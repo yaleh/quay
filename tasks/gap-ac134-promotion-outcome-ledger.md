@@ -44,6 +44,7 @@ depends_on:
 ## Touches
 
 - plugin/scripts/promotion-driver.ts（outcome 落盘）
+- plugin/test/promotion-driver.test.mjs（AC134 单测）
 - .quay/promotion-outcome.jsonl (new)
 - .gitignore（新增 promotion-outcome.jsonl 忽略）
 - tasks/gap-ac134-promotion-outcome-ledger.md（自身）

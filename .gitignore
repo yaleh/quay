@@ -48,6 +48,11 @@ packages/quay/plugin/
 # outer reads it for cross-task checks, never git-tracked). Same gitignored runtime-state family as
 # gate-events.jsonl / dispatch-record.jsonl.
 **/.quay/worker-outcome.jsonl
+# gap-ac134-promotion-outcome-ledger (2026-08-22): the promotion driver's per-task outcome record
+# (.quay/promotion-outcome.jsonl) — runtime state, one line per determination/promotion/fix
+# (manager-phase-goal ### AC134: outer reads it for cross-task promotion-pattern recognition, never
+# git-tracked). Same gitignored runtime-state family as worker-outcome.jsonl / gate-events.jsonl.
+**/.quay/promotion-outcome.jsonl
 # gap-outer-message-bus-needs-file-inbox-transport (2026-08-09): the OUTER target's file-inbox
 # (.quay/outer-inbox/) is runtime message state (SPEC-inbox-service D1 — 收件箱不进 git 跟踪,
 # 不假设内容持久). Same gitignored runtime-state family as gate-events.jsonl — a real manager→outer

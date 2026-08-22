@@ -1,6 +1,7 @@
 // @test-group governance
-// promotion-driver.test.mjs — AC130 + AC131 + AC132 (tasks/gap-ac130-promotion-driver-resident-loop,
-// tasks/gap-ac131-promotion-mechanical-no-llm, tasks/gap-ac132-fix-worker-structured-input): the resident
+// promotion-driver.test.mjs — AC130 + AC131 + AC132 + AC134 (tasks/gap-ac130-promotion-driver-resident-loop,
+// tasks/gap-ac131-promotion-mechanical-no-llm, tasks/gap-ac132-fix-worker-structured-input,
+// tasks/gap-ac134-promotion-outcome-ledger): the resident
 // promotion driver loops forever, calling ready-pool-check for the FULL-pool determination (never a
 // single --targeted task) each round, does not exit after one round, and enters the next round after
 // --interval. AC2 is the FALSIFIABLE half: stop the driver ⇒ a newly-eligible todo in the pool is NOT
@@ -12,6 +13,10 @@
 // the task id + the gate's STRUCTURED missing list (A24 三可修/五不可修), never a prose directive.
 // AC2: a DoD<40 todo ⇒ the fix worker's prompt carries the structured identifier (fourArtifacts=false
 // missing=[dod]); a prompt with only the task id and no missing list would falsify it.
+// AC134 (falsifiable): every determination/promotion/fix writes one structured outcome record to
+// .quay/promotion-outcome.jsonl (gitignored) with task_id · gate(eligible + missing) · action
+// (promote/fix/skip) · result · ts. AC2: the carrier holds REAL records from the real ready-pool-check
+// against real task files (not fixture/injected output) — ≥ N records after the driver runs.
 //
 // The ready-pool-check command is injectable (--ready-pool-cmd) so the pure/loop tests never touch the
 // real checker; the AC2 test drives the REAL ready-pool-check --apply against a temp workspace to prove
@@ -35,6 +40,8 @@ import {
   runPromotionRound,
   computeRoundRecord,
   appendRoundRecord,
+  computeOutcomeRecords,
+  appendOutcomeRecord,
   parseIntervalMs,
   resolveCap,
   classifyCandidate,
@@ -42,6 +49,7 @@ import {
   buildFixWorkerArgv,
   runFixPass,
   ROUND_LOG_REL,
+  OUTCOME_LOG_REL,
   INTERVAL_MS_DEFAULT,
   CAP_DEFAULT,
 } from "../scripts/promotion-driver.ts";
@@ -149,6 +157,12 @@ function runDriver(root, args) {
 
 function readRoundLines(root) {
   const file = path.join(root, ROUND_LOG_REL);
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+}
+
+function readOutcomeLines(root) {
+  const file = path.join(root, OUTCOME_LOG_REL);
   if (!fs.existsSync(file)) return [];
   return fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
 }
@@ -462,4 +476,120 @@ test("AC132 AC2 — DoD<40 todo ⇒ fix worker prompt contains the structured mi
   const prompt = fs.readFileSync(capture, "utf8");
   assert.ok(prompt.includes("task_id=gap-ac132-dodshort"), "prompt carries the task id");
   assert.ok(prompt.includes("fourArtifacts=false missing=[dod]"), `AC2: prompt carries the structured missing identifier (prompt=${JSON.stringify(prompt)})`);
+});
+
+// ── AC134 (falsifiable): 判定/晋升/修复各落一条 outcome（.quay/promotion-outcome.jsonl） ──────────
+
+// A self-contained temp root whose plugin/ is a SYMLINK to the worktree's plugin/ — so the driver's
+// DEFAULT ready-pool-check argv (`node <root>/plugin/scripts/ready-pool-check.ts --root <root> ...`)
+// resolves the REAL checker WITHOUT the --ready-pool-cmd injection seam (AC134 AC2: turn the seam off).
+function makeSelfContainedRoot(tag) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `promotion-outcome-${tag}-`));
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.symlinkSync(path.resolve(__dirname, ".."), path.join(dir, "plugin"), "dir");
+  return dir;
+}
+
+// A dep-blocked (unfixable) todo: `depends_on: gap-missing-dep` points at a task that does not exist
+// ⇒ depsReady=false (fail closed) ⇒ classifyCandidate → unfixable (五不可修) ⇒ skip, no fix worker.
+function writeDepBlockedTask(root, id) {
+  const fm = [
+    "---",
+    `id: ${id}`,
+    `title: fixture ${id}`,
+    "status: todo",
+    "labels:",
+    "  - gap",
+    "parent: null",
+    "children: []",
+    "depends_on:",
+    "  - gap-missing-dep",
+    "extra:",
+    "  schema: v1",
+    "---",
+  ].join("\n");
+  fs.writeFileSync(path.join(root, "tasks", `${id}.md`), `${fm}\n\n${eligibleTodoBody(id)}`);
+}
+
+test("computeOutcomeRecords — applied⇒promote, spawned⇒fix, unfixable⇒skip (fields task_id/gate/action/result/ts)", () => {
+  const at = "2026-08-22T00:00:00.000Z";
+  const applied = [{ id: "gap-a", ok: true, from: "todo", to: "ready", deliveryCritical: false }];
+  const fixes = [
+    { id: "gap-fix", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 0 },
+    { id: "gap-skip", spawned: false, missing: [], unfixable: ["depsReady=false"], exitCode: null },
+    { id: "gap-mixed", spawned: false, missing: ["selfTouchOk=false"], unfixable: ["superseded=true"], exitCode: null },
+  ];
+  const recs = computeOutcomeRecords({ at, applied, fixes });
+  assert.equal(recs.length, 4);
+  const [prom, fix, skip, mixed] = recs;
+
+  assert.equal(prom.task_id, "gap-a");
+  assert.equal(prom.action, "promote");
+  assert.deepEqual(prom.gate, { eligible: true, missing: [] }, "promote gate: eligible, no missing");
+  assert.deepEqual(prom.result, { ok: true, detail: "todo->ready" });
+  assert.equal(prom.ts, at);
+
+  assert.equal(fix.task_id, "gap-fix");
+  assert.equal(fix.action, "fix");
+  assert.equal(fix.gate.eligible, false);
+  assert.deepEqual(fix.gate.missing, ["fourArtifacts=false missing=[dod]"], "AC134: fix gate carries the structured missing list");
+  assert.deepEqual(fix.result, { ok: true, detail: "spawned exit=0" });
+
+  assert.equal(skip.task_id, "gap-skip");
+  assert.equal(skip.action, "skip");
+  assert.equal(skip.gate.eligible, false);
+  assert.deepEqual(skip.gate.missing, ["depsReady=false"], "skip gate.missing = the unfixable blocker");
+
+  assert.equal(mixed.action, "skip", "a fixable item plus an unfixable blocker ⇒ skip (not fix)");
+  assert.deepEqual(mixed.gate.missing, ["selfTouchOk=false", "superseded=true"], "mixed skip carries fixable missing + unfixable blocker");
+});
+
+test("appendOutcomeRecord — pure append, never truncates (two lines survive)", (t) => {
+  const root = makeRoot("outcome-append");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, OUTCOME_LOG_REL);
+  const rec = (id, action) => ({ task_id: id, gate: { eligible: action === "promote", missing: [] }, action, result: { ok: true, detail: null }, ts: "t" });
+  appendOutcomeRecord(file, rec("gap-1", "promote"));
+  appendOutcomeRecord(file, rec("gap-2", "skip"));
+  const lines = readOutcomeLines(root);
+  assert.equal(lines.length, 2, "two appended outcome lines");
+  assert.deepEqual(lines.map((l) => l.task_id), ["gap-1", "gap-2"]);
+});
+
+test("AC134 AC2 — real gate + real tasks ⇒ outcome ledger holds real promote/skip records (seam OFF)", (t) => {
+  const root = makeSelfContainedRoot("ac134-ac2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-ac134-eligible", "todo");
+  writeDepBlockedTask(root, "gap-ac134-depblocked");
+
+  // DEFAULT argv — no --ready-pool-cmd, no --fix-worker-cmd (the injection seams are OFF). The only
+  // difference from production is the temp root + symlinked plugin/ (real ready-pool-check).
+  runDriver(root, ["--cap", "5", "--once"]);
+
+  const lines = readOutcomeLines(root);
+  assert.ok(lines.length >= 2, `AC134 AC2: ≥2 real outcome records, got ${lines.length} (${lines.map((l) => l.action).join(",")})`);
+
+  const promote = lines.find((l) => l.task_id === "gap-ac134-eligible");
+  assert.ok(promote, "the eligible task produced a promote outcome record");
+  assert.equal(promote.action, "promote");
+  assert.deepEqual(promote.gate, { eligible: true, missing: [] });
+  assert.equal(promote.result.ok, true);
+
+  const skip = lines.find((l) => l.task_id === "gap-ac134-depblocked");
+  assert.ok(skip, "the dep-blocked task produced a skip outcome record");
+  assert.equal(skip.action, "skip");
+  assert.equal(skip.gate.eligible, false);
+  assert.ok(skip.gate.missing.includes("depsReady=false"), `skip gate carries the blocker: ${JSON.stringify(skip.gate.missing)}`);
+
+  // Every record carries the AC134 required fields (task_id · gate(含 missing) · action · result · ts).
+  for (const l of lines) {
+    assert.ok(l.task_id, "task_id present");
+    assert.ok(l.gate && typeof l.gate.eligible === "boolean" && Array.isArray(l.gate.missing), "gate{eligible,missing} present");
+    assert.ok(["promote", "fix", "skip"].includes(l.action), `action ∈ promote|fix|skip (got ${l.action})`);
+    assert.ok(l.result && typeof l.result.ok === "boolean", "result present");
+    assert.ok(l.ts, "ts present");
+  }
+
+  // The promotion actually landed (real gate, not fixture): status flipped todo → ready.
+  assert.equal(readStatus(root, "gap-ac134-eligible"), "ready", "the real gate promoted the eligible task");
 });
