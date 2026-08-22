@@ -1,6 +1,6 @@
 // @test-group governance
-// promotion-driver.test.mjs — AC130 + AC131 (tasks/gap-ac130-promotion-driver-resident-loop,
-// tasks/gap-ac131-promotion-mechanical-no-llm): the resident
+// promotion-driver.test.mjs — AC130 + AC131 + AC132 (tasks/gap-ac130-promotion-driver-resident-loop,
+// tasks/gap-ac131-promotion-mechanical-no-llm, tasks/gap-ac132-fix-worker-structured-input): the resident
 // promotion driver loops forever, calling ready-pool-check for the FULL-pool determination (never a
 // single --targeted task) each round, does not exit after one round, and enters the next round after
 // --interval. AC2 is the FALSIFIABLE half: stop the driver ⇒ a newly-eligible todo in the pool is NOT
@@ -8,10 +8,16 @@
 // AC131 (falsifiable): a qualified todo (four artifacts complete + empty deps) is promoted to ready
 // within one round via the mechanical A22 --apply path, with ZERO LLM — the round's outcome record
 // carries llm_invoked=false (derived from the spawned argv, not hardcoded).
+// AC132 (falsifiable): an ineligible todo spawns a short-lived `claude -p` fix worker whose input is
+// the task id + the gate's STRUCTURED missing list (A24 三可修/五不可修), never a prose directive.
+// AC2: a DoD<40 todo ⇒ the fix worker's prompt carries the structured identifier (fourArtifacts=false
+// missing=[dod]); a prompt with only the task id and no missing list would falsify it.
 //
 // The ready-pool-check command is injectable (--ready-pool-cmd) so the pure/loop tests never touch the
 // real checker; the AC2 test drives the REAL ready-pool-check --apply against a temp workspace to prove
-// the promotion lands on disk while the driver lives and does not after it is SIGTERM'd.
+// the promotion lands on disk while the driver lives and does not after it is SIGTERM'd. The fix-worker
+// command is injectable (--fix-worker-cmd) with the structured prompt appended as the last arg, so the
+// AC132 AC2 test captures the prompt the worker actually received without spawning a real claude.
 //
 // Run: scripts/test.sh plugin/test/promotion-driver.test.mjs
 
@@ -31,6 +37,10 @@ import {
   appendRoundRecord,
   parseIntervalMs,
   resolveCap,
+  classifyCandidate,
+  buildFixWorkerPrompt,
+  buildFixWorkerArgv,
+  runFixPass,
   ROUND_LOG_REL,
   INTERVAL_MS_DEFAULT,
   CAP_DEFAULT,
@@ -87,6 +97,44 @@ function writeTask(root, id, status = "todo") {
   fs.writeFileSync(path.join(root, "tasks", `${id}.md`), `${fm}\n\n${eligibleTodoBody(id)}`);
 }
 
+// A contract-shape todo with DoD < 40 non-whitespace chars (the AC2 falsifiable fixture): fourArtifacts
+// is false with missingArtifacts=["dod"] — the gate's structured "哪一项不合格" signal.
+function dodShortTodoBody(id) {
+  return [
+    "**type:** execution",
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace chars long.",
+    "## Contract",
+    "measure   ready_pool = ready-pool-check stdout pool field, definitely over forty chars.",
+    "## Acceptance Criteria",
+    "- [ ] an AC item that is long enough to count as an item",
+    "- [ ] another AC item that is long enough to count as an item",
+    "- [ ] a third AC item that is long enough to count as an item",
+    "- [ ] a fourth AC item that is long enough to count as an item",
+    "## Definition of Done",
+    "short",
+    "## Touches",
+    `- tasks/${id}.md`,
+  ].join("\n");
+}
+
+function writeDodShortTask(root, id, status = "todo") {
+  const fm = [
+    "---",
+    `id: ${id}`,
+    `title: fixture ${id}`,
+    `status: ${status}`,
+    "labels:",
+    "  - gap",
+    "parent: null",
+    "children: []",
+    "extra:",
+    "  schema: v1",
+    "---",
+  ].join("\n");
+  fs.writeFileSync(path.join(root, "tasks", `${id}.md`), `${fm}\n\n${dodShortTodoBody(id)}`);
+}
+
 function readStatus(root, id) {
   const raw = fs.readFileSync(path.join(root, "tasks", `${id}.md`), "utf8");
   const m = raw.match(/^status:\s*(\w+)\s*$/m);
@@ -115,6 +163,15 @@ function counterNodeE(counterFile, logExpr) {
 // Injected via --ready-pool-cmd so the AC2 test exercises the REAL promotion path (not a fake).
 function realReadyPoolCmd(root) {
   return `node --experimental-strip-types ${READY_POOL_SCRIPT} --root ${root} --cap 5 --apply --json`;
+}
+
+// AC132 capture seam: --fix-worker-cmd replaces the fix-worker command PREFIX, and the driver appends
+// the structured prompt as the LAST argv element. This script writes that last element (process.argv[1]
+// for `node -e <script> <prompt>`) to the capture file — so the test can read the prompt the worker
+// actually received. splitArgs splits on whitespace ⇒ the script text must be space-free.
+function fixWorkerCaptureCmd(captureFile) {
+  const f = JSON.stringify(captureFile);
+  return `node -e require('fs').writeFileSync(${f},process.argv[1]||'')`;
 }
 
 // ── pure functions ─────────────────────────────────────────────────────────────────────────────────
@@ -166,15 +223,21 @@ test("runPromotionRound — fail-closed: non-zero exit / unparseable output ⇒ 
   assert.match(garbage.error, /unparseable/);
 });
 
-test("computeRoundRecord — action ∈ promote|none|error derived from the round", () => {
-  const base = { round: 1, runId: "pm-1", pid: 42, at: "2026-08-22T00:00:00.000Z", pool: 1, shouldApply: true, applied: [], llmInvoked: false };
+test("computeRoundRecord — action ∈ promote|fix|none|error derived from the round", () => {
+  const base = { round: 1, runId: "pm-1", pid: 42, at: "2026-08-22T00:00:00.000Z", pool: 1, shouldApply: true, applied: [], llmInvoked: false, fixes: [] };
   assert.equal(computeRoundRecord({ ...base, promotedIds: ["gap-a"], error: null }).action, "promote");
   assert.equal(computeRoundRecord({ ...base, promotedIds: [], error: null }).action, "none");
   assert.equal(computeRoundRecord({ ...base, promotedIds: [], error: "boom" }).action, "error");
+  assert.equal(
+    computeRoundRecord({ ...base, promotedIds: [], error: null, fixes: [{ id: "gap-f", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 0 }] }).action,
+    "fix",
+    "AC132: a round that spawned a fix worker is a 'fix' round",
+  );
   const rec = computeRoundRecord({ ...base, promotedIds: ["gap-a"], error: null });
   assert.equal(rec.run_id, "pm-1");
   assert.equal(rec.pid, 42);
   assert.equal(rec.llm_invoked, false, "AC131: round record carries llm_invoked=false on the mechanical promotion path");
+  assert.deepEqual(rec.fixes, [], "AC132: no fix worker ⇒ fixes empty");
   assert.ok(rec.ts && rec.round, "ts/round present");
 });
 
@@ -182,7 +245,7 @@ test("appendRoundRecord — pure append, never truncates (two lines survive)", (
   const root = makeRoot("append");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const file = path.join(root, ROUND_LOG_REL);
-  const rec = (r) => computeRoundRecord({ round: r, runId: "pm-1", pid: 1, at: "t", pool: 0, shouldApply: false, promotedIds: [], applied: [], error: null, llmInvoked: false });
+  const rec = (r) => computeRoundRecord({ round: r, runId: "pm-1", pid: 1, at: "t", pool: 0, shouldApply: false, promotedIds: [], applied: [], error: null, llmInvoked: false, fixes: [] });
   appendRoundRecord(file, rec(1));
   appendRoundRecord(file, rec(2));
   assert.equal(readRoundLines(root).length, 2, "two appended lines");
@@ -306,4 +369,97 @@ test("AC131 AC2 — four-artifact + empty-deps todo promoted to ready in one rou
   assert.equal(rec.action, "promote");
   assert.ok(rec.promoted_ids.includes("gap-ac131-eligible"), "the promoted id is recorded in the outcome");
   assert.equal(rec.llm_invoked, false, "AC131 AC2: the outcome record carries llm_invoked=false (the falsifiable half)");
+});
+
+// ── AC132 (falsifiable): ineligible todo → short-lived fix worker with the gate's STRUCTURED input ──
+
+test("classifyCandidate — A24 classification (三可修 / 五不可修), ⛔ not re-designed", () => {
+  const base = {
+    id: "gap-a", fourArtifacts: true, missingArtifacts: [], selfTouchOk: true, touchesResolve: true,
+    depsReady: true, retiredMechanism: false, superseded: false, compound: false, prosePrereqGap: [],
+  };
+  // fixable: DoD missing (fourArtifacts=false)
+  const dod = classifyCandidate({ ...base, fourArtifacts: false, missingArtifacts: ["dod"] });
+  assert.equal(dod.fixable, true);
+  assert.deepEqual(dod.missing, ["fourArtifacts=false missing=[dod]"], "structured identifier verbatim from the gate");
+  assert.equal(dod.unfixable.length, 0);
+  assert.ok(dod.prompt.includes("fourArtifacts=false missing=[dod]"), "fixable ⇒ prompt carries the structured identifier");
+
+  // fixable: self-touch + touches (two fixable items)
+  const st = classifyCandidate({ ...base, selfTouchOk: false, touchesResolve: false });
+  assert.equal(st.fixable, true);
+  assert.deepEqual(st.missing, ["selfTouchOk=false", "touchesResolve=false"]);
+
+  // unfixable: deps not ready ⇒ no spawn, reason recorded
+  const deps = classifyCandidate({ ...base, depsReady: false });
+  assert.equal(deps.fixable, false);
+  assert.deepEqual(deps.unfixable, ["depsReady=false"]);
+  assert.equal(deps.prompt, null, "unfixable ⇒ no fix worker prompt");
+
+  // each of the other four unfixable classes records its own reason
+  assert.deepEqual(classifyCandidate({ ...base, retiredMechanism: true }).unfixable, ["retiredMechanism=true"]);
+  assert.deepEqual(classifyCandidate({ ...base, superseded: true }).unfixable, ["superseded=true"]);
+  assert.deepEqual(classifyCandidate({ ...base, compound: true }).unfixable, ["compound=true"]);
+  assert.deepEqual(classifyCandidate({ ...base, prosePrereqGap: ["gap-z"] }).unfixable, ["prosePrereqGap=[gap-z]"]);
+
+  // mixed: fixable AND unfixable ⇒ NOT fixable (the unfixable blocker is the real obstacle)
+  const mixed = classifyCandidate({ ...base, fourArtifacts: false, missingArtifacts: ["dod"], depsReady: false });
+  assert.equal(mixed.fixable, false, "a fixable item plus an unfixable blocker ⇒ no spawn");
+  assert.deepEqual(mixed.unfixable, ["depsReady=false"]);
+});
+
+test("buildFixWorkerPrompt — task id + structured missing list, ⛔ not a prose directive", () => {
+  const p = buildFixWorkerPrompt("gap-a", ["fourArtifacts=false missing=[dod]"]);
+  assert.ok(p.includes("task_id=gap-a"), "the prompt carries the task id");
+  assert.ok(p.includes("fourArtifacts=false missing=[dod]"), "the structured missing identifier is in the prompt");
+  assert.ok(p.includes("structured_missing:"), "the prompt names the structured list (not 'go look what's wrong')");
+});
+
+test("buildFixWorkerArgv — default claude -p; override prefix appends the prompt as the last arg", () => {
+  const def = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"]);
+  assert.equal(def[0], "claude");
+  assert.equal(def[1], "-p");
+  assert.ok(def[2].includes("fourArtifacts=false missing=[dod]"), "the prompt is the argv payload");
+  assert.equal(isLlmInvocation(def), true, "the default fix worker IS an LLM invocation (claude -p)");
+
+  const over = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], "node -e capture");
+  assert.deepEqual(over.slice(0, 3), ["node", "-e", "capture"]);
+  assert.ok(over[over.length - 1].includes("fourArtifacts=false missing=[dod]"), "override keeps the prompt as the last arg");
+});
+
+test("runFixPass — fixable spawns (exit 0), unfixable records reason without spawning", (t) => {
+  const root = makeRoot("fixpass");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const decisions = [
+    { id: "gap-fix", fixable: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], prompt: "p" },
+    { id: "gap-nofix", fixable: false, missing: [], unfixable: ["depsReady=false"], prompt: null },
+  ];
+  const outcomes = runFixPass(decisions, root, "node -e process.exit(0)");
+  assert.deepEqual(outcomes[0], { id: "gap-fix", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 0 });
+  assert.deepEqual(outcomes[1], { id: "gap-nofix", spawned: false, missing: [], unfixable: ["depsReady=false"], exitCode: null });
+});
+
+test("AC132 AC2 — DoD<40 todo ⇒ fix worker prompt contains the structured missing identifier (falsifiable)", (t) => {
+  const root = makeRoot("ac132-ac2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeDodShortTask(root, "gap-ac132-dodshort");
+
+  const capture = path.join(root, "fix-prompt.txt");
+  runDriver(root, [
+    "--ready-pool-cmd", realReadyPoolCmd(root),
+    "--fix-worker-cmd", fixWorkerCaptureCmd(capture),
+    "--cap", "5", "--once",
+  ]);
+
+  const records = readRoundLines(root);
+  assert.equal(records.length, 1, "exactly one round record");
+  const fix = records[0].fixes.find((f) => f.id === "gap-ac132-dodshort");
+  assert.ok(fix, "the ineligible todo produced a fix outcome");
+  assert.equal(fix.spawned, true, "AC132 AC1: an ineligible (DoD<40) todo spawns a fix worker");
+  assert.ok(fix.missing.includes("fourArtifacts=false missing=[dod]"), `structured missing list carried: ${JSON.stringify(fix.missing)}`);
+
+  // AC2 falsifiable: the prompt the fix worker RECEIVED carries the structured identifier — not just the id.
+  const prompt = fs.readFileSync(capture, "utf8");
+  assert.ok(prompt.includes("task_id=gap-ac132-dodshort"), "prompt carries the task id");
+  assert.ok(prompt.includes("fourArtifacts=false missing=[dod]"), `AC2: prompt carries the structured missing identifier (prompt=${JSON.stringify(prompt)})`);
 });

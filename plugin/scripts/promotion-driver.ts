@@ -1,5 +1,5 @@
-// plugin/scripts/promotion-driver.ts — AC130 + AC131 (tasks/gap-ac130-promotion-driver-resident-loop,
-//   tasks/gap-ac131-promotion-mechanical-no-llm)
+// plugin/scripts/promotion-driver.ts — AC130 + AC131 + AC132 (tasks/gap-ac130-promotion-driver-resident-loop,
+//   tasks/gap-ac131-promotion-mechanical-no-llm, tasks/gap-ac132-fix-worker-structured-input)
 //
 // 常驻循环，每轮调 `ready-pool-check` 取【全池】判定（⛔ 非单条 --targeted），跑完一轮不退出、
 // 按间隔进入下一轮。停掉驱动 ⇒ 池中新出现的合格任务不再被晋升（AC2 能取假，证明晋升由驱动驱动、
@@ -10,18 +10,21 @@
 //   常驻【机械】进程：每轮无条件调 ready-pool-check --apply 取全池判定 + 落地合格晋升（复用 A22 已在
 //   用的心跳路径，零 LLM），跑完一轮不退出、按 --interval 进入下一轮。AC130 只做【常驻全池循环】这一半。
 //
-// 权责边界（⛔ 只做 AC130 + AC131 判据，不越界到 AC132–136 —— 那些是独立任务）：
+// 权责边界（⛔ 只做 AC130 + AC131 + AC132 判据，不越界到 AC133–136 —— 那些是独立任务）：
 //   驱动  ✅ 每轮调 ready-pool-check --apply（全池判定 + 合格晋升，零 LLM）
 //         ✅ 跑完一轮不退出、按 --interval 进入下一轮；SIGINT/SIGTERM 优雅停机
 //         ✅ 每轮写一条 round 记录（.quay/promotion-round.jsonl，gitignored，outer 可消费）
 //         ✅ AC131：晋升路径纯机械（零 LLM），round 记录带 llm_invoked=false（派生自真实 argv，⛔ 不硬编码）
-//   驱动  ⛔ 不做任何 commit  ⛔ 不 spawn LLM fix worker（那是 AC132/133 的任务）
+//         ✅ AC132：不合格者 spawn 短命 claude -p fix worker，输入 = 任务 id + 闸的结构化 missing 清单
+//            （沿用 A24 可修三类/不可修五类；可修三类 spawn，不可修五类逐条记原因不修）
+//   驱动  ⛔ 不做任何 commit  ⛔ 不验证 fix worker 修没修好（那是 AC133）  ⛔ 不写独立 outcome 载体（AC134）
 //         ⛔ 不读/不写 .halt（停机态 = 进程信号，单一真相源；AC135 才涉及 outer 退役）
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/promotion-driver.ts \
 //     --root <repo> [--interval <ms>] [--cap <n>] [--once] [--max-rounds <n>]
-//     [--ready-pool-cmd "<argv>"] [--round-log <path>] [--run-id <id>] [--pid-file <path>] [--json]
+//     [--ready-pool-cmd "<argv>"] [--fix-worker-cmd "<argv>"] [--round-log <path>]
+//     [--run-id <id>] [--pid-file <path>] [--json]
 //   --interval <ms>       轮间隔（缺省 30000；测试缝传小值）
 //   --cap <n>             传给 ready-pool-check 的并发 cap（缺省 5——AC48 后 cap 不再闸晋升，
 //                         但仍参与 floor 报告与 disjointness 排序；传 5 避免 cap-3 回退的 floor 假象）
@@ -29,8 +32,11 @@
 //   --max-rounds <n>      跑满 N 轮退出（测试缝，防常驻环无限跑）
 //   --ready-pool-cmd <s>  覆盖 ready-pool-check 命令（测试缝，同 worker-driver 的缝）。
 //                         缺省 = `node …ready-pool-check.ts --root <root> --cap <cap> --apply --json`。
-//                         输出须为 analyzeTasks JSON（含 pool / promotions / applied_promotions）。
+//                         输出须为 analyzeTasks JSON（含 pool / promotions / applied_promotions / candidates）。
 //                         解析失败/非零退出 ⇒ fail-closed（本轮记 error，⛔ 不得伪装成「无候选」）。
+//   --fix-worker-cmd <s>  覆盖 fix worker 命令【前缀】（测试缝——真实 prompt 仍作为末参数追加，
+//                         AC2 取假用捕获脚本读末参数）。缺省 = `claude -p <prompt>`（prompt 由驱动
+//                         用任务 id + 结构化 missing 清单拼出，⛔ 非散文指令）。
 //   --round-log <path>    轮记录文件（缺省 <root>/.quay/promotion-round.jsonl）
 //   --pid-file <path>     把驱动自身 pid 写到该文件（外部观测 + kill 抓手）
 //   --json                每轮向 stdout 打一条 JSON 事件行
@@ -82,6 +88,7 @@ export interface PromotionRound {
   promotedIds: string[];
   applied: Array<{ id: string; ok: boolean; from: string | null; to: string | null; deliveryCritical: boolean }>;
   llmInvoked: boolean;
+  fixDecisions: FixDecision[];
 }
 
 /** 判定待 spawn 命令是否 LLM 调用（argv[0] basename 是 claude —— 本仓库 LLM CLI；fix worker = `claude -p`）。
@@ -91,6 +98,93 @@ export function isLlmInvocation(argv: string[]): boolean {
   const argv0 = Array.isArray(argv) && argv.length > 0 ? String(argv[0]) : "";
   const base = path.basename(argv0);
   return base === "claude" || base === "claude.exe" || base === "claude.cmd";
+}
+
+// ── AC132：fix worker（不合格者 → 短命 claude -p，输入 = 任务 id + 闸的结构化 missing 清单） ───────────
+
+/** 闸 candidate 上用于 A24 分类的结构化判据字段（ready-pool-check 的 candidates[] 条目同构子集）。 */
+export interface CandidateChecks {
+  id: string;
+  fourArtifacts: boolean;
+  missingArtifacts: string[];
+  selfTouchOk: boolean;
+  touchesResolve: boolean;
+  depsReady: boolean;
+  retiredMechanism: boolean;
+  superseded: boolean;
+  compound: boolean;
+  prosePrereqGap: string[];
+}
+
+/** A24 分类结果。fixable = 可修三类之一且【无】不可修五类 ⇒ 该 spawn fix worker；
+ *  missing = 结构化可修缺项标识（prompt 输入）；unfixable = 不可修五类的结构化原因（逐条记、不修）。 */
+export interface FixDecision {
+  id: string;
+  fixable: boolean;
+  missing: string[];
+  unfixable: string[];
+  prompt: string | null;
+}
+
+/** A24 可修三类 → 结构化缺项标识；不可修五类 → 结构化原因。⛔ 不重新设计分类——
+ *  沿用 orchestrator-tick-core.md:48 的 A24 现行分类（manager-phase-goal ### AC132 指明）。
+ *  可修三类：fourArtifacts=false（补 missingArtifacts 缺失段）· selfTouchOk=false（补自身 tasks/<id>.md
+ *  进 ## Touches）· touchesResolve=false（Touches 写错 ⇒ 改对）。不可修五类：depsReady=false ·
+ *  retiredMechanism · superseded · compound · prosePrereqGap 非空。 */
+export function classifyCandidate(c: CandidateChecks): FixDecision {
+  const missing: string[] = [];
+  if (!c.fourArtifacts) missing.push(`fourArtifacts=false missing=[${(c.missingArtifacts || []).join(",")}]`);
+  if (!c.selfTouchOk) missing.push("selfTouchOk=false");
+  if (!c.touchesResolve) missing.push("touchesResolve=false");
+  const unfixable: string[] = [];
+  if (!c.depsReady) unfixable.push("depsReady=false");
+  if (c.retiredMechanism) unfixable.push("retiredMechanism=true");
+  if (c.superseded) unfixable.push("superseded=true");
+  if (c.compound) unfixable.push("compound=true");
+  if (c.prosePrereqGap && c.prosePrereqGap.length > 0) unfixable.push(`prosePrereqGap=[${c.prosePrereqGap.join(",")}]`);
+  // 只有可修三类、且无任何不可修五类 ⇒ 值得 spawn（否则修了也晋不了，不可修原因才是真阻碍）。
+  const fixable = missing.length > 0 && unfixable.length === 0;
+  const prompt = fixable ? buildFixWorkerPrompt(c.id, missing) : null;
+  return { id: c.id, fixable, missing, unfixable, prompt };
+}
+
+/** fix worker prompt = 任务 id + 闸的结构化 missing 清单（⛔ 非「你去看看哪儿不对」散文指令）。
+ *  AC2 能取假：prompt 必须含结构化的缺项标识（如 `fourArtifacts=false missing=[DoD]`）；
+ *  若 prompt 只有任务 id 而无缺项清单 ⇒ 本条为假。 */
+export function buildFixWorkerPrompt(id: string, missing: string[]): string {
+  const list = missing.map((m) => `  - ${m}`).join("\n");
+  return [
+    "You are a fix worker in the quay repo. Fix the todo task so it passes the promotion gate (ready-pool-check).",
+    `task_id=${id}`,
+    "structured_missing:",
+    list,
+    "Fix ONLY the structured_missing items above; change nothing else.",
+  ].join("\n");
+}
+
+/** fix worker argv = `claude -p <prompt>`（短命）。--fix-worker-cmd 覆盖可执行前缀时把 prompt 作为
+ *  末参数追加（测试缝捕获真实 prompt，AC2 取假实测——prompt 是数据、不是可执行串）。 */
+export function buildFixWorkerArgv(id: string, missing: string[], fixWorkerCmd?: string | null): string[] {
+  const prompt = buildFixWorkerPrompt(id, missing);
+  if (fixWorkerCmd != null) {
+    const prefix = splitArgs(fixWorkerCmd);
+    if (prefix.length === 0) return ["claude", "-p", prompt];
+    return [...prefix, prompt];
+  }
+  return ["claude", "-p", prompt];
+}
+
+/** spawn 一个短命 fix worker（claude -p，或 --fix-worker-cmd 覆盖前缀），同步等待其退出。
+ *  返回退出码 / spawn 错误。AC132：spawn 即达成；⛔ 不验证修没修好（AC133），⛔ 不信 worker 自述。 */
+export function spawnFixWorker(argv: string[], root: string): { exitCode: number | null; error: string | null } {
+  if (!Array.isArray(argv) || argv.length === 0) return { exitCode: null, error: "empty fix-worker argv" };
+  try {
+    const r = spawnSync(argv[0], argv.slice(1), { cwd: root, encoding: "utf8", stdio: ["ignore", "ignore", "ignore"] });
+    if (r.error) return { exitCode: null, error: String(r.error.message || r.error) };
+    return { exitCode: r.status, error: null };
+  } catch (e) {
+    return { exitCode: null, error: e && typeof e === "object" && "message" in e ? String(e.message) : String(e) };
+  }
 }
 
 /** 跑一轮：调 ready-pool-check（缺省 --apply 全池），解析 analyzeTasks JSON。解析失败/非零退出 ⇒
@@ -105,11 +199,11 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
     });
   } catch (e) {
     const msg = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
-    return { ok: false, error: `ready-pool-check spawn failed (${msg})`, pool: null, shouldApply: false, promotedIds: [], applied: [], llmInvoked };
+    return { ok: false, error: `ready-pool-check spawn failed (${msg})`, pool: null, shouldApply: false, promotedIds: [], applied: [], llmInvoked, fixDecisions: [] };
   }
   if (r.error || r.status !== 0) {
     const msg = r.error ? String(r.error.message || r.error) : `ready-pool-check exited ${r.status}`;
-    return { ok: false, error: msg, pool: null, shouldApply: false, promotedIds: [], applied: [], llmInvoked };
+    return { ok: false, error: msg, pool: null, shouldApply: false, promotedIds: [], applied: [], llmInvoked, fixDecisions: [] };
   }
   try {
     const j = JSON.parse(String(r.stdout ?? "").trim());
@@ -127,21 +221,50 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
         deliveryCritical: !!(a && a.deliveryCritical),
       }))
       .filter((a) => a.id);
+    // AC132：读 candidates[] 里 eligible=false 的条目，按 A24 分类成 fixDecisions（可修三类 spawn /
+    // 不可修五类记原因）。eligible=false 才是「判定不合格」——candidates[] 含合格与不合格两类。
+    const candidatesRaw = Array.isArray(j.candidates) ? j.candidates : [];
+    const fixDecisions = candidatesRaw
+      .filter((c) => c && typeof c === "object" && "id" in c && c.eligible === false)
+      .map((c) =>
+        classifyCandidate({
+          id: String(c.id),
+          fourArtifacts: !!c.fourArtifacts,
+          missingArtifacts: Array.isArray(c.missingArtifacts) ? c.missingArtifacts.map(String) : [],
+          selfTouchOk: !!c.selfTouchOk,
+          touchesResolve: !!c.touchesResolve,
+          depsReady: !!c.depsReady,
+          retiredMechanism: !!c.retiredMechanism,
+          superseded: !!c.superseded,
+          compound: !!c.compound,
+          prosePrereqGap: Array.isArray(c.prosePrereqGap) ? c.prosePrereqGap.map(String) : [],
+        }),
+      );
     return {
       ok: true, error: null,
       pool: typeof j.pool === "number" ? j.pool : null,
       shouldApply: !!j.should_apply,
       promotedIds, applied,
       llmInvoked,
+      fixDecisions,
     };
   } catch {
-    return { ok: false, error: "unparseable ready-pool-check output", pool: null, shouldApply: false, promotedIds: [], applied: [], llmInvoked };
+    return { ok: false, error: "unparseable ready-pool-check output", pool: null, shouldApply: false, promotedIds: [], applied: [], llmInvoked, fixDecisions: [] };
   }
 }
 
 /** 一条结构化 round 记录（字段：ts · round · run_id · pid · action · pool · should_apply ·
- *  promoted_ids · applied · error · llm_invoked）。action ∈ promote|none|error。
- *  llm_invoked 在晋升路径上为 false（机械 ready-pool-check，AC131）；AC132 的 fix worker 轮才翻 true。 */
+ *  promoted_ids · applied · error · llm_invoked · fixes）。action ∈ promote|fix|none|error。
+ *  llm_invoked 在晋升路径上为 false（机械 ready-pool-check，AC131）；AC132 的 fix worker 是
+ *  `claude -p`（argv[0]=claude），其 spawn 在 fixes[].spawned=true 上可见。 */
+export interface FixOutcome {
+  id: string;
+  spawned: boolean;
+  missing: string[];
+  unfixable: string[];
+  exitCode: number | null;
+}
+
 export function computeRoundRecord(opts: {
   round: number;
   runId: string;
@@ -153,13 +276,33 @@ export function computeRoundRecord(opts: {
   applied: PromotionRound["applied"];
   error: string | null;
   llmInvoked: boolean;
+  fixes: FixOutcome[];
 }) {
-  const action = opts.error ? "error" : opts.promotedIds.length > 0 ? "promote" : "none";
+  const action = opts.error
+    ? "error"
+    : opts.promotedIds.length > 0
+      ? "promote"
+      : opts.fixes.some((f) => f.spawned)
+        ? "fix"
+        : "none";
   return {
     ts: opts.at, round: opts.round, run_id: opts.runId, pid: opts.pid, action,
     pool: opts.pool, should_apply: opts.shouldApply, promoted_ids: opts.promotedIds,
-    applied: opts.applied, error: opts.error, llm_invoked: opts.llmInvoked,
+    applied: opts.applied, error: opts.error, llm_invoked: opts.llmInvoked, fixes: opts.fixes,
   };
+}
+
+/** AC132 的 fix pass：对 fixable 决策 spawn 短命 fix worker；对不可修五类逐条记原因不 spawn。
+ *  返回每条的 FixOutcome（可修 ⇒ spawned=true + 结构化 missing；不可修 ⇒ spawned=false + unfixable 原因）。 */
+export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerCmd: string | null): FixOutcome[] {
+  return fixDecisions.map((d) => {
+    if (!d.fixable) {
+      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null };
+    }
+    const argv = buildFixWorkerArgv(d.id, d.missing, fixWorkerCmd);
+    const { exitCode } = spawnFixWorker(argv, root);
+    return { id: d.id, spawned: true, missing: d.missing, unfixable: [], exitCode };
+  });
 }
 
 /** 把一条 round 记录追加写入文件（pure append，⛔ 不截断不覆盖）。 */
@@ -195,6 +338,7 @@ export interface ResidentLoopOptions {
   once: boolean;
   maxRounds: number | null;
   readyPoolArgv: string[] | null;
+  fixWorkerCmd: string | null;
   roundLogFile: string;
   runId: string;
   json: boolean;
@@ -207,7 +351,7 @@ export interface ResidentLoopOptions {
  *  appendRoundRecord → （json 时）stdout 事件行。停机由进程信号驱动（⛔ 不读 .halt，单一真相源）。
  */
 export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promise<number> {
-  const { root, intervalMs, cap, once, maxRounds, readyPoolArgv, roundLogFile, runId, json, pidFile } = opts;
+  const { root, intervalMs, cap, once, maxRounds, readyPoolArgv, roundLogFile, runId, json, pidFile, fixWorkerCmd } = opts;
 
   if (pidFile) {
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
@@ -230,7 +374,10 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
   while (!stopRequested) {
     round += 1;
     const r = runPromotionRound(root, readyPoolArgv, cap);
-    const record = computeRoundRecord({ round, runId, pid: process.pid, at: new Date().toISOString(), ...r });
+    // AC132：不合格者 → 短命 fix worker（可修三类 spawn、不可修五类逐条记原因不修）。spawn 前先跑
+    // 分类（classifyCandidate 已做），fixDecisions 里 fixable=true 的才 spawn。
+    const fixes = runFixPass(r.fixDecisions, root, fixWorkerCmd);
+    const record = computeRoundRecord({ round, runId, pid: process.pid, at: new Date().toISOString(), ...r, fixes });
     try { appendRoundRecord(roundLogFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
     if (once) break;
@@ -248,14 +395,15 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
 
 const HELP = [
   "promotion-driver — AC130：常驻循环，每轮调 ready-pool-check 取全池判定（--apply 落地合格晋升），",
-  "跑完一轮不退出、按 --interval 进入下一轮。SIGINT/SIGTERM 优雅停机。",
+  "跑完一轮不退出、按 --interval 进入下一轮。SIGINT/SIGTERM 优雅停机。AC132：不合格者 spawn 短命 fix worker。",
   "  --root <repo> [--interval <ms>] [--cap <n>] [--once] [--max-rounds <n>]",
-  "  [--ready-pool-cmd \"<argv>\"] [--round-log <p>] [--run-id <id>] [--pid-file <p>] [--json]",
+  "  [--ready-pool-cmd \"<argv>\"] [--fix-worker-cmd \"<argv>\"] [--round-log <p>] [--run-id <id>] [--pid-file <p>] [--json]",
   "  --interval <ms>       轮间隔（缺省 30000；测试缝传小值）",
   "  --cap <n>             传给 ready-pool-check 的并发 cap（缺省 5）",
   "  --once                跑一轮即退出（手动单发 / 测试）",
   "  --max-rounds <n>      跑满 N 轮退出（测试缝，防常驻环无限跑）",
   "  --ready-pool-cmd <s>  覆盖 ready-pool-check 命令（测试缝）",
+  "  --fix-worker-cmd <s>  覆盖 fix worker 命令前缀（测试缝；prompt 仍作末参数追加）",
   "  --round-log <path>    轮记录文件（缺省 <root>/.quay/promotion-round.jsonl）",
   "  --pid-file <path>     把驱动自身 pid 写到该文件（外部观测 + kill 抓手）",
   "  --json                每轮向 stdout 打一条 JSON 事件行",
@@ -269,6 +417,7 @@ export async function main(argv: string[]): Promise<number> {
   let once = false;
   let maxRounds: number | null = null;
   let readyPoolCmd: string | undefined;
+  let fixWorkerCmd: string | undefined;
   let roundLogPath: string | undefined;
   let runId: string | undefined;
   let json = false;
@@ -282,6 +431,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--once") once = true;
     else if (a === "--max-rounds") maxRounds = Number(args[++i]);
     else if (a === "--ready-pool-cmd") readyPoolCmd = args[++i];
+    else if (a === "--fix-worker-cmd") fixWorkerCmd = args[++i];
     else if (a === "--round-log") roundLogPath = args[++i];
     else if (a === "--run-id") runId = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
@@ -311,6 +461,7 @@ export async function main(argv: string[]): Promise<number> {
     once,
     maxRounds,
     readyPoolArgv: readyPoolCmd ? splitArgs(readyPoolCmd) : null,
+    fixWorkerCmd: fixWorkerCmd ?? null,
     roundLogFile,
     runId: resolvedRunId,
     json,
