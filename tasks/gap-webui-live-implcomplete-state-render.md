@@ -1,7 +1,7 @@
 ---
 id: gap-webui-live-implcomplete-state-render
 title: web /live 渲染 implCompletedAtMs（实现中 vs 已完工待落地分栏 + 待落地时长），dashboard liveCard 升级 mini 列表
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -28,14 +28,15 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：`/live` 表格区分「实现中」（implCompletedAtMs=null）与「已完工待落地」（非null），后者展示待落地时长。
-- [ ] AC2：dashboard liveCard 显示前 2-3 个在飞任务 + 状态标签（非纯计数一行），可一眼看出「有任务卡住」。
+- [x] AC1：`/live` 表格区分「实现中」（implCompletedAtMs=null）与「已完工待落地」（非null），后者展示待落地时长。
+- [x] AC2：dashboard liveCard 显示前 2-3 个在飞任务 + 状态标签（非纯计数一行），可一眼看出「有任务卡住」。
 
 ## Definition of Done
 
-- [ ] /live 渲染 implCompletedAtMs 分栏 + 待落地时长 + liveCard mini 列表；AC1-2 全勾；land 到 develop。
+- [x] /live 渲染 implCompletedAtMs 分栏 + 待落地时长 + liveCard mini 列表；AC1-2 全勾；land 到 develop。
 
 ## Touches
 
 - packages/quay/src/serve-handlers.ts（渲染层）
+- packages/quay/test/serve-live-implcomplete.test.mjs（新增 scoped 单测，AC1/AC2 渲染证据）
 - tasks/gap-webui-live-implcomplete-state-render.md（自身）

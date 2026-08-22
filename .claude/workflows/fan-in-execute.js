@@ -71,6 +71,13 @@ export const meta = {
 //     改本块必须同步 plugin/test/fan-in-execute-paths.test.mjs 的锁等待负控制组（suite-launch 携带
 //     FULL_SUITE_LOCK_TIMEOUT ≥ 840 + REAL 槽忙→释放后获取而非 fail-closed）。ff 的 merge 锁（--lock-wait
 //     ${mergeLockWaitSecs}s）是独立正确性锁（毫秒级 hold），与 suite 资源锁无关。
+//  ⑪ 跨 relaunch 锁持有者卡死/失联检测（gap-suite-lock-holder-stuck-detection）：relaunch 前读上一轮
+//     pidfile（`pid started_ms`）——上一轮 suite 在 relaunch 时刻【应已死亡】；若 pid 仍存活 ⇒ 卡死（hung
+//     进程占着 single-flight 槽，flock 只在进程退出时自动释放、hung 永不退出）⇒ 跨 relaunch 无限持有。
+//     单次 SUITE_MAX_RUNTIME_MS(45min)/SUITE_SILENCE_MS(15min) 在 full-suite-runner.ts（管不到本 detached
+//     直跑路径），且每次 relaunch 新起进程、单次超时重置——本块专补「跨 relaunch 循环」这一半（在 relaunch
+//     边界评估）。存活且持有 ≥ ${stuckHolderGraceSecs}s ⇒ SIGKILL 整进程组释放槽 + 告警（谁/多久/动作）。
+//     改本块必须同步 plugin/test/fan-in-execute-paths.test.mjs 的 stuck-holder 组测试。
 //
 //  脚本层能力边界（同 manager-tick-core.js 实测）：globalThis 仅 log/phase/budget/setTimeout/
 //  clearTimeout/agent/parallel/pipeline/workflow/args；无 require/process/fetch；import() 语法
@@ -133,10 +140,49 @@ const releaseLivelockRounds = A.releaseLivelockRounds ?? 3  // release 侧 anti-
 const maxDeferRelaunches = A.maxDeferRelaunches ?? 3  // defer 侧 anti-livelock（gap-fan-in-relaunch-retry-cap）：非 load-sensitive「other-task defer → 全量 relaunch」的连续纯 defer 轮数上限 ≥3 轮 ⇒ escalate → needs-human / 交 outer（⛔ 无限重跑；与 releaseLivelockRounds 互补不冲突——一个管 load-sensitive、一个管确定性失败）
 const suiteLockTimeoutSecs = A.suiteLockTimeoutSecs ?? 900  // fan-in 启动的 suite 的 single-flight 锁等待（FULL_SUITE_LOCK_TIMEOUT，秒）——test.sh 默认 600 < suite 实测上界 807931ms ≈ 808s ⇒ 5 fan-in 撞 2 slot 时第 3+ suite 在 slot 释放前 fail-closed「not starting」白等 600s 后 relaunch（gap-single-flight-lock-wait-shorter-than-suite）。900 ≥ 808 + 余量；由 SUITE_LAUNCH/ISOLATE_LAUNCH 经 env 传入启动的 detached suite；调用方可经 env FULL_SUITE_LOCK_TIMEOUT 覆盖（测试 seam）。
 const mergeLockWaitSecs = A.mergeLockWaitSecs ?? 30  // fan-in-ff-merge.sh 的 merge 锁等待（--lock-wait，秒）——正确性锁，覆盖毫秒级 ff（hold 是 git merge --ff-only），与 suite 的 single-flight 资源锁无关（后者由 suiteLockTimeoutSecs 上调）。显式传递让 fan-in 流程拥有该语义（task Touches: fan-in-ff-merge.sh lock wait 语义）。
+const stuckHolderGraceSecs = A.stuckHolderGraceSecs ?? 2700  // 跨 relaunch 锁持有者卡死阈值（秒，默认 45min = 2700s；gap-suite-lock-holder-stuck-detection）——relaunch 时上一轮 detached suite 若仍存活且已存活 ≥ 此阈值 ⇒ SIGKILL 整进程组释放 single-flight 槽 + 告警。⛔ 与单次 SUITE_MAX_RUNTIME_MS(45min)/SUITE_SILENCE_MS(15min)【不同机制】：那两者在 full-suite-runner.ts 管「单次 suite 卡死」，且管不到本 detached 直跑路径（不经 full-suite-runner）——每次 relaunch 新起进程、单次超时重置，管不到「上一轮 hung 进程跨 relaunch 无限持有」这一半。本阈值只在 relaunch 时刻评估（活着的上一轮 = 卡死，不是单次运行时长判定）。测试可经 args 覆盖。
 
 if (!task || !worktree || !root) {
   return { outcome: 'bad-args', message: 'task / worktree / root are required', args }
 }
+
+// ── 跨 relaunch 锁持有者卡死/失联检测（gap-suite-lock-holder-stuck-detection AC1/AC2）──────────────
+// relaunch 前读上一轮 pidfile（`pid started_ms`，SUITE_LAUNCH/ISOLATE_LAUNCH 的 wrapper 自写）。
+// relaunch 只在上一轮 suite 已 red / 静默死亡 / ff-retry 后发生 ⇒ 上一轮【应已死亡】；若 pid 仍
+// 【存活】⇒ 上一轮 detached suite 卡死（hung，写不出 exit marker 却占着 single-flight 槽——flock 只在
+// 进程退出时自动释放，hung 进程永不退出）⇒ 跨 relaunch 无限持有。单次 SUITE_MAX_RUNTIME_MS/SUITE_SILENCE_MS
+// 在 full-suite-runner.ts（管不到本 detached 直跑路径），且每次 relaunch 新起进程、单次超时重置——本块
+// 专补「跨 relaunch 循环」这一半（在 relaunch 边界评估，活着的上一轮 = 卡死）。存活且持有 ≥
+// ${stuckHolderGraceSecs}s ⇒ SIGKILL 整个进程组（setsid session leader 的 pgid = pid，杀掉 wrapper +
+// scripts/test.sh + 测试子进程）释放槽 + 告警（谁/多久/动作，stdout + 持久 ledger）；存活但未超阈值 ⇒
+// 告警不杀（仍在正常收尾的上一轮不得误杀）；已死 ⇒ 陈旧 pidfile，随下方 rm 清理（正常路径，非持有，
+// 不告警——失联/静默死亡已由 wait 块 suite-pid-dead 覆盖）。改本块必须同步
+// plugin/test/fan-in-execute-paths.test.mjs 的 stuck-holder 组测试。
+const STALE_HOLDER_REAP = `
+# suite-stale-holder-reap-block-start
+suite_stuck_file="/tmp/fan-in-stuck-holder-${task}.log"
+if [ -f "$suite_pid_file" ] && [ -s "$suite_pid_file" ]; then
+  _holder_pid=$(cut -d' ' -f1 "$suite_pid_file" 2>/dev/null | tr -cd '0-9')
+  _holder_start=$(cut -d' ' -f2 "$suite_pid_file" 2>/dev/null | tr -cd '0-9')
+  if [ -n "$_holder_pid" ] && kill -0 "$_holder_pid" 2>/dev/null; then
+    _stuck_now=$(date +%s%3N)
+    _stuck_held_s=0
+    if [ -n "$_holder_start" ]; then
+      _stuck_held_s=$(( (_stuck_now - _holder_start) / 1000 ))
+    fi
+    if [ "$_stuck_held_s" -ge "${stuckHolderGraceSecs}" ]; then
+      kill -9 -"$_holder_pid" 2>/dev/null || kill -9 "$_holder_pid" 2>/dev/null || true
+      _stuck_line="__FANIN_STUCK_LOCK_HOLDER__ task=${task} pid=$_holder_pid held_s=$_stuck_held_s threshold_s=${stuckHolderGraceSecs} action=SIGKILL-released"
+      echo "$_stuck_line"
+      printf '%s\\n' "$_stuck_line" >> "$suite_stuck_file" 2>/dev/null || true
+    else
+      _stuck_line="__FANIN_STUCK_LOCK_HOLDER__ task=${task} pid=$_holder_pid held_s=$_stuck_held_s threshold_s=${stuckHolderGraceSecs} action=alive-under-grace-not-killed"
+      echo "$_stuck_line"
+      printf '%s\\n' "$_stuck_line" >> "$suite_stuck_file" 2>/dev/null || true
+    fi
+  fi
+fi
+# suite-stale-holder-reap-block-end`
 
 // ── 共享的 detached suite 启动核心（阶段 1 与 Fix agent 复用，字节一致）─────────────────────────
 // setsid + & + disown 让 suite 活在独立 session，subagent 退出不影响它；exit marker 是完成信号，
@@ -176,6 +222,7 @@ suite_lock_timeout="\${FULL_SUITE_LOCK_TIMEOUT:-${suiteLockTimeoutSecs}}"
 # 改由 wrapper 首行自写 $$（session leader，生命周期=整个 suite）到 pidfile 作为 suite_pid——poller 核验
 # 它才是真实存活信号；pidfile 读不到 ⇒ suite_pid 空，poller 退回纯 .exit 轮询（安全兜底）。
 suite_pid_file="/tmp/fan-in-suite-${task}.pid"
+${STALE_HOLDER_REAP}
 rm -f "$suite_pid_file"
 # gap-ac126-suite-bucket-execution-enable-wiring AC1 — the production suite path passes --buckets
 # <task-id> so the fan-in suite runs the task's bucket subset (P-only⇒P, M-only⇒M, hub/no-bucket⇒full)
@@ -183,10 +230,10 @@ rm -f "$suite_pid_file"
 # marker into this suite log; the fan-in's verification-round writer (pre-verified-round-record.ts)
 # parses it into the bucket fields (AC2/AC3). ISOLATE_LAUNCH (below) is NOT bucket-wired: it is the
 # C11 isolate rerun of an explicit load-sensitive file list — --buckets would override that list.
-setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'echo $$ > "$5"; cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh --buckets ${task}; else bash scripts/test.sh --buckets ${task}; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
+setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$5"; cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh --buckets ${task}; else bash scripts/test.sh --buckets ${task}; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
 suite_pid=""
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-  if [ -s "$suite_pid_file" ]; then suite_pid=$(cat "$suite_pid_file"); break; fi
+  if [ -s "$suite_pid_file" ]; then suite_pid=$(cut -d' ' -f1 "$suite_pid_file" 2>/dev/null); break; fi
   sleep 0.1
 done
 printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"`
@@ -223,11 +270,12 @@ suite_lock_timeout="\${FULL_SUITE_LOCK_TIMEOUT:-${suiteLockTimeoutSecs}}"
 # gap-suite-wait-bash-stale-pid-poll 修正同 SUITE_LAUNCH：$! 是 setsid 父进程 PID（fork 即退），kill -0 恒
 # 失败误报死进程 ⇒ 改由 wrapper 首行自写 $$ 到 pidfile（session leader）作为 suite_pid（硬规则 5b 全实例）。
 suite_pid_file="/tmp/fan-in-suite-${task}.pid"
+${STALE_HOLDER_REAP}
 rm -f "$suite_pid_file"
-setsid env SUITE_ISOLATE_FILES="$isolate_files" FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'echo $$ > "$4"; cd "$1" && { bash scripts/test.sh $SUITE_ISOLATE_FILES; } >> "$2" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$3"' _ "${worktree}" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
+setsid env SUITE_ISOLATE_FILES="$isolate_files" FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$4"; cd "$1" && { bash scripts/test.sh $SUITE_ISOLATE_FILES; } >> "$2" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$3"' _ "${worktree}" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
 suite_pid=""
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-  if [ -s "$suite_pid_file" ]; then suite_pid=$(cat "$suite_pid_file"); break; fi
+  if [ -s "$suite_pid_file" ]; then suite_pid=$(cut -d' ' -f1 "$suite_pid_file" 2>/dev/null); break; fi
   sleep 0.1
 done
 printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"

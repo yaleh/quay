@@ -1691,7 +1691,8 @@ test("⑧ turn-budget 取假 — phase-1 suite-launch DETACHES (setsid + & + dis
   // gap-suite-wait-bash-stale-pid-poll：suite_pid 必须是 wrapper 自写的真实 PID（pidfile），NOT 瞬态
   // setsid 父进程（$! fork 即退——kill -0 恒失败误报死进程，生产实测 2026-08-21，负控制 3 行确认）。
   assert.ok(launch.includes("suite_pid_file="), "suite-launch must write the wrapper PID to a pidfile (kill -0 polls a live process — gap-suite-wait-bash-stale-pid-poll)");
-  assert.ok(launch.includes('echo $$ >'), "the detached wrapper must self-record its PID ($$ = session leader) into the pidfile");
+  assert.ok(launch.includes('printf "%s %s\\n" "$$"'), "the detached wrapper must self-record its PID + start timestamp (`pid started_ms`) into the pidfile (kill -0 polls a live process + the cross-relaunch stuck-holder detector needs the held duration — gap-suite-lock-holder-stuck-detection)");
+  assert.ok(launch.includes('suite_pid=$(cut -d\' \' -f1 "$suite_pid_file"'), "suite-launch must parse the pid from the 2-field pidfile record (pid = field 1, gap-suite-lock-holder-stuck-detection)");
   assert.ok(!launch.includes("suite_pid=$!"), "suite-launch must NOT record the transient setsid parent PID ($! is dead — fork-and-exit)");
   // ⛔ NOT the two forbidden forms (f6b824b5 实证: Bash(run_in_background:true) 死于 subagent 退出; 前台 bash 超 10min 上限).
   // Only the EXECUTABLE lines matter — the comments legitimately name the forbidden form to forbid it.
@@ -3045,4 +3046,106 @@ test("⑨ impl-complete — runId-less fan-in skips the write (AC5 负控制)", 
   assert.ok(p2.includes('if [ -n "" ]; then'), `the runId guard is present even when runId is empty, got guard: ${p2.split("\n").find((l) => l.includes("if [ -n"))}`);
   // The step-4.4 block's own comment names the skip condition for a runId-less write.
   assert.ok(p2.includes("runId 为空") || p2.includes("未走 --task-start 留痕"), "the block documents the runId-less skip");
+});
+
+// ── ⑪ 跨 relaunch 锁持有者卡死/失联检测（gap-suite-lock-holder-stuck-detection）──────────────────────
+// THE DEFECT: hub-strip 无限 relaunch 期间，suite 锁被上一轮 hung 的 detached suite 持续持有——fan-in 的
+// detached 直跑（setsid bash scripts/test.sh）不经 full-suite-runner.ts ⇒ SUITE_MAX_RUNTIME_MS(45min)/
+// SUITE_SILENCE_MS(15min) 管不到它，且每次 relaunch 新起进程、单次超时重置 ⇒ 跨 relaunch 无限持有。
+// FIX: SUITE_LAUNCH/ISOLATE_LAUNCH 在 relaunch 前读上一轮 pidfile（`pid started_ms`）；上一轮【应已死亡】，
+// 仍存活 = 卡死 ⇒ 存活且持有 ≥ stuckHolderGraceSecs ⇒ SIGKILL 整进程组释放槽 + 告警（谁/多久/动作）；
+// 未超阈值 ⇒ 告警不杀；已死 ⇒ 陈旧 pidfile 静默清理（正常路径，非持有）。
+
+test("⑪ stuck-holder wiring — launch blocks carry the cross-relaunch reap (kill + alert + pid started_ms record)", async () => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-stuck-wiring", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-stuck-wiring", mergeTarget: "develop" },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1 (carries SUITE_LAUNCH)
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },                                           // stage 2 red
+      { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "" },                          // Fix agent (carries ISOLATE_LAUNCH)
+    ],
+  });
+  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  assert.ok(launch.includes("# suite-stale-holder-reap-block-start"), "suite-launch must carry the cross-relaunch stale-holder reap");
+  assert.ok(launch.includes("__FANIN_STUCK_LOCK_HOLDER__"), "the reap must emit the loud alert marker (非静默)");
+  assert.ok(launch.includes('kill -9 -"$_holder_pid"'), "the reap must SIGKILL the whole process group (release the single-flight slot)");
+  assert.ok(launch.includes("action=SIGKILL-released"), "the reap must record the release action");
+  assert.ok(launch.includes("held_s="), "the reap must record the held duration (多久)");
+  assert.ok(launch.includes("pid="), "the reap must record the holder pid (谁)");
+  assert.ok(launch.includes("suite_stuck_file="), "the reap must persist the alert to a ledger file (非静默)");
+  const isolate = extractBlockFromPrompts(prompts, "# isolate-launch-block-start", "# isolate-launch-block-end");
+  assert.ok(isolate.includes("# suite-stale-holder-reap-block-start"), "isolate-rerun launch must also carry the reap");
+});
+
+test("⑪ REAL stuck holder — alive holder with stale start ⇒ SIGKILL + __FANIN_STUCK_LOCK_HOLDER__ action=SIGKILL-released (AC1)", async (t) => {
+  const task = "gap-test-stuck-real";
+  const pidfile = `/tmp/fan-in-suite-${task}.pid`;
+  const ledger = `/tmp/fan-in-stuck-holder-${task}.log`;
+  fs.rmSync(ledger, { force: true });
+  // 真实存活 holder（detached ⇒ 自身为 session leader/pgid，与生产 setsid detached suite 同形）。
+  const holder = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+  t.after(() => { try { process.kill(-holder.pid, "SIGKILL"); } catch (_) { try { holder.kill("SIGKILL"); } catch (_) {} } });
+  // 10s 前的 start ⇒ held_s ≈ 10 ≥ 阈值(2) ⇒ 杀 + 告警。
+  fs.writeFileSync(pidfile, `${holder.pid} ${Date.now() - 10_000}\n`);
+  t.after(() => { for (const f of [pidfile, ledger]) { try { fs.rmSync(f, { force: true }); } catch (_) {} } });
+
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-stuck-real", mergeTarget: "develop", stuckHolderGraceSecs: 2 },
+  });
+  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  const reap = extractBlock(launch, "# suite-stale-holder-reap-block-start", "# suite-stale-holder-reap-block-end");
+  const r = runBash(`suite_pid_file="${pidfile}"; ${reap}`, { cwd: "/tmp", timeout: 10_000 });
+  assert.match(r.stdout, /__FANIN_STUCK_LOCK_HOLDER__ .*action=SIGKILL-released/, `must alert + release, got: ${r.stdout}`);
+  // SIGKILL 后进程先转 zombie、再被本测试进程（holder 的父进程）reap——kill -0 对 zombie 仍返回 0 ⇒
+  // 轮询等待被 reap（每次 await 让事件循环跑起来 reap 子进程），而不是单点 kill -0（zombie 误判为存活）。
+  let alive = "0";
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    alive = spawnSync("bash", ["-c", `kill -0 ${holder.pid} 2>/dev/null; echo $?`], { encoding: "utf8" }).stdout.trim();
+    if (alive === "1") break;
+    await new Promise((res) => setTimeout(res, 50));
+  }
+  assert.equal(alive, "1", `the stuck holder must be SIGKILLed (kill -0 exit 1 after reap), got alive=${alive}`);
+  const ledgerText = fs.readFileSync(ledger, "utf8");
+  assert.match(ledgerText, /action=SIGKILL-released/, "the alert must persist to the ledger (非静默)");
+});
+
+test("⑪ REAL under-grace — alive holder with recent start ⇒ NOT killed + action=alive-under-grace-not-killed (AC1 负控制)", async (t) => {
+  const task = "gap-test-stuck-grace";
+  const pidfile = `/tmp/fan-in-suite-${task}.pid`;
+  const ledger = `/tmp/fan-in-stuck-holder-${task}.log`;
+  fs.rmSync(ledger, { force: true });
+  const holder = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+  t.after(() => { try { process.kill(-holder.pid, "SIGKILL"); } catch (_) { try { holder.kill("SIGKILL"); } catch (_) {} } });
+  fs.writeFileSync(pidfile, `${holder.pid} ${Date.now()}\n`);  // 刚启动 ⇒ held_s ≈ 0 < 阈值(2)
+  t.after(() => { for (const f of [pidfile, ledger]) { try { fs.rmSync(f, { force: true }); } catch (_) {} } });
+
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-stuck-grace", mergeTarget: "develop", stuckHolderGraceSecs: 2 },
+  });
+  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  const reap = extractBlock(launch, "# suite-stale-holder-reap-block-start", "# suite-stale-holder-reap-block-end");
+  const r = runBash(`suite_pid_file="${pidfile}"; ${reap}`, { cwd: "/tmp", timeout: 10_000 });
+  assert.match(r.stdout, /action=alive-under-grace-not-killed/, `under-grace holder must alert but NOT kill, got: ${r.stdout}`);
+  const alive = spawnSync("bash", ["-c", `kill -0 ${holder.pid} 2>/dev/null; echo $?`], { encoding: "utf8" }).stdout.trim();
+  assert.equal(alive, "0", "an under-grace holder must NOT be killed (kill -0 exit 0)");
+});
+
+test("⑪ REAL dead holder — stale pidfile pointing at a dead pid ⇒ silent (no alert; normal completion path)", async (t) => {
+  const task = "gap-test-stuck-dead";
+  const pidfile = `/tmp/fan-in-suite-${task}.pid`;
+  const ledger = `/tmp/fan-in-stuck-holder-${task}.log`;
+  fs.rmSync(ledger, { force: true });
+  const deadPid = Number(spawnSync("bash", ["-c", "echo $$; sleep 0.1"], { encoding: "utf8" }).stdout.trim());
+  assert.ok(Number.isInteger(deadPid) && deadPid > 0, `dead pid precondition: got ${deadPid}`);
+  fs.writeFileSync(pidfile, `${deadPid} ${Date.now() - 10_000}\n`);
+  t.after(() => { for (const f of [pidfile, ledger]) { try { fs.rmSync(f, { force: true }); } catch (_) {} } });
+
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-stuck-dead", mergeTarget: "develop", stuckHolderGraceSecs: 2 },
+  });
+  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  const reap = extractBlock(launch, "# suite-stale-holder-reap-block-start", "# suite-stale-holder-reap-block-end");
+  const r = runBash(`suite_pid_file="${pidfile}"; ${reap}`, { cwd: "/tmp", timeout: 10_000 });
+  assert.ok(!r.stdout.includes("__FANIN_STUCK_LOCK_HOLDER__"), `a dead holder must NOT alert (normal completion path), got: ${r.stdout}`);
 });
