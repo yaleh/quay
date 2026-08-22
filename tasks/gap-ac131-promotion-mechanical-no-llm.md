@@ -1,7 +1,7 @@
 ---
 id: gap-ac131-promotion-mechanical-no-llm
 title: AC131 合格者纯机械晋升（零 LLM）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
