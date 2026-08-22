@@ -2233,7 +2233,7 @@ function renderTestsPage(tests: TestsResult): string {
   const latestBanner = latest
     ? html`<div style="border:1px solid var(--color-divider);background:var(--color-surface);padding:1rem;margin-bottom:1.5rem">
         <div style="font-weight:700;font-size:1rem"><span class="${runStatusClass(latest.state)}">${escapeHtml(latest.state ?? "unknown")}</span>${latest.scope ? ` · ${escapeHtml(latest.scope)}` : ""}</div>
-        <p class="meta" style="margin:0.25rem 0">startedAt: ${escapeHtml(latest.startedAt ?? "—")} · duration: ${latest.durationMs != null ? `${escapeHtml(String(Math.round(latest.durationMs / 1000)))}s` : "—"}${latest.commit ? ` · commit <code>${escapeHtml(latest.commit.slice(0, 8))}</code>` : ""}${latest.runner ? ` · runner ${escapeHtml(latest.runner)}` : ""}</p>
+        <p class="meta" style="margin:0.25rem 0">startedAt: ${escapeHtml(latest.startedAt ?? "—")} · duration: ${latest.durationMs != null ? `${escapeHtml(String(Math.round(latest.durationMs / 1000)))}s` : "—"}${latest.commit ? ` · commit <code>${escapeHtml(latest.commit.slice(0, 8))}</code>` : ""}${latest.runner ? ` · runner ${escapeHtml(latest.runner)}` : ""}${latest.buckets ? ` · buckets ${escapeHtml(latest.buckets)}` : ""}</p>
         <p class="meta" style="margin:0">tests ${latest.tests ?? "—"} · pass ${latest.pass ?? "—"} · fail ${latest.fail ?? "—"} · cancelled ${latest.cancelled ?? "—"}</p>
       </div>`
     : "";
@@ -2243,6 +2243,7 @@ function renderTestsPage(tests: TestsResult): string {
     <td>${r.pass ?? "—"}/${r.fail ?? "—"}/${r.cancelled ?? "—"}</td>
     <td>${r.durationMs != null ? `${escapeHtml(String(Math.round(r.durationMs / 1000)))}s` : "—"}</td>
     <td>${r.scope ? escapeHtml(r.scope) : "—"}</td>
+    <td>${r.buckets ? escapeHtml(r.buckets) : "—"}</td>
     <td>${r.commit ? html`<code>${escapeHtml(r.commit.slice(0, 8))}</code>` : "—"}</td>
   </tr>`).join("\n");
   const failedRun = tests.runs.find((r) => r.fail != null && r.fail > 0 && r.failures && r.failures.length > 0);
@@ -2263,7 +2264,7 @@ function renderTestsPage(tests: TestsResult): string {
       ${latestBanner}
       ${tests.runs.length > 0 ? html`<h2>历史运行（新→旧）</h2>
       <table>
-        <tr><th>round</th><th>state</th><th>pass/fail/cancel</th><th>duration</th><th>scope</th><th>commit</th></tr>
+        <tr><th>round</th><th>state</th><th>pass/fail/cancel</th><th>duration</th><th>scope</th><th>buckets</th><th>commit</th></tr>
         ${historyRows}
       </table>` : ""}
       ${failureDetails}

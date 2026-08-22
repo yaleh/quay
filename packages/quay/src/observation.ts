@@ -1346,6 +1346,13 @@ export interface TestRunRecord {
   nproc?: number | null;
   concurrentSuiteSlots?: number | null;
   concurrentSuitesRunning?: number | null;
+  // gap-ac127-suite-bucket-web-tests-page-visible — the bucket-execution fields (AC126 landed them in
+  // verification-round.jsonl; the /tests reader surfaces them). `buckets` is the canonical label
+  // (P|M|P+M|full); `bucket_files` / `bucket_duration_ms` are the selected file count and wall ms.
+  // Absent on legacy/non-bucket rows → null (never a fabricated "full").
+  buckets?: string | null;
+  bucket_files?: number | null;
+  bucket_duration_ms?: number | null;
 }
 
 export interface TestsResult {
@@ -1401,6 +1408,11 @@ export function parseVerificationRound(line: string): TestRunRecord | null {
       ...(o.nproc !== undefined ? { nproc: num(o.nproc) } : {}),
       ...(o.concurrentSuiteSlots !== undefined ? { concurrentSuiteSlots: num(o.concurrentSuiteSlots) } : {}),
       ...(o.concurrentSuitesRunning !== undefined ? { concurrentSuitesRunning: num(o.concurrentSuitesRunning) } : {}),
+      // gap-ac127-suite-bucket-web-tests-page-visible — bucket-execution fields (absent on legacy rows →
+      // undefined, never a fabricated "full"). Same 口径 as full-suite-runner:4027-4029.
+      ...(o.buckets !== undefined ? { buckets: str(o.buckets) } : {}),
+      ...(o.bucket_files !== undefined ? { bucket_files: num(o.bucket_files) } : {}),
+      ...(o.bucket_duration_ms !== undefined ? { bucket_duration_ms: num(o.bucket_duration_ms) } : {}),
     };
   } catch {
     return null;

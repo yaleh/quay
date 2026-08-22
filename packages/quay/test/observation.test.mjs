@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readGitHistory } from "../src/observation.ts";
+import { readGitHistory, parseVerificationRound } from "../src/observation.ts";
 
 /** Commit helper with a fixed clock (committer date = author date = `t`), per-branch file. */
 function commitAt(ws, msg, t, file = "log.txt") {
@@ -76,4 +76,29 @@ test("readGitHistory degrades to 「无活跃分支」 when every branch is stal
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
+});
+
+test("AC127: parseVerificationRound extracts the bucket-execution fields (buckets/bucket_files/bucket_duration_ms) and tolerates their absence on legacy rows (never a fabricated \"full\")", () => {
+  // gap-ac127-suite-bucket-web-tests-page-visible — AC126 landed these three fields on bucket-mode
+  // rounds (full-suite-runner.ts:4027-4029); the /tests reader must surface `buckets` and tolerate
+  // legacy rows that carry none of them (absence → undefined, NOT a fabricated "full").
+  const bucketRow = parseVerificationRound(JSON.stringify({
+    round: 240, startedAt: "2026-08-22T00:00:00.000Z", durationMs: 366000,
+    state: "green", pass: 500, fail: 0, cancelled: 0, tests: 500, reason: null,
+    commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", scope: "bucket", runner: "outer",
+    buckets: "M", bucket_files: 12, bucket_duration_ms: 366000,
+  }));
+  assert.equal(bucketRow.buckets, "M", "buckets label renders");
+  assert.equal(bucketRow.bucket_files, 12, "bucket_files renders the selected test-file count");
+  assert.equal(bucketRow.bucket_duration_ms, 366000, "bucket_duration_ms renders the round's own durationMs");
+
+  // Legacy row (no bucket fields — the default full suite / pre-fix shape) ⇒ undefined, never "full".
+  const legacy = parseVerificationRound(JSON.stringify({
+    round: 228, startedAt: "2026-08-17T04:30:00.000Z", durationMs: 936519,
+    state: "green", runner: "outer", scope: "worktree",
+    commit: "426b21ceaabbe7502334d92d79ce4a4a8d935fe9",
+  }));
+  assert.equal(legacy.buckets, undefined, "a legacy row has no buckets field (absent-field contract)");
+  assert.equal(legacy.bucket_files, undefined, "a legacy row has no bucket_files field");
+  assert.equal(legacy.bucket_duration_ms, undefined, "a legacy row has no bucket_duration_ms field");
 });
