@@ -47,11 +47,12 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
     assert.match(src, /skipping dist rebuild \(nested invocation; outer suite built it\)/, "dist-build skip echo");
   });
 
-  test("mark_nested is called before each of the 5 node --test exec sites", () => {
-    // The 5 node --test sites (token-held full-suite, run_selected exec, --group explicit files,
-    // --for-task, explicit files no-group) must each be preceded by a mark_nested call. Sites with
-    // `set +e` between mark_nested and node --test still export before the child spawn.
+  test("mark_nested is called before each of the 7 node --test exec sites", () => {
+    // The 7 node --test sites (token-held full-suite, run_selected exec, --group explicit files,
+    // --for-task, explicit files no-group, bucket path, flags-only default glob) must each be
+    // preceded by a mark_nested call. Sites with `set +e` between mark_nested and node --test
+    // still export before the child spawn.
     const calls = src.match(/^\s+mark_nested$/gm) || [];
-    assert.equal(calls.length, 5, `expected exactly 5 mark_nested call sites, got ${calls.length}`);
+    assert.equal(calls.length, 7, `expected exactly 7 mark_nested call sites, got ${calls.length}`);
   });
 }
