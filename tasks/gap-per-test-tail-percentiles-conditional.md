@@ -1,7 +1,7 @@
 ---
 id: gap-per-test-tail-percentiles-conditional
 title: 尾部分位数（条件触发）——per_test_ms 单均值看不见「最后一个测试独占 lane 拖长整相」
-status: todo
+status: superseded
 labels:
   - gap
   - mechanism
@@ -10,6 +10,9 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded: true
+  superseded_at: 2026-08-22
+  superseded_reason: "PARKED 条件占位（「某相利用率低」才晋）触发至今未到、近期无此信号；诊断价值边际、不服务任何当前阶段 AC；per-test 测量已有 measure-trend-check.ts（__PERFILE__ per-file 时长）覆盖，尾部分位数是锦上添花非必需。supersede 不删（留档可回查）"
 ---
 
 **type:** execution
