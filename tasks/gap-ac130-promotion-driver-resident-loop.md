@@ -1,7 +1,7 @@
 ---
 id: gap-ac130-promotion-driver-resident-loop
 title: AC130 晋升驱动常驻 + 全池判定循环
-status: todo
+status: ready
 labels:
   - gap
 parent: null
