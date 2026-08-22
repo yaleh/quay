@@ -1,7 +1,7 @@
 ---
 id: gap-ac117-spec-phase3-mcp-control-plane
 title: AC117 SPEC §5 阶段 3——MCP 控制面（halt / setPreference / forceDispatch，身份可核）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -30,13 +30,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1：halt 语义 = 停止新派发、⛔ 不杀在飞（与现 .halt 边界一致）。
-- [ ] AC2：调用方身份显式传且可核（走 header 或 tool 参数，非 Mcp-Session-Id）。
-- [ ] AC3（能取假）：不带身份调用 ⇒ 拒，⛔ 不得按默认身份放行。
+- [x] AC1：halt 语义 = 停止新派发、⛔ 不杀在飞（与现 .halt 边界一致）。
+- [x] AC2：调用方身份显式传且可核（走 header 或 tool 参数，非 Mcp-Session-Id）。
+- [x] AC3（能取假）：不带身份调用 ⇒ 拒，⛔ 不得按默认身份放行。
 
 ## Definition of Done
 
-- [ ] MCP 控制面三操作 + 身份可核 + 无身份拒取假通过；AC1-3 全勾；land 到 develop。
+- [x] MCP 控制面三操作 + 身份可核 + 无身份拒取假通过；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
@@ -45,4 +45,5 @@ depends_on:
 ## Touches
 
 - plugin/scripts/worker-driver.ts（MCP 控制面，落点 inner 定）
+- plugin/test/worker-driver.test.mjs（AC1/AC2/AC3 取假测试——扩 Touches：测试文件是新增代码的必要落点）
 - tasks/gap-ac117-spec-phase3-mcp-control-plane.md（自身）
