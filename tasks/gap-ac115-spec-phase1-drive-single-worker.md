@@ -49,6 +49,8 @@ depends_on: []
 - plugin/scripts/slot-refill.ts（--in-flight 退役面）
 - plugin/test/worker-driver.test.mjs (new)（AC1-3 单测，含杀 worker 取假）
 - plugin/test/slot-refill.test.mjs（退役面同步：--in-flight/--running/--closed-but-live CLI 测试 → --in-flight-count / 纯函数）
+- plugin/scripts/capability-catalog.sh（worker-driver.ts 进 catalog 声明——新 shipped 脚本必须声明，否则 AC1c 入口闸 exit 1 → mechanism-vitality-check / slot-free-trigger 全量红）
+- plugin/test/supervisor-preempt.test.mjs（退役面同步：裸 slot-refill 调用改为 --in-flight-count 0——裸调用已 fail-closed null，.halt 断言需一个「已测 0 在飞」视图）
 - .gitignore（新增 `**/.quay/worker-outcome.jsonl` 忽略）
 - tasks/gap-ac115-spec-phase1-drive-single-worker.md（自身）
 
@@ -56,3 +58,9 @@ depends_on: []
 > 实现时「退役 slot-refill 的 --in-flight 参数传递 + 遥测括号在飞测量」必须同步更新其 CLI 测试
 > （slot-refill.test.mjs，否则全量 suite 红），并新增 worker-driver 单测（worker-driver.test.mjs）与
 > .gitignore 忽略项（outcome 是 gitignored 运行时日志，与 gate-events.jsonl 同族）。故扩为七项。
+> **fan-in 阶段二次扩充（2026-08-22，硬规则 5b——修好一个≠只有那一个）**：全量 suite 暴露出两处
+> 未在七项内、但由本任务改动直接引起的跨文件回归——① 新增 shipped 脚本 worker-driver.ts 未在
+> capability-catalog.sh 声明 ⇒ AC1c 入口闸 exit 1 ⇒ mechanism-vitality-check / slot-free-trigger 红；
+> ② slot-refill 裸调用（supervisor-preempt.test.mjs 的 slotRefill helper）在退役后 fail-closed null ⇒
+> .halt 断言红。两处根因都属本任务 Touches 内源文件（worker-driver.ts / slot-refill.ts）的跨文件效应，
+> 修正需触碰 capability-catalog.sh 与 supervisor-preempt.test.mjs，故扩为九项。
