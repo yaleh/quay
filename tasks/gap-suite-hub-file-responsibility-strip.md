@@ -1,7 +1,7 @@
 ---
 id: gap-suite-hub-file-responsibility-strip
 title: 剥离 full-suite-runner.ts 的 accounting + test.sh 的 overhead 计时/分组逻辑到独立文件——非 harness 职责改动不再强制全量
-status: todo
+status: ready
 labels:
   - gap
 parent: null
