@@ -1,7 +1,7 @@
 ---
 id: gap-ac136-web-truth-source-follows-driver
 title: AC136 web 观测面随真相源切换
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -35,12 +35,12 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1：晋升面机械化后，web 展示的任务台账 / pool 指标读驱动 outcome 载体、或与之口径一致（核查点逐个核）。
-- [ ] AC2（能取假）：构造一次由驱动完成的晋升（todo→ready）⇒ web 对应视图在其刷新周期内反映；若仍只反映 outer 旧路径 ⇒ 本条为假。
+- [x] AC1：晋升面机械化后，web 展示的任务台账 / pool 指标读驱动 outcome 载体、或与之口径一致（核查点逐个核）。
+- [x] AC2（能取假）：构造一次由驱动完成的晋升（todo→ready）⇒ web 对应视图在其刷新周期内反映；若仍只反映 outer 旧路径 ⇒ 本条为假。
 
 ## Definition of Done
 
-- [ ] web 观测面随真相源切换落地；AC1-2 全勾（含驱动晋升反映取假）；land 到 develop。
+- [x] web 观测面随真相源切换落地；AC1-2 全勾（含驱动晋升反映取假）；land 到 develop。
 
 ## Retires
 
