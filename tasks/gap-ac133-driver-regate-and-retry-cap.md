@@ -1,7 +1,7 @@
 ---
 id: gap-ac133-driver-regate-and-retry-cap
 title: AC133 修完由驱动重跑同一个闸验证 + 失败上限 needs-human
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -30,13 +30,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1：fix worker 退出后，驱动重新调 `ready-pool-check` 验证，以闸的新判定为准，⛔ 不信 worker 自述。
-- [ ] AC2（能取假）：构造 fix worker 声称修好但实际未改 ⇒ 驱动必须仍判不合格、⛔ 不得晋升。
-- [ ] AC3（失败上限，能取假）：同一任务连续修 N 次仍不合格 ⇒ 标 `needs-human` 并停止修复循环；构造结构上修不好的任务 ⇒ 驱动 N 次后停手。
+- [x] AC1：fix worker 退出后，驱动重新调 `ready-pool-check` 验证，以闸的新判定为准，⛔ 不信 worker 自述。
+- [x] AC2（能取假）：构造 fix worker 声称修好但实际未改 ⇒ 驱动必须仍判不合格、⛔ 不得晋升。
+- [x] AC3（失败上限，能取假）：同一任务连续修 N 次仍不合格 ⇒ 标 `needs-human` 并停止修复循环；构造结构上修不好的任务 ⇒ 驱动 N 次后停手。
 
 ## Definition of Done
 
-- [ ] 重闸验证 + 失败上限落地；AC1-3 全勾（含自述不信 + 上限取假）；land 到 develop。
+- [x] 重闸验证 + 失败上限落地；AC1-3 全勾（含自述不信 + 上限取假）；land 到 develop。
 
 ## Retires
 
