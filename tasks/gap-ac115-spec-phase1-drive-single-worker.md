@@ -52,6 +52,7 @@ depends_on: []
 - plugin/scripts/capability-catalog.sh（worker-driver.ts 进 catalog 声明——新 shipped 脚本必须声明，否则 AC1c 入口闸 exit 1 → mechanism-vitality-check / slot-free-trigger 全量红）
 - plugin/test/supervisor-preempt.test.mjs（退役面同步：裸 slot-refill 调用改为 --in-flight-count 0——裸调用已 fail-closed null，.halt 断言需一个「已测 0 在飞」视图）
 - .gitignore（新增 `**/.quay/worker-outcome.jsonl` 忽略）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照 274→275——新增 shipped 脚本 worker-driver.ts 的跨文件效应，第三次遗漏）
 - tasks/gap-ac115-spec-phase1-drive-single-worker.md（自身）
 
 > **Touches 扩充说明**：原 Touches 只列 worker-driver.ts / worker-outcome.jsonl / slot-refill.ts / 自身。
@@ -64,3 +65,8 @@ depends_on: []
 > ② slot-refill 裸调用（supervisor-preempt.test.mjs 的 slotRefill helper）在退役后 fail-closed null ⇒
 > .halt 断言红。两处根因都属本任务 Touches 内源文件（worker-driver.ts / slot-refill.ts）的跨文件效应，
 > 修正需触碰 capability-catalog.sh 与 supervisor-preempt.test.mjs，故扩为九项。
+> **fan-in 阶段三次扩充（2026-08-22，anti-drift HARD FAIL 触发）**：fix commit 29e6dffd 刷新
+> DELIVERY-INVENTORY 快照 274→275（worker-driver.ts 进 catalog 声明后 inventory 同步增一），
+> 宿主 doc `docs/proposals/quay-product-outline.md` 未声明进 Touches ⇒ anti-drift 越界 HARD FAIL。
+> 该快照 bump 是 Touches 内源文件 worker-driver.ts 的跨文件效应，属合法改动（非 revert），
+> 故将宿主 doc 补入 Touches，扩为十项。
