@@ -1,7 +1,7 @@
 ---
 id: gap-ac136-web-truth-source-follows-driver
 title: AC136 web 观测面随真相源切换
-status: todo
+status: ready
 labels:
   - gap
 parent: null
