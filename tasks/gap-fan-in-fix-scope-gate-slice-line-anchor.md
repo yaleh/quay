@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-fix-scope-gate-slice-line-anchor
 title: fan-in-execute.js fix-scope gate 切片 lastIndexOf 裸 substring → 行首锚定（inline 提及误切 __PERFILE__）
-status: done
+status: ready
 labels:
   - gap
 parent: null
