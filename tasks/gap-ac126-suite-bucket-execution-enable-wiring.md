@@ -1,7 +1,7 @@
 ---
 id: gap-ac126-suite-bucket-execution-enable-wiring
 title: AC126 分桶执行的【生产启用】——fan-in suite 路径真正传 --buckets 且带桶轮次落 verification-round
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -37,13 +37,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `fan-in-execute.js` 存在 `--buckets` 引用且 suite 启动命令串含 `--buckets <task-id>`（生产 suite 路径真正传）。
-- [ ] AC2: M-only 任务回放 → verification-round 记录带 `buckets=M`；触枢纽任务 → `buckets=full`（带桶轮次落 verification-round 载体）。
-- [ ] AC3: 连带缺口闭合——带桶轮次不因「直跑 test.sh 不经 full-suite-runner」而账不进 verification-round。
+- [x] AC1: `fan-in-execute.js` 存在 `--buckets` 引用且 suite 启动命令串含 `--buckets <task-id>`（生产 suite 路径真正传）。
+- [x] AC2: M-only 任务回放 → verification-round 记录带 `buckets=M`；触枢纽任务 → `buckets=full`（带桶轮次落 verification-round 载体）。
+- [x] AC3: 连带缺口闭合——带桶轮次不因「直跑 test.sh 不经 full-suite-runner」而账不进 verification-round。
 
 ## Definition of Done
 
-- [ ] 生产启用接线完成（fan-in 传 --buckets）+ 带桶轮次落 verification-round + 回放 M/full 通过；AC1-3 全勾；land 到 develop。
+- [x] 生产启用接线完成（fan-in 传 --buckets）+ 带桶轮次落 verification-round + 回放 M/full 通过；AC1-3 全勾；land 到 develop。
 
 ## Touches
 
