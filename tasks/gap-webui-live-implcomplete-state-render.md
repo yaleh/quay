@@ -38,4 +38,5 @@ depends_on: []
 ## Touches
 
 - packages/quay/src/serve-handlers.ts（渲染层）
+- packages/quay/test/serve-live-implcomplete.test.mjs（新增 scoped 单测，AC1/AC2 渲染证据）
 - tasks/gap-webui-live-implcomplete-state-render.md（自身）

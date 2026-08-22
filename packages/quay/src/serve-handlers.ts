@@ -1410,6 +1410,27 @@ function renderSectionBlock(s: JournalSection, title: string): string {
   return html`<h2>${title}</h2><p class="meta"><strong>读失败</strong> — ${escapeHtml(s.reason || "")}</p>`;
 }
 
+// gap-webui-live-implcomplete-state-render: the impl-complete boundary (implCompletedAtMs) splits an
+// in-flight run into implementing (null) vs awaiting-land (non-null). The awaiting-land duration is
+// now − implCompletedAtMs, where "now" is the observation instant ALREADY embedded in the snapshot
+// (minutes = (now − startedAtMs)/60000) — so the render stays a pure function of LiveResult, with no
+// Date.now() inside it (deterministic and testable against a fixed nowMs).
+function awaitingLandMs(t: { startedAtMs: number; minutes: number; implCompletedAtMs: number | null }): number | null {
+  if (t.implCompletedAtMs == null) return null;
+  const nowMs = t.startedAtMs + t.minutes * 60_000;
+  return Math.max(0, nowMs - t.implCompletedAtMs);
+}
+
+function formatAwaitingDuration(ms: number | null): string {
+  if (ms == null) return "—";
+  const totalMin = Math.floor(ms / 60_000);
+  if (totalMin < 1) return "<1m";
+  if (totalMin < 60) return `${totalMin}m`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m === 0 ? `${h}h` : `${h}h${m}m`;
+}
+
 function renderLivePage(live: LiveResult): string {
   // gap-webui-cross-task-blocking-visibility: render the cross-task blocking relation (Touches
   // intersection + depends_on chain) computed by observation.computeInFlightBlocking. A task-id list
@@ -1421,12 +1442,14 @@ function renderLivePage(live: LiveResult): string {
       : html`<span class="meta">无</span>`;
 
   const rows = live.inFlight.length > 0 ? html`<table>
-    <tr><th>task id</th><th>run id</th><th>started</th><th>elapsed</th><th>阻塞 (blocks)</th><th>被阻塞 (blockedBy)</th></tr>
+    <tr><th>task id</th><th>run id</th><th>started</th><th>elapsed</th><th>状态</th><th>待落地时长</th><th>阻塞 (blocks)</th><th>被阻塞 (blockedBy)</th></tr>
     ${live.inFlight.map((t) => html`<tr>
       <td><a href="/task/${encodeURIComponent(t.taskId)}">${escapeHtml(t.taskId)}</a></td>
       <td>${escapeHtml(t.runId)}</td>
       <td>${escapeHtml(relativeTime(t.startedAtMs))}</td>
       <td>${escapeHtml(t.minutes.toFixed(1))} 分钟</td>
+      <td>${t.implCompletedAtMs == null ? "实现中" : html`<strong>已完工待落地</strong>`}</td>
+      <td>${escapeHtml(formatAwaitingDuration(awaitingLandMs(t)))}</td>
       <td>${linkList(t.blocks)}</td>
       <td>${linkList(t.blockedBy)}</td>
     </tr>`).join("\n")}
@@ -2481,10 +2504,19 @@ function renderDashboardPage(d: {
 }): string {
   const live = d.live;
   const liveStateText = live.status === "error" ? "读失败" : live.liveState === "running" ? "running" : live.liveState === "running-unwired" ? "在跑但未接遥测" : live.liveState === "not-running" ? "未在运行" : "—";
+  // gap-webui-live-implcomplete-state-render (AC2): the liveCard is no longer a bare count line —
+  // it renders a mini list of the first 3 in-flight tasks with a per-task state tag, so a task that
+  // finished implementing but is stuck awaiting-land is visible at a glance (待落地 + duration in
+  // the warning color), instead of hiding inside a "在飞 N" number.
+  const liveMiniList = live.inFlight.slice(0, 3).map((t) => html`<div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.78rem;line-height:1.4">
+      <a href="/task/${encodeURIComponent(t.taskId)}" style="color:var(--color-text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.taskId)}</a>
+      <span style="flex:none;${t.implCompletedAtMs == null ? "color:var(--color-neutral-700)" : "color:var(--color-accent-700);font-weight:700"}">${t.implCompletedAtMs == null ? "实现中" : `待落地 ${formatAwaitingDuration(awaitingLandMs(t))}`}</span>
+    </div>`).join("");
   const liveCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">循环脉搏</div>
     <div style="font-weight:800">${escapeHtml(liveStateText)}</div>
     <p style="margin:0;font-size:0.8rem;opacity:0.8">在飞 ${live.inFlight.length} · 并发 ${live.concurrency}</p>
+    ${live.status === "ok" && live.inFlight.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">${liveMiniList}</div>` : ""}
     <a href="/live" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Live →</a>
   </div>`;
 
