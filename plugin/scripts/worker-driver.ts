@@ -51,9 +51,41 @@
 //   --json             spawn 后向 stdout 打 JSON 事件行（stash / worker-spawned / worker-done）
 // Exit: 0 = 全部 worker 退出码 0（completed）；非 0 = 首个非零（worker 非零 / 被杀 / 超时 / spawn 失败）。
 //       ⛔ 任何终态都写 outcome 记录（阶段 1 AC3：杀 worker 不静默丢任务）。
+//
+// 阶段 3 新增（AC117，SPEC §5 阶段 3——MCP 控制面）：
+//   ① MCP 面（HTTP/SSE）—— serveControlPlane 起一个 StreamableHTTPServerTransport（streamable HTTP，
+//      同时支持 POST JSON-RPC 与 GET SSE），暴露三操作 halt / setPreference / forceDispatch。
+//   ② 调用方身份显式传且可核（AC2）—— 身份走【header `Mcp-Caller-Id`】或【tool 参数 `caller`】，
+//      与 Mcp-Session-Id 无关（后者只能区分「连接」，2026-08-16 实测不知道调用方是 outer 还是 manager）。
+//      可核 = 校验调用方 ∈ knownCallers()（QUAY_CONTROL_CALLERS，缺省 outer,manager）。
+//   ③ 取假验证（AC3）—— 不带身份调用 ⇒ 拒（isError + "no caller identity"），⛔ 不得按默认身份放行；
+//      未知身份（不在 knownCallers）同样拒（"unknown caller"）。
+//   halt 语义（AC1）—— 停止【新】派发、⛔ 不杀在飞：halt 只写控制态 halted=true；派发环在【spawn 前】
+//   逐任务读控制态，halted ⇒ 记一条 final_state=not-dispatched 的 outcome 并跳过（已 spawn 的在飞 worker
+//   完全不受影响——驱动从不因 halt 发信号杀在飞）。
+//
+// 单一真相源（SPEC §5 阶段 3 退役清单）：
+//   `.halt` 文件机制对【驱动】退役 —— 驱动的停机态 = `.quay/worker-control.json`（MCP halt 写、派发环读），
+//   ⛔ 驱动【不再】读 `.halt`、⛔ 不两者并存（两个真相源）。worker-control.json 与 worker-outcome.jsonl 同族
+//   （gitignored 运行时状态）。读失败 fail-closed（读失败/解析失败 ⇒ halted=true，硬规则 3b：读不懂 ≠ 合格）。
+//   注：.halt 仍被【旧三层循环】的 halt-check.sh / slot-refill.ts 等消费——它们的退役属外层 SPEC 迁移范围，
+//   本文件只管【驱动】这一条停机来源，不读 .halt、也不与它并存为驱动停机态。
+//
+// 控制态文件（.quay/worker-control.json，单一真相源）：
+//   { schemaVersion:1, halted:boolean, halted_by, halted_at, preference:{k:v}, forced:[{task,reason,caller,at}] }
+//   - halt({halted=true})  ⇒ 写 halted/halted_by/halted_at
+//   - setPreference(k,v)   ⇒ 写 preference[k]=v（selector 的倾向存储，SPEC §3.1）
+//   - forceDispatch(task)  ⇒ append forced[]（强制派发记录，驻留驱动的 selector 环消费；本阶段驱动仍用
+//     显式 --task，forceDispatch 落盘记录即可观测）
+//
+// Run（MCP 控制面）:
+//   node --experimental-strip-types plugin/scripts/worker-driver.ts --serve \
+//     --root <repo> [--host 127.0.0.1] [--port <n>] [--json]
 
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 
@@ -64,13 +96,28 @@ export const WORKER_OUTCOME_REL = ".quay/worker-outcome.jsonl";
 
 /** 终态枚举：completed（退出码 0）/ failed（非零退出）/ killed（被信号杀）/ timed-out（超时 SIGTERM）/
  *  spawn-failed（起不来）。 */
-export const FINAL_STATES = ["completed", "failed", "killed", "timed-out", "spawn-failed"] as const;
+export const FINAL_STATES = ["completed", "failed", "killed", "timed-out", "spawn-failed", "not-dispatched"] as const;
 
 /** 并发上限的定义点（concurrency-literal-check 的唯一定义点旋钮①，人 2026-08-13）。缺省并发读它。 */
 export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
 
 /** checkout 前 stash 的缺省 message（`git stash list` 可核的标记，AC2）。 */
 export const DEFAULT_STASH_MESSAGE = "worker-driver: stash before checkout (SPEC §5 阶段 2)";
+
+/** 控制态文件的仓库相对路径（gitignored 运行时状态，worker-outcome.jsonl 同族）。单一真相源。 */
+export const CONTROL_STATE_REL = ".quay/worker-control.json";
+
+/** known-callers 定义点（读 QUAY_CONTROL_CALLERS，逗号分隔；缺省 outer,manager）。 */
+export const CONTROL_CALLERS_ENV = "QUAY_CONTROL_CALLERS";
+
+/** 缺省 known-callers（SPEC §5 阶段 3：调用方是 outer 或 manager；身份可核 = 成员在此集合内）。 */
+export const DEFAULT_CALLERS = ["outer", "manager"] as const;
+
+/** 身份 header 的【小写】键（HTTP header 名大小写不敏感，Node 统一小写）。 */
+export const CONTROL_HEADER = "mcp-caller-id";
+
+/** 身份 header 的展示名（文档/错误消息用）。 */
+export const CONTROL_HEADER_NAME = "Mcp-Caller-Id";
 
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
 
@@ -231,6 +278,203 @@ export function stashIfDirty(root: string, stashMessage: string = DEFAULT_STASH_
   return { stashed: true, files, error: stillDirty ? "stash ran but main checkout still dirty" : null };
 }
 
+// ── 阶段 3（AC117）MCP 控制面：控制态 + 身份 + halt 派发闸 ──────────────────────────────────────────
+
+/** 一条强制派发记录（forceDispatch 落盘，驻留驱动的 selector 环消费）。 */
+export interface ForcedDispatch {
+  task: string;
+  reason: string | null;
+  caller: string;
+  at: string;
+}
+
+/** 控制态（单一真相源）。halted = 停止【新】派发（不杀在飞）；preference = selector 倾向存储。 */
+export interface ControlState {
+  schemaVersion: 1;
+  halted: boolean;
+  halted_by: string | null;
+  halted_at: string | null;
+  preference: Record<string, string>;
+  forced: ForcedDispatch[];
+}
+
+export function defaultControlState(): ControlState {
+  return { schemaVersion: 1, halted: false, halted_by: null, halted_at: null, preference: {}, forced: [] };
+}
+
+/** 把任意解析结果合并为 ControlState（缺失字段取缺省，不信任输入形状）。 */
+export function mergeControlState(parsed: unknown): ControlState {
+  const d = defaultControlState();
+  if (!parsed || typeof parsed !== "object") return d;
+  const p = parsed as Record<string, unknown>;
+  return {
+    schemaVersion: 1,
+    halted: typeof p.halted === "boolean" ? p.halted : d.halted,
+    halted_by: typeof p.halted_by === "string" ? p.halted_by : null,
+    halted_at: typeof p.halted_at === "string" ? p.halted_at : null,
+    preference:
+      p.preference && typeof p.preference === "object" && !Array.isArray(p.preference)
+        ? { ...(p.preference as Record<string, string>) }
+        : {},
+    forced: Array.isArray(p.forced)
+      ? (p.forced as unknown[]).filter((f): f is ForcedDispatch => !!f && typeof f === "object")
+      : [],
+  };
+}
+
+/**
+ * 读控制态（单一真相源）。缺失 ⇒ 缺省（未 halt）；任何【读失败/解析失败】⇒ fail-closed（halted=true，
+ * 硬规则 3b：读不懂 ≠ 合格，绝不伪装成「未 halt」）。返回 { state, parseError }。
+ */
+export function readControlState(
+  root: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { state: ControlState; parseError: string | null } {
+  const file = path.join(root, CONTROL_STATE_REL);
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    const code = e && typeof e === "object" && "code" in e ? (e as { code?: string }).code : undefined;
+    if (code === "ENOENT") return { state: defaultControlState(), parseError: null };
+    return { state: { ...defaultControlState(), halted: true }, parseError: `could not read control state at ${file}` };
+  }
+  try {
+    return { state: mergeControlState(JSON.parse(text)), parseError: null };
+  } catch {
+    return { state: { ...defaultControlState(), halted: true }, parseError: `unparseable control state at ${file}` };
+  }
+}
+
+/** 写控制态（原子：写 .tmp 再 rename，避免派发环读到半截）。返回落盘路径。 */
+export function writeControlState(root: string, state: ControlState): string {
+  const file = path.join(root, CONTROL_STATE_REL);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf8");
+  fs.renameSync(tmp, file);
+  return file;
+}
+
+/** halt 闸（AC1）：派发环在 spawn 前读它。halted=true ⇒ 停止【新】派发（不杀在飞）。fail-closed。 */
+export function isHalted(root: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  return readControlState(root, env).state.halted;
+}
+
+/** halt 操作（AC1 语义）：只翻 halted/halted_by/halted_at，不触碰任何在飞 worker。 */
+export function applyHalt(
+  state: ControlState,
+  caller: string,
+  halted = true,
+  nowIso = new Date().toISOString(),
+): ControlState {
+  return { ...state, halted, halted_by: halted ? caller : null, halted_at: halted ? nowIso : null };
+}
+
+/** setPreference 操作：写 preference[k]=v（selector 的倾向存储）。 */
+export function applyPreference(state: ControlState, key: string, value: string): ControlState {
+  return { ...state, preference: { ...state.preference, [key]: value } };
+}
+
+/** forceDispatch 操作：append 一条强制派发记录（驻留驱动的 selector 环消费）。 */
+export function applyForceDispatch(
+  state: ControlState,
+  task: string,
+  reason: string | null,
+  caller: string,
+  nowIso = new Date().toISOString(),
+): ControlState {
+  return { ...state, forced: [...state.forced, { task, reason, caller, at: nowIso }] };
+}
+
+/** 因 halt 未派发的任务也落一条 outcome（final_state=not-dispatched，⛔ 不静默丢任务）。 */
+export function computeHaltedOutcome({
+  task,
+  selectorReason,
+  runId,
+  nowMs,
+  inFlightCount = 0,
+}: {
+  task: string;
+  selectorReason: string;
+  runId: string;
+  nowMs: number;
+  inFlightCount?: number;
+}): ReturnType<typeof computeOutcome> {
+  const iso = new Date(nowMs).toISOString();
+  return {
+    ts: iso,
+    task,
+    selector_reason: selectorReason,
+    exit_code: null,
+    signal: null,
+    wall_clock_ms: 0,
+    final_state: "not-dispatched",
+    failure_reason: "dispatch halted (MCP halt) — no worker spawned; in-flight workers untouched",
+    started_at: iso,
+    ended_at: iso,
+    worker_pid: null,
+    run_id: runId,
+    in_flight_count: inFlightCount,
+    timed_out: false,
+  };
+}
+
+// ── 身份（AC2/AC3）：显式传 + 可核 + 无身份拒 ───────────────────────────────────────────────────────
+
+/** known-callers（可核 = 调用方必须在此集合内）。读 CONTROL_CALLERS_ENV，缺省 DEFAULT_CALLERS。 */
+export function knownCallers(env: NodeJS.ProcessEnv = process.env): Set<string> {
+  const raw = env[CONTROL_CALLERS_ENV];
+  const list = raw && raw.trim() ? raw.split(",").map((s) => s.trim()).filter(Boolean) : [...DEFAULT_CALLERS];
+  return new Set(list);
+}
+
+export type CallerResolution =
+  | { ok: true; caller: string }
+  | { ok: false; reason: string; code: "no-caller" | "unknown-caller" };
+
+/**
+ * 身份解析（AC2/AC3 核心）：tool 参数 `caller` 优先，其次 header `Mcp-Caller-Id`；两者皆缺 ⇒ 拒
+ * （⛔ 不得按默认身份放行）；不在 knownCallers ⇒ 拒（unknown-caller）。Mcp-Session-Id 完全不参与。
+ */
+export function resolveCaller(opts: {
+  toolArg?: string | null | undefined;
+  header?: string | null | undefined;
+  env?: NodeJS.ProcessEnv;
+}): CallerResolution {
+  const raw = (opts.toolArg ?? "").trim() || (opts.header ?? "").trim();
+  if (!raw) {
+    return {
+      ok: false,
+      code: "no-caller",
+      reason: `no caller identity — pass the \`caller\` tool arg or the ${CONTROL_HEADER_NAME} header (⛔ no default identity)`,
+    };
+  }
+  const callers = knownCallers(opts.env);
+  if (!callers.has(raw)) {
+    return {
+      ok: false,
+      code: "unknown-caller",
+      reason: `unknown caller "${raw}" (known callers: ${[...callers].sort().join(", ")})`,
+    };
+  }
+  return { ok: true, caller: raw };
+}
+
+/** 从 requestInfo.headers 取一个 header（兼容 string / string[] / Headers.get 三种形态）。 */
+export function headerValue(
+  headers: Record<string, string | string[] | undefined> | { get(name: string): string | null } | undefined,
+  name: string,
+): string | null {
+  if (!headers) return null;
+  if (typeof (headers as { get?: (n: string) => string | null }).get === "function") {
+    return (headers as { get(n: string): string | null }).get(name);
+  }
+  const v = (headers as Record<string, string | string[] | undefined>)[name];
+  if (v == null) return null;
+  return Array.isArray(v) ? (v[0] ?? null) : String(v);
+}
+
 /** 纯函数：解析多任务输入 → { tasks, selectorReason, runPrefix, workerArgv } 或 { error }。 */
 export function resolveRun({
   tasks,
@@ -368,6 +612,235 @@ function runOneWorker({
   });
 }
 
+// ── MCP 控制面（HTTP/SSE，AC117）──────────────────────────────────────────────────────────────────
+
+/** serveControlPlane 返回的句柄（url 可观测，close 停服）。 */
+export interface ControlPlaneHandle {
+  url: string;
+  port: number;
+  close(): Promise<void>;
+}
+
+/**
+ * 起 MCP 控制面（HTTP/SSE，streamable HTTP——同时支持 POST JSON-RPC 与 GET SSE）。暴露三操作
+ * halt / setPreference / forceDispatch，全部走【身份闸】resolveCaller（AC2 header 或 tool 参数、
+ * AC3 无身份拒）。SDK 与 zod 惰性 import（仅 --serve 路径加载，派发环/纯函数零 SDK 依赖）。
+ */
+export async function serveControlPlane(opts: {
+  root: string;
+  host?: string;
+  port?: number;
+  env?: NodeJS.ProcessEnv;
+}): Promise<ControlPlaneHandle> {
+  const root = path.resolve(opts.root);
+  const host = opts.host ?? "127.0.0.1";
+  const env = opts.env ?? process.env;
+
+  const [{ McpServer }, { StreamableHTTPServerTransport }, { isInitializeRequest }, { z }] = await Promise.all([
+    import("@modelcontextprotocol/sdk/server/mcp.js"),
+    import("@modelcontextprotocol/sdk/server/streamableHttp.js"),
+    import("@modelcontextprotocol/sdk/types.js"),
+    import("zod"),
+  ]);
+
+  // 身份闸：resolveCaller 不过 ⇒ 返回 isError 结果；过 ⇒ null。三个工具共用（AC2/AC3 统一）。
+  const reject = (reason: string) => ({
+    isError: true,
+    content: [{ type: "text" as const, text: `rejected: ${reason}` }],
+  });
+  const ok = (payload: unknown) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+  });
+
+  // 每个会话一个独立 McpServer（低层 Server 只支持单 transport ⇒ SDK simpleStreamableHttp 示例
+  // 也是每会话新建一个 server）。工具注册是纯函数，同一套工具挂到每个会话自己的 server 上。
+  const registerControlTools = (server: any) => {
+    server.registerTool(
+      "halt",
+      {
+        title: "halt — stop NEW dispatch (never kill in-flight)",
+        description:
+          "MCP halt (SPEC §5 阶段 3): set halted=true to stop NEW dispatch; in-flight workers are NOT killed " +
+          "(same boundary as the retired .halt sentinel). halted=false resumes. Identity is REQUIRED and " +
+          `verifiable — pass \`caller\` (tool arg) or the ${CONTROL_HEADER_NAME} header; a call with no identity ` +
+          "is rejected (no default identity).",
+        inputSchema: {
+          halted: z.boolean().optional().describe("true = halt (stop new dispatch); false = resume. Default true."),
+          caller: z.string().optional().describe(`Caller identity (e.g. "outer" | "manager"); alternative to the ${CONTROL_HEADER_NAME} header.`),
+        },
+      },
+      async (args: { halted?: boolean; caller?: string }, extra: any) => {
+        const header = headerValue(extra?.requestInfo?.headers, CONTROL_HEADER);
+        const res = resolveCaller({ toolArg: args.caller, header, env });
+        if (!res.ok) return reject(res.reason);
+        const state = readControlState(root, env).state;
+        const next = applyHalt(state, res.caller, args.halted ?? true);
+        writeControlState(root, next);
+        return ok({
+          halted: next.halted,
+          halted_by: next.halted_by,
+          halted_at: next.halted_at,
+          note: "halt stops NEW dispatch only; in-flight workers are NOT killed",
+        });
+      },
+    );
+
+    server.registerTool(
+      "setPreference",
+      {
+        title: "setPreference — write a selector preference",
+        description:
+          "MCP control plane (SPEC §5 阶段 3): write a key/value preference the selector loop reads. " +
+          "Identity is REQUIRED (caller arg or header); no identity is rejected.",
+        inputSchema: {
+          key: z.string().describe("Preference key."),
+          value: z.string().describe("Preference value."),
+          caller: z.string().optional().describe(`Caller identity; alternative to the ${CONTROL_HEADER_NAME} header.`),
+        },
+      },
+      async (args: { key: string; value: string; caller?: string }, extra: any) => {
+        const header = headerValue(extra?.requestInfo?.headers, CONTROL_HEADER);
+        const res = resolveCaller({ toolArg: args.caller, header, env });
+        if (!res.ok) return reject(res.reason);
+        const state = readControlState(root, env).state;
+        const next = applyPreference(state, args.key, args.value);
+        writeControlState(root, next);
+        return ok({ preference: next.preference });
+      },
+    );
+
+    server.registerTool(
+      "forceDispatch",
+      {
+        title: "forceDispatch — record a forced dispatch",
+        description:
+          "MCP control plane (SPEC §5 阶段 3): record a forced-dispatch request (consumed by the resident " +
+          "driver's selector loop). Identity is REQUIRED (caller arg or header); no identity is rejected.",
+        inputSchema: {
+          task: z.string().describe("Task id to force-dispatch."),
+          reason: z.string().optional().describe("Why this task is force-dispatched."),
+          caller: z.string().optional().describe(`Caller identity; alternative to the ${CONTROL_HEADER_NAME} header.`),
+        },
+      },
+      async (args: { task: string; reason?: string; caller?: string }, extra: any) => {
+        const header = headerValue(extra?.requestInfo?.headers, CONTROL_HEADER);
+        const res = resolveCaller({ toolArg: args.caller, header, env });
+        if (!res.ok) return reject(res.reason);
+        const state = readControlState(root, env).state;
+        const next = applyForceDispatch(state, args.task, args.reason ?? null, res.caller);
+        writeControlState(root, next);
+        return ok({ forced: next.forced });
+      },
+    );
+  };
+
+  // 多会话（stateful）路由：每个会话一个【独立 McpServer + transport】，按 Mcp-Session-Id 分流
+  // （SDK simpleStreamableHttp 示例的 canonical 模式）。outer 与 manager 各连各的会话，互不干扰。
+  const transports = new Map<string, any>();
+  const servers = new Set<any>();
+
+  const newTransport = async () => {
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (sid: string) => {
+        transports.set(sid, transport);
+      },
+    });
+    transport.onclose = () => {
+      const sid = transport.sessionId;
+      if (sid && transports.get(sid) === transport) transports.delete(sid);
+    };
+    const server = new McpServer({ name: "worker-driver-control", version: "0.6.1" });
+    registerControlTools(server);
+    servers.add(server);
+    await server.connect(transport);
+    return transport;
+  };
+
+  const httpServer = createServer((req, res) => {
+    void (async () => {
+      try {
+        const sessionId = headerValue(req.headers as Record<string, string | string[] | undefined>, "mcp-session-id");
+        const method = req.method ?? "GET";
+        // GET（SSE 流）/ DELETE（会话终止）：必须带已知 session id。
+        if (method === "GET" || method === "DELETE") {
+          if (!sessionId || !transports.has(sessionId)) {
+            res.writeHead(400, { "content-type": "application/json" });
+            res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message: "Invalid or missing session ID" }, id: null }));
+            return;
+          }
+          await transports.get(sessionId)!.handleRequest(req, res);
+          return;
+        }
+        // POST：带已知 session id ⇒ 复用该会话的 transport；否则必须是 initialize（开新会话）。
+        if (sessionId && transports.has(sessionId)) {
+          await transports.get(sessionId)!.handleRequest(req, res);
+          return;
+        }
+        const body = await readRequestBody(req);
+        let parsed: unknown = null;
+        try {
+          parsed = body ? JSON.parse(body) : null;
+        } catch {
+          /* fall through to 400 */
+        }
+        if (!parsed || !isInitializeRequest(parsed)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message: "Bad Request: no valid session ID provided" }, id: null }));
+          return;
+        }
+        const transport = await newTransport();
+        await transport.handleRequest(req, res, parsed);
+      } catch {
+        if (!res.headersSent) {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32603, message: "Internal server error" }, id: null }));
+        }
+      }
+    })();
+  });
+  await new Promise<void>((resolve, rejectListen) => {
+    httpServer.once("error", rejectListen);
+    httpServer.listen(opts.port ?? 0, host, () => resolve());
+  });
+  const address = httpServer.address();
+  const boundPort = address && typeof address === "object" ? address.port : (opts.port ?? 0);
+
+  return {
+    url: `http://${host}:${boundPort}`,
+    port: boundPort,
+    close: async () => {
+      for (const s of [...servers]) {
+        try {
+          await s.close();
+        } catch {
+          /* best-effort */
+        }
+      }
+      for (const t of [...transports.values()]) {
+        try {
+          await t.close();
+        } catch {
+          /* best-effort session teardown */
+        }
+      }
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    },
+  };
+}
+
+/** 读原始 HTTP 请求体为 UTF-8 字符串（Node 无 express 时 body 需手动读）。 */
+export function readRequestBody(req: { on(ev: "data", cb: (chunk: unknown) => void): unknown; on(ev: "end", cb: () => void): unknown; on(ev: "error", cb: (e: unknown) => void): unknown }): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (c) => {
+      data += String(c);
+    });
+    req.on("end", () => resolve(data));
+    req.on("error", reject);
+  });
+}
+
 // ── CLI 主流程 ─────────────────────────────────────────────────────────────────────────────────────
 
 export async function main(argv: string[]): Promise<number> {
@@ -382,6 +855,9 @@ export async function main(argv: string[]): Promise<number> {
   let outcomePath: string | undefined;
   let runId: string | undefined;
   let json = false;
+  let serve = false;
+  let host: string | undefined;
+  let port: number | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -395,11 +871,15 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--outcome") outcomePath = args[++i];
     else if (a === "--run-id") runId = args[++i];
     else if (a === "--json") json = true;
+    else if (a === "--serve") serve = true;
+    else if (a === "--host") host = args[++i];
+    else if (a === "--port") port = Number(args[++i]);
     else if (a === "--help" || a === "-h") {
       console.log(
-        "worker-driver — SPEC §5 阶段 2：spawn 多 claude -p worker（并发 N + 超时 SIGTERM + checkout 前 stash）\n" +
+        "worker-driver — SPEC §5 阶段 2+3：spawn 多 claude -p worker（并发 N + 超时 SIGTERM + checkout 前 stash + MCP 控制面）\n" +
           "  --task <id> [--task <id> …] [--reason \"<一句为什么选它>\"] [--concurrency <N>] [--timeout <ms>]\n" +
-          "  [--root <repo>] [--worker-cmd \"<argv>\"] [--pid-file <p>] [--outcome <p>] [--run-id <id>] [--json]",
+          "  [--root <repo>] [--worker-cmd \"<argv>\"] [--pid-file <p>] [--outcome <p>] [--run-id <id>] [--json]\n" +
+          "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
     } else {
@@ -409,6 +889,18 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const rootDir = root ? path.resolve(root) : path.resolve(process.cwd());
+
+  // --serve：起 MCP 控制面（常驻）。listening socket 保持事件循环存活 ⇒ 进程不退出，直到 SIGINT/SIGTERM。
+  if (serve) {
+    const handle = await serveControlPlane({ root: rootDir, host, port });
+    if (json) process.stdout.write(`${JSON.stringify({ event: "control-plane-serving", url: handle.url, port: handle.port })}\n`);
+    else console.log(`worker-driver control plane serving at ${handle.url}`);
+    const stop = () => { void handle.close(); };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    return 0;
+  }
+
   const outcomeFile = outcomePath ? path.resolve(outcomePath) : path.join(rootDir, WORKER_OUTCOME_REL);
   const resolved = resolveRun({ tasks, reason, workerCmd, root: rootDir, runId, nowMs: Date.now() });
   if (resolved.error) {
@@ -435,9 +927,20 @@ export async function main(argv: string[]): Promise<number> {
 
   const runTask = async (idx: number): Promise<void> => {
     const taskId = taskIds[idx];
+    const runIdForTask = runId ?? `${runPrefix}-${taskId}`;
+    // 阶段 3 halt 闸（AC1）：spawn 前逐任务读控制态；halted ⇒ 记 not-dispatched 并跳过，
+    // ⛔ 不杀在飞（已 spawn 的 worker 完全不受影响——闸只在【新】spawn 前生效）。
+    if (isHalted(rootDir)) {
+      const haltedOutcome = computeHaltedOutcome({
+        task: taskId, selectorReason, runId: runIdForTask, nowMs: Date.now(), inFlightCount: inFlight,
+      });
+      appendOutcomeToFile(outcomeFile, haltedOutcome);
+      if (json) process.stdout.write(`${JSON.stringify({ event: "worker-skipped", task: taskId, ...haltedOutcome })}\n`);
+      results[idx] = { taskId, outcome: haltedOutcome, exitCode: 0 };
+      return;
+    }
     inFlight += 1;
     const argv = sharedWorkerArgv ?? defaultWorkerArgv(taskId, rootDir);
-    const runIdForTask = runId ?? `${runPrefix}-${taskId}`;
     const r = await runOneWorker({
       taskId, selectorReason, runId: runIdForTask, workerArgv: argv, rootDir, outcomeFile,
       timeoutMs, inFlightCount: inFlight, json, pidFile,
