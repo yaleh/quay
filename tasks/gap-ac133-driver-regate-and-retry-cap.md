@@ -1,7 +1,7 @@
 ---
 id: gap-ac133-driver-regate-and-retry-cap
 title: AC133 修完由驱动重跑同一个闸验证 + 失败上限 needs-human
-status: todo
+status: ready
 labels:
   - gap
 parent: null
