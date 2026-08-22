@@ -1,7 +1,7 @@
 ---
 id: gap-fix-scope-perfile-buckets-parser
 title: fix-scope gate __PERFILE__ 解析器接 --buckets 输出格式（--buckets 走 node test-runner，parser 命中 0 行）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -34,12 +34,12 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `--buckets` 路径的失败能逐文件归因（fix-scope gate 非 0 行命中）。
-- [ ] AC2: 取假——带红桶轮 → fix-scope gate 定位到具体失败文件。
+- [x] AC1: `--buckets` 路径的失败能逐文件归因（fix-scope gate 非 0 行命中）。
+- [x] AC2: 取假——带红桶轮 → fix-scope gate 定位到具体失败文件。
 
 ## Definition of Done
 
-- [ ] --buckets 输出格式被 fix-scope gate 识别 + 取假通过；AC1-2 全勾；land 到 develop。
+- [x] --buckets 输出格式被 fix-scope gate 识别 + 取假通过；AC1-2 全勾；land 到 develop。
 
 ## Touches
 
