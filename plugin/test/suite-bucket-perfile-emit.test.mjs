@@ -58,7 +58,16 @@ test("AC1 — both --buckets node --test invocations carry $(suite_reporter_flag
 });
 
 test("AC2 take-false — a red test under the reporter flags emits __PERFILE__ ... passed=false and the parser attributes the file", () => {
-  const tmp = path.join(REPO_ROOT, "plugin", "test", "__tmp_bucket_red__.test.mjs");
+  // Scratch MUST live OUTSIDE packages/plugin/experiments — collectTestFiles (suite-cutoff-verdict.mjs)
+  // walks those three roots and counts every .test.mjs it sees. A transient .test.mjs under
+  // plugin/test/ races with suite-cutoff-verdict.test.mjs's concurrent scanHeavyFiles walk (suite
+  // concurrency=16): the walk sees 427 files, and its immediate re-walk (after this finally's rmSync)
+  // sees 426 ⇒ scan.total !== collectTestFiles().length ⇒ RED (427 !== 426, a real regression from
+  // this task's own new test). A REPO_ROOT-level hidden mkdtemp dir stays under the repo
+  // (extractFailureFile still attributes the file) but OUTSIDE the three scanned roots
+  // (collectTestFiles never sees it).
+  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, ".tmp-bucket-red-"));
+  const tmp = path.join(tmpDir, "__tmp_bucket_red__.test.mjs");
   fs.writeFileSync(
     tmp,
     'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("red", () => assert.equal(1, 2, "intentional"));\n'
@@ -93,6 +102,6 @@ test("AC2 take-false — a red test under the reporter flags emits __PERFILE__ .
       "extractFailureFile must attribute the __PERFILE__ line to the specific test file"
     );
   } finally {
-    fs.rmSync(tmp, { force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
