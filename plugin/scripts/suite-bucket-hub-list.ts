@@ -17,10 +17,16 @@
 //   plugin/scripts/runner-grouping*              — the --group / __GROUP__ grouping mechanism (glob).
 //   plugin/scripts/select-tests-for-touches.ts   — the file-level scoped selector.
 //
-// `runner-grouping*` is a GLOB, not a concrete path: the grouping mechanism currently lives INSIDE
-// scripts/test.sh (the --group flag + __GROUP__ lines), so no `plugin/scripts/runner-grouping*.ts`
-// exists yet. Keeping it as a glob makes the list future-proof — the moment the grouping is extracted
-// to a script it becomes a hub without a list edit.
+// `runner-grouping*` is a GLOB (not a concrete path): the grouping mechanism (group_of / select_files /
+// list_groups / ...) was extracted from scripts/test.sh to plugin/scripts/runner-grouping.ts
+// (gap-suite-hub-file-responsibility-strip) — the glob now matches a real file, and the grouping stays
+// a hub (it decides WHICH tests run, so its change still forces the full suite).
+//
+// NON-hubs (deliberately NOT listed, gap-suite-hub-file-responsibility-strip AC4): the accounting
+// family extracted to plugin/scripts/suite-accounting.ts and the overhead-timing family extracted to
+// plugin/scripts/overhead-instrument.sh are PURE TELEMETRY — changing them never flips pass/fail — so a
+// change touching either takes the bucket path (suite-bucket-select.ts), never the full suite. Do NOT
+// add them here: that would re-couple pure telemetry to the full-suite blast radius.
 //
 // Run:
 //   node --experimental-strip-types suite-bucket-hub-list.ts --task <task-id>   # replay a task's Touches
