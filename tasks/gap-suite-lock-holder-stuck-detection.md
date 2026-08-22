@@ -1,7 +1,7 @@
 ---
 id: gap-suite-lock-holder-stuck-detection
 title: suite 锁持有者跨 relaunch 卡死/失联检测（释放锁 + 告警兜底，⛔ 只针对跨 relaunch 无限持有）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -28,12 +28,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：锁持有者跨 relaunch 失联/卡死（超循环阈值）⇒ 释放锁 + 告警（非静默持有）。
-- [ ] AC2：与单次 suite 超时（SUITE_MAX_RUNTIME_MS/SILENCE_MS）不重叠——只补「跨 relaunch 循环」那一半。
+- [x] AC1：锁持有者跨 relaunch 失联/卡死（超循环阈值）⇒ 释放锁 + 告警（非静默持有）。
+- [x] AC2：与单次 suite 超时（SUITE_MAX_RUNTIME_MS/SILENCE_MS）不重叠——只补「跨 relaunch 循环」那一半。
 
 ## Definition of Done
 
-- [ ] 跨-relaunch 锁持有检测 + 告警落地；AC1-2 全勾；land 到 develop。
+- [x] 跨-relaunch 锁持有检测 + 告警落地；AC1-2 全勾；land 到 develop。
 
 ## Touches
 
