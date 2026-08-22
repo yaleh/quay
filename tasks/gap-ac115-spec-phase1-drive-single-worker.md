@@ -1,7 +1,7 @@
 ---
 id: gap-ac115-spec-phase1-drive-single-worker
 title: AC115 SPEC §5 阶段 1——驱动 spawn 单 claude -p worker 跑完整任务（选择→worktree→开发→suite→ff）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
