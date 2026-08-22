@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-relaunch-retry-cap
 title: fan-in-execute 对 suite 失败 relaunch 设重试上限/退避（非 load-sensitive 确定性失败无界循环，单点放大停摆 2h）
-status: todo
+status: ready
 labels:
   - gap
 parent: null

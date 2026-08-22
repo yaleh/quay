@@ -1,7 +1,7 @@
 ---
 id: gap-suite-lock-holder-stuck-detection
 title: suite 锁持有者跨 relaunch 卡死/失联检测（释放锁 + 告警兜底，⛔ 只针对跨 relaunch 无限持有）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
