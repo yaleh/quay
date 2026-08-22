@@ -1,7 +1,7 @@
 ---
 id: gap-ac137-promotion-driver-production-enablement
 title: AC137 驱动的生产启用（在跑 + 载体在长 + 重启存活）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
