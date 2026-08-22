@@ -1,7 +1,7 @@
 ---
 id: gap-suite-hub-file-responsibility-strip
 title: 剥离 full-suite-runner.ts 的 accounting + test.sh 的 overhead 计时/分组逻辑到独立文件——非 harness 职责改动不再强制全量
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -31,14 +31,14 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：accounting 族函数已移出（grep 确认 `resolveCgroupV2Dir` 等仅在 `suite-accounting.ts` 定义），full suite 绿 + 带桶轮次仍写 cpu/psi 字段不变。
-- [ ] AC2：`test.sh` 中 `_oh_*` 计时族移出至 `overhead-instrument.sh`，suite 的 `__OVERHEAD__` 输出不变。
-- [ ] AC3：分组函数移出至 `runner-grouping.ts`，`runner-grouping*` glob 命中该文件（死 glob 落地），分桶/分组选择行为不变。
-- [ ] AC4（可机械取假）：触碰 `suite-accounting.ts` 或 `overhead-instrument.sh` 的变更【不再】触发全量（走桶子集）；触碰 `runner-grouping.ts` 仍触发全量（hub 规则保持）。取假：改一个 accounting 常量 ⇒ 桶路径；改一个 grouping 常量 ⇒ 全量。
+- [x] AC1：accounting 族函数已移出（grep 确认 `resolveCgroupV2Dir` 等仅在 `suite-accounting.ts` 定义），full suite 绿 + 带桶轮次仍写 cpu/psi 字段不变。
+- [x] AC2：`test.sh` 中 `_oh_*` 计时族移出至 `overhead-instrument.sh`，suite 的 `__OVERHEAD__` 输出不变。
+- [x] AC3：分组函数移出至 `runner-grouping.ts`，`runner-grouping*` glob 命中该文件（死 glob 落地），分桶/分组选择行为不变。
+- [x] AC4（可机械取假）：触碰 `suite-accounting.ts` 或 `overhead-instrument.sh` 的变更【不再】触发全量（走桶子集）；触碰 `runner-grouping.ts` 仍触发全量（hub 规则保持）。取假：改一个 accounting 常量 ⇒ 桶路径；改一个 grouping 常量 ⇒ 全量。
 
 ## Definition of Done
 
-- [ ] 全量 suite 绿（`scripts/test.sh`）；被移函数无孤儿引用；hub 清单与实测触发行为一致；相关测试同步通过；AC1-4 全勾；land 到 develop。
+- [x] 全量 suite 绿（`scripts/test.sh`）；被移函数无孤儿引用；hub 清单与实测触发行为一致；相关测试同步通过；AC1-4 全勾；land 到 develop。
 
 ## Touches
 
