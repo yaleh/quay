@@ -1,7 +1,7 @@
 ---
 id: gap-ac128-hub-split-harness-concerns
 title: AC128 hub 单体按关切拆文件（红解析/并发-lanes/闸门-static/树态/状态写，爆炸半径收窄）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -30,13 +30,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，grep 函数名）：五组函数名原两单体命中 0、各自新文件命中（红/并发/闸门/树态/状态写各归其位）。
-- [ ] AC2：全量绿 + 分桶选择不变。
-- [ ] AC3：HUB_FILES 拆分后逐文件核，新 hub 文件触发全量（hub 规则保持）。
+- [x] AC1（能取假，grep 函数名）：五组函数名原两单体命中 0、各自新文件命中（红/并发/闸门/树态/状态写各归其位）。
+- [x] AC2：全量绿 + 分桶选择不变。
+- [x] AC3：HUB_FILES 拆分后逐文件核，新 hub 文件触发全量（hub 规则保持）。
 
 ## Definition of Done
 
-- [ ] 五关切拆分完成 + 函数名 grep 归位 + 全量绿 + hub 清单核；AC1-3 全勾；land 到 develop。
+- [x] 五关切拆分完成 + 函数名 grep 归位 + 全量绿 + hub 清单核；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
