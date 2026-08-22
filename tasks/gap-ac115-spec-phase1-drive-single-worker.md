@@ -1,7 +1,7 @@
 ---
 id: gap-ac115-spec-phase1-drive-single-worker
 title: AC115 SPEC §5 阶段 1——驱动 spawn 单 claude -p worker 跑完整任务（选择→worktree→开发→suite→ff）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -29,13 +29,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：在飞 = 驱动子进程数（直接量，⛔ 非代理量；不一致以驱动为准）。
-- [ ] AC2：worker 退出码 + 结构化 outcome 落盘字段齐全（SPEC §4③）。
-- [ ] AC3（能取假）：杀 worker ⇒ 驱动察觉并记录，⛔ 不静默丢任务。
+- [x] AC1：在飞 = 驱动子进程数（直接量，⛔ 非代理量；不一致以驱动为准）。
+- [x] AC2：worker 退出码 + 结构化 outcome 落盘字段齐全（SPEC §4③）。
+- [x] AC3（能取假）：杀 worker ⇒ 驱动察觉并记录，⛔ 不静默丢任务。
 
 ## Definition of Done
 
-- [ ] 单 worker 驱动落地 + outcome 字段齐全 + 杀 worker 取假通过；AC1-3 全勾；land 到 develop。
+- [x] 单 worker 驱动落地 + outcome 字段齐全 + 杀 worker 取假通过；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
