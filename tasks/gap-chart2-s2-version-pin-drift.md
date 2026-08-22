@@ -1,7 +1,7 @@
 ---
 id: gap-chart2-s2-version-pin-drift
 title: chart2-s2 测试 pin 版本漂移（develop 前移致 cov 2/3 + version-consistent pin 过期，环境红阻塞 fan-in）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -34,7 +34,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 版本 pin 更新 + scoped 绿；AC1-2 全勾；land 到 develop。
+- [x] 版本 pin 更新 + scoped 绿；AC1-2 全勾；land 到 develop。
 
 ## Touches
 
