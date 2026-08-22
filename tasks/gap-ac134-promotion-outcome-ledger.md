@@ -30,12 +30,12 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1：每次【判定】【晋升】【修复】各写一条结构化记录到运行时载体（gitignored），字段至少含：任务 id · 闸判定结果（含 missing 清单）· 动作（promote/fix/skip）· 结果 · 时刻。
-- [ ] AC2（能取假，读生产载体）：判据是载体中【实现 land 之后】的真实记录条数 ≥ N，⛔ fixture/注入数据不算；若把注入 seam 关掉后该 AC 仍能通过，它才是测量。
+- [x] AC1：每次【判定】【晋升】【修复】各写一条结构化记录到运行时载体（gitignored），字段至少含：任务 id · 闸判定结果（含 missing 清单）· 动作（promote/fix/skip）· 结果 · 时刻。
+- [ ] AC2（能取假，读生产载体）：判据是载体中【实现 land 之后】的真实记录条数 ≥ N，⛔ fixture/注入数据不算；若把注入 seam 关掉后该 AC 仍能通过，它才是测量。（待外部）
 
 ## Definition of Done
 
-- [ ] outcome 台账落地 + 生产载体真实记录条数达标；AC1-2 全勾；land 到 develop。
+- [ ] outcome 台账落地 + 生产载体真实记录条数达标；AC1-2 全勾；land 到 develop。（待外部）
 
 ## Retires
 
