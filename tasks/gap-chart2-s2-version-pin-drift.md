@@ -1,7 +1,7 @@
 ---
 id: gap-chart2-s2-version-pin-drift
 title: chart2-s2 测试 pin 版本漂移（develop 前移致 cov 2/3 + version-consistent pin 过期，环境红阻塞 fan-in）
-status: todo
+status: ready
 labels:
   - gap
 parent: null

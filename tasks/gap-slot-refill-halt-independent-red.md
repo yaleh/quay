@@ -1,7 +1,7 @@
 ---
 id: gap-slot-refill-halt-independent-red
 title: slot-refill + .halt 独立红（自含 fixture 测 .halt 阻断逻辑，fixture 假设漂移 vs 机件变更——阻塞 fan-in）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
