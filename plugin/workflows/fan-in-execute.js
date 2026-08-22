@@ -273,7 +273,12 @@ const family = scanFamily(wt);
 let logText = ""; try { logText = fs.readFileSync(logFile, "utf8"); } catch (e) { logText = ""; }
 // gap-fan-in-suite-log-cross-relaunch-reuse: 按当前轮起始标记切片——只读最后一个 __FANIN_SUITE_START__
 // 之后的内容（当前轮），不整份线性 grep 旧轮；无标记（full-suite-runner/测试手写日志）⇒ 整份（向后兼容）。
-const _roundMk = logText.lastIndexOf("__FANIN_SUITE_START__");
+// gap-fan-in-fix-scope-gate-slice-line-anchor: 行首锚定（与 pre-verified-round-record.lastSuiteStartOffset /
+// gap-wiring-B 断言一致）——裸 lastIndexOf 会命中测试输出里【行内】提及标记的文本（gap-wiring-B 测试名含
+// __FANIN_SUITE_START__ 字样），把其后的真实 __PERFILE__ passed=false 行切掉 ⇒ 假 checker-misreport。
+const _roundMkRe = /^__FANIN_SUITE_START__[^\\n]*$/gm;
+let _roundMk = -1; let _rm;
+while ((_rm = _roundMkRe.exec(logText)) !== null) _roundMk = _rm.index;
 if (_roundMk !== -1) logText = logText.slice(_roundMk);
 let prior = {}; try { if (releaseLedger) prior = JSON.parse(fs.readFileSync(releaseLedger, "utf8")); } catch (e) { prior = {}; }
 const inScope = []; const outOfScope = []; const loadSensitiveFiles = []; let livelock = false; const seen = new Set();

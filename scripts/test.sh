@@ -1290,66 +1290,19 @@ full_suite_lock_release() {
 }
 
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
-
-# group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
-# Valid groups: product|engine|governance (the default-run body) + serial (the load-sensitive
-# concurrency-1 phase — nested-suite-spawn + real-wall-clock-wait + the real-install
-# install/quay-init family, gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests +
-# gap-install-family-tests-rotate-flakes-under-full-suite) + lowconc (the hermetic-but-load-sensitive
-# concurrency-3 phase, gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). A MISSING
-# declaration defaults to
-# engine (AC7). An UNRECOGNIZED group name is FAIL-CLOSED, never silently degraded to engine:
-# the r10 regression (four commits b209f4fd→174badc0→e92c54d8→c7176a37 each dropping one group
-# from this case, so serial/lowconc silently folded into the concurrency-N body and the isolation
-# guarantee was cancelled WITHOUT going red) must be a hard failure, not a silent pass.
-group_of() {
-  local f="$1" g
-  g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
-  case "${g:-}" in
-    product|engine|governance|serial|lowconc) echo "$g" ;;
-    "")
-      # No declaration at all — intentional default to engine (AC7). The undeclared → engine path
-      # is a real rule, distinct from an unknown-group typo.
-      echo "engine" ;;
-    *)
-      echo "scripts/test.sh: group_of: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|governance|serial|lowconc); refusing to silently degrade it to engine" >&2
-      exit 3
-      ;;
-  esac
-}
-
-# check_group_declarations — pre-flight fail-closed guard (gap-verify-round-9-failures-from-recent-
-# changes-fix-batch, AC0b): every test file's declared `// @test-group` must be one of the five
-# recognized groups. A file declaring an UNKNOWN group is a dropped/mis-typed group — the r10
-# regression (b209f4fd→174badc0→e92c54d8→c7176a37 each dropping one group from group_of's case)
-# silently folded serial/lowconc into the concurrency-N engine body and cancelled the isolation
-# guarantee WITHOUT going red. That must be a HARD failure, not a silent pass. group_of's own
-# `*)` branch is defense-in-depth (it runs inside a command substitution, so its exit cannot abort
-# the parent); this check runs directly in the dispatch path and exits the script.
-check_group_declarations() {
-  local f g
-  while IFS= read -r f; do
-    g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
-    case "${g:-}" in
-      ""|product|engine|governance|serial|lowconc) ;;
-      *)
-        echo "scripts/test.sh: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|governance|serial|lowconc); refusing to silently degrade it to engine" >&2
-        exit 3
-        ;;
-    esac
-  done < <(build_deduped_files)
-  # gap-test-group-downgrade-no-guard (AC1): a LEGAL-but-degrading re-tag
-  # (product/engine → governance/serial/lowconc) silently removes a test from the default set —
-  # check_group_declarations now ALSO runs the downgrade detector
-  # (plugin/scripts/test-group-downgrade-check.ts), which requires a commit-message reason marker
-  # ("@test-group-downgrade") for any default-set escape after the enforcement baseline.
-  # stdout is redirected to stderr: this function also runs in the metadata modes
-  # (--list-groups/--list-files) whose stdout IS the data (file list / group counts) — a checker
-  # line leaking into it would be miscounted as a test file (test-coverage-check AC5 423 vs 421).
-  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-group-downgrade-check.ts" --root "${repo_root}" >&2 || exit $?
-}
+# group_of / check_group_declarations / effective_groups / in_group / is_default_set / select_files /
+# list_groups extracted to plugin/scripts/runner-grouping.ts (gap-suite-hub-file-responsibility-strip):
+# the grouping mechanism decides WHICH tests run, so it is a HUB file (a change still forces the full
+# suite — the `runner-grouping*` glob in suite-bucket-hub-list.ts HUB_FILES matches it). Sourced here so
+# the dispatch path below keeps calling them by name; behavior is byte-identical.
+source "${repo_root}/plugin/scripts/runner-grouping.ts"
 
 # build_deduped_files — echo the union glob, deduped by realpath (AC3). One file per line.
+# DELIBERATELY KEPT HERE (not moved to runner-grouping.ts): its canonical test-glob declaration line
+# is the ADR-004 SINGLE-SOURCE that FOUR checkers parse from scripts/test.sh
+# (test-framework-policy-check.ts / test-coverage-check.ts / test-impl-census-check.ts /
+# test-group-downgrade-check.ts) — moving it would break their glob derivation (0 files). The moved
+# functions call it by NAME (bash resolves at call time, so this later definition is fine).
 build_deduped_files() {
   shopt -s nullglob
   local glob=(packages/*/test/*.test.mjs plugin/test/*.test.mjs experiments/quay-perpetual-stream/test/*.test.mjs)
@@ -1363,56 +1316,6 @@ build_deduped_files() {
       printf '%s\n' "$rp"
     fi
   done
-}
-
-# effective_groups — echo the groups a given run should include (default product,engine, AC4).
-effective_groups() {
-  echo "product,engine"
-}
-
-# in_group <group> <csv> — return 0 iff group is in the comma-separated list.
-in_group() {
-  local g="$1" csv="$2"
-  [[ ",${csv}," == *",${g},"* ]]
-}
-
-# is_default_set <csv> — return 0 iff csv is exactly the default set {product,engine} (AC6).
-is_default_set() {
-  [ "${1:-}" = "product,engine" ]
-}
-
-# select_files <groups-csv> — echo the files to run for the given groups (respecting the
-# default-set self-skip passthrough so governance reports `skipped` rather than absent, AC4/AC6).
-select_files() {
-  local groups="$1" f g
-  while IFS= read -r f; do
-    g="$(group_of "$f")"
-    if in_group "$g" "$groups"; then
-      printf '%s\n' "$f"
-    elif [ "$g" = "governance" ] && is_default_set "$groups"; then
-      # governance self-skips via its in-file block; keep it in the run so it is VISIBLE.
-      printf '%s\n' "$f"
-    fi
-  done < <(build_deduped_files)
-}
-
-# list_groups — per-group counts over the full deduped glob (AC10). `serial` and `lowconc` are real
-# groups (the load-sensitive families routed to their own phases), so the default-set partition
-# product+engine+governance no longer equals total — serial and lowconc are the 4th and 5th parts.
-list_groups() {
-  declare -A counts=([product]=0 [engine]=0 [governance]=0 [serial]=0 [lowconc]=0)
-  local f g
-  while IFS= read -r f; do
-    g="$(group_of "$f")"
-    counts[$g]=$(( ${counts[$g]:-0} + 1 ))
-  done < <(build_deduped_files)
-  printf 'product:    %d\n' "${counts[product]:-0}"
-  printf 'engine:     %d\n' "${counts[engine]:-0}"
-  printf 'governance: %d\n' "${counts[governance]:-0}"
-  printf 'serial:     %d\n' "${counts[serial]:-0}"
-  printf 'lowconc:    %d\n' "${counts[lowconc]:-0}"
-  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} + ${counts[serial]:-0} + ${counts[lowconc]:-0} ))
-  printf 'total:      %d (deduped by realpath)\n' "$total"
 }
 
 # build_dist_once — build dist/quay.js ONCE per invocation, before any test runs
@@ -1505,71 +1408,10 @@ mark_nested() {
 # path). Extra flags (from the flags-only form) are PREPENDED to the file list; node --test is
 # last-flag-wins, so a user --test-concurrency=N still overrides the derived default.
 # ── Fixed-overhead instrumentation (gap-suite-fixed-overhead-decomposition, AC1/AC2) ───────────────
-# The ~152s fixed overhead (build_dist_once / run_static_checks / resource-gate / inter-phase gaps)
-# was never decomposed. These segments are DETERMINISTIC SERIAL — no concurrency jitter — so direct
-# per-segment timestamps give a decidable number (unlike wall-clock diffs, which sit inside the
-# 17–63s noise band per gap-suite-cost-model-is-wrong-optimizations-buy-nothing). We record epoch-ms
-# at each serial boundary and emit a per-segment breakdown to stderr on the FULL-SUITE default path.
-# Only the default (product,engine) full-suite path emits it — scoped --group runs skip (their fixed
-# overhead is not the object of measurement). Output lines: `__OVERHEAD__ <segment>_ms=<N>`.
-_oh_mark() { date +%s%N | cut -c1-13; }
-_oh_emit() { # _oh_emit <label> <start_ms> <end_ms>  → __OVERHEAD__ label_ms=N
-  # uutils date doesn't truncate %3N (returns epoch+full-9-digit-ns), so we slice epoch-ms
-  # from +%s%N. Guard: an empty/absent mark emits 0 rather than garbage (a mark capture that
-  # raced a subshell must not corrupt the whole breakdown).
-  local label="$1" s="$2" e="$3"
-  if [ -z "$s" ] || [ -z "$e" ] || ! [[ "$s" =~ ^[0-9]+$ ]] || ! [[ "$e" =~ ^[0-9]+$ ]]; then
-    echo "__OVERHEAD__ ${label}_ms=ERR-UNSET" >&2
-    return
-  fi
-  echo "__OVERHEAD__ ${label}_ms=$((e - s))" >&2
-}
-
-# ── Partial-overhead fallback (gap-red-round-loses-overhead-phase-decomposition AC2/AC3) ──────────
-# The full 9-segment emit below runs ONLY after the main phase completes — a kill-on-red truncation
-# (runner red-grace / max-runtime SIGTERM to the whole process tree) therefore historically left a
-# red round's archived log with ZERO __OVERHEAD__ lines even though serial/lowconc HAD completed.
-# Two fixes make the red round measurable: (1) the runner tees stderr to the archive too (the
-# __OVERHEAD__ lines ARE captured — locked by a regression test in full-suite-runner.test.mjs), and
-# (2) THIS fallback: a SIGTERM/EXIT trap emits the COMPLETED segments (partial=1) on the truncation
-# path, so serial/lowconc reach the log before the kill completes; un-run phases stay absent (缺省).
-_oh_done=0  # 1 once the full emit OR the partial fallback ran — suppresses SIGTERM→EXIT double-emit
-
-_oh_emit_p() { # _oh_emit_p <label> <start_ms> <end_ms> → __OVERHEAD__ label_ms=N partial=1 (skip if unset)
-  local label="$1" s="$2" e="$3"
-  # An un-run segment (e.g. main truncated) has an empty bound → 缺省: ABSENT, not ERR-UNSET, so a
-  # truncated round is distinguishable from a genuinely broken one.
-  if [ -z "$s" ] || [ -z "$e" ] || ! [[ "$s" =~ ^[0-9]+$ ]] || ! [[ "$e" =~ ^[0-9]+$ ]]; then
-    return 0
-  fi
-  echo "__OVERHEAD__ ${label}_ms=$((e - s)) partial=1" >&2
-}
-
-_oh_emit_partial() {
-  # Truncation-path fallback: emit the COMPLETED segments with partial=1. No-op on a scoped run
-  # (oh_full=0) or once the full emit already ran (_oh_done=1). Missing bounds are skipped (缺省).
-  [ "${oh_full:-0}" -eq 1 ] || return 0
-  [ "${_oh_done:-0}" -eq 0 ] || return 0
-  _oh_done=1
-  _oh_emit_p "lock_overhead"             "$oh_t0" "$oh_t1"
-  _oh_emit_p "resource_gate"             "$oh_t1" "$oh_t2"
-  _oh_emit_p "build_dist"                "$oh_t2" "$oh_t3"
-  _oh_emit_p "run_static_checks"         "$oh_t3" "$oh_t4"
-  _oh_emit_p "gap_ms_pre_to_serial"      "$oh_t4" "$oh_t5"
-  _oh_emit_p "serial_phase"              "$oh_t5" "$oh_t5b"
-  _oh_emit_p "gap_ms_serial_to_lowconc"  "$oh_t5b" "$oh_t6"
-  _oh_emit_p "lowconc_phase"             "$oh_t6" "$oh_t6b"
-  # main_phase is emitted ONLY by the full path (needs oh_t7 set) — a truncated main stays absent.
-}
-
-_oh_install_partial_trap() {
-  # SIGTERM → emit + re-raise 128+15 (the shell's signal-convention exit code, which the runner
-  # already classifies as a signal-kill/abort — never a false green); EXIT is the backstop for a
-  # set -e / any other non-SIGTERM truncation. _oh_done guards both paths so the emit runs exactly
-  # once whether the exit is SIGTERM→EXIT or a plain EXIT.
-  trap '_oh_emit_partial; exit 143' SIGTERM
-  trap '_oh_emit_partial' EXIT
-}
+# The _oh_* timing family (mark / emit / partial-fallback) was extracted to plugin/scripts/overhead-instrument.sh
+# (gap-suite-hub-file-responsibility-strip): overhead timing is PURE TELEMETRY — changing it never flips
+# pass/fail — so it is a NON-hub file. Sourced here; the `__OVERHEAD__` output stays byte-identical.
+source "${repo_root}/plugin/scripts/overhead-instrument.sh"
 
 run_selected() {
   local groups="$1"; shift
