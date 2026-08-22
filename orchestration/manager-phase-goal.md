@@ -424,11 +424,28 @@ SPEC 是目前唯一一份把"检查机制净减少"写成必答项的文档，�
 AC111（无代码调用者机件三选一判定）的扫描时点在 AC115-117 之前，**结构上扫不到 inner-tick 专属机件**——
 这批机件在扫描当时**仍有调用者**（inner 自己的 tick-core 读数/推理逻辑），只会在 AC115-117 把 inner 从
 "cron 唤醒的 LLM 会话自己推理" 换成 "机械驱动进程" 之后才变成无调用者。⇒ **AC111 的一次性扫描覆盖不到这个滞后 population**。
-**判据（不新造机制，复用 AC111 同一扫描谓词，仅挪后触发时点）**：AC115 ∧ AC116 ∧ AC117 全部 done 后，
+**判据（不新造机制，复用 AC111 同一扫描谓词，仅挪后触发时点）**：**AC115 ∧ AC116 ∧ AC117 ∧ AC129** 全部 done 后，
 用 AC111 用过的同一扫描谓词对 `orchestration/*-tick-core.md`（inner 专属部分）+ inner 相关机件脚本再扫一轮，
 逐条三选一判定（wired/retired/manual-by-design），与 AC111 同形。
 **⊢ 与 AC110/AC111 纪律同源**：净增退役配额 + "不得因为很久没报红就退役、必须说出防的缺陷现在由什么防"原样适用。
-**⊢ 触发条件（不设时间阈值，设状态阈值）**：AC115/116/117 三者 status 全部 done 时触发，不早于此。
+**⊢ 触发条件（不设时间阈值，设状态阈值）**：**AC115/116/117/AC129 四者** status 全部 done 时触发，不早于此。
+
+**⊕ 2026-08-22 15:4xZ 修正一（人核实同意）——AC129 必须进触发条件**：原写 AC115/116/117 三者。
+**但 inner-tick 专属机件真正失去调用者的时点是 AC129 落地**——AC117（MCP 控制面）只换控制通道，
+**决策层（"谁决定现在跑哪个任务"）要到 AC129 的选择环接上才从 inner 的 LLM tick 会话移走**。
+⇒ 三者 done 而 AC129 未 done 时，inner-tick 的读数/推理逻辑**仍有真实调用者**，此时扫描会把它们判成 wired 而漏掉。
+
+**⊕ 2026-08-22 15:4xZ 修正二（人核实同意）——web 观测载体切换纳入复扫范围**：
+**真相源在驱动模式下发生位移，而 web 读的仍是旧载体**——
+`packages/quay/src/observation.ts` 的 `readLive()` 读 `.workflow-events/*.jsonl`（fast-mode 遥测），
+`InFlightTask` 的 `runId`/`liveness` 字段建立在**当前 inner+subagent 模型**上；
+驱动模式的真相源是 `.quay/worker-outcome.jsonl`（AC115 已落地）+ **驱动自己 fork 的子进程数**（AC115 的直接量）。
+**⇒ 复扫时必须一并核**：(a) `readLive()` 是否已切读 worker-outcome 载体；
+(b) `/live` 与 dashboard `liveCard` 展示的在飞语义是否与驱动的直接量一致；
+(c) **今日立案的两条 web 任务**（`gap-webui-live-implcomplete-state-render` /
+`gap-webui-cross-task-blocking-visibility`）**均基于旧模型撰写**，其字段假设（`implCompletedAtMs` 等）
+在驱动模式下是否仍成立——⛔ 不得让 web 显示一个已不再是真相源的量（这正是硬规则 4b 的形态：
+页面看起来正常、数字也在动，但它读的载体已经不是系统的真相）。
 
 ### AC129（驱动常驻 + 自主选任务 —— 「持续运行的机械驱动进程」的终态闭合，2026-08-22 补）
 
