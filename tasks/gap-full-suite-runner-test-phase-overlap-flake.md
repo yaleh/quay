@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-runner-test-phase-overlap-flake
 title: full-suite-runner.test.mjs AC2 PHASE_OVERLAP 墙钟断言未标 @load-sensitive（16 并发确定性 flake，阻塞 fan-in）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -29,12 +29,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：PHASE_OVERLAP 墙钟断言不再在 16 并发下确定性 flake（隔离重跑证据 + 标注或断言确定性）。
-- [ ] AC2：hub-strip fan-in 不再因此测试无限 relaunch。
+- [x] AC1：PHASE_OVERLAP 墙钟断言不再在 16 并发下确定性 flake（隔离重跑证据 + 标注或断言确定性）。
+- [x] AC2：hub-strip fan-in 不再因此测试无限 relaunch。
 
 ## Definition of Done
 
-- [ ] 测试 flake 修复（@load-sensitive 或断言确定性）+ 并发重跑绿；AC1-2 全勾；land 到 develop。
+- [x] 测试 flake 修复（@load-sensitive 或断言确定性）+ 并发重跑绿；AC1-2 全勾；land 到 develop。
 
 ## Touches
 
