@@ -202,19 +202,19 @@ test("CLI: --help → usage, exit 2", () => {
   assert.equal(r.status, 2);
 });
 
-test("CLI: against THIS repo (default root) → cov 2/3 (manifest+foreign green, versions drifted), exit 0", () => {
+test("CLI: against THIS repo (default root) → cov 3/3 (versions consistent, manifest + foreign all green), exit 0", () => {
   const r = spawnCli([]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /S2 Delivery-completeness cov = 0\.6666666666666666 \(2\/3/);
-  assert.match(r.stdout, /version-consistent=false/);
+  assert.match(r.stdout, /S2 Delivery-completeness cov = 1 \(3\/3/);
+  assert.match(r.stdout, /version-consistent=true/);
   assert.match(r.stdout, /manifest-published=true/);
   assert.match(r.stdout, /foreign-install-green=true/);
 });
 
-test("CLI: explicit repoRoot arg → cov 2/3 against the real repo", () => {
+test("CLI: explicit repoRoot arg → cov 3/3 against the real repo", () => {
   const r = spawnCli([REPO_ROOT]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /S2 Delivery-completeness cov = 0\.6666666666666666 \(2\/3/);
+  assert.match(r.stdout, /S2 Delivery-completeness cov = 1 \(3\/3/);
 });
 
 // AC2 negative control (fail-closed): a temp repo whose evidence file has BOTH flags false must
