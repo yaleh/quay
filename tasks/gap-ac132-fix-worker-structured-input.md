@@ -1,7 +1,7 @@
 ---
 id: gap-ac132-fix-worker-structured-input
 title: AC132 不合格者 → 短命 fix worker（输入须为闸的结构化 missing）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -33,12 +33,12 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1：判定不合格的任务，驱动 spawn 短命 `claude -p` fix worker，输入必须是任务 id + 闸给出的结构化 missing 清单（沿用 A24 可修三类/不可修五类），⛔ 不得是散文指令。
-- [ ] AC2（能取假）：构造 DoD<40 字符的 todo ⇒ fix worker 收到的 prompt 中必须含该结构化缺项标识；若 prompt 只有任务 id 而无缺项清单 ⇒ 本条为假。
+- [x] AC1：判定不合格的任务，驱动 spawn 短命 `claude -p` fix worker，输入必须是任务 id + 闸给出的结构化 missing 清单（沿用 A24 可修三类/不可修五类），⛔ 不得是散文指令。
+- [x] AC2（能取假）：构造 DoD<40 字符的 todo ⇒ fix worker 收到的 prompt 中必须含该结构化缺项标识；若 prompt 只有任务 id 而无缺项清单 ⇒ 本条为假。
 
 ## Definition of Done
 
-- [ ] fix worker 结构化输入落地（沿用 A24 分类）；AC1-2 全勾（含缺项标识取假）；land 到 develop。
+- [x] fix worker 结构化输入落地（沿用 A24 分类）；AC1-2 全勾（含缺项标识取假）；land 到 develop。
 
 ## Retires
 
