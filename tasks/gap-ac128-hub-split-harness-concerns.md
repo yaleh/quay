@@ -59,6 +59,7 @@ net-add: 一次性重构成本非机制净增（与 AC112 计数基线显式记�
 - plugin/scripts/capability-catalog.sh（新文件注册 5×5 表）
 - plugin/scripts/axis-generator.ts（run_static_checks 抽取源 repoint to runner-static-gate.ts——漏迁移消费者，硬规则 5b）
 - plugin/scripts/precommit-guard.ts（staticObjectPatterns 聚合 @static-object：test.sh + runner-static-gate.ts——漏迁移消费者，硬规则 5b）
+- plugin/scripts/judgment-consumer-check.ts（judgment-consumer-check 判据 registry 的 obligation 台账 verify 从 scripts/test.sh 迁到 runner-static-gate.ts——漏迁移消费者，硬规则 5b）
 - docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照再生成）
 - plugin/test/checker-mutation-check.test.mjs（fixture 迁移到 runner-static-gate.ts）
 - plugin/test/dispatch-worktree-setup.test.mjs（wiring 断言迁移）
