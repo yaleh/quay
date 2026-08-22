@@ -1411,13 +1411,24 @@ function renderSectionBlock(s: JournalSection, title: string): string {
 }
 
 function renderLivePage(live: LiveResult): string {
+  // gap-webui-cross-task-blocking-visibility: render the cross-task blocking relation (Touches
+  // intersection + depends_on chain) computed by observation.computeInFlightBlocking. A task-id list
+  // renders as comma-joined links; an empty list renders the 「无」 placeholder so "no relation" is
+  // visually DISTINCT from "no data" (hard rule: a missing value must not look like a pass/absence).
+  const linkList = (ids: string[]): string =>
+    ids.length > 0
+      ? ids.map((id) => html`<a href="/task/${encodeURIComponent(id)}">${escapeHtml(id)}</a>`).join(", ")
+      : html`<span class="meta">无</span>`;
+
   const rows = live.inFlight.length > 0 ? html`<table>
-    <tr><th>task id</th><th>run id</th><th>started</th><th>elapsed</th></tr>
+    <tr><th>task id</th><th>run id</th><th>started</th><th>elapsed</th><th>阻塞 (blocks)</th><th>被阻塞 (blockedBy)</th></tr>
     ${live.inFlight.map((t) => html`<tr>
       <td><a href="/task/${encodeURIComponent(t.taskId)}">${escapeHtml(t.taskId)}</a></td>
       <td>${escapeHtml(t.runId)}</td>
       <td>${escapeHtml(relativeTime(t.startedAtMs))}</td>
       <td>${escapeHtml(t.minutes.toFixed(1))} 分钟</td>
+      <td>${linkList(t.blocks)}</td>
+      <td>${linkList(t.blockedBy)}</td>
     </tr>`).join("\n")}
   </table>` : "";
 
@@ -1450,12 +1461,31 @@ function renderLivePage(live: LiveResult): string {
         : ""}</p>`
     : "";
 
+  // gap-webui-cross-task-blocking-visibility (AC2): the cross-task blocking relation as a literal
+  // 「任务 X 正在阻塞 [Y, Z]」 sentence per blocking in-flight task (plus the 「被 … 阻塞」 mirror), so
+  // `curl /live | grep 阻塞` is the unambiguous contract measure — the relation no longer lives only
+  // in tick-log prose. A task with neither relation contributes no line; the whole section falls back
+  // to 「无跨任务阻塞关系」 when no in-flight task blocks anything.
+  const blockingLines = live.inFlight.flatMap((t) => {
+    const blocks = t.blocks.length > 0
+      ? [html`<li>任务 <a href="/task/${encodeURIComponent(t.taskId)}">${escapeHtml(t.taskId)}</a> 正在阻塞 [${t.blocks.map((id) => html`<a href="/task/${encodeURIComponent(id)}">${escapeHtml(id)}</a>`).join(", ")}]</li>`]
+      : [];
+    const blockedBy = t.blockedBy.length > 0
+      ? [html`<li>任务 <a href="/task/${encodeURIComponent(t.taskId)}">${escapeHtml(t.taskId)}</a> 被 [${t.blockedBy.map((id) => html`<a href="/task/${encodeURIComponent(id)}">${escapeHtml(id)}</a>`).join(", ")}] 阻塞</li>`]
+      : [];
+    return [...blocks, ...blockedBy];
+  });
+  const blockingSection = blockingLines.length > 0
+    ? html`<h2>跨任务阻塞关系</h2><ul>${blockingLines.join("\n")}</ul>`
+    : html`<p class="meta">无跨任务阻塞关系。</p>`;
+
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay live — what the loop is doing right now">${modernistStyles()}${pageStyles()}<title>Live — loop activity</title></head>
     <body>${renderMobileChrome("live", "live")}${renderSiteNav("live")}<main>
       <h1>Live — 循环此刻在做什么</h1>
       ${statusNote}
       ${summary}
+      ${blockingSection}
       ${live.status === "ok" && live.inFlight.length === 0 ? html`<p class="meta">当前无在飞任务。</p>` : rows}
     </main></body></html>`;
 }
