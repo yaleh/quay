@@ -44,7 +44,7 @@ depends_on: []
 
 ## Touches
 
-- plugin/scripts/worker-driver.ts (new)（驱动脚本，落点 inner 定）
-- .quay/worker-outcome.jsonl (new)（outcome 记录）
+- plugin/scripts/worker-driver.ts (new)
+- .quay/worker-outcome.jsonl (new)
 - plugin/scripts/slot-refill.ts（--in-flight 退役面）
 - tasks/gap-ac115-spec-phase1-drive-single-worker.md（自身）

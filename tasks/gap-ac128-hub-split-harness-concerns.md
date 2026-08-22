@@ -46,10 +46,10 @@ net-add: 一次性重构成本非机制净增（与 AC112 计数基线显式记�
 
 - scripts/test.sh
 - plugin/scripts/full-suite-runner.ts
-- plugin/scripts/runner-red-parse.ts (new)（红解析，落点 inner 定）
-- plugin/scripts/runner-concurrency.ts (new)（并发-lanes）
-- plugin/scripts/runner-static-gate.ts (new)（闸门-static）
-- plugin/scripts/runner-tree-state.ts (new)（树态）
-- plugin/scripts/runner-state-write.ts (new)（状态写）
+- plugin/scripts/runner-red-parse.ts (new)
+- plugin/scripts/runner-concurrency.ts (new)
+- plugin/scripts/runner-static-gate.ts (new)
+- plugin/scripts/runner-tree-state.ts (new)
+- plugin/scripts/runner-state-write.ts (new)
 - plugin/scripts/suite-bucket-hub-list.ts（HUB_FILES 核）
 - tasks/gap-ac128-hub-split-harness-concerns.md（自身）
