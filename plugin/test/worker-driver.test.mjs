@@ -25,6 +25,13 @@ import {
   appendOutcomeToFile,
   splitArgs,
   defaultWorkerArgv,
+  defaultSelectorArgv,
+  defaultReadyPoolArgv,
+  shuffle,
+  parseSelectorOutput,
+  runSelectorWorker,
+  readyPoolCheck,
+  resourceGateCheck,
   resolveRun,
   resolveConcurrency,
   parseTimeoutMs,
@@ -147,7 +154,7 @@ test("resolveRun / splitArgs / defaultWorkerArgv / signalExitCode / parseTimeout
 
   // phase-2 多任务 resolveRun（tasks 数组）。
   const noTask = resolveRun({ tasks: [], reason: undefined, workerCmd: undefined, root: "/r", runId: undefined, nowMs: 1 });
-  assert.ok(noTask.error, "no --task ⇒ error (selector is a later phase)");
+  assert.ok(noTask.error, "explicit-mode resolveRun with no tasks ⇒ error (resident selection loop is a separate path)");
   const ok = resolveRun({ tasks: [" gap-x ", " gap-y "], reason: "  why  ", workerCmd: "node -e process.exit(0)", root: "/r", runId: "run", nowMs: 1 });
   assert.deepEqual(ok.taskIds, ["gap-x", "gap-y"]);
   assert.equal(ok.selectorReason, "why");
@@ -582,4 +589,175 @@ test("AC3 (HTTP) — control-plane call without identity ⇒ rejected; with call
   const state = readControlState(root).state;
   assert.equal(state.halted, true);
   assert.equal(state.halted_by, "manager");
+});
+
+// ── 阶段 4（AC129）常驻驱动 + 自主选任务：选择环 / selector worker / 判停 ─────────────────────────
+// The driver shells out to THREE injectable commands in resident mode (no --task):
+//   --ready-pool-cmd (must emit ready-pool-check analyzeTasks JSON), --selector-cmd (must emit
+//   `<task-id> <one-line reason>`), --resource-gate-cmd (exit 0=GO / non-0=WAIT). All three are
+//   split by splitArgs (whitespace) — so the `node -e` script bodies are SPACE-FREE, and a runtime
+//   space in the selector output is emitted via the `\x20` string escape. The counterNodeE helper
+//   builds a space-free counter command whose output depends on how many times it has run (n).
+
+function counterNodeE(counterFile, logExpr) {
+  const f = JSON.stringify(counterFile);
+  return `node -e n=0;try{n=Number(require('fs').readFileSync(${f},'utf8'))}catch{};require('fs').writeFileSync(${f},String(n+1));console.log(${logExpr})`;
+}
+
+test("AC129 pure — parseSelectorOutput: valid pick, invalid-pick fallback, empty fallback", () => {
+  const candidates = ["gap-a", "gap-b"];
+  const ok = parseSelectorOutput("gap-a because it blocks the suite\n", candidates, 0);
+  assert.equal(ok.task, "gap-a");
+  assert.equal(ok.reason, "because it blocks the suite");
+
+  // invalid pick (task not in candidates) ⇒ fail-closed fallback to the first candidate.
+  const bad = parseSelectorOutput("gap-zzz not-a-candidate", candidates, 0);
+  assert.equal(bad.task, "gap-a");
+  assert.match(bad.reason, /fallback to first shuffled candidate/);
+
+  // empty output + non-zero exit ⇒ fallback too.
+  const empty = parseSelectorOutput("", candidates, 1);
+  assert.equal(empty.task, "gap-a");
+  assert.match(empty.reason, /exit 1/);
+
+  // no candidates ⇒ null.
+  assert.equal(parseSelectorOutput("gap-a x", [], 0), null);
+});
+
+test("AC129 pure — shuffle returns a permutation of its input", () => {
+  const src = ["gap-a", "gap-b", "gap-c", "gap-d"];
+  const got = shuffle(src);
+  assert.equal(got.length, src.length);
+  assert.deepEqual([...got].sort(), [...src].sort(), "shuffle preserves the multiset");
+  assert.deepEqual(src, ["gap-a", "gap-b", "gap-c", "gap-d"], "shuffle does not mutate its input");
+});
+
+test("AC129 pure — resourceGateCheck: exit 0 ⇒ GO; exit 1 ⇒ WAIT (fail-closed)", () => {
+  assert.equal(resourceGateCheck("/r", ["node", "-e", "process.exit(0)"]).go, true);
+  const wait = resourceGateCheck("/r", ["node", "-e", "process.exit(1)"]);
+  assert.equal(wait.go, false, "non-zero exit ⇒ WAIT");
+  assert.match(wait.reason, /WAIT/);
+  const missing = resourceGateCheck("/r", ["definitely-no-such-binary-xyz"]);
+  assert.equal(missing.go, false, "spawn failure ⇒ fail-closed WAIT");
+});
+
+test("AC129 pure — defaultSelectorArgv / defaultReadyPoolArgv are claude / node argv", () => {
+  const sel = defaultSelectorArgv(["gap-a", "gap-b"], "/r");
+  assert.equal(sel[0], "claude");
+  assert.equal(sel[1], "-p");
+  assert.match(sel[2], /gap-a, gap-b/, "candidate ids are inlined into the selector prompt");
+  const rpc = defaultReadyPoolArgv("/r", ["gap-a"], 3);
+  assert.equal(rpc[0], "node");
+  assert.deepEqual(rpc.slice(1, 5), ["--experimental-strip-types", "/r/plugin/scripts/ready-pool-check.ts", "--root", "/r"]);
+  assert.ok(rpc.includes("--in-flight"), "in-flight ids are passed to ready-pool-check");
+  assert.ok(rpc.includes("gap-a"));
+});
+
+test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the selector's real reason (not 'explicit --task selection')", (t) => {
+  const root = makeRoot("ac2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const rpcFile = path.join(root, "rpc.cnt");
+  const out = runDriver(root, [
+    "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n===0?['gap-a','gap-b']:[],pool:n===0?2:0})"),
+    "--selector-cmd", "node -e console.log('gap-a\\x20blocks-the-suite')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd", "node -e process.exit(0)",
+    "--json",
+  ]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const picked = events.find((e) => e.event === "selector-picked");
+  assert.ok(picked, "the selection loop emitted a selector-picked event (AC2 chain is wired)");
+  assert.equal(picked.task, "gap-a");
+  assert.equal(picked.selector_reason, "blocks-the-suite");
+
+  const records = readOutcomeLines(root);
+  assert.equal(records.length, 1, "one worker dispatched; pool drains on the next loop");
+  assert.equal(records[0].task, "gap-a");
+  assert.equal(records[0].selector_reason, "blocks-the-suite", "AC2: selector_reason is the selector's own reason");
+  assert.notEqual(records[0].selector_reason, "explicit --task selection", "AC2: no longer the constant explicit reason");
+});
+
+test("AC1 — resident loop does not exit after one worker; keeps dispatching while pool non-empty (in-memory in-flight subtraction)", (t) => {
+  const root = makeRoot("ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const rpcFile = path.join(root, "rpc.cnt");
+  const selFile = path.join(root, "sel.cnt");
+  // ready-pool returns BOTH candidates on calls 0 and 1 (it does NOT know gap-a went in-flight);
+  // the DRIVER's in-memory subtraction is what makes the second fill pick gap-b. Call 2 ⇒ empty.
+  const out = runDriver(root, [
+    "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n<=1?['gap-a','gap-b']:[],pool:n<=1?2:0})"),
+    "--selector-cmd", counterNodeE(selFile, "n===0?'gap-a\\x20first-pick':n===1?'gap-b\\x20second-pick':'gap-a\\x20again'"),
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd", "node -e process.exit(0)",
+    "--concurrency", "2",
+    "--json",
+  ]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const picks = events.filter((e) => e.event === "selector-picked");
+  assert.equal(picks.length, 2, "AC1: two sequential selections — the resident loop kept going after the first");
+  assert.deepEqual(picks.map((p) => p.task), ["gap-a", "gap-b"], "in-memory subtraction: second fill skipped the in-flight gap-a");
+  assert.deepEqual(picks.map((p) => p.selector_reason), ["first-pick", "second-pick"]);
+  assert.deepEqual(picks.map((p) => p.in_flight_count), [1, 2], "in-flight reached the concurrency cap (direct child count)");
+
+  const records = readOutcomeLines(root);
+  assert.equal(records.length, 2, "two outcome records (one per worker, no exit-after-one)");
+  assert.deepEqual(records.map((r) => r.final_state), ["completed", "completed"]);
+});
+
+test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero spawned)", (t) => {
+  const root = makeRoot("ac3-rg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const out = runDriver(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-a'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(1)",
+    "--worker-cmd", "node -e process.exit(0)",
+    "--json",
+  ]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(events.some((e) => e.event === "worker-spawned"), false, "AC3: no worker spawned while resource-gate reports WAIT");
+  const stop = events.find((e) => e.event === "resident-stop");
+  assert.ok(stop, "the stop is recorded (not silent)");
+  assert.match(stop.reason, /resource-gate-wait/);
+  assert.equal(readOutcomeLines(root).length, 0, "zero outcome records — nothing was dispatched");
+});
+
+test("AC3 — MCP halt mid-run stops NEW dispatch only; the in-flight worker completes (never killed)", async (t) => {
+  const root = makeRoot("ac3-halt");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeControlState(root, defaultControlState());
+  const rpcFile = path.join(root, "rpc.cnt");
+  const pidFile = path.join(root, "w.pid");
+  const driver = spawn(process.execPath, [
+    "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root,
+    "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n===0?['gap-slow','gap-fast']:n===1?['gap-fast']:[],pool:2})"),
+    "--selector-cmd", "node -e console.log('gap-slow\\x20slow-worker')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd", "sleep 2",
+    "--concurrency", "1",
+    "--pid-file", pidFile,
+    "--json",
+  ], { stdio: ["ignore", "pipe", "ignore"] });
+
+  let buf = "";
+  driver.stdout.on("data", (d) => { buf += d; });
+  let workerPid = null;
+  for (let i = 0; i < 200 && workerPid === null; i++) {
+    if (fs.existsSync(pidFile)) workerPid = Number(fs.readFileSync(pidFile, "utf8").trim().split("\n")[0]);
+    else await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.ok(workerPid, "the in-flight worker spawned and wrote its pid");
+
+  // flip halt while gap-slow (sleep 2) is in-flight
+  writeControlState(root, applyHalt(defaultControlState(), "outer", true));
+
+  const exitCode = await new Promise((resolve) => { driver.on("close", (c) => resolve(c)); });
+  assert.equal(exitCode, 0, "a halted resident stop is a clean exit, not a failure");
+
+  const records = readOutcomeLines(root);
+  assert.equal(records.length, 1, "AC3: exactly ONE worker (the in-flight); gap-fast was available but NOT dispatched after halt");
+  assert.equal(records[0].task, "gap-slow");
+  assert.equal(records[0].final_state, "completed", "AC3: the in-flight worker was NOT killed — it completed");
+  const events = buf.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(events.filter((e) => e.event === "worker-spawned").length, 1, "only the one in-flight worker was ever spawned");
 });

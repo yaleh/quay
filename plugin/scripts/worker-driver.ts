@@ -37,7 +37,7 @@
 //     --root <repo> --task <id> [--task <id> …] [--reason "<selector reason>"] \
 //     [--concurrency <N>] [--timeout <ms>] [--worker-cmd "<argv>"] \
 //     [--pid-file <path>] [--outcome <path>] [--run-id <id>] [--json]
-//   --task <id>         要跑的任务 id（可重复；无 --task ⇒ 报错退出——selector 属后续阶段）
+//   --task <id>         要跑的任务 id（可重复；无 --task ⇒ 常驻选择环——见阶段 4）
 //   --reason <r>        selector 理由（一句话「为什么选它」）；缺省 = "explicit --task selection"
 //   --concurrency <N>   并发上限（同时存活 worker 数）。缺省读 QUAY_MAX_TASK_SUBAGENTS（定义点），
 //                       再缺省 = 任务数。驱动数自己的子进程，达 cap 则等一个结束再起下一个。
@@ -81,6 +81,31 @@
 // Run（MCP 控制面）:
 //   node --experimental-strip-types plugin/scripts/worker-driver.ts --serve \
 //     --root <repo> [--host 127.0.0.1] [--port <n>] [--json]
+//
+// 阶段 4 新增（AC129，SPEC §5 阶段 4——常驻驱动 + 自主选任务，把「谁决定现在跑哪个任务」从 inner 的
+// LLM tick 会话移到本常驻进程）：
+//   ① 常驻循环 —— 无 --task 启动 ⇒ 驱动不再「单次 spawn 后退出」，而是常驻：跑完一个 worker 不退出，
+//      池非空且未达并发 cap 时自动起下一个（AC1）。
+//   ② 选择环 —— 每次起新 worker 前，调 ready-pool-check 取可行集 → 减内存中在飞集 → 打散 → 交短命
+//      selector worker（LLM 语义选择，SPEC §1 设计点1）挑一个，`selector_reason` 落 selector 的真实理由
+//      （不再恒为 "explicit --task selection"，AC2）。selector 无有效选择 ⇒ fail-closed 回退打散后首个。
+//   ③ 判停（AC3，能取假）—— 起新 worker 前逐轮判：MCP halt（isHalted，AC117 单一真相源）/
+//      resource-gate 报 WAIT（exit 非 0，fail-closed）/ 池空 ⇒ 停止起新 worker，⛔ 不杀在飞（在飞 worker
+//      跑完才退出）。⛔ 不读 `.halt` 文件（与 AC117 退役清单一致——驱动停机态只有一个真相源）。
+//
+// Run（常驻选择环）:
+//   node --experimental-strip-types plugin/scripts/worker-driver.ts \
+//     --root <repo> [--concurrency <N>] [--timeout <ms>] [--worker-cmd "<argv>"] \
+//     [--selector-cmd "<argv>"] [--ready-pool-cmd "<argv>"] [--resource-gate-cmd "<argv>"] \
+//     [--pid-file <path>] [--outcome <path>] [--run-id <id>] [--json]
+//   ⛔ 无 --task ⇒ 常驻选择环（不再报错退出）。--task 仍走显式批量派发（行为不变）。
+//   --selector-cmd <s>      selector worker 命令（短命 LLM，输出一行 `<task-id> <一句理由>`）。
+//                           缺省 = `claude -p <选择 prompt（内联打散后的候选 id 列表）>`。
+//   --ready-pool-cmd <s>    覆盖 ready-pool-check 命令（测试缝）。缺省 = `node …ready-pool-check.ts
+//                           --root <root> --cap <cap> [--in-flight <ids>] --json`。输出须为 analyzeTasks
+//                           JSON（读其 `ready` 数组）。解析失败/非零 ⇒ fail-closed 视为池空。
+//   --resource-gate-cmd <s> 覆盖 resource-gate 命令（测试缝）。缺省 = `bash …resource-gate.sh
+//                           --for full-suite --json`。exit 0 = GO，非 0 = WAIT（fail-closed）。
 
 import fs from "node:fs";
 import path from "node:path";
@@ -493,7 +518,7 @@ export function resolveRun({
 }) {
   const taskIds = (tasks ?? []).map((t) => t.trim()).filter(Boolean);
   if (taskIds.length === 0) {
-    return { error: "no --task given (selector worker is a later phase; pass --task <id> [--task <id> …])" };
+    return { error: "no --task given in explicit mode (pass --task <id> [--task <id> …]; omit --task to run the resident selection loop)" };
   }
   const selectorReason = (reason && reason.trim()) || "explicit --task selection";
   const workerArgv = workerCmd ? splitArgs(workerCmd) : null; // null ⇒ 每任务用 defaultWorkerArgv
@@ -610,6 +635,276 @@ function runOneWorker({
       }, timeoutMs);
     }
   });
+}
+
+// ── 阶段 4（AC129）常驻驱动 + 自主选任务：选择环 / selector worker / 判停 ───────────────────────────
+
+/** Fisher–Yates 打散（AC2：候选顺序打散后交 selector，避免 selector 每次看到同一顺序）。返回新数组，
+ *  不改动入参。 */
+export function shuffle<T>(arr: readonly T[]): T[] {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/** 缺省 ready-pool-check 命令（选择环的第一步）。输出须为 analyzeTasks JSON（读其 `ready` 数组）。 */
+export function defaultReadyPoolArgv(root: string, inFlight: string[], cap: number): string[] {
+  const argv = [
+    "node", "--experimental-strip-types", path.join(root, "plugin", "scripts", "ready-pool-check.ts"),
+    "--root", root, "--cap", String(cap), "--json",
+  ];
+  if (inFlight.length > 0) argv.push("--in-flight", inFlight.join(","));
+  return argv;
+}
+
+/** 调 ready-pool-check 取可行集（AC2 第一步）。cmd 覆盖是测试缝；缺省 = 本仓库 ready-pool-check.ts。
+ *  解析失败/非零退出 ⇒ fail-closed 返回空池（硬规则 3b：读不懂 ≠ 「有候选」，⛔ 不得伪装成有货）。 */
+export function readyPoolCheck(
+  root: string,
+  cmd: string[] | null,
+  inFlight: string[],
+  cap: number,
+): { ready: string[]; pool: number; criterionMet: boolean; error: string | null } {
+  const argv = cmd ?? defaultReadyPoolArgv(root, inFlight, cap);
+  let r: ReturnType<typeof spawnSync>;
+  try {
+    r = spawnSync(argv[0], argv.slice(1), {
+      encoding: "utf8", timeout: 120_000, maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch (e) {
+    const msg = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
+    return { ready: [], pool: 0, criterionMet: false, error: `ready-pool-check spawn failed (${msg})` };
+  }
+  if (r.error || r.status !== 0) {
+    const msg = r.error ? String(r.error.message || r.error) : `ready-pool-check exited ${r.status}`;
+    return { ready: [], pool: 0, criterionMet: false, error: msg };
+  }
+  try {
+    const j = JSON.parse(String(r.stdout ?? "").trim());
+    const ready = Array.isArray(j.ready) ? j.ready.filter((x: unknown) => typeof x === "string") : [];
+    return {
+      ready,
+      pool: typeof j.pool === "number" ? j.pool : ready.length,
+      criterionMet: !!j.criterion_met,
+      error: null,
+    };
+  } catch {
+    return { ready: [], pool: 0, criterionMet: false, error: "unparseable ready-pool-check output" };
+  }
+}
+
+/** 缺省 selector worker 命令（短命 LLM——SPEC §1 设计点1「选择仍应是语义的」）。prompt 内联打散后的
+ *  候选 id 列表，要求输出一行 `<task-id> <一句理由>`。 */
+export function defaultSelectorArgv(candidateIds: string[], root: string): string[] {
+  const prompt = [
+    `You are the resident task selector for the quay worker driver (SPEC §5 阶段 4 — AC129).`,
+    `Candidate task ids (ready pool, in-flight subtracted, order shuffled): ${candidateIds.join(", ")}.`,
+    `Pick exactly ONE task to dispatch next and reply with a single line: <task-id> <one-line reason>`,
+    `and nothing else. Repo root: ${root}.`,
+  ].join(" ");
+  return ["claude", "-p", prompt];
+}
+
+/** 解析 selector worker 输出：第一行 `<task-id> <一句理由>`。task-id 须在候选集内（⛔ 不得放行一个
+ *  未提交给它的任务）；无效输出 ⇒ fail-closed 回退打散后首个候选（循环永不因 selector 而 deadlock）。 */
+export function parseSelectorOutput(
+  stdout: string,
+  candidates: string[],
+  exitCode: number | null,
+): { task: string; reason: string } | null {
+  const line = String(stdout ?? "").trim().split("\n")[0]?.trim() ?? "";
+  const m = line.match(/^\s*(\S+)(?:\s+(.*))?$/);
+  const task = m ? m[1] : null;
+  const reason = m && m[2] ? m[2].trim() : "";
+  if (task && candidates.includes(task)) {
+    return { task, reason: reason || `selector picked ${task}` };
+  }
+  const fallback = candidates[0];
+  if (!fallback) return null;
+  const got = line ? `, got "${line.slice(0, 80)}"` : "";
+  return {
+    task: fallback,
+    reason: `selector worker returned no valid pick (exit ${exitCode ?? "null"}${got}); fallback to first shuffled candidate`,
+  };
+}
+
+/** 交短命 selector worker（AC2 末步）：spawn 覆盖命令（或 claude -p）→ 解析输出。永不 throw。 */
+export function runSelectorWorker(
+  candidates: string[],
+  fixedArgv: string[] | null,
+  root: string,
+): { task: string; reason: string } | null {
+  if (candidates.length === 0) return null;
+  const argv = fixedArgv ?? defaultSelectorArgv(candidates, root);
+  let stdout = "";
+  let exitCode: number | null = null;
+  try {
+    const r = spawnSync(argv[0], argv.slice(1), {
+      encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
+    });
+    stdout = String(r.stdout ?? "");
+    exitCode = r.error ? null : r.status;
+  } catch {
+    exitCode = null;
+  }
+  return parseSelectorOutput(stdout, candidates, exitCode);
+}
+
+/** 判停条件之二：resource-gate 是否报 WAIT（AC3）。cmd 覆盖是测试缝；缺省 = 本仓库 resource-gate.sh
+ *  `--for full-suite --json`。exit 0 = GO，非 0 = WAIT（读不懂/读失败 ⇒ fail-closed WAIT，硬规则 3b）。 */
+export function resourceGateCheck(root: string, cmd: string[] | null): { go: boolean; reason: string } {
+  const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "resource-gate.sh"), "--for", "full-suite", "--json"];
+  let r: ReturnType<typeof spawnSync>;
+  try {
+    r = spawnSync(argv[0], argv.slice(1), {
+      encoding: "utf8", timeout: 20_000, maxBuffer: 1 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch (e) {
+    const msg = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
+    return { go: false, reason: `resource-gate spawn failed (${msg}) — fail-closed` };
+  }
+  if (r.error) return { go: false, reason: `resource-gate failed (${String(r.error.message || r.error)}) — fail-closed` };
+  const stdout = String(r.stdout ?? "").trim();
+  if (r.status === 0) {
+    try {
+      const j = JSON.parse(stdout);
+      if (j && typeof j.verdict === "string") {
+        return { go: j.verdict === "GO", reason: j.reason || `resource-gate verdict ${j.verdict}` };
+      }
+    } catch {
+      /* not JSON — use exit code */
+    }
+    return { go: true, reason: stdout ? stdout.slice(0, 200) : "resource-gate GO" };
+  }
+  return { go: false, reason: stdout ? stdout.slice(0, 200) : `resource-gate WAIT (exit ${r.status})` };
+}
+
+/** 常驻循环里一条在飞 worker 的追踪态（done 由 `.then` 置位，reap 据此移除）。 */
+interface RunningWorker {
+  task: string;
+  done: boolean;
+  promise: Promise<WorkerRunResult>;
+}
+
+/** 常驻循环的选项（`main` 无 --task 分支装配后传入）。 */
+export interface ResidentOptions {
+  rootDir: string;
+  cap: number;
+  timeoutMs: number;
+  workerArgv: string[] | null;
+  selectorArgv: string[] | null;
+  readyPoolArgv: string[] | null;
+  resourceGateArgv: string[] | null;
+  outcomeFile: string;
+  runId: string | undefined;
+  runPrefix: string;
+  json: boolean;
+  pidFile?: string;
+}
+
+/**
+ * 常驻选择环（AC1 常驻 + AC2 自主选任务 + AC3 判停）。
+ *   循环：reap 已完成的 worker → 池非空且未达 cap 且未判停 ⇒ 走选择环（ready-pool-check → 减在飞集 →
+ *   打散 → selector worker）→ spawn → 等一个结束 → 再 reap。判停（MCP halt / resource-gate WAIT /
+ *   池空）⇒ 停止起新 worker，⛔ 不杀在飞（在飞 worker 全部跑完才退出）。退出码 = 首个非零 worker 码。
+ */
+export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
+  const { rootDir, cap, timeoutMs, workerArgv, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile } = opts;
+
+  // checkout 前 stash（阶段 2 ③）：主检出脏 ⇒ stash 一次（常驻循环起跑前），⛔ 不 discard。非 git no-op。
+  const stash = stashIfDirty(rootDir);
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ event: "stash", stashed: stash.stashed, files: stash.files, error: stash.error })}\n`);
+  }
+
+  const running: RunningWorker[] = [];
+  const results: WorkerRunResult[] = [];
+  let stopReason: string | null = null;
+
+  /** 判停（AC3）：起新 worker 前逐轮读。halt 优先，其次 resource-gate WAIT；池空在选择环返回 null 时判。 */
+  const stopCondition = (): { stop: boolean; reason: string | null } => {
+    if (isHalted(rootDir)) {
+      return { stop: true, reason: "mcp-halt (control state halted — no new dispatch; in-flight workers untouched)" };
+    }
+    const rg = resourceGateCheck(rootDir, resourceGateArgv);
+    if (!rg.go) return { stop: true, reason: `resource-gate-wait: ${rg.reason}` };
+    return { stop: false, reason: null };
+  };
+
+  /** spawn 一个选中的 worker，并把 selector 的真实理由带进 outcome（AC2）。 */
+  const spawnSelected = (sel: { task: string; reason: string }): void => {
+    const runIdForTask = runId ?? `${runPrefix}-${sel.task}`;
+    const rw = {} as RunningWorker;
+    rw.task = sel.task;
+    rw.done = false;
+    rw.promise = runOneWorker({
+      taskId: sel.task,
+      selectorReason: sel.reason,
+      runId: runIdForTask,
+      workerArgv: workerArgv ?? defaultWorkerArgv(sel.task, rootDir),
+      rootDir,
+      outcomeFile,
+      timeoutMs,
+      inFlightCount: running.length + 1,
+      json,
+      pidFile,
+    }).then((r) => {
+      rw.done = true;
+      results.push(r);
+      return r;
+    });
+    running.push(rw);
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ event: "selector-picked", task: sel.task, selector_reason: sel.reason, in_flight_count: running.length, run_id: runIdForTask })}\n`,
+      );
+    }
+  };
+
+  while (true) {
+    // 1. reap 已完成的 worker（减在飞集）。
+    for (let i = running.length - 1; i >= 0; i--) {
+      if (running[i].done) running.splice(i, 1);
+    }
+
+    // 2. 池非空且未达 cap 且未判停 ⇒ 走选择环起下一个。
+    while (running.length < cap && !stopReason) {
+      const sc = stopCondition();
+      if (sc.stop) {
+        stopReason = sc.reason;
+        break;
+      }
+      const pool = readyPoolCheck(rootDir, readyPoolArgv, running.map((r) => r.task), cap);
+      const active = new Set(running.map((r) => r.task));
+      const candidates = shuffle(pool.ready.filter((id) => !active.has(id)));
+      if (candidates.length === 0) {
+        stopReason = "pool-empty (no dispatchable candidate in the ready pool)";
+        break;
+      }
+      const sel = runSelectorWorker(candidates, selectorArgv, rootDir);
+      if (!sel) {
+        // 候选非空但 selector 未能给出任何选择（理论上 parseSelectorOutput 必回退首个，不会 null）。
+        stopReason = "pool-empty (selector returned no candidate)";
+        break;
+      }
+      spawnSelected(sel);
+    }
+
+    // 3. 无在飞 ⇒ 循环终了（判停，或池已排空）。
+    if (running.length === 0) break;
+
+    // 4. 等在飞 worker 结束（至少一个），再回环 reap + 补位。⛔ 从不主动杀在飞。
+    await Promise.race(running.map((r) => r.promise));
+  }
+
+  if (json && stopReason) {
+    process.stdout.write(`${JSON.stringify({ event: "resident-stop", reason: stopReason })}\n`);
+  }
+  const bad = results.find((r) => r && r.exitCode !== 0);
+  return bad ? bad.exitCode : 0;
 }
 
 // ── MCP 控制面（HTTP/SSE，AC117）──────────────────────────────────────────────────────────────────
@@ -849,6 +1144,9 @@ export async function main(argv: string[]): Promise<number> {
   const tasks: string[] = [];
   let reason: string | undefined;
   let workerCmd: string | undefined;
+  let selectorCmd: string | undefined;
+  let readyPoolCmd: string | undefined;
+  let resourceGateCmd: string | undefined;
   let concurrency: number | undefined;
   let timeoutRaw: string | undefined;
   let pidFile: string | undefined;
@@ -865,6 +1163,9 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--task") tasks.push(args[++i]);
     else if (a === "--reason") reason = args[++i];
     else if (a === "--worker-cmd") workerCmd = args[++i];
+    else if (a === "--selector-cmd") selectorCmd = args[++i];
+    else if (a === "--ready-pool-cmd") readyPoolCmd = args[++i];
+    else if (a === "--resource-gate-cmd") resourceGateCmd = args[++i];
     else if (a === "--concurrency") concurrency = Number(args[++i]);
     else if (a === "--timeout") timeoutRaw = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
@@ -876,9 +1177,11 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--port") port = Number(args[++i]);
     else if (a === "--help" || a === "-h") {
       console.log(
-        "worker-driver — SPEC §5 阶段 2+3：spawn 多 claude -p worker（并发 N + 超时 SIGTERM + checkout 前 stash + MCP 控制面）\n" +
+        "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 claude -p worker（并发 N + 超时 SIGTERM + checkout 前 stash + MCP 控制面 + 常驻选择环）\n" +
           "  --task <id> [--task <id> …] [--reason \"<一句为什么选它>\"] [--concurrency <N>] [--timeout <ms>]\n" +
           "  [--root <repo>] [--worker-cmd \"<argv>\"] [--pid-file <p>] [--outcome <p>] [--run-id <id>] [--json]\n" +
+          "  ⛔ 无 --task ⇒ 常驻选择环（不再报错退出）\n" +
+          "  [--selector-cmd \"<argv>\"] [--ready-pool-cmd \"<argv>\"] [--resource-gate-cmd \"<argv>\"]\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -902,13 +1205,33 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const outcomeFile = outcomePath ? path.resolve(outcomePath) : path.join(rootDir, WORKER_OUTCOME_REL);
+  const timeoutMs = parseTimeoutMs(timeoutRaw);
+
+  // 阶段 4（AC129）：无 --task ⇒ 常驻选择环（不再报错退出）。--task 显式批量派发路径不变。
+  if (tasks.length === 0) {
+    const cap = resolveConcurrency(concurrency, 0);
+    return runResidentLoop({
+      rootDir,
+      cap,
+      timeoutMs,
+      workerArgv: workerCmd ? splitArgs(workerCmd) : null,
+      selectorArgv: selectorCmd ? splitArgs(selectorCmd) : null,
+      readyPoolArgv: readyPoolCmd ? splitArgs(readyPoolCmd) : null,
+      resourceGateArgv: resourceGateCmd ? splitArgs(resourceGateCmd) : null,
+      outcomeFile,
+      runId,
+      runPrefix: runId || `fm-${Date.now()}`,
+      json,
+      pidFile,
+    });
+  }
+
   const resolved = resolveRun({ tasks, reason, workerCmd, root: rootDir, runId, nowMs: Date.now() });
   if (resolved.error) {
     console.error(`worker-driver: ${resolved.error}`);
     return 2;
   }
   const { taskIds, selectorReason, runPrefix, workerArgv: sharedWorkerArgv } = resolved;
-  const timeoutMs = parseTimeoutMs(timeoutRaw);
   const cap = resolveConcurrency(concurrency, taskIds.length);
 
   // checkout 前 stash（阶段 2 ③，AC2）：主检出有未提交变更 ⇒ stash，⛔ 不 discard。非 git 仓库 no-op。
