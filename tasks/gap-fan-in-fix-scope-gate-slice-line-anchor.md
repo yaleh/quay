@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-fix-scope-gate-slice-line-anchor
 title: fan-in-execute.js fix-scope gate 切片 lastIndexOf 裸 substring → 行首锚定（inline 提及误切 __PERFILE__）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -31,14 +31,15 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：gate slice 改为行首锚定，裸 substring `lastIndexOf("__FANIN_SUITE_START__")` 不再用于切分。
-- [ ] AC2（能取假，负控制）：测试名/输出含 inline `__FANIN_SUITE_START__` 字样 ⇒ 真实 `__PERFILE__ passed=false` 行仍被正确分诊（不产出假 checker-misreport）。
+- [x] AC1：gate slice 改为行首锚定，裸 substring `lastIndexOf("__FANIN_SUITE_START__")` 不再用于切分。
+- [x] AC2（能取假，负控制）：测试名/输出含 inline `__FANIN_SUITE_START__` 字样 ⇒ 真实 `__PERFILE__ passed=false` 行仍被正确分诊（不产出假 checker-misreport）。
 
 ## Definition of Done
 
-- [ ] slice 行首锚定 + 负控制通过 + 全量/相关 scoped 绿；AC1-2 全勾；land 到 develop。
+- [x] slice 行首锚定 + 负控制通过 + 全量/相关 scoped 绿；AC1-2 全勾；land 到 develop。
 
 ## Touches
 
 - .claude/workflows/fan-in-execute.js（fix-scope gate inline slice）
+- plugin/workflows/fan-in-execute.js（双副本：与 .claude/ 副本逐字节相同，同一处 bug 同修——diff 为空已核实）
 - tasks/gap-fan-in-fix-scope-gate-slice-line-anchor.md（自身）

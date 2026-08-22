@@ -96,6 +96,24 @@ test("gap-fan-in-suite-log-cross-relaunch-reuse — parsePerFileLines slices by 
   assert.equal(noMarker.length, 1, "no marker ⇒ whole file read (backward compat)");
 });
 
+test("gap-measure-trend-check-slice-line-anchor — an inline (mid-line) mention of __FANIN_SUITE_START__ does NOT slice away the real __PERFILE__ line", () => {
+  // A suite's OWN test output can mention the marker MID-LINE (e.g. the node:test description
+  // "parsePerFileLines slices by the last __FANIN_SUITE_START__ marker …"). A bare lastIndexOf
+  // matches that mid-line mention (the LAST occurrence) and slices from INSIDE the test run —
+  // dropping the real __PERFILE__ line that precedes it (fake checker-misreport). Line-start
+  // anchoring keeps the real line.
+  const log =
+    "__FANIN_SUITE_START__ iso=2026-08-19T00:00:00.000Z ms=100 head=cur round=full\n" +
+    "__PERFILE__ duration_ms=120.5 /repo/cur.test.mjs passed=true\n" +
+    "✔ parsePerFileLines slices by the last __FANIN_SUITE_START__ marker (current round only)\n";
+  const recs = parsePerFileLines(log);
+  assert.deepEqual(
+    recs.map((r) => [r.file, r.passed]),
+    [["/repo/cur.test.mjs", true]],
+    "the real __PERFILE__ line is retained despite a mid-line marker mention AFTER it",
+  );
+});
+
 test("constraint 6 — normalizePerFileKey strips the verify-round worktree root (same file across rounds keys once)", () => {
   // The same physical test file under two different per-task worktree roots MUST map to ONE key
   // (basename 归一 — gap-phase-overlap-two-phase-parallel-exploration constraint 6; 1179 full-path

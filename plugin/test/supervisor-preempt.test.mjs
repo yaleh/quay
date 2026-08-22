@@ -273,9 +273,15 @@ function writeDispatchableTask(root, id) {
 }
 
 function slotRefill(root) {
+  // AC115 (SPEC-worker-driven-inner §5 阶段 1): slot-refill's --in-flight/--running param passing
+  // is RETIRED — the in-flight count is now the worker driver's DIRECT child-process count. A bare
+  // invocation reports measurement_source="not-measured" and NULLS the slot family (fail-closed),
+  // which would break these .halt assertions (they need a measured 0-in-flight view). The .halt
+  // mechanism under test is orthogonal to in-flight measurement, so pass an explicit --in-flight-count 0
+  // (the driver's count when nothing is driven) to exercise the .halt mount point directly.
   const r = spawnSync(
     "node",
-    ["--experimental-strip-types", SLOT_REFILL, "--root", root, "--cap", "3"],
+    ["--experimental-strip-types", SLOT_REFILL, "--root", root, "--cap", "3", "--in-flight-count", "0"],
     { encoding: "utf8" }
   );
   assert.equal(r.status, 0, `slot-refill exit 0 (stderr: ${r.stderr})`);

@@ -183,18 +183,24 @@ export function matchesGlob(pattern: string, rel: string): boolean {
 }
 
 /**
- * scripts/test.sh 的 `@static-object` 标注聚合（判定对象由被约束者声明，机械派生、不手列）。
- * 无 scripts/test.sh（如临时测试仓）⇒ 返回 []，fallback 退回 tasks/** + plugin/loop/** 两组。
+ * `@static-object` 标注聚合（判定对象由被约束者声明，机械派生、不手列）。
+ * gap-ac128-hub-split-harness-concerns: run_static_checks 及其 `@static-object` 标注迁出 scripts/test.sh
+ * 到 runner-static-gate.ts ⇒ 聚合须覆盖两文件（test.sh 残留 run_doc_checks 的标注，runner-static-gate.ts
+ * 持 run_static_checks 的标注）。两者均缺（如临时测试仓）⇒ 返回 []，fallback 退回 tasks/** + plugin/loop/** 两组。
  */
 export function staticObjectPatterns(root: string): string[] {
+  const sources: string[] = [];
   const testSh = path.join(root, "scripts", "test.sh");
-  if (!fs.existsSync(testSh)) return [];
-  const src = fs.readFileSync(testSh, "utf8");
+  if (fs.existsSync(testSh)) sources.push(fs.readFileSync(testSh, "utf8"));
+  const staticGate = path.join(root, "plugin", "scripts", "runner-static-gate.ts");
+  if (fs.existsSync(staticGate)) sources.push(fs.readFileSync(staticGate, "utf8"));
   const patterns = new Set<string>();
-  for (const line of src.split("\n")) {
-    const m = line.match(/^\s*#\s*@static-object\s+(.+)$/);
-    if (m) {
-      for (const tok of m[1].trim().split(/\s+/).filter(Boolean)) patterns.add(tok);
+  for (const src of sources) {
+    for (const line of src.split("\n")) {
+      const m = line.match(/^\s*#\s*@static-object\s+(.+)$/);
+      if (m) {
+        for (const tok of m[1].trim().split(/\s+/).filter(Boolean)) patterns.add(tok);
+      }
     }
   }
   return [...patterns];

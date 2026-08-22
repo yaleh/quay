@@ -103,13 +103,29 @@ export function normalizePerFileKey(file: string): string {
   return m ? m[1] : file;
 }
 
+/** Byte offset of the LAST `__FANIN_SUITE_START__` LINE (anchored at line start), or -1.
+ *  gap-measure-trend-check-slice-line-anchor (hard rule 5b sibling — same shape as
+ *  fan-in-execute.js / pre-verified-round-record.ts): a bare
+ *  `lastIndexOf("__FANIN_SUITE_START__")` ALSO matches a test-output line that merely MENTIONS the
+ *  marker MID-LINE (e.g. the suite's own test description "…slices by the last __FANIN_SUITE_START__
+ *  marker…"), slicing from inside the test run and DROPPING the real `__PERFILE__` lines that precede
+ *  it (fake checker-misreport). The emitted marker is always at line START
+ *  (`__FANIN_SUITE_START__ iso=…`), so anchoring on `^…$` excludes mid-line mentions. */
+function lastSuiteStartOffset(text: string): number {
+  const re = /^__FANIN_SUITE_START__[^\n]*$/gm;
+  let last = -1;
+  let m;
+  while ((m = re.exec(text)) !== null) last = m.index;
+  return last;
+}
+
 /** Parse `__PERFILE__ duration_ms=<dur> <full-path> passed=<bool>` lines (measure-suite-reporter).
  *  gap-fan-in-suite-log-cross-relaunch-reuse: fan-in relaunch 轮转日志并打 `__FANIN_SUITE_START__`
  * 起始标记——按最后一个标记切片，只解析当前轮（最后一个 `__FANIN_SUITE_START__` 之后）的内容，不整份
  * 线性读旧轮。无标记（full-suite-runner 直写 / 测试手写日志 / 旧版 fan-in）⇒ 整份读取（向后兼容）。 */
 export function parsePerFileLines(text: string): PerFileRecord[] {
   const out: PerFileRecord[] = [];
-  const mk = text.lastIndexOf("__FANIN_SUITE_START__");
+  const mk = lastSuiteStartOffset(text);
   const body = mk === -1 ? text : text.slice(mk);
   for (const line of body.split("\n")) {
     const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)$/);

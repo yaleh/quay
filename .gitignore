@@ -43,6 +43,11 @@ packages/quay/plugin/
 **/.quay/gate-events.jsonl
 **/.quay/supervisor-bus-ledger.jsonl
 **/.quay/inner-wakeup-heartbeat-refusals.jsonl
+# gap-ac115-spec-phase1-drive-single-worker (2026-08-22): the worker driver's per-task outcome record
+# (.quay/worker-outcome.jsonl) — runtime state, one line per driven task (SPEC-worker-driven-inner §4③:
+# outer reads it for cross-task checks, never git-tracked). Same gitignored runtime-state family as
+# gate-events.jsonl / dispatch-record.jsonl.
+**/.quay/worker-outcome.jsonl
 # gap-outer-message-bus-needs-file-inbox-transport (2026-08-09): the OUTER target's file-inbox
 # (.quay/outer-inbox/) is runtime message state (SPEC-inbox-service D1 — 收件箱不进 git 跟踪,
 # 不假设内容持久). Same gitignored runtime-state family as gate-events.jsonl — a real manager→outer

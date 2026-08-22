@@ -22,7 +22,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const SEL_CLI = path.join(REPO_ROOT, "plugin", "scripts", "select-static-checks-for-touches.ts");
 const CONTRACT_CLI = path.join(REPO_ROOT, "plugin", "scripts", "task-contract-check.ts");
-const TEST_SH = path.join(REPO_ROOT, "scripts", "test.sh");
+const TEST_SH = path.join(REPO_ROOT, "plugin", "scripts", "runner-static-gate.ts");
 
 // Governance self-skip (AC7 @test-group governance, ADR-019 decision #1): in a DEFAULT
 // (product,engine) run this file reports `skipped`, not absent — QUAY_TEST_GROUPS is set to
@@ -222,9 +222,9 @@ t("AC1 — a docs touch selects NO doc ratchet (AC51: doc checks live at pre-com
 
 // ── AC3/AC1: full-width CJK annotations are stripped (the mapping must not skip checks) ──────────────
 
-// A minimal annotated scripts/test.sh for hermetic CLI tests (the real annotations live in the
-// repo's test.sh and are covered by the AC3 registry test above; this fixture exercises the
-// selector CLI end-to-end without depending on the real repo state).
+// A minimal annotated runner-static-gate.ts for hermetic CLI tests (the real annotations live in the
+// repo's runner-static-gate.ts and are covered by the AC3 registry test above; this fixture exercises
+// the selector CLI end-to-end without depending on the real repo state).
 const MINI_TEST_SH = `#!/usr/bin/env bash
 set -euo pipefail
 repo_root="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
@@ -248,16 +248,17 @@ run_static_checks() {
 `;
 
 t("AC1/AC3 — full-width （…） annotations are stripped from touches before relevance", async () => {
-  // NOTE: test.sh is written via writeFileSync (not as a makeWorkspace KEY) so the workspace
-  // variable's initializer never contains a "test.sh" string literal — the test-isolation
+  // NOTE: the registry fixture is written via writeFileSync (not as a makeWorkspace KEY) so the
+  // workspace variable's initializer never contains a "test.sh" string literal — the test-isolation
   // `spawns-test-sh` code-position heuristic flags any spawn region that mentions a variable
   // which ANYWHERE holds a test.sh path, and this test DOES spawn the selector CLI against the
-  // workspace root.
+  // workspace root. (gap-ac128 moved the registry from scripts/test.sh to runner-static-gate.ts.)
   const root = makeWorkspace({
     "plugin/test/foo.test.mjs": "export const x = 1;\n",
     "scripts/foo.ts": "export const y = 1;\n",
   });
-  fs.writeFileSync(path.join(root, "scripts", "test.sh"), MINI_TEST_SH);
+  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plugin", "scripts", "runner-static-gate.ts"), MINI_TEST_SH);
   try {
     writeTask(root, "t1", "## Touches\n- plugin/test/（AC4 负控制 + 档位测试）\n- scripts/foo.ts\n");
     // The full-width （…） annotation must be stripped so `plugin/test/` matches the test ratchet.
