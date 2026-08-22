@@ -1,7 +1,7 @@
 ---
 id: gap-ac111-rescan-inner-tick-and-web-carrier
 title: AC111 复扫 inner-tick 专属机件 + web 观测载体切换核查
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -73,7 +73,7 @@ raw md-only 计数 = 42；join（AC111 记录 70 条 ∪ 本记录 7 条）后**
 
 ## Definition of Done
 
-- [ ] 复扫判定记录完整 + 「仅 .md」类归零 + web 三点结论齐；AC1-4 全勾；land 到 develop。
+- [x] 复扫判定记录完整 + 「仅 .md」类归零 + web 三点结论齐；AC1-4 全勾；land 到 develop。
 
 ## Retires
 
