@@ -264,7 +264,7 @@ test("AC5 wiring — the checker is declared in capability-catalog (mechanism-ca
   assert.match(cat, /red-on-omission-audit/, "capability-catalog must declare the red-on-omission audit");
 });
 
-test("AC5 wiring — the checker is wired into scripts/test.sh run_static_checks", () => {
+test("AC5 wiring — the checker is wired into scripts/test.sh (run_doc_checks, the doc-class gate)", () => {
   const sh = fs.readFileSync(path.join(repoRoot, "scripts", "test.sh"), "utf8");
-  assert.match(sh, /red-on-omission-audit/, "test.sh must run the red-on-omission audit as a static checker");
+  assert.match(sh, /red-on-omission-audit/, "test.sh must run the red-on-omission audit (run_doc_checks)");
 });

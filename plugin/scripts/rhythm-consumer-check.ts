@@ -270,9 +270,15 @@ export function loadCatalogDecls(root: string): CatalogDecl[] {
   return JSON.parse(r.stdout) as CatalogDecl[];
 }
 
-/** The strict call surface: what ACTUALLY runs every tick (scripts/test.sh + both tick-core copies). */
+/** The strict call surface: what ACTUALLY runs every tick (scripts/test.sh + both tick-core copies).
+ *  runner-static-gate.ts is included because scripts/test.sh SOURCES it (gap-ac128-hub-split-harness-
+ *  concerns moved run_static_checks/resource_gate_check there) — its run_checker call sites are exactly
+ *  as "every-tick" as the test.sh ones they replaced. */
 export function strictSurfaceFiles(root: string): string[] {
-  const out = [path.join(root, "scripts", "test.sh")];
+  const out = [
+    path.join(root, "scripts", "test.sh"),
+    path.join(root, "plugin", "scripts", "runner-static-gate.ts"),
+  ];
   for (const dir of ["orchestration", "plugin/loop"]) {
     const d = path.join(root, dir);
     if (!fs.existsSync(d)) continue;
@@ -366,7 +372,9 @@ export function runCheck(root: string, asJson: boolean): number {
   checks.push({ check: "判据2-按需-consumer", ok: c2.every((x) => x.ok), entries: c2 });
 
   // ── 判据3 — --no-block checkers must declare who reads the output ────────────────────────────────
-  const testShPath = path.join(root, "scripts", "test.sh");
+  // The --no-block run_checker invocations live in run_static_checks, which moved to runner-static-gate.ts
+  // (gap-ac128-hub-split-harness-concerns) — read that file, not scripts/test.sh.
+  const testShPath = path.join(root, "plugin", "scripts", "runner-static-gate.ts");
   const noBlock = fs.existsSync(testShPath) ? extractNoBlockCheckers(fs.readFileSync(testShPath, "utf8")) : [];
   const c3: any[] = [];
   for (const nb of noBlock) {

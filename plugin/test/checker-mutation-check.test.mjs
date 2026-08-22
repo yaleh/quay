@@ -100,13 +100,16 @@ test("AC1: manifest includes every CI-wired checker", () => {
 test("AC1 negative control: a fake checker added to run_static_checks appears in the manifest", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cmc-ac1-"));
   tmpDirs.push(tmp);
-  const src = fs.readFileSync(path.join(REPO_ROOT, "scripts/test.sh"), "utf8");
+  // run_static_checks now lives in plugin/scripts/runner-static-gate.ts (gap-ac128-hub-split-harness-concerns)
+  const src = fs.readFileSync(path.join(REPO_ROOT, "plugin/scripts/runner-static-gate.ts"), "utf8");
   const fake = '  echo "== fake checker (negative control) =="\n  bash "${repo_root}/plugin/scripts/fake-negative-control.sh" "${repo_root}"\n';
   const anchor = '  echo "== split-or-commit whole-store check';
   const idx = src.indexOf(anchor);
-  assert.ok(idx >= 0, "anchor line must exist in scripts/test.sh");
+  assert.ok(idx >= 0, "anchor line must exist in runner-static-gate.ts");
+  fs.mkdirSync(path.join(tmp, "plugin/scripts"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "plugin/scripts/runner-static-gate.ts"), src.slice(0, idx) + fake + src.slice(idx));
   fs.mkdirSync(path.join(tmp, "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(tmp, "scripts/test.sh"), src.slice(0, idx) + fake + src.slice(idx));
+  fs.copyFileSync(path.join(REPO_ROOT, "scripts/test.sh"), path.join(tmp, "scripts/test.sh"));
   fs.mkdirSync(path.join(tmp, ".github/workflows"), { recursive: true });
   fs.copyFileSync(path.join(REPO_ROOT, ".github/workflows/ci.yml"), path.join(tmp, ".github/workflows/ci.yml"));
   fs.mkdirSync(path.join(tmp, "plugin/scripts/checker-mutation-cases"), { recursive: true });
@@ -181,7 +184,7 @@ test("AC5 #6: a zero-dependency probe under the same defect is FLAGGED as stayed
   tmpDirs.push(tmp);
   // Two fake checkers wired into run_static_checks: one whose probe depends on quay, one whose
   // probe is zero-dependency (always exits 0, like resource-gate.sh was in the real #6).
-  const src = fs.readFileSync(path.join(REPO_ROOT, "scripts/test.sh"), "utf8");
+  const src = fs.readFileSync(path.join(REPO_ROOT, "plugin/scripts/runner-static-gate.ts"), "utf8");
   const fake = [
     '  bash "${repo_root}/plugin/scripts/fake-zerodep-check.sh" "${repo_root}"',
     '  bash "${repo_root}/plugin/scripts/fake-quaydep-check.sh" "${repo_root}"',
@@ -189,8 +192,10 @@ test("AC5 #6: a zero-dependency probe under the same defect is FLAGGED as stayed
   const anchor = '  echo "== split-or-commit whole-store check';
   const idx = src.indexOf(anchor);
   assert.ok(idx >= 0);
+  fs.mkdirSync(path.join(tmp, "plugin/scripts"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "plugin/scripts/runner-static-gate.ts"), src.slice(0, idx) + fake + src.slice(idx));
   fs.mkdirSync(path.join(tmp, "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(tmp, "scripts/test.sh"), src.slice(0, idx) + fake + src.slice(idx));
+  fs.copyFileSync(path.join(REPO_ROOT, "scripts/test.sh"), path.join(tmp, "scripts/test.sh"));
   fs.mkdirSync(path.join(tmp, ".github/workflows"), { recursive: true });
   fs.copyFileSync(path.join(REPO_ROOT, ".github/workflows/ci.yml"), path.join(tmp, ".github/workflows/ci.yml"));
   fs.mkdirSync(path.join(tmp, "plugin/scripts/checker-mutation-cases"), { recursive: true });

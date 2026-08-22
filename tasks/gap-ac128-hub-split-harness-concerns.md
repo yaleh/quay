@@ -52,4 +52,18 @@ net-add: 一次性重构成本非机制净增（与 AC112 计数基线显式记�
 - plugin/scripts/runner-tree-state.ts (new)
 - plugin/scripts/runner-state-write.ts (new)
 - plugin/scripts/suite-bucket-hub-list.ts（HUB_FILES 核）
+- plugin/scripts/select-static-checks-for-touches.ts（registry 正本 repoint 到 runner-static-gate.ts）
+- plugin/scripts/checker-mutation-check.sh（run_static_checks 从 runner-static-gate.ts 解析，run_doc_checks 仍从 test.sh）
+- plugin/scripts/rhythm-consumer-check.ts（strict surface + 判据3 --no-block 读 runner-static-gate.ts）
+- plugin/scripts/red-on-omission-audit.ts（接入判据改查 suite static-gate 两面）
+- plugin/scripts/capability-catalog.sh（新文件注册 5×5 表）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照再生成）
+- plugin/test/checker-mutation-check.test.mjs（fixture 迁移到 runner-static-gate.ts）
+- plugin/test/dispatch-worktree-setup.test.mjs（wiring 断言迁移）
+- plugin/test/red-on-omission-audit.test.mjs（wiring 断言回指 run_doc_checks/test.sh）
+- plugin/test/resource-gate.test.mjs（gate 调用断言迁移到 runner-static-gate.ts）
+- plugin/test/rhythm-consumer-check.test.mjs（--no-block 抽取源迁移）
+- plugin/test/scoped-static-checks.test.mjs（registry 正本/夹具迁移）
+- plugin/test/select-static-checks-for-touches.test.mjs（TEST_SH/夹具迁移）
+- plugin/test/suite-speed-nested-skip.test.mjs（run_static_checks 断言迁移）
 - tasks/gap-ac128-hub-split-harness-concerns.md（自身）

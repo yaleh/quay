@@ -21,6 +21,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
 const testSh = join(repoRoot, "scripts", "test.sh");
 const src = readFileSync(testSh, "utf8");
+// run_static_checks moved out of test.sh (gap-ac128-hub-split-harness-concerns)
+const staticGate = join(repoRoot, "plugin", "scripts", "runner-static-gate.ts");
+const staticGateSrc = readFileSync(staticGate, "utf8");
 
 // In-file self-skip block (governance pattern, ADR-019 decision #1): in a default product,engine
 // run this file reports `skipped`, not absent; with QUAY_TEST_GROUPS including governance the
@@ -35,8 +38,8 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
   });
 
   test("run_static_checks() skips when nested and same-root", () => {
-    assert.match(src, /QUAY_TEST_NESTED_ROOT:-}" = "\$\{repo_root\}/, "same-root guard in run_static_checks");
-    assert.match(src, /skipping static checks \(nested invocation; outer suite ran them\)/, "static-checks skip echo");
+    assert.match(staticGateSrc, /QUAY_TEST_NESTED_ROOT:-}" = "\$\{repo_root\}/, "same-root guard in run_static_checks");
+    assert.match(staticGateSrc, /skipping static checks \(nested invocation; outer suite ran them\)/, "static-checks skip echo");
   });
 
   test("build_dist_once() skips when nested and same-root", () => {

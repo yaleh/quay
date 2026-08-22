@@ -796,7 +796,9 @@ test("AC5 — scripts/test.sh uses the derived default in its exec lines (no har
 // ── AC7: test.sh integration — gate on the full-suite default, skip on scoped runs ─────────────────
 test("AC7 — test.sh consults the gate on the full-suite default path and skips it for scoped runs", () => {
   const src = fs.readFileSync(TEST_SH, "utf8");
-  assert.match(src, /resource-gate\.sh" --for full-suite/, "test.sh must invoke the gate in gate mode");
+  // resource_gate_check moved out of test.sh into runner-static-gate.ts (gap-ac128-hub-split-harness-concerns)
+  const staticGateSrc = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "runner-static-gate.ts"), "utf8");
+  assert.match(staticGateSrc, /resource-gate\.sh" --for full-suite/, "resource_gate_check must invoke the gate in gate mode");
   assert.match(src, /resource_gate_check/, "run_selected must call resource_gate_check");
   assert.match(src, /is_default_set "\$groups"/, "the gate must guard the default full-suite set only");
   assert.match(src, /QUAY_TEST_SKIP_RESOURCE_GATE/, "nested-runner escape hatch must exist");

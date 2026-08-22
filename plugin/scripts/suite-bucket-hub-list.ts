@@ -69,6 +69,14 @@ export const HUB_FILES: readonly string[] = [
   "plugin/scripts/full-suite-runner.ts",
   "plugin/scripts/runner-grouping*",
   "plugin/scripts/select-tests-for-touches.ts",
+  // gap-ac128-hub-split-harness-concerns — the harness-critical families extracted out of the two
+  // monoliths. Each is STILL a hub: their change must force the full suite unconditionally (red parsing
+  // / concurrency / static-gate / tree-state / state-write are all harness-critical, never bucket-safe).
+  "plugin/scripts/runner-red-parse.ts",
+  "plugin/scripts/runner-concurrency.ts",
+  "plugin/scripts/runner-static-gate.ts",
+  "plugin/scripts/runner-tree-state.ts",
+  "plugin/scripts/runner-state-write.ts",
 ];
 
 /**
