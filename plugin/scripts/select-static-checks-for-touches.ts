@@ -51,8 +51,9 @@ import { isDirectEntry } from "./gate-script-base.ts";
  *  FULL set only, and scoped conservatively defers it (never silently drops it from the full gate). */
 export const DEFAULT_TIER = "full";
 const TIERS = new Set(["always", "change", "full"]);
-/** The single source for the checker registry: scripts/test.sh's `run_static_checks()` body. */
-export const TEST_SH_REL = "scripts/test.sh";
+/** The single source for the checker registry: plugin/scripts/runner-static-gate.ts's
+ *  `run_static_checks()` body (extracted from scripts/test.sh, gap-ac128-hub-split-harness-concerns). */
+export const TEST_SH_REL = "plugin/scripts/runner-static-gate.ts";
 
 /**
  * The capability-catalog AC1c ENTRY-POINT gate (gap-eighty-two-shipped-checks-and-none-says-what-it-
@@ -819,7 +820,7 @@ export function main(argv) {
 
   const testSh = path.join(root, TEST_SH_REL);
   if (!fs.existsSync(testSh)) {
-    process.stderr.write(`select-static-checks-for-touches: scripts/test.sh not found at ${testSh}\n`);
+    process.stderr.write(`select-static-checks-for-touches: registry file (runner-static-gate.ts) not found at ${testSh}\n`);
     return 2;
   }
   const registry = parseStaticCheckRegistry(fs.readFileSync(testSh, "utf8"));

@@ -31,7 +31,7 @@ import { spawnSync } from "node:child_process";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const SEL_CLI = path.join(REPO_ROOT, "plugin", "scripts", "select-static-checks-for-touches.ts");
-const TEST_SH = path.join(REPO_ROOT, "scripts", "test.sh");
+const TEST_SH = path.join(REPO_ROOT, "plugin", "scripts", "runner-static-gate.ts");
 const CATALOG = path.join(REPO_ROOT, "plugin", "scripts", "capability-catalog.sh");
 
 // Governance self-skip (ADR-019 decision #1, same pattern as scoped-static-checks.test.mjs): in a
@@ -79,8 +79,9 @@ function runSelCli(root, ...args) {
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
 
-// A minimal annotated scripts/test.sh for hermetic CLI tests — the selector requires a parseable
-// run_static_checks() body at <root>/scripts/test.sh.
+// A minimal annotated runner-static-gate.ts for hermetic CLI tests — the selector requires a parseable
+// run_static_checks() body at <root>/plugin/scripts/runner-static-gate.ts (the registry moved out of
+// scripts/test.sh, gap-ac128-hub-split-harness-concerns).
 const MINI_TEST_SH = `#!/usr/bin/env bash
 set -euo pipefail
 repo_root="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
@@ -101,11 +102,12 @@ function gitInit(root) {
   assert.equal(r.status, 0, `git init failed: ${r.stderr}`);
 }
 
-// Write the minimal test.sh fixture (with its scripts/ dir), so a hermetic CLI run has a parseable
-// run_static_checks() body at <root>/scripts/test.sh.
+// Write the minimal runner-static-gate.ts fixture (with its plugin/scripts/ dir), so a hermetic CLI run
+// has a parseable run_static_checks() body at <root>/plugin/scripts/runner-static-gate.ts
+// (gap-ac128-hub-split-harness-concerns moved the registry out of scripts/test.sh).
 function writeTestSh(root) {
-  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(root, "scripts", "test.sh"), MINI_TEST_SH);
+  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plugin", "scripts", "runner-static-gate.ts"), MINI_TEST_SH);
 }
 
 // ── AC1: a new plugin/scripts touch selects capability-catalog ────────────────────────────────────────

@@ -123,8 +123,8 @@ test("判据3 — --no-block with a CONSUMER row is ok", () => {
   assert.equal(v.ok, true);
 });
 
-test("判据3 — extractNoBlockCheckers finds the --no-block run_checker invocations in the live test.sh", () => {
-  const src = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
+test("判据3 — extractNoBlockCheckers finds the --no-block run_checker invocations in the live runner-static-gate.ts", () => {
+  const src = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "runner-static-gate.ts"), "utf8");
   const nbs = extractNoBlockCheckers(src);
   const byName = new Map(nbs.map((n) => [n.name, n.script]));
   assert.equal(byName.get("task-contract-check"), "task-contract-check.ts");
@@ -137,9 +137,9 @@ test("判据3 — extractNoBlockCheckers finds the --no-block run_checker invoca
   // (gap-suite-duration-exceed-check-not-wired 已把集合 2→3,任何新增 --no-block checker 都会破坏
   // 恰好=2 的断言)。这里只断言下界:已知成员按名在上方逐一核对、tick-core-drift-check 不在集合的
   // 硬闸断言独立成立;新增 checker 只会让 nbs 变长,下界断言不破。判据3 读的是生产载体
-  // scripts/test.sh (fs.readFileSync),非 fixture。
+  // plugin/scripts/runner-static-gate.ts (fs.readFileSync),非 fixture。
   assert.ok(nbs.length >= 2, `expected >= 2 --no-block checkers, got ${JSON.stringify(nbs)}`);
-  // AC2 负控制: 模拟第 3 个 --no-block checker (suite-duration-exceed-check) 加入真实 test.sh 源码后,
+  // AC2 负控制: 模拟第 3 个 --no-block checker (suite-duration-exceed-check) 加入真实 runner-static-gate.ts 源码后,
   // 下界断言仍成立——证明断言对「新增 --no-block checker」免疫,不再把当前瞬态当不变式。
   const withExtra = extractNoBlockCheckers(
     src +

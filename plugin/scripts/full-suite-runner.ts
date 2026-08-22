@@ -122,7 +122,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import readline from "node:readline";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { runOnce, isRunnerInFlight, type SuiteState as TriggerSuiteState } from "./suite-state-trigger.ts";
@@ -133,7 +133,6 @@ import { runOnce, isRunnerInFlight, type SuiteState as TriggerSuiteState } from 
 import { resolveAssertionSurface } from "./precommit-guard.ts";
 import { getLoad1 } from "./checker-cost.ts";
 import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
-import { TMUX_LEAK_FAIL_RE } from "./tmux-leak-fail-re.ts";
 // gap-leak-residue-per-run-namespace-isolation — the runner-level unified cleanup REUSES the
 // owner-liveness criterion (dirHasLiveOwner) already implemented in the session-liveness helpers
 // (the 2026-08-08 two-layer-blind invariant: cleanup is PATH-OWNERSHIP + OWNER-LIVENESS based,
@@ -153,7 +152,28 @@ import { landMeasureHistory, compareLastTwoRounds } from "./measure-trend-check.
 // suiteLockSlotPaths = base.0..S-1, suiteLockBase = env override → git-common-dir). suiteLockPaths /
 // countHeldSuiteLocks read it so concurrentSuitesRunning follows S (S=3 ⇒ .0/.1/.2 probed, never a
 // fixed two-slot destructure).
-import { suiteLockSlotCount, suiteLockSlotPaths, suiteLockBase } from "./suite-lock-slots.ts";
+import { suiteLockSlotPaths, suiteLockBase } from "./suite-lock-slots.ts";
+
+// ── gap-ac128-hub-split-harness-concerns — harness-critical families extracted to focused files ──
+// The red/failure parsing, concurrency/lane, tested-tree state, and state-write families were each
+// extracted (verbatim) into a focused HUB file so the two monoliths no longer carry their definitions.
+// Imported here for the runner's internal use (run() etc.) and re-exported so the runner's public API
+// surface — and every importer (full-suite-runner.test.mjs etc.) — is byte-for-byte unchanged. Each new
+// file is a HUB (suite-bucket-hub-list.ts HUB_FILES), so a change to any of them still forces the full
+// suite (harness-critical must be fully verified). `writeState` is imported but NOT re-exported (it
+// stays module-private to this boundary, same as before the split).
+import { gateScanCause, isFailureLine, buildStaticCheckFailures } from "./runner-red-parse.ts";
+import { concurrentSuiteSlots, hostParallelism, spliceConcurrency } from "./runner-concurrency.ts";
+import { readVerifiedCommit, readTreeState, contentHash, snapshotAssertionSurface } from "./runner-tree-state.ts";
+import type { AssertionSurfaceSnapshot } from "./runner-tree-state.ts";
+import { writeState, appendVerificationRound } from "./runner-state-write.ts";
+
+export { gateScanCause, isFailureLine, buildStaticCheckFailures } from "./runner-red-parse.ts";
+export { concurrentSuiteSlots, hostParallelism, spliceConcurrency, stripConcurrencyFlags } from "./runner-concurrency.ts";
+export { readVerifiedCommit, readTreeState, contentHash, snapshotAssertionSurface } from "./runner-tree-state.ts";
+export type { TreeState, AssertionSurfaceSnapshot } from "./runner-tree-state.ts";
+export { readStateRunId, writeStateGuarded, appendVerificationRound } from "./runner-state-write.ts";
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -444,57 +464,6 @@ export interface SuiteState {
   assertionSurfaceEditedMidRound?: string[];
 }
 
-// AC2 — failure markers that flip state to red the MOMENT they appear on the suite's
-// stdout/stderr stream, never waiting for the run to finish. These are STRUCTURED
-// failure shapes, NOT bare glyphs (gap-full-suite-runner-red-pattern-matches-bare-x-
-// vitest-false-red, AC1): a bare `✖` in a vitest suite can be the test's OWN console
-// output — archguard TASK-67 proved a PASSING negative-control test logging `✖ Diagram
-// test failed` triggered a FALSE early-red while vitest reported 0 failed / exit 0. Under
-// a pipe node:test emits TAP, so `not ok` / `# fail 1+` / `# cancelled 1+` cover node:test
-// failures (AC2, no regression); vitest failures are covered by their structured lines:
-// `❯ <file> (N tests | M failed)` (per-file) and `Test Files <N> failed` (summary).
-// FULL-SUITE-EXIT is the repo's own marker. A generic non-zero exit code is the catch-all
-// for failures no line matched (applied at exit).
-// gap-runner-failure-patterns-miss-info-glyph-and-perfile-failed — this repo's measure-suite
-// reporter / node:test SPEC-reporter emit the INFO-GLYPH and per-file forms, NOT the TAP `#`
-// forms (round-149 red: state=red reason=failed but failures=[] / redAt=null — the third path of
-// the same family 42aad5fe fixed for testsSeen): `ℹ fail N` / `ℹ cancelled N` (same [ #ℹ] dual
-// prefix the tallies already accept), `✖ <testname> (Nms)` (spec-reporter per-test failure —
-// the trailing (Nms) distinguishes it from bare `✖ ...` console noise, the TASK-67 negative
-// control), `__PERFILE__ ... passed=false` (measure-suite-reporter per-file failure — the file
-// path rides ON the line so failures[] carries it), and `tmux-leak-scan: FAIL` (the suite-tail
-// leak scan's residual report — candidate C: a leak is a REAL residual, independent of test
-// failures, and must not be swallowed by a `&&` short-circuit).
-const FAILURE_PATTERNS: RegExp[] = [
-  /^not ok\b/, // node:test / TAP per-test failure
-  /^[#ℹ]\s*fail\s+[1-9]/, // TAP + spec-reporter summary: # fail 1+ / ℹ fail 1+
-  /^[#ℹ]\s*cancelled\s+[1-9]/, // TAP + spec-reporter summary: # cancelled 1+ / ℹ cancelled 1+ (cancelled is a failure even when fail 0)
-  /^ ?❯\s+\S+\s+\(\d+\s+tests?\s*\|\s*[1-9]\d*\s+failed(?:[^)]*)\)/, // vitest per-file: ❯ <file> (N tests | M failed [| K skipped]) — ^ ? anchored: a REAL spec-reporter line is ` ❯ <file> ...` (one optional leading space, fixture-pinned); a PASSING test whose NAME quotes the `❯ <file> (N tests | M failed)` shape is `✔`-prefixed and must not match — same self-match family as the ^✖ fix (c83ce4be)
-  /^Test Files\s+[1-9]\d*\s+failed/, // vitest summary: Test Files <N> failed — ^ anchored: a REAL summary line starts column-0; a PASSING test whose NAME quotes the `Test Files <N> failed` shape is `✔`-prefixed and must not match — same family
-  /^FULL-SUITE-EXIT=[^0]/, // the repo's own full-suite exit marker, non-zero — ^ anchored: the REAL marker starts column-0 (test.sh appends it); a PASSING test whose NAME quotes `FULL-SUITE-EXIT=1` is `✔`-prefixed and must not match — same family
-  /^✖\s+\S.*\(\d+(?:\.\d+)?ms\)/, // node:test spec-reporter per-test failure: ✖ <testname> (Nms) — ^ anchored: a REAL reporter failure starts the line; a PASSING test whose NAME quotes the `✖ <name> (Nms)` shape (runner-failure-patterns' own e2e names) is `✔`-prefixed and must not match
-  /^✖\s+failing tests?/, // node:test spec-reporter failure-block header: `✖ failing tests:` (only emitted when tests failed) — ^ anchored, same reasoning
-  /^__PERFILE__\s+duration_ms=.*\s+passed=false\b/, // measure-suite-reporter per-file failure: __PERFILE__ duration_ms=<d> <path> passed=false — ^ anchored + FULL reporter shape (candidate B, gap-runner-perfile-pattern-unnchored-self-match-phantom-red): a REAL reporter line starts column-0 with `__PERFILE__ duration_ms=...`; a PASSING test whose NAME quotes the shape (the runner's own e2e test names) is `✔`-prefixed and must not match — same family as the ^✖ fix (c83ce4be)
-  TMUX_LEAK_FAIL_RE, // suite-tail leak scan's residual report (candidate C) — single definition, ^-anchored (rationale in tmux-leak-fail-re.ts)
-];
-
-// gap-verification-round-reason-self-contradiction — GATE/SCAN failure lines that flip red while the
-// TAP test counters stay fail=0 (they are per-file / residual reports, NOT node:test tallies): a
-// measure-suite per-file timeout (`__PERFILE__ ... passed=false`) and the suite-tail leak-scan residual
-// (`tmux-leak-scan: FAIL`). These are SUBSET patterns of FAILURE_PATTERNS above — a line matching one
-// of these ALSO flips redDetected via isFailureLine (a leak/per-file-timeout IS a real red). The gate
-// identity lets the round record name WHICH gate/scan failed (reason='gate-failed' + `gate`) so a red
-// round with fail=0 (all tests passed) is never mislabelled reason='failed'.
-const GATE_SCAN_FAILURE_LINES: { gate: string; re: RegExp }[] = [
-  { gate: "perfile-timeout", re: /^__PERFILE__\s+duration_ms=.*\s+passed=false\b/ },
-  { gate: "tmux-leak-scan", re: TMUX_LEAK_FAIL_RE },
-];
-
-/** The gate/scan identity of a failure line, or null when the line is not a gate/scan failure. */
-export function gateScanCause(line: string): string | null {
-  for (const { gate, re } of GATE_SCAN_FAILURE_LINES) if (re.test(line)) return gate;
-  return null;
-}
 
 // AC5 reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1/AC3) — ABORT markers
 // that flip state to red + reason=aborted: the suite emitted NO correctness conclusion. The concrete
@@ -629,33 +598,6 @@ export function extractFailClosedChecker(line: string): FailClosedChecker | null
   return { name: m[1], exitCode, line };
 }
 
-/**
- * The SuiteFailure[] for a static-check red (gap-static-check-red-failures-capture-only-task-contract-shape
- * AC1): the VIOLATION detail lines (each carrying the violated file) AND the fail-closed checkers (each
- * carrying the checker name in its raw `line`), all marked `staticCheck: true` so suite-state-trigger's
- * classifyFailure routes them to the shared gate. The TWO facts — which checker failed vs which violation
- * lines appeared — are SEPARATE in the record (AC2): the machine-readable separation lives in
- * staticCheck.failedCheckers (fail-closed) vs staticCheck.details (violation lines); failures[] carries
- * both for the shared-gate dispatch decision.
- *
- * ORDERING (gap-static-check-red-failures0-misattributed, round181/182): the FAIL-CLOSED checkers (the
- * real gate — each exited ≠0) MUST come BEFORE the VIOLATION detail lines. A static-check red usually
- * pairs a NON-blocking checker (e.g. task-contract-check --no-block, exit 0 — prints VIOLATION lines but
- * does NOT gate the round) with the true gate (e.g. direct-to-develop-bypass-check, exit 1). With the
- * VIOLATION lines first, `failures[0]` pointed at the non-blocking checker's line and every diagnostician
- * (manager/outer/inner) triaged the wrong thing (round181/182 both misled on gap-ac37). Putting the
- * fail-closed checkers first makes `failures[0]` the real gate's identity — the checker that actually
- * exited non-zero — so red-window triage reads the blocking cause first.
- */
-export function buildStaticCheckFailures(
-  details: StaticCheckViolation[],
-  failClosed: FailClosedChecker[],
-): SuiteFailure[] {
-  return [
-    ...failClosed.map((c) => ({ line: c.line, staticCheck: true })),
-    ...details.map((d) => ({ line: d.line, file: d.file, staticCheck: true })),
-  ];
-}
 
 // gap-streaming-red-cascade-amplifies-failures-array AC1 — the KNOWN suite-state-asserting TEST FILES:
 // tests that read the shared `.quay/full-suite-state.json` and assert `state=running with finishedAt
@@ -736,49 +678,6 @@ function toEpochSeconds(iso: string): number {
   return Math.floor(Date.parse(iso) / 1000);
 }
 
-/**
- * Read the runId (generation token) currently on disk at `file`, or undefined when absent /
- * unparseable (legacy state, missing file, or a concurrent mid-write). A legacy/missing file has
- * no generation to protect, so the caller treats undefined as "no guard active" (fail-open).
- */
-export function readStateRunId(file: string): string | undefined {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    return typeof parsed?.runId === "string" && parsed.runId ? parsed.runId : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * GENERATION GUARD — write `state` to `file`, but when `opts.guard` is set the write is REFUSED
- * (silently dropped) if a DIFFERENT run currently owns the file. Without the guard every write was
- * last-write-wins: if two runners overlap briefly (even a superseded runner still finishing its
- * cleanup), the older runner's red terminal state could land AFTER the newer runner's `running`
- * write and silently clobber it — no mechanism could distinguish "is this red from the current
- * round" (gap-full-suite-state-race-last-write-wins-no-generation-guard). Guard semantics:
- *   - the run's INITIAL `running` write is UNGUARDED (opts.establish in run()) — it establishes
- *     the generation; a newer run taking over MUST be able to overwrite an older run's state.
- *   - every later write (in-progress red, terminal green/red, signal abort) is GUARDED — it only
- *     succeeds while the writer is still the current generation.
- *   - a state without runId, or an unreadable/legacy on-disk file, never blocks a write (fail-open).
- */
-export function writeStateGuarded(file: string, state: SuiteState): void {
-  writeState(file, state, { guard: true });
-}
-
-function writeState(file: string, state: SuiteState, opts?: { guard?: boolean }): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (opts?.guard && state.runId) {
-    const current = readStateRunId(file);
-    if (current !== undefined && current !== state.runId) {
-      // A NEWER run owns the file — this writer is stale; its write would clobber the current
-      // round's state. Drop it (the current runner's state stays authoritative).
-      return;
-    }
-  }
-  fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n", "utf8");
-}
 
 // ── AC6: append-only suite-duration sequence (gap-no-criterion-records-its-own-cost) ──────────────────
 // `.quay/full-suite-state.json` is a SINGLE-STATE file overwritten every round — the previous
@@ -1079,31 +978,6 @@ export interface SuiteRoundRecord {
   bucket_duration_ms?: number;
 }
 
-/**
- * Append one suite-round record to <stateDir>/verification-round.jsonl (round = prior lines + 1).
- * `stateDir` is the .quay STATE directory — the state/log/ledger write location, decoupled from the
- * TESTED CHECKOUT by --state-dir (gap-suite-state-split-across-worktree-and-gate). Pre-split callers
- * passed a workspace root; the equivalent stateDir is `<root>/.quay`.
- */
-export function appendVerificationRound(stateDir: string, rec: SuiteRoundRecord): void {
-  try {
-    const file = path.join(stateDir, "verification-round.jsonl");
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    let prior = 0;
-    if (fs.existsSync(file)) {
-      const text = fs.readFileSync(file, "utf8");
-      for (const l of text.split("\n")) if (l.trim()) prior++;
-    }
-    fs.appendFileSync(file, JSON.stringify({ ...rec, round: rec.round > 0 ? rec.round : prior + 1 }) + "\n", "utf8");
-  } catch {
-    // best-effort — never let the ledger fail the run
-  }
-}
-
-/** Does a stream line match any AC2 failure marker? */
-export function isFailureLine(line: string): boolean {
-  return FAILURE_PATTERNS.some((re) => re.test(line));
-}
 
 // ── failure-location capture (gap-red-window-dispatch-stop-should-be-shared-gate-conditional) ──────
 // The SUITE-RED event must carry WHERE the red landed (state.failures) so the inner dispatch rule can
@@ -1146,18 +1020,6 @@ export function isAbortLine(line: string): boolean {
 
 // ── AC1/AC2: nproc-derived default laneCount + REPLACE splice ───────────────────────────────────────
 
-/**
- * QUAY_MAX_CONCURRENT_SUITES — knob ② (旋钮②) of the 人 2026-08-13 框架: the concurrent full-suite
- * SLOT count S (current 2). The SINGLE definition point for "how many suites may run at once" —
- * tasks/gap-single-flight-lock-2-slot-concurrent-suites + gap-concurrency-literal-only-at-definition-
- * points. Every concurrency value derived from it (per-suite lane budget, lock slot count, the
- * resource-gate per-suite budget) READS this env var — never a literal 2 (the id note: "勿把 2 当设计
- * 常量"). Clamped to >= 1 — an invalid/zero setting fails open to the single-suite default so a
- * misconfigured host degrades to the old 1-slot behavior, never to 0 lanes.
- */
-export function concurrentSuiteSlots(): number {
-  return suiteLockSlotCount();
-}
 
 /**
  * AC1 — the DEFAULT laneCount is nproc-derived, using the SAME formula as test.sh's AC5
@@ -1190,21 +1052,6 @@ export function defaultLaneCount(): number {
   return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) * oversub / slots));
 }
 
-/**
- * Host parallelism (nproc) — the SAME source expression as defaultLaneCount (:972-973):
- * RESOURCE_GATE_NPROC (the deterministic test seam) → os.availableParallelism() → os.cpus().length,
- * floored at 1. gap-ac44-concurrent-phases-read-host-parallelism (hard-rule-4 推论二): a
- * machine-spec-dependent LITERAL (the old `= 6`) is the same defect class as `cpuQuota:"400%"` — a
- * value that happens to equal the current host's capacity becomes a real silent limit (or silent
- * oversubscription) on a different host. Read the host instead.
- */
-export function hostParallelism(): number {
-  const ncpuRaw = process.env.RESOURCE_GATE_NPROC ?? String(
-    typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length,
-  );
-  const ncpu = Number(ncpuRaw);
-  return Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1;
-}
 
 // ── gap-lanes-nproc-concurrent-suites-accounting: nproc + concurrent-suite accounting ────────────────
 
@@ -1359,16 +1206,6 @@ function parsePositiveIntArg(argv: string[], name: string): number | null {
   return n;
 }
 
-/**
- * AC2 — strip any existing `--test-concurrency=*` from a command string, both the `=` spelling
- * (`--test-concurrency=8`) and the SPACE spelling (`--test-concurrency 8`). The splice is a
- * REPLACE so the spawned process carries exactly ONE --test-concurrency (the effective value).
- */
-export function stripConcurrencyFlags(cmd: string): string {
-  let out = cmd.replace(/\s+--test-concurrency=\d+/g, "");
-  out = out.replace(/\s+--test-concurrency\s+\d+/g, "");
-  return out.trim();
-}
 
 /**
  * Whether a command is concurrency-relevant — the default full suite (`bash scripts/test.sh`),
@@ -1380,69 +1217,9 @@ export function isConcurrencyRelevantCommand(cmd: string): boolean {
   return /\btest\.sh\b/.test(cmd) || cmd.includes("--test-concurrency");
 }
 
-/** Build the spawned command with the effective laneCount spliced as the ONLY --test-concurrency. */
-export function spliceConcurrency(cmd: string, laneCount: number): string {
-  const stripped = stripConcurrencyFlags(cmd);
-  return `${stripped} --test-concurrency=${laneCount}`;
-}
 
 // ── AC3: resource-gate consultation before starting ──────────────────────────────────────────────────
 
-/**
- * gap-merge-green-snapshot-verified-commit-livelock AC2 — the TESTED COMMIT: `git rev-parse HEAD` in
- * the tested checkout at suite start. In the main repo this IS the integration tip the green measures
- * (the batch-merge helper merges exactly this commit, not the moving integration HEAD). Not a git
- * checkout (a hermetic test root) ⇒ undefined ⇒ the field is omitted (graceful — the AC1 exact-shape
- * test on a non-git temp root stays byte-stable).
- */
-export function readVerifiedCommit(root: string): string | undefined {
-  try {
-    const out = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
-    return /^[0-9a-f]{40,}$/i.test(out) ? out : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * gap-verifiedcommit-dirty-tree-false-certificate AC1/AC2 — the TESTED root's tree state at round
- * START: the dirty flag (via plugin/scripts/assert-clean-tree.sh — its FIRST runner caller; the
- * absolute mode exits 0 on a clean tree, 1 on a dirty one, and its output names WHAT is dirty) plus
- * the tested-content tree hash (tracked part — `git stash create`'s commit tree = working-tree
- * tracked content, staged+unstaged; HEAD tree when nothing to stash). A non-git hermetic root yields
- * undefined (never fabricates a tree — same contract as verifiedCommit).
- */
-export function readTreeState(root: string): TreeState | undefined {
-  let treeDirty: boolean;
-  try {
-    const assertClean = path.join(__dirname, "assert-clean-tree.sh");
-    try {
-      // Exit 0 = clean; exit 1 = dirty (the FAIL branch); exit 2 = usage / not a git work tree —
-      // any status OTHER than 1 degrades to undefined (fail open: no detection, never a verdict).
-      execFileSync("bash", [assertClean, root], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-      treeDirty = false;
-    } catch (e) {
-      const status = (e as { status?: unknown }).status;
-      if (status !== 1) return undefined;
-      treeDirty = true;
-    }
-    const stashCreate = execFileSync("git", ["stash", "create"], { cwd: root, encoding: "utf8" }).trim();
-    const tree = /^[0-9a-f]{40,}$/i.test(stashCreate)
-      ? execFileSync("git", ["rev-parse", `${stashCreate}^{tree}`], { cwd: root, encoding: "utf8" }).trim()
-      : execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: root, encoding: "utf8" }).trim();
-    return { treeDirty, tree };
-  } catch {
-    return undefined;
-  }
-}
-
-export interface TreeState {
-  /** True when the tested working tree has ANY change vs HEAD — INCLUDING untracked files. */
-  treeDirty: boolean;
-  /** Tested-content tree hash (tracked part) — `git stash create`'s tree (working-tree tracked
-   *  content) when dirty, else `HEAD^{tree}`. */
-  tree: string;
-}
 
 /**
  * gap-concurrent-write-mutable-tree-false-positive-red — read the tested checkout's CURRENT HEAD and
@@ -1476,43 +1253,6 @@ export function readTreeMutation(
 // weaker green. The assertion-surface RESOLUTION is reused from precommit-guard.ts (the SAME
 // judged-object registry the guard reads; AC51 doc-class files already excluded).
 
-/** Content identity (SHA-1 hex) for an assertion-surface file's text. */
-export function contentHash(text: string): string {
-  return createHash("sha1").update(text).digest("hex");
-}
-
-export interface AssertionSurfaceSnapshot {
-  /** Repo-relative assertion-surface files, sorted (the files the running round reads). */
-  files: string[];
-  /** file -> content hash at snapshot time ("<unreadable>" when the file could not be read). */
-  hashes: Record<string, string>;
-}
-
-/**
- * Snapshot the TESTED checkout's assertion-surface files at round start (content hashes). The surface
- * is `resolveAssertionSurface` (precommit-guard.ts — the SAME judged-object registry the pre-commit
- * guard reads; AC51 doc-class `.md` files already excluded, so doc edits are NOT assertion-surface
- * edits). Best-effort: an unreadable file records "<unreadable>"; a resolution failure (non-git
- * hermetic root / registry error) degrades to an EMPTY snapshot (no detection possible ⇒ no
- * annotation — the runner must never fail a round because the snapshot could not be taken).
- */
-export function snapshotAssertionSurface(root: string): AssertionSurfaceSnapshot {
-  let files: string[];
-  try {
-    files = [...resolveAssertionSurface(root).files].sort();
-  } catch {
-    return { files: [], hashes: {} };
-  }
-  const hashes: Record<string, string> = {};
-  for (const f of files) {
-    try {
-      hashes[f] = contentHash(fs.readFileSync(path.join(root, f), "utf8"));
-    } catch {
-      hashes[f] = "<unreadable>";
-    }
-  }
-  return { files, hashes };
-}
 
 /**
  * Compare the CURRENT content of the snapshot's assertion-surface files against the round-start
