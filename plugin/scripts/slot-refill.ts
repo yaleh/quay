@@ -23,6 +23,8 @@
 //      bracket 代理 — a completed-but-not-fanned-in task keeps its telemetry bracket open yet its slot
 //      IS free; brackets ≠ workers (gap-telemetry-brackets-vs-subagents-no-slot-visibility). Completion
 //      frees the slot at the worker's exit, not at fan-in.
+//   RETIRED (AC76 C24-2, 人 2026-08-14 09:1xZ「在飞不应当靠任务记录,而应当查 inner 任务 subagent」;
+//      MEASURED IN-FLIGHT DEFAULT telemetry fallback 在飞读法退役);
 //   RETIRED (AC115, SPEC §5 阶段 1 退役清单): the --in-flight/--closed-but-live/--running PARAMETER
 //      PASSING and the telemetry-bracket "在飞" measurement (parseImplementingReport /
 //      measureImplementingFromTelemetry) are DELETED — their "在飞" semantic is taken over by the worker

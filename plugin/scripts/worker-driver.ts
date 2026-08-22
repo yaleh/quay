@@ -53,7 +53,9 @@ export const WORKER_OUTCOME_REL = ".quay/worker-outcome.jsonl";
 /** 终态枚举：completed（退出码 0）/ failed（非零退出）/ killed（被信号杀）/ spawn-failed（起不来）。 */
 export const FINAL_STATES = ["completed", "failed", "killed", "spawn-failed"] as const;
 
-/** 阶段 1 的并发上限：单 worker。直接量 = 驱动 fork 的子进程数，⛔ 不设代理。 */
+/** 阶段 1 的并发上限：单 worker。直接量 = 驱动 fork 的子进程数，⛔ 不设代理。
+ *  concurrency-default-fallback: 阶段 1 显式单 worker（AC115 scope，非宿主规格相关），阶段 2/3
+ *  （AC116/AC117）的并发 N 才读 QUAY_MAX_* 定义点 / 宿主并行度。 */
 export const PHASE1_CONCURRENCY = 1;
 
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
