@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-relaunch-retry-cap
 title: fan-in-execute 对 suite 失败 relaunch 设重试上限/退避（非 load-sensitive 确定性失败无界循环，单点放大停摆 2h）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -31,13 +31,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：非 load-sensitive 的 suite 失败 relaunch 有上限（N 次），超限 retreat→needs-human（⛔ 无限重跑）。
-- [ ] AC2（能取假，负控制）：构造一个确定性 flake ⇒ relaunch 到上限后 retreat/交人，不再无界循环。
-- [ ] AC3：与既有 ff-retry（单次 ff 失败）与 releaseLivelockRounds（load-sensitive）不冲突。
+- [x] AC1：非 load-sensitive 的 suite 失败 relaunch 有上限（N 次），超限 retreat→needs-human（⛔ 无限重跑）。
+- [x] AC2（能取假，负控制）：构造一个确定性 flake ⇒ relaunch 到上限后 retreat/交人，不再无界循环。
+- [x] AC3：与既有 ff-retry（单次 ff 失败）与 releaseLivelockRounds（load-sensitive）不冲突。
 
 ## Definition of Done
 
-- [ ] relaunch 上限/退避落地 + 确定性 flake 负控制通过；AC1-3 全勾；land 到 develop。
+- [x] relaunch 上限/退避落地 + 确定性 flake 负控制通过；AC1-3 全勾；land 到 develop。
 
 ## Touches
 
