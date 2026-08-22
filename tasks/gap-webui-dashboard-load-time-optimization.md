@@ -1,7 +1,7 @@
 ---
 id: gap-webui-dashboard-load-time-optimization
 title: webui dashboard 加载慢优化（manager 探针轻量化砍 pool 地板 + taskList 并行 + 任务摘要 30s TTL 缓存）
-status: done
+status: ready
 labels:
   - gap
 parent: null
