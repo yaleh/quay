@@ -2222,6 +2222,7 @@ function renderManagerPage(mgr: ManagerResult): string {
   const poolNote = pool.status === "ok"
     ? html`<div style="font-family:ui-monospace,monospace;font-size:0.85rem;line-height:1.7">
         pool=${pool.pool ?? "—"} floor=${pool.floor ?? "—"} deficit=${pool.deficit ?? "—"} cap=${pool.cap ?? "—"}
+        ${pool.lastPromoted.length > 0 ? html`<div style="color:var(--color-neutral-700)">最近一轮晋升（promotion-driver）：${pool.lastPromoted.map((id) => html`<a href="/task/${encodeURIComponent(id)}" style="color:var(--color-accent)">${escapeHtml(id)}</a>`).join(" · ")}</div>` : ""}
       </div>`
     : obsNote(pool.status, pool.reason);
 
@@ -2244,7 +2245,7 @@ function renderManagerPage(mgr: ManagerResult): string {
       <p class="meta">读 <code>observer-registry.conf</code> 单一登记表。</p>
       <h2>主要观测指标</h2>
       ${poolNote}
-      <p class="meta">pool/floor/deficit/cap 读 <code>slot-refill.ts --json</code>（派发机件，cap 默认 5）</p>
+      <p class="meta">pool/floor/deficit/cap 读 <code>.quay/promotion-round.jsonl</code>（promotion-driver round 记录，cap 默认 5，floor = cap × 4）</p>
       <p class="meta">release=${escapeHtml(mgr.version ?? "—")} · develop 领先 ${mgr.developLead != null ? escapeHtml(String(mgr.developLead)) : "—"} 提交</p>
     </main></body></html>`;
 }
@@ -2264,7 +2265,7 @@ export async function handleManager(
       loopDriver: { status: "error", reason: null, verdict: null, exitCode: null, detail: null },
       liveness: { status: "error", reason: null, sessions: [] },
       observers: { status: "error", reason: null, rows: [] },
-      pool: { status: "error", reason: null, pool: null, floor: null, deficit: null, cap: null },
+      pool: { status: "error", reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] },
       version: null,
       developLead: null,
     };
@@ -2606,12 +2607,12 @@ function renderDashboardPage(d: {
 // + the 5 most-recently-updated non-done tasks, yet the pre-cache path called
 // client.taskList({includeBody:false}) on EVERY /dashboard load — a full walkTasks() over the task
 // store (listIds() → get() per id = readFileSync + statSync + YAML.parse). Measured ~89ms warm /
-// ~640ms cold on the live store, plus the MCP subprocess round-trip. This cache (the slotRefillCache
+// ~640ms cold on the live store, plus the MCP subprocess round-trip. This cache (the poolMetricsCache
 // 范式 in observation.ts: 30s TTL, keyed by workspaceRoot so two served workspaces never share a
 // board) holds the whole frontmatter-only array the summary is derived from — on a hit,
 // client.taskList is never called, so the provider's walkTasks never executes (the AC3 mechanical
-// check). A 30s TTL bounds staleness: the dashboard is a display snapshot; the dispatch mechanism
-// (A22 / slot-refill) always reads fresh, never through this cache.
+// check). A 30s TTL bounds staleness: the dashboard is a display snapshot; the task store itself
+// (which the promotion-driver writes on todo→ready) is always read fresh, never through this cache.
 export const TASK_SUMMARY_CACHE_TTL_MS = 30_000;
 const taskSummaryCache = new Map<string, { at: number; tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }> }>();
 
@@ -2623,7 +2624,13 @@ export function clearTaskSummaryCache(): void {
 /** Dashboard task-summary source: client.taskList({includeBody:false}), short-TTL-cached per
  *  workspace root. On a hit the provider is not contacted, so its walkTasks() does not run (the AC3
  *  mechanical check). A failed read is NOT cached — the next load retries instead of pinning the
- *  error for the whole TTL (same fail-open policy as slotRefillCache). */
+ *  error for the whole TTL (same fail-open policy as poolMetricsCache).
+ *
+ *  AC136 (gap-ac136-web-truth-source-follows-driver): the task ledger's truth source is the task
+ *  store itself (tasks/*.md frontmatter) — the SAME store the promotion-driver writes on todo→ready.
+ *  So a driver-completed promotion is reflected here (status count + 最近更新) within the 30s TTL,
+ *  with no separate carrier read needed: reading client.taskList IS reading the driver's write
+ *  target (口径一致). */
 export async function readTaskSummary(
   root: string,
   client: ProviderClient,
@@ -2648,8 +2655,8 @@ export async function handleDashboard(
     live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
   }
   // AC1 + AC2 (gap-webui-dashboard-load-time-optimization): the dashboard manager probe is now
-  // readManagerLight — loop-driver + liveness ONLY, NO slot-refill pool probe — cutting the ~9s
-  // slot-refill cold-call floor from the dashboard path (/manager still runs the full readManager).
+  // readManagerLight — loop-driver + liveness ONLY, NO pool probe (the pool metrics are not shown on
+  // the dashboard card; /manager still runs the full readManager).
   // readSystem + the light manager probe + the (cached) task summary are independent — run them
   // CONCURRENTLY (Promise.all); client.taskList is no longer serialized AFTER the sys/mgr group
   // (the prior gap-webui-dashboard-manager-slow-parallelize shape awaited it later).
@@ -2658,7 +2665,7 @@ export async function handleDashboard(
       status: "error" as const, reason: "internal", resourceGate: { status: "error" as const, reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }, processBudget: { status: "error" as const, reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
     })),
     readManagerLight(cfg.workspaceRoot).catch(() => ({
-      status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null }, version: null, developLead: null,
+      status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null,
     })),
     readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
   ]);

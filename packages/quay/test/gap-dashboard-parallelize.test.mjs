@@ -18,9 +18,10 @@
 //      contain a Promise.all whose arguments are exactly the independent probes — the parallel
 //      structure is pinned by source (the same trick tick-core-static-check.ts uses for the
 //      orchestrator tick cores).
-//   2. BEHAVIORAL (AC3): the slot-refill cache must (a) return the SAME pool object on a second
-//      readManager call within TTL, (b) be cleared by clearSlotRefillCache (forcing a fresh read),
-//      and (c) never change what the slot-refill SUBPROCESS (A22's path) returns.
+//   2. BEHAVIORAL (AC3): the pool-metrics cache (now reading the promotion-driver round carrier,
+//      per AC136 — gap-ac136-web-truth-source-follows-driver) must (a) return the SAME pool object
+//      on a second readManager call within TTL, (b) be cleared by clearPoolMetricsCache (forcing a
+//      fresh read), and (c) never change what the slot-refill SUBPROCESS (A22's path) returns.
 //
 // Run (scoped): node --test packages/quay/test/gap-dashboard-parallelize.test.mjs
 import { test } from "node:test";
@@ -30,7 +31,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readManager, readManagerLight, clearSlotRefillCache, SLOT_REFILL_CACHE_TTL_MS } from "../src/observation.ts";
+import { readManager, readManagerLight, clearPoolMetricsCache, POOL_METRICS_CACHE_TTL_MS } from "../src/observation.ts";
 import { readTaskSummary, clearTaskSummaryCache, TASK_SUMMARY_CACHE_TTL_MS } from "../src/serve-handlers.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -143,27 +144,41 @@ function slotRefillSubprocess(cwd) {
 
 // ── Behavioral cache tests (AC3) ────────────────────────────────────────────────────────────────
 
-test("AC3: the slot-refill cache returns the SAME pool object within TTL and clears on demand", async () => {
+/** Write a synthetic promotion-driver round record into the fixture workspace — the AC136 pool truth
+ *  source (`.quay/promotion-round.jsonl`, one JSON line per round). */
+function writePromotionRound(ws, pool = 7, promotedIds = []) {
+  fs.writeFileSync(
+    path.join(ws, ".quay", "promotion-round.jsonl"),
+    `${JSON.stringify({ ts: new Date().toISOString(), round: 1, run_id: "test", action: "promote", pool, should_apply: true, promoted_ids: promotedIds, applied: [], error: null })}\n`,
+    "utf8",
+  );
+}
+
+test("AC3: the pool-metrics cache returns the SAME pool object within TTL and clears on demand", async () => {
   const ws = makeWorkspace("gap-par-");
   try {
-    clearSlotRefillCache();
+    clearPoolMetricsCache();
+    writePromotionRound(ws, 7);
     const m1 = await readManager(ws);
-    assert.equal(m1.pool.status, "ok", "readManager pool is a live slot-refill reading");
-    assert.equal(m1.pool.cap, 5, "slot-refill default dispatch cap is 5 (the production truth)");
+    assert.equal(m1.pool.status, "ok", "readManager pool is a live promotion-round reading");
+    assert.equal(m1.pool.cap, 5, "derived dispatch cap is 5 (the production truth)");
+    assert.equal(m1.pool.pool, 7, "pool comes from the driver's round record");
+    assert.equal(m1.pool.floor, 20, "floor = cap × 4 = 20");
+    assert.equal(m1.pool.deficit, 13, "deficit = max(0, floor − pool)");
 
     // Second call within TTL → cached: the SAME object reference, no re-read.
     const m2 = await readManager(ws);
     assert.equal(m1.pool, m2.pool, "pool object is cached across readManager calls within TTL");
 
-    // clearSlotRefillCache() forces a fresh read → a DIFFERENT object reference.
-    clearSlotRefillCache();
+    // clearPoolMetricsCache() forces a fresh read → a DIFFERENT object reference.
+    clearPoolMetricsCache();
     const m3 = await readManager(ws);
-    assert.notEqual(m3.pool, m1.pool, "clearing the cache forces a fresh slot-refill read");
+    assert.notEqual(m3.pool, m1.pool, "clearing the cache forces a fresh round-carrier read");
     assert.equal(m3.pool.status, "ok");
 
-    assert.ok(SLOT_REFILL_CACHE_TTL_MS > 0 && SLOT_REFILL_CACHE_TTL_MS <= 60_000, `TTL ${SLOT_REFILL_CACHE_TTL_MS}ms is a short bounded window`);
+    assert.ok(POOL_METRICS_CACHE_TTL_MS > 0 && POOL_METRICS_CACHE_TTL_MS <= 60_000, `TTL ${POOL_METRICS_CACHE_TTL_MS}ms is a short bounded window`);
   } finally {
-    clearSlotRefillCache();
+    clearPoolMetricsCache();
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });
@@ -171,13 +186,14 @@ test("AC3: the slot-refill cache returns the SAME pool object within TTL and cle
 test("AC3: the slot-refill subprocess (A22's path) is independent of the serve-side cache", async () => {
   const ws = makeWorkspace("gap-par-a22-");
   try {
-    clearSlotRefillCache();
+    clearPoolMetricsCache();
+    writePromotionRound(ws, 7);
     const before = slotRefillSubprocess(ws); // A22's direct exec — no observation.ts involved
-    await readManager(ws);                    // populate the serve-side cache
+    await readManager(ws);                    // populate the serve-side pool-metrics cache
     const after = slotRefillSubprocess(ws);   // same direct exec, cache still populated
     assert.deepEqual(after, before, "the subprocess truth is byte-identical whether or not the serve cache holds a value");
   } finally {
-    clearSlotRefillCache();
+    clearPoolMetricsCache();
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });

@@ -709,12 +709,12 @@ export interface BoardExecution {
   inFlight: InFlightTask[];
 }
 
-// ── Board landing cache — short-TTL, mirroring the slot-refill probe (readPoolMetrics) ─────────────
+// ── Board landing cache — short-TTL, mirroring the pool-metrics probe (readPoolMetrics) ────────────
 // readBoardLanding cold-runs plugin/scripts/task-status-drift-check.ts, which on a large repo does a
 // FULL git-log pass over the landing ref — >150s measured, documented by the checker's own comment
 // (task-status-drift-check.ts:462). Per-request cold-running is exactly the 120s /board defect
 // (gap-webui-board-load-120s), so a reading is short-TTL-cached (30s, the same window as
-// SLOT_REFILL_CACHE_TTL_MS). A TIMEOUT is cached too: on a large repo the checker's steady state IS
+// POOL_METRICS_CACHE_TTL_MS). A TIMEOUT is cached too: on a large repo the checker's steady state IS
 // a timeout, and not caching it would make EVERY request pay the full second-level cap — the AC2
 // "second request fast" negative control would fail where it matters. The cache lives ONLY in the
 // serve-side observation layer (display surface); A22 / slot-refill's own reads never import
@@ -1263,14 +1263,13 @@ export interface ManagerResult {
   loopDriver: LoopDriverReading;
   liveness: SessionLivenessReading;
   observers: { status: ObservationStatus; reason: string | null; rows: ObserverRow[] };
-  pool: { status: ObservationStatus; reason: string | null; pool: number | null; floor: number | null; deficit: number | null; cap: number | null };
+  pool: { status: ObservationStatus; reason: string | null; pool: number | null; floor: number | null; deficit: number | null; cap: number | null; lastPromoted: string[] };
   version: string | null;
   developLead: number | null;
 }
 
 export const LOOP_DRIVER_CHECK_REL = "../../../plugin/scripts/loop-driver-check.sh";
 export const SESSION_LIVENESS_REL = "../../../plugin/scripts/session-liveness.sh";
-export const SLOT_REFILL_REL = "../../../plugin/scripts/slot-refill.ts";
 export const OBSERVER_REGISTRY_CONF = "../../../orchestration/observer-registry.conf";
 
 /** Parse loop-driver-check.sh --json's single JSON document into structured fields. Pure. */
@@ -1403,59 +1402,132 @@ async function runLivenessProbe(root: string, targets: string | null): Promise<S
   return { status: "ok", reason: null, sessions: rows };
 }
 
-// ── Short-TTL cache for the slot-refill sub-probe (WebUI display surface only) ───────────────────
-// The pool metrics (pool/floor/deficit/cap) are the DISPATCH mechanism's truth for the inner tick:
-// A22 / slot-refill reads them EVERY tick by executing plugin/scripts/slot-refill.ts as a SEPARATE
-// process (its own execFile — never through this module). This cache lives ONLY in the serve-side
-// observation layer and serves the dashboard/manager display. Because A22's read never imports
-// observation.ts, caching here cannot pollute A22's read of truth (AC3 — 缓存不污染 A22). A 30s TTL
-// bounds staleness on the display surface: the page shows a snapshot, and the dispatch mechanism
-// always reads the fresh value. Keyed by workspace root so two served workspaces never share a
-// cached pool.
-export const SLOT_REFILL_CACHE_TTL_MS = 30_000;
-const slotRefillCache = new Map<string, { at: number; pool: ManagerResult["pool"] }>();
+// ── Short-TTL cache for the promotion-driver round-carrier probe (WebUI display surface only) ────
+// AC136 (gap-ac136-web-truth-source-follows-driver): after the promotion-driver takes over todo→ready
+// promotion (AC130–135), the truth source for the pool metrics (pool/floor/deficit/cap) is the
+// driver's own round record (`.quay/promotion-round.jsonl`, gitignored runtime log, worker-outcome
+// family), NOT a fresh cold-call of slot-refill.ts (the retired outer dispatch path). readPoolMetrics
+// below reads the driver's carrier and derives floor/deficit/cap from the SAME fixed dispatch
+// constants the driver uses (cap 5, floor = cap × 4 = 20 — the single source is slot-refill's
+// FIXED_DISPATCH_CAP and ready-pool-check's POOL_FLOOR_MULT_DEFAULT; this display layer mirrors the
+// caliber without importing plugin/scripts, which would break the self-contained-dist invariant).
+// A 30s TTL bounds staleness on the display surface; the driver itself always reads ready-pool-check
+// fresh, never through this cache (AC3 — 缓存不污染驱动). Keyed by workspace root so two served
+// workspaces never share a cached pool.
+export const POOL_METRICS_CACHE_TTL_MS = 30_000;
+const poolMetricsCache = new Map<string, { at: number; pool: ManagerResult["pool"] }>();
 
-/** Test-hygiene handle: drop all cached slot-refill readings. */
-export function clearSlotRefillCache(): void {
-  slotRefillCache.clear();
+/** Test-hygiene handle: drop all cached pool-metrics readings. */
+export function clearPoolMetricsCache(): void {
+  poolMetricsCache.clear();
 }
 
-/** slot-refill.ts --json → pool/floor/deficit/cap (AC99: the DISPATCH mechanism that produces the
- *  pool metrics — ready-pool-check's analyzeTasks is the same single source, and slot-refill
- *  defaults to the FIXED dispatch cap 5 so the reported floor is the production truth, cap=5×4=20).
- *  Cold-calling slot-refill is the single most expensive probe in readManager (~9s on the live box
- *  — `node --experimental-strip-types` re-strips the whole import graph each run), so a successful
- *  reading is short-TTL-cached. A failed/transient read is NOT cached — the next page load retries
- *  instead of pinning the error for the whole TTL. One of readManager's four CONCURRENT probes. */
-async function readPoolMetrics(root: string): Promise<ManagerResult["pool"]> {
-  const hit = slotRefillCache.get(root);
-  if (hit && Date.now() - hit.at < SLOT_REFILL_CACHE_TTL_MS) return hit.pool;
+/** The promotion-driver's round carrier, repo-relative (gitignored runtime log — same family as
+ *  worker-outcome.jsonl). Not a plugin script: resolved against the workspace root, not
+ *  import.meta.url. */
+export const PROMOTION_ROUND_REL = ".quay/promotion-round.jsonl";
 
-  const p = resolvePluginScript(SLOT_REFILL_REL);
-  if (!p) {
-    return { status: "empty", reason: `${SLOT_REFILL_REL} 缺失（未接入）`, pool: null, floor: null, deficit: null, cap: null };
+/** Fixed dispatch cap (mirrors slot-refill's FIXED_DISPATCH_CAP = 5 and promotion-driver's
+ *  CAP_DEFAULT = 5 — the production truth). floor = cap × floorMult = 5 × 4 = 20. */
+export const PROMOTION_CAP_DEFAULT = 5;
+
+/** Pool floor multiplier (mirrors ready-pool-check's POOL_FLOOR_MULT_DEFAULT = 4). */
+export const PROMOTION_FLOOR_MULT_DEFAULT = 4;
+
+/** One promotion-driver round record (the fields the web pool metric reads). Parsed from the JSONL
+ *  carrier; unknown/missing fields degrade to null rather than a fabricated reading (hard rule ③b —
+ *  a value the carrier never carried must not be indistinguishable from a real reading). */
+export interface PromotionRoundRecord {
+  ts: string | null;
+  round: number | null;
+  action: string | null;
+  pool: number | null;
+  promoted_ids: string[];
+  error: string | null;
+}
+
+/** Parse `.quay/promotion-round.jsonl` (one JSON object per line) into round records. Pure — never
+ *  throws; a malformed line is skipped (the carrier is best-effort runtime log, not a store). */
+export function parsePromotionRoundRecords(text: string): PromotionRoundRecord[] {
+  const out: PromotionRoundRecord[] = [];
+  for (const line of String(text).split("\n")) {
+    const s = line.trim();
+    if (!s) continue;
+    let j: Record<string, unknown>;
+    try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
+    out.push({
+      ts: typeof j.ts === "string" && j.ts.length > 0 ? j.ts : null,
+      round: typeof j.round === "number" && Number.isFinite(j.round) ? j.round : null,
+      action: typeof j.action === "string" && j.action.length > 0 ? j.action : null,
+      pool: typeof j.pool === "number" && Number.isFinite(j.pool) ? j.pool : null,
+      promoted_ids: Array.isArray(j.promoted_ids) ? j.promoted_ids.map(String).filter(Boolean) : [],
+      error: typeof j.error === "string" && j.error.length > 0 ? j.error : null,
+    });
   }
+  return out;
+}
 
-  let j: Record<string, unknown>;
-  try {
-    const argv = p.endsWith(".ts")
-      ? ["--experimental-strip-types", p, "--json"]
-      : [p, "--json"];
-    const { stdout } = await execFileP("node", argv, { cwd: root, timeout: 60_000, maxBuffer: 32 * 1024 * 1024, encoding: "utf8" });
-    j = JSON.parse(stdout);
-  } catch (err) {
-    return { status: "error", reason: `slot-refill 读失败：${err instanceof Error ? err.message : String(err)}`, pool: null, floor: null, deficit: null, cap: null };
+/** Derive the ManagerResult pool metrics from the driver's latest round record. `pool` is the
+ *  driver's own recorded judgment at round time (the ready count BEFORE that round's own promotions —
+ *  a resident loop records the post-promotion count on its NEXT round); `lastPromoted` surfaces what
+ *  that round promoted, so a todo→ready promotion is reflected even in a single --once round.
+ *  floor/deficit/cap are DERIVED from the fixed dispatch constants (the same caliber slot-refill
+ *  reported). A round whose pool is absent (the driver's round failed, or the carrier predates the
+ *  pool field) reports `error` — never a fabricated ok (hard rule ③b). */
+function poolMetricsFromRound(latest: PromotionRoundRecord): ManagerResult["pool"] {
+  if (latest.pool == null) {
+    return {
+      status: "error",
+      reason: `promotion-driver 最近一轮判定无 pool 读数${latest.error ? `（${latest.error}）` : ""}`,
+      pool: null, floor: null, deficit: null, cap: null, lastPromoted: latest.promoted_ids,
+    };
   }
-
-  const pool: ManagerResult["pool"] = {
+  const cap = PROMOTION_CAP_DEFAULT;
+  const floor = cap * PROMOTION_FLOOR_MULT_DEFAULT;
+  const deficit = Math.max(0, floor - latest.pool);
+  return {
     status: "ok",
     reason: null,
-    pool: typeof j.pool === "number" ? j.pool : null,
-    floor: typeof j.floor === "number" ? j.floor : null,
-    deficit: typeof j.deficit === "number" ? j.deficit : null,
-    cap: typeof j.cap === "number" ? j.cap : null,
+    pool: latest.pool,
+    floor,
+    deficit,
+    cap,
+    lastPromoted: latest.promoted_ids,
   };
-  slotRefillCache.set(root, { at: Date.now(), pool });
+}
+
+/** The promotion-driver's round carrier → pool/floor/deficit/cap + lastPromoted (AC136: the truth
+ *  source for the pool metrics is the driver's own round record, not a cold-call of the retired
+ *  slot-refill dispatch path). A successful reading is short-TTL-cached; a failed/transient read is
+ *  NOT cached. One of readManager's four CONCURRENT probes. */
+async function readPoolMetrics(root: string): Promise<ManagerResult["pool"]> {
+  const hit = poolMetricsCache.get(root);
+  if (hit && Date.now() - hit.at < POOL_METRICS_CACHE_TTL_MS) return hit.pool;
+
+  const file = path.join(root, PROMOTION_ROUND_REL);
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    return {
+      status: "empty",
+      reason: `${PROMOTION_ROUND_REL} 尚无 round 记录（promotion-driver 未接入/未跑）`,
+      pool: null, floor: null, deficit: null, cap: null, lastPromoted: [],
+    };
+  }
+
+  const records = parsePromotionRoundRecords(text);
+  const latest = records[records.length - 1];
+  if (!latest) {
+    return {
+      status: "empty",
+      reason: `${PROMOTION_ROUND_REL} 无可解析的 round 记录`,
+      pool: null, floor: null, deficit: null, cap: null, lastPromoted: [],
+    };
+  }
+
+  const pool = poolMetricsFromRound(latest);
+  poolMetricsCache.set(root, { at: Date.now(), pool });
   return pool;
 }
 
@@ -1473,14 +1545,13 @@ async function readDevelopLead(root: string): Promise<number | null> {
 
 /**
  * Manager view — LIGHT path for the dashboard display surface (gap-webui-dashboard-load-time-
- * optimization AC1): loop-driver + session-liveness ONLY, WITHOUT the slot-refill pool probe.
+ * optimization AC1): loop-driver + session-liveness ONLY, WITHOUT the pool probe.
  *
  * The dashboard's mgrCard (serve-handlers.ts renderDashboardPage) shows only loopDriver.verdict +
- * the alive-session count — it never renders pool/floor/deficit/cap. Cold-calling slot-refill is the
- * single most expensive probe in the manager view (~9s on the live box: `node
- * --experimental-strip-types` re-strips the whole import graph each run), so paying it for data the
- * card does NOT show is wasted latency. The `/manager` detail page — which DOES render pool — keeps
- * calling the full `readManager` below.
+ * the alive-session count — it never renders pool/floor/deficit/cap. readPoolMetrics (AC136) now
+ * reads the promotion-driver round carrier (a small sync file read), so the pool probe is cheap —
+ * but the card does NOT show it, so paying for the read is still wasted work. The `/manager` detail
+ * page — which DOES render pool — keeps calling the full `readManager` below.
  *
  * The un-probed fields are returned as `status: "empty"` (never "ok") so any surface that
  * accidentally renders them reads 未接入 rather than a fabricated zero (hard rule ③b — a value the
@@ -1504,20 +1575,20 @@ export async function readManagerLight(root: string): Promise<ManagerResult> {
     loopDriver,
     liveness,
     observers: { status: "empty", reason: "dashboard 轻量探针不含 observers（/manager 详情页才含）", rows: [] },
-    pool: { status: "empty", reason: "dashboard 轻量探针不含 pool（/manager 详情页才含）", pool: null, floor: null, deficit: null, cap: null },
+    pool: { status: "empty", reason: "dashboard 轻量探针不含 pool（/manager 详情页才含）", pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] },
     version,
     developLead: null,
   };
 }
 
-/** Manager view: loop-driver + session-liveness + observer registry + slot-refill pool metrics. */
+/** Manager view: loop-driver + session-liveness + observer registry + promotion-driver pool metrics. */
 export async function readManager(root: string): Promise<ManagerResult> {
   // AC1 (gap-webui-dashboard-manager-slow-parallelize): the four async probes are independent — run
-  // them CONCURRENTLY. Serial was loop-driver(1.26s)→session-liveness(2.31s)→slot-refill(9.10s)→
-  // git(0.01s) ≈ 12.7s; parallel is bounded by the slowest probe (slot-refill, short-TTL-cached).
-  // buildManagerSessionTargets is a tiny synchronous file read needed for the liveness probe's
-  // SESSION_TARGETS override, so it runs first; observers registry + version are small sync reads
-  // kept inline.
+  // them CONCURRENTLY. readPoolMetrics (AC136) reads the promotion-driver's round carrier — a small
+  // sync file read, no subprocess — so the ~9s slot-refill cold-call floor is gone from the manager
+  // path too. buildManagerSessionTargets is a tiny synchronous file read needed for the liveness
+  // probe's SESSION_TARGETS override, so it runs first; observers registry + version are small sync
+  // reads kept inline.
   const targets = buildManagerSessionTargets(root);
 
   const [loopDriver, liveness, pool, developLead] = await Promise.all([

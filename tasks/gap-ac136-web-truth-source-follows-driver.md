@@ -48,6 +48,8 @@ depends_on:
 
 ## Touches
 
-- packages/quay/src/observation.ts（readPoolMetrics 真相源切换）
-- packages/quay/src/serve-handlers.ts（状态计数/最近更新真相源切换）
+- packages/quay/src/observation.ts（readPoolMetrics 真相源切换：读 .quay/promotion-round.jsonl；pool 类型加 lastPromoted；缓存改名 poolMetricsCache）
+- packages/quay/src/serve-handlers.ts（/manager 页 pool 真相源标注 + lastPromoted 渲染；台账口径一致注释）
+- packages/quay/test/gap-ac136-web-truth-source.test.mjs（新增：AC1 解析/负控制 + AC2 驱动晋升反映取假）
+- packages/quay/test/gap-dashboard-parallelize.test.mjs（旧 slot-refill 缓存测试改为 promotion-round 缓存测试）
 - tasks/gap-ac136-web-truth-source-follows-driver.md（自身）
