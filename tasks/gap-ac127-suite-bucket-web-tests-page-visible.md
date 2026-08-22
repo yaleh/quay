@@ -1,7 +1,7 @@
 ---
 id: gap-ac127-suite-bucket-web-tests-page-visible
 title: AC127 分桶记录在 web /tests 页可见（observation.ts + serve-handlers.ts 解析并展示 buckets 字段）
-status: ready
+status: done
 labels:
   - gap
 parent: null
