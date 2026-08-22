@@ -1,7 +1,7 @@
 ---
 id: gap-webui-live-implcomplete-state-render
 title: web /live 渲染 implCompletedAtMs（实现中 vs 已完工待落地分栏 + 待落地时长），dashboard liveCard 升级 mini 列表
-status: todo
+status: ready
 labels:
   - gap
 parent: null
