@@ -38,4 +38,6 @@ depends_on: []
 ## Touches
 
 - .claude/workflows/fan-in-execute.js（suite 锁持有检测）
+- plugin/workflows/fan-in-execute.js（双副本，逐字节相同）
+- plugin/test/fan-in-execute-paths.test.mjs（stuck-holder 组测试 + pidfile 断言更新）
 - tasks/gap-suite-lock-holder-stuck-detection.md（自身）
