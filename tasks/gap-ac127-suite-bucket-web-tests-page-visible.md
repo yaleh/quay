@@ -1,7 +1,7 @@
 ---
 id: gap-ac127-suite-bucket-web-tests-page-visible
 title: AC127 分桶记录在 web /tests 页可见（observation.ts + serve-handlers.ts 解析并展示 buckets 字段）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -37,12 +37,12 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `parseVerificationRound` 解析 `buckets` 字段（legacy 缺键 → undefined，不 throw）。
-- [ ] AC2: `renderTestsPage` 输出桶值——回放 `buckets=M` ⇒ 页面含 `M`；legacy 无桶字段 ⇒ 不展示桶（absence 容忍，不显示伪 `full`）。
+- [x] AC1: `parseVerificationRound` 解析 `buckets` 字段（legacy 缺键 → undefined，不 throw）。
+- [x] AC2: `renderTestsPage` 输出桶值——回放 `buckets=M` ⇒ 页面含 `M`；legacy 无桶字段 ⇒ 不展示桶（absence 容忍，不显示伪 `full`）。
 
 ## Definition of Done
 
-- [ ] /tests 页解析并展示桶字段 + 取假两向回放通过；AC1-2 全勾；land 到 develop。
+- [x] /tests 页解析并展示桶字段 + 取假两向回放通过；AC1-2 全勾；land 到 develop。
 
 ## Touches
 
