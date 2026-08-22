@@ -1,7 +1,7 @@
 ---
 id: gap-webui-cross-task-blocking-visibility
 title: web 展示跨任务阻塞关系（Touches 交集 + depends_on 链 → blocks/blockedBy，谁挡谁可查）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
