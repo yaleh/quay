@@ -34,9 +34,9 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: README.md 安装示例版本更新（0.6.0→0.6.1 或 `<version>` 占位），`grep '0.6.0'` 安装示例处不再出现旧版本号。
-- [ ] AC2: CHANGELOG.md 有 `## v0.6.1` 条目，内容覆盖人令② release 范围（T1–T5 / AC107 重验 / AC118 截图 / 134+ 提交）。
-- [ ] AC3: `version-consistency-check` 仍 `All 8 files carry 0.6.1`（不引入新的 8 处漂移）。
+- [x] AC1: README.md 安装示例版本更新（0.6.0→0.6.1 或 `<version>` 占位），`grep '0.6.0'` 安装示例处不再出现旧版本号。
+- [x] AC2: CHANGELOG.md 有 `## v0.6.1` 条目，内容覆盖人令② release 范围（T1–T5 / AC107 重验 / AC118 截图 / 134+ 提交）。
+- [x] AC3: `version-consistency-check` 仍 `All 8 files carry 0.6.1`（不引入新的 8 处漂移）。
 
 ## Definition of Done
 

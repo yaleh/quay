@@ -73,7 +73,7 @@ kinds of artifact:
 - **npm package** (`quay-*.tgz`) — requires Node.js >= 20 already installed:
 
   ```sh
-  npm install -g quay-0.6.0.tgz   # replace with the actual filename from the release
+  npm install -g quay-<version>.tgz   # replace <version> with the actual release version
   quay --help
   ```
 
@@ -125,7 +125,7 @@ claude plugin install quay@quay
 Opt-out (install the CLI without registering the plugin):
 
 ```sh
-QUAY_SKIP_PLUGIN_REGISTER=1 npm install -g quay-0.6.0.tgz
+QUAY_SKIP_PLUGIN_REGISTER=1 npm install -g quay-<version>.tgz
 ```
 
 This is the **only** supported way to install for the CLI alone. (Install scripts
@@ -610,7 +610,7 @@ and `windows-x64`. Each archive bundles:
   `tasks/` directory.
 
 ```sh
-tar xzf quay-sea-0.6.0-linux-x64.tar.gz
+tar xzf quay-sea-<version>-linux-x64.tar.gz
 cd <extracted-dir>
 ./quay --help
 ./quay serve
