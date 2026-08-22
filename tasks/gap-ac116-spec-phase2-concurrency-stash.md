@@ -44,7 +44,16 @@ depends_on:
 
 ## Touches
 
-- plugin/scripts/worker-driver.ts（并发控制，落点 inner 定）
+- plugin/scripts/worker-driver.ts（并发控制 N + 超时 SIGTERM + checkout 前 stash）
 - plugin/scripts/cap-from-gate.sh（退役裁决面）
+- plugin/scripts/cap-from-gate.ts（退役裁决面——裁决逻辑模块，非薄包装）
 - plugin/scripts/process-budget.sh（退役裁决面）
+- plugin/scripts/fan-in-workflow-check.ts（A6「检查 fan-in 是否走 workflow」退役面）
+- plugin/test/worker-driver.test.mjs（阶段 2 测试：AC1 并发 / AC2 stash / AC3 超时）
 - tasks/gap-ac116-spec-phase2-concurrency-stash.md（自身）
+
+> **Touches 扩充说明**（相对立案时新增 3 项）：① `cap-from-gate.ts`——`cap-from-gate.sh` 只是
+> thin bash 包装（`exec node … cap-from-gate.ts`），「并发裁决面」的实际逻辑在 `.ts` 模块，退役横幅
+> 两处都落；② `fan-in-workflow-check.ts`——`## Retires` 明确列「A6 检查 fan-in 是否走 workflow」，
+> 该检查正身即此文件，退役横幅落此处；③ `worker-driver.test.mjs`——AC1/AC2/AC3 的取假证据必须落在
+> scoped 单测里（硬约束「跑 scoped 单测」），是实现的必带产物。

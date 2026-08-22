@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+// ⛔ RETIRED（并发裁决用途）— SPEC-worker-driven-inner-2026-08-16 §5 阶段 2（gap-ac116-spec-phase2-
+//   concurrency-stash）：本模块作为【派发并发裁决器】（effective_cap 供 slot-refill/派发读作并发上限）
+//   的用途已退役——新驱动 worker-driver.ts 数自己的子进程（直接量，硬规则 4b），不再读 effective_cap
+//   裁决派发并发。保留面（不退役）：观测行（signal/band/budget）+ 过渡期旧循环 slot-refill 仍读
+//   effective_cap。⛔ 新驱动路径不消费本模块做并发裁决。
 // plugin/scripts/cap-from-gate.ts — FIXED concurrency cap (the dynamic cap is RETIRED).
 //
 // HUMAN RULING (2026-08-09, task gap-fixed-cap-5-dynamic-cap-retired): the ADAPTIVE concurrency cap
