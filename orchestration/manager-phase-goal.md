@@ -99,13 +99,20 @@
 **裁：accept 41.6%**——安全优先于省；⛔ **禁止**以压低 M 桶占比为目的对这 9 个测试做再归属（拿安全换指标 = gate-gaming）。
 **持续信号**：M-only 轮围绕实测带 41.6% 波动（参照 `SPEC-suite-speed` 噪声 σ 判显著偏离）；显著偏离才是真回归。
 **③ 实测记账**：单桶省 ~56–58% 为真，但**低于基线加权估值 65.7%**（估值漏了恒选安全侧+固定开销）⇒ **本阶段收官按实测收益记账，不按 65.7% 报账**。
+**④ ⛔ 前提依赖（2026-08-22 补）**：AC124 的窗口判据（≥10 轮带桶字段）以 **AC126（启用接线）落地为前提**——启用前生产 suite 从不传 `--buckets`，窗口**结构上恒为 0**，不因「等数据」而改变。
 
 ### AC125（漏测的负控制 —— 分桶不得把真回归放过去）
 **判据（能取假）**：取本仓历史上**至少 3 次真实的跨层回归**（一个桶的源码改动打红了另一个桶的测试；从 `verification-round.jsonl` 红轮 + 对应提交回溯），回放分桶规则，**必须 3/3 仍然选中那个会红的测试**。
 **⊢ 为什么必须有这条**：AC120-124 都在证明"能省"，**只有这条在证明"没漏"**。⛔ 缺这条则本阶段的达成等于一个恒绿判据。
 
+### AC126（分桶执行的【生产启用】——suite 路径真正传 `--buckets`）
+**判据**：分桶执行的「启用」≠ 机制存在，而是**生产 suite 路径真正传 `--buckets <task-id>`**——即 fan-in 的 suite 启动（`.claude/workflows/fan-in-execute.js` 的 SUITE_LAUNCH/ISOLATE_LAUNCH，或其路由到的 full-suite-runner 入口）在任务触及单桶时按桶跑子集，且**该带桶轮次写入 `.quay/verification-round.jsonl`（AC124 的判据载体）**。
+**取假（可机械核）**：(a) `fan-in-execute.js` 存在 `--buckets` 引用且 suite 启动命令串含 `--buckets`；(b) 回放一个 M-only 任务走 fan-in，其 verification-round 记录带 `buckets=M`；一个触枢纽任务带 `buckets=full`。任一不符 ⇒ 未达成。
+**⊢ 为什么是缺口**：AC124 只把「开关」装在 `scripts/test.sh`/`full-suite-runner.ts` 两层（机制层），**没装到「谁按下开关」这一层**——fan-in 的 SUITE_LAUNCH 仍跑 `bash scripts/test.sh`（全量、无 `--buckets`），且实测 `fan-in-execute.js` **零处引用 buckets**。⇒ AC124 的 ≥10 轮带桶字段在启用接线前**结构上不可满足**（不是「等数据」能等出来的）。
+**⊢ 已核实的连带（inner 接线时一并处理）**：fan-in 的 suite 直跑 `test.sh`、不经 `full-suite-runner.ts`，而 `verification-round.jsonl` **仅由 `full-suite-runner.ts` 写**（既有 gap-preverified-suite-bypasses-verification-round-ledger / gap-fan-in-realsuite-bypasses-verification-round-ledger）⇒ ⛔ 启用接线不得只跑子集不落账，必须让带桶轮次落到 verification-round 载体上。
+
 ### 本阶段的达成条件与非目标
-**达成 = AC120 ∧ AC121 ∧ AC122 ∧ AC123 ∧ AC124 ∧ AC125 全部为真。**
+**达成 = AC120 ∧ AC121 ∧ AC122 ∧ AC123 ∧ AC124 ∧ AC125 ∧ AC126 全部为真。**
 **⛔ 非目标**：
 - ⛔ 不在本阶段改 `select-tests-for-touches.ts` 的文件级判据（那是另一层粒度，本阶段不碰）。
 - ⛔ 不在本阶段做退役/减少机件（那是下一阶段 AC110–AC117，判据面不得混用——硬规则 12「永远差最后一步」）。
