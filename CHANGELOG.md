@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.6.1 (2026-08-21) — documentation close-out (T1-T5) + cross-host/cross-project verification
+
+The 134+ commit release (人令② publish) closes out the delivery-facing documentation and the
+cross-machine verification: five product-documentation tasks (T1-T5), the AC107 cross-host
+mechanized verification re-run after the L2 liveness fix, and the AC118 cross-project pixel
+screenshots.
+
+#### Added
+
+- **Documentation close-out (T1-T5)**: CHANGELOG backfill for v0.4.0/v0.5.0/v0.6.0 (T1), root
+  README refresh (T2), Web UI user guide with 19 in-repo screenshots — 15 routes + 4 detail pages
+  (T3), `quay-native`/`quay-github` package READMEs (T4), and the `quay --help` missing commands
+  (`adr` / `config validate` / `manager`) (T5).
+- **AC107 cross-host mechanized verification re-verified**: the `verify-deliver-coldstart.sh` B/C
+  dual-machine three-step cold-start run re-executed after the L2 liveness fix, with negative
+  (`L2_STARTUP_PROMPT=1` → no) and positive (→ yes) controls both passing.
+- **AC118 cross-project pixel screenshots**: 3 meta-cc screenshots on machine B (headless Chrome)
+  plus the Web UI guide's 19 in-repo screenshots, jointly satisfying the cross-project + screenshot
+  verification (AC118/AC119).
+
+#### Fixed
+
+- **verify-deliver-coldstart L2 liveness false positive**: `proc_ok` alone no longer proves L2 is
+  alive — a startup-prompt direct measure was added (gap-verify-deliver-coldstart-l2-proc-ok-
+  false-positive).
+
 ## v0.6.0 (2026-08-20) — productization pipeline close-out (AC104-119) + Web UI gap fixes
 
 Closes the productization/verification pipeline (AC104-119): the version-bump step, current-tgz
