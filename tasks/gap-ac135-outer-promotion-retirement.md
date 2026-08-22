@@ -60,5 +60,6 @@ depends_on:
 - plugin/scripts/outer-tick-log-check.sh（A22_LINE 移除 + ② 退役）
 - plugin/test/outer-tick-log-check.test.mjs（监控 tick fixture 去 A22 + ② 退役 + 活触发改 ①）
 - tasks/gap-ac135-outer-promotion-retirement.md（自身）
+- docs/proposals/quay-product-outline.md（delivery-inventory-drift-gate 结构性 co-touch：删除 plugin/scripts/ac66-a22-agent-id-check.ts 触发 §6 DELIVERY-INVENTORY 快照 scripts 计数 281→280）
 
-> **Touches 扩充说明**（`grep -rn 'A22\|A24'` 全仓库，命中面如上）：manager-phase-goal.md（判据正本）/ 历史任务体（gap-ac66-*、gap-outer-supply-heartbeat 等）/ archive（AC58-retired-clauses.md）/ SPEC-* 文档中的 A22/A24 是历史记录或判据正本，不在改动范围；promotion-driver.ts + promotion-driver.test.mjs 中的 A22/A24 是【承接方】自述（正确描述驱动取代 A22/A24），保留；packages/quay/ 下 observation.ts + gap-dashboard-parallelize.test.mjs 的「A22」实指 slot-refill 子进程读面（非本任务退役的晋升心跳），未改。
+> **Touches 扩充说明**（`grep -rn 'A22\|A24'` 全仓库，命中面如上）：manager-phase-goal.md（判据正本）/ 历史任务体（gap-ac66-*、gap-outer-supply-heartbeat 等）/ archive（AC58-retired-clauses.md）/ SPEC-* 文档中的 A22/A24 是历史记录或判据正本，不在改动范围；promotion-driver.ts + promotion-driver.test.mjs 中的 A22/A24 是【承接方】自述（正确描述驱动取代 A22/A24），保留；packages/quay/ 下 observation.ts + gap-dashboard-parallelize.test.mjs 的「A22」实指 slot-refill 子进程读面（非本任务退役的晋升心跳），未改。docs/proposals/quay-product-outline.md 为 delivery-inventory 快照计数 co-touch（删除顶层 plugin/scripts 文件的结构性义务，gate 强制），非 A22/A24 语义改动。
