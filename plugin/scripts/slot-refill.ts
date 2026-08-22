@@ -14,27 +14,23 @@
 // spawns agents, never advances a counter):
 //   1. slots_free = max(0, effective_cap - in_flight_count). THE MEASURED OBJECT (AC76, 人
 //      2026-08-14 07:3xZ 逐字「cap=5 就是为了保护 subagent——inner 不能并发无限多 subagent」):
-//      cap 的被计量对象 = 并发 subagent。The caller passes the CURRENTLY-RUNNING subagent set
-//      EXPLICITLY (--in-flight) — the INNER tick's own maintained set, which is authoritative for
-//      its dispatch decision. ⛔ 禁 worktree 代理 — `git worktree list | grep -c` is a FORBIDDEN
-//      proxy (a worktree can have no active subagent turn, and an active subagent can have no
+//      cap 的被计量对象 = 并发 worker。AC115 (SPEC-worker-driven-inner §5 阶段 1): 在飞 = 驱动进程
+//      fork 的子进程数（直接量）——the caller passes it as --in-flight-count <n> (the worker driver's
+//      own child count), which is authoritative. ⛔ 禁 worktree 代理 — `git worktree list | grep -c` is
+//      a FORBIDDEN proxy (a worktree can have no active worker turn, and an active worker can have no
 //      worktree; 双向实测 2026-08-14: 07:2xZ worktree 4 · 活跃 subagent 2 ⇒ 高估 2; 07:4xZ worktree 1 ·
-//      活跃 subagent 2 ⇒ 低估 1 — tasks/gap-ac76-cap-counts-subagents-not-worktrees). The helper
-//      deliberately does NOT read RAW telemetry brackets for the count (AC6: brackets ≠ subagents —
-//      gap-telemetry-brackets-vs-subagents-no-slot-visibility; a completed-but-not-fanned-in task
-//      keeps its telemetry bracket open yet its slot IS free). Completion frees the slot at the
-//      <task-notification>, not at fan-in.
-//   RETIRED (AC76 C24-2, 人 2026-08-14 09:1xZ「在飞不应当靠任务记录,而应当查 inner 任务 subagent」;
-//            gap-inflight-states-missing-impl-complete-event 2026-08-19 进一步解耦):
-//      the MEASURED IN-FLIGHT DEFAULT below — when --in-flight/--closed-but-live are NOT passed (the
-//      OUTER tick A18 / a manual bare `--json` reading), the in-flight view was MEASURED from the
-//      reconcile-aware telemetry `--slot-status` view (real-in-flight KEPT records / closed-but-live
-//      agents / non-task subagents). That derivation is RETIRED — its worktree/telemetry/process probes
-//      are proxy inferences for the missing state. The Build dispatch count now reads the event
-//      stream's IMPLEMENTING segment (start without impl-complete — 真正在实现; the third
-//      `impl-complete` event splits the start→end span). a bare invocation still surfaces
-//      measurement_source ("explicit-input" | "event-stream-implementing" | "degraded-no-telemetry")
-//      + measurement_error so a 0 is never silent again.
+//      活跃 subagent 2 ⇒ 低估 1 — tasks/gap-ac76-cap-counts-subagents-not-worktrees). ⛔ 禁 telemetry
+//      bracket 代理 — a completed-but-not-fanned-in task keeps its telemetry bracket open yet its slot
+//      IS free; brackets ≠ workers (gap-telemetry-brackets-vs-subagents-no-slot-visibility). Completion
+//      frees the slot at the worker's exit, not at fan-in.
+//   RETIRED (AC115, SPEC §5 阶段 1 退役清单): the --in-flight/--closed-but-live/--running PARAMETER
+//      PASSING and the telemetry-bracket "在飞" measurement (parseImplementingReport /
+//      measureImplementingFromTelemetry) are DELETED — their "在飞" semantic is taken over by the worker
+//      driver's direct child count. The pure analyzeSlotRefill still ACCEPTS the id lists (inFlight/
+//      closedButLive/runningSubagentCount) for the touches-disjointness step-4 checks — the AC53 gate's
+//      library consumer (inner-wakeup-heartbeat-check.ts) keeps passing them; the CLI surface the
+//      driver uses does not. A bare CLI invocation (no --in-flight-count) reports
+//      measurement_source="not-measured" and NULLS the slot family (fail-closed, never a silent 0).
 //   2. Pool stats from ready-pool-check.analyzeTasks (pool / dispatchable_disjoint / criterion_met).
 //   3. should_refill = slots_free > 0 && dispatchable_disjoint >= 1 — the event-driven go/no-go.
 //   4. recommended = up to slots_free candidate ids from the PRODUCTION disjoint batch
@@ -68,8 +64,12 @@
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/slot-refill.ts [--root <repo>]
-//       [--cap <n>] [--in-flight <id1,id2>] [--floor-mult <n>] [--integration-backlog <n>]
+//       [--cap <n>] [--in-flight-count <n>] [--floor-mult <n>] [--integration-backlog <n>]
 //       [--red-backlog-cap <n>] [--json]
+//   --in-flight-count <n>       AC115: the worker driver's DIRECT child-process count (在飞 = 驱动子进程数,
+//                               直接量). ABSENT ⇒ measurement_source="not-measured" + slot family NULL
+//                               (fail-closed, never a silent 0). ⛔ --in-flight/--closed-but-live/--running
+//                               参数传递已退役（其语义由 worker-driver 子进程数接管）。
 //   --integration-backlog <n>   override the git-read integration backlog (test/Contract seam; the
 //                               production default reads `git rev-list --count develop..integration`).
 //                               Reported as a diagnostic; NO LONGER the cap-narrowing trigger.
@@ -81,7 +81,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { parseTask, extractSection } from "./task-schema.ts";
 import {
   analyzeTasks,
@@ -568,15 +567,15 @@ export function checkTouchesPairInFlight(candidateParsed, inFlightParsed, expand
  *      back to the wide set (backward compat for callers not yet passing --running / the outer A18 +
  *      manual bare paths).
  *  @param {string|null} [o.measurementSource] where the in-flight view came from — "explicit-input"
- *      (the caller passed --in-flight/--closed-but-live), "event-stream-implementing" (measured from
- *      the telemetry report's `implementing` segment — start without impl-complete, the Build dispatch
- *      count), or "degraded-no-telemetry" (the measurement failed and the in-flight view fell back to
- *      empty). Default null (direct library calls that pass inFlight/closedButLive arrays). This is
+ *      (the library caller passed inFlight/closedButLive arrays, e.g. the AC53 gate), "driver-count"
+ *      (the CLI passed --in-flight-count <n> — the worker driver's DIRECT child-process count, AC115),
+ *      "not-measured" (bare CLI with no --in-flight-count ⇒ fail-closed null), or "degraded-no-telemetry"
+ *      (legacy: the retired telemetry measurement failed). Default null (direct library calls). This is
  *      the field that closes gap-slot-refill-inflight-disconnected-from-worktrees: a bare
- *      `slot-refill --json` must never again silently read 0 — the JSON now says whether 0 is measured
- *      or a degraded fallback.
- *  @param {string|null} [o.measurementError] when measurementSource === "degraded-no-telemetry", the
- *      telemetry failure message (never a silent 0). Default null.
+ *      `slot-refill --json` must never again silently read 0 — the JSON now says whether the count is a
+ *      direct driver count, an explicit input, or not-measured (null).
+ *  @param {string|null} [o.measurementError] when measurementSource is an unmeasured/degraded state,
+ *      the reason (never a silent 0). Default null.
  *  @param {number} [o.integrationBacklog] integration-ahead-of-develop commit count; when omitted it
  *      is read from git (`git rev-list --count develop..integration`), fail-safe 0 on a non-git root /
  *      missing ref. Injectable for tests (a temp dir is not a git repo). Reported as a diagnostic;
@@ -934,15 +933,17 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // as a separate array below precisely so the consumer can read "recommended 非空" without re-deriving
   // it from the boolean — the semantics are: should_refill = (slots_free > 0) ∧ (recommended ≠ ∅).
   // AC6 DEGRADED-MEASUREMENT NULL (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 判据5
-  // 修法 (a), manager 13:2xZ): when the in-flight view FAILED to measure
-  // (measurement_source='degraded-no-telemetry'), the slot-family fields MUST be null — a downstream
-  // doing arithmetic on them must CRASH (null arithmetic → NaN) instead of silently computing
-  // "5 empty slots" (same-shaped as qualified). The 3b 漏网形态: slot-refill gave an honest
+  // 修法 (a), manager 13:2xZ) — BROADENED by AC115 (SPEC §5 阶段 1): when the in-flight view is NOT
+  // measured (measurement_source='degraded-no-telemetry' OR 'not-measured' — the new bare-invocation
+  // state after the telemetry-bracket "在飞" retirement), the slot-family fields MUST be null — a
+  // downstream doing arithmetic on them must CRASH (null arithmetic → NaN) instead of silently
+  // computing "5 empty slots" (same-shaped as qualified). The 3b 漏网形态: slot-refill gave an honest
   // measurement_source='degraded-no-telemetry' BUT also reported in_flight_count=0 (identical to
   // "genuinely nothing in flight"), and the gate (inner-wakeup-heartbeat.ts) does NOT read
   // measurement_source (零命中) — it only reads the numbers. Nulling the numbers forces the failure
-  // to propagate to the consumer instead of being swallowed.
-  const degraded = measurementSource === "degraded-no-telemetry";
+  // to propagate to the consumer instead of being swallowed. The new 'not-measured' source (bare CLI
+  // with no --in-flight-count) is the SAME fail-closed shape, never a silent 0.
+  const unmeasured = measurementSource === "degraded-no-telemetry" || measurementSource === "not-measured";
   let shouldRefill = slotsFree > 0 && recommended.length >= 1;
   let noRefillReason = null;
   if (halt.halted) {
@@ -950,11 +951,12 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // highest-priority gate (gap-supervisor-preemption: `.halt` is 任意点生效, not tick-boundary).
     shouldRefill = false;
     noRefillReason = `halted (preemption: .halt present — ${halt.reason}; check with supervisor-preempt.sh halt-check)`;
-  } else if (degraded) {
-    // AC6: a degraded measurement is NOT a valid "0 in-flight" — fail CLOSED (no refill) and say so.
-    // slots_free is null here; a consumer reading it gets null, never a silently-computed "5".
+  } else if (unmeasured) {
+    // A not-measured / degraded in-flight view is NOT a valid "0 in-flight" — fail CLOSED (no refill)
+    // and say so. slots_free is null here; a consumer reading it gets null, never a silently-computed
+    // "5" (the same family as a silently-computed "5 empty slots").
     shouldRefill = false;
-    noRefillReason = "measurement degraded — in-flight view NOT evaluated (measurement_source='degraded-no-telemetry'); slots_free is null, downstream must not read it";
+    noRefillReason = `in-flight view NOT measured (measurement_source='${measurementSource}'); slots_free is null, downstream must not read it — pass --in-flight-count <n> (driver child count) for a direct quantity`;
   } else if (slotsFree <= 0) {
     // AC5 DUAL-CONSUMER SPLIT: the slots consumer's denominator is the NARROW running-subagent count
     // when the caller passed --running, else the wide in-flight fallback.
@@ -1001,31 +1003,30 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // occupied_slots / slots_free) — a downstream arithmetic consumer CRASHES on null instead of
     // silently computing "5 empty slots" (same-shaped as qualified). measurement_source +
     // measurement_error still name WHY (never a silent 0).
-    in_flight_count: degraded ? null : inFlight.length,
-    closed_but_live_count: degraded ? null : closedButLive.length,
+    in_flight_count: unmeasured ? null : inFlight.length,
+    closed_but_live_count: unmeasured ? null : closedButLive.length,
     // AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 人 2026-08-14
     // 12:5xZ): the NARROW Consumer-B denominator — the currently-RUNNING task subagent count used for
     // occupied_slots / slots_free — plus its provenance. "running-subagents" = the caller passed
     // --running; "in-flight-fallback" = Consumer B reuses the wide in-flight set (backward compat).
     // Distinct from `in_flight_count` (the WIDE Consumer-A denominator, unchanged): the two are
     // ALLOWED to differ (dispatchable_disjoint 分母 ≠ slots_free 分母).
-    running_subagent_count: degraded ? null : slotOccupants,
+    running_subagent_count: unmeasured ? null : slotOccupants,
     slot_denominator_source: runningSubagentCount !== null ? "running-subagents" : "in-flight-fallback",
     // NON-TASK SUBAGENTS (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots): the
     // investigation-subagent PROCESS count that occupies slots but carries no task id. Included in
     // occupied_slots/slots_free, never in the touches-disjointness check.
-    subagents_in_flight: degraded ? null : subagentsInFlight,
-    // MEASUREMENT PROVENANCE (gap-slot-refill-inflight-disconnected-from-worktrees): where the
-    // in-flight view came from. "explicit-input" = the caller passed --in-flight/--closed-but-live
-    // (the inner tick A12 path); "event-stream-implementing" = measured from the telemetry report's
-    // `implementing` segment — start without impl-complete, the Build dispatch count
-    // (gap-inflight-states-missing-impl-complete-event; the outer tick A18 / manual bare `--json`
-    // path, which previously read a SILENT 0); "degraded-no-telemetry" = the measurement failed and
-    // measurement_error names why (never a silent 0).
+    subagents_in_flight: unmeasured ? null : subagentsInFlight,
+    // MEASUREMENT PROVENANCE (gap-slot-refill-inflight-disconnected-from-worktrees, AC115-broadened):
+    // where the in-flight view came from. "explicit-input" = the library caller passed inFlight/
+    // closedButLive arrays (the AC53 gate path); "driver-count" = the CLI passed --in-flight-count <n>
+    // (the worker driver's DIRECT child-process count); "not-measured" = bare CLI with no
+    // --in-flight-count ⇒ fail-closed null (the retired telemetry-bracket "在飞" path's honest
+    // replacement); "degraded-no-telemetry" = legacy retired-telemetry failure (never a silent 0).
     measurement_source: measurementSource,
     measurement_error: measurementError,
-    occupied_slots: degraded ? null : occupied,
-    slots_free: degraded ? null : slotsFree,
+    occupied_slots: unmeasured ? null : occupied,
+    slots_free: unmeasured ? null : slotsFree,
     pool: pool.pool,
     floor: pool.floor,
     // AC99 — surface the ready-pool `deficit` (max(0, floor − pool)) so the Manager view's
@@ -1082,50 +1083,17 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   };
 }
 
-// ── MEASURED IN-FLIGHT (gap-slot-refill-inflight-disconnected-from-worktrees →
-//    gap-inflight-states-missing-impl-complete-event) ──────────────────────────────────────────────────
-// A bare `slot-refill --json` (no --in-flight) used to read in_flight_count=0 even while worktrees +
-// telemetry showed tasks in flight — a counter disconnected from its source, the same "报零而不是报错"
-// family as gap-inbox-counter-disconnected-from-files. The first fix MEASURED the in-flight view from
-// the reconcile-aware telemetry `--slot-status` view (real-in-flight kept records + closed-but-live
-// agents + non-task subagents). That `--slot-status` derivation is now RETIRED (its worktree/process
-// probes are proxy inferences for a missing state): the Build dispatch count reads the event stream's
-// IMPLEMENTING segment (start without impl-complete — 真正在实现; the third `impl-complete` event splits
-// the start→end span). The inner tick A12 still passes its own maintained --in-flight — that explicit
-// path is byte-unchanged. On measurement failure the view degrades to empty BUT the JSON surfaces
-// measurement_source="degraded-no-telemetry" + measurement_error — the "0" is never silent again.
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TELEMETRY_CLI = path.join(__dirname, "fast-mode-telemetry.ts");
-
-/** Parse `fast-mode-telemetry.ts --report --json` stdout into the IMPLEMENTING segment — the Build
- *  dispatch count (gap-inflight-states-missing-impl-complete-event AC2: 「有 start 无 impl-complete」
- *  = 真正在实现). The `--slot-status` reconcile-derived view is RETIRED (its worktree/telemetry/
- *  process probes are proxy inferences); the event stream's impl-complete boundary is the state record.
- *  PURE: injectable for tests — the subprocess spawn lives in measureImplementingFromTelemetry. */
-export function parseImplementingReport(text) {
-  const d = JSON.parse(text);
-  const implementing = Array.isArray(d.implementing) ? d.implementing : [];
-  return {
-    implementingIds: implementing.map((r) => r.taskId).filter(Boolean),
-    implementingCount: implementing.length,
-  };
-}
-
-/** Spawn the telemetry `--report` CLI and parse the implementing segment (start without impl-complete).
- *  Any subprocess/parse failure → { ok:false, error } — the caller degrades to empty but MUST surface
- *  the error (never a silent 0). */
-export function measureImplementingFromTelemetry({ root }) {
-  try {
-    const out = execFileSync(process.execPath, [
-      "--no-warnings", "--experimental-strip-types", TELEMETRY_CLI,
-      "--report", "--json", "--root", root,
-    ], { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "ignore"] });
-    return { ok: true, ...parseImplementingReport(out) };
-  } catch (e) {
-    return { ok: false, error: e?.message || String(e) };
-  }
-}
+// ── MEASURED IN-FLIGHT — RETIRED (AC115, SPEC-worker-driven-inner-2026-08-16 §5 阶段 1) ────────────────
+// The bare `slot-refill --json` (no --in-flight) used to MEASURE the in-flight view from the telemetry
+// report's `implementing` segment (start without impl-complete). That telemetry-bracket "在飞" use is
+// RETIRED: in-flight is no longer derived from telemetry brackets — the worker driver
+// (worker-driver.ts) counts ITS OWN child processes (a DIRECT quantity, 硬规则 4b). The retired
+// measurement (parseImplementingReport / measureImplementingFromTelemetry) is DELETED; the CLI now takes
+// a direct `--in-flight-count <n>` (the driver's child count). A bare invocation without it reports
+// measurement_source="not-measured" and NULLs the slot family (fail-closed — never a silent 0), the
+// same shape as the old degraded path. The "遥测括号在飞用途" retirement is therefore: the defect it
+// defended (a counter reading 0 while tasks run) is now structurally impossible — the count comes from
+// the spawner, not from a proxy bracket; the bare-read path fails closed instead of silently 0.
 
 /** RESOLVE-BY-TASK-ID (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name): normalize an
  *  in-flight identifier (worktree DIRECTORY name / BRANCH name / true task id) to the TRUE task id.
@@ -1179,98 +1147,46 @@ function main(argv) {
   let root = null;
   let cap = FIXED_DISPATCH_CAP;
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
-  let inFlightIds = [];
-  let closedButLiveIds = [];
-  let runningIds = [];
+  // AC115 (SPEC-worker-driven-inner-2026-08-16 §5 阶段 1): in-flight is now the worker driver's
+  // DIRECT child-process count (--in-flight-count <n>), NOT a caller-maintained id list. The retired
+  // --in-flight/--closed-but-live/--running parameter passing is DELETED — its "在飞" semantic is taken
+  // over by worker-driver.ts's child count. null (flag absent) ⇒ fail-closed "not-measured".
+  let inFlightCount = null;
   let integrationBacklog = undefined;
   let redBacklogCap = RED_BACKLOG_CAP_DEFAULT;
-  // AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name): whether the
-  // caller passed the NARROW currently-RUNNING subagent set (--running). Consumer B (slots_free) uses
-  // it when present; otherwise Consumer B falls back to the wide in-flight set (backward compat).
-  let runningExplicit = false;
-  // MEASUREMENT PROVENANCE (gap-slot-refill-inflight-disconnected-from-worktrees): whether the caller
-  // EXPLICITLY supplied the in-flight view. When NEITHER --in-flight nor --closed-but-live is passed,
-  // the in-flight view is MEASURED from the reconcile-aware telemetry --slot-status view — never
-  // silently defaulted to 0 (the defect: a bare `slot-refill --json` read 0 while worktree + telemetry
-  // showed 2 in-flight).
-  let inFlightExplicit = false;
-  let closedButLiveExplicit = false;
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
     else if (args[i] === "--json") { /* output is always JSON — accepted for Contract parity */ }
     else if (args[i] === "--cap") cap = Number(args[++i]);
     else if (args[i] === "--floor-mult") floorMult = Number(args[++i]);
-    else if (args[i] === "--in-flight") {
-      inFlightExplicit = true;
-      inFlightIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
-    } else if (args[i] === "--closed-but-live") {
-      closedButLiveExplicit = true;
-      closedButLiveIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
-    } else if (args[i] === "--running") {
-      // AC5 DUAL-CONSUMER SPLIT: the NARROW Consumer-B set — the currently-RUNNING task subagent ids.
-      runningExplicit = true;
-      runningIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
-    } else if (args[i] === "--integration-backlog") {
-      integrationBacklog = Number(args[++i]);
-    } else if (args[i] === "--red-backlog-cap") {
-      redBacklogCap = Number(args[++i]);
-    }
+    else if (args[i] === "--in-flight-count") inFlightCount = Number(args[++i]);
+    else if (args[i] === "--integration-backlog") integrationBacklog = Number(args[++i]);
+    else if (args[i] === "--red-backlog-cap") redBacklogCap = Number(args[++i]);
   }
   const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
-  // RESOLVE-BY-TASK-ID (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name): each identifier is
-  // resolved to the TRUE task id before the file read — a truncated worktree slug (the `<slug>`
-  // convention lets the dispatching agent abbreviate) still resolves to the true id, so the in-flight
-  // count no longer under-reports and the AC53 gate stops refusing heartbeats it shouldn't. The
-  // resolved TRUE id is also what flows into the touches-disjointness set (line 578) — comparing the
-  // truncated slug against peers would miss collisions. Unresolved entries stay advisory-skipped
-  // (a vanished/unresolved id is not a failure), exactly as before.
   const tasksDir = path.join(rootDir, "tasks");
-  const readTasks = (ids) => {
-    const out = [];
-    for (const id of ids) {
-      const resolved = resolveInFlightId(tasksDir, id);
-      const file = path.join(tasksDir, `${resolved.id}.md`);
-      if (!fs.existsSync(file)) continue; // advisory — a vanished/unresolved id is not a failure
-      out.push({ id: resolved.id, body: fs.readFileSync(file, "utf8") });
-    }
-    return out;
-  };
-  let inFlight = readTasks(inFlightIds);
-  let closedButLive = readTasks(closedButLiveIds);
-  let subagentsInFlight = 0;
-  let measurementSource = "explicit-input";
-  let measurementError = null;
-  // MEASURED IN-FLIGHT (gap-slot-refill-inflight-disconnected-from-worktrees): a bare invocation (no
-  // --in-flight / --closed-but-live) MEASURES the in-flight view from the authoritative reconcile-aware
-  // telemetry `--slot-status` (real-in-flight kept records + closed-but-live agents + non-task
-  // subagents). This makes the outer tick A18's bare `slot-refill.ts --cap 5 --json` reading consistent
-  // with worktree + telemetry — previously it silently read 0 (and even re-recommended an already
-  // in-flight task). The inner tick A12 still passes its own --in-flight (its maintained set is
-  // authoritative for its dispatch decision), so the explicit path is unchanged. On measurement failure
-  // the view degrades to empty BUT measurement_source="degraded-no-telemetry" + measurement_error are
-  // surfaced — never a silent 0.
-  if (!inFlightExplicit && !closedButLiveExplicit) {
-    const measured = measureImplementingFromTelemetry({ root: rootDir });
-    if (measured.ok) {
-      inFlight = readTasks(measured.implementingIds);
-      closedButLive = [];
-      subagentsInFlight = 0;
-      measurementSource = "event-stream-implementing";
-    } else {
-      measurementSource = "degraded-no-telemetry";
-      measurementError = measured.error;
-    }
-  }
-  // AC5 DUAL-CONSUMER SPLIT: the NARROW Consumer-B denominator. Each --running id is a LIVE subagent
-  // and occupies a slot even if it does not resolve to a task file (a vanished id still runs); resolve
-  // + dedupe keeps the reported ids truthful (a truncated slug resolves to the true id; duplicates
-  // collapse). When --running is absent, runningSubagentCount stays null ⇒ Consumer B falls back to
-  // the wide in-flight set (backward compat).
-  const runningSubagentCount = runningExplicit
-    ? new Set(runningIds.map((id) => resolveInFlightId(tasksDir, id).id)).size
-    : null;
-  const result = analyzeSlotRefill({ tasksDir, root: rootDir, cap, floorMult, inFlight, closedButLive, subagentsInFlight, runningSubagentCount, measurementSource, measurementError, integrationBacklog, redBacklogCap });
+  // AC115 RETIREMENT (SPEC §5 阶段 1 退役清单): the CLI no longer passes --in-flight/--closed-but-live/
+  // --running id lists NOR measures in-flight from telemetry brackets. In-flight = the driver's direct
+  // child count. A bare invocation (no --in-flight-count) reports measurement_source="not-measured" and
+  // NULLS the slot family (fail-closed, never a silent 0 — the SAME shape as the old degraded path).
+  // The touches-disjointness step-4 checks in analyzeSlotRefill still accept the id lists via the PURE
+  // function (the AC53 gate's library consumer inner-wakeup-heartbeat-check.ts keeps passing them); the
+  // CLI surface the driver/inner-tick uses no longer does.
+  const result = analyzeSlotRefill({
+    tasksDir,
+    root: rootDir,
+    cap,
+    floorMult,
+    inFlight: [],
+    closedButLive: [],
+    subagentsInFlight: 0,
+    runningSubagentCount: inFlightCount,
+    measurementSource: inFlightCount !== null ? "driver-count" : "not-measured",
+    measurementError: null,
+    integrationBacklog,
+    redBacklogCap,
+  });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return 0;
 }

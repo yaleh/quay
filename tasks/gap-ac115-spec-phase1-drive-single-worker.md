@@ -45,6 +45,14 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/worker-driver.ts (new)（驱动脚本，落点 inner 定）
-- .quay/worker-outcome.jsonl (new)（outcome 记录）
+- .quay/worker-outcome.jsonl (new)（outcome 记录；gitignored 运行时日志）
 - plugin/scripts/slot-refill.ts（--in-flight 退役面）
+- plugin/test/worker-driver.test.mjs (new)（AC1-3 单测，含杀 worker 取假）
+- plugin/test/slot-refill.test.mjs（退役面同步：--in-flight/--running/--closed-but-live CLI 测试 → --in-flight-count / 纯函数）
+- .gitignore（新增 `**/.quay/worker-outcome.jsonl` 忽略）
 - tasks/gap-ac115-spec-phase1-drive-single-worker.md（自身）
+
+> **Touches 扩充说明**：原 Touches 只列 worker-driver.ts / worker-outcome.jsonl / slot-refill.ts / 自身。
+> 实现时「退役 slot-refill 的 --in-flight 参数传递 + 遥测括号在飞测量」必须同步更新其 CLI 测试
+> （slot-refill.test.mjs，否则全量 suite 红），并新增 worker-driver 单测（worker-driver.test.mjs）与
+> .gitignore 忽略项（outcome 是 gitignored 运行时日志，与 gate-events.jsonl 同族）。故扩为七项。
