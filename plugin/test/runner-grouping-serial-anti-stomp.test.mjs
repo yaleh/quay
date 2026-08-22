@@ -33,6 +33,10 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
 const testSh = join(repoRoot, "scripts", "test.sh");
+// gap-suite-hub-file-responsibility-strip: group_of / list_groups moved from scripts/test.sh into this
+// sourced library — the structural pins that assert those BODIES read the new file; the serial-phase
+// call-site pins stay on scripts/test.sh.
+const runnerGrouping = join(repoRoot, "plugin", "scripts", "runner-grouping.ts");
 
 function runTestSh(...args) {
   // node --test sets NODE_TEST_CONTEXT=child-v8 on the running file; a child `node --test`
@@ -116,7 +120,8 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
   //     lane N in).
   //   - list_groups counts serial (the 4th group in the partition).
   const src = readFileSync(testSh, "utf8");
-  assert.match(src, /product\|engine\|governance\|serial\|lowconc\) echo "\$g" ;;/,
+  const grouping = readFileSync(runnerGrouping, "utf8");
+  assert.match(grouping, /product\|engine\|governance\|serial\|lowconc\) echo "\$g" ;;/,
     "group_of must route serial AND lowconc as real groups (not fall back to engine)");
   assert.match(src, /local serial_files=\(\) sf serial_code/,
     "the FULL-SUITE-DEFAULT branch must declare a serial phase");
@@ -128,7 +133,7 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
     "the serial concurrency must default to the HOST derivation (H÷S — the AC2 experiment raised 1→2, AC44 read the host, AC74 wired the same derivation into the DIRECT path; gap-ac74-serial-lowconc-literal-direct-path)");
   assert.match(src, /in_group "serial" "\$groups"/,
     "the non-default path must detect the serial group");
-  assert.match(src, /printf 'serial:\s+%d\\n' "\$\{counts\[serial\]:-0\}"/,
+  assert.match(grouping, /printf 'serial:\s+%d\\n' "\$\{counts\[serial\]:-0\}"/,
     "list_groups must count the serial group");
   // Behavioral: --group serial --list-files returns exactly the serial members and nothing else;
   // the default --list-files EXCLUDES them (the concurrency-8 main body no longer pays their load).
@@ -153,8 +158,8 @@ test("AC0c (anti-stomp): group_of recognizes ALL FIVE groups in one case arm —
   // b209f4fd→174badc0→e92c54d8→c7176a37 each dropped one group from group_of's case, so serial/
   // lowconc silently folded into the concurrency-N engine body and the isolation guarantee was
   // cancelled WITHOUT going red. This pin fails the moment ANY of the five groups is dropped.
-  const src = readFileSync(testSh, "utf8");
-  assert.match(src, /product\|engine\|governance\|serial\|lowconc\) echo "\$g" ;;/,
+  const grouping = readFileSync(runnerGrouping, "utf8");
+  assert.match(grouping, /product\|engine\|governance\|serial\|lowconc\) echo "\$g" ;;/,
     "group_of must recognize ALL FIVE groups (product|engine|governance|serial|lowconc) in one case arm");
   // Behavioral double-check: all five counts are non-zero, and an unknown-group declaration is
   // FAIL-CLOSED (not silently degraded to engine — AC0b).

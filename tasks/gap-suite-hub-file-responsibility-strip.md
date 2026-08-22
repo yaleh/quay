@@ -48,4 +48,8 @@ depends_on: []
 - plugin/scripts/overhead-instrument.sh (new)
 - plugin/scripts/runner-grouping.ts (new)
 - plugin/scripts/suite-bucket-hub-list.ts
+- plugin/scripts/capability-catalog.sh（新脚本注册：3 条 × 5 表）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照再生成）
+- plugin/test/select-tests-for-touches.test.mjs（源断言迁移到 runner-grouping.ts）
+- plugin/test/runner-grouping-serial-anti-stomp.test.mjs（源断言迁移到 runner-grouping.ts）
 - tasks/gap-suite-hub-file-responsibility-strip.md（自身）
