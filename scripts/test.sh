@@ -2105,13 +2105,28 @@ elif [ "${1:-}" = "--buckets" ]; then
   # FULL static checks (verification-grade — no 降频), then the bucket test subset.
   run_static_checks
   build_dist_once
+  # Suite-tail leak scan on the bucket path (gap-bucket-subset-tmux-leak-scan-missing): the
+  # tmux-leak-scan --snapshot/--check delta pair + session-liveness-sweep-kill is a PER-ROUND
+  # checker, NOT 全量专属 — a bucket subset that skips it drops the checker from every-round to
+  # never-run (降频 violation). Snapshot failure is non-fatal (the absolute --check still runs).
+  bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
   mark_nested
+  set +e
   if has_explicit_concurrency "${rest_args[@]}"; then
     node --test "${rest_args[@]}" "${files[@]}"
   else
     node --test --test-concurrency="$(default_test_concurrency)" "${rest_args[@]}" "${files[@]}"
   fi
-  exit $?
+  bucket_code=$?
+  # Same suite-AFTER tail as the full default path: session-liveness-sweep-kill is the best-effort
+  # TRUE-CATCH-ALL registry kill (exit 0 always); the --check assertion is the leak verdict and
+  # merges into the exit code so a bucket-round leak still reports `tmux-leak-scan: FAIL`.
+  node --experimental-strip-types "${repo_root}/plugin/scripts/session-liveness-sweep-kill.mjs" || true
+  if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
+    bucket_code=1
+  fi
+  set -e
+  exit "${bucket_code}"
 elif all_flags "$@"; then
   # gap-test-sh-flags-only-...: bare node --test flags + the DEFAULT glob (the documented
   # `--test-concurrency=4` and `--experimental-test-coverage` forms). Previously these fell to the
