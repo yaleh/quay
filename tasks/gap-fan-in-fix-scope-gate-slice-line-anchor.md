@@ -41,4 +41,5 @@ depends_on: []
 ## Touches
 
 - .claude/workflows/fan-in-execute.js（fix-scope gate inline slice）
+- plugin/workflows/fan-in-execute.js（双副本：与 .claude/ 副本逐字节相同，同一处 bug 同修——diff 为空已核实）
 - tasks/gap-fan-in-fix-scope-gate-slice-line-anchor.md（自身）
