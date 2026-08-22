@@ -1,7 +1,7 @@
 ---
 id: gap-ac128-hub-split-harness-concerns
 title: AC128 hub 单体按关切拆文件（红解析/并发-lanes/闸门-static/树态/状态写，爆炸半径收窄）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
