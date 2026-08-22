@@ -1,7 +1,7 @@
 ---
 id: gap-fix-scope-perfile-buckets-parser
 title: fix-scope gate __PERFILE__ 解析器接 --buckets 输出格式（--buckets 走 node test-runner，parser 命中 0 行）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
