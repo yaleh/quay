@@ -1,7 +1,7 @@
 ---
 id: gap-measure-trend-check-slice-line-anchor
 title: measure-trend-check.ts:112 lastIndexOf 裸 substring → 行首锚定（5b sibling，同 fan-in-execute.js:276 缺陷）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -29,12 +29,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：`measure-trend-check.ts` 中 `lastIndexOf("__FANIN_SUITE_START__")` 裸 substring 改行首锚定。
-- [ ] AC2（负控制）：inline 提及该标记的日志不切掉其后真实 `__PERFILE__` 行（不产假 checker-misreport）。
+- [x] AC1：`measure-trend-check.ts` 中 `lastIndexOf("__FANIN_SUITE_START__")` 裸 substring 改行首锚定。
+- [x] AC2（负控制）：inline 提及该标记的日志不切掉其后真实 `__PERFILE__` 行（不产假 checker-misreport）。
 
 ## Definition of Done
 
-- [ ] 切片行首锚定 + 负控制通过 + scoped 绿；AC1-2 全勾；land 到 develop。
+- [x] 切片行首锚定 + 负控制通过 + scoped 绿；AC1-2 全勾；land 到 develop。
 
 ## Touches
 
