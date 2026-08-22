@@ -111,8 +111,14 @@
 **⊢ 为什么是缺口**：AC124 只把「开关」装在 `scripts/test.sh`/`full-suite-runner.ts` 两层（机制层），**没装到「谁按下开关」这一层**——fan-in 的 SUITE_LAUNCH 仍跑 `bash scripts/test.sh`（全量、无 `--buckets`），且实测 `fan-in-execute.js` **零处引用 buckets**。⇒ AC124 的 ≥10 轮带桶字段在启用接线前**结构上不可满足**（不是「等数据」能等出来的）。
 **⊢ 已核实的连带（inner 接线时一并处理）**：fan-in 的 suite 直跑 `test.sh`、不经 `full-suite-runner.ts`，而 `verification-round.jsonl` **仅由 `full-suite-runner.ts` 写**（既有 gap-preverified-suite-bypasses-verification-round-ledger / gap-fan-in-realsuite-bypasses-verification-round-ledger）⇒ ⛔ 启用接线不得只跑子集不落账，必须让带桶轮次落到 verification-round 载体上。
 
+### AC127（分桶记录在 web `/tests` 页可见 —— 交付面，不是只有 ledger 有）
+**判据**：quay web server 的 `/tests` 页（`packages/quay/src/observation.ts` 的 `readTests`/`parseVerificationRound` + `serve-handlers.ts` 的 `renderTestsPage`）解析并展示 `verification-round.jsonl` 里的桶字段（`buckets` / `bucket_files` / `bucket_duration_ms`）。
+**取假（可机械核）**：回放一条带 `buckets=M`（或 `full`/`P`/`P+M`）的记录 ⇒ `parseVerificationRound` 返回的 `TestRunRecord` 含 `buckets` 字段且 `renderTestsPage` 输出该值；一条无桶字段的 legacy 记录 ⇒ 不展示桶（absence 容忍，同 ledger 契约，⛔ 不得显示伪 `full`）。
+**⊢ 为什么是缺口（实测核实）**：AC124/126 让桶字段进了 `verification-round.jsonl`，但 `/tests` 页的 parser/renderer **都未解析该字段**——`TestRunRecord` 接口无 `buckets` 键（observation.ts:1324-1349）、`renderTestsPage` 表头只有 `round/state/pass/duration/scope/commit`（serve-handlers.ts:2266）。⇒ 桶记录在 web 端不可见，「分桶执行」对人不可观测 = 未交付。
+**依赖**：depends_on AC126（记录先于展示）。真实桶轮须 AC126 落地后才有；parse/render 层可先用 fixture 行测。
+
 ### 本阶段的达成条件与非目标
-**达成 = AC120 ∧ AC121 ∧ AC122 ∧ AC123 ∧ AC124 ∧ AC125 ∧ AC126 全部为真。**
+**达成 = AC120 ∧ AC121 ∧ AC122 ∧ AC123 ∧ AC124 ∧ AC125 ∧ AC126 ∧ AC127 全部为真。**
 **⛔ 非目标**：
 - ⛔ 不在本阶段改 `select-tests-for-touches.ts` 的文件级判据（那是另一层粒度，本阶段不碰）。
 - ⛔ 不在本阶段做退役/减少机件（那是下一阶段 AC110–AC117，判据面不得混用——硬规则 12「永远差最后一步」）。
