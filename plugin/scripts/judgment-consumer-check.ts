@@ -128,9 +128,9 @@ export const JUDGMENT_CONSUMERS: JudgmentConsumer[] = [
     judgment: "obligation 台账",
     producer: "plugin/scripts/obligation-ledger.ts",
     consumer: "obligation-ledger-check 完整性审计（wired 进 run_static_checks）+ 台账 shape 测试",
-    verify: [{ file: "scripts/test.sh", pattern: "obligation-ledger-check", expect: "present" }],
+    verify: [{ file: "plugin/scripts/runner-static-gate.ts", pattern: "obligation-ledger-check", expect: "present" }],
     status: "wired",
-    note: "scripts/test.sh run_static_checks 有 obligation-ledger-check 检查器。",
+    note: "runner-static-gate.ts run_static_checks 有 obligation-ledger-check 检查器（gap-ac128 hub 拆分自 scripts/test.sh 迁入）。",
   },
   {
     judgment: "closure-lag 信号",
