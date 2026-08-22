@@ -1,7 +1,7 @@
 ---
 id: gap-ac111-rescan-inner-tick-and-web-carrier
 title: AC111 复扫 inner-tick 专属机件 + web 观测载体切换核查
-status: todo
+status: ready
 labels:
   - gap
 parent: null
