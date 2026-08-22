@@ -262,6 +262,7 @@ function writeDispatchableTask(root, id) {
     "## Proposal",
     "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
     "## Touches",
+    `- tasks/${id}.md`,
     `- code/${id}.ts (new)`,
     "## Acceptance Criteria",
     "- [ ] an AC item",

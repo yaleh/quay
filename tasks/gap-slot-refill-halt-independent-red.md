@@ -29,8 +29,8 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: 定位 slot-refill + .halt 两条失败的根因（fixture 漂移 vs 机件变更），并修复。
-- [ ] AC2: scoped 绿（slot-refill + .halt 测试文件 + 依赖）。
+- [x] AC1: 定位 slot-refill + .halt 两条失败的根因（fixture 漂移 vs 机件变更），并修复。
+- [x] AC2: scoped 绿（slot-refill + .halt 测试文件 + 依赖）。
 
 ## Definition of Done
 
@@ -38,6 +38,5 @@ depends_on: []
 
 ## Touches
 
-- plugin/scripts/slot-refill.ts（若机件变更）
-- plugin/test/slot-refill-heartbeat.test.mjs（若 fixture 漂移，实际文件名 inner 定）
+- plugin/test/supervisor-preempt.test.mjs（fixture 漂移实际文件：`writeDispatchableTask` 补 `tasks/<id>.md` self-touch 恢复 dispatchable——C8 机件已落地，机件未变更）
 - tasks/gap-slot-refill-halt-independent-red.md（自身）
