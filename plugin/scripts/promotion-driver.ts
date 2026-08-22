@@ -1,6 +1,6 @@
-// plugin/scripts/promotion-driver.ts — AC130 + AC131 + AC132 + AC134 (tasks/gap-ac130-promotion-driver-resident-loop,
+// plugin/scripts/promotion-driver.ts — AC130 + AC131 + AC132 + AC133 + AC134 (tasks/gap-ac130-promotion-driver-resident-loop,
 //   tasks/gap-ac131-promotion-mechanical-no-llm, tasks/gap-ac132-fix-worker-structured-input,
-//   tasks/gap-ac134-promotion-outcome-ledger)
+//   tasks/gap-ac133-driver-regate-and-retry-cap, tasks/gap-ac134-promotion-outcome-ledger)
 //
 // 常驻循环，每轮调 `ready-pool-check` 取【全池】判定（⛔ 非单条 --targeted），跑完一轮不退出、
 // 按间隔进入下一轮。停掉驱动 ⇒ 池中新出现的合格任务不再被晋升（AC2 能取假，证明晋升由驱动驱动、
@@ -11,28 +11,32 @@
 //   常驻【机械】进程：每轮无条件调 ready-pool-check --apply 取全池判定 + 落地合格晋升（复用 A22 已在
 //   用的心跳路径，零 LLM），跑完一轮不退出、按 --interval 进入下一轮。AC130 只做【常驻全池循环】这一半。
 //
-// 权责边界（⛔ 只做 AC130 + AC131 + AC132 判据，不越界到 AC133–136 —— 那些是独立任务）：
+// 权责边界（⛔ 只做 AC130 + AC131 + AC132 + AC133 判据，不越界到 AC135–136 —— 那些是独立任务）：
 //   驱动  ✅ 每轮调 ready-pool-check --apply（全池判定 + 合格晋升，零 LLM）
 //         ✅ 跑完一轮不退出、按 --interval 进入下一轮；SIGINT/SIGTERM 优雅停机
 //         ✅ 每轮写一条 round 记录（.quay/promotion-round.jsonl，gitignored，outer 可消费）
 //         ✅ AC131：晋升路径纯机械（零 LLM），round 记录带 llm_invoked=false（派生自真实 argv，⛔ 不硬编码）
 //         ✅ AC132：不合格者 spawn 短命 claude -p fix worker，输入 = 任务 id + 闸的结构化 missing 清单
 //            （沿用 A24 可修三类/不可修五类；可修三类 spawn，不可修五类逐条记原因不修）
+//         ✅ AC133：fix worker 退出后【重新调同一个闸】验证，以闸的新判定为准（⛔ 不信 worker 自述）；
+//            同一任务连续修 N 次仍不合格 ⇒ 标 needs-human 并停止对它的修复循环（失败上限）
 //         ✅ AC134：每次判定/晋升/修复各写一条 outcome 记录（.quay/promotion-outcome.jsonl，gitignored，
-//            字段 task_id · gate（含 missing）· action（promote/fix/skip）· result · ts，outer 可消费）
-//   驱动  ⛔ 不做任何 commit  ⛔ 不验证 fix worker 修没修好（那是 AC133）
+//            字段 task_id · gate（含 missing）· action（promote/fix/skip/needs-human）· result · ts，outer 可消费）
+//   驱动  ⛔ 不做任何 commit（标 needs-human 是写 status 到 tasks/<id>.md，同 --apply 晋升的写类，非 commit）
 //         ⛔ 不读/不写 .halt（停机态 = 进程信号，单一真相源；AC135 才涉及 outer 退役）
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/promotion-driver.ts \
 //     --root <repo> [--interval <ms>] [--cap <n>] [--once] [--max-rounds <n>]
-//     [--ready-pool-cmd "<argv>"] [--fix-worker-cmd "<argv>"] [--round-log <path>]
-//     [--outcome-log <path>] [--run-id <id>] [--pid-file <path>] [--json]
+//     [--max-fix-retries <n>] [--ready-pool-cmd "<argv>"] [--fix-worker-cmd "<argv>"]
+//     [--round-log <path>] [--outcome-log <path>] [--run-id <id>] [--pid-file <path>] [--json]
 //   --interval <ms>       轮间隔（缺省 30000；测试缝传小值）
 //   --cap <n>             传给 ready-pool-check 的并发 cap（缺省 5——AC48 后 cap 不再闸晋升，
 //                         但仍参与 floor 报告与 disjointness 排序；传 5 避免 cap-3 回退的 floor 假象）
 //   --once                跑一轮即退出（手动单发 / 测试）
 //   --max-rounds <n>      跑满 N 轮退出（测试缝，防常驻环无限跑）
+//   --max-fix-retries <n> AC133 失败上限：同一任务连续修 N 次仍不合格 ⇒ 标 needs-human（缺省 3——
+//                         与 fan-in 侧 attempt>=3 同值，见 gap-fan-in-relaunch-retry-cap）
 //   --ready-pool-cmd <s>  覆盖 ready-pool-check 命令（测试缝，同 worker-driver 的缝）。
 //                         缺省 = `node …ready-pool-check.ts --root <root> --cap <cap> --apply --json`。
 //                         输出须为 analyzeTasks JSON（含 pool / promotions / applied_promotions / candidates）。
@@ -69,6 +73,10 @@ export const INTERVAL_MS_DEFAULT = 30_000;
 // 并发 cap 缺省。concurrency-default-fallback：生产调用方从 cap-from-gate.sh 传自适应 --cap；
 // 此值只是「未传 --cap」的手动/测试回退。AC48 后 cap 不闸晋升，传 5 避免 cap-3 回退的 floor 假象。
 export const CAP_DEFAULT = 5;
+
+/** AC133 失败上限缺省：同一任务连续修 N 次仍不合格 ⇒ 标 needs-human。与 fan-in 侧 attempt>=3 同值
+ *  （gap-fan-in-relaunch-retry-cap），非新设数值阈值——仅作「未传 --max-fix-retries」的手动/测试回退。 */
+export const MAX_FIX_RETRIES_DEFAULT = 3;
 
 /** ready-pool-check 单轮的 wall-clock 上限（spawnSync timeout，毫秒）。 */
 export const ROUND_TIMEOUT_MS = 180_000;
@@ -285,6 +293,8 @@ export function computeRoundRecord(opts: {
   error: string | null;
   llmInvoked: boolean;
   fixes: FixOutcome[];
+  reverify?: ReverifyOutcome | null;
+  needsHuman?: string[];
 }) {
   const action = opts.error
     ? "error"
@@ -297,6 +307,9 @@ export function computeRoundRecord(opts: {
     ts: opts.at, round: opts.round, run_id: opts.runId, pid: opts.pid, action,
     pool: opts.pool, should_apply: opts.shouldApply, promoted_ids: opts.promotedIds,
     applied: opts.applied, error: opts.error, llm_invoked: opts.llmInvoked, fixes: opts.fixes,
+    // AC133：重验证结果（null = 本轮无 fix worker 可重验证）与本轮新标 needs-human 的 id 清单。
+    reverify: opts.reverify ?? null,
+    needs_human: opts.needsHuman ?? [],
   };
 }
 
@@ -313,6 +326,78 @@ export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerC
   });
 }
 
+// ── AC133：重闸验证 + 失败上限（fix worker 退出后重跑同一个闸，⛔ 不信 worker 自述） ─────────────
+
+/** AC133 重验证结果。fixedIds = 本轮被 spawn 过 fix worker 的任务 id；重跑闸后按【闸的新判定】归类：
+ *  nowEligibleIds = 闸判合格（fix 生效，已由 --apply 落地晋升）；stillIneligibleIds = 闸仍判不合格
+ *  （fix 未生效，⛔ 不得晋升）。⛔ 不信 worker 自述「已修好」——worker 的退出码/自述不作为晋升依据。 */
+export interface ReverifyOutcome {
+  nowEligibleIds: string[];
+  stillIneligibleIds: string[];
+}
+
+/** 用重验证轮的闸判定给每个被修任务归类。闸判合格（出现在 promotions）⇒ nowEligible；闸判不合格
+ *  （出现在 candidates 且 eligible=false）⇒ stillIneligible；两者都不在（任务从 todo 池消失）⇒ 不计数。
+ *  纯函数，可单测（AC133 AC1/AC2——AC2 取假：worker 声称修好但实际未改 ⇒ 闸仍判不合格 ⇒ stillIneligible）。 */
+export function computeReverifyOutcome(fixedIds: string[], reRound: PromotionRound): ReverifyOutcome {
+  const promoted = new Set(reRound.promotedIds);
+  const stillBad = new Set(reRound.fixDecisions.map((d) => d.id));
+  const nowEligibleIds: string[] = [];
+  const stillIneligibleIds: string[] = [];
+  for (const id of fixedIds) {
+    if (promoted.has(id)) nowEligibleIds.push(id);
+    else if (stillBad.has(id)) stillIneligibleIds.push(id);
+  }
+  return { nowEligibleIds, stillIneligibleIds };
+}
+
+/** AC133 失败上限的跨轮状态。counts = 每任务连续修仍不合格的累计次数；needsHuman = 已标 needs-human
+ *  （后续轮不再对其 spawn fix worker）。跨轮存活于常驻循环内（⛔ 不落盘——运行时状态，与进程同寿命）。 */
+export interface RetryState {
+  counts: Map<string, number>;
+  needsHuman: Set<string>;
+}
+
+/** 推进失败上限：对每个仍不合格的 id 累计连续失败次数，达到 maxRetries 的进入 newlyNeedsHuman
+ *  （去重——已标过的不重复返回）。原地更新传入 state，纯逻辑可单测（AC133 AC3）。 */
+export function advanceRetryCap(
+  state: RetryState,
+  stillIneligibleIds: string[],
+  maxRetries: number,
+): string[] {
+  const newly: string[] = [];
+  for (const id of stillIneligibleIds) {
+    const n = (state.counts.get(id) ?? 0) + 1;
+    state.counts.set(id, n);
+    if (n >= maxRetries && !state.needsHuman.has(id)) {
+      state.needsHuman.add(id);
+      newly.push(id);
+    }
+  }
+  return newly;
+}
+
+/** AC133 AC3：把连续修满上限仍不合格的任务标 needs-human（status todo → needs-human）+ 追加一条
+ *  `## Needs-Human` 审计记录（grep-able 原因，⛔ 静默翻转）。只在 status=todo 时写（并发保护，同
+ *  ready-pool-check 的 setTaskStatus）。返回 { id, ok, reason }——ok=false 表示未写（missing/无
+ *  frontmatter/非 todo）。 */
+export function markNeedsHuman(root: string, id: string, reason: string): { id: string; ok: boolean; reason: string } {
+  const file = path.join(root, "tasks", `${id}.md`);
+  if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
+  const raw = fs.readFileSync(file, "utf8");
+  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
+  if (!m) return { id, ok: false, reason: "no-frontmatter" };
+  const [, open, fm, close] = m;
+  if (!/^status:\s*todo\s*$/m.test(fm)) return { id, ok: false, reason: "not-todo" };
+  const newFm = fm.replace(/^status:\s*todo\s*$/m, "status: needs-human");
+  const body = raw.slice(m[0].length);
+  const record =
+    `\n## Needs-Human\n\n**执行 ${new Date().toISOString()} — promotion-driver AC133：连续修满上限仍不合格**\n\n` +
+    `- 阻碍原因：${reason}\n`;
+  fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
+  return { id, ok: true, reason };
+}
+
 /** 把一条 round 记录追加写入文件（pure append，⛔ 不截断不覆盖）。 */
 export function appendRoundRecord(file: string, record: ReturnType<typeof computeRoundRecord>): string {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -323,22 +408,25 @@ export function appendRoundRecord(file: string, record: ReturnType<typeof comput
 // ── AC134：outcome 台账（判定/晋升/修复各一条，outer 可消费） ─────────────────────────────────────
 
 /** 一条 promotion outcome 记录（AC134：字段 task_id · gate 判定结果（含 missing 清单）· action
- *  （promote/fix/skip）· result · ts）。promote = 闸判定合格并落地晋升；fix = 判定不合格且可修三类
- *  （spawn 短命 fix worker）；skip = 判定不合格且不可修五类（逐条记原因不修）。 */
+ *  （promote/fix/skip/needs-human）· result · ts）。promote = 闸判定合格并落地晋升；fix = 判定不合格且
+ *  可修三类（spawn 短命 fix worker）；skip = 判定不合格且不可修五类（逐条记原因不修）；
+ *  needs-human = AC133 连续修满上限仍不合格（标 needs-human 停手）。 */
 export interface PromotionOutcomeRecord {
   task_id: string;
   gate: { eligible: boolean; missing: string[] };
-  action: "promote" | "fix" | "skip";
+  action: "promote" | "fix" | "skip" | "needs-human";
   result: { ok: boolean; detail: string | null };
   ts: string;
 }
 
 /** 从一轮结果推导 outcome 记录（纯函数，可单测）。applied ⇒ promote；fixes[].spawned ⇒ fix；
- *  fixes[] 其余（不可修）⇒ skip。⛔ 派生自真实轮结果，不硬编码、不写 fixture。 */
+ *  fixes[] 其余（不可修）⇒ skip；needsHuman ⇒ needs-human（AC133 失败上限触发）。⛔ 派生自真实轮
+ *  结果，不硬编码、不写 fixture。 */
 export function computeOutcomeRecords(opts: {
   at: string;
   applied: PromotionRound["applied"];
   fixes: FixOutcome[];
+  needsHuman?: Array<{ id: string }>;
 }): PromotionOutcomeRecord[] {
   const out: PromotionOutcomeRecord[] = [];
   for (const a of opts.applied) {
@@ -368,6 +456,15 @@ export function computeOutcomeRecords(opts: {
         ts: opts.at,
       });
     }
+  }
+  for (const n of opts.needsHuman ?? []) {
+    out.push({
+      task_id: n.id,
+      gate: { eligible: false, missing: [] },
+      action: "needs-human",
+      result: { ok: true, detail: "retry-cap-exhausted" },
+      ts: opts.at,
+    });
   }
   return out;
 }
@@ -404,6 +501,7 @@ export interface ResidentLoopOptions {
   cap: number;
   once: boolean;
   maxRounds: number | null;
+  maxFixRetries: number;
   readyPoolArgv: string[] | null;
   fixWorkerCmd: string | null;
   roundLogFile: string;
@@ -415,11 +513,13 @@ export interface ResidentLoopOptions {
 
 /**
  * 常驻循环（AC1）：跑一轮不退出，按 --interval 进入下一轮，直到 SIGINT/SIGTERM 或 --once/--max-rounds。
- *  每轮 = runPromotionRound（调 ready-pool-check --apply 全池判定 + 落地晋升）→ computeRoundRecord →
- *  appendRoundRecord → （json 时）stdout 事件行。停机由进程信号驱动（⛔ 不读 .halt，单一真相源）。
+ *  每轮 = runPromotionRound（调 ready-pool-check --apply 全池判定 + 落地晋升）→ runFixPass（可修三类
+ *  spawn fix worker）→ AC133 重闸验证（fix worker 退出后重跑同一个闸，⛔ 不信 worker 自述）→
+ *  失败上限（连续修满 N 次仍不合格 ⇒ 标 needs-human 停手）→ computeRoundRecord → appendRoundRecord →
+ *  （json 时）stdout 事件行。停机由进程信号驱动（⛔ 不读 .halt，单一真相源）。
  */
 export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promise<number> {
-  const { root, intervalMs, cap, once, maxRounds, readyPoolArgv, roundLogFile, outcomeLogFile, runId, json, pidFile, fixWorkerCmd } = opts;
+  const { root, intervalMs, cap, once, maxRounds, maxFixRetries, readyPoolArgv, roundLogFile, outcomeLogFile, runId, json, pidFile, fixWorkerCmd } = opts;
 
   if (pidFile) {
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
@@ -439,16 +539,48 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
   });
 
   let round = 0;
+  const retryState: RetryState = { counts: new Map(), needsHuman: new Set() };
   while (!stopRequested) {
     round += 1;
     const r = runPromotionRound(root, readyPoolArgv, cap);
+    // AC133 失败上限：已标 needs-human 的任务不再进 fix pass（停止对它的修复循环——与 markNeedsHuman
+    // 的 status 翻转双保险，即使 status 写失败也不会再 spawn）。
+    const activeDecisions = r.fixDecisions.filter((d) => !retryState.needsHuman.has(d.id));
     // AC132：不合格者 → 短命 fix worker（可修三类 spawn、不可修五类逐条记原因不修）。spawn 前先跑
     // 分类（classifyCandidate 已做），fixDecisions 里 fixable=true 的才 spawn。
-    const fixes = runFixPass(r.fixDecisions, root, fixWorkerCmd);
-    const record = computeRoundRecord({ round, runId, pid: process.pid, at: new Date().toISOString(), ...r, fixes });
+    const fixes = runFixPass(activeDecisions, root, fixWorkerCmd);
+
+    // AC133 AC1：fix worker 退出后【重新调同一个闸】验证，以闸的新判定为准（⛔ 不信 worker 自述）。
+    const fixedIds = fixes.filter((f) => f.spawned).map((f) => f.id);
+    let reverify: ReverifyOutcome | null = null;
+    let rePromotedIds: string[] = [];
+    let reApplied: PromotionRound["applied"] = [];
+    let newlyNeedsHuman: string[] = [];
+    if (fixedIds.length > 0) {
+      const re = runPromotionRound(root, readyPoolArgv, cap);
+      reverify = computeReverifyOutcome(fixedIds, re);
+      // 重验证轮本身也以 --apply 落地晋升（被修好的任务 ⇒ 闸判合格 ⇒ 晋升），并入本轮的晋升面。
+      rePromotedIds = re.promotedIds;
+      reApplied = re.applied;
+      // AC133 AC3：连续修满 N 次仍不合格 ⇒ 标 needs-human（失败上限）。
+      newlyNeedsHuman = advanceRetryCap(retryState, reverify.stillIneligibleIds, maxFixRetries);
+    }
+    for (const id of newlyNeedsHuman) {
+      markNeedsHuman(root, id, `连续修满 ${maxFixRetries} 次仍不合格（闸在重验证后仍判不合格）`);
+    }
+
+    const promotedIds = [...r.promotedIds, ...rePromotedIds];
+    const applied = [...r.applied, ...reApplied];
+    const record = computeRoundRecord({
+      round, runId, pid: process.pid, at: new Date().toISOString(), ...r,
+      promotedIds, applied, fixes, reverify, needsHuman: newlyNeedsHuman,
+    });
     try { appendRoundRecord(roundLogFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
-    // AC134：判定/晋升/修复各写一条 outcome 记录（.quay/promotion-outcome.jsonl，outer 可消费）。
-    const outcomes = computeOutcomeRecords({ at: record.ts, applied: r.applied, fixes });
+    // AC134：判定/晋升/修复/needs-human 各写一条 outcome 记录（.quay/promotion-outcome.jsonl，outer 可消费）。
+    const outcomes = computeOutcomeRecords({
+      at: record.ts, applied, fixes,
+      needsHuman: newlyNeedsHuman.map((id) => ({ id })),
+    });
     for (const o of outcomes) {
       try { appendOutcomeRecord(outcomeLogFile, o); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     }
@@ -469,13 +601,15 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
 const HELP = [
   "promotion-driver — AC130：常驻循环，每轮调 ready-pool-check 取全池判定（--apply 落地合格晋升），",
   "跑完一轮不退出、按 --interval 进入下一轮。SIGINT/SIGTERM 优雅停机。AC132：不合格者 spawn 短命 fix worker。",
-  "AC134：判定/晋升/修复各写一条 outcome 记录（.quay/promotion-outcome.jsonl）。",
-  "  --root <repo> [--interval <ms>] [--cap <n>] [--once] [--max-rounds <n>]",
+  "AC133：fix worker 退出后重跑同一个闸验证（⛔ 不信 worker 自述）+ 连续修满 N 次仍不合格 ⇒ needs-human。",
+  "AC134：判定/晋升/修复/needs-human 各写一条 outcome 记录（.quay/promotion-outcome.jsonl）。",
+  "  --root <repo> [--interval <ms>] [--cap <n>] [--once] [--max-rounds <n>] [--max-fix-retries <n>]",
   "  [--ready-pool-cmd \"<argv>\"] [--fix-worker-cmd \"<argv>\"] [--round-log <p>] [--outcome-log <p>] [--run-id <id>] [--pid-file <p>] [--json]",
   "  --interval <ms>       轮间隔（缺省 30000；测试缝传小值）",
   "  --cap <n>             传给 ready-pool-check 的并发 cap（缺省 5）",
   "  --once                跑一轮即退出（手动单发 / 测试）",
   "  --max-rounds <n>      跑满 N 轮退出（测试缝，防常驻环无限跑）",
+  "  --max-fix-retries <n> AC133 失败上限（缺省 3；连续修满 N 次仍不合格 ⇒ 标 needs-human）",
   "  --ready-pool-cmd <s>  覆盖 ready-pool-check 命令（测试缝）",
   "  --fix-worker-cmd <s>  覆盖 fix worker 命令前缀（测试缝；prompt 仍作末参数追加）",
   "  --round-log <path>    轮记录文件（缺省 <root>/.quay/promotion-round.jsonl）",
@@ -491,6 +625,7 @@ export async function main(argv: string[]): Promise<number> {
   let capRaw: string | undefined;
   let once = false;
   let maxRounds: number | null = null;
+  let maxFixRetriesRaw: string | undefined;
   let readyPoolCmd: string | undefined;
   let fixWorkerCmd: string | undefined;
   let roundLogPath: string | undefined;
@@ -506,6 +641,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--cap") capRaw = args[++i];
     else if (a === "--once") once = true;
     else if (a === "--max-rounds") maxRounds = Number(args[++i]);
+    else if (a === "--max-fix-retries") maxFixRetriesRaw = args[++i];
     else if (a === "--ready-pool-cmd") readyPoolCmd = args[++i];
     else if (a === "--fix-worker-cmd") fixWorkerCmd = args[++i];
     else if (a === "--round-log") roundLogPath = args[++i];
@@ -527,6 +663,13 @@ export async function main(argv: string[]): Promise<number> {
     console.error("promotion-driver: --max-rounds must be a positive integer");
     return 2;
   }
+  const maxFixRetries = maxFixRetriesRaw === undefined
+    ? MAX_FIX_RETRIES_DEFAULT
+    : Number(maxFixRetriesRaw);
+  if (!Number.isInteger(maxFixRetries) || maxFixRetries < 1) {
+    console.error("promotion-driver: --max-fix-retries must be a positive integer");
+    return 2;
+  }
 
   const roundLogFile = roundLogPath ? path.resolve(roundLogPath) : path.join(rootDir, ROUND_LOG_REL);
   const outcomeLogFile = outcomeLogPath ? path.resolve(outcomeLogPath) : path.join(rootDir, OUTCOME_LOG_REL);
@@ -538,6 +681,7 @@ export async function main(argv: string[]): Promise<number> {
     cap: capRes.value,
     once,
     maxRounds,
+    maxFixRetries,
     readyPoolArgv: readyPoolCmd ? splitArgs(readyPoolCmd) : null,
     fixWorkerCmd: fixWorkerCmd ?? null,
     roundLogFile,

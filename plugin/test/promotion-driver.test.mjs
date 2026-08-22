@@ -48,10 +48,14 @@ import {
   buildFixWorkerPrompt,
   buildFixWorkerArgv,
   runFixPass,
+  computeReverifyOutcome,
+  advanceRetryCap,
+  markNeedsHuman,
   ROUND_LOG_REL,
   OUTCOME_LOG_REL,
   INTERVAL_MS_DEFAULT,
   CAP_DEFAULT,
+  MAX_FIX_RETRIES_DEFAULT,
 } from "../scripts/promotion-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -145,7 +149,7 @@ function writeDodShortTask(root, id, status = "todo") {
 
 function readStatus(root, id) {
   const raw = fs.readFileSync(path.join(root, "tasks", `${id}.md`), "utf8");
-  const m = raw.match(/^status:\s*(\w+)\s*$/m);
+  const m = raw.match(/^status:\s*([\w-]+)\s*$/m);
   return m ? m[1] : null;
 }
 
@@ -186,6 +190,35 @@ function realReadyPoolCmd(root) {
 function fixWorkerCaptureCmd(captureFile) {
   const f = JSON.stringify(captureFile);
   return `node -e require('fs').writeFileSync(${f},process.argv[1]||'')`;
+}
+
+// AC133 seam: a fix worker that "claims success" (exit 0) but changes NOTHING — the falsifiable
+// fixture for "⛔ 不信 worker 自述". It also increments a counter so the retry-cap test can count how
+// many times the driver actually spawned it (space-free node -e, splitArgs splits on whitespace).
+function fixWorkerNoopCounter(counterFile) {
+  const f = JSON.stringify(counterFile);
+  return `node -e n=0;try{n=Number(require('fs').readFileSync(${f},'utf8'))}catch{};require('fs').writeFileSync(${f},String(n+1));process.exit(0)`;
+}
+
+// AC133 positive-control fixer: a REAL fix worker (a .cjs helper, since `node -e` must be space-free)
+// that actually rewrites the DoD-short fixture to a ≥40-char DoD, then exits 0. Returns the space-free
+// command prefix `node <abs path>`; the driver appends the prompt as the last arg (ignored here).
+function writeDoDFixer(root) {
+  const file = path.join(root, "fix-dod.cjs");
+  fs.writeFileSync(file, [
+    "const fs=require('fs');",
+    "const path=require('path');",
+    "const dir=path.join(process.cwd(),'tasks');",
+    "for(const f of fs.readdirSync(dir)){",
+    "  if(!f.endsWith('.md'))continue;",
+    "  const p=path.join(dir,f);",
+    "  let raw=fs.readFileSync(p,'utf8');",
+    "  raw=raw.replace('short','standard DoD — the five clauses; meta-enforcer fixture-pinned, over forty chars long.');",
+    "  fs.writeFileSync(p,raw);",
+    "}",
+    "process.exit(0);",
+  ].join("\n"));
+  return `node ${file}`;
 }
 
 // ── pure functions ─────────────────────────────────────────────────────────────────────────────────
@@ -585,11 +618,161 @@ test("AC134 AC2 — real gate + real tasks ⇒ outcome ledger holds real promote
   for (const l of lines) {
     assert.ok(l.task_id, "task_id present");
     assert.ok(l.gate && typeof l.gate.eligible === "boolean" && Array.isArray(l.gate.missing), "gate{eligible,missing} present");
-    assert.ok(["promote", "fix", "skip"].includes(l.action), `action ∈ promote|fix|skip (got ${l.action})`);
+    assert.ok(["promote", "fix", "skip", "needs-human"].includes(l.action), `action ∈ promote|fix|skip|needs-human (got ${l.action})`);
     assert.ok(l.result && typeof l.result.ok === "boolean", "result present");
     assert.ok(l.ts, "ts present");
   }
 
   // The promotion actually landed (real gate, not fixture): status flipped todo → ready.
   assert.equal(readStatus(root, "gap-ac134-eligible"), "ready", "the real gate promoted the eligible task");
+});
+
+// ── AC133 (falsifiable): 修完重跑同一个闸验证（⛔ 不信 worker 自述）+ 失败上限 needs-human ─────────
+
+test("AC133 MAX_FIX_RETRIES_DEFAULT — 与 fan-in 侧 attempt>=3 同值，非新设阈值", () => {
+  assert.equal(MAX_FIX_RETRIES_DEFAULT, 3, "default retry cap = 3 (gap-fan-in-relaunch-retry-cap 同值)");
+});
+
+test("computeReverifyOutcome — 闸的新判定归类：nowEligible / stillIneligible / neither（纯函数）", () => {
+  // gate now says eligible (promotions contains the id) ⇒ fix took
+  const eligible = { ok: true, error: null, pool: 1, shouldApply: true, promotedIds: ["gap-a"], applied: [], llmInvoked: false, fixDecisions: [] };
+  const r1 = computeReverifyOutcome(["gap-a", "gap-b"], eligible);
+  assert.deepEqual(r1.nowEligibleIds, ["gap-a"], "闸判合格 ⇒ nowEligible");
+  assert.deepEqual(r1.stillIneligibleIds, []);
+
+  // gate still says ineligible (fixDecisions contains eligible=false) ⇒ fix did NOT take
+  const stillBad = {
+    ok: true, error: null, pool: 1, shouldApply: false, promotedIds: [], applied: [], llmInvoked: false,
+    fixDecisions: [
+      { id: "gap-a", fixable: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], prompt: "p" },
+    ],
+  };
+  const r2 = computeReverifyOutcome(["gap-a"], stillBad);
+  assert.deepEqual(r2.nowEligibleIds, [], "闸仍判不合格 ⇒ ⛔ 不得晋升");
+  assert.deepEqual(r2.stillIneligibleIds, ["gap-a"], "闸仍判不合格 ⇒ stillIneligible（⛔ 不信 worker 自述「已修好」）");
+
+  // neither (task left the todo pool) ⇒ not counted either way
+  const gone = { ok: true, error: null, pool: 0, shouldApply: false, promotedIds: [], applied: [], llmInvoked: false, fixDecisions: [] };
+  const r3 = computeReverifyOutcome(["gap-z"], gone);
+  assert.deepEqual(r3, { nowEligibleIds: [], stillIneligibleIds: [] }, "task vanished from the pool ⇒ neither");
+});
+
+test("advanceRetryCap — 连续失败达 N 次 ⇒ newlyNeedsHuman；去重不重复返回（纯函数）", () => {
+  const state = { counts: new Map(), needsHuman: new Set() };
+  assert.deepEqual(advanceRetryCap(state, ["gap-a"], 2), [], "1st failure < N ⇒ not yet needs-human");
+  assert.deepEqual(advanceRetryCap(state, ["gap-a"], 2), ["gap-a"], "2nd failure ≥ N ⇒ needs-human");
+  assert.deepEqual(advanceRetryCap(state, ["gap-a"], 2), [], "already marked ⇒ no duplicate");
+  assert.equal(state.counts.get("gap-a"), 3, "count keeps accumulating (3 attempts)");
+  assert.ok(state.needsHuman.has("gap-a"), "needsHuman set records the id");
+});
+
+test("markNeedsHuman — status todo→needs-human + ## Needs-Human 审计记录；非 todo 拒写（fail-closed）", (t) => {
+  const root = makeRoot("mark-nh");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "todo");
+
+  const ok = markNeedsHuman(root, "gap-nh", "test reason");
+  assert.equal(ok.ok, true, "todo task marked needs-human");
+  assert.equal(readStatus(root, "gap-nh"), "needs-human", "status flipped todo → needs-human");
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-nh.md"), "utf8");
+  assert.ok(body.includes("## Needs-Human"), "grep-able ## Needs-Human audit record written");
+  assert.ok(body.includes("test reason"), "the reason is recorded in the body");
+
+  // fail-closed on a non-todo task (needs-human is not todo) ⇒ no double-mark
+  const again = markNeedsHuman(root, "gap-nh", "again");
+  assert.equal(again.ok, false, "needs-human task is not todo ⇒ refused");
+  assert.equal(again.reason, "not-todo");
+  assert.equal(readStatus(root, "gap-nh"), "needs-human", "status unchanged on refusal");
+
+  // fail-closed on a missing task
+  const missing = markNeedsHuman(root, "gap-ghost", "x");
+  assert.equal(missing.ok, false);
+  assert.equal(missing.reason, "missing");
+});
+
+test("AC133 AC2 — worker 声称修好（exit 0）但实际未改 ⇒ 驱动仍判不合格、⛔ 不得晋升（能取假）", (t) => {
+  const root = makeRoot("ac133-ac2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeDodShortTask(root, "gap-ac133-dodshort");
+
+  // fix worker = `node -e process.exit(0)` — exits 0 (claims success) but changes NOTHING.
+  runDriver(root, [
+    "--ready-pool-cmd", realReadyPoolCmd(root),
+    "--fix-worker-cmd", "node -e process.exit(0)",
+    "--cap", "5", "--once",
+  ]);
+
+  const records = readRoundLines(root);
+  assert.equal(records.length, 1, "exactly one round record");
+  const rec = records[0];
+
+  // AC1: the driver RE-RAN the gate after the worker exited (reverify is present, not null).
+  assert.ok(rec.reverify, "AC1: driver re-ran the gate after fix worker exit (reverify present)");
+  assert.deepEqual(rec.reverify.stillIneligibleIds, ["gap-ac133-dodshort"],
+    `AC2: the gate still judges it ineligible — worker's "success" was NOT trusted (reverify=${JSON.stringify(rec.reverify)})`);
+  assert.deepEqual(rec.reverify.nowEligibleIds, [], "nothing promoted on the worker's empty claim");
+
+  // AC2 falsifiable: the task is NOT promoted (status stays todo).
+  assert.equal(readStatus(root, "gap-ac133-dodshort"), "todo", "AC2: worker claimed fixed but didn't ⇒ NOT promoted");
+
+  // The fix outcome recorded a spawned worker (exit 0) but no promote outcome for this id.
+  const outcomes = readOutcomeLines(root);
+  assert.ok(outcomes.some((o) => o.task_id === "gap-ac133-dodshort" && o.action === "fix"), "a fix outcome was written");
+  assert.ok(!outcomes.some((o) => o.task_id === "gap-ac133-dodshort" && o.action === "promote"), "⛔ no promote outcome for the unfixed task");
+});
+
+test("AC133 AC3 — 连续修 N 次仍不合格 ⇒ 标 needs-human 并停止修复循环（能取假）", (t) => {
+  const root = makeRoot("ac133-ac3");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeDodShortTask(root, "gap-ac133-capped");
+
+  const counter = path.join(root, "fix.cnt");
+  // max-fix-retries 2: round 1 spawn(1) → round 2 spawn(2) ≥ N ⇒ needs-human → rounds 3-4 no spawn.
+  runDriver(root, [
+    "--ready-pool-cmd", realReadyPoolCmd(root),
+    "--fix-worker-cmd", fixWorkerNoopCounter(counter),
+    "--cap", "5", "--max-fix-retries", "2", "--max-rounds", "4", "--interval", "5",
+  ]);
+
+  // AC3 falsifiable: the driver stopped after N (2) fix attempts, not 4.
+  assert.equal(Number(fs.readFileSync(counter, "utf8")), 2,
+    "AC3: fix worker spawned exactly N=2 times, then the loop stopped spawning (⛔ 无限重修)");
+
+  // The task was marked needs-human on disk (status flip + audit record).
+  assert.equal(readStatus(root, "gap-ac133-capped"), "needs-human", "AC3: task marked needs-human after N failed fixes");
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-ac133-capped.md"), "utf8");
+  assert.ok(body.includes("## Needs-Human"), "AC3: ## Needs-Human audit record written");
+
+  // The round that hit the cap recorded the needs-human decision.
+  const records = readRoundLines(root);
+  const capRound = records.find((r) => r.needs_human && r.needs_human.includes("gap-ac133-capped"));
+  assert.ok(capRound, "the needs-human decision is recorded in the round ledger");
+
+  // An outcome record with action=needs-human is written (outer-consumable).
+  const outcomes = readOutcomeLines(root);
+  assert.ok(outcomes.some((o) => o.task_id === "gap-ac133-capped" && o.action === "needs-human"),
+    "a needs-human outcome record is written for the capped task");
+});
+
+test("AC133 AC1 positive — fix worker 真的修好 ⇒ 重验证轮的闸判合格并晋升（重闸验证的非空证据）", (t) => {
+  const root = makeRoot("ac133-pos");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeDodShortTask(root, "gap-ac133-fixed");
+
+  // A REAL fixer rewrites the short DoD ⇒ the re-verify round's gate now judges it eligible and --apply
+  // promotes it (status → ready). Proves the re-verify path can PROMOTE, not just detect failure.
+  runDriver(root, [
+    "--ready-pool-cmd", realReadyPoolCmd(root),
+    "--fix-worker-cmd", writeDoDFixer(root),
+    "--cap", "5", "--once",
+  ]);
+
+  assert.equal(readStatus(root, "gap-ac133-fixed"), "ready",
+    "AC1 positive: worker actually fixed the DoD ⇒ re-verify gate promoted it (todo → ready)");
+
+  const rec = readRoundLines(root)[0];
+  assert.ok(rec.reverify, "reverify present");
+  assert.deepEqual(rec.reverify.nowEligibleIds, ["gap-ac133-fixed"],
+    `the gate's new judgment (now eligible) is what counts, not the worker's self-report (reverify=${JSON.stringify(rec.reverify)})`);
+  assert.deepEqual(rec.reverify.stillIneligibleIds, [], "a genuinely-fixed task is not still-ineligible");
 });
