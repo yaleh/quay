@@ -90,8 +90,10 @@ packages/quay/test/document-gate.test.mjs
 packages/quay/test/document-store.test.mjs
 packages/quay/test/dod-gate-set.test.mjs
 packages/quay/test/driver.test.mjs
+packages/quay/test/entry-guard-symlink.test.mjs
 packages/quay/test/flags.test.mjs
 packages/quay/test/frontmatter-store-base.test.mjs
+packages/quay/test/gap-ac136-web-truth-source.test.mjs
 packages/quay/test/gap-cli-gate-enforcement.test.mjs
 packages/quay/test/gap-dashboard-parallelize.test.mjs
 packages/quay/test/gap-webui-root-should-show-dashboard.test.mjs
@@ -134,6 +136,7 @@ packages/quay/test/serve-github.test.mjs
 packages/quay/test/serve-goal-doc.test.mjs
 packages/quay/test/serve-handlers.test.mjs
 packages/quay/test/serve-list-realtime.test.mjs
+packages/quay/test/serve-live-implcomplete.test.mjs
 packages/quay/test/serve-nav-inconsistent-routes.test.mjs
 packages/quay/test/serve.test.mjs
 packages/quay/test/task-check.test.mjs
@@ -147,7 +150,6 @@ plugin/test/a15-ruling5-counter.test.mjs
 plugin/test/ac36-sortkey-criterion-check.test.mjs
 plugin/test/ac56-recommended-deordered-check.test.mjs
 plugin/test/ac61-staleness-disposition-check.test.mjs
-plugin/test/ac66-a22-agent-id-check.test.mjs
 plugin/test/ac69-slot-queue-gap-check.test.mjs
 plugin/test/accounting-emit-layer-map.test.mjs
 plugin/test/accounting-emit.test.mjs
@@ -278,6 +280,7 @@ plugin/test/preference-notification-check.test.mjs
 plugin/test/prepare-admission-check.test.mjs
 plugin/test/probe-spec-wiring.test.mjs
 plugin/test/prod-data-audit.test.mjs
+plugin/test/promotion-driver.test.mjs
 plugin/test/provision-verify-worktree.test.mjs
 plugin/test/quay-init-loop-driver.test.mjs
 plugin/test/quay-init-loop-fixture-hash.test.mjs
@@ -333,6 +336,10 @@ plugin/test/stage-receipt.test.mjs
 plugin/test/stale-ready-audit.test.mjs
 plugin/test/state-worded-clause-check.test.mjs
 plugin/test/strategic-doc-staleness-check.test.mjs
+plugin/test/suite-bucket-attribution.test.mjs
+plugin/test/suite-bucket-hub-list.test.mjs
+plugin/test/suite-bucket-perfile-emit.test.mjs
+plugin/test/suite-bucket-select.test.mjs
 plugin/test/suite-cutoff-verdict.test.mjs
 plugin/test/suite-duration-exceed-check.test.mjs
 plugin/test/suite-execution-form-counter.test.mjs
@@ -375,6 +382,7 @@ plugin/test/user-scope-reinstall.test.mjs
 plugin/test/verification-round.test.mjs
 plugin/test/verify-deliver-coldstart.test.mjs
 plugin/test/verify-delivery-surface.test.mjs
+plugin/test/worker-driver.test.mjs
 plugin/test/workflow-baseline-metrics.test.mjs
 plugin/test/workflow-event-schema.test.mjs
 plugin/test/workflow-invariant-ownership.test.mjs
