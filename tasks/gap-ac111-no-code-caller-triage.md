@@ -1,7 +1,7 @@
 ---
 id: gap-ac111-no-code-caller-triage
 title: AC111 无代码调用者机件逐条三选一判定（重扫 + wired/retired/manual-by-design，仅 .md 类归零）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -29,13 +29,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：判定完成后同一谓词重扫，「仅 .md 文档提及」类 = 0（要么有代码调用者，要么文件不存在，要么显式 manual-by-design）。
-- [ ] AC2：每条判定有记录（三选一 + 理由）。
-- [ ] AC3：retired 条目**不在本任务删除**——退役在后续按记录单独立任务，每条带「它防的缺陷现在由什么防」或「该缺陷类已不可能发生」的理由（⛔ 不得因「很久没报红」就退役）。
+- [x] AC1（能取假）：判定完成后同一谓词重扫，「仅 .md 文档提及」类 = 0（要么有代码调用者，要么文件不存在，要么显式 manual-by-design）。
+- [x] AC2：每条判定有记录（三选一 + 理由）。
+- [x] AC3：retired 条目**不在本任务删除**——退役在后续按记录单独立任务，每条带「它防的缺陷现在由什么防」或「该缺陷类已不可能发生」的理由（⛔ 不得因「很久没报红」就退役）。
 
 ## Definition of Done
 
-- [ ] 重扫清单落盘 + 逐条三选一记录完整 + 重扫验证「仅 .md」类 = 0；AC1-3 全勾；land 到 develop。
+- [x] 重扫清单落盘 + 逐条三选一记录完整 + 重扫验证「仅 .md」类 = 0；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
