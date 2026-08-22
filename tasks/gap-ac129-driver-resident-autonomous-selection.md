@@ -1,7 +1,7 @@
 ---
 id: gap-ac129-driver-resident-autonomous-selection
 title: AC129 驱动常驻 + 自主选任务（选择环 + selector worker + 判停）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -34,13 +34,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1（常驻）：跑完一个 worker 后不退出，池非空且未达并发 cap 时自动起下一个（现状单次 spawn 后必退出，取假）。
-- [ ] AC2（自主选任务）：不传 `--task` ⇒ 走选择环（调 `ready-pool-check` 取可行集 → 减在飞集 → 打散 → 交 selector worker）并起 worker，`selector_reason` 落真实理由（不再恒为 `"explicit --task selection"`）。
-- [ ] AC3（判停，能取假）：`.halt` 存在 / `resource-gate` 报 WAIT / 池空 ⇒ 停止起新 worker，⛔ 不杀在飞；置 `.halt` 后仍起新 worker ⇒ 本条为假。
+- [x] AC1（常驻）：跑完一个 worker 后不退出，池非空且未达并发 cap 时自动起下一个（现状单次 spawn 后必退出，取假）。
+- [x] AC2（自主选任务）：不传 `--task` ⇒ 走选择环（调 `ready-pool-check` 取可行集 → 减在飞集 → 打散 → 交 selector worker）并起 worker，`selector_reason` 落真实理由（不再恒为 `"explicit --task selection"`）。
+- [x] AC3（判停，能取假）：`.halt` 存在 / `resource-gate` 报 WAIT / 池空 ⇒ 停止起新 worker，⛔ 不杀在飞；置 `.halt` 后仍起新 worker ⇒ 本条为假。
 
 ## Definition of Done
 
-- [ ] 常驻循环 + 选择环 + 判停落地；AC1-3 全勾（含置 `.halt` 判停取假）；land 到 develop。
+- [x] 常驻循环 + 选择环 + 判停落地；AC1-3 全勾（含置 `.halt` 判停取假）；land 到 develop。
 
 ## Retires
 
