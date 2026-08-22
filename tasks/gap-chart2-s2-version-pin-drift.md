@@ -29,8 +29,8 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: chart2-s2 测试 pin 更新到当前 develop 真值，cov 断言不再因版本漂移红。
-- [ ] AC2: scoped 绿（chart2-s2 测试文件 + 依赖）。
+- [x] AC1: chart2-s2 测试 pin 更新到当前 develop 真值，cov 断言不再因版本漂移红。
+- [x] AC2: scoped 绿（chart2-s2 测试文件 + 依赖）。
 
 ## Definition of Done
 
