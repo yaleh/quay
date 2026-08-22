@@ -1,7 +1,7 @@
 ---
 id: gap-webui-dashboard-load-time-optimization
 title: webui dashboard 加载慢优化（manager 探针轻量化砍 pool 地板 + taskList 并行 + 任务摘要 30s TTL 缓存）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -39,14 +39,14 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：dashboard 的 manager 探针不再 cold-call slot-refill（轻量路径只 loopDriver + 存活会话），`/manager` 详情页仍走含 pool 的完整探针。
-- [ ] AC2：taskList 与 sys/mgr 并行（`Promise.all`），不再串行接在其后。
-- [ ] AC3：任务摘要（状态计数 + 最近 5 条）有 30s TTL 缓存，命中时不全量重扫任务文件（可机械核：缓存命中时 `walkTasks` 不执行）。
-- [ ] AC4：readTests 确认非 dashboard 主要瓶颈（实测，非断言）。
+- [x] AC1：dashboard 的 manager 探针不再 cold-call slot-refill（轻量路径只 loopDriver + 存活会话），`/manager` 详情页仍走含 pool 的完整探针。
+- [x] AC2：taskList 与 sys/mgr 并行（`Promise.all`），不再串行接在其后。
+- [x] AC3：任务摘要（状态计数 + 最近 5 条）有 30s TTL 缓存，命中时不全量重扫任务文件（可机械核：缓存命中时 `walkTasks` 不执行）。
+- [x] AC4：readTests 确认非 dashboard 主要瓶颈（实测，非断言）。
 
 ## Definition of Done
 
-- [ ] dashboard 加载路径砍掉 slot-refill 地板 + taskList 并行 + 摘要缓存；AC1-4 全勾；land 到 develop。
+- [x] dashboard 加载路径砍掉 slot-refill 地板 + taskList 并行 + 摘要缓存；AC1-4 全勾；land 到 develop。
 
 ## Touches
 
