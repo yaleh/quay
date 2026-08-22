@@ -674,7 +674,7 @@ declare -A CADENCE=(
   [semantic-observer-judge.ts]="按需"
   [red-on-omission-audit.ts]="每轮"
   [workflows-dual-copy-drift-check.ts]="每轮"
-  [promotion-driver.ts]="每轮"
+  [promotion-driver.ts]="按需"
 
 )
 
@@ -1618,6 +1618,7 @@ declare -A CONSUMER=(
   [task-ac-carryover-check.ts]="消费方：manager 在翻 done 前读同一 grow-only 账本，新未继承 AC 进账本并据此决定是否阻止合入；--no-block 不阻轮"
   [tick-core-static-check.ts]="消费方：pre-commit gate（run_doc_checks → precommit-guard.ts）——--check-drift 是 HARD 闸（gap-ac90-delivery-copy-drift-gate 收口），任一副本-正本对漂移（改正本而副本不落地 / 副本单边编辑）即 block 提交；reconcile 前的 --no-block 窗口已关闭"
   [worker-driver.ts]="谁按：inner 派发器在要驱动单个 claude -p worker 跑完整任务时按（AC115 阶段 1 显式 --task）；条件=任务要被机械驱动跑完 select→worktree→develop→suite→ff 并落盘结构化 outcome 到 .quay/worker-outcome.jsonl"
+  [promotion-driver.ts]="谁按：outer 生产部署启动命令按（常驻进程，promotion-driver.ts 头注释「生产部署时由 outer 的启动命令传 --interval 覆盖」——接线为 AC130 后续/独立任务，本任务只做常驻循环这一半）；条件=生产部署启动常驻进程"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the
