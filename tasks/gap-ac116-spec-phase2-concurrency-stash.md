@@ -1,7 +1,7 @@
 ---
 id: gap-ac116-spec-phase2-concurrency-stash
 title: AC116 SPEC §5 阶段 2——驱动控并发 + 超时杀 worker 保留 worktree + checkout 前 stash
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -29,13 +29,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1：N 并发跑、主检出 `git status --porcelain` 恒空（除 ff 持锁瞬时）。
-- [ ] AC2（能取假）：留一个未提交改动 ⇒ 驱动 stash（stash list 可核），⛔ 不得 discard。
-- [ ] AC3：超时——构造卡死 worker ⇒ 墙钟超时 SIGTERM、worktree 仍在。
+- [x] AC1：N 并发跑、主检出 `git status --porcelain` 恒空（除 ff 持锁瞬时）。
+- [x] AC2（能取假）：留一个未提交改动 ⇒ 驱动 stash（stash list 可核），⛔ 不得 discard。
+- [x] AC3：超时——构造卡死 worker ⇒ 墙钟超时 SIGTERM、worktree 仍在。
 
 ## Definition of Done
 
-- [ ] 并发控制 + stash + 超时保 worktree 落地，取假两向通过；AC1-3 全勾；land 到 develop。
+- [x] 并发控制 + stash + 超时保 worktree 落地，取假两向通过；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
