@@ -1,7 +1,7 @@
 ---
 id: gap-bucket-subset-tmux-leak-scan-missing
 title: bucket 子集路径补 suite-tail 泄漏扫描（tmux-leak-scan --snapshot/--check + session-liveness-sweep-kill）——降频 violation
-status: done
+status: ready
 labels:
   - gap
 parent: null
