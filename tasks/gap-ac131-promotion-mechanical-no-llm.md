@@ -31,8 +31,8 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1：判定合格的任务由驱动直接调 `A22 --apply` 晋升，该路径上不得有任何 LLM 调用。
-- [ ] AC2（能取假）：构造四件套齐全 deps 空的 todo ⇒ 驱动应在一轮内将其晋为 ready，且该轮 outcome 记录中 `llm_invoked=false`（或等价字段）。
+- [x] AC1：判定合格的任务由驱动直接调 `A22 --apply` 晋升，该路径上不得有任何 LLM 调用。
+- [x] AC2（能取假）：构造四件套齐全 deps 空的 todo ⇒ 驱动应在一轮内将其晋为 ready，且该轮 outcome 记录中 `llm_invoked=false`（或等价字段）。
 
 ## Definition of Done
 

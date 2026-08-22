@@ -1,4 +1,5 @@
-// plugin/scripts/promotion-driver.ts — AC130 (tasks/gap-ac130-promotion-driver-resident-loop)
+// plugin/scripts/promotion-driver.ts — AC130 + AC131 (tasks/gap-ac130-promotion-driver-resident-loop,
+//   tasks/gap-ac131-promotion-mechanical-no-llm)
 //
 // 常驻循环，每轮调 `ready-pool-check` 取【全池】判定（⛔ 非单条 --targeted），跑完一轮不退出、
 // 按间隔进入下一轮。停掉驱动 ⇒ 池中新出现的合格任务不再被晋升（AC2 能取假，证明晋升由驱动驱动、
@@ -9,10 +10,11 @@
 //   常驻【机械】进程：每轮无条件调 ready-pool-check --apply 取全池判定 + 落地合格晋升（复用 A22 已在
 //   用的心跳路径，零 LLM），跑完一轮不退出、按 --interval 进入下一轮。AC130 只做【常驻全池循环】这一半。
 //
-// 权责边界（⛔ 只做 AC130 判据，不越界到 AC131–136 —— 那些是独立任务）：
+// 权责边界（⛔ 只做 AC130 + AC131 判据，不越界到 AC132–136 —— 那些是独立任务）：
 //   驱动  ✅ 每轮调 ready-pool-check --apply（全池判定 + 合格晋升，零 LLM）
 //         ✅ 跑完一轮不退出、按 --interval 进入下一轮；SIGINT/SIGTERM 优雅停机
 //         ✅ 每轮写一条 round 记录（.quay/promotion-round.jsonl，gitignored，outer 可消费）
+//         ✅ AC131：晋升路径纯机械（零 LLM），round 记录带 llm_invoked=false（派生自真实 argv，⛔ 不硬编码）
 //   驱动  ⛔ 不做任何 commit  ⛔ 不 spawn LLM fix worker（那是 AC132/133 的任务）
 //         ⛔ 不读/不写 .halt（停机态 = 进程信号，单一真相源；AC135 才涉及 outer 退役）
 //
@@ -69,7 +71,9 @@ export function defaultPromotionCheckArgv(root: string, cap: number): string[] {
 }
 
 /** 单轮判定结果。promotedIds = 闸判定「合格应晋」的候选 id；applied = 闸实际落地的晋升（含
- *  deliveryCritical 标签同现判定）。error 非空 ⇒ 本轮读不懂（fail-closed，⛔ 不得伪装成无候选）。 */
+ *  deliveryCritical 标签同现判定）。error 非空 ⇒ 本轮读不懂（fail-closed，⛔ 不得伪装成无候选）。
+ *  llmInvoked = 本轮是否调用过 LLM（AC131：晋升路径 = 机械 ready-pool-check ⇒ false；派生自真实 argv，
+ *  ⛔ 不硬编码 false，使「该路径零 LLM」成为可取假的测量——硬规则 4）。 */
 export interface PromotionRound {
   ok: boolean;
   error: string | null;
@@ -77,12 +81,23 @@ export interface PromotionRound {
   shouldApply: boolean;
   promotedIds: string[];
   applied: Array<{ id: string; ok: boolean; from: string | null; to: string | null; deliveryCritical: boolean }>;
+  llmInvoked: boolean;
+}
+
+/** 判定待 spawn 命令是否 LLM 调用（argv[0] basename 是 claude —— 本仓库 LLM CLI；fix worker = `claude -p`）。
+ *  AC131：晋升路径 spawn 的是 ready-pool-check（argv[0]=node）⇒ llmInvoked=false；若命令换成 claude ⇒ true。
+ *  派生自真实 argv（⛔ 不硬编码 false），使「该路径零 LLM」成为可取假的测量（硬规则 4）。 */
+export function isLlmInvocation(argv: string[]): boolean {
+  const argv0 = Array.isArray(argv) && argv.length > 0 ? String(argv[0]) : "";
+  const base = path.basename(argv0);
+  return base === "claude" || base === "claude.exe" || base === "claude.cmd";
 }
 
 /** 跑一轮：调 ready-pool-check（缺省 --apply 全池），解析 analyzeTasks JSON。解析失败/非零退出 ⇒
  *  fail-closed（ok:false + error），⛔ 不把「读不懂」与「无候选」混为一谈（硬规则 3b）。 */
 export function runPromotionRound(root: string, cmd: string[] | null, cap: number): PromotionRound {
   const argv = cmd ?? defaultPromotionCheckArgv(root, cap);
+  const llmInvoked = isLlmInvocation(argv);
   let r: ReturnType<typeof spawnSync>;
   try {
     r = spawnSync(argv[0], argv.slice(1), {
@@ -90,11 +105,11 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
     });
   } catch (e) {
     const msg = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
-    return { ok: false, error: `ready-pool-check spawn failed (${msg})`, pool: null, shouldApply: false, promotedIds: [], applied: [] };
+    return { ok: false, error: `ready-pool-check spawn failed (${msg})`, pool: null, shouldApply: false, promotedIds: [], applied: [], llmInvoked };
   }
   if (r.error || r.status !== 0) {
     const msg = r.error ? String(r.error.message || r.error) : `ready-pool-check exited ${r.status}`;
-    return { ok: false, error: msg, pool: null, shouldApply: false, promotedIds: [], applied: [] };
+    return { ok: false, error: msg, pool: null, shouldApply: false, promotedIds: [], applied: [], llmInvoked };
   }
   try {
     const j = JSON.parse(String(r.stdout ?? "").trim());
@@ -117,14 +132,16 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
       pool: typeof j.pool === "number" ? j.pool : null,
       shouldApply: !!j.should_apply,
       promotedIds, applied,
+      llmInvoked,
     };
   } catch {
-    return { ok: false, error: "unparseable ready-pool-check output", pool: null, shouldApply: false, promotedIds: [], applied: [] };
+    return { ok: false, error: "unparseable ready-pool-check output", pool: null, shouldApply: false, promotedIds: [], applied: [], llmInvoked };
   }
 }
 
 /** 一条结构化 round 记录（字段：ts · round · run_id · pid · action · pool · should_apply ·
- *  promoted_ids · applied · error）。action ∈ promote|none|error。 */
+ *  promoted_ids · applied · error · llm_invoked）。action ∈ promote|none|error。
+ *  llm_invoked 在晋升路径上为 false（机械 ready-pool-check，AC131）；AC132 的 fix worker 轮才翻 true。 */
 export function computeRoundRecord(opts: {
   round: number;
   runId: string;
@@ -135,12 +152,13 @@ export function computeRoundRecord(opts: {
   promotedIds: string[];
   applied: PromotionRound["applied"];
   error: string | null;
+  llmInvoked: boolean;
 }) {
   const action = opts.error ? "error" : opts.promotedIds.length > 0 ? "promote" : "none";
   return {
     ts: opts.at, round: opts.round, run_id: opts.runId, pid: opts.pid, action,
     pool: opts.pool, should_apply: opts.shouldApply, promoted_ids: opts.promotedIds,
-    applied: opts.applied, error: opts.error,
+    applied: opts.applied, error: opts.error, llm_invoked: opts.llmInvoked,
   };
 }
 

@@ -1,9 +1,13 @@
 // @test-group governance
-// promotion-driver.test.mjs — AC130 (tasks/gap-ac130-promotion-driver-resident-loop): the resident
+// promotion-driver.test.mjs — AC130 + AC131 (tasks/gap-ac130-promotion-driver-resident-loop,
+// tasks/gap-ac131-promotion-mechanical-no-llm): the resident
 // promotion driver loops forever, calling ready-pool-check for the FULL-pool determination (never a
 // single --targeted task) each round, does not exit after one round, and enters the next round after
 // --interval. AC2 is the FALSIFIABLE half: stop the driver ⇒ a newly-eligible todo in the pool is NOT
 // promoted — proving promotion is driven by the driver, not some outer tick.
+// AC131 (falsifiable): a qualified todo (four artifacts complete + empty deps) is promoted to ready
+// within one round via the mechanical A22 --apply path, with ZERO LLM — the round's outcome record
+// carries llm_invoked=false (derived from the spawned argv, not hardcoded).
 //
 // The ready-pool-check command is injectable (--ready-pool-cmd) so the pure/loop tests never touch the
 // real checker; the AC2 test drives the REAL ready-pool-check --apply against a temp workspace to prove
@@ -21,6 +25,7 @@ import { execFileSync, spawn } from "node:child_process";
 
 import {
   defaultPromotionCheckArgv,
+  isLlmInvocation,
   runPromotionRound,
   computeRoundRecord,
   appendRoundRecord,
@@ -162,13 +167,14 @@ test("runPromotionRound — fail-closed: non-zero exit / unparseable output ⇒ 
 });
 
 test("computeRoundRecord — action ∈ promote|none|error derived from the round", () => {
-  const base = { round: 1, runId: "pm-1", pid: 42, at: "2026-08-22T00:00:00.000Z", pool: 1, shouldApply: true, applied: [] };
+  const base = { round: 1, runId: "pm-1", pid: 42, at: "2026-08-22T00:00:00.000Z", pool: 1, shouldApply: true, applied: [], llmInvoked: false };
   assert.equal(computeRoundRecord({ ...base, promotedIds: ["gap-a"], error: null }).action, "promote");
   assert.equal(computeRoundRecord({ ...base, promotedIds: [], error: null }).action, "none");
   assert.equal(computeRoundRecord({ ...base, promotedIds: [], error: "boom" }).action, "error");
   const rec = computeRoundRecord({ ...base, promotedIds: ["gap-a"], error: null });
   assert.equal(rec.run_id, "pm-1");
   assert.equal(rec.pid, 42);
+  assert.equal(rec.llm_invoked, false, "AC131: round record carries llm_invoked=false on the mechanical promotion path");
   assert.ok(rec.ts && rec.round, "ts/round present");
 });
 
@@ -176,7 +182,7 @@ test("appendRoundRecord — pure append, never truncates (two lines survive)", (
   const root = makeRoot("append");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const file = path.join(root, ROUND_LOG_REL);
-  const rec = (r) => computeRoundRecord({ round: r, runId: "pm-1", pid: 1, at: "t", pool: 0, shouldApply: false, promotedIds: [], applied: [], error: null });
+  const rec = (r) => computeRoundRecord({ round: r, runId: "pm-1", pid: 1, at: "t", pool: 0, shouldApply: false, promotedIds: [], applied: [], error: null, llmInvoked: false });
   appendRoundRecord(file, rec(1));
   appendRoundRecord(file, rec(2));
   assert.equal(readRoundLines(root).length, 2, "two appended lines");
@@ -256,4 +262,48 @@ test("AC2 — stop the driver (SIGTERM) ⇒ newly-eligible todo is not promoted;
   // Non-vacuous guard: the SAME task IS genuinely eligible — a single driver round (--once) promotes it.
   runDriver(root, ["--ready-pool-cmd", realReadyPoolCmd(root), "--cap", "5", "--once"]);
   assert.equal(readStatus(root, "gap-eligible-2"), "ready", "guard: gap-eligible-2 was eligible all along — only the stopped driver held it back");
+});
+
+// ── AC131 (falsifiable): qualified todo promoted via A22 --apply, zero LLM, llm_invoked=false ─────
+
+test("isLlmInvocation — falsifiable derivation: claude argv ⇒ true, mechanical argv ⇒ false (⛔ not hardcoded)", () => {
+  assert.equal(isLlmInvocation(["claude", "-p", "fix task X"]), true, "claude -p is an LLM invocation");
+  assert.equal(isLlmInvocation(["/usr/local/bin/claude", "print"]), true, "absolute claude path is an LLM invocation");
+  assert.equal(isLlmInvocation(["node", "--experimental-strip-types", "/r/plugin/scripts/ready-pool-check.ts", "--apply"]), false, "ready-pool-check is mechanical, not an LLM");
+  assert.equal(isLlmInvocation([]), false, "empty argv is not an LLM invocation");
+});
+
+test("AC131 AC1 — the promotion path spawns no LLM: default argv mechanical + round llmInvoked=false", (t) => {
+  const root = makeRoot("ac131-ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // The default promotion command is the mechanical ready-pool-check, never an LLM CLI.
+  const argv = defaultPromotionCheckArgv(root, 5);
+  assert.equal(argv[0], "node");
+  assert.equal(isLlmInvocation(argv), false, "AC131: default promotion argv is not an LLM invocation");
+
+  // A mechanical round reports llmInvoked=false — and isLlmInvocation is falsifiable (claude ⇒ true),
+  // so this is a DERIVED measurement of the spawned argv, not a hardcoded false (hard rule 4).
+  const r = runPromotionRound(root, ["node", "-e", "console.log(JSON.stringify({pool:1,should_apply:true,promotions:[{id:'gap-x'}],applied_promotions:[{id:'gap-x',ok:true,from:'todo',to:'ready',deliveryCritical:false}]}))"], 5);
+  assert.equal(r.ok, true);
+  assert.equal(r.llmInvoked, false, "AC131 AC1: the mechanical promotion round reports llmInvoked=false");
+});
+
+test("AC131 AC2 — four-artifact + empty-deps todo promoted to ready in one round, outcome llm_invoked=false", (t) => {
+  const root = makeRoot("ac131-ac2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // four artifacts (Proposal/Contract/AC/DoD) + Touches self-touch, frontmatter has no depends_on ⇒ deps empty.
+  writeTask(root, "gap-ac131-eligible", "todo");
+
+  // One driver round (--once) with the REAL ready-pool-check --apply against the temp workspace.
+  runDriver(root, ["--ready-pool-cmd", realReadyPoolCmd(root), "--cap", "5", "--once"]);
+
+  assert.equal(readStatus(root, "gap-ac131-eligible"), "ready", "AC131 AC2: eligible todo promoted to ready within one round");
+
+  const records = readRoundLines(root);
+  assert.equal(records.length, 1, "exactly one round record");
+  const rec = records[0];
+  assert.equal(rec.action, "promote");
+  assert.ok(rec.promoted_ids.includes("gap-ac131-eligible"), "the promoted id is recorded in the outcome");
+  assert.equal(rec.llm_invoked, false, "AC131 AC2: the outcome record carries llm_invoked=false (the falsifiable half)");
 });
