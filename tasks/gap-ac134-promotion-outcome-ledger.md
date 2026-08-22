@@ -1,7 +1,7 @@
 ---
 id: gap-ac134-promotion-outcome-ledger
 title: AC134 判定/晋升/修复各落一条 outcome（outer 可消费）
-status: ready
+status: done
 labels:
   - gap
 parent: null
