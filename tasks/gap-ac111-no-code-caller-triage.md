@@ -1,7 +1,7 @@
 ---
 id: gap-ac111-no-code-caller-triage
 title: AC111 无代码调用者机件逐条三选一判定（重扫 + wired/retired/manual-by-design，仅 .md 类归零）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
