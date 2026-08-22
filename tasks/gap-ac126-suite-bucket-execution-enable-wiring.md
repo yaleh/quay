@@ -1,7 +1,7 @@
 ---
 id: gap-ac126-suite-bucket-execution-enable-wiring
 title: AC126 分桶执行的【生产启用】——fan-in suite 路径真正传 --buckets 且带桶轮次落 verification-round
-status: todo
+status: ready
 labels:
   - gap
 parent: null
