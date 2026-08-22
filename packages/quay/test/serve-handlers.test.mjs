@@ -250,3 +250,38 @@ test("AC5: /git-history degrades to 200 「无数据」 on a non-git workspace (
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });
+
+test("AC127: GET /tests renders the buckets column — a bucket row shows its label, a legacy bucket-less row shows no fabricated \"full\"", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-bucket-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    // Oldest→newest file order: a legacy row (no bucket fields), then a bucket-mode row carrying the
+    // AC126 fields. readTests presents newest-first, so the bucket row is the latest banner + first row.
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 227, startedAt: "2026-08-17T04:30:00.000Z", durationMs: 936519, state: "green", runner: "outer", scope: "worktree", commit: "426b21ceaabbe7502334d92d79ce4a4a8d935fe9", pass: 900, fail: 0, cancelled: 0, tests: 900, failures: [] }),
+      JSON.stringify({ round: 228, startedAt: "2026-08-22T00:00:00.000Z", durationMs: 366000, state: "green", runner: "outer", scope: "bucket", commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 500, fail: 0, cancelled: 0, tests: 500, failures: [], buckets: "M", bucket_files: 12, bucket_duration_ms: 366000 }),
+    ].join("\n"));
+
+    createStore(tasksDir).write("AC127-T", { title: "bucket web tests", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests");
+    assert.equal(r.status, 200, "GET /tests returns 200");
+    assert.ok(r.body.includes("<th>buckets</th>"), "the history table has a buckets column");
+    assert.ok(r.body.includes("<td>M</td>"), "the bucket row's cell shows its label M");
+    assert.ok(r.body.includes("buckets M"), "the latest-run banner surfaces the bucket label");
+    assert.ok(!r.body.includes("<td>full</td>"), "a legacy bucket-less row shows no fabricated \"full\" bucket cell");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
