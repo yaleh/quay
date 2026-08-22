@@ -48,4 +48,6 @@ depends_on:
 
 - packages/quay/src/observation.ts（TestRunRecord + parseVerificationRound 加 buckets）
 - packages/quay/src/serve-handlers.ts（renderTestsPage 加桶列）
+- packages/quay/test/observation.test.mjs（parseVerificationRound buckets 字段测试）
+- packages/quay/test/serve-handlers.test.mjs（GET /tests 桶列测试）
 - tasks/gap-ac127-suite-bucket-web-tests-page-visible.md（自身）
