@@ -45,4 +45,5 @@ depends_on:
 
 - scripts/test.sh（--buckets 路径 emit __PERFILE__）
 - plugin/scripts/full-suite-runner.ts（若 parser 在 runner 侧）
+- plugin/test/suite-bucket-perfile-emit.test.mjs（新测试：钉住 --buckets reporter wiring + parser 归因）
 - tasks/gap-fix-scope-perfile-buckets-parser.md（自身）

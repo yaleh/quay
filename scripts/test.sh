@@ -2112,10 +2112,14 @@ elif [ "${1:-}" = "--buckets" ]; then
   bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
   mark_nested
   set +e
+  # Per-file attribution (gap-fix-scope-perfile-buckets-parser): load the measure-suite reporter
+  # (suite_reporter_flags) so a red bucket round emits __PERFILE__ duration_ms=<d> <path>
+  # passed=<bool> lines — full-suite-runner.ts's fix-scope gate parses THOSE to attribute each
+  # failure to its file (without them a bucket red is unattributed / falls to the no-file defer).
   if has_explicit_concurrency "${rest_args[@]}"; then
-    node --test "${rest_args[@]}" "${files[@]}"
+    node --test $(suite_reporter_flags) "${rest_args[@]}" "${files[@]}"
   else
-    node --test --test-concurrency="$(default_test_concurrency)" "${rest_args[@]}" "${files[@]}"
+    node --test --test-concurrency="$(default_test_concurrency)" $(suite_reporter_flags) "${rest_args[@]}" "${files[@]}"
   fi
   bucket_code=$?
   # Same suite-AFTER tail as the full default path: session-liveness-sweep-kill is the best-effort
