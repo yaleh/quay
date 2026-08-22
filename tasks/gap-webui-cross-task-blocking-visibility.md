@@ -34,7 +34,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 跨任务阻塞计算 + 渲染落地；AC1-2 全勾；land 到 develop。
+- [ ] 跨任务阻塞关系计算（blocks/blockedBy 字段）与 /live 渲染展示落地；AC1-2 全勾；land 到 develop。
 
 ## Touches
 
