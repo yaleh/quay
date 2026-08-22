@@ -81,14 +81,14 @@ export const JUDGMENT_CONSUMERS: JudgmentConsumer[] = [
     judgment: "deficit",
     producer: "plugin/scripts/ready-pool-check.ts",
     consumer:
-      "B9 第三触发器——`ready-pool-check.ts --apply` 自闸补晋（pool<floor 且 promotions 非空 ⇒ 机械补晋落盘）",
+      "promotion-driver 常驻循环——每轮 `ready-pool-check --apply` 全池判定 + 合格晋升（AC130/131）；原 B9 第三触发器随 A22 退役（AC135）",
     verify: [
-      { file: "orchestration/orchestrator-tick-core.md", pattern: "deficit\\s*>\\s*0", expect: "present" },
+      { file: "plugin/scripts/promotion-driver.ts", pattern: "ready-pool-check|--apply", expect: "present" },
       { file: "plugin/scripts/ready-pool-check.ts", pattern: "--apply|shouldApply", expect: "present" },
     ],
     status: "wired",
     instance: "instance-3 (22:0x deficit 每轮算出无触发器读, 已修 B9)",
-    note: "outer 77f17d95 接线；orchestrator-tick-core B9 第三触发器（2026-08-10）。",
+    note: "outer 77f17d95 接线原 B9 第三触发器（2026-08-10）；AC135 起消费方为 promotion-driver。",
   },
   {
     judgment: "not-yet-flipped",

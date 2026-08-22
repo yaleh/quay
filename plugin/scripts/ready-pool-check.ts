@@ -2,8 +2,9 @@
 // (tasks/gap-promotion-cadence-is-role-volition-not-product-mechanism).
 //
 // RETIRED FILTER LAYER (AC48, 2026-08-13 — tasks/gap-ac48-code-retirement-pool-filter-and-scripts):
-// the `pool < floor` (floor = cap × 4) gate on todo→ready BULK promotion is CANCELLED. A22 runs
-// `--apply` every tick; after AC48 it promotes EVERY eligible todo candidate regardless of pool size
+// the `pool < floor` (floor = cap × 4) gate on todo→ready BULK promotion is CANCELLED. The
+// promotion-driver runs `--apply` every round (AC135 退役 outer 的 A22 心跳，晋升改由常驻驱动);
+// after AC48 it promotes EVERY eligible todo candidate regardless of pool size
 // (合格即晋, 不看 pool 大小) — matching SPEC-task-status-flow's target model (outer 修不合格 + 尽力晋,
 // 不考虑 pool). The `pool`/`floor`/`deficit` fields remain as REPORTED signals (report string /
 // judgment-consumer still read them) but no longer GATE bulk promotion. Negative control: no eligible
@@ -223,7 +224,7 @@ export const POOL_FLOOR_MULT_DEFAULT = 4;
 /** The healthy ready-pool floor: pool must be ≥ this before promotion pressure releases.
  *  floor = cap × 4 (cap=3 ⇒ 12). SINGLE SOURCE — no hardcoded 3 anywhere.
  *  RETIRED GATE (AC48): this is now a REPORTED signal only — it no longer GATES bulk promotion
- *  (the pool<floor condition was cancelled; A22 promotes every eligible candidate, 合格即晋). */
+ *  (the pool<floor condition was cancelled; the promotion-driver promotes every eligible candidate, 合格即晋). */
 export const POOL_FLOOR = CONCURRENCY_CAP_DEFAULT * POOL_FLOOR_MULT_DEFAULT;
 
 /** floor = cap × floorMult (default 4×). The one definition of the floor; analyzeTasks calls this.

@@ -8,12 +8,14 @@
 #   ③ 新鲜度上界——行带时间戳+原始读数；checker 判「行内自洽 + 新鲜度上界」而非拿此刻真值判
 #      过去行；构造 20 分钟前的行 + 此刻真值已变 ⇒ 不因量变误报（自洽即过）。
 #
-# 五条不等式（B13，manager 明令）——每条对应一个强制动作，no-action 只有在五条全假时才合法：
+# 五条不等式（B13，manager 明令）——每条对应一个强制动作，no-action 只有在【活】条全假时才合法。
+# ②④⑤ 已退役（② pool<floor 随 A22 供给侧心跳退役 → AC135，pool 补晋现由 promotion-driver 承接；
+# ④⑤ 随 B3 退役 → AC84），不再计入 outer 的 no-action 义务。
 #   ① in_flight < cap 且 recommended 非空 ⇒ 必须派发到 cap
-#   ② pool < floor ⇒ 必须晋级补池
+#   ② pool < floor ⇒ 必须晋级补池   【AC135 退役】
 #   ③ nyf > 0 且 work 落地 ⇒ 必须翻 done
-#   ④ integration 领先 develop 且 suite 绿 ⇒ 必须批量合
-#   ⑤ suite state=red ⇒ 分诊+派发
+#   ④ integration 领先 develop 且 suite 绿 ⇒ 必须批量合   【AC84 退役】
+#   ⑤ suite state=red ⇒ 分诊+派发                          【AC84 退役】
 #
 # 判据（本脚本，三层）：
 #   L0 结构：读 tick-log 的最近一个 tick 段（`### HH:MMZ` 起），取动作类型 + 五条不等式行。
@@ -27,7 +29,7 @@
 #         写入/行内 epoch/保守回退），不是 log 写入时刻——act-then-log 下动作证据提交在 log 前，
 #         窗口必须含它（gap-outer-tick-log-check-trace-window-anchored-at-log-mtime）。
 #       - ⛔ 监控 tick 豁免（gap-outer-tick-log-l2-monitoring-tick-false-red）：correct 判词 + 窗口无
-#         commit + 行带完整读数举证（B13 五条 + A22 ready-pool + A23 AC81 输出）⇒ 合法监控 tick，不报
+#         commit + 行带完整读数举证（B13 五条 + A23 AC81 输出；A22 读数已随 A22 退役 → AC135）⇒ 合法监控 tick，不报
 #         （监控 tick 按构造无 develop commit，它的「动作」就是读数本身）。无读数举证仍报——豁免不
 #         压布尔，防欺骗保留（escalate/unblock 声称具体动作，即使带读数也不豁免）。
 #   L3 新鲜度上界：行时间 > 上界 ⇒ 跳过 L2（只跑 L1 自洽）——不拿此刻真值判 20 分钟前的行。
@@ -120,23 +122,19 @@ INEQ_LINE="$(printf '%s' "$LAST_SECTION" | grep -m1 '^- 五条不等式:' || tru
 # 区分「真跑了 A23 并留输出」与「散文讨论 A23 而无产物」（硬规则⑨：缺失则判 RED）。旧 inner 的
 # A23 执行模式两数行（`main_thread_edits=…/agent_dispatches=…`）无状态词 ⇒ 不算 AC81 A23 输出。
 A23_LINE="$(printf '%s' "$LAST_SECTION" | grep -m1 -E 'A23.*(code=[0-9]|VIOLATED|NOT-EVALUATED|CRITICAL|\bOK\b)' || true)"
-# A22 ready-pool 读数行判定（监控 tick 豁免用，gap-outer-tick-log-l2-monitoring-tick-false-red）：
-# A22 是每轮必跑的 ready-pool-check --apply 测量；真实读数形如 `A22 … pool=N floor=M deficit=K
-# promotions=[…]`（带 pool= 数字或 promotions= 列表）。散文提到 A22 而无读数不计（同 A23 的产物
-# 判定，硬规则⑨）。
-A22_LINE="$(printf '%s' "$LAST_SECTION" | grep -m1 -E 'A22.*(pool=[0-9]+|promotions=)' || true)"
 
 # ── 监控 tick 判定（gap-outer-tick-log-l2-monitoring-tick-false-red）────────────────────────
 # L2 trace 判据要求动作 tick 在 [tick 起点, log 写入] 窗口内有 git 提交（防「判词写了但没做事」）。
-# 但纯监控 tick（在飞=cap、无晋升、无派发、无新立案）每轮只产出读数（B13 五条 + A22 ready-pool +
-# A23 AC81 输出），【按构造没有 develop commit】——它做的「动作」就是这些测量本身。tick-log 行自带
-# 的完整读数举证就是它已执行的证据，只是 gitignore 排除使 L2 看不到。
-# ⇒ 判据：动作分类=correct 且窗口无 commit 时，行带完整读数举证（B13 + A22 + A23）⇒ 合法监控 tick，
+# 但纯监控 tick（在飞=cap、无晋升、无派发、无新立案）每轮只产出读数（B13 五条 + A23 AC81 输出），
+# 【按构造没有 develop commit】——它做的「动作」就是这些测量本身。tick-log 行自带的完整读数举证
+# 就是它已执行的证据，只是 gitignore 排除使 L2 看不到。（A22 ready-pool 读数已随 A22 退役 → AC135，
+# 监控 tick 举证不再含 A22 读数。）
+# ⇒ 判据：动作分类=correct 且窗口无 commit 时，行带完整读数举证（B13 + A23）⇒ 合法监控 tick，
 # 不报 action-claimed-but-no-git-trace。⛔ 不压布尔（不是「无 commit 就豁免」）——行无读数举证仍报
 # （AC2 防欺骗保留：correct 判词 + 无读数 + 无 commit ⇒ 仍 FAIL）。⛔ 只豁免 correct——escalate/unblock
 # 声称的是具体动作（派发/升级），即使带读数也必须留 git 痕迹，豁免它们才是削弱防欺骗。
 MONITORING_TICK=0
-if [ "$ACTION" = "correct" ] && [ -n "$INEQ_LINE" ] && [ -n "$A22_LINE" ] && [ -n "$A23_LINE" ]; then
+if [ "$ACTION" = "correct" ] && [ -n "$INEQ_LINE" ] && [ -n "$A23_LINE" ]; then
   MONITORING_TICK=1
 fi
 
@@ -227,7 +225,7 @@ L2_FAIL=""
 MONITORING_EXEMPT=0
 if [ "$IS_FRESH" = "1" ] && [ -n "$TRUTH" ]; then
   # --truth "10100"：五字符 ①-⑤，1=真。
-  INEQ1_TRUE="${TRUTH:0:1}"; INEQ2_TRUE="${TRUTH:1:1}"; INEQ3_TRUE="${TRUTH:2:1}"
+  INEQ1_TRUE="${TRUTH:0:1}"; INEQ2_TRUE=0; INEQ3_TRUE="${TRUTH:2:1}"   # ② 已退役（AC135），TRUTH[1] 位保留但恒 0——pool 补晋由 promotion-driver 承接
   INEQ4_TRUE="${TRUTH:3:1}"; INEQ5_TRUE="${TRUTH:4:1}"
   ANY_TRUE=$(( INEQ1_TRUE || INEQ2_TRUE || INEQ3_TRUE || INEQ4_TRUE || INEQ5_TRUE ))
   if [ "$ACTION" = "no-action" ] && [ "$ANY_TRUE" = "1" ]; then
@@ -260,14 +258,9 @@ elif [ "$IS_FRESH" = "1" ] && [ -d "$ROOT/.git" ]; then
     REC="$(printf '%s' "$SLOT_OUT" | grep -oE '"recommended": *\[[^]]*\]' | grep -oE '\[[^]]*\]' | tr -d '[]" ' | tr ',' '\n' | grep -c 'gap-\|DIR-' || true)"
     [ "${REC:-0}" -gt 0 ] && REC_NONEMPTY=1
   fi
-  # ② pool < floor（ready-pool-check）
+  # ② pool < floor（ready-pool-check）——【AC135 退役】：pool 补晋现由 promotion-driver 承接，不再计入
+  # outer 的 no-action 义务（原 A22 供给侧心跳退役）。
   POOL_LT_FLOOR=0
-  POOL_OUT="$(node --no-warnings --experimental-strip-types "$SCRIPT_DIR/ready-pool-check.ts" --root "$ROOT" --cap 4 --json 2>/dev/null || true)"
-  if [ -n "$POOL_OUT" ]; then
-    POOL="$(printf '%s' "$POOL_OUT" | grep -oE '"pool": *[0-9]+' | grep -oE '[0-9]+' | head -1)"
-    FLOOR="$(printf '%s' "$POOL_OUT" | grep -oE '"floor": *[0-9]+' | grep -oE '[0-9]+' | head -1)"
-    [ -n "$POOL" ] && [ -n "$FLOOR" ] && [ "$POOL" -lt "$FLOOR" ] && POOL_LT_FLOOR=1
-  fi
   # ④ integration 领先 develop 且 suite 绿
   INTEGRATION_AHEAD=0
   LEAD="$(git -C "$ROOT" rev-list --count develop..integration 2>/dev/null || echo 0)"

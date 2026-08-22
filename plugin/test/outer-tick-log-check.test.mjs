@@ -53,7 +53,7 @@ function makeGitRepoWithCommit({ epoch }) {
   return dir;
 }
 
-const FIVE_FALSE = "①in_flight<cap且recommended非空→派发到cap [当前假:in_flight==cap]; ②pool<floor→晋级补池 [当前假:pool≥floor]; ③nyf>0且work落地→翻done [当前假:nyf=0]; ④integration领先develop且suite绿→批量合 [当前假:develop==integration]; ⑤suite red→分诊 [当前假:green]";
+const FIVE_FALSE = "①in_flight<cap且recommended非空→派发到cap [当前假:in_flight==cap]; ②pool<floor→晋级补池【AC135 退役】; ③nyf>0且work落地→翻done [当前假:nyf=0]; ④integration领先develop且suite绿→批量合 [当前假:develop==integration]; ⑤suite red→分诊 [当前假:green]";
 
 // 时间鲁棒标签（2026-08-14, cc611891 同族第二处）：timestamp 子句（label ≤ mtime）让硬编码标签
 // 跨天后变「未来」⇒ 所有 row() 默认 fixture 全红。默认标签 = fixture 创建时的 date -u HH:MM，
@@ -359,22 +359,24 @@ test("AC2 — 窗口回退：无 epoch= 时用上一 tick 表头锚定该 tick �
 
 // ── 监控 tick 豁免（gap-outer-tick-log-l2-monitoring-tick-false-red）────────────────────────
 // 纯监控 tick（在飞=cap、无晋升、无派发、无新立案）按构造无 develop commit——它的「动作」就是读数
-// 本身（A22/A23/B13），tick-log 是 gitignored ⇒ L2 看不到。修法（方向 A）：checker 识别「本窗口无
-// commit 但 tick-log 行自带完整读数举证（B13 + A22 + A23）」为合法监控 tick ⇒ 不报
+// 本身（A23/B13），tick-log 是 gitignored ⇒ L2 看不到。修法（方向 A）：checker 识别「本窗口无
+// commit 但 tick-log 行自带完整读数举证（B13 + A23）」为合法监控 tick ⇒ 不报
 // action-claimed-but-no-git-trace。⛔ 不压布尔（不是「无 commit 就豁免」）：无读数举证仍报（AC2），
 // 且豁免只给 correct——escalate/unblock 声称具体动作，即使带读数也必须留 git 痕迹。
-const MONITOR_INEQ = "①in_flight<cap且recommended非空→派发到cap [当前假:in_flight==cap]; ②pool<floor→晋级补池 [当前真:pool<floor 供给侧 A22 promotions=[]]; ③nyf>0且work落地→翻done [当前假]; ④integration领先develop且suite绿→批量合 [当前假]; ⑤suite red→分诊 [当前假]";
-// 完整读数举证行（extra）：A22 ready-pool 读数 + epoch 锚定该 tick 起点。
-const MONITOR_READINGS = (tickStartEpoch) => `- A22 --apply pool=10 floor=20 deficit=10 promotions=[]\n- epoch=${tickStartEpoch}\n- 做了什么: 纯监控（在飞=cap、无晋升、无派发）\n`;
+// （A22 ready-pool 读数已随 A22 退役 → AC135；②pool<floor 晋级补池亦退役，监控 tick 的活触发改由
+// ① 派发侧承担——fixture 里 ① 标「当前真」以行使豁免路径。）
+const MONITOR_INEQ = "①in_flight<cap且recommended非空→派发到cap [当前真:recommended=[gap-x]]; ②pool<floor→晋级补池【AC135 退役】; ③nyf>0且work落地→翻done [当前假]; ④integration领先develop且suite绿→批量合 [当前假]; ⑤suite red→分诊 [当前假]";
+// 完整读数举证行（extra）：epoch 锚定该 tick 起点 + 做了什么。
+const MONITOR_READINGS = (tickStartEpoch) => `- epoch=${tickStartEpoch}\n- 做了什么: 纯监控（在飞=cap、无晋升、无派发）\n`;
 
 test("AC1 — 监控 tick（correct + 完整读数 + 窗口无 commit）⇒ PASS，不报 action-claimed-but-no-git-trace", () => {
   const nowEpoch = Math.floor(Date.now() / 1000);
   const tickStartEpoch = nowEpoch - 300;       // 该 tick 起点
   const oldCommitEpoch = nowEpoch - 7200;      // 窗口外提交（2h 前）⇒ TRACE_EMPTY
   const repo = makeGitRepoWithCommit({ epoch: oldCommitEpoch });
-  // B13（row ineq）+ A23（row 默认补）+ A22（extra 显式加）= 完整读数举证
+  // B13（row ineq）+ A23（row 默认补）= 完整读数举证（A22 读数已随 A22 退役，不再构成举证）。
   const log = row("correct", MONITOR_INEQ, MONITOR_READINGS(tickStartEpoch), labelAtEpoch(nowEpoch));
-  const r = runChecker({ log, truth: "01000", root: repo, logMtime: nowEpoch });
+  const r = runChecker({ log, truth: "10000", root: repo, logMtime: nowEpoch });
   assert.equal(r.status, 0, `expect PASS (monitoring tick): ${r.stdout}`);
   assert.doesNotMatch(r.stdout, /action-claimed-but-no-git-trace/, "monitoring tick must not be flagged as claimed-action-without-trace");
   assert.match(r.stdout, /"monitoring":1/, "PASS must report the monitoring exemption");
@@ -401,7 +403,7 @@ test("AC3 — 豁免不压布尔：escalate + 完整读数 + 窗口无 commit �
   const repo = makeGitRepoWithCommit({ epoch: oldCommitEpoch });
   // escalate 声称具体动作（升级/派发），即使带读数也必须留 git 痕迹——豁免只给 correct 监控 tick。
   const log = row("escalate", MONITOR_INEQ, MONITOR_READINGS(tickStartEpoch), labelAtEpoch(nowEpoch));
-  const r = runChecker({ log, truth: "01000", root: repo, logMtime: nowEpoch });
+  const r = runChecker({ log, truth: "10000", root: repo, logMtime: nowEpoch });
   assert.equal(r.status, 1, `expect FAIL (escalate not exempted): ${r.stdout}`);
   assert.match(r.stdout, /action-claimed-but-no-git-trace/, "escalate is a claimed specific action — readings alone must not exempt it");
   rmSync(repo, { recursive: true, force: true });

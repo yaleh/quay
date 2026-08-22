@@ -206,18 +206,8 @@ run_static_checks() {
   # tick section and self-checks it, but does NOT yet enforce the structured evidence rows.
   # @static-tier change
   run_checker "outer-tick-log-check" bash "${repo_root}/plugin/scripts/outer-tick-log-check.sh" --root "${repo_root}"
-  echo "== AC66 A22 agent-id check (gap-ac66-ac-driven-behavior-change-verifiable — tick-log A22 读数行必须带 agent 标识) =="
-  # AC66 判据2 A22 样板: the OUTER tick-log's A22 reading lines must carry the AGENT ID of the subagent
-  # that ran ready-pool-check --apply (orchestrator-tick-core.md A22: "不在主线程跑"). A reading line
-  # WITHOUT an agent id means ready-pool-check ran on the MAIN thread (or the outer cannot show it did
-  # not) — the pre-fix 10 main-thread invocations are the real absence sample (判据3, D2 不构造).
-  # FORWARD-ONLY (AC66 判据1): only the LATEST A22 reading line is judged — historical pre-fix lines
-  # are never retroactively red. The tick-log is gitignored (absent in task worktrees ⇒ NOT-EVALUATED,
-  # 硬规则 3b — never conflated with green); in the main checkout it reads the live log and REDs a
-  # current non-compliant line (the enforcement the AC mandates: 无标识即视为未执行).
-  # @static-tier change
-  # @static-object orchestration/tick-log.md plugin/scripts/ac66-a22-agent-id-check.ts plugin/test/ac66-a22-agent-id-check.test.mjs
-  run_checker "ac66-a22-agent-id-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/ac66-a22-agent-id-check.ts" --root "${repo_root}"
+  # AC66 A22 agent-id check RETIRED (AC135, 2026-08-22): A22 供给侧心跳已退役，晋升由 promotion-driver
+  # 承接；其「tick-log A22 读数行带 agent 标识」判据失去对象 → checker + test + mutation case 一并移除。
   echo "== superseded-capability check (gap-retired-script-still-callable, AC5) =="
   # One capability = ONE implementation. A superseded implementation (the SUPERSEDED table in
   # capability-catalog.sh — currently send-keys-verified.sh, deleted 2026-08-10 under human ruling)
