@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readJournal, readBoardLanding, readBoardExecution, readGitHistory, readSystem, readManager, readTests, readSessions, readArchitecture, SESSION_LAYERS, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution, type GitHistoryCommit, type GitHistoryResult, type SystemResult, type ManagerResult, type TestsResult, type SessionsResult, type SessionDetail, type ArchitectureResult, type TestRunRecord } from "./observation.ts";
+import { readLive, readJournal, readBoardLanding, readBoardExecution, readGitHistory, readSystem, readManager, readManagerLight, readTests, readSessions, readArchitecture, SESSION_LAYERS, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution, type GitHistoryCommit, type GitHistoryResult, type SystemResult, type ManagerResult, type TestsResult, type SessionsResult, type SessionDetail, type ArchitectureResult, type TestRunRecord } from "./observation.ts";
 import { createGoalStore } from "./goal-store.ts";
 import { createDocumentStore } from "./document-store.ts";
 // live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
@@ -2569,6 +2569,41 @@ function renderDashboardPage(d: {
     </main></body></html>`;
 }
 
+// ── Task-summary short-TTL cache (dashboard display surface only) ────────────────────────────────
+// gap-webui-dashboard-load-time-optimization AC3: the dashboard's taskCard shows only STATUS COUNTS
+// + the 5 most-recently-updated non-done tasks, yet the pre-cache path called
+// client.taskList({includeBody:false}) on EVERY /dashboard load — a full walkTasks() over the task
+// store (listIds() → get() per id = readFileSync + statSync + YAML.parse). Measured ~89ms warm /
+// ~640ms cold on the live store, plus the MCP subprocess round-trip. This cache (the slotRefillCache
+// 范式 in observation.ts: 30s TTL, keyed by workspaceRoot so two served workspaces never share a
+// board) holds the whole frontmatter-only array the summary is derived from — on a hit,
+// client.taskList is never called, so the provider's walkTasks never executes (the AC3 mechanical
+// check). A 30s TTL bounds staleness: the dashboard is a display snapshot; the dispatch mechanism
+// (A22 / slot-refill) always reads fresh, never through this cache.
+export const TASK_SUMMARY_CACHE_TTL_MS = 30_000;
+const taskSummaryCache = new Map<string, { at: number; tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }> }>();
+
+/** Test-hygiene handle: drop all cached task-summary readings. */
+export function clearTaskSummaryCache(): void {
+  taskSummaryCache.clear();
+}
+
+/** Dashboard task-summary source: client.taskList({includeBody:false}), short-TTL-cached per
+ *  workspace root. On a hit the provider is not contacted, so its walkTasks() does not run (the AC3
+ *  mechanical check). A failed read is NOT cached — the next load retries instead of pinning the
+ *  error for the whole TTL (same fail-open policy as slotRefillCache). */
+export async function readTaskSummary(
+  root: string,
+  client: ProviderClient,
+): Promise<Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>> {
+  const hit = taskSummaryCache.get(root);
+  if (hit && Date.now() - hit.at < TASK_SUMMARY_CACHE_TTL_MS) return hit.tasks;
+  const r = await client.taskList({ includeBody: false });
+  const tasks = r.tasks ?? [];
+  taskSummaryCache.set(root, { at: Date.now(), tasks });
+  return tasks;
+}
+
 export async function handleDashboard(
   req: IncomingMessage,
   res: ServerResponse,
@@ -2580,16 +2615,20 @@ export async function handleDashboard(
   try { live = readLive(cfg.workspaceRoot); } catch {
     live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
   }
-  // AC2 (gap-webui-dashboard-manager-slow-parallelize): readSystem + readManager are the two slow
-  // observation reads (each internally parallelized in observation.ts) — run them CONCURRENTLY.
-  // Serial was readSystem(≈2s)→readManager(≈12.7s) ≈ 14.7s; parallel is bounded by readManager.
-  const [sys, mgr] = await Promise.all([
+  // AC1 + AC2 (gap-webui-dashboard-load-time-optimization): the dashboard manager probe is now
+  // readManagerLight — loop-driver + liveness ONLY, NO slot-refill pool probe — cutting the ~9s
+  // slot-refill cold-call floor from the dashboard path (/manager still runs the full readManager).
+  // readSystem + the light manager probe + the (cached) task summary are independent — run them
+  // CONCURRENTLY (Promise.all); client.taskList is no longer serialized AFTER the sys/mgr group
+  // (the prior gap-webui-dashboard-manager-slow-parallelize shape awaited it later).
+  const [sys, mgr, tasks] = await Promise.all([
     readSystem(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", resourceGate: { status: "error" as const, reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }, processBudget: { status: "error" as const, reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
     })),
-    readManager(cfg.workspaceRoot).catch(() => ({
+    readManagerLight(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null }, version: null, developLead: null,
     })),
+    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
   ]);
   let tests: TestsResult;
   try { tests = readTests(cfg.workspaceRoot); } catch {
@@ -2599,11 +2638,6 @@ export async function handleDashboard(
   try { history = readGitHistory(cfg.workspaceRoot); } catch {
     history = { status: "error", reason: "internal", commits: [] };
   }
-  let tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }> = [];
-  try {
-    const r = await client.taskList({ includeBody: false });
-    tasks = r.tasks ?? [];
-  } catch { tasks = []; }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderDashboardPage({ live, sys, mgr, tests, history, tasks }));
 }

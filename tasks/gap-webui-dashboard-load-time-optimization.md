@@ -1,7 +1,7 @@
 ---
 id: gap-webui-dashboard-load-time-optimization
 title: webui dashboard 加载慢优化（manager 探针轻量化砍 pool 地板 + taskList 并行 + 任务摘要 30s TTL 缓存）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -39,18 +39,21 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：dashboard 的 manager 探针不再 cold-call slot-refill（轻量路径只 loopDriver + 存活会话），`/manager` 详情页仍走含 pool 的完整探针。
-- [ ] AC2：taskList 与 sys/mgr 并行（`Promise.all`），不再串行接在其后。
-- [ ] AC3：任务摘要（状态计数 + 最近 5 条）有 30s TTL 缓存，命中时不全量重扫任务文件（可机械核：缓存命中时 `walkTasks` 不执行）。
-- [ ] AC4：readTests 确认非 dashboard 主要瓶颈（实测，非断言）。
+- [x] AC1：dashboard 的 manager 探针不再 cold-call slot-refill（轻量路径只 loopDriver + 存活会话），`/manager` 详情页仍走含 pool 的完整探针。
+- [x] AC2：taskList 与 sys/mgr 并行（`Promise.all`），不再串行接在其后。
+- [x] AC3：任务摘要（状态计数 + 最近 5 条）有 30s TTL 缓存，命中时不全量重扫任务文件（可机械核：缓存命中时 `walkTasks` 不执行）。
+- [x] AC4：readTests 确认非 dashboard 主要瓶颈（实测，非断言）。
 
 ## Definition of Done
 
-- [ ] dashboard 加载路径砍掉 slot-refill 地板 + taskList 并行 + 摘要缓存；AC1-4 全勾；land 到 develop。
+- [x] dashboard 加载路径砍掉 slot-refill 地板 + taskList 并行 + 摘要缓存；AC1-4 全勾；land 到 develop。
 
 ## Touches
 
-- packages/quay/src/serve-handlers.ts（handleDashboard + renderDashboard）
-- packages/quay/src/observation.ts（readManager 轻量路径 + 摘要缓存）
-- packages/quay-native/src/store.ts（若涉 taskList 缓存）
+- packages/quay/src/serve-handlers.ts（handleDashboard：readManagerLight + readTaskSummary 并入 Promise.all；readTaskSummary 30s TTL 缓存）
+- packages/quay/src/observation.ts（新增 readManagerLight 轻量路径）
+- packages/quay/test/gap-dashboard-parallelize.test.mjs（AC1/AC2/AC3 结构+行为测试更新与新增）
 - tasks/gap-webui-dashboard-load-time-optimization.md（自身）
+
+> Touches 扩充说明：任务摘要缓存落在 Core serve 层（serve-handlers.ts 的 readTaskSummary，缓存 client.taskList 结果），
+> 故 `packages/quay-native/src/store.ts` 未改动（provider 的 walkTasks 在缓存命中时根本不会被调用，无需在 store 内加缓存）。
