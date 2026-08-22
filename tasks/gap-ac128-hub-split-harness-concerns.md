@@ -57,6 +57,8 @@ net-add: 一次性重构成本非机制净增（与 AC112 计数基线显式记�
 - plugin/scripts/rhythm-consumer-check.ts（strict surface + 判据3 --no-block 读 runner-static-gate.ts）
 - plugin/scripts/red-on-omission-audit.ts（接入判据改查 suite static-gate 两面）
 - plugin/scripts/capability-catalog.sh（新文件注册 5×5 表）
+- plugin/scripts/axis-generator.ts（run_static_checks 抽取源 repoint to runner-static-gate.ts——漏迁移消费者，硬规则 5b）
+- plugin/scripts/precommit-guard.ts（staticObjectPatterns 聚合 @static-object：test.sh + runner-static-gate.ts——漏迁移消费者，硬规则 5b）
 - docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照再生成）
 - plugin/test/checker-mutation-check.test.mjs（fixture 迁移到 runner-static-gate.ts）
 - plugin/test/dispatch-worktree-setup.test.mjs（wiring 断言迁移）
@@ -66,4 +68,7 @@ net-add: 一次性重构成本非机制净增（与 AC112 计数基线显式记�
 - plugin/test/scoped-static-checks.test.mjs（registry 正本/夹具迁移）
 - plugin/test/select-static-checks-for-touches.test.mjs（TEST_SH/夹具迁移）
 - plugin/test/suite-speed-nested-skip.test.mjs（run_static_checks 断言迁移）
+- plugin/test/axis-generator.test.mjs（枚举源迁移——漏迁移消费者，硬规则 5b）
+- plugin/test/fan-in-ff-executor-check.test.mjs（resolveDeltaCodeSurface 面随 staticObjectPatterns 修复——漏迁移消费者）
+- plugin/test/fan-in-execute-paths.test.mjs（symlinkRuntimeTrees fixture 补 runner-static-gate.ts——漏迁移消费者）
 - tasks/gap-ac128-hub-split-harness-concerns.md（自身）
