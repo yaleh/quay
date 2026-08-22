@@ -1,7 +1,7 @@
 ---
 id: gap-bucket-subset-tmux-leak-scan-missing
 title: bucket 子集路径补 suite-tail 泄漏扫描（tmux-leak-scan --snapshot/--check + session-liveness-sweep-kill）——降频 violation
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -30,12 +30,12 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 桶路径（bucket 子集）含 `tmux-leak-scan --snapshot`/`--check` 调用 + `session-liveness-sweep-kill.mjs`（两者同补，不再跳过）。
-- [ ] AC2: 负控制——桶轮注入泄漏 ⇒ 仍出 `tmux-leak-scan: FAIL`（机械可核）。
+- [x] AC1: 桶路径（bucket 子集）含 `tmux-leak-scan --snapshot`/`--check` 调用 + `session-liveness-sweep-kill.mjs`（两者同补，不再跳过）。
+- [x] AC2: 负控制——桶轮注入泄漏 ⇒ 仍出 `tmux-leak-scan: FAIL`（机械可核）。
 
 ## Definition of Done
 
-- [ ] 桶子集路径补齐 suite-tail 泄漏扫描 + 负控制通过；AC1-2 全勾；land 到 develop。
+- [x] 桶子集路径补齐 suite-tail 泄漏扫描 + 负控制通过；AC1-2 全勾；land 到 develop。
 
 ## Touches
 
