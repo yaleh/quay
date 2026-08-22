@@ -656,13 +656,26 @@ test("AC2 — PHASE_OVERLAP round: the overlap window closes at the second done-
     const main = phases.find((p) => p.phase === "main");
     assert.ok(main, "main is its own record");
     assert.equal(main.lanes, 8, "main lanes = the round laneCount");
-    // AC3 — the phase partition sums to ≈ durationMs (the overlap window is ONE wall segment, so
-    // serial+main+end+static still partition the run wall).
+    // AC3 — the phase partition is COMPLETE and CONTIGUOUS: the overlap window collapses into ONE
+    // "serial" segment and static/serial/main/end still partition the run wall with no gap or overlap
+    // in the record EDGES. This is the deterministic form of "phases partition the run wall" — measured
+    // on the EXACT start_ms/end_ms edges (each phase's end_ms IS the next phase's start_ms, by
+    // construction), NOT on a wall-clock |Σ wall_ms − durationMs| < 3000 tolerance. durationMs spans the
+    // runner's startup + post-suite overhead OUTSIDE any phase, so the old wall-sum≈durationMs assertion
+    // drifted with load (isolated PASS; under 16-way CPU contention sum=107 vs durationMs=3151, diff
+    // 3044ms > 3000ms → deterministic flake blocking fan-in — gap-full-suite-runner-test-phase-overlap-flake).
+    for (let i = 0; i < phases.length; i++) {
+      const p = phases[i];
+      assert.equal(typeof p.start_ms, "number", `${p.phase} carries absolute start_ms`);
+      assert.equal(typeof p.end_ms, "number", `${p.phase} carries absolute end_ms`);
+      assert.ok(p.end_ms >= p.start_ms, `${p.phase} end_ms >= start_ms`);
+      assert.ok(p.wall_ms === p.end_ms - p.start_ms, `${p.phase} wall_ms == end_ms - start_ms`);
+      if (i > 0) {
+        assert.equal(p.start_ms, phases[i - 1].end_ms, `phase edges contiguous: ${phases[i - 1].phase}.end_ms == ${p.phase}.start_ms`);
+      }
+    }
     const sumWall = phases.reduce((s, p) => s + p.wall_ms, 0);
-    assert.ok(
-      Math.abs(sumWall - rec.durationMs) < 3000,
-      `phases wall sum ≈ durationMs (sum=${sumWall}, durationMs=${rec.durationMs})`,
-    );
+    assert.ok(sumWall > 0, `phases span a non-zero wall (sum=${sumWall}ms)`);
     // AC4 — scheduling untouched: the overlap round carries the same serial_phase_ms (window) and
     // main_phase_ms the sequential baseline would, and the round record still reads the fixed-
     // overhead decomposition (not a phase-boundary artifact).
