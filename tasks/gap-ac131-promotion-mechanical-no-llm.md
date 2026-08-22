@@ -1,7 +1,7 @@
 ---
 id: gap-ac131-promotion-mechanical-no-llm
 title: AC131 合格者纯机械晋升（零 LLM）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -36,7 +36,7 @@ depends_on:
 
 ## Definition of Done
 
-- [ ] 机械晋升路径零 LLM 落地；AC1-2 全勾（含 llm_invoked=false 取假）；land 到 develop。
+- [x] 机械晋升路径零 LLM 落地；AC1-2 全勾（含 llm_invoked=false 取假）；land 到 develop。
 
 ## Retires
 
