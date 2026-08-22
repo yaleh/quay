@@ -173,7 +173,13 @@ suite_lock_timeout="\${FULL_SUITE_LOCK_TIMEOUT:-${suiteLockTimeoutSecs}}"
 # 它才是真实存活信号；pidfile 读不到 ⇒ suite_pid 空，poller 退回纯 .exit 轮询（安全兜底）。
 suite_pid_file="/tmp/fan-in-suite-${task}.pid"
 rm -f "$suite_pid_file"
-setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'echo $$ > "$5"; cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh; else bash scripts/test.sh; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
+# gap-ac126-suite-bucket-execution-enable-wiring AC1 — the production suite path passes --buckets
+# <task-id> so the fan-in suite runs the task's bucket subset (P-only⇒P, M-only⇒M, hub/no-bucket⇒full)
+# via test.sh's own --buckets flag (the selection authority, gap-ac124). test.sh emits a __BUCKETS__
+# marker into this suite log; the fan-in's verification-round writer (pre-verified-round-record.ts)
+# parses it into the bucket fields (AC2/AC3). ISOLATE_LAUNCH (below) is NOT bucket-wired: it is the
+# C11 isolate rerun of an explicit load-sensitive file list — --buckets would override that list.
+setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'echo $$ > "$5"; cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh --buckets ${task}; else bash scripts/test.sh --buckets ${task}; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
 suite_pid=""
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   if [ -s "$suite_pid_file" ]; then suite_pid=$(cat "$suite_pid_file"); break; fi

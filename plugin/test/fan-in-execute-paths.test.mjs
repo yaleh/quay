@@ -1717,6 +1717,20 @@ test("⑧ turn-budget 取假 — suite-launch block decides by code_delta: non-e
   assert.ok(launch.includes("PRE-VERIFIED-SUITE"), "the pre-verified reuse branch must be present (suite_head-pinned)");
 });
 
+test("AC126 AC1 — the fan-in suite launch command passes --buckets <task-id> (production bucket-execution wiring)", async () => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-ac126-wiring", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-ac126", mergeTarget: "develop" },
+  });
+  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  // The suite-launch command string must carry `--buckets <task-id>` — the task id is interpolated at
+  // workflow-build time, so the literal task id must appear (AC1: 生产 suite 路径真正传). test.sh is
+  // the selection authority (P-only⇒P, M-only⇒M, hub/no-bucket⇒full).
+  assert.ok(launch.includes("--buckets gap-ac126-wiring"), "suite-launch must pass --buckets <task-id> (the interpolated task id)");
+  const setsidLine = launch.split("\n").find((l) => l.includes("setsid env FULL_SUITE_LOCK_TIMEOUT="));
+  assert.ok(setsidLine, "suite-launch must contain the detached setsid launch line");
+  assert.ok(setsidLine.includes("bash scripts/test.sh --buckets gap-ac126-wiring"), "the detached launch command must pass --buckets <task-id> to scripts/test.sh");
+});
+
 test("⑧ stage-2 wait block — completes the capture post-fields (cpu/end/wall/load/lane/suite_exit) on exit-marker hit", async (t) => {
   const { prompts } = await runWorkflow({
     args: { task: "gap-test-tb-poll", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-poll", mergeTarget: "develop" },

@@ -34,6 +34,7 @@ import {
   appendPreVerifiedRound,
   parseSuitePhases,
   detectPhaseOverlap,
+  parseBucketMarker,
   hostParallelism,
   concurrentSuiteSlots,
   countHeldSuiteLocks,
@@ -701,4 +702,89 @@ test("CLI — --suite-log wires the phase fields through to the appended record 
   assert.equal(out.record.serial_phase_ms, 301000, "CLI --suite-log parses serial_phase_ms");
   assert.equal(out.record.main_phase_ms, 512000, "CLI --suite-log parses main_phase_ms");
   assert.equal(typeof out.record.nproc, "number", "CLI record carries nproc");
+});
+
+// ── gap-ac126-suite-bucket-execution-enable-wiring AC2/AC3: bucket fields ride the fan-in record ───
+// The fan-in suite now passes `--buckets <task-id>` (fan-in-execute.js SUITE_LAUNCH); test.sh emits a
+// `__BUCKETS__ buckets=<P|M|P+M|full> files=<n> full=<0|1>` marker into the suite log, and THIS writer
+// (the fan-in's verification-round writer) must carry it into the record — closing the ledger gap that
+// the direct test.sh run (not full-suite-runner) never wrote bucket fields (AC3). A non-bucket (default
+// full) round omits the fields (absent-field contract, same as full-suite-runner).
+
+test("parseBucketMarker — parses the __BUCKETS__ marker (M and full labels) and returns null on absent/unreadable", () => {
+  const mLog = writeSuiteLog(null, ["__BUCKETS__ buckets=M files=219 full=0", "__OVERHEAD__ serial_phase_ms=301000"]);
+  assert.deepEqual(parseBucketMarker(mLog), { buckets: "M", files: 219 }, "an M-only round → buckets=M files=219");
+
+  const fullLog = writeSuiteLog(null, ["__BUCKETS__ buckets=full files=424 full=1"]);
+  assert.deepEqual(parseBucketMarker(fullLog), { buckets: "full", files: 424 }, "a hub/no-bucket round → buckets=full");
+
+  const pMlog = writeSuiteLog(null, ["__BUCKETS__ buckets=P+M files=300 full=0"]);
+  assert.deepEqual(parseBucketMarker(pMlog), { buckets: "P+M", files: 300 }, "a P+M round → buckets=P+M");
+
+  const noMarker = writeSuiteLog(null, ["__OVERHEAD__ serial_phase_ms=301000", "selected 424 files (groups=product,engine)"]);
+  assert.equal(parseBucketMarker(noMarker), null, "a default full-suite log (no marker) → null (fields absent)");
+  assert.equal(parseBucketMarker(undefined), null, "no log → null");
+  assert.equal(parseBucketMarker("/nonexistent/pvr-missing.log"), null, "unreadable log → null");
+});
+
+test("parseBucketMarker — slices by the last __FANIN_SUITE_START__ marker (an old round's bucket marker is excluded)", () => {
+  const log = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=old round=full",
+    "__BUCKETS__ buckets=M files=219 full=0",
+    "__FANIN_SUITE_START__ iso=2026-08-21T00:10:00.000Z ms=600 head=new round=full",
+    "__BUCKETS__ buckets=P files=163 full=0",
+  ]);
+  assert.deepEqual(parseBucketMarker(log), { buckets: "P", files: 163 }, "only the last round's bucket marker is read");
+});
+
+test("AC2/AC3 — buildPreVerifiedRoundRecord carries buckets/bucket_files/bucket_duration_ms on a bucket-mode log (M-only → buckets=M; hub → buckets=full)", () => {
+  // M-only replay: the fan-in suite log carries `__BUCKETS__ buckets=M files=219 full=0` → record.buckets=M.
+  const mLog = writeSuiteLog(null, ["__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=x round=full", "__BUCKETS__ buckets=M files=219 full=0", "__OVERHEAD__ serial_phase_ms=301000"]);
+  const mRec = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: mLog, root: REPO_ROOT }).record;
+  assert.equal(mRec.buckets, "M", "an M-only round records buckets=M (AC2)");
+  assert.equal(mRec.bucket_files, 219, "bucket_files = the selected M test-file count");
+  assert.equal(mRec.bucket_duration_ms, mRec.durationMs, "bucket_duration_ms = the round's own durationMs (the round IS the bucket run)");
+
+  // Hub-touch replay: `__BUCKETS__ buckets=full files=424 full=1` → record.buckets=full.
+  const hubLog = writeSuiteLog(null, ["__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=x round=full", "__BUCKETS__ buckets=full files=424 full=1"]);
+  const hubRec = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: hubLog, root: REPO_ROOT }).record;
+  assert.equal(hubRec.buckets, "full", "a hub-touch round records buckets=full (AC2)");
+  assert.equal(hubRec.bucket_files, 424, "bucket_files = the full suite file count on a 'full' round");
+  assert.equal(hubRec.bucket_duration_ms, hubRec.durationMs, "bucket_duration_ms rides the round's own durationMs");
+});
+
+test("AC2/AC3 — a NON-bucket (default full) log omits the bucket fields (absent-field contract, never a fabricated value)", () => {
+  const seqLog = writeSuiteLog(null, ["__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=x round=full", "selected 424 files (groups=product,engine)", "__OVERHEAD__ serial_phase_ms=301000"]);
+  const rec = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: seqLog, root: REPO_ROOT }).record;
+  assert.equal(rec.buckets, undefined, "no __BUCKETS__ marker → buckets absent");
+  assert.equal(rec.bucket_files, undefined, "no marker → bucket_files absent");
+  assert.equal(rec.bucket_duration_ms, undefined, "no marker → bucket_duration_ms absent");
+  // An unreadable / absent log is also phase-less AND bucket-less (never fabricated).
+  const noLog = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", root: REPO_ROOT }).record;
+  assert.equal(noLog.buckets, undefined, "no log → buckets absent");
+});
+
+test("CLI — a bucket-mode --suite-log flows buckets/bucket_files/bucket_duration_ms into the appended record", () => {
+  const file = tmpFile("pvr-bucket-");
+  const log = writeSuiteLog(null, ["__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=x round=full", "__BUCKETS__ buckets=M files=219 full=0"]);
+  const args = [
+    "--task-id", BASE.taskId,
+    "--run-id", BASE.runId,
+    "--started-at", BASE.startedAt,
+    "--duration-ms", BASE.durationMs,
+    "--lane-count", BASE.laneCount,
+    "--load", BASE.load,
+    "--commit", BASE.commit,
+    "--preverified", "0",
+    "--suite-log", log,
+    "--record-file", file,
+    "--json",
+  ];
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER, ...args], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, true);
+  assert.equal(out.record.buckets, "M", "CLI --suite-log parses the __BUCKETS__ marker into buckets");
+  assert.equal(out.record.bucket_files, 219, "CLI record carries bucket_files");
+  assert.equal(out.record.bucket_duration_ms, Number(BASE.durationMs), "CLI record carries bucket_duration_ms = durationMs");
 });

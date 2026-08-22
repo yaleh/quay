@@ -234,6 +234,30 @@ export function detectPhaseOverlap(suiteLog) {
   return false;
 }
 
+// gap-ac126-suite-bucket-execution-enable-wiring AC2/AC3 — parse test.sh's `__BUCKETS__` marker
+// (bucket-mode rounds only; the default full suite never emits it). Returns { buckets, files } | null.
+// `buckets` is the canonical label (P|M|P+M|full — "full" = hub fallback / no-bucket-triggerable);
+// `files` is the selected test-file count. Mirrors full-suite-runner's onLine parse (:3292), but
+// slices by the last __FANIN_SUITE_START__ marker (current round only — same as parseSuitePhases).
+const BUCKET_MARKER_RE = /^__BUCKETS__\s+buckets=(\S+)\s+files=(\d+)\s+full=([01])/;
+
+export function parseBucketMarker(suiteLog) {
+  if (!suiteLog) return null;
+  let text;
+  try {
+    text = fs.readFileSync(suiteLog, "utf8");
+  } catch {
+    return null;
+  }
+  const mk = lastSuiteStartOffset(text);
+  const body = mk === -1 ? text : text.slice(mk);
+  for (const line of body.split("\n")) {
+    const m = line.match(BUCKET_MARKER_RE);
+    if (m) return { buckets: m[1], files: Number(m[2]) };
+  }
+  return null;
+}
+
 /** Host parallelism (nproc) — the same read-host expression as full-suite-runner.hostParallelism
  *  (RESOURCE_GATE_NPROC seam → os.availableParallelism() → os.cpus().length, floored at 1). */
 export function hostParallelism() {
@@ -494,6 +518,17 @@ export function buildPreVerifiedRoundRecord(o) {
   // present so a reader can distinguish the three cases — true = overlap ran; false = log readable +
   // marker absent (sequential); null = log absent/unreadable (n/a, never a fabricated boolean).
   record.phase_overlap = phaseOverlap;
+  // gap-ac126-suite-bucket-execution-enable-wiring AC2/AC3 — the bucket-execution fields, present ONLY
+  // on a bucket-mode round (test.sh emitted __BUCKETS__; the default full suite omits them — a reader
+  // must tolerate their absence). Same 口径 as full-suite-runner:4027-4029: buckets = canonical label
+  // (P|M|P+M|full), bucket_files = the selected test-file count, bucket_duration_ms = the round's own
+  // durationMs (the round IS the bucket run — no separate clock).
+  const bucketMarker = parseBucketMarker(suiteLog);
+  if (bucketMarker !== null) {
+    record.buckets = bucketMarker.buckets;
+    record.bucket_files = bucketMarker.files;
+    record.bucket_duration_ms = durationMs;
+  }
   // Concurrency variables (AC1): nproc + slots are deterministic reads; concurrentSuitesRunning =
   // 1 (this round's own slot) + currently-held OTHER-suite slots at WRITE time, capped at the slot
   // count — the same formula + clamp as full-suite-runner's round-start capture (:2591-2596). The

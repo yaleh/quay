@@ -47,6 +47,9 @@ depends_on:
 
 ## Touches
 
-- .claude/workflows/fan-in-execute.js（启用接线点：SUITE_LAUNCH/ISOLATE_LAUNCH 传 --buckets）
-- plugin/scripts/full-suite-runner.ts（若涉路由/verification-round 写入）
+- .claude/workflows/fan-in-execute.js（启用接线点：SUITE_LAUNCH 传 --buckets <task-id>）
+- plugin/workflows/fan-in-execute.js（双拷贝 mirror——workflows-dual-copy-drift-check 要求两副本一致）
+- plugin/scripts/pre-verified-round-record.ts（连带缺口闭合：fan-in 侧 verification-round writer 解析 __BUCKETS__ 标记 → buckets/bucket_files/bucket_duration_ms）
+- plugin/test/pre-verified-round-record.test.mjs（桶字段落账单测，AC2/AC3 取假）
+- plugin/test/fan-in-execute-paths.test.mjs（AC1 取假：suite-launch 传 --buckets <task-id>）
 - tasks/gap-ac126-suite-bucket-execution-enable-wiring.md（自身）
