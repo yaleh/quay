@@ -1,7 +1,7 @@
 ---
 id: gap-ac117-spec-phase3-mcp-control-plane
 title: AC117 SPEC §5 阶段 3——MCP 控制面（halt / setPreference / forceDispatch，身份可核）
-status: todo
+status: ready
 labels:
   - gap
 parent: null

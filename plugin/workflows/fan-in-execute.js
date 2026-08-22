@@ -54,6 +54,9 @@ export const meta = {
 //           机械步骤（step 4.5 入账 + step 5 flip+ff + step 5.5 bracket）；suite 红 ⇒ 返回
 //           { outcome:'suite-red', suiteExit }（不执行机械步骤，脚本派 Fix agent）。
 //       红 suite ⇒ Fix agent（读日志 → 修 → 重新启动 detached）→ 脚本再派阶段 2（有界 maxFixRounds）。
+//       其中非 load-sensitive「other-task defer → 全量 relaunch」另有 defer 侧 anti-livelock 上限
+//       （有界 maxDeferRelaunches，gap-fan-in-relaunch-retry-cap：确定性失败重跑零信息，连续纯 defer
+//       ≥3 轮 ⇒ escalate → needs-human / 交 outer；与 releaseLivelockRounds / maxFfRetries 互补不冲突）。
 //       ff 失败（develop 前进，窗口 = merge 到 ff 之间的整个 suite 时长）⇒ 回阶段 1 重跑
 //       （有界 maxFfRetries，同 SPEC §7 防活锁阈值；阶段 1 首步 revert 上次 ff 失败遗留的 done 翻转）。
 //     ⛔ 禁止 Bash(run_in_background:true)（subagent 退出被 harness 连带杀，execute-suite-fix.js
@@ -127,6 +130,7 @@ const maxFfRetries = A.maxFfRetries ?? 3            // ff 失败（develop 前�
 const pollBlockSeconds = A.pollBlockSeconds ?? 540  // 阶段 2 agent 内单次 <600s Bash 有界阻塞等待的硬边界（gap-fan-in-execute-poll-bounded-blocking-wait）
 const pollBlockSleep = A.pollBlockSleep ?? 15        // 阻塞等待的检查粒度（每 N 秒看一眼 exit marker）
 const releaseLivelockRounds = A.releaseLivelockRounds ?? 3  // release 侧 anti-livelock（gap-gate-release-no-isolate-rerun-no-livelock）：同一 load-sensitive 红连续 release ≥3 轮 ⇒ escalate（SPEC §7「同一任务失败 ≥3 次 才谈防活锁」同阈值）
+const maxDeferRelaunches = A.maxDeferRelaunches ?? 3  // defer 侧 anti-livelock（gap-fan-in-relaunch-retry-cap）：非 load-sensitive「other-task defer → 全量 relaunch」的连续纯 defer 轮数上限 ≥3 轮 ⇒ escalate → needs-human / 交 outer（⛔ 无限重跑；与 releaseLivelockRounds 互补不冲突——一个管 load-sensitive、一个管确定性失败）
 const suiteLockTimeoutSecs = A.suiteLockTimeoutSecs ?? 900  // fan-in 启动的 suite 的 single-flight 锁等待（FULL_SUITE_LOCK_TIMEOUT，秒）——test.sh 默认 600 < suite 实测上界 807931ms ≈ 808s ⇒ 5 fan-in 撞 2 slot 时第 3+ suite 在 slot 释放前 fail-closed「not starting」白等 600s 后 relaunch（gap-single-flight-lock-wait-shorter-than-suite）。900 ≥ 808 + 余量；由 SUITE_LAUNCH/ISOLATE_LAUNCH 经 env 传入启动的 detached suite；调用方可经 env FULL_SUITE_LOCK_TIMEOUT 覆盖（测试 seam）。
 const mergeLockWaitSecs = A.mergeLockWaitSecs ?? 30  // fan-in-ff-merge.sh 的 merge 锁等待（--lock-wait，秒）——正确性锁，覆盖毫秒级 ff（hold 是 git merge --ff-only），与 suite 的 single-flight 资源锁无关（后者由 suiteLockTimeoutSecs 上调）。显式传递让 fan-in 流程拥有该语义（task Touches: fan-in-ff-merge.sh lock wait 语义）。
 
@@ -260,6 +264,7 @@ fix_scope_log="/tmp/fan-in-suite-${task}.log"
 fix_scope_touches="${worktree}/tasks/${task}.md"
 fix_scope_release="/tmp/fan-in-scope-release-${task}.json"
 fix_scope_isolate="/tmp/fan-in-scope-isolate-${task}.files"
+fix_scope_defer="/tmp/fan-in-scope-defer-${task}.json"
 rm -f "$fix_scope_isolate"
 fix_scope_out=$(node --no-warnings --experimental-strip-types --input-type=module -e 'import fs from "node:fs";
 import { parseTouches, matchGlob, normalizePath } from "${worktree}/plugin/scripts/touches-orthogonality-check.ts";
@@ -267,6 +272,7 @@ import { scanFamily, kindForFile } from "${worktree}/plugin/scripts/known-load-s
 import { TMUX_LEAK_FAIL_RE } from "${worktree}/plugin/scripts/tmux-leak-fail-re.ts";
 const taskFile = process.argv[1]; const wt = process.argv[2]; const logFile = process.argv[3]; const releaseLedger = process.argv[4]; const isolateFile = process.argv[5];
 const livelockRounds = Number(process.argv[6] || 3);
+const deferLedger = process.argv[7]; const deferLivelockRounds = Number(process.argv[8] || 3);
 let globs = null;
 try { const tb = fs.readFileSync(taskFile, "utf8"); const p = parseTouches(tb); if (p.hasSection) globs = p.globs; } catch (e) { globs = null; }
 const family = scanFamily(wt);
@@ -300,7 +306,17 @@ if (inScope.length === 0 && outOfScope.length === 0 && /run_static_checks|static
 try { if (releaseLedger) fs.writeFileSync(releaseLedger, JSON.stringify(prior)); } catch (e) {}
 if (loadSensitiveFiles.length > 0) { try { fs.writeFileSync(isolateFile, loadSensitiveFiles.join("\\n") + "\\n"); } catch (e) {} }
 const isolateRerun = loadSensitiveFiles.length > 0 ? "bash scripts/test.sh " + loadSensitiveFiles.join(" ") : null;
-process.stdout.write(JSON.stringify({ scoped: globs !== null, inScope, outOfScope, isolateRerun, livelock }));' "$fix_scope_touches" "${worktree}" "$fix_scope_log" "$fix_scope_release" "$fix_scope_isolate" "${releaseLivelockRounds}" 2>&1) || { echo "FIX_SCOPE_NOT_EVALUATED=1"; fix_scope_out=""; }
+// defer 侧 anti-livelock（gap-fan-in-relaunch-retry-cap）：纯 defer 轮 = inScope 空 + 无 load-sensitive +
+// 有 outOfScope（other-task/leak-residual/checker-misreport）——这类轮【无根因可修】，「照旧全量 relaunch」
+// 是对确定性失败（别任务 bug / flake）的无界重跑。连续纯 defer 轮数持久化到 defer ledger（跨 fix-round
+// 调用存活，同 fix_scope_release）；有 inScope 修复或 load-sensitive 释放 ⇒ 视为有进展，计数归零。
+let deferRounds = 0;
+if (deferLedger) { try { const dp = JSON.parse(fs.readFileSync(deferLedger, "utf8")); if (typeof dp.rounds === "number") deferRounds = dp.rounds; } catch (e) {} }
+const isPureDefer = inScope.length === 0 && loadSensitiveFiles.length === 0 && outOfScope.length > 0;
+if (isPureDefer) { deferRounds += 1; } else { deferRounds = 0; }
+let deferLivelock = deferRounds >= deferLivelockRounds;
+if (deferLedger) { try { fs.writeFileSync(deferLedger, JSON.stringify({ rounds: deferRounds })); } catch (e) {} }
+process.stdout.write(JSON.stringify({ scoped: globs !== null, inScope, outOfScope, isolateRerun, livelock, deferRounds, deferLivelock }));' "$fix_scope_touches" "${worktree}" "$fix_scope_log" "$fix_scope_release" "$fix_scope_isolate" "${releaseLivelockRounds}" "$fix_scope_defer" "${maxDeferRelaunches}" 2>&1) || { echo "FIX_SCOPE_NOT_EVALUATED=1"; fix_scope_out=""; }
 echo "FIX_SCOPE_VERDICT=$fix_scope_out"
 # fix-scope-gate-block-end
 判定（读上面的 FIX_SCOPE_VERDICT JSON）：
@@ -309,6 +325,7 @@ echo "FIX_SCOPE_VERDICT=$fix_scope_out"
     * reason=load-sensitive（in_family，kind 已标注，携带 releasedRounds = 已连续 release 的轮数含本轮）⇒ 释放：不修。⛔ 幂等持久：同一 load-sensitive 红无论重跑几轮都【继续 release】，任何一轮都不得转 fix——重跑后仍红 ⇒ 仍 release（不是「重跑确认后改修」）。releasedRounds ≥ 1 的项本轮仍 release，note 里写「load-sensitive 释放（第 N 轮，幂等持久），⛔ 不得转 fix」，N = releasedRounds 的值。release 落账由 gate 自动持久化到 fix_scope_release ledger（跨重跑轮次递增），下一轮 gate 会读到 releasedRounds 递增——这是机制保证，不是靠记性。⛔ release 动作三态（见下方「重新启动 suite」步骤）：有 inScope 修复 ⇒ 全量 relaunch；纯 load-sensitive 释放且 FIX_SCOPE_VERDICT.livelock=false ⇒ 【C11 隔离重跑】（只重跑失败家族文件、低并发，非全量 relaunch）；FIX_SCOPE_VERDICT.livelock=true（任一 load-sensitive 项 releasedRounds ≥ ${releaseLivelockRounds}）⇒ 【anti-livelock 兜底】：不再 relaunch、escalate（relaunched:false）。
     * reason=checker-misreport ⇒ defer：不修，note 里要求 defer 独立任务。
     * reason=other-task / leak-residual ⇒ 别任务 bug / 环境残留：不修，note 里要求 defer 独立任务。
+    * FIX_SCOPE_VERDICT.deferLivelock=true（连续纯 defer 轮数 ≥ ${maxDeferRelaunches}——inScope 空、无 load-sensitive、只有 other-task/leak/checker defer）⇒ 【defer anti-livelock 兜底】：不再 relaunch、escalate（relaunched:false，note 写「other-task defer anti-livelock（deferRounds≥${maxDeferRelaunches}）」）——确定性失败重跑零信息，⛔ 不得无限重跑。
 - FIX_SCOPE_NOT_EVALUATED=1 ⇒ fail-closed：本任务不修任何失败，全部 defer（无法评估 ≠ 合格）。
 修完 inScope 后照常重新启动全量 suite。返回的 failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。重跑后 suite 仍红的 load-sensitive 红 ⇒ 仍按本 gate release，⛔ 绝不转 fix。`
 
@@ -927,9 +944,11 @@ ${FIX_SCOPE_GATE}
    a. inScope 非空（本任务有要修的回归）⇒ 修完 inScope 后【全量 relaunch】：用上面的 ${SUITE_LAUNCH} 块（重跑整个套件验证代码改动）。
    b. inScope 为空 且 FIX_SCOPE_VERDICT.livelock = true（同一 load-sensitive 红已连续 release ≥ ${releaseLivelockRounds} 轮）⇒ 【anti-livelock 兜底】：⛔ 不再 relaunch（不跑全量也不跑隔离）。escalate：返回 { relaunched: false, ... }，note 写「load-sensitive anti-livelock（releasedRounds≥${releaseLivelockRounds}）：停止无界 relaunch，escalate → quiet-window / needs-human」。
    c. inScope 为空 且只有 load-sensitive 释放、FIX_SCOPE_VERDICT.livelock = false ⇒ 【C11 隔离重跑】：用下面的 ${ISOLATE_LAUNCH} 块（只重跑 gate 分诊出的 load-sensitive 家族失败文件、低并发，非全量 relaunch）——高 load 常驻下全量 relaunch 不减 load、load-sensitive 反复红（ac101 实证 3 RED + 3 全量 relaunch）。
-   其余情形（inScope 为空、outOfScope 只有 other-task/leak/checker defer）⇒ 照旧全量 relaunch（上面的 ${SUITE_LAUNCH}）。
+   其余情形（inScope 为空、outOfScope 只有 other-task/leak/checker defer，非 load-sensitive）：
+     d. FIX_SCOPE_VERDICT.deferLivelock = true（连续纯 defer 轮数 ≥ ${maxDeferRelaunches}）⇒ 【defer anti-livelock 兜底】：⛔ 不再 relaunch（defer 无根因可修，确定性失败重跑零信息）。escalate：返回 { relaunched: false, rerunMode: null, escalate: 'defer-livelock', ... }，note 写「other-task defer anti-livelock（deferRounds≥${maxDeferRelaunches}）：停止无界 relaunch，escalate → needs-human / 交 outer」。
+     e. 否则 ⇒ 照旧全量 relaunch（上面的 ${SUITE_LAUNCH}）。
    ${ISOLATE_LAUNCH}
-4. 返回 { relaunched: bool, rerunMode: 'full' | 'isolated' | null, worktreeHead, failuresFixed: string[], note }。failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。relaunched=false 仅当 anti-livelock 兜底 (b) 或启动失败；rerunMode=isolated 仅当走了 (c) 隔离重跑；rerunMode=full 仅当走了 (a) 全量 relaunch。
+4. 返回 { relaunched: bool, rerunMode: 'full' | 'isolated' | null, escalate: 'defer-livelock' | null, worktreeHead, failuresFixed: string[], note }。failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。relaunched=false 仅当 anti-livelock 兜底 (b)/(d) 或启动失败；rerunMode=isolated 仅当走了 (c) 隔离重跑；rerunMode=full 仅当走了 (a) 或 (e) 全量 relaunch；escalate='defer-livelock' 仅当走了 (d) defer anti-livelock 兜底。
 不要做任何等待决策——每次等待的时长由阶段 2 的等待块 timeout 硬边界决定。`,
       {
         schema: {
@@ -937,6 +956,7 @@ ${FIX_SCOPE_GATE}
           properties: {
             relaunched: { type: 'boolean' },
             rerunMode: { type: 'string' },
+            escalate: { type: 'string' },
             worktreeHead: { type: 'string' },
             failuresFixed: { type: 'array', items: { type: 'string' } },
             note: { type: 'string' },
@@ -947,6 +967,9 @@ ${FIX_SCOPE_GATE}
     )
     log(`FanIn fix round ${fixRounds}/${maxFixRounds}: relaunched=${fix.relaunched} rerunMode=${fix.rerunMode ?? '?'} fixed=${(fix.failuresFixed ?? []).length} note=${fix.note ?? ''}`)
     if (!fix.relaunched) {
+      if (fix.escalate === 'defer-livelock') {
+        return { outcome: 'needs-human', ffOk: false, task, message: `fan-in non-load-sensitive defer anti-livelock (${maxDeferRelaunches} consecutive pure-defer rounds, other-task/flake) — retreating to needs-human; hand to outer: ${fix.note ?? 'unknown'}` }
+      }
       return { outcome: 'red', ffOk: false, task, message: `fan-in fix agent did not relaunch (${fix.note?.includes('anti-livelock') ? 'release anti-livelock' : 'abort'}): ${fix.note ?? 'unknown'}` }
     }
     continue   // 重派阶段 2（等 Fix 重启动的 detached suite 再机械步骤）

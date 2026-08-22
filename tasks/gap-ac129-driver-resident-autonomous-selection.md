@@ -1,7 +1,7 @@
 ---
 id: gap-ac129-driver-resident-autonomous-selection
 title: AC129 驱动常驻 + 自主选任务（选择环 + selector worker + 判停）
-status: todo
+status: ready
 labels:
   - gap
 parent: null

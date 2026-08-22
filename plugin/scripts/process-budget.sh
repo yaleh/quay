@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# ⛔ RETIRED（并发裁决用途）— SPEC-worker-driven-inner-2026-08-16 §5 阶段 2（gap-ac116-spec-phase2-
+#   concurrency-stash）：本脚本作为【派发并发裁决】输入（cap-from-gate 的 B 面 effective_cap 读
+#   total_budget/available 来裁决派发槽位）的用途已退役——新驱动 worker-driver.ts 数自己的子进程
+#   （直接量，硬规则 4b），不再读 process-budget 裁决派发并发。
+#   保留面（不退役）：C 面（scripts/test.sh default_concurrency_formula）+ A 面（resource-gate.sh
+#   suite 调度）。⛔ 新驱动路径不消费本脚本做并发裁决。
 # plugin/scripts/process-budget.sh — the cross-layer TOTAL PROCESS BUDGET authority
 # (gap-test-concurrency-cap-does-not-scope-nested-spawns, AC1).
 #

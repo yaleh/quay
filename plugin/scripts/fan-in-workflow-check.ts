@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+// ⛔ RETIRED（A6「检查 fan-in 是否走 workflow」）— SPEC-worker-driven-inner-2026-08-16 §5 阶段 2
+//   （gap-ac116-spec-phase2-concurrency-stash）：新驱动 worker-driver.ts 直接以 scriptPath 调
+//   fan-in-execute workflow（defaultWorkerArgv）⇒ 结构上不需要事后检查「有没有走」。保留面（不退役）：
+//   过渡期旧循环仍用本检查做 A6 判据2 (a)(b)(c)。⛔ 新驱动路径不消费本检查。
 // fan-in-workflow-check.ts — AC78 判据2 (a)(b)(c): fan-in 是否真的走了 fan-in-execute workflow.
 // (tasks/gap-ac78-fan-in-workflow-a6-check, SPEC-fan-in-ff-merge-lock-2026-08-14)
 //

@@ -2884,6 +2884,132 @@ test("release anti-livelock — fix agent escalation (relaunched:false) ⇒ work
   assert.equal(result.ffOk, false, "no ff on livelock escalation");
 });
 
+// ── defer 侧 anti-livelock（gap-fan-in-relaunch-retry-cap）──────────────────────────────────────────
+// THE DEFECT: 非 load-sensitive「other-task defer → 全量 relaunch」无上限——hub-strip 因 PHASE_OVERLAP
+// flake（非 load-sensitive、非本任务 Touches）每轮都判 other-task defer ⇒ 「照旧全量 relaunch」循环无界
+// （06:12→08:00 ~2h，占 suite 锁阻塞 3 个在飞任务）。releaseLivelockRounds 只覆盖 load-sensitive，不覆盖
+// 确定性失败。FIX（AC1/AC2）：defer 侧 anti-livelock——连续纯 defer 轮（inScope 空 + 无 load-sensitive +
+// 只有 other-task/leak/checker）≥ maxDeferRelaunches ⇒ deferLivelock=true ⇒ fix agent escalate
+// （relaunched:false, escalate='defer-livelock'）⇒ workflow 返回 needs-human（retreat，交 outer），不再
+// 无界 relaunch。与 releaseLivelockRounds（load-sensitive）互补不冲突（AC3）。负控制（真实 bash，非
+// fixture）：① 同一确定性 other-task 红连跑 3 轮 gate ⇒ 第 3 轮 deferLivelock=true；② 有 inScope 修复
+// 或 load-sensitive 释放 ⇒ defer 计数归零；③ 内联 fix prompt 携带 defer escalation 指令；④ workflow 层
+// fix agent 返回 escalate='defer-livelock' ⇒ needs-human 停止，不进入第 2 个 fix round。
+
+test("defer anti-livelock wiring — the fix prompt carries the defer escalation state (deferLivelock ⇒ escalate='defer-livelock' → needs-human)", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-defer-ll-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-defer-ll-wire", mergeTarget: "develop", maxSuitePolls: 5, maxFixRounds: 2 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },
+      { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "" },
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
+    ],
+  });
+  const fixPrompt = promptContaining(prompts, "suite-fix 阶段");
+  assert.ok(fixPrompt.includes("deferLivelock"), "the fix prompt must carry the defer anti-livelock flag");
+  assert.ok(fixPrompt.includes("defer anti-livelock"), "the fix prompt must instruct the defer anti-livelock escalation");
+  assert.ok(fixPrompt.includes("escalate: 'defer-livelock'"), "the defer escalation must return escalate='defer-livelock' (mechanism, not note-string)");
+  assert.ok(fixPrompt.includes("needs-human"), "the defer escalation must retreat to needs-human / hand to outer");
+});
+
+test("defer anti-livelock REAL — same non-load-sensitive other-task red 3 rounds ⇒ round-3 verdict deferLivelock=true (deterministic flake escalates)", async (t) => {
+  const task = "gap-test-defer-ll-real";
+  const dir = makeFixScopeDir("fan-in-defer-ll-", task, [
+    "---",
+    `id: ${task}`,
+    "status: ready",
+    "---",
+    "## Touches",
+    `- tasks/${task}.md`,
+    "- pkg/a/**",
+  ].join("\n") + "\n");
+  t.after(() => cleanup(dir));
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  const defer = `/tmp/fan-in-scope-defer-${task}.json`;
+  // 确定性 flake（PHASE_OVERLAP 类）：非 load-sensitive、非本任务 Touches —— 每轮都红，无根因可修。
+  fs.writeFileSync(log, [
+    `__PERFILE__ duration_ms=1.2 ${dir}/pkg/OTHER/stray.test.mjs passed=false`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
+  t.after(() => { try { fs.rmSync(defer, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await fixScopeGateBlockFor(task, dir);
+  const gate = (round) => {
+    const r = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir });
+    assert.equal(r.status, 0, `round ${round} gate failed: ${r.stderr}`);
+    const m = r.stdout.match(/GATE_OUT=\[(.*)\]/s);
+    assert.ok(m, `round ${round} gate JSON echo missing:\n${r.stdout}`);
+    return JSON.parse(m[1]);
+  };
+  const v1 = gate(1);
+  const v2 = gate(2);
+  const v3 = gate(3);
+  assert.equal(v1.deferRounds, 1, "round 1: deferRounds=1");
+  assert.equal(v1.deferLivelock, false, "round 1: deferRounds=1 < 3 ⇒ no defer livelock");
+  assert.equal(v2.deferRounds, 2, "round 2: deferRounds=2");
+  assert.equal(v2.deferLivelock, false, "round 2: deferRounds=2 < 3 ⇒ no defer livelock");
+  assert.equal(v3.deferRounds, 3, "round 3: deferRounds=3");
+  assert.equal(v3.deferLivelock, true, "round 3: deferRounds=3 ≥ 3 ⇒ deferLivelock=true (escalate, AC2)");
+});
+
+test("defer anti-livelock reset — an in-scope fix (or load-sensitive release) resets the defer counter (progress ⇒ not a livelock)", async (t) => {
+  const task = "gap-test-defer-ll-reset";
+  const dir = makeFixScopeDir("fan-in-defer-ll-r-", task, [
+    "---",
+    `id: ${task}`,
+    "status: ready",
+    "---",
+    "## Touches",
+    `- tasks/${task}.md`,
+    "- pkg/a/**",
+  ].join("\n") + "\n");
+  t.after(() => cleanup(dir));
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  const defer = `/tmp/fan-in-scope-defer-${task}.json`;
+  // round 1 / round 3: 纯 defer（out-of-Touches 确定性红）；round 2: in-scope 回归（有进展）。
+  const deferLog = `__PERFILE__ duration_ms=1.2 ${dir}/pkg/OTHER/stray.test.mjs passed=false\n`;
+  const fixLog = `__PERFILE__ duration_ms=1.2 ${dir}/pkg/a/x.test.mjs passed=false\n`;
+  t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
+  t.after(() => { try { fs.rmSync(defer, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await fixScopeGateBlockFor(task, dir);
+  const gate = () => {
+    const r = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir });
+    assert.equal(r.status, 0, `gate failed: ${r.stderr}`);
+    const m = r.stdout.match(/GATE_OUT=\[(.*)\]/s);
+    assert.ok(m, `gate JSON echo missing:\n${r.stdout}`);
+    return JSON.parse(m[1]);
+  };
+  fs.writeFileSync(log, deferLog, "utf8");
+  const v1 = gate();
+  assert.equal(v1.deferRounds, 1, "round 1 (pure defer): deferRounds=1");
+  fs.writeFileSync(log, fixLog, "utf8");
+  const v2 = gate();
+  assert.equal(v2.deferRounds, 0, "round 2 (in-scope fix): deferRounds reset to 0");
+  assert.equal(v2.deferLivelock, false, "round 2 (in-scope fix): no defer livelock");
+  fs.writeFileSync(log, deferLog, "utf8");
+  const v3 = gate();
+  assert.equal(v3.deferRounds, 1, "round 3 (pure defer again): deferRounds=1 (not 2 — reset by progress)");
+});
+
+test("defer anti-livelock — fix agent escalation (escalate='defer-livelock') ⇒ workflow returns needs-human (retreat, no infinite relaunch)", async (t) => {
+  const { prompts, result } = await runWorkflow({
+    args: { task: "gap-test-defer-ll-wf", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-defer-ll-wf", mergeTarget: "develop", maxSuitePolls: 5, maxFixRounds: 4, maxDeferRelaunches: 3 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },
+      { relaunched: false, rerunMode: null, escalate: "defer-livelock", worktreeHead: "h2", failuresFixed: [], note: "other-task defer anti-livelock（deferRounds≥3）：停止无界 relaunch，escalate → needs-human / 交 outer" },
+    ],
+  });
+  const fixPrompts = prompts.filter((p) => p.includes("suite-fix 阶段"));
+  assert.equal(fixPrompts.length, 1, "defer escalation emits ONE fix prompt, then stops (no round-2 relaunch)");
+  assert.equal(result.outcome, "needs-human", "defer anti-livelock must retreat to needs-human (not another relaunch, not red)");
+  assert.ok(result.message.includes("defer anti-livelock"), `the workflow message names the defer anti-livelock, got: ${result.message}`);
+  assert.ok(result.message.includes("hand to outer"), "the defer escalation message must hand off to outer");
+  assert.equal(result.ffOk, false, "no ff on defer escalation");
+});
+
 // ── ⑨ impl-complete event (gap-inflight-states-missing-impl-complete-event) ─────────────────────────
 // fan-in writes the THIRD lifecycle event (`--impl-complete`) after impl completes (suite green) and
 // BEFORE land (step 4.4, between step 4's suite and step 5's flip+ff). The block is runId-guarded
