@@ -1,7 +1,7 @@
 ---
 id: gap-ac132-fix-worker-structured-input
 title: AC132 不合格者 → 短命 fix worker（输入须为闸的结构化 missing）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
