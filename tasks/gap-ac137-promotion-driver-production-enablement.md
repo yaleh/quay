@@ -46,6 +46,9 @@ depends_on:
 ## Touches
 
 - plugin/scripts/promotion-driver-launch.sh (new)（常驻启动/守护，形态落笔方定：systemd/会话内常驻皆可）
+- plugin/scripts/capability-catalog.sh（机件新增的机械伴随：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER 六行注册）
+- docs/proposals/quay-product-outline.md（delivery-inventory 快照 scripts=280→281，机件新增的机械伴随）
+- .gitignore（部署面：`.quay/promotion-round.jsonl` 轮日志【AC130 遗留缺口，现因 AC137 开启驱动开始写入共享检出而暴露】+ supervisor 状态文件 `.quay/promotion-driver{,.pid,-supervisor.pid,-supervisor.log,.log,.stop}`）
 - tasks/gap-ac137-promotion-driver-production-enablement.md（自身）
 
-> **注意**：若启动形态为 systemd（无 repo 文件），launch 脚本 Touches 可替换为实际部署面；判据不规定形态，只要求 `ps` 可见 + 载体在长 + 重启存活。
+> **注意**：若启动形态为 systemd（无 repo 文件），launch 脚本 Touches 可替换为实际部署面；判据不规定形态，只要求 `ps` 可见 + 载体在长 + 重启存活。本任务采用纯 bash supervisor（setsid+nohup），无 systemd unit，故 Touches 为 launch 脚本 + 上述部署面文件。

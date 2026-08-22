@@ -389,6 +389,7 @@ declare -A QUESTION=(
   [mechanism-vitality-check.ts]="Which shipped mechanisms are zero-call past 3x their declared cadence (待表态), have a stale last-reaffirmed stamp (待重新确认), or lack a 失效前提 field (entry-gate reject)?"
   [md-deletion-token-evaporation-check.sh]="Did any commit net-deleting ≥50 lines from *.md leave deleted-content unique tokens (identifiers/paths/专名) with ZERO occurrence in the post-delete repo (来源完备性整段蒸发)?"
   [workflows-dual-copy-drift-check.ts]="Are the five dual-copy workflow files (drain-directives / fan-in-execute / run-routines / execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped orchestrator-tick-core.md references them, so the plugin/workflows/ mirror must carry them) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships to installed targets) — a one-sided edit (改正本而落地副本不跟, the A6/fan-in-execute.js class) must go RED, the current byte-identical state GREEN (gap-workflows-dual-copy-drift-unchecked)?"
+  [promotion-driver-launch.sh]="Is the promotion-driver's production enablement switch actually pressed — a launch script that starts the resident loop as a supervised daemon (setsid+nohup supervisor that respawns it after exit/kill/crash) and exposes start/stop/status/restart, rather than a mechanism that exists but is never turned on (AC137 生产启用, 硬规则 5b '机制存在 ≠ 生产启用')?"
   [promotion-driver.ts]="Is the todo→ready promotion applied mechanically every round — a resident loop that calls ready-pool-check for the full-pool verdict and lands eligible promotions (zero LLM), rather than role-will that vanishes when the session or model changes?"
 )
 
@@ -672,6 +673,7 @@ declare -A CADENCE=(
   [semantic-observer-judge.ts]="按需"
   [red-on-omission-audit.ts]="每轮"
   [workflows-dual-copy-drift-check.ts]="每轮"
+  [promotion-driver-launch.sh]="按需"
   [promotion-driver.ts]="按需"
 
 )
@@ -956,6 +958,7 @@ declare -A INVALIDATION=(
   [semantic-observer-judge.ts]="失效前提：inner/outer 状态仍以自由文本（心跳 reason + tick 报告）承载；若观测面改为纯结构化 schema 且无自由文本，本条退休"
   [red-on-omission-audit.ts]="失效前提：执行核仍以 tick-core 文档固化行为；若行为固化面迁出 tick-core/plugin-scripts 文件系统，本条退休"
   [workflows-dual-copy-drift-check.ts]="失效前提：workflow 双副本结构仍存在（.claude/workflows/ 与 plugin/workflows/ 各有一份同一文件）；若双副本结构取消（同一文件只在一处），本条退休"
+  [promotion-driver-launch.sh]="失效前提：promotion-driver 的生产启动仍经本脚本（supervisor 守护 + 退出重拉）；若晋升面换用别的启动形态（如 systemd unit / outer tick 内联启动）或 AC135 outer 退役连带变更启动面，本条需同步"
   [promotion-driver.ts]="失效前提：todo→ready 晋升仍经 ready-pool-check --apply 全池判定；若晋升并入别处（如 outer tick 内联）或 ready-pool-check 全池模式退役，本条退休"
 
 )
@@ -1240,6 +1243,7 @@ declare -A LAST_REAFFIRMED=(
   [semantic-observer-judge.ts]="2026-08-10"
   [red-on-omission-audit.ts]="2026-08-10"
   [workflows-dual-copy-drift-check.ts]="2026-08-14"
+  [promotion-driver-launch.sh]="2026-08-22"
   [promotion-driver.ts]="2026-08-22"
 
 )
@@ -1524,6 +1528,7 @@ declare -A MATCHING=(
   [semantic-observer-judge.ts]="keyword"
   [red-on-omission-audit.ts]="keyword"
   [workflows-dual-copy-drift-check.ts]="enumerative"
+  [promotion-driver-launch.sh]="n/a"
   [promotion-driver.ts]="n/a"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
@@ -1613,6 +1618,7 @@ declare -A CONSUMER=(
   [task-ac-carryover-check.ts]="消费方：manager 在翻 done 前读同一 grow-only 账本，新未继承 AC 进账本并据此决定是否阻止合入；--no-block 不阻轮"
   [tick-core-static-check.ts]="消费方：pre-commit gate（run_doc_checks → precommit-guard.ts）——--check-drift 是 HARD 闸（gap-ac90-delivery-copy-drift-gate 收口），任一副本-正本对漂移（改正本而副本不落地 / 副本单边编辑）即 block 提交；reconcile 前的 --no-block 窗口已关闭"
   [worker-driver.ts]="谁按：inner 派发器在要驱动单个 claude -p worker 跑完整任务时按（AC115 阶段 1 显式 --task）；条件=任务要被机械驱动跑完 select→worktree→develop→suite→ff 并落盘结构化 outcome 到 .quay/worker-outcome.jsonl"
+  [promotion-driver-launch.sh]="谁按：生产部署/冷启动按（人工或 outer 冷启动命令 bash plugin/scripts/promotion-driver-launch.sh start——AC137 的开关）；条件=需要把 promotion-driver 作为常驻进程起来，使 .quay/promotion-outcome.jsonl 载体在长（AC134-AC2 / AC135-AC2 / AC135-AC3 的窗口自本开关成立之时起算）"
   [promotion-driver.ts]="谁按：outer 生产部署启动命令按（常驻进程，promotion-driver.ts 头注释「生产部署时由 outer 的启动命令传 --interval 覆盖」——接线为 AC130 后续/独立任务，本任务只做常驻循环这一半）；条件=生产部署启动常驻进程"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──

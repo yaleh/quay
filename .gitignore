@@ -53,6 +53,18 @@ packages/quay/plugin/
 # (manager-phase-goal ### AC134: outer reads it for cross-task promotion-pattern recognition, never
 # git-tracked). Same gitignored runtime-state family as worker-outcome.jsonl / gate-events.jsonl.
 **/.quay/promotion-outcome.jsonl
+# gap-ac137-promotion-driver-production-enablement (2026-08-22): the promotion driver's production
+# launch state — round log (driver writes every round, AC130) + supervisor state files
+# (promotion-driver-launch.sh start/stop). All runtime state, never git-tracked; same gitignored
+# family as promotion-outcome.jsonl. ⚠ promotion-round.jsonl was a pre-existing gap (AC130 landed the
+# driver but never gitignored the round log) — surfaced now because AC137 turns the driver on in
+# production and the round log starts being written to the shared checkout.
+**/.quay/promotion-round.jsonl
+**/.quay/promotion-driver.pid
+**/.quay/promotion-driver-supervisor.pid
+**/.quay/promotion-driver.log
+**/.quay/promotion-driver-supervisor.log
+**/.quay/promotion-driver.stop
 # gap-outer-message-bus-needs-file-inbox-transport (2026-08-09): the OUTER target's file-inbox
 # (.quay/outer-inbox/) is runtime message state (SPEC-inbox-service D1 — 收件箱不进 git 跟踪,
 # 不假设内容持久). Same gitignored runtime-state family as gate-events.jsonl — a real manager→outer
