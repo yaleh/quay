@@ -1,7 +1,7 @@
 ---
 id: gap-release-v061-readme-changelog-drift
 title: v0.6.1 发布后 README/CHANGELOG 文档漂移（交付面不一致，安装示例仍 0.6.0、CHANGELOG 无 v0.6.1 条目）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
