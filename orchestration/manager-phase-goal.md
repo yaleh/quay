@@ -380,7 +380,19 @@ AC129 驱动的是【任务执行】（ready → worktree → 开发 → suite �
   若停掉驱动后晋升照常发生 ⇒ 说明 outer 仍在做 ⇒ 切换未完成）。
 
 **## Retires 目标（落笔方须逐条回答「它防的缺陷现在由什么防」）**：
-outer 执行核的 A22 晋升步骤 · 其在 B13 判定序列中的位置。
+outer 执行核的 **A22（供给侧心跳，跑 `ready-pool-check --apply` 晋合格的）** · **A24（质量心跳，修不合格 todo 到合格）** · 两者在 B13 判定序列中的位置。
+
+**⊕ 2026-08-22 17:2xZ 修正（manager 自查，硬规则 5b —— 立案前查证据时发现，未落地即修）**：
+**原文只写了 A22，漏了 A24** —— 而 **A24 正是 AC132/AC133 要机械化的那一半**（「修不合格任务」）。
+⊢ 实读 `orchestration/orchestrator-tick-core.md:48` 确证 A24 已存在且**已把可修/不可修分类枚举清楚**：
+```
+可修类（A24 现行）：fourArtifacts=false（按 missingArtifacts 补其 shape 缺失段）
+                    selfTouchOk=false（补自身 tasks/<id>.md 进 ## Touches）
+                    touchesResolve=false（Touches 写错 ⇒ 改对）
+不可修类（逐条记原因、不修）：depsReady=false · retiredMechanism · superseded · compound · prosePrereqGap 非空
+```
+⇒ **AC132 的 fix worker 作用域不必我另行发明——A24 已经定义好了**，落笔方应直接沿用这份分类（⛔ 不要重新设计）。
+⇒ **AC135 若只退役 A22 而留下 A24，就是两个真相源的另一半**（outer 仍在修不合格任务，驱动也在修）——**本条即补**。
 
 ### AC136（**web 观测面随真相源切换** —— ⛔ 页面不得读一个已不是真相源的量，2026-08-22 16:1xZ 人问后补）
 
