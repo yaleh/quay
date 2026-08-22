@@ -45,4 +45,5 @@ depends_on: []
 
 - plugin/scripts/promotion-driver.ts (new)
 - plugin/test/promotion-driver.test.mjs (new)
+- docs/proposals/quay-product-outline.md（delivery-inventory 快照 scripts=280→281，机件新增的机械伴随）
 - tasks/gap-ac130-promotion-driver-resident-loop.md（自身）
