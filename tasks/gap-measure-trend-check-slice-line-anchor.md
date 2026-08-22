@@ -39,4 +39,5 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/measure-trend-check.ts
+- plugin/test/measure-trend-check.test.mjs（新增负控制回归测试，扩充 Touches）
 - tasks/gap-measure-trend-check-slice-line-anchor.md（自身）
