@@ -41,5 +41,7 @@ depends_on: []
 
 ## Touches
 
-- .claude/workflows/fan-in-execute.js（relaunch 控制流）
+- .claude/workflows/fan-in-execute.js（relaunch 控制流 + defer 侧 anti-livelock）
+- plugin/workflows/fan-in-execute.js（双副本，逐字节一致）
+- plugin/test/fan-in-execute-paths.test.mjs（defer anti-livelock 组测试）
 - tasks/gap-fan-in-relaunch-retry-cap.md（自身）
