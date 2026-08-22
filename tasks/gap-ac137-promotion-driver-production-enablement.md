@@ -25,19 +25,19 @@ depends_on:
 ## Plan
 
 1. 在生产中启动 `promotion-driver` 为常驻进程（启动形态落笔方定：systemd / 会话内常驻 / 其它皆可，⛔ 判据不规定形态）。
-2. 确认 `.quay/promotion-outcome.jsonl` 产生且记录数随时间增长。
-3. 重启存活：kill 驱动后能重新起来（守护/告警）。
+2. 确认 `.quay/promotion-round.jsonl` 产生且记录数随时间增长（⛔ outcome.jsonl 是事件条件载体，池无 todo 时结构上永不写，不是「在长」判据）。
+3. 重启存活（异常退出实测）：`kill -9 <driver_pid>` 后 supervisor 重起 driver、round.jsonl 恢复增长。
 4. ⛔ 不改 `promotion-driver.ts` 逻辑本身（AC130-133 已覆盖）。
 
 ## Acceptance Criteria
 
-- [ ] AC1（在跑）：`promotion-driver` 在生产中作为常驻进程运行（`ps` 可见）。
-- [ ] AC2（载体在长）：`.quay/promotion-outcome.jsonl` 存在且记录数随时间增长（⛔ 非「文件被创建」，是「有新记录持续写入」）。
-- [ ] AC3（重启存活）：驱动异常退出/机器重启后能重新起来（⛔ 否则窗口被静默中断无人察觉）。
+- [x] AC1（在跑）：`promotion-driver` 在生产中作为常驻进程运行（`ps` 可见）。
+- [x] AC2（载体在长）：`.quay/promotion-round.jsonl` 存在且记录数随时间增长（⛔ 非「文件被创建」，是「有新记录持续写入」；round.jsonl 无条件每轮写，是驱动活着且在写的直接量）。
+- [x] AC3（重启存活，异常退出实测）：`kill -9 <driver_pid>` 后 (a) supervisor 重起 driver（`ps` 复现）(b) `promotion-round.jsonl` 恢复增长；⛔ 不接受干净退出 respawn（code=0 与异常退出走不同分支，干净退出 respawn 证不了异常路径）。
 
 ## Definition of Done
 
-- [ ] 驱动生产启用（在跑 + 载体在长 + 重启存活）；AC1-3 全勾；land 到 develop。
+- [x] 驱动生产启用（在跑 + 载体在长 + 重启存活）；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
@@ -52,3 +52,5 @@ depends_on:
 - tasks/gap-ac137-promotion-driver-production-enablement.md（自身）
 
 > **注意**：若启动形态为 systemd（无 repo 文件），launch 脚本 Touches 可替换为实际部署面；判据不规定形态，只要求 `ps` 可见 + 载体在长 + 重启存活。本任务采用纯 bash supervisor（setsid+nohup），无 systemd unit，故 Touches 为 launch 脚本 + 上述部署面文件。
+
+> **⚠️ 连带（防「永远待外部」重演，manager 裁定写进任务体）**：`outcome.jsonl` 仍是 **AC134-AC2** 的载体，而它只在池中有 todo 候选时才写 ⇒ **AC134-AC2 的窗口起算条件是「池中出现过 todo 候选并被驱动处理」，⛔ 不是「AC137 land」**。在此之前它是「无法起算」而非「未达成」（硬规则 3b）。
