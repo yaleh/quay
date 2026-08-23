@@ -52,6 +52,7 @@ depends_on:
 - plugin/scripts/quay-launch.sh（复用组装器，透传 -p）
 - plugin/test/worker-driver.test.mjs（覆盖语义取假）
 - plugin/test/promotion-driver.test.mjs（buildFixWorkerArgv root 参数 + llmInvoked→promotePathLlmInvoked 改名伴随）
+- plugin/test/launch-settings.test.mjs（角色数 3→6 断言 + sk- 正则收紧）
 - tasks/gap-ac140-llm-command-configurable.md（自身）
 
 > **注意**：与 AC139（承载/入口）Touches 零重叠，可并行派；配置面复用 `_launchSpec.roles` + `quay-launch.sh`（⛔ 不另立 config.yml 段）。⛔ 不裁定具体 model——配置值由人/项目定，本条只要求可配且被真实使用。
