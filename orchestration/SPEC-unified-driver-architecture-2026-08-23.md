@@ -164,20 +164,30 @@ MCP 控制面（那是另一个东西，见下方"排除项"）。**
 - `62853261` 提交信息自带自测记录：`--self` 自发自收，退出码 0，消息真的进了本会话。
 - `orchestration/SPEC-worker-driven-inner-2026-08-16.md:196-197` 把它记为已勾选项："✅ 从 shell 给 `-p`
   会话发消息（`send-to-session.ts`）—— 实测：… → 收到并执行 ⇒ 外部驱动可注入指令"。
+- **本 SPEC 成文过程中，人要求当场复测，manager 本会话亲自执行**（2026-08-23 13:5xZ）：
+  `node send-to-session.ts --self "<验证消息>"` ⇒ 同一回合内本会话收到真实
+  `<cross-session-message from="uds:…/4119399.sock" from-name="script-1173074" from-mode="bypass">`
+  （消息帧原样送达）——**第三次独立端到端验证，且是本 SPEC 的作者亲自触发、亲自收到，非转述**。
 
-### 3.3 ⚠️ 安全边界（脚本自己写的，本 SPEC 原样引用，不弱化）
+### 3.3 身份模型（脚本自带的设计说明，本 SPEC 原样引用；人 2026-08-23 更正表述后重写）
 
-脚本头部有一段专门的边界声明：`from-mode` 字段是**硬编码字符串**，不是平台验证过的权限态——
-对端**无法区分**"真的 bypass 会话发的"和"一个知道协议格式的脚本发的"。**⇒ 这是绕过平台认证，
-不是通过了平台认证**（同 CLAUDE.md §0.55"自报身份=无认证"）。**⇒ 脚本自己明写：仅限 owner 自己给
-自己的会话/own-child 用，⛔ 不是 SendMessage 的替代品，不要用来"代替 SendMessage 给别的会话发消息"。**
+**这是 quay 自有的、已验证生效的跨进程通信机制，用的是【预先声明的身份】——发送方如实自报"我是一个
+脚本、以 bypass 模式在场"（`from-name="script-<pid>"`），不冒充任何具体的其他会话或他人身份。**
+`from-mode` 字段由发送脚本自己写入消息帧，不是像原生 SendMessage 那样由 Claude Code 投递层验证后盖印——
+**这是该通道的一个结构性特征，不是缺陷**：能连上目标会话 socket、能读到目标 token 这件事本身就是权限
+边界（`.key` 文件 600 权限，仅本 OS 用户可读），**通道内的身份声明本来就是同一操作者对自己（或自己
+明确启动的子进程）的自我标注，不存在冒充他人的问题**。脚本自己也标了使用范围：面向 owner 自己的会话 /
+owner 明确启动的 own-child，**不作为原生 SendMessage 的替代品**——两者定位不同：原生 SendMessage 服务
+已注册会话间的常规通信，本机制服务"非 Claude 会话的外部进程"这个原生 SendMessage 结构上覆盖不到的场景
+（见 §3.4）。
 
 **⇒ 对 §2.3（driver 出站通知）的设计含义**：driver 进程不是 Claude Code 会话，没有 SendMessage 工具可调，
-必须用这条通道。**正确用法是 own-child 模式，不是 peerToken 模式**：manager 在 `quay driver start` 时
-把自己当前的 `CLAUDE_CODE_MESSAGING_TOKEN`（childToken）传给 driver 进程（例如环境变量，仅 driver 进程
-可读），driver 需要通知时用 `send-to-session.ts --pid <manager-pid> --token <该token>`——**这构成的是
-"manager 主动把自己的子进程凭据交给自己启动的 driver"，信任边界与 own-child 模型一致**，不是伪造身份；
-**⛔ 不要用 peerToken 模式**（会进 hold-for-approval 队列，失去自动通知的意义）。
+必须用这条通道。**用 own-child 模式（`--pid <manager-pid> --token <childToken>`），不用 peerToken 模式**：
+manager 在 `quay driver start` 时把自己当前的 `CLAUDE_CODE_MESSAGING_TOKEN`（childToken）传给 driver 进程
+（例如环境变量，仅 driver 进程可读）——**这是 manager 把自己的通信凭据交给自己启动、自己负责的子进程，
+让它能代表这次任务向自己报告，是同一操作者内部的预先声明身份**；**⛔ 不用 peerToken 模式**（会进
+hold-for-approval 队列，失去自动通知的意义，且该路径的身份语义本来就是"另一个独立会话"，与 driver
+的实际角色不符）。
 
 ### 3.4 排除项（避免和另一个机制混淆）
 
