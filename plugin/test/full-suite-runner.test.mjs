@@ -5011,3 +5011,84 @@ test("AC1/AC2 e2e — a fake suite that fails ONLY a state-asserting test file (
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("gap-test-detail-load-timeseries — the runner spawns a load sampler that writes a per-run timeseries and stops when the suite ends", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-load-"));
+  const { f, dir } = fakeSuite(
+    'sleep 1.5\n' +
+      'echo "# tests 1"\n' +
+      'echo "# pass 1"\n' +
+      'echo "# fail 0"\n' +
+      'echo "# cancelled 0"\n' +
+      "exit 0",
+  );
+  const loadDir = path.join(root, ".quay");
+  const loadFiles = () => {
+    try {
+      return fs.readdirSync(loadDir).filter((n) => n.startsWith("suite-load-") && n.endsWith(".jsonl"));
+    } catch {
+      return [];
+    }
+  };
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 2, env: { QUAY_SUITE_LOAD_SAMPLER_INTERVAL: "0.2" } });
+
+    // Wait (bounded) for the sampler to write its first sample while the run is in flight.
+    let name = null;
+    let lines = [];
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const files = loadFiles();
+      if (files.length > 0) {
+        name = files[0];
+        lines = fs.readFileSync(path.join(loadDir, name), "utf8").trim().split("\n").filter(Boolean);
+        if (lines.length >= 1) break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(name, "the sampler wrote .quay/suite-load-<runId>.jsonl during the run");
+    assert.ok(lines.length >= 1, `the timeseries has >=1 sample (got ${lines.length})`);
+
+    for (const line of lines) {
+      const o = JSON.parse(line);
+      assert.equal(typeof o.t, "number", "every sample carries a numeric timestamp");
+      assert.ok("loadavg" in o, "every sample carries loadavg");
+      assert.ok("cpu_stall" in o, "every sample carries cpu_stall");
+      assert.ok("mem_avail" in o, "every sample carries mem_avail");
+    }
+
+    // The file is keyed by the runner's runId (read from the state the runner wrote).
+    const s = readState(root);
+    assert.ok(s && typeof s.runId === "string" && s.runId, "state carries the run's runId");
+    assert.equal(name, `suite-load-${s.runId}.jsonl`, "timeseries file name = suite-load-<runId>.jsonl");
+
+    // Suite ends → the runner writes a terminal state → the detached sampler stops (never resident).
+    await waitExit(child);
+    const pidFile = path.join(loadDir, `${name}.pid`);
+    assert.ok(fs.existsSync(pidFile), "sampler wrote its pid sidecar");
+    const samplerPid = Number(fs.readFileSync(pidFile, "utf8").trim());
+    assert.ok(Number.isInteger(samplerPid) && samplerPid > 0, "pid sidecar holds a real pid");
+
+    let gone = false;
+    const stopDeadline = Date.now() + 10_000;
+    while (Date.now() < stopDeadline) {
+      try {
+        process.kill(samplerPid, 0);
+      } catch {
+        gone = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(gone, "the sampler exited after the suite ended (never a resident idle process)");
+
+    // The timeseries stops growing once sampling stops.
+    const countAfter = fs.readFileSync(path.join(loadDir, name), "utf8").trim().split("\n").filter(Boolean).length;
+    await new Promise((r) => setTimeout(r, 500));
+    const countLater = fs.readFileSync(path.join(loadDir, name), "utf8").trim().split("\n").filter(Boolean).length;
+    assert.equal(countLater, countAfter, "the timeseries stops growing once sampling stops");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
