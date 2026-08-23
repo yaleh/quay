@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-clickable-branches-window
 title: Git History 分支名可点击（链 /task/<id>）+ 放宽 24h 窗口
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null
@@ -33,7 +33,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 分支可点击 + 窗口放宽落地；AC1-2 全勾；land 到 develop。
+- [ ] 分支名链 `/task/<id>` + `GIT_HISTORY_ACTIVE_WINDOW` 放宽（含 master）落地；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
@@ -46,9 +46,3 @@ depends_on: []
 - packages/quay/test/serve-handlers.test.mjs
 - packages/quay/test/observation.test.mjs
 - tasks/gap-git-history-clickable-branches-window.md（自身）
-
-## Needs-Human
-
-**执行 2026-08-23T04:14:47.064Z — promotion-driver AC133：连续修满上限仍不合格**
-
-- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
