@@ -47,6 +47,8 @@ depends_on:
 - packages/quay/src/cli/driver.ts（worker-kind 启用面：`quay driver start --kind worker`）
 - plugin/scripts/promotion-driver-launch.sh（status 取 KIND_CARRIERS 全部文件 max）
 - plugin/scripts/worker-driver.ts（worker round 等价物：无条件心跳）
+- plugin/test/worker-driver.test.mjs（worker round 等价物 AC138-3 测试）
+- plugin/test/promotion-driver-launch.test.mjs（status 全载体 max AC138-3 测试）
 - .gitignore（worker-driver 运行时 state 模式：worker-driver.pid / .log / worker-control.json 等，⛔ 同 AC137 鸡生蛋——不列会重演脏树挡 ff）
 - tasks/gap-ac138-worker-driver-production-enablement.md（自身）
 
