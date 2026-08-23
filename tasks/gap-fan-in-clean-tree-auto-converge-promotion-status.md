@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-clean-tree-auto-converge-promotion-status
 title: fan-in clean-tree 判据前自动收敛 promotion-driver 的 status-only 翻转（manager 裁定方案③，⛔ 非路径排除）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -31,6 +31,8 @@ depends_on: []
 再动作：走原 clean-tree 判据，此时应已 clean，继续 ff
 ```
 非 status-only 的脏仍然照挡（保护范围不放宽）。
+
+**⊢ 降级说明（manager 2026-08-23 补，⛔ 不重写判据）**：人推翻方案③改判方案①（`gap-apply-promotions-commit-status-writes`：`applyPromotions()` 写 status 后当场 commit）。本任务定位从「主要修法」降为「防御纵深（兜底）」——applyPromotions 修好后晋升路径不再产生脏树，本任务兜底的是**其它不经过 applyPromotions 的写入源**若产生同类 status-only 脏时的收敛。判据不变（AC1 正向收敛 / AC2 非 status 仍挡）。
 
 ## Plan
 
