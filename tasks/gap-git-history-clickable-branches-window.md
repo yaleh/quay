@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-clickable-branches-window
 title: Git History 分支名可点击（链 /task/<id>）+ 放宽 24h 窗口
-status: ready
+status: done
 labels:
   - gap
 parent: null
