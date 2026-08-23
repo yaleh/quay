@@ -1,7 +1,7 @@
 ---
 id: gap-live-page-worker-driver-inflight-invisible
 title: Live 页「在飞任务」表只读 workflow-events，worker-driver 真实在飞全隐形（AC136 缺口的另一半）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
