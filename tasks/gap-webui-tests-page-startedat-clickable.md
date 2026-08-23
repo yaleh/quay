@@ -26,8 +26,8 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：Tests 页每行渲染 `startedAt` 时间戳（取自载体，非硬编码）。
-- [ ] AC2：行可点击（整行链 `/tests/<round>`，或 commit 列链 `/git-history?commit=`），⛔ 非纯 StaticText。
+- [x] AC1：Tests 页每行渲染 `startedAt` 时间戳（取自载体，非硬编码）。
+- [x] AC2：行可点击（整行链 `/tests/<round>`，或 commit 列链 `/git-history?commit=`），⛔ 非纯 StaticText。
 
 ## Definition of Done
 

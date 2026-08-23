@@ -285,3 +285,42 @@ test("AC127: GET /tests renders the buckets column — a bucket row shows its la
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });
+
+test("AC1/AC2: GET /tests renders a startedAt column per history row (carrier-sourced) and a clickable commit link (not pure StaticText)", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-startedat-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    // Oldest→newest: round 228 (startedAt appears ONLY in its history row, not the latest banner),
+    // then round 229 (the latest banner). This lets AC1's assertion target the ROW rendering — the
+    // round-228 startedAt cannot come from the latest-run banner, so it proves the row template emits it.
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 228, startedAt: "2026-08-23T01:57:10.824Z", durationMs: 936519, state: "green", runner: "outer", scope: "worktree", commit: "426b21ceaabbe7502334d92d79ce4a4a8d935fe9", pass: 900, fail: 0, cancelled: 0, tests: 900, failures: [] }),
+      JSON.stringify({ round: 229, startedAt: "2026-08-23T02:00:00.000Z", durationMs: 366000, state: "green", runner: "outer", scope: "full", commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 500, fail: 0, cancelled: 0, tests: 500, failures: [] }),
+    ].join("\n"));
+
+    createStore(tasksDir).write("AC-STARTED-T", { title: "startedAt web tests", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests");
+    assert.equal(r.status, 200, "GET /tests returns 200");
+    assert.ok(r.body.includes("<th>startedAt</th>"), "the history table has a startedAt column header");
+    // The round-228 timestamp is the NON-latest row → it can only appear via the history-row
+    // template (the latest banner renders round-229's 02:00:00 value, never 228's).
+    assert.ok(r.body.includes("2026-08-23T01:57:10.824Z"), "the round-228 row renders its startedAt timestamp");
+    // AC2: the commit column is an <a> link (not pure StaticText), carrying the full commit hash.
+    assert.ok(r.body.includes('href="/git-history?commit=426b21ceaabbe7502334d92d79ce4a4a8d935fe9"'), "the commit cell is a clickable link to /git-history?commit=<hash>");
+    assert.ok(r.body.includes("<code>426b21ce</code>"), "the linked commit still shows its 8-char short hash");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
