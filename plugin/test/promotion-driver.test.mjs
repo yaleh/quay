@@ -333,6 +333,49 @@ test("AC1 — --once runs exactly one round then exits (single-shot seam)", (t) 
   assert.equal(events.filter((e) => e.event === "round").length, 1, "--once runs one round");
 });
 
+// ── liveness 接线（gap-resident-driver-stable-carrier-liveness Finding：liveness 子命令零调用者）──
+// AC2 承诺「driver/supervisor 死时有机件在窗口内检测并报告」，但此前没有任何东西调 liveness 子命令
+// （log 13h 无更新）。修法 = driver 自身 round 循环每轮顺手调一次（promotion 侧接线）。本组验证：
+// ①resident loop 每轮真调 liveness（counter 缝）、②检出的死亡进 round record（⛔ 不静默丢）。
+
+test("liveness wiring — resident loop calls the liveness checker each round + round record carries it", (t) => {
+  const root = makeRoot("liveness-wire");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const livenessCnt = path.join(root, "liveness.cnt");
+  runDriver(root, [
+    "--ready-pool-cmd", counterNodeE(path.join(root, "rpc.cnt"), "JSON.stringify({pool:0,should_apply:false,promotions:[],applied_promotions:[]})"),
+    "--liveness-cmd", counterNodeE(livenessCnt, "JSON.stringify({kind:'promotion',deaths:'none',running:true})"),
+    "--interval", "5",
+    "--max-rounds", "3",
+    "--json",
+  ]);
+  assert.equal(Number(fs.readFileSync(livenessCnt, "utf8")), 3, "liveness checked once per round (3 rounds)");
+  const records = readRoundLines(root);
+  assert.equal(records.length, 3, "three round records");
+  for (const rec of records) {
+    assert.equal(rec.liveness.checked, true, `round carries liveness.checked=true: ${JSON.stringify(rec.liveness)}`);
+    assert.equal(rec.liveness.deaths, null, "healthy check ⇒ deaths=null");
+    assert.equal(rec.liveness.running, true);
+  }
+});
+
+test("liveness death surfacing — a death reported by the checker is carried into the round record (⛔ not dropped)", (t) => {
+  const root = makeRoot("liveness-death");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  runDriver(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({pool:0,should_apply:false,promotions:[],applied_promotions:[]}))",
+    "--liveness-cmd", "node -e console.log(JSON.stringify({kind:'promotion',deaths:'supervisor_dead,driver_orphaned',running:false}))",
+    "--once", "--json",
+  ]);
+  const records = readRoundLines(root);
+  assert.equal(records.length, 1, "one round");
+  const liveness = records[0].liveness;
+  assert.equal(liveness.checked, true);
+  assert.match(liveness.deaths, /supervisor_dead/, `supervisor_dead surfaced: ${liveness.deaths}`);
+  assert.match(liveness.deaths, /driver_orphaned/, "orphan driver explicitly named");
+  assert.equal(liveness.running, false, "running=false — the orphan driver is NOT misjudged as in-service");
+});
+
 // ── AC2 (falsifiable): stop the driver ⇒ a newly-eligible todo is NOT promoted ─────────────────────
 
 test("AC2 — stop the driver (SIGTERM) ⇒ newly-eligible todo is not promoted; alive driver promotes it", async (t) => {

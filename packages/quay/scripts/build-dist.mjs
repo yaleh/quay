@@ -27,6 +27,7 @@
 import * as esbuild from "esbuild";
 import path from "node:path";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -54,7 +55,24 @@ export const REQUIRE_BANNER =
 export function buildBanner() {
   const cssPath = path.resolve(pkgDir, "src", "webui-modernist.css");
   const css = fs.readFileSync(cssPath, "utf8");
-  return `${REQUIRE_BANNER}\nglobalThis.__WEBUI_MODERNIST_CSS__ = ${JSON.stringify(css)};`;
+  const d3 = readD3MinJs();
+  return `${REQUIRE_BANNER}\nglobalThis.__WEBUI_MODERNIST_CSS__ = ${JSON.stringify(css)};\nglobalThis.__WEBUI_D3_JS__ = ${JSON.stringify(d3)};`;
+}
+
+/**
+ * Read d3.min.js from node_modules (the third-party graph library the retired 「零客户端 JS」
+ * invariant now permits on the /git-history page). Inlined into the dist bundle's banner the same
+ * way the Modernist CSS is, so dist/quay.js stays self-contained (no sibling .js asset to ship).
+ * Returns "" when d3 is not installed — the /git-history page then degrades to the summary table.
+ */
+export function readD3MinJs() {
+  try {
+    const require = createRequire(import.meta.url);
+    const d3Main = require.resolve("d3");
+    return fs.readFileSync(path.join(path.dirname(path.dirname(d3Main)), "dist", "d3.min.js"), "utf8");
+  } catch {
+    return "";
+  }
 }
 
 /**

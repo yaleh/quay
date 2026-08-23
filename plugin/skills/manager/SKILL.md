@@ -176,6 +176,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md` — isolation + resource governance
 - `orchestration/SPEC-methodology-as-a-deliverable.md` — methodology as a deliverable
 - `orchestration/SPEC-no-text-substitution-at-install.md` — install is configuration-driven, not text-substitution
+- `orchestration/SPEC-unified-driver-architecture-2026-08-23.md` — 统一 `*-driver` 架构：机械化执行面与长会话规划面的分野。**两级分层**（Layer 0 runtime / 1a task-processing / 1b routine，人 2026-08-23 裁定，manager-kind 属 1b）· 核心不变式「⛔ 不信执行者自述」单一实现 · Filter 谓词列表 · Claude Code profile 抽层 · 配置与运行时控制态分界 · 事件触发保留兜底轮询（proposal·判据落为 AC151–155，排期在 AC142 系列收口后）
 - `orchestration/SPEC-one-observer-two-surfaces.md` — one observer, two surfaces
 - `orchestration/SPEC-quay-self-hosts-its-own-cold-start.md` — self-hosting the cold start
 - `orchestration/SPEC-state-crystallization-2026-08-05.md` — state crystallization

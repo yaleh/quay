@@ -197,6 +197,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/orchestrator- -->
 <!-- reference-doc: orchestration/outer-tick-prompt.txt -->
 <!-- reference-doc: plugin/loop/manager- -->
+<!-- reference-doc: orchestration/SPEC-unified-driver-architecture-2026-08-23.md -->
 
 ## Behavior
 

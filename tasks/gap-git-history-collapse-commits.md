@@ -39,6 +39,8 @@ depends_on: []
 
 - 无（渲染折叠）
 
+> **⛔ DEAD-CODE 注记（manager wiring 审计 2026-08-23）**：本任务实现提交 `0ce7cd5a` 改的是旧 `renderGitHistorySvg` 函数，但同日晚 `gap-git-history-vertical-graph-thirdparty-lib`（`ca4f1bc5`/`d7cb9b89`）把整个 `/git-history` 页重写为 D3、`renderGitHistorySvg` 被整体删除（`grep -rn renderGitHistorySvg packages/quay/src/` 零命中）。本任务的折叠行为现由 vertical-graph 自身的 `layoutGitGraph(collapsed:true)` + D3 点击展开代偿满足，本任务交付物为死代码（只剩 `serve-handlers.ts:270-271` 孤儿 CSS 规则，生成代码已不存在）。行为已覆盖，⛔ 无需重新落折叠逻辑。
+
 ## Touches
 
 - packages/quay/src/serve-handlers.ts（lanes 渲染折叠）

@@ -33,6 +33,40 @@ inner 核「账本·某机制是否真被调用」5 条（grep -c 账本·）   
 ⇒ 同理：本阶段驱动化的部分，AC135/AC141 打的那个「两个真相源」问题【结构上消失】（只剩一个执行者）。
 ```
 
+### AC151–AC155（**架构地基：driver 分层抽象** —— 人 2026-08-23 裁定「前述可重用机制应当分层抽象，以支持这两层上的重用」；正本 `orchestration/SPEC-unified-driver-architecture-2026-08-23.md` §2.1/§2.5/§2.6，⛔ 判据在此、设计在 SPEC，不互相复制）
+
+**⊢ 为什么是本阶段的【阶段 0】**：AC143 要求「收进 driver（新 kind 或并入既有 kind）」——
+而**新增的 manager-kind 与 promotion/worker 结构不同**（它没有任务池、没有任务选择、没有"spawn 执行者再复核其自述"）。
+⛔ 在分层做好之前加 manager-kind，只有两种结局：**要么它被迫实现三个空段，要么它另起一套** ——
+后者正是本阶段要消灭的"两个真相源"的新实例。**故分层必须先于 AC143。**
+
+- **AC151（两级分层落地，⛔ 不是一个 kernel + N 个平级 plugin）**：存在 **Layer 0（driver-runtime）**
+  与 **Layer 1a（task-processing）/ 1b（routine）** 两级；promotion/worker 继承 0+1a，manager-kind 继承 0+1b。
+  **取假**：manager-kind 里出现空的候选池/选择/verify 三段（被骨架强制） ⇒ 分层错，判假。
+  ⊢ 反向取假同样成立：**若 1b 里重新实现了一份 Layer 0 已有的循环/心跳/判停 ⇒ 假**（分层没起作用）。
+- **AC152（Filter 是可组合谓词列表）**：`notInFlight`/`depsSatisfied`/`touchesDisjoint`/`retryCapNotExhausted`/
+  `notNeedsHuman` 是**一个列表里的元素**，两个任务处理型 kind 共用。
+  **取假（一条命令可验）**：给两个 driver 同时新增一个谓词，**若需要改两处以上 ⇒ 假**。
+  ⊢ 发生率已实测：缺 `depsSatisfied` ⇒ ac138 白烧 15 分钟；缺 `touchesDisjoint` ⇒ Git-History 群组撞
+  `serve-handlers.ts` 的风险（2026-08-23，同一个缺失抽象的两种表现）。
+- **AC153（核心不变式单一实现 + 结果词表含「无法评估」）**：「⛔ 不信执行者自述，用独立于执行者的量复核」
+  **只存在一份**；且 `DriverResult` 词表强制含 `not-evaluated`（与 `verified` 不同形）。
+  **取假**：①任一 kind 能在未经独立判据证实时产出 `verified` ⇒ 假；②「读不到输入」能被表达成非 `not-evaluated`
+  的值 ⇒ 假。⊢ **本条是抽 kernel 的第一理由**：该不变式此前被独立实现两遍（promotion AC133 / worker
+  `computeLandingState`），**其中 worker 那份在 2026-08-23 11:37 之前一直是坏的**（`exitCode===0 ⇒ completed`）。
+- **AC154（Claude Code profile 抽层 + 独立承载）**：`profiles`（可复用）与 `roles`（引用 profile）分离；
+  `bare` **只在一层出现**；`env` 的"取消继承"显式表达为 `unset:[...]`（⛔ 非空字符串约定）；
+  profile 有自己的承载文件，`launch.settings.json` 只留 Claude Code 认识的键。
+  **取假**：①`bare` 仍有两级（顶层 + role）⇒ 假（**该歧义已造成 AC142 的 13/13 全败，⛔ 不留第二次**）；
+  ②「给所有 worker 换模型」仍需改三处以上 ⇒ 假；③profile 仍寄生在 `_launchSpec` 下划线扩展键里 ⇒ 假。
+- **AC155（配置合并 + 保留配置/控制态分界 + 事件触发保留兜底轮询）**：现散在六处的配置合并到**声明式配置**一侧；
+  **⛔ `.quay/worker-control.json`（运行时控制态，机器热写）保持独立**，不并入配置文件。
+  **取假**：①合并后仍存在两份以上的并发解析（现有三份：`CAP_DEFAULT=5` / `resolveConcurrency` /
+  `cap-from-gate.ts:FIXED_EFFECTIVE_CAP=5`，而后者注释自称"single source is QUAY_MAX_TASK_SUBAGENTS"）⇒ 假；
+  ②控制态被并进 git 版本化的配置文件 ⇒ 假（机器改人的源文件，同 CLAUDE.md 11b）；
+  ③事件源不可用时 driver 静默停摆 ⇒ 假（**事件是提前唤醒，⛔ 不是替代轮询**——`cmd_liveness` 零调用者
+  就是"机制建好了但从不触发"的现成反例）。
+
 ### AC143（观测/账本/收尾面驱动化 —— outer 的纯机械 A/B 段）
 **判据（能取假）**：outer 执行核里**纯机械**的 A/B 段（A1/A3/A6/A9/A10/A18/A21 读数 · B1/B2/B6 收尾留痕 · B12/B17 自查审计）收进 driver（新 kind 或并入既有 kind，落笔方定）。
 **⊢ 扩展成本已实测（manager 直读 `promotion-driver-launch.sh`）**：kind 派发是 **registry 表驱动**（`KIND_DRIVER[]`/`KIND_VERBS[]`/`KIND_PREFIX[]` 关联数组）⇒ 加一个 kind = 表里加一行 + 写该 driver 的 `.ts`。AC139-2「单一真相源」的设计红利，⛔ 不需要重造承载。
@@ -81,7 +115,9 @@ manager 过早给出因果归因        audit 报出
 - **AC149-3（无双真相源）**：停机后不存在任何"两个执行者做同一件事"的路径。**取假**：任一职责同时有 driver 路径与人工/会话路径且都在用 ⇒ 假。
 
 ### 本阶段的达成条件
-**达成 = AC143 ∧ AC144 ∧ AC145 ∧ AC146 ∧ AC147 ∧ AC148 ∧ AC149。**
+**达成 = AC151 ∧ AC152 ∧ AC153 ∧ AC154 ∧ AC155（架构地基）∧ AC143 ∧ AC144 ∧ AC145 ∧ AC146 ∧ AC147 ∧ AC148 ∧ AC149。**
+**⊢ 地基五条排在最前不是形式**：AC143 的 manager-kind 结构上不同于 promotion/worker（无任务池/无选择/无 verify），
+分层未做就加它 ⇒ 要么空段要么另起一套，后者正是本阶段要消灭的东西。
 
 **⊢ 切换判据（⛔ 与以往不同，本次要求 AC 满足而非仅任务 merge —— 理由在下面，不是凭空加前置）**：
 当前阶段任务全部 merge **且 AC142 判据满足**。
@@ -89,11 +125,15 @@ manager 过早给出因果归因        audit 报出
 
 **⊢ 建议的推进顺序（manager 分析，⛔ 非判据，落笔方可调）**：
 ```
-阶段0（在当前阶段内）  AC142 修 spawn 链，用 fix-worker + selector 两个坏例验证
-阶段1                  AC143 观测/账本/收尾面驱动化（registry 加一行 + 一个 .ts，成本已实测）
-阶段2                  AC144 质量把关按四种形状分开
-阶段3                  AC145 语义 subagent 化 + AC146 人机接口 + AC147 manager 兜底
-阶段4                  AC148 inner 核逐条归属 → AC149 真正停会话
+阶段0（在当前阶段内）  AC142 修 spawn 链 + AC150 promotion 资源门/控制面对齐（先共用后上收）
+阶段1（架构地基）      AC152 Filter 列表 + AC153 Verify 单一实现  ← ⛔ 先做这两条，它们是纯函数、
+                       可单测、无进程边界问题，且【当下就在造成损失】（ac138 白跑 / 假完成 bug 曾存在）
+阶段2（架构地基）      AC151 两级分层 + supervisor 港进 TS（SPEC §2.1 末条，人已裁定非可选）
+阶段3（架构地基）      AC154 profile 抽层 + AC155 配置合并与事件接线
+阶段4                  AC143 观测/账本/收尾面驱动化（此时 manager-kind = 继承 0+1b，写 routines 表）
+阶段5                  AC144 质量把关按四种形状分开
+阶段6                  AC145 语义 subagent 化 + AC146 人机接口 + AC147 manager 兜底
+阶段7                  AC148 inner 核逐条归属 → AC149 真正停会话
 ```
 **⊢ 非目标（⛔ 不在本阶段做）**：取消 **manager 会话**本身（人的方案里 manager 保留为语义驱动方；⊢ **该残余风险应显式记账**：最上层仍是 LLM 会话、仍有会话失效形态，人是兜底——这是 A16「最上层由人兜底」的既有裁定，本阶段不改）· driver 并发/选择策略调优 · 产品功能推进。
 
@@ -883,8 +923,37 @@ selector      .quay/worker-outcome.jsonl     selector_reason 全为
 **⊢ 与既有立案的关系**：`gap-fix-worker-spawn-zero-diagnostic-info`（outer 已立案，stdio 捕获 + timeout）**正是 AC142-1 的执行体**；⛔ 但该任务只覆盖 fix-worker 一侧，**selector 侧的同类诊断需一并接上**（outer 已判"复用同一次诊断一并查"，与本条一致）。
 **⊢ 非目标**：⛔ 不在本条裁定具体根因是什么（那是 AC142-2 要求对照后才能得出的结论）；⛔ 不要求 selector 的排序策略改动（AC129 已裁定非目标）。
 
+### AC150（**promotion-driver 的资源感知与控制面对齐** —— 本阶段自己的交付物有一半缺陷，manager 2026-08-23 架构审计直读发现，⛔ 编号接全局最大值 149，不复用）
+
+**⊢ 为什么属于【本阶段】而非下一阶段**：本阶段的主语就是 promotion-driver（「晋升面机械化」）。
+下一阶段做的是**架构分层**（把共性上收），而本条是**本阶段交付物自身的功能缺口**——⛔ 不是分层就能自动补上的，
+分层只决定它将来放在哪一层，不决定它现在有没有。
+
+**缺口（直读，非印象）**：
+```
+grep -c "resource-gate\|resourceGate" promotion-driver.ts  ⇒  0
+grep -c "resource-gate\|resourceGate" worker-driver.ts     ⇒  22
+grep -c "serveControlPlane\|CONTROL_HEADER" promotion-driver.ts ⇒ 0（worker 14）
+promotion-driver.ts:26 明写「⛔ 不读/不写 .halt（停机态 = 进程信号）」
+```
+⇒ **promotion-driver 每 30 秒无条件轮询、无条件 spawn LLM fix worker，机器负载多高都照 spawn**；
+而 worker-driver 会正确退避（2026-08-23 14:09 那次 `resource-gate-wait: loadavg 41.86` 就是它救的场）。
+**两个驱动跑在同一台机器上，一个懂事一个不懂事——worker 退避让出的资源，可能正被 promotion 拿去起 LLM。**
+
+**判据（能取假，三条）**：
+- **AC150-1（资源门）**：promotion-driver 在起 fix worker 前**经与 worker-driver 同一个资源门判定**；
+  **取假**：资源门报 WAIT 期间 `promotion-outcome.jsonl` 仍出现新的 `action="fix"` 记录 ⇒ 假。
+- **AC150-2（控制面）**：promotion-driver 可被**运行期**停机（halt），⛔ 非只能 `kill`；
+  `quay driver drain --kind promotion` 不再报 `does not support`（现 `KIND_VERBS` 把该不对称固化成配置）。
+  **取假**：halt 后下一轮仍晋升/仍 spawn fix worker ⇒ 假。
+- **AC150-3（⛔ 不得靠"两个 kind 各写一份"满足）**：AC150-1/-2 的实现**必须是与 worker-driver 共用的同一份**
+  （函数级复用，不是复制粘贴）。**取假**：`grep` 出两份独立的资源门判定/halt 判定实现 ⇒ 假。
+  ⊢ 本条是给下一阶段分层留的接口：**先共用，再上收**，⛔ 不要先复制两份再指望分层时合并。
+
+**⊢ 非目标**：⛔ 不在本条做分层抽象本身（那是下一阶段 AC151）；⛔ 不改 promotion 的晋升判定语义。
+
 ### 本阶段的达成条件（修正）
-**达成 = AC130 ∧ AC131 ∧ AC132 ∧ AC133 ∧ AC134 ∧ AC135 ∧ AC136 ∧ AC137 ∧ AC138 ∧ AC139 ∧ AC140 ∧ AC141 ∧ AC142。**
+**达成 = AC130 ∧ AC131 ∧ AC132 ∧ AC133 ∧ AC134 ∧ AC135 ∧ AC136 ∧ AC137 ∧ AC138 ∧ AC139 ∧ AC140 ∧ AC141 ∧ AC142 ∧ AC150。**
 **⊢ 分工提示（防「造齐机件却没接上」——AC129 那个缺口的同形）**：
 AC130–134 = **驱动能做**；**AC135 = outer 不再做（实际切换 + 退役）**；**AC136 = 观测面跟着切**；
 **AC138 = 两驱动均从「能做」变成「在生产中真的在做」——人 2026-08-23 裁定新增的第九个合取项**；
