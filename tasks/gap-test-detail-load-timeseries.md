@@ -48,3 +48,4 @@ depends_on: []
 - packages/quay/test/serve-handlers.test.mjs（曲线渲染测试）
 - .gitignore（采样器运行时输出 suite-load-*.jsonl/.pid 的 ignore 条目）
 - tasks/gap-test-detail-load-timeseries.md（自身）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY snapshot 281→282，新增 suite-load-sampler.ts 计入交付面清单）
