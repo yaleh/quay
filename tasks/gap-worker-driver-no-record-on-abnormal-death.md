@@ -44,12 +44,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：worker 非正常退出（含被杀 / suite 失败后自尽）⇒ `worker-outcome.jsonl` 有对应记录且 `final_state ∉ {completed}`；零记录 ⇒ 假。
-- [ ] AC2（能取假）：worker 异常死亡后，driver 下一轮能对同一 task 成功 `git worktree add`（⛔ 不需人工 `git worktree remove`）；stale worktree 仍挡 ⇒ 假。
+- [x] AC1：worker 非正常退出（含被杀 / suite 失败后自尽）⇒ `worker-outcome.jsonl` 有对应记录且 `final_state ∉ {completed}`；零记录 ⇒ 假。
+- [x] AC2（能取假）：worker 异常死亡后，driver 下一轮能对同一 task 成功 `git worktree add`（⛔ 不需人工 `git worktree remove`）；stale worktree 仍挡 ⇒ 假。
 
 ## Definition of Done
 
-- [ ] worker 异常死亡写终态记录 + orphan worktree 清理 + 生产验证零记录消失且 driver 可重派；AC1-2 全勾；land 到 develop。
+- [x] worker 异常死亡写终态记录 + orphan worktree 清理 + 生产验证零记录消失且 driver 可重派；AC1-2 全勾；land 到 develop。
 
 ## Retires
 

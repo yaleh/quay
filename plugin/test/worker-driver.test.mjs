@@ -43,6 +43,8 @@ import {
   signalExitCode,
   readTaskStatus,
   worktreePresentForTask,
+  worktreePathsForTask,
+  cleanupOrphanWorktree,
   computeLandingState,
   EXITED_NOT_LANDED_EXIT,
   WORKER_OUTCOME_REL,
@@ -491,21 +493,22 @@ test("AC2 (能取假) — leave an uncommitted change ⇒ driver stashes it (git
   assert.match(fs.readFileSync(path.join(root, "a.txt"), "utf8"), /dirty/, "stash pop restores the dirty content");
 });
 
-// ── AC3 (阶段 2): 超时 ⇒ 墙钟超时 SIGTERM、worktree 仍在 ────────────────────────────────────────────
+// ── AC3 (阶段 2): 超时 ⇒ 墙钟超时 SIGTERM、orphan worktree 清理 ────────────────────────────────────
 
-test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed-out, worktree preserved", async (t) => {
+test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed-out, orphan worktree cleaned (AC2)", async (t) => {
   const root = makeGitRoot("timeout");
+  const wtPath = path.join(root, "..", "w1");
   t.after(() => {
-    try { runGit(root, ["worktree", "remove", "--force", path.join(root, "..", "w1")]); } catch { /* best-effort */ }
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
     fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(path.join(root, "..", "w1"), { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
   });
   fs.writeFileSync(path.join(root, "k.txt"), "x\n");
   runGit(root, ["add", "k.txt"]);
   runGit(root, ["commit", "-q", "-m", "init"]);
-  // a real worktree that must survive the timeout (the driver never remove/prune worktrees)
-  runGit(root, ["worktree", "add", "-q", "-b", "task/w1", path.join(root, "..", "w1")]);
-  const wtPath = path.join(root, "..", "w1");
+  // a real orphan worktree on the TASK's branch — timeout is an abnormal death ⇒ it must be cleaned up
+  // (gap-worker-driver-no-record-on-abnormal-death AC2), not preserved (the old 阶段-2 contract).
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-t", wtPath]);
   assert.ok(fs.existsSync(wtPath), "precondition: worktree exists before the run");
 
   const pidFile = path.join(root, "worker.pid");
@@ -531,9 +534,78 @@ test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed
   assert.match(rec.failure_reason, /timed out/, "failure reason names the timeout");
   assert.ok(rec.wall_clock_ms >= 500 && rec.wall_clock_ms < 5000, `wall_clock_ms reflects the timeout (~${rec.wall_clock_ms}ms), not the full run`);
 
-  // worktree 仍在（驱动超时杀 worker 会话，但保留 worktree；从不 remove/prune）。
-  assert.ok(fs.existsSync(wtPath), "worktree still exists after timeout (preserved)");
-  assert.match(runGit(root, ["worktree", "list"]), /w1/, "git worktree list still shows the worktree");
+  // worktree 已清理（超时是异常死亡 ⇒ orphan worktree 被清，driver 下轮可对同一 task 重派；AC2）。
+  assert.equal(rec.worktree_cleaned, true, "AC2: the orphan worktree was cleaned up on timed-out");
+  assert.ok(!fs.existsSync(wtPath), "worktree removed after timeout (⛔ not preserved)");
+  assert.equal(worktreePresentForTask(root, "gap-t"), false, "git worktree list no longer shows task/gap-t");
+});
+
+// ── gap-worker-driver-no-record-on-abnormal-death：worker 异常死亡 ⇒ 终态记录 + orphan worktree 清理 ──
+// AC1：worker 非正常退出（被杀 / suite 失败后自尽）⇒ worker-outcome.jsonl 有对应记录且 final_state ∉
+// {completed}（零记录 ⇒ 假）。AC2（能取假）：异常死亡后 driver 下一轮能对同一 task 成功
+// `git worktree add`（stale worktree 仍挡 ⇒ 假）。
+
+test("AC2 (能取假) — worker abnormal death (exit non-zero) ⇒ orphan worktree cleaned; driver next round can git worktree add the same task", (t) => {
+  const root = makeGitRoot("orphan");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-or", "ready"); // ready ⇒ not done ⇒ the worker did not land
+  // simulate the orphan worktree left by a prior abnormal death (same task, same branch)
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-or", wtPath]);
+  assert.equal(worktreePresentForTask(root, "gap-or"), true, "precondition: orphan worktree present");
+
+  let code = 0;
+  try {
+    runDriver(root, ["--task", "gap-or", "--worker-cmd-exact", "node -e process.exit(7)"]);
+  } catch (e) {
+    code = e.status;
+  }
+  assert.equal(code, 7, "driver propagates the worker's non-zero exit");
+
+  const records = readOutcomeLines(root);
+  assert.equal(records.length, 1, "AC1: abnormal death still produces EXACTLY ONE outcome record (no zero-record)");
+  assert.equal(records[0].final_state, "failed", "AC1: final_state ∉ {completed}");
+  assert.equal(records[0].worktree_cleaned, true, "AC2: orphan worktree cleaned on abnormal death");
+  assert.equal(records[0].worktree_cleanup_error, null, "cleanup reported no error");
+
+  // AC2 的取假半面：worktree 已清 ⇒ 同一 task 能成功重派（git worktree add 不需人工 remove）。
+  assert.equal(worktreePresentForTask(root, "gap-or"), false, "orphan worktree gone after abnormal death");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-or", wtPath]);
+  assert.ok(fs.existsSync(wtPath), "driver next round can git worktree add the same task (no manual remove)");
+  runGit(root, ["worktree", "remove", "--force", wtPath]);
+});
+
+test("cleanupOrphanWorktree / worktreePathsForTask — find + remove orphan worktree + delete branch; idempotent", (t) => {
+  const root = makeGitRoot("cleanup");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-c", "ready");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-c", wtPath]);
+
+  const found = worktreePathsForTask(root, "gap-c");
+  assert.equal(found.length, 1, "exactly one worktree path located for the task");
+  assert.equal(found[0], wtPath, "worktree path resolved via the porcelain branch line");
+  assert.deepEqual(worktreePathsForTask(root, "gap-nope"), [], "no worktree for a different task");
+
+  const res = cleanupOrphanWorktree(root, "gap-c");
+  assert.equal(res.removed, true);
+  assert.equal(res.worktreePath, wtPath);
+  assert.equal(res.branchDeleted, true, "task/<id> branch deleted so a fresh git worktree add -b succeeds");
+  assert.equal(res.error, null);
+  assert.equal(worktreePresentForTask(root, "gap-c"), false, "worktree gone after cleanup");
+
+  // 幂等：无 worktree 可清 ⇒ no-op（不是错误）。
+  const again = cleanupOrphanWorktree(root, "gap-c");
+  assert.equal(again.removed, false);
+  assert.equal(again.error, null);
 });
 
 // ── 阶段 3（AC117）MCP 控制面：控制态 + 身份（AC2/AC3 纯函数）──────────────────────────────────────
