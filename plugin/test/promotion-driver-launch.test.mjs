@@ -41,6 +41,23 @@ const FAKE_DRIVER = [
   "",
 ].join("\n");
 
+// A fake worker-driver.ts (gap-launch-script-worker-cap-broken AC1/AC2): dumps its argv + the
+// QUAY_MAX_TASK_SUBAGENTS env (the worker concurrency definition point) to a file, then idles so the
+// supervisor has a live child. The worker driver's own pid is written by the supervisor (KIND_PID_SELF=0
+// → --pid-file is the in-flight file), so unlike FAKE_DRIVER it does NOT self-write a pid.
+const FAKE_WORKER_DRIVER = [
+  "const fs = require('node:fs');",
+  "const path = require('node:path');",
+  "const argv = process.argv.slice(2);",
+  "const i = argv.indexOf('--root');",
+  "const root = i >= 0 && argv[i + 1] ? argv[i + 1] : '.';",
+  "const dump = { argv: argv, capEnv: process.env.QUAY_MAX_TASK_SUBAGENTS || null };",
+  "fs.mkdirSync(path.join(root, '.quay'), { recursive: true });",
+  "fs.writeFileSync(path.join(root, '.quay', 'worker-argv-dump.json'), JSON.stringify(dump));",
+  "setInterval(() => {}, 1000);",
+  "",
+].join("\n");
+
 function run(args, opts = {}) {
   return spawnSync("bash", [SCRIPT, ...args], {
     encoding: "utf8",
@@ -59,6 +76,34 @@ function makeRoot(tag) {
   fs.writeFileSync(path.join(scripts, "promotion-driver.ts"), FAKE_DRIVER, "utf8");
   fs.copyFileSync(SCRIPT, path.join(scripts, "promotion-driver-launch.sh"));
   return root;
+}
+
+// A hermetic root for the worker kind (gap-launch-script-worker-cap-broken AC1/AC2): fake
+// worker-driver.ts that dumps its argv/env + a copy of the launch script.
+function makeWorkerRoot(tag) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `pd-launch-worker-${tag}-`));
+  const scripts = path.join(root, "plugin", "scripts");
+  fs.mkdirSync(scripts, { recursive: true });
+  fs.writeFileSync(path.join(scripts, "worker-driver.ts"), FAKE_WORKER_DRIVER, "utf8");
+  fs.copyFileSync(SCRIPT, path.join(scripts, "promotion-driver-launch.sh"));
+  return root;
+}
+
+function readWorkerArgvDump(root) {
+  const p = path.join(root, ".quay", "worker-argv-dump.json");
+  return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : null;
+}
+
+// The worker driver is spawned asynchronously by the supervisor (its pid file lands before the fake
+// driver's dump write), so poll bounded for the dump rather than assert it immediately after `start`.
+async function waitForWorkerArgvDump(root, ms = 5000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const d = readWorkerArgvDump(root);
+    if (d) return d;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return null;
 }
 
 function readPid(root, name) {
@@ -251,6 +296,36 @@ test("AC138-3 — status --kind worker reads ALL carriers; last_record_ts = max 
   assert.equal(st.carrier_records, 3, `both carriers summed (1 outcome + 2 round): ${JSON.stringify(st)}`);
   assert.equal(st.last_record_ts, "2026-08-23T11:30:00Z", `max across BOTH carriers — round wins: ${JSON.stringify(st)}`);
   assert.match(st.carrier_path, /worker-outcome\.jsonl$/, `primary carrier is outcome: ${st.carrier_path}`);
+});
+
+// ── gap-launch-script-worker-cap-broken：--cap worker 路径 + worker 并发缺省 5 ────────────────────
+
+test("AC1 — restart --kind worker --cap 2 ⇒ no `unknown argument: --concurrency`; driver argv carries --concurrency 2", async (t) => {
+  const root = makeWorkerRoot("ac1-cap");
+  t.after(() => {
+    run(["stop", "--kind", "worker", "--root", root], { timeout: 15000 });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const r = run(["restart", "--kind", "worker", "--cap", "2", "--root", root, "--restart-delay", "1", "--run-id", "wac1"]);
+  assert.equal(r.status, 0, `restart failed: ${r.stdout}\n${r.stderr}`);
+  assert.ok(!/unknown argument: --concurrency/.test(r.stderr), `supervisor self-restart must accept --cap, not reject --concurrency: ${r.stderr}`);
+  const dump = await waitForWorkerArgvDump(root);
+  assert.ok(dump, "worker driver dumped its argv");
+  assert.ok(dump.argv.includes("--concurrency") && dump.argv.includes("2"), `driver argv carries --concurrency 2: ${JSON.stringify(dump.argv)}`);
+});
+
+test("AC2 — start --kind worker with NO --cap ⇒ env QUAY_MAX_TASK_SUBAGENTS=5 (default, ⛔ not 1)", async (t) => {
+  const root = makeWorkerRoot("ac2-cap");
+  t.after(() => {
+    run(["stop", "--kind", "worker", "--root", root], { timeout: 15000 });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const r = run(["start", "--kind", "worker", "--root", root, "--restart-delay", "1", "--run-id", "wac2"]);
+  assert.equal(r.status, 0, `start failed: ${r.stdout}\n${r.stderr}`);
+  const dump = await waitForWorkerArgvDump(root);
+  assert.ok(dump, "worker driver dumped its argv/env");
+  assert.equal(dump.capEnv, "5", `worker default concurrency = 5 via the env definition point (⛔ not 1): ${JSON.stringify(dump)}`);
+  assert.ok(!dump.argv.includes("--concurrency"), `default is carried by env, not an explicit --concurrency flag: ${JSON.stringify(dump.argv)}`);
 });
 
 } // end governance group

@@ -32,6 +32,7 @@ import {
   defaultSelectorArgv,
   defaultReadyPoolArgv,
   shuffle,
+  filterTouchesDisjoint,
   parseSelectorOutput,
   runSelectorWorker,
   readyPoolCheck,
@@ -123,6 +124,23 @@ function writeTaskFile(root, taskId, status = "done") {
   fs.writeFileSync(path.join(root, "tasks", `${taskId}.md`), `---\nid: ${taskId}\nstatus: ${status}\n---\n\n## Proposal\n\nbody\n`);
   runGit(root, ["add", `tasks/${taskId}.md`]);
   runGit(root, ["commit", "-q", "-m", `task ${taskId} ${status}`]);
+}
+
+// A committed task file carrying a `## Touches` section (gap-launch-script-worker-cap-broken AC3):
+// the resident loop's filterTouchesDisjoint reads each task's ## Touches from disk, and the resident
+// loop stashes uncommitted changes before dispatching — so a Touches-bearing task file must be
+// COMMITTED (clean) or the stash reverts it and the filter sees a Touches-less file (conservative
+// serialize ⇒ the candidate is dropped). status=done so an exit-0 worker "lands" (completed, driver
+// exit 0), not exited-not-landed.
+function writeTouchedTask(root, taskId, touchesLine) {
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "tasks", `${taskId}.md`),
+    `---\nid: ${taskId}\nstatus: done\n---\n\n## Proposal\n\nprose\n\n## Touches\n\n- ${touchesLine}\n`,
+    "utf8",
+  );
+  runGit(root, ["add", `tasks/${taskId}.md`]);
+  runGit(root, ["commit", "-q", "-m", `task ${taskId} touched`]);
 }
 
 // ── pure functions ─────────────────────────────────────────────────────────────────────────────────
@@ -864,6 +882,54 @@ test("AC129 pure — shuffle returns a permutation of its input", () => {
   assert.deepEqual(src, ["gap-a", "gap-b", "gap-c", "gap-d"], "shuffle does not mutate its input");
 });
 
+test("AC3 pure (gap-launch-script-worker-cap-broken) — filterTouchesDisjoint filters Touches-overlapping candidates vs in-flight", (t) => {
+  const root = makeRoot("ac3-filter");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const writeTask = (id, touchesLine) => fs.writeFileSync(
+    path.join(root, "tasks", `${id}.md`),
+    `---\nid: ${id}\nstatus: ready\n---\n\n## Proposal\n\nprose\n\n## Touches\n\n- ${touchesLine}\n`,
+    "utf8",
+  );
+  writeTask("gap-a", "plugin/scripts/foo.ts");
+  writeTask("gap-b", "plugin/scripts/foo.ts"); // overlaps gap-a
+  writeTask("gap-c", "plugin/scripts/bar.ts"); // disjoint from both
+
+  // no in-flight ⇒ no conflict object ⇒ all candidates pass through.
+  assert.deepEqual(filterTouchesDisjoint(["gap-a", "gap-b", "gap-c"], [], root), ["gap-a", "gap-b", "gap-c"]);
+  // in-flight gap-a ⇒ gap-b (same foo.ts) filtered; gap-c kept.
+  assert.deepEqual(filterTouchesDisjoint(["gap-b", "gap-c"], ["gap-a"], root), ["gap-c"], "overlapping gap-b filtered, disjoint gap-c kept");
+  // in-flight gap-c ⇒ both kept (bar.ts disjoint from foo.ts).
+  assert.deepEqual(filterTouchesDisjoint(["gap-a", "gap-b"], ["gap-c"], root), ["gap-a", "gap-b"]);
+  // missing task file ⇒ conservative serialize (⛔ not "unknown ⇒ keep").
+  assert.deepEqual(filterTouchesDisjoint(["gap-zzz"], ["gap-a"], root), [], "unreadable candidate ⇒ conservative filter");
+});
+
+test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatches the Touches-overlapping pair concurrently", (t) => {
+  const root = makeGitRoot("ac3-integr");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTouchedTask(root, "gap-a", "plugin/scripts/foo.ts");
+  writeTouchedTask(root, "gap-b", "plugin/scripts/foo.ts"); // overlaps gap-a
+  writeTouchedTask(root, "gap-c", "plugin/scripts/bar.ts"); // disjoint
+  const rpcFile = path.join(root, "rpc.cnt");
+  const selFile = path.join(root, "sel.cnt");
+  const out = runDriver(root, [
+    "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n<=1?['gap-a','gap-b','gap-c']:[],pool:n<=1?3:0})"),
+    "--selector-cmd", counterNodeE(selFile, "n===0?'gap-a\\x20first':n===1?'gap-b\\x20wants-b':'gap-a\\x20unused'"),
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--concurrency", "3",
+    "--json",
+  ]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const picks = events.filter((e) => e.event === "selector-picked");
+  // gap-a picked first (touches foo.ts); while it is in-flight, gap-b (also foo.ts) must be filtered
+  // out of the selector's candidate set — the selector asked for gap-b on its 2nd call but was only
+  // offered the disjoint gap-c, so it fell back to gap-c. gap-b is never dispatched concurrently.
+  assert.ok(!picks.some((p) => p.task === "gap-b"), "AC3: the overlapping gap-b is never dispatched (would collide with in-flight gap-a)");
+  assert.deepEqual(picks.map((p) => p.task), ["gap-a", "gap-c"], "only the disjoint pair is dispatched");
+  assert.match(picks[1].selector_reason, /fallback/, `the selector asked for gap-b but was only offered the disjoint gap-c: ${picks[1].selector_reason}`);
+});
+
 test("AC129 pure — resourceGateCheck: exit 0 ⇒ GO; exit 1 ⇒ WAIT (fail-closed)", () => {
   assert.equal(resourceGateCheck("/r", ["node", "-e", "process.exit(0)"]).go, true);
   const wait = resourceGateCheck("/r", ["node", "-e", "process.exit(1)"]);
@@ -915,8 +981,12 @@ test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the se
 test("AC1 — resident loop does not exit after one worker; keeps dispatching while pool non-empty (in-memory in-flight subtraction)", (t) => {
   const root = makeGitRoot("ac1");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTaskFile(root, "gap-a", "done");
-  writeTaskFile(root, "gap-b", "done");
+  // gap-launch-script-worker-cap-broken AC3: the resident loop now reads each task's ## Touches to
+  // filter Touches-overlapping candidates — so these fake ids need DISJOINT, COMMITTED Touches task
+  // files (the loop stashes uncommitted changes before dispatching; a Touches-less file ⇒ conservative
+  // serialize ⇒ gap-b dropped and the two-selection assertion fails).
+  writeTouchedTask(root, "gap-a", "plugin/scripts/a.ts");
+  writeTouchedTask(root, "gap-b", "plugin/scripts/b.ts");
   const rpcFile = path.join(root, "rpc.cnt");
   const selFile = path.join(root, "sel.cnt");
   // ready-pool returns BOTH candidates on calls 0 and 1 (it does NOT know gap-a went in-flight);

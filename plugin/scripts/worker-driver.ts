@@ -116,6 +116,9 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, readFrontmatter } from "./gate-script-base.ts";
+import { parseTask } from "./task-schema.ts";
+import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
+import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -952,6 +955,38 @@ export function shuffle<T>(arr: readonly T[]): T[] {
   return a;
 }
 
+/**
+ * 派发前 Touches 互斥过滤（gap-launch-script-worker-cap-broken AC3）：cap=5 后池里可能同时有 2 条
+ * `## Touches` 重叠的 ready 任务，若并发派发会各改同一文件、fan-in 才炸（两边都 exit 0 看起来都做完了，
+ * 比 fake-completion 更难查）。本函数把候选里与【在飞任务】Touches 重叠的过滤掉——selector 只在滤后集合里
+ * 选（⛔ 不指望 LLM selector 避开，它拿不到 Touches）。checkTouchesPair / parseTouches 是 ready-pool-check
+ * 的同函数（不重实现）；读不懂（任务文件缺失/读失败）⇒ 视为无 Touches ⇒ checkTouchesPair 判 serialize ⇒
+ * 滤掉（与 checkTouchesPair 的保守缺省同向，⛔ 不因读不懂放行冲突）。无在飞任务 ⇒ 无冲突对象 ⇒ 全通过。
+ */
+export function filterTouchesDisjoint(
+  candidateIds: string[],
+  inFlightIds: string[],
+  rootDir: string,
+): string[] {
+  if (inFlightIds.length === 0) return candidateIds.slice();
+  const expand = (globs: string[]) => expandDeclaredTouches(globs, rootDir);
+  const readTouches = (id: string) => {
+    const file = path.join(rootDir, "tasks", `${id}.md`);
+    let raw: string;
+    try {
+      raw = fs.readFileSync(file, "utf8");
+    } catch {
+      return { hasSection: false, globs: [] as string[] };
+    }
+    return parseTouches(parseTask(raw).body);
+  };
+  const inFlight = inFlightIds.map(readTouches);
+  return candidateIds.filter((id) => {
+    const cand = readTouches(id);
+    return inFlight.every((ifp) => checkTouchesPair(cand, ifp, expand).disjoint);
+  });
+}
+
 /** 缺省 ready-pool-check 命令（选择环的第一步）。输出须为 analyzeTasks JSON（读其 `ready` 数组）。 */
 export function defaultReadyPoolArgv(root: string, inFlight: string[], cap: number): string[] {
   const argv = [
@@ -1219,9 +1254,15 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       const pool = readyPoolCheck(rootDir, readyPoolArgv, running.map((r) => r.task), cap);
       poolSeen = pool.pool;
       const active = new Set(running.map((r) => r.task));
-      const candidates = shuffle(pool.ready.filter((id) => !active.has(id)));
+      const shuffled = shuffle(pool.ready.filter((id) => !active.has(id)));
+      // AC3（gap-launch-script-worker-cap-broken）：派发前 Touches 互斥——候选里与在飞任务 Touches 重叠的
+      // 先滤掉，selector 只在滤后集合里选（⛔ 并发派发 Touches 重叠 = fan-in 才炸）。
+      const candidates = filterTouchesDisjoint(shuffled, running.map((r) => r.task), rootDir);
       if (candidates.length === 0) {
-        stopReason = "pool-empty (no dispatchable candidate in the ready pool)";
+        // 真池空（ready 减在飞后无候选）⇒ 终态停摆。池非空但全与在飞 Touches 重叠 ⇒ ⛔ 非终态：不设
+        // stopReason，外层等一个在飞 worker 结束释放 Touches 后重进选择环重新 filter（而非把「被 Touches
+        // 挡住」误当「池空」提前停摆）。
+        if (shuffled.length === 0) stopReason = "pool-empty (no dispatchable candidate in the ready pool)";
         break;
       }
       const sel = runSelectorWorker(candidates, selectorArgv, rootDir);

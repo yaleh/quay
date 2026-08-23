@@ -34,13 +34,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：`quay driver restart --kind worker --cap N` 成功（⛔ 不再 `unknown argument: --concurrency`），且驱动 argv/env 有 `--concurrency N` 或 `QUAY_MAX_TASK_SUBAGENTS=N`。
-- [ ] AC2：worker 无显式 --cap 时并发缺省=5（`resolveConcurrency` 读到 5，⛔ 仍兜底 1 ⇒ 假）。
-- [ ] AC3：派发前 Touches 互斥过滤生效——池中 2 条 Touches 重叠的任务时，worker 只派不相交的（⛔ 并发派发 Touches 重叠 ⇒ 假）；⛔ AC2 落地前必须同时落地 AC3（cap=5 无 Touches 检查会撞 serve-handlers.ts 群组）。
+- [x] AC1：`quay driver restart --kind worker --cap N` 成功（⛔ 不再 `unknown argument: --concurrency`），且驱动 argv/env 有 `--concurrency N` 或 `QUAY_MAX_TASK_SUBAGENTS=N`。
+- [x] AC2：worker 无显式 --cap 时并发缺省=5（`resolveConcurrency` 读到 5，⛔ 仍兜底 1 ⇒ 假）。
+- [x] AC3：派发前 Touches 互斥过滤生效——池中 2 条 Touches 重叠的任务时，worker 只派不相交的（⛔ 并发派发 Touches 重叠 ⇒ 假）；⛔ AC2 落地前必须同时落地 AC3（cap=5 无 Touches 检查会撞 serve-handlers.ts 群组）。
 
 ## Definition of Done
 
-- [ ] --cap 路径修复 + worker 并发缺省 5 + 派发前 Touches 互斥过滤 + restart 实测成功；AC1-3 全勾；land 到 develop。
+- [x] --cap 路径修复 + worker 并发缺省 5 + 派发前 Touches 互斥过滤 + restart 实测成功；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
