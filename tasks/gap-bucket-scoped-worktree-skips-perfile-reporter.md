@@ -21,13 +21,15 @@ depends_on: []
 
 **影响**：`perFile`/`ceiling`/`floor_ms` 等 per-file 字段生产全空，任何读这些字段的判据/展示都拿不到数据（不只是 test-detail 这条，是全套 per-file 指标的共同载体）。
 
+**范围扩大（manager 2026-08-23 实测，⛔ 比 perFile 更大）**：`verification-round.jsonl` 自 round 453 @ 12:54 起 **3h39min 零 suite 记录**，而期间至少 6 个 worker 跑到过 suite 阶段（有 suite log 为证，如 bucket-scoped 那条 10437 行的 AC6 断言）。⇒ 不是「perFile 字段缺失」，是**整条 round 记录都没写**——bucket-scoped worktree 执行路径的 suite 根本不写 round 记录，本缺口范围比原立案时以为的大。
+
 ## Plan
 
 1. 定位 bucket-scoped worktree 执行路径为什么不调用 per-file reporter（大概率 `full-suite-runner.ts` 某 scope 分支跳过了逐文件输出收集）。
 
 ## Acceptance Criteria
 
-- [ ] AC1：定位 bucket-scoped 路径跳过 per-file reporter 的 scope 分支，并修（或确认设计如此并文档化）；生产 round 记录里 `perFile`/`ceiling`/`floor_ms` 命中数不再恒 0。
+- [ ] AC1：定位 bucket-scoped 路径跳过 round 记录写入的 scope 分支，并修（或确认设计如此并文档化）；生产 `verification-round.jsonl` 恢复增长、`perFile`/`ceiling`/`floor_ms` 命中数不再恒 0（⛔ 整条 round 记录仍不写 ⇒ 假）。
 
 ## Definition of Done
 
