@@ -33,7 +33,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] runner 写三字段 + web 显示真实计数；AC1-2 全勾；land 到 develop。
+- [x] runner 写三字段 + web 显示真实计数；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
