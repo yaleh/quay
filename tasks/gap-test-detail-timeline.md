@@ -49,4 +49,6 @@ depends_on:
 - plugin/test/measure-trend-check.test.mjs（parsePerFileLines 起止时刻测试）
 - packages/quay/test/observation.test.mjs（perFile 起止时刻解析测试）
 - packages/quay/test/serve-handlers.test.mjs（时间线渲染测试）
+- plugin/workflows/fan-in-execute.js（__PERFILE__ 失败文件提取正则向后兼容 end_ms 后缀）
+- .claude/workflows/fan-in-execute.js（同上，两份字节一致镜像）
 - tasks/gap-test-detail-timeline.md（自身）
