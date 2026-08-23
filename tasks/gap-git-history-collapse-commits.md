@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-collapse-commits
 title: Git History task 分支默认折叠 commits（总数+跨度，展开查看）
-status: ready
+status: done
 labels:
   - gap
 parent: null
