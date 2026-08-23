@@ -36,7 +36,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 纵向时间轴 + 折叠展开 + 第三方库引入 + 原则废除记录落地；AC1-3 全勾；land 到 develop。
+- [x] 纵向时间轴 + 折叠展开 + 第三方库引入 + 原则废除记录落地；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
