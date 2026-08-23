@@ -1,7 +1,7 @@
 ---
 id: gap-test-detail-timeline
 title: Test 详情 ①——测试时间线（perFile 加结束时刻 + 甘特图）
-status: ready
+status: done
 labels:
   - gap
 parent: null
