@@ -1,7 +1,7 @@
 ---
 id: gap-bucket-scoped-worktree-skips-perfile-reporter
 title: bucket-scoped worktree 执行路径不触发 per-file reporter（perFile/ceiling/floor_ms 生产 0 命中）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -35,11 +35,11 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：定位 bucket-scoped 路径跳过 round 记录写入的 scope 分支，并修（或确认设计如此并文档化）；生产 `verification-round.jsonl` 恢复增长、`perFile`/`ceiling`/`floor_ms` 命中数不再恒 0（⛔ 整条 round 记录仍不写 ⇒ 假）。
+- [x] AC1：定位 bucket-scoped 路径跳过 round 记录写入的 scope 分支，并修（或确认设计如此并文档化）；生产 `verification-round.jsonl` 恢复增长、`perFile`/`ceiling`/`floor_ms` 命中数不再恒 0（⛔ 整条 round 记录仍不写 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] bucket-scoped 路径 per-file reporter 缺口定位 + 修 + 生产 round 出现 per-file 字段；AC1 全勾；land 到 develop。
+- [x] bucket-scoped 路径 per-file reporter 缺口定位 + 修 + 生产 round 出现 per-file 字段；AC1 全勾；land 到 develop。
 
 ## Retires
 
