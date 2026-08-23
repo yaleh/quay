@@ -35,6 +35,8 @@ depends_on: []
 
 - [x] 分支名链 `/task/<id>` + `GIT_HISTORY_ACTIVE_WINDOW` 放宽（含 master）落地；AC1-2 全勾；land 到 develop。
 
+
+> **手动介入记录（AC141-2 例外①）**：driver 误记 completed ⇒ 候选计算中永久排除 ⇒ 跨 round 4/5/6 两小时未重派 ⇒ inner 手动 re-trigger fan-in（判据：无记录的手动介入 ⇒ AC141-1 判假）。
 ## Retires
 
 - 无（渲染链接 + 过滤参数调整）
