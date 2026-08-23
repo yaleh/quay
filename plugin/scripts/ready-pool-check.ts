@@ -2275,6 +2275,44 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
   return { id, ok: true, from: "todo", to: newStatus, deliveryCritical };
 }
 
+/** True when `root` is inside a git work tree (production root = the main checkout). False when git
+ *  itself errors (unit-test temp dirs, or a repo-less root) — the commit is then a no-op, not a throw. */
+function isInsideGitWorkTree(root) {
+  try {
+    const out = execFileSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.toString().trim() === "true";
+  } catch {
+    return false;
+  }
+}
+
+/** COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a todo→ready status write must be
+ *  committed to git IMMEDIATELY — `applyPromotions` is the SINGLE write point shared by the A22 manual
+ *  path and the promotion-driver auto path, and a status write left uncommitted makes the main checkout
+ *  dirty (`git status --porcelain` non-empty) ⇒ fan-in-ff-merge.sh treats it as a dirty tree and exits 2
+ *  BEFORE the bypass check runs, blocking EVERY fan-in (3× observed; memory
+ *  uncommitted-promotion-blocks-fan-in-clean-tree). Hard rule 11: add and commit happen back-to-back with
+ *  no wait; the commit is pathspec-limited to the single task file (⛔ never a bare `git commit`, which
+ *  would sweep whatever another layer staged into the SHARED index — memory
+ *  git-commit-no-pathspec-commits-shared-index). `--no-verify` skips the pre-commit hook: a mechanical
+ *  status flip is content-neutral (the hook's doc-class + Touches checks guard authored CONTENT, and
+ *  shelling `scripts/test.sh --static-checks-doc` per promotion is slow and could fail on a doc change
+ *  another layer left in-flight). Returns true when the commit landed.
+ *  @param {string} root  repo root (tasks/<id>.md lives here)
+ *  @param {string} id    task id
+ *  @param {string} from  old status (todo)
+ *  @param {string} to    new status (ready)
+ */
+function commitTaskStatus(root, id, from, to) {
+  if (!isInsideGitWorkTree(root)) return false;
+  const rel = path.join("tasks", `${id}.md`);
+  execFileSync("git", ["-C", root, "add", "--", rel]);
+  execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", `tasks: ${id} ${from}→${to}（promotion-driver 机械晋升）`, "--", rel]);
+  return true;
+}
+
 /** HEARTBEAT MODE entry: run the same analysis as `analyzeTasks` (all options pass through) and —
  *  when promotions non-empty — land the recommended promotions on disk. Returns the full analyzeTasks
  *  result plus `should_apply` (the AC1 condition) and `applied_promotions` (the per-candidate
@@ -2303,7 +2341,12 @@ export function applyPromotions(opts) {
       const cand = candidateById.get(p.id);
       const deliveryCritical = !!(cand && cand.deliveryCritical);
       const out = setTaskStatus(opts.root, p.id, "ready", { ensureDeliveryCritical: deliveryCritical });
-      applied.push({ ...out, deliveryCritical });
+      // COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a landed status write is
+      // committed immediately so the main checkout stays clean (a dirty tree blocks every fan-in at
+      // fan-in-ff-merge.sh BEFORE the bypass check runs). `committed` is surfaced on the applied
+      // record so the commit (vs a repo-less no-op) is observable, not silent.
+      const committed = out.ok ? commitTaskStatus(opts.root, p.id, out.from, out.to) : false;
+      applied.push({ ...out, deliveryCritical, committed });
     }
   }
   return { ...result, should_apply: shouldApply, applied_promotions: applied };
