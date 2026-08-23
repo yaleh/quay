@@ -6,7 +6,8 @@
 // 在飞 = 驱动子进程数（直接量）、worker 退出码 + outcome 字段齐全（SPEC §4③）、杀 worker ⇒ 察觉并记录。
 // 阶段 3（AC117）MCP 控制面：halt 语义（停止新派发、不杀在飞，AC1）、调用方身份显式传且可核（AC2，
 // header Mcp-Caller-Id 或 tool 参数 caller，非 Mcp-Session-Id）、无身份调用 ⇒ 拒（AC3 能取假）。
-// The worker command is injectable (--worker-cmd) so the tests never spawn a real claude — they drive
+// The worker command is injectable (--worker-cmd-exact = whole replacement) so the tests never spawn a
+// real claude — they drive
 // `node -e process.exit(…)` and `sleep`, exactly the kill/timeout seams. The control plane is tested
 // over a real Streamable HTTP MCP connection (serveControlPlane on port 0 + SDK client).
 //
@@ -24,6 +25,8 @@ import {
   computeOutcome,
   appendOutcomeToFile,
   splitArgs,
+  launchArgv,
+  workerArgvForTask,
   defaultWorkerArgv,
   defaultSelectorArgv,
   defaultReadyPoolArgv,
@@ -147,20 +150,24 @@ test("computeOutcome — non-zero ⇒ failed; signal ⇒ killed; timedOut ⇒ ti
 test("resolveRun / splitArgs / defaultWorkerArgv / signalExitCode / parseTimeoutMs / resolveConcurrency", () => {
   assert.deepEqual(splitArgs("node -e process.exit(7)"), ["node", "-e", "process.exit(7)"]);
   assert.deepEqual(splitArgs("  sleep 100  "), ["sleep", "100"]);
-  assert.equal(defaultWorkerArgv("gap-x", "/r")[0], "claude");
-  assert.equal(defaultWorkerArgv("gap-x", "/r")[1], "-p");
+  const defWorker = defaultWorkerArgv("gap-x", "/r");
+  assert.equal(defWorker[0], "bash", "AC140-1: default worker routes through quay-launch.sh (not bare claude)");
+  assert.equal(defWorker[1], "/r/plugin/scripts/quay-launch.sh");
+  assert.equal(defWorker[2], "task-worker");
+  assert.equal(defWorker[3], "-p");
+  assert.match(defWorker[4], /gap-x/, "the task prompt is the argv payload");
   assert.equal(signalExitCode("SIGKILL"), 9);
   assert.equal(signalExitCode("SIGTERM"), 15);
 
   // phase-2 多任务 resolveRun（tasks 数组）。
-  const noTask = resolveRun({ tasks: [], reason: undefined, workerCmd: undefined, root: "/r", runId: undefined, nowMs: 1 });
+  const noTask = resolveRun({ tasks: [], reason: undefined, workerCmd: undefined, workerCmdExact: undefined, root: "/r", runId: undefined, nowMs: 1 });
   assert.ok(noTask.error, "explicit-mode resolveRun with no tasks ⇒ error (resident selection loop is a separate path)");
-  const ok = resolveRun({ tasks: [" gap-x ", " gap-y "], reason: "  why  ", workerCmd: "node -e process.exit(0)", root: "/r", runId: "run", nowMs: 1 });
+  const ok = resolveRun({ tasks: [" gap-x ", " gap-y "], reason: "  why  ", workerCmdExact: "node -e process.exit(0)", root: "/r", runId: "run", nowMs: 1 });
   assert.deepEqual(ok.taskIds, ["gap-x", "gap-y"]);
   assert.equal(ok.selectorReason, "why");
-  assert.deepEqual(ok.workerArgv, ["node", "-e", "process.exit(0)"]);
-  const noCmd = resolveRun({ tasks: ["gap-x"], reason: undefined, workerCmd: undefined, root: "/r", runId: undefined, nowMs: 1 });
-  assert.equal(noCmd.workerArgv, null, "no --worker-cmd ⇒ per-task default argv (claude -p)");
+  assert.deepEqual(ok.workerCmdOpts, { prefix: null, exact: "node -e process.exit(0)" });
+  const noCmd = resolveRun({ tasks: ["gap-x"], reason: undefined, workerCmd: undefined, workerCmdExact: undefined, root: "/r", runId: undefined, nowMs: 1 });
+  assert.deepEqual(noCmd.workerCmdOpts, { prefix: null, exact: null }, "no --worker-cmd ⇒ per-task default argv (quay-launch.sh task-worker)");
 
   // timeout 解析（SPEC §4④：缺省/非法 ⇒ 0 = 无超时）。
   assert.equal(parseTimeoutMs(undefined), 0);
@@ -214,7 +221,7 @@ test("stashIfDirty — clean repo ⇒ no-op; non-git dir ⇒ no-op; dirty repo �
 test("AC2 — worker exit 0 ⇒ driver exits 0 and records a completed outcome with all §4③ fields", (t) => {
   const root = makeRoot("ok");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const out = runDriver(root, ["--task", "gap-a", "--reason", "explicit", "--worker-cmd", "node -e process.exit(0)", "--json"]);
+  const out = runDriver(root, ["--task", "gap-a", "--reason", "explicit", "--worker-cmd-exact", "node -e process.exit(0)", "--json"]);
   const lines = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const spawned = lines.find((l) => l.event === "worker-spawned");
   assert.equal(spawned.in_flight_count, 1, "AC1: in-flight = the driver's own spawned child count (direct)");
@@ -237,7 +244,7 @@ test("AC2 — worker exit 7 ⇒ driver exits 7 and records a failed outcome (fai
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   let code = 0;
   try {
-    runDriver(root, ["--task", "gap-b", "--reason", "explicit", "--worker-cmd", "node -e process.exit(7)"]);
+    runDriver(root, ["--task", "gap-b", "--reason", "explicit", "--worker-cmd-exact", "node -e process.exit(7)"]);
   } catch (e) {
     code = e.status;
   }
@@ -256,7 +263,7 @@ test("AC3 — kill the worker ⇒ driver records final_state=killed + signal, do
   const pidFile = path.join(root, "worker.pid");
   const driver = spawn(process.execPath, [
     "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root,
-    "--task", "gap-z", "--reason", "kill-test", "--worker-cmd", "sleep 100", "--pid-file", pidFile,
+    "--task", "gap-z", "--reason", "kill-test", "--worker-cmd-exact", "sleep 100", "--pid-file", pidFile,
   ], { stdio: ["ignore", "pipe", "ignore"] });
 
   let workerPid = null;
@@ -287,7 +294,7 @@ test("AC2 — spawn-failed worker command ⇒ driver records spawn-failed, not s
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   let code = 0;
   try {
-    runDriver(root, ["--task", "gap-c", "--worker-cmd", "definitely-no-such-binary-xyz"]);
+    runDriver(root, ["--task", "gap-c", "--worker-cmd-exact", "definitely-no-such-binary-xyz"]);
   } catch (e) {
     code = e.status;
   }
@@ -309,7 +316,7 @@ test("AC1 — N concurrent workers; in-flight = driver's own child count (reache
   const out = runDriver(root, [
     "--task", "gap-1", "--task", "gap-2", "--task", "gap-3",
     "--concurrency", "3",
-    "--worker-cmd", "node -e setTimeout(process.exit,400)",
+    "--worker-cmd-exact", "node -e setTimeout(process.exit,400)",
     "--json",
   ]);
   const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -338,7 +345,7 @@ test("AC2 (能取假) — leave an uncommitted change ⇒ driver stashes it (git
   fs.writeFileSync(path.join(root, "a.txt"), "dirty\n");
   assert.notEqual(runGit(root, ["status", "--porcelain"]).trim(), "", "precondition: main checkout IS dirty");
 
-  runDriver(root, ["--task", "gap-s", "--worker-cmd", "node -e process.exit(0)", "--json"]);
+  runDriver(root, ["--task", "gap-s", "--worker-cmd-exact", "node -e process.exit(0)", "--json"]);
 
   // stash list 可核：驱动 stash 了（不是 discard）。
   assert.match(runGit(root, ["stash", "list"]), new RegExp(DEFAULT_STASH_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "stash entry carries the driver's message");
@@ -371,7 +378,7 @@ test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed
   const start = Date.now();
   const driver = spawn(process.execPath, [
     "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root,
-    "--task", "gap-t", "--worker-cmd", "sleep 100", "--timeout", "600", "--pid-file", pidFile,
+    "--task", "gap-t", "--worker-cmd-exact", "sleep 100", "--timeout", "600", "--pid-file", pidFile,
   ], { stdio: ["ignore", "pipe", "ignore"] });
 
   const exitCode = await new Promise((resolve) => {
@@ -495,7 +502,7 @@ test("AC1 — pre-halted control state ⇒ driver dispatches ZERO workers and re
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeControlState(root, applyHalt(defaultControlState(), "outer", true));
 
-  const out = runDriver(root, ["--task", "gap-h", "--reason", "r", "--worker-cmd", "node -e process.exit(0)", "--json"]);
+  const out = runDriver(root, ["--task", "gap-h", "--reason", "r", "--worker-cmd-exact", "node -e process.exit(0)", "--json"]);
   const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   assert.equal(events.some((e) => e.event === "worker-spawned"), false, "no worker spawned while halted");
   assert.equal(events.some((e) => e.event === "worker-skipped"), true, "the skip is recorded, not silent");
@@ -515,7 +522,7 @@ test("AC1 — halt mid-run stops NEW dispatch only; the in-flight worker complet
   const driver = spawn(process.execPath, [
     "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root,
     "--task", "gap-slow", "--task", "gap-fast", "--reason", "r", "--concurrency", "1",
-    "--worker-cmd", "sleep 2", "--pid-file", pidFile, "--json",
+    "--worker-cmd-exact", "sleep 2", "--pid-file", pidFile, "--json",
   ], { stdio: ["ignore", "pipe", "ignore"] });
 
   let buf = "";
@@ -641,11 +648,13 @@ test("AC129 pure — resourceGateCheck: exit 0 ⇒ GO; exit 1 ⇒ WAIT (fail-clo
   assert.equal(missing.go, false, "spawn failure ⇒ fail-closed WAIT");
 });
 
-test("AC129 pure — defaultSelectorArgv / defaultReadyPoolArgv are claude / node argv", () => {
+test("AC129 pure — defaultSelectorArgv / defaultReadyPoolArgv are launch / node argv", () => {
   const sel = defaultSelectorArgv(["gap-a", "gap-b"], "/r");
-  assert.equal(sel[0], "claude");
-  assert.equal(sel[1], "-p");
-  assert.match(sel[2], /gap-a, gap-b/, "candidate ids are inlined into the selector prompt");
+  assert.equal(sel[0], "bash", "AC140-1: default selector routes through quay-launch.sh (not bare claude)");
+  assert.equal(sel[1], "/r/plugin/scripts/quay-launch.sh");
+  assert.equal(sel[2], "selector");
+  assert.equal(sel[3], "-p");
+  assert.match(sel[4], /gap-a, gap-b/, "candidate ids are inlined into the selector prompt");
   const rpc = defaultReadyPoolArgv("/r", ["gap-a"], 3);
   assert.equal(rpc[0], "node");
   assert.deepEqual(rpc.slice(1, 5), ["--experimental-strip-types", "/r/plugin/scripts/ready-pool-check.ts", "--root", "/r"]);
@@ -661,7 +670,7 @@ test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the se
     "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n===0?['gap-a','gap-b']:[],pool:n===0?2:0})"),
     "--selector-cmd", "node -e console.log('gap-a\\x20blocks-the-suite')",
     "--resource-gate-cmd", "node -e process.exit(0)",
-    "--worker-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
     "--json",
   ]);
   const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -688,7 +697,7 @@ test("AC1 — resident loop does not exit after one worker; keeps dispatching wh
     "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n<=1?['gap-a','gap-b']:[],pool:n<=1?2:0})"),
     "--selector-cmd", counterNodeE(selFile, "n===0?'gap-a\\x20first-pick':n===1?'gap-b\\x20second-pick':'gap-a\\x20again'"),
     "--resource-gate-cmd", "node -e process.exit(0)",
-    "--worker-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
     "--concurrency", "2",
     "--json",
   ]);
@@ -711,7 +720,7 @@ test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero 
     "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-a'],pool:1}))",
     "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
     "--resource-gate-cmd", "node -e process.exit(1)",
-    "--worker-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
     "--json",
   ]);
   const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -733,7 +742,7 @@ test("AC3 — MCP halt mid-run stops NEW dispatch only; the in-flight worker com
     "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n===0?['gap-slow','gap-fast']:n===1?['gap-fast']:[],pool:2})"),
     "--selector-cmd", "node -e console.log('gap-slow\\x20slow-worker')",
     "--resource-gate-cmd", "node -e process.exit(0)",
-    "--worker-cmd", "sleep 2",
+    "--worker-cmd-exact", "sleep 2",
     "--concurrency", "1",
     "--pid-file", pidFile,
     "--json",
@@ -760,4 +769,73 @@ test("AC3 — MCP halt mid-run stops NEW dispatch only; the in-flight worker com
   assert.equal(records[0].final_state, "completed", "AC3: the in-flight worker was NOT killed — it completed");
   const events = buf.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   assert.equal(events.filter((e) => e.event === "worker-spawned").length, 1, "only the one in-flight worker was ever spawned");
+});
+
+// ── AC140（可配 wrapper + model + 按 role；单一真相源；覆盖语义统一）──────────────────────────────
+// 驱动的 LLM spawn 不再硬编码 `["claude","-p",prompt]`——单一构造 launchArgv 走
+// `quay-launch.sh <role> -p <prompt>`，wrapper/model/--bare 由 .claude/launch.settings.json 的
+// _launchSpec.roles 承载。取假靠 dry-run 读【启动语义】字段（launcher / --model），⛔ 不靠 argv0
+// （claude-fjdac 末行 exec claude 使 argv0 恒为 claude）。
+
+const QUAY_LAUNCH = path.resolve(__dirname, "..", "scripts", "quay-launch.sh");
+const LAUNCH_SETTINGS = path.resolve(__dirname, "..", "..", ".claude", "launch.settings.json");
+
+function dryRunLaunch(role, ...extra) {
+  return execFileSync("bash", [QUAY_LAUNCH, role, "--dry-run", ...extra], { encoding: "utf8" }).trim();
+}
+
+test("AC140-1 — single constructor: launchArgv produces bash+quay-launch.sh+<role>+-p+prompt for every role", () => {
+  assert.deepEqual(launchArgv("task-worker", "WPROMPT", "/r"), ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p", "WPROMPT"]);
+  assert.deepEqual(launchArgv("selector", "SPROMPT", "/r"), ["bash", "/r/plugin/scripts/quay-launch.sh", "selector", "-p", "SPROMPT"]);
+  assert.deepEqual(launchArgv("fix-worker", "FPROMPT", "/r"), ["bash", "/r/plugin/scripts/quay-launch.sh", "fix-worker", "-p", "FPROMPT"]);
+  // 单一真相源：default* 都经同一构造（argv[0..3] = bash + quay-launch.sh + role + -p）。
+  assert.deepEqual(defaultWorkerArgv("gap-x", "/r").slice(0, 4), ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p"]);
+  assert.deepEqual(defaultSelectorArgv(["a"], "/r").slice(0, 4), ["bash", "/r/plugin/scripts/quay-launch.sh", "selector", "-p"]);
+});
+
+test("AC140-2 — configurable: worker roles carry wrapper+model in _launchSpec.roles (falsifiable vs manager)", () => {
+  const settings = JSON.parse(fs.readFileSync(LAUNCH_SETTINGS, "utf8"));
+  const roles = settings._launchSpec.roles;
+  // 正控制：新 worker 角色照 outer/inner 抄（⛔ 不照 manager 的裸 claude + model null）。
+  for (const role of ["task-worker", "selector", "fix-worker"]) {
+    assert.equal(roles[role].launcher, "claude-fjdac", `${role}.launcher must be the wrapper (not bare claude)`);
+    assert.ok(roles[role].model, `${role}.model must be configured (not null)`);
+    assert.ok(roles[role].name && roles[role].name.startsWith("quay-") && roles[role].name !== "quay-inner",
+      `${role} needs a distinct -n name (concurrent-worker ListAgents collision)`);
+  }
+  // 负控制：manager 仍裸 claude + model null（照它抄就是错——quay-launch.sh:80 只查非空不查取值，无任何机件报错）。
+  assert.equal(roles.manager.launcher, "claude");
+  assert.equal(roles.manager.model, null);
+
+  // dry-run 实测：wrapper/model 确实出现在 spawn 命令行（launcher=claude-fjdac ⇒ wrapper 在链 ⇒ ANTHROPIC_BASE_URL 注入）。
+  const taskWorker = dryRunLaunch("task-worker", "-p", "TEST");
+  assert.match(taskWorker, /^claude-fjdac /, `task-worker launcher is the wrapper: ${taskWorker}`);
+  assert.match(taskWorker, /--model \S+/, `task-worker carries --model <m>: ${taskWorker}`);
+  assert.match(taskWorker, /-n quay-task-worker/, "task-worker has its own -n name");
+  assert.doesNotMatch(taskWorker, / --bare( |$)/, "task-worker (long chain) does NOT use --bare");
+
+  const selector = dryRunLaunch("selector", "-p", "TEST");
+  assert.match(selector, /^claude-fjdac /, `selector launcher is the wrapper: ${selector}`);
+  assert.match(selector, / --bare( |$)/, "selector (short decision) uses --bare");
+
+  // 取假对照：manager（launcher=claude，无 wrapper）⇒ 无 --model，argv0 是裸 claude（wrapper 不在链）。
+  const manager = dryRunLaunch("manager");
+  assert.match(manager, /^claude /, `manager is bare claude: ${manager}`);
+  assert.doesNotMatch(manager, /--model/, "manager has no --model (wrapper not in chain ⇒ no ANTHROPIC_BASE_URL)");
+});
+
+test("AC140-3 — override semantics unified: --worker-cmd is prefix, --worker-cmd-exact is whole-replacement", () => {
+  // exact（整体替换，测试专用）：prompt 不进 argv。
+  assert.deepEqual(workerArgvForTask("gap-x", "/r", { prefix: null, exact: "node -e capture" }),
+    ["node", "-e", "capture"], "--worker-cmd-exact replaces the whole command (no prompt)");
+
+  // prefix（前缀 + prompt）：prompt 作为末参数追加（wrapper/测试前缀可用）。
+  const prefix = workerArgvForTask("gap-x", "/r", { prefix: "claude-fjdac --model deepseek-v4-pro", exact: null });
+  assert.deepEqual(prefix.slice(0, 3), ["claude-fjdac", "--model", "deepseek-v4-pro"]);
+  assert.match(prefix[prefix.length - 1], /gap-x/,
+    "prefix semantics: the task prompt is appended as the last arg (exact would drop it ⇒ falsifiable)");
+
+  // 缺省 ⇒ launchArgv("task-worker", prompt)。
+  assert.deepEqual(workerArgvForTask("gap-x", "/r").slice(0, 4),
+    ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p"]);
 });

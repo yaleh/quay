@@ -8,7 +8,7 @@
 // promoted — proving promotion is driven by the driver, not some outer tick.
 // AC131 (falsifiable): a qualified todo (four artifacts complete + empty deps) is promoted to ready
 // within one round via the mechanical A22 --apply path, with ZERO LLM — the round's outcome record
-// carries llm_invoked=false (derived from the spawned argv, not hardcoded).
+// carries promote_path_llm_invoked=false (derived from the spawned argv, not hardcoded).
 // AC132 (falsifiable): an ineligible todo spawns a short-lived `claude -p` fix worker whose input is
 // the task id + the gate's STRUCTURED missing list (A24 三可修/五不可修), never a prose directive.
 // AC2: a DoD<40 todo ⇒ the fix worker's prompt carries the structured identifier (fourArtifacts=false
@@ -271,7 +271,7 @@ test("runPromotionRound — fail-closed: non-zero exit / unparseable output ⇒ 
 });
 
 test("computeRoundRecord — action ∈ promote|fix|none|error derived from the round", () => {
-  const base = { round: 1, runId: "pm-1", pid: 42, at: "2026-08-22T00:00:00.000Z", pool: 1, shouldApply: true, applied: [], llmInvoked: false, fixes: [] };
+  const base = { round: 1, runId: "pm-1", pid: 42, at: "2026-08-22T00:00:00.000Z", pool: 1, shouldApply: true, applied: [], promotePathLlmInvoked: false, fixes: [] };
   assert.equal(computeRoundRecord({ ...base, promotedIds: ["gap-a"], error: null }).action, "promote");
   assert.equal(computeRoundRecord({ ...base, promotedIds: [], error: null }).action, "none");
   assert.equal(computeRoundRecord({ ...base, promotedIds: [], error: "boom" }).action, "error");
@@ -283,7 +283,7 @@ test("computeRoundRecord — action ∈ promote|fix|none|error derived from the 
   const rec = computeRoundRecord({ ...base, promotedIds: ["gap-a"], error: null });
   assert.equal(rec.run_id, "pm-1");
   assert.equal(rec.pid, 42);
-  assert.equal(rec.llm_invoked, false, "AC131: round record carries llm_invoked=false on the mechanical promotion path");
+  assert.equal(rec.promote_path_llm_invoked, false, "AC131: round record carries promote_path_llm_invoked=false on the mechanical promotion path");
   assert.deepEqual(rec.fixes, [], "AC132: no fix worker ⇒ fixes empty");
   assert.ok(rec.ts && rec.round, "ts/round present");
 });
@@ -292,7 +292,7 @@ test("appendRoundRecord — pure append, never truncates (two lines survive)", (
   const root = makeRoot("append");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const file = path.join(root, ROUND_LOG_REL);
-  const rec = (r) => computeRoundRecord({ round: r, runId: "pm-1", pid: 1, at: "t", pool: 0, shouldApply: false, promotedIds: [], applied: [], error: null, llmInvoked: false, fixes: [] });
+  const rec = (r) => computeRoundRecord({ round: r, runId: "pm-1", pid: 1, at: "t", pool: 0, shouldApply: false, promotedIds: [], applied: [], error: null, promotePathLlmInvoked: false, fixes: [] });
   appendRoundRecord(file, rec(1));
   appendRoundRecord(file, rec(2));
   assert.equal(readRoundLines(root).length, 2, "two appended lines");
@@ -374,7 +374,7 @@ test("AC2 — stop the driver (SIGTERM) ⇒ newly-eligible todo is not promoted;
   assert.equal(readStatus(root, "gap-eligible-2"), "ready", "guard: gap-eligible-2 was eligible all along — only the stopped driver held it back");
 });
 
-// ── AC131 (falsifiable): qualified todo promoted via A22 --apply, zero LLM, llm_invoked=false ─────
+// ── AC131 (falsifiable): qualified todo promoted via A22 --apply, zero LLM, promote_path_llm_invoked=false ─────
 
 test("isLlmInvocation — falsifiable SET-based derivation (AC140-4 AC1 + AC2；⛔ not a claude literal)", () => {
   assert.equal(isLlmInvocation(["claude", "-p", "fix task X"]), true, "claude -p is an LLM invocation (default set)");
@@ -387,7 +387,7 @@ test("isLlmInvocation — falsifiable SET-based derivation (AC140-4 AC1 + AC2；
   assert.equal(isLlmInvocation(["claude-fjdac", "-p", "fix task X"]), false, "取假对照: claude-fjdac NOT in the default set ⇒ false (the SET decides, not the literal)");
 });
 
-test("AC131 AC1 — the promotion path spawns no LLM: default argv mechanical + round llmInvoked=false", (t) => {
+test("AC131 AC1 — the promotion path spawns no LLM: default argv mechanical + round promotePathLlmInvoked=false", (t) => {
   const root = makeRoot("ac131-ac1");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -396,14 +396,14 @@ test("AC131 AC1 — the promotion path spawns no LLM: default argv mechanical + 
   assert.equal(argv[0], "node");
   assert.equal(isLlmInvocation(argv), false, "AC131: default promotion argv is not an LLM invocation");
 
-  // A mechanical round reports llmInvoked=false — and isLlmInvocation is falsifiable (claude ⇒ true),
+  // A mechanical round reports promotePathLlmInvoked=false — and isLlmInvocation is falsifiable (claude ⇒ true),
   // so this is a DERIVED measurement of the spawned argv, not a hardcoded false (hard rule 4).
   const r = runPromotionRound(root, ["node", "-e", "console.log(JSON.stringify({pool:1,should_apply:true,promotions:[{id:'gap-x'}],applied_promotions:[{id:'gap-x',ok:true,from:'todo',to:'ready',deliveryCritical:false}]}))"], 5);
   assert.equal(r.ok, true);
-  assert.equal(r.llmInvoked, false, "AC131 AC1: the mechanical promotion round reports llmInvoked=false");
+  assert.equal(r.promotePathLlmInvoked, false, "AC131 AC1: the mechanical promotion round reports promotePathLlmInvoked=false");
 });
 
-test("AC131 AC2 — four-artifact + empty-deps todo promoted to ready in one round, outcome llm_invoked=false", (t) => {
+test("AC131 AC2 — four-artifact + empty-deps todo promoted to ready in one round, outcome promote_path_llm_invoked=false", (t) => {
   const root = makeRoot("ac131-ac2");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // four artifacts (Proposal/Contract/AC/DoD) + Touches self-touch, frontmatter has no depends_on ⇒ deps empty.
@@ -419,7 +419,7 @@ test("AC131 AC2 — four-artifact + empty-deps todo promoted to ready in one rou
   const rec = records[0];
   assert.equal(rec.action, "promote");
   assert.ok(rec.promoted_ids.includes("gap-ac131-eligible"), "the promoted id is recorded in the outcome");
-  assert.equal(rec.llm_invoked, false, "AC131 AC2: the outcome record carries llm_invoked=false (the falsifiable half)");
+  assert.equal(rec.promote_path_llm_invoked, false, "AC131 AC2: the outcome record carries promote_path_llm_invoked=false (the falsifiable half)");
 });
 
 // ── AC132 (falsifiable): ineligible todo → short-lived fix worker with the gate's STRUCTURED input ──
@@ -466,14 +466,13 @@ test("buildFixWorkerPrompt — task id + structured missing list, ⛔ not a pros
   assert.ok(p.includes("structured_missing:"), "the prompt names the structured list (not 'go look what's wrong')");
 });
 
-test("buildFixWorkerArgv — default claude -p; override prefix appends the prompt as the last arg", () => {
-  const def = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"]);
-  assert.equal(def[0], "claude");
-  assert.equal(def[1], "-p");
-  assert.ok(def[2].includes("fourArtifacts=false missing=[dod]"), "the prompt is the argv payload");
-  assert.equal(isLlmInvocation(def), true, "the default fix worker IS an LLM invocation (claude -p)");
+test("buildFixWorkerArgv — default quay-launch.sh fix-worker; override prefix appends the prompt as the last arg", () => {
+  const def = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], "/r");
+  assert.deepEqual(def.slice(0, 4), ["bash", "/r/plugin/scripts/quay-launch.sh", "fix-worker", "-p"],
+    "AC140-1: fix worker routes through quay-launch.sh (not bare claude -p)");
+  assert.ok(def[4].includes("fourArtifacts=false missing=[dod]"), "the prompt is the argv payload");
 
-  const over = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], "node -e capture");
+  const over = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], "/r", "node -e capture");
   assert.deepEqual(over.slice(0, 3), ["node", "-e", "capture"]);
   assert.ok(over[over.length - 1].includes("fourArtifacts=false missing=[dod]"), "override keeps the prompt as the last arg");
 });
@@ -639,14 +638,14 @@ test("AC133 MAX_FIX_RETRIES_DEFAULT — 与 fan-in 侧 attempt>=3 同值，非�
 
 test("computeReverifyOutcome — 闸的新判定归类：nowEligible / stillIneligible / neither（纯函数）", () => {
   // gate now says eligible (promotions contains the id) ⇒ fix took
-  const eligible = { ok: true, error: null, pool: 1, shouldApply: true, promotedIds: ["gap-a"], applied: [], llmInvoked: false, fixDecisions: [] };
+  const eligible = { ok: true, error: null, pool: 1, shouldApply: true, promotedIds: ["gap-a"], applied: [], promotePathLlmInvoked: false, fixDecisions: [] };
   const r1 = computeReverifyOutcome(["gap-a", "gap-b"], eligible);
   assert.deepEqual(r1.nowEligibleIds, ["gap-a"], "闸判合格 ⇒ nowEligible");
   assert.deepEqual(r1.stillIneligibleIds, []);
 
   // gate still says ineligible (fixDecisions contains eligible=false) ⇒ fix did NOT take
   const stillBad = {
-    ok: true, error: null, pool: 1, shouldApply: false, promotedIds: [], applied: [], llmInvoked: false,
+    ok: true, error: null, pool: 1, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked: false,
     fixDecisions: [
       { id: "gap-a", fixable: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], prompt: "p" },
     ],
@@ -656,7 +655,7 @@ test("computeReverifyOutcome — 闸的新判定归类：nowEligible / stillInel
   assert.deepEqual(r2.stillIneligibleIds, ["gap-a"], "闸仍判不合格 ⇒ stillIneligible（⛔ 不信 worker 自述「已修好」）");
 
   // neither (task left the todo pool) ⇒ not counted either way
-  const gone = { ok: true, error: null, pool: 0, shouldApply: false, promotedIds: [], applied: [], llmInvoked: false, fixDecisions: [] };
+  const gone = { ok: true, error: null, pool: 0, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked: false, fixDecisions: [] };
   const r3 = computeReverifyOutcome(["gap-z"], gone);
   assert.deepEqual(r3, { nowEligibleIds: [], stillIneligibleIds: [] }, "task vanished from the pool ⇒ neither");
 });

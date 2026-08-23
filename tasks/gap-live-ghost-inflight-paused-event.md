@@ -40,6 +40,7 @@ depends_on: []
 ## Touches
 
 - packages/quay/src/observation.ts（readLive 交叉校验/收尾事件消费）
+- packages/quay/test/observation.test.mjs（+交叉校验测试）
 - tasks/gap-live-ghost-inflight-paused-event.md（自身）
 
 > **注意**：写收尾事件的落点若在 inner 侧 fan-in（worktree 释放处），Touches 随实现增补。

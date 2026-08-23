@@ -56,7 +56,7 @@ if [ -z "$SETTINGS_FILE" ]; then
 fi
 
 if [[ -z "$ROLE" ]]; then
-  echo "ERROR: role required (manager|outer|inner) — see _launchSpec.roles in ${SETTINGS_FILE}" >&2
+  echo "ERROR: role required — see _launchSpec.roles in ${SETTINGS_FILE}" >&2
   exit 1
 fi
 if [[ ! -f "$SETTINGS_FILE" ]]; then
@@ -76,6 +76,9 @@ EXCLUDE_DYNAMIC="$(jq -r '._launchSpec.excludeDynamicSystemPromptSections // fal
 # 官方环境变量 CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false 由 env 块承载；两条路线都 REQUIRED）。
 PROMPT_SUGGESTIONS="$(jq -r '._launchSpec.promptSuggestions' "$SETTINGS_FILE")"
 ROLE_ENV="$(jq -c --arg r "$ROLE" '._launchSpec.roles[$r].env // {}' "$SETTINGS_FILE")"
+# 每角色 bare（AC140-2 按 role 可配）：_launchSpec.roles[$r].bare === true ⇒ 追加 --bare（一次性验证会话）。
+# task-worker（长任务链）设 bare=false（或缺失 = 不追加）；selector/fix-worker（短命决策/编辑）设 true。
+ROLE_BARE="$(jq -r --arg r "$ROLE" '._launchSpec.roles[$r].bare // false' "$SETTINGS_FILE")"
 
 if [[ -z "$LAUNCHER" || -z "$NAME" ]]; then
   echo "ERROR: role '${ROLE}' not defined in ${SETTINGS_FILE} (_launchSpec.roles)" >&2
@@ -108,7 +111,7 @@ fi
 if [[ -n "$MODEL" && "$MODEL" != "null" ]]; then
   CMD+=( "--model" "$MODEL" )
 fi
-if [[ "$BARE" == "1" ]]; then
+if [[ "$BARE" == "1" || "$ROLE_BARE" == "true" ]]; then
   CMD+=( "--bare" )
 fi
 CMD+=( "-n" "$NAME" )
