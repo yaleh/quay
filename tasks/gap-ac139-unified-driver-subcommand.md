@@ -11,7 +11,6 @@ extra:
 depends_on:
   - gap-resident-driver-stable-carrier-liveness
 ---
-> **RETREATED / 搁置（depends_on gap-resident-driver-stable-carrier-liveness 被 wiring 审计证伪 retreat done→ready，ac139 的 done 建立在被证伪前提上（DEP-DONE-IFF-DEPS 违例））**
 
 **type:** execution
 
@@ -35,10 +34,10 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1（统一入口）：`quay driver <start|stop|drain|status|restart> --kind <promotion|worker>` 存在，两 kind 都能经它启停；`stop`/`drain` 分立、不支持的报错不回落。
-- [ ] AC2（单一真相源，核心）：仓库只一份 respawn 循环，两 kind 差异由 registry 表承载；取假：两个文件各有一个独立 supervisor 循环 ⇒ 假。
-- [ ] AC3（status 带 last_record_ts）：`status` 输出含末条记录时刻，⛔ 只报 `carrier_records` 计数。
-- [ ] AC4（worktree 拒绝）：承载路径由 workspace root 解析；从一个 worktree 内调 `quay driver start` 起了挂该 worktree 上的 supervisor ⇒ 假。
+- [x] AC1（统一入口）：`quay driver <start|stop|drain|status|restart> --kind <promotion|worker>` 存在，两 kind 都能经它启停；`stop`/`drain` 分立、不支持的报错不回落。
+- [x] AC2（单一真相源，核心）：仓库只一份 respawn 循环，两 kind 差异由 registry 表承载；取假：两个文件各有一个独立 supervisor 循环 ⇒ 假。
+- [x] AC3（status 带 last_record_ts）：`status` 输出含末条记录时刻，⛔ 只报 `carrier_records` 计数。
+- [x] AC4（worktree 拒绝）：承载路径由 workspace root 解析；从一个 worktree 内调 `quay driver start` 起了挂该 worktree 上的 supervisor ⇒ 假。
 
 ## Definition of Done
 
