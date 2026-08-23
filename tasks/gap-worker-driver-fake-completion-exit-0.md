@@ -43,12 +43,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：`worker-outcome` 的 `final_state=completed` 与该任务实际落地状态一致（`status=done ∧ 无残留 worktree`）；不一致 ⇒ 假。⛔ 判据不写在 `exit_code` 上（那正是失真的量）。
-- [ ] AC2：修复落地后 100% `completed` 记录真 land（窗口只计落地后），且**存量被误记 completed 的任务能被重新看见/重派**（否则修好后这 3 条仍是僵尸）；出现一条「completed 但 status≠done」⇒ 假。
+- [x] AC1：`worker-outcome` 的 `final_state=completed` 与该任务实际落地状态一致（`status=done ∧ 无残留 worktree`）；不一致 ⇒ 假。⛔ 判据不写在 `exit_code` 上（那正是失真的量）。
+- [ ] AC2：修复落地后 100% `completed` 记录真 land（窗口只计落地后），且**存量被误记 completed 的任务能被重新看见/重派**（否则修好后这 3 条仍是僵尸）；出现一条「completed 但 status≠done」⇒ 假。（待外部）
 
 ## Definition of Done
 
-- [ ] 判据改读落地 + worker-driver 写前核落地 + 生产验证 100% 真 land；AC1-2 全勾；land 到 develop。
+- [ ] 判据改读落地 + worker-driver 写前核落地 + 生产验证 100% 真 land；AC1-2 全勾；land 到 develop。（待外部）
 
 ## Retires
 

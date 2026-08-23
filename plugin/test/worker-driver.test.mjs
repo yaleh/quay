@@ -41,6 +41,10 @@ import {
   parseTimeoutMs,
   stashIfDirty,
   signalExitCode,
+  readTaskStatus,
+  worktreePresentForTask,
+  computeLandingState,
+  EXITED_NOT_LANDED_EXIT,
   WORKER_OUTCOME_REL,
   WORKER_ROUND_REL,
   FINAL_STATES,
@@ -108,12 +112,22 @@ function readRoundLines(root) {
   return fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
 }
 
+// A real task file committed with a given frontmatter status. Used to make an exit-0 worker "land"
+// (status=done + no leftover worktree) under the real landing check — the git repo IS the seam.
+function writeTaskFile(root, taskId, status = "done") {
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(root, "tasks", `${taskId}.md`), `---\nid: ${taskId}\nstatus: ${status}\n---\n\n## Proposal\n\nbody\n`);
+  runGit(root, ["add", `tasks/${taskId}.md`]);
+  runGit(root, ["commit", "-q", "-m", `task ${taskId} ${status}`]);
+}
+
 // ── pure functions ─────────────────────────────────────────────────────────────────────────────────
 
 test("computeOutcome — SPEC §4③ field completeness + phase-2 timed_out flag", () => {
   const o = computeOutcome({
     task: "gap-x", selectorReason: "why", exitCode: 0, signal: null,
     startedAtMs: 1000, endedAtMs: 2500, workerPid: 42, runId: "fm-r",
+    landed: true,
   });
   // SPEC §4③: {task, selector 理由, worker exit code, 墙钟, 终态, 失败原因}.
   assert.equal(o.task, "gap-x");
@@ -131,6 +145,70 @@ test("computeOutcome — SPEC §4③ field completeness + phase-2 timed_out flag
   }
   assert.ok(FINAL_STATES.includes(o.final_state));
   assert.ok(FINAL_STATES.includes("timed-out"), "phase-2 added the timed-out terminal state");
+});
+
+test("computeOutcome — exit 0 + landed=true ⇒ completed; landed=false ⇒ exited-not-landed; landed=null ⇒ fail-closed (gap-worker-driver-fake-completion-exit-0)", () => {
+  assert.ok(FINAL_STATES.includes("exited-not-landed"), "exited-not-landed is a terminal state (hard rule 3b independent value)");
+
+  const landed = computeOutcome({ task: "g", selectorReason: "r", exitCode: 0, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: 1, runId: "x", landed: true });
+  assert.equal(landed.final_state, "completed", "landed=true ⇒ completed");
+  assert.equal(landed.failure_reason, null);
+
+  const notLanded = computeOutcome({ task: "g", selectorReason: "r", exitCode: 0, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: 1, runId: "x", landed: false });
+  assert.equal(notLanded.final_state, "exited-not-landed", "landed=false ⇒ exited-not-landed (exit 0 ≠ 落地)");
+  assert.match(notLanded.failure_reason, /did not land/);
+
+  const notVerified = computeOutcome({ task: "g", selectorReason: "r", exitCode: 0, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: 1, runId: "x" });
+  assert.equal(notVerified.final_state, "exited-not-landed", "landed omitted/unknown ⇒ fail-closed exited-not-landed (读不懂 ≠ completed)");
+  assert.match(notVerified.failure_reason, /not verified/);
+
+  const detailed = computeOutcome({ task: "g", selectorReason: "r", exitCode: 0, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: 1, runId: "x", landed: false, landReason: "status=ready (not done)" });
+  assert.equal(detailed.final_state, "exited-not-landed");
+  assert.equal(detailed.failure_reason, "status=ready (not done)", "landReason is threaded into failure_reason");
+
+  // 终态分支优先于 landed：exit 非零即使 landed=true 仍是 failed（landed 只覆盖 exit 0 路径）。
+  const failed = computeOutcome({ task: "g", selectorReason: "r", exitCode: 7, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: 1, runId: "x", landed: true });
+  assert.equal(failed.final_state, "failed", "non-zero exit wins over landed");
+});
+
+test("computeLandingState — landed = status=done ∧ no leftover worktree; read failures fail-closed to not-landed", (t) => {
+  const root = makeGitRoot("land");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // 无任务文件 ⇒ status null ⇒ not landed。
+  assert.equal(readTaskStatus(root, "gap-x"), null);
+  const missing = computeLandingState(root, "gap-x");
+  assert.equal(missing.landed, false, "missing task file ⇒ not landed");
+  assert.equal(missing.worktreePresent, false, "no task worktree in a fresh repo");
+
+  // status=done + 无 worktree ⇒ landed。
+  writeTaskFile(root, "gap-x", "done");
+  assert.equal(readTaskStatus(root, "gap-x"), "done");
+  const landed = computeLandingState(root, "gap-x");
+  assert.equal(landed.landed, true, "status=done + no worktree ⇒ landed");
+  assert.match(landed.reason, /landed/);
+
+  // status=ready ⇒ not landed（即使无 worktree）。
+  writeTaskFile(root, "gap-y", "ready");
+  const ready = computeLandingState(root, "gap-y");
+  assert.equal(ready.landed, false, "status=ready ⇒ not landed");
+  assert.match(ready.reason, /status=ready/);
+
+  // status=done + 残留 worktree ⇒ not landed。
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-x", wtPath]);
+  assert.equal(worktreePresentForTask(root, "gap-x"), true, "a real task/<id> worktree is detected");
+  const leftover = computeLandingState(root, "gap-x");
+  assert.equal(leftover.landed, false, "status=done + leftover worktree ⇒ not landed");
+  assert.match(leftover.reason, /leftover worktree/);
+  runGit(root, ["worktree", "remove", "--force", wtPath]);
+
+  // 非 git 仓库 ⇒ worktree 读不懂（null）⇒ fail-closed not landed（硬规则 3b）。
+  const nonGit = makeRoot("land-nogit");
+  const ng = computeLandingState(nonGit, "gap-x");
+  assert.equal(ng.worktreePresent, null, "non-git root ⇒ worktree state unreadable (null, not false)");
+  assert.equal(ng.landed, false, "unreadable worktree state ⇒ fail-closed not landed");
+  fs.rmSync(nonGit, { recursive: true, force: true });
 });
 
 test("computeOutcome — non-zero ⇒ failed; signal ⇒ killed; timedOut ⇒ timed-out (AC3 终态/失败原因)", () => {
@@ -227,8 +305,9 @@ test("stashIfDirty — clean repo ⇒ no-op; non-git dir ⇒ no-op; dirty repo �
 // ── AC2 (阶段 1): end-to-end worker exit code + outcome 落盘 ────────────────────────────────────────
 
 test("AC2 — worker exit 0 ⇒ driver exits 0 and records a completed outcome with all §4③ fields", (t) => {
-  const root = makeRoot("ok");
+  const root = makeGitRoot("ok");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-a", "done");
   const out = runDriver(root, ["--task", "gap-a", "--reason", "explicit", "--worker-cmd-exact", "node -e process.exit(0)", "--json"]);
   const lines = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const spawned = lines.find((l) => l.event === "worker-spawned");
@@ -312,6 +391,47 @@ test("AC2 — spawn-failed worker command ⇒ driver records spawn-failed, not s
   assert.ok(records[0].failure_reason, "spawn failure reason recorded");
 });
 
+// ── AC1 (gap-worker-driver-fake-completion-exit-0): exit 0 ≠ 落地 ──────────────────────────────
+// worker 进程 exit 0 只说明「进程正常退出」，⛔ 不说明「任务落地」。驱动写终态前读任务侧直接量
+// （status=done ∧ 无残留 worktree）；没落地 ⇒ final_state=exited-not-landed + 驱动非零退出。
+
+test("AC1 — worker exit 0 but status=ready (not done) ⇒ exited-not-landed + driver exits non-zero", (t) => {
+  const root = makeGitRoot("notland");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-nl", "ready");
+  let code = 0;
+  try {
+    runDriver(root, ["--task", "gap-nl", "--worker-cmd-exact", "node -e process.exit(0)"]);
+  } catch (e) {
+    code = e.status;
+  }
+  assert.equal(code, EXITED_NOT_LANDED_EXIT, "exited-not-landed ⇒ driver exit non-zero (3), not 0");
+  const records = readOutcomeLines(root);
+  assert.equal(records[0].final_state, "exited-not-landed", "exit 0 but status≠done ⇒ exited-not-landed (⛔ not completed)");
+  assert.match(records[0].failure_reason, /status=ready/);
+});
+
+test("AC1 — status=done but leftover worktree ⇒ exited-not-landed (leftover worktree blocks completed)", (t) => {
+  const root = makeGitRoot("leftover");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-wt", "done");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-wt", wtPath]);
+  let code = 0;
+  try {
+    runDriver(root, ["--task", "gap-wt", "--worker-cmd-exact", "node -e process.exit(0)"]);
+  } catch (e) {
+    code = e.status;
+  }
+  assert.equal(code, EXITED_NOT_LANDED_EXIT, "leftover worktree ⇒ exited-not-landed ⇒ driver exit non-zero");
+  const records = readOutcomeLines(root);
+  assert.equal(records[0].final_state, "exited-not-landed", "status=done but leftover worktree ⇒ exited-not-landed");
+  assert.match(records[0].failure_reason, /leftover worktree/);
+});
+
 // ── AC1 (阶段 2): N 并发 + 主检出恒空 ────────────────────────────────────────────────────────────────
 
 test("AC1 — N concurrent workers; in-flight = driver's own child count (reaches N); main checkout stays clean", (t) => {
@@ -320,6 +440,9 @@ test("AC1 — N concurrent workers; in-flight = driver's own child count (reache
   fs.writeFileSync(path.join(root, "keep.txt"), "x\n");
   runGit(root, ["add", "keep.txt"]);
   runGit(root, ["commit", "-q", "-m", "init"]);
+  writeTaskFile(root, "gap-1", "done");
+  writeTaskFile(root, "gap-2", "done");
+  writeTaskFile(root, "gap-3", "done");
 
   const out = runDriver(root, [
     "--task", "gap-1", "--task", "gap-2", "--task", "gap-3",
@@ -349,6 +472,7 @@ test("AC2 (能取假) — leave an uncommitted change ⇒ driver stashes it (git
   fs.writeFileSync(path.join(root, "a.txt"), "clean\n");
   runGit(root, ["add", "a.txt"]);
   runGit(root, ["commit", "-q", "-m", "init"]);
+  writeTaskFile(root, "gap-s", "done");
   // leave an uncommitted tracked change
   fs.writeFileSync(path.join(root, "a.txt"), "dirty\n");
   assert.notEqual(runGit(root, ["status", "--porcelain"]).trim(), "", "precondition: main checkout IS dirty");
@@ -522,8 +646,10 @@ test("AC1 — pre-halted control state ⇒ driver dispatches ZERO workers and re
 });
 
 test("AC1 — halt mid-run stops NEW dispatch only; the in-flight worker completes (never killed)", async (t) => {
-  const root = makeRoot("halt-mid");
+  const root = makeGitRoot("halt-mid");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-slow", "done");
+  writeTaskFile(root, "gap-fast", "done");
   writeControlState(root, defaultControlState());
 
   const pidFile = path.join(root, "w.pid");
@@ -688,8 +814,9 @@ test("AC129 pure — defaultSelectorArgv / defaultReadyPoolArgv are launch / nod
 });
 
 test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the selector's real reason (not 'explicit --task selection')", (t) => {
-  const root = makeRoot("ac2");
+  const root = makeGitRoot("ac2");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-a", "done");
   const rpcFile = path.join(root, "rpc.cnt");
   const out = runDriver(root, [
     "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n===0?['gap-a','gap-b']:[],pool:n===0?2:0})"),
@@ -712,8 +839,10 @@ test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the se
 });
 
 test("AC1 — resident loop does not exit after one worker; keeps dispatching while pool non-empty (in-memory in-flight subtraction)", (t) => {
-  const root = makeRoot("ac1");
+  const root = makeGitRoot("ac1");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-a", "done");
+  writeTaskFile(root, "gap-b", "done");
   const rpcFile = path.join(root, "rpc.cnt");
   const selFile = path.join(root, "sel.cnt");
   // ready-pool returns BOTH candidates on calls 0 and 1 (it does NOT know gap-a went in-flight);
@@ -757,8 +886,10 @@ test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero 
 });
 
 test("AC3 — MCP halt mid-run stops NEW dispatch only; the in-flight worker completes (never killed)", async (t) => {
-  const root = makeRoot("ac3-halt");
+  const root = makeGitRoot("ac3-halt");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-slow", "done");
+  writeTaskFile(root, "gap-fast", "done");
   writeControlState(root, defaultControlState());
   const rpcFile = path.join(root, "rpc.cnt");
   const pidFile = path.join(root, "w.pid");

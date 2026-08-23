@@ -114,7 +114,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, readFrontmatter } from "./gate-script-base.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -124,9 +124,13 @@ export const WORKER_OUTCOME_REL = ".quay/worker-outcome.jsonl";
 /** round 记录（无条件心跳）的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
 
-/** 终态枚举：completed（退出码 0）/ failed（非零退出）/ killed（被信号杀）/ timed-out（超时 SIGTERM）/
- *  spawn-failed（起不来）。 */
-export const FINAL_STATES = ["completed", "failed", "killed", "timed-out", "spawn-failed", "not-dispatched"] as const;
+/** 终态枚举：completed（退出码 0 且落地）/ exited-not-landed（退出码 0 但没落地）/ failed（非零退出）/
+ *  killed（被信号杀）/ timed-out（超时 SIGTERM）/ spawn-failed（起不来）/ not-dispatched（halt 未派）。 */
+export const FINAL_STATES = ["completed", "exited-not-landed", "failed", "killed", "timed-out", "spawn-failed", "not-dispatched"] as const;
+
+/** 驱动对 exited-not-landed 的退出码（gap-worker-driver-fake-completion-exit-0：exit 0 ≠ 落地，
+ *  区别于 spawn-failed=2 / killed=128+sig / timed-out=128+SIGTERM=143 / failed=worker 码）。 */
+export const EXITED_NOT_LANDED_EXIT = 3;
 
 /** 并发上限的定义点（concurrency-literal-check 的唯一定义点旋钮①，人 2026-08-13）。缺省并发读它。 */
 export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
@@ -152,7 +156,7 @@ export const CONTROL_HEADER_NAME = "Mcp-Caller-Id";
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
 
 /**
- * 一条结构化 outcome 记录（SPEC §4③ 字段齐全 + 直接量 + 超时标记）。
+ * 一条结构化 outcome 记录（SPEC §4③ 字段齐全 + 直接量 + 超时标记 + 落地判定）。
  * @returns {object} { ts, task, selector_reason, exit_code, signal, wall_clock_ms, final_state,
  *   failure_reason, started_at, ended_at, worker_pid, run_id, in_flight_count, timed_out }
  */
@@ -168,6 +172,8 @@ export function computeOutcome({
   spawnError = null,
   inFlightCount = 1,
   timedOut = false,
+  landed = null,
+  landReason = null,
 }: {
   task: string;
   selectorReason: string;
@@ -180,6 +186,8 @@ export function computeOutcome({
   spawnError?: string | null;
   inFlightCount?: number;
   timedOut?: boolean;
+  landed?: boolean | null;
+  landReason?: string | null;
 }) {
   // AC3（能取假，超时路径）：timedOut ⇒ final_state=timed-out（区别于外部 kill 的 killed）。
   //   被信号杀（非超时）⇒ final_state=killed + signal 落盘，⛔ 静默丢任务。
@@ -201,6 +209,17 @@ export function computeOutcome({
   } else if (exitCode !== 0) {
     finalState = "failed";
     failureReason = `worker exited with code ${exitCode}`;
+  } else if (landed !== true) {
+    // gap-worker-driver-fake-completion-exit-0：exit 0 只是「进程正常退出」，⛔ 不是「任务落地」。
+    //   completed 必须与 status=done ∧ 无残留 worktree 一致（AC1 判据不写在 exit_code 上）。
+    //   landed=false（确认没落地）与 landed=null（读不懂，fail-closed 朝未落地）都不等于完成——
+    //   两者共用独立取值 exited-not-landed（硬规则 3b：跑完没落地 ≠ 完成，⛔ 不伪造成 completed）。
+    finalState = "exited-not-landed";
+    failureReason =
+      landReason ??
+      (landed === false
+        ? "worker exited 0 but task did not land (status≠done or leftover worktree)"
+        : "worker exited 0 but landing not verified (task status / worktree read failed)");
   }
   return {
     ts: new Date(endedAtMs).toISOString(),
@@ -218,6 +237,64 @@ export function computeOutcome({
     in_flight_count: inFlightCount,
     timed_out: timedOut,
   };
+}
+
+// ── 落地判定（gap-worker-driver-fake-completion-exit-0）──────────────────────────────────────────
+// exit_code=0 只是「进程正常退出」，⛔ 不是「任务落地」。写 final_state=completed 前必须读一次任务侧
+// 直接量：status=done（任务文件 frontmatter）∧ 无残留 worktree（`git worktree list` 无 task/<id> 分支）。
+// 共同纪律（同族 gap-fix-worker-edit-exit-4）：驱动写任何终态之前，必须读任务侧的直接量。
+
+/** 读任务文件 status frontmatter（`<root>/tasks/<id>.md`）。缺失/读失败 ⇒ null。 */
+export function readTaskStatus(root: string, taskId: string): string | null {
+  try {
+    const fm = readFrontmatter(path.join(root, "tasks", `${taskId}.md`));
+    return fm?.status ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 转义正则元字符（task id 进 `new RegExp` 前）。 */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** 是否存在本任务残留 worktree（`git worktree list --porcelain` 里的 `branch refs/heads/task/<id>`）。
+ *  fan-in 成功后 `git worktree remove` + `git branch -d task/<id>` 把该分支删掉 ⇒ 无该行 = 无残留。
+ *  读失败（非 git 仓库 / git 错误）⇒ null（硬规则 3b：读不懂 ≠ 无残留）。 */
+export function worktreePresentForTask(root: string, taskId: string): boolean | null {
+  const r = spawnSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8" });
+  if (r.status !== 0 || r.error) return null;
+  const re = new RegExp(`^branch refs/heads/task/${escapeRegExp(taskId)}$`, "m");
+  return re.test(String(r.stdout ?? ""));
+}
+
+/** 落地判定（AC1 判据）：landed = status=done ∧ 无残留 worktree。任一读失败 ⇒ landed=false
+ *  （fail-closed 朝「未落地」，硬规则 3b：读不懂 ≠ 落地）。返回详细 reason（写进 failure_reason）。 */
+export function computeLandingState(root: string, taskId: string): {
+  landed: boolean;
+  status: string | null;
+  worktreePresent: boolean | null;
+  reason: string;
+} {
+  const status = readTaskStatus(root, taskId);
+  const worktreePresent = worktreePresentForTask(root, taskId);
+  const statusOk = status === "done";
+  const worktreeOk = worktreePresent === false; // false = 确认无残留；null = 读不懂 ⇒ 视为未落地
+  const landed = statusOk && worktreeOk;
+  let reason: string;
+  if (landed) {
+    reason = "landed (status=done, no leftover worktree)";
+  } else if (statusOk && worktreePresent === true) {
+    reason = `status=done but leftover worktree task/${taskId} still present`;
+  } else if (statusOk && worktreePresent === null) {
+    reason = "status=done but worktree state unreadable (git worktree list failed)";
+  } else if (!statusOk && worktreeOk) {
+    reason = `task status=${status ?? "missing"} (not done)`;
+  } else {
+    reason = `task status=${status ?? "missing"} (not done) and worktree ${worktreePresent === null ? "unreadable" : "still present"}`;
+  }
+  return { landed, status, worktreePresent, reason };
 }
 
 /** 把一条 outcome 追加写入指定文件（mkdir -p + appendFileSync，一行一 JSON）。 */
@@ -682,10 +759,15 @@ function runOneWorker({
       finished = true;
       if (timer) clearTimeout(timer);
       const endedAtMs = Date.now();
+      // gap-worker-driver-fake-completion-exit-0：写终态前读一次任务侧直接量（status=done ∧ 无残留
+      // worktree）。只在 exit 0 路径有意义——spawn-failed/killed/timed-out/failed 分支在 computeOutcome
+      // 里优先于 landed，落盘 result 由终态分支决定；但统一读一次无害（落地读是廉价 fs/git 调用）。
+      const landing = computeLandingState(rootDir, taskId);
       const outcome = computeOutcome({
         task: taskId, selectorReason, exitCode: code, signal,
         startedAtMs, endedAtMs, workerPid, runId,
         spawnError: spawnErr, inFlightCount, timedOut,
+        landed: landing.landed, landReason: landing.reason,
       });
       appendOutcomeToFile(outcomeFile, outcome);
       if (json) process.stdout.write(`${JSON.stringify({ event: "worker-done", task: taskId, ...outcome })}\n`);
@@ -694,6 +776,7 @@ function runOneWorker({
       else if (outcome.final_state === "timed-out") exitCode = 128 + signalExitCode(signal ?? "SIGTERM");
       else if (outcome.final_state === "killed") exitCode = 128 + (signal ? signalExitCode(signal) : 0);
       else if (outcome.final_state === "spawn-failed") exitCode = 2;
+      else if (outcome.final_state === "exited-not-landed") exitCode = EXITED_NOT_LANDED_EXIT;
       else exitCode = code ?? 2;
       resolve({ taskId, outcome, exitCode });
     };
