@@ -30,7 +30,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] flake 根因定位 + 并发 suite 稳定绿；AC1 全勾；land 到 develop。
+- [ ] observer-registry AC3 flake 根因定位（消费者报告落点共享/窗口过窄）+ 并发 suite 稳定绿；AC1 全勾；land 到 develop。
 
 ## Retires
 

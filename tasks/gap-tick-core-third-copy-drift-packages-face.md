@@ -31,7 +31,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 第三份同步 + 检查器覆盖第三份；AC1-2 全勾；land 到 develop。
+- [ ] 四份 packages/quay/plugin/loop/ 副本同步到与源 cmp 逐字节一致 + tick-core-static-check 扩第三份覆盖；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
