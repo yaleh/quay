@@ -1,55 +1,62 @@
 #!/usr/bin/env bash
-# plugin/scripts/promotion-driver-launch.sh — AC137：promotion-driver 的【生产启用】开关
-# (tasks/gap-ac137-promotion-driver-production-enablement)。
+# plugin/scripts/promotion-driver-launch.sh — 统一 driver supervisor（AC139）。
+# (tasks/gap-ac139-unified-driver-subcommand)
 #
-# WHY THIS EXISTS（manager-phase-goal ### AC137，硬规则 5b 自指实例）：
-#   AC130–136 七条 done 时，promotion-driver 机制存在但【没在跑】——`ps` 零命中、
-#   .quay/promotion-outcome.jsonl 不存在。缺口是「谁按下开关」这一层：没有任何一条 AC
-#   要求把驱动启动起来。本脚本就是那个开关：把 promotion-driver.ts 作为常驻进程启动 +
-#   守护重启（异常退出/被 kill 后自动拉起），使 AC134-AC2 / AC135-AC2 / AC135-AC3 三条
-#   「待外部」判据的窗口得以起算。
+# WHAT CHANGED（原 AC137 单 kind 脚本 → 统一 supervisor）：
+#   AC139 裁定把 promotion-driver 与 worker-driver 的【启动面】收敛到一个 `quay` 子命令
+#   （`quay driver <start|stop|drain|status|restart> --kind <promotion|worker>`）。本脚本是
+#   那单一 supervisor：仓库里只此一份 respawn/守护循环，两个 kind 的差异全部由下方
+#   【registry 表（数据）】承载，⛔ 非两份代码分支（AC139-2 取假：两个文件各有一个独立
+#   supervisor 循环 ⇒ 假）。
 #
-# 形态（⛔ AC137 判据不规定形态，本脚本自定）：纯 bash 守护循环（supervisor）。supervisor
-#   用 setsid+nohup 从本脚本会话脱离，循环 spawn `node … promotion-driver.ts`、wait 其退出、
-#   查停止哨兵后 sleep 重拉。不依赖 systemd / cron / tmux / 任何 Claude 会话锚点——单一真相
-#   源是【进程】本身（同 promotion-driver.ts 头注释「停机态 = 进程信号」）。
+# 继承（⛔ 非回退）gap-resident-driver-stable-carrier-liveness 的稳定承载 + 死亡告警修复：
+#   AC1 稳定承载：_resolve_main_root() 主检出解析（仍保留——脚本层防御；CLI 层 AC139-4 另做
+#       worktree 拒绝，两层不冲突：CLI 拒绝、脚本对直调 --root=worktree 规范化到主检出）。
+#   AC2 死亡告警：liveness 子命令检测并报告 driver/supervisor 死亡（pid 文件指向已不存在的
+#       pid ⇒ DEATH + 退出 1 + 写 liveness 事件；⛔ 载体停更 ≠ 一切正常）。
+#   AC3 supervisor 死：kill -9 supervisor 后 liveness 报 supervisor_dead，孤儿 driver ⛔ 不再
+#       被 status/liveness 误判为「在跑」（running = supervisor_alive && driver_alive）。
 #
-# 权责边界（⛔ 只做 AC137 判据，不越界到 AC130–136 —— 那些是已 done 的任务）：
-#   ✅ 启动/停止/状态/重启 promotion-driver 常驻进程（supervisor 守护）
-#   ✅ 异常退出（含被 kill）后自动重拉（AC3 重启存活），每次重拉写一条 supervisor 事件
-#   ⛔ 不改 promotion-driver.ts 逻辑（AC130-133 已覆盖）
+# 三处真实语义冲突的处置（AC139-1，⛔ 直接透传会静默改行为）：
+#   ① --pid-file 两边不同义：promotion 单值覆盖（驱动自写自己的 pid）；worker append 每个
+#      worker 子进程 pid。→ registry 里 KIND_PID_SELF 区分：promotion 把 --pid-file 指向驱动
+#      pid 文件（驱动自写）；worker 把 --pid-file 指向 in-flight pid 文件（append），而 supervisor
+#      自己用 $! 权威记录 worker 驱动自身 pid 到 <prefix>.pid。
+#   ② worker 有第三种模式 --serve（MCP 控制面），promotion 没有。→ 本脚本不碰 --serve（那是
+#      驱动自己的入口，非 supervisor 承载面）；supervisor 只守护常驻选择环/晋升环。
+#   ③ 停机语义两套：promotion 杀在飞（stop sentinel + TERM + 兜底 kill -9）；worker .halt 不杀在飞。
+#      → `stop` 与 `drain` 分立：promotion 支持 stop（杀在飞）不支持 drain；worker 支持 drain
+#      （halt：只挡新派发不杀在飞）与 stop（杀 supervisor+driver，⛔ 不杀在飞 worker）。
+#      ⛔ 对不支持的动词直接报错（退出 2），不静默回落（registry 里 KIND_VERBS 声明）。
+#
+# 权责边界（⛔ 只做承载与入口，不改两驱动业务逻辑——选择环/晋升判定/fix worker）：
+#   ✅ 启动/停止/排空/状态/重启/告警 promotion 与 worker 常驻进程（supervisor 守护）
+#   ✅ 异常退出（含被 kill）后自动重拉，每次重拉写一条 supervisor 事件
+#   ⛔ 不改 promotion-driver.ts / worker-driver.ts 逻辑
 #   ⛔ 不做任何 commit、不读/写 .halt、不翻 task status（驱动自己的 --apply 晋升除外）
 #
-# 稳定承载 + 死亡告警（gap-resident-driver-stable-carrier-liveness，AC1-3）：
-#   AC1 稳定承载：启动入口自规范化到主检出（primary worktree）。supervisor 的 cmdline 脚本
-#      路径 = 主检出，⛔ 非 worktrees/ —— worktree 是短命对象（ff 合并即移除），常驻
-#      supervisor 挂在上面 = 驱动寿命 ≤ 该任务寿命（AC137 land 后 ~7s 双死的实测成因）。
-#   AC2 死亡告警：`liveness` 子命令检测并报告 driver/supervisor 死亡（pid 文件指向【已不
-#      存在的 pid】⇒ 报告 DEATH + 退出 1 + 写 liveness 事件；⛔ 载体停更 ≠ 一切正常）。
-#   AC3 supervisor 死：kill -9 supervisor 后 liveness 报 supervisor_dead，且孤儿 driver
-#      ⛔ 不再被 status/liveness 误判为「在跑」（running = supervisor_alive && driver_alive）。
-#
 # 用法：
-#   bash plugin/scripts/promotion-driver-launch.sh start    [--root <repo>] [--interval <ms>]
-#                                                            [--cap <n>] [--restart-delay <s>] [--run-id <id>]
-#   bash plugin/scripts/promotion-driver-launch.sh stop      [--root <repo>]
-#   bash plugin/scripts/promotion-driver-launch.sh status    [--root <repo>] [--json]
-#   bash plugin/scripts/promotion-driver-launch.sh liveness  [--root <repo>] [--json]
-#   bash plugin/scripts/promotion-driver-launch.sh restart   [--root <repo>] [--interval <ms>] …
+#   bash plugin/scripts/promotion-driver-launch.sh <start|stop|drain|status|restart|liveness> \
+#       --kind <promotion|worker> [--root <repo>] [--interval <ms>] [--cap <n>]
+#       [--restart-delay <s>] [--run-id <id>] [--json]
+#     --kind <promotion|worker>  目标驱动（缺省 promotion；CLI 入口恒显式传）
 #     --root <repo>        目标仓库根（缺省 = 本脚本 ../..）
-#     --interval <ms>      驱动轮间隔（透传 promotion-driver --interval；缺省 = 驱动自己 30000）
-#     --cap <n>            并发 cap（透传 --cap；缺省 = 驱动自己 5）
+#     --interval <ms>      驱动轮间隔（仅 promotion 透传；worker 常驻选择环无 --interval）
+#     --cap <n>            并发 cap（promotion → --cap；worker → --concurrency；缺省 = 驱动自己）
 #     --restart-delay <s>  supervisor 重拉间隔秒（缺省 5；只作重拉节奏占位，非阈值）
-#     --run-id <id>        驱动 run id（缺省 pm-prod-<start-epoch>；重拉保持同 id 便于追迹）
+#     --run-id <id>        驱动 run id（缺省 pm-prod-/wk-prod-<start-epoch>；重拉保持同 id 便于追迹）
 #     --json               status/liveness 输出机器可读 JSON
 #
-# 状态文件（<root>/.quay/，全部 gitignored 运行时态，⛔ 不进 git）：
-#   promotion-driver.pid             驱动 pid（驱动 --pid-file 自写，外部观测 + kill 抓手）
-#   promotion-driver-supervisor.pid  supervisor pid（本脚本写）
-#   promotion-driver.log             驱动 stdout/stderr（append）
-#   promotion-driver-supervisor.log  supervisor 事件（start/exit/respawn，append）
-#   promotion-driver-liveness.log    liveness 告警事件（ok / DEATH deaths=…，append）
-#   promotion-driver.stop            停止哨兵（存在 = stop 已请求，supervisor 不再重拉）
+# 状态文件（<root>/.quay/，全部 gitignored 运行时态，⛔ 不进 git；<prefix> = promotion-driver|worker-driver）：
+#   <prefix>.pid              驱动 pid（supervisor 权威写 $!；promotion 驱动也自写同值）
+#   <prefix>-supervisor.pid   supervisor pid（本脚本写）
+#   <prefix>.log              驱动 stdout/stderr（append）
+#   <prefix>-supervisor.log   supervisor 事件（start/exit/respawn，append）
+#   <prefix>-liveness.log     liveness 告警事件（ok / DEATH deaths=…，append）
+#   <prefix>.stop             停止哨兵（存在 = stop 已请求，supervisor 不再重拉）
+#   worker-driver-inflight.pid  worker 在飞 worker 子进程 pid（驱动 --pid-file append，仅观测）
+#   载体（status 读）：promotion → promotion-outcome.jsonl + promotion-round.jsonl；
+#                      worker   → worker-outcome.jsonl
 #
 # Exit: 0 = 命令成功 / liveness 健康；1 = 运行/停止失败 / liveness 检出死亡；2 = 参数错误。
 
@@ -70,7 +77,7 @@ if ! NODE_BIN="$(command -v node 2>/dev/null)"; then
   exit 2
 fi
 
-# ── 主检出解析（AC1 稳定承载）────────────────────────────────────────────────────────
+# ── 主检出解析（AC1 稳定承载，gap-resident-driver-stable-carrier-liveness）───────────────
 # 常驻 supervisor 不得由生命周期短于它的对象承载：若 --root 落在 git worktree 内（脚本自身
 # 从 worktree 路径被调用即属此类），把 ROOT 规范化到 primary worktree（主检出），使 supervisor
 # cmdline 的脚本路径 = 主检出（⛔ 非 worktrees/）。git 不可用 / 非 git 仓库 / 解析失败 ⇒
@@ -89,10 +96,50 @@ _resolve_main_root() {
   fi
 }
 
+# ── registry 表（数据）── 两 kind 差异全在此，supervisor 循环只一份（AC139-2）────────────
+# 每个 kind 声明：driver 脚本名、状态文件前缀、支持的动词、cap flag 名、是否透传 --interval、
+# --pid-file 语义（自写自己 pid vs append 在飞 pids）、run-id 前缀、载体文件列表。
+declare -A KIND_DRIVER=(
+  [promotion]="promotion-driver.ts"
+  [worker]="worker-driver.ts"
+)
+declare -A KIND_PREFIX=(
+  [promotion]="promotion-driver"
+  [worker]="worker-driver"
+)
+declare -A KIND_VERBS=(
+  [promotion]="start stop status restart liveness"
+  [worker]="start stop drain status restart liveness"
+)
+declare -A KIND_CAP_FLAG=(
+  [promotion]="--cap"
+  [worker]="--concurrency"
+)
+declare -A KIND_HAS_INTERVAL=(
+  [promotion]="1"
+  [worker]="0"
+)
+# promotion：驱动把 --pid-file 写为自己的 pid（单值覆盖，自写）；worker：--pid-file = append 在飞
+# worker 子进程 pid（多值），故 worker 驱动自身 pid 由 supervisor 用 $! 权威写 <prefix>.pid。
+declare -A KIND_PID_SELF=(
+  [promotion]="1"
+  [worker]="0"
+)
+declare -A KIND_RUN_PREFIX=(
+  [promotion]="pm-prod"
+  [worker]="wk-prod"
+)
+# 载体文件（相对 .quay/；首个 = 主载体，作 status 的 carrier_path）。
+declare -A KIND_CARRIERS=(
+  [promotion]="promotion-outcome.jsonl promotion-round.jsonl"
+  [worker]="worker-outcome.jsonl"
+)
+
 # ── 参数解析 ──────────────────────────────────────────────────────────────────────────
 CMD="${1:-start}"
 shift || true
 
+KIND="promotion"
 ROOT=""
 INTERVAL=""
 CAP=""
@@ -101,6 +148,7 @@ RUN_ID=""
 JSON=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    --kind) KIND="${2:-}"; shift 2 ;;
     --root) ROOT="${2:-}"; shift 2 ;;
     --interval) INTERVAL="${2:-}"; shift 2 ;;
     --cap) CAP="${2:-}"; shift 2 ;;
@@ -110,6 +158,21 @@ while [ $# -gt 0 ]; do
     *) echo "promotion-driver-launch: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# kind 校验（registry 表里没有 = 未知 kind，⛔ 不静默回落）。
+if [ -z "${KIND_DRIVER[$KIND]:-}" ]; then
+  echo "promotion-driver-launch: unknown --kind: ${KIND:-<empty>} (expected promotion|worker)" >&2
+  exit 2
+fi
+
+# 动词校验（AC139-1：各 kind 声明支持哪些，对不支持的直接报错，⛔ 不静默回落）。
+# 内部动词 __supervise 不在此表（supervisor 自身模式，非用户动词）。
+if [ "$CMD" != "__supervise" ]; then
+  case " ${KIND_VERBS[$KIND]} " in
+    *" $CMD "*) ;;
+    *) echo "promotion-driver-launch: kind $KIND does not support '$CMD' (supports: ${KIND_VERBS[$KIND]})" >&2; exit 2 ;;
+  esac
+fi
 
 ROOT="${ROOT:-$REPO_ROOT_DEFAULT}"
 if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
@@ -129,14 +192,31 @@ fi
 # 规范化后的启动脚本路径（supervisor 的 cmdline 载体，⛔ 非 $0 的 worktree 路径）。
 LAUNCH_SCRIPT="$ROOT/plugin/scripts/promotion-driver-launch.sh"
 
-DRIVER="$ROOT/plugin/scripts/promotion-driver.ts"
+# ── kind 派生变量（registry 数据 → 本脚本状态文件/载体/参数）──────────────────────────
+PREFIX="${KIND_PREFIX[$KIND]}"
+DRIVER="$ROOT/plugin/scripts/${KIND_DRIVER[$KIND]}"
 STATE_DIR="$ROOT/.quay"
-DRIVER_PID_FILE="$STATE_DIR/promotion-driver.pid"
-SUPERVISOR_PID_FILE="$STATE_DIR/promotion-driver-supervisor.pid"
-DRIVER_LOG="$STATE_DIR/promotion-driver.log"
-SUPERVISOR_LOG="$STATE_DIR/promotion-driver-supervisor.log"
-LIVENESS_LOG="$STATE_DIR/promotion-driver-liveness.log"
-STOP_SENTINEL="$STATE_DIR/promotion-driver.stop"
+DRIVER_PID_FILE="$STATE_DIR/$PREFIX.pid"
+SUPERVISOR_PID_FILE="$STATE_DIR/$PREFIX-supervisor.pid"
+DRIVER_LOG="$STATE_DIR/$PREFIX.log"
+SUPERVISOR_LOG="$STATE_DIR/$PREFIX-supervisor.log"
+LIVENESS_LOG="$STATE_DIR/$PREFIX-liveness.log"
+STOP_SENTINEL="$STATE_DIR/$PREFIX.stop"
+INFLIGHT_PID_FILE="$STATE_DIR/$PREFIX-inflight.pid"
+# --pid-file 传给驱动的目标：promotion = 驱动 pid 文件（自写）；worker = in-flight pid 文件（append）。
+if [ "${KIND_PID_SELF[$KIND]}" = "1" ]; then
+  PID_ARG_FILE="$DRIVER_PID_FILE"
+else
+  PID_ARG_FILE="$INFLIGHT_PID_FILE"
+fi
+# 载体文件绝对路径（空格分隔；首个 = 主载体）。
+CARRIERS=""
+CARRIER_PRIMARY=""
+for c in ${KIND_CARRIERS[$KIND]}; do
+  CARRIERS="$CARRIERS $STATE_DIR/$c"
+  [ -z "$CARRIER_PRIMARY" ] && CARRIER_PRIMARY="$STATE_DIR/$c"
+done
+CARRIERS="${CARRIERS# }"
 
 [ -f "$DRIVER" ] || { echo "promotion-driver-launch: driver not found at $DRIVER" >&2; exit 2; }
 mkdir -p "$STATE_DIR"
@@ -167,7 +247,24 @@ pid_alive() {
 driver_pid()      { [ -f "$DRIVER_PID_FILE" ] && cat "$DRIVER_PID_FILE" 2>/dev/null || true; }
 supervisor_pid()  { [ -f "$SUPERVISOR_PID_FILE" ] && cat "$SUPERVISOR_PID_FILE" 2>/dev/null || true; }
 
-# ── supervisor 循环（__supervise 模式的前台进程里运行）──────────────────────────────
+# 载体观测（AC139-3）：carrier_records = 全载体行数之和；last_record_ts = 全载体末条记录 ts 的
+# 最大值（⛔ 只报计数无法区分「在长」与「停更」——载体停更与「一切正常」同形）。ts 字段是两种
+# driver 的 outcome/round 记录共有的 ISO 时间戳键（record 首字段）。
+_carrier_stats() {
+  local f recs=0 ts="" last_ts=""
+  for f in $CARRIERS; do
+    if [ -f "$f" ]; then
+      recs=$(( recs + $(wc -l < "$f" | tr -d ' ') ))
+      ts="$(grep -o '"ts":"[^"]*"' "$f" 2>/dev/null | tail -n 1 | sed -nE 's/^"ts":"([^"]*)"$/\1/p')"
+      if [ -n "$ts" ] && { [ -z "$last_ts" ] || [ "$ts" \> "$last_ts" ]; }; then
+        last_ts="$ts"
+      fi
+    fi
+  done
+  printf '%s %s' "$recs" "$last_ts"
+}
+
+# ── supervisor 循环（__supervise 模式的前台进程里运行）── 单一循环，kind 差异由 registry 数据驱动 ──
 run_supervisor() {
   set +e  # 驱动非零退出是常态（被 kill / 异常），不是 supervisor 的错误
   local child=""
@@ -178,13 +275,18 @@ run_supervisor() {
   trap cleanup TERM INT HUP
 
   local args=(--root "$ROOT")
-  [ -n "$CAP" ] && args+=(--cap "$CAP")
-  [ -n "$INTERVAL" ] && args+=(--interval "$INTERVAL")
-  args+=(--pid-file "$DRIVER_PID_FILE" --run-id "$RUN_ID")
+  [ -n "$CAP" ] && args+=( "${KIND_CAP_FLAG[$KIND]}" "$CAP" )
+  if [ "${KIND_HAS_INTERVAL[$KIND]}" = "1" ] && [ -n "$INTERVAL" ]; then
+    args+=(--interval "$INTERVAL")
+  fi
+  args+=(--pid-file "$PID_ARG_FILE" --run-id "$RUN_ID")
 
   while true; do
     "$NODE_BIN" --experimental-strip-types "$DRIVER" "${args[@]}" >> "$DRIVER_LOG" 2>&1 &
     child=$!
+    # supervisor 权威记录驱动自身 pid（⛔ 不依赖驱动 --pid-file：worker 的 --pid-file 另作
+    # 在飞 pids 用途；promotion 驱动自写同值，覆盖写幂等）。
+    echo "$child" > "$DRIVER_PID_FILE"
     echo "$(_ts) supervisor: started driver pid=$child" >> "$SUPERVISOR_LOG"
     wait "$child"
     local code=$?
@@ -208,17 +310,23 @@ cmd_status() {
   [ -n "$spid" ] && pid_alive "$spid" && sup_alive=1
   [ -n "$dpid" ] && pid_alive "$dpid" && drv_alive=1
   # running = 生产驱动「在服务」：supervisor 与 driver 都在。孤儿 driver（supervisor 死而
-  # driver 进程还在）⛔ 不算 running（AC3(b)：不再被误判为「在跑」）。
+  # driver 进程还在）⛔ 不算 running（AC3(b)：不再被误判为「在跑」）。alive 与 running 同值，
+  # alive 是 AC139-3 的字段名，running 保留作 backward compat。
   local running=0
   [ "$sup_alive" = "1" ] && [ "$drv_alive" = "1" ] && running=1
-  local outcome_n=0 round_n=0
-  [ -f "$STATE_DIR/promotion-outcome.jsonl" ] && outcome_n="$(wc -l < "$STATE_DIR/promotion-outcome.jsonl" | tr -d ' ')"
-  [ -f "$STATE_DIR/promotion-round.jsonl" ] && round_n="$(wc -l < "$STATE_DIR/promotion-round.jsonl" | tr -d ' ')"
+  local stats last_ts="null"
+  stats="$(_carrier_stats)"
+  local recs="${stats%% *}"
+  last_ts="${stats#* }"
+  [ -z "$last_ts" ] && last_ts="null"
+  # JSON 里 last_record_ts 是字符串（引号）或 null（⛔ 非引号裸值，否则 ISO 冒号产生非法 JSON）。
+  local ts_json
+  if [ "$last_ts" = "null" ]; then ts_json="null"; else ts_json="\"$last_ts\""; fi
   if [ "$JSON" = "1" ]; then
-    printf '{"supervisor_pid":%s,"driver_pid":%s,"supervisor_alive":%s,"driver_alive":%s,"running":%s,"outcome_records":%s,"round_records":%s}\n' \
-      "${spid:-null}" "${dpid:-null}" "$sup_alive" "$drv_alive" "$running" "$outcome_n" "$round_n"
+    printf '{"kind":"%s","supervisor_pid":%s,"driver_pid":%s,"supervisor_alive":%s,"driver_alive":%s,"alive":%s,"running":%s,"carrier_path":"%s","carrier_records":%s,"last_record_ts":%s}\n' \
+      "$KIND" "${spid:-null}" "${dpid:-null}" "$sup_alive" "$drv_alive" "$running" "$running" "$CARRIER_PRIMARY" "$recs" "$ts_json"
   else
-    echo "promotion-driver: supervisor pid=${spid:-none} alive=$sup_alive · driver pid=${dpid:-none} alive=$drv_alive · running=$running · outcome_records=$outcome_n · round_records=$round_n"
+    echo "$PREFIX: kind=$KIND · supervisor pid=${spid:-none} alive=$sup_alive · driver pid=${dpid:-none} alive=$drv_alive · running=$running · carrier_path=$CARRIER_PRIMARY · carrier_records=$recs · last_record_ts=${last_ts}"
   fi
   return 0
 }
@@ -241,24 +349,28 @@ cmd_start() {
     sleep 1
   fi
   rm -f "$DRIVER_PID_FILE" "$SUPERVISOR_PID_FILE" "$STOP_SENTINEL"
-  local run_id="${RUN_ID:-pm-prod-$(date +%s)}"
-  setsid nohup bash "$LAUNCH_SCRIPT" __supervise --root "$ROOT" \
-    ${CAP:+--cap "$CAP"} ${INTERVAL:+--interval "$INTERVAL"} \
-    --restart-delay "$RESTART_DELAY" --run-id "$run_id" \
+  local run_id="${RUN_ID:-${KIND_RUN_PREFIX[$KIND]}-$(date +%s)}"
+  local extra_args=()
+  [ -n "$CAP" ] && extra_args+=( "${KIND_CAP_FLAG[$KIND]}" "$CAP" )
+  if [ "${KIND_HAS_INTERVAL[$KIND]}" = "1" ] && [ -n "$INTERVAL" ]; then
+    extra_args+=( --interval "$INTERVAL" )
+  fi
+  setsid nohup bash "$LAUNCH_SCRIPT" __supervise --kind "$KIND" --root "$ROOT" \
+    "${extra_args[@]}" --restart-delay "$RESTART_DELAY" --run-id "$run_id" \
     >> "$SUPERVISOR_LOG" 2>&1 &
   local sup_pid=$!
   echo "$sup_pid" > "$SUPERVISOR_PID_FILE"
-  # 等驱动真正 spawn（supervisor 首轮 spawn 后，驱动自己写 pid 文件）。
+  # 等驱动真正 spawn（supervisor 首轮 spawn 后写 <prefix>.pid）。
   local i
   for i in $(seq 1 20); do
     [ -f "$DRIVER_PID_FILE" ] && break
     sleep 0.5
   done
-  echo "started: supervisor pid=$sup_pid run_id=$run_id"
+  echo "started: supervisor pid=$sup_pid kind=$KIND run_id=$run_id"
   cmd_status
 }
 
-# ── stop ─────────────────────────────────────────────────────────────────────────────
+# ── stop（硬停：杀 supervisor + 驱动；⛔ 不杀 worker 在飞子进程——那些在 in-flight pid 文件里，本函数不碰）─
 cmd_stop() {
   local spid dpid
   spid="$(supervisor_pid)"; dpid="$(driver_pid)"
@@ -271,7 +383,7 @@ cmd_stop() {
     { [ -z "$spid" ] || ! pid_alive "$spid"; } && { [ -z "$dpid" ] || ! pid_alive "$dpid"; } && break
     sleep 0.5
   done
-  # 兜底 kill -9（supervisor/驱动 10s 内未退出）。
+  # 兜底 kill -9（supervisor/驱动 10s 内未退出）。⛔ 只针对 supervisor 与驱动自身，不扫 in-flight。
   [ -n "$spid" ] && pid_alive "$spid" && kill -9 "$spid" 2>/dev/null || true
   [ -n "$dpid" ] && pid_alive "$dpid" && kill -9 "$dpid" 2>/dev/null || true
   rm -f "$DRIVER_PID_FILE" "$SUPERVISOR_PID_FILE" "$STOP_SENTINEL"
@@ -279,10 +391,56 @@ cmd_stop() {
   return 0
 }
 
+# ── drain（仅 worker 支持；promotion 被 KIND_VERBS 拒绝）── halt 语义：只挡新派发，⛔ 不杀在飞 ──
+# 写 .quay/worker-control.json halted=true（worker-driver.ts 单一真相源停机态，读-改-写保留
+# preference/forced，不破坏用户控制态）。不触碰 supervisor / driver / 在飞 worker 进程。
+cmd_drain() {
+  if [ ! -f "$ROOT/plugin/scripts/worker-driver.ts" ]; then
+    echo "promotion-driver-launch: drain requires worker-driver.ts at $ROOT/plugin/scripts/worker-driver.ts" >&2
+    exit 2
+  fi
+  DRIVER_DRAIN_ROOT="$ROOT" "$NODE_BIN" --experimental-strip-types - <<'NODE'
+import fs from "node:fs";
+import path from "node:path";
+const root = process.env.DRIVER_DRAIN_ROOT;
+const file = path.join(root, ".quay", "worker-control.json");
+// 与 worker-driver.ts 的 mergeControlState 同形（单一真相源：缺字段取缺省；读失败非 ENOENT 报错）。
+const dflt = { schemaVersion: 1, halted: false, halted_by: null, halted_at: null, preference: {}, forced: [] };
+let state = dflt;
+try {
+  const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (parsed && typeof parsed === "object") {
+    state = {
+      schemaVersion: 1,
+      halted: typeof parsed.halted === "boolean" ? parsed.halted : dflt.halted,
+      halted_by: typeof parsed.halted_by === "string" ? parsed.halted_by : null,
+      halted_at: typeof parsed.halted_at === "string" ? parsed.halted_at : null,
+      preference: parsed.preference && typeof parsed.preference === "object" && !Array.isArray(parsed.preference) ? parsed.preference : {},
+      forced: Array.isArray(parsed.forced) ? parsed.forced : [],
+    };
+  }
+} catch (e) {
+  if (e && e.code !== "ENOENT") {
+    console.error("promotion-driver-launch: drain: could not read " + file + ": " + e.message);
+    process.exit(2);
+  }
+}
+state.halted = true;
+state.halted_by = "quay-driver-drain";
+state.halted_at = new Date().toISOString();
+fs.mkdirSync(path.dirname(file), { recursive: true });
+const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf8");
+fs.renameSync(tmp, file);
+console.log("drained: worker halted (no new dispatch; in-flight workers untouched) — control state at " + file);
+NODE
+  return 0
+}
+
 # ── liveness（AC2 死亡告警 / AC3 supervisor 死检测）────────────────────────────────
 # 检测并报告 driver/supervisor 的死亡：pid 文件指向【已不存在的 pid】是死亡的直接量（⛔
 # 载体停更 ≠ 一切正常 —— AC137 land 后 supervisor 死了 33 分钟无人察觉的形态）。每次运行
-# 写一条事件到 <root>/.quay/promotion-driver-liveness.log（append，gitignored），stdout
+# 写一条事件到 <root>/.quay/<prefix>-liveness.log（append，gitignored），stdout
 # 输出机器可读 verdict；检出死亡时退出 1（健康退出 0）。
 cmd_liveness() {
   local spid dpid sup_alive drv_alive running deaths
@@ -305,18 +463,19 @@ cmd_liveness() {
   fi
 
   if [ "$JSON" = "1" ]; then
-    printf '{"supervisor_pid":%s,"driver_pid":%s,"supervisor_alive":%s,"driver_alive":%s,"running":%s,"deaths":"%s"}\n' \
-      "${spid:-null}" "${dpid:-null}" "$sup_alive" "$drv_alive" "$running" "${deaths:-none}"
+    printf '{"kind":"%s","supervisor_pid":%s,"driver_pid":%s,"supervisor_alive":%s,"driver_alive":%s,"running":%s,"deaths":"%s"}\n' \
+      "$KIND" "${spid:-null}" "${dpid:-null}" "$sup_alive" "$drv_alive" "$running" "${deaths:-none}"
   else
-    echo "promotion-driver-liveness: supervisor_alive=$sup_alive · driver_alive=$drv_alive · running=$running · deaths=${deaths:-none}"
+    echo "$PREFIX-liveness: kind=$KIND · supervisor_alive=$sup_alive · driver_alive=$drv_alive · running=$running · deaths=${deaths:-none}"
   fi
 
-  # 持久报告（告警事件载体；deaths 空 = ok 心跳，非空 = DEATH 事件）。
+  # 持久报告（告警事件载体；deaths 空 = ok 心跳，非空 = DEATH 事件）。⛔ `DEATH deaths=` 必须相邻
+  # （stable-carrier 测试的正则 /DEATH deaths=…/ 据此判死亡告警），kind 附加在 deaths 之后。
   if [ -n "$deaths" ]; then
-    echo "$(_ts) liveness: DEATH deaths=$deaths supervisor_pid=${spid:-none} driver_pid=${dpid:-none}" >> "$LIVENESS_LOG"
+    echo "$(_ts) liveness: DEATH deaths=$deaths kind=$KIND supervisor_pid=${spid:-none} driver_pid=${dpid:-none}" >> "$LIVENESS_LOG"
     return 1
   fi
-  echo "$(_ts) liveness: ok supervisor_pid=${spid:-none} driver_pid=${dpid:-none}" >> "$LIVENESS_LOG"
+  echo "$(_ts) liveness: ok kind=$KIND supervisor_pid=${spid:-none} driver_pid=${dpid:-none}" >> "$LIVENESS_LOG"
   return 0
 }
 
@@ -324,9 +483,10 @@ cmd_liveness() {
 case "$CMD" in
   start)    cmd_start ;;
   stop)     cmd_stop ;;
+  drain)    cmd_drain ;;
   status)   cmd_status ;;
   liveness) cmd_liveness ;;
   restart)  cmd_stop >/dev/null; cmd_start ;;
-  __supervise) RUN_ID="${RUN_ID:-pm-prod-$(date +%s)}"; run_supervisor ;;
-  *) echo "promotion-driver-launch: unknown command: $CMD (expected start|stop|status|restart|liveness)" >&2; exit 2 ;;
+  __supervise) RUN_ID="${RUN_ID:-${KIND_RUN_PREFIX[$KIND]}-$(date +%s)}"; run_supervisor ;;
+  *) echo "promotion-driver-launch: unknown command: $CMD (expected start|stop|drain|status|restart|liveness)" >&2; exit 2 ;;
 esac
