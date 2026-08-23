@@ -637,8 +637,41 @@ promotion-driver.ts:110-117  isLlmInvocation(argv)
   `["claude", "-p", …]` 字面量 ⇒ 为假。
 - **AC140-2（可配置：wrapper + model + 按 role）**：LLM 命令与 model **必须与 inner/outer 会话所用的同一套配置同源**，
   **且可按 role 分别覆盖**（worker / selector / fix-worker 是三种不同负载：长任务链 / 短决策 / 短编辑，
-  ⛔ 不假定它们该用同一个 model）。**取假**：把 role 的 launcher/model 配成本项目实际所用值后，
-  驱动 spawn 出的 argv 里 argv0 仍是裸 `claude` 或 `--model` 未出现 ⇒ 为假。
+  ⛔ 不假定它们该用同一个 model）。**取假（⛔ 读 env，不读 argv —— 理由见下）**：把 role 的 `launcher`/`model`
+  配成本项目实际所用值后，**spawn 出的 worker 进程的环境里没有 `ANTHROPIC_BASE_URL`**（即 wrapper 不在链上）
+  **或 `--model` 未出现在其命令行** ⇒ 为假。
+
+  **⊕ 2026-08-23 01:0xZ 我方第三次同形自纠（人指出「实际用的是 wrapper claude-fjdac，配置文件应当支持」后复核）**：
+  **原文写「spawn 出的 argv 里 argv0 仍是裸 `claude` ⇒ 为假」——该取假【两种读法都不成立】**：
+  ```
+  若测【结果进程】的 argv0  ⇒ 因 claude-fjdac 末行 `exec claude "$@"`，argv0 【永远】是 claude
+                              ⇒ 判据恒假（正确实现也判失败）
+  若测【驱动传给 spawn 的 argv】⇒ 新设计下它是 ["bash", "…/quay-launch.sh", <role>, "--bare", "-p", …]
+                              ⇒ argv0 是 bash，判据恒真【但什么也没验到】（wrapper 有没有真用上，它看不见）
+  ```
+  ⇒ **一个恒假、一个空转，都不是测量**（硬规则④）。**⊢ 这是我在 AC4、AC140-4 之后【第三次】踩同一类**：
+  **判据点名了一个被中间层（此处是 `exec`）抹掉的量。**
+  **⊢ 改用直接量：`ANTHROPIC_BASE_URL`。** wrapper 的全部作用就是注入 env 后 `exec claude`，
+  **env 穿过 exec 保留，argv0 不保留** ⇒ env 是唯一能区分「用了 wrapper / 没用」的量。
+  **⊢ 双向控制我已实测（读已在跑的进程 `/proc/<pid>/environ`，⛔ 未新起任何进程）**：
+  ```
+  正控制  outer 2346790 / inner 2346802（launcher=claude-fjdac）
+          ⇒ ANTHROPIC_BASE_URL=https://fjbigmodel.fjdac.cn/
+            ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro     ✓ 命中
+  负控制  manager 647350（launcher=claude，按设计不走 wrapper）
+          ⇒ ANTHROPIC_BASE_URL 命中数 = 0                      ✓ 不命中
+  ```
+  ⇒ **该谓词【能区分】，两个方向都验过**，⛔ 非「看起来合理」。
+
+  **⊢ 配置面本身【已经支持】wrapper，不需要新增机制（我直读确认，⛔ 不新造）**：
+  `_launchSpec.roles.<role>.launcher` 就是 argv0，`quay-launch.sh:97` 直接用它；
+  `:80` 对 `launcher` 缺失是**报错退出**，⛔ 无静默默认值 —— 所以新增 worker 角色**必须显式写 launcher**。
+  **⊢ ⚠️ 落笔方的真实风险在这里（点名，防止照错样本抄）**：
+  **`manager` 角色的 `launcher` 是裸 `"claude"`、`model` 是 `null`**（它跑 Anthropic 默认模型，且要剥掉 917k env）。
+  **若新增的 `task-worker`/`selector`/`fix-worker` 照 manager 那条抄，就会拿到裸 claude、不走 wrapper、无 model**
+  —— 且因为 `:80` 只检查非空、不检查取值，**这个错不会有任何机件报错**，只会在运行时表现为「模型不对/凭据不对」。
+  **⇒ 新 worker 角色须照 `outer`/`inner` 那两条抄**（`launcher: "claude-fjdac"`, `model: "deepseek-v4-pro"`），
+  ⛔ 不照 `manager` 抄。
 
   **⊕ 2026-08-23 00:5xZ 我方自纠（人令「应与 inner/outer 一致」后实测，⛔ 我原先指定的落点会制造漂移）**：
   **原文写「由 `.quay/config.yml` 加第四段配置」——⛔ 撤销该指定**，因为**这些事实已经有正本**，
