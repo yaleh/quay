@@ -35,6 +35,7 @@ import {
   classifyBashCommand,
   checkTranscriptLocation,
   isMainThreadAgentId,
+  findRuledHistoricalTaskEntry,
   judgeA6MergeNotRebase,
   judgeCommandMergeNotRebase,
   judgeA6DeltaStep,
@@ -144,6 +145,53 @@ test("PURE checkAgentId — no records ⇒ NOT-EVALUATED (nothing to validate, n
   assert.equal(v.ok, true);
   assert.equal(v.evaluated, false);
   assert.equal(v.reason, "no-fan-in-records (NOT-EVALUATED)");
+});
+
+// ── Ruled-historical one-off 豁免 (tasks/gap-fan-in-ff-executor-check-ruled-historical-99f845d9) ───────
+// manager 2026-08-23 裁定：99f845d9 的应急主线程 fan-in（未传 --agent-id 落地
+// gap-direct-to-develop-ruled-historical-99f845d9）是 ruled one-off。入表 taskId 的记录分类为
+// ruledHistorical（reason `ruled-historical-record`），非 main-thread-executor——豁免表有界，未入表仍红。
+
+test("PURE findRuledHistoricalTaskEntry — the ruled taskId matches; a non-table taskId does not", () => {
+  assert.equal(findRuledHistoricalTaskEntry("gap-direct-to-develop-ruled-historical-99f845d9")?.taskId, "gap-direct-to-develop-ruled-historical-99f845d9");
+  assert.equal(findRuledHistoricalTaskEntry("gap-ac67-c"), undefined, "非入表任务不入豁免表");
+  assert.equal(findRuledHistoricalTaskEntry(""), undefined);
+  assert.equal(findRuledHistoricalTaskEntry(null), undefined);
+});
+
+test("PURE checkAgentId — the ruled task's agentId-null records ⇒ ruledHistorical (not main-thread-executor)", () => {
+  const records = [
+    { event: "acquire", taskId: "gap-direct-to-develop-ruled-historical-99f845d9", pid: 1, agentId: null },
+    { event: "release", taskId: "gap-direct-to-develop-ruled-historical-99f845d9", pid: 1, agentId: null },
+  ];
+  const v = checkAgentId(records, "main-sess");
+  assert.equal(v.ok, true, "ruled one-off must not be RED");
+  assert.equal(v.evaluated, true);
+  assert.equal(v.reason, "ruled-historical-record", "ruled classification is distinguishable (not subagent-executor-record)");
+  assert.equal(v.violations.length, 0);
+  assert.ok(v.ruledHistorical.length >= 1, "ruledHistorical entries are listed (auditable)");
+  assert.match(v.ruledHistorical[0], /ruled one-off/);
+});
+
+test("PURE checkAgentId — a real main-thread record NOT in the ruled table still ⇒ RED (能取假)", () => {
+  const records = [{ event: "acquire", taskId: "gap-ac67-z", pid: 2, agentId: null }];
+  const v = checkAgentId(records, "main-sess");
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.reason, "main-thread-executor-record");
+  assert.ok(v.violations.length >= 1);
+  assert.equal(v.ruledHistorical.length, 0);
+});
+
+test("PURE checkAgentId — mixed ruled + non-ruled main-thread records ⇒ still RED (豁免有界)", () => {
+  const records = [
+    { event: "acquire", taskId: "gap-direct-to-develop-ruled-historical-99f845d9", pid: 1, agentId: null },
+    { event: "acquire", taskId: "gap-ac67-z", pid: 2, agentId: null },
+  ];
+  const v = checkAgentId(records, "main-sess");
+  assert.equal(v.ok, false, "a non-ruled main-thread record must still red");
+  assert.equal(v.reason, "main-thread-executor-record");
+  assert.equal(v.ruledHistorical.length, 1, "the ruled record is still classified ruledHistorical");
 });
 
 // ── PURE 判据3: real main-thread fan-in command replay ────────────────────────────────────────────────
@@ -467,6 +515,45 @@ test("integration — agentId null in a lock-events file ⇒ RED (exit 1)", () =
     const lock = out.checks.find((c) => c.check === "agent-id-lock-events");
     assert.equal(lock.ok, false);
     assert.equal(lock.evaluated, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integration — the ruled task's agentId-null lock-events ⇒ PASS (exit 0, ruled-historical-record)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac67ruled-"));
+  try {
+    const events = path.join(dir, "fan-in-merge-lock-events.jsonl");
+    fs.writeFileSync(events, [
+      JSON.stringify({ event: "acquire", epoch: 100, taskId: "gap-direct-to-develop-ruled-historical-99f845d9", pid: 1, agentId: null }),
+      JSON.stringify({ event: "release", epoch: 101, taskId: "gap-direct-to-develop-ruled-historical-99f845d9", pid: 1, agentId: null }),
+    ].join("\n") + "\n", "utf8");
+    const r = runChecker(["--lock-events", events, "--main-agent-id", "main-sess"]);
+    assert.equal(r.status, 0, `ruled lock-events must PASS: ${r.stdout}${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    const lock = out.checks.find((c) => c.check === "agent-id-lock-events");
+    assert.equal(lock.ok, true);
+    assert.equal(lock.evaluated, true);
+    assert.equal(lock.reason, "ruled-historical-record");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integration — a NON-ruled agentId-null lock-events ⇒ still RED (exit 1, 能取假)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac67ruledneg-"));
+  try {
+    const events = path.join(dir, "fan-in-merge-lock-events.jsonl");
+    fs.writeFileSync(events, [
+      JSON.stringify({ event: "acquire", epoch: 100, taskId: "gap-ac67-w", pid: 1, agentId: null }),
+      JSON.stringify({ event: "release", epoch: 101, taskId: "gap-ac67-w", pid: 1, agentId: null }),
+    ].join("\n") + "\n", "utf8");
+    const r = runChecker(["--lock-events", events, "--main-agent-id", "main-sess"]);
+    assert.equal(r.status, 1, `non-ruled null agentId must be RED: ${r.stdout}${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    const lock = out.checks.find((c) => c.check === "agent-id-lock-events");
+    assert.equal(lock.ok, false);
+    assert.equal(lock.reason, "main-thread-executor-record");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

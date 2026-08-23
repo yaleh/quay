@@ -45,13 +45,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：`gap-direct-to-develop-ruled-historical-99f845d9` 的 lock-events/retry-record 在两个 checker 中都分类为 ruledHistorical（executor-check 的 agent-id 两项 + workflow-check 的 a/c 两项，⛔ 非 main-thread-executor、非 fan-in-without-workflow-call）。
-- [ ] AC2（能取假）：真 main-thread-executor 记录（无豁免，agentId 缺失或=主会话 id）仍红；真「未走 workflow」的其它 fan-in 仍红。
-- [ ] AC3：既有测试全绿 + 经正常 subagent fan-in land（⛔ 非 outer 主线程直提）。
+- [x] AC1：`gap-direct-to-develop-ruled-historical-99f845d9` 的 lock-events/retry-record 在两个 checker 中都分类为 ruledHistorical（executor-check 的 agent-id 两项 + workflow-check 的 a/c 两项，⛔ 非 main-thread-executor、非 fan-in-without-workflow-call）。
+- [x] AC2（能取假）：真 main-thread-executor 记录（无豁免，agentId 缺失或=主会话 id）仍红；真「未走 workflow」的其它 fan-in 仍红。
+- [x] AC3：既有测试全绿 + 经正常 subagent fan-in land（⛔ 非 outer 主线程直提）。
 
 ## Definition of Done
 
-- [ ] 两个 checker（executor-check + workflow-check）加 ruled 豁免表承载 99f845d9 应急 fan-in（含未走 workflow 属性），ruledHistorical 分类可区分，真主线程执行者/真未走 workflow 仍红，测试绿，正常 subagent fan-in land。
+- [x] 两个 checker（executor-check + workflow-check）加 ruled 豁免表承载 99f845d9 应急 fan-in（含未走 workflow 属性），ruledHistorical 分类可区分，真主线程执行者/真未走 workflow 仍红，测试绿，正常 subagent fan-in land。
 
 ## Retires
 
