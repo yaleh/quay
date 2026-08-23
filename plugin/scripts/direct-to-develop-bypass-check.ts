@@ -256,6 +256,13 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "8 处 + plugin/VERSION 均 0.6.1（version-consistency-check 'All 8 files carry version 0.6.1' 已验证），release v0.6.1 已 gh 发布（createdAt 2026-08-21T14:49:30Z）指向本提交。" +
       "先例 08e8ec55（release 0.5.0 版本 bump 同形）。outer 2026-08-21 14:5xZ 裁定 ruled one-off（先例 08e8ec55/cddc55e2）。",
   },
+  {
+    sha: "99f845d9",
+    reason:
+      "outer 直提 develop 补 plugin/skills/init/SKILL.md 的 <!-- reference-doc: --> 声明——为解 referenced-not-landed 全库红的最小止损（补一行声明），" +
+      "非偷懒绕过 fan-in（性质同 f9577da1/167b7052 类：为修机制自身而直写）。但直提 develop 本身就是错的（应走 fan-in），" +
+      "本次是我方共同的流程失误。manager 2026-08-23 裁定 ruled one-off（先例 cddc55e2/f9577da1）。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
