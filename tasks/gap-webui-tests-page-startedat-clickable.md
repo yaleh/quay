@@ -31,7 +31,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] startedAt 列 + 行可点击落地；AC1-2 全勾；land 到 develop。
+- [x] startedAt 列 + 行可点击落地；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
