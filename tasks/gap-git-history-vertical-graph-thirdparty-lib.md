@@ -38,6 +38,8 @@ depends_on: []
 
 - [x] 纵向时间轴 + 折叠展开 + 第三方库引入 + 原则废除记录落地；AC1-3 全勾；land 到 develop。
 
+
+> **手动介入记录（AC141-2 例外①）**：driver 误记 completed ⇒ 候选计算中永久排除 ⇒ 跨 round 4/5/6 两小时未重派 ⇒ inner 手动 re-trigger fan-in（判据：无记录的手动介入 ⇒ AC141-1 判假）。
 ## Retires
 
 - 无（页重做 + 原则废除，非退役机件）
