@@ -52,7 +52,7 @@ const durations = new Map(); // full path -> duration_ms
 const passedMap = new Map(); // full path -> passed bool
 const fileSet = new Set(files);
 for (const line of String(res.stderr ?? "").split("\n")) {
-  const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)$/);
+  const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)(?: end_ms=([0-9]+))?$/);
   if (m) {
     const full = m[2];
     const dur = parseFloat(m[1]);

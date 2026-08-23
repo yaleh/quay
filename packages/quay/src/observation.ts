@@ -1901,7 +1901,10 @@ export interface TestRunRecord {
   // gap-test-detail-perfile-duration-failed — the per-file wall-clock + pass/fail array
   // (`{file, durationMs, passed}[]`), landed by full-suite-runner (reusing measure-suite-reporter's
   // __PERFILE__ stream). Absent on legacy rows → undefined (never a fabricated []).
-  perFile?: { file: string; durationMs: number; passed: boolean }[] | null;
+  // gap-test-detail-timeline — `endedAtMs`/`startedAtMs` are the file's END epoch-ms (reporter
+  // `test:complete` time) and the back-computed start (end − duration); present only on rows whose
+  // perFile records carried `end_ms` (legacy perFile without timestamps omits both fields).
+  perFile?: { file: string; durationMs: number; passed: boolean; endedAtMs?: number; startedAtMs?: number }[] | null;
 }
 
 export interface TestsResult {
@@ -1933,15 +1936,19 @@ export function parseVerificationRound(line: string): TestRunRecord | null {
         return JSON.stringify(f);
       });
     }
-    let perFile: { file: string; durationMs: number; passed: boolean }[] | null = null;
+    let perFile: { file: string; durationMs: number; passed: boolean; endedAtMs?: number; startedAtMs?: number }[] | null = null;
     if (Array.isArray(o.perFile)) {
       perFile = o.perFile.map((p: unknown) => {
         if (p && typeof p === "object") {
-          const q = p as { file?: unknown; durationMs?: unknown; passed?: unknown };
+          const q = p as { file?: unknown; durationMs?: unknown; passed?: unknown; endedAtMs?: unknown; startedAtMs?: unknown };
           return {
             file: typeof q.file === "string" ? q.file : "",
             durationMs: typeof q.durationMs === "number" ? q.durationMs : 0,
             passed: q.passed === true,
+            // gap-test-detail-timeline — timestamps present only when the row carried them (absent-
+            // field contract, same as perFile itself; legacy perFile entries have neither).
+            ...(typeof q.endedAtMs === "number" ? { endedAtMs: q.endedAtMs } : {}),
+            ...(typeof q.startedAtMs === "number" ? { startedAtMs: q.startedAtMs } : {}),
           };
         }
         return { file: "", durationMs: 0, passed: false };
