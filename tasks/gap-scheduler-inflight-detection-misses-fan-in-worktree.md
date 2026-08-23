@@ -30,12 +30,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（在飞检测含直接量）：`concurrent-batch-scheduler` 的在飞集含 fan-in workflow / 刚派 worktree（`git worktree list` 直接量，⛔ 仅 telemetry 括号快照）；取假：存在 fan-in worktree 却报 0 在飞 ⇒ 假。
-- [ ] AC2（闸不误拒）：重叠场景下（在飞 A touches X + hold B touches X）`slot-refill` 的 `no_refill_reason` 非空、AC53 心跳闸接受（⛔ 仍误拒 exit 非 0 ⇒ 假）。
+- [x] AC1（在飞检测含直接量）：`concurrent-batch-scheduler` 的在飞集含 fan-in workflow / 刚派 worktree（`git worktree list` 直接量，⛔ 仅 telemetry 括号快照）；取假：存在 fan-in worktree 却报 0 在飞 ⇒ 假。
+- [x] AC2（闸不误拒）：重叠场景下（在飞 A touches X + hold B touches X）`slot-refill` 的 `no_refill_reason` 非空、AC53 心跳闸接受（⛔ 仍误拒 exit 非 0 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] 在飞检测纳入直接量 + 重叠场景闸不误拒；AC1-2 全勾；land 到 develop。
+- [x] 在飞检测纳入直接量 + 重叠场景闸不误拒；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
@@ -44,4 +44,7 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/concurrent-batch-scheduler.ts（在飞集补 fan-in workflow / 刚派 worktree 直接量）
+- plugin/scripts/slot-refill.ts（在飞集补入 touches-disjointness step-4）
+- plugin/test/concurrent-batch-scheduler.test.mjs（resolveInFlightWorktrees 单测）
+- plugin/test/slot-refill.test.mjs（AC2 重叠场景闸不误拒单测）
 - tasks/gap-scheduler-inflight-detection-misses-fan-in-worktree.md（自身）
