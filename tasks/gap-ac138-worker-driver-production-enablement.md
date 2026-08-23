@@ -1,7 +1,7 @@
 ---
 id: gap-ac138-worker-driver-production-enablement
 title: AC138 worker-driver 生产启用 + 自主处理真实任务
-status: ready
+status: done
 labels:
   - gap
 parent: null
