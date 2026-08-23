@@ -1,7 +1,7 @@
 ---
 id: gap-ac139-unified-driver-subcommand
 title: AC139 两驱动统一到 quay driver 子命令 + 单一泛化 supervisor
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -34,14 +34,14 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1（统一入口）：`quay driver <start|stop|drain|status|restart> --kind <promotion|worker>` 存在，两 kind 都能经它启停；`stop`/`drain` 分立、不支持的报错不回落。
-- [ ] AC2（单一真相源，核心）：仓库只一份 respawn 循环，两 kind 差异由 registry 表承载；取假：两个文件各有一个独立 supervisor 循环 ⇒ 假。
-- [ ] AC3（status 带 last_record_ts）：`status` 输出含末条记录时刻，⛔ 只报 `carrier_records` 计数。
-- [ ] AC4（worktree 拒绝）：承载路径由 workspace root 解析；从一个 worktree 内调 `quay driver start` 起了挂该 worktree 上的 supervisor ⇒ 假。
+- [x] AC1（统一入口）：`quay driver <start|stop|drain|status|restart> --kind <promotion|worker>` 存在，两 kind 都能经它启停；`stop`/`drain` 分立、不支持的报错不回落。
+- [x] AC2（单一真相源，核心）：仓库只一份 respawn 循环，两 kind 差异由 registry 表承载；取假：两个文件各有一个独立 supervisor 循环 ⇒ 假。
+- [x] AC3（status 带 last_record_ts）：`status` 输出含末条记录时刻，⛔ 只报 `carrier_records` 计数。
+- [x] AC4（worktree 拒绝）：承载路径由 workspace root 解析；从一个 worktree 内调 `quay driver start` 起了挂该 worktree 上的 supervisor ⇒ 假。
 
 ## Definition of Done
 
-- [ ] 统一入口 + 单一 supervisor + status last_record_ts + worktree 拒绝；AC1-4 全勾；land 到 develop。
+- [x] 统一入口 + 单一 supervisor + status last_record_ts + worktree 拒绝；AC1-4 全勾；land 到 develop。
 
 ## Retires
 
@@ -53,5 +53,8 @@ depends_on:
 - plugin/scripts/promotion-driver-launch.sh（泛化为统一 supervisor，吸收 stable-carrier 修复）
 - plugin/test/driver-cli.test.mjs (new)
 - tasks/gap-ac139-unified-driver-subcommand.md（自身）
+- packages/quay/bin/quay.ts（`driver` verb 派发路由）
+- packages/quay/src/cli/help.ts（synopsis + `quay driver` 子命令帮助）
+- packages/quay/test/cli.test.mjs（dispatch verb 集合同步 `driver`）
 
 > **注意**：registry 表（kind 差异）落点随实现（可独立 `driver-registry.ts (new)` 或并入 launch 脚本），Touches 可随实现增补。⛔ 不改两驱动业务逻辑（选择环/晋升判定/fix worker），只动承载与入口。

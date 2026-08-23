@@ -202,6 +202,8 @@ export async function run(argv, ctx = {}) {
   if (cmd === "migrate") return (await import("../src/cli/migrate.ts")).handleMigrate(ctx);
   // Manager commands (C1-C5): start/adopt/arm.
   if (cmd === "manager") return (await import("../src/cli/manager.ts")).handleManager(ctx);
+  // AC139: unified driver launch surface (start/stop/drain/status/restart --kind promotion|worker).
+  if (cmd === "driver") return (await import("../src/cli/driver.ts")).handleDriver(ctx);
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
   console.error("usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|action list|serve|mcp|manager start|manager adopt> ...\nRun `quay --help` for full usage documentation.");

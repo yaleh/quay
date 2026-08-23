@@ -44,6 +44,7 @@ Usage:
   quay manager start [--dry-run] [--json]
   quay manager adopt <root> [--dry-run] [--json]
   quay manager arm [--dry-run] [--json] [--verify]
+  quay driver <start|stop|drain|status|restart> --kind <promotion|worker> [--root <path>]
 
 Options for task list:
   --status <status>   Filter by status (todo, ready, done, needs-human, superseded)
@@ -278,6 +279,28 @@ Environment contract — when the default 'acceptance' gate spawns a command:
                     when pre-set (mirrors the QUAY_ACCEPTANCE_CWD / QUAY_ACCEPTANCE_
                     TIMEOUT_MS explicit-override-wins precedence — a pre-set env var is
                     never clobbered).
+`);
+  } else if (sub === "driver") {
+    process.stdout.write(`quay driver — start/stop/drain/status/restart the promotion & worker drivers (AC139)
+
+Usage:
+  quay driver <start|stop|drain|status|restart> --kind <promotion|worker> [--root <path>] [flags]
+
+  start      Start the resident driver under the single supervisor (respawn on exit/kill/crash).
+  stop       Hard stop: terminate the supervisor + driver. For worker, in-flight workers are NOT
+             killed (they orphan and finish) — use drain for a graceful stop.
+  drain      (worker only) Halt new dispatch WITHOUT killing in-flight workers
+             (worker-control.json halted=true). promotion does NOT support drain — error.
+  status     Report {kind, supervisor_pid, driver_pid, alive, carrier_path, carrier_records,
+             last_record_ts} — last_record_ts is the carrier's last-record timestamp (not just a
+             record count, which cannot distinguish "growing" from "stalled").
+  restart    stop then start.
+
+  --kind <promotion|worker>   Required. Which driver the command targets.
+  --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
+
+Starting from a git worktree (quay-worktrees/…) is REJECTED — the resident supervisor must be
+carried from the workspace root (main checkout), not a short-lived worktree.
 `);
   } else {
     // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
