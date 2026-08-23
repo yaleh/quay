@@ -47,6 +47,7 @@ depends_on:
 - packages/quay/src/cli/driver.ts（worker-kind 启用面：`quay driver start --kind worker`）
 - plugin/scripts/promotion-driver-launch.sh（status 取 KIND_CARRIERS 全部文件 max）
 - plugin/scripts/worker-driver.ts（worker round 等价物：无条件心跳）
+- .gitignore（worker-driver 运行时 state 模式：worker-driver.pid / .log / worker-control.json 等，⛔ 同 AC137 鸡生蛋——不列会重演脏树挡 ff）
 - tasks/gap-ac138-worker-driver-production-enablement.md（自身）
 
 > **注意**：AC3「自主处理 ≥N 任务」N 不在此拍板（硬规则 4：先无阈值跑生产分布再定）；若 AC3 在 fan-in 时刻结构上不可满足（需生产时间窗），按 AC137 先例标「（待外部）」。
