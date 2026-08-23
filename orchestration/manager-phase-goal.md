@@ -524,12 +524,67 @@ ps -eo args | grep promotion-driver ⇒ 【零命中】 （驱动【没有在跑
 AC138-2/3 的窗口**均自 AC138-1 成立之时起算**（同 AC137 的「无法起算 ≠ 未达成」逻辑，硬规则 3b）。
 **⊢ 非目标**：⛔ 不在本条重新设计 selector 语义策略（同 AC129 非目标）；⛔ 不规定 N 的具体数值。
 
+### AC139（**两驱动统一到一个 `quay` 子命令 + 单一泛化 supervisor** —— ⛔ 不造第二个重复守护脚本，人 2026-08-23 逐字裁定「我希望它们可以用一个 quay 子命令统一启动」补）
+
+**⊢ 立条时机（⛔ 这是本条最重要的一句，晚一步就变二次重构）**：
+`gap-ac138-worker-driver-production-enablement` 的 Touches 原写 **`plugin/scripts/worker-driver-launch.sh (new)`** ——
+若照此落地，仓库将出现**两个近乎重复的 244 行 bash supervisor**（`promotion-driver-launch.sh` 已 244 行）。
+**⊢ 立条当刻实测**：该任务 `status=todo`（**尚未开工**，唯一在飞 worktree 是其 dep `gap-resident-driver-stable-carrier-liveness`）
+⇒ **改 Touches 的窗口现在是开的，成本为零**；等它 land 后再统一就是重构已落地的代码。
+
+**⊢ 当前不对称（我直读两个驱动的实现，⛔ 非推断）**：
+```
+promotion-driver  承载 = promotion-driver-launch.sh:237-243  start|stop|status|restart|__supervise
+                        setsid nohup + respawn 循环 + pid 文件 + stop sentinel（:199, :215-236）
+                  实际启动 = 手工敲 bash …/launch.sh start
+worker-driver     承载 = 【无】——只有 worker-driver.ts 自身
+                  实际启动 = 【从未在生产启动过】
+```
+**⊢ 三处真实语义冲突（⛔ 直接透传会静默改变行为，不是命名问题）**：
+① **`--pid-file` 两边不同义** —— promotion-driver 写**自己的** pid（单值覆盖）；
+   worker-driver 是 **append 每个 worker 子进程的 pid**（多值追加，`worker-driver.ts:621-624`）。
+② **worker-driver 有第三种运行模式** `--serve`（MCP 控制面常驻，`:1196`），promotion-driver 没有。
+③ **停机语义是两套** —— promotion 用 stop sentinel + TERM + 兜底 `kill -9`（**杀在飞**）；
+   worker 用 `.halt` 闸（**⛔ 不杀在飞**，只挡新 spawn）。**合并成单个 `stop` 会静默改掉其中一个的行为。**
+
+**判据（四条，全部能取假）**：
+- **AC139-1（统一入口）**：`quay driver <start|stop|drain|status|restart> --kind <promotion|worker>` 存在，
+  **两个 kind 都能经它启停**（⛔ 不是只包了一个）。**⊢ `driver` 这个 verb 当前空闲**（`quay run` 已被 QENG-4 gate 驱动占用，不冲突）。
+  **⊢ `stop` 与 `drain` 必须是两个动词**（对应上述冲突③）：各 kind 声明支持哪些，**对不支持的直接报错**，
+  ⛔ 不得静默回落到另一个语义。**取假**：某 kind 只能用旧路径启动，或 `stop` 对 worker 杀了在飞 ⇒ 为假。
+- **AC139-2（单一真相源，⛔ 本条是核心）**：**仓库中只存在一份 respawn/守护循环实现**，
+  两个 kind 的差异由**一张 registry 表（数据）**承载，⛔ 非两份代码分支。
+  **取假（一条 grep 可查）**：能在两个不同文件里各找到一个独立的 supervisor/respawn 循环 ⇒ 为假。
+  **⊢ 为什么这条比"有个子命令"重要**：昨天 `promotion-driver` 整个死掉的根因（supervisor 挂在被删的 worktree 上）
+  **若发生在统一层，只需修一处** —— 正是硬规则 5b（在某处修好 X ≠ X 只在那一处）要的形态。
+- **AC139-3（status 必须带时间，⛔ 不能只带计数）**：`status` 输出含
+  `{kind, supervisor_pid, driver_pid, alive, carrier_path, carrier_records, last_record_ts}`。
+  **⊢ 理由（硬规则 4b）**：只有 `carrier_records` 计数**无法区分「在长」与「停更」** ——
+  昨天驱动死了 33 分钟无人察觉，正是因为没有这个量；**载体停更与「一切正常」同形**。
+  ⊢ 这个 `status` 同时就是 AC138-1「死亡告警」与 `gap-resident-driver-stable-carrier-liveness` AC2 的天然消费面。
+  **取假**：`status` 只报计数不报末条时刻 ⇒ 为假（因为它无法支撑死亡告警）。
+- **AC139-4（承载路径显式从 workspace root 解析）**：`start` 时脚本/入口路径由 **workspace root**
+  （`.quay/config.yml` 发现路径）解析，**且拒绝从 `quay-worktrees/` 路径启动**。
+  **⊢ ⚠️ 不得把这条当成「统一到 CLI 就自动获得」的赠品** —— 实测 `quay` **不在 PATH**（无全局安装），
+  实际调用形态是 `node packages/quay/bin/quay.js`；而既有 `manager.ts:55-63` 的解析是
+  **从模块自身位置向上找 `plugin/scripts/`** ⇒ **若 CLI 从 worktree 里的副本被调用，它会找到 worktree 的脚本，昨天的事故照样重演**。
+  **取假**：从一个 worktree 内调用 `quay driver start` 而它成功起了挂在该 worktree 上的 supervisor ⇒ 为假。
+
+**⊢ 实现形态提示（记，⛔ 不强制——落笔方可另选）**：与既有 `quay manager start|adopt|arm` 同构，
+`packages/quay/src/cli/manager.ts:70` 已是「CLI 薄层 `spawnSync` 委托给 bash 脚本」的先例，照抄该形状即可，⛔ 不必发明新架构。
+
+**⊢ 顺序约束（⛔ 硬，因文件重叠）**：`gap-resident-driver-stable-carrier-liveness` **当前在飞**
+（worktree `499a33b8`），其 Touches 含 `plugin/scripts/promotion-driver-launch.sh` —— **与本条要泛化的正是同一文件**。
+⇒ **本条必须排在它 land 之后**，且泛化后的 supervisor **必须吸收（⛔ 非回退）它对稳定承载/死亡告警的修复**。
+**⊢ 非目标**：⛔ 不在本条改两个驱动各自的**业务逻辑**（选择环语义、晋升判定、fix worker 行为）——本条只动**承载与入口**。
+
 ### 本阶段的达成条件（修正）
-**达成 = AC130 ∧ AC131 ∧ AC132 ∧ AC133 ∧ AC134 ∧ AC135 ∧ AC136 ∧ AC137 ∧ AC138。**
+**达成 = AC130 ∧ AC131 ∧ AC132 ∧ AC133 ∧ AC134 ∧ AC135 ∧ AC136 ∧ AC137 ∧ AC138 ∧ AC139。**
 **⊢ 分工提示（防「造齐机件却没接上」——AC129 那个缺口的同形）**：
 AC130–134 = **驱动能做**；**AC135 = outer 不再做（实际切换 + 退役）**；**AC136 = 观测面跟着切**；
-**AC138 = 两驱动均从「能做」变成「在生产中真的在做」——这是本次人裁定新增的第九个合取项**。
-⛔ 四者缺一，本阶段就只是「多了一个能跑的东西」而非「晋升面机械化了」。
+**AC138 = 两驱动均从「能做」变成「在生产中真的在做」——人 2026-08-23 裁定新增的第九个合取项**；
+**AC139 = 两驱动的【启动面】收敛为一个 `quay` 子命令 + 单一泛化 supervisor——人同日第二条裁定，第十个合取项**。
+⛔ 五者缺一，本阶段就只是「多了一个能跑的东西」而非「晋升面机械化了」。
 **⊢ 切换判据（人 2026-08-22 16:0xZ 明令）**：当前「结晶」阶段的**任务全部 merge** 后即切换到本阶段，
 **⛔ 不要求结晶阶段的 AC 全部满足**——未满足者随其任务 land 后由我持续核（见下）。
 **⊢ 持续观察义务（人同令，⛔ 不因阶段切换而免除）**：切换后我仍须**每轮核结晶阶段的 AC 与阶段目标**，
