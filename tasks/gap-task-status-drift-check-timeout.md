@@ -40,4 +40,5 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/task-status-drift-check.ts（超时根因）
+- plugin/test/task-status-drift-check.test.mjs（性能测试）
 - tasks/gap-task-status-drift-check-timeout.md（自身）

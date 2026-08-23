@@ -44,4 +44,7 @@ depends_on: []
 - plugin/scripts/full-suite-runner.ts（轮记录写三字段）
 - plugin/scripts/measure-suite-reporter.mjs（如涉 reporter）
 - packages/quay/src/serve-handlers.ts（消费面已写 `r.pass ?? "—"`，数据接上即显）
+- plugin/test/full-suite-runner.test.mjs（三字段测试）
+- plugin/test/measure-suite-reporter.test.mjs（如涉）
+- packages/quay/test/serve-handlers.test.mjs（计数渲染测试）
 - tasks/gap-suite-round-pass-fail-cancel-fields.md（自身）
