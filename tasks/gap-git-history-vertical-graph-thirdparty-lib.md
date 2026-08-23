@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-vertical-graph-thirdparty-lib
 title: Git History 页重做（纵向时间轴 + 第三方图库；站点级「零客户端 JS」原则废除）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
