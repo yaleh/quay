@@ -35,7 +35,7 @@
 // Run:
 //   node --experimental-strip-types plugin/scripts/worker-driver.ts \
 //     --root <repo> --task <id> [--task <id> …] [--reason "<selector reason>"] \
-//     [--concurrency <N>] [--timeout <ms>] [--worker-cmd "<argv>"] \
+//     [--concurrency <N>] [--timeout <ms>] [--worker-cmd "<prefix>"] [--worker-cmd-exact "<argv>"] \
 //     [--pid-file <path>] [--outcome <path>] [--run-id <id>] [--json]
 //   --task <id>         要跑的任务 id（可重复；无 --task ⇒ 常驻选择环——见阶段 4）
 //   --reason <r>        selector 理由（一句话「为什么选它」）；缺省 = "explicit --task selection"
@@ -43,8 +43,10 @@
 //                       再缺省 = 任务数。驱动数自己的子进程，达 cap 则等一个结束再起下一个。
 //   --timeout <ms>      单任务墙钟超时（毫秒）。缺省 0 = 无超时（SPEC §4④：先无阈值记录时长分布）。
 //                       超时 ⇒ SIGTERM worker、保留 worktree、final_state=timed-out。
-//   --worker-cmd <s>    覆盖 worker 命令（空格分隔 argv，⛔ 无 shell 元字符）。缺省 = `claude -p <prompt>`。
-//                       取假/测试缝：`node -e process.exit(7)`、`sleep 100`。
+//   --worker-cmd <s>    覆盖 worker 命令【前缀】（AC140-3 覆盖语义统一：prompt 仍作为末参数追加）。
+//                       缺省 = `quay-launch.sh task-worker -p <prompt>`（launcher/model 由 config 承载）。
+//   --worker-cmd-exact <s> 整体替换 worker 命令（测试捕获/注入专用，⛔ prompt 不进 argv）。
+//                          取假/测试缝：`node -e process.exit(7)`、`sleep 100`。
 //   --pid-file <path>   spawn 后把 worker pid 写到此文件（每 worker 一行；外部可观测 + 杀 worker 抓手）。
 //   --outcome <path>    outcome 文件，缺省 <root>/.quay/worker-outcome.jsonl
 //   --run-id <id>       run id，缺省 = `fm-<task>-<unix-ms>`
@@ -95,7 +97,7 @@
 //
 // Run（常驻选择环）:
 //   node --experimental-strip-types plugin/scripts/worker-driver.ts \
-//     --root <repo> [--concurrency <N>] [--timeout <ms>] [--worker-cmd "<argv>"] \
+//     --root <repo> [--concurrency <N>] [--timeout <ms>] [--worker-cmd "<prefix>"] [--worker-cmd-exact "<argv>"] \
 //     [--selector-cmd "<argv>"] [--ready-pool-cmd "<argv>"] [--resource-gate-cmd "<argv>"] \
 //     [--pid-file <path>] [--outcome <path>] [--run-id <id>] [--json]
 //   ⛔ 无 --task ⇒ 常驻选择环（不再报错退出）。--task 仍走显式批量派发（行为不变）。
@@ -227,16 +229,31 @@ export function appendOutcome(root: string, outcome: ReturnType<typeof computeOu
   return appendOutcomeToFile(path.join(root, WORKER_OUTCOME_REL), outcome);
 }
 
-/** 空格分隔 argv 切分（⛔ 无 shell 元字符 / 引号；用于 --worker-cmd 与默认 claude -p）。 */
+/** 空格分隔 argv 切分（⛔ 无 shell 元字符 / 引号；用于 --worker-cmd/--worker-cmd-exact 与默认 claude -p）。 */
 export function splitArgs(cmd: string): string[] {
   return cmd.trim().split(/\s+/).filter(Boolean);
 }
 
-/** 缺省 worker 命令：claude -p <full-chain prompt>（argv 形，child 即 worker，超时 SIGTERM 杀得准）。
- *  prompt 里【直接】要求 worker 以 scriptPath 调 fan-in-execute workflow——驱动直调 ⇒ A6「检查 fan-in
- *  是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
-export function defaultWorkerArgv(task: string, root: string): string[] {
-  const prompt = [
+/**
+ * 单一真相源（AC140-1）：驱动 LLM spawn 的 argv 构造——走 `quay-launch.sh <role> -p <prompt>`。
+ * launcher / model / --bare / -n 全部由 `.claude/launch.settings.json` 的 `_launchSpec.roles[<role>]`
+ * 承载（⛔ 不在驱动里硬编码 claude/wrapper/model，四处分立的 `["claude","-p",…]` 全部归到这一处）。
+ * role ∈ task-worker | selector | fix-worker。wrapper 的贡献全在 env（claude-fjdac 末行 `exec claude`），
+ * 故本 argv 只看得见 `bash` + `quay-launch.sh`——AC2 取假须读 spawn 出的 worker 进程 env（ANTHROPIC_BASE_URL）。
+ */
+export function launchArgv(role: string, prompt: string, root: string): string[] {
+  return ["bash", path.join(root, "plugin", "scripts", "quay-launch.sh"), role, "-p", prompt];
+}
+
+/** worker 命令覆盖的两个旋钮（AC140-3 覆盖语义统一）：prefix = 前缀（prompt 追加）；exact = 整体替换（测试专用）。 */
+export interface WorkerCmdOptions {
+  prefix: string | null;
+  exact: string | null;
+}
+
+/** 缺省 worker prompt（单一真相源：worker 的 full-chain prompt 内容只在此一处）。 */
+export function buildWorkerPrompt(task: string, root: string): string {
+  return [
     `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2).`,
     `Task: ${task}. Repo root: ${root}.`,
     `Run the full task chain: (1) create an isolated git worktree for ${task},`,
@@ -244,7 +261,31 @@ export function defaultWorkerArgv(task: string, root: string): string[] {
     `(4) ff-merge to develop via the fan-in-execute workflow (scriptPath, args={task,worktree,root,runId,mergeTarget}).`,
     `You own your worktree fully; apart from the final merge do not touch develop.`,
   ].join(" ");
-  return ["claude", "-p", prompt];
+}
+
+/** 按覆盖旋钮解析一个 task 的 worker argv（单一构造 + AC140-3 覆盖语义统一）：
+ *  exact 非空 ⇒ 整体替换（--worker-cmd-exact，测试捕获/注入专用，prompt 不进 argv 是预期）；
+ *  否则 prefix 非空 ⇒ 前缀 + prompt（--worker-cmd，wrapper/测试前缀可用，prompt 作为末参数追加）；
+ *  否则 ⇒ launchArgv("task-worker", prompt)（配置承载的缺省，走 quay-launch.sh）。 */
+export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOptions = { prefix: null, exact: null }): string[] {
+  const prompt = buildWorkerPrompt(task, root);
+  if (opts.exact != null) {
+    const a = splitArgs(opts.exact);
+    return a.length > 0 ? a : launchArgv("task-worker", prompt, root);
+  }
+  if (opts.prefix != null) {
+    const p = splitArgs(opts.prefix);
+    return p.length > 0 ? [...p, prompt] : launchArgv("task-worker", prompt, root);
+  }
+  return launchArgv("task-worker", prompt, root);
+}
+
+/** 缺省 worker 命令：quay-launch.sh task-worker -p <full-chain prompt>（argv 形，child 即 worker，超时
+ *  SIGTERM 杀得准）。launcher/model/--bare 由 `_launchSpec.roles["task-worker"]` 承载（AC140-2 可配）。
+ *  prompt 里【直接】要求 worker 以 scriptPath 调 fan-in-execute workflow——驱动直调 ⇒ A6「检查 fan-in
+ *  是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
+export function defaultWorkerArgv(task: string, root: string): string[] {
+  return launchArgv("task-worker", buildWorkerPrompt(task, root), root);
 }
 
 /** 常见信号的 shell 惯例退出码（128+signum）；未知信号给 0（被杀本身已是非零）。 */
@@ -500,11 +541,12 @@ export function headerValue(
   return Array.isArray(v) ? (v[0] ?? null) : String(v);
 }
 
-/** 纯函数：解析多任务输入 → { tasks, selectorReason, runPrefix, workerArgv } 或 { error }。 */
+/** 纯函数：解析多任务输入 → { tasks, selectorReason, runPrefix, workerCmdOpts } 或 { error }。 */
 export function resolveRun({
   tasks,
   reason,
   workerCmd,
+  workerCmdExact,
   root,
   runId,
   nowMs,
@@ -512,6 +554,7 @@ export function resolveRun({
   tasks: string[];
   reason: string | undefined;
   workerCmd: string | undefined;
+  workerCmdExact: string | undefined;
   root: string;
   runId: string | undefined;
   nowMs: number;
@@ -521,9 +564,12 @@ export function resolveRun({
     return { error: "no --task given in explicit mode (pass --task <id> [--task <id> …]; omit --task to run the resident selection loop)" };
   }
   const selectorReason = (reason && reason.trim()) || "explicit --task selection";
-  const workerArgv = workerCmd ? splitArgs(workerCmd) : null; // null ⇒ 每任务用 defaultWorkerArgv
-  if (workerArgv !== null && workerArgv.length === 0) return { error: "empty worker command" };
-  return { taskIds, selectorReason, runPrefix: runId || `fm-${nowMs}`, workerArgv };
+  const prefix = workerCmd != null ? workerCmd.trim() : null;      // --worker-cmd（前缀，prompt 追加）
+  const exact = workerCmdExact != null ? workerCmdExact.trim() : null; // --worker-cmd-exact（整体替换，测试专用）
+  if ((prefix !== null && splitArgs(prefix).length === 0) || (exact !== null && splitArgs(exact).length === 0)) {
+    return { error: "empty worker command" };
+  }
+  return { taskIds, selectorReason, runPrefix: runId || `fm-${nowMs}`, workerCmdOpts: { prefix, exact } };
 }
 
 // ── worker 单例运行（含超时） ─────────────────────────────────────────────────────────────────────
@@ -697,7 +743,8 @@ export function readyPoolCheck(
 }
 
 /** 缺省 selector worker 命令（短命 LLM——SPEC §1 设计点1「选择仍应是语义的」）。prompt 内联打散后的
- *  候选 id 列表，要求输出一行 `<task-id> <一句理由>`。 */
+ *  候选 id 列表，要求输出一行 `<task-id> <一句理由>`。launcher/model/--bare 由
+ *  `_launchSpec.roles["selector"]` 承载（AC140-2 可配）。 */
 export function defaultSelectorArgv(candidateIds: string[], root: string): string[] {
   const prompt = [
     `You are the resident task selector for the quay worker driver (SPEC §5 阶段 4 — AC129).`,
@@ -705,7 +752,7 @@ export function defaultSelectorArgv(candidateIds: string[], root: string): strin
     `Pick exactly ONE task to dispatch next and reply with a single line: <task-id> <one-line reason>`,
     `and nothing else. Repo root: ${root}.`,
   ].join(" ");
-  return ["claude", "-p", prompt];
+  return launchArgv("selector", prompt, root);
 }
 
 /** 解析 selector worker 输出：第一行 `<task-id> <一句理由>`。task-id 须在候选集内（⛔ 不得放行一个
@@ -794,7 +841,7 @@ export interface ResidentOptions {
   rootDir: string;
   cap: number;
   timeoutMs: number;
-  workerArgv: string[] | null;
+  workerCmdOpts: WorkerCmdOptions;
   selectorArgv: string[] | null;
   readyPoolArgv: string[] | null;
   resourceGateArgv: string[] | null;
@@ -812,7 +859,7 @@ export interface ResidentOptions {
  *   池空）⇒ 停止起新 worker，⛔ 不杀在飞（在飞 worker 全部跑完才退出）。退出码 = 首个非零 worker 码。
  */
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
-  const { rootDir, cap, timeoutMs, workerArgv, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile } = opts;
+  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile } = opts;
 
   // checkout 前 stash（阶段 2 ③）：主检出脏 ⇒ stash 一次（常驻循环起跑前），⛔ 不 discard。非 git no-op。
   const stash = stashIfDirty(rootDir);
@@ -844,7 +891,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       taskId: sel.task,
       selectorReason: sel.reason,
       runId: runIdForTask,
-      workerArgv: workerArgv ?? defaultWorkerArgv(sel.task, rootDir),
+      workerArgv: workerArgvForTask(sel.task, rootDir, workerCmdOpts),
       rootDir,
       outcomeFile,
       timeoutMs,
@@ -1144,6 +1191,7 @@ export async function main(argv: string[]): Promise<number> {
   const tasks: string[] = [];
   let reason: string | undefined;
   let workerCmd: string | undefined;
+  let workerCmdExact: string | undefined;
   let selectorCmd: string | undefined;
   let readyPoolCmd: string | undefined;
   let resourceGateCmd: string | undefined;
@@ -1163,6 +1211,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--task") tasks.push(args[++i]);
     else if (a === "--reason") reason = args[++i];
     else if (a === "--worker-cmd") workerCmd = args[++i];
+    else if (a === "--worker-cmd-exact") workerCmdExact = args[++i];
     else if (a === "--selector-cmd") selectorCmd = args[++i];
     else if (a === "--ready-pool-cmd") readyPoolCmd = args[++i];
     else if (a === "--resource-gate-cmd") resourceGateCmd = args[++i];
@@ -1177,9 +1226,9 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--port") port = Number(args[++i]);
     else if (a === "--help" || a === "-h") {
       console.log(
-        "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 claude -p worker（并发 N + 超时 SIGTERM + checkout 前 stash + MCP 控制面 + 常驻选择环）\n" +
+        "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + checkout 前 stash + MCP 控制面 + 常驻选择环）\n" +
           "  --task <id> [--task <id> …] [--reason \"<一句为什么选它>\"] [--concurrency <N>] [--timeout <ms>]\n" +
-          "  [--root <repo>] [--worker-cmd \"<argv>\"] [--pid-file <p>] [--outcome <p>] [--run-id <id>] [--json]\n" +
+          "  [--root <repo>] [--worker-cmd \"<前缀>\"] [--worker-cmd-exact \"<argv>\"] [--pid-file <p>] [--outcome <p>] [--run-id <id>] [--json]\n" +
           "  ⛔ 无 --task ⇒ 常驻选择环（不再报错退出）\n" +
           "  [--selector-cmd \"<argv>\"] [--ready-pool-cmd \"<argv>\"] [--resource-gate-cmd \"<argv>\"]\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
@@ -1214,7 +1263,7 @@ export async function main(argv: string[]): Promise<number> {
       rootDir,
       cap,
       timeoutMs,
-      workerArgv: workerCmd ? splitArgs(workerCmd) : null,
+      workerCmdOpts: { prefix: workerCmd ?? null, exact: workerCmdExact ?? null },
       selectorArgv: selectorCmd ? splitArgs(selectorCmd) : null,
       readyPoolArgv: readyPoolCmd ? splitArgs(readyPoolCmd) : null,
       resourceGateArgv: resourceGateCmd ? splitArgs(resourceGateCmd) : null,
@@ -1226,12 +1275,12 @@ export async function main(argv: string[]): Promise<number> {
     });
   }
 
-  const resolved = resolveRun({ tasks, reason, workerCmd, root: rootDir, runId, nowMs: Date.now() });
+  const resolved = resolveRun({ tasks, reason, workerCmd, workerCmdExact, root: rootDir, runId, nowMs: Date.now() });
   if (resolved.error) {
     console.error(`worker-driver: ${resolved.error}`);
     return 2;
   }
-  const { taskIds, selectorReason, runPrefix, workerArgv: sharedWorkerArgv } = resolved;
+  const { taskIds, selectorReason, runPrefix, workerCmdOpts } = resolved;
   const cap = resolveConcurrency(concurrency, taskIds.length);
 
   // checkout 前 stash（阶段 2 ③，AC2）：主检出有未提交变更 ⇒ stash，⛔ 不 discard。非 git 仓库 no-op。
@@ -1263,7 +1312,7 @@ export async function main(argv: string[]): Promise<number> {
       return;
     }
     inFlight += 1;
-    const argv = sharedWorkerArgv ?? defaultWorkerArgv(taskId, rootDir);
+    const argv = workerArgvForTask(taskId, rootDir, workerCmdOpts);
     const r = await runOneWorker({
       taskId, selectorReason, runId: runIdForTask, workerArgv: argv, rootDir, outcomeFile,
       timeoutMs, inFlightCount: inFlight, json, pidFile,
