@@ -1,7 +1,7 @@
 ---
 id: gap-fix-worker-edit-exit-4
 title: fix-worker claude -p 编辑型任务 exit=4（根因待 stderr 定位，⛔ kimi 为待验证候选）
-status: ready
+status: done
 labels:
   - gap
 parent: null
