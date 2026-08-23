@@ -1,7 +1,7 @@
 ---
 id: gap-test-detail-load-timeseries
 title: Test 详情 ②——suite 运行期系统负载时间序列采样（新增采样器）
-status: done
+status: ready
 labels:
   - gap
 parent: null
