@@ -123,6 +123,12 @@ export const ENFORCEMENT_BASELINE_EPOCH = 1786701510;
  * missing/unresolvableDispatch — never conflated with "all-fan-in-have-workflow-call"). BOUNDED: it
  * only covers the RULED cases already listed here; any NEW direct-landing NOT in this table stays in
  * the difference and goes RED (能取假 — the exemption cannot be extended silently).
+ *
+ * ⚠️ 判据2(c) 复用 (tasks/gap-fan-in-ff-executor-check-ruled-historical-99f845d9): 同一张表也喂给
+ * `checkAgentIds`（c 项 agent-id 判定）——一个 ruled 直投（未走 workflow）往往同时未传 --agent-id
+ * （主线程调用形态），故 a 项（未走 workflow）与 c 项（agent-id 非 subagent）命中同一张表、同一 taskId。
+ * c 项命中的记录分类为 ruledHistorical（reason `lock-event-agent-id-ruled-historical`），非
+ * `lock-event-agent-id-not-subagent`（violation）——输出可区分。豁免表有界，未入表任务仍红。
  */
 export const RULED_HISTORICAL_GAPS: { taskId: string; reason: string }[] = [
   {
@@ -135,6 +141,15 @@ export const RULED_HISTORICAL_GAPS: { taskId: string; reason: string }[] = [
       "fan-in-ff-merge.sh, NOT the workflow. Ruling evidence: manager-phase-goal.md:226 (「未定案，留 outer/inner」) + " +
       ":681 (「AC81 doc-only 落地走的是 fan-in-ff-merge.sh 而非本 workflow」). Ruling = classification, NOT " +
       "retrospective dispatch (tasks/gap-fan-in-workflow-ruled-historical-gap-exempt).",
+  },
+  {
+    taskId: "gap-direct-to-develop-ruled-historical-99f845d9",
+    reason:
+      "manager 授权的应急 fan-in——outer 主会话为解红#4 直接走 fan-in-ff-merge.sh 落地本任务" +
+      "（未走 fan-in-execute workflow + 未传 --agent-id），非常规主线程绕过 subagent；" +
+      "该形态本轮后不应再发生（正确路径是让 worker-driver 正常派发 subagent fan-in）。" +
+      "manager 2026-08-23 裁定 ruled one-off（同 99f845d9 类，先例 direct-to-develop-bypass-check.ts 的" +
+      " RULED_HISTORICAL_COMMITS）。",
   },
 ];
 
@@ -455,26 +470,45 @@ export function classifyAgentId(
  * 判据2(c): judge every lock event after the boundary — its agentId must be a real subagent id.
  * RED on 'missing' (ff called without --agent-id = main-thread form), 'top-level-session'
  * (the old AC72/AC73 defect), or 'unresolvable' (not any real identifier).
+ * ⚠️ Ruled-historical 豁免：taskId 命中 `ruledHistoricalTasks`（同 RULED_HISTORICAL_GAPS 表，manager
+ * 裁定的应急主线程 fan-in one-off）⇒ 该记录分类为 ruledHistorical（reason `lock-event-agent-id-
+ * ruled-historical`），非 violation——两类在输出里可区分；豁免表有界，未入表任务仍红（能取假）。
  */
 export function checkAgentIds(
   events: LockEvent[],
   topLevelStems: string[],
-  subagentStems: string[]
-): { ok: boolean; evaluated: boolean; violations: { taskId?: string; agentId?: string | null; kind: string }[] } {
+  subagentStems: string[],
+  ruledHistoricalTasks: { taskId: string; reason: string }[] = []
+): {
+  ok: boolean;
+  evaluated: boolean;
+  violations: { taskId?: string; agentId?: string | null; kind: string }[];
+  ruledHistorical: { taskId: string; reason: string }[];
+} {
   if (events.length === 0) {
-    return { ok: true, evaluated: false, reason: "no-events-after-boundary (NOT-EVALUATED)", violations: [] };
+    return { ok: true, evaluated: false, reason: "no-events-after-boundary (NOT-EVALUATED)", violations: [], ruledHistorical: [] };
   }
+  const ruledByTask = new Map((ruledHistoricalTasks ?? []).map((g) => [g.taskId, g.reason]));
   const violations: { taskId?: string; agentId?: string | null; kind: string }[] = [];
+  const ruledHistorical: { taskId: string; reason: string }[] = [];
   for (const r of events) {
     const kind = classifyAgentId(r.agentId, topLevelStems, subagentStems);
     if (kind !== "subagent") {
-      violations.push({ taskId: r.taskId, agentId: r.agentId, kind });
+      const ruledReason = r.taskId != null ? ruledByTask.get(r.taskId) : undefined;
+      if (ruledReason != null) {
+        ruledHistorical.push({ taskId: r.taskId!, reason: ruledReason });
+      } else {
+        violations.push({ taskId: r.taskId, agentId: r.agentId, kind });
+      }
     }
   }
   if (violations.length > 0) {
-    return { ok: false, evaluated: true, reason: "lock-event-agent-id-not-subagent", violations };
+    return { ok: false, evaluated: true, reason: "lock-event-agent-id-not-subagent", violations, ruledHistorical };
   }
-  return { ok: true, evaluated: true, reason: "lock-event-agent-id-is-subagent", violations: [] };
+  if (ruledHistorical.length > 0) {
+    return { ok: true, evaluated: true, reason: "lock-event-agent-id-ruled-historical", violations: [], ruledHistorical };
+  }
+  return { ok: true, evaluated: true, reason: "lock-event-agent-id-is-subagent", violations: [], ruledHistorical: [] };
 }
 
 // ── Pure: d — escalation traceability (gap-ff-livelock-trigger-no-action) ───────────────────────────
@@ -800,7 +834,7 @@ export function main(argv: string[]): number {
     // ── 判据2(c) — agentId is a real subagent ──────────────────────────────────────────────────
     const topLevel = topLevelSessionStems(projectDir);
     const subAgents = subagentStems(projectDir);
-    const vC = checkAgentIds(events, topLevel, subAgents);
+    const vC = checkAgentIds(events, topLevel, subAgents, RULED_HISTORICAL_GAPS);
     if (vC.evaluated) {
       anyEvaluated = true;
       if (!vC.ok) anyRed = true;
@@ -850,6 +884,7 @@ export function main(argv: string[]): number {
       if (c.knownPreBaselineDebt?.length) console.log(`    known pre-baseline debt (dispatch before enforcement baseline, recorded non-blocking): ${c.knownPreBaselineDebt.join(", ")}`);
       if (c.unresolvableDispatch?.length) console.log(`    unresolvable dispatch (in difference, fail-closed): ${c.unresolvableDispatch.join(", ")}`);
       if (c.ruledHistoricalGaps?.length) for (const g of c.ruledHistoricalGaps) console.log(`    ruled-historical-gap exempt (classification, visible+auditable): ${g.taskId} — ${g.reason}`);
+      if (c.ruledHistorical?.length) for (const g of c.ruledHistorical) console.log(`    ruled-historical exempt (agent-id, classification, visible+auditable): ${g.taskId} — ${g.reason}`);
       if (c.violations?.length) for (const v of c.violations) console.log(`    ${v.taskId ?? "?"}: agentId ${v.agentId ?? "<null>"} → ${v.kind}`);
     }
   }
