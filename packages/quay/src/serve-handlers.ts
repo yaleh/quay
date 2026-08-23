@@ -1940,6 +1940,8 @@ export interface GitGraphLayout {
   branches: GitGraphBranchLane[];
   commitCount: number;
   mergeCount: number;
+}
+
 /**
  * Compute the vertical graph structure: a trunk (the first-parent chain from HEAD) + one lateral
  * lane per branch that forks from and merges back into the trunk. PURE and deterministic on its
