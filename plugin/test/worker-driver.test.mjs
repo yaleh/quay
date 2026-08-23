@@ -64,6 +64,8 @@ import {
   CONTROL_CALLERS_ENV,
   CONTROL_HEADER,
   serveControlPlane,
+  defaultLivenessCheckArgv,
+  runLivenessCheck,
 } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -969,6 +971,76 @@ test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome s
   assert.ok(last.ts, "round record carries a ts field (the supervisor's last_record_ts reads it)");
   // ⛔ 取假对照组：outcome 在池空轮【不写】——正是 round 存在的理由（outcome 停更 ≠ 死亡）。
   assert.equal(readOutcomeLines(root).length, 0, "no outcome on a pool-empty round; round is the unconditional carrier");
+});
+
+// ── liveness 接线（gap-resident-driver-stable-carrier-liveness Finding：liveness 子命令零调用者）──
+// AC2 承诺「driver/supervisor 死时有机件在窗口内检测并报告」，但此前没有任何东西调 liveness 子命令
+// （log 13h 无更新）。修法 = driver 自身 round 循环每轮顺手调一次。本组验证：①defaultLivenessCheckArgv
+// 复用 launch 脚本 liveness 子命令（⛔ 不重写存活判定）、②runLivenessCheck 的 checked/deaths 语义
+// （checked=false = 未查成，⛔ 不是健康）、③resident loop 每轮真调它（counter 缝）。
+
+test("defaultLivenessCheckArgv — reuse the launch script liveness subcommand; kind from file identity", () => {
+  const argv = defaultLivenessCheckArgv("/r", "worker");
+  assert.equal(argv[0], "bash");
+  assert.equal(argv[1], "/r/plugin/scripts/promotion-driver-launch.sh");
+  assert.equal(argv[2], "liveness");
+  assert.deepEqual(argv.slice(argv.indexOf("--kind"), argv.indexOf("--kind") + 2), ["--kind", "worker"]);
+  assert.deepEqual(argv.slice(argv.indexOf("--root"), argv.indexOf("--root") + 2), ["--root", "/r"]);
+  assert.ok(argv.includes("--json"), "machine-readable verdict (the driver parses deaths/running)");
+  // 同一函数传不同 kind（promotion-driver.ts 传 promotion）。
+  const promo = defaultLivenessCheckArgv("/r", "promotion");
+  assert.deepEqual(promo.slice(promo.indexOf("--kind"), promo.indexOf("--kind") + 2), ["--kind", "promotion"]);
+});
+
+test("runLivenessCheck — checked/deaths/running semantics (checked=false = NOT evaluated, ⛔ not healthy)", () => {
+  // 健康：deaths=none ⇒ deaths 归一为 null + checked=true。
+  assert.deepEqual(
+    runLivenessCheck("/r", "worker", ["node", "-e", "console.log(JSON.stringify({deaths:'none',running:true}))"]),
+    { checked: true, deaths: null, running: true },
+  );
+  // 检出死亡：deaths 非空 ⇒ 原样带上（supervisor_dead 是 AC3 的真实告警）。
+  assert.deepEqual(
+    runLivenessCheck("/r", "worker", ["node", "-e", "console.log(JSON.stringify({deaths:'supervisor_dead,driver_orphaned',running:false}))"]),
+    { checked: true, deaths: "supervisor_dead,driver_orphaned", running: false },
+  );
+  // 退出 1（liveness 子命令检出死亡的退出码）仍算「查过」——stdout 有 deaths JSON。
+  const exit1 = runLivenessCheck("/r", "worker", ["node", "-e", "console.log(JSON.stringify({deaths:'driver_dead',running:false}));process.exit(1)"]);
+  assert.deepEqual(exit1, { checked: true, deaths: "driver_dead", running: false });
+  // 脚本缺失 ⇒ checked=false（未查成），⛔ 不是「健康」（硬规则 3b：无法评估 ≠ 合格）。
+  assert.deepEqual(
+    runLivenessCheck("/r", "worker", ["bash", "/nonexistent/promotion-driver-launch.sh", "liveness"]),
+    { checked: false, deaths: null, running: false },
+  );
+});
+
+test("liveness wiring — resident loop calls the liveness checker each round (Finding AC2 no-caller fix)", (t) => {
+  // 用 git root + done 任务（镜像 AC1 resident-loop 测试），worker 落地 → 驱动干净退出 0，
+  // 免得 exit 3（exited-not-landed）盖住本测试真正要验的 liveness 接线。
+  const root = makeGitRoot("liveness-wire");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-a", "done");
+  writeTaskFile(root, "gap-b", "done");
+  const rpcFile = path.join(root, "rpc.cnt");
+  const selFile = path.join(root, "sel.cnt");
+  const livenessCnt = path.join(root, "liveness.cnt");
+  // ready-pool 返回 2 个候选 → 选择环起 2 个 worker → 每轮一个 liveness 检查。
+  runDriver(root, [
+    "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n<=1?['gap-a','gap-b']:[],pool:n<=1?2:0})"),
+    "--selector-cmd", counterNodeE(selFile, "n===0?'gap-a\\x20first-pick':n===1?'gap-b\\x20second-pick':'gap-a\\x20again'"),
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--concurrency", "2",
+    "--liveness-cmd", counterNodeE(livenessCnt, "JSON.stringify({kind:'worker',deaths:'none',running:true})"),
+    "--json",
+  ]);
+  const rounds = readRoundLines(root);
+  const livenessCount = Number(fs.readFileSync(livenessCnt, "utf8"));
+  assert.equal(livenessCount, rounds.length, `liveness checked once per round (${rounds.length} rounds ⇒ ${livenessCount} checks)`);
+  assert.ok(rounds.length >= 1, "at least one round ran");
+  for (const rec of rounds) {
+    assert.equal(rec.liveness.checked, true, `round carries liveness.checked=true: ${JSON.stringify(rec.liveness)}`);
+    assert.equal(rec.liveness.deaths, null, "healthy check ⇒ deaths=null");
+  }
 });
 
 // ── AC140（可配 wrapper + model + 按 role；单一真相源；覆盖语义统一）──────────────────────────────

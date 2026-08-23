@@ -309,6 +309,54 @@ export function appendOutcome(root: string, outcome: ReturnType<typeof computeOu
   return appendOutcomeToFile(path.join(root, WORKER_OUTCOME_REL), outcome);
 }
 
+// ── liveness 检查（gap-resident-driver-stable-carrier-liveness Finding：liveness 子命令零调用者）──
+// AC2 承诺的「driver/supervisor 死时有机件在窗口内检测并报告」此前没有任何东西触发 liveness 子命令
+// （log 13h 无更新）。修法（Finding）：driver 自身 round 循环每轮顺手调一次 liveness——supervisor 死后
+// driver 成孤儿仍在跑，它的下一轮即检出 supervisor_dead 并让 liveness 子命令写 DEATH 告警（⛔ 载体停更
+// ≠ 一切正常）。复用的是 launch 脚本已测的 liveness 子命令（单一真相源），⛔ 不在驱动里重写存活判定。
+
+/** liveness 检查的 wall-clock 上限（spawnSync timeout，毫秒）。轻量（kill -0 判定），远小于 round。 */
+export const LIVENESS_CHECK_TIMEOUT_MS = 10_000;
+
+/** 缺省 liveness 检查命令：复用 promotion-driver-launch.sh 的 liveness 子命令（单一真相源）。kind 是
+ *  驱动文件身份（worker-driver.ts 恒 worker；promotion-driver.ts 恒 promotion，同函数传不同 kind）。
+ *  exit 0 = 健康（deaths=none），exit 1 = 检出死亡（deaths 非空）——两者都是「查过」。 */
+export function defaultLivenessCheckArgv(root: string, kind: "promotion" | "worker"): string[] {
+  return [
+    "bash", path.join(root, "plugin", "scripts", "promotion-driver-launch.sh"),
+    "liveness", "--kind", kind, "--root", root, "--json",
+  ];
+}
+
+/** 单轮 liveness 检查结果。checked=false ⇒ 未查成（launch 脚本缺失 / spawn 失败 / 输出不可解析）——
+ *  这是「未评估」，⛔ 不是「健康」（硬规则 3b：无法评估 ≠ 合格，独立取值）。deaths=null + checked=true
+ *  ⇒ 查过且健康（deaths=none）；deaths 非空 ⇒ 查过且检出死亡。running = supervisor_alive && driver_alive。 */
+export interface LivenessResult {
+  checked: boolean;
+  deaths: string | null;
+  running: boolean;
+}
+
+/** 跑一次 liveness 检查（复用 launch 脚本 liveness 子命令，⛔ 不重写存活判定）。cmd 覆盖命令（测试缝，
+ *  同 --ready-pool-cmd/--selector-cmd 的形状）；缺省 = defaultLivenessCheckArgv(root, kind)。 */
+export function runLivenessCheck(root: string, kind: "promotion" | "worker", cmd: string[] | null = null): LivenessResult {
+  const argv = cmd ?? defaultLivenessCheckArgv(root, kind);
+  try {
+    const r = spawnSync(argv[0], argv.slice(1), {
+      encoding: "utf8", timeout: LIVENESS_CHECK_TIMEOUT_MS, maxBuffer: 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    // 脚本缺失 ⇒ bash exit 127、stdout 空 ⇒ JSON.parse 抛 ⇒ catch 归 checked:false；spawn 失败 / 无状态
+    // 亦归 checked:false（未查成）。exit 1（检出死亡）r.error 为 null ⇒ 正常走 parse。
+    if (r.error || r.status === null) return { checked: false, deaths: null, running: false };
+    const j = JSON.parse(String(r.stdout ?? "").trim());
+    const deaths = j && typeof j.deaths === "string" && j.deaths !== "none" && j.deaths !== "" ? String(j.deaths) : null;
+    return { checked: true, deaths, running: !!j.running };
+  } catch {
+    return { checked: false, deaths: null, running: false };
+  }
+}
+
 /**
  * 一条 worker round 记录（AC138-3 无条件心跳）：⛔ 与 outcome 分工——outcome 只在任务真完成（或
  * 终态）时写，池空时 outcome 停更会被 supervisor status 的 last_record_ts（读全载体 max）误读为
@@ -324,6 +372,7 @@ export function computeWorkerRoundRecord(opts: {
   inFlight: number;
   pool: number | null;
   stopReason: string | null;
+  liveness?: LivenessResult | null;
 }) {
   return {
     ts: opts.at,
@@ -334,6 +383,7 @@ export function computeWorkerRoundRecord(opts: {
     in_flight: opts.inFlight,
     pool: opts.pool,
     stop_reason: opts.stopReason,
+    liveness: opts.liveness ?? null,
   };
 }
 
@@ -989,6 +1039,8 @@ export interface ResidentOptions {
   runPrefix: string;
   json: boolean;
   pidFile?: string;
+  /** liveness 检查命令覆盖（测试缝）；null = 用 defaultLivenessCheckArgv(rootDir, "worker")。 */
+  livenessCmd: string[] | null;
 }
 
 /**
@@ -998,7 +1050,7 @@ export interface ResidentOptions {
  *   池空）⇒ 停止起新 worker，⛔ 不杀在飞（在飞 worker 全部跑完才退出）。退出码 = 首个非零 worker 码。
  */
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
-  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile } = opts;
+  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd } = opts;
 
   // checkout 前 stash（阶段 2 ③）：主检出脏 ⇒ stash 一次（常驻循环起跑前），⛔ 不 discard。非 git no-op。
   const stash = stashIfDirty(rootDir);
@@ -1013,7 +1065,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // round 心跳（AC138-3）：worker-outcome 只在任务真完成时写，池空时 outcome 停更会被 supervisor
   // status 的 last_record_ts（读全载体 max）误读为「死亡」；round 每轮循环无条件写一条作 liveness 直接量。
   const roundFile = path.join(rootDir, WORKER_ROUND_REL);
-  const writeRound = (round: number, inFlight: number, pool: number | null, reason: string | null): void => {
+  const writeRound = (round: number, inFlight: number, pool: number | null, reason: string | null, liveness: LivenessResult | null): void => {
     const record = computeWorkerRoundRecord({
       round,
       runId: runId ?? runPrefix,
@@ -1023,6 +1075,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       inFlight,
       pool,
       stopReason: reason,
+      liveness,
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -1072,6 +1125,11 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   while (true) {
     round += 1;
 
+    // liveness 检查（gap-resident-driver-stable-carrier-liveness Finding 的接线）：每轮顺手调一次
+    // launch 脚本的 liveness 子命令。supervisor 死后 driver 成孤儿仍在跑 ⇒ 下一轮即检出 supervisor_dead
+    // 并让子命令写 DEATH 告警（⛔ 载体停更 ≠ 一切正常）。checked=false（脚本缺失/失败）≠ 健康（硬规则 3b）。
+    const liveness = runLivenessCheck(rootDir, "worker", livenessCmd);
+
     // 1. reap 已完成的 worker（减在飞集）。
     for (let i = running.length - 1; i >= 0; i--) {
       if (running[i].done) running.splice(i, 1);
@@ -1103,7 +1161,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     }
 
     // AC138-3 无条件心跳：每轮循环写一条（⛔ 池空/判停轮也写——outcome 在这些轮不写）。
-    writeRound(round, running.length, poolSeen, stopReason);
+    writeRound(round, running.length, poolSeen, stopReason, liveness);
 
     // 3. 无在飞 ⇒ 循环终了（判停，或池已排空）。
     if (running.length === 0) break;
@@ -1360,6 +1418,7 @@ export async function main(argv: string[]): Promise<number> {
   let selectorCmd: string | undefined;
   let readyPoolCmd: string | undefined;
   let resourceGateCmd: string | undefined;
+  let livenessCmd: string | undefined;
   let concurrency: number | undefined;
   let timeoutRaw: string | undefined;
   let pidFile: string | undefined;
@@ -1380,6 +1439,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--selector-cmd") selectorCmd = args[++i];
     else if (a === "--ready-pool-cmd") readyPoolCmd = args[++i];
     else if (a === "--resource-gate-cmd") resourceGateCmd = args[++i];
+    else if (a === "--liveness-cmd") livenessCmd = args[++i];
     else if (a === "--concurrency") concurrency = Number(args[++i]);
     else if (a === "--timeout") timeoutRaw = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
@@ -1395,7 +1455,7 @@ export async function main(argv: string[]): Promise<number> {
           "  --task <id> [--task <id> …] [--reason \"<一句为什么选它>\"] [--concurrency <N>] [--timeout <ms>]\n" +
           "  [--root <repo>] [--worker-cmd \"<前缀>\"] [--worker-cmd-exact \"<argv>\"] [--pid-file <p>] [--outcome <p>] [--run-id <id>] [--json]\n" +
           "  ⛔ 无 --task ⇒ 常驻选择环（不再报错退出）\n" +
-          "  [--selector-cmd \"<argv>\"] [--ready-pool-cmd \"<argv>\"] [--resource-gate-cmd \"<argv>\"]\n" +
+          "  [--selector-cmd \"<argv>\"] [--ready-pool-cmd \"<argv>\"] [--resource-gate-cmd \"<argv>\"] [--liveness-cmd \"<argv>\"]\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -1437,6 +1497,7 @@ export async function main(argv: string[]): Promise<number> {
       runPrefix: runId || `fm-${Date.now()}`,
       json,
       pidFile,
+      livenessCmd: livenessCmd ? splitArgs(livenessCmd) : null,
     });
   }
 
