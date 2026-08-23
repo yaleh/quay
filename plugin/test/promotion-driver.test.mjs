@@ -47,6 +47,7 @@ import {
   classifyCandidate,
   buildFixWorkerPrompt,
   buildFixWorkerArgv,
+  spawnFixWorker,
   runFixPass,
   computeReverifyOutcome,
   advanceRetryCap,
@@ -56,6 +57,7 @@ import {
   INTERVAL_MS_DEFAULT,
   CAP_DEFAULT,
   MAX_FIX_RETRIES_DEFAULT,
+  FIX_WORKER_TIMEOUT_MS,
 } from "../scripts/promotion-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -485,8 +487,37 @@ test("runFixPass — fixable spawns (exit 0), unfixable records reason without s
     { id: "gap-nofix", fixable: false, missing: [], unfixable: ["depsReady=false"], prompt: null },
   ];
   const outcomes = runFixPass(decisions, root, "node -e process.exit(0)");
-  assert.deepEqual(outcomes[0], { id: "gap-fix", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 0 });
-  assert.deepEqual(outcomes[1], { id: "gap-nofix", spawned: false, missing: [], unfixable: ["depsReady=false"], exitCode: null });
+  assert.deepEqual(outcomes[0], { id: "gap-fix", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 0, stderr: null, timedOut: false });
+  assert.deepEqual(outcomes[1], { id: "gap-nofix", spawned: false, missing: [], unfixable: ["depsReady=false"], exitCode: null, stderr: null, timedOut: false });
+});
+
+test("AC142 AC1 — spawnFixWorker captures stderr; outcome result.detail carries it (spawn 失败不再零诊断)", (t) => {
+  const root = makeRoot("ac142-ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 一个写 stderr + exit 1 的 fix worker（模拟认证失败/报错——之前 10 条 spawned exit=1 零 stderr 不可诊断）。
+  const r = spawnFixWorker(["node", "-e", "process.stderr.write('AUTH-ERROR: no credentials');process.exit(1)"], root);
+  assert.equal(r.exitCode, 1, "spawn exit 1 is still captured");
+  assert.equal(r.timedOut, false);
+  assert.ok(r.stderr && r.stderr.includes("AUTH-ERROR"), `stderr captured (⛔ 不再 ignore): ${JSON.stringify(r.stderr)}`);
+
+  // 诊断面落进可查载体（promotion-outcome.jsonl 的 result.detail）：spawn 失败时带 stderr 截断。
+  const recs = computeOutcomeRecords({
+    at: "t",
+    applied: [],
+    fixes: [{ id: "gap-x", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 1, stderr: r.stderr, timedOut: false }],
+  });
+  const fix = recs.find((o) => o.action === "fix");
+  assert.equal(fix.result.ok, false);
+  assert.ok(fix.result.detail.includes("stderr=AUTH-ERROR"), `detail carries stderr: ${fix.result.detail}`);
+});
+
+test("AC142 AC1 — spawnFixWorker timeout ⇒ timedOut=true + error (ETIMEDOUT), exitCode null", (t) => {
+  const root = makeRoot("ac142-timeout");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const r = spawnFixWorker(["sleep", "5"], root, 300);
+  assert.equal(r.timedOut, true, "timeout fired ⇒ timedOut=true");
+  assert.ok(r.error, "timeout produces an error");
+  assert.equal(r.exitCode, null, "no exit code on timeout");
 });
 
 test("AC132 AC2 — DoD<40 todo ⇒ fix worker prompt contains the structured missing identifier (falsifiable)", (t) => {

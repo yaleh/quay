@@ -83,6 +83,10 @@ export const MAX_FIX_RETRIES_DEFAULT = 3;
 /** ready-pool-check 单轮的 wall-clock 上限（spawnSync timeout，毫秒）。 */
 export const ROUND_TIMEOUT_MS = 180_000;
 
+/** fix worker spawn 的 wall-clock 上限（spawnSync timeout，毫秒）——AC142 诊断面：与 ready-pool-check 的
+ *  ROUND_TIMEOUT_MS 同值（runPromotionRound 已用该值，⛔ 不为 fix worker 另设阈值——硬规则 4 推论）。 */
+export const FIX_WORKER_TIMEOUT_MS = 180_000;
+
 /** 配置声明的 LLM 命令集缺省（AC140-4：判定读集合，⛔ 不靠 `base === "claude"` 字面量）。
  *  形态先落缺省 ["claude"]；后续 AC140-2 把集做成 .quay/config.yml 可配（wrapper 如 claude-fjdac）。 */
 export const LLM_COMMAND_SET_DEFAULT: readonly string[] = ["claude"];
@@ -202,16 +206,37 @@ export function buildFixWorkerArgv(id: string, missing: string[], root: string, 
   return launchArgv("fix-worker", prompt, root);
 }
 
+/** spawn 一个短命 fix worker 的结果（AC142 诊断面：stdout/stderr/timedOut 落进可查载体，spawn 失败
+ *  不再零诊断信息——对照 gap-fix-worker-spawn-zero-diagnostic-info 的 10 条 `spawned exit=1` 无 stderr）。 */
+export interface FixWorkerSpawnResult {
+  exitCode: number | null;
+  error: string | null;
+  stdout: string | null;
+  stderr: string | null;
+  timedOut: boolean;
+}
+
 /** spawn 一个短命 fix worker（claude -p，或 --fix-worker-cmd 覆盖前缀），同步等待其退出。
- *  返回退出码 / spawn 错误。AC132：spawn 即达成；⛔ 不验证修没修好（AC133），⛔ 不信 worker 自述。 */
-export function spawnFixWorker(argv: string[], root: string): { exitCode: number | null; error: string | null } {
-  if (!Array.isArray(argv) || argv.length === 0) return { exitCode: null, error: "empty fix-worker argv" };
+ *  捕获 stdout/stderr + timeout（AC142 AC1：对照 runPromotionRound 的 stdio:["ignore","pipe","ignore"]
+ *  + ROUND_TIMEOUT_MS）。返回退出码 / spawn 错误 / 捕获面。AC132：spawn 即达成；⛔ 不验证修没修好
+ *  （AC133），⛔ 不信 worker 自述。 */
+export function spawnFixWorker(argv: string[], root: string, timeoutMs: number = FIX_WORKER_TIMEOUT_MS): FixWorkerSpawnResult {
+  if (!Array.isArray(argv) || argv.length === 0) {
+    return { exitCode: null, error: "empty fix-worker argv", stdout: null, stderr: null, timedOut: false };
+  }
   try {
-    const r = spawnSync(argv[0], argv.slice(1), { cwd: root, encoding: "utf8", stdio: ["ignore", "ignore", "ignore"] });
-    if (r.error) return { exitCode: null, error: String(r.error.message || r.error) };
-    return { exitCode: r.status, error: null };
+    const r = spawnSync(argv[0], argv.slice(1), {
+      cwd: root, encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdout = String(r.stdout ?? "").trim() || null;
+    const stderr = String(r.stderr ?? "").trim() || null;
+    const timedOut = !!(r.error && (r.error as { code?: string }).code === "ETIMEDOUT");
+    if (r.error) return { exitCode: null, error: String(r.error.message || r.error), stdout, stderr, timedOut };
+    return { exitCode: r.status, error: null, stdout, stderr, timedOut };
   } catch (e) {
-    return { exitCode: null, error: e && typeof e === "object" && "message" in e ? String(e.message) : String(e) };
+    const msg = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
+    return { exitCode: null, error: msg, stdout: null, stderr: null, timedOut: false };
   }
 }
 
@@ -292,6 +317,10 @@ export interface FixOutcome {
   missing: string[];
   unfixable: string[];
   exitCode: number | null;
+  /** AC142 诊断面：fix worker 的 stderr（spawn 失败/认证失败可诊断——⛔ 不再零诊断信息）。 */
+  stderr: string | null;
+  /** AC142 诊断面：fix worker 是否超时（spawnSync timeout ETIMEDOUT）。 */
+  timedOut: boolean;
 }
 
 export function computeRoundRecord(opts: {
@@ -331,11 +360,11 @@ export function computeRoundRecord(opts: {
 export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerCmd: string | null): FixOutcome[] {
   return fixDecisions.map((d) => {
     if (!d.fixable) {
-      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null };
+      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null, stderr: null, timedOut: false };
     }
     const argv = buildFixWorkerArgv(d.id, d.missing, root, fixWorkerCmd);
-    const { exitCode } = spawnFixWorker(argv, root);
-    return { id: d.id, spawned: true, missing: d.missing, unfixable: [], exitCode };
+    const { exitCode, stderr, timedOut } = spawnFixWorker(argv, root);
+    return { id: d.id, spawned: true, missing: d.missing, unfixable: [], exitCode, stderr, timedOut };
   });
 }
 
@@ -453,11 +482,17 @@ export function computeOutcomeRecords(opts: {
   }
   for (const f of opts.fixes) {
     if (f.spawned) {
+      // AC142 AC1：诊断面落进可查载体（promotion-outcome.jsonl 的 result.detail）——spawn 失败/超时
+      // 时把 stderr 截断带上（⛔ 不再 `spawned exit=1` 零诊断）。exit 0 保持原形（无诊断需求）。
+      const stderrFrag = f.stderr ? ` stderr=${f.stderr.slice(0, 300)}` : "";
+      const detail = f.exitCode === 0
+        ? "spawned exit=0"
+        : `spawned exit=${f.exitCode}${f.timedOut ? " (timed-out)" : ""}${stderrFrag}`;
       out.push({
         task_id: f.id,
         gate: { eligible: false, missing: f.missing },
         action: "fix",
-        result: { ok: f.exitCode === 0, detail: `spawned exit=${f.exitCode}` },
+        result: { ok: f.exitCode === 0, detail },
         ts: opts.at,
       });
     } else {

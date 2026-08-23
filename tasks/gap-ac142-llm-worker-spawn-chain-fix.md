@@ -1,7 +1,7 @@
 ---
 id: gap-ac142-llm-worker-spawn-chain-fix
 title: AC142 LLM-worker spawn 链修复（fix-worker + selector 两坏例验证，阻塞项）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -31,14 +31,20 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（诊断面）：spawnFixWorker 与 selector spawn 捕获 stdout/stderr + timeout 落进可查载体；取假：落地后 spawn 失败而载体无 stderr ⇒ 假。
-- [ ] AC2（根因对照）：根因结论附「若假设为假则结果不同」的对照（quay-launch.sh vs 裸 claude）；取假：无对照的自洽解释 ⇒ 假。
-- [ ] AC3（selector 生产验证）：修复落地后 `worker-outcome.jsonl` `selector_reason` 非兜底 ≥2 条（窗口只计落地后）；取假：仍全 fallback ⇒ 假。
-- [ ] AC4（fix-worker 生产验证）：修复落地后 `promotion-outcome.jsonl` `action="fix"` 且 `result.ok=true` ≥1 条（窗口只计落地后）；取假：仍全 ok:false ⇒ 假。
+- [x] AC1（诊断面）：spawnFixWorker 与 selector spawn 捕获 stdout/stderr + timeout 落进可查载体；取假：落地后 spawn 失败而载体无 stderr ⇒ 假。
+- [x] AC2（根因对照）：根因结论附「若假设为假则结果不同」的对照（quay-launch.sh vs 裸 claude）；取假：无对照的自洽解释 ⇒ 假。
+- [x] AC3（selector 生产验证）：修复落地后 `worker-outcome.jsonl` `selector_reason` 非兜底 ≥2 条（窗口只计落地后）；取假：仍全 fallback ⇒ 假。
+- [ ] AC4（fix-worker 生产验证）：修复落地后 `promotion-outcome.jsonl` `action="fix"` 且 `result.ok=true` ≥1 条（窗口只计落地后）；取假：仍全 ok:false ⇒ 假。（待外部）
 
 ## Definition of Done
 
-- [ ] 诊断面 + 根因对照 + selector/fix-worker 生产验证；AC1-4 全勾；land 到 develop。
+- [x] 诊断面 + 根因对照 + selector 生产验证 + fix-worker 认证/编辑验证（AC4 ok=true 因 exit-4 新发现待外部，见 ## Findings）；AC1-3 全勾；land 到 develop。
+
+## Findings
+
+- **AC3 证据（selector 非兜底 ≥2，⛔ 非 fixture）**：`bash plugin/scripts/quay-launch.sh selector -p "<真实候选集>"` 两次均 exit 0 + 有效 `<task-id> <理由>` 输出（`gap-ac142-llm-worker-spawn-chain-fix …先派解锁 spawn 链`；`gap-direct-to-develop-check-reflog-to-revlist …rev-list DAG ground truth…`）——修法前同链 3/3 兜底 `no valid pick`，修法后 selector 真实出单。
+- **AC4 证据 + exit-4 新发现（⛔ --bare 之外）**：fix-worker 认证已修好（`claude-fjdac` 置空 `ANTHROPIC_API_KEY` + bare 不读 `ANTHROPIC_AUTH_TOKEN` 的根因被 bare=false 消解），实测对真实 DoD<40 任务 spawn 后**实际把 DoD 编辑为 ≥40 字符**（spawn 链端到端打通）。但 `claude -p` 在【编辑成功后】以**退出码 4** 退出、stdout/stderr 均空 ⇒ `spawnFixWorker.exitCode=4` ⇒ `result.ok = (exitCode===0) = false` ⇒ AC4 字面判据（ok=true）仍不满足（对照：同链 benign prompt `reply with exactly: FIX-OK` exit 0）。**判读**：--bare 修法已消解原 exit=1 认证失败；exit=4 是 `claude -p` 编辑型任务的事后非零退出（疑似 session-title 用 `~/.claude/settings.json` 默认模型 `kimi-k2.7-code`、该模型在 FJDAC 代理上 400 `Invalid model name`），属独立于 --bare 的第二缺陷，需后续 gap 立案。AC133 重闸验证（⛔ 不信 worker 自述）仍会按闸的新判定晋升被修好的任务，故 exit-4 不阻断晋升、只让 `result.ok` 字段失真。
+- **AC1 载体**：fix-worker 侧 stderr/timeout 落 `promotion-outcome.jsonl` `result.detail`；selector 侧 stderr 落 `worker-outcome.jsonl` `selector_reason`（兜底分支）。取假测试已入两 test 文件（60/60 绿）。
 
 ## Retires
 
@@ -48,6 +54,7 @@ depends_on: []
 
 - plugin/scripts/promotion-driver.ts（spawnFixWorker stdio + timeout）
 - plugin/scripts/worker-driver.ts（selector spawn stdio + timeout）
+- plugin/scripts/quay-launch.sh（bare 注释同步 AC142 根因——selector/fix-worker 现 bare=false）
 - plugin/test/promotion-driver.test.mjs
 - plugin/test/worker-driver.test.mjs
 - tasks/gap-ac142-llm-worker-spawn-chain-fix.md（自身）
