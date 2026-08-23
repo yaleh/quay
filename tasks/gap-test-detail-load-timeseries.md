@@ -33,7 +33,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 采样器（suite 期采样、结束即停）+ 负载曲线渲染落地；AC1-2 全勾；land 到 develop。
+- [x] 采样器（suite 期采样、结束即停）+ 负载曲线渲染落地；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
