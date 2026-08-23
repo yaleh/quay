@@ -116,7 +116,7 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, readFrontmatter } from "./gate-script-base.ts";
-import { parseTask } from "./task-schema.ts";
+import { parseTask, readDependsOn } from "./task-schema.ts";
 import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 
@@ -256,6 +256,29 @@ export function readTaskStatus(root: string, taskId: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 派发前 depends_on 二次过滤（gap-worker-driver-dispatch-pre-filter-missing AC1）：读候选任务的
+ * `depends_on` 关系边（task-schema 的 readDependsOn——与 ready-pool-check 的 depsReadyFor 读同一
+ * 字段，单一真相源，⛔ 不重写依赖解析），逐个核对依赖的 status。任一依赖未 done（或依赖文件缺失，
+ * 读不懂 ⇒ fail-closed 不派发）⇒ false。无依赖 ⇒ true（⛔ 空依赖是「真无依赖」，不是「读不懂」——
+ * 候选自身文件读失败才 ⇒ false，硬规则 3b：读不懂 ≠ 无依赖）。与 gap-launch-script-worker-cap-broken
+ * AC3 的 Touches 互斥过滤同属「spawn 前候选过滤」的两半。
+ */
+export function depsReadyForDispatch(root: string, taskId: string): boolean {
+  let deps: string[];
+  try {
+    const text = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
+    deps = readDependsOn(parseTask(text).frontmatterRaw);
+  } catch {
+    return false; // 候选文件不可读 ⇒ fail-closed（不派发）
+  }
+  if (deps.length === 0) return true;
+  for (const depId of deps) {
+    if (readTaskStatus(root, depId) !== "done") return false;
+  }
+  return true;
 }
 
 /** 转义正则元字符（task id 进 `new RegExp` 前）。 */
@@ -1257,7 +1280,11 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       const shuffled = shuffle(pool.ready.filter((id) => !active.has(id)));
       // AC3（gap-launch-script-worker-cap-broken）：派发前 Touches 互斥——候选里与在飞任务 Touches 重叠的
       // 先滤掉，selector 只在滤后集合里选（⛔ 并发派发 Touches 重叠 = fan-in 才炸）。
-      const candidates = filterTouchesDisjoint(shuffled, running.map((r) => r.task), rootDir);
+      const touchesFiltered = filterTouchesDisjoint(shuffled, running.map((r) => r.task), rootDir);
+      // gap-worker-driver-dispatch-pre-filter-missing AC1：派发前二次过滤 depends_on——依赖未满
+      // （depends_on 含未 done 任务）的候选不进候选集（⛔ 照单派发 ⇒ ac138 白烧一轮复现）。与
+      // gap-launch-script-worker-cap-broken AC3 的 Touches 互斥过滤同属「spawn 前候选过滤」的两个维度，一并判。
+      const candidates = touchesFiltered.filter((id) => depsReadyForDispatch(rootDir, id));
       if (candidates.length === 0) {
         // 真池空（ready 减在飞后无候选）⇒ 终态停摆。池非空但全与在飞 Touches 重叠 ⇒ ⛔ 非终态：不设
         // stopReason，外层等一个在飞 worker 结束释放 Touches 后重进选择环重新 filter（而非把「被 Touches
