@@ -31,7 +31,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 超时根因定位 + 修复到 <8s + 落地列显示真实结果；AC1-2 全勾；land 到 develop。
+- [x] 超时根因定位 + 修复到 <8s + 落地列显示真实结果；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
