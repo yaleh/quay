@@ -55,7 +55,7 @@ test("readGitHistory excludes a merged-but-stale branch from the lanes (negative
   }
 });
 
-test("readGitHistory degrades to 「无活跃分支」 when every branch is stale", () => {
+test("readGitHistory degrades to 「无活跃分支」 when every branch is stale and there is no mainline", () => {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-old-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: ws });
@@ -69,10 +69,39 @@ test("readGitHistory degrades to 「无活跃分支」 when every branch is stal
       GIT_COMMITTER_DATE: new Date(oldSec * 1000).toISOString(),
     };
     execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "old"], { cwd: ws, env });
+    // Rename away from the mainline: a stale non-mainline-only repo must still degrade (the
+    // mainline refs develop/master are ALWAYS kept, so "every branch stale" only fires without one).
+    execFileSync("git", ["branch", "-m", "verify/stale"], { cwd: ws });
 
     const hist = readGitHistory(ws);
     assert.equal(hist.status, "empty");
     assert.match(hist.reason || "", /无活跃分支/, "reason says no active branch, not 「无提交记录」");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("readGitHistory always keeps master (and develop) even when their tip is >24h stale", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-mainline-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    // master's ONLY commit is 30 days old — far outside the 7-day active window, but a mainline
+    // lane must never drop out (gap-git-history-clickable-branches-window: the 24h window used to
+    // exclude master entirely).
+    const oldSec = Math.floor(Date.now() / 1000) - 30 * 86400;
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_DATE: new Date(oldSec * 1000).toISOString(),
+      GIT_COMMITTER_DATE: new Date(oldSec * 1000).toISOString(),
+    };
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "old"], { cwd: ws, env });
+
+    const hist = readGitHistory(ws);
+    assert.equal(hist.status, "ok");
+    const refs = new Set(hist.commits.map((c) => c.ref));
+    assert.ok(refs.has("master"), `stale master is still a lane (lanes: ${[...refs].join(", ")})`);
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }

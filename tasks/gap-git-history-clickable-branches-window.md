@@ -28,12 +28,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：Git History 页分支名可点击，链到对应 `/task/<id>`（⛔ 纯文本无链接 ⇒ 假）。
-- [ ] AC2：master 及超 24h 分支也可见（⛔ 24h 窗口把 master 排除 ⇒ 假）。
+- [x] AC1：Git History 页分支名可点击，链到对应 `/task/<id>`（⛔ 纯文本无链接 ⇒ 假）。
+- [x] AC2：master 及超 24h 分支也可见（⛔ 24h 窗口把 master 排除 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] 分支名链 `/task/<id>` + `GIT_HISTORY_ACTIVE_WINDOW` 放宽（含 master）落地；AC1-2 全勾；land 到 develop。
+- [x] 分支名链 `/task/<id>` + `GIT_HISTORY_ACTIVE_WINDOW` 放宽（含 master）落地；AC1-2 全勾；land 到 develop。
 
 ## Retires
 

@@ -1889,6 +1889,18 @@ export function groupCommitsByBranch(commits: GitHistoryCommit[]): GitHistoryBra
   return [...byRef.values()].sort((a, b) => b.lastT - a.lastT || a.ref.localeCompare(b.ref));
 }
 
+/**
+ * A `task/<id>` branch ref maps to task id `<id>` (the /task/<id> detail page already exists);
+ * a non-task ref (develop / master / integration / verify/…) has no task id and stays plain text.
+ * gap-git-history-clickable-branches-window: branch names on the chart + summary link out to the
+ * task that produced them.
+ */
+export function taskIdFromBranchRef(ref: string): string | null {
+  if (!ref.startsWith("task/")) return null;
+  const id = ref.slice("task/".length);
+  return id.length > 0 ? id : null;
+}
+
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
@@ -1967,7 +1979,13 @@ export function renderGitHistorySvg(history: GitHistoryResult): string {
       }
       return `<circle class="git-svg-commit" cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="4"><title>${tooltip}</title></circle>`;
     }).join("");
-    return `<g>${seg}${points}<text class="git-svg-ink" x="${(W - M.right + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="11">${escapeHtml(b.ref)}</text></g>`;
+    // A task branch's lane label links out to its /task/<id> detail page (SVG <a> wraps the text;
+    // the text's git-svg-ink fill is preserved — no default link blue). Non-task refs stay plain.
+    const taskId = taskIdFromBranchRef(b.ref);
+    const label = taskId
+      ? `<a href="/task/${encodeURIComponent(taskId)}"><text class="git-svg-ink" x="${(W - M.right + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="11">${escapeHtml(b.ref)}</text></a>`
+      : `<text class="git-svg-ink" x="${(W - M.right + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="11">${escapeHtml(b.ref)}</text>`;
+    return `<g>${seg}${points}${label}</g>`;
   }).join("");
 
   // In-SVG legend: the two mark kinds (merge vs regular). Identity is never color-alone — the
@@ -2000,13 +2018,19 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
   const branches = history.status === "ok" ? groupCommitsByBranch(history.commits) : [];
   const mergeCount = history.commits.filter((c) => c.parents > 1).length;
 
-  const summaryRows = branches.map((b) => html`<tr>
-    <td>${escapeHtml(b.ref)}</td>
-    <td>${escapeHtml(isoTime(b.firstT))}</td>
-    <td>${escapeHtml(isoTime(b.lastT))}</td>
-    <td>${b.commits.length}</td>
-    <td>${b.commits.filter((c) => c.parents > 1).length}</td>
-  </tr>`).join("\n");
+  const summaryRows = branches.map((b) => {
+    const taskId = taskIdFromBranchRef(b.ref);
+    const name = taskId
+      ? html`<a href="/task/${encodeURIComponent(taskId)}">${escapeHtml(b.ref)}</a>`
+      : escapeHtml(b.ref);
+    return html`<tr>
+      <td>${name}</td>
+      <td>${escapeHtml(isoTime(b.firstT))}</td>
+      <td>${escapeHtml(isoTime(b.lastT))}</td>
+      <td>${b.commits.length}</td>
+      <td>${b.commits.filter((c) => c.parents > 1).length}</td>
+    </tr>`;
+  }).join("\n");
   const summaryTable = branches.length > 0 ? html`<h2>分支汇总（git 可证的事实，非工时）</h2>
     <table>
       <tr><th>分支</th><th>首提交落地</th><th>末提交落地</th><th>提交数</th><th>合并数</th></tr>
