@@ -81,7 +81,7 @@ test("AC1 — _launchSpec carries --exclude-dynamic-system-prompt-sections + --p
   // ghost-suggestion at-source elimination (gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false AC3):
   // REQUIRED, not optional — every role's launch must disable prompt suggestions (flag form).
   assert.equal(spec.promptSuggestions, false, "_launchSpec.promptSuggestions must be false (REQUIRED, not optional)");
-  for (const role of ["manager", "outer", "inner"]) {
+  for (const role of ["manager", "outer", "inner", "task-worker", "selector", "fix-worker"]) {
     const r = spec.roles?.[role];
     assert.ok(r, `role "${role}" must be defined in _launchSpec.roles`);
     assert.ok(r.name, `role "${role}" must carry a session display name (-n)`);
@@ -90,7 +90,7 @@ test("AC1 — _launchSpec carries --exclude-dynamic-system-prompt-sections + --p
   }
   // distinct, stable names for session-liveness "whose session is this"
   const names = Object.values(spec.roles).map((r) => r.name);
-  assert.equal(new Set(names).size, 3, "role names must be distinct");
+  assert.equal(new Set(names).size, 6, "role names must be distinct");
 });
 
 test("AC1 — 917k vars are deepseek-role-only; manager unsets them (empty-string override)", () => {
@@ -106,9 +106,12 @@ test("AC1 — 917k vars are deepseek-role-only; manager unsets them (empty-strin
 
 test("AC1 — no secrets checked in (deepseek key / anthropic token / sk- pattern)", () => {
   const raw = fs.readFileSync(SETTINGS, "utf8");
-  for (const needle of ["sk-", "DEEPSEEK_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]) {
+  for (const needle of ["DEEPSEEK_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]) {
     assert.ok(!raw.includes(needle), `settings file must not contain secret material: ${needle}`);
   }
+  // sk- tightened (gap-ac140 6-role change): a real API key is "sk-" followed by a run of key-material
+  // chars; the crude substring "sk-" false-positives on the role name "task-worker" (ta-"sk-"-worker).
+  assert.ok(!/sk-[A-Za-z0-9_-]{8,}/.test(raw), "settings file must not contain an sk- API key");
 });
 
 // ── AC5 — --bare is opt-in, not the default ──────────────────────────────────────────────────────

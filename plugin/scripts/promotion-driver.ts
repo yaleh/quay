@@ -15,7 +15,7 @@
 //   驱动  ✅ 每轮调 ready-pool-check --apply（全池判定 + 合格晋升，零 LLM）
 //         ✅ 跑完一轮不退出、按 --interval 进入下一轮；SIGINT/SIGTERM 优雅停机
 //         ✅ 每轮写一条 round 记录（.quay/promotion-round.jsonl，gitignored，outer 可消费）
-//         ✅ AC131：晋升路径纯机械（零 LLM），round 记录带 llm_invoked=false（派生自真实 argv，⛔ 不硬编码）
+//         ✅ AC131：晋升路径纯机械（零 LLM），round 记录带 promote_path_llm_invoked=false（派生自真实 argv，⛔ 不硬编码）
 //         ✅ AC132：不合格者 spawn 短命 claude -p fix worker，输入 = 任务 id + 闸的结构化 missing 清单
 //            （沿用 A24 可修三类/不可修五类；可修三类 spawn，不可修五类逐条记原因不修）
 //         ✅ AC133：fix worker 退出后【重新调同一个闸】验证，以闸的新判定为准（⛔ 不信 worker 自述）；
@@ -59,7 +59,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { splitArgs } from "./worker-driver.ts";
+import { splitArgs, launchArgv } from "./worker-driver.ts";
 
 /** round 记录的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const ROUND_LOG_REL = ".quay/promotion-round.jsonl";
@@ -100,8 +100,10 @@ export function defaultPromotionCheckArgv(root: string, cap: number): string[] {
 
 /** 单轮判定结果。promotedIds = 闸判定「合格应晋」的候选 id；applied = 闸实际落地的晋升（含
  *  deliveryCritical 标签同现判定）。error 非空 ⇒ 本轮读不懂（fail-closed，⛔ 不得伪装成无候选）。
- *  llmInvoked = 本轮是否调用过 LLM（AC131：晋升路径 = 机械 ready-pool-check ⇒ false；派生自真实 argv，
- *  ⛔ 不硬编码 false，使「该路径零 LLM」成为可取假的测量——硬规则 4）。 */
+ *  promotePathLlmInvoked = 本轮【晋升路径】是否调用过 LLM（AC131：晋升路径 = 机械 ready-pool-check ⇒ false；
+ *  派生自真实 argv，⛔ 不硬编码 false，使「该路径零 LLM」成为可取假的测量——硬规则 4）。
+ *  ⛔ 字段名收窄（AC140-4 附带要求）：它只覆盖晋升路径（ready-pool-check 的 argv），AC132 的 fix worker
+ *  spawn 不进它（在 fixes[].spawned=true 上可见）——故命名为路径限定，⛔ 不再叫宽泛的 llm_invoked。 */
 export interface PromotionRound {
   ok: boolean;
   error: string | null;
@@ -109,14 +111,14 @@ export interface PromotionRound {
   shouldApply: boolean;
   promotedIds: string[];
   applied: Array<{ id: string; ok: boolean; from: string | null; to: string | null; deliveryCritical: boolean }>;
-  llmInvoked: boolean;
+  promotePathLlmInvoked: boolean;
   fixDecisions: FixDecision[];
 }
 
 /** 判定待 spawn 命令是否 LLM 调用——由【配置声明的 LLM 命令集】判定（AC140-4：⛔ 不靠
  *  `base === "claude"` 字面量）。argv[0] 的 basename 命中集合任一条 ⇒ LLM；缺省集合 ["claude"]
  *  （后续 AC140-2 可配 wrapper，如 claude-fjdac）。AC131：晋升路径 spawn 的是 ready-pool-check
- *  （argv[0]=node）⇒ llmInvoked=false；若命令换成集合内的 LLM CLI ⇒ true。派生自真实 argv
+ *  （argv[0]=node）⇒ promotePathLlmInvoked=false；若命令换成集合内的 LLM CLI ⇒ true。派生自真实 argv
  *  （⛔ 不硬编码 false），使「该路径零 LLM」成为可取假的测量（硬规则 4）。 */
 export function isLlmInvocation(argv: string[], llmCommandSet: readonly string[] = LLM_COMMAND_SET_DEFAULT): boolean {
   const argv0 = Array.isArray(argv) && argv.length > 0 ? String(argv[0]) : "";
@@ -124,7 +126,7 @@ export function isLlmInvocation(argv: string[], llmCommandSet: readonly string[]
   return (llmCommandSet ?? LLM_COMMAND_SET_DEFAULT).includes(base);
 }
 
-// ── AC132：fix worker（不合格者 → 短命 claude -p，输入 = 任务 id + 闸的结构化 missing 清单） ───────────
+// ── AC132：fix worker（不合格者 → 短命 fix worker，输入 = 任务 id + 闸的结构化 missing 清单） ───────────
 
 /** 闸 candidate 上用于 A24 分类的结构化判据字段（ready-pool-check 的 candidates[] 条目同构子集）。 */
 export interface CandidateChecks {
@@ -186,16 +188,18 @@ export function buildFixWorkerPrompt(id: string, missing: string[]): string {
   ].join("\n");
 }
 
-/** fix worker argv = `claude -p <prompt>`（短命）。--fix-worker-cmd 覆盖可执行前缀时把 prompt 作为
- *  末参数追加（测试缝捕获真实 prompt，AC2 取假实测——prompt 是数据、不是可执行串）。 */
-export function buildFixWorkerArgv(id: string, missing: string[], fixWorkerCmd?: string | null): string[] {
+/** fix worker argv = `quay-launch.sh fix-worker -p <prompt>`（短命，launcher/model/--bare 由
+ *  `_launchSpec.roles["fix-worker"]` 承载——AC140-2 可配，单一构造 launchArgv）。--fix-worker-cmd 覆盖
+ *  可执行【前缀】时把 prompt 作为末参数追加（测试缝捕获真实 prompt，AC2 取假实测——prompt 是数据、
+ *  不是可执行串）。 */
+export function buildFixWorkerArgv(id: string, missing: string[], root: string, fixWorkerCmd?: string | null): string[] {
   const prompt = buildFixWorkerPrompt(id, missing);
   if (fixWorkerCmd != null) {
     const prefix = splitArgs(fixWorkerCmd);
-    if (prefix.length === 0) return ["claude", "-p", prompt];
+    if (prefix.length === 0) return launchArgv("fix-worker", prompt, root);
     return [...prefix, prompt];
   }
-  return ["claude", "-p", prompt];
+  return launchArgv("fix-worker", prompt, root);
 }
 
 /** spawn 一个短命 fix worker（claude -p，或 --fix-worker-cmd 覆盖前缀），同步等待其退出。
@@ -213,10 +217,10 @@ export function spawnFixWorker(argv: string[], root: string): { exitCode: number
 
 /** 跑一轮：调 ready-pool-check（缺省 --apply 全池），解析 analyzeTasks JSON。解析失败/非零退出 ⇒
  *  fail-closed（ok:false + error），⛔ 不把「读不懂」与「无候选」混为一谈（硬规则 3b）。
- *  llmCommandSet = 配置声明的 LLM 命令集（AC140-4：llm_invoked 判定读此集合，⛔ 不靠 claude 字面量）。 */
+ *  llmCommandSet = 配置声明的 LLM 命令集（AC140-4：promote_path_llm_invoked 判定读此集合，⛔ 不靠 claude 字面量）。 */
 export function runPromotionRound(root: string, cmd: string[] | null, cap: number, llmCommandSet: readonly string[] = LLM_COMMAND_SET_DEFAULT): PromotionRound {
   const argv = cmd ?? defaultPromotionCheckArgv(root, cap);
-  const llmInvoked = isLlmInvocation(argv, llmCommandSet);
+  const promotePathLlmInvoked = isLlmInvocation(argv, llmCommandSet);
   let r: ReturnType<typeof spawnSync>;
   try {
     r = spawnSync(argv[0], argv.slice(1), {
@@ -224,11 +228,11 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
     });
   } catch (e) {
     const msg = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
-    return { ok: false, error: `ready-pool-check spawn failed (${msg})`, pool: null, shouldApply: false, promotedIds: [], applied: [], llmInvoked, fixDecisions: [] };
+    return { ok: false, error: `ready-pool-check spawn failed (${msg})`, pool: null, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked, fixDecisions: [] };
   }
   if (r.error || r.status !== 0) {
     const msg = r.error ? String(r.error.message || r.error) : `ready-pool-check exited ${r.status}`;
-    return { ok: false, error: msg, pool: null, shouldApply: false, promotedIds: [], applied: [], llmInvoked, fixDecisions: [] };
+    return { ok: false, error: msg, pool: null, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked, fixDecisions: [] };
   }
   try {
     const j = JSON.parse(String(r.stdout ?? "").trim());
@@ -270,17 +274,17 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
       pool: typeof j.pool === "number" ? j.pool : null,
       shouldApply: !!j.should_apply,
       promotedIds, applied,
-      llmInvoked,
+      promotePathLlmInvoked,
       fixDecisions,
     };
   } catch {
-    return { ok: false, error: "unparseable ready-pool-check output", pool: null, shouldApply: false, promotedIds: [], applied: [], llmInvoked, fixDecisions: [] };
+    return { ok: false, error: "unparseable ready-pool-check output", pool: null, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked, fixDecisions: [] };
   }
 }
 
 /** 一条结构化 round 记录（字段：ts · round · run_id · pid · action · pool · should_apply ·
- *  promoted_ids · applied · error · llm_invoked · fixes）。action ∈ promote|fix|none|error。
- *  llm_invoked 在晋升路径上为 false（机械 ready-pool-check，AC131）；AC132 的 fix worker 是
+ *  promoted_ids · applied · error · promote_path_llm_invoked · fixes）。action ∈ promote|fix|none|error。
+ *  promote_path_llm_invoked 在晋升路径上为 false（机械 ready-pool-check，AC131）；AC132 的 fix worker 是
  *  `claude -p`（argv[0]=claude），其 spawn 在 fixes[].spawned=true 上可见。 */
 export interface FixOutcome {
   id: string;
@@ -300,7 +304,7 @@ export function computeRoundRecord(opts: {
   promotedIds: string[];
   applied: PromotionRound["applied"];
   error: string | null;
-  llmInvoked: boolean;
+  promotePathLlmInvoked: boolean;
   fixes: FixOutcome[];
   reverify?: ReverifyOutcome | null;
   needsHuman?: string[];
@@ -315,7 +319,7 @@ export function computeRoundRecord(opts: {
   return {
     ts: opts.at, round: opts.round, run_id: opts.runId, pid: opts.pid, action,
     pool: opts.pool, should_apply: opts.shouldApply, promoted_ids: opts.promotedIds,
-    applied: opts.applied, error: opts.error, llm_invoked: opts.llmInvoked, fixes: opts.fixes,
+    applied: opts.applied, error: opts.error, promote_path_llm_invoked: opts.promotePathLlmInvoked, fixes: opts.fixes,
     // AC133：重验证结果（null = 本轮无 fix worker 可重验证）与本轮新标 needs-human 的 id 清单。
     reverify: opts.reverify ?? null,
     needs_human: opts.needsHuman ?? [],
@@ -329,7 +333,7 @@ export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerC
     if (!d.fixable) {
       return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null };
     }
-    const argv = buildFixWorkerArgv(d.id, d.missing, fixWorkerCmd);
+    const argv = buildFixWorkerArgv(d.id, d.missing, root, fixWorkerCmd);
     const { exitCode } = spawnFixWorker(argv, root);
     return { id: d.id, spawned: true, missing: d.missing, unfixable: [], exitCode };
   });
