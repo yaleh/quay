@@ -376,11 +376,15 @@ test("AC2 — stop the driver (SIGTERM) ⇒ newly-eligible todo is not promoted;
 
 // ── AC131 (falsifiable): qualified todo promoted via A22 --apply, zero LLM, llm_invoked=false ─────
 
-test("isLlmInvocation — falsifiable derivation: claude argv ⇒ true, mechanical argv ⇒ false (⛔ not hardcoded)", () => {
-  assert.equal(isLlmInvocation(["claude", "-p", "fix task X"]), true, "claude -p is an LLM invocation");
+test("isLlmInvocation — falsifiable SET-based derivation (AC140-4 AC1 + AC2；⛔ not a claude literal)", () => {
+  assert.equal(isLlmInvocation(["claude", "-p", "fix task X"]), true, "claude -p is an LLM invocation (default set)");
   assert.equal(isLlmInvocation(["/usr/local/bin/claude", "print"]), true, "absolute claude path is an LLM invocation");
   assert.equal(isLlmInvocation(["node", "--experimental-strip-types", "/r/plugin/scripts/ready-pool-check.ts", "--apply"]), false, "ready-pool-check is mechanical, not an LLM");
   assert.equal(isLlmInvocation([]), false, "empty argv is not an LLM invocation");
+  // AC140-4 AC1: the judgment reads the CONFIGURED set, not the literal `claude`.
+  // AC140-4 AC2 (能取假): 配 wrapper（claude-fjdac 进集合）后，isLlmInvocation(<wrapper argv>) 必须返回 true。
+  assert.equal(isLlmInvocation(["claude-fjdac", "-p", "fix task X"], ["claude", "claude-fjdac"]), true, "AC2: claude-fjdac in the configured set ⇒ isLlmInvocation(<wrapper argv>)=true");
+  assert.equal(isLlmInvocation(["claude-fjdac", "-p", "fix task X"]), false, "取假对照: claude-fjdac NOT in the default set ⇒ false (the SET decides, not the literal)");
 });
 
 test("AC131 AC1 — the promotion path spawns no LLM: default argv mechanical + round llmInvoked=false", (t) => {

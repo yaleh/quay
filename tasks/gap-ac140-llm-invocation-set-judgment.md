@@ -1,7 +1,7 @@
 ---
 id: gap-ac140-llm-invocation-set-judgment
 title: AC140-4 isLlmInvocation 改读命令集（⛔ 不靠 claude 字面量）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -26,12 +26,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（判定读集合）：`isLlmInvocation` 由配置声明的 LLM 命令集判定（⛔ 不靠 `base === "claude"` 字面量）。
-- [ ] AC2（能取假）：配 wrapper 后 `isLlmInvocation(<wrapper argv>)` 必须返回 true（直接对判定函数取假；⛔ 非「跑 fix worker 看 round 记录 llm_invoked」——该字段是晋升路径限定，fix worker spawn 不进它）。
+- [x] AC1（判定读集合）：`isLlmInvocation` 由配置声明的 LLM 命令集判定（⛔ 不靠 `base === "claude"` 字面量）。
+- [x] AC2（能取假）：配 wrapper 后 `isLlmInvocation(<wrapper argv>)` 必须返回 true（直接对判定函数取假；⛔ 非「跑 fix worker 看 round 记录 llm_invoked」——该字段是晋升路径限定，fix worker spawn 不进它）。
 
 ## Definition of Done
 
-- [ ] isLlmInvocation 集合化判定 + 负控制取假通过；AC1-2 全勾；land 到 develop。
+- [x] isLlmInvocation 集合化判定 + 负控制取假通过；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
