@@ -1,7 +1,7 @@
 ---
 id: gap-ac139-unified-driver-subcommand
 title: AC139 两驱动统一到 quay driver 子命令 + 单一泛化 supervisor
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -41,7 +41,7 @@ depends_on:
 
 ## Definition of Done
 
-- [ ] 统一入口 + 单一 supervisor + status last_record_ts + worktree 拒绝；AC1-4 全勾；land 到 develop。
+- [x] 统一入口 + 单一 supervisor + status last_record_ts + worktree 拒绝；AC1-4 全勾；land 到 develop。
 
 ## Retires
 
