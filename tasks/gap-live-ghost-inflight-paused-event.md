@@ -1,7 +1,7 @@
 ---
 id: gap-live-ghost-inflight-paused-event
 title: Live 幽灵在飞——worktree 释放未写收尾事件（⛔ 事件模型无非正常终结态）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -26,12 +26,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：worktree 释放写收尾事件（⛔ 只有 start 无 end ⇒ 假）；或 readLive 交叉校验 worktree 存在性、剔除幽灵在飞。
-- [ ] AC2：Live 页/Dashboard 不显示已不在飞的任务为「实现中」（⛔ 幽灵在飞 ⇒ 假）。
+- [x] AC1：worktree 释放写收尾事件（⛔ 只有 start 无 end ⇒ 假）；或 readLive 交叉校验 worktree 存在性、剔除幽灵在飞。
+- [x] AC2：Live 页/Dashboard 不显示已不在飞的任务为「实现中」（⛔ 幽灵在飞 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] 收尾事件（或交叉校验）+ 幽灵在飞消除；AC1-2 全勾；land 到 develop。
+- [x] 收尾事件（或交叉校验）+ 幽灵在飞消除；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
@@ -40,6 +40,7 @@ depends_on: []
 ## Touches
 
 - packages/quay/src/observation.ts（readLive 交叉校验/收尾事件消费）
+- packages/quay/test/observation.test.mjs（+交叉校验测试）
 - tasks/gap-live-ghost-inflight-paused-event.md（自身）
 
 > **注意**：写收尾事件的落点若在 inner 侧 fan-in（worktree 释放处），Touches 随实现增补。

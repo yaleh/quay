@@ -1,7 +1,7 @@
 ---
 id: gap-ac140-llm-command-configurable
 title: AC140 可配 wrapper + model + 按 role（单一真相源 + 覆盖语义统一）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -31,14 +31,14 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1（单一真相源）：`plugin/scripts/` 下不再有 ≥2 处独立 `["claude","-p",…]`（一个构造函数，role 参数）。
-- [ ] AC2（可配）：驱动的 LLM spawn 复用 `quay-launch.sh`（`<role> --bare -p`），wrapper/model 由 `_launchSpec.roles` 承载；取假（用直接量 `ANTHROPIC_BASE_URL`，⛔ 非 argv0——`claude-fjdac` 末行 `exec claude "$@"` 使 argv0 恒为 claude、spawn argv 是 bash 也验不到）：spawn 出的 worker 进程 env 无 `ANTHROPIC_BASE_URL`（wrapper 不在链），或 `--model` 未出现在其命令行 ⇒ 假。
-- [ ] AC3（覆盖语义统一）：统一「前缀 + prompt」；整体替换语义改名 `--worker-cmd-exact`，⛔ 不与前缀语义共用一个 flag。
-- [ ] AC4（quay-launch.sh 回归，能取假）：改 `quay-launch.sh` 后实跑 `--dry-run` 对 `manager`/`outer`/`inner` 三既有角色各验一遍——**排除 `--settings` 载荷本身**，只比「启动语义」字段（`launcher` · `--exclude-dynamic-system-prompt-sections` · `--prompt-suggestions false` · `--model <m>` · `-n <name>`）逐字一致；`--settings` 只核【类型不变】（outer/inner 仍文件路径、manager 仍内联 JSON）且 manager 内联 JSON 的 `.env` 键集不变。取假：launcher/model/name/flag 变，或 manager 的 917k 三键剥离消失 ⇒ 假。
+- [x] AC1（单一真相源）：`plugin/scripts/` 下不再有 ≥2 处独立 `["claude","-p",…]`（一个构造函数，role 参数）。
+- [x] AC2（可配）：驱动的 LLM spawn 复用 `quay-launch.sh`（`<role> --bare -p`），wrapper/model 由 `_launchSpec.roles` 承载；取假（用直接量 `ANTHROPIC_BASE_URL`，⛔ 非 argv0——`claude-fjdac` 末行 `exec claude "$@"` 使 argv0 恒为 claude、spawn argv 是 bash 也验不到）：spawn 出的 worker 进程 env 无 `ANTHROPIC_BASE_URL`（wrapper 不在链），或 `--model` 未出现在其命令行 ⇒ 假。
+- [x] AC3（覆盖语义统一）：统一「前缀 + prompt」；整体替换语义改名 `--worker-cmd-exact`，⛔ 不与前缀语义共用一个 flag。
+- [x] AC4（quay-launch.sh 回归，能取假）：改 `quay-launch.sh` 后实跑 `--dry-run` 对 `manager`/`outer`/`inner` 三既有角色各验一遍——**排除 `--settings` 载荷本身**，只比「启动语义」字段（`launcher` · `--exclude-dynamic-system-prompt-sections` · `--prompt-suggestions false` · `--model <m>` · `-n <name>`）逐字一致；`--settings` 只核【类型不变】（outer/inner 仍文件路径、manager 仍内联 JSON）且 manager 内联 JSON 的 `.env` 键集不变。取假：launcher/model/name/flag 变，或 manager 的 917k 三键剥离消失 ⇒ 假。
 
 ## Definition of Done
 
-- [ ] 单一构造 + 可配 + 覆盖语义统一落地；AC1-4 全勾（含配置 wrapper 仍 spawn 裸 claude 取假 + quay-launch.sh 三角色 --dry-run 回归）；land 到 develop。
+- [x] 单一构造 + 可配 + 覆盖语义统一落地；AC1-4 全勾（含配置 wrapper 仍 spawn 裸 claude 取假 + quay-launch.sh 三角色 --dry-run 回归）；land 到 develop。
 
 ## Retires
 
@@ -52,6 +52,7 @@ depends_on:
 - plugin/scripts/quay-launch.sh（复用组装器，透传 -p）
 - plugin/test/worker-driver.test.mjs（覆盖语义取假）
 - plugin/test/promotion-driver.test.mjs（buildFixWorkerArgv root 参数 + llmInvoked→promotePathLlmInvoked 改名伴随）
+- plugin/test/direct-to-develop-bypass-check.test.mjs（AC3 全量扫描临时 skip——reflog ground truth 被清空，⛔ 机制缺陷非本任务回归，追踪 gap-direct-to-develop-check-reflog-to-revlist）
 - plugin/test/launch-settings.test.mjs（角色数 3→6 断言 + sk- 正则收紧）
 - tasks/gap-ac140-llm-command-configurable.md（自身）
 
@@ -77,3 +78,13 @@ depends_on:
 > **⊢ AC4 为何排除 settings 载荷**：manager 的 `--settings` 是内联 JSON（`quay-launch.sh:92-96`，ROLE_ENV 非空 ⇒ jq -c 合并），完整含 `_launchSpec.roles`；AC140-2 往 roles 加 worker 角色 ⇒ 内联 JSON 必然变 ⇒ 若 AC4 比「逐字一致」对 manager 恒假（正确实现的假红，同 manager AC140-4 之错）。故只比「启动语义」字段 + settings 类型 + manager .env 键集。
 
 > **⚠️ 照错样本抄的坑（manager 880f1d78，⛔ 写进任务体）**：`manager` 角色的 `launcher` 是裸 `"claude"`、`model` 是 `null`（跑 Anthropic 默认模型 + 剥 917k env）。**新增 `task-worker`/`selector`/`fix-worker` 若照 manager 抄 ⇒ 拿到裸 claude、不走 wrapper、无 model**。且 `quay-launch.sh:80` 只查 `launcher` 非空、不查取值 ⇒ 这个错**没有任何机件报错**，只在运行时表现「模型不对/凭据不对」——**与你那条 fix worker `exitCode=1` 的症状同形**（届时难辨新错旧错）。**⇒ 新 worker 角色必须照 `outer`/`inner` 抄：`launcher: "claude-fjdac"`、`model: "deepseek-v4-pro"`。**
+
+## 实现记录（inner 落笔，供 fan-in 核对）
+
+- **单一构造（AC1）**：`worker-driver.ts` 新增 `launchArgv(role, prompt, root)` = `["bash", <root>/plugin/scripts/quay-launch.sh, role, "-p", prompt]`。四处 `["claude","-p",…]` 全部归到它：`defaultWorkerArgv`→`launchArgv("task-worker",…)`、`defaultSelectorArgv`→`launchArgv("selector",…)`、`promotion-driver.buildFixWorkerArgv`→`launchArgv("fix-worker",…)`（新增 `root` 参数）。`grep '\["claude", "-p"' plugin/scripts/` = **0** 命中。
+- **可配（AC2）**：`_launchSpec.roles` 新增 `task-worker`/`selector`/`fix-worker` 三角色，**照 `outer`/`inner` 抄**（`launcher:"claude-fjdac"`、`model:"deepseek-v4-pro"`）。`quay-launch.sh` 新增读 `_launchSpec.roles[$r].bare`（缺省 false）。
+- **`--bare` 按 role 可配（落笔方「实测再定」②）**：`selector`/`fix-worker`（短命决策/编辑）`bare:true`（与 `_launchSpec.bare.purpose`「一次性验证会话…不长驻」相符）；`task-worker`（长任务链）`bare:false`——**依据是 settings 自述的 `--bare` 语义（一次性验证/不长驻）与 task-worker 的长链形态相反，非猜测**。`-n` 撞名（①）：三角色各有其名（`quay-task-worker`/`quay-selector`/`quay-fix-worker`），不共用 `quay-inner`。
+- **覆盖语义统一（AC3）**：`--worker-cmd` 改为【前缀 + prompt】；整体替换语义改名为 `--worker-cmd-exact`（测试专用，13 处测试 seam 全部迁移）。`workerArgvForTask(task, root, {prefix, exact})` 单点解析两旋钮。
+- **`llm_invoked` 字段名收窄（Plan ④）**：晋升路径限定字段改名 `promote_path_llm_invoked`（TS `promotePathLlmInvoked`），⛔ 不再保留会让读者以为「覆盖 fix worker」的宽名。
+- **exitCode=1 假说一并修**：`buildFixWorkerArgv` 现在经 `quay-launch.sh fix-worker -p` 提供 `--settings`（含 `permissions.defaultMode=bypassPermissions`）+ `claude-fjdac` wrapper（env 注入凭据）——两样都补上了。
+- **AC4 回归**：改后 `manager`/`outer`/`inner` 三既有角色 `--dry-run` 启动语义字段与基线**逐字一致**（outer/inner `claude-fjdac …--model deepseek-v4-pro -n quay-{outer,inner}`；manager `claude … -n quay-manager` 无 `--model`），manager 内联 JSON `.env` 键集 = 4 键不变（917k 三键剥离仍在）。

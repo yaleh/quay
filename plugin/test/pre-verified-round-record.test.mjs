@@ -35,6 +35,7 @@ import {
   parseSuitePhases,
   detectPhaseOverlap,
   parseBucketMarker,
+  parseTestCounts,
   hostParallelism,
   concurrentSuiteSlots,
   countHeldSuiteLocks,
@@ -117,14 +118,51 @@ test("AC1/AC3 — the SHARED writer emits preverified:false for a REAL-suite rou
   assert.match(buildPreVerifiedRoundRecord({ ...BASE, preverified: "maybe" }).error ?? "", /preverified/);
 });
 
-test("AC2 — pass/fail/cancelled/tests are OMITTED (no fabricated test counts; a reader must not infer 0)", () => {
+test("AC2 — pass/fail/cancelled/tests are ABSENT without a suite log (no fabricated test counts; a reader must not infer 0)", () => {
+  // gap-suite-round-pass-fail-cancel-fields: WITHOUT a --suite-log (a pre-verified reuse whose caller
+  // recorded no log path) the counts stay ABSENT — a reader renders them null, never a fabricated 0.
   const { record } = buildPreVerifiedRoundRecord(BASE);
-  assert.equal(record.pass, undefined, "pass is absent — the capture carries no test count");
+  assert.equal(record.pass, undefined, "pass is absent — no log to parse a count from");
   assert.equal(record.fail, undefined, "fail is absent");
   assert.equal(record.cancelled, undefined, "cancelled is absent");
   assert.equal(record.tests, undefined, "tests is absent");
   // The /tests reader renders absent counts as null, not 0 (observation.ts parseVerificationRound) —
   // cross-package coverage lives in packages/quay/test/serve-ac95-views.test.mjs.
+});
+
+test("AC2 — pass/fail/cancelled/tests are PARSED from a suite log carrying the node:test spec summary (gap-suite-round-pass-fail-cancel-fields)", () => {
+  // The fan-in suite's node:test spec reporter (test.sh dual-reporter stdout, redirected into the log)
+  // emits the summary. The writer must parse it so the /tests page + Dashboard card show real counts.
+  const log = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=x round=full",
+    "ℹ tests 4288",
+    "ℹ pass 4175",
+    "ℹ fail 3",
+    "ℹ cancelled 0",
+    "__OVERHEAD__ serial_phase_ms=301000",
+  ]);
+  const { record, error } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: log, root: REPO_ROOT });
+  assert.equal(error, undefined, `build must succeed: ${error}`);
+  assert.equal(record.pass, 4175, "pass ← the ℹ pass summary");
+  assert.equal(record.fail, 3, "fail ← the ℹ fail summary");
+  assert.equal(record.cancelled, 0, "cancelled ← the ℹ cancelled summary");
+  assert.equal(record.tests, 4178, "tests = pass+fail+cancelled (the same 口径 full-suite-runner writes — never the ℹ tests line)");
+});
+
+test("AC2 — an UNREADABLE/empty suite log leaves pass/fail/cancelled/tests absent (honest, never a fabricated 0)", () => {
+  const unreadable = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: "/nonexistent/pvr-missing.log", root: REPO_ROOT }).record;
+  assert.equal(unreadable.pass, undefined, "unreadable log → pass absent");
+  assert.equal(unreadable.fail, undefined, "unreadable log → fail absent");
+  assert.equal(unreadable.cancelled, undefined, "unreadable log → cancelled absent");
+  assert.equal(unreadable.tests, undefined, "unreadable log → tests absent");
+
+  // A log WITHOUT any summary block (e.g. a scoped run that emitted no spec summary) also leaves them absent.
+  const noSummary = writeSuiteLog(null, ["__OVERHEAD__ serial_phase_ms=301000"]);
+  const noSummaryRec = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: noSummary, root: REPO_ROOT }).record;
+  assert.equal(noSummaryRec.pass, undefined, "a summary-less log → pass absent");
+  assert.equal(noSummaryRec.fail, undefined, "a summary-less log → fail absent");
+  assert.equal(noSummaryRec.cancelled, undefined, "a summary-less log → cancelled absent");
+  assert.equal(noSummaryRec.tests, undefined, "a summary-less log → tests absent");
 });
 
 // ── appendPreVerifiedRound: round numbering ────────────────────────────────────────────────────────
@@ -704,6 +742,45 @@ test("CLI — --suite-log wires the phase fields through to the appended record 
   assert.equal(typeof out.record.nproc, "number", "CLI record carries nproc");
 });
 
+test("CLI — a suite log with the node:test spec summary flows pass/fail/cancelled/tests into the appended record (gap-suite-round-pass-fail-cancel-fields)", () => {
+  const file = tmpFile("pvr-counts-");
+  const log = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=x round=full",
+    "ℹ pass 4175",
+    "ℹ fail 3",
+    "ℹ cancelled 0",
+    "__OVERHEAD__ serial_phase_ms=301000",
+  ]);
+  const args = [
+    "--task-id", BASE.taskId,
+    "--run-id", BASE.runId,
+    "--started-at", BASE.startedAt,
+    "--duration-ms", BASE.durationMs,
+    "--lane-count", BASE.laneCount,
+    "--load", BASE.load,
+    "--commit", BASE.commit,
+    "--preverified", "0",
+    "--suite-log", log,
+    "--record-file", file,
+    "--json",
+  ];
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER, ...args], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, true);
+  assert.equal(out.record.pass, 4175, "CLI record carries pass");
+  assert.equal(out.record.fail, 3, "CLI record carries fail");
+  assert.equal(out.record.cancelled, 0, "CLI record carries cancelled");
+  assert.equal(out.record.tests, 4178, "CLI record carries tests = pass+fail+cancelled");
+  const lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+  assert.equal(lines.length, 1);
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.pass, 4175, "appended record: pass present");
+  assert.equal(rec.fail, 3, "appended record: fail present");
+  assert.equal(rec.cancelled, 0, "appended record: cancelled present");
+  assert.equal(rec.tests, 4178, "appended record: tests present");
+});
+
 // ── gap-ac126-suite-bucket-execution-enable-wiring AC2/AC3: bucket fields ride the fan-in record ───
 // The fan-in suite now passes `--buckets <task-id>` (fan-in-execute.js SUITE_LAUNCH); test.sh emits a
 // `__BUCKETS__ buckets=<P|M|P+M|full> files=<n> full=<0|1>` marker into the suite log, and THIS writer
@@ -735,6 +812,61 @@ test("parseBucketMarker — slices by the last __FANIN_SUITE_START__ marker (an 
     "__BUCKETS__ buckets=P files=163 full=0",
   ]);
   assert.deepEqual(parseBucketMarker(log), { buckets: "P", files: 163 }, "only the last round's bucket marker is read");
+});
+
+// ── gap-suite-round-pass-fail-cancel-fields: pass/fail/cancelled/tests parsed from the suite log ────
+
+test("parseTestCounts — accumulates pass/fail/cancelled across the per-phase summary blocks (serial→lowconc→main sum, same 口径 as full-suite-runner)", () => {
+  const log = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=x round=full",
+    "ℹ tests 629",
+    "ℹ pass 628",
+    "ℹ fail 0",
+    "ℹ cancelled 0",
+    "ℹ tests 238",
+    "ℹ pass 237",
+    "ℹ fail 0",
+    "ℹ cancelled 0",
+    "ℹ tests 4288",
+    "ℹ pass 4175",
+    "ℹ fail 3",
+    "ℹ cancelled 0",
+  ]);
+  assert.deepEqual(parseTestCounts(log), { pass: 628 + 237 + 4175, fail: 0 + 0 + 3, cancelled: 0 + 0 + 0 }, "totals are the SUM across the three phase blocks (never the last block)");
+});
+
+test("parseTestCounts — accepts both the ℹ spec-reporter and the # TAP prefixes", () => {
+  const log = writeSuiteLog(null, [
+    "# pass 10",
+    "# fail 2",
+    "# cancelled 1",
+    "ℹ pass 5",
+    "ℹ fail 0",
+    "ℹ cancelled 0",
+  ]);
+  assert.deepEqual(parseTestCounts(log), { pass: 15, fail: 2, cancelled: 1 }, "both prefixes accumulate");
+});
+
+test("parseTestCounts — slices by the last __FANIN_SUITE_START__ marker (an old round's summary is excluded)", () => {
+  const log = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=old round=full",
+    "ℹ pass 999",
+    "ℹ fail 1",
+    "ℹ cancelled 0",
+    "__FANIN_SUITE_START__ iso=2026-08-21T00:10:00.000Z ms=600 head=new round=full",
+    "ℹ pass 42",
+    "ℹ fail 0",
+    "ℹ cancelled 0",
+  ]);
+  assert.deepEqual(parseTestCounts(log), { pass: 42, fail: 0, cancelled: 0 }, "only the last round's summary is read");
+});
+
+test("parseTestCounts — returns null for a missing/unreadable/summary-less log (distinguishes 'no counts' from '0 tests')", () => {
+  assert.equal(parseTestCounts(undefined), null, "no log path → null");
+  assert.equal(parseTestCounts(""), null, "empty log path → null");
+  assert.equal(parseTestCounts("/nonexistent/pvr-missing.log"), null, "unreadable log → null");
+  const noSummary = writeSuiteLog(null, ["__OVERHEAD__ serial_phase_ms=301000", "selected 424 files (groups=product,engine)"]);
+  assert.equal(parseTestCounts(noSummary), null, "a log with no spec summary → null (never {0,0,0})");
 });
 
 test("AC2/AC3 — buildPreVerifiedRoundRecord carries buckets/bucket_files/bucket_duration_ms on a bucket-mode log (M-only → buckets=M; hub → buckets=full)", () => {

@@ -1,7 +1,7 @@
 ---
 id: gap-suite-round-pass-fail-cancel-fields
 title: suite 轮记录补 pass/fail/cancelled 三字段（数据模型缺口，⛔ 非前端）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -23,17 +23,17 @@ depends_on: []
 
 ## Plan
 
-1. runner/reporter（full-suite-runner.ts / measure-suite-reporter.mjs）在轮记录写 `pass`/`fail`/`cancelled` 三字段。
-2. web 消费面（serve-handlers.ts:2297 的 `r.pass ?? "—"`）随之显示真实计数。
+1. fan-in 轮记录 writer（`plugin/scripts/pre-verified-round-record.ts`——生产落地路径的实际 writer，非 full-suite-runner.ts）从 `--suite-log` 解析 node:test spec-reporter 汇总（`ℹ pass/fail/cancelled`，跨 serial→lowconc→main 三相块求和），在轮记录写 `pass`/`fail`/`cancelled`/`tests` 字段。
+2. web 消费面（serve-handlers.ts:2297 的 `r.pass ?? "—"`）已写就，数据接上即显真实计数。
 
 ## Acceptance Criteria
 
-- [ ] AC1：`.quay/verification-round.jsonl` 每轮记录含 `pass`/`fail`/`cancelled` 三字段（读生产载体，⛔ 非 fixture）。
-- [ ] AC2：Tests 页 + Dashboard 卡片显示真实测试计数（⛔ 恒 "—/—/—" ⇒ 假）。
+- [x] AC1：`.quay/verification-round.jsonl` 每轮记录含 `pass`/`fail`/`cancelled` 三字段（读生产载体，⛔ 非 fixture）。
+- [x] AC2：Tests 页 + Dashboard 卡片显示真实测试计数（⛔ 恒 "—/—/—" ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] runner 写三字段 + web 显示真实计数；AC1-2 全勾；land 到 develop。
+- [x] runner 写三字段 + web 显示真实计数；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
@@ -41,7 +41,6 @@ depends_on: []
 
 ## Touches
 
-- plugin/scripts/full-suite-runner.ts（轮记录写三字段）
-- plugin/scripts/measure-suite-reporter.mjs（如涉 reporter）
-- packages/quay/src/serve-handlers.ts（消费面已写 `r.pass ?? "—"`，数据接上即显）
+- plugin/scripts/pre-verified-round-record.ts（fan-in 轮记录写三字段——生产落地路径的实际 writer，非 full-suite-runner.ts）
+- plugin/test/pre-verified-round-record.test.mjs（pin 新字段行为）
 - tasks/gap-suite-round-pass-fail-cancel-fields.md（自身）

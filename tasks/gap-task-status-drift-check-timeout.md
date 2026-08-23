@@ -41,4 +41,5 @@ depends_on: []
 
 - plugin/scripts/task-status-drift-check.ts（超时根因）
 - experiments/quay-perpetual-stream/scripts/task-status-drift-check.ts（byte-identical mirror，AC1 测试强制，同步改）
+- plugin/test/task-status-drift-check.test.mjs（性能测试）
 - tasks/gap-task-status-drift-check-timeout.md（自身）

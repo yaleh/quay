@@ -54,10 +54,11 @@
 //                  null/≤0 — a fabricated 0 would read "infinite cores"); lowconc_phase_ms carries
 //                  the `overlap_lowconc_ms` sub-time on an overlap round instead of the subsumed 0.
 //
-// pass/fail/cancelled/tests are OMITTED — the fan-in capture carries no test counts (the suite ran
-// outside full-suite-runner). A green round has fail=0/cancelled=0, but the pass count is genuinely
-// unknown; the /tests reader renders null as "—" and trend-check skips per-test cost for a row with
-// no tests — both honest, neither fabricates a count.
+// pass/fail/cancelled/tests are parsed from --suite-log when the log carries the node:test spec-reporter
+// summary (`ℹ pass N` / `ℹ fail N` / `ℹ cancelled N`; gap-suite-round-pass-fail-cancel-fields). A log
+// without a summary block (a pre-verified reuse whose caller recorded no log path) leaves them ABSENT —
+// the /tests reader renders null as "—" and trend-check skips per-test cost for a row with no tests —
+// both honest, neither fabricates a count.
 //
 // This writer is the equivalent writer the task mandates (a NEW module — it does NOT modify
 // plugin/scripts/per-task-suite-record.ts, the per-task ledger writer, so the two ledgers stay
@@ -83,10 +84,11 @@
 //   preverified  = true (AC1 marker — distinguishes a reused-capture round from a full-suite-runner row)
 //   taskId/runId = which fan-in produced this round (traceability; tolerated by every reader)
 //
-// pass/fail/cancelled/tests are OMITTED — the pre-verified capture carries no test counts (the suite
-// ran outside this fan-in). A green round has fail=0/cancelled=0, but the pass count is genuinely
-// unknown; the /tests reader renders null as "—" and trend-check skips per-test cost for a row with
-// no tests — both honest, neither fabricates a count.
+// pass/fail/cancelled/tests are parsed from --suite-log when the log carries the node:test spec-reporter
+// summary (`ℹ pass N` / `ℹ fail N` / `ℹ cancelled N`; gap-suite-round-pass-fail-cancel-fields). A log
+// without a summary block (a pre-verified reuse whose caller recorded no log path) leaves them ABSENT —
+// the /tests reader renders null as "—" and trend-check skips per-test cost for a row with no tests —
+// both honest, neither fabricates a count.
 //
 // Fail-closed (硬规则 3b): a missing/invalid required field exits 2 and writes NOTHING — a partial
 // record is never appended.
@@ -120,8 +122,10 @@
 //                     --cpu-user-s). user+sys ≈ cpu_time_s by construction (same source line). Optional
 //   --suite-log       the fan-in suite log path — parse its `__OVERHEAD__ <phase>_ms=N` lines into
 //                     static/serial/lowconc/main phase fields + record nproc/concurrentSuiteSlots/
-//                     concurrentSuitesRunning (same 口径 as full-suite-runner). When absent or
-//                     unreadable the row is EXPLICITLY phase-less (no fabricated fields).
+//                     concurrentSuitesRunning (same 口径 as full-suite-runner), AND parse its node:test
+//                     spec-reporter summary into pass/fail/cancelled/tests (gap-suite-round-pass-fail-
+//                     cancel-fields). When absent or unreadable the row is EXPLICITLY phase-less and
+//                     count-less (no fabricated fields).
 //   --runner          layer identity (default 'inner' — the fan-in suite is an inner-layer run; the
 //                     SAME default mirror-full-suite-state.ts writes, so the state + verification-round
 //                     carriers agree for the same round. Explicit --runner overrides.)
@@ -256,6 +260,38 @@ export function parseBucketMarker(suiteLog) {
     if (m) return { buckets: m[1], files: Number(m[2]) };
   }
   return null;
+}
+
+// gap-suite-round-pass-fail-cancel-fields AC1 — parse the node:test spec-reporter summary lines
+// (`ℹ pass N` / `ℹ fail N` / `ℹ cancelled N`, and the TAP `# …` forms) from the suite log. test.sh's
+// dual-reporter config puts the spec reporter on stdout (redirected into --suite-log), and the FULL-SUITE
+// path runs node --test as serial → lowconc → main (three phases, each emitting its OWN summary block),
+// so the totals are the SUM across blocks — the SAME 口径 as full-suite-runner's tapPass/tapFail/
+// tapCancelled accumulators (gap-verification-round-counter-overwrites-not-sums). Returns null when the
+// log is absent/unreadable or carries NO summary block (distinguishes "no counts in log" from "0 tests",
+// 硬规则⑥ 缺值=未查≠为假). Slices by the last __FANIN_SUITE_START__ marker (current round only).
+const TEST_COUNT_RE = /^[#ℹ]\s*(pass|fail|cancelled)\s+(\d+)/;
+
+export function parseTestCounts(suiteLog) {
+  if (!suiteLog) return null;
+  let text;
+  try {
+    text = fs.readFileSync(suiteLog, "utf8");
+  } catch {
+    return null;
+  }
+  const mk = lastSuiteStartOffset(text);
+  const body = mk === -1 ? text : text.slice(mk);
+  const acc = { pass: 0, fail: 0, cancelled: 0 };
+  let seen = false;
+  for (const line of body.split("\n")) {
+    const m = line.match(TEST_COUNT_RE);
+    if (m) {
+      seen = true;
+      acc[m[1]] += Number(m[2]);
+    }
+  }
+  return seen ? acc : null;
 }
 
 /** Host parallelism (nproc) — the same read-host expression as full-suite-runner.hostParallelism
@@ -529,6 +565,19 @@ export function buildPreVerifiedRoundRecord(o) {
     record.bucket_files = bucketMarker.files;
     record.bucket_duration_ms = durationMs;
   }
+  // gap-suite-round-pass-fail-cancel-fields AC1/AC2 — the fan-in suite's node:test summary carries the
+  // pass/fail/cancelled tallies (redirected into --suite-log). Write them so the /tests page + Dashboard
+  // card render real counts instead of "—". `tests` = pass+fail+cancelled (the same 口径 full-suite-runner
+  // writes — it never trusts the `ℹ tests` line for the field). A log without a summary block (a
+  // pre-verified reuse whose caller recorded no log path) ⇒ the fields stay ABSENT (honest — a reader
+  // renders null as "—"; never fabricate a 0).
+  const testCounts = parseTestCounts(suiteLog);
+  if (testCounts !== null) {
+    record.pass = testCounts.pass;
+    record.fail = testCounts.fail;
+    record.cancelled = testCounts.cancelled;
+    record.tests = testCounts.pass + testCounts.fail + testCounts.cancelled;
+  }
   // Concurrency variables (AC1): nproc + slots are deterministic reads; concurrentSuitesRunning =
   // 1 (this round's own slot) + currently-held OTHER-suite slots at WRITE time, capped at the slot
   // count — the same formula + clamp as full-suite-runner's round-start capture (:2591-2596). The
@@ -593,10 +642,12 @@ Usage:
   --suite-log       the fan-in suite log path — parse its __OVERHEAD__ <phase>_ms=N lines into
                     static/serial/lowconc/main phase fields + lock_wait_ms (test.sh's flock marker)
                     + record nproc/concurrentSuiteSlots/concurrentSuitesRunning (same 口径 as
-                    full-suite-runner). On an overlap round lowconc_phase_ms carries the
-                    overlap_lowconc_ms sub-time instead of the subsumed 0. effective_parallelism is
-                    derived from --cpu-time-s ÷ --duration-ms. When the log is absent or unreadable
-                    the row is EXPLICITLY phase-less (no fabricated fields).
+                    full-suite-runner), AND parse its node:test spec-reporter summary into
+                    pass/fail/cancelled/tests (gap-suite-round-pass-fail-cancel-fields). On an overlap
+                    round lowconc_phase_ms carries the overlap_lowconc_ms sub-time instead of the
+                    subsumed 0. effective_parallelism is derived from --cpu-time-s ÷ --duration-ms.
+                    When the log is absent or unreadable the row is EXPLICITLY phase-less and
+                    count-less (no fabricated fields).
   --runner          nominal runner identity (default 'outer', matching the existing ledger)
   --root            repo root (default: cwd) — resolves the shared checkout via git common-dir
   --record-file     override the ledger path (hermetic tests)
