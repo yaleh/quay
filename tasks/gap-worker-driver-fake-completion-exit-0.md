@@ -32,6 +32,8 @@ depends_on: []
 
 **影响（比 exit-4 严重）**：exit-4 是 fix-worker 侧、只影响晋升；**这条是 worker 侧、影响「任务到底做完没」**——现在会静默把没做完的任务记成 completed（3/5 假），且 `quay driver status` 的 `carrier_records` 自报 11 / 实际 5（同族「驱动自报值不可信」第二实例）。
 
+**更深的后果（manager 2026-08-23 核，⛔ 不止字段失真）**：`completed` 使该任务在驱动的候选计算里被**永久排除**（驱动视角它做完了、永不重派），任务却停在 `ready` + 分支未合 + 占 Touches 锁 ⇒ 变成**「驱动看不见、又占着锁」的僵尸**，只能靠人/别的层手动捞出来——这正是要退役的那种人工介入。3 条死 worktree（clickable/collapse/vertical-graph）跨 2 小时 driver 一轮都没重派，就是这个后果的活样本。
+
 **与 exit-4 的共同纪律（同族）**：exit-4 是「进程说失败、任务其实做成了某步」，本条是「进程说成功、任务没做完」——都是**驱动记录的终态是【进程视角】，我们要的是【任务视角】**。共同纪律：**驱动写任何终态之前，必须读一次任务侧的直接量**（同族：`gap-fix-worker-edit-exit-4`）。
 
 ## Plan
@@ -42,7 +44,7 @@ depends_on: []
 ## Acceptance Criteria
 
 - [ ] AC1：`worker-outcome` 的 `final_state=completed` 与该任务实际落地状态一致（`status=done ∧ 无残留 worktree`）；不一致 ⇒ 假。⛔ 判据不写在 `exit_code` 上（那正是失真的量）。
-- [ ] AC2：修复落地后 100% `completed` 记录真 land（窗口只计落地后）；出现一条「completed 但 status≠done」⇒ 假。
+- [ ] AC2：修复落地后 100% `completed` 记录真 land（窗口只计落地后），且**存量被误记 completed 的任务能被重新看见/重派**（否则修好后这 3 条仍是僵尸）；出现一条「completed 但 status≠done」⇒ 假。
 
 ## Definition of Done
 
