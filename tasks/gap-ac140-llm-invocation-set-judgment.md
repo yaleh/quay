@@ -1,7 +1,7 @@
 ---
 id: gap-ac140-llm-invocation-set-judgment
 title: AC140-4 isLlmInvocation 改读命令集（⛔ 不靠 claude 字面量）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -31,7 +31,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] isLlmInvocation 集合化判定 + 负控制取假通过；AC1-2 全勾；land 到 develop。
+- [x] isLlmInvocation 集合化判定 + 负控制取假通过；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
