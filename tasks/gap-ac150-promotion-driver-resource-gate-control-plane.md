@@ -1,7 +1,7 @@
 ---
 id: gap-ac150-promotion-driver-resource-gate-control-plane
 title: AC150 promotion-driver 资源门/控制面对齐（与 worker-driver 函数级复用）
-status: ready
+status: done
 labels:
   - gap
 parent: null
