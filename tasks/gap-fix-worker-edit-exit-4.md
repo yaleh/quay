@@ -57,4 +57,5 @@ depends_on: []
 ## Touches
 
 - tasks/gap-fix-worker-edit-exit-4.md（自身）
-- plugin/scripts/promotion-driver.ts（computeOutcomeRecords 增 reverify——result.ok 以闸判落地为准；test: plugin/test/promotion-driver.test.mjs）
+- plugin/scripts/promotion-driver.ts（computeOutcomeRecords 增 reverify——result.ok 以闸判落地为准）
+- plugin/test/promotion-driver.test.mjs（2 条 gap-fix-worker-edit-exit-4 单测）
