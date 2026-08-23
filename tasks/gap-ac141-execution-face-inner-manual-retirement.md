@@ -1,7 +1,7 @@
 ---
 id: gap-ac141-execution-face-inner-manual-retirement
 title: AC141 执行面退役——ready 任务默认 worker-driver 捡，inner 手动介入仅限边界 + 记原因
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -29,12 +29,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1（默认 worker-driver 捡）：ready 任务默认由 worker-driver 自主派发，inner 不再默认手动 Agent 实现；取假：驱动存活且能捡时 inner 仍默认手动实现（非①②边界）⇒ 假。
-- [ ] AC2（边界 + 记原因）：inner 手动介入仅限 ①驱动超 N 轮未 dispatch 或 ②明确时限压力（人裁定「立刻执行」），且介入时记明原因；取假：手动介入无原因记录、或超出①②边界 ⇒ 假。
+- [ ] AC1（默认路径唯一化）：`develop` 新落地任务分支的首次实现提交，若晚于 worker-driver 当次 `run_id` 启动时刻，必须能在 `worker-round.jsonl` 找到对应 dispatch 记录；取假：找不到且不在 AC2 例外内 ⇒ 假。
+- [ ] AC2（例外仅两种 + 记原因）：inner 手动直接实现仅限 ①驱动超 N 轮未 dispatch 或 ②明确时限压力（人裁定「立刻执行」），且必须留「为什么手动」记录；取假：无记录手动介入 ⇒ 假。
+- [ ] AC3（测试与 merge 同样纳入）：worker-driver 起手的任务，若中途测试/修复红/最终 merge 被 inner 手动 `Workflow`/`Bash` 接管，同样需 AC2 例外记录；取假：起手合规收尾不合规 ⇒ 假。
 
 ## Definition of Done
 
-- [ ] 执行面退役（默认 worker-driver 捡 + 边界条件 + 原因记录）；AC1-2 全勾；land 到 develop。
+- [ ] 执行面退役（默认 worker-driver 捡 + 例外边界 + 原因记录 + 测试/merge 纳入）；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
