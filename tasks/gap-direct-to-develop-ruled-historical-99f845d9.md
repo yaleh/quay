@@ -1,7 +1,7 @@
 ---
 id: gap-direct-to-develop-ruled-historical-99f845d9
 title: detector 加 ruled-historical 豁免承载 99f845d9——outer 解全库红的止损直提，manager 裁定 ruled one-off
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -34,9 +34,9 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：99f845d9 分类为 ruledHistorical（非 bypass、非 ac65Authorized，输出可区分）。
-- [ ] AC2（能取假）：真直投（无豁免）仍红；99f845d9 不再红；判据3（声明∧无验证⇒红）不变。
-- [ ] AC3：既有测试全绿 + 经 fan-in ff-merge land（⛔ 非直提 develop）。
+- [x] AC1：99f845d9 分类为 ruledHistorical（非 bypass、非 ac65Authorized，输出可区分）。
+- [x] AC2（能取假）：真直投（无豁免）仍红；99f845d9 不再红；判据3（声明∧无验证⇒红）不变。
+- [x] AC3：既有测试全绿 + 经 fan-in ff-merge land（⛔ 非直提 develop）。
 
 ## Definition of Done
 
