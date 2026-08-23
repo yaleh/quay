@@ -73,6 +73,10 @@ import {
 // directly for the AC2 all-5-consumers negative control on the DIR-014 suffixed-heading shape.
 import { applyPromotions, countCompletionCheckboxes, RETREATED_MARKER_RE, isRetreated } from "../scripts/ready-pool-check.ts";
 import { countAcCheckboxes } from "../scripts/task-status-drift-check.ts";
+// AC53 gate (gap-scheduler-inflight-detection-misses-fan-in-worktree AC2): the END invariant the AC53
+// heartbeat gate judges on — `violated === false` ⇒ the gate ACCEPTS the round end (no false refusal).
+// Reused here so the AC2 test asserts the gate's actual verdict, not just slot-refill's intermediate.
+import { judgeEndInvariant } from "../scripts/inner-wakeup-heartbeat-check.ts";
 // DIRECTORY-GLOB SELF-FILE EXEMPTION (tasks/gap-directory-level-tasks-touch-global-lock AC1): the
 // pure-function unit test needs parseTouches (candidate/in-flight Touches parsing) + expandGlobs (the
 // test expander) — imported from the single-source orthogonality module, never a parallel copy.
@@ -2358,4 +2362,69 @@ test("AC6 — unmeasured source nulls in_flight_count/slots_free/subagents_in_fl
   assert.equal(healthy.slots_free, 4, "healthy → slots_free stays a number");
   assert.equal(healthy.occupied_slots, 1, "healthy → occupied_slots stays a number");
   assert.equal(healthy.subagents_in_flight, 0, "healthy → subagents_in_flight stays a number");
+});
+
+// ── IN-FLIGHT WORKTREE DIRECT QUANTITY (gap-scheduler-inflight-detection-misses-fan-in-worktree) ────
+// AC2: in an overlap scenario (in-flight fan-in worktree A touches X + hold candidate B touches X), the
+// worktree A is INVISIBLE to the snapshot in-flight set (its subagent is a workflow, not a standalone
+// Agent) — so without the direct quantity, B is recommended and no_refill_reason stays null, and the
+// AC53 gate falsely refuses the round end. With the worktree supplement, B must be deferred (reason
+// touches-overlap-in-flight) ⇒ recommended empty ⇒ should_refill=false ⇒ no_refill_reason non-empty ⇒
+// the gate ACCEPTS (judgeEndInvariant.violated === false).
+
+test("IN-FLIGHT WORKTREE (AC2) — a hold candidate overlapping a fan-in worktree is deferred ⇒ no_refill_reason non-empty and the AC53 gate accepts", (t) => {
+  const root = makeWorkspace("inflight-worktree");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // In-flight fan-in worktree A declares X (the same file the hold candidate B will declare).
+  const faninTouches = parseTouches(dispatchableBody(["- code/shared.ts (new)"]));
+  // Hold candidate B — the ONLY ready task — declares the SAME X (and, via C8, its own self-file).
+  writeTask(root, "gap-hold", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/shared.ts (new)"]) });
+
+  // The snapshot in-flight set is EMPTY (the fan-in worktree is invisible to it — its subagent is a
+  // workflow). Only the injected direct-quantity worktree entry carries it.
+  const r = analyzeSlotRefill({
+    tasksDir: path.join(root, "tasks"),
+    root,
+    cap: 5,
+    inFlight: [],
+    inFlightWorktrees: [{ id: "gap-fanin", touches: faninTouches }],
+  });
+
+  assert.equal(r.should_refill, false, "the only candidate overlaps the fan-in worktree ⇒ not dispatchable");
+  assert.equal(r.recommended.length, 0, "recommended must be empty (B is deferred)");
+  assert.ok(r.no_refill_reason, `no_refill_reason must be non-empty, got ${JSON.stringify(r.no_refill_reason)}`);
+  const deferredB = (r.deferred || []).filter((d) => d.id === "gap-hold");
+  assert.equal(deferredB.length, 1, "the hold candidate is deferred");
+  assert.match(deferredB[0].reason, /touches-overlap-in-flight/, "deferred with the in-flight overlap reason");
+
+  // The AC53 gate accepts: judgeEndInvariant on the machine's fresh output must NOT be violated.
+  const inv = judgeEndInvariant(r);
+  assert.equal(inv.violated, false, "the AC53 gate must accept (no false refusal)");
+});
+
+test("IN-FLIGHT WORKTREE (AC2) — negative control: a disjoint candidate is still recommended despite the fan-in worktree", (t) => {
+  const root = makeWorkspace("inflight-worktree-disjoint");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const faninTouches = parseTouches(dispatchableBody(["- code/shared.ts (new)"]));
+  writeTask(root, "gap-free", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/free.ts (new)"]) });
+
+  const r = analyzeSlotRefill({
+    tasksDir: path.join(root, "tasks"),
+    root,
+    cap: 5,
+    inFlight: [],
+    inFlightWorktrees: [{ id: "gap-fanin", touches: faninTouches }],
+  });
+
+  assert.ok(r.recommended.includes("gap-free"), "a disjoint candidate is still recommended (the worktree only blocks its own conflict surface)");
+});
+
+test("IN-FLIGHT WORKTREE (AC2) — the default (no injection) reads the live worktree list and is a no-op in a non-git workspace", (t) => {
+  const root = makeWorkspace("inflight-worktree-live");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  // A non-git temp workspace has no `git worktree list` ⇒ computeInFlightWorktreeTouches returns []
+  // (fail-soft) ⇒ behavior is byte-identical to the pre-fix path.
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5, inFlight: [] });
+  assert.ok(r.recommended.includes("gap-a"), "no worktree in flight ⇒ the candidate is recommended as before");
 });

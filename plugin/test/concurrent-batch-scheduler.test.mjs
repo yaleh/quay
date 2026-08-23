@@ -11,7 +11,18 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCandidate } from "../scripts/concurrent-batch-scheduler.ts";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  parseCandidate,
+  // IN-FLIGHT WORKTREE DIRECT QUANTITY (tasks/gap-scheduler-inflight-detection-misses-fan-in-
+  // worktree AC1): the pure open-worktree → {id, touches} resolver whose in-flight detection must
+  // include a fan-in workflow / just-dispatched worktree via the `git worktree list` direct quantity
+  // (not only the telemetry-bracket snapshot).
+  resolveInFlightWorktrees,
+  computeInFlightWorktreeTouches,
+} from "../scripts/concurrent-batch-scheduler.ts";
 
 // A quay-task-shaped charter with frontmatter `labels:` (block-list form) plus a body.
 function taskText({ labels = [], body = "" }) {
@@ -76,4 +87,101 @@ test("parseCandidate: existing fields unchanged when labels are added (id/touche
   assert.equal(c.type, "learning");
   assert.equal(c.valueType, "capability-growth");
   assert.equal(c.deliveryCritical, true);
+});
+
+// ── IN-FLIGHT WORKTREE DETECTION (gap-scheduler-inflight-detection-misses-fan-in-worktree) ─────────
+// AC1: the in-flight detection must include a fan-in workflow / just-dispatched worktree via the
+// `git worktree list` DIRECT quantity — the snapshot (telemetry brackets / historical in-flight id
+// list) misses both. resolveInFlightWorktrees is the pure core; computeInFlightWorktreeTouches is its
+// production wiring (listWorktrees + taskIdFromBranch).
+
+function touchSectionBody(touches) {
+  return [
+    "**type:** execution",
+    "## Proposal",
+    "A proposal paragraph that is definitely more than forty non-whitespace chars.",
+    "## Touches",
+    ...touches,
+    "## Acceptance Criteria",
+    "- [ ] an acceptance criterion long enough to count",
+    "## Definition of Done",
+    "standard DoD — the five clauses; meta-enforcer fixture-pinned.",
+  ].join("\n");
+}
+
+function makeWorktreeTasks(tag, taskDefs) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `cbs-wt-${tag}-`));
+  const tasksDir = path.join(dir, "tasks");
+  fs.mkdirSync(tasksDir, { recursive: true });
+  for (const [id, touches] of Object.entries(taskDefs)) {
+    fs.writeFileSync(path.join(tasksDir, `${id}.md`), touchSectionBody(touches));
+  }
+  return { dir, tasksDir };
+}
+
+test("resolveInFlightWorktrees: a fan-in worktree (task/<id> branch) resolves to its task id + touches (AC1)", (t) => {
+  const { dir, tasksDir } = makeWorktreeTasks("fanin", {
+    "gap-fanin": ["- code/shared.ts"],
+  });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = resolveInFlightWorktrees(
+    [
+      { path: dir, branch: "refs/heads/develop" }, // main checkout
+      { path: path.join(dir, "..", "quay-worktrees", "gap-fanin"), branch: "refs/heads/task/gap-fanin" },
+    ],
+    { root: dir, tasksDir },
+  );
+  assert.equal(out.length, 1, "exactly one in-flight worktree (the main checkout is excluded)");
+  assert.equal(out[0].id, "gap-fanin");
+  assert.deepEqual(out[0].touches.globs, ["code/shared.ts"]);
+});
+
+test("resolveInFlightWorktrees: non-task branches + missing task file + no Touches are excluded (fail-soft)", (t) => {
+  const { dir, tasksDir } = makeWorktreeTasks("excl", {
+    "gap-task": ["- code/a.ts"],
+  });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = resolveInFlightWorktrees(
+    [
+      // integration / detached / non-task branches ⇒ not a task worktree
+      { path: path.join(dir, "..", "wt-integration"), branch: "refs/heads/integration" },
+      { path: path.join(dir, "..", "wt-detached"), branch: null },
+      { path: path.join(dir, "..", "wt-feat"), branch: "refs/heads/feat/thing" },
+      // task branch but the task file does not exist ⇒ blocks nothing
+      { path: path.join(dir, "..", "wt-missing"), branch: "refs/heads/task/gap-ghost" },
+      // task branch whose task declares no ## Touches ⇒ no usable conflict surface
+      { path: path.join(dir, "..", "wt-notouch"), branch: "refs/heads/task/gap-notouch" },
+    ],
+    { root: dir, tasksDir },
+  );
+  assert.equal(out.length, 0, "none of the excluded shapes are in-flight task worktrees");
+  // A task file WITHOUT a ## Touches section must not resolve (no declared conflict surface).
+  fs.writeFileSync(path.join(tasksDir, "gap-notouch.md"), "**type:** execution\n## Proposal\nno touches declared\n");
+  const out2 = resolveInFlightWorktrees(
+    [{ path: path.join(dir, "..", "wt-notouch"), branch: "refs/heads/task/gap-notouch" }],
+    { root: dir, tasksDir },
+  );
+  assert.equal(out2.length, 0, "a task worktree with no declared Touches blocks nothing");
+});
+
+test("resolveInFlightWorktrees: duplicate task/<id> worktrees dedup to one entry", (t) => {
+  const { dir, tasksDir } = makeWorktreeTasks("dedup", {
+    "gap-dup": ["- code/x.ts"],
+  });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = resolveInFlightWorktrees(
+    [
+      { path: path.join(dir, "..", "wt-a"), branch: "refs/heads/task/gap-dup" },
+      { path: path.join(dir, "..", "wt-b"), branch: "refs/heads/task/gap-dup" },
+    ],
+    { root: dir, tasksDir },
+  );
+  assert.equal(out.length, 1, "one task id ⇒ one in-flight entry");
+  assert.equal(out[0].id, "gap-dup");
+});
+
+test("computeInFlightWorktreeTouches: a non-git root yields [] (fail-soft, never a fabricated block)", (t) => {
+  const { dir, tasksDir } = makeWorktreeTasks("nogit", { "gap-nogit": ["- code/a.ts"] });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.deepEqual(computeInFlightWorktreeTouches(dir, tasksDir), []);
 });
