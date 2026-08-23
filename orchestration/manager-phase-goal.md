@@ -630,9 +630,24 @@ promotion-driver.ts:110-117  isLlmInvocation(argv)
   同名不同义正是本条要消除的东西。**取假**：给 `--worker-cmd` 一个 wrapper 前缀后，
   worker 收不到任务 id/prompt ⇒ 为假。
 - **AC140-4（判定不得靠命令字面量，⛔ 最优先）**：`isLlmInvocation` **不得**以 argv0 是否等于
-  `claude` 判定，须由**配置声明的 LLM 命令集**判定。**取假（负控制，一条命令可做）**：
-  配置 wrapper = `claude-fjdac` 后跑一次真实 fix worker ⇒ 其 round 记录的 `llm_invoked` **必须为 true**；
-  若仍为 `false` ⇒ 为假。**⊢ 这条同时是 AC131 证据链的修复**，⛔ 不得延后到 AC140 其余三条之后。
+  `claude` 判定，须由**配置声明的 LLM 命令集**判定。**取假（负控制）**：配置 wrapper = `claude-fjdac` 后，
+  **对该 wrapper 的 argv 调用 `isLlmInvocation` 必须返回 true**；仍为 `false` ⇒ 为假。
+  **⊢ 这条同时是 AC131 证据链的修复**，⛔ 不得延后到 AC140 其余三条之后。
+
+  **⊕ 2026-08-23 00:4xZ 我方自纠（⛔ 我原先给的取假写错了，实测证否后改正）**：
+  **原文写「跑一次真实 fix worker ⇒ 其 round 记录的 `llm_invoked` 必须为 true」——该判据对当前实现【结构上不可满足】，与 wrapper 无关。**
+  **⊢ 实读证否（`promotion-driver.ts:210` + `:272-275` 注释）**：`llmInvoked = isLlmInvocation(argv)` 中的
+  `argv` **只是 ready-pool-check 的 argv**（晋升路径），**fix worker 的 spawn 根本不进这个字段** ——
+  注释自己写明「fix worker 的 spawn 在 `fixes[].spawned=true` 上可见」。
+  **⊢ 生产实测印证**：round 70（`00:35:53.420Z`）**同一轮里** `fixes[0].spawned=true`（真的 spawn 了 `claude -p`）
+  **而 `llm_invoked:false`**；全载体 `llm_invoked=true` 的轮数 = **0**。
+  ⇒ **我把一个【路径限定】的字段当成了【全轮】字段** —— 若不改，落笔方会照我的原文去测，
+  拿到 `false` 后要么误判 AC140-4 失败、要么去改一个本来正确的字段。
+  **⊢ 因此本条的取假改为【直接对判定函数做】（上文已改）**；
+  **⊢ 并单列一条附带要求（归 AC140-1 的实现面，⛔ 不新增判据）**：`llm_invoked` 这个**字段名比它的语义宽** ——
+  同族陷阱已有前例（`perfile-timeout` gate 名误导）。落笔方**要么把它改名为路径限定的名字**
+  （如 `promote_path_llm_invoked`），**要么把它扩成真正的全轮口径**（含 fix worker spawn）；
+  ⛔ **不得原样保留一个会让读者得出相反结论的名字**（硬规则 4b：读数与「一切正常」同形）。
 
 **⊢ 与 AC139 的关系（⛔ 顺序与归属）**：AC139 管**承载与入口**（怎么启动、谁守护）；
 **本条管【被启动的东西本身调什么 LLM】** —— 两者正交，但**配置面应落在同一处**
