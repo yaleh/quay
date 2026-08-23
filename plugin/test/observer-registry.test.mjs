@@ -113,8 +113,11 @@ test("AC3 (load-bearing): register a target offline → run all 4 consumers once
 
     // Consumers 2 & 3 — the session-liveness surface (git-staleness reads REPO-STALL; the
     // session-liveness-coverage Monitor reads the SESSION-STATUS watch verdict from the same run).
+    // SL_NO_REGISTER=1 keeps this hermetic: --once must not self-register an observer into the
+    // shared <repo>/.quay/ dir (the transient .quay/session-liveness.<pid>.json write that raced
+    // the real resident monitor's file under the concurrent suite — the AC3 flake source).
     const sl = run(sessionLiveness, ["--once"], {
-      env: { ...env, SESSION_TARGETS: "test-target /tmp/observer-test-root test-sess:outer" },
+      env: { ...env, SL_NO_REGISTER: "1", SESSION_TARGETS: "test-target /tmp/observer-test-root test-sess:outer" },
     });
     assert.equal(sl.status, 0, sl.stderr);
     assert.match(sl.stdout, /SESSION-STATUS test-target decommissioned \(offline per observer-registry\)/);
@@ -155,7 +158,7 @@ test("AC2: an ACTIVE target is NOT reported decommissioned by any consumer (no f
     // normal liveness probe; here the fake target has no session, so it reports alive=0 — but it
     // must not say "decommissioned").
     const sl = run(sessionLiveness, ["--once"], {
-      env: { ...env, SESSION_TARGETS: "quay /tmp/observer-active-root quay-0:outer" },
+      env: { ...env, SL_NO_REGISTER: "1", SESSION_TARGETS: "quay /tmp/observer-active-root quay-0:outer" },
     });
     assert.equal(sl.status, 0, sl.stderr);
     assert.doesNotMatch(sl.stdout, /decommissioned/, "active target must not be reported decommissioned");
