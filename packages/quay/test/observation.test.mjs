@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen } from "../src/observation.ts";
+import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal } from "../src/observation.ts";
 
 /** Commit helper with a fixed clock (committer date = author date = `t`), per-branch file. */
 function commitAt(ws, msg, t, file = "log.txt") {
@@ -173,5 +173,133 @@ test("AC1 fail-closed: no worktree namespace ⇒ the run stays in-flight (never 
       "AC1: fail-closed — an unobservable worktree state keeps the run in-flight");
   } finally {
     fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+// ── gap-webui-journal-stale-and-ticklog-bug ─────────────────────────────────────────────────────
+// readJournal had two defects: (1) escalations.md — superseded by tick-log but still rendered first
+// as a fresh 「最近记录」 9 days after its last write; (2) tick-log.md — read by the SAME `## `-
+// boundary function as escalations, which found zero `## ` boundaries (the real file is
+// `` - `HH:MMZ` `action` `` bullets) and fell through to a raw-tail fallback that mixed days-old
+// stale entries with today's, with no date. AC1 = stale annotation; AC2 = dedicated bullet-prefix
+// reader (no raw-tail fallback); AC3 = date-stamped entries.
+
+const JOURNAL_NOW = Date.UTC(2026, 7, 23, 12, 0, 0); // 2026-08-23T12:00:00Z
+
+/** Build a temp workspace with an orchestration/ dir; return its root. */
+function journalWorkspace(prefix) {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+  fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
+  return ws;
+}
+
+/** Set a file's atime+mtime to a fixed instant (controls both the stale banner and date anchor). */
+function setMtime(abs, ms) {
+  const d = new Date(ms);
+  fs.utimesSync(abs, d, d);
+}
+
+test("AC1: readJournal marks a superseded escalations.md stale, and does NOT mark a fresh one (negative control)", () => {
+  const ws = journalWorkspace("journal-stale");
+  try {
+    const esc = path.join(ws, "orchestration", "escalations.md");
+    fs.writeFileSync(esc, "# 升级项\n\n## 3. 测试升级项\n\n这是一条测试升级项。\n");
+    setMtime(esc, JOURNAL_NOW - 9 * 86_400_000); // 9 days stale
+
+    const journal = readJournal(ws, JOURNAL_NOW);
+    assert.equal(journal.escalations.status, "ok", "AC1: a stale-but-readable escalations.md is still ok");
+    assert.match(journal.escalations.markdown || "", /陈旧记录/, "AC1: the stale banner appears");
+    assert.match(journal.escalations.markdown || "", /约 9 天前/, "AC1: the banner names the age in days");
+    assert.match(journal.escalations.markdown || "", /2026-08-14/, "AC1: the banner names the last-write date");
+
+    // Negative control — a fresh escalations.md carries no banner.
+    setMtime(esc, JOURNAL_NOW - 3600_000); // 1 hour ago
+    const fresh = readJournal(ws, JOURNAL_NOW);
+    assert.equal(fresh.escalations.status, "ok");
+    assert.doesNotMatch(fresh.escalations.markdown || "", /陈旧记录/,
+      "AC1 negative control: a fresh escalations.md is not marked stale (the banner is real, not vacuous)");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2: readTickLog segments by `- `HH:MMZ`` bullets and drops a days-old entry the raw-tail fallback would have kept", () => {
+  const ws = journalWorkspace("journal-bullets");
+  try {
+    const tlog = path.join(ws, "orchestration", "tick-log.md");
+    // 20 entries; entry 1 is the sentinel the old `lines.slice(-60)` fallback would have shown.
+    const entries = ["- `00:00Z` `no-action` — STALE-SENTINEL-ENTRY"];
+    for (let i = 1; i < 20; i++) {
+      const hh = String(Math.floor(i / 4)).padStart(2, "0");
+      const mm = String((i * 7) % 60).padStart(2, "0");
+      entries.push(`- \`${hh}:${mm}Z\` \`no-action\` — recent entry ${i}`);
+    }
+    fs.writeFileSync(tlog, entries.join("\n") + "\n");
+    setMtime(tlog, JOURNAL_NOW);
+
+    const journal = readJournal(ws, JOURNAL_NOW);
+    assert.equal(journal.tickLog.status, "ok", "AC2: a bulleted tick-log is ok");
+    assert.doesNotMatch(journal.tickLog.markdown || "", /STALE-SENTINEL-ENTRY/,
+      "AC2: the days-old entry is NOT mixed into the recent view (entry-count cap, not a raw line tail)");
+    assert.match(journal.tickLog.markdown || "", /recent entry 19/,
+      "AC2: the true most-recent entry is present");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2 negative control: a tick-log with NEITHER bullets nor `## ` sections reports 「无数据」, never a raw tail", () => {
+  const ws = journalWorkspace("journal-nofmt");
+  try {
+    const tlog = path.join(ws, "orchestration", "tick-log.md");
+    fs.writeFileSync(tlog, "# tick\n\njust some prose\nno tick entries here\n");
+    setMtime(tlog, JOURNAL_NOW);
+
+    const journal = readJournal(ws, JOURNAL_NOW);
+    assert.equal(journal.tickLog.status, "empty",
+      "AC2: an unrecognized tick-log is 「无数据」 (the dedicated reader has no raw-tail fallback)");
+    assert.equal(journal.tickLog.markdown, null, "AC2: no markdown is fabricated from the tail");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC3: readTickLog stamps each entry with its inferred date across a midnight rollover", () => {
+  const ws = journalWorkspace("journal-dates");
+  try {
+    const tlog = path.join(ws, "orchestration", "tick-log.md");
+    // Newest last: 23:59Z is the previous day; 00:01Z / 00:15Z are the mtime date.
+    fs.writeFileSync(
+      tlog,
+      "- `23:59Z` `no-action` — 前一天\n" +
+      "- `00:01Z` `unblock` — 今天凌晨\n" +
+      "- `00:15Z` `no-action` — 今天最新\n"
+    );
+    setMtime(tlog, Date.UTC(2026, 7, 23, 4, 0, 0)); // 2026-08-23T04:00:00Z
+
+    const journal = readJournal(ws, JOURNAL_NOW);
+    const md = journal.tickLog.markdown || "";
+    assert.match(md, /`2026-08-23 00:15Z`/, "AC3: newest entry carries its mtime date");
+    assert.match(md, /`2026-08-23 00:01Z`/, "AC3: same-day entry carries the same date");
+    assert.match(md, /`2026-08-22 23:59Z`/, "AC3: the pre-midnight entry rolls back one day");
+    assert.doesNotMatch(md, /- `\d{2}:\d{2}Z` /, "AC3: no entry is left with a bare HH:MMZ (all stamped)");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("back-compat: a legacy `## `-sectioned tick-log still reads ok (serve.test.mjs pins this shape)", () => {
+  const ws = journalWorkspace("journal-legacy");
+  try {
+    const tlog = path.join(ws, "orchestration", "tick-log.md");
+    fs.writeFileSync(tlog, "# 外层 tick 记录\n\n## 2026-08-03 05:45Z\n\n`correct` — 测试条目。\n");
+    setMtime(tlog, JOURNAL_NOW);
+
+    const journal = readJournal(ws, JOURNAL_NOW);
+    assert.equal(journal.tickLog.status, "ok", "a `## `-sectioned tick-log is still ok");
+    assert.match(journal.tickLog.markdown || "", /2026-08-03 05:45Z/,
+      "the `## ` timestamp heading still renders (dual-format back-compat)");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
   }
 });

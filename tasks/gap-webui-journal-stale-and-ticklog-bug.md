@@ -23,19 +23,19 @@ depends_on: []
 
 ## Plan
 
-1. escalations.md：退役该 section 或加「N 天无更新」提示（决策项，落笔方标注选择）。
+1. escalations.md：退役该 section 或加「N 天无更新」提示（决策项，落笔方标注选择）。**落笔方选择：加陈旧标注**（`ESCALATIONS_STALE_DAYS=1` 天后在段首加 `### ⚠️ 陈旧记录` 横幅）——保留升级历史可查，同时不再把死频道当「最近记录」；退役需改 serve-handlers.ts（不在 Touches，且与在飞 web 任务冲突）。
 2. tick-log.md：用专门的按 `` - `HH:MMZ` `` 行首模式分段读取函数（⛔ 不复用 `## ` 边界函数的兜底分支）。
 3. tick-log 条目带日期（⛔ 仅 HH:MMZ 跨天有歧义）。
 
 ## Acceptance Criteria
 
-- [ ] AC1：escalations.md 的 Journal 段退役或带陈旧标注（⛔ 死频道当「最近记录」第一段 ⇒ 假）。
-- [ ] AC2：tick-log 用专用行首模式分段读取，⛔ 不复用 `## ` 边界兜底；取真最近条目（⛔ 混入数天前陈旧条目 ⇒ 假）。
-- [ ] AC3：tick-log 条目带日期（⛔ 仅 HH:MMZ 跨天歧义）。
+- [x] AC1：escalations.md 的 Journal 段退役或带陈旧标注（⛔ 死频道当「最近记录」第一段 ⇒ 假）。
+- [x] AC2：tick-log 用专用行首模式分段读取，⛔ 不复用 `## ` 边界兜底；取真最近条目（⛔ 混入数天前陈旧条目 ⇒ 假）。
+- [x] AC3：tick-log 条目带日期（⛔ 仅 HH:MMZ 跨天歧义）。
 
 ## Definition of Done
 
-- [ ] escalations 退役/标注 + tick-log 专用分段 + 条目带日期；AC1-3 全勾；land 到 develop。
+- [x] escalations 退役/标注 + tick-log 专用分段 + 条目带日期；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
