@@ -1,7 +1,7 @@
 ---
 id: gap-test-detail-perfile-duration-failed
 title: Test 详情 ③④——perFile 耗时+失败持久化进 round 记录 + 可排序表
-status: ready
+status: done
 labels:
   - gap
 parent: null
