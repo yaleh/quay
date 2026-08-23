@@ -578,13 +578,77 @@ worker-driver     承载 = 【无】——只有 worker-driver.ts 自身
 ⇒ **本条必须排在它 land 之后**，且泛化后的 supervisor **必须吸收（⛔ 非回退）它对稳定承载/死亡告警的修复**。
 **⊢ 非目标**：⛔ 不在本条改两个驱动各自的**业务逻辑**（选择环语义、晋升判定、fix worker 行为）——本条只动**承载与入口**。
 
+### AC140（**驱动调用的 LLM CLI 必须可配置（wrapper + model），且判定不得靠命令字面量** —— 人 2026-08-23 逐字裁定「driver 子命令中运行的 Claude Code 命令应当可以配置，如本项目开发过程中就应当可以使用相应的 Claude Code wrapper 和 model」补）
+
+**⊢ 检查结论：不符合，且不是「加个配置项」那么简单** —— 现有两个覆盖旋钮**语义相反**，其中一个**结构上无法承载 wrapper**。
+
+**⊢ 实读四处硬编码（⛔ 非推断，逐个行号）**：
+```
+worker-driver.ts:247      defaultWorkerArgv    → return ["claude", "-p", prompt]
+worker-driver.ts:708      defaultSelectorArgv  → return ["claude", "-p", prompt]
+promotion-driver.ts:187   buildFixWorkerArgv   → return ["claude", "-p", prompt]（prefix 为空时）
+promotion-driver.ts:190   buildFixWorkerArgv   → return ["claude", "-p", prompt]（无覆盖时）
+```
+⇒ **同一个字面量四处独立出现，无单一真相源**（硬规则 5b 的静态形态）；**且全仓无任何 model/wrapper 配置项**
+（`grep -rn 'claude-fjdac\|--model\|QUAY_CLAUDE' .quay/config.yml plugin/scripts/*.ts` ⇒ **零命中**）。
+
+**⊢ 两个覆盖旋钮语义相反（这才是真正的阻塞点）**：
+```
+promotion-driver.ts:185-189   --fix-worker-cmd  = 【前缀】，prompt 仍被追加        ⇒ wrapper 可用 ✅
+worker-driver.ts:565          --worker-cmd      = 【整体替换】（const [cmd,...cmdArgs] = workerArgv）
+                                                   ⇒ 任务 prompt / task id 全部丢失 ⇒ wrapper 不可用 ❌
+```
+⊢ `worker-driver.ts:847` 的 `workerArgv ?? defaultWorkerArgv(sel.task, rootDir)` 证实：给了 `--worker-cmd`
+之后，**每个任务 spawn 的是完全相同的一条命令，任务 id 不出现在 argv 任何位置** ——
+该旋钮只对**测试捕获脚本**有意义（promotion-driver 注释 `:45` 自己写明「AC2 取假用捕获脚本读末参数」），
+**⛔ 不能用来接 `claude-fjdac --model <m>` 这类真实 wrapper。**
+
+**⊢ ⚠️ 连带发现的一个【会制造假读数】的缺陷（本条最该先修的一处，硬规则 4b）**：
+```
+promotion-driver.ts:110-117  isLlmInvocation(argv)
+  return base === "claude" || base === "claude.exe" || base === "claude.cmd";
+```
+⇒ **一旦按人的要求把 wrapper 配成 `claude-fjdac`，该判定返回 false** ——
+而它正是 **AC131「零 LLM 机械晋升」** 的证据字段 `llm_invoked` 的来源。
+**⊢ 后果**：fix worker（**确实是** LLM 调用）会被记成 `llm_invoked:false` ⇒ **AC131 的取假能力静默失效**，
+且失效形态与「该路径确实零 LLM」**完全同形**。⊢ **这是硬规则 4b 的教科书形态**：
+判定本可取假，但中间隔了一个**未随配置更新的字面量过滤器**，读数从此不再反映实际。
+⛔ **不得在换 wrapper 的同一个改动里放过这一条** —— 那会让本阶段最核心的一条 AC 的证据变成假阴性。
+
+**判据（四条，全部能取假）**：
+- **AC140-1（单一真相源）**：LLM 调用 argv 由**一个**构造函数产出（role 作参数），
+  上述**四处硬编码全部消除**。**取假（一条 grep 可查）**：`plugin/scripts/` 下仍能找到 ≥2 处独立的
+  `["claude", "-p", …]` 字面量 ⇒ 为假。
+- **AC140-2（可配置：wrapper + model + 按 role）**：LLM 命令与 model 由 **`.quay/config.yml` 配置**
+  （沿用 DIR-050 统一配置先例——该文件已有 `providers:`/`gates:`/`loop:` 三段，本条加第四段），
+  **且可按 role 分别覆盖**（worker / selector / fix-worker 是三种不同负载：长任务链 / 短决策 / 短编辑，
+  ⛔ 不假定它们该用同一个 model）。**取假**：把 wrapper 配成 `claude-fjdac`、model 配成本项目实际所用值后，
+  spawn 出的 argv 里 argv0 仍是 `claude` 或 model 未出现 ⇒ 为假。
+- **AC140-3（覆盖语义统一为「前缀 + prompt」）**：`--*-cmd` 一律解释为**前缀**，prompt 由驱动追加
+  （即 promotion-driver 的现行语义）；worker-driver 现有的**整体替换**语义**改名为独立 flag**
+  （如 `--worker-cmd-exact`，测试捕获专用）。**⛔ 两种语义不得共用一个 flag 名** ——
+  同名不同义正是本条要消除的东西。**取假**：给 `--worker-cmd` 一个 wrapper 前缀后，
+  worker 收不到任务 id/prompt ⇒ 为假。
+- **AC140-4（判定不得靠命令字面量，⛔ 最优先）**：`isLlmInvocation` **不得**以 argv0 是否等于
+  `claude` 判定，须由**配置声明的 LLM 命令集**判定。**取假（负控制，一条命令可做）**：
+  配置 wrapper = `claude-fjdac` 后跑一次真实 fix worker ⇒ 其 round 记录的 `llm_invoked` **必须为 true**；
+  若仍为 `false` ⇒ 为假。**⊢ 这条同时是 AC131 证据链的修复**，⛔ 不得延后到 AC140 其余三条之后。
+
+**⊢ 与 AC139 的关系（⛔ 顺序与归属）**：AC139 管**承载与入口**（怎么启动、谁守护）；
+**本条管【被启动的东西本身调什么 LLM】** —— 两者正交，但**配置面应落在同一处**
+（`quay driver` 读同一份 `.quay/config.yml`），⊢ 故建议**由同一个实现任务承接或紧邻排期**，
+⛔ 但判据独立计（AC139 全真而 AC140 全假是可能的，反之亦然）。
+**⊢ 非目标**：⛔ 不在本条挑选/裁定具体用哪个 model —— 那是**配置值**，由人/项目定；
+本条只要求**该值可配、且被真实使用**（同硬规则 4：不为一个未测量的量设阈值）。
+
 ### 本阶段的达成条件（修正）
-**达成 = AC130 ∧ AC131 ∧ AC132 ∧ AC133 ∧ AC134 ∧ AC135 ∧ AC136 ∧ AC137 ∧ AC138 ∧ AC139。**
+**达成 = AC130 ∧ AC131 ∧ AC132 ∧ AC133 ∧ AC134 ∧ AC135 ∧ AC136 ∧ AC137 ∧ AC138 ∧ AC139 ∧ AC140。**
 **⊢ 分工提示（防「造齐机件却没接上」——AC129 那个缺口的同形）**：
 AC130–134 = **驱动能做**；**AC135 = outer 不再做（实际切换 + 退役）**；**AC136 = 观测面跟着切**；
 **AC138 = 两驱动均从「能做」变成「在生产中真的在做」——人 2026-08-23 裁定新增的第九个合取项**；
-**AC139 = 两驱动的【启动面】收敛为一个 `quay` 子命令 + 单一泛化 supervisor——人同日第二条裁定，第十个合取项**。
-⛔ 五者缺一，本阶段就只是「多了一个能跑的东西」而非「晋升面机械化了」。
+**AC139 = 两驱动的【启动面】收敛为一个 `quay` 子命令 + 单一泛化 supervisor——人同日第二条裁定，第十个合取项**；
+**AC140 = 被启动的东西【调什么 LLM】可配（wrapper + model），且 `llm_invoked` 判定不再靠命令字面量——人同日第三条裁定，第十一个合取项**。
+⛔ 六者缺一，本阶段就只是「多了一个能跑的东西」而非「晋升面机械化了」。
 **⊢ 切换判据（人 2026-08-22 16:0xZ 明令）**：当前「结晶」阶段的**任务全部 merge** 后即切换到本阶段，
 **⛔ 不要求结晶阶段的 AC 全部满足**——未满足者随其任务 land 后由我持续核（见下）。
 **⊢ 持续观察义务（人同令，⛔ 不因阶段切换而免除）**：切换后我仍须**每轮核结晶阶段的 AC 与阶段目标**，
