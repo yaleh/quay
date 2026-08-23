@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-dispatch-pre-filter-missing
 title: worker-driver 派发前候选过滤缺失（depends_on 维度；Touches 维度已在 gap-launch-script-worker-cap-broken AC3）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -28,11 +28,11 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：依赖未满（`depends_on` 含未 done 任务）的任务不被 worker-driver 派发（⛔ 仍派发 ⇒ 假，如 ac138 白烧一轮再现）。
+- [x] AC1：依赖未满（`depends_on` 含未 done 任务）的任务不被 worker-driver 派发（⛔ 仍派发 ⇒ 假，如 ac138 白烧一轮再现）。
 
 ## Definition of Done
 
-- [ ] 派发前 depends_on 过滤落地 + 依赖未满任务不派发；AC1 全勾；land 到 develop。
+- [x] 派发前 depends_on 过滤落地 + 依赖未满任务不派发；AC1 全勾；land 到 develop。
 
 ## Retires
 
