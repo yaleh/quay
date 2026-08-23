@@ -1,7 +1,7 @@
 ---
 id: gap-resident-driver-stable-carrier-liveness
 title: 常驻驱动稳定承载 + 死亡告警（⛔ worktree 承载 + pid 死无告警）
-status: done
+status: ready
 labels:
   - gap
 parent: null
@@ -11,6 +11,7 @@ extra:
 depends_on:
   - gap-ac137-promotion-driver-production-enablement
 ---
+> **RETREATED / 搁置（wiring 审计 AC2 无调用者（零 cron/watchdog 调 liveness，log 13h 无更新），需接定时调用者）**
 
 **type:** execution
 
@@ -32,9 +33,9 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [x] AC1（稳定承载）：常驻 supervisor/driver 从稳定路径启动（supervisor cmdline 的脚本路径 = 主检出，⛔ 非 `worktrees/`）；取假：cmdline 含 worktree 路径 ⇒ 假。
-- [x] AC2（死亡告警）：driver/supervisor 死时有机件在窗口内检测并报告（⛔ pid 文件指向不存在 pid 而无人察觉 ⇒ 假）。
-- [x] AC3（supervisor 死测试）：`kill -9 <supervisor_pid>` 后 (a) 有机件报告 supervisor 死 (b) driver 不再被误判为「在跑」；取假：supervisor 死后无人报告、载体停更被读作「正常」⇒ 假。
+- [ ] AC1（稳定承载）：常驻 supervisor/driver 从稳定路径启动（supervisor cmdline 的脚本路径 = 主检出，⛔ 非 `worktrees/`）；取假：cmdline 含 worktree 路径 ⇒ 假。
+- [ ] AC2（死亡告警）：driver/supervisor 死时有机件在窗口内检测并报告（⛔ pid 文件指向不存在 pid 而无人察觉 ⇒ 假）。
+- [ ] AC3（supervisor 死测试）：`kill -9 <supervisor_pid>` 后 (a) 有机件报告 supervisor 死 (b) driver 不再被误判为「在跑」；取假：supervisor 死后无人报告、载体停更被读作「正常」⇒ 假。
 
 ## Definition of Done
 
@@ -51,3 +52,7 @@ depends_on:
 - .gitignore（新增 `.quay/promotion-driver-liveness.log` 运行时态，随 liveness 子命令落盘而暴露）
 - plugin/scripts/capability-catalog.sh（`promotion-driver-launch.sh` 条目补 liveness / 稳定承载，机件描述准确性伴随）
 - tasks/gap-resident-driver-stable-carrier-liveness.md（自身）
+
+## Finding（wiring 审计 2026-08-23，AC2 无调用者）
+
+`promotion-driver-launch.sh liveness` 子命令代码正确，但 `grep -rln "liveness"` 全仓库只命中脚本自身——**零 cron/watchdog/tick 调它**；`.quay/promotion-driver-liveness.log` 全文只有一行 `01:34:52Z`、距今 13+ 小时无更新。AC2 承诺的「driver 死后有机制在窗口内检测并报告」目前没有任何东西会触发它——与原始 Proposal「死亡 33 分钟无人察觉」是同一个洞，只是多了一把没人用的锤子。**修法**：接一个定时调用者（cron/tick，或 driver 自身 round 循环里顺手调）。
