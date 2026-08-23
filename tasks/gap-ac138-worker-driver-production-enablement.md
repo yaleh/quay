@@ -56,3 +56,5 @@ depends_on:
 > **注意**：AC3「自主处理 ≥N 任务」N 不在此拍板（硬规则 4：先无阈值跑生产分布再定）；若 AC3 在 fan-in 时刻结构上不可满足（需生产时间窗），按 AC137 先例标「（待外部）」。
 >
 > **land 时 AC 勾选说明（AC138-3 落地）**：AC1/AC3/DoD 标「（待外部）」——三者均需**生产时间窗**（worker-driver 在**主检出**启动为常驻 `ps` 可见 + 自主跑完真实任务），inner 实现 agent ⛔ 不碰主检出。已 land 并可证的部分：**AC2 死亡告警**（复用 AC139 liveness，worker-kind 冒烟实测 stale-pid ⇒ `deaths:supervisor_dead` + exit 1）；AC1 的稳定承载机制（AC139 统一入口 + `_resolve_main_root` 主检出规范化 + CLI worktree 拒绝，scoped 测试覆盖）；AC3 的 wrapper（`ANTHROPIC_BASE_URL`，AC140 `launchArgv` → `bash quay-launch.sh <role>`）与 `selector_reason`（AC129 选择环，scoped 测试覆盖）两部分——AC3 待外部范围**仅**「自主跑完真实任务」。
+
+> **⛔ 依赖阻塞注记（2026-08-23，worker 拒翻 done）**：本任务 `depends_on: gap-ac139-unified-driver-subcommand`，而 ac139 又 `depends_on: gap-resident-driver-stable-carrier-liveness`——后者被 wiring 审计证伪 retreat done→ready，级联 retreat 到本任务（b4ca63df）。worker 16:02 派发后正确判定「代码已全部 land + 依赖链阻塞 + 硬翻 done 会重造 DEP-DONE-IFF-DEPS 违例」⇒ 零提交退出。**⛔ 依赖链（liveness→ac139 落地）解之前，本任务不可翻 done；worker-driver 派发前无 depends_on 过滤（`gap-worker-driver-dispatch-pre-filter-missing`），故下轮可能仍白派一次——该 gap 落地前，此为已知白烧。
