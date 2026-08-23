@@ -7,6 +7,98 @@
 
 ---
 
+## 📋 下一阶段（**计划中，尚未切换** —— 人 2026-08-23 09:2xZ 裁定「创建/更新下一阶段计划，以退役 outer 和 inner 为目标」）：三层塌缩 —— 会话退役，机制承接（AC143–AC149）
+
+**来源（人逐字，两条，同一次）**：
+```
+①「把"阶段0（阻塞）：修 LLM-worker spawn 链，用 fix-worker + selector 两个坏例验证"列入本阶段目标和 AC」
+   ⇒ 已落为【当前阶段】的 AC142（⛔ 不在本阶段——它是本阶段的【前置地基】，见下方切换判据）
+②「创建/更新下一阶段计划，以退役 outer 和 inner 为目标，列入上述计划，并设置相应的 AC」
+   ⇒ 本节
+```
+**人此前给出的方向（2026-08-23 09:1xZ，manager 分析后人确认的形态）**：
+```
+质量把关            → 转给 promotion-driver，或实现独立 driver，由 quay 统一机械驱动
+其它定期操作        → 实现相应 driver，由 quay 统一机械驱动
+语义撰写/人机接口   → 实现相应 subagent，由 manager 直接驱动（后台执行）
+⇒ 彻底取消 outer 会话（inner 会话应已被 worker-driver 机制代替）
+```
+
+**⊢ 本阶段最强的论据（manager 2026-08-23 09:1xZ 机械计数，⛔ 非印象）——这不是【搬迁】工作，是【删除】工作**：
+```
+outer A段 9 条（A4/A7/A8/A12/A13/A16/A17/A19/A20）+ B7   只因 inner 是【会话】才存在
+outer 硬约束 6/16（C1/C2/C9/C11/C12/C16）                 tmux/会话卫生，会话没了即消失
+inner 核「账本·某机制是否真被调用」5 条（grep -c 账本·）   存在的唯一理由 = 会话可以静默跳过一步
+⇒ 驱动进程的循环【不可能静默跳过一步】——要么执行要么死，且死可由 supervisor alive=0 直接看见。
+⇒ 同理：本阶段驱动化的部分，AC135/AC141 打的那个「两个真相源」问题【结构上消失】（只剩一个执行者）。
+```
+
+### AC143（观测/账本/收尾面驱动化 —— outer 的纯机械 A/B 段）
+**判据（能取假）**：outer 执行核里**纯机械**的 A/B 段（A1/A3/A6/A9/A10/A18/A21 读数 · B1/B2/B6 收尾留痕 · B12/B17 自查审计）收进 driver（新 kind 或并入既有 kind，落笔方定）。
+**⊢ 扩展成本已实测（manager 直读 `promotion-driver-launch.sh`）**：kind 派发是 **registry 表驱动**（`KIND_DRIVER[]`/`KIND_VERBS[]`/`KIND_PREFIX[]` 关联数组）⇒ 加一个 kind = 表里加一行 + 写该 driver 的 `.ts`。AC139-2「单一真相源」的设计红利，⛔ 不需要重造承载。
+**取假**：①该 driver 的**生产载体**在其落地后 ≥N 轮无记录 ⇒ 假（硬规则④推论三：能产出 ≠ 已产出）；②driver 落地后 outer tick-log 里**仍出现**该步骤的手动调用记录 ⇒ 假（两个真相源，同 AC135 形态）。
+
+### AC144（质量把关按【形状】分开驱动化，⛔ 不得一股脑塞进 promotion-driver）
+**背景**：「质量把关」不是一件事；一股脑并入 promotion-driver 会造出 god-object（其 scope 是任务合格化，不是冲突解析/止损判断）。
+**四种形状，分别处置（manager 2026-08-23 分析，人已见）**：
+```
+B15 pool 质量语义闸   已是 ADR-033「机械触发 + schema'd LLM judge」形态 ⇒ 现成模板，只需把调用方从 outer tick 换成 driver
+B17 判据消费纪律      纯机械审计（judgment-consumer-check.ts）⇒ 直接驱动化
+B16 冲突归因          A/B 类可机械（per-hunk 取并集）；⛔ C 类要读两边意图 ⇒ 保留语义面（归 AC145）
+B18 止损义务          对一个【活场景】的判断 ⇒ 保留语义面（归 AC145）
+```
+**取假**：①上述四项被并入**同一个** driver kind ⇒ 假（god-object）；②B16-C 类 / B18 被声称"已驱动化"而无 LLM 参与 ⇒ 假（把语义判断伪装成机械判断）。
+
+### AC145（语义面 subagent 化 + 由 manager 后台驱动）
+**范围（这些结构上不能是 driver —— driver 读不出一个"听起来自洽但错了"的因果故事）**：任务撰写/立案 · 需求分析 · 升级判断（B11）· 学习（B10，证据推翻原判断时改目标/方法）· AC65 快修判断 · B16-C 类冲突意图 · B18 止损 · **跨层纠错**。
+**⊢ 跨层纠错必须单列（本会话三个实证，⛔ 全部由另一层读散文发现）**：
+```
+outer 自诊断「优先级排序疏漏」  错——真因是结构性阻塞（AskUserQuestion 卡 3h17m），manager 读其 transcript 才证否
+manager 自称「非手搓走已有机件」 过度声称——audit 读记录才发现（送键实为手搓，catalog 无适配工具）
+manager 过早给出因果归因        audit 报出
+```
+**判据（能取假）**：①上述职责由 manager **派后台 subagent** 执行，非 manager 主线程直接做；**取假**：`manager` 主线程出现产品文件编辑 ⇒ 假（同 inner A24 `main_thread_edits > 0` 即判违反的判据形态，直接复用）。②每类语义职责有**可查的派发记录**（同 A16b `dispatch-record` 形态）；**取假**：发生了一次语义产出而无对应派发记录 ⇒ 假。
+
+### AC146（人机接口必须有【显式承接者】）
+**背景（本阶段的一个真实缺口，⛔ 人的提案里目前无主）**：**driver 不能 `AskUserQuestion`**。取消 outer 后，到达人的通道只剩 `needs-human` 状态 + `escalations.md`。
+**⊢ 该通道当前已在实际堵塞（manager 09:2xZ 直读）**：`.quay/promotion-outcome.jsonl` 里 `action="needs-human"` + `retry-cap-exhausted` **已 3 条**——3 个真实任务被打成 needs-human，而**这件事没有任何一个界面主动让人看见**，是 manager 巡检时才发现的。
+**判据（能取假）**：一条 `needs-human` 产生后，人**在不读任何 transcript 的前提下**能从一个可查界面看到它（web/文件/通知，形态落笔方定）。**取假**：产生一条 needs-human，而人只能靠翻 transcript 或靠 manager 转述才知道 ⇒ 假。
+
+### AC147（manager 自身活性由【不依赖 manager】的通道兜底）
+**背景（"看门人"缺口，manager 分析时主动指出，⛔ 不是人提出的）**：今天是三层互看——outer 阻塞 3h17m 期间，是 **manager 发现、inner 执行**。取消两层后只剩人看 manager。
+**⊢ 平衡陈述（两侧都记，⛔ 不偏向）**：新架构下 manager 阻塞时 **driver 仍在跑**（比今天 outer 一阻塞派发即停**更好**）；**但语义工作停摆且无人察觉**，直到人去看。⇒ **本质是用【层间冗余】换【机制连续性】**。
+**判据（能取假）**：manager 会话失能（阻塞在交互提示 / 心跳停 / 进程死）超过阈值 T，**存在一个不经过 manager 的机制**让人知道。**取假**：把 manager 置于一个 `AskUserQuestion` 阻塞态（**本会话已有现成的真实样本可回放：outer `04:13:54Z`–`07:30:07Z`**），T 之后无任何通知 ⇒ 假。
+**⊢ 非目标**：⛔ 不要求自动解除该阻塞（那需要代人作答，越界）；只要求**让人知道**。
+
+### AC148（inner 执行核逐条归属，⛔ 不得有未分类项）
+**判据（能取假）**：`orchestration/fast-mode-tick-core.md` 的 **A1–A26 + B1–B5 每一条**给出三分类之一——**①已由某 driver 承接（指名哪个）· ②随会话消失（说明为何不再需要）· ③仍需保留（说明由谁执行）**。
+**取假**：任一条无归属，或归属写成"待定/后续再说" ⇒ 假。⊢ 这是硬规则⑤（来源完备性）的直接应用：**逐条映射，不是抽查几条**——本仓库已为"抽查即删"付过代价（2026-08-10 删 164 行，3 条无家可归）。
+
+### AC149（会话真正退役 + 不留双真相源 + 产能不塌）
+**判据（能取假，三条缺一不可）**：
+- **AC149-1（真停）**：outer / inner 会话停止；其 cron 锚、tick-log、执行核文档按 AC135/AC141/B9 的**同一套写法**标退役（删除线 + 指针 + 边界条件）。**取假**：会话停了而文档仍写着"每轮必跑" ⇒ 假（**这正是本会话 09:0xZ 刚修掉的 B9 漂移形态，⛔ 一次性退役十几条会批量制造它**）。
+- **AC149-2（产能不塌，⛔ 这是真判据不是仪式）**：停会话后连续 ≥24h，任务**持续 land**（`develop` 上有新的 fan-in 合并提交），且速率不低于停机前同长度窗口的 X%（X 落笔方定，⛔ manager 不设未测量过的阈值——硬规则④推论一）。**取假**：停机后 land 速率归零或断崖 ⇒ 假，回滚。
+- **AC149-3（无双真相源）**：停机后不存在任何"两个执行者做同一件事"的路径。**取假**：任一职责同时有 driver 路径与人工/会话路径且都在用 ⇒ 假。
+
+### 本阶段的达成条件
+**达成 = AC143 ∧ AC144 ∧ AC145 ∧ AC146 ∧ AC147 ∧ AC148 ∧ AC149。**
+
+**⊢ 切换判据（⛔ 与以往不同，本次要求 AC 满足而非仅任务 merge —— 理由在下面，不是凭空加前置）**：
+当前阶段任务全部 merge **且 AC142 判据满足**。
+**⊢ 为什么这次要加这条（硬规则⑫要的发生率，已给）**：本阶段**每一条 AC 都要起 LLM worker**，而该 spawn 链现为 **13/13 全败**（fix-worker 10/10 `spawned exit=1` + selector 3/3 兜底），且**已把 3 个真实任务打成 needs-human**。在这个地基上建 4+ 个 driver = 把一个未诊断缺陷复制到全系统。⊢ **这不是"永远差最后一步"式的前置**（硬规则⑫禁的那种）——它有实测发生率、有明确的取假判据（AC142-3/-4）、且**修好它本身就在当前阶段内**。
+
+**⊢ 建议的推进顺序（manager 分析，⛔ 非判据，落笔方可调）**：
+```
+阶段0（在当前阶段内）  AC142 修 spawn 链，用 fix-worker + selector 两个坏例验证
+阶段1                  AC143 观测/账本/收尾面驱动化（registry 加一行 + 一个 .ts，成本已实测）
+阶段2                  AC144 质量把关按四种形状分开
+阶段3                  AC145 语义 subagent 化 + AC146 人机接口 + AC147 manager 兜底
+阶段4                  AC148 inner 核逐条归属 → AC149 真正停会话
+```
+**⊢ 非目标（⛔ 不在本阶段做）**：取消 **manager 会话**本身（人的方案里 manager 保留为语义驱动方；⊢ **该残余风险应显式记账**：最上层仍是 LLM 会话、仍有会话失效形态，人是兜底——这是 A16「最上层由人兜底」的既有裁定，本阶段不改）· driver 并发/选择策略调优 · 产品功能推进。
+
+---
+
 ## ✅ 已达成阶段（**2026-08-21 16:5xZ 起 – 2026-08-22 15:3xZ 全部达成 8/8 + AC124 窗口判据满足**）：按变更选择性执行 —— suite 三桶划分
 
 **⊕ 2026-08-22 15:3xZ 达成核算（manager 直读 `.quay/verification-round.jsonl`，锚 `2026-08-21T23:04:39Z` 后）**：
@@ -766,8 +858,33 @@ promotion-driver.ts:110-117  isLlmInvocation(argv)
 
 **⊢ 非目标**：⛔ 不要求驱动的并发数/选择策略改动（AC129 已裁定非目标，本条不重开）；⛔ 不要求把 AC141-2 的两种例外情形本身机械化判定"是否该手动"——那个判断允许 inner 现场做，本条只要求**做了就要能查**。
 
+### AC142（**LLM-worker spawn 链修复 —— 阻塞项** · 人 2026-08-23 逐字裁定「把"阶段0（阻塞）：修 LLM-worker spawn 链，用 fix-worker + selector 两个坏例验证"列入本阶段目标和 AC」）
+
+**⚠️ 本条是【下一阶段全部 AC 的地基】**：所有拟建 driver 都经同一条 `quay-launch.sh <role> --bare -p` spawn 链起 LLM worker；该链当前 **13/13 全败**，在此地基上再建 driver = 把一个未诊断缺陷复制到全系统。
+
+**发生率（manager 2026-08-23 09:2xZ 直读生产载体，⛔ 非引用旧值；硬规则⑫要的那个数）**：
+```
+fix-worker    .quay/promotion-outcome.jsonl  action="fix" 共 10 条，result.ok 全 False，
+                                             detail 全为 "spawned exit=1" ⇒ 10/10 失败，涉 4 个任务
+连带后果      同载体 action="needs-human" result.detail="retry-cap-exhausted" = 3 条
+                                             ⇒ 已有 3 个真实任务【因本缺陷】被打成 needs-human，非潜在风险
+selector      .quay/worker-outcome.jsonl     selector_reason 全为
+                                             "selector worker returned no valid pick (exit null); fallback to first shuffled candidate"
+                                             ⇒ 3/3 兜底（outer 09:08Z 独立确认为系统性，非偶发）
+合计          13/13 = 100%
+```
+
+**判据（能取假，四条；⛔ 每条都读【生产载体】而非 fixture —— 硬规则④推论三）**：
+- **AC142-1（诊断面先行，⛔ 排在根因之前）**：`spawnFixWorker`（`plugin/scripts/promotion-driver.ts:207` 当前 `stdio:["ignore","ignore","ignore"]` 且无 timeout）与 selector 的 spawn **必须捕获 stdout/stderr 并设超时**，落进可查载体。**取假**：本条落地后再发生一次 spawn 失败，而载体里**没有**对应的 stderr 文本 ⇒ 为假。**⊢ 对照实现已在同文件内**：`runPromotionRound`（`:221`）用的就是 `stdio:["ignore","pipe","ignore"]` + timeout —— 不是没有先例，是这一处没照做。
+- **AC142-2（根因必须附【能区分的对照】，⛔ 不接受"说得通"）**：硬规则④推论四直接适用。**已知两个都能独立解释 13/13 的候选**（`--settings` 缺失导致非交互权限提示退出 / wrapper 未生效导致凭据无效）——**恰恰说明不能凭自洽定案**。**取假**：给出根因结论而无「若该假设为假、结果会不同」的对照 ⇒ 为假（降为假说，不得作为结论投递）。⊢ 现成的对照：同一 prompt 分别以 `quay-launch.sh <role> --bare -p "<同一 prompt>"` 与裸 `claude -p "<同一 prompt>"` 各跑一次。
+- **AC142-3（selector 侧生产验证）**：修复落地后，`.quay/worker-outcome.jsonl` 中 **`selector_reason` 为【非兜底】值的记录 ≥ 2 条**，且**时间窗只计【修复落地之后】**（`ts` > 落地提交时刻）。**取假**：窗口内仍全为 fallback-to-shuffle ⇒ 为假。⊢ 该字段名与形态由 manager 直读该载体确认，穿得过中间层（硬规则 4c）。
+- **AC142-4（fix-worker 侧生产验证）**：修复落地后，`.quay/promotion-outcome.jsonl` 中 **`action="fix"` 且 `result.ok=true` 的记录 ≥ 1 条**，时间窗同样只计落地之后。**取假**：窗口内 `action="fix"` 仍全为 `ok:false` ⇒ 为假。⊢ 字段形态同样由 manager 直读确认（`{task_id, gate:{eligible,missing}, action, result:{ok,detail}, ts}`）。
+
+**⊢ 与既有立案的关系**：`gap-fix-worker-spawn-zero-diagnostic-info`（outer 已立案，stdio 捕获 + timeout）**正是 AC142-1 的执行体**；⛔ 但该任务只覆盖 fix-worker 一侧，**selector 侧的同类诊断需一并接上**（outer 已判"复用同一次诊断一并查"，与本条一致）。
+**⊢ 非目标**：⛔ 不在本条裁定具体根因是什么（那是 AC142-2 要求对照后才能得出的结论）；⛔ 不要求 selector 的排序策略改动（AC129 已裁定非目标）。
+
 ### 本阶段的达成条件（修正）
-**达成 = AC130 ∧ AC131 ∧ AC132 ∧ AC133 ∧ AC134 ∧ AC135 ∧ AC136 ∧ AC137 ∧ AC138 ∧ AC139 ∧ AC140 ∧ AC141。**
+**达成 = AC130 ∧ AC131 ∧ AC132 ∧ AC133 ∧ AC134 ∧ AC135 ∧ AC136 ∧ AC137 ∧ AC138 ∧ AC139 ∧ AC140 ∧ AC141 ∧ AC142。**
 **⊢ 分工提示（防「造齐机件却没接上」——AC129 那个缺口的同形）**：
 AC130–134 = **驱动能做**；**AC135 = outer 不再做（实际切换 + 退役）**；**AC136 = 观测面跟着切**；
 **AC138 = 两驱动均从「能做」变成「在生产中真的在做」——人 2026-08-23 裁定新增的第九个合取项**；
