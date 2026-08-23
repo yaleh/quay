@@ -1,7 +1,7 @@
 ---
 id: gap-scheduler-inflight-detection-misses-fan-in-worktree
 title: 并发批调度器在飞检测漏 fan-in workflow / 刚派 worktree ⇒ AC53 心跳闸误拒
-status: ready
+status: done
 labels:
   - gap
 parent: null
