@@ -1,7 +1,7 @@
 ---
 id: gap-webui-server-stale-code-no-restart-detection
 title: web UI server 服务陈旧代码无感知（8.5h 未重启、11 UI 任务不可见，无机制提醒）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
