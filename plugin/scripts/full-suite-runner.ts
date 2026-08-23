@@ -146,7 +146,8 @@ import { sweepRunNamespaces, sweepRunNamespace, killRegisteredServers } from "./
 // develop→integration convergence 2026-08-09): land the suite's per-file __PERFILE__ duration
 // history + compare against the last round (the trend dimension — per-file durations WATCHED round
 // over round; see integration's version of this file for the original placement).
-import { landMeasureHistory, compareLastTwoRounds } from "./measure-trend-check.ts";
+import { landMeasureHistory, compareLastTwoRounds, parsePerFileLines } from "./measure-trend-check.ts";
+import type { PerFileRecord } from "./measure-trend-check.ts";
 // gap-suite-concurrency-ff-gate-and-slot-ssot — the CANONICAL suite-slot implementation (single
 // definition point for "the suite lock slots": suiteLockSlotCount = 旋钮② QUAY_MAX_CONCURRENT_SUITES,
 // suiteLockSlotPaths = base.0..S-1, suiteLockBase = env override → git-common-dir). suiteLockPaths /
@@ -896,6 +897,15 @@ export interface SuiteRoundRecord {
    */
   floor_ms?: number[];
   ceiling?: string[];
+  /**
+   * gap-test-detail-perfile-duration-failed AC1 — the per-file wall-clock + pass/fail array
+   * (`{file, durationMs, passed}[]`), reusing measure-suite-reporter's `__PERFILE__ duration_ms=<dur>
+   * <path> passed=<bool>` stream (parsed by measure-trend-check's parsePerFileLines — the SAME parser
+   * that lands measure-history.jsonl, so the two carriers share one 口径: repo-root-relative `file`
+   * keys via normalizePerFileKey, duration>0 filter). Present only when the round actually emitted
+   * __PERFILE__ lines (a scoped/legacy run with no reporter omits the field — never a fabricated []).
+   */
+  perFile?: PerFileRecord[];
   /**
    * gap-verification-round-load-fields-from-systemd — the suite cgroup scope's consumed CPU time /
    * memory peak / memory swap peak, parsed from systemd's `Consumed` journal line (kernel-accumulated
@@ -2379,6 +2389,12 @@ export async function run(argv: string[]): Promise<number> {
   // record must not fabricate them (AC3).
   const floorMsSeen: number[] = [];
   const ceilingFiles: string[] = [];
+  // gap-test-detail-perfile-duration-failed AC1 — accumulate the reporter's raw
+  // `__PERFILE__ duration_ms=<dur> <path> passed=<bool>` lines (stream-accumulation family, same as
+  // ceilingFiles) so the round record can carry the perFile array. Raw lines are buffered and parsed
+  // at finalize by parsePerFileLines (the measure-history parser) — NO regex re-implemented here
+  // (drift-free: the two carriers share one parser + one normalizePerFileKey).
+  const perFileLines: string[] = [];
 
   // gap-ac124-suite-bucket-production-carrier-benefit — the __BUCKETS__ marker test.sh emits on a
   // bucket-selected run (buckets=<P|M|P+M|full> files=<n> full=<0|1>). Only a bucket-mode run emits it
@@ -2617,6 +2633,12 @@ export async function run(argv: string[]): Promise<number> {
       const floor = Number(ceilingM[3]); // group 2 is duration_ms; group 3 is floor_ms
       if (!floorMsSeen.includes(floor)) floorMsSeen.push(floor);
     }
+    // gap-test-detail-perfile-duration-failed AC1 — buffer the reporter's per-file line (a REAL
+    // reporter line starts column-0 with `__PERFILE__ duration_ms=…`; a PASSING test whose NAME
+    // quotes the shape is ✔-prefixed and must NOT be buffered — the same ^-anchored self-match family
+    // the ceiling parse above and runner-red-parse's isFailureLine both guard). The precise parse
+    // (regex + normalizePerFileKey + duration>0) is parsePerFileLines' job at finalize.
+    if (line.startsWith("__PERFILE__ ")) perFileLines.push(line);
     // gap-ac124-suite-bucket-production-carrier-benefit — parse test.sh's __BUCKETS__ marker
     // (bucket-selected runs only). buckets is the canonical label (P|M|P+M|full); files is the
     // selected file count. First marker wins (test.sh emits exactly one).
@@ -3207,6 +3229,12 @@ export async function run(argv: string[]): Promise<number> {
         : (finalState.reason ?? null);
   const roundGate: string | null =
     roundReason === "gate-failed" ? (staticCheckDetected ? "static-check" : redGateCause ?? "unknown") : null;
+  // gap-test-detail-perfile-duration-failed AC1 — parse the buffered __PERFILE__ lines through
+  // parsePerFileLines (the measure-history parser), so verification-round.perFile and
+  // measure-history.jsonl share ONE 口径 (repo-root-relative keys, duration>0 filter). Omitted
+  // (never a fabricated []) when the round emitted no __PERFILE__ lines — same absent-field
+  // contract as floor_ms/ceiling below.
+  const perFile = perFileLines.length > 0 ? parsePerFileLines(perFileLines.join("\n")) : [];
   // gap-phase-boundary-differential-accounting — the final phase was CLOSED at suite exit (before
   // the journal poll) and its cpu backfilled from the Consumed total right after the poll (see the
   // `finalize()` / `backfillFinalCpu()` calls above). `phaseAccount.records` below is the finished
@@ -3316,6 +3344,9 @@ export async function run(argv: string[]): Promise<number> {
     // contract the *_phase_ms spreads above follow).
     ...(floorMsSeen.length > 0 ? { floor_ms: floorMsSeen } : {}),
     ...(ceilingFiles.length > 0 ? { ceiling: ceilingFiles } : {}),
+    // gap-test-detail-perfile-duration-failed AC1 — the per-file {file,durationMs,passed} array.
+    // Present only when parsePerFileLines yielded ≥1 record (a no-reporter/legacy run omits it).
+    ...(perFile.length > 0 ? { perFile } : {}),
     // gap-verification-round-load-fields-from-systemd — THIS round's scope unit + the parsed
     // Consumed-load fields. Present only when roundScopeUnit was captured at round START (real
     // systemd-run or the QUAY_TEST_SCOPE_UNIT seam); a non-systemd round omits ALL FOUR (缺键 — a

@@ -2401,6 +2401,31 @@ function runStatusClass(state: string | null): string {
   return "";
 }
 
+/**
+ * gap-test-detail-perfile-duration-failed AC2 — render the per-file duration table for one round.
+ * Sorted by duration DESC (server-side — zero client JS, same style as the git-history SVG), failed
+ * files marked with the existing `verdict-fail` class (red). Empty/absent perFile ⇒ "" (no fabricated
+ * table). Pure on its input, so the sort + fail-marking contract is unit-testable directly.
+ */
+export function renderPerFileTable(
+  perFile: { file: string; durationMs: number; passed: boolean }[] | null | undefined,
+): string {
+  if (!perFile || perFile.length === 0) return "";
+  const sorted = [...perFile].sort((a, b) => b.durationMs - a.durationMs);
+  const rows = sorted.map((f) => html`<tr>
+    <td><code>${escapeHtml(f.file)}</code></td>
+    <td>${escapeHtml(String(Math.round(f.durationMs)))} ms</td>
+    <td class="${f.passed ? "" : "verdict-fail"}" style="${f.passed ? "" : "font-weight:700"}">${f.passed ? "passed" : "failed"}</td>
+  </tr>`).join("\n");
+  return html`<details open style="margin-top:1rem">
+    <summary style="cursor:pointer;font-weight:600">perFile 耗时明细（耗时降序 · 失败标红）</summary>
+    <table style="margin-top:0.5rem">
+      <tr><th>file</th><th>duration</th><th>result</th></tr>
+      ${rows}
+    </table>
+  </details>`;
+}
+
 function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = []): string {
   const latest = tests.runs[0] ?? null;
   const latestBanner = latest
@@ -2412,12 +2437,13 @@ function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = []): s
     : "";
   const historyRows = tests.runs.map((r) => html`<tr>
     <td>${r.round != null ? `#${escapeHtml(String(r.round))}` : "—"}</td>
+    <td>${r.startedAt ? escapeHtml(r.startedAt) : "—"}</td>
     <td class="${runStatusClass(r.state)}" style="font-weight:700">${escapeHtml(r.state ?? "—")}</td>
     <td>${r.pass ?? "—"}/${r.fail ?? "—"}/${r.cancelled ?? "—"}</td>
     <td>${r.durationMs != null ? `${escapeHtml(String(Math.round(r.durationMs / 1000)))}s` : "—"}</td>
     <td>${r.scope ? escapeHtml(r.scope) : "—"}</td>
     <td>${r.buckets ? escapeHtml(r.buckets) : "—"}</td>
-    <td>${r.commit ? html`<code>${escapeHtml(r.commit.slice(0, 8))}</code>` : "—"}</td>
+    <td>${r.commit ? html`<a href="/git-history?commit=${encodeURIComponent(r.commit)}"><code>${escapeHtml(r.commit.slice(0, 8))}</code></a>` : "—"}</td>
   </tr>`).join("\n");
   const failedRun = tests.runs.find((r) => r.fail != null && r.fail > 0 && r.failures && r.failures.length > 0);
   const failureDetails = failedRun
@@ -2434,6 +2460,10 @@ function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = []): s
         <p class="meta">数据源：<code>.quay/suite-load-&lt;runId&gt;.jsonl</code>（suite 运行期采样，结束即停）</p>
         ${loadCurveSvg}`
     : "";
+  // gap-test-detail-perfile-duration-failed AC2 — render the per-file table for the newest run that
+  // actually carries perFile data (legacy rows have no perFile field → skipped, never fabricated).
+  const perFileRun = tests.runs.find((r) => r.perFile && r.perFile.length > 0);
+  const perFileTable = perFileRun ? renderPerFileTable(perFileRun.perFile) : "";
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>Tests — 验证轮记录</title></head>
     <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
@@ -2444,10 +2474,11 @@ function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = []): s
       ${loadCurve}
       ${tests.runs.length > 0 ? html`<h2>历史运行（新→旧）</h2>
       <table>
-        <tr><th>round</th><th>state</th><th>pass/fail/cancel</th><th>duration</th><th>scope</th><th>buckets</th><th>commit</th></tr>
+        <tr><th>round</th><th>startedAt</th><th>state</th><th>pass/fail/cancel</th><th>duration</th><th>scope</th><th>buckets</th><th>commit</th></tr>
         ${historyRows}
       </table>` : ""}
       ${failureDetails}
+      ${perFileTable}
     </main></body></html>`;
 }
 

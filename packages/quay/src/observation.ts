@@ -40,8 +40,14 @@ export const TICK_LOG_FILE = "tick-log.md";
 export const GIT_LOG_LIMIT = 20;
 /** Recent-entry bounds for the /journal page. */
 export const JOURNAL_ESCALATION_SECTIONS = 10;
-/** tick-log.md entries are `## 时间戳`-headed (or `` `HH:MMZ` ``-bulleted) prose — read as SECTIONS, not table rows. */
+/** tick-log.md entries are `` - `HH:MMZ` `action` `` bullets — read by a dedicated reader (readTickLog), not `## ` sections. */
 export const JOURNAL_TICK_SECTIONS = 15;
+/**
+ * gap-webui-journal-stale-and-ticklog-bug AC1: an escalations channel whose backing file is older
+ * than this many days is marked stale on the Journal page (it was superseded by tick-log but still
+ * rendered first as a fresh 「最近记录」).
+ */
+export const ESCALATIONS_STALE_DAYS = 1;
 /**
  * gap-live-cannot-tell-a-dead-loop-from-an-unwired-one: the activity window used to tell
  * 「循环在跑但没接遥测」 apart from 「循环根本没跑」. A signal is "active" if it falls inside the
@@ -660,11 +666,150 @@ function readRecentCommits(root: string, limit: number): JournalSection {
   }
 }
 
+/** A tick-log entry line: `` - `HH:MMZ` `action` … `` — bullet + backtick time (HH:MMZ, no date). */
+const TICK_ENTRY_RE = /^- `(\d{2}):(\d{2})Z` /;
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/**
+ * Stale banner for a channel superseded by tick-log but still rendered first on the Journal page
+ * (gap-webui-journal-stale-and-ticklog-bug AC1). A dead channel shown as a fresh 「最近记录」 is
+ * fake; the banner makes its age explicit. Null when the file is fresh or its mtime is unreadable.
+ */
+function staleBanner(abs: string, nowMs: number): string | null {
+  let mtimeMs: number;
+  try {
+    mtimeMs = fs.statSync(abs).mtimeMs;
+  } catch {
+    return null;
+  }
+  const ageDays = (nowMs - mtimeMs) / 86_400_000;
+  if (ageDays < ESCALATIONS_STALE_DAYS) return null;
+  const when = new Date(mtimeMs).toISOString().slice(0, 10);
+  return `### ⚠️ 陈旧记录 — 最后更新于 ${when}（约 ${Math.max(1, Math.floor(ageDays))} 天前）；升级机制已由 tick-log 取代，此处仅供参考`;
+}
+
+/** escalations.md — `## `-section reader plus the stale banner (AC1). */
+function readEscalations(root: string, relFile: string, max: number, nowMs: number): JournalSection {
+  const section = readRecentSections(root, relFile, max);
+  if (section.status !== "ok" || section.markdown == null) return section;
+  const banner = staleBanner(path.join(root, relFile), nowMs);
+  if (banner == null) return section;
+  return { status: "ok", reason: null, markdown: `${banner}\n\n${section.markdown}` };
+}
+
+/**
+ * tick-log.md — a DEDICATED reader (gap-webui-journal-stale-and-ticklog-bug AC2). The real file is
+ * `` - `HH:MMZ` `action` `` bullets, NOT `## ` sections: the shared `## `-boundary reader found zero
+ * boundaries and fell through to its `lines.slice(-max*4)` TAIL fallback, mixing days-old stale
+ * entries into the recent view with no date. This reader segments by the bullet line-prefix and
+ * stamps each entry with its inferred date (AC3). A legacy `## `-sectioned file is still supported
+ * (serve.test.mjs gap-webui-journal-reads-stale-data pins it) — but a file with NEITHER bullets nor
+ * `## ` sections reports 「无数据」, never a raw tail (that fallback is the AC2 mixing bug).
+ */
+function readTickLog(root: string, relFile: string, max: number): JournalSection {
+  const abs = path.join(root, relFile);
+  let text: string;
+  try {
+    if (!fs.existsSync(abs)) {
+      return { status: "empty", reason: `missing ${relFile}`, markdown: null };
+    }
+    text = fs.readFileSync(abs, "utf8");
+  } catch (err) {
+    return {
+      status: "error",
+      reason: `cannot read ${relFile}: ${err instanceof Error ? err.message : String(err)}`,
+      markdown: null,
+    };
+  }
+  const lines = text.split(/\r?\n/);
+  if (!lines.some((ln) => ln.trim().length > 0)) {
+    return { status: "empty", reason: `${relFile} 为空`, markdown: null };
+  }
+
+  // Real format: bullet entry starts (`` - `HH:MMZ` ``).
+  const starts: number[] = [];
+  const minutesOfDay: number[] = [];
+  lines.forEach((ln, i) => {
+    const m = TICK_ENTRY_RE.exec(ln);
+    if (m) {
+      starts.push(i);
+      minutesOfDay.push(Number(m[1]) * 60 + Number(m[2]));
+    }
+  });
+
+  if (starts.length > 0) {
+    return readTickBullets(lines, starts, minutesOfDay, abs, max);
+  }
+
+  // Legacy `## `-sectioned file — delegate ONLY when sections exist. With zero sections this is
+  // 「无数据」, never the raw-tail fallback.
+  const hasSections = lines.some((ln) => /^##\s+/.test(ln));
+  if (!hasSections) {
+    return { status: "empty", reason: `${relFile} 无可分段条目（既非 tick 条目也非 ## 小节）`, markdown: null };
+  }
+  return readRecentSections(root, relFile, max);
+}
+
+/**
+ * Segment the bulleted tick-log entries, stamp each with its inferred date, keep the most recent
+ * `max` (AC3). Date inference anchors the newest entry to the file's mtime UTC date and walks
+ * backward, rolling the day back whenever an entry's HH:MM is LATER than its successor's (a
+ * midnight rollover). HH:MMZ alone is ambiguous across days — this disambiguates the single-
+ * midnight case the file's own format can support.
+ */
+function readTickBullets(
+  lines: string[],
+  starts: number[],
+  minutesOfDay: number[],
+  abs: string,
+  max: number,
+): JournalSection {
+  let anchorMs: number;
+  try {
+    anchorMs = fs.statSync(abs).mtimeMs;
+  } catch {
+    anchorMs = Date.now();
+  }
+  const dates: { y: number; m: number; d: number }[] = new Array(starts.length);
+  {
+    const anchor = new Date(anchorMs);
+    let y = anchor.getUTCFullYear();
+    let m = anchor.getUTCMonth();
+    let d = anchor.getUTCDate();
+    dates[starts.length - 1] = { y, m, d };
+    for (let i = starts.length - 2; i >= 0; i--) {
+      if (minutesOfDay[i] > minutesOfDay[i + 1]) {
+        const prev = new Date(Date.UTC(y, m, d));
+        prev.setUTCDate(prev.getUTCDate() - 1);
+        y = prev.getUTCFullYear();
+        m = prev.getUTCMonth();
+        d = prev.getUTCDate();
+      }
+      dates[i] = { y, m, d };
+    }
+  }
+
+  const from = Math.max(0, starts.length - max);
+  const out: string[] = [];
+  for (let i = from; i < starts.length; i++) {
+    const end = i + 1 < starts.length ? starts[i + 1] : lines.length;
+    const entry = lines.slice(starts[i], end).join("\n");
+    const d = dates[i];
+    const stamp = `${d.y}-${pad2(d.m + 1)}-${pad2(d.d)}`;
+    out.push(entry.replace(TICK_ENTRY_RE, (_full: string, hh: string, mm: string): string => `- \`${stamp} ${hh}:${mm}Z\` `));
+  }
+  return { status: "ok", reason: null, markdown: out.join("\n") };
+}
+
 /** Journal view: recent escalations + tick log + commits. Degrades per the header contract; never throws. */
-export function readJournal(root: string): JournalResult {
+export function readJournal(root: string, nowMs: number = Date.now()): JournalResult {
+  const orch = path.join(root, ORCHESTRATION_DIR);
   return {
-    escalations: readRecentSections(path.join(root, ORCHESTRATION_DIR), ESCALATIONS_FILE, JOURNAL_ESCALATION_SECTIONS),
-    tickLog: readRecentSections(path.join(root, ORCHESTRATION_DIR), TICK_LOG_FILE, JOURNAL_TICK_SECTIONS),
+    escalations: readEscalations(orch, ESCALATIONS_FILE, JOURNAL_ESCALATION_SECTIONS, nowMs),
+    tickLog: readTickLog(orch, TICK_LOG_FILE, JOURNAL_TICK_SECTIONS),
     commits: readRecentCommits(root, GIT_LOG_LIMIT),
   };
 }
@@ -1714,6 +1859,10 @@ export interface TestRunRecord {
   buckets?: string | null;
   bucket_files?: number | null;
   bucket_duration_ms?: number | null;
+  // gap-test-detail-perfile-duration-failed — the per-file wall-clock + pass/fail array
+  // (`{file, durationMs, passed}[]`), landed by full-suite-runner (reusing measure-suite-reporter's
+  // __PERFILE__ stream). Absent on legacy rows → undefined (never a fabricated []).
+  perFile?: { file: string; durationMs: number; passed: boolean }[] | null;
 }
 
 export interface TestsResult {
@@ -1745,6 +1894,20 @@ export function parseVerificationRound(line: string): TestRunRecord | null {
         return JSON.stringify(f);
       });
     }
+    let perFile: { file: string; durationMs: number; passed: boolean }[] | null = null;
+    if (Array.isArray(o.perFile)) {
+      perFile = o.perFile.map((p: unknown) => {
+        if (p && typeof p === "object") {
+          const q = p as { file?: unknown; durationMs?: unknown; passed?: unknown };
+          return {
+            file: typeof q.file === "string" ? q.file : "",
+            durationMs: typeof q.durationMs === "number" ? q.durationMs : 0,
+            passed: q.passed === true,
+          };
+        }
+        return { file: "", durationMs: 0, passed: false };
+      });
+    }
     return {
       round: num(o.round),
       startedAt: str(o.startedAt) ?? str(o.started_at),
@@ -1774,6 +1937,9 @@ export function parseVerificationRound(line: string): TestRunRecord | null {
       ...(o.buckets !== undefined ? { buckets: str(o.buckets) } : {}),
       ...(o.bucket_files !== undefined ? { bucket_files: num(o.bucket_files) } : {}),
       ...(o.bucket_duration_ms !== undefined ? { bucket_duration_ms: num(o.bucket_duration_ms) } : {}),
+      // gap-test-detail-perfile-duration-failed — perFile (absent on legacy rows → undefined, the
+      // same absent-field contract as buckets).
+      ...(o.perFile !== undefined ? { perFile } : {}),
     };
   } catch {
     return null;

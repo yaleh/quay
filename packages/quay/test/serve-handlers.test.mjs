@@ -23,7 +23,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { renderGitHistorySvg, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples } from "../src/serve-handlers.ts";
+import { renderGitHistorySvg, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable } from "../src/serve-handlers.ts";
 import { readGitHistory } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
@@ -369,6 +369,109 @@ test("load curve: GET /tests renders the server-side load curve for the current 
     assert.ok(r.body.includes("suite-load-"), "the section names the sampler's timeseries source");
     assert.ok(r.body.includes("<polyline"), "the load curve is server-rendered SVG (no client chart lib)");
     assert.equal((r.body.match(/<script/g) || []).length, 0, "still zero <script> with the curve present");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-test-detail-perfile-duration-failed: AC2 (perFile table render) ──────────────────────────
+
+test("renderPerFileTable sorts by duration DESC, marks failed files red (verdict-fail), and renders nothing for empty/absent", () => {
+  const perFile = [
+    { file: "packages/quay/test/fast.test.mjs", durationMs: 12, passed: true },
+    { file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: false },
+    { file: "packages/quay/test/mid.test.mjs", durationMs: 100, passed: true },
+  ];
+  const out = renderPerFileTable(perFile);
+  assert.ok(out.includes("perFile 耗时明细"), "renders the perFile table heading");
+  // Sorted by duration DESC: slow (210) → mid (100) → fast (12). indexOf on a pure-function output
+  // is unambiguous (no failureDetails / history table in the same string).
+  const slowIdx = out.indexOf("slow.test.mjs");
+  const midIdx = out.indexOf("mid.test.mjs");
+  const fastIdx = out.indexOf("fast.test.mjs");
+  assert.ok(slowIdx > -1 && midIdx > -1 && fastIdx > -1, "all three files present");
+  assert.ok(slowIdx < midIdx && midIdx < fastIdx, `duration DESC order: slow(${slowIdx}) < mid(${midIdx}) < fast(${fastIdx})`);
+  // The failed file carries verdict-fail (red); the passed files do not.
+  assert.ok(/class="verdict-fail"/.test(out), "the failed file carries verdict-fail (red)");
+  assert.ok(out.includes(">failed<"), "the failed file shows the failed label");
+  assert.ok(out.includes(">passed<"), "the passed files show the passed label");
+  // Absent/empty perFile ⇒ "" (no fabricated table — AC2's 无 perFile ⇒ 假 guard).
+  assert.equal(renderPerFileTable(undefined), "");
+  assert.equal(renderPerFileTable(null), "");
+  assert.equal(renderPerFileTable([]), "");
+});
+
+test("AC2: GET /tests renders the perFile table (sorted, failed red) — a legacy no-perFile row renders no fabricated table", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-perfile-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    // Oldest→newest file order: a legacy row (no perFile), then a perFile-carrying row. readTests
+    // presents newest-first, so the perFile row is the latest and its perFile table renders.
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 227, startedAt: "2026-08-17T04:30:00.000Z", durationMs: 936519, state: "green", runner: "outer", scope: "worktree", commit: "426b21ceaabbe7502334d92d79ce4a4a8d935fe9", pass: 900, fail: 0, cancelled: 0, tests: 900, failures: [] }),
+      JSON.stringify({ round: 228, startedAt: "2026-08-23T00:00:00.000Z", durationMs: 500000, state: "red", runner: "outer", scope: "worktree", commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 1, fail: 1, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: false }, { file: "packages/quay/test/fast.test.mjs", durationMs: 12, passed: true }] }),
+    ].join("\n"));
+
+    createStore(tasksDir).write("AC2-PF", { title: "perfile web tests", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests");
+    assert.equal(r.status, 200, "GET /tests returns 200");
+    assert.ok(r.body.includes("perFile 耗时明细"), "the page renders the perFile table");
+    const slowIdx = r.body.indexOf("slow.test.mjs");
+    const fastIdx = r.body.indexOf("fast.test.mjs");
+    assert.ok(slowIdx > -1 && fastIdx > -1, "both perFile files present");
+    assert.ok(slowIdx < fastIdx, `duration DESC order (slow before fast): slow(${slowIdx}) < fast(${fastIdx})`);
+    assert.ok(/class="verdict-fail"/.test(r.body), "failed file marked red (verdict-fail)");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1/AC2: GET /tests renders a startedAt column per history row (carrier-sourced) and a clickable commit link (not pure StaticText)", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-startedat-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    // Oldest→newest: round 228 (startedAt appears ONLY in its history row, not the latest banner),
+    // then round 229 (the latest banner). This lets AC1's assertion target the ROW rendering — the
+    // round-228 startedAt cannot come from the latest-run banner, so it proves the row template emits it.
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 228, startedAt: "2026-08-23T01:57:10.824Z", durationMs: 936519, state: "green", runner: "outer", scope: "worktree", commit: "426b21ceaabbe7502334d92d79ce4a4a8d935fe9", pass: 900, fail: 0, cancelled: 0, tests: 900, failures: [] }),
+      JSON.stringify({ round: 229, startedAt: "2026-08-23T02:00:00.000Z", durationMs: 366000, state: "green", runner: "outer", scope: "full", commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 500, fail: 0, cancelled: 0, tests: 500, failures: [] }),
+    ].join("\n"));
+
+    createStore(tasksDir).write("AC-STARTED-T", { title: "startedAt web tests", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests");
+    assert.equal(r.status, 200, "GET /tests returns 200");
+    assert.ok(r.body.includes("<th>startedAt</th>"), "the history table has a startedAt column header");
+    // The round-228 timestamp is the NON-latest row → it can only appear via the history-row
+    // template (the latest banner renders round-229's 02:00:00 value, never 228's).
+    assert.ok(r.body.includes("2026-08-23T01:57:10.824Z"), "the round-228 row renders its startedAt timestamp");
+    // AC2: the commit column is an <a> link (not pure StaticText), carrying the full commit hash.
+    assert.ok(r.body.includes('href="/git-history?commit=426b21ceaabbe7502334d92d79ce4a4a8d935fe9"'), "the commit cell is a clickable link to /git-history?commit=<hash>");
+    assert.ok(r.body.includes("<code>426b21ce</code>"), "the linked commit still shows its 8-char short hash");
   } finally {
     if (server) {
       server.close();
