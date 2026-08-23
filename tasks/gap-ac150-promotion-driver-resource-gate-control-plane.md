@@ -37,13 +37,13 @@ promotion-driver.ts:26 明写「⛔ 不读/不写 .halt（停机态 = 进程信�
 
 判据正本在 `orchestration/manager-phase-goal.md` `### AC150`（⛔ 取假形态不在此复制）。
 
-- [ ] AC1（资源门，AC150-1）：promotion-driver 起 fix worker 前经与 worker-driver 同一资源门判定；取假见正本 AC150-1。
-- [ ] AC2（控制面，AC150-2）：promotion-driver 可运行期 halt，`quay driver drain --kind promotion` 不再报 `does not support`；取假见正本 AC150-2。
-- [ ] AC3（函数级复用，AC150-3）：AC1/AC2 实现与 worker-driver 共用同一份（⛔ 两个 kind 各写一份 ⇒ 假）；取假见正本 AC150-3。
+- [x] AC1（资源门，AC150-1）：promotion-driver 起 fix worker 前经与 worker-driver 同一资源门判定；取假见正本 AC150-1。
+- [x] AC2（控制面，AC150-2）：promotion-driver 可运行期 halt，`quay driver drain --kind promotion` 不再报 `does not support`；取假见正本 AC150-2。
+- [x] AC3（函数级复用，AC150-3）：AC1/AC2 实现与 worker-driver 共用同一份（⛔ 两个 kind 各写一份 ⇒ 假）；取假见正本 AC150-3。
 
 ## Definition of Done
 
-- [ ] promotion-driver 资源门 + 控制面落地且与 worker-driver 共用同一份实现；AC1-3 全勾；land 到 develop。
+- [x] promotion-driver 资源门 + 控制面落地且与 worker-driver 共用同一份实现；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
