@@ -1,7 +1,7 @@
 ---
 id: gap-resident-driver-stable-carrier-liveness
 title: 常驻驱动稳定承载 + 死亡告警（⛔ worktree 承载 + pid 死无告警）
-status: ready
+status: done
 labels:
   - gap
 parent: null
