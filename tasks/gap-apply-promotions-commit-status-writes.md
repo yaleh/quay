@@ -1,7 +1,7 @@
 ---
 id: gap-apply-promotions-commit-status-writes
 title: applyPromotions 写 status 后当场 commit（promotion 脏树挡 fan-in 的单一真相源修法，manager 裁定方案①）
-status: ready
+status: done
 labels:
   - gap
 parent: null
