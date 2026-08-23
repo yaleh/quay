@@ -202,7 +202,62 @@ fi
 # Clean tree required: an ff that would overwrite uncommitted work is an environment error, not a
 # "develop advanced" retry. (The shared checkout is clean at fan-in time; a dirty tree means the
 # caller broke the protocol's assumption.)
+#
+# ── auto-converge (gap-fan-in-clean-tree-auto-converge-promotion-status, 方案③ 防御纵深) ─────────
+# ONE benign dirty shape is auto-converged before the refusal: promotion-driver's status-only flip
+# (todo→ready) writes tasks/<id>.md without committing, leaving a status-only dirty tree that is NOT a
+# real protocol violation. Criterion is CONTENT-level (⛔ not path-level): porcelain must be ALL
+# `tasks/*.md`, AND each file's `git diff HEAD` must hit ONLY the frontmatter `status:` line (every
+# +/- line matches `status:`; any body edit or other-field edit fails). When satisfied, stage + commit
+# those files (--no-verify — a mechanical status flip is content-neutral; the hook's doc/Touches
+# checks guard authored CONTENT and shelling test.sh per converge is slow; pathspec-limited ⛔ never a
+# bare commit sweeping the shared index, memory git-commit-no-pathspec-commits-shared-index), then
+# fall through to the ORIGINAL clean-tree check (now clean). Non-status-only dirty still refuses —
+# the protection is NOT widened (AC2).
 porcelain="$(git -C "${root}" status --porcelain 2>/dev/null || true)"
+if [ -n "${porcelain}" ]; then
+  converge_ok=1
+  converge_paths=""
+  while IFS= read -r _pline; do
+    [ -n "${_pline}" ] || continue
+    _pstatus="${_pline:0:2}"
+    _ppath="${_pline:3}"
+    # porcelain XY: only a pure modification (" M"/"M "/"MM") is a status flip; ?? / A / D / R / T ⇒ no.
+    case "${_pstatus}" in
+      " M"|"M "|"MM") : ;;
+      *) converge_ok=0; break ;;
+    esac
+    # every dirty path must be a task file (single segment under tasks/, ⛔ not tasks/sub/…)
+    case "${_ppath}" in
+      tasks/*.md) : ;;
+      *) converge_ok=0; break ;;
+    esac
+    # content-level: the file's full uncommitted diff (HEAD→worktree) must hit ONLY the status: line
+    _pdiff="$(git -C "${root}" diff HEAD -- "${_ppath}" 2>/dev/null | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' || true)"
+    if [ -z "${_pdiff}" ]; then
+      # a modified tracked file with an empty +/- diff (e.g. mode-only) is not a status flip
+      converge_ok=0; break
+    fi
+    _nonstatus="$(printf '%s\n' "${_pdiff}" | grep -vE '^[+-]status:' || true)"
+    if [ -n "${_nonstatus}" ]; then
+      converge_ok=0; break
+    fi
+    converge_paths="${converge_paths}${converge_paths:+ }${_ppath}"
+  done <<EOF
+${porcelain}
+EOF
+
+  if [ "${converge_ok}" = "1" ] && [ -n "${converge_paths}" ]; then
+    # shellcheck disable=SC2086
+    if git -C "${root}" add -- ${converge_paths} 2>/dev/null \
+       && git -C "${root}" commit --no-verify -q -m "tasks: promotion-driver 翻转（fan-in 自动收敛）" -- ${converge_paths} 2>/dev/null; then
+      echo "fan-in-ff-merge: converged a status-only dirty tree (promotion-driver flip) — committed ${converge_paths}" >&2
+    fi
+  fi
+  # re-read porcelain after the (possible) converge commit
+  porcelain="$(git -C "${root}" status --porcelain 2>/dev/null || true)"
+fi
+
 if [ -n "${porcelain}" ]; then
   echo "fan-in-ff-merge: working tree not clean in ${root} — the ff must run on a clean checkout (found uncommitted changes):" >&2
   printf '%s\n' "${porcelain}" | sed 's/^/fan-in-ff-merge:   /' >&2

@@ -10,11 +10,15 @@
 // file's basename and whose `details.duration_ms` is the file's wall duration in the
 // concurrent run. This reporter forwards exactly those events, one line per file:
 //
-//   __PERFILE__ duration_ms=<dur> <full-path> passed=<bool>
+//   __PERFILE__ duration_ms=<dur> <full-path> passed=<bool> end_ms=<epoch-ms>
 //
 // on the reporter destination (stderr). The `duration_ms` BEFORE the path makes each
 // per-file line match the suite-cost contract measure
 // `grep -cE "duration_ms.*test\.mjs|file.*duration"` (> 34 files after a real run).
+// `end_ms` is the `Date.now()` epoch-ms recorded at the file's `test:complete` event
+// (gap-test-detail-timeline AC1) — the file's END time, from which the START is
+// back-computed as end − duration (the event callback delay is ms-level, acceptable
+// for the timeline approximation).
 //
 // At the END of the run it also emits the GROUP floor + ceiling determination (the
 // split criterion, auto-evaluated — no human arithmetic needed):
@@ -25,7 +29,7 @@
 //     (serial cc=1 is the EXCEPTION — splitting a file does not change total time at cc1)
 //
 // Output lines (all to stderr):
-//   __PERFILE__ duration_ms=<dur> <path> passed=<bool>     one per file, streamed live
+//   __PERFILE__ duration_ms=<dur> <path> passed=<bool> end_ms=<epoch-ms>   one per file, streamed live
 //   __GROUP__ concurrency=<cc> files=<n> sum_ms=<sum> floor_ms=<floor> capped=<m>
 //   __CEILING__ <path> duration_ms=<dur> floor_ms=<floor> 封顶者/该拆    per capped file (cc>1)
 //
@@ -152,13 +156,16 @@ export default async function* perFileReporter(source) {
     if (path.resolve(d.name) === d.file) {
       const dur = d.details?.duration_ms ?? 0;
       const passed = d.details?.passed === true;
-      files.set(d.file, { dur, passed });
+      // gap-test-detail-timeline AC1 — record the file's END time (the test:complete
+      // event fires at file completion); the START is back-computed as end − duration.
+      const endedAtMs = Date.now();
+      files.set(d.file, { dur, passed, endedAtMs });
       // Emit the FULL path (not basename) so duplicate basenames across packages
       // (cli.test.mjs in packages/quay|quay-github/test, etc.) cannot collide.
       // `duration_ms=` BEFORE the path matches the contract measure regex
       // (`duration_ms.*test\.mjs`), so the real full-suite log's per-file lines are
       // greppable by the suite-cost gate.
-      console.error(`__PERFILE__ duration_ms=${dur} ${d.file} passed=${passed}`);
+      console.error(`__PERFILE__ duration_ms=${dur} ${d.file} passed=${passed} end_ms=${endedAtMs}`);
     }
   }
 

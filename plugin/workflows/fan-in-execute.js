@@ -336,7 +336,7 @@ while ((_rm = _roundMkRe.exec(logText)) !== null) _roundMk = _rm.index;
 if (_roundMk !== -1) logText = logText.slice(_roundMk);
 let prior = {}; try { if (releaseLedger) prior = JSON.parse(fs.readFileSync(releaseLedger, "utf8")); } catch (e) { prior = {}; }
 const inScope = []; const outOfScope = []; const loadSensitiveFiles = []; let livelock = false; const seen = new Set();
-const re = /^__PERFILE__ duration_ms=[0-9.]+ (.+) passed=false$/gm;
+const re = /^__PERFILE__ duration_ms=[0-9.]+ (.+) passed=false(?: end_ms=[0-9]+)?$/gm; // gap-test-detail-timeline: reporter 行尾多 end_ms=<epoch-ms>，$ 锚定需容忍该可选后缀（否则失败文件提取恒空）
 let m;
 while ((m = re.exec(logText)) !== null) {
   let rel = m[1];

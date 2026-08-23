@@ -32,6 +32,7 @@ import {
   defaultSelectorArgv,
   defaultReadyPoolArgv,
   shuffle,
+  filterTouchesDisjoint,
   parseSelectorOutput,
   runSelectorWorker,
   readyPoolCheck,
@@ -43,6 +44,8 @@ import {
   signalExitCode,
   readTaskStatus,
   worktreePresentForTask,
+  worktreePathsForTask,
+  cleanupOrphanWorktree,
   computeLandingState,
   EXITED_NOT_LANDED_EXIT,
   WORKER_OUTCOME_REL,
@@ -66,6 +69,7 @@ import {
   serveControlPlane,
   defaultLivenessCheckArgv,
   runLivenessCheck,
+  depsReadyForDispatch,
 } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -121,6 +125,23 @@ function writeTaskFile(root, taskId, status = "done") {
   fs.writeFileSync(path.join(root, "tasks", `${taskId}.md`), `---\nid: ${taskId}\nstatus: ${status}\n---\n\n## Proposal\n\nbody\n`);
   runGit(root, ["add", `tasks/${taskId}.md`]);
   runGit(root, ["commit", "-q", "-m", `task ${taskId} ${status}`]);
+}
+
+// A committed task file carrying a `## Touches` section (gap-launch-script-worker-cap-broken AC3):
+// the resident loop's filterTouchesDisjoint reads each task's ## Touches from disk, and the resident
+// loop stashes uncommitted changes before dispatching — so a Touches-bearing task file must be
+// COMMITTED (clean) or the stash reverts it and the filter sees a Touches-less file (conservative
+// serialize ⇒ the candidate is dropped). status=done so an exit-0 worker "lands" (completed, driver
+// exit 0), not exited-not-landed.
+function writeTouchedTask(root, taskId, touchesLine) {
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "tasks", `${taskId}.md`),
+    `---\nid: ${taskId}\nstatus: done\n---\n\n## Proposal\n\nprose\n\n## Touches\n\n- ${touchesLine}\n`,
+    "utf8",
+  );
+  runGit(root, ["add", `tasks/${taskId}.md`]);
+  runGit(root, ["commit", "-q", "-m", `task ${taskId} touched`]);
 }
 
 // ── pure functions ─────────────────────────────────────────────────────────────────────────────────
@@ -491,21 +512,22 @@ test("AC2 (能取假) — leave an uncommitted change ⇒ driver stashes it (git
   assert.match(fs.readFileSync(path.join(root, "a.txt"), "utf8"), /dirty/, "stash pop restores the dirty content");
 });
 
-// ── AC3 (阶段 2): 超时 ⇒ 墙钟超时 SIGTERM、worktree 仍在 ────────────────────────────────────────────
+// ── AC3 (阶段 2): 超时 ⇒ 墙钟超时 SIGTERM、orphan worktree 清理 ────────────────────────────────────
 
-test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed-out, worktree preserved", async (t) => {
+test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed-out, orphan worktree cleaned (AC2)", async (t) => {
   const root = makeGitRoot("timeout");
+  const wtPath = path.join(root, "..", "w1");
   t.after(() => {
-    try { runGit(root, ["worktree", "remove", "--force", path.join(root, "..", "w1")]); } catch { /* best-effort */ }
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
     fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(path.join(root, "..", "w1"), { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
   });
   fs.writeFileSync(path.join(root, "k.txt"), "x\n");
   runGit(root, ["add", "k.txt"]);
   runGit(root, ["commit", "-q", "-m", "init"]);
-  // a real worktree that must survive the timeout (the driver never remove/prune worktrees)
-  runGit(root, ["worktree", "add", "-q", "-b", "task/w1", path.join(root, "..", "w1")]);
-  const wtPath = path.join(root, "..", "w1");
+  // a real orphan worktree on the TASK's branch — timeout is an abnormal death ⇒ it must be cleaned up
+  // (gap-worker-driver-no-record-on-abnormal-death AC2), not preserved (the old 阶段-2 contract).
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-t", wtPath]);
   assert.ok(fs.existsSync(wtPath), "precondition: worktree exists before the run");
 
   const pidFile = path.join(root, "worker.pid");
@@ -531,9 +553,78 @@ test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed
   assert.match(rec.failure_reason, /timed out/, "failure reason names the timeout");
   assert.ok(rec.wall_clock_ms >= 500 && rec.wall_clock_ms < 5000, `wall_clock_ms reflects the timeout (~${rec.wall_clock_ms}ms), not the full run`);
 
-  // worktree 仍在（驱动超时杀 worker 会话，但保留 worktree；从不 remove/prune）。
-  assert.ok(fs.existsSync(wtPath), "worktree still exists after timeout (preserved)");
-  assert.match(runGit(root, ["worktree", "list"]), /w1/, "git worktree list still shows the worktree");
+  // worktree 已清理（超时是异常死亡 ⇒ orphan worktree 被清，driver 下轮可对同一 task 重派；AC2）。
+  assert.equal(rec.worktree_cleaned, true, "AC2: the orphan worktree was cleaned up on timed-out");
+  assert.ok(!fs.existsSync(wtPath), "worktree removed after timeout (⛔ not preserved)");
+  assert.equal(worktreePresentForTask(root, "gap-t"), false, "git worktree list no longer shows task/gap-t");
+});
+
+// ── gap-worker-driver-no-record-on-abnormal-death：worker 异常死亡 ⇒ 终态记录 + orphan worktree 清理 ──
+// AC1：worker 非正常退出（被杀 / suite 失败后自尽）⇒ worker-outcome.jsonl 有对应记录且 final_state ∉
+// {completed}（零记录 ⇒ 假）。AC2（能取假）：异常死亡后 driver 下一轮能对同一 task 成功
+// `git worktree add`（stale worktree 仍挡 ⇒ 假）。
+
+test("AC2 (能取假) — worker abnormal death (exit non-zero) ⇒ orphan worktree cleaned; driver next round can git worktree add the same task", (t) => {
+  const root = makeGitRoot("orphan");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-or", "ready"); // ready ⇒ not done ⇒ the worker did not land
+  // simulate the orphan worktree left by a prior abnormal death (same task, same branch)
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-or", wtPath]);
+  assert.equal(worktreePresentForTask(root, "gap-or"), true, "precondition: orphan worktree present");
+
+  let code = 0;
+  try {
+    runDriver(root, ["--task", "gap-or", "--worker-cmd-exact", "node -e process.exit(7)"]);
+  } catch (e) {
+    code = e.status;
+  }
+  assert.equal(code, 7, "driver propagates the worker's non-zero exit");
+
+  const records = readOutcomeLines(root);
+  assert.equal(records.length, 1, "AC1: abnormal death still produces EXACTLY ONE outcome record (no zero-record)");
+  assert.equal(records[0].final_state, "failed", "AC1: final_state ∉ {completed}");
+  assert.equal(records[0].worktree_cleaned, true, "AC2: orphan worktree cleaned on abnormal death");
+  assert.equal(records[0].worktree_cleanup_error, null, "cleanup reported no error");
+
+  // AC2 的取假半面：worktree 已清 ⇒ 同一 task 能成功重派（git worktree add 不需人工 remove）。
+  assert.equal(worktreePresentForTask(root, "gap-or"), false, "orphan worktree gone after abnormal death");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-or", wtPath]);
+  assert.ok(fs.existsSync(wtPath), "driver next round can git worktree add the same task (no manual remove)");
+  runGit(root, ["worktree", "remove", "--force", wtPath]);
+});
+
+test("cleanupOrphanWorktree / worktreePathsForTask — find + remove orphan worktree + delete branch; idempotent", (t) => {
+  const root = makeGitRoot("cleanup");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-c", "ready");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-c", wtPath]);
+
+  const found = worktreePathsForTask(root, "gap-c");
+  assert.equal(found.length, 1, "exactly one worktree path located for the task");
+  assert.equal(found[0], wtPath, "worktree path resolved via the porcelain branch line");
+  assert.deepEqual(worktreePathsForTask(root, "gap-nope"), [], "no worktree for a different task");
+
+  const res = cleanupOrphanWorktree(root, "gap-c");
+  assert.equal(res.removed, true);
+  assert.equal(res.worktreePath, wtPath);
+  assert.equal(res.branchDeleted, true, "task/<id> branch deleted so a fresh git worktree add -b succeeds");
+  assert.equal(res.error, null);
+  assert.equal(worktreePresentForTask(root, "gap-c"), false, "worktree gone after cleanup");
+
+  // 幂等：无 worktree 可清 ⇒ no-op（不是错误）。
+  const again = cleanupOrphanWorktree(root, "gap-c");
+  assert.equal(again.removed, false);
+  assert.equal(again.error, null);
 });
 
 // ── 阶段 3（AC117）MCP 控制面：控制态 + 身份（AC2/AC3 纯函数）──────────────────────────────────────
@@ -792,6 +883,54 @@ test("AC129 pure — shuffle returns a permutation of its input", () => {
   assert.deepEqual(src, ["gap-a", "gap-b", "gap-c", "gap-d"], "shuffle does not mutate its input");
 });
 
+test("AC3 pure (gap-launch-script-worker-cap-broken) — filterTouchesDisjoint filters Touches-overlapping candidates vs in-flight", (t) => {
+  const root = makeRoot("ac3-filter");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const writeTask = (id, touchesLine) => fs.writeFileSync(
+    path.join(root, "tasks", `${id}.md`),
+    `---\nid: ${id}\nstatus: ready\n---\n\n## Proposal\n\nprose\n\n## Touches\n\n- ${touchesLine}\n`,
+    "utf8",
+  );
+  writeTask("gap-a", "plugin/scripts/foo.ts");
+  writeTask("gap-b", "plugin/scripts/foo.ts"); // overlaps gap-a
+  writeTask("gap-c", "plugin/scripts/bar.ts"); // disjoint from both
+
+  // no in-flight ⇒ no conflict object ⇒ all candidates pass through.
+  assert.deepEqual(filterTouchesDisjoint(["gap-a", "gap-b", "gap-c"], [], root), ["gap-a", "gap-b", "gap-c"]);
+  // in-flight gap-a ⇒ gap-b (same foo.ts) filtered; gap-c kept.
+  assert.deepEqual(filterTouchesDisjoint(["gap-b", "gap-c"], ["gap-a"], root), ["gap-c"], "overlapping gap-b filtered, disjoint gap-c kept");
+  // in-flight gap-c ⇒ both kept (bar.ts disjoint from foo.ts).
+  assert.deepEqual(filterTouchesDisjoint(["gap-a", "gap-b"], ["gap-c"], root), ["gap-a", "gap-b"]);
+  // missing task file ⇒ conservative serialize (⛔ not "unknown ⇒ keep").
+  assert.deepEqual(filterTouchesDisjoint(["gap-zzz"], ["gap-a"], root), [], "unreadable candidate ⇒ conservative filter");
+});
+
+test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatches the Touches-overlapping pair concurrently", (t) => {
+  const root = makeGitRoot("ac3-integr");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTouchedTask(root, "gap-a", "plugin/scripts/foo.ts");
+  writeTouchedTask(root, "gap-b", "plugin/scripts/foo.ts"); // overlaps gap-a
+  writeTouchedTask(root, "gap-c", "plugin/scripts/bar.ts"); // disjoint
+  const rpcFile = path.join(root, "rpc.cnt");
+  const selFile = path.join(root, "sel.cnt");
+  const out = runDriver(root, [
+    "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n<=1?['gap-a','gap-b','gap-c']:[],pool:n<=1?3:0})"),
+    "--selector-cmd", counterNodeE(selFile, "n===0?'gap-a\\x20first':n===1?'gap-b\\x20wants-b':'gap-a\\x20unused'"),
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--concurrency", "3",
+    "--json",
+  ]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const picks = events.filter((e) => e.event === "selector-picked");
+  // gap-a picked first (touches foo.ts); while it is in-flight, gap-b (also foo.ts) must be filtered
+  // out of the selector's candidate set — the selector asked for gap-b on its 2nd call but was only
+  // offered the disjoint gap-c, so it fell back to gap-c. gap-b is never dispatched concurrently.
+  assert.ok(!picks.some((p) => p.task === "gap-b"), "AC3: the overlapping gap-b is never dispatched (would collide with in-flight gap-a)");
+  assert.deepEqual(picks.map((p) => p.task), ["gap-a", "gap-c"], "only the disjoint pair is dispatched");
+  assert.match(picks[1].selector_reason, /fallback/, `the selector asked for gap-b but was only offered the disjoint gap-c: ${picks[1].selector_reason}`);
+});
+
 test("AC129 pure — resourceGateCheck: exit 0 ⇒ GO; exit 1 ⇒ WAIT (fail-closed)", () => {
   assert.equal(resourceGateCheck("/r", ["node", "-e", "process.exit(0)"]).go, true);
   const wait = resourceGateCheck("/r", ["node", "-e", "process.exit(1)"]);
@@ -843,8 +982,12 @@ test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the se
 test("AC1 — resident loop does not exit after one worker; keeps dispatching while pool non-empty (in-memory in-flight subtraction)", (t) => {
   const root = makeGitRoot("ac1");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTaskFile(root, "gap-a", "done");
-  writeTaskFile(root, "gap-b", "done");
+  // gap-launch-script-worker-cap-broken AC3: the resident loop now reads each task's ## Touches to
+  // filter Touches-overlapping candidates — so these fake ids need DISJOINT, COMMITTED Touches task
+  // files (the loop stashes uncommitted changes before dispatching; a Touches-less file ⇒ conservative
+  // serialize ⇒ gap-b dropped and the two-selection assertion fails).
+  writeTouchedTask(root, "gap-a", "plugin/scripts/a.ts");
+  writeTouchedTask(root, "gap-b", "plugin/scripts/b.ts");
   const rpcFile = path.join(root, "rpc.cnt");
   const selFile = path.join(root, "sel.cnt");
   // ready-pool returns BOTH candidates on calls 0 and 1 (it does NOT know gap-a went in-flight);
@@ -1125,4 +1268,91 @@ test("AC150-3 — worker-driver re-exports the SAME resourceGateCheck / isHalted
   // worker-driver.test.mjs 顶部从 worker-driver.ts import 了 resourceGateCheck / isHalted（re-export 面）。
   assert.equal(resourceGateCheck, shared.resourceGateCheck, "resourceGateCheck 同一份实现（worker re-export = shared）");
   assert.equal(isHalted, shared.isHalted, "isHalted 同一份实现（worker re-export = shared）");
+});
+
+// ── 派发前 depends_on 过滤（gap-worker-driver-dispatch-pre-filter-missing AC1）───────────────────────
+// worker-driver 把 ready-pool-check 的 ready 列表直接派发、不二次过滤 depends_on ⇒ 依赖未满的任务
+// 仍被派发（ac138 白烧一轮：代码已 land、依赖链未满、翻 done 会重造 DEP-DONE-IFF-DEPS 违例）。修法 =
+// 派发前对候选做 depends_on 过滤（与 gap-launch-script-worker-cap-broken AC3 的 Touches 过滤同点）。
+
+test("depsReadyForDispatch — no deps ⇒ true; all done ⇒ true; not-done ⇒ false; missing dep ⇒ false; unreadable candidate ⇒ false", (t) => {
+  const root = makeRoot("deps");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const write = (id, fm) => fs.writeFileSync(path.join(root, "tasks", `${id}.md`), fm);
+
+  // 无 depends_on ⇒ true（真无依赖，⛔ 不是「读不懂」）。
+  write("gap-none", "---\nid: gap-none\nstatus: ready\n---\n\nbody\n");
+  assert.equal(depsReadyForDispatch(root, "gap-none"), true);
+
+  // 依赖 done ⇒ true。
+  write("gap-prereq", "---\nid: gap-prereq\nstatus: done\n---\n\nbody\n");
+  write("gap-ok", "---\nid: gap-ok\nstatus: ready\ndepends_on:\n  - gap-prereq\n---\n\nbody\n");
+  assert.equal(depsReadyForDispatch(root, "gap-ok"), true);
+
+  // 依赖未 done ⇒ false（AC1 核心：依赖未满不派发）。
+  write("gap-prereq2", "---\nid: gap-prereq2\nstatus: ready\n---\n\nbody\n");
+  write("gap-blocked", "---\nid: gap-blocked\nstatus: ready\ndepends_on:\n  - gap-prereq2\n---\n\nbody\n");
+  assert.equal(depsReadyForDispatch(root, "gap-blocked"), false);
+
+  // 依赖文件缺失 ⇒ false（fail-closed：读不懂 ≠ done）。
+  write("gap-missing-dep", "---\nid: gap-missing-dep\nstatus: ready\ndepends_on:\n  - gap-no-such\n---\n\nbody\n");
+  assert.equal(depsReadyForDispatch(root, "gap-missing-dep"), false);
+
+  // 候选自身文件缺失 ⇒ false（硬规则 3b：读不懂 ≠ 无依赖）。
+  assert.equal(depsReadyForDispatch(root, "gap-no-such-candidate"), false);
+
+  // flow 形式 depends_on: [a, b] —— 任一未 done 即 false。
+  write("gap-flow", "---\nid: gap-flow\nstatus: ready\ndepends_on: [gap-prereq, gap-prereq2]\n---\n\nbody\n");
+  assert.equal(depsReadyForDispatch(root, "gap-flow"), false, "flow form: any not-done dep blocks");
+});
+
+test("AC1 — depends_on gate in the resident loop: a candidate whose dep is not done is NOT dispatched (ac138 白烧一轮防)", (t) => {
+  const root = makeGitRoot("ac1-deps");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // gap-prereq（ready，未 done）+ gap-dep（depends_on gap-prereq），都写进 tasks/ 并提交。
+  fs.writeFileSync(path.join(root, "tasks", "gap-prereq.md"), "---\nid: gap-prereq\nstatus: ready\n---\n\nbody\n");
+  runGit(root, ["add", "tasks/gap-prereq.md"]);
+  runGit(root, ["commit", "-q", "-m", "prereq ready"]);
+  fs.writeFileSync(path.join(root, "tasks", "gap-dep.md"), "---\nid: gap-dep\nstatus: ready\ndepends_on:\n  - gap-prereq\n---\n\nbody\n");
+  runGit(root, ["add", "tasks/gap-dep.md"]);
+  runGit(root, ["commit", "-q", "-m", "dep ready"]);
+
+  const out = runDriver(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-dep'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-dep\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--json",
+  ]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(events.some((e) => e.event === "worker-spawned"), false, "AC1: dep-not-done candidate is never dispatched");
+  assert.equal(readOutcomeLines(root).length, 0, "zero workers dispatched");
+  // 负控制（⛔ 不能是「池空才不派」）：round 记录 pool=1 证明 ready-pool 确实给了 gap-dep 候选——
+  // 是 depends_on 过滤把它滤掉的（不是 selector 没选、也不是池空）。与 Touches 互斥同属非终态过滤
+  // （依赖由别的任务落地，非本驱动等待可解）⇒ 无在飞 worker 可等 ⇒ 循环干净退出。
+  const rounds = readRoundLines(root);
+  assert.equal(rounds[rounds.length - 1].pool, 1, "ready-pool reported pool=1 (gap-dep), yet nothing dispatched — the filter is the cause");
+  assert.equal(rounds[rounds.length - 1].in_flight, 0, "nothing in flight");
+});
+
+test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the difference, not a blanket stop)", (t) => {
+  const root = makeGitRoot("ac1-deps-ok");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-prereq", "done");
+  fs.writeFileSync(path.join(root, "tasks", "gap-dep.md"), "---\nid: gap-dep\nstatus: done\ndepends_on:\n  - gap-prereq\n---\n\nbody\n");
+  runGit(root, ["add", "tasks/gap-dep.md"]);
+  runGit(root, ["commit", "-q", "-m", "dep done"]);
+  const rpcFile = path.join(root, "rpc.cnt");
+  const out = runDriver(root, [
+    "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n===0?['gap-dep']:[],pool:n===0?1:0})"),
+    "--selector-cmd", "node -e console.log('gap-dep\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--json",
+  ]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const spawned = events.filter((e) => e.event === "worker-spawned");
+  assert.equal(spawned.length, 1, "AC1 对照: dep-done candidate IS dispatched (exactly once)");
+  assert.equal(spawned[0].task, "gap-dep");
+  assert.equal(readOutcomeLines(root)[0].final_state, "completed", "the dep-done candidate lands cleanly");
 });

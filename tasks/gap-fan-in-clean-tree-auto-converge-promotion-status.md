@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-clean-tree-auto-converge-promotion-status
 title: fan-in clean-tree 判据前自动收敛 promotion-driver 的 status-only 翻转（manager 裁定方案③，⛔ 非路径排除）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -43,12 +43,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（正向，能取假）：porcelain 仅含 `tasks/*.md` 的 status-only diff 时，fan-in 自动收敛并继续完成 ff，⛔ 不应报脏树 exit 2。
-- [ ] AC2（负向，能取假）：porcelain 含非 status 字段改动（如 tasks/*.md 正文或非 tasks 路径）时，仍报脏树 exit 2，⛔ 不应静默通过。
+- [x] AC1（正向，能取假）：porcelain 仅含 `tasks/*.md` 的 status-only diff 时，fan-in 自动收敛并继续完成 ff，⛔ 不应报脏树 exit 2。
+- [x] AC2（负向，能取假）：porcelain 含非 status 字段改动（如 tasks/*.md 正文或非 tasks 路径）时，仍报脏树 exit 2，⛔ 不应静默通过。
 
 ## Definition of Done
 
-- [ ] fan-in clean-tree 判据前自动收敛 status-only 翻转 + 非 status 脏仍挡，AC1-2 全勾，land 到 develop。
+- [x] fan-in clean-tree 判据前自动收敛 status-only 翻转 + 非 status 脏仍挡，AC1-2 全勾，land 到 develop。
 
 ## Retires
 

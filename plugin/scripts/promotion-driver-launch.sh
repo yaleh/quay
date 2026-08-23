@@ -288,6 +288,13 @@ run_supervisor() {
   fi
   args+=(--pid-file "$PID_ARG_FILE" --run-id "$RUN_ID")
 
+  # worker 并发缺省（对齐 inner=5，人双重裁定；gap-launch-script-worker-cap-broken AC2）：无显式 --cap
+  # 时经定义点 env（worker-driver.ts MAX_TASK_SUBAGENTS_ENV）给驱动缺省并发 5，resolveConcurrency
+  # 读到 5（⛔ 否则 resident 模式 taskCount=0 ⇒ 兜底 1）。只设 env、不把字面量写进驱动 argv。
+  if [ "$KIND" = "worker" ] && [ -z "$CAP" ]; then
+    export QUAY_MAX_TASK_SUBAGENTS=5
+  fi
+
   while true; do
     "$NODE_BIN" --experimental-strip-types "$DRIVER" "${args[@]}" >> "$DRIVER_LOG" 2>&1 &
     child=$!
@@ -358,7 +365,11 @@ cmd_start() {
   rm -f "$DRIVER_PID_FILE" "$SUPERVISOR_PID_FILE" "$STOP_SENTINEL"
   local run_id="${RUN_ID:-${KIND_RUN_PREFIX[$KIND]}-$(date +%s)}"
   local extra_args=()
-  [ -n "$CAP" ] && extra_args+=( "${KIND_CAP_FLAG[$KIND]}" "$CAP" )
+  # ⛔ 这里的 extra_args 传给【supervisor 自重启】（__supervise 模式），而 __supervise 的 arg 解析只认
+  # --cap（本脚本自己的旗标），不认驱动旗标 KIND_CAP_FLAG（worker=--concurrency）——用后者会报
+  # `unknown argument: --concurrency` 杀掉旧 supervisor、新 supervisor 起不来 = driver 停摆
+  # （gap-launch-script-worker-cap-broken AC1）。驱动的 --concurrency 由 run_supervisor 映射。
+  [ -n "$CAP" ] && extra_args+=( --cap "$CAP" )
   if [ "${KIND_HAS_INTERVAL[$KIND]}" = "1" ] && [ -n "$INTERVAL" ]; then
     extra_args+=( --interval "$INTERVAL" )
   fi

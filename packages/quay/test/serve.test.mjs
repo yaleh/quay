@@ -33,7 +33,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer, computeStaleStatus, isStale, processStartMs } from "../src/serve.ts";
 import { composePayload } from "../src/action.ts";
 import { readLive, readJournal } from "../src/observation.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
@@ -1837,6 +1837,88 @@ async function main() {
       process.chdir(obsOrigCwd);
       fs.rmSync(obsTasksDir, { recursive: true, force: true });
       fs.rmSync(obsWorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  // gap-webui-server-stale-code-no-restart-detection: the /health endpoint reports
+  // code-freshness — compare the serve process start instant vs the latest serve-path
+  // commit. Three shapes are pinned: the pure comparator (isStale), the git-backed
+  // detector (computeStaleStatus against a real repo + a non-repo), and the live
+  // /health endpoint (which must distinguish "not evaluated" from "not stale").
+  {
+    // AC1 comparator — pure, deterministic.
+    assert(isStale(1000, 2000) === true, "AC1: isStale(start<commit) === true");
+    assert(isStale(2000, 1000) === false, "AC1: isStale(start>commit) === false");
+    assert(isStale(1000, null) === null, "AC1: isStale(start, null) === null (unknown propagates)");
+
+    // AC1 detector — a real git repo whose latest serve-path commit is newer than the
+    // test process ⇒ stale=true, evaluated=true.
+    const gitRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-stale-git-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: gitRoot });
+      execFileSync("git", ["-C", gitRoot, "config", "user.email", "test@example.com"]);
+      execFileSync("git", ["-C", gitRoot, "config", "user.name", "stale-test"]);
+      fs.mkdirSync(path.join(gitRoot, "packages", "quay", "src"), { recursive: true });
+      fs.writeFileSync(path.join(gitRoot, "packages", "quay", "src", "serve.ts"), "export const x = 1;\n");
+      execFileSync("git", ["-C", gitRoot, "add", "packages/quay/src/serve.ts"]);
+      execFileSync("git", ["-C", gitRoot, "commit", "-q", "-m", "stale-detection fixture"]);
+      const staleStatus = computeStaleStatus(gitRoot);
+      assert(staleStatus.evaluated === true, "AC1: computeStaleStatus(git repo) evaluated === true");
+      assert(staleStatus.stale === true, "AC1: computeStaleStatus(git repo with a now-commit) stale === true");
+      assert(staleStatus.source === "git", "AC1: source === 'git' when evaluated");
+      assert(typeof staleStatus.latestCodeCommitAtMs === "number" && staleStatus.latestCodeCommitAtMs > 0,
+        "AC1: latestCodeCommitAtMs is a positive epoch ms");
+      assert(staleStatus.processStartedAtMs <= Date.now(), "AC1: processStartedAtMs is in the past");
+    } finally {
+      fs.rmSync(gitRoot, { recursive: true, force: true });
+    }
+
+    // AC1 detector negative control — a non-git dir ⇒ evaluated=false, stale=null (never "not stale").
+    const nonGitDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-stale-nogit-"));
+    try {
+      const nonGitStatus = computeStaleStatus(nonGitDir);
+      assert(nonGitStatus.evaluated === false, "AC1: computeStaleStatus(non-git dir) evaluated === false");
+      assert(nonGitStatus.stale === null, "AC1: non-git dir ⇒ stale === null (not evaluated, NOT 'not stale')");
+      assert(nonGitStatus.source === null, "AC1: non-git dir ⇒ source === null");
+    } finally {
+      fs.rmSync(nonGitDir, { recursive: true, force: true });
+    }
+
+    // AC1 endpoint — /health returns machine-readable JSON with an `evaluated` field present,
+    // and (for this isolated non-git workspace) stale=null. processStartMs sanity: in the past.
+    assert(processStartMs() <= Date.now(), "AC1: processStartMs() is in the past");
+    const healthWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-stale-health-"));
+    const healthTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-stale-tasks-"));
+    let healthServer = null;
+    const healthOrigCwd = process.cwd();
+    try {
+      fs.mkdirSync(path.join(healthWorkspaceRoot, ".quay"), { recursive: true });
+      fs.writeFileSync(
+        path.join(healthWorkspaceRoot, ".quay", "config.yml"),
+        `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${healthTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${healthTasksDir.replaceAll("\\", "\\\\")}"\n`
+      );
+      process.chdir(healthWorkspaceRoot);
+      healthServer = await startServer({ port: 0 });
+      const healthPort = healthServer.address().port;
+      const health = await get(healthPort, "/health");
+      assert(health.status === 200, "AC1: GET /health returns 200 (got " + health.status + ")");
+      assert(health.headers["content-type"] && health.headers["content-type"].includes("application/json"),
+        "AC1: /health content-type is application/json");
+      const healthBody = JSON.parse(health.body);
+      assert(healthBody.ok === true, "AC1: /health body.ok === true (liveness)");
+      assert(Object.prototype.hasOwnProperty.call(healthBody, "stale"), "AC1: /health body carries a `stale` field");
+      assert(healthBody.evaluated === false, "AC1: /health on a non-git workspace reports evaluated === false");
+      assert(healthBody.stale === null, "AC1: /health on a non-git workspace reports stale === null");
+      assert(typeof healthBody.processStartedAt === "string" && !Number.isNaN(Date.parse(healthBody.processStartedAt)),
+        "AC1: /health processStartedAt is a parseable ISO timestamp");
+    } finally {
+      if (healthServer) {
+        healthServer.close();
+        if (healthServer.client) await healthServer.client.close();
+      }
+      process.chdir(healthOrigCwd);
+      fs.rmSync(healthWorkspaceRoot, { recursive: true, force: true });
+      fs.rmSync(healthTasksDir, { recursive: true, force: true });
     }
   }
 

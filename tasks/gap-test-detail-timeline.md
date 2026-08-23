@@ -1,7 +1,7 @@
 ---
 id: gap-test-detail-timeline
 title: Test 详情 ①——测试时间线（perFile 加结束时刻 + 甘特图）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -27,12 +27,12 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1：perFile 记录含起始/结束时刻（⛔ 仅 duration 无时刻 ⇒ 假）。
-- [ ] AC2：详情页渲染时间线图（每文件一条横条），服务端渲染 SVG（⛔ 客户端图表库 ⇒ 假）。
+- [x] AC1：perFile 记录含起始/结束时刻（⛔ 仅 duration 无时刻 ⇒ 假）。
+- [x] AC2：详情页渲染时间线图（每文件一条横条），服务端渲染 SVG（⛔ 客户端图表库 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] perFile 时间戳 + 甘特图渲染落地；AC1-2 全勾；land 到 develop。
+- [x] perFile 时间戳 + 甘特图渲染落地；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
@@ -41,7 +41,14 @@ depends_on:
 ## Touches
 
 - plugin/scripts/measure-suite-reporter.mjs（perFile 加结束时刻）
+- plugin/scripts/measure-suite.mjs（__PERFILE__ 行解析正则向后兼容 end_ms）
+- plugin/scripts/measure-trend-check.ts（PerFileRecord/parsePerFileLines 解析 end_ms → 起止时刻）
+- packages/quay/src/observation.ts（parseVerificationRound 提取 perFile 起止时刻）
 - packages/quay/src/serve-handlers.ts（时间线 SVG 渲染）
-- plugin/test/measure-suite-reporter.test.mjs（时刻字段测试）
+- plugin/test/measure-suite.test.mjs（reporter end_ms 时刻测试 + parsePerFile 正则）
+- plugin/test/measure-trend-check.test.mjs（parsePerFileLines 起止时刻测试）
+- packages/quay/test/observation.test.mjs（perFile 起止时刻解析测试）
 - packages/quay/test/serve-handlers.test.mjs（时间线渲染测试）
+- plugin/workflows/fan-in-execute.js（__PERFILE__ 失败文件提取正则向后兼容 end_ms 后缀）
+- .claude/workflows/fan-in-execute.js（同上，两份字节一致镜像）
 - tasks/gap-test-detail-timeline.md（自身）

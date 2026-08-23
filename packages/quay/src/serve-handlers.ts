@@ -272,6 +272,11 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
 /* AC102 (same token discipline): suite-load curve stroke — token-derived, no hardcoded hex.
    Surface/grid/ink/muted reuse the git-svg-* classes above (they are generic chart tokens). */
 .load-svg-line { fill: none; stroke: var(--color-accent-600); stroke-width: 2; }
+/* gap-test-detail-timeline AC2 — the per-file timeline bars are token-derived (no hardcoded hex),
+   reusing the git-svg-* surface/grid/ink/muted tokens for the chart frame. Passed bars use the
+   accent ramp; failed bars use the darker step (same fail-vs-pass shade language as verdict-fail). */
+.gantt-svg-bar { fill: var(--color-accent-600); }
+.gantt-svg-bar-fail { fill: var(--color-accent-800); }
 /* QW-006: mobile-responsive layout (DIR-003) — narrow viewport adaptations.
    Kept at the END of the sheet so its rules win the cascade over every base rule above
    (media queries add no specificity — a later base rule would otherwise beat them). */
@@ -1878,8 +1883,9 @@ export interface GitHistoryBranch {
 
 /**
  * Group commits into per-branch lanes, ordered by most-recent landing time (desc) then name.
- * A commit reached via multiple refs is attributed to the one `--source` picked in the git
- * traversal — the chart shows where the traversal saw it land, not a full DAG (honest scope).
+ * readGitHistory already re-attributed shared/mainline-reachable commits to the mainline ref
+ * (gap-git-history-branch-summary-wrong-numbers), so a task branch's lane here holds exactly its
+ * own (exclusive) commits — `git log develop..<branch>` — never the shared ancestry.
  */
 export function groupCommitsByBranch(commits: GitHistoryCommit[]): GitHistoryBranch[] {
   const byRef = new Map<string, GitHistoryBranch>();
@@ -2657,6 +2663,94 @@ export function renderPerFileTable(
   </details>`;
 }
 
+/** A per-file entry that carries BOTH timeline timestamps (end + back-computed start). */
+type TimedPerFile = {
+  file: string;
+  durationMs: number;
+  passed: boolean;
+  startedAtMs: number;
+  endedAtMs: number;
+};
+
+/** Narrow a perFile entry to one plottable on the timeline (both timestamps present, end > start). */
+function hasTimestamps(
+  f: { file: string; durationMs: number; passed: boolean; startedAtMs?: number; endedAtMs?: number },
+): f is TimedPerFile {
+  return typeof f.startedAtMs === "number" && typeof f.endedAtMs === "number" && f.endedAtMs > f.startedAtMs;
+}
+
+/** Truncate a path label to fit the gantt left margin; the full path rides in the <title>. */
+function truncateLabel(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return "…" + s.slice(s.length - (max - 1));
+}
+
+/**
+ * gap-test-detail-timeline AC2 — render the per-file timeline (one horizontal bar per file, positioned
+ * by its start/end epoch-ms) as a pure, dependency-free server-rendered SVG string. Sorted by start
+ * time ASC (a chronological timeline, distinct from the duration table's DESC). Only files carrying
+ * BOTH `startedAtMs` and `endedAtMs` are plotted; absent/legacy perFile ⇒ "" (no fabricated chart).
+ * Marks carry token-derived CSS classes (git-svg-* / gantt-svg-*), ZERO hardcoded hex, zero client JS.
+ */
+export function renderPerFileTimelineSvg(
+  perFile: { file: string; durationMs: number; passed: boolean; startedAtMs?: number; endedAtMs?: number }[] | null | undefined,
+): string {
+  if (!perFile || perFile.length === 0) return "";
+  const rows = perFile.filter(hasTimestamps).sort((a, b) => a.startedAtMs - b.startedAtMs);
+  if (rows.length === 0) return "";
+
+  const M = { top: 24, right: 24, bottom: 40, left: 340 };
+  const W = 960;
+  const rowH = 14;
+  const rowGap = 5;
+  const H = M.top + rows.length * (rowH + rowGap) + M.bottom;
+  const plotW = W - M.left - M.right;
+
+  const t0 = Math.min(...rows.map((f) => f.startedAtMs));
+  const t1 = Math.max(...rows.map((f) => f.endedAtMs));
+  const span = Math.max(t1 - t0, 1);
+  const X = (t: number): number => M.left + ((t - t0) / span) * plotW;
+
+  const bars = rows
+    .map((f, i) => {
+      const y = M.top + i * (rowH + rowGap);
+      const x = X(f.startedAtMs);
+      const w = Math.max(X(f.endedAtMs) - x, 1);
+      const cls = f.passed ? "gantt-svg-bar" : "gantt-svg-bar-fail";
+      const end = new Date(f.endedAtMs);
+      const endHhmmss = `${pad2(end.getHours())}:${pad2(end.getMinutes())}:${pad2(end.getSeconds())}`;
+      return `<g>
+<text class="git-svg-ink" x="${(M.left - 8).toFixed(1)}" y="${(y + rowH - 2).toFixed(1)}" font-size="10" text-anchor="end">${escapeHtml(truncateLabel(f.file, 52))}</text>
+<rect class="${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${rowH}" rx="2"><title>${escapeHtml(f.file)} · ${Math.round(f.durationMs)} ms · 结束 ${endHhmmss}</title></rect>
+</g>`;
+    })
+    .join("\n");
+
+  const durSec = span / 1000;
+  const xSteps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
+  let xStep = xSteps[xSteps.length - 1];
+  const xStepRaw = durSec / 5;
+  for (const s of xSteps) {
+    if (s >= xStepRaw) {
+      xStep = s;
+      break;
+    }
+  }
+  const xTicks: string[] = [];
+  for (let v = 0; v <= durSec; v += xStep) {
+    const t = t0 + v * 1000;
+    const d = new Date(t);
+    const hhmmss = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+    xTicks.push(`<line class="git-svg-grid" x1="${X(t).toFixed(1)}" y1="${M.top}" x2="${X(t).toFixed(1)}" y2="${H - M.bottom}" stroke-width="1" /><text class="git-svg-muted" x="${X(t).toFixed(1)}" y="${H - M.bottom + 16}" font-size="10" text-anchor="middle">${hhmmss}</text>`);
+  }
+
+  return `<svg class="git-svg-surface" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Per-file test timeline (gantt)" style="max-width:100%;height:auto;border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif;">
+${xTicks.join("\n")}
+${bars}
+<text class="git-svg-ink" x="${M.left}" y="${(M.top - 6).toFixed(1)}" font-size="11">测试时间线（每文件起止时刻 · 按开始时刻升序）</text>
+</svg>`;
+}
+
 function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = []): string {
   const latest = tests.runs[0] ?? null;
   const latestBanner = latest
@@ -2695,6 +2789,14 @@ function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = []): s
   // actually carries perFile data (legacy rows have no perFile field → skipped, never fabricated).
   const perFileRun = tests.runs.find((r) => r.perFile && r.perFile.length > 0);
   const perFileTable = perFileRun ? renderPerFileTable(perFileRun.perFile) : "";
+  // gap-test-detail-timeline AC2 — render the per-file timeline (gantt) for that same run. The chart
+  // omits itself (⇒ "") when the run's perFile entries carry no timestamps (legacy/absent field).
+  const perFileTimelineSvg = perFileRun ? renderPerFileTimelineSvg(perFileRun.perFile) : "";
+  const perFileTimeline = perFileTimelineSvg
+    ? html`<h2>测试时间线（最近一轮）</h2>
+        <p class="meta">数据源：<code>.quay/verification-round.jsonl</code> perFile 起止时刻（reporter 结束时刻 + duration 反推起始）</p>
+        ${perFileTimelineSvg}`
+    : "";
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>Tests — 验证轮记录</title></head>
     <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
@@ -2703,6 +2805,7 @@ function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = []): s
       ${obsNote(tests.status, tests.reason)}
       ${latestBanner}
       ${loadCurve}
+      ${perFileTimeline}
       ${tests.runs.length > 0 ? html`<h2>历史运行（新→旧）</h2>
       <table>
         <tr><th>round</th><th>startedAt</th><th>state</th><th>pass/fail/cancel</th><th>duration</th><th>scope</th><th>buckets</th><th>commit</th></tr>

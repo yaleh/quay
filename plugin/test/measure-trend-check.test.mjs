@@ -72,6 +72,22 @@ test("AC3 — parsePerFileLines matches measure-suite-reporter's __PERFILE__ lin
   assert.equal(parsePerFileLines("__PERFILE__ duration_ms=0 /repo/x.test.mjs passed=false\n").length, 0);
 });
 
+test("gap-test-detail-timeline AC1 — parsePerFileLines extracts end_ms → endedAtMs + back-computed startedAtMs (and tolerates legacy lines without end_ms)", () => {
+  const log =
+    "__PERFILE__ duration_ms=210.5 /repo/slow.test.mjs passed=false end_ms=1724000000123\n" +
+    "__PERFILE__ duration_ms=12.25 /repo/fast.test.mjs passed=true\n";
+  const recs = parsePerFileLines(log);
+  assert.equal(recs.length, 2, "both lines parse");
+  // end_ms present ⇒ both time fields land, start = end − duration.
+  const slow = recs.find((r) => r.file === "/repo/slow.test.mjs");
+  assert.equal(slow.endedAtMs, 1724000000123, "endedAtMs carried verbatim from end_ms");
+  assert.equal(slow.startedAtMs, 1724000000123 - 210.5, "startedAtMs = endedAtMs − durationMs (back-computed)");
+  // Legacy line without end_ms ⇒ the record omits both time fields (never a fabricated 0).
+  const fast = recs.find((r) => r.file === "/repo/fast.test.mjs");
+  assert.equal(fast.endedAtMs, undefined, "legacy line (no end_ms) has no endedAtMs");
+  assert.equal(fast.startedAtMs, undefined, "legacy line (no end_ms) has no startedAtMs");
+});
+
 test("gap-fan-in-suite-log-cross-relaunch-reuse — parsePerFileLines slices by the last __FANIN_SUITE_START__ marker (current round only, no stale-old-round read)", () => {
   // A fan-in relaunch rotates the log: old round (marker round=full) then current round (marker round=full).
   // The parser must read ONLY the current (last-marker) round's __PERFILE__ lines — the old round's
