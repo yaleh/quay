@@ -1,7 +1,7 @@
 ---
 id: gap-task-status-drift-check-timeout
 title: task-status-drift-check.ts 超时 8s fail-open 排查
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -26,12 +26,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：`task-status-drift-check.ts` 在 1387 条任务下执行 <8s（⛔ 稳定超时 fail-open ⇒ 假）。
-- [ ] AC2：Board 页「落地」列显示真实判断结果（⛔ 恒 "—" ⇒ 假）。
+- [x] AC1：`task-status-drift-check.ts` 在 1387 条任务下执行 <8s（⛔ 稳定超时 fail-open ⇒ 假）。
+- [x] AC2：Board 页「落地」列显示真实判断结果（⛔ 恒 "—" ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] 超时根因定位 + 修复到 <8s + 落地列显示真实结果；AC1-2 全勾；land 到 develop。
+- [x] 超时根因定位 + 修复到 <8s + 落地列显示真实结果；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
@@ -40,5 +40,6 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/task-status-drift-check.ts（超时根因）
+- experiments/quay-perpetual-stream/scripts/task-status-drift-check.ts（byte-identical mirror，AC1 测试强制，同步改）
 - plugin/test/task-status-drift-check.test.mjs（性能测试）
 - tasks/gap-task-status-drift-check-timeout.md（自身）

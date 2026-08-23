@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readGitHistory, parseVerificationRound } from "../src/observation.ts";
+import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen } from "../src/observation.ts";
 
 /** Commit helper with a fixed clock (committer date = author date = `t`), per-branch file. */
 function commitAt(ws, msg, t, file = "log.txt") {
@@ -101,4 +101,77 @@ test("AC127: parseVerificationRound extracts the bucket-execution fields (bucket
   assert.equal(legacy.buckets, undefined, "a legacy row has no buckets field (absent-field contract)");
   assert.equal(legacy.bucket_files, undefined, "a legacy row has no bucket_files field");
   assert.equal(legacy.bucket_duration_ms, undefined, "a legacy row has no bucket_duration_ms field");
+});
+
+// ── gap-live-ghost-inflight-paused-event ─────────────────────────────────────────────────────────
+// readLive cross-validates the event-stream in-flight pairing (start without end) against worktree
+// existence. The fast-mode worktree namespace is `<parent-of-main>/quay-worktrees` — so each fixture
+// nests the workspace under a private `parent/` so `dirname(root)/quay-worktrees` is test-private and
+// never touches the shared /tmp/quay-worktrees (which other suites must be able to assume is absent).
+// A start-no-end run whose worktree was RELEASED (complete / crash / operational-pause, no end event)
+// is a ghost and must be removed; the removal must be fail-closed (an unobservable namespace keeps the
+// run — never a positive "released" from a source that could not be observed).
+
+/** Build a nested workspace whose `dirname(root)/quay-worktrees` is test-private. */
+function ghostWorkspace(prefix) {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+  const root = path.join(parent, "main");
+  fs.mkdirSync(root, { recursive: true });
+  const namespace = path.join(parent, "quay-worktrees");
+  return { parent, root, namespace };
+}
+
+/** Write a single Fast start event (no end) for `taskId` into root's .workflow-events/. */
+function writeStartEvent(root, taskId, startedAtMs) {
+  const eventsDir = path.join(root, ".workflow-events");
+  fs.mkdirSync(eventsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(eventsDir, `fm-${taskId}.jsonl`),
+    JSON.stringify({ stage: "Fast", runId: `fm-${taskId}-1`, taskId, eventKind: "start", timing: { queuedAtMs: null, startedAtMs, endedAtMs: null } }) + "\n"
+  );
+}
+
+test("AC1: readLive removes a released-worktree ghost (start-no-end + worktree absent in an observable namespace)", () => {
+  const { parent, root, namespace } = ghostWorkspace("ghost-released");
+  try {
+    fs.mkdirSync(namespace, { recursive: true }); // worktree isolation IS in play…
+    writeStartEvent(root, "GHOST-1", Date.now() - 3600_000); // …but GHOST-1's slot was released.
+    assert.equal(taskWorktreeOpen(root, "GHOST-1"), false,
+      "AC1: an observable namespace without the task's worktree is a positive 'released' reading");
+    const live = readLive(root, { nowMs: Date.now() });
+    assert.ok(!live.inFlight.some((t) => t.taskId === "GHOST-1"),
+      "AC1: the released-worktree ghost is removed from readLive inFlight (not shown as 实现中)");
+    assert.equal(live.concurrency, 0, "AC1: the ghost does not inflate the in-flight concurrency count");
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("AC1 negative control: a start-no-end run WITH its worktree present stays in-flight (the filter is real, not vacuous)", () => {
+  const { parent, root, namespace } = ghostWorkspace("ghost-kept");
+  try {
+    fs.mkdirSync(namespace, { recursive: true });
+    fs.mkdirSync(path.join(namespace, "KEEP-1"), { recursive: true }); // the slot is occupied
+    writeStartEvent(root, "KEEP-1", Date.now() - 60_000);
+    assert.equal(taskWorktreeOpen(root, "KEEP-1"), true, "AC1: a present worktree is not released");
+    const live = readLive(root, { nowMs: Date.now() });
+    assert.ok(live.inFlight.some((t) => t.taskId === "KEEP-1"),
+      "AC1: an in-flight run whose worktree is present stays in-flight");
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("AC1 fail-closed: no worktree namespace ⇒ the run stays in-flight (never a positive 'released' from an unobservable source)", () => {
+  const { parent, root } = ghostWorkspace("ghost-nons");
+  try {
+    writeStartEvent(root, "X-1", Date.now() - 60_000);
+    assert.equal(taskWorktreeOpen(root, "X-1"), null,
+      "AC1: an absent namespace is 'unknown', distinct from 'released' (hard rule ③b)");
+    const live = readLive(root, { nowMs: Date.now() });
+    assert.ok(live.inFlight.some((t) => t.taskId === "X-1"),
+      "AC1: fail-closed — an unobservable worktree state keeps the run in-flight");
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
 });
