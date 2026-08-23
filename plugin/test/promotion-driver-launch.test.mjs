@@ -223,4 +223,34 @@ test("AC1 — launch from a worktree ⇒ supervisor cmdline script path = main c
   assert.ok(cmdline.includes("__supervise"), `supervisor mode in cmdline:\n${cmdline}`);
 });
 
+// ── AC138-3 (status reads ALL worker carriers; last_record_ts = max across outcome + round) ────────
+
+test("AC138-3 — status --kind worker reads ALL carriers; last_record_ts = max (round heartbeat wins)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pd-launch-ac138-worker-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scripts = path.join(root, "plugin", "scripts");
+  fs.mkdirSync(scripts, { recursive: true });
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  // status only checks the driver FILE exists (never executes it) — an empty worker-driver.ts suffices.
+  fs.writeFileSync(path.join(scripts, "worker-driver.ts"), "", "utf8");
+  fs.copyFileSync(SCRIPT, path.join(scripts, "promotion-driver-launch.sh"));
+
+  // outcome (event-conditional) carries an OLDER ts; round (unconditional heartbeat) a NEWER ts.
+  fs.writeFileSync(
+    path.join(root, ".quay", "worker-outcome.jsonl"),
+    '{"ts":"2026-08-23T10:00:00Z","task":"gap-a","final_state":"completed"}\n',
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(root, ".quay", "worker-round.jsonl"),
+    '{"ts":"2026-08-23T10:00:00Z","round":1,"action":"stop"}\n{"ts":"2026-08-23T11:30:00Z","round":2,"action":"stop"}\n',
+    "utf8",
+  );
+
+  const st = JSON.parse(run(["status", "--kind", "worker", "--root", root, "--json"]).stdout.trim());
+  assert.equal(st.carrier_records, 3, `both carriers summed (1 outcome + 2 round): ${JSON.stringify(st)}`);
+  assert.equal(st.last_record_ts, "2026-08-23T11:30:00Z", `max across BOTH carriers — round wins: ${JSON.stringify(st)}`);
+  assert.match(st.carrier_path, /worker-outcome\.jsonl$/, `primary carrier is outcome: ${st.carrier_path}`);
+});
+
 } // end governance group

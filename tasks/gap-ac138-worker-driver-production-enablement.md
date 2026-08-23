@@ -30,13 +30,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1（稳定承载）：worker-driver 从主检出稳定路径启动为常驻进程（`ps` 可见，supervisor cmdline ⛔ 非 `quay-worktrees/`）；取假：`ps` 零命中或 supervisor 从 worktree 路径启动 ⇒ 假。
-- [ ] AC2（死亡告警）：worker-driver/supervisor 死时有机件检测并报告（⛔ pid 文件在、进程已死 与「在跑」同形 ⇒ 假）。
-- [ ] AC3（自主处理，能取假）：驱动自主选任务（不传 `--task`）跑完真实任务——产出可核（有 diff/commit），`selector_reason` 非占位值，且 spawn 出的 worker 进程 env 有 `ANTHROPIC_BASE_URL`（走 wrapper，⛔ 裸 claude）；取假：窗口内一次都没自主跑完任务、或全为 `--task` 显式指定、或 worker env 无 `ANTHROPIC_BASE_URL` ⇒ 假。
+- [ ] AC1（稳定承载）：worker-driver 从主检出稳定路径启动为常驻进程（`ps` 可见，supervisor cmdline ⛔ 非 `quay-worktrees/`）；取假：`ps` 零命中或 supervisor 从 worktree 路径启动 ⇒ 假。（待外部）
+- [x] AC2（死亡告警）：worker-driver/supervisor 死时有机件检测并报告（⛔ pid 文件在、进程已死 与「在跑」同形 ⇒ 假）。
+- [ ] AC3（自主处理，能取假）：驱动自主选任务（不传 `--task`）跑完真实任务——产出可核（有 diff/commit），`selector_reason` 非占位值，且 spawn 出的 worker 进程 env 有 `ANTHROPIC_BASE_URL`（走 wrapper，⛔ 裸 claude）；取假：窗口内一次都没自主跑完任务、或全为 `--task` 显式指定、或 worker env 无 `ANTHROPIC_BASE_URL` ⇒ 假。（待外部）
 
 ## Definition of Done
 
-- [ ] worker-driver 生产启用 + 稳定承载 + 死亡告警 + 自主处理实证；AC1-3 全勾；land 到 develop。
+- [ ] worker-driver 生产启用 + 稳定承载 + 死亡告警 + 自主处理实证；AC1-3 全勾；land 到 develop。（待外部）
 
 ## Retires
 
@@ -51,3 +51,5 @@ depends_on:
 - tasks/gap-ac138-worker-driver-production-enablement.md（自身）
 
 > **注意**：AC3「自主处理 ≥N 任务」N 不在此拍板（硬规则 4：先无阈值跑生产分布再定）；若 AC3 在 fan-in 时刻结构上不可满足（需生产时间窗），按 AC137 先例标「（待外部）」。
+>
+> **land 时 AC 勾选说明（AC138-3 落地）**：AC1/AC3/DoD 标「（待外部）」——三者均需**生产时间窗**（worker-driver 在**主检出**启动为常驻 `ps` 可见 + 自主跑完真实任务），inner 实现 agent ⛔ 不碰主检出。已 land 并可证的部分：**AC2 死亡告警**（复用 AC139 liveness，worker-kind 冒烟实测 stale-pid ⇒ `deaths:supervisor_dead` + exit 1）；AC1 的稳定承载机制（AC139 统一入口 + `_resolve_main_root` 主检出规范化 + CLI worktree 拒绝，scoped 测试覆盖）；AC3 的 wrapper（`ANTHROPIC_BASE_URL`，AC140 `launchArgv` → `bash quay-launch.sh <role>`）与 `selector_reason`（AC129 选择环，scoped 测试覆盖）两部分——AC3 待外部范围**仅**「自主跑完真实任务」。

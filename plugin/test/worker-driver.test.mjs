@@ -24,6 +24,7 @@ import { execFileSync, spawn } from "node:child_process";
 import {
   computeOutcome,
   appendOutcomeToFile,
+  computeWorkerRoundRecord,
   splitArgs,
   launchArgv,
   workerArgvForTask,
@@ -41,6 +42,7 @@ import {
   stashIfDirty,
   signalExitCode,
   WORKER_OUTCOME_REL,
+  WORKER_ROUND_REL,
   FINAL_STATES,
   DEFAULT_STASH_MESSAGE,
   defaultControlState,
@@ -96,6 +98,12 @@ function runDriver(root, args) {
 
 function readOutcomeLines(root) {
   const file = path.join(root, WORKER_OUTCOME_REL);
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+}
+
+function readRoundLines(root) {
+  const file = path.join(root, WORKER_ROUND_REL);
   if (!fs.existsSync(file)) return [];
   return fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
 }
@@ -769,6 +777,50 @@ test("AC3 — MCP halt mid-run stops NEW dispatch only; the in-flight worker com
   assert.equal(records[0].final_state, "completed", "AC3: the in-flight worker was NOT killed — it completed");
   const events = buf.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   assert.equal(events.filter((e) => e.event === "worker-spawned").length, 1, "only the one in-flight worker was ever spawned");
+});
+
+// ── AC138-3（round 等价物：无条件心跳）──────────────────────────────────────────────────────────────
+// worker-outcome 只在任务真完成时写；池空时 outcome 停更会被 supervisor status 的 last_record_ts
+// 误读为「死亡」。round 每轮循环无条件写一条（含池空/判停轮）作 liveness 直接量。⛔ 取假：池空轮
+// 不写 round 心跳（round.jsonl 停更）⇒ 假。
+
+test("AC138-3 pure — computeWorkerRoundRecord: ts is the first field (supervisor _carrier_stats greps \"ts\")", () => {
+  const rec = computeWorkerRoundRecord({
+    round: 1, runId: "wk-prod-x", pid: 42, at: "2026-08-23T12:00:00.000Z",
+    action: "stop", inFlight: 0, pool: 0, stopReason: "pool-empty (no dispatchable candidate in the ready pool)",
+  });
+  assert.equal(rec.ts, "2026-08-23T12:00:00.000Z");
+  assert.equal(rec.round, 1);
+  assert.equal(rec.run_id, "wk-prod-x");
+  assert.equal(rec.action, "stop");
+  assert.equal(rec.in_flight, 0);
+  assert.equal(rec.pool, 0);
+  assert.match(rec.stop_reason, /pool-empty/);
+  // ts 首字段：JSON.stringify 后 `"ts":"…"` 是记录的第一个键（supervisor 的 grep 依赖该形状）。
+  const json = JSON.stringify(rec);
+  assert.ok(json.startsWith('{"ts":"'), `ts is the first JSON field: ${json.slice(0, 20)}…`);
+});
+
+test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome stays absent; round is the liveness carrier)", (t) => {
+  const root = makeRoot("ac138-round");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // ready-pool returns empty immediately ⇒ resident loop records ONE round then stops (no worker spawned).
+  runDriver(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
+    "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--json",
+  ]);
+  const rounds = readRoundLines(root);
+  assert.ok(rounds.length >= 1, "at least one round record written even when the pool is empty");
+  const last = rounds[rounds.length - 1];
+  assert.equal(last.action, "stop", "pool-empty round is recorded as stop (not dispatch)");
+  assert.match(last.stop_reason, /pool-empty/);
+  assert.equal(last.in_flight, 0);
+  assert.ok(last.ts, "round record carries a ts field (the supervisor's last_record_ts reads it)");
+  // ⛔ 取假对照组：outcome 在池空轮【不写】——正是 round 存在的理由（outcome 停更 ≠ 死亡）。
+  assert.equal(readOutcomeLines(root).length, 0, "no outcome on a pool-empty round; round is the unconditional carrier");
 });
 
 // ── AC140（可配 wrapper + model + 按 role；单一真相源；覆盖语义统一）──────────────────────────────

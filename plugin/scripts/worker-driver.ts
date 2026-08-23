@@ -121,6 +121,9 @@ import { isDirectEntry } from "./gate-script-base.ts";
 /** outcome 文件的仓库相对路径（gitignored 运行时日志，dispatch-record.jsonl 同族）。 */
 export const WORKER_OUTCOME_REL = ".quay/worker-outcome.jsonl";
 
+/** round 记录（无条件心跳）的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
+export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
+
 /** 终态枚举：completed（退出码 0）/ failed（非零退出）/ killed（被信号杀）/ timed-out（超时 SIGTERM）/
  *  spawn-failed（起不来）。 */
 export const FINAL_STATES = ["completed", "failed", "killed", "timed-out", "spawn-failed", "not-dispatched"] as const;
@@ -227,6 +230,41 @@ export function appendOutcomeToFile(file: string, outcome: ReturnType<typeof com
 /** 把一条 outcome 追加写入 <root>/.quay/worker-outcome.jsonl（gitignored 运行时日志）。 */
 export function appendOutcome(root: string, outcome: ReturnType<typeof computeOutcome>): string {
   return appendOutcomeToFile(path.join(root, WORKER_OUTCOME_REL), outcome);
+}
+
+/**
+ * 一条 worker round 记录（AC138-3 无条件心跳）：⛔ 与 outcome 分工——outcome 只在任务真完成（或
+ * 终态）时写，池空时 outcome 停更会被 supervisor status 的 last_record_ts（读全载体 max）误读为
+ * 「死亡」；round 每轮循环无条件写一条（含池空/判停轮），作 liveness 直接量。ts 是首字段
+ * （supervisor _carrier_stats 的 `"ts"` grep 依赖）。
+ */
+export function computeWorkerRoundRecord(opts: {
+  round: number;
+  runId: string;
+  pid: number;
+  at: string;
+  action: "start" | "dispatch" | "idle" | "stop";
+  inFlight: number;
+  pool: number | null;
+  stopReason: string | null;
+}) {
+  return {
+    ts: opts.at,
+    round: opts.round,
+    run_id: opts.runId,
+    pid: opts.pid,
+    action: opts.action,
+    in_flight: opts.inFlight,
+    pool: opts.pool,
+    stop_reason: opts.stopReason,
+  };
+}
+
+/** 把一条 round 记录追加写入指定文件（mkdir -p + appendFileSync，一行一 JSON，⛔ 不截断不覆盖）。 */
+export function appendRoundToFile(file: string, record: ReturnType<typeof computeWorkerRoundRecord>): string {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(record) + "\n", "utf8");
+  return file;
 }
 
 /** 空格分隔 argv 切分（⛔ 无 shell 元字符 / 引号；用于 --worker-cmd/--worker-cmd-exact 与默认 claude -p）。 */
@@ -883,6 +921,24 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   const results: WorkerRunResult[] = [];
   let stopReason: string | null = null;
 
+  // round 心跳（AC138-3）：worker-outcome 只在任务真完成时写，池空时 outcome 停更会被 supervisor
+  // status 的 last_record_ts（读全载体 max）误读为「死亡」；round 每轮循环无条件写一条作 liveness 直接量。
+  const roundFile = path.join(rootDir, WORKER_ROUND_REL);
+  const writeRound = (round: number, inFlight: number, pool: number | null, reason: string | null): void => {
+    const record = computeWorkerRoundRecord({
+      round,
+      runId: runId ?? runPrefix,
+      pid: process.pid,
+      at: new Date().toISOString(),
+      action: reason != null ? "stop" : inFlight > 0 ? "dispatch" : "idle",
+      inFlight,
+      pool,
+      stopReason: reason,
+    });
+    try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
+    if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
+  };
+
   /** 判停（AC3）：起新 worker 前逐轮读。halt 优先，其次 resource-gate WAIT；池空在选择环返回 null 时判。 */
   const stopCondition = (): { stop: boolean; reason: string | null } => {
     if (isHalted(rootDir)) {
@@ -923,13 +979,17 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     }
   };
 
+  let round = 0;
   while (true) {
+    round += 1;
+
     // 1. reap 已完成的 worker（减在飞集）。
     for (let i = running.length - 1; i >= 0; i--) {
       if (running[i].done) running.splice(i, 1);
     }
 
     // 2. 池非空且未达 cap 且未判停 ⇒ 走选择环起下一个。
+    let poolSeen: number | null = null;
     while (running.length < cap && !stopReason) {
       const sc = stopCondition();
       if (sc.stop) {
@@ -937,6 +997,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         break;
       }
       const pool = readyPoolCheck(rootDir, readyPoolArgv, running.map((r) => r.task), cap);
+      poolSeen = pool.pool;
       const active = new Set(running.map((r) => r.task));
       const candidates = shuffle(pool.ready.filter((id) => !active.has(id)));
       if (candidates.length === 0) {
@@ -951,6 +1012,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       }
       spawnSelected(sel);
     }
+
+    // AC138-3 无条件心跳：每轮循环写一条（⛔ 池空/判停轮也写——outcome 在这些轮不写）。
+    writeRound(round, running.length, poolSeen, stopReason);
 
     // 3. 无在飞 ⇒ 循环终了（判停，或池已排空）。
     if (running.length === 0) break;

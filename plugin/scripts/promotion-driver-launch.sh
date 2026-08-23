@@ -56,7 +56,7 @@
 #   <prefix>.stop             停止哨兵（存在 = stop 已请求，supervisor 不再重拉）
 #   worker-driver-inflight.pid  worker 在飞 worker 子进程 pid（驱动 --pid-file append，仅观测）
 #   载体（status 读）：promotion → promotion-outcome.jsonl + promotion-round.jsonl；
-#                      worker   → worker-outcome.jsonl
+#                      worker   → worker-outcome.jsonl + worker-round.jsonl（AC138-3 无条件心跳）
 #
 # Exit: 0 = 命令成功 / liveness 健康；1 = 运行/停止失败 / liveness 检出死亡；2 = 参数错误。
 
@@ -132,7 +132,7 @@ declare -A KIND_RUN_PREFIX=(
 # 载体文件（相对 .quay/；首个 = 主载体，作 status 的 carrier_path）。
 declare -A KIND_CARRIERS=(
   [promotion]="promotion-outcome.jsonl promotion-round.jsonl"
-  [worker]="worker-outcome.jsonl"
+  [worker]="worker-outcome.jsonl worker-round.jsonl"
 )
 
 # ── 参数解析 ──────────────────────────────────────────────────────────────────────────

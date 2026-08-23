@@ -66,6 +66,20 @@ packages/quay/plugin/
 **/.quay/promotion-driver-supervisor.log
 **/.quay/promotion-driver-liveness.log
 **/.quay/promotion-driver.stop
+# gap-ac138-worker-driver-production-enablement (2026-08-23): the worker driver's production
+# launch state — round heartbeat (unconditional per-loop record, AC138-3) + supervisor state files
+# (promotion-driver-launch.sh start/stop --kind worker) + control state (drain/control plane
+# worker-control.json). All runtime state, never git-tracked; same gitignored family as
+# worker-outcome.jsonl.
+**/.quay/worker-round.jsonl
+**/.quay/worker-control.json
+**/.quay/worker-driver.pid
+**/.quay/worker-driver-supervisor.pid
+**/.quay/worker-driver.log
+**/.quay/worker-driver-supervisor.log
+**/.quay/worker-driver-liveness.log
+**/.quay/worker-driver.stop
+**/.quay/worker-driver-inflight.pid
 # gap-outer-message-bus-needs-file-inbox-transport (2026-08-09): the OUTER target's file-inbox
 # (.quay/outer-inbox/) is runtime message state (SPEC-inbox-service D1 — 收件箱不进 git 跟踪,
 # 不假设内容持久). Same gitignored runtime-state family as gate-events.jsonl — a real manager→outer
