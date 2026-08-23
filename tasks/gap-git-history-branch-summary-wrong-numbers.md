@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-branch-summary-wrong-numbers
 title: Git History 分支汇总表提交数/合并数/首提交异常（撞错分支）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
