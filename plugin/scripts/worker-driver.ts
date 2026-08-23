@@ -1,6 +1,6 @@
 // worker-driver.ts — SPEC-worker-driven-inner-2026-08-16 §5 阶段 2：机械驱动进程 spawn 多个
 // claude -p worker 跑完整任务（选择 → worktree → 开发 → suite → ff），并发由驱动数自己的子进程控制，
-// 超时 SIGTERM（保留 worktree）、checkout 前 stash 主检出。退出码 + 结构化 outcome 落盘。
+// 超时 SIGTERM、checkout 前 stash 主检出。退出码 + 结构化 outcome 落盘；任何非落地终态清理 orphan worktree。
 //
 // WHY THIS EXISTS (SPEC §2 ①，硬规则 4b)：「在飞」现在是【驱动进程自己 fork 的子进程数】——直接量，
 // 不是估的。旧的三个代理量（worktree 数 / 任务 subagent 数 / 遥测括号 implementing 段）双向偏差，
@@ -15,7 +15,8 @@
 // 阶段 2 新增（AC116，相对阶段 1 的三条能力）：
 //   ① 并发 N —— --task 可重复、--concurrency N 上限；在飞 = 驱动当前活子进程数（直接量，非硬编码 1）。
 //   ② 超时 SIGTERM —— --timeout <ms>（缺省 0 = 无超时，SPEC §4④：成本结构未知前不设阈值）。超时 ⇒
-//      SIGTERM worker、保留 worktree（驱动从不 remove/prune worktree）、outcome 记 final_state=timed-out。
+//      SIGTERM worker、outcome 记 final_state=timed-out。⛔ 超时也是异常死亡（worker 没落地）⇒ 其
+//      orphan worktree 一并清理（gap-worker-driver-no-record-on-abnormal-death，AC2：不清理则挡下轮重派）。
 //   ③ checkout 前 stash —— spawn 前 `git stash push --include-untracked`（⛔ 不 discard），非 git 仓库 no-op。
 //
 // outcome 记录（SPEC §4③，人裁定「跨任务行为检查由 outer 执行 ⇒ outer 只能读记录」）：
@@ -115,6 +116,9 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, readFrontmatter } from "./gate-script-base.ts";
+import { parseTask } from "./task-schema.ts";
+import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
+import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -267,6 +271,64 @@ export function worktreePresentForTask(root: string, taskId: string): boolean | 
   if (r.status !== 0 || r.error) return null;
   const re = new RegExp(`^branch refs/heads/task/${escapeRegExp(taskId)}$`, "m");
   return re.test(String(r.stdout ?? ""));
+}
+
+/** 本任务残留 worktree 的路径列表（`git worktree list --porcelain` 里 `branch refs/heads/task/<id>` 行
+ *  对应的 `worktree <path>` 行）。读失败（非 git 仓库 / git 错误）⇒ []（硬规则 3b：读不懂 ≠ 确认无残留，
+ *  用 worktreePresentForTask 区分「读不懂」（null）与「确认无残留」（false））。 */
+export function worktreePathsForTask(root: string, taskId: string): string[] {
+  const r = spawnSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8" });
+  if (r.status !== 0 || r.error) return [];
+  const paths: string[] = [];
+  let current: string | null = null;
+  for (const line of String(r.stdout ?? "").split("\n")) {
+    if (line.startsWith("worktree ")) {
+      current = line.slice("worktree ".length).trim();
+    } else if (line === `branch refs/heads/task/${taskId}` && current != null) {
+      paths.push(current);
+    }
+  }
+  return paths;
+}
+
+/** orphan worktree 清理结果（可观测：removed/分支删除/错误）。 */
+export interface OrphanCleanupResult {
+  /** 找到 worktree 且 `git worktree remove --force` 全部成功。 */
+  removed: boolean;
+  /** 首个被移除（或移除失败）的 worktree 路径；未找到 ⇒ null。 */
+  worktreePath: string | null;
+  /** `task/<id>` 分支是否删除成功（worktree remove 不删分支；分支还在 ⇒ 下一轮 `-b` 重建仍失败）。 */
+  branchDeleted: boolean;
+  /** 移除失败的错误（worktree 找到但 remove 失败）；无错误 ⇒ null。 */
+  error: string | null;
+}
+
+/**
+ * orphan worktree 清理（gap-worker-driver-no-record-on-abnormal-death AC2）：worker 异常死亡（failed /
+ * killed / timed-out / exited-not-landed——worker 跑了但没落地）后，其 orphan worktree 永久残留会挡
+ * driver 下轮对同一 task 的 `git worktree add`（撞已存在路径 / 分支失败 ⇒ 需人工 remove）。清理 =
+ * `git worktree remove --force <path>` + `git branch -D task/<id>`。⛔ 只在 worker 已退出（close 事件后）
+ * 调用；⛔ completed 路径不调（落地判定已确认无残留）。best-effort：移除失败（脏树 / 锁 / 活进程）不
+ * 致命，error 落盘供观测，⛔ 不抛。
+ */
+export function cleanupOrphanWorktree(root: string, taskId: string): OrphanCleanupResult {
+  const paths = worktreePathsForTask(root, taskId);
+  if (paths.length === 0) return { removed: false, worktreePath: null, branchDeleted: false, error: null };
+  let error: string | null = null;
+  let removed = true;
+  for (const p of paths) {
+    const rm = spawnSync("git", ["-C", root, "worktree", "remove", "--force", p], { encoding: "utf8" });
+    if (rm.status !== 0) {
+      removed = false;
+      error = (rm.stderr || "").trim() || `git worktree remove ${p} failed`;
+    }
+  }
+  let branchDeleted = false;
+  if (removed) {
+    const bd = spawnSync("git", ["-C", root, "branch", "-D", `task/${taskId}`], { encoding: "utf8" });
+    branchDeleted = bd.status === 0;
+  }
+  return { removed, worktreePath: paths[0] ?? null, branchDeleted, error };
 }
 
 /** 落地判定（AC1 判据）：landed = status=done ∧ 无残留 worktree。任一读失败 ⇒ landed=false
@@ -763,8 +825,9 @@ function appendWorkerPid(pidFile: string, workerPid: number): void {
 }
 
 /**
- * spawn 一个 worker 并等待其终态（含超时 SIGTERM）。超时 ⇒ kill("SIGTERM")（保留 worktree——驱动从不
- * remove/prune worktree），close 事件带 signal=SIGTERM，timedOut 标记落 outcome final_state=timed-out。
+ * spawn 一个 worker 并等待其终态（含超时 SIGTERM）。超时 ⇒ kill("SIGTERM")，close 事件带 signal=SIGTERM，
+ * timedOut 标记落 outcome final_state=timed-out。任何非落地终态（failed/killed/timed-out/
+ * exited-not-landed）都清理 orphan worktree（gap-worker-driver-no-record-on-abnormal-death AC2）。
  */
 function runOneWorker({
   taskId,
@@ -819,16 +882,29 @@ function runOneWorker({
         spawnError: spawnErr, inFlightCount, timedOut,
         landed: landing.landed, landReason: landing.reason,
       });
-      appendOutcomeToFile(outcomeFile, outcome);
-      if (json) process.stdout.write(`${JSON.stringify({ event: "worker-done", task: taskId, ...outcome })}\n`);
+      // gap-worker-driver-no-record-on-abnormal-death（AC2，能取假）：worker 异常死亡（failed/killed/
+      // timed-out/exited-not-landed——worker 跑了但没落地）后，orphan worktree 永久残留会挡 driver 下轮
+      // 对同一 task 的 `git worktree add`。写终态的同时清理（⛔ completed/spawn-failed/not-dispatched
+      // 无 worktree 可清；spawn-failed 连 worker 都没起，not-dispatched 连派发都没派）。清理结果落进
+      // outcome（worktree_cleaned / worktree_cleanup_error）供生产观测「零记录消失 + driver 可重派」。
+      const shouldCleanup =
+        outcome.final_state !== "completed" &&
+        outcome.final_state !== "spawn-failed" &&
+        outcome.final_state !== "not-dispatched";
+      const cleanup = shouldCleanup ? cleanupOrphanWorktree(rootDir, taskId) : null;
+      const finalOutcome = cleanup
+        ? { ...outcome, worktree_cleaned: cleanup.removed, worktree_cleanup_error: cleanup.error }
+        : outcome;
+      appendOutcomeToFile(outcomeFile, finalOutcome);
+      if (json) process.stdout.write(`${JSON.stringify({ event: "worker-done", task: taskId, ...finalOutcome })}\n`);
       let exitCode: number;
-      if (outcome.final_state === "completed") exitCode = 0;
-      else if (outcome.final_state === "timed-out") exitCode = 128 + signalExitCode(signal ?? "SIGTERM");
-      else if (outcome.final_state === "killed") exitCode = 128 + (signal ? signalExitCode(signal) : 0);
-      else if (outcome.final_state === "spawn-failed") exitCode = 2;
-      else if (outcome.final_state === "exited-not-landed") exitCode = EXITED_NOT_LANDED_EXIT;
+      if (finalOutcome.final_state === "completed") exitCode = 0;
+      else if (finalOutcome.final_state === "timed-out") exitCode = 128 + signalExitCode(signal ?? "SIGTERM");
+      else if (finalOutcome.final_state === "killed") exitCode = 128 + (signal ? signalExitCode(signal) : 0);
+      else if (finalOutcome.final_state === "spawn-failed") exitCode = 2;
+      else if (finalOutcome.final_state === "exited-not-landed") exitCode = EXITED_NOT_LANDED_EXIT;
       else exitCode = code ?? 2;
-      resolve({ taskId, outcome, exitCode });
+      resolve({ taskId, outcome: finalOutcome, exitCode });
     };
 
     // spawn 同步抛错（罕见，如非法 options）：无 ChildProcess ⇒ 直接终态。
@@ -877,6 +953,38 @@ export function shuffle<T>(arr: readonly T[]): T[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+/**
+ * 派发前 Touches 互斥过滤（gap-launch-script-worker-cap-broken AC3）：cap=5 后池里可能同时有 2 条
+ * `## Touches` 重叠的 ready 任务，若并发派发会各改同一文件、fan-in 才炸（两边都 exit 0 看起来都做完了，
+ * 比 fake-completion 更难查）。本函数把候选里与【在飞任务】Touches 重叠的过滤掉——selector 只在滤后集合里
+ * 选（⛔ 不指望 LLM selector 避开，它拿不到 Touches）。checkTouchesPair / parseTouches 是 ready-pool-check
+ * 的同函数（不重实现）；读不懂（任务文件缺失/读失败）⇒ 视为无 Touches ⇒ checkTouchesPair 判 serialize ⇒
+ * 滤掉（与 checkTouchesPair 的保守缺省同向，⛔ 不因读不懂放行冲突）。无在飞任务 ⇒ 无冲突对象 ⇒ 全通过。
+ */
+export function filterTouchesDisjoint(
+  candidateIds: string[],
+  inFlightIds: string[],
+  rootDir: string,
+): string[] {
+  if (inFlightIds.length === 0) return candidateIds.slice();
+  const expand = (globs: string[]) => expandDeclaredTouches(globs, rootDir);
+  const readTouches = (id: string) => {
+    const file = path.join(rootDir, "tasks", `${id}.md`);
+    let raw: string;
+    try {
+      raw = fs.readFileSync(file, "utf8");
+    } catch {
+      return { hasSection: false, globs: [] as string[] };
+    }
+    return parseTouches(parseTask(raw).body);
+  };
+  const inFlight = inFlightIds.map(readTouches);
+  return candidateIds.filter((id) => {
+    const cand = readTouches(id);
+    return inFlight.every((ifp) => checkTouchesPair(cand, ifp, expand).disjoint);
+  });
 }
 
 /** 缺省 ready-pool-check 命令（选择环的第一步）。输出须为 analyzeTasks JSON（读其 `ready` 数组）。 */
@@ -1146,9 +1254,15 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       const pool = readyPoolCheck(rootDir, readyPoolArgv, running.map((r) => r.task), cap);
       poolSeen = pool.pool;
       const active = new Set(running.map((r) => r.task));
-      const candidates = shuffle(pool.ready.filter((id) => !active.has(id)));
+      const shuffled = shuffle(pool.ready.filter((id) => !active.has(id)));
+      // AC3（gap-launch-script-worker-cap-broken）：派发前 Touches 互斥——候选里与在飞任务 Touches 重叠的
+      // 先滤掉，selector 只在滤后集合里选（⛔ 并发派发 Touches 重叠 = fan-in 才炸）。
+      const candidates = filterTouchesDisjoint(shuffled, running.map((r) => r.task), rootDir);
       if (candidates.length === 0) {
-        stopReason = "pool-empty (no dispatchable candidate in the ready pool)";
+        // 真池空（ready 减在飞后无候选）⇒ 终态停摆。池非空但全与在飞 Touches 重叠 ⇒ ⛔ 非终态：不设
+        // stopReason，外层等一个在飞 worker 结束释放 Touches 后重进选择环重新 filter（而非把「被 Touches
+        // 挡住」误当「池空」提前停摆）。
+        if (shuffled.length === 0) stopReason = "pool-empty (no dispatchable candidate in the ready pool)";
         break;
       }
       const sel = runSelectorWorker(candidates, selectorArgv, rootDir);

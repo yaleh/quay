@@ -72,6 +72,28 @@ function makeTaskBranch(dir, taskId) {
   return tip;
 }
 
+/** Task-file body (frontmatter + a ## Proposal section) — the promotion-driver status-flip target. */
+function taskFileBody(taskId, status) {
+  return `---\nid: ${taskId}\ntitle: test ${taskId}\nstatus: ${status}\nlabels:\n  - gap\n---\n\n## Proposal\n\nproposal body for ${taskId}\n`;
+}
+
+/** Commit `tasks/<id>.md` (status=<status>) on the current branch. Returns the path relative to dir. */
+function writeTaskFile(dir, taskId, status) {
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), taskFileBody(taskId, status), "utf8");
+  gitCmd(dir, "add", "-A");
+  gitCmd(dir, "commit", "-q", "-m", `add ${taskId}`);
+  return path.join("tasks", `${taskId}.md`);
+}
+
+/** Flip ONLY the frontmatter `status:` field of `tasks/<id>.md` in the working tree (no commit). */
+function flipStatusOnDisk(dir, taskId, to) {
+  const p = path.join(dir, "tasks", `${taskId}.md`);
+  const body = fs.readFileSync(p, "utf8");
+  const flipped = body.replace(/^status: .*$/m, `status: ${to}`);
+  fs.writeFileSync(p, flipped, "utf8");
+}
+
 function runMerge(args) {
   return spawnSync("bash", [MERGE_SCRIPT, ...args], { encoding: "utf8" });
 }
@@ -606,6 +628,73 @@ test("dirty tree — exit 2, no retry record (ff must run on a clean checkout)",
     assert.equal(r.status, 2);
     assert.match(r.stderr, /not clean/);
     assert.ok(!fs.existsSync(retries), "no retry record on an environment error");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+// ── auto-converge (gap-fan-in-clean-tree-auto-converge-promotion-status) ────────────────────────────
+// A status-only dirty tree (promotion-driver's todo→ready flip, written to tasks/<id>.md without
+// committing) is auto-converged BEFORE the clean-tree refusal: porcelain all tasks/*.md ∧ per-file
+// `git diff HEAD` hits ONLY the frontmatter `status:` line ⇒ the script stage+commits those files
+// (--no-verify, pathspec-limited) and continues to the ff. Non-status dirty (a body edit, a non-status
+// frontmatter field, a non-tasks path) still refuses exit 2 — the protection is NOT widened (AC2).
+
+test("AC1 — status-only dirty (promotion-driver flip) auto-converges and the ff completes (NOT exit 2)", () => {
+  const dir = makeTmp("conv");
+  const st = stateDir("conv");
+  const wt = makeTmp("convwt");
+  try {
+    initRepo(dir);
+    writeTaskFile(dir, "promoted-a", "todo");          // C0: tasks/promoted-a.md status todo
+    const tip = makeTaskBranch(dir, "fanin-x");          // task/fanin-x = C0 + work
+    gitCmd(dir, "worktree", "add", "-q", wt, "task/fanin-x"); // worktree for the inert-retry path
+    flipStatusOnDisk(dir, "promoted-a", "ready");        // dirty: ` M tasks/promoted-a.md` (status-only)
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const capArgs = captureArgs(st, "fanin-x", tip);
+
+    const r = runMerge(["--task", "fanin-x", "--root", dir, "--worktree", wt, ...capArgs, "--lock-events", events, "--retry-record", retries]);
+    assert.equal(r.status, 0, `status-only dirty must auto-converge and complete the ff:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /not clean/, "the converge must remove the dirty-tree refusal, not report it");
+    assert.match(r.stderr, /converged a status-only dirty tree/, "the converge is attributed and observable");
+    // master fast-forwarded to the (post-merge) task tip — the converge advanced master, the inert-retry
+    // re-merged develop into the task branch, and the re-ff completed (full "继续完成 ff").
+    assert.equal(gitCmd(dir, "rev-parse", "master").stdout.trim(), gitCmd(dir, "rev-parse", "refs/heads/task/fanin-x").stdout.trim(), "master fast-forwarded to the task tip");
+    // The converge commit is on master, attributed, and pathspec-limited to the ONE flipped task file
+    // (⛔ never a bare commit sweeping the shared index).
+    const convHash = gitCmd(dir, "log", "--format=%H", "--grep=promotion-driver 翻转").stdout.trim().split("\n")[0];
+    assert.ok(convHash, "the converge commit landed with the canonical message");
+    const convFiles = gitCmd(dir, "show", "--name-only", "--format=", convHash).stdout.trim().split("\n").filter(Boolean);
+    assert.deepEqual(convFiles, ["tasks/promoted-a.md"], "the converge commit touches ONLY the status-flipped task file");
+    assert.ok(!fs.existsSync(retries), "no retry record — the ff completed, not a retry");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+    cleanup(wt);
+  }
+});
+
+test("AC2 — a non-status change inside tasks/*.md (body edit) still refuses exit 2, no converge", () => {
+  const dir = makeTmp("convneg");
+  const st = stateDir("convneg");
+  try {
+    initRepo(dir);
+    writeTaskFile(dir, "promoted-a", "todo");
+    makeTaskBranch(dir, "fanin-x");
+    // A body edit (non-status-field change) to tasks/promoted-a.md — the converge criterion is
+    // content-level, so a body line change is NOT "只命中 status: 字段" and must still be blocked.
+    const p = path.join(dir, "tasks", "promoted-a.md");
+    fs.appendFileSync(p, "extra body line\n", "utf8");
+    const retries = path.join(st, "retries.jsonl");
+    const r = runMerge(["--task", "fanin-x", "--root", dir, "--retry-record", retries]);
+    assert.equal(r.status, 2, `a non-status dirty tree must still refuse exit 2:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.match(r.stderr, /not clean/, "the dirty-tree refusal fires (not silently passed)");
+    assert.ok(!fs.existsSync(retries), "no retry record — an environment guard, not an ff failure");
+    // No converge commit was made (the content-level check rejected the body edit).
+    const convHash = gitCmd(dir, "log", "--format=%H", "--grep=promotion-driver 翻转").stdout.trim();
+    assert.equal(convHash, "", "NO converge commit for a non-status-only dirty tree");
   } finally {
     cleanup(dir);
     cleanup(st);

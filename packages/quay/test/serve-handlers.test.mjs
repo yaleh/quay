@@ -232,6 +232,15 @@ test("integration: GET /git-history serves the vertical-graph JSON payload + an 
     const layout = layoutGitGraph(h);
     assert.ok(layout.branches.some((b) => b.ref === "feature/alpha"), "layout places the feature branch as a fork/merge lane");
     assert.ok(layout.branches.every((b) => b.collapsed === true), "AC2: every branch is collapsed by default");
+
+    // gap-git-history-branch-summary-wrong-numbers: a branch lane carries only its OWN commits, never
+    // the shared mainline ancestry (the 481/111 symptom). feature/alpha was --no-ff merged into
+    // master, so it has ZERO exclusive commits (correctly no phantom summary lane); task/GH-1 is
+    // unmerged and carries exactly its one commit.
+    const featureCommits = h.commits.filter((x) => x.ref === "feature/alpha");
+    assert.equal(featureCommits.length, 0, "a fully-merged branch has no phantom lane (0 exclusive commits)");
+    const taskCommits = h.commits.filter((x) => x.ref === "task/GH-1");
+    assert.deepEqual(taskCommits.map((x) => x.subject), ["task work"], "the unmerged task branch carries exactly its own commit");
   } finally {
     if (server) {
       server.close();
