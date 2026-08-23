@@ -26,8 +26,8 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：worktree 释放写收尾事件（⛔ 只有 start 无 end ⇒ 假）；或 readLive 交叉校验 worktree 存在性、剔除幽灵在飞。
-- [ ] AC2：Live 页/Dashboard 不显示已不在飞的任务为「实现中」（⛔ 幽灵在飞 ⇒ 假）。
+- [x] AC1：worktree 释放写收尾事件（⛔ 只有 start 无 end ⇒ 假）；或 readLive 交叉校验 worktree 存在性、剔除幽灵在飞。
+- [x] AC2：Live 页/Dashboard 不显示已不在飞的任务为「实现中」（⛔ 幽灵在飞 ⇒ 假）。
 
 ## Definition of Done
 

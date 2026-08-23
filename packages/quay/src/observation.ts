@@ -514,6 +514,13 @@ export function computeInFlightBlocking(root: string, inFlight: InFlightTask[]):
 /**
  * Live loop view: in-flight fast-mode tasks + elapsed minutes + concurrency + CPU pressure +
  * the loop-state discriminator. Degrades per the header contract; never throws.
+ *
+ * gap-live-ghost-inflight-paused-event: the in-flight pairing (start without end) is cross-validated
+ * against worktree existence — a start-without-end run whose worktree was RELEASED (complete / crash
+ * / operational-pause, no end event) is removed as a ghost (AC1). The removal is fail-closed: it only
+ * happens on a positive "released" reading (`taskWorktreeOpen` === false); an unobservable worktree
+ * namespace (`null`) keeps the run in-flight, so a non-worktree workspace still shows the raw
+ * `--report inProgress` set (the serve.test.mjs AC2 pin).
  */
 export function readLive(root: string, { nowMs = Date.now() }: { nowMs?: number } = {}): LiveResult {
   const eventsDir = path.join(root, FAST_MODE_EVENTS_DIR);
@@ -538,10 +545,19 @@ export function readLive(root: string, { nowMs = Date.now() }: { nowMs?: number 
         // with process-level liveness. The pairing itself (ids/starts) is UNCHANGED — the AC2 pin
         // in serve.test.mjs requires readLive().inFlight to equal --report inProgress; liveness is
         // additive. The board reclassifies "orphan" runs out of the in-flight display.
-        inFlight = pairInFlight(readEventsFromDir(eventsDir, files), nowMs).map((t) => ({
-          ...t,
-          liveness: classifyRunLiveness(runProcessAliveSync(t.runId)),
-        }));
+        //
+        // gap-live-ghost-inflight-paused-event: additionally cross-validate the pairing against
+        // worktree existence — a start-without-end run whose worktree was RELEASED (no end event
+        // was ever written) is a ghost, removed here. The filter is fail-closed: only a positive
+        // `taskWorktreeOpen === false` (namespace observable, task worktree absent) removes; `null`
+        // (namespace unobservable — e.g. a non-worktree workspace) keeps the run, so the AC2 pin
+        // still holds where worktree isolation is not in play.
+        inFlight = pairInFlight(readEventsFromDir(eventsDir, files), nowMs)
+          .map((t) => ({
+            ...t,
+            liveness: classifyRunLiveness(runProcessAliveSync(t.runId)),
+          }))
+          .filter((t) => taskWorktreeOpen(root, t.taskId) !== false);
       }
     }
   } catch (err) {
@@ -886,6 +902,38 @@ export function classifyRunLiveness(alive: boolean | null): RunLiveness {
 /** Async wrapper over runProcessAliveSync (kept for API compatibility). */
 export async function isRunProcessAlive(runId: string): Promise<boolean | null> {
   return runProcessAliveSync(runId);
+}
+
+/**
+ * Whether a task's fast-mode worktree is currently open — the DIRECT measurement (the worktree
+ * namespace on disk, not the event stream) that cross-validates readLive's in-flight pairing.
+ * The namespace is `<parent-of-main>/quay-worktrees` and a task's worktree lives at
+ * `<namespace>/<taskId>` (checked out on `task/<taskId>` — the same convention
+ * fast-mode-telemetry.ts `worktreeExists` / `isQuayWorktreePath` pin; CLAUDE.md inner-brief:104).
+ *
+ * gap-live-ghost-inflight-paused-event: `.workflow-events/*.jsonl` can carry a `start` with NO end
+ * because the event model has no 「非正常终结」 state — inner releases the worktree (complete / crash /
+ * operational-pause) without ever writing an end. A start-without-end run whose worktree is RELEASED
+ * is not in-flight; it is a ghost. This probe is the direct量 that readLive uses to remove it.
+ *
+ * Returns (tri-state — hard rule ③b: "unobservable" must be distinguishable from "released"):
+ *   true  — `<namespace>/<taskId>` exists (the task's concurrency slot is occupied);
+ *   false — the namespace exists (worktree isolation IS in play) and the task's directory is ABSENT
+ *           (the slot was released — the ghost this task removes);
+ *   null  — the namespace is absent/unreadable (worktree isolation not in play, or an fs error) —
+ *           fail-closed toward in-flight: never a positive "released" signal from a source that
+ *           could not be observed. This is what keeps readLive's `--report inProgress` parity intact
+ *           in a non-worktree workspace (the serve.test.mjs AC2 fixture).
+ */
+export function taskWorktreeOpen(root: string, taskId: string): boolean | null {
+  if (!taskId) return null;
+  const namespace = path.join(path.dirname(path.resolve(root)), "quay-worktrees");
+  try {
+    if (!fs.existsSync(namespace)) return null;
+    return fs.existsSync(path.join(namespace, taskId));
+  } catch {
+    return null;
+  }
 }
 
 /**
