@@ -78,6 +78,19 @@ manager 检查代码后给出四点分析（讨论轮，未裁定），人要求
 - **Touches 互斥过滤**（`checkTouchesPair`，单一实现，`gap-launch-script-worker-cap-broken` AC3 补齐后上收进 kernel，两个 kind 都受益，不是各自实现）。
 - **事件订阅接口**（§2.2）+ **出站通知接口**（§2.3）。
 - MCP 控制面（`serveControlPlane` 已是 worker-driver 独有实现，本 SPEC 建议上收进 kernel，promotion-driver 免费获得同等能力）。
+- **进程守护（supervisor）本身**——`plugin/scripts/promotion-driver-launch.sh` 现有的 respawn 循环
+  （`run_supervisor()`:268）、pid 记账（`pid_alive()`:243 / `_carrier_stats()`:253）、
+  8 张 kind registry 表（`KIND_DRIVER`/`KIND_PREFIX`/`KIND_VERBS`/`KIND_CAP_FLAG`/
+  `KIND_HAS_INTERVAL`/`KIND_PID_SELF`/`KIND_RUN_PREFIX`/`KIND_CARRIERS`:102-140）
+  **全部港进 TS kernel**，`packages/quay/src/cli/driver.ts` 由"`spawnSync` bash 的薄壳"变为
+  真正的实现入口。
+  **⛔ 这不是可选项、不是"迁移期并存"**（人 2026-08-23 逐字裁定："这显然不够集成，对测试也不友好"）。
+  **Node 侧等价原语已确认可用**：`spawn(cmd, {detached:true, stdio:["ignore",fd,fd]}).unref()`
+  ≡ `setsid`+`nohup`；`process.kill(pid, 0)` ≡ `pid_alive()`；`child.on("exit")` + `setTimeout`
+  ≡ `wait`+`sleep $RESTART_DELAY`。**⛔ 无需 systemd、无需保留 bash 兜底。**
+  **可测试性是本条的目的，不是副产品**：港完后 respawn 判定、registry 查表、carrier 统计、
+  liveness 判定都必须是可直接 `import` 的纯函数（对照 `worker-driver.ts` 的
+  `computeLandingState`/`resolveConcurrency` 现有形态），⛔ 不接受"仍然只能 spawn 整个进程做黑盒断言"。
 
 **kind-plugin 的职责**（每个 kind 保留、不上收的部分）：
 - 候选池计算方式（promotion 读 `ready-pool-check`；worker 读同一个但语义不同——晋升候选 vs 执行候选）。
@@ -210,7 +223,7 @@ hold-for-approval 队列，失去自动通知的意义，且该路径的身份�
 | `routine-scheduler.ts` | 纯函数，已解耦判定与执行 | **直接复用**，kernel 调用其判定函数，不重写 |
 | `concurrent-batch-scheduler.ts` | 独立 CLI，批量装配用 | 装配策略保留独立（不是每个 kind 都要批量装配），但其依赖的 `checkTouchesPair` 上收进 kernel 后，本脚本改为调用 kernel 暴露的同一实现，**消除潜在的第二份实现漂移**（本会话已实证"第三份副本漂移"两次） |
 | `ready-pool-check.ts` | 独立 CLI，两个 driver 都 spawn 它 | **不建议内联**——它是任务库语义判断（AC/DoD/Touches/依赖），复杂度和变更频率都高于"driver 该不该派发"这个机械问题，保持独立 CLI + driver spawn 调用是当前合适的边界（`packages/quay` 领域逻辑 vs `plugin/scripts` 编排逻辑的既有分层，`SPEC-integration-architecture-2026-08-05.md` 已有此判据：机件层"留在外面"） |
-| `promotion-driver-launch.sh` 的 registry 表 | 已是统一入口 | **kernel 落地后 registry 增加"kernel 版本号/骨架路径"一列**，供新 kind 声明"我用共享骨架"还是"我是旧式独立实现"（迁移期并存，不強制一次性切完） |
+| `promotion-driver-launch.sh`（492 行 bash） | 统一入口已达成，但**实现语言与仓库其余部分割裂**：`cli/driver.ts` 只是 `spawnSync` 薄壳，真正的 supervisor 逻辑在 bash 里，测试只能黑盒（256 行测试 / 13 用例 / 仅 5 处 spawn 断言，对比 `worker-driver.ts` 的纯函数单测） | **整体港进 TS kernel 后删除本脚本**（§2.1 末条）。⛔ 非"迁移期并存"——人 2026-08-23 裁定不够集成/不利测试。港完后 `cli/driver.ts` 成为真正实现入口，本 `.sh` 文件从仓库移除（其 8 张 registry 表变成 TS 数据结构，`run_supervisor` 变成可单测的 kernel 函数） |
 
 ### 4.2 manager 定时任务（cron/loop）下沉的讨论
 
