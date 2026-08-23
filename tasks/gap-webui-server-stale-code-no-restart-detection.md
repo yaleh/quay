@@ -21,6 +21,8 @@ depends_on: []
 
 **已止损（outer 2026-08-23）**：重启 server（435604 → 2812230），curl /tests 现 startedAt 列 + commit 恢复。
 
+**第二实例（⛔ 更陈旧，待人确认用途）**：`./quay serve --port 18102`（pid 1716084）`Thu Aug 20 09:42:32` 启动、距今近 3 天，期间落地 webui/git-history/test-detail 类 **20 条**（比 4173 的 11 条更多）；`0.0.0.0:18102` 公网监听、curl 200。`grep -rln "18102"` 全仓库**零命中**——无文档/脚本引用，用途不明（可能调试孤儿，也可能特意留作版本对比）。⛔ 未动，待人确认后再决定按同一逻辑重启/并入本条。
+
 **影响**：UI 任务落地到「有人重启 server」之间有个滞后窗口，且**无任何机制感知或提醒**——server 不知自己代码过期，用户/manager 肉眼看到的页面与刚落地代码脱节。与 worker-driver「stale code 未重启」同族（本次 stale driver 根因），只是 web server 侧。
 
 ## Plan
