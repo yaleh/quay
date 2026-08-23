@@ -1,7 +1,7 @@
 ---
 id: gap-fix-worker-spawn-zero-diagnostic-info
 title: fix-worker spawn 零诊断信息（stdio 全 ignore）+ 无 timeout——先能看见报错
-status: ready
+status: superseded
 labels:
   - gap
 parent: null

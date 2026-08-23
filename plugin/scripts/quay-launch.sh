@@ -77,7 +77,8 @@ EXCLUDE_DYNAMIC="$(jq -r '._launchSpec.excludeDynamicSystemPromptSections // fal
 PROMPT_SUGGESTIONS="$(jq -r '._launchSpec.promptSuggestions' "$SETTINGS_FILE")"
 ROLE_ENV="$(jq -c --arg r "$ROLE" '._launchSpec.roles[$r].env // {}' "$SETTINGS_FILE")"
 # 每角色 bare（AC140-2 按 role 可配）：_launchSpec.roles[$r].bare === true ⇒ 追加 --bare（一次性验证会话）。
-# task-worker（长任务链）设 bare=false（或缺失 = 不追加）；selector/fix-worker（短命决策/编辑）设 true。
+# task-worker/selector/fix-worker 三者现均 bare=false——AC142 根因：claude --bare 不读 ANTHROPIC_AUTH_TOKEN，
+# 而 claude-fjdac wrapper 置空 ANTHROPIC_API_KEY ⇒ bare 下无凭据 ⇒ 认证失败 exit 1（生产 13/13 全败）。
 ROLE_BARE="$(jq -r --arg r "$ROLE" '._launchSpec.roles[$r].bare // false' "$SETTINGS_FILE")"
 
 if [[ -z "$LAUNCHER" || -z "$NAME" ]]; then

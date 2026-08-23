@@ -639,6 +639,23 @@ test("AC129 pure — parseSelectorOutput: valid pick, invalid-pick fallback, emp
   assert.equal(parseSelectorOutput("gap-a x", [], 0), null);
 });
 
+test("AC142 AC1 — selector spawn captures stderr; fallback reason carries it (spawn 失败不再零诊断)", () => {
+  const candidates = ["gap-a", "gap-b"];
+  // parseSelectorOutput: stderr 可选传入，兜底 reason 带 stderr 截断。
+  const bad = parseSelectorOutput("", candidates, 1, "AUTH-ERROR: no credentials");
+  assert.equal(bad.task, "gap-a");
+  assert.match(bad.reason, /stderr="AUTH-ERROR/);
+
+  // runSelectorWorker: 真实 spawn 写 stderr + exit 非零 ⇒ 兜底 reason 带 stderr（⛔ 不再 ignore）。
+  const r = runSelectorWorker(
+    candidates,
+    ["node", "-e", "process.stderr.write('AUTH-ERROR: no credentials');process.exit(1)"],
+    "/r",
+  );
+  assert.equal(r.task, "gap-a");
+  assert.match(r.reason, /stderr="AUTH-ERROR/, `selector_reason carries stderr: ${r.reason}`);
+});
+
 test("AC129 pure — shuffle returns a permutation of its input", () => {
   const src = ["gap-a", "gap-b", "gap-c", "gap-d"];
   const got = shuffle(src);
@@ -868,7 +885,13 @@ test("AC140-2 — configurable: worker roles carry wrapper+model in _launchSpec.
 
   const selector = dryRunLaunch("selector", "-p", "TEST");
   assert.match(selector, /^claude-fjdac /, `selector launcher is the wrapper: ${selector}`);
-  assert.match(selector, / --bare( |$)/, "selector (short decision) uses --bare");
+  // AC142 根因：selector/fix-worker 曾设 bare=true ⇒ claude --bare 不读 ANTHROPIC_AUTH_TOKEN 而
+  // wrapper 置空 ANTHROPIC_API_KEY ⇒ 认证失败 exit 1（生产 13/13 全败）。修法 = 三者均 bare=false。
+  assert.doesNotMatch(selector, / --bare( |$)/, "selector does NOT use --bare (AC142: --bare 不读 AUTH_TOKEN ⇒ 认证失败)");
+
+  const fixWorker = dryRunLaunch("fix-worker", "-p", "TEST");
+  assert.match(fixWorker, /^claude-fjdac /, `fix-worker launcher is the wrapper: ${fixWorker}`);
+  assert.doesNotMatch(fixWorker, / --bare( |$)/, "fix-worker does NOT use --bare (AC142: --bare 不读 AUTH_TOKEN ⇒ 认证失败)");
 
   // 取假对照：manager（launcher=claude，无 wrapper）⇒ 无 --model，argv0 是裸 claude（wrapper 不在链）。
   const manager = dryRunLaunch("manager");
