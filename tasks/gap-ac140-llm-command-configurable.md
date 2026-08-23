@@ -34,7 +34,7 @@ depends_on:
 - [ ] AC1（单一真相源）：`plugin/scripts/` 下不再有 ≥2 处独立 `["claude","-p",…]`（一个构造函数，role 参数）。
 - [ ] AC2（可配）：驱动的 LLM spawn 复用 `quay-launch.sh`（`<role> --bare -p`），wrapper/model 由 `_launchSpec.roles` 承载；取假：驱动仍 spawn 裸 `claude -p`（绕过组装器）⇒ 假。
 - [ ] AC3（覆盖语义统一）：统一「前缀 + prompt」；整体替换语义改名 `--worker-cmd-exact`，⛔ 不与前缀语义共用一个 flag。
-- [ ] AC4（quay-launch.sh 回归，能取假）：改 `quay-launch.sh` 后实跑 `--dry-run` 对 `manager`/`outer`/`inner` 三既有角色各验一遍，输出命令行与改动前逐字一致（新增 worker 角色除外）；取假：任一既有角色输出变了 ⇒ 假。
+- [ ] AC4（quay-launch.sh 回归，能取假）：改 `quay-launch.sh` 后实跑 `--dry-run` 对 `manager`/`outer`/`inner` 三既有角色各验一遍——**排除 `--settings` 载荷本身**，只比「启动语义」字段（`launcher` · `--exclude-dynamic-system-prompt-sections` · `--prompt-suggestions false` · `--model <m>` · `-n <name>`）逐字一致；`--settings` 只核【类型不变】（outer/inner 仍文件路径、manager 仍内联 JSON）且 manager 内联 JSON 的 `.env` 键集不变。取假：launcher/model/name/flag 变，或 manager 的 917k 三键剥离消失 ⇒ 假。
 
 ## Definition of Done
 
@@ -58,3 +58,18 @@ depends_on:
 > **落笔方须实测再定（⛔ 别猜，manager 60b67e47）**：① `quay-launch.sh:114` `-n <name>` 无条件追加——三个并发 worker 若都叫 `quay-inner` 会在 `ListAgents` 撞名；要么新角色各有其名，要么确认 `-p` 模式根本不注册会话。② `--bare` 定义（一次性验证会话：跳过 hooks/LSP/plugin 同步/自动记忆/预取，不长驻）对 selector/fix-worker 正好合用，但对 task-worker（长任务链）是否合适须实测，⛔ 不照搬到三种 role。
 
 > **exitCode=1 假说（⛔ 仍是假说，别当结论）**：`buildFixWorkerArgv` spawn 裸 `claude -p`，相对 inner/outer 少 `--settings`（含 permissions.defaultMode=bypassPermissions ⇒ 裸 claude 非交互遇权限提示可能退）与 `claude-fjdac`（wrapper 靠 env 注入凭据 ⇒ 裸 claude 走另一套可能无效凭据）。**能区分的对照**：同一 prompt 分别跑 `quay-launch.sh inner --bare -p "<prompt>"` 与裸 `claude -p "<prompt>"`——前者成/后者败 ⇒ 成因在启动形态（本条一并修）；两者都败 ⇒ 成因在 prompt 本身。另：`claude-fjdac` 末行 `exec claude "$@"`（exec 替换自身）⇒ inner/outer 进程 argv[0] 就是 `claude`，wrapper 贡献全在 env、ps 看不见，⛔ 不能用「ps 里是 claude」推断「没用 wrapper」。
+
+> **AC4 基线（改动前捕获，HEAD `a766e35d`，manager 提供——⛔ 验收时无物可比）**：
+> ```
+> outer   ⇒ claude-fjdac --settings /home/yale/work/quay/.claude/launch.settings.json \
+>           --exclude-dynamic-system-prompt-sections --prompt-suggestions false \
+>           --model deepseek-v4-pro -n quay-outer
+> inner   ⇒ 同上，仅 -n quay-inner
+> manager ⇒ claude --settings <内联 JSON，含完整 _launchSpec> \
+>           --exclude-dynamic-system-prompt-sections --prompt-suggestions false -n quay-manager
+>   ⊢ 关键可比量：launcher=claude · 无 --model · -n quay-manager ·
+>     内联 JSON 的 .env 键集 = {CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN, CLAUDE_CODE_DISABLE_MOUSE,
+>     CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION, QUAY_MAX_CONCURRENT_SUITES}
+>     ——⛔ 917k 三键（MAX_CONTEXT_TOKENS/AUTO_COMPACT_WINDOW/AUTOCOMPACT_PCT_OVERRIDE）【不在】其中
+> ```
+> **⊢ AC4 为何排除 settings 载荷**：manager 的 `--settings` 是内联 JSON（`quay-launch.sh:92-96`，ROLE_ENV 非空 ⇒ jq -c 合并），完整含 `_launchSpec.roles`；AC140-2 往 roles 加 worker 角色 ⇒ 内联 JSON 必然变 ⇒ 若 AC4 比「逐字一致」对 manager 恒假（正确实现的假红，同 manager AC140-4 之错）。故只比「启动语义」字段 + settings 类型 + manager .env 键集。
