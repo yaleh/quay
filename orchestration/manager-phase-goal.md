@@ -524,12 +524,191 @@ ps -eo args | grep promotion-driver ⇒ 【零命中】 （驱动【没有在跑
 AC138-2/3 的窗口**均自 AC138-1 成立之时起算**（同 AC137 的「无法起算 ≠ 未达成」逻辑，硬规则 3b）。
 **⊢ 非目标**：⛔ 不在本条重新设计 selector 语义策略（同 AC129 非目标）；⛔ 不规定 N 的具体数值。
 
+### AC139（**两驱动统一到一个 `quay` 子命令 + 单一泛化 supervisor** —— ⛔ 不造第二个重复守护脚本，人 2026-08-23 逐字裁定「我希望它们可以用一个 quay 子命令统一启动」补）
+
+**⊢ 立条时机（⛔ 这是本条最重要的一句，晚一步就变二次重构）**：
+`gap-ac138-worker-driver-production-enablement` 的 Touches 原写 **`plugin/scripts/worker-driver-launch.sh (new)`** ——
+若照此落地，仓库将出现**两个近乎重复的 244 行 bash supervisor**（`promotion-driver-launch.sh` 已 244 行）。
+**⊢ 立条当刻实测**：该任务 `status=todo`（**尚未开工**，唯一在飞 worktree 是其 dep `gap-resident-driver-stable-carrier-liveness`）
+⇒ **改 Touches 的窗口现在是开的，成本为零**；等它 land 后再统一就是重构已落地的代码。
+
+**⊢ 当前不对称（我直读两个驱动的实现，⛔ 非推断）**：
+```
+promotion-driver  承载 = promotion-driver-launch.sh:237-243  start|stop|status|restart|__supervise
+                        setsid nohup + respawn 循环 + pid 文件 + stop sentinel（:199, :215-236）
+                  实际启动 = 手工敲 bash …/launch.sh start
+worker-driver     承载 = 【无】——只有 worker-driver.ts 自身
+                  实际启动 = 【从未在生产启动过】
+```
+**⊢ 三处真实语义冲突（⛔ 直接透传会静默改变行为，不是命名问题）**：
+① **`--pid-file` 两边不同义** —— promotion-driver 写**自己的** pid（单值覆盖）；
+   worker-driver 是 **append 每个 worker 子进程的 pid**（多值追加，`worker-driver.ts:621-624`）。
+② **worker-driver 有第三种运行模式** `--serve`（MCP 控制面常驻，`:1196`），promotion-driver 没有。
+③ **停机语义是两套** —— promotion 用 stop sentinel + TERM + 兜底 `kill -9`（**杀在飞**）；
+   worker 用 `.halt` 闸（**⛔ 不杀在飞**，只挡新 spawn）。**合并成单个 `stop` 会静默改掉其中一个的行为。**
+
+**判据（四条，全部能取假）**：
+- **AC139-1（统一入口）**：`quay driver <start|stop|drain|status|restart> --kind <promotion|worker>` 存在，
+  **两个 kind 都能经它启停**（⛔ 不是只包了一个）。**⊢ `driver` 这个 verb 当前空闲**（`quay run` 已被 QENG-4 gate 驱动占用，不冲突）。
+  **⊢ `stop` 与 `drain` 必须是两个动词**（对应上述冲突③）：各 kind 声明支持哪些，**对不支持的直接报错**，
+  ⛔ 不得静默回落到另一个语义。**取假**：某 kind 只能用旧路径启动，或 `stop` 对 worker 杀了在飞 ⇒ 为假。
+- **AC139-2（单一真相源，⛔ 本条是核心）**：**仓库中只存在一份 respawn/守护循环实现**，
+  两个 kind 的差异由**一张 registry 表（数据）**承载，⛔ 非两份代码分支。
+  **取假（一条 grep 可查）**：能在两个不同文件里各找到一个独立的 supervisor/respawn 循环 ⇒ 为假。
+  **⊢ 为什么这条比"有个子命令"重要**：昨天 `promotion-driver` 整个死掉的根因（supervisor 挂在被删的 worktree 上）
+  **若发生在统一层，只需修一处** —— 正是硬规则 5b（在某处修好 X ≠ X 只在那一处）要的形态。
+- **AC139-3（status 必须带时间，⛔ 不能只带计数）**：`status` 输出含
+  `{kind, supervisor_pid, driver_pid, alive, carrier_path, carrier_records, last_record_ts}`。
+  **⊢ 理由（硬规则 4b）**：只有 `carrier_records` 计数**无法区分「在长」与「停更」** ——
+  昨天驱动死了 33 分钟无人察觉，正是因为没有这个量；**载体停更与「一切正常」同形**。
+  ⊢ 这个 `status` 同时就是 AC138-1「死亡告警」与 `gap-resident-driver-stable-carrier-liveness` AC2 的天然消费面。
+  **取假**：`status` 只报计数不报末条时刻 ⇒ 为假（因为它无法支撑死亡告警）。
+- **AC139-4（承载路径显式从 workspace root 解析）**：`start` 时脚本/入口路径由 **workspace root**
+  （`.quay/config.yml` 发现路径）解析，**且拒绝从 `quay-worktrees/` 路径启动**。
+  **⊢ ⚠️ 不得把这条当成「统一到 CLI 就自动获得」的赠品** —— 实测 `quay` **不在 PATH**（无全局安装），
+  实际调用形态是 `node packages/quay/bin/quay.js`；而既有 `manager.ts:55-63` 的解析是
+  **从模块自身位置向上找 `plugin/scripts/`** ⇒ **若 CLI 从 worktree 里的副本被调用，它会找到 worktree 的脚本，昨天的事故照样重演**。
+  **取假**：从一个 worktree 内调用 `quay driver start` 而它成功起了挂在该 worktree 上的 supervisor ⇒ 为假。
+
+**⊢ 实现形态提示（记，⛔ 不强制——落笔方可另选）**：与既有 `quay manager start|adopt|arm` 同构，
+`packages/quay/src/cli/manager.ts:70` 已是「CLI 薄层 `spawnSync` 委托给 bash 脚本」的先例，照抄该形状即可，⛔ 不必发明新架构。
+
+**⊢ 顺序约束（⛔ 硬，因文件重叠）**：`gap-resident-driver-stable-carrier-liveness` **当前在飞**
+（worktree `499a33b8`），其 Touches 含 `plugin/scripts/promotion-driver-launch.sh` —— **与本条要泛化的正是同一文件**。
+⇒ **本条必须排在它 land 之后**，且泛化后的 supervisor **必须吸收（⛔ 非回退）它对稳定承载/死亡告警的修复**。
+**⊢ 非目标**：⛔ 不在本条改两个驱动各自的**业务逻辑**（选择环语义、晋升判定、fix worker 行为）——本条只动**承载与入口**。
+
+### AC140（**驱动调用的 LLM CLI 必须可配置（wrapper + model），且判定不得靠命令字面量** —— 人 2026-08-23 逐字裁定「driver 子命令中运行的 Claude Code 命令应当可以配置，如本项目开发过程中就应当可以使用相应的 Claude Code wrapper 和 model」补）
+
+**⊢ 检查结论：不符合，且不是「加个配置项」那么简单** —— 现有两个覆盖旋钮**语义相反**，其中一个**结构上无法承载 wrapper**。
+
+**⊢ 实读四处硬编码（⛔ 非推断，逐个行号）**：
+```
+worker-driver.ts:247      defaultWorkerArgv    → return ["claude", "-p", prompt]
+worker-driver.ts:708      defaultSelectorArgv  → return ["claude", "-p", prompt]
+promotion-driver.ts:187   buildFixWorkerArgv   → return ["claude", "-p", prompt]（prefix 为空时）
+promotion-driver.ts:190   buildFixWorkerArgv   → return ["claude", "-p", prompt]（无覆盖时）
+```
+⇒ **同一个字面量四处独立出现，无单一真相源**（硬规则 5b 的静态形态）；**且全仓无任何 model/wrapper 配置项**
+（`grep -rn 'claude-fjdac\|--model\|QUAY_CLAUDE' .quay/config.yml plugin/scripts/*.ts` ⇒ **零命中**）。
+
+**⊢ 两个覆盖旋钮语义相反（这才是真正的阻塞点）**：
+```
+promotion-driver.ts:185-189   --fix-worker-cmd  = 【前缀】，prompt 仍被追加        ⇒ wrapper 可用 ✅
+worker-driver.ts:565          --worker-cmd      = 【整体替换】（const [cmd,...cmdArgs] = workerArgv）
+                                                   ⇒ 任务 prompt / task id 全部丢失 ⇒ wrapper 不可用 ❌
+```
+⊢ `worker-driver.ts:847` 的 `workerArgv ?? defaultWorkerArgv(sel.task, rootDir)` 证实：给了 `--worker-cmd`
+之后，**每个任务 spawn 的是完全相同的一条命令，任务 id 不出现在 argv 任何位置** ——
+该旋钮只对**测试捕获脚本**有意义（promotion-driver 注释 `:45` 自己写明「AC2 取假用捕获脚本读末参数」），
+**⛔ 不能用来接 `claude-fjdac --model <m>` 这类真实 wrapper。**
+
+**⊢ ⚠️ 连带发现的一个【会制造假读数】的缺陷（本条最该先修的一处，硬规则 4b）**：
+```
+promotion-driver.ts:110-117  isLlmInvocation(argv)
+  return base === "claude" || base === "claude.exe" || base === "claude.cmd";
+```
+⇒ **一旦按人的要求把 wrapper 配成 `claude-fjdac`，该判定返回 false** ——
+而它正是 **AC131「零 LLM 机械晋升」** 的证据字段 `llm_invoked` 的来源。
+**⊢ 后果**：fix worker（**确实是** LLM 调用）会被记成 `llm_invoked:false` ⇒ **AC131 的取假能力静默失效**，
+且失效形态与「该路径确实零 LLM」**完全同形**。⊢ **这是硬规则 4b 的教科书形态**：
+判定本可取假，但中间隔了一个**未随配置更新的字面量过滤器**，读数从此不再反映实际。
+⛔ **不得在换 wrapper 的同一个改动里放过这一条** —— 那会让本阶段最核心的一条 AC 的证据变成假阴性。
+
+**判据（四条，全部能取假）**：
+- **AC140-1（单一真相源）**：LLM 调用 argv 由**一个**构造函数产出（role 作参数），
+  上述**四处硬编码全部消除**。**取假（一条 grep 可查）**：`plugin/scripts/` 下仍能找到 ≥2 处独立的
+  `["claude", "-p", …]` 字面量 ⇒ 为假。
+- **AC140-2（可配置：wrapper + model + 按 role）**：LLM 命令与 model **必须与 inner/outer 会话所用的同一套配置同源**，
+  **且可按 role 分别覆盖**（worker / selector / fix-worker 是三种不同负载：长任务链 / 短决策 / 短编辑，
+  ⛔ 不假定它们该用同一个 model）。**取假**：把 role 的 launcher/model 配成本项目实际所用值后，
+  驱动 spawn 出的 argv 里 argv0 仍是裸 `claude` 或 `--model` 未出现 ⇒ 为假。
+
+  **⊕ 2026-08-23 00:5xZ 我方自纠（人令「应与 inner/outer 一致」后实测，⛔ 我原先指定的落点会制造漂移）**：
+  **原文写「由 `.quay/config.yml` 加第四段配置」——⛔ 撤销该指定**，因为**这些事实已经有正本**，
+  再写一份就是 CLAUDE.md 反复点名的**双真相源**。
+  **⊢ 实读正本（`.claude/launch.settings.json` `_launchSpec.roles`）**：
+  ```
+  outer / inner  launcher = "claude-fjdac"   model = "deepseek-v4-pro"
+  manager        launcher = "claude"          model = null（且清空 917k 三个 env）
+  ```
+  **⊢ 实读组装器（`plugin/scripts/quay-launch.sh:97-115`）**：
+  `CMD=( <launcher> --settings <file> [--exclude-dynamic-system-prompt-sections] [--prompt-suggestions false] [--model <m>] [--bare] -n <name> ) + PASSTHRU`
+  —— **`:36` 明写「其余参数原样透传给 claude（如 `-p`、`--print`、`--resume`）」⇒ 透传缝已经存在。**
+  **⊢ 干跑实证（我实跑，非推断）**：
+  ```
+  bash plugin/scripts/quay-launch.sh inner --bare --dry-run -p "TEST_PROMPT"
+  ⇒ claude-fjdac --settings …/launch.settings.json --exclude-dynamic-system-prompt-sections \
+     --prompt-suggestions false --model deepseek-v4-pro --bare -n quay-inner -p TEST_PROMPT
+  ```
+  ⇒ **人要的「与 inner/outer 一致、仅为 `-p` 模式加参数」这件事，既有机件【已经能做到】**。
+  **⇒ 本条改为要求：驱动的 LLM spawn 走 `quay-launch.sh <role> --bare -p <prompt>`（或等价复用同一组装器），
+  按 role 的配置落在 `_launchSpec.roles` 里新增 worker 角色**（如 `task-worker`/`selector`/`fix-worker`），
+  ⛔ **不得在 `.quay/config.yml` 另立一份 launcher/model**。
+  **⊢ 落笔方须一并回答的两个已知点（⛔ 不得跳过）**：
+  ① **`-n <name>` 是无条件追加的**（`:114`）—— 三个并发 worker 若都叫 `quay-inner` 会在 `ListAgents` 里撞名；
+     新角色须各有其名，或确认 `-p` 模式是否根本不注册会话（**⛔ 实测后再定，不猜**）。
+  ② **`--bare` 的既有定义正好合用**（settings 自述「一次性验证会话：跳过 hooks/LSP/plugin 同步/自动记忆/预取，不长驻」）
+     —— 短命 worker 正是这个形态；但**是否对 task-worker（长任务链）也合适须实测**，⛔ 不照搬到三种 role。
+- **AC140-3（覆盖语义统一为「前缀 + prompt」）**：`--*-cmd` 一律解释为**前缀**，prompt 由驱动追加
+  （即 promotion-driver 的现行语义）；worker-driver 现有的**整体替换**语义**改名为独立 flag**
+  （如 `--worker-cmd-exact`，测试捕获专用）。**⛔ 两种语义不得共用一个 flag 名** ——
+  同名不同义正是本条要消除的东西。**取假**：给 `--worker-cmd` 一个 wrapper 前缀后，
+  worker 收不到任务 id/prompt ⇒ 为假。
+- **AC140-4（判定不得靠命令字面量，⛔ 最优先）**：`isLlmInvocation` **不得**以 argv0 是否等于
+  `claude` 判定，须由**配置声明的 LLM 命令集**判定。**取假（负控制）**：配置 wrapper = `claude-fjdac` 后，
+  **对该 wrapper 的 argv 调用 `isLlmInvocation` 必须返回 true**；仍为 `false` ⇒ 为假。
+  **⊢ 这条同时是 AC131 证据链的修复**，⛔ 不得延后到 AC140 其余三条之后。
+
+  **⊕ 2026-08-23 00:4xZ 我方自纠（⛔ 我原先给的取假写错了，实测证否后改正）**：
+  **原文写「跑一次真实 fix worker ⇒ 其 round 记录的 `llm_invoked` 必须为 true」——该判据对当前实现【结构上不可满足】，与 wrapper 无关。**
+  **⊢ 实读证否（`promotion-driver.ts:210` + `:272-275` 注释）**：`llmInvoked = isLlmInvocation(argv)` 中的
+  `argv` **只是 ready-pool-check 的 argv**（晋升路径），**fix worker 的 spawn 根本不进这个字段** ——
+  注释自己写明「fix worker 的 spawn 在 `fixes[].spawned=true` 上可见」。
+  **⊢ 生产实测印证**：round 70（`00:35:53.420Z`）**同一轮里** `fixes[0].spawned=true`（真的 spawn 了 `claude -p`）
+  **而 `llm_invoked:false`**；全载体 `llm_invoked=true` 的轮数 = **0**。
+  ⇒ **我把一个【路径限定】的字段当成了【全轮】字段** —— 若不改，落笔方会照我的原文去测，
+  拿到 `false` 后要么误判 AC140-4 失败、要么去改一个本来正确的字段。
+  **⊢ 因此本条的取假改为【直接对判定函数做】（上文已改）**；
+  **⊢ 并单列一条附带要求（归 AC140-1 的实现面，⛔ 不新增判据）**：`llm_invoked` 这个**字段名比它的语义宽** ——
+  同族陷阱已有前例（`perfile-timeout` gate 名误导）。落笔方**要么把它改名为路径限定的名字**
+  （如 `promote_path_llm_invoked`），**要么把它扩成真正的全轮口径**（含 fix worker spawn）；
+  ⛔ **不得原样保留一个会让读者得出相反结论的名字**（硬规则 4b：读数与「一切正常」同形）。
+
+**⊕ 2026-08-23 00:5xZ 连带记录（一个【有待对照的假说】，⛔ 未证实，不得当结论用）**：
+`fix worker exitCode=1`（round 70 首次生产触发即失败）**可能**源于 `buildFixWorkerArgv` spawn 的是**裸 `claude -p`**，
+而它相对 inner/outer 的实际启动形态**少了两样东西**：
+```
+① --settings …/launch.settings.json  ⇒ 其中 permissions.defaultMode = "bypassPermissions"
+                                        ⇒ 裸 claude -p 在非交互下遇权限提示可能直接退出
+② launcher = claude-fjdac            ⇒ 该 wrapper 用【环境变量】注入 ANTHROPIC_BASE_URL /
+                                        AUTH_TOKEN / DEFAULT_{HAIKU,SONNET,OPUS}_MODEL，末行 `exec claude "$@"`
+                                        ⇒ 裸 claude 走的是另一套（可能无效的）凭据
+```
+**⊢ 两条都能独立解释 exitCode=1 ⇒ 恰恰说明不能凭「说得通」定案**（硬规则④推论四）。
+**⊢ 能区分的对照（一条命令，⛔ 做完再写成因）**：把**同一个 prompt** 分别以
+`bash plugin/scripts/quay-launch.sh inner --bare -p "<同一 prompt>"` 与裸 `claude -p "<同一 prompt>"` 各跑一次 ——
+前者成功而后者失败 ⇒ 成因在**启动形态**（即本条 AC140-2 一并修掉）；两者都失败 ⇒ 成因在 **prompt 本身**，与启动无关。
+**⊢ ⚠️ 顺带一个非显然事实（`ps` 上看不见 wrapper）**：`claude-fjdac` 末行是 `exec claude "$@"`，
+**exec 会替换自身** ⇒ inner/outer 跑着的进程 `argv[0]` 就是 `claude`（我直读 `/proc/2346790/cmdline` 确证），
+**wrapper 的全部贡献都在 env 里、在 `ps` 上不可见**。
+⇒ **不能用「`ps` 里看到的是 `claude`」推断「没用 wrapper」**（硬规则 4b：中间隔了一层 exec，代理量失真）。
+
+**⊢ 与 AC139 的关系（⛔ 顺序与归属）**：AC139 管**承载与入口**（怎么启动、谁守护）；
+**本条管【被启动的东西本身调什么 LLM】** —— 两者正交，但**配置面应落在同一处**
+（`quay driver` 读同一份 `.quay/config.yml`），⊢ 故建议**由同一个实现任务承接或紧邻排期**，
+⛔ 但判据独立计（AC139 全真而 AC140 全假是可能的，反之亦然）。
+**⊢ 非目标**：⛔ 不在本条挑选/裁定具体用哪个 model —— 那是**配置值**，由人/项目定；
+本条只要求**该值可配、且被真实使用**（同硬规则 4：不为一个未测量的量设阈值）。
+
 ### 本阶段的达成条件（修正）
-**达成 = AC130 ∧ AC131 ∧ AC132 ∧ AC133 ∧ AC134 ∧ AC135 ∧ AC136 ∧ AC137 ∧ AC138。**
+**达成 = AC130 ∧ AC131 ∧ AC132 ∧ AC133 ∧ AC134 ∧ AC135 ∧ AC136 ∧ AC137 ∧ AC138 ∧ AC139 ∧ AC140。**
 **⊢ 分工提示（防「造齐机件却没接上」——AC129 那个缺口的同形）**：
 AC130–134 = **驱动能做**；**AC135 = outer 不再做（实际切换 + 退役）**；**AC136 = 观测面跟着切**；
-**AC138 = 两驱动均从「能做」变成「在生产中真的在做」——这是本次人裁定新增的第九个合取项**。
-⛔ 四者缺一，本阶段就只是「多了一个能跑的东西」而非「晋升面机械化了」。
+**AC138 = 两驱动均从「能做」变成「在生产中真的在做」——人 2026-08-23 裁定新增的第九个合取项**；
+**AC139 = 两驱动的【启动面】收敛为一个 `quay` 子命令 + 单一泛化 supervisor——人同日第二条裁定，第十个合取项**；
+**AC140 = 被启动的东西【调什么 LLM】可配（wrapper + model），且 `llm_invoked` 判定不再靠命令字面量——人同日第三条裁定，第十一个合取项**。
+⛔ 六者缺一，本阶段就只是「多了一个能跑的东西」而非「晋升面机械化了」。
 **⊢ 切换判据（人 2026-08-22 16:0xZ 明令）**：当前「结晶」阶段的**任务全部 merge** 后即切换到本阶段，
 **⛔ 不要求结晶阶段的 AC 全部满足**——未满足者随其任务 land 后由我持续核（见下）。
 **⊢ 持续观察义务（人同令，⛔ 不因阶段切换而免除）**：切换后我仍须**每轮核结晶阶段的 AC 与阶段目标**，
