@@ -34,10 +34,11 @@ depends_on:
 - [ ] AC1（单一真相源）：`plugin/scripts/` 下不再有 ≥2 处独立 `["claude","-p",…]`（一个构造函数，role 参数）。
 - [ ] AC2（可配）：驱动的 LLM spawn 复用 `quay-launch.sh`（`<role> --bare -p`），wrapper/model 由 `_launchSpec.roles` 承载；取假：驱动仍 spawn 裸 `claude -p`（绕过组装器）⇒ 假。
 - [ ] AC3（覆盖语义统一）：统一「前缀 + prompt」；整体替换语义改名 `--worker-cmd-exact`，⛔ 不与前缀语义共用一个 flag。
+- [ ] AC4（quay-launch.sh 回归，能取假）：改 `quay-launch.sh` 后实跑 `--dry-run` 对 `manager`/`outer`/`inner` 三既有角色各验一遍，输出命令行与改动前逐字一致（新增 worker 角色除外）；取假：任一既有角色输出变了 ⇒ 假。
 
 ## Definition of Done
 
-- [ ] 单一构造 + 可配 + 覆盖语义统一落地；AC1-3 全勾（含配置 wrapper 仍 spawn 裸 claude 的取假）；land 到 develop。
+- [ ] 单一构造 + 可配 + 覆盖语义统一落地；AC1-4 全勾（含配置 wrapper 仍 spawn 裸 claude 取假 + quay-launch.sh 三角色 --dry-run 回归）；land 到 develop。
 
 ## Retires
 
