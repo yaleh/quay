@@ -11,6 +11,7 @@
 
 import http, { type Server } from "node:http";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { loadConfig, activeProvider } from "./config.ts";
 import { connectProvider, type ProviderClient } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
@@ -35,6 +36,97 @@ export interface StartServerOptions {
   port?: number;
   /** Host to bind to. Defaults to "0.0.0.0" (all interfaces). */
   host?: string;
+}
+
+// ── Stale-code detection (gap-webui-server-stale-code-no-restart-detection) ──
+// The `serve` process loads its JS at startup and never reloads it; when a new
+// commit lands on the serve-related source paths (`packages/quay/src` +
+// `packages/quay/bin`) AFTER the process started, the running server keeps
+// serving the OLD code with no awareness. This block gives it awareness: a
+// `/health` endpoint compares the process start instant against the latest
+// serve-related commit instant and reports `stale: true` when the code on disk
+// is newer than the code in memory.
+//
+// Hard rule 3b shape: `evaluated` is a SEPARATE field from `stale`. When the
+// workspace root is not a git repo (or git is unavailable / no commit touches
+// the serve paths), `evaluated` is false and `stale` is null — never silently
+// "not stale". `stale: null` means "could not determine", `stale: false` means
+// "checked, and the running code is current".
+
+export interface StaleStatus {
+  /** false = the check did not run (not a git repo / git unavailable / no serve-path commit). */
+  evaluated: boolean;
+  /** true = code on disk is newer than the running process. null = could not determine. */
+  stale: boolean | null;
+  /** Wall-clock ms the serve process started (derived from process.uptime()). */
+  processStartedAtMs: number;
+  /** Wall-clock ms of the latest serve-related commit, or null if none. */
+  latestCodeCommitAtMs: number | null;
+  /** Which source produced the signal ("git" when evaluated, null otherwise). */
+  source: "git" | null;
+}
+
+/** The serve-relevant source paths — anything whose change invalidates a running server. */
+const SERVE_CODE_PATHS = ["packages/quay/src", "packages/quay/bin"];
+
+/** Pure comparator: null propagates (unknown in → unknown out). */
+export function isStale(processStartedAtMs: number, latestCodeCommitAtMs: number | null): boolean | null {
+  if (latestCodeCommitAtMs == null) return null;
+  return latestCodeCommitAtMs > processStartedAtMs;
+}
+
+/** Process start instant, reconstructed from process.uptime() (Node has no direct field). */
+export function processStartMs(): number {
+  return Date.now() - Math.round(process.uptime() * 1000);
+}
+
+/** Latest commit instant (epoch ms) touching the serve code paths, or null if undeterminable. */
+export function latestServeCommitMs(workspaceRoot: string): number | null {
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", workspaceRoot, "log", "-1", "--format=%ct", "--", ...SERVE_CODE_PATHS],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 },
+    );
+    const sec = parseInt(out.trim(), 10);
+    if (!Number.isFinite(sec)) return null; // no commit touches the serve paths
+    return sec * 1000;
+  } catch {
+    return null; // not a git repo / git unavailable
+  }
+}
+
+export function computeStaleStatus(workspaceRoot: string, startedAtMs: number = processStartMs()): StaleStatus {
+  const latestCodeCommitAtMs = latestServeCommitMs(workspaceRoot);
+  const evaluated = latestCodeCommitAtMs !== null;
+  return {
+    evaluated,
+    stale: isStale(startedAtMs, latestCodeCommitAtMs),
+    processStartedAtMs: startedAtMs,
+    latestCodeCommitAtMs,
+    source: evaluated ? "git" : null,
+  };
+}
+
+/** GET /health — machine-readable liveness + code-freshness signal. */
+async function handleHealth(res: http.ServerResponse, workspaceRoot: string): Promise<void> {
+  const status = computeStaleStatus(workspaceRoot);
+  if (status.stale === true) {
+    console.warn(
+      `[quay serve] STALE CODE: 进程 ${new Date(status.processStartedAtMs).toISOString()} 启动，` +
+      `最新 serve 相关提交 ${status.latestCodeCommitAtMs != null ? new Date(status.latestCodeCommitAtMs).toISOString() : "?"} 晚于启动 — ` +
+      `运行中的代码已过期，请重启 server。`,
+    );
+  }
+  res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({
+    ok: true,
+    stale: status.stale,
+    evaluated: status.evaluated,
+    processStartedAt: new Date(status.processStartedAtMs).toISOString(),
+    latestCodeCommitAt: status.latestCodeCommitAtMs != null ? new Date(status.latestCodeCommitAtMs).toISOString() : null,
+    source: status.source,
+  }));
 }
 
 export async function startServer({ port = 4173, host = "0.0.0.0" }: StartServerOptions = {}): Promise<Server & { client: ProviderClient }> {
@@ -73,6 +165,15 @@ export async function startServer({ port = 4173, host = "0.0.0.0" }: StartServer
   // server down.
   const server = http.createServer(async (req, res) => {
     try {
+      // gap-webui-server-stale-code-no-restart-detection: /health reports whether
+      // the running code is stale (a serve-path commit landed after this process
+      // started). Served here (not in serve-handlers.ts) so the freshness signal
+      // lives beside the process lifecycle it measures.
+      const url = new URL(req.url as string, `http://${req.headers.host}`);
+      if (url.pathname === "/health") {
+        await handleHealth(res, cfg.workspaceRoot);
+        return;
+      }
       await handleAllRoutes(req, res, client, manifest, cfg);
     } catch (err) {
       console.error(`[quay serve] request handler error (${req.method} ${req.url}):`, (err as Error).stack || String(err));
