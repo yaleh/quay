@@ -2218,6 +2218,57 @@ test("--apply heartbeat negative control: promotions empty ⇒ zero writes (AC3)
   assert.match(task.frontmatterRaw, /^status:\s*todo$/m, "ineligible candidate must remain todo");
 });
 
+// ── COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes) ────────────────────────────────
+// A todo→ready status write must be committed IMMEDIATELY — a status write left uncommitted leaves the
+// main checkout dirty, and fan-in-ff-merge.sh treats any dirty tree as exit 2 (blocking every fan-in).
+// AC1 (能取假): a promoted task leaves `git status --porcelain` clean — the commit is the fix; without
+// it the tree would be dirty. Production root is the main checkout (a git repo); unit-test fixtures are
+// repo-less, where the commit is a no-op (committed=false) and the write still lands.
+
+test("applyPromotions commits the status write — git status clean + committed record (AC1)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-commit-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  // Two ready tasks + one eligible todo, all committed as a clean baseline.
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-candidate", gapTask("gap-candidate"));
+  git("add", ".");
+  git("commit", "-q", "-m", "init");
+  assert.equal(git("status", "--porcelain"), "", "baseline must be clean before promotion");
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+  const r = applyPromotions(opts);
+  assert.equal(r.should_apply, true);
+  assert.equal(r.applied_promotions.length, 1);
+  assert.equal(r.applied_promotions[0].id, "gap-candidate");
+  assert.equal(r.applied_promotions[0].committed, true, "a landed promotion in a git repo must commit");
+
+  // AC1 (能取假): the main checkout is immediately clean — the commit is what cleared the status write.
+  assert.equal(git("status", "--porcelain"), "", "AC1: after promotion the tree is clean (dirty ⇒ the commit did not land)");
+  const subject = git("log", "-1", "--format=%s");
+  assert.equal(subject, "tasks: gap-candidate todo→ready（promotion-driver 机械晋升）", "the commit subject names the task and transition");
+});
+
+test("applyPromotions in a repo-less root still lands the write (committed=false, no throw)", (t) => {
+  const root = makeWorkspace("apply-nogit");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-candidate", gapTask("gap-candidate"));
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+  const r = applyPromotions(opts);
+  assert.equal(r.should_apply, true);
+  assert.equal(r.applied_promotions[0].committed, false, "repo-less root ⇒ the commit is a no-op, surfaced as committed=false");
+  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8"));
+  assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "the status write still lands on disk");
+});
+
 test("setTaskStatus patches frontmatter todo→ready and preserves the body (AC1 mechanism)", (t) => {
   const root = makeWorkspace("sts");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

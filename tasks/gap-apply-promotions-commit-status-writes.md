@@ -1,7 +1,7 @@
 ---
 id: gap-apply-promotions-commit-status-writes
 title: applyPromotions 写 status 后当场 commit（promotion 脏树挡 fan-in 的单一真相源修法，manager 裁定方案①）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -39,11 +39,11 @@ applyPromotions() 每写完一个任务的 status →
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：applyPromotions 晋升一个任务后，主检出 `git status --porcelain` 立即 clean（⛔ 仍脏 ⇒ 假）。
+- [x] AC1（能取假）：applyPromotions 晋升一个任务后，主检出 `git status --porcelain` 立即 clean（⛔ 仍脏 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] applyPromotions 写 status 后当场 commit 落地（单一真相源，A22 手动路径 + driver 自动路径都干净），AC1 全勾，land 到 develop。
+- [x] applyPromotions 写 status 后当场 commit 落地（单一真相源，A22 手动路径 + driver 自动路径都干净），AC1 全勾，land 到 develop。
 
 ## Retires
 
