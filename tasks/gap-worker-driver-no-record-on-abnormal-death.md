@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-no-record-on-abnormal-death
 title: worker-driver worker 异常死亡零终态记录（computeOutcome 只正常返回时调用，异常路径与未派发同形）
-status: todo
+status: ready
 labels:
   - gap
 parent: null

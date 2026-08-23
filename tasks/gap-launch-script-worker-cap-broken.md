@@ -2,7 +2,7 @@
 id: gap-launch-script-worker-cap-broken
 title: promotion-driver-launch.sh --cap worker 路径 broken + worker 并发缺省设 5（对齐
   inner）+ 派发前 Touches 互斥检查
-status: todo
+status: ready
 labels:
   - gap
 parent: null
