@@ -10,6 +10,10 @@ extra:
   schema: execution
 depends_on:
   - gap-worker-driver-no-record-on-abnormal-death
+  - gap-ac141-execution-face-inner-manual-retirement
+  - gap-direct-to-develop-check-reflog-to-revlist
+  - gap-git-history-branch-summary-wrong-numbers
+  - gap-launch-script-worker-cap-broken
 ---
 
 **type:** execution
@@ -25,7 +29,7 @@ worker             computeLandingState（⛔ 2026-08-23 11:37 之前 exitCode===
 ```
 ⇒ 抽 kernel 的第一理由不是省代码，是让这条不变式**只有一份、且结构上不可能被某个 kind 悄悄漏掉**。
 
-**⊢ 排期注记**：本任务属下一阶段（架构地基），⛔ 现在只立案不派发——`depends_on` 即 SPEC §0 的排期锁（AC142 系列收口），不是输出依赖。manager 建议 AC152+AC153 先做。
+**⊢ 排期注记**：本任务属下一阶段（架构地基），⛔ 现在只立案不派发——`depends_on` 即 SPEC §0 的排期锁（AC142 系列收口），不是输出依赖。manager 建议 AC152+AC153 先做。⛔ AC151/AC152/AC153 三者都动 kernel/filter 同一片区域，**不并发**，按 AC152→AC153→AC151 单条推进。
 
 ## Plan
 

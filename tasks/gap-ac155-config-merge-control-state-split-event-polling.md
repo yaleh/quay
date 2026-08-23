@@ -10,6 +10,10 @@ extra:
   schema: execution
 depends_on:
   - gap-worker-driver-no-record-on-abnormal-death
+  - gap-ac141-execution-face-inner-manual-retirement
+  - gap-direct-to-develop-check-reflog-to-revlist
+  - gap-git-history-branch-summary-wrong-numbers
+  - gap-launch-script-worker-cap-broken
 ---
 
 **type:** execution

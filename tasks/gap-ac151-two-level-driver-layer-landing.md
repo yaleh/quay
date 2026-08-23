@@ -10,6 +10,10 @@ extra:
   schema: execution
 depends_on:
   - gap-worker-driver-no-record-on-abnormal-death
+  - gap-ac141-execution-face-inner-manual-retirement
+  - gap-direct-to-develop-check-reflog-to-revlist
+  - gap-git-history-branch-summary-wrong-numbers
+  - gap-launch-script-worker-cap-broken
 ---
 
 **type:** execution
@@ -22,7 +26,7 @@ depends_on:
 
 **分层结构（判据在 phase-goal，⛔ 不在此复制图）**：Layer 0（driver-runtime：supervisor/loop/trigger/stopCondition/heartbeat/controlPlane/notify/profile/ResultVocab）三种 driver 共享；Layer 1a（task-processing：source/filters/select/act/verify）promotion/worker 继承；Layer 1b（routine：routines/schedule/collect/report）manager-kind 继承。
 
-**⊢ 排期注记**：本任务属下一阶段（架构地基），⛔ 现在只立案不派发——`depends_on` 即 SPEC §0 的排期锁（AC142 系列收口），不是输出依赖。manager 建议顺序：AC152+AC153 先 → 再 AC151。
+**⊢ 排期注记**：本任务属下一阶段（架构地基），⛔ 现在只立案不派发——`depends_on` 即 SPEC §0 的排期锁（AC142 系列收口），不是输出依赖。manager 建议顺序：AC152+AC153 先 → 再 AC151。⛔ AC151/AC152/AC153 三者都动 kernel/filter 同一片区域，**不并发**，按 AC152→AC153→AC151 单条推进（Touches 互斥过滤落地前靠此注记防互撞）。
 
 ## Plan
 
