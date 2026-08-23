@@ -27,6 +27,7 @@ depends_on:
 1. **单一真相源**：一个构造函数（role 作参数：worker 长任务链 / selector 短决策 / fix-worker 短编辑），消除四处硬编码。
 2. **可配**：落 `.quay/config.yml` 第四段（沿用 DIR-050），wrapper + model + **按 role 分别可覆盖**。
 3. **覆盖语义统一**：统一为「前缀 + prompt」（promotion 现行语义）；worker-driver 整体替换改名 `--worker-cmd-exact`（测试专用），⛔ 两种语义不共用一个 flag 名。
+4. **`llm_invoked` 字段名收窄**：字段名比语义宽——它只是晋升路径的 `isLlmInvocation(argv)`（`promotion-driver.ts:210`），fix worker spawn 不进它（`fixes[].spawned=true` 才是）。要么改名路径限定（如 `promote_path_llm_invoked`），要么扩成全轮口径；⛔ 不得保留会让读者得出相反结论的名字（同 `perfile-timeout` gate 名误导前例）。
 
 ## Acceptance Criteria
 

@@ -22,12 +22,12 @@ depends_on: []
 ## Plan
 
 1. `isLlmInvocation` 改由**配置声明的 LLM 命令集**判定（⛔ 命令字面量 `base === "claude"`）；配置集暂缺省 `["claude"]`（形态改对即可，后续 AC140-2 把集做成可配）。
-2. 取假验证（一条命令的负控制）：配 `claude-fjdac` 后跑一次真实 fix worker ⇒ round 记录 `llm_invoked` 必须为 true。
+2. 取假验证：**直接对判定函数取假**——配 wrapper 后 `isLlmInvocation(<wrapper argv>)` 必须返回 true（⛔ 非「跑 fix worker 看 round 记录 llm_invoked」——`llm_invoked` 是晋升路径限定字段，fix worker spawn 不进它，见 manager 6f91cfb6 更正）。
 
 ## Acceptance Criteria
 
 - [ ] AC1（判定读集合）：`isLlmInvocation` 由配置声明的 LLM 命令集判定（⛔ 不靠 `base === "claude"` 字面量）。
-- [ ] AC2（能取假，负控制）：配 `claude-fjdac` 后跑一次真实 fix worker ⇒ `llm_invoked` 必须为 true（⛔ false ⇒ 假）。
+- [ ] AC2（能取假）：配 wrapper 后 `isLlmInvocation(<wrapper argv>)` 必须返回 true（直接对判定函数取假；⛔ 非「跑 fix worker 看 round 记录 llm_invoked」——该字段是晋升路径限定，fix worker spawn 不进它）。
 
 ## Definition of Done
 
