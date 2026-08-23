@@ -23,7 +23,13 @@ depends_on: []
 
 ## Plan
 
-1. 定位 bucket-scoped worktree 执行路径为什么不调用 per-file reporter（大概率 `full-suite-runner.ts` 某 scope 分支跳过了逐文件输出收集）。
+1. 定位 bucket-scoped worktree 执行路径为什么不触发 per-file reporter（大概率 `full-suite-runner.ts` 某 scope 分支跳过了逐文件输出收集）。
+
+**定位结果（实测，非推断）**：不是 `full-suite-runner.ts` 的 scope 分支——是**整条执行路径绕过了它**。bucket-scoped worktree 的 fan-in 走 `fan-in-execute.js` 的 detached `bash scripts/test.sh --buckets <task>`（不经 `full-suite-runner.ts`），其 round 记录由 **`pre-verified-round-record.ts`**（`# preverified-round-block`，step 4.5）写入。该 writer 已从 `--suite-log` 解析 `__OVERHEAD__`/`__BUCKETS__`/node:test summary，但**从未解析 `measure-suite-reporter.mjs` 的 `__PERFILE__`/`__CEILING__` 行** ⇒ 最常用的 landing 路径上 `perFile`/`ceiling`/`floor_ms` 恒缺（实测 `.quay/verification-round.jsonl` 453 轮 `perFile` 0 命中、bucket 启用后的每一轮 `ceiling`/`floor_ms` 0 命中）。
+
+**修**：`pre-verified-round-record.ts` 增加 `parsePerFile`（复用 `measure-trend-check.parsePerFileLines`，与 `full-suite-runner.ts` 同口径）+ `parseCeilingFloor`（同 `full-suite-runner.ts:2630` 的 `^__CEILING__` 正则），并把 `perFile`/`ceiling`/`floor_ms` 写入 round 记录（absent-field 契约同 `full-suite-runner.ts:3340-3349`）。单测 `plugin/test/pre-verified-round-record.test.mjs` 正/负控制各覆盖。
+
+**生产验证口径**：本任务自己的 fan-in（step 4 跑 `--buckets`、step 4.5 用 worktree 内已修 writer 写 round）即第一条带 `perFile` 的生产 round——fan-in 的「满足后勾框」在 step 4.5 后核验 `.quay/verification-round.jsonl` 末行含 `perFile` 再勾 AC1。
 
 ## Acceptance Criteria
 
@@ -39,6 +45,6 @@ depends_on: []
 
 ## Touches
 
-- plugin/scripts/full-suite-runner.ts（per-file reporter scope 分支）
-- plugin/test/full-suite-runner.test.mjs（test）
+- plugin/scripts/pre-verified-round-record.ts（per-file/ceiling/floor 解析 + 写入）
+- plugin/test/pre-verified-round-record.test.mjs（test）
 - tasks/gap-bucket-scoped-worktree-skips-perfile-reporter.md（自身）

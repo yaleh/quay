@@ -36,6 +36,8 @@ import {
   detectPhaseOverlap,
   parseBucketMarker,
   parseTestCounts,
+  parsePerFile,
+  parseCeilingFloor,
   hostParallelism,
   concurrentSuiteSlots,
   countHeldSuiteLocks,
@@ -919,4 +921,141 @@ test("CLI — a bucket-mode --suite-log flows buckets/bucket_files/bucket_durati
   assert.equal(out.record.buckets, "M", "CLI --suite-log parses the __BUCKETS__ marker into buckets");
   assert.equal(out.record.bucket_files, 219, "CLI record carries bucket_files");
   assert.equal(out.record.bucket_duration_ms, Number(BASE.durationMs), "CLI record carries bucket_duration_ms = durationMs");
+});
+
+// ── gap-bucket-scoped-worktree-skips-perfile-reporter: perFile/ceiling/floor_ms ride the fan-in record ──
+// The bucket-scoped worktree execution path (fan-in detached `bash scripts/test.sh --buckets <task>`)
+// writes its verification-round row via THIS writer, not full-suite-runner.ts. Its suite log carries the
+// measure-suite-reporter lines (`__PERFILE__ duration_ms=<dur> <path> passed=<bool>` + `__CEILING__ <path>
+// duration_ms=<dur> floor_ms=<floor> 封顶者/该拆`), but the writer never parsed them ⇒ perFile/ceiling/
+// floor_ms were always absent on the most-used landing path (0 hits across every post-bucket round). The
+// fix parses them with the SAME 口径 as full-suite-runner.ts (perFile ← measure-trend-check.parsePerFileLines;
+// ceiling/floor_ms ← the same ^__CEILING__ regex at full-suite-runner.ts:2630).
+
+test("parsePerFile — parses __PERFILE__ lines into {file,durationMs,passed}[] with normalizePerFileKey (worktree root stripped to repo-relative)", () => {
+  const log = writeSuiteLog(null, [
+    "__PERFILE__ duration_ms=123.456 /home/yale/work/quay-worktrees/gap-foo/plugin/test/foo.test.mjs passed=true",
+    "__PERFILE__ duration_ms=999.0 /home/yale/work/quay-worktrees/gap-foo/plugin/test/bar.test.mjs passed=false",
+  ]);
+  const perFile = parsePerFile(log);
+  assert.equal(perFile.length, 2, "two __PERFILE__ lines → two records");
+  assert.deepEqual(
+    perFile[0],
+    { file: "plugin/test/foo.test.mjs", durationMs: 123.456, passed: true },
+    "normalizePerFileKey strips the quay-worktrees/<task>/ prefix to a repo-relative key",
+  );
+  assert.deepEqual(
+    perFile[1],
+    { file: "plugin/test/bar.test.mjs", durationMs: 999, passed: false },
+    "a red file carries passed=false",
+  );
+});
+
+test("parsePerFile — drops duration_ms=0 lines (duration>0 filter, same 口径 as full-suite-runner) and returns [] on absent/unreadable/no-lines", () => {
+  const log = writeSuiteLog(null, [
+    "__PERFILE__ duration_ms=0 /home/yale/work/quay-worktrees/gap-foo/plugin/test/zero.test.mjs passed=true",
+    "__PERFILE__ duration_ms=5 /home/yale/work/quay-worktrees/gap-foo/plugin/test/keep.test.mjs passed=true",
+  ]);
+  assert.deepEqual(parsePerFile(log), [{ file: "plugin/test/keep.test.mjs", durationMs: 5, passed: true }], "a 0-duration line is filtered out");
+  assert.deepEqual(parsePerFile(undefined), [], "no log → []");
+  assert.deepEqual(parsePerFile("/nonexistent/pvr-missing.log"), [], "unreadable log → []");
+  const noLines = writeSuiteLog(null, ["__OVERHEAD__ serial_phase_ms=301000", "selected 424 files (groups=product,engine)"]);
+  assert.deepEqual(parsePerFile(noLines), [], "a log with no __PERFILE__ lines → []");
+});
+
+test("parseCeilingFloor — parses __CEILING__ lines into ceiling (stream order) + floor_ms (DISTINCT floors)", () => {
+  const log = writeSuiteLog(null, [
+    "__CEILING__ /home/yale/work/quay-worktrees/gap-foo/plugin/test/slow.test.mjs duration_ms=500 floor_ms=123.4 封顶者/该拆",
+    "__CEILING__ /home/yale/work/quay-worktrees/gap-foo/plugin/test/slower.test.mjs duration_ms=600 floor_ms=123.4 封顶者/该拆",
+    "__CEILING__ /home/yale/work/quay-worktrees/gap-foo/plugin/test/other.test.mjs duration_ms=700 floor_ms=99 封顶者/该拆",
+  ]);
+  assert.deepEqual(
+    parseCeilingFloor(log),
+    {
+      ceiling: [
+        "/home/yale/work/quay-worktrees/gap-foo/plugin/test/slow.test.mjs",
+        "/home/yale/work/quay-worktrees/gap-foo/plugin/test/slower.test.mjs",
+        "/home/yale/work/quay-worktrees/gap-foo/plugin/test/other.test.mjs",
+      ],
+      floor_ms: [123.4, 99],
+    },
+    "ceiling keeps every capped path in stream order; floor_ms keeps DISTINCT group floors (123.4 appears once)",
+  );
+});
+
+test("parseCeilingFloor — returns null on absent/unreadable (缺值=未查) and an honest empty {[],[]} on a readable log with no __CEILING__ lines", () => {
+  assert.equal(parseCeilingFloor(undefined), null, "no log → null");
+  assert.equal(parseCeilingFloor("/nonexistent/pvr-missing.log"), null, "unreadable log → null");
+  const noLines = writeSuiteLog(null, ["__OVERHEAD__ serial_phase_ms=301000", "selected 424 files (groups=product,engine)"]);
+  assert.deepEqual(parseCeilingFloor(noLines), { ceiling: [], floor_ms: [] }, "a readable log with no __CEILING__ lines → honest empty (fields stay ABSENT)");
+});
+
+test("AC1 — buildPreVerifiedRoundRecord carries perFile/ceiling/floor_ms on a bucket-mode log (the fan-in landing path no longer drops them)", () => {
+  const log = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=x round=full",
+    "__BUCKETS__ buckets=M files=219 full=0",
+    "__PERFILE__ duration_ms=123.456 /home/yale/work/quay-worktrees/gap-foo/plugin/test/foo.test.mjs passed=true",
+    "__PERFILE__ duration_ms=999 /home/yale/work/quay-worktrees/gap-foo/plugin/test/bar.test.mjs passed=true",
+    "__CEILING__ /home/yale/work/quay-worktrees/gap-foo/plugin/test/slow.test.mjs duration_ms=500 floor_ms=123.4 封顶者/该拆",
+  ]);
+  const { record, error } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: log, root: REPO_ROOT });
+  assert.equal(error, undefined, `build must succeed: ${error}`);
+  assert.deepEqual(
+    record.perFile,
+    [
+      { file: "plugin/test/foo.test.mjs", durationMs: 123.456, passed: true },
+      { file: "plugin/test/bar.test.mjs", durationMs: 999, passed: true },
+    ],
+    "perFile = the parsed __PERFILE__ records (repo-relative keys, same 口径 as full-suite-runner)",
+  );
+  assert.deepEqual(record.floor_ms, [123.4], "floor_ms = the DISTINCT __CEILING__ floors");
+  assert.deepEqual(record.ceiling, ["/home/yale/work/quay-worktrees/gap-foo/plugin/test/slow.test.mjs"], "ceiling = the capped __CEILING__ paths");
+});
+
+test("AC1 — a NON-reporter log omits perFile/ceiling/floor_ms (absent-field contract, never a fabricated [])", () => {
+  const noLines = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=x round=full",
+    "__BUCKETS__ buckets=M files=219 full=0",
+    "selected 219 files (groups=product,engine)",
+    "__OVERHEAD__ serial_phase_ms=301000",
+  ]);
+  const rec = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: noLines, root: REPO_ROOT }).record;
+  assert.equal(rec.perFile, undefined, "no __PERFILE__ lines → perFile absent");
+  assert.equal(rec.ceiling, undefined, "no __CEILING__ lines → ceiling absent");
+  assert.equal(rec.floor_ms, undefined, "no __CEILING__ lines → floor_ms absent");
+  // An absent/unreadable log is also per-file-less (never fabricated).
+  const noLog = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", root: REPO_ROOT }).record;
+  assert.equal(noLog.perFile, undefined, "no log → perFile absent");
+  assert.equal(noLog.ceiling, undefined, "no log → ceiling absent");
+  assert.equal(noLog.floor_ms, undefined, "no log → floor_ms absent");
+});
+
+test("CLI — a bucket-mode --suite-log flows perFile/ceiling/floor_ms into the appended record", () => {
+  const file = tmpFile("pvr-perfile-");
+  const log = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=x round=full",
+    "__BUCKETS__ buckets=M files=219 full=0",
+    "__PERFILE__ duration_ms=123.456 /home/yale/work/quay-worktrees/gap-foo/plugin/test/foo.test.mjs passed=true",
+    "__CEILING__ /home/yale/work/quay-worktrees/gap-foo/plugin/test/slow.test.mjs duration_ms=500 floor_ms=123.4 封顶者/该拆",
+  ]);
+  const args = [
+    "--task-id", BASE.taskId,
+    "--run-id", BASE.runId,
+    "--started-at", BASE.startedAt,
+    "--duration-ms", BASE.durationMs,
+    "--lane-count", BASE.laneCount,
+    "--load", BASE.load,
+    "--commit", BASE.commit,
+    "--preverified", "0",
+    "--suite-log", log,
+    "--record-file", file,
+    "--json",
+  ];
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER, ...args], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.record.perFile, [{ file: "plugin/test/foo.test.mjs", durationMs: 123.456, passed: true }], "CLI record carries perFile");
+  assert.deepEqual(out.record.floor_ms, [123.4], "CLI record carries floor_ms");
+  assert.deepEqual(out.record.ceiling, ["/home/yale/work/quay-worktrees/gap-foo/plugin/test/slow.test.mjs"], "CLI record carries ceiling");
 });

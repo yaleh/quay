@@ -124,8 +124,9 @@
 //                     static/serial/lowconc/main phase fields + record nproc/concurrentSuiteSlots/
 //                     concurrentSuitesRunning (same 口径 as full-suite-runner), AND parse its node:test
 //                     spec-reporter summary into pass/fail/cancelled/tests (gap-suite-round-pass-fail-
-//                     cancel-fields). When absent or unreadable the row is EXPLICITLY phase-less and
-//                     count-less (no fabricated fields).
+//                     cancel-fields), AND its measure-suite-reporter lines into perFile/ceiling/floor_ms
+//                     (gap-bucket-scoped-worktree-skips-perfile-reporter). When absent or unreadable the
+//                     row is EXPLICITLY phase-less and count-less (no fabricated fields).
 //   --runner          layer identity (default 'inner' — the fan-in suite is an inner-layer run; the
 //                     SAME default mirror-full-suite-state.ts writes, so the state + verification-round
 //                     carriers agree for the same round. Explicit --runner overrides.)
@@ -145,6 +146,7 @@ import { execFileSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { suiteLockSlotCount } from "./suite-lock-slots.ts";
 import { resolveSharedCheckout, toIsoTimestamp } from "./per-task-suite-record.ts";
+import { parsePerFileLines } from "./measure-trend-check.ts";
 
 const COMMIT_RE = /^[0-9a-f]{40}$/i;
 
@@ -292,6 +294,63 @@ export function parseTestCounts(suiteLog) {
     }
   }
   return seen ? acc : null;
+}
+
+// gap-bucket-scoped-worktree-skips-perfile-reporter AC1 — the bucket-scoped worktree execution path
+// (fan-in-execute.js detached `bash scripts/test.sh --buckets <task>`) writes its round record via THIS
+// writer, NOT full-suite-runner.ts. The suite log carries measure-suite-reporter.mjs's per-file lines
+// (`__PERFILE__ duration_ms=<dur> <path> passed=<bool>`, one per test file, streamed live) + capped-file
+// lines (`__CEILING__ <path> duration_ms=<dur> floor_ms=<floor> 封顶者/该拆`), but the writer never
+// parsed them ⇒ verification-round.perFile/ceiling/floor_ms were always absent on the most-used landing
+// path (0 hits across every post-bucket round). Parse them here with the SAME 口径 as
+// full-suite-runner.ts (perFile ← measure-trend-check.parsePerFileLines, the shared parser + the same
+// normalizePerFileKey; ceiling/floor_ms ← the same ^__CEILING__ regex at full-suite-runner.ts:2630).
+
+/** Parse the reporter's `__PERFILE__` lines from the suite log into {file,durationMs,passed}[] — the
+ *  SAME parser full-suite-runner uses (measure-trend-check.parsePerFileLines handles the
+ *  `__FANIN_SUITE_START__` current-round slice + normalizePerFileKey + duration>0 filter internally, so
+ *  the two carriers share one 口径 — no regex re-implemented). Returns [] when the log is
+ *  absent/unreadable or carries no per-file lines (never a fabricated array — the field stays ABSENT). */
+export function parsePerFile(suiteLog) {
+  if (!suiteLog) return [];
+  let text;
+  try {
+    text = fs.readFileSync(suiteLog, "utf8");
+  } catch {
+    return [];
+  }
+  return parsePerFileLines(text);
+}
+
+/** Parse the reporter's `__CEILING__` lines into the round's `ceiling` (capped file paths, stream
+ *  order) + `floor_ms` (DISTINCT group floors) — the SAME ^__CEILING__ regex + accumulate-into-
+ *  distinct-floor logic as full-suite-runner.ts:2630-2635. Both stay empty until a capped file exists
+ *  (cc>1 AND a file's wall > idealSplit — a small bucket subset may legitimately emit none). Returns
+ *  null when the log is absent/unreadable (缺值=未查, never a fabricated {[],[]}); a readable log with
+ *  no __CEILING__ lines returns { ceiling: [], floor_ms: [] } (honest empty — the fields stay ABSENT). */
+const CEILING_RE = /^__CEILING__\s+(.+?)\s+duration_ms=(\d+(?:\.\d+)?)\s+floor_ms=(\d+(?:\.\d+)?)/;
+
+export function parseCeilingFloor(suiteLog) {
+  if (!suiteLog) return null;
+  let text;
+  try {
+    text = fs.readFileSync(suiteLog, "utf8");
+  } catch {
+    return null;
+  }
+  const mk = lastSuiteStartOffset(text);
+  const body = mk === -1 ? text : text.slice(mk);
+  const ceiling = [];
+  const floorMsSeen = [];
+  for (const line of body.split("\n")) {
+    const m = line.match(CEILING_RE);
+    if (m) {
+      ceiling.push(m[1]);
+      const floor = Number(m[3]); // group 2 is duration_ms; group 3 is floor_ms
+      if (!floorMsSeen.includes(floor)) floorMsSeen.push(floor);
+    }
+  }
+  return { ceiling, floor_ms: floorMsSeen };
 }
 
 /** Host parallelism (nproc) — the same read-host expression as full-suite-runner.hostParallelism
@@ -578,6 +637,18 @@ export function buildPreVerifiedRoundRecord(o) {
     record.cancelled = testCounts.cancelled;
     record.tests = testCounts.pass + testCounts.fail + testCounts.cancelled;
   }
+  // gap-bucket-scoped-worktree-skips-perfile-reporter AC1 — the per-file + capped-file fields ride the
+  // fan-in landing path (same absent-field contract as full-suite-runner:3340-3349): perFile present
+  // only when parsePerFileLines yielded ≥1 record (a no-reporter/legacy log omits it); floor_ms/ceiling
+  // present only when ≥1 __CEILING__ line fired (both appear together — every __CEILING__ line carries a
+  // floor). A reader must tolerate their absence (缺键, never a fabricated []).
+  const perFile = parsePerFile(suiteLog);
+  if (perFile.length > 0) record.perFile = perFile;
+  const ceilingFloor = parseCeilingFloor(suiteLog);
+  if (ceilingFloor !== null) {
+    if (ceilingFloor.floor_ms.length > 0) record.floor_ms = ceilingFloor.floor_ms;
+    if (ceilingFloor.ceiling.length > 0) record.ceiling = ceilingFloor.ceiling;
+  }
   // Concurrency variables (AC1): nproc + slots are deterministic reads; concurrentSuitesRunning =
   // 1 (this round's own slot) + currently-held OTHER-suite slots at WRITE time, capped at the slot
   // count — the same formula + clamp as full-suite-runner's round-start capture (:2591-2596). The
@@ -643,7 +714,9 @@ Usage:
                     static/serial/lowconc/main phase fields + lock_wait_ms (test.sh's flock marker)
                     + record nproc/concurrentSuiteSlots/concurrentSuitesRunning (same 口径 as
                     full-suite-runner), AND parse its node:test spec-reporter summary into
-                    pass/fail/cancelled/tests (gap-suite-round-pass-fail-cancel-fields). On an overlap
+                    pass/fail/cancelled/tests (gap-suite-round-pass-fail-cancel-fields), AND its
+                    measure-suite-reporter lines into perFile/ceiling/floor_ms
+                    (gap-bucket-scoped-worktree-skips-perfile-reporter). On an overlap
                     round lowconc_phase_ms carries the overlap_lowconc_ms sub-time instead of the
                     subsumed 0. effective_parallelism is derived from --cpu-time-s ÷ --duration-ms.
                     When the log is absent or unreadable the row is EXPLICITLY phase-less and
