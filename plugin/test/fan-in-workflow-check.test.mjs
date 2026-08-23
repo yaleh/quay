@@ -558,6 +558,26 @@ test("PURE checkWorkflowCoverage — callers that do NOT pass a table are unchan
   assert.deepEqual(v.ruledHistoricalGaps, []);
 });
 
+test("PURE checkWorkflowCoverage — the 99f845d9 emergency fan-in (gap-direct-to-develop-ruled-historical-99f845d9) is exempted ⇒ ok:true, in ruledHistoricalGaps", (t) => {
+  // The ruled task: no Workflow call + unresolvable dispatch (outer 主会话 direct fan-in). WITHOUT the
+  // exemption it would be missing + unresolvableDispatch ⇒ RED; WITH it ⇒ moved to ruledHistoricalGaps.
+  const v = checkWorkflowCoverage(
+    ["gap-direct-to-develop-ruled-historical-99f845d9"],
+    [],
+    new Map(),
+    BOUNDARY_EPOCH,
+    ENFORCEMENT_BASELINE_EPOCH,
+    RULED_HISTORICAL_GAPS
+  );
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+  assert.deepEqual(v.missing, []);
+  assert.deepEqual(v.unresolvableDispatch, []);
+  assert.equal(v.ruledHistoricalGaps.length, 1);
+  assert.equal(v.ruledHistoricalGaps[0].taskId, "gap-direct-to-develop-ruled-historical-99f845d9");
+  assert.match(v.ruledHistoricalGaps[0].reason, /ruled one-off/);
+});
+
 // ── PURE 判据2(c): classifyAgentId ──────────────────────────────────────────────────────────────────
 
 test("PURE classifyAgentId — AC72/AC73 (top-level session ids) ⇒ top-level-session (RED)", (t) => {
@@ -599,6 +619,53 @@ test("PURE checkAgentIds — AC67/AC66 real lock events ⇒ GREEN (real subagent
 test("PURE checkAgentIds — no events ⇒ NOT-EVALUATED", (t) => {
   const v = checkAgentIds([], REAL_TOP_LEVEL_STEMS, REAL_SUBAGENT_STEMS);
   assert.equal(v.evaluated, false);
+});
+
+// ── PURE 判据2(c) ruled-historical exemption (tasks/gap-fan-in-ff-executor-check-ruled-historical-
+//    99f845d9): the same RULED_HISTORICAL_GAPS table also exempts (c) — a ruled direct-landing's
+//    missing agentId is classified ruledHistorical, NOT a violation; bounded (non-ruled still red). ──
+
+test("PURE checkAgentIds — the ruled task's agentId-missing lock events ⇒ ruledHistorical (not violation)", (t) => {
+  const events = [
+    { event: "acquire", taskId: "gap-direct-to-develop-ruled-historical-99f845d9", agentId: null },
+    { event: "acquire", taskId: "gap-direct-to-develop-ruled-historical-99f845d9", agentId: null },
+  ];
+  const v = checkAgentIds(events, REAL_TOP_LEVEL_STEMS, REAL_SUBAGENT_STEMS, RULED_HISTORICAL_GAPS);
+  assert.equal(v.ok, true, "ruled one-off must not be RED");
+  assert.equal(v.evaluated, true);
+  assert.equal(v.reason, "lock-event-agent-id-ruled-historical", "distinct from lock-event-agent-id-is-subagent");
+  assert.deepEqual(v.violations, []);
+  assert.equal(v.ruledHistorical.length, 2);
+  assert.equal(v.ruledHistorical[0].taskId, "gap-direct-to-develop-ruled-historical-99f845d9");
+});
+
+test("PURE checkAgentIds — a NON-ruled agentId-missing event still ⇒ RED (能取假)", (t) => {
+  const events = [{ event: "acquire", taskId: "gap-ac67-not-ruled", agentId: null }];
+  const v = checkAgentIds(events, REAL_TOP_LEVEL_STEMS, REAL_SUBAGENT_STEMS, RULED_HISTORICAL_GAPS);
+  assert.equal(v.ok, false);
+  assert.equal(v.reason, "lock-event-agent-id-not-subagent");
+  assert.deepEqual(v.violations.map((x) => x.kind), ["missing"]);
+  assert.deepEqual(v.ruledHistorical, []);
+});
+
+test("PURE checkAgentIds — mixed ruled + non-ruled missing events ⇒ still RED (豁免有界)", (t) => {
+  const events = [
+    { event: "acquire", taskId: "gap-direct-to-develop-ruled-historical-99f845d9", agentId: null },
+    { event: "acquire", taskId: "gap-ac67-not-ruled", agentId: null },
+  ];
+  const v = checkAgentIds(events, REAL_TOP_LEVEL_STEMS, REAL_SUBAGENT_STEMS, RULED_HISTORICAL_GAPS);
+  assert.equal(v.ok, false, "a non-ruled missing event must still red");
+  assert.equal(v.reason, "lock-event-agent-id-not-subagent");
+  assert.equal(v.ruledHistorical.length, 1, "the ruled event is still classified ruledHistorical");
+});
+
+test("PURE checkAgentIds — callers that do NOT pass a table are unchanged (default empty)", (t) => {
+  // Backward compat: the pre-exemption call shape (3 args) keeps the old semantics — the ruled task's
+  // missing agentId is still RED (the exemption table is opt-in, passed by main()).
+  const events = [{ event: "acquire", taskId: "gap-direct-to-develop-ruled-historical-99f845d9", agentId: null }];
+  const v = checkAgentIds(events, REAL_TOP_LEVEL_STEMS, REAL_SUBAGENT_STEMS);
+  assert.equal(v.ok, false, "without the table, the ruled task's missing agentId is still RED");
+  assert.equal(v.reason, "lock-event-agent-id-not-subagent");
 });
 
 // ── PURE d: escalation traceability (gap-ff-livelock-trigger-no-action, SPEC §7 anti-livelock) ─────
