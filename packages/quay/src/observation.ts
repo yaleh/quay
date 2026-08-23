@@ -1137,12 +1137,20 @@ export const GIT_HISTORY_LIMIT = 500;
 /**
  * A branch with no commit in this window is stale and excluded from the chart's lanes
  * (gap-git-history-counts-stale-branches). The two-layer fast mode's task lifetime is <1h
- * (measured: 149/164 fan-in branches lived <1h) and a stall rarely exceeds ~5h, so 24h is a
- * comfortable "active" horizon — a leftover branch whose tip is >24h old is not being worked
- * on and must not add a lane. Its commits are already reachable from the mainline, so they
- * still appear under the mainline's lane (not dropped); only the phantom stale lane is gone.
+ * (measured: 149/164 fan-in branches lived <1h) and a stall rarely exceeds ~5h, so a stale
+ * branch whose tip is older than the window is not being worked on and must not add a lane.
+ * Its commits are already reachable from the mainline, so they still appear under the
+ * mainline's lane (not dropped); only the phantom stale lane is gone.
+ *
+ * gap-git-history-clickable-branches-window: the window was 24h, which also excluded `master`
+ * (its tip is only advanced at merge boundaries, often >24h apart) — a mainline lane must never
+ * drop out. Relaxed to 7 days AND made mainline refs unconditional: `GIT_HISTORY_MAINLINE_REFS`
+ * are always kept regardless of tip age; the window now only bounds leftover task/verify lanes.
  */
-export const GIT_HISTORY_ACTIVE_WINDOW_SEC = 24 * 60 * 60;
+export const GIT_HISTORY_ACTIVE_WINDOW_SEC = 7 * 24 * 60 * 60;
+
+/** Mainline refs always included as lanes regardless of their tip age (never dropped for staleness). */
+export const GIT_HISTORY_MAINLINE_REFS = new Set(["develop", "master"]);
 
 export interface GitHistoryCommit {
   /** Full commit hash. */
@@ -1167,7 +1175,8 @@ export interface GitHistoryResult {
  * `git log --branches --source` counted EVERY local branch as a lane, so a leftover merged branch
  * (e.g. a fan-in source that was never deleted) kept polluting the lane count long after it was dead.
  * Instead: enumerate branch tips + their tip commit time, keep the branches with a commit in the
- * active window, then ONE `git log <active…> --source` pass, each line `%H %ct %S %P %s`
+ * active window (plus the mainline refs develop/master unconditionally — never dropped for
+ * staleness), then ONE `git log <active…> --source` pass, each line `%H %ct %S %P %s`
  * (hash / commit-time / source-ref / parents / subject). A stale branch's commits are already
  * reachable from the mainline, so they still appear (relabeled to the mainline) — not dropped. A
  * non-git workspace degrades to empty; a git failure degrades to error; never throws.
@@ -1191,13 +1200,16 @@ export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, nowMs 
       const sep = line.lastIndexOf("\t");
       const name = sep >= 0 ? line.slice(0, sep) : line;
       const tipTs = Number(sep >= 0 ? line.slice(sep + 1) : "");
-      if (name && Number.isFinite(tipTs) && tipTs >= sinceSec) activeRefs.push(name);
+      // Keep a branch if its tip is inside the active window, OR it is a mainline ref
+      // (develop/master are always kept regardless of tip age — their tips advance only at
+      // merge boundaries, which can be >24h apart; a mainline lane must never drop out).
+      if (name && Number.isFinite(tipTs) && (tipTs >= sinceSec || GIT_HISTORY_MAINLINE_REFS.has(name))) activeRefs.push(name);
     }
     if (activeRefs.length === 0) {
-      // No active branch: a fresh repo with no commits, or every branch is stale.
+      // No active branch: a fresh repo with no commits, or every branch is stale with no mainline.
       return {
         status: "empty",
-        reason: sawAnyRef ? `无活跃分支（最近 ${GIT_HISTORY_ACTIVE_WINDOW_SEC / 86400} 天无提交）` : "git 仓库无提交记录",
+        reason: sawAnyRef ? `无活跃分支（最近 ${GIT_HISTORY_ACTIVE_WINDOW_SEC / 86400} 天无提交且无 develop/master）` : "git 仓库无提交记录",
         commits: [],
       };
     }

@@ -200,6 +200,11 @@ orchestration/inner-idle-log.jsonl
 **/.quay/full-suite.log
 **/.quay/suite-state-events.jsonl
 **/.quay/suite-state-last.json
+# gap-test-detail-load-timeseries: the per-run suite-load sampler's timeseries + pid sidecar —
+# same live runtime-state family as full-suite-state.json / verification-round.jsonl (written by
+# suite-load-sampler.ts while a suite runs, read by the /tests load curve; never committed).
+**/.quay/suite-load-*.jsonl
+**/.quay/suite-load-*.pid
 # DIR-123 (2026-08-11): develop-deliver-tgz.sh runtime state — same live control-plane-state family as
 # full-suite-state.json (lastDelivered commit + per-host http_code; read by the outer tick for
 # freshness; never committed).

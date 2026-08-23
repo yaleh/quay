@@ -262,6 +262,9 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
 .git-svg-merge { fill: var(--color-accent-2-500); }
 .git-svg-ink { fill: var(--color-text); }
 .git-svg-muted { fill: var(--color-neutral-600); }
+/* AC102 (same token discipline): suite-load curve stroke — token-derived, no hardcoded hex.
+   Surface/grid/ink/muted reuse the git-svg-* classes above (they are generic chart tokens). */
+.load-svg-line { fill: none; stroke: var(--color-accent-600); stroke-width: 2; }
 /* QW-006: mobile-responsive layout (DIR-003) — narrow viewport adaptations.
    Kept at the END of the sheet so its rules win the cascade over every base rule above
    (media queries add no specificity — a later base rule would otherwise beat them). */
@@ -1889,6 +1892,18 @@ export function groupCommitsByBranch(commits: GitHistoryCommit[]): GitHistoryBra
   return [...byRef.values()].sort((a, b) => b.lastT - a.lastT || a.ref.localeCompare(b.ref));
 }
 
+/**
+ * A `task/<id>` branch ref maps to task id `<id>` (the /task/<id> detail page already exists);
+ * a non-task ref (develop / master / integration / verify/…) has no task id and stays plain text.
+ * gap-git-history-clickable-branches-window: branch names on the chart + summary link out to the
+ * task that produced them.
+ */
+export function taskIdFromBranchRef(ref: string): string | null {
+  if (!ref.startsWith("task/")) return null;
+  const id = ref.slice("task/".length);
+  return id.length > 0 ? id : null;
+}
+
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
@@ -1967,7 +1982,13 @@ export function renderGitHistorySvg(history: GitHistoryResult): string {
       }
       return `<circle class="git-svg-commit" cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="4"><title>${tooltip}</title></circle>`;
     }).join("");
-    return `<g>${seg}${points}<text class="git-svg-ink" x="${(W - M.right + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="11">${escapeHtml(b.ref)}</text></g>`;
+    // A task branch's lane label links out to its /task/<id> detail page (SVG <a> wraps the text;
+    // the text's git-svg-ink fill is preserved — no default link blue). Non-task refs stay plain.
+    const taskId = taskIdFromBranchRef(b.ref);
+    const label = taskId
+      ? `<a href="/task/${encodeURIComponent(taskId)}"><text class="git-svg-ink" x="${(W - M.right + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="11">${escapeHtml(b.ref)}</text></a>`
+      : `<text class="git-svg-ink" x="${(W - M.right + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="11">${escapeHtml(b.ref)}</text>`;
+    return `<g>${seg}${points}${label}</g>`;
   }).join("");
 
   // In-SVG legend: the two mark kinds (merge vs regular). Identity is never color-alone — the
@@ -2000,13 +2021,19 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
   const branches = history.status === "ok" ? groupCommitsByBranch(history.commits) : [];
   const mergeCount = history.commits.filter((c) => c.parents > 1).length;
 
-  const summaryRows = branches.map((b) => html`<tr>
-    <td>${escapeHtml(b.ref)}</td>
-    <td>${escapeHtml(isoTime(b.firstT))}</td>
-    <td>${escapeHtml(isoTime(b.lastT))}</td>
-    <td>${b.commits.length}</td>
-    <td>${b.commits.filter((c) => c.parents > 1).length}</td>
-  </tr>`).join("\n");
+  const summaryRows = branches.map((b) => {
+    const taskId = taskIdFromBranchRef(b.ref);
+    const name = taskId
+      ? html`<a href="/task/${encodeURIComponent(taskId)}">${escapeHtml(b.ref)}</a>`
+      : escapeHtml(b.ref);
+    return html`<tr>
+      <td>${name}</td>
+      <td>${escapeHtml(isoTime(b.firstT))}</td>
+      <td>${escapeHtml(isoTime(b.lastT))}</td>
+      <td>${b.commits.length}</td>
+      <td>${b.commits.filter((c) => c.parents > 1).length}</td>
+    </tr>`;
+  }).join("\n");
   const summaryTable = branches.length > 0 ? html`<h2>分支汇总（git 可证的事实，非工时）</h2>
     <table>
       <tr><th>分支</th><th>首提交落地</th><th>末提交落地</th><th>提交数</th><th>合并数</th></tr>
@@ -2274,6 +2301,122 @@ export async function handleManager(
   res.end(renderManagerPage(mgr));
 }
 
+// ── /tests load curve — server-rendered SVG of the suite-load timeseries (gap-test-detail-load-timeseries) ──
+//
+// plugin/scripts/suite-load-sampler.ts appends one JSON line per sample — {t, loadavg, cpu_stall,
+// mem_avail} — to .quay/suite-load-<runId>.jsonl while a suite runs (and stops the moment the suite
+// ends). The curve plotted here is the loadavg (1m) series over the suite's elapsed time; cpu_stall
+// and mem_avail ride the same samples but are not plotted (a load curve is the 1-minute load). Built
+// by STRING CONCATENATION — no template engine, no new dependency, and no <script> anywhere (zero
+// client JS, the same invariant as the git-history SVG). Marks carry token-derived CSS classes
+// (git-svg-* / load-svg-line) — ZERO hardcoded hex.
+
+export interface SuiteLoadSample {
+  t: number; // epoch ms
+  loadavg: number | null; // /proc/loadavg 1m
+  cpu_stall: number | null; // /proc/pressure/cpu some avg10 %
+  mem_avail: number | null; // /proc/meminfo MemAvailable, MB
+}
+
+/** Read one suite-load timeseries file; malformed lines are skipped, valid samples sorted by t. */
+export function readSuiteLoadSamples(root: string, runId: string): SuiteLoadSample[] {
+  const file = path.join(root, ".quay", `suite-load-${runId}.jsonl`);
+  const samples: SuiteLoadSample[] = [];
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return [];
+  }
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const o = JSON.parse(line);
+      if (!o || typeof o !== "object") continue;
+      const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+      const t = num(o.t);
+      if (t == null) continue; // a sample without a timestamp is unusable for a time series
+      samples.push({ t, loadavg: num(o.loadavg), cpu_stall: num(o.cpu_stall), mem_avail: num(o.mem_avail) });
+    } catch {
+      // skip malformed line (never throw — the page degrades to no-curve, not a 500)
+    }
+  }
+  return samples.sort((a, b) => a.t - b.t);
+}
+
+/** The current .quay/full-suite-state.json runId (the run the page should plot), or null. */
+function readCurrentSuiteRunId(root: string): string | null {
+  try {
+    const j = JSON.parse(readFileSync(path.join(root, ".quay", "full-suite-state.json"), "utf8"));
+    return typeof j?.runId === "string" && j.runId ? j.runId : null;
+  } catch {
+    return null;
+  }
+}
+
+function isPlottableSample(s: SuiteLoadSample): s is SuiteLoadSample & { loadavg: number } {
+  return s.loadavg != null && Number.isFinite(s.loadavg);
+}
+
+/**
+ * Render the suite-run loadavg curve as a pure, dependency-free SVG string. Returns "" when there
+ * are no plottable samples (the page then omits the section). Deterministic on its input.
+ */
+export function renderLoadCurveSvg(samples: SuiteLoadSample[]): string {
+  const pts = samples.filter(isPlottableSample);
+  if (pts.length === 0) return "";
+  const M = { top: 24, right: 24, bottom: 44, left: 48 };
+  const W = 940;
+  const H = 240;
+  const plotW = W - M.left - M.right;
+  const plotH = H - M.top - M.bottom;
+
+  const ts = pts.map((s) => s.t);
+  const t0 = Math.min(...ts);
+  const t1 = Math.max(...ts);
+  const durSec = Math.max((t1 - t0) / 1000, 1); // single-sample still a finite plot
+  const X = (t: number): number => M.left + ((t - t0) / 1000 / durSec) * plotW;
+
+  const loads = pts.map((s) => s.loadavg);
+  const yMaxRaw = Math.max(...loads);
+  const yMax = yMaxRaw > 0 ? yMaxRaw * 1.15 : 1;
+  const Y = (v: number): number => M.top + plotH - (v / yMax) * plotH;
+
+  const xSteps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
+  let xStep = xSteps[xSteps.length - 1];
+  const xStepRaw = durSec / 5;
+  for (const s of xSteps) {
+    if (s >= xStepRaw) { xStep = s; break; }
+  }
+  const xTicks: Array<{ x: number; label: string }> = [];
+  for (let v = 0; v <= durSec; v += xStep) {
+    xTicks.push({ x: X(t0 + v * 1000), label: v === 0 ? "0s" : `${v}s` });
+  }
+  const yTicks: Array<{ y: number; label: string }> = [];
+  for (let i = 0; i <= 4; i++) {
+    const v = (yMax / 4) * i;
+    yTicks.push({ y: Y(v), label: v.toFixed(1) });
+  }
+
+  const grid = [
+    ...xTicks.map((tk) => `<line class="git-svg-grid" x1="${tk.x.toFixed(1)}" y1="${M.top}" x2="${tk.x.toFixed(1)}" y2="${H - M.bottom}" stroke-width="1" /><text class="git-svg-muted" x="${tk.x.toFixed(1)}" y="${H - M.bottom + 16}" font-size="10" text-anchor="middle">${escapeHtml(tk.label)}</text>`),
+    ...yTicks.map((tk) => `<line class="git-svg-grid" x1="${M.left}" y1="${tk.y.toFixed(1)}" x2="${W - M.right}" y2="${tk.y.toFixed(1)}" stroke-width="1" /><text class="git-svg-muted" x="${(M.left - 6).toFixed(1)}" y="${(tk.y + 3).toFixed(1)}" font-size="10" text-anchor="end">${escapeHtml(tk.label)}</text>`),
+  ].join("");
+  const polyline = `<polyline class="load-svg-line" points="${pts.map((s) => `${X(s.t).toFixed(1)},${Y(s.loadavg).toFixed(1)}`).join(" ")}" />`;
+  const points = pts.map((s) => {
+    const d = new Date(s.t);
+    const hhmmss = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+    return `<circle class="git-svg-commit" cx="${X(s.t).toFixed(1)}" cy="${Y(s.loadavg).toFixed(1)}" r="2.5"><title>${hhmmss} · loadavg ${s.loadavg}</title></circle>`;
+  }).join("");
+
+  return `<svg class="git-svg-surface" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Suite-run loadavg curve" style="max-width:100%;height:auto;border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif;">
+${grid}
+${polyline}
+${points}
+<text class="git-svg-ink" x="${M.left}" y="${M.top - 6}" font-size="11">loadavg (1m) · suite 运行期采样</text>
+</svg>`;
+}
+
 // ── /tests ─────────────────────────────────────────────────────────────────────────────────────────
 
 function runStatusClass(state: string | null): string {
@@ -2307,7 +2450,7 @@ export function renderPerFileTable(
   </details>`;
 }
 
-function renderTestsPage(tests: TestsResult): string {
+function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = []): string {
   const latest = tests.runs[0] ?? null;
   const latestBanner = latest
     ? html`<div style="border:1px solid var(--color-divider);background:var(--color-surface);padding:1rem;margin-bottom:1.5rem">
@@ -2335,6 +2478,12 @@ function renderTestsPage(tests: TestsResult): string {
         </ul>
       </details>`
     : "";
+  const loadCurveSvg = renderLoadCurveSvg(samples);
+  const loadCurve = loadCurveSvg
+    ? html`<h2>负载曲线（最近一轮）</h2>
+        <p class="meta">数据源：<code>.quay/suite-load-&lt;runId&gt;.jsonl</code>（suite 运行期采样，结束即停）</p>
+        ${loadCurveSvg}`
+    : "";
   // gap-test-detail-perfile-duration-failed AC2 — render the per-file table for the newest run that
   // actually carries perFile data (legacy rows have no perFile field → skipped, never fabricated).
   const perFileRun = tests.runs.find((r) => r.perFile && r.perFile.length > 0);
@@ -2346,6 +2495,7 @@ function renderTestsPage(tests: TestsResult): string {
       <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（suite-state 机制写入）${tests.currentState ? html` · 当前 suite-state: <strong>${escapeHtml(tests.currentState)}</strong>` : ""}</p>
       ${obsNote(tests.status, tests.reason)}
       ${latestBanner}
+      ${loadCurve}
       ${tests.runs.length > 0 ? html`<h2>历史运行（新→旧）</h2>
       <table>
         <tr><th>round</th><th>startedAt</th><th>state</th><th>pass/fail/cancel</th><th>duration</th><th>scope</th><th>buckets</th><th>commit</th></tr>
@@ -2367,8 +2517,10 @@ export async function handleTests(
   } catch (err) {
     tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [], currentState: null };
   }
+  const runId = readCurrentSuiteRunId(cfg.workspaceRoot);
+  const samples = runId ? readSuiteLoadSamples(cfg.workspaceRoot, runId) : [];
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderTestsPage(tests));
+  res.end(renderTestsPage(tests, samples));
 }
 
 // ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
