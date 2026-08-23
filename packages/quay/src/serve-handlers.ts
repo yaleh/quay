@@ -2318,12 +2318,13 @@ function renderTestsPage(tests: TestsResult): string {
     : "";
   const historyRows = tests.runs.map((r) => html`<tr>
     <td>${r.round != null ? `#${escapeHtml(String(r.round))}` : "—"}</td>
+    <td>${r.startedAt ? escapeHtml(r.startedAt) : "—"}</td>
     <td class="${runStatusClass(r.state)}" style="font-weight:700">${escapeHtml(r.state ?? "—")}</td>
     <td>${r.pass ?? "—"}/${r.fail ?? "—"}/${r.cancelled ?? "—"}</td>
     <td>${r.durationMs != null ? `${escapeHtml(String(Math.round(r.durationMs / 1000)))}s` : "—"}</td>
     <td>${r.scope ? escapeHtml(r.scope) : "—"}</td>
     <td>${r.buckets ? escapeHtml(r.buckets) : "—"}</td>
-    <td>${r.commit ? html`<code>${escapeHtml(r.commit.slice(0, 8))}</code>` : "—"}</td>
+    <td>${r.commit ? html`<a href="/git-history?commit=${encodeURIComponent(r.commit)}"><code>${escapeHtml(r.commit.slice(0, 8))}</code></a>` : "—"}</td>
   </tr>`).join("\n");
   const failedRun = tests.runs.find((r) => r.fail != null && r.fail > 0 && r.failures && r.failures.length > 0);
   const failureDetails = failedRun
@@ -2347,7 +2348,7 @@ function renderTestsPage(tests: TestsResult): string {
       ${latestBanner}
       ${tests.runs.length > 0 ? html`<h2>历史运行（新→旧）</h2>
       <table>
-        <tr><th>round</th><th>state</th><th>pass/fail/cancel</th><th>duration</th><th>scope</th><th>buckets</th><th>commit</th></tr>
+        <tr><th>round</th><th>startedAt</th><th>state</th><th>pass/fail/cancel</th><th>duration</th><th>scope</th><th>buckets</th><th>commit</th></tr>
         ${historyRows}
       </table>` : ""}
       ${failureDetails}

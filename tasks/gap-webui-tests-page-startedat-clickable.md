@@ -1,7 +1,7 @@
 ---
 id: gap-webui-tests-page-startedat-clickable
 title: Tests 页补 startedAt 时间戳列 + 行可点击（commit 链 git-history）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -26,12 +26,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：Tests 页每行渲染 `startedAt` 时间戳（取自载体，非硬编码）。
-- [ ] AC2：行可点击（整行链 `/tests/<round>`，或 commit 列链 `/git-history?commit=`），⛔ 非纯 StaticText。
+- [x] AC1：Tests 页每行渲染 `startedAt` 时间戳（取自载体，非硬编码）。
+- [x] AC2：行可点击（整行链 `/tests/<round>`，或 commit 列链 `/git-history?commit=`），⛔ 非纯 StaticText。
 
 ## Definition of Done
 
-- [ ] startedAt 列 + 行可点击落地；AC1-2 全勾；land 到 develop。
+- [x] startedAt 列 + 行可点击落地；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
