@@ -1,7 +1,7 @@
 ---
 id: gap-fix-worker-exit-4-kimi-model-fjdac
 title: fix-worker claude -p 编辑成功后 exit=4（~/.claude/settings.json kimi-k2.7-code 在 FJDAC 400）——result.ok 失真
-status: todo
+status: ready
 labels:
   - gap
 parent: null
