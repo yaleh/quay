@@ -1,7 +1,7 @@
 ---
 id: gap-direct-to-develop-check-reflog-to-revlist
 title: direct-to-develop-bypass-check 直投判定改持久化 ledger（fan-in ff 落地记台账，reflog 剪后退 NOT-EVALUATED）
-status: ready
+status: done
 labels:
   - gap
 parent: null
