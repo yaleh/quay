@@ -1,7 +1,7 @@
 ---
 id: gap-ac139-unified-driver-subcommand
 title: AC139 两驱动统一到 quay driver 子命令 + 单一泛化 supervisor
-status: ready
+status: done
 labels:
   - gap
 parent: null
