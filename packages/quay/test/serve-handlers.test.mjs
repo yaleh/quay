@@ -23,7 +23,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { renderGitHistorySvg, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable, taskIdFromBranchRef } from "../src/serve-handlers.ts";
+import { renderGitHistorySvg, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable, pageStyles, GIT_HISTORY_LANE_COLLAPSE_THRESHOLD, taskIdFromBranchRef } from "../src/serve-handlers.ts";
 import { readGitHistory } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
@@ -136,6 +136,52 @@ test("groupCommitsByBranch groups into lanes sorted by most-recent landing, comm
   assert.deepEqual(branches.map((b) => b.ref), ["task/z", "integration"], "most-recent-landing branch first");
   const integration = branches.find((b) => b.ref === "integration");
   assert.deepEqual(integration.commits.map((x) => x.hash), ["aaa", "ccc"], "lane commits oldest→newest");
+});
+
+// ── gap-git-history-collapse-commits: dense lanes collapse to endpoints + summary ──────────
+
+test("AC1: a lane above the collapse threshold renders endpoints + summary, not every commit", () => {
+  const t0 = 1_700_000_000;
+  const n = GIT_HISTORY_LANE_COLLAPSE_THRESHOLD + 3; // 8 commits on one lane → collapsed
+  const commits = Array.from({ length: n }, (_, i) =>
+    c(`c${i}aaaa0000000000000000000000000`, t0 + i * 60, "integration", 1, `subject ${i}`),
+  );
+  const svg = renderGitHistorySvg({ status: "ok", reason: null, commits });
+
+  assert.ok(svg.includes('class="git-svg-lane git-svg-lane-collapsed"'), "dense lane is marked collapsed");
+  assert.ok(svg.includes('class="git-svg-collapsed-label"'), "collapsed lane carries the summary label");
+  const spanMin = n - 1; // 60s apart → minutes
+  assert.ok(svg.includes(`${n} commits · ${spanMin}m`), `summary states total + span ("${n} commits · ${spanMin}m")`);
+
+  // AC1 core: only the two endpoints are top-level marks; the middle commits live inside the
+  // hidden .git-svg-lane-points group — the default view does NOT per-commit render them.
+  const collapsedGroup = svg.match(/<g class="git-svg-lane-points">([\s\S]*?)<\/g>/);
+  assert.ok(collapsedGroup, "middle marks are grouped for hover-reveal");
+  assert.equal([...collapsedGroup[1].matchAll(/<circle/g)].length, n - 2, `group holds the ${n - 2} hidden middle marks`);
+
+  const topLevel = svg.replace(/<g class="git-svg-lane-points">[\s\S]*?<\/g>/, "");
+  const topCircles = [...topLevel.matchAll(/<circle[^>]*cx="/g)].length;
+  assert.equal(topCircles, 3, "default view = legend + 2 endpoints only (no per-commit marks)");
+});
+
+test("AC1: a lane at the collapse threshold still renders every commit (not collapsed)", () => {
+  const t0 = 1_700_000_000;
+  const n = GIT_HISTORY_LANE_COLLAPSE_THRESHOLD;
+  const commits = Array.from({ length: n }, (_, i) =>
+    c(`e${i}bbbb0000000000000000000000000`, t0 + i * 60, "integration", 1, `s${i}`),
+  );
+  const svg = renderGitHistorySvg({ status: "ok", reason: null, commits });
+  assert.ok(!svg.includes("git-svg-lane-collapsed"), "a lane at the threshold is not collapsed");
+  assert.ok(!svg.includes("git-svg-collapsed-label"), "no summary label for an expanded lane");
+  const circles = [...svg.matchAll(/<circle[^>]*cx="/g)].length;
+  assert.equal(circles, 1 + n, `legend + all ${n} commits rendered`);
+});
+
+test("AC2: the collapse CSS reveals the full list on :hover (zero client JS)", () => {
+  const css = pageStyles();
+  assert.ok(css.includes(".git-svg-lane-points { display: none; }"), "middle marks hidden by default");
+  assert.ok(css.includes(".git-svg-lane-collapsed:hover .git-svg-lane-points"), "hover reveals the full list");
+  assert.ok(css.includes(".git-svg-lane-collapsed:hover .git-svg-collapsed-label"), "hover hides the summary label");
 });
 
 // ── AC1: branch names on the /git-history chart link out to their task's /task/<id> ──

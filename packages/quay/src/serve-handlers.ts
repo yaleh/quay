@@ -262,6 +262,12 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
 .git-svg-merge { fill: var(--color-accent-2-500); }
 .git-svg-ink { fill: var(--color-text); }
 .git-svg-muted { fill: var(--color-neutral-600); }
+/* gap-git-history-collapse-commits: a dense lane collapses to its endpoints + a summary label
+   ("N commits · T span"); the full per-commit marks live in .git-svg-lane-points and are revealed
+   on :hover — pure CSS, so the AC4 zero-client-JS invariant holds. */
+.git-svg-lane-points { display: none; }
+.git-svg-lane-collapsed:hover .git-svg-lane-points { display: inline; }
+.git-svg-lane-collapsed:hover .git-svg-collapsed-label { display: none; }
 /* AC102 (same token discipline): suite-load curve stroke — token-derived, no hardcoded hex.
    Surface/grid/ink/muted reuse the git-svg-* classes above (they are generic chart tokens). */
 .load-svg-line { fill: none; stroke: var(--color-accent-600); stroke-width: 2; }
@@ -1936,6 +1942,36 @@ function isoTime(t: number): string {
 }
 
 /**
+ * A lane with more commits than this collapses to its start/end endpoints + a
+ * "N commits · T span" summary label (gap-git-history-collapse-commits). The default
+ * view shows only the endpoints + summary; hovering the lane reveals the full per-commit
+ * marks (pure CSS :hover, zero client JS — the AC4 no-<script> invariant holds). This is a
+ * rendering DENSITY threshold, not a measured performance target: the chart is already
+ * bounded to GIT_HISTORY_LIMIT commits in total, but one mainline lane can still hold
+ * hundreds of points that crowd a 940px plot.
+ */
+export const GIT_HISTORY_LANE_COLLAPSE_THRESHOLD = 5;
+
+/** Human-readable duration for a collapsed lane's 「跨度」 label ("45m", "2h 14m", "3d 5h"). */
+function formatSpan(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+  return `${Math.floor(sec / 86400)}d ${Math.floor((sec % 86400) / 3600)}h`;
+}
+
+/** Render one commit mark (blue circle, or orange diamond for a merge commit). */
+function commitMark(c: GitHistoryBranch["commits"][number], y: number, X: (t: number) => number): string {
+  const cx = X(c.t);
+  const tooltip = `${escapeHtml(c.hash.slice(0, 7))} · ${isoTime(c.t)} · ${escapeHtml(c.subject)}`;
+  if (c.parents > 1) {
+    const s = 4; // 8px diamond (the mark-spec ≥8px marker)
+    return `<rect class="git-svg-merge" x="${(cx - s).toFixed(1)}" y="${(y - s).toFixed(1)}" width="${2 * s}" height="${2 * s}" transform="rotate(45 ${cx} ${y})"><title>merge ${tooltip}</title></rect>`;
+  }
+  return `<circle class="git-svg-commit" cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="4"><title>${tooltip}</title></circle>`;
+}
+
+/**
  * Render the commit-landing timeline as a pure, dependency-free SVG string. Returns "" when the
  * history is degraded/empty (the page then shows the 无数据/读失败 note instead). Deterministic on
  * its input — the AC3 x-axis semantics (landing time, not duration) are testable directly here.
@@ -1973,22 +2009,31 @@ export function renderGitHistorySvg(history: GitHistoryResult): string {
     const seg = b.commits.length > 1
       ? `<line class="git-svg-grid" x1="${xFirst.toFixed(1)}" y1="${y.toFixed(1)}" x2="${xLast.toFixed(1)}" y2="${y.toFixed(1)}" stroke-width="2" />`
       : "";
-    const points = b.commits.map((c) => {
-      const cx = X(c.t);
-      const tooltip = `${escapeHtml(c.hash.slice(0, 7))} · ${isoTime(c.t)} · ${escapeHtml(c.subject)}`;
-      if (c.parents > 1) {
-        const s = 4; // 8px diamond (the mark-spec ≥8px marker)
-        return `<rect class="git-svg-merge" x="${(cx - s).toFixed(1)}" y="${(y - s).toFixed(1)}" width="${2 * s}" height="${2 * s}" transform="rotate(45 ${cx} ${y})"><title>merge ${tooltip}</title></rect>`;
-      }
-      return `<circle class="git-svg-commit" cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="4"><title>${tooltip}</title></circle>`;
-    }).join("");
+    const collapsed = b.commits.length > GIT_HISTORY_LANE_COLLAPSE_THRESHOLD;
+    let points: string;
+    let summary = "";
+    if (collapsed) {
+      // AC1: the default view shows ONLY the start/end endpoints + a summary label. The middle
+      // marks are emitted into a .git-svg-lane-points group that pageStyles() keeps display:none
+      // until the lane is :hovered (AC2 — one hover reveals the full list, zero client JS).
+      const first = commitMark(b.commits[0], y, X);
+      const last = commitMark(b.commits[b.commits.length - 1], y, X);
+      const middle = b.commits.slice(1, -1).map((c) => commitMark(c, y, X)).join("");
+      const span = formatSpan(b.lastT - b.firstT);
+      points = `${first}${last}<g class="git-svg-lane-points">${middle}</g>`;
+      const midX = (xFirst + xLast) / 2;
+      summary = `<text class="git-svg-collapsed-label" x="${midX.toFixed(1)}" y="${(y - 8).toFixed(1)}" text-anchor="middle" font-size="10"><title>${b.commits.length} commits · ${span}（悬停展开全部提交）</title>${b.commits.length} commits · ${span}</text>`;
+    } else {
+      points = b.commits.map((c) => commitMark(c, y, X)).join("");
+    }
+    const laneClass = collapsed ? "git-svg-lane git-svg-lane-collapsed" : "git-svg-lane";
     // A task branch's lane label links out to its /task/<id> detail page (SVG <a> wraps the text;
     // the text's git-svg-ink fill is preserved — no default link blue). Non-task refs stay plain.
     const taskId = taskIdFromBranchRef(b.ref);
     const label = taskId
       ? `<a href="/task/${encodeURIComponent(taskId)}"><text class="git-svg-ink" x="${(W - M.right + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="11">${escapeHtml(b.ref)}</text></a>`
       : `<text class="git-svg-ink" x="${(W - M.right + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="11">${escapeHtml(b.ref)}</text>`;
-    return `<g>${seg}${points}${label}</g>`;
+    return `<g class="${laneClass}">${seg}${points}${summary}${label}</g>`;
   }).join("");
 
   // In-SVG legend: the two mark kinds (merge vs regular). Identity is never color-alone — the

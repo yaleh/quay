@@ -463,12 +463,17 @@ export interface PromotionOutcomeRecord {
 
 /** 从一轮结果推导 outcome 记录（纯函数，可单测）。applied ⇒ promote；fixes[].spawned ⇒ fix；
  *  fixes[] 其余（不可修）⇒ skip；needsHuman ⇒ needs-human（AC133 失败上限触发）。⛔ 派生自真实轮
- *  结果，不硬编码、不写 fixture。 */
+ *  结果，不硬编码、不写 fixture。
+ *  gap-fix-worker-edit-exit-4：fix 的 result.ok 不再 = 裸 exitCode===0。`claude -p` 编辑型任务在
+ *  【编辑成功后】可能以 exit=4 退出（stdout/stderr 均空、事后非零），此时 result.ok=false 是失真——
+ *  真实落地与否由 AC133 重闸验证（reverify.nowEligibleIds）给出（⛔ 不信 worker 自述，也不信它的退出码）。
+ *  传 reverify 时以「闸判 nowEligible」为准；不传（旧调用/纯单测）退回 exitCode===0。 */
 export function computeOutcomeRecords(opts: {
   at: string;
   applied: PromotionRound["applied"];
   fixes: FixOutcome[];
   needsHuman?: Array<{ id: string }>;
+  reverify?: ReverifyOutcome | null;
 }): PromotionOutcomeRecord[] {
   const out: PromotionOutcomeRecord[] = [];
   for (const a of opts.applied) {
@@ -485,14 +490,17 @@ export function computeOutcomeRecords(opts: {
       // AC142 AC1：诊断面落进可查载体（promotion-outcome.jsonl 的 result.detail）——spawn 失败/超时
       // 时把 stderr 截断带上（⛔ 不再 `spawned exit=1` 零诊断）。exit 0 保持原形（无诊断需求）。
       const stderrFrag = f.stderr ? ` stderr=${f.stderr.slice(0, 300)}` : "";
+      // gap-fix-worker-edit-exit-4：落地判定以 AC133 重闸为准（若给了 reverify）；exit-4 这类「编辑
+      // 成功但事后非零退出」不再把 result.ok 打成 false。
+      const landed = opts.reverify ? opts.reverify.nowEligibleIds.includes(f.id) : f.exitCode === 0;
       const detail = f.exitCode === 0
         ? "spawned exit=0"
-        : `spawned exit=${f.exitCode}${f.timedOut ? " (timed-out)" : ""}${stderrFrag}`;
+        : `spawned exit=${f.exitCode}${f.timedOut ? " (timed-out)" : ""}${stderrFrag}${landed ? " (fix landed — reverified eligible)" : ""}`;
       out.push({
         task_id: f.id,
         gate: { eligible: false, missing: f.missing },
         action: "fix",
-        result: { ok: f.exitCode === 0, detail },
+        result: { ok: landed, detail },
         ts: opts.at,
       });
     } else {
@@ -627,9 +635,11 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     });
     try { appendRoundRecord(roundLogFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     // AC134：判定/晋升/修复/needs-human 各写一条 outcome 记录（.quay/promotion-outcome.jsonl，outer 可消费）。
+    // gap-fix-worker-edit-exit-4：把 AC133 重闸结果 reverify 传给 outcome，fix 的 result.ok 以「闸判落地」为准。
     const outcomes = computeOutcomeRecords({
       at: record.ts, applied, fixes,
       needsHuman: newlyNeedsHuman.map((id) => ({ id })),
+      reverify,
     });
     for (const o of outcomes) {
       try { appendOutcomeRecord(outcomeLogFile, o); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
