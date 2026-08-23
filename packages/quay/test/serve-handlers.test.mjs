@@ -23,7 +23,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { renderGitHistorySvg, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable } from "../src/serve-handlers.ts";
+import { renderGitHistorySvg, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable, taskIdFromBranchRef } from "../src/serve-handlers.ts";
 import { readGitHistory } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
@@ -138,6 +138,36 @@ test("groupCommitsByBranch groups into lanes sorted by most-recent landing, comm
   assert.deepEqual(integration.commits.map((x) => x.hash), ["aaa", "ccc"], "lane commits oldest→newest");
 });
 
+// ── AC1: branch names on the /git-history chart link out to their task's /task/<id> ──
+
+test("AC1: taskIdFromBranchRef maps task/<id> → <id> and leaves non-task refs unlinked", () => {
+  assert.equal(taskIdFromBranchRef("task/gap-git-history-clickable-branches-window"), "gap-git-history-clickable-branches-window");
+  assert.equal(taskIdFromBranchRef("task/"), null, "a bare task/ prefix has no task id");
+  assert.equal(taskIdFromBranchRef("develop"), null, "develop is a mainline ref, not a task");
+  assert.equal(taskIdFromBranchRef("master"), null);
+  assert.equal(taskIdFromBranchRef("integration"), null);
+  assert.equal(taskIdFromBranchRef("verify/stale"), null);
+  assert.equal(taskIdFromBranchRef("feature/alpha"), null);
+});
+
+test("AC1: the SVG lane label links a task branch to /task/<id>; non-task lanes stay plain text", () => {
+  const history = {
+    status: "ok",
+    reason: null,
+    commits: [
+      c("aaa0000", 1_700_000_000, "task/gap-x", 1, "task commit"),
+      c("bbb0000", 1_700_000_100, "integration", 1, "mainline commit"),
+    ],
+  };
+  const svg = renderGitHistorySvg(history);
+  // The task branch's lane label is an SVG <a> wrapping its <text>; the mainline label is bare <text>.
+  assert.ok(svg.includes('href="/task/gap-x"'), "task branch lane label links to /task/gap-x");
+  assert.ok(svg.includes('>task/gap-x</text>'), "the label still displays the full branch ref");
+  assert.ok(!svg.includes('href="/task/integration"'), "the mainline lane is NOT a task link");
+  // Zero client JS invariant holds with the SVG <a> (native navigation, no script).
+  assert.ok(!svg.includes("<script"), "no <script> even with clickable labels");
+});
+
 // ── AC2/AC4 integration: real git workspace, /git-history returns SVG, zero <script> ──
 
 function makeWorkspace(prefix) {
@@ -191,6 +221,11 @@ test("AC2/AC4: GET /git-history returns a server-rendered SVG page with zero <sc
     gitCommit(ws, "main three", { t: nowSec - 100 });
     execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "merge", "-q", "--no-ff", "feature/alpha", "-m", "merge feature/alpha"], { cwd: ws });
 
+    // a task branch whose lane label must link to its task's detail page (AC1)
+    execFileSync("git", ["checkout", "-q", "-b", "task/GH-1"], { cwd: ws });
+    gitCommit(ws, "task work", { t: nowSec - 50, file: "task.txt" });
+    execFileSync("git", ["checkout", "-q", "master"], { cwd: ws });
+
     // seed a task so startServer (which talks to the provider) has a store to read
     createStore(tasksDir).write("GH-1", { title: "git-history task", status: "todo" });
 
@@ -204,6 +239,7 @@ test("AC2/AC4: GET /git-history returns a server-rendered SVG page with zero <sc
     assert.ok(svgCount >= 1, `AC2/band: response contains ≥1 <svg (got ${svgCount})`);
     assert.ok(r.body.includes("feature/alpha"), "chart shows the feature branch lane");
     assert.ok(r.body.includes("master") || r.body.includes("main"), "chart shows the main branch lane");
+    assert.ok(r.body.includes('href="/task/GH-1"'), "AC1: the task branch lane links to /task/GH-1");
     const scriptCount = (r.body.match(/<script/g) || []).length;
     assert.equal(scriptCount, 0, `AC4/invariant: zero <script> tags (got ${scriptCount})`);
     assert.ok(r.body.includes("落地时刻"), "page disclaims the x-axis = landing time");
