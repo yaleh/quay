@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-collapse-commits
 title: Git History task 分支默认折叠 commits（总数+跨度，展开查看）
-status: todo
+status: needs-human
 labels:
   - gap
 parent: null
@@ -42,3 +42,9 @@ depends_on: []
 - packages/quay/src/serve-handlers.ts（lanes 渲染折叠）
 - packages/quay/test/serve-handlers.test.mjs
 - tasks/gap-git-history-collapse-commits.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-23T04:15:31.863Z — promotion-driver AC133：连续修满上限仍不合格**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
