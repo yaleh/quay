@@ -27,7 +27,7 @@ export {
   inlineMarkdown,
   relativeTime,
   isSafeRelativeRedirect,
-  renderGitHistorySvg,
+  layoutGitGraph,
   groupCommitsByBranch,
 } from "./serve-handlers.ts";
 

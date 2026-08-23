@@ -102,11 +102,19 @@ test("AC102② — serve-handlers.ts rendering code carries zero hardcoded 6-dig
   assert.ok(src.includes("color: var(--color-accent-700)"), "shared base verdict class is token-derived");
 });
 
-test("AC102② — the git-history SVG (a 15-view render segment) is token-classed, not hardcoded hex", async () => {
+test("AC102② — the git-history client renderer is token-classed, not hardcoded hex", async () => {
   const r = await get(port, "/git-history");
   assert.equal(r.status, 200);
-  assert.ok(r.body.includes('class="git-svg-commit"'), "git chart commit marks use the token class");
-  const svg = r.body.match(/<svg[\s\S]*?<\/svg>/)?.[0] ?? "";
-  const hex = svg.match(/#[0-9a-fA-F]{6}/g) || [];
-  assert.deepEqual(hex, [], "git-history SVG contains no hardcoded hex");
+  // The chart is now client-rendered (third-party D3); its marks still use the token-derived
+  // git-svg-* classes. The inlined CSS token sheet legitimately carries hex (it is the single
+  // source), so this check scopes to the client RENDERER script, which must carry none.
+  const marker = 'attr("class", "git-svg-commit")';
+  const i = r.body.indexOf(marker);
+  assert.ok(i >= 0, "the client renderer marks commits with the token class");
+  assert.ok(r.body.includes('attr("class", "git-svg-merge")'), "the client renderer marks merges with the token class");
+  const scriptStart = r.body.lastIndexOf("<script>", i);
+  const scriptEnd = r.body.indexOf("</script>", i);
+  const renderer = r.body.slice(scriptStart, scriptEnd);
+  const hex = renderer.match(/#[0-9a-fA-F]{6}/g) || [];
+  assert.deepEqual(hex, [], "the client renderer script carries no hardcoded hex");
 });

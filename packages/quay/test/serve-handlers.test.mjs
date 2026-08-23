@@ -1,16 +1,13 @@
 // @test-group product
-// gap-git-history-svg-server-rendered — /git-history must return a SERVER-RENDERED SVG whose
-// x-axis is commit LANDING time (not duration), with zero <script> tags (AC4 zero client JS) and
-// zero new dependencies. The two task traps are pinned by the renderer's contract and tested here:
-//   Trap 1 — the x-axis is the commit landing moment, not a duration: git branch lifespan ≠ task
-//            work hours (measured: 149/164 fan-in branches lived <1h — the task finished before its
-//            first commit even landed). The test asserts x maps monotonically to commit time and the
-//            page's note says 落地时刻/非工时.
-//   Trap 2 — the chart does NOT fake knowing work hours: it draws only what git proves (points at
-//            commit times, branch existence intervals, merges). No duration/work-hour marks exist.
+// gap-git-history-vertical-graph-thirdparty-lib — /git-history renders a VERTICAL timeline (develop
+// trunk + task-branch fork/merge lanes) via a third-party library (D3), and the 「零客户端 JS」
+// invariant is retired site-wide (human ruling 2026-08-23, recorded in docs/webui-guide.md).
 //
-// renderGitHistorySvg is a PURE function (deterministic on its input), so the x-axis semantic is
-// unit-tested directly; the route is integration-tested against a real git-init'd workspace.
+// layoutGitGraph is a PURE function (deterministic on its input) that computes the trunk + branch
+// fork/merge structure BEFORE any SVG is drawn — AC1 (vertical trunk + fork/merge edges) and AC2
+// (branches collapsed-by-default, carrying full commit lists for expansion) are tested directly on
+// that output. The route is integration-tested against a real git workspace: the page carries an
+// embedded JSON graph payload + an inlined D3 <script> (client JS is now permitted).
 //
 // Run (scoped): node --test packages/quay/test/serve-handlers.test.mjs
 import { test } from "node:test";
@@ -23,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { renderGitHistorySvg, groupCommitsByBranch } from "../src/serve-handlers.ts";
+import { layoutGitGraph, groupCommitsByBranch } from "../src/serve-handlers.ts";
 import { readGitHistory } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
@@ -54,91 +51,88 @@ function get(port, urlPath) {
   });
 }
 
-/** A commit fixture for the pure renderer (shape matches observation.GitHistoryCommit). */
-function c(hash, t, ref, parents, subject) {
-  return { hash, t, ref, parents, subject };
+/** A commit fixture (shape matches observation.GitHistoryCommit). `parentHashes` = parent hashes. */
+function c(hash, t, ref, parentHashes, subject) {
+  return { hash, t, ref, parents: parentHashes.length, parentHashes, subject };
 }
 
-// ── AC3 unit: x-axis = landing time, monotonic; no duration semantics ──────────
+/** A minimal ok GitHistoryResult for the pure layout. */
+function hist(commits, head, heads = {}) {
+  return { status: "ok", reason: null, commits, head, heads };
+}
 
-test("AC3: renderGitHistorySvg maps x monotonically to commit landing time (not duration)", () => {
+// ── AC1 unit: layoutGitGraph computes the vertical trunk + branch fork/merge ──
+
+test("AC1: layoutGitGraph yields a vertical trunk (first-parent chain) + branch fork/merge edges", () => {
   const t0 = 1_700_000_000;
-  const history = {
-    status: "ok",
-    reason: null,
-    commits: [
-      c("aaa0000", t0, "integration", 1, "base"),
-      c("bbb0000", t0 + 3 * DAY, "integration", 1, "second"),
-      c("ccc0000", t0 + 6 * DAY, "integration", 1, "third"),
-    ],
-  };
-  const svg = renderGitHistorySvg(history);
-  assert.ok(svg.startsWith("<svg"), "renderer returns an SVG document");
-  assert.ok(svg.includes("</svg>"), "SVG is well-formed (closes </svg>)");
-
-  // Lane circles (ignore the legend circle at a fixed x) — the three commits' cx must increase
-  // strictly with time, pinning the x-axis semantic = commit landing time. (The circles carry the
-  // AC102 token class attribute before cx, so match any <circle> tag.)
-  const cxs = [...svg.matchAll(/<circle[^>]*cx="([0-9.]+)"/g)].map((m) => Number(m[1]));
-  assert.ok(cxs.length >= 4, `legend + 3 commit points present (got ${cxs.length})`);
-  const lane = cxs.slice(1); // drop the legend marker
-  assert.equal(lane.length, 3);
-  assert.ok(lane[0] < lane[1] && lane[1] < lane[2],
-    `x increases with commit time: ${lane.map((v) => v.toFixed(1)).join(" < ")}`);
+  const commits = [
+    c("a000000", t0, "master", [], "base"),
+    c("b000000", t0 + 1, "master", ["a000000"], "trunk two"),
+    c("x000000", t0 + 2, "task/x", ["b000000"], "branch commit"),
+    c("m000000", t0 + 3, "master", ["b000000", "x000000"], "merge task/x"),
+  ];
+  const layout = layoutGitGraph(hist(commits, "m000000", { master: "m000000", "task/x": "x000000" }));
+  assert.ok(layout, "an ok history yields a layout");
+  // trunk = first-parent chain from HEAD, oldest → newest
+  assert.deepEqual(layout.trunk.commits.map((x) => x.hash), ["a000000", "b000000", "m000000"], "trunk is the first-parent chain, oldest-first");
+  assert.equal(layout.trunk.ref, "master", "trunk carries the mainline ref name");
+  // the merge's second parent becomes a branch lane: fork at b, merge at m
+  assert.equal(layout.branches.length, 1, "exactly one branch lane");
+  const b = layout.branches[0];
+  assert.equal(b.ref, "task/x", "branch ref name");
+  assert.deepEqual(b.commits.map((x) => x.hash), ["x000000"], "branch commits are the lateral commits");
+  assert.equal(b.fork, "b000000", "fork point = the trunk commit the branch diverged from");
+  assert.equal(b.merge, "m000000", "merge point = the trunk merge commit");
 });
 
-test("AC3: single-instant window still renders a finite plot (no NaN), zero <script>", () => {
-  const history = {
-    status: "ok",
-    reason: null,
-    commits: [
-      c("aaa0000", 1_700_000_000, "integration", 1, "only"),
-      c("bbb0000", 1_700_000_000, "task/x", 2, "merge at same instant"),
-    ],
-  };
-  const svg = renderGitHistorySvg(history);
-  assert.ok(svg.includes("<svg"), "renders even when every commit shares one timestamp");
-  assert.ok(!svg.includes("NaN"), "no NaN leaks into the SVG for a zero-width window");
-  assert.ok(!svg.includes("<script"), "zero client JS: no <script> in the SVG");
+test("AC1: a linear history has a trunk and NO branch lanes (negative control)", () => {
+  const t0 = 1_700_000_000;
+  const commits = [
+    c("a000000", t0, "master", [], "base"),
+    c("b000000", t0 + 1, "master", ["a000000"], "two"),
+    c("c000000", t0 + 2, "master", ["b000000"], "three"),
+  ];
+  const layout = layoutGitGraph(hist(commits, "c000000", { master: "c000000" }));
+  assert.deepEqual(layout.trunk.commits.map((x) => x.hash), ["a000000", "b000000", "c000000"], "trunk = whole chain");
+  assert.equal(layout.branches.length, 0, "no merge → no branch lanes");
 });
 
-test("AC3: merge commits are marked distinctly (orange diamond), regular commits blue circles", () => {
-  const history = {
-    status: "ok",
-    reason: null,
-    commits: [
-      c("aaa0000", 1_700_000_000, "integration", 1, "base"),
-      c("bbb0000", 1_700_000_100, "integration", 2, "merge fan-in"),
-    ],
-  };
-  const svg = renderGitHistorySvg(history);
-  // AC102: the chart's marks are token-derived CSS classes (git-svg-*), NOT hardcoded hex —
-  // the commit/merge marks carry the token classes and the svg must contain zero color literals.
-  assert.ok(svg.includes('class="git-svg-commit"'), "regular commit uses the token commit class");
-  assert.ok(svg.includes('class="git-svg-merge"'), "merge commit uses the token merge class");
-  assert.ok(!/#[0-9a-fA-F]{6}/.test(svg), "SVG carries no hardcoded hex (AC102②)");
-  assert.ok(svg.includes('rotate(45'), "merge commit is a diamond (rotated square)");
-  assert.ok(svg.includes("合并提交（fan-in 落地）"), "legend labels the merge kind");
+test("AC2: branches are collapsed by default and carry full commits + time span for expansion", () => {
+  const t0 = 1_700_000_000;
+  const commits = [
+    c("a000000", t0, "master", [], "base"),
+    c("b000000", t0 + 1, "master", ["a000000"], "trunk"),
+    c("x100000", t0 + 2, "task/x", ["b000000"], "branch one"),
+    c("x200000", t0 + 3, "task/x", ["x100000"], "branch two"),
+    c("m000000", t0 + 4, "master", ["b000000", "x200000"], "merge task/x"),
+  ];
+  const layout = layoutGitGraph(hist(commits, "m000000", { master: "m000000", "task/x": "x200000" }));
+  const b = layout.branches[0];
+  assert.equal(b.collapsed, true, "AC2: branch is collapsed by default");
+  assert.equal(b.commits.length, 2, "the full commit list is present (for expansion)");
+  assert.deepEqual(b.commits.map((x) => x.hash), ["x100000", "x200000"], "branch commits oldest → newest");
+  assert.equal(b.firstT, t0 + 2, "firstT = oldest branch commit landing time");
+  assert.equal(b.lastT, t0 + 3, "lastT = newest branch commit landing time (the time span)");
 });
 
-test("AC3: degradation — non-ok or empty history renders no chart (page shows 无数据/读失败)", () => {
-  assert.equal(renderGitHistorySvg({ status: "empty", reason: "x", commits: [] }), "");
-  assert.equal(renderGitHistorySvg({ status: "error", reason: "y", commits: [] }), "");
-  assert.equal(renderGitHistorySvg({ status: "ok", reason: null, commits: [] }), "");
+test("degradation: non-ok or empty history yields no layout", () => {
+  assert.equal(layoutGitGraph({ status: "empty", reason: "x", commits: [], head: null, heads: {} }), null);
+  assert.equal(layoutGitGraph({ status: "error", reason: "y", commits: [], head: null, heads: {} }), null);
+  assert.equal(layoutGitGraph({ status: "ok", reason: null, commits: [], head: null, heads: {} }), null);
 });
 
 test("groupCommitsByBranch groups into lanes sorted by most-recent landing, commits oldest-first", () => {
   const branches = groupCommitsByBranch([
-    c("aaa", 1_700_000_000, "integration", 1, "a"),
-    c("bbb", 1_700_000_300, "task/z", 1, "z"),
-    c("ccc", 1_700_000_200, "integration", 1, "c"),
+    c("aaa", 1_700_000_000, "integration", [], "a"),
+    c("bbb", 1_700_000_300, "task/z", [], "z"),
+    c("ccc", 1_700_000_200, "integration", [], "c"),
   ]);
   assert.deepEqual(branches.map((b) => b.ref), ["task/z", "integration"], "most-recent-landing branch first");
   const integration = branches.find((b) => b.ref === "integration");
   assert.deepEqual(integration.commits.map((x) => x.hash), ["aaa", "ccc"], "lane commits oldest→newest");
 });
 
-// ── AC2/AC4 integration: real git workspace, /git-history returns SVG, zero <script> ──
+// ── integration: real git workspace, /git-history serves the vertical-graph JSON + inlined D3 ──
 
 function makeWorkspace(prefix) {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}ws-`));
@@ -167,7 +161,7 @@ function gitCommit(ws, msg, { t, file = "log.txt" }) {
   execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", msg], { cwd: ws, env });
 }
 
-test("AC2/AC4: GET /git-history returns a server-rendered SVG page with zero <script> tags", async () => {
+test("integration: GET /git-history serves the vertical-graph JSON payload + an inlined D3 <script> (client JS now permitted)", async () => {
   const { ws, tasksDir } = makeWorkspace("gh-");
   const cwd0 = process.cwd();
   let server;
@@ -200,21 +194,28 @@ test("AC2/AC4: GET /git-history returns a server-rendered SVG page with zero <sc
 
     const r = await get(port, "/git-history");
     assert.equal(r.status, 200, "GET /git-history returns 200");
-    const svgCount = (r.body.match(/<svg/g) || []).length;
-    assert.ok(svgCount >= 1, `AC2/band: response contains ≥1 <svg (got ${svgCount})`);
-    assert.ok(r.body.includes("feature/alpha"), "chart shows the feature branch lane");
-    assert.ok(r.body.includes("master") || r.body.includes("main"), "chart shows the main branch lane");
-    const scriptCount = (r.body.match(/<script/g) || []).length;
-    assert.equal(scriptCount, 0, `AC4/invariant: zero <script> tags (got ${scriptCount})`);
-    assert.ok(r.body.includes("落地时刻"), "page disclaims the x-axis = landing time");
-    assert.ok(r.body.includes("非工时"), "page explicitly says NOT work hours (the AC3 trap)");
-    assert.ok(r.body.includes("分支汇总"), "accessibility: a data table view is present");
+    // AC1: the graph mount + embedded JSON payload (vertical trunk + fork/merge structure).
+    assert.ok(r.body.includes('id="git-graph"'), "the vertical graph mount is present");
+    assert.ok(r.body.includes('id="git-graph-data"'), "the embedded graph JSON payload is present");
+    assert.ok(r.body.includes('"fork"'), "the JSON payload carries fork edges");
+    assert.ok(r.body.includes('"merge"'), "the JSON payload carries merge edges");
+    assert.ok(r.body.includes('"collapsed":true'), "AC2: branches are collapsed by default in the payload");
+    assert.ok(r.body.includes("feature/alpha"), "the feature branch appears");
+    assert.ok(r.body.includes("master") || r.body.includes("main"), "the main branch appears");
+    // AC3: client JS + the third-party D3 library are now inlined (the retired zero-client-JS invariant).
+    assert.ok(r.body.includes("d3js.org"), "the inlined D3 library is present");
+    assert.ok((r.body.match(/<script/g) || []).length >= 3, "the page carries the data/lib/client <script> tags");
+    assert.ok(r.body.includes("分支汇总"), "the server-rendered summary table is still present");
 
-    // readGitHistory is also directly exercised (the route's data source)
-    const hist = readGitHistory(ws);
-    assert.equal(hist.status, "ok");
-    assert.ok(hist.commits.some((x) => x.ref === "feature/alpha"), "git history source sees the feature branch");
-    assert.ok(hist.commits.some((x) => x.parents > 1), "git history source sees a merge commit");
+    // readGitHistory now exposes the DAG edges (parentHashes + heads) the layout consumes.
+    const h = readGitHistory(ws);
+    assert.equal(h.status, "ok");
+    assert.ok(h.head, "readGitHistory resolves HEAD");
+    assert.ok(h.commits.some((x) => x.parents > 1), "git history source sees a merge commit");
+    assert.ok(h.commits.some((x) => x.parentHashes.length === 2), "a merge commit carries 2 parent hashes");
+    const layout = layoutGitGraph(h);
+    assert.ok(layout.branches.some((b) => b.ref === "feature/alpha"), "layout places the feature branch as a fork/merge lane");
+    assert.ok(layout.branches.every((b) => b.collapsed === true), "AC2: every branch is collapsed by default");
   } finally {
     if (server) {
       server.close();
@@ -226,7 +227,7 @@ test("AC2/AC4: GET /git-history returns a server-rendered SVG page with zero <sc
   }
 });
 
-test("AC5: /git-history degrades to 200 「无数据」 on a non-git workspace (never 500)", async () => {
+test("AC5: /git-history degrades to 200 「无数据」 on a non-git workspace (never 500, no graph mount)", async () => {
   const { ws, tasksDir } = makeWorkspace("gh-deg-");
   const cwd0 = process.cwd();
   let server;
@@ -239,7 +240,8 @@ test("AC5: /git-history degrades to 200 「无数据」 on a non-git workspace (
     const r = await get(port, "/git-history");
     assert.equal(r.status, 200, "non-git workspace still returns 200 (never 500)");
     assert.ok(r.body.includes("无数据"), "page renders 「无数据」 for a non-git workspace");
-    assert.equal((r.body.match(/<script/g) || []).length, 0, "degraded page still has zero <script>");
+    assert.ok(!r.body.includes('id="git-graph"'), "no graph mount when there is no data to graph");
+    assert.ok(!r.body.includes("d3js.org"), "no D3 library is inlined when there is no graph");
   } finally {
     if (server) {
       server.close();
