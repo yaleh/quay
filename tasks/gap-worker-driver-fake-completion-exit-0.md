@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-fake-completion-exit-0
 title: worker-driver final_state=completed 假完成（exit_code=0 ≠ 任务落地，3/5 没 merge/翻 done）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
