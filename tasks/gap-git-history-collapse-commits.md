@@ -26,12 +26,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：task 分支默认折叠（只显起止端点 + 总数/跨度），⛔ 每 commit 逐条渲染 ⇒ 假。
-- [ ] AC2：可展开查看完整 commit 列表（悬停或点击）。
+- [x] AC1：task 分支默认折叠（只显起止端点 + 总数/跨度），⛔ 每 commit 逐条渲染 ⇒ 假。
+- [x] AC2：可展开查看完整 commit 列表（悬停或点击）。
 
 ## Definition of Done
 
-- [ ] task 分支折叠（起止端点 + 总数/跨度）+ 悬停/点击展开落地；AC1-2 全勾；land 到 develop。
+- [x] task 分支折叠（起止端点 + 总数/跨度）+ 悬停/点击展开落地；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
