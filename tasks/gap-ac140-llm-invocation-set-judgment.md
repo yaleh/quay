@@ -26,8 +26,8 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（判定读集合）：`isLlmInvocation` 由配置声明的 LLM 命令集判定（⛔ 不靠 `base === "claude"` 字面量）。
-- [ ] AC2（能取假，负控制）：配 `claude-fjdac` 后跑一次真实 fix worker ⇒ `llm_invoked` 必须为 true（⛔ false ⇒ 假）。
+- [x] AC1（判定读集合）：`isLlmInvocation` 由配置声明的 LLM 命令集判定（⛔ 不靠 `base === "claude"` 字面量）。
+- [x] AC2（能取假，负控制）：配 `claude-fjdac` 后跑一次真实 fix worker ⇒ `llm_invoked` 必须为 true（⛔ false ⇒ 假）。
 
 ## Definition of Done
 

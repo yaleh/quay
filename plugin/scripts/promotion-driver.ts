@@ -29,7 +29,7 @@
 //   node --experimental-strip-types plugin/scripts/promotion-driver.ts \
 //     --root <repo> [--interval <ms>] [--cap <n>] [--once] [--max-rounds <n>]
 //     [--max-fix-retries <n>] [--ready-pool-cmd "<argv>"] [--fix-worker-cmd "<argv>"]
-//     [--round-log <path>] [--outcome-log <path>] [--run-id <id>] [--pid-file <path>] [--json]
+//     [--llm-commands <csv>] [--round-log <path>] [--outcome-log <path>] [--run-id <id>] [--pid-file <path>] [--json]
 //   --interval <ms>       轮间隔（缺省 30000；测试缝传小值）
 //   --cap <n>             传给 ready-pool-check 的并发 cap（缺省 5——AC48 后 cap 不再闸晋升，
 //                         但仍参与 floor 报告与 disjointness 排序；传 5 避免 cap-3 回退的 floor 假象）
@@ -44,6 +44,8 @@
 //   --fix-worker-cmd <s>  覆盖 fix worker 命令【前缀】（测试缝——真实 prompt 仍作为末参数追加，
 //                         AC2 取假用捕获脚本读末参数）。缺省 = `claude -p <prompt>`（prompt 由驱动
 //                         用任务 id + 结构化 missing 清单拼出，⛔ 非散文指令）。
+//   --llm-commands <csv>  配置声明的 LLM 命令集（逗号分隔，缺省 `claude`）——AC140-4 判定读此集合，
+//                         ⛔ 不靠 `base === "claude"` 字面量。后续 AC140-2 移到 .quay/config.yml。
 //   --round-log <path>    轮记录文件（缺省 <root>/.quay/promotion-round.jsonl）
 //   --outcome-log <path>  outcome 记录文件（缺省 <root>/.quay/promotion-outcome.jsonl，AC134）
 //   --pid-file <path>     把驱动自身 pid 写到该文件（外部观测 + kill 抓手）
@@ -81,6 +83,10 @@ export const MAX_FIX_RETRIES_DEFAULT = 3;
 /** ready-pool-check 单轮的 wall-clock 上限（spawnSync timeout，毫秒）。 */
 export const ROUND_TIMEOUT_MS = 180_000;
 
+/** 配置声明的 LLM 命令集缺省（AC140-4：判定读集合，⛔ 不靠 `base === "claude"` 字面量）。
+ *  形态先落缺省 ["claude"]；后续 AC140-2 把集做成 .quay/config.yml 可配（wrapper 如 claude-fjdac）。 */
+export const LLM_COMMAND_SET_DEFAULT: readonly string[] = ["claude"];
+
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
 
 /** 缺省 ready-pool-check 命令（全池 + --apply 落地晋升）。输出须为 analyzeTasks JSON。 */
@@ -107,13 +113,15 @@ export interface PromotionRound {
   fixDecisions: FixDecision[];
 }
 
-/** 判定待 spawn 命令是否 LLM 调用（argv[0] basename 是 claude —— 本仓库 LLM CLI；fix worker = `claude -p`）。
- *  AC131：晋升路径 spawn 的是 ready-pool-check（argv[0]=node）⇒ llmInvoked=false；若命令换成 claude ⇒ true。
- *  派生自真实 argv（⛔ 不硬编码 false），使「该路径零 LLM」成为可取假的测量（硬规则 4）。 */
-export function isLlmInvocation(argv: string[]): boolean {
+/** 判定待 spawn 命令是否 LLM 调用——由【配置声明的 LLM 命令集】判定（AC140-4：⛔ 不靠
+ *  `base === "claude"` 字面量）。argv[0] 的 basename 命中集合任一条 ⇒ LLM；缺省集合 ["claude"]
+ *  （后续 AC140-2 可配 wrapper，如 claude-fjdac）。AC131：晋升路径 spawn 的是 ready-pool-check
+ *  （argv[0]=node）⇒ llmInvoked=false；若命令换成集合内的 LLM CLI ⇒ true。派生自真实 argv
+ *  （⛔ 不硬编码 false），使「该路径零 LLM」成为可取假的测量（硬规则 4）。 */
+export function isLlmInvocation(argv: string[], llmCommandSet: readonly string[] = LLM_COMMAND_SET_DEFAULT): boolean {
   const argv0 = Array.isArray(argv) && argv.length > 0 ? String(argv[0]) : "";
   const base = path.basename(argv0);
-  return base === "claude" || base === "claude.exe" || base === "claude.cmd";
+  return (llmCommandSet ?? LLM_COMMAND_SET_DEFAULT).includes(base);
 }
 
 // ── AC132：fix worker（不合格者 → 短命 claude -p，输入 = 任务 id + 闸的结构化 missing 清单） ───────────
@@ -271,14 +279,16 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
 
 /** 一条结构化 round 记录（字段：ts · round · run_id · pid · action · pool · should_apply ·
  *  promoted_ids · applied · error · llm_invoked · fixes）。action ∈ promote|fix|none|error。
- *  llm_invoked 在晋升路径上为 false（机械 ready-pool-check，AC131）；AC132 的 fix worker 是
- *  `claude -p`（argv[0]=claude），其 spawn 在 fixes[].spawned=true 上可见。 */
+ *  llm_invoked = 晋升检查 argv 的 LLM 判定 OR 任一 spawn 的 fix worker 的 LLM 判定（AC140-4：
+ *  读配置声明的 LLM 命令集，⛔ 不靠 claude 字面量——fix worker 换 wrapper 后仍须为 true）。 */
 export interface FixOutcome {
   id: string;
   spawned: boolean;
   missing: string[];
   unfixable: string[];
   exitCode: number | null;
+  /** 该 fix worker 是否 LLM 调用（isLlmInvocation 对真实 argv 判定；AC140-4 供 round llm_invoked 聚合）。 */
+  llm: boolean;
 }
 
 export function computeRoundRecord(opts: {
@@ -314,15 +324,16 @@ export function computeRoundRecord(opts: {
 }
 
 /** AC132 的 fix pass：对 fixable 决策 spawn 短命 fix worker；对不可修五类逐条记原因不 spawn。
- *  返回每条的 FixOutcome（可修 ⇒ spawned=true + 结构化 missing；不可修 ⇒ spawned=false + unfixable 原因）。 */
-export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerCmd: string | null): FixOutcome[] {
+ *  返回每条的 FixOutcome（可修 ⇒ spawned=true + 结构化 missing + llm；不可修 ⇒ spawned=false + unfixable 原因）。
+ *  llm = isLlmInvocation 对【真实 argv】判定（AC140-4：读配置声明的 LLM 命令集，⛔ 不靠 claude 字面量）。 */
+export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerCmd: string | null, llmCommandSet: readonly string[] = LLM_COMMAND_SET_DEFAULT): FixOutcome[] {
   return fixDecisions.map((d) => {
     if (!d.fixable) {
-      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null };
+      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null, llm: false };
     }
     const argv = buildFixWorkerArgv(d.id, d.missing, fixWorkerCmd);
     const { exitCode } = spawnFixWorker(argv, root);
-    return { id: d.id, spawned: true, missing: d.missing, unfixable: [], exitCode };
+    return { id: d.id, spawned: true, missing: d.missing, unfixable: [], exitCode, llm: isLlmInvocation(argv, llmCommandSet) };
   });
 }
 
@@ -504,6 +515,8 @@ export interface ResidentLoopOptions {
   maxFixRetries: number;
   readyPoolArgv: string[] | null;
   fixWorkerCmd: string | null;
+  /** 配置声明的 LLM 命令集（--llm-commands，缺省 LLM_COMMAND_SET_DEFAULT；AC140-4）。 */
+  llmCommands: string[];
   roundLogFile: string;
   outcomeLogFile: string;
   runId: string;
@@ -519,7 +532,7 @@ export interface ResidentLoopOptions {
  *  （json 时）stdout 事件行。停机由进程信号驱动（⛔ 不读 .halt，单一真相源）。
  */
 export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promise<number> {
-  const { root, intervalMs, cap, once, maxRounds, maxFixRetries, readyPoolArgv, roundLogFile, outcomeLogFile, runId, json, pidFile, fixWorkerCmd } = opts;
+  const { root, intervalMs, cap, once, maxRounds, maxFixRetries, readyPoolArgv, roundLogFile, outcomeLogFile, runId, json, pidFile, fixWorkerCmd, llmCommands } = opts;
 
   if (pidFile) {
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
@@ -548,7 +561,7 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     const activeDecisions = r.fixDecisions.filter((d) => !retryState.needsHuman.has(d.id));
     // AC132：不合格者 → 短命 fix worker（可修三类 spawn、不可修五类逐条记原因不修）。spawn 前先跑
     // 分类（classifyCandidate 已做），fixDecisions 里 fixable=true 的才 spawn。
-    const fixes = runFixPass(activeDecisions, root, fixWorkerCmd);
+    const fixes = runFixPass(activeDecisions, root, fixWorkerCmd, llmCommands);
 
     // AC133 AC1：fix worker 退出后【重新调同一个闸】验证，以闸的新判定为准（⛔ 不信 worker 自述）。
     const fixedIds = fixes.filter((f) => f.spawned).map((f) => f.id);
@@ -573,6 +586,9 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     const applied = [...r.applied, ...reApplied];
     const record = computeRoundRecord({
       round, runId, pid: process.pid, at: new Date().toISOString(), ...r,
+      // AC140-4：round llm_invoked = 晋升检查 argv 的 LLM 判定 OR 本轮任一 spawn 的 fix worker 的 LLM 判定
+      // （fix worker 换 wrapper 如 claude-fjdac 后仍须为 true —— ⛔ 不因字面量失配而读成 false）。
+      llmInvoked: r.llmInvoked || fixes.some((f) => f.llm),
       promotedIds, applied, fixes, reverify, needsHuman: newlyNeedsHuman,
     });
     try { appendRoundRecord(roundLogFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
@@ -604,7 +620,7 @@ const HELP = [
   "AC133：fix worker 退出后重跑同一个闸验证（⛔ 不信 worker 自述）+ 连续修满 N 次仍不合格 ⇒ needs-human。",
   "AC134：判定/晋升/修复/needs-human 各写一条 outcome 记录（.quay/promotion-outcome.jsonl）。",
   "  --root <repo> [--interval <ms>] [--cap <n>] [--once] [--max-rounds <n>] [--max-fix-retries <n>]",
-  "  [--ready-pool-cmd \"<argv>\"] [--fix-worker-cmd \"<argv>\"] [--round-log <p>] [--outcome-log <p>] [--run-id <id>] [--pid-file <p>] [--json]",
+  "  [--ready-pool-cmd \"<argv>\"] [--fix-worker-cmd \"<argv>\"] [--llm-commands <csv>] [--round-log <p>] [--outcome-log <p>] [--run-id <id>] [--pid-file <p>] [--json]",
   "  --interval <ms>       轮间隔（缺省 30000；测试缝传小值）",
   "  --cap <n>             传给 ready-pool-check 的并发 cap（缺省 5）",
   "  --once                跑一轮即退出（手动单发 / 测试）",
@@ -612,6 +628,7 @@ const HELP = [
   "  --max-fix-retries <n> AC133 失败上限（缺省 3；连续修满 N 次仍不合格 ⇒ 标 needs-human）",
   "  --ready-pool-cmd <s>  覆盖 ready-pool-check 命令（测试缝）",
   "  --fix-worker-cmd <s>  覆盖 fix worker 命令前缀（测试缝；prompt 仍作末参数追加）",
+  "  --llm-commands <csv>  配置声明的 LLM 命令集，逗号分隔（缺省 claude；AC140-4 判定读此集合）",
   "  --round-log <path>    轮记录文件（缺省 <root>/.quay/promotion-round.jsonl）",
   "  --outcome-log <path>  outcome 记录文件（缺省 <root>/.quay/promotion-outcome.jsonl，AC134）",
   "  --pid-file <path>     把驱动自身 pid 写到该文件（外部观测 + kill 抓手）",
@@ -633,6 +650,7 @@ export async function main(argv: string[]): Promise<number> {
   let runId: string | undefined;
   let json = false;
   let pidFile: string | undefined;
+  let llmCommandsRaw: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -648,6 +666,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--outcome-log") outcomeLogPath = args[++i];
     else if (a === "--run-id") runId = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
+    else if (a === "--llm-commands") llmCommandsRaw = args[++i];
     else if (a === "--json") json = true;
     else if (a === "--help" || a === "-h") { console.log(HELP); return 0; }
     else { console.error(`promotion-driver: unknown argument: ${a}`); return 2; }
@@ -674,6 +693,10 @@ export async function main(argv: string[]): Promise<number> {
   const roundLogFile = roundLogPath ? path.resolve(roundLogPath) : path.join(rootDir, ROUND_LOG_REL);
   const outcomeLogFile = outcomeLogPath ? path.resolve(outcomeLogPath) : path.join(rootDir, OUTCOME_LOG_REL);
   const resolvedRunId = runId || `pm-${Date.now()}`;
+  // AC140-4：配置声明的 LLM 命令集（缺省 ["claude"]；--llm-commands 以逗号分隔注入，测试缝/AC140-2 前置）。
+  const llmCommands = llmCommandsRaw === undefined
+    ? [...LLM_COMMAND_SET_DEFAULT]
+    : llmCommandsRaw.split(",").map((s) => s.trim()).filter(Boolean);
 
   return runResidentPromotionLoop({
     root: rootDir,
@@ -684,6 +707,7 @@ export async function main(argv: string[]): Promise<number> {
     maxFixRetries,
     readyPoolArgv: readyPoolCmd ? splitArgs(readyPoolCmd) : null,
     fixWorkerCmd: fixWorkerCmd ?? null,
+    llmCommands,
     roundLogFile,
     outcomeLogFile,
     runId: resolvedRunId,
