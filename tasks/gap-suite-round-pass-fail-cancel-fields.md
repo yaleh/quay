@@ -1,7 +1,7 @@
 ---
 id: gap-suite-round-pass-fail-cancel-fields
 title: suite 轮记录补 pass/fail/cancelled 三字段（数据模型缺口，⛔ 非前端）
-status: ready
+status: done
 labels:
   - gap
 parent: null
