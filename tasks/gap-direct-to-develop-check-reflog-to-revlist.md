@@ -1,7 +1,7 @@
 ---
 id: gap-direct-to-develop-check-reflog-to-revlist
 title: direct-to-develop-bypass-check ground truth 从 reflog 改 rev-list/DAG
-status: todo
+status: ready
 labels:
   - gap
 parent: null
