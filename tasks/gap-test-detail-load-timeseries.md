@@ -43,6 +43,7 @@ depends_on: []
 
 - plugin/scripts/suite-load-sampler.ts (new)（suite 运行期采样，结束即停）
 - plugin/scripts/full-suite-runner.ts（触发采样 start/stop）
+- plugin/scripts/capability-catalog.sh（新增 suite-load-sampler.ts 的 QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING 声明——AC1c 入口闸：shipped 脚本必须声明问题）
 - packages/quay/src/serve-handlers.ts（负载曲线 SVG 渲染）
 - plugin/test/full-suite-runner.test.mjs（采样触发测试）
 - packages/quay/test/serve-handlers.test.mjs（曲线渲染测试）
