@@ -1,7 +1,7 @@
 ---
 id: gap-tick-core-third-copy-drift-packages-face
 title: tick-core 第三份副本（packages/quay/plugin/loop，npm 打包面）漂移 + 检查器覆盖缺口
-status: needs-human
+status: todo
 labels:
   - gap
 parent: null
@@ -45,9 +45,3 @@ depends_on: []
 - packages/quay/plugin/loop/manager-loop-tick.md（同步）
 - plugin/scripts/tick-core-static-check.ts（drift pair 扩第三份）
 - tasks/gap-tick-core-third-copy-drift-packages-face.md（自身）
-
-## Needs-Human
-
-**执行 2026-08-23T09:09:46.035Z — promotion-driver AC133：连续修满上限仍不合格**
-
-- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
