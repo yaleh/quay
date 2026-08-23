@@ -1,7 +1,7 @@
 ---
 id: gap-webui-journal-stale-and-ticklog-bug
 title: Journal 页陈旧记录（escalations 退役 + tick-log 分段 bug）
-status: ready
+status: done
 labels:
   - gap
 parent: null
