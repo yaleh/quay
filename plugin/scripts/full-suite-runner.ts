@@ -1943,6 +1943,58 @@ export async function run(argv: string[]): Promise<number> {
   // runner can always take over from a stale/legacy state.
   writeSuiteState({ state: "running", ...base, finishedAt: null, durationMs: null }, { establish: true });
 
+  // ── gap-test-detail-load-timeseries — per-run system-load sampler (start/stop) ─────────────────────
+  // The sampler records loadavg/cpu_stall/mem_avail every N seconds into <state-dir>/suite-load-
+  // <runId>.jsonl while THIS round runs, then STOPS. Its stop is STATE-DRIVEN (it polls the state
+  // file and exits when state leaves "running" or a newer run owns the generation), so it can never
+  // outlive the suite on ANY terminal path — green/red/aborted/signal/crash all write a terminal
+  // state. stopLoadSampler below is only the normal-path fast-stop (no up-to-N-second tail). The
+  // lightweight hermetic controls (--fail-fast-check / --static-check-check / --wait-check) run no
+  // real suite, so they spawn no sampler. Best-effort — a sampler failure must never fail the run.
+  const isLightweightControl =
+    argv.includes("--fail-fast-check") || argv.includes("--static-check-check") || argv.includes("--wait-check");
+  let loadSampler: ReturnType<typeof spawn> | null = null;
+  const startLoadSampler = (): void => {
+    if (isLightweightControl) return;
+    const intervalArg = Number(process.env.QUAY_SUITE_LOAD_SAMPLER_INTERVAL ?? "5");
+    const interval = Number.isFinite(intervalArg) && intervalArg > 0 ? intervalArg : 5;
+    const outFile = path.join(stateDir, `suite-load-${runId}.jsonl`);
+    try {
+      const child = spawn(
+        process.execPath,
+        [
+          "--no-warnings",
+          "--experimental-strip-types",
+          path.join(__dirname, "suite-load-sampler.ts"),
+          "--state-file",
+          stateFile,
+          "--out-file",
+          outFile,
+          "--run-id",
+          runId,
+          "--interval",
+          String(interval),
+        ],
+        { stdio: "ignore", detached: true },
+      );
+      child.unref();
+      loadSampler = child;
+    } catch (e) {
+      process.stderr.write(`full-suite-runner: load sampler spawn failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
+    }
+  };
+  const stopLoadSampler = (): void => {
+    if (loadSampler && loadSampler.pid) {
+      try {
+        process.kill(loadSampler.pid, "SIGTERM");
+      } catch {
+        // already exited — the state-driven stop beat us here
+      }
+    }
+    loadSampler = null;
+  };
+  startLoadSampler();
+
   // gap-phase-boundary-differential-accounting — the per-phase differential accumulator. Declared
   // HERE (before the crash trap below so the trap can write the phase records) and initialized right
   // after the child spawns. `lanes` per phase = the concurrency that phase actually ran at (serial
@@ -3022,6 +3074,9 @@ export async function run(argv: string[]): Promise<number> {
           : {}),
       };
   writeSuiteState(finalState);
+  // gap-test-detail-load-timeseries — normal-path fast-stop for the load sampler: the verdict is
+  // terminal on disk, so stop sampling now rather than waiting out the sampler's next poll.
+  stopLoadSampler();
   // gap-suite-red-verdict-carries-empty-failures-payload AC3 — the suite log must ALWAYS end with a
   // `# fail N / # pass M` summary line. The observed defect (2026-08-06): full-suite.log ran 9251
   // lines / 792K with 410 fail-words but ZERO `# fail`/`# pass` summary lines, ending mid-assertion

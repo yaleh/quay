@@ -28,8 +28,8 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：suite 运行期间有 `.quay/suite-load-<runId>.jsonl` 时间序列（读生产载体⛔非 fixture），suite 结束即停采样（⛔ 常驻空跑 ⇒ 假）。
-- [ ] AC2：详情页渲染负载曲线（服务端 SVG，⛔ 客户端图表库 ⇒ 假）。
+- [x] AC1：suite 运行期间有 `.quay/suite-load-<runId>.jsonl` 时间序列（读生产载体⛔非 fixture），suite 结束即停采样（⛔ 常驻空跑 ⇒ 假）。
+- [x] AC2：详情页渲染负载曲线（服务端 SVG，⛔ 客户端图表库 ⇒ 假）。
 
 ## Definition of Done
 
@@ -46,4 +46,5 @@ depends_on: []
 - packages/quay/src/serve-handlers.ts（负载曲线 SVG 渲染）
 - plugin/test/full-suite-runner.test.mjs（采样触发测试）
 - packages/quay/test/serve-handlers.test.mjs（曲线渲染测试）
+- .gitignore（采样器运行时输出 suite-load-*.jsonl/.pid 的 ignore 条目）
 - tasks/gap-test-detail-load-timeseries.md（自身）
