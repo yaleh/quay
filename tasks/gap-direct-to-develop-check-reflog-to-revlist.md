@@ -35,13 +35,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（ledger 写入，能取假）：fan-in 真实 ff 落地后，`fan-in-merge-lock-events.jsonl` 记了该 commit 的「fan-in 落地」事实；⛔ ff 落地后 ledger 无对应记录 ⇒ 假。
-- [ ] AC2（ledger 判定，能取假）：rev-list 命中的 commit 在 ledger 里 ⇒ 判 fan-in 落地不算直投（不报 RED）；不在 ledger 里且 reflog 有「直接 commit」标签 ⇒ 报 RED（真直投仍红）。
-- [ ] AC3（NOT-EVALUATED 诚实）：ledger 无记录且 reflog 也查不到 ⇒ 判 NOT-EVALUATED（⛔ 不伪装成「未发现 direct」——硬规则 3b）。
+- [x] AC1（ledger 写入，能取假）：fan-in 真实 ff 落地后，`fan-in-merge-lock-events.jsonl` 记了该 commit 的「fan-in 落地」事实；⛔ ff 落地后 ledger 无对应记录 ⇒ 假。
+- [x] AC2（ledger 判定，能取假）：rev-list 命中的 commit 在 ledger 里 ⇒ 判 fan-in 落地不算直投（不报 RED）；不在 ledger 里且 reflog 有「直接 commit」标签 ⇒ 报 RED（真直投仍红）。
+- [x] AC3（NOT-EVALUATED 诚实）：ledger 无记录且 reflog 也查不到 ⇒ 判 NOT-EVALUATED（⛔ 不伪装成「未发现 direct」——硬规则 3b）。
 
 ## Definition of Done
 
-- [ ] fan-in ff 落地记持久化 ledger + checker 三态判定（ledger → reflog 回退 → NOT-EVALUATED）落地；AC1-3 全勾；land 到 develop。
+- [x] fan-in ff 落地记持久化 ledger + checker 三态判定（ledger → reflog 回退 → NOT-EVALUATED）落地；AC1-3 全勾；land 到 develop。
 
 ## Retires
 

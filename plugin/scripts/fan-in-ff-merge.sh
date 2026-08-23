@@ -411,7 +411,18 @@ fi
 
 now_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 now_epoch="$(date +%s)"
-printf '%s\n' "{\"event\":\"release\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"taskId\":\"${task_id}\",\"pid\":$$,\"runId\":${run_id_json},\"agentId\":${agent_id_json}}" >> "${lock_events}"
+# gap-direct-to-develop-check-reflog-to-revlist AC1: the release event carries `landedSha` — on a
+# SUCCESSFUL ff it is the landed commit sha (the merge target, now at the task tip); on an ff failure
+# (merge_rc != 0) it is null. This is the persistent fan-in-landing ledger (same file, same append —
+# ⛔ no new jsonl): direct-to-develop-bypass-check.ts reads it as the ground truth that survives reflog
+# gc, instead of the pruneable reflog `merge task/<id>: Fast-forward` entries.
+if [ "${merge_rc}" = "0" ]; then
+  landed_sha="$(git -C "${root}" rev-parse "${merge_target}" 2>/dev/null || echo "")"
+  if [ -n "${landed_sha}" ]; then landed_json="\"${landed_sha}\""; else landed_json="null"; fi
+else
+  landed_json="null"
+fi
+printf '%s\n' "{\"event\":\"release\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"taskId\":\"${task_id}\",\"pid\":$$,\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"landedSha\":${landed_json}}" >> "${lock_events}"
 
 # Release the lock explicitly. NOTE: do NOT `exec {lock_fd}>&-` here — bash mis-handles `{var}>&-`
 # (an fd-ALLOCATING close) after a prior `$(...)` command substitution re-used fd numbers and would

@@ -158,15 +158,17 @@ test("ff success — master fast-forwards to the task tip; lock events paired; N
     assert.notEqual(gitCmd(dir, "rev-parse", "master").stdout.trim(), before, "master advanced");
     assert.equal(gitCmd(dir, "rev-list", "--parents", "-n", "1", "master").stdout.trim().split(" ").length, 2,
       "ff creates NO merge commit (single parent)");
-    // Lock events: exactly one acquire + one release for this task.
+    // Lock events: acquire + release. The release event carries `landedSha` — the persistent fan-in
+    // landing ledger (gap-direct-to-develop-check-reflog-to-revlist AC1), same file same append.
     const lines = fs.readFileSync(events, "utf8").trim().split("\n").filter(Boolean);
-    assert.equal(lines.length, 2, "exactly acquire+release");
+    assert.equal(lines.length, 2, "exactly acquire+release (the ledger is a field on release, ⛔ no new event)");
     const [acq, rel] = lines.map(JSON.parse);
     assert.equal(acq.event, "acquire");
     assert.equal(rel.event, "release");
     assert.equal(acq.taskId, "ac62-a");
     // The hold is released immediately (release ≥ acquire, and the window is milliseconds).
     assert.ok(rel.epoch >= acq.epoch, "release must not precede acquire");
+    assert.equal(rel.landedSha, tip, "AC1: release carries the landed commit sha (the task tip)");
     // No retry record written on success.
     assert.ok(!fs.existsSync(retries), "no retry record on success");
   } finally {
