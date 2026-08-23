@@ -51,14 +51,14 @@
         "launcher": "claude-fjdac",
         "model": "deepseek-v4-pro",
         "env": {},
-        "bare": true
+        "bare": false
       },
       "fix-worker": {
         "name": "quay-fix-worker",
         "launcher": "claude-fjdac",
         "model": "deepseek-v4-pro",
         "env": {},
-        "bare": true
+        "bare": false
       }
     },
     "bare": {
