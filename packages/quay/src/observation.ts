@@ -1155,12 +1155,14 @@ export const GIT_HISTORY_MAINLINE_REFS = new Set(["develop", "master"]);
 export interface GitHistoryCommit {
   /** Full commit hash. */
   hash: string;
-  /** Commit timestamp (unix seconds) — the "landing time" the chart's x-axis maps to. */
+  /** Commit timestamp (unix seconds) — the commit's landing time. */
   t: number;
   /** Local branch this commit was reached from (`--source`), e.g. "integration". */
   ref: string;
   /** Number of parents. > 1 → a merge commit (the fan-in landing event). */
   parents: number;
+  /** Full parent hashes — the DAG edges the vertical graph's fork/merge lines are drawn from. */
+  parentHashes: string[];
   subject: string;
 }
 
@@ -1168,6 +1170,10 @@ export interface GitHistoryResult {
   status: ObservationStatus;
   reason: string | null;
   commits: GitHistoryCommit[];
+  /** HEAD commit hash — the vertical graph's trunk root. null when the repo has no resolvable HEAD. */
+  head: string | null;
+  /** Active branch name → tip commit hash (the branch topology, not the `--source` attribution). */
+  heads: Record<string, string>;
 }
 
 /**
@@ -1184,26 +1190,32 @@ export interface GitHistoryResult {
 export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, nowMs = Date.now() }: { limit?: number; nowMs?: number } = {}): GitHistoryResult {
   try {
     const sinceSec = Math.floor(nowMs / 1000) - GIT_HISTORY_ACTIVE_WINDOW_SEC;
-    // Enumerate local branches with their tip's commit time. `%09` emits a TAB, which git forbids
-    // in ref names (a control char), so it is a safe field separator. (`%x1f` is a `--pretty`-only
-    // escape — `for-each-ref --format` emits it literally.)
+    // Enumerate local branches with their tip hash + tip commit time. `%09` emits a TAB, which git
+    // forbids in ref names (a control char), so it is a safe field separator. (`%x1f` is a
+    // `--pretty`-only escape — `for-each-ref --format` emits it literally.) The tip hash is the
+    // branch TOPOLOGY (which commit the ref points at) — the vertical graph needs it, because the
+    // `--source` attribution in the log below is only "which ref the traversal reached the commit
+    // through", NOT "which branch this commit belongs to".
     const refsOut = execFileSync(
       "git",
-      ["-C", root, "for-each-ref", "refs/heads", "--format=%(refname:short)%09%(committerdate:unix)"],
+      ["-C", root, "for-each-ref", "refs/heads", "--format=%(refname:short)%09%(objectname)%09%(committerdate:unix)"],
       { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] },
     );
     const activeRefs: string[] = [];
+    const heads: Record<string, string> = {};
     let sawAnyRef = false;
     for (const line of refsOut.split(/\r?\n/)) {
       if (!line) continue;
       sawAnyRef = true;
-      const sep = line.lastIndexOf("\t");
-      const name = sep >= 0 ? line.slice(0, sep) : line;
-      const tipTs = Number(sep >= 0 ? line.slice(sep + 1) : "");
+      const [name, tipHash, tipTsRaw] = line.split("\t");
+      const tipTs = Number(tipTsRaw ?? "");
       // Keep a branch if its tip is inside the active window, OR it is a mainline ref
       // (develop/master are always kept regardless of tip age — their tips advance only at
       // merge boundaries, which can be >24h apart; a mainline lane must never drop out).
-      if (name && Number.isFinite(tipTs) && (tipTs >= sinceSec || GIT_HISTORY_MAINLINE_REFS.has(name))) activeRefs.push(name);
+      if (name && tipHash && Number.isFinite(tipTs) && (tipTs >= sinceSec || GIT_HISTORY_MAINLINE_REFS.has(name))) {
+        activeRefs.push(name);
+        heads[name] = tipHash;
+      }
     }
     if (activeRefs.length === 0) {
       // No active branch: a fresh repo with no commits, or every branch is stale with no mainline.
@@ -1211,6 +1223,8 @@ export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, nowMs 
         status: "empty",
         reason: sawAnyRef ? `无活跃分支（最近 ${GIT_HISTORY_ACTIVE_WINDOW_SEC / 86400} 天无提交且无 develop/master）` : "git 仓库无提交记录",
         commits: [],
+        head: null,
+        heads: {},
       };
     }
     const out = execFileSync(
@@ -1223,27 +1237,40 @@ export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, nowMs 
       if (!line) continue;
       const [hash, t, ref, parents, ...subjectParts] = line.split("\x1f");
       if (!hash || !t || !ref) continue;
+      const parentHashes = (parents ?? "").split(/\s+/).filter(Boolean);
       commits.push({
         hash,
         t: Number(t),
         ref,
-        parents: (parents ?? "").split(/\s+/).filter(Boolean).length,
+        parents: parentHashes.length,
+        parentHashes,
         subject: subjectParts.join("\x1f"),
       });
     }
     if (commits.length === 0) {
-      return { status: "empty", reason: "git 仓库无提交记录", commits: [] };
+      return { status: "empty", reason: "git 仓库无提交记录", commits: [], head: null, heads: {} };
     }
-    return { status: "ok", reason: null, commits };
+    let head: string | null = null;
+    try {
+      const headOut = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], {
+        encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+      });
+      head = headOut.trim().split(/\r?\n/)[0] || null;
+    } catch {
+      head = null; // unborn HEAD / detached — the renderer falls back to the newest commit as trunk root.
+    }
+    return { status: "ok", reason: null, commits, head, heads };
   } catch (err) {
     const stderr = String((err as { stderr?: Buffer | string }).stderr ?? "");
     if (stderr.includes("not a git repository")) {
-      return { status: "empty", reason: "工作区不是 git 仓库（无提交记录）", commits: [] };
+      return { status: "empty", reason: "工作区不是 git 仓库（无提交记录）", commits: [], head: null, heads: {} };
     }
     return {
       status: "error",
       reason: `git log 失败：${err instanceof Error ? err.message : String(err)}`,
       commits: [],
+      head: null,
+      heads: {},
     };
   }
 }

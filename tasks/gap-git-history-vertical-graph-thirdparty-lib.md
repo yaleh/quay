@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-vertical-graph-thirdparty-lib
 title: Git History 页重做（纵向时间轴 + 第三方图库；站点级「零客户端 JS」原则废除）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -30,22 +30,30 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（纵向时间轴）：Git History 页渲染纵向时间轴——develop 竖直主干 + task 分支从 develop 分出/合入的 fork/merge 连线（⛔ 仍横向列表/散点 ⇒ 假）。
-- [ ] AC2（折叠 + 展开）：task 分支默认折叠 commits，只显总数 + 时间跨度，可展开查看逐条（⛔ 默认全展开 ⇒ 假）。
-- [ ] AC3（第三方库 + 原则废除）：引入了第三方前端库做可视化，且 `docs/webui-guide.md` 已记录「零客户端 JS」原则废除（⛔ 仍 server-rendered 零客户端 JS ⇒ 假）。
+- [x] AC1（纵向时间轴）：Git History 页渲染纵向时间轴——develop 竖直主干 + task 分支从 develop 分出/合入的 fork/merge 连线（⛔ 仍横向列表/散点 ⇒ 假）。
+- [x] AC2（折叠 + 展开）：task 分支默认折叠 commits，只显总数 + 时间跨度，可展开查看逐条（⛔ 默认全展开 ⇒ 假）。
+- [x] AC3（第三方库 + 原则废除）：引入了第三方前端库做可视化，且 `docs/webui-guide.md` 已记录「零客户端 JS」原则废除（⛔ 仍 server-rendered 零客户端 JS ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] 纵向时间轴 + 折叠展开 + 第三方库引入 + 原则废除记录落地；AC1-3 全勾；land 到 develop。
+- [x] 纵向时间轴 + 折叠展开 + 第三方库引入 + 原则废除记录落地；AC1-3 全勾；land 到 develop。
 
+
+> **手动介入记录（AC141-2 例外①）**：driver 误记 completed ⇒ 候选计算中永久排除 ⇒ 跨 round 4/5/6 两小时未重派 ⇒ inner 手动 re-trigger fan-in（判据：无记录的手动介入 ⇒ AC141-1 判假）。
 ## Retires
 
 - 无（页重做 + 原则废除，非退役机件）
 
 ## Touches
 
-- packages/quay/src/serve-handlers.ts（Git History 页改为纵向时间轴 + 第三方库渲染）
-- packages/quay/package.json（第三方图库依赖）
+- packages/quay/src/serve-handlers.ts（Git History 页改为纵向时间轴 + 第三方库渲染 + 折叠展开客户端脚本）
+- packages/quay/src/observation.ts（readGitHistory 增 parentHashes/head/heads，供纵向图布局）
+- packages/quay/src/serve.ts（re-export：renderGitHistorySvg → layoutGitGraph）
+- packages/quay/scripts/build-dist.mjs（dist bundle 内联 d3.min.js）
+- packages/quay/package.json（第三方图库依赖 d3）
+- package-lock.json（d3 依赖锁定）
+- packages/quay/test/serve-handlers.test.mjs（git-history 测试改写：纵向布局 + 折叠 + 第三方库）
+- packages/quay/test/serve-ac102-modernist-views.test.mjs（git-history 渲染段 token 化断言更新）
 - docs/webui-guide.md（记录「零客户端 JS」原则废除）
 - tasks/gap-git-history-vertical-graph-thirdparty-lib.md（自身）
 
