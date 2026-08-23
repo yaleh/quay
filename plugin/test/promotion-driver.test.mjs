@@ -611,6 +611,31 @@ test("computeOutcomeRecords — applied⇒promote, spawned⇒fix, unfixable⇒sk
   assert.deepEqual(mixed.gate.missing, ["selfTouchOk=false", "superseded=true"], "mixed skip carries fixable missing + unfixable blocker");
 });
 
+test("gap-fix-worker-edit-exit-4 — exit=4 但重闸判落地 ⇒ result.ok=true（⛔ result.ok 不再 = 裸 exitCode===0）", () => {
+  const at = "2026-08-23T00:00:00.000Z";
+  // exit=4（编辑成功后的事后非零退出）+ stderr 空（同 AC142 观测：stdout/stderr 均空）。
+  const fixes = [{ id: "gap-fix", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 4, stderr: null, timedOut: false }];
+
+  // 无 reverify ⇒ 退回 exitCode===0 ⇒ ok=false（旧行为；⛔ 不硬编码「exit-4=成功」——那是猜）。
+  const noReverify = computeOutcomeRecords({ at, applied: [], fixes });
+  assert.equal(noReverify.find((o) => o.action === "fix").result.ok, false, "无 reverify 时仍以退出码为准");
+
+  // 有 reverify 且闸判 nowEligible ⇒ ok=true（fix landed，⛔ 不信 exit-4 这个事后非零退出码）。
+  const reverify = { nowEligibleIds: ["gap-fix"], stillIneligibleIds: [] };
+  const withReverify = computeOutcomeRecords({ at, applied: [], fixes, reverify });
+  const fix = withReverify.find((o) => o.action === "fix");
+  assert.equal(fix.result.ok, true, "重闸判落地 ⇒ ok=true（exit-4 不把 result.ok 打 false）");
+  assert.ok(fix.result.detail.includes("fix landed"), `detail 标注落地: ${fix.result.detail}`);
+});
+
+test("gap-fix-worker-edit-exit-4 — exit=0 但重闸判仍不合格 ⇒ result.ok=false（⛔ 不信 exit-0 自述）", () => {
+  const fixes = [{ id: "gap-fix", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 0, stderr: null, timedOut: false }];
+  const reverify = { nowEligibleIds: [], stillIneligibleIds: ["gap-fix"] };
+  const recs = computeOutcomeRecords({ at: "t", applied: [], fixes, reverify });
+  const fix = recs.find((o) => o.action === "fix");
+  assert.equal(fix.result.ok, false, "exit=0 但闸判仍不合格 ⇒ ok=false（AC133 ⛔ 不信 worker 自述）");
+});
+
 test("appendOutcomeRecord — pure append, never truncates (two lines survive)", (t) => {
   const root = makeRoot("outcome-append");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
