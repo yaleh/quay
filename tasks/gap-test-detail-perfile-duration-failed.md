@@ -1,7 +1,7 @@
 ---
 id: gap-test-detail-perfile-duration-failed
 title: Test 详情 ③④——perFile 耗时+失败持久化进 round 记录 + 可排序表
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -41,4 +41,6 @@ depends_on: []
 
 - plugin/scripts/measure-suite-reporter.mjs（收尾写 perFile 字段）
 - packages/quay/src/serve-handlers.ts（详情页 perFile 表格渲染）
+- plugin/test/measure-suite-reporter.test.mjs（perFile 字段测试）
+- packages/quay/test/serve-handlers.test.mjs（表格渲染测试）
 - tasks/gap-test-detail-perfile-duration-failed.md（自身）

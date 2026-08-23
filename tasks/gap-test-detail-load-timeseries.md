@@ -1,7 +1,7 @@
 ---
 id: gap-test-detail-load-timeseries
 title: Test 详情 ②——suite 运行期系统负载时间序列采样（新增采样器）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -44,4 +44,6 @@ depends_on: []
 - plugin/scripts/suite-load-sampler.ts (new)（suite 运行期采样，结束即停）
 - plugin/scripts/full-suite-runner.ts（触发采样 start/stop）
 - packages/quay/src/serve-handlers.ts（负载曲线 SVG 渲染）
+- plugin/test/full-suite-runner.test.mjs（采样触发测试）
+- packages/quay/test/serve-handlers.test.mjs（曲线渲染测试）
 - tasks/gap-test-detail-load-timeseries.md（自身）

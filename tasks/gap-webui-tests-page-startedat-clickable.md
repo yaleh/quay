@@ -40,4 +40,5 @@ depends_on: []
 ## Touches
 
 - packages/quay/src/serve-handlers.ts（historyRows 渲染）
+- packages/quay/test/serve-handlers.test.mjs（startedAt 列 + 行可点测试）
 - tasks/gap-webui-tests-page-startedat-clickable.md（自身）

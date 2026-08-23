@@ -44,4 +44,5 @@ depends_on: []
 ## Touches
 
 - packages/quay/src/observation.ts（readJournal 专用分段函数）
+- packages/quay/test/observation.test.mjs（tick-log 分段测试）
 - tasks/gap-webui-journal-stale-and-ticklog-bug.md（自身）

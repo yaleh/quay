@@ -42,4 +42,6 @@ depends_on:
 
 - plugin/scripts/measure-suite-reporter.mjs（perFile 加结束时刻）
 - packages/quay/src/serve-handlers.ts（时间线 SVG 渲染）
+- plugin/test/measure-suite-reporter.test.mjs（时刻字段测试）
+- packages/quay/test/serve-handlers.test.mjs（时间线渲染测试）
 - tasks/gap-test-detail-timeline.md（自身）
