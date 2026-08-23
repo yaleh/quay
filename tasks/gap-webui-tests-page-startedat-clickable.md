@@ -1,7 +1,7 @@
 ---
 id: gap-webui-tests-page-startedat-clickable
 title: Tests 页补 startedAt 时间戳列 + 行可点击（commit 链 git-history）
-status: ready
+status: done
 labels:
   - gap
 parent: null
