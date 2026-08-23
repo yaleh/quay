@@ -32,10 +32,12 @@ depends_on: []
 
 **影响（比 exit-4 严重）**：exit-4 是 fix-worker 侧、只影响晋升；**这条是 worker 侧、影响「任务到底做完没」**——现在会静默把没做完的任务记成 completed（3/5 假），且 `quay driver status` 的 `carrier_records` 自报 11 / 实际 5（同族「驱动自报值不可信」第二实例）。
 
+**与 exit-4 的共同纪律（同族）**：exit-4 是「进程说失败、任务其实做成了某步」，本条是「进程说成功、任务没做完」——都是**驱动记录的终态是【进程视角】，我们要的是【任务视角】**。共同纪律：**驱动写任何终态之前，必须读一次任务侧的直接量**（同族：`gap-fix-worker-edit-exit-4`）。
+
 ## Plan
 
 1. 判据从 `exit_code` 换成「读生产载体确认 land」：`final_state=completed` 必须与 `status=done ∧ 无残留 worktree` 一致。
-2. worker-driver 写 `final_state` 前核实际落地状态。
+2. **修法（manager 已读 `computeOutcome` :159-220 逐字验证）**：`finalState` 只由 4 条件定（spawnError→spawn-failed / timedOut→timed-out / signal→killed / exitCode≠0→failed），其余落初始值 `completed`——函数体【无任何】读 task status/worktree/develop 的语句 ⇒ `completed` 结构上就是「没触发异常分支且 exit==0」的同义词。修法倾向**引入 `exited-not-landed` 独立取值**（硬规则 3b：跑完没落地 ≠ 完成，两者现共用 `completed` 正是 3b 禁的形态），⛔ 而非仅「写前加核对」——独立取值即便核对失败也能如实表达。
 
 ## Acceptance Criteria
 
