@@ -32,11 +32,11 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：server 代码过期可被检测（比对启动时刻 vs 最新 commit，过期 ⇒ 有信号/自动重启；⛔ 无感知 ⇒ 假）。
+- [x] AC1：server 代码过期可被检测（比对启动时刻 vs 最新 commit，过期 ⇒ 有信号/自动重启；⛔ 无感知 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] server 陈旧代码检测/自愈机制落地 + 实测过期可报；AC1 全勾；land 到 develop。
+- [x] server 陈旧代码检测/自愈机制落地 + 实测过期可报；AC1 全勾；land 到 develop。
 
 ## Retires
 
