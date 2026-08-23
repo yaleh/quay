@@ -38,7 +38,7 @@ depends_on:
 
 ## Definition of Done
 
-- [ ] 单一构造 + 可配 + 覆盖语义统一落地；AC1-4 全勾（含配置 wrapper 仍 spawn 裸 claude 取假 + quay-launch.sh 三角色 --dry-run 回归）；land 到 develop。
+- [x] 单一构造 + 可配 + 覆盖语义统一落地；AC1-4 全勾（含配置 wrapper 仍 spawn 裸 claude 取假 + quay-launch.sh 三角色 --dry-run 回归）；land 到 develop。
 
 ## Retires
 
