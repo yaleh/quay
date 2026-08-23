@@ -31,7 +31,7 @@ depends_on:
 
 - [ ] AC1（稳定承载）：worker-driver 从主检出稳定路径启动为常驻进程（`ps` 可见，supervisor cmdline ⛔ 非 `quay-worktrees/`）；取假：`ps` 零命中或 supervisor 从 worktree 路径启动 ⇒ 假。
 - [ ] AC2（死亡告警）：worker-driver/supervisor 死时有机件检测并报告（⛔ pid 文件在、进程已死 与「在跑」同形 ⇒ 假）。
-- [ ] AC3（自主处理，能取假）：驱动自主选任务（不传 `--task`）跑完真实任务——产出可核（有 diff/commit），`selector_reason` 非占位值；取假：窗口内一次都没自主跑完任务、或全为 `--task` 显式指定 ⇒ 假。
+- [ ] AC3（自主处理，能取假）：驱动自主选任务（不传 `--task`）跑完真实任务——产出可核（有 diff/commit），`selector_reason` 非占位值，且 spawn 出的 worker 进程 env 有 `ANTHROPIC_BASE_URL`（走 wrapper，⛔ 裸 claude）；取假：窗口内一次都没自主跑完任务、或全为 `--task` 显式指定、或 worker env 无 `ANTHROPIC_BASE_URL` ⇒ 假。
 
 ## Definition of Done
 
