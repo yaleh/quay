@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-collapse-commits
 title: Git History task 分支默认折叠 commits（总数+跨度，展开查看）
-status: needs-human
+status: done
 labels:
   - gap
 parent: null
@@ -26,13 +26,15 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：task 分支默认折叠（只显起止端点 + 总数/跨度），⛔ 每 commit 逐条渲染 ⇒ 假。
-- [ ] AC2：可展开查看完整 commit 列表（悬停或点击）。
+- [x] AC1：task 分支默认折叠（只显起止端点 + 总数/跨度），⛔ 每 commit 逐条渲染 ⇒ 假。
+- [x] AC2：可展开查看完整 commit 列表（悬停或点击）。
 
 ## Definition of Done
 
-- [ ] 折叠 + 展开落地；AC1-2 全勾；land 到 develop。
+- [x] task 分支折叠（起止端点 + 总数/跨度）+ 悬停/点击展开落地；AC1-2 全勾；land 到 develop。
 
+
+> **手动介入记录（AC141-2 例外①）**：driver 误记 completed ⇒ 候选计算中永久排除 ⇒ 跨 round 4/5/6 两小时未重派 ⇒ inner 手动 re-trigger fan-in（判据：无记录的手动介入 ⇒ AC141-1 判假）。
 ## Retires
 
 - 无（渲染折叠）
@@ -42,9 +44,3 @@ depends_on: []
 - packages/quay/src/serve-handlers.ts（lanes 渲染折叠）
 - packages/quay/test/serve-handlers.test.mjs
 - tasks/gap-git-history-collapse-commits.md（自身）
-
-## Needs-Human
-
-**执行 2026-08-23T04:15:31.863Z — promotion-driver AC133：连续修满上限仍不合格**
-
-- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）

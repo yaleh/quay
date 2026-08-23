@@ -55,7 +55,7 @@ test("readGitHistory excludes a merged-but-stale branch from the lanes (negative
   }
 });
 
-test("readGitHistory degrades to 「无活跃分支」 when every branch is stale", () => {
+test("readGitHistory degrades to 「无活跃分支」 when every branch is stale and there is no mainline", () => {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-old-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: ws });
@@ -69,10 +69,39 @@ test("readGitHistory degrades to 「无活跃分支」 when every branch is stal
       GIT_COMMITTER_DATE: new Date(oldSec * 1000).toISOString(),
     };
     execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "old"], { cwd: ws, env });
+    // Rename away from the mainline: a stale non-mainline-only repo must still degrade (the
+    // mainline refs develop/master are ALWAYS kept, so "every branch stale" only fires without one).
+    execFileSync("git", ["branch", "-m", "verify/stale"], { cwd: ws });
 
     const hist = readGitHistory(ws);
     assert.equal(hist.status, "empty");
     assert.match(hist.reason || "", /无活跃分支/, "reason says no active branch, not 「无提交记录」");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("readGitHistory always keeps master (and develop) even when their tip is >24h stale", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-mainline-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    // master's ONLY commit is 30 days old — far outside the 7-day active window, but a mainline
+    // lane must never drop out (gap-git-history-clickable-branches-window: the 24h window used to
+    // exclude master entirely).
+    const oldSec = Math.floor(Date.now() / 1000) - 30 * 86400;
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_DATE: new Date(oldSec * 1000).toISOString(),
+      GIT_COMMITTER_DATE: new Date(oldSec * 1000).toISOString(),
+    };
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "old"], { cwd: ws, env });
+
+    const hist = readGitHistory(ws);
+    assert.equal(hist.status, "ok");
+    const refs = new Set(hist.commits.map((c) => c.ref));
+    assert.ok(refs.has("master"), `stale master is still a lane (lanes: ${[...refs].join(", ")})`);
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
@@ -101,6 +130,32 @@ test("AC127: parseVerificationRound extracts the bucket-execution fields (bucket
   assert.equal(legacy.buckets, undefined, "a legacy row has no buckets field (absent-field contract)");
   assert.equal(legacy.bucket_files, undefined, "a legacy row has no bucket_files field");
   assert.equal(legacy.bucket_duration_ms, undefined, "a legacy row has no bucket_duration_ms field");
+});
+
+test("gap-test-detail-perfile-duration-failed: parseVerificationRound extracts perFile ({file,durationMs,passed}) and tolerates its absence on legacy rows", () => {
+  // full-suite-runner lands `perFile` on the round record (reusing measure-suite-reporter's
+  // __PERFILE__ stream); the /tests reader must surface it and tolerate legacy rows that carry none.
+  const withPerFile = parseVerificationRound(JSON.stringify({
+    round: 241, startedAt: "2026-08-23T00:00:00.000Z", durationMs: 500000,
+    state: "red", pass: 1, fail: 1, cancelled: 0, tests: 2, reason: "failed",
+    runner: "outer", scope: "worktree",
+    perFile: [
+      { file: "packages/quay/test/slow.test.mjs", durationMs: 210.5, passed: false },
+      { file: "packages/quay/test/fast.test.mjs", durationMs: 12.25, passed: true },
+    ],
+  }));
+  assert.ok(Array.isArray(withPerFile.perFile), "perFile is an array");
+  assert.equal(withPerFile.perFile.length, 2, "both entries parsed");
+  assert.deepEqual(withPerFile.perFile[0], { file: "packages/quay/test/slow.test.mjs", durationMs: 210.5, passed: false }, "failed entry (file/durationMs/passed) preserved");
+  assert.deepEqual(withPerFile.perFile[1], { file: "packages/quay/test/fast.test.mjs", durationMs: 12.25, passed: true }, "passed entry preserved");
+
+  // Legacy row (no perFile field) ⇒ undefined, never a fabricated [].
+  const legacy = parseVerificationRound(JSON.stringify({
+    round: 228, startedAt: "2026-08-17T04:30:00.000Z", durationMs: 936519,
+    state: "green", runner: "outer", scope: "worktree",
+    commit: "426b21ceaabbe7502334d92d79ce4a4a8d935fe9",
+  }));
+  assert.equal(legacy.perFile, undefined, "a legacy row has no perFile field (absent-field contract)");
 });
 
 // ── gap-live-ghost-inflight-paused-event ─────────────────────────────────────────────────────────

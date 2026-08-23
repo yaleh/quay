@@ -1,7 +1,7 @@
 ---
 id: gap-test-detail-load-timeseries
 title: Test 详情 ②——suite 运行期系统负载时间序列采样（新增采样器）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -28,12 +28,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：suite 运行期间有 `.quay/suite-load-<runId>.jsonl` 时间序列（读生产载体⛔非 fixture），suite 结束即停采样（⛔ 常驻空跑 ⇒ 假）。
-- [ ] AC2：详情页渲染负载曲线（服务端 SVG，⛔ 客户端图表库 ⇒ 假）。
+- [x] AC1：suite 运行期间有 `.quay/suite-load-<runId>.jsonl` 时间序列（读生产载体⛔非 fixture），suite 结束即停采样（⛔ 常驻空跑 ⇒ 假）。
+- [x] AC2：详情页渲染负载曲线（服务端 SVG，⛔ 客户端图表库 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] 采样器（suite 期采样、结束即停）+ 负载曲线渲染落地；AC1-2 全勾；land 到 develop。
+- [x] 采样器（suite 期采样、结束即停）+ 负载曲线渲染落地；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
@@ -43,7 +43,10 @@ depends_on: []
 
 - plugin/scripts/suite-load-sampler.ts (new)（suite 运行期采样，结束即停）
 - plugin/scripts/full-suite-runner.ts（触发采样 start/stop）
+- plugin/scripts/capability-catalog.sh（新增 suite-load-sampler.ts 的 QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING 声明——AC1c 入口闸：shipped 脚本必须声明问题）
 - packages/quay/src/serve-handlers.ts（负载曲线 SVG 渲染）
 - plugin/test/full-suite-runner.test.mjs（采样触发测试）
 - packages/quay/test/serve-handlers.test.mjs（曲线渲染测试）
+- .gitignore（采样器运行时输出 suite-load-*.jsonl/.pid 的 ignore 条目）
 - tasks/gap-test-detail-load-timeseries.md（自身）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY snapshot 281→282，新增 suite-load-sampler.ts 计入交付面清单）

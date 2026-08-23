@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-clickable-branches-window
 title: Git History 分支名可点击（链 /task/<id>）+ 放宽 24h 窗口
-status: needs-human
+status: done
 labels:
   - gap
 parent: null
@@ -28,13 +28,15 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：Git History 页分支名可点击，链到对应 `/task/<id>`（⛔ 纯文本无链接 ⇒ 假）。
-- [ ] AC2：master 及超 24h 分支也可见（⛔ 24h 窗口把 master 排除 ⇒ 假）。
+- [x] AC1：Git History 页分支名可点击，链到对应 `/task/<id>`（⛔ 纯文本无链接 ⇒ 假）。
+- [x] AC2：master 及超 24h 分支也可见（⛔ 24h 窗口把 master 排除 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] 分支可点击 + 窗口放宽落地；AC1-2 全勾；land 到 develop。
+- [x] 分支名链 `/task/<id>` + `GIT_HISTORY_ACTIVE_WINDOW` 放宽（含 master）落地；AC1-2 全勾；land 到 develop。
 
+
+> **手动介入记录（AC141-2 例外①）**：driver 误记 completed ⇒ 候选计算中永久排除 ⇒ 跨 round 4/5/6 两小时未重派 ⇒ inner 手动 re-trigger fan-in（判据：无记录的手动介入 ⇒ AC141-1 判假）。
 ## Retires
 
 - 无（渲染链接 + 过滤参数调整）
@@ -46,9 +48,3 @@ depends_on: []
 - packages/quay/test/serve-handlers.test.mjs
 - packages/quay/test/observation.test.mjs
 - tasks/gap-git-history-clickable-branches-window.md（自身）
-
-## Needs-Human
-
-**执行 2026-08-23T04:14:47.064Z — promotion-driver AC133：连续修满上限仍不合格**
-
-- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）

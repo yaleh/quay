@@ -135,6 +135,10 @@ import {
   assembleBatch,
   parseCandidate,
   expandDeclaredTouches,
+  // IN-FLIGHT WORKTREE DIRECT QUANTITY (tasks/gap-scheduler-inflight-detection-misses-fan-in-worktree):
+  // the open-task-worktree → {id, touches} resolver (`git worktree list` direct quantity) — the
+  // snapshot in-flight set misses fan-in workflows / just-dispatched worktrees; this supplements it.
+  computeInFlightWorktreeTouches,
 } from "./concurrent-batch-scheduler.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 
@@ -591,6 +595,14 @@ export function checkTouchesPairInFlight(candidateParsed, inFlightParsed, expand
  *      loop continues to the next — BACKFILL (gap-slot-refill-c8-reject-no-backfill: a per-candidate
  *      gate rejection must pull a later-in-sort candidate, never recommend a rejected one with no
  *      replacement). Default: none (the built-in C8 self-touch gate is always on).
+ *  @param {Array<{id:string, touches:object}>} [o.inFlightWorktrees] OPTIONAL injected in-flight
+ *      worktree entries (the `computeInFlightWorktreeTouches` output shape) — the touches-disjointness
+ *      supplement for fan-in workflow / just-dispatched worktrees. `undefined` (default) ⇒ the
+ *      DIRECT quantity is computed live (`git worktree list`); a real array (including `[]`) ⇒ use
+ *      exactly that set (test seam — a non-git test workspace has no worktree list, so the injected
+ *      array models the fan-in worktree the snapshot in-flight set misses). The worktree entries join
+ *      the WIDE Consumer-A touches-disjointness set only — never the slot count (a fan-in worktree
+ *      occupies files, but has no subagent ⇒ does not occupy a cap slot; the AC5 dual-consumer split).
  *  @returns {object} { cap, base_cap, effective_cap, arbitration, in_flight_count,
  *      closed_but_live_count, occupied_slots, slots_free, pool, floor, deficit,
  *      dispatchable_disjoint, criterion_met, should_refill, no_refill_reason, recommended,
@@ -602,7 +614,7 @@ export function checkTouchesPairInFlight(candidateParsed, inFlightParsed, expand
  *      exposes-sort-key) is the parallel array of {id, deliveryCritical, suiteBlocking, rank} that
  *      exposes each recommended id's sort axes for AC36 判据②'s mechanical check.
  */
-export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, runningSubagentCount = null, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null }) {
+export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, runningSubagentCount = null, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null, inFlightWorktrees = undefined }) {
   // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
   // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
   // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
@@ -702,7 +714,25 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     const metaById = buildTaskMetaById(tasksDir);
     // Concurrency eligibility must also respect closed-bracket-but-live agents' touches — a closed
     // bracket does NOT free the touches a still-live agent is working on.
-    const inFlightParsed = [...(inFlight || []), ...(closedButLive || [])].map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
+    //
+    // IN-FLIGHT WORKTREE DIRECT QUANTITY (tasks/gap-scheduler-inflight-detection-misses-fan-in-
+    // worktree): the snapshot in-flight set (inFlight + closedButLive) misses a fan-in workflow (its
+    // subagent is a WORKFLOW, not a standalone Agent) and a just-`git worktree add`-ed worktree
+    // (subagent not yet started). Both occupy files a new task would collide with, so their DECLARED
+    // `## Touches` must join the touches-disjointness set — else a hold task overlapping a fan-in
+    // worktree is recommended (recommended non-empty) with no_refill_reason=null and the AC53 gate
+    // falsely refuses the round. The direct quantity (`git worktree list`) is computed live unless the
+    // caller injected `inFlightWorktrees` (the test seam). Dedup by id so a worktree for an
+    // already-listed id adds nothing.
+    const worktreeInFlight = inFlightWorktrees !== undefined
+      ? inFlightWorktrees
+      : computeInFlightWorktreeTouches(root, tasksDir);
+    const existingInFlight = [...(inFlight || []), ...(closedButLive || [])];
+    const existingIds = new Set(existingInFlight.map((t) => t.id));
+    const inFlightParsed = [
+      ...existingInFlight.map((t) => ({ id: t.id, touches: parseTouches(t.body) })),
+      ...(Array.isArray(worktreeInFlight) ? worktreeInFlight : []).filter((w) => w && w.id && !existingIds.has(w.id)),
+    ];
     // NOT-YET-FLIPPED SKIP (gap-slot-refill-repeats-done-eligible-recommendations): ready-pool-check's
     // analyzeTasks already computes the not-yet-flipped exclusion into pool.excluded (reason
     // "not-yet-flipped"). Wire that signal into the candidate path (AC2) — it is disjoint from

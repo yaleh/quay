@@ -34,6 +34,12 @@ import { deriveTouches } from "./derive-touches-heuristic.ts";
 // (task-schema.ts) that reads `labels` — reused here so parseCandidate can expose a
 // delivery-critical flag without a second labels parser (slot-refill.ts:250 already uses it).
 import { parseTask } from "./task-schema.ts";
+// IN-FLIGHT WORKTREE DIRECT QUANTITY (tasks/gap-scheduler-inflight-detection-misses-fan-in-worktree):
+// the open-worktree enumerator (`git worktree list --porcelain`) + the `task/<id>`-branch → task-id
+// resolver — single source (fast-mode-telemetry's listWorktrees/taskIdFromBranch, not a parallel
+// porcelain parser). The in-flight worktree detection below reuses them to find fan-in workflow /
+// just-dispatched worktrees the snapshot in-flight set misses.
+import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
 // DIR-117 iteration-2 item 4: the SAME touch-set-expansion arithmetic that
 // milestone-preparation-check.ts's `Prepared` gate used to detect a checked Plan outgrowing its
 // declared '## Touches'. milestone-preparation-check.ts is retired with the prepare/execute
@@ -297,6 +303,58 @@ function isLearning(type) {
 // CONSERVATIVE reason (absent/overbroad/empty) DOES. Distinguish them.
 function isSelfOverlapOnly(result) {
   return /overlapping file-sets/i.test(result.reason);
+}
+
+// ── IN-FLIGHT WORKTREE DETECTION (tasks/gap-scheduler-inflight-detection-misses-fan-in-worktree) ──
+// The dispatch gate's in-flight set was a SNAPSHOT (telemetry brackets / a historical in-flight id
+// list) that misses two live shapes: a fan-in workflow (its worktree exists but the subagent is a
+// WORKFLOW, not a standalone Agent) and a just-`git worktree add`-ed worktree (subagent not yet
+// started / already running). Both are DIRECT quantities only `git worktree list` sees — the same
+// 硬规则 4b family as resource.node_count's comm regex and outer.ticklog's line-shape predicate: a
+// snapshot stops updating exactly when the thing it tracks is mid-flight, so it reads "nothing in
+// flight" precisely when there IS. These helpers enumerate open TASK worktrees and resolve each to
+// its declared `## Touches` so the touches-overlap judgment (slot-refill step-4) can treat a fan-in /
+// just-dispatched worktree as in-flight. Fail-soft throughout: no worktree / unreadable list / no task
+// file / no declared Touches ⇒ [] (never a fabricated block — hard rule 5: absent evidence is not a
+// verdict).
+
+/** PURE core: resolve an open-worktree listing to in-flight task entries `[{id, touches}]`. The
+ *  worktree list is INJECTED (listWorktrees output) so tests exercise the resolution without faking
+ *  git; `computeInFlightWorktreeTouches` is the production wiring. A worktree is in-flight when it is
+ *  NOT the main checkout AND checks out a `task/<id>` branch (the fast-mode convention — both the
+ *  dispatched worktree and the fan-in workflow that later runs in it stay on `task/<id>`). Its
+ *  conflict surface is the task's DECLARED `## Touches` (the same declared-path surface the peer arm
+ *  uses), so the resolution only keeps worktrees whose task file exists AND declares a Touches section.
+ *  @param {Array<{path:string, branch:string|null}>} worktrees from listWorktrees (inject in tests)
+ *  @param {object} o
+ *  @param {string} o.root main checkout root (the main worktree is excluded)
+ *  @param {string} o.tasksDir the task store dir (`<root>/tasks`)
+ *  @returns {Array<{id:string, touches:object}>} resolvable in-flight task worktrees
+ */
+export function resolveInFlightWorktrees(worktrees, { root, tasksDir }) {
+  const mainRoot = root ? path.resolve(root) : null;
+  const seen = new Set();
+  const out = [];
+  for (const wt of worktrees || []) {
+    if (!wt || !wt.path) continue;
+    if (mainRoot !== null && path.resolve(wt.path) === mainRoot) continue; // the main checkout is not in-flight
+    const id = taskIdFromBranch(wt.branch);
+    if (!id) continue; // a non-task branch (integration / feat / milestone / detached) is not a task worktree
+    if (seen.has(id)) continue; // dedup: one task → one in-flight entry even if listed twice
+    seen.add(id);
+    const file = path.join(tasksDir, `${id}.md`);
+    if (!fs.existsSync(file)) continue; // a task worktree whose task file is gone blocks nothing
+    const touches = parseTouches(fs.readFileSync(file, "utf8"));
+    if (!touches.hasSection) continue; // no declared Touches ⇒ no usable conflict surface
+    out.push({ id, touches });
+  }
+  return out;
+}
+
+/** Production wiring: enumerate open worktrees via `git worktree list --porcelain` (the DIRECT
+ *  quantity) and resolve them to in-flight task entries. Fail-soft: an unreadable worktree list ⇒ []. */
+export function computeInFlightWorktreeTouches(root, tasksDir) {
+  return resolveInFlightWorktrees(listWorktrees(root), { root, tasksDir });
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────

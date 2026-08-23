@@ -806,11 +806,13 @@ export function defaultSelectorArgv(candidateIds: string[], root: string): strin
 }
 
 /** 解析 selector worker 输出：第一行 `<task-id> <一句理由>`。task-id 须在候选集内（⛔ 不得放行一个
- *  未提交给它的任务）；无效输出 ⇒ fail-closed 回退打散后首个候选（循环永不因 selector 而 deadlock）。 */
+ *  未提交给它的任务）；无效输出 ⇒ fail-closed 回退打散后首个候选（循环永不因 selector 而 deadlock）。
+ *  AC142 AC1：stderr 可选传入，兜底 reason 带上 stderr 截断（selector spawn 失败/认证失败可诊断）。 */
 export function parseSelectorOutput(
   stdout: string,
   candidates: string[],
   exitCode: number | null,
+  stderr: string | null = null,
 ): { task: string; reason: string } | null {
   const line = String(stdout ?? "").trim().split("\n")[0]?.trim() ?? "";
   const m = line.match(/^\s*(\S+)(?:\s+(.*))?$/);
@@ -822,13 +824,15 @@ export function parseSelectorOutput(
   const fallback = candidates[0];
   if (!fallback) return null;
   const got = line ? `, got "${line.slice(0, 80)}"` : "";
+  const errFrag = stderr ? `, stderr="${stderr.slice(0, 200)}"` : "";
   return {
     task: fallback,
-    reason: `selector worker returned no valid pick (exit ${exitCode ?? "null"}${got}); fallback to first shuffled candidate`,
+    reason: `selector worker returned no valid pick (exit ${exitCode ?? "null"}${got}${errFrag}); fallback to first shuffled candidate`,
   };
 }
 
-/** 交短命 selector worker（AC2 末步）：spawn 覆盖命令（或 claude -p）→ 解析输出。永不 throw。 */
+/** 交短命 selector worker（AC2 末步）：spawn 覆盖命令（或 claude -p）→ 解析输出。永不 throw。
+ *  AC142 AC1：捕获 stderr（连同 stdout + timeout 落进可查载体 selector_reason）。 */
 export function runSelectorWorker(
   candidates: string[],
   fixedArgv: string[] | null,
@@ -837,17 +841,19 @@ export function runSelectorWorker(
   if (candidates.length === 0) return null;
   const argv = fixedArgv ?? defaultSelectorArgv(candidates, root);
   let stdout = "";
+  let stderr = "";
   let exitCode: number | null = null;
   try {
     const r = spawnSync(argv[0], argv.slice(1), {
-      encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
     });
     stdout = String(r.stdout ?? "");
+    stderr = String(r.stderr ?? "").trim();
     exitCode = r.error ? null : r.status;
   } catch {
     exitCode = null;
   }
-  return parseSelectorOutput(stdout, candidates, exitCode);
+  return parseSelectorOutput(stdout, candidates, exitCode, stderr || null);
 }
 
 /** 判停条件之二：resource-gate 是否报 WAIT（AC3）。cmd 覆盖是测试缝；缺省 = 本仓库 resource-gate.sh
