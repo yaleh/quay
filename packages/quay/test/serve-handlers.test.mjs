@@ -283,7 +283,7 @@ test("AC2/AC4: GET /git-history returns a server-rendered SVG page with zero <sc
     assert.equal(r.status, 200, "GET /git-history returns 200");
     const svgCount = (r.body.match(/<svg/g) || []).length;
     assert.ok(svgCount >= 1, `AC2/band: response contains ≥1 <svg (got ${svgCount})`);
-    assert.ok(r.body.includes("feature/alpha"), "chart shows the feature branch lane");
+    assert.ok(r.body.includes("task/GH-1"), "chart shows the unmerged task branch lane");
     assert.ok(r.body.includes("master") || r.body.includes("main"), "chart shows the main branch lane");
     assert.ok(r.body.includes('href="/task/GH-1"'), "AC1: the task branch lane links to /task/GH-1");
     const scriptCount = (r.body.match(/<script/g) || []).length;
@@ -295,8 +295,16 @@ test("AC2/AC4: GET /git-history returns a server-rendered SVG page with zero <sc
     // readGitHistory is also directly exercised (the route's data source)
     const hist = readGitHistory(ws);
     assert.equal(hist.status, "ok");
-    assert.ok(hist.commits.some((x) => x.ref === "feature/alpha"), "git history source sees the feature branch");
     assert.ok(hist.commits.some((x) => x.parents > 1), "git history source sees a merge commit");
+
+    // gap-git-history-branch-summary-wrong-numbers: a branch lane carries only its OWN commits, never
+    // the shared mainline ancestry (the 481/111 symptom). feature/alpha was --no-ff merged into
+    // master, so it has ZERO exclusive commits (correctly no phantom lane); task/GH-1 is unmerged
+    // and carries exactly its one commit.
+    const featureCommits = hist.commits.filter((x) => x.ref === "feature/alpha");
+    assert.equal(featureCommits.length, 0, "a fully-merged branch has no phantom lane (0 exclusive commits)");
+    const taskCommits = hist.commits.filter((x) => x.ref === "task/GH-1");
+    assert.deepEqual(taskCommits.map((x) => x.subject), ["task work"], "the unmerged task branch carries exactly its own commit");
   } finally {
     if (server) {
       server.close();

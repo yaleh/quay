@@ -107,6 +107,41 @@ test("readGitHistory always keeps master (and develop) even when their tip is >2
   }
 });
 
+test("gap-git-history-branch-summary-wrong-numbers: a branch whose tip is newer than the mainline shows only its OWN commits, not the shared ancestry", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-excl-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: ws });
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Mainline: init + two commits, tip at nowSec-400.
+    commitAt(ws, "main one", nowSec - 500);
+    commitAt(ws, "main two", nowSec - 400);
+    // A task branch forked from the mainline, with a tip NEWER than the mainline tip (nowSec-200).
+    execFileSync("git", ["checkout", "-q", "-b", "task/gap-x"], { cwd: ws });
+    commitAt(ws, "branch one", nowSec - 300, "branch.txt");
+    commitAt(ws, "branch two", nowSec - 200, "branch.txt");
+    execFileSync("git", ["checkout", "-q", "master"], { cwd: ws });
+
+    const hist = readGitHistory(ws);
+    assert.equal(hist.status, "ok");
+    const branchCommits = hist.commits.filter((c) => c.ref === "task/gap-x");
+    assert.deepEqual(
+      branchCommits.map((c) => c.subject).sort(),
+      ["branch one", "branch two"],
+      `the branch lane carries only its own commits (got: ${branchCommits.map((c) => c.subject).join(", ")})`,
+    );
+    // The shared mainline ancestry must NOT be attributed to the branch (the 481/111 symptom).
+    const branchSubjects = new Set(branchCommits.map((c) => c.subject));
+    assert.ok(!branchSubjects.has("init"), "the repo's first commit is the mainline's, not the branch's");
+    assert.ok(!branchSubjects.has("main one") && !branchSubjects.has("main two"), "mainline commits stay on the mainline");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("AC127: parseVerificationRound extracts the bucket-execution fields (buckets/bucket_files/bucket_duration_ms) and tolerates their absence on legacy rows (never a fabricated \"full\")", () => {
   // gap-ac127-suite-bucket-web-tests-page-visible — AC126 landed these three fields on bucket-mode
   // rounds (full-suite-runner.ts:4027-4029); the /tests reader must surface `buckets` and tolerate

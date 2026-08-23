@@ -1876,8 +1876,9 @@ export interface GitHistoryBranch {
 
 /**
  * Group commits into per-branch lanes, ordered by most-recent landing time (desc) then name.
- * A commit reached via multiple refs is attributed to the one `--source` picked in the git
- * traversal — the chart shows where the traversal saw it land, not a full DAG (honest scope).
+ * readGitHistory already re-attributed shared/mainline-reachable commits to the mainline ref
+ * (gap-git-history-branch-summary-wrong-numbers), so a task branch's lane here holds exactly its
+ * own (exclusive) commits — `git log develop..<branch>` — never the shared ancestry.
  */
 export function groupCommitsByBranch(commits: GitHistoryCommit[]): GitHistoryBranch[] {
   const byRef = new Map<string, GitHistoryBranch>();

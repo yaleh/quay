@@ -1178,8 +1178,16 @@ export interface GitHistoryResult {
  * active window (plus the mainline refs develop/master unconditionally — never dropped for
  * staleness), then ONE `git log <active…> --source` pass, each line `%H %ct %S %P %s`
  * (hash / commit-time / source-ref / parents / subject). A stale branch's commits are already
- * reachable from the mainline, so they still appear (relabeled to the mainline) — not dropped. A
- * non-git workspace degrades to empty; a git failure degrades to error; never throws.
+ * reachable from the mainline, so they still appear (relabeled to the mainline) — not dropped.
+ *
+ * gap-git-history-branch-summary-wrong-numbers: `--source` labels a commit with whichever ref the
+ * traversal first REACHED it from, and the walk starts at the newest tip — so a task branch whose
+ * tip is newer than develop gets every shared ancestor (the whole reachable history) attributed to
+ * it (observed: a 6-commit branch showed 481 commits / 111 merges / a first-commit at repo birth).
+ * A commit reachable from ANY mainline ref therefore belongs to the mainline, NOT to a task branch;
+ * after the log pass every such commit is re-attributed to the primary mainline ref, so each branch
+ * lane carries exactly its own (exclusive) commits — `git log develop..<branch>`. A non-git
+ * workspace degrades to empty; a git failure degrades to error; never throws.
  */
 export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, nowMs = Date.now() }: { limit?: number; nowMs?: number } = {}): GitHistoryResult {
   try {
@@ -1230,6 +1238,24 @@ export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, nowMs 
         parents: (parents ?? "").split(/\s+/).filter(Boolean).length,
         subject: subjectParts.join("\x1f"),
       });
+    }
+    // gap-git-history-branch-summary-wrong-numbers: `--source` labels a shared ancestor with the
+    // newest tip's ref, so a task branch whose tip is newer than develop absorbs the whole reachable
+    // history. A commit reachable from ANY mainline ref is the mainline's — re-attribute it to the
+    // primary mainline ref (develop sorts before master in for-each-ref, so it wins when both exist)
+    // so each branch lane carries exactly its own commits (`git log develop..<branch>`). Branch
+    // EXCLUSIVE commits are reachable from only that branch, so `--source` already labels them right.
+    const mainlineRefs = activeRefs.filter((r) => GIT_HISTORY_MAINLINE_REFS.has(r));
+    if (mainlineRefs.length > 0 && commits.length > 0) {
+      const mainlineHashes = new Set(
+        execFileSync("git", ["-C", root, "rev-list", ...mainlineRefs], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] })
+          .split(/\s+/)
+          .filter(Boolean),
+      );
+      const primary = mainlineRefs[0];
+      for (const c of commits) {
+        if (mainlineHashes.has(c.hash) && !GIT_HISTORY_MAINLINE_REFS.has(c.ref)) c.ref = primary;
+      }
     }
     if (commits.length === 0) {
       return { status: "empty", reason: "git 仓库无提交记录", commits: [] };
