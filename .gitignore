@@ -64,6 +64,7 @@ packages/quay/plugin/
 **/.quay/promotion-driver-supervisor.pid
 **/.quay/promotion-driver.log
 **/.quay/promotion-driver-supervisor.log
+**/.quay/promotion-driver-liveness.log
 **/.quay/promotion-driver.stop
 # gap-outer-message-bus-needs-file-inbox-transport (2026-08-09): the OUTER target's file-inbox
 # (.quay/outer-inbox/) is runtime message state (SPEC-inbox-service D1 — 收件箱不进 git 跟踪,

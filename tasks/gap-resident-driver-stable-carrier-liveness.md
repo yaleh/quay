@@ -32,13 +32,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1（稳定承载）：常驻 supervisor/driver 从稳定路径启动（supervisor cmdline 的脚本路径 = 主检出，⛔ 非 `worktrees/`）；取假：cmdline 含 worktree 路径 ⇒ 假。
-- [ ] AC2（死亡告警）：driver/supervisor 死时有机件在窗口内检测并报告（⛔ pid 文件指向不存在 pid 而无人察觉 ⇒ 假）。
-- [ ] AC3（supervisor 死测试）：`kill -9 <supervisor_pid>` 后 (a) 有机件报告 supervisor 死 (b) driver 不再被误判为「在跑」；取假：supervisor 死后无人报告、载体停更被读作「正常」⇒ 假。
+- [x] AC1（稳定承载）：常驻 supervisor/driver 从稳定路径启动（supervisor cmdline 的脚本路径 = 主检出，⛔ 非 `worktrees/`）；取假：cmdline 含 worktree 路径 ⇒ 假。
+- [x] AC2（死亡告警）：driver/supervisor 死时有机件在窗口内检测并报告（⛔ pid 文件指向不存在 pid 而无人察觉 ⇒ 假）。
+- [x] AC3（supervisor 死测试）：`kill -9 <supervisor_pid>` 后 (a) 有机件报告 supervisor 死 (b) driver 不再被误判为「在跑」；取假：supervisor 死后无人报告、载体停更被读作「正常」⇒ 假。
 
 ## Definition of Done
 
-- [ ] 稳定承载 + 死亡告警 + supervisor 死测试落地；AC1-3 全勾；land 到 develop。
+- [x] 稳定承载 + 死亡告警 + supervisor 死测试落地；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
@@ -46,8 +46,8 @@ depends_on:
 
 ## Touches
 
-- plugin/scripts/promotion-driver-launch.sh（启动路径规范化 / 稳定承载）
+- plugin/scripts/promotion-driver-launch.sh（启动路径规范化 / 稳定承载 / liveness 死亡告警子命令）
 - plugin/test/promotion-driver-launch.test.mjs (new)（AC1-3 单测，含 supervisor 死取假）
+- .gitignore（新增 `.quay/promotion-driver-liveness.log` 运行时态，随 liveness 子命令落盘而暴露）
+- plugin/scripts/capability-catalog.sh（`promotion-driver-launch.sh` 条目补 liveness / 稳定承载，机件描述准确性伴随）
 - tasks/gap-resident-driver-stable-carrier-liveness.md（自身）
-
-> **注意**：若 liveness 告警需独立检查器/监控机件，其脚本与单测随实现增补进 Touches（落笔方定）。
