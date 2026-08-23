@@ -23,7 +23,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { renderGitHistorySvg, groupCommitsByBranch, renderPerFileTable } from "../src/serve-handlers.ts";
+import { renderGitHistorySvg, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable } from "../src/serve-handlers.ts";
 import { readGitHistory } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
@@ -275,6 +275,100 @@ test("AC127: GET /tests renders the buckets column — a bucket row shows its la
     assert.ok(r.body.includes("<td>M</td>"), "the bucket row's cell shows its label M");
     assert.ok(r.body.includes("buckets M"), "the latest-run banner surfaces the bucket label");
     assert.ok(!r.body.includes("<td>full</td>"), "a legacy bucket-less row shows no fabricated \"full\" bucket cell");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-test-detail-load-timeseries — suite-load curve (server-rendered SVG) ──────────
+
+test("load curve: renderLoadCurveSvg draws the loadavg series as a pure SVG (zero <script>, zero hex, no NaN)", () => {
+  const samples = [
+    { t: 1_700_000_000_000, loadavg: 1.0, cpu_stall: 5.2, mem_avail: 9000.0 },
+    { t: 1_700_000_005_000, loadavg: 3.5, cpu_stall: 30.1, mem_avail: 8500.0 },
+    { t: 1_700_000_010_000, loadavg: 6.0, cpu_stall: 55.7, mem_avail: 8000.0 },
+  ];
+  const svg = renderLoadCurveSvg(samples);
+  assert.ok(svg.startsWith("<svg"), "renderer returns an SVG document");
+  assert.ok(svg.includes("</svg>"), "SVG is well-formed (closes </svg>)");
+  assert.ok(svg.includes('class="load-svg-line"'), "the loadavg series is a stroke line (token class)");
+  assert.ok(svg.includes("<polyline"), "the curve is a polyline");
+  assert.ok(svg.includes('class="git-svg-commit"'), "sample points use the token point class");
+  assert.ok(svg.includes("loadavg (1m)"), "the curve is labelled as the 1-minute load");
+  assert.ok(!svg.includes("<script"), "zero client JS: no <script> in the SVG");
+  assert.ok(!/#[0-9a-fA-F]{6}/.test(svg), "SVG carries no hardcoded hex (AC102 token discipline)");
+  assert.ok(!svg.includes("NaN"), "no NaN leaks into the SVG");
+});
+
+test("load curve: single-sample / empty / all-null input degrades safely (never NaN, empty -> no chart)", () => {
+  assert.equal(renderLoadCurveSvg([]), "", "empty samples -> no chart");
+  assert.equal(
+    renderLoadCurveSvg([{ t: 1_700_000_000_000, loadavg: null, cpu_stall: null, mem_avail: null }]),
+    "",
+    "all-null loadavg -> no plottable series -> no chart",
+  );
+  const single = renderLoadCurveSvg([{ t: 1_700_000_000_000, loadavg: 2.0, cpu_stall: 4.0, mem_avail: 7000.0 }]);
+  assert.ok(single.startsWith("<svg"), "a single sample still renders a finite plot");
+  assert.ok(!single.includes("NaN"), "single-sample window has no NaN");
+});
+
+test("load curve: readSuiteLoadSamples parses the sampler's jsonl, skips malformed lines, sorts by t", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "load-read-"));
+  try {
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(ws, ".quay", "suite-load-abc123.jsonl"),
+      [
+        JSON.stringify({ t: 3, loadavg: 2.0, cpu_stall: 3.0, mem_avail: 1000 }),
+        "not-json",
+        JSON.stringify({ t: 1, loadavg: 1.0, cpu_stall: 1.0, mem_avail: 900 }),
+        JSON.stringify({ t: 2, loadavg: null, cpu_stall: null, mem_avail: null }),
+        "",
+      ].join("\n"),
+    );
+    const got = readSuiteLoadSamples(ws, "abc123");
+    assert.equal(got.length, 3, "three valid lines parsed (malformed line + blank skipped)");
+    assert.deepEqual(got.map((s) => s.t), [1, 2, 3], "samples sorted by t ascending");
+    assert.equal(got[0].loadavg, 1.0);
+    assert.equal(got[2].loadavg, 2.0);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("load curve: GET /tests renders the server-side load curve for the current runId", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-loadcurve-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    createStore(tasksDir).write("LC-T", { title: "load curve web tests", status: "todo" });
+    // full-suite-state.json carries the current runId; the sampler's file is keyed by it.
+    const runId = "11111111-2222-3333-4444-555555555555";
+    fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId }));
+    fs.writeFileSync(
+      path.join(ws, ".quay", `suite-load-${runId}.jsonl`),
+      [
+        JSON.stringify({ t: Date.now(), loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
+        JSON.stringify({ t: Date.now() + 5000, loadavg: 4.5, cpu_stall: 40.0, mem_avail: 7500.0 }),
+      ].join("\n"),
+    );
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests");
+    assert.equal(r.status, 200, "GET /tests returns 200");
+    assert.ok(r.body.includes("负载曲线"), "the page has a load-curve section");
+    assert.ok(r.body.includes("suite-load-"), "the section names the sampler's timeseries source");
+    assert.ok(r.body.includes("<polyline"), "the load curve is server-rendered SVG (no client chart lib)");
+    assert.equal((r.body.match(/<script/g) || []).length, 0, "still zero <script> with the curve present");
   } finally {
     if (server) {
       server.close();
