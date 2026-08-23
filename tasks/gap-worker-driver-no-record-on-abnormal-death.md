@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-no-record-on-abnormal-death
 title: worker-driver worker 异常死亡零终态记录（computeOutcome 只正常返回时调用，异常路径与未派发同形）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -31,6 +31,8 @@ depends_on: []
 **根因（③）**：`computeOutcome` 只在 worker **正常返回**时被调用；worker 异常死亡（被杀 / suite 失败后自尽）**不写任何终态记录** ⇒ 载体上与「从未派发」**完全同形**（硬规则 3b：异常路径与未发生共用「无记录」这个表示）。触发是 tmux-leak-scan flake（`FAIL 残留 test tmux server`，测试本身 fail 0、非任务代码因），但**修 flake 修不掉「无记录」**——flake 是触发原因，无记录是机制缺口，两者要分开记。
 
 **影响（③ 与 ① 的本质区别）**：① 是「记错了」⇒ 永久隐形；③ 是「没记」⇒ 任务停在 ready、worktree 残留，driver 无记录可判，但**槽位空出后 driver 理论上会重新看到它**（不隐形）。当前没被重派只因 in_flight=2=cap 满，非隐形。
+
+**区分原则（⛔ 第四种形态时直接查载体，manager 2026-08-23）**：① 与 ③ 表象同形（任务都停着没动），区分靠的不是「想得更细」而是「去读载体里到底有没有那条记录」——① 有 `completed` 记录、③ 零记录。将来出现第四种形态，先查 `worker-outcome.jsonl` 的记录**有无/取值**，比按表象归类快。
 
 ## Plan
 
