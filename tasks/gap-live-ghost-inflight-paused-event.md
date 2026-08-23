@@ -31,7 +31,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 收尾事件（或交叉校验）+ 幽灵在飞消除；AC1-2 全勾；land 到 develop。
+- [x] 收尾事件（或交叉校验）+ 幽灵在飞消除；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
