@@ -176,6 +176,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md` — isolation + resource governance
 - `orchestration/SPEC-methodology-as-a-deliverable.md` — methodology as a deliverable
 - `orchestration/SPEC-no-text-substitution-at-install.md` — install is configuration-driven, not text-substitution
+- `orchestration/SPEC-unified-driver-architecture-2026-08-23.md` — 统一 `*-driver` 架构：机械化执行面与长会话规划面的分野（事件触发/可配置扩展/manager 定时任务下沉/冷启动简化；proposal·待人裁定，排期在 AC142 系列收口后）
 - `orchestration/SPEC-one-observer-two-surfaces.md` — one observer, two surfaces
 - `orchestration/SPEC-quay-self-hosts-its-own-cold-start.md` — self-hosting the cold start
 - `orchestration/SPEC-state-crystallization-2026-08-05.md` — state crystallization
