@@ -580,6 +580,23 @@ export interface WorkerRunResult {
   exitCode: number;
 }
 
+/** 原子追加 worker pid 到 pid-file（观测抓手）：读-改-写 tmp 再 rename，外部读者绝不读到半截/空文件。
+ *  非原子的 appendFileSync 会在 open(O_CREAT) 与 write 之间暴露【空文件窗口】——全量 suite 高并发下
+ *  外部轮询（worker-driver.test.mjs halt-mid 用例）读到 existsSync=true 但内容为空 ⇒ Number("")=0
+ *  误判「未写 pid」假红（gap-ac140 回归）。本进程内全同步调用 ⇒ 无并发交错，rename 保证原子可见。 */
+function appendWorkerPid(pidFile: string, workerPid: number): void {
+  try {
+    const file = path.resolve(pidFile);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    fs.writeFileSync(tmp, existing + `${workerPid}\n`, "utf8");
+    fs.renameSync(tmp, file);
+  } catch {
+    /* pid-file 是观测抓手，写失败不改变主流程 */
+  }
+}
+
 /**
  * spawn 一个 worker 并等待其终态（含超时 SIGTERM）。超时 ⇒ kill("SIGTERM")（保留 worktree——驱动从不
  * remove/prune worktree），close 事件带 signal=SIGTERM，timedOut 标记落 outcome final_state=timed-out。
@@ -665,12 +682,7 @@ function runOneWorker({
       );
     }
     if (pidFile && workerPid) {
-      try {
-        fs.mkdirSync(path.dirname(path.resolve(pidFile)), { recursive: true });
-        fs.appendFileSync(path.resolve(pidFile), `${workerPid}\n`, "utf8");
-      } catch {
-        /* pid-file 是观测抓手，写失败不改变主流程 */
-      }
+      appendWorkerPid(pidFile, workerPid);
     }
 
     if (timeoutMs > 0) {
