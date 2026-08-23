@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-ff-executor-check-ruled-historical-99f845d9
 title: fan-in-ff-executor-check + fan-in-workflow-check 加 ruled 豁免表承载 99f845d9 的应急主线程 fan-in（manager 裁定 ruled one-off，范围扩至两个 checker）
-status: ready
+status: done
 labels:
   - gap
 parent: null
