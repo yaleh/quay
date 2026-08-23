@@ -1,7 +1,7 @@
 ---
 id: gap-tick-core-third-copy-drift-packages-face
 title: tick-core 第三份副本（packages/quay/plugin/loop，npm 打包面）漂移 + 检查器覆盖缺口
-status: todo
+status: ready
 labels:
   - gap
 parent: null
