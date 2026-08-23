@@ -1,7 +1,7 @@
 ---
 id: gap-direct-to-develop-ruled-historical-99f845d9
 title: detector 加 ruled-historical 豁免承载 99f845d9——outer 解全库红的止损直提，manager 裁定 ruled one-off
-status: todo
+status: ready
 labels:
   - gap
 parent: null
