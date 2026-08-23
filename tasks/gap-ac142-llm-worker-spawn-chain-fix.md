@@ -1,7 +1,7 @@
 ---
 id: gap-ac142-llm-worker-spawn-chain-fix
 title: AC142 LLM-worker spawn 链修复（fix-worker + selector 两坏例验证，阻塞项）
-status: ready
+status: done
 labels:
   - gap
 parent: null
