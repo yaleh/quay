@@ -33,9 +33,9 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1（稳定承载）：常驻 supervisor/driver 从稳定路径启动（supervisor cmdline 的脚本路径 = 主检出，⛔ 非 `worktrees/`）；取假：cmdline 含 worktree 路径 ⇒ 假。
-- [ ] AC2（死亡告警）：driver/supervisor 死时有机件在窗口内检测并报告（⛔ pid 文件指向不存在 pid 而无人察觉 ⇒ 假）。
-- [ ] AC3（supervisor 死测试）：`kill -9 <supervisor_pid>` 后 (a) 有机件报告 supervisor 死 (b) driver 不再被误判为「在跑」；取假：supervisor 死后无人报告、载体停更被读作「正常」⇒ 假。
+- [x] AC1（稳定承载）：常驻 supervisor/driver 从稳定路径启动（supervisor cmdline 的脚本路径 = 主检出，⛔ 非 `worktrees/`）；取假：cmdline 含 worktree 路径 ⇒ 假。
+- [x] AC2（死亡告警）：driver/supervisor 死时有机件在窗口内检测并报告（⛔ pid 文件指向不存在 pid 而无人察觉 ⇒ 假）。
+- [x] AC3（supervisor 死测试）：`kill -9 <supervisor_pid>` 后 (a) 有机件报告 supervisor 死 (b) driver 不再被误判为「在跑」；取假：supervisor 死后无人报告、载体停更被读作「正常」⇒ 假。
 
 ## Definition of Done
 
