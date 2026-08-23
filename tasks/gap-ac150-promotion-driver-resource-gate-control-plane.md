@@ -54,6 +54,8 @@ promotion-driver.ts:26 明写「⛔ 不读/不写 .halt（停机态 = 进程信�
 - plugin/scripts/promotion-driver.ts（起 fix worker 前过资源门 + 控制面 halt）
 - plugin/scripts/worker-driver.ts（resourceGateCheck/serveControlPlane 抽成共享函数供复用）
 - plugin/scripts/driver-shared.ts（新：共享资源门+控制面载体，两 driver 共用）
+- plugin/scripts/capability-catalog.sh（driver-shared.ts 新脚本注册：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER 六表声明，gap-new-script-touches-missing-inventory-catalog-registration）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照再生成：scripts 282→283）
 - plugin/scripts/promotion-driver-launch.sh（KIND_VERBS 给 promotion 开 drain；cmd_drain 写 promotion-control.json）
 - packages/quay/src/cli/driver.ts（drain help 文本：promotion 不再「does not support」）
 - packages/quay/src/cli/help.ts（同 driver.ts 的 help 文本，防漂移）
