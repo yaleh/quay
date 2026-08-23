@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-periodic-exit-resident
 title: worker-driver 常驻进程周期性 exit code=0（~95min 一次）——查是设计内 restart cadence 还是异常退出
-status: todo
+status: ready
 labels:
   - gap
 parent: null
