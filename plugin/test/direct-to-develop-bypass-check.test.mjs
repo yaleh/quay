@@ -45,6 +45,10 @@ import {
   extractAc65Evidence,
   RULED_HISTORICAL_COMMITS,
   findRuledHistoricalEntry,
+  extractFanInLandedShas,
+  isReflogDirectCommit,
+  buildReflogIndex,
+  classifyLandingMode,
 } from "../scripts/direct-to-develop-bypass-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -588,7 +592,10 @@ test("AC3 回放·CLI — cddc55e2 exit 0（ruledHistorical，非 bypass 非 ac6
   assert.equal(bySha["7e64a86b"].confirmedBypass, true);
 });
 
-test.skip("AC3 回放·CLI — 全量扫描（生产基线 b11ce720）ok=true：cddc55e2 ruledHistorical，无真直投红（⛔ 临时 skip：direct-to-develop-bypass-check 的 reflog ground truth 被外部清空，机制缺陷非 ac140 回归，追踪 gap-direct-to-develop-check-reflog-to-revlist）", (t) => {
+test("AC3 回放·CLI — 全量扫描（生产基线 b11ce720）NOT-EVALUATED：reflog 被 gc 剪 ⇒ 不伪装成「未发现 direct」", (t) => {
+  // gap-direct-to-develop-check-reflog-to-revlist：reflog 被 gc 全局剪后，基线区间内 ~1600 条 commit
+  // 既不在 ledger（fan-in-landed 记录，本任务起才落）也不在 reflog ⇒ unclassifiable ⇒ NOT-EVALUATED。
+  // ⛔ 旧行为（ok=true, evaluated=true, "no-code-surface-direct-commits"）正是「伪装成未发现 direct」。
   const baseline = "b11ce720";
   const baseExists = gitCmd(REPO_ROOT, "cat-file", "-e", `${baseline}^{commit}`).status === 0;
   if (!baseExists) {
@@ -596,15 +603,13 @@ test.skip("AC3 回放·CLI — 全量扫描（生产基线 b11ce720）ok=true：
     return;
   }
   const r = runChecker(["--root", REPO_ROOT, "--baseline", baseline]);
-  assert.equal(r.status, 0, `全量扫描必须 GREEN(exit 0): ${r.stdout}${r.stderr}`);
+  assert.equal(r.status, 0, `NOT-EVALUATED 不得 RED（exit 0）: ${r.stdout}${r.stderr}`);
   const out = jsonOut(r);
-  assert.equal(out.evaluated, true);
-  assert.equal(out.ok, true, `基线后无真直投红: ${r.stdout}${r.stderr}`);
-  const ruled = out.candidates.find((c) => c.sha.startsWith("cddc55e2"));
-  assert.ok(ruled, "cddc55e2 在候选（代码面）中");
-  assert.equal(ruled.ruledHistorical, true, "cddc55e2 分类为 ruledHistorical");
-  assert.equal(ruled.confirmedBypass, false);
-  assert.ok(out.candidates.every((c) => !c.confirmedBypass), "无真直投红");
+  assert.equal(out.evaluated, false, "reflog 剪后必须 NOT-EVALUATED（⛔ 不伪装成「未发现 direct」）");
+  assert.equal(out.ok, true, "NOT-EVALUATED 不是 RED");
+  assert.equal(out.reason, "unclassifiable-commits-in-range");
+  assert.ok(out.unclassifiableCommits > 0, "基线区间内存在 ledger 无记录且 reflog 也查不到的 commit");
+  assert.ok(out.denominator.unclassifiableCommits > 0, "denominator 同步暴露 unclassifiable 计数");
 });
 
 test("AC3 负控制·真实 git — 2fdb6e32（docs/ 非 ASCII 设计正本）CLI --commits 必须 GREEN（AC3）", (t) => {
@@ -823,4 +828,141 @@ test("--help exits 0 with usage on stdout", () => {
   const r = runChecker(["--help"]);
   assert.equal(r.status, 0);
   assert.match(r.stdout, /direct-to-develop-bypass-check/);
+});
+
+// ── 三态判定（gap-direct-to-develop-check-reflog-to-revlist）────────────────────────────────────────
+// ledger（fan-in-landed 记录）优先 → reflog 回退 → NOT-EVALUATED。reflog 会被 gc 剪，ledger 不剪。
+
+test("PURE extractFanInLandedShas — 只提取 release 事件的 landedSha hex sha；acquire/null/malformed 跳过", () => {
+  const shas = extractFanInLandedShas([
+    { event: "acquire", epoch: 1, taskId: "t", pid: 1 },
+    { event: "release", epoch: 2, taskId: "t", pid: 1, landedSha: "9a074ff16887416540eab7c99e2dbb4e5767a89f" },
+    { event: "release", epoch: 3, taskId: "t2", pid: 2, landedSha: "90329c7d" }, // 短 sha 也认（前缀）
+    { event: "release", epoch: 4, taskId: "t3", pid: 3, landedSha: null }, // 失败 ff ⇒ null 跳过
+    { event: "release", epoch: 5, taskId: "t4", pid: 4 }, // 无 landedSha（历史 release）⇒ 跳过
+    { event: "release", epoch: 6, taskId: "t5", pid: 5, landedSha: "not-a-sha" }, // 非 hex ⇒ 跳过
+    { __unparseable: true },
+    null,
+  ]);
+  assert.equal(shas.size, 2, "只认 release 事件的 hex landedSha");
+  assert.ok(shas.has("9a074ff16887416540eab7c99e2dbb4e5767a89f"));
+  assert.ok(shas.has("90329c7d"));
+  assert.equal(extractFanInLandedShas(null).size, 0, "null ⇒ 空集");
+  assert.equal(extractFanInLandedShas(undefined).size, 0, "undefined ⇒ 空集");
+});
+
+test("PURE isReflogDirectCommit — commit:/commit (amend): 是直接提交；merge … Fast-forward 不是", () => {
+  assert.equal(isReflogDirectCommit("commit: tasks: 立案 x"), true);
+  assert.equal(isReflogDirectCommit("commit (amend): fixed subject"), true);
+  assert.equal(isReflogDirectCommit("commit (merge): merged"), true);
+  assert.equal(isReflogDirectCommit("merge task/gap-x: Fast-forward"), false, "fan-in ff 不是直接提交");
+  assert.equal(isReflogDirectCommit("reset: moving to HEAD~1"), false);
+  assert.equal(isReflogDirectCommit("rebase (finish): returning to refs/heads/develop"), false);
+  assert.equal(isReflogDirectCommit(""), false);
+  assert.equal(isReflogDirectCommit(null), false);
+});
+
+test("PURE buildReflogIndex — direct/seen 分离；commit 优先于 merge 条目", () => {
+  const idx = buildReflogIndex([
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tcommit: direct a",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tmerge task/x: Fast-forward",
+    "cccccccccccccccccccccccccccccccccccccccc\tcommit: direct c",
+  ]);
+  assert.ok(idx.direct.has("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+  assert.ok(idx.direct.has("cccccccccccccccccccccccccccccccccccccccc"));
+  assert.ok(!idx.direct.has("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), "merge 条目不是 direct");
+  assert.ok(idx.seen.has("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), "merge 条目在 seen");
+  // 一条 sha 同时有 commit 与 merge 条目 ⇒ direct 优先（reset-reapply 形态）。
+  const idx2 = buildReflogIndex([
+    "dddddddddddddddddddddddddddddddddddddddd\tmerge task/x: Fast-forward",
+    "dddddddddddddddddddddddddddddddddddddddd\tcommit: direct d",
+  ]);
+  assert.ok(idx2.direct.has("dddddddddddddddddddddddddddddddddddddddd"));
+});
+
+test("PURE classifyLandingMode — ledger ⇒ fan-in；reflog direct ⇒ direct；reflog seen ⇒ fan-in；两者皆无 ⇒ unclassifiable", () => {
+  const ledger = new Set(["ledgersha1"]);
+  const reflog = buildReflogIndex([
+    "directsha1\tcommit: direct",
+    "ffsha1\tmerge task/x: Fast-forward",
+  ]);
+  assert.equal(classifyLandingMode("ledgersha1", ledger, reflog), "fan-in", "在 ledger ⇒ fan-in");
+  assert.equal(classifyLandingMode("directsha1", ledger, reflog), "direct", "reflog commit ⇒ direct");
+  assert.equal(classifyLandingMode("ffsha1", ledger, reflog), "fan-in", "reflog merge … Fast-forward ⇒ fan-in");
+  assert.equal(classifyLandingMode("unknownsha1", ledger, reflog), "unclassifiable", "ledger 无且 reflog 无 ⇒ unclassifiable");
+  assert.equal(classifyLandingMode("directsha1", ledger, null), "unclassifiable", "reflog 不可读 ⇒ unclassifiable");
+  assert.equal(classifyLandingMode("ledgersha1", ledger, null), "fan-in", "ledger 优先于 reflog 不可读");
+});
+
+// ── CLI 集成：ledger 判定（AC2）与 reflog 剪后退 NOT-EVALUATED（AC3）─────────────────────────────
+
+test("AC2 CLI — rev-list 命中的 code-surface commit 在 ledger 里 ⇒ 判 fan-in 落地不算直投（不报 RED）", () => {
+  const dir = makeTmp("cli-ledger");
+  const st = makeTmp("cli-ledger-state");
+  try {
+    initRepo(dir);
+    // 一条触及代码面的 commit（若无 ledger，其 reflog `commit:` 会判为直接提交 ⇒ RED）。
+    fs.mkdirSync(path.join(dir, "plugin", "test"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "plugin", "test", "led.test.mjs"), "export const l = 1;\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "test: code commit recorded as fan-in-landed");
+    const sha = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    // ledger fixture：同一 lock-events 文件里，成对的 acquire/release，release 带 landedSha
+    // （fan-in 落地的持久化事实——与 fan-in-ff-merge.sh 的写入形态一致）。
+    const events = path.join(st, "fan-in-merge-lock-events.jsonl");
+    fs.mkdirSync(st, { recursive: true });
+    fs.writeFileSync(events, [
+      JSON.stringify({ event: "acquire", taskId: "t", ts: "2026-08-23T00:00:00Z", epoch: 1, pid: 1 }),
+      JSON.stringify({ event: "release", landedSha: sha, taskId: "t", ts: "2026-08-23T00:00:01Z", epoch: 2, pid: 1 }),
+    ].join("\n") + "\n", "utf8");
+
+    const r = runChecker(["--root", dir, "--lock-events", events]);
+    assert.equal(r.status, 0, `在 ledger 里 ⇒ 不算直投（不报 RED）: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, true);
+    assert.equal(out.ok, true);
+    assert.equal(out.denominator.codeSurfaceCommits, 0, "ledger 命中的 code-surface commit 不被收集为直接提交");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("AC2 CLI — 不在 ledger 且 reflog 有「直接 commit」标签 ⇒ 仍 RED（真直投仍红）", () => {
+  const dir = makeTmp("cli-ledger-neg");
+  try {
+    initRepo(dir);
+    fs.mkdirSync(path.join(dir, "plugin", "test"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "plugin", "test", "neg.test.mjs"), "export const n = 1;\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "test: direct code commit");
+    // 无 ledger 记录（默认 .quay/ 缺失 = 空 ledger）⇒ 真直投仍红。
+    const r = runChecker(["--root", dir]);
+    assert.equal(r.status, 1, `不在 ledger 且 reflog 有 commit 标签 ⇒ RED: ${r.stdout}${r.stderr}`);
+    assert.equal(jsonOut(r).reason, "direct-commit-bypasses-fan-in");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("AC3 CLI — reflog 被 gc 剪（expire）后：ledger 无记录且 reflog 也查不到 ⇒ NOT-EVALUATED", () => {
+  const dir = makeTmp("cli-gc");
+  try {
+    initRepo(dir);
+    fs.mkdirSync(path.join(dir, "plugin", "test"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "plugin", "test", "gc.test.mjs"), "export const g = 1;\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "test: direct code commit");
+    // 模拟 gc 全局剪：expire 全部 reflog。
+    gitCmd(dir, "reflog", "expire", "--expire=now", "--all");
+    const r = runChecker(["--root", dir]);
+    assert.equal(r.status, 0, `reflog 剪后不得 RED，也不得假装 GREEN: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, false, "reflog 剪后 ⇒ NOT-EVALUATED（硬规则 3b）");
+    assert.equal(out.ok, true);
+    assert.equal(out.reason, "unclassifiable-commits-in-range");
+    assert.ok(out.unclassifiableCommits > 0, "存在 ledger 无记录且 reflog 也查不到的 commit");
+  } finally {
+    cleanup(dir);
+  }
 });

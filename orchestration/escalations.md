@@ -580,3 +580,14 @@ resource-aware。
   **产物（判据2）**：outer 每次直接修，必须在同一条提交信息或投递里贴出那条验证命令的【实际输出】——没有输出即违规（「几行/checker 类」都没有产物只能靠自觉，而贴输出是本来就该做的那一步，零额外成本，守与不守在记录上可区分）。
   **能取假（判据3）**：一次没有贴验证输出的产品文件直改 ⇒ 红（负控制由落地方产出，沿用 AC49 判据1）。
   **落地**：orchestrator-tick-core.md:97 D 段边界已按 AC65 判据1 更新（outer 核，outer 改）；对照实例 `outer-tick-log-check.sh`+测试=可直接修侧、`full-suite-runner.ts`+测试=必须走 inner 侧。
+
+## 2026-08-23 23:06Z — manager 会话（quay-3e）消失，adjudication 层离线
+- **现象**：quay-3e（manager）从 ListAgents 消失、tmux quay-0 只剩 outer+inner 两窗（原 manager 窗没了）、ps 无 manager 进程。adjudication 层离线——needs-human / 重定范围 / 裁定无人接。
+- **已试**：确认进程不在、tmux 窗不在（list-windows 仅 outer+inner）。
+- **为何超权**：manager 是独立跨项目会话，重启它不在 outer 授权内（AC147「manager 活性由不依赖 manager 的通道兜底」属 AC143-149 下一阶段，尚未落地）。
+- **选项**：① 人重启 manager（quay-launch.sh manager）；② 等 manager 自愈（大概率不会）；③ 暂以 tick-log 为 durable record 继续观察（loop 仍在跑，worker-driver 照常派发，仅无 adjudication）。
+
+## 2026-08-23 23:06Z — AC150 三次死亡根因：worker 墙钟 < fan-in 时长（含 ff-retry），⛔ 非登记内容
+- **现象**：AC150 三次 exited-not-landed（37.2 / 27.7 / 25.5 min）。①②卡 scoped 门（driver-shared.ts 未登记 capability-catalog，已修 8cc18952）；③ 登记修好后 suite 已绿（4071/0 exit=0 @22:46:12），但 ff-merge 22:47:35-36 撞「not a fast-forward」（develop 22:40:02 被 reflog-to-revlist 非惰性代码变更推进）⇒ retry 回无锁段，worker 墙钟 25.5min 就死，没来得及重跑。
+- **为何超权**：worker 生命周期（worker 墙钟 vs fan-in 时长）是 driver/机制面，需 manager 裁定或立任务；`gap-worker-driver-periodic-exit-resident`（worker 生命周期族）已在飞。
+- **选项**：① 立任务：fan-in 遇非惰性 develop 前进时 ff-retry 让 worker 墙钟不够——诊断 worker 墙钟上限 vs fan-in 时长；② 等 periodic-exit-resident（在飞）落地看是否连带解决；③ 临时提高 worker 墙钟 / 允许 ff-retry 跨 worker 存活。
