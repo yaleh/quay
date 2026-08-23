@@ -36,7 +36,7 @@ depends_on:
 
 ## Definition of Done
 
-- [ ] 单一构造 + 可配 + 覆盖语义统一；AC1-3 全勾；land 到 develop。
+- [ ] 单一构造 + 可配 + 覆盖语义统一落地；AC1-3 全勾（含配置 wrapper 仍 spawn 裸 claude 的取假）；land 到 develop。
 
 ## Retires
 
