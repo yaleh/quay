@@ -54,6 +54,10 @@ promotion-driver.ts:26 明写「⛔ 不读/不写 .halt（停机态 = 进程信�
 - plugin/scripts/promotion-driver.ts（起 fix worker 前过资源门 + 控制面 halt）
 - plugin/scripts/worker-driver.ts（resourceGateCheck/serveControlPlane 抽成共享函数供复用）
 - plugin/scripts/driver-shared.ts（新：共享资源门+控制面载体，两 driver 共用）
+- plugin/scripts/promotion-driver-launch.sh（KIND_VERBS 给 promotion 开 drain；cmd_drain 写 promotion-control.json）
+- packages/quay/src/cli/driver.ts（drain help 文本：promotion 不再「does not support」）
+- packages/quay/src/cli/help.ts（同 driver.ts 的 help 文本，防漂移）
 - plugin/test/promotion-driver.test.mjs（test）
 - plugin/test/worker-driver.test.mjs（test）
+- plugin/test/driver-cli.test.mjs（drain-for-promotion 断言反转：不再报 does not support）
 - tasks/gap-ac150-promotion-driver-resource-gate-control-plane.md（自身）

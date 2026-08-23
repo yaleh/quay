@@ -1045,3 +1045,12 @@ test("AC140-3 — override semantics unified: --worker-cmd is prefix, --worker-c
   assert.deepEqual(workerArgvForTask("gap-x", "/r").slice(0, 4),
     ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p"]);
 });
+
+// ── AC150-3 (falsifiable): 资源门/halt 判定抽到 driver-shared.ts，worker-driver 只是 re-export ──
+
+test("AC150-3 — worker-driver re-exports the SAME resourceGateCheck / isHalted as driver-shared (单份实现)", async () => {
+  const shared = await import("../scripts/driver-shared.ts");
+  // worker-driver.test.mjs 顶部从 worker-driver.ts import 了 resourceGateCheck / isHalted（re-export 面）。
+  assert.equal(resourceGateCheck, shared.resourceGateCheck, "resourceGateCheck 同一份实现（worker re-export = shared）");
+  assert.equal(isHalted, shared.isHalted, "isHalted 同一份实现（worker re-export = shared）");
+});

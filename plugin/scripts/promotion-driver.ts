@@ -22,8 +22,10 @@
 //            同一任务连续修 N 次仍不合格 ⇒ 标 needs-human 并停止对它的修复循环（失败上限）
 //         ✅ AC134：每次判定/晋升/修复各写一条 outcome 记录（.quay/promotion-outcome.jsonl，gitignored，
 //            字段 task_id · gate（含 missing）· action（promote/fix/skip/needs-human）· result · ts，outer 可消费）
+//         ✅ AC150-1：起 fix worker 前经与 worker-driver 同一 resourceGateCheck 判定（WAIT ⇒ 退避，本轮不 spawn）
+//         ✅ AC150-2：运行期 halt = 读 .quay/promotion-control.json（单一真相源）；halted ⇒ 停止晋升与 fix spawn
 //   驱动  ⛔ 不做任何 commit（标 needs-human 是写 status 到 tasks/<id>.md，同 --apply 晋升的写类，非 commit）
-//         ⛔ 不读/不写 .halt（停机态 = 进程信号，单一真相源；AC135 才涉及 outer 退役）
+//         ⛔ 不读/不写 .halt（停机态 = promotion-control.json 单一真相源，与 worker-driver 同族；AC135 才涉及 outer 退役）
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/promotion-driver.ts \
@@ -60,6 +62,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { splitArgs, launchArgv } from "./worker-driver.ts";
+// AC150-3：资源门判定 + halt 判定与 worker-driver 共用同一份实现（driver-shared.ts，⛔ 非复制粘贴）。
+// AC150-1 资源门（起 fix worker 前经同一 resourceGateCheck 判定）；AC150-2 控制面（运行期 halt =
+// 读 .quay/promotion-control.json 单一真相源，⛔ 不再「只能 kill」）。
+import { resourceGateCheck, isHalted, PROMOTION_CONTROL_STATE_REL } from "./driver-shared.ts";
 
 /** round 记录的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const ROUND_LOG_REL = ".quay/promotion-round.jsonl";
@@ -337,14 +343,20 @@ export function computeRoundRecord(opts: {
   fixes: FixOutcome[];
   reverify?: ReverifyOutcome | null;
   needsHuman?: string[];
+  /** AC150-2：本轮是否因控制态 halted 而停（true ⇒ 未跑 ready-pool-check、未 spawn fix worker）。 */
+  halted?: boolean;
+  /** AC150-1：本轮资源门判定（起 fix worker 前读；WAIT ⇒ 退避、fixes 为空）。 */
+  gate?: { go: boolean; reason: string | null } | null;
 }) {
   const action = opts.error
     ? "error"
-    : opts.promotedIds.length > 0
-      ? "promote"
-      : opts.fixes.some((f) => f.spawned)
-        ? "fix"
-        : "none";
+    : opts.halted
+      ? "halted"
+      : opts.promotedIds.length > 0
+        ? "promote"
+        : opts.fixes.some((f) => f.spawned)
+          ? "fix"
+          : "none";
   return {
     ts: opts.at, round: opts.round, run_id: opts.runId, pid: opts.pid, action,
     pool: opts.pool, should_apply: opts.shouldApply, promoted_ids: opts.promotedIds,
@@ -352,6 +364,9 @@ export function computeRoundRecord(opts: {
     // AC133：重验证结果（null = 本轮无 fix worker 可重验证）与本轮新标 needs-human 的 id 清单。
     reverify: opts.reverify ?? null,
     needs_human: opts.needsHuman ?? [],
+    // AC150：halted（控制态停）与 gate（资源门判定）落进 round 记录，outer 可观测。
+    halted: opts.halted ?? false,
+    gate: opts.gate ?? null,
   };
 }
 
@@ -567,6 +582,8 @@ export interface ResidentLoopOptions {
   runId: string;
   json: boolean;
   pidFile?: string;
+  /** AC150-1：覆盖 resource-gate 命令（测试缝；缺省 = 与 worker-driver 同一 resourceGateCheck 缺省）。 */
+  resourceGateArgv?: string[] | null;
 }
 
 /**
@@ -577,7 +594,7 @@ export interface ResidentLoopOptions {
  *  （json 时）stdout 事件行。停机由进程信号驱动（⛔ 不读 .halt，单一真相源）。
  */
 export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promise<number> {
-  const { root, intervalMs, cap, once, maxRounds, maxFixRetries, readyPoolArgv, roundLogFile, outcomeLogFile, runId, json, pidFile, fixWorkerCmd, llmCommands } = opts;
+  const { root, intervalMs, cap, once, maxRounds, maxFixRetries, readyPoolArgv, roundLogFile, outcomeLogFile, runId, json, pidFile, fixWorkerCmd, llmCommands, resourceGateArgv = null } = opts;
 
   if (pidFile) {
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
@@ -600,13 +617,30 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
   const retryState: RetryState = { counts: new Map(), needsHuman: new Set() };
   while (!stopRequested) {
     round += 1;
+    // AC150-2 控制面：起新一轮前读控制态（.quay/promotion-control.json 单一真相源，与 worker-driver
+    // 共用同一 isHalted 实现）。halted ⇒ 停止晋升与 fix spawn（记一条 halted round 后退出，⛔ 不再跑
+    // ready-pool-check --apply、不再 spawn fix worker）。
+    if (isHalted(root, process.env, PROMOTION_CONTROL_STATE_REL)) {
+      const haltedRecord = computeRoundRecord({
+        round, runId, pid: process.pid, at: new Date().toISOString(),
+        pool: null, shouldApply: false, promotedIds: [], applied: [], error: null,
+        promotePathLlmInvoked: false, fixes: [], halted: true,
+      });
+      try { appendRoundRecord(roundLogFile, haltedRecord); } catch { /* 记录写失败不致命（运行时日志） */ }
+      if (json) process.stdout.write(`${JSON.stringify({ event: "halted", round })}\n`);
+      break;
+    }
     const r = runPromotionRound(root, readyPoolArgv, cap, llmCommands);
+    // AC150-1 资源门：起 fix worker 前经与 worker-driver 同一个 resourceGateCheck 判定（WAIT ⇒ 退避，
+    // 本轮不 spawn LLM fix worker）。机械的 ready-pool-check 晋升路径不受资源门约束（零 LLM）。
+    const gate = resourceGateCheck(root, resourceGateArgv);
     // AC133 失败上限：已标 needs-human 的任务不再进 fix pass（停止对它的修复循环——与 markNeedsHuman
     // 的 status 翻转双保险，即使 status 写失败也不会再 spawn）。
     const activeDecisions = r.fixDecisions.filter((d) => !retryState.needsHuman.has(d.id));
     // AC132：不合格者 → 短命 fix worker（可修三类 spawn、不可修五类逐条记原因不修）。spawn 前先跑
     // 分类（classifyCandidate 已做），fixDecisions 里 fixable=true 的才 spawn。
-    const fixes = runFixPass(activeDecisions, root, fixWorkerCmd);
+    // AC150-1：gate.go=false ⇒ 退避（fixes 为空，⛔ 不 spawn LLM fix worker）。
+    const fixes = gate.go ? runFixPass(activeDecisions, root, fixWorkerCmd) : [];
 
     // AC133 AC1：fix worker 退出后【重新调同一个闸】验证，以闸的新判定为准（⛔ 不信 worker 自述）。
     const fixedIds = fixes.filter((f) => f.spawned).map((f) => f.id);
@@ -631,7 +665,7 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     const applied = [...r.applied, ...reApplied];
     const record = computeRoundRecord({
       round, runId, pid: process.pid, at: new Date().toISOString(), ...r,
-      promotedIds, applied, fixes, reverify, needsHuman: newlyNeedsHuman,
+      promotedIds, applied, fixes, reverify, needsHuman: newlyNeedsHuman, gate,
     });
     try { appendRoundRecord(roundLogFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     // AC134：判定/晋升/修复/needs-human 各写一条 outcome 记录（.quay/promotion-outcome.jsonl，outer 可消费）。
@@ -672,6 +706,7 @@ const HELP = [
   "  --max-fix-retries <n> AC133 失败上限（缺省 3；连续修满 N 次仍不合格 ⇒ 标 needs-human）",
   "  --ready-pool-cmd <s>  覆盖 ready-pool-check 命令（测试缝）",
   "  --fix-worker-cmd <s>  覆盖 fix worker 命令前缀（测试缝；prompt 仍作末参数追加）",
+  "  --resource-gate-cmd <s> 覆盖 resource-gate 命令（测试缝；AC150-1 起 fix worker 前判定，exit 0=GO 非 0=WAIT）",
   "  --llm-commands <csv>  配置声明的 LLM 命令集，逗号分隔（缺省 claude；AC140-4 判定读此集合）",
   "  --round-log <path>    轮记录文件（缺省 <root>/.quay/promotion-round.jsonl）",
   "  --outcome-log <path>  outcome 记录文件（缺省 <root>/.quay/promotion-outcome.jsonl，AC134）",
@@ -689,6 +724,7 @@ export async function main(argv: string[]): Promise<number> {
   let maxFixRetriesRaw: string | undefined;
   let readyPoolCmd: string | undefined;
   let fixWorkerCmd: string | undefined;
+  let resourceGateCmd: string | undefined;
   let roundLogPath: string | undefined;
   let outcomeLogPath: string | undefined;
   let runId: string | undefined;
@@ -706,6 +742,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--max-fix-retries") maxFixRetriesRaw = args[++i];
     else if (a === "--ready-pool-cmd") readyPoolCmd = args[++i];
     else if (a === "--fix-worker-cmd") fixWorkerCmd = args[++i];
+    else if (a === "--resource-gate-cmd") resourceGateCmd = args[++i];
     else if (a === "--round-log") roundLogPath = args[++i];
     else if (a === "--outcome-log") outcomeLogPath = args[++i];
     else if (a === "--run-id") runId = args[++i];
@@ -751,6 +788,7 @@ export async function main(argv: string[]): Promise<number> {
     maxFixRetries,
     readyPoolArgv: readyPoolCmd ? splitArgs(readyPoolCmd) : null,
     fixWorkerCmd: fixWorkerCmd ?? null,
+    resourceGateArgv: resourceGateCmd ? splitArgs(resourceGateCmd) : null,
     llmCommands,
     roundLogFile,
     outcomeLogFile,
