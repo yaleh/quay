@@ -103,6 +103,32 @@ test("AC127: parseVerificationRound extracts the bucket-execution fields (bucket
   assert.equal(legacy.bucket_duration_ms, undefined, "a legacy row has no bucket_duration_ms field");
 });
 
+test("gap-test-detail-perfile-duration-failed: parseVerificationRound extracts perFile ({file,durationMs,passed}) and tolerates its absence on legacy rows", () => {
+  // full-suite-runner lands `perFile` on the round record (reusing measure-suite-reporter's
+  // __PERFILE__ stream); the /tests reader must surface it and tolerate legacy rows that carry none.
+  const withPerFile = parseVerificationRound(JSON.stringify({
+    round: 241, startedAt: "2026-08-23T00:00:00.000Z", durationMs: 500000,
+    state: "red", pass: 1, fail: 1, cancelled: 0, tests: 2, reason: "failed",
+    runner: "outer", scope: "worktree",
+    perFile: [
+      { file: "packages/quay/test/slow.test.mjs", durationMs: 210.5, passed: false },
+      { file: "packages/quay/test/fast.test.mjs", durationMs: 12.25, passed: true },
+    ],
+  }));
+  assert.ok(Array.isArray(withPerFile.perFile), "perFile is an array");
+  assert.equal(withPerFile.perFile.length, 2, "both entries parsed");
+  assert.deepEqual(withPerFile.perFile[0], { file: "packages/quay/test/slow.test.mjs", durationMs: 210.5, passed: false }, "failed entry (file/durationMs/passed) preserved");
+  assert.deepEqual(withPerFile.perFile[1], { file: "packages/quay/test/fast.test.mjs", durationMs: 12.25, passed: true }, "passed entry preserved");
+
+  // Legacy row (no perFile field) ⇒ undefined, never a fabricated [].
+  const legacy = parseVerificationRound(JSON.stringify({
+    round: 228, startedAt: "2026-08-17T04:30:00.000Z", durationMs: 936519,
+    state: "green", runner: "outer", scope: "worktree",
+    commit: "426b21ceaabbe7502334d92d79ce4a4a8d935fe9",
+  }));
+  assert.equal(legacy.perFile, undefined, "a legacy row has no perFile field (absent-field contract)");
+});
+
 // ── gap-live-ghost-inflight-paused-event ─────────────────────────────────────────────────────────
 // readLive cross-validates the event-stream in-flight pairing (start without end) against worktree
 // existence. The fast-mode worktree namespace is `<parent-of-main>/quay-worktrees` — so each fixture

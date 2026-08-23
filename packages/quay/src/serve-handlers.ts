@@ -2282,6 +2282,31 @@ function runStatusClass(state: string | null): string {
   return "";
 }
 
+/**
+ * gap-test-detail-perfile-duration-failed AC2 — render the per-file duration table for one round.
+ * Sorted by duration DESC (server-side — zero client JS, same style as the git-history SVG), failed
+ * files marked with the existing `verdict-fail` class (red). Empty/absent perFile ⇒ "" (no fabricated
+ * table). Pure on its input, so the sort + fail-marking contract is unit-testable directly.
+ */
+export function renderPerFileTable(
+  perFile: { file: string; durationMs: number; passed: boolean }[] | null | undefined,
+): string {
+  if (!perFile || perFile.length === 0) return "";
+  const sorted = [...perFile].sort((a, b) => b.durationMs - a.durationMs);
+  const rows = sorted.map((f) => html`<tr>
+    <td><code>${escapeHtml(f.file)}</code></td>
+    <td>${escapeHtml(String(Math.round(f.durationMs)))} ms</td>
+    <td class="${f.passed ? "" : "verdict-fail"}" style="${f.passed ? "" : "font-weight:700"}">${f.passed ? "passed" : "failed"}</td>
+  </tr>`).join("\n");
+  return html`<details open style="margin-top:1rem">
+    <summary style="cursor:pointer;font-weight:600">perFile 耗时明细（耗时降序 · 失败标红）</summary>
+    <table style="margin-top:0.5rem">
+      <tr><th>file</th><th>duration</th><th>result</th></tr>
+      ${rows}
+    </table>
+  </details>`;
+}
+
 function renderTestsPage(tests: TestsResult): string {
   const latest = tests.runs[0] ?? null;
   const latestBanner = latest
@@ -2310,6 +2335,10 @@ function renderTestsPage(tests: TestsResult): string {
         </ul>
       </details>`
     : "";
+  // gap-test-detail-perfile-duration-failed AC2 — render the per-file table for the newest run that
+  // actually carries perFile data (legacy rows have no perFile field → skipped, never fabricated).
+  const perFileRun = tests.runs.find((r) => r.perFile && r.perFile.length > 0);
+  const perFileTable = perFileRun ? renderPerFileTable(perFileRun.perFile) : "";
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>Tests — 验证轮记录</title></head>
     <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
@@ -2323,6 +2352,7 @@ function renderTestsPage(tests: TestsResult): string {
         ${historyRows}
       </table>` : ""}
       ${failureDetails}
+      ${perFileTable}
     </main></body></html>`;
 }
 
