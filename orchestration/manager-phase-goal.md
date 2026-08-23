@@ -370,6 +370,22 @@ AC129 驱动的是【任务执行】（ready → worktree → 开发 → suite �
 **取假（硬规则 4 推论三：AC 必须读生产载体，且只计实现落地之后的时间窗）**：
 本 AC 达成的判据是**载体中【实现 land 之后】的真实记录条数 ≥ N**，⛔ fixture/注入数据不算；
 若把注入 seam 关掉后该 AC 仍能通过，它才是测量。
+
+**⊕ 2026-08-23 00:5xZ 计数口径钉死（manager 读生产载体后补，⛔ N 仍不拍板）**：
+**「记录条数」= 【去重后的事件数】，⛔ 不是裸行数。**
+**⊢ 实测（我直读 `.quay/promotion-outcome.jsonl`，非推断）**：
+```
+总 158 条（23:59:31 → 00:54:37，55 分钟）：promote 2 · fix 1 · skip 155
+skip 构成：ac138 ×85 · ac139 ×38 · ac140-command-configurable ×33（全是 depsReady=false 的被锁任务）
+ac138 那 85 条：去掉 ts 后【不同取值个数 = 1】—— 逐字相同，零新信息
+```
+⇒ **驱动每轮（~30s）把全部被锁任务原样重写一遍** ⇒ **98% 的记录不携带信息**。
+**⊢ 为什么这会毁掉本判据**：若按裸行数定 N，**55 分钟就能凑到 158，而真实事件只有 3 个**
+—— 那样 N 拍的是噪声，**且「驱动在工作」与「驱动空转 55 分钟」在该读数上完全同形**（硬规则 4b）。
+**⇒ 口径**：同一 `task_id` + `action` + `missing` 在**其状态未变期间只计一次**；N 在这个口径上再谈。
+**⊢ 连带观察项（⛔ 不立条、不阻塞，归 outer 判形态）**：载体按当前速率 ~172 条/小时、~4100 条/天，
+信息量恒定 —— **发生率读数已有（155/158 = 98% 无信息）**；是否改实现（去重写入 / 只在状态变化时写）由 outer 定，
+**我只钉判据口径，不裁定实现**。
 **⊢ 为什么必须有**：SPEC §7 人已裁定「跨任务模式识别由 outer 执行」，而 outer 只能读记录——
 **没有这条，晋升面机械化之后 outer 就瞎了**（同 AC115 的 outcome 记录之于 inner 侧）。
 
@@ -619,20 +635,113 @@ promotion-driver.ts:110-117  isLlmInvocation(argv)
 - **AC140-1（单一真相源）**：LLM 调用 argv 由**一个**构造函数产出（role 作参数），
   上述**四处硬编码全部消除**。**取假（一条 grep 可查）**：`plugin/scripts/` 下仍能找到 ≥2 处独立的
   `["claude", "-p", …]` 字面量 ⇒ 为假。
-- **AC140-2（可配置：wrapper + model + 按 role）**：LLM 命令与 model 由 **`.quay/config.yml` 配置**
-  （沿用 DIR-050 统一配置先例——该文件已有 `providers:`/`gates:`/`loop:` 三段，本条加第四段），
+- **AC140-2（可配置：wrapper + model + 按 role）**：LLM 命令与 model **必须与 inner/outer 会话所用的同一套配置同源**，
   **且可按 role 分别覆盖**（worker / selector / fix-worker 是三种不同负载：长任务链 / 短决策 / 短编辑，
-  ⛔ 不假定它们该用同一个 model）。**取假**：把 wrapper 配成 `claude-fjdac`、model 配成本项目实际所用值后，
-  spawn 出的 argv 里 argv0 仍是 `claude` 或 model 未出现 ⇒ 为假。
+  ⛔ 不假定它们该用同一个 model）。**取假（⛔ 读 env，不读 argv —— 理由见下）**：把 role 的 `launcher`/`model`
+  配成本项目实际所用值后，**spawn 出的 worker 进程的环境里没有 `ANTHROPIC_BASE_URL`**（即 wrapper 不在链上）
+  **或 `--model` 未出现在其命令行** ⇒ 为假。
+
+  **⊕ 2026-08-23 01:0xZ 我方第三次同形自纠（人指出「实际用的是 wrapper claude-fjdac，配置文件应当支持」后复核）**：
+  **原文写「spawn 出的 argv 里 argv0 仍是裸 `claude` ⇒ 为假」——该取假【两种读法都不成立】**：
+  ```
+  若测【结果进程】的 argv0  ⇒ 因 claude-fjdac 末行 `exec claude "$@"`，argv0 【永远】是 claude
+                              ⇒ 判据恒假（正确实现也判失败）
+  若测【驱动传给 spawn 的 argv】⇒ 新设计下它是 ["bash", "…/quay-launch.sh", <role>, "--bare", "-p", …]
+                              ⇒ argv0 是 bash，判据恒真【但什么也没验到】（wrapper 有没有真用上，它看不见）
+  ```
+  ⇒ **一个恒假、一个空转，都不是测量**（硬规则④）。**⊢ 这是我在 AC4、AC140-4 之后【第三次】踩同一类**：
+  **判据点名了一个被中间层（此处是 `exec`）抹掉的量。**
+  **⊢ 改用直接量：`ANTHROPIC_BASE_URL`。** wrapper 的全部作用就是注入 env 后 `exec claude`，
+  **env 穿过 exec 保留，argv0 不保留** ⇒ env 是唯一能区分「用了 wrapper / 没用」的量。
+  **⊢ 双向控制我已实测（读已在跑的进程 `/proc/<pid>/environ`，⛔ 未新起任何进程）**：
+  ```
+  正控制  outer 2346790 / inner 2346802（launcher=claude-fjdac）
+          ⇒ ANTHROPIC_BASE_URL=https://fjbigmodel.fjdac.cn/
+            ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro     ✓ 命中
+  负控制  manager 647350（launcher=claude，按设计不走 wrapper）
+          ⇒ ANTHROPIC_BASE_URL 命中数 = 0                      ✓ 不命中
+  ```
+  ⇒ **该谓词【能区分】，两个方向都验过**，⛔ 非「看起来合理」。
+
+  **⊢ 配置面本身【已经支持】wrapper，不需要新增机制（我直读确认，⛔ 不新造）**：
+  `_launchSpec.roles.<role>.launcher` 就是 argv0，`quay-launch.sh:97` 直接用它；
+  `:80` 对 `launcher` 缺失是**报错退出**，⛔ 无静默默认值 —— 所以新增 worker 角色**必须显式写 launcher**。
+  **⊢ ⚠️ 落笔方的真实风险在这里（点名，防止照错样本抄）**：
+  **`manager` 角色的 `launcher` 是裸 `"claude"`、`model` 是 `null`**（它跑 Anthropic 默认模型，且要剥掉 917k env）。
+  **若新增的 `task-worker`/`selector`/`fix-worker` 照 manager 那条抄，就会拿到裸 claude、不走 wrapper、无 model**
+  —— 且因为 `:80` 只检查非空、不检查取值，**这个错不会有任何机件报错**，只会在运行时表现为「模型不对/凭据不对」。
+  **⇒ 新 worker 角色须照 `outer`/`inner` 那两条抄**（`launcher: "claude-fjdac"`, `model: "deepseek-v4-pro"`），
+  ⛔ 不照 `manager` 抄。
+
+  **⊕ 2026-08-23 00:5xZ 我方自纠（人令「应与 inner/outer 一致」后实测，⛔ 我原先指定的落点会制造漂移）**：
+  **原文写「由 `.quay/config.yml` 加第四段配置」——⛔ 撤销该指定**，因为**这些事实已经有正本**，
+  再写一份就是 CLAUDE.md 反复点名的**双真相源**。
+  **⊢ 实读正本（`.claude/launch.settings.json` `_launchSpec.roles`）**：
+  ```
+  outer / inner  launcher = "claude-fjdac"   model = "deepseek-v4-pro"
+  manager        launcher = "claude"          model = null（且清空 917k 三个 env）
+  ```
+  **⊢ 实读组装器（`plugin/scripts/quay-launch.sh:97-115`）**：
+  `CMD=( <launcher> --settings <file> [--exclude-dynamic-system-prompt-sections] [--prompt-suggestions false] [--model <m>] [--bare] -n <name> ) + PASSTHRU`
+  —— **`:36` 明写「其余参数原样透传给 claude（如 `-p`、`--print`、`--resume`）」⇒ 透传缝已经存在。**
+  **⊢ 干跑实证（我实跑，非推断）**：
+  ```
+  bash plugin/scripts/quay-launch.sh inner --bare --dry-run -p "TEST_PROMPT"
+  ⇒ claude-fjdac --settings …/launch.settings.json --exclude-dynamic-system-prompt-sections \
+     --prompt-suggestions false --model deepseek-v4-pro --bare -n quay-inner -p TEST_PROMPT
+  ```
+  ⇒ **人要的「与 inner/outer 一致、仅为 `-p` 模式加参数」这件事，既有机件【已经能做到】**。
+  **⇒ 本条改为要求：驱动的 LLM spawn 走 `quay-launch.sh <role> --bare -p <prompt>`（或等价复用同一组装器），
+  按 role 的配置落在 `_launchSpec.roles` 里新增 worker 角色**（如 `task-worker`/`selector`/`fix-worker`），
+  ⛔ **不得在 `.quay/config.yml` 另立一份 launcher/model**。
+  **⊢ 落笔方须一并回答的两个已知点（⛔ 不得跳过）**：
+  ① **`-n <name>` 是无条件追加的**（`:114`）—— 三个并发 worker 若都叫 `quay-inner` 会在 `ListAgents` 里撞名；
+     新角色须各有其名，或确认 `-p` 模式是否根本不注册会话（**⛔ 实测后再定，不猜**）。
+  ② **`--bare` 的既有定义正好合用**（settings 自述「一次性验证会话：跳过 hooks/LSP/plugin 同步/自动记忆/预取，不长驻」）
+     —— 短命 worker 正是这个形态；但**是否对 task-worker（长任务链）也合适须实测**，⛔ 不照搬到三种 role。
 - **AC140-3（覆盖语义统一为「前缀 + prompt」）**：`--*-cmd` 一律解释为**前缀**，prompt 由驱动追加
   （即 promotion-driver 的现行语义）；worker-driver 现有的**整体替换**语义**改名为独立 flag**
   （如 `--worker-cmd-exact`，测试捕获专用）。**⛔ 两种语义不得共用一个 flag 名** ——
   同名不同义正是本条要消除的东西。**取假**：给 `--worker-cmd` 一个 wrapper 前缀后，
   worker 收不到任务 id/prompt ⇒ 为假。
 - **AC140-4（判定不得靠命令字面量，⛔ 最优先）**：`isLlmInvocation` **不得**以 argv0 是否等于
-  `claude` 判定，须由**配置声明的 LLM 命令集**判定。**取假（负控制，一条命令可做）**：
-  配置 wrapper = `claude-fjdac` 后跑一次真实 fix worker ⇒ 其 round 记录的 `llm_invoked` **必须为 true**；
-  若仍为 `false` ⇒ 为假。**⊢ 这条同时是 AC131 证据链的修复**，⛔ 不得延后到 AC140 其余三条之后。
+  `claude` 判定，须由**配置声明的 LLM 命令集**判定。**取假（负控制）**：配置 wrapper = `claude-fjdac` 后，
+  **对该 wrapper 的 argv 调用 `isLlmInvocation` 必须返回 true**；仍为 `false` ⇒ 为假。
+  **⊢ 这条同时是 AC131 证据链的修复**，⛔ 不得延后到 AC140 其余三条之后。
+
+  **⊕ 2026-08-23 00:4xZ 我方自纠（⛔ 我原先给的取假写错了，实测证否后改正）**：
+  **原文写「跑一次真实 fix worker ⇒ 其 round 记录的 `llm_invoked` 必须为 true」——该判据对当前实现【结构上不可满足】，与 wrapper 无关。**
+  **⊢ 实读证否（`promotion-driver.ts:210` + `:272-275` 注释）**：`llmInvoked = isLlmInvocation(argv)` 中的
+  `argv` **只是 ready-pool-check 的 argv**（晋升路径），**fix worker 的 spawn 根本不进这个字段** ——
+  注释自己写明「fix worker 的 spawn 在 `fixes[].spawned=true` 上可见」。
+  **⊢ 生产实测印证**：round 70（`00:35:53.420Z`）**同一轮里** `fixes[0].spawned=true`（真的 spawn 了 `claude -p`）
+  **而 `llm_invoked:false`**；全载体 `llm_invoked=true` 的轮数 = **0**。
+  ⇒ **我把一个【路径限定】的字段当成了【全轮】字段** —— 若不改，落笔方会照我的原文去测，
+  拿到 `false` 后要么误判 AC140-4 失败、要么去改一个本来正确的字段。
+  **⊢ 因此本条的取假改为【直接对判定函数做】（上文已改）**；
+  **⊢ 并单列一条附带要求（归 AC140-1 的实现面，⛔ 不新增判据）**：`llm_invoked` 这个**字段名比它的语义宽** ——
+  同族陷阱已有前例（`perfile-timeout` gate 名误导）。落笔方**要么把它改名为路径限定的名字**
+  （如 `promote_path_llm_invoked`），**要么把它扩成真正的全轮口径**（含 fix worker spawn）；
+  ⛔ **不得原样保留一个会让读者得出相反结论的名字**（硬规则 4b：读数与「一切正常」同形）。
+
+**⊕ 2026-08-23 00:5xZ 连带记录（一个【有待对照的假说】，⛔ 未证实，不得当结论用）**：
+`fix worker exitCode=1`（round 70 首次生产触发即失败）**可能**源于 `buildFixWorkerArgv` spawn 的是**裸 `claude -p`**，
+而它相对 inner/outer 的实际启动形态**少了两样东西**：
+```
+① --settings …/launch.settings.json  ⇒ 其中 permissions.defaultMode = "bypassPermissions"
+                                        ⇒ 裸 claude -p 在非交互下遇权限提示可能直接退出
+② launcher = claude-fjdac            ⇒ 该 wrapper 用【环境变量】注入 ANTHROPIC_BASE_URL /
+                                        AUTH_TOKEN / DEFAULT_{HAIKU,SONNET,OPUS}_MODEL，末行 `exec claude "$@"`
+                                        ⇒ 裸 claude 走的是另一套（可能无效的）凭据
+```
+**⊢ 两条都能独立解释 exitCode=1 ⇒ 恰恰说明不能凭「说得通」定案**（硬规则④推论四）。
+**⊢ 能区分的对照（一条命令，⛔ 做完再写成因）**：把**同一个 prompt** 分别以
+`bash plugin/scripts/quay-launch.sh inner --bare -p "<同一 prompt>"` 与裸 `claude -p "<同一 prompt>"` 各跑一次 ——
+前者成功而后者失败 ⇒ 成因在**启动形态**（即本条 AC140-2 一并修掉）；两者都失败 ⇒ 成因在 **prompt 本身**，与启动无关。
+**⊢ ⚠️ 顺带一个非显然事实（`ps` 上看不见 wrapper）**：`claude-fjdac` 末行是 `exec claude "$@"`，
+**exec 会替换自身** ⇒ inner/outer 跑着的进程 `argv[0]` 就是 `claude`（我直读 `/proc/2346790/cmdline` 确证），
+**wrapper 的全部贡献都在 env 里、在 `ps` 上不可见**。
+⇒ **不能用「`ps` 里看到的是 `claude`」推断「没用 wrapper」**（硬规则 4b：中间隔了一层 exec，代理量失真）。
 
 **⊢ 与 AC139 的关系（⛔ 顺序与归属）**：AC139 管**承载与入口**（怎么启动、谁守护）；
 **本条管【被启动的东西本身调什么 LLM】** —— 两者正交，但**配置面应落在同一处**
