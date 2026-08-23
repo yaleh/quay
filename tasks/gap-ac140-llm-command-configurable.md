@@ -1,7 +1,7 @@
 ---
 id: gap-ac140-llm-command-configurable
 title: AC140 可配 wrapper + model + 按 role（单一真相源 + 覆盖语义统一）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
