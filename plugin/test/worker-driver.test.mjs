@@ -69,6 +69,7 @@ import {
   serveControlPlane,
   defaultLivenessCheckArgv,
   runLivenessCheck,
+  depsReadyForDispatch,
 } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1258,4 +1259,91 @@ test("AC140-3 — override semantics unified: --worker-cmd is prefix, --worker-c
   // 缺省 ⇒ launchArgv("task-worker", prompt)。
   assert.deepEqual(workerArgvForTask("gap-x", "/r").slice(0, 4),
     ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p"]);
+});
+
+// ── 派发前 depends_on 过滤（gap-worker-driver-dispatch-pre-filter-missing AC1）───────────────────────
+// worker-driver 把 ready-pool-check 的 ready 列表直接派发、不二次过滤 depends_on ⇒ 依赖未满的任务
+// 仍被派发（ac138 白烧一轮：代码已 land、依赖链未满、翻 done 会重造 DEP-DONE-IFF-DEPS 违例）。修法 =
+// 派发前对候选做 depends_on 过滤（与 gap-launch-script-worker-cap-broken AC3 的 Touches 过滤同点）。
+
+test("depsReadyForDispatch — no deps ⇒ true; all done ⇒ true; not-done ⇒ false; missing dep ⇒ false; unreadable candidate ⇒ false", (t) => {
+  const root = makeRoot("deps");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const write = (id, fm) => fs.writeFileSync(path.join(root, "tasks", `${id}.md`), fm);
+
+  // 无 depends_on ⇒ true（真无依赖，⛔ 不是「读不懂」）。
+  write("gap-none", "---\nid: gap-none\nstatus: ready\n---\n\nbody\n");
+  assert.equal(depsReadyForDispatch(root, "gap-none"), true);
+
+  // 依赖 done ⇒ true。
+  write("gap-prereq", "---\nid: gap-prereq\nstatus: done\n---\n\nbody\n");
+  write("gap-ok", "---\nid: gap-ok\nstatus: ready\ndepends_on:\n  - gap-prereq\n---\n\nbody\n");
+  assert.equal(depsReadyForDispatch(root, "gap-ok"), true);
+
+  // 依赖未 done ⇒ false（AC1 核心：依赖未满不派发）。
+  write("gap-prereq2", "---\nid: gap-prereq2\nstatus: ready\n---\n\nbody\n");
+  write("gap-blocked", "---\nid: gap-blocked\nstatus: ready\ndepends_on:\n  - gap-prereq2\n---\n\nbody\n");
+  assert.equal(depsReadyForDispatch(root, "gap-blocked"), false);
+
+  // 依赖文件缺失 ⇒ false（fail-closed：读不懂 ≠ done）。
+  write("gap-missing-dep", "---\nid: gap-missing-dep\nstatus: ready\ndepends_on:\n  - gap-no-such\n---\n\nbody\n");
+  assert.equal(depsReadyForDispatch(root, "gap-missing-dep"), false);
+
+  // 候选自身文件缺失 ⇒ false（硬规则 3b：读不懂 ≠ 无依赖）。
+  assert.equal(depsReadyForDispatch(root, "gap-no-such-candidate"), false);
+
+  // flow 形式 depends_on: [a, b] —— 任一未 done 即 false。
+  write("gap-flow", "---\nid: gap-flow\nstatus: ready\ndepends_on: [gap-prereq, gap-prereq2]\n---\n\nbody\n");
+  assert.equal(depsReadyForDispatch(root, "gap-flow"), false, "flow form: any not-done dep blocks");
+});
+
+test("AC1 — depends_on gate in the resident loop: a candidate whose dep is not done is NOT dispatched (ac138 白烧一轮防)", (t) => {
+  const root = makeGitRoot("ac1-deps");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // gap-prereq（ready，未 done）+ gap-dep（depends_on gap-prereq），都写进 tasks/ 并提交。
+  fs.writeFileSync(path.join(root, "tasks", "gap-prereq.md"), "---\nid: gap-prereq\nstatus: ready\n---\n\nbody\n");
+  runGit(root, ["add", "tasks/gap-prereq.md"]);
+  runGit(root, ["commit", "-q", "-m", "prereq ready"]);
+  fs.writeFileSync(path.join(root, "tasks", "gap-dep.md"), "---\nid: gap-dep\nstatus: ready\ndepends_on:\n  - gap-prereq\n---\n\nbody\n");
+  runGit(root, ["add", "tasks/gap-dep.md"]);
+  runGit(root, ["commit", "-q", "-m", "dep ready"]);
+
+  const out = runDriver(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-dep'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-dep\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--json",
+  ]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(events.some((e) => e.event === "worker-spawned"), false, "AC1: dep-not-done candidate is never dispatched");
+  assert.equal(readOutcomeLines(root).length, 0, "zero workers dispatched");
+  // 负控制（⛔ 不能是「池空才不派」）：round 记录 pool=1 证明 ready-pool 确实给了 gap-dep 候选——
+  // 是 depends_on 过滤把它滤掉的（不是 selector 没选、也不是池空）。与 Touches 互斥同属非终态过滤
+  // （依赖由别的任务落地，非本驱动等待可解）⇒ 无在飞 worker 可等 ⇒ 循环干净退出。
+  const rounds = readRoundLines(root);
+  assert.equal(rounds[rounds.length - 1].pool, 1, "ready-pool reported pool=1 (gap-dep), yet nothing dispatched — the filter is the cause");
+  assert.equal(rounds[rounds.length - 1].in_flight, 0, "nothing in flight");
+});
+
+test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the difference, not a blanket stop)", (t) => {
+  const root = makeGitRoot("ac1-deps-ok");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-prereq", "done");
+  fs.writeFileSync(path.join(root, "tasks", "gap-dep.md"), "---\nid: gap-dep\nstatus: done\ndepends_on:\n  - gap-prereq\n---\n\nbody\n");
+  runGit(root, ["add", "tasks/gap-dep.md"]);
+  runGit(root, ["commit", "-q", "-m", "dep done"]);
+  const rpcFile = path.join(root, "rpc.cnt");
+  const out = runDriver(root, [
+    "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n===0?['gap-dep']:[],pool:n===0?1:0})"),
+    "--selector-cmd", "node -e console.log('gap-dep\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--json",
+  ]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const spawned = events.filter((e) => e.event === "worker-spawned");
+  assert.equal(spawned.length, 1, "AC1 对照: dep-done candidate IS dispatched (exactly once)");
+  assert.equal(spawned[0].task, "gap-dep");
+  assert.equal(readOutcomeLines(root)[0].final_state, "completed", "the dep-done candidate lands cleanly");
 });
