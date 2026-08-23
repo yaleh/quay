@@ -59,35 +59,117 @@ manager 检查代码后给出四点分析（讨论轮，未裁定），人要求
 
 ### 2.1 机械面：统一 `*-driver` 骨架
 
+**⊕ 2026-08-23 人裁定的分层要求（本节据此重写）**：「我们还讨论过其它的 driver，如承接 manager 现有 cron/loop 工作的
+driver。显然它与前述 promotion / worker 的 driver 是有差异的。前述可重用机制应当**分层抽象**，以支持这两层上的重用。」
+⇒ **不是一个 kernel + N 个平级 plugin，是【两级】抽象**：所有 driver 共享【运行时】，而"处理任务"这件事本身是
+**第二级**的共享——manager-driver 不处理任务池，它执行例程，故它**继承 Layer 0 但不继承 Layer 1a**。
+
+**⊢ 判据（本节的取假形态）**：若 manager-kind 被迫实现一个空的"候选池/选择/verify"三段（因为骨架强制要求），
+说明分层错了——**那三段属于 Layer 1a，不属于 Layer 0**。
+
+#### 分层结构
+
 ```
-                    ┌─────────────────────────────────────┐
-                    │         driver-kernel（新，共享）      │
-                    │  reap() / stopCondition() / round     │
-                    │  心跳写盘 / 事件订阅 / spawn 记账       │
-                    └──────────────┬────────────────────────┘
-                                   │ 由 kind-plugin 提供
-              ┌────────────────────┼────────────────────┐
-              ▼                    ▼                    ▼
-      promotion-plugin      worker-plugin        <未来 kind>-plugin
-      （晋升判定+修复）      （执行+测试+合并）     （例：观测/账本/收尾——AC143）
+┌─ Layer 0 · driver-runtime ────────────────────── 三种 driver 全部共享 ──────┐
+│  supervisor   respawn / pid 记账 / stop sentinel   ← 由 .sh 港进 TS（§4.1） │
+│  loop         round 计数 / sleep·wake / 信号处理                            │
+│  trigger      兜底轮询 ⊕ 事件订阅（§2.2；⛔ 事件是提前唤醒，非替代轮询）      │
+│  stopCondition halt(控制面) ∧ resourceGate ∧ kind 自定终止                  │
+│  heartbeat    每轮无条件写一条 round 记录（池空/判停轮也写）                  │
+│  controlPlane MCP（halt/preference/forceDispatch，⛔ 非 worker 私产）        │
+│  notify       send-to-session → manager（§2.3）                            │
+│  profile      LLM 调用配置解析（§2.5）                                      │
+│  ResultVocab  ⛔ 输出词表强制含【无法评估】态（见下方「共同不变式」）           │
+└──────────┬─────────────────────────────────────────────┬───────────────────┘
+           │                                             │
+┌──────────▼── Layer 1a · task-processing ──────┐  ┌─────▼── Layer 1b · routine ──────┐
+│  source    候选池（ready-pool-check，参数化）    │  │  routines  [{name, schedule,     │
+│  filters   ⛔ 可组合谓词【列表】（见下）          │  │             run() → Facts}]      │
+│  select    策略（全部合格 | LLM 选一）           │  │  schedule  复用 routine-         │
+│  act       spawn LLM worker（按 role profile）  │  │            scheduler.ts 判定函数  │
+│  verify    ⛔ 独立复核（见「共同不变式」）        │  │  collect   汇集 Facts            │
+│  outcome   task-keyed 记录（统一 schema）        │  │  report    经 notify 上报        │
+└──────────┬──────────────────┬──────────────────┘  └──────────┬──────────────────────┘
+           ▼                  ▼                                ▼
+    promotion-kind      worker-kind                     manager-kind
+    （晋升判定+修复）    （执行+测试+合并）                （承接 manager cron/loop：
+                                                          读数/监视器/哨兵/巡检）
 ```
 
-**driver-kernel 的职责**（从两个现有 driver 里抽取的公共部分）：
+#### 共同不变式（Layer 0 的 `ResultVocab` 强制，⛔ 这是抽 kernel 的第一理由）
+
+**两个现有 driver 各自独立地发明了同一条不变式、实现了两遍、其中一遍曾经是坏的**：
+```
+promotion AC133   「fix worker 退出后重跑同一个闸验证 ⛔ 不信 worker 自述」
+worker    今天修   「⛔ 不信 exit code，读任务侧直接量 status=done ∧ 无 worktree」
+                     ↑ computeLandingState，2026-08-23 11:37 才落地；在此之前
+                       `exitCode===0 ⇒ completed` 造成假完成 bug（本会话实证）
+```
+⇒ **「⛔ 不信执行者自述，用独立于执行者的量复核」是整个 driver 架构的核心不变式。**
+**抽 kernel 的第一理由不是省代码，是让这条不变式只有一份、且结构上不可能被某个 kind 悄悄漏掉。**
+
+**⊢ 它在 Layer 1b 的对应形态**（manager-kind 不 spawn worker，故不能直接套 verify）：例程读不到输入时
+**必须报「无法评估」而非报合格**（硬规则 3b）。两者是同一条的两个投影，故**统一由 Layer 0 的结果词表承载**：
+```ts
+type DriverResult<T> =
+  | { state: "verified";      value: T; verifiedBy: string }  // 由独立判据证实
+  | { state: "not-evaluated"; reason: string }                // ⛔ 与「合格」不同形
+  | { state: "failed";        reason: string }
+```
+**取假**：任一 kind 能在【未经独立判据证实】的情况下产出 `verified`，或能把「读不到输入」表达成非 `not-evaluated`
+的值 ⇒ 架构未达成。
+
+#### Filter 是一个【列表】，不是各 kind 的私有分支（Layer 1a 的核心收益）
+
+**现状（实测）**：四个谓词散落两处，各有一个随机子集——
+```
+notInFlight            worker 有       promotion 无
+depsSatisfied          ⛔ 两个都无     ← ac138 白烧 15 分钟（2026-08-23 实证）
+touchesDisjoint        ⛔ 两个都无     ← Git-History 群组撞 serve-handlers.ts 的风险来源
+retryCapNotExhausted   promotion 有    worker 无
+notNeedsHuman          promotion 有    worker 无
+```
+⇒ **做成谓词列表后，「给两个 driver 都加 depends_on 检查」= 数组加一行**，而不是改两个文件、写两遍、漂移两次。
+**⊢ 同一个缺失的抽象，今天有两种表现**（ac138 白跑一轮 · Touches 冲突风险）——这是它优先级高于 supervisor 港移的理由。
+
+#### Layer 0 的逐项落点（下列各条即上图 Layer 0 各行的展开）：
 - 常驻主循环骨架：`round` 计数、`running[]` 在飞集、`reap()` 回收已完成、`stopCondition()` 判停（halt/资源门）。
 - round 心跳落盘：无条件每轮写一条（AC138-3 已验证的设计：即使池空也写，防止 outcome 停更被误读为驱动死亡）。
 - **Touches 互斥过滤**（`checkTouchesPair`，单一实现，`gap-launch-script-worker-cap-broken` AC3 补齐后上收进 kernel，两个 kind 都受益，不是各自实现）。
 - **事件订阅接口**（§2.2）+ **出站通知接口**（§2.3）。
 - MCP 控制面（`serveControlPlane` 已是 worker-driver 独有实现，本 SPEC 建议上收进 kernel，promotion-driver 免费获得同等能力）。
+- **进程守护（supervisor）本身**——`plugin/scripts/promotion-driver-launch.sh` 现有的 respawn 循环
+  （`run_supervisor()`:268）、pid 记账（`pid_alive()`:243 / `_carrier_stats()`:253）、
+  8 张 kind registry 表（`KIND_DRIVER`/`KIND_PREFIX`/`KIND_VERBS`/`KIND_CAP_FLAG`/
+  `KIND_HAS_INTERVAL`/`KIND_PID_SELF`/`KIND_RUN_PREFIX`/`KIND_CARRIERS`:102-140）
+  **全部港进 TS kernel**，`packages/quay/src/cli/driver.ts` 由"`spawnSync` bash 的薄壳"变为
+  真正的实现入口。
+  **⛔ 这不是可选项、不是"迁移期并存"**（人 2026-08-23 逐字裁定："这显然不够集成，对测试也不友好"）。
+  **Node 侧等价原语已确认可用**：`spawn(cmd, {detached:true, stdio:["ignore",fd,fd]}).unref()`
+  ≡ `setsid`+`nohup`；`process.kill(pid, 0)` ≡ `pid_alive()`；`child.on("exit")` + `setTimeout`
+  ≡ `wait`+`sleep $RESTART_DELAY`。**⛔ 无需 systemd、无需保留 bash 兜底。**
+  **可测试性是本条的目的，不是副产品**：港完后 respawn 判定、registry 查表、carrier 统计、
+  liveness 判定都必须是可直接 `import` 的纯函数（对照 `worker-driver.ts` 的
+  `computeLandingState`/`resolveConcurrency` 现有形态），⛔ 不接受"仍然只能 spawn 整个进程做黑盒断言"。
 
-**kind-plugin 的职责**（每个 kind 保留、不上收的部分）：
-- 候选池计算方式（promotion 读 `ready-pool-check`；worker 读同一个但语义不同——晋升候选 vs 执行候选）。
+**Layer 2（kind）保留、不上收的部分**：
+- 候选池的**参数**（promotion 与 worker 都调 `ready-pool-check`，但语义不同——晋升候选 vs 执行候选）。
+  ⛔ 注意这是 Layer 1a 的 `source` **参数化**，不是各写一份调用。
 - 单任务的实际动作（promotion = 判定+可能 spawn fix worker；worker = spawn 完整实现链）。
-- outcome 记录的字段形状（两族已经在 `computeOutcome`/`computeRoundRecord` 上部分同构，可以进一步统一 schema，但字段语义不同，不建议强行合并成一个类型）。
+- `select` 策略（promotion = 全部合格者；worker = LLM selector 选一）——**这是真实的领域差异，不强行统一**。
+- outcome 记录的**字段语义**（`computeOutcome` vs `computeOutcomeRecords` 字段含义不同，不合并成一个类型；
+  但**外层信封**（ts/kind/round/run_id/state）归 Layer 0 统一，供 supervisor `status` 与 web 单份解析——
+  ⛔ 现状是 `_carrier_stats` 用 `grep -o '"ts":"[^"]*"'` 跨两种 schema 硬读，一个无类型无测试的隐式跨语言契约）。
 
-**新增 kind 的成本**（本 SPEC 的可扩展性目标）：**registry 表加一行 + 写一个 kind-plugin**，
-不需要重新实现常驻循环/心跳/Touches 过滤/事件订阅/出站通知——这些都在 kernel 里。
-这个成本已经在 AC139（`quay driver` 统一入口）落地时被验证过（`promotion-driver-launch.sh` 加 `--kind worker`
-就是加一行 registry + 一个新 .ts 文件，未改 launch 脚本主体逻辑）。
+**新增 kind 的成本（分层后的可扩展性目标）**：
+```
+新增一个【任务处理型】kind（如未来的 review-driver）  = 继承 Layer 0 + 1a，写 source 参数/act/select
+新增一个【例程型】kind（manager-driver，AC143 的承接） = 继承 Layer 0 + 1b，写 routines 表
+⛔ 两者都不需要重新实现：常驻循环 / 心跳 / 判停 / 事件订阅 / 出站通知 / 控制面 / profile 解析
+```
+**⊢ manager-driver 为什么必须落在 1b 而不是 1a**（人 2026-08-23 指出的差异，此处给出机械判据）：
+它**没有候选池、没有任务选择、没有"spawn 执行者再复核其自述"这一步**——它的单元是【例程】不是【任务】，
+产出是【读数】不是【任务终态】。**硬塞进 1a 会迫使它实现三个空段**，那正是本节开头「取假形态」说的架构错误。
 
 ### 2.2 事件触发：改接线，不新造
 
@@ -117,7 +199,7 @@ manager 检查代码后给出四点分析（讨论轮，未裁定），人要求
 
 **设计**：driver-kernel 在以下时机调用 `send-to-session.ts --pid <manager-pid> --token <manager-childToken>`
 （具体消息形态、频率由落地方按 AC146 的"显式承接者"要求设计，本 SPEC 只定时机，不定文本格式）：
-1. **round 内某个任务的 `final_state` 是异常态**（`failed`/`timed-out`/`killed`/`spawn-failed`，或 §2.4
+1. **round 内某个任务的 `final_state` 是异常态**（`failed`/`timed-out`/`killed`/`spawn-failed`，或 §2.7
    `gap-worker-driver-no-record-on-abnormal-death` 修复后新增的"异常但有记录"态）——立即通知，对应 AC146
    的"needs-human 产生后人不用翻 transcript 就能看到"。
 2. **驱动自身判停**（`stopCondition()` 返回 stop=true 且 reason 不是常规的 `pool-empty`）——例如资源门 WAIT、
@@ -125,7 +207,68 @@ manager 检查代码后给出四点分析（讨论轮，未裁定），人要求
 3. **⛔ 不建议**：每次正常完成都通知（会变成噪音，且正常完成本来就该被 promotion-driver/下一轮派发自然消费，
    不需要人看）。
 
-### 2.4 与本会话已发现缺陷的关系（不是本 SPEC 的范围，但落地顺序相关）
+### 2.5 Claude Code profile 抽层（人 2026-08-23 裁定：「Claude Code 的命令行本身就应当抽象为若干 Claude Code profile」）
+
+**⊕ 地基已有，比预期完整**：`.claude/launch.settings.json` 的 `_launchSpec.roles` 已有 6 个 role
+（manager/outer/inner/task-worker/selector/fix-worker），每个带 `name`/`launcher`/`model`/`env`/`bare`，
+由 `quay-launch.sh` 经 jq 消费，`worker-driver.ts:359 launchArgv(role, prompt, root)` 是唯一构造点（AC140-1）。
+**⇒ 本节不是从零造 profile，是把已有的雏形补三个缺口。**
+
+**缺口①（⛔ 已经流过血）：`bare` 是两级且优先级无文档**
+```
+_launchSpec.bare           ← 顶层一个
+_launchSpec.roles.*.bare   ← 每个 role 又一个
+```
+**这正是 AC142 记录的 13/13 全败成因**：fix-worker/selector 的 `bare:true` 让 spawn 链 100% 失败
+（`--bare` 要求 `ANTHROPIC_API_KEY`，而 wrapper 给的是 `ANTHROPIC_AUTH_TOKEN`），task-worker 无该键故存活。
+⇒ **两级覆盖 + 无声明的优先级 = 一个改错了不报错、只静默全败的旋钮**（硬规则 3b：读不懂与合格同形）。
+
+**缺口②：无组合、无继承** —— 三个 worker role 各自重复 `launcher: claude-fjdac` / `model: deepseek-v4-pro`。
+「给所有 worker 换模型」= 改三处，漏一处即静默不一致。**目标形态**：
+```yaml
+profiles:
+  worker-default: { launcher: claude-fjdac, model: deepseek-v4-pro, bare: false }
+  manager-local:  { launcher: claude,       model: null, unset: [CLAUDE_CODE_MAX_CONTEXT_TOKENS, ...] }
+roles:
+  task-worker: { profile: worker-default, name: quay-task-worker }
+  selector:    { profile: worker-default, name: quay-selector }
+  fix-worker:  { profile: worker-default, name: quay-fix-worker }
+```
+⇒ 换模型 = 改一行；**且 `bare` 只在 profile 一层出现，缺口① 的两级歧义结构性消失**。
+
+**⊢ `unset` 不是可省的细节**：现 manager role 的 `env` 是三个**空字符串**
+（`CLAUDE_CODE_MAX_CONTEXT_TOKENS: ""` 等），这是"用空值取消继承"的隐式约定。
+profile 化时必须显式表达为 `unset: [...]`——**空串与"没配"是两回事**，混同又是一个 3b 形态。
+
+**缺口③：寄生在别人的 schema 里** —— `_launchSpec` 是挂在 Claude Code 自己的 settings 文件上的扩展键，
+靠下划线前缀避让。**Claude Code 若哪天校验未知键，整个启动面一起挂。**
+⇒ profile 应有自己的承载（`.quay/profiles.yml` 或并入 `.quay/config.yml`），
+`launch.settings.json` 只保留 Claude Code 真正认识的键。
+
+### 2.6 配置与控制态：合并五处，但**必须保留一条分界**
+
+**现状：配置散在六处** —— `_launchSpec.roles`（LLM）· 8 张 bash registry 表（kind）· CLI flags（`--cap`/`--interval`）·
+env（`QUAY_MAX_TASK_SUBAGENTS`）· `.quay/worker-control.json`（运行时）· 硬编码字面量
+（`CAP_DEFAULT=5`:77 / `INTERVAL_MS_DEFAULT=30_000`:73 / `ROUND_TIMEOUT_MS`:84）。
+
+**⛔ 合并时的硬分界（合错会造出新缺陷）**：
+```
+声明式配置（git 版本化 · 人写 · 重启才生效）    ⟷    运行时控制态（gitignored · 机器写 · 热变）
+ drivers.yml: kind / filters / profile / cap          .quay/worker-control.json: halted / preference
+ ⇒ 六处里的【五处】合并到这一侧                        ⇒ 这一侧【保持独立】，⛔ 不并进配置文件
+```
+**理由**：控制态可被 MCP 热改（`halt`/`forceDispatch`）。合成一个文件 = **机器改人的源文件** ——
+与 CLAUDE.md 11b 警告的「未提交改动正在影响生产、而一次 `git checkout` 就静默回退它」同族。
+
+**⊢ 顺带消除的一类缺陷**：`CAP_DEFAULT = 5`（promotion）与 `resolveConcurrency` 读 env（worker）
+是**两份语义不同的并发解析**，再加 `cap-from-gate.ts` 的 `FIXED_EFFECTIVE_CAP = 5` 是第三份——
+而该文件自己的注释写着「the single source is QUAY_MAX_TASK_SUBAGENTS」。**三份"单一真相源"。**
+
+**关于事件触发（§2.2 的补充约束）**：**事件是"提前唤醒"，⛔ 不是"替代轮询"**。
+必须保留一个兜底轮询周期，事件只让它提前醒。**否则事件源一挂，driver 静默停摆**——
+这正是本会话实证的 `cmd_liveness` 形态（机制建好了、零调用者、"死亡检测"从不触发）。
+
+### 2.7 与本会话已发现缺陷的关系（不是本 SPEC 的范围，但落地顺序相关）
 
 `gap-worker-driver-fake-completion-exit-0`（已 done）和 `gap-worker-driver-no-record-on-abnormal-death`
 （进行中）这两条修的是"driver 记录是否可信"——**这是 driver-kernel 的地基**。§2.1 的 kernel 抽取工作
@@ -210,7 +353,7 @@ hold-for-approval 队列，失去自动通知的意义，且该路径的身份�
 | `routine-scheduler.ts` | 纯函数，已解耦判定与执行 | **直接复用**，kernel 调用其判定函数，不重写 |
 | `concurrent-batch-scheduler.ts` | 独立 CLI，批量装配用 | 装配策略保留独立（不是每个 kind 都要批量装配），但其依赖的 `checkTouchesPair` 上收进 kernel 后，本脚本改为调用 kernel 暴露的同一实现，**消除潜在的第二份实现漂移**（本会话已实证"第三份副本漂移"两次） |
 | `ready-pool-check.ts` | 独立 CLI，两个 driver 都 spawn 它 | **不建议内联**——它是任务库语义判断（AC/DoD/Touches/依赖），复杂度和变更频率都高于"driver 该不该派发"这个机械问题，保持独立 CLI + driver spawn 调用是当前合适的边界（`packages/quay` 领域逻辑 vs `plugin/scripts` 编排逻辑的既有分层，`SPEC-integration-architecture-2026-08-05.md` 已有此判据：机件层"留在外面"） |
-| `promotion-driver-launch.sh` 的 registry 表 | 已是统一入口 | **kernel 落地后 registry 增加"kernel 版本号/骨架路径"一列**，供新 kind 声明"我用共享骨架"还是"我是旧式独立实现"（迁移期并存，不強制一次性切完） |
+| `promotion-driver-launch.sh`（492 行 bash） | 统一入口已达成，但**实现语言与仓库其余部分割裂**：`cli/driver.ts` 只是 `spawnSync` 薄壳，真正的 supervisor 逻辑在 bash 里，测试只能黑盒（256 行测试 / 13 用例 / 仅 5 处 spawn 断言，对比 `worker-driver.ts` 的纯函数单测） | **整体港进 TS kernel 后删除本脚本**（§2.1 末条）。⛔ 非"迁移期并存"——人 2026-08-23 裁定不够集成/不利测试。港完后 `cli/driver.ts` 成为真正实现入口，本 `.sh` 文件从仓库移除（其 8 张 registry 表变成 TS 数据结构，`run_supervisor` 变成可单测的 kernel 函数） |
 
 ### 4.2 manager 定时任务（cron/loop）下沉的讨论
 
@@ -254,7 +397,7 @@ hold-for-approval 队列，失去自动通知的意义，且该路径的身份�
 
 ## 6. 排期与验收方向（非最终 AC，供下一阶段立案时参考）
 
-1. AC142 系列全部 done（本文件成文时 4/5 done，剩 §2.4 提到的 no-record 任务）。
+1. AC142 系列全部 done（本文件成文时 4/5 done，剩 §2.7 提到的 no-record 任务）。
 2. driver-kernel 抽取（§2.1），至少两个现有 kind（promotion/worker）迁移到共享骨架，**行为不变**
    （既有测试全过 + 生产载体读数与迁移前同构）。
 3. 事件订阅接线（§2.2）——**取假点**：制造一次 SLOT-FREE 场景，driver 在事件到达后的秒级响应，

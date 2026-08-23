@@ -60,6 +60,10 @@ export interface PerFileRecord {
   file: string;
   durationMs: number;
   passed: boolean;
+  /** gap-test-detail-timeline AC1 — epoch ms the file's `test:complete` event fired (its END). */
+  endedAtMs?: number;
+  /** Derived start = endedAtMs − durationMs (reporter records END; start is back-computed). */
+  startedAtMs?: number;
 }
 
 export interface HistoryLine extends PerFileRecord {
@@ -119,7 +123,10 @@ function lastSuiteStartOffset(text: string): number {
   return last;
 }
 
-/** Parse `__PERFILE__ duration_ms=<dur> <full-path> passed=<bool>` lines (measure-suite-reporter).
+/** Parse `__PERFILE__ duration_ms=<dur> <full-path> passed=<bool> [end_ms=<epoch-ms>]` lines
+ *  (measure-suite-reporter). The optional trailing `end_ms` (gap-test-detail-timeline AC1) is the
+ *  file's END epoch-ms; the START is back-computed as end − duration. Legacy lines without `end_ms`
+ *  still parse (records simply omit the two time fields — backward compatible).
  *  gap-fan-in-suite-log-cross-relaunch-reuse: fan-in relaunch 轮转日志并打 `__FANIN_SUITE_START__`
  * 起始标记——按最后一个标记切片，只解析当前轮（最后一个 `__FANIN_SUITE_START__` 之后）的内容，不整份
  * 线性读旧轮。无标记（full-suite-runner 直写 / 测试手写日志 / 旧版 fan-in）⇒ 整份读取（向后兼容）。 */
@@ -128,11 +135,19 @@ export function parsePerFileLines(text: string): PerFileRecord[] {
   const mk = lastSuiteStartOffset(text);
   const body = mk === -1 ? text : text.slice(mk);
   for (const line of body.split("\n")) {
-    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)$/);
+    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)(?: end_ms=([0-9]+))?$/);
     if (m) {
       const dur = parseFloat(m[1]);
       if (Number.isFinite(dur) && dur > 0) {
-        out.push({ file: normalizePerFileKey(m[2]), durationMs: dur, passed: m[3] === "true" });
+        const rec: PerFileRecord = { file: normalizePerFileKey(m[2]), durationMs: dur, passed: m[3] === "true" };
+        if (m[4] != null) {
+          const endedAtMs = Number(m[4]);
+          if (Number.isFinite(endedAtMs)) {
+            rec.endedAtMs = endedAtMs;
+            rec.startedAtMs = endedAtMs - dur;
+          }
+        }
+        out.push(rec);
       }
     }
   }

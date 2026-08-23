@@ -1,7 +1,7 @@
 ---
 id: gap-webui-server-stale-code-no-restart-detection
 title: web UI server 服务陈旧代码无感知（8.5h 未重启、11 UI 任务不可见，无机制提醒）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -32,11 +32,11 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：server 代码过期可被检测（比对启动时刻 vs 最新 commit，过期 ⇒ 有信号/自动重启；⛔ 无感知 ⇒ 假）。
+- [x] AC1：server 代码过期可被检测（比对启动时刻 vs 最新 commit，过期 ⇒ 有信号/自动重启；⛔ 无感知 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] server 陈旧代码检测/自愈机制落地 + 实测过期可报；AC1 全勾；land 到 develop。
+- [x] server 陈旧代码检测/自愈机制落地 + 实测过期可报；AC1 全勾；land 到 develop。
 
 ## Retires
 

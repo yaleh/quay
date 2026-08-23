@@ -75,6 +75,32 @@ export function isMainThreadAgentId(agentId, mainAgentId) {
   return false;
 }
 
+// ── Ruled-historical one-off 豁免 (tasks/gap-fan-in-ff-executor-check-ruled-historical-99f845d9) ──────
+//
+// manager 2026-08-23 裁定：99f845d9 的应急主线程 fan-in（outer 主会话为解红#4 直接落地
+// gap-direct-to-develop-ruled-historical-99f845d9，fan-in-ff-merge.sh 未传 --agent-id）是 ruled one-off——
+// 形态 = ruled 豁免 + 定案理由（先例 direct-to-develop-bypass-check.ts 的 RULED_HISTORICAL_COMMITS）。
+//   · 入表 taskId 的 lock-events / retry-record 分类为 `ruledHistorical`（可见 + 可审计，非静默掩盖）
+//     ——独立分类，非 main-thread-executor（两者在 checker 输出里可区分：reason 分别为
+//     `ruled-historical-record` 与 `main-thread-executor-record`）。
+//   · 豁免表【有界】：只覆盖这里列出的 ruled 任务；任一未入表任务的缺失/主会话 agentId 记录仍红
+//     （能取假——豁免不能被静默扩展）。
+export const RULED_HISTORICAL_TASKS: { taskId: string; reason: string }[] = [
+  {
+    taskId: "gap-direct-to-develop-ruled-historical-99f845d9",
+    reason:
+      "manager 授权的应急 fan-in——outer 主会话直接落地红#4 的止损动作，非常规主线程绕过 subagent；" +
+      "该形态本轮后不应再发生（正确路径是让 worker-driver 正常派发 subagent fan-in）。" +
+      "manager 2026-08-23 裁定 ruled one-off（先例 direct-to-develop-bypass-check.ts 的 RULED_HISTORICAL_COMMITS 99f845d9）。",
+  },
+];
+
+/** 一条记录的 taskId 是否命中 ruled 豁免表（精确匹配——fan-in 记录的 taskId 是完整任务 id）。PURE。 */
+export function findRuledHistoricalTaskEntry(taskId, table = RULED_HISTORICAL_TASKS) {
+  if (!taskId) return undefined;
+  return (table ?? []).find((e) => e && String(taskId) === e.taskId);
+}
+
 // ── Pure: 判据1 (A6 subject + form) ───────────────────────────────────────────────────────────────────
 
 /**
@@ -116,27 +142,40 @@ export function extractA6Line(file) {
  * Judge the caller agent identity in a set of fan-in records (lock events AND/OR retry records).
  * PURE — the caller resolves the records. A record is the OLD main-thread form when its agentId is
  * missing/null (the script called without --agent-id) OR equals the main-session id.
+ * ⚠️ Ruled-historical 豁免：taskId 命中 `RULED_HISTORICAL_TASKS`（manager 裁定的应急主线程 fan-in
+ * one-off）⇒ 该记录分类为 ruledHistorical（reason `ruled-historical-record`），非 main-thread-executor
+ * ——两类在输出里可区分；豁免表有界，未入表任务仍红（能取假）。
  * @param {Array<Record<string, any>>} records — lock-event / retry-record lines
  * @param {string|null} mainAgentId — the inner MAIN session's agent id (null = only presence is judged)
- * @returns {{ok:boolean, evaluated:boolean, reason:string, violations:string[]}}
+ * @returns {{ok:boolean, evaluated:boolean, reason:string, violations:string[], ruledHistorical:string[]}}
  */
 export function checkAgentId(records, mainAgentId) {
   const list = (records ?? []).filter(Boolean);
   if (list.length === 0) {
-    return { ok: true, evaluated: false, reason: "no-fan-in-records (NOT-EVALUATED)", violations: [] };
+    return { ok: true, evaluated: false, reason: "no-fan-in-records (NOT-EVALUATED)", violations: [], ruledHistorical: [] };
   }
   const violations = [];
+  const ruledHistorical = [];
   list.forEach((r, i) => {
     const id = r.agentId;
+    const taskId = r.taskId ?? "?";
     if (isMainThreadAgentId(id, mainAgentId)) {
-      const shown = id == null || id === "" ? "missing/null" : `== main (${id})`;
-      violations.push(`[${i}] ${r.taskId ?? "?"}: agentId ${shown} — the main-thread (or absent) executor form`);
+      const ruledEntry = findRuledHistoricalTaskEntry(r.taskId);
+      if (ruledEntry) {
+        ruledHistorical.push(`[${i}] ${taskId}: ruled one-off — ${ruledEntry.reason}`);
+      } else {
+        const shown = id == null || id === "" ? "missing/null" : `== main (${id})`;
+        violations.push(`[${i}] ${taskId}: agentId ${shown} — the main-thread (or absent) executor form`);
+      }
     }
   });
   if (violations.length > 0) {
-    return { ok: false, evaluated: true, reason: "main-thread-executor-record", violations };
+    return { ok: false, evaluated: true, reason: "main-thread-executor-record", violations, ruledHistorical };
   }
-  return { ok: true, evaluated: true, reason: "subagent-executor-record", violations: [] };
+  if (ruledHistorical.length > 0) {
+    return { ok: true, evaluated: true, reason: "ruled-historical-record", violations: [], ruledHistorical };
+  }
+  return { ok: true, evaluated: true, reason: "subagent-executor-record", violations: [], ruledHistorical: [] };
 }
 
 // ── Pure: 判据3 (real main-thread fan-in command replay) ──────────────────────────────────────────────

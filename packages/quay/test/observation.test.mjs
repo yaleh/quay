@@ -107,6 +107,41 @@ test("readGitHistory always keeps master (and develop) even when their tip is >2
   }
 });
 
+test("gap-git-history-branch-summary-wrong-numbers: a branch whose tip is newer than the mainline shows only its OWN commits, not the shared ancestry", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-excl-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: ws });
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Mainline: init + two commits, tip at nowSec-400.
+    commitAt(ws, "main one", nowSec - 500);
+    commitAt(ws, "main two", nowSec - 400);
+    // A task branch forked from the mainline, with a tip NEWER than the mainline tip (nowSec-200).
+    execFileSync("git", ["checkout", "-q", "-b", "task/gap-x"], { cwd: ws });
+    commitAt(ws, "branch one", nowSec - 300, "branch.txt");
+    commitAt(ws, "branch two", nowSec - 200, "branch.txt");
+    execFileSync("git", ["checkout", "-q", "master"], { cwd: ws });
+
+    const hist = readGitHistory(ws);
+    assert.equal(hist.status, "ok");
+    const branchCommits = hist.commits.filter((c) => c.ref === "task/gap-x");
+    assert.deepEqual(
+      branchCommits.map((c) => c.subject).sort(),
+      ["branch one", "branch two"],
+      `the branch lane carries only its own commits (got: ${branchCommits.map((c) => c.subject).join(", ")})`,
+    );
+    // The shared mainline ancestry must NOT be attributed to the branch (the 481/111 symptom).
+    const branchSubjects = new Set(branchCommits.map((c) => c.subject));
+    assert.ok(!branchSubjects.has("init"), "the repo's first commit is the mainline's, not the branch's");
+    assert.ok(!branchSubjects.has("main one") && !branchSubjects.has("main two"), "mainline commits stay on the mainline");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("AC127: parseVerificationRound extracts the bucket-execution fields (buckets/bucket_files/bucket_duration_ms) and tolerates their absence on legacy rows (never a fabricated \"full\")", () => {
   // gap-ac127-suite-bucket-web-tests-page-visible — AC126 landed these three fields on bucket-mode
   // rounds (full-suite-runner.ts:4027-4029); the /tests reader must surface `buckets` and tolerate
@@ -156,6 +191,27 @@ test("gap-test-detail-perfile-duration-failed: parseVerificationRound extracts p
     commit: "426b21ceaabbe7502334d92d79ce4a4a8d935fe9",
   }));
   assert.equal(legacy.perFile, undefined, "a legacy row has no perFile field (absent-field contract)");
+});
+
+test("gap-test-detail-timeline: parseVerificationRound extracts perFile timestamps ({endedAtMs,startedAtMs}) and tolerates their absence (legacy perFile entries)", () => {
+  // full-suite-runner now lands perFile entries carrying endedAtMs (reporter test:complete time) and
+  // startedAtMs (back-computed end − duration). The /tests reader must surface them AND keep the
+  // absent-field contract: a legacy perFile entry without timestamps omits both (never a fabricated 0).
+  const withTimes = parseVerificationRound(JSON.stringify({
+    round: 242, startedAt: "2026-08-23T01:00:00.000Z", durationMs: 500000,
+    state: "green", pass: 2, fail: 0, cancelled: 0, tests: 2,
+    runner: "outer", scope: "worktree",
+    perFile: [
+      { file: "packages/quay/test/slow.test.mjs", durationMs: 210.5, passed: true, endedAtMs: 1724374800000, startedAtMs: 1724374800000 - 210.5 },
+      { file: "packages/quay/test/fast.test.mjs", durationMs: 12.25, passed: true },
+    ],
+  }));
+  assert.ok(Array.isArray(withTimes.perFile), "perFile is an array");
+  assert.equal(withTimes.perFile[0].endedAtMs, 1724374800000, "endedAtMs extracted");
+  assert.equal(withTimes.perFile[0].startedAtMs, 1724374800000 - 210.5, "startedAtMs extracted");
+  // Legacy perFile entry (no timestamps) ⇒ both fields absent, never a fabricated 0.
+  assert.equal(withTimes.perFile[1].endedAtMs, undefined, "legacy entry omits endedAtMs");
+  assert.equal(withTimes.perFile[1].startedAtMs, undefined, "legacy entry omits startedAtMs");
 });
 
 // ── gap-live-ghost-inflight-paused-event ─────────────────────────────────────────────────────────

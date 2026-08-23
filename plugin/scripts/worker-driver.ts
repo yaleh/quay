@@ -1,6 +1,6 @@
 // worker-driver.ts — SPEC-worker-driven-inner-2026-08-16 §5 阶段 2：机械驱动进程 spawn 多个
 // claude -p worker 跑完整任务（选择 → worktree → 开发 → suite → ff），并发由驱动数自己的子进程控制，
-// 超时 SIGTERM（保留 worktree）、checkout 前 stash 主检出。退出码 + 结构化 outcome 落盘。
+// 超时 SIGTERM、checkout 前 stash 主检出。退出码 + 结构化 outcome 落盘；任何非落地终态清理 orphan worktree。
 //
 // WHY THIS EXISTS (SPEC §2 ①，硬规则 4b)：「在飞」现在是【驱动进程自己 fork 的子进程数】——直接量，
 // 不是估的。旧的三个代理量（worktree 数 / 任务 subagent 数 / 遥测括号 implementing 段）双向偏差，
@@ -15,7 +15,8 @@
 // 阶段 2 新增（AC116，相对阶段 1 的三条能力）：
 //   ① 并发 N —— --task 可重复、--concurrency N 上限；在飞 = 驱动当前活子进程数（直接量，非硬编码 1）。
 //   ② 超时 SIGTERM —— --timeout <ms>（缺省 0 = 无超时，SPEC §4④：成本结构未知前不设阈值）。超时 ⇒
-//      SIGTERM worker、保留 worktree（驱动从不 remove/prune worktree）、outcome 记 final_state=timed-out。
+//      SIGTERM worker、outcome 记 final_state=timed-out。⛔ 超时也是异常死亡（worker 没落地）⇒ 其
+//      orphan worktree 一并清理（gap-worker-driver-no-record-on-abnormal-death，AC2：不清理则挡下轮重派）。
 //   ③ checkout 前 stash —— spawn 前 `git stash push --include-untracked`（⛔ 不 discard），非 git 仓库 no-op。
 //
 // outcome 记录（SPEC §4③，人裁定「跨任务行为检查由 outer 执行 ⇒ outer 只能读记录」）：
@@ -115,6 +116,9 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, readFrontmatter } from "./gate-script-base.ts";
+import { parseTask, readDependsOn } from "./task-schema.ts";
+import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
+import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -254,6 +258,29 @@ export function readTaskStatus(root: string, taskId: string): string | null {
   }
 }
 
+/**
+ * 派发前 depends_on 二次过滤（gap-worker-driver-dispatch-pre-filter-missing AC1）：读候选任务的
+ * `depends_on` 关系边（task-schema 的 readDependsOn——与 ready-pool-check 的 depsReadyFor 读同一
+ * 字段，单一真相源，⛔ 不重写依赖解析），逐个核对依赖的 status。任一依赖未 done（或依赖文件缺失，
+ * 读不懂 ⇒ fail-closed 不派发）⇒ false。无依赖 ⇒ true（⛔ 空依赖是「真无依赖」，不是「读不懂」——
+ * 候选自身文件读失败才 ⇒ false，硬规则 3b：读不懂 ≠ 无依赖）。与 gap-launch-script-worker-cap-broken
+ * AC3 的 Touches 互斥过滤同属「spawn 前候选过滤」的两半。
+ */
+export function depsReadyForDispatch(root: string, taskId: string): boolean {
+  let deps: string[];
+  try {
+    const text = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
+    deps = readDependsOn(parseTask(text).frontmatterRaw);
+  } catch {
+    return false; // 候选文件不可读 ⇒ fail-closed（不派发）
+  }
+  if (deps.length === 0) return true;
+  for (const depId of deps) {
+    if (readTaskStatus(root, depId) !== "done") return false;
+  }
+  return true;
+}
+
 /** 转义正则元字符（task id 进 `new RegExp` 前）。 */
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -267,6 +294,64 @@ export function worktreePresentForTask(root: string, taskId: string): boolean | 
   if (r.status !== 0 || r.error) return null;
   const re = new RegExp(`^branch refs/heads/task/${escapeRegExp(taskId)}$`, "m");
   return re.test(String(r.stdout ?? ""));
+}
+
+/** 本任务残留 worktree 的路径列表（`git worktree list --porcelain` 里 `branch refs/heads/task/<id>` 行
+ *  对应的 `worktree <path>` 行）。读失败（非 git 仓库 / git 错误）⇒ []（硬规则 3b：读不懂 ≠ 确认无残留，
+ *  用 worktreePresentForTask 区分「读不懂」（null）与「确认无残留」（false））。 */
+export function worktreePathsForTask(root: string, taskId: string): string[] {
+  const r = spawnSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8" });
+  if (r.status !== 0 || r.error) return [];
+  const paths: string[] = [];
+  let current: string | null = null;
+  for (const line of String(r.stdout ?? "").split("\n")) {
+    if (line.startsWith("worktree ")) {
+      current = line.slice("worktree ".length).trim();
+    } else if (line === `branch refs/heads/task/${taskId}` && current != null) {
+      paths.push(current);
+    }
+  }
+  return paths;
+}
+
+/** orphan worktree 清理结果（可观测：removed/分支删除/错误）。 */
+export interface OrphanCleanupResult {
+  /** 找到 worktree 且 `git worktree remove --force` 全部成功。 */
+  removed: boolean;
+  /** 首个被移除（或移除失败）的 worktree 路径；未找到 ⇒ null。 */
+  worktreePath: string | null;
+  /** `task/<id>` 分支是否删除成功（worktree remove 不删分支；分支还在 ⇒ 下一轮 `-b` 重建仍失败）。 */
+  branchDeleted: boolean;
+  /** 移除失败的错误（worktree 找到但 remove 失败）；无错误 ⇒ null。 */
+  error: string | null;
+}
+
+/**
+ * orphan worktree 清理（gap-worker-driver-no-record-on-abnormal-death AC2）：worker 异常死亡（failed /
+ * killed / timed-out / exited-not-landed——worker 跑了但没落地）后，其 orphan worktree 永久残留会挡
+ * driver 下轮对同一 task 的 `git worktree add`（撞已存在路径 / 分支失败 ⇒ 需人工 remove）。清理 =
+ * `git worktree remove --force <path>` + `git branch -D task/<id>`。⛔ 只在 worker 已退出（close 事件后）
+ * 调用；⛔ completed 路径不调（落地判定已确认无残留）。best-effort：移除失败（脏树 / 锁 / 活进程）不
+ * 致命，error 落盘供观测，⛔ 不抛。
+ */
+export function cleanupOrphanWorktree(root: string, taskId: string): OrphanCleanupResult {
+  const paths = worktreePathsForTask(root, taskId);
+  if (paths.length === 0) return { removed: false, worktreePath: null, branchDeleted: false, error: null };
+  let error: string | null = null;
+  let removed = true;
+  for (const p of paths) {
+    const rm = spawnSync("git", ["-C", root, "worktree", "remove", "--force", p], { encoding: "utf8" });
+    if (rm.status !== 0) {
+      removed = false;
+      error = (rm.stderr || "").trim() || `git worktree remove ${p} failed`;
+    }
+  }
+  let branchDeleted = false;
+  if (removed) {
+    const bd = spawnSync("git", ["-C", root, "branch", "-D", `task/${taskId}`], { encoding: "utf8" });
+    branchDeleted = bd.status === 0;
+  }
+  return { removed, worktreePath: paths[0] ?? null, branchDeleted, error };
 }
 
 /** 落地判定（AC1 判据）：landed = status=done ∧ 无残留 worktree。任一读失败 ⇒ landed=false
@@ -309,6 +394,54 @@ export function appendOutcome(root: string, outcome: ReturnType<typeof computeOu
   return appendOutcomeToFile(path.join(root, WORKER_OUTCOME_REL), outcome);
 }
 
+// ── liveness 检查（gap-resident-driver-stable-carrier-liveness Finding：liveness 子命令零调用者）──
+// AC2 承诺的「driver/supervisor 死时有机件在窗口内检测并报告」此前没有任何东西触发 liveness 子命令
+// （log 13h 无更新）。修法（Finding）：driver 自身 round 循环每轮顺手调一次 liveness——supervisor 死后
+// driver 成孤儿仍在跑，它的下一轮即检出 supervisor_dead 并让 liveness 子命令写 DEATH 告警（⛔ 载体停更
+// ≠ 一切正常）。复用的是 launch 脚本已测的 liveness 子命令（单一真相源），⛔ 不在驱动里重写存活判定。
+
+/** liveness 检查的 wall-clock 上限（spawnSync timeout，毫秒）。轻量（kill -0 判定），远小于 round。 */
+export const LIVENESS_CHECK_TIMEOUT_MS = 10_000;
+
+/** 缺省 liveness 检查命令：复用 promotion-driver-launch.sh 的 liveness 子命令（单一真相源）。kind 是
+ *  驱动文件身份（worker-driver.ts 恒 worker；promotion-driver.ts 恒 promotion，同函数传不同 kind）。
+ *  exit 0 = 健康（deaths=none），exit 1 = 检出死亡（deaths 非空）——两者都是「查过」。 */
+export function defaultLivenessCheckArgv(root: string, kind: "promotion" | "worker"): string[] {
+  return [
+    "bash", path.join(root, "plugin", "scripts", "promotion-driver-launch.sh"),
+    "liveness", "--kind", kind, "--root", root, "--json",
+  ];
+}
+
+/** 单轮 liveness 检查结果。checked=false ⇒ 未查成（launch 脚本缺失 / spawn 失败 / 输出不可解析）——
+ *  这是「未评估」，⛔ 不是「健康」（硬规则 3b：无法评估 ≠ 合格，独立取值）。deaths=null + checked=true
+ *  ⇒ 查过且健康（deaths=none）；deaths 非空 ⇒ 查过且检出死亡。running = supervisor_alive && driver_alive。 */
+export interface LivenessResult {
+  checked: boolean;
+  deaths: string | null;
+  running: boolean;
+}
+
+/** 跑一次 liveness 检查（复用 launch 脚本 liveness 子命令，⛔ 不重写存活判定）。cmd 覆盖命令（测试缝，
+ *  同 --ready-pool-cmd/--selector-cmd 的形状）；缺省 = defaultLivenessCheckArgv(root, kind)。 */
+export function runLivenessCheck(root: string, kind: "promotion" | "worker", cmd: string[] | null = null): LivenessResult {
+  const argv = cmd ?? defaultLivenessCheckArgv(root, kind);
+  try {
+    const r = spawnSync(argv[0], argv.slice(1), {
+      encoding: "utf8", timeout: LIVENESS_CHECK_TIMEOUT_MS, maxBuffer: 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    // 脚本缺失 ⇒ bash exit 127、stdout 空 ⇒ JSON.parse 抛 ⇒ catch 归 checked:false；spawn 失败 / 无状态
+    // 亦归 checked:false（未查成）。exit 1（检出死亡）r.error 为 null ⇒ 正常走 parse。
+    if (r.error || r.status === null) return { checked: false, deaths: null, running: false };
+    const j = JSON.parse(String(r.stdout ?? "").trim());
+    const deaths = j && typeof j.deaths === "string" && j.deaths !== "none" && j.deaths !== "" ? String(j.deaths) : null;
+    return { checked: true, deaths, running: !!j.running };
+  } catch {
+    return { checked: false, deaths: null, running: false };
+  }
+}
+
 /**
  * 一条 worker round 记录（AC138-3 无条件心跳）：⛔ 与 outcome 分工——outcome 只在任务真完成（或
  * 终态）时写，池空时 outcome 停更会被 supervisor status 的 last_record_ts（读全载体 max）误读为
@@ -324,6 +457,7 @@ export function computeWorkerRoundRecord(opts: {
   inFlight: number;
   pool: number | null;
   stopReason: string | null;
+  liveness?: LivenessResult | null;
 }) {
   return {
     ts: opts.at,
@@ -334,6 +468,7 @@ export function computeWorkerRoundRecord(opts: {
     in_flight: opts.inFlight,
     pool: opts.pool,
     stop_reason: opts.stopReason,
+    liveness: opts.liveness ?? null,
   };
 }
 
@@ -713,8 +848,9 @@ function appendWorkerPid(pidFile: string, workerPid: number): void {
 }
 
 /**
- * spawn 一个 worker 并等待其终态（含超时 SIGTERM）。超时 ⇒ kill("SIGTERM")（保留 worktree——驱动从不
- * remove/prune worktree），close 事件带 signal=SIGTERM，timedOut 标记落 outcome final_state=timed-out。
+ * spawn 一个 worker 并等待其终态（含超时 SIGTERM）。超时 ⇒ kill("SIGTERM")，close 事件带 signal=SIGTERM，
+ * timedOut 标记落 outcome final_state=timed-out。任何非落地终态（failed/killed/timed-out/
+ * exited-not-landed）都清理 orphan worktree（gap-worker-driver-no-record-on-abnormal-death AC2）。
  */
 function runOneWorker({
   taskId,
@@ -769,16 +905,29 @@ function runOneWorker({
         spawnError: spawnErr, inFlightCount, timedOut,
         landed: landing.landed, landReason: landing.reason,
       });
-      appendOutcomeToFile(outcomeFile, outcome);
-      if (json) process.stdout.write(`${JSON.stringify({ event: "worker-done", task: taskId, ...outcome })}\n`);
+      // gap-worker-driver-no-record-on-abnormal-death（AC2，能取假）：worker 异常死亡（failed/killed/
+      // timed-out/exited-not-landed——worker 跑了但没落地）后，orphan worktree 永久残留会挡 driver 下轮
+      // 对同一 task 的 `git worktree add`。写终态的同时清理（⛔ completed/spawn-failed/not-dispatched
+      // 无 worktree 可清；spawn-failed 连 worker 都没起，not-dispatched 连派发都没派）。清理结果落进
+      // outcome（worktree_cleaned / worktree_cleanup_error）供生产观测「零记录消失 + driver 可重派」。
+      const shouldCleanup =
+        outcome.final_state !== "completed" &&
+        outcome.final_state !== "spawn-failed" &&
+        outcome.final_state !== "not-dispatched";
+      const cleanup = shouldCleanup ? cleanupOrphanWorktree(rootDir, taskId) : null;
+      const finalOutcome = cleanup
+        ? { ...outcome, worktree_cleaned: cleanup.removed, worktree_cleanup_error: cleanup.error }
+        : outcome;
+      appendOutcomeToFile(outcomeFile, finalOutcome);
+      if (json) process.stdout.write(`${JSON.stringify({ event: "worker-done", task: taskId, ...finalOutcome })}\n`);
       let exitCode: number;
-      if (outcome.final_state === "completed") exitCode = 0;
-      else if (outcome.final_state === "timed-out") exitCode = 128 + signalExitCode(signal ?? "SIGTERM");
-      else if (outcome.final_state === "killed") exitCode = 128 + (signal ? signalExitCode(signal) : 0);
-      else if (outcome.final_state === "spawn-failed") exitCode = 2;
-      else if (outcome.final_state === "exited-not-landed") exitCode = EXITED_NOT_LANDED_EXIT;
+      if (finalOutcome.final_state === "completed") exitCode = 0;
+      else if (finalOutcome.final_state === "timed-out") exitCode = 128 + signalExitCode(signal ?? "SIGTERM");
+      else if (finalOutcome.final_state === "killed") exitCode = 128 + (signal ? signalExitCode(signal) : 0);
+      else if (finalOutcome.final_state === "spawn-failed") exitCode = 2;
+      else if (finalOutcome.final_state === "exited-not-landed") exitCode = EXITED_NOT_LANDED_EXIT;
       else exitCode = code ?? 2;
-      resolve({ taskId, outcome, exitCode });
+      resolve({ taskId, outcome: finalOutcome, exitCode });
     };
 
     // spawn 同步抛错（罕见，如非法 options）：无 ChildProcess ⇒ 直接终态。
@@ -827,6 +976,38 @@ export function shuffle<T>(arr: readonly T[]): T[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+/**
+ * 派发前 Touches 互斥过滤（gap-launch-script-worker-cap-broken AC3）：cap=5 后池里可能同时有 2 条
+ * `## Touches` 重叠的 ready 任务，若并发派发会各改同一文件、fan-in 才炸（两边都 exit 0 看起来都做完了，
+ * 比 fake-completion 更难查）。本函数把候选里与【在飞任务】Touches 重叠的过滤掉——selector 只在滤后集合里
+ * 选（⛔ 不指望 LLM selector 避开，它拿不到 Touches）。checkTouchesPair / parseTouches 是 ready-pool-check
+ * 的同函数（不重实现）；读不懂（任务文件缺失/读失败）⇒ 视为无 Touches ⇒ checkTouchesPair 判 serialize ⇒
+ * 滤掉（与 checkTouchesPair 的保守缺省同向，⛔ 不因读不懂放行冲突）。无在飞任务 ⇒ 无冲突对象 ⇒ 全通过。
+ */
+export function filterTouchesDisjoint(
+  candidateIds: string[],
+  inFlightIds: string[],
+  rootDir: string,
+): string[] {
+  if (inFlightIds.length === 0) return candidateIds.slice();
+  const expand = (globs: string[]) => expandDeclaredTouches(globs, rootDir);
+  const readTouches = (id: string) => {
+    const file = path.join(rootDir, "tasks", `${id}.md`);
+    let raw: string;
+    try {
+      raw = fs.readFileSync(file, "utf8");
+    } catch {
+      return { hasSection: false, globs: [] as string[] };
+    }
+    return parseTouches(parseTask(raw).body);
+  };
+  const inFlight = inFlightIds.map(readTouches);
+  return candidateIds.filter((id) => {
+    const cand = readTouches(id);
+    return inFlight.every((ifp) => checkTouchesPair(cand, ifp, expand).disjoint);
+  });
 }
 
 /** 缺省 ready-pool-check 命令（选择环的第一步）。输出须为 analyzeTasks JSON（读其 `ready` 数组）。 */
@@ -989,6 +1170,8 @@ export interface ResidentOptions {
   runPrefix: string;
   json: boolean;
   pidFile?: string;
+  /** liveness 检查命令覆盖（测试缝）；null = 用 defaultLivenessCheckArgv(rootDir, "worker")。 */
+  livenessCmd: string[] | null;
 }
 
 /**
@@ -998,7 +1181,7 @@ export interface ResidentOptions {
  *   池空）⇒ 停止起新 worker，⛔ 不杀在飞（在飞 worker 全部跑完才退出）。退出码 = 首个非零 worker 码。
  */
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
-  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile } = opts;
+  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd } = opts;
 
   // checkout 前 stash（阶段 2 ③）：主检出脏 ⇒ stash 一次（常驻循环起跑前），⛔ 不 discard。非 git no-op。
   const stash = stashIfDirty(rootDir);
@@ -1013,7 +1196,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // round 心跳（AC138-3）：worker-outcome 只在任务真完成时写，池空时 outcome 停更会被 supervisor
   // status 的 last_record_ts（读全载体 max）误读为「死亡」；round 每轮循环无条件写一条作 liveness 直接量。
   const roundFile = path.join(rootDir, WORKER_ROUND_REL);
-  const writeRound = (round: number, inFlight: number, pool: number | null, reason: string | null): void => {
+  const writeRound = (round: number, inFlight: number, pool: number | null, reason: string | null, liveness: LivenessResult | null): void => {
     const record = computeWorkerRoundRecord({
       round,
       runId: runId ?? runPrefix,
@@ -1023,6 +1206,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       inFlight,
       pool,
       stopReason: reason,
+      liveness,
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -1072,6 +1256,11 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   while (true) {
     round += 1;
 
+    // liveness 检查（gap-resident-driver-stable-carrier-liveness Finding 的接线）：每轮顺手调一次
+    // launch 脚本的 liveness 子命令。supervisor 死后 driver 成孤儿仍在跑 ⇒ 下一轮即检出 supervisor_dead
+    // 并让子命令写 DEATH 告警（⛔ 载体停更 ≠ 一切正常）。checked=false（脚本缺失/失败）≠ 健康（硬规则 3b）。
+    const liveness = runLivenessCheck(rootDir, "worker", livenessCmd);
+
     // 1. reap 已完成的 worker（减在飞集）。
     for (let i = running.length - 1; i >= 0; i--) {
       if (running[i].done) running.splice(i, 1);
@@ -1088,9 +1277,19 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       const pool = readyPoolCheck(rootDir, readyPoolArgv, running.map((r) => r.task), cap);
       poolSeen = pool.pool;
       const active = new Set(running.map((r) => r.task));
-      const candidates = shuffle(pool.ready.filter((id) => !active.has(id)));
+      const shuffled = shuffle(pool.ready.filter((id) => !active.has(id)));
+      // AC3（gap-launch-script-worker-cap-broken）：派发前 Touches 互斥——候选里与在飞任务 Touches 重叠的
+      // 先滤掉，selector 只在滤后集合里选（⛔ 并发派发 Touches 重叠 = fan-in 才炸）。
+      const touchesFiltered = filterTouchesDisjoint(shuffled, running.map((r) => r.task), rootDir);
+      // gap-worker-driver-dispatch-pre-filter-missing AC1：派发前二次过滤 depends_on——依赖未满
+      // （depends_on 含未 done 任务）的候选不进候选集（⛔ 照单派发 ⇒ ac138 白烧一轮复现）。与
+      // gap-launch-script-worker-cap-broken AC3 的 Touches 互斥过滤同属「spawn 前候选过滤」的两个维度，一并判。
+      const candidates = touchesFiltered.filter((id) => depsReadyForDispatch(rootDir, id));
       if (candidates.length === 0) {
-        stopReason = "pool-empty (no dispatchable candidate in the ready pool)";
+        // 真池空（ready 减在飞后无候选）⇒ 终态停摆。池非空但全与在飞 Touches 重叠 ⇒ ⛔ 非终态：不设
+        // stopReason，外层等一个在飞 worker 结束释放 Touches 后重进选择环重新 filter（而非把「被 Touches
+        // 挡住」误当「池空」提前停摆）。
+        if (shuffled.length === 0) stopReason = "pool-empty (no dispatchable candidate in the ready pool)";
         break;
       }
       const sel = runSelectorWorker(candidates, selectorArgv, rootDir);
@@ -1103,7 +1302,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     }
 
     // AC138-3 无条件心跳：每轮循环写一条（⛔ 池空/判停轮也写——outcome 在这些轮不写）。
-    writeRound(round, running.length, poolSeen, stopReason);
+    writeRound(round, running.length, poolSeen, stopReason, liveness);
 
     // 3. 无在飞 ⇒ 循环终了（判停，或池已排空）。
     if (running.length === 0) break;
@@ -1360,6 +1559,7 @@ export async function main(argv: string[]): Promise<number> {
   let selectorCmd: string | undefined;
   let readyPoolCmd: string | undefined;
   let resourceGateCmd: string | undefined;
+  let livenessCmd: string | undefined;
   let concurrency: number | undefined;
   let timeoutRaw: string | undefined;
   let pidFile: string | undefined;
@@ -1380,6 +1580,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--selector-cmd") selectorCmd = args[++i];
     else if (a === "--ready-pool-cmd") readyPoolCmd = args[++i];
     else if (a === "--resource-gate-cmd") resourceGateCmd = args[++i];
+    else if (a === "--liveness-cmd") livenessCmd = args[++i];
     else if (a === "--concurrency") concurrency = Number(args[++i]);
     else if (a === "--timeout") timeoutRaw = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
@@ -1395,7 +1596,7 @@ export async function main(argv: string[]): Promise<number> {
           "  --task <id> [--task <id> …] [--reason \"<一句为什么选它>\"] [--concurrency <N>] [--timeout <ms>]\n" +
           "  [--root <repo>] [--worker-cmd \"<前缀>\"] [--worker-cmd-exact \"<argv>\"] [--pid-file <p>] [--outcome <p>] [--run-id <id>] [--json]\n" +
           "  ⛔ 无 --task ⇒ 常驻选择环（不再报错退出）\n" +
-          "  [--selector-cmd \"<argv>\"] [--ready-pool-cmd \"<argv>\"] [--resource-gate-cmd \"<argv>\"]\n" +
+          "  [--selector-cmd \"<argv>\"] [--ready-pool-cmd \"<argv>\"] [--resource-gate-cmd \"<argv>\"] [--liveness-cmd \"<argv>\"]\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -1437,6 +1638,7 @@ export async function main(argv: string[]): Promise<number> {
       runPrefix: runId || `fm-${Date.now()}`,
       json,
       pidFile,
+      livenessCmd: livenessCmd ? splitArgs(livenessCmd) : null,
     });
   }
 

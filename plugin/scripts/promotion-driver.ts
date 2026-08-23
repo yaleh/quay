@@ -29,7 +29,7 @@
 //   node --experimental-strip-types plugin/scripts/promotion-driver.ts \
 //     --root <repo> [--interval <ms>] [--cap <n>] [--once] [--max-rounds <n>]
 //     [--max-fix-retries <n>] [--ready-pool-cmd "<argv>"] [--fix-worker-cmd "<argv>"]
-//     [--llm-commands <csv>] [--round-log <path>] [--outcome-log <path>] [--run-id <id>] [--pid-file <path>] [--json]
+//     [--llm-commands <csv>] [--round-log <path>] [--outcome-log <path>] [--run-id <id>] [--pid-file <path>] [--liveness-cmd "<argv>"] [--json]
 //   --interval <ms>       轮间隔（缺省 30000；测试缝传小值）
 //   --cap <n>             传给 ready-pool-check 的并发 cap（缺省 5——AC48 后 cap 不再闸晋升，
 //                         但仍参与 floor 报告与 disjointness 排序；传 5 避免 cap-3 回退的 floor 假象）
@@ -59,7 +59,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { splitArgs, launchArgv } from "./worker-driver.ts";
+import { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./worker-driver.ts";
 
 /** round 记录的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const ROUND_LOG_REL = ".quay/promotion-round.jsonl";
@@ -337,6 +337,7 @@ export function computeRoundRecord(opts: {
   fixes: FixOutcome[];
   reverify?: ReverifyOutcome | null;
   needsHuman?: string[];
+  liveness?: LivenessResult | null;
 }) {
   const action = opts.error
     ? "error"
@@ -352,6 +353,7 @@ export function computeRoundRecord(opts: {
     // AC133：重验证结果（null = 本轮无 fix worker 可重验证）与本轮新标 needs-human 的 id 清单。
     reverify: opts.reverify ?? null,
     needs_human: opts.needsHuman ?? [],
+    liveness: opts.liveness ?? null,
   };
 }
 
@@ -567,6 +569,8 @@ export interface ResidentLoopOptions {
   runId: string;
   json: boolean;
   pidFile?: string;
+  /** liveness 检查命令覆盖（测试缝）；null = 用 defaultLivenessCheckArgv(root, "promotion")。 */
+  livenessCmd: string[] | null;
 }
 
 /**
@@ -577,7 +581,7 @@ export interface ResidentLoopOptions {
  *  （json 时）stdout 事件行。停机由进程信号驱动（⛔ 不读 .halt，单一真相源）。
  */
 export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promise<number> {
-  const { root, intervalMs, cap, once, maxRounds, maxFixRetries, readyPoolArgv, roundLogFile, outcomeLogFile, runId, json, pidFile, fixWorkerCmd, llmCommands } = opts;
+  const { root, intervalMs, cap, once, maxRounds, maxFixRetries, readyPoolArgv, roundLogFile, outcomeLogFile, runId, json, pidFile, fixWorkerCmd, llmCommands, livenessCmd } = opts;
 
   if (pidFile) {
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
@@ -600,6 +604,10 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
   const retryState: RetryState = { counts: new Map(), needsHuman: new Set() };
   while (!stopRequested) {
     round += 1;
+    // liveness 检查（gap-resident-driver-stable-carrier-liveness Finding 的接线）：每轮顺手调一次
+    // launch 脚本的 liveness 子命令。supervisor 死后 driver 成孤儿仍在跑 ⇒ 下一轮即检出 supervisor_dead
+    // 并让子命令写 DEATH 告警（⛔ 载体停更 ≠ 一切正常）。checked=false（脚本缺失/失败）≠ 健康（硬规则 3b）。
+    const liveness = runLivenessCheck(root, "promotion", livenessCmd);
     const r = runPromotionRound(root, readyPoolArgv, cap, llmCommands);
     // AC133 失败上限：已标 needs-human 的任务不再进 fix pass（停止对它的修复循环——与 markNeedsHuman
     // 的 status 翻转双保险，即使 status 写失败也不会再 spawn）。
@@ -631,7 +639,7 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     const applied = [...r.applied, ...reApplied];
     const record = computeRoundRecord({
       round, runId, pid: process.pid, at: new Date().toISOString(), ...r,
-      promotedIds, applied, fixes, reverify, needsHuman: newlyNeedsHuman,
+      promotedIds, applied, fixes, reverify, needsHuman: newlyNeedsHuman, liveness,
     });
     try { appendRoundRecord(roundLogFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     // AC134：判定/晋升/修复/needs-human 各写一条 outcome 记录（.quay/promotion-outcome.jsonl，outer 可消费）。
@@ -664,7 +672,7 @@ const HELP = [
   "AC133：fix worker 退出后重跑同一个闸验证（⛔ 不信 worker 自述）+ 连续修满 N 次仍不合格 ⇒ needs-human。",
   "AC134：判定/晋升/修复/needs-human 各写一条 outcome 记录（.quay/promotion-outcome.jsonl）。",
   "  --root <repo> [--interval <ms>] [--cap <n>] [--once] [--max-rounds <n>] [--max-fix-retries <n>]",
-  "  [--ready-pool-cmd \"<argv>\"] [--fix-worker-cmd \"<argv>\"] [--llm-commands <csv>] [--round-log <p>] [--outcome-log <p>] [--run-id <id>] [--pid-file <p>] [--json]",
+  "  [--ready-pool-cmd \"<argv>\"] [--fix-worker-cmd \"<argv>\"] [--llm-commands <csv>] [--round-log <p>] [--outcome-log <p>] [--run-id <id>] [--pid-file <p>] [--liveness-cmd \"<argv>\"] [--json]",
   "  --interval <ms>       轮间隔（缺省 30000；测试缝传小值）",
   "  --cap <n>             传给 ready-pool-check 的并发 cap（缺省 5）",
   "  --once                跑一轮即退出（手动单发 / 测试）",
@@ -676,6 +684,7 @@ const HELP = [
   "  --round-log <path>    轮记录文件（缺省 <root>/.quay/promotion-round.jsonl）",
   "  --outcome-log <path>  outcome 记录文件（缺省 <root>/.quay/promotion-outcome.jsonl，AC134）",
   "  --pid-file <path>     把驱动自身 pid 写到该文件（外部观测 + kill 抓手）",
+  "  --liveness-cmd <s>    覆盖 liveness 检查命令（测试缝；每轮调 supervisor/driver 存活检查）",
   "  --json                每轮向 stdout 打一条 JSON 事件行",
 ].join("\n");
 
@@ -695,6 +704,7 @@ export async function main(argv: string[]): Promise<number> {
   let json = false;
   let pidFile: string | undefined;
   let llmCommandsRaw: string | undefined;
+  let livenessCmd: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -711,6 +721,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--run-id") runId = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
     else if (a === "--llm-commands") llmCommandsRaw = args[++i];
+    else if (a === "--liveness-cmd") livenessCmd = args[++i];
     else if (a === "--json") json = true;
     else if (a === "--help" || a === "-h") { console.log(HELP); return 0; }
     else { console.error(`promotion-driver: unknown argument: ${a}`); return 2; }
@@ -757,6 +768,7 @@ export async function main(argv: string[]): Promise<number> {
     runId: resolvedRunId,
     json,
     pidFile,
+    livenessCmd: livenessCmd ? splitArgs(livenessCmd) : null,
   });
 }
 

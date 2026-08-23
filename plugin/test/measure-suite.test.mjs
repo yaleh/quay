@@ -45,8 +45,9 @@ function runWithReporter(files) {
 function parsePerFile(stderr) {
   const out = new Map();
   for (const line of stderr.split("\n")) {
-    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)$/);
-    if (m) out.set(m[2], { durationMs: parseFloat(m[1]), passed: m[3] === "true" });
+    // gap-test-detail-timeline — the line now carries an optional trailing `end_ms=<epoch-ms>`.
+    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)(?: end_ms=([0-9]+))?$/);
+    if (m) out.set(m[2], { durationMs: parseFloat(m[1]), passed: m[3] === "true", endedAtMs: m[4] != null ? Number(m[4]) : undefined });
   // key = full path from the reporter
   }
   return out;
@@ -83,6 +84,40 @@ test("reporter captures file-level duration for node:test AND custom-harness fil
     assert.ok(perFile.has(customFile), "custom-harness file must get a file-level duration");
     assert.ok(perFile.get(customFile).durationMs > 0);
     assert.equal(perFile.get(customFile).passed, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reporter records the file END time (end_ms) so the START back-computes as end − duration (gap-test-detail-timeline AC1)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-timeline-"));
+  try {
+    const f = path.join(dir, "timed.test.mjs");
+    writeFileSync(
+      f,
+      `import { test } from "node:test";\n` +
+        `import { setTimeout as sleep } from "node:timers/promises";\n` +
+        `test("t1", async () => { await sleep(120); });\n`
+    );
+    const before = Date.now();
+    const res = runWithReporter([f]);
+    const after = Date.now();
+    assert.equal(res.status, 0, `suite should pass; stderr tail: ${res.stderr.slice(-300)}`);
+
+    const line = res.stderr.split("\n").find((l) => l.startsWith(`__PERFILE__ `));
+    assert.ok(line, `a __PERFILE__ line must be emitted:\n${res.stderr}`);
+    assert.match(line, / end_ms=\d+$/, `the line must carry a trailing end_ms epoch-ms:\n${line}`);
+
+    const rec = parsePerFile(res.stderr).get(f);
+    assert.ok(rec, "timed file captured");
+    assert.ok(rec.endedAtMs > 0, "endedAtMs is a positive epoch ms");
+    // The END time is recorded at test:complete — inside [before, after + slack] of this test's own
+    // wall clock (the child suite runs synchronously within runWithReporter). The start is back-
+    // computed: startedAtMs = endedAtMs − durationMs ⇒ non-negative and ≤ endedAtMs.
+    assert.ok(rec.endedAtMs >= before - 500 && rec.endedAtMs <= after + 500, `endedAtMs ${rec.endedAtMs} inside the run window [${before}, ${after}]`);
+    const startedAtMs = rec.endedAtMs - rec.durationMs;
+    assert.ok(startedAtMs >= 0, `back-computed start (${startedAtMs}) is non-negative`);
+    assert.ok(startedAtMs <= rec.endedAtMs, "back-computed start does not exceed the end");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
