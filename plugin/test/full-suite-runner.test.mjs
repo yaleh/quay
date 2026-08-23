@@ -1375,6 +1375,67 @@ test("AC3 — a round with NO __CEILING__ lines omits floor_ms and ceiling (no f
   }
 });
 
+// ── gap-test-detail-perfile-duration-failed: AC1 (perFile) ────────────────────────────────────────
+// measure-suite-reporter.mjs emits `__PERFILE__ duration_ms=<dur> <path> passed=<bool>` per file. The
+// runner must carry the per-file {file,durationMs,passed} array into the verification-round record
+// (reusing parsePerFileLines — the measure-history parser — so the two carriers share one 口径).
+
+test("AC1 — __PERFILE__ lines land perFile ({file,durationMs,passed}) into the verification-round record", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-perfile-"));
+  const suite = [
+    'echo "__PERFILE__ duration_ms=210.5 /repo/packages/quay/test/slow.test.mjs passed=false" >&2',
+    'echo "__PERFILE__ duration_ms=12.25 /repo/packages/quay/test/fast.test.mjs passed=true" >&2',
+    'echo "# tests 2"',
+    'echo "# pass 1"',
+    'echo "# fail 1"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    // The __PERFILE__ ... passed=false line IS a real failure line (runner-red-parse isFailureLine) —
+    // the round is red and the runner exits 1. The perFile array must STILL land (the round-record
+    // write runs on every completion, green OR red).
+    assert.equal(code, 1, "a round with a passed=false file is red (exit 1)");
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    assert.ok(fs.existsSync(vrf), "verification-round.jsonl written");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.ok(Array.isArray(rec.perFile), "perFile is an array");
+    assert.equal(rec.perFile.length, 2, "both __PERFILE__ lines captured");
+    // parsePerFileLines keeps the path verbatim (normalizePerFileKey only strips a quay-worktrees
+    // prefix; /repo/... carries none) — same no-drift contract as ceiling.
+    const slow = rec.perFile.find((p) => p.file === "/repo/packages/quay/test/slow.test.mjs");
+    assert.ok(slow, "slow file captured");
+    assert.equal(slow.durationMs, 210.5, "durationMs carried verbatim");
+    assert.equal(slow.passed, false, "failed file carries passed=false");
+    const fast = rec.perFile.find((p) => p.file === "/repo/packages/quay/test/fast.test.mjs");
+    assert.ok(fast, "fast file captured");
+    assert.equal(fast.durationMs, 12.25, "durationMs carried verbatim");
+    assert.equal(fast.passed, true, "passing file carries passed=true");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — a round with NO __PERFILE__ lines omits perFile (no fabricated empty)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-perfile-none-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.perFile, undefined, "no perFile on a no-__PERFILE__ suite");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── gap-merge-green-snapshot-verified-commit-livelock: AC2 (verifiedCommit / commit) ────────────────
 
 test("AC2 — a git-repo run records verifiedCommit (the integration tip at suite start) in the state AND the round record", async () => {

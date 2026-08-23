@@ -1714,6 +1714,10 @@ export interface TestRunRecord {
   buckets?: string | null;
   bucket_files?: number | null;
   bucket_duration_ms?: number | null;
+  // gap-test-detail-perfile-duration-failed — the per-file wall-clock + pass/fail array
+  // (`{file, durationMs, passed}[]`), landed by full-suite-runner (reusing measure-suite-reporter's
+  // __PERFILE__ stream). Absent on legacy rows → undefined (never a fabricated []).
+  perFile?: { file: string; durationMs: number; passed: boolean }[] | null;
 }
 
 export interface TestsResult {
@@ -1745,6 +1749,20 @@ export function parseVerificationRound(line: string): TestRunRecord | null {
         return JSON.stringify(f);
       });
     }
+    let perFile: { file: string; durationMs: number; passed: boolean }[] | null = null;
+    if (Array.isArray(o.perFile)) {
+      perFile = o.perFile.map((p: unknown) => {
+        if (p && typeof p === "object") {
+          const q = p as { file?: unknown; durationMs?: unknown; passed?: unknown };
+          return {
+            file: typeof q.file === "string" ? q.file : "",
+            durationMs: typeof q.durationMs === "number" ? q.durationMs : 0,
+            passed: q.passed === true,
+          };
+        }
+        return { file: "", durationMs: 0, passed: false };
+      });
+    }
     return {
       round: num(o.round),
       startedAt: str(o.startedAt) ?? str(o.started_at),
@@ -1774,6 +1792,9 @@ export function parseVerificationRound(line: string): TestRunRecord | null {
       ...(o.buckets !== undefined ? { buckets: str(o.buckets) } : {}),
       ...(o.bucket_files !== undefined ? { bucket_files: num(o.bucket_files) } : {}),
       ...(o.bucket_duration_ms !== undefined ? { bucket_duration_ms: num(o.bucket_duration_ms) } : {}),
+      // gap-test-detail-perfile-duration-failed — perFile (absent on legacy rows → undefined, the
+      // same absent-field contract as buckets).
+      ...(o.perFile !== undefined ? { perFile } : {}),
     };
   } catch {
     return null;

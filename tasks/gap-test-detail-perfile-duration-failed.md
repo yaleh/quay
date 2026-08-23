@@ -26,12 +26,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：`.quay/verification-round.jsonl` 每轮记录含 `perFile` 数组（`{file, durationMs, passed}`，读生产载体⛔非 fixture）。
-- [ ] AC2：Test 详情页渲染 perFile 表格，可按耗时排序、失败项标红（⛔ 无 perFile 数据或不可排序 ⇒ 假）。
+- [x] AC1：`.quay/verification-round.jsonl` 每轮记录含 `perFile` 数组（`{file, durationMs, passed}`，读生产载体⛔非 fixture）。
+- [x] AC2：Test 详情页渲染 perFile 表格，可按耗时排序、失败项标红（⛔ 无 perFile 数据或不可排序 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] perFile 持久化 + 可排序表落地；AC1-2 全勾；land 到 develop。
+- [x] perFile 持久化 + 可排序表落地；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
@@ -39,8 +39,10 @@ depends_on: []
 
 ## Touches
 
-- plugin/scripts/measure-suite-reporter.mjs（收尾写 perFile 字段）
+- plugin/scripts/full-suite-runner.ts（__PERFILE__ 流 → perFile 写 round 记录）
+- packages/quay/src/observation.ts（parseVerificationRound 提取 perFile）
 - packages/quay/src/serve-handlers.ts（详情页 perFile 表格渲染）
-- plugin/test/measure-suite-reporter.test.mjs（perFile 字段测试）
-- packages/quay/test/serve-handlers.test.mjs（表格渲染测试）
+- plugin/test/full-suite-runner.test.mjs（__PERFILE__ → perFile 用例）
+- packages/quay/test/observation.test.mjs（parseVerificationRound perFile 用例）
+- packages/quay/test/serve-handlers.test.mjs（表格渲染用例）
 - tasks/gap-test-detail-perfile-duration-failed.md（自身）
