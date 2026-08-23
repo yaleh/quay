@@ -151,6 +151,14 @@ export function resolveSymbol(ident, repoRoot, opts = {}) {
   const maxFiles = opts.maxFiles ?? 8;
   const roots = (opts.roots ?? CODE_ROOTS).map((r) => path.resolve(repoRoot, r)).filter((r) => fs.existsSync(r));
   if (roots.length === 0) return false;
+  if (opts.index) {
+    // Batched path (gap-task-status-drift-check-timeout): scanTasks pre-resolves EVERY candidate
+    // symbol in ONE grep pass (buildSymbolIndex) and passes the resulting symbol→fileCount map here.
+    // SAME judgment as the per-symbol grep below — count ∈ (0, maxFiles] — just without a subprocess
+    // per symbol. An absent symbol means the batch grep never matched it (count 0 → unresolved).
+    const count = opts.index.get(ident) ?? 0;
+    return count > 0 && count <= maxFiles;
+  }
   try {
     const out = execFileSync("grep", [
       "-rlw",
@@ -166,7 +174,67 @@ export function resolveSymbol(ident, repoRoot, opts = {}) {
   }
 }
 
-function globHasMatch(glob, repoRoot) {
+// Batched symbol resolution (gap-task-status-drift-check-timeout): the full-store scan used to call
+// resolveSymbol() PER candidate symbol, and the per-symbol path spawns a `grep -rlw <ident>` subprocess
+// each time. At ~1400 tasks / ~950 distinct backticked AC symbols that is ~1000+ grep processes —
+// measured ~40s on this repo, far past the board's 8s landing timeout (LANDING_TIMEOUT_MS in
+// packages/quay/src/observation.ts), so the board's 落地 column degraded to a permanent 读取超时
+// fail-open. This builder resolves EVERY needed symbol in ONE grep pass and returns symbol→fileCount;
+// resolveSymbol(…, { index }) then applies the UNCHANGED (0, maxFiles] judgment.
+//
+// `grep -rHowZ -e <sym>… -- <roots>`: -o emits one line per whole-word match (file\0symbol, -Z
+// NUL-separates the filename from the match so a path containing ':' cannot be mis-split), and the
+// per-symbol DISTINCT-file count is computed in memory (a match repeated within one file dedupes).
+// maxBuffer is raised because the -o dump exceeds execFileSync's 1MB default (measured ~1.1MB here).
+// Fail-open to an empty index on any grep failure (a symbol with no count is unresolved, the same
+// fail-closed per-symbol result a `grep -rlw` exit-1 produced).
+export function buildSymbolIndex(repoRoot, symbols, roots = CODE_ROOTS) {
+  const existing = roots
+    .map((r) => path.resolve(repoRoot, r))
+    .filter((r) => fs.existsSync(r));
+  if (existing.length === 0 || symbols.length === 0) return new Map();
+  let out;
+  try {
+    out = execFileSync("grep", [
+      "-rHowZ",
+      "--exclude-dir=node_modules", "--exclude-dir=dist", "--exclude-dir=vendor",
+      "--exclude-dir=milestones", "--exclude-dir=worktrees", "--exclude-dir=.git",
+      "--exclude=*.test.*",
+      ...symbols.flatMap((s) => ["-e", s]),
+      "--", ...existing,
+    ], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return new Map(); // grep exits 1 on zero matches — every symbol unresolved
+  }
+  const index = new Map(); // symbol → Set<file>
+  for (const line of out.split("\n")) {
+    const nul = line.indexOf("\0");
+    if (nul < 0) continue;
+    const file = line.slice(0, nul);
+    const sym = line.slice(nul + 1);
+    if (!sym) continue;
+    let set = index.get(sym);
+    if (!set) { set = new Set(); index.set(sym, set); }
+    set.add(file);
+  }
+  const counts = new Map();
+  for (const [sym, files] of index) counts.set(sym, files.size);
+  return counts;
+}
+
+// Repo file-list cache (gap-task-status-drift-check-timeout): globHasMatch used to re-walk the whole
+// repo tree (readdir recursion) PER glob Touches entry — ~130 glob entries across the done store × a
+// ~4000-entry walk measured ~18s. The list is walked ONCE and cached per repoRoot; each glob then
+// scans the cached list with the SAME matchesGlob predicate and the SAME exclusion set the per-glob
+// walk used. The original visited<20000 defensive cap is preserved (on the walk, files+dirs counted),
+// so a pathological huge repo still cannot balloon memory. The walk result (true/false for a given
+// glob) is order-independent, so scanning a cached list is behaviorally identical to the interleaved
+// walk — only the number of readdir passes changes.
+const _fileListCache = new Map(); // repoRoot → string[] repo-root-relative paths (forward slashes)
+function listRepoFiles(repoRoot) {
+  const cached = _fileListCache.get(repoRoot);
+  if (cached) return cached;
+  const out = [];
   const stack = [repoRoot];
   let visited = 0;
   while (stack.length > 0 && visited < 20000) {
@@ -179,8 +247,31 @@ function globHasMatch(glob, repoRoot) {
       const rel = path.relative(repoRoot, abs).split(path.sep).join("/");
       visited++;
       if (ent.isDirectory()) { stack.push(abs); continue; }
-      try { if (path.matchesGlob(rel, glob)) return true; } catch { /* malformed glob → not a match */ }
+      out.push(rel);
     }
+  }
+  _fileListCache.set(repoRoot, out);
+  return out;
+}
+
+function globHasMatch(glob, repoRoot) {
+  // Literal-prefix prune (gap-task-status-drift-check-timeout): `path.matchesGlob` recompiles the
+  // glob to a regex per call (~40µs × a full ~4000-file scan ≈ 150ms per glob), which was the last
+  // scanTasks hotspot after the symbol/diff batches. A matching path MUST start with the glob's
+  // literal leading segment (everything before the first `*`/`?`/`[` wildcard, `\`-escapes kept
+  // literal), so files outside that prefix are skipped WITHOUT a matchesGlob call. The final match
+  // is still `path.matchesGlob` itself — the prune is only a necessary-condition filter, so the
+  // judgment is byte-for-byte unchanged; only the number of regex compilations drops.
+  let prefix = "";
+  for (let i = 0; i < glob.length; i++) {
+    const ch = glob[i];
+    if (ch === "\\") { prefix += ch + (glob[i + 1] ?? ""); i++; continue; }
+    if (ch === "*" || ch === "?" || ch === "[") break;
+    prefix += ch;
+  }
+  for (const rel of listRepoFiles(repoRoot)) {
+    if (prefix && !rel.startsWith(prefix)) continue;
+    try { if (path.matchesGlob(rel, glob)) return true; } catch { /* malformed glob → not a match */ }
   }
   return false;
 }
@@ -754,11 +845,23 @@ export function strandedBranches(repoRoot, opts = {}) {
 // correctly stays reverse-drift while noisy-agent's prepare-milestone.js — absent from master, on
 // M239 — correctly reclassifies to stranded-not-merged). Globs are skipped (the exact-path signal is
 // the common case).
+// Branch-divergence cache (gap-task-status-drift-check-timeout): the diverged set depends ONLY on
+// (landing, branch), not on the task — yet scanTasks called this PER done task, re-running the SAME
+// `git diff --name-only landing...branch` subprocess ~60× per branch (measured ~6s of subprocess
+// spawn). The set is cached per (repoRoot, landing, branch); null means the git call failed (the
+// same fail-closed false the per-call failure produced). Safe within the drift checker's short-lived
+// CLI process (and per-repoRoot for tests) — the branch's divergent diff does not change mid-run.
+const _branchDiffCache = new Map(); // `${repoRoot}\n${landing}...${branch}` → Set<string> | null
 export function entriesInBranchDiff(repoRoot, entries, branch, landing = "master") {
   if (entries.length === 0) return false;
-  const r = gitTry(repoRoot, ["diff", "--name-only", `${landing}...${branch}`]);
-  if (!r.ok) return false;
-  const diverged = new Set(r.out.split("\n").filter(Boolean));
+  const key = `${repoRoot}\n${landing}...${branch}`;
+  let diverged = _branchDiffCache.get(key);
+  if (diverged === undefined) {
+    const r = gitTry(repoRoot, ["diff", "--name-only", `${landing}...${branch}`]);
+    diverged = r.ok ? new Set(r.out.split("\n").filter(Boolean)) : null;
+    _branchDiffCache.set(key, diverged);
+  }
+  if (diverged === null) return false;
   return entries.some((e) => !(e.includes("*") || e.includes("?")) && diverged.has(e));
 }
 
@@ -786,6 +889,12 @@ export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), r
   const strandedTasks = [];
   let taskFiles;
   try { taskFiles = fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md")); } catch { return { suspects, reverse, closedWithoutWork, strandedTasks, scanned: 0 }; }
+  // Pass 1 (gap-task-status-drift-check-timeout): read every task ONCE and collect the UNION of all
+  // candidate symbols. Symbol resolution (resolveSymbol) is the O(~1000 subprocesses) hotspot — the
+  // per-symbol `grep -rlw` spawn — so pass 2 resolves every symbol against ONE batched index instead
+  // of one subprocess per symbol. The judgment body below is UNCHANGED; only `matched` sources change.
+  const tasks = [];
+  const allSymbols = new Set();
   for (const f of taskFiles) {
     const raw = fs.readFileSync(path.join(tasksDir, f), "utf8");
     const statusMatch = raw.match(/^status:\s*(\S+)/m);
@@ -793,6 +902,11 @@ export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), r
     const ac = extractSection(raw, "Acceptance Criteria");
     const touchesSection = extractSection(raw, "Touches");
     const candidates = extractSymbolCandidates(ac);
+    for (const c of candidates) allSymbols.add(c);
+    tasks.push({ f, raw, status, ac, touchesSection, candidates });
+  }
+  const symbolIndex = buildSymbolIndex(repoRoot, [...allSymbols], roots);
+  for (const { f, raw, status, ac, touchesSection, candidates } of tasks) {
     if (status === "done") {
       // Reverse drift: a done task whose implementation never landed. Signal = distinctive AC
       // symbols are mostly UNRESOLVED (fewer than half resolve — REVERSE_SYMBOL_RATIO_MAX, AC5) AND
@@ -806,7 +920,7 @@ export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), r
       // exp5-DEFECT-*, … all have landed code but no Touches). A Touches section that parses to
       // ZERO entries, or to only bookkeeping entries, IS judged fail-closed (proves nothing — AC6).
       const tAll = touchesAllExist(touchesSection, repoRoot);
-      const matched = candidates.filter((c) => resolveSymbol(c, repoRoot, { roots }));
+      const matched = candidates.filter((c) => resolveSymbol(c, repoRoot, { roots, index: symbolIndex }));
       const codeTouchExists = hasAnyCodeRootTouch(touchesSection, repoRoot);
       // ── Closed-without-work — the DANGEROUS direction (gap-drift-check-only-looks-at-the-harmless-
       // direction). The forward scan (todo/ready) only sees "code in the tree but status not closed" —
@@ -873,7 +987,7 @@ export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), r
     }
     if (status !== "todo" && status !== "ready") continue;
     if (candidates.length === 0) continue;
-    const matched = candidates.filter((c) => resolveSymbol(c, repoRoot, { roots }));
+    const matched = candidates.filter((c) => resolveSymbol(c, repoRoot, { roots, index: symbolIndex }));
     const ratio = matched.length / candidates.length;
     const tAll = touchesAllExist(touchesSection, repoRoot);
     if (ratio >= ratioFloor && tAll) {

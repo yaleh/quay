@@ -26,8 +26,8 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：`task-status-drift-check.ts` 在 1387 条任务下执行 <8s（⛔ 稳定超时 fail-open ⇒ 假）。
-- [ ] AC2：Board 页「落地」列显示真实判断结果（⛔ 恒 "—" ⇒ 假）。
+- [x] AC1：`task-status-drift-check.ts` 在 1387 条任务下执行 <8s（⛔ 稳定超时 fail-open ⇒ 假）。
+- [x] AC2：Board 页「落地」列显示真实判断结果（⛔ 恒 "—" ⇒ 假）。
 
 ## Definition of Done
 
@@ -40,4 +40,5 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/task-status-drift-check.ts（超时根因）
+- experiments/quay-perpetual-stream/scripts/task-status-drift-check.ts（byte-identical mirror，AC1 测试强制，同步改）
 - tasks/gap-task-status-drift-check-timeout.md（自身）
