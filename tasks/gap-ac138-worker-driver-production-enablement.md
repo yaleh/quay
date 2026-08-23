@@ -26,6 +26,7 @@ depends_on:
 
 1. **生产启用**：经 `quay driver start --kind worker` 从主检出稳定路径启动 worker-driver 为常驻进程（⛔ 非 worktree；统一入口 + 稳定承载 + 死亡告警由 AC139 提供）。
 2. **自主处理**：驱动自主选任务（不传 `--task`），跑完真实任务（有 diff/commit，`selector_reason` 非占位值）。
+3. **观测面修正**（manager 发现，⛔ 同 AC137-2 教训）：`status` 的 `carrier_records`/`last_record_ts` 只读 `KIND_CARRIERS[kind]` **首个**（outcome.jsonl=事件条件载体），round.jsonl（无条件每轮写）列第二位却未用 ⇒ 改成对**全部**文件取 mtime/末条时刻 **max**；worker 侧加 round 等价物（无条件心跳，⛔ worker-outcome 只在任务真完成时写、池空时心跳陈旧会被误读为「死亡」）。
 
 ## Acceptance Criteria
 
@@ -44,6 +45,8 @@ depends_on:
 ## Touches
 
 - packages/quay/src/cli/driver.ts（worker-kind 启用面：`quay driver start --kind worker`）
+- plugin/scripts/promotion-driver-launch.sh（status 取 KIND_CARRIERS 全部文件 max）
+- plugin/scripts/worker-driver.ts（worker round 等价物：无条件心跳）
 - tasks/gap-ac138-worker-driver-production-enablement.md（自身）
 
 > **注意**：AC3「自主处理 ≥N 任务」N 不在此拍板（硬规则 4：先无阈值跑生产分布再定）；若 AC3 在 fan-in 时刻结构上不可满足（需生产时间窗），按 AC137 先例标「（待外部）」。
