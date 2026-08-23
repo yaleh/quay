@@ -619,11 +619,37 @@ promotion-driver.ts:110-117  isLlmInvocation(argv)
 - **AC140-1（单一真相源）**：LLM 调用 argv 由**一个**构造函数产出（role 作参数），
   上述**四处硬编码全部消除**。**取假（一条 grep 可查）**：`plugin/scripts/` 下仍能找到 ≥2 处独立的
   `["claude", "-p", …]` 字面量 ⇒ 为假。
-- **AC140-2（可配置：wrapper + model + 按 role）**：LLM 命令与 model 由 **`.quay/config.yml` 配置**
-  （沿用 DIR-050 统一配置先例——该文件已有 `providers:`/`gates:`/`loop:` 三段，本条加第四段），
+- **AC140-2（可配置：wrapper + model + 按 role）**：LLM 命令与 model **必须与 inner/outer 会话所用的同一套配置同源**，
   **且可按 role 分别覆盖**（worker / selector / fix-worker 是三种不同负载：长任务链 / 短决策 / 短编辑，
-  ⛔ 不假定它们该用同一个 model）。**取假**：把 wrapper 配成 `claude-fjdac`、model 配成本项目实际所用值后，
-  spawn 出的 argv 里 argv0 仍是 `claude` 或 model 未出现 ⇒ 为假。
+  ⛔ 不假定它们该用同一个 model）。**取假**：把 role 的 launcher/model 配成本项目实际所用值后，
+  驱动 spawn 出的 argv 里 argv0 仍是裸 `claude` 或 `--model` 未出现 ⇒ 为假。
+
+  **⊕ 2026-08-23 00:5xZ 我方自纠（人令「应与 inner/outer 一致」后实测，⛔ 我原先指定的落点会制造漂移）**：
+  **原文写「由 `.quay/config.yml` 加第四段配置」——⛔ 撤销该指定**，因为**这些事实已经有正本**，
+  再写一份就是 CLAUDE.md 反复点名的**双真相源**。
+  **⊢ 实读正本（`.claude/launch.settings.json` `_launchSpec.roles`）**：
+  ```
+  outer / inner  launcher = "claude-fjdac"   model = "deepseek-v4-pro"
+  manager        launcher = "claude"          model = null（且清空 917k 三个 env）
+  ```
+  **⊢ 实读组装器（`plugin/scripts/quay-launch.sh:97-115`）**：
+  `CMD=( <launcher> --settings <file> [--exclude-dynamic-system-prompt-sections] [--prompt-suggestions false] [--model <m>] [--bare] -n <name> ) + PASSTHRU`
+  —— **`:36` 明写「其余参数原样透传给 claude（如 `-p`、`--print`、`--resume`）」⇒ 透传缝已经存在。**
+  **⊢ 干跑实证（我实跑，非推断）**：
+  ```
+  bash plugin/scripts/quay-launch.sh inner --bare --dry-run -p "TEST_PROMPT"
+  ⇒ claude-fjdac --settings …/launch.settings.json --exclude-dynamic-system-prompt-sections \
+     --prompt-suggestions false --model deepseek-v4-pro --bare -n quay-inner -p TEST_PROMPT
+  ```
+  ⇒ **人要的「与 inner/outer 一致、仅为 `-p` 模式加参数」这件事，既有机件【已经能做到】**。
+  **⇒ 本条改为要求：驱动的 LLM spawn 走 `quay-launch.sh <role> --bare -p <prompt>`（或等价复用同一组装器），
+  按 role 的配置落在 `_launchSpec.roles` 里新增 worker 角色**（如 `task-worker`/`selector`/`fix-worker`），
+  ⛔ **不得在 `.quay/config.yml` 另立一份 launcher/model**。
+  **⊢ 落笔方须一并回答的两个已知点（⛔ 不得跳过）**：
+  ① **`-n <name>` 是无条件追加的**（`:114`）—— 三个并发 worker 若都叫 `quay-inner` 会在 `ListAgents` 里撞名；
+     新角色须各有其名，或确认 `-p` 模式是否根本不注册会话（**⛔ 实测后再定，不猜**）。
+  ② **`--bare` 的既有定义正好合用**（settings 自述「一次性验证会话：跳过 hooks/LSP/plugin 同步/自动记忆/预取，不长驻」）
+     —— 短命 worker 正是这个形态；但**是否对 task-worker（长任务链）也合适须实测**，⛔ 不照搬到三种 role。
 - **AC140-3（覆盖语义统一为「前缀 + prompt」）**：`--*-cmd` 一律解释为**前缀**，prompt 由驱动追加
   （即 promotion-driver 的现行语义）；worker-driver 现有的**整体替换**语义**改名为独立 flag**
   （如 `--worker-cmd-exact`，测试捕获专用）。**⛔ 两种语义不得共用一个 flag 名** ——
@@ -648,6 +674,25 @@ promotion-driver.ts:110-117  isLlmInvocation(argv)
   同族陷阱已有前例（`perfile-timeout` gate 名误导）。落笔方**要么把它改名为路径限定的名字**
   （如 `promote_path_llm_invoked`），**要么把它扩成真正的全轮口径**（含 fix worker spawn）；
   ⛔ **不得原样保留一个会让读者得出相反结论的名字**（硬规则 4b：读数与「一切正常」同形）。
+
+**⊕ 2026-08-23 00:5xZ 连带记录（一个【有待对照的假说】，⛔ 未证实，不得当结论用）**：
+`fix worker exitCode=1`（round 70 首次生产触发即失败）**可能**源于 `buildFixWorkerArgv` spawn 的是**裸 `claude -p`**，
+而它相对 inner/outer 的实际启动形态**少了两样东西**：
+```
+① --settings …/launch.settings.json  ⇒ 其中 permissions.defaultMode = "bypassPermissions"
+                                        ⇒ 裸 claude -p 在非交互下遇权限提示可能直接退出
+② launcher = claude-fjdac            ⇒ 该 wrapper 用【环境变量】注入 ANTHROPIC_BASE_URL /
+                                        AUTH_TOKEN / DEFAULT_{HAIKU,SONNET,OPUS}_MODEL，末行 `exec claude "$@"`
+                                        ⇒ 裸 claude 走的是另一套（可能无效的）凭据
+```
+**⊢ 两条都能独立解释 exitCode=1 ⇒ 恰恰说明不能凭「说得通」定案**（硬规则④推论四）。
+**⊢ 能区分的对照（一条命令，⛔ 做完再写成因）**：把**同一个 prompt** 分别以
+`bash plugin/scripts/quay-launch.sh inner --bare -p "<同一 prompt>"` 与裸 `claude -p "<同一 prompt>"` 各跑一次 ——
+前者成功而后者失败 ⇒ 成因在**启动形态**（即本条 AC140-2 一并修掉）；两者都失败 ⇒ 成因在 **prompt 本身**，与启动无关。
+**⊢ ⚠️ 顺带一个非显然事实（`ps` 上看不见 wrapper）**：`claude-fjdac` 末行是 `exec claude "$@"`，
+**exec 会替换自身** ⇒ inner/outer 跑着的进程 `argv[0]` 就是 `claude`（我直读 `/proc/2346790/cmdline` 确证），
+**wrapper 的全部贡献都在 env 里、在 `ps` 上不可见**。
+⇒ **不能用「`ps` 里看到的是 `claude`」推断「没用 wrapper」**（硬规则 4b：中间隔了一层 exec，代理量失真）。
 
 **⊢ 与 AC139 的关系（⛔ 顺序与归属）**：AC139 管**承载与入口**（怎么启动、谁守护）；
 **本条管【被启动的东西本身调什么 LLM】** —— 两者正交，但**配置面应落在同一处**
