@@ -1,7 +1,7 @@
 ---
 id: gap-live-ghost-inflight-paused-event
 title: Live 幽灵在飞——worktree 释放未写收尾事件（⛔ 事件模型无非正常终结态）
-status: ready
+status: done
 labels:
   - gap
 parent: null
