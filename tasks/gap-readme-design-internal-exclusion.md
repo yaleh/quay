@@ -1,7 +1,7 @@
 ---
 id: gap-readme-design-internal-exclusion
 title: README.md 加进 direct-to-develop-bypass-check design-internal 排除集 + b67a91cf 入 ruled 表
-status: todo
+status: ready
 labels:
   - gap
 parent: null
