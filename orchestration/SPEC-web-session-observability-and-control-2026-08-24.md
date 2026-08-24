@@ -564,3 +564,89 @@ web "新建会话"表单需要且只需要**四个**选择：**profile**（wrapp
    见 §7.3 的 17:2xZ 更新）：落地前仍建议补一次（只切 `crossSessionInbound`，发送方固定），
    代价 = 一次 60 秒实验；**在此之前按"必须显式 accept"设计。**
 3. **§8.3 的 (a)/(b) 路线**：建议 (a)，但若人要 profile 自足（换机器即用），则须先设计凭据层。
+
+---
+
+# 第三轮（2026-08-24T17:3xZ）：人问"还有什么要验证的"⇒ 补验三条，全部有结论
+
+## 10. 三条补验（全部单变量对照，⛔ 非推断）
+
+### 10.1 投递成因【已定】——决定变量是接收方的 `permissions.defaultMode`，不是 cwd
+
+§7.3 留下的"成因未定、混淆变量≥3"现已用单变量对照解开。**四个样本**（发送方通道全部固定为
+`send-to-session.ts` 的 peerToken 路径或平台 SendMessage，cwd 与 settings 交叉变化）：
+
+```
+样本  cwd          recipient settings                       结果
+P0    /tmp         (无)                                     held → expired   （未送达）
+B     /tmp         crossSessionInbound:accept               送达且被消费
+P2    <repo>       (无)                                     marker 命中 0    （未送达）
+P1    <repo>       permissions.defaultMode=bypassPermissions marker 命中 10  （送达且被消费）
+                                                            RESULT #2 逐字："I received a message
+                                                            from peer session `script-905367`…"
+```
+**⇒ cwd 与结果不相关**（/tmp 和 repo 各出现一次送达、一次未送达）⇒ **cwd 被排除**。
+**⇒ 决定变量是接收方的 settings**，且**两条独立路径都能达成直通**：
+`permissions.defaultMode=bypassPermissions`（P1）**或** `crossSessionInbound:accept`（B）；
+两者皆无 ⇒ held（P0/P2）。
+**⇒ 这解释了 §7.3 的 25/25**：本项目所有会话都带
+`permissions.defaultMode: bypassPermissions`（`launch.settings.json:3-5`）⇒ 天然直通。
+
+**🔴 附带发现（与仓库现有注释冲突，值得单独记）**：`send-to-session.ts:14`/`:82-88` 的头注释写
+「用 peerToken ⇒ 对端把你当另一个会话 ⇒ **bypass 会话会 hold for approval**（"The sender did not
+attest its permission mode"，实测 2026-08-15，Claude Code 2.1.233）」。
+**而 P1 是 bypass 会话、走 peerToken 路径、直接送达且被消费 ⇒ 与该注释【相反】。**
+**⛔ 我不断言该注释"当时就错"** —— 本机现为 **2.1.241**，跨了 8 个 patch 版本，
+**"行为变了"与"注释当时写错了"两种可能我都没有对照能区分**。
+**⇒ 归属 outer：这是一条会误导后续读者的仓库注释**（有人照它设计就会多做一层不存在的审批），
+**建议按实测更新并注明版本**；⛔ 我不改 `.ts`（§D 边界）。
+
+### 10.2 `-p` 会话的权限模式【结论与 §6.4 的假设相反】——非 bypass 实际不可用
+
+**实测**：`-p --input-format stream-json --permission-mode manual`，要求它写一个文件。stdout 逐条：
+```
+system:init            → tools 列表齐全（Write 在内）
+assistant              → 决定调用 Write
+system:permission_denied  {"tool_name":"Write","tool_use_id":"…",
+                           "message":"Claude requested permissions to write to …,
+                                      but you haven't granted it yet."}
+user (tool_result)     → is_error:true，同一句话
+assistant / result     → "I need your permission to write to …. Please grant the permission…"
+文件实际是否创建         → 否（ls 不存在）
+```
+**⇒ 关键否定结论：stdout 上【没有】任何可回答的授权请求事件**（无 `control_request`、
+无 `can_use_tool` 往返）——只有一个**事后通知**式的 `system:permission_denied`，
+**工具调用已经被拒了，不是挂起等批准。⇒ web 端【无法】代用户"点同意"然后让它继续。**
+
+**⇒ §6.4 必须改写**：原文说"必须显式选权限模式并显示它"——**选择本身仍对**，
+但它隐含的"非 bypass 模式配人工审批也能工作"是**错的**。真实可用集合只有两种：
+```
+① permissions.defaultMode=bypassPermissions  ⇒ 全自主（且顺带获得消息直通，见 10.1）
+② 预先声明 allowedTools / 预授权              ⇒ 只能做被预先允许的事
+③ 其余（manual 等）                           ⇒ 需要授权的工具【直接失败】，会话空转
+```
+**⇒ 对本功能的硬含义（安全相关，须原样呈现给人）**：**一个"能干活"的 web 启动会话，
+实际上必然是 ① 或 ②**。①=全权限；②=需要在 profile 里预先枚举工具。
+**⛔ 不存在"从 web 逐次批准"这个中间档** —— 若要那个体验，得由 web server 自己做
+（例如以 ② 起会话 + 由 web 侧代理工具执行），**那是另一个量级的工程，不在本 SPEC 范围**。
+
+### 10.3 `--resume` 可用且上下文保留 ⇒ "重启会话"可以是【真重启】而非【重开】
+
+**实测**：取一个**已结束**的 `-p` 探针会话（transcript 33706 字节），跑
+`claude -p --resume <session-id> "你在本对话里的第一条回复逐字是什么？"`
+⇒ 回答 **`READY`**，与原会话第一条回复逐字一致。
+**⇒ 该答案只有读过原上下文才给得出（不是能猜的常见词）⇒ resume 真的载入了历史。**
+**⇒ 设计含义**：§3.4 的"重启会话"可以实现为 **`--resume <同一 sessionId>`**，
+用户的上下文不丢；**这也再次印证 §2.3「spawn 时钉 `--session-id`」的价值**——
+没有稳定 id 就没有 resume 的抓手。
+
+## 11. 现在还剩什么没验证（⇒ 直接回答人的问题）
+
+**已无【我能验而未验】的项。** 剩下三条**结构上不是验证问题，是裁定问题**（归人）：
+1. **实时性方案**：整页 meta-refresh / 保持手动刷新 / 专用 SSE 端点——**打破零客户端 JS 约定**这件事
+   需要人裁定，不是测出来的。
+2. **profile 路线 (a) 按名字引用 wrapper vs (b) 自足 profile + 独立凭据层**（§8.3）——取舍不是测量。
+3. **§10.2 揭示的安全取舍**：web 启动的"能干活"会话必然是全权限或预授权白名单，**人是否接受**。
+
+**⊢ 一条我不代拍的补充**：§10.1 发现的 `send-to-session.ts` 注释与实测冲突，**归 outer 处置**
+（改注释属 `.ts`，在我豁免面外）。
