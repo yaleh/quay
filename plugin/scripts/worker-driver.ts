@@ -574,6 +574,8 @@ export function computeWorkerRoundRecord(opts: {
   pool: number | null;
   stopReason: string | null;
   liveness?: LivenessResult | null;
+  /** 本轮现观测到的冷启动在飞 task id（排序后）。空数组 = 观测过且无（⛔ 与「没观测」可区分）。 */
+  coldStartInflight: string[];
 }) {
   return {
     ts: opts.at,
@@ -585,6 +587,7 @@ export function computeWorkerRoundRecord(opts: {
     pool: opts.pool,
     stop_reason: opts.stopReason,
     liveness: opts.liveness ?? null,
+    cold_start_inflight: opts.coldStartInflight,
   };
 }
 
@@ -1297,20 +1300,19 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   const results: WorkerRunResult[] = [];
   let stopReason: string | null = null;
 
-  // gap-worker-driver-cold-start-inflight-blind：冷启动在飞排除集。restart / supervisor 崩溃自动
-  // respawn 后，新驱动的 running 是纯内存数组、从空集起——不认得重启前就存活的 worker。枚举真实
-  // 存活的 task worktree + 交叉核对存活 quay-task-worker 进程，把「worktree 在 ∧ 存活 worker 在」的
-  // task 预先纳入排除集，使本驱动不再对它们重复派发（重复派发撞同一 worktree，被杀后还会误删原
-  // worker 仍在用的共享 worktree）。计算一次（冷启动）；存活 worker 落地 fan-in 后其 worktree 消失，
-  // 本驱动对其整个寿命内都不再派发（安全方向）。这些 task 不占内存 running（无 promise 可 await），
-  // 但作为「已在飞」参与 ready-pool 减项 / active 过滤 / Touches 互斥，⛔ 不阻塞其它 task 的派发。
-  const coldInflight = enumerateColdStartInflight(rootDir);
+  // gap-worker-driver-cold-start-inflight-refresh：冷启动在飞排除集【每趟 pass 现观测】（SPEC §5.2
+  // actual=observe()），不再是循环外一次性 const 快照——原 gap-worker-driver-cold-start-inflight-blind
+  // 只修了「冷启动 ⇒ 不重复派发」一个方向（快照冻结 ⇒ 冷启动 worker 结束后其 task 仍永久假在飞、
+  // 本驱动余生不可派，硬规则 5b 只修被报出来的那一个方向）。restart / supervisor 崩溃自动 respawn
+  // 后，新驱动的 running 是纯内存数组、从空集起，不认得重启前就存活的 worker；枚举真实存活的 task
+  // worktree + 交叉核对存活 quay-task-worker 进程，把「worktree 在 ∧ 存活 worker 在」的 task 纳入
+  // 排除集（⛔ 重复派发撞同一 worktree，被杀后还会误删原 worker 仍在用的共享 worktree）。每轮重扫 ⇒
+  // worker 退出 / worktree 消失任一发生，task 即离开排除集、重新可派（AC2 承重条）。观测结果落
+  // round 记录（生产可见载体——生产 driver argv 无 --json，原「cold-start-inflight」诊断从不发射，
+  // 硬规则 6 来源不完备）。这些 task 不占内存 running（无 promise 可 await），但作为「已在飞」参与
+  // ready-pool 减项 / active 过滤 / Touches 互斥，⛔ 不阻塞其它 task 的派发。
+  let coldInflight = new Set<string>();
   const inFlightTasks = (): string[] => running.map((r) => r.task).concat([...coldInflight]);
-  if (json && coldInflight.size > 0) {
-    process.stdout.write(
-      `${JSON.stringify({ event: "cold-start-inflight", tasks: [...coldInflight].sort() })}\n`,
-    );
-  }
 
   // round 心跳（AC138-3）：worker-outcome 只在任务真完成时写，池空时 outcome 停更会被 supervisor
   // status 的 last_record_ts（读全载体 max）误读为「死亡」；round 每轮循环无条件写一条作 liveness 直接量。
@@ -1326,6 +1328,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       pool,
       stopReason: reason,
       liveness,
+      coldStartInflight: [...coldInflight].sort(),
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -1382,6 +1385,16 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   let round = 0;
   while (true) {
     round += 1;
+
+    // 冷启动在飞【现观测】（每趟 pass，SPEC §5.2 actual=observe()）：worker 退出 / worktree 消失任一
+    // 发生 ⇒ task 即离开排除集、下一轮重新可派（⛔ 循环外一次性 const 快照 = 假在飞不可派，已修）。
+    // 每轮重扫 task worktree + /proc 存活 worker 交叉核对；该结果同时写进本轮 round 记录（生产载体）。
+    coldInflight = enumerateColdStartInflight(rootDir);
+    if (json && coldInflight.size > 0) {
+      process.stdout.write(
+        `${JSON.stringify({ event: "cold-start-inflight", tasks: [...coldInflight].sort() })}\n`,
+      );
+    }
 
     // liveness 检查（gap-resident-driver-stable-carrier-liveness Finding 的接线）：每轮顺手调一次
     // launch 脚本的 liveness 子命令。supervisor 死后 driver 成孤儿仍在跑 ⇒ 下一轮即检出 supervisor_dead

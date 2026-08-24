@@ -27,9 +27,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，原有方向）：冷启动 worker 在跑 ⇒ 不重复派发其 task（⛔ 重复派发 ⇒ 假）。
-- [ ] AC2（能取假，承重条·原任务缺的那半）：冷启动 worker **结束**后其 task 重新可派——构造「冷启动发现 worker → worker 退出 → 断言该 task 离开排除集可被派发」；⛔ task 仍留排除集 ⇒ 假。
-- [ ] AC3（能取假，现观测）：`actual` 每趟 pass 由扫活进程/worktree 派生（⛔ 循环外 `const coldInflight` 快照仍存在 ⇒ 假）。
+- [x] AC1（能取假，原有方向）：冷启动 worker 在跑 ⇒ 不重复派发其 task（⛔ 重复派发 ⇒ 假）。
+- [x] AC2（能取假，承重条·原任务缺的那半）：冷启动 worker **结束**后其 task 重新可派——构造「冷启动发现 worker → worker 退出 → 断言该 task 离开排除集可被派发」；⛔ task 仍留排除集 ⇒ 假。
+- [x] AC3（能取假，现观测）：`actual` 每趟 pass 由扫活进程/worktree 派生（⛔ 循环外 `const coldInflight` 快照仍存在 ⇒ 假）。
 
 ## Definition of Done
 
