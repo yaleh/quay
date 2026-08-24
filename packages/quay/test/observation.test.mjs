@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, WORKER_OUTCOME_REL, WORKER_ROUND_REL } from "../src/observation.ts";
+import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL } from "../src/observation.ts";
 
 /** Commit helper with a fixed clock (committer date = author date = `t`), per-branch file. */
 function commitAt(ws, msg, t, file = "log.txt") {
@@ -316,19 +316,27 @@ function writeWorkerOutcome(root, records) {
   fs.writeFileSync(file, lines.join(""));
 }
 
-test("AC1: readLive surfaces a worker-driver open task (exited-not-landed) from the outcome carrier", () => {
-  const ws = workerWorkspace("worker-open");
+// gap-live-page-worker-inflight-bidirectional-error 方向一: the outcome carrier is written only at
+// worker END, so every final_state is terminal. The old workerOutcomeOpen excluded only
+// completed/spawn-failed/not-dispatched, so a destroyed worker (exited-not-landed) — and the abnormal-
+// death states failed/killed/timed-out — showed as 实现中 forever. All terminal states must be NOT
+// in-flight; a first-dispatched worker (no outcome record yet) is surfaced by 方向二 instead.
+test("方向一: a terminal worker outcome (exited-not-landed / failed / killed / timed-out) is NOT in-flight", () => {
+  const ws = workerWorkspace("worker-terminal");
   try {
     writeWorkerOutcome(ws, [
-      { task: "gap-open-a", started_at: "2026-08-24T07:00:00.000Z", final_state: "exited-not-landed" },
+      { task: "gap-exited", started_at: "2026-08-24T07:00:00.000Z", final_state: "exited-not-landed" },
+      { task: "gap-failed", started_at: "2026-08-24T07:01:00.000Z", final_state: "failed" },
+      { task: "gap-killed", started_at: "2026-08-24T07:02:00.000Z", final_state: "killed" },
+      { task: "gap-timedout", started_at: "2026-08-24T07:03:00.000Z", final_state: "timed-out" },
     ]);
-    const live = readLive(ws, { nowMs: Date.parse("2026-08-24T08:00:00.000Z") });
-    assert.ok(live.inFlight.some((t) => t.taskId === "gap-open-a"),
-      "AC1: an exited-not-landed worker task is in-flight on the Live page");
-    const t = live.inFlight.find((t) => t.taskId === "gap-open-a");
-    assert.equal(t.implCompletedAtMs, null, "AC1: an open worker task is still 实现中");
-    assert.equal(t.liveness, "unknown", "AC1: fail-closed liveness (never flagged orphan)");
-    assert.equal(live.status, "ok", "AC1: the worker carrier is the telemetry once the driver is wired");
+    const live = readLive(ws, { nowMs: Date.parse("2026-08-24T08:00:00.000Z"), liveWorkers: [] });
+    const ids = live.inFlight.map((t) => t.taskId);
+    assert.ok(!ids.includes("gap-exited"), "方向一: exited-not-landed (destroyed worker) is NOT in-flight");
+    assert.ok(!ids.includes("gap-failed"), "方向一: failed (non-zero exit) is NOT in-flight");
+    assert.ok(!ids.includes("gap-killed"), "方向一: killed (signal death) is NOT in-flight");
+    assert.ok(!ids.includes("gap-timedout"), "方向一: timed-out is NOT in-flight");
+    assert.equal(live.status, "ok", "方向一: the worker carrier is still the telemetry (driver wired)");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
@@ -342,7 +350,7 @@ test("AC1: completed / spawn-failed / not-dispatched worker outcomes are NOT in-
       { task: "gap-never-a", started_at: "2026-08-24T07:00:00.000Z", final_state: "spawn-failed" },
       { task: "gap-halted-a", started_at: "2026-08-24T07:00:00.000Z", final_state: "not-dispatched" },
     ]);
-    const live = readLive(ws, { nowMs: Date.parse("2026-08-24T08:00:00.000Z") });
+    const live = readLive(ws, { nowMs: Date.parse("2026-08-24T08:00:00.000Z"), liveWorkers: [] });
     const ids = live.inFlight.map((t) => t.taskId);
     assert.ok(!ids.includes("gap-done-a"), "AC1: completed (landed) is not in-flight");
     assert.ok(!ids.includes("gap-never-a"), "AC1: spawn-failed (never ran) is not in-flight");
@@ -352,17 +360,17 @@ test("AC1: completed / spawn-failed / not-dispatched worker outcomes are NOT in-
   }
 });
 
-test("AC1: a done task whose worker outcome is exited-not-landed (leftover worktree) is NOT in-flight", () => {
-  const ws = workerWorkspace("worker-done-leftover");
+test("AC1: a live worker process whose task status is already done is NOT in-flight (done-skip holds for 方向二)", () => {
+  const ws = workerWorkspace("worker-done-live");
   try {
-    writeWorkerOutcome(ws, [
-      { task: "gap-reflog", started_at: "2026-08-24T07:00:00.000Z", final_state: "exited-not-landed" },
-    ]);
     fs.writeFileSync(path.join(ws, "tasks", "gap-reflog.md"),
       "---\nid: gap-reflog\ntitle: fixture\nstatus: done\n---\n\n**type:** execution\n");
-    const live = readLive(ws, { nowMs: Date.parse("2026-08-24T08:00:00.000Z") });
+    const live = readLive(ws, {
+      nowMs: Date.parse("2026-08-24T08:00:00.000Z"),
+      liveWorkers: [{ taskId: "gap-reflog", startedAtMs: Date.parse("2026-08-24T07:00:00.000Z") }],
+    });
     assert.ok(!live.inFlight.some((t) => t.taskId === "gap-reflog"),
-      "AC1: status=done ⇒ not in-flight even though the carrier says exited-not-landed (cleanup artifact)");
+      "AC1: status=done ⇒ a running worker process for it is still NOT in-flight (done has landed)");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
@@ -380,7 +388,7 @@ test("AC2: a workflow-events start-no-end run that predates the driver is droppe
     fs.mkdirSync(namespace, { recursive: true });
     fs.mkdirSync(path.join(namespace, "GHOST-9H"), { recursive: true });
     writeStartEvent(root, "GHOST-9H", Date.parse("2026-08-24T04:14:26.000Z"));
-    const live = readLive(root, { nowMs: Date.parse("2026-08-24T08:00:00.000Z") });
+    const live = readLive(root, { nowMs: Date.parse("2026-08-24T08:00:00.000Z"), liveWorkers: [] });
     assert.ok(!live.inFlight.some((t) => t.taskId === "GHOST-9H"),
       "AC2: a start-no-end run that predates the driver is a ghost, removed even though its worktree is present");
   } finally {
@@ -397,12 +405,80 @@ test("AC2 negative control: a workflow-events run that started AFTER the driver 
     fs.mkdirSync(namespace, { recursive: true });
     fs.mkdirSync(path.join(namespace, "KEEP-POST"), { recursive: true });
     writeStartEvent(root, "KEEP-POST", Date.parse("2026-08-24T07:30:00.000Z"));
-    const live = readLive(root, { nowMs: Date.parse("2026-08-24T08:00:00.000Z") });
+    const live = readLive(root, { nowMs: Date.parse("2026-08-24T08:00:00.000Z"), liveWorkers: [] });
     assert.ok(live.inFlight.some((t) => t.taskId === "KEEP-POST"),
       "AC2 negative control: a post-driver workflow-events run is not dropped by the online-time filter");
   } finally {
     fs.rmSync(parent, { recursive: true, force: true });
   }
+});
+
+// ── gap-live-page-worker-inflight-bidirectional-error 方向二 ─────────────────────────────────────
+// The outcome carrier is written only at worker END, so a first-dispatched worker (no outcome record
+// yet) has no carrier record — workerInFlightTasks cannot see it. The /live in-flight set now ALSO
+// reads the live-process signal (a /proc cmdline carrying `quay-task-worker` + `Task: <id>`), so a
+// first-dispatched worker shows in-flight. The `liveWorkers` option is the test seam.
+
+test("方向二: a first-dispatched worker (no outcome record) is in-flight via the process signal", () => {
+  const ws = workerWorkspace("worker-first");
+  try {
+    const startedAtMs = Date.parse("2026-08-24T07:30:00.000Z");
+    const live = readLive(ws, {
+      nowMs: Date.parse("2026-08-24T08:00:00.000Z"),
+      liveWorkers: [{ taskId: "gap-first", startedAtMs }],
+    });
+    const t = live.inFlight.find((x) => x.taskId === "gap-first");
+    assert.ok(t, "方向二: a worker with no outcome record surfaces in-flight via the process signal");
+    assert.equal(t.liveness, "alive", "方向二: the process-signal worker is observably alive");
+    assert.equal(t.implCompletedAtMs, null, "方向二: a running worker is still 实现中 (not awaiting-land)");
+    assert.ok(Math.abs(t.minutes - 30) < 0.001, "方向二: elapsed minutes from the process start (~30m, got " + t.minutes + ")");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("workerTaskIdFromCmdline: extracts the task id from a worker cmdline, null otherwise (pure)", () => {
+  const cmd = `node /x/quay-launch.sh ${WORKER_PROCESS_NAME} -p Task: gap-live-page-worker-inflight-bidirectional-error. Repo root: /home/yale/work/quay. …`;
+  assert.equal(workerTaskIdFromCmdline(cmd), "gap-live-page-worker-inflight-bidirectional-error",
+    "extracts the Task: id from a worker cmdline");
+  assert.equal(workerTaskIdFromCmdline("node some-other-process --flag"), null,
+    "a non-worker cmdline (no quay-task-worker) is null");
+  assert.equal(workerTaskIdFromCmdline(`node ${WORKER_PROCESS_NAME} -p No task marker here`), null,
+    "a worker cmdline with no Task: marker is null");
+  assert.equal(workerTaskIdFromCmdline(`node ${WORKER_PROCESS_NAME} -p Task: gap-t. Repo root: /tmp/ws.`), "gap-t",
+    "a short id stops at the full stop (word-boundary — no over-match onto a longer id)");
+});
+
+test("readLiveWorkerProcesses: scans a fake /proc for worker cmdlines + start times (方向二)", () => {
+  const procDir = fs.mkdtempSync(path.join(os.tmpdir(), "fake-proc-"));
+  try {
+    const btimeSec = 1724486400;
+    fs.writeFileSync(path.join(procDir, "stat"), `cpu  0 0 0\nbtime ${btimeSec}\n`);
+    // /proc/<pid>/stat: pid (comm) state ppid pgrp session tty_nr tpgid flags minflt cminflt majflt
+    // cmajflt utime stime cutime cstime priority nice num_threads itrealvalue starttime …
+    // starttime is field 22 (the 20th token after "(comm) ", index 19 in the after-comm slice).
+    const statPid = (pid, starttime) =>
+      `${pid} (node) S 1 ${pid} ${pid} 0 -1 4194560 10 0 0 0 0 0 0 0 20 0 1 0 ${starttime} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+    fs.mkdirSync(path.join(procDir, "100"));
+    fs.writeFileSync(path.join(procDir, "100", "cmdline"),
+      `node /x/quay-launch.sh ${WORKER_PROCESS_NAME} -p Task: gap-first. Repo root: /tmp/ws. … `);
+    fs.writeFileSync(path.join(procDir, "100", "stat"), statPid(100, 10000));
+    fs.mkdirSync(path.join(procDir, "101"));
+    fs.writeFileSync(path.join(procDir, "101", "cmdline"), "node not-a-worker \n");
+    fs.writeFileSync(path.join(procDir, "101", "stat"), statPid(101, 20000));
+
+    const workers = readLiveWorkerProcesses(procDir);
+    assert.equal(workers.length, 1, "only the quay-task-worker process is a live worker");
+    assert.equal(workers[0].taskId, "gap-first", "task id extracted from the worker cmdline");
+    assert.equal(workers[0].startedAtMs, (btimeSec + 100) * 1000,
+      "startedAtMs = btime + starttime/100 ticks (got " + workers[0].startedAtMs + ")");
+  } finally {
+    fs.rmSync(procDir, { recursive: true, force: true });
+  }
+});
+
+test("readLiveWorkerProcesses: unreadable /proc ⇒ [] (fail-closed, never throws)", () => {
+  assert.deepEqual(readLiveWorkerProcesses("/nonexistent-proc-dir"), [], "no /proc ⇒ no live workers");
 });
 
 test("parseWorkerOutcomeRecords: parses the carrier, skips malformed lines, never throws", () => {
