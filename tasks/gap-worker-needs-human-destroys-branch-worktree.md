@@ -2,7 +2,7 @@
 id: gap-worker-needs-human-destroys-branch-worktree
 title: needs-human / exited-not-landed（套件绿+实现完成）走孤儿清理销毁分支+worktree ⇒
   已完成实现永久丢失（39min 第 2 次同形）
-status: ready
+status: done
 labels:
   - gap
   - defect
