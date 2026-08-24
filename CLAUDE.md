@@ -234,8 +234,9 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   （真 npm-pack 产物在 Node 底线上跑）、以及里程碑节奏的浏览器/agent e2e
   （`adr/ADR-010-scheduled-milestone-e2e-incl-browser-tests.md`，status: proposed）。
   **一次绿的 `scripts/test.sh` 不是这两类的证据。**
-- **driver 进程管理**（`quay driver <start|stop|drain|status|restart|liveness> --kind <promotion|worker>`，
-  正本 `plugin/scripts/promotion-driver-launch.sh --help`，**不要在此处复制参数表**）：
+- **driver 进程管理**（`quay driver <start|stop|drain|status|restart> --kind <promotion|worker>`——
+  **`liveness` 只有直调 `plugin/scripts/promotion-driver-launch.sh` 才有**，`quay driver`（`cli/driver.ts:27`
+  `VERBS`）未收录，2026-08-24 outer 核实的一个CLI表层缺口；正本仍是脚本 `--help`，**不要在此处复制参数表**）：
   `stop`/`restart` 只杀 supervisor+driver 自身，⛔ 不碰 worker kind 的在飞子进程（设计如此，见脚本注释）；
   worker kind 独有 `drain`（挡新派发、不杀在飞，写 `.quay/worker-control.json` `halted:true`）。
   **⛔ 已知缺口（2026-08-24 实证，`gap-worker-driver-cold-start-inflight-blind`，未落地前必读）**：
