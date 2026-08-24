@@ -2,7 +2,7 @@
 id: gap-fan-in-materialize-check-false-positive-non-bootstrap
 title: fan-in-materialize-check 对非 bootstrap 任务假阳性 RED（taskIsBootstrapHit 死代码）⇒
   阻断所有 fan-in
-status: ready
+status: done
 labels:
   - gap
   - defect
