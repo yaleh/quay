@@ -2269,6 +2269,44 @@ test("applyPromotions in a repo-less root still lands the write (committed=false
   assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "the status write still lands on disk");
 });
 
+// ── MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard) ──────────
+// The promotion commit path runs `git commit --no-verify`, so the pre-commit hook's Touches detector
+// never fires there (production: e7be44a0 landed a `serve-handlers.ts + serve.ts` bullet). The guard
+// re-runs the SAME judgment BEFORE the status write — a multi-path candidate must NOT be promoted
+// (stays todo, tree stays clean, reason surfaced), the negative control against the silent bypass.
+
+test("applyPromotions blocks a multi-path Touches candidate — no commit, stays todo, reason surfaced (AC1)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-multipath-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  // An ELIGIBLE candidate whose ## Touches carries a multi-path bullet (the e7be44a0 shape: "a.ts + b.ts").
+  writeTask(root, "gap-multi", gapTask("gap-multi", { touches: ["- code/a.ts + code/b.ts"] }));
+  git("add", ".");
+  git("commit", "-q", "-m", "init");
+  assert.equal(git("status", "--porcelain"), "", "baseline clean before promotion");
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+  const r = applyPromotions(opts);
+  assert.equal(r.should_apply, true, "the gate still recommends the candidate (multi-path is not a gate criterion — the commit-path guard must catch it)");
+  assert.equal(r.applied_promotions.length, 1);
+  assert.equal(r.applied_promotions[0].id, "gap-multi");
+  assert.equal(r.applied_promotions[0].ok, false, "AC1: the multi-path bullet is blocked at promotion, not silently landed");
+  assert.equal(r.applied_promotions[0].reason, "touches-multi-path-bullet");
+  assert.equal(r.applied_promotions[0].committed, false, "blocked ⇒ never committed");
+
+  // The status must NOT have flipped — the task stays todo (not promoted into develop).
+  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-multi.md"), "utf8"));
+  assert.match(task.frontmatterRaw, /^status:\s*todo$/m, "blocked candidate must remain todo on disk");
+  assert.equal(git("status", "--porcelain"), "", "AC1: no write, no commit — the tree stays clean (nothing entered develop)");
+});
+
 test("setTaskStatus patches frontmatter todo→ready and preserves the body (AC1 mechanism)", (t) => {
   const root = makeWorkspace("sts");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

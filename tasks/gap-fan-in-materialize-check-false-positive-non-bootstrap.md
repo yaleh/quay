@@ -2,7 +2,7 @@
 id: gap-fan-in-materialize-check-false-positive-non-bootstrap
 title: fan-in-materialize-check 对非 bootstrap 任务假阳性 RED（taskIsBootstrapHit 死代码）⇒
   阻断所有 fan-in
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -25,8 +25,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，非 bootstrap 不假红）：非 bootstrap 任务（Touches 无 fan-in 编排文件）的 worktree-vs-materialized 不一致不再产生 RED（⛔ 仍 red-worktree-exists-mismatch ⇒ 假）。
-- [ ] AC2（能取假，bootstrap 仍红）：bootstrap-hit 任务（Touches 含 fan-in 编排文件）的 worktree-vs-materialized 不一致仍 RED（⛔ 漏报 ⇒ 假）。
+- [x] AC1（能取假，非 bootstrap 不假红）：非 bootstrap 任务（Touches 无 fan-in 编排文件）的 worktree-vs-materialized 不一致不再产生 RED（⛔ 仍 red-worktree-exists-mismatch ⇒ 假）。
+- [x] AC2（能取假，bootstrap 仍红）：bootstrap-hit 任务（Touches 含 fan-in 编排文件）的 worktree-vs-materialized 不一致仍 RED（⛔ 漏报 ⇒ 假）。
 
 ## Definition of Done
 
