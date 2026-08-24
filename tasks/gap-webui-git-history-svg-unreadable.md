@@ -2,7 +2,7 @@
 id: gap-webui-git-history-svg-unreadable
 title: git-history 页 SVG 缩放把 924×15570 viewBox 压到 ~91px 不可读（preserveAspectRatio
   meet + max-height:75vh）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -22,8 +22,8 @@ viewBox 宽高比接近原生渲染——按内容宽高设置合理固定宽度
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，可读）：git-history 页 SVG 文字可读（⛔ 仍压到 ~91px 宽不可读 ⇒ 假）。
-- [ ] AC2（能取假，可滚动）：超高 viewBox 允许横向滚动/原生宽高比（⛔ 强制 `meet` 压缩进方形容器 ⇒ 假）。
+- [x] AC1（能取假，可读）：git-history 页 SVG 文字可读（⛔ 仍压到 ~91px 宽不可读 ⇒ 假）。
+- [x] AC2（能取假，可滚动）：超高 viewBox 允许横向滚动/原生宽高比（⛔ 强制 `meet` 压缩进方形容器 ⇒ 假）。
 
 ## Definition of Done
 
