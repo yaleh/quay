@@ -97,6 +97,7 @@ function runInit(workspace, args = []) {
 function isolateTmuxEnv(sockDir) {
   const env = { ...process.env, TMUX_TMPDIR: sockDir };
   delete env.TMUX;
+  env.HISTFILE = "/dev/null"; // gap-test-fixture-pollutes-bash-history: fixture bash must not write ~/.bash_history
   return env;
 }
 function tmuxAt(sockPath, args, env) {
