@@ -647,8 +647,13 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     const activeDecisions = r.fixDecisions.filter((d) => !retryState.needsHuman.has(d.id));
     // AC132：不合格者 → 短命 fix worker（可修三类 spawn、不可修五类逐条记原因不修）。spawn 前先跑
     // 分类（classifyCandidate 已做），fixDecisions 里 fixable=true 的才 spawn。
-    // AC150-1：gate.go=false ⇒ 退避（fixes 为空，⛔ 不 spawn LLM fix worker）。
-    const fixes = gate.go ? runFixPass(activeDecisions, root, fixWorkerCmd) : [];
+    // AC150-1：gate.go=false ⇒ 退避——只退【可修三类的 spawn】（⛔ 不再 spawn LLM fix worker，留待
+    // 下轮），不可修五类的 skip 台账零 LLM、不受资源门约束（仍逐条记原因，⛔ 不因 WAIT 丢失可观测性）。
+    const fixes = runFixPass(
+      gate.go ? activeDecisions : activeDecisions.filter((d) => !d.fixable),
+      root,
+      fixWorkerCmd,
+    );
 
     // AC133 AC1：fix worker 退出后【重新调同一个闸】验证，以闸的新判定为准（⛔ 不信 worker 自述）。
     const fixedIds = fixes.filter((f) => f.spawned).map((f) => f.id);
