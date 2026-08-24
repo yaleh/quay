@@ -35,12 +35,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：新增 `orchestration/SPEC-*.md` 而漏任一声明点 ⇒ checker 红（⛔ 三连红同形再现 ⇒ 假）。
-- [ ] AC2：声明点集合是 grep 派生的（⛔ 硬编码「两处」⇒ 假）。
+- [x] AC1：新增 `orchestration/SPEC-*.md` 而漏任一声明点 ⇒ checker 红（⛔ 三连红同形再现 ⇒ 假）。
+- [x] AC2：声明点集合是 grep 派生的（⛔ 硬编码「两处」⇒ 假）。
 
 ## Definition of Done
 
-- [ ] SPEC 声明点机械检查落地 + 新增 SPEC 漏声明可被红；AC1-2 全勾；land 到 develop。
+- [x] SPEC 声明点机械检查落地 + 新增 SPEC 漏声明可被红；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
