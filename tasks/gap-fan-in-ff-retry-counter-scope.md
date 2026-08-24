@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-ff-retry-counter-scope
 title: fan-in ff retry 计数器作用域 bug——grep -c 全历史累计，跨 dispatch 不隔离（任务提前锁死）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -32,8 +32,8 @@ attempt3 runId=22atfr 18:11:02Z   ← 全新 dispatch（新 runId，隔 30min）
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，per-dispatch 隔离）：全新 dispatch 不继承历史失败次数（attempt 从 0 起）；（⛔ 全新 dispatch 仍被历史累计判成第 N 次 ⇒ 假）。
-- [ ] AC2（能取假，预算足额）：每个 dispatch 能跑满自己的 3 次预算（不被历史提前锁死）；（⛔ 历史失败 2 次的任务在新 dispatch 第 1 次就被锁 ⇒ 假）。
+- [x] AC1（能取假，per-dispatch 隔离）：全新 dispatch 不继承历史失败次数（attempt 从 0 起）；（⛔ 全新 dispatch 仍被历史累计判成第 N 次 ⇒ 假）。
+- [x] AC2（能取假，预算足额）：每个 dispatch 能跑满自己的 3 次预算（不被历史提前锁死）；（⛔ 历史失败 2 次的任务在新 dispatch 第 1 次就被锁 ⇒ 假）。
 
 ## Definition of Done
 
