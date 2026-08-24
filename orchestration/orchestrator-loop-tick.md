@@ -93,6 +93,14 @@ transcript 有没有真实 user 消息（被驱动过）。三态判定与处理
 bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: healthy|empty-shell|missing, window, process, transcript, transcriptFresh}
 ```
 
+> **⚠️ 2026-08-24「缺失 ⇒ 重建」改为条件性（人裁定停 inner，AC141 收窄 inner 执行面）**：
+> AC141 把 inner 的执行面收窄为「默认 defer 给 worker-driver」（worker-driven 模型），
+> manager 核实 inner 冷启动后 57min 零真实任务执行；人 2026-08-24 明确裁定**把 inner 停掉**。
+> ⇒ **本步「缺失 ⇒ 无条件重建」不再适用**——inner 缺失时**不自动重建**（重建前先确认
+> inner 在 worker-driven 模型下是否仍有必须存在的职责；若仅剩自检/锚点价值，可保持停止）。
+> 实证代价：2026-08-24 外层冷启动/恢复各无条件重建了一次 inner，被 manager 按人裁定叫停
+> （两次都多建了一个被停掉的会话）。
+
 按 `state` 分派：
 
 - **`healthy`** ⇒ 什么都不做——不重建、不重启、不改启动参数（权限边界，负控制：健康 inner 不被动）。
