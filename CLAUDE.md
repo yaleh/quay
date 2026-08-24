@@ -234,6 +234,17 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   （真 npm-pack 产物在 Node 底线上跑）、以及里程碑节奏的浏览器/agent e2e
   （`adr/ADR-010-scheduled-milestone-e2e-incl-browser-tests.md`，status: proposed）。
   **一次绿的 `scripts/test.sh` 不是这两类的证据。**
+- **driver 进程管理**（`quay driver <start|stop|drain|status|restart|liveness> --kind <promotion|worker>`，
+  正本 `plugin/scripts/promotion-driver-launch.sh --help`，**不要在此处复制参数表**）：
+  `stop`/`restart` 只杀 supervisor+driver 自身，⛔ 不碰 worker kind 的在飞子进程（设计如此，见脚本注释）；
+  worker kind 独有 `drain`（挡新派发、不杀在飞，写 `.quay/worker-control.json` `halted:true`）。
+  **⛔ 已知缺口（2026-08-24 实证，`gap-worker-driver-cold-start-inflight-blind`，未落地前必读）**：
+  driver 重启/崩溃自动 respawn 后，新进程的"在飞集合"是纯内存数组、从空集合起——它不认得重启前就存活的
+  worker，`ready-pool-check` 仍把那些任务判为可派发 ⇒ **重启当轮可能对同一任务重复派发**，而重复者被杀后
+  触发的 orphan-worktree 清理会**连带删除原 worker 仍在用的共享 worktree+分支**（哪怕原 worker 自愈无损，
+  仍有真实数据丢失风险）。该缺口修复前，**手工 restart 后务必立即人工核对是否产生重复 `quay-task-worker`
+  进程**（`ps aux | grep quay-task-worker`，按 task 名去重），发现重复立刻 kill 新的一个并 `drain` 直到
+  重启前的在飞任务全部自然落地。
 ## Architecture — the product (`packages/`)
 
 Three packages, one ABI:
