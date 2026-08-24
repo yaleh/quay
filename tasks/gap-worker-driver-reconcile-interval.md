@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-reconcile-interval
 title: worker-driver 加定时器地板 --reconcile-interval（至少每 N 秒协调一次，边沿事件全丢也降级「慢但正确」而非静默停摆）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -23,8 +23,8 @@ driver 进程内加 `--reconcile-interval <s>`（CLI `quay driver ... --reconcil
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，地板触发）：driver 进程内定时器每 N 秒触发一次协调（⛔ 用 CronCreate/会话级机制 ⇒ 假；⛔ 仅 --json 才可观测 ⇒ 假——须生产可见载体）。
-- [ ] AC2（能取假，降级非停摆）：构造「所有边沿事件源失效」场景，断言 driver 仍在 N 秒内重算 ready 池并派发（⛔ 停摆等边沿事件 ⇒ 假）。
+- [x] AC1（能取假，地板触发）：driver 进程内定时器每 N 秒触发一次协调（⛔ 用 CronCreate/会话级机制 ⇒ 假；⛔ 仅 --json 才可观测 ⇒ 假——须生产可见载体）。
+- [x] AC2（能取假，降级非停摆）：构造「所有边沿事件源失效」场景，断言 driver 仍在 N 秒内重算 ready 池并派发（⛔ 停摆等边沿事件 ⇒ 假）。
 
 ## Definition of Done
 
