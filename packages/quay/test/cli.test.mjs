@@ -546,6 +546,10 @@ async function main() {
     const r = await runImport(["bogus"], spawnOpts);
     assert(r.status === 1, "quay <unknown command> exits 1");
     assert(r.stderr.includes("usage:"), "quay <unknown command> prints the usage fallback to stderr");
+    // gap-quay-driver-missing-from-usage-line: `driver` is a real subcommand
+    // (AC139) but was missing from the fallback usage line — discoverable via
+    // `quay --help` yet invisible when a user runs `quay` bare or mistypes.
+    assert(r.stderr.includes("driver"), "quay <unknown command> usage fallback includes 'driver' (gap-quay-driver-missing-from-usage-line)");
   }
 
   // 8. QN-039 (iteration 29): resolveProviderEnv()'s absolute-path
