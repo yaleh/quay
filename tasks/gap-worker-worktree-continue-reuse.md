@@ -1,7 +1,7 @@
 ---
 id: gap-worker-worktree-continue-reuse
 title: worker 续做机制：exited-not-landed 保留的 worktree 应被重派复用（而非 create 新撞死 + 57 次重做）
-status: ready
+status: done
 labels:
   - gap
   - defect
