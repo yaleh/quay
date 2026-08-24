@@ -50,4 +50,8 @@ depends_on: []
 
 - plugin/scripts/spec-declaration-point-check.ts
 - plugin/test/spec-declaration-point-check.test.mjs
+- plugin/scripts/runner-static-gate.ts（注册进 run_static_checks）
+- plugin/scripts/checker-mutation-cases/spec-declaration-point-check.sh（mutation case，checker-mutation-check AC1b 强制）
+- plugin/scripts/capability-catalog.sh（QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER 六字段，AC1b 入口闸强制）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照 scripts 282→283，delivery-inventory-drift-gate 强制）
 - tasks/gap-spec-declaration-point-mechanical-check.md（自身）
