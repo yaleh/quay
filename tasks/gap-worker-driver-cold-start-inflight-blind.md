@@ -31,12 +31,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：冷启动后（模拟 restart 前有存活 worker + 其 worktree），driver 不再重复派发这些 task（⛔ 仍重复派发 ⇒ 假）。
-- [ ] AC2（能取假）：`cleanupOrphanWorktree` 不清「有存活 worker 正在用」的 worktree（⛔ 误删共享 worktree ⇒ 假）。
+- [x] AC1（能取假）：冷启动后（模拟 restart 前有存活 worker + 其 worktree），driver 不再重复派发这些 task（⛔ 仍重复派发 ⇒ 假）。— test `AC1 (cold-start) — surviving worker + its worktree ⇒ resident loop does NOT re-dispatch that task` + 对照 `orphan worktree ⇒ IS re-dispatched`
+- [x] AC2（能取假）：`cleanupOrphanWorktree` 不清「有存活 worker 正在用」的 worktree（⛔ 误删共享 worktree ⇒ 假）。— test `AC2 (cold-start) — cleanupOrphanWorktree skips a worktree a live worker is using`
 
 ## Definition of Done
 
-- [ ] 冷启动 in-flight 排除集落地（worktree 枚举 + pid 核对）+ cleanupOrphanWorktree 存活校验；AC1-2 全勾；land 到 develop。
+- [x] 冷启动 in-flight 排除集落地（worktree 枚举 + pid 核对）+ cleanupOrphanWorktree 存活校验；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
