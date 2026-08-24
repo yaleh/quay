@@ -2,7 +2,7 @@
 id: gap-worker-driver-cold-start-inflight-refresh
 title: worker-driver 冷启动在飞集合一次计算不刷新 ⇒ 冷启动 worker 完成后其 task 永久假在飞不可派（重立案：原
   gap-worker-driver-cold-start-inflight-blind 只修症状）
-status: done
+status: ready
 labels:
   - gap
   - defect
