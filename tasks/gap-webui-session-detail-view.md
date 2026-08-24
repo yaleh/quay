@@ -1,7 +1,7 @@
 ---
 id: gap-webui-session-detail-view
 title: web /session/<sessionId> 单一会话视图（sessionId 寻址 + 结构化分块渲染 + 路径穿越防护）
-status: ready
+status: done
 labels:
   - gap
   - feature
