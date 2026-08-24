@@ -1,7 +1,7 @@
 ---
 id: gap-quay-driver-missing-from-usage-line
 title: quay driver 子命令不在顶层 usage 行（可运行但不可发现）
-status: done
+status: ready
 labels:
   - gap
 parent: null
