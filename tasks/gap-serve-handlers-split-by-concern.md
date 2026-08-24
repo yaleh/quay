@@ -34,6 +34,10 @@ serve-handlers.ts 按关切拆分落地；AC1-3 全勾；T1-T6 Touches 更新；
 - packages/quay/src/serve-handlers.ts（拆分源）
 - packages/quay/src/serve*.ts（新关切文件）
 - packages/quay/test/serve-handlers.test.mjs（对应测试拆分）
+- packages/quay/test/webui-modernist-sync.test.mjs（AC100(c) 断言面随拆分迁移到 serve-adr/goal/doc/render）
+- packages/quay/test/serve-ac102-modernist-views.test.mjs（AC102② 断言面迁移到 serve-render.ts）
+- packages/quay/test/serve-ac96-responsive-two-form.test.mjs（AC102 preserved 断言面迁移到 serve-render.ts）
+- packages/quay/test/gap-dashboard-parallelize.test.mjs（AC2 结构断言迁移到 serve-dashboard.ts）
 - tasks/gap-serve-handlers-split-by-concern.md（自身）
 - tasks/gap-webui-session-discovery-claude-agents-json.md（T1 Touches 更新）
 - tasks/gap-webui-live-passthrough-pid.md（T2 Touches 更新）

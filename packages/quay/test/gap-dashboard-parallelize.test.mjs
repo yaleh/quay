@@ -37,7 +37,9 @@ import { readTaskSummary, clearTaskSummaryCache, TASK_SUMMARY_CACHE_TTL_MS } fro
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const OBSERVATION_SRC = path.join(__dirname, "..", "src", "observation.ts");
-const SERVE_HANDLERS_SRC = path.join(__dirname, "..", "src", "serve-handlers.ts");
+// gap-serve-handlers-split-by-concern: handleDashboard moved to serve-dashboard.ts; the AC2
+// structural concurrency assertion now pins that file.
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve-dashboard.ts");
 const SLOT_REFILL_TS = path.join(REPO_ROOT, "plugin", "scripts", "slot-refill.ts");
 
 // ── Structural helpers (AC1/AC2: the parallel structure is pinned in source) ───────────────────
@@ -103,7 +105,7 @@ test("AC1: readManager runs its four async probes concurrently (Promise.all)", (
 });
 
 test("AC2: handleDashboard runs readSystem + readManagerLight + readTaskSummary concurrently (Promise.all)", () => {
-  const src = fs.readFileSync(SERVE_HANDLERS_SRC, "utf8");
+  const src = fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8");
   assertConcurrent(src, "handleDashboard", ["readSystem", "readManagerLight", "readTaskSummary"]);
 });
 
