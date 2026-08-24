@@ -1,7 +1,7 @@
 ---
 id: gap-spec-declaration-point-mechanical-check
 title: SPEC 声明点无机械保证（每个 orchestration/SPEC-*.md 须在全部已知声明点出现，声明点集合 grep 派生非硬编码）
-status: done
+status: ready
 labels:
   - gap
 parent: null
