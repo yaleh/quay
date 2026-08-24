@@ -595,3 +595,20 @@ resource-aware。
 ## 2026-08-24 01:2xZ — 【已解】上一条「manager 离线」升级：manager 以 quay-4f（fork）回归
 - manager 会话以 quay-4f 恢复（并已在驱动——restart --kind worker 并发 2→5，事故报告见 gap-worker-driver-cold-start-inflight-blind）。
 - adjudication 层恢复。AC150 worker 生命周期那条升级仍 open（drain 保持到 AC150 落地，manager 在跟）。
+
+## 2026-08-24 04:26Z — ⚠️ 根因 fix 卡在 catch-22：gap-worker-print-bg-wait-ceiling-600s 的 worker 死于它自己要修的 600s 根因，无法 land
+
+**现象**：根因 fix 任务（worker 反复 exited-not-landed = `claude -p` end_turn 时存活后台任务的 600s 宽限竞态，43/77=56%）的 worker 04:15 exited-not-landed（wall 1890s）——**死于同一个根因**（fan-in 全量 suite 517s+ 必然超 600s 天花板）。fix 完整实现已在分支 `task/gap-worker-print-bg-wait-ceiling-600s`（0658efa7：(a) launch.settings.json 设 PRINT_BG_WAIT_CEILING_MS=0 + (b) worker-driver 外部超时保 worktree + (c) prompt 回合内等 + 两个测试），但 worktree 已清理、分支未 merge。driver 无限重派 → 无限死。
+
+**外层已尝试**：向 manager 报 catch-22（msg 1dcc1021）请求破局授权。
+
+**为什么超出授权**：设 launch.settings.json env var 是共享 config 改动（影响所有会话 launch），worker-driver.ts merge 是产品代码落地——两者都不是外层可单方执行的（AC141/C17 写所有权）。
+
+**选项**：
+1. **外层直接设 env var**（launch.settings.json `_launchSpec.roles["task-worker"].env` 加 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`，可验证）——下一个 worker 带无限等待，能正常 land 完整 fix；这是拆循环的唯一机制级路径。
+2. **人手工 merge fix 分支**（0658efa7）到 develop——直接落地完整 fix。
+3. 其它（如临时把 fix 任务标记为暂停，等人处理）。
+**外层倾向选项 1**（机制级拆循环，env var 是主修法 (a)，也是 SPEC 2026-08-16 裁定的内容）。
+
+### 已解（2026-08-24 04:29Z）——manager 自行破局
+manager 只搬 (a) env var 到 launch.settings.json task-worker.env（`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:"0"`），commit f1ea7c26 到 develop（.claude/ 在 design-internal 排除集，非 bypass；已核实生效）。(b)(c)/测试留正常 fan-in（真实产品代码）。task 仍 ready，driver 自然重派——下一个 worker 带无限等待应能 land 完整 fix。外层不 merge 0658efa7。若重派仍死于同一处 ⇒ 问题更复杂（worker 等待方式不可靠），届时再升级。
