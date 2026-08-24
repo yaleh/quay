@@ -32,8 +32,9 @@ driver 进程内加 `--reconcile-interval <s>`（CLI `quay driver ... --reconcil
 
 ## Touches
 
-- plugin/scripts/worker-driver.ts（协调循环地板 + --reconcile-interval 解析）
-- plugin/scripts/routine-scheduler.ts（复用 interval 判定，不新造）
+- plugin/scripts/worker-driver.ts（协调循环地板 + --reconcile-interval 解析 + 循环体 spawnSync→spawn 异步化〔任务 4 的前置〕）
+- plugin/scripts/routine-scheduler.ts（复用 interval 判定，不新造——import isDue）
 - packages/quay/src/cli/driver.ts（quay driver --reconcile-interval 接线）
+- plugin/scripts/promotion-driver-launch.sh（supervisor 解析 --reconcile-interval 并透传给 worker driver——CLI 接线必经此脚本，原 Touches 漏列）
 - plugin/test/worker-driver.test.mjs
 - tasks/gap-worker-driver-reconcile-interval.md（自身）
