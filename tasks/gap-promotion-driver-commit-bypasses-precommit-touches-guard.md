@@ -24,8 +24,8 @@ promotion-driver 的机械晋升自动提交（todo→ready）**不触发 pre-co
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，晋升路径拦多路径）：promotion-driver 提交一个含多路径 Touches bullet 的任务时，该 bullet 被拦下（不进 develop）。⛔ 仍静默进 develop ⇒ 假。
-- [ ] AC2（能取假，手动路径不退化）：手动 commit 的 pre-commit 守卫仍拦多路径 bullet（不因改动退化）。⛔ 手动路径失效 ⇒ 假。
+- [x] AC1（能取假，晋升路径拦多路径）：promotion-driver 提交一个含多路径 Touches bullet 的任务时，该 bullet 被拦下（不进 develop）。⛔ 仍静默进 develop ⇒ 假。 — 实证：`applyPromotions blocks a multi-path Touches candidate — no commit, stays todo, reason surfaced (AC1)` 测试通过（e7be44a0 同形 `- code/a.ts + code/b.ts` bullet 在晋升时 ok=false、tree 干净、reason=touches-multi-path-bullet、状态保持 todo）。
+- [x] AC2（能取假，手动路径不退化）：手动 commit 的 pre-commit 守卫仍拦多路径 bullet（不因改动退化）。⛔ 手动路径失效 ⇒ 假。 — 实证：改动未触碰 `precommit-guard.ts`（`git diff develop...HEAD` 对 precommit-guard.ts / touches-one-entry-one-path-check.ts 无 diff）；precommit-guard.ts:345/420 仍调用同一 `checkTaskOneEntryOnePath`，手动路径未退化。
 
 ## Definition of Done
 
