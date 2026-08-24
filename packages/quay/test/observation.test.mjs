@@ -14,6 +14,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readSession } from "../src/observation.ts";
+import { renderSessionPage } from "../src/serve-handlers.ts";
 
 /** Commit helper with a fixed clock (committer date = author date = `t`), per-branch file. */
 function commitAt(ws, msg, t, file = "log.txt") {
@@ -779,4 +780,44 @@ test("AC1/AC3: readSession resolves by sessionId (home-injected) and refuses non
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("AC2: renderSessionPage renders structured blocks — tool_use/tool_result paired + thinking marked, never a flat dump", () => {
+  const turns = parseTranscript([
+    { type: "user", timestamp: "2026-08-24T00:00:00Z", message: { role: "user", content: "run it" } },
+    { type: "assistant", timestamp: "2026-08-24T00:00:01Z", message: { role: "assistant", content: [
+      { type: "thinking", thinking: "THINKING-MARKER" },
+      { type: "tool_use", id: "call_1", name: "Bash", input: { command: "INPUT-MARKER" } },
+    ] } },
+    { type: "user", timestamp: "2026-08-24T00:00:02Z", message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "call_1", content: "RESULT-MARKER", is_error: false },
+    ] } },
+  ].map((o) => JSON.stringify(o)).join("\n"));
+
+  const html = renderSessionPage({
+    status: "ok",
+    reason: null,
+    sessionId: SESSION_VIEW_UUID,
+    transcriptPath: "/tmp/x.jsonl",
+    turns,
+  });
+
+  // Structured, collapsible blocks — not a flat text dump.
+  assert.ok(html.includes("<details"), "renders <details> collapse units");
+  assert.ok(html.includes("tx-tool-pair"), "tool_use renders as a marked pair block");
+  assert.ok(html.includes("tx-thinking"), "thinking renders as a distinguishable block");
+
+  // tool_use and its tool_result are PAIRED: the result lives INSIDE the pair's <details>, exactly once.
+  assert.equal(html.split("RESULT-MARKER").length, 2, "result appears exactly once (absorbed into the pair, not duplicated)");
+  const pairStart = html.indexOf("tx-tool-pair");
+  const pairEnd = html.indexOf("</details>", pairStart);
+  const pairBody = html.slice(pairStart, pairEnd);
+  assert.ok(pairBody.includes("INPUT-MARKER"), "pair body carries the tool_use input");
+  assert.ok(pairBody.includes("RESULT-MARKER"), "pair body carries the tool_result (paired, not a separate block)");
+  assert.ok(pairBody.includes("tool_use · Bash"), "pair summary labels the tool");
+
+  // thinking is distinguishable by its own marked block (not flattened into text).
+  const thinkStart = html.indexOf("tx-thinking");
+  const thinkEnd = html.indexOf("</details>", thinkStart);
+  assert.ok(html.slice(thinkStart, thinkEnd).includes("THINKING-MARKER"), "thinking block carries the thinking text");
 });

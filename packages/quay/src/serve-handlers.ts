@@ -3186,41 +3186,58 @@ export async function handleSessions(
 // gap-webui-session-detail-view — the single-session view. Addressable by sessionId ONLY (§7.1), the
 // one quantity stable across live/dead × interactive/-p. The renderer is the observation-level parse
 // (structured text/thinking/tool_use/tool_result blocks) — NOT the /sessions 3-message preview.
-// Zero client JS: collapse via native <details>, freshness via manual refresh (blocker ① deferred).
-function renderSessionPage(view: SessionViewResult): string {
-  // tool_use id → name, so a later tool_result can label which tool it answered (pairing).
-  const toolNames = new Map<string, string>();
+// AC2 (结构化分块非摊平): each content block renders as a marked, collapsible unit (`tx-text` /
+// `tx-thinking` / `tx-tool-pair`), and a `tool_use` is PAIRED with its `tool_result` (rendered inside
+// one <details class="tx-tool-pair">) — never a flat full-text dump. Zero client JS: collapse via
+// native <details>, freshness via manual refresh (blocker ① deferred).
+export function renderSessionPage(view: SessionViewResult): string {
+  // First pass: index tool_use (by id) and tool_result (by tool_use_id) across ALL turns so a
+  // tool_result arriving in a later user record can be folded into its assistant tool_use's <details>.
+  const toolUseById = new Map<string, { name: string; input: string }>();
+  const toolResultByUseId = new Map<string, { text: string; isError: boolean }>();
   for (const turn of view.turns) {
-    for (const b of turn.blocks) if (b.kind === "tool_use") toolNames.set(b.id, b.name);
+    for (const b of turn.blocks) {
+      if (b.kind === "tool_use") toolUseById.set(b.id, { name: b.name, input: b.input });
+      else if (b.kind === "tool_result") toolResultByUseId.set(b.toolUseId, { text: b.text, isError: b.isError });
+    }
   }
 
   const blockFor = (b: TranscriptBlock): string => {
     if (b.kind === "text") {
-      return html`<div style="margin:0.25rem 0;white-space:pre-wrap;line-height:1.5;font-size:0.85rem">${escapeHtml(b.text)}</div>`;
+      return html`<div class="tx-block tx-text" style="margin:0.25rem 0;white-space:pre-wrap;line-height:1.5;font-size:0.85rem">${escapeHtml(b.text)}</div>`;
     }
     if (b.kind === "thinking") {
-      return html`<details style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">thinking</summary><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.text)}</pre></details>`;
+      return html`<details class="tx-block tx-thinking" style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">thinking</summary><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.text)}</pre></details>`;
     }
     if (b.kind === "tool_use") {
       const label = b.name ? `tool_use · ${b.name}` : "tool_use";
-      const body = b.input ? html`<pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.input)}</pre>` : "";
-      return html`<details style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(label)}</summary>${body}</details>`;
+      const res = toolResultByUseId.get(b.id);
+      const inputHtml = b.input ? html`<div class="tx-tool-input"><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.input)}</pre></div>` : "";
+      const resultHtml = res
+        ? html`<div class="tx-tool-result"><div style="font-size:0.7rem;color:var(--color-neutral-700);margin:0.25rem 0">${res.isError ? "result · error" : "result"}</div><pre style="margin:0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(res.text)}</pre></div>`
+        : "";
+      return html`<details class="tx-block tx-tool-pair" style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(label)}</summary>${inputHtml}${resultHtml}</details>`;
     }
-    const name = toolNames.get(b.toolUseId);
-    const summary = name ? `tool_result · ${name}` : "tool_result";
-    const flag = b.isError ? " · error" : "";
-    return html`<details style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(summary)}${flag}</summary><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.text)}</pre></details>`;
+    // tool_result with no matching tool_use in the (bounded) tail renders standalone (orphan).
+    return html`<details class="tx-block tx-tool-result" style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">${b.isError ? "tool_result · error" : "tool_result"}</summary><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.text)}</pre></details>`;
   };
 
-  const turnFor = (t: SessionViewResult["turns"][number]): string => html`<div style="border-left:2px solid var(--color-divider);padding-left:0.75rem;margin-bottom:1rem">
-    <div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.7rem;color:var(--color-neutral-700);margin-bottom:0.25rem">
-      <b>${escapeHtml(t.role || "?")}</b><span>${escapeHtml(t.time)}</span>
-    </div>
-    ${t.blocks.map(blockFor).join("")}
-  </div>`;
+  const turnFor = (t: SessionViewResult["turns"][number]): string => {
+    // Absorb matched tool_results into their tool_use's <details>; only orphans render standalone.
+    const blocks = t.blocks
+      .filter((b) => !(b.kind === "tool_result" && toolUseById.has(b.toolUseId)))
+      .map(blockFor);
+    if (blocks.length === 0) return "";
+    return html`<div style="border-left:2px solid var(--color-divider);padding-left:0.75rem;margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.7rem;color:var(--color-neutral-700);margin-bottom:0.25rem">
+        <b>${escapeHtml(t.role || "?")}</b><span>${escapeHtml(t.time)}</span>
+      </div>
+      ${blocks.join("")}
+    </div>`;
+  };
 
   const turnsHtml = view.turns.length > 0
-    ? html`<h2>Transcript（${view.turns.length} 条消息 · 旧→新）</h2>${view.turns.map(turnFor).join("")}`
+    ? html`<h2>Transcript（${view.turns.length} 条消息 · 旧→新）</h2>${view.turns.map(turnFor).filter(Boolean).join("")}`
     : "";
 
   return html`<!doctype html>
