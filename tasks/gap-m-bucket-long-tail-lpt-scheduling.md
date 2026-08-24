@@ -44,5 +44,6 @@ extra: {}
 - scripts/test.sh（M bucket 文件列表 LPT 排序）
 - plugin/scripts/suite-lpt-order.ts（新增 LPT 排序机件）
 - plugin/test/suite-lpt-order.test.mjs（suite-lpt-order.ts 的测试）
-- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数 282→283，delivery-inventory-drift-gate 机械要求）
+- plugin/scripts/capability-catalog.sh（新脚本 QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING 声明，capability-catalog AC1c 门机械要求）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数 283→284，delivery-inventory-drift-gate 机械要求）
 - tasks/gap-m-bucket-long-tail-lpt-scheduling.md（自身）
