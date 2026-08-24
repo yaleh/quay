@@ -120,7 +120,7 @@ export interface PromotionRound {
   pool: number | null;
   shouldApply: boolean;
   promotedIds: string[];
-  applied: Array<{ id: string; ok: boolean; from: string | null; to: string | null; deliveryCritical: boolean }>;
+  applied: Array<{ id: string; ok: boolean; from: string | null; to: string | null; deliveryCritical: boolean; reason: string | null; committed: boolean }>;
   promotePathLlmInvoked: boolean;
   fixDecisions: FixDecision[];
 }
@@ -279,6 +279,12 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
         from: a && typeof a === "object" && "from" in a ? a.from : null,
         to: a && typeof a === "object" && "to" in a ? a.to : null,
         deliveryCritical: !!(a && a.deliveryCritical),
+        // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard):
+        // surface the block reason + commit outcome so a blocked (ok:false) promotion is NOT silent in
+        // the round/outcome ledger (the raw ready-pool-check JSON carries them; the driver re-map used
+        // to drop both).
+        reason: a && typeof a === "object" && "reason" in a && a.reason != null ? String(a.reason) : null,
+        committed: !!(a && a.committed),
       }))
       .filter((a) => a.id);
     // AC132：读 candidates[] 里 eligible=false 的条目，按 A24 分类成 fixDecisions（可修三类 spawn /
@@ -498,7 +504,15 @@ export function computeOutcomeRecords(opts: {
       task_id: a.id,
       gate: { eligible: true, missing: [] },
       action: "promote",
-      result: { ok: a.ok, detail: a.from != null && a.to != null ? `${a.from}->${a.to}` : "promoted" },
+      // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): a
+      // blocked (ok:false) promotion must NOT record "promoted" — surface the block reason (e.g.
+      // touches-multi-path-bullet) so the ledger is truthful, not a silent "promoted" lie.
+      result: {
+        ok: a.ok,
+        detail: !a.ok
+          ? (a.reason ?? "promotion-blocked")
+          : (a.from != null && a.to != null ? `${a.from}->${a.to}` : "promoted"),
+      },
       ts: opts.at,
     });
   }
