@@ -350,11 +350,39 @@ B（--settings '{"crossSessionInbound":"accept"}'）：
 **⇒ 正向路径证成**：一个**不是 Claude Code 会话的普通 Node 进程**（正是 web server 的处境）
 可以把消息投进一个 `-p` 会话并被真正处理。**这正是本功能需要的能力，已端到端实测。**
 
-**⚠️ 但 A 与 B 之间有【两个】变量不同**（设置 + 发送方通道），**⇒ ⛔ 不得据此断言
-「`crossSessionInbound:accept` 是送达的充要条件」**——那会是硬规则 4 推论四的重演。
-**已证成的是 B（正向可行）；A 的失败原因未定**（可能是设置、可能是 hold-for-approval 队列、
-可能是 idle 的 `-p` 会话不排空 inbox）。**落地前应补一次单变量对照**（同为 `send-to-session.ts` 发送，
-只切 `crossSessionInbound`），**在此之前设计上按"必须显式设 accept"处理**（保守方向，代价仅一个参数）。
+**🟢 2026-08-24T17:2xZ 更新——A 的失败原因【已由平台自己告知】，不再是未定项。**
+本文原写「A 的失败原因未定（可能是设置/可能是 hold 队列/可能是 idle 不排空 inbox）」。
+随后平台向发送方（我）投回两条投递回执：
+```
+[Cross-session delivery notice] ... held for the recipient user's approval
+                                (recipient: uds:/run/user/1000/cc-socks/312474.sock)
+[Cross-session delivery notice] ... not approved before expiry — Not delivered to that session's Claude.
+```
+（`312474` = A 组那个长静默探针的 pid，socket 逐字对上。）
+**⇒ A 的真实形态是【held for approval → 到期未批准 → 丢弃】，不是"静默无视"、不是"inbox 不排空"。**
+**⇒ 三个候选成因里 2 个被排除，剩下的正是 `crossSessionInbound` 那一个。**
+
+**⊢ 对照的受控程度也随之提高**（比我原先的自评更强）：A 与 B **发送方身份类别相同**
+（都是 peer 身份：A=SendMessage 的 peer 投递，B=`send-to-session.ts` 的 `peerToken` 路径），
+**差的是接收方的 `crossSessionInbound` 设置** ⇒ **同身份类别 + 切设置 ⇒ held/expired vs delivered/consumed**。
+**⚠️ 仍有一个未消的差异：传输通道（工具 vs 脚本）。** ⇒ **仍不写"充要条件"**，
+但可以写：**`crossSessionInbound:accept` 是【当前唯一未被排除】的成因，且方向与文档一致。**
+落地前那次单变量对照仍建议补（成本 60 秒），**但它现在是【确认】而非【探明】。**
+
+**🔴 这条回执还暴露了一个必须写进设计的产品事实（比上面的归因更重要）**：
+```
+SendMessage 返回 success:true + msg_id   ≠   已送达
+真实状态机至少有四态：  已发送 → 待接收方批准(held) → 到期未批准(expired,丢弃)
+                                            ↘ 已批准 → 送达并被消费
+```
+**⇒ 调用点拿到的 `success:true` 与【最终没送到】完全同形**（硬规则 3b 的教科书形态：
+"失败"与"合格"共用一个返回值），**而真相是【异步、事后、经另一条回执通道】才到达发送方的。**
+**⇒ 对 web UI 的硬要求（⛔ 不可省）**：
+- **⛔ 页面不得在 POST 成功后显示"已发送给 X"** —— 那是把 `success:true` 当送达，会稳定地骗用户。
+- **必须显示真实状态**：`待对方批准` / `已送达` / `到期未批准（未送达）`，并**保留回执**。
+- **⊢ 这恰好也解释了为什么 §6.4（权限）与本条要一起设计**：向一个**你没启动的**会话发消息，
+  接收方那侧是要**人去批准**的；而向**web server 自己启动的**会话（可在 spawn 时设 accept）则直通。
+  **⇒ 两类目标的用户体验本质不同，页面必须区分呈现，⛔ 不要做成一个统一的"发送"按钮然后假装都一样。**
 
 **⊢ 安全注记（人 2026-08-24 已扩大授权到"本机任意会话"，见 §1③）**：`send-to-session.ts` 的
 `from-mode="bypass"` 是**发送方自写**、非平台盖印（`send-to-session.ts:24-34` 自带该警告）。
@@ -459,8 +487,10 @@ fix-worker `bare:true` 10/10 exit=1、task-worker 无 bare 键 3/3 通过——*
 
 ### 8.5 profile 与本功能（web 启动会话）的接口
 
-web "新建会话"表单需要且只需要三个选择：**profile**（wrapper+model+env 的具名组合）·
-**权限模式**（§6.4，必须显式）· **cwd/工作区**。
+web "新建会话"表单需要且只需要**四个**选择：**profile**（wrapper+model+env 的具名组合）·
+**权限模式**（§6.4，必须显式）· **cwd/工作区** · **`crossSessionInbound`**
+（§7.3 更新后新增：**决定这个会话此后能不能被 web 直接投递消息，还是每条都要人去批准**；
+⇒ 它是 profile 的一个字段，不是隐藏默认值）。
 **⇒ profile 系统是本功能的前置依赖，但不是它的一部分**——本功能只消费 profile 名字。
 **⊢ 若 AC154 尚未落地，本功能可先用现有 `_launchSpec.roles` 的 role 名当 profile 名**
 （形态兼容，`quay-launch.sh <role>` 已经是这个接口），**AC154 落地后自然升级，⛔ 不需要重做。**
@@ -469,6 +499,7 @@ web "新建会话"表单需要且只需要三个选择：**profile**（wrapper+m
 
 1. **实时性方案**（第一轮 §3.1 已列三选项，仍未裁定）：`-p` + stream-json 让"推流"变得容易得多
    （stdout 就是结构化事件流），**但零客户端 JS 的约定仍然会被打破**——决定权在人。
-2. **§7.3 的单变量对照**：落地前应补一次（只切 `crossSessionInbound`，发送方固定），
+2. **§7.3 的单变量对照（🟢 已降级为"确认"而非"探明"** —— 平台回执已排除三个候选成因中的两个，
+   见 §7.3 的 17:2xZ 更新）：落地前仍建议补一次（只切 `crossSessionInbound`，发送方固定），
    代价 = 一次 60 秒实验；**在此之前按"必须显式 accept"设计。**
 3. **§8.3 的 (a)/(b) 路线**：建议 (a)，但若人要 profile 自足（换机器即用），则须先设计凭据层。
