@@ -44,6 +44,7 @@ import {
   formatClosedText,
   REVERSE_SYMBOL_RATIO_MAX,
   BOOKKEEPING_ROOTS,
+  listRepoFiles,
   listWorkBranches,
   classifyBranch,
   strandedBranches,
@@ -370,6 +371,43 @@ test("AC1: experiments and plugin mirrors are byte-identical", () => {
   const a = fs.readFileSync(path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "task-status-drift-check.ts"), "utf8");
   const b = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "task-status-drift-check.ts"), "utf8");
   assert.equal(a, b, "mirrors must be byte-identical");
+});
+
+// ── timeout fix (gap-task-status-drift-check-timeout) ─────────────────────────────────────────────
+// AC1 (<8s on the real 1387-task store) is guaranteed by construction here. The walk that measured
+// 76s did so because `.quay/node-compile-cache` (384k files) was NOT in the exclusion set, so one
+// readdirSync returned 384k entries and the inner for-loop never re-checked the visited<20000 cap
+// (the cap was only tested at the outer pop). Two pins make the walk bounded and therefore fast:
+// (1) `.quay` is excluded, so that build-artifact directory is never descended; (2) the inner loop
+// re-checks the cap so a single huge NON-excluded directory also cannot overflow it.
+
+test("timeout fix: .quay (node-compile-cache) is excluded from the repo file walk", () => {
+  const ws = makeWorkspace("timeout-quay");
+  try {
+    fs.mkdirSync(path.join(ws, ".quay", "node-compile-cache"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "code", "landed-symbol.ts"), "export function distinctiveLandedMarker() {}\n");
+    // A build-artifact blob that must NOT be walked (384k files in the real store; a few hundred here
+    // is enough to prove exclusion without slowing the suite).
+    for (let i = 0; i < 500; i++) fs.writeFileSync(path.join(ws, ".quay", "node-compile-cache", `c${i}`), "");
+    const files = listRepoFiles(ws);
+    assert.ok(files.includes("code/landed-symbol.ts"), "code file is still listed");
+    assert.equal(files.some((f) => f.startsWith(".quay/")), false, ".quay/** must be excluded from the walk");
+    assert.ok(files.length < 100, `walk stayed bounded (got ${files.length})`);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("timeout fix: a single non-excluded directory >20000 entries is bounded by the inner-loop cap", () => {
+  const ws = makeWorkspace("timeout-cap");
+  try {
+    fs.mkdirSync(path.join(ws, "packages", "huge"), { recursive: true });
+    for (let i = 0; i < 20001; i++) fs.writeFileSync(path.join(ws, "packages", "huge", `f${i}`), "");
+    const files = listRepoFiles(ws);
+    assert.ok(files.length <= 20000, `inner-loop cap bounds the walk (got ${files.length})`);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
 });
 
 // ── pure extraction ──────────────────────────────────────────────────────────────────────────────

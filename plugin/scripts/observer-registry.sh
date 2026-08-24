@@ -258,8 +258,13 @@ do_audit() {
 
     # consumers 2 & 3 — session-liveness surface (git-staleness reads REPO-STALL from it;
     # session-liveness-coverage reads the SESSION-STATUS watch verdict from it).
+    # SL_NO_REGISTER=1: the audit is a READ-type check of each consumer's read-surface — it must
+    # not self-register an observer into the shared <root>/.quay/ dir (session-liveness.sh writes
+    # .quay/session-liveness.<pid>.json on startup unless SL_NO_REGISTER=1). Under the concurrent
+    # suite those transient writes race with the real resident monitor's registration file in the
+    # same dir — the shared report-landing that flaked AC3 (gap-observer-registry-audit-flaky-test).
     if [ -f "$SELF_DIR/session-liveness.sh" ]; then
-      out="$(SESSION_TARGETS="$name $root $sess:outer" bash "$SELF_DIR/session-liveness.sh" --once 2>&1)" || true
+      out="$(SL_NO_REGISTER=1 SESSION_TARGETS="$name $root $sess:outer" bash "$SELF_DIR/session-liveness.sh" --once 2>&1)" || true
       if printf '%s\n' "$out" | grep -q "SESSION-STATUS $name decommissioned"; then
         gs_det+="${name}->decommissioned(no REPO-STALL); "
         slc_det+="${name}->decommissioned; "
