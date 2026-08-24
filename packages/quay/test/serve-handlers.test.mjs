@@ -617,8 +617,8 @@ test("AC1: the three sections each render their OWN referenced round (load curve
     assert.ok(r.body.includes("负载曲线（round #479 · 03:33Z）"), "load curve heading names round #479");
     // Timeline names the round it actually fell back to (#478 — the newest run WITH perFile).
     assert.ok(r.body.includes("测试时间线（round #478 · 03:14Z）"), "timeline heading names round #478");
-    // History table's top row is the true latest (#479), marked ← 最新.
-    assert.ok(r.body.includes("#479 <span") && r.body.includes("← 最新"), "history top row marks #479 as 最新");
+    // History table's top row is the true latest (#479), marked ← 最新 (the #NNN cell is now a link).
+    assert.ok(r.body.includes('<a href="/tests?round=479">#479</a>') && r.body.includes("← 最新"), "history top row marks #479 as 最新");
   } finally {
     if (server) {
       server.close();
@@ -683,7 +683,7 @@ test("AC3: negative control — all three sections reference the same round cons
     // All three sections name the SAME round (#230).
     assert.ok(r.body.includes("负载曲线（round #230 · 01:00Z）"), "load curve names round #230");
     assert.ok(r.body.includes("测试时间线（round #230 · 01:00Z）"), "timeline names round #230");
-    assert.ok(r.body.includes("#230 <span") && r.body.includes("← 最新"), "history top row marks #230 as 最新");
+    assert.ok(r.body.includes('<a href="/tests?round=230">#230</a>') && r.body.includes("← 最新"), "history top row marks #230 as 最新 (the #NNN cell is now a link)");
     assert.ok(!r.body.includes("无 perFile 数据"), "no fallback notice in the consistent case");
   } finally {
     if (server) {
@@ -880,6 +880,123 @@ test("AC3: GET /tests perFile table rows link each file to its /tests/file detai
     // The gantt timeline rows also link (the same URL shape appears in the SVG label <a>).
     const svgLinks = (r.body.match(/<a href="\/tests\/file\?path=[^"]+">/g) ?? []);
     assert.ok(svgLinks.length >= 2, "the timeline gantt labels also carry detail-page links");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-webui-round-detail-page — /tests?round=N selects one round (not the latest) ──────────────
+
+test("AC1: GET /tests?round=N shows THAT round's timeline + load curve (not the latest — param not ignored)", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-rounddetail-ac1-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const t0 = 1724374800000; // 2026-08-23T01:00:00Z
+    const runId510 = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const runId511 = "11111111-2222-3333-4444-555555555555";
+    createStore(tasksDir).write("RD-A1", { title: "round detail web tests", status: "todo" });
+    // Oldest→newest: round 510 (green, perFile slow.test.mjs) then round 511 (latest, perFile fast.test.mjs).
+    // Distinct perFile sets make the timeline/table falsifiable: the default page shows only 511's
+    // fast.test.mjs, the ?round=510 page shows only 510's slow.test.mjs.
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 510, startedAt: "2026-08-23T01:00:00.000Z", durationMs: 500000, state: "green", runner: "outer", scope: "worktree", runId: runId510, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 500, startedAtMs: t0 + 290 }] }),
+      JSON.stringify({ round: 511, startedAt: "2026-08-23T02:00:00.000Z", durationMs: 400000, state: "green", runner: "outer", scope: "worktree", runId: runId511, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/fast.test.mjs", durationMs: 12, passed: true, endedAtMs: t0 + 6000, startedAtMs: t0 + 5988 }] }),
+    ].join("\n"));
+    // full-suite-state.json points at the LATEST runId (default page = round 511); round 510's own
+    // runId has its own sampler file, so ?round=510 must read THAT, not the current runId.
+    fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId: runId511 }));
+    fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId510}.jsonl`), [
+      JSON.stringify({ t: 1_700_000_000_000, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
+      JSON.stringify({ t: 1_700_000_005_000, loadavg: 2.5, cpu_stall: 12.0, mem_avail: 7900.0 }),
+    ].join("\n"));
+    fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId511}.jsonl`), [
+      JSON.stringify({ t: 1_700_000_000_000, loadavg: 7.0, cpu_stall: 50.0, mem_avail: 5000.0 }),
+      JSON.stringify({ t: 1_700_000_005_000, loadavg: 8.0, cpu_stall: 55.0, mem_avail: 4800.0 }),
+    ].join("\n"));
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r510 = await get(port, "/tests?round=510");
+    assert.equal(r510.status, 200, "GET /tests?round=510 returns 200");
+    assert.ok(r510.body.includes("正在查看 round #510 · 01:00Z"), "focus note names round 510");
+    assert.ok(r510.body.includes("测试时间线（round #510 · 01:00Z）"), "timeline names round 510");
+    assert.ok(r510.body.includes("负载曲线（round #510 · 01:00Z）"), "load curve names round 510 (its OWN runId samples)");
+    assert.ok(r510.body.includes("slow.test.mjs"), "round 510's perFile file is shown");
+    assert.ok(!r510.body.includes("fast.test.mjs"), "round 511's perFile file is NOT shown on the round-510 page");
+
+    // Negative control: the DEFAULT page still shows the latest round (#511), proving ?round=510 is
+    // not ignored (a param-ignoring handler would render #511's timeline here too).
+    const rDefault = await get(port, "/tests");
+    assert.ok(rDefault.body.includes("测试时间线（round #511 · 02:00Z）"), "default page timeline names the latest round 511");
+    assert.ok(rDefault.body.includes("负载曲线（round #511 · 02:00Z）"), "default page load curve names the latest round 511");
+    assert.ok(!rDefault.body.includes("slow.test.mjs"), "default page shows only 511's perFile");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2: GET /tests history #NNN cells are clickable links to /tests?round=N (not plain text)", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-rounddetail-ac2-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    createStore(tasksDir).write("RD-A2", { title: "round detail link web tests", status: "todo" });
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 510, startedAt: "2026-08-23T01:00:00.000Z", durationMs: 500000, state: "green", runner: "outer", scope: "worktree", commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [] }),
+      JSON.stringify({ round: 511, startedAt: "2026-08-23T02:00:00.000Z", durationMs: 400000, state: "green", runner: "outer", scope: "worktree", commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [] }),
+    ].join("\n"));
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests");
+    assert.equal(r.status, 200, "GET /tests returns 200");
+    assert.ok(r.body.includes('<a href="/tests?round=510">#510</a>'), "the round 510 history cell is a link (not pure text)");
+    assert.ok(r.body.includes('<a href="/tests?round=511">#511</a>'), "the round 511 (latest) history cell is also a link");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1 falsifiability: /tests?round=<absent> renders an explicit not-found note (never silently the latest)", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-rounddetail-notfound-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    createStore(tasksDir).write("RD-NF", { title: "round detail not-found tests", status: "todo" });
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 511, startedAt: "2026-08-23T02:00:00.000Z", durationMs: 400000, state: "green", runner: "outer", scope: "worktree", commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [] }),
+    ].join("\n"));
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests?round=999");
+    assert.equal(r.status, 200, "GET /tests?round=999 returns 200");
+    assert.ok(r.body.includes("未找到 round #999"), "an absent round renders an explicit not-found note (hard rule 3b: not a silent latest)");
   } finally {
     if (server) {
       server.close();
