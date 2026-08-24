@@ -2,7 +2,7 @@
 id: gap-fast-mode-telemetry-hangs-on-verification-round-growth
 title: fast-mode-telemetry --report/--snapshot 挂起（verification-round.jsonl
   2.7MB/515 轮）⇒ B1 close-terminal + B6 snapshot 断
-status: ready
+status: done
 labels:
   - gap
   - defect
