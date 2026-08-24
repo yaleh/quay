@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-cold-start-inflight-blind
 title: worker-driver 冷启动 in-flight 盲区（running 纯内存从空起 ⇒ 重复派发 + orphan worktree 误删）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
