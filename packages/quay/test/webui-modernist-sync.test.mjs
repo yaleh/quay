@@ -124,13 +124,23 @@ test("AC100(b) — legacy /adr and /goal LIST pages still render (no regression)
 // detailStyles, renderMarkdown) must carry zero hardcoded hex — the hex lives only in
 // the webui-modernist.css asset (which the byte-identity test (a) pins to the design).
 test("AC100(c) — the three detail-page rendering code segments contain zero hardcoded hex", () => {
-  const src = fs.readFileSync(path.join(__dirname, "..", "src", "serve-handlers.ts"), "utf8");
-  const lines = src.split("\n");
-  const fns = ["handleAdrDetail", "handleGoalDetail", "handleDocDetail",
-    "goalEvidenceCell", "modernistStyles", "detailStyles", "renderMarkdown"];
-  for (const fn of fns) {
+  // gap-serve-handlers-split-by-concern: the detail-page handlers + their render helpers moved out
+  // of serve-handlers.ts into per-concern files. The AC100(c) invariant (zero hex in the detail-page
+  // render path) is unchanged; only each function's home file moved.
+  const fnFiles = {
+    handleAdrDetail: "serve-adr.ts",
+    handleGoalDetail: "serve-goal.ts",
+    goalEvidenceCell: "serve-goal.ts",
+    handleDocDetail: "serve-doc.ts",
+    modernistStyles: "serve-render.ts",
+    detailStyles: "serve-render.ts",
+    renderMarkdown: "serve-render.ts",
+  };
+  for (const [fn, file] of Object.entries(fnFiles)) {
+    const src = fs.readFileSync(path.join(__dirname, "..", "src", file), "utf8");
+    const lines = src.split("\n");
     const start = lines.findIndex((l) => l.includes(`function ${fn}`));
-    assert.ok(start >= 0, `${fn} not found in serve-handlers.ts`);
+    assert.ok(start >= 0, `${fn} not found in ${file}`);
     let end = lines.length;
     for (let j = start + 1; j < lines.length; j++) {
       if (/^(export (async )?function |function )/.test(lines[j])) { end = j; break; }

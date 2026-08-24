@@ -1,0 +1,155 @@
+// serve-system.ts — /system + /manager route handlers, split from serve-handlers.ts.
+
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { readSystem, readManager, type SystemResult, type ManagerResult } from "./observation.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote } from "./serve-render.ts";
+
+// ── /system ─────────────────────────────────────────────────────────────────────────────────────────
+
+function renderSystemPage(sys: SystemResult): string {
+  const rg = sys.resourceGate;
+  const pb = sys.processBudget;
+  const bothOk = rg.status === "ok" && pb.status === "ok";
+  const goVerdict = bothOk && rg.verdict === "GO" && pb.verdict === "GO";
+  const banner = bothOk
+    ? html`<div class="${goVerdict ? "success-banner" : "error-banner"}" role="status"><strong>⇒ ${goVerdict ? "GO" : "WAIT"}</strong>：${goVerdict ? "资源充足，可以跑" : "资源受限，等待"}</div>`
+    : "";
+  const bar = (label: string, val: number | null, limit: string | null): string => {
+    const pct = val != null ? Math.min(100, Math.max(1, (val / (Number(limit) || 1)) * 100)) : 0;
+    return html`<div><div style="display:flex;justify-content:space-between;font-size:0.9rem;margin-bottom:2px">
+      <span>${escapeHtml(label)}</span><span>${val != null ? escapeHtml(String(val)) : "—"}${limit ? html` <span style="color:var(--color-neutral-700)">/ ${escapeHtml(limit)}</span>` : ""}</span>
+    </div>${val != null ? html`<div style="height:8px;background:var(--color-neutral-300)"><div style="height:100%;width:${pct.toFixed(1)}%;background:var(--color-text)"></div></div>` : ""}</div>`;
+  };
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay system — resource gate and process budget">${modernistStyles()}${pageStyles()}<title>System — 系统状态</title></head>
+    <body>${renderMobileChrome("system", "system")}${renderSiteNav("system")}<main>
+      <h1>System — 系统状态</h1>
+      <p class="meta">数据源：<code>resource-gate.sh --json</code> · <code>process-budget.sh --json</code>（稳定机读 JSON 输出）</p>
+      ${banner}
+      ${obsNote(rg.status, rg.reason)}
+      <h2>resource-gate.sh</h2>
+      ${rg.status === "ok" ? html`<div style="display:flex;flex-direction:column;gap:0.75rem;max-width:640px">
+        ${bar("cpu_stall (avg10)", rg.cpuStallAvg10, "60")}
+        ${bar("cpu_stall (avg300)", rg.cpuStallAvg300, "60")}
+        ${bar("loadavg (1m)", rg.loadAvg, rg.loadThreshold != null ? `nproc×${rg.loadOverFactor ?? "?"}≈${rg.loadThreshold}` : "nproc×factor")}
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>mem_avail</span><span>${rg.memAvailMb != null ? `${escapeHtml(String(rg.memAvailMb))} MB` : "—"}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>nproc / node_procs</span><span>${rg.nproc != null ? escapeHtml(String(rg.nproc)) : "—"} / ${rg.nodeProcs != null ? escapeHtml(String(rg.nodeProcs)) : "—"}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>verdict</span><span>${escapeHtml(rg.verdict ?? "—")}</span></div>
+      </div>` : ""}
+      ${obsNote(pb.status, pb.reason)}
+      <h2>process-budget.sh</h2>
+      ${pb.status === "ok" ? html`<div style="display:flex;flex-direction:column;gap:0.5rem;max-width:640px">
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>total_budget</span><span>${pb.totalBudget != null ? escapeHtml(String(pb.totalBudget)) : "—"}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>in_use</span><span>${pb.inUse != null ? escapeHtml(String(pb.inUse)) : "—"}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>available</span><span>${pb.available != null ? escapeHtml(String(pb.available)) : "—"}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>verdict</span><span>${escapeHtml(pb.verdict ?? "—")}</span></div>
+      </div>` : ""}
+      <p class="meta" style="margin-top:1rem">阈值按 <code>nproc</code> 动态计算显示，不写死当前机器上的数字。</p>
+    </main></body></html>`;
+}
+
+export async function handleSystem(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let sys: SystemResult;
+  try {
+    sys = await readSystem(cfg.workspaceRoot);
+  } catch (err) {
+    sys = {
+      status: "error",
+      reason: `internal: ${err instanceof Error ? err.message : String(err)}`,
+      resourceGate: { status: "error", reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null },
+      processBudget: { status: "error", reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
+    };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderSystemPage(sys));
+}
+
+// ── /manager ───────────────────────────────────────────────────────────────────────────────────────
+
+function renderManagerPage(mgr: ManagerResult): string {
+  const loopCards = (label: string, statusText: string, note: string): string => html`<div style="background:var(--color-surface);padding:1rem">
+    <div style="font-size:0.85rem;color:var(--color-neutral-700);margin-bottom:4px">${escapeHtml(label)}</div>
+    <div style="font-weight:700">${statusText}</div>
+    <p style="font-size:0.8rem;margin:4px 0 0">${escapeHtml(note)}</p>
+  </div>`;
+
+  const ld = mgr.loopDriver;
+  const livenessRows = mgr.liveness.sessions.length > 0 ? html`<table>
+    <tr><th>会话</th><th>alive</th><th>pid</th><th>halted</th></tr>
+    ${mgr.liveness.sessions.map((s) => html`<tr>
+      <td>${escapeHtml(s.name)}</td>
+      <td>${s.alive ? "LIVE" : "GONE"}</td>
+      <td>${s.pid != null ? escapeHtml(String(s.pid)) : "—"}</td>
+      <td>${s.halted ? "halted" : "—"}</td>
+    </tr>`).join("\n")}
+  </table>` : "";
+
+  const observerRows = mgr.observers.rows.length > 0 ? html`<table>
+    <tr><th>name</th><th>status</th><th>root</th><th>note</th></tr>
+    ${mgr.observers.rows.map((r) => html`<tr>
+      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(r.status)}</td>
+      <td><code>${escapeHtml(r.root)}</code></td>
+      <td>${escapeHtml(r.note)}</td>
+    </tr>`).join("\n")}
+  </table>` : "";
+
+  const pool = mgr.pool;
+  const poolNote = pool.status === "ok"
+    ? html`<div style="font-family:ui-monospace,monospace;font-size:0.85rem;line-height:1.7">
+        pool=${pool.pool ?? "—"} floor=${pool.floor ?? "—"} deficit=${pool.deficit ?? "—"} cap=${pool.cap ?? "—"}
+        ${pool.lastPromoted.length > 0 ? html`<div style="color:var(--color-neutral-700)">最近一轮晋升（promotion-driver）：${pool.lastPromoted.map((id) => html`<a href="/task/${encodeURIComponent(id)}" style="color:var(--color-accent)">${escapeHtml(id)}</a>`).join(" · ")}</div>` : ""}
+      </div>`
+    : obsNote(pool.status, pool.reason);
+
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay manager — Manager/Outer/Inner 三层状态">${modernistStyles()}${pageStyles()}<title>Manager / Outer / Inner</title></head>
+    <body>${renderMobileChrome("manager", "manager")}${renderSiteNav("manager")}<main>
+      <h1>Manager / Outer / Inner — 三层状态</h1>
+      <p class="meta">三层自适应探测：多信号加权判定，缺失信号诚实标注「未检测到」，不静默假设。</p>
+      <h2>Loop / 会话</h2>
+      ${obsNote(ld.status, ld.reason)}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:2px;margin-bottom:1rem">
+        ${loopCards("Loop driver", ld.verdict ?? "—", ld.detail || `exit=${ld.exitCode ?? "—"}`)}
+        ${mgr.liveness.sessions.map((s) => loopCards(s.name, s.alive ? "LIVE" : "GONE", s.halted ? "halted" : s.pid != null ? `pid ${s.pid}` : "—")).join("")}
+      </div>
+      ${obsNote(mgr.liveness.status, mgr.liveness.reason)}
+      ${livenessRows}
+      <h2>Monitor 注册表</h2>
+      ${obsNote(mgr.observers.status, mgr.observers.reason)}
+      ${observerRows}
+      <p class="meta">读 <code>observer-registry.conf</code> 单一登记表。</p>
+      <h2>主要观测指标</h2>
+      ${poolNote}
+      <p class="meta">pool/floor/deficit/cap 读 <code>.quay/promotion-round.jsonl</code>（promotion-driver round 记录，cap 默认 5，floor = cap × 4）</p>
+      <p class="meta">release=${escapeHtml(mgr.version ?? "—")} · develop 领先 ${mgr.developLead != null ? escapeHtml(String(mgr.developLead)) : "—"} 提交</p>
+    </main></body></html>`;
+}
+
+export async function handleManager(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let mgr: ManagerResult;
+  try {
+    mgr = await readManager(cfg.workspaceRoot);
+  } catch (err) {
+    mgr = {
+      status: "error",
+      reason: `internal: ${err instanceof Error ? err.message : String(err)}`,
+      loopDriver: { status: "error", reason: null, verdict: null, exitCode: null, detail: null },
+      liveness: { status: "error", reason: null, sessions: [] },
+      observers: { status: "error", reason: null, rows: [] },
+      pool: { status: "error", reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] },
+      version: null,
+      developLead: null,
+    };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderManagerPage(mgr));
+}

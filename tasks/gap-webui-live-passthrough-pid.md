@@ -1,7 +1,7 @@
 ---
 id: gap-webui-live-passthrough-pid
 title: web /live 透传 pid（LiveWorker/InFlightTask 补 pid 字段，约 3 行）
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -21,7 +21,7 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`/live` 响应每个 live 条目含 `pid` 字段（⛔ pid 缺失 ⇒ 假）。
+- [x] AC1（能取假）：`/live` 响应每个 live 条目含 `pid` 字段（⛔ pid 缺失 ⇒ 假）。
 
 ## Definition of Done
 
@@ -30,6 +30,6 @@ pid 从 `readLiveWorkerProcesses` 读到 `/live` 响应全程透传；AC1 全勾
 ## Touches
 
 - packages/quay/src/observation.ts（readLiveWorkerProcesses / readLive / LiveWorker / InFlightTask）
-- packages/quay/src/serve-handlers.ts（/live handler）
+- packages/quay/src/serve-live.ts（/live handler）
 - packages/quay/test/observation.test.mjs（对应测试）
 - tasks/gap-webui-live-passthrough-pid.md（自身）

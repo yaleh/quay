@@ -32,6 +32,6 @@ extra: {}
 ## Touches
 
 - packages/quay/src/observation.ts（buildManagerSessionTargets）
-- packages/quay/src/serve-handlers.ts（/sessions handler）
+- packages/quay/src/serve-sessions.ts（/sessions handler）
 - packages/quay/test/observation.test.mjs（对应测试）
 - tasks/gap-webui-session-discovery-claude-agents-json.md（自身）
