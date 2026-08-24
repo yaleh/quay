@@ -41,5 +41,5 @@ depends_on: []
 ## Touches
 
 - packages/quay/bin/quay.ts（usage 字符串补 driver）
-- packages/quay/test/cli-entry.test.mjs（test：usage 行含 driver）
+- packages/quay/test/cli.test.mjs（test：usage 行含 driver）
 - tasks/gap-quay-driver-missing-from-usage-line.md（自身）
