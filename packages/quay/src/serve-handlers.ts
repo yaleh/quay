@@ -10,7 +10,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readJournal, readBoardLanding, readBoardExecution, readGitHistory, readSystem, readManager, readManagerLight, readTests, readSessions, readArchitecture, SESSION_LAYERS, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution, type GitHistoryCommit, type GitHistoryResult, type SystemResult, type ManagerResult, type TestsResult, type SessionsResult, type SessionDetail, type ArchitectureResult, type TestRunRecord } from "./observation.ts";
+import { readLive, readJournal, readBoardLanding, readBoardExecution, readGitHistory, readSystem, readManager, readManagerLight, readTests, readSessions, readSession, readArchitecture, SESSION_LAYERS, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution, type GitHistoryCommit, type GitHistoryResult, type SystemResult, type ManagerResult, type TestsResult, type SessionsResult, type SessionDetail, type SessionViewResult, type TranscriptBlock, type ArchitectureResult, type TestRunRecord } from "./observation.ts";
 import { createGoalStore } from "./goal-store.ts";
 import { createDocumentStore } from "./document-store.ts";
 // live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
@@ -3181,6 +3181,74 @@ export async function handleSessions(
   res.end(renderSessionsPage(sessions));
 }
 
+// ── /session/<sessionId> ──────────────────────────────────────────────────────────────────────────
+
+// gap-webui-session-detail-view — the single-session view. Addressable by sessionId ONLY (§7.1), the
+// one quantity stable across live/dead × interactive/-p. The renderer is the observation-level parse
+// (structured text/thinking/tool_use/tool_result blocks) — NOT the /sessions 3-message preview.
+// Zero client JS: collapse via native <details>, freshness via manual refresh (blocker ① deferred).
+function renderSessionPage(view: SessionViewResult): string {
+  // tool_use id → name, so a later tool_result can label which tool it answered (pairing).
+  const toolNames = new Map<string, string>();
+  for (const turn of view.turns) {
+    for (const b of turn.blocks) if (b.kind === "tool_use") toolNames.set(b.id, b.name);
+  }
+
+  const blockFor = (b: TranscriptBlock): string => {
+    if (b.kind === "text") {
+      return html`<div style="margin:0.25rem 0;white-space:pre-wrap;line-height:1.5;font-size:0.85rem">${escapeHtml(b.text)}</div>`;
+    }
+    if (b.kind === "thinking") {
+      return html`<details style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">thinking</summary><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.text)}</pre></details>`;
+    }
+    if (b.kind === "tool_use") {
+      const label = b.name ? `tool_use · ${b.name}` : "tool_use";
+      const body = b.input ? html`<pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.input)}</pre>` : "";
+      return html`<details style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(label)}</summary>${body}</details>`;
+    }
+    const name = toolNames.get(b.toolUseId);
+    const summary = name ? `tool_result · ${name}` : "tool_result";
+    const flag = b.isError ? " · error" : "";
+    return html`<details style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(summary)}${flag}</summary><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.text)}</pre></details>`;
+  };
+
+  const turnFor = (t: SessionViewResult["turns"][number]): string => html`<div style="border-left:2px solid var(--color-divider);padding-left:0.75rem;margin-bottom:1rem">
+    <div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.7rem;color:var(--color-neutral-700);margin-bottom:0.25rem">
+      <b>${escapeHtml(t.role || "?")}</b><span>${escapeHtml(t.time)}</span>
+    </div>
+    ${t.blocks.map(blockFor).join("")}
+  </div>`;
+
+  const turnsHtml = view.turns.length > 0
+    ? html`<h2>Transcript（${view.turns.length} 条消息 · 旧→新）</h2>${view.turns.map(turnFor).join("")}`
+    : "";
+
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay session — 单一会话视图">${modernistStyles()}${pageStyles()}<title>Session — ${escapeHtml(view.sessionId)}</title></head>
+    <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main>
+      <h1>Session — <code>${escapeHtml(view.sessionId)}</code></h1>
+      <p class="meta"><a href="/sessions">← 返回 Sessions</a> · 数据源：<code>~/.claude/projects/&lt;slug&gt;/&lt;sessionId&gt;.jsonl</code>（transcript 尾部，非实时）</p>
+      ${obsNote(view.status, view.reason)}
+      ${turnsHtml}
+    </main></body></html>`;
+}
+
+export async function handleSession(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+  sessionId: string,
+): Promise<void> {
+  let view: SessionViewResult;
+  try {
+    view = readSession(cfg.workspaceRoot, sessionId);
+  } catch (err) {
+    view = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, sessionId, transcriptPath: null, turns: [] };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderSessionPage(view));
+}
+
 // ── /architecture ──────────────────────────────────────────────────────────────────────────────────
 
 interface ArchNode { label: string; x: number; y: number; w: number; h: number; highlight: "dev" | "recent" | "plain" | "stale"; fill: string; stroke: string }
@@ -3516,6 +3584,18 @@ export async function handleAllRoutes(
 
   if (url.pathname === "/sessions") {
     await handleSessions(req, res, cfg);
+    return;
+  }
+
+  // gap-webui-session-detail-view — the single-session view, addressed by sessionId (§7.1). The id is
+  // validated as a strict UUID inside readSession (lookup key, never a path component — §7.4). A
+  // malformed %-escape falls back to the raw segment, which then fails UUID validation → honest
+  // 「非法」 empty state rather than a 500.
+  const sessionM = /^\/session\/([^/]+)$/.exec(url.pathname);
+  if (sessionM) {
+    let sessionId: string;
+    try { sessionId = decodeURIComponent(sessionM[1]); } catch { sessionId = sessionM[1]; }
+    await handleSession(req, res, cfg, sessionId);
     return;
   }
 

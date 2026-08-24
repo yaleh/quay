@@ -23,9 +23,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，sessionId 寻址）：用 sessionId 能取到对应会话视图（⛔ 用 pid/task id/路径寻址 ⇒ 假）。
-- [ ] AC2（能取假，结构化分块非摊平）：transcript 渲染按 `message.content` 的 `text`/`tool_use`/`tool_result`/`thinking` 分块，`tool_use` 与其 `tool_result` 成对且可折叠、`thinking` 可区分（有可 grep 块标记），`-p` 与交互式同走此渲染；（⛔ 全文摊平为纯文本 dump、无分块结构 ⇒ 假）。
-- [ ] AC3（能取假，路径穿越防护）：`../` 或绝对路径作 sessionId 参数不触发文件系统访问（⛔ 触发 ⇒ 假）。
+- [x] AC1（能取假，sessionId 寻址）：用 sessionId 能取到对应会话视图（⛔ 用 pid/task id/路径寻址 ⇒ 假）。
+- [x] AC2（能取假，结构化分块非摊平）：transcript 渲染按 `message.content` 的 `text`/`tool_use`/`tool_result`/`thinking` 分块，`tool_use` 与其 `tool_result` 成对且可折叠、`thinking` 可区分（有可 grep 块标记），`-p` 与交互式同走此渲染；（⛔ 全文摊平为纯文本 dump、无分块结构 ⇒ 假）。
+- [x] AC3（能取假，路径穿越防护）：`../` 或绝对路径作 sessionId 参数不触发文件系统访问（⛔ 触发 ⇒ 假）。
 
 ## Definition of Done
 

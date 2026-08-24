@@ -2535,6 +2535,175 @@ export async function readSessions(root: string): Promise<SessionsResult> {
   return { status: "ok", reason: null, sessions };
 }
 
+// ── Single-session view (/session/<sessionId>) ─────────────────────────────────────────────────────
+// gap-webui-session-detail-view. Addressing key = sessionId (UUID) ONLY — never pid, never task id,
+// never a transcript path (§7.1). The sessionId is validated as a strict UUID BEFORE it is ever used,
+// then joined onto a FIXED project slug derived from the workspace root — so it is a lookup key, never
+// a path component (§7.4 house pattern, same as /tests/file?path=). `-p` and interactive transcripts
+// share one schema family (§7.4) so a single parser renders both.
+
+/** Strict UUID shape. Rejects `../`, absolute paths, and any non-UUID before filesystem access (AC3). */
+export const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Detail view reads a larger tail than the /sessions preview (200 KB) — still bounded so a multi-GB
+ *  transcript never loads fully, but long enough to be observation-level rather than preview-level. */
+export const SESSION_VIEW_TRANSCRIPT_TAIL_BYTES = 2_000_000;
+
+export function isValidSessionId(sessionId: string): boolean {
+  return SESSION_ID_RE.test(sessionId);
+}
+
+/** The per-project transcript directory slug — the same `tr '/' '-'` transform session-liveness.sh
+ *  uses (`_sl_dynamic_transcript`), so `/home/yale/work/quay` → `-home-yale-work-quay`. */
+export function projectSlug(root: string): string {
+  return root.split("/").join("-");
+}
+
+/**
+ * Resolve a sessionId to its transcript path — PURE (no filesystem access, AC3). A sessionId that is
+ * not a strict UUID returns null (the caller then renders an honest 「非法」 state, never touching the
+ * disk). `home` is injectable for tests; defaults to the real `$HOME`.
+ */
+export function sessionTranscriptPath(root: string, sessionId: string, home: string = os.homedir()): string | null {
+  if (!isValidSessionId(sessionId)) return null;
+  return path.join(home, ".claude", "projects", projectSlug(root), `${sessionId}.jsonl`);
+}
+
+export type TranscriptBlock =
+  | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
+  | { kind: "tool_use"; id: string; name: string; input: string }
+  | { kind: "tool_result"; toolUseId: string; text: string; isError: boolean };
+
+export interface TranscriptTurn {
+  time: string;
+  role: string;
+  blocks: TranscriptBlock[];
+}
+
+export interface SessionViewResult {
+  status: ObservationStatus;
+  reason: string | null;
+  /** The requested sessionId (echoed, validated). */
+  sessionId: string;
+  /** Resolved transcript path, or null when the sessionId was invalid. */
+  transcriptPath: string | null;
+  turns: TranscriptTurn[];
+}
+
+/** tool_result content is a string OR an array of `{type:"text"}` blocks — normalize to text. */
+function toolResultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const b of content) {
+      if (b && typeof b === "object" && (b as { type?: unknown }).type === "text") {
+        const t = (b as { text?: unknown }).text;
+        if (typeof t === "string") parts.push(t);
+      }
+    }
+    return parts.join("\n");
+  }
+  return "";
+}
+
+/**
+ * Normalize a record's `message.content` (string prompt OR a block array) into structured blocks:
+ * `text` / `thinking` / `tool_use` / `tool_result`. This is the schema shared by `-p` and interactive
+ * transcripts (§7.4) — both carry these content-block shapes, interactive merely adds extra record
+ * types (system/mode/…) that are skipped here.
+ */
+export function transcriptContentBlocks(content: unknown): TranscriptBlock[] {
+  const blocks: TranscriptBlock[] = [];
+  if (typeof content === "string") {
+    const t = content.trim();
+    if (t) blocks.push({ kind: "text", text: t });
+    return blocks;
+  }
+  if (!Array.isArray(content)) return blocks;
+  for (const b of content) {
+    if (!b || typeof b !== "object") continue;
+    const type = (b as { type?: unknown }).type;
+    if (type === "text") {
+      const t = (b as { text?: unknown }).text;
+      if (typeof t === "string" && t.trim()) blocks.push({ kind: "text", text: t.trim() });
+    } else if (type === "thinking") {
+      const t = (b as { thinking?: unknown }).thinking;
+      if (typeof t === "string" && t.trim()) blocks.push({ kind: "thinking", text: t.trim() });
+    } else if (type === "tool_use") {
+      const o = b as { id?: unknown; name?: unknown; input?: unknown };
+      const id = typeof o.id === "string" ? o.id : "";
+      const name = typeof o.name === "string" ? o.name : "";
+      let input = "";
+      try { input = typeof o.input === "undefined" ? "" : JSON.stringify(o.input, null, 2); } catch { input = ""; }
+      blocks.push({ kind: "tool_use", id, name, input });
+    } else if (type === "tool_result") {
+      const o = b as { tool_use_id?: unknown; content?: unknown; is_error?: unknown };
+      blocks.push({
+        kind: "tool_result",
+        toolUseId: typeof o.tool_use_id === "string" ? o.tool_use_id : "",
+        text: toolResultText(o.content),
+        isError: o.is_error === true,
+      });
+    }
+  }
+  return blocks;
+}
+
+/** Parse complete JSONL transcript text into ordered turns (each = one user/assistant message). Pure. */
+export function parseTranscript(text: string): TranscriptTurn[] {
+  const turns: TranscriptTurn[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let o: unknown;
+    try { o = JSON.parse(line); } catch { continue; }
+    if (!o || typeof o !== "object" || Array.isArray(o)) continue;
+    const rec = o as { type?: unknown; timestamp?: unknown; message?: unknown };
+    const msg = rec.message as { role?: unknown; content?: unknown } | undefined;
+    if (!msg || !msg.content) continue;
+    const blocks = transcriptContentBlocks(msg.content);
+    if (blocks.length === 0) continue;
+    turns.push({
+      time: typeof rec.timestamp === "string" ? rec.timestamp : "",
+      role: typeof msg.role === "string" ? msg.role : "",
+      blocks,
+    });
+  }
+  return turns;
+}
+
+/** Bounded read of the transcript tail (same tail strategy as readTranscriptTail, larger window),
+ *  parsed into structured turns. Returns empty/error honestly — never throws. */
+export function readTranscript(transcriptPath: string, maxBytes = SESSION_VIEW_TRANSCRIPT_TAIL_BYTES): { status: ObservationStatus; reason: string | null; turns: TranscriptTurn[] } {
+  try {
+    if (!fs.existsSync(transcriptPath)) return { status: "empty", reason: "transcript 缺失", turns: [] };
+    const stat = fs.statSync(transcriptPath);
+    const fd = fs.openSync(transcriptPath, "r");
+    const tailStart = Math.max(0, stat.size - maxBytes);
+    const buf = Buffer.alloc(stat.size - tailStart);
+    fs.readSync(fd, buf, 0, buf.length, tailStart);
+    fs.closeSync(fd);
+    const lines = buf.toString("utf8").split(/\r?\n/);
+    if (tailStart > 0 && lines.length > 0) lines.shift(); // drop the leading partial JSON record
+    const turns = parseTranscript(lines.join("\n"));
+    if (turns.length === 0) return { status: "empty", reason: "transcript 无 user/assistant 消息", turns: [] };
+    return { status: "ok", reason: null, turns };
+  } catch (err) {
+    return { status: "error", reason: `transcript 读失败：${err instanceof Error ? err.message : String(err)}`, turns: [] };
+  }
+}
+
+/** The single-session view: validate sessionId → resolve transcript path → read+parse it. Sync (pure
+ *  fs.readSync tail, no shell-out). Invalid sessionId is a distinct empty state, never a disk read.
+ *  `home` is injectable for tests; defaults to the real `$HOME`. */
+export function readSession(root: string, sessionId: string, home: string = os.homedir()): SessionViewResult {
+  const transcriptPath = sessionTranscriptPath(root, sessionId, home);
+  if (transcriptPath == null) {
+    return { status: "empty", reason: `sessionId 非法（须为 UUID）：${sessionId}`, sessionId, transcriptPath: null, turns: [] };
+  }
+  const t = readTranscript(transcriptPath);
+  return { ...t, sessionId, transcriptPath };
+}
+
 // ── Architecture view (git/facts per packages/* path) ──────────────────────────────────────────────
 
 export interface ArchComponent {
