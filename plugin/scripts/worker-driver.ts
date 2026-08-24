@@ -1009,6 +1009,7 @@ export function defaultSelectorArgv(candidateIds: string[], root: string): strin
   const prompt = [
     `You are the resident task selector for the quay worker driver (SPEC §5 阶段 4 — AC129).`,
     `Candidate task ids (ready pool, in-flight subtracted, order shuffled): ${candidateIds.join(", ")}.`,
+    `Before choosing, read orchestration/dispatch-preference.md — its 覆盖段 carries the current priority (manager-maintained). Honor it unless a candidate is structurally ineligible (Touches conflict / unmet deps). If no candidate matches the override priority, fall back to your own semantic judgment.`,
     `Pick exactly ONE task to dispatch next and reply with a single line: <task-id> <one-line reason>`,
     `and nothing else. Repo root: ${root}.`,
   ].join(" ");
