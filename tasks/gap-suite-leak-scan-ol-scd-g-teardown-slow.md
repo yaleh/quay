@@ -22,8 +22,8 @@ ol-scd 家族 4 gap 已 done，这是新实例——要么 teardown 提速，要
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，不再假红）：16-lane 负载下 ol-scd-g teardown 后不触发 leak-scan 假红（⛔ 仍 4 轮同形假红 ⇒ 假）。
-- [ ] AC2（能取假，真泄漏仍红）：真实 tmux 泄漏仍被 scan 判红（⛔ 放宽窗口后真泄漏漏报 ⇒ 假）。
+- [x] AC1（能取假，不再假红）：16-lane 负载下 ol-scd-g teardown 后不触发 leak-scan 假红（⛔ 仍 4 轮同形假红 ⇒ 假）。
+- [x] AC2（能取假，真泄漏仍红）：真实 tmux 泄漏仍被 scan 判红（⛔ 放宽窗口后真泄漏漏报 ⇒ 假）。
 
 ## Definition of Done
 
