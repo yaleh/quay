@@ -591,3 +591,7 @@ resource-aware。
 - **现象**：AC150 三次 exited-not-landed（37.2 / 27.7 / 25.5 min）。①②卡 scoped 门（driver-shared.ts 未登记 capability-catalog，已修 8cc18952）；③ 登记修好后 suite 已绿（4071/0 exit=0 @22:46:12），但 ff-merge 22:47:35-36 撞「not a fast-forward」（develop 22:40:02 被 reflog-to-revlist 非惰性代码变更推进）⇒ retry 回无锁段，worker 墙钟 25.5min 就死，没来得及重跑。
 - **为何超权**：worker 生命周期（worker 墙钟 vs fan-in 时长）是 driver/机制面，需 manager 裁定或立任务；`gap-worker-driver-periodic-exit-resident`（worker 生命周期族）已在飞。
 - **选项**：① 立任务：fan-in 遇非惰性 develop 前进时 ff-retry 让 worker 墙钟不够——诊断 worker 墙钟上限 vs fan-in 时长；② 等 periodic-exit-resident（在飞）落地看是否连带解决；③ 临时提高 worker 墙钟 / 允许 ff-retry 跨 worker 存活。
+
+## 2026-08-24 01:2xZ — 【已解】上一条「manager 离线」升级：manager 以 quay-4f（fork）回归
+- manager 会话以 quay-4f 恢复（并已在驱动——restart --kind worker 并发 2→5，事故报告见 gap-worker-driver-cold-start-inflight-blind）。
+- adjudication 层恢复。AC150 worker 生命周期那条升级仍 open（drain 保持到 AC150 落地，manager 在跟）。
