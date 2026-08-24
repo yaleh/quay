@@ -1,6 +1,7 @@
 ---
 id: gap-tmux-tmpdir-not-honored-fixtures-leak-default-socket
-title: "TMUX_TMPDIR 本机不认 → factory 脚本/fixture 测试落默认 socket 撞生产（7 孤儿 server 实测，推翻 leak 任务「never touches default socket」）"
+title: TMUX_TMPDIR 本机不认 → factory 脚本/fixture 测试落默认 socket 撞生产（7 孤儿 server 实测，推翻
+  leak 任务「never touches default socket」）
 status: ready
 labels:
   - gap
