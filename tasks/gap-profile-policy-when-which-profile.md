@@ -1,7 +1,7 @@
 ---
 id: gap-profile-policy-when-which-profile
 title: profile policy（L2：何时用哪个 profile——主备回退 + 加载一致性校验 + 继承去重）
-status: ready
+status: done
 labels:
   - gap
   - feature
