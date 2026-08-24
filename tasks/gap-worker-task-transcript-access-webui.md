@@ -40,6 +40,7 @@ extra: {}
 
 - plugin/scripts/worker-driver.ts（--session-id pin + computeOutcome session_id 字段）
 - packages/quay/src/observation.ts（/live pid→sessionId join）
-- packages/quay/src/serve-handlers.ts + serve.ts（Runs 区块 + 新端点 + 路径穿越防护）
+- packages/quay/src/serve-handlers.ts（Runs 区块 + 新端点 + 路径穿越防护）
+- packages/quay/src/serve.ts（Runs 区块 + 新端点 + 路径穿越防护）
 - packages/quay/test/serve-handlers.test.mjs（或对应测试）
 - tasks/gap-worker-task-transcript-access-webui.md（自身）
