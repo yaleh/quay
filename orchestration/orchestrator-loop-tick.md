@@ -127,8 +127,11 @@ CronList     # ← 必须先列。/clear 之后旧 cron 仍在，直接建就是
 # 恰好一个本层 tick 的 cron  ⇒ 什么都不做
 # 多于一个                  ⇒ CronDelete 到只剩一个（哨兵清扫：按 prompt 内容找，绝不靠记住的 ID）
 # 一个都没有                ⇒ 才建：
-CronCreate(cron="*/20 * * * *", prompt="执行 orchestrator-loop-tick.md 中的 tick 指令", recurring=true)
+CronCreate(cron="*/20 * * * *", prompt="$(cat orchestration/outer-tick-prompt.txt)", recurring=true)
 CronList     # 建完再列一次确认——没列出的 cron 不是报警，是静默空转
+# ⚠️ prompt 必须逐字等于 orchestration/outer-tick-prompt.txt（A23 判据④ 活 prompt==正本）。
+#    2026-08-24 实证：冷启动曾按旧文本建「执行 orchestrator-loop-tick.md」prompt，被 A23 判据④ 拒——
+#    正本已改锚 orchestrator-tick-core.md（1 跳执行核）。建完跑 outer-cron-registry --record 登记新 id。
 ```
 
 > **⚠️ 2026-08-08 13:3xZ 实测更正：原文「会话一结束就没了。新会话必须重建」是错的，
