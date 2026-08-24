@@ -1,7 +1,7 @@
 ---
 id: gap-test-fixture-pollutes-bash-history
 title: 测试 fixture 污染真实 ~/.bash_history（isolateTmuxEnv 未隔离 HISTFILE）
-status: ready
+status: done
 labels:
   - gap
 parent: null
