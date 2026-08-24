@@ -1,7 +1,7 @@
 ---
 id: gap-suite-load-sampler-bypassed-by-fan-in-execute
 title: suite-load-sampler 被 AC84 fan-in 直跑绕过 ⇒ web /tests 负载曲线断供 5+ 小时（数据源断供，非渲染坏）
-status: ready
+status: done
 labels:
   - gap
   - defect
