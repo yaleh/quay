@@ -603,6 +603,49 @@ test("AC2 (能取假) — worker abnormal death (exit non-zero) ⇒ orphan workt
   runGit(root, ["worktree", "remove", "--force", wtPath]);
 });
 
+// ── gap-worker-needs-human-destroys-branch-worktree ────────────────────────────────────────────────
+// AC1（能取假，保留）：worker exit 0 跑到 fan-in 底但没落地（final_state=exited-not-landed，含
+// needs-human 闸拒绝 = 套件绿 + 实现完成）⇒ 分支 task/<id> 与 worktree 目录【仍存在】且 worktree 是
+// 有效 git 仓库。⛔ 分支消失 / 空壳 ⇒ 假（39min 完成实现永久丢失的第 2 次同形）。
+// AC2（能取假，仍清崩溃）：worker 异常死亡（failed/killed）仍删分支+worktree——上面的
+// "worker abnormal death (exit non-zero)" 用例已钉死，本组只补 needs-human 保留面。
+
+test("AC1 — worker exit 0 + status=ready (needs-human gate rejection) ⇒ branch + worktree PRESERVED, valid git repo", (t) => {
+  const root = makeGitRoot("nh");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    try { runGit(root, ["branch", "-D", "task/gap-nh"]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-nh", "ready"); // ready ⇒ not done ⇒ the worker did not land
+  // the worker's own worktree on its task branch — the implementation lives here
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-nh", wtPath]);
+  assert.ok(fs.existsSync(wtPath), "precondition: worktree exists before the run");
+  assert.match(runGit(root, ["branch", "--list", "task/gap-nh"]), /gap-nh/, "precondition: branch task/gap-nh exists");
+
+  let code = 0;
+  try {
+    runDriver(root, ["--task", "gap-nh", "--worker-cmd-exact", "node -e process.exit(0)"]);
+  } catch (e) {
+    code = e.status;
+  }
+  assert.equal(code, EXITED_NOT_LANDED_EXIT, "exit 0 but status≠done ⇒ driver exit non-zero (3), not 0");
+
+  const records = readOutcomeLines(root);
+  assert.equal(records.length, 1, "exactly one outcome record");
+  assert.equal(records[0].final_state, "exited-not-landed", "needs-human gate rejection ⇒ exited-not-landed (⛔ not completed)");
+  assert.ok(records[0].worktree_cleaned !== true, "AC1: exited-not-landed is NOT cleaned — the branch/worktree must be preserved (no worktree_cleaned=true)");
+
+  // AC1 取假半面：分支仍在 + worktree 目录仍在 + worktree 是有效 git 仓库（git -C <wt> rev-parse 成功）。
+  assert.match(runGit(root, ["branch", "--list", "task/gap-nh"]), /gap-nh/, "AC1: branch task/gap-nh still exists (⛔ branch gone ⇒ 假)");
+  assert.ok(fs.existsSync(wtPath), "AC1: worktree directory still exists (⛔ empty shell ⇒ 假)");
+  assert.equal(worktreePresentForTask(root, "gap-nh"), true, "AC1: git worktree list still shows task/gap-nh");
+  const gitDir = runGit(wtPath, ["rev-parse", "--git-dir"]);
+  assert.match(gitDir, /\.git/, "AC1: worktree is still a valid git repo (rev-parse --git-dir succeeds)");
+});
+
 test("cleanupOrphanWorktree / worktreePathsForTask — find + remove orphan worktree + delete branch; idempotent", (t) => {
   const root = makeGitRoot("cleanup");
   const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
