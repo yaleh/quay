@@ -1,7 +1,7 @@
 ---
 id: gap-worker-worktree-continue-reuse
 title: worker 续做机制：exited-not-landed 保留的 worktree 应被重派复用（而非 create 新撞死 + 57 次重做）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -24,8 +24,8 @@ worker prompt 改为「复用已有 worktree，无则创建」；或 driver 派�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，复用不撞死）：exited-not-landed 保留 worktree 的任务重派时，worker 复用该 worktree（⛔ `git worktree add` 撞已存在对象报 fatal ⇒ 假）。
-- [ ] AC2（能取假，续做不重做）：续做 prompt 携带前一轮状态（分支提交 / AC 勾选 / 失败原因），worker 从保留的 worktree 继续（⛔ prompt 仍只说「create」或零状态 ⇒ 假）。
+- [x] AC1（能取假，复用不撞死）：exited-not-landed 保留 worktree 的任务重派时，worker 复用该 worktree（⛔ `git worktree add` 撞已存在对象报 fatal ⇒ 假）。
+- [x] AC2（能取假，续做不重做）：续做 prompt 携带前一轮状态（分支提交 / AC 勾选 / 失败原因），worker 从保留的 worktree 继续（⛔ prompt 仍只说「create」或零状态 ⇒ 假）。
 
 ## Definition of Done
 

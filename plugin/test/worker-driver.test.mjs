@@ -75,6 +75,15 @@ import {
   enumerateLiveWorkerCmdlines,
   hasLiveWorkerForTask,
   WORKER_PROCESS_NAME,
+  parseIntervalMs,
+  RESIDENT_INTERVAL_MS_DEFAULT,
+  workerPromptForTask,
+  buildContinueWorkerPrompt,
+  continueStateForTask,
+  readAcCheckState,
+  countBranchCommits,
+  branchHeadSubject,
+  lastExitedNotLandedReason,
 } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -121,6 +130,35 @@ function readRoundLines(root) {
   const file = path.join(root, WORKER_ROUND_REL);
   if (!fs.existsSync(file)) return [];
   return fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+}
+
+// 常驻驱动（无 --task）现在【不退出】——瞬时 WAIT（resource-gate / pool-empty）轮询而非 latch
+// （gap-worker-driver-stopreason-latch-permanent-stop）。故常驻测试不能再用 execFileSync 等退出码：
+// spawn 收集 stdout JSON 事件 + 显式 stop（SIGKILL）。--json 由本 helper 恒追加（events() 依赖它）。
+function spawnResident(root, args) {
+  const child = spawn(process.execPath, [
+    "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root, ...args, "--json",
+  ], { stdio: ["ignore", "pipe", "ignore"] });
+  let buf = "";
+  child.stdout.on("data", (d) => { buf += d; });
+  const events = () => buf.trim().split("\n").filter(Boolean).map((l) => {
+    try { return JSON.parse(l); } catch { return null; }
+  }).filter(Boolean);
+  const stop = () => { if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch { /* already gone */ } } };
+  return { child, events, stop, pid: child.pid };
+}
+
+// 轮询谓词直到真值或超时（返回最后一次谓词值）。断言写在 waitFor 之后，超时 ⇒ 断言取假 ⇒ 测试干净失败。
+// timeoutMs 留足驱动冷启动余量（node --experimental-strip-types 起步 + /proc 冷启动枚举在满载 16 核机上可 >1s）。
+async function waitFor(fn, timeoutMs = 10000, stepMs = 20) {
+  const deadline = Date.now() + timeoutMs;
+  let v;
+  while (Date.now() < deadline) {
+    v = fn();
+    if (v) return v;
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+  return v;
 }
 
 // A real task file committed with a given frontmatter status. Used to make an exit-0 worker "land"
@@ -953,7 +991,7 @@ test("AC3 pure (gap-launch-script-worker-cap-broken) — filterTouchesDisjoint f
   assert.deepEqual(filterTouchesDisjoint(["gap-zzz"], ["gap-a"], root), [], "unreadable candidate ⇒ conservative filter");
 });
 
-test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatches the Touches-overlapping pair concurrently", (t) => {
+test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatches the Touches-overlapping pair concurrently", async (t) => {
   const root = makeGitRoot("ac3-integr");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTouchedTask(root, "gap-a", "plugin/scripts/foo.ts");
@@ -961,16 +999,17 @@ test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatch
   writeTouchedTask(root, "gap-c", "plugin/scripts/bar.ts"); // disjoint
   const rpcFile = path.join(root, "rpc.cnt");
   const selFile = path.join(root, "sel.cnt");
-  const out = runDriver(root, [
+  const drv = spawnResident(root, [
     "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n<=1?['gap-a','gap-b','gap-c']:[],pool:n<=1?3:0})"),
     "--selector-cmd", counterNodeE(selFile, "n===0?'gap-a\\x20first':n===1?'gap-b\\x20wants-b':'gap-a\\x20unused'"),
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
     "--concurrency", "3",
-    "--json",
+    "--interval", "20",
   ]);
-  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const picks = events.filter((e) => e.event === "selector-picked");
+  t.after(() => drv.stop());
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 5000);
+  const picks = drv.events().filter((e) => e.event === "selector-picked");
   // gap-a picked first (touches foo.ts); while it is in-flight, gap-b (also foo.ts) must be filtered
   // out of the selector's candidate set — the selector asked for gap-b on its 2nd call but was only
   // offered the disjoint gap-c, so it fell back to gap-c. gap-b is never dispatched concurrently.
@@ -1002,20 +1041,21 @@ test("AC129 pure — defaultSelectorArgv / defaultReadyPoolArgv are launch / nod
   assert.ok(rpc.includes("gap-a"));
 });
 
-test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the selector's real reason (not 'explicit --task selection')", (t) => {
+test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the selector's real reason (not 'explicit --task selection')", async (t) => {
   const root = makeGitRoot("ac2");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTaskFile(root, "gap-a", "done");
   const rpcFile = path.join(root, "rpc.cnt");
-  const out = runDriver(root, [
+  const drv = spawnResident(root, [
     "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n===0?['gap-a','gap-b']:[],pool:n===0?2:0})"),
     "--selector-cmd", "node -e console.log('gap-a\\x20blocks-the-suite')",
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
-    "--json",
+    "--interval", "20",
   ]);
-  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const picked = events.find((e) => e.event === "selector-picked");
+  t.after(() => drv.stop());
+  await waitFor(() => readOutcomeLines(root).length >= 1, 5000);
+  const picked = drv.events().find((e) => e.event === "selector-picked");
   assert.ok(picked, "the selection loop emitted a selector-picked event (AC2 chain is wired)");
   assert.equal(picked.task, "gap-a");
   assert.equal(picked.selector_reason, "blocks-the-suite");
@@ -1027,7 +1067,7 @@ test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the se
   assert.notEqual(records[0].selector_reason, "explicit --task selection", "AC2: no longer the constant explicit reason");
 });
 
-test("AC1 — resident loop does not exit after one worker; keeps dispatching while pool non-empty (in-memory in-flight subtraction)", (t) => {
+test("AC1 — resident loop does not exit after one worker; keeps dispatching while pool non-empty (in-memory in-flight subtraction)", async (t) => {
   const root = makeGitRoot("ac1");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // gap-launch-script-worker-cap-broken AC3: the resident loop now reads each task's ## Touches to
@@ -1040,16 +1080,17 @@ test("AC1 — resident loop does not exit after one worker; keeps dispatching wh
   const selFile = path.join(root, "sel.cnt");
   // ready-pool returns BOTH candidates on calls 0 and 1 (it does NOT know gap-a went in-flight);
   // the DRIVER's in-memory subtraction is what makes the second fill pick gap-b. Call 2 ⇒ empty.
-  const out = runDriver(root, [
+  const drv = spawnResident(root, [
     "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n<=1?['gap-a','gap-b']:[],pool:n<=1?2:0})"),
     "--selector-cmd", counterNodeE(selFile, "n===0?'gap-a\\x20first-pick':n===1?'gap-b\\x20second-pick':'gap-a\\x20again'"),
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
     "--concurrency", "2",
-    "--json",
+    "--interval", "20",
   ]);
-  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const picks = events.filter((e) => e.event === "selector-picked");
+  t.after(() => drv.stop());
+  await waitFor(() => readOutcomeLines(root).length >= 2, 5000);
+  const picks = drv.events().filter((e) => e.event === "selector-picked");
   assert.equal(picks.length, 2, "AC1: two sequential selections — the resident loop kept going after the first");
   assert.deepEqual(picks.map((p) => p.task), ["gap-a", "gap-b"], "in-memory subtraction: second fill skipped the in-flight gap-a");
   assert.deepEqual(picks.map((p) => p.selector_reason), ["first-pick", "second-pick"]);
@@ -1060,22 +1101,24 @@ test("AC1 — resident loop does not exit after one worker; keeps dispatching wh
   assert.deepEqual(records.map((r) => r.final_state), ["completed", "completed"]);
 });
 
-test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero spawned)", (t) => {
+test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero spawned; WAIT is transient, not a latch)", async (t) => {
   const root = makeRoot("ac3-rg");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const out = runDriver(root, [
+  const drv = spawnResident(root, [
     "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-a'],pool:1}))",
     "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
     "--resource-gate-cmd", "node -e process.exit(1)",
     "--worker-cmd-exact", "node -e process.exit(0)",
-    "--json",
+    "--interval", "20",
   ]);
-  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  assert.equal(events.some((e) => e.event === "worker-spawned"), false, "AC3: no worker spawned while resource-gate reports WAIT");
-  const stop = events.find((e) => e.event === "resident-stop");
-  assert.ok(stop, "the stop is recorded (not silent)");
-  assert.match(stop.reason, /resource-gate-wait/);
+  t.after(() => drv.stop());
+  await waitFor(() => readRoundLines(root).length >= 1, 5000);
+  assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC3: no worker spawned while resource-gate reports WAIT");
   assert.equal(readOutcomeLines(root).length, 0, "zero outcome records — nothing was dispatched");
+  const stop = readRoundLines(root).find((r) => r.action === "stop");
+  assert.ok(stop, "the stop round is recorded (not silent)");
+  assert.match(stop.stop_reason, /resource-gate-wait/);
+  assert.equal(drv.child.exitCode, null, "WAIT is transient — the driver does NOT exit (no permanent latch)");
 });
 
 test("AC3 — MCP halt mid-run stops NEW dispatch only; the in-flight worker completes (never killed)", async (t) => {
@@ -1142,17 +1185,20 @@ test("AC138-3 pure — computeWorkerRoundRecord: ts is the first field (supervis
   assert.ok(json.startsWith('{"ts":"'), `ts is the first JSON field: ${json.slice(0, 20)}…`);
 });
 
-test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome stays absent; round is the liveness carrier)", (t) => {
+test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome stays absent; round is the liveness carrier)", async (t) => {
   const root = makeRoot("ac138-round");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // ready-pool returns empty immediately ⇒ resident loop records ONE round then stops (no worker spawned).
-  runDriver(root, [
+  // ready-pool returns empty ⇒ resident loop records a stop round then polls (no worker spawned; it no
+  // longer exits on pool-empty — pool-empty is transient, promotion-driver keeps filling it).
+  const drv = spawnResident(root, [
     "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
     "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
-    "--json",
+    "--interval", "20",
   ]);
+  t.after(() => drv.stop());
+  await waitFor(() => readRoundLines(root).length >= 1, 5000);
   const rounds = readRoundLines(root);
   assert.ok(rounds.length >= 1, "at least one round record written even when the pool is empty");
   const last = rounds[rounds.length - 1];
@@ -1204,9 +1250,8 @@ test("runLivenessCheck — checked/deaths/running semantics (checked=false = NOT
   );
 });
 
-test("liveness wiring — resident loop calls the liveness checker each round (Finding AC2 no-caller fix)", (t) => {
-  // 用 git root + done 任务（镜像 AC1 resident-loop 测试），worker 落地 → 驱动干净退出 0，
-  // 免得 exit 3（exited-not-landed）盖住本测试真正要验的 liveness 接线。
+test("liveness wiring — resident loop calls the liveness checker each round (Finding AC2 no-caller fix)", async (t) => {
+  // 用 git root + done 任务（镜像 AC1 resident-loop 测试），worker 落地 → 驱动继续轮询（池空不退出）。
   const root = makeGitRoot("liveness-wire");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTaskFile(root, "gap-a", "done");
@@ -1215,19 +1260,24 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
   const selFile = path.join(root, "sel.cnt");
   const livenessCnt = path.join(root, "liveness.cnt");
   // ready-pool 返回 2 个候选 → 选择环起 2 个 worker → 每轮一个 liveness 检查。
-  runDriver(root, [
+  const drv = spawnResident(root, [
     "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n<=1?['gap-a','gap-b']:[],pool:n<=1?2:0})"),
     "--selector-cmd", counterNodeE(selFile, "n===0?'gap-a\\x20first-pick':n===1?'gap-b\\x20second-pick':'gap-a\\x20again'"),
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
     "--concurrency", "2",
     "--liveness-cmd", counterNodeE(livenessCnt, "JSON.stringify({kind:'worker',deaths:'none',running:true})"),
-    "--json",
+    "--interval", "20",
   ]);
+  t.after(() => drv.stop());
+  await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, 5000);
   const rounds = readRoundLines(root);
   const livenessCount = Number(fs.readFileSync(livenessCnt, "utf8"));
-  assert.equal(livenessCount, rounds.length, `liveness checked once per round (${rounds.length} rounds ⇒ ${livenessCount} checks)`);
+  // liveness 在每轮【开头】跑（writeRound 之前）⇒ livenessCount ≥ rounds.length 恒成立；≥1 证明
+  // 零调用者（Finding 的根）已修。⛔ 不做精确相等——停杀可能落在「liveness 已跑、round 未写」的窗口。
+  assert.ok(livenessCount >= 1, "liveness was called (zero-caller fix): counter is non-zero");
   assert.ok(rounds.length >= 1, "at least one round ran");
+  assert.ok(livenessCount >= rounds.length, `liveness checked at least once per round (${rounds.length} rounds ⇒ ${livenessCount} checks)`);
   for (const rec of rounds) {
     assert.equal(rec.liveness.checked, true, `round carries liveness.checked=true: ${JSON.stringify(rec.liveness)}`);
     assert.equal(rec.liveness.deaths, null, "healthy check ⇒ deaths=null");
@@ -1309,6 +1359,152 @@ test("AC140-3 — override semantics unified: --worker-cmd is prefix, --worker-c
     ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p"]);
 });
 
+// ── gap-worker-worktree-continue-reuse ───────────────────────────────────────────────────────────
+// destroy-path 修复后 exited-not-landed 的 worktree 被【保留】但没人接着做：派发 prompt 仍是「create」
+// ⇒ 重派 worker 一上来 `git worktree add` 撞已存在对象 fatal。AC1（复用不撞死）：保留 worktree 在 ⇒
+// 续做 prompt（复用，⛔ 不含 create）。AC2（续做不重做）：续做 prompt 携带前一轮状态（分支提交 / AC
+// 勾选 / 失败原因）。
+
+test("AC1 (能取假) — workerPromptForTask / continueStateForTask: preserved worktree ⇒ continue prompt (reuse, ⛔ create); no worktree ⇒ create prompt", (t) => {
+  const root = makeGitRoot("continue");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    try { runGit(root, ["branch", "-D", "task/gap-cr"]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-cr", "ready");
+
+  // 无 worktree ⇒ 创建 prompt（旧行为）。
+  const createPrompt = workerPromptForTask("gap-cr", root);
+  assert.match(createPrompt, /create an isolated git worktree/, "no worktree ⇒ create prompt");
+  assert.doesNotMatch(createPrompt, /CONTINUE \(reuse/, "create prompt does not say reuse");
+  assert.equal(continueStateForTask(root, "gap-cr"), null, "no worktree ⇒ no continue state (create path)");
+
+  // 模拟 exited-not-landed 保留的 worktree ⇒ 续做 prompt。
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cr", wtPath]);
+  const contPrompt = workerPromptForTask("gap-cr", root);
+  assert.match(contPrompt, /CONTINUE \(reuse/, "preserved worktree ⇒ continue prompt");
+  assert.doesNotMatch(contPrompt, /create an isolated git worktree/, "AC1: continue prompt must NOT say create (create ⇒ git worktree add fatal)");
+  assert.match(contPrompt, /do NOT run `git worktree add`/, "AC1: reuse not create");
+  assert.ok(continueStateForTask(root, "gap-cr") != null, "worktree present ⇒ continue state gathered");
+});
+
+test("AC2 (能取假) — buildContinueWorkerPrompt carries prior-round state (branch commits / AC check / failure reason)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "worker exited 0 but task did not land",
+  });
+  assert.match(p, /3 commits/, "AC2: branch commit count carried");
+  assert.match(p, /head: "implement gap-x"/, "AC2: branch head subject carried");
+  assert.match(p, /checked 2\/5/, "AC2: AC check state carried (checked X/Y)");
+  assert.match(p, /because: worker exited 0 but task did not land/, "AC2: failure reason carried");
+  assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
+});
+
+test("AC2 — continueStateForTask gathers real state (own branch commits / AC checkboxes / last exited-not-landed reason)", (t) => {
+  const root = makeGitRoot("continue-state");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    try { runGit(root, ["branch", "-D", "task/gap-cs2"]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+
+  // task file with an AC section: 2 checked / 3 total.
+  const body = `---\nid: gap-cs2\nstatus: ready\n---\n\n## Proposal\n\nbody\n\n## Acceptance Criteria\n\n- [x] AC1 done\n- [ ] AC2 todo\n- [x] AC3 done\n`;
+  fs.writeFileSync(path.join(root, "tasks", "gap-cs2.md"), body);
+  runGit(root, ["add", "tasks/gap-cs2.md"]);
+  runGit(root, ["commit", "-q", "-m", "task gap-cs2"]);
+
+  // prior round's own commit on the task branch (HEAD..task/<id> must count exactly this, not the whole history).
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cs2", wtPath]);
+  fs.writeFileSync(path.join(wtPath, "impl.txt"), "implemented");
+  runGit(wtPath, ["add", "impl.txt"]);
+  runGit(wtPath, ["commit", "-q", "-m", "implement gap-cs2"]);
+
+  // prior round's outcome record (exited-not-landed with a reason).
+  fs.appendFileSync(
+    path.join(root, WORKER_OUTCOME_REL),
+    JSON.stringify({ ts: new Date().toISOString(), task: "gap-cs2", final_state: "exited-not-landed", failure_reason: "worker exited 0 but task did not land (status≠done or leftover worktree)" }) + "\n",
+    "utf8",
+  );
+
+  assert.equal(readAcCheckState(root, "gap-cs2").checked, 2, "AC checkboxes: 2 checked");
+  assert.equal(readAcCheckState(root, "gap-cs2").total, 3, "AC checkboxes: 3 total");
+  assert.equal(countBranchCommits(root, "gap-cs2"), 1, "own commits only (HEAD..task/<id> = 1, ⛔ not whole history)");
+  assert.equal(branchHeadSubject(root, "gap-cs2"), "implement gap-cs2", "branch head subject = the prior round's own commit");
+  assert.match(lastExitedNotLandedReason(root, "gap-cs2"), /did not land/, "last exited-not-landed reason read from outcome");
+
+  const st = continueStateForTask(root, "gap-cs2");
+  assert.ok(st != null, "continue state gathered for preserved worktree");
+  assert.equal(st.worktreePath, wtPath, "state carries the worktree path");
+  assert.equal(st.branchCommits, 1, "state carries own commit count");
+  assert.equal(st.acChecked, 2, "state carries AC checked");
+  assert.equal(st.acTotal, 3, "state carries AC total");
+  assert.match(st.failureReason, /did not land/, "state carries failure reason");
+});
+
+test("AC1 (integration, 复现) — re-dispatch of an exited-not-landed task passes the CONTINUE prompt to the worker (reuse, ⛔ create)", (t) => {
+  const root = makeGitRoot("continue-e2e");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  const capOut = path.join(root, "..", `captured-prompt-${path.basename(root)}.txt`);
+  const capScript = path.join(root, "..", `capture-prompt-${path.basename(root)}.sh`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    try { runGit(root, ["branch", "-D", "task/gap-ce"]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+    fs.rmSync(capOut, { force: true });
+    fs.rmSync(capScript, { force: true });
+  });
+
+  // task file with an AC section (1 checked / 2 total).
+  const body = `---\nid: gap-ce\nstatus: ready\n---\n\n## Proposal\n\nbody\n\n## Acceptance Criteria\n\n- [x] AC1 done\n- [ ] AC2 todo\n`;
+  fs.writeFileSync(path.join(root, "tasks", "gap-ce.md"), body);
+  runGit(root, ["add", "tasks/gap-ce.md"]);
+  runGit(root, ["commit", "-q", "-m", "task gap-ce"]);
+
+  // prior exited-not-landed round: worktree + branch + one own commit + an outcome record.
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-ce", wtPath]);
+  fs.writeFileSync(path.join(wtPath, "impl.txt"), "implemented");
+  runGit(wtPath, ["add", "impl.txt"]);
+  runGit(wtPath, ["commit", "-q", "-m", "implement gap-ce"]);
+  fs.appendFileSync(
+    path.join(root, WORKER_OUTCOME_REL),
+    JSON.stringify({ ts: new Date().toISOString(), task: "gap-ce", final_state: "exited-not-landed", failure_reason: "worker exited 0 but task did not land (status≠done or leftover worktree)" }) + "\n",
+    "utf8",
+  );
+
+  // capture the prompt the driver actually passes to the worker (--worker-cmd prefix appends it as the last arg).
+  fs.writeFileSync(capScript, `#!/bin/sh\nprintf '%s' "$1" > "${capOut}"\nexit 0\n`);
+  fs.chmodSync(capScript, 0o755);
+
+  let code = 0;
+  try {
+    runDriver(root, ["--task", "gap-ce", "--worker-cmd", `bash ${capScript}`]);
+  } catch (e) {
+    code = e.status;
+  }
+
+  // worker exit 0 + status≠done ⇒ exited-not-landed (the exact re-dispatch scenario; worktree preserved).
+  assert.equal(code, EXITED_NOT_LANDED_EXIT, "exit 0 + status≠done ⇒ driver exit 3 (exited-not-landed, worktree preserved)");
+
+  const prompt = fs.readFileSync(capOut, "utf8");
+  assert.match(prompt, /CONTINUE \(reuse/, "AC1: the re-dispatched worker got the CONTINUE prompt");
+  assert.doesNotMatch(prompt, /create an isolated git worktree/, "AC1: ⛔ continue prompt must not say create (create ⇒ git worktree add fatal)");
+  assert.match(prompt, /1 commits/, "AC2: carries branch commit count");
+  assert.match(prompt, /checked 1\/2/, "AC2: carries AC check state");
+  assert.match(prompt, /exited-not-landed because: worker exited 0 but task did not land/, "AC2: carries failure reason");
+  assert.equal(worktreePresentForTask(root, "gap-ce"), true, "worktree still preserved after re-dispatch (⛔ not cleaned)");
+});
+
 // ── AC150-3 (falsifiable): 资源门/halt 判定抽到 driver-shared.ts，worker-driver 只是 re-export ──
 
 test("AC150-3 — worker-driver re-exports the SAME resourceGateCheck / isHalted as driver-shared (单份实现)", async () => {
@@ -1354,7 +1550,7 @@ test("depsReadyForDispatch — no deps ⇒ true; all done ⇒ true; not-done ⇒
   assert.equal(depsReadyForDispatch(root, "gap-flow"), false, "flow form: any not-done dep blocks");
 });
 
-test("AC1 — depends_on gate in the resident loop: a candidate whose dep is not done is NOT dispatched (ac138 白烧一轮防)", (t) => {
+test("AC1 — depends_on gate in the resident loop: a candidate whose dep is not done is NOT dispatched (ac138 白烧一轮防)", async (t) => {
   const root = makeGitRoot("ac1-deps");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // gap-prereq（ready，未 done）+ gap-dep（depends_on gap-prereq），都写进 tasks/ 并提交。
@@ -1365,25 +1561,26 @@ test("AC1 — depends_on gate in the resident loop: a candidate whose dep is not
   runGit(root, ["add", "tasks/gap-dep.md"]);
   runGit(root, ["commit", "-q", "-m", "dep ready"]);
 
-  const out = runDriver(root, [
+  const drv = spawnResident(root, [
     "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-dep'],pool:1}))",
     "--selector-cmd", "node -e console.log('gap-dep\\x20pick')",
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
-    "--json",
+    "--interval", "20",
   ]);
-  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  assert.equal(events.some((e) => e.event === "worker-spawned"), false, "AC1: dep-not-done candidate is never dispatched");
+  t.after(() => drv.stop());
+  await waitFor(() => readRoundLines(root).length >= 1, 5000);
+  assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC1: dep-not-done candidate is never dispatched");
   assert.equal(readOutcomeLines(root).length, 0, "zero workers dispatched");
   // 负控制（⛔ 不能是「池空才不派」）：round 记录 pool=1 证明 ready-pool 确实给了 gap-dep 候选——
   // 是 depends_on 过滤把它滤掉的（不是 selector 没选、也不是池空）。与 Touches 互斥同属非终态过滤
-  // （依赖由别的任务落地，非本驱动等待可解）⇒ 无在飞 worker 可等 ⇒ 循环干净退出。
+  // （依赖由别的任务落地，非本驱动等待可解）⇒ 无在飞 worker 可等 ⇒ 轮询等依赖落地。
   const rounds = readRoundLines(root);
   assert.equal(rounds[rounds.length - 1].pool, 1, "ready-pool reported pool=1 (gap-dep), yet nothing dispatched — the filter is the cause");
   assert.equal(rounds[rounds.length - 1].in_flight, 0, "nothing in flight");
 });
 
-test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the difference, not a blanket stop)", (t) => {
+test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the difference, not a blanket stop)", async (t) => {
   const root = makeGitRoot("ac1-deps-ok");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTaskFile(root, "gap-prereq", "done");
@@ -1391,15 +1588,16 @@ test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the
   runGit(root, ["add", "tasks/gap-dep.md"]);
   runGit(root, ["commit", "-q", "-m", "dep done"]);
   const rpcFile = path.join(root, "rpc.cnt");
-  const out = runDriver(root, [
+  const drv = spawnResident(root, [
     "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n===0?['gap-dep']:[],pool:n===0?1:0})"),
     "--selector-cmd", "node -e console.log('gap-dep\\x20pick')",
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
-    "--json",
+    "--interval", "20",
   ]);
-  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const spawned = events.filter((e) => e.event === "worker-spawned");
+  t.after(() => drv.stop());
+  await waitFor(() => readOutcomeLines(root).length >= 1, 5000);
+  const spawned = drv.events().filter((e) => e.event === "worker-spawned");
   assert.equal(spawned.length, 1, "AC1 对照: dep-done candidate IS dispatched (exactly once)");
   assert.equal(spawned[0].task, "gap-dep");
   assert.equal(readOutcomeLines(root)[0].final_state, "completed", "the dep-done candidate lands cleanly");
@@ -1473,7 +1671,7 @@ test("enumerateLiveWorkerCmdlines — real /proc scan finds a spawned fake worke
   assert.deepEqual(enumerateLiveWorkerCmdlines("/nonexistent-proc-dir"), []);
 });
 
-test("AC1 (cold-start) — surviving worker + its worktree ⇒ resident loop does NOT re-dispatch that task", (t) => {
+test("AC1 (cold-start) — surviving worker + its worktree ⇒ resident loop does NOT re-dispatch that task", async (t) => {
   const root = makeGitRoot("coldstart-ac1");
   const wtPath = path.join(root, "..", `wt-${path.basename(root)}-cs`);
   t.after(() => {
@@ -1491,16 +1689,17 @@ test("AC1 (cold-start) — surviving worker + its worktree ⇒ resident loop doe
   const fakeWorker = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, "gap-cs-a"], { stdio: "ignore" });
   t.after(() => { try { fakeWorker.kill("SIGKILL"); } catch { /* already gone */ } });
 
-  const out = runDriver(root, [
+  const drv = spawnResident(root, [
     "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-cs-a'],pool:1}))",
     "--selector-cmd", "node -e console.log('gap-cs-a\\x20pick')",
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
-    "--json",
+    "--interval", "20",
   ]);
-  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  assert.equal(events.some((e) => e.event === "worker-spawned"), false, "AC1: surviving worker's task is NOT re-dispatched");
-  const cs = events.find((e) => e.event === "cold-start-inflight");
+  t.after(() => drv.stop());
+  await waitFor(() => drv.events().some((e) => e.event === "cold-start-inflight"), 5000);
+  assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC1: surviving worker's task is NOT re-dispatched");
+  const cs = drv.events().find((e) => e.event === "cold-start-inflight");
   assert.ok(cs, "the cold-start in-flight enumeration is recorded (not silent)");
   assert.deepEqual(cs.tasks, ["gap-cs-a"], "the survivor is the enumerated in-flight task");
   assert.equal(readOutcomeLines(root).length, 0, "zero outcomes — nothing dispatched");
@@ -1520,19 +1719,16 @@ test("AC1 对照 — orphan worktree (no live worker) ⇒ the task IS re-dispatc
 
   // 无存活 worker ⇒ 冷启动枚举为空 ⇒ gap-cs-b 不被排除 ⇒ 会被派发（worker-spawned 出现）。
   const rpcFile = path.join(root, "rpc.cnt");
-  const driver = spawn(process.execPath, [
-    "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root,
+  const drv = spawnResident(root, [
     "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n===0?['gap-cs-b']:[],pool:n===0?1:0})"),
     "--selector-cmd", "node -e console.log('gap-cs-b\\x20pick')",
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
-    "--json",
-  ], { stdio: ["ignore", "pipe", "ignore"] });
-  let buf = "";
-  driver.stdout.on("data", (d) => { buf += d; });
-  await new Promise((resolve) => { driver.on("close", (c) => resolve(c)); });
-  const events = buf.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const spawned = events.filter((e) => e.event === "worker-spawned");
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 5000);
+  const spawned = drv.events().filter((e) => e.event === "worker-spawned");
   assert.equal(spawned.length, 1, "orphan worktree alone does NOT block re-dispatch — the task IS dispatched");
   assert.equal(spawned[0].task, "gap-cs-b");
 });
@@ -1561,4 +1757,93 @@ test("AC2 (cold-start) — cleanupOrphanWorktree skips a worktree a live worker 
   assert.equal(cleaned.removed, true, "a true orphan (no live worker) IS cleaned");
   assert.equal(cleaned.skippedLiveWorker, false);
   assert.equal(worktreePresentForTask(root, "gap-cs-c"), false, "orphan worktree removed");
+});
+
+// ── gap-worker-driver-stopreason-latch-permanent-stop ──────────────────────────────────────────────
+// stopReason 一旦赋值永不复位 ⇒ 瞬时闸拒绝（resource-gate-wait）被永久 latch ⇒ 同一 driver 进程内
+// 恢复不可能 ⇒ 1h48m 零派发（234 槽·分钟）。修法：WAIT（瞬时）不 latch、下一轮重读 stopCondition；
+// 终态（mcp-halt）才 latch；running.length===0 且瞬时 WAIT 时不退出、等 --interval 重读。AC1-3 逐条取假。
+
+test("parseIntervalMs — default 30000; small value; invalid ⇒ default (fail-closed to the default cadence)", () => {
+  assert.equal(RESIDENT_INTERVAL_MS_DEFAULT, 30000);
+  assert.equal(parseIntervalMs(undefined), RESIDENT_INTERVAL_MS_DEFAULT);
+  assert.equal(parseIntervalMs("25"), 25);
+  assert.equal(parseIntervalMs("abc"), RESIDENT_INTERVAL_MS_DEFAULT, "invalid ⇒ default");
+  assert.equal(parseIntervalMs("-5"), RESIDENT_INTERVAL_MS_DEFAULT, "negative ⇒ default");
+});
+
+test("AC1 (gap-worker-driver-stopreason-latch-permanent-stop) — gate first WAIT then GO ⇒ the SAME driver process (no restart) recovers dispatch", async (t) => {
+  const root = makeGitRoot("stop-latch-ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-ac1", "done");
+  // gate: WAIT (exit 1) while the go-marker file is absent; GO (exit 0) once the test writes it.
+  const goFile = path.join(root, "gate.go");
+  const gateCmd = `node -e require('fs').existsSync(${JSON.stringify(goFile)})?process.exit(0):(console.log('{"verdict":"WAIT","reason":"load-high"}'),process.exit(1))`;
+  const rpcFile = path.join(root, "rpc.cnt");
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n===0?['gap-ac1']:[],pool:n===0?1:0})"),
+    "--selector-cmd", "node -e console.log('gap-ac1\\x20pick')",
+    "--resource-gate-cmd", gateCmd,
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--concurrency", "1",
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+
+  // Phase 1: gate WAIT ⇒ no worker dispatched, and the driver does NOT exit (polls, ⛔ not latch).
+  await waitFor(() => readRoundLines(root).length >= 1, 5000);
+  assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "gate WAIT ⇒ no dispatch yet");
+  assert.equal(drv.child.exitCode, null, "transient WAIT did not exit the driver");
+
+  // Phase 2: release the gate — the SAME process must recover and dispatch (stopReason 不复位即恒不派 ⇒ 假).
+  fs.writeFileSync(goFile, "go\n");
+  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 5000);
+  const spawned = drv.events().filter((e) => e.event === "worker-spawned");
+  assert.equal(spawned.length, 1, "AC1: gate-open recovered dispatch in the SAME driver process (no restart)");
+  assert.equal(spawned[0].task, "gap-ac1");
+  await waitFor(() => readOutcomeLines(root).length >= 1, 5000);
+  assert.equal(readOutcomeLines(root)[0].final_state, "completed", "the recovered dispatch lands cleanly");
+  drv.stop();
+});
+
+test("AC2 (gap-worker-driver-stopreason-latch-permanent-stop) — adjacent stop rounds re-acquire the resource reading (⛔ not byte-identical)", async (t) => {
+  const root = makeRoot("stop-latch-ac2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // gate: always WAIT (exit 1) but each call prints an incrementing reading ⇒ stop_reason differs per round.
+  const gateCnt = path.join(root, "gate.cnt");
+  const f = JSON.stringify(gateCnt);
+  const gateCmd = `node -e n=0;try{n=Number(require('fs').readFileSync(${f},'utf8'))}catch{};require('fs').writeFileSync(${f},String(n+1));console.log('load='+n);process.exitCode=1`;
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
+    "--selector-cmd", "node -e console.log('gap-x\\x20pick')",
+    "--resource-gate-cmd", gateCmd,
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+  await waitFor(() => readRoundLines(root).length >= 3, 5000);
+  const stops = readRoundLines(root).filter((r) => r.action === "stop");
+  assert.ok(stops.length >= 2, "at least two stop rounds written (the driver re-reads the gate each poll)");
+  assert.match(stops[0].stop_reason, /resource-gate-wait/);
+  assert.match(stops[1].stop_reason, /resource-gate-wait/);
+  assert.notEqual(stops[0].stop_reason, stops[1].stop_reason, "AC2: adjacent stop readings differ (re-acquired each round, ⛔ not latched byte-identical)");
+  drv.stop();
+});
+
+test("AC3 (gap-worker-driver-stopreason-latch-permanent-stop) — pool non-empty + transient WAIT + running.length===0 ⇒ driver does NOT exit directly", async (t) => {
+  const root = makeRoot("stop-latch-ac3");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-ac3'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-ac3\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(1)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+  await waitFor(() => readRoundLines(root).length >= 3, 5000);
+  assert.equal(drv.child.exitCode, null, "AC3: pool non-empty + gate WAIT + no in-flight ⇒ driver does NOT exit directly");
+  const stops = readRoundLines(root).filter((r) => r.action === "stop");
+  assert.ok(stops.length >= 2, "AC3: the driver polled (≥2 stop rounds) — it did not exit after the first WAIT round");
+  drv.stop();
 });

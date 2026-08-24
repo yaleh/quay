@@ -1061,6 +1061,54 @@ test("RECONCILE — firstKnownCommitMs resolves to the task's WORK start (branch
   }
 });
 
+test("RECONCILE — batched makeFirstKnownCommitMsByTask is byte-equivalent to per-task firstKnownCommitMs (gap-fast-mode-telemetry-hangs-on-verification-round-growth)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  const commit = (args, env = {}) => spawnSync("git", ["-C", tmp, ...args], {
+    encoding: "utf8", env: { ...process.env, ...env },
+  });
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "wk.md"), "---\nid: wk\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    gitCmd(tmp, "add", "-A");
+    assert.equal(commit(["commit", "-m", "create wk.md"], { GIT_AUTHOR_DATE: "2026-08-01T00:00:00Z", GIT_COMMITTER_DATE: "2026-08-01T00:00:00Z" }).status, 0);
+
+    // Fresh (no own commits) → null via both paths.
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/wk-fresh").status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+
+    // In-flight with work → its first work commit time.
+    const workDate = "2026-08-02T12:00:00Z";
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/wk-work").status, 0);
+    fs.appendFileSync(path.join(tmp, "tasks", "wk.md"), "work\n");
+    gitCmd(tmp, "add", "-A");
+    assert.equal(commit(["commit", "-m", "wk work"], { GIT_AUTHOR_DATE: workDate, GIT_COMMITTER_DATE: workDate }).status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+
+    // Merged (branch merged into master) → the merge commit time.
+    assert.equal(gitCmd(tmp, "merge", "--no-ff", "task/wk-work", "-m", "Merge branch 'task/wk-work'").status, 0);
+
+    // The batched factory must agree with the per-task reference on EVERY case: fresh (null),
+    // in-flight (work start), merged (merge time), and a never-existing task (null).
+    const batched = cli.makeFirstKnownCommitMsByTask(tmp);
+    for (const taskId of ["wk-fresh", "wk-work", "wk-never-existed"]) {
+      assert.equal(
+        batched(taskId),
+        cli.firstKnownCommitMs(tmp, taskId),
+        `batched lookup for ${taskId} must match per-task firstKnownCommitMs`,
+      );
+    }
+    // The factory is memoized: a repeat lookup returns the same value (and must not re-hit git).
+    assert.equal(batched("wk-work"), cli.firstKnownCommitMs(tmp, "wk-work"));
+  } finally {
+    cleanup(tmp);
+  }
+});
+
 test("RECONCILE — processAlive detects a live process by runId (AC3 real-process criterion)", async () => {
   const cli = await importCli();
   const runId = `fm-proc-${Date.now()}`;
