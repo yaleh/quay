@@ -207,6 +207,15 @@ import { defaultLaneCount } from "./full-suite-runner.ts";
 // not a parallel porcelain parser). The merge-worktree detector below reuses it to find worktrees
 // where a MERGE is in flight.
 import { listWorktrees } from "./fast-mode-telemetry.ts";
+// MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): the
+// promotion commit path runs `git commit --no-verify` (a mechanical status flip is content-neutral),
+// so the pre-commit hook's Touches「一条目一路径」detector never runs there — a multi-path Touches bullet
+// silently lands in develop (production: e7be44a0 landed a `serve-handlers.ts + serve.ts` bullet).
+// Re-run the SAME judgment at the promotion write boundary, BEFORE the status write, so a multi-path
+// candidate is NOT promoted (stays todo, tree stays clean, block reason surfaces on the applied
+// record). Single source: checkTaskOneEntryOnePath — the SAME judge precommit-guard.ts uses (no
+// second Touches parser).
+import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
 
 /** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
  *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
@@ -2337,9 +2346,27 @@ export function applyPromotions(opts) {
   const applied = [];
   if (shouldApply) {
     const candidateById = new Map(result.candidates.map((c) => [c.id, c]));
+    // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): the
+    // promotion commit runs `git commit --no-verify`, so the pre-commit hook's Touches detector never
+    // fires here (production: e7be44a0 landed a `serve-handlers.ts + serve.ts` multi-path bullet).
+    // Re-run the SAME judgment BEFORE writing anything — a multi-path candidate is NOT promoted
+    // (stays todo, tree stays clean, block reason surfaces on the applied record).
+    const { baseline } = readOneEntryBaseline(opts.root);
     for (const p of result.promotions) {
       const cand = candidateById.get(p.id);
       const deliveryCritical = !!(cand && cand.deliveryCritical);
+      const rel = path.join("tasks", `${p.id}.md`);
+      const file = path.join(opts.root, rel);
+      const body = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+      const touchesBlock = checkTaskOneEntryOnePath(body, rel, baseline);
+      if (touchesBlock.length > 0) {
+        applied.push({
+          id: p.id, ok: false, from: "todo", to: null, deliveryCritical, committed: false,
+          reason: "touches-multi-path-bullet",
+          detail: touchesBlock.map((v) => v.what).join(" · "),
+        });
+        continue;
+      }
       const out = setTaskStatus(opts.root, p.id, "ready", { ensureDeliveryCritical: deliveryCritical });
       // COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a landed status write is
       // committed immediately so the main checkout stays clean (a dirty tree blocks every fan-in at

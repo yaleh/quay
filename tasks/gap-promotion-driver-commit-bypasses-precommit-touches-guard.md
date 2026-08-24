@@ -33,6 +33,8 @@ promotion-driver 提交路径接入 Touches 多路径守卫落地 develop；AC1-
 
 ## Touches
 
-- plugin/scripts/promotion-driver.ts（提交前接 Touches 单路径守卫）
-- plugin/scripts/touches-one-entry-one-path*（或现有多路径 bullet 守卫，如守卫在别处则列该处）
+- plugin/scripts/ready-pool-check.ts（applyPromotions 提交前接 Touches 单路径守卫——多路径 bullet 不晋升不进 develop）
+- plugin/scripts/promotion-driver.ts（applied/outcome 记录传播 reason + committed——block 不静默）
+- plugin/test/ready-pool-check.test.mjs（AC1 负控制测试：多路径候选不晋升）
+- plugin/test/promotion-driver.test.mjs（applied 形状断言随 reason/committed 更新）
 - tasks/gap-promotion-driver-commit-bypasses-precommit-touches-guard.md（自身）
