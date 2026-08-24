@@ -186,19 +186,57 @@ export function getBaseCommit(root) {
  * @returns {boolean}
  */
 export function processAlive(runId) {
-  if (!runId || String(runId).length < 4) return false;
+  return processAliveInCmdlines(snapshotProcCmdlines(), runId);
+}
+
+/**
+ * The runId "needle" `processAlive` scans for — the last two `-`-joined segments of the runId (the
+ * dispatch-timestamp + random-suffix tail), which is what a live executor's cmdline actually carries.
+ * Null when the runId is too short to be a reliable signal (matches `processAlive`'s guards).
+ * @param {string} runId
+ * @returns {string|null}
+ */
+function processAliveNeedle(runId) {
+  if (!runId || String(runId).length < 4) return null;
   const parts = String(runId).split("-");
   const needle = parts.length >= 2 ? parts.slice(-2).join("-") : String(runId);
-  if (needle.length < 4) return false;
+  return needle.length < 4 ? null : needle;
+}
+
+/**
+ * Snapshot every live process's cmdline in ONE `/proc` pass. Split out of `processAlive` so a
+ * multi-bracket scan (the reverse-direction closed-bracket detector) can share one snapshot instead
+ * of re-scanning /proc per bracket (gap-fast-mode-telemetry-hangs-on-verification-round-growth:
+ * ~380 closed brackets × a full /proc scan ≈ 10s). Best-effort: a per-pid read failure is skipped;
+ * /proc unavailable (non-Linux, sandbox) → [] (never a positive signal from an unavailable source).
+ * @returns {string[]}
+ */
+function snapshotProcCmdlines() {
+  const cmdlines = [];
   try {
     const procs = fs.readdirSync("/proc").filter((d) => /^\d+$/.test(d));
     for (const pid of procs) {
       try {
-        const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
-        if (cmd.includes(needle)) return true;
+        cmdlines.push(fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " "));
       } catch (_) { /* pid exited mid-scan; skip */ }
     }
   } catch (_) { /* /proc unavailable (non-Linux, sandbox) → no positive signal */ }
+  return cmdlines;
+}
+
+/**
+ * Whether any cmdline in a pre-captured `/proc` snapshot carries the runId needle. Pure over the
+ * injected snapshot (tests inject deterministic payloads). Absent needle ⇒ false.
+ * @param {string[]} cmdlines
+ * @param {string} runId
+ * @returns {boolean}
+ */
+function processAliveInCmdlines(cmdlines, runId) {
+  const needle = processAliveNeedle(runId);
+  if (needle == null) return false;
+  for (const cmd of cmdlines) {
+    if (cmd.includes(needle)) return true;
+  }
   return false;
 }
 
@@ -509,16 +547,70 @@ export function firstKnownCommitMs(root, taskId) {
 }
 
 /**
- * Memoized `firstKnownCommitMs` factory for the aggregate/reconcile paths: one git lookup per
- * distinct taskId, never per record.
+ * Memoized `firstKnownCommitMs` factory for the aggregate/reconcile paths — BATCHED
+ * (gap-fast-mode-telemetry-hangs-on-verification-round-growth). The previous lazy factory delegated
+ * each distinct taskId to `firstKnownCommitMs`, i.e. up to two git subprocesses per task (the
+ * `--all --merges --grep` fallback is a full-repo scan). At ~330 completed tasks that was ~40s,
+ * which pushed `--report`/`--snapshot` past their 60s/30s timeouts. This factory gathers BOTH
+ * sources in one pass each — one live-branch enumeration (with a per-live-branch first-commit log;
+ * live task branches are few) and ONE `git log --all --merges` — then answers lookups from
+ * in-memory maps. Semantics match `firstKnownCommitMs` exactly: live-branch first-commit wins; else
+ * the NEWEST merge commit whose subject mentions `task/<taskId>`; else null.
  * @param {string} root
  * @returns {(taskId: string) => number|null}
  */
 export function makeFirstKnownCommitMsByTask(root) {
+  // taskId -> ms. Branch map wins over merge map (matches firstKnownCommitMs's attempt ordering).
+  const branchFirstCommitMs = new Map();
+  const mergeFirstCommitMs = new Map();
+  try {
+    const branches = execFileSync(
+      "git", ["-C", root, "for-each-ref", "--format=%(refname:short)", "refs/heads/task/"],
+      { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"] },
+    ).split("\n").map((s) => s.trim()).filter(Boolean);
+    for (const branch of branches) {
+      const taskId = branch.slice("task/".length);
+      if (!taskId) continue;
+      // First commit on the branch not reachable from master (firstKnownCommitMs attempt 1).
+      const out = execFileSync(
+        "git", ["-C", root, "log", "--reverse", "--format=%ct", branch, "^master"],
+        { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] },
+      );
+      const line = out.trim().split("\n")[0];
+      if (line && /^\d+$/.test(line)) branchFirstCommitMs.set(taskId, Number(line) * 1000);
+    }
+  } catch (_) { /* no live task branches / git unavailable — degrade to merge-only */ }
+
+  try {
+    // ONE pass over all merge commits replaces the per-task `--all --merges --grep` scans. `%ct`
+    // (seconds) + a record separator + subject, so a multi-line subject cannot corrupt the parse.
+    const out = execFileSync(
+      "git", ["-C", root, "log", "--all", "--format=%ct%x1e%s", "--merges"],
+      { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"] },
+    );
+    // git log emits newest-first, so first-wins = newest — matches firstKnownCommitMs's
+    // `.split("\n")[0]` on the per-task `--grep` output.
+    for (const line of out.split("\n")) {
+      const sep = line.indexOf("\x1e");
+      if (sep < 1) continue;
+      const t = Number(line.slice(0, sep));
+      if (!Number.isFinite(t)) continue;
+      const subject = line.slice(sep + 1);
+      const re = /task\/([A-Za-z0-9._-]+)/g;
+      let m;
+      while ((m = re.exec(subject)) !== null) {
+        const taskId = m[1];
+        if (!mergeFirstCommitMs.has(taskId)) mergeFirstCommitMs.set(taskId, t * 1000);
+      }
+    }
+  } catch (_) { /* no merge commits / git unavailable — degrade to branch-only */ }
+
   const cache = new Map();
   return (taskId) => {
     if (cache.has(taskId)) return cache.get(taskId);
-    const v = firstKnownCommitMs(root, taskId);
+    let v = null;
+    if (branchFirstCommitMs.has(taskId)) v = branchFirstCommitMs.get(taskId);
+    else if (mergeFirstCommitMs.has(taskId)) v = mergeFirstCommitMs.get(taskId);
     cache.set(taskId, v);
     return v;
   };
@@ -1460,9 +1552,23 @@ export function detectClosedButLive(completed, { executorPresent } = {}) {
  * @returns {(rec: {taskId:string, runId?:string|null}) => {present:boolean, reason:string}}
  */
 export function makeDefaultExecutorPresent(root) {
+  // BATCHED (gap-fast-mode-telemetry-hangs-on-verification-round-growth): the reverse-direction
+  // closed-bracket scan calls this per CLOSED bracket, and the per-call probes — `worktreeExists`
+  // (a `git worktree list --porcelain` subprocess) + `processAlive` (a full /proc scan) — made it
+  // O(closed brackets × (git + /proc)) ≈ 10s at ~380 completed tasks. Snapshot both ONCE (the open
+  // worktree branch set, and the live-process cmdlines), then answer every bracket from memory.
+  // Fail-closed toward "free" exactly as before: an unreadable worktree list / /proc ⇒ no positive
+  // signal, so the report degrades to the forward-only view rather than a false occupied slot.
+  const openBranches = new Set();
+  try {
+    for (const wt of listWorktrees(root)) {
+      if (wt && wt.branch) openBranches.add(wt.branch);
+    }
+  } catch (_) { /* unreadable worktree list — no worktree-present signal */ }
+  const procCmdlines = snapshotProcCmdlines();
   return (rec) => {
-    if (rec.taskId && worktreeExists(root, rec.taskId)) return { present: true, reason: "worktree-present" };
-    if (rec.runId && processAlive(rec.runId)) return { present: true, reason: "process-alive" };
+    if (rec.taskId && openBranches.has(`refs/heads/task/${rec.taskId}`)) return { present: true, reason: "worktree-present" };
+    if (rec.runId && processAliveInCmdlines(procCmdlines, rec.runId)) return { present: true, reason: "process-alive" };
     return { present: false, reason: "no-present-signal" };
   };
 }
