@@ -1172,6 +1172,7 @@ test("AC138-3 pure — computeWorkerRoundRecord: ts is the first field (supervis
   const rec = computeWorkerRoundRecord({
     round: 1, runId: "wk-prod-x", pid: 42, at: "2026-08-23T12:00:00.000Z",
     action: "stop", inFlight: 0, pool: 0, stopReason: "pool-empty (no dispatchable candidate in the ready pool)",
+    coldStartInflight: ["gap-cs-a"],
   });
   assert.equal(rec.ts, "2026-08-23T12:00:00.000Z");
   assert.equal(rec.round, 1);
@@ -1180,6 +1181,7 @@ test("AC138-3 pure — computeWorkerRoundRecord: ts is the first field (supervis
   assert.equal(rec.in_flight, 0);
   assert.equal(rec.pool, 0);
   assert.match(rec.stop_reason, /pool-empty/);
+  assert.deepEqual(rec.cold_start_inflight, ["gap-cs-a"], "cold-start observation lands in the round record (production-visible carrier)");
   // ts 首字段：JSON.stringify 后 `"ts":"…"` 是记录的第一个键（supervisor 的 grep 依赖该形状）。
   const json = JSON.stringify(rec);
   assert.ok(json.startsWith('{"ts":"'), `ts is the first JSON field: ${json.slice(0, 20)}…`);
@@ -1757,6 +1759,64 @@ test("AC2 (cold-start) — cleanupOrphanWorktree skips a worktree a live worker 
   assert.equal(cleaned.removed, true, "a true orphan (no live worker) IS cleaned");
   assert.equal(cleaned.skippedLiveWorker, false);
   assert.equal(worktreePresentForTask(root, "gap-cs-c"), false, "orphan worktree removed");
+});
+
+// ── gap-worker-driver-cold-start-inflight-refresh：冷启动在飞集合每趟 pass 现观测 ────────────────────
+// 原 gap-worker-driver-cold-start-inflight-blind 只修了「冷启动 ⇒ 不重复派发」一个方向：enumerateColdStartInflight
+// 在 while(true) 之前 const 冻结一次、全生命周期不刷新 ⇒ 冷启动 worker 结束后其 task 仍永久假在飞、
+// 该 driver 余生不可派。修法 = 每趟 pass 现观测（SPEC §5.2 actual=observe()）。AC1（原有方向，保绿）+
+// AC2（承重条·原缺的那半）+ AC3（现观测，无循环外 const 快照）逐条取假。
+
+test("AC2 (cold-start-refresh) — survivor finishes ⇒ its task leaves the exclusion set and IS re-dispatched (same driver process)", async (t) => {
+  const root = makeGitRoot("coldstart-ac2-refresh");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-ac2r`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-cs-a", "ready");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cs-a", wtPath]);
+  assert.equal(worktreePresentForTask(root, "gap-cs-a"), true, "precondition: survivor worktree present");
+
+  // 幸存 worker 进程（旧 driver 所 fork、冷启动前就在）。
+  const fakeWorker = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, "gap-cs-a"], { stdio: "ignore" });
+  t.after(() => { try { fakeWorker.kill("SIGKILL"); } catch { /* already gone */ } });
+
+  // ready-pool 持续给 gap-cs-a 候选、selector 持续选它；冷启动在飞时被排除，worker 结束后重新可派。
+  // --concurrency 1 + 派发后的 worker 长跑（不退出）⇒ 只派发一次，无重派循环（spawned.length===1 可断言）。
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-cs-a'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-cs-a\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e setTimeout(()=>{},60000)",
+    "--concurrency", "1",
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+
+  // Phase 1: 冷启动发现幸存 worker ⇒ 不派发（排除集挡住，⛔ 不是池空——round 记录 pool=1 证明候选在）。
+  await waitFor(() => drv.events().some((e) => e.event === "cold-start-inflight"), 5000);
+  const cs = drv.events().find((e) => e.event === "cold-start-inflight");
+  assert.ok(cs, "the cold-start enumeration is observed (recorded)");
+  assert.deepEqual(cs.tasks, ["gap-cs-a"], "the survivor is the enumerated in-flight task");
+  assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC2 phase 1: survivor not re-dispatched while its worker is alive");
+
+  // Phase 2: 幸存 worker 退出 + worktree 消失（模拟其 fan-in 落地）⇒ 现观测使 task 离开排除集 ⇒
+  //   同一 driver 进程内重新可派。⛔ 冻结快照（旧缺陷）下此步恒不派 ⇒ 假。
+  try { fakeWorker.kill("SIGKILL"); } catch { /* already gone */ }
+  try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 5000);
+  const spawned = drv.events().filter((e) => e.event === "worker-spawned");
+  assert.equal(spawned.length, 1, "AC2: exactly one re-dispatch after the survivor finished (concurrency 1 + long-running worker ⇒ no re-dispatch loop)");
+  assert.equal(spawned[0].task, "gap-cs-a", "the re-dispatched task is the former cold-start survivor");
+});
+
+test("AC3 (cold-start-refresh) — per-pass observation: no one-time `const coldInflight` snapshot outside the loop; reassigned each pass", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  assert.doesNotMatch(src, /const\s+coldInflight\s*=/, "AC3: the one-time `const coldInflight` snapshot is gone (⛔ frozen snapshot ⇒ fake in-flight forever)");
+  assert.match(src, /let\s+coldInflight\s*=\s*new Set/, "coldInflight is a mutable per-pass binding, not a frozen snapshot");
+  assert.match(src, /coldInflight\s*=\s*enumerateColdStartInflight\(rootDir\)/, "coldInflight is re-observed via enumerateColdStartInflight each pass");
 });
 
 // ── gap-worker-driver-stopreason-latch-permanent-stop ──────────────────────────────────────────────

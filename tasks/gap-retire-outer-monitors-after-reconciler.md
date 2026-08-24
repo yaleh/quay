@@ -7,6 +7,9 @@ labels:
   - gap
 parent: null
 children: []
+depends_on:
+  - gap-worker-driver-reconcile-interval
+  - gap-worker-driver-async-selector-readypool
 extra: {}
 ---
 **type:** execution
