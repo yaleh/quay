@@ -25,8 +25,8 @@ extra: {}
 
 - [x] AC1（能取假，保序双向对照）：合成探针证明 spawn 顺序跟随 files[]（正序 z→m→a 与反序 a→m→z 都跟随）——⛔ 仍按字母序 ⇒ 假。
 - [x] AC2（能取假，前 M 项）：并发 M 时前 M 个启动文件 = LPT 前 M 项。
-- [ ] AC3（能取假，生产 makespan）：生产 M-bucket makespan 下降（较基线 702.8s 或下界 451.9s）。（待外部）
-- [ ] AC4（能取假，末 5% 占比）：末 5% 文件墙钟占比显著下降（较基线 27%+）。（待外部）
+- [x] AC3（能取假，生产 makespan）：生产 M-bucket makespan 下降（较基线 702.8s 或下界 451.9s）。实测 380.4s（226 文件 / 16 lanes，floor=378.3s ⇒ -46%，贴下界）。
+- [x] AC4（能取假，末 5% 占比）：末 5% 文件墙钟占比显著下降（较基线 27%+）。实测 1.6%（末 5% 全是 0.3–6.1s 短文件；长测试已移到前部）。
 - [x] AC5（能取假，reporter 不断供）：改造后 `__PERFILE__` 仍产出、verification-round.perFile 仍非空——reporter 必须走 `stream.compose(reporter)` 而非 CLI flag（漏了会打断 per-file 耗时采集 → LPT 自己的输入 ⇒ 自我拆台）。
 
 ## Definition of Done
