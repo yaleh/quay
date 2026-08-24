@@ -1,7 +1,7 @@
 ---
 id: gap-serve-handlers-split-by-concern
 title: serve-handlers.ts 按关切拆分（3559 行单体致 UI 任务全串行；发生率 2 过硬规则⑫）
-status: todo
+status: ready
 labels:
   - gap
   - defect
