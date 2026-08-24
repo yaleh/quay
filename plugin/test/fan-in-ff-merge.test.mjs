@@ -392,7 +392,9 @@ test("anti-livelock — ac63 4 real retry samples replay (11:55/12:39/12:42/13:5
     fs.writeFileSync(retries, realSamples.map((r) => JSON.stringify(r)).join("\n") + "\n");
     const esc = path.join(st, "escalations.jsonl");
 
-    const r = runMerge(["--task", "gap-ac63-judgment2-no-carrier", "--root", dir, "--suite-state", suite, ...capArgs, "--retry-record", retries, "--escalations", esc]);
+    // gap-fan-in-ff-retry-counter-scope: the attempt count now keys on runId — pass the SAME runId the
+    // 4 real records carry so the count sees them (a different/absent runId would read 0 prior failures).
+    const r = runMerge(["--task", "gap-ac63-judgment2-no-carrier", "--root", dir, "--suite-state", suite, ...capArgs, "--retry-record", retries, "--escalations", esc, "--run-id", "fm-gap-ac63-judgment2-no-carrier-1786707748654-tzaml5"]);
     assert.equal(r.status, 3, "replaying the 4 real ac63 retry records + one more ff failure (attempt 5) must trigger the anti-livelock action (判据2: 现状只升级无动作 ⇒ 红; 触发后动作机械定义)");
     assert.match(r.stderr, /ANTI-LIVELOCK/);
     const esRec = JSON.parse(fs.readFileSync(esc, "utf8").trim());
@@ -429,11 +431,69 @@ test("anti-livelock — ac80 2 real retry samples replay: a 3rd ff failure (the 
     // AC80 had 2 ff failures and develop kept advancing (4 advances during the workflow) — the gap
     // was that nothing would trigger if it hit the 3rd. Replay the 2 real records + one more failure:
     // the 3rd failure MUST trigger the anti-livelock action (the gap is now closed).
-    const r = runMerge(["--task", "gap-ac80-prompt-canonical-and-invariant-checker", "--root", dir, "--suite-state", suite, ...capArgs, "--retry-record", retries, "--escalations", esc]);
+    // gap-fan-in-ff-retry-counter-scope: pass the SAME runId the 2 real records carry so the count
+    // sees them (a different/absent runId would read 0 prior failures under per-runId counting).
+    const r = runMerge(["--task", "gap-ac80-prompt-canonical-and-invariant-checker", "--root", dir, "--suite-state", suite, ...capArgs, "--retry-record", retries, "--escalations", esc, "--run-id", "fm-gap-ac80-prompt-canonical-and-invariant-checker-1786720803526-arirtz"]);
     assert.equal(r.status, 3, "the 3rd ff failure (2 real prior failures + 1) escalates — the AC80 gap is closed");
     const esRec = JSON.parse(fs.readFileSync(esc, "utf8").trim());
     assert.equal(esRec.attempt, 3, "escalation records attempt 3 (2 prior + 1)");
     assert.equal(esRec.quietWindow.requested, true);
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+// ── gap-fan-in-ff-retry-counter-scope (AC1/AC2): attempt count is PER-DISPATCH (per-runId) ────────────
+// The retry record is append-only and accumulates across ALL dispatches. `maxFfRetries=3` in
+// fan-in-execute.js is a PER-DISPATCH budget (each fresh runId starts at 0). Before the fix, a taskId
+// count read a task that failed twice historically as "attempt 3" on a LATER dispatch's first real
+// try and escalated before spending its own budget. AC1 = a fresh dispatch's first failure is attempt
+// 1 (no escalation); AC2 = the fresh dispatch runs its OWN full 3-attempt budget.
+
+test("gap-fan-in-ff-retry-counter-scope — a fresh dispatch (new runId) does NOT inherit historical failures: attempts restart at 1 and run the full 3-attempt budget", () => {
+  const dir = makeTmp("scope");
+  const st = stateDir("scope");
+  try {
+    initRepo(dir);
+    const tip = makeTaskBranch(dir, "scope-t");
+    fs.writeFileSync(path.join(dir, "adv.txt"), "adv\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "adv");
+    const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const esc = path.join(st, "escalations.jsonl");
+    const capArgs = captureArgs(st, "scope-t", tip);
+
+    // Seed 2 failures under an OLD runId (a prior, completed dispatch) — a distinct runId string.
+    const oldRunId = "fm-scope-t-1111111111111-oldrun";
+    fs.writeFileSync(retries, [
+      JSON.stringify({ taskId: "scope-t", attempt: 1, developHead: "0".repeat(40), ts: "2026-08-14T10:00:00Z", epoch: 1786700000, runId: oldRunId, agentId: "a1", mergeTarget: "develop", error: "adv" }),
+      JSON.stringify({ taskId: "scope-t", attempt: 2, developHead: "1".repeat(40), ts: "2026-08-14T10:01:00Z", epoch: 1786700060, runId: oldRunId, agentId: "a2", mergeTarget: "develop", error: "adv" }),
+    ].join("\n") + "\n");
+
+    // The fresh dispatch carries a NEW runId.
+    const newRunId = "fm-scope-t-2222222222222-newrun";
+    const args = ["--task", "scope-t", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries, "--escalations", esc, "--run-id", newRunId];
+
+    // AC1: the fresh dispatch's FIRST failure is attempt 1 (a plain retry), NOT the inherited attempt 3.
+    const r1 = runMerge(args);
+    assert.equal(r1.status, 1, "fresh dispatch first failure is attempt 1 (plain retry), not inherited attempt 3");
+    assert.ok(!fs.existsSync(esc), "NO escalation on the fresh dispatch's first failure (AC1)");
+
+    // AC2: the fresh dispatch runs its OWN full 3-attempt budget (1-2 retry, 3 escalates).
+    assert.equal(runMerge(args).status, 1, "fresh dispatch second failure is attempt 2 (plain retry)");
+    const r3 = runMerge(args);
+    assert.equal(r3.status, 3, "fresh dispatch third failure escalates — its OWN budget, not the old dispatch's");
+    assert.match(r3.stderr, /ANTI-LIVELOCK/);
+
+    // The record now holds 2 historical + 3 fresh lines; the fresh attempts restart at 1 (not 3,4,5).
+    const lines = fs.readFileSync(retries, "utf8").trim().split("\n").filter(Boolean);
+    assert.equal(lines.length, 5, "2 historical + 3 fresh records");
+    const fresh = lines.slice(2).map(JSON.parse);
+    assert.deepEqual(fresh.map((r) => r.attempt), [1, 2, 3], "fresh dispatch attempts restart from 1");
+    assert.ok(fresh.every((r) => r.runId === newRunId), "fresh records carry the new runId");
   } finally {
     cleanup(dir);
     cleanup(st);
