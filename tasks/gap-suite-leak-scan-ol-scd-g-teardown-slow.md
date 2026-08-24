@@ -31,6 +31,7 @@ reap-wait 窗口/teardown 修正落地 develop；AC1-2 全勾；16-lane 下 ol-s
 
 ## Touches
 
-- plugin/scripts/tmux-leak-scan.sh（reap-wait 窗口读宿主，或 teardown 提速）
-- plugin/test/session-liveness.test.mjs（或对应测试）
+- plugin/scripts/tmux-leak-scan.sh（reap-wait 窗口读宿主——reap_wait_default 读 nproc，硬规则 4 推论二）
+- plugin/test/tmux-leak-scan.test.mjs（reap-wait 机制的对应测试）
+- scripts/test.sh（suite-tail leak-scan 注释同步：default 10000 → host-derived）
 - tasks/gap-suite-leak-scan-ol-scd-g-teardown-slow.md（自身）
