@@ -1732,6 +1732,85 @@ test("AC126 AC1 — the fan-in suite launch command passes --buckets <task-id> (
   assert.ok(setsidLine.includes("bash scripts/test.sh --buckets gap-ac126-wiring"), "the detached launch command must pass --buckets <task-id> to scripts/test.sh");
 });
 
+test("gap-suite-load-sampler-bypassed-by-fan-in-execute AC1 wiring — the detached suite-launch spawns the state-driven load sampler keyed to the fan-in runId", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-sampler-wiring", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-test-sampler-wiring", mergeTarget: "develop" },
+  });
+  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  // The sampler must be spawned from the detached launch (the direct run otherwise bypasses the ONLY
+  // spawner, full-suite-runner.ts) and keyed to the SAME runId mirror-full-suite-state.ts writes into
+  // full-suite-state.json at step 4.5 (so the /tests page joins them: readCurrentSuiteRunId → readSuiteLoadSamples).
+  assert.ok(launch.includes("suite-load-sampler.ts"), "suite-launch must spawn suite-load-sampler.ts");
+  assert.ok(launch.includes("--out-file"), "the sampler spawn must carry an explicit --out-file");
+  assert.ok(launch.includes("suite-load-fm-test-sampler-wiring.jsonl"), "sampler out-file must be suite-load-<runId>.jsonl keyed to the fan-in runId");
+  assert.ok(launch.includes('--run-id "fm-test-sampler-wiring"'), "sampler must receive the fan-in runId (joins the step-4.5 mirror-write)");
+  assert.ok(launch.includes("--interval 5"), "sampler must sample at the 5s default interval");
+  // State-driven stop: the outer launch establishes a running state file (single-quoted JSON, so bash
+  // does not strip the quotes — the template-literal quoting pitfall), the wrapper rm's it after the suite.
+  assert.ok(launch.includes(`printf '{"state":"running"}`), "the outer launch must establish a valid-JSON running state file before the detached suite starts");
+  assert.ok(launch.includes(`rm -f "/tmp/fan-in-suite-sampler-gap-test-sampler-wiring.state.json"`), "the wrapper must remove the state file after the suite so the sampler stops (state-driven, never a resident idle-spin)");
+  // 取假: the sampler spawn must NOT sit in the doc-only skip branch (no suite ran ⇒ no sampler).
+  const skipBranch = launch.slice(launch.indexOf("skip_reason=doc-only-delta"));
+  assert.ok(!skipBranch.includes("suite-load-sampler.ts"), "the doc-only skip branch must NOT spawn a sampler (no suite ran)");
+});
+
+test("gap-suite-load-sampler-bypassed-by-fan-in-execute AC1 REAL — the emitted sampler spawn samples while running and stops when the state file is removed", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-sampler-"));
+  const wt = path.join(tmp, "wt");
+  fs.mkdirSync(wt, { recursive: true });
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-sampler-real", worktree: wt, root: tmp, runId: "fm-test-sampler-real", mergeTarget: "develop" },
+  });
+  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  // Extract the EXACT sampler spawn command the phase-1 agent would run — verbatim, so the test catches
+  // the template-literal \n / quoting pitfalls the workflow header warns about (not a re-typed copy).
+  // Slice between `node …` and the wrapper's ` & cd "$1"` (the `&` that backgrounds the sampler) — a
+  // regex `[^&]*` would stop at the `&` inside `2>&1` and truncate the redirect.
+  const nodeIdx = launch.indexOf("node --no-warnings --experimental-strip-types");
+  const cdIdx = launch.indexOf(" & cd", nodeIdx);
+  assert.ok(nodeIdx !== -1 && cdIdx !== -1, "suite-launch must emit a suite-load-sampler.ts spawn command followed by the suite `cd`");
+  const samplerCmd = launch.slice(nodeIdx, cdIdx).replace(/--interval \d+(\.\d+)?/, "--interval 0.2");
+  // The sampler resolves through ${worktree}/plugin/scripts/… — symlink the REAL runtime tree so the
+  // temp worktree has a resolvable suite-load-sampler.ts (same pattern as the other REAL tests).
+  symlinkRuntimeTrees(wt, {});
+  const stateFile = "/tmp/fan-in-suite-sampler-gap-test-sampler-real.state.json";
+  const outFile = path.join(tmp, ".quay", "suite-load-fm-test-sampler-real.jsonl");
+  cleanup(stateFile); cleanup(outFile); cleanup(`${outFile}.pid`);
+  fs.writeFileSync(stateFile, JSON.stringify({ state: "running" }));
+  const child = spawn("bash", ["-c", samplerCmd], { stdio: "ignore", detached: true });
+  child.unref();
+  try {
+    let lines = [];
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try { lines = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean); } catch { lines = []; }
+      if (lines.length >= 1) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(lines.length >= 1, "the emitted sampler spawn wrote >=1 sample while the state was running");
+    const o = JSON.parse(lines[0]);
+    assert.equal(typeof o.t, "number", "every sample carries a numeric timestamp");
+    assert.ok("loadavg" in o, "every sample carries loadavg");
+    assert.ok("cpu_stall" in o, "every sample carries cpu_stall");
+    assert.ok("mem_avail" in o, "every sample carries mem_avail");
+    // The wrapper's terminal stop: remove the state file ⇒ the sampler exits on its next poll.
+    fs.rmSync(stateFile, { force: true });
+    const pidFile = `${outFile}.pid`;
+    assert.ok(fs.existsSync(pidFile), "sampler wrote its pid sidecar");
+    const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
+    let gone = false;
+    const stopDeadline = Date.now() + 10_000;
+    while (Date.now() < stopDeadline) {
+      try { process.kill(pid, 0); } catch { gone = true; break; }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(gone, "the sampler exited after the state file was removed (never a resident idle-spin)");
+  } finally {
+    try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+    cleanup(stateFile); cleanup(outFile); cleanup(`${outFile}.pid`); cleanup(tmp);
+  }
+});
+
 test("⑧ stage-2 wait block — completes the capture post-fields (cpu/end/wall/load/lane/suite_exit) on exit-marker hit", async (t) => {
   const { prompts } = await runWorkflow({
     args: { task: "gap-test-tb-poll", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-poll", mergeTarget: "develop" },
