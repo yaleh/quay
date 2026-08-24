@@ -2,7 +2,7 @@
 id: gap-worker-print-bg-wait-ceiling-600s
 title: worker 反复 exited-not-landed 根因：claude -p 模式后台任务等待上限 600s 掐死 fan-in——设
   PRINT_BG_WAIT_CEILING_MS=0 + driver 外部墙钟超时（SPEC 2026-08-16 裁定从未落地）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
