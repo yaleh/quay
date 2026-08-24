@@ -77,6 +77,13 @@ import {
   WORKER_PROCESS_NAME,
   parseIntervalMs,
   RESIDENT_INTERVAL_MS_DEFAULT,
+  workerPromptForTask,
+  buildContinueWorkerPrompt,
+  continueStateForTask,
+  readAcCheckState,
+  countBranchCommits,
+  branchHeadSubject,
+  lastExitedNotLandedReason,
 } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1350,6 +1357,152 @@ test("AC140-3 — override semantics unified: --worker-cmd is prefix, --worker-c
   // 缺省 ⇒ launchArgv("task-worker", prompt)。
   assert.deepEqual(workerArgvForTask("gap-x", "/r").slice(0, 4),
     ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p"]);
+});
+
+// ── gap-worker-worktree-continue-reuse ───────────────────────────────────────────────────────────
+// destroy-path 修复后 exited-not-landed 的 worktree 被【保留】但没人接着做：派发 prompt 仍是「create」
+// ⇒ 重派 worker 一上来 `git worktree add` 撞已存在对象 fatal。AC1（复用不撞死）：保留 worktree 在 ⇒
+// 续做 prompt（复用，⛔ 不含 create）。AC2（续做不重做）：续做 prompt 携带前一轮状态（分支提交 / AC
+// 勾选 / 失败原因）。
+
+test("AC1 (能取假) — workerPromptForTask / continueStateForTask: preserved worktree ⇒ continue prompt (reuse, ⛔ create); no worktree ⇒ create prompt", (t) => {
+  const root = makeGitRoot("continue");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    try { runGit(root, ["branch", "-D", "task/gap-cr"]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-cr", "ready");
+
+  // 无 worktree ⇒ 创建 prompt（旧行为）。
+  const createPrompt = workerPromptForTask("gap-cr", root);
+  assert.match(createPrompt, /create an isolated git worktree/, "no worktree ⇒ create prompt");
+  assert.doesNotMatch(createPrompt, /CONTINUE \(reuse/, "create prompt does not say reuse");
+  assert.equal(continueStateForTask(root, "gap-cr"), null, "no worktree ⇒ no continue state (create path)");
+
+  // 模拟 exited-not-landed 保留的 worktree ⇒ 续做 prompt。
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cr", wtPath]);
+  const contPrompt = workerPromptForTask("gap-cr", root);
+  assert.match(contPrompt, /CONTINUE \(reuse/, "preserved worktree ⇒ continue prompt");
+  assert.doesNotMatch(contPrompt, /create an isolated git worktree/, "AC1: continue prompt must NOT say create (create ⇒ git worktree add fatal)");
+  assert.match(contPrompt, /do NOT run `git worktree add`/, "AC1: reuse not create");
+  assert.ok(continueStateForTask(root, "gap-cr") != null, "worktree present ⇒ continue state gathered");
+});
+
+test("AC2 (能取假) — buildContinueWorkerPrompt carries prior-round state (branch commits / AC check / failure reason)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "worker exited 0 but task did not land",
+  });
+  assert.match(p, /3 commits/, "AC2: branch commit count carried");
+  assert.match(p, /head: "implement gap-x"/, "AC2: branch head subject carried");
+  assert.match(p, /checked 2\/5/, "AC2: AC check state carried (checked X/Y)");
+  assert.match(p, /because: worker exited 0 but task did not land/, "AC2: failure reason carried");
+  assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
+});
+
+test("AC2 — continueStateForTask gathers real state (own branch commits / AC checkboxes / last exited-not-landed reason)", (t) => {
+  const root = makeGitRoot("continue-state");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    try { runGit(root, ["branch", "-D", "task/gap-cs2"]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+
+  // task file with an AC section: 2 checked / 3 total.
+  const body = `---\nid: gap-cs2\nstatus: ready\n---\n\n## Proposal\n\nbody\n\n## Acceptance Criteria\n\n- [x] AC1 done\n- [ ] AC2 todo\n- [x] AC3 done\n`;
+  fs.writeFileSync(path.join(root, "tasks", "gap-cs2.md"), body);
+  runGit(root, ["add", "tasks/gap-cs2.md"]);
+  runGit(root, ["commit", "-q", "-m", "task gap-cs2"]);
+
+  // prior round's own commit on the task branch (HEAD..task/<id> must count exactly this, not the whole history).
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cs2", wtPath]);
+  fs.writeFileSync(path.join(wtPath, "impl.txt"), "implemented");
+  runGit(wtPath, ["add", "impl.txt"]);
+  runGit(wtPath, ["commit", "-q", "-m", "implement gap-cs2"]);
+
+  // prior round's outcome record (exited-not-landed with a reason).
+  fs.appendFileSync(
+    path.join(root, WORKER_OUTCOME_REL),
+    JSON.stringify({ ts: new Date().toISOString(), task: "gap-cs2", final_state: "exited-not-landed", failure_reason: "worker exited 0 but task did not land (status≠done or leftover worktree)" }) + "\n",
+    "utf8",
+  );
+
+  assert.equal(readAcCheckState(root, "gap-cs2").checked, 2, "AC checkboxes: 2 checked");
+  assert.equal(readAcCheckState(root, "gap-cs2").total, 3, "AC checkboxes: 3 total");
+  assert.equal(countBranchCommits(root, "gap-cs2"), 1, "own commits only (HEAD..task/<id> = 1, ⛔ not whole history)");
+  assert.equal(branchHeadSubject(root, "gap-cs2"), "implement gap-cs2", "branch head subject = the prior round's own commit");
+  assert.match(lastExitedNotLandedReason(root, "gap-cs2"), /did not land/, "last exited-not-landed reason read from outcome");
+
+  const st = continueStateForTask(root, "gap-cs2");
+  assert.ok(st != null, "continue state gathered for preserved worktree");
+  assert.equal(st.worktreePath, wtPath, "state carries the worktree path");
+  assert.equal(st.branchCommits, 1, "state carries own commit count");
+  assert.equal(st.acChecked, 2, "state carries AC checked");
+  assert.equal(st.acTotal, 3, "state carries AC total");
+  assert.match(st.failureReason, /did not land/, "state carries failure reason");
+});
+
+test("AC1 (integration, 复现) — re-dispatch of an exited-not-landed task passes the CONTINUE prompt to the worker (reuse, ⛔ create)", (t) => {
+  const root = makeGitRoot("continue-e2e");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  const capOut = path.join(root, "..", `captured-prompt-${path.basename(root)}.txt`);
+  const capScript = path.join(root, "..", `capture-prompt-${path.basename(root)}.sh`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    try { runGit(root, ["branch", "-D", "task/gap-ce"]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+    fs.rmSync(capOut, { force: true });
+    fs.rmSync(capScript, { force: true });
+  });
+
+  // task file with an AC section (1 checked / 2 total).
+  const body = `---\nid: gap-ce\nstatus: ready\n---\n\n## Proposal\n\nbody\n\n## Acceptance Criteria\n\n- [x] AC1 done\n- [ ] AC2 todo\n`;
+  fs.writeFileSync(path.join(root, "tasks", "gap-ce.md"), body);
+  runGit(root, ["add", "tasks/gap-ce.md"]);
+  runGit(root, ["commit", "-q", "-m", "task gap-ce"]);
+
+  // prior exited-not-landed round: worktree + branch + one own commit + an outcome record.
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-ce", wtPath]);
+  fs.writeFileSync(path.join(wtPath, "impl.txt"), "implemented");
+  runGit(wtPath, ["add", "impl.txt"]);
+  runGit(wtPath, ["commit", "-q", "-m", "implement gap-ce"]);
+  fs.appendFileSync(
+    path.join(root, WORKER_OUTCOME_REL),
+    JSON.stringify({ ts: new Date().toISOString(), task: "gap-ce", final_state: "exited-not-landed", failure_reason: "worker exited 0 but task did not land (status≠done or leftover worktree)" }) + "\n",
+    "utf8",
+  );
+
+  // capture the prompt the driver actually passes to the worker (--worker-cmd prefix appends it as the last arg).
+  fs.writeFileSync(capScript, `#!/bin/sh\nprintf '%s' "$1" > "${capOut}"\nexit 0\n`);
+  fs.chmodSync(capScript, 0o755);
+
+  let code = 0;
+  try {
+    runDriver(root, ["--task", "gap-ce", "--worker-cmd", `bash ${capScript}`]);
+  } catch (e) {
+    code = e.status;
+  }
+
+  // worker exit 0 + status≠done ⇒ exited-not-landed (the exact re-dispatch scenario; worktree preserved).
+  assert.equal(code, EXITED_NOT_LANDED_EXIT, "exit 0 + status≠done ⇒ driver exit 3 (exited-not-landed, worktree preserved)");
+
+  const prompt = fs.readFileSync(capOut, "utf8");
+  assert.match(prompt, /CONTINUE \(reuse/, "AC1: the re-dispatched worker got the CONTINUE prompt");
+  assert.doesNotMatch(prompt, /create an isolated git worktree/, "AC1: ⛔ continue prompt must not say create (create ⇒ git worktree add fatal)");
+  assert.match(prompt, /1 commits/, "AC2: carries branch commit count");
+  assert.match(prompt, /checked 1\/2/, "AC2: carries AC check state");
+  assert.match(prompt, /exited-not-landed because: worker exited 0 but task did not land/, "AC2: carries failure reason");
+  assert.equal(worktreePresentForTask(root, "gap-ce"), true, "worktree still preserved after re-dispatch (⛔ not cleaned)");
 });
 
 // ── AC150-3 (falsifiable): 资源门/halt 判定抽到 driver-shared.ts，worker-driver 只是 re-export ──

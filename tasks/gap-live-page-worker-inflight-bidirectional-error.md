@@ -1,7 +1,7 @@
 ---
 id: gap-live-page-worker-inflight-bidirectional-error
 title: /live 页在飞可见性双向错误（workerOutcomeOpen 终态排除不全 + 无派发时进程信号）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -25,8 +25,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，误报方向）：终态 worker（exited-not-landed/failed/timed-out）不再显示在 /live 在飞列表（⛔ 死任务仍显示「实现中」⇒ 假）。
-- [ ] AC2（能取假，漏报方向）：首次派发（无 worker-outcome 记录）的 worker 出现在 /live 在飞列表（⛔ 零记录任务看不到 ⇒ 假）。
+- [x] AC1（能取假，误报方向）：终态 worker（exited-not-landed/failed/timed-out）不再显示在 /live 在飞列表（⛔ 死任务仍显示「实现中」⇒ 假）。
+- [x] AC2（能取假，漏报方向）：首次派发（无 worker-outcome 记录）的 worker 出现在 /live 在飞列表（⛔ 零记录任务看不到 ⇒ 假）。
 
 ## Definition of Done
 
