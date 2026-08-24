@@ -43,7 +43,9 @@
         "name": "quay-task-worker",
         "launcher": "claude-fjdac",
         "model": "deepseek-v4-pro",
-        "env": {},
+        "env": {
+          "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0"
+        },
         "bare": false
       },
       "selector": {
