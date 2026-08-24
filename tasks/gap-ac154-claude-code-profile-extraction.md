@@ -1,7 +1,7 @@
 ---
 id: gap-ac154-claude-code-profile-extraction
 title: AC154 Claude Code profile 抽层（profiles/roles 分离 + bare 单层 + unset 显式）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
