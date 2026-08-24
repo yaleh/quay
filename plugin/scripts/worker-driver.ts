@@ -414,7 +414,23 @@ export function enumerateColdStartInflight(
   return out;
 }
 
-/** orphan worktree 清理结果（可观测：removed/分支删除/错误/存活跳过）。 */
+/** exit_code=143（128+SIGTERM=15）⇒ 外部 SIGTERM 杀——wrapper/shell 把信号转成退出码上报（Node 的 close
+ *  事件 code=143、signal=null），区别于 worker 自崩（真实非零退出码）。failed 桶正是用它区分「外部杀」
+ *  （driver 重启误伤 / 外部 kill，worker 正干着活被打断）与「自崩」（worker 缺陷）。 */
+export function isSigtermExitCode(exitCode: number | null): boolean {
+  return exitCode === 128 + signalExitCode("SIGTERM");
+}
+
+/** 该 task 分支相对 develop 是否有提交（直接量、可取假）：`git log develop..task/<id>` 非空 ⇒ 有实现
+ *  产出（worker 在 worktree 里提交过）；空 ⇒ 零提交无产出。读失败（非 git 仓库 / develop 或 task/<id>
+ *  分支不存在 / git 错误）⇒ null（硬规则 3b：读不懂 ≠ 无产出，⛔ 不得当「零提交」清掉）。 */
+export function taskBranchHasCommits(root: string, taskId: string): boolean | null {
+  const r = spawnSync("git", ["-C", root, "log", `develop..task/${taskId}`, "--oneline"], { encoding: "utf8" });
+  if (r.status !== 0 || r.error) return null;
+  return String(r.stdout ?? "").trim().length > 0;
+}
+
+/** orphan worktree 清理结果（可观测：removed/分支删除/错误/存活跳过/产出判定/信号区分）。 */
 export interface OrphanCleanupResult {
   /** 找到 worktree 且 `git worktree remove --force` 全部成功。 */
   removed: boolean;
@@ -427,6 +443,14 @@ export interface OrphanCleanupResult {
   /** worktree 有存活 worker 正在用 ⇒ 跳过清理（⛔ 不是「没找到」也不是「remove 失败」——独立取值，
    *  硬规则 3b：跳过 ≠ 已清）。false = 未跳过（已清 / 无 worktree / 正常失败）。 */
   skippedLiveWorker: boolean;
+  /** 清理前 `git log develop..task/<id>` 判产出的读数（直接量）。true = 有提交、false = 零提交、
+   *  null = 读不懂。false ⇒ 可清；true ⇒ 保留；null ⇒ fail-closed 保留（读不懂 ≠ 无产出）。 */
+  hasCommits: boolean | null;
+  /** 因「有提交 ⇒ 有实现产出」而跳过清理（⛔ 与 skippedLiveWorker 区分：后者是存活 worker 在用，前者是
+   *  分支有产出）。仅 hasCommits === true 时为 true。 */
+  preservedForCommits: boolean;
+  /** failed 桶按信号区分：final_state=failed 且 exit_code=143 ⇒ 外部 SIGTERM 杀（区别于 worker 自崩）。 */
+  sigtermExternal: boolean;
 }
 
 /**
@@ -443,15 +467,42 @@ export interface OrphanCleanupResult {
  * failed 终态触发本清理，而【原 worker】仍活、仍在用同一个 worktree——此时删除会连带误删原 worker 的
  * 共享 worktree+分支。故移除前先核：worktree 有存活 worker 正在用 ⇒ 跳过（skippedLiveWorker=true，
  * ⛔ 只清真 orphan）。workerCmdlines 是测试缝（null ⇒ 读真实 /proc）。
+ *
+ * gap-worker-cleanup-judgment-precision（清理判据精确化，AC1+AC2）：清理前查 `git log develop..task/<id>`
+ * 判有无产出（直接量、可取假）——零提交 ⇒ 无产出可清；有提交 ⇒ 有实现保留（⛔ 纯终态字符串布尔判断
+ * 会误删 SIGTERM 打断时有提交的 worktree）。failed 桶按信号区分：exit_code=143（外部 SIGTERM 杀）vs
+ * 自崩，前者有提交则保留。outcome 是终态上下文（finalState/exitCode）——测试与调用方注入，null ⇒ 不
+ * 区分信号（sigtermExternal=false，仅按 git log 判产出）。
  */
-export function cleanupOrphanWorktree(root: string, taskId: string, workerCmdlines: string[] | null = null): OrphanCleanupResult {
+export function cleanupOrphanWorktree(
+  root: string,
+  taskId: string,
+  workerCmdlines: string[] | null = null,
+  outcome: { finalState?: string | null; exitCode?: number | null } | null = null,
+): OrphanCleanupResult {
   const paths = worktreePathsForTask(root, taskId);
   if (paths.length === 0) {
-    return { removed: false, worktreePath: null, branchDeleted: false, error: null, skippedLiveWorker: false };
+    return {
+      removed: false, worktreePath: null, branchDeleted: false, error: null, skippedLiveWorker: false,
+      hasCommits: null, preservedForCommits: false, sigtermExternal: false,
+    };
   }
   const live = workerCmdlines ?? enumerateLiveWorkerCmdlines();
   if (hasLiveWorkerForTask(taskId, live)) {
-    return { removed: false, worktreePath: paths[0] ?? null, branchDeleted: false, error: null, skippedLiveWorker: true };
+    return {
+      removed: false, worktreePath: paths[0] ?? null, branchDeleted: false, error: null, skippedLiveWorker: true,
+      hasCommits: null, preservedForCommits: false, sigtermExternal: false,
+    };
+  }
+  // 判产出（AC1）：零提交 ⇒ 清；有提交 ⇒ 保留；读不懂 ⇒ fail-closed 保留（⛔ 不得当「零提交」清掉）。
+  const hasCommits = taskBranchHasCommits(root, taskId);
+  const sigtermExternal = (outcome?.finalState ?? null) === "failed" && isSigtermExitCode(outcome?.exitCode ?? null);
+  if (hasCommits !== false) {
+    // hasCommits === true（有提交）⇒ 保留；=== null（读不懂）⇒ 保留但不声称「有提交」。
+    return {
+      removed: false, worktreePath: paths[0] ?? null, branchDeleted: false, error: null, skippedLiveWorker: false,
+      hasCommits, preservedForCommits: hasCommits === true, sigtermExternal,
+    };
   }
   let error: string | null = null;
   let removed = true;
@@ -467,7 +518,10 @@ export function cleanupOrphanWorktree(root: string, taskId: string, workerCmdlin
     const bd = spawnSync("git", ["-C", root, "branch", "-D", `task/${taskId}`], { encoding: "utf8" });
     branchDeleted = bd.status === 0;
   }
-  return { removed, worktreePath: paths[0] ?? null, branchDeleted, error, skippedLiveWorker: false };
+  return {
+    removed, worktreePath: paths[0] ?? null, branchDeleted, error, skippedLiveWorker: false,
+    hasCommits, preservedForCommits: false, sigtermExternal,
+  };
 }
 
 /** 落地判定（AC1 判据）：landed = status=done ∧ 无残留 worktree。任一读失败 ⇒ landed=false
@@ -1038,13 +1092,18 @@ function runOneWorker({
         outcome.final_state !== "exited-not-landed" &&
         outcome.final_state !== "spawn-failed" &&
         outcome.final_state !== "not-dispatched";
-      const cleanup = shouldCleanup ? cleanupOrphanWorktree(rootDir, taskId) : null;
+      const cleanup = shouldCleanup
+        ? cleanupOrphanWorktree(rootDir, taskId, null, { finalState: outcome.final_state, exitCode: outcome.exit_code })
+        : null;
       const finalOutcome = cleanup
         ? {
             ...outcome,
             worktree_cleaned: cleanup.removed,
             worktree_cleanup_error: cleanup.error,
             worktree_cleanup_skipped_live: cleanup.skippedLiveWorker,
+            worktree_cleanup_has_commits: cleanup.hasCommits,
+            worktree_cleanup_preserved_commits: cleanup.preservedForCommits,
+            worktree_cleanup_sigterm_external: cleanup.sigtermExternal,
           }
         : outcome;
       appendOutcomeToFile(outcomeFile, finalOutcome);
