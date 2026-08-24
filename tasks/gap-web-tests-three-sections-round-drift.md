@@ -36,13 +36,13 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：web tests 页三个板块各自渲染出引用的 round 号/起始时刻（页面文本可查）。
-- [ ] AC2（能取假）：最新一轮无 perFile 时，测试时间线显示「最新一轮无 perFile 数据」的明确提示（而非静默回退；⛔ 仍静默显示旧轮 ⇒ 假）。
-- [ ] AC3（负控制）：三板块引用同一 round 时（正常情况），三者显示一致，不受标注改动影响。
+- [x] AC1（能取假）：web tests 页三个板块各自渲染出引用的 round 号/起始时刻（页面文本可查）。
+- [x] AC2（能取假）：最新一轮无 perFile 时，测试时间线显示「最新一轮无 perFile 数据」的明确提示（而非静默回退；⛔ 仍静默显示旧轮 ⇒ 假）。
+- [x] AC3（负控制）：三板块引用同一 round 时（正常情况），三者显示一致，不受标注改动影响。
 
 ## Definition of Done
 
-- [ ] AC1-3 全勾；serve-handlers.ts 改动落地到 develop；页面实测三板块各自标注 round。
+- [x] AC1-3 全勾；serve-handlers.ts 改动落地到 develop；页面实测三板块各自标注 round。
 
 ## Retires
 
@@ -51,5 +51,6 @@ extra: {}
 ## Touches
 
 - packages/quay/src/serve-handlers.ts（三板块 round 标注 + 无 perFile 提示）
+- packages/quay/src/observation.ts（TestRunRecord 增 runId 字段 + parseVerificationRound 解析，供负载曲线 runId→round 映射）
 - packages/quay/test/（对应测试，若新增断言）
 - tasks/gap-web-tests-three-sections-round-drift.md（自身）

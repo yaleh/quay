@@ -2148,6 +2148,11 @@ export interface TestRunRecord {
   // `test:complete` time) and the back-computed start (end − duration); present only on rows whose
   // perFile records carried `end_ms` (legacy perFile without timestamps omits both fields).
   perFile?: { file: string; durationMs: number; passed: boolean; endedAtMs?: number; startedAtMs?: number }[] | null;
+  // gap-web-tests-three-sections-round-drift — the round's suite runId (written by the fan-in thin
+  // writer, `pre-verified-round-record`). Absent on legacy/full-suite-runner rows → undefined (never a
+  // fabricated ""), the same absent-field contract as buckets/perFile. Lets the /tests page map the
+  // load curve's current runId (full-suite-state.json) back to its round number + startedAt.
+  runId?: string | null;
 }
 
 export interface TestsResult {
@@ -2229,6 +2234,9 @@ export function parseVerificationRound(line: string): TestRunRecord | null {
       // gap-test-detail-perfile-duration-failed — perFile (absent on legacy rows → undefined, the
       // same absent-field contract as buckets).
       ...(o.perFile !== undefined ? { perFile } : {}),
+      // gap-web-tests-three-sections-round-drift — runId (absent on legacy/full-suite-runner rows →
+      // undefined, same absent-field contract). Fan-in thin rows carry it.
+      ...(o.runId !== undefined ? { runId: str(o.runId) } : {}),
     };
   } catch {
     return null;

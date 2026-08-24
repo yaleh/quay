@@ -572,3 +572,126 @@ test("AC1/AC2: GET /tests renders a startedAt column per history row (carrier-so
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });
+
+// ── gap-web-tests-three-sections-round-drift: AC1/AC2/AC3 ─────────────────────────────────────────
+// The three /tests sections used to all claim 「最近一轮」 while plotting DIFFERENT rounds: the load
+// curve = the current runId, the timeline = the newest run WITH perFile (silently falling back), and
+// the history table = runs[0]. AC1 makes each section name its own round; AC2 surfaces the fallback
+// instead of hiding it; AC3 is the negative control (all three agree when they reference one round).
+
+/** Seed the drift scenario: newest round (red, NO perFile) + an older round (green, WITH perFile),
+ *  plus a full-suite-state.json whose runId points at the NEWEST (red) round. The three sections then
+ *  reference three DIFFERENT rounds (the proposal's bug). Returns the two runIds. */
+function seedDriftFixture(ws) {
+  const t0 = 1724374800000;
+  const runIdLatest = "fm-drift-latest-479-aaaaaa";
+  const runIdOlder = "fm-drift-older-478-bbbbbb";
+  fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+    // oldest→newest file order; readTests reverses → newest first.
+    JSON.stringify({ round: 478, startedAt: "2026-08-23T03:14:00.000Z", durationMs: 517000, state: "green", runner: "outer", scope: "worktree", runId: runIdOlder, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/a.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 500, startedAtMs: t0 + 500 - 210 }, { file: "packages/quay/test/b.test.mjs", durationMs: 12, passed: true, endedAtMs: t0 + 6000, startedAtMs: t0 + 6000 - 12 }] }),
+    JSON.stringify({ round: 479, startedAt: "2026-08-23T03:33:00.000Z", durationMs: 645000, state: "red", runner: "outer", scope: "worktree", runId: runIdLatest, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 0, fail: 1, cancelled: 0, tests: 2, failures: [] }),
+  ].join("\n"));
+  fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "red", runId: runIdLatest, startedAt: "2026-08-23T03:33:00.000Z" }));
+  fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runIdLatest}.jsonl`), [
+    JSON.stringify({ t: Date.now(), loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
+    JSON.stringify({ t: Date.now() + 5000, loadavg: 4.5, cpu_stall: 40.0, mem_avail: 7500.0 }),
+  ].join("\n"));
+  return { runIdLatest, runIdOlder };
+}
+
+test("AC1: the three sections each render their OWN referenced round (load curve ≠ timeline when the latest run has no perFile)", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-rounddrift-ac1-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seedDriftFixture(ws);
+    createStore(tasksDir).write("RD-AC1", { title: "round drift web tests", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests");
+    assert.equal(r.status, 200, "GET /tests returns 200");
+    // Load curve names the CURRENT runId's round (latest = red #479).
+    assert.ok(r.body.includes("负载曲线（round #479 · 03:33Z）"), "load curve heading names round #479");
+    // Timeline names the round it actually fell back to (#478 — the newest run WITH perFile).
+    assert.ok(r.body.includes("测试时间线（round #478 · 03:14Z）"), "timeline heading names round #478");
+    // History table's top row is the true latest (#479), marked ← 最新.
+    assert.ok(r.body.includes("#479 <span") && r.body.includes("← 最新"), "history top row marks #479 as 最新");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2: latest run without perFile shows the explicit 「最新一轮无 perFile 数据」 notice (no silent fallback)", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-rounddrift-ac2-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seedDriftFixture(ws);
+    createStore(tasksDir).write("RD-AC2", { title: "round drift no-perfile notice", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests");
+    assert.equal(r.status, 200, "GET /tests returns 200");
+    assert.ok(r.body.includes("最新一轮无 perFile 数据"), "explicit no-perFile notice is present");
+    assert.ok(r.body.includes("round #479 · 03:33Z"), "the notice names the latest (no-perFile) round");
+    assert.ok(r.body.includes("回退显示") && r.body.includes("round #478 · 03:14Z"), "the notice names the fallback round");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC3: negative control — all three sections reference the same round consistently when the latest run has perFile", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-rounddrift-ac3-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const t0 = 1724374800000;
+    const runId = "fm-drift-single-230-cccccc";
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 230, startedAt: "2026-08-23T01:00:00.000Z", durationMs: 500000, state: "green", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/a.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 500, startedAtMs: t0 + 500 - 210 }, { file: "packages/quay/test/b.test.mjs", durationMs: 12, passed: true, endedAtMs: t0 + 6000, startedAtMs: t0 + 6000 - 12 }] }),
+    ].join("\n"));
+    fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId, startedAt: "2026-08-23T01:00:00.000Z" }));
+    fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
+      JSON.stringify({ t: Date.now(), loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
+    ].join("\n"));
+    createStore(tasksDir).write("RD-AC3", { title: "round consistency web tests", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests");
+    assert.equal(r.status, 200, "GET /tests returns 200");
+    // All three sections name the SAME round (#230).
+    assert.ok(r.body.includes("负载曲线（round #230 · 01:00Z）"), "load curve names round #230");
+    assert.ok(r.body.includes("测试时间线（round #230 · 01:00Z）"), "timeline names round #230");
+    assert.ok(r.body.includes("#230 <span") && r.body.includes("← 最新"), "history top row marks #230 as 最新");
+    assert.ok(!r.body.includes("无 perFile 数据"), "no fallback notice in the consistent case");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
