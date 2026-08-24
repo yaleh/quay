@@ -1,7 +1,7 @@
 ---
 id: gap-serve-handlers-split-by-concern
 title: serve-handlers.ts 按关切拆分（3559 行单体致 UI 任务全串行；发生率 2 过硬规则⑫）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -21,9 +21,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，拆分落地）：serve-handlers.ts 不再是 3559 行单体（拆成 ≥4 个关切文件）；（⛔ 仍单体 ⇒ 假）。
-- [ ] AC2（能取假，行为不退化）：拆分后全量 suite 绿（路由/响应行为不变）；（⛔ suite 红 ⇒ 假）。
-- [ ] AC3（能取假，Touches 分散）：拆分后 T1-T6 六条任务 Touches 不再全部命中同一文件（分散到各自关切文件）；（⛔ 仍全命中 serve-handlers.ts ⇒ 假）。
+- [x] AC1（能取假，拆分落地）：serve-handlers.ts 不再是 3559 行单体（拆成 ≥4 个关切文件）；（⛔ 仍单体 ⇒ 假）。
+- [x] AC2（能取假，行为不退化）：拆分后全量 suite 绿（路由/响应行为不变）；（⛔ suite 红 ⇒ 假）。
+- [x] AC3（能取假，Touches 分散）：拆分后 T1-T6 六条任务 Touches 不再全部命中同一文件（分散到各自关切文件）；（⛔ 仍全命中 serve-handlers.ts ⇒ 假）。
 
 ## Definition of Done
 
