@@ -1,7 +1,7 @@
 ---
 id: gap-live-page-worker-inflight-bidirectional-error
 title: /live 页在飞可见性双向错误（workerOutcomeOpen 终态排除不全 + 无派发时进程信号）
-status: ready
+status: done
 labels:
   - gap
   - defect
