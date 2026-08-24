@@ -564,3 +564,216 @@ web "新建会话"表单需要且只需要**四个**选择：**profile**（wrapp
    见 §7.3 的 17:2xZ 更新）：落地前仍建议补一次（只切 `crossSessionInbound`，发送方固定），
    代价 = 一次 60 秒实验；**在此之前按"必须显式 accept"设计。**
 3. **§8.3 的 (a)/(b) 路线**：建议 (a)，但若人要 profile 自足（换机器即用），则须先设计凭据层。
+
+---
+
+# 第三轮（2026-08-24T17:3xZ）：人问"还有什么要验证的"⇒ 补验三条，全部有结论
+
+## 10. 三条补验（全部单变量对照，⛔ 非推断）
+
+### 10.1 投递成因【已定】——决定变量是接收方的 `permissions.defaultMode`，不是 cwd
+
+§7.3 留下的"成因未定、混淆变量≥3"现已用单变量对照解开。**四个样本**（发送方通道全部固定为
+`send-to-session.ts` 的 peerToken 路径或平台 SendMessage，cwd 与 settings 交叉变化）：
+
+```
+样本  cwd          recipient settings                       结果
+P0    /tmp         (无)                                     held → expired   （未送达）
+B     /tmp         crossSessionInbound:accept               送达且被消费
+P2    <repo>       (无)                                     marker 命中 0    （未送达）
+P1    <repo>       permissions.defaultMode=bypassPermissions marker 命中 10  （送达且被消费）
+                                                            RESULT #2 逐字："I received a message
+                                                            from peer session `script-905367`…"
+```
+**⇒ cwd 与结果不相关**（/tmp 和 repo 各出现一次送达、一次未送达）⇒ **cwd 被排除**。
+**⇒ 决定变量是接收方的 settings**，且**两条独立路径都能达成直通**：
+`permissions.defaultMode=bypassPermissions`（P1）**或** `crossSessionInbound:accept`（B）；
+两者皆无 ⇒ held（P0/P2）。
+**⇒ 这解释了 §7.3 的 25/25**：本项目所有会话都带
+`permissions.defaultMode: bypassPermissions`（`launch.settings.json:3-5`）⇒ 天然直通。
+
+**🔴 附带发现（与仓库现有注释冲突，值得单独记）**：`send-to-session.ts:14`/`:82-88` 的头注释写
+「用 peerToken ⇒ 对端把你当另一个会话 ⇒ **bypass 会话会 hold for approval**（"The sender did not
+attest its permission mode"，实测 2026-08-15，Claude Code 2.1.233）」。
+**而 P1 是 bypass 会话、走 peerToken 路径、直接送达且被消费 ⇒ 与该注释【相反】。**
+**⛔ 我不断言该注释"当时就错"** —— 本机现为 **2.1.241**，跨了 8 个 patch 版本，
+**"行为变了"与"注释当时写错了"两种可能我都没有对照能区分**。
+**⇒ 归属 outer：这是一条会误导后续读者的仓库注释**（有人照它设计就会多做一层不存在的审批），
+**建议按实测更新并注明版本**；⛔ 我不改 `.ts`（§D 边界）。
+
+### 10.2 `-p` 会话的权限模式【结论与 §6.4 的假设相反】——非 bypass 实际不可用
+
+**实测**：`-p --input-format stream-json --permission-mode manual`，要求它写一个文件。stdout 逐条：
+```
+system:init            → tools 列表齐全（Write 在内）
+assistant              → 决定调用 Write
+system:permission_denied  {"tool_name":"Write","tool_use_id":"…",
+                           "message":"Claude requested permissions to write to …,
+                                      but you haven't granted it yet."}
+user (tool_result)     → is_error:true，同一句话
+assistant / result     → "I need your permission to write to …. Please grant the permission…"
+文件实际是否创建         → 否（ls 不存在）
+```
+**⇒ 关键否定结论：stdout 上【没有】任何可回答的授权请求事件**（无 `control_request`、
+无 `can_use_tool` 往返）——只有一个**事后通知**式的 `system:permission_denied`，
+**工具调用已经被拒了，不是挂起等批准。⇒ web 端【无法】代用户"点同意"然后让它继续。**
+
+**⇒ §6.4 必须改写**：原文说"必须显式选权限模式并显示它"——**选择本身仍对**，
+但它隐含的"非 bypass 模式配人工审批也能工作"是**错的**。真实可用集合只有两种：
+```
+① permissions.defaultMode=bypassPermissions  ⇒ 全自主（且顺带获得消息直通，见 10.1）
+② 预先声明 allowedTools / 预授权              ⇒ 只能做被预先允许的事
+③ 其余（manual 等）                           ⇒ 需要授权的工具【直接失败】，会话空转
+```
+**⇒ 对本功能的硬含义（安全相关，须原样呈现给人）**：**一个"能干活"的 web 启动会话，
+实际上必然是 ① 或 ②**。①=全权限；②=需要在 profile 里预先枚举工具。
+**⛔ 不存在"从 web 逐次批准"这个中间档** —— 若要那个体验，得由 web server 自己做
+（例如以 ② 起会话 + 由 web 侧代理工具执行），**那是另一个量级的工程，不在本 SPEC 范围**。
+
+### 10.3 `--resume` 可用且上下文保留 ⇒ "重启会话"可以是【真重启】而非【重开】
+
+**实测**：取一个**已结束**的 `-p` 探针会话（transcript 33706 字节），跑
+`claude -p --resume <session-id> "你在本对话里的第一条回复逐字是什么？"`
+⇒ 回答 **`READY`**，与原会话第一条回复逐字一致。
+**⇒ 该答案只有读过原上下文才给得出（不是能猜的常见词）⇒ resume 真的载入了历史。**
+**⇒ 设计含义**：§3.4 的"重启会话"可以实现为 **`--resume <同一 sessionId>`**，
+用户的上下文不丢；**这也再次印证 §2.3「spawn 时钉 `--session-id`」的价值**——
+没有稳定 id 就没有 resume 的抓手。
+
+## 11. 现在还剩什么没验证（⇒ 直接回答人的问题）
+
+**已无【我能验而未验】的项。** 剩下三条**结构上不是验证问题，是裁定问题**（归人）：
+1. **实时性方案**：整页 meta-refresh / 保持手动刷新 / 专用 SSE 端点——**打破零客户端 JS 约定**这件事
+   需要人裁定，不是测出来的。
+2. **profile 路线 (a) 按名字引用 wrapper vs (b) 自足 profile + 独立凭据层**（§8.3）——取舍不是测量。
+3. **§10.2 揭示的安全取舍**：web 启动的"能干活"会话必然是全权限或预授权白名单，**人是否接受**。
+
+**⊢ 一条我不代拍的补充**：§10.1 发现的 `send-to-session.ts` 注释与实测冲突，**归 outer 处置**
+（改注释属 `.ts`，在我豁免面外）。
+
+---
+
+# 第四轮（2026-08-24T17:5xZ）：结构性重定位——quay 从【会话里的东西】变成【包裹会话的东西】
+
+## 12. 人的判断（原话）与它的实测支撑
+
+> 「本项目正从 `Claude Code 会话中的 quay` 转变为 `包裹 Claude Code 会话的 quay`。
+> 除了配置多种 Claude Code profile 以外，也需要能配置和选择**何时和如何使用**这些 profile；
+> 除了管理 web 上临时启动的会话以外，管理 `*-driver` 启动的会话也是必要的。
+> 关于 `*-driver` 本身，现在还是可以假设它们是使用**配置文件**设置的。
+> 我也希望**先在配置文件中**实现对 `*-driver` 启动的会话的设置，**以后再考虑如何在 web 上**设置它们。」
+
+### 12.1 一条实测把这个判断变成可操作的（我本轮直读，非转述）
+
+**会话管理的代码【全部】在编排层，产品层一行没有**：
+```
+packages/quay/src（产品，发 npm，承载 Provider ABI）
+  grep launchArgv|_launchSpec|launch.settings|claude agents  ⇒ 命中【1 个文件】= init.ts
+  而 init.ts 只做一件事：generateLaunchSettingsContent() 铺一个模板文件（:285）
+  ⇒ 产品【不管理会话】，只在初始化时【放一个别人用的配置模板】
+plugin/scripts（本实验的编排层，不发布）
+  同一组谓词 ⇒ 命中【10 个文件】（quay-launch.sh / worker-driver.ts / promotion-driver.ts /
+  quay-topology.sh / manager-start.sh / session-bootstrap.sh / quay-session.ts / …）
+  ⇒ 真正的会话生命周期【全在这里】
+```
+**⇒ 用人的话说：现在的 quay 确实是「会话里的东西」——会话管理是【围着 quay 的脚手架】，不是 quay 的一部分。**
+**⇒ 要变成「包裹会话的 quay」，缺的不是某个功能，是【会话成为产品的一等域对象】这件事本身。**
+
+### 12.2 与 Provider ABI 的类比（这不是新发明，是同一手法用第二次）
+
+quay 的既有核心抽象是 **Provider ABI**：产品**不关心任务存在哪**（native markdown / GitHub Issues），
+只对着 task view-model 编程，由 `.quay/config.yml` 声明启用哪个 provider。
+**⇒ 本次要的东西是它的镜像：产品不关心【会话怎么起、起在哪、用哪个模型/wrapper】**，
+只对着一个 session view-model 编程，由配置声明。**可以叫 Runner/Session ABI。**
+
+**⊢ 这个类比不是修辞，它直接给出两条设计约束**：
+1. **承载位置**：Provider 的声明在 `.quay/config.yml`（产品自己的配置面）。
+   ⇒ profile/policy 也应落在产品配置面（`.quay/config.yml` 或 `.quay/profiles.yml`），
+   **⛔ 不是 `.claude/launch.settings.json`** —— §8.2 坑③ 已指出后者是**寄生在 Claude Code 自己
+   settings 文件上的扩展键**（靠 `_` 前缀避让，对方哪天校验未知键就整体挂掉）。
+   **⊢ 第四轮给了坑③ 一个此前没有的【理由】**：不只是"寄生有风险"，而是**归属就错了**——
+   它是 quay 的配置，不该住在 Claude Code 的文件里。
+2. **抽象边界**：Provider ABI 的价值是**换后端不改 core**。对应地，Session ABI 的价值应是
+   **换 launcher/model/宿主不改调用方**——`worker-driver` 不该知道 `claude-fjdac` 这个名字，
+   它只该说「给我一个 `task-worker` 语义的会话」。**实测现状恰恰相反**：
+   `worker-driver.ts:613 launchArgv()` 硬编码 `bash quay-launch.sh <role> -p <prompt>`，
+   而 `quay-launch.sh` 再去 jq 读 wrapper 名 ⇒ **抽象在 bash 里，不在产品里。**
+
+## 13. 四层分解（人的三个要求各自落在哪一层）
+
+```
+L1 Profile     「怎么起一个会话」= launcher · model · env(含 unset) · permission-mode · tools/allowedTools · bare
+                 ⇒ 人的要求①「配置多种 profile」            ⇒ 已有雏形（_launchSpec.roles）+ AC154 在跟
+L2 Policy      「什么场合用哪个 profile」= 按 session-kind 绑定 · 条件选择 · 失败回退 · 组合/继承
+                 ⇒ 人的要求②「配置和选择【何时和如何】使用」 ⇒ 【全新，今天没有任何东西对应】
+L3 Consumers   「谁来起」= *-driver（配置文件驱动，人要求先做）· web 临时会话 · 长驻角色(tmux)
+                 ⇒ 人的要求③「管理 *-driver 启动的会话」    ⇒ driver 侧今天是硬编码 role 名
+L4 Registry/观测「起完之后统一可见/可投递/可管理」            ⇒ 本 SPEC §7 已设计（六条任务已立案）
+```
+**⊢ 关键判断：L2 是这次真正的新东西，L1 已有雏形、L4 已在做、L3 是把 L1+L2 接进 driver。**
+**⊢ 且 L2 缺失是【有历史代价的】，不是理论洁癖**（下节逐条给证据）。
+
+## 14. L2（policy）为什么必须单列——三条历史证据，全部已发生
+
+| # | 历史事件 | 今天为什么挡不住 | L2 若存在会怎样 |
+|---|---|---|---|
+| ① | `07fb3be7` outer/inner 模型改 `glm-5.3`，**因模型不可用被人手工回退** | profile 是**单值**，没有"主/备"概念 ⇒ 模型挂了只能人改配置再重启 | policy 表达 `primary: glm-5.3, fallback: deepseek-v4-pro`，**spawn 失败自动降级** |
+| ② | AC142：`fix-worker`/`selector` 的 `bare:true` + `claude-fjdac`（只给 `ANTHROPIC_AUTH_TOKEN`）⇒ **13/13 全败**，且 `task-worker` 因恰好没设该键而存活 | **没有任何一致性校验**（§8.2 实测：`plugin/test/launch-settings.test.mjs` 只做值钉死，不知道 launcher 是什么） | policy/profile **加载时**就拒绝不相容组合（`bare:true` ⇒ 必须提供 `ANTHROPIC_API_KEY`），⛔ 不是 spawn 时静默失败 |
+| ③ | 三个 worker role 逐字重复 `launcher: claude-fjdac` / `model: deepseek-v4-pro`（§8.2 坑②） | 无组合/继承 ⇒ 「给所有 worker 换模型」= 改三处，漏一处静默不一致 | profile 继承 + role 只声明差异（§8.2 已给出目标形态） |
+
+**⊢ 发生率**：①1 次（有 commit）②1 次（13/13，有 outcome 记录）③结构性长期存在。
+**⊢ 按硬规则⑫**：①② 各 1 次**尚未到"必须立新机制"的门槛**，**但它们不是我在要求新前置**——
+L2 本来就是人已经裁定要做的东西（要求②），**这三条只是给它定形态，不是给它找理由**。
+⇒ **⛔ 不得把这三条当成"发生率够了所以要做"的论证**（那会是我自己批评过的形态）；
+它们的用途是：**L2 落地时至少要覆盖这三种已发生的失败**，否则就是重造一个挡不住历史的机制。
+
+## 15. L3：`*-driver` 会话的配置化（人明确要求"先在配置文件里做"）
+
+### 15.1 人的排序与既有裁定一致，不是任意偏好
+
+人说「先配置文件，以后再考虑 web 设置」。**这与 `SPEC-unified-driver-architecture-2026-08-23.md:259-266`
+的既有硬分界【完全一致】**：
+```
+声明式配置（git 版本化 · 人写 · 重启才生效）  ⟷  运行时控制态（gitignored · 机器写 · 热变）
+```
+**⇒ driver 的 profile 绑定属【左侧】** ⇒ 若做成 web 可改，就是**机器改人的源文件**，
+正是该 SPEC 点名要避免的形态（同 CLAUDE.md 11b「未提交改动正在影响生产，而一次 `git checkout` 静默回退它」）。
+**⇒ 人的"先配置文件"不需要额外论证——它落在已有裁定的正确一侧。web 侧应是【只读展示】。**
+
+### 15.2 落地面（读代码给出，非设想）
+
+```
+今天：worker-driver.ts:613  launchArgv(role, prompt, root)
+        ⇒ ["bash", "<root>/plugin/scripts/quay-launch.sh", role, "-p", prompt]   ← role 名硬编码在调用点
+      promotion-driver.ts:209/:212 同形（fix-worker）
+      worker-driver.ts:1199        同形（selector）
+目标：调用点只说【语义 kind】，由 L2 policy 解析成 L1 profile，再由单一构造点出 argv
+      ⇒ 三个调用点不再各自知道 role 名与 launcher 名
+```
+**⊢ 已有的好地基**：`launchArgv` **已经是唯一构造点**（AC140-1 的成果）⇒ **L1/L2 只需接在它下面，
+⛔ 不需要重构三个调用点**。这是本次改动比看起来小的原因。
+
+**⊢ 一条必须保留的能力（⛔ 别在配置化时弄丢）**：`quay-launch.sh` 的
+`with_entries(select(.value != ""))`（`:98`）—— **空串 = 取消继承**，manager role 靠它取消 917k 三件套；
+而 `"0"` 是有效值会保留。**⇒ 新配置必须显式表达 `unset: [...]`**（§8.2 已记），
+否则 manager 的 profile 会静默继承 917k 而在 Anthropic 端压缩过晚报错（`session-launch-recipes.md:145-152` 记的真实故障）。
+
+## 16. 对已立六条任务的影响 + 建议的新增（⛔ 我不写任务体）
+
+**已立六条（T1–T6）不受本轮影响，可照常推进**——它们是 L4（观测/交互面），与 L1/L2/L3 正交。
+**唯一接触点是 T6（`gap-webui-session-lifecycle`）**：它已 `depends_on gap-ac154-...profile-extraction`，
+**方向正确**；本轮只是把它依赖的那个东西说清楚了（AC154 = L1，而 T6 还需要 L2/L3）。
+
+**建议的新增/调整（形态与归属由 outer 定，我只给判断）**：
+1. **AC154（L1 profile）不变，但需补一条**：承载位置应是**产品配置面**而非 `.claude/launch.settings.json`
+   （§12.2 给了它此前没有的理由：归属错了，不只是寄生有风险）。
+2. **新增一条 L2 policy**：至少覆盖 §14 的三种已发生失败（主备回退 / 加载时一致性校验 / 继承去重）。
+   **⛔ 不要做成"配置项的自由组合"**——那会变成第二个 `bare` 那样的两级歧义旋钮。
+3. **新增一条 L3 driver 绑定**：接在 `launchArgv` 之下，三个调用点改为只说语义 kind。
+   **人明确要求：配置文件先行，web 只读。**
+4. **⛔ 明确不做**：web 端编辑 driver 配置（§15.1，撞既有硬分界）。
+
+**⊢ 一条我不代拍的**：`packages/quay`（产品）vs `plugin/scripts`（编排）的归属——
+§12.1 实测显示会话管理今天 100% 在编排层。**若"包裹会话的 quay"是【产品】主张**，
+L1/L2/L3 应逐步进 `packages/quay`；**若只是本仓库开发循环的需要**，留在 `plugin/scripts` 也自洽。
+**这两者的差别是"quay 发布出去之后别人能不能用这套会话管理"** ⇒ **归人裁定，不归我也不归 outer。**
