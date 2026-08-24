@@ -40,6 +40,19 @@ manager 在时的当前倾向（本阶段优先）。
   那时清单条目必须携带**可机械求值的到期条件**（id 本身即是——检查器可 resolve 其 status），
   且检查器输出须四态可分（无条目 / 全部在册 / 有条目已 done·superseded·不存在 / 覆盖段解析不出），
   **⛔ 后两态不得与 PASS 同形**（硬规则 3b）。
+
+- **⚡ 显式排序（清单形，2026-08-24T11:0xZ manager 立，正是上一条描述的那个触发场景）**：
+  `gap-worker-needs-human-destroys-branch-worktree` 必须排在 `gap-worker-driver-stopreason-latch-permanent-stop`
+  **之前**——两者都是 delivery-critical 且都 touch `worker-driver.ts`（结构上互斥，同一时刻只能有一个在飞），
+  但仅按谓词平级选是不够的：**outer 2026-08-24T11:0xZ 实证一次真实级联**——stopreason-latch 的 worker
+  两度翻 done、两度因 destroy-path 缺陷被孤儿清理销毁（分支+worktree 全部消失，AC1-3+DoD 回到全未勾，
+  ~1h 实现墙钟白费），根因正是 destroy-path 缺陷本身**尚未修复** ⇒ **不先修 destroy-path，
+  stopreason-latch 每次重派都会被同一个缺陷再销毁一次，永远落不了地**。
+  **到期条件（可机械求值）**：`gap-worker-needs-human-destroys-branch-worktree` 的 status ∈
+  {done, superseded} ⇒ 本条排序约束自动失效，回落纯谓词平级选择（两者不再有依赖关系）。
+  **⊢ 与上面谓词形的关系**：这不是退回旧的"手写清单+散文失效"模式——到期条件是 status 检查（机械可判），
+  不是散文承诺；且只列了这一对的顺序关系，不是列全部候选，谓词仍然决定"谁进候选池"，本条只决定
+  "候选池内这两个具体 id 的相对先后"。
 - **覆盖段生效条件**：manager 在场（可见、维护）。manager 不在场时回落到默认段。
 
 ## 维护者字段
