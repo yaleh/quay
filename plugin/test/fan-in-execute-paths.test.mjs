@@ -2721,12 +2721,16 @@ test("fix-scope REAL machine-partition — a task WITHOUT a ## Touches section �
   assert.ok(verdict.inScope.includes("pkg/a/x.test.mjs"), "unscoped: non-family failures stay inScope (machine-partition only)");
 });
 
-test("fix-scope REAL leak-residual — a tmux-leak-scan: FAIL with no per-file failure ⇒ outOfScope leak-residual (never fixed as a Touches regression)", async (t) => {
+test("fix-scope REAL leak-residual — a tmux-leak-scan: FAIL on a LATER line of the multi-line log (with no per-file failure) ⇒ outOfScope leak-residual (never fixed as a Touches regression)", async (t) => {
   const task = "gap-test-fixscope-leak";
   const dir = makeFixScopeDir("fan-in-fixscope-leak-", task, "---\nid: gap-test-fixscope-leak\nstatus: ready\n---\n## Touches\n- tasks/gap-test-fixscope-leak.md\n- pkg/a/**\n");
   t.after(() => cleanup(dir));
   const log = `/tmp/fan-in-suite-${task}.log`;
-  fs.writeFileSync(log, "tmux-leak-scan: FAIL\nresidual tmux server skv-1234\n", "utf8");
+  // gap-fan-in-leak-fail-regex-missing-m-flag (AC1/AC2): the gate tests TMUX_LEAK_FAIL_RE against
+  // the WHOLE multi-line logText, not one line. Put the FAIL on a LATER line — without the `m`
+  // flag `^` anchors only to string start and this would be misclassified (leak-residual dead
+  // code). A normal passing line above it keeps this a real multi-line-log reproduction.
+  fs.writeFileSync(log, "✔ some passing test (1.2ms)\ntmux-leak-scan: FAIL\nresidual tmux server skv-1234\n", "utf8");
   t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
   const block = await fixScopeGateBlockFor(task, dir);
   const r = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir });

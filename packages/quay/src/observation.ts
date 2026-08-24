@@ -541,6 +541,12 @@ export const WORKER_OUTCOME_REL = ".quay/worker-outcome.jsonl";
  *  instant (AC2) and the worker-active discriminator — it carries no per-task list. */
 export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
 
+/** The worker-driver's spawned worker process `-n` name (worker-driver.ts WORKER_PROCESS_NAME —
+ *  `quay-launch.sh task-worker`). Core cannot import plugin/, so the name is mirrored here for the
+ *  /proc process-signal probe (方向二): a first-dispatched worker has no outcome record yet, so its
+ *  live process cmdline (`Task: <id>`) is the only carrier that shows it in-flight. */
+export const WORKER_PROCESS_NAME = "quay-task-worker";
+
 /** The subset of the outcome record readLive consumes. Unknown/missing fields degrade to null rather
  *  than a fabricated reading (hard rule ③b). */
 export interface WorkerOutcomeRecord {
@@ -571,23 +577,29 @@ export function parseWorkerOutcomeRecords(text: string): WorkerOutcomeRecord[] {
   return out;
 }
 
-/** A task's latest worker outcome is "open" (not landed) — the worker-driver still has it in play.
- *  The two "never actually ran" states (spawn-failed / not-dispatched) are NOT open: no worktree was
- *  ever created for them, so nothing is in flight. `completed` is the only landed state. A missing
- *  terminal state is NOT open (no evidence the task was dispatched — fail-closed to NOT in-flight,
- *  never a fabricated "open" from an unreadable field, hard rule ③b). */
-function workerOutcomeOpen(finalState: string | null): boolean {
-  if (finalState == null) return false;
-  return finalState !== "completed" && finalState !== "spawn-failed" && finalState !== "not-dispatched";
+/**
+ * A task's latest worker outcome is "open" (still in play). For the worker-driver this is NEVER true
+ * from the outcome carrier alone: the carrier is written only at worker END, so every `final_state`
+ * is terminal — completed | exited-not-landed | failed | killed | timed-out | spawn-failed |
+ * not-dispatched. A worker whose process is STILL RUNNING has no outcome record yet (方向二 surfaces
+ * those via the /proc process signal instead). gap-live-page-worker-inflight-bidirectional-error
+ * 方向一: the old list excluded only completed/spawn-failed/not-dispatched, leaving exited-not-landed
+ * / failed / killed / timed-out misjudged as in-flight (a destroyed worker shown as 实现中 forever).
+ * Whitelist, fail-closed (hard rule ③b): no terminal state is open, and a null / unknown state is
+ * NOT open either — never a fabricated "open" from an unreadable field.
+ */
+function workerOutcomeOpen(_finalState: string | null): boolean {
+  return false;
 }
 
 /**
  * Derive the worker-driver's in-flight set from its outcome carrier: for each task, keep its LATEST
- * record (most-recent `started_at`) and surface it as in-flight iff that record is open (final_state
- * ≠ completed / spawn-failed / not-dispatched). `implCompletedAtMs` is null (every open worker task
- * still needs implementing to land); `liveness` is "unknown" (fail-closed toward in-flight — the
- * driver manages its own orphan cleanup, so the board's workflow-events orphan concept does not
- * transfer). Pure and /proc-free — the same shape pairInFlight produces.
+ * record (most-recent `started_at`) and surface it as in-flight iff that record is open. After
+ * gap-live-page-worker-inflight-bidirectional-error 方向一 every `final_state` is terminal, so this
+ * set is now ALWAYS empty — the outcome carrier is written only at worker END and cannot signal a
+ * still-running worker. The live in-flight set comes from the /proc process signal
+ * (readLiveWorkerProcesses) instead; this function stays as the pure outcome-carrier reader (and its
+ * shape stays pairInFlight-compatible). Pure and /proc-free.
  */
 export function workerInFlightTasks(records: WorkerOutcomeRecord[], nowMs: number): InFlightTask[] {
   const latest = new Map<string, WorkerOutcomeRecord & { startedMs: number }>();
@@ -611,6 +623,69 @@ export function workerInFlightTasks(records: WorkerOutcomeRecord[], nowMs: numbe
       blocks: [],
       blockedBy: [],
     });
+  }
+  return out;
+}
+
+/** A live worker process (方向二): task id + process start wall-clock. */
+export interface LiveWorker {
+  taskId: string;
+  /** Process start wall-clock ms (from `/proc/<pid>/stat` starttime + btime). null when unreadable —
+   *  the caller falls back to the observation instant (fail-closed toward "just started", never a
+   *  fabricated long elapsed). */
+  startedAtMs: number | null;
+}
+
+/** Extract a task id from a worker process cmdline (the prompt carries `Task: <id>. Repo root: …`).
+ *  Pure; null when the cmdline is not a worker or carries no `Task:` marker. */
+export function workerTaskIdFromCmdline(cmdline: string): string | null {
+  if (!cmdline.includes(WORKER_PROCESS_NAME)) return null;
+  const m = /Task:\s*([A-Za-z0-9_-]+)/.exec(cmdline);
+  return m ? m[1] : null;
+}
+
+/** Process start wall-clock ms from `/proc/<pid>/stat` starttime (field 22, USER_HZ ticks since boot)
+ *  + btime (boot epoch seconds, from /proc/stat). null when either is unreadable. CLK_TCK = 100 is
+ *  USER_HZ on the x86 Linux serve target; a start time is a display nicety (the caller falls back to
+ *  nowMs), never a correctness gate. */
+function procStartTimeMs(procDir: string, pid: string, btimeSec: number | null): number | null {
+  if (btimeSec == null) return null;
+  try {
+    const statText = fs.readFileSync(path.join(procDir, pid, "stat"), "utf8");
+    // Format `pid (comm) state ppid …`; comm may contain spaces/parens, so parse from the LAST `)`.
+    const fields = statText.slice(statText.lastIndexOf(")") + 2).split(/\s+/);
+    const starttime = Number(fields[19]); // fields[0] is field 3 (state); starttime is field 22.
+    if (!Number.isFinite(starttime)) return null;
+    return (btimeSec + starttime / 100) * 1000;
+  } catch {
+    return null;
+  }
+}
+
+/** Scan `/proc` for live worker processes: every cmdline carrying `quay-task-worker` + `Task: <id>`
+ *  is a running worker (方向二 — the only carrier for a first-dispatched worker, which has no outcome
+ *  record yet). `procDir` is a test seam. /proc unreadable ⇒ [] (hard rule ③b: read-fail is NOT
+ *  "no live workers" — but for the display surface failing closed to "nothing shown" is the safe
+ *  direction, and the caller gates this on workerDriverActive so a non-worker workspace never scans). */
+export function readLiveWorkerProcesses(procDir: string = "/proc"): LiveWorker[] {
+  let entries: string[];
+  try { entries = fs.readdirSync(procDir); } catch { return []; }
+  let btimeSec: number | null = null;
+  try {
+    const statText = fs.readFileSync(path.join(procDir, "stat"), "utf8");
+    const bm = /(?:^|\n)btime\s+(\d+)/.exec(statText);
+    if (bm) btimeSec = Number(bm[1]);
+  } catch { /* no btime — start times degrade to null */ }
+  const out: LiveWorker[] = [];
+  for (const e of entries) {
+    if (!/^\d+$/.test(e)) continue;
+    let cmdline: string;
+    try {
+      cmdline = fs.readFileSync(path.join(procDir, e, "cmdline"), "utf8").replace(/\0/g, " ").trim();
+    } catch { continue; }
+    const taskId = workerTaskIdFromCmdline(cmdline);
+    if (!taskId) continue;
+    out.push({ taskId, startedAtMs: procStartTimeMs(procDir, e, btimeSec) });
   }
   return out;
 }
@@ -696,7 +771,10 @@ function readTaskStatusOnDisk(root: string, taskId: string): string | null {
  * namespace (`null`) keeps the run in-flight, so a non-worktree workspace still shows the raw
  * `--report inProgress` set (the serve.test.mjs AC2 pin).
  */
-export function readLive(root: string, { nowMs = Date.now() }: { nowMs?: number } = {}): LiveResult {
+export function readLive(
+  root: string,
+  { nowMs = Date.now(), liveWorkers = null }: { nowMs?: number; liveWorkers?: LiveWorker[] | null } = {},
+): LiveResult {
   const eventsDir = path.join(root, FAST_MODE_EVENTS_DIR);
   let inFlight: InFlightTask[] = [];
   let status: ObservationStatus = "ok";
@@ -750,6 +828,29 @@ export function readLive(root: string, { nowMs = Date.now() }: { nowMs?: number 
     }
   } catch {
     workerInFlight = [];
+  }
+
+  // gap-live-page-worker-inflight-bidirectional-error 方向二: the outcome carrier is written only at
+  // worker END, so a first-dispatched worker (no outcome record yet) is invisible to the outcome path.
+  // Surface it from the live-process signal — a /proc cmdline carrying `quay-task-worker` + `Task: <id>`.
+  // The AUTO scan is gated on the driver being active for THIS root (a synthetic/foreign workspace
+  // with no worker carriers has no workers for it, and scanning /proc would surface OTHER workspaces'
+  // workers — serve.test.mjs AC2 pins readLive against a workflow-events-only fixture). The
+  // `liveWorkers` test seam bypasses the gate.
+  const live = liveWorkers ?? (workerDriverActive(root) ? readLiveWorkerProcesses("/proc") : []);
+  for (const w of live) {
+    if (!w || !w.taskId) continue;
+    const startedAtMs = w.startedAtMs ?? nowMs;
+    workerInFlight.push({
+      taskId: w.taskId,
+      runId: `worker-${w.taskId}`,
+      startedAtMs,
+      implCompletedAtMs: null,
+      minutes: Math.max(0, (nowMs - startedAtMs) / 60_000),
+      liveness: "alive", // the process IS the live signal — this worker is observably running
+      blocks: [],
+      blockedBy: [],
+    });
   }
 
   // The driver's carrier IS the loop telemetry once the driver is the executor: an empty
