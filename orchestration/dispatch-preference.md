@@ -18,17 +18,28 @@ manager 不在时生效（inner/outer 独立运行时回落到这一段）。
 
 manager 在时的当前倾向（本阶段优先）。
 
-- **2026-08-24T07:4xZ 起（manager 裁定，实测驱动——见 `gap-worker-driver-stopreason-latch-permanent-stop`
-  与 `gap-worker-needs-human-destroys-branch-worktree` 两条任务体的量化证据）：以下两条
-  `label:delivery-critical` 任务优先于池中其它任务，除非结构上不可派（Touches 冲突/依赖未满）：**
-  - `gap-worker-driver-stopreason-latch-permanent-stop`（worker-driver 瞬时资源闸拒绝被永久 latch，
-    实测单次停摆损失 ≈3.4 条任务的槽位时间，且此刻仍在复发）
-  - `gap-worker-needs-human-destroys-branch-worktree`（AC 闸拒绝翻 done 后走孤儿清理销毁分支+worktree，
-    实测已发生 2 次数据丢失）
-  - 两条落地后（或从池中移除后），此条优先级项失效，回落到下一条「本阶段」倾向或默认段。
-- ~~本阶段（语义派发，AC54–AC57）：优先派发与阶段目标直接相关的任务~~ **陈旧，2026-08-24 manager 核实
-  ——AC54-57 所属阶段早已推进，`manager-phase-goal.md` 当前段为 AC54–AC78（详见该文件，不在此复制），
-  且当前实际派发已在 AC120+ 序列；本行不再代表当前倾向，保留仅供追溯，下次覆盖段整体刷新时删除。**
+- **⚡ 当前优先级（谓词形，2026-08-24T07:5xZ manager 立）：候选中凡满足
+  `frontmatter labels 含 delivery-critical` 者，一律优先于其它候选**，
+  除非结构上不可派（Touches 冲突 / 依赖未满 / 非 ready）。多条同时满足时，其相对顺序由 selector 按语义判断。
+
+  **⛔ 本条【不列任务 id】，这是刻意的设计**（2026-08-24 manager 自纠：初版列了两条 id + 一句散文
+  「两条落地后此条失效」，那是**无产物的自我承诺**——硬规则 9「守与不守在记录上无法区分 ⇒ 只能靠意志」；
+  且过期条目是**惰性**的：任务 done 后离开 ready 池，谓词永远匹配不到，**静默失效且与「从未设过优先级」同形**，
+  没有任何机件会报出来）。
+
+  **⊢ 谓词为何自动到期**：它合取了一个**语义项**（`delivery-critical` 标签——由 outer 在立案/晋升时按证据打，
+  **从不移除**：实测 72 条带该标签者中 done 69 / superseded 1 / ready 2）与一个**自行衰减项**
+  （候选集本身只含 ready 且未在飞的任务）。**到期由那个会自己衰减的项负责，不需要任何人清理。**
+  ⇒ 一般形式：**一条会过期的规则，必须包含一个自己会衰减的项**；只写标签的谓词照样会陈旧。
+
+  **⊢ 实测等价性（立本条时的负控制，2026-08-24T07:5xZ）**：该谓词此刻选出的集合 =
+  `{gap-worker-driver-stopreason-latch-permanent-stop, gap-worker-needs-human-destroys-branch-worktree}`，
+  与初版手写清单**逐字相同**；差别只在这两条落地后谓词自动选不中，而清单需要有人来删。
+
+  **⊢ 何时才该退回清单形**：仅当需要**谓词表达不了的粒度**（如「A 必须排在 B 之前，而两者都带该标签」）。
+  那时清单条目必须携带**可机械求值的到期条件**（id 本身即是——检查器可 resolve 其 status），
+  且检查器输出须四态可分（无条目 / 全部在册 / 有条目已 done·superseded·不存在 / 覆盖段解析不出），
+  **⛔ 后两态不得与 PASS 同形**（硬规则 3b）。
 - **覆盖段生效条件**：manager 在场（可见、维护）。manager 不在场时回落到默认段。
 
 ## 维护者字段
