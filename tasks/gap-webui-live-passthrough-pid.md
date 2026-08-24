@@ -30,6 +30,6 @@ pid 从 `readLiveWorkerProcesses` 读到 `/live` 响应全程透传；AC1 全勾
 ## Touches
 
 - packages/quay/src/observation.ts（readLiveWorkerProcesses / readLive / LiveWorker / InFlightTask）
-- packages/quay/src/serve-handlers.ts（/live handler）
+- packages/quay/src/serve-live.ts（/live handler）
 - packages/quay/test/observation.test.mjs（对应测试）
 - tasks/gap-webui-live-passthrough-pid.md（自身）

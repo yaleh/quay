@@ -34,6 +34,6 @@ extra: {}
 ## Touches
 
 - packages/quay/src/observation.ts（readTranscriptTail / 新渲染器）
-- packages/quay/src/serve-handlers.ts（/session/<sessionId> handler）
+- packages/quay/src/serve-sessions.ts（/session/<sessionId> handler）
 - packages/quay/test/observation.test.mjs（对应测试）
 - tasks/gap-webui-session-detail-view.md（自身）

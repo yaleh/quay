@@ -35,3 +35,9 @@ serve-handlers.ts 按关切拆分落地；AC1-3 全勾；T1-T6 Touches 更新；
 - packages/quay/src/serve*.ts（新关切文件）
 - packages/quay/test/serve-handlers.test.mjs（对应测试拆分）
 - tasks/gap-serve-handlers-split-by-concern.md（自身）
+- tasks/gap-webui-session-discovery-claude-agents-json.md（T1 Touches 更新）
+- tasks/gap-webui-live-passthrough-pid.md（T2 Touches 更新）
+- tasks/gap-webui-session-detail-view.md（T3 Touches 更新）
+- tasks/gap-webui-task-runs-block.md（T4 Touches 更新）
+- tasks/gap-webui-message-delivery-entry.md（T5 Touches 更新）
+- tasks/gap-webui-session-lifecycle.md（T6 Touches 更新）
