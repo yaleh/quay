@@ -34,4 +34,5 @@ reap-wait 窗口/teardown 修正落地 develop；AC1-2 全勾；16-lane 下 ol-s
 - plugin/scripts/tmux-leak-scan.sh（reap-wait 窗口读宿主——reap_wait_default 读 nproc，硬规则 4 推论二）
 - plugin/test/tmux-leak-scan.test.mjs（reap-wait 机制的对应测试）
 - scripts/test.sh（suite-tail leak-scan 注释同步：default 10000 → host-derived）
+- plugin/test/test-isolation-check.test.mjs（合法连带：DELTA 测试 runScan 固定 TMUX_LEAK_REAP_WAIT_MS 确定性小值——reap-wait 读宿主后真泄漏 --check 超其 30s spawnSync timeout ⇒ status null）
 - tasks/gap-suite-leak-scan-ol-scd-g-teardown-slow.md（自身）
