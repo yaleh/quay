@@ -32,9 +32,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，WAIT 不 latch）：构造一轮闸先拒后放行，断言同一个 driver 进程【不重启】前提下恢复派发（stopReason 不复位即恒不派 ⇒ 假）。
-- [ ] AC2（能取假，读数重采集）：`worker-round.jsonl` 相邻两条 `stop` 记录的 resource 读数**不得逐字节相同**（恒定读数 = 未重采集）。
-- [ ] AC3（能取假，不假退出）：pool 非空时 running.length===0 不直接退出；构造「池非空 + 闸刚放行」轮，断言 driver 不退出而是继续派发。
+- [x] AC1（能取假，WAIT 不 latch）：构造一轮闸先拒后放行，断言同一个 driver 进程【不重启】前提下恢复派发（stopReason 不复位即恒不派 ⇒ 假）。
+- [x] AC2（能取假，读数重采集）：`worker-round.jsonl` 相邻两条 `stop` 记录的 resource 读数**不得逐字节相同**（恒定读数 = 未重采集）。
+- [x] AC3（能取假，不假退出）：pool 非空时 running.length===0 不直接退出；构造「池非空 + 闸刚放行」轮，断言 driver 不退出而是继续派发。
 
 ## Definition of Done
 

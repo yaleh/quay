@@ -177,6 +177,13 @@ export const DEFAULT_STASH_MESSAGE = "worker-driver: stash before checkout (SPEC
  *  CONTROL_HEADER_NAME）已随控制面抽到 driver-shared.ts 并在本文件 re-export；本常量是 worker
  *  独有（进程名识别），保留在本文件。 */
 export const WORKER_PROCESS_NAME = "quay-task-worker";
+
+/** 常驻循环【无在飞 worker 且瞬时 WAIT】时的轮询间隔（ms，测试缝经 --interval 传小值）。与
+ *  promotion-driver 的 INTERVAL_MS_DEFAULT 同语义：resource-gate-wait / pool-empty 是瞬时态
+ *  （闸随负载降会放行、池随 promotion-driver 持续补），等 intervalMs 后重读而非退出
+ *  （gap-worker-driver-stopreason-latch-permanent-stop）。 */
+export const RESIDENT_INTERVAL_MS_DEFAULT = 30_000;
+
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -675,6 +682,14 @@ export function parseTimeoutMs(raw: string | undefined): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
+/** 解析 --interval <ms>（常驻循环无在飞 worker 且瞬时 WAIT 时的轮询间隔）。缺省
+ *  RESIDENT_INTERVAL_MS_DEFAULT；非法（非有限 / 负数）⇒ 缺省（⛔ 不因 flag 拼写炸常驻循环）。 */
+export function parseIntervalMs(raw: string | undefined): number {
+  if (raw == null) return RESIDENT_INTERVAL_MS_DEFAULT;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : RESIDENT_INTERVAL_MS_DEFAULT;
+}
+
 /** 一次 stash 的结果（AC2 可核：stashed=true 且 git stash list 可见；⛔ 绝不 discard）。 */
 export interface StashResult {
   stashed: boolean;
@@ -1099,16 +1114,22 @@ export interface ResidentOptions {
   pidFile?: string;
   /** liveness 检查命令覆盖（测试缝）；null = 用 defaultLivenessCheckArgv(rootDir, "worker")。 */
   livenessCmd: string[] | null;
+  /** 无在飞 worker 且瞬时 WAIT 时的轮询间隔（ms）；缺省 RESIDENT_INTERVAL_MS_DEFAULT。测试缝传小值。 */
+  intervalMs: number;
 }
 
 /**
  * 常驻选择环（AC1 常驻 + AC2 自主选任务 + AC3 判停）。
  *   循环：reap 已完成的 worker → 池非空且未达 cap 且未判停 ⇒ 走选择环（ready-pool-check → 减在飞集 →
- *   打散 → selector worker）→ spawn → 等一个结束 → 再 reap。判停（MCP halt / resource-gate WAIT /
- *   池空）⇒ 停止起新 worker，⛔ 不杀在飞（在飞 worker 全部跑完才退出）。退出码 = 首个非零 worker 码。
+ *   打散 → selector worker）→ spawn → 等一个结束 → 再 reap。判停分两态
+ *   （gap-worker-driver-stopreason-latch-permanent-stop，⛔ stopReason 一旦赋值永不复位 = 瞬时拒被永久 latch）：
+ *     - 终态（mcp-halt，人 halt 且明示终止）⇒ latch stopReason：停止起新 worker，在飞全部跑完才退出；
+ *     - 瞬时 WAIT（resource-gate-wait / pool-empty / Touches-deps 过滤）⇒ ⛔ 不 latch：本轮不派、
+ *       下一轮重读 stopCondition；无在飞 worker 时等 intervalMs 重读，⛔ 不退出（退出 = 把恢复外包给
+ *       supervisor 重启）。退出码 = 首个非零 worker 码（仅在终态 latch 后返回）。
  */
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
-  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd } = opts;
+  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs } = opts;
 
   // checkout 前 stash（阶段 2 ③）：主检出脏 ⇒ stash 一次（常驻循环起跑前），⛔ 不 discard。非 git no-op。
   const stash = stashIfDirty(rootDir);
@@ -1154,14 +1175,17 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
   };
 
-  /** 判停（AC3）：起新 worker 前逐轮读。halt 优先，其次 resource-gate WAIT；池空在选择环返回 null 时判。 */
-  const stopCondition = (): { stop: boolean; reason: string | null } => {
+  /** 判停（AC3）：起新 worker 前逐轮读。halt 优先（终态，latch）；其次 resource-gate WAIT（瞬时，
+   *  ⛔ 不 latch——gap-worker-driver-stopreason-latch-permanent-stop：WAIT 名字含 WAIT，负载高恰因在飞
+   *  worker 在跑、worker 结束负载降但闸再没被读 = 自我锁死反馈环）。瞬时 WAIT 只让本轮不派、
+   *  下一轮重读 stopCondition。 */
+  const stopCondition = (): { stop: boolean; reason: string | null; terminal: boolean } => {
     if (isHalted(rootDir)) {
-      return { stop: true, reason: "mcp-halt (control state halted — no new dispatch; in-flight workers untouched)" };
+      return { stop: true, reason: "mcp-halt (control state halted — no new dispatch; in-flight workers untouched)", terminal: true };
     }
     const rg = resourceGateCheck(rootDir, resourceGateArgv);
-    if (!rg.go) return { stop: true, reason: `resource-gate-wait: ${rg.reason}` };
-    return { stop: false, reason: null };
+    if (!rg.go) return { stop: true, reason: `resource-gate-wait: ${rg.reason}`, terminal: false };
+    return { stop: false, reason: null, terminal: false };
   };
 
   /** spawn 一个选中的 worker，并把 selector 的真实理由带进 outcome（AC2）。 */
@@ -1194,6 +1218,11 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     }
   };
 
+  // 无在飞 worker 且瞬时 WAIT 时的轮询（gap-worker-driver-stopreason-latch-permanent-stop）：等
+  // intervalMs 后重读闸/池，⛔ 不退出（退出 = 把恢复外包给 supervisor 重启，正是 1h48m 停摆的根）。
+  // plain setTimeout——驱动不注册 SIGTERM 处理器（默认终止），supervisor 的 stop 仍能即时杀掉驱动。
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
   let round = 0;
   while (true) {
     round += 1;
@@ -1209,11 +1238,16 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     }
 
     // 2. 池非空且未达 cap 且未判停 ⇒ 走选择环起下一个。
+    //    ⛔ stopReason 是【终态 latch】（仅 mcp-halt）；瞬时闸拒绝只记本轮 waitReason，下一轮重读
+    //    stopCondition（gap-worker-driver-stopreason-latch-permanent-stop：stopReason 一旦赋值永不复位 ⇒
+    //    瞬时拒被永久 latch ⇒ 1h48m 零派发）。
     let poolSeen: number | null = null;
+    let waitReason: string | null = null;
     while (running.length < cap && !stopReason) {
       const sc = stopCondition();
       if (sc.stop) {
-        stopReason = sc.reason;
+        if (sc.terminal) stopReason = sc.reason;
+        else waitReason = sc.reason;
         break;
       }
       const pool = readyPoolCheck(rootDir, readyPoolArgv, inFlightTasks(), cap);
@@ -1229,26 +1263,32 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // gap-launch-script-worker-cap-broken AC3 的 Touches 互斥过滤同属「spawn 前候选过滤」的两个维度，一并判。
       const candidates = touchesFiltered.filter((id) => depsReadyForDispatch(rootDir, id));
       if (candidates.length === 0) {
-        // 真池空（ready 减在飞后无候选）⇒ 终态停摆。池非空但全与在飞 Touches 重叠 ⇒ ⛔ 非终态：不设
-        // stopReason，外层等一个在飞 worker 结束释放 Touches 后重进选择环重新 filter（而非把「被 Touches
-        // 挡住」误当「池空」提前停摆）。
-        if (shuffled.length === 0) stopReason = "pool-empty (no dispatchable candidate in the ready pool)";
+        // 真池空（ready 减在飞后无候选）⇒ 瞬时 WAIT：记 pool-empty，下一轮重读（⛔ 不再 latch）。
+        //   池非空但全与在飞 Touches/deps 重叠 ⇒ 同为瞬时 WAIT：不设 stopReason（在飞 worker 结束释放
+        //   Touches 或依赖由别的任务落地后重进选择环重新 filter）。两者都不退出——等 intervalMs 重读。
+        if (shuffled.length === 0) waitReason = "pool-empty (no dispatchable candidate in the ready pool)";
         break;
       }
       const sel = runSelectorWorker(candidates, selectorArgv, rootDir);
       if (!sel) {
         // 候选非空但 selector 未能给出任何选择（理论上 parseSelectorOutput 必回退首个，不会 null）。
-        stopReason = "pool-empty (selector returned no candidate)";
+        waitReason = "pool-empty (selector returned no candidate)";
         break;
       }
       spawnSelected(sel);
     }
 
     // AC138-3 无条件心跳：每轮循环写一条（⛔ 池空/判停轮也写——outcome 在这些轮不写）。
-    writeRound(round, running.length, poolSeen, stopReason, liveness);
+    //   终态 stopReason 与瞬时 waitReason 都记 action=stop（观测面保留 stop_reason 读数，AC2）。
+    writeRound(round, running.length, poolSeen, stopReason ?? waitReason, liveness);
 
-    // 3. 无在飞 ⇒ 循环终了（判停，或池已排空）。
-    if (running.length === 0) break;
+    // 3. 无在飞 ⇒ 终态 halt（stopReason latch）才退出；瞬时 WAIT（池可能再补 / 闸可能已放行）⇒
+    //    等 intervalMs 重读，⛔ 不退出（gap-worker-driver-stopreason-latch-permanent-stop AC3）。
+    if (running.length === 0) {
+      if (stopReason) break;
+      await sleep(intervalMs);
+      continue;
+    }
 
     // 4. 等在飞 worker 结束（至少一个），再回环 reap + 补位。⛔ 从不主动杀在飞。
     await Promise.race(running.map((r) => r.promise));
@@ -1276,6 +1316,7 @@ export async function main(argv: string[]): Promise<number> {
   let livenessCmd: string | undefined;
   let concurrency: number | undefined;
   let timeoutRaw: string | undefined;
+  let intervalRaw: string | undefined;
   let pidFile: string | undefined;
   let outcomePath: string | undefined;
   let runId: string | undefined;
@@ -1297,6 +1338,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--liveness-cmd") livenessCmd = args[++i];
     else if (a === "--concurrency") concurrency = Number(args[++i]);
     else if (a === "--timeout") timeoutRaw = args[++i];
+    else if (a === "--interval") intervalRaw = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
     else if (a === "--outcome") outcomePath = args[++i];
     else if (a === "--run-id") runId = args[++i];
@@ -1311,6 +1353,7 @@ export async function main(argv: string[]): Promise<number> {
           "  [--root <repo>] [--worker-cmd \"<前缀>\"] [--worker-cmd-exact \"<argv>\"] [--pid-file <p>] [--outcome <p>] [--run-id <id>] [--json]\n" +
           "  ⛔ 无 --task ⇒ 常驻选择环（不再报错退出）\n" +
           "  [--selector-cmd \"<argv>\"] [--ready-pool-cmd \"<argv>\"] [--resource-gate-cmd \"<argv>\"] [--liveness-cmd \"<argv>\"]\n" +
+          "  [--interval <ms>]   无在飞 worker 且瞬时 WAIT 时的轮询间隔（缺省 30000；测试缝传小值）\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -1335,6 +1378,7 @@ export async function main(argv: string[]): Promise<number> {
 
   const outcomeFile = outcomePath ? path.resolve(outcomePath) : path.join(rootDir, WORKER_OUTCOME_REL);
   const timeoutMs = parseTimeoutMs(timeoutRaw);
+  const intervalMs = parseIntervalMs(intervalRaw);
 
   // 阶段 4（AC129）：无 --task ⇒ 常驻选择环（不再报错退出）。--task 显式批量派发路径不变。
   if (tasks.length === 0) {
@@ -1353,6 +1397,7 @@ export async function main(argv: string[]): Promise<number> {
       json,
       pidFile,
       livenessCmd: livenessCmd ? splitArgs(livenessCmd) : null,
+      intervalMs,
     });
   }
 
