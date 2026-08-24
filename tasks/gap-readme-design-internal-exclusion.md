@@ -1,7 +1,7 @@
 ---
 id: gap-readme-design-internal-exclusion
 title: README.md 加进 direct-to-develop-bypass-check design-internal 排除集 + b67a91cf 入 ruled 表
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -35,13 +35,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（根修，能取假）：README.md 直接提交不再报 bypass（design-internal）；⛔ 仍报 ⇒ 假。
-- [ ] AC2（快修，能取假）：b67a91cf 分类 ruledHistorical（非 bypass、非 ac65Authorized）。
-- [ ] AC3（不扩范围，能取假）：LICENSE / CHANGELOG.md / AGENTS.md 仍 code-surface（直改仍红）。
+- [x] AC1（根修，能取假）：README.md 直接提交不再报 bypass（design-internal）；⛔ 仍报 ⇒ 假。
+- [x] AC2（快修，能取假）：b67a91cf 分类 ruledHistorical（非 bypass、非 ac65Authorized）。
+- [x] AC3（不扩范围，能取假）：LICENSE / CHANGELOG.md / AGENTS.md 仍 code-surface（直改仍红）。
 
 ## Definition of Done
 
-- [ ] README.md 入排除集 + b67a91cf 入 ruled 表 + 其余 repo-root 文档仍 code-surface；AC1-3 全勾；正常 fan-in land。
+- [x] README.md 入排除集 + b67a91cf 入 ruled 表 + 其余 repo-root 文档仍 code-surface；AC1-3 全勾；正常 fan-in land。
 
 ## Retires
 

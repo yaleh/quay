@@ -150,6 +150,7 @@ test("PURE isDesignInternalPath — 记账/转向/遥测面 + manager 独占 + �
     "plugin/skills/manager/SKILL.md",
     "plugin/skills/manager/sub/deep.md",
     "CLAUDE.md",
+    "README.md",
     ".gitignore",
     ".gitattributes",
     ".npmrc",
@@ -173,7 +174,9 @@ test("PURE isDesignInternalPath — 代码/断言面（产品交付）不是设�
     "plugin/scripts/outer-cron-registry.ts",
     "packages/quay/src/mcp-server.ts",
     "scripts/test.sh",
-    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "AGENTS.md",
   ];
   for (const p of codeSurface) assert.equal(isDesignInternalPath(p), false, `代码面不应排除: ${p}`);
   // 反向：`fan-in-` 前缀只在 plugin/scripts|test 顶层豁免——不要误伤 loop-shipping 等。
@@ -228,6 +231,22 @@ test("PURE classifyCommit — 代码面 ∧ 不在锁窗 ⇒ bypass；设计内 
   const mixed = classifyCommit({ sha: "d", files: ["plugin/test/x.mjs", "tasks/gap-y.md"], epoch: 200, subject: "s" }, holds);
   assert.equal(mixed.bypass, true);
   assert.equal(mixed.designInternal, false);
+});
+
+test("PURE classifyCommit — README.md 设计内（非 bypass）；LICENSE/CHANGELOG.md/AGENTS.md 仍代码面（bypass）", () => {
+  const holds = [];
+  // AC1：README.md 直接提交 ⇒ 设计内，非 bypass（同 CLAUDE.md 类——纯 prose、仓库根、不被测试/构建解析）。
+  const readme = classifyCommit({ sha: "r1", files: ["README.md"], epoch: 200, subject: "docs: README" }, holds);
+  assert.equal(readme.designInternal, true, "README.md 设计内（AC1 根修）");
+  assert.equal(readme.bypass, false, "README.md 直接提交不再报 bypass（AC1）");
+  assert.deepEqual(readme.codeSurfaceFiles, []);
+
+  // AC3：LICENSE / CHANGELOG.md / AGENTS.md 仍代码面 ⇒ 直改仍红（⛔ 不扩范围）。
+  for (const f of ["LICENSE", "CHANGELOG.md", "AGENTS.md"]) {
+    const c = classifyCommit({ sha: `c-${f}`, files: [f], epoch: 200, subject: "chore" }, holds);
+    assert.equal(c.designInternal, false, `${f} 仍代码面（AC3 不扩范围）`);
+    assert.equal(c.bypass, true, `${f} 直改仍红（AC3 能取假）`);
+  }
 });
 
 // ── PURE: checkDirectCommits — 聚合 + denominator 计数（AC3 谓词口径）──────────────────────────
@@ -562,6 +581,20 @@ test("AC3 回放·真实 git — cddc55e2（ruled 豁免）不再被误标；非
   assert.equal(vv.violations[0].bypass, true);
 });
 
+test("AC2 回放·真实 git — b67a91cf（manager 委托 outer 写 README）分类 ruledHistorical，非 bypass 非 ac65Authorized", (t) => {
+  const d = realCommitData("b67a91cf");
+  if (!d) {
+    t.skip("样本 sha 不在本 repo（b67a91cf）——真实 git 回放跳过，fixture 回放仍覆盖");
+    return;
+  }
+  assert.ok(d.files.includes("README.md"), "b67a91cf 真提交触及 README.md");
+  const v = checkDirectCommits([{ ...d, action: "commit" }], []);
+  assert.equal(v.violations.length, 0, `b67a91cf（ruled 豁免）必须不再误标: ${JSON.stringify(v.classified.map((c) => ({ sha: c.sha.slice(0, 8), bypass: c.bypass, ac65: c.ac65Authorized, ruled: c.ruledHistorical })))}`);
+  assert.equal(v.classified[0].ruledHistorical, true, "b67a91cf 命中 ruled 表 ⇒ ruledHistorical（AC2 快修）");
+  assert.equal(v.classified[0].bypass, false, "b67a91cf 非 bypass（AC2）");
+  assert.equal(v.classified[0].ac65Authorized, false, "ruled 豁免是独立分类，非 ac65Authorized（AC2）");
+});
+
 test("AC3 回放·CLI — cddc55e2 exit 0（ruledHistorical，非 bypass 非 ac65Authorized）；7e64a86b exit 1（真直投仍红）；混合只红真直投", (t) => {
   if (!realCommitData("cddc55e2") || !realCommitData("7e64a86b")) {
     t.skip("样本 sha 不在本 repo——CLI 回放跳过");
@@ -590,6 +623,20 @@ test("AC3 回放·CLI — cddc55e2 exit 0（ruledHistorical，非 bypass 非 ac6
   assert.equal(bySha["cddc55e2"].ac65Authorized, false);
   assert.equal(bySha["7e64a86b"].ruledHistorical, false);
   assert.equal(bySha["7e64a86b"].confirmedBypass, true);
+});
+
+test("AC2 回放·CLI — b67a91cf exit 0（ruledHistorical 可见 + README.md 设计内）", (t) => {
+  if (!realCommitData("b67a91cf")) {
+    t.skip("样本 sha 不在本 repo——CLI 回放跳过");
+    return;
+  }
+  const r = runChecker(["--root", REPO_ROOT, "--commits", "b67a91cf"]);
+  assert.equal(r.status, 0, `b67a91cf（ruled 豁免 + README.md 设计内）必须 GREEN(exit 0): ${r.stdout}${r.stderr}`);
+  const out = jsonOut(r);
+  assert.equal(out.ok, true);
+  assert.equal(out.evaluated, true);
+  assert.equal(out.denominator.ruledHistoricalCommits, 1, "b67a91cf 计入 ruledHistorical（AC2 快修可见）");
+  assert.equal(out.denominator.codeSurfaceCommits, 0, "README.md 设计内 ⇒ 非代码面（AC1 根修）");
 });
 
 test("AC3 回放·CLI — 全量扫描（生产基线 b11ce720）NOT-EVALUATED：reflog 被 gc 剪 ⇒ 不伪装成「未发现 direct」", (t) => {
