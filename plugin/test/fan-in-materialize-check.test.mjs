@@ -14,8 +14,9 @@
 //         non-fan-in workflow, unparseable, empty script)
 //   PURE  isUnder / worktreeRootOf — path-segment-safe under-check; worktree-root extraction
 //   PURE  judgeRecord — all verdict paths:
+//         NOT-APPLICABLE  non-bootstrap task (isBootstrapHit=false) — never RED (AC1)
 //         GREEN  worktree file exists + materialized == worktree file
-//         RED    worktree file exists + materialized != worktree file (fallback — the finding)
+//         RED    worktree file exists + materialized != worktree file, bootstrap-HIT (fallback — the finding)
 //         NE     worktree gone + no reconstruction
 //         GREEN  worktree gone + materialized == worktree@fanIn
 //         GREEN  worktree gone + materialized == worktree@dispatch-HEAD
@@ -168,10 +169,52 @@ test("PURE judgeRecord — worktree exists + mismatch ⇒ RED (fallback — the 
   fs.writeFileSync(wtFile, "WORKTREE_LATEST_BLOCK"); // the worktree's own version
   // materialized script is the MAIN version (lacks the worktree's latest block)
   const rec = { ...REC, script: "MAIN_VERSION_WITHOUT_THE_BLOCK" };
+  // default isBootstrapHit=null ⇒ fail-closed (judged as bootstrap-HIT) ⇒ RED
   const v = judgeRecord(rec, wtFile, null);
   assert.equal(v.ok, false);
   assert.equal(v.evaluated, true);
   assert.equal(v.kind, "red-worktree-exists-mismatch");
+});
+
+test("PURE judgeRecord — non-bootstrap (isBootstrapHit=false) + worktree mismatch ⇒ NOT-APPLICABLE (no RED, AC1)", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-mat-judge-"));
+  t.after(() => cleanup(dir));
+  const wtFile = path.join(dir, "fan-in-execute.js");
+  fs.writeFileSync(wtFile, "WORKTREE_LATEST_BLOCK"); // worktree evolved (post-dispatch sync)
+  const rec = { ...REC, script: "MAIN_VERSION_WITHOUT_THE_BLOCK" }; // materialized MAIN version
+  const v = judgeRecord(rec, wtFile, null, false);
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, false);
+  assert.equal(v.kind, "not-applicable-non-bootstrap");
+});
+
+test("PURE judgeRecord — bootstrap-hit (isBootstrapHit=true) + worktree mismatch ⇒ RED (AC2)", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-mat-judge-"));
+  t.after(() => cleanup(dir));
+  const wtFile = path.join(dir, "fan-in-execute.js");
+  fs.writeFileSync(wtFile, "WORKTREE_LATEST_BLOCK");
+  const rec = { ...REC, script: "MAIN_VERSION_WITHOUT_THE_BLOCK" };
+  const v = judgeRecord(rec, wtFile, null, true);
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.kind, "red-worktree-exists-mismatch");
+});
+
+test("PURE judgeRecord — non-bootstrap + worktree gone + would-be-fallback ⇒ NOT-APPLICABLE (no reconstruction needed)", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-mat-judge-"));
+  t.after(() => cleanup(dir));
+  const wtFile = path.join(dir, "fan-in-execute.js"); // gone
+  const rec = { ...REC, script: "BASE" };
+  // even a reconstruction that WOULD be RED (base + taskTouchedWorkflow) is bypassed for non-bootstrap
+  const recon = {
+    baseSha: "b".repeat(40), fanInSha: "f".repeat(40),
+    baseContent: "BASE", fanInContent: "FINAL_WORKTREE",
+    dispatchHeadContent: "DISPATCH_HEAD", taskTouchedWorkflow: true,
+  };
+  const v = judgeRecord(rec, wtFile, recon, false);
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, false);
+  assert.equal(v.kind, "not-applicable-non-bootstrap");
 });
 
 test("PURE judgeRecord — worktree gone + no reconstruction ⇒ NOT-EVALUATED (never conflated with green)", (t) => {
@@ -352,6 +395,50 @@ test("CLI — GREEN when a worktree-scriptPath dispatch materialized the WORKTRE
   assert.equal(out.evaluated, true);
   const ok = out.checks.find((c) => c.runId === "wf_ok-01");
   assert.equal(ok.verdict, "green-worktree-version-materialized");
+});
+
+test("CLI — non-bootstrap task: worktree-vs-materialized mismatch is NOT-APPLICABLE (no RED, AC1)", (t) => {
+  const fx = makeCliFixture();
+  t.after(() => cleanup(fx.base));
+  // A non-bootstrap task file: Touches lists ONLY itself (no fan-in orchestration file).
+  const tasksDir = path.join(fx.base, "tasks");
+  fs.mkdirSync(tasksDir, { recursive: true });
+  fs.writeFileSync(path.join(tasksDir, "gap-foo.md"),
+    "---\nid: gap-foo\n---\n## Touches\n- tasks/gap-foo.md\n");
+  // Materialized script is the MAIN version (lacks the marker) while the worktree file on disk has the
+  // marker (worktree evolved / post-dispatch sync) — a mismatch that MUST NOT redden a non-bootstrap task.
+  writeWf(fx.projectDir, "wf_nonbootstrap-01.json", {
+    scriptPath: path.join(fx.worktreeRoot, ".claude", "workflows", "fan-in-execute.js"),
+    script: "export const meta = { name: 'fan-in-execute' };\n// (main version — no bootstrap marker)\n",
+  });
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--project-dir", fx.projectDir, "--tasks-dir", tasksDir, "--workflow-events-dir", path.join(fx.base, "no-events"), "--json"], { encoding: "utf8" });
+  assert.equal(res.status, 0, `expected exit 0 (no RED for non-bootstrap), got ${res.status}: ${res.stdout}`);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.ok, true);
+  const nb = out.checks.find((c) => c.runId === "wf_nonbootstrap-01");
+  assert.equal(nb.verdict, "not-applicable-non-bootstrap");
+  assert.equal(nb.ok, true);
+  assert.equal(nb.evaluated, false);
+});
+
+test("CLI — bootstrap-hit task: worktree-vs-materialized mismatch is still RED (AC2)", (t) => {
+  const fx = makeCliFixture();
+  t.after(() => cleanup(fx.base));
+  // A bootstrap-HIT task file: Touches lists a fan-in orchestration file.
+  const tasksDir = path.join(fx.base, "tasks");
+  fs.mkdirSync(tasksDir, { recursive: true });
+  fs.writeFileSync(path.join(tasksDir, "gap-foo.md"),
+    "---\nid: gap-foo\n---\n## Touches\n- .claude/workflows/fan-in-execute.js\n");
+  writeWf(fx.projectDir, "wf_bootstrap-01.json", {
+    scriptPath: path.join(fx.worktreeRoot, ".claude", "workflows", "fan-in-execute.js"),
+    script: "export const meta = { name: 'fan-in-execute' };\n// (main version — no bootstrap marker)\n",
+  });
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--project-dir", fx.projectDir, "--tasks-dir", tasksDir, "--workflow-events-dir", path.join(fx.base, "no-events"), "--json"], { encoding: "utf8" });
+  assert.equal(res.status, 1, `expected exit 1 (RED for bootstrap-hit), got ${res.status}: ${res.stdout}`);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.ok, false);
+  const bs = out.checks.find((c) => c.runId === "wf_bootstrap-01");
+  assert.equal(bs.verdict, "red-worktree-exists-mismatch");
 });
 
 test("CLI — NOT-EVALUATED when no in-scope worktree-scriptPath records exist", (t) => {
