@@ -21,7 +21,7 @@ depends_on: []
 
 **根因**：`plugin/test/session-liveness-helpers.mjs` 的 `isolateTmuxEnv(sockDir)`（:378）只设 `TMUX_TMPDIR`（隔离 tmux socket）+ `delete env.TMUX`，**没碰 `HOME`/`HISTFILE`**。`makeEnvProbe`/`makeNoEnvProbe` 用它起的 `tmux new-session -d … "bash"` 是真交互式 shell、继承真实 `$HOME`，`send-keys` 发的 `exec -a claude-probe sleep 10000 &` 被这个 bash 记进真实 `~/.bash_history`。
 
-**修法（单点，⛔ 不逐文件打补丁）**：`isolateTmuxEnv` 返回的 env 加 `HISTFILE=/dev/null`（或指向 tmp 目录内的隔离路径，与既有 `TMUX_TMPDIR` 隔离同款手法）——`grep -rl isolateTmuxEnv plugin/test/` 命中 **12 个测试文件**共用这个 helper，单点修复传播到全部 12 个消费者。
+**修法**：给 fixture 的 tmux bash pane 构造 env 的每个 `isolateTmuxEnv` 拷贝加 `HISTFILE=/dev/null`（与既有 `TMUX_TMPDIR` 隔离同款手法）。⚠️ **原「单点」前提不成立**（`grep -rl` 只数名字、未验证是否共用同一 helper）：12 个命中文件里只有 **8 个 `import` 共享 helper**（`session-liveness-helpers.mjs`）；**3 个文件自带本地副本**（`inner-session-check` / `session-topology` / `quay-init-tmux-detection`，各自 `new-session … "bash"` + `send-keys "exec -a claude-probe …"` 污染），`session-liveness-events` 另有 **2 处内联 `{...process.env, TMUX_TMPDIR: sockDir}`** 拷贝（未走已 import 的 helper）。故需 共享 helper + 3 本地副本 + 2 内联（改为调已 import 的 helper）一并修，否则「真实 bash_history 不再被污染」不成立。
 
 ## Plan
 
@@ -42,6 +42,10 @@ depends_on: []
 
 ## Touches
 
-- plugin/test/session-liveness-helpers.mjs（isolateTmuxEnv 加 HISTFILE 隔离，单点覆盖 12 消费者）
-- plugin/test/session-liveness-restart.test.mjs（test：probe 跑后 bash_history 不变 / env 含 HISTFILE 隔离）
+- plugin/test/session-liveness-helpers.mjs（共享 isolateTmuxEnv 加 HISTFILE 隔离，覆盖 8 个 import 消费者）
+- plugin/test/inner-session-check.test.mjs（本地 isolateTmuxEnv 副本加 HISTFILE）
+- plugin/test/session-topology.test.mjs（本地 isolateTmuxEnv 副本加 HISTFILE）
+- plugin/test/quay-init-tmux-detection.test.mjs（本地 isolateTmuxEnv 副本加 HISTFILE）
+- plugin/test/session-liveness-events.test.mjs（2 处内联 env 拷贝改用已 import 的 isolateTmuxEnv）
+- plugin/test/session-liveness-restart.test.mjs（test：R7 env 含 HISTFILE 隔离 / R8 probe 跑后 bash_history 不变）
 - tasks/gap-test-fixture-pollutes-bash-history.md（自身）

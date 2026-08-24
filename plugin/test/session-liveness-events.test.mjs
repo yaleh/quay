@@ -426,7 +426,7 @@ test("AC2 — quay-init --loop lays down session-liveness.sh VERBATIM; the sessi
 test("AC3/AC7 — the laid-down script, run --once, identifies THIS project's own outer (real run, not file-exists)", async () => {
   const ws = makeTmp();
   const sockDir = path.join(ws, "sock"); fs.mkdirSync(sockDir, { recursive: true });
-  const env = { ...process.env, TMUX_TMPDIR: sockDir }; delete env.TMUX;
+  const env = isolateTmuxEnv(sockDir); // gap-test-fixture-pollutes-bash-history: HISTFILE-isolated (was an inline copy of the helper)
   try {
     const r = runInit(ws, ["--loop", "--root", ws, "--project", "proj",
       "--test-command", "node --test", "--tmux-session", "ol-cold:0.0", "--worktree-root", diskWorktreeRoot()]);
@@ -488,7 +488,7 @@ test("AC9 — orchestration/session-liveness.env is the OUTER's OWN config (mana
 
   const ws = makeTmp();
   const sockDir = path.join(ws, "sock"); fs.mkdirSync(sockDir, { recursive: true });
-  const env = { ...process.env, TMUX_TMPDIR: sockDir }; delete env.TMUX;
+  const env = isolateTmuxEnv(sockDir); // gap-test-fixture-pollutes-bash-history: HISTFILE-isolated (was an inline copy of the helper)
   try {
     fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
     const ns = tmux(["new-session", "-d", "-s", "ol-env", "-n", "outer", "bash"], env);
