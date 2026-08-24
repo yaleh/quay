@@ -1,7 +1,7 @@
 ---
 id: gap-suite-load-sampler-bypassed-by-fan-in-execute
 title: suite-load-sampler 被 AC84 fan-in 直跑绕过 ⇒ web /tests 负载曲线断供 5+ 小时（数据源断供，非渲染坏）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -24,7 +24,7 @@ extra: {}
 ## Acceptance Criteria
 
 - [x] AC1（能取假，数据源恢复）：fan-in-execute 直跑套件时，`.quay/suite-load-*.jsonl` 产生新样本（⛔ 一轮直跑后仍无新样本 ⇒ 假）。
-- [ ] AC2（能取假，非渲染假象）：web `/tests` 负载曲线区块有可绘制样本（⛔ 空串省略 ⇒ 假）。
+- [x] AC2（能取假，非渲染假象）：web `/tests` 负载曲线区块有可绘制样本（⛔ 空串省略 ⇒ 假）。
 
 ## Definition of Done
 
