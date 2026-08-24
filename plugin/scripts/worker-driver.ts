@@ -617,7 +617,8 @@ export interface WorkerCmdOptions {
   exact: string | null;
 }
 
-/** 缺省 worker prompt（单一真相源：worker 的 full-chain prompt 内容只在此一处）。 */
+/** 创建 prompt（无保留 worktree 时的 full-chain prompt，单一真相源）。续做 prompt 见
+ *  buildContinueWorkerPrompt；两者由 workerPromptForTask 按「保留 worktree 在不在」择一。 */
 export function buildWorkerPrompt(task: string, root: string): string {
   return [
     `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2).`,
@@ -634,7 +635,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
  *  否则 prefix 非空 ⇒ 前缀 + prompt（--worker-cmd，wrapper/测试前缀可用，prompt 作为末参数追加）；
  *  否则 ⇒ launchArgv("task-worker", prompt)（配置承载的缺省，走 quay-launch.sh）。 */
 export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOptions = { prefix: null, exact: null }): string[] {
-  const prompt = buildWorkerPrompt(task, root);
+  const prompt = workerPromptForTask(task, root);
   if (opts.exact != null) {
     const a = splitArgs(opts.exact);
     return a.length > 0 ? a : launchArgv("task-worker", prompt, root);
@@ -651,7 +652,162 @@ export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOpt
  *  prompt 里【直接】要求 worker 以 scriptPath 调 fan-in-execute workflow——驱动直调 ⇒ A6「检查 fan-in
  *  是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
 export function defaultWorkerArgv(task: string, root: string): string[] {
-  return launchArgv("task-worker", buildWorkerPrompt(task, root), root);
+  return launchArgv("task-worker", workerPromptForTask(task, root), root);
+}
+
+// ── 续做复用（gap-worker-worktree-continue-reuse）──────────────────────────────────────────────
+// destroy-path 修复（0a8e7a8d）落地后 exited-not-landed 的 worktree 被【正确保留】但没人接着做：
+// 派发 prompt 仍是 buildWorkerPrompt 的「create an isolated git worktree」⇒ 重派 worker 一上来就
+// `git worktree add` 撞已存在对象硬失败（路径+分支都在 ⇒ fatal）。本段补「派发前检测已有 worktree ⇒
+// 走续做 prompt（复用 + 携带前一轮状态）」，让保留的 worktree 被【接着做】而非从头重做（57 次量级）。
+// ⛔ 驱动仍只做机械读取（git log / 任务文件 AC 段 / worker-outcome.jsonl），不调 LLM 判断。
+
+/** 续做状态：exited-not-landed 保留 worktree 的任务重派时，派发前机械搜集「前一轮做到哪」。 */
+export interface ContinueWorkerState {
+  /** 保留 worktree 的路径（`git worktree list --porcelain` 的 worktree <path> 行）。null = 读不懂。 */
+  worktreePath: string | null;
+  /** task/<id> 分支【自己】的提交数（HEAD..task/<id>，⛔ 不含继承历史）。null = 读不懂（git 失败）；0 = 读懂了但无提交。 */
+  branchCommits: number | null;
+  /** 分支最新【自己】提交主题（HEAD..task/<id>）。null = 无提交 / 读不懂。 */
+  branchHeadSubject: string | null;
+  /** AC 勾选状态（勾了几条）。null = 任务文件 AC 段读不懂（硬规则 3b：读不懂 ≠ 零）。 */
+  acChecked: number | null;
+  /** AC 总条数。null = 任务文件 AC 段读不懂（与 checked 同源）。 */
+  acTotal: number | null;
+  /** 上次 exited-not-landed 的失败原因（worker-outcome.jsonl 该 task 最近一条）。null = 无记录 / 读不懂。 */
+  failureReason: string | null;
+}
+
+/** AC 勾选状态（AC2）：读任务文件的 Acceptance Criteria 段，数 `- [x]`（勾）与 `- [ ]`（未勾）。
+ *  段从 `## Acceptance Criteria` / `## AC`（含 `（draft）` / `(draft)` 后缀）标题起，到下一个 `## ` 标题止。
+ *  文件缺失 / 无 AC 段 ⇒ {checked:null,total:null}（硬规则 3b：读不懂 ≠ 零——与「读到 0 条」可区分）。 */
+export function readAcCheckState(root: string, taskId: string): { checked: number | null; total: number | null } {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
+  } catch {
+    return { checked: null, total: null };
+  }
+  const lines = text.split("\n");
+  let inAc = false;
+  let found = false;
+  let checked = 0;
+  let total = 0;
+  for (const line of lines) {
+    if (/^##\s+/i.test(line)) {
+      if (inAc) break; // 下一个标题 ⇒ AC 段结束
+      if (/^##\s+(Acceptance Criteria|AC)\b/i.test(line)) {
+        inAc = true;
+        found = true;
+      }
+      continue;
+    }
+    if (!inAc) continue;
+    if (/^\s*-\s*\[[xX]\]/.test(line)) {
+      checked += 1;
+      total += 1;
+    } else if (/^\s*-\s*\[\s*\]/.test(line)) {
+      total += 1;
+    }
+  }
+  if (!found) return { checked: null, total: null };
+  return { checked, total };
+}
+
+/** task/<id> 分支「自己的」提交数（AC2「分支已有提交」）——`HEAD..task/<id>`：只数前一轮 worker 提交的
+ *  实现（⛔ 不含继承的 develop 历史，否则恒为整库提交数、无信息）。HEAD = 主检出当前分支（=develop，
+ *  驱动在主检出跑、stash 后仍停在 develop）。git 失败 / 分支不存在 ⇒ null（读不懂 ≠ 0 提交）。 */
+export function countBranchCommits(root: string, taskId: string): number | null {
+  const r = spawnSync("git", ["-C", root, "rev-list", "--count", `HEAD..task/${taskId}`], { encoding: "utf8" });
+  if (r.status !== 0 || r.error) return null;
+  const out = String(r.stdout ?? "").trim();
+  if (out === "") return 0;
+  const n = Number(out);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** task/<id> 分支最新【自己】提交主题（AC2「分支已有提交」的 head 上下文，`HEAD..task/<id>`）。
+ *  无自己的提交 / 读失败 ⇒ null。 */
+export function branchHeadSubject(root: string, taskId: string): string | null {
+  const r = spawnSync("git", ["-C", root, "log", "-1", "--format=%s", `HEAD..task/${taskId}`], { encoding: "utf8" });
+  if (r.status !== 0 || r.error) return null;
+  const out = String(r.stdout ?? "").trim();
+  return out === "" ? null : out;
+}
+
+/** 该 task 最近一条 exited-not-landed 的失败原因（AC2「上次失败原因」，读 worker-outcome.jsonl）。
+ *  无记录 / 读失败 ⇒ null（读不懂 ≠ 无失败——但续做 prompt 以 "(unknown)" 呈现，不伪装成「没有失败」）。 */
+export function lastExitedNotLandedReason(root: string, taskId: string): string | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, WORKER_OUTCOME_REL), "utf8");
+  } catch {
+    return null;
+  }
+  let last: string | null = null;
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let rec: { task?: unknown; final_state?: unknown; failure_reason?: unknown };
+    try {
+      rec = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (rec.task === taskId && rec.final_state === "exited-not-landed") {
+      last = typeof rec.failure_reason === "string" ? rec.failure_reason : null;
+    }
+  }
+  return last;
+}
+
+/** 派发前搜集续做状态（AC1 复用 / AC2 状态）。⛔ 无 worktree（worktreePresentForTask 非 true）⇒ null
+ *  （走创建 prompt）。worktree 读不懂（null）⇒ null（创建，与「确认无残留」同向——撞死由 git 自己报，
+ *  比误判复用更安全；且读不懂时 `git worktree add` 同样会失败，属 git 不可用的同一次故障）。 */
+export function continueStateForTask(root: string, taskId: string): ContinueWorkerState | null {
+  if (worktreePresentForTask(root, taskId) !== true) return null;
+  const paths = worktreePathsForTask(root, taskId);
+  const ac = readAcCheckState(root, taskId);
+  return {
+    worktreePath: paths[0] ?? null,
+    branchCommits: countBranchCommits(root, taskId),
+    branchHeadSubject: branchHeadSubject(root, taskId),
+    acChecked: ac.checked,
+    acTotal: ac.total,
+    failureReason: lastExitedNotLandedReason(root, taskId),
+  };
+}
+
+/** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
+ *  状态（分支提交 / AC 勾选 / 失败原因）供 worker 从保留 worktree 继续。⛔ 不含 "create an isolated
+ *  git worktree"（AC1 取假判据——旧 prompt 逐字说 create 是撞死根因）。 */
+export function buildContinueWorkerPrompt(task: string, root: string, state: ContinueWorkerState): string {
+  const wt = state.worktreePath ?? "(unknown path)";
+  const commits = state.branchCommits == null ? "?" : String(state.branchCommits);
+  const head = state.branchHeadSubject ? ` (head: "${state.branchHeadSubject}")` : "";
+  const ac = state.acChecked == null || state.acTotal == null ? "?" : `${state.acChecked}/${state.acTotal}`;
+  const reason = state.failureReason ?? "(unknown)";
+  return [
+    `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2).`,
+    `Task: ${task}. Repo root: ${root}.`,
+    `CONTINUE (reuse, ⛔ do NOT create): a worktree for ${task} already exists at ${wt}`,
+    `on branch task/${task} from a prior exited-not-landed round — reuse it; do NOT run \`git worktree add\``,
+    `(it would fail: the path/branch already exists). Prior round state: branch task/${task} already has`,
+    `${commits} commits${head}; Acceptance Criteria currently checked ${ac};`,
+    `the last round exited-not-landed because: ${reason}.`,
+    `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
+    `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch),`,
+    `(2) run the suite, (3) ff-merge to develop via the fan-in-execute workflow`,
+    `(scriptPath, args={task,worktree,root,runId,mergeTarget}; worktree=${wt}).`,
+    `You own this worktree fully; apart from the final merge do not touch develop.`,
+  ].join(" ");
+}
+
+/** 派发前选 prompt：保留 worktree 在 ⇒ 续做 prompt，无 ⇒ 创建 prompt。单一决策点——显式批量派发
+ *  （runTask）与常驻选择环（spawnSelected）都经 workerArgvForTask 走到这里。 */
+export function workerPromptForTask(task: string, root: string): string {
+  const state = continueStateForTask(root, task);
+  return state != null ? buildContinueWorkerPrompt(task, root, state) : buildWorkerPrompt(task, root);
 }
 
 /** 常见信号的 shell 惯例退出码（128+signum）；未知信号给 0（被杀本身已是非零）。 */
