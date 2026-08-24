@@ -21,8 +21,8 @@ extra: {}
 本任务重定范围到两条**已核实**的真问题：
 
 1. **过时误导注释（错误立案源）**：`plugin/test/session-topology.test.mjs:151` 与
-   `plugin/test/inner-session-check.test.mjs:110` 明写「TMUX_TMPDIR is NOT honored by tmux on this
-   system」——实测假。这两条注释 + ps「无 -S」误推断直接导致旧任务误立案。
+   `plugin/test/inner-session-check.test.mjs:110` 明写「TMUX_TMPDIR 在本机不被 tmux 认可（旧注释原文
+   'is NOT honored by tmux on this system'）」——实测假。这两条注释 + ps「无 -S」误推断直接导致旧任务误立案。
 2. **tmux-leak-scan.sh 漏私有 socket 孤儿前缀**：leak-scan 只覆盖 `skv-|session-liveness-|ol-tok-|
    enter-repro-` + `/tmp/quay-run-<runId>/`，**不覆盖** `/tmp/quay-init-tmux-*` / `/tmp/quay-isc-*` /
    `/tmp/repro-rmsync-*`（mkdtemp 私有 socket 前缀）⇒ 9 个孤儿 tmux:server 不被回收（资源泄漏，非默认撞生产）。
@@ -31,21 +31,22 @@ extra: {}
 
 1. 修正两条过时注释为真实行为（TMUX_TMPDIR 在 `$TMUX` 剥离时被认；`$TMUX` 继承时覆盖 TMUX_TMPDIR——
    即 guard 任务已修机制）。
-2. 扩展 tmux-leak-scan.sh 前缀覆盖到 `quay-init-tmux-` / `quay-isc-` / `repro-` 等 mkdtemp 私有 socket 前缀。
+2. 扩展 tmux-leak-scan.sh 前缀覆盖到 `quay-init-tmux-` / `quay-isc-` / `repro-rmsync-` 等 mkdtemp 私有 socket 前缀。
 
 ## Acceptance Criteria
 
 - [ ] AC1（负控制·承重条）：`env -u TMUX TMUX_TMPDIR=<dir> tmux new-session -d` 落 `<dir>/tmux-1000/default`
       （私有）；`env TMUX_TMPDIR=<dir> tmux new-session -d`（`$TMUX` 继承）才落默认。贴两条命令实际落点。
-- [ ] AC2（注释修正）：两条注释不再含「NOT honored」且改述真实行为；`grep -rn "TMUX_TMPDIR is NOT honored"`
+- [ ] AC2（注释修正）：两条注释不再含「NOT honored」且改述真实行为；`grep -rn "TMUX_TMPDIR is NOT [h]onored"`
       全仓零命中。
-- [ ] AC3（scan 覆盖）：tmux-leak-scan.sh 前缀覆盖 `quay-init-tmux-*` / `quay-isc-*` / `repro-*`；跑一次
-      扫描能识别现存 9 个私有 socket 孤儿。
+- [ ] AC3（scan 覆盖）：tmux-leak-scan.sh 前缀覆盖 `quay-init-tmux-*` / `quay-isc-*` / `repro-rmsync-*`；跑一次
+      扫描能识别现存 9 个私有 socket 孤儿。（AC 原写 `repro-*`，落实为精确 `repro-rmsync-*`：裸 `repro-*`
+      会命中 /tmp 下 ~25 个人工 scratch 文件，非测试残留 ⇒ 恒假阳性。）
 
 ## Definition of Done
 
-注释修正 + leak-scan 前缀覆盖落地，且一次扫描后 `/tmp/quay-init-tmux-*` / `quay-isc-*` / `repro-*` 孤儿数
-= 0（AC3），全仓 grep「TMUX_TMPDIR is NOT honored」零命中（AC2）。
+注释修正 + leak-scan 前缀覆盖落地，且一次扫描后 `/tmp/quay-init-tmux-*` / `quay-isc-*` / `repro-rmsync-*` 孤儿数
+= 0（AC3），全仓 grep「TMUX_TMPDIR is NOT [h]onored」零命中（AC2）。
 
 ## Touches
 

@@ -3,9 +3,13 @@
 # gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause).
 #
 # After a test run, NO tmux server process and NO /tmp dir carrying a test characteristic prefix
-# (skv- / session-liveness- / ol-tok- / enter-repro-) may remain. This is the SECOND line of
-# defense — the teardown fix (kill-session -t <name>, never kill-server) is primary; this scan
-# covers the whole leak class at once and makes "the leak is gone" mechanically checkable.
+# (skv- / session-liveness- / ol-tok- / enter-repro- / quay-init-tmux- / quay-isc- / repro-rmsync-)
+# may remain. The last three are the private-socket mkdtemp prefixes
+# (gap-tmux-stale-not-honored-comment-private-socket-leak-scan) — `repro-rmsync-` is used over the
+# bare `repro-` the AC named because `repro-` also matches ~25 human scratch files in /tmp (not
+# test residue). This is the SECOND line of defense — the teardown fix (kill-session -t <name>,
+# never kill-server) is primary; this scan covers the whole leak class at once and makes "the leak
+# is gone" mechanically checkable.
 #
 # DELTA form (gap-assert-clean-tree-premise-void-under-concurrent-writers, same family as
 # assert-clean-tree.sh): the outer layer legitimately runs tmux sessions (send-keys remote-drive,
@@ -29,7 +33,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 set -uo pipefail
 
-prefixes='skv-|session-liveness-|ol-tok-|enter-repro-'
+prefixes='skv-|session-liveness-|ol-tok-|enter-repro-|quay-init-tmux-|quay-isc-|repro-rmsync-'
 
 # gap-leak-residue-per-run-namespace-isolation (2026-08-13): when the runner delivered QUAY_RUN_ID,
 # the suite's probe tmp root is the PER-RUN namespace /tmp/quay-run-<runId>/ (session-liveness-
@@ -92,7 +96,7 @@ scan_matches() {
   if [ -n "$run_root" ]; then
     leaked_dirs="$(ls -d "${run_root}"/* 2>/dev/null || true)"
   else
-    leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* 2>/dev/null || true)"
+    leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* /tmp/quay-init-tmux-* /tmp/quay-isc-* /tmp/repro-rmsync-* 2>/dev/null || true)"
   fi
   {
     [ -n "$leaked_procs" ] && printf '%s\n' "$leaked_procs"
@@ -165,7 +169,7 @@ fi
 if [ -n "$run_root" ]; then
   leaked_dirs="$(ls -d "${run_root}"/* 2>/dev/null || true)"
 else
-  leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* 2>/dev/null || true)"
+  leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* /tmp/quay-init-tmux-* /tmp/quay-isc-* /tmp/repro-rmsync-* 2>/dev/null || true)"
 fi
 
 if [ -n "${leaked_procs}" ] || [ -n "${leaked_dirs}" ]; then

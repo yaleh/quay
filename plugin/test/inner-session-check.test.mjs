@@ -107,12 +107,15 @@ function newHermetic(prefix = "quay-isc-") {
       for (const name of started) {
         tmuxAt(sockPath, ["kill-session", "-t", name], env);
       }
-      // TMUX_TMPDIR is NOT honored by tmux on this system (verified: a session spawned with
-      // TMUX_TMPDIR set still lands on /tmp/tmux-<uid>/default), so the factory scripts
-      // (quay-topology.sh --session topo-factory/topo-race/isc-factory) build on the DEFAULT
-      // socket — the hermetic sweep above cannot reach them. Kill the named factory sessions
-      // on the default socket explicitly (per-session kill-session, never kill-server). Scoped
-      // to the factory names this file creates so a real user session is never touched.
+      // TMUX_TMPDIR IS honored when $TMUX is stripped — `env -u TMUX TMUX_TMPDIR=<dir> tmux
+      // new-session -d` lands on <dir>/tmux-<uid>/default; an INHERITED $TMUX overrides
+      // TMUX_TMPDIR (gap-tmux-stale-not-honored-comment-private-socket-leak-scan AC1). The
+      // factory scripts (quay-topology.sh --session topo-factory/topo-race/isc-factory) run
+      // under this file's hermetic env ($TMUX stripped + TMUX_TMPDIR=sockDir), so they build on
+      // THIS private socket and the sweep above reaches them. The default-socket kill loop below
+      // is a harmless defensive net — scoped to the factory names this file creates, a
+      // kill-session on the default socket can only error "no such session" and never touches a
+      // real user session (per-session kill-session, never kill-server).
       for (const fname of ["topo-factory", "topo-idem", "topo-race", "isc-factory"]) {
         tmuxAt(null, ["kill-session", "-t", fname], process.env);
       }

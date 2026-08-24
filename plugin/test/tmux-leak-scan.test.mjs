@@ -181,3 +181,28 @@ test("R5 — fail closed: --check with no before-run snapshot exits 1", () => {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 });
+
+// ── prefix coverage (gap-tmux-stale-not-honored-comment-private-socket-leak-scan AC3) ───────────────
+// The suite-tail scan's ABSOLUTE mode (no QUAY_RUN_ID, no --scope) matches the historical /tmp
+// prefix glob. This pins the three private-socket mkdtemp prefixes the scan must cover: a leaked
+// /tmp/<prefix>* dir from a crashed hermetic tmux test is the residue class AC3 re-scopes to.
+test("prefix coverage — the absolute-mode scan flags a private-socket mkdtemp dir (quay-init-tmux- / quay-isc- / repro-rmsync-)", () => {
+  const dirs = [];
+  try {
+    for (const prefix of ["quay-init-tmux-leakscan-", "quay-isc-leakscan-", "repro-rmsync-leakscan-"]) {
+      dirs.push(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+    }
+    // Un-set QUAY_RUN_ID so the scan takes the ABSOLUTE /tmp-prefix path, not the per-run namespace
+    // subtree (the namespaced path would not see these /tmp dirs at all).
+    const env = { ...process.env };
+    delete env.QUAY_RUN_ID;
+    const res = spawnSync("bash", [SCAN_SH], { encoding: "utf8", timeout: 30_000, env });
+    assert.equal(res.status, 1, `the scan must FAIL with a private-socket dir present:\n${res.stdout}\n${res.stderr}`);
+    for (const d of dirs) {
+      assert.match(res.stderr, new RegExp(path.basename(d)),
+        `the scan must list the ${path.basename(d)} dir`);
+    }
+  } finally {
+    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
