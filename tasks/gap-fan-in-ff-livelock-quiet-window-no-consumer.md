@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-ff-livelock-quiet-window-no-consumer
 title: fan-in ff 活锁——quiet-window 请求无消费者（diverging branches 后无人兑现零提交窗口）
-status: todo
+status: ready
 labels:
   - gap
   - defect
