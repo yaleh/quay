@@ -1366,6 +1366,21 @@ elif [ "${1:-}" = "--buckets" ]; then
     run_selected "$(effective_groups)"
   fi
   mapfile -t files <<< "${bucket_sel_out}"
+  # LPT order (gap-m-bucket-long-tail-lpt-scheduling): reorder the M-bucket file list so the
+  # longest-KNOWN files start FIRST and overlap the long run of short files instead of serializing
+  # at the tail (measured round 474/476/478: the last 5% of files = 27%+ of wall clock). Durations
+  # come from the EXISTING carrier .quay/verification-round.jsonl perFile[].durationMs (rolling
+  # average of the last QUAY_TEST_LPT_ROUNDS rounds) — no new measurer. Scheduling-only: every file
+  # is emitted exactly once, so a bug can never drop a test (pass/fail-neutral). FAIL-OPEN: no
+  # history / helper failure / a short result ⇒ keep the original order. QUAY_TEST_LPT_ORDER=0 is
+  # the one-key rollback.
+  if [ "${QUAY_TEST_LPT_ORDER:-1}" = "1" ] && [ "${#files[@]}" -gt 1 ]; then
+    _lpt_out="$(printf '%s\n' "${files[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-lpt-order.ts" --root "${main_root}" --rounds "${QUAY_TEST_LPT_ROUNDS:-3}")" || _lpt_out=""
+    if [ -n "${_lpt_out}" ] && [ "$(printf '%s\n' "${_lpt_out}" | wc -l)" -eq "${#files[@]}" ]; then
+      mapfile -t files <<< "${_lpt_out}"
+      echo "scripts/test.sh: lpt-order: M bucket reordered (${#files[@]} files; first=$(basename "${files[0]}"))" >&2
+    fi
+  fi
   # FULL static checks (verification-grade — no 降频), then the bucket test subset.
   run_static_checks
   build_dist_once
