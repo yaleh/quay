@@ -11,12 +11,19 @@
 //   7e64a86b → plugin/skills/init/SKILL.md
 // 直接提交 develop 且触及代码/断言面、且不在任何 ff-lock 事件时间窗内 ⇒ 报「直接提交绕过 fan-in 机件」。
 //
-// 判定原理（reflog 是 ground truth）：`git merge --ff-only` 只移动 ref、不创建 commit——一个通过
-// fan-in 落地的 task 提交在 DAG 上与直接提交看起来完全一样（单亲线性链），唯一区分它们的读面是
-// develop 的 REFLOG：fan-in 落地记 `merge task/<id>: Fast-forward`，直接提交记 `commit: <msg>`
-// （或 `commit (amend):` / `commit (merge):`）。因此本检测器以 `git log -g develop` 的 action
-// 为「直接提交」主信号（CLAUDE.md 硬规则 2：按位置判定，不按关键词——commit subject 里出现
-// 「fan-in」不算，reflog action 才算）。
+// 判定原理（ledger 优先，reflog 回退，剪后退 NOT-EVALUATED）：`git merge --ff-only` 只移动 ref、
+// 不创建 commit——一个通过 fan-in 落地的 task 提交在 DAG 上与直接提交看起来完全一样（单亲线性链，
+// ⛔ 故不能判父数区分）。区分它们的读面有【两个】：
+//   ① 持久化 ledger——fan-in-ff-merge.sh 每次真实 ff 落地，在 .quay/fan-in-merge-lock-events.jsonl
+//     的 release 事件上记 `landedSha` 字段（成功 = 落地 sha，失败 = null；gap-direct-to-develop-check-
+//     reflog-to-revlist, AC1）。事件发生当下 append，不依赖可被 gc 回收的易失状态。
+//   ② develop 的 REFLOG——fan-in 落地记 `merge task/<id>: Fast-forward`，直接提交记 `commit: <msg>`
+//     （或 `commit (amend):` / `commit (merge):`）。但 reflog 会被 gc 全局剪 ⇒ 老 commit 条目过期。
+// 三态判定（AC2/AC3）：`git rev-list` 全量扫描 develop 历史（不受 gc 剪）→ 对每条命中的 commit——
+// 在 ledger ⇒ fan-in 落地不算直投；不在 ledger 且 reflog 有「直接 commit」标签 ⇒ 直接提交（报红候选）；
+// ledger 无记录 且 reflog 也查不到 ⇒ NOT-EVALUATED（⛔ 不伪装成「未发现 direct」，硬规则 3b）。
+// （CLAUDE.md 硬规则 2：按位置判定，不按关键词——commit subject 里出现「fan-in」不算，reflog action
+// 或 ledger 记录才算。）
 //
 // 排除集（denominator 谓词，AC3 判据 25 vs 30 的差异就在排除集——本谓词记录在任务体）：
 //   设计内 = 按设计就该直接提交 develop 的文件（GREEN，不误报）：
@@ -256,12 +263,74 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "8 处 + plugin/VERSION 均 0.6.1（version-consistency-check 'All 8 files carry version 0.6.1' 已验证），release v0.6.1 已 gh 发布（createdAt 2026-08-21T14:49:30Z）指向本提交。" +
       "先例 08e8ec55（release 0.5.0 版本 bump 同形）。outer 2026-08-21 14:5xZ 裁定 ruled one-off（先例 08e8ec55/cddc55e2）。",
   },
+  {
+    sha: "99f845d9",
+    reason:
+      "outer 直提 develop 补 plugin/skills/init/SKILL.md 的 <!-- reference-doc: --> 声明——为解 referenced-not-landed 全库红的最小止损（补一行声明），" +
+      "非偷懒绕过 fan-in（性质同 f9577da1/167b7052 类：为修机制自身而直写）。但直提 develop 本身就是错的（应走 fan-in），" +
+      "本次是我方共同的流程失误。manager 2026-08-23 裁定 ruled one-off（先例 cddc55e2/f9577da1）。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
 export function findRuledHistoricalEntry(sha, table = RULED_HISTORICAL_COMMITS) {
   if (!sha) return undefined;
   return (table ?? []).find((e) => e && sha.startsWith(e.sha));
+}
+
+// ── 三态判定（gap-direct-to-develop-check-reflog-to-revlist）──────────────────────────────────────
+// fan-in 落地的持久化 ledger（release 事件上的 landedSha 字段，与 acquire/release 写在同一个
+// .quay/fan-in-merge-lock-events.jsonl 里）+ develop reflog 回退 + NOT-EVALUATED。reflog 会被 gc 剪，
+// ledger 是事件发生当下 append、不依赖可回收的易失状态。
+
+/** 从 lock-event 记录里提取「fan-in 落地」commit sha 集（ledger）。只认 release 事件上的
+ *  `landedSha` 字段（fan-in-ff-merge.sh 在 ff 成功时写落地 sha、失败时写 null——gap-direct-to-develop-
+ *  check-reflog-to-revlist AC1）；无该字段的历史 release / acquire / malformed 行跳过。PURE。 */
+export function extractFanInLandedShas(events) {
+  const shas = new Set();
+  for (const e of events ?? []) {
+    if (!e || e.event !== "release") continue;
+    if (typeof e.landedSha === "string" && /^[0-9a-f]{7,40}$/i.test(e.landedSha)) shas.add(e.landedSha);
+  }
+  return shas;
+}
+
+/** 一条 develop reflog action 是否为「直接提交」（`commit:` / `commit (amend):` / `commit (merge):`）。
+ *  与 fan-in 落地的 `merge task/<id>: Fast-forward` 区分（后者 action 词含 `/`，不匹配本谓词）。
+ *  PURE——复用既有 reflog 解析（:423 原正则同源，不新造）。 */
+export function isReflogDirectCommit(gs) {
+  const m = String(gs ?? "").match(/^([a-z() ]+?):\s*(.*)$/);
+  if (!m) return false;
+  return m[1].trim().startsWith("commit");
+}
+
+/** 从 `git log -g` 原始行（`<sha>\t<action>`）建立 reflog 索引 `{direct, seen}`。
+ *  `direct` = 任一 reflog 条目 action 是直接提交；`seen` = 任一 reflog 条目（含 merge … Fast-forward）。
+ *  一条 sha 同时有 `commit:` 与 `merge … Fast-forward` 条目时 direct 优先（历史 reset-reapply 形态）。
+ *  PURE。 */
+export function buildReflogIndex(reflogLines) {
+  const direct = new Set();
+  const seen = new Set();
+  for (const line of reflogLines ?? []) {
+    const [sha, gs] = line.split("\t");
+    if (!sha || !gs) continue;
+    seen.add(sha);
+    if (isReflogDirectCommit(gs)) direct.add(sha);
+  }
+  return { direct, seen };
+}
+
+/** 一条 commit 的落地方式（AC2/AC3 三态）。
+ *   "fan-in"          ledger 有记录，或 reflog 有非 commit 条目（merge … Fast-forward）
+ *   "direct"          reflog 有「直接 commit」条目（报红候选）
+ *   "unclassifiable"  ledger 无记录 且 reflog 也查不到（reflog 被 gc 剪 ⇒ NOT-EVALUATED）
+ *  PURE。 */
+export function classifyLandingMode(sha, ledgerShas, reflogIndex) {
+  if (ledgerShas?.has(sha)) return "fan-in";
+  if (!reflogIndex) return "unclassifiable"; // reflog 不可读
+  if (reflogIndex.direct?.has(sha)) return "direct";
+  if (reflogIndex.seen?.has(sha)) return "fan-in";
+  return "unclassifiable";
 }
 
 /** 一个直接提交的判定。PURE——测试注入 {sha, files, epoch, subject, message, action}。 */
@@ -379,53 +448,57 @@ function gitCommitMessage(root, sha) {
 }
 
 /**
- * 读 develop 的 reflog（git log -g），返回【已落地 develop 的】直接提交（action = `commit` 前缀）。
- * 每条：{sha, subject, action, epoch(committer), files}。files 逐个 `git diff` 取。
+ * 枚举 develop 的直接提交（三态判定，gap-direct-to-develop-check-reflog-to-revlist）。
  *
- * 关键：只报【reachable from develop】的直接提交——一次直接提交后又被 reset 走（abandoned）的
- * commit 从未成为 develop 历史的一部分，不算绕过（mutation-case RESTORE 正是 reset 走代码提交）。
- * baseline 用 `git rev-list <baseline>..develop` 一次取「基线后已落地的 commit 集」（一条命令同时
- * 完成 reachability + baseline 过滤，而不是逐条 merge-base）。reflog 不可读 / 无 reflog
- * （fresh clone）⇒ 返回 null（调用方据此 NOT-EVALUATED）。
+ * 不再以 reflog 为【唯一】ground truth（reflog 会被 gc 全局剪，老 commit 条目过期后 checker 失能——
+ * test :591 被 skip 的根因）。改以 `git rev-list` 全量扫描 develop 历史（rev-list 不受 gc 剪），对每条
+ * 命中的 commit 按三态分类：
+ *   · 在 ledger（release 事件的 landedSha 字段，写在与 lock-events 同一个 .quay/fan-in-merge-lock-events.jsonl）
+ *     ⇒ fan-in 落地，不算直投（AC2）
+ *   · reflog 有「直接 commit」条目（`commit:` / `commit (amend):` / `commit (merge):`）⇒ 直接提交
+ *     （收集，逐条读 files/epoch/message——AC2 真直投仍红）
+ *   · ledger 无记录 且 reflog 也查不到 ⇒ unclassifiable（AC3——返回 sha 列表，调用方据此
+ *     NOT-EVALUATED，⛔ 不伪装成「未发现 direct」，硬规则 3b）
+ *
+ * 返回 `{ direct, unclassifiable }`；rev-list 不可读（git 错误）⇒ 返回 null。只报【reachable from
+ * develop】的提交（rev-list 本身就只给出 develop 可达集）；baseline 用 `git rev-list <baseline>..develop`
+ * 一次完成 reachability + baseline 过滤。
  */
-export function gitReflogDirectCommits(root, develop, baseline) {
-  let out;
+export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
+  let revs;
   try {
-    out = git(root, ["log", "-g", "--format=%H%x09%gs", develop]);
-  } catch {
-    return null;
-  }
-  const entries = out.split("\n").filter(Boolean);
-  if (entries.length === 0) return null; // no reflog — cannot tell direct from ff (3b: 读不懂 ≠ 合格)
-  // reachable set：基线后（或无基线 = 全史）已落地 develop 的 commit。空集合（baseline==develop）
-  // 是合法的「无新直接提交」——rev-list 失败才 NOT-EVALUATED。
-  let reachable;
-  try {
-    const revs = baseline
+    revs = baseline
       ? git(root, ["rev-list", `${baseline}..${develop}`])
       : git(root, ["rev-list", develop]);
-    reachable = new Set(revs.split("\n").map((s) => s.trim()).filter(Boolean));
   } catch {
     return null;
   }
-  const commits = [];
-  for (const line of entries) {
-    const [sha, gs] = line.split("\t");
-    if (!sha || !gs) continue;
-    if (!reachable.has(sha)) continue; // 未落地 develop（reset 走 / 在基线外）⇒ 不算
-    const m = gs.match(/^([a-z() ]+?):\s*(.*)$/);
-    if (!m) continue;
-    const action = m[1].trim();
-    if (!action.startsWith("commit")) continue; // 只看 reflog `commit:`（含 amend / merge）
-    const subject = m[2] ?? "";
+  const reachable = revs.split("\n").map((s) => s.trim()).filter(Boolean);
+
+  let reflogIndex = null;
+  try {
+    const out = git(root, ["log", "-g", "--format=%H%x09%gs", develop]);
+    reflogIndex = buildReflogIndex(out.split("\n").filter(Boolean));
+  } catch {
+    reflogIndex = null; // reflog 不可读 ⇒ 所有非 ledger commit 都 unclassifiable（3b）
+  }
+
+  const direct = [];
+  const unclassifiable = [];
+  for (const sha of reachable) {
+    const mode = classifyLandingMode(sha, ledgerShas, reflogIndex);
+    if (mode === "fan-in") continue;
+    if (mode === "unclassifiable") { unclassifiable.push(sha); continue; }
+    // direct：逐条读 files/epoch/message（与 --commits 回放同源）。
     const files = gitCommitFiles(root, sha);
     if (files === null) continue; // root commit / unreadable — skip (can't diff)
     const epoch = gitCommitEpoch(root, sha);
     if (epoch === null) continue;
+    const subject = gitCommitSubject(root, sha);
     const message = gitCommitMessage(root, sha); // AC65 验证证据读取面
-    commits.push({ sha, subject, action, epoch, files, message });
+    direct.push({ sha, subject, action: "commit", epoch, files, message });
   }
-  return commits;
+  return { direct, unclassifiable };
 }
 
 function readJsonlLines(file) {
@@ -497,44 +570,19 @@ export function main(argv) {
   const asJson = args.includes("--json");
 
   let commits = null;
+  let unclassifiable = [];
   let lockHoldIntervals = null;
   let lockSubEvaluated = false;
   let lockSubReason = "";
 
-  // ── 收集直接提交（reflog 扫描 或 --commits 回放）────────────────────────────────────────────
-  if (commitsArg !== undefined) {
-    const shas = commitsArg.split(",").map((s) => s.trim()).filter(Boolean);
-    commits = shas.map((sha) => {
-      const files = gitCommitFiles(root, sha);
-      const epoch = gitCommitEpoch(root, sha);
-      if (files === null || epoch === null) return null;
-      return { sha, subject: gitCommitSubject(root, sha), action: "commit", epoch, files, message: gitCommitMessage(root, sha) };
-    }).filter(Boolean);
-    if (commits.length === 0) {
-      process.stderr.write(`direct-to-develop-bypass-check: --commits resolved to 0 readable commits (shas: ${commitsArg})\n`);
-      return 2;
-    }
-  } else {
-    commits = gitReflogDirectCommits(root, develop, baseline);
-    if (commits === null) {
-      const result = {
-        evaluated: false,
-        ok: true,
-        reason: "reflog-unreadable (NOT-EVALUATED)",
-        checks: [{ check: "direct-commit-bypass", evaluated: false, ok: true, reason: "reflog-unreadable" }],
-      };
-      if (asJson) process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-      else console.log(`direct-to-develop-bypass-check: evaluated=false ok=true (${result.reason})`);
-      return 0;
-    }
-  }
-
-  // ── ff-lock 时间窗 ────────────────────────────────────────────────────────────────────────────
+  // ── ff-lock 时间窗 + ledger 提取（先读 lock-events 文件——ledger 是收集阶段的三态输入之一）─────
   // ⚠️ 缺失文件 = 「从未有过锁持」（可读的空状态），不是「读不懂」——full-suite 的 verify worktree
   // 没有 .quay/ 运行时状态，若把缺失当 NOT-EVALUATED，检测器在 full-suite 路径永远给不出硬结论。
   // reflog 的 `commit:` action 已是「直接提交」的充分主信号；锁窗只是保守豁免（毫秒级、几乎从不命中），
   // 数据缺失时豁免空转（vacuous）。只有「文件在但读不懂」（malformed/unpaired）才是 3b 的 NOT-EVALUATED。
+  // ledger（release 事件的 landedSha 字段）与锁事件同文件——缺失文件 ⇒ 空 ledger（vacuous：无 fan-in 落地记录）。
   const events = readJsonlLines(lockEventsFile);
+  const ledgerShas = extractFanInLandedShas(events);
   if (events === null) {
     lockHoldIntervals = [];
     lockSubEvaluated = true;
@@ -550,6 +598,36 @@ export function main(argv) {
       lockSubEvaluated = true;
       lockSubReason = "lock-window-evaluated";
     }
+  }
+
+  // ── 收集直接提交（rev-list 三态扫描 或 --commits 回放）──────────────────────────────────────
+  if (commitsArg !== undefined) {
+    const shas = commitsArg.split(",").map((s) => s.trim()).filter(Boolean);
+    commits = shas.map((sha) => {
+      const files = gitCommitFiles(root, sha);
+      const epoch = gitCommitEpoch(root, sha);
+      if (files === null || epoch === null) return null;
+      return { sha, subject: gitCommitSubject(root, sha), action: "commit", epoch, files, message: gitCommitMessage(root, sha) };
+    }).filter(Boolean);
+    if (commits.length === 0) {
+      process.stderr.write(`direct-to-develop-bypass-check: --commits resolved to 0 readable commits (shas: ${commitsArg})\n`);
+      return 2;
+    }
+  } else {
+    const collected = gitDevelopDirectCommits(root, develop, baseline, ledgerShas);
+    if (collected === null) {
+      const result = {
+        evaluated: false,
+        ok: true,
+        reason: "rev-list-unreadable (NOT-EVALUATED)",
+        checks: [{ check: "direct-commit-bypass", evaluated: false, ok: true, reason: "rev-list-unreadable" }],
+      };
+      if (asJson) process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      else console.log(`direct-to-develop-bypass-check: evaluated=false ok=true (${result.reason})`);
+      return 0;
+    }
+    commits = collected.direct;
+    unclassifiable = collected.unclassifiable;
   }
 
   const verdict = checkDirectCommits(commits, lockHoldIntervals);
@@ -588,12 +666,23 @@ export function main(argv) {
     reason = ok ? "pass" : "direct-commit-bypasses-fan-in";
   }
 
+  // ── 三态 NOT-EVALUATED 降级（gap-direct-to-develop-check-reflog-to-revlist AC3）──────────────────
+  // 枚举不完全（rev-list 命中的 commit 既不在 ledger 也不在 reflog——reflog 被 gc 剪）⇒ 即使「无直接
+  // 提交被收集到」也不能假装「未发现 direct」（硬规则 3b）。降级规则：核心判 GREEN ⇒ NOT-EVALUATED；
+  // 核心判 RED ⇒ 保持 RED（已确认 bypass 存在，不因盲区吞掉红）；核心判 NOT-EVALUATED ⇒ 保持。
+  if (evaluated && ok && unclassifiable.length > 0) {
+    evaluated = false;
+    reason = "unclassifiable-commits-in-range";
+  }
+
   const result = {
     evaluated,
     ok,
     reason,
     baseline: baseline ?? null,
     develop,
+    unclassifiableCommits: unclassifiable.length,
+    unclassifiableSample: unclassifiable.slice(0, 20),
     denominator: {
       totalDirectCommits: verdict.totalCommits,
       codeSurfaceCommits: verdict.codeSurfaceCommits,
@@ -601,6 +690,7 @@ export function main(argv) {
       inLockWindowCommits: verdict.inLockWindowCommits,
       ac65AuthorizedCommits: verdict.ac65AuthorizedCommits,
       ruledHistoricalCommits: verdict.ruledHistoricalCommits,
+      unclassifiableCommits: unclassifiable.length,
       predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ plugin/skills/manager/ CLAUDE.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
       ac65CarveOut: "AC65-authorized direct-fix (two predicates; sha table retired to display-only): commit message has AC65 declaration (/^AC65:/m) AND verification artifact (/AC65-Verified:/m) ⇒ ac65AuthorizedDirectFix (visible, NOT bypass); declaration with no verification artifact ⇒ RED (criterion-3); no declaration code-surface direct commit ⇒ RED. Legacy 02b2b2fc form (AC65 一条命令验证：<output>) tolerated. NOT a plugin/scripts/* filename exemption.",
       ruledHistoricalCarveOut: "RULED_HISTORICAL_COMMITS one-off exemption (manager 2026-08-15 ruling, tasks/gap-direct-to-develop-ruled-historical-cddc55e2): sha prefix match on the bounded ruled table ⇒ ruledHistorical (visible, NOT bypass, NOT ac65Authorized); any non-table direct commit still RED (exemption cannot be silently extended). Criterion-3 (declaration without verification ⇒ RED) unchanged.",
@@ -623,7 +713,7 @@ export function main(argv) {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   } else {
     console.log(`direct-to-develop-bypass-check: evaluated=${evaluated} ok=${ok} (${reason})`);
-    console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits} ruled-historical=${verdict.ruledHistoricalCommits}`);
+    console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits} ruled-historical=${verdict.ruledHistoricalCommits} unclassifiable=${unclassifiable.length}`);
     console.log(`  lock-window: evaluated=${lockSubEvaluated} (${lockSubReason})`);
     for (const c of codeSurfaceCandidates) {
       const tag = c.ruledHistorical ? "RULED-HISTORICAL" : c.bypass ? "RED" : c.ac65Authorized ? "AC65-AUTHORIZED" : c.inLockWindow ? "SKIP(in-lock-window)" : "design-internal";

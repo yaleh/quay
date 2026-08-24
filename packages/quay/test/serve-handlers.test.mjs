@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable, taskIdFromBranchRef } from "../src/serve-handlers.ts";
+import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable, renderPerFileTimelineSvg, taskIdFromBranchRef } from "../src/serve-handlers.ts";
 import { readGitHistory } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
@@ -232,6 +232,15 @@ test("integration: GET /git-history serves the vertical-graph JSON payload + an 
     const layout = layoutGitGraph(h);
     assert.ok(layout.branches.some((b) => b.ref === "feature/alpha"), "layout places the feature branch as a fork/merge lane");
     assert.ok(layout.branches.every((b) => b.collapsed === true), "AC2: every branch is collapsed by default");
+
+    // gap-git-history-branch-summary-wrong-numbers: a branch lane carries only its OWN commits, never
+    // the shared mainline ancestry (the 481/111 symptom). feature/alpha was --no-ff merged into
+    // master, so it has ZERO exclusive commits (correctly no phantom summary lane); task/GH-1 is
+    // unmerged and carries exactly its one commit.
+    const featureCommits = h.commits.filter((x) => x.ref === "feature/alpha");
+    assert.equal(featureCommits.length, 0, "a fully-merged branch has no phantom lane (0 exclusive commits)");
+    const taskCommits = h.commits.filter((x) => x.ref === "task/GH-1");
+    assert.deepEqual(taskCommits.map((x) => x.subject), ["task work"], "the unmerged task branch carries exactly its own commit");
   } finally {
     if (server) {
       server.close();
@@ -423,6 +432,69 @@ test("renderPerFileTable sorts by duration DESC, marks failed files red (verdict
   assert.equal(renderPerFileTable(undefined), "");
   assert.equal(renderPerFileTable(null), "");
   assert.equal(renderPerFileTable([]), "");
+});
+
+// ── gap-test-detail-timeline: AC2 (perFile timeline gantt render) ────────────────────────────────
+
+test("renderPerFileTimelineSvg renders one server-side SVG bar per timestamped file (start-time ASC), marks failed bars, and omits legacy/absent entries", () => {
+  const t0 = 1724374800000; // 2026-08-23T01:00:00Z epoch ms
+  const perFile = [
+    { file: "packages/quay/test/fast.test.mjs", durationMs: 12, passed: true, endedAtMs: t0 + 6000, startedAtMs: t0 + 6000 - 12 },
+    { file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: false, endedAtMs: t0 + 400, startedAtMs: t0 + 400 - 210 },
+    { file: "packages/quay/test/mid.test.mjs", durationMs: 100, passed: true, endedAtMs: t0 + 3000, startedAtMs: t0 + 3000 - 100 },
+    // A legacy entry WITHOUT timestamps must be dropped (not plotted, not fabricated).
+    { file: "packages/quay/test/legacy.test.mjs", durationMs: 50, passed: true },
+  ];
+  const out = renderPerFileTimelineSvg(perFile);
+  assert.ok(out.startsWith("<svg"), "output is an <svg> element (server-rendered, zero client JS)");
+  assert.ok(out.includes("测试时间线"), "renders the timeline heading");
+  // One bar per timestamped file (3 rects with gantt-svg-bar*), the legacy entry dropped.
+  assert.equal((out.match(/class="gantt-svg-bar(-fail)?"/g) ?? []).length, 3, "three timestamped files → three bars");
+  assert.ok(out.includes("gantt-svg-bar-fail"), "the failed file's bar carries gantt-svg-bar-fail");
+  assert.ok(!out.includes("legacy.test.mjs"), "a timestamp-less legacy entry is not plotted");
+  // Chronological start-time ASC: slow (t0+190) < mid (t0+2900) < fast (t0+5988); assert label order.
+  const slowIdx = out.indexOf("slow.test.mjs");
+  const midIdx = out.indexOf("mid.test.mjs");
+  const fastIdx = out.indexOf("fast.test.mjs");
+  assert.ok(slowIdx > -1 && midIdx > -1 && fastIdx > -1, "all three timestamped files present");
+  assert.ok(slowIdx < midIdx && midIdx < fastIdx, `start-time ASC order: slow(${slowIdx}) < mid(${midIdx}) < fast(${fastIdx})`);
+  // Absent / empty / all-legacy ⇒ "" (no fabricated chart).
+  assert.equal(renderPerFileTimelineSvg(undefined), "");
+  assert.equal(renderPerFileTimelineSvg(null), "");
+  assert.equal(renderPerFileTimelineSvg([]), "");
+  assert.equal(renderPerFileTimelineSvg([{ file: "a.test.mjs", durationMs: 10, passed: true }]), "", "a perFile with no timestamps renders nothing (legacy data has no time axis)");
+});
+
+test("AC2: GET /tests renders the timeline SVG when the latest perFile row carries timestamps", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-timeline-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const t0 = 1724374800000;
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 229, startedAt: "2026-08-23T01:00:00.000Z", durationMs: 500000, state: "green", runner: "outer", scope: "worktree", commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 500, startedAtMs: t0 + 500 - 210 }, { file: "packages/quay/test/fast.test.mjs", durationMs: 12, passed: true, endedAtMs: t0 + 6000, startedAtMs: t0 + 6000 - 12 }] }),
+    ].join("\n"));
+
+    createStore(tasksDir).write("TIMELINE", { title: "timeline web tests", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests");
+    assert.equal(r.status, 200, "GET /tests returns 200");
+    assert.ok(r.body.includes("测试时间线"), "the page renders the timeline section");
+    assert.ok(/class="gantt-svg-bar"/.test(r.body), "the page renders at least one timeline bar");
+    assert.ok(r.body.includes("slow.test.mjs") && r.body.includes("fast.test.mjs"), "both timestamped files present in the timeline");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
 });
 
 test("AC2: GET /tests renders the perFile table (sorted, failed red) — a legacy no-perFile row renders no fabricated table", async () => {

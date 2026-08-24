@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-no-record-on-abnormal-death
 title: worker-driver worker 异常死亡零终态记录（computeOutcome 只正常返回时调用，异常路径与未派发同形）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -34,18 +34,22 @@ depends_on: []
 
 **区分原则（⛔ 第四种形态时直接查载体，manager 2026-08-23）**：① 与 ③ 表象同形（任务都停着没动），区分靠的不是「想得更细」而是「去读载体里到底有没有那条记录」——① 有 `completed` 记录、③ 零记录。将来出现第四种形态，先查 `worker-outcome.jsonl` 的记录**有无/取值**，比按表象归类快。
 
+**姊妹缺口（stale worktree 挡重派，同根一并修，manager 2026-08-23 批准并入）**：`worker-driver.ts:18` 注释「驱动从不 remove/prune worktree」——worktree 由 worker 建、fan-in 成功才 remove（:263）。worker 异常死亡后 orphan worktree 永久残留，driver 下轮重派同一 task 时新 worker `git worktree add` 撞已存在路径失败 ⇒ 需人工 `git worktree remove`（本次 3 条已手动清）。同根（worker 死→无记录→orphan worktree），一次修比事后手动清干净。
+
 ## Plan
 
 1. worker 异常死亡（exit non-zero / signal / kill）也写 outcome 记录，`final_state ∈ {failed, killed, timed-out}`（⛔ 不是 completed）。
 2. `computeOutcome` 之外加「worker 死亡兜底」记录路径（spawn 的 close/exit 事件写终态）。
+3. **orphan worktree 清理**：worker 异常死亡记录终态的同时，清理（或标记待清）该 task 的 orphan worktree，使 driver 下轮能对同一 task 成功 `git worktree add`（⛔ 不需人工 remove）。
 
 ## Acceptance Criteria
 
-- [ ] AC1：worker 非正常退出（含被杀 / suite 失败后自尽）⇒ `worker-outcome.jsonl` 有对应记录且 `final_state ∉ {completed}`；零记录 ⇒ 假。
+- [x] AC1：worker 非正常退出（含被杀 / suite 失败后自尽）⇒ `worker-outcome.jsonl` 有对应记录且 `final_state ∉ {completed}`；零记录 ⇒ 假。
+- [x] AC2（能取假）：worker 异常死亡后，driver 下一轮能对同一 task 成功 `git worktree add`（⛔ 不需人工 `git worktree remove`）；stale worktree 仍挡 ⇒ 假。
 
 ## Definition of Done
 
-- [ ] worker 异常死亡写终态记录 + 生产验证零记录消失；AC1 全勾；land 到 develop。
+- [x] worker 异常死亡写终态记录 + orphan worktree 清理 + 生产验证零记录消失且 driver 可重派；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
@@ -53,6 +57,6 @@ depends_on: []
 
 ## Touches
 
-- plugin/scripts/worker-driver.ts（worker 死亡兜底记录）
+- plugin/scripts/worker-driver.ts（worker 死亡兜底记录 + orphan worktree 清理）
 - plugin/test/worker-driver.test.mjs（test）
 - tasks/gap-worker-driver-no-record-on-abnormal-death.md（自身）

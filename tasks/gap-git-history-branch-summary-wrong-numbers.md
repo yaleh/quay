@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-branch-summary-wrong-numbers
 title: Git History 分支汇总表提交数/合并数/首提交异常（撞错分支）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -26,11 +26,11 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：分支汇总表对各分支显示提交数/合并数/首提交与 `git log` 直读一致（⛔ 481/111/2026-07-15 假 ⇒ 假）。
+- [x] AC1：分支汇总表对各分支显示提交数/合并数/首提交与 `git log` 直读一致（⛔ 481/111/2026-07-15 假 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] 分支汇总数字异常根因定位 + 修复到与 git 直读一致；AC1 全勾；land 到 develop。
+- [x] 分支汇总数字异常根因定位 + 修复到与 git 直读一致；AC1 全勾；land 到 develop。
 
 ## Retires
 
