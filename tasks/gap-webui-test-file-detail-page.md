@@ -1,7 +1,7 @@
 ---
 id: gap-webui-test-file-detail-page
 title: 新增独立单测试文件详情页（/tests/file?path=...）：跨多轮历史时间线 + 运行期间负载曲线片段
-status: done
+status: ready
 labels:
   - gap
   - feature
