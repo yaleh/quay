@@ -199,6 +199,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: plugin/loop/manager- -->
 <!-- reference-doc: orchestration/SPEC-unified-driver-architecture-2026-08-23.md -->
 <!-- reference-doc: orchestration/SPEC-web-session-observability-and-control-2026-08-24.md -->
+<!-- reference-doc: orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md -->
 
 ## Behavior
 

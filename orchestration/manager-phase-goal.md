@@ -468,6 +468,27 @@ AC129 驱动的是【任务执行】（ready → worktree → 开发 → suite �
 **⊢ 可复用面（记，不强制）**：AC115 已落地的 `worker-driver.ts` 的 spawn/outcome/退出码骨架、AC116 的并发+超时、AC129 的常驻循环+判停——
 落笔方可评估复用还是另起；⛔ 本阶段判据不规定实现形态（同 AC129 非目标条）。
 
+### AC 状态台账（2026-08-24T18:0xZ 立 —— **同一个结构性缺陷在本阶段复发，硬规则 5b**）
+
+**⇐ 为什么现在立**：旧阶段的台账（本文件 `### AC 状态台账`，2026-08-16 21:4xZ）立案理由逐字是
+「补一个结构性缺陷：本阶段 8 条 AC 里此前只有 AC94 带 `**状态**` 行」——**而本阶段（AC130+）
+一条状态行都没有**（grep `\*\*状态\*\*|Evidence|- \[x\]` 于 AC130–AC134 段 ⇒ 零命中）。
+**⇒ 那次只修好了它被发现的那一个阶段，没有让约定延续到下一个阶段**（硬规则 5b：修好一处 ≠ 只有一处）。
+**⇒ 按硬规则⑥「缺值=未查」，无状态行的 AC 在读者眼里与【未达成】同形**——而下面这几条其实已达成。
+
+| AC | 状态 | 依据（**读生产载体/读实现，⛔ 非自述**；均本会话 2026-08-24 实测） |
+|---|---|---|
+| AC130 驱动常驻+全池循环 | **达成（被动证据充分）／取假未做** | `ps` 确认 `promotion-driver.ts --run-id pm-prod-1787565907` 常驻（由 `promotion-driver-launch.sh __supervise` 监督）；`.quay/promotion-outcome.jsonl` 40.8h 窗口持续产出。**⊢ 取假（停驱动看晋升是否停）属构造负控制，§D2 边界外，manager 不做 ⇒ 归 outer**；outer 2026-08-24 裁定 defer，不阻塞。 |
+| AC131 合格者纯机械晋升零 LLM | **达成（判据已换证据类型）** | 原判据要 outcome 带 `llm_invoked`，实测该字段在 schema 结构上不存在（7032/7032 无）⇒ outer 裁定采方案(b)，判据改为读代码路径。现判据下重判：`computeOutcomeRecords` 的 `promote`(:496-504)/`skip`(:523-531) 分支均纯对象构造，无 spawn/`claude -p` 派生 ⇒ 真。落 `14d8a25f`。 |
+| AC132 fix worker 输入必须是闸的结构化输出 | **达成（读实现 + 生产样本）** | `buildFixWorkerPrompt`(`promotion-driver.ts:190-199`) 返回体含 `task_id=` + `structured_missing:` 逐条列 `missing[]` + 「Fix ONLY the structured_missing items」⇒ 非散文指令。**⊕ 2026-08-24T18:02:36.494Z 生产样本**：`gap-profile-policy-when-which-profile` 的 fix 记录 `gate.missing=["touchesResolve=false"]` ⇒ 结构化缺项确实进了 worker 输入。 |
+| AC133 修完由驱动重跑同一个闸验证 | **达成（两个方向均有生产样本）** | **拒绝方向**：`promotion-round.jsonl` 3966 轮全含 `reverify` 键，其中 8 轮 non-null 且 `nowEligibleIds` 全为 `[]`、`stillIneligibleIds` 非空 ⇒ 「worker 声称修好但实际未改 ⇒ 闸仍判不合格、不晋升」**在生产中自然发生 8 次且每次都正确拒绝**。**⊕ 通过方向（2026-08-24T18:02:36.494Z，全历史首次）**：fix `exit=0`（此前 11 条 fix 记录中 10 条 `exit=1` 全部早于根因修复 `18956cad`），同轮 `reverify.nowEligibleIds=["gap-profile-policy-when-which-profile"]`、`stillIneligibleIds=[]` ⇒ **完整闭环首次跑通**：判不合格 → spawn fix → 真修好 → **重跑同一个闸** → 判合格 → 晋升 todo→ready。**配套失败上限**：3 条 `action=needs-human`/`detail=retry-cap-exhausted`，时刻与 round 逐条对得上（例 `gap-git-history-clickable-branches-window` 04:13:02→04:13:55→04:14:47 第 3 轮触发，N=3 与 `MAX_FIX_RETRIES` 缺省一致）。 |
+| AC134 每次判定/晋升/修复各落一条 outcome | **达成** | 字段完备性：7032 条记录中缺任一必需字段（`task_id`/`gate`/`action`/`result`/`ts`）= **0**，`gate` 缺 `missing` 子字段 = **0**。三类事件均有真实生产记录（**按本 AC 自钉的去重口径**，⛔ 非裸行数）：promote 73 · fix 4 · skip 10 · needs-human 3。**⊢ 裸行 7032 vs 去重 90 ⇒ 信号占比 1.28%**，速率实测 172.3 条/小时（40.8h 窗口）与本 AC 观察项记的「~172 条/小时」逐字吻合 ⇒ 该观察项经 41h 复核仍成立。**精确剩余**：N 按设计未设阈值（硬规则 4），故"条数≥N"无从判真假——**这是有意留白非漏判**；「outer 可消费」在 98.7% 噪声下是否真可消费，本 AC 已自记为观察项且明写归 outer 定。 |
+| AC135 实际切换+outer 晋升步骤退役 | **AC135-1 达成／-2 待取证／-3 归 outer** | **-1 达成**：`orchestrator-tick-core.md:46` 逐字 `~~**A22 供给侧心跳晋升已退役**~~ → 驱动承接`，`:48` 同形退役 A24，且 `:65`/`:69`/`:73` 三处（B9 第三触发器 / no-action 判据② / B17 消费动作）均已改注"随 A22 退役，由 promotion-driver 承接" ⇒ **退役逐条落到执行核里，非口头**。**-2 未取证**：需把 `orchestration/tick-log.md` 的 A22 命中（621 条）**按时间窗切分**才有意义，尚未做。**-3 停机取假**属构造负控制 ⇒ §D2 边界外，归 outer。 |
+
+**⊢ 台账纪律（沿用旧阶段那条，⛔ 不重新发明）**：**此后本阶段每条 AC 达成/推进都必须在此更新一行**，
+使「达成 N/M」可从文件本身复算，**⛔ 不再依赖我记得**。**⊢ 且下一个阶段切换时必须一并带走这个约定**
+——上一次就是没带走才复发。
+
 ### AC130（驱动常驻 + 全池判定循环）
 **判据（能取假）**：promotion-driver 常驻运行，每轮调 `ready-pool-check` 取**全池**判定（⛔ 不是只看某一条），
 跑完一轮不退出、按间隔进入下一轮。**取假**：杀掉/停掉驱动后池中新出现的合格任务不再被晋升 ⇒ 证明晋升确实由它驱动而非 outer 的 tick。
