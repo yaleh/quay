@@ -32,5 +32,6 @@ extra: {}
 
 - orchestration/orchestrator-loop-tick.md（4b2 移除两个 Monitor 挂载）
 - orchestration/orchestrator-tick-core.md（同步退役引用）
-- plugin/scripts/slot-free-trigger.ts + suite-state-trigger.ts（冗余标记/移除）
+- plugin/scripts/slot-free-trigger.ts（冗余标记/移除）
+- plugin/scripts/suite-state-trigger.ts（冗余标记/移除）
 - tasks/gap-retire-outer-monitors-after-reconciler.md（自身）
