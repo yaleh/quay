@@ -1,7 +1,7 @@
 ---
 id: gap-ac153-core-invariant-single-impl-not-evaluated-vocab
 title: AC153 核心不变式单一实现 + DriverResult 词表强制含 not-evaluated
-status: todo
+status: ready
 labels:
   - gap
 parent: null
