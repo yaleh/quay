@@ -21,7 +21,7 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`/live` 响应每个 live 条目含 `pid` 字段（⛔ pid 缺失 ⇒ 假）。
+- [x] AC1（能取假）：`/live` 响应每个 live 条目含 `pid` 字段（⛔ pid 缺失 ⇒ 假）。
 
 ## Definition of Done
 
