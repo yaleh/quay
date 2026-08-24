@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef } from "../src/serve-handlers.ts";
+import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript } from "../src/serve-handlers.ts";
 import { readGitHistory } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
@@ -146,6 +146,20 @@ test("AC1: taskIdFromBranchRef maps task/<id> → <id> and leaves non-task refs 
   assert.equal(taskIdFromBranchRef("feature/alpha"), null);
 });
 
+// gap-webui-git-history-svg-unreadable: the client renderer must draw the viewBox at its NATIVE
+// width/height (1:1) instead of width=100% + max-height:75vh + default preserveAspectRatio meet,
+// which squashed a 924×15570 viewBox to ~91px wide (meet scales to the shortest edge).
+test("AC1-2: git-history SVG renders native width/height (no max-height squash → text readable + native aspect ratio)", () => {
+  const script = gitGraphClientScript();
+  // AC1 (falsifiable): no style attribute carries a max-height cap (the squash culprit — a cap forces
+  // default preserveAspectRatio meet to scale a tall viewBox down to the shortest edge).
+  assert.ok(!/\.attr\("style", "[^"]*max-height/.test(script), "SVG style has no max-height cap");
+  assert.ok(!script.includes('"width", "100%"'), "SVG no longer forces width 100%");
+  // AC2 (falsifiable): native width + height set → the viewBox renders 1:1 (no meet compression).
+  assert.ok(script.includes('.attr("width", width)'), "SVG width = native content width");
+  assert.ok(script.includes('.attr("height", height)'), "SVG height = native content height");
+});
+
 function makeWorkspace(prefix) {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}ws-`));
   const tasksDir = path.join(ws, "tasks");
@@ -213,6 +227,9 @@ test("integration: GET /git-history serves the vertical-graph JSON payload + an 
     assert.equal(r.status, 200, "GET /git-history returns 200");
     // AC1: the graph mount + embedded JSON payload (vertical trunk + fork/merge structure).
     assert.ok(r.body.includes('id="git-graph"'), "the vertical graph mount is present");
+    // gap-webui-git-history-svg-unreadable AC2: the mount scrolls horizontally so the native-width
+    // SVG is never squashed into the viewport (falsifiable — absent before the fix).
+    assert.ok(r.body.includes('overflow-x:auto'), "the graph mount scrolls horizontally (native width)");
     assert.ok(r.body.includes('id="git-graph-data"'), "the embedded graph JSON payload is present");
     assert.ok(r.body.includes('"fork"'), "the JSON payload carries fork edges");
     assert.ok(r.body.includes('"merge"'), "the JSON payload carries merge edges");

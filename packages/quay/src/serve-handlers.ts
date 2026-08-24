@@ -2068,7 +2068,7 @@ function gitGraphLibJs(): string {
 
 /** The client-side D3 renderer. Collapse/expand is toggled client-side; branches start COLLAPSED
  *  (AC2). Written without template literals / `${` / hex / `</script` so it inlines verbatim. */
-function gitGraphClientScript(): string {
+export function gitGraphClientScript(): string {
   return `(function () {
   var mount = document.getElementById("git-graph");
   var dataEl = document.getElementById("git-graph-data");
@@ -2124,8 +2124,13 @@ function gitGraphClientScript(): string {
     var maxDepth = Math.max(left, right);
     var width = Math.max(trunkX + (maxDepth + 1) * laneGap + 260, 360);
     var height = y(all.length - 1) + padY;
-    svg.attr("viewBox", "0 0 " + width + " " + height).attr("width", "100%")
-      .attr("style", "height:auto;max-height:75vh;overflow:auto;border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif");
+    // gap-webui-git-history-svg-unreadable: draw the viewBox at its NATIVE width/height (1:1) so the
+    // text stays readable — the old width=100% + max-height:75vh + default preserveAspectRatio meet
+    // squashed a tall viewBox (924x15570) to ~91px wide (meet scales to the shortest edge). The
+    // #git-graph container scrolls horizontally when the native width exceeds the viewport.
+    svg.attr("viewBox", "0 0 " + width + " " + height)
+      .attr("width", width).attr("height", height)
+      .attr("style", "border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif");
     var g = svg.append("g");
 
     // trunk vertical spine
@@ -2224,7 +2229,7 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
   const branches = history.status === "ok" ? groupCommitsByBranch(history.commits) : [];
   const mergeCount = history.commits.filter((c) => c.parents > 1).length;
 
-  const graph = layout ? html`<div id="git-graph" aria-label="Git 纵向时间轴"></div>` : "";
+  const graph = layout ? html`<div id="git-graph" aria-label="Git 纵向时间轴" style="overflow-x:auto"></div>` : "";
   // The data JSON is embedded with `<` escaped to \u003c so a commit subject can never break out of
   // the <script> element. d3 + the client renderer are emitted only when there is a graph to draw.
   const dataScript = layout ? html`<script type="application/json" id="git-graph-data">${JSON.stringify(layout).replace(/</g, "\\u003c")}</script>` : "";
