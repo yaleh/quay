@@ -34,6 +34,8 @@
 //       fan-in-execute.js 无 task 即 bad-args；同 .claude/ 类。⛔ 粒度到 manager/**，不含 init/——
 //       后者是产品交付面真红，7e64a86b 必须仍红；635ec831（manager/SKILL.md）转绿）
 //     · 指引面：CLAUDE.md（本仓库唯一每会话自动注入的文档，管理者独占直写）
+//       README.md（纯 prose、仓库根、不被测试/构建解析——同 CLAUDE.md 类；⛔ 不含 LICENSE/CHANGELOG.md/
+//       AGENTS.md——三者被 npm-pack-e2e / package-json-bin / codex-stage1-adapter 读取，非纯 prose，仍代码面）
 //     · 基础设施：.gitignore .gitattributes .npmrc .github/（CI/build 配置）
 //     · 热修 fan-in 机件本身：plugin/scripts/fan-in-* plugin/test/fan-in-*（机制坏了无法 self-fan-in，
 //       引导问题——5e54bb37 正是此类）
@@ -100,7 +102,7 @@ import { buildLockHoldIntervals } from "./fan-in-ff-protocol-check.ts";
  * 不再直写 git 收据 ⇒ 该排除项（曾为消除 bypass 误红而加）不再需要。git 版 json 已删除。
  */
 export const DESIGN_INTERNAL_RE =
-  /^(?:tasks\/|docs\/|orchestration\/|adr\/|[.]quay\/|plugin\/loop\/|measurements\/|milestones\/|[.]claude\/|plugin\/skills\/manager\/|CLAUDE[.]md$|[.]gitignore$|[.]gitattributes$|[.]npmrc$|[.]github\/|plugin\/scripts\/fan-in-|plugin\/test\/fan-in-)/;
+  /^(?:tasks\/|docs\/|orchestration\/|adr\/|[.]quay\/|plugin\/loop\/|measurements\/|milestones\/|[.]claude\/|plugin\/skills\/manager\/|CLAUDE[.]md$|README[.]md$|[.]gitignore$|[.]gitattributes$|[.]npmrc$|[.]github\/|plugin\/scripts\/fan-in-|plugin\/test\/fan-in-)/;
 
 /** 一条 repo-相对路径是否落在设计内排除集（按设计就该直接提交 develop）。PURE。 */
 export function isDesignInternalPath(relPath) {
@@ -269,6 +271,12 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "outer 直提 develop 补 plugin/skills/init/SKILL.md 的 <!-- reference-doc: --> 声明——为解 referenced-not-landed 全库红的最小止损（补一行声明），" +
       "非偷懒绕过 fan-in（性质同 f9577da1/167b7052 类：为修机制自身而直写）。但直提 develop 本身就是错的（应走 fan-in），" +
       "本次是我方共同的流程失误。manager 2026-08-23 裁定 ruled one-off（先例 cddc55e2/f9577da1）。",
+  },
+  {
+    sha: "b67a91cf",
+    reason:
+      "manager 委托 outer 写 README（Driver processes 小节）——README.md 当时不在 design-internal 排除集（同 CLAUDE.md 类：纯 prose、仓库根、" +
+      "不被测试/构建解析）⇒ 触发 bypass 误红。非绕过 fan-in 意图。manager 2026-08-24 裁定 a+b（根修 isDesignInternalPath 加 README.md + 本快修入 ruled 表）。",
   },
 ];
 
@@ -691,7 +699,7 @@ export function main(argv) {
       ac65AuthorizedCommits: verdict.ac65AuthorizedCommits,
       ruledHistoricalCommits: verdict.ruledHistoricalCommits,
       unclassifiableCommits: unclassifiable.length,
-      predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ plugin/skills/manager/ CLAUDE.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
+      predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ plugin/skills/manager/ CLAUDE.md README.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
       ac65CarveOut: "AC65-authorized direct-fix (two predicates; sha table retired to display-only): commit message has AC65 declaration (/^AC65:/m) AND verification artifact (/AC65-Verified:/m) ⇒ ac65AuthorizedDirectFix (visible, NOT bypass); declaration with no verification artifact ⇒ RED (criterion-3); no declaration code-surface direct commit ⇒ RED. Legacy 02b2b2fc form (AC65 一条命令验证：<output>) tolerated. NOT a plugin/scripts/* filename exemption.",
       ruledHistoricalCarveOut: "RULED_HISTORICAL_COMMITS one-off exemption (manager 2026-08-15 ruling, tasks/gap-direct-to-develop-ruled-historical-cddc55e2): sha prefix match on the bounded ruled table ⇒ ruledHistorical (visible, NOT bypass, NOT ac65Authorized); any non-table direct commit still RED (exemption cannot be silently extended). Criterion-3 (declaration without verification ⇒ RED) unchanged.",
     },
