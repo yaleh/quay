@@ -11,7 +11,9 @@
 //      用 CLAUDE_CODE_MESSAGING_SOCKET + CLAUDE_CODE_MESSAGING_TOKEN（= childToken，own-child 场景，不 hold）。
 //   ② 给【别的会话】发：node --experimental-strip-types send-to-session.ts --pid <pid> "消息"
 //      读 ~/.claude/sessions/<pid>.json（name↔socket）+ <pid>.*.key（peerToken）。
-//      ⚠️ 用 peerToken ⇒ 对端把你当【另一个会话】⇒ bypass 会话会 hold for approval（实测 2026-08-15）。
+//      ⚠️ 用 peerToken ⇒ 对端把你当【另一个会话】。2.1.241 更正（2.1.233 时曾记「bypass 会话会 hold」，
+//      跨 8 patch 行为已变）：投递不由 token 类型决定，由【接收方 settings】——permissions.defaultMode=
+//      bypassPermissions 或 crossSessionInbound:accept 任一即直通，皆无则 held→expired（项目会话全带前者 ⇒ 直通）。
 //      权限边界：<pid>.*.key 是 600 <user>——只挡【别的 OS 用户】，不挡【同用户的另一个会话】。
 //   ③ 给【别的会话】发但【免 hold】：node --experimental-strip-types send-to-session.ts --pid <pid> --token <childToken> "消息"
 //      childToken 是【目标会话】的 CLAUDE_CODE_MESSAGING_TOKEN（在该会话里 echo $CLAUDE_CODE_MESSAGING_TOKEN 取）。
@@ -64,7 +66,7 @@ if (self) {
   );
   sockPath = reg.messagingSocketPath;
   // --token <childToken> 显式传入 ⇒ 用 childToken（own-child，免 hold）；
-  // 否则读 .key 里的 peerToken（跨会话，bypass 会话会 hold）。
+  // 否则读 .key 里的 peerToken（跨会话；投递由接收方 settings 决定，非 token 类型——见 2.1.241 更正）。
   if (tokenIdx !== -1) {
     token = args[tokenIdx + 1];
     console.error(`  token 来源 = --token 参数（childToken，own-child，不 hold）`);
@@ -79,12 +81,11 @@ if (self) {
     token = JSON.parse(
       fs.readFileSync(path.join(home, ".claude", "sessions", keyFile), "utf8"),
     ).peerToken;
-    // ⚠️ 2026-08-15 实测：peerToken ≠ childToken。用 peerToken ⇒ 对端把你当【另一个会话】⇒
-    // bypass 会话会 hold for approval（"The sender did not attest its permission mode"）。
-    // 若目标是【自己的会话】且要免 hold，必须用 childToken（CLAUDE_CODE_MESSAGING_TOKEN），
-    // 即 --pid <自己pid> --token <childToken>。peerToken 只用于【给别的会话发且接受 hold】。
+    // ⚠️ 2.1.241 更正（2.1.233 曾记「peerToken ⇒ bypass 会话会 hold」，跨 8 patch 已变）：
+    // 投递不由 token 类型决定，而由【接收方 settings】——permissions.defaultMode=bypassPermissions 或
+    // crossSessionInbound:accept 任一即直通，皆无则 held→expired。项目会话全带 bypassPermissions ⇒ 25/25 直通（实测）。
     console.error(`  token 来源 = ${pid}.*.key（peerToken，跨会话）`);
-    console.error(`  ⚠️ 用 peerToken ⇒ 对端把你当【另一个会话】⇒ bypass 会话会 hold for approval。`);
+    console.error(`  ⚠️ 投递由接收方 settings 决定（bypassPermissions/crossSessionInbound:accept ⇒ 直通，皆无 ⇒ held→expired），非 token 类型。`);
     console.error(`     若目标是【自己的会话】且要免 hold，请加 --token <childToken>（目标会话的 CLAUDE_CODE_MESSAGING_TOKEN）。`);
   }
   console.error(`  target = ${reg.name} (pid=${pid}, sessionId=${reg.sessionId})`);
