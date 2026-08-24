@@ -1,7 +1,8 @@
 ---
 id: gap-tmux-tmpdir-not-honored-fixtures-leak-default-socket
-title: "TMUX_TMPDIR 本机不认 → factory 脚本/fixture 测试落默认 socket 撞生产（7 孤儿 server 实测，推翻 leak 任务「never touches default socket」）"
-status: ready
+title: TMUX_TMPDIR 本机不认 → factory 脚本/fixture 测试落默认 socket 撞生产（7 孤儿 server 实测，推翻
+  leak 任务「never touches default socket」）
+status: superseded
 labels:
   - gap
   - defect
@@ -11,6 +12,13 @@ extra: {}
 ---
 
 **type:** execution
+
+## Superseded（2026-08-24，AC1 负控制证伪前提）
+
+本任务前提「TMUX_TMPDIR 本机不认 + factory 脚本落默认 socket 撞生产」被 worker AC1 负控制证伪（外层独立
+复现确认）：`env -u TMUX TMUX_TMPDIR=<dir> tmux new-session`（无 -S）落 `<dir>/tmux-1000/default`
+（TMUX_TMPDIR 在 $TMUX 剥离时被认）；「无 -S」孤儿实为私有 socket（/tmp/quay-init-tmux-* 等，ss -xlp 映射）。
+重定范围至 [[gap-tmux-stale-not-honored-comment-private-socket-leak-scan]]。
 
 ## Proposal
 
