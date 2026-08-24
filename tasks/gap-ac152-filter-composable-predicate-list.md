@@ -1,7 +1,7 @@
 ---
 id: gap-ac152-filter-composable-predicate-list
 title: AC152 Filter 可组合谓词列表（两 driver 共用，⛔ 非各 kind 私有分支）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
