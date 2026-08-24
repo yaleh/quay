@@ -1,7 +1,7 @@
 ---
 id: gap-direct-to-develop-bypass-init-skill-reference-doc
 title: bypass-check 豁免面缺 plugin/skills/init/——reference-doc 索引行被误判 code-surface（发生率 2）
-status: todo
+status: ready
 labels:
   - gap
   - defect
