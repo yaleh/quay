@@ -480,6 +480,14 @@ if [ "${post_head}" != "${task_tip}" ]; then
   echo "fan-in-ff-merge: post-check FAILED — ${merge_target} is at ${post_head}, expected task tip ${task_tip}; needs human" >&2
   exit 1
 fi
+# ── quiet-window 兑现（gap-fan-in-ff-livelock-quiet-window-no-consumer）───────────────────────
+# The escalation (attempt >= 3) requested a quiet window (holder: all-layers-except-fan-in-executor).
+# On ff SUCCESS the escalated task has landed — append a resolution record (event
+# "quiet-window-resolved") to the SAME escalation file so the consumer (promotion-driver) stops
+# holding develop writes — the escalation's `endsEarly: "ff-success"` half. Written unconditionally:
+# a resolution with no prior request is a no-op for the consumer (its active-window logic keys on a
+# request NEWER than any resolution). Same file, same append — ⛔ no new jsonl.
+printf '%s\n' "{\"event\":\"quiet-window-resolved\",\"taskId\":\"${task_id}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"mergeTarget\":\"${merge_target}\"}" >> "${escalations}"
 echo "fan-in-ff-merge: OK — ${merge_target} fast-forwarded to task/${task_id} (${post_head}) [before ${develop_head_before}]${run_id:+ (runId: ${run_id})}"
 echo "fan-in-ff-merge: measure ff_only_locked=true"
 exit 0
