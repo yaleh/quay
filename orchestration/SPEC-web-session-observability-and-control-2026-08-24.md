@@ -650,3 +650,130 @@ assistant / result     → "I need your permission to write to …. Please grant
 
 **⊢ 一条我不代拍的补充**：§10.1 发现的 `send-to-session.ts` 注释与实测冲突，**归 outer 处置**
 （改注释属 `.ts`，在我豁免面外）。
+
+---
+
+# 第四轮（2026-08-24T17:5xZ）：结构性重定位——quay 从【会话里的东西】变成【包裹会话的东西】
+
+## 12. 人的判断（原话）与它的实测支撑
+
+> 「本项目正从 `Claude Code 会话中的 quay` 转变为 `包裹 Claude Code 会话的 quay`。
+> 除了配置多种 Claude Code profile 以外，也需要能配置和选择**何时和如何使用**这些 profile；
+> 除了管理 web 上临时启动的会话以外，管理 `*-driver` 启动的会话也是必要的。
+> 关于 `*-driver` 本身，现在还是可以假设它们是使用**配置文件**设置的。
+> 我也希望**先在配置文件中**实现对 `*-driver` 启动的会话的设置，**以后再考虑如何在 web 上**设置它们。」
+
+### 12.1 一条实测把这个判断变成可操作的（我本轮直读，非转述）
+
+**会话管理的代码【全部】在编排层，产品层一行没有**：
+```
+packages/quay/src（产品，发 npm，承载 Provider ABI）
+  grep launchArgv|_launchSpec|launch.settings|claude agents  ⇒ 命中【1 个文件】= init.ts
+  而 init.ts 只做一件事：generateLaunchSettingsContent() 铺一个模板文件（:285）
+  ⇒ 产品【不管理会话】，只在初始化时【放一个别人用的配置模板】
+plugin/scripts（本实验的编排层，不发布）
+  同一组谓词 ⇒ 命中【10 个文件】（quay-launch.sh / worker-driver.ts / promotion-driver.ts /
+  quay-topology.sh / manager-start.sh / session-bootstrap.sh / quay-session.ts / …）
+  ⇒ 真正的会话生命周期【全在这里】
+```
+**⇒ 用人的话说：现在的 quay 确实是「会话里的东西」——会话管理是【围着 quay 的脚手架】，不是 quay 的一部分。**
+**⇒ 要变成「包裹会话的 quay」，缺的不是某个功能，是【会话成为产品的一等域对象】这件事本身。**
+
+### 12.2 与 Provider ABI 的类比（这不是新发明，是同一手法用第二次）
+
+quay 的既有核心抽象是 **Provider ABI**：产品**不关心任务存在哪**（native markdown / GitHub Issues），
+只对着 task view-model 编程，由 `.quay/config.yml` 声明启用哪个 provider。
+**⇒ 本次要的东西是它的镜像：产品不关心【会话怎么起、起在哪、用哪个模型/wrapper】**，
+只对着一个 session view-model 编程，由配置声明。**可以叫 Runner/Session ABI。**
+
+**⊢ 这个类比不是修辞，它直接给出两条设计约束**：
+1. **承载位置**：Provider 的声明在 `.quay/config.yml`（产品自己的配置面）。
+   ⇒ profile/policy 也应落在产品配置面（`.quay/config.yml` 或 `.quay/profiles.yml`），
+   **⛔ 不是 `.claude/launch.settings.json`** —— §8.2 坑③ 已指出后者是**寄生在 Claude Code 自己
+   settings 文件上的扩展键**（靠 `_` 前缀避让，对方哪天校验未知键就整体挂掉）。
+   **⊢ 第四轮给了坑③ 一个此前没有的【理由】**：不只是"寄生有风险"，而是**归属就错了**——
+   它是 quay 的配置，不该住在 Claude Code 的文件里。
+2. **抽象边界**：Provider ABI 的价值是**换后端不改 core**。对应地，Session ABI 的价值应是
+   **换 launcher/model/宿主不改调用方**——`worker-driver` 不该知道 `claude-fjdac` 这个名字，
+   它只该说「给我一个 `task-worker` 语义的会话」。**实测现状恰恰相反**：
+   `worker-driver.ts:613 launchArgv()` 硬编码 `bash quay-launch.sh <role> -p <prompt>`，
+   而 `quay-launch.sh` 再去 jq 读 wrapper 名 ⇒ **抽象在 bash 里，不在产品里。**
+
+## 13. 四层分解（人的三个要求各自落在哪一层）
+
+```
+L1 Profile     「怎么起一个会话」= launcher · model · env(含 unset) · permission-mode · tools/allowedTools · bare
+                 ⇒ 人的要求①「配置多种 profile」            ⇒ 已有雏形（_launchSpec.roles）+ AC154 在跟
+L2 Policy      「什么场合用哪个 profile」= 按 session-kind 绑定 · 条件选择 · 失败回退 · 组合/继承
+                 ⇒ 人的要求②「配置和选择【何时和如何】使用」 ⇒ 【全新，今天没有任何东西对应】
+L3 Consumers   「谁来起」= *-driver（配置文件驱动，人要求先做）· web 临时会话 · 长驻角色(tmux)
+                 ⇒ 人的要求③「管理 *-driver 启动的会话」    ⇒ driver 侧今天是硬编码 role 名
+L4 Registry/观测「起完之后统一可见/可投递/可管理」            ⇒ 本 SPEC §7 已设计（六条任务已立案）
+```
+**⊢ 关键判断：L2 是这次真正的新东西，L1 已有雏形、L4 已在做、L3 是把 L1+L2 接进 driver。**
+**⊢ 且 L2 缺失是【有历史代价的】，不是理论洁癖**（下节逐条给证据）。
+
+## 14. L2（policy）为什么必须单列——三条历史证据，全部已发生
+
+| # | 历史事件 | 今天为什么挡不住 | L2 若存在会怎样 |
+|---|---|---|---|
+| ① | `07fb3be7` outer/inner 模型改 `glm-5.3`，**因模型不可用被人手工回退** | profile 是**单值**，没有"主/备"概念 ⇒ 模型挂了只能人改配置再重启 | policy 表达 `primary: glm-5.3, fallback: deepseek-v4-pro`，**spawn 失败自动降级** |
+| ② | AC142：`fix-worker`/`selector` 的 `bare:true` + `claude-fjdac`（只给 `ANTHROPIC_AUTH_TOKEN`）⇒ **13/13 全败**，且 `task-worker` 因恰好没设该键而存活 | **没有任何一致性校验**（§8.2 实测：`plugin/test/launch-settings.test.mjs` 只做值钉死，不知道 launcher 是什么） | policy/profile **加载时**就拒绝不相容组合（`bare:true` ⇒ 必须提供 `ANTHROPIC_API_KEY`），⛔ 不是 spawn 时静默失败 |
+| ③ | 三个 worker role 逐字重复 `launcher: claude-fjdac` / `model: deepseek-v4-pro`（§8.2 坑②） | 无组合/继承 ⇒ 「给所有 worker 换模型」= 改三处，漏一处静默不一致 | profile 继承 + role 只声明差异（§8.2 已给出目标形态） |
+
+**⊢ 发生率**：①1 次（有 commit）②1 次（13/13，有 outcome 记录）③结构性长期存在。
+**⊢ 按硬规则⑫**：①② 各 1 次**尚未到"必须立新机制"的门槛**，**但它们不是我在要求新前置**——
+L2 本来就是人已经裁定要做的东西（要求②），**这三条只是给它定形态，不是给它找理由**。
+⇒ **⛔ 不得把这三条当成"发生率够了所以要做"的论证**（那会是我自己批评过的形态）；
+它们的用途是：**L2 落地时至少要覆盖这三种已发生的失败**，否则就是重造一个挡不住历史的机制。
+
+## 15. L3：`*-driver` 会话的配置化（人明确要求"先在配置文件里做"）
+
+### 15.1 人的排序与既有裁定一致，不是任意偏好
+
+人说「先配置文件，以后再考虑 web 设置」。**这与 `SPEC-unified-driver-architecture-2026-08-23.md:259-266`
+的既有硬分界【完全一致】**：
+```
+声明式配置（git 版本化 · 人写 · 重启才生效）  ⟷  运行时控制态（gitignored · 机器写 · 热变）
+```
+**⇒ driver 的 profile 绑定属【左侧】** ⇒ 若做成 web 可改，就是**机器改人的源文件**，
+正是该 SPEC 点名要避免的形态（同 CLAUDE.md 11b「未提交改动正在影响生产，而一次 `git checkout` 静默回退它」）。
+**⇒ 人的"先配置文件"不需要额外论证——它落在已有裁定的正确一侧。web 侧应是【只读展示】。**
+
+### 15.2 落地面（读代码给出，非设想）
+
+```
+今天：worker-driver.ts:613  launchArgv(role, prompt, root)
+        ⇒ ["bash", "<root>/plugin/scripts/quay-launch.sh", role, "-p", prompt]   ← role 名硬编码在调用点
+      promotion-driver.ts:209/:212 同形（fix-worker）
+      worker-driver.ts:1199        同形（selector）
+目标：调用点只说【语义 kind】，由 L2 policy 解析成 L1 profile，再由单一构造点出 argv
+      ⇒ 三个调用点不再各自知道 role 名与 launcher 名
+```
+**⊢ 已有的好地基**：`launchArgv` **已经是唯一构造点**（AC140-1 的成果）⇒ **L1/L2 只需接在它下面，
+⛔ 不需要重构三个调用点**。这是本次改动比看起来小的原因。
+
+**⊢ 一条必须保留的能力（⛔ 别在配置化时弄丢）**：`quay-launch.sh` 的
+`with_entries(select(.value != ""))`（`:98`）—— **空串 = 取消继承**，manager role 靠它取消 917k 三件套；
+而 `"0"` 是有效值会保留。**⇒ 新配置必须显式表达 `unset: [...]`**（§8.2 已记），
+否则 manager 的 profile 会静默继承 917k 而在 Anthropic 端压缩过晚报错（`session-launch-recipes.md:145-152` 记的真实故障）。
+
+## 16. 对已立六条任务的影响 + 建议的新增（⛔ 我不写任务体）
+
+**已立六条（T1–T6）不受本轮影响，可照常推进**——它们是 L4（观测/交互面），与 L1/L2/L3 正交。
+**唯一接触点是 T6（`gap-webui-session-lifecycle`）**：它已 `depends_on gap-ac154-...profile-extraction`，
+**方向正确**；本轮只是把它依赖的那个东西说清楚了（AC154 = L1，而 T6 还需要 L2/L3）。
+
+**建议的新增/调整（形态与归属由 outer 定，我只给判断）**：
+1. **AC154（L1 profile）不变，但需补一条**：承载位置应是**产品配置面**而非 `.claude/launch.settings.json`
+   （§12.2 给了它此前没有的理由：归属错了，不只是寄生有风险）。
+2. **新增一条 L2 policy**：至少覆盖 §14 的三种已发生失败（主备回退 / 加载时一致性校验 / 继承去重）。
+   **⛔ 不要做成"配置项的自由组合"**——那会变成第二个 `bare` 那样的两级歧义旋钮。
+3. **新增一条 L3 driver 绑定**：接在 `launchArgv` 之下，三个调用点改为只说语义 kind。
+   **人明确要求：配置文件先行，web 只读。**
+4. **⛔ 明确不做**：web 端编辑 driver 配置（§15.1，撞既有硬分界）。
+
+**⊢ 一条我不代拍的**：`packages/quay`（产品）vs `plugin/scripts`（编排）的归属——
+§12.1 实测显示会话管理今天 100% 在编排层。**若"包裹会话的 quay"是【产品】主张**，
+L1/L2/L3 应逐步进 `packages/quay`；**若只是本仓库开发循环的需要**，留在 `plugin/scripts` 也自洽。
+**这两者的差别是"quay 发布出去之后别人能不能用这套会话管理"** ⇒ **归人裁定，不归我也不归 outer。**
