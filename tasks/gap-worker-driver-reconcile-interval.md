@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-reconcile-interval
 title: worker-driver 加定时器地板 --reconcile-interval（至少每 N 秒协调一次，边沿事件全丢也降级「慢但正确」而非静默停摆）
-status: done
+status: ready
 labels:
   - gap
   - defect
