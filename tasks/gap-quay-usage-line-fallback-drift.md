@@ -2,7 +2,7 @@
 id: gap-quay-usage-line-fallback-drift
 title: quay 顶层 usage fallback 字符串 4 个同类缺口（adr/manager arm/action run/config
   check）+ 无机械一致性守卫
-status: done
+status: ready
 labels:
   - gap
   - defect
