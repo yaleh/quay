@@ -3,7 +3,7 @@ id: gap-worker-print-bg-wait-ceiling-600s
 title: worker 反复 exited-not-landed 根因：claude -p end_turn 时存活后台任务的 600s
   宽限竞态（13/13 样本聚集 600.8-602.9s；43/77=56%）→ 主修 PRINT_BG_WAIT_CEILING_MS=0 +
   prompt 辅助 + driver 外部超时
-status: done
+status: ready
 labels:
   - gap
 parent: null
