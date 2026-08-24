@@ -278,6 +278,13 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "manager 委托 outer 写 README（Driver processes 小节）——README.md 当时不在 design-internal 排除集（同 CLAUDE.md 类：纯 prose、仓库根、" +
       "不被测试/构建解析）⇒ 触发 bypass 误红。非绕过 fan-in 意图。manager 2026-08-24 裁定 a+b（根修 isDesignInternalPath 加 README.md + 本快修入 ruled 表）。",
   },
+  {
+    sha: "095af66a",
+    reason:
+      "manager 直提 develop 补 plugin/skills/init/SKILL.md + plugin/skills/manager/SKILL.md 的 <!-- reference-doc: --> 索引声明（随 SPEC-codex-session-communication-host-adapter-2026-08-24 立案）——" +
+      "manager/SKILL.md 一行已被 design-internal exclusion set 豁免，init/SKILL.md 一行因豁免正则缺口被误判 code-surface；性质与 99f845d9 完全相同（同为 reference-doc 索引行的止损直写）。" +
+      "manager 2026-08-24 裁定 ruled one-off（先例 99f845d9/cddc55e2/f9577da1）。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */

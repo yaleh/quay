@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable, renderPerFileTimelineSvg, taskIdFromBranchRef } from "../src/serve-handlers.ts";
+import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef } from "../src/serve-handlers.ts";
 import { readGitHistory } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
@@ -685,6 +685,201 @@ test("AC3: negative control — all three sections reference the same round cons
     assert.ok(r.body.includes("测试时间线（round #230 · 01:00Z）"), "timeline names round #230");
     assert.ok(r.body.includes("#230 <span") && r.body.includes("← 最新"), "history top row marks #230 as 最新");
     assert.ok(!r.body.includes("无 perFile 数据"), "no fallback notice in the consistent case");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-webui-test-file-detail-page — single-file cross-round detail page ─────────────────────────
+
+/** Seed a 3-round fixture where `slow.test.mjs` appears in ALL three rounds (oldest→newest file
+ *  order; readTests reverses → newest-first), and `onlyonce.test.mjs` appears in just ONE round. */
+function seedFileDetailFixture(ws) {
+  const t0 = 1724374800000;
+  const runId = "fm-file-detail-231-dddddd";
+  fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+    JSON.stringify({ round: 229, startedAt: "2026-08-22T01:00:00.000Z", durationMs: 400000, state: "green", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 300, passed: false, endedAtMs: t0 + 500, startedAtMs: t0 + 200 }, { file: "packages/quay/test/fast.test.mjs", durationMs: 10, passed: true }] }),
+    JSON.stringify({ round: 230, startedAt: "2026-08-22T02:00:00.000Z", durationMs: 400000, state: "red", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 1, fail: 1, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 1000, startedAtMs: t0 + 790 }, { file: "packages/quay/test/fast.test.mjs", durationMs: 9, passed: true }] }),
+    JSON.stringify({ round: 231, startedAt: "2026-08-22T03:00:00.000Z", durationMs: 400000, state: "green", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 150, passed: true, endedAtMs: t0 + 1500, startedAtMs: t0 + 1350 }, { file: "packages/quay/test/onlyonce.test.mjs", durationMs: 77, passed: true }] }),
+  ].join("\n"));
+  fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId, startedAt: "2026-08-22T03:00:00.000Z" }));
+  fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
+    JSON.stringify({ t: t0 + 1300, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
+    JSON.stringify({ t: t0 + 1400, loadavg: 4.5, cpu_stall: 40.0, mem_avail: 7500.0 }),
+    JSON.stringify({ t: t0 + 1600, loadavg: 5.0, cpu_stall: 50.0, mem_avail: 7000.0 }),
+  ].join("\n"));
+  return runId;
+}
+
+test("collectFileHistory collects one file's entries ACROSS rounds oldest→newest, skipping rounds without it (never fabricates)", () => {
+  const t0 = 1724374800000;
+  const runs = [
+    { round: 231, startedAt: "2026-08-22T03:00:00.000Z", durationMs: 400000, state: "green", pass: 2, fail: 0, cancelled: 0, tests: 2, reason: null, commit: null, scope: null, runner: null, gate: null, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 150, passed: true, endedAtMs: t0 + 1500, startedAtMs: t0 + 1350 }] },
+    { round: 230, startedAt: "2026-08-22T02:00:00.000Z", durationMs: 400000, state: "red", pass: 1, fail: 1, cancelled: 0, tests: 2, reason: null, commit: null, scope: null, runner: null, gate: null, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 1000, startedAtMs: t0 + 790 }] },
+    { round: 229, startedAt: "2026-08-22T01:00:00.000Z", durationMs: 400000, state: "green", pass: 2, fail: 0, cancelled: 0, tests: 2, reason: null, commit: null, scope: null, runner: null, gate: null, failures: [], perFile: [{ file: "packages/quay/test/other.test.mjs", durationMs: 10, passed: true }] },
+  ];
+  const got = collectFileHistory(runs, "packages/quay/test/slow.test.mjs");
+  assert.equal(got.length, 2, "slow.test.mjs appears in 2 of the 3 rounds");
+  assert.deepEqual(got.map((p) => p.round), [230, 231], "oldest→newest (runs was newest-first)");
+  assert.deepEqual(got.map((p) => p.durationMs), [210, 150], "round 230 first (210ms), then 231 (150ms)");
+  assert.deepEqual(got.map((p) => p.passed), [true, true]);
+  // absent file ⇒ empty (never a fabricated point)
+  assert.deepEqual(collectFileHistory(runs, "nope.test.mjs"), []);
+  assert.deepEqual(collectFileHistory([], "x.test.mjs"), []);
+});
+
+test("renderFileDurationTrendSvg renders a bar per round (fail-shaded), and returns \"\" for <2 points (a one-round trend is not cross-round)", () => {
+  const points = [
+    { round: 229, startedAt: null, durationMs: 300, passed: false, runState: "green" },
+    { round: 230, startedAt: null, durationMs: 210, passed: true, runState: "red" },
+    { round: 231, startedAt: null, durationMs: 150, passed: true, runState: "green" },
+  ];
+  const svg = renderFileDurationTrendSvg(points);
+  assert.ok(svg.startsWith("<svg"), "returns an SVG document");
+  assert.equal((svg.match(/class="gantt-svg-bar(-fail)?"/g) ?? []).length, 3, "one bar per round (3 bars)");
+  assert.ok(svg.includes("gantt-svg-bar-fail"), "the failed round's bar is fail-shaded");
+  assert.ok(svg.includes("#229") && svg.includes("#231"), "bars carry their round labels");
+  assert.ok(!svg.includes("<script"), "zero client JS");
+  assert.ok(!svg.includes("NaN"), "no NaN leaks");
+  assert.ok(!/#[0-9a-fA-F]{6}/.test(svg), "token-derived (no hardcoded hex)");
+  // AC2 falsifiability: <2 points ⇒ no cross-round trend chart.
+  assert.equal(renderFileDurationTrendSvg([]), "");
+  assert.equal(renderFileDurationTrendSvg([points[0]]), "", "a single point renders no trend chart");
+});
+
+test("renderFileHistoryTable renders a pass/fail history row per round (oldest→newest), failed marked red, empty ⇒ \"\"", () => {
+  const points = [
+    { round: 229, startedAt: "2026-08-22T01:00:00.000Z", durationMs: 300, passed: false, runState: "green" },
+    { round: 230, startedAt: "2026-08-22T02:00:00.000Z", durationMs: 210, passed: true, runState: "red" },
+  ];
+  const out = renderFileHistoryTable(points);
+  assert.ok(out.includes("<th>round</th>"), "renders the history table header row");
+  assert.ok(out.includes("#229") && out.includes("#230"), "both rounds present");
+  assert.ok(out.includes(">failed<") && out.includes(">passed<"), "pass/fail labels present");
+  assert.ok(/class="verdict-fail"/.test(out), "the failed round is marked red");
+  assert.equal(renderFileHistoryTable([]), "", "empty history renders no table");
+});
+
+test("AC1/AC2: GET /tests/file?path= returns a single-file detail page with cross-round durationMs trend + pass/fail history", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-filedetail-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seedFileDetailFixture(ws);
+    createStore(tasksDir).write("FILEDETAIL", { title: "file detail web tests", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs");
+    assert.equal(r.status, 200, "GET /tests/file returns 200");
+    assert.ok(r.body.includes("测试文件"), "the page renders the single-file detail heading");
+    assert.ok(r.body.includes("packages/quay/test/slow.test.mjs"), "the page names the requested file");
+    // AC2: cross-round trend + history (3 rounds for slow.test.mjs).
+    assert.ok(r.body.includes("durationMs 趋势"), "renders the durationMs trend section");
+    assert.ok(r.body.includes("跨 3 轮"), "the trend names the 3-round span");
+    assert.ok(/class="gantt-svg-bar"/.test(r.body), "the trend chart renders bars");
+    assert.ok(r.body.includes("pass/fail 历史"), "renders the pass/fail history table");
+    assert.ok(r.body.includes("#229") && r.body.includes("#231"), "history spans all three rounds");
+    assert.ok(!r.body.includes("仅出现在 1 轮"), "no single-round notice for a multi-round file");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2 falsifiability: a file appearing in only ONE round shows the explicit single-round notice (no fabricated cross-round trend)", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-filedetail-single-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seedFileDetailFixture(ws);
+    createStore(tasksDir).write("FILEDETAIL-S", { title: "file detail single-round", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fonlyonce.test.mjs");
+    assert.equal(r.status, 200, "GET /tests/file returns 200 even for a single-round file");
+    assert.ok(r.body.includes("packages/quay/test/onlyonce.test.mjs"), "the page names the requested file");
+    assert.ok(r.body.includes("仅出现在 1 轮"), "explicit single-round notice (no fabricated trend)");
+    assert.ok(!r.body.includes("durationMs 趋势"), "no cross-round trend for a single-round file");
+    assert.ok(!r.body.includes("未找到"), "the file WAS found (in 1 round) — not a not-found page");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1 falsifiability: an unknown path (or absent path) renders the not-found note, never a 500", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-filedetail-notfound-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seedFileDetailFixture(ws);
+    createStore(tasksDir).write("FILEDETAIL-NF", { title: "file detail not-found", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const unknown = await get(port, "/tests/file?path=does%2Fnot%2Fexist.test.mjs");
+    assert.equal(unknown.status, 200, "unknown path still returns 200 (never 500)");
+    assert.ok(unknown.body.includes("未找到"), "the page renders the not-found note");
+    const absent = await get(port, "/tests/file");
+    assert.equal(absent.status, 200, "absent path still returns 200");
+    assert.ok(absent.body.includes("未找到"), "an absent path renders the not-found note");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC3: GET /tests perFile table rows link each file to its /tests/file detail page", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-filedetail-link-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const t0 = 1724374800000;
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 231, startedAt: "2026-08-22T03:00:00.000Z", durationMs: 400000, state: "green", runner: "outer", scope: "worktree", commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: false, endedAtMs: t0 + 500, startedAtMs: t0 + 290 }, { file: "packages/quay/test/fast.test.mjs", durationMs: 12, passed: true }] }),
+    ].join("\n"));
+    createStore(tasksDir).write("FILEDETAIL-L", { title: "file detail link", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests");
+    assert.equal(r.status, 200, "GET /tests returns 200");
+    assert.ok(r.body.includes('href="/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs"'), "the perFile table row links to the detail page (URL-encoded path)");
+    assert.ok(r.body.includes('href="/tests/file?path=packages%2Fquay%2Ftest%2Ffast.test.mjs"'), "both perFile rows link out");
+    // The gantt timeline rows also link (the same URL shape appears in the SVG label <a>).
+    const svgLinks = (r.body.match(/<a href="\/tests\/file\?path=[^"]+">/g) ?? []);
+    assert.ok(svgLinks.length >= 2, "the timeline gantt labels also carry detail-page links");
   } finally {
     if (server) {
       server.close();

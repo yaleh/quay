@@ -269,7 +269,9 @@ test("runPromotionRound — parses pool/promotions/applied_promotions from the i
   assert.equal(r.pool, 2);
   assert.equal(r.shouldApply, true);
   assert.deepEqual(r.promotedIds, ["gap-a", "gap-b"], "promotedIds = the gate's eligible-promotion id list");
-  assert.deepEqual(r.applied, [{ id: "gap-a", ok: true, from: "todo", to: "ready", deliveryCritical: false }]);
+  // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): the driver
+  // re-map now propagates reason + committed so a blocked promotion is not silent in the ledger.
+  assert.deepEqual(r.applied, [{ id: "gap-a", ok: true, from: "todo", to: "ready", deliveryCritical: false, reason: null, committed: false }]);
 });
 
 test("runPromotionRound — fail-closed: non-zero exit / unparseable output ⇒ error, ⛔ not 'no candidates'", () => {

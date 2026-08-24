@@ -58,4 +58,6 @@ extra: {}
 - .claude/launch.settings.json（_launchSpec.roles["task-worker"].env 加 PRINT_BG_WAIT_CEILING_MS=0）
 - plugin/scripts/worker-driver.ts（buildWorkerPrompt 提示 + --timeout 接线）
 - plugin/scripts/quay-launch.sh（SETTINGS_ARG 分支核对，勿破坏空串=删键语义）
+- plugin/test/launch-settings.test.mjs（(a) PRINT_BG_WAIT_CEILING_MS=0 测试）
+- plugin/test/worker-driver.test.mjs（(b)(c) timed-out 保留 worktree + 回合内等提示测试）
 - tasks/gap-worker-print-bg-wait-ceiling-600s.md（自身）

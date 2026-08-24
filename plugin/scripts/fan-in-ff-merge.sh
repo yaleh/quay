@@ -337,11 +337,28 @@ if [ "${suite_cert_ok}" != "1" ]; then
   exit 2
 fi
 
+# JSON-string-or-null encoding for runId/agentId. The `:+\"...\"${x:-null}` compound is WRONG (it fires
+# BOTH branches when the value is non-empty ⇒ the value is emitted twice, corrupting the JSON — a real
+# bug caught while wiring --agent-id). Precompute with an explicit if/else so a SET value is ONE quoted
+# string and an ABSENT value is `null` (the absence the executor check flags as the main-thread form).
+# Computed BEFORE the attempt counting below — the count keys on runId (gap-fan-in-ff-retry-counter-
+# scope), so run_id_json must already be resolved here.
+if [ -n "${run_id}" ]; then run_id_json="\"${run_id}\""; else run_id_json="null"; fi
+if [ -n "${agent_id}" ]; then agent_id_json="\"${agent_id}\""; else agent_id_json="null"; fi
+
 # ── attempt counting (判据3: 第几次) ──────────────────────────────────────────────────────────────────
 # The retry record is the anti-livelock data (§7): the attempt number is "how many times THIS task's
 # ff has failed already" + 1 (the current failure is the next try). A missing/empty retry file counts
 # zero prior failures ⇒ the first failure is attempt 1.
-prior_failures="$( { grep -c "\"taskId\":\"${task_id}\"" "${retry_record}" 2>/dev/null || true; } | tail -n1 )"
+# gap-fan-in-ff-retry-counter-scope (AC1/AC2): the retry record is APPEND-ONLY — no code prunes it
+# (grep -rn 'fan-in-retries.jsonl' plugin/ confirms it is never trimmed on success/re-dispatch), so a
+# taskId-only count accumulates across ALL dispatches. `maxFfRetries=3` in fan-in-execute.js is a
+# PER-DISPATCH budget (each fresh dispatch = a fresh runId, starting at 0) — the two counters' scopes
+# were mismatched: a task that failed twice historically was read as attempt 3 on a LATER dispatch's
+# first real try and escalated before spending its own budget. Fix: count only failures carrying the
+# CURRENT dispatch's runId, so a fresh dispatch's failures start from 0. (runId null/empty ⇒ the
+# pre-AC67 / main-thread form with no per-dispatch identity — those still group together as before.)
+prior_failures="$( { grep -c "\"taskId\":\"${task_id}\".*\"runId\":${run_id_json}" "${retry_record}" 2>/dev/null || true; } | tail -n1 )"
 [ -n "${prior_failures}" ] || prior_failures=0
 attempt=$(( prior_failures + 1 ))
 
@@ -365,12 +382,7 @@ fi
 
 now_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 now_epoch="$(date +%s)"
-# JSON-string-or-null encoding for runId/agentId. The `:+\"...\"${x:-null}` compound is WRONG (it fires
-# BOTH branches when the value is non-empty ⇒ the value is emitted twice, corrupting the JSON — a real
-# bug caught while wiring --agent-id). Precompute with an explicit if/else so a SET value is ONE quoted
-# string and an ABSENT value is `null` (the absence the executor check flags as the main-thread form).
-if [ -n "${run_id}" ]; then run_id_json="\"${run_id}\""; else run_id_json="null"; fi
-if [ -n "${agent_id}" ]; then agent_id_json="\"${agent_id}\""; else agent_id_json="null"; fi
+# (run_id_json / agent_id_json are resolved above, before attempt counting — see the encoding note there.)
 # Lock-hold event (acquire) — the checker reads these to verify the lock covers ONLY the ff.
 printf '%s\n' "{\"event\":\"acquire\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"taskId\":\"${task_id}\",\"pid\":$$,\"runId\":${run_id_json},\"agentId\":${agent_id_json}}" >> "${lock_events}"
 

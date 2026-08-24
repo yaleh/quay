@@ -26,7 +26,7 @@ depends_on:
 ```
 ① bare 两级且优先级无文档   ← AC142 记录 13/13 全败成因（fix-worker/selector bare:true 让 spawn 链 100% 失败）
 ② 无组合无继承              ← 三个 worker role 各自重复 launcher/model，「换模型」= 改三处
-③ 寄生在 _launchSpec 下划线扩展键里  ← Claude Code 若校验未知键，整个启动面一起挂
+③ 寄生在 _launchSpec 下划线扩展键里  ← Claude Code 若校验未知键，整个启动面一起挂；且**归属就错了**（SPEC 第四轮 §12）——那是 quay 的配置，不该住在 Claude Code 的文件里（类比：Provider 声明在 `.quay/config.yml` 而非寄生别处）
 ```
 ⇒ 目标形态：`profiles`（可复用）与 `roles`（引用 profile）分离；`bare` 只在 profile 一层；`env` 取消继承显式表达为 `unset:[...]`（⛔ 非空字符串约定）；profile 有自己的承载文件，`launch.settings.json` 只留 Claude Code 认识的键。
 

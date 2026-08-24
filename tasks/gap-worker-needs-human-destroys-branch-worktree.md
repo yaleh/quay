@@ -2,7 +2,7 @@
 id: gap-worker-needs-human-destroys-branch-worktree
 title: needs-human / exited-not-landed（套件绿+实现完成）走孤儿清理销毁分支+worktree ⇒
   已完成实现永久丢失（39min 第 2 次同形）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -27,8 +27,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，保留）：worker fan-in 终态为 needs-human 时，其分支 `task/<id>` 与 worktree 目录【仍存在】且 worktree 是有效 git 仓库（`git -C <worktree> rev-parse` 成功）；⛔ 分支消失/空壳 ⇒ 假。
-- [ ] AC2（能取假，仍清崩溃）：worker 异常死亡（failed/killed，无完成实现）时，orphan 清理仍删分支+worktree（⛔ 本条不能破坏正常 orphan 回收）。
+- [x] AC1（能取假，保留）：worker fan-in 终态为 needs-human 时，其分支 `task/<id>` 与 worktree 目录【仍存在】且 worktree 是有效 git 仓库（`git -C <worktree> rev-parse` 成功）；⛔ 分支消失/空壳 ⇒ 假。
+- [x] AC2（能取假，仍清崩溃）：worker 异常死亡（failed/killed，无完成实现）时，orphan 清理仍删分支+worktree（⛔ 本条不能破坏正常 orphan 回收）。
 
 ## Definition of Done
 

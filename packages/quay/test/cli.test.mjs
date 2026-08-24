@@ -1050,6 +1050,7 @@ async function main() {
   await block25(spawnOpts);
   await block26(spawnOpts);
   await block27();
+  await block28();
 
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -2027,4 +2028,69 @@ function block27() {
   // D2 shebang-line shell-contract check (AC3).
   const src = fs.readFileSync(path.join(__dirname, "..", "bin", "quay.ts"), "utf8");
   assert(src.startsWith("#!/usr/bin/env node"), "D2: bin/quay.ts shebang line is #!/usr/bin/env node");
+}
+
+// 28. gap-quay-usage-line-fallback-drift (AC2): the short fallback usage line in
+//     bin/quay.ts (`usage: quay <…>`) had no mechanical guard against drifting from
+//     the dispatch table — gap-quay-driver-missing-from-usage-line only patched
+//     `driver`, and four real commands/subcommands were still absent (adr / manager
+//     arm / action run / config check). This mirrors block14's --help set-equality
+//     test but for the fallback line: the EXPECTED command set is derived FROM the
+//     dispatch table itself (every `if (cmd === "…")` route + every `cmd && sub`
+//     route, parsed out of bin/quay.ts source), plus the two handlers whose
+//     subcommands live OUTSIDE the dispatch chain (config validate|check →
+//     src/cli/config.ts; manager start|adopt|arm → src/cli/manager.ts). A new
+//     command/subcommand added to the dispatch — or one removed but left in the
+//     line — without a matching usage-line update turns this RED, so the drift
+//     class is closed by construction rather than patched one string at a time.
+function block28() {
+  const src = fs.readFileSync(path.join(__dirname, "..", "bin", "quay.ts"), "utf8");
+
+  // Expected command set, derived mechanically from the dispatch table.
+  const dispatchTopLevel = [...src.matchAll(/if \(cmd === "([a-z][a-z-]*)"/g)].map((m) => m[1]);
+  const dispatchSubs = [...src.matchAll(/if \(cmd === "([a-z][a-z-]*)" && sub === "([a-z][a-z-]*)"/g)].map((m) => `${m[1]} ${m[2]}`);
+  // config/manager route their subcommands inside their handlers (src/cli/config.ts
+  // / src/cli/manager.ts), not via `cmd && sub` routes in quay.ts — so enumerate
+  // them here, the same list the fallback line is expected to carry.
+  const handlerSubs = ["config validate", "config check", "manager start", "manager adopt", "manager arm"];
+  const expected = new Set([...new Set(dispatchTopLevel), ...dispatchSubs, ...handlerSubs]);
+
+  // Actual command set, parsed out of the fallback usage line's <…> payload.
+  const usageMatch = src.match(/usage: quay <([^>]*)>/);
+  assert(usageMatch, "bin/quay.ts fallback usage line present (gap-quay-usage-line-fallback-drift)");
+  const tokens = usageMatch[1].split("|").map((t) => t.trim());
+  const actual = new Set();
+  // `task list|view|create|edit|check` carries bare subcommand tokens after the
+  // first (`task list`); every other enumerated subcommand is prefixed
+  // (`config validate`, `manager arm`, …). Track the bare-parent (only `task`)
+  // so a bare token is read as a sub of the right command, not a new top-level.
+  const taskSubs = dispatchSubs.filter((s) => s.startsWith("task ")).map((s) => s.slice(5));
+  let bareParent = null;
+  for (const tok of tokens) {
+    const parts = tok.split(/\s+/);
+    if (parts.length === 2) {
+      actual.add(tok);
+      actual.add(parts[0]);
+      bareParent = parts[0] === "task" ? parts[0] : null;
+    } else if (parts.length === 1) {
+      if (bareParent === "task" && taskSubs.includes(parts[0])) {
+        actual.add(`task ${parts[0]}`);
+      } else {
+        actual.add(parts[0]);
+        bareParent = parts[0];
+      }
+    }
+  }
+
+  const missing = [...expected].filter((v) => !actual.has(v));
+  const extra = [...actual].filter((v) => !expected.has(v));
+  assert(
+    missing.length === 0 && extra.length === 0,
+    `usage fallback command set == dispatch-table command set (missing: ${missing.join(",")}, extra: ${extra.join(",")}) (gap-quay-usage-line-fallback-drift)`
+  );
+
+  // AC1: the four gaps this task closes are literally present in the line.
+  for (const needle of ["adr", "manager arm", "action run", "config check"]) {
+    assert(usageMatch[1].includes(needle), `usage fallback line includes '${needle}' (gap-quay-usage-line-fallback-drift AC1)`);
+  }
 }

@@ -26,6 +26,11 @@
 // Verdict per in-scope record (scriptPath basename == fan-in-execute.js AND scriptPath is a WORKTREE
 // path, i.e. outside the main checkout root):
 //
+//   non-bootstrap task (## Touches lists NO fan-in orchestration file) — the materialization check does
+//     NOT apply (the task did not modify the pipeline; the MAIN version is correct; a worktree-vs-
+//     materialized divergence is benign worktree evolution / post-dispatch sync) ⇒ NOT-APPLICABLE,
+//     never RED.
+//
 //   worktree file EXISTS on disk — DECISIVE:
 //     materialized script == worktree file  ⇒ GREEN  (worktree-version-materialized — correct)
 //     materialized script != worktree file  ⇒ RED    (fallback: main/stale version materialized)
@@ -231,6 +236,7 @@ export type VerdictKind =
   | "green-base-not-task-touched"
   | "red-worktree-exists-mismatch"
   | "red-materialized-equals-base-task-touched"
+  | "not-applicable-non-bootstrap"
   | "not-evaluated";
 
 export interface Verdict {
@@ -247,12 +253,26 @@ export interface Verdict {
  * @param record   the materialized workflow record.
  * @param worktreeFile absolute path to the worktree's fan-in-execute.js (may not exist).
  * @param recon    git-reconstructed worktree states (for gone worktrees), or null when unresolvable.
+ * @param isBootstrapHit whether the task's `## Touches` lists a fan-in orchestration file
+ *        (`taskIsBootstrapHit`): true = bootstrap-HIT (self-verification applies), false = non-bootstrap
+ *        (the materialization check does NOT apply — the MAIN version is correct), null = undeterminable
+ *        (fail-closed: treat as bootstrap-HIT). Defaults to null.
  */
 export function judgeRecord(
   record: MaterializedWorkflowRecord,
   worktreeFile: string,
-  recon: WorktreeReconstruction | null
+  recon: WorktreeReconstruction | null,
+  isBootstrapHit: boolean | null = null
 ): Verdict {
+  // Non-bootstrap task — the materialization-fallback check does NOT apply. The task did not modify the
+  // fan-in pipeline (its Touches lists no fan-in orchestration file), so the MAIN version materialized
+  // by the SDK is correct, and any worktree-vs-materialized divergence is benign (the worktree's
+  // fan-in-execute.js may have been synced to main AFTER dispatch by bootstrap-sync/merge-develop). NOT
+  // a RED — hard rule 3b: "does not apply" is its own state, never conflated with a fallback verdict.
+  if (isBootstrapHit === false) {
+    return { kind: "not-applicable-non-bootstrap", reason: "non-bootstrap task (## Touches lists no fan-in orchestration file) — materialization check not applicable; the MAIN version is correct", evaluated: false, ok: true, worktreeFile };
+  }
+
   // Case 1 — the worktree file is still on disk: byte-exact comparison is decisive.
   if (fs.existsSync(worktreeFile)) {
     let wtContent: string;
@@ -398,9 +418,11 @@ const usage = `fan-in-materialize-check.ts — gap-workflow-scriptpath-materiali
   dispatched with scriptPath=<worktree>/.claude/workflows/fan-in-execute.js but MATERIALIZED from the
   MAIN checkout — the task's own fix to the fan-in pipeline is then NOT verified by its own fan-in.
   Reads the PRODUCTION CARRIER (the SDK-written ~/.claude/projects/<slug>/<session>/workflows/wf_*.json
-  records, which carry BOTH the passed scriptPath AND the materialized script content). Fail-closed:
-  any in-scope record whose materialized script != the worktree version is RED; NOT-EVALUATED when the
-  evidence cannot decide (硬规则 3b — "cannot judge" is never conflated with green).
+  records, which carry BOTH the passed scriptPath AND the materialized script content). Only
+  bootstrap-HIT tasks (## Touches lists a fan-in orchestration file) are judged — a non-bootstrap
+  task's MAIN-version materialization is correct and is NOT-APPLICABLE (never RED). Fail-closed for
+  undeterminable tasks; NOT-EVALUATED when the evidence cannot decide (硬规则 3b — "cannot judge" is
+  never conflated with green).
 
 Usage:
   node --experimental-strip-types fan-in-materialize-check.ts
@@ -452,10 +474,15 @@ export function main(argv: string[]): number {
       continue;
     }
     const worktreeFile = path.join(worktreeRoot, workflowRel);
+    // Bootstrap-HIT confirmation: only a task whose Touches lists a fan-in orchestration file is a
+    // bootstrap self-verification (whose worktree-vs-materialized divergence is a defect). Non-bootstrap
+    // tasks are NOT applicable (their MAIN-version materialization is correct). null = undeterminable
+    // (no task file / no Touches section) ⇒ fail-closed (judged as if bootstrap-HIT).
+    const isBootstrapHit = taskIsBootstrapHit(tasksDir, record.taskId);
     // Reconstruct the gone-worktree states from A16 telemetry + git (only used when the worktree is gone).
     const events = readWorkflowEvents(workflowEventsDir, record.fanInRunId);
     const recon = events ? reconstructWorktree(root, workflowRel, events.baseSha, events.fanInSha, mainlineRef) : null;
-    verdicts.push({ record, verdict: judgeRecord(record, worktreeFile, recon) });
+    verdicts.push({ record, verdict: judgeRecord(record, worktreeFile, recon, isBootstrapHit) });
   }
 
   const out = aggregate(verdicts);

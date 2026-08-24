@@ -2680,8 +2680,10 @@ export function renderPerFileTable(
 ): string {
   if (!perFile || perFile.length === 0) return "";
   const sorted = [...perFile].sort((a, b) => b.durationMs - a.durationMs);
+  // gap-webui-test-file-detail-page AC3 — the file cell is a link to the single-file detail page
+  // (path is the repo-rel path, URL-encoded into the query param; the handler decodes it back).
   const rows = sorted.map((f) => html`<tr>
-    <td><code>${escapeHtml(f.file)}</code></td>
+    <td><a href="/tests/file?path=${encodeURIComponent(f.file)}"><code>${escapeHtml(f.file)}</code></a></td>
     <td>${escapeHtml(String(Math.round(f.durationMs)))} ms</td>
     <td class="${f.passed ? "" : "verdict-fail"}" style="${f.passed ? "" : "font-weight:700"}">${f.passed ? "passed" : "failed"}</td>
   </tr>`).join("\n");
@@ -2751,7 +2753,7 @@ export function renderPerFileTimelineSvg(
       const end = new Date(f.endedAtMs);
       const endHhmmss = `${pad2(end.getHours())}:${pad2(end.getMinutes())}:${pad2(end.getSeconds())}`;
       return `<g>
-<text class="git-svg-ink" x="${(M.left - 8).toFixed(1)}" y="${(y + rowH - 2).toFixed(1)}" font-size="10" text-anchor="end">${escapeHtml(truncateLabel(f.file, 52))}</text>
+<text class="git-svg-ink" x="${(M.left - 8).toFixed(1)}" y="${(y + rowH - 2).toFixed(1)}" font-size="10" text-anchor="end"><a href="/tests/file?path=${encodeURIComponent(f.file)}">${escapeHtml(truncateLabel(f.file, 52))}</a></text>
 <rect class="${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${rowH}" rx="2"><title>${escapeHtml(f.file)} · ${Math.round(f.durationMs)} ms · 结束 ${endHhmmss}</title></rect>
 </g>`;
     })
@@ -2879,6 +2881,197 @@ export async function handleTests(
   const samples = current.runId ? readSuiteLoadSamples(cfg.workspaceRoot, current.runId) : [];
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderTestsPage(tests, samples, current));
+}
+
+// ── /tests/file — single-file cross-round detail page (gap-webui-test-file-detail-page) ──────────
+//
+// /tests shows the SUITE's view (round history + one round's perFile table/timeline). A single test
+// file's own record spans ROUNDS: the same file appears in many verification-round rows' perFile
+// arrays, each carrying its own durationMs + passed. This page collects that per-file history ACROSS
+// rounds and renders ① a durationMs trend chart (one bar per round, oldest→newest, fail-shaded),
+// ② a pass/fail history table, and ③ (data-source-dependent) the load-curve fragment clipped to the
+// file's run window for the newest round that carried both timestamps and suite-load samples. All
+// server-rendered SVG/HTML — zero client JS, token-derived colours (reuses gantt-svg-bar /
+// gantt-svg-bar-fail / git-svg-*). The load curve is a DATA-SOURCE dependency (gap-suite-load-
+// sampler-bypassed-by-fan-in-execute must land first or the sampler produces no samples); the rest
+// of the page renders regardless (DoD: 「负载曲线是数据源依赖项」).
+
+/** One round's observation of a single file (its perFile entry joined with the round's identity). */
+export interface FileRoundPoint {
+  round: number | null;
+  startedAt: string | null;
+  durationMs: number;
+  passed: boolean;
+  runState: string | null;
+}
+
+/**
+ * Collect one file's perFile entries ACROSS every round that carried it. `runs` is newest-first
+ * (readTests reversed); the returned array is OLDEST-first so the trend chart + history table read
+ * left-to-right / top-to-bottom chronologically. A round contributes at most one point (perFile is a
+ * set of files); rounds without the file are skipped (never a fabricated 0-duration point).
+ */
+export function collectFileHistory(runs: TestRunRecord[], filePath: string): FileRoundPoint[] {
+  const points: FileRoundPoint[] = [];
+  for (let i = runs.length - 1; i >= 0; i--) {
+    const r = runs[i];
+    if (!r.perFile || r.perFile.length === 0) continue;
+    const entry = r.perFile.find((f) => f.file === filePath);
+    if (!entry) continue;
+    points.push({
+      round: r.round,
+      startedAt: r.startedAt,
+      durationMs: entry.durationMs,
+      passed: entry.passed,
+      runState: r.state,
+    });
+  }
+  return points;
+}
+
+/**
+ * The durationMs trend chart for one file across rounds: a bar per round (x axis), height ∝
+ * durationMs, passed bars reuse gantt-svg-bar (accent) and failed bars gantt-svg-bar-fail (darker) —
+ * the SAME fail-vs-pass token language as the timeline. Returns "" with <2 points (a one-round
+ * "trend" is not a cross-round trend — AC2's falsifiability guard: 「只有单轮 ⇒ 假」).
+ */
+export function renderFileDurationTrendSvg(points: FileRoundPoint[]): string {
+  if (points.length < 2) return "";
+  const M = { top: 24, right: 24, bottom: 48, left: 64 };
+  const W = 960;
+  const H = 240;
+  const plotW = W - M.left - M.right;
+  const plotH = H - M.top - M.bottom;
+
+  const maxMs = Math.max(...points.map((p) => p.durationMs), 1);
+  const yMax = maxMs * 1.15;
+  const Y = (ms: number): number => M.top + plotH - (ms / yMax) * plotH;
+  const step = plotW / points.length;
+  const barW = Math.min(step - 12, 80);
+  const X = (i: number): number => M.left + step * i + step / 2;
+
+  const bars = points
+    .map((p, i) => {
+      const x = X(i) - barW / 2;
+      const y = Y(p.durationMs);
+      const h = Math.max(M.top + plotH - y, 1);
+      const cls = p.passed ? "gantt-svg-bar" : "gantt-svg-bar-fail";
+      const label = p.round != null ? `#${p.round}` : shortUtcTime(p.startedAt);
+      const secs = (p.durationMs / 1000).toFixed(1);
+      return `<rect class="${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="2"><title>${escapeHtml(label)} · ${secs}s · ${p.passed ? "passed" : "failed"}</title></rect>
+<text class="git-svg-ink" x="${X(i).toFixed(1)}" y="${(H - M.bottom + 16).toFixed(1)}" font-size="10" text-anchor="middle">${escapeHtml(label)}</text>`;
+    })
+    .join("\n");
+
+  const yTicks: string[] = [];
+  for (let i = 0; i <= 4; i++) {
+    const ms = (yMax / 4) * i;
+    yTicks.push(`<line class="git-svg-grid" x1="${M.left}" y1="${Y(ms).toFixed(1)}" x2="${(W - M.right).toFixed(1)}" y2="${Y(ms).toFixed(1)}" stroke-width="1" /><text class="git-svg-muted" x="${(M.left - 6).toFixed(1)}" y="${(Y(ms) + 3).toFixed(1)}" font-size="10" text-anchor="end">${(ms / 1000).toFixed(0)}s</text>`);
+  }
+
+  return `<svg class="git-svg-surface" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Single-file duration trend across rounds" style="max-width:100%;height:auto;border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif;">
+${yTicks.join("\n")}
+${bars}
+<text class="git-svg-ink" x="${M.left}" y="${(M.top - 6).toFixed(1)}" font-size="11">durationMs 趋势（每轮一根柱 · 失败标红 · 按轮次升序）</text>
+</svg>`;
+}
+
+/** The pass/fail history table for one file across rounds (oldest→newest). Empty ⇒ "" (no table). */
+export function renderFileHistoryTable(points: FileRoundPoint[]): string {
+  if (points.length === 0) return "";
+  const rows = points
+    .map((p) => `<tr>
+    <td>${p.round != null ? `#${p.round}` : "—"}</td>
+    <td>${p.startedAt ? escapeHtml(p.startedAt) : "—"}</td>
+    <td>${escapeHtml(String(Math.round(p.durationMs)))} ms</td>
+    <td class="${p.passed ? "" : "verdict-fail"}" style="${p.passed ? "" : "font-weight:700"}">${p.passed ? "passed" : "failed"}</td>
+  </tr>`)
+    .join("\n");
+  return `<table>
+    <tr><th>round</th><th>startedAt</th><th>duration</th><th>result</th></tr>
+    ${rows}
+  </table>`;
+}
+
+/**
+ * The newest round that carried BOTH the file (with timestamps) AND a runId, with its suite-load
+ * samples clipped to the file's [start, end] window — the 「运行期间负载曲线片段」 (a fragment, not
+ * the whole suite curve). Returns null when no such round exists (legacy rows / no runId); returns a
+ * non-null object with possibly-empty samples when the round exists but the sampler produced no
+ * points inside the window (the caller then renders the data-source-dependency note).
+ */
+function fileLoadFragment(
+  root: string,
+  runs: TestRunRecord[],
+  filePath: string,
+): { samples: SuiteLoadSample[]; label: string } | null {
+  for (const r of runs) {
+    if (!r.runId || !r.perFile) continue;
+    const entry = r.perFile.find((f) => f.file === filePath);
+    if (!entry) continue;
+    const start = entry.startedAtMs;
+    const end = entry.endedAtMs;
+    if (typeof start !== "number" || typeof end !== "number") continue;
+    const samples = readSuiteLoadSamples(root, r.runId).filter((s) => s.t >= start && s.t <= end);
+    return { samples, label: roundLabel(r) };
+  }
+  return null;
+}
+
+function renderFileDetailPage(
+  filePath: string,
+  tests: TestsResult,
+  fragment: { samples: SuiteLoadSample[]; label: string } | null,
+): string {
+  const history = collectFileHistory(tests.runs, filePath);
+  const trendSvg = renderFileDurationTrendSvg(history);
+  const historyTable = renderFileHistoryTable(history);
+  const notFound = history.length === 0;
+
+  const trend = trendSvg
+    ? html`<h2>durationMs 趋势（跨 ${history.length} 轮）</h2>
+        <p class="meta">数据源：<code>.quay/verification-round.jsonl</code> perFile（同一文件跨多轮聚合）</p>
+        ${trendSvg}`
+    : history.length === 1
+      ? html`<p class="meta" style="color:var(--color-accent-800);font-weight:600">⚠️ 该文件仅出现在 1 轮 — 无跨多轮趋势（AC2 的「只有单轮 ⇒ 假」守卫）。</p>`
+      : "";
+
+  const fragmentSvg = fragment ? renderLoadCurveSvg(fragment.samples) : "";
+  const loadFragment = fragment
+    ? html`<h2>运行期间负载曲线片段${fragment.label ? `（${escapeHtml(fragment.label)}）` : ""}</h2>
+        <p class="meta">数据源：<code>.quay/suite-load-&lt;runId&gt;.jsonl</code>（裁剪到该文件起止窗口）</p>
+        ${fragmentSvg || html`<p class="meta">该文件起止窗口内无采样点 — 负载曲线是数据源依赖项（sampler-bypass 修复后显示）。</p>`}`
+    : "";
+
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay test file — single-file cross-round history">${modernistStyles()}${pageStyles()}<title>Test file — ${escapeHtml(filePath)}</title></head>
+    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
+      <h1>测试文件 — <code>${escapeHtml(filePath)}</code></h1>
+      <p class="meta"><a href="/tests">← 返回 Tests</a></p>
+      ${obsNote(tests.status, tests.reason)}
+      ${notFound ? html`<p class="meta"><strong>未找到</strong> — 该路径未出现在任何验证轮的 perFile 记录中。</p>` : ""}
+      ${trend}
+      ${historyTable ? html`<h2>pass/fail 历史（${history.length} 轮 · 旧→新）</h2>${historyTable}` : ""}
+      ${loadFragment}
+    </main></body></html>`;
+}
+
+export async function handleTestsFile(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+  url: URL,
+): Promise<void> {
+  const filePath = url.searchParams.get("path") ?? "";
+  let tests: TestsResult;
+  try {
+    tests = readTests(cfg.workspaceRoot);
+  } catch (err) {
+    tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [], currentState: null };
+  }
+  const fragment = fileLoadFragment(cfg.workspaceRoot, tests.runs, filePath);
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderFileDetailPage(filePath, tests, fragment));
 }
 
 // ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
@@ -3267,6 +3460,13 @@ export async function handleAllRoutes(
 
   if (url.pathname === "/tests") {
     await handleTests(req, res, cfg);
+    return;
+  }
+
+  // gap-webui-test-file-detail-page AC1 — the single-file cross-round detail page. `path` is the
+  // repo-rel path (URL-encoded by the /tests perFile links); absent ⇒ the page renders 「未找到」.
+  if (url.pathname === "/tests/file") {
+    await handleTestsFile(req, res, cfg, url);
     return;
   }
 
