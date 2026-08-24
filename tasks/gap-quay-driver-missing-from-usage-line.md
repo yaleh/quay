@@ -1,7 +1,7 @@
 ---
 id: gap-quay-driver-missing-from-usage-line
 title: quay driver 子命令不在顶层 usage 行（可运行但不可发现）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -28,11 +28,11 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`quay` 无参数跑，usage 行含 `driver`（⛔ 仍无 driver ⇒ 假）。
+- [x] AC1（能取假）：`quay` 无参数跑，usage 行含 `driver`（⛔ 仍无 driver ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] usage 行补 driver + 测试同步；AC1 全勾；land 到 develop。
+- [x] usage 行补 driver + 测试同步；AC1 全勾；land 到 develop。
 
 ## Retires
 
@@ -41,5 +41,5 @@ depends_on: []
 ## Touches
 
 - packages/quay/bin/quay.ts（usage 字符串补 driver）
-- packages/quay/test/cli-entry.test.mjs（test：usage 行含 driver）
+- packages/quay/test/cli.test.mjs（test：usage 行含 driver）
 - tasks/gap-quay-driver-missing-from-usage-line.md（自身）

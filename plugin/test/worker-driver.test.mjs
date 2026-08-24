@@ -1266,6 +1266,15 @@ test("AC140-3 — override semantics unified: --worker-cmd is prefix, --worker-c
     ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p"]);
 });
 
+// ── AC150-3 (falsifiable): 资源门/halt 判定抽到 driver-shared.ts，worker-driver 只是 re-export ──
+
+test("AC150-3 — worker-driver re-exports the SAME resourceGateCheck / isHalted as driver-shared (单份实现)", async () => {
+  const shared = await import("../scripts/driver-shared.ts");
+  // worker-driver.test.mjs 顶部从 worker-driver.ts import 了 resourceGateCheck / isHalted（re-export 面）。
+  assert.equal(resourceGateCheck, shared.resourceGateCheck, "resourceGateCheck 同一份实现（worker re-export = shared）");
+  assert.equal(isHalted, shared.isHalted, "isHalted 同一份实现（worker re-export = shared）");
+});
+
 // ── 派发前 depends_on 过滤（gap-worker-driver-dispatch-pre-filter-missing AC1）───────────────────────
 // worker-driver 把 ready-pool-check 的 ready 列表直接派发、不二次过滤 depends_on ⇒ 依赖未满的任务
 // 仍被派发（ac138 白烧一轮：代码已 land、依赖链未满、翻 done 会重造 DEP-DONE-IFF-DEPS 违例）。修法 =

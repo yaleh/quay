@@ -69,8 +69,8 @@ Usage:
   start      Start the resident driver under the single supervisor (respawn on exit/kill/crash)
   stop       Hard stop: terminate the supervisor + driver. For worker, in-flight workers are
              NOT killed (they orphan and finish) — use drain for a graceful stop.
-  drain      (worker only) Halt new dispatch WITHOUT killing in-flight workers (worker-control.json
-             halted=true). promotion does NOT support drain (it has no halt mechanism) — error.
+  drain      Halt new dispatch WITHOUT killing in-flight workers (control-state halted=true).
+             worker → worker-control.json; promotion → promotion-control.json (AC150).
   status     Report {kind, supervisor_pid, driver_pid, alive, carrier_path, carrier_records,
              last_record_ts} — last_record_ts is the carrier's last-record timestamp (⛔ not just a
              record count, which cannot distinguish "growing" from "stalled").
