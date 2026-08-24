@@ -2557,13 +2557,27 @@ export function readSuiteLoadSamples(root: string, runId: string): SuiteLoadSamp
   return samples.sort((a, b) => a.t - b.t);
 }
 
-/** The current .quay/full-suite-state.json runId (the run the page should plot), or null. */
-function readCurrentSuiteRunId(root: string): string | null {
+/**
+ * The current `.quay/full-suite-state.json` run identity (runId + startedAt + state) — the load
+ * curve's data source. Absent/unparseable file ⇒ all-null (never throw). `runId` maps back to a
+ * verification-round record's `round`/`startedAt` (gap-web-tests-three-sections-round-drift AC1).
+ */
+interface CurrentSuiteState {
+  runId: string | null;
+  startedAt: string | null;
+  state: string | null;
+}
+
+function readCurrentSuiteState(root: string): CurrentSuiteState {
   try {
     const j = JSON.parse(readFileSync(path.join(root, ".quay", "full-suite-state.json"), "utf8"));
-    return typeof j?.runId === "string" && j.runId ? j.runId : null;
+    return {
+      runId: typeof j?.runId === "string" && j.runId ? j.runId : null,
+      startedAt: typeof j?.startedAt === "string" && j.startedAt ? j.startedAt : null,
+      state: typeof j?.state === "string" && j.state ? j.state : null,
+    };
   } catch {
-    return null;
+    return { runId: null, startedAt: null, state: null };
   }
 }
 
@@ -2636,6 +2650,23 @@ function runStatusClass(state: string | null): string {
   if (state === "green" || state === "pass") return "verdict-pass";
   if (state === "red" || state === "fail" || state === "running") return "verdict-fail";
   return "";
+}
+
+/** "2026-08-23T01:00:00.000Z" → "01:00Z" (UTC HH:MM, the proposal's 「03:14Z」 form). "" on bad input. */
+function shortUtcTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const m = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})/.exec(iso);
+  return m ? `${m[1]}:${m[2]}Z` : "";
+}
+
+/** "round #478 · 03:14Z" for a run record; time-only when `round` is absent; "" for no record. */
+function roundLabel(r: TestRunRecord | null | undefined): string {
+  if (!r) return "";
+  const parts: string[] = [];
+  if (r.round != null) parts.push(`round #${r.round}`);
+  const t = shortUtcTime(r.startedAt);
+  if (t) parts.push(t);
+  return parts.join(" · ");
 }
 
 /**
@@ -2751,8 +2782,19 @@ ${bars}
 </svg>`;
 }
 
-function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = []): string {
+function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = [], current: CurrentSuiteState = { runId: null, startedAt: null, state: null }): string {
   const latest = tests.runs[0] ?? null;
+  // gap-web-tests-three-sections-round-drift AC1 — map the load curve's current runId
+  // (full-suite-state.json) back to its verification-round record so the three sections each name
+  // the round they reference (instead of all three claiming 「最近一轮」 while plotting different
+  // rounds). null when the current run is still running (no round record yet) or the record lacks
+  // runId (standalone full-suite-runner rows) — then the label falls back to the state's startedAt.
+  const currentRun = current.runId ? tests.runs.find((r) => r.runId === current.runId) ?? null : null;
+  const loadLabel = currentRun
+    ? roundLabel(currentRun)
+    : current.startedAt
+      ? `${shortUtcTime(current.startedAt)}${current.state === "running" ? " · 运行中" : ""}`
+      : "";
   const latestBanner = latest
     ? html`<div style="border:1px solid var(--color-divider);background:var(--color-surface);padding:1rem;margin-bottom:1.5rem">
         <div style="font-weight:700;font-size:1rem"><span class="${runStatusClass(latest.state)}">${escapeHtml(latest.state ?? "unknown")}</span>${latest.scope ? ` · ${escapeHtml(latest.scope)}` : ""}</div>
@@ -2760,8 +2802,8 @@ function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = []): s
         <p class="meta" style="margin:0">tests ${latest.tests ?? "—"} · pass ${latest.pass ?? "—"} · fail ${latest.fail ?? "—"} · cancelled ${latest.cancelled ?? "—"}</p>
       </div>`
     : "";
-  const historyRows = tests.runs.map((r) => html`<tr>
-    <td>${r.round != null ? `#${escapeHtml(String(r.round))}` : "—"}</td>
+  const historyRows = tests.runs.map((r, i) => html`<tr>
+    <td>${r.round != null ? `#${escapeHtml(String(r.round))}${i === 0 ? ` <span style="color:var(--color-neutral-700);font-weight:600">← 最新</span>` : ""}` : "—"}</td>
     <td>${r.startedAt ? escapeHtml(r.startedAt) : "—"}</td>
     <td class="${runStatusClass(r.state)}" style="font-weight:700">${escapeHtml(r.state ?? "—")}</td>
     <td>${r.pass ?? "—"}/${r.fail ?? "—"}/${r.cancelled ?? "—"}</td>
@@ -2781,7 +2823,7 @@ function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = []): s
     : "";
   const loadCurveSvg = renderLoadCurveSvg(samples);
   const loadCurve = loadCurveSvg
-    ? html`<h2>负载曲线（最近一轮）</h2>
+    ? html`<h2>负载曲线${loadLabel ? `（${loadLabel}）` : ""}</h2>
         <p class="meta">数据源：<code>.quay/suite-load-&lt;runId&gt;.jsonl</code>（suite 运行期采样，结束即停）</p>
         ${loadCurveSvg}`
     : "";
@@ -2792,8 +2834,14 @@ function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = []): s
   // gap-test-detail-timeline AC2 — render the per-file timeline (gantt) for that same run. The chart
   // omits itself (⇒ "") when the run's perFile entries carry no timestamps (legacy/absent field).
   const perFileTimelineSvg = perFileRun ? renderPerFileTimelineSvg(perFileRun.perFile) : "";
+  // gap-web-tests-three-sections-round-drift AC2 — the find() above silently falls back to an
+  // EARLIER run when the newest run carries no perFile (red / static-check-early-fail / reporter
+  // stopped before perFile). Surface that fallback instead of hiding it: name both the latest run
+  // and the run actually shown.
+  const timelineFallback = perFileRun != null && latest != null && perFileRun !== latest;
   const perFileTimeline = perFileTimelineSvg
-    ? html`<h2>测试时间线（最近一轮）</h2>
+    ? html`<h2>测试时间线${perFileRun ? `（${roundLabel(perFileRun)}）` : ""}</h2>
+        ${timelineFallback ? html`<p class="meta" style="margin:0.25rem 0;color:var(--color-accent-800);font-weight:600">⚠️ 最新一轮无 perFile 数据${latest ? `（${roundLabel(latest)}）` : ""}，以下回退显示${perFileRun ? ` ${roundLabel(perFileRun)}` : ""}。</p>` : ""}
         <p class="meta">数据源：<code>.quay/verification-round.jsonl</code> perFile 起止时刻（reporter 结束时刻 + duration 反推起始）</p>
         ${perFileTimelineSvg}`
     : "";
@@ -2827,10 +2875,10 @@ export async function handleTests(
   } catch (err) {
     tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [], currentState: null };
   }
-  const runId = readCurrentSuiteRunId(cfg.workspaceRoot);
-  const samples = runId ? readSuiteLoadSamples(cfg.workspaceRoot, runId) : [];
+  const current = readCurrentSuiteState(cfg.workspaceRoot);
+  const samples = current.runId ? readSuiteLoadSamples(cfg.workspaceRoot, current.runId) : [];
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderTestsPage(tests, samples));
+  res.end(renderTestsPage(tests, samples, current));
 }
 
 // ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
