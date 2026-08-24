@@ -2,7 +2,7 @@
 id: gap-m-bucket-long-tail-lpt-scheduling
 title: M bucket 测试长尾：最后 5% 文件吃掉总时长 27%+（最慢 5% 串行和占 55%）——scripts/test.sh 未按已知耗时
   LPT 排序，长测试排尾部等 lane
-status: done
+status: ready
 labels:
   - gap
 parent: null
