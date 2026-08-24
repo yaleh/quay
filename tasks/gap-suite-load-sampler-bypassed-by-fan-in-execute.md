@@ -33,6 +33,7 @@ sampler 接线到 fan-in-execute detached 直跑落地 develop；AC1-2 全勾；
 ## Touches
 
 - .claude/workflows/fan-in-execute.js（detached 直跑时起/停 sampler）
+- plugin/workflows/fan-in-execute.js（双拷贝同步，workflows-dual-copy-drift-check）
 - plugin/scripts/suite-load-sampler.ts（如需适配直跑调用）
 - plugin/test/fan-in-execute-paths.test.mjs（或对应测试）
 - tasks/gap-suite-load-sampler-bypassed-by-fan-in-execute.md（自身）
