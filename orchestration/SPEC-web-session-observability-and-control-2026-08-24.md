@@ -41,27 +41,49 @@
   → `~/.claude/projects/<slug>/<sessionId>.jsonl`。
 - **局限（本次调研新发现，非文档已知）**：只覆盖固定的 3 个角色名（Manager/Outer/Inner），
   只覆盖**当前活着**的会话（`alive` 布尔），**不覆盖 `-p`/headless、不覆盖已结束会话**。
+  **⚠️ 这条局限是【本页面的】，不是 Claude Code 的**——它源于 `readSessions` 用
+  `buildManagerSessionTargets` 只注册三个角色名，**⛔ 不要与 §2.2 那条被推翻的
+  「`claude agents --json` 不覆盖 `-p`」混为一谈**（后者是错的，本条是对的）。
+  **⇒ 恰恰因为平台侧覆盖 `-p`，本页面的这条局限是【可以修的】，不是结构性的。**
 
-### 2.2 `claude agents --json`（官方 CLI，本会话今日实测）
+### 2.2 `claude agents --json`（官方 CLI）
 
-- `kind`/`status`/`pid`/`sessionId`/`name`/`cwd`/`startedAt` 逐条给出，**仅覆盖交互式会话**。
-- **结构性排除 `-p` 会话**：`claude --bg --print` 报错
-  `"--bg and --print conflict: --print never starts the interactive session that claude agents
-  attaches to, so the job would be unattachable."`——不是遗漏，是设计如此（无 TUI 可附着）。
-- `--all` 加 "completed background sessions"，但仅指 `--bg` 派生的后台会话，
-  **实测未见任何 `-p`/print 或已结束会话**（本会话 `--all` 实跑 7 条，全为当前存活 interactive）。
+> **🔴 2026-08-24T17:0xZ 本节原内容【错误】，已由实测推翻——原文与更正一并保留（硬规则：认账不删账）。**
+>
+> **原断言（错）**：「仅覆盖交互式会话」「**结构性排除 `-p` 会话**」。
+> **原推理（错在哪）**：我跑 `claude -p "…" --bg` 得到报错
+> `"--bg and --print conflict: --print never starts the interactive session that claude agents
+> attaches to, so the job would be unattachable."`，**据此推出「`-p` 会话不进登记表」**。
+> **⇒ 那条报错说的是 `--bg` 不能【附着】一个 print 会话，与「`-p` 会话是否【注册】」是两件事**
+> （硬规则 C28 方向 A：谓词问的不是被问的那个问题）。
+> **⇒ 且我当时手里就有反证没去看**：同一份 `claude agents --json` 输出里的
+> `quay-task-worker` 条目，其 argv 逐字含 `-p`（`worker-driver.ts:613 launchArgv` 构造
+> `quay-launch.sh <role> -p <prompt>`）——**生产中的 `-p` 会话一直在那份清单里，我却在同一屏输出上断言它们不在**。
+> **⇒ 硬规则 4 推论四的教科书实例：一个能解释现象的说法（报错 ⇒ 不支持）不是一个被检验的结论；
+> 而推翻它只要一条命令。**
 
-### 2.3 `-p`/headless 会话的可观测性——唯一路径是 transcript 文件本身
+**实测更正（2026-08-24T17:0xZ，干净针）**：起一个 `-p --input-format stream-json` 会话（`/tmp` cwd，
+throwaway），同时查三个面：
+```
+claude agents --json          ⇒ 命中：{pid:300596, kind:"interactive", sessionId:"4cf8ed4a-…", name:"tmp-7b"}
+ListAgents（本会话工具）       ⇒ 命中：tmp-07 列为 peer session（即 SendMessage 可寻址）
+~/.claude/sessions/<pid>.json ⇒ 存在，且 messagingSocketPath 有值（socket=YES）
+负控制：同刻 6 个生产 `-p` 进程（ps argv 含 `-p`）全部出现在 agents --json
+```
+**⇒ 正确结论：`-p` 会话【与交互式会话同等注册】**——同样进 `claude agents --json`（`kind` 字段值也是
+`"interactive"`，该字段不区分 print/interactive）、同样进 `ListAgents`、同样有 messaging socket。
+**⇒ §2.3 与 §3.1 中一切基于「`-p` 不可发现」的推论随之作废，已重写。**
 
-- 无论 `claude agents --json` 或 `~/.claude/sessions/`，**`-p` 会话都不在任何"活体登记表"里**
-  （`~/.claude/sessions/<pid>.json` 确实也给 `-p` 会话写，但发现它需要先知道 pid——
-  `-p` 进程本身若不是本项目自己 spawn 的，没有独立发现入口）。
-- 因此：**要观测一个 `-p` 会话，必须在 spawn 时就记下它的 session id**（或至少 pid），
-  否则事后唯一能做的是扫描 `~/.claude/projects/<hash>/*.jsonl` 的 mtime 猜"最近"，不可靠。
-- `gap-worker-task-transcript-access-webui` 的 AC1（`worker-driver.ts` spawn 时传
-  `--session-id <uuid>` 并把它写进 `worker-outcome.jsonl`）**正是这个通用问题在 worker 场景下的解**——
-  本 SPEC 建议把该模式当作**通用契约**，不只是 worker 专属：任何本项目 spawn 的会话，
-  spawn 点都应现生成 `--session-id` 并落一条可查记录（下方 §4.1 展开）。
+### 2.3 `-p`/headless 会话的可观测性（**已按 §2.2 更正重写**）
+
+- **活体发现：与交互式同路**（`claude agents --json` / `ListAgents` / `~/.claude/sessions/<pid>.json`），
+  §2.2 已实测。**⇒ 不需要"必须自己记 session id 才能发现"** ——那是原版基于错误前提的结论。
+- **`--session-id <uuid>` 仍然值得在 spawn 时钉，但理由变了**：不再是"否则发现不了"，而是
+  **①把「哪个任务/哪次派发」与「哪个 transcript」的关联做成【机械可查】而非【按时间猜】**
+  （`claude agents --json` 只告诉你"现在有哪些会话"，答不了"上周那次 X 任务的会话是哪个"）；
+  **②会话结束后登记表条目消失**（§2.4），届时只剩 transcript 文件，没有预先记下的 id 就只能按 mtime 猜。
+- `gap-worker-task-transcript-access-webui` 的 AC1 因此仍然成立、仍建议升为通用契约（§4.1），
+  **只是它解决的是【历史可追溯】而非【活体可发现】。**
 
 ### 2.4 已结束会话——无登记表，只能扫 transcript 目录
 
@@ -132,7 +154,7 @@ task id、OS pid、tmux 窗口名都只覆盖其中一部分。
 | 类型 | 发现方式 | 备注 |
 |---|---|---|
 | 交互式·运行中 | `claude agents --json`（官方，本会话今日验证） | 取代/补强 `session-liveness.sh` 的 tmux 猜测式发现——更权威、不需 tmux 前提 |
-| `-p`/headless·运行中 | **必须在 spawn 时记录 session id**（`--session-id <uuid>` + 落一条 dispatch 记录） | 结构性限制，`claude agents --json` 天然不覆盖（§2.3），无法绕过 |
+| `-p`/headless·运行中 | **同上，与交互式同路**（🔴 2026-08-24T17:0xZ 更正：本行原写「必须在 spawn 时记录 session id，`claude agents --json` 天然不覆盖」，**该断言已被实测推翻，见 §2.2**） | `--session-id` 仍建议钉，但理由是【历史可追溯】不是【活体可发现】（§2.3） |
 | 任意类型·已结束 | 扫 `~/.claude/projects/<固定 hash>/*.jsonl`，按 mtime/内容判定起止时间 | 本项目单 workspace，扫描面已知、有限 |
 
 **渲染层（"接近 Claude Code web 端"的实质要求）**：现有 `readTranscriptTail` 只取最近 3 条纯文本，
@@ -215,3 +237,269 @@ web server 每次用户点"发消息"就 `spawnSync` 一次这个脚本，是可
   （`SPEC-unified-driver-architecture-2026-08-23.md`）在跟，避免重复设计。
 - 不给出鉴权方案的具体设计——人已裁定不阻塞本功能，若后续要做，应是独立的任务/讨论。
 - manager 本轮只做到"架构 + 建议"——不写任务体/AC/DoD、不改产品代码，按 CLAUDE.md D 段边界。
+
+---
+
+# 第二轮（2026-08-24T17:0xZ）：人追加的三个问题
+
+人追加：①`-p` 会话能否长期等待用户输入（能 ⇒ web 启动的会话就用 `-p`，否则仍需 tmux+交互式）；
+②设计更统一可重用的会话观测/交互机制，可从 Live / Tasks 多个源页面跳转；③支持用户定义多组
+启动 profile（wrapper + model + env）。以下 §6–§8 逐条，**全部读实测或读代码，不引未核实的转述**。
+
+## 6. `-p` 会话能否长驻等待输入——**能，判据已实测**
+
+### 6.1 实测（干净针，throwaway 会话，cwd=/tmp，⛔ 未碰任何生产会话）
+
+```
+spawn: claude -p --session-id <uuid> --input-format stream-json --output-format stream-json --verbose
+       stdin 保持打开（不 close），逐条写 {"type":"user","message":{...}}
+[+0.0s]  → msg1                        [+11.4s] ← RESULT #1 "ONE"
+[+25.1s] 存活=true；~/.claude/sessions/<pid>.json：kind=interactive socket=YES name=tmp-7b
+[+25.1s] --- 静默 60s（不写任何输入）---
+[+85.1s] 存活=true（⇒ 无 60s 级空闲超时）；注册表条目仍在、socket 仍在
+[+85.1s] → msg2                        [+86.3s] ← RESULT #2 "TWO"（同一 session_id）
+```
+**⇒ 三条判据全过**：①首答后不退出 ②静默 60s 不退出 ③同一 stdin 上的第二条消息被正常处理。
+**⊢ 长静默补测进行中**（15min 静默 + 末条消息，`probe-p-idle-long.mjs`）：**已过 3min 静默存活**，
+末值落定后补记。**⛔ 在补测落定前，本节的可断言上界是【实测 60s 静默 + 3min 采样点】，不是"任意长"**
+（硬规则：不把未测的量写成已测）。
+
+### 6.2 与既有事实的一致性交叉验证（不止靠上面那一次实验）
+
+- 生产 `quay-task-worker` 本来就是 `-p`（`launchArgv` 构造 `quay-launch.sh <role> -p <prompt>`），
+  实测单个 worker 墙钟可达 `wall_clock_ms=814357`（≈13.6 分钟，`worker-outcome.jsonl` 真实记录）
+  ⇒ **`-p` 进程长时间存活本来就是本项目每天在跑的常态**，不是新能力。
+- 区别只在**输入形态**：生产 worker 用 `-p <prompt>`（一次性 prompt，跑完即退）；
+  长驻交互需要 `--input-format stream-json` + **stdin 不关闭**——**后者才是"能等输入"的开关**。
+
+### 6.3 ⇒ 对「web 页面启动的会话用什么形态」的结论
+
+**用 `-p --input-format stream-json --output-format stream-json`，⛔ 不需要 tmux + 交互式。**
+
+| 维度 | `-p` + stream-json（建议） | tmux + 交互式（现状用于 manager/outer/inner） |
+|---|---|---|
+| 能否等用户输入 | ✅ 实测可（§6.1） | ✅ 可 |
+| 输入通道 | **stdin（结构化 JSON，进程直接持有）** | tmux send-keys（要 C-u 清行、要稳态轮询、要 NBSP 特判——`send-keys-reliable.sh` 355 行全在处理这些） |
+| 输出通道 | **stdout stream-json（结构化，可直接渲染）** | 只能读 transcript 文件或解析 TUI（ADR-016 禁解析 TUI） |
+| web server 能否直接持有 | ✅ 就是它 spawn 的子进程 | ❌ 要经 tmux 这一层 |
+| 依赖 tmux | ❌ 无 | ✅ 硬依赖 |
+| 是否可被 SendMessage/socket 投递 | ✅（§7.3） | ✅ |
+
+**⊢ 决定性理由不是"两者都能等输入"，是【输入/输出通道的形态】**：`-p` + stream-json 给 web server
+一个**双向结构化管道**（写 JSON、读 JSON），而 tmux 路径给的是**键盘模拟 + 屏幕**，
+后者已经在本项目里长出了 355 行的可靠性补丁（清行/稳态/NBSP/重发/三态退出码）
+**且结构上无法覆盖非 tmux 目标**。**⇒ 新建面选 `-p`，是选一个不需要那 355 行的通道。**
+
+**⊢ tmux 路径【不退役】**：manager/outer/inner 三个长驻人机会话仍在 tmux 里，
+**它们不是本功能新建的**；本结论只约束"**web 页面新建的**会话"。
+
+### 6.4 一条必须一并设计的约束：`-p` 会话的权限模式
+
+`-p` 会话没有 TUI，**没有地方弹权限确认框**。生产 worker 靠 `permissions.defaultMode=bypassPermissions`
+（`launch.settings.json:3-5`）绕开。⇒ web 新建会话必须**显式选定权限模式**并**在页面上显示它**，
+⛔ 不得沉默地继承 bypass——否则"从 web 起一个会话"= 静默起一个全权限 agent。
+**这是 profile 的一个必填字段（§8），不是实现细节。**
+
+## 7. 统一、可重用的会话观测/交互机制
+
+### 7.1 核心设计：一个会话视图，一个寻址键，多个入口
+
+**寻址键 = `sessionId`（UUID），⛔ 不用 pid、⛔ 不用 task id、⛔ 不用 transcript 路径。**
+理由逐条：pid 会复用且进程退出即失效；task id 一对多（重派 N 次）；
+**transcript 路径若进 URL 就是路径穿越面**（§7.4）。sessionId 是唯一横跨"活/死 × 交互式/`-p`"都稳定的量。
+
+```
+路由： /session/<sessionId>            ← 唯一会话视图（活的、死的、交互式、-p 全用它）
+入口： /sessions   列表 → 每张卡片链到它
+      /live       在飞行 → 该任务当前 worker 的会话
+      /task/<id>  Runs 区块 → 该任务历次尝试各自的会话
+      /manager    会话表 → 同 /sessions
+```
+**⇒ "可从多个源页面跳转"不需要每个页面各做一套**：它们只需要各自算出一个 `sessionId` 然后链过去。
+
+### 7.2 每个入口缺什么（已逐条读代码核实，附最小改动量）
+
+| 入口 | 现状 | 缺口 | 最小改动 |
+|---|---|---|---|
+| `/sessions` | 已渲染 `s.pid`（`serve-handlers.ts:3092`） | 有 pid 无 sessionId | pid → `~/.claude/sessions/<pid>.json` 已有解析器（`session-liveness.sh --resolve-transcript`），取 sessionId 即可 |
+| `/live` | `InFlightTask`（`observation.ts:89-127`）**无 pid 字段** | **pid 被读了又丢**：`readLiveWorkerProcesses`（`observation.ts:665-690`）`:686` 用 `e`（pid）算完 start time 后**只 push `{taskId, startedAtMs}`** | `LiveWorker` 加 `pid`、`:686` push 带上、`readLive` `:843-853` 透传 ⇒ **3 行** |
+| `/task/<id>` | **完全没读 worker-outcome**（`serve-handlers.ts:1349-1420` 只有 `client.taskGet`，全文件 grep `worker-outcome` = 0 命中） | 无 Runs 区块；且 handler **没有 `cfg` 参数**拿不到 workspaceRoot | 路由 `:3548-3553` 照 `/goal/:id`（`:3529-3533`）加 `cfg`；`parseWorkerOutcomeRecords`（`observation.ts:563-578`）**当前只取 4 个字段，而磁盘上每条有 14 个**——`worker_pid` 就在磁盘上但被丢弃 ⇒ 加 `session_id`/`worker_pid` 两个字段即可 |
+
+**⊢ 一条关键实测（决定 Runs 区块能不能做历史追溯）**：`.quay/worker-outcome.jsonl` 真实字段有
+`ts/task/selector_reason/exit_code/signal/wall_clock_ms/final_state/failure_reason/started_at/ended_at/`
+**`worker_pid`**`/run_id/in_flight_count/timed_out` —— **`worker_pid` 已经在盘上了**，
+只是 parser 没读。**但 pid 在进程退出后无法反查 sessionId**（`~/.claude/sessions/<pid>.json` 随进程删除）
+⇒ **历史追溯仍然必须靠 spawn 时钉 `--session-id` 并写进 outcome**（= `gap-worker-task-transcript-access-webui` AC1）。
+**⊢ 亦即：`worker_pid` 对【在飞】够用，对【历史】不够用——两者不可互替。**
+
+**⊢ 另一条**：`run_id` **不是每次派发唯一**（实测三条不同任务的记录共享 `wk-prod-1787572144`，
+它是 driver 进程启动时算一次的前缀）⇒ **⛔ 不得用 run_id 作会话寻址键**，与 §7.1 的裁定一致。
+
+### 7.3 交互（发消息）——已实测的必要条件
+
+**受控实验（唯一变量 = `crossSessionInbound` 设置）**：
+```
+A（不设该项）：SendMessage → tmp-07  ⇒ 工具返回 success:true / msg_id
+               目标 transcript grep 该 marker ⇒ 【0 命中】       ← 未送达
+B（--settings '{"crossSessionInbound":"accept"}'）：
+   send-to-session.ts --pid <pid> "<marker> …"（peerToken 路径，纯 Node 进程发）
+               目标 transcript grep 该 marker ⇒ 【4 命中】
+               且该会话【真的处理了它】：RESULT #2 = "Received cross-session probe message —
+               session is active and ready. No action required."   ← 送达且被消费
+```
+**⇒ 正向路径证成**：一个**不是 Claude Code 会话的普通 Node 进程**（正是 web server 的处境）
+可以把消息投进一个 `-p` 会话并被真正处理。**这正是本功能需要的能力，已端到端实测。**
+
+**🟢 2026-08-24T17:2xZ 更新——A 的失败原因【已由平台自己告知】，不再是未定项。**
+本文原写「A 的失败原因未定（可能是设置/可能是 hold 队列/可能是 idle 不排空 inbox）」。
+随后平台向发送方（我）投回两条投递回执：
+```
+[Cross-session delivery notice] ... held for the recipient user's approval
+                                (recipient: uds:/run/user/1000/cc-socks/312474.sock)
+[Cross-session delivery notice] ... not approved before expiry — Not delivered to that session's Claude.
+```
+（`312474` = A 组那个长静默探针的 pid，socket 逐字对上。）
+**⇒ A 的真实形态是【held for approval → 到期未批准 → 丢弃】，不是"静默无视"、不是"inbox 不排空"。**
+**⇒ 三个候选成因里 2 个被排除，剩下的正是 `crossSessionInbound` 那一个。**
+
+**⊢ 对照的受控程度也随之提高**（比我原先的自评更强）：A 与 B **发送方身份类别相同**
+（都是 peer 身份：A=SendMessage 的 peer 投递，B=`send-to-session.ts` 的 `peerToken` 路径），
+**差的是接收方的 `crossSessionInbound` 设置** ⇒ **同身份类别 + 切设置 ⇒ held/expired vs delivered/consumed**。
+**⚠️ 仍有一个未消的差异：传输通道（工具 vs 脚本）。** ⇒ **仍不写"充要条件"**，
+但可以写：**`crossSessionInbound:accept` 是【当前唯一未被排除】的成因，且方向与文档一致。**
+落地前那次单变量对照仍建议补（成本 60 秒），**但它现在是【确认】而非【探明】。**
+
+**🔴 这条回执还暴露了一个必须写进设计的产品事实（比上面的归因更重要）**：
+```
+SendMessage 返回 success:true + msg_id   ≠   已送达
+真实状态机至少有四态：  已发送 → 待接收方批准(held) → 到期未批准(expired,丢弃)
+                                            ↘ 已批准 → 送达并被消费
+```
+**⇒ 调用点拿到的 `success:true` 与【最终没送到】完全同形**（硬规则 3b 的教科书形态：
+"失败"与"合格"共用一个返回值），**而真相是【异步、事后、经另一条回执通道】才到达发送方的。**
+**⇒ 对 web UI 的硬要求（⛔ 不可省）**：
+- **⛔ 页面不得在 POST 成功后显示"已发送给 X"** —— 那是把 `success:true` 当送达，会稳定地骗用户。
+- **必须显示真实状态**：`待对方批准` / `已送达` / `到期未批准（未送达）`，并**保留回执**。
+- **⊢ 这恰好也解释了为什么 §6.4（权限）与本条要一起设计**：向一个**你没启动的**会话发消息，
+  接收方那侧是要**人去批准**的；而向**web server 自己启动的**会话（可在 spawn 时设 accept）则直通。
+  **⇒ 两类目标的用户体验本质不同，页面必须区分呈现，⛔ 不要做成一个统一的"发送"按钮然后假装都一样。**
+
+**⊢ 安全注记（人 2026-08-24 已扩大授权到"本机任意会话"，见 §1③）**：`send-to-session.ts` 的
+`from-mode="bypass"` 是**发送方自写**、非平台盖印（`send-to-session.ts:24-34` 自带该警告）。
+本功能落地后，web server 将以该形态向本机会话投递。**人已在知晓此形态的前提下授权**；
+**⛔ 但仍不得把它包装成"平台验证过的身份"呈现给页面访问者**——页面应如实显示"由 quay web 注入"。
+
+### 7.4 渲染与安全
+
+**一个渲染器覆盖全部四种会话**（实测支撑）：`-p` 会话与交互式会话的 transcript **schema 同族**——
+`-p` 探针会话记录类型 `{user, assistant, attachment, queue-operation, ai-title, atis-latch, last-prompt}`，
+本会话（交互式）为其超集（多 `system`/`mode`/`bridge-session`/`file-history-*`）。
+**⇒ ⛔ 不要为 `-p` 单写一个渲染器。** 现有 `readTranscriptTail`（`observation.ts:2448-2491`）
+只取最近 3 条纯文本、每条截 500 字符——**它是预览级，不是观测级**；
+接近 Claude Code web 端需要新解析器：按 `message.content` 的 `text`/`tool_use`/`tool_result`/`thinking`
+分块，工具调用与结果配对折叠。**这是本功能真正的新工作量所在**，不是复用即可。
+
+**路径穿越（人在第一轮点名的唯一安全敏感点）——本仓库现有防护形态实测如下**：
+- `/tests/file?path=`（`serve-handlers.ts:3065-3077`）**没有穿越防护，且不需要**——
+  该参数**从不作为文件路径使用**，只作 `r.perFile.find(f => f.file === filePath)` 的**等值查找键**，
+  真正读盘用的 `runId` 来自盘上记录而非 URL。**⇒ house pattern = 用户输入只做查找键，永不做路径分量。**
+- 唯一的真·输入校验样板是 `isSafeRelativeRedirect`（`serve-handlers.ts:626-635`，含 25 行威胁模型注释，
+  防 `/\evil.com` / `/\t/evil.com` 这类 WHATWG 归一化绕过）。
+**⇒ `/session/<sessionId>` 应照 house pattern 办**：`^[0-9a-f-]{36}$` 严格 UUID 校验 **+ 路径固定拼
+已知 project slug**，**且**（更强的一层）**先在"已发现会话集合"里查得到该 id 才渲染**——
+即把它降级成查找键而非路径分量，与 `/tests/file` 同形。
+
+## 8. 用户可定义的多组启动 profile
+
+### 8.1 现状（读代码 + 读机器实测，非转述）
+
+- **地基已有但很薄**：`_launchSpec.roles`（`.claude/launch.settings.json:19-65`）6 个 role，
+  每个 `{name, launcher, model, env, bare?}`，由 `quay-launch.sh` 经 `jq` 消费（`:69-82`），
+  `exec` 出去（`:127`）。
+- **本机实存 8 个 wrapper**（`~/.local/bin/claude-*`，**均在仓库外、personal tooling**）：
+  `claude-fjdac` / `claude-deepseek` / `claude-aliyun` / `claude-glm` / `claude-kimi` /
+  `claude-litellm` / `claude-bobdong`（+1 个 .bak）。每个 = `source ~/.local/etc/<vendor>-api-key`
+  → `export ANTHROPIC_BASE_URL=…` + 认证变量 → `exec claude "$@"`。
+- **历史用过的组合（有仓库证据的）≥6 组**：`claude`(无 wrapper)+Anthropic 默认 ·
+  `claude-deepseek`+`deepseek-v4-flash` · `claude-aliyun`+`qwen3.8-max-preview` ·
+  `claude-fjdac`+`glm-5.3`（回退） · `claude-fjdac`+`deepseek-v4-flash` ·
+  `claude-fjdac`+`deepseek-v4-pro`（当前）。**⇒ 人要求的"多组 profile"是真实历史需求，不是假想。**
+
+### 8.2 三个必须在设计里解决的坑（全部已实测，非推测）
+
+**坑①：认证变量分两族，且与 `--bare` 结构性冲突。**
+```
+claude-kimi                          ⇒ 用 ANTHROPIC_API_KEY
+其余 6 个 wrapper                     ⇒ 用 ANTHROPIC_AUTH_TOKEN
+其中 fjdac/aliyun/litellm/bobdong     ⇒ 还【显式把 ANTHROPIC_API_KEY 置空】
+而 --bare 的认证【严格只认】 ANTHROPIC_API_KEY / apiKeyHelper（CLI --help 原文）
+⇒ bare:true + 这 4 个 wrapper 中任意一个 = 100% spawn 失败
+```
+**这不是假想：AC142 记录的 fix-worker 13/13 全败就是它**（selector `bare:true` 3/3 null、
+fix-worker `bare:true` 10/10 exit=1、task-worker 无 bare 键 3/3 通过——**一个天然的三组对照**）。
+**⇒ profile schema 必须能表达并校验这条约束**（`bare:true` ⇒ 该 profile 必须提供 `ANTHROPIC_API_KEY`）。
+
+**坑②：`bare` 现在是【或】不是【优先级】，且有一半是死配置。**
+`quay-launch.sh:115` 实际是 `if [[ "$BARE" == "1" || "$ROLE_BARE" == "true" ]]` ——
+**CLI 与 role 任一为真即加 `--bare`，没有任何办法为某个 role 强制关掉它**；
+而**顶层 `_launchSpec.bare`（`launch.settings.json:66-70`）从头到尾没有任何代码读它**
+（`grep -n bare quay-launch.sh` 只有 `roles[$r].bare` 与 CLI 两处）
+⇒ **`bare.enabled:true` 是纯文档、纯死配置**。
+**⊢ 比 `SPEC-unified-driver-architecture` §2.5 记的"两级且优先级无文档"更糟：一级是 inert 的。**
+
+**坑③：同一 schema 已有【三份互相漂移的副本】。**
+`.claude/launch.settings.json`（6 role，fjdac+deepseek-v4-pro，7 个 env）·
+`plugin/.claude/launch.settings.json`（3 role，全 `launcher:"claude"`，3 个 env，是 quay-init 的出厂模板）·
+`packages/quay/src/init.ts:303-323 generateLaunchSettingsContent()`（3 role，1 个 env，
+**且注释 `:301-302` 仍写着已过时的 "claude-deepseek + deepseek-v4-flash"**）。
+**⇒ profile 化若不同时收敛这三份，只会变成四份。**
+
+**⊢ 另有一条隐式约定必须显式化**：`quay-launch.sh:98` 的
+`with_entries(select(.value != ""))` —— **空字符串 = "取消继承"**（manager role 靠它取消 917k 三件套）。
+而 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"` 是字面 `"0"` 会保留。
+**⇒ `""` 与 `"0"` 语义不同且仅靠一行 jq 表达，profile 化必须写成显式 `unset: [...]`**
+（与 `SPEC-unified-driver-architecture:244-246` 的裁定一致）。
+
+### 8.3 一条硬约束：秘密与端点【不能进 git】
+
+`plugin/test/launch-settings.test.mjs:107-115` 断言 launch 配置文件里**不得出现**
+`DEEPSEEK_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` 字面量，以及 `/sk-[A-Za-z0-9_-]{8,}/`。
+**当前之所以能满足，正是因为 wrapper 这层间接**：仓库只写 `launcher: "claude-fjdac"` 这个**名字**，
+真正的 endpoint 与 token 在仓库外的 `~/.local/bin/` + `~/.local/etc/`。
+**⇒ profile 设计有且仅有两条路**：
+```
+(a) 继续按【名字】引用 wrapper                    ⇒ 秘密天然在外，测试不动。代价：profile 不自足，
+                                                    换机器要先装 wrapper（本项目已实际踩过：跨主机验证）
+(b) profile 直接写 base_url/auth 变量名 + 值来源  ⇒ 必须引入【gitignored 的凭据层】+ 放宽该测试断言，
+                                                    ⛔ 不得直接放宽了事（那等于删掉唯一的防泄漏检查）
+```
+**本 SPEC 建议 (a) 为默认、(b) 作为可选扩展**（profile 可声明"我需要哪些 env 变量名"，
+但**值**始终来自仓库外）——**理由：(b) 的收益是自足性，而代价是把项目唯一的秘密防线改成"要记得别写错"。**
+
+### 8.4 与既有排期的关系（⛔ 不重复立条）
+
+**profile 化已有正本与任务**：`tasks/gap-ac154-claude-code-profile-extraction.md`（status `ready`，
+5 个 `depends_on` 未清）· 判据正本 `manager-phase-goal.md:60-67`（AC154）·
+设计 `SPEC-unified-driver-architecture-2026-08-23.md:216-247`。
+**⇒ 本节【不新立任务】，是给 AC154 补三条它没写的实测细节**：
+坑②的"一级 inert"、坑③的"三份副本"、§8.3 的"秘密防线是 (a) 路线在承担"。
+**⇒ 落地时按 AC154 走，本节作为其输入。**
+
+### 8.5 profile 与本功能（web 启动会话）的接口
+
+web "新建会话"表单需要且只需要**四个**选择：**profile**（wrapper+model+env 的具名组合）·
+**权限模式**（§6.4，必须显式）· **cwd/工作区** · **`crossSessionInbound`**
+（§7.3 更新后新增：**决定这个会话此后能不能被 web 直接投递消息，还是每条都要人去批准**；
+⇒ 它是 profile 的一个字段，不是隐藏默认值）。
+**⇒ profile 系统是本功能的前置依赖，但不是它的一部分**——本功能只消费 profile 名字。
+**⊢ 若 AC154 尚未落地，本功能可先用现有 `_launchSpec.roles` 的 role 名当 profile 名**
+（形态兼容，`quay-launch.sh <role>` 已经是这个接口），**AC154 落地后自然升级，⛔ 不需要重做。**
+
+## 9. 第二轮的开放问题（留给人/outer 裁定，⛔ 我不代拍）
+
+1. **实时性方案**（第一轮 §3.1 已列三选项，仍未裁定）：`-p` + stream-json 让"推流"变得容易得多
+   （stdout 就是结构化事件流），**但零客户端 JS 的约定仍然会被打破**——决定权在人。
+2. **§7.3 的单变量对照（🟢 已降级为"确认"而非"探明"** —— 平台回执已排除三个候选成因中的两个，
+   见 §7.3 的 17:2xZ 更新）：落地前仍建议补一次（只切 `crossSessionInbound`，发送方固定），
+   代价 = 一次 60 秒实验；**在此之前按"必须显式 accept"设计。**
+3. **§8.3 的 (a)/(b) 路线**：建议 (a)，但若人要 profile 自足（换机器即用），则须先设计凭据层。
