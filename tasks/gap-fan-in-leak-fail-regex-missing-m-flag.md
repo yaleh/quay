@@ -2,7 +2,7 @@
 id: gap-fan-in-leak-fail-regex-missing-m-flag
 title: fan-in-execute.js:363 TMUX_LEAK_FAIL_RE 缺 m flag ⇒ leak-residual
   分支死代码、真实泄漏红被误标 checker-misreport
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -22,8 +22,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，leak-residual 可达）：多行日志中含 `tmux-leak-scan: FAIL` 时，`TMUX_LEAK_FAIL_RE.test()` = true（⛔ 仍 false ⇒ 假）。
-- [ ] AC2（能取假，不再误标）：真实泄漏红走 leak-residual 分支，不被误标 checker-misreport（⛔ 仍误标 ⇒ 假）。
+- [x] AC1（能取假，leak-residual 可达）：多行日志中含 `tmux-leak-scan: FAIL` 时，`TMUX_LEAK_FAIL_RE.test()` = true（⛔ 仍 false ⇒ 假）。
+- [x] AC2（能取假，不再误标）：真实泄漏红走 leak-residual 分支，不被误标 checker-misreport（⛔ 仍误标 ⇒ 假）。
 
 ## Definition of Done
 
