@@ -27,6 +27,7 @@ import {
   computeWorkerRoundRecord,
   splitArgs,
   launchArgv,
+  buildWorkerPrompt,
   workerArgvForTask,
   defaultWorkerArgv,
   defaultSelectorArgv,
@@ -334,6 +335,15 @@ test("resolveRun / splitArgs / defaultWorkerArgv / signalExitCode / parseTimeout
   assert.equal(resolveConcurrency(0, 2, {}), 2, "non-positive explicit is ignored");
 });
 
+test("AC2 (gap-worker-print-bg-wait-ceiling-600s c) — buildWorkerPrompt hints to stay in-turn (TaskOutput blocking wait) during fan-in flight", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  // 辅助 (c)：fan-in 在飞期间尽量留在回合内等（TaskOutput 阻塞等待），不要结束回合等完成通知。
+  assert.match(prompt, /fan-in 在飞期间尽量留在回合内等/, "prompt hints to stay in-turn during fan-in flight");
+  assert.match(prompt, /TaskOutput 阻塞等待/, "prompt names TaskOutput blocking wait (resets the 600s clock)");
+  assert.match(prompt, /不要结束回合等完成通知/, "prompt forbids ending the turn to await the notification");
+  assert.match(prompt, /600s 终止/, "prompt names the 600s termination risk");
+});
+
 test("stashIfDirty — clean repo ⇒ no-op; non-git dir ⇒ no-op; dirty repo ⇒ stash (never discard)", () => {
   // non-git dir (the phase-1 makeRoot shape) ⇒ graceful no-op.
   const nonGit = makeRoot("nogit");
@@ -555,9 +565,9 @@ test("AC2 (能取假) — leave an uncommitted change ⇒ driver stashes it (git
   assert.match(fs.readFileSync(path.join(root, "a.txt"), "utf8"), /dirty/, "stash pop restores the dirty content");
 });
 
-// ── AC3 (阶段 2): 超时 ⇒ 墙钟超时 SIGTERM、orphan worktree 清理 ────────────────────────────────────
+// ── AC3 (阶段 2): 超时 ⇒ 墙钟超时 SIGTERM、worktree 保留（gap-worker-print-bg-wait-ceiling-600s）──────
 
-test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed-out, orphan worktree cleaned (AC2)", async (t) => {
+test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed-out, worktree preserved (SPEC §1 设计点3)", async (t) => {
   const root = makeGitRoot("timeout");
   const wtPath = path.join(root, "..", "w1");
   t.after(() => {
@@ -568,8 +578,9 @@ test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed
   fs.writeFileSync(path.join(root, "k.txt"), "x\n");
   runGit(root, ["add", "k.txt"]);
   runGit(root, ["commit", "-q", "-m", "init"]);
-  // a real orphan worktree on the TASK's branch — timeout is an abnormal death ⇒ it must be cleaned up
-  // (gap-worker-driver-no-record-on-abnormal-death AC2), not preserved (the old 阶段-2 contract).
+  // a real worktree on the TASK's branch — timeout SIGTERMs the worker but PRESERVES the worktree
+  // (SPEC §1 设计点3「超时即杀 worker 会话，但保留 worktree」；gap-worker-print-bg-wait-ceiling-600s AC3),
+  // ⛔ not cleaned up (unlike failed/killed/exited-not-landed — gap-worker-driver-no-record-on-abnormal-death AC2).
   runGit(root, ["worktree", "add", "-q", "-b", "task/gap-t", wtPath]);
   assert.ok(fs.existsSync(wtPath), "precondition: worktree exists before the run");
 
@@ -596,10 +607,11 @@ test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed
   assert.match(rec.failure_reason, /timed out/, "failure reason names the timeout");
   assert.ok(rec.wall_clock_ms >= 500 && rec.wall_clock_ms < 5000, `wall_clock_ms reflects the timeout (~${rec.wall_clock_ms}ms), not the full run`);
 
-  // worktree 已清理（超时是异常死亡 ⇒ orphan worktree 被清，driver 下轮可对同一 task 重派；AC2）。
-  assert.equal(rec.worktree_cleaned, true, "AC2: the orphan worktree was cleaned up on timed-out");
-  assert.ok(!fs.existsSync(wtPath), "worktree removed after timeout (⛔ not preserved)");
-  assert.equal(worktreePresentForTask(root, "gap-t"), false, "git worktree list no longer shows task/gap-t");
+  // worktree 保留（超时 ⇒ SIGTERM 但保留 worktree；⛔ 误删 ⇒ 假）。
+  assert.equal(rec.worktree_preserved, true, "AC3: timed-out records worktree_preserved=true");
+  assert.equal(rec.worktree_cleaned, undefined, "AC3: timed-out does NOT clean the orphan worktree (no worktree_cleaned field)");
+  assert.ok(fs.existsSync(wtPath), "worktree preserved after timeout (⛔ not removed)");
+  assert.equal(worktreePresentForTask(root, "gap-t"), true, "git worktree list still shows task/gap-t");
 });
 
 // ── gap-worker-driver-no-record-on-abnormal-death：worker 异常死亡 ⇒ 终态记录 + orphan worktree 清理 ──

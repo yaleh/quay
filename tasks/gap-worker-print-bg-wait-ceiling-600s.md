@@ -40,14 +40,14 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，**主修法 (a)**）：**活 worker 进程** env 含 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`（`tr '\0' '\n' < /proc/<worker-pid>/environ` 可查；⛔ 只改配置文件不算——必须是活进程读得到，同「代码落地≠生产生效」）。
-- [ ] AC2（能取假，辅助 (c)）：`buildWorkerPrompt` 输出含「fan-in 在飞期间尽量留在回合内等」的提示（grep buildWorkerPrompt 返回模板命中）。
-- [ ] AC3（能取假，兜底 (b)）：driver 外部墙钟超时生效，且**超时后 worktree 保留**（⛔ 误删 worktree ⇒ 假）。
-- [ ] AC4（负控制）：修复后落地窗口内，**end_turn 发生时无存活后台任务**（判据 = fan-in `journal.jsonl` 在 worker end_turn 时已写终态记录；⛔ 不是查 "Background tasks still running" 字符串——那是该机制的打印形式之一，不是本体）；且 `final_state=exited-not-landed` 占比显著下降（**基线 43/77 = 56%**；修复后应 <30%）。
+- [x] AC1（能取假，**主修法 (a)**）：**活 worker 进程** env 含 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`（`tr '\0' '\n' < /proc/<worker-pid>/environ` 可查；⛔ 只改配置文件不算——必须是活进程读得到，同「代码落地≠生产生效」）。
+- [x] AC2（能取假，辅助 (c)）：`buildWorkerPrompt` 输出含「fan-in 在飞期间尽量留在回合内等」的提示（grep buildWorkerPrompt 返回模板命中）。
+- [x] AC3（能取假，兜底 (b)）：driver 外部墙钟超时生效，且**超时后 worktree 保留**（⛔ 误删 worktree ⇒ 假）。
+- [ ] AC4（负控制）：修复后落地窗口内，**end_turn 发生时无存活后台任务**（判据 = fan-in `journal.jsonl` 在 worker end_turn 时已写终态记录；⛔ 不是查 "Background tasks still running" 字符串——那是该机制的打印形式之一，不是本体）；且 `final_state=exited-not-landed` 占比显著下降（**基线 43/77 = 56%**；修复后应 <30%）。（待外部）
 
 ## Definition of Done
 
-- [ ] AC1-4 全勾；(a)(c)(b) 三件都落地到 develop；生产 worker 进程 env 实测含该变量；一个 >600s 的 fan-in 任务正常落地（end_turn 时 journal 已终态）。
+- [ ] AC1-4 全勾；(a)(c)(b) 三件都落地到 develop；生产 worker 进程 env 实测含该变量；一个 >600s 的 fan-in 任务正常落地（end_turn 时 journal 已终态）。（待外部）
 
 ## Retires
 
