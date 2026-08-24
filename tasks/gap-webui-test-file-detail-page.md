@@ -21,9 +21,9 @@ web /tests 页缺**独立单测试文件详情页**（人明确要求，非「te
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，独立路由）：`/tests/file?path=<repo-rel-path>` 返回单文件详情（⛔ 仍只有 /tests 一页 ⇒ 假）。
-- [ ] AC2（能取假，跨多轮历史）：详情页显示该文件跨多轮 durationMs 趋势 + pass/fail 历史（⛔ 只有单轮 ⇒ 假）。
-- [ ] AC3（能取假，入口链接）：/tests 页 perFile 行可点击跳到详情页（⛔ 无链接 ⇒ 假）。
+- [x] AC1（能取假，独立路由）：`/tests/file?path=<repo-rel-path>` 返回单文件详情（⛔ 仍只有 /tests 一页 ⇒ 假）。
+- [x] AC2（能取假，跨多轮历史）：详情页显示该文件跨多轮 durationMs 趋势 + pass/fail 历史（⛔ 只有单轮 ⇒ 假）。
+- [x] AC3（能取假，入口链接）：/tests 页 perFile 行可点击跳到详情页（⛔ 无链接 ⇒ 假）。
 
 ## Definition of Done
 
