@@ -1,7 +1,7 @@
 ---
 id: gap-suite-load-sampler-bypassed-by-fan-in-execute
 title: suite-load-sampler 被 AC84 fan-in 直跑绕过 ⇒ web /tests 负载曲线断供 5+ 小时（数据源断供，非渲染坏）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -23,8 +23,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，数据源恢复）：fan-in-execute 直跑套件时，`.quay/suite-load-*.jsonl` 产生新样本（⛔ 一轮直跑后仍无新样本 ⇒ 假）。
-- [ ] AC2（能取假，非渲染假象）：web `/tests` 负载曲线区块有可绘制样本（⛔ 空串省略 ⇒ 假）。
+- [x] AC1（能取假，数据源恢复）：fan-in-execute 直跑套件时，`.quay/suite-load-*.jsonl` 产生新样本（⛔ 一轮直跑后仍无新样本 ⇒ 假）。
+- [x] AC2（能取假，非渲染假象）：web `/tests` 负载曲线区块有可绘制样本（⛔ 空串省略 ⇒ 假）。
 
 ## Definition of Done
 
@@ -33,6 +33,7 @@ sampler 接线到 fan-in-execute detached 直跑落地 develop；AC1-2 全勾；
 ## Touches
 
 - .claude/workflows/fan-in-execute.js（detached 直跑时起/停 sampler）
+- plugin/workflows/fan-in-execute.js（双拷贝同步，workflows-dual-copy-drift-check）
 - plugin/scripts/suite-load-sampler.ts（如需适配直跑调用）
 - plugin/test/fan-in-execute-paths.test.mjs（或对应测试）
 - tasks/gap-suite-load-sampler-bypassed-by-fan-in-execute.md（自身）

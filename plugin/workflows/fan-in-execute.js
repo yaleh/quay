@@ -230,7 +230,18 @@ rm -f "$suite_pid_file"
 # marker into this suite log; the fan-in's verification-round writer (pre-verified-round-record.ts)
 # parses it into the bucket fields (AC2/AC3). ISOLATE_LAUNCH (below) is NOT bucket-wired: it is the
 # C11 isolate rerun of an explicit load-sensitive file list — --buckets would override that list.
-setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$5"; cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh --buckets ${task}; else bash scripts/test.sh --buckets ${task}; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
+# gap-suite-load-sampler-bypassed-by-fan-in-execute AC1 — the detached direct run (setsid bash
+# scripts/test.sh) bypasses full-suite-runner.ts (the ONLY spawner of suite-load-sampler.ts) ⇒ the
+# /tests load-curve data source (.quay/suite-load-<runId>.jsonl) went dark (5+ hour gap, 08-24). Re-wire
+# the SAME state-driven sampler on this path: the detached wrapper below establishes a per-task "running"
+# state file, spawns the sampler with its lifetime tied to the suite session (a group SIGKILL on a hung
+# holder also reaps it), and writes the terminal state right after the suite exits so the sampler stops
+# on its next poll (never a resident idle-spin; the sampler's own 结束即停 invariant). The out-file is the
+# SHARED checkout's .quay/suite-load-<runId>.jsonl — the SAME runId mirror-full-suite-state.ts writes into
+# full-suite-state.json at step 4.5, so the /tests page joins them (readCurrentSuiteRunId → readSuiteLoadSamples).
+rm -f "/tmp/fan-in-suite-sampler-${task}.state.json"
+printf '{"state":"running"}\\n' > "/tmp/fan-in-suite-sampler-${task}.state.json"
+setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$5"; node --no-warnings --experimental-strip-types ${worktree}/plugin/scripts/suite-load-sampler.ts --state-file "/tmp/fan-in-suite-sampler-${task}.state.json" --out-file "${root}/.quay/suite-load-${runId}.jsonl" --run-id "${runId}" --interval 5 >/dev/null 2>&1 & cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh --buckets ${task}; else bash scripts/test.sh --buckets ${task}; fi; } >> "$3" 2>&1; rc=$?; rm -f "/tmp/fan-in-suite-sampler-${task}.state.json"; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
 suite_pid=""
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   if [ -s "$suite_pid_file" ]; then suite_pid=$(cut -d' ' -f1 "$suite_pid_file" 2>/dev/null); break; fi
