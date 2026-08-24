@@ -1,7 +1,7 @@
 ---
 id: gap-task-status-drift-check-timeout
 title: task-status-drift-check.ts 超时 8s fail-open 排查
-status: ready
+status: done
 labels:
   - gap
 parent: null
