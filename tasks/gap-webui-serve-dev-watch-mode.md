@@ -1,6 +1,6 @@
 ---
 id: gap-webui-serve-dev-watch-mode
-title: quay serve 加 --dev/--watch 开发模式（Node --watch 自动加载最新实现，解决「陈旧进程跑旧代码」第 5 次复发）
+title: 记录 node --watch 开发用法（不新增 --dev/--watch 入口——node --watch 机制已可用，零产品表层）
 status: ready
 labels:
   - gap
@@ -17,9 +17,11 @@ extra: {}
 
 **可行性已验（manager 现场）**：`node --watch --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port <p>` 直接启动现有 serve 入口（零改代码），/health 返回 stale:false。Node 内置 --watch 对 import 的模块变更自动重启整个进程（Node ≥18 文档化标准能力）。
 
+**范围澄清（人 2026-08-24）**：node --watch 机制本身已可用，**不新增 --dev/--watch CLI 入口**——直接用 `node --watch <既有入口>` 启动即可，省一个不必要的新增产品表层。
+
 ## Plan
 
-给 `quay serve` 加 `--dev`/`--watch` 入口（或在 README/CLAUDE.md 记录 `node --watch ...` 用法作开发启动方式）。
+**默认只做文档记录**：README.md/CLAUDE.md 写清 `node --watch --experimental-strip-types packages/quay/bin/quay.ts serve --host <ip> --port <p>` 的开发用法。⛔ 不新增 CLI 标志/产品表层。**仅在文档路径验证不出闭环（AC1 端到端）时才退回加 `--dev`/`--watch` 入口**。
 
 ## Acceptance Criteria
 
@@ -27,10 +29,12 @@ extra: {}
 
 ## Definition of Done
 
-dev/watch 模式落地 develop；AC1 全勾；改源码自动重启、新代码 curl 生效（AC1 复现）。
+文档记录 node --watch 开发用法落地 develop；AC1 全勾；改源码自动重启、新代码 curl 生效（AC1 复现）。若文档路径验证不出闭环，退回加 CLI 入口后同 AC1 验收。
 
 ## Touches
 
-- packages/quay/bin/quay.ts（--dev/--watch 入口）或 README.md/CLAUDE.md（node --watch 用法记录）
-- packages/quay/test/serve-*.test.mjs（或对应测试）
+- README.md（记录 node --watch 开发用法——首选，零产品表层）
+- CLAUDE.md（同 README 记录——首选，零产品表层）
+- packages/quay/bin/quay.ts（--dev/--watch 入口——仅文档路径验证不出闭环时退回）
+- packages/quay/test/serve-*.test.mjs（AC1 端到端测试）
 - tasks/gap-webui-serve-dev-watch-mode.md（自身）
