@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-ff-retry-counter-scope
 title: fan-in ff retry 计数器作用域 bug——grep -c 全历史累计，跨 dispatch 不隔离（任务提前锁死）
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -37,7 +37,7 @@ attempt3 runId=22atfr 18:11:02Z   ← 全新 dispatch（新 runId，隔 30min）
 
 ## Definition of Done
 
-计数器按 runId 隔离；AC1-2 全勾；历史失败不再跨 dispatch 累计。
+计数器按 runId 隔离（各 dispatch 失败计数从 0 起）；AC1-2 全勾；历史失败不再跨 dispatch 累计。
 
 ## Touches
 
