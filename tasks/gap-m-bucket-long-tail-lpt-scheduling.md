@@ -28,12 +28,12 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：修复后连续 3 轮 M bucket，长尾窗口（95%→100% 完成时刻）占墙钟比例较修复前基线（round 474/476/478 平均 27%+）**显著下降**（目标 <15%）。
-- [ ] AC2（负控制）：已知长测试文件在生成的 M bucket 文件列表里排在前 N（N = 已知长文件数）。
+- [ ] AC1（能取假）：修复后连续 3 轮 M bucket，长尾窗口（95%→100% 完成时刻）占墙钟比例较修复前基线（round 474/476/478 平均 27%+）**显著下降**（目标 <15%）。（待外部）
+- [x] AC2（负控制）：已知长测试文件在生成的 M bucket 文件列表里排在前 N（N = 已知长文件数）。
 
 ## Definition of Done
 
-- [ ] AC1-2 全勾；scripts/test.sh 的 M bucket 排序落地到 develop；3 轮实测长尾下降。
+- [ ] AC1-2 全勾；scripts/test.sh 的 M bucket 排序落地到 develop；3 轮实测长尾下降。（待外部）
 
 ## Retires
 
