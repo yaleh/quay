@@ -4,10 +4,11 @@
   control-plane runtime, supervisor, project configuration, Skill, agent, hook,
   MCP registration, or scheduled task is implemented by this document.
   Adoption must enter the normal exp5 directive and milestone process.
-- **Date:** 2026-07-18; architecture and staged-adoption update 2026-07-26
+- **Date:** 2026-07-18; architecture and staged-adoption update 2026-07-26;
+  Codex App Server communication update 2026-08-24
 - **Context:** captured from a live human-directed review of the recent exp5
   history and a capability check against the locally installed Codex CLI
-  (`codex-cli 0.145.0`) and the current Codex manual. The question has two
+  (`codex-cli 0.149.1`) and the current Codex manual. The question has two
   deliberately separate parts: first, whether Codex can replace a Claude Code
   terminal session as the human-facing quay operator and session-evidence
   reviewer; second, whether Codex can drive a bounded milestone and eventually
@@ -28,7 +29,9 @@
   implement rather than bypass. ·
   [`quay-codex-self-observation-tool-supply-chain.md`](./quay-codex-self-observation-tool-supply-chain.md)
   defines how Codex observation tools are discovered, evaluated, packaged, and
-  kept outside authoritative Quay state.
+  kept outside authoritative Quay state. ·
+  [`../../orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md`](../../orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md)
+  defines the current Codex App Server session-communication adapter boundary.
 
 ## 1. Decision summary
 
@@ -50,7 +53,12 @@ Codex workload.
   goals, subagents and custom agents, Skills, MCP, lifecycle hooks, local Git
   worktrees, browser tooling, non-interactive `codex exec`, JSON event output,
   and output-schema validation.
-- Codex does not provide one single primitive equivalent to exp5's complete
+- Codex does not provide one single user-facing peer primitive equivalent to
+  Claude Code's `SendMessage`. Its App Server does provide thread discovery,
+  resume/fork, `turn/start`, `turn/steer`, and streamed lifecycle events, which
+  are sufficient building blocks for a Host Adapter but not a reason to expose
+  Codex-specific thread operations as Quay's protocol.
+- Codex still does not provide one single primitive equivalent to exp5's complete
   `completion notification -> wake OUTER -> poll/re-arm -> continue forever`
   contract. Goal continuation and scheduled in-chat follow-ups cover parts of
   that contract, but process death, machine sleep, permission failures, and
@@ -227,14 +235,14 @@ The control-plane runtime repeats this bounded goal through the adapter. This
 preserves exp5's infinite outer horizon without requiring any individual model
 run to be infinite.
 
-### 3.7 There is no runtime-neutral Host Adapter contract yet
+### 3.7 The runtime-neutral Host Adapter contract is defined separately
 
 The original version of this proposal placed a Codex-specific supervisor
 directly between repository state and `codex exec`. That is sufficient for a
 one-host proof, but it would make the next Claude, CI, remote-executor, or
 multi-machine integration reimplement scheduling and recovery again.
 
-The missing boundary is a small host-neutral contract. At minimum it must
+The required boundary is a small host-neutral contract. At minimum it must
 support:
 
 - capability discovery;
@@ -247,9 +255,28 @@ support:
 - no requirement that a control-plane consumer understand Codex transcript or
   UI internals.
 
-Codex Goals, subagents, scheduled follow-ups, `codex exec`, and App worktrees
-are implementation choices behind this boundary. They are not themselves the
-Quay runtime protocol.
+Codex Goals, subagents, scheduled follow-ups, `codex exec`, App Server threads,
+and App worktrees are implementation choices behind this boundary. They are not
+themselves the Quay runtime protocol. The session-communication subset is now
+specified separately in §3.8; the broader bounded-run contract remains proposal
+work.
+
+### 3.8 Cross-session communication is a separate adapter concern
+
+The repository has now verified that Claude Code sessions can be addressed from
+outside the receiving session through the existing SendMessage socket path. The
+Codex equivalent must not be inferred from subagents or from transcript files.
+Codex App Server is the current implementation substrate: it exposes thread
+enumeration and persistence plus `turn/start`/`turn/steer` and notifications.
+The host-neutral `list / status / send / events` contract, acknowledgement
+states, idempotency rules, and the distinction between peer/child/fork/review
+are defined in:
+
+[`SPEC-codex-session-communication-host-adapter-2026-08-24.md`](../../orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md).
+
+That SPEC is intentionally proposal-only. It does not claim that Codex CLI
+already has Claude's arbitrary-peer `SendMessage(to, text)` UX, and it does not
+expand the current Stage 1 operator's lifecycle authority.
 
 ## 4. Proposed architecture
 
