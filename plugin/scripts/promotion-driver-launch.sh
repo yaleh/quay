@@ -25,8 +25,9 @@
 #   ② worker 有第三种模式 --serve（MCP 控制面），promotion 没有。→ 本脚本不碰 --serve（那是
 #      驱动自己的入口，非 supervisor 承载面）；supervisor 只守护常驻选择环/晋升环。
 #   ③ 停机语义两套：promotion 杀在飞（stop sentinel + TERM + 兜底 kill -9）；worker .halt 不杀在飞。
-#      → `stop` 与 `drain` 分立：promotion 支持 stop（杀在飞）不支持 drain；worker 支持 drain
-#      （halt：只挡新派发不杀在飞）与 stop（杀 supervisor+driver，⛔ 不杀在飞 worker）。
+#      → `stop` 与 `drain` 分立：两个 kind 都支持 stop（杀 supervisor+driver；worker ⛔ 不杀在飞
+#      worker）与 drain（halt：写各自控制态文件 halted=true，只挡新派发/新一轮，⛔ 不杀在飞）。
+#      promotion 的 drain 写 promotion-control.json（AC150-2，与 worker-control.json 同族不同文件）。
 #      ⛔ 对不支持的动词直接报错（退出 2），不静默回落（registry 里 KIND_VERBS 声明）。
 #
 # 权责边界（⛔ 只做承载与入口，不改两驱动业务逻辑——选择环/晋升判定/fix worker）：
@@ -108,7 +109,7 @@ declare -A KIND_PREFIX=(
   [worker]="worker-driver"
 )
 declare -A KIND_VERBS=(
-  [promotion]="start stop status restart liveness"
+  [promotion]="start stop drain status restart liveness"
   [worker]="start stop drain status restart liveness"
 )
 declare -A KIND_CAP_FLAG=(
@@ -133,6 +134,12 @@ declare -A KIND_RUN_PREFIX=(
 declare -A KIND_CARRIERS=(
   [promotion]="promotion-outcome.jsonl promotion-round.jsonl"
   [worker]="worker-outcome.jsonl worker-round.jsonl"
+)
+# 控制态文件（相对 .quay/；drain 写它、驱动判停读它）。promotion → promotion-control.json；
+# worker → worker-control.json（两个 kind 独立，halting 一个不杀另一个——AC150-2）。
+declare -A KIND_CONTROL_FILE=(
+  [promotion]="promotion-control.json"
+  [worker]="worker-control.json"
 )
 
 # ── 参数解析 ──────────────────────────────────────────────────────────────────────────
@@ -402,20 +409,18 @@ cmd_stop() {
   return 0
 }
 
-# ── drain（仅 worker 支持；promotion 被 KIND_VERBS 拒绝）── halt 语义：只挡新派发，⛔ 不杀在飞 ──
-# 写 .quay/worker-control.json halted=true（worker-driver.ts 单一真相源停机态，读-改-写保留
-# preference/forced，不破坏用户控制态）。不触碰 supervisor / driver / 在飞 worker 进程。
+# ── drain（两个 kind 都支持，AC150-2）── halt 语义：只挡新派发/新一轮，⛔ 不杀在飞 ──
+# 写 <kind>-control.json halted=true（driver-shared.ts 单一真相源停机态，读-改-写保留 preference/forced，
+# 不破坏用户控制态）。不触碰 supervisor / driver / 在飞 worker 进程。promotion → promotion-control.json；
+# worker → worker-control.json（两个 kind 独立，halting 一个不杀另一个）。
 cmd_drain() {
-  if [ ! -f "$ROOT/plugin/scripts/worker-driver.ts" ]; then
-    echo "promotion-driver-launch: drain requires worker-driver.ts at $ROOT/plugin/scripts/worker-driver.ts" >&2
-    exit 2
-  fi
-  DRIVER_DRAIN_ROOT="$ROOT" "$NODE_BIN" --experimental-strip-types - <<'NODE'
+  local control_file="$STATE_DIR/${KIND_CONTROL_FILE[$KIND]}"
+  DRIVER_DRAIN_FILE="$control_file" DRIVER_DRAIN_KIND="$KIND" "$NODE_BIN" --experimental-strip-types - <<'NODE'
 import fs from "node:fs";
 import path from "node:path";
-const root = process.env.DRIVER_DRAIN_ROOT;
-const file = path.join(root, ".quay", "worker-control.json");
-// 与 worker-driver.ts 的 mergeControlState 同形（单一真相源：缺字段取缺省；读失败非 ENOENT 报错）。
+const file = process.env.DRIVER_DRAIN_FILE;
+const kind = process.env.DRIVER_DRAIN_KIND || "worker";
+// 与 driver-shared.ts 的 mergeControlState 同形（单一真相源：缺字段取缺省；读失败非 ENOENT 报错）。
 const dflt = { schemaVersion: 1, halted: false, halted_by: null, halted_at: null, preference: {}, forced: [] };
 let state = dflt;
 try {
@@ -443,7 +448,7 @@ fs.mkdirSync(path.dirname(file), { recursive: true });
 const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
 fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf8");
 fs.renameSync(tmp, file);
-console.log("drained: worker halted (no new dispatch; in-flight workers untouched) — control state at " + file);
+console.log(`drained: ${kind} halted (no new dispatch; in-flight workers untouched) — control state at ` + file);
 NODE
   return 0
 }

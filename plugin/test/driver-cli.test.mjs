@@ -4,8 +4,8 @@
 // subcommand + a single generalized supervisor (plugin/scripts/promotion-driver-launch.sh).
 //
 //   AC1 (统一入口): `quay driver <start|stop|drain|status|restart> --kind <promotion|worker>` exists,
-//     both kinds start/stop through it; stop/drain are separate verbs and an unsupported verb for a
-//     kind errors (no silent fallback). Falsifiable: a kind only starts via the old path, or worker
+//     both kinds start/stop/drain through it (AC150: promotion now supports drain = halt, writing its
+//     own promotion-control.json). Falsifiable: a kind only starts via the old path, or worker
 //     `stop` kills in-flight workers ⇒ false.
 //   AC2 (单一真相源): exactly ONE respawn/supervisor loop in the repo; per-kind differences are a
 //     registry table. Falsifiable: a second launch script with its own supervisor loop ⇒ false.
@@ -110,14 +110,16 @@ test("AC1 — both kinds start + status + stop through `quay driver`", async (t)
   }
 });
 
-test("AC1 — stop/drain are separate verbs; unsupported verb for a kind errors (no silent fallback)", async (t) => {
+test("AC1 — stop/drain are separate verbs; both kinds support drain = halt (AC150-2)", async (t) => {
   const root = makeRoot("ac1-drain");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
-  // promotion does NOT support drain (it has no halt mechanism) → error, not silent fallback.
-  const r = await cli(["driver", "drain", "--kind", "promotion", "--root", root]);
-  assert.notEqual(r.code, 0, `drain for promotion must error: ${r.stdout}\n${r.stderr}`);
-  assert.match(r.stderr, /does not support 'drain'/, `drain-for-promotion names the unsupported verb: ${r.stderr}`);
+  // promotion DOES support drain now (AC150-2): writes promotion-control.json halted=true.
+  const p = await cli(["driver", "drain", "--kind", "promotion", "--root", root]);
+  assert.equal(p.code, 0, `drain for promotion must succeed: ${p.stdout}\n${p.stderr}`);
+  const pctl = JSON.parse(fs.readFileSync(path.join(root, ".quay", "promotion-control.json"), "utf8"));
+  assert.equal(pctl.halted, true, "promotion drain writes halted=true");
+  assert.equal(pctl.schemaVersion, 1, "promotion drain preserves schemaVersion");
 
   // worker DOES support drain = halt (write worker-control.json halted=true).
   const d = await cli(["driver", "drain", "--kind", "worker", "--root", root]);
@@ -125,6 +127,10 @@ test("AC1 — stop/drain are separate verbs; unsupported verb for a kind errors 
   const ctl = JSON.parse(fs.readFileSync(path.join(root, ".quay", "worker-control.json"), "utf8"));
   assert.equal(ctl.halted, true, "drain writes halted=true");
   assert.equal(ctl.schemaVersion, 1, "drain preserves schemaVersion");
+
+  // ⛔ 两 kind 独立：halting one does NOT halt the other (distinct control files, AC150-2)。
+  const pctl2 = JSON.parse(fs.readFileSync(path.join(root, ".quay", "promotion-control.json"), "utf8"));
+  assert.equal(pctl2.halted, true, "worker drain leaves promotion-control.json untouched (independent halt)");
 });
 
 test("AC1 — worker `stop` does NOT kill in-flight workers (⛔ falsifiable: kill in-flight ⇒ false)", async (t) => {
