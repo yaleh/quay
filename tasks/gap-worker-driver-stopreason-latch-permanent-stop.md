@@ -2,7 +2,7 @@
 id: gap-worker-driver-stopreason-latch-permanent-stop
 title: worker-driver stopReason 一旦赋值永不复位 ⇒ 瞬时闸拒绝被永久 latch ⇒ 1h48m 零派发（234 槽·分钟 ≈
   3.4 条任务损失，正在复发）
-status: ready
+status: done
 labels:
   - gap
   - defect
