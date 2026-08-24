@@ -226,12 +226,16 @@ export function buildSymbolIndex(repoRoot, symbols, roots = CODE_ROOTS) {
 // repo tree (readdir recursion) PER glob Touches entry — ~130 glob entries across the done store × a
 // ~4000-entry walk measured ~18s. The list is walked ONCE and cached per repoRoot; each glob then
 // scans the cached list with the SAME matchesGlob predicate and the SAME exclusion set the per-glob
-// walk used. The original visited<20000 defensive cap is preserved (on the walk, files+dirs counted),
-// so a pathological huge repo still cannot balloon memory. The walk result (true/false for a given
-// glob) is order-independent, so scanning a cached list is behaviorally identical to the interleaved
-// walk — only the number of readdir passes changes.
+// walk used. The visited<20000 defensive cap is checked in BOTH loops: the outer pop-loop check alone
+// was bypassed by a single readdirSync returning >20000 entries (`.quay/node-compile-cache` holds
+// 380k+ files, measured 76s), so the inner for-loop re-checks the cap on every non-excluded entry —
+// a pathological huge repo can neither balloon memory NOR balloon the walk wall-clock. `.quay` is now
+// excluded (workspace runtime state + the node-compile-cache build artifact — bookkeeping, never
+// implementation evidence) alongside the other dirs. The walk result (true/false for a given glob) is
+// order-independent, so scanning a cached list is behaviorally identical to the interleaved walk —
+// only the number of readdir passes changes.
 const _fileListCache = new Map(); // repoRoot → string[] repo-root-relative paths (forward slashes)
-function listRepoFiles(repoRoot) {
+export function listRepoFiles(repoRoot) {
   const cached = _fileListCache.get(repoRoot);
   if (cached) return cached;
   const out = [];
@@ -242,7 +246,8 @@ function listRepoFiles(repoRoot) {
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
     for (const ent of entries) {
-      if (["node_modules", "dist", "vendor", "milestones", ".git", "worktrees"].includes(ent.name)) continue;
+      if (["node_modules", "dist", "vendor", "milestones", ".git", "worktrees", ".quay"].includes(ent.name)) continue;
+      if (visited >= 20000) break; // inner-loop cap: one readdirSync can return >20000 entries (see header comment)
       const abs = path.join(dir, ent.name);
       const rel = path.relative(repoRoot, abs).split(path.sep).join("/");
       visited++;
