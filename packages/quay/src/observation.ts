@@ -517,6 +517,174 @@ export function computeInFlightBlocking(root: string, inFlight: InFlightTask[]):
   });
 }
 
+// ── Worker-driver carrier (gap-live-page-worker-driver-inflight-invisible) ─────────────────────
+// The worker-driver (the production executor since AC138) does NOT write `.workflow-events/*.jsonl`
+// (the old inner fast-mode-telemetry store). It writes its own runtime carriers — `.quay/worker-
+// outcome.jsonl` (one record per FINISHED worker run) and `.quay/worker-round.jsonl` (an unconditional
+// heartbeat carrying only the in-flight COUNT, no task list). readLive previously read ONLY the
+// workflow-events store, so the driver's real in-flight work was invisible on the Live page (AC136's
+// other half — AC136 wired the promotion-driver into the POOL metric; nobody wired the worker-driver
+// into the IN-FLIGHT table).
+//
+// Carrier fact (why "in-flight" is DERIVED, not read): the outcome record is written at worker END —
+// the driver has no persisted per-task "started" record. So a task whose worker is STILL RUNNING has
+// no outcome record yet and surfaces on its first outcome write. "Worker-driver in-flight" below is
+// therefore the carrier-derivable open set: a task whose LATEST outcome is not `completed` (dispatched
+// but not landed — the driver keeps re-dispatching it until it lands). This is the same "open run"
+// notion the workflow-events pairing gives (start without end).
+
+/** The worker-driver's outcome carrier, repo-relative (gitignored runtime log — promotion-round /
+ *  dispatch-record family). NOT a plugin script: resolved against the workspace root. */
+export const WORKER_OUTCOME_REL = ".quay/worker-outcome.jsonl";
+
+/** The worker-driver's round (heartbeat) carrier, repo-relative. Used only for the "driver online"
+ *  instant (AC2) and the worker-active discriminator — it carries no per-task list. */
+export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
+
+/** The subset of the outcome record readLive consumes. Unknown/missing fields degrade to null rather
+ *  than a fabricated reading (hard rule ③b). */
+export interface WorkerOutcomeRecord {
+  task: string | null;
+  run_id: string | null;
+  /** ISO-8601 UTC worker-run start (the carrier's `started_at`). */
+  started_at: string | null;
+  /** Terminal state: completed | exited-not-landed | failed | killed | timed-out | spawn-failed | not-dispatched. */
+  final_state: string | null;
+}
+
+/** Parse `.quay/worker-outcome.jsonl` (one JSON object per line) into outcome records. Pure — never
+ *  throws; a malformed line is skipped (best-effort runtime log, not a store). */
+export function parseWorkerOutcomeRecords(text: string): WorkerOutcomeRecord[] {
+  const out: WorkerOutcomeRecord[] = [];
+  for (const line of String(text).split("\n")) {
+    const s = line.trim();
+    if (!s) continue;
+    let j: Record<string, unknown>;
+    try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
+    out.push({
+      task: typeof j.task === "string" && j.task.length > 0 ? j.task : null,
+      run_id: typeof j.run_id === "string" && j.run_id.length > 0 ? j.run_id : null,
+      started_at: typeof j.started_at === "string" && j.started_at.length > 0 ? j.started_at : null,
+      final_state: typeof j.final_state === "string" && j.final_state.length > 0 ? j.final_state : null,
+    });
+  }
+  return out;
+}
+
+/** A task's latest worker outcome is "open" (not landed) — the worker-driver still has it in play.
+ *  The two "never actually ran" states (spawn-failed / not-dispatched) are NOT open: no worktree was
+ *  ever created for them, so nothing is in flight. `completed` is the only landed state. A missing
+ *  terminal state is NOT open (no evidence the task was dispatched — fail-closed to NOT in-flight,
+ *  never a fabricated "open" from an unreadable field, hard rule ③b). */
+function workerOutcomeOpen(finalState: string | null): boolean {
+  if (finalState == null) return false;
+  return finalState !== "completed" && finalState !== "spawn-failed" && finalState !== "not-dispatched";
+}
+
+/**
+ * Derive the worker-driver's in-flight set from its outcome carrier: for each task, keep its LATEST
+ * record (most-recent `started_at`) and surface it as in-flight iff that record is open (final_state
+ * ≠ completed / spawn-failed / not-dispatched). `implCompletedAtMs` is null (every open worker task
+ * still needs implementing to land); `liveness` is "unknown" (fail-closed toward in-flight — the
+ * driver manages its own orphan cleanup, so the board's workflow-events orphan concept does not
+ * transfer). Pure and /proc-free — the same shape pairInFlight produces.
+ */
+export function workerInFlightTasks(records: WorkerOutcomeRecord[], nowMs: number): InFlightTask[] {
+  const latest = new Map<string, WorkerOutcomeRecord & { startedMs: number }>();
+  for (const r of records) {
+    if (!r.task) continue;
+    const startedMs = r.started_at != null ? Date.parse(r.started_at) : NaN;
+    if (!Number.isFinite(startedMs)) continue;
+    const prev = latest.get(r.task);
+    if (!prev || startedMs >= prev.startedMs) latest.set(r.task, { ...r, startedMs });
+  }
+  const out: InFlightTask[] = [];
+  for (const [task, r] of latest) {
+    if (!workerOutcomeOpen(r.final_state)) continue;
+    out.push({
+      taskId: task,
+      runId: r.run_id ?? `worker-${task}`,
+      startedAtMs: r.startedMs,
+      implCompletedAtMs: null,
+      minutes: Math.max(0, (nowMs - r.startedMs) / 60_000),
+      liveness: "unknown",
+      blocks: [],
+      blockedBy: [],
+    });
+  }
+  return out;
+}
+
+/** Read `.quay/worker-outcome.jsonl` as text. Absent/unreadable ⇒ null (degrade, never throw). */
+function readWorkerOutcomeText(root: string): string | null {
+  try {
+    return fs.readFileSync(path.join(root, WORKER_OUTCOME_REL), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The instant the worker-driver came online — the earliest dispatch/round timestamp across its two
+ * carriers (min of every outcome `started_at` and every round `ts`). null when the driver has no
+ * record at all. readLive uses it (AC2) to drop workflow-events runs that predate the driver: a
+ * start-without-end workflow-events record whose start is BEFORE the driver came online is a stale
+ * inner-era ghost (its worktree may still exist, but it is now managed by the driver, not the retired
+ * inner dispatch path).
+ */
+export function workerDriverOnlineMs(root: string): number | null {
+  let onlineMs: number | null = null;
+  const consider = (ms: number) => {
+    if (!Number.isFinite(ms)) return;
+    if (onlineMs == null || ms < onlineMs) onlineMs = ms;
+  };
+
+  const outcomeText = readWorkerOutcomeText(root);
+  if (outcomeText != null) {
+    for (const r of parseWorkerOutcomeRecords(outcomeText)) {
+      if (r.started_at != null) consider(Date.parse(r.started_at));
+    }
+  }
+
+  try {
+    const roundText = fs.readFileSync(path.join(root, WORKER_ROUND_REL), "utf8");
+    for (const line of String(roundText).split("\n")) {
+      const s = line.trim();
+      if (!s) continue;
+      try {
+        const j = JSON.parse(s) as Record<string, unknown>;
+        if (typeof j.ts === "string") consider(Date.parse(j.ts));
+      } catch { /* skip malformed round line */ }
+    }
+  } catch {
+    // no round carrier — the outcome carrier alone (if any) still yields a valid online instant
+  }
+
+  return onlineMs;
+}
+
+/** True when the worker-driver has produced ANY record (outcome or round) — i.e. the driver is wired
+ *  and active. readLive uses this so an empty workflow-events store does NOT read as 「循环没跑」 once
+ *  the driver is the real executor. */
+export function workerDriverActive(root: string): boolean {
+  return fs.existsSync(path.join(root, WORKER_OUTCOME_REL)) || fs.existsSync(path.join(root, WORKER_ROUND_REL));
+}
+
+/** Read a single task's status frontmatter from the on-disk store. Missing/unreadable ⇒ null (never
+ *  throws). readLive uses it to drop a worker-carrier task whose status is already "done" — the
+ *  driver's `exited-not-landed` on a done task is a leftover-worktree cleanup artifact, the same
+ *  "not really in-flight" class as the AC2 ghost, not live work. */
+function readTaskStatusOnDisk(root: string, taskId: string): string | null {
+  try {
+    const raw = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
+    const parsed = parseFrontmatter(raw);
+    const fm = parsed.frontmatter as Record<string, unknown>;
+    return typeof fm.status === "string" ? fm.status : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Live loop view: in-flight fast-mode tasks + elapsed minutes + concurrency + CPU pressure +
  * the loop-state discriminator. Degrades per the header contract; never throws.
@@ -569,6 +737,55 @@ export function readLive(root: string, { nowMs = Date.now() }: { nowMs?: number 
   } catch (err) {
     status = "error";
     reason = `读取遥测失败：${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  // gap-live-page-worker-driver-inflight-invisible: merge the worker-driver's carrier-derived
+  // in-flight set, and drop workflow-events runs that predate the driver (stale inner-era ghosts).
+  // A worker-carrier read failure degrades to the workflow-events-only view — never 500s the page.
+  let workerInFlight: InFlightTask[] = [];
+  try {
+    const outcomeText = readWorkerOutcomeText(root);
+    if (outcomeText != null) {
+      workerInFlight = workerInFlightTasks(parseWorkerOutcomeRecords(outcomeText), nowMs);
+    }
+  } catch {
+    workerInFlight = [];
+  }
+
+  // The driver's carrier IS the loop telemetry once the driver is the executor: an empty
+  // workflow-events store must not read as 「循环没跑」 (running-unwired / not-running) when the
+  // driver is actively writing its own carrier.
+  if (workerDriverActive(root)) {
+    telemetryEmpty = false;
+    if (status === "empty") {
+      status = "ok";
+      reason = null;
+    }
+  }
+
+  // AC2: a workflow-events start-without-end run whose start is BEFORE the driver came online is a
+  // stale inner-era ghost — its worktree may still exist (now managed by the driver), so the
+  // worktree-released filter above does not remove it. Drop it here by the direct量 (start < online).
+  const workerOnlineMs = workerDriverOnlineMs(root);
+  if (workerOnlineMs != null) {
+    inFlight = inFlight.filter((t) => t.startedAtMs >= workerOnlineMs);
+  }
+
+  // Merge: a task carried by the worker-driver replaces any same-task workflow-events run (the driver
+  // is the execution truth); union otherwise. Worker wins on collision. A worker task whose on-disk
+  // status is already "done" is NOT in-flight (it landed — the driver's exited-not-landed on a done
+  // task is a leftover-worktree cleanup artifact, the same "not really in-flight" class as the AC2
+  // ghost).
+  if (workerInFlight.length > 0) {
+    const byTask = new Map<string, InFlightTask>();
+    for (const t of inFlight) byTask.set(t.taskId, t);
+    for (const t of workerInFlight) {
+      if (readTaskStatusOnDisk(root, t.taskId) === "done") continue;
+      byTask.set(t.taskId, t);
+    }
+    inFlight = [...byTask.values()].sort(
+      (a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId),
+    );
   }
 
   // Cross-task blocking (gap-webui-cross-task-blocking-visibility): annotate every in-flight task
