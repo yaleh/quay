@@ -97,6 +97,78 @@ export const FIX_WORKER_TIMEOUT_MS = 180_000;
  *  形态先落缺省 ["claude"]；后续 AC140-2 把集做成 .quay/config.yml 可配（wrapper 如 claude-fjdac）。 */
 export const LLM_COMMAND_SET_DEFAULT: readonly string[] = ["claude"];
 
+// ── quiet-window 消费者（gap-fan-in-ff-livelock-quiet-window-no-consumer）──────────────────────────
+// The fan-in ff anti-livelock escalation (fan-in-ff-merge.sh attempt>=3, SPEC §7) writes a
+// `request-quiet-window-and-stop-retry` record requesting all layers EXCEPT the fan-in executor to
+// hold develop writes; before this task it had NO consumer (grep -rln fan-in-ff-escalations only hit
+// the writer + the checker) ⇒ the 20min zero-commit window was structurally unreachable ⇒ livelock.
+// This driver is one consumer: while an escalation request is OPEN (no newer `quiet-window-resolved`
+// record for the same task) AND still within its windowMinutes, the resident loop holds — it skips
+// the --apply promotion and fix-worker spawn (the develop writes the request asks to pause). The hold
+// self-clears when the escalated task lands (fan-in-ff-merge.sh appends the resolution on ff success)
+// or the window expires.
+
+/** The escalation lifecycle file (request → resolution). fan-in-ff-merge.sh appends `ff-escalation`
+ *  (request, attempt>=3) and `quiet-window-resolved` (ff landed). gitignored runtime state. */
+export const ESCALATIONS_REL = ".quay/fan-in-ff-escalations.jsonl";
+
+/** One escalation-file line — an `ff-escalation` request or a `quiet-window-resolved` resolution. */
+export interface EscalationRecord {
+  event?: string;
+  taskId?: string;
+  epoch?: number;
+  ts?: string;
+  windowMinutes?: number;
+  quietWindow?: { requested?: boolean; windowMinutes?: number };
+}
+
+/** Parse escalation-file text into records. Unparseable / torn-tail lines are skipped (append-only). */
+export function parseEscalationRecords(text: string): EscalationRecord[] {
+  const out: EscalationRecord[] = [];
+  for (const line of String(text ?? "").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const d = JSON.parse(line);
+      if (d && typeof d === "object") out.push(d as EscalationRecord);
+    } catch {
+      /* torn/partial tail — skip */
+    }
+  }
+  return out;
+}
+
+/** The active quiet window: per task, the newest `ff-escalation` request that has NO newer
+ *  `quiet-window-resolved` record AND is still within its windowMinutes. The consumer (this driver)
+ *  holds develop writes while `active`. Read-unable (empty / unreadable) ⇒ active=false — an absent
+ *  escalation file means no window was ever requested (a real measurement, not a fabricated hold). */
+export function quietWindowActive(records: EscalationRecord[], nowEpochSeconds: number): { active: boolean; heldTasks: string[] } {
+  const latestRequest = new Map<string, { epoch: number; windowMinutes: number }>();
+  const latestResolution = new Map<string, number>();
+  for (const r of records ?? []) {
+    const taskId = typeof r.taskId === "string" && r.taskId ? r.taskId : null;
+    if (!taskId) continue;
+    const epoch = typeof r.epoch === "number" ? r.epoch : 0;
+    if (r.event === "ff-escalation") {
+      const wm =
+        typeof r.windowMinutes === "number" ? r.windowMinutes
+        : r.quietWindow && typeof r.quietWindow.windowMinutes === "number" ? r.quietWindow.windowMinutes
+        : 20;
+      const cur = latestRequest.get(taskId);
+      if (!cur || epoch > cur.epoch) latestRequest.set(taskId, { epoch, windowMinutes: wm });
+    } else if (r.event === "quiet-window-resolved") {
+      const cur = latestResolution.get(taskId);
+      if (cur == null || epoch > cur) latestResolution.set(taskId, epoch);
+    }
+  }
+  const heldTasks: string[] = [];
+  for (const [taskId, req] of latestRequest) {
+    const res = latestResolution.get(taskId);
+    if (res != null && res >= req.epoch) continue; // resolved — the escalated task landed
+    if (nowEpochSeconds - req.epoch < Math.max(0, req.windowMinutes) * 60) heldTasks.push(taskId);
+  }
+  return { active: heldTasks.length > 0, heldTasks: heldTasks.sort() };
+}
+
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
 
 /** 缺省 ready-pool-check 命令（全池 + --apply 落地晋升）。输出须为 analyzeTasks JSON。 */
@@ -353,17 +425,24 @@ export function computeRoundRecord(opts: {
   halted?: boolean;
   /** AC150-1：本轮资源门判定（起 fix worker 前读；WAIT ⇒ 退避、fixes 为空）。 */
   gate?: { go: boolean; reason: string | null } | null;
+  /** quiet-window 消费者：本轮因 fan-in ff 活锁 escalation 的 quiet-window 请求而 hold（true ⇒
+   *  未跑 ready-pool-check、未 spawn fix worker——窗口期 develop 写入被暂停）。 */
+  held?: boolean;
+  /** 本轮的 quiet-window 判定（null = 无 quiet-window 请求，未 hold）。 */
+  quietWindow?: { active: boolean; heldTasks: string[] } | null;
   liveness?: LivenessResult | null;
 }) {
   const action = opts.error
     ? "error"
     : opts.halted
       ? "halted"
-      : opts.promotedIds.length > 0
-        ? "promote"
-        : opts.fixes.some((f) => f.spawned)
-          ? "fix"
-          : "none";
+      : opts.held
+        ? "held"
+        : opts.promotedIds.length > 0
+          ? "promote"
+          : opts.fixes.some((f) => f.spawned)
+            ? "fix"
+            : "none";
   return {
     ts: opts.at, round: opts.round, run_id: opts.runId, pid: opts.pid, action,
     pool: opts.pool, should_apply: opts.shouldApply, promoted_ids: opts.promotedIds,
@@ -374,6 +453,10 @@ export function computeRoundRecord(opts: {
     // AC150：halted（控制态停）与 gate（资源门判定）落进 round 记录，outer 可观测。
     halted: opts.halted ?? false,
     gate: opts.gate ?? null,
+    // quiet-window 消费者（gap-fan-in-ff-livelock-quiet-window-no-consumer）：held（窗口期 hold）与
+    // quietWindow（判定）落进 round 记录，outer 可观测。
+    held: opts.held ?? false,
+    quiet_window: opts.quietWindow ?? null,
     liveness: opts.liveness ?? null,
   };
 }
@@ -647,6 +730,32 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
       try { appendRoundRecord(roundLogFile, haltedRecord); } catch { /* 记录写失败不致命（运行时日志） */ }
       if (json) process.stdout.write(`${JSON.stringify({ event: "halted", round })}\n`);
       break;
+    }
+    // ── quiet-window 消费者（gap-fan-in-ff-livelock-quiet-window-no-consumer）──────────────────
+    // 读 fan-in ff 活锁 escalation（.quay/fan-in-ff-escalations.jsonl）：有【未兑现、且在窗口期内】的
+    // quiet-window 请求 ⇒ 本轮 hold——不跑 ready-pool-check --apply、不 spawn fix worker（暂停 develop
+    // 写入，兑现 escalation 的 holder: all-layers-except-fan-in-executor）。hold 自愈：被升级任务落地
+    // （fan-in-ff-merge.sh ff 成功写 quiet-window-resolved）或窗口到期。读不到/空 ⇒ 无窗口（fail-open：
+    // 无 escalation 文件 = 从未请求窗口，非「读不懂装合格」——active 是真实测量，可被「有旧请求无兑现」取真）。
+    let quietWindow: { active: boolean; heldTasks: string[] } = { active: false, heldTasks: [] };
+    const _qwFile = path.join(root, ESCALATIONS_REL);
+    try {
+      if (fs.existsSync(_qwFile)) {
+        quietWindow = quietWindowActive(parseEscalationRecords(fs.readFileSync(_qwFile, "utf8")), Math.floor(Date.now() / 1000));
+      }
+    } catch { /* unreadable ⇒ no window (fail-open) */ }
+    if (quietWindow.active) {
+      const heldRecord = computeRoundRecord({
+        round, runId, pid: process.pid, at: new Date().toISOString(),
+        pool: null, shouldApply: false, promotedIds: [], applied: [], error: null,
+        promotePathLlmInvoked: false, fixes: [], held: true, quietWindow,
+      });
+      try { appendRoundRecord(roundLogFile, heldRecord); } catch { /* 记录写失败不致命（运行时日志） */ }
+      if (json) process.stdout.write(`${JSON.stringify({ event: "held", round, quiet_window: quietWindow })}\n`);
+      if (once) break;
+      if (maxRounds !== null && round >= maxRounds) break;
+      await sleep(intervalMs);
+      continue;
     }
     // liveness 检查（gap-resident-driver-stable-carrier-liveness Finding 的接线）：每轮顺手调一次
     // launch 脚本的 liveness 子命令。supervisor 死后 driver 成孤儿仍在跑 ⇒ 下一轮即检出 supervisor_dead
