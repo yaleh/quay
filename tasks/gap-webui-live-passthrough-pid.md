@@ -1,7 +1,7 @@
 ---
 id: gap-webui-live-passthrough-pid
 title: web /live 透传 pid（LiveWorker/InFlightTask 补 pid 字段，约 3 行）
-status: ready
+status: done
 labels:
   - gap
   - feature
