@@ -1,7 +1,7 @@
 ---
 id: gap-test-fixture-pollutes-bash-history
 title: 测试 fixture 污染真实 ~/.bash_history（isolateTmuxEnv 未隔离 HISTFILE）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -30,11 +30,11 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：跑一次用到 `isolateTmuxEnv` 的测试后，真实 `~/.bash_history` 内容不变（跑前跑后 diff 为空）；⛔ 仍被记入 `claude-probe` ⇒ 假。
+- [x] AC1（能取假）：跑一次用到 `isolateTmuxEnv` 的测试后，真实 `~/.bash_history` 内容不变（跑前跑后 diff 为空）；⛔ 仍被记入 `claude-probe` ⇒ 假。
 
 ## Definition of Done
 
-- [ ] `isolateTmuxEnv` 加 HISTFILE 隔离 + 真实 bash_history 不再被污染；AC1 全勾；land 到 develop。
+- [x] `isolateTmuxEnv` 加 HISTFILE 隔离 + 真实 bash_history 不再被污染；AC1 全勾；land 到 develop。
 
 ## Retires
 
