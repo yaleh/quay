@@ -2,15 +2,40 @@
 id: gap-m-bucket-long-tail-lpt-scheduling
 title: M bucket 测试长尾：最后 5% 文件吃掉总时长 27%+（最慢 5% 串行和占 55%）——scripts/test.sh 未按已知耗时
   LPT 排序，长测试排尾部等 lane
-status: superseded
+status: ready
 labels:
   - gap
 parent: null
 children: []
 extra: {}
 ---
-**superseded（2026-08-24 10:2xZ，manager A/B 实验证伪 + outer 独立复核）**：LPT 重排**计算正确但交付无效**——`node --test` 无视 argv 顺序。独立复核（outer 实跑）：`node --test z-long.test.mjs a-short.test.mjs` 与 `a-short.test.mjs z-long.test.mjs` 两种相反顺序 → 起跑顺序完全相同（a-short 先、z-long 后），即 node --test 按自己的内部发现/排序（字母序），完全无视调用方文件顺序（v24.19.0）。
+**type:** execution
 
-**后果**：`scripts/test.sh:1377-1380` 把 `suite-lpt-order.ts` 重排结果喂给 `node --test "${files[@]}"`，而后者不看这个参数 ⇒ AC1（生产验证 span 下降）结构上不可通过，跑多少轮 M bucket 结果都一样。
+## Proposal
 
-**重定范围 →** `gap-suite-lpt-dual-process-sharding`（双进程分片：最长 K 文件独立子进程，不再依赖 node 尊重顺序）。
+**更正（manager 2026-08-24 + 人裁定，撤销此前 supersede）**：先前 supersede 基于「LPT 交付方式被证伪」是**过度推广**——实际证伪的是「CLI 位置参数是有序文件列表」假设，不是 LPT 本身。Node v24.19.0：CLI 把位置参数当 `globPatterns` → `createTestFileList()` → `ArrayPrototypeSort(results)` ⇒ argv 顺序必被丢弃；**但 `run({files})` 直接提供 files 数组时 `createTestFileList()` 不被调用（`let testFiles = files ?? createTestFileList(...)`）⇒ 保序**。三组对照（观测子进程真实 spawn 时刻）：`run({files})` conc=1/2 均保序，CLI 同一批文件字母序——实验 C 决定性。
+
+**现象（原任务，仍成立）**：M bucket（223 文件，16 lanes）最后 5% 文件吃掉总时长 27%+，最长文件 150-293s 排列表尾部等 lane。
+
+## Plan
+
+`scripts/test.sh` 里 `node --test "${files[@]}"` 换成一个调 `run({files: LPT_ORDER, concurrency: M, isolation:'process'})` 的 runner 脚本。**分桶逻辑完全不动**（减少复杂度，不增加维度）。`run()` 是共享工作队列 + 动态 list scheduling（lane 空取队列下一个），对耗时漂移天然免疫。
+
+## Acceptance Criteria
+
+- [ ] AC1（能取假，保序双向对照）：合成探针证明 spawn 顺序跟随 files[]（正序 z→m→a 与反序 a→m→z 都跟随）——⛔ 仍按字母序 ⇒ 假。
+- [ ] AC2（能取假，前 M 项）：并发 M 时前 M 个启动文件 = LPT 前 M 项。
+- [ ] AC3（能取假，生产 makespan）：生产 M-bucket makespan 下降（较基线 702.8s 或下界 451.9s）。
+- [ ] AC4（能取假，末 5% 占比）：末 5% 文件墙钟占比显著下降（较基线 27%+）。
+- [ ] AC5（能取假，reporter 不断供）：改造后 `__PERFILE__` 仍产出、verification-round.perFile 仍非空——reporter 必须走 `stream.compose(reporter)` 而非 CLI flag（漏了会打断 per-file 耗时采集 → LPT 自己的输入 ⇒ 自我拆台）。
+
+## Definition of Done
+
+run({files}) 保序 runner 落地 develop；AC1-5 全勾；生产 M-bucket makespan 下降（AC3）、reporter 数据源不断（AC5）。
+
+## Touches
+
+- scripts/test.sh（node --test "${files[@]}" → run({files}) runner；reporter 改 stream.compose）
+- plugin/scripts/suite-lpt-order.ts（LPT 排序，保留）
+- plugin/test/suite-lpt-order.test.mjs
+- tasks/gap-m-bucket-long-tail-lpt-scheduling.md（自身）
