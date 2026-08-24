@@ -1,7 +1,7 @@
 ---
 id: gap-profile-policy-when-which-profile
 title: profile policy（L2：何时用哪个 profile——主备回退 + 加载一致性校验 + 继承去重）
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -30,9 +30,9 @@ policy 表达「语义 kind → profile 选择规则」（主备回退 + 加载�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，主备回退）：主 profile 不可用时按 policy 自动回退到备 profile（不人工干预）；（⛔ 主不可用仍只能人工回退 ⇒ 假）。
-- [ ] AC2（能取假，加载校验）：加载时校验 profile/launcher 一致性，bare 与 auth 不匹配在启动时被拒（非 13/13 全败后才知道）；（⛔ 加载时仍无校验 ⇒ 假）。
-- [ ] AC3（能取假，继承去重）：多 role 共享配置不逐字重复（继承/引用 + `""` 取消继承）；（⛔ 三 role 仍逐字重复 ⇒ 假）。
+- [x] AC1（能取假，主备回退）：主 profile 不可用时按 policy 自动回退到备 profile（不人工干预）；（⛔ 主不可用仍只能人工回退 ⇒ 假）。
+- [x] AC2（能取假，加载校验）：加载时校验 profile/launcher 一致性，bare 与 auth 不匹配在启动时被拒（非 13/13 全败后才知道）；（⛔ 加载时仍无校验 ⇒ 假）。
+- [x] AC3（能取假，继承去重）：多 role 共享配置不逐字重复（继承/引用 + `""` 取消继承）；（⛔ 三 role 仍逐字重复 ⇒ 假）。
 
 ## Definition of Done
 
@@ -40,7 +40,9 @@ policy 落地覆盖三种已发生失败；AC1-3 全勾；`""` = 取消继承语
 
 ## Touches
 
-- .quay/profiles.yml（policy 承载，或并入 config.yml）(new)
-- plugin/scripts/profile-policy.ts（新：policy 解析，语义 kind → profile）(new)
-- plugin/test/profile-policy.test.mjs（对应测试）(new)
+- .quay/profiles.yml (new)
+- plugin/scripts/profile-policy.ts (new)
+- plugin/test/profile-policy.test.mjs (new)
+- plugin/scripts/capability-catalog.sh（六表注册 profile-policy.ts）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数）
 - tasks/gap-profile-policy-when-which-profile.md（自身）

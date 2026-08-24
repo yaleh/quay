@@ -10,7 +10,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readJournal, readBoardLanding, readBoardExecution, readGitHistory, readSystem, readManager, readManagerLight, readTests, readSessions, readArchitecture, SESSION_LAYERS, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution, type GitHistoryCommit, type GitHistoryResult, type SystemResult, type ManagerResult, type TestsResult, type SessionsResult, type SessionDetail, type ArchitectureResult, type TestRunRecord } from "./observation.ts";
+import { readLive, readJournal, readBoardLanding, readBoardExecution, readGitHistory, readSystem, readManager, readManagerLight, readTests, readSessions, readSession, readArchitecture, SESSION_LAYERS, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution, type GitHistoryCommit, type GitHistoryResult, type SystemResult, type ManagerResult, type TestsResult, type SessionsResult, type SessionDetail, type SessionViewResult, type TranscriptBlock, type ArchitectureResult, type TestRunRecord } from "./observation.ts";
 import { createGoalStore } from "./goal-store.ts";
 import { createDocumentStore } from "./document-store.ts";
 // live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
@@ -2068,7 +2068,7 @@ function gitGraphLibJs(): string {
 
 /** The client-side D3 renderer. Collapse/expand is toggled client-side; branches start COLLAPSED
  *  (AC2). Written without template literals / `${` / hex / `</script` so it inlines verbatim. */
-function gitGraphClientScript(): string {
+export function gitGraphClientScript(): string {
   return `(function () {
   var mount = document.getElementById("git-graph");
   var dataEl = document.getElementById("git-graph-data");
@@ -2124,8 +2124,13 @@ function gitGraphClientScript(): string {
     var maxDepth = Math.max(left, right);
     var width = Math.max(trunkX + (maxDepth + 1) * laneGap + 260, 360);
     var height = y(all.length - 1) + padY;
-    svg.attr("viewBox", "0 0 " + width + " " + height).attr("width", "100%")
-      .attr("style", "height:auto;max-height:75vh;overflow:auto;border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif");
+    // gap-webui-git-history-svg-unreadable: draw the viewBox at its NATIVE width/height (1:1) so the
+    // text stays readable — the old width=100% + max-height:75vh + default preserveAspectRatio meet
+    // squashed a tall viewBox (924x15570) to ~91px wide (meet scales to the shortest edge). The
+    // #git-graph container scrolls horizontally when the native width exceeds the viewport.
+    svg.attr("viewBox", "0 0 " + width + " " + height)
+      .attr("width", width).attr("height", height)
+      .attr("style", "border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif");
     var g = svg.append("g");
 
     // trunk vertical spine
@@ -2224,7 +2229,7 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
   const branches = history.status === "ok" ? groupCommitsByBranch(history.commits) : [];
   const mergeCount = history.commits.filter((c) => c.parents > 1).length;
 
-  const graph = layout ? html`<div id="git-graph" aria-label="Git 纵向时间轴"></div>` : "";
+  const graph = layout ? html`<div id="git-graph" aria-label="Git 纵向时间轴" style="overflow-x:auto"></div>` : "";
   // The data JSON is embedded with `<` escaped to \u003c so a commit subject can never break out of
   // the <script> element. d3 + the client renderer are emitted only when there is a graph to draw.
   const dataScript = layout ? html`<script type="application/json" id="git-graph-data">${JSON.stringify(layout).replace(/</g, "\\u003c")}</script>` : "";
@@ -2784,28 +2789,50 @@ ${bars}
 </svg>`;
 }
 
-function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = [], current: CurrentSuiteState = { runId: null, startedAt: null, state: null }): string {
+function renderTestsPage(
+  tests: TestsResult,
+  samples: SuiteLoadSample[] = [],
+  current: CurrentSuiteState = { runId: null, startedAt: null, state: null },
+  selected: TestRunRecord | null = null,
+  roundRequested: number | null = null,
+): string {
   const latest = tests.runs[0] ?? null;
+  // gap-webui-round-detail-page — `selected` is the round the page focuses on when /tests?round=N
+  // names one (null on the default page, which keeps the pre-existing latest-run focus). The banner,
+  // load-curve label, and timeline/table then all reference THAT round instead of the newest.
+  const focus = selected;
   // gap-web-tests-three-sections-round-drift AC1 — map the load curve's current runId
   // (full-suite-state.json) back to its verification-round record so the three sections each name
   // the round they reference (instead of all three claiming 「最近一轮」 while plotting different
   // rounds). null when the current run is still running (no round record yet) or the record lacks
   // runId (standalone full-suite-runner rows) — then the label falls back to the state's startedAt.
   const currentRun = current.runId ? tests.runs.find((r) => r.runId === current.runId) ?? null : null;
-  const loadLabel = currentRun
-    ? roundLabel(currentRun)
-    : current.startedAt
-      ? `${shortUtcTime(current.startedAt)}${current.state === "running" ? " · 运行中" : ""}`
-      : "";
-  const latestBanner = latest
+  const loadLabel = focus
+    ? roundLabel(focus)
+    : currentRun
+      ? roundLabel(currentRun)
+      : current.startedAt
+        ? `${shortUtcTime(current.startedAt)}${current.state === "running" ? " · 运行中" : ""}`
+        : "";
+  const bannerRun = focus ?? latest;
+  const latestBanner = bannerRun
     ? html`<div style="border:1px solid var(--color-divider);background:var(--color-surface);padding:1rem;margin-bottom:1.5rem">
-        <div style="font-weight:700;font-size:1rem"><span class="${runStatusClass(latest.state)}">${escapeHtml(latest.state ?? "unknown")}</span>${latest.scope ? ` · ${escapeHtml(latest.scope)}` : ""}</div>
-        <p class="meta" style="margin:0.25rem 0">startedAt: ${escapeHtml(latest.startedAt ?? "—")} · duration: ${latest.durationMs != null ? `${escapeHtml(String(Math.round(latest.durationMs / 1000)))}s` : "—"}${latest.commit ? ` · commit <code>${escapeHtml(latest.commit.slice(0, 8))}</code>` : ""}${latest.runner ? ` · runner ${escapeHtml(latest.runner)}` : ""}${latest.buckets ? ` · buckets ${escapeHtml(latest.buckets)}` : ""}</p>
-        <p class="meta" style="margin:0">tests ${latest.tests ?? "—"} · pass ${latest.pass ?? "—"} · fail ${latest.fail ?? "—"} · cancelled ${latest.cancelled ?? "—"}</p>
+        <div style="font-weight:700;font-size:1rem"><span class="${runStatusClass(bannerRun.state)}">${escapeHtml(bannerRun.state ?? "unknown")}</span>${bannerRun.scope ? ` · ${escapeHtml(bannerRun.scope)}` : ""}</div>
+        <p class="meta" style="margin:0.25rem 0">startedAt: ${escapeHtml(bannerRun.startedAt ?? "—")} · duration: ${bannerRun.durationMs != null ? `${escapeHtml(String(Math.round(bannerRun.durationMs / 1000)))}s` : "—"}${bannerRun.commit ? ` · commit <code>${escapeHtml(bannerRun.commit.slice(0, 8))}</code>` : ""}${bannerRun.runner ? ` · runner ${escapeHtml(bannerRun.runner)}` : ""}${bannerRun.buckets ? ` · buckets ${escapeHtml(bannerRun.buckets)}` : ""}</p>
+        <p class="meta" style="margin:0">tests ${bannerRun.tests ?? "—"} · pass ${bannerRun.pass ?? "—"} · fail ${bannerRun.fail ?? "—"} · cancelled ${bannerRun.cancelled ?? "—"}</p>
       </div>`
     : "";
+  // gap-webui-round-detail-page — name the focused round so a /tests?round=N page is self-describing,
+  // and say so plainly when the requested round isn't in the record (never silently show the latest
+  // as if the param had worked — 硬规则 3b: a "read the input failed" result must not look like success).
+  const focusNote = focus
+    ? html`<p class="meta" style="margin:0.75rem 0;color:var(--color-accent-800);font-weight:600">正在查看 ${roundLabel(focus)} 的详情（时间线 / 负载曲线 / perFile 均来自该轮）。</p>`
+    : "";
+  const notFoundNote = roundRequested != null && focus == null
+    ? html`<p class="meta" style="margin:0.75rem 0;color:var(--color-accent-800);font-weight:600">未找到 round #${escapeHtml(String(roundRequested))} — 验证轮记录中无该轮次，以下显示最新一轮。</p>`
+    : "";
   const historyRows = tests.runs.map((r, i) => html`<tr>
-    <td>${r.round != null ? `#${escapeHtml(String(r.round))}${i === 0 ? ` <span style="color:var(--color-neutral-700);font-weight:600">← 最新</span>` : ""}` : "—"}</td>
+    <td>${r.round != null ? html`<a href="/tests?round=${r.round}">#${escapeHtml(String(r.round))}</a>${i === 0 ? ` <span style="color:var(--color-neutral-700);font-weight:600">← 最新</span>` : ""}` : "—"}</td>
     <td>${r.startedAt ? escapeHtml(r.startedAt) : "—"}</td>
     <td class="${runStatusClass(r.state)}" style="font-weight:700">${escapeHtml(r.state ?? "—")}</td>
     <td>${r.pass ?? "—"}/${r.fail ?? "—"}/${r.cancelled ?? "—"}</td>
@@ -2831,7 +2858,12 @@ function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = [], cu
     : "";
   // gap-test-detail-perfile-duration-failed AC2 — render the per-file table for the newest run that
   // actually carries perFile data (legacy rows have no perFile field → skipped, never fabricated).
-  const perFileRun = tests.runs.find((r) => r.perFile && r.perFile.length > 0);
+  // gap-webui-round-detail-page — when a round is selected, its OWN perFile drives the timeline +
+  // table (an empty/absent perFile → no timeline/table, exactly that round's truth — never a silent
+  // fallback to another round). Default mode keeps the pre-existing "newest run with perFile".
+  const perFileRun = focus
+    ? (focus.perFile && focus.perFile.length > 0 ? focus : null)
+    : tests.runs.find((r) => r.perFile && r.perFile.length > 0);
   const perFileTable = perFileRun ? renderPerFileTable(perFileRun.perFile) : "";
   // gap-test-detail-timeline AC2 — render the per-file timeline (gantt) for that same run. The chart
   // omits itself (⇒ "") when the run's perFile entries carry no timestamps (legacy/absent field).
@@ -2839,8 +2871,9 @@ function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = [], cu
   // gap-web-tests-three-sections-round-drift AC2 — the find() above silently falls back to an
   // EARLIER run when the newest run carries no perFile (red / static-check-early-fail / reporter
   // stopped before perFile). Surface that fallback instead of hiding it: name both the latest run
-  // and the run actually shown.
-  const timelineFallback = perFileRun != null && latest != null && perFileRun !== latest;
+  // and the run actually shown. (No fallback notice in focus mode — the selected round is shown as-is,
+  // not "falling back" from a different round.)
+  const timelineFallback = !focus && perFileRun != null && latest != null && perFileRun !== latest;
   const perFileTimeline = perFileTimelineSvg
     ? html`<h2>测试时间线${perFileRun ? `（${roundLabel(perFileRun)}）` : ""}</h2>
         ${timelineFallback ? html`<p class="meta" style="margin:0.25rem 0;color:var(--color-accent-800);font-weight:600">⚠️ 最新一轮无 perFile 数据${latest ? `（${roundLabel(latest)}）` : ""}，以下回退显示${perFileRun ? ` ${roundLabel(perFileRun)}` : ""}。</p>` : ""}
@@ -2853,6 +2886,8 @@ function renderTestsPage(tests: TestsResult, samples: SuiteLoadSample[] = [], cu
       <h1>Tests — 验证轮记录</h1>
       <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（suite-state 机制写入）${tests.currentState ? html` · 当前 suite-state: <strong>${escapeHtml(tests.currentState)}</strong>` : ""}</p>
       ${obsNote(tests.status, tests.reason)}
+      ${focusNote}
+      ${notFoundNote}
       ${latestBanner}
       ${loadCurve}
       ${perFileTimeline}
@@ -2870,6 +2905,7 @@ export async function handleTests(
   req: IncomingMessage,
   res: ServerResponse,
   cfg: { workspaceRoot: string },
+  url: URL,
 ): Promise<void> {
   let tests: TestsResult;
   try {
@@ -2878,9 +2914,17 @@ export async function handleTests(
     tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [], currentState: null };
   }
   const current = readCurrentSuiteState(cfg.workspaceRoot);
-  const samples = current.runId ? readSuiteLoadSamples(cfg.workspaceRoot, current.runId) : [];
+  // gap-webui-round-detail-page AC1 — /tests?round=N names a specific round; its OWN runId feeds the
+  // load curve (absent runId → no curve, the same data-source degradation as the default page). A
+  // non-numeric / non-matching round is treated as "not requested" / "not found" (never fabricated).
+  const roundParam = url.searchParams.get("round");
+  const roundNum = roundParam != null && /^\d+$/.test(roundParam.trim()) ? Number(roundParam.trim()) : null;
+  const selected = roundNum != null ? tests.runs.find((r) => r.round === roundNum) ?? null : null;
+  const samples = selected
+    ? selected.runId ? readSuiteLoadSamples(cfg.workspaceRoot, selected.runId) : []
+    : current.runId ? readSuiteLoadSamples(cfg.workspaceRoot, current.runId) : [];
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderTestsPage(tests, samples, current));
+  res.end(renderTestsPage(tests, samples, current, selected, roundNum));
 }
 
 // ── /tests/file — single-file cross-round detail page (gap-webui-test-file-detail-page) ──────────
@@ -3135,6 +3179,91 @@ export async function handleSessions(
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderSessionsPage(sessions));
+}
+
+// ── /session/<sessionId> ──────────────────────────────────────────────────────────────────────────
+
+// gap-webui-session-detail-view — the single-session view. Addressable by sessionId ONLY (§7.1), the
+// one quantity stable across live/dead × interactive/-p. The renderer is the observation-level parse
+// (structured text/thinking/tool_use/tool_result blocks) — NOT the /sessions 3-message preview.
+// AC2 (结构化分块非摊平): each content block renders as a marked, collapsible unit (`tx-text` /
+// `tx-thinking` / `tx-tool-pair`), and a `tool_use` is PAIRED with its `tool_result` (rendered inside
+// one <details class="tx-tool-pair">) — never a flat full-text dump. Zero client JS: collapse via
+// native <details>, freshness via manual refresh (blocker ① deferred).
+export function renderSessionPage(view: SessionViewResult): string {
+  // First pass: index tool_use (by id) and tool_result (by tool_use_id) across ALL turns so a
+  // tool_result arriving in a later user record can be folded into its assistant tool_use's <details>.
+  const toolUseById = new Map<string, { name: string; input: string }>();
+  const toolResultByUseId = new Map<string, { text: string; isError: boolean }>();
+  for (const turn of view.turns) {
+    for (const b of turn.blocks) {
+      if (b.kind === "tool_use") toolUseById.set(b.id, { name: b.name, input: b.input });
+      else if (b.kind === "tool_result") toolResultByUseId.set(b.toolUseId, { text: b.text, isError: b.isError });
+    }
+  }
+
+  const blockFor = (b: TranscriptBlock): string => {
+    if (b.kind === "text") {
+      return html`<div class="tx-block tx-text" style="margin:0.25rem 0;white-space:pre-wrap;line-height:1.5;font-size:0.85rem">${escapeHtml(b.text)}</div>`;
+    }
+    if (b.kind === "thinking") {
+      return html`<details class="tx-block tx-thinking" style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">thinking</summary><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.text)}</pre></details>`;
+    }
+    if (b.kind === "tool_use") {
+      const label = b.name ? `tool_use · ${b.name}` : "tool_use";
+      const res = toolResultByUseId.get(b.id);
+      const inputHtml = b.input ? html`<div class="tx-tool-input"><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.input)}</pre></div>` : "";
+      const resultHtml = res
+        ? html`<div class="tx-tool-result"><div style="font-size:0.7rem;color:var(--color-neutral-700);margin:0.25rem 0">${res.isError ? "result · error" : "result"}</div><pre style="margin:0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(res.text)}</pre></div>`
+        : "";
+      return html`<details class="tx-block tx-tool-pair" style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(label)}</summary>${inputHtml}${resultHtml}</details>`;
+    }
+    // tool_result with no matching tool_use in the (bounded) tail renders standalone (orphan).
+    return html`<details class="tx-block tx-tool-result" style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">${b.isError ? "tool_result · error" : "tool_result"}</summary><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.text)}</pre></details>`;
+  };
+
+  const turnFor = (t: SessionViewResult["turns"][number]): string => {
+    // Absorb matched tool_results into their tool_use's <details>; only orphans render standalone.
+    const blocks = t.blocks
+      .filter((b) => !(b.kind === "tool_result" && toolUseById.has(b.toolUseId)))
+      .map(blockFor);
+    if (blocks.length === 0) return "";
+    return html`<div style="border-left:2px solid var(--color-divider);padding-left:0.75rem;margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.7rem;color:var(--color-neutral-700);margin-bottom:0.25rem">
+        <b>${escapeHtml(t.role || "?")}</b><span>${escapeHtml(t.time)}</span>
+      </div>
+      ${blocks.join("")}
+    </div>`;
+  };
+
+  const turnsHtml = view.turns.length > 0
+    ? html`<h2>Transcript（${view.turns.length} 条消息 · 旧→新）</h2>${view.turns.map(turnFor).filter(Boolean).join("")}`
+    : "";
+
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay session — 单一会话视图">${modernistStyles()}${pageStyles()}<title>Session — ${escapeHtml(view.sessionId)}</title></head>
+    <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main>
+      <h1>Session — <code>${escapeHtml(view.sessionId)}</code></h1>
+      <p class="meta"><a href="/sessions">← 返回 Sessions</a> · 数据源：<code>~/.claude/projects/&lt;slug&gt;/&lt;sessionId&gt;.jsonl</code>（transcript 尾部，非实时）</p>
+      ${obsNote(view.status, view.reason)}
+      ${turnsHtml}
+    </main></body></html>`;
+}
+
+export async function handleSession(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+  sessionId: string,
+): Promise<void> {
+  let view: SessionViewResult;
+  try {
+    view = readSession(cfg.workspaceRoot, sessionId);
+  } catch (err) {
+    view = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, sessionId, transcriptPath: null, turns: [] };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderSessionPage(view));
 }
 
 // ── /architecture ──────────────────────────────────────────────────────────────────────────────────
@@ -3459,7 +3588,7 @@ export async function handleAllRoutes(
   }
 
   if (url.pathname === "/tests") {
-    await handleTests(req, res, cfg);
+    await handleTests(req, res, cfg, url);
     return;
   }
 
@@ -3472,6 +3601,18 @@ export async function handleAllRoutes(
 
   if (url.pathname === "/sessions") {
     await handleSessions(req, res, cfg);
+    return;
+  }
+
+  // gap-webui-session-detail-view — the single-session view, addressed by sessionId (§7.1). The id is
+  // validated as a strict UUID inside readSession (lookup key, never a path component — §7.4). A
+  // malformed %-escape falls back to the raw segment, which then fails UUID validation → honest
+  // 「非法」 empty state rather than a 500.
+  const sessionM = /^\/session\/([^/]+)$/.exec(url.pathname);
+  if (sessionM) {
+    let sessionId: string;
+    try { sessionId = decodeURIComponent(sessionM[1]); } catch { sessionId = sessionM[1]; }
+    await handleSession(req, res, cfg, sessionId);
     return;
   }
 
