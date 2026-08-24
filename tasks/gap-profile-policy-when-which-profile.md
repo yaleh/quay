@@ -1,7 +1,7 @@
 ---
 id: gap-profile-policy-when-which-profile
 title: profile policy（L2：何时用哪个 profile——主备回退 + 加载一致性校验 + 继承去重）
-status: todo
+status: ready
 labels:
   - gap
   - feature
@@ -40,7 +40,7 @@ policy 落地覆盖三种已发生失败；AC1-3 全勾；`""` = 取消继承语
 
 ## Touches
 
-- .quay/profiles.yml（policy 承载，或并入 config.yml）
-- plugin/scripts/profile-policy.ts（新：policy 解析，语义 kind → profile）
-- plugin/test/profile-policy.test.mjs（对应测试）
+- .quay/profiles.yml（policy 承载，或并入 config.yml）(new)
+- plugin/scripts/profile-policy.ts（新：policy 解析，语义 kind → profile）(new)
+- plugin/test/profile-policy.test.mjs（对应测试）(new)
 - tasks/gap-profile-policy-when-which-profile.md（自身）
