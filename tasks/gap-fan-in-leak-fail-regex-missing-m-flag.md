@@ -31,6 +31,6 @@ m flag 落地 develop；AC1-2 全勾；多行日志 leak-residual 分支可达�
 
 ## Touches
 
-- .claude/workflows/fan-in-execute.js（TMUX_LEAK_FAIL_RE 加 m flag）
-- plugin/test/fan-in-execute-paths.test.mjs（或对应测试）
+- plugin/scripts/tmux-leak-fail-re.ts（TMUX_LEAK_FAIL_RE 加 m flag——正本单一定义；两个 workflow 副本按路径引用它，无需改副本）
+- plugin/test/fan-in-execute-paths.test.mjs（leak-residual 测试改为多行日志复现 m flag）
 - tasks/gap-fan-in-leak-fail-regex-missing-m-flag.md（自身）
