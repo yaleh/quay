@@ -52,6 +52,9 @@ import {
   computeReverifyOutcome,
   advanceRetryCap,
   markNeedsHuman,
+  parseEscalationRecords,
+  quietWindowActive,
+  ESCALATIONS_REL,
   ROUND_LOG_REL,
   OUTCOME_LOG_REL,
   INTERVAL_MS_DEFAULT,
@@ -993,4 +996,94 @@ test("AC150-2 — promotion 控制态文件独立于 worker（halting one 不杀
   // promotion 控制态 = halted（用同一 isHalted 实现读 promotion 文件）。
   assert.equal(readControlState(root, process.env, PROMOTION_CONTROL_STATE_REL).state.halted, true, "promotion control file halted");
   assert.equal(sharedIsHalted(root, process.env, PROMOTION_CONTROL_STATE_REL), true, "shared isHalted reads promotion-control.json");
+});
+
+// ── quiet-window 消费者（gap-fan-in-ff-livelock-quiet-window-no-consumer）─────────────────────────
+// The fan-in ff anti-livelock escalation (attempt>=3) writes a quiet-window request that, before this
+// task, had NO consumer. This driver is now the consumer: while an escalation request is OPEN (no
+// newer resolution) and within windowMinutes, the resident loop holds (skips promotion + fix spawn).
+// Falsifiable: request ⇒ hold (AC2 取假 = 请求仍无消费者); resolution / expiry ⇒ resume.
+
+test("quietWindowActive — an open ff-escalation within windowMinutes ⇒ active (the consumer holds)", () => {
+  const now = 1786700000;
+  const records = parseEscalationRecords(
+    JSON.stringify({ event: "ff-escalation", taskId: "gap-livelock", attempt: 3, epoch: now - 60, quietWindow: { requested: true, windowMinutes: 20 } }) + "\n",
+  );
+  const v = quietWindowActive(records, now);
+  assert.equal(v.active, true);
+  assert.deepEqual(v.heldTasks, ["gap-livelock"]);
+});
+
+test("quietWindowActive — a resolution NEWER than the request ⇒ inactive (endsEarly: ff-success)", () => {
+  const now = 1786700000;
+  const records = parseEscalationRecords([
+    JSON.stringify({ event: "ff-escalation", taskId: "gap-livelock", attempt: 3, epoch: now - 60, quietWindow: { requested: true, windowMinutes: 20 } }),
+    JSON.stringify({ event: "quiet-window-resolved", taskId: "gap-livelock", epoch: now - 10 }),
+  ].join("\n"));
+  assert.equal(quietWindowActive(records, now).active, false);
+});
+
+test("quietWindowActive — an open request PAST its windowMinutes ⇒ inactive (window expired)", () => {
+  const now = 1786700000;
+  const records = parseEscalationRecords(
+    JSON.stringify({ event: "ff-escalation", taskId: "gap-livelock", attempt: 3, epoch: now - 30 * 60, quietWindow: { requested: true, windowMinutes: 20 } }) + "\n",
+  );
+  assert.equal(quietWindowActive(records, now).active, false);
+});
+
+test("quietWindowActive — no records / empty ⇒ inactive (no window was ever requested)", () => {
+  assert.equal(quietWindowActive([], 1786700000).active, false);
+  assert.equal(quietWindowActive(parseEscalationRecords(""), 1786700000).active, false);
+  assert.equal(quietWindowActive(parseEscalationRecords(null), 1786700000).active, false);
+});
+
+test("quiet-window consumer — an active escalation ⇒ the resident loop holds (no promotion, action=held)", (t) => {
+  const root = makeRoot("qw-hold");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-qw-eligible", "todo");
+  // Write an OPEN escalation request (recent epoch, within windowMinutes=20) to the gitignored
+  // escalation file the driver reads by default (<root>/.quay/fan-in-ff-escalations.jsonl).
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ESCALATIONS_REL), JSON.stringify({
+    event: "ff-escalation", taskId: "gap-livelock", attempt: 3, epoch: Math.floor(Date.now() / 1000) - 60,
+    quietWindow: { requested: true, windowMinutes: 20 },
+  }) + "\n");
+
+  runDriver(root, ["--ready-pool-cmd", realReadyPoolCmd(root), "--cap", "5", "--once"]);
+
+  // Falsifiable: the eligible todo is NOT promoted — the hold paused the --apply round.
+  assert.equal(readStatus(root, "gap-qw-eligible"), "todo", "hold ⇒ no promotion (eligible todo stays todo)");
+  const records = readRoundLines(root);
+  assert.equal(records.length, 1, "exactly one (held) round record");
+  assert.equal(records[0].action, "held", "round record action=held");
+  assert.equal(records[0].held, true, "round record carries held=true");
+  assert.deepEqual(records[0].quiet_window.heldTasks, ["gap-livelock"], "the hold names the escalated task");
+  const outcomes = readOutcomeLines(root);
+  assert.equal(outcomes.length, 0, "hold ⇒ no promote/fix outcome written");
+
+  // Positive control: the SAME eligible fixture WITHOUT an escalation promotes (eligible all along).
+  const root2 = makeRoot("qw-go");
+  t.after(() => fs.rmSync(root2, { recursive: true, force: true }));
+  writeTask(root2, "gap-qw-eligible-go", "todo");
+  runDriver(root2, ["--ready-pool-cmd", realReadyPoolCmd(root2), "--cap", "5", "--once"]);
+  assert.equal(readStatus(root2, "gap-qw-eligible-go"), "ready", "guard: eligible todo promoted when NO quiet window");
+});
+
+test("quiet-window consumer — a RESOLVED escalation (resolution newer than request) ⇒ the loop resumes (promotes)", (t) => {
+  const root = makeRoot("qw-resolved");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-qw-eligible", "todo");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  const now = Math.floor(Date.now() / 1000);
+  fs.writeFileSync(path.join(root, ESCALATIONS_REL), [
+    JSON.stringify({ event: "ff-escalation", taskId: "gap-livelock", attempt: 3, epoch: now - 60, quietWindow: { requested: true, windowMinutes: 20 } }),
+    JSON.stringify({ event: "quiet-window-resolved", taskId: "gap-livelock", epoch: now - 10 }),
+  ].join("\n") + "\n");
+
+  runDriver(root, ["--ready-pool-cmd", realReadyPoolCmd(root), "--cap", "5", "--once"]);
+
+  // The request is resolved ⇒ no hold ⇒ the eligible todo is promoted (endsEarly: ff-success).
+  assert.equal(readStatus(root, "gap-qw-eligible"), "ready", "resolved escalation ⇒ no hold ⇒ promotion proceeds");
+  const records = readRoundLines(root);
+  assert.equal(records[0].action, "promote", "round record action=promote (not held)");
 });

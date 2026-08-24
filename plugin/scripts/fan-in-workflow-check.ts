@@ -548,7 +548,14 @@ export function parseEscalations(text: string): Escalation[] {
 
 /** The unique task ids that carry an escalation record (the anti-livelock-triggered fan-ins). */
 export function escalatedTaskIds(escalations: Escalation[]): string[] {
-  return [...new Set((escalations ?? []).map((e) => e.taskId).filter((t): t is string => typeof t === "string" && t.length > 0))].sort();
+  // gap-fan-in-ff-livelock-quiet-window-no-consumer: the escalation file now also carries
+  // `quiet-window-resolved` records (written by fan-in-ff-merge.sh on ff success). Filter to
+  // `ff-escalation` only — a resolution is the FULFILLMENT of a request, not a NEW escalation, and
+  // must not pollute 判据2(d) traceability (a landed task is not an "escalated fan-in").
+  return [...new Set((escalations ?? [])
+    .filter((e) => e.event === "ff-escalation")
+    .map((e) => e.taskId)
+    .filter((t): t is string => typeof t === "string" && t.length > 0))].sort();
 }
 
 export interface EscalationTraceabilityResult {

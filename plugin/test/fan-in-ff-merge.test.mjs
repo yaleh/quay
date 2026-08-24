@@ -177,6 +177,41 @@ test("ff success — master fast-forwards to the task tip; lock events paired; N
   }
 });
 
+// ── quiet-window 兑现 (gap-fan-in-ff-livelock-quiet-window-no-consumer) ─────────────────────────────
+// On ff SUCCESS the script appends a `quiet-window-resolved` record to the escalation file — the
+// `endsEarly: "ff-success"` half of the attempt>=3 escalation request. The consumer
+// (promotion-driver) reads it to stop holding develop writes. Same file, same append.
+
+test("ff success writes a quiet-window-resolved record to the escalation file (endsEarly: ff-success)", () => {
+  const dir = makeTmp("resolved");
+  const st = stateDir("resolved");
+  try {
+    initRepo(dir);
+    const tip = makeTaskBranch(dir, "ac62-res");
+    const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const esc = path.join(st, "escalations.jsonl");
+    const capArgs = captureArgs(st, "ac62-res", tip);
+
+    const r = runMerge(["--task", "ac62-res", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries, "--escalations", esc, "--run-id", "fm-res-1786", "--agent-id", "sub-uuid"]);
+    assert.equal(r.status, 0, `ff should succeed: ${r.stdout}${r.stderr}`);
+
+    // The resolution record is appended (the escalation request's "endsEarly: ff-success" half).
+    const resLine = JSON.parse(fs.readFileSync(esc, "utf8").trim());
+    assert.equal(resLine.event, "quiet-window-resolved");
+    assert.equal(resLine.taskId, "ac62-res");
+    assert.equal(resLine.runId, "fm-res-1786", "resolution carries the caller runId");
+    assert.equal(resLine.agentId, "sub-uuid", "resolution carries the caller agentId");
+    assert.equal(resLine.mergeTarget, "master", "resolution names the merge target");
+    assert.match(resLine.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, "ts must be ISO …Z");
+    assert.equal(typeof resLine.epoch, "number", "epoch is a numeric timestamp");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
 // ── FF failure (develop advanced) + retry record ───────────────────────────────────────────────────────
 
 test("ff failure (develop advanced) — exit 1, retry record with taskId/attempt/developHead/ts, ref unchanged", () => {
