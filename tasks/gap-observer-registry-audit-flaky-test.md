@@ -1,7 +1,7 @@
 ---
 id: gap-observer-registry-audit-flaky-test
 title: observer-registry AC3 audit 断言 flake（并发 suite 下偶发 stale）
-status: ready
+status: done
 labels:
   - gap
 parent: null
