@@ -2,7 +2,7 @@
 id: gap-promotion-driver-commit-bypasses-precommit-touches-guard
 title: promotion-driver 自动提交绕过 pre-commit Touches 多路径守卫 → 多路径 bullet 静默进 develop
   阻断全量 fan-in
-status: ready
+status: done
 labels:
   - gap
   - defect
