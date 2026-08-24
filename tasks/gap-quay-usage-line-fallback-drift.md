@@ -28,8 +28,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，四缺口闭合）：usage fallback 字符串含 adr / manager arm / action run / config check（⛔ 任一仍缺 ⇒ 假）。
-- [ ] AC2（能取假，机械守卫）：set-equality 测试把「拨号表/字典表命令集」与「usage 字符串命令集」比对，新增命令漏 usage 即红（⛔ 只补 4 个字符串不加守卫 ⇒ 假——会再次漂移）。
+- [x] AC1（能取假，四缺口闭合）：usage fallback 字符串含 adr / manager arm / action run / config check（⛔ 任一仍缺 ⇒ 假）。
+- [x] AC2（能取假，机械守卫）：set-equality 测试把「拨号表/字典表命令集」与「usage 字符串命令集」比对，新增命令漏 usage 即红（⛔ 只补 4 个字符串不加守卫 ⇒ 假——会再次漂移）。
 
 ## Definition of Done
 
