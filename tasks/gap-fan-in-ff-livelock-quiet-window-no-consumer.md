@@ -8,7 +8,9 @@ labels:
   - delivery-critical
 parent: null
 children: []
-extra: {}
+extra:
+  depends_on:
+    - gap-fan-in-ff-retry-counter-scope
 ---
 **type:** execution
 

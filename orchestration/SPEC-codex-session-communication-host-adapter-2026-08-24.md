@@ -4,7 +4,8 @@
 
 **date**: 2026-08-24
 
-**scope**: 将 Claude Code 已验证的跨会话消息能力抽象为 quay 的宿主无关通信契约，并定义 Codex 的实现路径。
+**scope**: 将 Claude Code 已验证的跨会话消息能力抽象为 quay 的宿主无关通信契约，并定义
+manager 长会话与 Quay 启动的 Codex 短会话路径。
 
 ## 1. 决策摘要
 
@@ -14,7 +15,7 @@ quay Core 的权威状态，也不能直接移植为 Codex 的同名调用。
 Codex 当前最接近的原生能力是 **App Server**：外部控制器可以创建、列出、读取、恢复和
 分叉 thread，向目标 thread 启动新的 turn，向运行中的 turn 追加输入，并订阅生命周期与
 消息事件。Codex CLI 0.149.1 已在本机暴露 `codex app-server`、`codex exec resume` 和
-`codex exec fork`。
+`codex exec fork`；短会话则使用 `codex exec --json --output-schema`。
 
 因此采用以下边界：
 
@@ -24,9 +25,39 @@ quay Core / control plane
         -> host-native session transport
 ```
 
-Host Adapter 对外提供统一的 `list / status / send / events` 语义；Codex Adapter 使用
-App Server 的 thread/turn 协议，Claude Adapter 保留已验证的 SendMessage socket 协议。
+Host Adapter 对外提供统一的 `list / status / send / events` 语义。目标架构中，唯一的
+长期语义会话是 `manager`，由 Codex App Server 承载；所有由 Quay 启动的实现、复核和
+修复会话都是由 `*-driver` 管理的、隔离 worktree 中的 Codex 短会话。Claude Adapter
+仅保留为现有 manager 的兼容路径，不再作为新的 outer/inner/worker 会话目标。
 Core 不读取或写入任一宿主的 transcript 作为通信真值。
+
+## 0.1 与统一 `*-driver` 架构的对齐
+
+本 SPEC 服从 [`SPEC-unified-driver-architecture-2026-08-23.md`](./SPEC-unified-driver-architecture-2026-08-23.md)：
+
+```text
+一个长期语义会话：Codex manager
+          ▲                 │
+          │ host adapter    │ control / notification
+          │                 ▼
+Quay control plane ←→ Layer 0 driver-runtime
+                         ├─ manager-driver（例程/机械读数）
+                         ├─ promotion-driver（任务处理）
+                         └─ worker-driver（任务处理）
+                              │
+                              └─ codex exec 短会话
+                                 （实现 / 复核 / 修复）
+```
+
+- `manager` 是唯一需要长期保持上下文的语义会话；不再设计 Codex outer/inner 长会话。
+- `manager-driver`、`promotion-driver`、`worker-driver` 是进程外机械执行面，不是 LLM
+  会话，也不通过 transcript 驱动正确性。
+- Quay 启动的短会话统一是 Codex `codex exec`，每次有明确 run/attempt、base SHA、
+  worktree、JSON result 和终止状态。
+- driver 向 manager 的通知使用本 SPEC 的 `send/events`；manager 对 driver 的控制使用
+  driver control plane。二者不能互换，也不能把消息顺序当作 task 状态。
+- Claude 的既有 `SendMessage` 只作为 manager 兼容 transport 保留；新短会话不得回退为
+  Claude Code worker/selector/fix-worker。
 
 ## 2. 能力判定
 
@@ -36,7 +67,7 @@ Core 不读取或写入任一宿主的 transcript 作为通信真值。
 | 向空闲会话发消息 | `SendMessage` | `thread/resume` + `turn/start` | 统一为 `send` |
 | 向忙碌会话追加消息 | 平台 SendMessage 语义 | `turn/steer`，要求匹配 active turn | 统一为 `send`，状态由 adapter 决定 |
 | 送达/执行事件 | Claude 消息帧；现有路径为 fire-and-forget | `turn/*`、`item/*` notifications | 必须由 Adapter 形成 ack 事件 |
-| 子代理协作 | Claude Agent/SendMessage | Codex subagents；App Server 记录 `collabToolCall` | 视为子代理关系，不等同 peer message |
+| 短会话协作 | Claude Agent/SendMessage | `codex exec`；driver 读取结构化结果 | 视为 run/attempt，不等同长期 peer |
 | 历史会话 | transcript / session 文件 | `thread/read`、`thread/resume` | 仅作诊断和恢复输入 |
 | 任意 peer 的稳定 `SendMessage(to, text)` | 已有验证路径 | 未发现同等稳定的用户级 API | 不在 Codex CLI 表面伪造；由 Adapter 编排 |
 
@@ -149,20 +180,21 @@ interface SessionHostAdapter {
 
 ### 4.1 传输
 
-第一实现使用本机 Codex App Server stdio 或 Unix socket；跨机器时才启用 WebSocket，
-并显式配置认证。App Server 连接必须完成 `initialize` / `initialized` 握手。
+长期 manager 的第一实现使用本机 Codex App Server stdio 或 Unix socket；跨机器时才
+启用 WebSocket，并显式配置认证。App Server 连接必须完成 `initialize` / `initialized`
+握手。短会话不通过 manager thread 派生，而由对应 `*-driver` 直接启动 `codex exec`。
 
 ```text
 adapter.start
   -> codex app-server
   -> initialize
   -> thread/list / thread/loaded/list
-  -> registry maps SessionRef.id -> threadId
+  -> registry maps manager SessionRef.id -> threadId
 ```
 
 不得把 Codex 的本地 JSONL、SQLite state DB 或未公开文件格式作为 quay ABI。
 
-### 4.2 send 路由
+### 4.2 manager send 路由
 
 ```text
 target thread idle/notLoaded
@@ -181,17 +213,40 @@ target status unknown or stale
 `SendMessage` 的替代品。`thread/inject_items` 直接修改模型可见历史，属于高风险的
 专用集成能力，默认禁止用于普通跨会话消息。
 
-### 4.3 角色与权限
+### 4.3 Quay 短会话路由
 
-Codex subagent 是 parent thread 派生的执行角色。Host Adapter 必须区分：
+短会话由 Layer 1a task-processing driver 启动，不由 manager 直接 spawn，也不由
+Codex App Server 长期保留：
+
+```text
+driver claims run/attempt
+  -> create or verify isolated worktree at base SHA
+  -> codex exec -C <worktree> --json --output-schema <schema> <prompt>
+  -> independently inspect carrier / Git / tests
+  -> write normalized result and release attempt
+  -> notify manager only for exceptional or actionable states
+```
+
+短会话的 `SessionRef` 是诊断字段，不是调度地址；重试依据是 `runId`、`attemptId`、
+幂等键和 carrier 状态，不是恢复一段 Codex transcript。短会话不得创建新的长期
+manager、outer 或 inner thread。
+
+### 4.4 角色与权限
+
+Codex App Server 的 thread、Codex subagent 和 `codex exec` 进程是不同宿主对象。
+Host Adapter 必须区分：
 
 - `peer`：独立、可寻址的会话；
 - `child`：由目标 parent 派生的 subagent；
 - `fork`：复制历史得到的新 thread；
-- `review`：审查型子 thread。
+- `review`：审查型短会话或子 thread。
 
 只有 `peer` 的消息投递可被称为跨会话通信。对 `child`/`fork`/`review` 的操作必须在
 事件中保留 parent/ancestor 关系，不能把结果伪装成独立 peer 的授权消息。
+
+在目标架构中，Codex `codex exec` 短会话默认不进入 peer registry；它们由 driver 以
+`runId`/`attemptId` 管理，结果通过 carrier 和 driver→manager 通知返回。只有长期
+manager thread 才需要被 `list_sessions` 和 `send` 寻址。
 
 ## 5. Quay 权威边界
 
@@ -223,12 +278,19 @@ Codex subagent 是 parent thread 派生的执行角色。Host Adapter 必须区�
 - 增加 Codex Adapter capability probe。
 - 验证 `thread/list`、`thread/read`、`thread/status/changed`。
 - 输出 opaque SessionRef，不写 task、不发送消息。
+- 确认当前 workspace 只有 manager 长会话进入 peer registry。
 
 ### Stage B：单目标、人工授权发送
 
 - 实现 `send(mode="auto")` 到 `turn/start` / `turn/steer`。
 - 记录 requestId、threadId、turnId、授权引用和完整 ack 状态。
 - 用真实但无副作用的 Codex thread 验证重复 requestId 不重复发送。
+
+### Stage B.1：Codex 短会话
+
+- 由每个任务处理型 driver 启动一个 `codex exec` 短会话。
+- 验证 worktree、JSON schema、carrier、独立复核和异常退出记录。
+- 验证短会话不会被当作长期 thread，也不会绕过 driver 的 lease 和 single-writer 规则。
 
 ### Stage C：Quay control-plane 接入
 
@@ -243,12 +305,14 @@ Codex subagent 是 parent thread 派生的执行角色。Host Adapter 必须区�
 
 ## 8. 验收标准
 
-- [ ] Codex Adapter 能从 App Server 枚举真实 thread，并生成带 adapter 前缀的 SessionRef。
+- [ ] Codex Adapter 能从 App Server 枚举真实 manager thread，并生成带 adapter 前缀的 SessionRef。
 - [ ] 对 idle thread 的 `send` 能得到可审计的 `requestId`、`threadId`、`turnId` 和 ack 状态。
 - [ ] 对 active thread 的 `send` 正确使用 `turn/steer`，不伪造新的独立 peer。
 - [ ] `turn/completed`、失败、取消和连接中断均能映射到明确状态；未知状态不报告成功。
 - [ ] 相同 requestId 重试不会重复发送或重复执行。
 - [ ] Codex Adapter 不把 transcript/thread 状态当作 Quay task 权威状态。
+- [ ] 每个 Quay 启动的短会话均由对应 `*-driver` 以 `codex exec` 启动，并具备隔离 worktree、structured result、独立复核和异常退出记录。
+- [ ] 不存在由 Quay 新启动的 Claude Code outer/inner/worker/selector/fix-worker 长会话；Claude 仅作为既有 manager 的兼容 transport。
 - [ ] Claude Adapter 与 Codex Adapter 通过同一宿主无关契约测试。
 - [ ] 失败、过期、冲突和跨机器认证均有负向测试。
 - [ ] 本 SPEC 的实现不会扩大当前 Codex Stage 1 的自治生命周期权限。

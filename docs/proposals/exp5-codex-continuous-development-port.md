@@ -318,11 +318,13 @@ finding must deduplicate rather than create a second task.
 | **Codex Host Adapter** | translate the neutral run contract into Goal/subagent/`codex exec`/worktree operations; normalize results and session references | Authoritative only for the lifecycle of its host processes |
 | **Human control surface** | goals, policy, approvals, exceptions, risk/cost review, mission redirection, cross-project portfolio decisions | Authoritative for explicitly human-owned decisions |
 
-Within the Codex Host Adapter, the **outer Codex agent** still performs DRAIN,
-SELECT, value hypothesis, charter authoring, gate interpretation,
-merge/adjudication, and ABSORB; **inner Codex agents** still perform isolated
-implementation/re-derivation and adversarial audit. These are execution roles,
-not additional control-plane layers.
+Within the target Codex architecture, the single long-lived **Codex manager**
+performs DRAIN, SELECT, value hypothesis, charter authoring, gate
+interpretation, merge/adjudication, and ABSORB. The `*-driver` processes
+perform mechanical dispatch and lifecycle handling for bounded `codex exec`
+sessions that do isolated implementation/re-derivation and adversarial audit.
+These short sessions are execution attempts, not additional long-lived control-
+plane layers or manager peers.
 
 The repository substrate remains the durable project record. The control plane
 projects that record into explicit run/lease/event state. The chat transcript
@@ -338,15 +340,15 @@ control-plane wake
   -> acquire single-writer workspace lease
   -> inspect Git/index/worktrees and recover interrupted state
   -> check .halt
-  -> ask Codex Host Adapter to start bounded outer run: DRAIN/SELECT/AUTHOR/gates
+  -> wake the single Codex manager for DRAIN/SELECT/AUTHOR/gates
   -> require checked task Proposal + checked milestone Plan (DIR-117 preparation gate)
   -> create iteration worktree(s) from the recorded base SHA
-  -> ask adapter to start Codex iteration worker(s) with frozen inputs
+  -> ask the relevant *-driver to start bounded Codex exec session(s) with frozen inputs
   -> consume lifecycle acknowledgements; heartbeat only detects hangs
   -> validate normalized result envelope, commit, report, and gate evidence
-  -> ask adapter for a fresh-context reviewer/adjudicator when required
+  -> ask the relevant *-driver for a bounded Codex review session when required
   -> merge one canonical result; run post-merge semantic sweep and tests
-  -> ask adapter for bounded outer run: ABSORB/checkpoint/commit
+  -> wake the single Codex manager for ABSORB/checkpoint/commit
   -> append terminal run events and release lease
   -> immediately schedule the next cycle unless HALTed
 ```
@@ -402,9 +404,9 @@ contention exp5 is designed to avoid.
 
 The adapter must enforce:
 
-1. The outer agent is the only writer to the main experiment state and the only
-   merger into the integration branch.
-2. Every implementation/re-derivation worker receives a distinct worktree and
+1. The Codex manager is the only semantic writer to the main experiment state
+   and the only merger into the integration branch.
+2. Every driver-launched `codex exec` implementation/re-derivation session receives a distinct worktree and
    branch or detached starting point, pinned to the same recorded base SHA.
 3. Workers may not edit `dashboard.md`, `backlog.md`, directive lifecycle state,
    or another worker's milestone report.
@@ -571,8 +573,8 @@ Quay operation. They do not prove autonomous execution.
 9. Land or reproduce DIR-117's checked-Proposal/checked-Plan preparation gate.
 10. Freeze the runtime-neutral Host Adapter operations, result envelope,
    acknowledgements, lease, and idempotency rules without Codex-only fields.
-11. Have a Codex outer Skill perform a read-only replay of SELECT and gates for a
-    completed historical milestone.
+11. Have the Codex manager Skill perform a read-only replay of SELECT and gates
+    for a completed historical milestone.
 12. Port one bounded iteration worker; run a disposable fixture milestone in one
     explicit worktree with frozen input and structured output.
 13. Prove independent worker/reviewer roles and, where policy requires it, two
@@ -612,8 +614,9 @@ Quay operation. They do not prove autonomous execution.
    `.agents` packages cannot silently drift in task lifecycle rules.
 8. `[ ]` A runtime-neutral Host Adapter contract exists and contains no Codex
    transcript, Goal, UI, or internal database assumptions.
-9. `[ ]` Codex discovers and explicitly invokes the repo-scoped outer and
-   iteration Skills from `.agents/skills/`.
+9. `[ ]` The Codex manager discovers and explicitly invokes the repo-scoped
+   manager Skills, while each `*-driver` invokes bounded `codex exec` sessions
+   with the required short-session prompt and result schema.
 10. `[ ]` Before any real worker starts, the task has a checked Proposal, the
    milestone has a checked executable Plan, and the DIR-117 preparation gate
    verifies their freshness.
