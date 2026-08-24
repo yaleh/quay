@@ -1,7 +1,7 @@
 ---
 id: gap-ac141-execution-face-inner-manual-retirement
 title: AC141 执行面退役——ready 任务默认 worker-driver 捡，inner 手动介入仅限边界 + 记原因
-status: done
+status: ready
 labels:
   - gap
 parent: null
