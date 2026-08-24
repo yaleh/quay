@@ -48,6 +48,6 @@ depends_on: []
 
 ## Touches
 
-- plugin/scripts/（新 checker，名字待定，如 spec-declaration-point-check.ts）
-- plugin/test/（checker test）
+- plugin/scripts/spec-declaration-point-check.ts
+- plugin/test/spec-declaration-point-check.test.mjs
 - tasks/gap-spec-declaration-point-mechanical-check.md（自身）

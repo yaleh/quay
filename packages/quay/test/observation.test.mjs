@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal } from "../src/observation.ts";
+import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, WORKER_OUTCOME_REL, WORKER_ROUND_REL } from "../src/observation.ts";
 
 /** Commit helper with a fixed clock (committer date = author date = `t`), per-branch file. */
 function commitAt(ws, msg, t, file = "log.txt") {
@@ -284,6 +284,158 @@ test("AC1 fail-closed: no worktree namespace ⇒ the run stays in-flight (never 
       "AC1: fail-closed — an unobservable worktree state keeps the run in-flight");
   } finally {
     fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+// ── gap-live-page-worker-driver-inflight-invisible ─────────────────────────────────────────────
+// readLive previously read ONLY `.workflow-events/*.jsonl` — the worker-driver (production executor)
+// writes `.quay/worker-outcome.jsonl` / `.quay/worker-round.jsonl`, so its real in-flight work was
+// invisible on the Live page (and a stale workflow-events start-no-end record from before the driver
+// came online showed as a ghost). AC1 = readLive merges the worker carrier's open set; AC2 = a
+// workflow-events run that started BEFORE the driver came online is dropped as a ghost.
+
+/** Build a temp workspace with a `.quay/` dir (the worker carriers live there). */
+function workerWorkspace(prefix) {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
+  return ws;
+}
+
+/** Write one worker-outcome record per entry into `<root>/.quay/worker-outcome.jsonl`. */
+function writeWorkerOutcome(root, records) {
+  const file = path.join(root, WORKER_OUTCOME_REL);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const lines = records.map((r) => JSON.stringify({
+    task: r.task,
+    run_id: r.run_id ?? `wk-${r.task}`,
+    started_at: r.started_at,
+    ended_at: r.ended_at ?? new Date(Date.parse(r.started_at) + 60_000).toISOString(),
+    final_state: r.final_state,
+  }) + "\n");
+  fs.writeFileSync(file, lines.join(""));
+}
+
+test("AC1: readLive surfaces a worker-driver open task (exited-not-landed) from the outcome carrier", () => {
+  const ws = workerWorkspace("worker-open");
+  try {
+    writeWorkerOutcome(ws, [
+      { task: "gap-open-a", started_at: "2026-08-24T07:00:00.000Z", final_state: "exited-not-landed" },
+    ]);
+    const live = readLive(ws, { nowMs: Date.parse("2026-08-24T08:00:00.000Z") });
+    assert.ok(live.inFlight.some((t) => t.taskId === "gap-open-a"),
+      "AC1: an exited-not-landed worker task is in-flight on the Live page");
+    const t = live.inFlight.find((t) => t.taskId === "gap-open-a");
+    assert.equal(t.implCompletedAtMs, null, "AC1: an open worker task is still 实现中");
+    assert.equal(t.liveness, "unknown", "AC1: fail-closed liveness (never flagged orphan)");
+    assert.equal(live.status, "ok", "AC1: the worker carrier is the telemetry once the driver is wired");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1: completed / spawn-failed / not-dispatched worker outcomes are NOT in-flight (negative control)", () => {
+  const ws = workerWorkspace("worker-closed");
+  try {
+    writeWorkerOutcome(ws, [
+      { task: "gap-done-a", started_at: "2026-08-24T07:00:00.000Z", final_state: "completed" },
+      { task: "gap-never-a", started_at: "2026-08-24T07:00:00.000Z", final_state: "spawn-failed" },
+      { task: "gap-halted-a", started_at: "2026-08-24T07:00:00.000Z", final_state: "not-dispatched" },
+    ]);
+    const live = readLive(ws, { nowMs: Date.parse("2026-08-24T08:00:00.000Z") });
+    const ids = live.inFlight.map((t) => t.taskId);
+    assert.ok(!ids.includes("gap-done-a"), "AC1: completed (landed) is not in-flight");
+    assert.ok(!ids.includes("gap-never-a"), "AC1: spawn-failed (never ran) is not in-flight");
+    assert.ok(!ids.includes("gap-halted-a"), "AC1: not-dispatched (never ran) is not in-flight");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1: a done task whose worker outcome is exited-not-landed (leftover worktree) is NOT in-flight", () => {
+  const ws = workerWorkspace("worker-done-leftover");
+  try {
+    writeWorkerOutcome(ws, [
+      { task: "gap-reflog", started_at: "2026-08-24T07:00:00.000Z", final_state: "exited-not-landed" },
+    ]);
+    fs.writeFileSync(path.join(ws, "tasks", "gap-reflog.md"),
+      "---\nid: gap-reflog\ntitle: fixture\nstatus: done\n---\n\n**type:** execution\n");
+    const live = readLive(ws, { nowMs: Date.parse("2026-08-24T08:00:00.000Z") });
+    assert.ok(!live.inFlight.some((t) => t.taskId === "gap-reflog"),
+      "AC1: status=done ⇒ not in-flight even though the carrier says exited-not-landed (cleanup artifact)");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2: a workflow-events start-no-end run that predates the driver is dropped (the 9h ghost)", () => {
+  const { parent, root, namespace } = ghostWorkspace("worker-ghost");
+  try {
+    // The driver came online at 07:16Z (outcome carrier).
+    writeWorkerOutcome(root, [
+      { task: "gap-some-other", started_at: "2026-08-24T07:16:00.000Z", final_state: "exited-not-landed" },
+    ]);
+    // A stale workflow-events run started 3h BEFORE the driver, worktree STILL present (so the
+    // existing worktree-released filter does NOT remove it — the new online-time filter must).
+    fs.mkdirSync(namespace, { recursive: true });
+    fs.mkdirSync(path.join(namespace, "GHOST-9H"), { recursive: true });
+    writeStartEvent(root, "GHOST-9H", Date.parse("2026-08-24T04:14:26.000Z"));
+    const live = readLive(root, { nowMs: Date.parse("2026-08-24T08:00:00.000Z") });
+    assert.ok(!live.inFlight.some((t) => t.taskId === "GHOST-9H"),
+      "AC2: a start-no-end run that predates the driver is a ghost, removed even though its worktree is present");
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("AC2 negative control: a workflow-events run that started AFTER the driver came online stays in-flight", () => {
+  const { parent, root, namespace } = ghostWorkspace("worker-kept");
+  try {
+    writeWorkerOutcome(root, [
+      { task: "gap-some-other", started_at: "2026-08-24T07:16:00.000Z", final_state: "exited-not-landed" },
+    ]);
+    fs.mkdirSync(namespace, { recursive: true });
+    fs.mkdirSync(path.join(namespace, "KEEP-POST"), { recursive: true });
+    writeStartEvent(root, "KEEP-POST", Date.parse("2026-08-24T07:30:00.000Z"));
+    const live = readLive(root, { nowMs: Date.parse("2026-08-24T08:00:00.000Z") });
+    assert.ok(live.inFlight.some((t) => t.taskId === "KEEP-POST"),
+      "AC2 negative control: a post-driver workflow-events run is not dropped by the online-time filter");
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("parseWorkerOutcomeRecords: parses the carrier, skips malformed lines, never throws", () => {
+  const recs = parseWorkerOutcomeRecords(
+    '{"task":"a","run_id":"r1","started_at":"2026-08-24T07:00:00.000Z","final_state":"completed"}\n' +
+    'not-json\n' +
+    '{"task":"b","run_id":"r2","started_at":"2026-08-24T07:01:00.000Z","final_state":"failed"}\n'
+  );
+  assert.equal(recs.length, 2, "skips the malformed (non-JSON) line");
+  assert.equal(recs[0].task, "a");
+  assert.equal(recs[1].final_state, "failed");
+  assert.equal(recs[1].started_at, "2026-08-24T07:01:00.000Z");
+});
+
+test("workerDriverOnlineMs: min across outcome started_at and round ts; null when the driver never ran", () => {
+  const ws = workerWorkspace("worker-online");
+  try {
+    writeWorkerOutcome(ws, [
+      { task: "a", started_at: "2026-08-24T07:16:00.000Z", final_state: "completed" },
+    ]);
+    fs.writeFileSync(path.join(ws, WORKER_ROUND_REL),
+      '{"ts":"2026-08-24T07:15:00.000Z","round":1,"action":"start"}\n' +
+      '{"ts":"2026-08-24T07:17:00.000Z","round":2,"action":"idle"}\n');
+    assert.equal(workerDriverOnlineMs(ws), Date.parse("2026-08-24T07:15:00.000Z"),
+      "online instant = earliest round ts (07:15 < outcome 07:16)");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+  const empty = workerWorkspace("worker-online-empty");
+  try {
+    assert.equal(workerDriverOnlineMs(empty), null, "no carrier ⇒ null (driver never ran)");
+  } finally {
+    fs.rmSync(empty, { recursive: true, force: true });
   }
 });
 

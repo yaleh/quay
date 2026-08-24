@@ -416,3 +416,57 @@ test("R6 — a no-env-var claude process (sessions/<pid>.json maps it to a NEW s
     try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
 });
+
+// R7/R8 — HISTFILE isolation (gap-test-fixture-pollutes-bash-history): the fixture's probe pane is a
+// real interactive bash inheriting the runner's $HOME, so every send-keys'd `exec -a claude-probe …`
+// command got appended to the real ~/.bash_history when the pane exited (1679/2000 lines of the
+// user's history were claude-probe noise). isolateTmuxEnv must redirect the pane's history to
+// /dev/null so the fixture never writes the user's real history. (The shared helper covers its ~8
+// import consumers; the 3 local copies + events' 2 inline copies are fixed in-place by the same task.)
+
+test("R7 — isolateTmuxEnv isolates HISTFILE (env unit: the fixture bash must never write ~/.bash_history)", () => {
+  const sockDir = "/tmp/session-liveness-restart-env-sock";
+  const env = isolateTmuxEnv(sockDir);
+  assert.equal(env.TMUX_TMPDIR, sockDir, "TMUX_TMPDIR must point at the private socket dir");
+  assert.ok(!("TMUX" in env), "TMUX must be stripped (library env)");
+  assert.equal(env.HISTFILE, "/dev/null",
+    `HISTFILE must be /dev/null (redirect the pane's history away from ~/.bash_history). Got: ${env.HISTFILE}`);
+});
+
+test("R8 — the probe pane inherits HISTFILE=/dev/null and does NOT write $HOME/.bash_history (integration)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-restart-"));
+  __registerProbeTmp(tmp);
+  const home = path.join(tmp, "home");
+  fs.mkdirSync(home, { recursive: true });
+  const sockDir = path.join(tmp, "sock");
+  fs.mkdirSync(sockDir, { recursive: true });
+  // Override HOME to a THROWAWAY dir so the test observes pollution hermetically: if HISTFILE were
+  // NOT isolated, the pane bash would write this throwaway $HOME/.bash_history (the real-bug shape);
+  // with HISTFILE=/dev/null it writes to /dev/null and never touches $HOME/.bash_history.
+  const env = { ...isolateTmuxEnv(sockDir), HOME: home };
+  const session = "restart-hist";
+  const newS = tmux(["new-session", "-d", "-x", "200", "-y", "50", "-s", session, "bash"], env);
+  assert.equal(newS.status, 0, `tmux new-session failed: ${newS.stderr}`);
+  try {
+    // the exact fixture command that polluted ~/.bash_history (1679 claude-probe lines)
+    tmux(["send-keys", "-t", session, "exec -a claude-probe sleep 10000 &"], env);
+    tmux(["send-keys", "-t", session, "Enter"], env);
+    assert.ok(await waitForAlive(env, session), "probe must be alive first");
+
+    // direct propagation proof: the pane's ACTUAL environ carries HISTFILE=/dev/null (not just the
+    // client env) — the intermediate tmux layer must not strip it (hard-rule-4c: the quantity must
+    // survive every intermediate layer to the point of effect).
+    const panePid = tmux(["list-panes", "-t", session, "-F", "#{pane_pid}"], env).stdout.trim();
+    assert.ok(panePid, "probe must have a pane pid");
+    const environ = fs.readFileSync(`/proc/${panePid}/environ`, "utf8").split("\0");
+    const histfile = environ.find((kv) => kv.startsWith("HISTFILE="));
+    assert.equal(histfile, "HISTFILE=/dev/null",
+      `the pane bash must inherit HISTFILE=/dev/null (tmux must not strip it). Pane environ HISTFILE: ${histfile}`);
+  } finally {
+    // teardownProbe kill-servers the pane → the pane bash exits → would save its history to
+    // $HOME/.bash_history here if HISTFILE were unisolated.
+    teardownProbe(tmp);
+  }
+  assert.ok(!fs.existsSync(path.join(home, ".bash_history")),
+    `the fixture must not write $HOME/.bash_history (HISTFILE=/dev/null should have redirected it). Found: ${path.join(home, ".bash_history")}`);
+});

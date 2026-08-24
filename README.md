@@ -479,6 +479,29 @@ not merely that the checkboxes are ticked.
 aggregating every `enabled: true` Provider from `.quay/config.yml` behind
 a single MCP endpoint for an agent (e.g. Claude Code) to register once.
 
+### Driver processes (`quay driver`)
+
+The promotion and worker drivers are resident daemons kept alive by a single
+supervisor. The unified entry point:
+
+```
+quay driver <start|stop|drain|status|restart> --kind <promotion|worker>
+```
+
+| verb | semantics |
+|---|---|
+| `start` | Start the resident driver under the supervisor (respawn on exit/kill/crash) |
+| `stop` | Hard stop: terminate the supervisor + driver. For worker, in-flight workers are **not** killed — they orphan and finish |
+| `drain` | (worker only) Halt new dispatch **without** killing in-flight workers (`worker-control.json halted=true`). `promotion` does not support `drain` |
+| `status` | Report `{kind, supervisor_pid, driver_pid, alive, …}` |
+| `restart` | `stop` then `start` |
+
+> **Known gap** (until `gap-worker-driver-cold-start-inflight-blind` lands): a
+> cold start (explicit `restart`, or the supervisor's 5s auto-respawn after a
+> crash) rebuilds the in-flight set from memory, so a driver restarted while
+> tasks are in flight may **duplicate-dispatch** them. Prefer `drain` over
+> `restart` when in-flight workers must be preserved.
+
 ### `quay-native` (the reference Provider)
 
 `quay-native`'s own CLI exposes raw local file operations directly

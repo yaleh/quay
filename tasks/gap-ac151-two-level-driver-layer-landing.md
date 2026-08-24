@@ -1,7 +1,7 @@
 ---
 id: gap-ac151-two-level-driver-layer-landing
 title: AC151 两级分层落地（Layer 0 driver-runtime + Layer 1a/1b，⛔ 非 kernel+N 平级 plugin）
-status: todo
+status: ready
 labels:
   - gap
 parent: null

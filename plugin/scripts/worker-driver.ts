@@ -144,6 +144,7 @@ export {
 import { parseTask, readDependsOn } from "./task-schema.ts";
 import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
+import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -167,6 +168,13 @@ export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
 /** checkout 前 stash 的缺省 message（`git stash list` 可核的标记，AC2）。 */
 export const DEFAULT_STASH_MESSAGE = "worker-driver: stash before checkout (SPEC §5 阶段 2)";
 
+/** 存活 worker 进程的 `-n` 名（quay-launch.sh 由 .claude/launch.settings.json 的
+ *  `_launchSpec.roles["task-worker"].name` 承载；AC140-2 测试钉死 name 以 quay- 开头）。
+ *  冷启动在飞枚举用它识别存活 worker 进程的 cmdline（/proc/<pid>/cmdline）。
+ *  AC150-3：控制态常量（CONTROL_STATE_REL/CONTROL_CALLERS_ENV/DEFAULT_CALLERS/CONTROL_HEADER/
+ *  CONTROL_HEADER_NAME）已随控制面抽到 driver-shared.ts 并在本文件 re-export；本常量是 worker
+ *  独有（进程名识别），保留在本文件。 */
+export const WORKER_PROCESS_NAME = "quay-task-worker";
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -324,7 +332,80 @@ export function worktreePathsForTask(root: string, taskId: string): string[] {
   return paths;
 }
 
-/** orphan worktree 清理结果（可观测：removed/分支删除/错误）。 */
+// ── 冷启动在飞枚举（gap-worker-driver-cold-start-inflight-blind）───────────────────────────────────
+// driver 的 running 是纯内存数组、冷启动从空集起：restart / supervisor 崩溃自动 respawn 后，新进程
+// 不认得重启前就存活的 worker。`ready-pool-check` 的 notInFlight 完全依赖调用方传入的 in-flight id
+// 列表、无独立「该 task 已有存活 worktree」维度 ⇒ 新 driver 会重复派发这些 task（撞同一 worktree），
+// 重复者被杀后 failed 终态又触发 cleanupOrphanWorktree 误删原 worker 仍在用的共享 worktree+分支。
+// 修法（manager 裁定）：枚举真实存活的 task worktree + 交叉核对存活 quay-task-worker 进程 pid，
+// 把「worktree 在 ∧ 存活 worker 在」的 task 预先纳入「已在飞」排除集。worktree 复用 fast-mode-
+// telemetry 的 listWorktrees/taskIdFromBranch（单一真相源，⛔ 不另写 porcelain 解析器）。
+
+/** 枚举所有开着的 task worktree 的 task id（`task/<id>` 分支）。git 失败 / 非 git 仓库 ⇒ []。 */
+export function enumerateTaskWorktreeTasks(root: string): string[] {
+  const ids: string[] = [];
+  for (const wt of listWorktrees(root)) {
+    const id = taskIdFromBranch(wt?.branch);
+    if (id != null) ids.push(id);
+  }
+  return ids;
+}
+
+/** 扫描 /proc/<pid>/cmdline，返回所有含 `quay-task-worker` 的存活进程 cmdline（空格 join，读失败跳过）。
+ *  procDir 是测试缝（缺省 /proc）。读不到 /proc（非 Linux / 权限）⇒ []（硬规则 3b：读不懂 ≠ 无存活，
+ *  由调用方 fail-closed——enumerateColdStartInflight 交集为空即不排除，方向是「少排除 ⇒ 可能重派」，
+ *  比「误判全部存活」安全）。 */
+export function enumerateLiveWorkerCmdlines(procDir: string = "/proc"): string[] {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(procDir);
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  for (const e of entries) {
+    if (!/^\d+$/.test(e)) continue;
+    let buf: Buffer;
+    try {
+      buf = fs.readFileSync(path.join(procDir, e, "cmdline"));
+    } catch {
+      continue; // 进程已退 / 无权限 ⇒ 跳过
+    }
+    const cmdline = buf.toString("utf8").replace(/\0/g, " ").trim();
+    if (cmdline.includes(WORKER_PROCESS_NAME)) out.push(cmdline);
+  }
+  return out;
+}
+
+/** 该 task 是否有存活 worker 正在跑：某存活进程 cmdline 同时含 `quay-task-worker`（-n 名）与该 task id
+ *  （worker prompt 里的 "Task: <id>"）。纯谓词，cmdline 列表注入（缺省由调用方从 /proc 取）。
+ *  task id 用【词边界】匹配，⛔ 不用裸 substring——短 id（如 `gap-t`）会作为前缀命中 `gap-test-…` /
+ *  `gap-todo-…` 的存活 worker cmdline（2026-08-24 实测：测试 task `gap-t` 误命中生产 worker
+ *  `gap-test-fixture-pollutes-bash-history` ⇒ cleanupOrphanWorktree 假跳过）。边界字符类 = 字母/数字/
+ *  下划线/连字符（task id 全由它们组成 ⇒ `gap-t` 后跟 `e` 或 `-` 都不算命中，后跟 `.`/空格/行尾才算）。 */
+export function hasLiveWorkerForTask(taskId: string, workerCmdlines: string[]): boolean {
+  const re = new RegExp(`(^|[^a-zA-Z0-9_-])${escapeRegExp(taskId)}(?![a-zA-Z0-9_-])`);
+  return workerCmdlines.some((cmd) => cmd.includes(WORKER_PROCESS_NAME) && re.test(cmd));
+}
+
+/** 冷启动「已在飞」排除集：task id 同时满足 ① 有 task/<id> worktree、② 有存活 worker 进程。二者缺一
+ *  不纳入（只有 worktree 无进程 = orphan，可清、可重派；只有进程无 worktree = 尚未 fork，由内存
+ *  running 覆盖）。opts.worktreeTasks / opts.workerCmdlines 是测试缝（null ⇒ 用真实 git / /proc）。 */
+export function enumerateColdStartInflight(
+  root: string,
+  opts: { worktreeTasks?: string[] | null; workerCmdlines?: string[] | null } = {},
+): Set<string> {
+  const worktreeTasks = opts.worktreeTasks ?? enumerateTaskWorktreeTasks(root);
+  if (worktreeTasks.length === 0) return new Set(); // 无 task worktree ⇒ 无冷启动在飞（⛔ 不白扫 /proc）
+  const workerCmdlines = opts.workerCmdlines ?? enumerateLiveWorkerCmdlines();
+  const out = new Set<string>();
+  for (const taskId of worktreeTasks) {
+    if (hasLiveWorkerForTask(taskId, workerCmdlines)) out.add(taskId);
+  }
+  return out;
+}
+
+/** orphan worktree 清理结果（可观测：removed/分支删除/错误/存活跳过）。 */
 export interface OrphanCleanupResult {
   /** 找到 worktree 且 `git worktree remove --force` 全部成功。 */
   removed: boolean;
@@ -334,6 +415,9 @@ export interface OrphanCleanupResult {
   branchDeleted: boolean;
   /** 移除失败的错误（worktree 找到但 remove 失败）；无错误 ⇒ null。 */
   error: string | null;
+  /** worktree 有存活 worker 正在用 ⇒ 跳过清理（⛔ 不是「没找到」也不是「remove 失败」——独立取值，
+   *  硬规则 3b：跳过 ≠ 已清）。false = 未跳过（已清 / 无 worktree / 正常失败）。 */
+  skippedLiveWorker: boolean;
 }
 
 /**
@@ -343,10 +427,21 @@ export interface OrphanCleanupResult {
  * `git worktree remove --force <path>` + `git branch -D task/<id>`。⛔ 只在 worker 已退出（close 事件后）
  * 调用；⛔ completed 路径不调（落地判定已确认无残留）。best-effort：移除失败（脏树 / 锁 / 活进程）不
  * 致命，error 落盘供观测，⛔ 不抛。
+ *
+ * gap-worker-driver-cold-start-inflight-blind AC2（存活校验）：重复派发场景下，被 kill 的【重复者】走
+ * failed 终态触发本清理，而【原 worker】仍活、仍在用同一个 worktree——此时删除会连带误删原 worker 的
+ * 共享 worktree+分支。故移除前先核：worktree 有存活 worker 正在用 ⇒ 跳过（skippedLiveWorker=true，
+ * ⛔ 只清真 orphan）。workerCmdlines 是测试缝（null ⇒ 读真实 /proc）。
  */
-export function cleanupOrphanWorktree(root: string, taskId: string): OrphanCleanupResult {
+export function cleanupOrphanWorktree(root: string, taskId: string, workerCmdlines: string[] | null = null): OrphanCleanupResult {
   const paths = worktreePathsForTask(root, taskId);
-  if (paths.length === 0) return { removed: false, worktreePath: null, branchDeleted: false, error: null };
+  if (paths.length === 0) {
+    return { removed: false, worktreePath: null, branchDeleted: false, error: null, skippedLiveWorker: false };
+  }
+  const live = workerCmdlines ?? enumerateLiveWorkerCmdlines();
+  if (hasLiveWorkerForTask(taskId, live)) {
+    return { removed: false, worktreePath: paths[0] ?? null, branchDeleted: false, error: null, skippedLiveWorker: true };
+  }
   let error: string | null = null;
   let removed = true;
   for (const p of paths) {
@@ -361,7 +456,7 @@ export function cleanupOrphanWorktree(root: string, taskId: string): OrphanClean
     const bd = spawnSync("git", ["-C", root, "branch", "-D", `task/${taskId}`], { encoding: "utf8" });
     branchDeleted = bd.status === 0;
   }
-  return { removed, worktreePath: paths[0] ?? null, branchDeleted, error };
+  return { removed, worktreePath: paths[0] ?? null, branchDeleted, error, skippedLiveWorker: false };
 }
 
 /** 落地判定（AC1 判据）：landed = status=done ∧ 无残留 worktree。任一读失败 ⇒ landed=false
@@ -762,7 +857,12 @@ function runOneWorker({
         outcome.final_state !== "not-dispatched";
       const cleanup = shouldCleanup ? cleanupOrphanWorktree(rootDir, taskId) : null;
       const finalOutcome = cleanup
-        ? { ...outcome, worktree_cleaned: cleanup.removed, worktree_cleanup_error: cleanup.error }
+        ? {
+            ...outcome,
+            worktree_cleaned: cleanup.removed,
+            worktree_cleanup_error: cleanup.error,
+            worktree_cleanup_skipped_live: cleanup.skippedLiveWorker,
+          }
         : outcome;
       appendOutcomeToFile(outcomeFile, finalOutcome);
       if (json) process.stdout.write(`${JSON.stringify({ event: "worker-done", task: taskId, ...finalOutcome })}\n`);
@@ -1010,6 +1110,21 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   const results: WorkerRunResult[] = [];
   let stopReason: string | null = null;
 
+  // gap-worker-driver-cold-start-inflight-blind：冷启动在飞排除集。restart / supervisor 崩溃自动
+  // respawn 后，新驱动的 running 是纯内存数组、从空集起——不认得重启前就存活的 worker。枚举真实
+  // 存活的 task worktree + 交叉核对存活 quay-task-worker 进程，把「worktree 在 ∧ 存活 worker 在」的
+  // task 预先纳入排除集，使本驱动不再对它们重复派发（重复派发撞同一 worktree，被杀后还会误删原
+  // worker 仍在用的共享 worktree）。计算一次（冷启动）；存活 worker 落地 fan-in 后其 worktree 消失，
+  // 本驱动对其整个寿命内都不再派发（安全方向）。这些 task 不占内存 running（无 promise 可 await），
+  // 但作为「已在飞」参与 ready-pool 减项 / active 过滤 / Touches 互斥，⛔ 不阻塞其它 task 的派发。
+  const coldInflight = enumerateColdStartInflight(rootDir);
+  const inFlightTasks = (): string[] => running.map((r) => r.task).concat([...coldInflight]);
+  if (json && coldInflight.size > 0) {
+    process.stdout.write(
+      `${JSON.stringify({ event: "cold-start-inflight", tasks: [...coldInflight].sort() })}\n`,
+    );
+  }
+
   // round 心跳（AC138-3）：worker-outcome 只在任务真完成时写，池空时 outcome 停更会被 supervisor
   // status 的 last_record_ts（读全载体 max）误读为「死亡」；round 每轮循环无条件写一条作 liveness 直接量。
   const roundFile = path.join(rootDir, WORKER_ROUND_REL);
@@ -1091,13 +1206,14 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         stopReason = sc.reason;
         break;
       }
-      const pool = readyPoolCheck(rootDir, readyPoolArgv, running.map((r) => r.task), cap);
+      const pool = readyPoolCheck(rootDir, readyPoolArgv, inFlightTasks(), cap);
       poolSeen = pool.pool;
-      const active = new Set(running.map((r) => r.task));
+      const active = new Set(inFlightTasks());
       const shuffled = shuffle(pool.ready.filter((id) => !active.has(id)));
       // AC3（gap-launch-script-worker-cap-broken）：派发前 Touches 互斥——候选里与在飞任务 Touches 重叠的
-      // 先滤掉，selector 只在滤后集合里选（⛔ 并发派发 Touches 重叠 = fan-in 才炸）。
-      const touchesFiltered = filterTouchesDisjoint(shuffled, running.map((r) => r.task), rootDir);
+      // 先滤掉，selector 只在滤后集合里选（⛔ 并发派发 Touches 重叠 = fan-in 才炸）。冷启动在飞 task
+      // 一并参与（它们的 Touches 是真实冲突面，⛔ 不是只从 ready 里减去）。
+      const touchesFiltered = filterTouchesDisjoint(shuffled, inFlightTasks(), rootDir);
       // gap-worker-driver-dispatch-pre-filter-missing AC1：派发前二次过滤 depends_on——依赖未满
       // （depends_on 含未 done 任务）的候选不进候选集（⛔ 照单派发 ⇒ ac138 白烧一轮复现）。与
       // gap-launch-script-worker-cap-broken AC3 的 Touches 互斥过滤同属「spawn 前候选过滤」的两个维度，一并判。

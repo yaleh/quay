@@ -378,6 +378,16 @@ export function tmux(args, env) {
 export function isolateTmuxEnv(sockDir) {
   const env = { ...process.env, TMUX_TMPDIR: sockDir };
   delete env.TMUX;
+  // HISTFILE isolation (gap-test-fixture-pollutes-bash-history): the probe pane's `bash` is a REAL
+  // interactive shell inheriting the runner's $HOME — every send-keys'd `exec -a claude-probe …`
+  // command gets appended to the real ~/.bash_history when the pane exits (1679/2000 lines of the
+  // user's history were claude-probe noise). tmux propagates the client env to the pane (verified:
+  // HISTFILE set here reaches the pane bash's /proc/<pid>/environ), so redirecting the pane's history
+  // to /dev/null stops the pollution. This helper covers its ~8 import consumers; the 3 files that
+  // carry a LOCAL isolateTmuxEnv copy (inner-session-check / session-topology / quay-init-tmux-
+  // detection) and session-liveness-events' 2 inline copies are fixed in-place by the same task.
+  // (Not a tmp-path: /dev/null discards without leaving a file the teardown would sweep.)
+  env.HISTFILE = "/dev/null";
   return env;
 }
 

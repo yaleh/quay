@@ -72,4 +72,3 @@ setTimeout」形状的唯一依据是被证伪的「~13min 回合预算硬超时
 - .claude/workflows/fan-in-execute.js（短命轮询 agent → 单 agent 循环等；双拷贝同步 plugin/workflows/fan-in-execute.js）
 - plugin/workflows/fan-in-execute.js（同上）
 - plugin/test/fan-in-execute-paths.test.mjs（负控制 + 注释改准确）
-- plugin/scripts/（fan-in 相关脚本，若轮询逻辑在脚本控制流里）

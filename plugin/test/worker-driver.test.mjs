@@ -70,6 +70,11 @@ import {
   defaultLivenessCheckArgv,
   runLivenessCheck,
   depsReadyForDispatch,
+  enumerateColdStartInflight,
+  enumerateTaskWorktreeTasks,
+  enumerateLiveWorkerCmdlines,
+  hasLiveWorkerForTask,
+  WORKER_PROCESS_NAME,
 } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1355,4 +1360,162 @@ test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the
   assert.equal(spawned.length, 1, "AC1 对照: dep-done candidate IS dispatched (exactly once)");
   assert.equal(spawned[0].task, "gap-dep");
   assert.equal(readOutcomeLines(root)[0].final_state, "completed", "the dep-done candidate lands cleanly");
+});
+
+// ── gap-worker-driver-cold-start-inflight-blind：冷启动在飞盲区 ───────────────────────────────────
+// restart / supervisor 崩溃自动 respawn 后，新驱动的 running 是纯内存数组、从空集起，不认得重启前
+// 就存活的 worker ⇒ 重复派发（撞同一 worktree），重复者被杀后 failed 终态又触发
+// cleanupOrphanWorktree 误删原 worker 仍在用的共享 worktree+分支。修法 = 冷启动枚举「worktree 在 ∧
+// 存活 worker 在」的 task 进排除集 + cleanupOrphanWorktree 存活校验。
+
+test("cold-start pure — enumerateColdStartInflight / hasLiveWorkerForTask: worktree ∧ live worker ⇒ in-flight; worktree-only ⇒ orphan", (t) => {
+  const root = makeRoot("coldstart-pure");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const live = "claude-fjdac --settings x --model m -n quay-task-worker -p '... Task: gap-cs-a ...'";
+
+  // worktree + live worker ⇒ in-flight；只有 worktree 无进程 ⇒ orphan（不排除）。
+  assert.deepEqual(
+    [...enumerateColdStartInflight(root, { worktreeTasks: ["gap-cs-a", "gap-cs-b"], workerCmdlines: [live] })].sort(),
+    ["gap-cs-a"],
+    "only the task with BOTH a worktree and a live worker is in-flight (gap-cs-b is an orphan worktree)",
+  );
+  // worktree 但无存活 worker ⇒ 空（orphan 可重派、可清——正是交叉核对的意义）。
+  assert.deepEqual(
+    [...enumerateColdStartInflight(root, { worktreeTasks: ["gap-cs-a"], workerCmdlines: [] })],
+    [],
+    "a worktree without a live worker is an orphan — NOT excluded from dispatch",
+  );
+  // 无 task worktree ⇒ 空（⛔ 短路，不白扫 /proc）。
+  assert.deepEqual(
+    [...enumerateColdStartInflight(root, { worktreeTasks: [], workerCmdlines: [live] })],
+    [],
+    "no task worktree ⇒ nothing in-flight",
+  );
+
+  // hasLiveWorkerForTask 纯谓词：cmdline 须同时含 quay-task-worker 与 task id。
+  assert.equal(hasLiveWorkerForTask("gap-cs-a", [live]), true);
+  assert.equal(hasLiveWorkerForTask("gap-cs-a", ["node -e x quay-task-worker gap-zzz"]), false, "wrong task id ⇒ not a live worker for this task");
+  assert.equal(hasLiveWorkerForTask("gap-cs-a", ["node -e x gap-cs-a"]), false, "no quay-task-worker name ⇒ not a worker");
+
+  // ⛔ 词边界回归（2026-08-24 实测假阳性）：短 id `gap-t` 不得作为前缀命中 `gap-test-…` 的存活 worker。
+  const gapTestWorker = "claude -n quay-task-worker -p '... Task: gap-test-fixture-pollutes-bash-history ...'";
+  assert.equal(hasLiveWorkerForTask("gap-t", [gapTestWorker]), false, "gap-t must NOT match gap-test-… (word boundary, not substring)");
+  assert.equal(hasLiveWorkerForTask("gap-test-fixture-pollutes-bash-history", [gapTestWorker]), true, "the full id matches its own worker");
+});
+
+test("enumerateTaskWorktreeTasks — lists task/<id> branches, skips the main checkout + non-task branches", (t) => {
+  const root = makeGitRoot("coldstart-enum");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-enum`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-enum-a", "ready");
+  assert.deepEqual(enumerateTaskWorktreeTasks(root), [], "no task worktree yet (main checkout's branch is not a task branch)");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-enum-a", wtPath]);
+  assert.deepEqual(enumerateTaskWorktreeTasks(root), ["gap-enum-a"], "the task/<id> worktree is enumerated");
+});
+
+test("enumerateLiveWorkerCmdlines — real /proc scan finds a spawned fake worker (fail-soft otherwise)", async (t) => {
+  const fake = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, "gap-proc-scan"], { stdio: "ignore" });
+  t.after(() => { try { fake.kill("SIGKILL"); } catch { /* already gone */ } });
+  await new Promise((r) => setTimeout(r, 50));
+  const cmdlines = enumerateLiveWorkerCmdlines();
+  assert.ok(
+    cmdlines.some((c) => c.includes(WORKER_PROCESS_NAME) && c.includes("gap-proc-scan")),
+    "the spawned fake worker's cmdline is found by the /proc scan",
+  );
+  // fail-soft：非 /proc 目录 ⇒ []（硬规则 3b：读不懂 ≠ 无存活，但绝不抛）。
+  assert.deepEqual(enumerateLiveWorkerCmdlines("/nonexistent-proc-dir"), []);
+});
+
+test("AC1 (cold-start) — surviving worker + its worktree ⇒ resident loop does NOT re-dispatch that task", (t) => {
+  const root = makeGitRoot("coldstart-ac1");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-cs`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+
+  // 幸存 worker 的 worktree（branch task/gap-cs-a）——旧 driver 已 fork、新 driver 冷启动前就在。
+  writeTaskFile(root, "gap-cs-a", "ready");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cs-a", wtPath]);
+  assert.equal(worktreePresentForTask(root, "gap-cs-a"), true, "precondition: survivor worktree present");
+
+  // 存活 worker 进程（cmdline 同时含 quay-task-worker 与 task id——/proc 扫描靠它识别）。
+  const fakeWorker = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, "gap-cs-a"], { stdio: "ignore" });
+  t.after(() => { try { fakeWorker.kill("SIGKILL"); } catch { /* already gone */ } });
+
+  const out = runDriver(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-cs-a'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-cs-a\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--json",
+  ]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(events.some((e) => e.event === "worker-spawned"), false, "AC1: surviving worker's task is NOT re-dispatched");
+  const cs = events.find((e) => e.event === "cold-start-inflight");
+  assert.ok(cs, "the cold-start in-flight enumeration is recorded (not silent)");
+  assert.deepEqual(cs.tasks, ["gap-cs-a"], "the survivor is the enumerated in-flight task");
+  assert.equal(readOutcomeLines(root).length, 0, "zero outcomes — nothing dispatched");
+});
+
+test("AC1 对照 — orphan worktree (no live worker) ⇒ the task IS re-dispatched (the live-worker cross-check is the difference)", async (t) => {
+  const root = makeGitRoot("coldstart-neg");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-neg`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-cs-b", "done");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cs-b", wtPath]);
+  assert.equal(worktreePresentForTask(root, "gap-cs-b"), true, "precondition: orphan worktree present (no live worker)");
+
+  // 无存活 worker ⇒ 冷启动枚举为空 ⇒ gap-cs-b 不被排除 ⇒ 会被派发（worker-spawned 出现）。
+  const rpcFile = path.join(root, "rpc.cnt");
+  const driver = spawn(process.execPath, [
+    "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root,
+    "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n===0?['gap-cs-b']:[],pool:n===0?1:0})"),
+    "--selector-cmd", "node -e console.log('gap-cs-b\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--json",
+  ], { stdio: ["ignore", "pipe", "ignore"] });
+  let buf = "";
+  driver.stdout.on("data", (d) => { buf += d; });
+  await new Promise((resolve) => { driver.on("close", (c) => resolve(c)); });
+  const events = buf.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const spawned = events.filter((e) => e.event === "worker-spawned");
+  assert.equal(spawned.length, 1, "orphan worktree alone does NOT block re-dispatch — the task IS dispatched");
+  assert.equal(spawned[0].task, "gap-cs-b");
+});
+
+test("AC2 (cold-start) — cleanupOrphanWorktree skips a worktree a live worker is using; cleans a true orphan", (t) => {
+  const root = makeGitRoot("coldstart-ac2");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-ac2`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-cs-c", "ready");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cs-c", wtPath]);
+
+  const liveCmdline = "claude -n quay-task-worker -p '... Task: gap-cs-c ...'";
+  // 存活 worker 正在用 ⇒ 跳过（skippedLiveWorker=true，removed=false，worktree 仍在）。
+  const skipped = cleanupOrphanWorktree(root, "gap-cs-c", [liveCmdline]);
+  assert.equal(skipped.removed, false, "AC2: not removed while a live worker uses it");
+  assert.equal(skipped.skippedLiveWorker, true, "the skip is reported as skippedLiveWorker (not 'removed', not 'no worktree')");
+  assert.equal(skipped.error, null);
+  assert.equal(worktreePresentForTask(root, "gap-cs-c"), true, "the shared worktree survives (not deleted)");
+
+  // 无存活 worker（真 orphan）⇒ 清理（对照，证明 skip 是存活校验在起作用，不是永远不清）。
+  const cleaned = cleanupOrphanWorktree(root, "gap-cs-c", []);
+  assert.equal(cleaned.removed, true, "a true orphan (no live worker) IS cleaned");
+  assert.equal(cleaned.skippedLiveWorker, false);
+  assert.equal(worktreePresentForTask(root, "gap-cs-c"), false, "orphan worktree removed");
 });
