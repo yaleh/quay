@@ -13,7 +13,8 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL } from "../src/observation.ts";
+import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readSession } from "../src/observation.ts";
+import { renderSessionPage } from "../src/serve-handlers.ts";
 
 /** Commit helper with a fixed clock (committer date = author date = `t`), per-branch file. */
 function commitAt(ws, msg, t, file = "log.txt") {
@@ -641,4 +642,182 @@ test("back-compat: a legacy `## `-sectioned tick-log still reads ok (serve.test.
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
+});
+
+// ── gap-webui-session-detail-view: single-session view (sessionId addressing + dual-schema parse + path-traversal guard) ──
+
+const SESSION_VIEW_UUID = "01234567-89ab-cdef-89ab-cdef01234567";
+
+test("AC3: isValidSessionId accepts a strict UUID and rejects path/pid/task-id shapes", () => {
+  assert.equal(isValidSessionId(SESSION_VIEW_UUID), true);
+  assert.equal(isValidSessionId("01234567-89AB-CDEF-89AB-CDEF01234567"), true, "case-insensitive");
+  assert.equal(isValidSessionId("../etc/passwd"), false, "relative traversal");
+  assert.equal(isValidSessionId("/etc/passwd"), false, "absolute path");
+  assert.equal(isValidSessionId("..%2f..%2fetc"), false, "encoded traversal");
+  assert.equal(isValidSessionId("3266379"), false, "pid");
+  assert.equal(isValidSessionId("gap-webui-session-detail-view"), false, "task id");
+  assert.equal(isValidSessionId("/home/yale/.claude/x.jsonl"), false, "transcript path");
+  assert.equal(isValidSessionId(""), false);
+});
+
+test("AC3: sessionTranscriptPath is pure — traversal/path/pid/task-id inputs return null, never a path", () => {
+  const home = "/tmp/home-x";
+  assert.equal(sessionTranscriptPath("/home/yale/work/quay", "../etc/passwd", home), null);
+  assert.equal(sessionTranscriptPath("/home/yale/work/quay", "/etc/passwd", home), null);
+  assert.equal(sessionTranscriptPath("/home/yale/work/quay", "3266379", home), null);
+  assert.equal(sessionTranscriptPath("/home/yale/work/quay", "gap-webui-session-detail-view", home), null);
+  assert.equal(sessionTranscriptPath("/home/yale/work/quay", "", home), null);
+});
+
+test("AC1: sessionTranscriptPath derives the transcript from the sessionId (the addressing key), not pid/task/path", () => {
+  const home = "/tmp/home-x";
+  const p = sessionTranscriptPath("/home/yale/work/quay", SESSION_VIEW_UUID, home);
+  assert.equal(p, "/tmp/home-x/.claude/projects/-home-yale-work-quay/01234567-89ab-cdef-89ab-cdef01234567.jsonl");
+});
+
+test("AC1: projectSlug matches session-liveness.sh's tr '/' '-' transform", () => {
+  assert.equal(projectSlug("/home/yale/work/quay"), "-home-yale-work-quay");
+  assert.equal(projectSlug("/tmp/ws"), "-tmp-ws");
+});
+
+test("AC2: transcriptContentBlocks normalizes both string content and block-array content", () => {
+  assert.deepEqual(transcriptContentBlocks("hello"), [{ kind: "text", text: "hello" }]);
+  const blocks = transcriptContentBlocks([
+    { type: "thinking", thinking: "plan" },
+    { type: "text", text: "running" },
+    { type: "tool_use", id: "call_1", name: "Bash", input: { command: "echo hi" } },
+  ]);
+  assert.equal(blocks.length, 3);
+  assert.deepEqual(blocks[0], { kind: "thinking", text: "plan" });
+  assert.deepEqual(blocks[1], { kind: "text", text: "running" });
+  assert.equal(blocks[2].kind, "tool_use");
+  assert.equal(blocks[2].name, "Bash");
+  assert.equal(blocks[2].input, '{\n  "command": "echo hi"\n}');
+});
+
+test("AC2: parseTranscript renders both -p and interactive transcripts (one shared schema family)", () => {
+  // A `-p`/headless record set (SPEC §7.4: user/assistant + thinking/text/tool_use/tool_result blocks).
+  const pRecords = [
+    { type: "user", timestamp: "2026-08-24T00:00:00Z", message: { role: "user", content: "do the thing" } },
+    { type: "assistant", timestamp: "2026-08-24T00:00:01Z", message: { role: "assistant", content: [
+      { type: "thinking", thinking: "let me think" },
+      { type: "text", text: "running a command" },
+      { type: "tool_use", id: "call_1", name: "Bash", input: { command: "echo hi" } },
+    ] } },
+    { type: "user", timestamp: "2026-08-24T00:00:02Z", message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "call_1", content: "hi\n", is_error: false },
+    ] } },
+  ].map((o) => JSON.stringify(o)).join("\n");
+  const p = parseTranscript(pRecords);
+  assert.equal(p.length, 3);
+  assert.equal(p[0].role, "user");
+  assert.equal(p[0].blocks[0].kind, "text");
+  assert.equal(p[1].blocks.length, 3);
+  assert.equal(p[1].blocks[0].kind, "thinking");
+  assert.equal(p[1].blocks[2].kind, "tool_use");
+  assert.equal(p[1].blocks[2].name, "Bash");
+  assert.equal(p[2].blocks[0].kind, "tool_result");
+  assert.equal(p[2].blocks[0].toolUseId, "call_1");
+  assert.equal(p[2].blocks[0].isError, false);
+
+  // An interactive transcript is a superset (SPEC §7.4): extra system/mode record types that carry no
+  // `message` are skipped, the user/assistant records parse on the same path.
+  const interactiveRecords = [
+    { type: "system", timestamp: "2026-08-24T00:00:00Z", subtype: "init" },
+    { type: "user", timestamp: "2026-08-24T00:00:01Z", message: { role: "user", content: "hi" } },
+    { type: "assistant", timestamp: "2026-08-24T00:00:02Z", message: { role: "assistant", content: [{ type: "text", text: "hello" }] } },
+  ].map((o) => JSON.stringify(o)).join("\n");
+  const i = parseTranscript(interactiveRecords);
+  assert.equal(i.length, 2, "system records (no message) are skipped");
+  assert.equal(i[0].role, "user");
+  assert.equal(i[1].blocks[0].kind, "text");
+  assert.equal(i[1].blocks[0].text, "hello");
+});
+
+test("AC2: readTranscript reads the tail and parses structured blocks (not the 3-message preview)", () => {
+  const p = path.join(os.tmpdir(), `obs-tx-${process.pid}.jsonl`);
+  try {
+    fs.writeFileSync(p, [
+      JSON.stringify({ type: "user", timestamp: "2026-08-24T00:00:00Z", message: { role: "user", content: "go" } }),
+      JSON.stringify({ type: "assistant", timestamp: "2026-08-24T00:00:01Z", message: { role: "assistant", content: [
+        { type: "text", text: "ok" },
+        { type: "tool_use", id: "call_9", name: "Read", input: { file_path: "/x" } },
+      ] } }),
+    ].join("\n"));
+    const r = readTranscript(p);
+    assert.equal(r.status, "ok");
+    assert.equal(r.turns.length, 2);
+    assert.equal(r.turns[1].blocks[1].kind, "tool_use");
+    assert.equal(r.turns[1].blocks[1].input, '{\n  "file_path": "/x"\n}');
+  } finally {
+    fs.rmSync(p, { force: true });
+  }
+});
+
+test("AC1/AC3: readSession resolves by sessionId (home-injected) and refuses non-UUID inputs", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "obs-sess-home-"));
+  const root = "/home/yale/work/quay";
+  const tp = path.join(home, ".claude", "projects", projectSlug(root), `${SESSION_VIEW_UUID}.jsonl`);
+  fs.mkdirSync(path.dirname(tp), { recursive: true });
+  fs.writeFileSync(tp, [
+    JSON.stringify({ type: "user", timestamp: "2026-08-24T00:00:00Z", message: { role: "user", content: "hello" } }),
+    JSON.stringify({ type: "assistant", timestamp: "2026-08-24T00:00:01Z", message: { role: "assistant", content: [{ type: "text", text: "hi" }] } }),
+  ].join("\n"));
+  try {
+    const ok = readSession(root, SESSION_VIEW_UUID, home);
+    assert.equal(ok.status, "ok");
+    assert.equal(ok.turns.length, 2);
+    assert.equal(ok.sessionId, SESSION_VIEW_UUID);
+
+    const bad = readSession(root, "../etc/passwd", home);
+    assert.equal(bad.status, "empty");
+    assert.equal(bad.transcriptPath, null);
+    assert.match(bad.reason || "", /非法/, "traversal input is rejected before any disk read");
+
+    const missing = readSession(root, "00000000-0000-0000-0000-000000000000", home);
+    assert.equal(missing.status, "empty");
+    assert.match(missing.reason || "", /缺失/, "valid UUID with no transcript is an honest empty state");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("AC2: renderSessionPage renders structured blocks — tool_use/tool_result paired + thinking marked, never a flat dump", () => {
+  const turns = parseTranscript([
+    { type: "user", timestamp: "2026-08-24T00:00:00Z", message: { role: "user", content: "run it" } },
+    { type: "assistant", timestamp: "2026-08-24T00:00:01Z", message: { role: "assistant", content: [
+      { type: "thinking", thinking: "THINKING-MARKER" },
+      { type: "tool_use", id: "call_1", name: "Bash", input: { command: "INPUT-MARKER" } },
+    ] } },
+    { type: "user", timestamp: "2026-08-24T00:00:02Z", message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "call_1", content: "RESULT-MARKER", is_error: false },
+    ] } },
+  ].map((o) => JSON.stringify(o)).join("\n"));
+
+  const html = renderSessionPage({
+    status: "ok",
+    reason: null,
+    sessionId: SESSION_VIEW_UUID,
+    transcriptPath: "/tmp/x.jsonl",
+    turns,
+  });
+
+  // Structured, collapsible blocks — not a flat text dump.
+  assert.ok(html.includes("<details"), "renders <details> collapse units");
+  assert.ok(html.includes("tx-tool-pair"), "tool_use renders as a marked pair block");
+  assert.ok(html.includes("tx-thinking"), "thinking renders as a distinguishable block");
+
+  // tool_use and its tool_result are PAIRED: the result lives INSIDE the pair's <details>, exactly once.
+  assert.equal(html.split("RESULT-MARKER").length, 2, "result appears exactly once (absorbed into the pair, not duplicated)");
+  const pairStart = html.indexOf("tx-tool-pair");
+  const pairEnd = html.indexOf("</details>", pairStart);
+  const pairBody = html.slice(pairStart, pairEnd);
+  assert.ok(pairBody.includes("INPUT-MARKER"), "pair body carries the tool_use input");
+  assert.ok(pairBody.includes("RESULT-MARKER"), "pair body carries the tool_result (paired, not a separate block)");
+  assert.ok(pairBody.includes("tool_use · Bash"), "pair summary labels the tool");
+
+  // thinking is distinguishable by its own marked block (not flattened into text).
+  const thinkStart = html.indexOf("tx-thinking");
+  const thinkEnd = html.indexOf("</details>", thinkStart);
+  assert.ok(html.slice(thinkStart, thinkEnd).includes("THINKING-MARKER"), "thinking block carries the thinking text");
 });
