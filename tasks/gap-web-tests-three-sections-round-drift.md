@@ -2,7 +2,7 @@
 id: gap-web-tests-three-sections-round-drift
 title: web tests 页三板块显示三个不同 round（负载曲线=当前 runId vs 时间线静默回退带 perFile 的旧轮 vs 历史表
   runs[0]）——静默回退制造数据假象
-status: ready
+status: done
 labels:
   - gap
 parent: null
