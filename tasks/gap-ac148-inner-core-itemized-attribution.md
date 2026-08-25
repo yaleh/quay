@@ -1,7 +1,7 @@
 ---
 id: gap-ac148-inner-core-itemized-attribution
 title: AC148 inner 执行核逐条归属——fast-mode-tick-core A1-A26+B1-B5 每条三分类之一，⛔ 不得有未分类项
-status: done
+status: ready
 labels:
   - gap
   - feature
