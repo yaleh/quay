@@ -31,5 +31,9 @@ needs-human 显式承接界面落地；AC1/AC2 全勾；现有 3 条 needs-human
 
 ## Touches
 
-- packages/quay/src/ 或 plugin/scripts/（needs-human 承接界面 / 文件 / 通知）
-- tasks/gap-ac146-human-interface-explicit-owner.md（自身）
+- packages/quay/src/serve-needs-human.ts
+- packages/quay/src/serve-handlers.ts
+- packages/quay/src/serve-render.ts
+- packages/quay/src/observation.ts
+- packages/quay/test/serve-needs-human.test.mjs
+- tasks/gap-ac146-human-interface-explicit-owner.md
