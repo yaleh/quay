@@ -1,7 +1,7 @@
 ---
 id: gap-not-evaluated-harness-third-state
 title: NOT-EVALUATED 在 harness 层结构上无法兑现——run_checker 只有二值，exit 2 承载三种互不相容含义（硬规则 3b 架构级缺口）
-status: ready
+status: done
 labels:
   - gap
   - defect
