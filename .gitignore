@@ -43,6 +43,10 @@ packages/quay/plugin/
 **/.quay/gate-events.jsonl
 **/.quay/supervisor-bus-ledger.jsonl
 **/.quay/inner-wakeup-heartbeat-refusals.jsonl
+# serve-send.ts runtime message-delivery receipts (SendMessage cross-session delivery record) — runtime
+# state, never git-tracked; same gitignored runtime-state family as gate-events.jsonl. A live file here
+# dirtied the checkout and made fan-in-ff-merge refuse (unrelated to the blocked task's code).
+**/.quay/message-receipts.jsonl
 # gap-ac115-spec-phase1-drive-single-worker (2026-08-22): the worker driver's per-task outcome record
 # (.quay/worker-outcome.jsonl) — runtime state, one line per driven task (SPEC-worker-driven-inner §4③:
 # outer reads it for cross-task checks, never git-tracked). Same gitignored runtime-state family as
