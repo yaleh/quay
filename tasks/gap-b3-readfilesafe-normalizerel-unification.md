@@ -1,7 +1,7 @@
 ---
 id: gap-b3-readfilesafe-normalizerel-unification
 title: B3·readFileSafe(4)+normalizeRel(4) 合一——各 →1（canonicalTestFiles 已另立）
-status: todo
+status: ready
 labels:
   - gap
   - feature
