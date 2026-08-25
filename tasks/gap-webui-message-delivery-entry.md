@@ -1,7 +1,7 @@
 ---
 id: gap-webui-message-delivery-entry
 title: web 消息投递入口（复用 send-to-session 协议 + 投递四态真实显示）
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -23,8 +23,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，共享实现）：web 发送入口与 `send-to-session.ts` 用同一模块（⛔ 两份实现 ⇒ 假）。
-- [ ] AC2（能取假，真实状态）：响应显示投递四态（delivered/held/expired/error），held→expired 路径可观测（⛔ 只显示 success:true 而无 held/expired 态 ⇒ 假）。
+- [x] AC1（能取假，共享实现）：web 发送入口与 `send-to-session.ts` 用同一模块（⛔ 两份实现 ⇒ 假）。
+- [x] AC2（能取假，真实状态）：响应显示投递四态（delivered/held/expired/error），held→expired 路径可观测（⛔ 只显示 success:true 而无 held/expired 态 ⇒ 假）。
 
 ## Definition of Done
 
@@ -34,5 +34,7 @@ extra:
 
 - plugin/scripts/send-to-session.ts（提炼 importable 模块）
 - packages/quay/src/serve-send.ts（/send handler）
+- packages/quay/src/serve-handlers.ts（/send 路由注册 + re-export barrel）
+- packages/quay/src/serve-sessions.ts（/session/<id> 页投递表单入口）
 - packages/quay/test/serve-handlers.test.mjs（对应测试）
 - tasks/gap-webui-message-delivery-entry.md（自身）
