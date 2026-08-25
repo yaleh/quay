@@ -1,7 +1,7 @@
 ---
 id: gap-tests-round-load-curve-time-window-clip
 title: /tests?round=N 负载曲线未按该轮时间窗裁剪——显示窗外数据（1552.6s vs 真实 437.5s）
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -30,7 +30,7 @@ extra: {}
 
 ## Definition of Done
 
-主 round 页负载曲线按时间窗裁剪；AC1-2 全勾；两处消费同一份数据都防。
+主 round 页负载曲线按 `[startedAt, startedAt+durationMs]` 时间窗裁剪、不显示窗外数据；AC1-2 全勾；两处（/tests/file 与主 round 页）复用同一时间窗过滤逻辑；对应测试通过。
 
 ## Touches
 
