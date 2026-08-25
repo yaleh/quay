@@ -1,7 +1,7 @@
 ---
 id: gap-web-server-access-logging
 title: web server 加访问日志（方法+路径+时间戳，可推热点页面/访问模式）
-status: ready
+status: done
 labels:
   - gap
   - feature
