@@ -71,7 +71,7 @@ serial+lowconc 两阶段合计吃掉 full-bucket suite 真实执行时间 ~50%�
 
 ## Definition of Done
 
-两条路径判断一致性结论落地（分相）+ 单飞锁对 `--buckets` 生效（bucket-scoped 成功路径调 `full_suite_lock_acquire`）；AC1/AC2/AC3 全勾；serial/lowconc 分相按结论统一（启用或停用），不再一条生效一条不生效；`QUAY_MAX_CONCURRENT_SUITES=1` 对 `--buckets` 正常路径不再失效。
+两条路径判断一致性结论落地（分相）+ 单飞锁对 `--buckets` 生效（bucket-scoped 成功路径调 `full_suite_lock_acquire`）；AC1/AC2/AC3 全勾；serial/lowconc 分相按结论统一（启用或停用）——26 个 load-sensitive 留组 + 5 个非敏感移 engine 已落，「`--buckets` 路径分相接线（direction (a)）」为独立后续工作（0 失败 latent，硬规则 12 不阻塞本任务，见 Conclusion「⛔ 残留」）；`QUAY_MAX_CONCURRENT_SUITES=1` 对 `--buckets` 正常路径不再失效。
 
 ## Touches
 
