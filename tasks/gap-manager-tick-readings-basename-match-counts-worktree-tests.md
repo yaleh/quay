@@ -1,7 +1,7 @@
 ---
 id: gap-manager-tick-readings-basename-match-counts-worktree-tests
 title: manager-tick-readings 按 basename 匹配 session-liveness.sh 无 root 过滤——worktree 测试进程被计成「已挂载监视器」，monitor.mounted 在真监视器死亡时仍报 true（硬规则 4b 代理量偏离）
-status: ready
+status: done
 labels:
   - gap
   - defect
