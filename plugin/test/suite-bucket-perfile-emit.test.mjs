@@ -10,9 +10,10 @@
 // the --buckets branch now loads the SAME `suite_reporter_flags` the full-suite path already uses.
 //
 // Covered here:
-//   - AC1 (structural pin): both `node --test` invocations in the --buckets branch carry
-//     $(suite_reporter_flags) — the exact anti-regression shape measure-suite-reporter.test.mjs pins
-//     for the full-suite path, now extended to the bucket path.
+//   - AC1 (structural pin): the --buckets branch runs suite-lpt-runner.mjs (gap-m-bucket-long-tail-
+//     lpt-scheduling), and the runner composes measure-suite-reporter via stream.compose — the
+//     run({files}) path IGNORES --test-reporter CLI flags, so the per-file reporter must be composed
+//     (or a red bucket round emits no __PERFILE__ lines).
 //   - AC2 (take-false): a red test run under those reporter flags EMITS a `__PERFILE__ ... passed=false`
 //     line naming the file, and full-suite-runner.ts's parser (isFailureLine + extractFailureFile)
 //     attributes that line to the specific file.
@@ -43,19 +44,17 @@ function bucketsBranchSrc(testSh) {
   return slice.join("\n");
 }
 
-test("AC1 — both --buckets node --test invocations carry $(suite_reporter_flags) (per-file attribution wiring)", () => {
+test("AC1 — the --buckets branch runs suite-lpt-runner.mjs which wires the measure-suite reporter (per-file attribution)", () => {
   const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
   const branch = bucketsBranchSrc(testSh);
-  const nodeTestLines = branch.split("\n").filter((l) => /^\s*node --test\b/.test(l));
-  // The --buckets branch has exactly two direct node --test sites (explicit-concurrency + derived-default).
-  assert.ok(nodeTestLines.length >= 2, `expected >=2 node --test lines in the --buckets branch, got ${nodeTestLines.length}`);
-  for (const l of nodeTestLines) {
-    assert.match(
-      l,
-      /\$\(suite_reporter_flags\)/,
-      `--buckets node --test line must carry $(suite_reporter_flags) so a red bucket round emits __PERFILE__: ${l.trim()}`
-    );
-  }
+  // The --buckets branch now hands its (LPT-ordered) file list to suite-lpt-runner.mjs
+  // (gap-m-bucket-long-tail-lpt-scheduling) — node:test run({files}) is the only path that
+  // preserves argv order, and it IGNORES --test-reporter CLI flags, so the per-file reporter must
+  // be composed in the runner (stream.compose) or a red bucket round emits no __PERFILE__ lines.
+  assert.match(branch, /suite-lpt-runner\.mjs/, "the --buckets branch must invoke suite-lpt-runner.mjs");
+  const runnerSrc = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "suite-lpt-runner.mjs"), "utf8");
+  assert.match(runnerSrc, /measure-suite-reporter\.mjs/, "the runner must import the measure-suite reporter");
+  assert.match(runnerSrc, /stream\.compose\(perFileReporter\)/, "the runner must compose the per-file reporter via stream.compose (CLI flags are ignored by run())");
 });
 
 test("AC2 take-false — a red test under the reporter flags emits __PERFILE__ ... passed=false and the parser attributes the file", () => {

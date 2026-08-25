@@ -33,6 +33,6 @@ extra:
 ## Touches
 
 - plugin/scripts/send-to-session.ts（提炼 importable 模块）
-- packages/quay/src/serve-handlers.ts（/send 或等价 handler）
+- packages/quay/src/serve-send.ts（/send handler）
 - packages/quay/test/serve-handlers.test.mjs（对应测试）
 - tasks/gap-webui-message-delivery-entry.md（自身）

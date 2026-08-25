@@ -24,7 +24,9 @@ import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
-const SERVE_HANDLERS = path.join(__dirname, "..", "src", "serve-handlers.ts");
+// gap-serve-handlers-split-by-concern: the rendering code (pageStyles + verdict classes) moved to
+// serve-render.ts; the AC102② zero-hex + token-derived invariant now pins that file.
+const SERVE_RENDER = path.join(__dirname, "..", "src", "serve-render.ts");
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -94,10 +96,10 @@ test("AC102① — all 15 views' response HTML contains the Modernist token char
   }
 });
 
-test("AC102② — serve-handlers.ts rendering code carries zero hardcoded 6-digit hex", () => {
-  const src = fs.readFileSync(SERVE_HANDLERS, "utf8");
+test("AC102② — serve-render.ts rendering code carries zero hardcoded 6-digit hex", () => {
+  const src = fs.readFileSync(SERVE_RENDER, "utf8");
   const hex = src.match(/#[0-9a-fA-F]{6}/g) || [];
-  assert.deepEqual(hex, [], `AC102②: zero hardcoded hex in serve-handlers.ts (got ${hex.length}: ${hex.join(", ")})`);
+  assert.deepEqual(hex, [], `AC102②: zero hardcoded hex in serve-render.ts (got ${hex.length}: ${hex.join(", ")})`);
   // The pageStyles base sheet is token-derived too (colours via var(--color-*), not legacy hex).
   assert.ok(src.includes("color: var(--color-accent-700)"), "shared base verdict class is token-derived");
 });

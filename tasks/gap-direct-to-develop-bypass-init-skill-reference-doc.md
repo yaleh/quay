@@ -1,7 +1,7 @@
 ---
 id: gap-direct-to-develop-bypass-init-skill-reference-doc
 title: bypass-check 豁免面缺 plugin/skills/init/——reference-doc 索引行被误判 code-surface（发生率 2）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -23,8 +23,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，init/SKILL.md 豁免）：`plugin/skills/init/SKILL.md` 的 reference-doc 索引行不再判 bypass（同 manager/SKILL.md 豁免）；（⛔ 仍判 bypass ⇒ 假）。
-- [ ] AC2（能取假，不扩大豁免面）：豁免只覆盖 `plugin/skills/init/`（docs skill 目录），其它 `plugin/skills/*` 或 `plugin/scripts/*` 仍判 code-surface；（⛔ 豁免扩大到非 docs ⇒ 假）。
+- [x] AC1（能取假，init/SKILL.md 豁免）：`plugin/skills/init/SKILL.md` 的 reference-doc 索引行不再判 bypass（同 manager/SKILL.md 豁免）；（⛔ 仍判 bypass ⇒ 假）。
+- [x] AC2（能取假，不扩大豁免面）：豁免只覆盖 `plugin/skills/init/`（docs skill 目录），其它 `plugin/skills/*` 或 `plugin/scripts/*` 仍判 code-surface；（⛔ 豁免扩大到非 docs ⇒ 假）。
 
 ## Definition of Done
 

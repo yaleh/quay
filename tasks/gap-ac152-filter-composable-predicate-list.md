@@ -1,7 +1,7 @@
 ---
 id: gap-ac152-filter-composable-predicate-list
 title: AC152 Filter 可组合谓词列表（两 driver 共用，⛔ 非各 kind 私有分支）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -43,11 +43,11 @@ notNeedsHuman          promotion 有    worker 无
 
 判据正本在 `orchestration/manager-phase-goal.md` `### AC152`（⛔ 取假形态不在此复制）。
 
-- [ ] AC1：五个谓词是可组合列表元素，promotion/worker 两 driver 共用；给两个 driver 同时新增一个谓词只需改一处（⛔ 需改两处以上 ⇒ 假）；取假见正本 AC152。
+- [x] AC1：五个谓词是可组合列表元素，promotion/worker 两 driver 共用；给两个 driver 同时新增一个谓词只需改一处（⛔ 需改两处以上 ⇒ 假）；取假见正本 AC152。
 
 ## Definition of Done
 
-- [ ] Filter 谓词列表单一实现 + 两 driver 共用落地；AC1 全勾；land 到 develop。
+- [x] Filter 谓词列表单一实现 + 两 driver 共用落地；AC1 全勾；land 到 develop。
 
 ## Retires
 
@@ -59,6 +59,8 @@ notNeedsHuman          promotion 有    worker 无
 - plugin/scripts/worker-driver.ts（派发前过滤改消费 filter 列表）
 - plugin/scripts/promotion-driver.ts（派发前过滤改消费 filter 列表）
 - plugin/scripts/ready-pool-check.ts（depsSatisfied/touchesDisjoint 谓词复用）
+- plugin/scripts/capability-catalog.sh（driver-filters.ts 六表注册）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数 287→288）
 - plugin/test/driver-filters.test.mjs（新 test）
 - plugin/test/worker-driver.test.mjs（test）
 - plugin/test/promotion-driver.test.mjs（test）

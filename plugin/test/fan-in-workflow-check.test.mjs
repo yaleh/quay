@@ -695,6 +695,20 @@ test("PURE escalatedTaskIds — unique sorted task ids from escalation records",
   assert.deepEqual(escalatedTaskIds([]), []);
 });
 
+test("PURE escalatedTaskIds — a quiet-window-resolved record is NOT an escalation (gap-fan-in-ff-livelock-quiet-window-no-consumer)", (t) => {
+  // The escalation file now carries BOTH ff-escalation (request) and quiet-window-resolved
+  // (resolution, written by fan-in-ff-merge.sh on ff success). A resolution is the FULFILLMENT of a
+  // request, not a NEW escalation — it must not pollute 判据2(d) traceability.
+  const es = parseEscalations([
+    JSON.stringify({ event: "ff-escalation", taskId: "gap-livelock", attempt: 3 }),
+    JSON.stringify({ event: "quiet-window-resolved", taskId: "gap-livelock" }),
+  ].join("\n"));
+  assert.deepEqual(escalatedTaskIds(es), ["gap-livelock"], "the task appears once (the request), not twice");
+  // A file holding ONLY a resolution contributes no escalated task.
+  const onlyResolved = parseEscalations(JSON.stringify({ event: "quiet-window-resolved", taskId: "gap-landed" }) + "\n");
+  assert.deepEqual(escalatedTaskIds(onlyResolved), [], "a bare resolution is not an escalation");
+});
+
 test("PURE checkEscalationTraceability — every escalated task has a Workflow call ⇒ GREEN", (t) => {
   const v = checkEscalationTraceability(
     ["gap-ac63-judgment2-no-carrier"],

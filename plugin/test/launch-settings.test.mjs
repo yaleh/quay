@@ -244,6 +244,32 @@ test("AC6 — negative control: removing _launchSpec.promptSuggestions drops the
   }
 });
 
+// ── gap-worker-print-bg-wait-ceiling-600s (a)：task-worker 主修法 env PRINT_BG_WAIT_CEILING_MS=0 ───────
+
+test("AC1 (a) — task-worker env carries CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 (non-empty, survives merge)", () => {
+  const s = readSettings();
+  const tw = s._launchSpec.roles["task-worker"].env;
+  assert.equal(tw.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, "0",
+    "task-worker must set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 (⛔ empty string = delete-key, would not survive the SETTINGS_ARG merge)");
+  // 只 task-worker（主修法只针对 worker 会话）；outer/inner 无角色级 env、manager 只 unset 917k。
+  for (const role of ["outer", "inner", "manager", "selector", "fix-worker"]) {
+    assert.ok(!("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS" in s._launchSpec.roles[role].env),
+      `${role} must NOT set the worker ceiling var (task-worker only)`);
+  }
+});
+
+test("AC1 (a) — launcher materializes CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 into the task-worker --settings env", () => {
+  const tw = extractSettingsArg(launch("task-worker", ["--dry-run"]).stdout.trim());
+  assert.equal(tw.env?.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, "0",
+    "task-worker --settings env must carry the var (the launcher's SETTINGS_ARG merge keeps non-empty values)");
+  // 917k 顶层 env 仍保留（task-worker 是 deepseek 角色，加角色级 env 不丢顶层 env——改 launch.settings.json
+  // 动了 SETTINGS_ARG 分支，但空串=删键语义未破坏，非空值照常合并）。
+  assert.equal(tw.env?.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "917000", "task-worker still inherits the 917k top-level env");
+  // 负控制：outer 仍传文件逐字（无角色级 env ⇒ 不合并、不加 worker ceiling 变量）。
+  const outer = extractSettingsArg(launch("outer", ["--dry-run"]).stdout.trim());
+  assert.equal(outer.__file, SETTINGS, "outer still passes the checked-in file verbatim");
+});
+
 // ── Settings schema conformance (root additionalProperties tolerated; _launchSpec is the only extension) ──
 
 test("AC7 — the settings file loads cleanly under claude --settings (no validation error)", () => {

@@ -1,23 +1,27 @@
 // @test-group engine
-// suite-lpt-order.test.mjs — RED/GREEN tests for the M-bucket LPT ordering
+// suite-lpt-order.test.mjs — RED/GREEN tests for the M-bucket LPT ordering + run({files}) runner
 // (gap-m-bucket-long-tail-lpt-scheduling).
 //
-// Defect: scripts/test.sh handed the M-bucket file list to `node --test` in glob/discovery order, so
-// the 150–290s long tests that landed at the END of the list waited for the short tests to drain the
-// lanes and serialized into a long tail (measured round 474/476/478: last 5% of files = 27%+ of wall
-// clock). The fix: scripts/test.sh --buckets now LPT-orders the selected list — longest-KNOWN files
-// FIRST — using the EXISTING per-file carrier (.quay/verification-round.jsonl perFile[].durationMs,
-// rolling average of the most recent rounds), via plugin/scripts/suite-lpt-order.ts.
+// Two halves, one defect:
+//   1. suite-lpt-order.ts — the ORDERING helper: reads .quay/verification-round.jsonl
+//      perFile[].durationMs (rolling average of the last --rounds) and reorders longest-known-first
+//      (LPT). Scheduling-only (every file emitted exactly once) + FAIL-OPEN (no history ⇒ unchanged).
+//   2. suite-lpt-runner.mjs — the DELIVERY half: `node --test <file...>` re-sorts positional globs
+//      alphabetically (createTestFileList → ArrayPrototypeSort) ⇒ the LPT order was being discarded.
+//      run({files}) passes the array straight through ⇒ order preserved. The runner composes
+//      spec→stdout and measure-suite-reporter→stderr via stream.compose (NOT --test-reporter flags).
 //
-// Covered here:
-//   - AC1 (structural pin): the --buckets branch of scripts/test.sh wires suite-lpt-order.ts behind the
-//     QUAY_TEST_LPT_ORDER gate — removing the wiring flips the suite red.
-//   - AC2 (take-false): orderByLpt sorts longest-known-first and keeps unknowns at the END (stable,
-//     original relative order), so a known-long file lands in the first N.
-//   - AC3 (fail-open): an absent carrier ⇒ the input list is emitted UNCHANGED (no history ⇒ current
-//     behavior, never a dropped/empty file list).
-//   - AC4 (normalization): repoRelKey folds a worktree absolute path and a main-checkout absolute path
-//     to the SAME repo-relative key, so round-to-round durations match across worktree variants.
+// Covered here (matching the task's AC numbering):
+//   - AC1 (take-false, both directions): run({files}) spawn order follows files[] — forward
+//     z→m→a AND reverse a→m→z both follow (alphabetical would be a→m→z both times ⇒ red).
+//   - AC2 (take-false, first-M): at concurrency M, the first M spawned files = the first M of the
+//     input list (the long tests grab lanes FIRST instead of serializing at the tail).
+//   - AC5 (take-false, reporter not starved): the runner's stream.compose(perFileReporter) still
+//     emits __PERFILE__ duration_ms=<d> <path> passed=<bool> — the LPT ordering's OWN input carrier
+//     (break it and LPT has no duration data ⇒ self-defeating).
+//   - ordering helpers: repoRelKey normalization, orderByLpt LPT sort, loadDurationAverages
+//     rolling-average + malformed-line tolerance, fail-open on an absent carrier, and the
+//     --buckets branch wiring behind QUAY_TEST_LPT_ORDER.
 //
 // Run:
 //   scripts/test.sh plugin/test/suite-lpt-order.test.mjs
@@ -31,9 +35,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { repoRelKey, loadDurationAverages, orderByLpt } from "../scripts/suite-lpt-order.ts";
+import { parseRunnerArgs } from "../scripts/suite-lpt-runner.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const RUNNER = path.join(REPO_ROOT, "plugin", "scripts", "suite-lpt-runner.mjs");
 
 /** Slice the `--buckets` elif branch out of scripts/test.sh (bounded by the next `elif`). */
 function bucketsBranchSrc(testSh) {
@@ -62,14 +68,57 @@ function makeRootWithCarrier(rounds) {
   return root;
 }
 
-test("AC1 — the --buckets branch wires suite-lpt-order.ts behind the QUAY_TEST_LPT_ORDER gate", () => {
+// ── synthetic scratch files (os.tmpdir(), NOT the repo — R8: a repo-rooted mkdtemp dirties the
+// shared checkout; and collectTestFiles walks packages/plugin/experiments and would count a
+// transient .test.mjs under plugin/test/). Each file appends "START <name>" to $SPAWN_LOG at module
+// load (its FIRST statement) so the log order = the spawn order, then optionally sleeps so the
+// concurrency-M first-wave stays alive while the lanes are full. ────────────────────────────────────
+function makeSpawnProbeFile(dir, name, { sleepMs = 0 } = {}) {
+  const sleepLine = sleepMs > 0 ? `await new Promise((r) => setTimeout(r, ${sleepMs}));` : "";
+  const file = path.join(dir, `${name}.test.mjs`);
+  fs.writeFileSync(
+    file,
+    `import { appendFileSync } from "node:fs";\n` +
+      `appendFileSync(process.env.SPAWN_LOG, "START ${name}\\n");\n` +
+      `${sleepLine}\n` +
+      `import { test } from "node:test";\n` +
+      `import assert from "node:assert/strict";\n` +
+      `test("${name}", () => assert.equal(1, 1));\n`,
+  );
+  return file;
+}
+
+/** Spawn the runner against the given probe files (concurrency rides in execArgv, as test.sh does)
+ *  and return { code, stderr, spawnLog } (spawnLog = the synthetic files' append log, one line per
+ *  file in spawn order). NODE_TEST_CONTEXT is stripped so the child run() is not treated as nested. */
+function runProbe(probeFiles, { concurrency, logFile }) {
+  const childEnv = { ...process.env };
+  delete childEnv.NODE_TEST_CONTEXT;
+  childEnv.SPAWN_LOG = logFile;
+  const r = spawnSync(
+    process.execPath,
+    [`--test-concurrency=${concurrency}`, RUNNER, ...probeFiles],
+    { cwd: REPO_ROOT, encoding: "utf8", env: childEnv },
+  );
+  let spawnLog = "";
+  try {
+    spawnLog = fs.readFileSync(logFile, "utf8");
+  } catch {
+    // no probe file ran — leave empty so the assertion below fails loudly
+  }
+  return { code: r.status, stderr: r.stderr, spawnLog };
+}
+
+// ══ ordering-helper tests (suite-lpt-order.ts) ════════════════════════════════════════════════════
+
+test("ordering — the --buckets branch wires suite-lpt-order.ts behind the QUAY_TEST_LPT_ORDER gate", () => {
   const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
   const branch = bucketsBranchSrc(testSh);
   assert.match(branch, /suite-lpt-order\.ts/, "the --buckets branch must invoke suite-lpt-order.ts");
   assert.match(branch, /QUAY_TEST_LPT_ORDER/, "the wiring must sit behind the QUAY_TEST_LPT_ORDER rollback gate");
 });
 
-test("AC2 — orderByLpt sorts longest-known-first and keeps unknowns at the END in original order", () => {
+test("ordering — orderByLpt sorts longest-known-first and keeps unknowns at the END in original order", () => {
   const root = "/home/yale/work/quay";
   const avg = new Map([
     ["plugin/test/long-a.test.mjs", 240],
@@ -94,7 +143,7 @@ test("AC2 — orderByLpt sorts longest-known-first and keeps unknowns at the END
   );
 });
 
-test("AC2b — a known-long file lands in the first N (N = known-long count) of the sorted list", () => {
+test("ordering — a known-long file lands in the first N (N = known-long count) of the sorted list", () => {
   const root = "/home/yale/work/quay";
   const avg = new Map([
     ["plugin/test/long.test.mjs", 200],
@@ -110,7 +159,7 @@ test("AC2b — a known-long file lands in the first N (N = known-long count) of 
   assert.equal(out.length, input.length, "every file is emitted exactly once (no drop, no dup)");
 });
 
-test("AC3 — absent carrier ⇒ loadDurationAverages is empty (fail-open: no history, no reorder)", () => {
+test("ordering — absent carrier ⇒ loadDurationAverages is empty (fail-open: no history, no reorder)", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "lpt-empty-"));
   try {
     const avg = loadDurationAverages(path.join(root, ".quay", "verification-round.jsonl"), root, 3);
@@ -123,14 +172,14 @@ test("AC3 — absent carrier ⇒ loadDurationAverages is empty (fail-open: no hi
   }
 });
 
-test("AC3b — a short/empty helper result never empties the list (spawnSync round-trip over an absent carrier)", () => {
+test("ordering — a short/empty helper result never empties the list (spawnSync round-trip over an absent carrier)", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "lpt-spawn-"));
   try {
     const helper = path.join(REPO_ROOT, "plugin", "scripts", "suite-lpt-order.ts");
     const r = spawnSync(
       process.execPath,
       ["--no-warnings", "--experimental-strip-types", helper, "--root", root, "--rounds", "3"],
-      { input: "plugin/test/a.test.mjs\nplugin/test/b.test.mjs\n", encoding: "utf8" }
+      { input: "plugin/test/a.test.mjs\nplugin/test/b.test.mjs\n", encoding: "utf8" },
     );
     assert.equal(r.status, 0, `helper must exit 0 (stderr: ${r.stderr})`);
     // No carrier ⇒ input unchanged (a.test.mjs then b.test.mjs).
@@ -140,7 +189,7 @@ test("AC3b — a short/empty helper result never empties the list (spawnSync rou
   }
 });
 
-test("AC4 — repoRelKey folds worktree + main-checkout absolute paths to the same repo-relative key", () => {
+test("ordering — repoRelKey folds worktree + main-checkout absolute paths to the same repo-relative key", () => {
   const root = "/home/yale/work/quay";
   assert.equal(
     repoRelKey("/home/yale/work/quay-worktrees/gap-x-abc/plugin/test/foo.test.mjs", root),
@@ -159,7 +208,7 @@ test("AC4 — repoRelKey folds worktree + main-checkout absolute paths to the sa
   );
 });
 
-test("AC5 — loadDurationAverages takes a rolling average over the most recent rounds and tolerates malformed lines", () => {
+test("ordering — loadDurationAverages takes a rolling average over the most recent rounds and tolerates malformed lines", () => {
   const root = makeRootWithCarrier([
     [
       ["plugin/test/x.test.mjs", 100],
@@ -178,4 +227,93 @@ test("AC5 — loadDurationAverages takes a rolling average over the most recent 
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ══ runner tests (suite-lpt-runner.mjs) — the task's AC1 / AC2 / AC5 ═══════════════════════════════
+
+test("AC1 — run({files}) spawn order follows files[] in BOTH directions (forward z→m→a and reverse a→m→z)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lpt-ac1-"));
+  try {
+    const z = makeSpawnProbeFile(dir, "z");
+    const m = makeSpawnProbeFile(dir, "m");
+    const a = makeSpawnProbeFile(dir, "a");
+    // Forward: z, m, a. Alphabetical would be a, m, z — a DIFFERENT order ⇒ take-false.
+    const fwd = runProbe([z, m, a], { concurrency: 1, logFile: path.join(dir, "fwd.log") });
+    assert.equal(fwd.code, 0, `forward run must exit 0 (stderr: ${fwd.stderr})`);
+    assert.equal(fwd.spawnLog, "START z\nSTART m\nSTART a\n", "forward spawn order must follow files[] (z→m→a)");
+    // Reverse: a, m, z. Same set, reversed input ⇒ reversed spawn — alphabetical would be identical.
+    const rev = runProbe([a, m, z], { concurrency: 1, logFile: path.join(dir, "rev.log") });
+    assert.equal(rev.code, 0, `reverse run must exit 0 (stderr: ${rev.stderr})`);
+    assert.equal(rev.spawnLog, "START a\nSTART m\nSTART z\n", "reverse spawn order must follow files[] (a→m→z)");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — at concurrency M the first M spawned files are the first M of the input list", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lpt-ac2-"));
+  const log = path.join(dir, "spawn.log");
+  try {
+    // Five files a..e, each sleeping 300ms so the first-wave (a,b,c at concurrency 3) stays alive
+    // while all 3 lanes are full — d and e cannot spawn until a lane frees (~300ms), so the first
+    // 3 log entries are deterministically {a,b,c} = the first 3 of the input list.
+    const files = ["a", "b", "c", "d", "e"].map((n) => makeSpawnProbeFile(dir, n, { sleepMs: 300 }));
+    const r = runProbe(files, { concurrency: 3, logFile: log });
+    assert.equal(r.code, 0, `run must exit 0 (stderr: ${r.stderr})`);
+    const lines = r.spawnLog.trim().split("\n").map((l) => l.replace(/^START /, ""));
+    assert.equal(lines.length, 5, "all five files must run exactly once");
+    const firstM = new Set(lines.slice(0, 3));
+    assert.deepEqual([...firstM].sort(), ["a", "b", "c"], "the first 3 spawned files must be the first 3 of the input list");
+    assert.deepEqual(lines.slice(3).sort(), ["d", "e"], "d and e spawn only after the first-wave lanes free up");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC5 — the runner's stream.compose(perFileReporter) still emits __PERFILE__ (LPT's input carrier intact)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lpt-ac5-"));
+  try {
+    const ok = path.join(dir, "ok.test.mjs");
+    fs.writeFileSync(
+      ok,
+      'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("ok", () => assert.equal(1, 1));\n',
+    );
+    const bad = path.join(dir, "bad.test.mjs");
+    fs.writeFileSync(
+      bad,
+      'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("red", () => assert.equal(1, 2, "intentional"));\n',
+    );
+    const childEnv = { ...process.env };
+    delete childEnv.NODE_TEST_CONTEXT;
+    const r = spawnSync(process.execPath, ["--test-concurrency=2", RUNNER, ok, bad], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env: childEnv,
+    });
+    assert.equal(r.status, 1, "one failing file ⇒ the runner exits non-zero");
+    // Both files emit a __PERFILE__ line on stderr (the reporter is composed, not CLI-flagged).
+    assert.match(r.stderr, /^__PERFILE__\s+duration_ms=\S+\s+\S*ok\.test\.mjs\s+passed=true\b/m, `passing file must emit passed=true:\n${r.stderr}`);
+    assert.match(r.stderr, /^__PERFILE__\s+duration_ms=\S+\s+\S*bad\.test\.mjs\s+passed=false\b/m, `failing file must emit passed=false:\n${r.stderr}`);
+    // __GROUP__ concurrency must echo the execArgv value (single source, no reporter drift).
+    assert.match(r.stderr, /^__GROUP__ concurrency=2\b/m, `__GROUP__ must read concurrency from execArgv:\n${r.stderr}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runner — parseRunnerArgs splits files from pass-through flags (--test-concurrency skipped, --test-name-pattern mapped)", () => {
+  const { files, testNamePatterns } = parseRunnerArgs([
+    "node",
+    "runner",
+    "--test-concurrency=4",
+    "--test-name-pattern=keep me",
+    "--test-name-pattern",
+    "drop me",
+    "a.test.mjs",
+    "--test-concurrency",
+    "8",
+    "b.test.mjs",
+  ]);
+  assert.deepEqual(files, ["a.test.mjs", "b.test.mjs"], "--test-concurrency args are consumed, not files");
+  assert.deepEqual(testNamePatterns, ["keep me", "drop me"], "both --test-name-pattern spellings map to testNamePatterns");
 });

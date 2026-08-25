@@ -572,6 +572,30 @@ has_explicit_concurrency() {
   return 1
 }
 
+# bucket_test_concurrency <args...> — the EFFECTIVE concurrency for the --buckets run({files})
+# runner (suite-lpt-runner.mjs). An explicit --test-concurrency=N in args wins (single source, the
+# SAME precedence as has_explicit_concurrency); otherwise the derived default. Returns the VALUE —
+# the runner needs a number in execArgv (`node --test-concurrency=N`), not the boolean
+# has_explicit_concurrency answers. The runner reads that SAME execArgv value for run()'s
+# concurrency, and measure-suite-reporter.mjs reads it too ⇒ one source, no drift.
+bucket_test_concurrency() {
+  local a
+  while [ "$#" -gt 0 ]; do
+    a="$1"; shift
+    case "$a" in
+      --test-concurrency=*)
+        a="${a#--test-concurrency=}"
+        if [[ "$a" =~ ^[0-9]+$ ]] && [ "$a" -ge 1 ]; then printf '%s' "$a"; return 0; fi
+        ;;
+      --test-concurrency)
+        if [ "$#" -gt 0 ] && [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ]; then printf '%s' "$1"; return 0; fi
+        shift
+        ;;
+    esac
+  done
+  default_test_concurrency
+}
+
 # resource_gate_check — extracted to plugin/scripts/runner-static-gate.ts (gap-ac128-hub-split-harness-concerns),
 # sourced above alongside run_static_checks.
 # ── single-flight lock, S slots (gap-resource-gate-no-single-flight-lock-two-suite-overlap →
@@ -1073,7 +1097,8 @@ run_selected() {
     # residual, independent of test-failure reporting — merge its verdict into code so the runner's
     # tmux-leak-scan: FAIL line reaches the stream and failures[].
     # BOUNDED REAP-WAIT (gap-leak-scan-reap-race-false-red): the wait-before-judgment lives INSIDE
-    # --check — when NEW matches appear it polls up to $TMUX_LEAK_REAP_WAIT_MS (default 10000) for
+    # --check — when NEW matches appear it polls up to $TMUX_LEAK_REAP_WAIT_MS (default: host-derived
+    # reap_wait_default() in tmux-leak-scan.sh, ≥10000) for
     # them to clear before declaring a leak, so test-spawned tmux servers still exiting at run end
     # (round 95 false-red: tests=4150 all pass) are not swept as residue. A genuine leak persists
     # past the bound and still fails. A clean run adds zero latency (first scan wins immediately).
@@ -1391,15 +1416,16 @@ elif [ "${1:-}" = "--buckets" ]; then
   bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
   mark_nested
   set +e
-  # Per-file attribution (gap-fix-scope-perfile-buckets-parser): load the measure-suite reporter
-  # (suite_reporter_flags) so a red bucket round emits __PERFILE__ duration_ms=<d> <path>
-  # passed=<bool> lines — full-suite-runner.ts's fix-scope gate parses THOSE to attribute each
-  # failure to its file (without them a bucket red is unattributed / falls to the no-file defer).
-  if has_explicit_concurrency "${rest_args[@]}"; then
-    node --test $(suite_reporter_flags) "${rest_args[@]}" "${files[@]}"
-  else
-    node --test --test-concurrency="$(default_test_concurrency)" $(suite_reporter_flags) "${rest_args[@]}" "${files[@]}"
-  fi
+  # Per-file attribution + LPT-preserving run (gap-fix-scope-perfile-buckets-parser +
+  # gap-m-bucket-long-tail-lpt-scheduling): hand the LPT-ordered file list to suite-lpt-runner.mjs,
+  # which calls node:test run({files}) — the ONLY path that preserves argv order (the node --test
+  # CLI re-sorts positional globs alphabetically). The runner composes BOTH reporters via
+  # stream.compose: spec → stdout (判绿 markers) and measure-suite-reporter → stderr
+  # (__PERFILE__ duration_ms=<d> <path> passed=<bool> — the fix-scope gate's per-file attribution
+  # AND the LPT ordering's own input carrier; if this breaks the per-file duration data goes dark
+  # and LPT has no input ⇒ self-defeating). Concurrency rides in execArgv (--test-concurrency=N)
+  # so the reporter's readConcurrency() sees the SAME value (single source, no drift).
+  node --test-concurrency="$(bucket_test_concurrency "${rest_args[@]}")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${rest_args[@]}" "${files[@]}"
   bucket_code=$?
   # Same suite-AFTER tail as the full default path: session-liveness-sweep-kill is the best-effort
   # TRUE-CATCH-ALL registry kill (exit 0 always); the --check assertion is the leak verdict and

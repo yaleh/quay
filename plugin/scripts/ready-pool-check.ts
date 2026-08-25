@@ -159,6 +159,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
+// AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（depsSatisfied 谓词同一份实现，
+// ⛔ 不各写一遍「逐个查 status !== done」的循环）。
+import { allDepsDone } from "./driver-filters.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
 // criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
@@ -1516,14 +1519,13 @@ function depsReadyFor(task, allTasks) {
     if (!isCompoundTask(allTasks.get(parent))) deps.push(parent);
   }
   for (const d of readDependsOn(task.frontmatterRaw)) deps.push(d);
-  if (deps.length === 0) return true;
-  for (const depId of deps) {
+  // AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（单一实现，⛔ 不各写一遍
+  // 「逐个查 status !== done」的循环）。statusOf 返回依赖的 status；Parent/dep 文件缺失 ⇒ null ⇒
+  // 非 done ⇒ fail closed（conservative, not dispatchable）。
+  return allDepsDone(deps, (depId) => {
     const p = allTasks.get(depId);
-    // Parent/dep file missing → cannot confirm done → fail closed (conservative, not dispatchable).
-    if (!p) return false;
-    if (p.status !== "done") return false;
-  }
-  return true;
+    return p ? p.status : null;
+  });
 }
 
 /** Largest subset of `parsed` (an array of parseTouches results) whose members are pairwise

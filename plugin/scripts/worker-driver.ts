@@ -17,8 +17,10 @@
 // 阶段 2 新增（AC116，相对阶段 1 的三条能力）：
 //   ① 并发 N —— --task 可重复、--concurrency N 上限；在飞 = 驱动当前活子进程数（直接量，非硬编码 1）。
 //   ② 超时 SIGTERM —— --timeout <ms>（缺省 0 = 无超时，SPEC §4④：成本结构未知前不设阈值）。超时 ⇒
-//      SIGTERM worker、outcome 记 final_state=timed-out。⛔ 超时也是异常死亡（worker 没落地）⇒ 其
-//      orphan worktree 一并清理（gap-worker-driver-no-record-on-abnormal-death，AC2：不清理则挡下轮重派）。
+//      SIGTERM worker、outcome 记 final_state=timed-out（worktree_preserved=true）。⛔ 超时【保留
+//      worktree】（SPEC §1 设计点3「超时即杀 worker 会话，但保留 worktree」；gap-worker-print-bg-wait-
+//      ceiling-600s AC3）——超时≠其它异常死亡（failed/killed/exited-not-landed 仍清 orphan worktree，
+//      gap-worker-driver-no-record-on-abnormal-death AC2）。
 //   ③ checkout 前 stash —— spawn 前 `git stash push --include-untracked`（⛔ 不 discard），非 git 仓库 no-op。
 //
 // outcome 记录（SPEC §4③，人裁定「跨任务行为检查由 outer 执行 ⇒ outer 只能读记录」）：
@@ -115,7 +117,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { isDirectEntry, readFrontmatter } from "./gate-script-base.ts";
+import { isDirectEntry } from "./gate-script-base.ts";
 // AC150-3：资源门判定 + 控制态 + 身份闸 + MCP 控制面，抽到 driver-shared.ts 供 promotion-driver 复用
 // （函数级复用，⛔ 非复制粘贴）。本文件仍 re-export 保持旧 import 面（worker-driver.test.mjs 等）。
 import {
@@ -143,10 +145,13 @@ export {
   resourceGateCheck,
   serveControlPlane,
 } from "./driver-shared.ts";
-import { parseTask, readDependsOn } from "./task-schema.ts";
-import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
-import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
+// AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
+// applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
+// 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
+import { applyTaskFilters, makeFilterContext, readTaskStatus } from "./driver-filters.ts";
+export { readTaskStatus } from "./driver-filters.ts";
 import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
+import { isDue } from "./routine-scheduler.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -183,6 +188,12 @@ export const WORKER_PROCESS_NAME = "quay-task-worker";
  *  （闸随负载降会放行、池随 promotion-driver 持续补），等 intervalMs 后重读而非退出
  *  （gap-worker-driver-stopreason-latch-permanent-stop）。 */
 export const RESIDENT_INTERVAL_MS_DEFAULT = 30_000;
+
+/** 协调地板（gap-worker-driver-reconcile-interval，SPEC §5.5）的缺省周期：至少每 N 秒协调一次，
+ *  哪怕所有边沿事件（worker 退出）都丢了 ⇒ 降级「慢但正确」而非「静默停摆」。缺省【保守】——
+ *  协调一趟只是读文件+扫进程+算 diff（配合异步化后廉价且有界），300s = 5 分钟：远小于停摆窗口
+ *  （今日实测 1h48m），又不会高频重算 ready 池浪费资源（硬规则 4 推论：成本结构已知为「廉价」后才设值）。 */
+export const RECONCILE_INTERVAL_SECS_DEFAULT = 300;
 
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
 
@@ -274,39 +285,8 @@ export function computeOutcome({
 // exit_code=0 只是「进程正常退出」，⛔ 不是「任务落地」。写 final_state=completed 前必须读一次任务侧
 // 直接量：status=done（任务文件 frontmatter）∧ 无残留 worktree（`git worktree list` 无 task/<id> 分支）。
 // 共同纪律（同族 gap-fix-worker-edit-exit-4）：驱动写任何终态之前，必须读任务侧的直接量。
-
-/** 读任务文件 status frontmatter（`<root>/tasks/<id>.md`）。缺失/读失败 ⇒ null。 */
-export function readTaskStatus(root: string, taskId: string): string | null {
-  try {
-    const fm = readFrontmatter(path.join(root, "tasks", `${taskId}.md`));
-    return fm?.status ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 派发前 depends_on 二次过滤（gap-worker-driver-dispatch-pre-filter-missing AC1）：读候选任务的
- * `depends_on` 关系边（task-schema 的 readDependsOn——与 ready-pool-check 的 depsReadyFor 读同一
- * 字段，单一真相源，⛔ 不重写依赖解析），逐个核对依赖的 status。任一依赖未 done（或依赖文件缺失，
- * 读不懂 ⇒ fail-closed 不派发）⇒ false。无依赖 ⇒ true（⛔ 空依赖是「真无依赖」，不是「读不懂」——
- * 候选自身文件读失败才 ⇒ false，硬规则 3b：读不懂 ≠ 无依赖）。与 gap-launch-script-worker-cap-broken
- * AC3 的 Touches 互斥过滤同属「spawn 前候选过滤」的两半。
- */
-export function depsReadyForDispatch(root: string, taskId: string): boolean {
-  let deps: string[];
-  try {
-    const text = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
-    deps = readDependsOn(parseTask(text).frontmatterRaw);
-  } catch {
-    return false; // 候选文件不可读 ⇒ fail-closed（不派发）
-  }
-  if (deps.length === 0) return true;
-  for (const depId of deps) {
-    if (readTaskStatus(root, depId) !== "done") return false;
-  }
-  return true;
-}
+// readTaskStatus / depsSatisfied / touchesDisjoint 已上收 driver-filters.ts（AC152 单一实现），本文件
+// 只 re-export readTaskStatus、派发环消费 applyTaskFilters。
 
 /** 转义正则元字符（task id 进 `new RegExp` 前）。 */
 function escapeRegExp(s: string): string {
@@ -329,6 +309,31 @@ export function worktreePresentForTask(root: string, taskId: string): boolean | 
 export function worktreePathsForTask(root: string, taskId: string): string[] {
   const r = spawnSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8" });
   if (r.status !== 0 || r.error) return [];
+  const paths: string[] = [];
+  let current: string | null = null;
+  for (const line of String(r.stdout ?? "").split("\n")) {
+    if (line.startsWith("worktree ")) {
+      current = line.slice("worktree ".length).trim();
+    } else if (line === `branch refs/heads/task/${taskId}` && current != null) {
+      paths.push(current);
+    }
+  }
+  return paths;
+}
+
+/** worktreePresentForTask 的异步版（常驻循环体用——⛔ spawnSync git 会冻住协调地板）。语义一致：
+ *  读失败（git 失败）⇒ null（读不懂 ≠ 无残留），⛔ 不是 false。 */
+export async function worktreePresentForTaskAsync(root: string, taskId: string): Promise<boolean | null> {
+  const r = await runAsync(["git", "-C", root, "worktree", "list", "--porcelain"], { timeoutMs: 5_000 });
+  if (r.error || r.status !== 0) return null;
+  const re = new RegExp(`^branch refs/heads/task/${escapeRegExp(taskId)}$`, "m");
+  return re.test(String(r.stdout ?? ""));
+}
+
+/** worktreePathsForTask 的异步版（常驻循环体用）。读失败 ⇒ []（与同步版一致）。 */
+export async function worktreePathsForTaskAsync(root: string, taskId: string): Promise<string[]> {
+  const r = await runAsync(["git", "-C", root, "worktree", "list", "--porcelain"], { timeoutMs: 5_000 });
+  if (r.error || r.status !== 0) return [];
   const paths: string[] = [];
   let current: string | null = null;
   for (const line of String(r.stdout ?? "").split("\n")) {
@@ -414,6 +419,50 @@ export function enumerateColdStartInflight(
   return out;
 }
 
+/** listWorktrees 的异步版（常驻循环体用——⛔ fast-mode-telemetry.listWorktrees 用 execFileSync 会冻住
+ *  协调地板）。解析逻辑与其一致：`git worktree list --porcelain` → [{path, branch}]，git 失败 ⇒ []（fail-soft）。 */
+async function listWorktreesAsync(root: string): Promise<Array<{ path: string; branch: string | null }>> {
+  const r = await runAsync(["git", "-C", root, "worktree", "list", "--porcelain"], { timeoutMs: 5_000 });
+  if (r.error || r.status !== 0) return [];
+  const worktrees: Array<{ path: string; branch: string | null }> = [];
+  let cur: { path: string; branch: string | null } | null = null;
+  for (const line of r.stdout.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      cur = { path: line.slice("worktree ".length), branch: null };
+      worktrees.push(cur);
+    } else if (line.startsWith("branch ") && cur) {
+      cur.branch = line.slice("branch ".length);
+    }
+  }
+  return worktrees;
+}
+
+/** enumerateTaskWorktreeTasks 的异步版（常驻循环体用）。 */
+async function enumerateTaskWorktreeTasksAsync(root: string): Promise<string[]> {
+  const ids: string[] = [];
+  for (const wt of await listWorktreesAsync(root)) {
+    const id = taskIdFromBranch(wt?.branch);
+    if (id != null) ids.push(id);
+  }
+  return ids;
+}
+
+/** enumerateColdStartInflight 的异步版（常驻循环体用）：git worktree list 改 spawn；/proc 扫进程仍是
+ *  同步 fs（廉价、无 spawnSync 阻塞——task 4 只点名 git，不点名 /proc）。opts 测试缝同同步版。 */
+export async function enumerateColdStartInflightAsync(
+  root: string,
+  opts: { worktreeTasks?: string[] | null; workerCmdlines?: string[] | null } = {},
+): Promise<Set<string>> {
+  const worktreeTasks = opts.worktreeTasks ?? await enumerateTaskWorktreeTasksAsync(root);
+  if (worktreeTasks.length === 0) return new Set(); // 无 task worktree ⇒ 无冷启动在飞（⛔ 不白扫 /proc）
+  const workerCmdlines = opts.workerCmdlines ?? enumerateLiveWorkerCmdlines();
+  const out = new Set<string>();
+  for (const taskId of worktreeTasks) {
+    if (hasLiveWorkerForTask(taskId, workerCmdlines)) out.add(taskId);
+  }
+  return out;
+}
+
 /** orphan worktree 清理结果（可观测：removed/分支删除/错误/存活跳过）。 */
 export interface OrphanCleanupResult {
   /** 找到 worktree 且 `git worktree remove --force` 全部成功。 */
@@ -431,7 +480,7 @@ export interface OrphanCleanupResult {
 
 /**
  * orphan worktree 清理（gap-worker-driver-no-record-on-abnormal-death AC2）：worker 异常死亡（failed /
- * killed / timed-out——worker 没跑完、无完成实现）后，其 orphan worktree 永久残留会挡 driver 下轮对同一
+ * killed——worker 没跑完、无完成实现）后，其 orphan worktree 永久残留会挡 driver 下轮对同一
  * task 的 `git worktree add`（撞已存在路径 / 分支失败 ⇒ 需人工 remove）。清理 =
  * `git worktree remove --force <path>` + `git branch -D task/<id>`。⛔ 只在 worker 已退出（close 事件后）
  * 调用；⛔ completed 路径不调（落地判定已确认无残留）；⛔ exited-not-landed 路径不调——那是 worker
@@ -538,6 +587,49 @@ export interface LivenessResult {
   running: boolean;
 }
 
+/**
+ * 异步 spawn（spawn 而非 spawnSync）：不阻塞事件循环，child exit 本身是一个唤醒源
+ * （gap-worker-driver-async-selector-readypool AC2 + gap-worker-driver-reconcile-interval SPEC §5.7——
+ * 循环体用 spawnSync 会冻住协调地板：一个卡住的 selector 会连定时器一起冻住）。collectStderr=true
+ * 时捕获 stderr（selector 兜底 reason 需要）；缺省 stderr 丢弃。timeoutMs 到期 ⇒ SIGKILL child 并
+ * resolve error。永不 throw——失败经返回值的 status/error 表达（硬规则 3b：spawn 失败 ≠ 合格，由调用方判）。
+ */
+async function runAsync(
+  argv: string[],
+  opts: { timeoutMs: number; collectStderr?: boolean } = { timeoutMs: 120_000 },
+): Promise<{ status: number | null; stdout: string; stderr: string; error: Error | null }> {
+  const { timeoutMs, collectStderr = false } = opts;
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(argv[0], argv.slice(1), {
+        stdio: ["ignore", "pipe", collectStderr ? "pipe" : "ignore"],
+      });
+    } catch (e) {
+      resolve({ status: null, stdout: "", stderr: "", error: e as Error });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (status: number | null, error: Error | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({ status, stdout, stderr, error });
+    };
+    timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+      finish(null, new Error(`spawn timeout after ${timeoutMs}ms (SIGKILL): ${argv[0]}`));
+    }, timeoutMs);
+    child.stdout?.on("data", (d) => { stdout += d; });
+    if (child.stderr) child.stderr.on("data", (d) => { stderr += d; });
+    child.on("error", (e) => finish(null, e));
+    child.on("close", (code) => finish(code, null));
+  });
+}
+
 /** 跑一次 liveness 检查（复用 launch 脚本 liveness 子命令，⛔ 不重写存活判定）。cmd 覆盖命令（测试缝，
  *  同 --ready-pool-cmd/--selector-cmd 的形状）；缺省 = defaultLivenessCheckArgv(root, kind)。 */
 export function runLivenessCheck(root: string, kind: "promotion" | "worker", cmd: string[] | null = null): LivenessResult {
@@ -551,6 +643,26 @@ export function runLivenessCheck(root: string, kind: "promotion" | "worker", cmd
     // 亦归 checked:false（未查成）。exit 1（检出死亡）r.error 为 null ⇒ 正常走 parse。
     if (r.error || r.status === null) return { checked: false, deaths: null, running: false };
     const j = JSON.parse(String(r.stdout ?? "").trim());
+    const deaths = j && typeof j.deaths === "string" && j.deaths !== "none" && j.deaths !== "" ? String(j.deaths) : null;
+    return { checked: true, deaths, running: !!j.running };
+  } catch {
+    return { checked: false, deaths: null, running: false };
+  }
+}
+
+/** runLivenessCheck 的异步版（常驻循环体用——⛔ spawnSync 会冻住协调地板）。解析逻辑与同步版一致
+ *  （checked=false = 未查成，⛔ 不是「健康」，硬规则 3b）。 */
+export async function runLivenessCheckAsync(
+  root: string,
+  kind: "promotion" | "worker",
+  cmd: string[] | null = null,
+): Promise<LivenessResult> {
+  const argv = cmd ?? defaultLivenessCheckArgv(root, kind);
+  const r = await runAsync(argv, { timeoutMs: LIVENESS_CHECK_TIMEOUT_MS });
+  // 脚本缺失 ⇒ bash exit 127、stdout 空 ⇒ JSON.parse 抛 ⇒ catch 归 checked:false（未查成）。
+  if (r.error || r.status === null) return { checked: false, deaths: null, running: false };
+  try {
+    const j = JSON.parse(r.stdout.trim());
     const deaths = j && typeof j.deaths === "string" && j.deaths !== "none" && j.deaths !== "" ? String(j.deaths) : null;
     return { checked: true, deaths, running: !!j.running };
   } catch {
@@ -621,7 +733,11 @@ export interface WorkerCmdOptions {
 }
 
 /** 创建 prompt（无保留 worktree 时的 full-chain prompt，单一真相源）。续做 prompt 见
- *  buildContinueWorkerPrompt；两者由 workerPromptForTask 按「保留 worktree 在不在」择一。 */
+ *  buildContinueWorkerPrompt；两者由 workerPromptForTask 按「保留 worktree 在不在」择一。
+ *  gap-worker-print-bg-wait-ceiling-600s (c，辅助非根修)：fan-in 在飞期间尽量留在回合内等（用
+ *  TaskOutput 阻塞等待其终态），不要结束回合等完成通知——end_turn 时有存活后台任务会触发 600s
+ *  宽限终止（exit 0 却未落地）。⛔ 根修是 (a) PRINT_BG_WAIT_CEILING_MS=0，本提示只是降低模型
+ *  选错等法的概率。 */
 export function buildWorkerPrompt(task: string, root: string): string {
   return [
     `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2).`,
@@ -630,6 +746,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `(2) implement the task per its Proposal/Plan/AC/DoD, (3) run the suite,`,
     `(4) ff-merge to develop via the fan-in-execute workflow (scriptPath, args={task,worktree,root,runId,mergeTarget}).`,
     `You own your worktree fully; apart from the final merge do not touch develop.`,
+    `fan-in 在飞期间尽量留在回合内等（用 TaskOutput 阻塞等待其终态）——不要结束回合等完成通知：end_turn 时有存活后台任务会触发 600s 终止。`,
   ].join(" ");
 }
 
@@ -738,6 +855,25 @@ export function branchHeadSubject(root: string, taskId: string): string | null {
   return out === "" ? null : out;
 }
 
+/** countBranchCommits 的异步版（常驻循环体用——⛔ spawnSync git 会冻住协调地板）。语义一致：
+ *  git 失败 / 分支不存在 ⇒ null（读不懂 ≠ 0 提交）。 */
+export async function countBranchCommitsAsync(root: string, taskId: string): Promise<number | null> {
+  const r = await runAsync(["git", "-C", root, "rev-list", "--count", `HEAD..task/${taskId}`], { timeoutMs: 5_000 });
+  if (r.error || r.status !== 0) return null;
+  const out = r.stdout.trim();
+  if (out === "") return 0;
+  const n = Number(out);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** branchHeadSubject 的异步版（常驻循环体用）。无自己的提交 / 读失败 ⇒ null。 */
+export async function branchHeadSubjectAsync(root: string, taskId: string): Promise<string | null> {
+  const r = await runAsync(["git", "-C", root, "log", "-1", "--format=%s", `HEAD..task/${taskId}`], { timeoutMs: 5_000 });
+  if (r.error || r.status !== 0) return null;
+  const out = r.stdout.trim();
+  return out === "" ? null : out;
+}
+
 /** 该 task 最近一条 exited-not-landed 的失败原因（AC2「上次失败原因」，读 worker-outcome.jsonl）。
  *  无记录 / 读失败 ⇒ null（读不懂 ≠ 无失败——但续做 prompt 以 "(unknown)" 呈现，不伪装成「没有失败」）。 */
 export function lastExitedNotLandedReason(root: string, taskId: string): string | null {
@@ -781,6 +917,23 @@ export function continueStateForTask(root: string, taskId: string): ContinueWork
   };
 }
 
+/** continueStateForTask 的异步版（常驻循环体用——⛔ spawnSync git 会冻住协调地板）。语义一致：
+ *  无 worktree（worktreePresentForTaskAsync 非 true）⇒ null（创建路径）；worktree 读不懂（null）⇒ null
+ *  （创建，与「确认无残留」同向）。/proc 与任务文件读仍是同步 fs（廉价，task 4 只点名 git，不点名 /proc）。 */
+export async function continueStateForTaskAsync(root: string, taskId: string): Promise<ContinueWorkerState | null> {
+  if ((await worktreePresentForTaskAsync(root, taskId)) !== true) return null;
+  const paths = await worktreePathsForTaskAsync(root, taskId);
+  const ac = readAcCheckState(root, taskId);
+  return {
+    worktreePath: paths[0] ?? null,
+    branchCommits: await countBranchCommitsAsync(root, taskId),
+    branchHeadSubject: await branchHeadSubjectAsync(root, taskId),
+    acChecked: ac.checked,
+    acTotal: ac.total,
+    failureReason: lastExitedNotLandedReason(root, taskId),
+  };
+}
+
 /** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
  *  状态（分支提交 / AC 勾选 / 失败原因）供 worker 从保留 worktree 继续。⛔ 不含 "create an isolated
  *  git worktree"（AC1 取假判据——旧 prompt 逐字说 create 是撞死根因）。 */
@@ -811,6 +964,28 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
 export function workerPromptForTask(task: string, root: string): string {
   const state = continueStateForTask(root, task);
   return state != null ? buildContinueWorkerPrompt(task, root, state) : buildWorkerPrompt(task, root);
+}
+
+/** workerPromptForTask 的异步版（常驻循环体用——⛔ 同步版经 continueStateForTask 走 spawnSync git 会冻住
+ *  协调地板）。保留 worktree ⇒ 续做 prompt，无 ⇒ 创建 prompt。 */
+export async function workerPromptForTaskAsync(task: string, root: string): Promise<string> {
+  const state = await continueStateForTaskAsync(root, task);
+  return state != null ? buildContinueWorkerPrompt(task, root, state) : buildWorkerPrompt(task, root);
+}
+
+/** workerArgvForTask 的异步版（常驻循环体用）：覆盖语义同同步版（exact > prefix > 缺省 launchArgv），
+ *  prompt 经 workerPromptForTaskAsync 取（⛔ 同步版走 continueStateForTask 的 spawnSync git）。 */
+export async function workerArgvForTaskAsync(task: string, root: string, opts: WorkerCmdOptions = { prefix: null, exact: null }): Promise<string[]> {
+  const prompt = await workerPromptForTaskAsync(task, root);
+  if (opts.exact != null) {
+    const a = splitArgs(opts.exact);
+    return a.length > 0 ? a : launchArgv("task-worker", prompt, root);
+  }
+  if (opts.prefix != null) {
+    const p = splitArgs(opts.prefix);
+    return p.length > 0 ? [...p, prompt] : launchArgv("task-worker", prompt, root);
+  }
+  return launchArgv("task-worker", prompt, root);
 }
 
 /** 常见信号的 shell 惯例退出码（128+signum）；未知信号给 0（被杀本身已是非零）。 */
@@ -847,6 +1022,14 @@ export function parseIntervalMs(raw: string | undefined): number {
   if (raw == null) return RESIDENT_INTERVAL_MS_DEFAULT;
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : RESIDENT_INTERVAL_MS_DEFAULT;
+}
+
+/** 解析 --reconcile-interval <s>（秒，协调地板周期）。缺省 RECONCILE_INTERVAL_SECS_DEFAULT（保守）；
+ *  非法（非有限 / 负数）⇒ 缺省（⛔ 不因 flag 拼写炸常驻循环）。返回毫秒（内部统一用 ms）。 */
+export function parseReconcileIntervalSecs(raw: string | undefined): number {
+  if (raw == null) return RECONCILE_INTERVAL_SECS_DEFAULT * 1000;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) * 1000 : RECONCILE_INTERVAL_SECS_DEFAULT * 1000;
 }
 
 /** 一次 stash 的结果（AC2 可核：stashed=true 且 git stash list 可见；⛔ 绝不 discard）。 */
@@ -968,10 +1151,10 @@ function appendWorkerPid(pidFile: string, workerPid: number): void {
 
 /**
  * spawn 一个 worker 并等待其终态（含超时 SIGTERM）。超时 ⇒ kill("SIGTERM")，close 事件带 signal=SIGTERM，
- * timedOut 标记落 outcome final_state=timed-out。异常死亡终态（failed/killed/timed-out——worker 没跑完、
- * 无完成实现）清理 orphan worktree（gap-worker-driver-no-record-on-abnormal-death AC2）；⛔
- * exited-not-landed（exit 0 但没落地，含 needs-human 闸拒绝）保留分支/worktree 供续做
- * （gap-worker-needs-human-destroys-branch-worktree AC1）。
+ * timedOut 标记落 outcome final_state=timed-out（worktree_preserved=true，⛔ 不清理——SPEC §1 设计点3
+ * 超时保留 worktree）。其它异常死亡终态（failed/killed——worker 没跑完、无完成实现）清理 orphan
+ * worktree（gap-worker-driver-no-record-on-abnormal-death AC2）；⛔ exited-not-landed（exit 0 但没落地，
+ * 含 needs-human 闸拒绝）保留分支/worktree 供续做（gap-worker-needs-human-destroys-branch-worktree AC1）。
  */
 function runOneWorker({
   taskId,
@@ -1026,18 +1209,21 @@ function runOneWorker({
         spawnError: spawnErr, inFlightCount, timedOut,
         landed: landing.landed, landReason: landing.reason,
       });
-      // gap-worker-driver-no-record-on-abnormal-death（AC2，能取假）：worker 异常死亡（failed/killed/
-      // timed-out——worker 没跑完、无完成实现）后，orphan worktree 永久残留会挡 driver 下轮对同一 task 的
+      // gap-worker-driver-no-record-on-abnormal-death（AC2，能取假）：worker 异常死亡（failed/killed——
+      // worker 没跑完、无完成实现）后，orphan worktree 永久残留会挡 driver 下轮对同一 task 的
       // `git worktree add`。写终态的同时清理（⛔ completed/spawn-failed/not-dispatched 无 worktree 可清；
       // spawn-failed 连 worker 都没起，not-dispatched 连派发都没派）。⛔ exited-not-landed 同样不清理
       // ——那是 exit 0 跑到 fan-in 底但没落地（needs-human 闸拒绝 = 套件绿 + 实现完成，工作有效），
       // 分支/worktree 保留供续做，销毁会让完成实现永久丢失（gap-worker-needs-human-destroys-branch-
-      // worktree AC1）。清理结果落进 outcome（worktree_cleaned / worktree_cleanup_error）供生产观测。
+      // worktree AC1）。⛔ timed-out 是唯一例外（gap-worker-print-bg-wait-ceiling-600s AC3）：超时
+      // 【保留 worktree】（SPEC §1 设计点3「超时即杀 worker 会话，但保留 worktree」），不清理——落
+      // worktree_preserved=true。清理结果落进 outcome（worktree_cleaned / worktree_cleanup_error）供观测。
       const shouldCleanup =
         outcome.final_state !== "completed" &&
         outcome.final_state !== "exited-not-landed" &&
         outcome.final_state !== "spawn-failed" &&
-        outcome.final_state !== "not-dispatched";
+        outcome.final_state !== "not-dispatched" &&
+        outcome.final_state !== "timed-out";
       const cleanup = shouldCleanup ? cleanupOrphanWorktree(rootDir, taskId) : null;
       const finalOutcome = cleanup
         ? {
@@ -1046,7 +1232,9 @@ function runOneWorker({
             worktree_cleanup_error: cleanup.error,
             worktree_cleanup_skipped_live: cleanup.skippedLiveWorker,
           }
-        : outcome;
+        : outcome.final_state === "timed-out"
+          ? { ...outcome, worktree_preserved: true }
+          : outcome;
       appendOutcomeToFile(outcomeFile, finalOutcome);
       if (json) process.stdout.write(`${JSON.stringify({ event: "worker-done", task: taskId, ...finalOutcome })}\n`);
       let exitCode: number;
@@ -1107,37 +1295,8 @@ export function shuffle<T>(arr: readonly T[]): T[] {
   return a;
 }
 
-/**
- * 派发前 Touches 互斥过滤（gap-launch-script-worker-cap-broken AC3）：cap=5 后池里可能同时有 2 条
- * `## Touches` 重叠的 ready 任务，若并发派发会各改同一文件、fan-in 才炸（两边都 exit 0 看起来都做完了，
- * 比 fake-completion 更难查）。本函数把候选里与【在飞任务】Touches 重叠的过滤掉——selector 只在滤后集合里
- * 选（⛔ 不指望 LLM selector 避开，它拿不到 Touches）。checkTouchesPair / parseTouches 是 ready-pool-check
- * 的同函数（不重实现）；读不懂（任务文件缺失/读失败）⇒ 视为无 Touches ⇒ checkTouchesPair 判 serialize ⇒
- * 滤掉（与 checkTouchesPair 的保守缺省同向，⛔ 不因读不懂放行冲突）。无在飞任务 ⇒ 无冲突对象 ⇒ 全通过。
- */
-export function filterTouchesDisjoint(
-  candidateIds: string[],
-  inFlightIds: string[],
-  rootDir: string,
-): string[] {
-  if (inFlightIds.length === 0) return candidateIds.slice();
-  const expand = (globs: string[]) => expandDeclaredTouches(globs, rootDir);
-  const readTouches = (id: string) => {
-    const file = path.join(rootDir, "tasks", `${id}.md`);
-    let raw: string;
-    try {
-      raw = fs.readFileSync(file, "utf8");
-    } catch {
-      return { hasSection: false, globs: [] as string[] };
-    }
-    return parseTouches(parseTask(raw).body);
-  };
-  const inFlight = inFlightIds.map(readTouches);
-  return candidateIds.filter((id) => {
-    const cand = readTouches(id);
-    return inFlight.every((ifp) => checkTouchesPair(cand, ifp, expand).disjoint);
-  });
-}
+// 派发前 Touches 互斥过滤（gap-launch-script-worker-cap-broken AC3）已上收 driver-filters.ts 的
+// `touchesDisjoint` 谓词（AC152 单一实现）——派发环经 applyTaskFilters 消费，⛔ 不在此保留平行实现。
 
 /** 缺省 ready-pool-check 命令（选择环的第一步）。输出须为 analyzeTasks JSON（读其 `ready` 数组）。 */
 export function defaultReadyPoolArgv(root: string, inFlight: string[], cap: number): string[] {
@@ -1151,28 +1310,21 @@ export function defaultReadyPoolArgv(root: string, inFlight: string[], cap: numb
 
 /** 调 ready-pool-check 取可行集（AC2 第一步）。cmd 覆盖是测试缝；缺省 = 本仓库 ready-pool-check.ts。
  *  解析失败/非零退出 ⇒ fail-closed 返回空池（硬规则 3b：读不懂 ≠ 「有候选」，⛔ 不得伪装成有货）。 */
-export function readyPoolCheck(
+export async function readyPoolCheck(
   root: string,
   cmd: string[] | null,
   inFlight: string[],
   cap: number,
-): { ready: string[]; pool: number; criterionMet: boolean; error: string | null } {
+): Promise<{ ready: string[]; pool: number; criterionMet: boolean; error: string | null }> {
   const argv = cmd ?? defaultReadyPoolArgv(root, inFlight, cap);
-  let r: ReturnType<typeof spawnSync>;
-  try {
-    r = spawnSync(argv[0], argv.slice(1), {
-      encoding: "utf8", timeout: 120_000, maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch (e) {
-    const msg = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
-    return { ready: [], pool: 0, criterionMet: false, error: `ready-pool-check spawn failed (${msg})` };
-  }
+  // 异步 spawn（gap-worker-driver-async-selector-readypool AC1）：循环体不再用 spawnSync 阻塞协调地板。
+  const r = await runAsync(argv, { timeoutMs: 120_000 });
   if (r.error || r.status !== 0) {
     const msg = r.error ? String(r.error.message || r.error) : `ready-pool-check exited ${r.status}`;
     return { ready: [], pool: 0, criterionMet: false, error: msg };
   }
   try {
-    const j = JSON.parse(String(r.stdout ?? "").trim());
+    const j = JSON.parse(r.stdout.trim());
     const ready = Array.isArray(j.ready) ? j.ready.filter((x: unknown) => typeof x === "string") : [];
     return {
       ready,
@@ -1227,27 +1379,17 @@ export function parseSelectorOutput(
 
 /** 交短命 selector worker（AC2 末步）：spawn 覆盖命令（或 claude -p）→ 解析输出。永不 throw。
  *  AC142 AC1：捕获 stderr（连同 stdout + timeout 落进可查载体 selector_reason）。 */
-export function runSelectorWorker(
+export async function runSelectorWorker(
   candidates: string[],
   fixedArgv: string[] | null,
   root: string,
-): { task: string; reason: string } | null {
+): Promise<{ task: string; reason: string } | null> {
   if (candidates.length === 0) return null;
   const argv = fixedArgv ?? defaultSelectorArgv(candidates, root);
-  let stdout = "";
-  let stderr = "";
-  let exitCode: number | null = null;
-  try {
-    const r = spawnSync(argv[0], argv.slice(1), {
-      encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
-    });
-    stdout = String(r.stdout ?? "");
-    stderr = String(r.stderr ?? "").trim();
-    exitCode = r.error ? null : r.status;
-  } catch {
-    exitCode = null;
-  }
-  return parseSelectorOutput(stdout, candidates, exitCode, stderr || null);
+  // 异步 spawn（gap-worker-driver-async-selector-readypool AC1）：selector 的 LLM 调用（实测约 1 分钟）
+  // 不再冻住协调地板（SPEC §5.7）。stderr 捕获供 parseSelectorOutput 兜底 reason（AC142 AC1）。
+  const r = await runAsync(argv, { timeoutMs: 120_000, collectStderr: true });
+  return parseSelectorOutput(r.stdout, candidates, r.error ? null : r.status, r.stderr.trim() || null);
 }
 
 /** 常驻循环里一条在飞 worker 的追踪态（done 由 `.then` 置位，reap 据此移除）。 */
@@ -1275,6 +1417,9 @@ export interface ResidentOptions {
   livenessCmd: string[] | null;
   /** 无在飞 worker 且瞬时 WAIT 时的轮询间隔（ms）；缺省 RESIDENT_INTERVAL_MS_DEFAULT。测试缝传小值。 */
   intervalMs: number;
+  /** 协调地板（gap-worker-driver-reconcile-interval）：至少每 reconcileMs 协调一次，哪怕所有边沿事件
+   *  （worker 退出）都丢了 ⇒ 降级「慢但正确」而非「静默停摆」。缺省 RECONCILE_INTERVAL_SECS_DEFAULT*1000。 */
+  reconcileMs: number;
 }
 
 /**
@@ -1288,7 +1433,7 @@ export interface ResidentOptions {
  *       supervisor 重启）。退出码 = 首个非零 worker 码（仅在终态 latch 后返回）。
  */
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
-  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs } = opts;
+  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs } = opts;
 
   // checkout 前 stash（阶段 2 ③）：主检出脏 ⇒ stash 一次（常驻循环起跑前），⛔ 不 discard。非 git no-op。
   const stash = stashIfDirty(rootDir);
@@ -1348,8 +1493,11 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   };
 
   /** spawn 一个选中的 worker，并把 selector 的真实理由带进 outcome（AC2）。 */
-  const spawnSelected = (sel: { task: string; reason: string }): void => {
+  const spawnSelected = async (sel: { task: string; reason: string }): Promise<void> => {
     const runIdForTask = runId ?? `${runPrefix}-${sel.task}`;
+    // 异步版（gap-worker-driver-async-selector-readypool AC1）：worker argv 经 workerArgvForTaskAsync 取——
+    // 同步 workerArgvForTask 走 continueStateForTask 的 spawnSync git 会冻住协调地板。
+    const workerArgv = await workerArgvForTaskAsync(sel.task, rootDir, workerCmdOpts);
     const rw = {} as RunningWorker;
     rw.task = sel.task;
     rw.done = false;
@@ -1357,7 +1505,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       taskId: sel.task,
       selectorReason: sel.reason,
       runId: runIdForTask,
-      workerArgv: workerArgvForTask(sel.task, rootDir, workerCmdOpts),
+      workerArgv,
       rootDir,
       outcomeFile,
       timeoutMs,
@@ -1382,14 +1530,27 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // plain setTimeout——驱动不注册 SIGTERM 处理器（默认终止），supervisor 的 stop 仍能即时杀掉驱动。
   const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+  // 地板 race：等【任一 worker 退出】或【地板到期】取先到者。⛔ 地板定时器必须在 race 结束时清除
+  // （gap-worker-driver-reconcile-interval AC 前置）：worker 先退出时，未触发的 setTimeout 仍挂起会让
+  // 驱动进程在循环 break 后多活 reconcileMs 秒（默认 300s）——halt 后 driver 不退出 = 静默停摆的镜像。
+  const raceWithFloor = (runningWorkers: RunningWorker[], floorMs: number): Promise<unknown> => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const floor = new Promise<void>((resolve) => { timer = setTimeout(resolve, floorMs); });
+    return Promise.race([...runningWorkers.map((r) => r.promise), floor]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
+  };
+
   let round = 0;
   while (true) {
     round += 1;
+    const passStartMs = Date.now();
 
     // 冷启动在飞【现观测】（每趟 pass，SPEC §5.2 actual=observe()）：worker 退出 / worktree 消失任一
     // 发生 ⇒ task 即离开排除集、下一轮重新可派（⛔ 循环外一次性 const 快照 = 假在飞不可派，已修）。
     // 每轮重扫 task worktree + /proc 存活 worker 交叉核对；该结果同时写进本轮 round 记录（生产载体）。
-    coldInflight = enumerateColdStartInflight(rootDir);
+    // 异步版（gap-worker-driver-async-selector-readypool）：git worktree list 不再 spawnSync 阻塞地板。
+    coldInflight = await enumerateColdStartInflightAsync(rootDir);
     if (json && coldInflight.size > 0) {
       process.stdout.write(
         `${JSON.stringify({ event: "cold-start-inflight", tasks: [...coldInflight].sort() })}\n`,
@@ -1399,7 +1560,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     // liveness 检查（gap-resident-driver-stable-carrier-liveness Finding 的接线）：每轮顺手调一次
     // launch 脚本的 liveness 子命令。supervisor 死后 driver 成孤儿仍在跑 ⇒ 下一轮即检出 supervisor_dead
     // 并让子命令写 DEATH 告警（⛔ 载体停更 ≠ 一切正常）。checked=false（脚本缺失/失败）≠ 健康（硬规则 3b）。
-    const liveness = runLivenessCheck(rootDir, "worker", livenessCmd);
+    const liveness = await runLivenessCheckAsync(rootDir, "worker", livenessCmd);
 
     // 1. reap 已完成的 worker（减在飞集）。
     for (let i = running.length - 1; i >= 0; i--) {
@@ -1419,18 +1580,14 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         else waitReason = sc.reason;
         break;
       }
-      const pool = readyPoolCheck(rootDir, readyPoolArgv, inFlightTasks(), cap);
+      const pool = await readyPoolCheck(rootDir, readyPoolArgv, inFlightTasks(), cap);
       poolSeen = pool.pool;
-      const active = new Set(inFlightTasks());
-      const shuffled = shuffle(pool.ready.filter((id) => !active.has(id)));
-      // AC3（gap-launch-script-worker-cap-broken）：派发前 Touches 互斥——候选里与在飞任务 Touches 重叠的
-      // 先滤掉，selector 只在滤后集合里选（⛔ 并发派发 Touches 重叠 = fan-in 才炸）。冷启动在飞 task
-      // 一并参与（它们的 Touches 是真实冲突面，⛔ 不是只从 ready 里减去）。
-      const touchesFiltered = filterTouchesDisjoint(shuffled, inFlightTasks(), rootDir);
-      // gap-worker-driver-dispatch-pre-filter-missing AC1：派发前二次过滤 depends_on——依赖未满
-      // （depends_on 含未 done 任务）的候选不进候选集（⛔ 照单派发 ⇒ ac138 白烧一轮复现）。与
-      // gap-launch-script-worker-cap-broken AC3 的 Touches 互斥过滤同属「spawn 前候选过滤」的两个维度，一并判。
-      const candidates = touchesFiltered.filter((id) => depsReadyForDispatch(rootDir, id));
+      const shuffled = shuffle(pool.ready);
+      // AC152：派发前过滤消费 driver-filters.ts 的【可组合谓词列表】（notInFlight / depsSatisfied /
+      // touchesDisjoint / retryCapNotExhausted / notNeedsHuman，⛔ 不各写一遍）。冷启动在飞 task 一并参与
+      // （它们的 Touches 是真实冲突面）。原「active 过滤 + filterTouchesDisjoint + depsReadyForDispatch」
+      // 三个散点已收进 applyTaskFilters 一次判完。
+      const candidates = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks() }));
       if (candidates.length === 0) {
         // 真池空（ready 减在飞后无候选）⇒ 瞬时 WAIT：记 pool-empty，下一轮重读（⛔ 不再 latch）。
         //   池非空但全与在飞 Touches/deps 重叠 ⇒ 同为瞬时 WAIT：不设 stopReason（在飞 worker 结束释放
@@ -1438,13 +1595,13 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         if (shuffled.length === 0) waitReason = "pool-empty (no dispatchable candidate in the ready pool)";
         break;
       }
-      const sel = runSelectorWorker(candidates, selectorArgv, rootDir);
+      const sel = await runSelectorWorker(candidates, selectorArgv, rootDir);
       if (!sel) {
         // 候选非空但 selector 未能给出任何选择（理论上 parseSelectorOutput 必回退首个，不会 null）。
         waitReason = "pool-empty (selector returned no candidate)";
         break;
       }
-      spawnSelected(sel);
+      await spawnSelected(sel);
     }
 
     // AC138-3 无条件心跳：每轮循环写一条（⛔ 池空/判停轮也写——outcome 在这些轮不写）。
@@ -1460,7 +1617,19 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     }
 
     // 4. 等在飞 worker 结束（至少一个），再回环 reap + 补位。⛔ 从不主动杀在飞。
-    await Promise.race(running.map((r) => r.promise));
+    //    协调地板（gap-worker-driver-reconcile-interval，SPEC §5.5）：至少每 reconcileMs 协调一次——
+    //    边沿事件（worker 退出）全丢也降级「慢但正确」而非「静默停摆」。复用 routine-scheduler.isDue
+    //    的 interval 判定（⛔ 不新造定时器/判定）：isDue 的 interval 单位是分钟 ⇒ minutes = reconcileMs/60000。
+    if (reconcileMs > 0) {
+      const nowMs = Date.now();
+      const floorElapsed = isDue({ kind: "interval", minutes: reconcileMs / 60_000 }, { now: nowMs, lastRun: passStartMs });
+      const floorMs = floorElapsed ? 0 : Math.max(0, passStartMs + reconcileMs - nowMs);
+      // ⛔ 地板定时器必须在 race 结束时 clearTimeout：worker 先退出时，未触发的 setTimeout 仍挂起会让
+      // 驱动进程在循环 break 后多活 reconcileMs 秒（默认 300s）——halt 后 driver 不退出、测试/生产停摆。
+      await raceWithFloor(running, floorMs);
+    } else {
+      await Promise.race(running.map((r) => r.promise));
+    }
   }
 
   if (json && stopReason) {
@@ -1486,6 +1655,7 @@ export async function main(argv: string[]): Promise<number> {
   let concurrency: number | undefined;
   let timeoutRaw: string | undefined;
   let intervalRaw: string | undefined;
+  let reconcileRaw: string | undefined;
   let pidFile: string | undefined;
   let outcomePath: string | undefined;
   let runId: string | undefined;
@@ -1508,6 +1678,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--concurrency") concurrency = Number(args[++i]);
     else if (a === "--timeout") timeoutRaw = args[++i];
     else if (a === "--interval") intervalRaw = args[++i];
+    else if (a === "--reconcile-interval") reconcileRaw = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
     else if (a === "--outcome") outcomePath = args[++i];
     else if (a === "--run-id") runId = args[++i];
@@ -1523,6 +1694,7 @@ export async function main(argv: string[]): Promise<number> {
           "  ⛔ 无 --task ⇒ 常驻选择环（不再报错退出）\n" +
           "  [--selector-cmd \"<argv>\"] [--ready-pool-cmd \"<argv>\"] [--resource-gate-cmd \"<argv>\"] [--liveness-cmd \"<argv>\"]\n" +
           "  [--interval <ms>]   无在飞 worker 且瞬时 WAIT 时的轮询间隔（缺省 30000；测试缝传小值）\n" +
+          "  [--reconcile-interval <s>]  协调地板：至少每 N 秒协调一次，边沿事件全丢也降级「慢但正确」而非静默停摆（缺省 300；0 = 无地板）\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -1548,6 +1720,7 @@ export async function main(argv: string[]): Promise<number> {
   const outcomeFile = outcomePath ? path.resolve(outcomePath) : path.join(rootDir, WORKER_OUTCOME_REL);
   const timeoutMs = parseTimeoutMs(timeoutRaw);
   const intervalMs = parseIntervalMs(intervalRaw);
+  const reconcileMs = parseReconcileIntervalSecs(reconcileRaw);
 
   // 阶段 4（AC129）：无 --task ⇒ 常驻选择环（不再报错退出）。--task 显式批量派发路径不变。
   if (tasks.length === 0) {
@@ -1567,6 +1740,7 @@ export async function main(argv: string[]): Promise<number> {
       pidFile,
       livenessCmd: livenessCmd ? splitArgs(livenessCmd) : null,
       intervalMs,
+      reconcileMs,
     });
   }
 

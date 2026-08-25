@@ -18,9 +18,10 @@
 // and /tmp/session-liveness-* socket dir are removed asynchronously after kill-session) was swept
 // as "NEW residual" → a false red (round 95: tests=4150 all pass, only the leak gate red; round 96
 // light-load control: reaping won 2-10s before the scan → green). Fix: --check HOLD JUDGMENT — when
-// NEW matches appear it polls up to $TMUX_LEAK_REAP_WAIT_MS (default 10000) for them to clear; only
-// matches STILL PRESENT at the bound are a REAL leak. A genuine leak never clears, so the gate is
-// not weakened — it only stops flagging exit-in-progress.
+// NEW matches appear it polls up to a HOST-DERIVED reap-wait bound (default reap_wait_default():
+// max(10000, nproc×2500), ≥10000 — gap-suite-leak-scan-ol-scd-g-teardown-slow) for them to clear;
+// only matches STILL PRESENT at the bound are a REAL leak. A genuine leak never clears, so the gate
+// is not weakened — it only stops flagging exit-in-progress.
 //
 // Covers:
 //   - R1  clean delta (no NEW matches) → immediate clean, no reap-wait note (zero added latency)
@@ -29,6 +30,8 @@
 //   - R3  PERSISTENT NEW residue (a genuine leak) → FAIL after the bound, listing the match
 //   - R4  pre-existing match recorded in --snapshot → excluded (DELTA form preserved)
 //   - R5  fail-closed: --check with no before-run snapshot → FAIL "no before-run snapshot"
+//   - R6  the default reap-wait is HOST-DERIVED (reap_wait_default() reads nproc, floor 10000) —
+//        not a fixed literal (gap-suite-leak-scan-ol-scd-g-teardown-slow; AC1 read-host mechanic)
 //
 // Run:
 //   scripts/test.sh plugin/test/tmux-leak-scan.test.mjs
@@ -76,6 +79,22 @@ function runCheck(scratch, scope, { reapWaitMs = "10000", pollMs = "250" } = {})
     timeout: 30_000,
     env: { ...process.env, TMUX_LEAK_REAP_WAIT_MS: reapWaitMs, TMUX_LEAK_REAP_POLL_MS: pollMs },
   });
+}
+
+// Extract the REAL reap_wait_default() from tmux-leak-scan.sh and run it with the nproc seam —
+// the same extract-and-execute technique resource-gate.test.mjs uses for test.sh's
+// default_concurrency_formula (the derivation lives in the script, not in a copied formula). The
+// default reap-wait is HOST-DERIVED (gap-suite-leak-scan-ol-scd-g-teardown-slow): teardown latency
+// scales with the main-phase lane count, so a fixed 10000ms is a host-dependent constant
+// (CLAUDE.md 硬规则 4 推论二). RESOURCE_GATE_NPROC is the seam (no real nproc read → deterministic).
+function reapWaitDefault(nproc) {
+  const src = fs.readFileSync(SCAN_SH, "utf8");
+  const fnMatch = src.match(/reap_wait_default\(\) \{[^]*?\n\}/);
+  assert.ok(fnMatch, "tmux-leak-scan.sh must define reap_wait_default()");
+  const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nprintf '%s' "$(reap_wait_default)"\n`;
+  const res = spawnSync("bash", ["-c", script], { encoding: "utf8", timeout: 30_000 });
+  assert.equal(res.status, 0, `reap_wait_default(${nproc}) failed: ${res.stderr}`);
+  return parseInt(res.stdout.trim(), 10);
 }
 
 test("R1 — a clean delta (no NEW matches) is immediate clean with no reap-wait note", () => {
@@ -180,6 +199,17 @@ test("R5 — fail closed: --check with no before-run snapshot exits 1", () => {
     fs.rmSync(scope, { recursive: true, force: true });
     fs.rmSync(scratch, { recursive: true, force: true });
   }
+});
+
+test("R6 — the default reap-wait is HOST-DERIVED (reap_wait_default reads nproc), not a fixed literal", () => {
+  // AC1's read-host mechanic (gap-suite-leak-scan-ol-scd-g-teardown-slow): the 4-round ol-scd-g
+  // false-red was the reap-wait 10000ms literal expiring under 16-lane load. The default must now
+  // scale with nproc — floor 10000 (the historical 4-core value, unchanged) up to nproc×2500. A
+  // fixed 10000ms would return 10000 for EVERY seam here; the scaling asserts it reads the host.
+  assert.equal(reapWaitDefault(1), 10000, "1-core floors at the historical 10000ms");
+  assert.equal(reapWaitDefault(4), 10000, "4-core (historical box) is unchanged at 10000ms");
+  assert.equal(reapWaitDefault(16), 40000, "16-core widens to 40000ms — the 16-lane ol-scd-g false-red fix");
+  assert.equal(reapWaitDefault(32), 80000, "32-core scales linearly (nproc × 2500)");
 });
 
 // ── prefix coverage (gap-tmux-stale-not-honored-comment-private-socket-leak-scan AC3) ───────────────
