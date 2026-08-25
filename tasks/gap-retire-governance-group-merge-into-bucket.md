@@ -1,7 +1,7 @@
 ---
 id: gap-retire-governance-group-merge-into-bucket
 title: 退役 @test-group governance 第三套机制——并入 bucket（人裁定「不要在 bucket 和相机制以外再搞一套」），142 文件改标真实相
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -12,7 +12,7 @@ extra:
 ---
 **type:** execution
 
-> **⛔ 暂持 todo（2026-08-25）**：AC5 的 AC101 600s 冲突（a 真全量 vs b bucket 驱动默认轮）**须人裁定**，裁定落地前不放 ready——避免 worker 读到 AC5 发现结构上无法自行满足（人不在 worker 回合里）⇒ 白烧 worktree + 派发。人裁定后由 outer 记进 AC5 Evidence 并翻 ready。
+> **⛔ 暂持 needs-human（2026-08-25）**：AC5 的 AC101 600s 冲突（a 真全量 vs b bucket 驱动默认轮）**须人裁定**，裁定落地前不放 ready——避免 worker 读到 AC5 发现结构上无法自行满足（人不在 worker 回合里）⇒ 白烧 worktree + 派发。⛔ **不能用 todo**：promotion-driver 会把形状完整的 todo 机械晋升回 ready（已实证 b1762d8a「todo→ready 机械晋升」）。needs-human 是 driver 不自动晋升的持稳态。人裁定后由 outer 记进 AC5 Evidence 并翻 ready。
 
 ## Proposal
 
@@ -35,7 +35,7 @@ extra:
 1. 退役 governance 作为「选择/跳过」语义，删掉 39 段文件内自跳过守卫。
 2. 142 文件改标真实相：默认 engine；负载敏感（含今天两 flake）标 serial/lowconc——同时修掉今天两 flake 根（本该隔离却在主池裸跑）。
 3. 「这次要不要跑」此后只由 bucket 回答。132/142 现有桶覆盖；10 UNRESOLVED 落安全侧（每次 bucket run 都跑）或新开桶（触发=experiments/quay-perpetual-stream/scripts/）。
-4. ⛔ **实现前先实跑 `suite-bucket-attribution.ts` 对这 10 个取真值**（suite-bucket-select.ts 已有 EXP_SCRIPTS_PREFIX→PLUGIN_SCRIPTS_PREFIX 镜像折叠，可能部分本就能解析），别用 grep 近似当结论。
+4. ⛔ **实现前实跑 `suite-bucket-attribution.ts` 对这 10 个取真值**（manager 已用正本工具实跑：**10/10 全 UNRESOLVED**，EXP_SCRIPTS_PREFIX→PLUGIN_SCRIPTS_PREFIX 镜像折叠对它们一个都没生效——「可能部分能解析」已证否）。⇒「10 个落安全侧还是新开桶」是**真决策**（不开桶则永久安全侧、每次 bucket run 都付它们时间），别用 grep 近似当结论。
 
 **⚠️ 实现前必须解决的冲突（须人裁，⛔ 不代拍）**：退役 governance 跳过 ⇒ 默认全量轮多出 ~120 文件，本轮 suite dur=599.2s 已贴 AC101 ≤600s。两条路须显式选一：(a) 全量轮变真·全量（修掉「full suite 静默漏 142 文件」的「声明在/保证没了」形态，但 AC101 600s 须重谈）；(b) 默认全量轮本身改 bucket 驱动（省时，但改「全量轮作闸门」含义）。manager 倾向 (a)+省时责任交回 bucket，但**AC101 重谈须人裁**——实现方在 Plan 里显式记录所选项 + 人裁定，⛔ 不默认滑过去。
 
@@ -44,7 +44,7 @@ extra:
 - [ ] AC1（能取假，governance 退役）：39 段文件内自跳过守卫删除，`@test-group governance` 不再作为「选择/跳过」机制（无唤回路径的第三套语义移除）；（⛔ 守卫仍在 ⇒ 假）。
 - [ ] AC2（能取假，相标真实）：142 文件改标真实相（默认 engine；负载敏感含 worker-driver.test.mjs / full-suite-runner.test.mjs → serial/lowconc）；（⛔ 今天两 flake 文件仍在主池裸跑 ⇒ 假）。
 - [ ] AC3（能取假，bucket 单一选择）：「这次要不要跑」只由 bucket 回答；132/142 落现有桶、10 UNRESOLVED 落安全侧或新桶；（⛔ 仍有第三套选择机制 ⇒ 假）。
-- [ ] AC4（能取假，正本工具核对）：实现前 `suite-bucket-attribution.ts` 对 10 UNRESOLVED 实跑取真值（⛔ 用 grep 近似当结论 ⇒ 假）。
+- [ ] AC4（能取假，正本工具核对 + 时序）：实现前 `suite-bucket-attribution.ts` 对 10 UNRESOLVED 实跑取真值（⛔ 用 grep 近似当结论 ⇒ 假），**且须在 gap-suite-move-27-evidenced-files-out-serial-lowconc 与 gap-suite-serial-lowconc-classification-recheck 两个在飞任务 ff 之后重取**（它们的 diff 含 57+28 行 `@test-group` 改动，落地后 142 总数 / 各文件相 / bucket 归属都会变；在它们落地前跑正本工具仍是过期真值）。
 - [ ] AC5（能取假，AC101 冲突人裁）：AC101 ≤600s 冲突（a 真全量 vs b bucket 驱动默认轮）在实现前由人裁定，所选方向写进 Evidence；若 (a) 则 600s 预算重谈有记录；（⛔ 未裁定即实现/默认滑过 ⇒ 假）。
 
 ## Definition of Done
