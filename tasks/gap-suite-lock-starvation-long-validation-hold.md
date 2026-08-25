@@ -1,10 +1,12 @@
 ---
 id: gap-suite-lock-starvation-long-validation-hold
-title: 验证型长任务（如 serial-lowconc 33 文件 N 次重跑）持单飞锁数小时饿死全仓 fan-in，且与「worker 慢」在 outcome 里同形不可区分
+title: 验证型长任务（如 serial-lowconc 33 文件 N 次重跑）持单飞锁数小时饿死全仓 fan-in，且与「worker 慢」在
+  outcome 里同形不可区分
 status: ready
 labels:
   - gap
   - defect
+  - delivery-critical
 parent: null
 children: []
 extra:
@@ -26,6 +28,7 @@ extra:
 给验证型长任务的锁持有设上限，或让它走独立锁——两选一（或组合，落笔方定）：
 - **锁持有上限**：一个 suite 持 `full-suite.lock` 超过 T 分钟（如 30min）⇒ 释放 + 记「lock-hold-exceeded」告警（fail-loud，不静默）；
 - **独立锁**：验证型任务（`--buckets` 的主动重跑类 / 明确标 `@long-validation` 的）走独立锁，不与普通 fan-in 的 full-suite 锁竞争。
+⛔ **实现约束（manager 钉死，落笔必守）**：锁是 OS 级 flock，被 `scripts/test.sh` 进程的**文件描述符**持有，且该进程可脱离触发它的 worker session 独立存活（`suite-load-sampler` 孤儿化就是它活得比 worker 久的实例）。⇒ **T 分钟释放必须实现在持锁进程自己身上（test.sh 内部自超时）**，⛔ **不能实现成「worker-driver 发现某任务在飞太久就去杀它」**——后者依赖 worker-driver 对该进程的追踪，而追踪失效正是孤儿化那条 bug 本身，会在这里重蹈覆辙。
 ⛔ 关键判据：outcome 记录里「长时间持锁」必须与「worker 慢」**可区分**（加 wall_clock 分段 / lock_wait / lock_hold 字段），否则观测者仍会重走今天这条三层全错链。
 
 ## Acceptance Criteria
@@ -41,6 +44,6 @@ extra:
 ## Touches
 
 - plugin/scripts/（full-suite 锁语义：持有上限 / 独立锁 + outcome 记录加 lock_hold/lock_wait 字段）
-- scripts/test.sh 或 driver-runtime.ts（锁获取/释放 + 上限）
+- scripts/test.sh（锁获取/释放 + T 分钟自超时——⛔ 实现在持锁进程自身，非 worker-driver 杀）
 - plugin/scripts/worker-outcome 记录（lock_hold/lock_wait 分段）
 - tasks/gap-suite-lock-starvation-long-validation-hold.md（自身）

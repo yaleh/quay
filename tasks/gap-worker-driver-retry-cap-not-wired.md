@@ -1,10 +1,12 @@
 ---
 id: gap-worker-driver-retry-cap-not-wired
-title: worker-driver 重试上限从未接线——promotion 有 retryExhausted、worker 空集 ⇒ 反复 exited-not-landed 无止损（性价比最高止血）
+title: worker-driver 重试上限从未接线——promotion 有 retryExhausted、worker 空集 ⇒ 反复
+  exited-not-landed 无止损（性价比最高止血）
 status: ready
 labels:
   - gap
   - defect
+  - delivery-critical
 parent: null
 children: []
 extra:
