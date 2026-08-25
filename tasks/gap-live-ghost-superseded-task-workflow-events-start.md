@@ -1,7 +1,7 @@
 ---
 id: gap-live-ghost-superseded-task-workflow-events-start
 title: /live 页孤儿 workflow-events START 事件永久显示 superseded/done 任务「实现中」——inFlight 来源无 status 过滤
-status: done
+status: ready
 labels:
   - gap
   - defect
