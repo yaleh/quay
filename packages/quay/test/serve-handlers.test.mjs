@@ -1377,6 +1377,35 @@ test("AC2 (falsifiable) — deliverySettingsFromArgv reads --settings / --danger
   assert.deepEqual(deliverySettingsFromArgv([], read, "/home"), null, "no flags, no global settings ⇒ null");
 });
 
+test("gap-send-message-held-inline-settings-json — deliverySettingsFromArgv parses inline --settings JSON directly (not as a file path)", () => {
+  // AC1: `--settings <inline JSON>` (with defaultMode=bypassPermissions) is parsed directly — a
+  // readSettingsFile that returns null for EVERY path (i.e. any file-path read ENOENTs) must still
+  // yield bypassPermissions, proving the JSON never went through the file-path branch.
+  const inline = '{"permissions":{"defaultMode":"bypassPermissions"},"crossSessionInbound":"accept"}';
+  const readCalls = [];
+  const readNever = (p) => { readCalls.push(p); return null; };
+  assert.deepEqual(
+    deliverySettingsFromArgv(["--settings", inline], readNever, "/home"),
+    { defaultMode: "bypassPermissions", crossSessionInbound: "accept" },
+    "inline JSON parsed directly ⇒ bypass + accept (⛔ 仍当路径读 ENOENT ⇒ 假)"
+  );
+  assert.equal(readCalls.length, 0, "readSettingsFile is never called for the inline-JSON form (the file-path branch is bypassed)");
+
+  // AC3 negative control: a REAL file path still goes through readSettingsFile (no regression).
+  const readFile = (p) => (p === "/tmp/s.json" ? '{"permissions":{"defaultMode":"bypassPermissions"}}' : null);
+  assert.deepEqual(
+    deliverySettingsFromArgv(["--settings", "/tmp/s.json"], readFile, "/home"),
+    { defaultMode: "bypassPermissions", crossSessionInbound: null },
+    "--settings <path> still reads the file (no regression)"
+  );
+  // AC3: --dangerously-skip-permissions branch unchanged (still bypass without reading anything).
+  assert.deepEqual(
+    deliverySettingsFromArgv(["--dangerously-skip-permissions", "--settings", inline], readNever, "/home"),
+    { defaultMode: "bypassPermissions", crossSessionInbound: null },
+    "--dangerously-skip-permissions still wins (no regression)"
+  );
+});
+
 test("AC2 (falsifiable) — classifyReceipt folds a held receipt past TTL into expired (held→expired observable)", () => {
   const held = { sessionId: SEND_SID, name: null, message: "hi", state: "held", sentAtMs: 1000 };
   assert.equal(classifyReceipt(held, 1000, 5000), "held", "age 0 < ttl ⇒ still held");
