@@ -1,7 +1,9 @@
-// @test-group engine
-// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
-// `serial` group (B-class — spawns real monitor processes and waits on real process/argv state) so
-// it runs in the concurrency-1 serial phase, never competing with the concurrency-8 main body.
+// @test-group lowconc
+// GROUP NOTE: B-class — spawns real monitor processes and waits on real process/argv state, so it
+// runs in the concurrency-3 lowconc phase, never competing with the concurrency-N engine body.
+// Reverted from `engine` back to `lowconc` (gap-suite-serial-lowconc-classification-recheck): the
+// AC7 zero-write test snapshots `git status --short` before/after the checker, and that snapshot
+// races with concurrent repo writes in the engine body (full-suite red under concurrency-16).
 // monitor-mount-check.test.mjs — gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right,
 // rewritten for gap-retire-inner-state-one-observer-targets-by-parameter (AC1): observation has
 // exactly ONE tool, session-liveness.sh. Verifies the two criteria of the outer's Monitor mount
