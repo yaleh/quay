@@ -23,6 +23,8 @@ extra:
 
 **最危险的一点**：这类「长时间持锁」在 `worker-outcome.jsonl` 里与「worker 自己慢」**完全同形**（长 wall_clock、无 error、最终 exit 0/not-landed）——观测者无法区分「验证型任务在设计上就慢」vs「worker 卡死占锁」。今天这条诊断链三层（worker spawnSync→spawn → 我「另一个 hang」→ manager 转写 memory）全错，推翻只用了一条 `--test worker-driver.test.mjs` 对照（79/79 pass 147s）。
 
+**量化升级（manager 08-25 实算当日 21 轮 lock_wait_ms，非单案例）**：当日锁等待占套件总墙钟 **46.2%**（Σlock=13878.1s / Σwall=30014.8s = 3.86h/8.34h）。关键在 `work_s`（实际测试时间）列几乎不变——早段 494–683s、近段 1035–1164s（测试量自身增长），而同期 wall 从 530s 摆到 7349s ⇒ **墙钟方差几乎全来自锁等待，不是套件变慢**。最坏 round 615 单轮等锁 **104.6 分钟**、`effective_parallelism` 掉到 **0.859**。交叉核（⛔ 不单信 runner 自报）：`wall ≈ work + lock + 小额开销` 逐轮成立（615: 7314 vs 7349 残差 35s）。可复算判据形态：按日 `Σlock_wait_ms / ΣdurationMs`（基准 46.2%）。该读数**能取假**（4 轮 lock_wait=0.0 ⇒ 非结构恒有、是争用依赖）。
+
 ## Plan
 
 给验证型长任务的锁持有设上限，或让它走独立锁——两选一（或组合，落笔方定）：
@@ -36,10 +38,11 @@ extra:
 - [ ] AC1（能取假，锁持有上限或独立锁）：验证型长任务不再独占 full-suite 锁数小时（锁持有超 T 释放，或走独立锁）；（⛔ 仍 5 小时独占 ⇒ 假）。
 - [ ] AC2（能取假，outcome 可区分）：outcome 记录里「长时间持锁」与「worker 慢」可区分（含 lock_wait / lock_hold 字段）；（⛔ 仍同形不可区分 ⇒ 假）。
 - [ ] AC3（能取假，负控制回放）：回放 serial-lowconc 今天 5.2 小时持锁场景，改造后其它 fan-in 不再被饿死（能在 T 内拿到锁）；（⛔ 仍饿死 ⇒ 假）。
+- [ ] AC4（能取假，锁等待占比下降）：修复后按日 `Σlock_wait_ms / ΣdurationMs` 从基准 46.2% 显著下降（有历史基准可比）；（⛔ 仍 ~46% ⇒ 假）。
 
 ## Definition of Done
 
-锁持有上限或独立锁落地；AC1/AC2/AC3 全勾；outcome 记录含 lock_hold/lock_wait 分段；serial-lowconc 场景回放不再饿死其它 fan-in。
+锁持有上限或独立锁落地；AC1-AC4 全勾；outcome 记录含 lock_hold/lock_wait 分段；serial-lowconc 场景回放不再饿死其它 fan-in；按日锁等待占比从基准 46.2% 显著下降。
 
 ## Touches
 
