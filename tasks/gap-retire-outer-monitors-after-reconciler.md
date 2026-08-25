@@ -2,7 +2,7 @@
 id: gap-retire-outer-monitors-after-reconciler
 title: 协调循环（任务1-4）落地后退役 outer 两个 Monitor（slot-free-trigger /
   suite-state-trigger，从正确性依赖降级为优化后移除）
-status: done
+status: ready
 labels:
   - gap
 parent: null
