@@ -49,6 +49,19 @@ export const oldPathPatterns = oldPaths.map((s) =>
 );
 
 /**
+ * The staging-test build-artifact dir NAME prefix. quay-init-laydown-dist-closure.test.mjs's
+ * stagePackagedPlugin() stages a packaged-plugin copy at
+ * `packages/quay/plugin-staging-<pid>-<counter>/` (INSIDE the repo tree so esbuild resolves yaml;
+ * see that file's STAGED_PREFIX rationale). A KILLED run (OOM/interrupt) leaves those dirs behind as
+ * orphans — `after()` never runs. walkCorpus must skip them BY NAME exactly like node_modules/.git/
+ * dist: it is an fs traversal that does NOT respect gitignore, and an orphan carries a full plugin/
+ * copy whose tick-doc old-path strings (loop/orchestrator-loop-tick.md etc.) + scripts/*.ts false-red
+ * AC1b/AC2 (2026-08-25: plugin-staging-3477285-{0,1} red, worker hand-deleted to restore).
+ * (gap-orphan-staging-dirs-pollute-walkcorpus)
+ */
+export const stagingDirPrefix = 'plugin-staging-';
+
+/**
  * Absolute paths of every git worktree CONTAINER that the fs-based `walk()` must NOT scan as
  * main-repo content (gap-loop-shipping-scan-does-not-exclude-worktrees).
  *
