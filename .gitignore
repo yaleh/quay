@@ -271,6 +271,19 @@ orchestration/inner-idle-log.jsonl
 # written by full-suite-runner.ts after every suite via measure-trend-check.ts). Same live
 # runtime-state family as verification-round.jsonl / full-suite.log; never committed.
 **/.quay/measure-history.jsonl
+# gap-quay-runtime-files-tracked-but-shouldnt (2026-08-25): 5 runtime products under .quay/ were
+# accidentally TRACKED (git rm --cached'd in the same gap). test.sh.lock (scripts/test.sh
+# single-flight lock), full-suite-state.json.suitefix-bak (suite-fix backup), no-code-caller-triage.jsonl
+# + no-code-caller-triage-rescan.jsonl (gap-ac111 triage dumps), suite-bucket-reattribution.jsonl
+# (gap-ac121 test-bucket re-attribution dump) — all machine-local runtime state / one-off task outputs,
+# same family as full-suite-state.json / verification-round.jsonl; never committed. The 3 .quay/ files
+# that ARE deliberately tracked (profiles.yml / red-on-omission-manifest.md /
+# outer-inflight-coordination-20260812.md) stay tracked — reasons in the task Evidence.
+**/.quay/test.sh.lock
+**/.quay/full-suite-state.json.suitefix-bak
+**/.quay/no-code-caller-triage.jsonl
+**/.quay/no-code-caller-triage-rescan.jsonl
+**/.quay/suite-bucket-reattribution.jsonl
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/

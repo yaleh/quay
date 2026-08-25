@@ -54,8 +54,9 @@ monitor 扫描加 root 过滤；AC1-AC3 全勾；worktree 测试进程不再污�
   - `monitorInstances resolves relative argv[1] via /proc/<pid>/cwd` —— cwd=repoRoot 计入、cwd=worktree 排除；`isMainCheckoutScript` 前缀边界（`quay2` ≠ `quay/`）判 false。
   - `monitor.mounted false when only a worktree test process is running (AC2)` —— worktree 测试进程在 + 真监视器死 ⇒ `mounted false`；负控制：无进程 ⇒ 同样 false。
   - `monitor.mounted true and instances correct when a real main-checkout monitor is alive (AC3 no regression)` —— 真监视器存活 ⇒ `mounted true`、`instances 1`，混杂 worktree 进程 pid 400 不进 `monitor.instance`。
+- **生产证据（时序包夹，2026-08-25T23:1xZ，⛔ 非 fixture 非注入）**：BEFORE A0 worktree pid 2323753 存活 → A0 报 `monitor.instances=1` → AFTER A0 该 pid 仍存活（另有新起 2329457），两端交集 {2323753} 在【整个 A0 调用期间】始终存活 ⇒ 排除了「中间死掉所以没被数」的唯一替代解释，root 过滤在生产确实生效。先前 22:59:54Z 那份（ps 与 A0 相邻但不同时的两次读数）降级为「首次观察」——manager 自认拿两个相隔 2s 的单点取证，正是它刚批评读数 agent 的同一毛病（方向相反：用它证成 vs 证否）。⇒ AC1「不误计 worktree 测试进程」有生产证据（能取假而未取假：若过滤没生效 instances 应 ≥2）。
 
-> **⛔ 生产鉴别条件待复现（2026-08-25，manager 指出）**：done 基于读码（root 过滤）+ 测试（27/27 绿），但生产鉴别条件（某任务 worktree 正在跑 session-liveness.sh 时，两口径仍报 1）至今未复现——当前两口径一致是【非鉴别】情形（无 worktree 在跑）。「过滤生效」与「过滤没生效但恰好无干扰进程」在读数上同形（硬规则 4 推论三）。下次出现 worktree 在跑、两口径仍 1，才是生产证据。
+> **⛔ AC2 生产鉴别仍待复现（2026-08-25，manager 指出）**：AC1 已生产复现（见上）。AC2「monitor.mounted 掩盖真监视器死亡」需「真监视器死 + worktree 实例在」组合，今日真监视器一直活着、该方向未在生产发生，⛔ 不制造条件（杀真监视器是制造故障非观测）。结构上已由同一处过滤覆盖（worktree 进程进不了 `monitors` 集合 ⇒ 撑不起 `length > 0`），故 AC2 保持「结构已覆盖、生产未复现」即可。
 
 ## Touches
 
