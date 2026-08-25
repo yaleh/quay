@@ -2,7 +2,7 @@
 id: gap-single-flight-lock-timeout-double-value
 title: single-flight 锁超时双值（fan-in 900s vs 其余 600s）+ 600s 线已被跨越（活 suite 被误杀
   fail-closed）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -34,8 +34,8 @@ single-flight 锁超时在同一队列上有两套值：`FULL_SUITE_LOCK_TIMEOUT
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，无双值）：fan-in 与其余路径读同一超时来源（⛔ 仍有 600/900 双值 ⇒ 假）。
-- [ ] AC2（能取假，超时不误杀）：超时值 ≥ 近 N 轮 suite 时长 p99（或直接不设上界靠 flock crash-autorelease）；（⛔ 超时值仍 < p99 会误杀活 suite ⇒ 假）。
+- [x] AC1（能取假，无双值）：fan-in 与其余路径读同一超时来源（⛔ 仍有 600/900 双值 ⇒ 假）。
+- [x] AC2（能取假，超时不误杀）：超时值 ≥ 近 N 轮 suite 时长 p99（或直接不设上界靠 flock crash-autorelease）；（⛔ 超时值仍 < p99 会误杀活 suite ⇒ 假）。
 
 ## Definition of Done
 
@@ -43,7 +43,9 @@ single-flight 锁超时在同一队列上有两套值：`FULL_SUITE_LOCK_TIMEOUT
 
 ## Touches
 
-- scripts/test.sh（FULL_SUITE_LOCK_TIMEOUT）
-- plugin/workflows/fan-in-execute.js（suiteLockTimeoutSecs ?? 900）
-- plugin/test/fan-in-execute-paths.test.mjs（:2142-2279 负控制 fixture，改 AC1 必碰）
+- scripts/test.sh（FULL_SUITE_LOCK_TIMEOUT → 无界排队等待，删 fail-closed 超时）
+- plugin/workflows/fan-in-execute.js（suiteLockTimeoutSecs ?? 900 → 删除 env 传值）
+- .claude/workflows/fan-in-execute.js（双拷贝同步，workflows-dual-copy-drift-check）
+- plugin/test/fan-in-execute-paths.test.mjs（:1721-1733 AC126 setsid 行匹配 + :2141-2287 负控制 fixture 重写）
+- plugin/scripts/fan-in-ff-merge.sh（:369-374 lock wait 语义注释同步）
 - tasks/gap-single-flight-lock-timeout-double-value.md（自身）
