@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
+import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
 import { sendSessionFrames, deliveryStateFor, classifyReceipt, extractDeliverySettings, deliverySettingsFromArgv, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
@@ -464,12 +464,13 @@ test("renderPerFileTimelineSvg renders one server-side SVG bar per timestamped f
     // A legacy entry WITHOUT timestamps must be dropped (not plotted, not fabricated).
     { file: "packages/quay/test/legacy.test.mjs", durationMs: 50, passed: true },
   ];
-  const out = renderPerFileTimelineSvg(perFile);
+  const out = renderPerFileTimelineSvg(perFile); // no root → every file is UNRESOLVED (never throws)
   assert.ok(out.startsWith("<svg"), "output is an <svg> element (server-rendered, zero client JS)");
   assert.ok(out.includes("测试时间线"), "renders the timeline heading");
-  // One bar per timestamped file (3 rects with gantt-svg-bar*), the legacy entry dropped.
-  assert.equal((out.match(/class="gantt-svg-bar(-fail)?"/g) ?? []).length, 3, "three timestamped files → three bars");
-  assert.ok(out.includes("gantt-svg-bar-fail"), "the failed file's bar carries gantt-svg-bar-fail");
+  // One bar per timestamped file (3 label links), the legacy entry dropped.
+  assert.equal((out.match(/href="\/tests\/file\?path=/g) ?? []).length, 3, "three timestamped files → three bars");
+  assert.ok(out.includes("gantt-bucket-unresolved"), "a file with no readable source is UNRESOLVED, not fabricated");
+  assert.ok(out.includes("gantt-svg-bar-fail"), "the failed file's bar carries the fail shade (gantt-svg-bar-fail)");
   assert.ok(!out.includes("legacy.test.mjs"), "a timestamp-less legacy entry is not plotted");
   // Chronological start-time ASC: slow (t0+190) < mid (t0+2900) < fast (t0+5988); assert label order.
   const slowIdx = out.indexOf("slow.test.mjs");
@@ -482,6 +483,50 @@ test("renderPerFileTimelineSvg renders one server-side SVG bar per timestamped f
   assert.equal(renderPerFileTimelineSvg(null), "");
   assert.equal(renderPerFileTimelineSvg([]), "");
   assert.equal(renderPerFileTimelineSvg([{ file: "a.test.mjs", durationMs: 10, passed: true }]), "", "a perFile with no timestamps renders nothing (legacy data has no time axis)");
+});
+
+test("AC1/AC2/AC3: timeline bars are bucket-coloured (P/M/S distinct hues, not just pass/fail) with a legend, and bucketSetOfFile mirrors suite-bucket-attribution", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-bucket-"));
+  try {
+    // P — a product test file (directory home `packages/*/test/` → P).
+    const pFile = "packages/quay/test/p.test.mjs";
+    fs.mkdirSync(path.join(root, "packages/quay/test"), { recursive: true });
+    fs.writeFileSync(path.join(root, pFile), "// product test\n");
+    // M — a plugin test file that statically references plugin/scripts (→ M).
+    const mFile = "plugin/test/m.test.mjs";
+    fs.mkdirSync(path.join(root, "plugin/test"), { recursive: true });
+    fs.writeFileSync(path.join(root, mFile), 'import "../scripts/foo.ts";\n');
+    // S — a test file that references the suite script (→ S).
+    const sFile = "plugin/test/s.test.mjs";
+    fs.writeFileSync(path.join(root, sFile), "// Run: bash scripts/test.sh\n");
+
+    // AC2 — the mirror attributes each file to the SAME buckets as suite-bucket-attribution.ts.
+    assert.deepEqual([...bucketSetOfFile(pFile, root)].sort(), ["P"], "product test → {P}");
+    assert.deepEqual([...bucketSetOfFile(mFile, root)].sort(), ["M"], "plugin test importing ../scripts → {M}");
+    assert.deepEqual([...bucketSetOfFile(sFile, root)].sort(), ["S"], "scripts/test.sh reference → {S}");
+    assert.deepEqual([...bucketSetOfFile("no/such/file.test.mjs", root)], [], "missing file → empty set (UNRESOLVED, never throws)");
+
+    const t0 = 1724374800000;
+    const out = renderPerFileTimelineSvg([
+      { file: pFile, durationMs: 100, passed: true, endedAtMs: t0 + 1000, startedAtMs: t0 },
+      { file: mFile, durationMs: 200, passed: true, endedAtMs: t0 + 2000, startedAtMs: t0 + 1000 },
+      { file: sFile, durationMs: 300, passed: true, endedAtMs: t0 + 3000, startedAtMs: t0 + 2000 },
+    ], root);
+
+    // AC1 — distinct bucket hues, not just the old pass/fail pair.
+    assert.ok(out.includes('class="gantt-bucket-P"'), "P bar carries the P hue class");
+    assert.ok(out.includes('class="gantt-bucket-M"'), "M bar carries the M hue class");
+    assert.ok(out.includes('class="gantt-bucket-S"'), "S bar carries the S hue class");
+    assert.ok(!out.includes('class="gantt-svg-bar"'), "no bar still uses the old single pass hue");
+
+    // AC3 — a legend names each bucket's colour meaning.
+    assert.ok(out.includes("图例"), "renders a legend");
+    assert.ok(out.includes("P 产品"), "legend names the P bucket");
+    assert.ok(out.includes("M 机件"), "legend names the M bucket");
+    assert.ok(out.includes("S 套件"), "legend names the S bucket");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("AC2: GET /tests renders the timeline SVG when the latest perFile row carries timestamps", async () => {
@@ -503,7 +548,7 @@ test("AC2: GET /tests renders the timeline SVG when the latest perFile row carri
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
     assert.ok(r.body.includes("测试时间线"), "the page renders the timeline section");
-    assert.ok(/class="gantt-svg-bar"/.test(r.body), "the page renders at least one timeline bar");
+    assert.ok(/class="gantt-bucket-/.test(r.body), "the page renders at least one bucket-coloured timeline bar");
     assert.ok(r.body.includes("slow.test.mjs") && r.body.includes("fast.test.mjs"), "both timestamped files present in the timeline");
   } finally {
     if (server) {
@@ -1202,6 +1247,72 @@ test("AC2 (unit) — readLive annotates in-flight worker tasks with the live ses
   }
 });
 
+// ── gap-live-ghost-superseded-task-workflow-events-start (AC1/AC2/AC3) ────────────────────────
+// A workflow-events START-without-END record for a task whose on-disk status is terminal
+// (done/superseded/needs-human) is a ghost: its worker session ended or was superseded without a
+// normal fan-in END telemetry. readLive must drop it by the direct量 (on-disk status), NOT keep it
+// in-flight forever just because its worktree was never released. A genuinely in-flight task
+// (ready, no terminal status) must be KEPT — the filter is fail-closed toward "terminal only".
+
+function writeLiveGhostFixture(root, entries) {
+  const eventsDir = path.join(root, ".workflow-events");
+  const tasksDir = path.join(root, "tasks");
+  fs.mkdirSync(eventsDir, { recursive: true });
+  fs.mkdirSync(tasksDir, { recursive: true });
+  const nowMs = Date.now();
+  for (const { runId, taskId, status } of entries) {
+    const ev = {
+      schemaVersion: "1", agentLabel: "fast-mode", attempt: 0, stage: "Fast", eventKind: "start",
+      runId, taskId, commandIdentity: "fast-mode-telemetry:task-start", recordedAtMs: nowMs,
+      timing: { queuedAtMs: null, startedAtMs: nowMs - 120_000, endedAtMs: null },
+    };
+    fs.writeFileSync(path.join(eventsDir, `${runId}.jsonl`), JSON.stringify(ev) + "\n");
+    fs.writeFileSync(path.join(tasksDir, `${taskId}.md`), `---\nid: ${taskId}\nstatus: ${status}\n---\nbody\n`);
+  }
+  return nowMs;
+}
+
+test("AC1/AC2/AC3 — readLive drops terminal-status ghosts, keeps a ready task (workflow-events source)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-ghost-"));
+  try {
+    const nowMs = writeLiveGhostFixture(root, [
+      { runId: "fm-SUP-1", taskId: "SUP", status: "superseded" },
+      { runId: "fm-DONE-1", taskId: "DONE", status: "done" },
+      { runId: "fm-NH-1", taskId: "NH", status: "needs-human" },
+      { runId: "fm-RDY-1", taskId: "RDY", status: "ready" },
+    ]);
+
+    const live = readLive(root, { nowMs });
+    const ids = new Set(live.inFlight.map((t) => t.taskId));
+
+    assert.ok(!ids.has("SUP"), "AC1: a superseded task with an orphan START event is NOT in-flight (⛔ 仍显示「实现中」⇒ 假)");
+    assert.ok(!ids.has("DONE"), "AC1: a done task with an orphan START event is NOT in-flight");
+    assert.ok(!ids.has("NH"), "AC3: a needs-human task with an orphan START event is NOT in-flight (no worker is running)");
+    assert.ok(ids.has("RDY"), "AC2: a ready task with an orphan START event IS still in-flight (negative control — not over-trimmed)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — a live worker (status ready + process present) is still in-flight (not mis-dropped)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-ghost-worker-"));
+  try {
+    const nowMs = Date.now();
+    fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(root, "tasks", "LIVE-1.md"), `---\nid: LIVE-1\nstatus: ready\n---\nbody\n`);
+
+    const live = readLive(root, {
+      nowMs,
+      liveWorkers: [{ taskId: "LIVE-1", pid: "4242", startedAtMs: nowMs - 30_000 }],
+    });
+    const ids = new Set(live.inFlight.map((t) => t.taskId));
+
+    assert.ok(ids.has("LIVE-1"), "AC2: a live worker for a ready task is in-flight (⛔ 误剔 ⇒ 假)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC2 (falsifiable) — renderLivePage renders a transcript link ONLY for in-flight workers with a sessionId", () => {
   const base = {
     status: "ok", reason: null, concurrency: 1, cpuPressure: null,
@@ -1245,11 +1356,73 @@ test("AC3 (unit) — taskRunsBlock renders a per-attempt view + download link fo
     const recs = readWorkerOutcomeRecords(root).filter((r) => r.task === "gap-runs-1");
     assert.equal(recs.length, 2, "two attempts read back");
     assert.equal(recs[0].session_id, sid, "session_id is parsed from the carrier");
-    const htmlBlock = taskRunsBlock(root, "gap-runs-1");
+    // `liveWorkers: []` keeps this outcome-carrier test hermetic: the fixture root has a
+    // worker-outcome.jsonl (⇒ workerDriverActive=true), so without the seam the block would scan
+    // the REAL /proc and depend on the host's live processes.
+    const htmlBlock = taskRunsBlock(root, "gap-runs-1", { liveWorkers: [] });
     assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132"/, "Runs block links the view for the attempt with a session_id");
     assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132\/download"/, "Runs block links the raw download for the attempt");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 (unit) — taskRunsBlock shows a 「进行中」 row + session link for a live worker (no END record yet)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-live-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "runs-home-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  // No worker-outcome.jsonl — a first-dispatched worker has no END record yet (the exact blind spot).
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  fs.mkdirSync(path.join(home, ".claude", "sessions"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".claude", "sessions", "12345.json"), JSON.stringify({ sessionId: sid }));
+  try {
+    const htmlBlock = taskRunsBlock(root, "gap-live-1", {
+      liveWorkers: [{ taskId: "gap-live-1", pid: "12345", startedAtMs: Date.parse("2026-08-25T00:00:00Z") }],
+      sessionHome: home,
+    });
+    assert.match(htmlBlock, /进行中/, "live worker renders a 「进行中」 row");
+    assert.match(htmlBlock, />12345</, "live worker pid is shown");
+    assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132"/, "live worker session id is linked (reuses liveSessionIdForPid)");
+    assert.match(htmlBlock, /worker-gap-live-1/, "live worker run id is the worker-<task> form");
+    assert.doesNotMatch(htmlBlock, /无 worker 运行记录/, "an in-flight row suppresses the empty-store message");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("AC2 (unit) — a done task with no live worker shows NO 「进行中」 row (no ghost)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-done-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  fs.writeFileSync(path.join(q, "worker-outcome.jsonl"), [
+    JSON.stringify({ ts: "2026-08-25T00:00:00Z", task: "gap-runs-1", final_state: "completed", exit_code: 0, session_id: null }),
+  ].join("\n") + "\n");
+  try {
+    const htmlBlock = taskRunsBlock(root, "gap-runs-1", { liveWorkers: [] });
+    assert.doesNotMatch(htmlBlock, /进行中/, "no live worker ⇒ no 「进行中」 ghost row");
+    assert.match(htmlBlock, /completed/, "historical outcome row still renders");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 (unit) — a live worker with no/malformed session record renders 「—」 (honest, no dead link)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-nolink-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "runs-home2-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  try {
+    const htmlBlock = taskRunsBlock(root, "gap-live-2", {
+      liveWorkers: [{ taskId: "gap-live-2", pid: "99999", startedAtMs: null }],
+      sessionHome: home, // no sessions dir ⇒ liveSessionIdForPid returns null (honest, not a dead link)
+    });
+    assert.match(htmlBlock, /进行中/, "live worker row still present");
+    assert.doesNotMatch(htmlBlock, /href="\/session\//, "no session record ⇒ no dead transcript link");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

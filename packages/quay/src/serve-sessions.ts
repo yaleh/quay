@@ -5,29 +5,35 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readSessions, readSession, sessionTranscriptPath, isValidSessionId, SESSION_LAYERS, type SessionsResult, type SessionDetail, type SessionViewResult, type TranscriptBlock } from "./observation.ts";
+import { readSessions, readSession, readTranscript, sessionTranscriptPath, isValidSessionId, SESSION_LAYERS, SESSION_VIEW_INITIAL_TURNS, SESSION_VIEW_EARLIER_CHUNK, type SessionsResult, type SessionDetail, type SessionViewResult, type TranscriptBlock, type TranscriptTurn } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote } from "./serve-render.ts";
 import { runDriver } from "./cli/driver.ts";
 import { renderSendForm } from "./serve-send.ts";
 
 // ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
 
-function renderSessionsPage(sessions: SessionsResult): string {
+export function renderSessionsPage(sessions: SessionsResult): string {
+  // AC1 (gap-sessions-page-slow-unclickable-flat-render): the card is an <a href="/session/<id>"> —
+  // the detail page already exists, the list just never linked to it. sessionId is a strict UUID
+  // ([0-9a-f-]), so the href is a lookup key, never a path-traversal vector.
   const cardFor = (s: SessionDetail): string => {
     const msgHtml = s.messages && s.messages.length > 0
       ? s.messages.map((m) => html`<div style="border-left:2px solid var(--color-divider);padding-left:0.6rem;margin-bottom:0.5rem">
           <div style="font-size:0.7rem;color:var(--color-neutral-700)">${escapeHtml(m.time)} · ${escapeHtml(m.role)}</div>
           <p style="font-size:0.8rem;line-height:1.4;margin:0">${escapeHtml(m.text)}</p>
         </div>`).join("")
-      : obsNote(s.transcriptStatus, s.transcriptReason);
-    return html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:0.5rem;min-height:180px">
+      : s.alive
+        ? obsNote(s.transcriptStatus, s.transcriptReason)
+        // AC2: a GONE card's tail is NOT read on the list page — render a hint, not a fabricated 未接入.
+        : html`<p class="meta">transcript 在详情页按需读取 — 点击查看</p>`;
+    return html`<a href="/session/${escapeHtml(s.sessionId)}" style="text-decoration:none;color:inherit;background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:0.5rem;min-height:180px">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <b>${escapeHtml(s.name)}</b>
         <span style="font-size:0.75rem;font-weight:700;color:${s.alive ? "var(--color-accent-700)" : "var(--color-accent-800)"}">${s.alive ? "LIVE" : "GONE"}</span>
       </div>
       <div style="font-size:0.75rem;color:var(--color-neutral-700)">${s.halted ? "halted" : s.pid != null ? `pid ${s.pid}` : "—"}</div>
       ${msgHtml}
-    </div>`;
+    </a>`;
   };
 
   // Group by layer (Manager / Outer / Inner, plus Other for names that carry no layer marker) so
@@ -39,13 +45,24 @@ function renderSessionsPage(sessions: SessionsResult): string {
     list.push(s);
     byLayer.set(s.layer, list);
   }
+  // AC2: default-render LIVE only; GONE sessions fold into a collapsed <details> (native, zero-JS).
+  // The GONE tail was already skipped in readSessions, so the <details> holds only minimal name cards.
+  const grid = "display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem";
   const sections = SESSION_LAYERS.map(({ layer, heading }) => {
     const items = byLayer.get(layer) ?? [];
+    const live = items.filter((s) => s.alive);
+    const gone = items.filter((s) => !s.alive);
     return html`<section style="margin-bottom:1.5rem">
       <h2>${escapeHtml(heading)}</h2>
-      ${items.length > 0
-        ? html`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem">${items.map(cardFor).join("")}</div>`
-        : html`<p class="meta">无该层会话目标</p>`}
+      ${live.length > 0
+        ? html`<div style="${grid}">${live.map(cardFor).join("")}</div>`
+        : html`<p class="meta">无运行中会话</p>`}
+      ${gone.length > 0
+        ? html`<details style="margin-top:0.75rem">
+            <summary style="cursor:pointer;font-size:0.8rem;color:var(--color-neutral-700)">已结束会话（GONE · ${gone.length}）</summary>
+            <div style="${grid};margin-top:0.75rem">${gone.map(cardFor).join("")}</div>
+          </details>`
+        : ""}
     </section>`;
   }).join("");
   return html`<!doctype html>
@@ -81,20 +98,39 @@ export async function handleSessions(
 // (structured text/thinking/tool_use/tool_result blocks) — NOT the /sessions 3-message preview.
 // AC2 (结构化分块非摊平): each content block renders as a marked, collapsible unit (`tx-text` /
 // `tx-thinking` / `tx-tool-pair`), and a `tool_use` is PAIRED with its `tool_result` (rendered inside
-// one <details class="tx-tool-pair">) — never a flat full-text dump. Zero client JS: collapse via
-// native <details>, freshness via manual refresh (blocker ① deferred).
-export function renderSessionPage(view: SessionViewResult): string {
-  // First pass: index tool_use (by id) and tool_result (by tool_use_id) across ALL turns so a
-  // tool_result arriving in a later user record can be folded into its assistant tool_use's <details>.
+// one <details class="tx-tool-pair">) — never a flat full-text dump.
+//
+// gap-sessions-page-slow-unclickable-flat-render AC3: the detail page no longer flattens the whole
+// 2 MB tail. It renders the most recent SESSION_VIEW_INITIAL_TURNS turns by default and lazy-loads
+// earlier turns on scroll-up. ⛔ This BREAKS the zero-client-JS convention for THIS one page — a
+// deliberate, documented exception (see the task Plan §3 tension note): scroll-triggered lazy-loading
+// is structurally impossible in pure HTML, and the native <details> alternative either re-embeds the
+// full 2 MB (defeating the perf fix) or degrades to a "load earlier" pagination link (excluded by the
+// Plan). The break is minimal — one self-contained <script> (IntersectionObserver), no framework, no
+// WebSocket — and every other page stays zero-JS.
+
+/** tool_use→result pairing maps, indexed across a full turn list so a tool_result in a later record
+ *  folds into its assistant tool_use even when only a slice of turns is rendered. */
+interface ToolMaps {
+  toolUseById: Map<string, { name: string; input: string }>;
+  toolResultByUseId: Map<string, { text: string; isError: boolean }>;
+}
+
+function buildToolMaps(turns: TranscriptTurn[]): ToolMaps {
   const toolUseById = new Map<string, { name: string; input: string }>();
   const toolResultByUseId = new Map<string, { text: string; isError: boolean }>();
-  for (const turn of view.turns) {
+  for (const turn of turns) {
     for (const b of turn.blocks) {
       if (b.kind === "tool_use") toolUseById.set(b.id, { name: b.name, input: b.input });
       else if (b.kind === "tool_result") toolResultByUseId.set(b.toolUseId, { text: b.text, isError: b.isError });
     }
   }
+  return { toolUseById, toolResultByUseId };
+}
 
+/** Render a list of turns (a slice of the transcript) to HTML using pre-built tool pairing maps.
+ *  Shared by the detail page (recent N) and the /session/<id>/earlier endpoint (older chunks). */
+function renderTurnsHtml(turns: TranscriptTurn[], maps: ToolMaps): string {
   const blockFor = (b: TranscriptBlock): string => {
     if (b.kind === "text") {
       return html`<div class="tx-block tx-text" style="margin:0.25rem 0;white-space:pre-wrap;line-height:1.5;font-size:0.85rem">${escapeHtml(b.text)}</div>`;
@@ -104,7 +140,7 @@ export function renderSessionPage(view: SessionViewResult): string {
     }
     if (b.kind === "tool_use") {
       const label = b.name ? `tool_use · ${b.name}` : "tool_use";
-      const res = toolResultByUseId.get(b.id);
+      const res = maps.toolResultByUseId.get(b.id);
       const inputHtml = b.input ? html`<div class="tx-tool-input"><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.input)}</pre></div>` : "";
       const resultHtml = res
         ? html`<div class="tx-tool-result"><div style="font-size:0.7rem;color:var(--color-neutral-700);margin:0.25rem 0">${res.isError ? "result · error" : "result"}</div><pre style="margin:0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(res.text)}</pre></div>`
@@ -115,10 +151,10 @@ export function renderSessionPage(view: SessionViewResult): string {
     return html`<details class="tx-block tx-tool-result" style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">${b.isError ? "tool_result · error" : "tool_result"}</summary><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.text)}</pre></details>`;
   };
 
-  const turnFor = (t: SessionViewResult["turns"][number]): string => {
+  const turnFor = (t: TranscriptTurn): string => {
     // Absorb matched tool_results into their tool_use's <details>; only orphans render standalone.
     const blocks = t.blocks
-      .filter((b) => !(b.kind === "tool_result" && toolUseById.has(b.toolUseId)))
+      .filter((b) => !(b.kind === "tool_result" && maps.toolUseById.has(b.toolUseId)))
       .map(blockFor);
     if (blocks.length === 0) return "";
     return html`<div style="border-left:2px solid var(--color-divider);padding-left:0.75rem;margin-bottom:1rem">
@@ -129,8 +165,73 @@ export function renderSessionPage(view: SessionViewResult): string {
     </div>`;
   };
 
-  const turnsHtml = view.turns.length > 0
-    ? html`<h2>Transcript（${view.turns.length} 条消息 · 旧→新）</h2>${view.turns.map(turnFor).filter(Boolean).join("")}`
+  return turns.map(turnFor).filter(Boolean).join("");
+}
+
+export function renderSessionPage(view: SessionViewResult): string {
+  const maps = buildToolMaps(view.turns);
+  const recent = view.turns.slice(-SESSION_VIEW_INITIAL_TURNS);
+  const olderCount = view.turns.length - recent.length;
+  const lazy = olderCount > 0 || view.truncated;
+
+  let transcriptHtml = "";
+  if (view.turns.length > 0) {
+    const heading = html`<h2>Transcript（${view.turns.length} 条消息 · 旧→新${olderCount > 0 ? `，默认显示最近 ${recent.length} 条` : ""}）</h2>`;
+    const sentinel = lazy
+      ? html`<div id="tx-earlier-sentinel" class="meta" style="padding:0.5rem 0;color:var(--color-neutral-700);font-size:0.75rem">加载更早消息…</div>`
+      : "";
+    transcriptHtml = html`<div id="tx-list" data-session="${escapeHtml(view.sessionId)}" data-rendered="${recent.length}" data-total="${view.turns.length}" data-truncated="${view.truncated}">${heading}${sentinel}${renderTurnsHtml(recent, maps)}</div>`;
+  }
+
+  // One self-contained scroll-loader (the deliberate zero-JS break). Auto-scrolls to the newest turn
+  // (chat-style), then IntersectionObserver on the top sentinel fetches older chunks on scroll-up.
+  const loaderScript = lazy
+    ? html`<script>
+(() => {
+  const list = document.getElementById("tx-list");
+  if (!list) return;
+  const sentinel = document.getElementById("tx-earlier-sentinel");
+  if (!sentinel) return;
+  const sessionId = list.dataset.session;
+  const total = Number(list.dataset.total) || 0;
+  let rendered = Number(list.dataset.rendered) || 0;
+  let truncated = list.dataset.truncated === "true";
+  let busy = false;
+  const done = () => rendered >= total && !truncated;
+  function finish() {
+    if (truncated) {
+      sentinel.outerHTML = '<p class="meta">更早的 transcript 超出读取窗口 — <a href="/session/' + encodeURIComponent(sessionId) + '/download">下载完整 transcript</a></p>';
+    } else {
+      sentinel.remove();
+    }
+  }
+  async function load() {
+    if (busy || done()) return;
+    busy = true;
+    try {
+      const res = await fetch("/session/" + encodeURIComponent(sessionId) + "/earlier?before=" + rendered);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.count > 0) {
+        sentinel.insertAdjacentHTML("afterend", data.html || "");
+        rendered += data.count;
+        truncated = data.truncated === true;
+        if (!done() && sentinel.getBoundingClientRect().top < window.innerHeight) {
+          busy = false;
+          load();
+          return;
+        }
+      }
+      if (done() || data.count === 0) finish();
+    } catch {} finally { busy = false; }
+  }
+  list.scrollIntoView({ block: "end" });
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) load();
+  }, { rootMargin: "600px 0px" });
+  io.observe(sentinel);
+})();
+</script>`
     : "";
 
   return html`<!doctype html>
@@ -139,7 +240,8 @@ export function renderSessionPage(view: SessionViewResult): string {
       <h1>Session — <code>${escapeHtml(view.sessionId)}</code></h1>
       <p class="meta"><a href="/sessions">← 返回 Sessions</a> · 数据源：<code>~/.claude/projects/&lt;slug&gt;/&lt;sessionId&gt;.jsonl</code>（transcript 尾部，非实时）</p>
       ${obsNote(view.status, view.reason)}
-      ${turnsHtml}
+      ${transcriptHtml}
+      ${loaderScript}
       ${renderSendForm(view.sessionId)}
     </main></body></html>`;
 }
@@ -154,10 +256,48 @@ export async function handleSession(
   try {
     view = readSession(cfg.workspaceRoot, sessionId);
   } catch (err) {
-    view = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, sessionId, transcriptPath: null, turns: [] };
+    view = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, sessionId, transcriptPath: null, turns: [], truncated: false };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderSessionPage(view));
+}
+
+// ── /session/<sessionId>/earlier ─────────────────────────────────────────────────────────────────
+// gap-sessions-page-slow-unclickable-flat-render AC3: the on-demand endpoint the detail page's scroll
+// loader calls. `before` = the number of turns already rendered (the most recent); the server re-reads
+// the bounded tail and returns the next SESSION_VIEW_EARLIER_CHUNK turns BEFORE them as HTML (the
+// "服务端按需重新截取 tail" half — the client never holds the full 2 MB). Response is JSON
+// { html, count, truncated, total } so the loader can append and know when to stop. A non-UUID
+// sessionId resolves to null ⇒ 400 (same traversal-proof house rule as /session/<id>).
+
+/** Pure: the next chunk of earlier turns (up to SESSION_VIEW_EARLIER_CHUNK) immediately BEFORE the
+ *  last `before` turns — the slice the /earlier endpoint returns. Exported for direct unit testing
+ *  (the pagination math is the AC3 "按需加载" surface; no transcript file I/O needed to verify it). */
+export function earlierTurnsChunk(turns: TranscriptTurn[], before: number): TranscriptTurn[] {
+  const total = turns.length;
+  const clamped = Number.isFinite(before) && before > 0 ? Math.min(before, total) : 0;
+  const start = Math.max(0, total - clamped - SESSION_VIEW_EARLIER_CHUNK);
+  return turns.slice(start, total - clamped);
+}
+
+export async function handleSessionEarlier(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+  sessionId: string,
+  url: URL,
+): Promise<void> {
+  const transcriptPath = sessionTranscriptPath(cfg.workspaceRoot, sessionId);
+  if (transcriptPath == null) {
+    writeJson(res, 400, { html: "", count: 0, truncated: false, total: 0, status: "empty", reason: "sessionId 非法（须为 UUID）" });
+    return;
+  }
+  const t = readTranscript(transcriptPath);
+  const beforeRaw = url.searchParams.get("before") ?? "";
+  const parsed = Number.parseInt(beforeRaw, 10);
+  const slice = earlierTurnsChunk(t.turns, parsed);
+  const maps = buildToolMaps(t.turns);
+  writeJson(res, 200, { html: renderTurnsHtml(slice, maps), count: slice.length, truncated: t.truncated, total: t.turns.length, status: t.status, reason: t.reason });
 }
 
 // ── /session/<sessionId>/download ────────────────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ import { handleBoard } from "./serve-board.ts";
 import { handleGitHistory } from "./serve-git.ts";
 import { handleSystem, handleManager } from "./serve-system.ts";
 import { handleTests, handleTestsFile } from "./serve-tests.ts";
-import { handleSessions, handleSession, handleSessionDownload, handleDriverLifecycle, handleNewSession, handleResumeSession } from "./serve-sessions.ts";
+import { handleSessions, handleSession, handleSessionEarlier, handleSessionDownload, handleDriverLifecycle, handleNewSession, handleResumeSession } from "./serve-sessions.ts";
 import { handleArchitecture } from "./serve-architecture.ts";
 import { handleDashboard } from "./serve-dashboard.ts";
 import { handleSend } from "./serve-send.ts";
@@ -122,6 +122,18 @@ export async function handleAllRoutes(
 
   if (url.pathname === "/sessions") {
     await handleSessions(req, res, cfg);
+    return;
+  }
+
+  // gap-sessions-page-slow-unclickable-flat-render AC3: the detail page's scroll-loader fetches the
+  // next chunk of earlier turns here. Same strict-UUID lookup key as /session/<id>; a non-UUID segment
+  // resolves to null → 400. Routed BEFORE the single-session matcher (distinct path shape, `/earlier`
+  // suffix), so it can never be swallowed by the `/session/([^/]+)` regex below.
+  const sessionEarlierM = /^\/session\/([^/]+)\/earlier$/.exec(url.pathname);
+  if (sessionEarlierM) {
+    let sessionId: string;
+    try { sessionId = decodeURIComponent(sessionEarlierM[1]); } catch { sessionId = sessionEarlierM[1]; }
+    await handleSessionEarlier(req, res, cfg, sessionId, url);
     return;
   }
 
