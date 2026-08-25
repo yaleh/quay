@@ -381,10 +381,13 @@ test("AC4 (分级闸) — checkSerialKinds does NOT gate a lowconc family member
   }
 });
 
-test("AC3 — the real repo: 5 of the 8 heavy lowconc→serial downgrade files returned to lowconc (serial phase shrank)", () => {
+test("AC3 — the real repo: 27 evidenced files moved out of serial/lowconc to the default group (gap-suite-move-27-evidenced-files-out-serial-lowconc)", () => {
   // The downgrade set (lowconc→serial on 2026-08-09) was 8 heavy + 1 child-spawn. After the mechanism
-  // re-split: the 5 fixture-amortized real-install files return to lowconc; npm-pack-e2e +
-  // install-config-driven-e2e (full real installs) and checker-cost (broke at lowconc c3) stay serial.
+  // re-split (2026-08-12): the 5 fixture-amortized real-install files returned to lowconc; npm-pack-e2e +
+  // install-config-driven-e2e (full real installs) and checker-cost (broke at lowconc c3) stayed serial.
+  // gap-suite-move-27-evidenced-files-out-serial-lowconc (2026-08-25) then moved 27 files with fail=0
+  // high-load evidence OUT of the serial/lowconc concurrency-reduction lanes entirely — to the default
+  // group (product for packages/*/test, engine for plugin/test). This test guards the RESULTING state.
   // quay-init-check-drift.test.mjs is RETIRED (gap-quay-init-check-drift-merge-into-drift-report —
   // its assertions were merged into quay-init-drift-report.test.mjs, so it is no longer a test file).
   const serialFiles = [];
@@ -394,20 +397,36 @@ test("AC3 — the real repo: 5 of the 8 heavy lowconc→serial downgrade files r
     if (isSerialGroupFile(text)) serialFiles.push(rel);
     if (/^\s*\/\/\s*@test-group\s+lowconc\b/m.test(text)) lowconcFiles.push(rel);
   }
-  const movedToLowconc = [
+  // The 3 quay-init-loop files that WERE lowconc are now in the default group (engine) — moved out
+  // by gap-suite-move-27-evidenced-files-out-serial-lowconc (fail=0 high-load evidence).
+  const movedToDefault = [
     "plugin/test/quay-init-loop-driver.test.mjs",
     "plugin/test/quay-init-loop-runtime.test.mjs",
     "plugin/test/quay-init-loop-vendor.test.mjs",
+  ];
+  for (const rel of movedToDefault) {
+    assert.ok(!lowconcFiles.includes(rel), `${rel} must no longer be in the lowconc lane (moved to default group)`);
+    assert.ok(!serialFiles.includes(rel), `${rel} must no longer be in the serial lane (moved to default group)`);
+  }
+  // The 2 remaining real-install files STAY in lowconc (NOT in the 27-file move set).
+  const stillLowconc = [
     "plugin/test/quay-init-tmux-detection.test.mjs",
     "plugin/test/runtime-landing.test.mjs",
   ];
-  for (const rel of movedToLowconc) {
-    assert.ok(lowconcFiles.includes(rel), `${rel} must have returned to the lowconc lane (AC3)`);
+  for (const rel of stillLowconc) {
+    assert.ok(lowconcFiles.includes(rel), `${rel} must still be in the lowconc lane (AC3)`);
     assert.ok(!serialFiles.includes(rel), `${rel} must no longer be in the serial lane (AC3)`);
   }
-  // The genuine full-real-install / broke-at-lowconc members stay in serial.
-  assert.ok(serialFiles.includes("packages/quay/test/npm-pack-e2e.test.mjs"), "npm-pack-e2e stays serial (full real npm pack)");
-  assert.ok(serialFiles.includes("packages/quay/test/install-config-driven-e2e.test.mjs"), "install-config-driven-e2e stays serial (12 real installs)");
+  // The full-real-install members moved OUT of serial to the default group (product) — in the 27 set.
+  const movedOutOfSerial = [
+    "packages/quay/test/npm-pack-e2e.test.mjs",
+    "packages/quay/test/install-config-driven-e2e.test.mjs",
+  ];
+  for (const rel of movedOutOfSerial) {
+    assert.ok(!serialFiles.includes(rel), `${rel} must no longer be in the serial lane (moved to default group)`);
+    assert.ok(!lowconcFiles.includes(rel), `${rel} must not be in the lowconc lane (moved to default group)`);
+  }
+  // checker-cost stays serial (child-spawn broke at lowconc c3) — NOT in the 27-file move set.
   assert.ok(serialFiles.includes("plugin/test/checker-cost.test.mjs"), "checker-cost stays serial (child-spawn broke at lowconc c3)");
 });
 
