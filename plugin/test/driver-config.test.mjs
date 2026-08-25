@@ -3,7 +3,7 @@
 //
 // 验证 AC1 取假消点：并发 cap 只有一份解析（driverCap → loadDriverConfig → drivers.yml），
 // 三份旧真相源（CAP_DEFAULT / resolveConcurrency env / FIXED_EFFECTIVE_CAP）全部派生自它。
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -17,8 +17,11 @@ import {
   driverCap,
 } from "../scripts/driver-config.ts";
 
+const _createdDirs = [];
 function tmpdir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "driver-config-"));
+  const created = fs.mkdtempSync(path.join(os.tmpdir(), "driver-config-"));
+  _createdDirs.push(created);
+  return created;
 }
 
 function writeDriversYml(dir, yml) {
@@ -83,4 +86,8 @@ test("driverCap — 显式 > drivers.yml > 缺省（单一并发解析，AC1）"
   const b = tmpdir();
   assert.equal(driverCap(b, "worker"), DEFAULT_DRIVER_CAP, "no config ⇒ default");
   assert.equal(driverCap(b, "promotion", 4), 4);
+});
+
+after(() => {
+  for (const dir of _createdDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
