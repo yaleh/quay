@@ -61,7 +61,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./worker-driver.ts";
+// AC151：promotion 继承 Layer 0（driver-runtime：profile/liveness）。splitArgs/launchArgv/runLivenessCheck/
+// LivenessResult 直接从 Layer 0 import（⛔ 不再经 worker-driver 中转——两 driver 平级继承同一层）。
+import { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./driver-runtime.ts";
+// AC151：re-export 保持旧 import 面（promotion-driver.test.mjs 等）——两 driver 经同一函数身份
+// 证「继承 Layer 0 的 profile/liveness 单一实现」。
+export { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./driver-runtime.ts";
 // AC150-3：资源门判定 + halt 判定与 worker-driver 共用同一份实现（driver-shared.ts，⛔ 非复制粘贴）。
 // AC150-1 资源门（起 fix worker 前经同一 resourceGateCheck 判定）；AC150-2 控制面（运行期 halt =
 // 读 .quay/promotion-control.json 单一真相源，⛔ 不再「只能 kill」）。

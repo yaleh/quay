@@ -38,11 +38,11 @@ depends_on:
 
 判据正本在 `orchestration/manager-phase-goal.md` `### AC151`（⛔ 取假形态不在此复制）。
 
-- [ ] AC1：存在 Layer 0 与 Layer 1a/1b 两级；promotion/worker 继承 0+1a，manager-kind 继承 0+1b；取假见正本 AC151（manager-kind 出现空候选池/选择/verify 三段，或 1b 重实现 Layer 0 循环/心跳/判停 ⇒ 假）。
+- [x] AC1：存在 Layer 0 与 Layer 1a/1b 两级；promotion/worker 继承 0+1a，manager-kind 继承 0+1b；取假见正本 AC151（manager-kind 出现空候选池/选择/verify 三段，或 1b 重实现 Layer 0 循环/心跳/判停 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] Layer 0 + 1a/1b 两级落地 + supervisor 港进 TS + 两 driver 改继承；AC1 全勾；land 到 develop。
+- [x] Layer 0 + 1a/1b 两级落地 + supervisor 港进 TS + 两 driver 改继承；AC1 全勾；land 到 develop。
 
 ## Retires
 
