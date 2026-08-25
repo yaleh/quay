@@ -23,8 +23,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，缩进形态可读）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。
-- [ ] AC2（能取假，派发前依赖生效）：dep 未合入 develop 的任务不被派发（调度层读到依赖）；（⛔ dep 未合入仍被派发 ⇒ 假）。
+- [x] AC1（能取假，缩进形态可读）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。
+- [x] AC2（能取假，派发前依赖生效）：dep 未合入 develop 的任务不被派发（调度层读到依赖）；（⛔ dep 未合入仍被派发 ⇒ 假）。
 
 ## Definition of Done
 
