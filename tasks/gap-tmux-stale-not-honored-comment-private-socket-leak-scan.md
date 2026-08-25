@@ -1,7 +1,7 @@
 ---
 id: gap-tmux-stale-not-honored-comment-private-socket-leak-scan
 title: "过时注释「TMUX_TMPDIR NOT honored」误导立案 + leak-scan 漏私有 socket 孤儿前缀（AC1 负控制证伪旧任务后重定范围）"
-status: ready
+status: done
 labels:
   - gap
   - defect
