@@ -35,5 +35,5 @@ extra: {}
 ## Touches
 
 - packages/quay/src/serve-tests.ts（/tests?round=N 负载曲线过滤）
-- packages/quay/test/serve-tests.test.mjs（对应测试）
+- packages/quay/test/serve-handlers.test.mjs（对应测试——与既有 serve-tests 测试同文件）
 - tasks/gap-tests-round-load-curve-time-window-clip.md（自身）
