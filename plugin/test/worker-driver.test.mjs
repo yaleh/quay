@@ -87,6 +87,13 @@ import {
   countBranchCommits,
   branchHeadSubject,
   lastExitedNotLandedReason,
+  worktreePresentForTaskAsync,
+  worktreePathsForTaskAsync,
+  countBranchCommitsAsync,
+  branchHeadSubjectAsync,
+  continueStateForTaskAsync,
+  workerPromptForTaskAsync,
+  workerArgvForTaskAsync,
 } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1911,6 +1918,88 @@ test("AC2 (gap-worker-driver-reconcile-interval) — all edge events lost (worke
   await waitFor(() => drv.events().some((e) => e.event === "selector-picked" && e.task === "gap-b"), 10000);
   const picks = drv.events().filter((e) => e.event === "selector-picked").map((e) => e.task);
   assert.ok(picks.includes("gap-b"), `AC2: floor re-ran ready pool and dispatched gap-b with zero worker-exit edge events (picks=${picks.join(",")})`);
+  drv.stop();
+});
+
+// ── gap-worker-driver-async-selector-readypool：循环体 spawnSync→spawn（selector/readyPool/liveness/git）──
+// 常驻循环体里任何 spawnSync 都会冻住协调地板（一个卡住的 selector / git 会连 setTimeout 地板一起冻住，
+// SPEC §5.7）。AC1（循环体异步化，能取假 = 源面静态检查 + 慢 selector 下地板仍触发）/ AC2（child exit 唤醒
+// 循环 = 异步版在子进程退出后 resolve）/ AC3（协调一趟有界，慢 selector 不冻住地板）逐条取假。
+
+test("AC1 (gap-worker-driver-async-selector-readypool) — loop body's worker-argv construction is async (⛔ sync workerArgvForTask → continueStateForTask spawnSync git freezes the floor)", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  // spawnSelected 是 async 且 await 异步 argv 构造（workerArgvForTaskAsync），⛔ 不再是同步 workerArgvForTask。
+  assert.match(src, /const spawnSelected = async \(sel: \{ task: string; reason: string \}\): Promise<void>/, "spawnSelected is async");
+  assert.match(src, /await workerArgvForTaskAsync\(sel\.task, rootDir, workerCmdOpts\)/, "spawnSelected awaits workerArgvForTaskAsync");
+  assert.doesNotMatch(src, /workerArgv: workerArgvForTask\(sel\.task, rootDir, workerCmdOpts\)/, "the sync workerArgvForTask (continueStateForTask spawnSync git) is gone from the loop body");
+  // 异步变体齐全，且 git 读走 runAsync（spawn，⛔ 非 spawnSync）。
+  for (const name of ["worktreePresentForTaskAsync", "worktreePathsForTaskAsync", "countBranchCommitsAsync", "branchHeadSubjectAsync", "continueStateForTaskAsync", "workerPromptForTaskAsync", "workerArgvForTaskAsync"]) {
+    assert.match(src, new RegExp(`export async function ${name}`), `${name} is defined`);
+  }
+  assert.match(src, /const r = await runAsync\(\["git", "-C", root, "worktree", "list", "--porcelain"\]/, "worktree async variants route through runAsync (spawn), not spawnSync");
+  assert.match(src, /await continueStateForTaskAsync\(/, "continueStateForTaskAsync gathers state via async git reads (awaited)");
+});
+
+test("AC2 (gap-worker-driver-async-selector-readypool) — async variants resolve on child exit (runAsync close wakes the await); parity with sync continueStateForTask", async (t) => {
+  const root = makeGitRoot("async-ac2");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-ac2`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    try { runGit(root, ["branch", "-D", "task/gap-as2"]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  const body = `---\nid: gap-as2\nstatus: ready\n---\n\n## Proposal\n\nbody\n\n## Acceptance Criteria\n\n- [x] AC1 done\n- [ ] AC2 todo\n`;
+  fs.writeFileSync(path.join(root, "tasks", "gap-as2.md"), body);
+  runGit(root, ["add", "tasks/gap-as2.md"]);
+  runGit(root, ["commit", "-q", "-m", "task gap-as2"]);
+
+  // 无 worktree ⇒ 异步创建路径（`git worktree list` 的 child exit 唤醒 await ⇒ false，不是挂起）。
+  assert.equal(await worktreePresentForTaskAsync(root, "gap-as2"), false, "async git worktree list resolves (child exit wakes await)");
+  assert.equal((await workerPromptForTaskAsync("gap-as2", root)).includes("create an isolated git worktree"), true, "no worktree ⇒ create prompt (async)");
+
+  // 保留 worktree ⇒ 异步续做路径（git rev-list / log 在 child exit 后 resolve）。
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-as2", wtPath]);
+  fs.writeFileSync(path.join(wtPath, "impl.txt"), "implemented");
+  runGit(wtPath, ["add", "impl.txt"]);
+  runGit(wtPath, ["commit", "-q", "-m", "implement gap-as2"]);
+
+  assert.equal(await countBranchCommitsAsync(root, "gap-as2"), 1, "async rev-list resolves on child exit");
+  assert.equal(await branchHeadSubjectAsync(root, "gap-as2"), "implement gap-as2", "async git log resolves on child exit");
+  const st = await continueStateForTaskAsync(root, "gap-as2");
+  assert.ok(st != null, "async continue state gathered");
+  assert.equal(st.branchCommits, 1, "async state carries own commit count (parity with sync continueStateForTask)");
+  assert.equal(st.acChecked, 1, "async state carries AC checked");
+  const cont = await workerPromptForTaskAsync("gap-as2", root);
+  assert.match(cont, /CONTINUE \(reuse/, "async continue prompt reuses the worktree");
+  const argv = await workerArgvForTaskAsync("gap-as2", root, { prefix: null, exact: null });
+  assert.equal(argv[0], "bash", "async worker argv routes through quay-launch.sh");
+});
+
+test("AC3 (gap-worker-driver-async-selector-readypool) — a slow selector does not freeze the floor (round heartbeat keeps firing while the selector is slow)", async (t) => {
+  const root = makeGitRoot("async-ac3");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTouchedTask(root, "gap-a", "plugin/scripts/aa.ts");
+  writeTouchedTask(root, "gap-b", "plugin/scripts/bb.ts");
+  // selector 慢（sleep 2s 后才输出 gap-b）。cap=2 + gap-a 在飞（挂起）⇒ selector 在 pass1 跑一次派 gap-b；
+  // 之后两个 worker 都挂起（无 worker 退出边沿事件）⇒ 只有地板（--reconcile-interval 1）让循环活着。
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-a','gap-b'],pool:2}))",
+    "--selector-cmd", "node -e setTimeout(()=>console.log('gap-b\\x20slow-pick'),2000)",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e setTimeout(()=>{},60000)", // 两个 worker 都挂起
+    "--concurrency", "2",
+    "--reconcile-interval", "1",
+    "--interval", "100",
+  ]);
+  t.after(() => drv.stop());
+
+  // 慢 selector 派发 gap-b（约 2s），然后地板在 ~1s 节奏继续写 round 心跳（⛔ 慢 selector 没冻住地板）。
+  await waitFor(() => drv.events().some((e) => e.event === "selector-picked" && e.task === "gap-b"), 10000);
+  await waitFor(() => readRoundLines(root).length >= 3, 10000);
+  const rounds = readRoundLines(root);
+  assert.ok(rounds.length >= 3, `AC3: the floor kept writing round heartbeats despite the 2s-slow selector (rounds=${rounds.length})`);
+  assert.ok(rounds.some((r) => r.in_flight >= 1), "the round records carry in-flight workers (floor exercised in the in-flight branch)");
   drv.stop();
 });
 
