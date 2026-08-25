@@ -28,9 +28,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，session_id 持久化）：worker-outcome.jsonl 每行有 session_id，且同任务重派 N 次有 N 个不同 session_id（⛔ 仍无 session_id 或重派同 session_id ⇒ 假）。
-- [ ] AC2（能取假，/live 活体关联）：/live 在飞任务的详情能访问其「执行中」transcript（pid→sessionId join；⛔ 无链接 ⇒ 假）。
-- [ ] AC3（能取假，web Runs 区块 + 穿越防护）：task 详情页 Runs 区块按尝试逐行渲染 transcript 链接 + 下载；非 UUID 的 session_id 参数被拒（⛔ 任意路径可读 ⇒ 假）。
+- [x] AC1（能取假，session_id 持久化）：worker-outcome.jsonl 每行有 session_id，且同任务重派 N 次有 N 个不同 session_id（⛔ 仍无 session_id 或重派同 session_id ⇒ 假）。
+- [x] AC2（能取假，/live 活体关联）：/live 在飞任务的详情能访问其「执行中」transcript（pid→sessionId join；⛔ 无链接 ⇒ 假）。
+- [x] AC3（能取假，web Runs 区块 + 穿越防护）：task 详情页 Runs 区块按尝试逐行渲染 transcript 链接 + 下载；非 UUID 的 session_id 参数被拒（⛔ 任意路径可读 ⇒ 假）。
 
 ## Definition of Done
 
