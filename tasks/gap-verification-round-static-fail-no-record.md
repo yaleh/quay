@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-static-fail-no-record
 title: verification-round.jsonl 静态检查 fail-closed 轮次不落记录——「没跑」与「跑了但静态闸拦下」在账本同形
-status: ready
+status: superseded
 labels:
   - gap
   - defect
@@ -11,6 +11,8 @@ extra:
   schema: execution
 ---
 **type:** execution
+
+> **superseded 2026-08-25（pool-quality-judge should-remove，独立复核确认）**：前提证伪——`verification-round.jsonl` 已有 31 条 `gate=static-check` + 34 条 `reason=gate-failed` 记录，静态检查 fail-closed 轮次**本来就在落记录**（`full-suite-runner.ts:3223-3231` 把 `staticCheckDetected` 映射为 `reason="gate-failed" + gate="static-check"`，commit 5ef1a789 于 08-12 落地）。manager 的「split-long 7 次 0 轮」是**归因误判**（count 的是动态阶段轮次，非全部轮次），不是机制缺口。我立案时未独立核实前提（照抄 manager 归因）——硬规则「verify 不 trust」的 filing 方向反例。
 
 ## Proposal
 
