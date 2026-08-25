@@ -1,7 +1,7 @@
 ---
 id: gap-quay-runtime-files-tracked-but-shouldnt
 title: .quay/ 8 个运行时文件被误提交（tracked-but-shouldn't）——git rm --cached + gitignore 清理（不脏检出、不挡 ff，纯卫生）
-status: done
+status: ready
 labels:
   - gap
   - defect
