@@ -58,5 +58,5 @@ monitor 扫描加 root 过滤；AC1-AC3 全勾；worktree 测试进程不再污�
 ## Touches
 
 - plugin/scripts/manager-tick-readings.ts（monitor 扫描 root 过滤 + mounted 判据）
-- plugin/test/ 或 plugin/scripts/（worktree 测试进程负控制 + 真监视器死亡负控制 测试）
+- plugin/test/manager-tick-readings.test.mjs（worktree 测试进程负控制 + 真监视器死亡负控制 测试）
 - tasks/gap-manager-tick-readings-basename-match-counts-worktree-tests.md（自身）
