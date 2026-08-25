@@ -1,7 +1,7 @@
 ---
 id: gap-archguard-zero-production-calls
 title: archguard 从未被真实调用，而 CLAUDE.md 明令「Consult it before calling a milestone done」——规定存在、执行为零
-status: todo
+status: ready
 labels:
   - gap
   - defect
