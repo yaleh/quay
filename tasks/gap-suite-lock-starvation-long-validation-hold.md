@@ -1,7 +1,7 @@
 ---
 id: gap-suite-lock-starvation-long-validation-hold
 title: 验证型长任务（如 serial-lowconc 33 文件 N 次重跑）持单飞锁数小时饿死全仓 fan-in，且与「worker 慢」在 outcome 里同形不可区分
-status: todo
+status: ready
 labels:
   - gap
   - defect
