@@ -62,6 +62,32 @@ checker-cost-lib.sh  run_checker  ⇒ 把【任何非零】一律当 fail-closed
 ⊢ **无论单个 checker 多守纪律，硬规则 3b 在 harness 层都兑现不了——这是架构级缺口，不是 checker 缺陷。**
 ⊢ 已立案 `gap-not-evaluated-harness-third-state`（ready）。
 
+### 1.3a 同一个病的数据层版本：「验证发生过」这个事实，没有单一权威载体（2026-08-25 补，manager+人实证）
+
+```
+一次真实的动态测试失败（worker-driver.test.mjs AC1，5831.7ms 超时），独立证据：
+  /tmp/fan-in-suite-<task>.log.prev（跨 relaunch 轮转前的旧副本，真实 ✖ 行）
+而它在下列【全部】面向消费者的正本载体里 = 0 条：
+  .quay/verification-round.jsonl      （/tests 页 serve-tests.ts 的唯一数据源）
+  .quay/per-task-suite-records.jsonl  （fan-in AC 闸的判据来源）
+```
+⊢ **`/tests` 页没有隐藏这条红——红压根没被写进它读的那个文件。** 真实发生的事件，唯一留痕的
+载体是 fan-in 机制内部用的 `/tmp` 临时日志，**且该临时日志自己还有已知的"跨 relaunch 复用不
+轮转"缺陷**（这次全靠没被覆盖的 `.log.prev` 才捞到证据，`.log` 当前内容已是后续轮次覆盖）。
+
+⊢ **这与 §1.3 是同一个病的两种表现，不是两个不同问题**：§1.3 是"NOT-EVALUATED 在退出码这一层
+没有统一编码"；本条是"验证曾经发生过这件事，在【记录】这一层没有统一编码"——两者的共同根子是
+**"验证结果"从来不是一个被设计过的一等对象**：exit code、`verification-round.jsonl`、
+`per-task-suite-records.jsonl`、`worker-outcome.jsonl`、`/tmp/fan-in-suite-*.log` 各自记录
+verification 生命周期的一个片段，彼此不同步、无人拥有"这是完整记录吗"这个问题的答案。
+⊢ **人的原话点破了这条的性质**：「这显然也是在缺乏整体设计的情况下的零散实现造成的分歧」——
+与 §1.2（`gate-script-base` 的 `emitPass`/`emitFail` 零调用）、§1.6（scattered utility 重复）
+同属一类：**没有人在架构层面回答过"一次验证的结果应该长什么样、该写在哪、谁读它"**，
+于是每个消费者（`/tests` 页、fan-in 闸、driver）各自实现了自己需要的那一小片。
+⊢ **已投递 outer**（2026-08-25 18:5xZ），建议判断是否与 `gap-verification-round-static-fail-
+no-record`（同族但范围更窄，仅管静态检查 fail）合并处理——真正的修法可能是给"验证轮"一个
+统一 schema 与单一 writer，而不是逐个 carrier 打补丁。
+
 ### 1.4 输入形状：`path` vs `content` —— 可测试性的真正杠杆
 
 ```

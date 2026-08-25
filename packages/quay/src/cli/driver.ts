@@ -90,55 +90,86 @@ carried from the workspace root (main checkout), not a short-lived worktree.
     return;
   }
 
-  if (!VERBS.includes(sub)) {
-    console.error(`quay driver: unknown subcommand: ${sub} (try: ${VERBS.join(", ")})`);
-    process.exitCode = 1;
-    return;
+  const r = runDriver(sub, flags.kind, rest, flags.root);
+  if (r.stdout) process.stdout.write(r.stdout);
+  if (r.stderr) process.stderr.write(r.stderr);
+  if (r.reason) console.error(r.reason);
+  process.exitCode = r.exitCode;
+  return;
+}
+
+/** Structured result of `runDriver` — the shared core behind both the CLI and the web surface. */
+export interface DriverRunResult {
+  /** true = the command was delegated to the supervisor kernel (spawn succeeded). */
+  ok: boolean;
+  /** Human-readable failure reason (validation / root / worktree / kernel-missing), null when ok. */
+  reason: string | null;
+  stdout: string;
+  stderr: string;
+  /** Exit code the caller should report. */
+  exitCode: number;
+}
+
+/**
+ * gap-webui-session-lifecycle AC1: the web surface exposes headless driver start/stop/restart by
+ * REUSING `quay driver` — this pure function is that shared core. It validates verb+kind, resolves
+ * the workspace root, rejects a worktree root (AC139-4), resolves the TS kernel path, and
+ * spawnSync's the supervisor kernel — returning a structured result (⛔ never writes to process globals,
+ * so the web handler can call it in-process without coupling to stdout/exitCode). Both the CLI
+ * (handleDriver) and the web handler consume this ONE implementation (⛔ reimplementing the driver
+ * lifecycle in the web layer would be fake reuse).
+ */
+export function runDriver(
+  verb: string,
+  kind: string | undefined,
+  rest: string[],
+  rootFlag: string | undefined,
+): DriverRunResult {
+  if (!VERBS.includes(verb)) {
+    return { ok: false, reason: `quay driver: unknown subcommand: ${verb} (try: ${VERBS.join(", ")})`, stdout: "", stderr: "", exitCode: 1 };
   }
-  const kind = flags.kind;
   if (!KINDS.includes(kind)) {
-    console.error(`quay driver: missing/invalid --kind: ${kind ?? "<empty>"} (expected ${KINDS.join("|")})`);
-    process.exitCode = 1;
-    return;
+    return { ok: false, reason: `quay driver: missing/invalid --kind: ${kind ?? "<empty>"} (expected ${KINDS.join("|")})`, stdout: "", stderr: "", exitCode: 1 };
   }
 
   // AC139-4: resolve the carrier/entry path from the workspace root (NOT import.meta walk-up).
-  const root = resolveRoot(flags.root);
+  const root = resolveRoot(rootFlag);
   if (!root) {
-    console.error(
-      `quay driver: no .quay/config.yml found (searched from ${flags.root ?? process.cwd()} upward). ` +
-        `Run from a quay workspace root, or pass --root <workspace-root>.`
-    );
-    process.exitCode = 1;
-    return;
+    return {
+      ok: false,
+      reason:
+        `quay driver: no .quay/config.yml found (searched from ${rootFlag ?? process.cwd()} upward). ` +
+        `Run from a quay workspace root, or pass --root <workspace-root>.`,
+      stdout: "",
+      stderr: "",
+      exitCode: 1,
+    };
   }
 
   // AC139-4: reject a worktree root (fail closed; never start a supervisor on a worktree).
   if (isWorktreeRoot(root)) {
-    console.error(
-      `quay driver: refusing to run from a git worktree (${root}). ` +
+    return {
+      ok: false,
+      reason:
+        `quay driver: refusing to run from a git worktree (${root}). ` +
         `The resident supervisor must be carried from the workspace root (main checkout), ` +
-        `not a short-lived worktree. Run from the main checkout instead.`
-    );
-    process.exitCode = 1;
-    return;
+        `not a short-lived worktree. Run from the main checkout instead.`,
+      stdout: "",
+      stderr: "",
+      exitCode: 1,
+    };
   }
 
   const kernel = path.join(root, DRIVER_RUNTIME_REL);
   if (!fsSyncExists(kernel)) {
-    console.error(`quay driver: driver runtime kernel not found at ${kernel}`);
-    process.exitCode = 1;
-    return;
+    return { ok: false, reason: `quay driver: driver runtime kernel not found at ${kernel}`, stdout: "", stderr: "", exitCode: 1 };
   }
 
   // Forward the user's argv verbatim (rest already carries --kind/--root/--json/…), then pin
   // --root to the resolved workspace root (last-wins in the kernel's parser) so the kernel runs
   // against the same root this handler resolved — never a stale/missing one. AC151: the supervisor
   // is TS now — spawn the kernel with `node --experimental-strip-types` (⛔ no more bash .sh).
-  const args = [sub, ...rest, "--root", root];
+  const args = [verb, ...rest, "--root", root];
   const r = spawnSync(process.execPath, ["--experimental-strip-types", kernel, ...args], { encoding: "utf8" });
-  if (r.stdout) process.stdout.write(r.stdout);
-  if (r.stderr) process.stderr.write(r.stderr);
-  process.exitCode = r.status ?? 1;
-  return;
+  return { ok: true, reason: null, stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
 }

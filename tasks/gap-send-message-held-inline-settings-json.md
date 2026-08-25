@@ -1,7 +1,7 @@
 ---
 id: gap-send-message-held-inline-settings-json
 title: 发消息给运行中 worker 恒 held——deliverySettingsFromArgv 把 --settings 内联 JSON 当文件路径读（ENOENT 回退全局无 defaultMode，100% 影响）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -34,9 +34,9 @@ worker-driver 启动 worker 时 `--settings` 传的是**内联 JSON 字符串**�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，内联 JSON 直读）：`deliverySettingsFromArgv` 对 `--settings <内联 JSON>`（含 `defaultMode: bypassPermissions`）直接解析出 bypassPermissions，不经文件路径读；（⛔ 仍当路径读 ENOENT ⇒ 假）。
-- [ ] AC2（能取假，held 消失）：给一个真实 bypassPermissions worker 发消息，不再恒 held（deliveryStateFor 满足 bypass 条件）；（⛔ 仍 held ⇒ 假）。
-- [ ] AC3（能取假，负控制）：`--settings <真实文件路径>` 场景不回归（仍读文件）；`--dangerously-skip-permissions` 分支不回归；（⛔ 回归 ⇒ 假）。
+- [x] AC1（能取假，内联 JSON 直读）：`deliverySettingsFromArgv` 对 `--settings <内联 JSON>`（含 `defaultMode: bypassPermissions`）直接解析出 bypassPermissions，不经文件路径读；（⛔ 仍当路径读 ENOENT ⇒ 假）。
+- [x] AC2（能取假，held 消失）：给一个真实 bypassPermissions worker 发消息，不再恒 held（deliveryStateFor 满足 bypass 条件）；（⛔ 仍 held ⇒ 假）。
+- [x] AC3（能取假，负控制）：`--settings <真实文件路径>` 场景不回归（仍读文件）；`--dangerously-skip-permissions` 分支不回归；（⛔ 回归 ⇒ 假）。
 
 ## Definition of Done
 
