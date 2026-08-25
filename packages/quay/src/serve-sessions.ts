@@ -1,7 +1,8 @@
 // serve-sessions.ts — /sessions + /session/<sessionId> route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readSessions, readSession, SESSION_LAYERS, type SessionsResult, type SessionDetail, type SessionViewResult, type TranscriptBlock } from "./observation.ts";
+import fs from "node:fs";
+import { readSessions, readSession, sessionTranscriptPath, SESSION_LAYERS, type SessionsResult, type SessionDetail, type SessionViewResult, type TranscriptBlock } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote } from "./serve-render.ts";
 
 // ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
@@ -150,4 +151,44 @@ export async function handleSession(
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderSessionPage(view));
+}
+
+// ── /session/<sessionId>/download ────────────────────────────────────────────────────────────────
+// gap-worker-task-transcript-access-webui AC3: raw JSONL transcript download (Content-Disposition:
+// attachment). The session_id is a strict-UUID LOOKUP KEY resolved via sessionTranscriptPath — the
+// same traversal-proof resolver the view uses (UUID regex → fixed project slug join, §7.4 house
+// pattern). A non-UUID / `../` / absolute-path session_id resolves to null ⇒ 400, never touches the
+// disk (AC3: ⛔ 任意路径可读 ⇒ 假). A valid-but-absent transcript ⇒ 404; present ⇒ streamed raw.
+
+export async function handleSessionDownload(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+  sessionId: string,
+): Promise<void> {
+  const transcriptPath = sessionTranscriptPath(cfg.workspaceRoot, sessionId);
+  if (transcriptPath == null) {
+    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("invalid session id (must be a UUID)");
+    return;
+  }
+  let size: number;
+  try {
+    size = fs.statSync(transcriptPath).size;
+  } catch {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("transcript not found");
+    return;
+  }
+  // sessionId is UUID-validated (only [0-9a-f-]) ⇒ safe as a Content-Disposition filename (no CR/LF).
+  res.writeHead(200, {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${sessionId}.jsonl"`,
+    "Content-Length": String(size),
+  });
+  const stream = fs.createReadStream(transcriptPath);
+  stream.on("error", () => {
+    try { res.destroy(); } catch { /* client already gone */ }
+  });
+  stream.pipe(res);
 }

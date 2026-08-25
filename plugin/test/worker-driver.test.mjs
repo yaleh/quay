@@ -23,6 +23,7 @@ import { execFileSync, spawn } from "node:child_process";
 
 import {
   computeOutcome,
+  newSessionId,
   appendOutcomeToFile,
   computeWorkerRoundRecord,
   splitArgs,
@@ -305,6 +306,37 @@ test("computeOutcome — non-zero ⇒ failed; signal ⇒ killed; timedOut ⇒ ti
 
   const spawnFailed = computeOutcome({ task: "g", selectorReason: "r", exitCode: null, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: null, runId: "x", spawnError: "ENOENT" });
   assert.equal(spawnFailed.final_state, "spawn-failed");
+});
+
+// ── gap-worker-task-transcript-access-webui AC1（能取假）：session_id 持久化 + 每次派发新 UUID ────────
+
+test("AC1 (unit) — computeOutcome writes session_id; newSessionId returns fresh UUIDs", () => {
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  const withSid = computeOutcome({ task: "g", selectorReason: "r", exitCode: 0, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: 1, runId: "x", landed: true, sessionId: sid });
+  assert.equal(withSid.session_id, sid, "session_id is written to the outcome record (⛔ 仍无 session_id ⇒ 假)");
+  const noSid = computeOutcome({ task: "g", selectorReason: "r", exitCode: 0, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: 1, runId: "x", landed: true });
+  assert.equal(noSid.session_id, null, "session_id defaults null when omitted (honest, never fabricated)");
+
+  const a = newSessionId();
+  const b = newSessionId();
+  assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "newSessionId yields a UUID");
+  assert.notEqual(a, b, "two dispatches get DIFFERENT session ids (⛔ 重派同 session_id ⇒ 假)");
+});
+
+test("AC1 (integration) — re-dispatching the same task N times writes N distinct session_ids", (t) => {
+  const root = makeGitRoot("session-pin");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-sid", "done"); // status=done ⇒ an exit-0 worker "lands" (completed)
+  for (let i = 0; i < 3; i++) {
+    runDriver(root, ["--task", "gap-sid", "--reason", "session-pin", "--worker-cmd-exact", "node -e process.exit(0)"]);
+  }
+  const records = readOutcomeLines(root).filter((r) => r.task === "gap-sid");
+  assert.equal(records.length, 3, "three dispatches ⇒ three outcome records");
+  const sids = records.map((r) => r.session_id);
+  for (const sid of sids) {
+    assert.match(sid, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "every outcome record carries a session_id");
+  }
+  assert.equal(new Set(sids).size, 3, "same task re-dispatched 3× ⇒ 3 DIFFERENT session_ids (⛔ 重派同 session_id ⇒ 假)");
 });
 
 test("resolveRun / splitArgs / defaultWorkerArgv / signalExitCode / parseTimeoutMs / resolveConcurrency", () => {

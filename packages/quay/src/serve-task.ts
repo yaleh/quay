@@ -443,7 +443,7 @@ export function taskRunsBlock(root: string, taskId: string): string {
       ? html`${escapeHtml(r.final_state ?? "?")}<br><span style="font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(r.failure_reason)}</span>`
       : escapeHtml(r.final_state ?? "?");
     const transcript = r.session_id != null && isValidSessionId(r.session_id)
-      ? html`<a href="/session/${encodeURIComponent(r.session_id)}">transcript</a>`
+      ? html`<a href="/session/${encodeURIComponent(r.session_id)}">view</a> · <a href="/session/${encodeURIComponent(r.session_id)}/download">download</a>`
       : "—";
     return html`<tr>
       <td>${escapeHtml(r.started_at ?? "—")}</td>
