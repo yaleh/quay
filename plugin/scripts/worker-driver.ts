@@ -159,6 +159,42 @@ export { verifyIndependently } from "./driver-result.ts";
 export type { DriverResult } from "./driver-result.ts";
 import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
 import { isDue } from "./routine-scheduler.ts";
+// AC151：worker 继承 Layer 0（driver-runtime：profile/liveness/loop/stopCondition）+ Layer 1a
+// （task-processing：source/select）。⛔ 不各写一遍 launchArgv/liveness/shuffle/readyPoolCheck/
+// selector——全部经 import 消费单一实现。runAsync 只 import 不 re-export（本文件内部用，非公开面）。
+import {
+  splitArgs,
+  launchArgv,
+  runAsync,
+  defaultLivenessCheckArgv,
+  runLivenessCheck,
+  runLivenessCheckAsync,
+  LIVENESS_CHECK_TIMEOUT_MS,
+  shuffle,
+  defaultReadyPoolArgv,
+  readyPoolCheck,
+  defaultSelectorArgv,
+  parseSelectorOutput,
+  runSelectorWorker,
+  makeStopCondition,
+  type LivenessResult,
+} from "./driver-runtime.ts";
+export {
+  splitArgs,
+  launchArgv,
+  defaultLivenessCheckArgv,
+  runLivenessCheck,
+  runLivenessCheckAsync,
+  LIVENESS_CHECK_TIMEOUT_MS,
+  shuffle,
+  defaultReadyPoolArgv,
+  readyPoolCheck,
+  defaultSelectorArgv,
+  parseSelectorOutput,
+  runSelectorWorker,
+  makeStopCondition,
+  type LivenessResult,
+} from "./driver-runtime.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -592,116 +628,11 @@ export function appendOutcome(root: string, outcome: ReturnType<typeof computeOu
   return appendOutcomeToFile(path.join(root, WORKER_OUTCOME_REL), outcome);
 }
 
-// ── liveness 检查（gap-resident-driver-stable-carrier-liveness Finding：liveness 子命令零调用者）──
-// AC2 承诺的「driver/supervisor 死时有机件在窗口内检测并报告」此前没有任何东西触发 liveness 子命令
-// （log 13h 无更新）。修法（Finding）：driver 自身 round 循环每轮顺手调一次 liveness——supervisor 死后
-// driver 成孤儿仍在跑，它的下一轮即检出 supervisor_dead 并让 liveness 子命令写 DEATH 告警（⛔ 载体停更
-// ≠ 一切正常）。复用的是 launch 脚本已测的 liveness 子命令（单一真相源），⛔ 不在驱动里重写存活判定。
-
-/** liveness 检查的 wall-clock 上限（spawnSync timeout，毫秒）。轻量（kill -0 判定），远小于 round。 */
-export const LIVENESS_CHECK_TIMEOUT_MS = 10_000;
-
-/** 缺省 liveness 检查命令：复用 promotion-driver-launch.sh 的 liveness 子命令（单一真相源）。kind 是
- *  驱动文件身份（worker-driver.ts 恒 worker；promotion-driver.ts 恒 promotion，同函数传不同 kind）。
- *  exit 0 = 健康（deaths=none），exit 1 = 检出死亡（deaths 非空）——两者都是「查过」。 */
-export function defaultLivenessCheckArgv(root: string, kind: "promotion" | "worker"): string[] {
-  return [
-    "bash", path.join(root, "plugin", "scripts", "promotion-driver-launch.sh"),
-    "liveness", "--kind", kind, "--root", root, "--json",
-  ];
-}
-
-/** 单轮 liveness 检查结果。checked=false ⇒ 未查成（launch 脚本缺失 / spawn 失败 / 输出不可解析）——
- *  这是「未评估」，⛔ 不是「健康」（硬规则 3b：无法评估 ≠ 合格，独立取值）。deaths=null + checked=true
- *  ⇒ 查过且健康（deaths=none）；deaths 非空 ⇒ 查过且检出死亡。running = supervisor_alive && driver_alive。 */
-export interface LivenessResult {
-  checked: boolean;
-  deaths: string | null;
-  running: boolean;
-}
-
-/**
- * 异步 spawn（spawn 而非 spawnSync）：不阻塞事件循环，child exit 本身是一个唤醒源
- * （gap-worker-driver-async-selector-readypool AC2 + gap-worker-driver-reconcile-interval SPEC §5.7——
- * 循环体用 spawnSync 会冻住协调地板：一个卡住的 selector 会连定时器一起冻住）。collectStderr=true
- * 时捕获 stderr（selector 兜底 reason 需要）；缺省 stderr 丢弃。timeoutMs 到期 ⇒ SIGKILL child 并
- * resolve error。永不 throw——失败经返回值的 status/error 表达（硬规则 3b：spawn 失败 ≠ 合格，由调用方判）。
- */
-async function runAsync(
-  argv: string[],
-  opts: { timeoutMs: number; collectStderr?: boolean } = { timeoutMs: 120_000 },
-): Promise<{ status: number | null; stdout: string; stderr: string; error: Error | null }> {
-  const { timeoutMs, collectStderr = false } = opts;
-  return new Promise((resolve) => {
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(argv[0], argv.slice(1), {
-        stdio: ["ignore", "pipe", collectStderr ? "pipe" : "ignore"],
-      });
-    } catch (e) {
-      resolve({ status: null, stdout: "", stderr: "", error: e as Error });
-      return;
-    }
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const finish = (status: number | null, error: Error | null) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      resolve({ status, stdout, stderr, error });
-    };
-    timer = setTimeout(() => {
-      try { child.kill("SIGKILL"); } catch { /* already gone */ }
-      finish(null, new Error(`spawn timeout after ${timeoutMs}ms (SIGKILL): ${argv[0]}`));
-    }, timeoutMs);
-    child.stdout?.on("data", (d) => { stdout += d; });
-    if (child.stderr) child.stderr.on("data", (d) => { stderr += d; });
-    child.on("error", (e) => finish(null, e));
-    child.on("close", (code) => finish(code, null));
-  });
-}
-
-/** 跑一次 liveness 检查（复用 launch 脚本 liveness 子命令，⛔ 不重写存活判定）。cmd 覆盖命令（测试缝，
- *  同 --ready-pool-cmd/--selector-cmd 的形状）；缺省 = defaultLivenessCheckArgv(root, kind)。 */
-export function runLivenessCheck(root: string, kind: "promotion" | "worker", cmd: string[] | null = null): LivenessResult {
-  const argv = cmd ?? defaultLivenessCheckArgv(root, kind);
-  try {
-    const r = spawnSync(argv[0], argv.slice(1), {
-      encoding: "utf8", timeout: LIVENESS_CHECK_TIMEOUT_MS, maxBuffer: 1024 * 1024,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    // 脚本缺失 ⇒ bash exit 127、stdout 空 ⇒ JSON.parse 抛 ⇒ catch 归 checked:false；spawn 失败 / 无状态
-    // 亦归 checked:false（未查成）。exit 1（检出死亡）r.error 为 null ⇒ 正常走 parse。
-    if (r.error || r.status === null) return { checked: false, deaths: null, running: false };
-    const j = JSON.parse(String(r.stdout ?? "").trim());
-    const deaths = j && typeof j.deaths === "string" && j.deaths !== "none" && j.deaths !== "" ? String(j.deaths) : null;
-    return { checked: true, deaths, running: !!j.running };
-  } catch {
-    return { checked: false, deaths: null, running: false };
-  }
-}
-
-/** runLivenessCheck 的异步版（常驻循环体用——⛔ spawnSync 会冻住协调地板）。解析逻辑与同步版一致
- *  （checked=false = 未查成，⛔ 不是「健康」，硬规则 3b）。 */
-export async function runLivenessCheckAsync(
-  root: string,
-  kind: "promotion" | "worker",
-  cmd: string[] | null = null,
-): Promise<LivenessResult> {
-  const argv = cmd ?? defaultLivenessCheckArgv(root, kind);
-  const r = await runAsync(argv, { timeoutMs: LIVENESS_CHECK_TIMEOUT_MS });
-  // 脚本缺失 ⇒ bash exit 127、stdout 空 ⇒ JSON.parse 抛 ⇒ catch 归 checked:false（未查成）。
-  if (r.error || r.status === null) return { checked: false, deaths: null, running: false };
-  try {
-    const j = JSON.parse(r.stdout.trim());
-    const deaths = j && typeof j.deaths === "string" && j.deaths !== "none" && j.deaths !== "" ? String(j.deaths) : null;
-    return { checked: true, deaths, running: !!j.running };
-  } catch {
-    return { checked: false, deaths: null, running: false };
-  }
-}
+// liveness 检查（gap-resident-driver-stable-carrier-liveness Finding）已上收 driver-runtime.ts
+// （Layer 0 · liveness）：defaultLivenessCheckArgv / runLivenessCheck / runLivenessCheckAsync /
+// LivenessResult / LIVENESS_CHECK_TIMEOUT_MS / runAsync 全部经 import 消费（⛔ 不各写一遍存活判定）。
+// 单一真相源从「bash promotion-driver-launch.sh liveness」改为「node driver-runtime.ts liveness」——
+// supervisor 港进 TS 后 liveness 子命令随 kernel 一起（AC151）。
 
 /**
  * 一条 worker round 记录（AC138-3 无条件心跳）：⛔ 与 outcome 分工——outcome 只在任务真完成（或
@@ -741,22 +672,6 @@ export function appendRoundToFile(file: string, record: ReturnType<typeof comput
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, JSON.stringify(record) + "\n", "utf8");
   return file;
-}
-
-/** 空格分隔 argv 切分（⛔ 无 shell 元字符 / 引号；用于 --worker-cmd/--worker-cmd-exact 与默认 claude -p）。 */
-export function splitArgs(cmd: string): string[] {
-  return cmd.trim().split(/\s+/).filter(Boolean);
-}
-
-/**
- * 单一真相源（AC140-1）：驱动 LLM spawn 的 argv 构造——走 `quay-launch.sh <role> -p <prompt>`。
- * launcher / model / --bare / -n 全部由 `.quay/profiles.yml` 的 `profiles`/`roles` 承载
- * （⛔ 不在驱动里硬编码 claude/wrapper/model，四处分立的 `["claude","-p",…]` 全部归到这一处）。
- * role ∈ task-worker | selector | fix-worker。wrapper 的贡献全在 env（claude-fjdac 末行 `exec claude`），
- * 故本 argv 只看得见 `bash` + `quay-launch.sh`——AC2 取假须读 spawn 出的 worker 进程 env（ANTHROPIC_BASE_URL）。
- */
-export function launchArgv(role: string, prompt: string, root: string): string[] {
-  return ["bash", path.join(root, "plugin", "scripts", "quay-launch.sh"), role, "-p", prompt];
 }
 
 /** worker 命令覆盖的两个旋钮（AC140-3 覆盖语义统一）：prefix = 前缀（prompt 追加）；exact = 整体替换（测试专用）。 */
@@ -1343,113 +1258,9 @@ function runOneWorker({
 
 // ── 阶段 4（AC129）常驻驱动 + 自主选任务：选择环 / selector worker / 判停 ───────────────────────────
 
-/** Fisher–Yates 打散（AC2：候选顺序打散后交 selector，避免 selector 每次看到同一顺序）。返回新数组，
- *  不改动入参。 */
-export function shuffle<T>(arr: readonly T[]): T[] {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-// 派发前 Touches 互斥过滤（gap-launch-script-worker-cap-broken AC3）已上收 driver-filters.ts 的
-// `touchesDisjoint` 谓词（AC152 单一实现）——派发环经 applyTaskFilters 消费，⛔ 不在此保留平行实现。
-
-/** 缺省 ready-pool-check 命令（选择环的第一步）。输出须为 analyzeTasks JSON（读其 `ready` 数组）。 */
-export function defaultReadyPoolArgv(root: string, inFlight: string[], cap: number): string[] {
-  const argv = [
-    "node", "--experimental-strip-types", path.join(root, "plugin", "scripts", "ready-pool-check.ts"),
-    "--root", root, "--cap", String(cap), "--json",
-  ];
-  if (inFlight.length > 0) argv.push("--in-flight", inFlight.join(","));
-  return argv;
-}
-
-/** 调 ready-pool-check 取可行集（AC2 第一步）。cmd 覆盖是测试缝；缺省 = 本仓库 ready-pool-check.ts。
- *  解析失败/非零退出 ⇒ fail-closed 返回空池（硬规则 3b：读不懂 ≠ 「有候选」，⛔ 不得伪装成有货）。 */
-export async function readyPoolCheck(
-  root: string,
-  cmd: string[] | null,
-  inFlight: string[],
-  cap: number,
-): Promise<{ ready: string[]; pool: number; criterionMet: boolean; error: string | null }> {
-  const argv = cmd ?? defaultReadyPoolArgv(root, inFlight, cap);
-  // 异步 spawn（gap-worker-driver-async-selector-readypool AC1）：循环体不再用 spawnSync 阻塞协调地板。
-  const r = await runAsync(argv, { timeoutMs: 120_000 });
-  if (r.error || r.status !== 0) {
-    const msg = r.error ? String(r.error.message || r.error) : `ready-pool-check exited ${r.status}`;
-    return { ready: [], pool: 0, criterionMet: false, error: msg };
-  }
-  try {
-    const j = JSON.parse(r.stdout.trim());
-    const ready = Array.isArray(j.ready) ? j.ready.filter((x: unknown) => typeof x === "string") : [];
-    return {
-      ready,
-      pool: typeof j.pool === "number" ? j.pool : ready.length,
-      criterionMet: !!j.criterion_met,
-      error: null,
-    };
-  } catch {
-    return { ready: [], pool: 0, criterionMet: false, error: "unparseable ready-pool-check output" };
-  }
-}
-
-/** 缺省 selector worker 命令（短命 LLM——SPEC §1 设计点1「选择仍应是语义的」）。prompt 内联打散后的
- *  候选 id 列表，要求输出一行 `<task-id> <一句理由>`。launcher/model/--bare 由
- *  `.quay/profiles.yml` 的 profiles/roles 承载（AC140-2 可配）。 */
-export function defaultSelectorArgv(candidateIds: string[], root: string): string[] {
-  const prompt = [
-    `You are the resident task selector for the quay worker driver (SPEC §5 阶段 4 — AC129).`,
-    `Candidate task ids (ready pool, in-flight subtracted, order shuffled): ${candidateIds.join(", ")}.`,
-    `Before choosing, read orchestration/dispatch-preference.md — its 覆盖段 carries the current priority (manager-maintained). Honor it unless a candidate is structurally ineligible (Touches conflict / unmet deps). If no candidate matches the override priority, fall back to your own semantic judgment.`,
-    `Pick exactly ONE task to dispatch next and reply with a single line: <task-id> <one-line reason>`,
-    `and nothing else. Repo root: ${root}.`,
-  ].join(" ");
-  return launchArgv("selector", prompt, root);
-}
-
-/** 解析 selector worker 输出：第一行 `<task-id> <一句理由>`。task-id 须在候选集内（⛔ 不得放行一个
- *  未提交给它的任务）；无效输出 ⇒ fail-closed 回退打散后首个候选（循环永不因 selector 而 deadlock）。
- *  AC142 AC1：stderr 可选传入，兜底 reason 带上 stderr 截断（selector spawn 失败/认证失败可诊断）。 */
-export function parseSelectorOutput(
-  stdout: string,
-  candidates: string[],
-  exitCode: number | null,
-  stderr: string | null = null,
-): { task: string; reason: string } | null {
-  const line = String(stdout ?? "").trim().split("\n")[0]?.trim() ?? "";
-  const m = line.match(/^\s*(\S+)(?:\s+(.*))?$/);
-  const task = m ? m[1] : null;
-  const reason = m && m[2] ? m[2].trim() : "";
-  if (task && candidates.includes(task)) {
-    return { task, reason: reason || `selector picked ${task}` };
-  }
-  const fallback = candidates[0];
-  if (!fallback) return null;
-  const got = line ? `, got "${line.slice(0, 80)}"` : "";
-  const errFrag = stderr ? `, stderr="${stderr.slice(0, 200)}"` : "";
-  return {
-    task: fallback,
-    reason: `selector worker returned no valid pick (exit ${exitCode ?? "null"}${got}${errFrag}); fallback to first shuffled candidate`,
-  };
-}
-
-/** 交短命 selector worker（AC2 末步）：spawn 覆盖命令（或 claude -p）→ 解析输出。永不 throw。
- *  AC142 AC1：捕获 stderr（连同 stdout + timeout 落进可查载体 selector_reason）。 */
-export async function runSelectorWorker(
-  candidates: string[],
-  fixedArgv: string[] | null,
-  root: string,
-): Promise<{ task: string; reason: string } | null> {
-  if (candidates.length === 0) return null;
-  const argv = fixedArgv ?? defaultSelectorArgv(candidates, root);
-  // 异步 spawn（gap-worker-driver-async-selector-readypool AC1）：selector 的 LLM 调用（实测约 1 分钟）
-  // 不再冻住协调地板（SPEC §5.7）。stderr 捕获供 parseSelectorOutput 兜底 reason（AC142 AC1）。
-  const r = await runAsync(argv, { timeoutMs: 120_000, collectStderr: true });
-  return parseSelectorOutput(r.stdout, candidates, r.error ? null : r.status, r.stderr.trim() || null);
-}
+// shuffle / defaultReadyPoolArgv / readyPoolCheck / defaultSelectorArgv / parseSelectorOutput /
+// runSelectorWorker 已上收 driver-runtime.ts（Layer 1a · source/select）——派发环经 import 消费，
+// ⛔ 不在此保留平行实现（AC151）。Touches 互斥过滤经 driver-filters.ts 的 touchesDisjoint 谓词。
 
 /** 常驻循环里一条在飞 worker 的追踪态（done 由 `.then` 置位，reap 据此移除）。 */
 interface RunningWorker {
@@ -1541,15 +1352,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   /** 判停（AC3）：起新 worker 前逐轮读。halt 优先（终态，latch）；其次 resource-gate WAIT（瞬时，
    *  ⛔ 不 latch——gap-worker-driver-stopreason-latch-permanent-stop：WAIT 名字含 WAIT，负载高恰因在飞
    *  worker 在跑、worker 结束负载降但闸再没被读 = 自我锁死反馈环）。瞬时 WAIT 只让本轮不派、
-   *  下一轮重读 stopCondition。 */
-  const stopCondition = (): { stop: boolean; reason: string | null; terminal: boolean } => {
-    if (isHalted(rootDir)) {
-      return { stop: true, reason: "mcp-halt (control state halted — no new dispatch; in-flight workers untouched)", terminal: true };
-    }
-    const rg = resourceGateCheck(rootDir, resourceGateArgv);
-    if (!rg.go) return { stop: true, reason: `resource-gate-wait: ${rg.reason}`, terminal: false };
-    return { stop: false, reason: null, terminal: false };
-  };
+   *  下一轮重读 stopCondition。⛔ AC151：判停经 Layer 0 的 makeStopCondition 消费（halt ∧ resourceGate
+   *  单一实现），不各写一遍。 */
+  const stopCondition = makeStopCondition(rootDir, "worker", resourceGateArgv);
 
   /** spawn 一个选中的 worker，并把 selector 的真实理由带进 outcome（AC2）。 */
   const spawnSelected = async (sel: { task: string; reason: string }): Promise<void> => {
