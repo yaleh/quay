@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // fan-in-execute-paths.test.mjs — gap-fan-in-execute-three-unverified-paths: the three UNVERIFIED
 // hot points of .claude/workflows/fan-in-execute.js, exercised through the REAL invocation path
 // (判据3 — NOT fixture-only pure-function mocks; the AC78 lesson: "改 workflow 的唯一有效验证=实调").

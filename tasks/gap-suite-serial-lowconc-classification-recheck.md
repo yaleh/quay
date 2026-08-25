@@ -33,8 +33,28 @@ serial+lowconc 两阶段合计吃掉 full-bucket suite 真实执行时间 ~50%�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，33 主动验证）：33 个纯 S 的 serial/lowconc 文件各在主并发池独立重跑 N 次，记录稳定/不稳定；（⛔ 未主动跑 33 个 ⇒ 假）。
-- [ ] AC2（能取假，结论落地）：据测量落方向 (a) 或 (b)（测出前不动任一方向）；（⛔ 无结论或先动后测 ⇒ 假）。
+- [x] AC1（能取假，33 主动验证）：33 个纯 S 的 serial/lowconc 文件各在主并发池独立重跑 N 次，记录稳定/不稳定；（⛔ 未主动跑 33 个 ⇒ 假）。
+- [x] AC2（能取假，结论落地）：据测量落方向 (a) 或 (b)（测出前不动任一方向）；（⛔ 无结论或先动后测 ⇒ 假）。
+
+## Measurement（AC1 证据）
+
+33 个纯 S 文件在【主并发池】整体重跑 N=5 轮（concurrency=16 = 主并发池 `default_test_concurrency`）。`QUAY_TEST_NESTED=1` + `QUAY_TEST_NESTED_ROOT=<worktree>` 复刻 full-suite/bucket 路径的嵌套环境——**缺它会出测量伪影**：nested-spawn 文件（runner-grouping-*）的嵌套 `scripts/test.sh` 会重跑静态检查、撞测试自身的 120s `spawnSync` 超时（首轮 3 个假 UNSTABLE 即此因，已修 harness 重测）。逐轮 perFile 记录：
+
+| 轮 | exit | pass | fail | wall_ms |
+|---|---|---|---|---|
+| 1 | 0 | 33 | 0 | 186354 |
+| 2 | 0 | 33 | 0 | 152903 |
+| 3 | 0 | 33 | 0 | 160698 |
+| 4 | 0 | 33 | 0 | 160310 |
+| 5 | 0 | 33 | 0 | 164619 |
+
+⇒ **33 文件 × 5 轮 = 165 次独立 file-run，0 fail，全部 STABLE**（测量期并有机上其它在飞 suite 的真实负载）。无文件在主并发池重跑中不稳定。
+
+## Conclusion（AC2 落方向）
+
+33 个纯 S 文件在主并发池 5 轮 165 次全稳定 ⇒ **不需要 serial/lowconc 降并发分相**。落方向 **(b)**：确认新条件下不需要、两条路径一起停用——33 文件 `@test-group` 由 serial/lowconc 改为默认组 `engine`（主并发池）。`--buckets` 路径本就未启用分相（从不降并发）⇒ 两条路径对这 33 文件的并发判断一致（都跑主并发池）。
+
+保留各文件的 `@load-sensitive` 标注（`known-load-sensitive.ts` 的 fix-scope deferral 用，与 `@test-group` 分相正交，不改）。剩余 27 个有证据文件由 `gap-suite-move-27-evidenced-files-out-serial-lowconc` 独立移出（不在本任务范围）；其移出后 serial/lowconc 分相为空（两任务合起来 = 分相停用）。
 
 ## Definition of Done
 
@@ -42,7 +62,37 @@ serial+lowconc 两阶段合计吃掉 full-bucket suite 真实执行时间 ~50%�
 
 ## Touches
 
-- 被主动验证的 @test-group serial/lowconc 文件（标注调整，如需）
-- scripts/test.sh（如需按结论统一分相）
-- plugin/scripts/suite-bucket-select.ts（如需按结论统一分相）
+- experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs
+- plugin/test/capability-catalog.test.mjs
+- plugin/test/checker-cost.test.mjs
+- plugin/test/cold-start-skill.test.mjs
+- plugin/test/fan-in-execute-paths.test.mjs
+- plugin/test/fan-in-ff-executor-check.test.mjs
+- plugin/test/monitor-mount-check.test.mjs
+- plugin/test/per-task-suite-record-check.test.mjs
+- plugin/test/quay-init-drift-report.test.mjs
+- plugin/test/quay-init-laydown-closure.test.mjs
+- plugin/test/quay-init-laydown-dist-closure.test.mjs
+- plugin/test/quay-init-loop-consumer-doc-refs.test.mjs
+- plugin/test/quay-init-loop-core.test.mjs
+- plugin/test/quay-init-tmux-detection.test.mjs
+- plugin/test/quay-init.test.mjs
+- plugin/test/runner-grouping-fixture-runs.test.mjs
+- plugin/test/runner-grouping-flags-only.test.mjs
+- plugin/test/runner-grouping-governance.test.mjs
+- plugin/test/runner-grouping-list-groups.test.mjs
+- plugin/test/runner-grouping-serial-anti-stomp.test.mjs
+- plugin/test/runtime-landing.test.mjs
+- plugin/test/select-tests-for-touches.test.mjs
+- plugin/test/session-liveness-events.test.mjs
+- plugin/test/session-liveness-heartbeat.test.mjs
+- plugin/test/session-liveness-signals-integration.test.mjs
+- plugin/test/session-liveness-signals-kinds.test.mjs
+- plugin/test/session-liveness-signals-thresholds-edge.test.mjs
+- plugin/test/session-liveness-signals-thresholds-observers.test.mjs
+- plugin/test/session-liveness-signals-thresholds.test.mjs
+- plugin/test/session-liveness-sweep.test.mjs
+- plugin/test/session-liveness-target.test.mjs
+- plugin/test/session-topology.test.mjs
+- plugin/test/threshold-scope-check.test.mjs
 - tasks/gap-suite-serial-lowconc-classification-recheck.md（自身）

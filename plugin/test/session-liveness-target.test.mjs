@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // @load-sensitive wall-clock
 // session-liveness-target.test.mjs — the monitor watches the CONFIGURED target (the inner role
 // window), not ITSELF (the outer pane that hosts it) — gap-session-liveness-monitor-watches-self-not-inner.

@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // @load-sensitive wall-clock
 // session-liveness-signals-thresholds-observers.test.mjs — 阈值行为 · observers/边界 — token chrome / 双 observer 独立阈值 / 权限提示阈值 / pane-only 默认心跳边界
 //

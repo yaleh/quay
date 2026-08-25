@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion): routed to `lowconc`, NOT `serial`.
 // The serial group's ONLY criterion is nested-runner (a file that spawns its own worker-pool
 // sub-suites via `node --test` / test.sh --for-task). This file made itself concurrency-safe — 9
@@ -28,7 +28,7 @@
 //   AC4 — cold-start/SKILL.md cross-annotates the session topology (TOPOLOGY-IN-PLACE key + the
 //         factory/check references) — SKILL teaches the loop start, this task teaches the session
 //         topology; together they are 装得上.
-//   AC5 — this file is node:test + // @test-group lowconc (hermetic → lowconc, see GROUP NOTE).
+//   AC5 — this file is node:test + // @test-group engine (was lowconc; reclassified by gap-suite-serial-lowconc-classification-recheck).
 // Plus: the factory's --dry-run emits the two-window plan; a real build creates the windows.
 //
 // All tmux work is on a HERMETIC server on a private socket (TMUX_TMPDIR + explicit -S argv),

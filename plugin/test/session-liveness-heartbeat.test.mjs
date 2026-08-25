@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // @load-sensitive wall-clock
 // session-liveness-heartbeat.test.mjs — transcript + multi-source heartbeat, OVERDUE drivers, idle noise-gating, LOOP_MIN
 //

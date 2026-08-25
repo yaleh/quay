@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // fan-in-ff-executor-check.test.mjs — AC67 fan-in EXECUTOR checker (判据1/判据2/判据3/判据4 能取假),
 // plugin/scripts/fan-in-ff-executor-check.ts. The negative-control fixtures prove the checker can
 // go RED on the three main-thread-executor forms AC67 requires (判据), plus NOT-EVALUATED

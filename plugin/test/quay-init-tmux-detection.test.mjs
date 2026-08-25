@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // @load-sensitive real-install
 // @load-sensitive-entry 2026-08-09 hermetic tmux server + real install; B-class real wall-clock wait; re-split lowconc 2026-08-12 (gap-suite-tiering-kind-heavy-not-a-mechanism)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
@@ -29,8 +29,8 @@
 //
 // Detection is exercised against a HERMETIC tmux server on a private socket (TMUX_TMPDIR), so
 // the machine's real sessions (quay-0 / meta-cc-4 / ...) can never leak into the assertion and
-// the test never touches them. Install is a user-visible contract → @test-group serial (was AC7
-// product; the serial group runs the full suite's install contract in its concurrency-1 phase).
+// the test never touches them. Install is a user-visible contract → @test-group engine (was
+// serial; reclassified by gap-suite-serial-lowconc-classification-recheck — direction b).
 //
 // Run:
 //   scripts/test.sh plugin/test/quay-init-tmux-detection.test.mjs
