@@ -68,6 +68,7 @@ _launchSpec.roles（LLM）· 8 张 bash registry 表（kind）· CLI flags · en
 - docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数）
 - plugin/test/driver-config.test.mjs（test，新）
 - plugin/test/worker-driver.test.mjs（test，resolveConcurrency 签名更新）
+- plugin/test/driver-runtime.test.mjs（test，AC2 缺省并发契约更新：supervisor 不注入 env、driver 自读 drivers.yml）
 - plugin/skills/init/SKILL.md（补 SPEC-methodology-layer-architecture-2026-08-25 声明点，shared-gate 修复）
 - plugin/skills/manager/SKILL.md（同上：补 SPEC 索引声明点）
 - tasks/gap-ac155-config-merge-control-state-split-event-polling.md（自身）
