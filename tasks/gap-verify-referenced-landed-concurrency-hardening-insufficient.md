@@ -1,10 +1,12 @@
 ---
 id: gap-verify-referenced-landed-concurrency-hardening-insufficient
-title: verify_referenced_landed 并发下扫描时序非确定——--loop 并发安装时 torn-read 假阳性挡 fan-in（既有加固史不够）
+title: verify_referenced_landed 并发下扫描时序非确定——--loop 并发安装时 torn-read 假阳性挡
+  fan-in（既有加固史不够）
 status: ready
 labels:
   - gap
   - defect
+  - delivery-critical
 parent: null
 children: []
 extra:
