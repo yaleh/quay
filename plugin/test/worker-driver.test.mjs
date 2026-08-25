@@ -1261,11 +1261,13 @@ test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome s
 // 复用 launch 脚本 liveness 子命令（⛔ 不重写存活判定）、②runLivenessCheck 的 checked/deaths 语义
 // （checked=false = 未查成，⛔ 不是健康）、③resident loop 每轮真调它（counter 缝）。
 
-test("defaultLivenessCheckArgv — reuse the launch script liveness subcommand; kind from file identity", () => {
+test("defaultLivenessCheckArgv — reuse the TS kernel liveness subcommand; kind from file identity", () => {
+  // AC151：supervisor 港进 TS 后，liveness 子命令 = `node … driver-runtime.ts liveness --kind … --root …`。
   const argv = defaultLivenessCheckArgv("/r", "worker");
-  assert.equal(argv[0], "bash");
-  assert.equal(argv[1], "/r/plugin/scripts/promotion-driver-launch.sh");
-  assert.equal(argv[2], "liveness");
+  assert.equal(argv[0], process.execPath, "spawn the node binary (⛔ not bash — kernel is TS)");
+  assert.equal(argv[1], "--experimental-strip-types");
+  assert.ok(argv[2].endsWith("driver-runtime.ts"), `kernel path = driver-runtime.ts, got ${argv[2]}`);
+  assert.equal(argv[3], "liveness");
   assert.deepEqual(argv.slice(argv.indexOf("--kind"), argv.indexOf("--kind") + 2), ["--kind", "worker"]);
   assert.deepEqual(argv.slice(argv.indexOf("--root"), argv.indexOf("--root") + 2), ["--root", "/r"]);
   assert.ok(argv.includes("--json"), "machine-readable verdict (the driver parses deaths/running)");

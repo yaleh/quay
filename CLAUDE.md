@@ -238,8 +238,8 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   （`adr/ADR-010-scheduled-milestone-e2e-incl-browser-tests.md`，status: proposed）。
   **一次绿的 `scripts/test.sh` 不是这两类的证据。**
 - **driver 进程管理**（`quay driver <start|stop|drain|status|restart> --kind <promotion|worker>`——
-  **`liveness` 只有直调 `plugin/scripts/promotion-driver-launch.sh` 才有**，`quay driver`（`cli/driver.ts:27`
-  `VERBS`）未收录，2026-08-24 outer 核实的一个CLI表层缺口；正本仍是脚本 `--help`，**不要在此处复制参数表**）：
+  **`liveness` 只有直调 `plugin/scripts/driver-runtime.ts` 才有**，`quay driver`（`cli/driver.ts:27`
+  `VERBS`）未收录，2026-08-24 outer 核实的一个CLI表层缺口；正本仍是 kernel `--help`，**不要在此处复制参数表**）：
   `stop`/`restart` 只杀 supervisor+driver 自身，⛔ 不碰 worker kind 的在飞子进程（设计如此，见脚本注释）；
   worker kind 独有 `drain`（挡新派发、不杀在飞，写 `.quay/worker-control.json` `halted:true`）。
   **⛔ 已知缺口更新（2026-08-24，`gap-worker-driver-cold-start-inflight-blind` 已 done，读下面两行别读旧结论）**：

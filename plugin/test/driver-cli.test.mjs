@@ -1,14 +1,17 @@
 // @test-group governance
 // driver-cli.test.mjs — AC1-4 (tasks/gap-ac139-unified-driver-subcommand):
 // the two drivers' launch surface converges onto ONE `quay driver <verb> --kind <promotion|worker>`
-// subcommand + a single generalized supervisor (plugin/scripts/promotion-driver-launch.sh).
+// subcommand + a single generalized supervisor. AC151 ports that supervisor from bash
+// (promotion-driver-launch.sh) into TS (plugin/scripts/driver-runtime.ts — Layer 0 kernel); this
+// file exercises the CLI → kernel path end-to-end.
 //
 //   AC1 (统一入口): `quay driver <start|stop|drain|status|restart> --kind <promotion|worker>` exists,
 //     both kinds start/stop/drain through it (AC150: promotion now supports drain = halt, writing its
 //     own promotion-control.json). Falsifiable: a kind only starts via the old path, or worker
 //     `stop` kills in-flight workers ⇒ false.
-//   AC2 (单一真相源): exactly ONE respawn/supervisor loop in the repo; per-kind differences are a
-//     registry table. Falsifiable: a second launch script with its own supervisor loop ⇒ false.
+//   AC2 (单一真相源): exactly ONE respawn/supervisor loop in the repo (now in driver-runtime.ts, the
+//     TS kernel — ⛔ no bash .sh carries a supervisor loop anymore). Per-kind differences are a
+//     registry data table. Falsifiable: a second launch script with its own supervisor loop ⇒ false.
 //   AC3 (status 带 last_record_ts): `status` reports {kind, …, carrier_records, last_record_ts}.
 //     Falsifiable: status reports only a record count ⇒ false.
 //   AC4 (worktree 拒绝): carrier path resolved from workspace root; start from a worktree is
@@ -27,13 +30,43 @@ import { fileURLToPath } from "node:url";
 import { run } from "../../packages/quay/bin/quay.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCRIPT = path.resolve(__dirname, "..", "scripts", "promotion-driver-launch.sh");
 const SCRIPTS_DIR = path.resolve(__dirname, "..", "scripts");
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
-// A fake driver for both kinds: idles forever (the supervisor writes the driver's own pid via `$!`;
-// the real worker driver writes in-flight worker pids to --pid-file, but the fake need not).
+// The TS kernel (driver-runtime.ts) the CLI spawns + its transitive plugin/scripts deps (a fixed,
+// closed set — the CLI resolves the kernel via `path.join(root, DRIVER_RUNTIME_REL)`, so the hermetic
+// temp root must carry the kernel and everything it imports).
+const KERNEL_DEPS = [
+  "driver-runtime.ts",
+  "driver-shared.ts",
+  "driver-result.ts",
+  "driver-filters.ts",
+  "gate-script-base.ts",
+  "routine-scheduler.ts",
+  "task-schema.ts",
+  "touches-orthogonality-check.ts",
+  "touches-parser.ts",
+  "concurrent-batch-scheduler.ts",
+  "derive-touches-heuristic.ts",
+  "fast-mode-telemetry.ts",
+  "wiring-coverage-check.ts",
+  "workflow-event-schema.mjs",
+];
+
+// A fake driver for both kinds: idles forever (the supervisor writes the driver's own pid via the
+// spawn `$!` equivalent; the real worker driver writes in-flight worker pids to --pid-file, but the
+// fake need not).
 const FAKE_DRIVER = "setInterval(() => {}, 1000);\n";
+
+/** Copy the kernel + its transitive deps into the temp root's plugin/scripts, then overwrite the two
+ *  driver entry files with fakes so `start` spawns an idling child instead of a real driver loop. */
+function copyKernel(scripts) {
+  for (const dep of KERNEL_DEPS) {
+    fs.copyFileSync(path.join(SCRIPTS_DIR, dep), path.join(scripts, dep));
+  }
+  fs.writeFileSync(path.join(scripts, "promotion-driver.ts"), FAKE_DRIVER, "utf8");
+  fs.writeFileSync(path.join(scripts, "worker-driver.ts"), FAKE_DRIVER, "utf8");
+}
 
 async function cli(args) {
   const r = await run(args, { capture: true });
@@ -43,17 +76,15 @@ async function cli(args) {
   return r;
 }
 
-// A hermetic bare root (not a git repo): .quay/config.yml + plugin/scripts/{promotion,worker}-driver.ts
-// + a copy of the launch script. The CLI resolves the script from THIS root via --root.
+// A hermetic bare root (not a git repo): .quay/config.yml + the kernel (copyKernel) + fake drivers.
+// The CLI resolves the kernel from THIS root via --root.
 function makeRoot(tag) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `driver-cli-${tag}-`));
   const scripts = path.join(root, "plugin", "scripts");
   fs.mkdirSync(scripts, { recursive: true });
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(root, ".quay", "config.yml"), "providers: {}\n", "utf8");
-  fs.writeFileSync(path.join(scripts, "promotion-driver.ts"), FAKE_DRIVER, "utf8");
-  fs.writeFileSync(path.join(scripts, "worker-driver.ts"), FAKE_DRIVER, "utf8");
-  fs.copyFileSync(SCRIPT, path.join(scripts, "promotion-driver-launch.sh"));
+  copyKernel(scripts);
   return root;
 }
 
@@ -65,7 +96,7 @@ function git(cwd, args) {
   });
 }
 
-// A real git main checkout + a linked worktree (both carry .quay/config.yml + the scripts), so the
+// A real git main checkout + a linked worktree (both carry .quay/config.yml + the kernel), so the
 // AC4 worktree path actually traverses `git worktree list`.
 function makeGitWorktree() {
   const main = fs.mkdtempSync(path.join(os.tmpdir(), "driver-main-"));
@@ -74,9 +105,7 @@ function makeGitWorktree() {
   fs.mkdirSync(scripts, { recursive: true });
   fs.mkdirSync(path.join(main, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(main, ".quay", "config.yml"), "providers: {}\n", "utf8");
-  fs.writeFileSync(path.join(scripts, "promotion-driver.ts"), FAKE_DRIVER, "utf8");
-  fs.writeFileSync(path.join(scripts, "worker-driver.ts"), FAKE_DRIVER, "utf8");
-  fs.copyFileSync(SCRIPT, path.join(scripts, "promotion-driver-launch.sh"));
+  copyKernel(scripts);
   git(main, ["init", "-q"]);
   git(main, ["add", "-A"]);
   git(main, ["commit", "-qm", "init"]);
@@ -161,23 +190,27 @@ test("AC1 — worker `stop` does NOT kill in-flight workers (⛔ falsifiable: ki
   try { process.kill(Number(inflightPid), 0); } catch { assert.fail(`worker stop killed the in-flight worker ${inflightPid}`); }
 });
 
-// ── AC2 (falsifiable): a single supervisor loop, no duplicate launch script ────────────────────────
+// ── AC2 (falsifiable): a single supervisor loop, in the TS kernel — no duplicate launch script ────
 
-test("AC2 — exactly ONE respawn/supervisor loop in the repo (no worker-driver-launch.sh duplicate)", () => {
+test("AC2 — exactly ONE respawn/supervisor loop in the repo (TS kernel; ⛔ no .sh supervisor anymore)", () => {
   // The would-be duplicate from AC138's Touches must not exist.
   assert.ok(
     !fs.existsSync(path.join(SCRIPTS_DIR, "worker-driver-launch.sh")),
     "no worker-driver-launch.sh (the duplicate supervisor AC139 prevents)"
   );
-  // The supervisor loop markers (__supervise internal mode + run_supervisor loop fn) live in exactly
-  // one file. A second file with its own loop ⇒ false.
-  const superviseFiles = fs.readdirSync(SCRIPTS_DIR).filter((f) => f.endsWith(".sh") &&
+  // AC151: the supervisor loop (__supervise internal mode + runSupervisor) now lives in the TS kernel.
+  // A bash .sh with its own supervisor loop ⇒ false.
+  const superviseSh = fs.readdirSync(SCRIPTS_DIR).filter((f) => f.endsWith(".sh") &&
     fs.readFileSync(path.join(SCRIPTS_DIR, f), "utf8").includes("__supervise"));
   assert.deepEqual(
-    superviseFiles,
-    ["promotion-driver-launch.sh"],
-    `exactly one file carries the driver supervisor loop, got: ${superviseFiles.join(",")}`
+    superviseSh,
+    [],
+    `⛔ no .sh carries the supervisor loop anymore (ported to driver-runtime.ts), got: ${superviseSh.join(",")}`
   );
+  // The kernel carries the single supervisor loop + registry data table.
+  const kernel = fs.readFileSync(path.join(SCRIPTS_DIR, "driver-runtime.ts"), "utf8");
+  assert.ok(kernel.includes("runSupervisor"), "driver-runtime.ts carries the supervisor respawn loop");
+  assert.ok(kernel.includes("DRIVER_KINDS"), "driver-runtime.ts carries the registry data table");
 });
 
 // ── AC3 (falsifiable): status reports last_record_ts, not just a count ─────────────────────────────
