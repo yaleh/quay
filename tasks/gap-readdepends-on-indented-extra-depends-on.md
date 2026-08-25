@@ -32,6 +32,7 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/task-schema.ts（readDependsOn flow + block 两形态）
-- plugin/test/task-schema.test.mjs（对应测试，含缩进形态样本）
+- experiments/quay-perpetual-stream/scripts/task-schema.ts（readDependsOn flow + block 两形态，canonical 源）
+- plugin/scripts/task-schema.ts（vendored mirror，sync-vendor 镜像同步）
+- experiments/quay-perpetual-stream/test/task-schema.test.mjs（对应测试，含缩进形态样本）
 - tasks/gap-readdepends-on-indented-extra-depends-on.md（自身）
