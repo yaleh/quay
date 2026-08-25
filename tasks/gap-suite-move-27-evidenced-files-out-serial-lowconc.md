@@ -1,7 +1,7 @@
 ---
 id: gap-suite-move-27-evidenced-files-out-serial-lowconc
 title: 27 个有证据文件直接移出 serial/lowconc 降并发名单（fail=0 高负载验证，不抽查）
-status: todo
+status: ready
 labels:
   - gap
   - feature
@@ -28,7 +28,7 @@ extra: {}
 
 ## Definition of Done
 
-27 文件移出降并发名单；AC1-2 全勾。
+27 个有证据文件已移出 serial/lowconc 降并发名单：@test-group 由 serial/lowconc 改为默认组（product/engine，按 scripts/test.sh 规则逐个核实）；AC1、AC2 全勾；改后 suite 仍绿；无文件残留 serial/lowconc 标记。
 
 ## Touches
 
