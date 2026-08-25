@@ -1,7 +1,7 @@
 ---
 id: gap-worker-cleanup-judgment-precision
 title: 清理判据精确化：清理前 git log 判有无产出 + failed 按信号区分（SIGTERM vs 自崩）
-status: ready
+status: done
 labels:
   - gap
   - defect
