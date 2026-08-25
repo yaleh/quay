@@ -1,7 +1,7 @@
 ---
 id: gap-ac147-manager-liveness-independent-channel
 title: AC147 manager 自身活性由【不依赖 manager】的通道兜底——失能超 T 有机制让人知道
-status: todo
+status: ready
 labels:
   - gap
   - feature
@@ -27,7 +27,7 @@ extra:
 
 ## Definition of Done
 
-manager 活性独立兜底落地；AC1/AC2 全勾；负控制样本回放通过。
+manager 活性独立兜底落地：不经过 manager 的 heartbeat 超时检测 + 通知机制到位；AC1/AC2 全勾；负控制样本回放（outer 04:13:54Z–07:30:07Z 阻塞态）通过。
 
 ## Touches
 
