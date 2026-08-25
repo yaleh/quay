@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock } from "../src/serve-handlers.ts";
+import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
 import { sendSessionFrames, deliveryStateFor, classifyReceipt, extractDeliverySettings, deliverySettingsFromArgv, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
@@ -464,12 +464,13 @@ test("renderPerFileTimelineSvg renders one server-side SVG bar per timestamped f
     // A legacy entry WITHOUT timestamps must be dropped (not plotted, not fabricated).
     { file: "packages/quay/test/legacy.test.mjs", durationMs: 50, passed: true },
   ];
-  const out = renderPerFileTimelineSvg(perFile);
+  const out = renderPerFileTimelineSvg(perFile); // no root → every file is UNRESOLVED (never throws)
   assert.ok(out.startsWith("<svg"), "output is an <svg> element (server-rendered, zero client JS)");
   assert.ok(out.includes("测试时间线"), "renders the timeline heading");
-  // One bar per timestamped file (3 rects with gantt-svg-bar*), the legacy entry dropped.
-  assert.equal((out.match(/class="gantt-svg-bar(-fail)?"/g) ?? []).length, 3, "three timestamped files → three bars");
-  assert.ok(out.includes("gantt-svg-bar-fail"), "the failed file's bar carries gantt-svg-bar-fail");
+  // One bar per timestamped file (3 label links), the legacy entry dropped.
+  assert.equal((out.match(/href="\/tests\/file\?path=/g) ?? []).length, 3, "three timestamped files → three bars");
+  assert.ok(out.includes("gantt-bucket-unresolved"), "a file with no readable source is UNRESOLVED, not fabricated");
+  assert.ok(out.includes("gantt-svg-bar-fail"), "the failed file's bar carries the fail shade (gantt-svg-bar-fail)");
   assert.ok(!out.includes("legacy.test.mjs"), "a timestamp-less legacy entry is not plotted");
   // Chronological start-time ASC: slow (t0+190) < mid (t0+2900) < fast (t0+5988); assert label order.
   const slowIdx = out.indexOf("slow.test.mjs");
@@ -482,6 +483,50 @@ test("renderPerFileTimelineSvg renders one server-side SVG bar per timestamped f
   assert.equal(renderPerFileTimelineSvg(null), "");
   assert.equal(renderPerFileTimelineSvg([]), "");
   assert.equal(renderPerFileTimelineSvg([{ file: "a.test.mjs", durationMs: 10, passed: true }]), "", "a perFile with no timestamps renders nothing (legacy data has no time axis)");
+});
+
+test("AC1/AC2/AC3: timeline bars are bucket-coloured (P/M/S distinct hues, not just pass/fail) with a legend, and bucketSetOfFile mirrors suite-bucket-attribution", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-bucket-"));
+  try {
+    // P — a product test file (directory home `packages/*/test/` → P).
+    const pFile = "packages/quay/test/p.test.mjs";
+    fs.mkdirSync(path.join(root, "packages/quay/test"), { recursive: true });
+    fs.writeFileSync(path.join(root, pFile), "// product test\n");
+    // M — a plugin test file that statically references plugin/scripts (→ M).
+    const mFile = "plugin/test/m.test.mjs";
+    fs.mkdirSync(path.join(root, "plugin/test"), { recursive: true });
+    fs.writeFileSync(path.join(root, mFile), 'import "../scripts/foo.ts";\n');
+    // S — a test file that references the suite script (→ S).
+    const sFile = "plugin/test/s.test.mjs";
+    fs.writeFileSync(path.join(root, sFile), "// Run: bash scripts/test.sh\n");
+
+    // AC2 — the mirror attributes each file to the SAME buckets as suite-bucket-attribution.ts.
+    assert.deepEqual([...bucketSetOfFile(pFile, root)].sort(), ["P"], "product test → {P}");
+    assert.deepEqual([...bucketSetOfFile(mFile, root)].sort(), ["M"], "plugin test importing ../scripts → {M}");
+    assert.deepEqual([...bucketSetOfFile(sFile, root)].sort(), ["S"], "scripts/test.sh reference → {S}");
+    assert.deepEqual([...bucketSetOfFile("no/such/file.test.mjs", root)], [], "missing file → empty set (UNRESOLVED, never throws)");
+
+    const t0 = 1724374800000;
+    const out = renderPerFileTimelineSvg([
+      { file: pFile, durationMs: 100, passed: true, endedAtMs: t0 + 1000, startedAtMs: t0 },
+      { file: mFile, durationMs: 200, passed: true, endedAtMs: t0 + 2000, startedAtMs: t0 + 1000 },
+      { file: sFile, durationMs: 300, passed: true, endedAtMs: t0 + 3000, startedAtMs: t0 + 2000 },
+    ], root);
+
+    // AC1 — distinct bucket hues, not just the old pass/fail pair.
+    assert.ok(out.includes('class="gantt-bucket-P"'), "P bar carries the P hue class");
+    assert.ok(out.includes('class="gantt-bucket-M"'), "M bar carries the M hue class");
+    assert.ok(out.includes('class="gantt-bucket-S"'), "S bar carries the S hue class");
+    assert.ok(!out.includes('class="gantt-svg-bar"'), "no bar still uses the old single pass hue");
+
+    // AC3 — a legend names each bucket's colour meaning.
+    assert.ok(out.includes("图例"), "renders a legend");
+    assert.ok(out.includes("P 产品"), "legend names the P bucket");
+    assert.ok(out.includes("M 机件"), "legend names the M bucket");
+    assert.ok(out.includes("S 套件"), "legend names the S bucket");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("AC2: GET /tests renders the timeline SVG when the latest perFile row carries timestamps", async () => {
@@ -503,7 +548,7 @@ test("AC2: GET /tests renders the timeline SVG when the latest perFile row carri
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
     assert.ok(r.body.includes("测试时间线"), "the page renders the timeline section");
-    assert.ok(/class="gantt-svg-bar"/.test(r.body), "the page renders at least one timeline bar");
+    assert.ok(/class="gantt-bucket-/.test(r.body), "the page renders at least one bucket-coloured timeline bar");
     assert.ok(r.body.includes("slow.test.mjs") && r.body.includes("fast.test.mjs"), "both timestamped files present in the timeline");
   } finally {
     if (server) {
@@ -1202,6 +1247,72 @@ test("AC2 (unit) — readLive annotates in-flight worker tasks with the live ses
   }
 });
 
+// ── gap-live-ghost-superseded-task-workflow-events-start (AC1/AC2/AC3) ────────────────────────
+// A workflow-events START-without-END record for a task whose on-disk status is terminal
+// (done/superseded/needs-human) is a ghost: its worker session ended or was superseded without a
+// normal fan-in END telemetry. readLive must drop it by the direct量 (on-disk status), NOT keep it
+// in-flight forever just because its worktree was never released. A genuinely in-flight task
+// (ready, no terminal status) must be KEPT — the filter is fail-closed toward "terminal only".
+
+function writeLiveGhostFixture(root, entries) {
+  const eventsDir = path.join(root, ".workflow-events");
+  const tasksDir = path.join(root, "tasks");
+  fs.mkdirSync(eventsDir, { recursive: true });
+  fs.mkdirSync(tasksDir, { recursive: true });
+  const nowMs = Date.now();
+  for (const { runId, taskId, status } of entries) {
+    const ev = {
+      schemaVersion: "1", agentLabel: "fast-mode", attempt: 0, stage: "Fast", eventKind: "start",
+      runId, taskId, commandIdentity: "fast-mode-telemetry:task-start", recordedAtMs: nowMs,
+      timing: { queuedAtMs: null, startedAtMs: nowMs - 120_000, endedAtMs: null },
+    };
+    fs.writeFileSync(path.join(eventsDir, `${runId}.jsonl`), JSON.stringify(ev) + "\n");
+    fs.writeFileSync(path.join(tasksDir, `${taskId}.md`), `---\nid: ${taskId}\nstatus: ${status}\n---\nbody\n`);
+  }
+  return nowMs;
+}
+
+test("AC1/AC2/AC3 — readLive drops terminal-status ghosts, keeps a ready task (workflow-events source)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-ghost-"));
+  try {
+    const nowMs = writeLiveGhostFixture(root, [
+      { runId: "fm-SUP-1", taskId: "SUP", status: "superseded" },
+      { runId: "fm-DONE-1", taskId: "DONE", status: "done" },
+      { runId: "fm-NH-1", taskId: "NH", status: "needs-human" },
+      { runId: "fm-RDY-1", taskId: "RDY", status: "ready" },
+    ]);
+
+    const live = readLive(root, { nowMs });
+    const ids = new Set(live.inFlight.map((t) => t.taskId));
+
+    assert.ok(!ids.has("SUP"), "AC1: a superseded task with an orphan START event is NOT in-flight (⛔ 仍显示「实现中」⇒ 假)");
+    assert.ok(!ids.has("DONE"), "AC1: a done task with an orphan START event is NOT in-flight");
+    assert.ok(!ids.has("NH"), "AC3: a needs-human task with an orphan START event is NOT in-flight (no worker is running)");
+    assert.ok(ids.has("RDY"), "AC2: a ready task with an orphan START event IS still in-flight (negative control — not over-trimmed)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — a live worker (status ready + process present) is still in-flight (not mis-dropped)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-ghost-worker-"));
+  try {
+    const nowMs = Date.now();
+    fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(root, "tasks", "LIVE-1.md"), `---\nid: LIVE-1\nstatus: ready\n---\nbody\n`);
+
+    const live = readLive(root, {
+      nowMs,
+      liveWorkers: [{ taskId: "LIVE-1", pid: "4242", startedAtMs: nowMs - 30_000 }],
+    });
+    const ids = new Set(live.inFlight.map((t) => t.taskId));
+
+    assert.ok(ids.has("LIVE-1"), "AC2: a live worker for a ready task is in-flight (⛔ 误剔 ⇒ 假)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC2 (falsifiable) — renderLivePage renders a transcript link ONLY for in-flight workers with a sessionId", () => {
   const base = {
     status: "ok", reason: null, concurrency: 1, cpuPressure: null,
@@ -1245,11 +1356,73 @@ test("AC3 (unit) — taskRunsBlock renders a per-attempt view + download link fo
     const recs = readWorkerOutcomeRecords(root).filter((r) => r.task === "gap-runs-1");
     assert.equal(recs.length, 2, "two attempts read back");
     assert.equal(recs[0].session_id, sid, "session_id is parsed from the carrier");
-    const htmlBlock = taskRunsBlock(root, "gap-runs-1");
+    // `liveWorkers: []` keeps this outcome-carrier test hermetic: the fixture root has a
+    // worker-outcome.jsonl (⇒ workerDriverActive=true), so without the seam the block would scan
+    // the REAL /proc and depend on the host's live processes.
+    const htmlBlock = taskRunsBlock(root, "gap-runs-1", { liveWorkers: [] });
     assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132"/, "Runs block links the view for the attempt with a session_id");
     assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132\/download"/, "Runs block links the raw download for the attempt");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 (unit) — taskRunsBlock shows a 「进行中」 row + session link for a live worker (no END record yet)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-live-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "runs-home-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  // No worker-outcome.jsonl — a first-dispatched worker has no END record yet (the exact blind spot).
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  fs.mkdirSync(path.join(home, ".claude", "sessions"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".claude", "sessions", "12345.json"), JSON.stringify({ sessionId: sid }));
+  try {
+    const htmlBlock = taskRunsBlock(root, "gap-live-1", {
+      liveWorkers: [{ taskId: "gap-live-1", pid: "12345", startedAtMs: Date.parse("2026-08-25T00:00:00Z") }],
+      sessionHome: home,
+    });
+    assert.match(htmlBlock, /进行中/, "live worker renders a 「进行中」 row");
+    assert.match(htmlBlock, />12345</, "live worker pid is shown");
+    assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132"/, "live worker session id is linked (reuses liveSessionIdForPid)");
+    assert.match(htmlBlock, /worker-gap-live-1/, "live worker run id is the worker-<task> form");
+    assert.doesNotMatch(htmlBlock, /无 worker 运行记录/, "an in-flight row suppresses the empty-store message");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("AC2 (unit) — a done task with no live worker shows NO 「进行中」 row (no ghost)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-done-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  fs.writeFileSync(path.join(q, "worker-outcome.jsonl"), [
+    JSON.stringify({ ts: "2026-08-25T00:00:00Z", task: "gap-runs-1", final_state: "completed", exit_code: 0, session_id: null }),
+  ].join("\n") + "\n");
+  try {
+    const htmlBlock = taskRunsBlock(root, "gap-runs-1", { liveWorkers: [] });
+    assert.doesNotMatch(htmlBlock, /进行中/, "no live worker ⇒ no 「进行中」 ghost row");
+    assert.match(htmlBlock, /completed/, "historical outcome row still renders");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 (unit) — a live worker with no/malformed session record renders 「—」 (honest, no dead link)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-nolink-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "runs-home2-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  try {
+    const htmlBlock = taskRunsBlock(root, "gap-live-2", {
+      liveWorkers: [{ taskId: "gap-live-2", pid: "99999", startedAtMs: null }],
+      sessionHome: home, // no sessions dir ⇒ liveSessionIdForPid returns null (honest, not a dead link)
+    });
+    assert.match(htmlBlock, /进行中/, "live worker row still present");
+    assert.doesNotMatch(htmlBlock, /href="\/session\//, "no session record ⇒ no dead transcript link");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
@@ -1289,6 +1462,163 @@ test("AC3 (integration) — /session/<id>/download serves raw JSONL (attachment)
     process.chdir(cwd0);
     fs.rmSync(transcriptPath, { force: true });
     try { fs.rmdirSync(transcriptDir); } catch { /* leave the (empty) dir */ }
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-webui-session-lifecycle (AC1-AC3) ─────────────────────────────────────────────────────
+// 会话生命周期：headless driver 两 kind（promotion/worker）经 web 复用 `quay driver`（AC1）；
+// 新建会话 = -p --input-format stream-json + --session-id + profile + 显式权限模式；重启 =
+// --resume <sessionId>（AC2 上下文保留）。交互式 manager/outer/inner 的停/重启【不暴露】（AC3）。
+
+function postJson(port, urlPath, obj) {
+  const body = JSON.stringify(obj);
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: "127.0.0.1", port, path: urlPath, method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => resolve({ status: res.statusCode, body: data }));
+      },
+    );
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
+test("AC1/AC3 (unit) — driverActionSpec: headless kinds × lifecycle verbs valid; interactive kinds & non-lifecycle verbs rejected", () => {
+  // AC1: promotion/worker × start/stop/restart all valid (headless lifecycle surface)
+  for (const kind of ["promotion", "worker"]) {
+    for (const verb of ["start", "stop", "restart"]) {
+      assert.deepEqual(driverActionSpec(verb, kind), { verb, kind }, `${verb} ${kind} → valid spec`);
+    }
+  }
+  // AC3: interactive manager/outer/inner NOT exposed — a stop/restart of them ⇒ 假
+  for (const kind of ["manager", "outer", "inner"]) {
+    for (const verb of ["start", "stop", "restart"]) {
+      assert.equal(driverActionSpec(verb, kind), null, `${verb} ${kind} → null (interactive not exposed)`);
+    }
+  }
+  // AC1 scope: status/drain/liveness stay CLI-only (not lifecycle verbs on the web surface)
+  for (const verb of ["status", "drain", "liveness"]) {
+    assert.equal(driverActionSpec(verb, "worker"), null, `${verb} → null (not a web lifecycle verb)`);
+  }
+  // non-string / missing → null (hard rule ③b: 读不懂不伪装成合格)
+  assert.equal(driverActionSpec(undefined, "worker"), null, "missing verb → null");
+  assert.equal(driverActionSpec("stop", undefined), null, "missing kind → null");
+  assert.equal(driverActionSpec(123, "worker"), null, "non-string verb → null");
+  // the enumerated allow-lists are exactly headless-only (no interactive kind leaks in)
+  assert.deepEqual([...WEB_DRIVER_KINDS], ["promotion", "worker"], "WEB_DRIVER_KINDS = headless kinds only");
+  assert.deepEqual([...WEB_DRIVER_VERBS], ["start", "stop", "restart"], "WEB_DRIVER_VERBS = lifecycle verbs only");
+});
+
+test("AC1 (unit) — newSessionArgs builds -p --session-id argv; permissionMode has NO default (blocker ③)", () => {
+  const root = "/ws";
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  const spec = newSessionArgs({ profile: "task-worker", permissionMode: "bypassPermissions", sessionId: sid, root });
+  assert.ok(spec, "valid input → spec");
+  assert.equal(spec.sessionId, sid, "pinned session-id preserved (traceable + resumable)");
+  assert.ok(spec.argv.includes("-p"), "headless print mode");
+  assert.ok(spec.argv.includes("--input-format") && spec.argv.includes("stream-json"), "stream-json input");
+  assert.ok(spec.argv.includes("--session-id"), "--session-id forwarded");
+  assert.ok(spec.argv.includes(sid), "the pinned id (not a fresh one) is forwarded");
+  assert.ok(spec.argv.includes("--permission-mode") && spec.argv.includes("bypassPermissions"), "explicit permission mode");
+  assert.equal(spec.argv[2], "task-worker", "profile = quay-launch.sh role (first positional)");
+  assert.ok(spec.argv[1].endsWith(path.join("plugin", "scripts", "quay-launch.sh")), "reuses quay-launch.sh (⛔ 手工重造启动 ⇒ 假)");
+
+  // missing profile → null
+  assert.equal(newSessionArgs({ profile: "", permissionMode: "bypassPermissions", root }), null, "empty profile → null");
+  // missing permissionMode → null (⛔ blocker ③: no silent default — a default would be 假)
+  assert.equal(newSessionArgs({ profile: "task-worker", permissionMode: "", root }), null, "empty permissionMode → null");
+  // invalid sessionId → a fresh UUID is generated (never the invalid literal)
+  const gen = newSessionArgs({ profile: "task-worker", permissionMode: "bypassPermissions", sessionId: "not-a-uuid", root });
+  assert.ok(gen, "invalid id → still spawns (fresh id)");
+  assert.notEqual(gen.sessionId, "not-a-uuid", "invalid literal is replaced by a generated UUID");
+  assert.ok(isValidSessionId(gen.sessionId), "generated id is a valid UUID");
+});
+
+test("AC2 (falsifiable) — resumeSessionArgs resumes the SAME session via --resume (a fresh id ⇒ context lost ⇒ 假)", () => {
+  const root = "/ws";
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  const spec = resumeSessionArgs({ sessionId: sid, profile: "task-worker", permissionMode: "bypassPermissions", root });
+  assert.ok(spec, "valid input → spec");
+  assert.equal(spec.sessionId, sid, "the SAME session id is resumed");
+  assert.ok(spec.argv.includes("--resume"), "--resume present (⛔ not --session-id ⇒ 假)");
+  assert.ok(spec.argv.includes(sid), "resumes the exact id — not a fresh one");
+  assert.ok(!spec.argv.includes("--session-id"), "resume path does NOT mint a new session id (context preserved only by resuming the same id)");
+  assert.ok(spec.argv.includes("-p"), "headless");
+
+  // non-UUID sessionId → null (traversal-proof, same house rule as /session/<id>)
+  assert.equal(resumeSessionArgs({ sessionId: "../etc/passwd", profile: "task-worker", permissionMode: "bypassPermissions", root }), null, "traversal id → null");
+  assert.equal(resumeSessionArgs({ sessionId: "not-a-uuid", profile: "task-worker", permissionMode: "bypassPermissions", root }), null, "non-UUID → null");
+  assert.equal(resumeSessionArgs({ sessionId: "", profile: "task-worker", permissionMode: "bypassPermissions", root }), null, "empty id → null");
+  // missing profile/permissionMode → null
+  assert.equal(resumeSessionArgs({ sessionId: sid, profile: "", permissionMode: "bypassPermissions", root }), null, "empty profile → null");
+  assert.equal(resumeSessionArgs({ sessionId: sid, profile: "task-worker", permissionMode: "", root }), null, "empty permissionMode → null");
+});
+
+test("AC3 (integration) — POST /sessions/driver rejects interactive kinds + non-lifecycle verbs, and /new //resume reject invalid input (400)", async () => {
+  const { ws, tasksDir } = makeWorkspace("lifecycle-ac3-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    for (const kind of ["manager", "outer", "inner"]) {
+      const r = await postJson(port, "/sessions/driver", { verb: "stop", kind });
+      assert.equal(r.status, 400, `kind=${kind} → 400 (interactive stop/restart not exposed)`);
+    }
+    const drain = await postJson(port, "/sessions/driver", { verb: "drain", kind: "worker" });
+    assert.equal(drain.status, 400, "drain → 400 (CLI-only)");
+
+    const newNoMode = await postJson(port, "/sessions/new", { profile: "task-worker" });
+    assert.equal(newNoMode.status, 400, "/sessions/new without permissionMode → 400 (⛔ blocker ③: no default)");
+
+    const badResume = await postJson(port, "/sessions/resume", { sessionId: "not-a-uuid", profile: "task-worker", permissionMode: "bypassPermissions" });
+    assert.equal(badResume.status, 400, "/sessions/resume with non-UUID → 400");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1 (falsifiable) — POST /sessions/driver delegates to runDriver and forwards --kind (worker action targets worker, ⛔ 漏 --kind ⇒ 默认 promotion ⇒ 假)", async () => {
+  const { ws, tasksDir } = makeWorkspace("lifecycle-ac1-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    // Mock the supervisor kernel to echo its argv (⛔ 不真起 driver — 只验证 --kind 透传).
+    const scriptDir = path.join(ws, "plugin", "scripts");
+    fs.mkdirSync(scriptDir, { recursive: true });
+    fs.writeFileSync(path.join(scriptDir, "driver-runtime.ts"), "process.stdout.write(process.argv.slice(2).join(' '));\n");
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await postJson(port, "/sessions/driver", { verb: "stop", kind: "worker" });
+    assert.equal(r.status, 200, "valid driver action → 200 (delegated, not 400)");
+    const json = JSON.parse(r.body);
+    assert.equal(json.verb, "stop");
+    assert.equal(json.kind, "worker");
+    assert.ok(json.ok, "delegated to runDriver (ok:true)");
+    assert.match(json.stdout, /stop/, "supervisor argv carries the verb");
+    assert.match(json.stdout, /--kind\s+worker/, "supervisor argv carries --kind worker (⛔ 漏 --kind 会默认 promotion ⇒ 假)");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
     fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(ws, { recursive: true, force: true });
   }

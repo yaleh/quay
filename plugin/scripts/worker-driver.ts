@@ -49,7 +49,7 @@
 //   --timeout <ms>      单任务墙钟超时（毫秒）。缺省 0 = 无超时（SPEC §4④：先无阈值记录时长分布）。
 //                       超时 ⇒ SIGTERM worker、保留 worktree、final_state=timed-out。
 //   --worker-cmd <s>    覆盖 worker 命令【前缀】（AC140-3 覆盖语义统一：prompt 仍作为末参数追加）。
-//                       缺省 = `quay-launch.sh task-worker -p <prompt>`（launcher/model 由 config 承载）。
+//                       缺省 = launchArgv 经 L2 policy 解析（profile launcher + --settings + --model + -n）。
 //   --worker-cmd-exact <s> 整体替换 worker 命令（测试捕获/注入专用，⛔ prompt 不进 argv）。
 //                          取假/测试缝：`node -e process.exit(7)`、`sleep 100`。
 //   --pid-file <path>   spawn 后把 worker pid 写到此文件（每 worker 一行；外部可观测 + 杀 worker 抓手）。
@@ -149,7 +149,7 @@ export {
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
-import { applyTaskFilters, makeFilterContext, readTaskStatus } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, type RetryState } from "./driver-filters.ts";
 export { readTaskStatus } from "./driver-filters.ts";
 // AC153：核心不变式单一实现（「⛔ 不信执行者自述，用独立量复核」）+ DriverResult 词表强制含
 // not-evaluated。computeLandingState 消费它（⛔ 不各写一遍 exitCode/自述判定）。
@@ -218,7 +218,7 @@ export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
 /** checkout 前 stash 的缺省 message（`git stash list` 可核的标记，AC2）。 */
 export const DEFAULT_STASH_MESSAGE = "worker-driver: stash before checkout (SPEC §5 阶段 2)";
 
-/** 存活 worker 进程的 `-n` 名（quay-launch.sh 由 .quay/profiles.yml 的
+/** 存活 worker 进程的 `-n` 名（launchArgv 经 profile-policy.ts 解析 .quay/profiles.yml 的
  *  `roles["task-worker"].name` 承载；AC140-2 测试钉死 name 以 quay- 开头）。
  *  冷启动在飞枚举用它识别存活 worker 进程的 cmdline（/proc/<pid>/cmdline）。
  *  AC150-3：控制态常量（CONTROL_STATE_REL/CONTROL_CALLERS_ENV/DEFAULT_CALLERS/CONTROL_HEADER/
@@ -782,7 +782,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
 /** 按覆盖旋钮解析一个 task 的 worker argv（单一构造 + AC140-3 覆盖语义统一）：
  *  exact 非空 ⇒ 整体替换（--worker-cmd-exact，测试捕获/注入专用，prompt 不进 argv 是预期）；
  *  否则 prefix 非空 ⇒ 前缀 + prompt（--worker-cmd，wrapper/测试前缀可用，prompt 作为末参数追加）；
- *  否则 ⇒ launchArgv("task-worker", prompt)（配置承载的缺省，走 quay-launch.sh）。 */
+ *  否则 ⇒ launchArgv("task-worker", prompt)（配置承载的缺省，经 policy 解析 kind → profile）。 */
 export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOptions = { prefix: null, exact: null }): string[] {
   const prompt = workerPromptForTask(task, root);
   if (opts.exact != null) {
@@ -796,10 +796,10 @@ export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOpt
   return launchArgv("task-worker", prompt, root);
 }
 
-/** 缺省 worker 命令：quay-launch.sh task-worker -p <full-chain prompt>（argv 形，child 即 worker，超时
- *  SIGTERM 杀得准）。launcher/model/--bare 由 `.quay/profiles.yml` 的 profiles/roles 承载（AC140-2 可配）。
- *  prompt 里【直接】要求 worker 以 scriptPath 调 fan-in-execute workflow——驱动直调 ⇒ A6「检查 fan-in
- *  是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
+/** 缺省 worker 命令：launchArgv("task-worker", <full-chain prompt>)（argv 形，child 即 worker，超时
+ *  SIGTERM 杀得准）。launcher/model/--bare 由 `.quay/profiles.yml` 的 profiles/roles 承载（AC140-2 可配，
+ *  L3 经 profile-policy.ts 解析）。prompt 里【直接】要求 worker 以 scriptPath 调 fan-in-execute
+ *  workflow——驱动直调 ⇒ A6「检查 fan-in 是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
 export function defaultWorkerArgv(task: string, root: string): string[] {
   return launchArgv("task-worker", workerPromptForTask(task, root), root);
 }
@@ -1061,6 +1061,15 @@ export function parseReconcileIntervalSecs(raw: string | undefined): number {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) * 1000 : RECONCILE_INTERVAL_SECS_DEFAULT * 1000;
 }
 
+/** 解析 --max-retries <n>（重试上限，gap-worker-driver-retry-cap-not-wired）。缺省 RETRY_CAP_DEFAULT
+ *  （与 promotion 的 --max-fix-retries 同值单一真相源）；非法（非正整数）⇒ 缺省（⛔ 不因 flag 拼写
+ *  炸常驻循环——与本文件其它 parse* 助手的 fail-to-default 约定一致）。 */
+export function parseMaxRetries(raw: string | undefined): number {
+  if (raw == null) return RETRY_CAP_DEFAULT;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : RETRY_CAP_DEFAULT;
+}
+
 /** 一次 stash 的结果（AC2 可核：stashed=true 且 git stash list 可见；⛔ 绝不 discard）。 */
 export interface StashResult {
   stashed: boolean;
@@ -1196,8 +1205,8 @@ export function newSessionId(): string {
  * 含 needs-human 闸拒绝）保留分支/worktree 供续做（gap-worker-needs-human-destroys-branch-worktree AC1）。
  *
  * gap-worker-task-transcript-access-webui AC1：每次尝试生成新 session_id 并落盘 outcome；spawn 时把
- * `--session-id <uuid>` 追加进 argv（经 quay-launch.sh 的 PASSTHRU 透传给 claude ⇒ transcript 落
- * `~/.claude/projects/<slug>/<uuid>.jsonl`）。⛔ `--worker-cmd-exact` 测试缝（`node -e …`/`sleep` 等
+ * `--session-id <uuid>` 追加进 argv（launchArgv 已直接出 argv，--session-id 作为末参数追加给 claude
+ * ⇒ transcript 落 `~/.claude/projects/<slug>/<uuid>.jsonl`）。⛔ `--worker-cmd-exact` 测试缝（`node -e …`/`sleep` 等
  * 假命令）不追加（假命令不接受该 flag，追加会误杀全部既有测试）——但 session_id 仍生成并落盘
  * （AC1 的「每行有 session_id」对测试缝同样成立，只是不进 argv）。
  */
@@ -1376,6 +1385,9 @@ export interface ResidentOptions {
   /** 协调地板（gap-worker-driver-reconcile-interval）：至少每 reconcileMs 协调一次，哪怕所有边沿事件
    *  （worker 退出）都丢了 ⇒ 降级「慢但正确」而非「静默停摆」。缺省 RECONCILE_INTERVAL_SECS_DEFAULT*1000。 */
   reconcileMs: number;
+  /** 重试上限（gap-worker-driver-retry-cap-not-wired）：同一任务连续 N 次 exited-not-landed 未落地 ⇒
+   *  标 needs-human 并停止重派。缺省 RETRY_CAP_DEFAULT（与 promotion 的 --max-fix-retries 同值）。 */
+  maxRetries: number;
 }
 
 /**
@@ -1389,7 +1401,7 @@ export interface ResidentOptions {
  *       supervisor 重启）。退出码 = 首个非零 worker 码（仅在终态 latch 后返回）。
  */
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
-  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs } = opts;
+  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs, maxRetries } = opts;
 
   // checkout 前 stash（阶段 2 ③）：主检出脏 ⇒ stash 一次（常驻循环起跑前），⛔ 不 discard。非 git no-op。
   const stash = stashIfDirty(rootDir);
@@ -1400,6 +1412,13 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   const running: RunningWorker[] = [];
   const results: WorkerRunResult[] = [];
   let stopReason: string | null = null;
+
+  // 重试上限（gap-worker-driver-retry-cap-not-wired）：worker 派发的任务可无限次 exited-not-landed 重派
+  // ⇒ 补 retryExhausted 集合填充（同 promotion 的 RetryState 形态，单一真相源 = driver-filters.ts 的
+  // advanceRetryCap / markNeedsHuman）。每 worker 结束若 exited-not-landed ⇒ 连续失败计数 + 达上限标
+  // needs-human（ready→needs-human），needsHuman 集合同进 retryCapNotExhausted / notNeedsHuman 过滤 ⇒
+  // 不再无限重派。跨轮存活于常驻循环内（⛔ 不落盘，与 promotion 的 RetryState 同寿命）。
+  const retryState: RetryState = { counts: new Map(), needsHuman: new Set() };
 
   // gap-worker-driver-cold-start-inflight-refresh：冷启动在飞排除集【每趟 pass 现观测】（SPEC §5.2
   // actual=observe()），不再是循环外一次性 const 快照——原 gap-worker-driver-cold-start-inflight-blind
@@ -1466,6 +1485,15 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     }).then((r) => {
       rw.done = true;
       results.push(r);
+      // 重试上限（gap-worker-driver-retry-cap-not-wired）：worker 结束若 exited-not-landed ⇒ 连续失败
+      // 计数 + 达上限标 needs-human（ready→needs-human）。needsHuman 集合进 retryCapNotExhausted 过滤 ⇒
+      // 下一轮不再重派（与 markNeedsHuman 的 status 翻转双保险——即使磁盘写失败，内存过滤也挡重派）。
+      if (r.outcome.final_state === "exited-not-landed") {
+        const newly = advanceRetryCap(retryState, [r.taskId], maxRetries);
+        for (const id of newly) {
+          markNeedsHuman(rootDir, id, `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`);
+        }
+      }
       return r;
     });
     running.push(rw);
@@ -1538,7 +1566,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // touchesDisjoint / retryCapNotExhausted / notNeedsHuman，⛔ 不各写一遍）。冷启动在飞 task 一并参与
       // （它们的 Touches 是真实冲突面）。原「active 过滤 + filterTouchesDisjoint + depsReadyForDispatch」
       // 三个散点已收进 applyTaskFilters 一次判完。
-      const candidates = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks() }));
+      // 重试上限（gap-worker-driver-retry-cap-not-wired）：retryExhausted = 本循环已标 needs-human 的
+      // 任务集合（exited-not-landed 达上限派生）——retryCapNotExhausted 谓词据此滤掉不再重派。
+      const candidates = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks(), retryExhausted: retryState.needsHuman }));
       if (candidates.length === 0) {
         // 真池空（ready 减在飞后无候选）⇒ 瞬时 WAIT：记 pool-empty，下一轮重读（⛔ 不再 latch）。
         //   池非空但全与在飞 Touches/deps 重叠 ⇒ 同为瞬时 WAIT：不设 stopReason（在飞 worker 结束释放
@@ -1607,6 +1637,7 @@ export async function main(argv: string[]): Promise<number> {
   let timeoutRaw: string | undefined;
   let intervalRaw: string | undefined;
   let reconcileRaw: string | undefined;
+  let maxRetriesRaw: string | undefined;
   let pidFile: string | undefined;
   let outcomePath: string | undefined;
   let runId: string | undefined;
@@ -1630,6 +1661,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--timeout") timeoutRaw = args[++i];
     else if (a === "--interval") intervalRaw = args[++i];
     else if (a === "--reconcile-interval") reconcileRaw = args[++i];
+    else if (a === "--max-retries") maxRetriesRaw = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
     else if (a === "--outcome") outcomePath = args[++i];
     else if (a === "--run-id") runId = args[++i];
@@ -1646,6 +1678,7 @@ export async function main(argv: string[]): Promise<number> {
           "  [--selector-cmd \"<argv>\"] [--ready-pool-cmd \"<argv>\"] [--resource-gate-cmd \"<argv>\"] [--liveness-cmd \"<argv>\"]\n" +
           "  [--interval <ms>]   无在飞 worker 且瞬时 WAIT 时的轮询间隔（缺省 30000；测试缝传小值）\n" +
           "  [--reconcile-interval <s>]  协调地板：至少每 N 秒协调一次，边沿事件全丢也降级「慢但正确」而非静默停摆（缺省 300；0 = 无地板）\n" +
+          "  [--max-retries <n>]  重试上限：同一任务连续 N 次 exited-not-landed 未落地 ⇒ 标 needs-human 并停止重派（缺省 3，同 promotion --max-fix-retries）\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -1672,6 +1705,7 @@ export async function main(argv: string[]): Promise<number> {
   const timeoutMs = parseTimeoutMs(timeoutRaw);
   const intervalMs = parseIntervalMs(intervalRaw);
   const reconcileMs = parseReconcileIntervalSecs(reconcileRaw);
+  const maxRetries = parseMaxRetries(maxRetriesRaw);
 
   // 阶段 4（AC129）：无 --task ⇒ 常驻选择环（不再报错退出）。--task 显式批量派发路径不变。
   if (tasks.length === 0) {
@@ -1692,6 +1726,7 @@ export async function main(argv: string[]): Promise<number> {
       livenessCmd: livenessCmd ? splitArgs(livenessCmd) : null,
       intervalMs,
       reconcileMs,
+      maxRetries,
     });
   }
 

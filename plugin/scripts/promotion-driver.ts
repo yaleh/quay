@@ -73,7 +73,7 @@ export { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./
 import { resourceGateCheck, isHalted, PROMOTION_CONTROL_STATE_REL } from "./driver-shared.ts";
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。promotion 的 fix pass 经
 // applyTaskFilters 消费 retryCapNotExhausted / notNeedsHuman（⛔ 不各写一遍 retryState.needsHuman 判定）。
-import { applyTaskFilters, makeFilterContext } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, type RetryState } from "./driver-filters.ts";
 // AC153：核心不变式单一实现（「⛔ 不信执行者自述，用独立量复核」）。AC133 重闸验证（computeReverifyOutcome）
 // 消费它——worker 的 computeLandingState 与本文件的重闸判定共用同一份三态映射（⛔ 不各写一遍）。
 import { verifyIndependently } from "./driver-result.ts";
@@ -96,8 +96,9 @@ export const INTERVAL_MS_DEFAULT = 30_000;
 export const CAP_DEFAULT = 5;
 
 /** AC133 失败上限缺省：同一任务连续修 N 次仍不合格 ⇒ 标 needs-human。与 fan-in 侧 attempt>=3 同值
- *  （gap-fan-in-relaunch-retry-cap），非新设数值阈值——仅作「未传 --max-fix-retries」的手动/测试回退。 */
-export const MAX_FIX_RETRIES_DEFAULT = 3;
+ *  （gap-fan-in-relaunch-retry-cap），非新设数值阈值——仅作「未传 --max-fix-retries」的手动/测试回退。
+ *  单一真相源 = driver-filters.ts 的 RETRY_CAP_DEFAULT（worker-driver 同值共享，⛔ 不各写一遍 3）。 */
+export const MAX_FIX_RETRIES_DEFAULT = RETRY_CAP_DEFAULT;
 
 /** ready-pool-check 单轮的 wall-clock 上限（spawnSync timeout，毫秒）。 */
 export const ROUND_TIMEOUT_MS = 180_000;
@@ -283,8 +284,8 @@ export function buildFixWorkerPrompt(id: string, missing: string[]): string {
   ].join("\n");
 }
 
-/** fix worker argv = `quay-launch.sh fix-worker -p <prompt>`（短命，launcher/model/--bare 由
- *  `.quay/profiles.yml` 的 profiles/roles 承载——AC140-2 可配，单一构造 launchArgv）。--fix-worker-cmd 覆盖
+/** fix worker argv = launchArgv("fix-worker", <prompt>)（短命，launcher/model/--bare 由
+ *  `.quay/profiles.yml` 的 profiles/roles 承载——AC140-2 可配，单一构造 launchArgv 经 L2 policy 解析）。--fix-worker-cmd 覆盖
  *  可执行【前缀】时把 prompt 作为末参数追加（测试缝捕获真实 prompt，AC2 取假实测——prompt 是数据、
  *  不是可执行串）。 */
 export function buildFixWorkerArgv(id: string, missing: string[], root: string, fixWorkerCmd?: string | null): string[] {
@@ -534,52 +535,11 @@ export function computeReverifyOutcome(fixedIds: string[], reRound: PromotionRou
   return { nowEligibleIds, stillIneligibleIds, notEvaluatedIds: [] };
 }
 
-/** AC133 失败上限的跨轮状态。counts = 每任务连续修仍不合格的累计次数；needsHuman = 已标 needs-human
- *  （后续轮不再对其 spawn fix worker）。跨轮存活于常驻循环内（⛔ 不落盘——运行时状态，与进程同寿命）。 */
-export interface RetryState {
-  counts: Map<string, number>;
-  needsHuman: Set<string>;
-}
-
-/** 推进失败上限：对每个仍不合格的 id 累计连续失败次数，达到 maxRetries 的进入 newlyNeedsHuman
- *  （去重——已标过的不重复返回）。原地更新传入 state，纯逻辑可单测（AC133 AC3）。 */
-export function advanceRetryCap(
-  state: RetryState,
-  stillIneligibleIds: string[],
-  maxRetries: number,
-): string[] {
-  const newly: string[] = [];
-  for (const id of stillIneligibleIds) {
-    const n = (state.counts.get(id) ?? 0) + 1;
-    state.counts.set(id, n);
-    if (n >= maxRetries && !state.needsHuman.has(id)) {
-      state.needsHuman.add(id);
-      newly.push(id);
-    }
-  }
-  return newly;
-}
-
-/** AC133 AC3：把连续修满上限仍不合格的任务标 needs-human（status todo → needs-human）+ 追加一条
- *  `## Needs-Human` 审计记录（grep-able 原因，⛔ 静默翻转）。只在 status=todo 时写（并发保护，同
- *  ready-pool-check 的 setTaskStatus）。返回 { id, ok, reason }——ok=false 表示未写（missing/无
- *  frontmatter/非 todo）。 */
-export function markNeedsHuman(root: string, id: string, reason: string): { id: string; ok: boolean; reason: string } {
-  const file = path.join(root, "tasks", `${id}.md`);
-  if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
-  const raw = fs.readFileSync(file, "utf8");
-  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
-  if (!m) return { id, ok: false, reason: "no-frontmatter" };
-  const [, open, fm, close] = m;
-  if (!/^status:\s*todo\s*$/m.test(fm)) return { id, ok: false, reason: "not-todo" };
-  const newFm = fm.replace(/^status:\s*todo\s*$/m, "status: needs-human");
-  const body = raw.slice(m[0].length);
-  const record =
-    `\n## Needs-Human\n\n**执行 ${new Date().toISOString()} — promotion-driver AC133：连续修满上限仍不合格**\n\n` +
-    `- 阻碍原因：${reason}\n`;
-  fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
-  return { id, ok: true, reason };
-}
+// AC133 失败上限（RetryState / advanceRetryCap / markNeedsHuman）已上收 driver-filters.ts（单一真相源
+// —— worker-driver 也从 exited-not-landed 计数派生同一个 retryExhausted 集合，⛔ 不各写一遍计数/翻转）。
+// re-export 保持旧 import 面（promotion-driver.test.mjs 等经同一函数身份 import）。
+export { advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT } from "./driver-filters.ts";
+export type { RetryState } from "./driver-filters.ts";
 
 /** 把一条 round 记录追加写入文件（pure append，⛔ 不截断不覆盖）。 */
 export function appendRoundRecord(file: string, record: ReturnType<typeof computeRoundRecord>): string {
