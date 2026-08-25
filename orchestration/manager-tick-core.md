@@ -34,8 +34,11 @@
 
 ## B. 每轮必产出
 
-- **B1 tick 第一步 = `Workflow({scriptPath:'.claude/workflows/manager-tick-core.js', args:{prior:<本轮读数差异 + 台账最近 12 条 `id｜condition` 的紧凑已入账清单>}})`,再照它返回的 (src:1263 "manager-tick-readings.js")
+- **B1 tick 第一步 = `Workflow({scriptPath:'.claude/workflows/manager-tick-core.js', args:{prior:<本轮读数差异 + 台账最近 12 条 `id｜condition` 的紧凑已入账清单>, managerSessionId:<我当轮真 session id,现读不查——见本行下方>}})`,再照它返回的 (src:1263 "manager-tick-readings.js")
   `指令.第一/二/三/四步` 做**——**判准活在磁盘上、跨 clear/compact 稳定,不是「我记得应用」**;自带 meta-cc 自审段。
+  **⊢ `managerSessionId` 必传,来源是本轮系统提示里的 scratchpad 路径段(`/tmp/claude-.../<session-id>/scratchpad`)——不查、不猜、不用 `claude agents --json` 按 name 找**
+  (2026-08-25 12:19Z 实证:该 name 查找回退路径 `name=='quay-manager'` 命中 0——本会话当轮注册名已是 `quay-64`,与脚本硬编码的 `quay-manager`/历史上漂过一次的 `quay-a8` 均不同,
+  audit 步骤整轮 NOT-EVALUATED;`.claude/workflows/manager-tick-core.js` 第 77 行早已备好 `A.managerSessionId` 优先路径,缺的只是主循环这一步**没传**——非脚本缺陷,是调用方漏传)。
   **⊢ 手写判词不被接受** · **⊢ 缺读数按「缺值=未查」判不可判,不得写 `no-action`** · 活跃集 `AC20-AC34`,主判据 `AC28` · **调查型工作走后台 subagent**(人量化门槛 5-8 分钟)。
   **B1b 已退役**(2026-08-14 03:2xZ,人裁定恢复 B1)—— 退役说明与撤销理由、以及「我停调它 33 小时还重造了个更粗的替身」的经过 → 档案 §B1b-retired / §为什么要 workflow-subagent (src:1708 "B1b 退役")
 - **B2 四元组 → 2026-08-13 23:0xZ 拆为三段(与 A12 同形:合一条款把【在场】伪装成【缺席】)** (src:1000 "危害不止记错时刻")
