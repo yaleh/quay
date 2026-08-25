@@ -1,7 +1,7 @@
 ---
 id: gap-worker-cleanup-judgment-precision
 title: 清理判据精确化：清理前 git log 判有无产出 + failed 按信号区分（SIGTERM vs 自崩）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -21,8 +21,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，git log 判产出）：清理前查 `git log develop..task/<id>`，零提交 ⇒ 清、有提交 ⇒ 保留（⛔ 纯终态名判断、不看提交 ⇒ 假）。
-- [ ] AC2（能取假，信号区分）：`failed` 中 exit_code=143(SIGTERM) 有提交者保留（⛔ SIGTERM 有提交仍被清 ⇒ 假）。
+- [x] AC1（能取假，git log 判产出）：清理前查 `git log develop..task/<id>`，零提交 ⇒ 清、有提交 ⇒ 保留（⛔ 纯终态名判断、不看提交 ⇒ 假）。
+- [x] AC2（能取假，信号区分）：`failed` 中 exit_code=143(SIGTERM) 有提交者保留（⛔ SIGTERM 有提交仍被清 ⇒ 假）。
 
 ## Definition of Done
 
