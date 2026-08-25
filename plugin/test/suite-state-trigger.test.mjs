@@ -156,6 +156,10 @@ test("AC1 — the outer tick doc wires SUITE-RED => immediately start RED handli
   assert.ok(outer.includes("不等下一次 cron") || outer.includes("不等 cron"), "RED handling starts on state-change, not the cron window");
   assert.ok(outer.includes("红窗分诊"), "doc routes SUITE-RED to the existing red-window triage");
   assert.ok(outer.includes("stop-dispatch 信号"), "doc names the stop-dispatch signal (state=red)");
+  // gap-retire-outer-monitors-after-reconciler — the Monitor mount is retired (driver reconcile takes
+  // over); the doc keeps the mechanism as 理由档案 and names the retirement.
+  assert.ok(outer.includes("gap-retire-outer-monitors-after-reconciler"), "doc names the Monitor-mount retirement task");
+  assert.ok(outer.includes("共享库"), "doc notes the script is retained as a shared library (full-suite-runner import)");
 });
 
 test("AC1 unit — detectSuiteEvent is a pure transition detector", () => {
