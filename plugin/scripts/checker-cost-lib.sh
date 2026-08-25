@@ -18,6 +18,14 @@
 #   CHECKER_COST_N     — override the recorded n (default 1; ready-pool-check self-records real n).
 #   CHECKER_COST_LOAD_OVERRIDE — record this load instead of reading /proc/loadavg (AC2 fixture).
 
+# ── NOT-EVALUATED third state (gap-not-evaluated-harness-third-state) ────────────────────────────────
+# A criterion that CANNOT evaluate its input must not be conflated with either a PASS (exit 0) or a
+# RED (fail-closed) — hard rule 3b ("读不懂输入时不得返回与合格同形的值"). The checker convention is
+# exit 3 = NOT-EVALUATED (exit 0 = PASS, 1 = RED, 2 = usage/env error). run_checker recognizes exit 3
+# as a THIRD state: it is NOT fail-closed (never aborts the suite, never emits STATIC_CHECK_FAILED) and
+# NOT a plain pass (surfaced as `STATIC_CHECK_NOT_EVALUATED: <name>`, counted separately).
+RUN_CHECKER_EXIT_NOT_EVALUATED=3
+
 # ── timestamp helpers (nanosecond where available, seconds fallback) ───────────────────────────────
 _checker_cost_now_ns() {
   date +%s%N 2>/dev/null || date +%s
@@ -83,6 +91,7 @@ _run_par_results_file=""
 _run_par_launched=0
 _run_par_max=0
 _run_par_failures=()
+_run_par_not_evaluated=()
 _run_par_first_rc=0
 
 _run_par_done_count() {
@@ -122,7 +131,21 @@ run_checker() {
     ) &
     return 0
   fi
-  _run_checker_one "$_name" "$@"
+  # Synchronous (scoped tier / doc checks). NOT-EVALUATED (exit 3) must not abort the suite under
+  # `set -e`: surface it on stderr (counted separately, never conflated with a pass) and return 0 —
+  # a RED (1) or usage error (2) still propagates as before. The `if` form keeps the `$?` capture off
+  # a pipe-bearing line (instrument-failure-check FAMILY-3 flags a `$?` read after a pipe character).
+  local _rc=0
+  if _run_checker_one "$_name" "$@"; then
+    _rc=0
+  else
+    _rc=$?
+  fi
+  if [ "$_rc" -eq "$RUN_CHECKER_EXIT_NOT_EVALUATED" ]; then
+    echo "STATIC_CHECK_NOT_EVALUATED: ${_name}" >&2
+    return 0
+  fi
+  return "$_rc"
 }
 
 # Wait for all launched checkers, report any failures, fail closed (AC3). Every exit is recorded
@@ -144,11 +167,20 @@ run_checker_parallel_wait() {
   local _name _rc _fail=0 _ret=0
   if [ -n "$_run_par_results_file" ] && [ -f "$_run_par_results_file" ]; then
     while IFS='|' read -r _name _rc; do
-      if [ -n "$_rc" ] && [ "$_rc" -ne 0 ]; then
-        _fail=1
-        [ "$_run_par_first_rc" -eq 0 ] && _run_par_first_rc="$_rc"
-        _run_par_failures+=("${_name}|${_rc}")
+      if [ -z "$_rc" ] || [ "$_rc" -eq 0 ]; then
+        continue
       fi
+      if [ "$_rc" -eq "$RUN_CHECKER_EXIT_NOT_EVALUATED" ]; then
+        # NOT-EVALUATED (exit 3) — a THIRD state, neither RED nor PASS (gap-not-evaluated-harness-
+        # third-state). Counted separately: surfaced as a distinct stderr line (never
+        # STATIC_CHECK_FAILED, never a plain pass), never fail-closed.
+        echo "STATIC_CHECK_NOT_EVALUATED: ${_name}" >&2
+        _run_par_not_evaluated+=("${_name}")
+        continue
+      fi
+      _fail=1
+      [ "$_run_par_first_rc" -eq 0 ] && _run_par_first_rc="$_rc"
+      _run_par_failures+=("${_name}|${_rc}")
     done < "$_run_par_results_file"
     rm -f "$_run_par_results_file"
     _run_par_results_file=""
@@ -169,13 +201,18 @@ run_checker_parallel_wait() {
       fi
     done
     _run_par_failures=()
+    _run_par_not_evaluated=()
     _run_par_first_rc=0
     _run_par_launched=0
     RUN_CHECKER_PARALLEL=0
     echo "$_msg" >&2
     return "$_ret"
   fi
+  if [ "${#_run_par_not_evaluated[@]}" -gt 0 ]; then
+    echo "checker-cost-lib: ${#_run_par_not_evaluated[@]} checker(s) NOT-EVALUATED (third state, not a failure): ${_run_par_not_evaluated[*]}" >&2
+  fi
   _run_par_failures=()
+  _run_par_not_evaluated=()
   _run_par_first_rc=0
   _run_par_launched=0
   RUN_CHECKER_PARALLEL=0

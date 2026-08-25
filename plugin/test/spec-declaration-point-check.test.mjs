@@ -7,14 +7,15 @@
 // NOT hardcoded): the declaration-point set is derived by searching plugin/skills/** for files
 // referencing `orchestration/SPEC-` — a THIRD declaration point is picked up automatically, and a
 // SPEC missing from it goes RED. Hard rule 3b: zero SPECs / zero declaration points ⇒ NOT-EVALUATED
-// (exit 2), never conflated with green.
+// (exit 3, the unified third-state exit code, gap-not-evaluated-harness-third-state), never conflated
+// with green.
 //
 // This file pins:
 //   (a) the pure logic (listSpecBasenames / findDeclarationPoints / checkSpecDeclarations);
 //   (b) the REAL repo is GREEN (every on-disk SPEC declared at each real declaration point);
 //   (c) the NEGATIVE CONTROL — a temp repo missing one declaration ⇒ exit 1;
 //   (d) AC2 — a third declaration point is derived, not hardcoded;
-//   (e) NOT-EVALUATED — zero declaration points ⇒ exit 2.
+//   (e) NOT-EVALUATED — zero declaration points ⇒ exit 3.
 //
 // Run:
 //   scripts/test.sh plugin/test/spec-declaration-point-check.test.mjs
@@ -157,20 +158,20 @@ test("AC2 — a THIRD declaration point is auto-detected; a SPEC missing from it
 
 // ── NOT-EVALUATED (hard rule 3b) ──────────────────────────────────────────────────────────────────────
 
-test("zero declaration points ⇒ NOT-EVALUATED (exit 2), never conflated with green", () => {
+test("zero declaration points ⇒ NOT-EVALUATED (exit 3), never conflated with green", () => {
   const dir = buildFixture("ne", ["SPEC-alpha.md"], {});
   const r = runCli(dir);
-  assert.equal(r.status, 2, `no declaration points must be NOT-EVALUATED, not green:\n${r.stdout}\n${r.stderr}`);
+  assert.equal(r.status, 3, `no declaration points must be NOT-EVALUATED, not green:\n${r.stdout}\n${r.stderr}`);
   const res = JSON.parse(r.stdout);
   assert.equal(res.evaluated, false);
   assert.ok(res.notEvaluatedReason, "NOT-EVALUATED must carry a reason");
 });
 
-test("zero on-disk SPECs ⇒ NOT-EVALUATED (exit 2)", () => {
+test("zero on-disk SPECs ⇒ NOT-EVALUATED (exit 3)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spc-ne2-"));
   after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.mkdirSync(path.join(dir, "plugin", "skills", "a"), { recursive: true });
   fs.writeFileSync(path.join(dir, "plugin", "skills", "a", "SKILL.md"), "- `orchestration/SPEC-x.md`\n");
   const r = runCli(dir);
-  assert.equal(r.status, 2, `no SPECs must be NOT-EVALUATED, not green:\n${r.stdout}\n${r.stderr}`);
+  assert.equal(r.status, 3, `no SPECs must be NOT-EVALUATED, not green:\n${r.stdout}\n${r.stderr}`);
 });
