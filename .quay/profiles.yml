@@ -11,6 +11,15 @@
 #   mergeEnv 保留（manager 靠它取消 917k 三件套）。
 version: 1
 
+# ── flag-only 启动参数（对全部 role 生效；AC154 随 _launchSpec 一起移出 launch.settings.json）──
+# 原 _launchSpec.excludeDynamicSystemPromptSections / _launchSpec.promptSuggestions 迁入——launch.settings.json
+# 只留 Claude Code 认识的键（$schema/permissions/env），这些 flag-only 参数由 quay-launch.sh 翻译成 CLI 参数。
+excludeDynamicSystemPromptSections: true
+promptSuggestions: false
+# deferredToPpMigration（原 _launchSpec 文档元数据，无代码消费，此处 YAML 注释保留语义）：待 -p 迁移决定后
+# 追加的 flag —— --replay-user-messages（send-keys-reliable.sh 原生版本）/ --max-budget-usd（对冲 -p 只认
+# API key 的计费风险）/ --forward-subagent-text（减少手工读 subagent jsonl）。
+
 profiles:
   # 三个 worker role（task-worker / selector / fix-worker）+ outer / inner 共享的 recipe。
   worker-default:

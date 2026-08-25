@@ -24,6 +24,10 @@ export interface InitResult {
   launchSettingsPath: string;
   /** The full generated launch.settings.json content (for dry-run printing). */
   launchSettingsContent: string;
+  /** Absolute path to the .quay/profiles.yml scaffold. */
+  profilesPath: string;
+  /** The full generated .quay/profiles.yml content (for dry-run printing). */
+  profilesContent: string;
 }
 
 /**
@@ -287,18 +291,16 @@ export function detectProvider(): string {
  * gap-quay-init-launch-settings-template-missing-permissions-and-exclude-dynamic:
  * the scaffold previously laid down NO launch.settings.json at all — consumers
  * hand-copied it, and the copy was missing the `permissions.defaultMode:
- * "bypassPermissions"` block and `_launchSpec.excludeDynamicSystemPromptSections:
- * true` (measured F1/F2 on ad-arm1 archguard: inner cold-start hit a permission
- * prompt on its own loop scripts, monitor-mount-check.sh). This template matches
- * the quay-local checked-in `.claude/launch.settings.json` structure:
- *   - `permissions.defaultMode: "bypassPermissions"` — the two-layer loop's own
- *     scripts run without interactive prompts (ADR-016 remotely-drivable).
- *   - `_launchSpec.excludeDynamicSystemPromptSections: true` — outer/inner share
- *     a stable system prompt across per-task worktree cwds (prompt-cache reuse).
- *   - `_launchSpec.promptSuggestions: false` + the env-var disable — ghost
- *     suggestions off at the source.
- * Roles default to the generic `claude` launcher / null model; a consumer edits
- * them to their stack (quay itself uses claude-deepseek + deepseek-v4-flash).
+ * "bypassPermissions"` block (measured F1/F2 on ad-arm1 archguard: inner
+ * cold-start hit a permission prompt on its own loop scripts,
+ * monitor-mount-check.sh).
+ *
+ * AC154 (profile 抽层): `_launchSpec` is GONE — launch.settings.json now carries
+ * ONLY Claude Code keys ($schema/permissions/env). The profile/roles (launcher/
+ * model/--bare/-n/unset) + flag-only params live in the sibling `.quay/profiles.yml`
+ * scaffold (generateProfilesContent). Roles default to the generic `claude` launcher
+ * / null model; a consumer edits them to their stack (quay itself uses
+ * claude-fjdac + deepseek-v4-pro).
  */
 export function generateLaunchSettingsContent(): string {
   return (
@@ -307,21 +309,60 @@ export function generateLaunchSettingsContent(): string {
         $schema: "https://json.schemastore.org/claude-code-settings.json",
         permissions: { defaultMode: "bypassPermissions" },
         env: { CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false" },
-        _launchSpec: {
-          version: 1,
-          excludeDynamicSystemPromptSections: true,
-          promptSuggestions: false,
-          roles: {
-            manager: { name: "quay-manager", launcher: "claude", model: null, env: {} },
-            outer: { name: "quay-outer", launcher: "claude", model: null, env: {} },
-            inner: { name: "quay-inner", launcher: "claude", model: null, env: {} },
-          },
-        },
       },
       null,
       2,
     ) + "\n"
   );
+}
+
+/**
+ * Generate the `.quay/profiles.yml` content laid down by `quay init` (AC154).
+ *
+ * The profile carrier for the launcher (plugin/scripts/quay-launch.sh reads it via
+ * python3+yaml). Generic default: launcher=claude / model=null — a consumer edits
+ * them to their stack. Kept structurally identical to the checked-in dev-tree
+ * `.quay/profiles.yml` (worker-default / manager-local profiles + 3 roles), only
+ * differing in launcher/model values (dev-tree uses claude-fjdac + deepseek-v4-pro).
+ */
+export function generateProfilesContent(): string {
+  return [
+    "# .quay/profiles.yml — Claude Code profile 承载（quay init 默认模板，AC154 profile 抽层）。",
+    "# launcher/model/--bare/-n/unset + flag-only 参数在此；launch.settings.json 只留 Claude Code 键。",
+    "# 通用默认 launcher=claude / model=null —— 消费者按自己的栈编辑。",
+    "version: 1",
+    "",
+    "excludeDynamicSystemPromptSections: true",
+    "promptSuggestions: false",
+    "",
+    "profiles:",
+    "  worker-default:",
+    "    launcher: claude",
+    "    model: null",
+    "    bare: false",
+    "    auth: key",
+    "  manager-local:",
+    "    launcher: claude",
+    "    model: null",
+    "    bare: false",
+    "    auth: key",
+    "    unset:",
+    "      - CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+    "      - CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+    "      - CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+    "",
+    "roles:",
+    "  manager:",
+    "    profile: manager-local",
+    "    name: quay-manager",
+    "  outer:",
+    "    profile: worker-default",
+    "    name: quay-outer",
+    "  inner:",
+    "    profile: worker-default",
+    "    name: quay-inner",
+    "",
+  ].join("\n");
 }
 
 /**
@@ -337,6 +378,8 @@ export function runInit(opts: InitOptions): InitResult {
   const tasksDir = path.join(root, "tasks");
   const launchSettingsPath = path.join(root, ".claude", "launch.settings.json");
   const launchSettingsContent = generateLaunchSettingsContent();
+  const profilesPath = path.join(quayDir, "profiles.yml");
+  const profilesContent = generateProfilesContent();
 
   // Check if config already exists.
   const configExists = fs.existsSync(configPath);
@@ -349,6 +392,8 @@ export function runInit(opts: InitOptions): InitResult {
       content: "",
       launchSettingsPath,
       launchSettingsContent: "",
+      profilesPath,
+      profilesContent: "",
     };
     return result;
   }
@@ -366,7 +411,7 @@ export function runInit(opts: InitOptions): InitResult {
   const content = generateConfigContent({ providerId, providerPath, isNode, isGo });
 
   if (opts.dryRun) {
-    return { outcome: "dry-run", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent };
+    return { outcome: "dry-run", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent };
   }
 
   // Write config.
@@ -378,17 +423,24 @@ export function runInit(opts: InitOptions): InitResult {
     fs.mkdirSync(tasksDir, { recursive: true });
   }
 
-  // Lay down .claude/launch.settings.json (with bypassPermissions +
-  // excludeDynamicSystemPromptSections) so a cold-start inner does not hit a
-  // permission prompt on its own loop scripts. Create-if-absent on a fresh
-  // init; --force overwrites a stale copy. Never silently overwrite a user's
-  // launch settings on a plain re-init (that path returns "skipped" anyway).
+  // Lay down .claude/launch.settings.json (with bypassPermissions) so a cold-start
+  // inner does not hit a permission prompt on its own loop scripts. Create-if-absent
+  // on a fresh init; --force overwrites a stale copy. Never silently overwrite a
+  // user's launch settings on a plain re-init (that path returns "skipped" anyway).
   if (opts.force || !fs.existsSync(launchSettingsPath)) {
     fs.mkdirSync(path.dirname(launchSettingsPath), { recursive: true });
     fs.writeFileSync(launchSettingsPath, launchSettingsContent, "utf8");
   }
 
-  return { outcome: "written", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent };
+  // Lay down .quay/profiles.yml (the profile carrier, AC154) so quay-launch.sh can
+  // resolve launcher/model/--bare/-n/unset + flag-only params. Same create-if-absent /
+  // --force semantics as launch.settings.json.
+  if (opts.force || !fs.existsSync(profilesPath)) {
+    fs.mkdirSync(path.dirname(profilesPath), { recursive: true });
+    fs.writeFileSync(profilesPath, profilesContent, "utf8");
+  }
+
+  return { outcome: "written", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent };
 }
 
 /**
