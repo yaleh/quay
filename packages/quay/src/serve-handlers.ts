@@ -20,7 +20,7 @@ import { handleBoard } from "./serve-board.ts";
 import { handleGitHistory } from "./serve-git.ts";
 import { handleSystem, handleManager } from "./serve-system.ts";
 import { handleTests, handleTestsFile } from "./serve-tests.ts";
-import { handleSessions, handleSession, handleSessionDownload } from "./serve-sessions.ts";
+import { handleSessions, handleSession, handleSessionDownload, handleDriverLifecycle, handleNewSession, handleResumeSession } from "./serve-sessions.ts";
 import { handleArchitecture } from "./serve-architecture.ts";
 import { handleDashboard } from "./serve-dashboard.ts";
 
@@ -50,6 +50,28 @@ export async function handleAllRoutes(
   cfg: { workspaceRoot: string },
 ): Promise<void> {
   const url = new URL(req.url as string, `http://${req.headers.host}`);
+
+  // gap-webui-session-lifecycle: the three lifecycle POST routes (headless driver start/stop/restart,
+  // new -p session, --resume restart). Dispatched on METHOD, before the GET matchers below (a GET on
+  // these paths falls through to the /sessions page or 404). Interactive manager/outer/inner
+  // stop/restart is deliberately NOT routed (AC3).
+  if (req.method === "POST") {
+    if (url.pathname === "/sessions/driver") {
+      await handleDriverLifecycle(req, res, cfg);
+      return;
+    }
+    if (url.pathname === "/sessions/new") {
+      await handleNewSession(req, res, cfg);
+      return;
+    }
+    if (url.pathname === "/sessions/resume") {
+      await handleResumeSession(req, res, cfg);
+      return;
+    }
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("not found");
+    return;
+  }
 
   // gap-webui-root-should-show-dashboard: `/` is the design's landing page → dashboard.
   // AC95 had kept `/` wired to the legacy task list; the design (state.page: 'dashboard' default,
