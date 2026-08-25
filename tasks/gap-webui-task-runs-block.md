@@ -2,7 +2,7 @@
 id: gap-webui-task-runs-block
 title: web /task/<id> Runs 区块（补 cfg 参数 + parseWorkerOutcomeRecords 字段取满，复用
   transcript-access）
-status: ready
+status: done
 labels:
   - gap
   - feature
