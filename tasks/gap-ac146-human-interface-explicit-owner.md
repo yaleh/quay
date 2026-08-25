@@ -1,7 +1,7 @@
 ---
 id: gap-ac146-human-interface-explicit-owner
 title: AC146 人机接口必须有【显式承接者】——needs-human 产生后人不读 transcript 就能从一个界面看到
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -22,8 +22,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，显式承接者）：一条 needs-human 产生后，人从不读 transcript 的界面（web/文件/通知）看到它；（⛔ 只能翻 transcript 或靠 manager 转述 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：造一条 needs-human（`.quay/promotion-outcome.jsonl` 已有 3 条现成样本），该界面须显示它；（⛔ 不显示 ⇒ 假）。
+- [x] AC1（能取假，显式承接者）：一条 needs-human 产生后，人从不读 transcript 的界面（web/文件/通知）看到它；（⛔ 只能翻 transcript 或靠 manager 转述 ⇒ 假）。
+- [x] AC2（能取假，负控制）：造一条 needs-human（`.quay/promotion-outcome.jsonl` 已有 3 条现成样本），该界面须显示它；（⛔ 不显示 ⇒ 假）。
 
 ## Definition of Done
 
@@ -31,5 +31,9 @@ needs-human 显式承接界面落地；AC1/AC2 全勾；现有 3 条 needs-human
 
 ## Touches
 
-- packages/quay/src/ 或 plugin/scripts/（needs-human 承接界面 / 文件 / 通知）
-- tasks/gap-ac146-human-interface-explicit-owner.md（自身）
+- packages/quay/src/serve-needs-human.ts
+- packages/quay/src/serve-handlers.ts
+- packages/quay/src/serve-render.ts
+- packages/quay/src/observation.ts
+- packages/quay/test/serve-needs-human.test.mjs
+- tasks/gap-ac146-human-interface-explicit-owner.md
