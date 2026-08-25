@@ -74,6 +74,9 @@ import {
 } from "./driver-shared.ts";
 // Layer 1b · schedule（routine-scheduler 判定函数，⛔ 不新造定时器）。
 import { isDue } from "./routine-scheduler.ts";
+// Layer 0 · profile → L2 policy（gap-driver-binding-semantic-kind-to-profile：launchArgv 经 policy 解析
+// 语义 kind → profile，⛔ 不各自解析 profiles.yml / 不硬编码 launcher/model）。
+import { loadProfiles, resolveRole, type ProfilesConfig } from "./profile-policy.ts";
 
 // ── Layer 0 · ResultVocab / controlPlane（re-export，单一真相源）────────────────────────────────────
 // 三种 driver 全部经本文件消费这些词表/控制面；⛔ 不得在 kind 里另写一份。
@@ -406,17 +409,59 @@ export function notifyManager(opts: {
 }
 
 // ── Layer 0 · profile（launchArgv，AC140 单一构造点：LLM 调用配置解析）──────────────────────────────
-// 驱动 LLM spawn 的 argv 构造：走 `quay-launch.sh <role> -p <prompt>`。launcher / model / --bare / -n
-// 全部由 `.quay/profiles.yml` 的 profiles/roles 承载（⛔ 不在驱动里硬编码 claude/wrapper/model）。
+// 驱动 LLM spawn 的 argv 构造：调用点只说【语义 kind】（role ∈ task-worker | selector | fix-worker），
+// 由 L2 policy（profile-policy.ts loadProfiles + resolveRole）解析成 L1 profile（launcher / model /
+// --bare / -n / env），再在此【单一构造点】出 argv（L3 gap-driver-binding-semantic-kind-to-profile）。
+// ⛔ 不再 `bash quay-launch.sh <role> -p <prompt>`——那会把 kind→profile 解析交给 bash 里的第二份实现
+// （python3+jq，且不套 L2 的主备回退/加载校验/继承去重）。quay-launch.sh 保留给非驱动路径
+// （manager/outer/inner 长驻会话，经 manager-start.sh / session-bootstrap.sh 直接调用）。
 
 /** 空格分隔 argv 切分（⛔ 无 shell 元字符 / 引号；用于覆盖命令与默认 claude -p）。 */
 export function splitArgs(cmd: string): string[] {
   return cmd.trim().split(/\s+/).filter(Boolean);
 }
 
-/** LLM 调用配置解析单一构造点（role ∈ task-worker | selector | fix-worker）。 */
+/** settings 文件选取：`<root>/.claude/launch.settings.json`（dev-tree 优先）→ `<root>/plugin/.claude/
+ *  launch.settings.json`（出厂 fallback，同 quay-launch.sh 的手法）。两处都不存在 ⇒ 抛错（fail-closed）。 */
+function pickSettingsFile(root: string): string {
+  const devTree = path.join(root, ".claude", "launch.settings.json");
+  if (fs.existsSync(devTree)) return devTree;
+  const shipped = path.join(root, "plugin", ".claude", "launch.settings.json");
+  if (fs.existsSync(shipped)) return shipped;
+  throw new Error(`launch settings file not found (checked ${devTree} and ${shipped})`);
+}
+
+/** 拼 `--settings` 参数：把 profile.unset（取消继承，删除 settings env 键）+ resolved 的 env（profile.env
+ *  + role.env）合并到 settings 文件 env 之上。无 unset 且无 env ⇒ 直接用文件路径（可读、逐字可查）；
+ *  否则合并成 JSON 字符串传给 --settings（--settings 接受 file-or-json，复刻 quay-launch.sh 语义）。 */
+function launchSettingsArg(root: string, config: ProfilesConfig, kind: string, resolvedEnv: Record<string, string>): string {
+  const settingsFile = pickSettingsFile(root);
+  const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
+  const roleSpec = config.roles?.[kind];
+  const profileSpec = roleSpec ? config.profiles?.[roleSpec.profile] : undefined;
+  const unset = profileSpec?.unset ?? [];
+  const env: Record<string, string> = { ...(settings.env ?? {}) };
+  for (const k of unset) delete env[k];
+  Object.assign(env, resolvedEnv);
+  const needsJson = unset.length > 0 || Object.keys(resolvedEnv).length > 0;
+  return needsJson ? JSON.stringify({ ...settings, env }) : settingsFile;
+}
+
+/** LLM 调用配置解析单一构造点（role ∈ task-worker | selector | fix-worker）。经 L2 policy 解析
+ *  语义 kind → profile，再出 argv。profile 缺失 / 非法 ⇒ loadProfiles 抛错（fail-closed，⛔ 不静默）。 */
 export function launchArgv(role: string, prompt: string, root: string): string[] {
-  return ["bash", path.join(root, "plugin", "scripts", "quay-launch.sh"), role, "-p", prompt];
+  const config = loadProfiles(root); // L2：读 + 校验 profiles.yml（加载校验 AC2）
+  const resolved = resolveRole(config, role); // L2：kind → profile（主备回退 / 继承去重）
+  if (!resolved.launcher || !resolved.name) {
+    throw new Error(`role "${role}" resolves an empty launcher/name — check .quay/profiles.yml`);
+  }
+  const argv = [resolved.launcher, "--settings", launchSettingsArg(root, config, role, resolved.env)];
+  if (config.excludeDynamicSystemPromptSections === true) argv.push("--exclude-dynamic-system-prompt-sections");
+  if (config.promptSuggestions === false) argv.push("--prompt-suggestions", "false");
+  if (resolved.model) argv.push("--model", resolved.model);
+  if (resolved.bare) argv.push("--bare");
+  argv.push("-n", resolved.name, "-p", prompt);
+  return argv;
 }
 
 // ── Layer 0 · 异步 spawn 原语（runAsync，SPEC §5.7：循环体用 spawnSync 会冻住协调地板）──────────────
