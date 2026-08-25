@@ -1,7 +1,7 @@
 ---
 id: gap-orphan-staging-dirs-pollute-walkcorpus
 title: 孤儿 plugin-staging-* 目录污染 walkCorpus 扫描（staging 测试被 kill 残留，致 loop-shipping.test.mjs 假红）
-status: ready
+status: done
 labels:
   - gap
   - defect
