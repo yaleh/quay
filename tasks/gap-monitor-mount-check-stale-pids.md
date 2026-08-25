@@ -1,7 +1,8 @@
 ---
 id: gap-monitor-mount-check-stale-pids
-title: monitor-mount-check.sh 报死 pid——扫描后输出前无存活复验，pids 可含已死 pid 而 mounted/targetOk 仍 true（manager 15:2xZ 报）
-status: done
+title: monitor-mount-check.sh 报死 pid——扫描后输出前无存活复验，pids 可含已死 pid 而
+  mounted/targetOk 仍 true（manager 15:2xZ 报）
+status: ready
 labels:
   - gap
   - mechanism
@@ -11,6 +12,7 @@ extra:
   schema: execution
 depends_on: []
 ---
+> **RETREATED / 搁置（done 但 AC1-4 全未勾 + 生产复现原症状：manager 实测 monitor-mount-check --json 报 pids=[122043,474265] stale_pids=[]（机件自称两 pid 都活），手动 ps -p 复核 474265 已死——stale_pids 漏报死 pid，正是 AC1 要防的「静默剔除」。重开重做 + 重勾 AC。）**
 
 **type:** execution
 

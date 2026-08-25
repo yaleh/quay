@@ -50,6 +50,16 @@ export function readSuiteLoadSamples(root: string, runId: string): SuiteLoadSamp
 }
 
 /**
+ * Clip suite-load samples to an inclusive [startMs, endMs] window (epoch ms) — the SHARED time-window
+ * filter used by BOTH the /tests round page and /tests/file (gap-tests-round-load-curve-time-window-
+ * clip AC2). A page must not show samples outside the window it declares; each caller passes its own
+ * [start, end] (the round's declared window, or the file's perFile start/end) and this drops the rest.
+ */
+export function clipSuiteLoadSamplesToWindow(samples: SuiteLoadSample[], startMs: number, endMs: number): SuiteLoadSample[] {
+  return samples.filter((s) => s.t >= startMs && s.t <= endMs);
+}
+
+/**
  * The current `.quay/full-suite-state.json` run identity (runId + startedAt + state) — the load
  * curve's data source. Absent/unparseable file ⇒ all-null (never throw). `runId` maps back to a
  * verification-round record's `round`/`startedAt` (gap-web-tests-three-sections-round-drift AC1).
@@ -159,6 +169,20 @@ function roundLabel(r: TestRunRecord | null | undefined): string {
   const t = shortUtcTime(r.startedAt);
   if (t) parts.push(t);
   return parts.join(" · ");
+}
+
+/**
+ * A round's declared [startedAt, startedAt+durationMs] window as epoch ms — the bounds the load curve
+ * must clip to (gap-tests-round-load-curve-time-window-clip). null when the window is uncomputable
+ * (legacy/incomplete row: no startedAt or no durationMs) — the page then keeps the samples UNCLIPPED
+ * rather than fabricate a window it can't know (and rather than drop a still-running run's curve).
+ */
+function roundTimeWindowMs(r: TestRunRecord | null | undefined): { start: number; end: number } | null {
+  if (!r) return null;
+  if (typeof r.startedAt !== "string" || typeof r.durationMs !== "number") return null;
+  const start = Date.parse(r.startedAt);
+  if (!Number.isFinite(start)) return null;
+  return { start, end: start + r.durationMs };
 }
 
 /**
@@ -407,9 +431,25 @@ export async function handleTests(
   const roundParam = url.searchParams.get("round");
   const roundNum = roundParam != null && /^\d+$/.test(roundParam.trim()) ? Number(roundParam.trim()) : null;
   const selected = roundNum != null ? tests.runs.find((r) => r.round === roundNum) ?? null : null;
-  const samples = selected
-    ? selected.runId ? readSuiteLoadSamples(cfg.workspaceRoot, selected.runId) : []
-    : current.runId ? readSuiteLoadSamples(cfg.workspaceRoot, current.runId) : [];
+  // gap-tests-round-load-curve-time-window-clip — clip the load curve to the focused round's declared
+  // [startedAt, startedAt+durationMs] window (the SAME helper as /tests/file). An uncomputable window
+  // (legacy row without durationMs; still-running current run with no round record) keeps the samples
+  // unclipped rather than fabricate a window or drop the curve.
+  const samples = ((): SuiteLoadSample[] => {
+    if (selected) {
+      if (!selected.runId) return [];
+      const raw = readSuiteLoadSamples(cfg.workspaceRoot, selected.runId);
+      const w = roundTimeWindowMs(selected);
+      return w ? clipSuiteLoadSamplesToWindow(raw, w.start, w.end) : raw;
+    }
+    if (current.runId) {
+      const currentRun = tests.runs.find((r) => r.runId === current.runId) ?? null;
+      const raw = readSuiteLoadSamples(cfg.workspaceRoot, current.runId);
+      const w = roundTimeWindowMs(currentRun);
+      return w ? clipSuiteLoadSamplesToWindow(raw, w.start, w.end) : raw;
+    }
+    return [];
+  })();
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderTestsPage(tests, samples, current, selected, roundNum));
 }
@@ -543,7 +583,7 @@ function fileLoadFragment(
     const start = entry.startedAtMs;
     const end = entry.endedAtMs;
     if (typeof start !== "number" || typeof end !== "number") continue;
-    const samples = readSuiteLoadSamples(root, r.runId).filter((s) => s.t >= start && s.t <= end);
+    const samples = clipSuiteLoadSamplesToWindow(readSuiteLoadSamples(root, r.runId), start, end);
     return { samples, label: roundLabel(r) };
   }
   return null;

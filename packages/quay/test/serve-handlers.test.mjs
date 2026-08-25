@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript } from "../src/serve-handlers.ts";
+import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript } from "../src/serve-handlers.ts";
 import { readGitHistory } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
@@ -609,9 +609,14 @@ function seedDriftFixture(ws) {
     JSON.stringify({ round: 479, startedAt: "2026-08-23T03:33:00.000Z", durationMs: 645000, state: "red", runner: "outer", scope: "worktree", runId: runIdLatest, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 0, fail: 1, cancelled: 0, tests: 2, failures: [] }),
   ].join("\n"));
   fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "red", runId: runIdLatest, startedAt: "2026-08-23T03:33:00.000Z" }));
+  // gap-tests-round-load-curve-time-window-clip — samples must land INSIDE round 479's declared
+  // [03:33:00Z, 03:33:00Z+645s] window: the round page now clips the load curve to that window, so
+  // out-of-window samples (the old `Date.now()` values, ~2 days later) would be dropped and the
+  // AC1/AC3 load-curve heading assertions would break.
+  const start479 = Date.parse("2026-08-23T03:33:00.000Z");
   fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runIdLatest}.jsonl`), [
-    JSON.stringify({ t: Date.now(), loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
-    JSON.stringify({ t: Date.now() + 5000, loadavg: 4.5, cpu_stall: 40.0, mem_avail: 7500.0 }),
+    JSON.stringify({ t: start479 + 1000, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
+    JSON.stringify({ t: start479 + 5000, loadavg: 4.5, cpu_stall: 40.0, mem_avail: 7500.0 }),
   ].join("\n"));
   return { runIdLatest, runIdOlder };
 }
@@ -687,7 +692,7 @@ test("AC3: negative control — all three sections reference the same round cons
     ].join("\n"));
     fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId, startedAt: "2026-08-23T01:00:00.000Z" }));
     fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
-      JSON.stringify({ t: Date.now(), loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
+      JSON.stringify({ t: Date.parse("2026-08-23T01:00:00.000Z") + 1000, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
     ].join("\n"));
     createStore(tasksDir).write("RD-AC3", { title: "round consistency web tests", status: "todo" });
 
@@ -929,13 +934,18 @@ test("AC1: GET /tests?round=N shows THAT round's timeline + load curve (not the 
     // full-suite-state.json points at the LATEST runId (default page = round 511); round 510's own
     // runId has its own sampler file, so ?round=510 must read THAT, not the current runId.
     fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId: runId511 }));
+    // gap-tests-round-load-curve-time-window-clip — samples land INSIDE their round's declared window
+    // (round 510 = [01:00Z, 01:00Z+500s], round 511 = [02:00Z, 02:00Z+400s]); the round page now clips
+    // to that window, so the old 2023-dated samples would be dropped and the heading assertions break.
+    const start510 = Date.parse("2026-08-23T01:00:00.000Z");
+    const start511 = Date.parse("2026-08-23T02:00:00.000Z");
     fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId510}.jsonl`), [
-      JSON.stringify({ t: 1_700_000_000_000, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
-      JSON.stringify({ t: 1_700_000_005_000, loadavg: 2.5, cpu_stall: 12.0, mem_avail: 7900.0 }),
+      JSON.stringify({ t: start510 + 1000, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
+      JSON.stringify({ t: start510 + 5000, loadavg: 2.5, cpu_stall: 12.0, mem_avail: 7900.0 }),
     ].join("\n"));
     fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId511}.jsonl`), [
-      JSON.stringify({ t: 1_700_000_000_000, loadavg: 7.0, cpu_stall: 50.0, mem_avail: 5000.0 }),
-      JSON.stringify({ t: 1_700_000_005_000, loadavg: 8.0, cpu_stall: 55.0, mem_avail: 4800.0 }),
+      JSON.stringify({ t: start511 + 1000, loadavg: 7.0, cpu_stall: 50.0, mem_avail: 5000.0 }),
+      JSON.stringify({ t: start511 + 5000, loadavg: 8.0, cpu_stall: 55.0, mem_avail: 4800.0 }),
     ].join("\n"));
 
     const port = await freePort();
@@ -1014,6 +1024,111 @@ test("AC1 falsifiability: /tests?round=<absent> renders an explicit not-found no
     const r = await get(port, "/tests?round=999");
     assert.equal(r.status, 200, "GET /tests?round=999 returns 200");
     assert.ok(r.body.includes("未找到 round #999"), "an absent round renders an explicit not-found note (hard rule 3b: not a silent latest)");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-tests-round-load-curve-time-window-clip — the round page clips the load curve to the round's
+// declared [startedAt, startedAt+durationMs] window (the /tests/file page already clipped). AC2 =
+// both pages reuse the SAME shared filter (clipSuiteLoadSamplesToWindow). ──────────────────────────
+
+test("clipSuiteLoadSamplesToWindow keeps samples inside [start, end] inclusive and drops everything outside (the shared time-window filter)", () => {
+  const samples = [
+    { t: 90, loadavg: 1.0, cpu_stall: null, mem_avail: null },
+    { t: 100, loadavg: 2.0, cpu_stall: null, mem_avail: null },
+    { t: 150, loadavg: 3.0, cpu_stall: null, mem_avail: null },
+    { t: 200, loadavg: 4.0, cpu_stall: null, mem_avail: null },
+    { t: 210, loadavg: 5.0, cpu_stall: null, mem_avail: null },
+  ];
+  const clipped = clipSuiteLoadSamplesToWindow(samples, 100, 200);
+  assert.deepEqual(clipped.map((s) => s.t), [100, 150, 200], "inclusive bounds keep 100..200, drop 90 and 210");
+  assert.equal(clipSuiteLoadSamplesToWindow(samples, 0, 50).length, 0, "a window before all samples clips to empty");
+  assert.equal(clipSuiteLoadSamplesToWindow(samples, 300, 400).length, 0, "a window after all samples clips to empty");
+});
+
+test("AC1: GET /tests?round=N clips the load curve to [startedAt, startedAt+durationMs], dropping out-of-window samples", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-roundclip-ac1-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const start = Date.parse("2026-08-23T01:00:00.000Z");
+    const durationMs = 437500; // the proposal's real round #560 duration
+    const runId = "fm-roundclip-560-eeeeee";
+    createStore(tasksDir).write("RC-A1", { title: "round clip web tests", status: "todo" });
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 560, startedAt: "2026-08-23T01:00:00.000Z", durationMs, state: "green", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [] }),
+    ].join("\n"));
+    // Four samples: two inside [start, start+durationMs], one before it, one after it — clipping must
+    // keep exactly the two in-window samples (the bug showed all four spanning 1552.6s vs 437.5s).
+    fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
+      JSON.stringify({ t: start - 100_000, loadavg: 9.0, cpu_stall: null, mem_avail: null }), // before window
+      JSON.stringify({ t: start + 100_000, loadavg: 1.5, cpu_stall: null, mem_avail: null }), // inside
+      JSON.stringify({ t: start + 200_000, loadavg: 2.5, cpu_stall: null, mem_avail: null }), // inside
+      JSON.stringify({ t: start + durationMs + 100_000, loadavg: 9.5, cpu_stall: null, mem_avail: null }), // after window
+    ].join("\n"));
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests?round=560");
+    assert.equal(r.status, 200, "GET /tests?round=560 returns 200");
+    assert.ok(r.body.includes("负载曲线（round #560 · 01:00Z）"), "the load curve heading names round 560");
+    // Exactly the two in-window samples are plotted (one <circle class="git-svg-commit"> per sample).
+    const points = (r.body.match(/class="git-svg-commit"/g) ?? []).length;
+    assert.equal(points, 2, `two in-window samples plotted, the two out-of-window dropped (got ${points})`);
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2: /tests/file and /tests?round=N both clip through the SAME shared filter (each to its own window)", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-roundclip-ac2-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const t0 = Date.parse("2026-08-23T01:00:00.000Z"); // the round's own startedAt (2026, in-window)
+    const runId = "fm-roundclip-file-ffffff";
+    createStore(tasksDir).write("RC-A2", { title: "round clip shared filter tests", status: "todo" });
+    // One round whose perFile slow.test.mjs spans [t0+290, t0+500]; the round's own window is
+    // [t0, t0+500000]. Samples: two inside BOTH windows, one only inside the round window but AFTER the
+    // file window, one after both — the two pages clip to DIFFERENT windows via the same filter.
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 570, startedAt: "2026-08-23T01:00:00.000Z", durationMs: 500000, state: "green", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 500, startedAtMs: t0 + 290 }] }),
+    ].join("\n"));
+    fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
+      JSON.stringify({ t: t0 + 300, loadavg: 1.0, cpu_stall: null, mem_avail: null }), // file window AND round window
+      JSON.stringify({ t: t0 + 400, loadavg: 2.0, cpu_stall: null, mem_avail: null }), // file window AND round window
+      JSON.stringify({ t: t0 + 60_000, loadavg: 3.0, cpu_stall: null, mem_avail: null }), // round window, AFTER file window
+      JSON.stringify({ t: t0 + 600_000, loadavg: 4.0, cpu_stall: null, mem_avail: null }), // after both windows
+    ].join("\n"));
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    // The FILE page clips to the file's [startedAtMs, endedAtMs] = [t0+290, t0+500] → keeps 2 samples.
+    const filePage = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs");
+    const filePoints = (filePage.body.match(/class="git-svg-commit"/g) ?? []).length;
+    assert.equal(filePoints, 2, `file page clips to the file window (keeps 2, got ${filePoints})`);
+
+    // The ROUND page clips to [startedAt, startedAt+durationMs] = [t0, t0+500000] → keeps 3 samples.
+    const roundPage = await get(port, "/tests?round=570");
+    const roundPoints = (roundPage.body.match(/class="git-svg-commit"/g) ?? []).length;
+    assert.equal(roundPoints, 3, `round page clips to the round window (keeps 3, got ${roundPoints})`);
   } finally {
     if (server) {
       server.close();
