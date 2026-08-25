@@ -90,7 +90,7 @@
 |---|---|---|---|---|
 | 1 | **机件与运行时** | `plugin/scripts/quay-init.sh`、`sync-vendor.sh`、`verify-installed-executables.sh` | —（自足） | referenced-set ⊆ landed-set（verify_referenced_landed）+ 已铺可执行文件逐字节（verify-installed-executables）；vendor 运行时由 sync-vendor.sh 构建、quay-init 铺入目标 |
 | 2 | **循环文档** | `plugin/loop/fast-mode-loop-tick.md`（inner）、`plugin/loop/orchestrator-loop-tick.md`（outer） | `gap-productize-the-manager-layer` | outer+inner 两层 tick 文档随包，铺入 `docs/analysis/` + `orchestration/`；manager 层缺 → 归属该任务 |
-| 3 | **启动配置** | `.claude/launch.settings.json`、`plugin/scripts/quay-launch.sh` | `gap-crystallize-launch-config-into-checked-in-settings-file` | 启动命令/模型/上下文环境变量/TUI 环境变量结晶进检查进仓库的 settings 文件；quay-launch.sh 读取并生成启动命令，不再靠手打一行 shell |
+| 3 | **启动配置** | `.claude/launch.settings.json`（只留 Claude Code 键）、`.quay/profiles.yml`（profile 承载，AC154）、`plugin/scripts/quay-launch.sh` | `gap-crystallize-launch-config-into-checked-in-settings-file` | profile/roles + flag-only 参数结晶进 `.quay/profiles.yml`；launch.settings.json 只留 $schema/permissions/env；quay-launch.sh 读取并生成启动命令，不再靠手打一行 shell |
 | 4 | **会话拓扑** | `plugin/scripts/quay-topology.sh`、`topology-check.sh`、`plugin/skills/session-topology/SKILL.md` | `gap-tmux-session-topology-no-factory-definition` | 三窗口（outer/inner/manager）拓扑出厂定义：每层起什么命令、谁驱动谁（topology-check 钉住） |
 | 5 | **周期锚点（已排除，非交付物）** | （空——人裁定 2026-08-06：os-anchor-install.sh / os-anchor-watchdog.sh 是开发阶段工具，不进交付物 build，仅供人工显式使用） | `gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash` | 恒 covered（deliverables 留空，vacuous）；机制文件仍在仓库，但不随 quay-init 铺设、不作为交付判据 |
 | 6 | **观测与校验** | `plugin/scripts/verify-delivery-surface.ts`（L1）、`plugin/skills/cold-start/SKILL.md`（AC8c 六键） | `gap-quality-criteria-are-point-in-time-no-trend-criteria`（L2） | L1 六类完整性检查（本条）+ AC8c 六键（启动瞬间）+ L2 趋势判据（§3 其余三类补进 trend-criteria 任务，AC3） |
@@ -131,10 +131,11 @@
       "label": "启动配置",
       "deliverables": [
         ".claude/launch.settings.json",
+        ".quay/profiles.yml",
         "plugin/scripts/quay-launch.sh"
       ],
       "attribution": ["gap-crystallize-launch-config-into-checked-in-settings-file"],
-      "criterion": "启动命令/模型/上下文环境变量/TUI 环境变量结晶进检查进仓库的 .claude/launch.settings.json；quay-launch.sh 读取并生成启动命令（不再靠手打一行 shell）"
+      "criterion": "launch.settings.json 只留 Claude Code 认识的键（$schema/permissions/env）；profile/roles（launcher/model/--bare/-n/unset）+ flag-only 参数结晶进 .quay/profiles.yml（AC154 profile 抽层）；quay-launch.sh 读取并生成启动命令（不再靠手打一行 shell）"
     },
     {
       "id": 4,
@@ -190,7 +191,7 @@
 |---|---|---|---|---|
 | 1 | **机件与运行时** | `plugin/scripts/`、`plugin/vendor/`（自包含运行时），`quay-init` 派生铺设已修好 | `gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down`（origin of verify-referenced-landed） | 机件 + 运行时在交付物里（目录存在）；`quay-init --loop` 的 referenced⊆landed 机械校验（verify_referenced_landed） |
 | 2 | **循环文档** | 两层 tick doc（`plugin/loop/fast-mode-loop-tick.md`、`orchestrator-loop-tick.md`）+ **manager 层**（`plugin/skills/manager/SKILL.md`） | `gap-productize-the-manager-layer`（done） | 两层 + manager 层文档在交付物里；目标落地后 tick doc 铺到 `orchestration/` 与 `docs/analysis/` |
-| 3 | **启动配置** | `.claude/launch.settings.json`（检查进仓库）+ `plugin/scripts/quay-launch.sh`（launcher） | `gap-crystallize-launch-config-into-checked-in-settings-file`（done） | settings 文件 + launcher 在交付物里；启动命令从文件物化，非手打一行 shell |
+| 3 | **启动配置** | `.claude/launch.settings.json`（检查进仓库）+ `.quay/profiles.yml`（profile 承载）+ `plugin/scripts/quay-launch.sh`（launcher） | `gap-crystallize-launch-config-into-checked-in-settings-file`（done） | settings + profiles + launcher 在交付物里；启动命令从 profiles 物化，非手打一行 shell |
 | 4 | **会话拓扑** | `plugin/skills/session-topology/SKILL.md`（出厂定义）+ `plugin/scripts/quay-topology.sh`（工厂）+ `topology-check.sh`（在位校验） | `gap-tmux-session-topology-no-factory-definition`（done） | 拓扑定义 + 工厂 + 校验脚本在交付物里；冷启动按定义建窗口，不靠手工拼 |
 | 5 | **周期锚点（已排除，非交付物，人裁定 2026-08-06）** | `plugin/scripts/os-anchor-install.sh`（systemd user timer）+ `os-anchor-watchdog.sh`（看门狗）——机制存在、曾是"OS 级锚点为真实落点"（AC5 修正，2026-08-05），但**人已裁定改为开发阶段工具，不进交付物 build**，`quay-init.sh` 从不调用；systemd timer 本机已停用（2026-08-06 事故：absence-inference 复活了刚被人为下线的 archguard） | `gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash`（done，归属类目已改标排除）+ `gap-reanchor-must-converge-inner-self-reported-vocabulary`（done） | 不再是交付判据——`verify-delivery-surface.ts` 该类目 `deliverables: []`，恒 vacuously covered |
 | 6 | **观测与校验** | 本规格活文档（`orchestration/SPEC-complete-delivery-surface-2026-08-05.md`）+ `plugin/scripts/l1-delivery-surface-check.ts`（L1 六类检查）+ `plugin/scripts/trend-check.ts`（L2 趋势判据）+ cold-start AC8c 七键（启动瞬间） | `gap-quality-criteria-are-point-in-time-no-trend-criteria`（L2 承载，done） | 规格活文档 + L1 检查 + L2 趋势判据在交付物里；`l1-delivery-surface-check.ts --surface` 报 6/6 |
@@ -233,7 +234,7 @@
 
 <!-- l1-category: 1; name: mechanisms-runtime; deliverable: plugin/scripts; deliverable: plugin/vendor; task: gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down -->
 <!-- l1-category: 2; name: loop-docs; deliverable: plugin/loop/fast-mode-loop-tick.md; deliverable: plugin/loop/orchestrator-loop-tick.md; deliverable: plugin/skills/manager/SKILL.md; task: gap-productize-the-manager-layer -->
-<!-- l1-category: 3; name: launch-config; deliverable: .claude/launch.settings.json; deliverable: plugin/scripts/quay-launch.sh; task: gap-crystallize-launch-config-into-checked-in-settings-file -->
+<!-- l1-category: 3; name: launch-config; deliverable: .claude/launch.settings.json; deliverable: .quay/profiles.yml; deliverable: plugin/scripts/quay-launch.sh; task: gap-crystallize-launch-config-into-checked-in-settings-file -->
 <!-- l1-category: 4; name: session-topology; deliverable: plugin/skills/session-topology/SKILL.md; deliverable: plugin/scripts/quay-topology.sh; deliverable: plugin/scripts/topology-check.sh; task: gap-tmux-session-topology-no-factory-definition -->
 <!-- l1-category: 5; name: periodic-anchors; deliverable: plugin/scripts/os-anchor-install.sh; deliverable: plugin/scripts/os-anchor-watchdog.sh; task: gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash -->
 <!-- l1-category: 6; name: observation-verification; deliverable: orchestration/SPEC-complete-delivery-surface-2026-08-05.md; deliverable: plugin/scripts/trend-check.ts; deliverable: plugin/scripts/l1-delivery-surface-check.ts; task: gap-quality-criteria-are-point-in-time-no-trend-criteria -->

@@ -439,49 +439,63 @@ test("gap-mcp-entry-for-provider unit: node_modules vs repo-tree discrimination"
 
 // gap-quay-init-launch-settings-template-missing-permissions-and-exclude-dynamic
 // (2026-08-11). `quay init` must lay down `.claude/launch.settings.json` with
-// `permissions.defaultMode: "bypassPermissions"` + `_launchSpec.excludeDynamicSystemPromptSections: true`
-// so a cold-start inner does NOT hit a permission prompt on its own loop scripts
-// (measured F1/F2 on ad-arm1 archguard: monitor-mount-check.sh approval box).
+// `permissions.defaultMode: "bypassPermissions"` so a cold-start inner does NOT hit a
+// permission prompt on its own loop scripts (measured F1/F2 on ad-arm1 archguard:
+// monitor-mount-check.sh approval box). AC154 (profile 抽层): the flag-only params
+// (excludeDynamicSystemPromptSections / promptSuggestions) + profiles/roles now live in the
+// SIBLING `.quay/profiles.yml` scaffold — launch.settings.json carries ONLY Claude Code keys.
 // ---------------------------------------------------------------------------
 
-test("gap-launch-settings: quay init lays down .claude/launch.settings.json with bypassPermissions + excludeDynamic", () => {
+test("gap-launch-settings: quay init lays down .claude/launch.settings.json (bypassPermissions, no _launchSpec) + .quay/profiles.yml", () => {
   const dir = tmpDir("launchsettings");
   const out = runQuay(["init"], dir);
 
   assert.ok(out.includes("launch.settings.json"), "quay init should report the launch.settings.json scaffold");
+  assert.ok(out.includes("profiles.yml"), "quay init should report the .quay/profiles.yml scaffold (AC154)");
   const settingsPath = path.join(dir, ".claude", "launch.settings.json");
   assert.ok(fs.existsSync(settingsPath), ".claude/launch.settings.json should be laid down by quay init");
-  const raw = fs.readFileSync(settingsPath, "utf8");
+  const s = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
   assert.equal(
-    JSON.parse(raw).permissions?.defaultMode,
+    s.permissions?.defaultMode,
     "bypassPermissions",
     "permissions.defaultMode must be bypassPermissions (F1 — inner must not hit permission prompt)"
   );
-  assert.equal(
-    JSON.parse(raw)._launchSpec?.excludeDynamicSystemPromptSections,
-    true,
-    "_launchSpec.excludeDynamicSystemPromptSections must be true (F2 — outer/inner prompt-cache consistency)"
-  );
+  assert.ok(!("_launchSpec" in s), "_launchSpec must be gone from launch.settings.json (AC154 profile 抽层)");
+
+  // AC154: the profile carrier is a SIBLING scaffold laid down beside launch.settings.json.
+  const profilesPath = path.join(dir, ".quay", "profiles.yml");
+  assert.ok(fs.existsSync(profilesPath), ".quay/profiles.yml should be laid down by quay init (AC154)");
+  const rawP = fs.readFileSync(profilesPath, "utf8");
+  assert.match(rawP, /excludeDynamicSystemPromptSections: true/, "profiles.yml must carry excludeDynamicSystemPromptSections: true");
+  assert.match(rawP, /promptSuggestions: false/, "profiles.yml must carry promptSuggestions: false");
+  assert.match(rawP, /quay-manager/, "profiles.yml must carry the manager role name (quay-manager)");
 });
 
-test("gap-launch-settings: quay-native init lays down the same launch.settings.json", () => {
+test("gap-launch-settings: quay-native init lays down the same launch.settings.json + profiles.yml", () => {
   const dir = tmpDir("launchsettings-native");
   const out = runNative(["init"], dir);
   assert.ok(out.includes("launch.settings.json"), "quay-native init should report the launch.settings.json scaffold");
+  assert.ok(out.includes("profiles.yml"), "quay-native init should report the .quay/profiles.yml scaffold");
 
   const settingsPath = path.join(dir, ".claude", "launch.settings.json");
   assert.ok(fs.existsSync(settingsPath), "quay-native init should lay down .claude/launch.settings.json");
   const s = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
   assert.equal(s.permissions?.defaultMode, "bypassPermissions");
-  assert.equal(s._launchSpec?.excludeDynamicSystemPromptSections, true);
+  assert.ok(!("_launchSpec" in s), "_launchSpec must be gone from launch.settings.json (AC154)");
+
+  const profilesPath = path.join(dir, ".quay", "profiles.yml");
+  assert.ok(fs.existsSync(profilesPath), "quay-native init should lay down .quay/profiles.yml");
+  assert.match(fs.readFileSync(profilesPath, "utf8"), /excludeDynamicSystemPromptSections: true/);
 });
 
 test("gap-launch-settings: quay init --dry-run does NOT write launch.settings.json", () => {
   const dir = tmpDir("launchsettings-dryrun");
   const out = runQuay(["init", "--dry-run"], dir);
   assert.ok(out.includes("launch.settings.json"), "dry-run should preview the launch.settings.json path");
+  assert.ok(out.includes("profiles.yml"), "dry-run should preview the profiles.yml path");
   assert.ok(!fs.existsSync(path.join(dir, ".claude")), "dry-run must NOT write .claude/ dir");
   assert.ok(!fs.existsSync(path.join(dir, ".quay", "config.yml")), "dry-run must NOT write config");
+  assert.ok(!fs.existsSync(path.join(dir, ".quay", "profiles.yml")), "dry-run must NOT write profiles.yml");
 });
 
 test("gap-launch-settings: quay init --force overwrites a stale launch.settings.json (consumer fix path)", () => {
@@ -490,7 +504,7 @@ test("gap-launch-settings: quay init --force overwrites a stale launch.settings.
   const settingsPath = path.join(dir, ".claude", "launch.settings.json");
 
   // Simulate the consumer's stale/broken copy (F1/F2: no bypassPermissions,
-  // excludeDynamicSystemPromptSections false).
+  // still carrying the pre-AC154 _launchSpec).
   const staleRaw = JSON.stringify(
     { $schema: "https://json.schemastore.org/claude-code-settings.json", _launchSpec: { excludeDynamicSystemPromptSections: false } },
     null,
@@ -502,6 +516,6 @@ test("gap-launch-settings: quay init --force overwrites a stale launch.settings.
   const afterRaw = fs.readFileSync(settingsPath, "utf8");
   const second = JSON.parse(afterRaw);
   assert.equal(second.permissions?.defaultMode, "bypassPermissions", "--force must restore bypassPermissions");
-  assert.equal(second._launchSpec?.excludeDynamicSystemPromptSections, true, "--force must restore excludeDynamic");
+  assert.ok(!("_launchSpec" in second), "--force must strip the stale _launchSpec (AC154)");
   assert.notEqual(afterRaw, staleRaw, "stale file must be overwritten on --force");
 });

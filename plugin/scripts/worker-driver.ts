@@ -175,8 +175,8 @@ export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
 /** checkout 前 stash 的缺省 message（`git stash list` 可核的标记，AC2）。 */
 export const DEFAULT_STASH_MESSAGE = "worker-driver: stash before checkout (SPEC §5 阶段 2)";
 
-/** 存活 worker 进程的 `-n` 名（quay-launch.sh 由 .claude/launch.settings.json 的
- *  `_launchSpec.roles["task-worker"].name` 承载；AC140-2 测试钉死 name 以 quay- 开头）。
+/** 存活 worker 进程的 `-n` 名（quay-launch.sh 由 .quay/profiles.yml 的
+ *  `roles["task-worker"].name` 承载；AC140-2 测试钉死 name 以 quay- 开头）。
  *  冷启动在飞枚举用它识别存活 worker 进程的 cmdline（/proc/<pid>/cmdline）。
  *  AC150-3：控制态常量（CONTROL_STATE_REL/CONTROL_CALLERS_ENV/DEFAULT_CALLERS/CONTROL_HEADER/
  *  CONTROL_HEADER_NAME）已随控制面抽到 driver-shared.ts 并在本文件 re-export；本常量是 worker
@@ -717,8 +717,8 @@ export function splitArgs(cmd: string): string[] {
 
 /**
  * 单一真相源（AC140-1）：驱动 LLM spawn 的 argv 构造——走 `quay-launch.sh <role> -p <prompt>`。
- * launcher / model / --bare / -n 全部由 `.claude/launch.settings.json` 的 `_launchSpec.roles[<role>]`
- * 承载（⛔ 不在驱动里硬编码 claude/wrapper/model，四处分立的 `["claude","-p",…]` 全部归到这一处）。
+ * launcher / model / --bare / -n 全部由 `.quay/profiles.yml` 的 `profiles`/`roles` 承载
+ * （⛔ 不在驱动里硬编码 claude/wrapper/model，四处分立的 `["claude","-p",…]` 全部归到这一处）。
  * role ∈ task-worker | selector | fix-worker。wrapper 的贡献全在 env（claude-fjdac 末行 `exec claude`），
  * 故本 argv 只看得见 `bash` + `quay-launch.sh`——AC2 取假须读 spawn 出的 worker 进程 env（ANTHROPIC_BASE_URL）。
  */
@@ -768,7 +768,7 @@ export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOpt
 }
 
 /** 缺省 worker 命令：quay-launch.sh task-worker -p <full-chain prompt>（argv 形，child 即 worker，超时
- *  SIGTERM 杀得准）。launcher/model/--bare 由 `_launchSpec.roles["task-worker"]` 承载（AC140-2 可配）。
+ *  SIGTERM 杀得准）。launcher/model/--bare 由 `.quay/profiles.yml` 的 profiles/roles 承载（AC140-2 可配）。
  *  prompt 里【直接】要求 worker 以 scriptPath 调 fan-in-execute workflow——驱动直调 ⇒ A6「检查 fan-in
  *  是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
 export function defaultWorkerArgv(task: string, root: string): string[] {
@@ -1339,7 +1339,7 @@ export async function readyPoolCheck(
 
 /** 缺省 selector worker 命令（短命 LLM——SPEC §1 设计点1「选择仍应是语义的」）。prompt 内联打散后的
  *  候选 id 列表，要求输出一行 `<task-id> <一句理由>`。launcher/model/--bare 由
- *  `_launchSpec.roles["selector"]` 承载（AC140-2 可配）。 */
+ *  `.quay/profiles.yml` 的 profiles/roles 承载（AC140-2 可配）。 */
 export function defaultSelectorArgv(candidateIds: string[], root: string): string[] {
   const prompt = [
     `You are the resident task selector for the quay worker driver (SPEC §5 阶段 4 — AC129).`,
