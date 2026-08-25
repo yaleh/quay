@@ -36,6 +36,7 @@ import { spawnSync } from "node:child_process";
 
 import { buildPluginDist, rewriteInvokers } from "../../packages/quay/scripts/build-plugin-dist.mjs";
 import { diskWorktreeRoot } from "./quay-init-loop-helpers.mjs";
+import { stagingDirPrefix } from "../scripts/loop-shipping-exclusion-data.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, "..");
@@ -47,7 +48,7 @@ const repoRoot = path.resolve(pluginDir, "..");
 // must NOT reuse that shared path: two concurrent test invocations (e.g. this file's standalone run
 // racing a `scripts/test.sh --for-task` run) would clobber each other's staging. Each
 // stagePackagedPlugin() call gets a PID + counter-unique subdir, cleaned up in the after() hook.
-const STAGED_PREFIX = "plugin-staging-";
+const STAGED_PREFIX = stagingDirPrefix; // single source: loop-shipping-exclusion-data.mjs
 let _stagingCounter = 0;
 const _stagingDirs = [];
 
@@ -67,6 +68,34 @@ function makeTmp(prefix = "pkgdist-") {
   _cleanups.push(d);
   return d;
 }
+
+// gap-orphan-staging-dirs-pollute-walkcorpus: a KILLED prior run leaves packages/quay/
+// plugin-staging-<pid>-{0,1}/ orphans (the after() hook never fires on OOM/interrupt). Remove them at
+// startup — but ONLY when their embedded PID is no longer alive, so a LIVE concurrent invocation's
+// staging dir (its PID is alive) is never deleted. Best-effort hygiene; the hard guard against SCAN
+// pollution is walkCorpus's name-skip (stagingDirPrefix in loop-shipping-exclusion-data.mjs).
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return true; // unparseable → conservative: keep it
+  try {
+    process.kill(pid, 0); // signal 0 = existence probe, no signal delivered
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM'; // EPERM = exists but owned elsewhere; ESRCH = gone
+  }
+}
+function cleanOrphanStagingDirs() {
+  const container = path.join(repoRoot, 'packages', 'quay');
+  let entries;
+  try { entries = fs.readdirSync(container, { withFileTypes: true }); } catch { return; }
+  for (const ent of entries) {
+    if (!ent.isDirectory() || !ent.name.startsWith(stagingDirPrefix)) continue;
+    const rest = ent.name.slice(stagingDirPrefix.length); // e.g. "3477285-0"
+    const pid = Number.parseInt(rest.split('-')[0], 10);
+    if (pidAlive(pid)) continue;
+    try { fs.rmSync(path.join(container, ent.name), { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+}
+cleanOrphanStagingDirs();
 
 function vendorRuntimePresent() {
   return fs.existsSync(path.join(pluginDir, "vendor", "quay", "dist", "quay.js"))
@@ -170,5 +199,25 @@ test("AC3 — negative control: a dist/ghost.js reference fails the packaged ins
     assert.match(r.stderr, /dist\/ghost\.js/, "must name the missing dist bundle");
   } finally {
     try { fs.rmSync(ws, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+
+// ── orphan staging-dir cleanup (gap-orphan-staging-dirs-pollute-walkcorpus) ─────────────────────────
+test("cleanup — cleanOrphanStagingDirs removes a dead-PID orphan, keeps a live-PID staging dir", () => {
+  const container = path.join(repoRoot, "packages", "quay");
+  // A dead PID: the pid of a completed sync child (already exited + reaped when spawnSync returns).
+  const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
+  const deadOrphan = path.join(container, `${stagingDirPrefix}${deadPid}-cleanup-dead`);
+  const liveDir = path.join(container, `${stagingDirPrefix}${process.pid}-cleanup-live`);
+  fs.mkdirSync(deadOrphan, { recursive: true });
+  fs.writeFileSync(path.join(deadOrphan, "probe.md"), "orphan residue\n");
+  fs.mkdirSync(liveDir, { recursive: true });
+  try {
+    cleanOrphanStagingDirs();
+    assert.ok(!fs.existsSync(deadOrphan), "a dead-PID plugin-staging-* orphan must be removed");
+    assert.ok(fs.existsSync(liveDir), "a live-PID plugin-staging-* dir must NOT be removed (concurrent invocation)");
+  } finally {
+    fs.rmSync(deadOrphan, { recursive: true, force: true });
+    fs.rmSync(liveDir, { recursive: true, force: true });
   }
 });
