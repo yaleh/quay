@@ -122,11 +122,68 @@ export const touchesDisjoint: TaskFilter = {
   },
 };
 
-/** 候选未耗尽重试上限（AC133 失败上限）。worker 无重试上限 ⇒ ctx.retryExhausted 空 ⇒ 恒 true。 */
+/** 候选未耗尽重试上限（AC133 失败上限）。retryExhausted 集合由 advanceRetryCap 填充（worker 从
+ *  exited-not-landed 计数派生、promotion 从重验证仍不合格计数派生），两 driver 共用同一生产函数。 */
 export const retryCapNotExhausted: TaskFilter = {
   name: "retryCapNotExhausted",
   predicate: (ctx) => (id) => !ctx.retryExhausted.has(id),
 };
+
+// ── retryExhausted 集合的【生产面】（单一真相源：两 driver 共用，⛔ 不各写一遍计数/翻转逻辑）──────────
+
+/** 失败上限缺省：同一任务连续 N 次未落地/未合格 ⇒ 标 needs-human。与 fan-in 侧 attempt>=3 同值
+ *  （gap-fan-in-relaunch-retry-cap），非新设数值阈值——仅作「未传 --max-retries/--max-fix-retries」的
+ *  手动/测试回退。concurrency-default-fallback: 重试次数上限（非并发 cap——`*_CAP*` 名须声明保持诚实，
+ *  同 RED_BACKLOG_CAP_DEFAULT，declared per gap-concurrency-literal-only-at-definition-points）。 */
+export const RETRY_CAP_DEFAULT = 3;
+
+/** 失败上限的跨轮状态。counts = 每任务连续未落地/未合格的累计次数；needsHuman = 已标 needs-human
+ *  （后续轮不再对其重派/修）。跨轮存活于常驻循环内（⛔ 不落盘——运行时状态，与进程同寿命）。 */
+export interface RetryState {
+  counts: Map<string, number>;
+  needsHuman: Set<string>;
+}
+
+/** 推进失败上限：对每个仍未落地的 id 累计连续失败次数，达到 maxRetries 的进入 newlyNeedsHuman
+ *  （去重——已标过的不重复返回）。原地更新传入 state，纯逻辑可单测（AC133 AC3）。 */
+export function advanceRetryCap(
+  state: RetryState,
+  stillIneligibleIds: string[],
+  maxRetries: number,
+): string[] {
+  const newly: string[] = [];
+  for (const id of stillIneligibleIds) {
+    const n = (state.counts.get(id) ?? 0) + 1;
+    state.counts.set(id, n);
+    if (n >= maxRetries && !state.needsHuman.has(id)) {
+      state.needsHuman.add(id);
+      newly.push(id);
+    }
+  }
+  return newly;
+}
+
+/** 把修满/派满上限仍不合格的任务标 needs-human（status todo/ready → needs-human）+ 追加一条
+ *  `## Needs-Human` 审计记录（grep-able 原因，⛔ 静默翻转）。worker 派发的是 ready 任务、promotion
+ *  修的是 todo 任务 ⇒ 两者都可翻 needs-human；其它状态（needs-human/done/superseded…）拒写。
+ *  只在 status ∈ {todo, ready} 时写（并发保护，同 ready-pool-check 的 setTaskStatus）。返回
+ *  { id, ok, reason }——ok=false 表示未写（missing/无 frontmatter/非 todo·ready）。 */
+export function markNeedsHuman(root: string, id: string, reason: string): { id: string; ok: boolean; reason: string } {
+  const file = path.join(root, "tasks", `${id}.md`);
+  if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
+  const raw = fs.readFileSync(file, "utf8");
+  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
+  if (!m) return { id, ok: false, reason: "no-frontmatter" };
+  const [, open, fm, close] = m;
+  if (!/^status:\s*(todo|ready)\s*$/m.test(fm)) return { id, ok: false, reason: "not-todo" };
+  const newFm = fm.replace(/^status:\s*(todo|ready)\s*$/m, "status: needs-human");
+  const body = raw.slice(m[0].length);
+  const record =
+    `\n## Needs-Human\n\n**执行 ${new Date().toISOString()} — 连续修满重试上限仍不合格（标 needs-human）**\n\n` +
+    `- 阻碍原因：${reason}\n`;
+  fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
+  return { id, ok: true, reason };
+}
 
 /** 候选未被标 needs-human（status 非 needs-human）。读不懂 ⇒ fail-closed 滤掉（⛔ 读不懂 ≠ 合格）。 */
 export const notNeedsHuman: TaskFilter = {

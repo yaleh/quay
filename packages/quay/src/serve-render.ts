@@ -271,6 +271,20 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
    accent ramp; failed bars use the darker step (same fail-vs-pass shade language as verdict-fail). */
 .gantt-svg-bar { fill: var(--color-accent-600); }
 .gantt-svg-bar-fail { fill: var(--color-accent-800); }
+/* gap-webui-bucket-color-distinction — the Gantt timeline bars are bucket-coloured: HUE = bucket
+   (P 产品 / S 套件 / M 机件 / multi 多桶 / unresolved 未解析), SHADE = pass/fail (the fail step reuses
+   gantt-svg-bar-fail as a darker modifier of the same bucket family, so the two-class selector below
+   beats the bare .gantt-svg-bar-fail). Token-derived, zero hardcoded hex. */
+.gantt-bucket-P { fill: var(--color-accent-600); }
+.gantt-bucket-P.gantt-svg-bar-fail { fill: var(--color-accent-800); }
+.gantt-bucket-S { fill: var(--color-accent-2-500); }
+.gantt-bucket-S.gantt-svg-bar-fail { fill: var(--color-accent-2-800); }
+.gantt-bucket-M { fill: var(--color-neutral-500); }
+.gantt-bucket-M.gantt-svg-bar-fail { fill: var(--color-neutral-700); }
+.gantt-bucket-multi { fill: color-mix(in srgb, var(--color-accent-600) 45%, var(--color-accent-2-500)); }
+.gantt-bucket-multi.gantt-svg-bar-fail { fill: var(--color-neutral-800); }
+.gantt-bucket-unresolved { fill: var(--color-neutral-300); }
+.gantt-bucket-unresolved.gantt-svg-bar-fail { fill: var(--color-neutral-500); }
 /* QW-006: mobile-responsive layout (DIR-003) — narrow viewport adaptations.
    Kept at the END of the sheet so its rules win the cascade over every base rule above
    (media queries add no specificity — a later base rule would otherwise beat them). */
