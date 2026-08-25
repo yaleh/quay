@@ -1266,7 +1266,10 @@ test("AC1 — resident loop does not exit after one worker; keeps dispatching wh
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  await waitFor(() => readOutcomeLines(root).length >= 2, 5000);
+  // 5000 → 10000：两次完整派发+落地循环（ready-pool/selector/worker 各 spawn 一个 node 子进程 + landing
+  // 读 git）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时 flake、picks=1）；与同文件
+  // 「第二次派发」的既有约定（gap-b 等 10000ms）一致。
+  await waitFor(() => readOutcomeLines(root).length >= 2, 10000);
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   assert.equal(picks.length, 2, "AC1: two sequential selections — the resident loop kept going after the first");
   assert.deepEqual(picks.map((p) => p.task), ["gap-a", "gap-b"], "in-memory subtraction: second fill skipped the in-flight gap-a");
