@@ -27,9 +27,9 @@ headless 两 kind 接 `quay driver`；新建会话走 `-p` + `--session-id`；�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，driver 暴露）：headless 两 kind 经 web 可 start/stop/restart（复用 `quay driver`；⛔ 手工重造 driver 逻辑 ⇒ 假）。
-- [ ] AC2（能取假，真重启）：`--resume` 重启已结束会话且上下文保留（答出原会话首条回复原文可作证；⛔ resume 后上下文丢 ⇒ 假）。
-- [ ] AC3（能取假，交互式不暴露）：交互式 manager/outer/inner 的 web 停/重启未暴露（⛔ 暴露了交互式 kill 入口 ⇒ 假）。
+- [x] AC1（能取假，driver 暴露）：headless 两 kind 经 web 可 start/stop/restart（复用 `quay driver`；⛔ 手工重造 driver 逻辑 ⇒ 假）。
+- [x] AC2（能取假，真重启）：`--resume` 重启已结束会话且上下文保留（答出原会话首条回复原文可作证；⛔ resume 后上下文丢 ⇒ 假）。
+- [x] AC3（能取假，交互式不暴露）：交互式 manager/outer/inner 的 web 停/重启未暴露（⛔ 暴露了交互式 kill 入口 ⇒ 假）。
 
 ## Definition of Done
 
