@@ -30,6 +30,8 @@ single-flight 锁超时在同一队列上有两套值：`FULL_SUITE_LOCK_TIMEOUT
 ② 值不字面常量（依赖 suite 时长 + slot 数，硬规则 4 推论二同族），从实测 suite 上界派生，或直接不设上界靠 flock 自身 crash-autorelease（注释已确认该保证成立）；
 ③ 若保留有界等待，判据：**超时值 ≥ 近 N 轮 suite 时长 p99**，否则它守的不是活性而是制造假红。
 
+⛔ **注意 fixture 红是对的**：`plugin/test/fan-in-execute-paths.test.mjs:2199/:2206` 的 fixture 把 `600` 字面量与 fail-closed 文案写死在断言里——AC1 改成单一来源时该 fixture 会红，这是【对的】（硬规则 4 推论二检测半边：检查通过恰恰证明用了即将失效的字面量），连同判据一起更新，不要当噪声绕过。
+
 ## Acceptance Criteria
 
 - [ ] AC1（能取假，无双值）：fan-in 与其余路径读同一超时来源（⛔ 仍有 600/900 双值 ⇒ 假）。
@@ -43,5 +45,5 @@ single-flight 锁超时在同一队列上有两套值：`FULL_SUITE_LOCK_TIMEOUT
 
 - scripts/test.sh（FULL_SUITE_LOCK_TIMEOUT）
 - plugin/workflows/fan-in-execute.js（suiteLockTimeoutSecs ?? 900）
-- plugin/test/...（对应测试）
+- plugin/test/fan-in-execute-paths.test.mjs（:2142-2279 负控制 fixture，改 AC1 必碰）
 - tasks/gap-single-flight-lock-timeout-double-value.md（自身）
