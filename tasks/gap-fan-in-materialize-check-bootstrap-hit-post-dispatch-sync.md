@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-materialize-check-bootstrap-hit-post-dispatch-sync
 title: fan-in-materialize-check Case-1 对 bootstrap-hit 任务「派发后 merge-develop 同步」假阳性 RED ⇒ 阻断跨任务 fan-in
-status: todo
+status: ready
 labels:
   - gap
   - defect
