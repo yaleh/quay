@@ -512,7 +512,23 @@ export async function enumerateColdStartInflightAsync(
   return out;
 }
 
-/** orphan worktree 清理结果（可观测：removed/分支删除/错误/存活跳过）。 */
+/** exit_code=143（128+SIGTERM=15）⇒ 外部 SIGTERM 杀——wrapper/shell 把信号转成退出码上报（Node 的 close
+ *  事件 code=143、signal=null），区别于 worker 自崩（真实非零退出码）。failed 桶正是用它区分「外部杀」
+ *  （driver 重启误伤 / 外部 kill，worker 正干着活被打断）与「自崩」（worker 缺陷）。 */
+export function isSigtermExitCode(exitCode: number | null): boolean {
+  return exitCode === 128 + signalExitCode("SIGTERM");
+}
+
+/** 该 task 分支相对 develop 是否有提交（直接量、可取假）：`git log develop..task/<id>` 非空 ⇒ 有实现
+ *  产出（worker 在 worktree 里提交过）；空 ⇒ 零提交无产出。读失败（非 git 仓库 / develop 或 task/<id>
+ *  分支不存在 / git 错误）⇒ null（硬规则 3b：读不懂 ≠ 无产出，⛔ 不得当「零提交」清掉）。 */
+export function taskBranchHasCommits(root: string, taskId: string): boolean | null {
+  const r = spawnSync("git", ["-C", root, "log", `develop..task/${taskId}`, "--oneline"], { encoding: "utf8" });
+  if (r.status !== 0 || r.error) return null;
+  return String(r.stdout ?? "").trim().length > 0;
+}
+
+/** orphan worktree 清理结果（可观测：removed/分支删除/错误/存活跳过/产出判定/信号区分）。 */
 export interface OrphanCleanupResult {
   /** 找到 worktree 且 `git worktree remove --force` 全部成功。 */
   removed: boolean;
@@ -525,6 +541,14 @@ export interface OrphanCleanupResult {
   /** worktree 有存活 worker 正在用 ⇒ 跳过清理（⛔ 不是「没找到」也不是「remove 失败」——独立取值，
    *  硬规则 3b：跳过 ≠ 已清）。false = 未跳过（已清 / 无 worktree / 正常失败）。 */
   skippedLiveWorker: boolean;
+  /** 清理前 `git log develop..task/<id>` 判产出的读数（直接量）。true = 有提交、false = 零提交、
+   *  null = 读不懂。false ⇒ 可清；true ⇒ 保留；null ⇒ fail-closed 保留（读不懂 ≠ 无产出）。 */
+  hasCommits: boolean | null;
+  /** 因「有提交 ⇒ 有实现产出」而跳过清理（⛔ 与 skippedLiveWorker 区分：后者是存活 worker 在用，前者是
+   *  分支有产出）。仅 hasCommits === true 时为 true。 */
+  preservedForCommits: boolean;
+  /** failed 桶按信号区分：final_state=failed 且 exit_code=143 ⇒ 外部 SIGTERM 杀（区别于 worker 自崩）。 */
+  sigtermExternal: boolean;
 }
 
 /**
@@ -541,15 +565,42 @@ export interface OrphanCleanupResult {
  * failed 终态触发本清理，而【原 worker】仍活、仍在用同一个 worktree——此时删除会连带误删原 worker 的
  * 共享 worktree+分支。故移除前先核：worktree 有存活 worker 正在用 ⇒ 跳过（skippedLiveWorker=true，
  * ⛔ 只清真 orphan）。workerCmdlines 是测试缝（null ⇒ 读真实 /proc）。
+ *
+ * gap-worker-cleanup-judgment-precision（清理判据精确化，AC1+AC2）：清理前查 `git log develop..task/<id>`
+ * 判有无产出（直接量、可取假）——零提交 ⇒ 无产出可清；有提交 ⇒ 有实现保留（⛔ 纯终态字符串布尔判断
+ * 会误删 SIGTERM 打断时有提交的 worktree）。failed 桶按信号区分：exit_code=143（外部 SIGTERM 杀）vs
+ * 自崩，前者有提交则保留。outcome 是终态上下文（finalState/exitCode）——测试与调用方注入，null ⇒ 不
+ * 区分信号（sigtermExternal=false，仅按 git log 判产出）。
  */
-export function cleanupOrphanWorktree(root: string, taskId: string, workerCmdlines: string[] | null = null): OrphanCleanupResult {
+export function cleanupOrphanWorktree(
+  root: string,
+  taskId: string,
+  workerCmdlines: string[] | null = null,
+  outcome: { finalState?: string | null; exitCode?: number | null } | null = null,
+): OrphanCleanupResult {
   const paths = worktreePathsForTask(root, taskId);
   if (paths.length === 0) {
-    return { removed: false, worktreePath: null, branchDeleted: false, error: null, skippedLiveWorker: false };
+    return {
+      removed: false, worktreePath: null, branchDeleted: false, error: null, skippedLiveWorker: false,
+      hasCommits: null, preservedForCommits: false, sigtermExternal: false,
+    };
   }
   const live = workerCmdlines ?? enumerateLiveWorkerCmdlines();
   if (hasLiveWorkerForTask(taskId, live)) {
-    return { removed: false, worktreePath: paths[0] ?? null, branchDeleted: false, error: null, skippedLiveWorker: true };
+    return {
+      removed: false, worktreePath: paths[0] ?? null, branchDeleted: false, error: null, skippedLiveWorker: true,
+      hasCommits: null, preservedForCommits: false, sigtermExternal: false,
+    };
+  }
+  // 判产出（AC1）：零提交 ⇒ 清；有提交 ⇒ 保留；读不懂 ⇒ fail-closed 保留（⛔ 不得当「零提交」清掉）。
+  const hasCommits = taskBranchHasCommits(root, taskId);
+  const sigtermExternal = (outcome?.finalState ?? null) === "failed" && isSigtermExitCode(outcome?.exitCode ?? null);
+  if (hasCommits !== false) {
+    // hasCommits === true（有提交）⇒ 保留；=== null（读不懂）⇒ 保留但不声称「有提交」。
+    return {
+      removed: false, worktreePath: paths[0] ?? null, branchDeleted: false, error: null, skippedLiveWorker: false,
+      hasCommits, preservedForCommits: hasCommits === true, sigtermExternal,
+    };
   }
   let error: string | null = null;
   let removed = true;
@@ -565,7 +616,10 @@ export function cleanupOrphanWorktree(root: string, taskId: string, workerCmdlin
     const bd = spawnSync("git", ["-C", root, "branch", "-D", `task/${taskId}`], { encoding: "utf8" });
     branchDeleted = bd.status === 0;
   }
-  return { removed, worktreePath: paths[0] ?? null, branchDeleted, error, skippedLiveWorker: false };
+  return {
+    removed, worktreePath: paths[0] ?? null, branchDeleted, error, skippedLiveWorker: false,
+    hasCommits, preservedForCommits: false, sigtermExternal,
+  };
 }
 
 /** verified 态的证据载体：status 已读为 "done"、worktree 已确认无残留。 */
@@ -680,6 +734,31 @@ export interface WorkerCmdOptions {
   exact: string | null;
 }
 
+/** fan-in 调用签名的完整指令（gap-worker-prompt-fan-in-call-signature-placeholder）：真实绝对路径 +
+ *  runId 取法 + 正本拷贝。worktree 由调用方填（创建 prompt = 指引，续做 prompt = 实际路径）。
+ *  ⛔ 旧版只给 `scriptPath` 字面占位词 + `runId` 键名 ⇒ 每个 worker 从源码反向工程一遍（实测 12/12
+ *  session 全命中：读 fan-in-execute.js / 找 workflow 路径 / 重发现 generateRunId）。 */
+function fanInSignature(task: string, root: string, worktree: string): string {
+  const fanInScript = path.join(root, ".claude", "workflows", "fan-in-execute.js");
+  const telemetryModule = path.join(root, "plugin", "scripts", "fast-mode-telemetry.ts");
+  return [
+    `ff-merge to develop via the fan-in-execute workflow: call the Workflow tool with the script file "${fanInScript}"`,
+    `(this .claude/workflows/ copy is the landed one that runs here — use it, do NOT diff it against plugin/workflows/fan-in-execute.js, its byte-identical shipped mirror guarded by workflows-dual-copy-drift-check)`,
+    `and args={task:"${task}", worktree:"${worktree}", root:"${root}", runId, mergeTarget:"develop"}.`,
+    `runId: import { generateRunId } from "${telemetryModule}" and call generateRunId("${task}") —`,
+    `or reuse the runId this task was dispatched with, if one was passed.`,
+  ].join(" ");
+}
+
+/** dispatch-worktree-setup.sh 调用签名（gap-dispatch-worktree-setup-zero-production-callers）：每个
+ *  被派发的 worktree 创建后【必须】跑一次（node_modules symlink-or-install + config.yml 经
+ *  worktree-include.sh），机制接管 bootstrap——worker 不再手工 `ln -s`/`cp config.yml`（正是该脚本被
+ *  写出来要消灭的 AGENT-REMEMBERING 失败模式）。脚本幂等：已 provision 的 worktree 重跑是 no-op。 */
+function dispatchSetupSignature(root: string, worktree: string): string {
+  const setupScript = path.join(root, "plugin", "scripts", "dispatch-worktree-setup.sh");
+  return `bash ${setupScript} ${worktree}`;
+}
+
 /** 创建 prompt（无保留 worktree 时的 full-chain prompt，单一真相源）。续做 prompt 见
  *  buildContinueWorkerPrompt；两者由 workerPromptForTask 按「保留 worktree 在不在」择一。
  *  gap-worker-print-bg-wait-ceiling-600s (c，辅助非根修)：fan-in 在飞期间尽量留在回合内等（用
@@ -690,9 +769,11 @@ export function buildWorkerPrompt(task: string, root: string): string {
   return [
     `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2).`,
     `Task: ${task}. Repo root: ${root}.`,
-    `Run the full task chain: (1) create an isolated git worktree for ${task},`,
+    `Run the full task chain: (1) create an isolated git worktree for ${task}, then immediately`,
+    `provision it by running \`${dispatchSetupSignature(root, "<the worktree path you created in step 1>")}\``,
+    `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, (3) run the suite,`,
-    `(4) ff-merge to develop via the fan-in-execute workflow (scriptPath, args={task,worktree,root,runId,mergeTarget}).`,
+    `(4) ${fanInSignature(task, root, "<the worktree path you created in step 1>")}.`,
     `You own your worktree fully; apart from the final merge do not touch develop.`,
     `fan-in 在飞期间尽量留在回合内等（用 TaskOutput 阻塞等待其终态）——不要结束回合等完成通知：end_turn 时有存活后台任务会触发 600s 终止。`,
   ].join(" ");
@@ -899,10 +980,10 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `(it would fail: the path/branch already exists). Prior round state: branch task/${task} already has`,
     `${commits} commits${head}; Acceptance Criteria currently checked ${ac};`,
     `the last round exited-not-landed because: ${reason}.`,
+    `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch),`,
-    `(2) run the suite, (3) ff-merge to develop via the fan-in-execute workflow`,
-    `(scriptPath, args={task,worktree,root,runId,mergeTarget}; worktree=${wt}).`,
+    `(2) run the suite, (3) ${fanInSignature(task, root, wt)}.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
   ].join(" ");
 }
@@ -1198,13 +1279,18 @@ function runOneWorker({
         outcome.final_state !== "spawn-failed" &&
         outcome.final_state !== "not-dispatched" &&
         outcome.final_state !== "timed-out";
-      const cleanup = shouldCleanup ? cleanupOrphanWorktree(rootDir, taskId) : null;
+      const cleanup = shouldCleanup
+        ? cleanupOrphanWorktree(rootDir, taskId, null, { finalState: outcome.final_state, exitCode: outcome.exit_code })
+        : null;
       const finalOutcome = cleanup
         ? {
             ...outcome,
             worktree_cleaned: cleanup.removed,
             worktree_cleanup_error: cleanup.error,
             worktree_cleanup_skipped_live: cleanup.skippedLiveWorker,
+            worktree_cleanup_has_commits: cleanup.hasCommits,
+            worktree_cleanup_preserved_commits: cleanup.preservedForCommits,
+            worktree_cleanup_sigterm_external: cleanup.sigtermExternal,
           }
         : outcome.final_state === "timed-out"
           ? { ...outcome, worktree_preserved: true }

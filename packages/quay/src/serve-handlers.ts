@@ -24,6 +24,7 @@ import { handleSessions, handleSession, handleSessionDownload } from "./serve-se
 import { handleArchitecture } from "./serve-architecture.ts";
 import { handleDashboard } from "./serve-dashboard.ts";
 import { handleSend } from "./serve-send.ts";
+import { handleNeedsHuman } from "./serve-needs-human.ts";
 
 // Re-export the full public surface (shared render helpers + domain render/handler functions) so
 // serve.ts's named re-exports and existing test imports remain unchanged.
@@ -41,6 +42,7 @@ export * from "./serve-sessions.ts";
 export * from "./serve-architecture.ts";
 export * from "./serve-dashboard.ts";
 export * from "./serve-send.ts";
+export * from "./serve-needs-human.ts";
 
 // ── Facade dispatcher (M99 pattern: single entry point keeps startServer outDegree low) ──
 
@@ -166,6 +168,13 @@ export async function handleAllRoutes(
   // checker (observation.ts's readBoardLanding) so per-task agreement holds by construction.
   if (url.pathname === "/board") {
     await handleBoard(req, res, url, client, manifest, cfg);
+    return;
+  }
+
+  // gap-ac146-human-interface-explicit-owner: the explicit human owner interface for needs-human
+  // tasks — joins 当前待办 (store status) + 升级台账 (.quay/promotion-outcome.jsonl), no transcript.
+  if (url.pathname === "/needs-human") {
+    await handleNeedsHuman(req, res, client, manifest, cfg);
     return;
   }
 

@@ -93,6 +93,8 @@ import {
   continueStateForTaskAsync,
   workerPromptForTaskAsync,
   workerArgvForTaskAsync,
+  taskBranchHasCommits,
+  isSigtermExitCode,
 } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -396,6 +398,46 @@ test("AC2 (gap-worker-print-bg-wait-ceiling-600s c) — buildWorkerPrompt hints 
   assert.match(prompt, /600s 终止/, "prompt names the 600s termination risk");
 });
 
+test("gap-worker-prompt-fan-in-call-signature-placeholder — buildWorkerPrompt gives real fan-in signature (absolute path + runId 取法 + 正本拷贝), no scriptPath placeholder", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  // AC1（能取假）：真实绝对路径（⛔ 非 scriptPath 字面词）。
+  assert.match(prompt, /\/r\/\.claude\/workflows\/fan-in-execute\.js/, "AC1: real absolute path to fan-in-execute.js");
+  assert.doesNotMatch(prompt, /scriptPath/, "AC1: no bare scriptPath placeholder");
+  // AC1（能取假）：runId 取法 —— 哪个模块导出 generateRunId。
+  assert.match(prompt, /generateRunId/, "AC1: names generateRunId");
+  assert.match(prompt, /plugin\/scripts\/fast-mode-telemetry\.ts/, "AC1: names the module exporting generateRunId");
+  // AC3（能取假）：正本拷贝明确 —— .claude/workflows/ vs plugin/workflows/。
+  assert.match(prompt, /\.claude\/workflows\/ copy is the landed one that runs here/, "AC3: says .claude/workflows/ is the landed copy");
+  assert.match(prompt, /plugin\/workflows\/fan-in-execute\.js/, "AC3: names the shipped mirror to NOT diff against");
+});
+
+test("AC1 (能取假) — buildWorkerPrompt wires dispatch-worktree-setup.sh after worktree create (机制接管 bootstrap)", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  // 结构针：grep 到调用 + 位置在 worktree 创建之后。
+  assert.match(prompt, /dispatch-worktree-setup\.sh/, "AC1: create prompt names the setup script");
+  assert.match(prompt, /\/r\/plugin\/scripts\/dispatch-worktree-setup\.sh/, "AC1: setup script is the real absolute path under root");
+  const createIdx = prompt.indexOf("create an isolated git worktree");
+  const setupIdx = prompt.indexOf("dispatch-worktree-setup.sh");
+  assert.ok(createIdx !== -1, "create instruction present");
+  assert.ok(setupIdx > createIdx, "AC1: setup call is positioned AFTER worktree creation");
+});
+
+test("AC2 (能取假，负控制) — prompt no longer leaves bootstrap to agent-remembering (⛔ no hand-rolled ln -s / cp config.yml instruction)", () => {
+  const create = buildWorkerPrompt("gap-x", "/r");
+  assert.doesNotMatch(create, /ln -s/, "AC2: create prompt must not instruct a hand-rolled node_modules symlink");
+  assert.doesNotMatch(create, /cp config\.yml/, "AC2: create prompt must not instruct a hand-rolled config.yml copy");
+  const cont = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "r",
+  });
+  assert.doesNotMatch(cont, /ln -s/, "AC2: continue prompt must not instruct a hand-rolled node_modules symlink");
+  assert.doesNotMatch(cont, /cp config\.yml/, "AC2: continue prompt must not instruct a hand-rolled config.yml copy");
+});
+
 test("stashIfDirty — clean repo ⇒ no-op; non-git dir ⇒ no-op; dirty repo ⇒ stash (never discard)", () => {
   // non-git dir (the phase-1 makeRoot shape) ⇒ graceful no-op.
   const nonGit = makeRoot("nogit");
@@ -680,6 +722,7 @@ test("AC2 (能取假) — worker abnormal death (exit non-zero) ⇒ orphan workt
     fs.rmSync(wtPath, { recursive: true, force: true });
   });
   writeTaskFile(root, "gap-or", "ready"); // ready ⇒ not done ⇒ the worker did not land
+  runGit(root, ["branch", "develop"]); // 基准分支 = develop（生产一致）；git log develop..task/<id> 判产出需要它存在
   // simulate the orphan worktree left by a prior abnormal death (same task, same branch)
   runGit(root, ["worktree", "add", "-q", "-b", "task/gap-or", wtPath]);
   assert.equal(worktreePresentForTask(root, "gap-or"), true, "precondition: orphan worktree present");
@@ -757,6 +800,7 @@ test("cleanupOrphanWorktree / worktreePathsForTask — find + remove orphan work
     fs.rmSync(wtPath, { recursive: true, force: true });
   });
   writeTaskFile(root, "gap-c", "ready");
+  runGit(root, ["branch", "develop"]); // 基准分支 = develop（生产一致）；git log develop..task/<id> 判产出需要它存在
   runGit(root, ["worktree", "add", "-q", "-b", "task/gap-c", wtPath]);
 
   const found = worktreePathsForTask(root, "gap-c");
@@ -775,6 +819,91 @@ test("cleanupOrphanWorktree / worktreePathsForTask — find + remove orphan work
   const again = cleanupOrphanWorktree(root, "gap-c");
   assert.equal(again.removed, false);
   assert.equal(again.error, null);
+});
+
+// ── gap-worker-cleanup-judgment-precision：清理前 git log 判产出 + failed 按信号区分 ──────────────────
+// AC1（能取假）：清理前查 `git log develop..task/<id>`——零提交 ⇒ 无产出可清、有提交 ⇒ 有实现保留
+//  （⛔ 纯终态字符串布尔判断、不看提交 ⇒ 假）。AC2（能取假）：failed 桶按信号区分，exit_code=143
+//  （SIGTERM，外部杀）有提交者保留（⛔ SIGTERM 有提交仍被清 ⇒ 假）。taskBranchHasCommits 是直接量
+//  （三态：true 有提交 / false 零提交 / null 读不懂）。
+
+test("isSigtermExitCode — 143 ⇒ external SIGTERM; 其它非零 ⇒ self-crash; null ⇒ false", () => {
+  assert.equal(isSigtermExitCode(143), true, "143 = 128+SIGTERM(15) ⇒ external kill");
+  assert.equal(isSigtermExitCode(130), false, "130 = 128+SIGINT ⇒ not SIGTERM");
+  assert.equal(isSigtermExitCode(1), false, "exit 1 = self-crash, not SIGTERM");
+  assert.equal(isSigtermExitCode(null), false, "no exit code ⇒ not SIGTERM");
+});
+
+test("taskBranchHasCommits — tri-state: has commits / zero commits / unreadable (⛔ null ≠ false)", (t) => {
+  const root = makeGitRoot("tbch");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-tb", "ready");
+  // 无 develop / 无 task/<id> 分支 ⇒ 读不懂 ⇒ null（⛔ 不是 false「零提交」）。
+  assert.equal(taskBranchHasCommits(root, "gap-tb"), null, "no develop + no task branch ⇒ unreadable (null)");
+
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-tb", wtPath]);
+  assert.equal(taskBranchHasCommits(root, "gap-tb"), false, "zero commits beyond develop ⇒ false");
+
+  fs.writeFileSync(path.join(wtPath, "impl.txt"), "wip\n");
+  runGit(wtPath, ["add", "impl.txt"]);
+  runGit(wtPath, ["commit", "-q", "-m", "wip impl"]);
+  assert.equal(taskBranchHasCommits(root, "gap-tb"), true, "one commit beyond develop ⇒ true");
+});
+
+test("AC1 (cleanup-judgment) — zero-commit failed worktree IS cleaned (git log develop..task/<id> empty ⇒ no output)", (t) => {
+  const root = makeGitRoot("cj-ac1");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-ac1`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-cj-a", "ready");
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cj-a", wtPath]);
+  assert.equal(worktreePresentForTask(root, "gap-cj-a"), true, "precondition: worktree present");
+  assert.equal(taskBranchHasCommits(root, "gap-cj-a"), false, "precondition: zero commits on the task branch");
+
+  // failed（自崩 exit_code=1）+ 零提交 ⇒ 清（无产出可清）。
+  const res = cleanupOrphanWorktree(root, "gap-cj-a", null, { finalState: "failed", exitCode: 1 });
+  assert.equal(res.removed, true, "AC1: zero-commit failed worktree IS cleaned");
+  assert.equal(res.hasCommits, false, "git log reading recorded: zero commits");
+  assert.equal(res.preservedForCommits, false, "not preserved — nothing to preserve");
+  assert.equal(res.sigtermExternal, false, "exit_code=1 is self-crash, not SIGTERM");
+  assert.equal(worktreePresentForTask(root, "gap-cj-a"), false, "worktree gone after cleanup");
+});
+
+test("AC2 (cleanup-judgment) — SIGTERM (exit_code=143) failed worktree WITH commits IS preserved", (t) => {
+  const root = makeGitRoot("cj-ac2");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-ac2`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-cj-b", "ready");
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cj-b", wtPath]);
+  // worker 在 worktree 里提交过一个实现（模拟 SIGTERM 打断前已产出）。
+  fs.writeFileSync(path.join(wtPath, "impl.txt"), "partial implementation\n");
+  runGit(wtPath, ["add", "impl.txt"]);
+  runGit(wtPath, ["commit", "-q", "-m", "wip implementation"]);
+  assert.equal(taskBranchHasCommits(root, "gap-cj-b"), true, "precondition: task branch has commits beyond develop");
+
+  // failed + exit_code=143（外部 SIGTERM 杀）+ 有提交 ⇒ 保留（⛔ SIGTERM 有提交仍被清 ⇒ 假）。
+  const res = cleanupOrphanWorktree(root, "gap-cj-b", null, { finalState: "failed", exitCode: 143 });
+  assert.equal(res.removed, false, "AC2: SIGTERM-with-commits worktree is NOT cleaned");
+  assert.equal(res.hasCommits, true, "git log reading recorded: has commits");
+  assert.equal(res.preservedForCommits, true, "preserved BECAUSE the branch has commits");
+  assert.equal(res.sigtermExternal, true, "exit_code=143 classified as external SIGTERM");
+  assert.equal(worktreePresentForTask(root, "gap-cj-b"), true, "worktree survives");
+  assert.match(runGit(root, ["branch", "--list", "task/gap-cj-b"]), /gap-cj-b/, "branch survives");
 });
 
 // ── 阶段 3（AC117）MCP 控制面：控制态 + 身份（AC2/AC3 纯函数）──────────────────────────────────────
@@ -1461,6 +1590,36 @@ test("AC2 (能取假) — buildContinueWorkerPrompt carries prior-round state (b
   assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
 });
 
+test("gap-worker-prompt-fan-in-call-signature-placeholder — buildContinueWorkerPrompt also gives real fan-in signature (no scriptPath placeholder, concrete worktree)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "worker exited 0 but task did not land",
+  });
+  assert.match(p, /\/r\/\.claude\/workflows\/fan-in-execute\.js/, "AC1: continue prompt carries real absolute path");
+  assert.doesNotMatch(p, /scriptPath/, "AC1: continue prompt has no bare scriptPath placeholder");
+  assert.match(p, /worktree:"\/wt"/, "continue prompt embeds the concrete worktree path (not a placeholder)");
+  assert.match(p, /generateRunId/, "AC1: continue prompt names generateRunId");
+  assert.match(p, /plugin\/scripts\/fast-mode-telemetry\.ts/, "AC1: continue prompt names the generateRunId module");
+});
+
+test("AC1 (能取假) — buildContinueWorkerPrompt wires dispatch-worktree-setup.sh on the reused worktree (idempotent re-provision)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "worker exited 0 but task did not land",
+  });
+  assert.match(p, /dispatch-worktree-setup\.sh/, "AC1: continue prompt names the setup script");
+  assert.match(p, /dispatch-worktree-setup\.sh \/wt/, "AC1: continue prompt re-provisions the concrete worktree path");
+  assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
+});
+
 test("AC2 — continueStateForTask gathers real state (own branch commits / AC checkboxes / last exited-not-landed reason)", (t) => {
   const root = makeGitRoot("continue-state");
   const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
@@ -1768,6 +1927,7 @@ test("AC2 (cold-start) — cleanupOrphanWorktree skips a worktree a live worker 
     fs.rmSync(wtPath, { recursive: true, force: true });
   });
   writeTaskFile(root, "gap-cs-c", "ready");
+  runGit(root, ["branch", "develop"]); // 基准分支 = develop（生产一致）；git log develop..task/<id> 判产出需要它存在
   runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cs-c", wtPath]);
 
   const liveCmdline = "claude -n quay-task-worker -p '... Task: gap-cs-c ...'";

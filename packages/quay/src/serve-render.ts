@@ -686,14 +686,14 @@ export function isMissingIdTask(t: { id?: unknown; title?: unknown; extra?: Reco
 
 const SITE_NAV_GROUPS: Array<{ label: string; items: Array<[string, string]> }> = [
   { label: "核心", items: [["dashboard", "Dashboard"], ["tasks", "Tasks"]] },
-  { label: "观测", items: [["live", "Live"], ["board", "Board"], ["system", "System"], ["manager", "Manager"]] },
+  { label: "观测", items: [["live", "Live"], ["board", "Board"], ["system", "System"], ["manager", "Manager"], ["needs-human", "Needs Human"]] },
   { label: "记录", items: [["journal", "Journal"], ["git", "Git History"], ["tests", "Tests"], ["sessions", "Sessions"]] },
   { label: "知识", items: [["adr", "ADRs"], ["goal", "Goals"], ["doc", "Docs"], ["architecture", "Architecture"]] },
 ];
 
 const SITE_NAV_ROUTES: Record<string, string> = {
   dashboard: "/dashboard", tasks: "/tasks", live: "/live", board: "/board", system: "/system",
-  manager: "/manager", journal: "/journal", git: "/git-history", tests: "/tests",
+  manager: "/manager", "needs-human": "/needs-human", journal: "/journal", git: "/git-history", tests: "/tests",
   sessions: "/sessions", adr: "/adr", goal: "/goal", doc: "/doc", architecture: "/architecture",
 };
 
