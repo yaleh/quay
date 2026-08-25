@@ -1,7 +1,7 @@
 ---
 id: gap-readdepends-on-indented-extra-depends-on
 title: "readDependsOn 认不到 extra: 缩进下的 depends_on——10 条任务依赖读不到 ⇒ 无效派发"
-status: ready
+status: done
 labels:
   - gap
   - defect
