@@ -163,14 +163,21 @@ plugin/scripts 结构                  288 文件平铺，子目录 1 个
 |---|---|---|---|
 | driver | 3 类 | ✅ Layer0/1a，4 模块 | 维持 |
 | gate | 8 工厂 | ✅ 真工厂 + `runAcceptance` | 维持 |
-| **checker** | **109** | ⚠️ `gate-script-base` 入口面已采纳、**契约面零采纳**；`checker-lib` 4 原语 7/77 | **§2.3** |
+| **checker** | **109** | ⚠️ `gate-script-base` 入口面已采纳、**契约面零采纳**；`checker-lib` 4 原语 7/77 | **§2.3 / §2.3a（复用 driver-result）/ §2.3b（调用面迁移）** |
 | **state I/O** | 12 函数 | ❌ | **§2.4** |
-| trigger | 2 | ❌ poll/diff/emit 骨架重复 | §2.5 |
+| ~~trigger~~ | 2 | ✅ **已由 `gap-retire-outer-monitors-after-reconciler` 处置**：职责移交 driver 协调循环，脚本降级为共享库 | ⛔ **移出待办**，见 §2.5 |
 | path/root | 18 处 | ❌ 三种策略并存 | §2.4 |
 | record 校验 | 4 | ❌ | §2.4 |
 | 测试集枚举 | 3 | ❌ 已立案 | §2.4 |
 
+**⊢ 修订后的账**：8 个角色中 **3 个已做对**（driver / gate / trigger——最后一个是查证后才发现已处置），
+**5 个待办**。且其中 checker 的层 2 已因 §2.3a 从"设计新契约"降为"复用已落地的 `driver-result`"。
+**⇒ 实际待办量比初稿判断的小。**
+
 ### 2.3 checker 契约：三层，且**分开立案**（因为三层的代价差一个量级）
+
+> **⭐ 2026-08-25 重大修订（人追问"checker 与 *-driver 架构是否已结合"后实测）**：
+> **层 2 的契约不需要重新设计——`driver-result.ts` 已经把它写好了，只是 checker 不知道。** 见 §2.3a。
 
 ```
 层 1 · 机械脊柱  —— CODIFY-EXISTING（几乎免费）
@@ -178,10 +185,8 @@ plugin/scripts 结构                  288 文件平铺，子目录 1 个
     --json 输出          13/14 已支持（56/77）
   ⇒ 写下来即可，不需要改文件
 
-层 2 · 判定契约  —— REAL-MIGRATION（需改 50-70 文件）
-    emitPass/emitFail    0/77 采纳 ← 必须先回答「为什么上一个契约无人用」
-    --help 无副作用      4 种互不相容行为（已立案）
-    selftest             15/77，但那 15 个高度一致（是良性少数派，不是分歧）
+层 2 · 判定契约  —— ⭐ 从「REAL-MIGRATION 设计新契约」降级为「复用 driver-result」
+    见 §2.3a —— 代价小一个量级
 
 层 3 · 输入形状  —— 真正的可测试性杠杆，也是最大改动
     path → content：判定逻辑对【字符串】纯函数，I/O 留在薄 CLI 壳
@@ -189,10 +194,81 @@ plugin/scripts 结构                  288 文件平铺，子目录 1 个
   ⇒ ⚠️ 这一层【不应一次性推给 109 个 checker】，见 §5 棘轮
 ```
 
+### 2.3a ⭐ 跨角色发现：driver 已解决 checker 的第三态问题，而 checker 不知道
+
+**实测（2026-08-25）**：
+
+```
+plugin/scripts/driver-result.ts（AC153，2026-08-25 刚落地）已定义：
+    | { state: "not-evaluated"; reason: string }      ⛔ 与 verified 不同形，也与 failed 不同形
+  注释逐字引硬规则 3b：「读不懂 ≠ 合格，也不伪造成合格」
+  并提供构造器 + 「null/throw ⇒ not-evaluated（携带 notEvaluatedReason）」的收敛规则
+
+采纳者：driver-runtime.ts · promotion-driver.ts · worker-driver.ts
+其中是 checker 的：**0**
+```
+
+⊢ **§1.3 判为"checker 角色的架构级缺口"的那个第三态，driver 角色已经解决了。**
+⊢ **同一仓库、同一周、同一条硬规则**：两个角色各自面对，一个产出了 `DriverResult<T>` 词表，
+另一个还在用三义冲突的 `exit 2`。
+⊢ **这是「缺乏整体架构设计」最精确的证据形态**——不是没人会做，是**做对了的方案不跨角色传播**。
+
+**⇒ 对目标架构的影响（把改动降一个量级）**：
+- 层 2 不再是"设计一个 `Checker` 接口并推广"，而是**让 checker 复用 `driver-result.ts` 的
+  `DriverResult<T>`**（已落地、已被 3 个消费者验证、已有测试）。
+- §1.3 的 harness 三态缺口随之有了**现成词表**可对接：`run_checker` 需要认的第三态，
+  Layer 0 已经定义好了它的形状。
+- ⚠️ **仍需实现方判断**：`DriverResult<T>` 的语义是否 1:1 适配 checker（driver 的 `verified` 对应
+  checker 的 `pass`？`failed` 对应 `fail`？），还是需要一个共享的更上位词表。**本 SPEC 不代为判定。**
+
 **⛔ 关于扩 `checker-lib` 还是新建 `checker-io`**：
 `checker-lib.ts` 现有 4 个原语**全是判定侧**（源码掩码/位置匹配/枚举存在性），**不含任何 I/O**。
 新增 I/O 原语前**必须先读 `checker-lib.test.mjs`**，确认是否存在"该库保持纯净/无 fs"的不变式——
 若有，则应新建 `checker-io.ts` 兄弟模块而非扩它。**此项未查，留给实现方。**
+
+### 2.3b ⚠️ 调用面迁移：退役的前置条件，不是退役后的清理
+
+**背景（人 2026-08-25）**：outer 将随 inner 退役；outer/manager 的 cron/loop 将被
+**外部更机械触发的短 Claude Code 会话**取代。**这会从下面抽走一部分 checker 的调用面。**
+
+**实测归属（109 个 checker，按可执行载体判定，⛔ 已排除 .md 文档提及）**：
+
+```
+在 static-gate 注册表（随套件跑，退役不受影响）    45
+outer 执行核直接引用                              12  ← 其中 5 个不在注册表
+manager 侧                                          6
+driver 家族                                         4
+workflows                                           6
+以上皆无、但仍有其它可执行载体引用                 54
+只剩 .md 文档提及                                    6  ← 真正的死代码候选
+全仓零引用                                           1
+```
+
+**outer 引用的 12 个，逐个核实其注册表重叠**：
+
+```
+[安全·同时在注册表 7]  inner-wakeup-heartbeat-check · judgment-consumer-check · ready-pool-check
+                       task-contract-check · touches-orthogonality-check · closure-lag-check.sh
+                       outer-tick-log-check.sh
+[需处置·不在注册表 5]  drive-contract-check.ts · outer-anchor-check.ts · test-framework-policy-check.ts
+                       drive-target-check.sh · monitor-mount-check.sh
+```
+
+**但"不在注册表"≠"退役即孤儿"**——逐个查留存调用面后：
+
+| checker | 留存调用面 | 处置 |
+|---|---|---|
+| `test-framework-policy-check.ts` | 被 `test-isolation-check` / `tmp-leak-pairing-check` **import**（事实库） | ✅ 安全，但见 §1.6"checker 当库用"的问题 |
+| `drive-contract-check.ts` | `red-on-omission-audit.ts` + mutation-cases | ✅ 安全 |
+| `monitor-mount-check.sh` | `quay-session.ts` · `manager-start.sh` · `quay-init.sh` | ✅ 安全 |
+| `drive-target-check.sh` | `os-anchor-watchdog.sh` · `send-keys-reliable.sh` | ✅ 安全 |
+| **`outer-anchor-check.ts`** | 仅 `outer-cron-registry.ts`（**同属退役层**） | ⚠️ **真正绑死在退役层上的唯一一个** |
+
+⊢ **结论：checker 侧的退役风险面比预期小得多——只有 1 个真正需要在退役前处置。**
+⊢ **但这条必须写成退役的【前置检查】而非事后清理**：判据形如「退役 outer 前，枚举其执行核引用的
+全部 checker，逐个确认存在留存调用面或显式退役」。**没有这个前置，孤儿是静默产生的。**
+⊢ ⚠️ **未查**：manager 侧那 6 个、以及 cron/loop 换成短会话后 `manager-tick-readings.ts` 的
+调用面是否同样受影响。**manager 自身的退役形态尚未定，留待人裁定后再补测。**
 
 ### 2.4 共享 I/O 基座
 
@@ -204,11 +280,34 @@ plugin/scripts 结构                  288 文件平铺，子目录 1 个
   `exec node` 薄壳 —— **收敛到 TS 是自然路径**。
 - ⛔ `SCAN_ROOTS` 类配置**作为参数传入，不被基座吸收**（§1.6）。
 
-### 2.5 trigger：poll/diff/emit 骨架
+### 2.5 trigger：⛔ **本节原判断已过时，实测后撤回**
 
-`slot-free-trigger` 与 `suite-state-trigger` 共享"读 memo → 读当前态 → 冷启动特例 → 检测跃迁 →
-推事件 → 写 memo"骨架（连注释都逐段对应）。`gate/driver.ts` 的 `runOnce` **是不同职责**（任务队列
-步进），⛔ 不并入。
+> **原写法（2026-08-25 初稿）**：「`slot-free-trigger` 与 `suite-state-trigger` 共享 poll/diff/emit
+> 骨架，待抽取」。**这是过时的判断，现撤回。**
+
+**实测（读两个脚本的头注释，权威来源是脚本自身）**：
+
+```
+两者头部均写着：
+  ⛔ 退役（gap-retire-outer-monitors-after-reconciler）：外层 Monitor 挂载（冷启动 4b2/4b3）已移除
+  ——「空槽出现」/「套件转红」由 driver 协调循环接管（定时器地板 + 每趟 pass 现读，SPEC §5.5），
+  本脚本从【正确性依赖】降级为【优化】。脚本本体保留（判定逻辑与测试仍在）。
+  suite-state-trigger 另注：保留为共享库——full-suite-runner.ts 仍 import runOnce / isRunnerInFlight
+```
+
+⊢ **这两个 trigger 既不是"待抽取的重复"，也不是"被 Layer 0 取代"**，而是**已被显式降级并保留为库**：
+职责已移交 driver 协调循环，脚本本体作为判定逻辑 + 共享库继续存在。
+⊢ **`driver-runtime` Layer 0 的 `trigger` 是另一回事**——实读为驱动自身的调度节律
+（`--interval` / `--reconcile-interval` 透传给常驻循环），**不是"检测状态跃迁并发事件"**。
+两者不构成取代关系。
+⊢ **⇒ trigger 角色从本 SPEC 的待办中移除。** 若仍要合并那两份 poll/diff/emit 骨架，
+那是纯代码整洁收益，**且必须先确认 `full-suite-runner.ts` 对 `runOnce`/`isRunnerInFlight` 的
+import 不被破坏** —— 优先级低于 §5.3 的任何一批。
+
+**⊢ 方法论记账**：本节是**第 3 处在起草/修订中被实测推翻的判断**（前两处见 §1.5）。
+三次的共同点：**我按"代码形状"归类，而没读"这段代码自己声明的处境"**。
+脚本头注释里写着"已退役/已降级"，比任何静态相似度分析都权威。
+⇒ **纪律：判定一个组件"待重构"之前，先读它自己的头注释与最近一条相关任务的状态。**
 
 ---
 
@@ -221,6 +320,8 @@ plugin/scripts 结构                  288 文件平铺，子目录 1 个
 4. **⛔ 不以"缩短默认轮套件时间"为 checker 重构的论据**（§1.5②已自证否定）。
    若目标是套件时间，**93% 在 `packages/` 测试**，那是另一条线。
 5. **⛔ 不追求"消除全部重复"**。`scanText`/`SCAN_ROOTS` 已判定为合理多样性。
+6. **⛔ 不把 trigger 合并列为本 SPEC 待办**（§2.5：已由既有任务处置并降级为库）。
+7. **⛔ 不在 manager 退役形态未定前，替 manager 侧那 6 个 checker 规划迁移**（§2.3b 末）。
 
 ---
 
@@ -264,12 +365,17 @@ AC 形如：<某角色的重复实现数 / 未采纳契约数> 从 N 降到 N-k�
 
 | 批 | 内容 | 棘轮量 | 负控制 |
 |---|---|---|---|
+| **B0** ⭐ | **退役前置**：枚举 outer 执行核引用的全部 checker，逐个确认有留存调用面或显式退役（§2.3b） | 无留存调用面者 N→0（当前 N=1：`outer-anchor-check.ts`） | 造一个只被退役层引用的 checker，前置检查须红 |
 | **B1** | 层 1 机械脊柱写成文档 + 检查器 | exit 码/`--json` 不符者 N→0 | 造一个用 exit 3 的 checker，检查须红 |
 | **B2** | `repo-root` 合一（bash+TS 成对） | 18 处 → 1 | 删共享模块，18 处编译/运行须红 |
 | **B3** | `readFileSafe`/`normalizeRel`/`canonicalTestFiles` 合一 | 各 →1 | 同上 |
-| **B4** | 层 2 判定契约（`emitPass`/`--help`） | 0/77 → k/77（棘轮） | `--help` 前后 `.quay` mtime 集合零变化 |
+| **B4** ⭐ | 层 2 判定契约——**复用 `driver-result.ts` 的 `DriverResult<T>`**（§2.3a），非设计新契约 | 采纳 `driver-result` 的 checker 数 0→k（棘轮） | 删该 import，checker 的第三态须塌回二值、对应断言须红 |
 | **B5** | 层 3 输入形状（path→content） | 纯函数导出的 checker 数 N→N+k | 该 checker 的测试可零 spawn 零 mkdtemp 运行 |
 
+⊢ **B0 是唯一有【时限】的一批**——它必须在 outer 退役**之前**完成，否则孤儿静默产生。
+其余各批无时限，可任意穿插。
+⊢ **B4 因 §2.3a 而大幅降级**：从"设计契约 + 说服 50-70 个文件采纳"变成"复用一个已落地、
+已有 3 个消费者、已有测试的词表"。**且它天然给 §1.3 的 harness 三态缺口提供了现成形状。**
 ⊢ **B5 是唯一真正改变可测试性的**，也最大；建议**先在 3-5 个 checker 上做示范**，
 用 `audit-independence-check.ts` 作模板，**测出实际收益再决定是否推广**
 （⛔ 不要凭 §1.5② 已被否定的那条链条推广）。
@@ -295,8 +401,17 @@ AC 形如：<某角色的重复实现数 / 未采纳契约数> 从 N 降到 N-k�
 | 输入形状是可测试性杠杆 | **实测**（85 测试分类 + 真实 perFile 时长 + 样板对照） |
 | 重复簇判定 | **7 个并发 subagent 逐簇实读**，含 1 反例 1 coincidental |
 | 输入侧重复 ~557 行 | **按大括号配平实测**，非"平均长度×个数"估算 |
+| ⭐ `driver-result` 已定义 not-evaluated 而 checker 零采纳 | **实读 `driver-result.ts` + grep 采纳面**（3 个 driver 消费者、0 个 checker） |
+| ⭐ checker 调用面归属与退役风险 | **逐个 grep 可执行载体判定**（⛔ 已排除 .md 提及）；outer 引用的 12 个逐个核实注册表重叠与留存调用面 |
 | **checker 重构能显著缩短套件** | **❌ 已被自己的测量否定，见 §1.5②** |
 | **`../..` 在 worktree 下错误** | **❌ 已被实测推翻，见 §2.4** |
+| **trigger 是"待抽取的重复"** | **❌ 已被实测推翻，见 §2.5**（脚本头注释自述已降级为库） |
+| **"大量 checker 已死"** | **❌ 部分否定**：109 个中真死代码仅 6-7 个（只剩 .md 提及 6 + 零引用 1）。但 **64/109 不在统一注册表**，靠分散调用面存活——**"归属不明"成立，"已死"不成立** |
 | 全仓重复总规模 | **⚠️ 未测**。已核实 15 簇（8 确证/1 反例/1 coincidental），全仓有 100 个精确同名簇 + 47 个家族簇。**"可缩减一半"目前不是实测数字，不应作为承诺** |
 | checker-lib 能否加 I/O 原语 | **⚠️ 未查**（需先读 `checker-lib.test.mjs` 是否有纯净性不变式） |
 | 非原子写是否真有并发读者 | **⚠️ 未验证**（结构上可能，未复现） |
+| `DriverResult<T>` 语义是否 1:1 适配 checker | **⚠️ 未判定**（§2.3a 末，留给实现方） |
+| manager 侧 6 个 checker 的迁移 | **⚠️ 未测**（manager 退役形态未定，§2.3b 末 / §3.7） |
+
+**⊢ 本表自身的意义**：**14 条主张里有 4 条是"❌ 已被推翻"**，且全部由本 SPEC 的起草过程自己推翻。
+**这个比例（4/14）本身是"先测再写"的收益证据**——若按初稿直接立案，会有 4 条错误前提进入任务池。

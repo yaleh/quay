@@ -2,13 +2,17 @@
 id: gap-worker-driver-periodic-exit-resident
 title: worker-driver 周期性 exit code=0 是设计内 cadence（前提证伪，重定范围为文档化）——idle-exit +
   supervisor-respawn 写进 CLAUDE.md
-status: ready
+status: superseded
 labels:
   - gap
 parent: null
 children: []
 extra:
-  schema: execution
+  superseded_reason: pool-quality-judge 判 should-remove：前提双重证伪——本任务已是 rescope，但
+    cited 机制（idle-exit + supervisor-respawn）已被退役/替换：worker-driver.ts:1477 现 idle
+    不退出（sleep intervalMs 重读 stopCondition），promotion-driver-launch.sh
+    run_supervisor 已被 1f1c41e8 删除（supervisor 港进 TS）。AC1 交付物
+    'idle-exit-by-design' 在 CLAUDE.md 不存在。
 depends_on: []
 ---
 **type:** execution

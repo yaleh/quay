@@ -1,13 +1,19 @@
 ---
 id: gap-archguard-zero-production-calls
-title: archguard 从未被真实调用，而 CLAUDE.md 明令「Consult it before calling a milestone done」——规定存在、执行为零
-status: ready
+title: archguard 从未被真实调用，而 CLAUDE.md 明令「Consult it before calling a milestone
+  done」——规定存在、执行为零
+status: superseded
 labels:
   - gap
   - defect
 parent: null
 children: []
-extra: {}
+extra:
+  superseded_reason: pool-quality-judge 判 should-remove：前提证伪——archguard 无法解析本仓
+    plain-JS/ESM（git-lens-l-g-structural-drift.ts 已记录 'No query scopes
+    persisted'），fallback（import-graph cycle detector + god-module
+    heuristic）已存在并被消费；且 .archguard/ 现已有真实产物（manager 09:31 跑过）。真缺陷是 CLAUDE.md
+    'consult archguard' 令不可满足，应改为由 fallback 承接，不是 wire archguard 本身。
 ---
 **type:** execution
 

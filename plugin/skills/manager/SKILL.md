@@ -181,6 +181,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md` — Codex App Server 会话通信 Host Adapter：thread/turn 映射、宿主无关 `list/status/send/events` 契约、ack 状态、幂等性与 Claude/Codex 权限边界（proposal·不扩大 Stage 1 自治生命周期权限）
 - `orchestration/SPEC-methodology-layer-architecture-2026-08-25.md` — 方法学层架构：契约面的采纳而非重建抽象（现状盘点直读代码 → 目标架构 → 非目标 → 排期与验收方向；AC 正本由 outer 写，本文件是输入）
 - `orchestration/SPEC-one-observer-two-surfaces.md` — one observer, two surfaces
+- `orchestration/SPEC-methodology-layer-architecture-2026-08-25.md` — 方法学层架构：契约面采纳而非重建抽象（checker 契约三层 / state-IO / path-root 三角色，六批次 B0-B5 棘轮演进）
 - `orchestration/SPEC-quay-self-hosts-its-own-cold-start.md` — self-hosting the cold start
 - `orchestration/SPEC-state-crystallization-2026-08-05.md` — state crystallization
 - `orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md` — the three-layer unified architecture (manager/outer/inner minimal unified architecture; AC28–AC34, P0 wiring = SPEC-carrying first-lines + ledger A + parallel-comparison rounds)
