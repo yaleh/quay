@@ -53,9 +53,12 @@ depends_on:
 - plugin/scripts/driver-runtime.ts（新：Layer 0 kernel）
 - plugin/scripts/promotion-driver.ts（改继承 Layer 0 + 1a）
 - plugin/scripts/worker-driver.ts（改继承 Layer 0 + 1a）
-- plugin/scripts/promotion-driver-launch.sh（supervisor/respawn/pid 记账港进 TS kernel）
+- plugin/scripts/promotion-driver-launch.sh（supervisor/respawn/pid 记账港进 TS kernel；删除）
+- plugin/scripts/capability-catalog.sh（六表注册 driver-runtime.ts、退役 promotion-driver-launch.sh）
 - packages/quay/src/cli/driver.ts（spawnSync 薄壳变真正实现入口）
 - plugin/test/driver-runtime.test.mjs（新 test）
 - plugin/test/worker-driver.test.mjs（test）
-- plugin/test/promotion-driver.test.mjs（test）
+- plugin/test/driver-cli.test.mjs（改写：测 CLI→kernel 路径）
+- plugin/test/promotion-driver-launch.test.mjs（删除：被 driver-runtime.test.mjs 取代）
+- CLAUDE.md（driver liveness 指针由 launch.sh 更新为 driver-runtime.ts）
 - tasks/gap-ac151-two-level-driver-layer-landing.md（自身）
