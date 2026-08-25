@@ -1,7 +1,7 @@
 ---
 id: gap-suite-single-flight-lock-ab-remesure
 title: suite 单飞锁 S=1 A/B 复测——38% 等锁 vs 33% 核利用率，旧结论可能过时
-status: todo
+status: ready
 labels:
   - gap
   - feature
