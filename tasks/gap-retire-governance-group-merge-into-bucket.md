@@ -37,7 +37,7 @@ extra:
 3. 「这次要不要跑」此后只由 bucket 回答。132/142 现有桶覆盖；10 UNRESOLVED 落安全侧（每次 bucket run 都跑）或新开桶（触发=experiments/quay-perpetual-stream/scripts/）。
 4. ⛔ **实现前实跑 `suite-bucket-attribution.ts` 对这 10 个取真值**（manager 已用正本工具实跑：**10/10 全 UNRESOLVED**，EXP_SCRIPTS_PREFIX→PLUGIN_SCRIPTS_PREFIX 镜像折叠对它们一个都没生效——「可能部分能解析」已证否）。⇒「10 个落安全侧还是新开桶」是**真决策**（不开桶则永久安全侧、每次 bucket run 都付它们时间），别用 grep 近似当结论。
 
-**⚠️ 实现前必须解决的冲突（须人裁，⛔ 不代拍）**：退役 governance 跳过 ⇒ 默认全量轮多出 ~120 文件，本轮 suite dur=599.2s 已贴 AC101 ≤600s。两条路须显式选一：(a) 全量轮变真·全量（修掉「full suite 静默漏 142 文件」的「声明在/保证没了」形态，但 AC101 600s 须重谈）；(b) 默认全量轮本身改 bucket 驱动（省时，但改「全量轮作闸门」含义）。manager 倾向 (a)+省时责任交回 bucket，但**AC101 重谈须人裁**——实现方在 Plan 里显式记录所选项 + 人裁定，⛔ 不默认滑过去。
+**⚠️ 实现前必须解决的冲突（须人裁，⛔ 不代拍；事实基础已更正 2026-08-25）**：退役 governance 跳过 ⇒ 默认全量轮多出 ~**33–39 个文件的【实际执行】**（⛔ 非「把 120 文件加进选择集」——142 个 governance 文件本就在 `selected 381 files` 内，只有 39 带守卫的运行时自跳过，本轮实测 33 次）。这 33–39 个文件落在 **main 相**（墙钟仅 34.3%、并行度最好），真正大头是 serial+lowconc（34.0%）+ 锁等待（17.6%）= 51.6%，`effective_parallelism 5.54/16` 说明套件结构性欠并行、瓶颈在低并发相非 main 相 ⇒ **(a) 撞 600s 预算的风险远小于先前陈述**。⛔ 口径警示：本轮分解是 `scope=worktree + laneCount=16`（1395.6s），AC101 预算是「main 相 lane=8」，**不得直接比对**；且这 33–39 文件自身耗时仍无测量（本轮它们跳过了）。**另（减争用一层，供 (b) 参考，⛔ 非主张 (b)）**：当日 70 轮中 49 轮（70%）已完全绕开锁——bucket 轮结构上不取锁（`scripts/test.sh:630`「Scoped paths never take the lock」+ `:881` full_suite_lock_acquire 只在 run_selected + `--buckets` 走显式文件形态不经 :881）；争用只发生在 21 个 full 轮之间 ⇒ (b) 会把轮次从争用人群移出，(a) 作为完整闸门的理由一字未弱。两条路仍须人显式选一：(a) 全量轮变真·全量；(b) 默认全量轮改 bucket 驱动。manager 倾向 (a)+省时责任交回 bucket，但**AC101 重谈须人裁**——实现方在 Plan 里显式记录所选项 + 人裁定，⛔ 不默认滑过去。
 
 ## Acceptance Criteria
 

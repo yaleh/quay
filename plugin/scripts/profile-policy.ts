@@ -51,6 +51,9 @@ export interface ProfilesConfig {
   version?: number;
   profiles?: Record<string, ProfileSpec>;
   roles?: Record<string, RoleSpec>;
+  // flag-only 启动参数（AC154 随 _launchSpec 迁入；对全部 role 生效，由 L3 launchArgv 翻译成 CLI 参数）。
+  excludeDynamicSystemPromptSections?: boolean;
+  promptSuggestions?: boolean;
 }
 
 /** 解析后的一份 profile（继承已展开、env 已合并）。 */

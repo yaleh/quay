@@ -8,7 +8,11 @@ import {
   relativeTime, isSafeRelativeRedirect, DEFAULT_PAGE_SIZE, buildHref, isMissingIdTask,
   renderSiteNav, renderMobileChrome,
 } from "./serve-render.ts";
-import { readWorkerOutcomeRecords, isValidSessionId } from "./observation.ts";
+import {
+  readWorkerOutcomeRecords, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
+  workerDriverActive,
+} from "./observation.ts";
+import type { LiveWorker } from "./observation.ts";
 
 export async function handleTaskList(
   req: IncomingMessage,
@@ -430,12 +434,46 @@ export async function handleTaskList(
 /** Render the Runs block for /task/<id> — the worker-outcome records for THIS task, one row per
  *  attempt (gap-webui-task-runs-block AC1). Reads `.quay/worker-outcome.jsonl` via the observation
  *  facade and reuses the transcript-access validation (isValidSessionId) + the existing /session
- *  endpoint rather than re-implementing read/validation (AC3 — no second implementation). */
-export function taskRunsBlock(root: string, taskId: string): string {
+ *  endpoint rather than re-implementing read/validation (AC3 — no second implementation).
+ *
+ *  gap-task-detail-runs-block-inflight-session-link: the outcome carrier is written only at worker
+ *  END, so a still-running worker (no END record yet) is structurally invisible to the records above.
+ *  Surface it from the /proc live-process signal — the SAME path /live uses — and reuse
+ *  liveSessionIdForPid to join pid → live transcript session id (the /live-clickable link, now
+ *  mirrored here). The auto-scan is gated on the worker driver being active for THIS root (a
+ *  non-worker workspace never scans /proc, which would surface OTHER workspaces' workers); the
+ *  `liveWorkers` test seam bypasses the gate, and `sessionHome` makes the pid→sessionId join testable. */
+export function taskRunsBlock(
+  root: string,
+  taskId: string,
+  opts: { liveWorkers?: LiveWorker[] | null; sessionHome?: string } = {},
+): string {
   const records = readWorkerOutcomeRecords(root).filter((r) => r.task === taskId);
-  if (records.length === 0) {
+
+  const live = opts.liveWorkers ?? (workerDriverActive(root) ? readLiveWorkerProcesses("/proc") : []);
+  const inFlight = live.filter((w) => w && w.taskId === taskId);
+
+  if (records.length === 0 && inFlight.length === 0) {
     return html`<h2>Runs</h2><p class="meta">无 worker 运行记录（<code>.quay/worker-outcome.jsonl</code>）</p>`;
   }
+
+  const inFlightRows = inFlight.map((w) => {
+    const started = w.startedAtMs != null ? new Date(w.startedAtMs).toISOString() : "—";
+    const sessionId = liveSessionIdForPid(w.pid, opts.sessionHome);
+    const transcript = sessionId != null
+      ? html`<a href="/session/${encodeURIComponent(sessionId)}">view</a> · <a href="/session/${encodeURIComponent(sessionId)}/download">download</a>`
+      : "—";
+    return html`<tr>
+      <td>${escapeHtml(started)}</td>
+      <td><strong>进行中</strong></td>
+      <td>—</td>
+      <td>—</td>
+      <td>${escapeHtml(w.pid)}</td>
+      <td><code>${escapeHtml(`worker-${w.taskId}`)}</code></td>
+      <td>${transcript}</td>
+    </tr>`;
+  }).join("\n");
+
   const rows = records.map((r) => {
     const exit = r.exit_code != null ? String(r.exit_code) : r.signal != null ? `signal ${r.signal}` : "—";
     const wall = r.wall_clock_ms != null ? `${r.wall_clock_ms}ms` : "—";
@@ -458,6 +496,7 @@ export function taskRunsBlock(root: string, taskId: string): string {
   return html`<h2>Runs</h2>
     <table>
       <tr><th>started</th><th>state</th><th>exit</th><th>wall</th><th>worker pid</th><th>run id</th><th>transcript</th></tr>
+      ${inFlightRows}
       ${rows}
     </table>`;
 }
