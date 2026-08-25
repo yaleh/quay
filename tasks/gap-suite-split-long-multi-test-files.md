@@ -58,4 +58,6 @@ round #560 负载曲线前 3 段（长文件跑那段）均值 load1=26.02、峰
 - plugin/test/quay-init-loop-vendor-user-scope-fresh.test.mjs（新）
 - .quay/suite-bucket-reattribution.jsonl（删 stale entry）
 - docs/analysis/test-file-baseline.txt（重快照：删 2 + 增 16）
+- plugin/test/known-load-sensitive.test.mjs（删 stale 引用：movedToLowconc 移除已删 vendor 文件）
+- plugin/test/suite-bucket-attribution.test.mjs（删 stale 引用：GROUP_C 移除已删 vendor 文件）
 - tasks/gap-suite-split-long-multi-test-files.md（自身）
