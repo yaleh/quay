@@ -6,6 +6,11 @@
 //   第二行：{"type":"user","message":{"role":"user","content":"<文本>"}}  ← 实测到达的消息帧
 //   socket 返回 0 字节（fire-and-forget，无 ack/error）；消息以纯文本到达目标会话。
 //
+// gap-webui-message-delivery-entry：本脚本的 socket 协议（连接 + 写 auth/user 帧）已提炼为可 import
+// 的共享模块 `packages/quay/src/serve-send.ts` 的 `sendSessionFrames`——web 发送入口（/send）与本节
+// 本脚本【共用同一实现】（⛔ 不复制一份进 web 层）。本脚本继续作为独立诊断工具保留，只负责参数解析
+// 与诊断输出，投递动作委托给共享模块。
+//
 // 用法：
 //   ① 给【本会话】发（自检）：node --experimental-strip-types send-to-session.ts --self "消息"
 //      用 CLAUDE_CODE_MESSAGING_SOCKET + CLAUDE_CODE_MESSAGING_TOKEN（= childToken，own-child 场景，不 hold）。
@@ -35,10 +40,19 @@
 //       ⛔ 不要用于「代替 SendMessage 给别的会话发消息」——SendMessage 的价值正是平台标注身份。
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import net from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+// 共享 socket 协议（packages/quay/src/serve-send.ts 的 sendSessionFrames）。动态 import 用相对路径
+// ——与 build-evidence-gate.ts 的 `await import("../../packages/quay/src/…")` 同型（plugin 从 repo-root
+// 的 packages/quay 取产品模块，相对本脚本解析，非打包期依赖）。
+async function loadSendSessionFrames(): Promise<
+  (opts: { sockPath: string; token: string; text: string; fromName: string }) => Promise<{ ok: boolean; reason: string | null }>
+> {
+  const mod = await import("../../packages/quay/src/serve-send.ts");
+  return mod.sendSessionFrames;
+}
 
 const args = process.argv.slice(2);
 const self = args.includes("--self");
@@ -99,42 +113,24 @@ if (self) {
 console.error(`  socket = ${sockPath}`);
 console.error(`  token  = ${token.slice(0, 8)}…（len=${token.length}）`);
 
-const s = net.createConnection(sockPath);
-
-s.on("connect", () => {
-  // ① auth 帧（文档明写：第一行）
-  s.write(JSON.stringify({ type: "auth", token }) + "\n");
-  // ② 消息帧（2026-08-15 实测到达的格式）
-  // 改进（2026-08-15）：SendMessage 的投递层会加 <cross-session-message from=… from-name=… from-mode=…>
-  // 包裹；对端凭 from-mode 判「发送方是不是 bypass」⇒ 同类则直接投递。
-  // 脚本在消息帧里带上这三个字段，让对端把我当「另一个 bypass 会话」⇒ 同类 ⇒ 直接投递。
-  const fromSock = sockPath; // 发送方 socket（对端显示为 from=）
-  const fromName =
-    process.env.CLAUDE_CODE_SESSION_ID
-      ? `script-${process.pid}`
-      : `script-${process.pid}`;
-  const frame = {
-    type: "user",
-    message: {
-      role: "user",
-      content: `<cross-session-message from="uds:${fromSock}" from-name="${fromName}" from-mode="bypass">\n${text}\n</cross-session-message>`,
-    },
-  };
-  s.write(JSON.stringify(frame) + "\n");
-  // socket 无 ack（实测返回 0 字节）；给对端一个读窗口再关
-  setTimeout(() => {
-    s.end();
+// 投递动作委托给共享模块（与 web /send 入口同一实现，AC1）。诊断脚本保留自己的 from-name
+// `script-<pid>`（与既有 --self 实测到达的形态一致）；from 字段由共享模块按协议写 `uds:${sockPath}`。
+try {
+  const sendSessionFrames = await loadSendSessionFrames();
+  const result = await sendSessionFrames({
+    sockPath,
+    token,
+    text,
+    fromName: `script-${process.pid}`,
+  });
+  if (result.ok) {
     console.error("  ✅ 已写 auth + user 帧（带 cross-session-message 包裹）并关闭");
     process.exit(0);
-  }, 800);
-});
-
-s.on("data", (d) => {
-  // 实测对端返回 0 字节；若未来有 ack/error 会打在这里
-  console.error(`  ⇐ 对端回执: ${d.toString().trim()}`);
-});
-
-s.on("error", (e) => {
-  console.error(`  ⛔ 连接失败: ${e.message}`);
+  }
+  console.error(`  ⛔ 连接失败: ${result.reason ?? "unknown"}`);
   process.exit(4);
-});
+} catch (e) {
+  // 共享模块加载失败（packages/quay 不可用——例如打包产物剥离了源码树）：诚实报错，不伪造投递。
+  console.error(`  ⛔ 共享投递模块不可用: ${e instanceof Error ? e.message : String(e)}`);
+  process.exit(4);
+}
