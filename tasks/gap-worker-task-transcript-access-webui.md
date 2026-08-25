@@ -2,7 +2,7 @@
 id: gap-worker-task-transcript-access-webui
 title: worker task 详情页接入 transcript：派发钉 session-id 持久化 + /live 活体关联 + web Runs
   区块（带路径穿越防护）
-status: ready
+status: done
 labels:
   - gap
   - feature
