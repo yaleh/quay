@@ -1247,6 +1247,72 @@ test("AC2 (unit) — readLive annotates in-flight worker tasks with the live ses
   }
 });
 
+// ── gap-live-ghost-superseded-task-workflow-events-start (AC1/AC2/AC3) ────────────────────────
+// A workflow-events START-without-END record for a task whose on-disk status is terminal
+// (done/superseded/needs-human) is a ghost: its worker session ended or was superseded without a
+// normal fan-in END telemetry. readLive must drop it by the direct量 (on-disk status), NOT keep it
+// in-flight forever just because its worktree was never released. A genuinely in-flight task
+// (ready, no terminal status) must be KEPT — the filter is fail-closed toward "terminal only".
+
+function writeLiveGhostFixture(root, entries) {
+  const eventsDir = path.join(root, ".workflow-events");
+  const tasksDir = path.join(root, "tasks");
+  fs.mkdirSync(eventsDir, { recursive: true });
+  fs.mkdirSync(tasksDir, { recursive: true });
+  const nowMs = Date.now();
+  for (const { runId, taskId, status } of entries) {
+    const ev = {
+      schemaVersion: "1", agentLabel: "fast-mode", attempt: 0, stage: "Fast", eventKind: "start",
+      runId, taskId, commandIdentity: "fast-mode-telemetry:task-start", recordedAtMs: nowMs,
+      timing: { queuedAtMs: null, startedAtMs: nowMs - 120_000, endedAtMs: null },
+    };
+    fs.writeFileSync(path.join(eventsDir, `${runId}.jsonl`), JSON.stringify(ev) + "\n");
+    fs.writeFileSync(path.join(tasksDir, `${taskId}.md`), `---\nid: ${taskId}\nstatus: ${status}\n---\nbody\n`);
+  }
+  return nowMs;
+}
+
+test("AC1/AC2/AC3 — readLive drops terminal-status ghosts, keeps a ready task (workflow-events source)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-ghost-"));
+  try {
+    const nowMs = writeLiveGhostFixture(root, [
+      { runId: "fm-SUP-1", taskId: "SUP", status: "superseded" },
+      { runId: "fm-DONE-1", taskId: "DONE", status: "done" },
+      { runId: "fm-NH-1", taskId: "NH", status: "needs-human" },
+      { runId: "fm-RDY-1", taskId: "RDY", status: "ready" },
+    ]);
+
+    const live = readLive(root, { nowMs });
+    const ids = new Set(live.inFlight.map((t) => t.taskId));
+
+    assert.ok(!ids.has("SUP"), "AC1: a superseded task with an orphan START event is NOT in-flight (⛔ 仍显示「实现中」⇒ 假)");
+    assert.ok(!ids.has("DONE"), "AC1: a done task with an orphan START event is NOT in-flight");
+    assert.ok(!ids.has("NH"), "AC3: a needs-human task with an orphan START event is NOT in-flight (no worker is running)");
+    assert.ok(ids.has("RDY"), "AC2: a ready task with an orphan START event IS still in-flight (negative control — not over-trimmed)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — a live worker (status ready + process present) is still in-flight (not mis-dropped)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-ghost-worker-"));
+  try {
+    const nowMs = Date.now();
+    fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(root, "tasks", "LIVE-1.md"), `---\nid: LIVE-1\nstatus: ready\n---\nbody\n`);
+
+    const live = readLive(root, {
+      nowMs,
+      liveWorkers: [{ taskId: "LIVE-1", pid: "4242", startedAtMs: nowMs - 30_000 }],
+    });
+    const ids = new Set(live.inFlight.map((t) => t.taskId));
+
+    assert.ok(ids.has("LIVE-1"), "AC2: a live worker for a ready task is in-flight (⛔ 误剔 ⇒ 假)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC2 (falsifiable) — renderLivePage renders a transcript link ONLY for in-flight workers with a sessionId", () => {
   const base = {
     status: "ok", reason: null, concurrency: 1, cpuPressure: null,

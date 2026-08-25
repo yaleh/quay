@@ -901,6 +901,14 @@ function readTaskStatusOnDisk(root: string, taskId: string): string | null {
   }
 }
 
+/** Task statuses that mean "no worker is currently running for this task" — the terminal/non-live
+ *  states (done/superseded/needs-human). readLive drops an in-flight run whose on-disk task status is
+ *  one of these: a start-without-end telemetry record for a done/superseded/needs-human task is a
+ *  ghost (its worker session ended, was superseded, or escaped to a human WITHOUT a normal fan-in END
+ *  telemetry). `todo`/`ready` are NOT terminal: `ready` is the genuine in-flight case (AC2), and a
+ *  `todo` carrying a start event is not evidence of terminality. */
+const NON_LIVE_TASK_STATUSES: ReadonlySet<string> = new Set(["done", "superseded", "needs-human"]);
+
 /**
  * Live loop view: in-flight fast-mode tasks + elapsed minutes + concurrency + CPU pressure +
  * the loop-state discriminator. Degrades per the header contract; never throws.
@@ -1018,6 +1026,16 @@ export function readLive(
   if (workerOnlineMs != null) {
     inFlight = inFlight.filter((t) => t.startedAtMs >= workerOnlineMs);
   }
+
+  // gap-live-ghost-superseded-task-workflow-events-start: a workflow-events start-without-end run
+  // whose task's on-disk status is terminal (done/superseded/needs-human) is a ghost — the worker
+  // session was ended/superseded without a normal fan-in END telemetry, so the pairing never closes.
+  // Drop it by the direct量 (on-disk status), the same terminal-state filter the worker-carrier merge
+  // below applies — but UNCONDITIONAL, because the ghost bug fires precisely when workerInFlight is
+  // empty (workerOutcomeOpen is always false) and the merge block below is skipped entirely.
+  inFlight = inFlight.filter(
+    (t) => !NON_LIVE_TASK_STATUSES.has(readTaskStatusOnDisk(root, t.taskId)),
+  );
 
   // Merge: a task carried by the worker-driver replaces any same-task workflow-events run (the driver
   // is the execution truth); union otherwise. Worker wins on collision. A worker task whose on-disk
