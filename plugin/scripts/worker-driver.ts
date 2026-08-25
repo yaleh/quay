@@ -17,8 +17,10 @@
 // 阶段 2 新增（AC116，相对阶段 1 的三条能力）：
 //   ① 并发 N —— --task 可重复、--concurrency N 上限；在飞 = 驱动当前活子进程数（直接量，非硬编码 1）。
 //   ② 超时 SIGTERM —— --timeout <ms>（缺省 0 = 无超时，SPEC §4④：成本结构未知前不设阈值）。超时 ⇒
-//      SIGTERM worker、outcome 记 final_state=timed-out。⛔ 超时也是异常死亡（worker 没落地）⇒ 其
-//      orphan worktree 一并清理（gap-worker-driver-no-record-on-abnormal-death，AC2：不清理则挡下轮重派）。
+//      SIGTERM worker、outcome 记 final_state=timed-out（worktree_preserved=true）。⛔ 超时【保留
+//      worktree】（SPEC §1 设计点3「超时即杀 worker 会话，但保留 worktree」；gap-worker-print-bg-wait-
+//      ceiling-600s AC3）——超时≠其它异常死亡（failed/killed/exited-not-landed 仍清 orphan worktree，
+//      gap-worker-driver-no-record-on-abnormal-death AC2）。
 //   ③ checkout 前 stash —— spawn 前 `git stash push --include-untracked`（⛔ 不 discard），非 git 仓库 no-op。
 //
 // outcome 记录（SPEC §4③，人裁定「跨任务行为检查由 outer 执行 ⇒ outer 只能读记录」）：
@@ -482,7 +484,7 @@ export interface OrphanCleanupResult {
 
 /**
  * orphan worktree 清理（gap-worker-driver-no-record-on-abnormal-death AC2）：worker 异常死亡（failed /
- * killed / timed-out——worker 没跑完、无完成实现）后，其 orphan worktree 永久残留会挡 driver 下轮对同一
+ * killed——worker 没跑完、无完成实现）后，其 orphan worktree 永久残留会挡 driver 下轮对同一
  * task 的 `git worktree add`（撞已存在路径 / 分支失败 ⇒ 需人工 remove）。清理 =
  * `git worktree remove --force <path>` + `git branch -D task/<id>`。⛔ 只在 worker 已退出（close 事件后）
  * 调用；⛔ completed 路径不调（落地判定已确认无残留）；⛔ exited-not-landed 路径不调——那是 worker
@@ -735,7 +737,11 @@ export interface WorkerCmdOptions {
 }
 
 /** 创建 prompt（无保留 worktree 时的 full-chain prompt，单一真相源）。续做 prompt 见
- *  buildContinueWorkerPrompt；两者由 workerPromptForTask 按「保留 worktree 在不在」择一。 */
+ *  buildContinueWorkerPrompt；两者由 workerPromptForTask 按「保留 worktree 在不在」择一。
+ *  gap-worker-print-bg-wait-ceiling-600s (c，辅助非根修)：fan-in 在飞期间尽量留在回合内等（用
+ *  TaskOutput 阻塞等待其终态），不要结束回合等完成通知——end_turn 时有存活后台任务会触发 600s
+ *  宽限终止（exit 0 却未落地）。⛔ 根修是 (a) PRINT_BG_WAIT_CEILING_MS=0，本提示只是降低模型
+ *  选错等法的概率。 */
 export function buildWorkerPrompt(task: string, root: string): string {
   return [
     `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2).`,
@@ -744,6 +750,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `(2) implement the task per its Proposal/Plan/AC/DoD, (3) run the suite,`,
     `(4) ff-merge to develop via the fan-in-execute workflow (scriptPath, args={task,worktree,root,runId,mergeTarget}).`,
     `You own your worktree fully; apart from the final merge do not touch develop.`,
+    `fan-in 在飞期间尽量留在回合内等（用 TaskOutput 阻塞等待其终态）——不要结束回合等完成通知：end_turn 时有存活后台任务会触发 600s 终止。`,
   ].join(" ");
 }
 
@@ -1090,10 +1097,10 @@ function appendWorkerPid(pidFile: string, workerPid: number): void {
 
 /**
  * spawn 一个 worker 并等待其终态（含超时 SIGTERM）。超时 ⇒ kill("SIGTERM")，close 事件带 signal=SIGTERM，
- * timedOut 标记落 outcome final_state=timed-out。异常死亡终态（failed/killed/timed-out——worker 没跑完、
- * 无完成实现）清理 orphan worktree（gap-worker-driver-no-record-on-abnormal-death AC2）；⛔
- * exited-not-landed（exit 0 但没落地，含 needs-human 闸拒绝）保留分支/worktree 供续做
- * （gap-worker-needs-human-destroys-branch-worktree AC1）。
+ * timedOut 标记落 outcome final_state=timed-out（worktree_preserved=true，⛔ 不清理——SPEC §1 设计点3
+ * 超时保留 worktree）。其它异常死亡终态（failed/killed——worker 没跑完、无完成实现）清理 orphan
+ * worktree（gap-worker-driver-no-record-on-abnormal-death AC2）；⛔ exited-not-landed（exit 0 但没落地，
+ * 含 needs-human 闸拒绝）保留分支/worktree 供续做（gap-worker-needs-human-destroys-branch-worktree AC1）。
  */
 function runOneWorker({
   taskId,
@@ -1148,18 +1155,21 @@ function runOneWorker({
         spawnError: spawnErr, inFlightCount, timedOut,
         landed: landing.landed, landReason: landing.reason,
       });
-      // gap-worker-driver-no-record-on-abnormal-death（AC2，能取假）：worker 异常死亡（failed/killed/
-      // timed-out——worker 没跑完、无完成实现）后，orphan worktree 永久残留会挡 driver 下轮对同一 task 的
+      // gap-worker-driver-no-record-on-abnormal-death（AC2，能取假）：worker 异常死亡（failed/killed——
+      // worker 没跑完、无完成实现）后，orphan worktree 永久残留会挡 driver 下轮对同一 task 的
       // `git worktree add`。写终态的同时清理（⛔ completed/spawn-failed/not-dispatched 无 worktree 可清；
       // spawn-failed 连 worker 都没起，not-dispatched 连派发都没派）。⛔ exited-not-landed 同样不清理
       // ——那是 exit 0 跑到 fan-in 底但没落地（needs-human 闸拒绝 = 套件绿 + 实现完成，工作有效），
       // 分支/worktree 保留供续做，销毁会让完成实现永久丢失（gap-worker-needs-human-destroys-branch-
-      // worktree AC1）。清理结果落进 outcome（worktree_cleaned / worktree_cleanup_error）供生产观测。
+      // worktree AC1）。⛔ timed-out 是唯一例外（gap-worker-print-bg-wait-ceiling-600s AC3）：超时
+      // 【保留 worktree】（SPEC §1 设计点3「超时即杀 worker 会话，但保留 worktree」），不清理——落
+      // worktree_preserved=true。清理结果落进 outcome（worktree_cleaned / worktree_cleanup_error）供观测。
       const shouldCleanup =
         outcome.final_state !== "completed" &&
         outcome.final_state !== "exited-not-landed" &&
         outcome.final_state !== "spawn-failed" &&
-        outcome.final_state !== "not-dispatched";
+        outcome.final_state !== "not-dispatched" &&
+        outcome.final_state !== "timed-out";
       const cleanup = shouldCleanup ? cleanupOrphanWorktree(rootDir, taskId) : null;
       const finalOutcome = cleanup
         ? {
@@ -1168,7 +1178,9 @@ function runOneWorker({
             worktree_cleanup_error: cleanup.error,
             worktree_cleanup_skipped_live: cleanup.skippedLiveWorker,
           }
-        : outcome;
+        : outcome.final_state === "timed-out"
+          ? { ...outcome, worktree_preserved: true }
+          : outcome;
       appendOutcomeToFile(outcomeFile, finalOutcome);
       if (json) process.stdout.write(`${JSON.stringify({ event: "worker-done", task: taskId, ...finalOutcome })}\n`);
       let exitCode: number;
