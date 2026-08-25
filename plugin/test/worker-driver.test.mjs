@@ -27,6 +27,7 @@ import {
   computeWorkerRoundRecord,
   splitArgs,
   launchArgv,
+  buildWorkerPrompt,
   workerArgvForTask,
   defaultWorkerArgv,
   defaultSelectorArgv,
@@ -77,6 +78,8 @@ import {
   WORKER_PROCESS_NAME,
   parseIntervalMs,
   RESIDENT_INTERVAL_MS_DEFAULT,
+  parseReconcileIntervalSecs,
+  RECONCILE_INTERVAL_SECS_DEFAULT,
   workerPromptForTask,
   buildContinueWorkerPrompt,
   continueStateForTask,
@@ -334,6 +337,15 @@ test("resolveRun / splitArgs / defaultWorkerArgv / signalExitCode / parseTimeout
   assert.equal(resolveConcurrency(0, 2, {}), 2, "non-positive explicit is ignored");
 });
 
+test("AC2 (gap-worker-print-bg-wait-ceiling-600s c) — buildWorkerPrompt hints to stay in-turn (TaskOutput blocking wait) during fan-in flight", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  // 辅助 (c)：fan-in 在飞期间尽量留在回合内等（TaskOutput 阻塞等待），不要结束回合等完成通知。
+  assert.match(prompt, /fan-in 在飞期间尽量留在回合内等/, "prompt hints to stay in-turn during fan-in flight");
+  assert.match(prompt, /TaskOutput 阻塞等待/, "prompt names TaskOutput blocking wait (resets the 600s clock)");
+  assert.match(prompt, /不要结束回合等完成通知/, "prompt forbids ending the turn to await the notification");
+  assert.match(prompt, /600s 终止/, "prompt names the 600s termination risk");
+});
+
 test("stashIfDirty — clean repo ⇒ no-op; non-git dir ⇒ no-op; dirty repo ⇒ stash (never discard)", () => {
   // non-git dir (the phase-1 makeRoot shape) ⇒ graceful no-op.
   const nonGit = makeRoot("nogit");
@@ -555,9 +567,9 @@ test("AC2 (能取假) — leave an uncommitted change ⇒ driver stashes it (git
   assert.match(fs.readFileSync(path.join(root, "a.txt"), "utf8"), /dirty/, "stash pop restores the dirty content");
 });
 
-// ── AC3 (阶段 2): 超时 ⇒ 墙钟超时 SIGTERM、orphan worktree 清理 ────────────────────────────────────
+// ── AC3 (阶段 2): 超时 ⇒ 墙钟超时 SIGTERM、worktree 保留（gap-worker-print-bg-wait-ceiling-600s）──────
 
-test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed-out, orphan worktree cleaned (AC2)", async (t) => {
+test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed-out, worktree preserved (SPEC §1 设计点3)", async (t) => {
   const root = makeGitRoot("timeout");
   const wtPath = path.join(root, "..", "w1");
   t.after(() => {
@@ -568,8 +580,9 @@ test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed
   fs.writeFileSync(path.join(root, "k.txt"), "x\n");
   runGit(root, ["add", "k.txt"]);
   runGit(root, ["commit", "-q", "-m", "init"]);
-  // a real orphan worktree on the TASK's branch — timeout is an abnormal death ⇒ it must be cleaned up
-  // (gap-worker-driver-no-record-on-abnormal-death AC2), not preserved (the old 阶段-2 contract).
+  // a real worktree on the TASK's branch — timeout SIGTERMs the worker but PRESERVES the worktree
+  // (SPEC §1 设计点3「超时即杀 worker 会话，但保留 worktree」；gap-worker-print-bg-wait-ceiling-600s AC3),
+  // ⛔ not cleaned up (unlike failed/killed/exited-not-landed — gap-worker-driver-no-record-on-abnormal-death AC2).
   runGit(root, ["worktree", "add", "-q", "-b", "task/gap-t", wtPath]);
   assert.ok(fs.existsSync(wtPath), "precondition: worktree exists before the run");
 
@@ -596,10 +609,11 @@ test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed
   assert.match(rec.failure_reason, /timed out/, "failure reason names the timeout");
   assert.ok(rec.wall_clock_ms >= 500 && rec.wall_clock_ms < 5000, `wall_clock_ms reflects the timeout (~${rec.wall_clock_ms}ms), not the full run`);
 
-  // worktree 已清理（超时是异常死亡 ⇒ orphan worktree 被清，driver 下轮可对同一 task 重派；AC2）。
-  assert.equal(rec.worktree_cleaned, true, "AC2: the orphan worktree was cleaned up on timed-out");
-  assert.ok(!fs.existsSync(wtPath), "worktree removed after timeout (⛔ not preserved)");
-  assert.equal(worktreePresentForTask(root, "gap-t"), false, "git worktree list no longer shows task/gap-t");
+  // worktree 保留（超时 ⇒ SIGTERM 但保留 worktree；⛔ 误删 ⇒ 假）。
+  assert.equal(rec.worktree_preserved, true, "AC3: timed-out records worktree_preserved=true");
+  assert.equal(rec.worktree_cleaned, undefined, "AC3: timed-out does NOT clean the orphan worktree (no worktree_cleaned field)");
+  assert.ok(fs.existsSync(wtPath), "worktree preserved after timeout (⛔ not removed)");
+  assert.equal(worktreePresentForTask(root, "gap-t"), true, "git worktree list still shows task/gap-t");
 });
 
 // ── gap-worker-driver-no-record-on-abnormal-death：worker 异常死亡 ⇒ 终态记录 + orphan worktree 清理 ──
@@ -944,7 +958,7 @@ test("AC129 pure — parseSelectorOutput: valid pick, invalid-pick fallback, emp
   assert.equal(parseSelectorOutput("gap-a x", [], 0), null);
 });
 
-test("AC142 AC1 — selector spawn captures stderr; fallback reason carries it (spawn 失败不再零诊断)", () => {
+test("AC142 AC1 — selector spawn captures stderr; fallback reason carries it (spawn 失败不再零诊断)", async () => {
   const candidates = ["gap-a", "gap-b"];
   // parseSelectorOutput: stderr 可选传入，兜底 reason 带 stderr 截断。
   const bad = parseSelectorOutput("", candidates, 1, "AUTH-ERROR: no credentials");
@@ -952,7 +966,8 @@ test("AC142 AC1 — selector spawn captures stderr; fallback reason carries it (
   assert.match(bad.reason, /stderr="AUTH-ERROR/);
 
   // runSelectorWorker: 真实 spawn 写 stderr + exit 非零 ⇒ 兜底 reason 带 stderr（⛔ 不再 ignore）。
-  const r = runSelectorWorker(
+  // 异步版（gap-worker-driver-async-selector-readypool AC1）：runSelectorWorker 已改 async。
+  const r = await runSelectorWorker(
     candidates,
     ["node", "-e", "process.stderr.write('AUTH-ERROR: no credentials');process.exit(1)"],
     "/r",
@@ -1816,7 +1831,7 @@ test("AC3 (cold-start-refresh) — per-pass observation: no one-time `const cold
   const src = fs.readFileSync(DRIVER, "utf8");
   assert.doesNotMatch(src, /const\s+coldInflight\s*=/, "AC3: the one-time `const coldInflight` snapshot is gone (⛔ frozen snapshot ⇒ fake in-flight forever)");
   assert.match(src, /let\s+coldInflight\s*=\s*new Set/, "coldInflight is a mutable per-pass binding, not a frozen snapshot");
-  assert.match(src, /coldInflight\s*=\s*enumerateColdStartInflight\(rootDir\)/, "coldInflight is re-observed via enumerateColdStartInflight each pass");
+  assert.match(src, /coldInflight\s*=\s*await\s+enumerateColdStartInflightAsync\(rootDir\)/, "coldInflight is re-observed via enumerateColdStartInflightAsync each pass (async — 不阻塞地板)");
 });
 
 // ── gap-worker-driver-stopreason-latch-permanent-stop ──────────────────────────────────────────────
@@ -1830,6 +1845,73 @@ test("parseIntervalMs — default 30000; small value; invalid ⇒ default (fail-
   assert.equal(parseIntervalMs("25"), 25);
   assert.equal(parseIntervalMs("abc"), RESIDENT_INTERVAL_MS_DEFAULT, "invalid ⇒ default");
   assert.equal(parseIntervalMs("-5"), RESIDENT_INTERVAL_MS_DEFAULT, "negative ⇒ default");
+});
+
+// ── gap-worker-driver-reconcile-interval：协调地板（SPEC §5.5）───────────────────────────────────────
+// 边沿触发（worker 退出）+ 存储决策 = 1h48m 停摆形态。地板 = 至少每 reconcileMs 协调一次，边沿事件全丢
+// 也降级「慢但正确」而非「静默停摆」。AC1（地板触发 + 生产载体）/ AC2（全边沿失效仍派发）逐条取假。
+
+test("parseReconcileIntervalSecs — default 300s (conservative); small; invalid ⇒ default", () => {
+  assert.equal(RECONCILE_INTERVAL_SECS_DEFAULT, 300);
+  assert.equal(parseReconcileIntervalSecs(undefined), 300_000, "default = 300s → 300000ms");
+  assert.equal(parseReconcileIntervalSecs("5"), 5_000, "5s → 5000ms");
+  assert.equal(parseReconcileIntervalSecs("abc"), 300_000, "invalid ⇒ default");
+  assert.equal(parseReconcileIntervalSecs("-3"), 300_000, "negative ⇒ default");
+});
+
+test("AC1 (gap-worker-driver-reconcile-interval) — in-process timer re-coordinates every ≤N s with zero worker-exit edge events (carrier = worker-round.jsonl, ⛔ not --json)", async (t) => {
+  const root = makeGitRoot("reconcile-ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-r", "done");
+  // ⛔ spawn WITHOUT --json: the floor's observable carrier must be .quay/worker-round.jsonl
+  // (writeRound → appendRoundToFile 无条件写文件，与 --json 无关——生产 argv 无 --json，硬规则 3b）。
+  const child = spawn(process.execPath, [
+    "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root,
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-r'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-r\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e setTimeout(()=>{},60000)", // 挂起：worker 退出这个边沿事件永不发生
+    "--concurrency", "1",
+    "--reconcile-interval", "1",  // 地板每 1s
+    "--interval", "100",          // idle 轮询（在飞时不走这条，无害）
+  ], { stdio: ["ignore", "ignore", "ignore"] });
+  t.after(() => { if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch { /* gone */ } } });
+
+  // 挂起的 worker 只派发一次；之后地板每 ~1s 唤醒循环 ⇒ round 记录持续累积（无 worker 退出边沿事件）。
+  await waitFor(() => readRoundLines(root).length >= 3, 10000);
+  const rounds = readRoundLines(root);
+  assert.ok(rounds.length >= 3, "AC1: floor wrote ≥3 round records with zero worker-exit edge events (production carrier, ⛔ not --json)");
+  assert.ok(rounds.some((r) => r.in_flight >= 1), "the round records carry an in-flight worker (the floor is exercised in the in-flight branch, ⛔ not the idle poll)");
+  child.kill("SIGKILL");
+});
+
+test("AC2 (gap-worker-driver-reconcile-interval) — all edge events lost (worker hangs) ⇒ floor still re-runs ready pool and dispatches within N s", async (t) => {
+  const root = makeGitRoot("reconcile-ac2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTouchedTask(root, "gap-a", "plugin/scripts/aa.ts");
+  writeTouchedTask(root, "gap-b", "plugin/scripts/bb.ts"); // disjoint from gap-a
+  const rpcFile = path.join(root, "rpc.cnt");
+  const selFile = path.join(root, "sel.cnt");
+  const drv = spawnResident(root, [
+    // ready-pool: pass1 的两次调用（派发 gap-a + pool-empty）都只给 gap-a；pass2 地板唤醒才给 gap-b。
+    // 用计数器而非 marker 文件——marker 的写入时刻与 pass1 第二次 ready-pool 的 spawn 竞态（gap-b 会提前在 pass1 派发）。
+    "--ready-pool-cmd", counterNodeE(rpcFile, "n>=2?JSON.stringify({ready:['gap-a','gap-b'],pool:2}):JSON.stringify({ready:['gap-a'],pool:1})"),
+    "--selector-cmd", counterNodeE(selFile, "n===0?'gap-a\\x20first':'gap-b\\x20second'"),
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e setTimeout(()=>{},60000)", // 两个 worker 都挂起：worker 退出边沿事件永不发生
+    "--concurrency", "2",
+    "--reconcile-interval", "1",
+    "--interval", "100",
+  ]);
+  t.after(() => drv.stop());
+
+  // gap-a 先派发（挂起）。此后无任何 worker 退出边沿事件。
+  await waitFor(() => drv.events().some((e) => e.event === "selector-picked" && e.task === "gap-a"), 5000);
+  // 地板（⛔ 不是 worker 退出）唤醒循环 ⇒ 重读 ready 池 ⇒ 派发 gap-b。
+  await waitFor(() => drv.events().some((e) => e.event === "selector-picked" && e.task === "gap-b"), 10000);
+  const picks = drv.events().filter((e) => e.event === "selector-picked").map((e) => e.task);
+  assert.ok(picks.includes("gap-b"), `AC2: floor re-ran ready pool and dispatched gap-b with zero worker-exit edge events (picks=${picks.join(",")})`);
+  drv.stop();
 });
 
 test("AC1 (gap-worker-driver-stopreason-latch-permanent-stop) — gate first WAIT then GO ⇒ the SAME driver process (no restart) recovers dispatch", async (t) => {

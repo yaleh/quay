@@ -34,7 +34,7 @@ extra:
 
 ## Touches
 
-- packages/quay/src/serve-handlers.ts（/task/<id> handler + cfg）
+- packages/quay/src/serve-task.ts（/task/<id> handler + cfg）
 - packages/quay/src/observation.ts（parseWorkerOutcomeRecords）
 - packages/quay/test/observation.test.mjs（对应测试）
 - tasks/gap-webui-task-runs-block.md（自身）

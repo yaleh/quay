@@ -89,6 +89,13 @@ export type RunLiveness = "alive" | "orphan" | "unknown";
 export interface InFlightTask {
   taskId: string;
   runId: string;
+  /**
+   * Worker process id (from the `/proc/<pid>` scan, 方向二). Non-null ONLY for a worker-process-
+   * signal task (gap-live-page-worker-inflight-bidirectional-error); null for workflow-events and
+   * outcome-carrier tasks (no process known). Lets the Live view locate the process/session
+   * downstream (gap-webui-live-passthrough-pid).
+   */
+  pid: string | null;
   startedAtMs: number;
   /**
    * Impl-complete boundary (gap-inflight-states-missing-impl-complete-event): the third lifecycle
@@ -227,6 +234,7 @@ export function pairInFlight(events: RawEvent[], nowMs: number): InFlightTask[] 
       out.push({
         taskId: rec.taskId,
         runId: rec.runId,
+        pid: null, // pure event pairing: no live process known (readLive annotates it for 方向二)
         startedAtMs: rec.start.timing.startedAtMs,
         implCompletedAtMs:
           rec.implComplete && typeof rec.implComplete.recordedAtMs === "number"
@@ -616,6 +624,7 @@ export function workerInFlightTasks(records: WorkerOutcomeRecord[], nowMs: numbe
     out.push({
       taskId: task,
       runId: r.run_id ?? `worker-${task}`,
+      pid: null, // outcome-carrier task: no live process known (written only at worker END)
       startedAtMs: r.startedMs,
       implCompletedAtMs: null,
       minutes: Math.max(0, (nowMs - r.startedMs) / 60_000),
@@ -627,9 +636,12 @@ export function workerInFlightTasks(records: WorkerOutcomeRecord[], nowMs: numbe
   return out;
 }
 
-/** A live worker process (方向二): task id + process start wall-clock. */
+/** A live worker process (方向二): task id + process id + process start wall-clock. */
 export interface LiveWorker {
   taskId: string;
+  /** The `/proc/<pid>` directory name this worker was scanned from (gap-webui-live-passthrough-pid).
+   *  Lets the Live view locate the process/session downstream. */
+  pid: string;
   /** Process start wall-clock ms (from `/proc/<pid>/stat` starttime + btime). null when unreadable —
    *  the caller falls back to the observation instant (fail-closed toward "just started", never a
    *  fabricated long elapsed). */
@@ -685,7 +697,7 @@ export function readLiveWorkerProcesses(procDir: string = "/proc"): LiveWorker[]
     } catch { continue; }
     const taskId = workerTaskIdFromCmdline(cmdline);
     if (!taskId) continue;
-    out.push({ taskId, startedAtMs: procStartTimeMs(procDir, e, btimeSec) });
+    out.push({ taskId, pid: e, startedAtMs: procStartTimeMs(procDir, e, btimeSec) });
   }
   return out;
 }
@@ -844,6 +856,7 @@ export function readLive(
     workerInFlight.push({
       taskId: w.taskId,
       runId: `worker-${w.taskId}`,
+      pid: w.pid,
       startedAtMs,
       implCompletedAtMs: null,
       minutes: Math.max(0, (nowMs - startedAtMs) / 60_000),

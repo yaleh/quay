@@ -368,7 +368,7 @@ test("AC1: a live worker process whose task status is already done is NOT in-fli
       "---\nid: gap-reflog\ntitle: fixture\nstatus: done\n---\n\n**type:** execution\n");
     const live = readLive(ws, {
       nowMs: Date.parse("2026-08-24T08:00:00.000Z"),
-      liveWorkers: [{ taskId: "gap-reflog", startedAtMs: Date.parse("2026-08-24T07:00:00.000Z") }],
+      liveWorkers: [{ taskId: "gap-reflog", pid: "100", startedAtMs: Date.parse("2026-08-24T07:00:00.000Z") }],
     });
     assert.ok(!live.inFlight.some((t) => t.taskId === "gap-reflog"),
       "AC1: status=done ⇒ a running worker process for it is still NOT in-flight (done has landed)");
@@ -426,12 +426,13 @@ test("方向二: a first-dispatched worker (no outcome record) is in-flight via 
     const startedAtMs = Date.parse("2026-08-24T07:30:00.000Z");
     const live = readLive(ws, {
       nowMs: Date.parse("2026-08-24T08:00:00.000Z"),
-      liveWorkers: [{ taskId: "gap-first", startedAtMs }],
+      liveWorkers: [{ taskId: "gap-first", pid: "100", startedAtMs }],
     });
     const t = live.inFlight.find((x) => x.taskId === "gap-first");
     assert.ok(t, "方向二: a worker with no outcome record surfaces in-flight via the process signal");
     assert.equal(t.liveness, "alive", "方向二: the process-signal worker is observably alive");
     assert.equal(t.implCompletedAtMs, null, "方向二: a running worker is still 实现中 (not awaiting-land)");
+    assert.equal(t.pid, "100", "方向二: the process-signal worker carries its /proc pid through readLive (gap-webui-live-passthrough-pid)");
     assert.ok(Math.abs(t.minutes - 30) < 0.001, "方向二: elapsed minutes from the process start (~30m, got " + t.minutes + ")");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
@@ -471,6 +472,7 @@ test("readLiveWorkerProcesses: scans a fake /proc for worker cmdlines + start ti
     const workers = readLiveWorkerProcesses(procDir);
     assert.equal(workers.length, 1, "only the quay-task-worker process is a live worker");
     assert.equal(workers[0].taskId, "gap-first", "task id extracted from the worker cmdline");
+    assert.equal(workers[0].pid, "100", "pid = the /proc/<pid> directory name the worker was scanned from");
     assert.equal(workers[0].startedAtMs, (btimeSec + 100) * 1000,
       "startedAtMs = btime + starttime/100 ticks (got " + workers[0].startedAtMs + ")");
   } finally {
@@ -480,6 +482,32 @@ test("readLiveWorkerProcesses: scans a fake /proc for worker cmdlines + start ti
 
 test("readLiveWorkerProcesses: unreadable /proc ⇒ [] (fail-closed, never throws)", () => {
   assert.deepEqual(readLiveWorkerProcesses("/nonexistent-proc-dir"), [], "no /proc ⇒ no live workers");
+});
+
+// gap-webui-live-passthrough-pid AC1: pid must be present on EVERY live entry (⛔ pid 缺失 ⇒ 假).
+// The field is a pass-through from readLiveWorkerProcesses to the /live response — a workflow-events
+// entry (pairInFlight) has no process (null), a worker-process entry (方向二) carries its /proc pid.
+test("AC1: every readLive in-flight entry carries a pid field (null for workflow-events, non-null for worker process)", () => {
+  const { parent, root } = ghostWorkspace("pid-passthrough");
+  try {
+    writeStartEvent(root, "EV-1", Date.parse("2026-08-24T07:00:00.000Z"));
+    const live = readLive(root, {
+      nowMs: Date.parse("2026-08-24T08:00:00.000Z"),
+      liveWorkers: [{ taskId: "WK-1", pid: "100", startedAtMs: Date.parse("2026-08-24T07:30:00.000Z") }],
+    });
+    assert.ok(live.inFlight.length >= 2,
+      "both entries surface in-flight (got " + live.inFlight.map((t) => t.taskId).join(",") + ")");
+    for (const t of live.inFlight) {
+      assert.ok(Object.prototype.hasOwnProperty.call(t, "pid"),
+        `AC1: every live entry carries a pid field — ${t.taskId} is missing it`);
+    }
+    const ev = live.inFlight.find((t) => t.taskId === "EV-1");
+    const wk = live.inFlight.find((t) => t.taskId === "WK-1");
+    assert.equal(ev.pid, null, "AC1: a workflow-events entry has pid=null (no process known)");
+    assert.equal(wk.pid, "100", "AC1: a worker-process entry carries its /proc pid through readLive");
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
 });
 
 test("parseWorkerOutcomeRecords: parses the carrier, skips malformed lines, never throws", () => {
