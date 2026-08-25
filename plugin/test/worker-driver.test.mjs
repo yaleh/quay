@@ -409,6 +409,33 @@ test("gap-worker-prompt-fan-in-call-signature-placeholder — buildWorkerPrompt 
   assert.match(prompt, /plugin\/workflows\/fan-in-execute\.js/, "AC3: names the shipped mirror to NOT diff against");
 });
 
+test("AC1 (能取假) — buildWorkerPrompt wires dispatch-worktree-setup.sh after worktree create (机制接管 bootstrap)", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  // 结构针：grep 到调用 + 位置在 worktree 创建之后。
+  assert.match(prompt, /dispatch-worktree-setup\.sh/, "AC1: create prompt names the setup script");
+  assert.match(prompt, /\/r\/plugin\/scripts\/dispatch-worktree-setup\.sh/, "AC1: setup script is the real absolute path under root");
+  const createIdx = prompt.indexOf("create an isolated git worktree");
+  const setupIdx = prompt.indexOf("dispatch-worktree-setup.sh");
+  assert.ok(createIdx !== -1, "create instruction present");
+  assert.ok(setupIdx > createIdx, "AC1: setup call is positioned AFTER worktree creation");
+});
+
+test("AC2 (能取假，负控制) — prompt no longer leaves bootstrap to agent-remembering (⛔ no hand-rolled ln -s / cp config.yml instruction)", () => {
+  const create = buildWorkerPrompt("gap-x", "/r");
+  assert.doesNotMatch(create, /ln -s/, "AC2: create prompt must not instruct a hand-rolled node_modules symlink");
+  assert.doesNotMatch(create, /cp config\.yml/, "AC2: create prompt must not instruct a hand-rolled config.yml copy");
+  const cont = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "r",
+  });
+  assert.doesNotMatch(cont, /ln -s/, "AC2: continue prompt must not instruct a hand-rolled node_modules symlink");
+  assert.doesNotMatch(cont, /cp config\.yml/, "AC2: continue prompt must not instruct a hand-rolled config.yml copy");
+});
+
 test("stashIfDirty — clean repo ⇒ no-op; non-git dir ⇒ no-op; dirty repo ⇒ stash (never discard)", () => {
   // non-git dir (the phase-1 makeRoot shape) ⇒ graceful no-op.
   const nonGit = makeRoot("nogit");
@@ -1488,6 +1515,20 @@ test("gap-worker-prompt-fan-in-call-signature-placeholder — buildContinueWorke
   assert.match(p, /worktree:"\/wt"/, "continue prompt embeds the concrete worktree path (not a placeholder)");
   assert.match(p, /generateRunId/, "AC1: continue prompt names generateRunId");
   assert.match(p, /plugin\/scripts\/fast-mode-telemetry\.ts/, "AC1: continue prompt names the generateRunId module");
+});
+
+test("AC1 (能取假) — buildContinueWorkerPrompt wires dispatch-worktree-setup.sh on the reused worktree (idempotent re-provision)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "worker exited 0 but task did not land",
+  });
+  assert.match(p, /dispatch-worktree-setup\.sh/, "AC1: continue prompt names the setup script");
+  assert.match(p, /dispatch-worktree-setup\.sh \/wt/, "AC1: continue prompt re-provisions the concrete worktree path");
+  assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
 });
 
 test("AC2 — continueStateForTask gathers real state (own branch commits / AC checkboxes / last exited-not-landed reason)", (t) => {

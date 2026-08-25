@@ -696,6 +696,15 @@ function fanInSignature(task: string, root: string, worktree: string): string {
   ].join(" ");
 }
 
+/** dispatch-worktree-setup.sh 调用签名（gap-dispatch-worktree-setup-zero-production-callers）：每个
+ *  被派发的 worktree 创建后【必须】跑一次（node_modules symlink-or-install + config.yml 经
+ *  worktree-include.sh），机制接管 bootstrap——worker 不再手工 `ln -s`/`cp config.yml`（正是该脚本被
+ *  写出来要消灭的 AGENT-REMEMBERING 失败模式）。脚本幂等：已 provision 的 worktree 重跑是 no-op。 */
+function dispatchSetupSignature(root: string, worktree: string): string {
+  const setupScript = path.join(root, "plugin", "scripts", "dispatch-worktree-setup.sh");
+  return `bash ${setupScript} ${worktree}`;
+}
+
 /** 创建 prompt（无保留 worktree 时的 full-chain prompt，单一真相源）。续做 prompt 见
  *  buildContinueWorkerPrompt；两者由 workerPromptForTask 按「保留 worktree 在不在」择一。
  *  gap-worker-print-bg-wait-ceiling-600s (c，辅助非根修)：fan-in 在飞期间尽量留在回合内等（用
@@ -706,7 +715,9 @@ export function buildWorkerPrompt(task: string, root: string): string {
   return [
     `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2).`,
     `Task: ${task}. Repo root: ${root}.`,
-    `Run the full task chain: (1) create an isolated git worktree for ${task},`,
+    `Run the full task chain: (1) create an isolated git worktree for ${task}, then immediately`,
+    `provision it by running \`${dispatchSetupSignature(root, "<the worktree path you created in step 1>")}\``,
+    `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, (3) run the suite,`,
     `(4) ${fanInSignature(task, root, "<the worktree path you created in step 1>")}.`,
     `You own your worktree fully; apart from the final merge do not touch develop.`,
@@ -915,6 +926,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `(it would fail: the path/branch already exists). Prior round state: branch task/${task} already has`,
     `${commits} commits${head}; Acceptance Criteria currently checked ${ac};`,
     `the last round exited-not-landed because: ${reason}.`,
+    `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch),`,
     `(2) run the suite, (3) ${fanInSignature(task, root, wt)}.`,
