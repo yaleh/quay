@@ -43,10 +43,10 @@ function renderSessionsPage(sessions: SessionsResult): string {
     </section>`;
   }).join("");
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — Manager/Outer/Inner 最近会话">${modernistStyles()}${pageStyles()}<title>Sessions — 三层最近会话</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — 运行中 + 已结束会话">${modernistStyles()}${pageStyles()}<title>Sessions — 会话观测</title></head>
     <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main>
-      <h1>Sessions — Manager / Outer / Inner 最近会话</h1>
-      <p class="meta">数据源：<code>session-liveness.sh --once</code> + 会话 transcript 尾部</p>
+      <h1>Sessions — 会话观测（运行中 + 已结束）</h1>
+      <p class="meta">数据源：<code>claude agents --json</code>（运行中 · 交互式 + <code>-p</code>）+ transcript 目录扫描（已结束）+ 会话 transcript 尾部</p>
       ${obsNote(sessions.status, sessions.reason)}
       ${sessions.sessions.length > 0 ? sections : ""}
     </main></body></html>`;
