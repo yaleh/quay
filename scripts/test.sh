@@ -1401,6 +1401,17 @@ elif [ "${1:-}" = "--buckets" ]; then
       echo "scripts/test.sh: lpt-order: M bucket reordered (${#files[@]} files; first=$(basename "${files[0]}"))" >&2
     fi
   fi
+  # AC3 (gap-suite-serial-lowconc-classification-recheck 单飞锁侧): the bucket SUCCESS path
+  # (non-hub, non-zero selection) structurally bypasses run_selected() — where
+  # full_suite_lock_acquire() lives — so QUAY_MAX_CONCURRENT_SUITES=1 never applied to bucket runs
+  # (round #572 M-bucket lock_wait_ms key missing vs #573 full overlap 5min). Acquire the
+  # single-flight lock HERE (before static checks + build, matching run_selected's lock-first
+  # order), so a bucket suite contends on the SAME S-slot lock as a full suite. The lock's own
+  # skip guards (QUAY_TEST_SKIP_RESOURCE_GATE=1 / nested) still hold — this runs before
+  # mark_nested below, so a top-level bucket run acquires while a nested one (outer already holds
+  # the slot) skips. FD-based flock auto-releases on `exit "${bucket_code}"` below — no explicit
+  # release needed (same crash-autorelease guarantee as the full path).
+  full_suite_lock_acquire
   # FULL static checks (verification-grade — no 降频), then the bucket test subset.
   run_static_checks
   build_dist_once
