@@ -38,8 +38,13 @@ extra:
 
 ## Touches
 
-- .gitignore（追加 5-8 条 `**/.quay/<name>`）
+- .gitignore（追加 5 条 `**/.quay/<name>`）
 - tasks/gap-quay-runtime-files-tracked-but-shouldnt.md（自身）
+- .quay/test.sh.lock（git rm --cached 去跟踪）
+- .quay/full-suite-state.json.suitefix-bak（git rm --cached 去跟踪）
+- .quay/no-code-caller-triage.jsonl（git rm --cached 去跟踪）
+- .quay/no-code-caller-triage-rescan.jsonl（git rm --cached 去跟踪）
+- .quay/suite-bucket-reattribution.jsonl（git rm --cached 去跟踪）
 
 ## Evidence（inner 落盘 2026-08-25，impl 完成）
 
