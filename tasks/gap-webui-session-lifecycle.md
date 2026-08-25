@@ -1,7 +1,7 @@
 ---
 id: gap-webui-session-lifecycle
 title: web 会话生命周期（headless driver 暴露 + -p 新建 + --resume 重启；交互式先不暴露）
-status: ready
+status: done
 labels:
   - gap
   - feature
