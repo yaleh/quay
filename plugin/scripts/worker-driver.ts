@@ -117,7 +117,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { isDirectEntry, readFrontmatter } from "./gate-script-base.ts";
+import { isDirectEntry } from "./gate-script-base.ts";
 // AC150-3：资源门判定 + 控制态 + 身份闸 + MCP 控制面，抽到 driver-shared.ts 供 promotion-driver 复用
 // （函数级复用，⛔ 非复制粘贴）。本文件仍 re-export 保持旧 import 面（worker-driver.test.mjs 等）。
 import {
@@ -145,9 +145,11 @@ export {
   resourceGateCheck,
   serveControlPlane,
 } from "./driver-shared.ts";
-import { parseTask, readDependsOn } from "./task-schema.ts";
-import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
-import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
+// AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
+// applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
+// 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
+import { applyTaskFilters, makeFilterContext, readTaskStatus } from "./driver-filters.ts";
+export { readTaskStatus } from "./driver-filters.ts";
 import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
 import { isDue } from "./routine-scheduler.ts";
 
@@ -283,39 +285,8 @@ export function computeOutcome({
 // exit_code=0 只是「进程正常退出」，⛔ 不是「任务落地」。写 final_state=completed 前必须读一次任务侧
 // 直接量：status=done（任务文件 frontmatter）∧ 无残留 worktree（`git worktree list` 无 task/<id> 分支）。
 // 共同纪律（同族 gap-fix-worker-edit-exit-4）：驱动写任何终态之前，必须读任务侧的直接量。
-
-/** 读任务文件 status frontmatter（`<root>/tasks/<id>.md`）。缺失/读失败 ⇒ null。 */
-export function readTaskStatus(root: string, taskId: string): string | null {
-  try {
-    const fm = readFrontmatter(path.join(root, "tasks", `${taskId}.md`));
-    return fm?.status ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 派发前 depends_on 二次过滤（gap-worker-driver-dispatch-pre-filter-missing AC1）：读候选任务的
- * `depends_on` 关系边（task-schema 的 readDependsOn——与 ready-pool-check 的 depsReadyFor 读同一
- * 字段，单一真相源，⛔ 不重写依赖解析），逐个核对依赖的 status。任一依赖未 done（或依赖文件缺失，
- * 读不懂 ⇒ fail-closed 不派发）⇒ false。无依赖 ⇒ true（⛔ 空依赖是「真无依赖」，不是「读不懂」——
- * 候选自身文件读失败才 ⇒ false，硬规则 3b：读不懂 ≠ 无依赖）。与 gap-launch-script-worker-cap-broken
- * AC3 的 Touches 互斥过滤同属「spawn 前候选过滤」的两半。
- */
-export function depsReadyForDispatch(root: string, taskId: string): boolean {
-  let deps: string[];
-  try {
-    const text = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
-    deps = readDependsOn(parseTask(text).frontmatterRaw);
-  } catch {
-    return false; // 候选文件不可读 ⇒ fail-closed（不派发）
-  }
-  if (deps.length === 0) return true;
-  for (const depId of deps) {
-    if (readTaskStatus(root, depId) !== "done") return false;
-  }
-  return true;
-}
+// readTaskStatus / depsSatisfied / touchesDisjoint 已上收 driver-filters.ts（AC152 单一实现），本文件
+// 只 re-export readTaskStatus、派发环消费 applyTaskFilters。
 
 /** 转义正则元字符（task id 进 `new RegExp` 前）。 */
 function escapeRegExp(s: string): string {
@@ -1324,37 +1295,8 @@ export function shuffle<T>(arr: readonly T[]): T[] {
   return a;
 }
 
-/**
- * 派发前 Touches 互斥过滤（gap-launch-script-worker-cap-broken AC3）：cap=5 后池里可能同时有 2 条
- * `## Touches` 重叠的 ready 任务，若并发派发会各改同一文件、fan-in 才炸（两边都 exit 0 看起来都做完了，
- * 比 fake-completion 更难查）。本函数把候选里与【在飞任务】Touches 重叠的过滤掉——selector 只在滤后集合里
- * 选（⛔ 不指望 LLM selector 避开，它拿不到 Touches）。checkTouchesPair / parseTouches 是 ready-pool-check
- * 的同函数（不重实现）；读不懂（任务文件缺失/读失败）⇒ 视为无 Touches ⇒ checkTouchesPair 判 serialize ⇒
- * 滤掉（与 checkTouchesPair 的保守缺省同向，⛔ 不因读不懂放行冲突）。无在飞任务 ⇒ 无冲突对象 ⇒ 全通过。
- */
-export function filterTouchesDisjoint(
-  candidateIds: string[],
-  inFlightIds: string[],
-  rootDir: string,
-): string[] {
-  if (inFlightIds.length === 0) return candidateIds.slice();
-  const expand = (globs: string[]) => expandDeclaredTouches(globs, rootDir);
-  const readTouches = (id: string) => {
-    const file = path.join(rootDir, "tasks", `${id}.md`);
-    let raw: string;
-    try {
-      raw = fs.readFileSync(file, "utf8");
-    } catch {
-      return { hasSection: false, globs: [] as string[] };
-    }
-    return parseTouches(parseTask(raw).body);
-  };
-  const inFlight = inFlightIds.map(readTouches);
-  return candidateIds.filter((id) => {
-    const cand = readTouches(id);
-    return inFlight.every((ifp) => checkTouchesPair(cand, ifp, expand).disjoint);
-  });
-}
+// 派发前 Touches 互斥过滤（gap-launch-script-worker-cap-broken AC3）已上收 driver-filters.ts 的
+// `touchesDisjoint` 谓词（AC152 单一实现）——派发环经 applyTaskFilters 消费，⛔ 不在此保留平行实现。
 
 /** 缺省 ready-pool-check 命令（选择环的第一步）。输出须为 analyzeTasks JSON（读其 `ready` 数组）。 */
 export function defaultReadyPoolArgv(root: string, inFlight: string[], cap: number): string[] {
@@ -1640,16 +1582,12 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       }
       const pool = await readyPoolCheck(rootDir, readyPoolArgv, inFlightTasks(), cap);
       poolSeen = pool.pool;
-      const active = new Set(inFlightTasks());
-      const shuffled = shuffle(pool.ready.filter((id) => !active.has(id)));
-      // AC3（gap-launch-script-worker-cap-broken）：派发前 Touches 互斥——候选里与在飞任务 Touches 重叠的
-      // 先滤掉，selector 只在滤后集合里选（⛔ 并发派发 Touches 重叠 = fan-in 才炸）。冷启动在飞 task
-      // 一并参与（它们的 Touches 是真实冲突面，⛔ 不是只从 ready 里减去）。
-      const touchesFiltered = filterTouchesDisjoint(shuffled, inFlightTasks(), rootDir);
-      // gap-worker-driver-dispatch-pre-filter-missing AC1：派发前二次过滤 depends_on——依赖未满
-      // （depends_on 含未 done 任务）的候选不进候选集（⛔ 照单派发 ⇒ ac138 白烧一轮复现）。与
-      // gap-launch-script-worker-cap-broken AC3 的 Touches 互斥过滤同属「spawn 前候选过滤」的两个维度，一并判。
-      const candidates = touchesFiltered.filter((id) => depsReadyForDispatch(rootDir, id));
+      const shuffled = shuffle(pool.ready);
+      // AC152：派发前过滤消费 driver-filters.ts 的【可组合谓词列表】（notInFlight / depsSatisfied /
+      // touchesDisjoint / retryCapNotExhausted / notNeedsHuman，⛔ 不各写一遍）。冷启动在飞 task 一并参与
+      // （它们的 Touches 是真实冲突面）。原「active 过滤 + filterTouchesDisjoint + depsReadyForDispatch」
+      // 三个散点已收进 applyTaskFilters 一次判完。
+      const candidates = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks() }));
       if (candidates.length === 0) {
         // 真池空（ready 减在飞后无候选）⇒ 瞬时 WAIT：记 pool-empty，下一轮重读（⛔ 不再 latch）。
         //   池非空但全与在飞 Touches/deps 重叠 ⇒ 同为瞬时 WAIT：不设 stopReason（在飞 worker 结束释放

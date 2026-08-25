@@ -66,6 +66,9 @@ import { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./
 // AC150-1 资源门（起 fix worker 前经同一 resourceGateCheck 判定）；AC150-2 控制面（运行期 halt =
 // 读 .quay/promotion-control.json 单一真相源，⛔ 不再「只能 kill」）。
 import { resourceGateCheck, isHalted, PROMOTION_CONTROL_STATE_REL } from "./driver-shared.ts";
+// AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。promotion 的 fix pass 经
+// applyTaskFilters 消费 retryCapNotExhausted / notNeedsHuman（⛔ 不各写一遍 retryState.needsHuman 判定）。
+import { applyTaskFilters, makeFilterContext } from "./driver-filters.ts";
 
 /** round 记录的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const ROUND_LOG_REL = ".quay/promotion-round.jsonl";
@@ -767,7 +770,16 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     const gate = resourceGateCheck(root, resourceGateArgv);
     // AC133 失败上限：已标 needs-human 的任务不再进 fix pass（停止对它的修复循环——与 markNeedsHuman
     // 的 status 翻转双保险，即使 status 写失败也不会再 spawn）。
-    const activeDecisions = r.fixDecisions.filter((d) => !retryState.needsHuman.has(d.id));
+    // AC152：此过滤消费 driver-filters.ts 的【可组合谓词列表】——promotion 的 fix pass 只取
+    // retryCapNotExhausted / notNeedsHuman 两个谓词（⛔ 不各写一遍 retryState.needsHuman 判定）；
+    // 其余（deps/touches/in-flight）由 ready-pool-check 的 eligible 已在闸内判定，再滤一遍会丢掉
+    // AC134 的 skip 台账（depsReady=false 等 unfixable 原因仍须逐条记 outcome）。
+    const activeIds = new Set(applyTaskFilters(
+      r.fixDecisions.map((d) => d.id),
+      makeFilterContext(root, { inFlight: [], retryExhausted: retryState.needsHuman }),
+      ["retryCapNotExhausted", "notNeedsHuman"],
+    ));
+    const activeDecisions = r.fixDecisions.filter((d) => activeIds.has(d.id));
     // AC132：不合格者 → 短命 fix worker（可修三类 spawn、不可修五类逐条记原因不修）。spawn 前先跑
     // 分类（classifyCandidate 已做），fixDecisions 里 fixable=true 的才 spawn。
     // AC150-1：gate.go=false ⇒ 退避——只退【可修三类的 spawn】（⛔ 不再 spawn LLM fix worker，留待

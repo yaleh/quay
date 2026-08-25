@@ -33,7 +33,6 @@ import {
   defaultSelectorArgv,
   defaultReadyPoolArgv,
   shuffle,
-  filterTouchesDisjoint,
   parseSelectorOutput,
   runSelectorWorker,
   readyPoolCheck,
@@ -70,7 +69,6 @@ import {
   serveControlPlane,
   defaultLivenessCheckArgv,
   runLivenessCheck,
-  depsReadyForDispatch,
   enumerateColdStartInflight,
   enumerateTaskWorktreeTasks,
   enumerateLiveWorkerCmdlines,
@@ -991,28 +989,6 @@ test("AC129 pure — shuffle returns a permutation of its input", () => {
   assert.deepEqual(src, ["gap-a", "gap-b", "gap-c", "gap-d"], "shuffle does not mutate its input");
 });
 
-test("AC3 pure (gap-launch-script-worker-cap-broken) — filterTouchesDisjoint filters Touches-overlapping candidates vs in-flight", (t) => {
-  const root = makeRoot("ac3-filter");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const writeTask = (id, touchesLine) => fs.writeFileSync(
-    path.join(root, "tasks", `${id}.md`),
-    `---\nid: ${id}\nstatus: ready\n---\n\n## Proposal\n\nprose\n\n## Touches\n\n- ${touchesLine}\n`,
-    "utf8",
-  );
-  writeTask("gap-a", "plugin/scripts/foo.ts");
-  writeTask("gap-b", "plugin/scripts/foo.ts"); // overlaps gap-a
-  writeTask("gap-c", "plugin/scripts/bar.ts"); // disjoint from both
-
-  // no in-flight ⇒ no conflict object ⇒ all candidates pass through.
-  assert.deepEqual(filterTouchesDisjoint(["gap-a", "gap-b", "gap-c"], [], root), ["gap-a", "gap-b", "gap-c"]);
-  // in-flight gap-a ⇒ gap-b (same foo.ts) filtered; gap-c kept.
-  assert.deepEqual(filterTouchesDisjoint(["gap-b", "gap-c"], ["gap-a"], root), ["gap-c"], "overlapping gap-b filtered, disjoint gap-c kept");
-  // in-flight gap-c ⇒ both kept (bar.ts disjoint from foo.ts).
-  assert.deepEqual(filterTouchesDisjoint(["gap-a", "gap-b"], ["gap-c"], root), ["gap-a", "gap-b"]);
-  // missing task file ⇒ conservative serialize (⛔ not "unknown ⇒ keep").
-  assert.deepEqual(filterTouchesDisjoint(["gap-zzz"], ["gap-a"], root), [], "unreadable candidate ⇒ conservative filter");
-});
-
 test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatches the Touches-overlapping pair concurrently", async (t) => {
   const root = makeGitRoot("ac3-integr");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -1541,38 +1517,8 @@ test("AC150-3 — worker-driver re-exports the SAME resourceGateCheck / isHalted
 // ── 派发前 depends_on 过滤（gap-worker-driver-dispatch-pre-filter-missing AC1）───────────────────────
 // worker-driver 把 ready-pool-check 的 ready 列表直接派发、不二次过滤 depends_on ⇒ 依赖未满的任务
 // 仍被派发（ac138 白烧一轮：代码已 land、依赖链未满、翻 done 会重造 DEP-DONE-IFF-DEPS 违例）。修法 =
-// 派发前对候选做 depends_on 过滤（与 gap-launch-script-worker-cap-broken AC3 的 Touches 过滤同点）。
-
-test("depsReadyForDispatch — no deps ⇒ true; all done ⇒ true; not-done ⇒ false; missing dep ⇒ false; unreadable candidate ⇒ false", (t) => {
-  const root = makeRoot("deps");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const write = (id, fm) => fs.writeFileSync(path.join(root, "tasks", `${id}.md`), fm);
-
-  // 无 depends_on ⇒ true（真无依赖，⛔ 不是「读不懂」）。
-  write("gap-none", "---\nid: gap-none\nstatus: ready\n---\n\nbody\n");
-  assert.equal(depsReadyForDispatch(root, "gap-none"), true);
-
-  // 依赖 done ⇒ true。
-  write("gap-prereq", "---\nid: gap-prereq\nstatus: done\n---\n\nbody\n");
-  write("gap-ok", "---\nid: gap-ok\nstatus: ready\ndepends_on:\n  - gap-prereq\n---\n\nbody\n");
-  assert.equal(depsReadyForDispatch(root, "gap-ok"), true);
-
-  // 依赖未 done ⇒ false（AC1 核心：依赖未满不派发）。
-  write("gap-prereq2", "---\nid: gap-prereq2\nstatus: ready\n---\n\nbody\n");
-  write("gap-blocked", "---\nid: gap-blocked\nstatus: ready\ndepends_on:\n  - gap-prereq2\n---\n\nbody\n");
-  assert.equal(depsReadyForDispatch(root, "gap-blocked"), false);
-
-  // 依赖文件缺失 ⇒ false（fail-closed：读不懂 ≠ done）。
-  write("gap-missing-dep", "---\nid: gap-missing-dep\nstatus: ready\ndepends_on:\n  - gap-no-such\n---\n\nbody\n");
-  assert.equal(depsReadyForDispatch(root, "gap-missing-dep"), false);
-
-  // 候选自身文件缺失 ⇒ false（硬规则 3b：读不懂 ≠ 无依赖）。
-  assert.equal(depsReadyForDispatch(root, "gap-no-such-candidate"), false);
-
-  // flow 形式 depends_on: [a, b] —— 任一未 done 即 false。
-  write("gap-flow", "---\nid: gap-flow\nstatus: ready\ndepends_on: [gap-prereq, gap-prereq2]\n---\n\nbody\n");
-  assert.equal(depsReadyForDispatch(root, "gap-flow"), false, "flow form: any not-done dep blocks");
-});
+// 派发前对候选做 depends_on 过滤（AC152 起经 driver-filters.ts 的 depsSatisfied 谓词，纯函数测试见
+// driver-filters.test.mjs）。
 
 test("AC1 — depends_on gate in the resident loop: a candidate whose dep is not done is NOT dispatched (ac138 白烧一轮防)", async (t) => {
   const root = makeGitRoot("ac1-deps");
