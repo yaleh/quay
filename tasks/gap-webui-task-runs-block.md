@@ -2,7 +2,7 @@
 id: gap-webui-task-runs-block
 title: web /task/<id> Runs 区块（补 cfg 参数 + parseWorkerOutcomeRecords 字段取满，复用
   transcript-access）
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -24,9 +24,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，cfg 补齐）：`/task/<id>` handler 有 `cfg` 参数（与 `/goal/:id` 同构）且 Runs 区块渲染（⛔ 无 cfg 或 Runs 空 ⇒ 假）。
-- [ ] AC2（能取假，字段取满）：`parseWorkerOutcomeRecords` 取盘上全部字段（含 worker_pid）（⛔ worker_pid 仍丢 ⇒ 假）。
-- [ ] AC3（能取假，复用不重造）：复用 `gap-worker-task-transcript-access-webui` 的读取+校验函数（⛔ 另造一份实现 ⇒ 假）。
+- [x] AC1（能取假，cfg 补齐）：`/task/<id>` handler 有 `cfg` 参数（与 `/goal/:id` 同构）且 Runs 区块渲染（⛔ 无 cfg 或 Runs 空 ⇒ 假）。
+- [x] AC2（能取假，字段取满）：`parseWorkerOutcomeRecords` 取盘上全部字段（含 worker_pid）（⛔ worker_pid 仍丢 ⇒ 假）。
+- [x] AC3（能取假，复用不重造）：复用 `gap-worker-task-transcript-access-webui` 的读取+校验函数（⛔ 另造一份实现 ⇒ 假）。
 
 ## Definition of Done
 
@@ -35,6 +35,7 @@ extra:
 ## Touches
 
 - packages/quay/src/serve-task.ts（/task/<id> handler + cfg）
+- packages/quay/src/serve-handlers.ts（/task/<id> 路由调用点传 cfg）
 - packages/quay/src/observation.ts（parseWorkerOutcomeRecords）
 - packages/quay/test/observation.test.mjs（对应测试）
 - tasks/gap-webui-task-runs-block.md（自身）

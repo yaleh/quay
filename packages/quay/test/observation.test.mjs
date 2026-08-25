@@ -15,6 +15,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readSession, parseClaudeAgentsJson } from "../src/observation.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
+import { taskRunsBlock } from "../src/serve-task.ts";
 
 /** Commit helper with a fixed clock (committer date = author date = `t`), per-branch file. */
 function commitAt(ws, msg, t, file = "log.txt") {
@@ -879,4 +880,163 @@ test("parseClaudeAgentsJson degrades to [] on malformed / non-array input (never
   assert.deepEqual(parseClaudeAgentsJson("[1, \"x\", null]"), []);
   // A missing optional field (pid) parses as null, never a fabricated 0.
   assert.deepEqual(parseClaudeAgentsJson(JSON.stringify([{ sessionId: "b02622c8-4cb7-4c2b-91c3-2a6c67fcc7a1", name: "quay-91" }]))[0].pid, null);
+});
+
+// ── gap-webui-task-runs-block ───────────────────────────────────────────────────────────────────────
+// The old parseWorkerOutcomeRecords read only 4 of the 14 fields computeOutcome writes — `worker_pid`
+// was on disk but dropped. AC2: the parse takes EVERY on-disk field (14) + the forward-compatible
+// session_id; a missing field degrades to null (hard rule ③b), never a fabricated 0/""/false.
+
+test("parseWorkerOutcomeRecords reads all 14 on-disk fields incl. worker_pid (AC2)", () => {
+  const line = JSON.stringify({
+    ts: "2026-08-25T01:00:00.000Z",
+    task: "gap-webui-task-runs-block",
+    selector_reason: "ready",
+    exit_code: 0,
+    signal: null,
+    wall_clock_ms: 123456,
+    final_state: "completed",
+    failure_reason: null,
+    started_at: "2026-08-25T00:58:00.000Z",
+    ended_at: "2026-08-25T01:00:00.000Z",
+    worker_pid: 4242,
+    run_id: "run-abc",
+    in_flight_count: 1,
+    timed_out: false,
+  });
+  const [r] = parseWorkerOutcomeRecords(line);
+  assert.equal(r.task, "gap-webui-task-runs-block");
+  assert.equal(r.ts, "2026-08-25T01:00:00.000Z");
+  assert.equal(r.selector_reason, "ready");
+  assert.equal(r.exit_code, 0);
+  assert.equal(r.signal, null);
+  assert.equal(r.wall_clock_ms, 123456);
+  assert.equal(r.final_state, "completed");
+  assert.equal(r.failure_reason, null);
+  assert.equal(r.started_at, "2026-08-25T00:58:00.000Z");
+  assert.equal(r.ended_at, "2026-08-25T01:00:00.000Z");
+  // The field the old 4-field parse dropped: worker_pid must survive (AC2 negative control).
+  assert.equal(r.worker_pid, 4242);
+  assert.equal(r.run_id, "run-abc");
+  assert.equal(r.in_flight_count, 1);
+  assert.equal(r.timed_out, false);
+  // Forward-compatible: not on disk yet, parses to null until gap-worker-task-transcript-access-webui.
+  assert.equal(r.session_id, null);
+});
+
+test("parseWorkerOutcomeRecords reads a killed record (signal set, exit_code null) and degrades missing fields to null", () => {
+  const killed = JSON.stringify({
+    task: "gap-webui-task-runs-block",
+    exit_code: null,
+    signal: "SIGTERM",
+    wall_clock_ms: 5000,
+    final_state: "killed",
+    failure_reason: "worker killed by SIGTERM",
+    started_at: "2026-08-25T00:57:00.000Z",
+    ended_at: "2026-08-25T00:57:05.000Z",
+    worker_pid: 4343,
+    run_id: "run-def",
+    in_flight_count: 1,
+    timed_out: false,
+  });
+  // A minimal record with only `task` — every other field must degrade to null, never a fabricated 0.
+  const sparse = JSON.stringify({ task: "gap-webui-task-runs-block" });
+  const recs = parseWorkerOutcomeRecords(`${killed}\n${sparse}\nnot json\n`);
+  assert.equal(recs.length, 2); // the malformed "not json" line is skipped
+  const [k, s] = recs;
+  assert.equal(k.signal, "SIGTERM");
+  assert.equal(k.exit_code, null); // killed ⇒ no exit code, must stay null (not 0)
+  assert.equal(k.worker_pid, 4343);
+  assert.equal(k.final_state, "killed");
+  assert.equal(k.failure_reason, "worker killed by SIGTERM");
+  assert.equal(k.session_id, null);
+  // Sparse record: worker_pid / exit_code / run_id must be null, never fabricated (hard rule ③b).
+  assert.equal(s.task, "gap-webui-task-runs-block");
+  assert.equal(s.worker_pid, null);
+  assert.equal(s.exit_code, null);
+  assert.equal(s.run_id, null);
+  assert.equal(s.final_state, null);
+  assert.equal(s.timed_out, null);
+});
+
+// ── gap-webui-task-runs-block AC1/AC3 — taskRunsBlock ──────────────────────────────────────────────
+// The Runs block renders one row per worker-outcome attempt for THIS task only, and links the
+// transcript via the existing /session endpoint (reusing isValidSessionId, never a second
+// read/validation implementation).
+
+test("taskRunsBlock renders one row per attempt for THIS task only + an honest empty state", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-runs-"));
+  try {
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    const line = (task, worker_pid, run_id) => JSON.stringify({
+      task, worker_pid, run_id,
+      started_at: "2026-08-25T00:58:00.000Z",
+      ended_at: "2026-08-25T01:00:00.000Z",
+      final_state: "completed",
+      exit_code: 0,
+      wall_clock_ms: 120000,
+      signal: null,
+      failure_reason: null,
+      ts: "2026-08-25T01:00:00.000Z",
+      selector_reason: "ready",
+      in_flight_count: 1,
+      timed_out: false,
+    });
+    fs.writeFileSync(path.join(ws, ".quay", "worker-outcome.jsonl"), [
+      line("gap-webui-task-runs-block", 4242, "run-a"),
+      line("gap-webui-task-runs-block", 4343, "run-b"),
+      line("some-other-task", 9999, "run-c"),
+    ].join("\n"));
+
+    const html = taskRunsBlock(ws, "gap-webui-task-runs-block");
+    assert.ok(html.includes("<h2>Runs</h2>"), "AC1: the Runs block header renders");
+    assert.ok(html.includes("4242") && html.includes("4343"), "AC1/AC2: worker_pid renders per row");
+    assert.ok(html.includes("run-a") && html.includes("run-b"), "AC1: each attempt's run_id renders");
+    assert.ok(!html.includes("run-c") && !html.includes("9999"), "AC1: another task's attempts are NOT rendered");
+
+    const empty = taskRunsBlock(ws, "no-such-task");
+    assert.ok(empty.includes("<h2>Runs</h2>"), "empty state still renders the Runs block (never a bare page)");
+    assert.ok(empty.includes("无 worker 运行记录"), "empty state is an honest 无记录, not a fabricated row");
+
+    const absent = taskRunsBlock(path.join(ws, "does-not-exist"), "gap-webui-task-runs-block");
+    assert.ok(absent.includes("无 worker 运行记录"), "absent outcome carrier degrades to the empty state, never throws");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("taskRunsBlock links the transcript only for a VALID session_id (AC3 reuse of isValidSessionId)", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-runs-sess-"));
+  try {
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    const uuid = "b02622c8-4cb7-4c2b-91c3-2a6c67fcc7a1";
+    const line = (session_id) => JSON.stringify({
+      task: "gap-webui-task-runs-block",
+      worker_pid: 4242,
+      run_id: "run-a",
+      started_at: "2026-08-25T00:58:00.000Z",
+      final_state: "completed",
+      exit_code: 0,
+      wall_clock_ms: 120000,
+      signal: null,
+      failure_reason: null,
+      ts: "2026-08-25T01:00:00.000Z",
+      selector_reason: "ready",
+      ended_at: "2026-08-25T01:00:00.000Z",
+      in_flight_count: 1,
+      timed_out: false,
+      ...(session_id != null ? { session_id } : {}),
+    });
+    fs.writeFileSync(path.join(ws, ".quay", "worker-outcome.jsonl"), [
+      line(uuid),                  // valid UUID → link
+      line("not-a-uuid"),          // non-UUID → no link (validation reused, not a second impl)
+      line(null),                  // absent → no link
+    ].join("\n"));
+
+    const html = taskRunsBlock(ws, "gap-webui-task-runs-block");
+    assert.ok(html.includes(`href="/session/${uuid}"`), "AC3: a valid session_id links the existing /session endpoint");
+    assert.ok(!html.includes('href="/session/not-a-uuid"'), "AC3: a non-UUID session_id is NOT linked (isValidSessionId gate)");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
 });
