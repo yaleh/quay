@@ -2,7 +2,7 @@
 id: gap-single-flight-lock-timeout-double-value
 title: single-flight 锁超时双值（fan-in 900s vs 其余 600s）+ 600s 线已被跨越（活 suite 被误杀
   fail-closed）
-status: ready
+status: done
 labels:
   - gap
   - defect
