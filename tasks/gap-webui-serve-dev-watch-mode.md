@@ -1,7 +1,7 @@
 ---
 id: gap-webui-serve-dev-watch-mode
 title: 记录 node --watch 开发用法（不新增 --dev/--watch 入口——node --watch 机制已可用，零产品表层）
-status: ready
+status: done
 labels:
   - gap
   - feature
