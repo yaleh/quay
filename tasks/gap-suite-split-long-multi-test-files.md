@@ -1,7 +1,7 @@
 ---
 id: gap-suite-split-long-multi-test-files
 title: 拆分含多个独立 test() 的长耗时文件——压缩 M-bucket LPT 队列头（makespan 下限）
-status: todo
+status: ready
 labels:
   - gap
   - feature
@@ -27,11 +27,11 @@ round #560 负载曲线前 3 段（长文件跑那段）均值 load1=26.02、峰
 
 ## Definition of Done
 
-可拆长文件拆分落地；AC1-3 全勾；M-bucket LPT 队列头压缩。
+可拆长文件拆分为多个独立文件并落地提交；AC1-3 全勾（独立性抽查、拆分不破坏、makespan 改善）；M-bucket LPT 队列头压缩、makespan 下降。
 
 ## Touches
 
-- plugin/test/session-liveness.test.mjs（拆）+ 拆分出的新文件
-- plugin/test/quay-init-loop-vendor.test.mjs（拆）+ 拆分出的新文件
+- plugin/test/session-liveness.test.mjs（拆）
+- plugin/test/quay-init-loop-vendor.test.mjs（拆）
 - 其它可拆长文件（抽查后定，round #560 perFile 清单）
 - tasks/gap-suite-split-long-multi-test-files.md（自身）
