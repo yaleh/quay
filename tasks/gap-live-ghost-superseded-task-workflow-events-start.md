@@ -1,7 +1,7 @@
 ---
 id: gap-live-ghost-superseded-task-workflow-events-start
 title: /live 页孤儿 workflow-events START 事件永久显示 superseded/done 任务「实现中」——inFlight 来源无 status 过滤
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -29,9 +29,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，终态剔除）：一个 status=superseded/done 且有孤儿 START 事件的任务，在 /live 不再显示「实现中」；（⛔ 仍显示 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：一个真在飞任务（status=ready + 活 worker）仍显示「实现中」（不被误剔）；（⛔ 误剔 ⇒ 假）。
-- [ ] AC3（能取假，needs-human 语义）：needs-human 任务（无活 worker）不显示「实现中」（若采纳排除 needs-human）或明确记录为何保留；（⛔ 语义不决 ⇒ 假）。
+- [x] AC1（能取假，终态剔除）：一个 status=superseded/done 且有孤儿 START 事件的任务，在 /live 不再显示「实现中」；（⛔ 仍显示 ⇒ 假）。
+- [x] AC2（能取假，负控制）：一个真在飞任务（status=ready + 活 worker）仍显示「实现中」（不被误剔）；（⛔ 误剔 ⇒ 假）。
+- [x] AC3（能取假，needs-human 语义）：needs-human 任务（无活 worker）不显示「实现中」（若采纳排除 needs-human）或明确记录为何保留；（⛔ 语义不决 ⇒ 假）。
 
 ## Definition of Done
 
