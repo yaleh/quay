@@ -1,7 +1,7 @@
 ---
 id: gap-webui-serve-dev-watch-mode
 title: 记录 node --watch 开发用法（不新增 --dev/--watch 入口——node --watch 机制已可用，零产品表层）
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -25,7 +25,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，端到端自动重启生效）：改一个 serve-handlers.ts 的字符串 → 等自动重启 → curl 验证新内容出现（⛔ 只测启动不测「改动→重启→新代码生效」闭环 ⇒ 假）。
+- [x] AC1（能取假，端到端自动重启生效）：改一个 serve-handlers.ts 的字符串 → 等自动重启 → curl 验证新内容出现（⛔ 只测启动不测「改动→重启→新代码生效」闭环 ⇒ 假）。
+  **实测（2026-08-25，worktree 内，doc 路径验证出闭环 ⇒ 不退回 CLI 入口）**：`node --watch --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 46173` 启动后 `curl .../zzz-nonexistent-route` 得 `not found`；`sed -i` 把 serve-handlers.ts 的 404 字符串改为 `not found (WATCH-RELOAD-VERIFIED-2026-08-25)` → `--watch` 自动重启（约 5s）→ 再次 curl 得新字符串 → 闭环生效；随后 `git checkout --` 还原源码改动。
 
 ## Definition of Done
 
