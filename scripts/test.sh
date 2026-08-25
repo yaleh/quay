@@ -618,11 +618,14 @@ bucket_test_concurrency() {
 # The lock is file-descriptor-based (one FD per slot, allocated dynamically via `exec {fd}>file`): the
 # FDs are opened once and held open for the whole run, so the lock releases automatically when this
 # process exits — even on an error abort — with no trap bookkeeping (flock's crash-autorelease is
-# PRESERVED: a dead suite can never leak a slot — the run2-a 600s lock-timeout abort becomes a clean
-# slot release, not a permanent leak). Acquire tries each slot NON-BLOCKING (`flock -n`); if ALL S are
-# held it WAITs for EITHER to release (bounded per-attempt flock-wait, re-checking all after each),
-# then FAILS CLOSED after FULL_SUITE_LOCK_TIMEOUT (default 600s) with a clear message — never a
-# (S+1)-th GO, never an infinite hang.
+# PRESERVED: a dead suite can never leak a slot). Acquire tries each slot NON-BLOCKING (`flock -n`); if
+# ALL S are held it WAITs for EITHER to release (bounded per-attempt flock-wait, re-checking all after
+# each) — an UNBOUNDED queue wait, never a fail-closed timeout (gap-single-flight-lock-timeout-double-
+# value: the old FULL_SUITE_LOCK_TIMEOUT 600s default + the fan-in 900s override were two values on one
+# lock, and the 600s line was crossed by the now-normal 819-1619s full-bucket suite — a live suite got
+# fail-closed「not starting」). Correctness (never a (S+1)-th GO) is flock-guarded; liveness (never an
+# infinite hang) is crash-autorelease for a dead holder + the runner's SUITE_SILENCE_MS/SUITE_MAX_RUNTIME_MS
+# and the fan-in stuck-holder reaper for a hung-but-alive holder.
 #
 # Scoped paths (--for-task, --scoped, --group <non-default>, explicit files) never take the lock —
 # they are the verification path that must stay usable while a full suite runs. Nested runners skip
@@ -648,10 +651,9 @@ FULL_SUITE_LOCK_FILE="${FULL_SUITE_LOCK_FILE:-${FULL_SUITE_LOCK_DIR}/full-suite.
 FULL_SUITE_LOCK_SLOTS=()
 while IFS= read -r _suite_slot; do FULL_SUITE_LOCK_SLOTS+=("${_suite_slot}"); done < <(suite_slot_paths "${FULL_SUITE_LOCK_FILE}")
 FULL_SUITE_LOCK_FDS=()
-FULL_SUITE_LOCK_TIMEOUT="${FULL_SUITE_LOCK_TIMEOUT:-600}"
 
 # full_suite_lock_acquire — acquire one of the S single-flight slots (non-blocking try on each;
-# all busy ⇒ bounded wait for any to release, then fail-closed).
+# all busy ⇒ unbounded wait for any to release — never fail-closed, see the lock comment above).
 full_suite_lock_acquire() {
   if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
     echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping single-flight lock (nested runner)"
@@ -662,7 +664,7 @@ full_suite_lock_acquire() {
     return 0
   fi
   mkdir -p "$(dirname "${FULL_SUITE_LOCK_FILE}")"
-  local _s_fd _s_slot _s_idx _s_held="" _s_waited=0 _s_wall_start=0 _s_lock_start_ms="" _s_lock_end_ms=""
+  local _s_fd _s_slot _s_idx _s_held="" _s_lock_start_ms="" _s_lock_end_ms=""
   FULL_SUITE_LOCK_FDS=()
   # Open EVERY slot file on its own dynamically-allocated FD (append mode: the file exists + is
   # writable even if empty). FD-based flock auto-releases on process exit — a crash/abort cannot leak.
@@ -687,26 +689,19 @@ full_suite_lock_acquire() {
   done
   if [ -z "${_s_held}" ]; then
     # ALL S slots busy — WAIT for ANY to release (an S-slot counting semaphore made of S flocks).
-    # Bounded per-attempt flock-wait (1s per slot, re-checking all after each) so a release on ANY
-    # slot is picked up; fail-closed after FULL_SUITE_LOCK_TIMEOUT — never a (S+1)-th GO, never an
-    # infinite hang.
-    # Timeout is ELAPSED wall-clock (SECONDS), NOT an outer-iteration counter: each outer iteration
-    # does `flock -w 1` on ALL S slots (= ~S seconds), so counting iterations over-waits S×
-    # (S=2 ⇒ ~1200s instead of the intended 600s). gap-suite-slot-lock-not-enforcing-concurrency.
-    _s_wall_start="${SECONDS}"
-    while [ "${_s_waited}" -lt "${FULL_SUITE_LOCK_TIMEOUT}" ]; do
+    # Unbounded queue wait, never a fail-closed timeout: correctness (no (S+1)-th GO) is flock-guarded,
+    # liveness is crash-autorelease for a dead holder + the runner's SUITE_SILENCE_MS/SUITE_MAX_RUNTIME_MS
+    # and the fan-in stuck-holder reaper for a hung-but-alive holder (gap-single-flight-lock-timeout-
+    # double-value: the old 600s/900s timeout misfired on the now-normal 819-1619s suite). Bounded
+    # per-attempt flock-wait (1s per slot, re-checking all after each) so a release on ANY slot is
+    # picked up promptly.
+    while [ -z "${_s_held}" ]; do
       _s_idx=0
       for _s_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
         if flock -w 1 "${_s_fd}"; then _s_held="${_s_idx}"; break; fi
         _s_idx=$((_s_idx + 1))
       done
-      [ -n "${_s_held}" ] && break
-      _s_waited=$(( SECONDS - _s_wall_start ))
     done
-    if [ -z "${_s_held}" ]; then
-      echo "scripts/test.sh: another full suite holds all ${#FULL_SUITE_LOCK_SLOTS[@]} slots (${FULL_SUITE_LOCK_SLOTS[*]}) — not starting (single-flight lock; waited ${FULL_SUITE_LOCK_TIMEOUT}s). Re-run when a slot frees." >&2
-      exit 1
-    fi
   fi
   FULL_SUITE_LOCK_HELD="${_s_held}"
   echo "scripts/test.sh: acquired full-suite single-flight slot ${_s_held} (${FULL_SUITE_LOCK_FILE}.${_s_held}) — held for the entire run"
