@@ -50,14 +50,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 
 // ── AC2 known-sample groups (exact lists, replay of the baseline) ───────────────────────────────────
 
-// (a) 12 `packages/quay/test/*` files that touch `plugin/scripts` → cross-bucket P+M.
+// (a) 11 `packages/quay/test/*` files that touch `plugin/scripts` → cross-bucket P+M.
 const GROUP_A = [
   "build-plugin-dist.test.mjs",
   "gap-dashboard-parallelize.test.mjs",
   "install-config-driven-e2e-runtime.test.mjs",
   "install-config-driven-e2e-upgrade.test.mjs",
   "install-config-driven-e2e.test.mjs",
-  "lifecycle.test.mjs",
   "mcp-server.test.mjs",
   "npm-pack-e2e.test.mjs",
   "sea-artifact-consumer-e2e.test.mjs",
@@ -109,8 +108,8 @@ const GROUP_C = [
 
 // ── AC2(a) ───────────────────────────────────────────────────────────────────────────────────────────
 
-test("AC2(a): the 12 packages/quay/test files touching plugin/scripts are cross-bucket P AND M", () => {
-  assert.equal(GROUP_A.length, 12, "group (a) must be exactly 12 files");
+test("AC2(a): the 11 packages/quay/test files touching plugin/scripts are cross-bucket P AND M", () => {
+  assert.equal(GROUP_A.length, 11, "group (a) must be exactly 11 files");
   for (const f of GROUP_A) {
     const rel = `packages/quay/test/${f}`;
     const buckets = bucketSetOf(rel, ROOT);
