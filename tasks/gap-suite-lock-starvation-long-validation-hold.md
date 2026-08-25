@@ -23,7 +23,7 @@ extra:
 
 **最危险的一点**：这类「长时间持锁」在 `worker-outcome.jsonl` 里与「worker 自己慢」**完全同形**（长 wall_clock、无 error、最终 exit 0/not-landed）——观测者无法区分「验证型任务在设计上就慢」vs「worker 卡死占锁」。今天这条诊断链三层（worker spawnSync→spawn → 我「另一个 hang」→ manager 转写 memory）全错，推翻只用了一条 `--test worker-driver.test.mjs` 对照（79/79 pass 147s）。
 
-**量化升级（manager 08-25 实算当日 21 轮 lock_wait_ms，非单案例）**：当日锁等待占套件总墙钟 **46.2%**（Σlock=13878.1s / Σwall=30014.8s = 3.86h/8.34h）。关键在 `work_s`（实际测试时间）列几乎不变——早段 494–683s、近段 1035–1164s（测试量自身增长），而同期 wall 从 530s 摆到 7349s ⇒ **墙钟方差几乎全来自锁等待，不是套件变慢**。最坏 round 615 单轮等锁 **104.6 分钟**、`effective_parallelism` 掉到 **0.859**。交叉核（⛔ 不单信 runner 自报）：`wall ≈ work + lock + 小额开销` 逐轮成立（615: 7314 vs 7349 残差 35s）。可复算判据形态：按日 `Σlock_wait_ms / ΣdurationMs`（基准 46.2%）——⛔ 但该比值随当日并发需求变、与修复无关也会动（4 轮 lock_wait=0.0 全在清晨低峰、lock%>50% 全在忙时段），作判据须同争用条件对照。该读数**能取假**（4 轮 lock_wait=0.0 ⇒ 非结构恒有、是争用依赖）。
+**量化升级（manager 08-25 实算当日 21 轮 lock_wait_ms，非单案例）**：当日锁等待占【全量轮 buckets=full】总墙钟 **46.2%**（Σlock=13878.1s / Σwall=30014.8s = 3.86h/8.34h；⛔ 分母只计 21 个 full 轮——当日 70 轮中 49 轮 M/P/P+M 结构上不取锁、0/49 无 lock_wait_ms）。关键在 `work_s`（实际测试时间）列几乎不变——早段 494–683s、近段 1035–1164s（测试量自身增长），而同期 wall 从 530s 摆到 7349s ⇒ **墙钟方差几乎全来自锁等待，不是套件变慢**。最坏 round 615 单轮等锁 **104.6 分钟**、`effective_parallelism` 掉到 **0.859**。交叉核（⛔ 不单信 runner 自报）：`wall ≈ work + lock + 小额开销` 逐轮成立（615: 7314 vs 7349 残差 35s）。可复算判据形态：按日 `Σlock_wait_ms / ΣdurationMs`（基准 46.2%）——⛔ 但该比值随当日并发需求变、与修复无关也会动（4 轮 lock_wait=0.0 全在清晨低峰、lock%>50% 全在忙时段），作判据须同争用条件对照。该读数**能取假**（4 轮 lock_wait=0.0 ⇒ 非结构恒有、是争用依赖）。
 
 ## Plan
 
