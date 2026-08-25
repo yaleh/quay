@@ -1,7 +1,7 @@
 ---
 id: gap-task-detail-runs-block-inflight-session-link
 title: /task/<id> 任务详情页 Runs 表对「正在跑」盲（只读 worker-outcome END-only），缺 /live 那样的在飞 session 链接
-status: todo
+status: ready
 labels:
   - gap
   - defect
