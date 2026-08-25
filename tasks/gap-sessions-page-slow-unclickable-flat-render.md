@@ -51,6 +51,7 @@ sessions 列表/详情页三缺陷（人 MCP 浏览器 + manager 读代码双核
 ## Touches
 
 - packages/quay/src/serve-sessions.ts（cardFor 加 `<a>`、LIVE/GONE 分组 `<details>`、renderSessionPage 最近 N + 按需加载、/earlier 端点）
+- packages/quay/src/serve-handlers.ts（/session/<id>/earlier 路由注册：handleSessionEarlier import + 路由分支）
 - packages/quay/src/observation.ts（readSessions 跳过 GONE tail / readTranscript truncated 旗标 / SessionDetail.sessionId）
 - packages/quay/test/serve-sessions.test.mjs（卡片链接 / GONE 折叠 / 详情按需加载 + truncated 测试）
 - tasks/gap-sessions-page-slow-unclickable-flat-render.md（自身）
