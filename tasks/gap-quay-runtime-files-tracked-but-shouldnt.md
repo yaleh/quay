@@ -1,7 +1,7 @@
 ---
 id: gap-quay-runtime-files-tracked-but-shouldnt
 title: .quay/ 8 个运行时文件被误提交（tracked-but-shouldn't）——git rm --cached + gitignore 清理（不脏检出、不挡 ff，纯卫生）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -28,9 +28,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，明显运行时产物清出跟踪）：`test.sh.lock` / `full-suite-state.json.suitefix-bak` / `no-code-caller-triage.jsonl` / `no-code-caller-triage-rescan.jsonl` / `suite-bucket-reattribution.jsonl` 5 个 `git rm --cached` 去跟踪 + `.gitignore` 追加；（⛔ 仍 `git ls-files` tracked ⇒ 假）。
-- [ ] AC2（能取假，可能故意的逐个判）：`profiles.yml` / `outer-inflight-coordination-20260812.md` / `red-on-omission-manifest.md` 3 个逐个判定「该跟踪」或「该清理」，判定理由写进任务 Evidence；（⛔ 盲清或不清且无理由 ⇒ 假）。
-- [ ] AC3（能取假，清后不脏）：清理后 `git status --porcelain` 对这些文件不再显示（去跟踪的文件也不作为 untracked 出现，因已 gitignore）；（⛔ 仍脏 ⇒ 假）。
+- [x] AC1（能取假，明显运行时产物清出跟踪）：`test.sh.lock` / `full-suite-state.json.suitefix-bak` / `no-code-caller-triage.jsonl` / `no-code-caller-triage-rescan.jsonl` / `suite-bucket-reattribution.jsonl` 5 个 `git rm --cached` 去跟踪 + `.gitignore` 追加；（⛔ 仍 `git ls-files` tracked ⇒ 假）。
+- [x] AC2（能取假，可能故意的逐个判）：`profiles.yml` / `outer-inflight-coordination-20260812.md` / `red-on-omission-manifest.md` 3 个逐个判定「该跟踪」或「该清理」，判定理由写进任务 Evidence；（⛔ 盲清或不清且无理由 ⇒ 假）。
+- [x] AC3（能取假，清后不脏）：清理后 `git status --porcelain` 对这些文件不再显示（去跟踪的文件也不作为 untracked 出现，因已 gitignore）；（⛔ 仍脏 ⇒ 假）。
 
 ## Definition of Done
 
