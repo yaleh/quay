@@ -1,7 +1,7 @@
 ---
 id: gap-worker-prompt-fan-in-call-signature-placeholder
 title: worker prompt 给 fan-in 调用签名是字面占位词（scriptPath/runId）⇒ 每个 worker 反向工程一遍（n=12 全命中）
-status: todo
+status: ready
 labels:
   - gap
   - defect
