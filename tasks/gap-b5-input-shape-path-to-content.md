@@ -1,7 +1,7 @@
 ---
 id: gap-b5-input-shape-path-to-content
 title: B5·层 3 输入形状 path→content——判定逻辑对字符串纯函数，先 3-5 checker 示范测收益
-status: todo
+status: ready
 labels:
   - gap
   - feature
