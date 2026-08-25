@@ -32,9 +32,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，接线）：`worker-driver.ts` 派发路径在 `git worktree add` 后调用 `dispatch-worktree-setup.sh <worktree>`（结构针：grep 到调用 + 位置在 worktree 创建之后）；（⛔ 仍零调用 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：新派发 worker 的 transcript 不再出现手工 `ln -s .../node_modules` 或 `cp .../config.yml`（现在必然出现）；（⛔ 仍手工 bootstrap ⇒ 假）。
-- [ ] AC3（能取假，幂等）：对已手工 bootstrap 过的 worktree 再跑一次脚本不报错、不重复创建（幂等）；（⛔ 报错或重复 ⇒ 假）。
+- [x] AC1（能取假，接线）：`worker-driver.ts` 派发路径在 `git worktree add` 后调用 `dispatch-worktree-setup.sh <worktree>`（结构针：grep 到调用 + 位置在 worktree 创建之后）；（⛔ 仍零调用 ⇒ 假）。
+- [ ] AC2（能取假，负控制）：新派发 worker 的 transcript 不再出现手工 `ln -s .../node_modules` 或 `cp .../config.yml`（现在必然出现）；（⛔ 仍手工 bootstrap ⇒ 假）。（待外部）
+- [x] AC3（能取假，幂等）：对已手工 bootstrap 过的 worktree 再跑一次脚本不报错、不重复创建（幂等）；（⛔ 报错或重复 ⇒ 假）。
 
 ## Definition of Done
 
