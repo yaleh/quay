@@ -105,4 +105,5 @@ serial+lowconc 两阶段合计吃掉 full-bucket suite 真实执行时间 ~50%�
 - plugin/test/session-topology.test.mjs
 - plugin/test/threshold-scope-check.test.mjs
 - scripts/test.sh（分相统一 + `full_suite_lock_acquire`/`run_selected` 锁获取抽出共用）
+- plugin/test/known-load-sensitive.test.mjs（AC3 快照随 direction (b) 更新：3 个 ex-serial/lowconc 文件改断言 engine lane）
 - tasks/gap-suite-serial-lowconc-classification-recheck.md（自身）
