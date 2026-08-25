@@ -130,6 +130,20 @@ function runGit(root, args) {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
 }
 
+// L3 后 launchArgv 经 L2 policy 需要 `.quay/profiles.yml` + `.claude/launch.settings.json` 两个载体。
+// 给 temp root 铺一份最小载体（缺省 launcher=claude / model=test-model），供默认 argv 路径的测试用。
+function writeProfileCarrier(root, { launcher = "claude", model = "test-model" } = {}) {
+  fs.writeFileSync(path.join(root, ".quay", "profiles.yml"),
+    "version: 1\n" +
+    "profiles:\n  w:\n    launcher: " + launcher + "\n    model: " + model + "\n    bare: false\n    auth: key\n" +
+    "roles:\n  task-worker:\n    profile: w\n    name: quay-test-worker\n" +
+    "  selector:\n    profile: w\n    name: quay-selector\n" +
+    "  fix-worker:\n    profile: w\n    name: quay-fix-worker\n");
+  fs.mkdirSync(path.join(root, ".claude"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".claude", "launch.settings.json"),
+    JSON.stringify({ $schema: "x", permissions: {}, env: {} }));
+}
+
 function runDriver(root, args) {
   return execFileSync(process.execPath, [
     "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root, ...args,
@@ -362,12 +376,10 @@ test("AC1 (integration) — re-dispatching the same task N times writes N distin
 test("resolveRun / splitArgs / defaultWorkerArgv / signalExitCode / parseTimeoutMs / resolveConcurrency", () => {
   assert.deepEqual(splitArgs("node -e process.exit(7)"), ["node", "-e", "process.exit(7)"]);
   assert.deepEqual(splitArgs("  sleep 100  "), ["sleep", "100"]);
-  const defWorker = defaultWorkerArgv("gap-x", "/r");
-  assert.equal(defWorker[0], "bash", "AC140-1: default worker routes through quay-launch.sh (not bare claude)");
-  assert.equal(defWorker[1], "/r/plugin/scripts/quay-launch.sh");
-  assert.equal(defWorker[2], "task-worker");
-  assert.equal(defWorker[3], "-p");
-  assert.match(defWorker[4], /gap-x/, "the task prompt is the argv payload");
+  const defWorker = defaultWorkerArgv("gap-x", REPO_ROOT);
+  assert.equal(defWorker[0], "claude-fjdac", "AC140-1/L3: default worker resolves via policy to the profile launcher (not bare claude)");
+  assert.equal(defWorker[defWorker.indexOf("-n") + 1], "quay-task-worker");
+  assert.match(defWorker[defWorker.length - 1], /gap-x/, "the task prompt is the argv payload");
   assert.equal(signalExitCode("SIGKILL"), 9);
   assert.equal(signalExitCode("SIGTERM"), 15);
 
@@ -1205,12 +1217,10 @@ test("AC129 pure — resourceGateCheck: exit 0 ⇒ GO; exit 1 ⇒ WAIT (fail-clo
 });
 
 test("AC129 pure — defaultSelectorArgv / defaultReadyPoolArgv are launch / node argv", () => {
-  const sel = defaultSelectorArgv(["gap-a", "gap-b"], "/r");
-  assert.equal(sel[0], "bash", "AC140-1: default selector routes through quay-launch.sh (not bare claude)");
-  assert.equal(sel[1], "/r/plugin/scripts/quay-launch.sh");
-  assert.equal(sel[2], "selector");
-  assert.equal(sel[3], "-p");
-  assert.match(sel[4], /gap-a, gap-b/, "candidate ids are inlined into the selector prompt");
+  const sel = defaultSelectorArgv(["gap-a", "gap-b"], REPO_ROOT);
+  assert.equal(sel[0], "claude-fjdac", "AC140-1/L3: default selector resolves via policy to the profile launcher (not bare claude)");
+  assert.equal(sel[sel.indexOf("-n") + 1], "quay-selector");
+  assert.match(sel[sel.length - 1], /gap-a, gap-b/, "candidate ids are inlined into the selector prompt");
   const rpc = defaultReadyPoolArgv("/r", ["gap-a"], 3);
   assert.equal(rpc[0], "node");
   assert.deepEqual(rpc.slice(1, 5), ["--experimental-strip-types", "/r/plugin/scripts/ready-pool-check.ts", "--root", "/r"]);
@@ -1468,14 +1478,17 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
   }
 });
 
-// ── AC140（可配 wrapper + model + 按 role；单一真相源；覆盖语义统一）──────────────────────────────
-// 驱动的 LLM spawn 不再硬编码 `["claude","-p",prompt]`——单一构造 launchArgv 走
-// `quay-launch.sh <role> -p <prompt>`，wrapper/model/--bare 由 .quay/profiles.yml 的 profiles/roles
-// 承载（AC154 profile 抽层）。取假靠 dry-run 读【启动语义】字段（launcher / --model），⛔ 不靠 argv0
-// （claude-fjdac 末行 exec claude 使 argv0 恒为 claude）。
+// ── AC140（可配 wrapper + model + 按 role；单一真相源；覆盖语义统一）+ L3（driver 消费 policy）─────
+// 驱动的 LLM spawn 不再硬编码 `["claude","-p",prompt]`——单一构造 launchArgv 现在【经 L2 policy
+// （profile-policy.ts loadProfiles + resolveRole）解析语义 kind → profile】后直接出 argv（L3
+// gap-driver-binding-semantic-kind-to-profile），⛔ 不再 `bash quay-launch.sh <role>` 把解析交给 bash 里
+// 的第二份实现。wrapper/model/--bare 由 .quay/profiles.yml 的 profiles/roles 承载（AC154 profile 抽层）。
+// 取假靠读【启动语义】字段（launcher / --model），⛔ 不靠 argv0（claude-fjdac 末行 exec claude 使
+// argv0 恒为 claude）。quay-launch.sh 保留给非驱动路径（manager/outer/inner），AC140-2 仍经它 dry-run。
 
 const QUAY_LAUNCH = path.resolve(__dirname, "..", "scripts", "quay-launch.sh");
 const PROFILES = path.resolve(__dirname, "..", "..", ".quay", "profiles.yml");
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 // profiles.yml 是 YAML；launcher 经 python3+yaml 消费，本测试用同一手法转 JSON 后断言结构。
 function readProfiles() {
@@ -1487,13 +1500,48 @@ function dryRunLaunch(role, ...extra) {
   return execFileSync("bash", [QUAY_LAUNCH, role, "--dry-run", ...extra], { encoding: "utf8" }).trim();
 }
 
-test("AC140-1 — single constructor: launchArgv produces bash+quay-launch.sh+<role>+-p+prompt for every role", () => {
-  assert.deepEqual(launchArgv("task-worker", "WPROMPT", "/r"), ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p", "WPROMPT"]);
-  assert.deepEqual(launchArgv("selector", "SPROMPT", "/r"), ["bash", "/r/plugin/scripts/quay-launch.sh", "selector", "-p", "SPROMPT"]);
-  assert.deepEqual(launchArgv("fix-worker", "FPROMPT", "/r"), ["bash", "/r/plugin/scripts/quay-launch.sh", "fix-worker", "-p", "FPROMPT"]);
-  // 单一真相源：default* 都经同一构造（argv[0..3] = bash + quay-launch.sh + role + -p）。
-  assert.deepEqual(defaultWorkerArgv("gap-x", "/r").slice(0, 4), ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p"]);
-  assert.deepEqual(defaultSelectorArgv(["a"], "/r").slice(0, 4), ["bash", "/r/plugin/scripts/quay-launch.sh", "selector", "-p"]);
+test("AC140-1 — single constructor: launchArgv resolves kind → profile via policy (launcher from profile, ⛔ not bash quay-launch.sh)", () => {
+  const tw = launchArgv("task-worker", "WPROMPT", REPO_ROOT);
+  assert.equal(tw[0], "claude-fjdac", "launcher resolved from profile (⛔ bash quay-launch.sh)");
+  assert.equal(tw[1], "--settings");
+  assert.equal(tw[tw.indexOf("--model") + 1], "deepseek-v4-pro");
+  assert.equal(tw[tw.indexOf("-n") + 1], "quay-task-worker");
+  assert.equal(tw[tw.length - 1], "WPROMPT", "prompt is the last argv payload");
+  assert.ok(!tw.includes("quay-launch.sh"), "no bash quay-launch.sh in the spawn argv (⛔ bash 第二份实现)");
+
+  const sel = launchArgv("selector", "SPROMPT", REPO_ROOT);
+  assert.equal(sel[0], "claude-fjdac");
+  assert.equal(sel[sel.indexOf("-n") + 1], "quay-selector");
+
+  const fix = launchArgv("fix-worker", "FPROMPT", REPO_ROOT);
+  assert.equal(fix[0], "claude-fjdac");
+  assert.equal(fix[fix.indexOf("-n") + 1], "quay-fix-worker");
+
+  // 单一真相源：default* 都经同一构造（argv[0] = profile launcher，调用点只传语义 kind）。
+  assert.equal(defaultWorkerArgv("gap-x", REPO_ROOT)[0], "claude-fjdac");
+  assert.equal(defaultSelectorArgv(["a"], REPO_ROOT)[0], "claude-fjdac");
+});
+
+test("AC140-1b — L3 由 policy 解析（能取假）：合成 profile 的 launcher/model 流进 argv（⛔ 非硬编码）", (t) => {
+  const root = makeRoot("profile");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 合成 profiles.yml：launcher=claude（⛔ 非 claude-fjdac）+ model=synth-model——若 launchArgv 硬编码
+  // claude-fjdac/deepseek-v4-pro 或绕过 policy，这些字段不会照合成值流进 argv ⇒ 取假。
+  fs.writeFileSync(path.join(root, ".quay", "profiles.yml"),
+    "version: 1\n" +
+    "profiles:\n  w:\n    launcher: claude\n    model: synth-model\n    bare: false\n    auth: key\n" +
+    "roles:\n  task-worker:\n    profile: w\n    name: quay-synth\n");
+  fs.mkdirSync(path.join(root, ".claude"), { recursive: true });
+  const settingsPath = path.join(root, ".claude", "launch.settings.json");
+  fs.writeFileSync(settingsPath, JSON.stringify({ $schema: "x", permissions: {}, env: { KEEP: "1" } }));
+
+  const a = launchArgv("task-worker", "P", root);
+  assert.equal(a[0], "claude", "launcher from the SYNTHETIC profile (⛔ hardcoded claude-fjdac)");
+  assert.equal(a[a.indexOf("--model") + 1], "synth-model", "model from the SYNTHETIC profile");
+  assert.equal(a[a.indexOf("-n") + 1], "quay-synth", "name from the SYNTHETIC profile");
+  assert.equal(a[a.length - 1], "P");
+  // 无 unset / 无 role env ⇒ --settings 直接是文件路径（非合并 JSON）。
+  assert.equal(a[a.indexOf("--settings") + 1], settingsPath);
 });
 
 test("AC140-2 — configurable: worker roles carry wrapper+model via shared profile (falsifiable vs manager)", () => {
@@ -1545,9 +1593,10 @@ test("AC140-3 — override semantics unified: --worker-cmd is prefix, --worker-c
   assert.match(prefix[prefix.length - 1], /gap-x/,
     "prefix semantics: the task prompt is appended as the last arg (exact would drop it ⇒ falsifiable)");
 
-  // 缺省 ⇒ launchArgv("task-worker", prompt)。
-  assert.deepEqual(workerArgvForTask("gap-x", "/r").slice(0, 4),
-    ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p"]);
+  // 缺省 ⇒ launchArgv("task-worker", prompt)：经 policy 解析，argv[0] 是 profile launcher。
+  const def = workerArgvForTask("gap-x", REPO_ROOT);
+  assert.equal(def[0], "claude-fjdac", "default worker resolves via policy (⛔ bash quay-launch.sh)");
+  assert.match(def[def.length - 1], /gap-x/, "the task prompt is the last argv payload");
 });
 
 // ── gap-worker-worktree-continue-reuse ───────────────────────────────────────────────────────────
@@ -2142,8 +2191,10 @@ test("AC2 (gap-worker-driver-async-selector-readypool) — async variants resolv
   assert.equal(st.acChecked, 1, "async state carries AC checked");
   const cont = await workerPromptForTaskAsync("gap-as2", root);
   assert.match(cont, /CONTINUE \(reuse/, "async continue prompt reuses the worktree");
+  writeProfileCarrier(root); // L3: 默认 argv 经 policy 需要 profiles.yml + settings 载体
   const argv = await workerArgvForTaskAsync("gap-as2", root, { prefix: null, exact: null });
-  assert.equal(argv[0], "bash", "async worker argv routes through quay-launch.sh");
+  assert.equal(argv[0], "claude", "async worker argv resolves via policy to the profile launcher (⛔ bash quay-launch.sh)");
+  assert.match(argv[argv.length - 1], /CONTINUE \(reuse/, "async continue prompt is the argv payload");
 });
 
 test("AC3 (gap-worker-driver-async-selector-readypool) — a slow selector does not freeze the floor (round heartbeat keeps firing while the selector is slow)", async (t) => {

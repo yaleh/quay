@@ -25,8 +25,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，语义 kind 调用）：调用点只传语义 kind（不硬编码 profile 字段）；（⛔ 调用点仍硬编码 profile ⇒ 假）。
-- [ ] AC2（能取假，policy 解析）：`launchArgv` 由 policy 解析 kind → profile（复用 L2 的 policy 模块）；（⛔ 绕过 policy 直接拼 argv ⇒ 假）。
+- [x] AC1（能取假，语义 kind 调用）：调用点只传语义 kind（不硬编码 profile 字段）；（⛔ 调用点仍硬编码 profile ⇒ 假）。
+- [x] AC2（能取假，policy 解析）：`launchArgv` 由 policy 解析 kind → profile（复用 L2 的 policy 模块）；（⛔ 绕过 policy 直接拼 argv ⇒ 假）。
 
 ## Definition of Done
 
@@ -34,7 +34,10 @@ driver 消费 policy 落地；AC1-2 全勾；调用点不硬编码 profile；web
 
 ## Touches
 
-- plugin/scripts/worker-driver.ts（launchArgv 消费 policy）
-- plugin/scripts/profile-policy.ts（消费 policy，同 L2）
-- plugin/test/worker-driver.test.mjs（对应测试）
+- plugin/scripts/driver-runtime.ts（launchArgv 定义处——改消费 policy）
+- plugin/scripts/profile-policy.ts（ProfilesConfig 补 flag-only 字段 + 被 launchArgv 消费）
+- plugin/scripts/worker-driver.ts（注释：launchArgv 不再走 quay-launch.sh）
+- plugin/scripts/promotion-driver.ts（注释：buildFixWorkerArgv 走 policy）
+- plugin/test/worker-driver.test.mjs（AC140-1/1b/3 改测 policy 解析）
+- plugin/test/promotion-driver.test.mjs（buildFixWorkerArgv 改测 policy 解析）
 - tasks/gap-driver-binding-semantic-kind-to-profile.md（自身）
