@@ -24,9 +24,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，异步化）：循环体慢操作（readyPoolCheck / runSelectorWorker / runLivenessCheck / git）不再用 spawnSync 阻塞（⛔ 仍有 spawnSync 阻塞循环体 ⇒ 假）。
-- [ ] AC2（能取假，完成作唤醒源）：spawn 完成的 child exit 事件唤醒循环（⛔ 完成事件不被消费 ⇒ 假）。
-- [ ] AC3（能取假，廉价有界）：协调一趟有界（读文件/扫进程/算 diff/至多一个动作），一个卡住的 selector 不冻住地板（构造慢 selector，断言地板仍触发）。
+- [x] AC1（能取假，异步化）：循环体慢操作（readyPoolCheck / runSelectorWorker / runLivenessCheck / git）不再用 spawnSync 阻塞（⛔ 仍有 spawnSync 阻塞循环体 ⇒ 假）。
+- [x] AC2（能取假，完成作唤醒源）：spawn 完成的 child exit 事件唤醒循环（⛔ 完成事件不被消费 ⇒ 假）。
+- [x] AC3（能取假，廉价有界）：协调一趟有界（读文件/扫进程/算 diff/至多一个动作），一个卡住的 selector 不冻住地板（构造慢 selector，断言地板仍触发）。
 
 ## Definition of Done
 

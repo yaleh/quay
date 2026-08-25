@@ -350,6 +350,31 @@ export function worktreePathsForTask(root: string, taskId: string): string[] {
   return paths;
 }
 
+/** worktreePresentForTask 的异步版（常驻循环体用——⛔ spawnSync git 会冻住协调地板）。语义一致：
+ *  读失败（git 失败）⇒ null（读不懂 ≠ 无残留），⛔ 不是 false。 */
+export async function worktreePresentForTaskAsync(root: string, taskId: string): Promise<boolean | null> {
+  const r = await runAsync(["git", "-C", root, "worktree", "list", "--porcelain"], { timeoutMs: 5_000 });
+  if (r.error || r.status !== 0) return null;
+  const re = new RegExp(`^branch refs/heads/task/${escapeRegExp(taskId)}$`, "m");
+  return re.test(String(r.stdout ?? ""));
+}
+
+/** worktreePathsForTask 的异步版（常驻循环体用）。读失败 ⇒ []（与同步版一致）。 */
+export async function worktreePathsForTaskAsync(root: string, taskId: string): Promise<string[]> {
+  const r = await runAsync(["git", "-C", root, "worktree", "list", "--porcelain"], { timeoutMs: 5_000 });
+  if (r.error || r.status !== 0) return [];
+  const paths: string[] = [];
+  let current: string | null = null;
+  for (const line of String(r.stdout ?? "").split("\n")) {
+    if (line.startsWith("worktree ")) {
+      current = line.slice("worktree ".length).trim();
+    } else if (line === `branch refs/heads/task/${taskId}` && current != null) {
+      paths.push(current);
+    }
+  }
+  return paths;
+}
+
 // ── 冷启动在飞枚举（gap-worker-driver-cold-start-inflight-blind）───────────────────────────────────
 // driver 的 running 是纯内存数组、冷启动从空集起：restart / supervisor 崩溃自动 respawn 后，新进程
 // 不认得重启前就存活的 worker。`ready-pool-check` 的 notInFlight 完全依赖调用方传入的 in-flight id
@@ -859,6 +884,25 @@ export function branchHeadSubject(root: string, taskId: string): string | null {
   return out === "" ? null : out;
 }
 
+/** countBranchCommits 的异步版（常驻循环体用——⛔ spawnSync git 会冻住协调地板）。语义一致：
+ *  git 失败 / 分支不存在 ⇒ null（读不懂 ≠ 0 提交）。 */
+export async function countBranchCommitsAsync(root: string, taskId: string): Promise<number | null> {
+  const r = await runAsync(["git", "-C", root, "rev-list", "--count", `HEAD..task/${taskId}`], { timeoutMs: 5_000 });
+  if (r.error || r.status !== 0) return null;
+  const out = r.stdout.trim();
+  if (out === "") return 0;
+  const n = Number(out);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** branchHeadSubject 的异步版（常驻循环体用）。无自己的提交 / 读失败 ⇒ null。 */
+export async function branchHeadSubjectAsync(root: string, taskId: string): Promise<string | null> {
+  const r = await runAsync(["git", "-C", root, "log", "-1", "--format=%s", `HEAD..task/${taskId}`], { timeoutMs: 5_000 });
+  if (r.error || r.status !== 0) return null;
+  const out = r.stdout.trim();
+  return out === "" ? null : out;
+}
+
 /** 该 task 最近一条 exited-not-landed 的失败原因（AC2「上次失败原因」，读 worker-outcome.jsonl）。
  *  无记录 / 读失败 ⇒ null（读不懂 ≠ 无失败——但续做 prompt 以 "(unknown)" 呈现，不伪装成「没有失败」）。 */
 export function lastExitedNotLandedReason(root: string, taskId: string): string | null {
@@ -902,6 +946,23 @@ export function continueStateForTask(root: string, taskId: string): ContinueWork
   };
 }
 
+/** continueStateForTask 的异步版（常驻循环体用——⛔ spawnSync git 会冻住协调地板）。语义一致：
+ *  无 worktree（worktreePresentForTaskAsync 非 true）⇒ null（创建路径）；worktree 读不懂（null）⇒ null
+ *  （创建，与「确认无残留」同向）。/proc 与任务文件读仍是同步 fs（廉价，task 4 只点名 git，不点名 /proc）。 */
+export async function continueStateForTaskAsync(root: string, taskId: string): Promise<ContinueWorkerState | null> {
+  if ((await worktreePresentForTaskAsync(root, taskId)) !== true) return null;
+  const paths = await worktreePathsForTaskAsync(root, taskId);
+  const ac = readAcCheckState(root, taskId);
+  return {
+    worktreePath: paths[0] ?? null,
+    branchCommits: await countBranchCommitsAsync(root, taskId),
+    branchHeadSubject: await branchHeadSubjectAsync(root, taskId),
+    acChecked: ac.checked,
+    acTotal: ac.total,
+    failureReason: lastExitedNotLandedReason(root, taskId),
+  };
+}
+
 /** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
  *  状态（分支提交 / AC 勾选 / 失败原因）供 worker 从保留 worktree 继续。⛔ 不含 "create an isolated
  *  git worktree"（AC1 取假判据——旧 prompt 逐字说 create 是撞死根因）。 */
@@ -932,6 +993,28 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
 export function workerPromptForTask(task: string, root: string): string {
   const state = continueStateForTask(root, task);
   return state != null ? buildContinueWorkerPrompt(task, root, state) : buildWorkerPrompt(task, root);
+}
+
+/** workerPromptForTask 的异步版（常驻循环体用——⛔ 同步版经 continueStateForTask 走 spawnSync git 会冻住
+ *  协调地板）。保留 worktree ⇒ 续做 prompt，无 ⇒ 创建 prompt。 */
+export async function workerPromptForTaskAsync(task: string, root: string): Promise<string> {
+  const state = await continueStateForTaskAsync(root, task);
+  return state != null ? buildContinueWorkerPrompt(task, root, state) : buildWorkerPrompt(task, root);
+}
+
+/** workerArgvForTask 的异步版（常驻循环体用）：覆盖语义同同步版（exact > prefix > 缺省 launchArgv），
+ *  prompt 经 workerPromptForTaskAsync 取（⛔ 同步版走 continueStateForTask 的 spawnSync git）。 */
+export async function workerArgvForTaskAsync(task: string, root: string, opts: WorkerCmdOptions = { prefix: null, exact: null }): Promise<string[]> {
+  const prompt = await workerPromptForTaskAsync(task, root);
+  if (opts.exact != null) {
+    const a = splitArgs(opts.exact);
+    return a.length > 0 ? a : launchArgv("task-worker", prompt, root);
+  }
+  if (opts.prefix != null) {
+    const p = splitArgs(opts.prefix);
+    return p.length > 0 ? [...p, prompt] : launchArgv("task-worker", prompt, root);
+  }
+  return launchArgv("task-worker", prompt, root);
 }
 
 /** 常见信号的 shell 惯例退出码（128+signum）；未知信号给 0（被杀本身已是非零）。 */
@@ -1468,8 +1551,11 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   };
 
   /** spawn 一个选中的 worker，并把 selector 的真实理由带进 outcome（AC2）。 */
-  const spawnSelected = (sel: { task: string; reason: string }): void => {
+  const spawnSelected = async (sel: { task: string; reason: string }): Promise<void> => {
     const runIdForTask = runId ?? `${runPrefix}-${sel.task}`;
+    // 异步版（gap-worker-driver-async-selector-readypool AC1）：worker argv 经 workerArgvForTaskAsync 取——
+    // 同步 workerArgvForTask 走 continueStateForTask 的 spawnSync git 会冻住协调地板。
+    const workerArgv = await workerArgvForTaskAsync(sel.task, rootDir, workerCmdOpts);
     const rw = {} as RunningWorker;
     rw.task = sel.task;
     rw.done = false;
@@ -1477,7 +1563,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       taskId: sel.task,
       selectorReason: sel.reason,
       runId: runIdForTask,
-      workerArgv: workerArgvForTask(sel.task, rootDir, workerCmdOpts),
+      workerArgv,
       rootDir,
       outcomeFile,
       timeoutMs,
@@ -1577,7 +1663,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         waitReason = "pool-empty (selector returned no candidate)";
         break;
       }
-      spawnSelected(sel);
+      await spawnSelected(sel);
     }
 
     // AC138-3 无条件心跳：每轮循环写一条（⛔ 池空/判停轮也写——outcome 在这些轮不写）。
