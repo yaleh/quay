@@ -380,11 +380,11 @@ test("resolveRun / splitArgs / defaultWorkerArgv / signalExitCode / parseTimeout
   assert.equal(parseTimeoutMs("abc"), 0);
   assert.equal(parseTimeoutMs("-5"), 0);
 
-  // 并发上限：显式 N 优先 → 定义点 env → 任务数（无字面量）。
-  assert.equal(resolveConcurrency(3, 5, {}), 3);
-  assert.equal(resolveConcurrency(undefined, 5, {}), 5, "no explicit + no env ⇒ task count");
-  assert.equal(resolveConcurrency(undefined, 2, { QUAY_MAX_TASK_SUBAGENTS: "4" }), 4, "env definition point wins");
-  assert.equal(resolveConcurrency(0, 2, {}), 2, "non-positive explicit is ignored");
+  // 并发上限：显式 N 优先 → 声明式配置 cap（driver-config 单一真相源，AC155）→ 任务数（无字面量）。
+  assert.equal(resolveConcurrency(3, 5, 7), 3, "explicit wins");
+  assert.equal(resolveConcurrency(undefined, 5, undefined), 5, "no explicit + no config ⇒ task count");
+  assert.equal(resolveConcurrency(undefined, 2, 4), 4, "config cap (drivers.yml) wins");
+  assert.equal(resolveConcurrency(0, 2, 7), 7, "non-positive explicit is ignored ⇒ config cap");
 });
 
 test("AC2 (gap-worker-print-bg-wait-ceiling-600s c) — buildWorkerPrompt hints to stay in-turn (TaskOutput blocking wait) during fan-in flight", () => {

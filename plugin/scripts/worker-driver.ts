@@ -151,6 +151,9 @@ export {
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
 import { applyTaskFilters, makeFilterContext, readTaskStatus } from "./driver-filters.ts";
 export { readTaskStatus } from "./driver-filters.ts";
+// AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
+// ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
+import { defaultDriverConfig, loadDriverConfig, driverCap } from "./driver-config.ts";
 // AC153：核心不变式单一实现（「⛔ 不信执行者自述，用独立量复核」）+ DriverResult 词表强制含
 // not-evaluated。computeLandingState 消费它（⛔ 不各写一遍 exitCode/自述判定）。
 import { verifyIndependently, type DriverResult } from "./driver-result.ts";
@@ -212,7 +215,9 @@ export const FINAL_STATES = ["completed", "exited-not-landed", "failed", "killed
  *  区别于 spawn-failed=2 / killed=128+sig / timed-out=128+SIGTERM=143 / failed=worker 码）。 */
 export const EXITED_NOT_LANDED_EXIT = 3;
 
-/** 并发上限的定义点（concurrency-literal-check 的唯一定义点旋钮①，人 2026-08-13）。缺省并发读它。 */
+/** 并发上限的旧 env 定义点（concurrency-literal-check 的旧旋钮①）。AC155：env 源已退役——并发缺省
+ *  改读 driver-config 的 drivers.yml（loadDriverConfig / driverCap 单一真相源）。本常量保留仅为历史
+ *  引用/命名稳定性，⛔ 不再是并发解析的输入。 */
 export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
 
 /** checkout 前 stash 的缺省 message（`git stash list` 可核的标记，AC2）。 */
@@ -229,14 +234,16 @@ export const WORKER_PROCESS_NAME = "quay-task-worker";
 /** 常驻循环【无在飞 worker 且瞬时 WAIT】时的轮询间隔（ms，测试缝经 --interval 传小值）。与
  *  promotion-driver 的 INTERVAL_MS_DEFAULT 同语义：resource-gate-wait / pool-empty 是瞬时态
  *  （闸随负载降会放行、池随 promotion-driver 持续补），等 intervalMs 后重读而非退出
- *  （gap-worker-driver-stopreason-latch-permanent-stop）。 */
-export const RESIDENT_INTERVAL_MS_DEFAULT = 30_000;
+ *  （gap-worker-driver-stopreason-latch-permanent-stop）。AC155：值从 driver-config 的
+ *  drivers.yml 派生（单一真相源，⛔ 本文件不再有独立字面量）。 */
+export const RESIDENT_INTERVAL_MS_DEFAULT = defaultDriverConfig().worker.intervalMs;
 
 /** 协调地板（gap-worker-driver-reconcile-interval，SPEC §5.5）的缺省周期：至少每 N 秒协调一次，
- *  哪怕所有边沿事件（worker 退出）都丢了 ⇒ 降级「慢但正确」而非「静默停摆」。缺省【保守】——
- *  协调一趟只是读文件+扫进程+算 diff（配合异步化后廉价且有界），300s = 5 分钟：远小于停摆窗口
- *  （今日实测 1h48m），又不会高频重算 ready 池浪费资源（硬规则 4 推论：成本结构已知为「廉价」后才设值）。 */
-export const RECONCILE_INTERVAL_SECS_DEFAULT = 300;
+ *  哪怕所有边沿事件（worker 退出）都丢了 ⇒ 降级「慢但正确」而非「静默停摆」（AC155 AC3 兜底轮询）。
+ *  缺省【保守】——协调一趟只是读文件+扫进程+算 diff（配合异步化后廉价且有界），300s = 5 分钟：
+ *  远小于停摆窗口（今日实测 1h48m），又不会高频重算 ready 池浪费资源（硬规则 4 推论：成本结构已知
+ *  为「廉价」后才设值）。AC155：值从 driver-config 的 drivers.yml 派生（单一真相源）。 */
+export const RECONCILE_INTERVAL_SECS_DEFAULT = defaultDriverConfig().worker.reconcileIntervalSecs;
 
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
 
@@ -943,17 +950,18 @@ export function signalExitCode(signal: string): number {
 }
 
 /**
- * 并发上限（AC116 阶段 2 ①）：显式 N 优先 → 定义点 QUAY_MAX_TASK_SUBAGENTS → 任务数（无字面量，
- * 不依赖宿主规格）。驱动数自己的子进程，达 cap 则等一个结束再起下一个。
+ * 并发上限（AC116 阶段 2 ①）：显式 N 优先 → 声明式配置 cap（driver-config 单一真相源，AC155——
+ * ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env）→ 任务数（无字面量，不依赖宿主规格）。驱动数自己的
+ * 子进程，达 cap 则等一个结束再起下一个。`configCap` = 调用方经 driverCap(root,"worker") 现读的
+ * drivers.yml cap（纯函数，不自己碰 fs/env）。
  */
 export function resolveConcurrency(
   explicit: number | undefined,
   taskCount: number,
-  env: NodeJS.ProcessEnv = process.env,
+  configCap?: number,
 ): number {
   if (explicit != null && Number.isInteger(explicit) && explicit >= 1) return explicit;
-  const envN = Number(env[MAX_TASK_SUBAGENTS_ENV]);
-  if (Number.isInteger(envN) && envN >= 1) return envN;
+  if (configCap != null && Number.isInteger(configCap) && configCap >= 1) return configCap;
   return Math.max(1, taskCount);
 }
 
@@ -964,20 +972,24 @@ export function parseTimeoutMs(raw: string | undefined): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
-/** 解析 --interval <ms>（常驻循环无在飞 worker 且瞬时 WAIT 时的轮询间隔）。缺省
- *  RESIDENT_INTERVAL_MS_DEFAULT；非法（非有限 / 负数）⇒ 缺省（⛔ 不因 flag 拼写炸常驻循环）。 */
-export function parseIntervalMs(raw: string | undefined): number {
-  if (raw == null) return RESIDENT_INTERVAL_MS_DEFAULT;
+/** 解析 --interval <ms>（常驻循环无在飞 worker 且瞬时 WAIT 时的轮询间隔）。缺省 = drivers.yml 的
+ *  interval_ms（root 缺省时回退 RESIDENT_INTERVAL_MS_DEFAULT 常量）；非法（非有限 / 负数）⇒ 缺省
+ *  （⛔ 不因 flag 拼写炸常驻循环）。 */
+export function parseIntervalMs(raw: string | undefined, root?: string): number {
+  const def = root ? loadDriverConfig(root).worker.intervalMs : RESIDENT_INTERVAL_MS_DEFAULT;
+  if (raw == null) return def;
   const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : RESIDENT_INTERVAL_MS_DEFAULT;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : def;
 }
 
-/** 解析 --reconcile-interval <s>（秒，协调地板周期）。缺省 RECONCILE_INTERVAL_SECS_DEFAULT（保守）；
- *  非法（非有限 / 负数）⇒ 缺省（⛔ 不因 flag 拼写炸常驻循环）。返回毫秒（内部统一用 ms）。 */
-export function parseReconcileIntervalSecs(raw: string | undefined): number {
-  if (raw == null) return RECONCILE_INTERVAL_SECS_DEFAULT * 1000;
+/** 解析 --reconcile-interval <s>（秒，协调地板周期）。缺省 = drivers.yml 的 reconcile_interval_secs
+ *  （root 缺省时回退 RECONCILE_INTERVAL_SECS_DEFAULT 常量，保守）；非法（非有限 / 负数）⇒ 缺省
+ *  （⛔ 不因 flag 拼写炸常驻循环）。返回毫秒（内部统一用 ms）。 */
+export function parseReconcileIntervalSecs(raw: string | undefined, root?: string): number {
+  const def = root ? loadDriverConfig(root).worker.reconcileIntervalSecs : RECONCILE_INTERVAL_SECS_DEFAULT;
+  if (raw == null) return def * 1000;
   const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) * 1000 : RECONCILE_INTERVAL_SECS_DEFAULT * 1000;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) * 1000 : def * 1000;
 }
 
 /** 一次 stash 的结果（AC2 可核：stashed=true 且 git stash list 可见；⛔ 绝不 discard）。 */
@@ -1584,12 +1596,12 @@ export async function main(argv: string[]): Promise<number> {
 
   const outcomeFile = outcomePath ? path.resolve(outcomePath) : path.join(rootDir, WORKER_OUTCOME_REL);
   const timeoutMs = parseTimeoutMs(timeoutRaw);
-  const intervalMs = parseIntervalMs(intervalRaw);
-  const reconcileMs = parseReconcileIntervalSecs(reconcileRaw);
+  const intervalMs = parseIntervalMs(intervalRaw, rootDir);
+  const reconcileMs = parseReconcileIntervalSecs(reconcileRaw, rootDir);
 
   // 阶段 4（AC129）：无 --task ⇒ 常驻选择环（不再报错退出）。--task 显式批量派发路径不变。
   if (tasks.length === 0) {
-    const cap = resolveConcurrency(concurrency, 0);
+    const cap = resolveConcurrency(concurrency, 0, driverCap(rootDir, "worker"));
     return runResidentLoop({
       rootDir,
       cap,
@@ -1615,7 +1627,7 @@ export async function main(argv: string[]): Promise<number> {
     return 2;
   }
   const { taskIds, selectorReason, runPrefix, workerCmdOpts } = resolved;
-  const cap = resolveConcurrency(concurrency, taskIds.length);
+  const cap = resolveConcurrency(concurrency, taskIds.length, driverCap(rootDir, "worker"));
 
   // checkout 前 stash（阶段 2 ③，AC2）：主检出有未提交变更 ⇒ stash，⛔ 不 discard。非 git 仓库 no-op。
   const stash = stashIfDirty(rootDir);

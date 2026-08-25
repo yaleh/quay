@@ -74,6 +74,8 @@ import { resourceGateCheck, isHalted, PROMOTION_CONTROL_STATE_REL } from "./driv
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。promotion 的 fix pass 经
 // applyTaskFilters 消费 retryCapNotExhausted / notNeedsHuman（⛔ 不各写一遍 retryState.needsHuman 判定）。
 import { applyTaskFilters, makeFilterContext } from "./driver-filters.ts";
+// AC155：并发 cap / 轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量）。
+import { defaultDriverConfig, loadDriverConfig, driverCap } from "./driver-config.ts";
 // AC153：核心不变式单一实现（「⛔ 不信执行者自述，用独立量复核」）。AC133 重闸验证（computeReverifyOutcome）
 // 消费它——worker 的 computeLandingState 与本文件的重闸判定共用同一份三态映射（⛔ 不各写一遍）。
 import { verifyIndependently } from "./driver-result.ts";
@@ -87,13 +89,14 @@ export const ROUND_LOG_REL = ".quay/promotion-round.jsonl";
  *  各一条，outer 可消费）。 */
 export const OUTCOME_LOG_REL = ".quay/promotion-outcome.jsonl";
 
-/** 轮间隔缺省（毫秒）。AC130 判据不设数值阈值（硬规则 4）——此值只是「机械心跳」的占位节奏，
- *  生产部署时由 outer 的启动命令传 --interval 覆盖；测试传小值。 */
-export const INTERVAL_MS_DEFAULT = 30_000;
+/** 轮间隔缺省（毫秒）。AC130 判据不设数值阈值（硬规则 4）——此值只是「机械心跳」的占位节奏。
+ *  AC155：值从 driver-config 的声明式配置（drivers.yml）派生（单一真相源）；生产由 --interval 覆盖，
+ *  测试传小值。 */
+export const INTERVAL_MS_DEFAULT = defaultDriverConfig().promotion.intervalMs;
 
-// 并发 cap 缺省。concurrency-default-fallback：生产调用方从 cap-from-gate.sh 传自适应 --cap；
-// 此值只是「未传 --cap」的手动/测试回退。AC48 后 cap 不闸晋升，传 5 避免 cap-3 回退的 floor 假象。
-export const CAP_DEFAULT = 5;
+// 并发 cap 缺省。AC155：值从 driver-config 的声明式配置（drivers.yml）派生（单一真相源——⛔ 本文件
+// 不再有独立的并发字面量）。生产由 --cap 覆盖；AC48 后 cap 不闸晋升，缺省 5 避免 cap-3 回退的 floor 假象。
+export const CAP_DEFAULT = defaultDriverConfig().promotion.cap;
 
 /** AC133 失败上限缺省：同一任务连续修 N 次仍不合格 ⇒ 标 needs-human。与 fan-in 侧 attempt>=3 同值
  *  （gap-fan-in-relaunch-retry-cap），非新设数值阈值——仅作「未传 --max-fix-retries」的手动/测试回退。 */
@@ -681,17 +684,20 @@ export function appendOutcomeRecord(file: string, record: PromotionOutcomeRecord
   return file;
 }
 
-/** 解析 --interval。缺省 INTERVAL_MS_DEFAULT；非负有限数才合法。 */
-export function parseIntervalMs(raw: string | undefined): { ok: true; value: number } | { ok: false; error: string } {
-  if (raw === undefined) return { ok: true, value: INTERVAL_MS_DEFAULT };
+/** 解析 --interval。缺省 = drivers.yml 的 interval_ms（root 缺省时回退 INTERVAL_MS_DEFAULT 常量）；
+ *  非负有限数才合法。 */
+export function parseIntervalMs(raw: string | undefined, root?: string): { ok: true; value: number } | { ok: false; error: string } {
+  if (raw === undefined) {
+    return { ok: true, value: root ? loadDriverConfig(root).promotion.intervalMs : INTERVAL_MS_DEFAULT };
+  }
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return { ok: false, error: `invalid --interval: ${raw}` };
   return { ok: true, value: n };
 }
 
-/** 解析 --cap。缺省 CAP_DEFAULT；正整数才合法。 */
-export function resolveCap(raw: string | undefined): { ok: true; value: number } | { ok: false; error: string } {
-  if (raw === undefined) return { ok: true, value: CAP_DEFAULT };
+/** 解析 --cap。缺省 = drivers.yml 的 cap（单一真相源；root 缺省时回退 CAP_DEFAULT 常量）；正整数才合法。 */
+export function resolveCap(raw: string | undefined, root?: string): { ok: true; value: number } | { ok: false; error: string } {
+  if (raw === undefined) return { ok: true, value: root ? driverCap(root, "promotion") : CAP_DEFAULT };
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0) return { ok: false, error: `invalid --cap: ${raw}` };
   return { ok: true, value: n };
@@ -938,9 +944,9 @@ export async function main(argv: string[]): Promise<number> {
 
   const rootDir = root ? path.resolve(root) : path.resolve(process.cwd());
 
-  const interval = parseIntervalMs(intervalRaw);
+  const interval = parseIntervalMs(intervalRaw, rootDir);
   if (!interval.ok) { console.error(`promotion-driver: ${interval.error}`); return 2; }
-  const capRes = resolveCap(capRaw);
+  const capRes = resolveCap(capRaw, rootDir);
   if (!capRes.ok) { console.error(`promotion-driver: ${capRes.error}`); return 2; }
   if (maxRounds !== null && (!Number.isInteger(maxRounds) || maxRounds < 1)) {
     console.error("promotion-driver: --max-rounds must be a positive integer");
