@@ -151,6 +151,12 @@ export {
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
 import { applyTaskFilters, makeFilterContext, readTaskStatus } from "./driver-filters.ts";
 export { readTaskStatus } from "./driver-filters.ts";
+// AC153：核心不变式单一实现（「⛔ 不信执行者自述，用独立量复核」）+ DriverResult 词表强制含
+// not-evaluated。computeLandingState 消费它（⛔ 不各写一遍 exitCode/自述判定）。
+import { verifyIndependently, type DriverResult } from "./driver-result.ts";
+// AC153：re-export verifyIndependently 值——测试用「同一函数身份」证两 driver 共用单一实现（⛔ 非平行副本）。
+export { verifyIndependently } from "./driver-result.ts";
+export type { DriverResult } from "./driver-result.ts";
 import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
 import { isDue } from "./routine-scheduler.ts";
 
@@ -526,32 +532,52 @@ export function cleanupOrphanWorktree(root: string, taskId: string, workerCmdlin
   return { removed, worktreePath: paths[0] ?? null, branchDeleted, error, skippedLiveWorker: false };
 }
 
-/** 落地判定（AC1 判据）：landed = status=done ∧ 无残留 worktree。任一读失败 ⇒ landed=false
- *  （fail-closed 朝「未落地」，硬规则 3b：读不懂 ≠ 落地）。返回详细 reason（写进 failure_reason）。 */
-export function computeLandingState(root: string, taskId: string): {
-  landed: boolean;
-  status: string | null;
-  worktreePresent: boolean | null;
-  reason: string;
-} {
+/** verified 态的证据载体：status 已读为 "done"、worktree 已确认无残留。 */
+export interface LandingEvidence {
+  status: "done";
+  worktreePresent: false;
+}
+
+/** 落地判定（AC1 判据）：landed = status=done ∧ 无残留 worktree，经 AC153 单一不变式
+ *  verifyIndependently 表达成 DriverResult（⛔ 不信 exitCode，读任务侧独立直接量）。三态（证伪优先）：
+ *   verified      = status=done ∧ 无残留 worktree（独立判据证实落地）
+ *   failed        = status≠done 或 残留 worktree（任一独立量证伪即可，⛔ 不需读全另一量）
+ *   not-evaluated = 既未证真也未证伪（status 读不到且未证伪、或 worktree 读不到且 status 未证伪）
+ * 下游 computeOutcome 把 verified→completed、failed/not-evaluated→exited-not-landed（fail-closed 朝
+ * 「未完成」，但保留 reason 区分「证伪」与「未评估」）。 */
+export function computeLandingState(root: string, taskId: string): DriverResult<LandingEvidence> {
   const status = readTaskStatus(root, taskId);
   const worktreePresent = worktreePresentForTask(root, taskId);
-  const statusOk = status === "done";
-  const worktreeOk = worktreePresent === false; // false = 确认无残留；null = 读不懂 ⇒ 视为未落地
-  const landed = statusOk && worktreeOk;
-  let reason: string;
-  if (landed) {
-    reason = "landed (status=done, no leftover worktree)";
-  } else if (statusOk && worktreePresent === true) {
-    reason = `status=done but leftover worktree task/${taskId} still present`;
-  } else if (statusOk && worktreePresent === null) {
-    reason = "status=done but worktree state unreadable (git worktree list failed)";
-  } else if (!statusOk && worktreeOk) {
-    reason = `task status=${status ?? "missing"} (not done)`;
-  } else {
-    reason = `task status=${status ?? "missing"} (not done) and worktree ${worktreePresent === null ? "unreadable" : "still present"}`;
-  }
-  return { landed, status, worktreePresent, reason };
+
+  return verifyIndependently(
+    {
+      value: { status: "done", worktreePresent: false },
+      verifiedBy: "task status=done ∧ no leftover worktree (independent task-side read)",
+      failedReason: landingFailedReason(status, worktreePresent, taskId),
+      notEvaluatedReason:
+        status === null
+          ? "task status unreadable (task file missing or unreadable)"
+          : "worktree state unreadable (git worktree list failed)",
+    },
+    () => {
+      // 证伪优先：任一独立量可读且证伪 ⇒ failed（⛔ 不等另一量）。
+      if (status !== null && status !== "done") return false; // status 可读且 ≠ done
+      if (worktreePresent === true) return false; // 残留 worktree
+      // 证真：status=done ∧ 确认无残留。
+      if (status === "done" && worktreePresent === false) return true;
+      // 读不到（status 或 worktree 读不到，且未证伪）⇒ not-evaluated（⛔ 不伪造成 failed）。
+      return null;
+    },
+  );
+}
+
+/** 证伪理由（独立判据证伪落地时用：status≠done 或 残留 worktree，逐条拼）。 */
+function landingFailedReason(status: string | null, worktreePresent: boolean | null, taskId: string): string {
+  const parts: string[] = [];
+  if (status !== null && status !== "done") parts.push(`task status=${status} (not done)`);
+  else if (status === null) parts.push("task status unreadable");
+  if (worktreePresent === true) parts.push(`leftover worktree task/${taskId} still present`);
+  return parts.join(" and ");
 }
 
 /** 把一条 outcome 追加写入指定文件（mkdir -p + appendFileSync，一行一 JSON）。 */
@@ -1235,7 +1261,11 @@ function runOneWorker({
         task: taskId, selectorReason, exitCode: code, signal,
         startedAtMs, endedAtMs, workerPid, runId,
         spawnError: spawnErr, inFlightCount, timedOut,
-        landed: landing.landed, landReason: landing.reason,
+        // AC153：DriverResult → computeOutcome 的 landed 三态。verified ⇒ landed=true；failed ⇒
+        // landed=false + 证伪 reason；not-evaluated ⇒ landed=null（读不懂，computeOutcome 的 landed
+        // 缺省分支即「未评估」措辞，⛔ 与「证伪」区分）。
+        landed: landing.state === "verified" ? true : landing.state === "failed" ? false : null,
+        landReason: landing.state === "verified" ? null : landing.reason,
         sessionId,
       });
       // gap-worker-driver-no-record-on-abnormal-death（AC2，能取假）：worker 异常死亡（failed/killed——
