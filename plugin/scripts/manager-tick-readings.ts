@@ -9,7 +9,8 @@
 //   - tmux 纯只读：只用 `list-panes`（含 -a 全量枚举）；零破坏性 tmux 子命令（kill 族一律不用）。AC2。
 //   - 身份判据：`pane_pid` + `pane_current_command`（cmd=claude 才算认出会话）；不用 pgrep 的 `-P` 子进程寻址。AC4。
 //   - 监视器实例枚举按 argv[0..1]（argv[1] basename == session-liveness.sh），不 grep 整条 cmdline
-//     （§1.4c 自匹配教训；monitor-mount-check.sh 同一谓词）。
+//     （§1.4c 自匹配教训；monitor-mount-check.sh 同一谓词）；再加 root 过滤——解析后的脚本路径须落在
+//     主检出 repoRoot 下，worktree 测试进程（quay-worktrees/）不误计（硬规则 4b）。
 //   - 输出固定结构、逐行带标签：人为跳过一项 ⇒ 该标签行缺失，可被机械检出，不是静默少几行。AC3。
 //
 // 用法:
@@ -413,8 +414,36 @@ export interface MonitorInstance {
   stale: boolean;
 }
 
-/** 枚举 session-liveness 监视器实例：argv[0]=bash 且 argv[1] basename == session-liveness.sh。 */
-export function monitorInstances(entryLastCommit: number, procRoot = "/proc"): MonitorInstance[] {
+/** 读 /proc/<pid>/cwd 链接目标（进程当前工作目录）。失败返回空串。 */
+export function readCwd(pid: number, procRoot = "/proc"): string {
+  try {
+    return fs.readlinkSync(path.join(procRoot, String(pid), "cwd"));
+  } catch {
+    return "";
+  }
+}
+
+/** 把 argv[1] 解析为绝对脚本路径：绝对 → normpath；相对 → 按进程 cwd 解析再 normpath
+ *  （挂载常以 `bash plugin/scripts/session-liveness.sh` 形式启动，cwd = 项目根；
+ *   monitor-mount-check.sh 的 resolve_script_path 同构）。 */
+export function resolveScriptPath(pid: number, argvScript: string, procRoot = "/proc"): string {
+  if (path.isAbsolute(argvScript)) return path.normalize(argvScript);
+  const cwd = readCwd(pid, procRoot);
+  if (!cwd) return path.normalize(argvScript); // cwd 不可得时退化为相对路径（仍不命中 root 过滤）
+  return path.normalize(path.join(cwd, argvScript));
+}
+
+/** root 过滤：解析后的脚本路径是否落在主检出 repoRoot 下（排除 worktree 测试进程等外仓实例）。
+ *  `repoRoot + path.sep` 前缀判定——`quay-worktrees/<task>` 是 `repoRoot` 的兄弟目录，
+ *  不满足前缀（`/home/yale/work/quay-worktrees/…` 不以 `/home/yale/work/quay/` 开头）。 */
+export function isMainCheckoutScript(resolved: string, repoRoot: string): boolean {
+  const root = path.normalize(repoRoot);
+  return resolved === root || resolved.startsWith(root + path.sep);
+}
+
+/** 枚举 session-liveness 监视器实例：argv[0]=bash 且 argv[1] basename == session-liveness.sh，
+ *  且解析后的脚本路径落在主检出 repoRoot 下（root 过滤——worktree 测试进程不误计，硬规则 4b）。 */
+export function monitorInstances(entryLastCommit: number, repoRoot: string, procRoot = "/proc"): MonitorInstance[] {
   const out: MonitorInstance[] = [];
   let entries: string[] = [];
   try {
@@ -428,6 +457,7 @@ export function monitorInstances(entryLastCommit: number, procRoot = "/proc"): M
     const argv = readCmdline(pid, procRoot);
     if (argv.length < 2 || argv[0] !== "bash") continue;
     if (path.basename(argv[1]) !== "session-liveness.sh") continue;
+    if (!isMainCheckoutScript(resolveScriptPath(pid, argv[1], procRoot), repoRoot)) continue;
     const { ppid, startEpoch } = readStat(pid, procRoot);
     out.push({
       pid,
@@ -500,7 +530,7 @@ export function render(projects: Project[], opts: RenderOpts): string {
   const resources = resourceReadings(procRoot);
   const outer = outerReadings(projects, resolvePanes(projects, opts.socket, env));
   const entryCommit = entryLastCommitEpoch(opts.repoRoot, env);
-  const monitors = monitorInstances(entryCommit, procRoot);
+  const monitors = monitorInstances(entryCommit, opts.repoRoot, procRoot);
 
   const lines: string[] = [];
   lines.push(`manager-tick-readings ts=${Date.now()}`);
