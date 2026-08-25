@@ -1,7 +1,7 @@
 ---
 id: gap-sessions-page-slow-unclickable-flat-render
 title: sessions 页三缺陷：列表每卡同步读 200KB tail（慢）+ 卡片裸 div 无链接（不可点）+ 详情页 2MB 全量平铺——阶段一三改
-status: ready
+status: done
 labels:
   - gap
   - defect
