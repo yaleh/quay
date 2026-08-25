@@ -100,6 +100,22 @@ scan_matches() {
   } | grep -v '^$' | sort
 }
 
+# reap_wait_default — the HOST-DERIVED default reap-wait bound (gap-suite-leak-scan-ol-scd-g-
+# teardown-slow). The suite's test-spawned tmux-server teardown latency scales with the MAIN-PHASE
+# lane count (more lanes = more servers reaping concurrently under load), so a fixed 10000ms is a
+# host-dependent constant (CLAUDE.md 硬规则 4 推论二). round 95 set 10000ms for a lighter load
+# profile; under the current 16-lane load an ol-scd-g server still exits past 10000ms (4-round
+# false-red, .prev -xie53B / 本轮 -D22itv). Default = max(10000, nproc × 2500): 4-core (historical)
+# = 10000, 16-core = 40000. Reads the SAME nproc seam scripts/test.sh uses (RESOURCE_GATE_NPROC →
+# nproc); TMUX_LEAK_REAP_WAIT_MS overrides the whole derivation for deterministic tests. A genuine
+# leak never clears regardless of the bound, so widening only absorbs slow teardown — it never turns
+# a leak green (AC2).
+reap_wait_default() {
+  local nproc_val
+  nproc_val="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
+  awk -v n="${nproc_val}" 'BEGIN { c = n * 2500; if (c < 10000) c = 10000; printf "%d", c }'
+}
+
 if [ "$mode" = "snapshot" ]; then
   mkdir -p "${root}/.quay"
   scan_matches > "$snapshot"
@@ -119,12 +135,12 @@ if [ "$mode" = "check" ]; then
   # ASYNCHRONOUSLY. Under load that exit can lag the run-end --check, so a still-exiting server was
   # swept as "NEW residual" → a false red (round 95: tests=4150 all pass, only the leak gate red;
   # round 96: light load, reaping won 2-10s before the scan → green). Fix: when NEW matches appear,
-  # HOLD JUDGMENT and poll for up to $TMUX_LEAK_REAP_WAIT_MS (default 10000) — matches that clear
-  # within the bound were reaping (transient), not a leak; only matches STILL PRESENT at the bound
-  # are a REAL leak. A genuine leak (a server nobody killed) never clears, so the gate is NOT
-  # weakened — it only stops flagging exit-in-progress. When the run is clean the first scan wins
-  # immediately (zero added latency).
-  reap_wait_ms="${TMUX_LEAK_REAP_WAIT_MS:-10000}"
+  # HOLD JUDGMENT and poll for up to the reap-wait bound (default reap_wait_default(), host-derived
+  # — gap-suite-leak-scan-ol-scd-g-teardown-slow) — matches that clear within the bound were reaping
+  # (transient), not a leak; only matches STILL PRESENT at the bound are a REAL leak. A genuine leak
+  # (a server nobody killed) never clears, so the gate is NOT weakened — it only stops flagging
+  # exit-in-progress. When the run is clean the first scan wins immediately (zero added latency).
+  reap_wait_ms="${TMUX_LEAK_REAP_WAIT_MS:-$(reap_wait_default)}"
   poll_ms="${TMUX_LEAK_REAP_POLL_MS:-250}"
   waited_ms=0
   new_matches=""

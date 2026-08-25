@@ -466,7 +466,14 @@ test("AC5/tmux-leak-scan DELTA: pre-existing matches are excluded; only NEW matc
   const scope = fs.mkdtempSync(path.join(os.tmpdir(), "leakscan-fixture-"));
   const preDir = path.join(scope, "skv-delta-test-preexisting");
   const newDir = path.join(scope, "skv-delta-test-newleak");
-  const runScan = (mode) => spawnSync("bash", [SCAN_SH, "--scope", scope, mode, scratch], { encoding: "utf8", timeout: 30_000 });
+  // Fix B (gap-suite-leak-scan-ol-scd-g-teardown-slow, 2026-08-24): the reap-wait bound is now
+  // HOST-DERIVED (max(10000, nproc×2500) = 40000ms on 16 cores) — a genuine-leak --check polls the
+  // full bound, which exceeds this 30s spawnSync timeout → status null (deterministic RED, both full
+  // and isolate rounds). This DELTA test asserts DETECTION (NEW vs pre-existing, fail-closed), NOT the
+  // reap-wait bound (that is tmux-leak-scan.test.mjs R2/R3/R6). Pin the documented seam
+  // TMUX_LEAK_REAP_WAIT_MS/Poll to deterministic small values so a genuine-leak --check finishes in
+  // ~1s regardless of host nproc — the test is not weakened (all three DELTA assertions unchanged).
+  const runScan = (mode) => spawnSync("bash", [SCAN_SH, "--scope", scope, mode, scratch], { encoding: "utf8", timeout: 30_000, env: { ...process.env, TMUX_LEAK_REAP_WAIT_MS: "1000", TMUX_LEAK_REAP_POLL_MS: "100" } });
   try {
     // PASS: a pre-existing match is excluded (recorded in the before-run snapshot).
     fs.mkdirSync(preDir, { recursive: true });

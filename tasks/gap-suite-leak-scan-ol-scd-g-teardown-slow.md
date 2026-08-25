@@ -2,7 +2,7 @@
 id: gap-suite-leak-scan-ol-scd-g-teardown-slow
 title: leak-scan 越界 flake：ol-scd-g teardown 超 10000ms reap-wait 窗口 ⇒ 4 轮假红（慢
   teardown 竞态，非永久泄漏）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -22,8 +22,8 @@ ol-scd 家族 4 gap 已 done，这是新实例——要么 teardown 提速，要
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，不再假红）：16-lane 负载下 ol-scd-g teardown 后不触发 leak-scan 假红（⛔ 仍 4 轮同形假红 ⇒ 假）。
-- [ ] AC2（能取假，真泄漏仍红）：真实 tmux 泄漏仍被 scan 判红（⛔ 放宽窗口后真泄漏漏报 ⇒ 假）。
+- [x] AC1（能取假，不再假红）：16-lane 负载下 ol-scd-g teardown 后不触发 leak-scan 假红（⛔ 仍 4 轮同形假红 ⇒ 假）。
+- [x] AC2（能取假，真泄漏仍红）：真实 tmux 泄漏仍被 scan 判红（⛔ 放宽窗口后真泄漏漏报 ⇒ 假）。
 
 ## Definition of Done
 
@@ -31,6 +31,8 @@ reap-wait 窗口/teardown 修正落地 develop；AC1-2 全勾；16-lane 下 ol-s
 
 ## Touches
 
-- plugin/scripts/tmux-leak-scan.sh（reap-wait 窗口读宿主，或 teardown 提速）
-- plugin/test/session-liveness.test.mjs（或对应测试）
+- plugin/scripts/tmux-leak-scan.sh（reap-wait 窗口读宿主——reap_wait_default 读 nproc，硬规则 4 推论二）
+- plugin/test/tmux-leak-scan.test.mjs（reap-wait 机制的对应测试）
+- scripts/test.sh（suite-tail leak-scan 注释同步：default 10000 → host-derived）
+- plugin/test/test-isolation-check.test.mjs（合法连带：DELTA 测试 runScan 固定 TMUX_LEAK_REAP_WAIT_MS 确定性小值——reap-wait 读宿主后真泄漏 --check 超其 30s spawnSync timeout ⇒ status null）
 - tasks/gap-suite-leak-scan-ol-scd-g-teardown-slow.md（自身）
