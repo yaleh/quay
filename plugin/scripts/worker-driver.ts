@@ -680,6 +680,31 @@ export interface WorkerCmdOptions {
   exact: string | null;
 }
 
+/** fan-in 调用签名的完整指令（gap-worker-prompt-fan-in-call-signature-placeholder）：真实绝对路径 +
+ *  runId 取法 + 正本拷贝。worktree 由调用方填（创建 prompt = 指引，续做 prompt = 实际路径）。
+ *  ⛔ 旧版只给 `scriptPath` 字面占位词 + `runId` 键名 ⇒ 每个 worker 从源码反向工程一遍（实测 12/12
+ *  session 全命中：读 fan-in-execute.js / 找 workflow 路径 / 重发现 generateRunId）。 */
+function fanInSignature(task: string, root: string, worktree: string): string {
+  const fanInScript = path.join(root, ".claude", "workflows", "fan-in-execute.js");
+  const telemetryModule = path.join(root, "plugin", "scripts", "fast-mode-telemetry.ts");
+  return [
+    `ff-merge to develop via the fan-in-execute workflow: call the Workflow tool with the script file "${fanInScript}"`,
+    `(this .claude/workflows/ copy is the landed one that runs here — use it, do NOT diff it against plugin/workflows/fan-in-execute.js, its byte-identical shipped mirror guarded by workflows-dual-copy-drift-check)`,
+    `and args={task:"${task}", worktree:"${worktree}", root:"${root}", runId, mergeTarget:"develop"}.`,
+    `runId: import { generateRunId } from "${telemetryModule}" and call generateRunId("${task}") —`,
+    `or reuse the runId this task was dispatched with, if one was passed.`,
+  ].join(" ");
+}
+
+/** dispatch-worktree-setup.sh 调用签名（gap-dispatch-worktree-setup-zero-production-callers）：每个
+ *  被派发的 worktree 创建后【必须】跑一次（node_modules symlink-or-install + config.yml 经
+ *  worktree-include.sh），机制接管 bootstrap——worker 不再手工 `ln -s`/`cp config.yml`（正是该脚本被
+ *  写出来要消灭的 AGENT-REMEMBERING 失败模式）。脚本幂等：已 provision 的 worktree 重跑是 no-op。 */
+function dispatchSetupSignature(root: string, worktree: string): string {
+  const setupScript = path.join(root, "plugin", "scripts", "dispatch-worktree-setup.sh");
+  return `bash ${setupScript} ${worktree}`;
+}
+
 /** 创建 prompt（无保留 worktree 时的 full-chain prompt，单一真相源）。续做 prompt 见
  *  buildContinueWorkerPrompt；两者由 workerPromptForTask 按「保留 worktree 在不在」择一。
  *  gap-worker-print-bg-wait-ceiling-600s (c，辅助非根修)：fan-in 在飞期间尽量留在回合内等（用
@@ -690,9 +715,11 @@ export function buildWorkerPrompt(task: string, root: string): string {
   return [
     `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2).`,
     `Task: ${task}. Repo root: ${root}.`,
-    `Run the full task chain: (1) create an isolated git worktree for ${task},`,
+    `Run the full task chain: (1) create an isolated git worktree for ${task}, then immediately`,
+    `provision it by running \`${dispatchSetupSignature(root, "<the worktree path you created in step 1>")}\``,
+    `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, (3) run the suite,`,
-    `(4) ff-merge to develop via the fan-in-execute workflow (scriptPath, args={task,worktree,root,runId,mergeTarget}).`,
+    `(4) ${fanInSignature(task, root, "<the worktree path you created in step 1>")}.`,
     `You own your worktree fully; apart from the final merge do not touch develop.`,
     `fan-in 在飞期间尽量留在回合内等（用 TaskOutput 阻塞等待其终态）——不要结束回合等完成通知：end_turn 时有存活后台任务会触发 600s 终止。`,
   ].join(" ");
@@ -899,10 +926,10 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `(it would fail: the path/branch already exists). Prior round state: branch task/${task} already has`,
     `${commits} commits${head}; Acceptance Criteria currently checked ${ac};`,
     `the last round exited-not-landed because: ${reason}.`,
+    `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch),`,
-    `(2) run the suite, (3) ff-merge to develop via the fan-in-execute workflow`,
-    `(scriptPath, args={task,worktree,root,runId,mergeTarget}; worktree=${wt}).`,
+    `(2) run the suite, (3) ${fanInSignature(task, root, wt)}.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
   ].join(" ");
 }

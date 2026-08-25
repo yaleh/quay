@@ -330,13 +330,19 @@ t("AC4 wiring — worktree-node-modules-check is invoked by run_static_checks (r
 });
 
 // ── AC2 wiring: the dispatch prompt template must mandate the setup after worktree add ─────────
+// gap-dispatch-worktree-setup-zero-production-callers: the wiring's ONLY prior caller was the RETIRED
+// fast-mode-loop-tick.md:1033 (经典/fast-mode 循环文档), NOT the live dispatch path worker-driver.ts
+// (which had ZERO provisioning — buildWorkerPrompt/buildContinueWorkerPrompt only said "create a
+// worktree"). The wiring test now asserts the LIVE path (worker-driver.ts) carries the setup call;
+// asserting the retired doc would be a false guarantee (a check that can only ever be satisfied by a
+// dead doc — hard rule 3b).
 
-t("AC2 wiring — the dispatch tick doc mandates dispatch-worktree-setup.sh after git worktree add", () => {
-  const tick = fs.readFileSync(path.join(REPO_ROOT, "plugin/loop/fast-mode-loop-tick.md"), "utf8");
-  assert.match(tick, /dispatch-worktree-setup\.sh/, "the dispatch prompt template must call the setup script");
-  assert.match(
-    tick,
-    /git -C "\$REPO_ROOT" worktree add/,
-    "the worktree-add command must still be present next to the setup step",
-  );
+t("AC2 wiring — worker-driver.ts (the LIVE dispatch path) wires dispatch-worktree-setup.sh into BOTH prompts (create + continue)", () => {
+  const workerDriver = fs.readFileSync(path.join(REPO_ROOT, "plugin/scripts/worker-driver.ts"), "utf8");
+  assert.match(workerDriver, /dispatch-worktree-setup\.sh/, "worker-driver.ts must reference the setup script");
+  // 接线经单一 helper dispatchSetupSignature，且【两个】prompt 构建器都调用它（不是只有 helper 定义在文件里）。
+  // 位置在 worktree 创建之后这一结构针在 worker-driver.test.mjs 对运行时 prompt 串逐字断言（源码里 helper
+  // 定义在 buildWorkerPrompt 之前，源码级 indexOf 顺序不是该语义的正确载体）。
+  assert.match(workerDriver, /dispatchSetupSignature\(root, "<the worktree path/, "create prompt calls the setup helper (step-1 placeholder)");
+  assert.match(workerDriver, /dispatchSetupSignature\(root, wt\)/, "continue prompt calls the setup helper with the concrete worktree path");
 });
