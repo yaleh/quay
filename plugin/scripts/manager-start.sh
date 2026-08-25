@@ -4,7 +4,7 @@
 #
 # 规格：SPEC-manager-productization-2026-08-05 §4.1。manager 的启动与启动项目完全分开：
 #   - `manager start` 不接受任何项目参数（C5：两条命令分开，不是一条带参数的命令）
-#   - 建自己的会话：独立 tmux session（`quay-manager`，名字来自 _launchSpec.roles.manager.name），
+#   - 建自己的会话：独立 tmux session（`quay-manager`，名字来自 .quay/profiles.yml roles.manager.name），
 #     不进任何项目的 session（C2：身份不属于任何单个项目）
 #   - 设自己的家：$QUAY_GLOBAL_DIR/manager/（状态、tick 日志、观测器配置；C2）
 #   - 起会话时锚点确定性建立（AC5）：装上 manager 自己的 `/loop` 作为其中一步——冷启动后锚点必然
@@ -21,7 +21,7 @@
 # 用法：
 #   manager-start.sh [--session <sess>] [--dry-run] [--json] [--home <dir>] [--check-idle-watch]
 #     --session <sess>    目标 tmux 会话（默认：MANAGER_START_SESSION → 读
-#                         <repo>/plugin/skills/manager 的 _launchSpec.roles.manager.name → quay-manager）
+#                         <repo>/.quay/profiles.yml 的 roles.manager.name → quay-manager）
 #     --dry-run           只打印将执行的命令，不实际改动（校验用）
 #     --json              JSON 输出（机器消费）；默认人读表格 + 退出码
 #     --home <dir>        覆盖 manager 家目录（默认 $QUAY_GLOBAL_DIR/manager/ → $HOME/.quay-global/manager/）
@@ -93,10 +93,14 @@ done
 QUAY_GLOBAL_DIR="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}"
 HOME_DIR="${HOME_DIR:-${QUAY_GLOBAL_DIR}/manager}"
 
-# ── 会话名：显式 > 环境 > launch settings 的 _launchSpec.roles.manager.name → quay-manager ──
+# ── 会话名：显式 > 环境 > profiles.yml 的 roles.manager.name（AC154，profile 抽层后）→ quay-manager ──
 if [ -z "$SESSION" ]; then
-  if command -v jq >/dev/null 2>&1 && [ -f "$REPO_ROOT/.claude/launch.settings.json" ]; then
-    SESSION="$(jq -r '._launchSpec.roles.manager.name // empty' "$REPO_ROOT/.claude/launch.settings.json" 2>/dev/null)"
+  if command -v python3 >/dev/null 2>&1; then
+    if [ -f "$REPO_ROOT/.quay/profiles.yml" ]; then
+      SESSION="$(python3 -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])) or {}; print(d.get("roles",{}).get("manager",{}).get("name",""))' "$REPO_ROOT/.quay/profiles.yml" 2>/dev/null)"
+    elif [ -f "$REPO_ROOT/plugin/.quay/profiles.yml" ]; then
+      SESSION="$(python3 -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])) or {}; print(d.get("roles",{}).get("manager",{}).get("name",""))' "$REPO_ROOT/plugin/.quay/profiles.yml" 2>/dev/null)"
+    fi
   fi
 fi
 if [ -z "$SESSION" ]; then

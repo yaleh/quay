@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
-# quay-launch.sh — 双层循环会话启动器（gap-crystallize-launch-config-into-checked-in-settings-file）。
+# quay-launch.sh — 双层循环会话启动器（gap-crystallize-launch-config-into-checked-in-settings-file；
+# AC154 profile 抽层后：profile 承载从 _launchSpec 迁到 .quay/profiles.yml）。
 #
-# 从检查进仓库的 .claude/launch.settings.json 生成并启动一个双层循环会话。
-# 启动参数只存在于 settings 文件里（settings-schema 键 + _launchSpec 扩展），
-# 本脚本负责把 _launchSpec 里的 flag-only 参数翻译成 CLI 参数——冷启动不再靠手打一行 shell。
+# 从检查进仓库的 .quay/profiles.yml（Claude Code profile 承载，AC154）生成并启动一个双层循环会话。
+# 启动参数只存在于 profiles 文件里（profiles/roles + flag-only 参数），本脚本负责把 profile 里的
+# flag-only 参数翻译成 CLI 参数——冷启动不再靠手打一行 shell。
+# launch.settings.json 只留 Claude Code 认识的键（$schema/permissions/env），是 --settings 的输入；
+# launcher/model/--bare/-n/unset 全部来自 profiles.yml（quay-launch.sh 经 python3+yaml → JSON 消费）。
 #
 # 用法：
 #   quay-launch.sh <role> [--dry-run] [--bare]
-#     role      ∈ manager | outer | inner（定义在 _launchSpec.roles）
+#     role      ∈ manager | outer | inner | task-worker | selector | fix-worker（定义在 profiles.yml.roles）
 #     --dry-run  只打印将执行的启动命令，不实际启动（AC4 正/负控制校验用）
 #     --bare     追加 --bare 最小模式（一次性验证会话用，AC5；不长驻）
 #
-# 依赖：jq（读取 settings JSON）。无 jq 时输出错误并退出。
+# 依赖：jq（读 settings JSON + profile JSON）、python3+yaml（读 profiles.yml；同 quay-init.sh 解析
+# .quay/config.yml 的手法）。缺 jq / python3+yaml 时输出错误并退出。
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
@@ -56,7 +60,7 @@ if [ -z "$SETTINGS_FILE" ]; then
 fi
 
 if [[ -z "$ROLE" ]]; then
-  echo "ERROR: role required — see _launchSpec.roles in ${SETTINGS_FILE}" >&2
+  echo "ERROR: role required — see roles in .quay/profiles.yml" >&2
   exit 1
 fi
 if [[ ! -f "$SETTINGS_FILE" ]]; then
@@ -64,38 +68,65 @@ if [[ ! -f "$SETTINGS_FILE" ]]; then
   exit 1
 fi
 
-# 从 settings 文件读取角色定义（jq 失败=JSON 无效=settings 校验失败，fail-closed）。
-# 注意：model 允许为 null（manager 用 claude 默认模型），故不用 -e，null → ""（jq 的 `// ""`）。
-LAUNCHER="$(jq -er --arg r "$ROLE" '._launchSpec.roles[$r].launcher // empty' "$SETTINGS_FILE")"
-NAME="$(jq -er --arg r "$ROLE" '._launchSpec.roles[$r].name // empty' "$SETTINGS_FILE")"
-MODEL="$(jq -r --arg r "$ROLE" '._launchSpec.roles[$r].model // ""' "$SETTINGS_FILE")"
-EXCLUDE_DYNAMIC="$(jq -r '._launchSpec.excludeDynamicSystemPromptSections // false' "$SETTINGS_FILE")"
-# _launchSpec.promptSuggestions — ghost-suggestion 源头消除（gap-ghost-suggestion-eliminated-at-source-
-# prompt-suggestions-false，REQUIRED 非可选）。用 jq -e 判「字面 false」：键缺失或为 true 都不 emit，
-# 只有显式 false 才翻译成 CLI 参数 `--prompt-suggestions false`（settings.json 无 promptSuggestions 键，
-# 官方环境变量 CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false 由 env 块承载；两条路线都 REQUIRED）。
-PROMPT_SUGGESTIONS="$(jq -r '._launchSpec.promptSuggestions' "$SETTINGS_FILE")"
-ROLE_ENV="$(jq -c --arg r "$ROLE" '._launchSpec.roles[$r].env // {}' "$SETTINGS_FILE")"
-# 每角色 bare（AC140-2 按 role 可配）：_launchSpec.roles[$r].bare === true ⇒ 追加 --bare（一次性验证会话）。
-# task-worker/selector/fix-worker 三者现均 bare=false——AC142 根因：claude --bare 不读 ANTHROPIC_AUTH_TOKEN，
-# 而 claude-fjdac wrapper 置空 ANTHROPIC_API_KEY ⇒ bare 下无凭据 ⇒ 认证失败 exit 1（生产 13/13 全败）。
-ROLE_BARE="$(jq -r --arg r "$ROLE" '._launchSpec.roles[$r].bare // false' "$SETTINGS_FILE")"
-
-if [[ -z "$LAUNCHER" || -z "$NAME" ]]; then
-  echo "ERROR: role '${ROLE}' not defined in ${SETTINGS_FILE} (_launchSpec.roles)" >&2
-  echo "       available roles: $(jq -r '._launchSpec.roles | keys | join(", ")' "$SETTINGS_FILE")" >&2
+# ── profile 承载（AC154）：profiles.yml 优先（dev-tree 根 → plugin 出厂回退，同 settings 的 fallback
+#    手法）。显式 QUAY_LAUNCH_PROFILES 可覆盖 profiles 文件路径（测试/负控制用）。⛔ 无 _launchSpec
+#    回退——profile 抽层后 _launchSpec 已从两份 launch.settings.json 移除，profiles.yml 是唯一承载。
+PROFILES_FILE="${QUAY_LAUNCH_PROFILES:-}"
+if [ -z "$PROFILES_FILE" ]; then
+  if [ -f "${REPO_ROOT}/.quay/profiles.yml" ]; then
+    PROFILES_FILE="${REPO_ROOT}/.quay/profiles.yml"
+  else
+    PROFILES_FILE="${REPO_ROOT}/plugin/.quay/profiles.yml"
+  fi
+fi
+if [[ ! -f "$PROFILES_FILE" ]]; then
+  echo "ERROR: profiles file not found: ${PROFILES_FILE}" >&2
+  exit 1
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: quay-launch.sh requires python3 to read ${PROFILES_FILE}" >&2
+  exit 1
+fi
+if ! PROFILES_JSON="$(python3 -c 'import sys,yaml,json; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))' "$PROFILES_FILE" 2>/dev/null)"; then
+  echo "ERROR: failed to parse ${PROFILES_FILE} as YAML (python3+yaml)" >&2
   exit 1
 fi
 
-# 角色的 env 与文件顶层 env 合并：无角色级 env（outer/inner，deepseek 角色直接用文件全量 env）→ 直接引用
-# 文件（可读、逐字可查）；有角色级 env（manager 把 917k 上下文/压缩变量置空串）→ 合并成 JSON 字符串传给
-# --settings（--settings 接受 file-or-json）。这是把「917k 只给 deepseek、不给 manager」机械化的地方——
-# manager 跑 Anthropic 默认模型，若带上 917k 会在真实窗口之上压缩过晚导致 API 报错（session-launch-recipes §5）。
-# 空串覆盖值表示「从该角色的 env 中删掉此键」：with_entries(select(.value != ""))。
-if [[ "$ROLE_ENV" == "{}" ]]; then
+# role → profile 引用 → profile 的 launcher/model/bare/unset。model 允许 null（manager 用 claude
+# 默认模型），故不用 -e，null → ""（jq 的 `// ""`）。role 未定义 ⇒ 空值 → 下方显式报错（⛔ 不靠
+# jq -e + set -e 隐式中止——错误信息要给出可用 role 清单）。
+ROLE_PROFILE="$(jq -r --arg r "$ROLE" '.roles[$r].profile // empty' <<<"$PROFILES_JSON")"
+LAUNCHER="$(jq -r --arg p "$ROLE_PROFILE" '.profiles[$p].launcher // empty' <<<"$PROFILES_JSON")"
+NAME="$(jq -r --arg r "$ROLE" '.roles[$r].name // empty' <<<"$PROFILES_JSON")"
+MODEL="$(jq -r --arg p "$ROLE_PROFILE" '.profiles[$p].model // ""' <<<"$PROFILES_JSON")"
+# bare 只在 profile 一层（AC154 取假①：roles/顶层均无 bare）；profile 缺省 false。
+ROLE_BARE="$(jq -r --arg p "$ROLE_PROFILE" '.profiles[$p].bare // false' <<<"$PROFILES_JSON")"
+# env 的「取消继承」显式表达为 profile.unset: [...]（⛔ 非空字符串约定）；role.env 为叠加/覆盖。
+UNSET_KEYS="$(jq -c --arg p "$ROLE_PROFILE" '.profiles[$p].unset // []' <<<"$PROFILES_JSON")"
+ROLE_ENV="$(jq -c --arg r "$ROLE" '.roles[$r].env // {}' <<<"$PROFILES_JSON")"
+EXCLUDE_DYNAMIC="$(jq -r '.excludeDynamicSystemPromptSections // false' <<<"$PROFILES_JSON")"
+# ⛔ 不用 `// ""`——jq 的 `//` 把 false 当「无值」，`false // ""` = ""，会把显式 false 吃掉。
+# 缺省 → jq 渲染 "null"（≠ "false" ⇒ 不 emit flag，与旧版「缺键默认 true = 不加 flag」一致）。
+PROMPT_SUGGESTIONS="$(jq -r '.promptSuggestions' <<<"$PROFILES_JSON")"
+
+if [[ -z "$LAUNCHER" || -z "$NAME" ]]; then
+  echo "ERROR: role '${ROLE}' not defined in ${PROFILES_FILE} (roles)" >&2
+  echo "       available roles: $(jq -r '.roles | keys | join(", ")' <<<"$PROFILES_JSON")" >&2
+  exit 1
+fi
+
+# 角色的有效 env 与文件顶层 env 合并：无 unset 且无角色级 env（outer/inner/selector/fix-worker，
+# deepseek 角色直接用文件全量 env）→ 直接引用文件（可读、逐字可查）；有 unset（manager 取消继承
+# 917k 上下文/压缩变量）或有角色级 env（task-worker 叠加 PRINT_BG_WAIT）→ 合并成 JSON 字符串传给
+# --settings（--settings 接受 file-or-json）。这是把「917k 只给 deepseek、不给 manager」机械化的
+# 地方——manager 跑 Anthropic 默认模型，若带上 917k 会在真实窗口之上压缩过晚导致 API 报错
+# （session-launch-recipes §5）。取消继承 = 从 base env 删 unset 键（显式列表，⛔ 非空串约定）。
+if [[ "$ROLE_ENV" == "{}" && "$UNSET_KEYS" == "[]" ]]; then
   SETTINGS_ARG="$SETTINGS_FILE"
 else
-  SETTINGS_ARG="$(jq -c --argjson roleEnv "$ROLE_ENV" '.env = ((.env // {}) + $roleEnv | with_entries(select(.value != "")))' "$SETTINGS_FILE")"
+  SETTINGS_ARG="$(jq -c --argjson roleEnv "$ROLE_ENV" --argjson unsetKeys "$UNSET_KEYS" '
+    .env = (((.env // {}) | to_entries | map(select(.key as $k | ($unsetKeys | index($k) | not))) | from_entries) + $roleEnv)
+  ' "$SETTINGS_FILE")"
 fi
 
 CMD=( "$LAUNCHER" "--settings" "$SETTINGS_ARG" )
@@ -103,7 +134,7 @@ if [[ "$EXCLUDE_DYNAMIC" == "true" ]]; then
   CMD+=( "--exclude-dynamic-system-prompt-sections" )
 fi
 # ghost-suggestion at-source elimination (gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false):
-# _launchSpec.promptSuggestions === false ⇒ append the REQUIRED `--prompt-suggestions false` flag.
+# promptSuggestions === false ⇒ append the REQUIRED `--prompt-suggestions false` flag.
 # (The env var CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false is carried via --settings; the flag is the
 # belt-and-suspenders CLI-form REQUIRED by the human ruling. Absent key defaults to true = no flag.)
 if [[ "$PROMPT_SUGGESTIONS" == "false" ]]; then
