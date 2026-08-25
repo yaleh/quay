@@ -1,7 +1,7 @@
 ---
 id: gap-webui-session-discovery-claude-agents-json
 title: web /sessions 会话发现统一为 claude agents --json（取代三角色 tmux 猜测）
-status: ready
+status: done
 labels:
   - gap
   - feature
