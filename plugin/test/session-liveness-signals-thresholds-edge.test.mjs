@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group lowconc
 // @load-sensitive wall-clock
 // session-liveness-signals-thresholds-edge.test.mjs — 阈值行为 · 沿/warmup — per-spell 沿 / mount 停滞 / 首轮 warmup
 //

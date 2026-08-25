@@ -55,11 +55,15 @@ serial+lowconc 两阶段合计吃掉 full-bucket suite 真实执行时间 ~50%�
 
 ⇒ **33 文件 × 5 轮 = 165 次独立 file-run，0 fail，全部 STABLE**（测量期并有机上其它在飞 suite 的真实负载）。无文件在主并发池重跑中不稳定。
 
-## Conclusion（AC2 落方向）
+## Conclusion（AC2 落方向，经 full-suite 修订）
 
-33 个纯 S 文件在主并发池 5 轮 165 次全稳定 ⇒ **不需要 serial/lowconc 降并发分相**。落方向 **(b)**：确认新条件下不需要、两条路径一起停用——33 文件 `@test-group` 由 serial/lowconc 改为默认组 `engine`（主并发池）。`--buckets` 路径本就未启用分相（从不降并发）⇒ 两条路径对这 33 文件的并发判断一致（都跑主并发池）。
+初测方向 (b)（33 文件移 engine）**被 full-suite 验证推翻**。根因是 AC1 的方法论缺陷：`独立重跑`（每文件单跑，无并发无负载）测不出 `@load-sensitive` 文件的负载敏感——负载敏感只在全量并发 + 高机器负载下显现（同 `runner-grouping-serial-anti-stomp` 的「individual runs have no concurrency」）。
 
-保留各文件的 `@load-sensitive` 标注（`known-load-sensitive.ts` 的 fix-scope deferral 用，与 `@test-group` 分相正交，不改）。剩余 27 个有证据文件由 `gap-suite-move-27-evidenced-files-out-serial-lowconc` 独立移出（不在本任务范围）；其移出后 serial/lowconc 分相为空（两任务合起来 = 分相停用）。
+**full-suite 实证（fan-in 4 轮连红）**：`@load-sensitive` 文件在 engine 并发(16)高负载下——① `session-liveness-signals-kinds`（wall-clock）194s RESUMED 未触发（墙钟超时）；② `session-liveness-sweep`（wall-clock）+ `quay-init-tmux-detection`（real-install）tmux 服务器泄漏（独占资源，reap-wait 40s 后仍残留）。这些正是 Proposal ① 指出的「敏感于墙钟超时与独占资源」的家族。
+
+**修订后结论**：26 个 `@load-sensitive` 文件（session-liveness 族 + quay-init/real-install 族 + nested-spawn/child-spawn）**回退原 serial/lowconc 组**——它们的 `@load-sensitive` 标注即降并发理由，分相不能停用。direction (b) 只对 **6 个非 load-sensitive 文件**成立（capability-catalog、fan-in-execute-paths、fan-in-ff-executor-check、monitor-mount-check、per-task-suite-record-check、session-topology），这 6 个留 engine。`runner-grouping-serial-anti-stomp` 已在前轮回退 serial。
+
+**⛔ 残留（direction (a) 未实现，需后续任务）**：分相被保留后，「full 路径尊重分相、`--buckets` 非 full 路径仍不尊重分相」的不一致**复现**——`--buckets` 成功路径走 `suite-lpt-runner.mjs` 以 `bucket_test_concurrency` 裸跑，不按 `@test-group serial/lowconc` 降并发。方向 (b)（移空分相）是错误的「解决」；正确方向是 **(a)**：让 `--buckets` 也尊重分相（把 serial/lowconc 文件抽出按低并发跑），与 AC3 的单飞锁同根（都是 `--buckets` 绕过 `run_selected()`）。本任务只落 AC3 + 回退 load-sensitive 文件；direction (a) 的 `--buckets` 分相接线是独立后续任务。
 
 ## AC3 落点（单飞锁接入 --buckets）
 

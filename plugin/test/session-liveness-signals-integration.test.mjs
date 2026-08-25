@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group lowconc
 // @load-sensitive wall-clock
 // session-liveness-signals-integration.test.mjs — 集成断言 — 脚本接缝（--mask/--last-message-type/--saturation/--pane-state/--check/--selfcheck）、头注释、主循环接线
 //

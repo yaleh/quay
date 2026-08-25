@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // @load-sensitive nested-spawn
 // @load-sensitive-entry 2026-08-08 A-class nested full-suite spawn (spawns scripts/test.sh --for-task, a nested runner with its own worker pool — gap-suite-tiering-kind-heavy-not-a-mechanism 补缺省 kind)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — A-class nested scripts/test.sh spawn (routed to serial by gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests)

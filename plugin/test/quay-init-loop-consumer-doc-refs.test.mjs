@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // @load-sensitive real-install
 // @judges plugin/loop/*
 // @load-sensitive-entry 2026-08-11 real-install e2e; install family flake rotation
@@ -440,5 +440,144 @@ test("torn-read negative control — a genuinely missing ref still FAILS --loop 
     assert.notEqual(r.status, 0, "--loop must FAIL when a consumer-laid docs/analysis/ doc references a non-landed path");
     assert.match(r.stderr, /referenced-not-landed/, "must use the referenced-not-landed category");
     assert.match(r.stderr, /nonexistent-checker\.ts/, "must name the non-landed referenced path");
+  } finally { cleanup(ws); cleanup(binDir); }
+});
+
+// ── reference-scan torn-read simulation seam (gap-verify-referenced-landed-concurrency-hardening-
+//    insufficient) ─────────────────────────────────────────────────────────────────────────────────
+// The REFERENCE-SET derivation inside verify_referenced_landed (the path-prefixed grep over the
+// shipped corpus + consumer-laid docs) was the last single-pass "裸 grep" face: under concurrent
+// --loop installs its grep/sort in a command substitution can be killed mid-stream (the `|| true`
+// masks the death), returning a PARTIAL (torn) set. A torn reference set would silently MISS a
+// genuinely-referenced-but-not-landed file — a false negative that violates fail-closed — so the fix
+// wraps it in the SAME stability check as _read_declarations (a4f1e41d) and derive_loop_scripts
+// (089365b5): two independent passes must produce IDENTICAL output, else retry.
+//
+// These tests inject a fake `grep` that passes through everything EXCEPT the reference-scan greps
+// (the two greps in _reference_set_once whose pattern starts with `(plugin/scripts`). On a torn
+// policy it truncates those to the first KEEP lines, simulating a grep killed mid-stream. The drop
+// schedule tears only the FIRST TWO reference-scan greps (the two greps of the first
+// _reference_set_once pass) and lets greps 3+ return the full set — the first pass is torn, the
+// second is full, so the stability check's two passes disagree and it retries to two agreeing full
+// passes. A pre-fix (single-pass) derivation would accept the torn subset.
+const REFSCAN_FAKE_GREP_SOURCE = `#!/usr/bin/env bash
+# Torn-read simulation grep (verify_referenced_landed reference-scan regression test only).
+# Passes through to the real grep except the reference-scan greps (pattern starting with "(plugin/scripts").
+set -u
+real_grep="$REAL_GREP"
+policy="$FAKE_GREP_POLICY"
+
+refscan=no
+for a in "$@"; do
+  case "$a" in
+    \\(plugin/scripts*) refscan=yes ;;
+  esac
+done
+
+if [ "$refscan" = "yes" ] && [ "$policy" = "torn" ]; then
+  full="$("$real_grep" "$@" 2>/dev/null || true)"
+  rseq=0
+  if [ -f "$FAKE_GREP_COUNTER" ]; then
+    rseq="$(cat "$FAKE_GREP_COUNTER" 2>/dev/null || echo 0)"
+  fi
+  rseq=$((rseq + 1))
+  printf '%s' "$rseq" > "$FAKE_GREP_COUNTER"
+
+  torn=no
+  if [ "$rseq" -le "$FAKE_GREP_TORN_UNTIL" ]; then
+    torn=yes
+  fi
+  printf 'refscan %s %s %s\n' "$rseq" "$torn" "$FAKE_GREP_KEEP" >> "$FAKE_GREP_LOG"
+
+  if [ "$torn" = "yes" ]; then
+    keep="$FAKE_GREP_KEEP"
+    n=0
+    printed=0
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      n=$((n + 1))
+      if [ "$n" -le "$keep" ]; then
+        printf '%s\n' "$line"
+        printed=$((printed + 1))
+      fi
+    done <<< "$full"
+  else
+    printf '%s\n' "$full"
+  fi
+  exit 0
+fi
+
+exec "$real_grep" "$@"
+`;
+
+function refscanTornEnv(binDir, opts) {
+  const fakeGrep = path.join(binDir, "grep");
+  fs.writeFileSync(fakeGrep, REFSCAN_FAKE_GREP_SOURCE);
+  fs.chmodSync(fakeGrep, 0o755);
+  return {
+    PATH: `${binDir}:${process.env.PATH || ""}`,
+    REAL_GREP: realGrepPath(),
+    FAKE_GREP_POLICY: opts.policy,
+    FAKE_GREP_COUNTER: path.join(binDir, "refscan-counter"),
+    FAKE_GREP_LOG: path.join(binDir, "refscan-reads.log"),
+    FAKE_GREP_TORN_UNTIL: String(opts.tornUntil ?? 0),
+    FAKE_GREP_KEEP: String(opts.keep ?? 5),
+  };
+}
+
+function readRefscanLog(logPath) {
+  if (!fs.existsSync(logPath)) return [];
+  return fs.readFileSync(logPath, "utf8").trim().split("\n").filter(Boolean).map((line) => {
+    const [kind, rseq, torn] = line.split(" ");
+    return { kind, rseq: Number(rseq), torn };
+  });
+}
+
+test("torn-read stability (reference-scan) — a torn reference-scan grep is retried; a real --loop install still passes", () => {
+  const binDir = makeTmp("torn-refscan-");
+  const env = refscanTornEnv(binDir, { policy: "torn", tornUntil: 2, keep: 5 });
+  const ws = makeTmp("torn-refscan-ws-");
+  try {
+    const r = runInitEnv(ws, INIT_ARGS(ws), env);
+    assert.equal(r.status, 0,
+      `a torn reference-scan must NOT fail the install (the stability check retries to a clean pass):\n${r.stdout}${r.stderr}`);
+    assert.match(r.stdout + r.stderr, /verify-referenced-landed: OK/,
+      "the referenced ⊆ landed gate must pass once the reference-scan stabilizes");
+
+    // The fake-grep log proves the tear really fired and that a full reference-scan followed it.
+    const log = readRefscanLog(env.FAKE_GREP_LOG);
+    assert.ok(log.length >= 1, "the fake-grep seam must have intercepted at least one reference-scan");
+    assert.equal(log[0].torn, "yes", "the FIRST reference-scan must be torn (the tear actually fired)");
+    assert.ok(log.length >= 3,
+      `the stability check must read past the torn pass (≥3 reference-scans; 2-pass agreement requires a retry), got ${log.length}`);
+    assert.ok(log.some((e) => e.torn === "no"),
+      "a complete (non-torn) reference-scan must follow the torn one — the retry moved past it");
+  } finally { cleanup(ws); cleanup(binDir); }
+});
+
+test("torn-read control (reference-scan) — the pass-through seam preserves the happy path: consistent reads exit 0", () => {
+  const binDir = makeTmp("torn-refscan-");
+  const env = refscanTornEnv(binDir, { policy: "pass" });
+  const ws = makeTmp("torn-refscan-ws-");
+  try {
+    const r = runInitEnv(ws, INIT_ARGS(ws), env);
+    assert.equal(r.status, 0, `the pass-through seam must not change a clean install verdict:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stdout + r.stderr, /verify-referenced-landed: OK/,
+      "the referenced ⊆ landed gate must pass on consistent reads");
+  } finally { cleanup(ws); cleanup(binDir); }
+});
+
+test("torn-read negative control (reference-scan) — a genuinely missing ref still FAILS (referenced-not-landed), unchanged under the seam", () => {
+  const binDir = makeTmp("torn-refscan-");
+  const env = refscanTornEnv(binDir, { policy: "pass" });
+  const ws = makeTmp("torn-refscan-ws-");
+  try {
+    fs.mkdirSync(path.join(ws, "docs", "analysis"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "docs", "analysis", "refscan-evil-consumer.md"),
+      "this consumer doc references a path the loop never lays: plugin/scripts/refscan-nonexistent-checker.ts\n", "utf8");
+    const r = runInitEnv(ws, INIT_ARGS(ws), env);
+    assert.notEqual(r.status, 0, "--loop must FAIL when a consumer-laid docs/analysis/ doc references a non-landed path");
+    assert.match(r.stderr, /referenced-not-landed/, "must use the referenced-not-landed category");
+    assert.match(r.stderr, /refscan-nonexistent-checker\.ts/, "must name the non-landed referenced path");
   } finally { cleanup(ws); cleanup(binDir); }
 });

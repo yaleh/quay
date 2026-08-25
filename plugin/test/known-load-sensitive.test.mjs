@@ -381,49 +381,34 @@ test("AC4 (分级闸) — checkSerialKinds does NOT gate a lowconc family member
   }
 });
 
-test("AC3 — the real repo: direction (b) moved the heavy ex-serial/lowconc files to engine (phase shrank further)", () => {
+test("AC3 — the real repo: 5 of the 8 heavy lowconc→serial downgrade files returned to lowconc (serial phase shrank)", () => {
   // The downgrade set (lowconc→serial on 2026-08-09) was 8 heavy + 1 child-spawn. After the mechanism
   // re-split: the 5 fixture-amortized real-install files return to lowconc; npm-pack-e2e +
   // install-config-driven-e2e (full real installs) and checker-cost (broke at lowconc c3) stay serial.
   // quay-init-check-drift.test.mjs is RETIRED (gap-quay-init-check-drift-merge-into-drift-report —
   // its assertions were merged into quay-init-drift-report.test.mjs, so it is no longer a test file).
-  // Direction (b) (gap-suite-serial-lowconc-classification-recheck, 2026-08-25): 33 pure-S
-  // serial/lowconc files measured stable at main-pool concurrency ⇒ moved to engine. Among this set,
-  // 2 ex-lowconc (quay-init-tmux-detection, runtime-landing) and 1 ex-serial (checker-cost) moved
-  // OUT of both lanes to engine; the 3 sibling-task files (loop-driver/runtime/vendor) stay in their
-  // lanes until gap-suite-move-27-evidenced-files-out-serial-lowconc lands.
   const serialFiles = [];
   const lowconcFiles = [];
-  const engineFiles = [];
   for (const rel of listTestFiles(REPO_ROOT)) {
     const text = fs.readFileSync(path.join(REPO_ROOT, rel), "utf8");
     if (isSerialGroupFile(text)) serialFiles.push(rel);
     if (/^\s*\/\/\s*@test-group\s+lowconc\b/m.test(text)) lowconcFiles.push(rel);
-    if (/^\s*\/\/\s*@test-group\s+engine\b/m.test(text)) engineFiles.push(rel);
   }
   const movedToLowconc = [
     "plugin/test/quay-init-loop-driver.test.mjs",
     "plugin/test/quay-init-loop-runtime.test.mjs",
     "plugin/test/quay-init-loop-vendor.test.mjs",
+    "plugin/test/quay-init-tmux-detection.test.mjs",
+    "plugin/test/runtime-landing.test.mjs",
   ];
   for (const rel of movedToLowconc) {
     assert.ok(lowconcFiles.includes(rel), `${rel} must have returned to the lowconc lane (AC3)`);
     assert.ok(!serialFiles.includes(rel), `${rel} must no longer be in the serial lane (AC3)`);
   }
-  // Direction (b): the 3 ex-serial/lowconc files this task moved to the default engine lane.
-  const movedToEngine = [
-    "plugin/test/quay-init-tmux-detection.test.mjs",
-    "plugin/test/runtime-landing.test.mjs",
-    "plugin/test/checker-cost.test.mjs",
-  ];
-  for (const rel of movedToEngine) {
-    assert.ok(engineFiles.includes(rel), `${rel} must have moved to the engine lane (direction b)`);
-    assert.ok(!serialFiles.includes(rel), `${rel} must no longer be in the serial lane`);
-    assert.ok(!lowconcFiles.includes(rel), `${rel} must no longer be in the lowconc lane`);
-  }
-  // The genuine full-real-install members stay in serial (moved by the sibling task, not this one).
+  // The genuine full-real-install / broke-at-lowconc members stay in serial.
   assert.ok(serialFiles.includes("packages/quay/test/npm-pack-e2e.test.mjs"), "npm-pack-e2e stays serial (full real npm pack)");
   assert.ok(serialFiles.includes("packages/quay/test/install-config-driven-e2e.test.mjs"), "install-config-driven-e2e stays serial (12 real installs)");
+  assert.ok(serialFiles.includes("plugin/test/checker-cost.test.mjs"), "checker-cost stays serial (child-spawn broke at lowconc c3)");
 });
 
 test("AC3/AC2 — the real repo: every serial family member declares a mechanism kind (no heavy left in the lane)", () => {

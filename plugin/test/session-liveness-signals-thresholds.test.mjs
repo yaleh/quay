@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group lowconc
 // @load-sensitive wall-clock
 // session-liveness-signals-thresholds.test.mjs — 阈值行为 — 去抖轮数 / LOOP_MIN 噪声闸 / per-spell 沿 / warmup / 同阶去抖 / 权限提示阈值
 //

@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // @load-sensitive real-install
 // @load-sensitive-entry 2026-08-16 packaged-install e2e; install family flake rotation
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:

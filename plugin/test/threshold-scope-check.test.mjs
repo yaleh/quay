@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // @load-sensitive child-spawn
 // @load-sensitive-entry 2026-08-11 child-spawn spawn×9 under suite load (round-215 silent passed=false @7721ms)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this harness
@@ -29,7 +29,7 @@
 //   AC10 — placeholder patterns (`NNN`, `<...>`, `*`, `{`) are skipped (`tasks/DIR-NNN.md`).
 //   AC11 — the negative control: a fabricated reference to a nonexistent file MUST be reported;
 //         the same text with a real path MUST NOT.
-//   AC8  — this file uses node:test and declares `// @test-group engine` (line 1; was serial).
+//   AC8  — this file uses node:test and declares `// @test-group serial` (line 1).
 //   AC6  — the shrink-only ratchet: the real-repo gate exits 0 and its current violation set
 //         exactly matches the baseline file (a NEW violation would flip growth=true → exit 1).
 //

@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group lowconc
 // @load-sensitive wall-clock
 // session-liveness-events.test.mjs — SESSION-GONE/BACK, REPO-STALL, SESSION-OVERDUE, .halt gating, real-probe idle/resumed + productization/laydown
 //

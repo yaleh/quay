@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // @load-sensitive wall-clock
 // @load-sensitive-entry 2026-08-08 wall-clock (spawns real monitor + tmux servers); GROUP=serial deliberately
 // session-liveness-sweep.test.mjs — AC2/AC3/AC4 (+ candidate-D registry, AC5) for

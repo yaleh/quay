@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group lowconc
 // @load-sensitive wall-clock
 // session-liveness-signals-kinds.test.mjs — 信号种类 — 事件识别与载荷（RESUMED/IDLE/MARKER-STALE/CANT-SEND/GONE/SATURATED/INTERVENTION，payload cause+last-input）
 //

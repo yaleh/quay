@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // @load-sensitive nested-spawn
 // @load-sensitive-entry 2026-08-08 A-class nested full-suite spawn (shells out to real scripts/test.sh --group governance)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this file shells

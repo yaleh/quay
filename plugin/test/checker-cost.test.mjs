@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // @load-sensitive child-spawn
 // @load-sensitive-entry 2026-08-10 child-spawn delay-dominates signal broke under lowconc c3 (round-51 silent passed=false @7542ms)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — AC2 asserts the
@@ -35,7 +35,7 @@
 //   AC6 — full-suite-runner appends {round, startedAt, durationMs, laneCount, pass, fail, load}
 //         to .quay/verification-round.jsonl (append-only sequence; the single-state
 //         full-suite-state.json is never overwritten away).
-//   AC7 — this file uses node:test and declares // @test-group engine (was serial; reclassified by gap-suite-serial-lowconc-classification-recheck).
+//   AC7 — this file uses node:test and declares // @test-group serial (see GROUP NOTE above).
 //
 // Run:
 //   scripts/test.sh --for-task gap-no-criterion-records-its-own-cost-checker-cost-jsonl
