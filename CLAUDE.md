@@ -226,6 +226,9 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   `--test-concurrency=` 的 `=` 写法、`QUAY_TEST_LIVE_GITHUB`、`@test-group`/`@static-tier` 标注，
   **全部读脚本，不要在此处复制一份**（本节曾复制 144 行，占本文件 49%，正是漂移之源）。
 - **Web UI**：`node --experimental-strip-types packages/quay/bin/quay.ts serve --host <ip> --port <p>`
+  - **开发模式**：`node --watch --experimental-strip-types packages/quay/bin/quay.ts serve --host <ip> --port <p>`
+    —— Node ≥18 `--watch` 对 import 模块变更自动重启进程（改 `packages/quay/src` 立即生效），
+    **不新增 `--dev`/`--watch` CLI 入口**（`node --watch <既有入口>` 直接可用，零产品表层；人 2026-08-24 裁定）。
 - **两条没有别处正本、故留在此**：①测试要用真 `.quay/config.yml` 建临时 workspace（见某测试文件里的
   `makeWorkspace()`）——**裸 tasks 目录不是合法 workspace**，config 是 provider map 不是扁平路径；
   ②**覆盖率不是目标**：从未被测量、可被刷（本仓库自带 `gate-gameability.test.mjs`）、
