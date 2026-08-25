@@ -1,7 +1,7 @@
 ---
 id: gap-canonical-test-files-glob-vs-realpath-divergence
 title: canonicalTestFiles 整组复制进 3 checker，2 份偏离 shell 正本的 realpath 语义（glob 顺序凑巧掩盖分歧，无测试守）
-status: todo
+status: ready
 labels:
   - gap
   - defect
