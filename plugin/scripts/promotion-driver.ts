@@ -69,6 +69,11 @@ import { resourceGateCheck, isHalted, PROMOTION_CONTROL_STATE_REL } from "./driv
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。promotion 的 fix pass 经
 // applyTaskFilters 消费 retryCapNotExhausted / notNeedsHuman（⛔ 不各写一遍 retryState.needsHuman 判定）。
 import { applyTaskFilters, makeFilterContext } from "./driver-filters.ts";
+// AC153：核心不变式单一实现（「⛔ 不信执行者自述，用独立量复核」）。AC133 重闸验证（computeReverifyOutcome）
+// 消费它——worker 的 computeLandingState 与本文件的重闸判定共用同一份三态映射（⛔ 不各写一遍）。
+import { verifyIndependently } from "./driver-result.ts";
+// AC153：re-export verifyIndependently 值——测试用「同一函数身份」证两 driver 共用单一实现（⛔ 非平行副本）。
+export { verifyIndependently } from "./driver-result.ts";
 
 /** round 记录的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const ROUND_LOG_REL = ".quay/promotion-round.jsonl";
@@ -481,25 +486,47 @@ export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerC
 
 /** AC133 重验证结果。fixedIds = 本轮被 spawn 过 fix worker 的任务 id；重跑闸后按【闸的新判定】归类：
  *  nowEligibleIds = 闸判合格（fix 生效，已由 --apply 落地晋升）；stillIneligibleIds = 闸仍判不合格
- *  （fix 未生效，⛔ 不得晋升）。⛔ 不信 worker 自述「已修好」——worker 的退出码/自述不作为晋升依据。 */
+ *  （fix 未生效，⛔ 不得晋升）；notEvaluatedIds = 读不到输入（重跑闸 spawn 失败/输出不可解析 ⇒
+ *  无法评估，⛔ 不是「仍不合格」也不是「消失」——AC153 与 verified/failed 分离的第三态）。
+ *  ⛔ 不信 worker 自述「已修好」——worker 的退出码/自述不作为晋升依据。 */
 export interface ReverifyOutcome {
   nowEligibleIds: string[];
   stillIneligibleIds: string[];
+  notEvaluatedIds: string[];
 }
 
-/** 用重验证轮的闸判定给每个被修任务归类。闸判合格（出现在 promotions）⇒ nowEligible；闸判不合格
- *  （出现在 candidates 且 eligible=false）⇒ stillIneligible；两者都不在（任务从 todo 池消失）⇒ 不计数。
+/** 用重验证轮的闸判定给每个被修任务归类，经 AC153 单一不变式 verifyIndependently 表达三态。
+ *  读不到输入（reRound.ok=false ⇒ 闸没跑成/输出不可解析）⇒ 全部 notEvaluatedIds（⛔ 既不是
+ *  stillIneligible——那会误计入 AC133 失败上限，也不是静默「neither」——那正是 AC153 要消灭的
+ *  「读不懂伪装成既非晋也非否」）；ok=true 时闸判合格（在 promotions）⇒ nowEligible、闸判不合格
+ *  （eligible=false）⇒ stillIneligible；两者都不在（任务从 todo 池消失）⇒ 三态词表不承载、不计数
+ *  （沿用原行为）。
  *  纯函数，可单测（AC133 AC1/AC2——AC2 取假：worker 声称修好但实际未改 ⇒ 闸仍判不合格 ⇒ stillIneligible）。 */
 export function computeReverifyOutcome(fixedIds: string[], reRound: PromotionRound): ReverifyOutcome {
+  // 读不到输入（重跑闸没跑成）⇒ 全部 not-evaluated，⛔ 不伪造成「仍不合格」或「合格」。
+  if (!reRound.ok) {
+    return { nowEligibleIds: [], stillIneligibleIds: [], notEvaluatedIds: [...fixedIds] };
+  }
   const promoted = new Set(reRound.promotedIds);
   const stillBad = new Set(reRound.fixDecisions.map((d) => d.id));
   const nowEligibleIds: string[] = [];
   const stillIneligibleIds: string[] = [];
   for (const id of fixedIds) {
-    if (promoted.has(id)) nowEligibleIds.push(id);
-    else if (stillBad.has(id)) stillIneligibleIds.push(id);
+    // vanished（task 不再出现在候选池——被别的 actor 晋升/删除）：三态词表不承载，沿用原行为不计数。
+    if (!promoted.has(id) && !stillBad.has(id)) continue;
+    const res = verifyIndependently(
+      {
+        value: id,
+        verifiedBy: "re-run gate (ready-pool-check) judged eligible (in promotions)",
+        failedReason: "re-run gate still judged ineligible (eligible=false)",
+        notEvaluatedReason: "unreachable (ok=true and id present in candidates)",
+      },
+      () => (promoted.has(id) ? true : false),
+    );
+    if (res.state === "verified") nowEligibleIds.push(id);
+    else stillIneligibleIds.push(id);
   }
-  return { nowEligibleIds, stillIneligibleIds };
+  return { nowEligibleIds, stillIneligibleIds, notEvaluatedIds: [] };
 }
 
 /** AC133 失败上限的跨轮状态。counts = 每任务连续修仍不合格的累计次数；needsHuman = 已标 needs-human
