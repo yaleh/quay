@@ -2429,16 +2429,20 @@ test("AC1 — while the suite runs, state=running (or early-red) with finishedAt
 test("AC2 — RED is marked on first failure detection, before the run completes (marker-file proof)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-root-"));
   const marker = path.join(root, "post-failure-marker");
-  const { f, dir } = fakeSuite(`echo "not ok 1 - boom"\nsleep 2\necho done > "${marker}"\nexit 1`);
+  const { f, dir } = fakeSuite(`echo "not ok 1 - boom"\nsleep 10\necho done > "${marker}"\nexit 1`);
   try {
     const child = runRunner({ root, command: `bash ${f}` });
     // The failure line is printed immediately; the suite's post-failure step (writing the
-    // marker) happens only after `sleep 2`. If state=red is observed BEFORE the marker
+    // marker) happens only after `sleep 10`. If state=red is observed BEFORE the marker
     // exists, red was written on detection, not after the run completed (AC2).
+    // gap-suite-load-sampler-orphan-process load-hardening: the 5s poll / 2s marker window
+    // flaked RED under 16-way contention (runner node bootstrap > 5s ⇒ `poll timeout after
+    // 5000ms`). Widen the marker window + poll timeout so "early-red" is judged on the
+    // marker (wall-clock), not on a runner-bootstrap race.
     const redObserved = await poll(() => {
       const s = readState(root);
       return s && s.state === "red" ? s : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 20000 });
     assert.equal(redObserved.finishedAt, null, "red written while the run is still in progress");
     assert.equal(redObserved.state, "red");
     assert.ok(!fs.existsSync(marker), "red appeared before the suite's post-failure step completed");
@@ -3120,16 +3124,20 @@ test("AC2 — a vitest structured failure line flips red EARLY, before the run c
   // BEFORE its summary and exit. Red must be marked on that line, not at exit — the same early-red
   // property node:test/TAP gets from `not ok` (AC2 preserved for vitest projects).
   const { f, dir } = fakeSuite(
-    'echo " ❯ test/foo.test.ts (3 tests | 1 failed) 12ms"\nsleep 2\necho done > "' +
+    'echo " ❯ test/foo.test.ts (3 tests | 1 failed) 12ms"\nsleep 10\necho done > "' +
       marker +
       '"\nexit 1',
   );
   try {
     const child = runRunner({ root, command: `bash ${f}` });
+    // gap-suite-load-sampler-orphan-process load-hardening: 5s poll / 2s marker window flaked
+    // RED under 16-way contention (runner node bootstrap > 5s ⇒ `poll timeout after 5000ms`).
+    // Widen the marker window + poll timeout so early-red is judged on the marker (wall-clock),
+    // not on a runner-bootstrap race.
     const redObserved = await poll(() => {
       const s = readState(root);
       return s && s.state === "red" ? s : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 20000 });
     assert.equal(redObserved.state, "red");
     assert.equal(redObserved.reason, "failed", "a structured vitest failure is a REAL failure (stop-dispatch signal)");
     assert.equal(redObserved.finishedAt, null, "red written while the run is still in progress (AC2 early-red)");
