@@ -95,7 +95,12 @@ import {
   workerArgvForTaskAsync,
   taskBranchHasCommits,
   isSigtermExitCode,
+  parseMaxRetries,
 } from "../scripts/worker-driver.ts";
+// gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
+// 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
+import { advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, applyTaskFilters, makeFilterContext } from "../scripts/driver-filters.ts";
+import { advanceRetryCap as promoAdvanceRetryCap, markNeedsHuman as promoMarkNeedsHuman, MAX_FIX_RETRIES_DEFAULT } from "../scripts/promotion-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DRIVER = path.resolve(__dirname, "..", "scripts", "worker-driver.ts");
@@ -2239,4 +2244,95 @@ test("AC3 (gap-worker-driver-stopreason-latch-permanent-stop) — pool non-empty
   const stops = readRoundLines(root).filter((r) => r.action === "stop");
   assert.ok(stops.length >= 2, "AC3: the driver polled (≥2 stop rounds) — it did not exit after the first WAIT round");
   drv.stop();
+});
+
+// ── gap-worker-driver-retry-cap-not-wired：worker 重试上限接线 ─────────────────────────────────────
+// 根因：driver-filters.ts:9 明写「retryCapNotExhausted promotion 有 worker 无」，worker 的
+// retryExhausted 恒空集 ⇒ exited-not-landed 任务无限重派（实证 split-long flaky 红 7 次 501 分钟）。
+// 修法：worker 从 exited-not-landed 计数派生 retryExhausted（同 promotion 的 RetryState 形态），
+// 达上限标 needs-human（ready→needs-human）并停止重派。复用 driver-filters.ts 的 advanceRetryCap /
+// markNeedsHuman / retryCapNotExhausted（⛔ 不各写一遍）。
+
+test("AC1 (gap-worker-driver-retry-cap-not-wired) — parseMaxRetries: default 3, explicit N, invalid ⇒ default", () => {
+  assert.equal(RETRY_CAP_DEFAULT, 3, "default retry cap = 3 (gap-fan-in-relaunch-retry-cap 同值)");
+  assert.equal(parseMaxRetries(undefined), 3, "no --max-retries ⇒ default");
+  assert.equal(parseMaxRetries("2"), 2, "explicit N honored");
+  assert.equal(parseMaxRetries("0"), 3, "non-positive ⇒ default (fail-to-default, ⛔ 不因 flag 拼写炸循环)");
+  assert.equal(parseMaxRetries("1.5"), 3, "non-integer ⇒ default");
+  assert.equal(parseMaxRetries("garbage"), 3, "garbage ⇒ default");
+});
+
+test("AC1 (gap-worker-driver-retry-cap-not-wired) — retryExhausted 非空派生：advanceRetryCap 填集合 + retryCapNotExhausted 滤掉（能取假）", (t) => {
+  const root = makeRoot("retry-derive");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 写两个 ready 候选（filter 只读 frontmatter/status，body 无需满四件套）。
+  fs.writeFileSync(path.join(root, "tasks", "gap-a.md"), "---\nid: gap-a\nstatus: ready\n---\n\n## Proposal\n\nprose\n");
+  fs.writeFileSync(path.join(root, "tasks", "gap-b.md"), "---\nid: gap-b\nstatus: ready\n---\n\n## Proposal\n\nprose\n");
+
+  const state = { counts: new Map(), needsHuman: new Set() };
+  assert.deepEqual(advanceRetryCap(state, ["gap-a"], 2), [], "1st exited-not-landed < N ⇒ not yet needs-human");
+  assert.deepEqual(advanceRetryCap(state, ["gap-a"], 2), ["gap-a"], "2nd exited-not-landed ≥ N ⇒ needsHuman 非空");
+  assert.ok(state.needsHuman.size === 1 && state.needsHuman.has("gap-a"), "retryExhausted 集合非空派生（⛔ 恒空集 ⇒ 假）");
+
+  // retryExhausted 非空 ⇒ retryCapNotExhausted 把 gap-a 滤掉、gap-b 保留（接线生效，⛔ 不再无限重派）。
+  const filtered = applyTaskFilters(["gap-a", "gap-b"], makeFilterContext(root, { retryExhausted: state.needsHuman }));
+  assert.deepEqual(filtered, ["gap-b"], "capped gap-a is filtered out; uncapped gap-b passes");
+});
+
+test("AC1 (gap-worker-driver-retry-cap-not-wired) — markNeedsHuman flips ready→needs-human（worker 重派的是 ready 任务，非 todo）", (t) => {
+  const root = makeRoot("mark-ready");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "tasks", "gap-cap.md"), "---\nid: gap-cap\nstatus: ready\n---\n\n## Proposal\n\nprose\n");
+
+  const res = markNeedsHuman(root, "gap-cap", "worker 连续 N 次 exited-not-landed 未落地");
+  assert.equal(res.ok, true, "ready task marked needs-human");
+  assert.equal(readTaskStatus(root, "gap-cap"), "needs-human", "status flipped ready → needs-human");
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-cap.md"), "utf8");
+  assert.ok(body.includes("## Needs-Human"), "grep-able ## Needs-Human audit record written");
+  assert.ok(body.includes("worker 连续 N 次 exited-not-landed 未落地"), "the reason is recorded in the body");
+
+  // needs-human 已是终态 ⇒ 拒写（同 promotion 的 fail-closed，⛔ 双标）。
+  const again = markNeedsHuman(root, "gap-cap", "again");
+  assert.equal(again.ok, false);
+  assert.equal(readTaskStatus(root, "gap-cap"), "needs-human", "status unchanged on refusal");
+});
+
+test("AC2 (gap-worker-driver-retry-cap-not-wired) — 反复 exited-not-landed 的任务在 N 次后停（不再无限重派，负控制）", async (t) => {
+  const root = makeGitRoot("retry-cap");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-cap", "ready");
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-cap'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-cap\\x20flaky-red')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--max-retries", "2",
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+
+  // N=2 次 exited-not-landed（exit 0 但 status=ready 未落地）。
+  await waitFor(() => readOutcomeLines(root).length >= 2, 8000);
+  const records = readOutcomeLines(root);
+  assert.deepEqual(records.map((r) => r.final_state), ["exited-not-landed", "exited-not-landed"],
+    "AC2: both attempts exited-not-landed (exit 0 but status=ready not done)");
+
+  // 达上限 ⇒ 标 needs-human（ready→needs-human）+ ## Needs-Human 审计记录。
+  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 4000);
+  assert.equal(readTaskStatus(root, "gap-cap"), "needs-human", "AC2: task marked needs-human after N exited-not-landed");
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-cap.md"), "utf8");
+  assert.ok(body.includes("## Needs-Human"), "AC2: ## Needs-Human audit record written");
+
+  // 负控制：给驱动一个「可能第 3 次派发」的窗口，再断言仍只有 N=2 次派发（⛔ 无限重派）。
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 4000);
+  await new Promise((r) => setTimeout(r, 400));
+  const picks = drv.events().filter((e) => e.event === "selector-picked");
+  assert.equal(picks.length, 2, "AC2: exactly N=2 dispatches — the capped task is not re-dispatched (⛔ 无限重派)");
+  assert.equal(readOutcomeLines(root).length, 2, "AC2: still exactly 2 outcomes — no 3rd attempt wrote a record");
+});
+
+test("AC3 (gap-worker-driver-retry-cap-not-wired) — promotion 不回归：同一函数身份 + 缺省同值", () => {
+  assert.equal(advanceRetryCap, promoAdvanceRetryCap, "AC3: promotion re-exports the SAME advanceRetryCap (⛔ 非平行副本)");
+  assert.equal(markNeedsHuman, promoMarkNeedsHuman, "AC3: promotion re-exports the SAME markNeedsHuman (⛔ 非平行副本)");
+  assert.equal(MAX_FIX_RETRIES_DEFAULT, RETRY_CAP_DEFAULT, "AC3: promotion --max-fix-retries 缺省 = 共享 RETRY_CAP_DEFAULT（单一真相源）");
 });
