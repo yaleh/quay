@@ -480,10 +480,39 @@ export function defaultLivenessCheckArgv(root: string, kind: DriverKind): string
   return [process.execPath, "--experimental-strip-types", kernelSelfPath(), "liveness", "--kind", kind, "--root", root, "--json"];
 }
 
-/** 跑一次 liveness 检查（spawn 本 kernel 的 liveness 子命令）。cmd 覆盖命令（测试缝）；缺省 =
- *  defaultLivenessCheckArgv(root, kind)。 */
+/** liveness 告警日志（ok / DEATH）单一落点：livenessForKind（外部子命令）与 livenessInProcess
+ *  （常驻循环 in-process 缺省）共用，⛔ 不各写一遍。 */
+function writeLivenessLog(root: string, kind: DriverKind, deaths: string[], supervisorPid: number | null, driverPid: number | null): void {
+  const st = statePaths(root, kind);
+  if (deaths.length > 0) {
+    appendLog(
+      st.livenessLog,
+      `${ts()} liveness: DEATH deaths=${deaths.join(",")} kind=${kind} supervisor_pid=${supervisorPid ?? "none"} driver_pid=${driverPid ?? "none"}`,
+    );
+  } else {
+    appendLog(
+      st.livenessLog,
+      `${ts()} liveness: ok kind=${kind} supervisor_pid=${supervisorPid ?? "none"} driver_pid=${driverPid ?? "none"}`,
+    );
+  }
+}
+
+/** 常驻循环的缺省（cmd=null）in-process liveness：aliveness() 单一真相源 + 写 liveness 告警日志。
+ *  ⛔ 不 spawn `node … driver-runtime.ts liveness`——那个子命令每轮加载整个 kernel + resolveMainRoot
+ *  （spawnSync git worktree list），16-way 桶负载下把常驻循环拖到 5000ms waitFor 超时（gap-ac151
+ *  RED：worker-driver.test.mjs 5 测全 waitFor 超时）。in-process 无 spawn 失败路径 ⇒ checked=true 恒成立
+ *  （「查过」；deaths 空 = 健康，deaths 非空 = 检出死亡——与外部版 checked/deaths 语义一致）。 */
+export function livenessInProcess(root: string, kind: DriverKind): LivenessResult {
+  const a = aliveness(root, kind);
+  writeLivenessLog(root, kind, a.deaths, a.supervisorPid, a.driverPid);
+  return { checked: true, deaths: a.deaths.length > 0 ? a.deaths.join(",") : null, running: a.running };
+}
+
+/** 跑一次 liveness 检查。cmd 覆盖命令（测试缝）⇒ spawn；缺省（cmd=null）⇒ in-process
+ *  livenessInProcess（⛔ 不 spawn 重进程）。 */
 export function runLivenessCheck(root: string, kind: DriverKind, cmd: string[] | null = null): LivenessResult {
-  const argv = cmd ?? defaultLivenessCheckArgv(root, kind);
+  if (cmd === null) return livenessInProcess(root, kind);
+  const argv = cmd;
   try {
     const r = spawnSync(argv[0], argv.slice(1), {
       encoding: "utf8", timeout: LIVENESS_CHECK_TIMEOUT_MS, maxBuffer: 1024 * 1024,
@@ -498,13 +527,15 @@ export function runLivenessCheck(root: string, kind: DriverKind, cmd: string[] |
   }
 }
 
-/** runLivenessCheck 的异步版（常驻循环体用——⛔ spawnSync 会冻住协调地板）。 */
+/** runLivenessCheck 的异步版（常驻循环体用——⛔ spawnSync 会冻住协调地板）。缺省（cmd=null）⇒
+ *  in-process livenessInProcess（同步，无 spawn）；cmd 覆盖 ⇒ 异步 spawn。 */
 export async function runLivenessCheckAsync(
   root: string,
   kind: DriverKind,
   cmd: string[] | null = null,
 ): Promise<LivenessResult> {
-  const argv = cmd ?? defaultLivenessCheckArgv(root, kind);
+  if (cmd === null) return livenessInProcess(root, kind);
+  const argv = cmd;
   const r = await runAsync(argv, { timeoutMs: LIVENESS_CHECK_TIMEOUT_MS });
   if (r.error || r.status === null) return { checked: false, deaths: null, running: false };
   try {
@@ -809,7 +840,6 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
  *  写 ok 心跳 + 退出 0。 */
 export function livenessForKind(root: string, kind: DriverKind, json: boolean, out: (s: string) => void): number {
   const spec = DRIVER_KINDS[kind];
-  const st = statePaths(root, kind);
   const a = aliveness(root, kind);
   const deaths = a.deaths.length > 0 ? a.deaths.join(",") : "none";
   if (json) {
@@ -828,18 +858,8 @@ export function livenessForKind(root: string, kind: DriverKind, json: boolean, o
       `driver_alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · deaths=${deaths}`,
     );
   }
-  if (a.deaths.length > 0) {
-    appendLog(
-      st.livenessLog,
-      `${ts()} liveness: DEATH deaths=${deaths} kind=${kind} supervisor_pid=${a.supervisorPid ?? "none"} driver_pid=${a.driverPid ?? "none"}`,
-    );
-    return 1;
-  }
-  appendLog(
-    st.livenessLog,
-    `${ts()} liveness: ok kind=${kind} supervisor_pid=${a.supervisorPid ?? "none"} driver_pid=${a.driverPid ?? "none"}`,
-  );
-  return 0;
+  writeLivenessLog(root, kind, a.deaths, a.supervisorPid, a.driverPid);
+  return a.deaths.length > 0 ? 1 : 0;
 }
 
 /** start：无活 supervisor ⇒ 清孤儿驱动、spawn detached supervisor（setsid+nohup 等价）、等 driver pid
