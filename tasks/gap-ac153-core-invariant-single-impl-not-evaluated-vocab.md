@@ -1,7 +1,7 @@
 ---
 id: gap-ac153-core-invariant-single-impl-not-evaluated-vocab
 title: AC153 核心不变式单一实现 + DriverResult 词表强制含 not-evaluated
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -45,7 +45,7 @@ worker             computeLandingState（⛔ 2026-08-23 11:37 之前 exitCode===
 
 ## Definition of Done
 
-- [ ] 核心不变式单一实现 + DriverResult 词表含 not-evaluated 落地；AC1-2 全勾；land 到 develop。
+- [x] 核心不变式单一实现 + DriverResult 词表含 not-evaluated 落地；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
