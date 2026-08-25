@@ -55,6 +55,7 @@ depends_on:
 - plugin/scripts/worker-driver.ts（改继承 Layer 0 + 1a）
 - plugin/scripts/promotion-driver-launch.sh（supervisor/respawn/pid 记账港进 TS kernel；删除）
 - plugin/scripts/capability-catalog.sh（六表注册 driver-runtime.ts、退役 promotion-driver-launch.sh）
+- docs/proposals/quay-product-outline.md（新脚本注册授权：DELIVERY-INVENTORY 计数 driver-runtime.ts +1 / promotion-driver-launch.sh -1 净零，快照无需改）
 - packages/quay/src/cli/driver.ts（spawnSync 薄壳变真正实现入口）
 - plugin/test/driver-runtime.test.mjs（新 test）
 - plugin/test/worker-driver.test.mjs（test）
