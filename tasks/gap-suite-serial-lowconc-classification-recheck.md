@@ -1,7 +1,7 @@
 ---
 id: gap-suite-serial-lowconc-classification-recheck
 title: serial/lowconc 降并发 + 单飞锁两路径判断不一致——--buckets 绕过 run_selected（分相 + 锁全失效，33 主动验证）
-status: done
+status: ready
 labels:
   - gap
   - feature
