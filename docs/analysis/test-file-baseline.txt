@@ -273,6 +273,7 @@ plugin/test/drive-target-check.test.mjs
 plugin/test/driver-cli.test.mjs
 plugin/test/driver-filters.test.mjs
 plugin/test/driver-result.test.mjs
+plugin/test/driver-runtime.test.mjs
 plugin/test/execute-suite-fix-relaunch-snapshot.test.mjs
 plugin/test/execute-suite-fix-scope-gate.test.mjs
 plugin/test/execution-policy.test.mjs
@@ -364,7 +365,6 @@ plugin/test/prepare-admission-check.test.mjs
 plugin/test/probe-spec-wiring.test.mjs
 plugin/test/prod-data-audit.test.mjs
 plugin/test/profile-policy.test.mjs
-plugin/test/promotion-driver-launch.test.mjs
 plugin/test/promotion-driver.test.mjs
 plugin/test/provision-verify-worktree.test.mjs
 plugin/test/quay-init-loop-driver.test.mjs
