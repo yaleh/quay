@@ -40,5 +40,5 @@ workflow-events 来源 inFlight 加终态 status 过滤；AC1/AC2/AC3 全勾；c
 ## Touches
 
 - packages/quay/src/observation.ts（readLive 的 inFlight 合并加 status 过滤）
-- packages/quay/test/ 或 plugin/test/（/live 幽灵负控制测试）
+- packages/quay/test/serve-handlers.test.mjs（/live 幽灵负控制测试）
 - tasks/gap-live-ghost-superseded-task-workflow-events-start.md（自身）
