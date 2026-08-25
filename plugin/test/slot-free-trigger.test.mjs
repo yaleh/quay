@@ -198,21 +198,20 @@ test("AC2 — the trigger reads the EXISTING mechanisms (--slots + ready-pool-ch
 
 // ── AC3: outer 接事件回填 ────────────────────────────────────────────────────────
 
-test("AC3 — the orchestrator doc wires SLOT-FREE ⇒ 立即驱动 inner 回填 (not waiting for the tick)", () => {
+test("AC3 — the SLOT-FREE Monitor mount is retired (driver reconcile takes over); the doc keeps the mechanism as 理由档案", () => {
   const outer = read(OUTER_TICK);
-  assert.ok(outer.includes("slot-free-trigger.ts"), "doc names the trigger script");
-  assert.ok(outer.includes("SLOT-FREE"), "doc names the SLOT-FREE event");
-  assert.ok(outer.includes("驱动 inner 回填") || outer.includes("驱动 inner") || outer.includes("立即驱动"),
-    "doc routes SLOT-FREE to immediately drive the inner to refill");
-  assert.ok(outer.includes("slot-free-events.jsonl"), "doc names the append-only event log (漏回填可追责)");
-  assert.ok(outer.includes("不等下一次 cron") || outer.includes("不等 cron") || outer.includes("立即"),
-    "drive happens on the event, not the cron window");
+  assert.ok(outer.includes("slot-free-trigger.ts"), "doc still names the trigger script (共享库 / 理由档案)");
+  assert.ok(outer.includes("SLOT-FREE"), "doc still documents the SLOT-FREE event");
+  assert.ok(outer.includes("gap-retire-outer-monitors-after-reconciler"), "doc names the retirement task");
+  assert.ok(outer.includes("已退役"), "doc marks the Monitor mount retired");
+  assert.ok(outer.includes("driver"), "doc routes the empty-slot response to the driver reconcile loop");
 });
 
-test("AC3 — orchestrator-tick-core A18/B9 空槽强制链加事件驱动分支", () => {
+test("AC3 — orchestrator-tick-core retires the A18/B9 SLOT-FREE event-drive branch (driver per-pass reading takes over)", () => {
   const core = read(path.join(REPO_ROOT, "orchestration/orchestrator-tick-core.md"));
-  assert.ok(core.includes("SLOT-FREE"), "tick-core names the SLOT-FREE event");
-  assert.ok(core.includes("slot-free-trigger"), "tick-core names the trigger");
+  assert.ok(core.includes("SLOT-FREE"), "tick-core names the SLOT-FREE event (retirement note)");
+  assert.ok(core.includes("已退役"), "tick-core marks the event-drive branch retired");
+  assert.ok(core.includes("gap-retire-outer-monitors-after-reconciler"), "tick-core names the retirement task");
 });
 
 // ── AC4: inner 醒来第一件事 ──────────────────────────────────────────────────────
