@@ -1,7 +1,7 @@
 ---
 id: gap-sessions-page-slow-unclickable-flat-render
 title: sessions 页三缺陷：列表每卡同步读 200KB tail（慢）+ 卡片裸 div 无链接（不可点）+ 详情页 2MB 全量平铺——阶段一三改
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -40,9 +40,9 @@ sessions 列表/详情页三缺陷（人 MCP 浏览器 + manager 读代码双核
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，卡片可点）：列表页卡片 `<a href="/session/<id>">` 包裹，点击导航到 `/session/<id>` 详情页；（⛔ 仍裸 `<div>` 不可点 ⇒ 假）。
-- [ ] AC2（能取假，LIVE-only + GONE 折叠）：列表页默认只渲染 LIVE；GONE 收进 `<details>` 默认折叠（点开才读取/显示），首屏不再同步读全部 GONE 的 200KB tail；（⛔ 仍全量渲染 GONE ⇒ 假）。
-- [ ] AC3（能取假，详情页最近 N + 按需加载）：详情页默认只渲染最近 N 条 turn，更早内容按需加载（滚动或原生机制），不再 2MB 全量平铺；（⛔ 仍全量平铺 ⇒ 假）。
+- [x] AC1（能取假，卡片可点）：列表页卡片 `<a href="/session/<id>">` 包裹，点击导航到 `/session/<id>` 详情页；（⛔ 仍裸 `<div>` 不可点 ⇒ 假）。
+- [x] AC2（能取假，LIVE-only + GONE 折叠）：列表页默认只渲染 LIVE；GONE 收进 `<details>` 默认折叠（点开才读取/显示），首屏不再同步读全部 GONE 的 200KB tail；（⛔ 仍全量渲染 GONE ⇒ 假）。
+- [x] AC3（能取假，详情页最近 N + 按需加载）：详情页默认只渲染最近 N 条 turn，更早内容按需加载（滚动或原生机制），不再 2MB 全量平铺；（⛔ 仍全量平铺 ⇒ 假）。
 
 ## Definition of Done
 
