@@ -2,7 +2,7 @@
 id: gap-worker-driver-async-selector-readypool
 title: worker-driver 循环体 spawnSync 改 spawn（selector/readyPool/liveness/git
   异步，完成作唤醒源——地板的前置，防同步调用冻住地板）
-status: ready
+status: done
 labels:
   - gap
   - defect
