@@ -21,8 +21,8 @@ sampler 进程随宿主 suite 生命周期正确终止——清理路径覆盖�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，宿主结束即停）：宿主 suite 结束后 sampler 不再写（5s 间隔写入即停）；（⛔ 宿主结束后仍写数分钟 ⇒ 假）。
-- [ ] AC2（能取假，异常退出回收）：worker 异常退出分支也回收后台 sampler（⛔ 异常退出后 sampler 残留 ⇒ 假）。
+- [x] AC1（能取假，宿主结束即停）：宿主 suite 结束后 sampler 不再写（5s 间隔写入即停）；（⛔ 宿主结束后仍写数分钟 ⇒ 假）。
+- [x] AC2（能取假，异常退出回收）：worker 异常退出分支也回收后台 sampler（⛔ 异常退出后 sampler 残留 ⇒ 假）。
 
 ## Definition of Done
 

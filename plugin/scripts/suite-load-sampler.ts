@@ -12,6 +12,16 @@
 // crash-trap, watchdog-written — writes a terminal state, so sampling can never outlive the suite
 // by construction. This is NOT a resident idle-spin process: no suite ⇒ no sampler.
 //
+// STOP IS ALSO HOST-DEATH-DRIVEN (gap-suite-load-sampler-orphan-process): the state-driven stop
+// only fires when SOMEONE writes a terminal state / removes the state file. A host that dies
+// UNCLEANLY — SIGKILL (uncatchable), a worker mid-exit exception, the fan-in detached wrapper
+// killed before its `rm -f` of the per-task state file — leaves the state file stuck at "running",
+// and the sampler would otherwise spin for minutes-to-hours polluting the load metric. The sampler
+// therefore ALSO records its host's PID (process.ppid at spawn) and exits the moment that PID
+// disappears: the kernel reparents an orphan to PID 1 / a subreaper, so process.ppid changing is
+// the one host-death signal that survives EVERY exit branch. Either stop — state terminal, or host
+// dead — ends sampling; neither depends on a cleanup path that a killed host never reaches.
+//
 // Read semantics match plugin/scripts/resource-gate.sh so the curve is the SAME 口径 the gate's
 // point readings carry (a curve point is comparable to the gate's GO/WAIT readings).
 
@@ -100,9 +110,19 @@ async function main(): Promise<void> {
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
 
-  // Sample immediately, then every interval — but ALWAYS check the suite is still running FIRST,
-  // so a finished/superseded suite never gets one extra post-mortem sample (the 结束即停 invariant).
-  while (isSuiteRunning(stateFile, runId)) {
+  // gap-suite-load-sampler-orphan-process — record the host PID (the process that spawned us:
+  // full-suite-runner.ts, or the fan-in detached suite wrapper) so sampling stops the moment the
+  // host dies on ANY exit branch, not only the paths that write a terminal state. An unclean host
+  // exit (SIGKILL / worker mid-exit exception) leaves the state file stuck at "running"; the
+  // kernel's reparent of this orphan to PID 1 (or a subreaper) is the host-death signal that
+  // survives such a death, and it never fires a false positive (a child's ppid only changes when
+  // its parent dies).
+  const hostPid = process.ppid;
+
+  // Sample immediately, then every interval — but ALWAYS check the suite is still running AND the
+  // host is still alive FIRST, so a finished/superseded suite never gets one extra post-mortem
+  // sample (the 结束即停 invariant) and a killed host can never leave a resident orphan sampler.
+  while (isSuiteRunning(stateFile, runId) && process.ppid === hostPid) {
     const rec = {
       t: Date.now(),
       loadavg: readLoadavg(),

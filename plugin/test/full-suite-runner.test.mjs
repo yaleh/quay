@@ -5092,3 +5092,64 @@ test("gap-test-detail-load-timeseries — the runner spawns a load sampler that 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("gap-suite-load-sampler-orphan-process AC2 — an UNCLEAN host exit (SIGKILL, no terminal state) reaps the sampler via host-death detection", async () => {
+  // The state-driven stop only fires when SOMEONE writes a terminal state / removes the state file.
+  // A host that dies UNCLEANLY (SIGKILL — uncatchable; worker mid-exit exception; fan-in wrapper
+  // killed before its `rm -f`) leaves the state file stuck at "running" and the sampler must still
+  // stop. This test drives that branch directly: the host backgrounds the sampler then never writes
+  // a terminal state — the host is SIGKILLed, and the sampler must detect the host's death (its
+  // ppid changes when the kernel reparents the orphan) and exit on its own.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-load-orphan-"));
+  const stateFile = path.join(root, "sampler.state.json");
+  const outFile = path.join(root, "suite-load-orphan.jsonl");
+  const samplerPath = path.join(REPO_ROOT, "plugin", "scripts", "suite-load-sampler.ts");
+  fs.writeFileSync(stateFile, JSON.stringify({ state: "running" }), "utf8");
+  // Host = a bash wrapper that backgrounds the sampler then sleeps, modeling the suite host the
+  // sampler must follow. It has NO terminal-state / rm -f step — the unclean-exit branch.
+  const host = spawn(
+    "bash",
+    [
+      "-c",
+      `node --no-warnings --experimental-strip-types "${samplerPath}" --state-file "${stateFile}" --out-file "${outFile}" --run-id "orphan-test" --interval 0.2 & sleep 60`,
+    ],
+    { stdio: "ignore", detached: true },
+  );
+  host.unref();
+  const pidFile = `${outFile}.pid`;
+  try {
+    // Wait (bounded) for the sampler to write its first sample + pid sidecar while the host is alive.
+    let samplerPid = 0;
+    let lines = [];
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      try { lines = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean); } catch { lines = []; }
+      try { samplerPid = Number(fs.readFileSync(pidFile, "utf8").trim()); } catch { samplerPid = 0; }
+      if (lines.length >= 1 && samplerPid > 0) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(lines.length >= 1, "the sampler wrote >=1 sample while its host was alive");
+    assert.ok(samplerPid > 0, "the sampler wrote its pid sidecar");
+
+    // Unclean host death: SIGKILL the host wrapper (no terminal state, no rm -f). The sampler must
+    // detect the host's death (ppid change) and exit on its own — the AC2 orphan-reaping invariant.
+    process.kill(host.pid, "SIGKILL");
+
+    let gone = false;
+    const stopDeadline = Date.now() + 10_000;
+    while (Date.now() < stopDeadline) {
+      try { process.kill(samplerPid, 0); } catch { gone = true; break; }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(gone, "the sampler exited after its host was SIGKILLed (host-death reaping, never an orphan)");
+
+    // The timeseries stops growing once the host is dead (no post-mortem pollution).
+    const countAfter = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean).length;
+    await new Promise((r) => setTimeout(r, 500));
+    const countLater = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean).length;
+    assert.equal(countLater, countAfter, "the timeseries stops growing once the host is dead");
+  } finally {
+    try { process.kill(host.pid, "SIGKILL"); } catch { /* already gone */ }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
