@@ -1,7 +1,7 @@
 ---
 id: gap-webui-message-delivery-entry
 title: web 消息投递入口（复用 send-to-session 协议 + 投递四态真实显示）
-status: ready
+status: done
 labels:
   - gap
   - feature
