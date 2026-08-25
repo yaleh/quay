@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-static-fail-no-record
 title: verification-round.jsonl 静态检查 fail-closed 轮次不落记录——「没跑」与「跑了但静态闸拦下」在账本同形
-status: todo
+status: ready
 labels:
   - gap
   - defect
