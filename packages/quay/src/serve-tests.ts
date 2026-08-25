@@ -234,6 +234,103 @@ function truncateLabel(s: string, max: number): string {
   return "…" + s.slice(s.length - (max - 1));
 }
 
+// ── bucket attribution (gap-webui-bucket-color-distinction) ─────────────────────────────────────
+//
+// AUTHORITATIVE-SOURCE NOTE (hard rule: single source of truth): the file→bucket attribution is
+// plugin/scripts/suite-bucket-attribution.ts (bucketSetOf). Core cannot import plugin/
+// (packages/quay/src has zero plugin/ imports), and a per-perFile subprocess would be overkill for a
+// pure static classification — so this display-surface mirror reproduces bucketSetOf's documented
+// judgment (directory-home P + relative-reference closure + path literals) with the same three
+// signal regexes. A divergence can at worst mis-colour one Gantt bar, never a dispatch/skip decision
+// (that stays with plugin/scripts/suite-bucket-select.ts). Deliberate web-context deviation: an
+// unreadable/missing file returns UNRESOLVED (empty set) instead of throwing — the page must degrade
+// to a muted bar, never a 500.
+
+type Bucket = "P" | "S" | "M";
+
+const M_PREFIX = /plugin\/scripts(?=\/|["'`\s]|$)/;
+const P_PREFIX = /packages\/[^/]+\/(?:src|bin|dist)\//;
+const S_PREFIX = /scripts\/test\.sh/;
+const P_TEST_DIR = /^packages\/[^/]+\/test\//;
+const BUCKET_ORDER: readonly Bucket[] = ["P", "S", "M"];
+
+function classifyRef(s: string): Bucket | null {
+  if (M_PREFIX.test(s)) return "M";
+  if (P_PREFIX.test(s)) return "P";
+  if (S_PREFIX.test(s)) return "S";
+  return null;
+}
+
+function normalizeRel(p: string): string {
+  const parts = String(p).replace(/\\/g, "/").split("/");
+  const out: string[] = [];
+  for (const seg of parts) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") { out.pop(); continue; }
+    out.push(seg);
+  }
+  return out.join("/");
+}
+
+function resolveRelSpec(fileRel: string, spec: string): string {
+  const dir = path.posix.dirname(normalizeRel(fileRel));
+  return normalizeRel(dir === "." ? spec : `${dir}/${spec}`);
+}
+
+function extractRelSpecifiers(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/["'`](\.\.?\/[^"'`\n]*?)["'`]/g)) {
+    if (m[1].includes("${")) continue; // dynamic interpolation — not a static reference
+    out.push(m[1]);
+  }
+  return out;
+}
+
+/** The bucket set of one test file (mirror of suite-bucket-attribution.ts bucketSetOf). */
+export function bucketSetOfFile(fileRef: string, root: string | null | undefined): Set<Bucket> {
+  if (!root) return new Set();
+  const fileRel = normalizeRel(fileRef);
+  let text: string;
+  try {
+    text = readFileSync(path.join(root, fileRel), "utf8");
+  } catch {
+    return new Set(); // missing/unreadable → UNRESOLVED (the page degrades, never throws)
+  }
+  const buckets = new Set<Bucket>();
+  if (P_TEST_DIR.test(fileRel)) buckets.add("P"); // directory home — one signal, not the whole judgment
+  for (const spec of extractRelSpecifiers(text)) {
+    const b = classifyRef(resolveRelSpec(fileRel, spec));
+    if (b) buckets.add(b);
+  }
+  for (const m of text.matchAll(/plugin\/scripts(?=\/|["'`\s]|$)|packages\/[^/]+\/(?:src|bin|dist)\/|scripts\/test\.sh/g)) {
+    const b = classifyRef(m[0]);
+    if (b) buckets.add(b);
+  }
+  return buckets;
+}
+
+/** Canonical bucket string: `P | S | M | P+S | P+M | S+M | P+S+M | UNRESOLVED` (same as attribution). */
+function canonicalBuckets(buckets: Set<Bucket>): string {
+  if (buckets.size === 0) return "UNRESOLVED";
+  return BUCKET_ORDER.filter((b) => buckets.has(b)).join("+");
+}
+
+/** The colour key: singleton → its own; any combo → "multi"; unresolved → "unresolved". */
+function bucketColorKey(canonical: string): string {
+  if (canonical === "UNRESOLVED") return "unresolved";
+  if (canonical.includes("+")) return "multi";
+  return canonical; // "P" | "S" | "M"
+}
+
+/** Legend label for a canonical bucket string. */
+function bucketLabel(canonical: string): string {
+  if (canonical === "UNRESOLVED") return "未解析";
+  if (canonical.includes("+")) return "多桶";
+  if (canonical === "P") return "P 产品";
+  if (canonical === "S") return "S 套件";
+  return "M 机件";
+}
+
 /**
  * gap-test-detail-timeline AC2 — render the per-file timeline (one horizontal bar per file, positioned
  * by its start/end epoch-ms) as a pure, dependency-free server-rendered SVG string. Sorted by start
@@ -243,12 +340,20 @@ function truncateLabel(s: string, max: number): string {
  */
 export function renderPerFileTimelineSvg(
   perFile: { file: string; durationMs: number; passed: boolean; startedAtMs?: number; endedAtMs?: number }[] | null | undefined,
+  root?: string | null,
 ): string {
   if (!perFile || perFile.length === 0) return "";
   const rows = perFile.filter(hasTimestamps).sort((a, b) => a.startedAtMs - b.startedAtMs);
   if (rows.length === 0) return "";
 
-  const M = { top: 24, right: 24, bottom: 40, left: 340 };
+  // gap-webui-bucket-color-distinction AC2 — attribute each file to its bucket set (the
+  // suite-bucket-attribution.ts mirror) so bars are HUE-coloured by bucket, not just pass/fail.
+  const attributed = rows.map((f) => {
+    const canonical = canonicalBuckets(bucketSetOfFile(f.file, root));
+    return { ...f, key: bucketColorKey(canonical), label: bucketLabel(canonical) };
+  });
+
+  const M = { top: 24, right: 24, bottom: 64, left: 340 };
   const W = 960;
   const rowH = 14;
   const rowGap = 5;
@@ -260,20 +365,39 @@ export function renderPerFileTimelineSvg(
   const span = Math.max(t1 - t0, 1);
   const X = (t: number): number => M.left + ((t - t0) / span) * plotW;
 
-  const bars = rows
+  const bars = attributed
     .map((f, i) => {
       const y = M.top + i * (rowH + rowGap);
       const x = X(f.startedAtMs);
       const w = Math.max(X(f.endedAtMs) - x, 1);
-      const cls = f.passed ? "gantt-svg-bar" : "gantt-svg-bar-fail";
+      // HUE = bucket, SHADE = pass/fail (the fail step reuses gantt-svg-bar-fail as a darker modifier
+      // of the same bucket family — see pageStyles' .gantt-bucket-* rules).
+      const cls = `gantt-bucket-${f.key}${f.passed ? "" : " gantt-svg-bar-fail"}`;
       const end = new Date(f.endedAtMs);
       const endHhmmss = `${pad2(end.getHours())}:${pad2(end.getMinutes())}:${pad2(end.getSeconds())}`;
       return `<g>
 <text class="git-svg-ink" x="${(M.left - 8).toFixed(1)}" y="${(y + rowH - 2).toFixed(1)}" font-size="10" text-anchor="end"><a href="/tests/file?path=${encodeURIComponent(f.file)}">${escapeHtml(truncateLabel(f.file, 52))}</a></text>
-<rect class="${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${rowH}" rx="2"><title>${escapeHtml(f.file)} · ${Math.round(f.durationMs)} ms · 结束 ${endHhmmss}</title></rect>
+<rect class="${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${rowH}" rx="2"><title>${escapeHtml(f.file)} · ${Math.round(f.durationMs)} ms · ${f.label} · 结束 ${endHhmmss}</title></rect>
 </g>`;
     })
     .join("\n");
+
+  // gap-webui-bucket-color-distinction AC3 — legend explaining each bucket colour (only the buckets
+  // actually present, in canonical order). Token-derived classes, zero hardcoded hex, zero client JS.
+  const legendOrder = ["P", "S", "M", "multi", "unresolved"] as const;
+  const presentKeys = new Set(attributed.map((f) => f.key));
+  const legendY = H - M.bottom + 34;
+  const legendItems = legendOrder
+    .filter((k) => presentKeys.has(k))
+    .map((k) => ({ key: k, label: attributed.find((f) => f.key === k)!.label }))
+    .map((it, i) => {
+      const lx = M.left + i * 92;
+      return `<rect class="gantt-bucket-${it.key}" x="${lx}" y="${legendY}" width="10" height="10" rx="2"></rect><text class="git-svg-muted" x="${lx + 15}" y="${legendY + 9}" font-size="10">${escapeHtml(it.label)}</text>`;
+    })
+    .join("");
+  const legend = legendItems
+    ? `<g class="gantt-svg-legend"><text class="git-svg-muted" x="${M.left}" y="${legendY - 4}" font-size="10">图例：</text></g>${legendItems}`
+    : "";
 
   const durSec = span / 1000;
   const xSteps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
@@ -296,12 +420,14 @@ export function renderPerFileTimelineSvg(
   return `<svg class="git-svg-surface" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Per-file test timeline (gantt)" style="max-width:100%;height:auto;border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif;">
 ${xTicks.join("\n")}
 ${bars}
-<text class="git-svg-ink" x="${M.left}" y="${(M.top - 6).toFixed(1)}" font-size="11">测试时间线（每文件起止时刻 · 按开始时刻升序）</text>
+${legend}
+<text class="git-svg-ink" x="${M.left}" y="${(M.top - 6).toFixed(1)}" font-size="11">测试时间线（每文件起止时刻 · 按开始时刻升序 · 按 bucket 着色）</text>
 </svg>`;
 }
 
 function renderTestsPage(
   tests: TestsResult,
+  root: string,
   samples: SuiteLoadSample[] = [],
   current: CurrentSuiteState = { runId: null, startedAt: null, state: null },
   selected: TestRunRecord | null = null,
@@ -378,7 +504,7 @@ function renderTestsPage(
   const perFileTable = perFileRun ? renderPerFileTable(perFileRun.perFile) : "";
   // gap-test-detail-timeline AC2 — render the per-file timeline (gantt) for that same run. The chart
   // omits itself (⇒ "") when the run's perFile entries carry no timestamps (legacy/absent field).
-  const perFileTimelineSvg = perFileRun ? renderPerFileTimelineSvg(perFileRun.perFile) : "";
+  const perFileTimelineSvg = perFileRun ? renderPerFileTimelineSvg(perFileRun.perFile, root) : "";
   // gap-web-tests-three-sections-round-drift AC2 — the find() above silently falls back to an
   // EARLIER run when the newest run carries no perFile (red / static-check-early-fail / reporter
   // stopped before perFile). Surface that fallback instead of hiding it: name both the latest run
@@ -451,7 +577,7 @@ export async function handleTests(
     return [];
   })();
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderTestsPage(tests, samples, current, selected, roundNum));
+  res.end(renderTestsPage(tests, cfg.workspaceRoot, samples, current, selected, roundNum));
 }
 
 // ── /tests/file — single-file cross-round detail page (gap-webui-test-file-detail-page) ──────────
