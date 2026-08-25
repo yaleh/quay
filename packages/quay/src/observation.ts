@@ -901,6 +901,14 @@ function readTaskStatusOnDisk(root: string, taskId: string): string | null {
   }
 }
 
+/** Task statuses that mean "no worker is currently running for this task" — the terminal/non-live
+ *  states (done/superseded/needs-human). readLive drops an in-flight run whose on-disk task status is
+ *  one of these: a start-without-end telemetry record for a done/superseded/needs-human task is a
+ *  ghost (its worker session ended, was superseded, or escaped to a human WITHOUT a normal fan-in END
+ *  telemetry). `todo`/`ready` are NOT terminal: `ready` is the genuine in-flight case (AC2), and a
+ *  `todo` carrying a start event is not evidence of terminality. */
+const NON_LIVE_TASK_STATUSES: ReadonlySet<string> = new Set(["done", "superseded", "needs-human"]);
+
 /**
  * Live loop view: in-flight fast-mode tasks + elapsed minutes + concurrency + CPU pressure +
  * the loop-state discriminator. Degrades per the header contract; never throws.
@@ -1018,6 +1026,16 @@ export function readLive(
   if (workerOnlineMs != null) {
     inFlight = inFlight.filter((t) => t.startedAtMs >= workerOnlineMs);
   }
+
+  // gap-live-ghost-superseded-task-workflow-events-start: a workflow-events start-without-end run
+  // whose task's on-disk status is terminal (done/superseded/needs-human) is a ghost — the worker
+  // session was ended/superseded without a normal fan-in END telemetry, so the pairing never closes.
+  // Drop it by the direct量 (on-disk status), the same terminal-state filter the worker-carrier merge
+  // below applies — but UNCONDITIONAL, because the ghost bug fires precisely when workerInFlight is
+  // empty (workerOutcomeOpen is always false) and the merge block below is skipped entirely.
+  inFlight = inFlight.filter(
+    (t) => !NON_LIVE_TASK_STATUSES.has(readTaskStatusOnDisk(root, t.taskId)),
+  );
 
   // Merge: a task carried by the worker-driver replaces any same-task workflow-events run (the driver
   // is the execution truth); union otherwise. Worker wins on collision. A worker task whose on-disk
@@ -2545,6 +2563,8 @@ export type SessionLayer = "Manager" | "Outer" | "Inner" | "Other";
 
 export interface SessionDetail {
   name: string;
+  /** The UUID lookup key for /session/<id> — present for both LIVE (registry row) and GONE (scan). */
+  sessionId: string;
   layer: SessionLayer;
   alive: boolean;
   pid: number | null;
@@ -2749,6 +2769,7 @@ export async function readSessions(root: string): Promise<SessionsResult> {
     const transcript = transcriptTailFor(sessionTranscriptPath(root, sessionId));
     sessions.push({
       name,
+      sessionId,
       layer: classifySessionLayer(name),
       alive: true,
       pid: row.pid,
@@ -2761,17 +2782,20 @@ export async function readSessions(root: string): Promise<SessionsResult> {
 
   // Ended sessions: transcripts in this workspace's project dir that the running registry does not
   // list. Surfaced newest-first as GONE cards so a session that just ended is still observable.
+  // ⛔ The 200 KB tail is NOT read here — the GONE card is folded into a collapsed <details> on the
+  // list page and shows only name + a link to /session/<id>; the tail read is deferred to the detail
+  // page (gap-sessions-page-slow-unclickable-flat-render AC2: 首屏不再同步读全部 GONE 的 tail).
   for (const { sessionId } of scanEndedSessions(root, runningIds)) {
-    const transcript = transcriptTailFor(sessionTranscriptPath(root, sessionId));
     sessions.push({
       name: sessionId,
+      sessionId,
       layer: classifySessionLayer(sessionId),
       alive: false,
       pid: null,
       halted: false,
-      transcriptStatus: transcript.status,
-      transcriptReason: transcript.reason,
-      messages: transcript.messages,
+      transcriptStatus: "empty",
+      transcriptReason: "GONE — transcript 在详情页按需读取",
+      messages: null,
     });
   }
 
@@ -2790,6 +2814,11 @@ export const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[
 /** Detail view reads a larger tail than the /sessions preview (200 KB) — still bounded so a multi-GB
  *  transcript never loads fully, but long enough to be observation-level rather than preview-level. */
 export const SESSION_VIEW_TRANSCRIPT_TAIL_BYTES = 2_000_000;
+/** Detail view renders only this many turns (the most recent) by default; earlier turns are lazy-loaded
+ *  on scroll (gap-sessions-page-slow-unclickable-flat-render AC3: 默认只渲染最近 N 条, not 2 MB flat). */
+export const SESSION_VIEW_INITIAL_TURNS = 30;
+/** Turns fetched per on-demand scroll chunk when the detail view loads earlier content. */
+export const SESSION_VIEW_EARLIER_CHUNK = 50;
 
 export function isValidSessionId(sessionId: string): boolean {
   return SESSION_ID_RE.test(sessionId);
@@ -2831,6 +2860,8 @@ export interface SessionViewResult {
   /** Resolved transcript path, or null when the sessionId was invalid. */
   transcriptPath: string | null;
   turns: TranscriptTurn[];
+  /** True when the transcript file has bytes BEYOND the read window (older history not read). */
+  truncated: boolean;
 }
 
 /** tool_result content is a string OR an array of `{type:"text"}` blocks — normalize to text. */
@@ -2915,11 +2946,13 @@ export function parseTranscript(text: string): TranscriptTurn[] {
 }
 
 /** Bounded read of the transcript tail (same tail strategy as readTranscriptTail, larger window),
- *  parsed into structured turns. Returns empty/error honestly — never throws. */
-export function readTranscript(transcriptPath: string, maxBytes = SESSION_VIEW_TRANSCRIPT_TAIL_BYTES): { status: ObservationStatus; reason: string | null; turns: TranscriptTurn[] } {
+ *  parsed into structured turns. Returns empty/error honestly — never throws. `truncated` reports
+ *  whether the file has bytes BEYOND the read window (older history not read). */
+export function readTranscript(transcriptPath: string, maxBytes = SESSION_VIEW_TRANSCRIPT_TAIL_BYTES): { status: ObservationStatus; reason: string | null; turns: TranscriptTurn[]; truncated: boolean } {
   try {
-    if (!fs.existsSync(transcriptPath)) return { status: "empty", reason: "transcript 缺失", turns: [] };
+    if (!fs.existsSync(transcriptPath)) return { status: "empty", reason: "transcript 缺失", turns: [], truncated: false };
     const stat = fs.statSync(transcriptPath);
+    const truncated = stat.size > maxBytes;
     const fd = fs.openSync(transcriptPath, "r");
     const tailStart = Math.max(0, stat.size - maxBytes);
     const buf = Buffer.alloc(stat.size - tailStart);
@@ -2928,10 +2961,10 @@ export function readTranscript(transcriptPath: string, maxBytes = SESSION_VIEW_T
     const lines = buf.toString("utf8").split(/\r?\n/);
     if (tailStart > 0 && lines.length > 0) lines.shift(); // drop the leading partial JSON record
     const turns = parseTranscript(lines.join("\n"));
-    if (turns.length === 0) return { status: "empty", reason: "transcript 无 user/assistant 消息", turns: [] };
-    return { status: "ok", reason: null, turns };
+    if (turns.length === 0) return { status: "empty", reason: "transcript 无 user/assistant 消息", turns: [], truncated };
+    return { status: "ok", reason: null, turns, truncated };
   } catch (err) {
-    return { status: "error", reason: `transcript 读失败：${err instanceof Error ? err.message : String(err)}`, turns: [] };
+    return { status: "error", reason: `transcript 读失败：${err instanceof Error ? err.message : String(err)}`, turns: [], truncated: false };
   }
 }
 
@@ -2941,7 +2974,7 @@ export function readTranscript(transcriptPath: string, maxBytes = SESSION_VIEW_T
 export function readSession(root: string, sessionId: string, home: string = os.homedir()): SessionViewResult {
   const transcriptPath = sessionTranscriptPath(root, sessionId, home);
   if (transcriptPath == null) {
-    return { status: "empty", reason: `sessionId 非法（须为 UUID）：${sessionId}`, sessionId, transcriptPath: null, turns: [] };
+    return { status: "empty", reason: `sessionId 非法（须为 UUID）：${sessionId}`, sessionId, transcriptPath: null, turns: [], truncated: false };
   }
   const t = readTranscript(transcriptPath);
   return { ...t, sessionId, transcriptPath };

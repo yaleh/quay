@@ -149,7 +149,7 @@ export {
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
-import { applyTaskFilters, makeFilterContext, readTaskStatus } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, type RetryState } from "./driver-filters.ts";
 export { readTaskStatus } from "./driver-filters.ts";
 // AC153：核心不变式单一实现（「⛔ 不信执行者自述，用独立量复核」）+ DriverResult 词表强制含
 // not-evaluated。computeLandingState 消费它（⛔ 不各写一遍 exitCode/自述判定）。
@@ -1061,6 +1061,15 @@ export function parseReconcileIntervalSecs(raw: string | undefined): number {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) * 1000 : RECONCILE_INTERVAL_SECS_DEFAULT * 1000;
 }
 
+/** 解析 --max-retries <n>（重试上限，gap-worker-driver-retry-cap-not-wired）。缺省 RETRY_CAP_DEFAULT
+ *  （与 promotion 的 --max-fix-retries 同值单一真相源）；非法（非正整数）⇒ 缺省（⛔ 不因 flag 拼写
+ *  炸常驻循环——与本文件其它 parse* 助手的 fail-to-default 约定一致）。 */
+export function parseMaxRetries(raw: string | undefined): number {
+  if (raw == null) return RETRY_CAP_DEFAULT;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : RETRY_CAP_DEFAULT;
+}
+
 /** 一次 stash 的结果（AC2 可核：stashed=true 且 git stash list 可见；⛔ 绝不 discard）。 */
 export interface StashResult {
   stashed: boolean;
@@ -1376,6 +1385,9 @@ export interface ResidentOptions {
   /** 协调地板（gap-worker-driver-reconcile-interval）：至少每 reconcileMs 协调一次，哪怕所有边沿事件
    *  （worker 退出）都丢了 ⇒ 降级「慢但正确」而非「静默停摆」。缺省 RECONCILE_INTERVAL_SECS_DEFAULT*1000。 */
   reconcileMs: number;
+  /** 重试上限（gap-worker-driver-retry-cap-not-wired）：同一任务连续 N 次 exited-not-landed 未落地 ⇒
+   *  标 needs-human 并停止重派。缺省 RETRY_CAP_DEFAULT（与 promotion 的 --max-fix-retries 同值）。 */
+  maxRetries: number;
 }
 
 /**
@@ -1389,7 +1401,7 @@ export interface ResidentOptions {
  *       supervisor 重启）。退出码 = 首个非零 worker 码（仅在终态 latch 后返回）。
  */
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
-  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs } = opts;
+  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs, maxRetries } = opts;
 
   // checkout 前 stash（阶段 2 ③）：主检出脏 ⇒ stash 一次（常驻循环起跑前），⛔ 不 discard。非 git no-op。
   const stash = stashIfDirty(rootDir);
@@ -1400,6 +1412,13 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   const running: RunningWorker[] = [];
   const results: WorkerRunResult[] = [];
   let stopReason: string | null = null;
+
+  // 重试上限（gap-worker-driver-retry-cap-not-wired）：worker 派发的任务可无限次 exited-not-landed 重派
+  // ⇒ 补 retryExhausted 集合填充（同 promotion 的 RetryState 形态，单一真相源 = driver-filters.ts 的
+  // advanceRetryCap / markNeedsHuman）。每 worker 结束若 exited-not-landed ⇒ 连续失败计数 + 达上限标
+  // needs-human（ready→needs-human），needsHuman 集合同进 retryCapNotExhausted / notNeedsHuman 过滤 ⇒
+  // 不再无限重派。跨轮存活于常驻循环内（⛔ 不落盘，与 promotion 的 RetryState 同寿命）。
+  const retryState: RetryState = { counts: new Map(), needsHuman: new Set() };
 
   // gap-worker-driver-cold-start-inflight-refresh：冷启动在飞排除集【每趟 pass 现观测】（SPEC §5.2
   // actual=observe()），不再是循环外一次性 const 快照——原 gap-worker-driver-cold-start-inflight-blind
@@ -1466,6 +1485,15 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     }).then((r) => {
       rw.done = true;
       results.push(r);
+      // 重试上限（gap-worker-driver-retry-cap-not-wired）：worker 结束若 exited-not-landed ⇒ 连续失败
+      // 计数 + 达上限标 needs-human（ready→needs-human）。needsHuman 集合进 retryCapNotExhausted 过滤 ⇒
+      // 下一轮不再重派（与 markNeedsHuman 的 status 翻转双保险——即使磁盘写失败，内存过滤也挡重派）。
+      if (r.outcome.final_state === "exited-not-landed") {
+        const newly = advanceRetryCap(retryState, [r.taskId], maxRetries);
+        for (const id of newly) {
+          markNeedsHuman(rootDir, id, `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`);
+        }
+      }
       return r;
     });
     running.push(rw);
@@ -1538,7 +1566,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // touchesDisjoint / retryCapNotExhausted / notNeedsHuman，⛔ 不各写一遍）。冷启动在飞 task 一并参与
       // （它们的 Touches 是真实冲突面）。原「active 过滤 + filterTouchesDisjoint + depsReadyForDispatch」
       // 三个散点已收进 applyTaskFilters 一次判完。
-      const candidates = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks() }));
+      // 重试上限（gap-worker-driver-retry-cap-not-wired）：retryExhausted = 本循环已标 needs-human 的
+      // 任务集合（exited-not-landed 达上限派生）——retryCapNotExhausted 谓词据此滤掉不再重派。
+      const candidates = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks(), retryExhausted: retryState.needsHuman }));
       if (candidates.length === 0) {
         // 真池空（ready 减在飞后无候选）⇒ 瞬时 WAIT：记 pool-empty，下一轮重读（⛔ 不再 latch）。
         //   池非空但全与在飞 Touches/deps 重叠 ⇒ 同为瞬时 WAIT：不设 stopReason（在飞 worker 结束释放
@@ -1607,6 +1637,7 @@ export async function main(argv: string[]): Promise<number> {
   let timeoutRaw: string | undefined;
   let intervalRaw: string | undefined;
   let reconcileRaw: string | undefined;
+  let maxRetriesRaw: string | undefined;
   let pidFile: string | undefined;
   let outcomePath: string | undefined;
   let runId: string | undefined;
@@ -1630,6 +1661,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--timeout") timeoutRaw = args[++i];
     else if (a === "--interval") intervalRaw = args[++i];
     else if (a === "--reconcile-interval") reconcileRaw = args[++i];
+    else if (a === "--max-retries") maxRetriesRaw = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
     else if (a === "--outcome") outcomePath = args[++i];
     else if (a === "--run-id") runId = args[++i];
@@ -1646,6 +1678,7 @@ export async function main(argv: string[]): Promise<number> {
           "  [--selector-cmd \"<argv>\"] [--ready-pool-cmd \"<argv>\"] [--resource-gate-cmd \"<argv>\"] [--liveness-cmd \"<argv>\"]\n" +
           "  [--interval <ms>]   无在飞 worker 且瞬时 WAIT 时的轮询间隔（缺省 30000；测试缝传小值）\n" +
           "  [--reconcile-interval <s>]  协调地板：至少每 N 秒协调一次，边沿事件全丢也降级「慢但正确」而非静默停摆（缺省 300；0 = 无地板）\n" +
+          "  [--max-retries <n>]  重试上限：同一任务连续 N 次 exited-not-landed 未落地 ⇒ 标 needs-human 并停止重派（缺省 3，同 promotion --max-fix-retries）\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -1672,6 +1705,7 @@ export async function main(argv: string[]): Promise<number> {
   const timeoutMs = parseTimeoutMs(timeoutRaw);
   const intervalMs = parseIntervalMs(intervalRaw);
   const reconcileMs = parseReconcileIntervalSecs(reconcileRaw);
+  const maxRetries = parseMaxRetries(maxRetriesRaw);
 
   // 阶段 4（AC129）：无 --task ⇒ 常驻选择环（不再报错退出）。--task 显式批量派发路径不变。
   if (tasks.length === 0) {
@@ -1692,6 +1726,7 @@ export async function main(argv: string[]): Promise<number> {
       livenessCmd: livenessCmd ? splitArgs(livenessCmd) : null,
       intervalMs,
       reconcileMs,
+      maxRetries,
     });
   }
 
