@@ -1,7 +1,7 @@
 ---
 id: gap-suite-serial-lowconc-classification-recheck
 title: serial/lowconc load-sensitive 分类复核——占 50% full-bucket 时间，抽查是否过时
-status: todo
+status: ready
 labels:
   - gap
   - feature
