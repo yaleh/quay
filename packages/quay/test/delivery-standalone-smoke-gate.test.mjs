@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group product
 // @load-sensitive wall-clock
 // @load-sensitive-entry 2026-08-12 real standalone smoke gates with real waits (163s); moved product→serial 2026-08-12 (7/7 isolated, timed out under 8-lane — gap-suite-tiering-kind-heavy-not-a-mechanism 补缺省 kind)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-wall-clock-wait smoke gates (delivery-standalone-smoke.sh: pack + fresh-workspace install)
