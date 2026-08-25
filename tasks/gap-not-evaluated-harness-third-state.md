@@ -1,7 +1,7 @@
 ---
 id: gap-not-evaluated-harness-third-state
 title: NOT-EVALUATED 在 harness 层结构上无法兑现——run_checker 只有二值，exit 2 承载三种互不相容含义（硬规则 3b 架构级缺口）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -28,9 +28,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，第三态识别）：`run_checker` 识别 NOT-EVALUATED 第三态，既不判红也不算通过、单独计数（grep 到第三态分支）；（⛔ 仍二值 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：一个故意读不到输入的 checker，改造前它要么误红要么误绿，改造后被记为「未评估」（fail-closed 但取值可区分，硬规则 3b）；（⛔ 仍误红或误绿 ⇒ 假）。
-- [ ] AC3（能取假，编码统一）：spec-declaration-point 的 exit 2 与另三个的 JSON 字段 NOT-EVALUATED 都迁到统一约定（grep 无互不相容的 exit 2 语义残留）；（⛔ 仍三种编码 ⇒ 假）。
+- [x] AC1（能取假，第三态识别）：`run_checker` 识别 NOT-EVALUATED 第三态，既不判红也不算通过、单独计数（grep 到第三态分支）；（⛔ 仍二值 ⇒ 假）。
+- [x] AC2（能取假，负控制）：一个故意读不到输入的 checker，改造前它要么误红要么误绿，改造后被记为「未评估」（fail-closed 但取值可区分，硬规则 3b）；（⛔ 仍误红或误绿 ⇒ 假）。
+- [x] AC3（能取假，编码统一）：spec-declaration-point 的 exit 2 与另三个的 JSON 字段 NOT-EVALUATED 都迁到统一约定（grep 无互不相容的 exit 2 语义残留）；（⛔ 仍三种编码 ⇒ 假）。
 
 ## Definition of Done
 
@@ -40,6 +40,12 @@ extra: {}
 
 - plugin/scripts/checker-cost-lib.sh（run_checker 三态识别）
 - plugin/scripts/spec-declaration-point-check.ts（exit 2 迁移）
-- plugin/scripts/fan-in-materialize-check.ts 等（JSON 字段 NOT-EVALUATED 迁移）
-- plugin/test/checker-cost-lib.test.mjs（三态测试 + 负控制）
+- plugin/scripts/fan-in-materialize-check.ts（JSON 字段 NOT-EVALUATED 迁移）
+- plugin/scripts/per-task-suite-record-check.ts（JSON 字段 NOT-EVALUATED 迁移）
+- plugin/scripts/inner-wakeup-heartbeat-check.ts（JSON 字段 NOT-EVALUATED 迁移）
+- plugin/test/checker-cost.test.mjs（三态测试 + 负控制）
+- plugin/test/spec-declaration-point-check.test.mjs（exit 3 断言）
+- plugin/test/fan-in-materialize-check.test.mjs（exit 3 断言）
+- plugin/test/per-task-suite-record-check.test.mjs（exit 3 断言）
+- plugin/test/inner-wakeup-heartbeat-check.test.mjs（exit 3 断言）
 - tasks/gap-not-evaluated-harness-third-state.md（自身）

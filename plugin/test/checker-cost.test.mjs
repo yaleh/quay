@@ -369,13 +369,14 @@ test("AC2/AC3/AC4 — parallel run_checker fails closed with the failing name vi
     RUN_CHECKER_PARALLEL=1
     STATIC_CHECK_CONCURRENCY=2
     run_checker "par-ok-1" bash -c "sleep 0.1; exit 0"
-    run_checker "par-fail" bash -c "exit 3"
+    run_checker "par-fail" bash -c "exit 1"
     run_checker "par-ok-2" bash -c "sleep 0.1; exit 0"
     run_checker_parallel_wait
   `);
   // AC3: fail-closed with the FIRST failing checker's exit code; the failing name is on stderr,
-  // never masked by its siblings' (parallel) output.
-  assert.equal(res.status, 3, `parallel wait returns the first failing checker's exit code (got ${res.status}): ${res.stderr}`);
+  // never masked by its siblings' (parallel) output. (exit 1 is a RED here — exit 3 is now reserved
+  // for NOT-EVALUATED, gap-not-evaluated-harness-third-state.)
+  assert.equal(res.status, 1, `parallel wait returns the first failing checker's exit code (got ${res.status}): ${res.stderr}`);
   assert.match(res.stderr, /par-fail/, `the failing checker's name is reported (AC3, not masked): ${res.stderr}`);
   // gap-static-check-red-failures-capture-only-task-contract-shape — the fail-closed line must be
   // MACHINE-PARSEABLE (`STATIC_CHECK_FAILED: <name> exit=<rc>`, one line per failing checker) so
@@ -383,7 +384,7 @@ test("AC2/AC3/AC4 — parallel run_checker fails closed with the failing name vi
   // task-contract VIOLATION line — round-84's capture saw zero of them).
   assert.match(
     res.stderr,
-    /^STATIC_CHECK_FAILED: par-fail exit=3$/m,
+    /^STATIC_CHECK_FAILED: par-fail exit=1$/m,
     `a machine-parseable STATIC_CHECK_FAILED line is emitted with the name + exit code: ${res.stderr}`,
   );
   assert.doesNotMatch(res.stderr, /^STATIC_CHECK_FAILED: par-ok-1/, "passing checkers never emit a fail-closed line");
@@ -444,4 +445,64 @@ test("AC3 — non-parallel run_checker (the scoped tier) runs synchronously and 
   // propagate the wrapped exit code exactly as before the parallelization.
   assert.equal(res.status, 2, "synchronous run_checker propagates the wrapped command's exit code");
   assert.equal(readLedgerRows(root).length, 1, "one append-only cost row");
+});
+
+// ── NOT-EVALUATED third state (gap-not-evaluated-harness-third-state) ───────────────────────────────
+// run_checker recognizes exit 3 as a THIRD state — neither RED (fail-closed) nor PASS — and counts it
+// separately (surfaced as `STATIC_CHECK_NOT_EVALUATED: <name>`). AC1 pins the third-state branch; AC2
+// pins the negative control (a checker that cannot read its input is recorded as not-evaluated, never
+// conflated with a real failure or a real pass).
+
+test("AC1 (three-state) — parallel run_checker recognizes exit 3 as NOT-EVALUATED: not RED, not PASS, counted separately", () => {
+  const root = makeTmpDir("cc-par-ne-");
+  const res = runLibScript(root, `
+    set -euo pipefail
+    source "${CHECKER_COST_LIB}"
+    RUN_CHECKER_PARALLEL=1
+    STATIC_CHECK_CONCURRENCY=2
+    run_checker "par-ne" bash -c "exit 3"
+    run_checker "par-ok" bash -c "exit 0"
+    run_checker_parallel_wait
+  `);
+  // A NOT-EVALUATED checker is NOT fail-closed: the wait returns 0 and emits no STATIC_CHECK_FAILED.
+  assert.equal(res.status, 0, `a NOT-EVALUATED checker must not fail the wait (got ${res.status}): ${res.stderr}`);
+  assert.doesNotMatch(res.stderr, /^STATIC_CHECK_FAILED:/m, "NOT-EVALUATED never emits the fail-closed line");
+  assert.match(res.stderr, /^STATIC_CHECK_NOT_EVALUATED: par-ne$/m, "the NOT-EVALUATED checker is surfaced (counted separately)");
+  assert.match(res.stderr, /1 checker\(s\) NOT-EVALUATED/, "the third-state count is reported");
+  // Every cost row still appended (AC4 unchanged by the third state).
+  assert.deepEqual(readLedgerRows(root).map((r) => r.name).sort(), ["par-ne", "par-ok"]);
+});
+
+test("AC2 (negative control) — a checker that cannot read input (exit 3) is not conflated with a real RED (exit 1)", () => {
+  const root = makeTmpDir("cc-par-mixed-");
+  const res = runLibScript(root, `
+    set -euo pipefail
+    source "${CHECKER_COST_LIB}"
+    RUN_CHECKER_PARALLEL=1
+    STATIC_CHECK_CONCURRENCY=2
+    run_checker "par-ne" bash -c "exit 3"
+    run_checker "par-fail" bash -c "exit 1"
+    run_checker_parallel_wait
+  `);
+  // The real RED (exit 1) is still fail-closed with name + exit code; the NOT-EVALUATED (exit 3) is
+  // separated and NEVER reported as a failure.
+  assert.equal(res.status, 1, `a real RED must still fail the wait (got ${res.status}): ${res.stderr}`);
+  assert.match(res.stderr, /^STATIC_CHECK_FAILED: par-fail exit=1$/m, "the real RED emits its fail-closed line");
+  assert.doesNotMatch(res.stderr, /STATIC_CHECK_FAILED: par-ne/, "NOT-EVALUATED is never conflated with a failure");
+  assert.match(res.stderr, /^STATIC_CHECK_NOT_EVALUATED: par-ne$/m, "the NOT-EVALUATED checker is counted separately");
+});
+
+test("AC2 (negative control) — synchronous run_checker maps exit 3 to a non-failing return (set -e safe), surfaced not hidden", () => {
+  const root = makeTmpDir("cc-sync-ne-");
+  const res = runLibScript(root, `
+    set -euo pipefail
+    source "${CHECKER_COST_LIB}"
+    run_checker "sync-ne" bash -c "exit 3"
+    echo "after-run-checker"
+  `);
+  // A NOT-EVALUATED checker must NOT abort the script under `set -e` (before the fix, exit 3 — like any
+  // non-zero — would abort it). The marker line proves the script continued past run_checker.
+  assert.equal(res.status, 0, `NOT-EVALUATED must not abort a set -e script (got ${res.status}): ${res.stderr}`);
+  assert.match(res.stdout, /after-run-checker/, "the script continues past the NOT-EVALUATED checker");
+  assert.match(res.stderr, /^STATIC_CHECK_NOT_EVALUATED: sync-ne$/m, "the NOT-EVALUATED checker is surfaced");
 });

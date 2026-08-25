@@ -466,7 +466,7 @@ test("CLI — worktree-scriptPath mismatch without reconstruction ⇒ NOT-EVALUA
     script: "export const meta = { name: 'fan-in-execute' };\n// (different — post-dispatch sync version)\n",
   });
   const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--project-dir", fx.projectDir, "--workflow-events-dir", path.join(fx.base, "no-events"), "--json"], { encoding: "utf8" });
-  assert.equal(res.status, 0, `expected exit 0 (NOT-EVALUATED), got ${res.status}: ${res.stdout}`);
+  assert.equal(res.status, 3, `expected exit 3 (NOT-EVALUATED), got ${res.status}: ${res.stdout}`);
   const out = JSON.parse(res.stdout);
   assert.equal(out.ok, true);
   assert.equal(out.evaluated, false);
@@ -506,7 +506,7 @@ test("CLI — non-bootstrap task: worktree-vs-materialized mismatch is NOT-APPLI
     script: "export const meta = { name: 'fan-in-execute' };\n// (main version — no bootstrap marker)\n",
   });
   const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--project-dir", fx.projectDir, "--tasks-dir", tasksDir, "--workflow-events-dir", path.join(fx.base, "no-events"), "--json"], { encoding: "utf8" });
-  assert.equal(res.status, 0, `expected exit 0 (no RED for non-bootstrap), got ${res.status}: ${res.stdout}`);
+  assert.equal(res.status, 3, `expected exit 3 (NOT-EVALUATED — no RED for non-bootstrap), got ${res.status}: ${res.stdout}`);
   const out = JSON.parse(res.stdout);
   assert.equal(out.ok, true);
   const nb = out.checks.find((c) => c.runId === "wf_nonbootstrap-01");
@@ -528,7 +528,7 @@ test("CLI — bootstrap-hit task: worktree-vs-materialized mismatch without reco
     script: "export const meta = { name: 'fan-in-execute' };\n// (different — post-dispatch sync version)\n",
   });
   const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--project-dir", fx.projectDir, "--tasks-dir", tasksDir, "--workflow-events-dir", path.join(fx.base, "no-events"), "--json"], { encoding: "utf8" });
-  assert.equal(res.status, 0, `expected exit 0 (NOT-EVALUATED for bootstrap-hit mismatch), got ${res.status}: ${res.stdout}`);
+  assert.equal(res.status, 3, `expected exit 3 (NOT-EVALUATED for bootstrap-hit mismatch), got ${res.status}: ${res.stdout}`);
   const out = JSON.parse(res.stdout);
   assert.equal(out.ok, true);
   const bs = out.checks.find((c) => c.runId === "wf_bootstrap-01");
@@ -545,7 +545,7 @@ test("CLI — NOT-EVALUATED when no in-scope worktree-scriptPath records exist",
     script: "export const meta = { name: 'fan-in-execute' };",
   });
   const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--project-dir", fx.projectDir, "--workflow-events-dir", path.join(fx.base, "no-events"), "--json"], { encoding: "utf8" });
-  assert.equal(res.status, 0, `expected exit 0 (NOT-EVALUATED), got ${res.status}: ${res.stdout}`);
+  assert.equal(res.status, 3, `expected exit 3 (NOT-EVALUATED), got ${res.status}: ${res.stdout}`);
   const out = JSON.parse(res.stdout);
   assert.equal(out.ok, true);
   assert.equal(out.evaluated, false);

@@ -1,7 +1,7 @@
 ---
 id: gap-orphan-staging-dirs-pollute-walkcorpus
 title: 孤儿 plugin-staging-* 目录污染 walkCorpus 扫描（staging 测试被 kill 残留，致 loop-shipping.test.mjs 假红）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -21,9 +21,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，不污染）：一个 `plugin-staging-*` 孤儿目录存在时，`walkCorpus`（或 loop-shipping 扫描）不再把它当输入（排除生效）；（⛔ 仍污染 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：删掉排除/清理逻辑，loop-shipping.test.mjs 对孤儿 staging 目录须红；（⛔ 删了不红 ⇒ 假）。
-- [ ] AC3（能取假，清理或排除落地）：staging 测试启动清孤儿，或 walkCorpus 排除 pattern 落地（grep 到其一）；（⛔ 两者皆无 ⇒ 假）。
+- [x] AC1（能取假，不污染）：一个 `plugin-staging-*` 孤儿目录存在时，`walkCorpus`（或 loop-shipping 扫描）不再把它当输入（排除生效）；（⛔ 仍污染 ⇒ 假）。
+- [x] AC2（能取假，负控制）：删掉排除/清理逻辑，loop-shipping.test.mjs 对孤儿 staging 目录须红；（⛔ 删了不红 ⇒ 假）。
+- [x] AC3（能取假，清理或排除落地）：staging 测试启动清孤儿，或 walkCorpus 排除 pattern 落地（grep 到其一）；（⛔ 两者皆无 ⇒ 假）。
 
 ## Definition of Done
 
@@ -31,7 +31,7 @@ extra: {}
 
 ## Touches
 
-- packages/quay/（walkCorpus/exclusionTargets 排除 plugin-staging-*，或 staging 测试清理）
-- plugin/scripts/ 或 packages/quay/src/（扫描逻辑所在处）
-- packages/quay/test/（staging 清理/排除测试 + 负控制）
+- plugin/scripts/loop-shipping-exclusion-data.mjs（stagingDirPrefix 单源，供 walkCorpus 排除与 staging 清理共用）
+- plugin/test/loop-shipping.test.mjs（walkCorpus 按名跳过 plugin-staging-* + AC1/AC2 负控制）
+- plugin/test/quay-init-laydown-dist-closure.test.mjs（cleanOrphanStagingDirs 启动清孤儿 + 清理负控制）
 - tasks/gap-orphan-staging-dirs-pollute-walkcorpus.md（自身）
