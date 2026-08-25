@@ -8,6 +8,7 @@ import {
   relativeTime, isSafeRelativeRedirect, DEFAULT_PAGE_SIZE, buildHref, isMissingIdTask,
   renderSiteNav, renderMobileChrome,
 } from "./serve-render.ts";
+import { readWorkerOutcomeRecords, isValidSessionId } from "./observation.ts";
 
 export async function handleTaskList(
   req: IncomingMessage,
@@ -426,12 +427,48 @@ export async function handleTaskList(
     </main></body></html>`);
 }
 
+/** Render the Runs block for /task/<id> — the worker-outcome records for THIS task, one row per
+ *  attempt (gap-webui-task-runs-block AC1). Reads `.quay/worker-outcome.jsonl` via the observation
+ *  facade and reuses the transcript-access validation (isValidSessionId) + the existing /session
+ *  endpoint rather than re-implementing read/validation (AC3 — no second implementation). */
+export function taskRunsBlock(root: string, taskId: string): string {
+  const records = readWorkerOutcomeRecords(root).filter((r) => r.task === taskId);
+  if (records.length === 0) {
+    return html`<h2>Runs</h2><p class="meta">无 worker 运行记录（<code>.quay/worker-outcome.jsonl</code>）</p>`;
+  }
+  const rows = records.map((r) => {
+    const exit = r.exit_code != null ? String(r.exit_code) : r.signal != null ? `signal ${r.signal}` : "—";
+    const wall = r.wall_clock_ms != null ? `${r.wall_clock_ms}ms` : "—";
+    const state = r.failure_reason != null
+      ? html`${escapeHtml(r.final_state ?? "?")}<br><span style="font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(r.failure_reason)}</span>`
+      : escapeHtml(r.final_state ?? "?");
+    const transcript = r.session_id != null && isValidSessionId(r.session_id)
+      ? html`<a href="/session/${encodeURIComponent(r.session_id)}">transcript</a>`
+      : "—";
+    return html`<tr>
+      <td>${escapeHtml(r.started_at ?? "—")}</td>
+      <td>${state}</td>
+      <td>${escapeHtml(exit)}</td>
+      <td>${escapeHtml(wall)}</td>
+      <td>${r.worker_pid != null ? escapeHtml(String(r.worker_pid)) : "—"}</td>
+      <td><code>${escapeHtml(r.run_id ?? "—")}</code></td>
+      <td>${transcript}</td>
+    </tr>`;
+  }).join("\n");
+  return html`<h2>Runs</h2>
+    <table>
+      <tr><th>started</th><th>state</th><th>exit</th><th>wall</th><th>worker pid</th><th>run id</th><th>transcript</th></tr>
+      ${rows}
+    </table>`;
+}
+
 export async function handleTaskDetail(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
   taskId: string,
   client: ProviderClient,
+  cfg: { workspaceRoot: string },
 ): Promise<void> {
   const t = await client.taskGet(taskId);
   if (!t) {
@@ -479,6 +516,7 @@ export async function handleTaskDetail(
       <p class="meta">role: ${escapeHtml(t.role)} · labels: ${escapeHtml((t.labels || []).join(", "))}${parentMeta}</p>
       ${typeof tExt.updatedAt === "number" ? html`<p class="meta">last updated: ${escapeHtml(relativeTime(tExt.updatedAt as number))}</p>` : ""}
       ${childrenMeta}
+      ${taskRunsBlock(cfg.workspaceRoot, taskId)}
       <h2 class="sr-only">Details</h2>
       <div class="body">${renderMarkdown(t.body)}</div>
     </main></body></html>`);

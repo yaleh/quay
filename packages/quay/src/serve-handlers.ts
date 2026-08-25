@@ -187,7 +187,7 @@ export async function handleAllRoutes(
   const taskM = /^\/task\/([^/]+)$/.exec(url.pathname);
   if (taskM) {
     const id = decodeURIComponent(taskM[1]);
-    await handleTaskDetail(req, res, url, id, client);
+    await handleTaskDetail(req, res, url, id, client, cfg);
     return;
   }
 
