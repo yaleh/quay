@@ -1,7 +1,7 @@
 ---
 id: gap-retire-governance-group-merge-into-bucket
 title: 退役 @test-group governance 第三套机制——并入 bucket（人裁定「不要在 bucket 和相机制以外再搞一套」），142 文件改标真实相
-status: ready
+status: todo
 labels:
   - gap
   - defect
@@ -11,6 +11,8 @@ extra:
   schema: execution
 ---
 **type:** execution
+
+> **⛔ 暂持 todo（2026-08-25）**：AC5 的 AC101 600s 冲突（a 真全量 vs b bucket 驱动默认轮）**须人裁定**，裁定落地前不放 ready——避免 worker 读到 AC5 发现结构上无法自行满足（人不在 worker 回合里）⇒ 白烧 worktree + 派发。人裁定后由 outer 记进 AC5 Evidence 并翻 ready。
 
 ## Proposal
 
