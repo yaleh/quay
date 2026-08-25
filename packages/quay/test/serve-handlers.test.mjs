@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock } from "../src/serve-handlers.ts";
+import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
@@ -1288,6 +1288,164 @@ test("AC3 (integration) — /session/<id>/download serves raw JSONL (attachment)
     process.chdir(cwd0);
     fs.rmSync(transcriptPath, { force: true });
     try { fs.rmdirSync(transcriptDir); } catch { /* leave the (empty) dir */ }
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-webui-session-lifecycle (AC1-AC3) ─────────────────────────────────────────────────────
+// 会话生命周期：headless driver 两 kind（promotion/worker）经 web 复用 `quay driver`（AC1）；
+// 新建会话 = -p --input-format stream-json + --session-id + profile + 显式权限模式；重启 =
+// --resume <sessionId>（AC2 上下文保留）。交互式 manager/outer/inner 的停/重启【不暴露】（AC3）。
+
+function postJson(port, urlPath, obj) {
+  const body = JSON.stringify(obj);
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: "127.0.0.1", port, path: urlPath, method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => resolve({ status: res.statusCode, body: data }));
+      },
+    );
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
+test("AC1/AC3 (unit) — driverActionSpec: headless kinds × lifecycle verbs valid; interactive kinds & non-lifecycle verbs rejected", () => {
+  // AC1: promotion/worker × start/stop/restart all valid (headless lifecycle surface)
+  for (const kind of ["promotion", "worker"]) {
+    for (const verb of ["start", "stop", "restart"]) {
+      assert.deepEqual(driverActionSpec(verb, kind), { verb, kind }, `${verb} ${kind} → valid spec`);
+    }
+  }
+  // AC3: interactive manager/outer/inner NOT exposed — a stop/restart of them ⇒ 假
+  for (const kind of ["manager", "outer", "inner"]) {
+    for (const verb of ["start", "stop", "restart"]) {
+      assert.equal(driverActionSpec(verb, kind), null, `${verb} ${kind} → null (interactive not exposed)`);
+    }
+  }
+  // AC1 scope: status/drain/liveness stay CLI-only (not lifecycle verbs on the web surface)
+  for (const verb of ["status", "drain", "liveness"]) {
+    assert.equal(driverActionSpec(verb, "worker"), null, `${verb} → null (not a web lifecycle verb)`);
+  }
+  // non-string / missing → null (hard rule ③b: 读不懂不伪装成合格)
+  assert.equal(driverActionSpec(undefined, "worker"), null, "missing verb → null");
+  assert.equal(driverActionSpec("stop", undefined), null, "missing kind → null");
+  assert.equal(driverActionSpec(123, "worker"), null, "non-string verb → null");
+  // the enumerated allow-lists are exactly headless-only (no interactive kind leaks in)
+  assert.deepEqual([...WEB_DRIVER_KINDS], ["promotion", "worker"], "WEB_DRIVER_KINDS = headless kinds only");
+  assert.deepEqual([...WEB_DRIVER_VERBS], ["start", "stop", "restart"], "WEB_DRIVER_VERBS = lifecycle verbs only");
+});
+
+test("AC1 (unit) — newSessionArgs builds -p --session-id argv; permissionMode has NO default (blocker ③)", () => {
+  const root = "/ws";
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  const spec = newSessionArgs({ profile: "task-worker", permissionMode: "bypassPermissions", sessionId: sid, root });
+  assert.ok(spec, "valid input → spec");
+  assert.equal(spec.sessionId, sid, "pinned session-id preserved (traceable + resumable)");
+  assert.ok(spec.argv.includes("-p"), "headless print mode");
+  assert.ok(spec.argv.includes("--input-format") && spec.argv.includes("stream-json"), "stream-json input");
+  assert.ok(spec.argv.includes("--session-id"), "--session-id forwarded");
+  assert.ok(spec.argv.includes(sid), "the pinned id (not a fresh one) is forwarded");
+  assert.ok(spec.argv.includes("--permission-mode") && spec.argv.includes("bypassPermissions"), "explicit permission mode");
+  assert.equal(spec.argv[2], "task-worker", "profile = quay-launch.sh role (first positional)");
+  assert.ok(spec.argv[1].endsWith(path.join("plugin", "scripts", "quay-launch.sh")), "reuses quay-launch.sh (⛔ 手工重造启动 ⇒ 假)");
+
+  // missing profile → null
+  assert.equal(newSessionArgs({ profile: "", permissionMode: "bypassPermissions", root }), null, "empty profile → null");
+  // missing permissionMode → null (⛔ blocker ③: no silent default — a default would be 假)
+  assert.equal(newSessionArgs({ profile: "task-worker", permissionMode: "", root }), null, "empty permissionMode → null");
+  // invalid sessionId → a fresh UUID is generated (never the invalid literal)
+  const gen = newSessionArgs({ profile: "task-worker", permissionMode: "bypassPermissions", sessionId: "not-a-uuid", root });
+  assert.ok(gen, "invalid id → still spawns (fresh id)");
+  assert.notEqual(gen.sessionId, "not-a-uuid", "invalid literal is replaced by a generated UUID");
+  assert.ok(isValidSessionId(gen.sessionId), "generated id is a valid UUID");
+});
+
+test("AC2 (falsifiable) — resumeSessionArgs resumes the SAME session via --resume (a fresh id ⇒ context lost ⇒ 假)", () => {
+  const root = "/ws";
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  const spec = resumeSessionArgs({ sessionId: sid, profile: "task-worker", permissionMode: "bypassPermissions", root });
+  assert.ok(spec, "valid input → spec");
+  assert.equal(spec.sessionId, sid, "the SAME session id is resumed");
+  assert.ok(spec.argv.includes("--resume"), "--resume present (⛔ not --session-id ⇒ 假)");
+  assert.ok(spec.argv.includes(sid), "resumes the exact id — not a fresh one");
+  assert.ok(!spec.argv.includes("--session-id"), "resume path does NOT mint a new session id (context preserved only by resuming the same id)");
+  assert.ok(spec.argv.includes("-p"), "headless");
+
+  // non-UUID sessionId → null (traversal-proof, same house rule as /session/<id>)
+  assert.equal(resumeSessionArgs({ sessionId: "../etc/passwd", profile: "task-worker", permissionMode: "bypassPermissions", root }), null, "traversal id → null");
+  assert.equal(resumeSessionArgs({ sessionId: "not-a-uuid", profile: "task-worker", permissionMode: "bypassPermissions", root }), null, "non-UUID → null");
+  assert.equal(resumeSessionArgs({ sessionId: "", profile: "task-worker", permissionMode: "bypassPermissions", root }), null, "empty id → null");
+  // missing profile/permissionMode → null
+  assert.equal(resumeSessionArgs({ sessionId: sid, profile: "", permissionMode: "bypassPermissions", root }), null, "empty profile → null");
+  assert.equal(resumeSessionArgs({ sessionId: sid, profile: "task-worker", permissionMode: "", root }), null, "empty permissionMode → null");
+});
+
+test("AC3 (integration) — POST /sessions/driver rejects interactive kinds + non-lifecycle verbs, and /new //resume reject invalid input (400)", async () => {
+  const { ws, tasksDir } = makeWorkspace("lifecycle-ac3-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    for (const kind of ["manager", "outer", "inner"]) {
+      const r = await postJson(port, "/sessions/driver", { verb: "stop", kind });
+      assert.equal(r.status, 400, `kind=${kind} → 400 (interactive stop/restart not exposed)`);
+    }
+    const drain = await postJson(port, "/sessions/driver", { verb: "drain", kind: "worker" });
+    assert.equal(drain.status, 400, "drain → 400 (CLI-only)");
+
+    const newNoMode = await postJson(port, "/sessions/new", { profile: "task-worker" });
+    assert.equal(newNoMode.status, 400, "/sessions/new without permissionMode → 400 (⛔ blocker ③: no default)");
+
+    const badResume = await postJson(port, "/sessions/resume", { sessionId: "not-a-uuid", profile: "task-worker", permissionMode: "bypassPermissions" });
+    assert.equal(badResume.status, 400, "/sessions/resume with non-UUID → 400");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1 (falsifiable) — POST /sessions/driver delegates to runDriver and forwards --kind (worker action targets worker, ⛔ 漏 --kind ⇒ 默认 promotion ⇒ 假)", async () => {
+  const { ws, tasksDir } = makeWorkspace("lifecycle-ac1-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    // Mock the supervisor script to echo its argv (⛔ 不真起 driver — 只验证 --kind 透传).
+    const scriptDir = path.join(ws, "plugin", "scripts");
+    fs.mkdirSync(scriptDir, { recursive: true });
+    fs.writeFileSync(path.join(scriptDir, "promotion-driver-launch.sh"), "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\"\n");
+    fs.chmodSync(path.join(scriptDir, "promotion-driver-launch.sh"), 0o755);
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await postJson(port, "/sessions/driver", { verb: "stop", kind: "worker" });
+    assert.equal(r.status, 200, "valid driver action → 200 (delegated, not 400)");
+    const json = JSON.parse(r.body);
+    assert.equal(json.verb, "stop");
+    assert.equal(json.kind, "worker");
+    assert.ok(json.ok, "delegated to runDriver (ok:true)");
+    assert.match(json.stdout, /stop/, "supervisor argv carries the verb");
+    assert.match(json.stdout, /--kind\s+worker/, "supervisor argv carries --kind worker (⛔ 漏 --kind 会默认 promotion ⇒ 假)");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
     fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(ws, { recursive: true, force: true });
   }

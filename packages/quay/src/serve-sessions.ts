@@ -379,7 +379,10 @@ export async function handleDriverLifecycle(req: IncomingMessage, res: ServerRes
     writeJson(res, 400, { ok: false, reason: `invalid driver action (verb ∈ ${WEB_DRIVER_VERBS.join("|")}, kind ∈ ${WEB_DRIVER_KINDS.join("|")})`, verb: body.verb ?? null, kind: body.kind ?? null });
     return;
   }
-  const r = runDriver(spec.verb, spec.kind, [], cfg.workspaceRoot);
+  // Forward --kind into the supervisor argv (runDriver's `rest` carries the user flags verbatim; the
+  // CLI gets --kind from `rest`, the web layer must pass it explicitly). ⛔ omitting it makes the
+  // supervisor default to promotion — a web "worker" action would silently hit the promotion driver.
+  const r = runDriver(spec.verb, spec.kind, ["--kind", spec.kind], cfg.workspaceRoot);
   writeJson(res, 200, { ok: r.ok, verb: spec.verb, kind: spec.kind, stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, reason: r.reason });
 }
 
