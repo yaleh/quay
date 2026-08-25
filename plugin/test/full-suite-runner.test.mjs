@@ -2401,7 +2401,11 @@ test("AC6 — this task cross-annotates the shared stop-dispatch family (gap-red
 
 test("AC1 — while the suite runs, state=running (or early-red) with finishedAt/durationMs null", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-root-"));
-  const { f, dir } = fakeSuite('echo "started"\nsleep 2\necho "# fail 0"\nexit 0');
+  // gap-suite-load-sampler-orphan-process load-hardening: the 5s poll / 2s running window flaked
+  // RED under 16-way contention (runner node bootstrap > 5s ⇒ `poll timeout after 5000ms`). Widen
+  // the running window + poll timeout so "in-flight" is judged on the state file (wall-clock), not
+  // on a runner-bootstrap race. Same shape as the AC2 early-red fixes below.
+  const { f, dir } = fakeSuite('echo "started"\nsleep 10\necho "# fail 0"\nexit 0');
   try {
     const child = runRunner({ root, command: `bash ${f}` });
     // gap-streaming-red-cascade-amplifies-failures-array AC1 — the assertion is "the round is IN
@@ -2413,7 +2417,7 @@ test("AC1 — while the suite runs, state=running (or early-red) with finishedAt
     const inFlight = await poll(() => {
       const s = readState(root);
       return s && (s.state === "running" || s.state === "red") ? s : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 20000 });
     assert.equal(inFlight.runner, "outer");
     assert.equal(inFlight.finishedAt, null, "finishedAt null while the round is in flight");
     assert.equal(inFlight.durationMs, null, "durationMs null while the round is in flight");
