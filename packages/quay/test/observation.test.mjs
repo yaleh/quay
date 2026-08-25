@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readSession } from "../src/observation.ts";
+import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readSession, parseClaudeAgentsJson } from "../src/observation.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
 
 /** Commit helper with a fixed clock (committer date = author date = `t`), per-branch file. */
@@ -848,4 +848,35 @@ test("AC2: renderSessionPage renders structured blocks — tool_use/tool_result 
   const thinkStart = html.indexOf("tx-thinking");
   const thinkEnd = html.indexOf("</details>", thinkStart);
   assert.ok(html.slice(thinkStart, thinkEnd).includes("THINKING-MARKER"), "thinking block carries the thinking text");
+});
+
+// ── gap-webui-session-discovery-claude-agents-json ────────────────────────────────────────────────
+// `claude agents --json` replaces the three-role tmux guessing as the /sessions discovery source. The
+// registry covers interactive AND `-p`/headless sessions equally (SPEC §2.2 更正段); the parser must
+// not fabricate a `status` for a worker that omits it (absence ≠ idle, hard rule ③b).
+
+test("parseClaudeAgentsJson parses a real registry shape: interactive rows carry status, -p worker rows carry status=null", () => {
+  const text = JSON.stringify([
+    { pid: 4190941, cwd: "/home/yale/work/quay", kind: "interactive", startedAt: 1787554133207, sessionId: "b02622c8-4cb7-4c2b-91c3-2a6c67fcc7a1", name: "quay-91", status: "idle" },
+    { pid: 1830917, cwd: "/home/yale/work/quay", kind: "interactive", startedAt: 1787603007803, sessionId: "5a06c41c-4909-4bb4-a7f9-52891dcffb3a", name: "quay-task-worker" },
+  ]);
+  const rows = parseClaudeAgentsJson(text);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].pid, 4190941);
+  assert.equal(rows[0].name, "quay-91");
+  assert.equal(rows[0].sessionId, "b02622c8-4cb7-4c2b-91c3-2a6c67fcc7a1");
+  assert.equal(rows[0].status, "idle");
+  // A `-p`/headless worker omits `status` — must parse as null, NOT a fabricated "idle" (AC1: -p
+  // sessions are registered just like interactive ones; absence is a missing field, not a value).
+  assert.equal(rows[1].name, "quay-task-worker");
+  assert.equal(rows[1].status, null);
+});
+
+test("parseClaudeAgentsJson degrades to [] on malformed / non-array input (never throws)", () => {
+  assert.deepEqual(parseClaudeAgentsJson("not json"), []);
+  assert.deepEqual(parseClaudeAgentsJson(""), []);
+  assert.deepEqual(parseClaudeAgentsJson("{}"), []);
+  assert.deepEqual(parseClaudeAgentsJson("[1, \"x\", null]"), []);
+  // A missing optional field (pid) parses as null, never a fabricated 0.
+  assert.deepEqual(parseClaudeAgentsJson(JSON.stringify([{ sessionId: "b02622c8-4cb7-4c2b-91c3-2a6c67fcc7a1", name: "quay-91" }]))[0].pid, null);
 });

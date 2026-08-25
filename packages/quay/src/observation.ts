@@ -1637,7 +1637,7 @@ export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, nowMs 
 //   system       → resource-gate.sh + process-budget.sh (text output)
 //   manager      → loop-driver-check.sh + session-liveness.sh + observer-registry.conf + ready-pool-check.ts
 //   tests        → .quay/verification-round.jsonl + .quay/full-suite-state.json (the suite-state writer)
-//   sessions     → session-liveness.sh --once + resolved session transcripts
+//   sessions     → claude agents --json (running) + transcript-dir scan (ended) + transcript tails
 //   architecture → git log per packages/* path + git worktree list (filesystem/git facts)
 //   dashboard    → the same sources via the specific views above, plus client.taskList (in the handler)
 // Everything degrades per the header contract: absent → 「未接入/无数据」, unreadable → 「读失败」,
@@ -2502,43 +2502,139 @@ export function readTranscriptTail(transcriptPath: string, maxMsgs = SESSIONS_TR
   }
 }
 
-/** Sessions view: session-liveness rows + best-effort transcript tails per live session. */
+// ── `claude agents --json` discovery (gap-webui-session-discovery-claude-agents-json) ───────────────
+// The official CLI session registry replaces the old three-role tmux-guessing discovery
+// (buildManagerSessionTargets → session-liveness.sh). It lists EVERY running session — interactive
+// AND `-p`/headless alike (SPEC §2.2 更正段) — but only RUNNING ones: ended sessions are absent from
+// the registry (SPEC §2.4) and are discovered separately by scanning the transcript directory.
+
+/** One `claude agents --json` row. `status` (busy/idle) is only present on interactive sessions; a
+ *  `-p`/headless worker omits it — absence is NOT "idle", so it parses as null rather than a
+ *  fabricated value (hard rule ③b). */
+export interface ClaudeAgentRow {
+  pid: number | null;
+  cwd: string | null;
+  kind: string | null;
+  startedAt: number | null;
+  sessionId: string | null;
+  name: string | null;
+  status: string | null;
+}
+
+/** Parse `claude agents --json` stdout (a JSON array). Pure — never throws; a non-array or malformed
+ *  document yields [] (the caller then renders an honest empty state). */
+export function parseClaudeAgentsJson(text: string): ClaudeAgentRow[] {
+  let doc: unknown;
+  try { doc = JSON.parse(String(text)); } catch { return []; }
+  if (!Array.isArray(doc)) return [];
+  const out: ClaudeAgentRow[] = [];
+  for (const el of doc) {
+    if (!el || typeof el !== "object" || Array.isArray(el)) continue;
+    const o = el as Record<string, unknown>;
+    out.push({
+      pid: typeof o.pid === "number" && Number.isFinite(o.pid) ? o.pid : null,
+      cwd: typeof o.cwd === "string" && o.cwd.length > 0 ? o.cwd : null,
+      kind: typeof o.kind === "string" && o.kind.length > 0 ? o.kind : null,
+      startedAt: typeof o.startedAt === "number" && Number.isFinite(o.startedAt) ? o.startedAt : null,
+      sessionId: typeof o.sessionId === "string" && o.sessionId.length > 0 ? o.sessionId : null,
+      name: typeof o.name === "string" && o.name.length > 0 ? o.name : null,
+      status: typeof o.status === "string" && o.status.length > 0 ? o.status : null,
+    });
+  }
+  return out;
+}
+
+/** Spawn `claude agents --json` and return its raw stdout. Never throws — a spawn failure or non-zero
+ *  exit yields { stdout: null, reason } (the caller renders an honest empty state, never a 500). */
+async function runClaudeAgentsJson(root: string): Promise<{ stdout: string | null; reason: string | null }> {
+  const { stdout, exitCode } = await runScriptBounded(["claude", "agents", "--json"], { cwd: root, timeoutMs: 20_000 });
+  if (exitCode === null) return { stdout: null, reason: "claude agents --json 未能运行（spawn 失败或超时被杀）" };
+  if (exitCode !== 0) return { stdout: null, reason: `claude agents --json 退出码 ${exitCode}` };
+  return { stdout, reason: null };
+}
+
+/** Path equality after resolution (trailing-slash-insensitive). Never throws — an un-resolvable path
+ *  returns false rather than propagating. Used to scope the machine-wide `claude agents --json`
+ *  registry down to the served workspace. */
+function samePath(a: string, b: string): boolean {
+  try { return path.resolve(a) === path.resolve(b); } catch { return false; }
+}
+
+/** Max recent-ended sessions surfaced on /sessions. The transcript dir holds hundreds of session
+ *  files; the page shows only the most recent (newest-first), not the whole history. */
+export const SESSIONS_ENDED_MAX = 20;
+
+/** Scan the workspace's transcript dir (`~/.claude/projects/<slug>/*.jsonl`) for sessions NOT in the
+ *  running registry — i.e. ended sessions. Returns { sessionId, mtimeMs } newest-first, bounded to
+ *  SESSIONS_ENDED_MAX. A missing dir yields [] (honest empty, not an error). */
+function scanEndedSessions(root: string, runningIds: ReadonlySet<string>): Array<{ sessionId: string; mtimeMs: number }> {
+  const dir = path.join(os.homedir(), ".claude", "projects", projectSlug(root));
+  let entries: string[];
+  try { entries = fs.readdirSync(dir); } catch { return []; }
+  const ended: Array<{ sessionId: string; mtimeMs: number }> = [];
+  for (const entry of entries) {
+    if (!entry.endsWith(".jsonl")) continue;
+    const sessionId = entry.slice(0, -".jsonl".length);
+    if (runningIds.has(sessionId) || !isValidSessionId(sessionId)) continue;
+    try {
+      ended.push({ sessionId, mtimeMs: fs.statSync(path.join(dir, entry)).mtimeMs });
+    } catch { /* a file that vanished between readdir and stat is skipped */ }
+  }
+  ended.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return ended.slice(0, SESSIONS_ENDED_MAX);
+}
+
+/** Best-effort transcript tail for a session whose transcript path is already known; a missing path
+ *  degrades to an honest empty (the card renders 未接入 rather than a fabricated reading). */
+function transcriptTailFor(tp: string | null): { status: ObservationStatus; reason: string | null; messages: SessionMessage[] | null } {
+  if (tp != null && fs.existsSync(tp)) return readTranscriptTail(tp);
+  return { status: "empty", reason: "transcript 缺失", messages: null };
+}
+
+/** Sessions view: `claude agents --json` (running sessions — interactive + `-p`) + a transcript-dir
+ *  scan for ended sessions (SPEC §3.1: the registry only lists running sessions, so ended ones are
+ *  discovered from their transcript files). Replaces the old three-role tmux-guessing discovery, which
+ *  could see neither `-p`/headless sessions nor ended sessions. */
 export async function readSessions(root: string): Promise<SessionsResult> {
-  const p = resolvePluginScript(SESSION_LIVENESS_REL);
-  if (!p) {
-    return { status: "empty", reason: `${SESSION_LIVENESS_REL} 缺失（未接入）`, sessions: [] };
+  const { stdout, reason } = await runClaudeAgentsJson(root);
+  if (stdout == null) {
+    return { status: "empty", reason, sessions: [] };
   }
-  // Register explicit outer+inner targets (same override the Manager view uses) so the sessions
-  // resolve to layer-named rows (`outer` / `inner`) instead of whatever single default target the
-  // workspace env happens to name — the /sessions page is a three-layer view by design. Fail-closed:
-  // when no session name is derivable, buildManagerSessionTargets returns null and we run with the
-  // env's own targets (preserving pre-existing display).
-  const targets = buildManagerSessionTargets(root);
-  const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000, targets ? { SESSION_TARGETS: targets } : undefined);
-  if (r.stdout == null) {
-    return { status: "empty", reason: r.reason, sessions: [] };
-  }
-  const rows = parseSessionLivenessJson(r.stdout);
-  if (rows.length === 0) {
-    return { status: "empty", reason: "session-liveness 无 SESSION-STATUS 行（无观测目标）", sessions: [] };
-  }
+  const rows = parseClaudeAgentsJson(stdout);
+  // Scope to THIS workspace: the registry is machine-wide (every project's sessions), so keep only
+  // rows whose cwd resolves to the served root — otherwise an unrelated project's sessions would leak
+  // onto this workspace's /sessions page (and a temp test workspace would show real machine sessions).
+  const here = rows.filter((r) => r.cwd != null && r.sessionId != null && samePath(r.cwd, root));
 
   const sessions: SessionDetail[] = [];
-  for (const row of rows) {
-    let transcript: { status: ObservationStatus; reason: string | null; messages: SessionMessage[] | null } =
-      { status: "empty", reason: "未解析 transcript 路径（无 pid）", messages: null };
-    if (row.alive && row.pid != null) {
-      const t = await runScriptBounded(["bash", p, "--resolve-transcript", row.name, root, String(row.pid)], { cwd: root, timeoutMs: 10_000 });
-      const tp = t.stdout.trim().split(/\r?\n/).pop() ?? "";
-      if (tp && fs.existsSync(tp)) transcript = readTranscriptTail(tp);
-      else transcript = { status: "empty", reason: "transcript 路径不可解析", messages: null };
-    }
+  const runningIds = new Set<string>();
+  for (const row of here) {
+    const sessionId = row.sessionId as string;
+    runningIds.add(sessionId);
+    const name = row.name ?? sessionId;
+    const transcript = transcriptTailFor(sessionTranscriptPath(root, sessionId));
     sessions.push({
-      name: row.name,
-      layer: classifySessionLayer(row.name),
-      alive: row.alive,
+      name,
+      layer: classifySessionLayer(name),
+      alive: true,
       pid: row.pid,
-      halted: row.halted,
+      halted: false,
+      transcriptStatus: transcript.status,
+      transcriptReason: transcript.reason,
+      messages: transcript.messages,
+    });
+  }
+
+  // Ended sessions: transcripts in this workspace's project dir that the running registry does not
+  // list. Surfaced newest-first as GONE cards so a session that just ended is still observable.
+  for (const { sessionId } of scanEndedSessions(root, runningIds)) {
+    const transcript = transcriptTailFor(sessionTranscriptPath(root, sessionId));
+    sessions.push({
+      name: sessionId,
+      layer: classifySessionLayer(sessionId),
+      alive: false,
+      pid: null,
+      halted: false,
       transcriptStatus: transcript.status,
       transcriptReason: transcript.reason,
       messages: transcript.messages,
