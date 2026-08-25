@@ -59,4 +59,6 @@ worker             computeLandingState（⛔ 2026-08-23 11:37 之前 exitCode===
 - plugin/test/driver-result.test.mjs（新 test）
 - plugin/test/worker-driver.test.mjs（test）
 - plugin/test/promotion-driver.test.mjs（test）
+- plugin/scripts/capability-catalog.sh（新脚本 driver-result.ts 六表注册）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数 bump）
 - tasks/gap-ac153-core-invariant-single-impl-not-evaluated-vocab.md（自身）
