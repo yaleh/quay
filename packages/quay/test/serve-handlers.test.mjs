@@ -1356,11 +1356,73 @@ test("AC3 (unit) — taskRunsBlock renders a per-attempt view + download link fo
     const recs = readWorkerOutcomeRecords(root).filter((r) => r.task === "gap-runs-1");
     assert.equal(recs.length, 2, "two attempts read back");
     assert.equal(recs[0].session_id, sid, "session_id is parsed from the carrier");
-    const htmlBlock = taskRunsBlock(root, "gap-runs-1");
+    // `liveWorkers: []` keeps this outcome-carrier test hermetic: the fixture root has a
+    // worker-outcome.jsonl (⇒ workerDriverActive=true), so without the seam the block would scan
+    // the REAL /proc and depend on the host's live processes.
+    const htmlBlock = taskRunsBlock(root, "gap-runs-1", { liveWorkers: [] });
     assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132"/, "Runs block links the view for the attempt with a session_id");
     assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132\/download"/, "Runs block links the raw download for the attempt");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 (unit) — taskRunsBlock shows a 「进行中」 row + session link for a live worker (no END record yet)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-live-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "runs-home-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  // No worker-outcome.jsonl — a first-dispatched worker has no END record yet (the exact blind spot).
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  fs.mkdirSync(path.join(home, ".claude", "sessions"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".claude", "sessions", "12345.json"), JSON.stringify({ sessionId: sid }));
+  try {
+    const htmlBlock = taskRunsBlock(root, "gap-live-1", {
+      liveWorkers: [{ taskId: "gap-live-1", pid: "12345", startedAtMs: Date.parse("2026-08-25T00:00:00Z") }],
+      sessionHome: home,
+    });
+    assert.match(htmlBlock, /进行中/, "live worker renders a 「进行中」 row");
+    assert.match(htmlBlock, />12345</, "live worker pid is shown");
+    assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132"/, "live worker session id is linked (reuses liveSessionIdForPid)");
+    assert.match(htmlBlock, /worker-gap-live-1/, "live worker run id is the worker-<task> form");
+    assert.doesNotMatch(htmlBlock, /无 worker 运行记录/, "an in-flight row suppresses the empty-store message");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("AC2 (unit) — a done task with no live worker shows NO 「进行中」 row (no ghost)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-done-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  fs.writeFileSync(path.join(q, "worker-outcome.jsonl"), [
+    JSON.stringify({ ts: "2026-08-25T00:00:00Z", task: "gap-runs-1", final_state: "completed", exit_code: 0, session_id: null }),
+  ].join("\n") + "\n");
+  try {
+    const htmlBlock = taskRunsBlock(root, "gap-runs-1", { liveWorkers: [] });
+    assert.doesNotMatch(htmlBlock, /进行中/, "no live worker ⇒ no 「进行中」 ghost row");
+    assert.match(htmlBlock, /completed/, "historical outcome row still renders");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 (unit) — a live worker with no/malformed session record renders 「—」 (honest, no dead link)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-nolink-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "runs-home2-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  try {
+    const htmlBlock = taskRunsBlock(root, "gap-live-2", {
+      liveWorkers: [{ taskId: "gap-live-2", pid: "99999", startedAtMs: null }],
+      sessionHome: home, // no sessions dir ⇒ liveSessionIdForPid returns null (honest, not a dead link)
+    });
+    assert.match(htmlBlock, /进行中/, "live worker row still present");
+    assert.doesNotMatch(htmlBlock, /href="\/session\//, "no session record ⇒ no dead transcript link");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

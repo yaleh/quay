@@ -24,9 +24,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，在飞可见）：`/task/<id>` 对一个正在跑的任务（worker 活）显示「进行中」行（含 session 链接）；（⛔ 仍只显示「无 worker 运行记录」⇒ 假）。
-- [ ] AC2（能取假，负控制）：一个 done 任务（无活 worker）不显示「进行中」行（只显示历史 worker-outcome 行，无幻影）；（⛔ 出现幻影「进行中」⇒ 假）。
-- [ ] AC3（能取假，链接可点）：该 session 链接复用 `liveSessionIdForPid`，点开能看到 transcript（与 /live 一致）；（⛔ 链接死/不可点 ⇒ 假）。
+- [x] AC1（能取假，在飞可见）：`/task/<id>` 对一个正在跑的任务（worker 活）显示「进行中」行（含 session 链接）；（⛔ 仍只显示「无 worker 运行记录」⇒ 假）。
+- [x] AC2（能取假，负控制）：一个 done 任务（无活 worker）不显示「进行中」行（只显示历史 worker-outcome 行，无幻影）；（⛔ 出现幻影「进行中」⇒ 假）。
+- [x] AC3（能取假，链接可点）：该 session 链接复用 `liveSessionIdForPid`，点开能看到 transcript（与 /live 一致）；（⛔ 链接死/不可点 ⇒ 假）。
 
 ## Definition of Done
 
