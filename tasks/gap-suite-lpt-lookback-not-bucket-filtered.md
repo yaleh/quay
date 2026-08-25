@@ -1,6 +1,6 @@
 ---
 id: gap-suite-lpt-lookback-not-bucket-filtered
-title: LPT 滚动均值不按 bucket 过滤——P 桶轮次 lookback 被 M 桶占满 ⇒ P-only 文件查不到历史值被 `?? 0` 排到末尾（违反 LPT，生产 #595/#599 实证）
+title: "LPT 滚动均值不按 bucket 过滤——P 桶轮次 lookback 被 M 桶占满 ⇒ P-only 文件查不到历史值被 `?? 0` 排到末尾（违反 LPT，生产 #595/#599 实证）"
 status: ready
 labels:
   - gap
