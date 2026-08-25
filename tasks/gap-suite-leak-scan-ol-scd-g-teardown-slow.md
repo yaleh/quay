@@ -2,7 +2,7 @@
 id: gap-suite-leak-scan-ol-scd-g-teardown-slow
 title: leak-scan 越界 flake：ol-scd-g teardown 超 10000ms reap-wait 窗口 ⇒ 4 轮假红（慢
   teardown 竞态，非永久泄漏）
-status: done
+status: ready
 labels:
   - gap
   - defect
