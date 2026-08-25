@@ -23,6 +23,8 @@ import { handleTests, handleTestsFile } from "./serve-tests.ts";
 import { handleSessions, handleSession, handleSessionDownload, handleDriverLifecycle, handleNewSession, handleResumeSession } from "./serve-sessions.ts";
 import { handleArchitecture } from "./serve-architecture.ts";
 import { handleDashboard } from "./serve-dashboard.ts";
+import { handleSend } from "./serve-send.ts";
+import { handleNeedsHuman } from "./serve-needs-human.ts";
 
 // Re-export the full public surface (shared render helpers + domain render/handler functions) so
 // serve.ts's named re-exports and existing test imports remain unchanged.
@@ -39,6 +41,8 @@ export * from "./serve-tests.ts";
 export * from "./serve-sessions.ts";
 export * from "./serve-architecture.ts";
 export * from "./serve-dashboard.ts";
+export * from "./serve-send.ts";
+export * from "./serve-needs-human.ts";
 
 // ── Facade dispatcher (M99 pattern: single entry point keeps startServer outDegree low) ──
 
@@ -54,7 +58,9 @@ export async function handleAllRoutes(
   // gap-webui-session-lifecycle: the three lifecycle POST routes (headless driver start/stop/restart,
   // new -p session, --resume restart). Dispatched on METHOD, before the GET matchers below (a GET on
   // these paths falls through to the /sessions page or 404). Interactive manager/outer/inner
-  // stop/restart is deliberately NOT routed (AC3).
+  // stop/restart is deliberately NOT routed (AC3). This block intercepts ONLY the three lifecycle
+  // paths — any other POST (e.g. /send) falls through to the path matchers below (⛔ a catch-all
+  // 404 here would shadow the /send route and break message delivery).
   if (req.method === "POST") {
     if (url.pathname === "/sessions/driver") {
       await handleDriverLifecycle(req, res, cfg);
@@ -68,9 +74,6 @@ export async function handleAllRoutes(
       await handleResumeSession(req, res, cfg);
       return;
     }
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("not found");
-    return;
   }
 
   // gap-webui-root-should-show-dashboard: `/` is the design's landing page → dashboard.
@@ -147,6 +150,15 @@ export async function handleAllRoutes(
     return;
   }
 
+  // gap-webui-message-delivery-entry — POST /send delivers a message to a local session and renders
+  // the honest four-state result (delivered/held/expired/error). The sessionId is in the form body
+  // (a UUID look-up key), resolved through the same /session addressing path; the handler reuses the
+  // shared send-to-session socket protocol (never a second copy of the frame logic).
+  if (url.pathname === "/send" && req.method === "POST") {
+    await handleSend(req, res, cfg);
+    return;
+  }
+
   if (url.pathname === "/architecture") {
     await handleArchitecture(req, res, cfg);
     return;
@@ -177,6 +189,13 @@ export async function handleAllRoutes(
   // checker (observation.ts's readBoardLanding) so per-task agreement holds by construction.
   if (url.pathname === "/board") {
     await handleBoard(req, res, url, client, manifest, cfg);
+    return;
+  }
+
+  // gap-ac146-human-interface-explicit-owner: the explicit human owner interface for needs-human
+  // tasks — joins 当前待办 (store status) + 升级台账 (.quay/promotion-outcome.jsonl), no transcript.
+  if (url.pathname === "/needs-human") {
+    await handleNeedsHuman(req, res, client, manifest, cfg);
     return;
   }
 

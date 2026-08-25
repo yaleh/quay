@@ -572,7 +572,7 @@ test("AC3 CLI — fresh full-shape heartbeat exits 0 (ALIVE)", () => {
   const root = makeRootWithHeartbeat(fullHeartbeat());
   try {
     // --in-flight '' (measured zero set) keeps the END invariant judgeable so the fully-evaluated
-    // verdict is ALIVE; WITHOUT it the checker reports NOT-EVALUATED (AC1, exit 0).
+    // verdict is ALIVE; WITHOUT it the checker reports NOT-EVALUATED (AC1, exit 3).
     const r = runCli(root, ["--in-flight", ""]);
     assert.equal(r.status, 0, `fresh full-shape heartbeat must exit 0:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stdout, /ALIVE/, "stdout must say ALIVE");
@@ -672,7 +672,7 @@ test("AC2 CLI --json — a full-shape fresh heartbeat is ALIVE with fieldContrac
   const root = makeRootWithHeartbeat(fullHeartbeat());
   try {
     // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
-    // NOT-EVALUATED (AC1) — still exit 0, but the verdict text differs.
+    // NOT-EVALUATED (AC1) — exit 3, but the verdict text differs.
     const r = runCli(root, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 0, `full-shape heartbeat must exit 0:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
@@ -835,19 +835,20 @@ test("AC53 判据① CLI --json — NEGATIVE CONTROL: machine says no blocking r
 // ── NOT-EVALUATED end-invariant (gap-inner-heartbeat-check-not-evaluated-when-no-inflight) ───────────
 // AC1 (hard rule 3b): the checker run WITHOUT --in-flight cannot judge the touches-overlap-in-flight
 // step ⇒ the END invariant is UNEVALUABLE ⇒ it must report NOT-EVALUATED (an INDEPENDENT value carrying
-// evaluated:false, non-escalating exit 0) — NOT the constant false DEAD. DEAD stays reserved for real
+// evaluated:false, non-escalating exit 3 — the unified NOT-EVALUATED exit code,
+// gap-not-evaluated-harness-third-state) — NOT the constant false DEAD. DEAD stays reserved for real
 // violations (in-flight set provided AND the four-part invariant holds).
 
 test("AC2 CLI --json — NO --in-flight + healthy inner (dispatchable work visible to an empty in-flight view) ⇒ NOT-EVALUATED, NOT DEAD", () => {
   // The falsifiable shape (AC2 能取假): a workspace with a REAL dispatchable ready task. Under the old
   // default-empty in-flight, the machine refill said should_refill=true + no_refill_reason=null ⇒ the
   // four-part invariant "held" ⇒ the checker reported constant DEAD. Now, without --in-flight, the
-  // touches-overlap-in-flight step cannot be judged ⇒ NOT-EVALUATED (exit 0), never DEAD.
+  // touches-overlap-in-flight step cannot be judged ⇒ NOT-EVALUATED (exit 3), never DEAD.
   const root = makeDispatchableWorkspace("iwuh-ne1-");
   try {
     writeHeartbeatTo(root, fullHeartbeat());
     const r = runCli(root, ["--json"]);
-    assert.equal(r.status, 0, `no-in-flight healthy inner must NOT escalate:\n${r.stdout}\n${r.stderr}`);
+    assert.equal(r.status, 3, `no-in-flight healthy inner must exit 3 (NOT-EVALUATED), not escalate:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "NOT-EVALUATED", `verdict must be NOT-EVALUATED, got ${out.verdict}`);
     assert.equal(out.status, "end-invariant-not-evaluated");

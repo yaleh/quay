@@ -50,7 +50,9 @@
 //           the shared checkout's .quay/fan-in-merge-lock-events.jsonl. The mechanism-landed boundary
 //           (resolveBoundaryEpoch — the commit that ADDED the writer) is reported for context.
 //
-// Exit codes: 0 = PASS (or NOT-EVALUATED — read `evaluated`), 1 = RED, 2 = usage/environment error.
+// Exit codes: 0 = PASS, 1 = RED, 3 = NOT-EVALUATED (read `evaluated` — nothing to judge, never
+//             conflated with green; the unified exit-3 third state,
+//             gap-not-evaluated-harness-third-state), 2 = usage/environment error.
 //
 // Usage:
 //   node --experimental-strip-types plugin/scripts/per-task-suite-record-check.ts
@@ -408,11 +410,12 @@ Usage:
   --help               this help
 
 Exit codes:
-  0  PASS or NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green)
+  0  PASS
   1  RED — a malformed record / an expected per-task suite run with no record / an empty carrier with
      per-task suite(s) after the enforcement boundary / an ff with no doc-check trace
      (判据2 / 判据3 / AC72 判据3 conditional / AC63 判据2)
-  2  usage / environment error`;
+  2  usage / environment error
+  3  NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green)`;
 
 export function main(argv) {
   const args = argv.slice(2);
@@ -568,6 +571,7 @@ export function main(argv) {
       console.log(`  [${c.check}] ${c.ok ? "ok" : "RED"}${c.evaluated ? "" : " (NOT-EVALUATED)"} — ${c.reason}${detail}`);
     }
   }
+  if (!anyEvaluated) return 3; // NOT-EVALUATED (hard rule 3b) — the unified exit-3 third state
   return ok ? 0 : 1;
 }
 

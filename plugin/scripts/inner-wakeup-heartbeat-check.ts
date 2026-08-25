@@ -21,8 +21,9 @@
 //   node --experimental-strip-types inner-wakeup-heartbeat-check.ts [--root <dir>] \
 //        [--max-age-secs <N>] [--in-flight <id1,id2>] [--json]
 //
-// Exit: 0 = ALIVE (heartbeat fresh) / NOT-EVALUATED (end-invariant unevaluable without --in-flight) ·
-//       1 = DEAD (missing / malformed / stale / contracts / invariant-violated) · 2 = usage error.
+// Exit: 0 = ALIVE (heartbeat fresh) · 1 = DEAD (missing / malformed / stale / contracts /
+//       invariant-violated) · 3 = NOT-EVALUATED (end-invariant unevaluable without --in-flight —
+//       the unified exit-3 third state, gap-not-evaluated-harness-third-state) · 2 = usage error.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -219,7 +220,8 @@ export const MACHINE_UNVERIFIABLE_REASON = "end-invariant-unverifiable";
 /** Reason string when the checker is run WITHOUT --in-flight (no in-flight set provided) — the
  *  touches-overlap-in-flight step cannot be judged ⇒ the END invariant is UNEVALUABLE (hard rule 3b:
  *  读不懂 ≠ 合格, ≠ 不合格). The verdict is NOT-EVALUATED — an INDEPENDENT value carrying
- *  `evaluated:false` and a NON-escalating exit 0 — NEVER the DEAD verdict. DEAD stays reserved for
+ *  `evaluated:false` and a NON-escalating exit 3 (the unified NOT-EVALUATED exit code,
+ *  gap-not-evaluated-harness-third-state) — NEVER the DEAD verdict. DEAD stays reserved for
  *  real violations (in-flight set provided AND the four-part invariant actually holds). */
 export const END_INVARIANT_NOT_EVALUATED_REASON = "end-invariant-not-evaluated-no-inflight";
 
@@ -663,7 +665,7 @@ ScheduleWakeup via plugin/scripts/inner-wakeup-heartbeat.ts) and judges:
       (recorded_no_refill_reason). Machine unverifiable ⇒ "结束不变式无法验证" + exit 1 (fail-closed).
       WITHOUT --in-flight the touches-overlap-in-flight step cannot be judged ⇒ the invariant is
       UNEVALUABLE ⇒ the checker reports NOT-EVALUATED (verdict "NOT-EVALUATED", evaluated:false,
-      exit 0) — NEVER a constant false DEAD (hard rule 3b: 读不懂 ≠ 合格, ≠ 不合格).
+      exit 3) — NEVER a constant false DEAD (hard rule 3b: 读不懂 ≠ 合格, ≠ 不合格).
   (e) I1 read-product criterion (tasks/gap-inner-assessment-steps-no-product-reader) — the dispatch-
       evaluation steps all leave products: heartbeat jsonl ts + slot-refill call record +
       ready-pool call record (checker-cost.jsonl ${CHECKER_COST_FILE} rows). A STALE ready-pool or
@@ -678,7 +680,7 @@ Usage:
   --in-flight <id1,id2>  AC53: the session's in-flight task ids for the fresh slot-refill re-run.
                          Outer may not know inner's set — ABSENT means the touches-overlap-in-flight
                          step cannot be judged ⇒ the END invariant is NOT-EVALUATED (verdict
-                         "NOT-EVALUATED", evaluated:false, exit 0 — never a constant false DEAD).
+                         "NOT-EVALUATED", evaluated:false, exit 3 — never a constant false DEAD).
                          Provide it (even --in-flight '' = a MEASURED zero) to judge DEAD/ALIVE.
   --running <id1,id2>  AC53-gate 判据1: the NARROW currently-RUNNING task-subagent set the gate observed
                          this round. Consumer B (slots_free / should_refill) counts THIS; an empty value
@@ -688,9 +690,9 @@ Usage:
                          always stays on the wide in-flight view.
   --json               JSON output (default human-readable)
 
-Exit: 0 ALIVE / NOT-EVALUATED (end-invariant unevaluable without --in-flight) · 1 DEAD (missing /
-malformed / stale / assessment-steps-stale / fields-missing / dispatch-state-missing /
-end-invariant-unverifiable / invariant-violated) · 2 usage error`);
+Exit: 0 ALIVE · 1 DEAD (missing / malformed / stale / assessment-steps-stale / fields-missing /
+dispatch-state-missing / end-invariant-unverifiable / invariant-violated) ·
+3 NOT-EVALUATED (end-invariant unevaluable without --in-flight) · 2 usage error`);
 }
 
 export function main(argv) {
@@ -804,7 +806,7 @@ export function main(argv) {
         // --in-flight the touches-overlap-in-flight step cannot be judged — the empty-in-flight
         // machine view is exactly the computation that produced the constant false DEAD. The invariant
         // is then UNEVALUABLE ⇒ the checker reports NOT-EVALUATED (independent value, evaluated:false,
-        // exit 0), NEVER the DEAD verdict. DEAD stays reserved for real violations (in-flight set
+        // exit 3), NEVER the DEAD verdict. DEAD stays reserved for real violations (in-flight set
         // provided AND the four-part invariant holds). runMachineSlotRefill is NOT invoked in the
         // unevaluable branch — re-running it against an empty in-flight set is precisely the misleading
         // shape we refuse to judge.
@@ -974,6 +976,7 @@ export function main(argv) {
       console.log(`${base} — ${filePath} MALFORMED (no valid ts) ⇒ inner 兜底心跳断`);
     }
   }
+  if (v.verdict === "NOT-EVALUATED") return 3; // NOT-EVALUATED — the unified exit-3 third state
   return v.alive ? 0 : 1;
 }
 

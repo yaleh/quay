@@ -1,22 +1,24 @@
 // cli/driver.ts — `quay driver <start|stop|drain|status|restart> --kind <promotion|worker>` handler.
 // (tasks/gap-ac139-unified-driver-subcommand)
 //
-// AC139: the two drivers' launch surface converges onto ONE `quay` subcommand that delegates to a
-// single generalized supervisor (plugin/scripts/promotion-driver-launch.sh). The supervisor itself
-// owns the respawn loop and the per-kind registry table; this CLI handler is a THIN layer (same
-// shape as cli/manager.ts's spawnSync delegate) that:
+// AC139: the two drivers' launch surface converges onto ONE `quay` subcommand. AC151 (gap-ac151-
+// two-level-driver-layer-landing) ports the supervisor into TS: the single generalized supervisor
+// that USED to live in plugin/scripts/promotion-driver-launch.sh (bash) now lives in
+// plugin/scripts/driver-runtime.ts (Layer 0 kernel — respawn loop + per-kind registry table +
+// status/liveness/start/stop/drain). This CLI handler is a THIN dispatch layer (same shape as
+// cli/manager.ts's delegate) that:
 //   - validates the verb + --kind
-//   - resolves the carrier/entry path from the WORKSPACE ROOT (AC139-4, see below)
+//   - resolves the kernel path from the WORKSPACE ROOT (AC139-4, see below)
 //   - rejects a worktree root (AC139-4)
-//   - spawnSync's the supervisor script with the same argv
+//   - spawns the TS kernel (node --experimental-strip-types driver-runtime.ts) with the same argv
 //
 // ⛔ AC139-4 (承载路径显式从 workspace root 解析, 拒绝 worktree): this is NOT the manager.ts
 //   import.meta.url walk-up. That walk-up finds the *worktree copy* of plugin/scripts when the CLI
 //   is invoked from a worktree — the exact 2026-08-23 carrier-death cause (resident supervisor
-//   hanging on a short-lived worktree). Here the launch-script path is resolved from the workspace
-//   root (discovered via .quay/config.yml or --root), and a worktree root is REJECTED — not
-//   relocated, not silently started (relocation is the supervisor script's own second-layer
-//   defense for direct script invocation; the CLI entry is the first layer).
+//   hanging on a short-lived worktree). Here the kernel path is resolved from the workspace root
+//   (discovered via .quay/config.yml or --root), and a worktree root is REJECTED — not relocated,
+//   not silently started (relocation is the kernel's own second-layer defense for direct kernel
+//   invocation; the CLI entry is the first layer).
 
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -26,7 +28,7 @@ import type { CliCtx } from "./context.ts";
 
 const VERBS = ["start", "stop", "drain", "status", "restart"];
 const KINDS = ["promotion", "worker"];
-const LAUNCH_SCRIPT_REL = path.join("plugin", "scripts", "promotion-driver-launch.sh");
+const DRIVER_RUNTIME_REL = path.join("plugin", "scripts", "driver-runtime.ts");
 
 /** Resolve the workspace root from `--root` (walk-up) or the process cwd; null when no config. */
 function resolveRoot(rootFlag: string | undefined): string | null {
@@ -98,9 +100,9 @@ carried from the workspace root (main checkout), not a short-lived worktree.
 
 /** Structured result of `runDriver` — the shared core behind both the CLI and the web surface. */
 export interface DriverRunResult {
-  /** true = the command was delegated to the supervisor script (spawn succeeded). */
+  /** true = the command was delegated to the supervisor kernel (spawn succeeded). */
   ok: boolean;
-  /** Human-readable failure reason (validation / root / worktree / script-missing), null when ok. */
+  /** Human-readable failure reason (validation / root / worktree / kernel-missing), null when ok. */
   reason: string | null;
   stdout: string;
   stderr: string;
@@ -111,8 +113,8 @@ export interface DriverRunResult {
 /**
  * gap-webui-session-lifecycle AC1: the web surface exposes headless driver start/stop/restart by
  * REUSING `quay driver` — this pure function is that shared core. It validates verb+kind, resolves
- * the workspace root, rejects a worktree root (AC139-4), resolves the launch script, and
- * spawnSync's the supervisor — returning a structured result (⛔ never writes to process globals,
+ * the workspace root, rejects a worktree root (AC139-4), resolves the TS kernel path, and
+ * spawnSync's the supervisor kernel — returning a structured result (⛔ never writes to process globals,
  * so the web handler can call it in-process without coupling to stdout/exitCode). Both the CLI
  * (handleDriver) and the web handler consume this ONE implementation (⛔ reimplementing the driver
  * lifecycle in the web layer would be fake reuse).
@@ -158,15 +160,16 @@ export function runDriver(
     };
   }
 
-  const script = path.join(root, LAUNCH_SCRIPT_REL);
-  if (!fsSyncExists(script)) {
-    return { ok: false, reason: `quay driver: launch script not found at ${script}`, stdout: "", stderr: "", exitCode: 1 };
+  const kernel = path.join(root, DRIVER_RUNTIME_REL);
+  if (!fsSyncExists(kernel)) {
+    return { ok: false, reason: `quay driver: driver runtime kernel not found at ${kernel}`, stdout: "", stderr: "", exitCode: 1 };
   }
 
   // Forward the user's argv verbatim (rest already carries --kind/--root/--json/…), then pin
-  // --root to the resolved workspace root (last-wins in the script's parser) so the script runs
-  // against the same root this handler resolved — never a stale/missing one.
+  // --root to the resolved workspace root (last-wins in the kernel's parser) so the kernel runs
+  // against the same root this handler resolved — never a stale/missing one. AC151: the supervisor
+  // is TS now — spawn the kernel with `node --experimental-strip-types` (⛔ no more bash .sh).
   const args = [verb, ...rest, "--root", root];
-  const r = spawnSync("bash", [script, ...args], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--experimental-strip-types", kernel, ...args], { encoding: "utf8" });
   return { ok: true, reason: null, stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
 }

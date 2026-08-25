@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { readSessions, readSession, sessionTranscriptPath, isValidSessionId, SESSION_LAYERS, type SessionsResult, type SessionDetail, type SessionViewResult, type TranscriptBlock } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote } from "./serve-render.ts";
 import { runDriver } from "./cli/driver.ts";
+import { renderSendForm } from "./serve-send.ts";
 
 // ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -139,6 +140,7 @@ export function renderSessionPage(view: SessionViewResult): string {
       <p class="meta"><a href="/sessions">← 返回 Sessions</a> · 数据源：<code>~/.claude/projects/&lt;slug&gt;/&lt;sessionId&gt;.jsonl</code>（transcript 尾部，非实时）</p>
       ${obsNote(view.status, view.reason)}
       ${turnsHtml}
+      ${renderSendForm(view.sessionId)}
     </main></body></html>`;
 }
 

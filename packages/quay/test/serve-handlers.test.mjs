@@ -23,6 +23,7 @@ import { startServer } from "../src/serve.ts";
 import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
+import { sendSessionFrames, deliveryStateFor, classifyReceipt, extractDeliverySettings, deliverySettingsFromArgv, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -1422,11 +1423,10 @@ test("AC1 (falsifiable) — POST /sessions/driver delegates to runDriver and for
   const cwd0 = process.cwd();
   let server;
   try {
-    // Mock the supervisor script to echo its argv (⛔ 不真起 driver — 只验证 --kind 透传).
+    // Mock the supervisor kernel to echo its argv (⛔ 不真起 driver — 只验证 --kind 透传).
     const scriptDir = path.join(ws, "plugin", "scripts");
     fs.mkdirSync(scriptDir, { recursive: true });
-    fs.writeFileSync(path.join(scriptDir, "promotion-driver-launch.sh"), "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\"\n");
-    fs.chmodSync(path.join(scriptDir, "promotion-driver-launch.sh"), 0o755);
+    fs.writeFileSync(path.join(scriptDir, "driver-runtime.ts"), "process.stdout.write(process.argv.slice(2).join(' '));\n");
 
     const port = await freePort();
     process.chdir(ws);
@@ -1440,6 +1440,220 @@ test("AC1 (falsifiable) — POST /sessions/driver delegates to runDriver and for
     assert.ok(json.ok, "delegated to runDriver (ok:true)");
     assert.match(json.stdout, /stop/, "supervisor argv carries the verb");
     assert.match(json.stdout, /--kind\s+worker/, "supervisor argv carries --kind worker (⛔ 漏 --kind 会默认 promotion ⇒ 假)");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-webui-message-delivery-entry — /send 消息投递入口。AC1（共享实现）：web 入口与
+// plugin/scripts/send-to-session.ts 共用 packages/quay/src/serve-send.ts 的 sendSessionFrames（⛔
+// 两份实现 ⇒ 假）。AC2（真实状态）：投递四态 delivered/held/expired/error，held→expired 可观测（⛔
+// 只显示 success:true 而无 held/expired 态 ⇒ 假）。决定变量 = 接收方 settings（§10.1），非 socket
+// 的 fire-and-forget「写成功」。
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+const SEND_SID = "066a1382-fde0-410b-bee1-78a4b5886132";
+const pluginScriptPath = path.join(__dirname, "..", "..", "..", "plugin", "scripts", "send-to-session.ts");
+
+/** Spin up a real Unix-socket server, run `fn(sockPath)`, capture every byte the client wrote. */
+function captureSocketFrames(fn) {
+  return new Promise((resolve, reject) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "send-sock-"));
+    const sockPath = path.join(dir, "s.sock");
+    const chunks = [];
+    const server = net.createServer((socket) => {
+      socket.on("data", (c) => chunks.push(c));
+    });
+    server.listen(sockPath, async () => {
+      try {
+        const result = await fn(sockPath);
+        await new Promise((r) => setTimeout(r, 50)); // drain any buffered frame
+        await new Promise((r) => server.close(r));
+        resolve({ result, data: Buffer.concat(chunks).toString("utf8"), dir });
+      } catch (e) {
+        server.close(() => reject(e));
+      }
+    });
+  });
+}
+
+test("AC1 (shared protocol) — sendSessionFrames writes the auth frame then the user frame (real socket, exact wire format)", async () => {
+  const { result, data, dir } = await captureSocketFrames((sockPath) =>
+    sendSessionFrames({ sockPath, token: "fake-token", text: "hello", fromName: WEB_SEND_FROM_NAME })
+  );
+  try {
+    assert.equal(result.ok, true, "connect+write succeeds against a real socket");
+    const lines = data.split("\n").filter((l) => l.trim());
+    const auth = JSON.parse(lines[0]);
+    const user = JSON.parse(lines[1]);
+    assert.equal(auth.type, "auth", "first frame is the auth frame");
+    assert.equal(auth.token, "fake-token", "auth frame carries the token");
+    assert.equal(user.type, "user", "second frame is the user frame");
+    assert.equal(user.message.role, "user", "user frame role is user");
+    assert.match(user.message.content, /cross-session-message/, "message is wrapped in a cross-session-message");
+    assert.match(user.message.content, /from-name="quay-web"/, "web injects from-name=quay-web");
+    assert.match(user.message.content, /from-mode="bypass"/, "from-mode=bypass is self-asserted (SPEC §7.3)");
+    assert.match(user.message.content, /hello/, "the message text is inside the frame");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 (no two copies) — send-to-session.ts imports the shared module instead of reimplementing the socket", () => {
+  const src = fs.readFileSync(pluginScriptPath, "utf8");
+  assert.doesNotMatch(src, /net\.createConnection/, "the plugin script no longer opens its own socket (logic extracted)");
+  assert.match(src, /import\("\.\.\/\.\.\/packages\/quay\/src\/serve-send\.ts"\)/, "the plugin script imports the shared serve-send.ts module");
+});
+
+test("AC2 (falsifiable) — deliveryStateFor maps recipient settings to delivered/held (not a hardcoded success)", () => {
+  assert.equal(deliveryStateFor({ defaultMode: "bypassPermissions", crossSessionInbound: null }), "delivered", "defaultMode=bypassPermissions ⇒ 直通");
+  assert.equal(deliveryStateFor({ defaultMode: null, crossSessionInbound: "accept" }), "delivered", "crossSessionInbound=accept ⇒ 直通");
+  assert.equal(deliveryStateFor({ defaultMode: null, crossSessionInbound: null }), "held", "两者皆无 ⇒ held（能取假：≠ delivered）");
+  assert.equal(deliveryStateFor({ defaultMode: "manual", crossSessionInbound: "reject" }), "held", "非直通值 ⇒ held");
+});
+
+test("AC2 (falsifiable) — extractDeliverySettings parses the delivery-relevant pair, malformed ⇒ null", () => {
+  const s = extractDeliverySettings('{"permissions":{"defaultMode":"bypassPermissions"},"crossSessionInbound":"accept"}');
+  assert.deepEqual(s, { defaultMode: "bypassPermissions", crossSessionInbound: "accept" }, "both fields extracted");
+  assert.deepEqual(extractDeliverySettings('{"permissions":{}}'), { defaultMode: null, crossSessionInbound: null }, "absent fields ⇒ nulls (not fabricated)");
+  assert.equal(extractDeliverySettings("not json"), null, "malformed ⇒ null (读不懂 ≠ 合格)");
+});
+
+test("AC2 (falsifiable) — deliverySettingsFromArgv reads --settings / --dangerously-skip-permissions / global fallback", () => {
+  const read = (p) => (p === "/tmp/s.json" ? '{"permissions":{"defaultMode":"bypassPermissions"}}' : null);
+  assert.deepEqual(deliverySettingsFromArgv(["--dangerously-skip-permissions"], read, "/home"), { defaultMode: "bypassPermissions", crossSessionInbound: null }, "--dangerously-skip-permissions ⇒ bypass");
+  assert.deepEqual(deliverySettingsFromArgv(["--settings", "/tmp/s.json"], read, "/home"), { defaultMode: "bypassPermissions", crossSessionInbound: null }, "--settings <path> is read");
+  assert.deepEqual(deliverySettingsFromArgv(["--settings", "/tmp/missing.json"], read, "/home"), null, "unreadable --settings ⇒ null");
+  assert.deepEqual(deliverySettingsFromArgv([], read, "/home"), null, "no flags, no global settings ⇒ null");
+});
+
+test("gap-send-message-held-inline-settings-json — deliverySettingsFromArgv parses inline --settings JSON directly (not as a file path)", () => {
+  // AC1: `--settings <inline JSON>` (with defaultMode=bypassPermissions) is parsed directly — a
+  // readSettingsFile that returns null for EVERY path (i.e. any file-path read ENOENTs) must still
+  // yield bypassPermissions, proving the JSON never went through the file-path branch.
+  const inline = '{"permissions":{"defaultMode":"bypassPermissions"},"crossSessionInbound":"accept"}';
+  const readCalls = [];
+  const readNever = (p) => { readCalls.push(p); return null; };
+  assert.deepEqual(
+    deliverySettingsFromArgv(["--settings", inline], readNever, "/home"),
+    { defaultMode: "bypassPermissions", crossSessionInbound: "accept" },
+    "inline JSON parsed directly ⇒ bypass + accept (⛔ 仍当路径读 ENOENT ⇒ 假)"
+  );
+  assert.equal(readCalls.length, 0, "readSettingsFile is never called for the inline-JSON form (the file-path branch is bypassed)");
+
+  // AC3 negative control: a REAL file path still goes through readSettingsFile (no regression).
+  const readFile = (p) => (p === "/tmp/s.json" ? '{"permissions":{"defaultMode":"bypassPermissions"}}' : null);
+  assert.deepEqual(
+    deliverySettingsFromArgv(["--settings", "/tmp/s.json"], readFile, "/home"),
+    { defaultMode: "bypassPermissions", crossSessionInbound: null },
+    "--settings <path> still reads the file (no regression)"
+  );
+  // AC3: --dangerously-skip-permissions branch unchanged (still bypass without reading anything).
+  assert.deepEqual(
+    deliverySettingsFromArgv(["--dangerously-skip-permissions", "--settings", inline], readNever, "/home"),
+    { defaultMode: "bypassPermissions", crossSessionInbound: null },
+    "--dangerously-skip-permissions still wins (no regression)"
+  );
+});
+
+test("AC2 (falsifiable) — classifyReceipt folds a held receipt past TTL into expired (held→expired observable)", () => {
+  const held = { sessionId: SEND_SID, name: null, message: "hi", state: "held", sentAtMs: 1000 };
+  assert.equal(classifyReceipt(held, 1000, 5000), "held", "age 0 < ttl ⇒ still held");
+  assert.equal(classifyReceipt(held, 6000, 5000), "expired", "age ≥ ttl ⇒ expired (held→expired path)");
+  assert.equal(classifyReceipt({ ...held, state: "delivered" }, 999999, 5000), "delivered", "delivered is stable (never folded to expired)");
+});
+
+test("AC2 (falsifiable) — renderSendResult displays the four states, and a held receipt past TTL renders expired", () => {
+  const outcome = { state: "held", detail: "x", sessionId: SEND_SID, name: "t", message: "hi" };
+  const receipts = [{ sessionId: SEND_SID, name: "t", message: "hi", state: "held", sentAtMs: 0 }];
+  const expiredHtml = renderSendResult(outcome, receipts, HELD_EXPIRY_MS);
+  assert.match(expiredHtml, /到期未批准（未送达）/, "a held receipt at age≥ttl renders expired");
+  const freshHtml = renderSendResult(outcome, receipts, 0);
+  assert.match(freshHtml, /待对方批准/, "a held receipt at age 0 renders held");
+  assert.match(freshHtml, /已送达|待对方批准|到期未批准|投递失败/, "the four-state vocabulary is present");
+});
+
+test("AC2 (unit) — resolveSessionEndpoint joins sessionId→socket+peerToken from the registry, non-UUID ⇒ null", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "send-resolve-"));
+  const sessionsDir = path.join(home, ".claude", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  try {
+    fs.writeFileSync(path.join(sessionsDir, "4242.json"), JSON.stringify({ pid: 4242, sessionId: SEND_SID, name: "target", messagingSocketPath: "/tmp/t.sock" }));
+    fs.writeFileSync(path.join(sessionsDir, "4242.abc.key"), JSON.stringify({ peerToken: "peer-123" }));
+    const ep = resolveSessionEndpoint(SEND_SID, home);
+    assert.deepEqual(ep, { pid: 4242, sockPath: "/tmp/t.sock", token: "peer-123", name: "target" }, "valid sessionId → its endpoint + peerToken");
+    assert.equal(resolveSessionEndpoint("not-a-uuid", home), null, "non-UUID ⇒ null");
+    assert.equal(resolveSessionEndpoint("066a1382-0000-4000-8000-000000000000", home), null, "unknown UUID ⇒ null");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("AC2 (integration) — sendToSession returns delivered/held/error by recipient settings + socket outcome", async () => {
+  const endpoint = { pid: 4242, sockPath: "", token: "peer-123", name: "target" };
+  const delivered = await captureSocketFrames((sockPath) =>
+    sendToSession({ sessionId: SEND_SID, message: "hi", endpoint: { ...endpoint, sockPath }, settings: { defaultMode: "bypassPermissions", crossSessionInbound: null } })
+  );
+  try {
+    assert.equal(delivered.result.state, "delivered", "bypass settings + socket ok ⇒ delivered");
+  } finally { fs.rmSync(delivered.dir, { recursive: true, force: true }); }
+
+  const held = await captureSocketFrames((sockPath) =>
+    sendToSession({ sessionId: SEND_SID, message: "hi", endpoint: { ...endpoint, sockPath }, settings: { defaultMode: null, crossSessionInbound: null } })
+  );
+  try {
+    assert.equal(held.result.state, "held", "neither settings + socket ok ⇒ held");
+  } finally { fs.rmSync(held.dir, { recursive: true, force: true }); }
+
+  const errored = await sendToSession({ sessionId: SEND_SID, message: "hi", endpoint: { ...endpoint, sockPath: "/tmp/nonexistent-send.sock" }, settings: { defaultMode: "bypassPermissions", crossSessionInbound: null } });
+  assert.equal(errored.state, "error", "socket connect failure ⇒ error");
+  const invalid = await sendToSession({ sessionId: "not-a-uuid", message: "hi", endpoint });
+  assert.equal(invalid.state, "error", "non-UUID sessionId ⇒ error");
+});
+
+/** POST form-urlencoded to the running server (the /send route is method+path gated). */
+function postRes(port, urlPath, body) {
+  return new Promise((resolve, reject) => {
+    const data = new URLSearchParams(body).toString();
+    const req = http.request(
+      { host: "127.0.0.1", port, path: urlPath, method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(data) } },
+      (res) => {
+        let b = "";
+        res.on("data", (c) => (b += c));
+        res.on("end", () => resolve({ status: res.statusCode, body: b }));
+      }
+    );
+    req.on("error", reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+test("AC2 (integration) — /session/<id> renders the /send form; POST /send returns an honest error (not a 500) for an unknown session", async () => {
+  const { ws, tasksDir } = makeWorkspace("send-route-");
+  const cwd0 = process.cwd();
+  let server;
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  try {
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const page = await getRes(port, `/session/${sid}`);
+    assert.equal(page.status, 200, "session view renders");
+    assert.match(page.body, /action="\/send"/, "the session page renders a /send form (delivery entry present)");
+
+    const res = await postRes(port, "/send", { sessionId: "066a1382-0000-4000-8000-000000000000", message: "hi" });
+    assert.equal(res.status, 200, "POST /send → 200 (honest four-state error, never a 500)");
+    assert.match(res.body, /投递失败/, "unknown session renders the error state");
+    assert.match(res.body, /未找到目标会话/, "the error detail names the cause (unresolved registry)");
   } finally {
     if (server) {
       server.close();

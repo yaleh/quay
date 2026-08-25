@@ -1706,7 +1706,13 @@ async function main() {
     let obsServer;
     try {
       process.chdir(obsWorkspaceRoot);
-      obsServer = await startServer({ port: 0 });
+      // gap-web-server-access-logging: the access log is a DELIBERATE per-request
+      // write (tested by its own block above). AC6 pins the OBSERVATION data path's
+      // zero-git-side-effect — readLive/readJournal must not write the working tree —
+      // so this server's access log is pinned OUT of the git-initialized workspace,
+      // otherwise the (correct) access-log line would show up as an untracked file
+      // and falsely trip AC6's "git status unchanged" comparison.
+      obsServer = await startServer({ port: 0, accessLogPath: path.join(os.tmpdir(), `quay-serve-obs-access-${Date.now()}.log`) });
       const obsPort = obsServer.address().port;
 
       // AC6 baseline: snapshot the working tree before any render.
@@ -1919,6 +1925,66 @@ async function main() {
       process.chdir(healthOrigCwd);
       fs.rmSync(healthWorkspaceRoot, { recursive: true, force: true });
       fs.rmSync(healthTasksDir, { recursive: true, force: true });
+    }
+  }
+
+  // --- gap-web-server-access-logging: every request produces a disk-persisted
+  //     access-log line (method + path + timestamp) so hot pages / access
+  //     patterns can be inferred later. AC1 (successful request → log line with
+  //     method+path+timestamp) + AC2 (落盘可 grep, not stdout-only). ---
+  {
+    const alTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-accesslog-tasks-"));
+    const alWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-accesslog-workspace-"));
+    fs.mkdirSync(path.join(alWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(alWorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${alTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${alTasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+    // Pure-data fixture → store write.
+    seedTask(alTasksDir, "AL-1", { title: "Access-log task", status: "todo", body: VALID_SECTIONS });
+
+    const alOrigCwd = process.cwd();
+    let alServer = null;
+    try {
+      process.chdir(alWorkspaceRoot);
+
+      // (1) Explicit accessLogPath — the pinned, deterministic case. The log
+      // must be a real on-disk file (AC2: 落盘), not stdout.
+      const accessLogFile = path.join(alWorkspaceRoot, "access.log");
+      alServer = await startServer({ port: 0, accessLogPath: accessLogFile });
+      let alPort = alServer.address().port;
+      const resp = await get(alPort, "/tasks?prefix=AL");
+      assert(resp.status === 200 && resp.body.includes("AL-1"),
+        "GET /tasks?prefix=AL returns 200 with the seeded task (access-log setup)");
+      const logText = fs.readFileSync(accessLogFile, "utf8");
+      const line = logText.split("\n").find((l) => l.includes("GET /tasks?prefix=AL"));
+      assert(line !== undefined, "AC2: access log on disk contains a GET /tasks?prefix=AL line (落盘可 grep)");
+      const [ts, method, p] = line.split(" ");
+      assert(method === "GET", `AC1: access-log line method is GET (got ${method})`);
+      assert(p === "/tasks?prefix=AL", `AC1: access-log line path is /tasks?prefix=AL (got ${p})`);
+      assert(!Number.isNaN(Date.parse(ts)), `AC1: access-log line timestamp is a parseable ISO string (got ${ts})`);
+      alServer.close();
+      if (alServer.client) await alServer.client.close();
+      alServer = null;
+
+      // (2) Default accessLogPath — must land at <workspaceRoot>/.quay/quay-access.log
+      // (the production default; gitignored via `*.log`).
+      alServer = await startServer({ port: 0 });
+      alPort = alServer.address().port;
+      const resp2 = await get(alPort, "/tasks");
+      assert(resp2.status === 200, "GET /tasks returns 200 (default access-log path setup)");
+      const defaultLogPath = path.join(alWorkspaceRoot, ".quay", "quay-access.log");
+      assert(fs.existsSync(defaultLogPath), "AC2: default access log lands at .quay/quay-access.log");
+      assert(fs.readFileSync(defaultLogPath, "utf8").includes("GET /tasks"),
+        "AC2: default access log on disk contains a GET /tasks line");
+    } finally {
+      if (alServer) {
+        alServer.close();
+        if (alServer.client) await alServer.client.close();
+      }
+      process.chdir(alOrigCwd);
+      fs.rmSync(alTasksDir, { recursive: true, force: true });
+      fs.rmSync(alWorkspaceRoot, { recursive: true, force: true });
     }
   }
 
