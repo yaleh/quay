@@ -55,6 +55,8 @@ monitor 扫描加 root 过滤；AC1-AC3 全勾；worktree 测试进程不再污�
   - `monitor.mounted false when only a worktree test process is running (AC2)` —— worktree 测试进程在 + 真监视器死 ⇒ `mounted false`；负控制：无进程 ⇒ 同样 false。
   - `monitor.mounted true and instances correct when a real main-checkout monitor is alive (AC3 no regression)` —— 真监视器存活 ⇒ `mounted true`、`instances 1`，混杂 worktree 进程 pid 400 不进 `monitor.instance`。
 
+> **⛔ 生产鉴别条件待复现（2026-08-25，manager 指出）**：done 基于读码（root 过滤）+ 测试（27/27 绿），但生产鉴别条件（某任务 worktree 正在跑 session-liveness.sh 时，两口径仍报 1）至今未复现——当前两口径一致是【非鉴别】情形（无 worktree 在跑）。「过滤生效」与「过滤没生效但恰好无干扰进程」在读数上同形（硬规则 4 推论三）。下次出现 worktree 在跑、两口径仍 1，才是生产证据。
+
 ## Touches
 
 - plugin/scripts/manager-tick-readings.ts（monitor 扫描 root 过滤 + mounted 判据）

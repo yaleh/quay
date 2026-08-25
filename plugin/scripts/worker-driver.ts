@@ -49,7 +49,7 @@
 //   --timeout <ms>      单任务墙钟超时（毫秒）。缺省 0 = 无超时（SPEC §4④：先无阈值记录时长分布）。
 //                       超时 ⇒ SIGTERM worker、保留 worktree、final_state=timed-out。
 //   --worker-cmd <s>    覆盖 worker 命令【前缀】（AC140-3 覆盖语义统一：prompt 仍作为末参数追加）。
-//                       缺省 = `quay-launch.sh task-worker -p <prompt>`（launcher/model 由 config 承载）。
+//                       缺省 = launchArgv 经 L2 policy 解析（profile launcher + --settings + --model + -n）。
 //   --worker-cmd-exact <s> 整体替换 worker 命令（测试捕获/注入专用，⛔ prompt 不进 argv）。
 //                          取假/测试缝：`node -e process.exit(7)`、`sleep 100`。
 //   --pid-file <path>   spawn 后把 worker pid 写到此文件（每 worker 一行；外部可观测 + 杀 worker 抓手）。
@@ -218,7 +218,7 @@ export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
 /** checkout 前 stash 的缺省 message（`git stash list` 可核的标记，AC2）。 */
 export const DEFAULT_STASH_MESSAGE = "worker-driver: stash before checkout (SPEC §5 阶段 2)";
 
-/** 存活 worker 进程的 `-n` 名（quay-launch.sh 由 .quay/profiles.yml 的
+/** 存活 worker 进程的 `-n` 名（launchArgv 经 profile-policy.ts 解析 .quay/profiles.yml 的
  *  `roles["task-worker"].name` 承载；AC140-2 测试钉死 name 以 quay- 开头）。
  *  冷启动在飞枚举用它识别存活 worker 进程的 cmdline（/proc/<pid>/cmdline）。
  *  AC150-3：控制态常量（CONTROL_STATE_REL/CONTROL_CALLERS_ENV/DEFAULT_CALLERS/CONTROL_HEADER/
@@ -782,7 +782,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
 /** 按覆盖旋钮解析一个 task 的 worker argv（单一构造 + AC140-3 覆盖语义统一）：
  *  exact 非空 ⇒ 整体替换（--worker-cmd-exact，测试捕获/注入专用，prompt 不进 argv 是预期）；
  *  否则 prefix 非空 ⇒ 前缀 + prompt（--worker-cmd，wrapper/测试前缀可用，prompt 作为末参数追加）；
- *  否则 ⇒ launchArgv("task-worker", prompt)（配置承载的缺省，走 quay-launch.sh）。 */
+ *  否则 ⇒ launchArgv("task-worker", prompt)（配置承载的缺省，经 policy 解析 kind → profile）。 */
 export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOptions = { prefix: null, exact: null }): string[] {
   const prompt = workerPromptForTask(task, root);
   if (opts.exact != null) {
@@ -796,10 +796,10 @@ export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOpt
   return launchArgv("task-worker", prompt, root);
 }
 
-/** 缺省 worker 命令：quay-launch.sh task-worker -p <full-chain prompt>（argv 形，child 即 worker，超时
- *  SIGTERM 杀得准）。launcher/model/--bare 由 `.quay/profiles.yml` 的 profiles/roles 承载（AC140-2 可配）。
- *  prompt 里【直接】要求 worker 以 scriptPath 调 fan-in-execute workflow——驱动直调 ⇒ A6「检查 fan-in
- *  是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
+/** 缺省 worker 命令：launchArgv("task-worker", <full-chain prompt>)（argv 形，child 即 worker，超时
+ *  SIGTERM 杀得准）。launcher/model/--bare 由 `.quay/profiles.yml` 的 profiles/roles 承载（AC140-2 可配，
+ *  L3 经 profile-policy.ts 解析）。prompt 里【直接】要求 worker 以 scriptPath 调 fan-in-execute
+ *  workflow——驱动直调 ⇒ A6「检查 fan-in 是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
 export function defaultWorkerArgv(task: string, root: string): string[] {
   return launchArgv("task-worker", workerPromptForTask(task, root), root);
 }
@@ -1205,8 +1205,8 @@ export function newSessionId(): string {
  * 含 needs-human 闸拒绝）保留分支/worktree 供续做（gap-worker-needs-human-destroys-branch-worktree AC1）。
  *
  * gap-worker-task-transcript-access-webui AC1：每次尝试生成新 session_id 并落盘 outcome；spawn 时把
- * `--session-id <uuid>` 追加进 argv（经 quay-launch.sh 的 PASSTHRU 透传给 claude ⇒ transcript 落
- * `~/.claude/projects/<slug>/<uuid>.jsonl`）。⛔ `--worker-cmd-exact` 测试缝（`node -e …`/`sleep` 等
+ * `--session-id <uuid>` 追加进 argv（launchArgv 已直接出 argv，--session-id 作为末参数追加给 claude
+ * ⇒ transcript 落 `~/.claude/projects/<slug>/<uuid>.jsonl`）。⛔ `--worker-cmd-exact` 测试缝（`node -e …`/`sleep` 等
  * 假命令）不追加（假命令不接受该 flag，追加会误杀全部既有测试）——但 session_id 仍生成并落盘
  * （AC1 的「每行有 session_id」对测试缝同样成立，只是不进 argv）。
  */
