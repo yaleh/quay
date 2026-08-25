@@ -39,10 +39,11 @@
 # 用法：
 #   bash plugin/scripts/promotion-driver-launch.sh <start|stop|drain|status|restart|liveness> \
 #       --kind <promotion|worker> [--root <repo>] [--interval <ms>] [--cap <n>]
-#       [--restart-delay <s>] [--run-id <id>] [--json]
+#       [--restart-delay <s>] [--run-id <id>] [--json] [--reconcile-interval <s>]
 #     --kind <promotion|worker>  目标驱动（缺省 promotion；CLI 入口恒显式传）
 #     --root <repo>        目标仓库根（缺省 = 本脚本 ../..）
 #     --interval <ms>      驱动轮间隔（仅 promotion 透传；worker 常驻选择环无 --interval）
+#     --reconcile-interval <s>  协调地板（仅 worker 透传；至少每 N 秒协调一次，边沿事件全丢也降级「慢但正确」而非静默停摆，缺省 300）
 #     --cap <n>            并发 cap（promotion → --cap；worker → --concurrency；缺省 = 驱动自己）
 #     --restart-delay <s>  supervisor 重拉间隔秒（缺省 5；只作重拉节奏占位，非阈值）
 #     --run-id <id>        驱动 run id（缺省 pm-prod-/wk-prod-<start-epoch>；重拉保持同 id 便于追迹）
@@ -120,6 +121,12 @@ declare -A KIND_HAS_INTERVAL=(
   [promotion]="1"
   [worker]="0"
 )
+# 协调地板（gap-worker-driver-reconcile-interval）：仅 worker 常驻选择环有边沿触发+无地板的问题；
+# promotion 是「跑一轮 → 睡 --interval」的定时驱动，本就有地板，不需要 --reconcile-interval。
+declare -A KIND_HAS_RECONCILE=(
+  [promotion]="0"
+  [worker]="1"
+)
 # promotion：驱动把 --pid-file 写为自己的 pid（单值覆盖，自写）；worker：--pid-file = append 在飞
 # worker 子进程 pid（多值），故 worker 驱动自身 pid 由 supervisor 用 $! 权威写 <prefix>.pid。
 declare -A KIND_PID_SELF=(
@@ -149,6 +156,7 @@ shift || true
 KIND="promotion"
 ROOT=""
 INTERVAL=""
+RECONCILE_INTERVAL=""
 CAP=""
 RESTART_DELAY="5"
 RUN_ID=""
@@ -158,6 +166,7 @@ while [ $# -gt 0 ]; do
     --kind) KIND="${2:-}"; shift 2 ;;
     --root) ROOT="${2:-}"; shift 2 ;;
     --interval) INTERVAL="${2:-}"; shift 2 ;;
+    --reconcile-interval) RECONCILE_INTERVAL="${2:-}"; shift 2 ;;
     --cap) CAP="${2:-}"; shift 2 ;;
     --restart-delay) RESTART_DELAY="${2:-}"; shift 2 ;;
     --run-id) RUN_ID="${2:-}"; shift 2 ;;
@@ -238,6 +247,9 @@ _is_nonneg_int() {
 if [ -n "$INTERVAL" ] && ! _is_nonneg_int "$INTERVAL"; then
   echo "promotion-driver-launch: invalid --interval: $INTERVAL" >&2; exit 2
 fi
+if [ -n "$RECONCILE_INTERVAL" ] && ! _is_nonneg_int "$RECONCILE_INTERVAL"; then
+  echo "promotion-driver-launch: invalid --reconcile-interval: $RECONCILE_INTERVAL" >&2; exit 2
+fi
 if [ -n "$CAP" ] && ! _is_nonneg_int "$CAP"; then
   echo "promotion-driver-launch: invalid --cap: $CAP" >&2; exit 2
 fi
@@ -285,6 +297,9 @@ run_supervisor() {
   [ -n "$CAP" ] && args+=( "${KIND_CAP_FLAG[$KIND]}" "$CAP" )
   if [ "${KIND_HAS_INTERVAL[$KIND]}" = "1" ] && [ -n "$INTERVAL" ]; then
     args+=(--interval "$INTERVAL")
+  fi
+  if [ "${KIND_HAS_RECONCILE[$KIND]}" = "1" ] && [ -n "$RECONCILE_INTERVAL" ]; then
+    args+=(--reconcile-interval "$RECONCILE_INTERVAL")
   fi
   args+=(--pid-file "$PID_ARG_FILE" --run-id "$RUN_ID")
 

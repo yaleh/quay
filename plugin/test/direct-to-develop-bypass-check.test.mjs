@@ -3,21 +3,23 @@
 // (tasks/gap-direct-to-develop-bypasses-fan-in-gates, 11b/C17 写所有权/越权直改面),
 // plugin/scripts/direct-to-develop-bypass-check.ts.
 //
-// 能取假（AC3）：真样本（7e64a86b + 核心子集 4 条 7d1d5d2e/b389a758/18e7a3be/77174684）必须报红；
-// 设计内样本（.gitignore / manager 独占 / 热修 fan-in 机件本身）必须绿。回放走两条路：
-// AC2 粒度：7e64a86b（plugin/skills/init/SKILL.md）在排除集加 plugin/skills/manager/** 后仍红；
-// 635ec831（plugin/skills/manager/SKILL.md）转绿——粒度到 manager/**，不掩 init/ 真红。
+// 能取假（AC3）：真样本（核心子集 4 条 7d1d5d2e/b389a758/18e7a3be/77174684）必须报红；
+// 设计内样本（.gitignore / manager 独占 / init 独占 / 热修 fan-in 机件本身）必须绿。回放走两条路：
+// AC1 粒度：7e64a86b（plugin/skills/init/SKILL.md）与 635ec831（plugin/skills/manager/SKILL.md）都转绿
+// ——粒度到 init/** 与 manager/**（纯 docs skill 目录），不掩其它 plugin/skills/*（如 manager-tool/）真红。
 //   ① 真实 git 读（REPO_ROOT 的 develop 历史含这些样本——它们是 develop 的祖先），喂纯判定；
 //   ② 硬编码 fixture（file 清单 + 时刻，取自真提交）——在无该历史的 hermetic clone 里也跑。
 // 另覆盖：锁时间窗豁免、设计内/外分离（AC2）、NOT-EVALUATED（reflog 无 / 锁事件不成对，硬规则3b）、
 // CLI 集成（temp repo：直接提交代码面 ⇒ RED；直接提交 .gitignore ⇒ GREEN；fan-in ff 不误报）。
 // AC65 授权直修 carve-out（gap-ac65-direct-fix-vs-bypass-detector-conflict）：02b2b2fc（AC65 授权直修，
-// 消息带验证证据）不再被误标；7e64a86b（真直投）仍红——按 sha + 证据豁免，非 plugin/scripts/* 文件名豁免
+// 消息带验证证据）不再被误标；7d1d5d2e（真直投）仍红——按 sha + 证据豁免，非 plugin/scripts/* 文件名豁免
 // （fail-closed：sha 入表但消息无 AC65 标记 ⇒ 仍红）。
 // Ruled-historical 豁免（gap-direct-to-develop-ruled-historical-cddc55e2，manager 2026-08-15 裁定 one-off）：
-// cddc55e2（inner 紧急回退自己的破坏）→ ruledHistorical=true（独立分类，非 bypass、非 ac65Authorized——
-// 两类输出可区分 AC65-AUTHORIZED vs RULED-HISTORICAL）；真直投（无豁免无 AC65）仍红；⛔ 判据3
-// （声明∧无验证⇒红）不松动。豁免表有界（只覆盖 cddc55e2），非入表 sha 仍红（能取假）。
+// 8e024f88（outer 直修 fixture 日期时间炸弹，AC65 散文消息非两谓词形态）→ ruledHistorical=true（独立分类，
+// 非 bypass、非 ac65Authorized——两类输出可区分 AC65-AUTHORIZED vs RULED-HISTORICAL）；真直投（无豁免无 AC65）
+// 仍红；⛔ 判据3（声明∧无验证⇒红）不松动。豁免表有界，非入表 sha 仍红（能取假）。
+// ⛔ cddc55e2（原 ruled 样本）现因 init/ 入排除集变全设计内——code-surface 锚失效，改用 8e024f88
+// （plugin/test/outer-cron-registry.test.mjs 仍代码面）作 ruled 样本，保持「ruled 豁免仍代码面可见」不变式。
 //
 // Run:
 //   scripts/test.sh plugin/test/direct-to-develop-bypass-check.test.mjs
@@ -91,16 +93,15 @@ function realCommitData(sha) {
 
 // ── 真样本 fixture（取自真提交——file 清单与 committer epoch 与 develop 历史一致）──────────────
 
-/** AC3 真样本：5 条必须报红。*/
+/** AC3 真样本：4 条必须报红。*/
 const REAL_BYPASS_SAMPLES = [
-  { sha: "7e64a86b", files: ["plugin/skills/init/SKILL.md"], subject: "init/SKILL.md: 声明 reference-doc（AC80-INNER-ANCHOR）" },
   { sha: "7d1d5d2e", files: ["plugin/test/ready-pool-check.test.mjs"], subject: "test: AC5 负控制 self-touch 样本" },
   { sha: "b389a758", files: ["plugin/scripts/loop-shipping-exclusion-data.mjs"], subject: "mjs: AC1b 排除表加 manager-phase-goal-archive.md" },
   { sha: "18e7a3be", files: ["plugin/scripts/loop-shipping-exclusion-data.mjs"], subject: "mjs: manager-phase-goal 条目加 retainedNote" },
   { sha: "77174684", files: ["plugin/test/manager-tick-core.test.mjs"], subject: "test: AC3 pgrep-idle-watch 谓词加位置感知" },
 ];
 
-/** 设计内样本：.gitignore / manager 独占 / 热修 fan-in 机件本身，必须绿（AC2）。*/
+/** 设计内样本：.gitignore / manager 独占 / init 独占 / 热修 fan-in 机件本身，必须绿（AC2）。*/
 const DESIGN_INTERNAL_SAMPLES = [
   { sha: "gitignore-f", files: [".gitignore"], subject: "chore: gitignore" },
   { sha: "manager-tick-core", files: [".claude/workflows/manager-tick-core.js"], subject: "manager: tick-core 判准修正" },
@@ -108,6 +109,7 @@ const DESIGN_INTERNAL_SAMPLES = [
   { sha: "claude-md", files: ["CLAUDE.md"], subject: "CLAUDE.md: 硬规则 12 补 12b" },
   { sha: "fan-in-hotfix", files: [".claude/workflows/fan-in-execute.js"], subject: "workflows: fix fan-in-execute meta" },
   { sha: "manager-skill", files: ["plugin/skills/manager/SKILL.md"], subject: "manager: SKILL.md 索引（635ec831 类）" },
+  { sha: "init-skill", files: ["plugin/skills/init/SKILL.md"], subject: "init: SKILL.md reference-doc 索引（7e64a86b 类）" },
   { sha: "task-file", files: ["tasks/gap-xxx.md"], subject: "tasks: 立案" },
 ];
 
@@ -122,18 +124,20 @@ const AC65_AUTHORIZED_SAMPLE = {
     "AC65 一条命令验证：A0 outer.ticklog quay 现含 A11+ 内容（full length 676 > 200）。新增测试（full 完整行 + 默认截断向后兼容），24/24 绿。",
 };
 
-/** Ruled-historical 豁免样本（cddc55e2——manager 2026-08-15 裁定 one-off）。必须分类为 ruledHistorical
- *  （独立分类，非 bypass、非 ac65Authorized）；非入表真直投仍红。 */
+/** Ruled-historical 豁免样本（8e024f88——outer 2026-08-20 裁定 one-off，AC65 散文消息非两谓词形态）。
+ *  必须分类为 ruledHistorical（独立分类，非 bypass、非 ac65Authorized）；非入表真直投仍红。
+ *  ⛔ 原样本 cddc55e2 因 init/ 入排除集变全设计内（code-surface 锚失效），改用 8e024f88 保持
+ *  「ruled 豁免仍代码面可见」不变式。 */
 const RULED_HISTORICAL_SAMPLE = {
-  sha: "cddc55e2",
-  files: ["plugin/loop/fast-mode-tick-core.md", "plugin/skills/init/SKILL.md"],
-  subject: "inner: 回退 drift 同步（232e4171 破坏 quay-init referenced⊆landed）+ SKILL.md:71 改正本/副本关系声明（option ②）",
-  message: "inner: 回退 drift 同步（232e4171 破坏 quay-init referenced⊆landed）+ SKILL.md:71 改正本/副本关系声明（option ②）",
+  sha: "8e024f88",
+  files: ["plugin/test/outer-cron-registry.test.mjs"],
+  subject: "test: outer-cron-registry fixture 硬编码 08-14 过期 ⇒ 改相对 now（修复 4 条恒红，解锁全管线 fan-in）",
+  message: "test: outer-cron-registry fixture 硬编码 08-14 过期 ⇒ 改相对 now\n\nAC65 direct-fix（plugin/test 单命令可验）；非产品代码、非 capability-catalog 验证机件。",
 };
 
 // ── PURE: isDesignInternalPath — 设计内排除集（AC2）──────────────────────────────────────────────
 
-test("PURE isDesignInternalPath — 记账/转向/遥测面 + manager 独占 + 基础设施 + 热修机件 ⇒ 设计内", () => {
+test("PURE isDesignInternalPath — 记账/转向/遥测面 + manager/init 独占 + 基础设施 + 热修机件 ⇒ 设计内", () => {
   const designInternal = [
     "tasks/gap-x.md",
     "docs/analysis/foo.md",
@@ -149,6 +153,8 @@ test("PURE isDesignInternalPath — 记账/转向/遥测面 + manager 独占 + �
     ".claude/skills/x/SKILL.md",
     "plugin/skills/manager/SKILL.md",
     "plugin/skills/manager/sub/deep.md",
+    "plugin/skills/init/SKILL.md",
+    "plugin/skills/init/sub/deep.md",
     "CLAUDE.md",
     "README.md",
     ".gitignore",
@@ -167,8 +173,6 @@ test("PURE isDesignInternalPath — 代码/断言面（产品交付）不是设�
     "plugin/scripts/loop-shipping-exclusion-data.mjs",
     "plugin/test/ready-pool-check.test.mjs",
     "plugin/test/manager-tick-core.test.mjs",
-    "plugin/skills/init/SKILL.md",
-    "plugin/skills/init/sub/x.md",
     "plugin/skills/manager-tool/foo.md",
     "plugin/scripts/ready-pool-check.ts",
     "plugin/scripts/outer-cron-registry.ts",
@@ -187,8 +191,10 @@ test("PURE isDesignInternalPath — 代码/断言面（产品交付）不是设�
   // 即代码面，红）；verifier 机件 .ts 仍不是设计内（直改仍红）。
   assert.equal(isDesignInternalPath("plugin/scripts/outer-cron-registry.json"), false, "git 版收据已退役，不再是设计内（重建即代码面，仍红）");
   assert.equal(isDesignInternalPath("plugin/scripts/outer-cron-registry.ts"), false, "verifier 机件 .ts 不是设计内（仍红）");
-  // ⛔ AC2 粒度：manager/ 前缀豁免，但必须精确到 manager/ 子树——`manager-tool/` 是另一个目录，不得误豁免。
-  assert.equal(isDesignInternalPath("plugin/skills/manager-tool/foo.md"), false, "manager-tool/ 不是 manager/ 子树");
+  // ⛔ AC2 粒度：manager/ 与 init/ 前缀豁免，但必须精确到各自子树（尾斜杠）——`manager-tool/` 是另一个
+  // 目录，不得误豁免（同证 init/ 豁免不扩大到其它 plugin/skills/*）。
+  assert.equal(isDesignInternalPath("plugin/skills/manager-tool/foo.md"), false, "manager-tool/ 不是 manager/ 或 init/ 子树");
+  assert.equal(isDesignInternalPath("plugin/skills/init-tool/foo.md"), false, "init-tool/ 不是 init/ 子树");
 });
 
 test("PURE isDesignInternalPath — 非 ASCII 文件名（git quoted-path 形态）恢复排除（AC1/AC2）", () => {
@@ -251,20 +257,20 @@ test("PURE classifyCommit — README.md 设计内（非 bypass）；LICENSE/CHAN
 
 // ── PURE: checkDirectCommits — 聚合 + denominator 计数（AC3 谓词口径）──────────────────────────
 
-test("PURE checkDirectCommits — 真样本 5 条全红；设计内样本全绿；denominator 计数正确", () => {
+test("PURE checkDirectCommits — 真样本 4 条全红；设计内样本全绿；denominator 计数正确", () => {
   const samples = REAL_BYPASS_SAMPLES.map((s) => ({ ...s, epoch: 1_700_000_000, action: "commit" }));
   const v = checkDirectCommits(samples, []);
-  assert.equal(v.violations.length, 5);
-  assert.equal(v.codeSurfaceCommits, 5);
+  assert.equal(v.violations.length, 4);
+  assert.equal(v.codeSurfaceCommits, 4);
   assert.equal(v.designInternalCommits, 0);
-  assert.equal(v.totalCommits, 5);
+  assert.equal(v.totalCommits, 4);
   assert.equal(v.violations.every((x) => x.bypass), true);
 
   const internal = DESIGN_INTERNAL_SAMPLES.map((s) => ({ ...s, epoch: 1_700_000_000, action: "commit" }));
   const v2 = checkDirectCommits(internal, []);
   assert.equal(v2.violations.length, 0, "设计内样本不得报红");
   assert.equal(v2.codeSurfaceCommits, 0);
-  assert.equal(v2.designInternalCommits, 7);
+  assert.equal(v2.designInternalCommits, 8);
 
   // 混合一真一设计内 ⇒ 只红真样本。
   const mixed = checkDirectCommits(
@@ -282,9 +288,9 @@ test("PURE checkDirectCommits — 真样本 5 条全红；设计内样本全绿�
 
 // ── AC3 回放·真实 git：REPO_ROOT 的 develop 历史含这些样本（它们是祖先）───────────────────────
 
-const REAL_SHAS = ["7e64a86b", "7d1d5d2e", "b389a758", "18e7a3be", "77174684", "5e54bb37", "635ec831"];
+const REAL_SHAS = ["7d1d5d2e", "b389a758", "18e7a3be", "77174684", "5e54bb37"];
 
-test("AC3 回放·真实 git — develop 历史中 5 条真样本读自 git 后必须红，5e54bb37（热修机件）必须绿", (t) => {
+test("AC3 回放·真实 git — develop 历史中 4 条真样本读自 git 后必须红，5e54bb37（热修机件）必须绿", (t) => {
   const missing = REAL_SHAS.filter((sha) => realCommitData(sha) === null);
   if (missing.length > 0) {
     // hermetic clone 无该历史 ⇒ skip（不把「样本不可得」当红/绿——硬规则 5：来源不完备不判存在）。
@@ -293,7 +299,7 @@ test("AC3 回放·真实 git — develop 历史中 5 条真样本读自 git 后�
   }
   const bypass = REAL_BYPASS_SAMPLES.map((s) => realCommitData(s.sha)).map((d) => ({ ...d, action: "commit" }));
   const v = checkDirectCommits(bypass, []);
-  assert.equal(v.violations.length, 5, `真样本必须红: ${JSON.stringify(v.violations.map((x) => x.sha))}`);
+  assert.equal(v.violations.length, 4, `真样本必须红: ${JSON.stringify(v.violations.map((x) => x.sha))}`);
   assert.equal(v.violations.every((x) => x.bypass), true);
   // 设计内真样本：5e54bb37 是热修 fan-in 机件本身（.claude/workflows/fan-in-execute.js）。
   const hotfix = realCommitData("5e54bb37");
@@ -302,7 +308,7 @@ test("AC3 回放·真实 git — develop 历史中 5 条真样本读自 git 后�
   assert.equal(v2.designInternalCommits, 1);
 });
 
-test("AC3 回放·真实 git — CLI --commits 对 5 条真样本 exit 1（RED），对设计内 exit 0", (t) => {
+test("AC3 回放·真实 git — CLI --commits 对 4 条真样本 exit 1（RED），对设计内 exit 0", (t) => {
   const missing = REAL_SHAS.filter((sha) => realCommitData(sha) === null);
   if (missing.length > 0) {
     t.skip(`样本 sha 不在本 repo（${missing.join(",")}）——CLI 回放跳过`);
@@ -314,16 +320,16 @@ test("AC3 回放·真实 git — CLI --commits 对 5 条真样本 exit 1（RED�
   assert.equal(out.evaluated, true);
   assert.equal(out.ok, false);
   assert.equal(out.reason, "direct-commit-bypasses-fan-in");
-  assert.equal(out.candidates.length, 5);
+  assert.equal(out.candidates.length, 4);
 
   const r2 = runChecker(["--root", REPO_ROOT, "--commits", "5e54bb37"]);
   assert.equal(r2.status, 0, `设计内（热修机件）必须 GREEN(exit 0): ${r2.stdout}${r2.stderr}`);
   assert.equal(jsonOut(r2).ok, true);
 });
 
-// ── AC2 粒度（⛔ 到 manager/**，不掩 init/ 真红）────────────────────────────────────────────────
+// ── AC1 粒度（init/** 与 manager/** 均豁免；⛔ 不掩其它 plugin/skills/* 真红）──────────────────
 
-test("AC2 粒度 · 真实 git — 7e64a86b（init/SKILL.md）仍红；635ec831（manager/SKILL.md）转绿", (t) => {
+test("AC1 粒度 · 真实 git — 7e64a86b（init/SKILL.md）与 635ec831（manager/SKILL.md）均转绿（docs skill 目录豁免）", (t) => {
   const init = realCommitData("7e64a86b");
   const mgr = realCommitData("635ec831");
   if (!init || !mgr) {
@@ -331,14 +337,14 @@ test("AC2 粒度 · 真实 git — 7e64a86b（init/SKILL.md）仍红；635ec831�
     return;
   }
   const vi = checkDirectCommits([{ ...init, action: "commit" }], []);
-  assert.equal(vi.violations.length, 1, `init/SKILL.md 直改必须仍红（AC2 粒度——不掩真红）: ${JSON.stringify(vi.classified)}`);
-  assert.equal(vi.violations[0].bypass, true);
+  assert.equal(vi.violations.length, 0, `init/SKILL.md 直改必须转绿（AC1 豁免）: ${JSON.stringify(vi.classified)}`);
+  assert.equal(vi.designInternalCommits, 1);
   const vm = checkDirectCommits([{ ...mgr, action: "commit" }], []);
   assert.equal(vm.violations.length, 0, `manager/SKILL.md 必须转绿（manager 独占 + 无 fan-in 路）: ${JSON.stringify(vm.classified)}`);
   assert.equal(vm.designInternalCommits, 1);
 });
 
-test("AC2 粒度 · CLI — 7e64a86b exit 1（RED）；635ec831 exit 0（GREEN）", (t) => {
+test("AC1 粒度 · CLI — 7e64a86b exit 0（GREEN）；635ec831 exit 0（GREEN）", (t) => {
   const init = realCommitData("7e64a86b");
   const mgr = realCommitData("635ec831");
   if (!init || !mgr) {
@@ -346,11 +352,11 @@ test("AC2 粒度 · CLI — 7e64a86b exit 1（RED）；635ec831 exit 0（GREEN�
     return;
   }
   const rInit = runChecker(["--root", REPO_ROOT, "--commits", "7e64a86b"]);
-  assert.equal(rInit.status, 1, `init/SKILL.md 必须 RED(exit 1): ${rInit.stdout}${rInit.stderr}`);
+  assert.equal(rInit.status, 0, `init/SKILL.md 必须 GREEN(exit 0): ${rInit.stdout}${rInit.stderr}`);
   const outInit = jsonOut(rInit);
-  assert.equal(outInit.evaluated, true);
-  assert.equal(outInit.ok, false);
-  assert.equal(outInit.candidates[0].codeSurfaceFiles[0], "plugin/skills/init/SKILL.md");
+  assert.equal(outInit.ok, true);
+  assert.equal(outInit.denominator.designInternalCommits, 1);
+  assert.equal(outInit.denominator.codeSurfaceCommits, 0);
 
   const rMgr = runChecker(["--root", REPO_ROOT, "--commits", "635ec831"]);
   assert.equal(rMgr.status, 0, `manager/SKILL.md 必须 GREEN(exit 0): ${rMgr.stdout}${rMgr.stderr}`);
@@ -436,7 +442,7 @@ test("PURE classifyCommit — AC65 两谓词：声明∧验证 ⇒ 非 bypass；
   assert.equal(declOnly.bypass, true, "声明∧无验证产物 ⇒ 红");
 
   // 无声明 code-surface 直投 ⇒ 仍红。
-  const real = classifyCommit({ sha: "7e64a86b", files: ["plugin/skills/init/SKILL.md"], epoch: 200, subject: "s", message: "init/SKILL.md: 声明 reference-doc" }, holds);
+  const real = classifyCommit({ sha: "7d1d5d2e", files: ["plugin/test/ready-pool-check.test.mjs"], epoch: 200, subject: "s", message: "test: AC5 负控制 self-touch 样本" }, holds);
   assert.equal(real.ac65Authorized, false);
   assert.equal(real.bypass, true);
 });
@@ -451,10 +457,10 @@ test("PURE checkDirectCommits — AC65 授权直修不计入 violations；混合
   // 混合：AC65 授权 + 真直投 ⇒ 只红真直投。
   const mixed = checkDirectCommits([
     ac65,
-    { sha: "7e64a86b", files: ["plugin/skills/init/SKILL.md"], epoch: 1_700_000_001, subject: "s", message: "init/SKILL.md: 声明", action: "commit" },
+    { sha: "7d1d5d2e", files: ["plugin/test/ready-pool-check.test.mjs"], epoch: 1_700_000_001, subject: "s", message: "test: AC5 负控制", action: "commit" },
   ], []);
   assert.equal(mixed.violations.length, 1);
-  assert.equal(mixed.violations[0].sha, "7e64a86b");
+  assert.equal(mixed.violations[0].sha, "7d1d5d2e");
   assert.equal(mixed.ac65AuthorizedCommits, 1);
   assert.equal(mixed.codeSurfaceCommits, 2, "AC65 授权与真直投都是代码面（denominator 都可见）");
 });
@@ -472,8 +478,8 @@ test("AC3 回放·真实 git — 02b2b2fc（AC65 授权直修，消息带验证�
   assert.equal(v.classified[0].ac65Authorized, true);
 });
 
-test("AC3 回放·CLI — 02b2b2fc exit 0（AC65 授权直修）；7e64a86b exit 1（真直投仍红）；混合只红真直投", (t) => {
-  if (!realCommitData("02b2b2fc") || !realCommitData("7e64a86b")) {
+test("AC3 回放·CLI — 02b2b2fc exit 0（AC65 授权直修）；7d1d5d2e exit 1（真直投仍红）；混合只红真直投", (t) => {
+  if (!realCommitData("02b2b2fc") || !realCommitData("7d1d5d2e")) {
     t.skip("样本 sha 不在本 repo——CLI 回放跳过");
     return;
   }
@@ -487,48 +493,51 @@ test("AC3 回放·CLI — 02b2b2fc exit 0（AC65 授权直修）；7e64a86b exit
   assert.equal(outAc65.candidates[0].ac65Evidence.includes("AC65"), true);
   assert.equal(outAc65.denominator.ac65AuthorizedCommits, 1);
 
-  const rReal = runChecker(["--root", REPO_ROOT, "--commits", "7e64a86b"]);
+  const rReal = runChecker(["--root", REPO_ROOT, "--commits", "7d1d5d2e"]);
   assert.equal(rReal.status, 1, `真直投必须仍 RED(exit 1): ${rReal.stdout}${rReal.stderr}`);
   assert.equal(jsonOut(rReal).candidates[0].ac65Authorized, false);
 
-  const rMixed = runChecker(["--root", REPO_ROOT, "--commits", "02b2b2fc,7e64a86b"]);
+  const rMixed = runChecker(["--root", REPO_ROOT, "--commits", "02b2b2fc,7d1d5d2e"]);
   assert.equal(rMixed.status, 1, `混合含真直投 ⇒ 仍 RED(exit 1): ${rMixed.stdout}${rMixed.stderr}`);
   const outMixed = jsonOut(rMixed);
   const bySha = Object.fromEntries(outMixed.candidates.map((c) => [c.sha.slice(0, 8), c]));
   assert.equal(bySha["02b2b2fc"].ac65Authorized, true);
   assert.equal(bySha["02b2b2fc"].confirmedBypass, false);
-  assert.equal(bySha["7e64a86b"].ac65Authorized, false);
-  assert.equal(bySha["7e64a86b"].confirmedBypass, true);
+  assert.equal(bySha["7d1d5d2e"].ac65Authorized, false);
+  assert.equal(bySha["7d1d5d2e"].confirmedBypass, true);
 });
 
 // ── Ruled-historical 豁免（gap-direct-to-develop-ruled-historical-cddc55e2）──────────────────────────
-// manager 2026-08-15 裁定 one-off：cddc55e2（inner 紧急回退自己的破坏）→ ruledHistorical（独立分类，
-// 非 bypass、非 ac65Authorized——两类输出可区分）。⛔ 豁免表有界（只覆盖 cddc55e2）；非入表真直投仍红
-// （能取假）；判据3（声明∧无验证⇒红）不松动。
+// manager 2026-08-15 裁定 one-off（先例）：8e024f88（outer 直修 fixture 日期时间炸弹，AC65 散文消息
+// 非两谓词形态）→ ruledHistorical（独立分类，非 bypass、非 ac65Authorized——两类输出可区分）。
+// ⛔ 豁免表有界；非入表真直投仍红（能取假）；判据3（声明∧无验证⇒红）不松动。
+// ⛔ cddc55e2（原 ruled 样本）现因 init/ 入排除集变全设计内——code-surface 锚失效，改用 8e024f88
+// （plugin/test/outer-cron-registry.test.mjs 仍代码面）作 ruled 样本，保持「ruled 豁免仍代码面可见」不变式。
 
 test("PURE RULED — findRuledHistoricalEntry 前缀匹配 + 表有界（非入表 sha 返回 undefined）", () => {
-  assert.equal(findRuledHistoricalEntry("cddc55e2")?.sha, "cddc55e2");
-  assert.equal(findRuledHistoricalEntry("cddc55e24e343708426ecbc0bcd7fea33c28697a")?.sha, "cddc55e2", "全量 sha 前缀匹配");
-  assert.equal(findRuledHistoricalEntry("7e64a86b"), undefined, "真直投不入豁免表");
+  assert.equal(findRuledHistoricalEntry("8e024f88")?.sha, "8e024f88");
+  assert.equal(findRuledHistoricalEntry("8e024f88aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")?.sha, "8e024f88", "全量 sha 前缀匹配");
+  assert.equal(findRuledHistoricalEntry("7d1d5d2e"), undefined, "真直投不入豁免表");
   assert.equal(findRuledHistoricalEntry(""), undefined);
   assert.equal(findRuledHistoricalEntry(null), undefined);
-  assert.equal(RULED_HISTORICAL_COMMITS.length >= 1, true, "豁免表非空（承载 cddc55e2）");
+  assert.equal(RULED_HISTORICAL_COMMITS.length >= 1, true, "豁免表非空（承载 8e024f88）");
 });
 
-test("PURE classifyCommit — cddc55e2 → ruledHistorical（非 bypass 非 ac65Authorized）；真直投（无豁免无 AC65）仍红", () => {
+test("PURE classifyCommit — 8e024f88 → ruledHistorical（非 bypass 非 ac65Authorized）；真直投（无豁免无 AC65）仍红", () => {
   const holds = [];
-  // cddc55e2：代码面（SKILL.md）∧ 无 AC65 声明，但命中 ruled 表 ⇒ ruledHistorical，非 bypass、非 ac65Authorized。
+  // 8e024f88：代码面（test 文件）∧ AC65 散文消息非两谓词形态（ac65Authorized=false），但命中 ruled 表
+  // ⇒ ruledHistorical，非 bypass、非 ac65Authorized。
   const ruled = classifyCommit(RULED_HISTORICAL_SAMPLE, holds);
-  assert.equal(ruled.ruledHistorical, true, "cddc55e2 命中 ruled 表 ⇒ ruledHistorical");
+  assert.equal(ruled.ruledHistorical, true, "8e024f88 命中 ruled 表 ⇒ ruledHistorical");
   assert.equal(ruled.bypass, false, "ruled 豁免 ⇒ 非 bypass");
   assert.equal(ruled.ac65Authorized, false, "ruled 豁免是独立分类，非 ac65Authorized（两类可区分）");
   assert.equal(typeof ruled.ruledReason, "string", "ruledReason（定案理由）可见可审计");
-  assert.ok(ruled.ruledReason.includes("manager 2026-08-15 裁定"), "定案理由带 manager 裁定");
-  assert.equal(ruled.codeSurfaceFiles.length, 1, "cddc55e2 仍是代码面（denominator 可见，非静默掩盖）");
-  assert.equal(ruled.codeSurfaceFiles[0], "plugin/skills/init/SKILL.md");
+  assert.ok(ruled.ruledReason.includes("裁定"), "定案理由带裁定");
+  assert.equal(ruled.codeSurfaceFiles.length, 1, "8e024f88 仍是代码面（denominator 可见，非静默掩盖）");
+  assert.equal(ruled.codeSurfaceFiles[0], "plugin/test/outer-cron-registry.test.mjs");
 
   // 真直投（无 AC65、无 ruled 豁免）⇒ 仍红——表有界，非入表 sha 不被豁免。
-  const real = classifyCommit({ sha: "7e64a86b", files: ["plugin/skills/init/SKILL.md"], epoch: 200, subject: "s", message: "init/SKILL.md: 声明 reference-doc" }, holds);
+  const real = classifyCommit({ sha: "7d1d5d2e", files: ["plugin/test/ready-pool-check.test.mjs"], epoch: 200, subject: "s", message: "test: AC5 负控制 self-touch 样本" }, holds);
   assert.equal(real.ruledHistorical, false, "非入表 sha ⇒ ruledHistorical=false");
   assert.equal(real.ac65Authorized, false);
   assert.equal(real.bypass, true, "真直投（无豁免无 AC65）仍红——豁免表有界（能取假）");
@@ -554,24 +563,24 @@ test("PURE checkDirectCommits — ruled 豁免不计入 violations；ruledHistor
   // 混合：ruled 豁免 + 真直投 ⇒ 只红真直投。
   const mixed = checkDirectCommits([
     ruled,
-    { sha: "7e64a86b", files: ["plugin/skills/init/SKILL.md"], epoch: 1_700_000_001, subject: "s", message: "init/SKILL.md: 声明", action: "commit" },
+    { sha: "7d1d5d2e", files: ["plugin/test/ready-pool-check.test.mjs"], epoch: 1_700_000_001, subject: "s", message: "test: AC5 负控制", action: "commit" },
   ], []);
   assert.equal(mixed.violations.length, 1);
-  assert.equal(mixed.violations[0].sha, "7e64a86b", "非入表真直投仍红（表有界）");
+  assert.equal(mixed.violations[0].sha, "7d1d5d2e", "非入表真直投仍红（表有界）");
   assert.equal(mixed.ruledHistoricalCommits, 1);
   assert.equal(mixed.codeSurfaceCommits, 2, "ruled 与真直投都是代码面（denominator 都可见）");
 });
 
-test("AC3 回放·真实 git — cddc55e2（ruled 豁免）不再被误标；非入表真直投仍红", (t) => {
-  const ruled = realCommitData("cddc55e2");
-  const real = realCommitData("7e64a86b");
+test("AC3 回放·真实 git — 8e024f88（ruled 豁免）不再被误标；非入表真直投仍红", (t) => {
+  const ruled = realCommitData("8e024f88");
+  const real = realCommitData("7d1d5d2e");
   if (!ruled || !real) {
-    t.skip(`样本 sha 不在本 repo（${[!ruled && "cddc55e2", !real && "7e64a86b"].filter(Boolean).join(",")}）——真实 git 回放跳过，fixture 回放仍覆盖`);
+    t.skip(`样本 sha 不在本 repo（${[!ruled && "8e024f88", !real && "7d1d5d2e"].filter(Boolean).join(",")}）——真实 git 回放跳过，fixture 回放仍覆盖`);
     return;
   }
-  assert.ok(ruled.files.includes("plugin/skills/init/SKILL.md"), "cddc55e2 真提交触及代码面 SKILL.md");
+  assert.ok(ruled.files.includes("plugin/test/outer-cron-registry.test.mjs"), "8e024f88 真提交触及代码面 test 文件");
   const vr = checkDirectCommits([{ ...ruled, action: "commit" }], []);
-  assert.equal(vr.violations.length, 0, `cddc55e2（ruled 豁免）必须不再误标: ${JSON.stringify(vr.classified.map((c) => ({ sha: c.sha.slice(0, 8), bypass: c.bypass, ac65: c.ac65Authorized, ruled: c.ruledHistorical })))}`);
+  assert.equal(vr.violations.length, 0, `8e024f88（ruled 豁免）必须不再误标: ${JSON.stringify(vr.classified.map((c) => ({ sha: c.sha.slice(0, 8), bypass: c.bypass, ac65: c.ac65Authorized, ruled: c.ruledHistorical })))}`);
   assert.equal(vr.classified[0].ruledHistorical, true);
   assert.equal(vr.classified[0].bypass, false);
   assert.equal(vr.classified[0].ac65Authorized, false);
@@ -595,13 +604,13 @@ test("AC2 回放·真实 git — b67a91cf（manager 委托 outer 写 README）�
   assert.equal(v.classified[0].ac65Authorized, false, "ruled 豁免是独立分类，非 ac65Authorized（AC2）");
 });
 
-test("AC3 回放·CLI — cddc55e2 exit 0（ruledHistorical，非 bypass 非 ac65Authorized）；7e64a86b exit 1（真直投仍红）；混合只红真直投", (t) => {
-  if (!realCommitData("cddc55e2") || !realCommitData("7e64a86b")) {
+test("AC3 回放·CLI — 8e024f88 exit 0（ruledHistorical，非 bypass 非 ac65Authorized）；7d1d5d2e exit 1（真直投仍红）；混合只红真直投", (t) => {
+  if (!realCommitData("8e024f88") || !realCommitData("7d1d5d2e")) {
     t.skip("样本 sha 不在本 repo——CLI 回放跳过");
     return;
   }
-  const rRuled = runChecker(["--root", REPO_ROOT, "--commits", "cddc55e2"]);
-  assert.equal(rRuled.status, 0, `cddc55e2（ruled 豁免）必须 GREEN(exit 0): ${rRuled.stdout}${rRuled.stderr}`);
+  const rRuled = runChecker(["--root", REPO_ROOT, "--commits", "8e024f88"]);
+  assert.equal(rRuled.status, 0, `8e024f88（ruled 豁免）必须 GREEN(exit 0): ${rRuled.stdout}${rRuled.stderr}`);
   const outRuled = jsonOut(rRuled);
   assert.equal(outRuled.ok, true);
   assert.equal(outRuled.candidates[0].ruledHistorical, true);
@@ -610,19 +619,19 @@ test("AC3 回放·CLI — cddc55e2 exit 0（ruledHistorical，非 bypass 非 ac6
   assert.equal(outRuled.denominator.ruledHistoricalCommits, 1);
   assert.ok(typeof outRuled.candidates[0].ruledReason === "string" && outRuled.candidates[0].ruledReason.length > 0, "ruledReason 可见");
 
-  const rReal = runChecker(["--root", REPO_ROOT, "--commits", "7e64a86b"]);
+  const rReal = runChecker(["--root", REPO_ROOT, "--commits", "7d1d5d2e"]);
   assert.equal(rReal.status, 1, `非入表真直投必须仍 RED(exit 1): ${rReal.stdout}${rReal.stderr}`);
   assert.equal(jsonOut(rReal).candidates[0].ruledHistorical, false);
 
-  const rMixed = runChecker(["--root", REPO_ROOT, "--commits", "cddc55e2,7e64a86b"]);
+  const rMixed = runChecker(["--root", REPO_ROOT, "--commits", "8e024f88,7d1d5d2e"]);
   assert.equal(rMixed.status, 1, `混合含真直投 ⇒ 仍 RED(exit 1): ${rMixed.stdout}${rMixed.stderr}`);
   const outMixed = jsonOut(rMixed);
   const bySha = Object.fromEntries(outMixed.candidates.map((c) => [c.sha.slice(0, 8), c]));
-  assert.equal(bySha["cddc55e2"].ruledHistorical, true);
-  assert.equal(bySha["cddc55e2"].confirmedBypass, false);
-  assert.equal(bySha["cddc55e2"].ac65Authorized, false);
-  assert.equal(bySha["7e64a86b"].ruledHistorical, false);
-  assert.equal(bySha["7e64a86b"].confirmedBypass, true);
+  assert.equal(bySha["8e024f88"].ruledHistorical, true);
+  assert.equal(bySha["8e024f88"].confirmedBypass, false);
+  assert.equal(bySha["8e024f88"].ac65Authorized, false);
+  assert.equal(bySha["7d1d5d2e"].ruledHistorical, false);
+  assert.equal(bySha["7d1d5d2e"].confirmedBypass, true);
 });
 
 test("AC2 回放·CLI — b67a91cf exit 0（ruledHistorical 可见 + README.md 设计内）", (t) => {
