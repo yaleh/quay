@@ -40,8 +40,8 @@ worker             computeLandingState（⛔ 2026-08-23 11:37 之前 exitCode===
 
 判据正本在 `orchestration/manager-phase-goal.md` `### AC153`（⛔ 取假形态不在此复制）。
 
-- [ ] AC1：核心不变式只存在一份，两 kind 共用；任一 kind 能在未经独立判据证实时产出 `verified` ⇒ 假。
-- [ ] AC2：`DriverResult` 词表强制含 `not-evaluated`；「读不到输入」被表达成非 `not-evaluated` 的值 ⇒ 假；取假见正本 AC153。
+- [x] AC1：核心不变式只存在一份，两 kind 共用；任一 kind 能在未经独立判据证实时产出 `verified` ⇒ 假。
+- [x] AC2：`DriverResult` 词表强制含 `not-evaluated`；「读不到输入」被表达成非 `not-evaluated` 的值 ⇒ 假；取假见正本 AC153。
 
 ## Definition of Done
 
