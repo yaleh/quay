@@ -154,6 +154,20 @@ node --experimental-strip-types packages/quay-native/bin/quay-native.ts <command
 node --experimental-strip-types packages/quay-github/bin/quay-github.ts <command>
 ```
 
+For **development** — editing the web UI source under `packages/quay/src` and
+seeing changes served without a manual restart — run `quay serve` under Node's
+built-in watch mode (`--watch`, Node ≥ 18):
+
+```sh
+node --watch --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4173
+```
+
+`node --watch` restarts the whole process whenever an imported module changes,
+so a live-page edit takes effect immediately (the server's `GET /health`
+reports `stale: false`, since each restart starts a fresh process). This is a
+plain Node feature — deliberately there is **no** `--dev`/`--watch` flag on
+`quay serve`; the built-in mechanism needs no product surface of its own.
+
 ### Option C — as a Claude Code plugin
 
 ```
