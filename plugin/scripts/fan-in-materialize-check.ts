@@ -31,13 +31,15 @@
 //     materialized divergence is benign worktree evolution / post-dispatch sync) ⇒ NOT-APPLICABLE,
 //     never RED.
 //
-//   worktree file EXISTS on disk — DECISIVE:
+//   worktree file EXISTS on disk:
 //     materialized script == worktree file  ⇒ GREEN  (worktree-version-materialized — correct)
-//     materialized script != worktree file  ⇒ RED    (fallback: main/stale version materialized)
+//     materialized script != worktree file  ⇒ fall through to the git-reconstructed states below
+//       (post-dispatch merge-develop sync is a LEGITIMATE evolution — the materialized record is the
+//       dispatch-time worktree version, the on-disk file is the post-sync version; NOT a fallback)
 //
-//   worktree file GONE (cleaned up after a completed fan-in) — git-reconstructed states
-//     (base = the fan-in fork point; fanIn = the worktree HEAD at fan-in end, first-parent = the
-//     worktree HEAD at dispatch):
+//   worktree file GONE (cleaned up after a completed fan-in) OR on-disk MISMATCH — git-reconstructed
+//     states (base = the fan-in fork point; fanIn = the worktree HEAD at fan-in end, first-parent =
+//     the worktree HEAD at dispatch):
 //     materialized == worktree@fanIn            ⇒ GREEN (final worktree state — the task's committed
 //                                                    change, if any, is present)
 //     materialized == worktree@dispatch-HEAD    ⇒ GREEN (dispatch-time worktree state)
@@ -234,7 +236,6 @@ export type VerdictKind =
   | "green-worktree-final"
   | "green-worktree-dispatch-head"
   | "green-base-not-task-touched"
-  | "red-worktree-exists-mismatch"
   | "red-materialized-equals-base-task-touched"
   | "not-applicable-non-bootstrap"
   | "not-evaluated";
@@ -252,7 +253,8 @@ export interface Verdict {
  * PURE: judge ONE materialized record.
  * @param record   the materialized workflow record.
  * @param worktreeFile absolute path to the worktree's fan-in-execute.js (may not exist).
- * @param recon    git-reconstructed worktree states (for gone worktrees), or null when unresolvable.
+ * @param recon    git-reconstructed worktree states (for gone worktrees AND on-disk mismatch — the
+ *        post-dispatch-sync case), or null when unresolvable.
  * @param isBootstrapHit whether the task's `## Touches` lists a fan-in orchestration file
  *        (`taskIsBootstrapHit`): true = bootstrap-HIT (self-verification applies), false = non-bootstrap
  *        (the materialization check does NOT apply — the MAIN version is correct), null = undeterminable
@@ -273,7 +275,7 @@ export function judgeRecord(
     return { kind: "not-applicable-non-bootstrap", reason: "non-bootstrap task (## Touches lists no fan-in orchestration file) — materialization check not applicable; the MAIN version is correct", evaluated: false, ok: true, worktreeFile };
   }
 
-  // Case 1 — the worktree file is still on disk: byte-exact comparison is decisive.
+  // Case 1 — the worktree file is still on disk: byte-exact match is decisive GREEN.
   if (fs.existsSync(worktreeFile)) {
     let wtContent: string;
     try {
@@ -284,12 +286,16 @@ export function judgeRecord(
     if (record.script === wtContent) {
       return { kind: "green-worktree-version-materialized", reason: "materialized script == worktree fan-in-execute.js (worktree version materialized)", evaluated: true, ok: true, worktreeFile };
     }
-    return { kind: "red-worktree-exists-mismatch", reason: "materialized script != worktree fan-in-execute.js (fallback: main/stale version materialized)", evaluated: true, ok: false, worktreeFile };
+    // Mismatch — NOT immediately RED (gap-fan-in-materialize-check-bootstrap-hit-post-dispatch-sync):
+    // the worktree may have been merge-develop-synced AFTER dispatch, so the on-disk file is a later
+    // legitimate version while the materialized record is the dispatch-time version. Fall through to
+    // the git-reconstructed states below to distinguish post-dispatch sync from a true fallback.
   }
 
-  // Case 2 — the worktree is gone (fan-in completed and cleaned up). Use git-reconstructed states.
+  // Case 2 — the worktree is gone (fan-in completed and cleaned up) OR on-disk mismatch (post-dispatch
+  // merge-develop sync). Use git-reconstructed states.
   if (!recon || recon.baseContent == null || recon.fanInContent == null) {
-    return { kind: "not-evaluated", reason: "worktree gone and git reconstruction unresolvable — cannot judge", evaluated: false, ok: true, worktreeFile };
+    return { kind: "not-evaluated", reason: "worktree-vs-materialized mismatch and git reconstruction unresolvable — cannot judge (post-dispatch sync not pin-able)", evaluated: false, ok: true, worktreeFile };
   }
   // 2a. The final worktree state (fanInCommitSha) — the task's committed change, if any, is present.
   if (record.script === recon.fanInContent) {
@@ -479,7 +485,8 @@ export function main(argv: string[]): number {
     // tasks are NOT applicable (their MAIN-version materialization is correct). null = undeterminable
     // (no task file / no Touches section) ⇒ fail-closed (judged as if bootstrap-HIT).
     const isBootstrapHit = taskIsBootstrapHit(tasksDir, record.taskId);
-    // Reconstruct the gone-worktree states from A16 telemetry + git (only used when the worktree is gone).
+    // Reconstruct the worktree states from A16 telemetry + git (used when the worktree is gone AND when
+    // the on-disk file mismatches — the post-dispatch merge-develop sync case).
     const events = readWorkflowEvents(workflowEventsDir, record.fanInRunId);
     const recon = events ? reconstructWorktree(root, workflowRel, events.baseSha, events.fanInSha, mainlineRef) : null;
     verdicts.push({ record, verdict: judgeRecord(record, worktreeFile, recon, isBootstrapHit) });

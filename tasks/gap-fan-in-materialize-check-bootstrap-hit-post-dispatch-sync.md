@@ -32,9 +32,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，本案归 green）：构造「派发时刻 materialized == worktree@dispatch-HEAD，但当前 worktree 已 merge-develop 到新版本」的 case，checker 判 green（不 RED）；（⛔ 仍 RED ⇒ 假）。
-- [ ] AC2（能取假，真阳性不削弱）：构造「materialized == base（PRE-task）且 task 自己 commit 改过 fan-in-execute.js」的 case，checker 仍 RED（fallback 真阳性保留）；（⛔ 变 green ⇒ 削弱，假）。
-- [ ] AC3（能取假，真机回放）：对 2026-08-25 的 wf_c0f7d061-5e4（materialized 491f894e）真机回放，checker 不再报 red-worktree-exists-mismatch（判 green 或 not-evaluated，非 RED）。
+- [x] AC1（能取假，本案归 green）：构造「派发时刻 materialized == worktree@dispatch-HEAD，但当前 worktree 已 merge-develop 到新版本」的 case，checker 判 green（不 RED）；（⛔ 仍 RED ⇒ 假）。
+- [x] AC2（能取假，真阳性不削弱）：构造「materialized == base（PRE-task）且 task 自己 commit 改过 fan-in-execute.js」的 case，checker 仍 RED（fallback 真阳性保留）；（⛔ 变 green ⇒ 削弱，假）。
+- [x] AC3（能取假，真机回放）：对 2026-08-25 的 wf_c0f7d061-5e4（materialized 491f894e）真机回放，checker 不再报 red-worktree-exists-mismatch（判 green 或 not-evaluated，非 RED）。
 
 ## Definition of Done
 
