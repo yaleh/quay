@@ -79,7 +79,7 @@ function stagePack({ withNodeModules = true } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mgr-vec-"));
   const pkg = path.join(tmp, "pkg");
   fs.mkdirSync(path.join(pkg, "plugin"), { recursive: true });
-  for (const rel of ["scripts", "loop", ".claude"]) {
+  for (const rel of ["scripts", "loop", ".claude", ".quay"]) {
     fs.cpSync(path.join(pluginDir, rel), path.join(pkg, "plugin", rel), { recursive: true });
   }
   fs.mkdirSync(path.join(pkg, "plugin", "skills"), { recursive: true });
@@ -153,7 +153,7 @@ test("AC2 — quay-launch.sh resolves the SHIPPED plugin settings in a bare pack
       /plugin\/\.claude\/launch\.settings\.json/,
       "must fall back to the SHIPPED plugin/.claude/launch.settings.json (bare-metal vector)"
     );
-    assert.match(r.stdout, /-n quay-manager/, "the manager session name must come from the launch settings");
+    assert.match(r.stdout, /-n quay-manager/, "the manager session name must resolve from the SHIPPED plugin/.quay/profiles.yml (AC154 profile carrier fallback)");
   } finally { cleanup(tmp); }
 });
 

@@ -555,20 +555,46 @@ export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
  *  live process cmdline (`Task: <id>`) is the only carrier that shows it in-flight. */
 export const WORKER_PROCESS_NAME = "quay-task-worker";
 
-/** The subset of the outcome record readLive consumes. Unknown/missing fields degrade to null rather
- *  than a fabricated reading (hard rule ③b). */
+/** The full outcome record the worker-driver writes (computeOutcome's 14 fields + the
+ *  gap-worker-task-transcript-access-webui `session_id` that lands later). Unknown/missing fields
+ *  degrade to null rather than a fabricated reading (hard rule ③b) — the carrier is a best-effort
+ *  runtime log, so a missing `worker_pid`/`exit_code` must read as null, never as a fake 0. */
 export interface WorkerOutcomeRecord {
+  /** ISO-8601 UTC write time (the carrier's `ts`). */
+  ts: string | null;
   task: string | null;
-  run_id: string | null;
-  /** ISO-8601 UTC worker-run start (the carrier's `started_at`). */
-  started_at: string | null;
+  selector_reason: string | null;
+  /** Process exit code (null on signal / spawn-failed / timed-out). */
+  exit_code: number | null;
+  /** Termination signal (null unless killed). */
+  signal: string | null;
+  /** Wall-clock duration of the worker run, ms. */
+  wall_clock_ms: number | null;
   /** Terminal state: completed | exited-not-landed | failed | killed | timed-out | spawn-failed | not-dispatched. */
   final_state: string | null;
+  failure_reason: string | null;
+  /** ISO-8601 UTC worker-run start (the carrier's `started_at`). */
+  started_at: string | null;
+  /** ISO-8601 UTC worker-run end (the carrier's `ended_at`). */
+  ended_at: string | null;
+  worker_pid: number | null;
+  run_id: string | null;
+  in_flight_count: number | null;
+  timed_out: boolean | null;
+  /** Transcript session id — written by gap-worker-task-transcript-access-webui (not yet on disk).
+   *  Parses to null until that lands, so a Runs block can link the transcript with zero
+   *  re-implementation (this task reuses that task's read+validation, hard rule ③b / AC3). */
+  session_id: string | null;
 }
 
 /** Parse `.quay/worker-outcome.jsonl` (one JSON object per line) into outcome records. Pure — never
- *  throws; a malformed line is skipped (best-effort runtime log, not a store). */
+ *  throws; a malformed line is skipped (best-effort runtime log, not a store). Reads every field the
+ *  driver writes (computeOutcome's 14) rather than a hand-picked subset — `worker_pid` was on disk
+ *  but dropped by the old 4-field parse (gap-webui-task-runs-block AC2). */
 export function parseWorkerOutcomeRecords(text: string): WorkerOutcomeRecord[] {
+  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
   const out: WorkerOutcomeRecord[] = [];
   for (const line of String(text).split("\n")) {
     const s = line.trim();
@@ -576,10 +602,21 @@ export function parseWorkerOutcomeRecords(text: string): WorkerOutcomeRecord[] {
     let j: Record<string, unknown>;
     try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
     out.push({
-      task: typeof j.task === "string" && j.task.length > 0 ? j.task : null,
-      run_id: typeof j.run_id === "string" && j.run_id.length > 0 ? j.run_id : null,
-      started_at: typeof j.started_at === "string" && j.started_at.length > 0 ? j.started_at : null,
-      final_state: typeof j.final_state === "string" && j.final_state.length > 0 ? j.final_state : null,
+      ts: str(j.ts),
+      task: str(j.task),
+      selector_reason: str(j.selector_reason),
+      exit_code: num(j.exit_code),
+      signal: str(j.signal),
+      wall_clock_ms: num(j.wall_clock_ms),
+      final_state: str(j.final_state),
+      failure_reason: str(j.failure_reason),
+      started_at: str(j.started_at),
+      ended_at: str(j.ended_at),
+      worker_pid: num(j.worker_pid),
+      run_id: str(j.run_id),
+      in_flight_count: num(j.in_flight_count),
+      timed_out: bool(j.timed_out),
+      session_id: str(j.session_id),
     });
   }
   return out;
@@ -709,6 +746,13 @@ function readWorkerOutcomeText(root: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** Read + parse all worker-outcome records for a workspace root (the /task/<id> Runs block's data
+ *  source — gap-webui-task-runs-block). Absent/unreadable ⇒ [] (degrade, never throw). */
+export function readWorkerOutcomeRecords(root: string): WorkerOutcomeRecord[] {
+  const text = readWorkerOutcomeText(root);
+  return text != null ? parseWorkerOutcomeRecords(text) : [];
 }
 
 /**

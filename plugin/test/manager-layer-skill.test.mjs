@@ -28,6 +28,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
@@ -83,9 +84,15 @@ test('AC4 — the launch config 三件套 (deepseek-v4-pro + CLAUDE_CODE_MAX_CON
   assert.ok(fs.existsSync(settingsPath), '.claude/launch.settings.json must exist (checked-in deliverable)');
   const s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   assert.equal(s.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '917000', 'env must carry the 917000 context (三件套 #1)');
-  const outer = s._launchSpec?.roles?.outer;
-  assert.equal(outer?.launcher, 'claude-fjdac', 'outer role must use claude-fjdac launcher (三件套 #2)');
-  assert.equal(outer?.model, 'deepseek-v4-pro', 'outer role must pin deepseek-v4-pro (三件套 #3)');
+  // AC154: launcher/model now live in .quay/profiles.yml (profile 抽层), not _launchSpec.
+  const profilesPath = path.join(repoRoot, '.quay', 'profiles.yml');
+  assert.ok(fs.existsSync(profilesPath), '.quay/profiles.yml must exist (AC154 profile carrier)');
+  const py = spawnSync('python3', ['-c', 'import sys,yaml,json; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))', profilesPath], { encoding: 'utf8' });
+  assert.equal(py.status, 0, `profiles.yml must parse as YAML:\n${py.stderr}`);
+  const p = JSON.parse(py.stdout);
+  const outerProf = p.profiles[p.roles.outer.profile];
+  assert.equal(outerProf.launcher, 'claude-fjdac', 'outer role must use claude-fjdac launcher (三件套 #2)');
+  assert.equal(outerProf.model, 'deepseek-v4-pro', 'outer role must pin deepseek-v4-pro (三件套 #3)');
   // The manager skill references the launch config for the manager's own start (tribal → installable),
   // WITHOUT exposing the bare launcher script — a skill is the user-facing interface, the launcher is
   // skill-internal (gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal AC2/AC4).

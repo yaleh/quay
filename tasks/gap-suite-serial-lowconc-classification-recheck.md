@@ -1,6 +1,6 @@
 ---
 id: gap-suite-serial-lowconc-classification-recheck
-title: serial/lowconc load-sensitive 分类复核——占 50% full-bucket 时间，抽查是否过时
+title: serial/lowconc 降并发两条路径判断不一致——--buckets 未启用分相（33 主动验证）
 status: ready
 labels:
   - gap
@@ -13,24 +13,34 @@ extra: {}
 
 ## Proposal
 
-`scripts/test.sh` 里 serial+lowconc 两阶段合计吃掉 full-bucket suite 真实执行时间 ~50%（8h 窗口 12 轮 full-bucket：serial 25% + lowconc 25%）——这些文件被 `// @test-group serial` / `// @test-group lowconc` 标记 load-sensitive、跑降并发（`nproc/(S×P)`）。分类是**每文件顶部自声明**（`grep -rl "@test-group.*serial\|@test-group.*lowconc"` 命中 63 个文件），无集中维护、无「最后核实时间」记录。⛔ 无证据说明现在有错分类，只是该假设从未被系统性复核过。本任务是**抽查复核**，不是直接改降并发配置。
+serial+lowconc 两阶段合计吃掉 full-bucket suite 真实执行时间 ~50%（8h 12 轮：serial 25% + lowconc 25%）——标 `@test-group serial`/`lowconc` 的文件跑降并发（`nproc/(S×P)`）。**定性修正（manager 逐条核实，人裁定「发」）：不是「分类过时」，是「同一套判断在两条路径上一条生效一条不生效」**：
+
+**① 降并发的真实理由（`scripts/test.sh:70-96`，与 S 无关）**：serial(并发1)=嵌套启动 suite / 真实墙钟等待 A/B + real-install/quay-init 家族（后者 round 162 因全量负载下「轮着 flaky」才并入）；lowconc(并发3)=hermetic 但负载敏感的 session-observation 家族（私有 socket + 墙钟等待）。⇒ 它们敏感的是**墙钟超时与独占资源**，不是 CPU。
+
+**② 这套保护在当前主要派发路径 `--buckets` 上根本没启用**：`suite-bucket-select.ts` + `suite-lpt-runner.mjs` 全文无 `test-group` 字样，serial/lowconc 文件在 bucket 跑里 concurrency=16 裸跑，且历史 120 轮 fail=0。⇒ 两条路径判断不一致。
+
+**③ S 的双重身份（解释「96 个纯 S 文件只能走 full」）**：S 定义 = `scripts/test.sh` 本身；静态引用 test.sh 的文件 bucket-set={S} ⇒ 任何 P-only/M-only 改动都选不中它。
+
+**④ `@test-group` 分相与 bucket 分类是两套正交机制**：纯 S 文件 @test-group 标签五花八门——「S 分类」与「低并发」无因果。
+
+**⑤ 数量更正 + 收窄（`effectiveBucketSet` 普查）**：serial/lowconc 文件是 **61 个**（非 63）。其中 **27 个已有生产证据（22-60 次重复 fail=0、load 29.0-45.3，含 stage-receipt 41 次 bucket-path fail=0）已另立任务直接移出**（`gap-suite-move-27-evidenced-files-out-serial-lowconc`）。剩余 **33 个纯 S 无证据**（结构性永不被 bucket 跑选中，只能主动跑验证）+ **0 待观察**。全库分布：M 190 / P 104 / 纯S 96 / M+P 14 / UNRESOLVED 9 / M+S 8 / P+S 7 / M+P+S 6。
 
 ## Plan
 
-抽样一批 serial/lowconc 文件，各在主并发池（不降并发）独立重跑 N 次记录稳定性；稳定候选移出降并发名单（或记录为「复核后保留 + 复核时间」）。
+33 个纯 S 的 serial/lowconc 文件主动跑验证（主并发池 N 次重跑记录稳定）。据结果落方向——(a) 让 `--buckets` 也尊重分相，或 (b) 确认新条件下不需要、两条路径一起停用。⛔ 测出结论前不朝任一方向动。
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，抽查执行）：抽样 ≥N 个 serial/lowconc 文件各在主并发池重跑，记录稳定/不稳定；（⛔ 未抽查 ⇒ 假）。
-- [ ] AC2（能取假，结论落地）：稳定候选移出降并发名单，不稳定保留并记录复核时间；（⛔ 稳定文件仍在降并发名单且无复核记录 ⇒ 假）。
+- [ ] AC1（能取假，33 主动验证）：33 个纯 S 的 serial/lowconc 文件各在主并发池独立重跑 N 次，记录稳定/不稳定；（⛔ 未主动跑 33 个 ⇒ 假）。
+- [ ] AC2（能取假，结论落地）：据测量落方向 (a) 或 (b)（测出前不动任一方向）；（⛔ 无结论或先动后测 ⇒ 假）。
 
 ## Definition of Done
 
-serial/lowconc 分类复核完成；AC1-2 全勾；过时降并发标注被纠正（或确认无误 + 补复核时间记录）。
+两条路径判断一致性结论落地；AC1/AC2 全勾；serial/lowconc 分相按结论统一（启用或停用），不再一条生效一条不生效。
 
 ## Touches
 
-- 被抽查的 @test-group serial/lowconc 文件（标注调整，如需）
-- scripts/test.sh（如需改降并发名单消费）
-- plugin/test/...（对应测试，如需）
+- 被主动验证的 @test-group serial/lowconc 文件（标注调整，如需）
+- scripts/test.sh（如需按结论统一分相）
+- plugin/scripts/suite-bucket-select.ts（如需按结论统一分相）
 - tasks/gap-suite-serial-lowconc-classification-recheck.md（自身）

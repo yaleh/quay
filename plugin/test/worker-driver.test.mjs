@@ -1286,12 +1286,18 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
 
 // ── AC140（可配 wrapper + model + 按 role；单一真相源；覆盖语义统一）──────────────────────────────
 // 驱动的 LLM spawn 不再硬编码 `["claude","-p",prompt]`——单一构造 launchArgv 走
-// `quay-launch.sh <role> -p <prompt>`，wrapper/model/--bare 由 .claude/launch.settings.json 的
-// _launchSpec.roles 承载。取假靠 dry-run 读【启动语义】字段（launcher / --model），⛔ 不靠 argv0
+// `quay-launch.sh <role> -p <prompt>`，wrapper/model/--bare 由 .quay/profiles.yml 的 profiles/roles
+// 承载（AC154 profile 抽层）。取假靠 dry-run 读【启动语义】字段（launcher / --model），⛔ 不靠 argv0
 // （claude-fjdac 末行 exec claude 使 argv0 恒为 claude）。
 
 const QUAY_LAUNCH = path.resolve(__dirname, "..", "scripts", "quay-launch.sh");
-const LAUNCH_SETTINGS = path.resolve(__dirname, "..", "..", ".claude", "launch.settings.json");
+const PROFILES = path.resolve(__dirname, "..", "..", ".quay", "profiles.yml");
+
+// profiles.yml 是 YAML；launcher 经 python3+yaml 消费，本测试用同一手法转 JSON 后断言结构。
+function readProfiles() {
+  const out = execFileSync("python3", ["-c", "import sys,yaml,json; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))", PROFILES], { encoding: "utf8" });
+  return JSON.parse(out);
+}
 
 function dryRunLaunch(role, ...extra) {
   return execFileSync("bash", [QUAY_LAUNCH, role, "--dry-run", ...extra], { encoding: "utf8" }).trim();
@@ -1306,19 +1312,20 @@ test("AC140-1 — single constructor: launchArgv produces bash+quay-launch.sh+<r
   assert.deepEqual(defaultSelectorArgv(["a"], "/r").slice(0, 4), ["bash", "/r/plugin/scripts/quay-launch.sh", "selector", "-p"]);
 });
 
-test("AC140-2 — configurable: worker roles carry wrapper+model in _launchSpec.roles (falsifiable vs manager)", () => {
-  const settings = JSON.parse(fs.readFileSync(LAUNCH_SETTINGS, "utf8"));
-  const roles = settings._launchSpec.roles;
-  // 正控制：新 worker 角色照 outer/inner 抄（⛔ 不照 manager 的裸 claude + model null）。
+test("AC140-2 — configurable: worker roles carry wrapper+model via shared profile (falsifiable vs manager)", () => {
+  const p = readProfiles();
+  const roles = p.roles;
+  const profileOf = (role) => p.profiles[roles[role].profile];
+  // 正控制：新 worker 角色照 outer/inner 抄（⛔ 不照 manager 的裸 claude + model null）；AC154 后三者共享同一 profile。
   for (const role of ["task-worker", "selector", "fix-worker"]) {
-    assert.equal(roles[role].launcher, "claude-fjdac", `${role}.launcher must be the wrapper (not bare claude)`);
-    assert.ok(roles[role].model, `${role}.model must be configured (not null)`);
+    assert.equal(profileOf(role).launcher, "claude-fjdac", `${role} profile launcher must be the wrapper (not bare claude)`);
+    assert.ok(profileOf(role).model, `${role} profile model must be configured (not null)`);
     assert.ok(roles[role].name && roles[role].name.startsWith("quay-") && roles[role].name !== "quay-inner",
       `${role} needs a distinct -n name (concurrent-worker ListAgents collision)`);
   }
-  // 负控制：manager 仍裸 claude + model null（照它抄就是错——quay-launch.sh:80 只查非空不查取值，无任何机件报错）。
-  assert.equal(roles.manager.launcher, "claude");
-  assert.equal(roles.manager.model, null);
+  // 负控制：manager 仍裸 claude + model null（照它抄就是错——quay-launch.sh 只查非空不查取值，无任何机件报错）。
+  assert.equal(profileOf("manager").launcher, "claude");
+  assert.equal(profileOf("manager").model, null);
 
   // dry-run 实测：wrapper/model 确实出现在 spawn 命令行（launcher=claude-fjdac ⇒ wrapper 在链 ⇒ ANTHROPIC_BASE_URL 注入）。
   const taskWorker = dryRunLaunch("task-worker", "-p", "TEST");

@@ -437,3 +437,96 @@ test("stale-pids AC1/AC3 (mixed) — a live pid stays in pids, a concurrent dead
     cleanup(tmp);
   }
 });
+
+// ── stale-pids AC2 (real zombie replay): the DETECTION path, not just the routing seam ────────────────
+// The retreat (2026-08-14) was triggered because the seam-based tests above were green while production
+// still reported a dead pid as alive: manager ran --json → pids=[122043,474265] stale_pids=[] but
+// `ps -p 474265` was dead. Root cause: pid_alive used os.path.exists(/proc/<pid>), which is TRUE for a
+// ZOMBIE (state=Z still has a /proc entry). A zombie's cmdline is empty so it can never be re-scanned as
+// a monitor — the only way to exercise the REAL detection against a real zombie is the --probe-alive
+// seam, which feeds a pid straight to pid_alive (same function the scan uses). This test would have
+// FAILED against the old os.path.exists check (probe → "alive") and passes only against the
+// /proc/<pid>/stat state!=Z check.
+
+// /proc/<pid>/stat state field: `pid (comm) state ppid ...` — comm can contain spaces/parens, so parse
+// from the last `)` (mirrors readPpid above and the checker's own pid_alive).
+function readStatState(pid) {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    const idx = stat.lastIndexOf(")");
+    return stat.slice(idx + 2).trim().split(/\s+/)[0];
+  } catch {
+    return null;
+  }
+}
+
+// Spawn a REAL zombie: the background `sleep 0.2` exits and stays a zombie (state=Z) for the ~3s the
+// parent `sleep 3` is alive-but-not-reaping; its pid is written to pidFile.
+function spawnZombie(pidFile) {
+  const h = spawn(
+    "bash",
+    ["-c", `sleep 0.2 & echo $! > '${pidFile}'; sleep 3`],
+    { stdio: "ignore" },
+  );
+  h.unref();
+  return h;
+}
+
+async function waitForZombie(pid, { timeoutMs = 5000, intervalMs = 25 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const state = readStatState(pid);
+    if (state === "Z") return;
+    if (Date.now() >= deadline) {
+      throw new Error(`pid ${pid} not a zombie after ${timeoutMs}ms (state=${state})`);
+    }
+    await sleep(intervalMs);
+  }
+}
+
+function runProbeAlive(pid, livenessPath) {
+  const res = spawnSync("bash", [CHECKER, "--probe-alive", String(pid)], {
+    encoding: "utf8",
+    env: { ...process.env, MONITOR_CHECK_SESSION_LIVENESS: livenessPath },
+  });
+  assert.equal(res.status, 0, res.stderr);
+  return res.stdout.trim();
+}
+
+test("stale-pids AC2 — a REAL zombie (state=Z) is judged stale via /proc/<pid>/stat, not os.path.exists", async () => {
+  const tmp = makeTmpWorkspace();
+  const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+  writeStubLiveness(livenessPath);
+  const pidFile = path.join(tmp, "zombie.pid");
+  spawnZombie(pidFile);
+  let zombie = null;
+  try {
+    zombie = await waitForPidFile(pidFile);
+    await waitForZombie(zombie);
+    // Precondition that pins the exact bug: /proc/<zombie> still EXISTS, so the old os.path.exists
+    // check would (wrongly) report it alive — this is the "can-take-false" replay AC2 demands.
+    assert.ok(fs.existsSync(`/proc/${zombie}`),
+      "precondition: /proc/<zombie> exists — os.path.exists would wrongly judge it alive");
+    assert.equal(runProbeAlive(zombie, livenessPath), "stale",
+      "a real zombie must be judged stale by state=Z (the old existence check reported alive)");
+  } finally {
+    if (zombie) { try { process.kill(zombie, "SIGKILL"); } catch { /* already gone */ } }
+    cleanup(tmp);
+  }
+});
+
+test("stale-pids AC2 (control) — --probe-alive reports alive for a LIVE pid and stale for a nonexistent pid", () => {
+  const tmp = makeTmpWorkspace();
+  const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+  writeStubLiveness(livenessPath);
+  const child = spawnInSessionFake(livenessPath, { SESSION_ROOT: tmp });
+  try {
+    assert.equal(runProbeAlive(child.pid, livenessPath), "alive",
+      "a live pid must be judged alive by --probe-alive (state != Z)");
+    assert.equal(runProbeAlive(999999999, livenessPath), "stale",
+      "a nonexistent pid must be judged stale (stat read → OSError)");
+  } finally {
+    try { child.kill("SIGKILL"); } catch { /* already gone */ }
+    cleanup(tmp);
+  }
+});
