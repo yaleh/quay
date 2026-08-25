@@ -31,6 +31,13 @@ sessions 列表/详情页三缺陷（人 MCP 浏览器 + manager 读代码双核
 - (a) 为此处破例引入最小滚动监听 JS（明确写打破 zero-JS 约定的理由）；
 - (b) 退让为「滚动接近底部时用 `<details>`/锚点等原生机制触发」（需人确认是否满足「滚动动态加载」本意）。
 
+**✅ 已定方向（阶段一落地）＝ (a)，理由如下**：
+1. **只有 (a) 能同时满足 AC3 的「滚动动态加载」与「不再 2MB 全量平铺」两个不可让渡的量**。(b) 的原生 `<details>` 只有两种落法，都会撞其中一条：要么把更早的 turn **预嵌入** `<details>`（字节层面仍是 2MB 全量下传，perf 修复落空，AC3「仍全量平铺」半假）；要么 `<details>` 里放一个「加载更早」的 `<a>` 分页链接——被 Plan 明文排除（「非『加载更早』分页链接」）。
+2. **zero-JS 约定的本意是「无框架、无构建、无 WebSocket、无跨页状态」**，而不是「绝不允许任何一行 `<script>`」。(a) 只引入**一个自包含的 IntersectionObserver 脚本**（约 30 行、无依赖、无框架、无 WebSocket），破例范围**仅限详情页这一个页面**，其余全部页面维持 zero-JS。这是「最小、局部、可点名」的破例，不是约定全面失效。
+3. 「服务端按需重新截取 tail」这半句本身也指向 (a)：只有客户端发一个「再给我更早的 N 条」的请求，服务端才能**按需重读 tail**；(b) 的原生 `<details>` 无法在展开时触发服务端再读。
+
+**第 2 条对 Plan 原文「不改数据抓取逻辑」的落地修订（诚实记录，非悄悄改）**：AC2 明写「首屏不再同步读全部 GONE 的 200KB tail」，与 Plan 的「不改数据抓取逻辑」冲突。以 AC 为准：`readSessions` 对 GONE 会话**跳过 tail 读取**（`messages: null`、`transcriptStatus: "empty"`），折叠的 `<details>` 只装最小 name 卡片（name + GONE 徽章 + 「点击查看」提示，卡片本身就是 `/session/<id>` 链接）；200KB tail 读取移到详情页按需。这样「点开才读取」的语义 = 点开卡片导航到详情页才读 tail。
+
 ## Acceptance Criteria
 
 - [ ] AC1（能取假，卡片可点）：列表页卡片 `<a href="/session/<id>">` 包裹，点击导航到 `/session/<id>` 详情页；（⛔ 仍裸 `<div>` 不可点 ⇒ 假）。
@@ -43,7 +50,7 @@ sessions 列表/详情页三缺陷（人 MCP 浏览器 + manager 读代码双核
 
 ## Touches
 
-- packages/quay/src/serve-sessions.ts（cardFor 加 `<a>`、LIVE/GONE 分组 `<details>`、renderSessionPage 最近 N + 按需加载）
-- packages/quay/src/observation.ts（readSessions / readTranscript 按需重新截取 tail，如需）
-- packages/quay/test/ 或 plugin/test/（卡片链接 / GONE 折叠 / 详情按需加载 测试）
+- packages/quay/src/serve-sessions.ts（cardFor 加 `<a>`、LIVE/GONE 分组 `<details>`、renderSessionPage 最近 N + 按需加载、/earlier 端点）
+- packages/quay/src/observation.ts（readSessions 跳过 GONE tail / readTranscript truncated 旗标 / SessionDetail.sessionId）
+- packages/quay/test/serve-sessions.test.mjs（卡片链接 / GONE 折叠 / 详情按需加载 + truncated 测试）
 - tasks/gap-sessions-page-slow-unclickable-flat-render.md（自身）
