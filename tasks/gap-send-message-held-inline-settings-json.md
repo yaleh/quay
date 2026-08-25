@@ -1,7 +1,7 @@
 ---
 id: gap-send-message-held-inline-settings-json
 title: 发消息给运行中 worker 恒 held——deliverySettingsFromArgv 把 --settings 内联 JSON 当文件路径读（ENOENT 回退全局无 defaultMode，100% 影响）
-status: todo
+status: ready
 labels:
   - gap
   - defect
