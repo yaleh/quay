@@ -1,13 +1,19 @@
 ---
 id: gap-archguard-zero-production-calls
-title: archguard 从未被真实调用，而 CLAUDE.md 明令「Consult it before calling a milestone done」——规定存在、执行为零
+title: archguard 从未被真实调用，而 CLAUDE.md 明令「Consult it before calling a milestone
+  done」——规定存在、执行为零
 status: ready
 labels:
   - gap
   - defect
 parent: null
 children: []
-extra: {}
+extra:
+  correction_note: pool-quality-judge 误判 should-remove（采信 07-20 过期注释）→ 已恢复
+    ready。实测：archguard 现能解析本仓（07-23 6f183ef9 加 tsconfig 后），.archguard/output/src
+    367 entities / scripts 2017 entities；crossDomainFusions 找到 4 族重复
+    store（createAdrStore/createDocumentStore/createGoalStore，assertSafeId/assertSafeStatus
+    逐字节复制），真实结构洞见非空跑。
 ---
 **type:** execution
 
