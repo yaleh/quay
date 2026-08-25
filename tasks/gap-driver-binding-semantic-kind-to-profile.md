@@ -40,4 +40,5 @@ driver 消费 policy 落地；AC1-2 全勾；调用点不硬编码 profile；web
 - plugin/scripts/promotion-driver.ts（注释：buildFixWorkerArgv 走 policy）
 - plugin/test/worker-driver.test.mjs（AC140-1/1b/3 改测 policy 解析）
 - plugin/test/promotion-driver.test.mjs（buildFixWorkerArgv 改测 policy 解析）
+- plugin/test/driver-cli.test.mjs（KERNEL_DEPS 补 profile-policy.ts + temp root 铺 node_modules 符号链接，kernel 首带 yaml 依赖）
 - tasks/gap-driver-binding-semantic-kind-to-profile.md（自身）

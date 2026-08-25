@@ -42,6 +42,7 @@ const KERNEL_DEPS = [
   "driver-result.ts",
   "driver-filters.ts",
   "gate-script-base.ts",
+  "profile-policy.ts",
   "routine-scheduler.ts",
   "task-schema.ts",
   "touches-orthogonality-check.ts",
@@ -64,6 +65,11 @@ function copyKernel(scripts) {
   for (const dep of KERNEL_DEPS) {
     fs.copyFileSync(path.join(SCRIPTS_DIR, dep), path.join(scripts, dep));
   }
+  // L3（gap-driver-binding-semantic-kind-to-profile）后 driver-runtime.ts import profile-policy.ts
+  // （→ `yaml`），kernel 首次带 node_modules 依赖。给 temp root 铺 node_modules 符号链接（同
+  // dispatch-worktree-setup.sh 的手法），让裸说明符 `import "yaml"` 从 temp root 向上可解析。
+  const root = path.resolve(scripts, "..", "..");
+  fs.symlinkSync(path.join(REPO_ROOT, "node_modules"), path.join(root, "node_modules"), "dir");
   fs.writeFileSync(path.join(scripts, "promotion-driver.ts"), FAKE_DRIVER, "utf8");
   fs.writeFileSync(path.join(scripts, "worker-driver.ts"), FAKE_DRIVER, "utf8");
 }
