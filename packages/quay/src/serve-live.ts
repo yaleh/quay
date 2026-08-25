@@ -46,7 +46,7 @@ export function formatAwaitingDuration(ms: number | null): string {
   return m === 0 ? `${h}h` : `${h}h${m}m`;
 }
 
-function renderLivePage(live: LiveResult): string {
+export function renderLivePage(live: LiveResult): string {
   // gap-webui-cross-task-blocking-visibility: render the cross-task blocking relation (Touches
   // intersection + depends_on chain) computed by observation.computeInFlightBlocking. A task-id list
   // renders as comma-joined links; an empty list renders the 「无」 placeholder so "no relation" is
@@ -57,11 +57,12 @@ function renderLivePage(live: LiveResult): string {
       : html`<span class="meta">无</span>`;
 
   const rows = live.inFlight.length > 0 ? html`<table>
-    <tr><th>task id</th><th>run id</th><th>pid</th><th>started</th><th>elapsed</th><th>状态</th><th>待落地时长</th><th>阻塞 (blocks)</th><th>被阻塞 (blockedBy)</th></tr>
+    <tr><th>task id</th><th>run id</th><th>pid</th><th>transcript</th><th>started</th><th>elapsed</th><th>状态</th><th>待落地时长</th><th>阻塞 (blocks)</th><th>被阻塞 (blockedBy)</th></tr>
     ${live.inFlight.map((t) => html`<tr>
       <td><a href="/task/${encodeURIComponent(t.taskId)}">${escapeHtml(t.taskId)}</a></td>
       <td>${escapeHtml(t.runId)}</td>
       <td>${t.pid != null ? escapeHtml(t.pid) : html`<span class="meta">—</span>`}</td>
+      <td>${t.sessionId != null ? html`<a href="/session/${encodeURIComponent(t.sessionId)}">transcript</a>` : html`<span class="meta">—</span>`}</td>
       <td>${escapeHtml(relativeTime(t.startedAtMs))}</td>
       <td>${escapeHtml(t.minutes.toFixed(1))} 分钟</td>
       <td>${t.implCompletedAtMs == null ? "实现中" : html`<strong>已完工待落地</strong>`}</td>

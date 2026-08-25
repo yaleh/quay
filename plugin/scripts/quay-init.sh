@@ -703,7 +703,7 @@ write_state_file() {
   # files under them (sorted). .quay/quay-init-state.json is included so the record self-tracks.
   for root in \
     "plugin/scripts" "plugin/probes" "orchestration" "docs/analysis" \
-    ".quay/config.yml" ".quay/quay-init-state.json" ".quay/runtime" \
+    ".quay/config.yml" ".quay/profiles.yml" ".quay/quay-init-state.json" ".quay/runtime" \
     ".claude/workflows" ".claude/agents" ".claude/launch.settings.json"; do
     if [ -f "$WORKSPACE_ROOT/$root" ]; then
       printf '%s\n' "$root" >> "$laid_rel_file"
@@ -1680,7 +1680,7 @@ auto_commit_laid_down() {
   # unrelated uncommitted work — AC3). Missing paths are skipped; gitignored runtime bundles never
   # reach the stage. Runs in a subshell at the workspace root so the literal `git add` / `git commit`
   # (the Contract invoke's surface) are the real operations, not prose.
-  for p in .gitignore .quay/config.yml .quay/quay-init-state.json plugin/scripts orchestration docs/analysis .claude/workflows .claude/agents .claude/launch.settings.json tasks; do
+  for p in .gitignore .quay/config.yml .quay/profiles.yml .quay/quay-init-state.json plugin/scripts orchestration docs/analysis .claude/workflows .claude/agents .claude/launch.settings.json tasks; do
     if [ -e "$WORKSPACE_ROOT/$p" ]; then
       ( cd "$WORKSPACE_ROOT" && git add -- "$p" ) 2>/dev/null || true
     fi
@@ -1958,8 +1958,9 @@ PYEOF
   fi
 
   # Launch config (gap-quay-init-coldstart-usability-launch-not-used-... F4/AC2): the checked-in
-  # per-role launch command lives in <target>/.claude/launch.settings.json (settings-schema keys +
-  # _launchSpec for flag-only params), materialized by quay-launch.sh — but quay-init NEVER laid it
+  # per-role launch command lives in <target>/.claude/launch.settings.json (Claude Code 认识的键
+  # $schema/permissions/env) + <target>/.quay/profiles.yml（AC154 profile 抽层后 launcher/model/--bare/
+  # -n/unset + flag-only 参数的承载），materialized by quay-launch.sh — but quay-init NEVER laid it
   # down, so a cold-started third-party target had a laid-down quay-launch.sh that FAILED CLOSED
   # ("launch settings file not found") and consumers hand-started sessions without --settings /
   # without the role-convention name (measured 2026-08-11 on ad-arm1 archguard). Lay the DEFAULT
@@ -1974,6 +1975,15 @@ PYEOF
   else
     copy_one "$ls_src" "$ls_dst" managed
     echo "  launch-config: laid down .claude/launch.settings.json (default template — edit model/env per project; quay-launch.sh materializes it)"
+  fi
+  # profiles.yml 同源铺设（AC154）：profile/roles/flags 承载；缺 plugin 模板则警告、不影响已铺设的 settings。
+  pf_src="$PLUGIN_ROOT/.quay/profiles.yml"
+  pf_dst="$WORKSPACE_ROOT/.quay/profiles.yml"
+  if [ ! -f "$pf_src" ]; then
+    echo "  WARN: profiles template missing from plugin: $pf_src" >&2
+  else
+    copy_one "$pf_src" "$pf_dst" managed
+    echo "  launch-config: laid down .quay/profiles.yml (default profile carrier — edit launcher/model per project)"
   fi
 
   # AC7b (gap-cold-start-...-eight-steps) + gap-vendor-runtime-not-in-git-clone-broken-mcp-entry

@@ -1,7 +1,7 @@
 ---
 id: gap-tests-round-load-curve-time-window-clip
 title: /tests?round=N 负载曲线未按该轮时间窗裁剪——显示窗外数据（1552.6s vs 真实 437.5s）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -25,8 +25,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，时间窗裁剪）：`/tests?round=N` 负载曲线数据按 `[startedAt, startedAt+durationMs]` 裁剪（不显示窗外数据）；（⛔ 仍显示窗外数据 ⇒ 假）。
-- [ ] AC2（能取假，两处一致）：与 `/tests/file` 复用同一时间窗过滤逻辑（两处同一份数据都防）；（⛔ 两处逻辑不一致 ⇒ 假）。
+- [x] AC1（能取假，时间窗裁剪）：`/tests?round=N` 负载曲线数据按 `[startedAt, startedAt+durationMs]` 裁剪（不显示窗外数据）；（⛔ 仍显示窗外数据 ⇒ 假）。
+- [x] AC2（能取假，两处一致）：与 `/tests/file` 复用同一时间窗过滤逻辑（两处同一份数据都防）；（⛔ 两处逻辑不一致 ⇒ 假）。
 
 ## Definition of Done
 
@@ -35,5 +35,5 @@ extra: {}
 ## Touches
 
 - packages/quay/src/serve-tests.ts（/tests?round=N 负载曲线过滤）
-- packages/quay/test/serve-tests.test.mjs（对应测试）
+- packages/quay/test/serve-handlers.test.mjs（对应测试——与既有 serve-tests 测试同文件）
 - tasks/gap-tests-round-load-curve-time-window-clip.md（自身）

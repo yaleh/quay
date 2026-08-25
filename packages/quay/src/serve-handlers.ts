@@ -20,7 +20,7 @@ import { handleBoard } from "./serve-board.ts";
 import { handleGitHistory } from "./serve-git.ts";
 import { handleSystem, handleManager } from "./serve-system.ts";
 import { handleTests, handleTestsFile } from "./serve-tests.ts";
-import { handleSessions, handleSession } from "./serve-sessions.ts";
+import { handleSessions, handleSession, handleSessionDownload } from "./serve-sessions.ts";
 import { handleArchitecture } from "./serve-architecture.ts";
 import { handleDashboard } from "./serve-dashboard.ts";
 
@@ -109,6 +109,19 @@ export async function handleAllRoutes(
     let sessionId: string;
     try { sessionId = decodeURIComponent(sessionM[1]); } catch { sessionId = sessionM[1]; }
     await handleSession(req, res, cfg, sessionId);
+    return;
+  }
+
+  // gap-worker-task-transcript-access-webui AC3: raw JSONL download for a transcript session. Same
+  // strict-UUID lookup key as the view; the handler resolves it through sessionTranscriptPath (UUID
+  // regex → fixed project slug join), so a non-UUID / traversal segment is rejected with 400, never
+  // used as a path component. A malformed %-escape falls back to the raw segment → fails UUID
+  // validation → honest 400 rather than a 500.
+  const sessionDlM = /^\/session\/([^/]+)\/download$/.exec(url.pathname);
+  if (sessionDlM) {
+    let sessionId: string;
+    try { sessionId = decodeURIComponent(sessionDlM[1]); } catch { sessionId = sessionDlM[1]; }
+    await handleSessionDownload(req, res, cfg, sessionId);
     return;
   }
 

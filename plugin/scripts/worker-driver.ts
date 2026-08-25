@@ -116,6 +116,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // AC150-3：资源门判定 + 控制态 + 身份闸 + MCP 控制面，抽到 driver-shared.ts 供 promotion-driver 复用
@@ -175,8 +176,8 @@ export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
 /** checkout 前 stash 的缺省 message（`git stash list` 可核的标记，AC2）。 */
 export const DEFAULT_STASH_MESSAGE = "worker-driver: stash before checkout (SPEC §5 阶段 2)";
 
-/** 存活 worker 进程的 `-n` 名（quay-launch.sh 由 .claude/launch.settings.json 的
- *  `_launchSpec.roles["task-worker"].name` 承载；AC140-2 测试钉死 name 以 quay- 开头）。
+/** 存活 worker 进程的 `-n` 名（quay-launch.sh 由 .quay/profiles.yml 的
+ *  `roles["task-worker"].name` 承载；AC140-2 测试钉死 name 以 quay- 开头）。
  *  冷启动在飞枚举用它识别存活 worker 进程的 cmdline（/proc/<pid>/cmdline）。
  *  AC150-3：控制态常量（CONTROL_STATE_REL/CONTROL_CALLERS_ENV/DEFAULT_CALLERS/CONTROL_HEADER/
  *  CONTROL_HEADER_NAME）已随控制面抽到 driver-shared.ts 并在本文件 re-export；本常量是 worker
@@ -198,9 +199,9 @@ export const RECONCILE_INTERVAL_SECS_DEFAULT = 300;
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
 
 /**
- * 一条结构化 outcome 记录（SPEC §4③ 字段齐全 + 直接量 + 超时标记 + 落地判定）。
+ * 一条结构化 outcome 记录（SPEC §4③ 字段齐全 + 直接量 + 超时标记 + 落地判定 + transcript session_id）。
  * @returns {object} { ts, task, selector_reason, exit_code, signal, wall_clock_ms, final_state,
- *   failure_reason, started_at, ended_at, worker_pid, run_id, in_flight_count, timed_out }
+ *   failure_reason, started_at, ended_at, worker_pid, run_id, in_flight_count, timed_out, session_id }
  */
 export function computeOutcome({
   task,
@@ -216,6 +217,7 @@ export function computeOutcome({
   timedOut = false,
   landed = null,
   landReason = null,
+  sessionId = null,
 }: {
   task: string;
   selectorReason: string;
@@ -230,6 +232,10 @@ export function computeOutcome({
   timedOut?: boolean;
   landed?: boolean | null;
   landReason?: string | null;
+  /** 本次尝试的 transcript session id（gap-worker-task-transcript-access-webui AC1：spawn 传
+   *  `--session-id <uuid>`，同一 uuid 落盘 ⇒ web 可逐次访问该尝试的 transcript）。null = 无会话
+   *  （not-dispatched 等未 spawn 路径）。 */
+  sessionId?: string | null;
 }) {
   // AC3（能取假，超时路径）：timedOut ⇒ final_state=timed-out（区别于外部 kill 的 killed）。
   //   被信号杀（非超时）⇒ final_state=killed + signal 落盘，⛔ 静默丢任务。
@@ -278,6 +284,7 @@ export function computeOutcome({
     run_id: runId,
     in_flight_count: inFlightCount,
     timed_out: timedOut,
+    session_id: sessionId,
   };
 }
 
@@ -717,8 +724,8 @@ export function splitArgs(cmd: string): string[] {
 
 /**
  * 单一真相源（AC140-1）：驱动 LLM spawn 的 argv 构造——走 `quay-launch.sh <role> -p <prompt>`。
- * launcher / model / --bare / -n 全部由 `.claude/launch.settings.json` 的 `_launchSpec.roles[<role>]`
- * 承载（⛔ 不在驱动里硬编码 claude/wrapper/model，四处分立的 `["claude","-p",…]` 全部归到这一处）。
+ * launcher / model / --bare / -n 全部由 `.quay/profiles.yml` 的 `profiles`/`roles` 承载
+ * （⛔ 不在驱动里硬编码 claude/wrapper/model，四处分立的 `["claude","-p",…]` 全部归到这一处）。
  * role ∈ task-worker | selector | fix-worker。wrapper 的贡献全在 env（claude-fjdac 末行 `exec claude`），
  * 故本 argv 只看得见 `bash` + `quay-launch.sh`——AC2 取假须读 spawn 出的 worker 进程 env（ANTHROPIC_BASE_URL）。
  */
@@ -768,7 +775,7 @@ export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOpt
 }
 
 /** 缺省 worker 命令：quay-launch.sh task-worker -p <full-chain prompt>（argv 形，child 即 worker，超时
- *  SIGTERM 杀得准）。launcher/model/--bare 由 `_launchSpec.roles["task-worker"]` 承载（AC140-2 可配）。
+ *  SIGTERM 杀得准）。launcher/model/--bare 由 `.quay/profiles.yml` 的 profiles/roles 承载（AC140-2 可配）。
  *  prompt 里【直接】要求 worker 以 scriptPath 调 fan-in-execute workflow——驱动直调 ⇒ A6「检查 fan-in
  *  是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
 export function defaultWorkerArgv(task: string, root: string): string[] {
@@ -1090,6 +1097,7 @@ export function computeHaltedOutcome({
     run_id: runId,
     in_flight_count: inFlightCount,
     timed_out: false,
+    session_id: null, // 未 spawn ⇒ 无 transcript 会话（诚实 null，⛔ 不伪造成「有会话」）
   };
 }
 
@@ -1150,11 +1158,26 @@ function appendWorkerPid(pidFile: string, workerPid: number): void {
 }
 
 /**
+ * 生成一个 transcript session id（UUID v4）。gap-worker-task-transcript-access-webui AC1：每次派发
+ * （每尝试非每任务）生成【新】UUID——同任务重派 N 次有 N 个不同 session_id ⇒ 每次尝试的 transcript
+ * 可逐次访问。独立成函数供测试直接调用（⛔ 不内联 randomUUID 让「每次新」无处可验）。
+ */
+export function newSessionId(): string {
+  return randomUUID();
+}
+
+/**
  * spawn 一个 worker 并等待其终态（含超时 SIGTERM）。超时 ⇒ kill("SIGTERM")，close 事件带 signal=SIGTERM，
  * timedOut 标记落 outcome final_state=timed-out（worktree_preserved=true，⛔ 不清理——SPEC §1 设计点3
  * 超时保留 worktree）。其它异常死亡终态（failed/killed——worker 没跑完、无完成实现）清理 orphan
  * worktree（gap-worker-driver-no-record-on-abnormal-death AC2）；⛔ exited-not-landed（exit 0 但没落地，
  * 含 needs-human 闸拒绝）保留分支/worktree 供续做（gap-worker-needs-human-destroys-branch-worktree AC1）。
+ *
+ * gap-worker-task-transcript-access-webui AC1：每次尝试生成新 session_id 并落盘 outcome；spawn 时把
+ * `--session-id <uuid>` 追加进 argv（经 quay-launch.sh 的 PASSTHRU 透传给 claude ⇒ transcript 落
+ * `~/.claude/projects/<slug>/<uuid>.jsonl`）。⛔ `--worker-cmd-exact` 测试缝（`node -e …`/`sleep` 等
+ * 假命令）不追加（假命令不接受该 flag，追加会误杀全部既有测试）——但 session_id 仍生成并落盘
+ * （AC1 的「每行有 session_id」对测试缝同样成立，只是不进 argv）。
  */
 function runOneWorker({
   taskId,
@@ -1167,6 +1190,8 @@ function runOneWorker({
   inFlightCount,
   json,
   pidFile,
+  sessionId = newSessionId(),
+  injectSessionId = true,
 }: {
   taskId: string;
   selectorReason: string;
@@ -1178,9 +1203,12 @@ function runOneWorker({
   inFlightCount: number;
   json: boolean;
   pidFile?: string;
+  sessionId?: string;
+  injectSessionId?: boolean;
 }): Promise<WorkerRunResult> {
+  const argv = injectSessionId ? [...workerArgv, "--session-id", sessionId] : workerArgv;
   return new Promise((resolve) => {
-    const [cmd, ...cmdArgs] = workerArgv;
+    const [cmd, ...cmdArgs] = argv;
     const startedAtMs = Date.now();
     let child: ReturnType<typeof spawn> | null = null;
     let spawnError: string | null = null;
@@ -1208,6 +1236,7 @@ function runOneWorker({
         startedAtMs, endedAtMs, workerPid, runId,
         spawnError: spawnErr, inFlightCount, timedOut,
         landed: landing.landed, landReason: landing.reason,
+        sessionId,
       });
       // gap-worker-driver-no-record-on-abnormal-death（AC2，能取假）：worker 异常死亡（failed/killed——
       // worker 没跑完、无完成实现）后，orphan worktree 永久残留会挡 driver 下轮对同一 task 的
@@ -1339,7 +1368,7 @@ export async function readyPoolCheck(
 
 /** 缺省 selector worker 命令（短命 LLM——SPEC §1 设计点1「选择仍应是语义的」）。prompt 内联打散后的
  *  候选 id 列表，要求输出一行 `<task-id> <一句理由>`。launcher/model/--bare 由
- *  `_launchSpec.roles["selector"]` 承载（AC140-2 可配）。 */
+ *  `.quay/profiles.yml` 的 profiles/roles 承载（AC140-2 可配）。 */
 export function defaultSelectorArgv(candidateIds: string[], root: string): string[] {
   const prompt = [
     `You are the resident task selector for the quay worker driver (SPEC §5 阶段 4 — AC129).`,
@@ -1512,6 +1541,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       inFlightCount: running.length + 1,
       json,
       pidFile,
+      injectSessionId: workerCmdOpts.exact == null,
     }).then((r) => {
       rw.done = true;
       results.push(r);
@@ -1785,6 +1815,7 @@ export async function main(argv: string[]): Promise<number> {
     const r = await runOneWorker({
       taskId, selectorReason, runId: runIdForTask, workerArgv: argv, rootDir, outcomeFile,
       timeoutMs, inFlightCount: inFlight, json, pidFile,
+      injectSessionId: workerCmdOpts.exact == null,
     });
     inFlight -= 1;
     results[idx] = r;

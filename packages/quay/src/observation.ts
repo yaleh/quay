@@ -96,6 +96,14 @@ export interface InFlightTask {
    * downstream (gap-webui-live-passthrough-pid).
    */
   pid: string | null;
+  /**
+   * The live transcript session id for an in-flight worker (gap-worker-task-transcript-access-webui
+   * AC2): joined from `~/.claude/sessions/<pid>.json`'s `sessionId` for the worker-process-signal
+   * task whose pid is known. null otherwise — a live worker has NO transcript join when its pid has
+   * no session record yet (honest null, hard rule ③b: 读不到 ≠ 无会话可访问，但「无链接」比「伪造
+   * 链接」安全，且进程退出即删只覆盖在飞).
+   */
+  sessionId: string | null;
   startedAtMs: number;
   /**
    * Impl-complete boundary (gap-inflight-states-missing-impl-complete-event): the third lifecycle
@@ -235,6 +243,7 @@ export function pairInFlight(events: RawEvent[], nowMs: number): InFlightTask[] 
         taskId: rec.taskId,
         runId: rec.runId,
         pid: null, // pure event pairing: no live process known (readLive annotates it for 方向二)
+        sessionId: null, // pure event pairing: no process ⇒ no live session join (readLive annotates)
         startedAtMs: rec.start.timing.startedAtMs,
         implCompletedAtMs:
           rec.implComplete && typeof rec.implComplete.recordedAtMs === "number"
@@ -662,6 +671,7 @@ export function workerInFlightTasks(records: WorkerOutcomeRecord[], nowMs: numbe
       taskId: task,
       runId: r.run_id ?? `worker-${task}`,
       pid: null, // outcome-carrier task: no live process known (written only at worker END)
+      sessionId: null, // outcome-carrier task: no live process ⇒ no live session join (readLive annotates)
       startedAtMs: r.startedMs,
       implCompletedAtMs: null,
       minutes: Math.max(0, (nowMs - r.startedMs) / 60_000),
@@ -737,6 +747,23 @@ export function readLiveWorkerProcesses(procDir: string = "/proc"): LiveWorker[]
     out.push({ taskId, pid: e, startedAtMs: procStartTimeMs(procDir, e, btimeSec) });
   }
   return out;
+}
+
+/** Read the live session id for a worker pid from `~/.claude/sessions/<pid>.json` (the Claude Code
+ *  live-session registry — pid → sessionId, written while the process is alive, deleted on exit; only
+ *  covers in-flight). Returns null when the record is missing/unreadable/malformed or its `sessionId`
+ *  is not a strict UUID (hard rule ③b: 读不到 ≠ 无会话，诚实 null 让 /live 渲染「无链接」而非伪造)。
+ *  `home` is injectable for tests; defaults to the real `$HOME`. */
+export function liveSessionIdForPid(pid: string, home: string = os.homedir()): string | null {
+  if (!/^\d+$/.test(pid)) return null; // pid must be numeric (the /proc entry name) — never a path component
+  try {
+    const text = fs.readFileSync(path.join(home, ".claude", "sessions", `${pid}.json`), "utf8");
+    const j = JSON.parse(text) as Record<string, unknown>;
+    const sid = j.sessionId;
+    return typeof sid === "string" && isValidSessionId(sid) ? sid : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Read `.quay/worker-outcome.jsonl` as text. Absent/unreadable ⇒ null (degrade, never throw). */
@@ -829,7 +856,8 @@ function readTaskStatusOnDisk(root: string, taskId: string): string | null {
  */
 export function readLive(
   root: string,
-  { nowMs = Date.now(), liveWorkers = null }: { nowMs?: number; liveWorkers?: LiveWorker[] | null } = {},
+  { nowMs = Date.now(), liveWorkers = null, sessionHome = os.homedir() }:
+    { nowMs?: number; liveWorkers?: LiveWorker[] | null; sessionHome?: string } = {},
 ): LiveResult {
   const eventsDir = path.join(root, FAST_MODE_EVENTS_DIR);
   let inFlight: InFlightTask[] = [];
@@ -901,6 +929,10 @@ export function readLive(
       taskId: w.taskId,
       runId: `worker-${w.taskId}`,
       pid: w.pid,
+      // gap-worker-task-transcript-access-webui AC2: join ~/.claude/sessions/<pid>.json for the live
+      // transcript session id (worker-driver now spawns `claude --session-id <uuid>`, so a live worker's
+      // pid maps to the session whose transcript is being written RIGHT NOW).
+      sessionId: liveSessionIdForPid(w.pid, sessionHome),
       startedAtMs,
       implCompletedAtMs: null,
       minutes: Math.max(0, (nowMs - startedAtMs) / 60_000),

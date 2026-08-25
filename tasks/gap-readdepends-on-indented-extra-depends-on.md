@@ -1,7 +1,7 @@
 ---
 id: gap-readdepends-on-indented-extra-depends-on
 title: "readDependsOn 认不到 extra: 缩进下的 depends_on——10 条任务依赖读不到 ⇒ 无效派发"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -23,8 +23,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，缩进形态可读）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。
-- [ ] AC2（能取假，派发前依赖生效）：dep 未合入 develop 的任务不被派发（调度层读到依赖）；（⛔ dep 未合入仍被派发 ⇒ 假）。
+- [x] AC1（能取假，缩进形态可读）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。
+- [x] AC2（能取假，派发前依赖生效）：dep 未合入 develop 的任务不被派发（调度层读到依赖）；（⛔ dep 未合入仍被派发 ⇒ 假）。
 
 ## Definition of Done
 
@@ -32,6 +32,7 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/task-schema.ts（readDependsOn flow + block 两形态）
-- plugin/test/task-schema.test.mjs（对应测试，含缩进形态样本）
+- experiments/quay-perpetual-stream/scripts/task-schema.ts（readDependsOn flow + block 两形态，canonical 源）
+- plugin/scripts/task-schema.ts（vendored mirror，sync-vendor 镜像同步）
+- experiments/quay-perpetual-stream/test/task-schema.test.mjs（对应测试，含缩进形态样本）
 - tasks/gap-readdepends-on-indented-extra-depends-on.md（自身）

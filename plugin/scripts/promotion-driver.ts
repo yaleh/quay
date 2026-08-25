@@ -274,7 +274,7 @@ export function buildFixWorkerPrompt(id: string, missing: string[]): string {
 }
 
 /** fix worker argv = `quay-launch.sh fix-worker -p <prompt>`（短命，launcher/model/--bare 由
- *  `_launchSpec.roles["fix-worker"]` 承载——AC140-2 可配，单一构造 launchArgv）。--fix-worker-cmd 覆盖
+ *  `.quay/profiles.yml` 的 profiles/roles 承载——AC140-2 可配，单一构造 launchArgv）。--fix-worker-cmd 覆盖
  *  可执行【前缀】时把 prompt 作为末参数追加（测试缝捕获真实 prompt，AC2 取假实测——prompt 是数据、
  *  不是可执行串）。 */
 export function buildFixWorkerArgv(id: string, missing: string[], root: string, fixWorkerCmd?: string | null): string[] {

@@ -20,8 +20,9 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript } from "../src/serve-handlers.ts";
-import { readGitHistory } from "../src/observation.ts";
+import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock } from "../src/serve-handlers.ts";
+import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
+import { renderLivePage } from "../src/serve-live.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -609,9 +610,14 @@ function seedDriftFixture(ws) {
     JSON.stringify({ round: 479, startedAt: "2026-08-23T03:33:00.000Z", durationMs: 645000, state: "red", runner: "outer", scope: "worktree", runId: runIdLatest, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 0, fail: 1, cancelled: 0, tests: 2, failures: [] }),
   ].join("\n"));
   fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "red", runId: runIdLatest, startedAt: "2026-08-23T03:33:00.000Z" }));
+  // gap-tests-round-load-curve-time-window-clip — samples must land INSIDE round 479's declared
+  // [03:33:00Z, 03:33:00Z+645s] window: the round page now clips the load curve to that window, so
+  // out-of-window samples (the old `Date.now()` values, ~2 days later) would be dropped and the
+  // AC1/AC3 load-curve heading assertions would break.
+  const start479 = Date.parse("2026-08-23T03:33:00.000Z");
   fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runIdLatest}.jsonl`), [
-    JSON.stringify({ t: Date.now(), loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
-    JSON.stringify({ t: Date.now() + 5000, loadavg: 4.5, cpu_stall: 40.0, mem_avail: 7500.0 }),
+    JSON.stringify({ t: start479 + 1000, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
+    JSON.stringify({ t: start479 + 5000, loadavg: 4.5, cpu_stall: 40.0, mem_avail: 7500.0 }),
   ].join("\n"));
   return { runIdLatest, runIdOlder };
 }
@@ -687,7 +693,7 @@ test("AC3: negative control — all three sections reference the same round cons
     ].join("\n"));
     fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId, startedAt: "2026-08-23T01:00:00.000Z" }));
     fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
-      JSON.stringify({ t: Date.now(), loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
+      JSON.stringify({ t: Date.parse("2026-08-23T01:00:00.000Z") + 1000, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
     ].join("\n"));
     createStore(tasksDir).write("RD-AC3", { title: "round consistency web tests", status: "todo" });
 
@@ -929,13 +935,18 @@ test("AC1: GET /tests?round=N shows THAT round's timeline + load curve (not the 
     // full-suite-state.json points at the LATEST runId (default page = round 511); round 510's own
     // runId has its own sampler file, so ?round=510 must read THAT, not the current runId.
     fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId: runId511 }));
+    // gap-tests-round-load-curve-time-window-clip — samples land INSIDE their round's declared window
+    // (round 510 = [01:00Z, 01:00Z+500s], round 511 = [02:00Z, 02:00Z+400s]); the round page now clips
+    // to that window, so the old 2023-dated samples would be dropped and the heading assertions break.
+    const start510 = Date.parse("2026-08-23T01:00:00.000Z");
+    const start511 = Date.parse("2026-08-23T02:00:00.000Z");
     fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId510}.jsonl`), [
-      JSON.stringify({ t: 1_700_000_000_000, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
-      JSON.stringify({ t: 1_700_000_005_000, loadavg: 2.5, cpu_stall: 12.0, mem_avail: 7900.0 }),
+      JSON.stringify({ t: start510 + 1000, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
+      JSON.stringify({ t: start510 + 5000, loadavg: 2.5, cpu_stall: 12.0, mem_avail: 7900.0 }),
     ].join("\n"));
     fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId511}.jsonl`), [
-      JSON.stringify({ t: 1_700_000_000_000, loadavg: 7.0, cpu_stall: 50.0, mem_avail: 5000.0 }),
-      JSON.stringify({ t: 1_700_000_005_000, loadavg: 8.0, cpu_stall: 55.0, mem_avail: 4800.0 }),
+      JSON.stringify({ t: start511 + 1000, loadavg: 7.0, cpu_stall: 50.0, mem_avail: 5000.0 }),
+      JSON.stringify({ t: start511 + 5000, loadavg: 8.0, cpu_stall: 55.0, mem_avail: 4800.0 }),
     ].join("\n"));
 
     const port = await freePort();
@@ -1020,6 +1031,263 @@ test("AC1 falsifiability: /tests?round=<absent> renders an explicit not-found no
       if (server.client) await server.client.close();
     }
     process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-tests-round-load-curve-time-window-clip — the round page clips the load curve to the round's
+// declared [startedAt, startedAt+durationMs] window (the /tests/file page already clipped). AC2 =
+// both pages reuse the SAME shared filter (clipSuiteLoadSamplesToWindow). ──────────────────────────
+
+test("clipSuiteLoadSamplesToWindow keeps samples inside [start, end] inclusive and drops everything outside (the shared time-window filter)", () => {
+  const samples = [
+    { t: 90, loadavg: 1.0, cpu_stall: null, mem_avail: null },
+    { t: 100, loadavg: 2.0, cpu_stall: null, mem_avail: null },
+    { t: 150, loadavg: 3.0, cpu_stall: null, mem_avail: null },
+    { t: 200, loadavg: 4.0, cpu_stall: null, mem_avail: null },
+    { t: 210, loadavg: 5.0, cpu_stall: null, mem_avail: null },
+  ];
+  const clipped = clipSuiteLoadSamplesToWindow(samples, 100, 200);
+  assert.deepEqual(clipped.map((s) => s.t), [100, 150, 200], "inclusive bounds keep 100..200, drop 90 and 210");
+  assert.equal(clipSuiteLoadSamplesToWindow(samples, 0, 50).length, 0, "a window before all samples clips to empty");
+  assert.equal(clipSuiteLoadSamplesToWindow(samples, 300, 400).length, 0, "a window after all samples clips to empty");
+});
+
+test("AC1: GET /tests?round=N clips the load curve to [startedAt, startedAt+durationMs], dropping out-of-window samples", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-roundclip-ac1-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const start = Date.parse("2026-08-23T01:00:00.000Z");
+    const durationMs = 437500; // the proposal's real round #560 duration
+    const runId = "fm-roundclip-560-eeeeee";
+    createStore(tasksDir).write("RC-A1", { title: "round clip web tests", status: "todo" });
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 560, startedAt: "2026-08-23T01:00:00.000Z", durationMs, state: "green", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [] }),
+    ].join("\n"));
+    // Four samples: two inside [start, start+durationMs], one before it, one after it — clipping must
+    // keep exactly the two in-window samples (the bug showed all four spanning 1552.6s vs 437.5s).
+    fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
+      JSON.stringify({ t: start - 100_000, loadavg: 9.0, cpu_stall: null, mem_avail: null }), // before window
+      JSON.stringify({ t: start + 100_000, loadavg: 1.5, cpu_stall: null, mem_avail: null }), // inside
+      JSON.stringify({ t: start + 200_000, loadavg: 2.5, cpu_stall: null, mem_avail: null }), // inside
+      JSON.stringify({ t: start + durationMs + 100_000, loadavg: 9.5, cpu_stall: null, mem_avail: null }), // after window
+    ].join("\n"));
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests?round=560");
+    assert.equal(r.status, 200, "GET /tests?round=560 returns 200");
+    assert.ok(r.body.includes("负载曲线（round #560 · 01:00Z）"), "the load curve heading names round 560");
+    // Exactly the two in-window samples are plotted (one <circle class="git-svg-commit"> per sample).
+    const points = (r.body.match(/class="git-svg-commit"/g) ?? []).length;
+    assert.equal(points, 2, `two in-window samples plotted, the two out-of-window dropped (got ${points})`);
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2: /tests/file and /tests?round=N both clip through the SAME shared filter (each to its own window)", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-roundclip-ac2-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const t0 = Date.parse("2026-08-23T01:00:00.000Z"); // the round's own startedAt (2026, in-window)
+    const runId = "fm-roundclip-file-ffffff";
+    createStore(tasksDir).write("RC-A2", { title: "round clip shared filter tests", status: "todo" });
+    // One round whose perFile slow.test.mjs spans [t0+290, t0+500]; the round's own window is
+    // [t0, t0+500000]. Samples: two inside BOTH windows, one only inside the round window but AFTER the
+    // file window, one after both — the two pages clip to DIFFERENT windows via the same filter.
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 570, startedAt: "2026-08-23T01:00:00.000Z", durationMs: 500000, state: "green", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 500, startedAtMs: t0 + 290 }] }),
+    ].join("\n"));
+    fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
+      JSON.stringify({ t: t0 + 300, loadavg: 1.0, cpu_stall: null, mem_avail: null }), // file window AND round window
+      JSON.stringify({ t: t0 + 400, loadavg: 2.0, cpu_stall: null, mem_avail: null }), // file window AND round window
+      JSON.stringify({ t: t0 + 60_000, loadavg: 3.0, cpu_stall: null, mem_avail: null }), // round window, AFTER file window
+      JSON.stringify({ t: t0 + 600_000, loadavg: 4.0, cpu_stall: null, mem_avail: null }), // after both windows
+    ].join("\n"));
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    // The FILE page clips to the file's [startedAtMs, endedAtMs] = [t0+290, t0+500] → keeps 2 samples.
+    const filePage = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs");
+    const filePoints = (filePage.body.match(/class="git-svg-commit"/g) ?? []).length;
+    assert.equal(filePoints, 2, `file page clips to the file window (keeps 2, got ${filePoints})`);
+
+    // The ROUND page clips to [startedAt, startedAt+durationMs] = [t0, t0+500000] → keeps 3 samples.
+    const roundPage = await get(port, "/tests?round=570");
+    const roundPoints = (roundPage.body.match(/class="git-svg-commit"/g) ?? []).length;
+    assert.equal(roundPoints, 3, `round page clips to the round window (keeps 3, got ${roundPoints})`);
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-worker-task-transcript-access-webui (AC2 + AC3) ───────────────────────────────────────
+// worker-driver spawns `claude --session-id <uuid>` and writes session_id to worker-outcome.jsonl;
+// the web layer links those transcripts. AC2: /live joins ~/.claude/sessions/<pid>.json → live
+// sessionId for an in-flight worker. AC3: the task-detail Runs block renders a per-attempt view +
+// raw-JSONL download, and the download endpoint rejects any non-UUID session_id (path-traversal guard).
+
+function getRes(port, urlPath) {
+  return new Promise((resolve, reject) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
+    }).on("error", reject);
+  });
+}
+
+test("AC2 (unit) — liveSessionIdForPid joins pid→sessionId, and rejects non-numeric pid / non-UUID sessionId", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "live-sess-"));
+  const sessionsDir = path.join(home, ".claude", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  try {
+    const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+    fs.writeFileSync(path.join(sessionsDir, "12345.json"), JSON.stringify({ pid: 12345, sessionId: sid }));
+    fs.writeFileSync(path.join(sessionsDir, "77777.json"), JSON.stringify({ pid: 77777, sessionId: "not-a-uuid" }));
+
+    assert.equal(liveSessionIdForPid("12345", home), sid, "valid pid → its sessionId");
+    assert.equal(liveSessionIdForPid("99999", home), null, "missing record → null (honest, no fabricated link)");
+    assert.equal(liveSessionIdForPid("77777", home), null, "non-UUID sessionId → null");
+    assert.equal(liveSessionIdForPid("../../etc/passwd", home), null, "non-numeric pid (traversal) → null, never a path component");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("AC2 (unit) — readLive annotates in-flight worker tasks with the live sessionId (pid→sessionId join)", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "live-join-"));
+  const sessionsDir = path.join(home, ".claude", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-root-"));
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  fs.writeFileSync(path.join(sessionsDir, "12345.json"), JSON.stringify({ pid: 12345, sessionId: sid }));
+  try {
+    const nowMs = Date.now();
+    const live = readLive(root, {
+      nowMs,
+      sessionHome: home,
+      liveWorkers: [
+        { taskId: "gap-live-1", pid: "12345", startedAtMs: nowMs - 60_000 },
+        { taskId: "gap-live-2", pid: "99999", startedAtMs: nowMs - 60_000 },
+      ],
+    });
+    const byTask = new Map(live.inFlight.map((t) => [t.taskId, t]));
+    assert.equal(byTask.get("gap-live-1").sessionId, sid, "in-flight worker with a session record carries its live sessionId");
+    assert.equal(byTask.get("gap-live-2").sessionId, null, "worker with no session record carries null (no fabricated link)");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 (falsifiable) — renderLivePage renders a transcript link ONLY for in-flight workers with a sessionId", () => {
+  const base = {
+    status: "ok", reason: null, concurrency: 1, cpuPressure: null,
+    liveState: "running", liveExplanation: null, activity: null,
+  };
+  const task = (sessionId) => ({
+    taskId: "gap-live-1", runId: "worker-gap-live-1", pid: "12345", sessionId,
+    startedAtMs: Date.now() - 60_000, implCompletedAtMs: null, minutes: 1,
+    liveness: "alive", blocks: [], blockedBy: [],
+  });
+  const withLink = renderLivePage({ ...base, inFlight: [task("066a1382-fde0-410b-bee1-78a4b5886132")] });
+  assert.match(withLink, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132"/, "in-flight worker with sessionId renders a /session transcript link (⛔ 无链接 ⇒ 假)");
+  const noLink = renderLivePage({ ...base, inFlight: [task(null)] });
+  assert.doesNotMatch(noLink, /href="\/session\//, "no sessionId ⇒ no transcript link (honest null, hard rule ③b)");
+});
+
+test("AC3 (unit) — sessionTranscriptPath is traversal-proof: non-UUID/`..` resolves to null, valid joins the fixed project slug", () => {
+  const home = "/fake-home";
+  assert.equal(sessionTranscriptPath("/a/b", "../etc/passwd", home), null, "`..` is not a UUID ⇒ null (never a path component)");
+  assert.equal(sessionTranscriptPath("/a/b", "not-a-uuid", home), null, "non-UUID ⇒ null");
+  assert.equal(sessionTranscriptPath("/a/b", "/etc/passwd", home), null, "absolute path ⇒ null");
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  assert.equal(
+    sessionTranscriptPath("/a/b", sid, home),
+    path.join(home, ".claude", "projects", "-a-b", `${sid}.jsonl`),
+    "valid UUID is joined onto the FIXED project slug — never used as a raw path",
+  );
+  assert.ok(isValidSessionId(sid), "the fixture UUID is valid (control)");
+});
+
+test("AC3 (unit) — taskRunsBlock renders a per-attempt view + download link for a record with session_id", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  fs.writeFileSync(path.join(q, "worker-outcome.jsonl"), [
+    JSON.stringify({ ts: "2026-08-25T00:00:00Z", task: "gap-runs-1", final_state: "completed", exit_code: 0, session_id: sid }),
+    JSON.stringify({ ts: "2026-08-25T00:01:00Z", task: "gap-runs-1", final_state: "failed", exit_code: 7, session_id: null }),
+  ].join("\n") + "\n");
+  try {
+    const recs = readWorkerOutcomeRecords(root).filter((r) => r.task === "gap-runs-1");
+    assert.equal(recs.length, 2, "two attempts read back");
+    assert.equal(recs[0].session_id, sid, "session_id is parsed from the carrier");
+    const htmlBlock = taskRunsBlock(root, "gap-runs-1");
+    assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132"/, "Runs block links the view for the attempt with a session_id");
+    assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132\/download"/, "Runs block links the raw download for the attempt");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 (integration) — /session/<id>/download serves raw JSONL (attachment) and rejects non-UUID/traversal ids", async () => {
+  const { ws, tasksDir } = makeWorkspace("session-dl-");
+  const cwd0 = process.cwd();
+  let server;
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  const slug = ws.split(path.sep).join("-");
+  const transcriptDir = path.join(os.homedir(), ".claude", "projects", slug);
+  const transcriptPath = path.join(transcriptDir, `${sid}.jsonl`);
+  fs.mkdirSync(transcriptDir, { recursive: true });
+  fs.writeFileSync(transcriptPath, '{"type":"user","message":{"role":"user","content":"hello"}}\n');
+  try {
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const ok = await getRes(port, `/session/${sid}/download`);
+    assert.equal(ok.status, 200, "valid UUID download → 200");
+    assert.match(String(ok.headers["content-disposition"] ?? ""), /attachment/, "raw download is an attachment");
+    assert.ok(ok.body.includes('"hello"'), "download streams the raw JSONL transcript");
+
+    const badUuid = await getRes(port, "/session/not-a-uuid/download");
+    assert.equal(badUuid.status, 400, "non-UUID session_id → 400 (rejected before any disk read)");
+
+    const traversal = await getRes(port, "/session/%2e%2e%2fetc%2fpasswd/download");
+    assert.equal(traversal.status, 400, "encoded traversal session_id → 400 (never reads an arbitrary path)");
+
+    const absent = await getRes(port, "/session/066a1382-0000-4000-8000-000000000000/download");
+    assert.equal(absent.status, 404, "valid UUID but no transcript → 404 (honest, not a 500)");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(transcriptPath, { force: true });
+    try { fs.rmdirSync(transcriptDir); } catch { /* leave the (empty) dir */ }
     fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(ws, { recursive: true, force: true });
   }

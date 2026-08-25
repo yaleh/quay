@@ -23,6 +23,7 @@ import { execFileSync, spawn } from "node:child_process";
 
 import {
   computeOutcome,
+  newSessionId,
   appendOutcomeToFile,
   computeWorkerRoundRecord,
   splitArgs,
@@ -305,6 +306,37 @@ test("computeOutcome — non-zero ⇒ failed; signal ⇒ killed; timedOut ⇒ ti
 
   const spawnFailed = computeOutcome({ task: "g", selectorReason: "r", exitCode: null, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: null, runId: "x", spawnError: "ENOENT" });
   assert.equal(spawnFailed.final_state, "spawn-failed");
+});
+
+// ── gap-worker-task-transcript-access-webui AC1（能取假）：session_id 持久化 + 每次派发新 UUID ────────
+
+test("AC1 (unit) — computeOutcome writes session_id; newSessionId returns fresh UUIDs", () => {
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  const withSid = computeOutcome({ task: "g", selectorReason: "r", exitCode: 0, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: 1, runId: "x", landed: true, sessionId: sid });
+  assert.equal(withSid.session_id, sid, "session_id is written to the outcome record (⛔ 仍无 session_id ⇒ 假)");
+  const noSid = computeOutcome({ task: "g", selectorReason: "r", exitCode: 0, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: 1, runId: "x", landed: true });
+  assert.equal(noSid.session_id, null, "session_id defaults null when omitted (honest, never fabricated)");
+
+  const a = newSessionId();
+  const b = newSessionId();
+  assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "newSessionId yields a UUID");
+  assert.notEqual(a, b, "two dispatches get DIFFERENT session ids (⛔ 重派同 session_id ⇒ 假)");
+});
+
+test("AC1 (integration) — re-dispatching the same task N times writes N distinct session_ids", (t) => {
+  const root = makeGitRoot("session-pin");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-sid", "done"); // status=done ⇒ an exit-0 worker "lands" (completed)
+  for (let i = 0; i < 3; i++) {
+    runDriver(root, ["--task", "gap-sid", "--reason", "session-pin", "--worker-cmd-exact", "node -e process.exit(0)"]);
+  }
+  const records = readOutcomeLines(root).filter((r) => r.task === "gap-sid");
+  assert.equal(records.length, 3, "three dispatches ⇒ three outcome records");
+  const sids = records.map((r) => r.session_id);
+  for (const sid of sids) {
+    assert.match(sid, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "every outcome record carries a session_id");
+  }
+  assert.equal(new Set(sids).size, 3, "same task re-dispatched 3× ⇒ 3 DIFFERENT session_ids (⛔ 重派同 session_id ⇒ 假)");
 });
 
 test("resolveRun / splitArgs / defaultWorkerArgv / signalExitCode / parseTimeoutMs / resolveConcurrency", () => {
@@ -1286,12 +1318,18 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
 
 // ── AC140（可配 wrapper + model + 按 role；单一真相源；覆盖语义统一）──────────────────────────────
 // 驱动的 LLM spawn 不再硬编码 `["claude","-p",prompt]`——单一构造 launchArgv 走
-// `quay-launch.sh <role> -p <prompt>`，wrapper/model/--bare 由 .claude/launch.settings.json 的
-// _launchSpec.roles 承载。取假靠 dry-run 读【启动语义】字段（launcher / --model），⛔ 不靠 argv0
+// `quay-launch.sh <role> -p <prompt>`，wrapper/model/--bare 由 .quay/profiles.yml 的 profiles/roles
+// 承载（AC154 profile 抽层）。取假靠 dry-run 读【启动语义】字段（launcher / --model），⛔ 不靠 argv0
 // （claude-fjdac 末行 exec claude 使 argv0 恒为 claude）。
 
 const QUAY_LAUNCH = path.resolve(__dirname, "..", "scripts", "quay-launch.sh");
-const LAUNCH_SETTINGS = path.resolve(__dirname, "..", "..", ".claude", "launch.settings.json");
+const PROFILES = path.resolve(__dirname, "..", "..", ".quay", "profiles.yml");
+
+// profiles.yml 是 YAML；launcher 经 python3+yaml 消费，本测试用同一手法转 JSON 后断言结构。
+function readProfiles() {
+  const out = execFileSync("python3", ["-c", "import sys,yaml,json; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))", PROFILES], { encoding: "utf8" });
+  return JSON.parse(out);
+}
 
 function dryRunLaunch(role, ...extra) {
   return execFileSync("bash", [QUAY_LAUNCH, role, "--dry-run", ...extra], { encoding: "utf8" }).trim();
@@ -1306,19 +1344,20 @@ test("AC140-1 — single constructor: launchArgv produces bash+quay-launch.sh+<r
   assert.deepEqual(defaultSelectorArgv(["a"], "/r").slice(0, 4), ["bash", "/r/plugin/scripts/quay-launch.sh", "selector", "-p"]);
 });
 
-test("AC140-2 — configurable: worker roles carry wrapper+model in _launchSpec.roles (falsifiable vs manager)", () => {
-  const settings = JSON.parse(fs.readFileSync(LAUNCH_SETTINGS, "utf8"));
-  const roles = settings._launchSpec.roles;
-  // 正控制：新 worker 角色照 outer/inner 抄（⛔ 不照 manager 的裸 claude + model null）。
+test("AC140-2 — configurable: worker roles carry wrapper+model via shared profile (falsifiable vs manager)", () => {
+  const p = readProfiles();
+  const roles = p.roles;
+  const profileOf = (role) => p.profiles[roles[role].profile];
+  // 正控制：新 worker 角色照 outer/inner 抄（⛔ 不照 manager 的裸 claude + model null）；AC154 后三者共享同一 profile。
   for (const role of ["task-worker", "selector", "fix-worker"]) {
-    assert.equal(roles[role].launcher, "claude-fjdac", `${role}.launcher must be the wrapper (not bare claude)`);
-    assert.ok(roles[role].model, `${role}.model must be configured (not null)`);
+    assert.equal(profileOf(role).launcher, "claude-fjdac", `${role} profile launcher must be the wrapper (not bare claude)`);
+    assert.ok(profileOf(role).model, `${role} profile model must be configured (not null)`);
     assert.ok(roles[role].name && roles[role].name.startsWith("quay-") && roles[role].name !== "quay-inner",
       `${role} needs a distinct -n name (concurrent-worker ListAgents collision)`);
   }
-  // 负控制：manager 仍裸 claude + model null（照它抄就是错——quay-launch.sh:80 只查非空不查取值，无任何机件报错）。
-  assert.equal(roles.manager.launcher, "claude");
-  assert.equal(roles.manager.model, null);
+  // 负控制：manager 仍裸 claude + model null（照它抄就是错——quay-launch.sh 只查非空不查取值，无任何机件报错）。
+  assert.equal(profileOf("manager").launcher, "claude");
+  assert.equal(profileOf("manager").model, null);
 
   // dry-run 实测：wrapper/model 确实出现在 spawn 命令行（launcher=claude-fjdac ⇒ wrapper 在链 ⇒ ANTHROPIC_BASE_URL 注入）。
   const taskWorker = dryRunLaunch("task-worker", "-p", "TEST");

@@ -96,10 +96,10 @@ export const MANIFEST: DeliveryCategory[] = [
     id: 3,
     name: "launch-config",
     label: "启动配置",
-    deliverables: [".claude/launch.settings.json", "plugin/scripts/quay-launch.sh"],
+    deliverables: [".claude/launch.settings.json", ".quay/profiles.yml", "plugin/scripts/quay-launch.sh"],
     attribution: ["gap-crystallize-launch-config-into-checked-in-settings-file"],
     criterion:
-      "启动命令/模型/上下文环境变量/TUI 环境变量结晶进检查进仓库的 .claude/launch.settings.json；quay-launch.sh 是内部实现（非用户直接调用面），读取 settings 并生成启动命令（不再靠手打一行 shell）",
+      "launch.settings.json 只留 Claude Code 认识的键（$schema/permissions/env）；profile/roles（launcher/model/--bare/-n/unset）+ flag-only 参数结晶进 .quay/profiles.yml（AC154 profile 抽层）；quay-launch.sh 是内部实现（非用户直接调用面），读取 profiles 生成启动命令（不再靠手打一行 shell）",
   },
   {
     id: 4,
@@ -179,10 +179,10 @@ export const LAID_MANIFEST: DeliveryCategory[] = [
     id: 3,
     name: "launch-config",
     label: "启动配置（laid）",
-    deliverables: ["plugin/scripts/quay-launch.sh"],
+    deliverables: [".quay/profiles.yml", "plugin/scripts/quay-launch.sh"],
     attribution: ["gap-crystallize-launch-config-into-checked-in-settings-file"],
     criterion:
-      "quay-launch.sh 随派生铺设集铺入消费者 plugin/scripts/（由 manager SKILL.md 的 plugin/scripts/ 引用派生）",
+      "profile 承载 .quay/profiles.yml 随 quay-init 铺入消费者 .quay/；quay-launch.sh 随派生铺设集铺入消费者 plugin/scripts/（由 manager SKILL.md 的 plugin/scripts/ 引用派生）",
   },
   {
     id: 4,

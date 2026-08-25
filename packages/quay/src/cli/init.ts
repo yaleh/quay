@@ -90,12 +90,14 @@ Description:
       console.log(`# Would create: ${result.configPath}`);
       console.log(`# Would create: ${result.tasksDir}/`);
       console.log(`# Would create: ${result.launchSettingsPath}`);
+      console.log(`# Would create: ${result.profilesPath}`);
       return;
     }
 
     console.log(`Created ${result.configPath}`);
     console.log(`Created ${result.tasksDir}/ (or already existed)`);
     console.log(`Created ${result.launchSettingsPath}`);
+    console.log(`Created ${result.profilesPath}`);
     printNextSteps("native", result.tasksDir);
   } catch (err) {
     console.error(`quay init: ${err instanceof Error ? err.message : String(err)}`);
