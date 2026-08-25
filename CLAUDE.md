@@ -226,6 +226,9 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   `--test-concurrency=` 的 `=` 写法、`QUAY_TEST_LIVE_GITHUB`、`@test-group`/`@static-tier` 标注，
   **全部读脚本，不要在此处复制一份**（本节曾复制 144 行，占本文件 49%，正是漂移之源）。
 - **Web UI**：`node --experimental-strip-types packages/quay/bin/quay.ts serve --host <ip> --port <p>`
+  - **开发模式**：`node --watch --experimental-strip-types packages/quay/bin/quay.ts serve --host <ip> --port <p>`
+    —— Node ≥18 `--watch` 对 import 模块变更自动重启进程（改 `packages/quay/src` 立即生效），
+    **不新增 `--dev`/`--watch` CLI 入口**（`node --watch <既有入口>` 直接可用，零产品表层；人 2026-08-24 裁定）。
 - **两条没有别处正本、故留在此**：①测试要用真 `.quay/config.yml` 建临时 workspace（见某测试文件里的
   `makeWorkspace()`）——**裸 tasks 目录不是合法 workspace**，config 是 provider map 不是扁平路径；
   ②**覆盖率不是目标**：从未被测量、可被刷（本仓库自带 `gate-gameability.test.mjs`）、
@@ -235,8 +238,8 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   （`adr/ADR-010-scheduled-milestone-e2e-incl-browser-tests.md`，status: proposed）。
   **一次绿的 `scripts/test.sh` 不是这两类的证据。**
 - **driver 进程管理**（`quay driver <start|stop|drain|status|restart> --kind <promotion|worker>`——
-  **`liveness` 只有直调 `plugin/scripts/promotion-driver-launch.sh` 才有**，`quay driver`（`cli/driver.ts:27`
-  `VERBS`）未收录，2026-08-24 outer 核实的一个CLI表层缺口；正本仍是脚本 `--help`，**不要在此处复制参数表**）：
+  **`liveness` 只有直调 `plugin/scripts/driver-runtime.ts` 才有**，`quay driver`（`cli/driver.ts:27`
+  `VERBS`）未收录，2026-08-24 outer 核实的一个CLI表层缺口；正本仍是 kernel `--help`，**不要在此处复制参数表**）：
   `stop`/`restart` 只杀 supervisor+driver 自身，⛔ 不碰 worker kind 的在飞子进程（设计如此，见脚本注释）；
   worker kind 独有 `drain`（挡新派发、不杀在飞，写 `.quay/worker-control.json` `halted:true`）。
   **⛔ 已知缺口更新（2026-08-24，`gap-worker-driver-cold-start-inflight-blind` 已 done，读下面两行别读旧结论）**：

@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { oldPaths, oldPathPatterns, exclusionEntries, worktreeContainerPaths } from '../scripts/loop-shipping-exclusion-data.mjs';
+import { oldPaths, oldPathPatterns, exclusionEntries, worktreeContainerPaths, stagingDirPrefix } from '../scripts/loop-shipping-exclusion-data.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
@@ -35,14 +35,17 @@ const repoRoot = path.resolve(pluginDir, '..');
 // stale-path strings and file copies would be scanned as if they were the main repo → AC1b/AC2
 // false-red (gap-loop-shipping-scan-does-not-exclude-worktrees). worktreeContainerPaths (single source
 // in loop-shipping-exclusion-data.mjs) supplies every container path; walkCorpus skips them exactly
-// like node_modules/.git/dist.
+// like node_modules/.git/dist. It ALSO skips any `plugin-staging-*` dir by NAME (stagingDirPrefix,
+// single source in the same module): a KILLED stagePackagedPlugin() run leaves packages/quay/
+// plugin-staging-<pid>-{0,1}/ orphans that carry a full plugin/ copy — their tick-doc old-path strings
+// + scripts/*.ts false-red AC1b/AC2 (gap-orphan-staging-dirs-pollute-walkcorpus).
 function walkCorpus(dir, { excluded = [], includeWorktrees = false } = {}) {
   const containers = includeWorktrees ? new Set() : worktreeContainerPaths(repoRoot);
   const isContainer = (p) => [...containers].some((c) => p === c || p.startsWith(c + path.sep));
   const scanned = [];
   const walk = (d) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist') continue;
+      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist' || e.name.startsWith(stagingDirPrefix)) continue;
       const p = path.join(d, e.name);
       if (e.isDirectory()) {
         if (isContainer(p) || excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
@@ -239,6 +242,54 @@ test('AC2 — walk() skips the .claude/worktrees/ container even for UNREGISTERE
   } finally {
     fs.rmSync(residue, { recursive: true, force: true });
     if (madeParent) fs.rmSync(worktreesDir, { recursive: true, force: true });
+  }
+});
+
+// ── plugin-staging-* orphan skip (gap-orphan-staging-dirs-pollute-walkcorpus) ───────────────────────
+test('AC1 — walkCorpus skips a plugin-staging-* orphan dir (its old-path tick-doc copy + telemetry copy are not scanned)', () => {
+  // An orphan is a KILLED stagePackagedPlugin() copy left at packages/quay/plugin-staging-<pid>-{0,1}/:
+  // it carries the full plugin/ tree (the tick docs' old-path strings) + scripts/*.ts — swept into the
+  // corpus it false-reds AC1b/AC2 (2026-08-25: plugin-staging-3477285-{0,1} red, worker hand-deleted).
+  const container = path.join(repoRoot, 'packages', 'quay');
+  const orphan = path.join(container, `${stagingDirPrefix}${process.pid}-0`);
+  fs.mkdirSync(orphan, { recursive: true });
+  try {
+    const tick = path.join(orphan, 'loop', 'orchestrator-loop-tick.md');
+    fs.mkdirSync(path.dirname(tick), { recursive: true });
+    fs.writeFileSync(tick, 'deployed copy lives at orchestration/orchestrator-loop-tick.md\n');
+    fs.mkdirSync(path.join(orphan, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(orphan, 'scripts', 'fast-mode-telemetry.ts'), 'export const orphanCopy = true;\n');
+    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+    assert.ok(!scanned.some((p) => p.startsWith(orphan + path.sep)), 'walkCorpus must not scan inside a plugin-staging-* orphan dir');
+    const copies = scanned.filter((p) => path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink());
+    assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'an orphan staging fast-mode-telemetry.ts copy must not be counted (AC2)');
+  } finally {
+    fs.rmSync(orphan, { recursive: true, force: true });
+  }
+});
+
+test('AC2 — negative control: renaming off the staging prefix makes walkCorpus COLLECT the orphan (the skip is load-bearing)', () => {
+  // The negative control proves the skip suppresses a REAL hit, not a vacuous exclusion: the orphan
+  // content IS a live old-path reference (it trips an AC1b pattern), and walkCorpus collects it the
+  // moment the dir stops matching the staging prefix — the exact red the skip prevents.
+  const container = path.join(repoRoot, 'packages', 'quay');
+  const orphan = path.join(container, `${stagingDirPrefix}${process.pid}-nc`);
+  const renamed = path.join(container, `orphan-probe-${process.pid}-nc`);
+  fs.mkdirSync(orphan, { recursive: true });
+  try {
+    const probe = path.join(orphan, 'stale-probe.md');
+    fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
+    const src = fs.readFileSync(probe, 'utf8');
+    assert.ok(oldPathPatterns.some((re) => re.test(src)), 'the orphan staging content must trip an AC1b pattern (a live reference)');
+    // With the staging skip active, the orphan is not part of the corpus.
+    assert.ok(!walkCorpus(repoRoot, { excluded: exclusionTargets() }).includes(probe), 'with the staging skip, the orphan probe is not in the corpus');
+    // Remove the skip (rename off the prefix): walkCorpus now COLLECTS the probe — would red AC1b.
+    fs.renameSync(orphan, renamed);
+    const renamedProbe = path.join(renamed, 'stale-probe.md');
+    assert.ok(walkCorpus(repoRoot, { excluded: exclusionTargets() }).includes(renamedProbe), 'without the staging skip, the orphan probe IS collected (would red AC1b)');
+  } finally {
+    fs.rmSync(orphan, { recursive: true, force: true });
+    fs.rmSync(renamed, { recursive: true, force: true });
   }
 });
 

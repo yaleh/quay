@@ -752,12 +752,13 @@ test("AC133 MAX_FIX_RETRIES_DEFAULT — 与 fan-in 侧 attempt>=3 同值，非�
   assert.equal(MAX_FIX_RETRIES_DEFAULT, 3, "default retry cap = 3 (gap-fan-in-relaunch-retry-cap 同值)");
 });
 
-test("computeReverifyOutcome — 闸的新判定归类：nowEligible / stillIneligible / neither（纯函数）", () => {
+test("computeReverifyOutcome — 闸的新判定归类：nowEligible / stillIneligible / notEvaluated / neither（纯函数）", () => {
   // gate now says eligible (promotions contains the id) ⇒ fix took
   const eligible = { ok: true, error: null, pool: 1, shouldApply: true, promotedIds: ["gap-a"], applied: [], promotePathLlmInvoked: false, fixDecisions: [] };
   const r1 = computeReverifyOutcome(["gap-a", "gap-b"], eligible);
   assert.deepEqual(r1.nowEligibleIds, ["gap-a"], "闸判合格 ⇒ nowEligible");
   assert.deepEqual(r1.stillIneligibleIds, []);
+  assert.deepEqual(r1.notEvaluatedIds, [], "ok=true ⇒ 无 not-evaluated");
 
   // gate still says ineligible (fixDecisions contains eligible=false) ⇒ fix did NOT take
   const stillBad = {
@@ -769,11 +770,20 @@ test("computeReverifyOutcome — 闸的新判定归类：nowEligible / stillInel
   const r2 = computeReverifyOutcome(["gap-a"], stillBad);
   assert.deepEqual(r2.nowEligibleIds, [], "闸仍判不合格 ⇒ ⛔ 不得晋升");
   assert.deepEqual(r2.stillIneligibleIds, ["gap-a"], "闸仍判不合格 ⇒ stillIneligible（⛔ 不信 worker 自述「已修好」）");
+  assert.deepEqual(r2.notEvaluatedIds, [], "ok=true ⇒ 无 not-evaluated");
 
   // neither (task left the todo pool) ⇒ not counted either way
   const gone = { ok: true, error: null, pool: 0, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked: false, fixDecisions: [] };
   const r3 = computeReverifyOutcome(["gap-z"], gone);
-  assert.deepEqual(r3, { nowEligibleIds: [], stillIneligibleIds: [] }, "task vanished from the pool ⇒ neither");
+  assert.deepEqual(r3, { nowEligibleIds: [], stillIneligibleIds: [], notEvaluatedIds: [] }, "task vanished from the pool ⇒ neither");
+
+  // ⛔ AC153：读不到输入（重跑闸 ok=false）⇒ 全部 notEvaluatedIds（不是 neither 静默丢弃，也不是
+  // stillIneligible 误计入失败上限）。
+  const unreadable = { ok: false, error: "ready-pool-check spawn failed", pool: null, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked: false, fixDecisions: [] };
+  const r4 = computeReverifyOutcome(["gap-a", "gap-b"], unreadable);
+  assert.deepEqual(r4.notEvaluatedIds, ["gap-a", "gap-b"], "重跑闸读不到 ⇒ notEvaluatedIds（⛔ 不是 neither/不是 stillIneligible）");
+  assert.deepEqual(r4.nowEligibleIds, [], "读不到 ⇒ ⛔ 不晋升");
+  assert.deepEqual(r4.stillIneligibleIds, [], "读不到 ⇒ ⛔ 不计失败上限");
 });
 
 test("advanceRetryCap — 连续失败达 N 次 ⇒ newlyNeedsHuman；去重不重复返回（纯函数）", () => {

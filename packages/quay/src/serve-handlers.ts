@@ -23,6 +23,7 @@ import { handleTests, handleTestsFile } from "./serve-tests.ts";
 import { handleSessions, handleSession, handleSessionDownload } from "./serve-sessions.ts";
 import { handleArchitecture } from "./serve-architecture.ts";
 import { handleDashboard } from "./serve-dashboard.ts";
+import { handleSend } from "./serve-send.ts";
 
 // Re-export the full public surface (shared render helpers + domain render/handler functions) so
 // serve.ts's named re-exports and existing test imports remain unchanged.
@@ -39,6 +40,7 @@ export * from "./serve-tests.ts";
 export * from "./serve-sessions.ts";
 export * from "./serve-architecture.ts";
 export * from "./serve-dashboard.ts";
+export * from "./serve-send.ts";
 
 // ── Facade dispatcher (M99 pattern: single entry point keeps startServer outDegree low) ──
 
@@ -122,6 +124,15 @@ export async function handleAllRoutes(
     let sessionId: string;
     try { sessionId = decodeURIComponent(sessionDlM[1]); } catch { sessionId = sessionDlM[1]; }
     await handleSessionDownload(req, res, cfg, sessionId);
+    return;
+  }
+
+  // gap-webui-message-delivery-entry — POST /send delivers a message to a local session and renders
+  // the honest four-state result (delivered/held/expired/error). The sessionId is in the form body
+  // (a UUID look-up key), resolved through the same /session addressing path; the handler reuses the
+  // shared send-to-session socket protocol (never a second copy of the frame logic).
+  if (url.pathname === "/send" && req.method === "POST") {
+    await handleSend(req, res, cfg);
     return;
   }
 

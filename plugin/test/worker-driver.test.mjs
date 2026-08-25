@@ -248,43 +248,56 @@ test("computeOutcome — exit 0 + landed=true ⇒ completed; landed=false ⇒ ex
   assert.equal(failed.final_state, "failed", "non-zero exit wins over landed");
 });
 
-test("computeLandingState — landed = status=done ∧ no leftover worktree; read failures fail-closed to not-landed", (t) => {
+test("computeLandingState — DriverResult 三态：verified = status=done ∧ 无 worktree；failed = 证伪；not-evaluated = 读不到（AC153）", (t) => {
   const root = makeGitRoot("land");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
-  // 无任务文件 ⇒ status null ⇒ not landed。
+  // 无任务文件 ⇒ status null ⇒ not-evaluated（⛔ 不是 failed——读不到输入与「没落地」分离，AC153/硬规则 3b）。
   assert.equal(readTaskStatus(root, "gap-x"), null);
   const missing = computeLandingState(root, "gap-x");
-  assert.equal(missing.landed, false, "missing task file ⇒ not landed");
-  assert.equal(missing.worktreePresent, false, "no task worktree in a fresh repo");
+  assert.equal(missing.state, "not-evaluated", "missing task file ⇒ not-evaluated（⛔ 不伪造成 failed）");
+  assert.match(missing.reason, /status unreadable/);
 
-  // status=done + 无 worktree ⇒ landed。
+  // status=done + 无 worktree ⇒ verified（独立判据证实落地）。
   writeTaskFile(root, "gap-x", "done");
   assert.equal(readTaskStatus(root, "gap-x"), "done");
   const landed = computeLandingState(root, "gap-x");
-  assert.equal(landed.landed, true, "status=done + no worktree ⇒ landed");
-  assert.match(landed.reason, /landed/);
+  assert.equal(landed.state, "verified", "status=done + no worktree ⇒ verified");
+  assert.equal(landed.value.status, "done", "verified 证据：status=done");
+  assert.equal(landed.value.worktreePresent, false, "verified 证据：无残留 worktree");
+  assert.match(landed.verifiedBy, /status=done/);
 
-  // status=ready ⇒ not landed（即使无 worktree）。
+  // status=ready ⇒ failed（即使无 worktree）——独立判据【证伪】落地。
   writeTaskFile(root, "gap-y", "ready");
   const ready = computeLandingState(root, "gap-y");
-  assert.equal(ready.landed, false, "status=ready ⇒ not landed");
+  assert.equal(ready.state, "failed", "status=ready ⇒ failed（独立判据证伪落地）");
   assert.match(ready.reason, /status=ready/);
 
-  // status=done + 残留 worktree ⇒ not landed。
+  // status=done + 残留 worktree ⇒ failed（独立判据证伪落地）。
   const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
   runGit(root, ["worktree", "add", "-q", "-b", "task/gap-x", wtPath]);
   assert.equal(worktreePresentForTask(root, "gap-x"), true, "a real task/<id> worktree is detected");
   const leftover = computeLandingState(root, "gap-x");
-  assert.equal(leftover.landed, false, "status=done + leftover worktree ⇒ not landed");
+  assert.equal(leftover.state, "failed", "status=done + leftover worktree ⇒ failed");
   assert.match(leftover.reason, /leftover worktree/);
   runGit(root, ["worktree", "remove", "--force", wtPath]);
 
-  // 非 git 仓库 ⇒ worktree 读不懂（null）⇒ fail-closed not landed（硬规则 3b）。
+  // 非 git 仓库 ⇒ worktree 读不懂（null）⇒ not-evaluated。先手写一个 status=done 的任务文件（无 git），
+  // 使 status 可读但 worktree 读失败——精准命中「worktree 读不到」分支（硬规则 3b：读不懂 ≠ 无残留 ≠ 没落地）。
   const nonGit = makeRoot("land-nogit");
+  fs.writeFileSync(path.join(nonGit, "tasks", "gap-x.md"), "---\nid: gap-x\nstatus: done\n---\n\n## Proposal\n\nbody\n", "utf8");
+  assert.equal(readTaskStatus(nonGit, "gap-x"), "done", "task file written without git is still readable");
+  assert.equal(worktreePresentForTask(nonGit, "gap-x"), null, "non-git root ⇒ worktree state unreadable (null, not false)");
   const ng = computeLandingState(nonGit, "gap-x");
-  assert.equal(ng.worktreePresent, null, "non-git root ⇒ worktree state unreadable (null, not false)");
-  assert.equal(ng.landed, false, "unreadable worktree state ⇒ fail-closed not landed");
+  assert.equal(ng.state, "not-evaluated", "unreadable worktree state ⇒ not-evaluated（⛔ 不伪造成 failed）");
+  assert.match(ng.reason, /worktree state unreadable/);
+
+  // 证伪优先：status=ready 可读但 worktree 读不懂（非 git）⇒ failed（status≠done 单独证伪落地），
+  // ⛔ 不因 worktree 读不懂降为 not-evaluated（任一独立量证伪即可，不需读全另一量）。
+  fs.writeFileSync(path.join(nonGit, "tasks", "gap-y.md"), "---\nid: gap-y\nstatus: ready\n---\n\n## Proposal\n\nbody\n", "utf8");
+  const refuted = computeLandingState(nonGit, "gap-y");
+  assert.equal(refuted.state, "failed", "status=ready 可读 ⇒ 证伪（⛔ 不因 worktree 读不懂降为 not-evaluated）");
+  assert.match(refuted.reason, /status=ready/);
   fs.rmSync(nonGit, { recursive: true, force: true });
 });
 
@@ -383,6 +396,46 @@ test("AC2 (gap-worker-print-bg-wait-ceiling-600s c) — buildWorkerPrompt hints 
   assert.match(prompt, /TaskOutput 阻塞等待/, "prompt names TaskOutput blocking wait (resets the 600s clock)");
   assert.match(prompt, /不要结束回合等完成通知/, "prompt forbids ending the turn to await the notification");
   assert.match(prompt, /600s 终止/, "prompt names the 600s termination risk");
+});
+
+test("gap-worker-prompt-fan-in-call-signature-placeholder — buildWorkerPrompt gives real fan-in signature (absolute path + runId 取法 + 正本拷贝), no scriptPath placeholder", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  // AC1（能取假）：真实绝对路径（⛔ 非 scriptPath 字面词）。
+  assert.match(prompt, /\/r\/\.claude\/workflows\/fan-in-execute\.js/, "AC1: real absolute path to fan-in-execute.js");
+  assert.doesNotMatch(prompt, /scriptPath/, "AC1: no bare scriptPath placeholder");
+  // AC1（能取假）：runId 取法 —— 哪个模块导出 generateRunId。
+  assert.match(prompt, /generateRunId/, "AC1: names generateRunId");
+  assert.match(prompt, /plugin\/scripts\/fast-mode-telemetry\.ts/, "AC1: names the module exporting generateRunId");
+  // AC3（能取假）：正本拷贝明确 —— .claude/workflows/ vs plugin/workflows/。
+  assert.match(prompt, /\.claude\/workflows\/ copy is the landed one that runs here/, "AC3: says .claude/workflows/ is the landed copy");
+  assert.match(prompt, /plugin\/workflows\/fan-in-execute\.js/, "AC3: names the shipped mirror to NOT diff against");
+});
+
+test("AC1 (能取假) — buildWorkerPrompt wires dispatch-worktree-setup.sh after worktree create (机制接管 bootstrap)", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  // 结构针：grep 到调用 + 位置在 worktree 创建之后。
+  assert.match(prompt, /dispatch-worktree-setup\.sh/, "AC1: create prompt names the setup script");
+  assert.match(prompt, /\/r\/plugin\/scripts\/dispatch-worktree-setup\.sh/, "AC1: setup script is the real absolute path under root");
+  const createIdx = prompt.indexOf("create an isolated git worktree");
+  const setupIdx = prompt.indexOf("dispatch-worktree-setup.sh");
+  assert.ok(createIdx !== -1, "create instruction present");
+  assert.ok(setupIdx > createIdx, "AC1: setup call is positioned AFTER worktree creation");
+});
+
+test("AC2 (能取假，负控制) — prompt no longer leaves bootstrap to agent-remembering (⛔ no hand-rolled ln -s / cp config.yml instruction)", () => {
+  const create = buildWorkerPrompt("gap-x", "/r");
+  assert.doesNotMatch(create, /ln -s/, "AC2: create prompt must not instruct a hand-rolled node_modules symlink");
+  assert.doesNotMatch(create, /cp config\.yml/, "AC2: create prompt must not instruct a hand-rolled config.yml copy");
+  const cont = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "r",
+  });
+  assert.doesNotMatch(cont, /ln -s/, "AC2: continue prompt must not instruct a hand-rolled node_modules symlink");
+  assert.doesNotMatch(cont, /cp config\.yml/, "AC2: continue prompt must not instruct a hand-rolled config.yml copy");
 });
 
 test("stashIfDirty — clean repo ⇒ no-op; non-git dir ⇒ no-op; dirty repo ⇒ stash (never discard)", () => {
@@ -1337,11 +1390,13 @@ test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome s
 // 复用 launch 脚本 liveness 子命令（⛔ 不重写存活判定）、②runLivenessCheck 的 checked/deaths 语义
 // （checked=false = 未查成，⛔ 不是健康）、③resident loop 每轮真调它（counter 缝）。
 
-test("defaultLivenessCheckArgv — reuse the launch script liveness subcommand; kind from file identity", () => {
+test("defaultLivenessCheckArgv — reuse the TS kernel liveness subcommand; kind from file identity", () => {
+  // AC151：supervisor 港进 TS 后，liveness 子命令 = `node … driver-runtime.ts liveness --kind … --root …`。
   const argv = defaultLivenessCheckArgv("/r", "worker");
-  assert.equal(argv[0], "bash");
-  assert.equal(argv[1], "/r/plugin/scripts/promotion-driver-launch.sh");
-  assert.equal(argv[2], "liveness");
+  assert.equal(argv[0], process.execPath, "spawn the node binary (⛔ not bash — kernel is TS)");
+  assert.equal(argv[1], "--experimental-strip-types");
+  assert.ok(argv[2].endsWith("driver-runtime.ts"), `kernel path = driver-runtime.ts, got ${argv[2]}`);
+  assert.equal(argv[3], "liveness");
   assert.deepEqual(argv.slice(argv.indexOf("--kind"), argv.indexOf("--kind") + 2), ["--kind", "worker"]);
   assert.deepEqual(argv.slice(argv.indexOf("--root"), argv.indexOf("--root") + 2), ["--root", "/r"]);
   assert.ok(argv.includes("--json"), "machine-readable verdict (the driver parses deaths/running)");
@@ -1535,6 +1590,36 @@ test("AC2 (能取假) — buildContinueWorkerPrompt carries prior-round state (b
   assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
 });
 
+test("gap-worker-prompt-fan-in-call-signature-placeholder — buildContinueWorkerPrompt also gives real fan-in signature (no scriptPath placeholder, concrete worktree)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "worker exited 0 but task did not land",
+  });
+  assert.match(p, /\/r\/\.claude\/workflows\/fan-in-execute\.js/, "AC1: continue prompt carries real absolute path");
+  assert.doesNotMatch(p, /scriptPath/, "AC1: continue prompt has no bare scriptPath placeholder");
+  assert.match(p, /worktree:"\/wt"/, "continue prompt embeds the concrete worktree path (not a placeholder)");
+  assert.match(p, /generateRunId/, "AC1: continue prompt names generateRunId");
+  assert.match(p, /plugin\/scripts\/fast-mode-telemetry\.ts/, "AC1: continue prompt names the generateRunId module");
+});
+
+test("AC1 (能取假) — buildContinueWorkerPrompt wires dispatch-worktree-setup.sh on the reused worktree (idempotent re-provision)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "worker exited 0 but task did not land",
+  });
+  assert.match(p, /dispatch-worktree-setup\.sh/, "AC1: continue prompt names the setup script");
+  assert.match(p, /dispatch-worktree-setup\.sh \/wt/, "AC1: continue prompt re-provisions the concrete worktree path");
+  assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
+});
+
 test("AC2 — continueStateForTask gathers real state (own branch commits / AC checkboxes / last exited-not-landed reason)", (t) => {
   const root = makeGitRoot("continue-state");
   const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
@@ -1676,6 +1761,7 @@ test("AC1 — depends_on gate in the resident loop: a candidate whose dep is not
   const rounds = readRoundLines(root);
   assert.equal(rounds[rounds.length - 1].pool, 1, "ready-pool reported pool=1 (gap-dep), yet nothing dispatched — the filter is the cause");
   assert.equal(rounds[rounds.length - 1].in_flight, 0, "nothing in flight");
+  drv.stop(); // 先停驱动再让 after 钩 rmSync 删目录（node:test after 钩按注册序 FIFO：rmSync 先注册会先于 drv.stop 运行 ⇒ 驱动仍在写 round/cnt ⇒ ENOTEMPTY）
 });
 
 test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the difference, not a blanket stop)", async (t) => {
@@ -1699,6 +1785,7 @@ test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the
   assert.equal(spawned.length, 1, "AC1 对照: dep-done candidate IS dispatched (exactly once)");
   assert.equal(spawned[0].task, "gap-dep");
   assert.equal(readOutcomeLines(root)[0].final_state, "completed", "the dep-done candidate lands cleanly");
+  drv.stop(); // 先停驱动再让 after 钩 rmSync 删目录（node:test after 钩按注册序 FIFO：rmSync 先注册会先于 drv.stop 运行 ⇒ 驱动仍在写 round/cnt ⇒ ENOTEMPTY）
 });
 
 // ── gap-worker-driver-cold-start-inflight-blind：冷启动在飞盲区 ───────────────────────────────────
