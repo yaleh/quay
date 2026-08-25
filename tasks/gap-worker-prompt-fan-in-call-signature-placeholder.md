@@ -44,9 +44,9 @@ cp .quay/config.yml                  1/12            1
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，签名完整）：`buildWorkerPrompt` 与 `buildContinueWorkerPrompt` 的 prompt 文本含 fan-in workflow 的**真实绝对路径**（⛔ 非 `scriptPath` 字面词）+ `runId` 取法（哪个模块导出 `generateRunId`）；（⛔ 仍是占位词 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：新派发 worker 的 transcript 不再出现 `find . -name 'fan-in-execute*'`、`grep generateRunId`、`diff .claude/workflows/... plugin/workflows/...` 这三类调用（现在 12/12 必然出现）；（⛔ 仍出现 ⇒ 假）。
-- [ ] AC3（能取假，正本明确）：prompt 明确该调哪一份拷贝（`.claude/workflows/` vs `plugin/workflows/`）；（⛔ 仍含糊 ⇒ 假）。
+- [x] AC1（能取假，签名完整）：`buildWorkerPrompt` 与 `buildContinueWorkerPrompt` 的 prompt 文本含 fan-in workflow 的**真实绝对路径**（⛔ 非 `scriptPath` 字面词）+ `runId` 取法（哪个模块导出 `generateRunId`）；（⛔ 仍是占位词 ⇒ 假）。
+- [ ] AC2（能取假，负控制）：新派发 worker 的 transcript 不再出现 `find . -name 'fan-in-execute*'`、`grep generateRunId`、`diff .claude/workflows/... plugin/workflows/...` 这三类调用（现在 12/12 必然出现）；（⛔ 仍出现 ⇒ 假）。（待外部）
+- [x] AC3（能取假，正本明确）：prompt 明确该调哪一份拷贝（`.claude/workflows/` vs `plugin/workflows/`）；（⛔ 仍含糊 ⇒ 假）。
 
 ## Definition of Done
 

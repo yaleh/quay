@@ -396,6 +396,19 @@ test("AC2 (gap-worker-print-bg-wait-ceiling-600s c) — buildWorkerPrompt hints 
   assert.match(prompt, /600s 终止/, "prompt names the 600s termination risk");
 });
 
+test("gap-worker-prompt-fan-in-call-signature-placeholder — buildWorkerPrompt gives real fan-in signature (absolute path + runId 取法 + 正本拷贝), no scriptPath placeholder", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  // AC1（能取假）：真实绝对路径（⛔ 非 scriptPath 字面词）。
+  assert.match(prompt, /\/r\/\.claude\/workflows\/fan-in-execute\.js/, "AC1: real absolute path to fan-in-execute.js");
+  assert.doesNotMatch(prompt, /scriptPath/, "AC1: no bare scriptPath placeholder");
+  // AC1（能取假）：runId 取法 —— 哪个模块导出 generateRunId。
+  assert.match(prompt, /generateRunId/, "AC1: names generateRunId");
+  assert.match(prompt, /plugin\/scripts\/fast-mode-telemetry\.ts/, "AC1: names the module exporting generateRunId");
+  // AC3（能取假）：正本拷贝明确 —— .claude/workflows/ vs plugin/workflows/。
+  assert.match(prompt, /\.claude\/workflows\/ copy is the landed one that runs here/, "AC3: says .claude/workflows/ is the landed copy");
+  assert.match(prompt, /plugin\/workflows\/fan-in-execute\.js/, "AC3: names the shipped mirror to NOT diff against");
+});
+
 test("stashIfDirty — clean repo ⇒ no-op; non-git dir ⇒ no-op; dirty repo ⇒ stash (never discard)", () => {
   // non-git dir (the phase-1 makeRoot shape) ⇒ graceful no-op.
   const nonGit = makeRoot("nogit");
@@ -1459,6 +1472,22 @@ test("AC2 (能取假) — buildContinueWorkerPrompt carries prior-round state (b
   assert.match(p, /checked 2\/5/, "AC2: AC check state carried (checked X/Y)");
   assert.match(p, /because: worker exited 0 but task did not land/, "AC2: failure reason carried");
   assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
+});
+
+test("gap-worker-prompt-fan-in-call-signature-placeholder — buildContinueWorkerPrompt also gives real fan-in signature (no scriptPath placeholder, concrete worktree)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "worker exited 0 but task did not land",
+  });
+  assert.match(p, /\/r\/\.claude\/workflows\/fan-in-execute\.js/, "AC1: continue prompt carries real absolute path");
+  assert.doesNotMatch(p, /scriptPath/, "AC1: continue prompt has no bare scriptPath placeholder");
+  assert.match(p, /worktree:"\/wt"/, "continue prompt embeds the concrete worktree path (not a placeholder)");
+  assert.match(p, /generateRunId/, "AC1: continue prompt names generateRunId");
+  assert.match(p, /plugin\/scripts\/fast-mode-telemetry\.ts/, "AC1: continue prompt names the generateRunId module");
 });
 
 test("AC2 — continueStateForTask gathers real state (own branch commits / AC checkboxes / last exited-not-landed reason)", (t) => {
