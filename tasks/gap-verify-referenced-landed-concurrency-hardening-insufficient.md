@@ -27,16 +27,28 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，并发确定性）：并发 N 个 `--loop` 安装下，check 对【已 land 的文件】不再报假「referenced-not-landed」（两轮命中集不再漂移）；（⛔ 仍假阳性 ⇒ 假）。
-- [ ] AC2（能取假，负控制保留）：造一个「referenced 且未 land 且未声明」的真漂移文件，check 仍确定性红（fail-closed 不因加固而放宽）；（⛔ 真漂移不红 ⇒ 假）。
-- [ ] AC3（能取假，单独跑回归）：`session-liveness-events.test.mjs` AC2 单独跑仍绿（不回归）；（⛔ 单独跑红 ⇒ 假）。
+- [x] AC1（能取假，并发确定性）：并发 N 个 `--loop` 安装下，check 对【已 land 的文件】不再报假「referenced-not-landed」（两轮命中集不再漂移）
+      **证据**：`verify_referenced_landed` 的引用集推导抽出为 `_reference_set_once` 并包进稳定性 check
+      `_read_references`（两次独立 pass 必须一致，torn 必异故重试——同 `_read_declarations` a4f1e41d /
+      `derive_loop_scripts` 089365b5 形态）；landed 集扫描补「fresh existence 复检」（`[ ! -e ]` 命中后
+      再 `[ -e ]` 一次，瞬时缺席不误报）；`copy_dir` 的空目录检查去掉 `$(ls -A)` 子进程（改 bash 内建
+      glob 计数——run B 的 `.claude/workflows/*` 假阳性根因）。回归测试
+      `quay-init-loop-consumer-doc-refs.test.mjs` reference-scan torn-read stability（torn 首个 pass → 重试至
+      全量 pass，装完仍 exit 0）+ 既有 concurrent --loop 负控制全绿。
+- [x] AC2（能取假，负控制保留）：造一个「referenced 且未 land 且未声明」的真漂移文件，check 仍确定性红（fail-closed 不因加固而放宽）
+      **证据**：`torn-read negative control (reference-scan)` 测试——消费者 doc 引用
+      `plugin/scripts/refscan-nonexistent-checker.ts`（referenced 且未 land 且未声明）→ `--loop` exit 2、
+      `referenced-not-landed`、点名该文件。真漂移不因稳定性 retry 而吞掉（每条重试读里它都缺席 ⇒ 必红）。
+- [x] AC3（能取假，单独跑回归）：`session-liveness-events.test.mjs` AC2 单独跑仍绿（不回归）
+      **证据**：`node --test --test-name-pattern "AC2 — quay-init --loop lays down session-liveness.sh"
+      plugin/test/session-liveness-events.test.mjs` 单独跑 pass 1/0 fail 0（装完 `verify-referenced-landed: OK`）。
 
 ## Definition of Done
 
-`verify_referenced_landed` 并发鲁棒性加固落地；AC1/AC2/AC3 全勾；并发安装下 check 确定性、真漂移仍 fail-closed、单独跑不回归。
+- [x] `verify_referenced_landed` 并发鲁棒性加固落地（引用集稳定性 check + landed 集复检 + copy_dir 去子进程）；AC1/AC2/AC3 全勾；并发安装下 check 确定性、真漂移仍 fail-closed、单独跑不回归。
 
 ## Touches
 
-- plugin/scripts/quay-init.sh（verify_referenced_landed 并发加固）
-- plugin/test/session-liveness-events.test.mjs 或相关（并发负控制测试）
+- plugin/scripts/quay-init.sh（verify_referenced_landed 并发加固：_read_references 稳定性 check + landed 集 fresh 复检 + copy_dir 去 ls -A 子进程）
+- plugin/test/quay-init-loop-consumer-doc-refs.test.mjs（reference-scan torn-read 回归：stability 重试 + pass-through 控制 + 真漂移负控制）
 - tasks/gap-verify-referenced-landed-concurrency-hardening-insufficient.md（自身）
