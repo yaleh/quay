@@ -1,7 +1,7 @@
 ---
 id: gap-driver-binding-semantic-kind-to-profile
 title: driver 绑定（L3：调用点只说语义 kind，policy 解析成 profile；web 侧只读）
-status: ready
+status: done
 labels:
   - gap
   - feature
