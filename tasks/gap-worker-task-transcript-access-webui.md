@@ -39,8 +39,12 @@ extra: {}
 ## Touches
 
 - plugin/scripts/worker-driver.ts（--session-id pin + computeOutcome session_id 字段）
-- packages/quay/src/observation.ts（/live pid→sessionId join）
-- packages/quay/src/serve-handlers.ts（Runs 区块 + 新端点 + 路径穿越防护）
+- plugin/test/worker-driver.test.mjs（AC1 session_id 持久化/逐次唯一测试）
+- packages/quay/src/observation.ts（/live pid→sessionId join + liveSessionIdForPid）
+- packages/quay/src/serve-live.ts（/live transcript 链接列）
+- packages/quay/src/serve-handlers.ts（/session/<id>/download 路由）
+- packages/quay/src/serve-sessions.ts（handleSessionDownload 端点 + 穿越防护）
+- packages/quay/src/serve-task.ts（Runs 区块 view+download 链接）
 - packages/quay/src/serve.ts（Runs 区块 + 新端点 + 路径穿越防护）
-- packages/quay/test/serve-handlers.test.mjs（或对应测试）
+- packages/quay/test/serve-handlers.test.mjs（AC2 /live 活体关联 + AC3 下载/穿越防护测试）
 - tasks/gap-worker-task-transcript-access-webui.md（自身）

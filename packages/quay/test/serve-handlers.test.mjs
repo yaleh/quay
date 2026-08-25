@@ -20,8 +20,9 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript } from "../src/serve-handlers.ts";
-import { readGitHistory } from "../src/observation.ts";
+import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock } from "../src/serve-handlers.ts";
+import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
+import { renderLivePage } from "../src/serve-live.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -1135,6 +1136,158 @@ test("AC2: /tests/file and /tests?round=N both clip through the SAME shared filt
       if (server.client) await server.client.close();
     }
     process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-worker-task-transcript-access-webui (AC2 + AC3) ───────────────────────────────────────
+// worker-driver spawns `claude --session-id <uuid>` and writes session_id to worker-outcome.jsonl;
+// the web layer links those transcripts. AC2: /live joins ~/.claude/sessions/<pid>.json → live
+// sessionId for an in-flight worker. AC3: the task-detail Runs block renders a per-attempt view +
+// raw-JSONL download, and the download endpoint rejects any non-UUID session_id (path-traversal guard).
+
+function getRes(port, urlPath) {
+  return new Promise((resolve, reject) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
+    }).on("error", reject);
+  });
+}
+
+test("AC2 (unit) — liveSessionIdForPid joins pid→sessionId, and rejects non-numeric pid / non-UUID sessionId", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "live-sess-"));
+  const sessionsDir = path.join(home, ".claude", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  try {
+    const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+    fs.writeFileSync(path.join(sessionsDir, "12345.json"), JSON.stringify({ pid: 12345, sessionId: sid }));
+    fs.writeFileSync(path.join(sessionsDir, "77777.json"), JSON.stringify({ pid: 77777, sessionId: "not-a-uuid" }));
+
+    assert.equal(liveSessionIdForPid("12345", home), sid, "valid pid → its sessionId");
+    assert.equal(liveSessionIdForPid("99999", home), null, "missing record → null (honest, no fabricated link)");
+    assert.equal(liveSessionIdForPid("77777", home), null, "non-UUID sessionId → null");
+    assert.equal(liveSessionIdForPid("../../etc/passwd", home), null, "non-numeric pid (traversal) → null, never a path component");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("AC2 (unit) — readLive annotates in-flight worker tasks with the live sessionId (pid→sessionId join)", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "live-join-"));
+  const sessionsDir = path.join(home, ".claude", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-root-"));
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  fs.writeFileSync(path.join(sessionsDir, "12345.json"), JSON.stringify({ pid: 12345, sessionId: sid }));
+  try {
+    const nowMs = Date.now();
+    const live = readLive(root, {
+      nowMs,
+      sessionHome: home,
+      liveWorkers: [
+        { taskId: "gap-live-1", pid: "12345", startedAtMs: nowMs - 60_000 },
+        { taskId: "gap-live-2", pid: "99999", startedAtMs: nowMs - 60_000 },
+      ],
+    });
+    const byTask = new Map(live.inFlight.map((t) => [t.taskId, t]));
+    assert.equal(byTask.get("gap-live-1").sessionId, sid, "in-flight worker with a session record carries its live sessionId");
+    assert.equal(byTask.get("gap-live-2").sessionId, null, "worker with no session record carries null (no fabricated link)");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 (falsifiable) — renderLivePage renders a transcript link ONLY for in-flight workers with a sessionId", () => {
+  const base = {
+    status: "ok", reason: null, concurrency: 1, cpuPressure: null,
+    liveState: "running", liveExplanation: null, activity: null,
+  };
+  const task = (sessionId) => ({
+    taskId: "gap-live-1", runId: "worker-gap-live-1", pid: "12345", sessionId,
+    startedAtMs: Date.now() - 60_000, implCompletedAtMs: null, minutes: 1,
+    liveness: "alive", blocks: [], blockedBy: [],
+  });
+  const withLink = renderLivePage({ ...base, inFlight: [task("066a1382-fde0-410b-bee1-78a4b5886132")] });
+  assert.match(withLink, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132"/, "in-flight worker with sessionId renders a /session transcript link (⛔ 无链接 ⇒ 假)");
+  const noLink = renderLivePage({ ...base, inFlight: [task(null)] });
+  assert.doesNotMatch(noLink, /href="\/session\//, "no sessionId ⇒ no transcript link (honest null, hard rule ③b)");
+});
+
+test("AC3 (unit) — sessionTranscriptPath is traversal-proof: non-UUID/`..` resolves to null, valid joins the fixed project slug", () => {
+  const home = "/fake-home";
+  assert.equal(sessionTranscriptPath("/a/b", "../etc/passwd", home), null, "`..` is not a UUID ⇒ null (never a path component)");
+  assert.equal(sessionTranscriptPath("/a/b", "not-a-uuid", home), null, "non-UUID ⇒ null");
+  assert.equal(sessionTranscriptPath("/a/b", "/etc/passwd", home), null, "absolute path ⇒ null");
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  assert.equal(
+    sessionTranscriptPath("/a/b", sid, home),
+    path.join(home, ".claude", "projects", "-a-b", `${sid}.jsonl`),
+    "valid UUID is joined onto the FIXED project slug — never used as a raw path",
+  );
+  assert.ok(isValidSessionId(sid), "the fixture UUID is valid (control)");
+});
+
+test("AC3 (unit) — taskRunsBlock renders a per-attempt view + download link for a record with session_id", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  fs.writeFileSync(path.join(q, "worker-outcome.jsonl"), [
+    JSON.stringify({ ts: "2026-08-25T00:00:00Z", task: "gap-runs-1", final_state: "completed", exit_code: 0, session_id: sid }),
+    JSON.stringify({ ts: "2026-08-25T00:01:00Z", task: "gap-runs-1", final_state: "failed", exit_code: 7, session_id: null }),
+  ].join("\n") + "\n");
+  try {
+    const recs = readWorkerOutcomeRecords(root).filter((r) => r.task === "gap-runs-1");
+    assert.equal(recs.length, 2, "two attempts read back");
+    assert.equal(recs[0].session_id, sid, "session_id is parsed from the carrier");
+    const htmlBlock = taskRunsBlock(root, "gap-runs-1");
+    assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132"/, "Runs block links the view for the attempt with a session_id");
+    assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132\/download"/, "Runs block links the raw download for the attempt");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 (integration) — /session/<id>/download serves raw JSONL (attachment) and rejects non-UUID/traversal ids", async () => {
+  const { ws, tasksDir } = makeWorkspace("session-dl-");
+  const cwd0 = process.cwd();
+  let server;
+  const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
+  const slug = ws.split(path.sep).join("-");
+  const transcriptDir = path.join(os.homedir(), ".claude", "projects", slug);
+  const transcriptPath = path.join(transcriptDir, `${sid}.jsonl`);
+  fs.mkdirSync(transcriptDir, { recursive: true });
+  fs.writeFileSync(transcriptPath, '{"type":"user","message":{"role":"user","content":"hello"}}\n');
+  try {
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const ok = await getRes(port, `/session/${sid}/download`);
+    assert.equal(ok.status, 200, "valid UUID download → 200");
+    assert.match(String(ok.headers["content-disposition"] ?? ""), /attachment/, "raw download is an attachment");
+    assert.ok(ok.body.includes('"hello"'), "download streams the raw JSONL transcript");
+
+    const badUuid = await getRes(port, "/session/not-a-uuid/download");
+    assert.equal(badUuid.status, 400, "non-UUID session_id → 400 (rejected before any disk read)");
+
+    const traversal = await getRes(port, "/session/%2e%2e%2fetc%2fpasswd/download");
+    assert.equal(traversal.status, 400, "encoded traversal session_id → 400 (never reads an arbitrary path)");
+
+    const absent = await getRes(port, "/session/066a1382-0000-4000-8000-000000000000/download");
+    assert.equal(absent.status, 404, "valid UUID but no transcript → 404 (honest, not a 500)");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(transcriptPath, { force: true });
+    try { fs.rmdirSync(transcriptDir); } catch { /* leave the (empty) dir */ }
     fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(ws, { recursive: true, force: true });
   }
