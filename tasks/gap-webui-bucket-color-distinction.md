@@ -1,7 +1,7 @@
 ---
 id: gap-webui-bucket-color-distinction
 title: web /tests 甘特图 + 时间线加 bucket 颜色区分（P/M/P+M/full 各一色，bucketSetOf 查路径 + 图例）
-status: ready
+status: done
 labels:
   - gap
   - feature
