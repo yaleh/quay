@@ -35,9 +35,12 @@
 # plugin/scripts/session-liveness.sh）。生产调用不设 → 行为不变。
 #
 # 输出前存活复验（gap-monitor-mount-check-stale-pids）：扫描到输出之间 pid 可能已死（TOCTOU）——
-# 逐个 /proc/<pid> 存在性复验（等价 ps -p），死 pid 单独报 `stale_pids`（独立取值，不静默剔除，
-# 不与 mounted 判据混为一谈）；mounted/targetOk 基于【存活 pid 集】。测试接缝
-# MONITOR_CHECK_STALE_PIDS 模拟「扫描后已死」（生产不设）。
+# 逐个读 /proc/<pid>/stat 的 state 字段复验（state != Z 才算活），死 pid（含僵尸 Z）单独报
+# `stale_pids`（独立取值，不静默剔除，不与 mounted 判据混为一谈）；mounted/targetOk 基于
+# 【存活 pid 集】。为何是 stat 而非存在性：/proc/<pid> 对僵尸（Z）仍存在，os.path.exists 会把
+# 僵尸当活（ps -p 判死）——2026-08-14 manager 实测 pids=[122043,474265] stale_pids=[]，而 474265
+# 已死，正是存在性复验漏掉僵尸。测试接缝：MONITOR_CHECK_STALE_PIDS 模拟「扫描后已死」（生产不设）；
+# --probe-alive <pid> 直接打印 pid_alive 判定（生产不设，供真实僵尸回放测试）。
 #
 # 用法: bash plugin/scripts/monitor-mount-check.sh [--json]
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
@@ -55,10 +58,17 @@ SL_DIR="$(cd "$(dirname "$SESSION_LIVENESS")" && pwd)"
 REPO_ROOT="$(cd "$SL_DIR/../.." && pwd)"
 
 FORMAT=human
-for a in "$@"; do [ "$a" = "--json" ] && FORMAT=json; done
+PROBE_PID=""
+prev=""
+for a in "$@"; do
+  [ "$prev" = "--probe-alive" ] && PROBE_PID="$a"
+  prev="$a"
+  [ "$a" = "--json" ] && FORMAT=json
+done
 
 MMC_SESSION_LIVENESS="$SESSION_LIVENESS" MMC_REPO_ROOT="$REPO_ROOT" MMC_FORMAT="$FORMAT" \
 MMC_STALE_PIDS="${MONITOR_CHECK_STALE_PIDS:-}" \
+MMC_PROBE_PID="$PROBE_PID" \
 python3 - <<'PY'
 import json, os, glob
 
@@ -86,12 +96,37 @@ def read_cmdline(pid):
 
 
 def pid_alive(pid):
-    """输出前存活复验（判据1）：扫描到输出之间 pid 可能已死，逐个用 /proc/<pid> 存在性复验
-    （等价 ps -p）。死 pid 单独报 stale_pids，不静默剔除——「曾经挂过但死了」与「从没挂过」不同形
+    """输出前存活复验（判据1）：扫描到输出之间 pid 可能已死。读 /proc/<pid>/stat 的 state 字段，
+    state == Z（僵尸）判死——/proc/<pid> 对僵尸仍存在，os.path.exists 会把僵尸当活（ps -p 判死）。
+    死 pid（含僵尸）单独报 stale_pids，不静默剔除——「曾经挂过但死了」与「从没挂过」不同形
     （C29 家族）。"""
     if pid in _STALE_OVERRIDE:
         return False
-    return os.path.exists(f"/proc/{pid}")
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as f:
+            stat = f.read()
+    except OSError:
+        return False
+    # /proc/<pid>/stat 形如 `pid (comm) state ppid ...`；comm 可含空格/括号，从最后一个 `)` 之后
+    # 取 state（本仓 monitor-mount-check.test.mjs readPpid 同款解析）。
+    idx = stat.rfind(b")")
+    if idx == -1:
+        return False
+    fields = stat[idx + 2:].split()
+    return bool(fields) and fields[0] != b"Z"
+
+
+# 测试接缝（gap-monitor-mount-check-stale-pids）：--probe-alive <pid> 直接打印 pid_alive 判定
+# （alive / stale），供真实僵尸回放测试——僵尸 cmdline 为空、进不了扫描集，只能靠本接缝把真实
+# 僵尸 pid 喂给同一个 pid_alive。生产调用不设 → 跳过（行为不变）。
+PROBE_PID = os.environ.get("MMC_PROBE_PID", "").strip()
+if PROBE_PID:
+    try:
+        _probe = int(PROBE_PID)
+    except ValueError:
+        _probe = -1
+    print("alive" if pid_alive(_probe) else "stale")
+    raise SystemExit(0)
 
 
 def resolve_script_path(pid, argv_script):

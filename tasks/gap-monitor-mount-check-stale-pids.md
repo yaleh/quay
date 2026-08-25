@@ -48,21 +48,25 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：pids 逐个存活校验，死 pid → stale_pids 独立报（不静默剔除）。
-- [ ] AC2 判据2 能取假：死 pid 回放红（现 pids 可含死 pid）。
-- [ ] AC3 判据3：mounted/targetOk 基于存活 pid 集。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：pids 逐个存活校验，死 pid → stale_pids 独立报（不静默剔除）——`pid_alive` 读 `/proc/<pid>/stat` 的 state 字段，state=Z（僵尸）判死，死 pid 单独进 `stale_pids`；测试 `stale-pids AC1/AC3`（死 pid 进 stale_pids 不进 pids）+ `mixed`（活 pid 留 pids、死 pid 进 stale_pids）。
+- [x] AC2 判据2 能取假：死 pid 回放红——真实僵尸回放测试 `stale-pids AC2 — a REAL zombie (state=Z) is judged stale`：创建真实僵尸（state=Z），`--probe-alive` 判 `stale`，且断言 `/proc/<zombie>` 仍存在（旧 `os.path.exists` 会误判 alive——正是 2026-08-14 生产复现 `pids=[122043,474265] stale_pids=[]` 而 474265 已死的机制根因）。
+- [x] AC3 判据3：mounted/targetOk 基于存活 pid 集——`live_targets` 只含 `pid_alive` 为真的 pid；测试断言唯一监视器死亡 ⇒ mounted=false/targetOk=false，≥1 活 ⇒ mounted=true。
+- [x] AC4 既有测试全绿 + `--for-task` scoped 门绿——`node --test plugin/test/monitor-mount-check.test.mjs` 15/15 绿；`scripts/test.sh --for-task gap-monitor-mount-check-stale-pids` 退出码 0（scoped 静态检查全 PASS + 15 测试全绿）。
 
 ## Definition of Done
 
-- [ ] monitor-mount-check 输出前复验 pids 存活（死 pid → stale_pids）+ mounted/targetOk 基于存活集。
+- [x] monitor-mount-check 输出前复验 pids 存活（死 pid → stale_pids）+ mounted/targetOk 基于存活集——`pid_alive` 读 `/proc/<pid>/stat` state（!=Z 才算活），死 pid（含僵尸）→ `stale_pids` 独立字段，mounted/targetOk 基于 `live_targets`；真实僵尸回归测试 + 15/15 测试绿。
 
 ## Touches
 
-- plugin/scripts/monitor-mount-check.sh（输出前 ps -p 复验，stale_pids 独立字段）
-- plugin/test/monitor-mount-check.test.mjs（补测：死 pid 进 stale_pids）
+- plugin/scripts/monitor-mount-check.sh（输出前 stat state 复验，stale_pids 独立字段）
+- plugin/test/monitor-mount-check.test.mjs（补测：真实僵尸回放 → stale_pids）
 - tasks/gap-monitor-mount-check-stale-pids.md（自身）
 
 ## Evidence
 
-（落地后回填——manager 15:2xZ 实测 pids=[779887,2729903]，779887 不存在；outer 复跑当前仅 [2729903]）
+（2026-08-25 回填）
+- 根因确认：`os.path.exists(/proc/<僵尸 pid>)` 对 state=Z 的僵尸返回 True（实测 `os.path.exists: True`、`stat state: Z`），旧复验把僵尸当活——`ps -p` 判死、/proc 存在性判活，正是 2026-08-14 manager 报 `pids=[122043,474265] stale_pids=[]` 而 474265 已死的机制成因。
+- 修法：`pid_alive` 改为读 `/proc/<pid>/stat` 的 state 字段（`!= b"Z"` 才算活，stat 读不到 → 死）；僵尸 cmdline 为空、进不了扫描集，故加 `--probe-alive <pid>` 接缝把真实僵尸 pid 喂给同一个 `pid_alive`（生产不设 → 行为不变）。
+- 测试：`node --test plugin/test/monitor-mount-check.test.mjs` → 15 pass / 0 fail（含 2 条新僵尸回归测试）。
+- scoped 门：`scripts/test.sh --for-task gap-monitor-mount-check-stale-pids` → 退出码 0（全部 scoped 静态检查 PASS + 15/15 测试绿）。
