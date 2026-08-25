@@ -78,6 +78,9 @@ Usage:
 
   --kind <promotion|worker>   Required. Which driver the command targets.
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
+  --reconcile-interval <s>    (worker only) Coordination floor: reconcile at least every N seconds
+                              even if every edge event (worker exit) is lost — degrade to
+                              "slow but correct" instead of silent stall (default 300; 0 = no floor).
 
 ⛔ Starting from a git worktree (quay-worktrees/…) is REJECTED — the resident supervisor must be
 carried from the workspace root (main checkout), not a short-lived worktree.

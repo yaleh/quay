@@ -37,7 +37,7 @@ headless 生命周期（driver + 新建 + --resume 重启）落地；AC1-3 全�
 
 ## Touches
 
-- packages/quay/src/serve-handlers.ts（生命周期 handler）
+- packages/quay/src/serve-sessions.ts（生命周期 handler）
 - packages/quay/src/cli/driver.ts（quay driver 暴露，如需）
 - packages/quay/test/serve-handlers.test.mjs（对应测试）
 - tasks/gap-webui-session-lifecycle.md（自身）

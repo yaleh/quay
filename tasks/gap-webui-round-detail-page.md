@@ -1,7 +1,7 @@
 ---
 id: gap-webui-round-detail-page
 title: "任选历史轮次详情（面向单轮非单文件）：/tests?round=N 真正生效 + 历史运行表 #NNN 包链接"
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -21,8 +21,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，任选轮次）：`/tests?round=510` 显示 round 510 的时间线/负载曲线（⛔ 仍显示最新轮、参数被忽略 ⇒ 假）。
-- [ ] AC2（能取假，入口链接）：历史运行表 `#NNN` 格子可点击跳到该轮详情（⛔ 纯文本 `<td>#510</td>` 无链接 ⇒ 假）。
+- [x] AC1（能取假，任选轮次）：`/tests?round=510` 显示 round 510 的时间线/负载曲线（⛔ 仍显示最新轮、参数被忽略 ⇒ 假）。
+- [x] AC2（能取假，入口链接）：历史运行表 `#NNN` 格子可点击跳到该轮详情（⛔ 纯文本 `<td>#510</td>` 无链接 ⇒ 假）。
 
 ## Definition of Done
 
