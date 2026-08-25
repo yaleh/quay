@@ -85,6 +85,9 @@ function makeFixtureRoot() {
   }
   fs.mkdirSync(path.join(tmp, ".claude"), { recursive: true });
   fs.copyFileSync(path.join(REPO_ROOT, ".claude", "launch.settings.json"), path.join(tmp, ".claude", "launch.settings.json"));
+  // R7: .quay is a live data dir (runtime state) — do NOT copy from REPO_ROOT/.quay; write a stub.
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".quay", "profiles.yml"), "version: 1\n");
   fs.mkdirSync(path.join(tmp, "orchestration"), { recursive: true });
   fs.copyFileSync(SPEC, path.join(tmp, "orchestration", SPEC_BASENAME));
   return tmp;

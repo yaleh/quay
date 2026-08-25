@@ -69,10 +69,10 @@ test("AC2 — the three exec-core docs are in the derived laydown set; a --loop 
 });
 
 // ── AC2 (gap-quay-init-coldstart-usability-launch-not-used-... F4): the laid-down launch is usable ────
-// quay-launch.sh reads <target>/.claude/launch.settings.json — a --loop install must lay the default
-// template so a cold-started consumer's quay-launch.sh does NOT fail closed ("launch settings file
-// not found"), and the materialized command carries --settings + the role-convention name.
-test("AC2-launch — --loop lays down .claude/launch.settings.json; the laid-down quay-launch.sh materializes --settings + role names", () => {
+// quay-launch.sh reads <target>/.claude/launch.settings.json + <target>/.quay/profiles.yml (AC154) — a
+// --loop install must lay BOTH so a cold-started consumer's quay-launch.sh does NOT fail closed
+// ("launch settings file not found"), and the materialized command carries --settings + the role name.
+test("AC2-launch — --loop lays down .claude/launch.settings.json + .quay/profiles.yml; the laid-down quay-launch.sh materializes --settings + role names", () => {
   const { ws, install: r } = laydownWorkspace();
   try {
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
@@ -81,8 +81,14 @@ test("AC2-launch — --loop lays down .claude/launch.settings.json; the laid-dow
     const settings = path.join(ws, ".claude", "launch.settings.json");
     assert.ok(fs.existsSync(settings), "a --loop install must lay .claude/launch.settings.json (the launcher's input)");
     const s = JSON.parse(fs.readFileSync(settings, "utf8"));
-    assert.ok(s._launchSpec?.roles, "the template must define _launchSpec.roles");
-    const names = new Set(Object.values(s._launchSpec.roles).map((r) => r.name));
+    assert.ok(!("_launchSpec" in s), "the laid template must NOT carry _launchSpec (AC154 profile 抽层)");
+    // AC154: roles now live in the SIBLING .quay/profiles.yml laid beside the settings file.
+    const profiles = path.join(ws, ".quay", "profiles.yml");
+    assert.ok(fs.existsSync(profiles), "a --loop install must lay .quay/profiles.yml (the profile carrier)");
+    const py = spawnSync("python3", ["-c", "import sys,yaml,json; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))", profiles], { encoding: "utf8" });
+    assert.equal(py.status, 0, `laid profiles.yml must parse as YAML:\n${py.stderr}`);
+    const p = JSON.parse(py.stdout);
+    const names = new Set(Object.values(p.roles).map((r) => r.name));
     assert.equal(names.has("quay-outer"), true, "outer role must carry the role-convention name quay-outer");
     assert.equal(names.has("quay-inner"), true, "inner role must carry the role-convention name quay-inner");
     // The launcher in the laid-down target materializes --settings + the role name (F4's missing half).

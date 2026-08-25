@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   extractSection, parseTask, hasSchemaMarker, classifyKind,
+  readDependsOn,
   checkProposal, checkPlan, checkAcceptanceChecklist, checkDodChecklist,
   checkResolution, checkNoScaffolding,
   checkGapFinding, checkGapRequestedAction, checkGapWiringCoverage,
@@ -44,6 +45,25 @@ test("parseTask: no frontmatter → empty labels/extra, whole text as body", () 
   const t = parseTask("just body");
   assert.deepEqual(t.labels, []);
   assert.equal(t.body, "just body");
+});
+
+// ── readDependsOn ────────────────────────────────────────────────────────────────────────────────
+// gap-readdepends-on-indented-extra-depends-on: `depends_on:` may sit at column 0 OR indented under
+// `extra:` (the real production shape that hid 10 tasks' dependencies from the dispatch layer).
+test("readDependsOn: flow form at column 0", () => {
+  assert.deepEqual(readDependsOn("depends_on: [a, b]\n"), ["a", "b"]);
+});
+test("readDependsOn: flow form indented under extra", () => {
+  assert.deepEqual(readDependsOn("extra:\n  depends_on: [a, b]\n"), ["a", "b"]);
+});
+test("readDependsOn: block form at column 0", () => {
+  assert.deepEqual(readDependsOn("depends_on:\n  - a\n  - b\n"), ["a", "b"]);
+});
+test("readDependsOn: block form indented under extra (real production shape)", () => {
+  assert.deepEqual(readDependsOn("extra:\n  depends_on:\n    - a\n    - b\n"), ["a", "b"]);
+});
+test("readDependsOn: no depends_on key → []", () => {
+  assert.deepEqual(readDependsOn("labels: [gap]\n"), []);
 });
 
 // ── marker + kind ─────────────────────────────────────────────────────────────────────────────

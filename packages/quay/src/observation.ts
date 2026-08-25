@@ -89,6 +89,21 @@ export type RunLiveness = "alive" | "orphan" | "unknown";
 export interface InFlightTask {
   taskId: string;
   runId: string;
+  /**
+   * Worker process id (from the `/proc/<pid>` scan, 方向二). Non-null ONLY for a worker-process-
+   * signal task (gap-live-page-worker-inflight-bidirectional-error); null for workflow-events and
+   * outcome-carrier tasks (no process known). Lets the Live view locate the process/session
+   * downstream (gap-webui-live-passthrough-pid).
+   */
+  pid: string | null;
+  /**
+   * The live transcript session id for an in-flight worker (gap-worker-task-transcript-access-webui
+   * AC2): joined from `~/.claude/sessions/<pid>.json`'s `sessionId` for the worker-process-signal
+   * task whose pid is known. null otherwise — a live worker has NO transcript join when its pid has
+   * no session record yet (honest null, hard rule ③b: 读不到 ≠ 无会话可访问，但「无链接」比「伪造
+   * 链接」安全，且进程退出即删只覆盖在飞).
+   */
+  sessionId: string | null;
   startedAtMs: number;
   /**
    * Impl-complete boundary (gap-inflight-states-missing-impl-complete-event): the third lifecycle
@@ -227,6 +242,8 @@ export function pairInFlight(events: RawEvent[], nowMs: number): InFlightTask[] 
       out.push({
         taskId: rec.taskId,
         runId: rec.runId,
+        pid: null, // pure event pairing: no live process known (readLive annotates it for 方向二)
+        sessionId: null, // pure event pairing: no process ⇒ no live session join (readLive annotates)
         startedAtMs: rec.start.timing.startedAtMs,
         implCompletedAtMs:
           rec.implComplete && typeof rec.implComplete.recordedAtMs === "number"
@@ -547,20 +564,46 @@ export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
  *  live process cmdline (`Task: <id>`) is the only carrier that shows it in-flight. */
 export const WORKER_PROCESS_NAME = "quay-task-worker";
 
-/** The subset of the outcome record readLive consumes. Unknown/missing fields degrade to null rather
- *  than a fabricated reading (hard rule ③b). */
+/** The full outcome record the worker-driver writes (computeOutcome's 14 fields + the
+ *  gap-worker-task-transcript-access-webui `session_id` that lands later). Unknown/missing fields
+ *  degrade to null rather than a fabricated reading (hard rule ③b) — the carrier is a best-effort
+ *  runtime log, so a missing `worker_pid`/`exit_code` must read as null, never as a fake 0. */
 export interface WorkerOutcomeRecord {
+  /** ISO-8601 UTC write time (the carrier's `ts`). */
+  ts: string | null;
   task: string | null;
-  run_id: string | null;
-  /** ISO-8601 UTC worker-run start (the carrier's `started_at`). */
-  started_at: string | null;
+  selector_reason: string | null;
+  /** Process exit code (null on signal / spawn-failed / timed-out). */
+  exit_code: number | null;
+  /** Termination signal (null unless killed). */
+  signal: string | null;
+  /** Wall-clock duration of the worker run, ms. */
+  wall_clock_ms: number | null;
   /** Terminal state: completed | exited-not-landed | failed | killed | timed-out | spawn-failed | not-dispatched. */
   final_state: string | null;
+  failure_reason: string | null;
+  /** ISO-8601 UTC worker-run start (the carrier's `started_at`). */
+  started_at: string | null;
+  /** ISO-8601 UTC worker-run end (the carrier's `ended_at`). */
+  ended_at: string | null;
+  worker_pid: number | null;
+  run_id: string | null;
+  in_flight_count: number | null;
+  timed_out: boolean | null;
+  /** Transcript session id — written by gap-worker-task-transcript-access-webui (not yet on disk).
+   *  Parses to null until that lands, so a Runs block can link the transcript with zero
+   *  re-implementation (this task reuses that task's read+validation, hard rule ③b / AC3). */
+  session_id: string | null;
 }
 
 /** Parse `.quay/worker-outcome.jsonl` (one JSON object per line) into outcome records. Pure — never
- *  throws; a malformed line is skipped (best-effort runtime log, not a store). */
+ *  throws; a malformed line is skipped (best-effort runtime log, not a store). Reads every field the
+ *  driver writes (computeOutcome's 14) rather than a hand-picked subset — `worker_pid` was on disk
+ *  but dropped by the old 4-field parse (gap-webui-task-runs-block AC2). */
 export function parseWorkerOutcomeRecords(text: string): WorkerOutcomeRecord[] {
+  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
   const out: WorkerOutcomeRecord[] = [];
   for (const line of String(text).split("\n")) {
     const s = line.trim();
@@ -568,10 +611,21 @@ export function parseWorkerOutcomeRecords(text: string): WorkerOutcomeRecord[] {
     let j: Record<string, unknown>;
     try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
     out.push({
-      task: typeof j.task === "string" && j.task.length > 0 ? j.task : null,
-      run_id: typeof j.run_id === "string" && j.run_id.length > 0 ? j.run_id : null,
-      started_at: typeof j.started_at === "string" && j.started_at.length > 0 ? j.started_at : null,
-      final_state: typeof j.final_state === "string" && j.final_state.length > 0 ? j.final_state : null,
+      ts: str(j.ts),
+      task: str(j.task),
+      selector_reason: str(j.selector_reason),
+      exit_code: num(j.exit_code),
+      signal: str(j.signal),
+      wall_clock_ms: num(j.wall_clock_ms),
+      final_state: str(j.final_state),
+      failure_reason: str(j.failure_reason),
+      started_at: str(j.started_at),
+      ended_at: str(j.ended_at),
+      worker_pid: num(j.worker_pid),
+      run_id: str(j.run_id),
+      in_flight_count: num(j.in_flight_count),
+      timed_out: bool(j.timed_out),
+      session_id: str(j.session_id),
     });
   }
   return out;
@@ -616,6 +670,8 @@ export function workerInFlightTasks(records: WorkerOutcomeRecord[], nowMs: numbe
     out.push({
       taskId: task,
       runId: r.run_id ?? `worker-${task}`,
+      pid: null, // outcome-carrier task: no live process known (written only at worker END)
+      sessionId: null, // outcome-carrier task: no live process ⇒ no live session join (readLive annotates)
       startedAtMs: r.startedMs,
       implCompletedAtMs: null,
       minutes: Math.max(0, (nowMs - r.startedMs) / 60_000),
@@ -627,9 +683,12 @@ export function workerInFlightTasks(records: WorkerOutcomeRecord[], nowMs: numbe
   return out;
 }
 
-/** A live worker process (方向二): task id + process start wall-clock. */
+/** A live worker process (方向二): task id + process id + process start wall-clock. */
 export interface LiveWorker {
   taskId: string;
+  /** The `/proc/<pid>` directory name this worker was scanned from (gap-webui-live-passthrough-pid).
+   *  Lets the Live view locate the process/session downstream. */
+  pid: string;
   /** Process start wall-clock ms (from `/proc/<pid>/stat` starttime + btime). null when unreadable —
    *  the caller falls back to the observation instant (fail-closed toward "just started", never a
    *  fabricated long elapsed). */
@@ -685,9 +744,26 @@ export function readLiveWorkerProcesses(procDir: string = "/proc"): LiveWorker[]
     } catch { continue; }
     const taskId = workerTaskIdFromCmdline(cmdline);
     if (!taskId) continue;
-    out.push({ taskId, startedAtMs: procStartTimeMs(procDir, e, btimeSec) });
+    out.push({ taskId, pid: e, startedAtMs: procStartTimeMs(procDir, e, btimeSec) });
   }
   return out;
+}
+
+/** Read the live session id for a worker pid from `~/.claude/sessions/<pid>.json` (the Claude Code
+ *  live-session registry — pid → sessionId, written while the process is alive, deleted on exit; only
+ *  covers in-flight). Returns null when the record is missing/unreadable/malformed or its `sessionId`
+ *  is not a strict UUID (hard rule ③b: 读不到 ≠ 无会话，诚实 null 让 /live 渲染「无链接」而非伪造)。
+ *  `home` is injectable for tests; defaults to the real `$HOME`. */
+export function liveSessionIdForPid(pid: string, home: string = os.homedir()): string | null {
+  if (!/^\d+$/.test(pid)) return null; // pid must be numeric (the /proc entry name) — never a path component
+  try {
+    const text = fs.readFileSync(path.join(home, ".claude", "sessions", `${pid}.json`), "utf8");
+    const j = JSON.parse(text) as Record<string, unknown>;
+    const sid = j.sessionId;
+    return typeof sid === "string" && isValidSessionId(sid) ? sid : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Read `.quay/worker-outcome.jsonl` as text. Absent/unreadable ⇒ null (degrade, never throw). */
@@ -697,6 +773,13 @@ function readWorkerOutcomeText(root: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** Read + parse all worker-outcome records for a workspace root (the /task/<id> Runs block's data
+ *  source — gap-webui-task-runs-block). Absent/unreadable ⇒ [] (degrade, never throw). */
+export function readWorkerOutcomeRecords(root: string): WorkerOutcomeRecord[] {
+  const text = readWorkerOutcomeText(root);
+  return text != null ? parseWorkerOutcomeRecords(text) : [];
 }
 
 /**
@@ -773,7 +856,8 @@ function readTaskStatusOnDisk(root: string, taskId: string): string | null {
  */
 export function readLive(
   root: string,
-  { nowMs = Date.now(), liveWorkers = null }: { nowMs?: number; liveWorkers?: LiveWorker[] | null } = {},
+  { nowMs = Date.now(), liveWorkers = null, sessionHome = os.homedir() }:
+    { nowMs?: number; liveWorkers?: LiveWorker[] | null; sessionHome?: string } = {},
 ): LiveResult {
   const eventsDir = path.join(root, FAST_MODE_EVENTS_DIR);
   let inFlight: InFlightTask[] = [];
@@ -844,6 +928,11 @@ export function readLive(
     workerInFlight.push({
       taskId: w.taskId,
       runId: `worker-${w.taskId}`,
+      pid: w.pid,
+      // gap-worker-task-transcript-access-webui AC2: join ~/.claude/sessions/<pid>.json for the live
+      // transcript session id (worker-driver now spawns `claude --session-id <uuid>`, so a live worker's
+      // pid maps to the session whose transcript is being written RIGHT NOW).
+      sessionId: liveSessionIdForPid(w.pid, sessionHome),
       startedAtMs,
       implCompletedAtMs: null,
       minutes: Math.max(0, (nowMs - startedAtMs) / 60_000),
@@ -1624,7 +1713,7 @@ export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, nowMs 
 //   system       → resource-gate.sh + process-budget.sh (text output)
 //   manager      → loop-driver-check.sh + session-liveness.sh + observer-registry.conf + ready-pool-check.ts
 //   tests        → .quay/verification-round.jsonl + .quay/full-suite-state.json (the suite-state writer)
-//   sessions     → session-liveness.sh --once + resolved session transcripts
+//   sessions     → claude agents --json (running) + transcript-dir scan (ended) + transcript tails
 //   architecture → git log per packages/* path + git worktree list (filesystem/git facts)
 //   dashboard    → the same sources via the specific views above, plus client.taskList (in the handler)
 // Everything degrades per the header contract: absent → 「未接入/无数据」, unreadable → 「读失败」,
@@ -2489,43 +2578,139 @@ export function readTranscriptTail(transcriptPath: string, maxMsgs = SESSIONS_TR
   }
 }
 
-/** Sessions view: session-liveness rows + best-effort transcript tails per live session. */
+// ── `claude agents --json` discovery (gap-webui-session-discovery-claude-agents-json) ───────────────
+// The official CLI session registry replaces the old three-role tmux-guessing discovery
+// (buildManagerSessionTargets → session-liveness.sh). It lists EVERY running session — interactive
+// AND `-p`/headless alike (SPEC §2.2 更正段) — but only RUNNING ones: ended sessions are absent from
+// the registry (SPEC §2.4) and are discovered separately by scanning the transcript directory.
+
+/** One `claude agents --json` row. `status` (busy/idle) is only present on interactive sessions; a
+ *  `-p`/headless worker omits it — absence is NOT "idle", so it parses as null rather than a
+ *  fabricated value (hard rule ③b). */
+export interface ClaudeAgentRow {
+  pid: number | null;
+  cwd: string | null;
+  kind: string | null;
+  startedAt: number | null;
+  sessionId: string | null;
+  name: string | null;
+  status: string | null;
+}
+
+/** Parse `claude agents --json` stdout (a JSON array). Pure — never throws; a non-array or malformed
+ *  document yields [] (the caller then renders an honest empty state). */
+export function parseClaudeAgentsJson(text: string): ClaudeAgentRow[] {
+  let doc: unknown;
+  try { doc = JSON.parse(String(text)); } catch { return []; }
+  if (!Array.isArray(doc)) return [];
+  const out: ClaudeAgentRow[] = [];
+  for (const el of doc) {
+    if (!el || typeof el !== "object" || Array.isArray(el)) continue;
+    const o = el as Record<string, unknown>;
+    out.push({
+      pid: typeof o.pid === "number" && Number.isFinite(o.pid) ? o.pid : null,
+      cwd: typeof o.cwd === "string" && o.cwd.length > 0 ? o.cwd : null,
+      kind: typeof o.kind === "string" && o.kind.length > 0 ? o.kind : null,
+      startedAt: typeof o.startedAt === "number" && Number.isFinite(o.startedAt) ? o.startedAt : null,
+      sessionId: typeof o.sessionId === "string" && o.sessionId.length > 0 ? o.sessionId : null,
+      name: typeof o.name === "string" && o.name.length > 0 ? o.name : null,
+      status: typeof o.status === "string" && o.status.length > 0 ? o.status : null,
+    });
+  }
+  return out;
+}
+
+/** Spawn `claude agents --json` and return its raw stdout. Never throws — a spawn failure or non-zero
+ *  exit yields { stdout: null, reason } (the caller renders an honest empty state, never a 500). */
+async function runClaudeAgentsJson(root: string): Promise<{ stdout: string | null; reason: string | null }> {
+  const { stdout, exitCode } = await runScriptBounded(["claude", "agents", "--json"], { cwd: root, timeoutMs: 20_000 });
+  if (exitCode === null) return { stdout: null, reason: "claude agents --json 未能运行（spawn 失败或超时被杀）" };
+  if (exitCode !== 0) return { stdout: null, reason: `claude agents --json 退出码 ${exitCode}` };
+  return { stdout, reason: null };
+}
+
+/** Path equality after resolution (trailing-slash-insensitive). Never throws — an un-resolvable path
+ *  returns false rather than propagating. Used to scope the machine-wide `claude agents --json`
+ *  registry down to the served workspace. */
+function samePath(a: string, b: string): boolean {
+  try { return path.resolve(a) === path.resolve(b); } catch { return false; }
+}
+
+/** Max recent-ended sessions surfaced on /sessions. The transcript dir holds hundreds of session
+ *  files; the page shows only the most recent (newest-first), not the whole history. */
+export const SESSIONS_ENDED_MAX = 20;
+
+/** Scan the workspace's transcript dir (`~/.claude/projects/<slug>/*.jsonl`) for sessions NOT in the
+ *  running registry — i.e. ended sessions. Returns { sessionId, mtimeMs } newest-first, bounded to
+ *  SESSIONS_ENDED_MAX. A missing dir yields [] (honest empty, not an error). */
+function scanEndedSessions(root: string, runningIds: ReadonlySet<string>): Array<{ sessionId: string; mtimeMs: number }> {
+  const dir = path.join(os.homedir(), ".claude", "projects", projectSlug(root));
+  let entries: string[];
+  try { entries = fs.readdirSync(dir); } catch { return []; }
+  const ended: Array<{ sessionId: string; mtimeMs: number }> = [];
+  for (const entry of entries) {
+    if (!entry.endsWith(".jsonl")) continue;
+    const sessionId = entry.slice(0, -".jsonl".length);
+    if (runningIds.has(sessionId) || !isValidSessionId(sessionId)) continue;
+    try {
+      ended.push({ sessionId, mtimeMs: fs.statSync(path.join(dir, entry)).mtimeMs });
+    } catch { /* a file that vanished between readdir and stat is skipped */ }
+  }
+  ended.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return ended.slice(0, SESSIONS_ENDED_MAX);
+}
+
+/** Best-effort transcript tail for a session whose transcript path is already known; a missing path
+ *  degrades to an honest empty (the card renders 未接入 rather than a fabricated reading). */
+function transcriptTailFor(tp: string | null): { status: ObservationStatus; reason: string | null; messages: SessionMessage[] | null } {
+  if (tp != null && fs.existsSync(tp)) return readTranscriptTail(tp);
+  return { status: "empty", reason: "transcript 缺失", messages: null };
+}
+
+/** Sessions view: `claude agents --json` (running sessions — interactive + `-p`) + a transcript-dir
+ *  scan for ended sessions (SPEC §3.1: the registry only lists running sessions, so ended ones are
+ *  discovered from their transcript files). Replaces the old three-role tmux-guessing discovery, which
+ *  could see neither `-p`/headless sessions nor ended sessions. */
 export async function readSessions(root: string): Promise<SessionsResult> {
-  const p = resolvePluginScript(SESSION_LIVENESS_REL);
-  if (!p) {
-    return { status: "empty", reason: `${SESSION_LIVENESS_REL} 缺失（未接入）`, sessions: [] };
+  const { stdout, reason } = await runClaudeAgentsJson(root);
+  if (stdout == null) {
+    return { status: "empty", reason, sessions: [] };
   }
-  // Register explicit outer+inner targets (same override the Manager view uses) so the sessions
-  // resolve to layer-named rows (`outer` / `inner`) instead of whatever single default target the
-  // workspace env happens to name — the /sessions page is a three-layer view by design. Fail-closed:
-  // when no session name is derivable, buildManagerSessionTargets returns null and we run with the
-  // env's own targets (preserving pre-existing display).
-  const targets = buildManagerSessionTargets(root);
-  const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000, targets ? { SESSION_TARGETS: targets } : undefined);
-  if (r.stdout == null) {
-    return { status: "empty", reason: r.reason, sessions: [] };
-  }
-  const rows = parseSessionLivenessJson(r.stdout);
-  if (rows.length === 0) {
-    return { status: "empty", reason: "session-liveness 无 SESSION-STATUS 行（无观测目标）", sessions: [] };
-  }
+  const rows = parseClaudeAgentsJson(stdout);
+  // Scope to THIS workspace: the registry is machine-wide (every project's sessions), so keep only
+  // rows whose cwd resolves to the served root — otherwise an unrelated project's sessions would leak
+  // onto this workspace's /sessions page (and a temp test workspace would show real machine sessions).
+  const here = rows.filter((r) => r.cwd != null && r.sessionId != null && samePath(r.cwd, root));
 
   const sessions: SessionDetail[] = [];
-  for (const row of rows) {
-    let transcript: { status: ObservationStatus; reason: string | null; messages: SessionMessage[] | null } =
-      { status: "empty", reason: "未解析 transcript 路径（无 pid）", messages: null };
-    if (row.alive && row.pid != null) {
-      const t = await runScriptBounded(["bash", p, "--resolve-transcript", row.name, root, String(row.pid)], { cwd: root, timeoutMs: 10_000 });
-      const tp = t.stdout.trim().split(/\r?\n/).pop() ?? "";
-      if (tp && fs.existsSync(tp)) transcript = readTranscriptTail(tp);
-      else transcript = { status: "empty", reason: "transcript 路径不可解析", messages: null };
-    }
+  const runningIds = new Set<string>();
+  for (const row of here) {
+    const sessionId = row.sessionId as string;
+    runningIds.add(sessionId);
+    const name = row.name ?? sessionId;
+    const transcript = transcriptTailFor(sessionTranscriptPath(root, sessionId));
     sessions.push({
-      name: row.name,
-      layer: classifySessionLayer(row.name),
-      alive: row.alive,
+      name,
+      layer: classifySessionLayer(name),
+      alive: true,
       pid: row.pid,
-      halted: row.halted,
+      halted: false,
+      transcriptStatus: transcript.status,
+      transcriptReason: transcript.reason,
+      messages: transcript.messages,
+    });
+  }
+
+  // Ended sessions: transcripts in this workspace's project dir that the running registry does not
+  // list. Surfaced newest-first as GONE cards so a session that just ended is still observable.
+  for (const { sessionId } of scanEndedSessions(root, runningIds)) {
+    const transcript = transcriptTailFor(sessionTranscriptPath(root, sessionId));
+    sessions.push({
+      name: sessionId,
+      layer: classifySessionLayer(sessionId),
+      alive: false,
+      pid: null,
+      halted: false,
       transcriptStatus: transcript.status,
       transcriptReason: transcript.reason,
       messages: transcript.messages,
@@ -2533,6 +2718,175 @@ export async function readSessions(root: string): Promise<SessionsResult> {
   }
 
   return { status: "ok", reason: null, sessions };
+}
+
+// ── Single-session view (/session/<sessionId>) ─────────────────────────────────────────────────────
+// gap-webui-session-detail-view. Addressing key = sessionId (UUID) ONLY — never pid, never task id,
+// never a transcript path (§7.1). The sessionId is validated as a strict UUID BEFORE it is ever used,
+// then joined onto a FIXED project slug derived from the workspace root — so it is a lookup key, never
+// a path component (§7.4 house pattern, same as /tests/file?path=). `-p` and interactive transcripts
+// share one schema family (§7.4) so a single parser renders both.
+
+/** Strict UUID shape. Rejects `../`, absolute paths, and any non-UUID before filesystem access (AC3). */
+export const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Detail view reads a larger tail than the /sessions preview (200 KB) — still bounded so a multi-GB
+ *  transcript never loads fully, but long enough to be observation-level rather than preview-level. */
+export const SESSION_VIEW_TRANSCRIPT_TAIL_BYTES = 2_000_000;
+
+export function isValidSessionId(sessionId: string): boolean {
+  return SESSION_ID_RE.test(sessionId);
+}
+
+/** The per-project transcript directory slug — the same `tr '/' '-'` transform session-liveness.sh
+ *  uses (`_sl_dynamic_transcript`), so `/home/yale/work/quay` → `-home-yale-work-quay`. */
+export function projectSlug(root: string): string {
+  return root.split("/").join("-");
+}
+
+/**
+ * Resolve a sessionId to its transcript path — PURE (no filesystem access, AC3). A sessionId that is
+ * not a strict UUID returns null (the caller then renders an honest 「非法」 state, never touching the
+ * disk). `home` is injectable for tests; defaults to the real `$HOME`.
+ */
+export function sessionTranscriptPath(root: string, sessionId: string, home: string = os.homedir()): string | null {
+  if (!isValidSessionId(sessionId)) return null;
+  return path.join(home, ".claude", "projects", projectSlug(root), `${sessionId}.jsonl`);
+}
+
+export type TranscriptBlock =
+  | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
+  | { kind: "tool_use"; id: string; name: string; input: string }
+  | { kind: "tool_result"; toolUseId: string; text: string; isError: boolean };
+
+export interface TranscriptTurn {
+  time: string;
+  role: string;
+  blocks: TranscriptBlock[];
+}
+
+export interface SessionViewResult {
+  status: ObservationStatus;
+  reason: string | null;
+  /** The requested sessionId (echoed, validated). */
+  sessionId: string;
+  /** Resolved transcript path, or null when the sessionId was invalid. */
+  transcriptPath: string | null;
+  turns: TranscriptTurn[];
+}
+
+/** tool_result content is a string OR an array of `{type:"text"}` blocks — normalize to text. */
+function toolResultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const b of content) {
+      if (b && typeof b === "object" && (b as { type?: unknown }).type === "text") {
+        const t = (b as { text?: unknown }).text;
+        if (typeof t === "string") parts.push(t);
+      }
+    }
+    return parts.join("\n");
+  }
+  return "";
+}
+
+/**
+ * Normalize a record's `message.content` (string prompt OR a block array) into structured blocks:
+ * `text` / `thinking` / `tool_use` / `tool_result`. This is the schema shared by `-p` and interactive
+ * transcripts (§7.4) — both carry these content-block shapes, interactive merely adds extra record
+ * types (system/mode/…) that are skipped here.
+ */
+export function transcriptContentBlocks(content: unknown): TranscriptBlock[] {
+  const blocks: TranscriptBlock[] = [];
+  if (typeof content === "string") {
+    const t = content.trim();
+    if (t) blocks.push({ kind: "text", text: t });
+    return blocks;
+  }
+  if (!Array.isArray(content)) return blocks;
+  for (const b of content) {
+    if (!b || typeof b !== "object") continue;
+    const type = (b as { type?: unknown }).type;
+    if (type === "text") {
+      const t = (b as { text?: unknown }).text;
+      if (typeof t === "string" && t.trim()) blocks.push({ kind: "text", text: t.trim() });
+    } else if (type === "thinking") {
+      const t = (b as { thinking?: unknown }).thinking;
+      if (typeof t === "string" && t.trim()) blocks.push({ kind: "thinking", text: t.trim() });
+    } else if (type === "tool_use") {
+      const o = b as { id?: unknown; name?: unknown; input?: unknown };
+      const id = typeof o.id === "string" ? o.id : "";
+      const name = typeof o.name === "string" ? o.name : "";
+      let input = "";
+      try { input = typeof o.input === "undefined" ? "" : JSON.stringify(o.input, null, 2); } catch { input = ""; }
+      blocks.push({ kind: "tool_use", id, name, input });
+    } else if (type === "tool_result") {
+      const o = b as { tool_use_id?: unknown; content?: unknown; is_error?: unknown };
+      blocks.push({
+        kind: "tool_result",
+        toolUseId: typeof o.tool_use_id === "string" ? o.tool_use_id : "",
+        text: toolResultText(o.content),
+        isError: o.is_error === true,
+      });
+    }
+  }
+  return blocks;
+}
+
+/** Parse complete JSONL transcript text into ordered turns (each = one user/assistant message). Pure. */
+export function parseTranscript(text: string): TranscriptTurn[] {
+  const turns: TranscriptTurn[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let o: unknown;
+    try { o = JSON.parse(line); } catch { continue; }
+    if (!o || typeof o !== "object" || Array.isArray(o)) continue;
+    const rec = o as { type?: unknown; timestamp?: unknown; message?: unknown };
+    const msg = rec.message as { role?: unknown; content?: unknown } | undefined;
+    if (!msg || !msg.content) continue;
+    const blocks = transcriptContentBlocks(msg.content);
+    if (blocks.length === 0) continue;
+    turns.push({
+      time: typeof rec.timestamp === "string" ? rec.timestamp : "",
+      role: typeof msg.role === "string" ? msg.role : "",
+      blocks,
+    });
+  }
+  return turns;
+}
+
+/** Bounded read of the transcript tail (same tail strategy as readTranscriptTail, larger window),
+ *  parsed into structured turns. Returns empty/error honestly — never throws. */
+export function readTranscript(transcriptPath: string, maxBytes = SESSION_VIEW_TRANSCRIPT_TAIL_BYTES): { status: ObservationStatus; reason: string | null; turns: TranscriptTurn[] } {
+  try {
+    if (!fs.existsSync(transcriptPath)) return { status: "empty", reason: "transcript 缺失", turns: [] };
+    const stat = fs.statSync(transcriptPath);
+    const fd = fs.openSync(transcriptPath, "r");
+    const tailStart = Math.max(0, stat.size - maxBytes);
+    const buf = Buffer.alloc(stat.size - tailStart);
+    fs.readSync(fd, buf, 0, buf.length, tailStart);
+    fs.closeSync(fd);
+    const lines = buf.toString("utf8").split(/\r?\n/);
+    if (tailStart > 0 && lines.length > 0) lines.shift(); // drop the leading partial JSON record
+    const turns = parseTranscript(lines.join("\n"));
+    if (turns.length === 0) return { status: "empty", reason: "transcript 无 user/assistant 消息", turns: [] };
+    return { status: "ok", reason: null, turns };
+  } catch (err) {
+    return { status: "error", reason: `transcript 读失败：${err instanceof Error ? err.message : String(err)}`, turns: [] };
+  }
+}
+
+/** The single-session view: validate sessionId → resolve transcript path → read+parse it. Sync (pure
+ *  fs.readSync tail, no shell-out). Invalid sessionId is a distinct empty state, never a disk read.
+ *  `home` is injectable for tests; defaults to the real `$HOME`. */
+export function readSession(root: string, sessionId: string, home: string = os.homedir()): SessionViewResult {
+  const transcriptPath = sessionTranscriptPath(root, sessionId, home);
+  if (transcriptPath == null) {
+    return { status: "empty", reason: `sessionId 非法（须为 UUID）：${sessionId}`, sessionId, transcriptPath: null, turns: [] };
+  }
+  const t = readTranscript(transcriptPath);
+  return { ...t, sessionId, transcriptPath };
 }
 
 // ── Architecture view (git/facts per packages/* path) ──────────────────────────────────────────────

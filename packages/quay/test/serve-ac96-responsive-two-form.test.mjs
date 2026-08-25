@@ -39,7 +39,9 @@ import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
-const SERVE_HANDLERS = path.join(__dirname, "..", "src", "serve-handlers.ts");
+// gap-serve-handlers-split-by-concern: the rendering code (pageStyles + verdict classes) moved to
+// serve-render.ts; the AC102-preserved zero-hex + token-derived invariant now pins that file.
+const SERVE_RENDER = path.join(__dirname, "..", "src", "serve-render.ts");
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -170,8 +172,8 @@ test("AC102 preserved — list response inlines the Modernist token sheet and se
   const r = await get(port, "/tasks");
   assert.ok(r.body.includes("--color-bg"), "list page still inlines the Modernist token sheet (AC102 ①)");
   assert.ok(r.body.includes("var(--color-"), "list page uses var(--color-*) tokens");
-  const src = fs.readFileSync(SERVE_HANDLERS, "utf8");
+  const src = fs.readFileSync(SERVE_RENDER, "utf8");
   const hex = src.match(/#[0-9a-fA-F]{6}/g) || [];
-  assert.deepEqual(hex, [], `AC102 ②: serve-handlers.ts carries zero hardcoded hex (got ${hex.length}: ${hex.join(", ")})`);
+  assert.deepEqual(hex, [], `AC102 ②: serve-render.ts carries zero hardcoded hex (got ${hex.length}: ${hex.join(", ")})`);
   assert.ok(src.includes("color: var(--color-accent-700)"), "shared base verdict class stays token-derived");
 });

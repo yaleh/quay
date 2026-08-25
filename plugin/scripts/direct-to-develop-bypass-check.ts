@@ -3,13 +3,13 @@
 // (tasks/gap-direct-to-develop-bypasses-fan-in-gates, 11b/C17 写所有权/越权直改面).
 //
 // 问题（任务体实证）：~25-30 条直接提交 develop 绕过 ff-lock / anti-drift-touches / AC 完成闸三道，
-// 且不进任何差集——AC78 判据2 按任务算的差集结构上看不见它们（7e64a86b 是最近一条）。核心子集：
+// 且不进任何差集——AC78 判据2 按任务算的差集结构上看不见它们。核心子集：
 //   7d1d5d2e → plugin/test/ready-pool-check.test.mjs
 //   b389a758 → plugin/scripts/loop-shipping-exclusion-data.mjs
 //   18e7a3be → plugin/scripts/loop-shipping-exclusion-data.mjs
 //   77174684 → plugin/test/manager-tick-core.test.mjs
-//   7e64a86b → plugin/skills/init/SKILL.md
 // 直接提交 develop 且触及代码/断言面、且不在任何 ff-lock 事件时间窗内 ⇒ 报「直接提交绕过 fan-in 机件」。
+// （7e64a86b → plugin/skills/init/SKILL.md 曾是此类——现 init/ 已入排除集，见下。）
 //
 // 判定原理（ledger 优先，reflog 回退，剪后退 NOT-EVALUATED）：`git merge --ff-only` 只移动 ref、
 // 不创建 commit——一个通过 fan-in 落地的 task 提交在 DAG 上与直接提交看起来完全一样（单亲线性链，
@@ -31,8 +31,10 @@
 //       milestones/（任务体、分析文档、执行核、ADR、遥测都是各层直接写）
 //     · 机件面：.claude/（agent harness 的 workflow/skill——manager 独占）
 //       plugin/skills/manager/**（manager 独占 SKILL.md + 结构上无 fan-in 路——无任务/无 worktree，
-//       fan-in-execute.js 无 task 即 bad-args；同 .claude/ 类。⛔ 粒度到 manager/**，不含 init/——
-//       后者是产品交付面真红，7e64a86b 必须仍红；635ec831（manager/SKILL.md）转绿）
+//       fan-in-execute.js 无 task 即 bad-args；同 .claude/ 类）
+//       plugin/skills/init/**（同 manager/ 类——纯 docs skill 目录，只含 SKILL.md、无 code；结构上
+//       无 fan-in 路。gap-direct-to-develop-bypass-init-skill-reference-doc：reference-doc 索引行
+//       不再误判 code-surface。⛔ 粒度到 init/，不含其它 plugin/skills/* 如 manager-tool/——后者仍真红）
 //     · 指引面：CLAUDE.md（本仓库唯一每会话自动注入的文档，管理者独占直写）
 //       README.md（纯 prose、仓库根、不被测试/构建解析——同 CLAUDE.md 类；⛔ 不含 LICENSE/CHANGELOG.md/
 //       AGENTS.md——三者被 npm-pack-e2e / package-json-bin / codex-stage1-adapter 读取，非纯 prose，仍代码面）
@@ -40,8 +42,9 @@
 //     · 热修 fan-in 机件本身：plugin/scripts/fan-in-* plugin/test/fan-in-*（机制坏了无法 self-fan-in，
 //       引导问题——5e54bb37 正是此类）
 //   代码/断言面 = 排除集之外的一切，含 plugin/scripts/*、plugin/test/*、plugin/skills/**/*.md
-//     （SKILL.md 是产品交付面，不是记账面——7e64a86b（init/）因此报红；manager/** 是 manager 独占面、
-//     635ec831 因此转绿）、packages/**、scripts/test.sh 等。
+//     （SKILL.md 是产品交付面，不是记账面——但 manager/** 与 init/** 是纯 docs skill 目录、结构上
+//     无 fan-in 路，同 .claude/ 类豁免；其它 plugin/skills/*（如 manager-tool/）仍是产品交付面真红）、
+//     packages/**、scripts/test.sh 等。
 //
 //   ⚠️ 与 fan-in-execute.js:87 code_delta 谓词的关系（AC1）：复用其「排除记账/遥测面」的精神，
 //   但**不排除全部 .md**（该谓词的 `[.]md$` 是为「develop delta 要不要重跑全量」服务的——.md
@@ -102,7 +105,7 @@ import { buildLockHoldIntervals } from "./fan-in-ff-protocol-check.ts";
  * 不再直写 git 收据 ⇒ 该排除项（曾为消除 bypass 误红而加）不再需要。git 版 json 已删除。
  */
 export const DESIGN_INTERNAL_RE =
-  /^(?:tasks\/|docs\/|orchestration\/|adr\/|[.]quay\/|plugin\/loop\/|measurements\/|milestones\/|[.]claude\/|plugin\/skills\/manager\/|CLAUDE[.]md$|README[.]md$|[.]gitignore$|[.]gitattributes$|[.]npmrc$|[.]github\/|plugin\/scripts\/fan-in-|plugin\/test\/fan-in-)/;
+  /^(?:tasks\/|docs\/|orchestration\/|adr\/|[.]quay\/|plugin\/loop\/|measurements\/|milestones\/|[.]claude\/|plugin\/skills\/manager\/|plugin\/skills\/init\/|CLAUDE[.]md$|README[.]md$|[.]gitignore$|[.]gitattributes$|[.]npmrc$|[.]github\/|plugin\/scripts\/fan-in-|plugin\/test\/fan-in-)/;
 
 /** 一条 repo-相对路径是否落在设计内排除集（按设计就该直接提交 develop）。PURE。 */
 export function isDesignInternalPath(relPath) {
@@ -706,7 +709,7 @@ export function main(argv) {
       ac65AuthorizedCommits: verdict.ac65AuthorizedCommits,
       ruledHistoricalCommits: verdict.ruledHistoricalCommits,
       unclassifiableCommits: unclassifiable.length,
-      predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ plugin/skills/manager/ CLAUDE.md README.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
+      predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ plugin/skills/manager/ plugin/skills/init/ CLAUDE.md README.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
       ac65CarveOut: "AC65-authorized direct-fix (two predicates; sha table retired to display-only): commit message has AC65 declaration (/^AC65:/m) AND verification artifact (/AC65-Verified:/m) ⇒ ac65AuthorizedDirectFix (visible, NOT bypass); declaration with no verification artifact ⇒ RED (criterion-3); no declaration code-surface direct commit ⇒ RED. Legacy 02b2b2fc form (AC65 一条命令验证：<output>) tolerated. NOT a plugin/scripts/* filename exemption.",
       ruledHistoricalCarveOut: "RULED_HISTORICAL_COMMITS one-off exemption (manager 2026-08-15 ruling, tasks/gap-direct-to-develop-ruled-historical-cddc55e2): sha prefix match on the bounded ruled table ⇒ ruledHistorical (visible, NOT bypass, NOT ac65Authorized); any non-table direct commit still RED (exemption cannot be silently extended). Criterion-3 (declaration without verification ⇒ RED) unchanged.",
     },

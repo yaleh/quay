@@ -44,6 +44,7 @@ const repoRoot = path.resolve(pluginDir, '..');
 const MANAGER_SKILL = path.join(pluginDir, 'skills', 'manager', 'SKILL.md');
 const COLD_START_SKILL = path.join(pluginDir, 'skills', 'cold-start', 'SKILL.md');
 const LAUNCH_SETTINGS = path.join(repoRoot, '.claude', 'launch.settings.json');
+const PROFILES = path.join(repoRoot, '.quay', 'profiles.yml');
 const TOPOLOGY_FACTORY = path.join(pluginDir, 'scripts', 'quay-topology.sh');
 const PORTABILITY_DOC = path.join(repoRoot, 'docs', 'proposals', 'fast-mode-cross-project-portability.md');
 const SPEC_DIR = path.join(repoRoot, 'orchestration');
@@ -80,14 +81,17 @@ test('AC3 — cold-start/SKILL.md AC8c has no dead-key references (inner-state.s
   assert.match(src, /send-keys-reliable\.sh/, 'cold-start must reference the live reliable-send mechanism (send-keys-reliable.sh)');
 });
 
-// ── AC4: the launch-config trio ships in the checked-in settings file ───────────────────────────────
-test('AC4 — the launch-config trio is checked-in (.claude/launch.settings.json): claude-fjdac + deepseek-v4-pro + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000', () => {
+// ── AC4: the launch-config trio ships in the checked-in settings + profiles files ────────────────────
+test('AC4 — the launch-config trio is checked-in: claude-fjdac + deepseek-v4-pro (profiles.yml) + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 (settings env)', () => {
   assert.ok(fs.existsSync(LAUNCH_SETTINGS), '.claude/launch.settings.json must exist (checked-in launch config)');
-  const src = fs.readFileSync(LAUNCH_SETTINGS, 'utf8');
-  assert.match(src, /claude-fjdac/, 'launch config must use the claude-fjdac launcher');
-  assert.match(src, /deepseek-v4-pro/, 'launch config must set --model deepseek-v4-pro');
-  assert.match(src, /CLAUDE_CODE_MAX_CONTEXT_TOKENS/, 'launch config must set CLAUDE_CODE_MAX_CONTEXT_TOKENS');
-  assert.match(src, /917000/, 'CLAUDE_CODE_MAX_CONTEXT_TOKENS must be 917000');
+  const settingsSrc = fs.readFileSync(LAUNCH_SETTINGS, 'utf8');
+  assert.match(settingsSrc, /CLAUDE_CODE_MAX_CONTEXT_TOKENS/, 'launch config must set CLAUDE_CODE_MAX_CONTEXT_TOKENS');
+  assert.match(settingsSrc, /917000/, 'CLAUDE_CODE_MAX_CONTEXT_TOKENS must be 917000');
+  // AC154: launcher + model moved out of launch.settings.json into .quay/profiles.yml (profile 抽层).
+  assert.ok(fs.existsSync(PROFILES), '.quay/profiles.yml must exist (AC154 profile carrier)');
+  const profilesSrc = fs.readFileSync(PROFILES, 'utf8');
+  assert.match(profilesSrc, /claude-fjdac/, 'launch config must use the claude-fjdac launcher (in profiles.yml)');
+  assert.match(profilesSrc, /deepseek-v4-pro/, 'launch config must set --model deepseek-v4-pro (in profiles.yml)');
   // The cold-start skill must document the launch config as checked-in (tribal knowledge → installable).
   const cold = fs.readFileSync(COLD_START_SKILL, 'utf8');
   assert.match(cold, /launch\.settings\.json/, 'cold-start skill must reference the checked-in launch config');

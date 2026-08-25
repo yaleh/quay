@@ -7,35 +7,5 @@
     "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": "1",
     "CLAUDE_CODE_DISABLE_MOUSE": "1",
     "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false"
-  },
-  "_launchSpec": {
-    "version": 1,
-    "excludeDynamicSystemPromptSections": true,
-    "promptSuggestions": false,
-    "roles": {
-      "manager": {
-        "name": "quay-manager",
-        "launcher": "claude",
-        "model": null,
-        "env": {}
-      },
-      "outer": {
-        "name": "quay-outer",
-        "launcher": "claude",
-        "model": null,
-        "env": {}
-      },
-      "inner": {
-        "name": "quay-inner",
-        "launcher": "claude",
-        "model": null,
-        "env": {}
-      }
-    },
-    "bare": {
-      "enabled": true,
-      "purpose": "一次性验证会话（quay-launch.sh <role> --bare 最小模式），不长驻",
-      "usage": "quay-launch.sh <role> --bare"
-    }
   }
 }
