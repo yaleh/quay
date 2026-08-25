@@ -15,6 +15,8 @@ extra: {}
 
 `scripts/test.sh` 里 serial+lowconc 两阶段合计吃掉 full-bucket suite 真实执行时间 ~50%（8h 窗口 12 轮 full-bucket：serial 25% + lowconc 25%）——这些文件被 `// @test-group serial` / `// @test-group lowconc` 标记 load-sensitive、跑降并发（`nproc/(S×P)`）。分类是**每文件顶部自声明**（`grep -rl "@test-group.*serial\|@test-group.*lowconc"` 命中 63 个文件），无集中维护、无「最后核实时间」记录。⛔ 无证据说明现在有错分类，只是该假设从未被系统性复核过。本任务是**抽查复核**，不是直接改降并发配置。
 
+**加固证据（manager 核实，人裁定「给」）**：`--buckets` 路径（`suite-bucket-select.ts` + `suite-lpt-runner.mjs` 全文 grep 无 `test-group` 字样）**完全没有 serial/lowconc 降并发保护**——那套保护只存在于老的 `run_selected`（full-suite 三阶段）路径。round #560（M bucket）里 `session-liveness.test.mjs`/`quay-init-loop.test.mjs` 等标 `@test-group serial/lowconc` 的文件实测在无保护 concurrency=16 下跑。更关键：`--buckets` 路径历史 **120 轮 fail=0**——一次没红过。⇒ 假设从「可能过时」升为「当前主要派发路径上这套保护根本没启用过、也没出过事」。
+
 ## Plan
 
 抽样一批 serial/lowconc 文件，各在主并发池（不降并发）独立重跑 N 次记录稳定性；稳定候选移出降并发名单（或记录为「复核后保留 + 复核时间」）。
