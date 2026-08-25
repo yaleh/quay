@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
+import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
 import { sendSessionFrames, deliveryStateFor, classifyReceipt, extractDeliverySettings, deliverySettingsFromArgv, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
@@ -464,12 +464,13 @@ test("renderPerFileTimelineSvg renders one server-side SVG bar per timestamped f
     // A legacy entry WITHOUT timestamps must be dropped (not plotted, not fabricated).
     { file: "packages/quay/test/legacy.test.mjs", durationMs: 50, passed: true },
   ];
-  const out = renderPerFileTimelineSvg(perFile);
+  const out = renderPerFileTimelineSvg(perFile); // no root → every file is UNRESOLVED (never throws)
   assert.ok(out.startsWith("<svg"), "output is an <svg> element (server-rendered, zero client JS)");
   assert.ok(out.includes("测试时间线"), "renders the timeline heading");
-  // One bar per timestamped file (3 rects with gantt-svg-bar*), the legacy entry dropped.
-  assert.equal((out.match(/class="gantt-svg-bar(-fail)?"/g) ?? []).length, 3, "three timestamped files → three bars");
-  assert.ok(out.includes("gantt-svg-bar-fail"), "the failed file's bar carries gantt-svg-bar-fail");
+  // One bar per timestamped file (3 label links), the legacy entry dropped.
+  assert.equal((out.match(/href="\/tests\/file\?path=/g) ?? []).length, 3, "three timestamped files → three bars");
+  assert.ok(out.includes("gantt-bucket-unresolved"), "a file with no readable source is UNRESOLVED, not fabricated");
+  assert.ok(out.includes("gantt-svg-bar-fail"), "the failed file's bar carries the fail shade (gantt-svg-bar-fail)");
   assert.ok(!out.includes("legacy.test.mjs"), "a timestamp-less legacy entry is not plotted");
   // Chronological start-time ASC: slow (t0+190) < mid (t0+2900) < fast (t0+5988); assert label order.
   const slowIdx = out.indexOf("slow.test.mjs");
@@ -482,6 +483,50 @@ test("renderPerFileTimelineSvg renders one server-side SVG bar per timestamped f
   assert.equal(renderPerFileTimelineSvg(null), "");
   assert.equal(renderPerFileTimelineSvg([]), "");
   assert.equal(renderPerFileTimelineSvg([{ file: "a.test.mjs", durationMs: 10, passed: true }]), "", "a perFile with no timestamps renders nothing (legacy data has no time axis)");
+});
+
+test("AC1/AC2/AC3: timeline bars are bucket-coloured (P/M/S distinct hues, not just pass/fail) with a legend, and bucketSetOfFile mirrors suite-bucket-attribution", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-bucket-"));
+  try {
+    // P — a product test file (directory home `packages/*/test/` → P).
+    const pFile = "packages/quay/test/p.test.mjs";
+    fs.mkdirSync(path.join(root, "packages/quay/test"), { recursive: true });
+    fs.writeFileSync(path.join(root, pFile), "// product test\n");
+    // M — a plugin test file that statically references plugin/scripts (→ M).
+    const mFile = "plugin/test/m.test.mjs";
+    fs.mkdirSync(path.join(root, "plugin/test"), { recursive: true });
+    fs.writeFileSync(path.join(root, mFile), 'import "../scripts/foo.ts";\n');
+    // S — a test file that references the suite script (→ S).
+    const sFile = "plugin/test/s.test.mjs";
+    fs.writeFileSync(path.join(root, sFile), "// Run: bash scripts/test.sh\n");
+
+    // AC2 — the mirror attributes each file to the SAME buckets as suite-bucket-attribution.ts.
+    assert.deepEqual([...bucketSetOfFile(pFile, root)].sort(), ["P"], "product test → {P}");
+    assert.deepEqual([...bucketSetOfFile(mFile, root)].sort(), ["M"], "plugin test importing ../scripts → {M}");
+    assert.deepEqual([...bucketSetOfFile(sFile, root)].sort(), ["S"], "scripts/test.sh reference → {S}");
+    assert.deepEqual([...bucketSetOfFile("no/such/file.test.mjs", root)], [], "missing file → empty set (UNRESOLVED, never throws)");
+
+    const t0 = 1724374800000;
+    const out = renderPerFileTimelineSvg([
+      { file: pFile, durationMs: 100, passed: true, endedAtMs: t0 + 1000, startedAtMs: t0 },
+      { file: mFile, durationMs: 200, passed: true, endedAtMs: t0 + 2000, startedAtMs: t0 + 1000 },
+      { file: sFile, durationMs: 300, passed: true, endedAtMs: t0 + 3000, startedAtMs: t0 + 2000 },
+    ], root);
+
+    // AC1 — distinct bucket hues, not just the old pass/fail pair.
+    assert.ok(out.includes('class="gantt-bucket-P"'), "P bar carries the P hue class");
+    assert.ok(out.includes('class="gantt-bucket-M"'), "M bar carries the M hue class");
+    assert.ok(out.includes('class="gantt-bucket-S"'), "S bar carries the S hue class");
+    assert.ok(!out.includes('class="gantt-svg-bar"'), "no bar still uses the old single pass hue");
+
+    // AC3 — a legend names each bucket's colour meaning.
+    assert.ok(out.includes("图例"), "renders a legend");
+    assert.ok(out.includes("P 产品"), "legend names the P bucket");
+    assert.ok(out.includes("M 机件"), "legend names the M bucket");
+    assert.ok(out.includes("S 套件"), "legend names the S bucket");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("AC2: GET /tests renders the timeline SVG when the latest perFile row carries timestamps", async () => {
@@ -503,7 +548,7 @@ test("AC2: GET /tests renders the timeline SVG when the latest perFile row carri
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
     assert.ok(r.body.includes("测试时间线"), "the page renders the timeline section");
-    assert.ok(/class="gantt-svg-bar"/.test(r.body), "the page renders at least one timeline bar");
+    assert.ok(/class="gantt-bucket-/.test(r.body), "the page renders at least one bucket-coloured timeline bar");
     assert.ok(r.body.includes("slow.test.mjs") && r.body.includes("fast.test.mjs"), "both timestamped files present in the timeline");
   } finally {
     if (server) {
