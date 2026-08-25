@@ -783,13 +783,20 @@ test("AC5 — process-budget.sh header documents the counting scope (test procs 
 
 test("AC5 — scripts/test.sh uses the derived default in its exec lines (no hardcoded 8)", () => {
   const src = fs.readFileSync(TEST_SH, "utf8");
-  // All SIX invocation sites must use the derived default: 4 `exec node --test ...` lines
-  // (run_selected, --group-explicit, explicit-file, --scoped <file...>) + 2 `node --test ...`
-  // lines (--for-task and --buckets, no exec). The --scoped <file...> site was added by
-  // gap-scoped-runs-pay-full-static-check-overhead; the --buckets site was added by
-  // gap-ac124-suite-bucket-production-carrier-benefit. Both correctly use the derived default.
+  // FIVE `node --test --test-concurrency="$(default_test_concurrency)"` sites remain: 4
+  // `exec node --test ...` lines (run_selected, --group-explicit, explicit-file, --scoped
+  // <file...>) + 1 `node --test ...` line (--for-task, no exec). The --buckets site
+  // (gap-ac124-suite-bucket-production-carrier-benefit) now hands its LPT-ordered list to
+  // suite-lpt-runner.mjs via `node --test-concurrency="$(bucket_test_concurrency ...)"`
+  // (gap-m-bucket-long-tail-lpt-scheduling: run({files}) preserves order) — the derived default
+  // STILL governs it (bucket_test_concurrency falls back to default_test_concurrency when no
+  // explicit --test-concurrency flag is passed), only delivered through execArgv instead of the
+  // node --test CLI flag.
   const allSites = src.match(/node --test --test-concurrency="\$\(default_test_concurrency\)"/g);
-  assert.equal(allSites.length, 6, `expected 6 derived-concurrency invocation sites, got ${allSites.length}`);
+  assert.equal(allSites.length, 5, `expected 5 derived-concurrency node --test sites, got ${allSites.length}`);
+  // The --buckets runner derives its concurrency from the SAME default (no hardcoded literal).
+  assert.match(src, /node --test-concurrency="\$\(bucket_test_concurrency/, "the --buckets runner must derive concurrency via bucket_test_concurrency");
+  assert.match(src, /default_test_concurrency\n}/, "bucket_test_concurrency must fall back to default_test_concurrency");
   assert.doesNotMatch(src, /--test-concurrency=8/, "no hardcoded 8 may remain in test.sh");
 });
 
