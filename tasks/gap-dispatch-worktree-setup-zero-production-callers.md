@@ -1,7 +1,7 @@
 ---
 id: gap-dispatch-worktree-setup-zero-production-callers
 title: dispatch-worktree-setup.sh 零生产调用者——worker-driver 派发不做 provisioning，每个 worker 手工重推 bootstrap
-status: ready
+status: done
 labels:
   - gap
   - defect
