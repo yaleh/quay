@@ -23,6 +23,9 @@ import {
   latestTickLog,
   latestTickLogReading,
   readStat,
+  readCwd,
+  resolveScriptPath,
+  isMainCheckoutScript,
   monitorInstances,
   entryLastCommitEpoch,
   goalReading,
@@ -258,23 +261,100 @@ test("manager-tick-readings: readStat parses ppid + starttime→epoch via btime"
   assert.equal(s.startEpoch, 1000000 + 5000); // starttime/HZ = 5000
 });
 
-test("manager-tick-readings: monitorInstances finds bash session-liveness.sh by argv basename (AC2 self-match safe)", (t) => {
+test("manager-tick-readings: monitorInstances root-filter counts only main-checkout monitors (AC1 worktree + foreign-repo excluded)", (t) => {
   const dir = tmpdir(t);
   const proc = path.join(dir, "proc");
+  const repoRoot = "/home/yale/work/quay";
+  write(proc, "stat", "btime 1000000\n");
+  // 真监视器（主检出，绝对路径）→ 计入
+  write(proc, "100/stat", statLine(100, "bash", 1, 500000));
+  write(proc, "100/cmdline", "bash\0/home/yale/work/quay/plugin/scripts/session-liveness.sh\0--once\0");
+  // argv[0]=node → 不匹配（self-match safe，AC2）
+  write(proc, "200/stat", statLine(200, "node", 1, 100000));
+  write(proc, "200/cmdline", "node\0--experimental-strip-types\0/session-liveness.sh\0");
+  // 外仓实例（/opt/quay）→ root 过滤排除
+  write(proc, "300/stat", statLine(300, "bash", 1, 900000));
+  write(proc, "300/cmdline", "bash\0/opt/quay/plugin/scripts/session-liveness.sh\0");
+  // worktree 测试进程 → root 过滤排除（AC1：不误计）
+  write(proc, "400/stat", statLine(400, "bash", 1, 700000));
+  write(proc, "400/cmdline", "bash\0/home/yale/work/quay-worktrees/gap-x/plugin/scripts/session-liveness.sh\0--once\0");
+  const ms = monitorInstances(2000000, repoRoot, proc);
+  assert.equal(ms.length, 1);
+  assert.deepEqual(ms.map((m) => m.pid), [100]);
+  assert.equal(ms[0].stale, true); // start=1005000 < 2000000
+  assert.equal(ms[0].ppid, 1);
+});
+
+test("manager-tick-readings: monitorInstances resolves relative argv[1] via /proc/<pid>/cwd (main-checkout counted, worktree cwd excluded)", (t) => {
+  const dir = tmpdir(t);
+  const proc = path.join(dir, "proc");
+  const repoRoot = "/home/yale/work/quay";
+  write(proc, "stat", "btime 1000000\n");
+  // 主检出相对路径挂载（cwd = 项目根）→ 计入
+  write(proc, "500/stat", statLine(500, "bash", 1, 500000));
+  write(proc, "500/cmdline", "bash\0plugin/scripts/session-liveness.sh\0--once\0");
+  fs.symlinkSync(repoRoot, path.join(proc, "500", "cwd"));
+  // worktree 相对路径挂载（cwd = worktree 根）→ 排除
+  write(proc, "600/stat", statLine(600, "bash", 1, 500000));
+  write(proc, "600/cmdline", "bash\0plugin/scripts/session-liveness.sh\0--once\0");
+  fs.symlinkSync("/home/yale/work/quay-worktrees/gap-y", path.join(proc, "600", "cwd"));
+  assert.equal(readCwd(500, proc), repoRoot);
+  assert.equal(resolveScriptPath(500, "plugin/scripts/session-liveness.sh", proc), path.join(repoRoot, "plugin/scripts/session-liveness.sh"));
+  assert.equal(isMainCheckoutScript("/home/yale/work/quay/plugin/scripts/session-liveness.sh", repoRoot), true);
+  assert.equal(isMainCheckoutScript("/home/yale/work/quay-worktrees/gap-y/plugin/scripts/session-liveness.sh", repoRoot), false);
+  assert.equal(isMainCheckoutScript("/home/yale/work/quay2/plugin/scripts/session-liveness.sh", repoRoot), false); // 前缀边界：quay2 ≠ quay/
+  const ms = monitorInstances(2000000, repoRoot, proc);
+  assert.deepEqual(ms.map((m) => m.pid), [500]);
+});
+
+test("manager-tick-readings: monitor.mounted false when only a worktree test process is running (AC2)", (t) => {
+  const dir = tmpdir(t);
+  const proc = path.join(dir, "proc");
+  const repoRoot = "/home/yale/work/quay";
+  const env = {
+    MTR_PROJECTS: "quay=" + dir,
+    MTR_TMUX_LIST_PANES: "quay-0:outer\t2989418\tclaude\n",
+    MTR_ENTRY_LAST_COMMIT: "2000000",
+  };
+  write(dir, "orchestration/tick-log.md", "# log\n");
+  // 只有 worktree 测试进程，无主检出真监视器 ⇒ mounted 必须 false（不掩盖真监视器死亡）
+  write(proc, "stat", "btime 1000000\n");
+  write(proc, "400/stat", statLine(400, "bash", 1, 700000));
+  write(proc, "400/cmdline", "bash\0/home/yale/work/quay-worktrees/gap-x/plugin/scripts/session-liveness.sh\0--once\0");
+  const out = render(parseProjects(env), { socket: "/sock", repoRoot, procRoot: proc, env });
+  assert.ok(out.includes("monitor.mounted false"), out);
+  assert.ok(out.includes("monitor.instances 0"), out);
+  assert.ok(!out.includes("monitor.instance "), out);
+  // 负控制：无任何进程 ⇒ 同样 false（对照证明过滤不是靠「无进程」侥幸——上方 worktree 进程在却仍 false）
+  const emptyProc = path.join(dir, "empty");
+  fs.mkdirSync(emptyProc);
+  const outEmpty = render(parseProjects(env), { socket: "/sock", repoRoot, procRoot: emptyProc, env });
+  assert.ok(outEmpty.includes("monitor.mounted false"), outEmpty);
+  assert.ok(outEmpty.includes("monitor.instances 0"), outEmpty);
+});
+
+test("manager-tick-readings: monitor.mounted true and instances correct when a real main-checkout monitor is alive (AC3 no regression)", (t) => {
+  const dir = tmpdir(t);
+  const proc = path.join(dir, "proc");
+  const repoRoot = "/home/yale/work/quay";
+  const env = {
+    MTR_PROJECTS: "quay=" + dir,
+    MTR_TMUX_LIST_PANES: "quay-0:outer\t2989418\tclaude\n",
+    MTR_ENTRY_LAST_COMMIT: "2000000",
+  };
+  write(dir, "orchestration/tick-log.md", "# log\n");
+  // 真监视器（主检出）存活
   write(proc, "stat", "btime 1000000\n");
   write(proc, "100/stat", statLine(100, "bash", 1, 500000));
   write(proc, "100/cmdline", "bash\0/home/yale/work/quay/plugin/scripts/session-liveness.sh\0--once\0");
-  // argv[0]=node → 不匹配；argv[1] basename 不对 → 不匹配
-  write(proc, "200/stat", statLine(200, "node", 1, 100000));
-  write(proc, "200/cmdline", "node\0--experimental-strip-types\0/session-liveness.sh\0");
-  write(proc, "300/stat", statLine(300, "bash", 1, 900000));
-  write(proc, "300/cmdline", "bash\0/opt/quay/plugin/scripts/session-liveness.sh\0");
-  const ms = monitorInstances(2000000, proc);
-  assert.equal(ms.length, 2);
-  assert.deepEqual(ms.map((m) => m.pid), [100, 300]);
-  assert.equal(ms[0].stale, true); // start=1005000 < 2000000
-  assert.equal(ms[1].stale, true); // start=1009000 < 2000000
-  assert.equal(ms[0].ppid, 1);
+  // 混杂一个 worktree 测试进程，不得影响计数
+  write(proc, "400/stat", statLine(400, "bash", 1, 700000));
+  write(proc, "400/cmdline", "bash\0/home/yale/work/quay-worktrees/gap-x/plugin/scripts/session-liveness.sh\0--once\0");
+  const out = render(parseProjects(env), { socket: "/sock", repoRoot, procRoot: proc, env });
+  assert.ok(out.includes("monitor.mounted true"), out);
+  assert.ok(out.includes("monitor.instances 1"), out);
+  assert.ok(out.includes("monitor.instance 100 "), out);
+  assert.ok(!out.includes("monitor.instance 400 "), out);
 });
 
 test("manager-tick-readings: entryLastCommitEpoch honors the git seam", () => {

@@ -49,7 +49,7 @@
 //   --timeout <ms>      单任务墙钟超时（毫秒）。缺省 0 = 无超时（SPEC §4④：先无阈值记录时长分布）。
 //                       超时 ⇒ SIGTERM worker、保留 worktree、final_state=timed-out。
 //   --worker-cmd <s>    覆盖 worker 命令【前缀】（AC140-3 覆盖语义统一：prompt 仍作为末参数追加）。
-//                       缺省 = `quay-launch.sh task-worker -p <prompt>`（launcher/model 由 config 承载）。
+//                       缺省 = launchArgv 经 L2 policy 解析（profile launcher + --settings + --model + -n）。
 //   --worker-cmd-exact <s> 整体替换 worker 命令（测试捕获/注入专用，⛔ prompt 不进 argv）。
 //                          取假/测试缝：`node -e process.exit(7)`、`sleep 100`。
 //   --pid-file <path>   spawn 后把 worker pid 写到此文件（每 worker 一行；外部可观测 + 杀 worker 抓手）。
@@ -149,7 +149,7 @@ export {
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
-import { applyTaskFilters, makeFilterContext, readTaskStatus } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, type RetryState } from "./driver-filters.ts";
 export { readTaskStatus } from "./driver-filters.ts";
 // AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
 // ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
@@ -223,7 +223,7 @@ export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
 /** checkout 前 stash 的缺省 message（`git stash list` 可核的标记，AC2）。 */
 export const DEFAULT_STASH_MESSAGE = "worker-driver: stash before checkout (SPEC §5 阶段 2)";
 
-/** 存活 worker 进程的 `-n` 名（quay-launch.sh 由 .quay/profiles.yml 的
+/** 存活 worker 进程的 `-n` 名（launchArgv 经 profile-policy.ts 解析 .quay/profiles.yml 的
  *  `roles["task-worker"].name` 承载；AC140-2 测试钉死 name 以 quay- 开头）。
  *  冷启动在飞枚举用它识别存活 worker 进程的 cmdline（/proc/<pid>/cmdline）。
  *  AC150-3：控制态常量（CONTROL_STATE_REL/CONTROL_CALLERS_ENV/DEFAULT_CALLERS/CONTROL_HEADER/
@@ -519,7 +519,23 @@ export async function enumerateColdStartInflightAsync(
   return out;
 }
 
-/** orphan worktree 清理结果（可观测：removed/分支删除/错误/存活跳过）。 */
+/** exit_code=143（128+SIGTERM=15）⇒ 外部 SIGTERM 杀——wrapper/shell 把信号转成退出码上报（Node 的 close
+ *  事件 code=143、signal=null），区别于 worker 自崩（真实非零退出码）。failed 桶正是用它区分「外部杀」
+ *  （driver 重启误伤 / 外部 kill，worker 正干着活被打断）与「自崩」（worker 缺陷）。 */
+export function isSigtermExitCode(exitCode: number | null): boolean {
+  return exitCode === 128 + signalExitCode("SIGTERM");
+}
+
+/** 该 task 分支相对 develop 是否有提交（直接量、可取假）：`git log develop..task/<id>` 非空 ⇒ 有实现
+ *  产出（worker 在 worktree 里提交过）；空 ⇒ 零提交无产出。读失败（非 git 仓库 / develop 或 task/<id>
+ *  分支不存在 / git 错误）⇒ null（硬规则 3b：读不懂 ≠ 无产出，⛔ 不得当「零提交」清掉）。 */
+export function taskBranchHasCommits(root: string, taskId: string): boolean | null {
+  const r = spawnSync("git", ["-C", root, "log", `develop..task/${taskId}`, "--oneline"], { encoding: "utf8" });
+  if (r.status !== 0 || r.error) return null;
+  return String(r.stdout ?? "").trim().length > 0;
+}
+
+/** orphan worktree 清理结果（可观测：removed/分支删除/错误/存活跳过/产出判定/信号区分）。 */
 export interface OrphanCleanupResult {
   /** 找到 worktree 且 `git worktree remove --force` 全部成功。 */
   removed: boolean;
@@ -532,6 +548,14 @@ export interface OrphanCleanupResult {
   /** worktree 有存活 worker 正在用 ⇒ 跳过清理（⛔ 不是「没找到」也不是「remove 失败」——独立取值，
    *  硬规则 3b：跳过 ≠ 已清）。false = 未跳过（已清 / 无 worktree / 正常失败）。 */
   skippedLiveWorker: boolean;
+  /** 清理前 `git log develop..task/<id>` 判产出的读数（直接量）。true = 有提交、false = 零提交、
+   *  null = 读不懂。false ⇒ 可清；true ⇒ 保留；null ⇒ fail-closed 保留（读不懂 ≠ 无产出）。 */
+  hasCommits: boolean | null;
+  /** 因「有提交 ⇒ 有实现产出」而跳过清理（⛔ 与 skippedLiveWorker 区分：后者是存活 worker 在用，前者是
+   *  分支有产出）。仅 hasCommits === true 时为 true。 */
+  preservedForCommits: boolean;
+  /** failed 桶按信号区分：final_state=failed 且 exit_code=143 ⇒ 外部 SIGTERM 杀（区别于 worker 自崩）。 */
+  sigtermExternal: boolean;
 }
 
 /**
@@ -548,15 +572,42 @@ export interface OrphanCleanupResult {
  * failed 终态触发本清理，而【原 worker】仍活、仍在用同一个 worktree——此时删除会连带误删原 worker 的
  * 共享 worktree+分支。故移除前先核：worktree 有存活 worker 正在用 ⇒ 跳过（skippedLiveWorker=true，
  * ⛔ 只清真 orphan）。workerCmdlines 是测试缝（null ⇒ 读真实 /proc）。
+ *
+ * gap-worker-cleanup-judgment-precision（清理判据精确化，AC1+AC2）：清理前查 `git log develop..task/<id>`
+ * 判有无产出（直接量、可取假）——零提交 ⇒ 无产出可清；有提交 ⇒ 有实现保留（⛔ 纯终态字符串布尔判断
+ * 会误删 SIGTERM 打断时有提交的 worktree）。failed 桶按信号区分：exit_code=143（外部 SIGTERM 杀）vs
+ * 自崩，前者有提交则保留。outcome 是终态上下文（finalState/exitCode）——测试与调用方注入，null ⇒ 不
+ * 区分信号（sigtermExternal=false，仅按 git log 判产出）。
  */
-export function cleanupOrphanWorktree(root: string, taskId: string, workerCmdlines: string[] | null = null): OrphanCleanupResult {
+export function cleanupOrphanWorktree(
+  root: string,
+  taskId: string,
+  workerCmdlines: string[] | null = null,
+  outcome: { finalState?: string | null; exitCode?: number | null } | null = null,
+): OrphanCleanupResult {
   const paths = worktreePathsForTask(root, taskId);
   if (paths.length === 0) {
-    return { removed: false, worktreePath: null, branchDeleted: false, error: null, skippedLiveWorker: false };
+    return {
+      removed: false, worktreePath: null, branchDeleted: false, error: null, skippedLiveWorker: false,
+      hasCommits: null, preservedForCommits: false, sigtermExternal: false,
+    };
   }
   const live = workerCmdlines ?? enumerateLiveWorkerCmdlines();
   if (hasLiveWorkerForTask(taskId, live)) {
-    return { removed: false, worktreePath: paths[0] ?? null, branchDeleted: false, error: null, skippedLiveWorker: true };
+    return {
+      removed: false, worktreePath: paths[0] ?? null, branchDeleted: false, error: null, skippedLiveWorker: true,
+      hasCommits: null, preservedForCommits: false, sigtermExternal: false,
+    };
+  }
+  // 判产出（AC1）：零提交 ⇒ 清；有提交 ⇒ 保留；读不懂 ⇒ fail-closed 保留（⛔ 不得当「零提交」清掉）。
+  const hasCommits = taskBranchHasCommits(root, taskId);
+  const sigtermExternal = (outcome?.finalState ?? null) === "failed" && isSigtermExitCode(outcome?.exitCode ?? null);
+  if (hasCommits !== false) {
+    // hasCommits === true（有提交）⇒ 保留；=== null（读不懂）⇒ 保留但不声称「有提交」。
+    return {
+      removed: false, worktreePath: paths[0] ?? null, branchDeleted: false, error: null, skippedLiveWorker: false,
+      hasCommits, preservedForCommits: hasCommits === true, sigtermExternal,
+    };
   }
   let error: string | null = null;
   let removed = true;
@@ -572,7 +623,10 @@ export function cleanupOrphanWorktree(root: string, taskId: string, workerCmdlin
     const bd = spawnSync("git", ["-C", root, "branch", "-D", `task/${taskId}`], { encoding: "utf8" });
     branchDeleted = bd.status === 0;
   }
-  return { removed, worktreePath: paths[0] ?? null, branchDeleted, error, skippedLiveWorker: false };
+  return {
+    removed, worktreePath: paths[0] ?? null, branchDeleted, error, skippedLiveWorker: false,
+    hasCommits, preservedForCommits: false, sigtermExternal,
+  };
 }
 
 /** verified 态的证据载体：status 已读为 "done"、worktree 已确认无残留。 */
@@ -687,6 +741,31 @@ export interface WorkerCmdOptions {
   exact: string | null;
 }
 
+/** fan-in 调用签名的完整指令（gap-worker-prompt-fan-in-call-signature-placeholder）：真实绝对路径 +
+ *  runId 取法 + 正本拷贝。worktree 由调用方填（创建 prompt = 指引，续做 prompt = 实际路径）。
+ *  ⛔ 旧版只给 `scriptPath` 字面占位词 + `runId` 键名 ⇒ 每个 worker 从源码反向工程一遍（实测 12/12
+ *  session 全命中：读 fan-in-execute.js / 找 workflow 路径 / 重发现 generateRunId）。 */
+function fanInSignature(task: string, root: string, worktree: string): string {
+  const fanInScript = path.join(root, ".claude", "workflows", "fan-in-execute.js");
+  const telemetryModule = path.join(root, "plugin", "scripts", "fast-mode-telemetry.ts");
+  return [
+    `ff-merge to develop via the fan-in-execute workflow: call the Workflow tool with the script file "${fanInScript}"`,
+    `(this .claude/workflows/ copy is the landed one that runs here — use it, do NOT diff it against plugin/workflows/fan-in-execute.js, its byte-identical shipped mirror guarded by workflows-dual-copy-drift-check)`,
+    `and args={task:"${task}", worktree:"${worktree}", root:"${root}", runId, mergeTarget:"develop"}.`,
+    `runId: import { generateRunId } from "${telemetryModule}" and call generateRunId("${task}") —`,
+    `or reuse the runId this task was dispatched with, if one was passed.`,
+  ].join(" ");
+}
+
+/** dispatch-worktree-setup.sh 调用签名（gap-dispatch-worktree-setup-zero-production-callers）：每个
+ *  被派发的 worktree 创建后【必须】跑一次（node_modules symlink-or-install + config.yml 经
+ *  worktree-include.sh），机制接管 bootstrap——worker 不再手工 `ln -s`/`cp config.yml`（正是该脚本被
+ *  写出来要消灭的 AGENT-REMEMBERING 失败模式）。脚本幂等：已 provision 的 worktree 重跑是 no-op。 */
+function dispatchSetupSignature(root: string, worktree: string): string {
+  const setupScript = path.join(root, "plugin", "scripts", "dispatch-worktree-setup.sh");
+  return `bash ${setupScript} ${worktree}`;
+}
+
 /** 创建 prompt（无保留 worktree 时的 full-chain prompt，单一真相源）。续做 prompt 见
  *  buildContinueWorkerPrompt；两者由 workerPromptForTask 按「保留 worktree 在不在」择一。
  *  gap-worker-print-bg-wait-ceiling-600s (c，辅助非根修)：fan-in 在飞期间尽量留在回合内等（用
@@ -697,9 +776,11 @@ export function buildWorkerPrompt(task: string, root: string): string {
   return [
     `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2).`,
     `Task: ${task}. Repo root: ${root}.`,
-    `Run the full task chain: (1) create an isolated git worktree for ${task},`,
+    `Run the full task chain: (1) create an isolated git worktree for ${task}, then immediately`,
+    `provision it by running \`${dispatchSetupSignature(root, "<the worktree path you created in step 1>")}\``,
+    `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, (3) run the suite,`,
-    `(4) ff-merge to develop via the fan-in-execute workflow (scriptPath, args={task,worktree,root,runId,mergeTarget}).`,
+    `(4) ${fanInSignature(task, root, "<the worktree path you created in step 1>")}.`,
     `You own your worktree fully; apart from the final merge do not touch develop.`,
     `fan-in 在飞期间尽量留在回合内等（用 TaskOutput 阻塞等待其终态）——不要结束回合等完成通知：end_turn 时有存活后台任务会触发 600s 终止。`,
   ].join(" ");
@@ -708,7 +789,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
 /** 按覆盖旋钮解析一个 task 的 worker argv（单一构造 + AC140-3 覆盖语义统一）：
  *  exact 非空 ⇒ 整体替换（--worker-cmd-exact，测试捕获/注入专用，prompt 不进 argv 是预期）；
  *  否则 prefix 非空 ⇒ 前缀 + prompt（--worker-cmd，wrapper/测试前缀可用，prompt 作为末参数追加）；
- *  否则 ⇒ launchArgv("task-worker", prompt)（配置承载的缺省，走 quay-launch.sh）。 */
+ *  否则 ⇒ launchArgv("task-worker", prompt)（配置承载的缺省，经 policy 解析 kind → profile）。 */
 export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOptions = { prefix: null, exact: null }): string[] {
   const prompt = workerPromptForTask(task, root);
   if (opts.exact != null) {
@@ -722,10 +803,10 @@ export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOpt
   return launchArgv("task-worker", prompt, root);
 }
 
-/** 缺省 worker 命令：quay-launch.sh task-worker -p <full-chain prompt>（argv 形，child 即 worker，超时
- *  SIGTERM 杀得准）。launcher/model/--bare 由 `.quay/profiles.yml` 的 profiles/roles 承载（AC140-2 可配）。
- *  prompt 里【直接】要求 worker 以 scriptPath 调 fan-in-execute workflow——驱动直调 ⇒ A6「检查 fan-in
- *  是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
+/** 缺省 worker 命令：launchArgv("task-worker", <full-chain prompt>)（argv 形，child 即 worker，超时
+ *  SIGTERM 杀得准）。launcher/model/--bare 由 `.quay/profiles.yml` 的 profiles/roles 承载（AC140-2 可配，
+ *  L3 经 profile-policy.ts 解析）。prompt 里【直接】要求 worker 以 scriptPath 调 fan-in-execute
+ *  workflow——驱动直调 ⇒ A6「检查 fan-in 是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
 export function defaultWorkerArgv(task: string, root: string): string[] {
   return launchArgv("task-worker", workerPromptForTask(task, root), root);
 }
@@ -906,10 +987,10 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `(it would fail: the path/branch already exists). Prior round state: branch task/${task} already has`,
     `${commits} commits${head}; Acceptance Criteria currently checked ${ac};`,
     `the last round exited-not-landed because: ${reason}.`,
+    `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch),`,
-    `(2) run the suite, (3) ff-merge to develop via the fan-in-execute workflow`,
-    `(scriptPath, args={task,worktree,root,runId,mergeTarget}; worktree=${wt}).`,
+    `(2) run the suite, (3) ${fanInSignature(task, root, wt)}.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
   ].join(" ");
 }
@@ -990,6 +1071,15 @@ export function parseReconcileIntervalSecs(raw: string | undefined, root?: strin
   if (raw == null) return def * 1000;
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) * 1000 : def * 1000;
+}
+
+/** 解析 --max-retries <n>（重试上限，gap-worker-driver-retry-cap-not-wired）。缺省 RETRY_CAP_DEFAULT
+ *  （与 promotion 的 --max-fix-retries 同值单一真相源）；非法（非正整数）⇒ 缺省（⛔ 不因 flag 拼写
+ *  炸常驻循环——与本文件其它 parse* 助手的 fail-to-default 约定一致）。 */
+export function parseMaxRetries(raw: string | undefined): number {
+  if (raw == null) return RETRY_CAP_DEFAULT;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : RETRY_CAP_DEFAULT;
 }
 
 /** 一次 stash 的结果（AC2 可核：stashed=true 且 git stash list 可见；⛔ 绝不 discard）。 */
@@ -1127,8 +1217,8 @@ export function newSessionId(): string {
  * 含 needs-human 闸拒绝）保留分支/worktree 供续做（gap-worker-needs-human-destroys-branch-worktree AC1）。
  *
  * gap-worker-task-transcript-access-webui AC1：每次尝试生成新 session_id 并落盘 outcome；spawn 时把
- * `--session-id <uuid>` 追加进 argv（经 quay-launch.sh 的 PASSTHRU 透传给 claude ⇒ transcript 落
- * `~/.claude/projects/<slug>/<uuid>.jsonl`）。⛔ `--worker-cmd-exact` 测试缝（`node -e …`/`sleep` 等
+ * `--session-id <uuid>` 追加进 argv（launchArgv 已直接出 argv，--session-id 作为末参数追加给 claude
+ * ⇒ transcript 落 `~/.claude/projects/<slug>/<uuid>.jsonl`）。⛔ `--worker-cmd-exact` 测试缝（`node -e …`/`sleep` 等
  * 假命令）不追加（假命令不接受该 flag，追加会误杀全部既有测试）——但 session_id 仍生成并落盘
  * （AC1 的「每行有 session_id」对测试缝同样成立，只是不进 argv）。
  */
@@ -1210,13 +1300,18 @@ function runOneWorker({
         outcome.final_state !== "spawn-failed" &&
         outcome.final_state !== "not-dispatched" &&
         outcome.final_state !== "timed-out";
-      const cleanup = shouldCleanup ? cleanupOrphanWorktree(rootDir, taskId) : null;
+      const cleanup = shouldCleanup
+        ? cleanupOrphanWorktree(rootDir, taskId, null, { finalState: outcome.final_state, exitCode: outcome.exit_code })
+        : null;
       const finalOutcome = cleanup
         ? {
             ...outcome,
             worktree_cleaned: cleanup.removed,
             worktree_cleanup_error: cleanup.error,
             worktree_cleanup_skipped_live: cleanup.skippedLiveWorker,
+            worktree_cleanup_has_commits: cleanup.hasCommits,
+            worktree_cleanup_preserved_commits: cleanup.preservedForCommits,
+            worktree_cleanup_sigterm_external: cleanup.sigtermExternal,
           }
         : outcome.final_state === "timed-out"
           ? { ...outcome, worktree_preserved: true }
@@ -1302,6 +1397,9 @@ export interface ResidentOptions {
   /** 协调地板（gap-worker-driver-reconcile-interval）：至少每 reconcileMs 协调一次，哪怕所有边沿事件
    *  （worker 退出）都丢了 ⇒ 降级「慢但正确」而非「静默停摆」。缺省 RECONCILE_INTERVAL_SECS_DEFAULT*1000。 */
   reconcileMs: number;
+  /** 重试上限（gap-worker-driver-retry-cap-not-wired）：同一任务连续 N 次 exited-not-landed 未落地 ⇒
+   *  标 needs-human 并停止重派。缺省 RETRY_CAP_DEFAULT（与 promotion 的 --max-fix-retries 同值）。 */
+  maxRetries: number;
 }
 
 /**
@@ -1315,7 +1413,7 @@ export interface ResidentOptions {
  *       supervisor 重启）。退出码 = 首个非零 worker 码（仅在终态 latch 后返回）。
  */
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
-  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs } = opts;
+  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs, maxRetries } = opts;
 
   // checkout 前 stash（阶段 2 ③）：主检出脏 ⇒ stash 一次（常驻循环起跑前），⛔ 不 discard。非 git no-op。
   const stash = stashIfDirty(rootDir);
@@ -1326,6 +1424,13 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   const running: RunningWorker[] = [];
   const results: WorkerRunResult[] = [];
   let stopReason: string | null = null;
+
+  // 重试上限（gap-worker-driver-retry-cap-not-wired）：worker 派发的任务可无限次 exited-not-landed 重派
+  // ⇒ 补 retryExhausted 集合填充（同 promotion 的 RetryState 形态，单一真相源 = driver-filters.ts 的
+  // advanceRetryCap / markNeedsHuman）。每 worker 结束若 exited-not-landed ⇒ 连续失败计数 + 达上限标
+  // needs-human（ready→needs-human），needsHuman 集合同进 retryCapNotExhausted / notNeedsHuman 过滤 ⇒
+  // 不再无限重派。跨轮存活于常驻循环内（⛔ 不落盘，与 promotion 的 RetryState 同寿命）。
+  const retryState: RetryState = { counts: new Map(), needsHuman: new Set() };
 
   // gap-worker-driver-cold-start-inflight-refresh：冷启动在飞排除集【每趟 pass 现观测】（SPEC §5.2
   // actual=observe()），不再是循环外一次性 const 快照——原 gap-worker-driver-cold-start-inflight-blind
@@ -1392,6 +1497,15 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     }).then((r) => {
       rw.done = true;
       results.push(r);
+      // 重试上限（gap-worker-driver-retry-cap-not-wired）：worker 结束若 exited-not-landed ⇒ 连续失败
+      // 计数 + 达上限标 needs-human（ready→needs-human）。needsHuman 集合进 retryCapNotExhausted 过滤 ⇒
+      // 下一轮不再重派（与 markNeedsHuman 的 status 翻转双保险——即使磁盘写失败，内存过滤也挡重派）。
+      if (r.outcome.final_state === "exited-not-landed") {
+        const newly = advanceRetryCap(retryState, [r.taskId], maxRetries);
+        for (const id of newly) {
+          markNeedsHuman(rootDir, id, `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`);
+        }
+      }
       return r;
     });
     running.push(rw);
@@ -1464,7 +1578,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // touchesDisjoint / retryCapNotExhausted / notNeedsHuman，⛔ 不各写一遍）。冷启动在飞 task 一并参与
       // （它们的 Touches 是真实冲突面）。原「active 过滤 + filterTouchesDisjoint + depsReadyForDispatch」
       // 三个散点已收进 applyTaskFilters 一次判完。
-      const candidates = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks() }));
+      // 重试上限（gap-worker-driver-retry-cap-not-wired）：retryExhausted = 本循环已标 needs-human 的
+      // 任务集合（exited-not-landed 达上限派生）——retryCapNotExhausted 谓词据此滤掉不再重派。
+      const candidates = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks(), retryExhausted: retryState.needsHuman }));
       if (candidates.length === 0) {
         // 真池空（ready 减在飞后无候选）⇒ 瞬时 WAIT：记 pool-empty，下一轮重读（⛔ 不再 latch）。
         //   池非空但全与在飞 Touches/deps 重叠 ⇒ 同为瞬时 WAIT：不设 stopReason（在飞 worker 结束释放
@@ -1533,6 +1649,7 @@ export async function main(argv: string[]): Promise<number> {
   let timeoutRaw: string | undefined;
   let intervalRaw: string | undefined;
   let reconcileRaw: string | undefined;
+  let maxRetriesRaw: string | undefined;
   let pidFile: string | undefined;
   let outcomePath: string | undefined;
   let runId: string | undefined;
@@ -1556,6 +1673,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--timeout") timeoutRaw = args[++i];
     else if (a === "--interval") intervalRaw = args[++i];
     else if (a === "--reconcile-interval") reconcileRaw = args[++i];
+    else if (a === "--max-retries") maxRetriesRaw = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
     else if (a === "--outcome") outcomePath = args[++i];
     else if (a === "--run-id") runId = args[++i];
@@ -1572,6 +1690,7 @@ export async function main(argv: string[]): Promise<number> {
           "  [--selector-cmd \"<argv>\"] [--ready-pool-cmd \"<argv>\"] [--resource-gate-cmd \"<argv>\"] [--liveness-cmd \"<argv>\"]\n" +
           "  [--interval <ms>]   无在飞 worker 且瞬时 WAIT 时的轮询间隔（缺省 30000；测试缝传小值）\n" +
           "  [--reconcile-interval <s>]  协调地板：至少每 N 秒协调一次，边沿事件全丢也降级「慢但正确」而非静默停摆（缺省 300；0 = 无地板）\n" +
+          "  [--max-retries <n>]  重试上限：同一任务连续 N 次 exited-not-landed 未落地 ⇒ 标 needs-human 并停止重派（缺省 3，同 promotion --max-fix-retries）\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -1598,6 +1717,7 @@ export async function main(argv: string[]): Promise<number> {
   const timeoutMs = parseTimeoutMs(timeoutRaw);
   const intervalMs = parseIntervalMs(intervalRaw, rootDir);
   const reconcileMs = parseReconcileIntervalSecs(reconcileRaw, rootDir);
+  const maxRetries = parseMaxRetries(maxRetriesRaw);
 
   // 阶段 4（AC129）：无 --task ⇒ 常驻选择环（不再报错退出）。--task 显式批量派发路径不变。
   if (tasks.length === 0) {
@@ -1618,6 +1738,7 @@ export async function main(argv: string[]): Promise<number> {
       livenessCmd: livenessCmd ? splitArgs(livenessCmd) : null,
       intervalMs,
       reconcileMs,
+      maxRetries,
     });
   }
 

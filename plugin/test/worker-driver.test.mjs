@@ -93,7 +93,14 @@ import {
   continueStateForTaskAsync,
   workerPromptForTaskAsync,
   workerArgvForTaskAsync,
+  taskBranchHasCommits,
+  isSigtermExitCode,
+  parseMaxRetries,
 } from "../scripts/worker-driver.ts";
+// gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
+// 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
+import { advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, applyTaskFilters, makeFilterContext } from "../scripts/driver-filters.ts";
+import { advanceRetryCap as promoAdvanceRetryCap, markNeedsHuman as promoMarkNeedsHuman, MAX_FIX_RETRIES_DEFAULT } from "../scripts/promotion-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DRIVER = path.resolve(__dirname, "..", "scripts", "worker-driver.ts");
@@ -121,6 +128,20 @@ function makeGitRoot(tag) {
 
 function runGit(root, args) {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
+}
+
+// L3 后 launchArgv 经 L2 policy 需要 `.quay/profiles.yml` + `.claude/launch.settings.json` 两个载体。
+// 给 temp root 铺一份最小载体（缺省 launcher=claude / model=test-model），供默认 argv 路径的测试用。
+function writeProfileCarrier(root, { launcher = "claude", model = "test-model" } = {}) {
+  fs.writeFileSync(path.join(root, ".quay", "profiles.yml"),
+    "version: 1\n" +
+    "profiles:\n  w:\n    launcher: " + launcher + "\n    model: " + model + "\n    bare: false\n    auth: key\n" +
+    "roles:\n  task-worker:\n    profile: w\n    name: quay-test-worker\n" +
+    "  selector:\n    profile: w\n    name: quay-selector\n" +
+    "  fix-worker:\n    profile: w\n    name: quay-fix-worker\n");
+  fs.mkdirSync(path.join(root, ".claude"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".claude", "launch.settings.json"),
+    JSON.stringify({ $schema: "x", permissions: {}, env: {} }));
 }
 
 function runDriver(root, args) {
@@ -355,12 +376,10 @@ test("AC1 (integration) — re-dispatching the same task N times writes N distin
 test("resolveRun / splitArgs / defaultWorkerArgv / signalExitCode / parseTimeoutMs / resolveConcurrency", () => {
   assert.deepEqual(splitArgs("node -e process.exit(7)"), ["node", "-e", "process.exit(7)"]);
   assert.deepEqual(splitArgs("  sleep 100  "), ["sleep", "100"]);
-  const defWorker = defaultWorkerArgv("gap-x", "/r");
-  assert.equal(defWorker[0], "bash", "AC140-1: default worker routes through quay-launch.sh (not bare claude)");
-  assert.equal(defWorker[1], "/r/plugin/scripts/quay-launch.sh");
-  assert.equal(defWorker[2], "task-worker");
-  assert.equal(defWorker[3], "-p");
-  assert.match(defWorker[4], /gap-x/, "the task prompt is the argv payload");
+  const defWorker = defaultWorkerArgv("gap-x", REPO_ROOT);
+  assert.equal(defWorker[0], "claude-fjdac", "AC140-1/L3: default worker resolves via policy to the profile launcher (not bare claude)");
+  assert.equal(defWorker[defWorker.indexOf("-n") + 1], "quay-task-worker");
+  assert.match(defWorker[defWorker.length - 1], /gap-x/, "the task prompt is the argv payload");
   assert.equal(signalExitCode("SIGKILL"), 9);
   assert.equal(signalExitCode("SIGTERM"), 15);
 
@@ -394,6 +413,46 @@ test("AC2 (gap-worker-print-bg-wait-ceiling-600s c) — buildWorkerPrompt hints 
   assert.match(prompt, /TaskOutput 阻塞等待/, "prompt names TaskOutput blocking wait (resets the 600s clock)");
   assert.match(prompt, /不要结束回合等完成通知/, "prompt forbids ending the turn to await the notification");
   assert.match(prompt, /600s 终止/, "prompt names the 600s termination risk");
+});
+
+test("gap-worker-prompt-fan-in-call-signature-placeholder — buildWorkerPrompt gives real fan-in signature (absolute path + runId 取法 + 正本拷贝), no scriptPath placeholder", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  // AC1（能取假）：真实绝对路径（⛔ 非 scriptPath 字面词）。
+  assert.match(prompt, /\/r\/\.claude\/workflows\/fan-in-execute\.js/, "AC1: real absolute path to fan-in-execute.js");
+  assert.doesNotMatch(prompt, /scriptPath/, "AC1: no bare scriptPath placeholder");
+  // AC1（能取假）：runId 取法 —— 哪个模块导出 generateRunId。
+  assert.match(prompt, /generateRunId/, "AC1: names generateRunId");
+  assert.match(prompt, /plugin\/scripts\/fast-mode-telemetry\.ts/, "AC1: names the module exporting generateRunId");
+  // AC3（能取假）：正本拷贝明确 —— .claude/workflows/ vs plugin/workflows/。
+  assert.match(prompt, /\.claude\/workflows\/ copy is the landed one that runs here/, "AC3: says .claude/workflows/ is the landed copy");
+  assert.match(prompt, /plugin\/workflows\/fan-in-execute\.js/, "AC3: names the shipped mirror to NOT diff against");
+});
+
+test("AC1 (能取假) — buildWorkerPrompt wires dispatch-worktree-setup.sh after worktree create (机制接管 bootstrap)", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  // 结构针：grep 到调用 + 位置在 worktree 创建之后。
+  assert.match(prompt, /dispatch-worktree-setup\.sh/, "AC1: create prompt names the setup script");
+  assert.match(prompt, /\/r\/plugin\/scripts\/dispatch-worktree-setup\.sh/, "AC1: setup script is the real absolute path under root");
+  const createIdx = prompt.indexOf("create an isolated git worktree");
+  const setupIdx = prompt.indexOf("dispatch-worktree-setup.sh");
+  assert.ok(createIdx !== -1, "create instruction present");
+  assert.ok(setupIdx > createIdx, "AC1: setup call is positioned AFTER worktree creation");
+});
+
+test("AC2 (能取假，负控制) — prompt no longer leaves bootstrap to agent-remembering (⛔ no hand-rolled ln -s / cp config.yml instruction)", () => {
+  const create = buildWorkerPrompt("gap-x", "/r");
+  assert.doesNotMatch(create, /ln -s/, "AC2: create prompt must not instruct a hand-rolled node_modules symlink");
+  assert.doesNotMatch(create, /cp config\.yml/, "AC2: create prompt must not instruct a hand-rolled config.yml copy");
+  const cont = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "r",
+  });
+  assert.doesNotMatch(cont, /ln -s/, "AC2: continue prompt must not instruct a hand-rolled node_modules symlink");
+  assert.doesNotMatch(cont, /cp config\.yml/, "AC2: continue prompt must not instruct a hand-rolled config.yml copy");
 });
 
 test("stashIfDirty — clean repo ⇒ no-op; non-git dir ⇒ no-op; dirty repo ⇒ stash (never discard)", () => {
@@ -680,6 +739,7 @@ test("AC2 (能取假) — worker abnormal death (exit non-zero) ⇒ orphan workt
     fs.rmSync(wtPath, { recursive: true, force: true });
   });
   writeTaskFile(root, "gap-or", "ready"); // ready ⇒ not done ⇒ the worker did not land
+  runGit(root, ["branch", "develop"]); // 基准分支 = develop（生产一致）；git log develop..task/<id> 判产出需要它存在
   // simulate the orphan worktree left by a prior abnormal death (same task, same branch)
   runGit(root, ["worktree", "add", "-q", "-b", "task/gap-or", wtPath]);
   assert.equal(worktreePresentForTask(root, "gap-or"), true, "precondition: orphan worktree present");
@@ -757,6 +817,7 @@ test("cleanupOrphanWorktree / worktreePathsForTask — find + remove orphan work
     fs.rmSync(wtPath, { recursive: true, force: true });
   });
   writeTaskFile(root, "gap-c", "ready");
+  runGit(root, ["branch", "develop"]); // 基准分支 = develop（生产一致）；git log develop..task/<id> 判产出需要它存在
   runGit(root, ["worktree", "add", "-q", "-b", "task/gap-c", wtPath]);
 
   const found = worktreePathsForTask(root, "gap-c");
@@ -775,6 +836,91 @@ test("cleanupOrphanWorktree / worktreePathsForTask — find + remove orphan work
   const again = cleanupOrphanWorktree(root, "gap-c");
   assert.equal(again.removed, false);
   assert.equal(again.error, null);
+});
+
+// ── gap-worker-cleanup-judgment-precision：清理前 git log 判产出 + failed 按信号区分 ──────────────────
+// AC1（能取假）：清理前查 `git log develop..task/<id>`——零提交 ⇒ 无产出可清、有提交 ⇒ 有实现保留
+//  （⛔ 纯终态字符串布尔判断、不看提交 ⇒ 假）。AC2（能取假）：failed 桶按信号区分，exit_code=143
+//  （SIGTERM，外部杀）有提交者保留（⛔ SIGTERM 有提交仍被清 ⇒ 假）。taskBranchHasCommits 是直接量
+//  （三态：true 有提交 / false 零提交 / null 读不懂）。
+
+test("isSigtermExitCode — 143 ⇒ external SIGTERM; 其它非零 ⇒ self-crash; null ⇒ false", () => {
+  assert.equal(isSigtermExitCode(143), true, "143 = 128+SIGTERM(15) ⇒ external kill");
+  assert.equal(isSigtermExitCode(130), false, "130 = 128+SIGINT ⇒ not SIGTERM");
+  assert.equal(isSigtermExitCode(1), false, "exit 1 = self-crash, not SIGTERM");
+  assert.equal(isSigtermExitCode(null), false, "no exit code ⇒ not SIGTERM");
+});
+
+test("taskBranchHasCommits — tri-state: has commits / zero commits / unreadable (⛔ null ≠ false)", (t) => {
+  const root = makeGitRoot("tbch");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-tb", "ready");
+  // 无 develop / 无 task/<id> 分支 ⇒ 读不懂 ⇒ null（⛔ 不是 false「零提交」）。
+  assert.equal(taskBranchHasCommits(root, "gap-tb"), null, "no develop + no task branch ⇒ unreadable (null)");
+
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-tb", wtPath]);
+  assert.equal(taskBranchHasCommits(root, "gap-tb"), false, "zero commits beyond develop ⇒ false");
+
+  fs.writeFileSync(path.join(wtPath, "impl.txt"), "wip\n");
+  runGit(wtPath, ["add", "impl.txt"]);
+  runGit(wtPath, ["commit", "-q", "-m", "wip impl"]);
+  assert.equal(taskBranchHasCommits(root, "gap-tb"), true, "one commit beyond develop ⇒ true");
+});
+
+test("AC1 (cleanup-judgment) — zero-commit failed worktree IS cleaned (git log develop..task/<id> empty ⇒ no output)", (t) => {
+  const root = makeGitRoot("cj-ac1");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-ac1`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-cj-a", "ready");
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cj-a", wtPath]);
+  assert.equal(worktreePresentForTask(root, "gap-cj-a"), true, "precondition: worktree present");
+  assert.equal(taskBranchHasCommits(root, "gap-cj-a"), false, "precondition: zero commits on the task branch");
+
+  // failed（自崩 exit_code=1）+ 零提交 ⇒ 清（无产出可清）。
+  const res = cleanupOrphanWorktree(root, "gap-cj-a", null, { finalState: "failed", exitCode: 1 });
+  assert.equal(res.removed, true, "AC1: zero-commit failed worktree IS cleaned");
+  assert.equal(res.hasCommits, false, "git log reading recorded: zero commits");
+  assert.equal(res.preservedForCommits, false, "not preserved — nothing to preserve");
+  assert.equal(res.sigtermExternal, false, "exit_code=1 is self-crash, not SIGTERM");
+  assert.equal(worktreePresentForTask(root, "gap-cj-a"), false, "worktree gone after cleanup");
+});
+
+test("AC2 (cleanup-judgment) — SIGTERM (exit_code=143) failed worktree WITH commits IS preserved", (t) => {
+  const root = makeGitRoot("cj-ac2");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-ac2`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-cj-b", "ready");
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cj-b", wtPath]);
+  // worker 在 worktree 里提交过一个实现（模拟 SIGTERM 打断前已产出）。
+  fs.writeFileSync(path.join(wtPath, "impl.txt"), "partial implementation\n");
+  runGit(wtPath, ["add", "impl.txt"]);
+  runGit(wtPath, ["commit", "-q", "-m", "wip implementation"]);
+  assert.equal(taskBranchHasCommits(root, "gap-cj-b"), true, "precondition: task branch has commits beyond develop");
+
+  // failed + exit_code=143（外部 SIGTERM 杀）+ 有提交 ⇒ 保留（⛔ SIGTERM 有提交仍被清 ⇒ 假）。
+  const res = cleanupOrphanWorktree(root, "gap-cj-b", null, { finalState: "failed", exitCode: 143 });
+  assert.equal(res.removed, false, "AC2: SIGTERM-with-commits worktree is NOT cleaned");
+  assert.equal(res.hasCommits, true, "git log reading recorded: has commits");
+  assert.equal(res.preservedForCommits, true, "preserved BECAUSE the branch has commits");
+  assert.equal(res.sigtermExternal, true, "exit_code=143 classified as external SIGTERM");
+  assert.equal(worktreePresentForTask(root, "gap-cj-b"), true, "worktree survives");
+  assert.match(runGit(root, ["branch", "--list", "task/gap-cj-b"]), /gap-cj-b/, "branch survives");
 });
 
 // ── 阶段 3（AC117）MCP 控制面：控制态 + 身份（AC2/AC3 纯函数）──────────────────────────────────────
@@ -1071,12 +1217,10 @@ test("AC129 pure — resourceGateCheck: exit 0 ⇒ GO; exit 1 ⇒ WAIT (fail-clo
 });
 
 test("AC129 pure — defaultSelectorArgv / defaultReadyPoolArgv are launch / node argv", () => {
-  const sel = defaultSelectorArgv(["gap-a", "gap-b"], "/r");
-  assert.equal(sel[0], "bash", "AC140-1: default selector routes through quay-launch.sh (not bare claude)");
-  assert.equal(sel[1], "/r/plugin/scripts/quay-launch.sh");
-  assert.equal(sel[2], "selector");
-  assert.equal(sel[3], "-p");
-  assert.match(sel[4], /gap-a, gap-b/, "candidate ids are inlined into the selector prompt");
+  const sel = defaultSelectorArgv(["gap-a", "gap-b"], REPO_ROOT);
+  assert.equal(sel[0], "claude-fjdac", "AC140-1/L3: default selector resolves via policy to the profile launcher (not bare claude)");
+  assert.equal(sel[sel.indexOf("-n") + 1], "quay-selector");
+  assert.match(sel[sel.length - 1], /gap-a, gap-b/, "candidate ids are inlined into the selector prompt");
   const rpc = defaultReadyPoolArgv("/r", ["gap-a"], 3);
   assert.equal(rpc[0], "node");
   assert.deepEqual(rpc.slice(1, 5), ["--experimental-strip-types", "/r/plugin/scripts/ready-pool-check.ts", "--root", "/r"]);
@@ -1132,7 +1276,10 @@ test("AC1 — resident loop does not exit after one worker; keeps dispatching wh
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  await waitFor(() => readOutcomeLines(root).length >= 2, 5000);
+  // 5000 → 10000：两次完整派发+落地循环（ready-pool/selector/worker 各 spawn 一个 node 子进程 + landing
+  // 读 git）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时 flake、picks=1）；与同文件
+  // 「第二次派发」的既有约定（gap-b 等 10000ms）一致。
+  await waitFor(() => readOutcomeLines(root).length >= 2, 10000);
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   assert.equal(picks.length, 2, "AC1: two sequential selections — the resident loop kept going after the first");
   assert.deepEqual(picks.map((p) => p.task), ["gap-a", "gap-b"], "in-memory subtraction: second fill skipped the in-flight gap-a");
@@ -1331,14 +1478,17 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
   }
 });
 
-// ── AC140（可配 wrapper + model + 按 role；单一真相源；覆盖语义统一）──────────────────────────────
-// 驱动的 LLM spawn 不再硬编码 `["claude","-p",prompt]`——单一构造 launchArgv 走
-// `quay-launch.sh <role> -p <prompt>`，wrapper/model/--bare 由 .quay/profiles.yml 的 profiles/roles
-// 承载（AC154 profile 抽层）。取假靠 dry-run 读【启动语义】字段（launcher / --model），⛔ 不靠 argv0
-// （claude-fjdac 末行 exec claude 使 argv0 恒为 claude）。
+// ── AC140（可配 wrapper + model + 按 role；单一真相源；覆盖语义统一）+ L3（driver 消费 policy）─────
+// 驱动的 LLM spawn 不再硬编码 `["claude","-p",prompt]`——单一构造 launchArgv 现在【经 L2 policy
+// （profile-policy.ts loadProfiles + resolveRole）解析语义 kind → profile】后直接出 argv（L3
+// gap-driver-binding-semantic-kind-to-profile），⛔ 不再 `bash quay-launch.sh <role>` 把解析交给 bash 里
+// 的第二份实现。wrapper/model/--bare 由 .quay/profiles.yml 的 profiles/roles 承载（AC154 profile 抽层）。
+// 取假靠读【启动语义】字段（launcher / --model），⛔ 不靠 argv0（claude-fjdac 末行 exec claude 使
+// argv0 恒为 claude）。quay-launch.sh 保留给非驱动路径（manager/outer/inner），AC140-2 仍经它 dry-run。
 
 const QUAY_LAUNCH = path.resolve(__dirname, "..", "scripts", "quay-launch.sh");
 const PROFILES = path.resolve(__dirname, "..", "..", ".quay", "profiles.yml");
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 // profiles.yml 是 YAML；launcher 经 python3+yaml 消费，本测试用同一手法转 JSON 后断言结构。
 function readProfiles() {
@@ -1350,13 +1500,48 @@ function dryRunLaunch(role, ...extra) {
   return execFileSync("bash", [QUAY_LAUNCH, role, "--dry-run", ...extra], { encoding: "utf8" }).trim();
 }
 
-test("AC140-1 — single constructor: launchArgv produces bash+quay-launch.sh+<role>+-p+prompt for every role", () => {
-  assert.deepEqual(launchArgv("task-worker", "WPROMPT", "/r"), ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p", "WPROMPT"]);
-  assert.deepEqual(launchArgv("selector", "SPROMPT", "/r"), ["bash", "/r/plugin/scripts/quay-launch.sh", "selector", "-p", "SPROMPT"]);
-  assert.deepEqual(launchArgv("fix-worker", "FPROMPT", "/r"), ["bash", "/r/plugin/scripts/quay-launch.sh", "fix-worker", "-p", "FPROMPT"]);
-  // 单一真相源：default* 都经同一构造（argv[0..3] = bash + quay-launch.sh + role + -p）。
-  assert.deepEqual(defaultWorkerArgv("gap-x", "/r").slice(0, 4), ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p"]);
-  assert.deepEqual(defaultSelectorArgv(["a"], "/r").slice(0, 4), ["bash", "/r/plugin/scripts/quay-launch.sh", "selector", "-p"]);
+test("AC140-1 — single constructor: launchArgv resolves kind → profile via policy (launcher from profile, ⛔ not bash quay-launch.sh)", () => {
+  const tw = launchArgv("task-worker", "WPROMPT", REPO_ROOT);
+  assert.equal(tw[0], "claude-fjdac", "launcher resolved from profile (⛔ bash quay-launch.sh)");
+  assert.equal(tw[1], "--settings");
+  assert.equal(tw[tw.indexOf("--model") + 1], "deepseek-v4-pro");
+  assert.equal(tw[tw.indexOf("-n") + 1], "quay-task-worker");
+  assert.equal(tw[tw.length - 1], "WPROMPT", "prompt is the last argv payload");
+  assert.ok(!tw.includes("quay-launch.sh"), "no bash quay-launch.sh in the spawn argv (⛔ bash 第二份实现)");
+
+  const sel = launchArgv("selector", "SPROMPT", REPO_ROOT);
+  assert.equal(sel[0], "claude-fjdac");
+  assert.equal(sel[sel.indexOf("-n") + 1], "quay-selector");
+
+  const fix = launchArgv("fix-worker", "FPROMPT", REPO_ROOT);
+  assert.equal(fix[0], "claude-fjdac");
+  assert.equal(fix[fix.indexOf("-n") + 1], "quay-fix-worker");
+
+  // 单一真相源：default* 都经同一构造（argv[0] = profile launcher，调用点只传语义 kind）。
+  assert.equal(defaultWorkerArgv("gap-x", REPO_ROOT)[0], "claude-fjdac");
+  assert.equal(defaultSelectorArgv(["a"], REPO_ROOT)[0], "claude-fjdac");
+});
+
+test("AC140-1b — L3 由 policy 解析（能取假）：合成 profile 的 launcher/model 流进 argv（⛔ 非硬编码）", (t) => {
+  const root = makeRoot("profile");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 合成 profiles.yml：launcher=claude（⛔ 非 claude-fjdac）+ model=synth-model——若 launchArgv 硬编码
+  // claude-fjdac/deepseek-v4-pro 或绕过 policy，这些字段不会照合成值流进 argv ⇒ 取假。
+  fs.writeFileSync(path.join(root, ".quay", "profiles.yml"),
+    "version: 1\n" +
+    "profiles:\n  w:\n    launcher: claude\n    model: synth-model\n    bare: false\n    auth: key\n" +
+    "roles:\n  task-worker:\n    profile: w\n    name: quay-synth\n");
+  fs.mkdirSync(path.join(root, ".claude"), { recursive: true });
+  const settingsPath = path.join(root, ".claude", "launch.settings.json");
+  fs.writeFileSync(settingsPath, JSON.stringify({ $schema: "x", permissions: {}, env: { KEEP: "1" } }));
+
+  const a = launchArgv("task-worker", "P", root);
+  assert.equal(a[0], "claude", "launcher from the SYNTHETIC profile (⛔ hardcoded claude-fjdac)");
+  assert.equal(a[a.indexOf("--model") + 1], "synth-model", "model from the SYNTHETIC profile");
+  assert.equal(a[a.indexOf("-n") + 1], "quay-synth", "name from the SYNTHETIC profile");
+  assert.equal(a[a.length - 1], "P");
+  // 无 unset / 无 role env ⇒ --settings 直接是文件路径（非合并 JSON）。
+  assert.equal(a[a.indexOf("--settings") + 1], settingsPath);
 });
 
 test("AC140-2 — configurable: worker roles carry wrapper+model via shared profile (falsifiable vs manager)", () => {
@@ -1408,9 +1593,10 @@ test("AC140-3 — override semantics unified: --worker-cmd is prefix, --worker-c
   assert.match(prefix[prefix.length - 1], /gap-x/,
     "prefix semantics: the task prompt is appended as the last arg (exact would drop it ⇒ falsifiable)");
 
-  // 缺省 ⇒ launchArgv("task-worker", prompt)。
-  assert.deepEqual(workerArgvForTask("gap-x", "/r").slice(0, 4),
-    ["bash", "/r/plugin/scripts/quay-launch.sh", "task-worker", "-p"]);
+  // 缺省 ⇒ launchArgv("task-worker", prompt)：经 policy 解析，argv[0] 是 profile launcher。
+  const def = workerArgvForTask("gap-x", REPO_ROOT);
+  assert.equal(def[0], "claude-fjdac", "default worker resolves via policy (⛔ bash quay-launch.sh)");
+  assert.match(def[def.length - 1], /gap-x/, "the task prompt is the last argv payload");
 });
 
 // ── gap-worker-worktree-continue-reuse ───────────────────────────────────────────────────────────
@@ -1458,6 +1644,36 @@ test("AC2 (能取假) — buildContinueWorkerPrompt carries prior-round state (b
   assert.match(p, /head: "implement gap-x"/, "AC2: branch head subject carried");
   assert.match(p, /checked 2\/5/, "AC2: AC check state carried (checked X/Y)");
   assert.match(p, /because: worker exited 0 but task did not land/, "AC2: failure reason carried");
+  assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
+});
+
+test("gap-worker-prompt-fan-in-call-signature-placeholder — buildContinueWorkerPrompt also gives real fan-in signature (no scriptPath placeholder, concrete worktree)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "worker exited 0 but task did not land",
+  });
+  assert.match(p, /\/r\/\.claude\/workflows\/fan-in-execute\.js/, "AC1: continue prompt carries real absolute path");
+  assert.doesNotMatch(p, /scriptPath/, "AC1: continue prompt has no bare scriptPath placeholder");
+  assert.match(p, /worktree:"\/wt"/, "continue prompt embeds the concrete worktree path (not a placeholder)");
+  assert.match(p, /generateRunId/, "AC1: continue prompt names generateRunId");
+  assert.match(p, /plugin\/scripts\/fast-mode-telemetry\.ts/, "AC1: continue prompt names the generateRunId module");
+});
+
+test("AC1 (能取假) — buildContinueWorkerPrompt wires dispatch-worktree-setup.sh on the reused worktree (idempotent re-provision)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "worker exited 0 but task did not land",
+  });
+  assert.match(p, /dispatch-worktree-setup\.sh/, "AC1: continue prompt names the setup script");
+  assert.match(p, /dispatch-worktree-setup\.sh \/wt/, "AC1: continue prompt re-provisions the concrete worktree path");
   assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
 });
 
@@ -1768,6 +1984,7 @@ test("AC2 (cold-start) — cleanupOrphanWorktree skips a worktree a live worker 
     fs.rmSync(wtPath, { recursive: true, force: true });
   });
   writeTaskFile(root, "gap-cs-c", "ready");
+  runGit(root, ["branch", "develop"]); // 基准分支 = develop（生产一致）；git log develop..task/<id> 判产出需要它存在
   runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cs-c", wtPath]);
 
   const liveCmdline = "claude -n quay-task-worker -p '... Task: gap-cs-c ...'";
@@ -1974,8 +2191,10 @@ test("AC2 (gap-worker-driver-async-selector-readypool) — async variants resolv
   assert.equal(st.acChecked, 1, "async state carries AC checked");
   const cont = await workerPromptForTaskAsync("gap-as2", root);
   assert.match(cont, /CONTINUE \(reuse/, "async continue prompt reuses the worktree");
+  writeProfileCarrier(root); // L3: 默认 argv 经 policy 需要 profiles.yml + settings 载体
   const argv = await workerArgvForTaskAsync("gap-as2", root, { prefix: null, exact: null });
-  assert.equal(argv[0], "bash", "async worker argv routes through quay-launch.sh");
+  assert.equal(argv[0], "claude", "async worker argv resolves via policy to the profile launcher (⛔ bash quay-launch.sh)");
+  assert.match(argv[argv.length - 1], /CONTINUE \(reuse/, "async continue prompt is the argv payload");
 });
 
 test("AC3 (gap-worker-driver-async-selector-readypool) — a slow selector does not freeze the floor (round heartbeat keeps firing while the selector is slow)", async (t) => {
@@ -2079,4 +2298,95 @@ test("AC3 (gap-worker-driver-stopreason-latch-permanent-stop) — pool non-empty
   const stops = readRoundLines(root).filter((r) => r.action === "stop");
   assert.ok(stops.length >= 2, "AC3: the driver polled (≥2 stop rounds) — it did not exit after the first WAIT round");
   drv.stop();
+});
+
+// ── gap-worker-driver-retry-cap-not-wired：worker 重试上限接线 ─────────────────────────────────────
+// 根因：driver-filters.ts:9 明写「retryCapNotExhausted promotion 有 worker 无」，worker 的
+// retryExhausted 恒空集 ⇒ exited-not-landed 任务无限重派（实证 split-long flaky 红 7 次 501 分钟）。
+// 修法：worker 从 exited-not-landed 计数派生 retryExhausted（同 promotion 的 RetryState 形态），
+// 达上限标 needs-human（ready→needs-human）并停止重派。复用 driver-filters.ts 的 advanceRetryCap /
+// markNeedsHuman / retryCapNotExhausted（⛔ 不各写一遍）。
+
+test("AC1 (gap-worker-driver-retry-cap-not-wired) — parseMaxRetries: default 3, explicit N, invalid ⇒ default", () => {
+  assert.equal(RETRY_CAP_DEFAULT, 3, "default retry cap = 3 (gap-fan-in-relaunch-retry-cap 同值)");
+  assert.equal(parseMaxRetries(undefined), 3, "no --max-retries ⇒ default");
+  assert.equal(parseMaxRetries("2"), 2, "explicit N honored");
+  assert.equal(parseMaxRetries("0"), 3, "non-positive ⇒ default (fail-to-default, ⛔ 不因 flag 拼写炸循环)");
+  assert.equal(parseMaxRetries("1.5"), 3, "non-integer ⇒ default");
+  assert.equal(parseMaxRetries("garbage"), 3, "garbage ⇒ default");
+});
+
+test("AC1 (gap-worker-driver-retry-cap-not-wired) — retryExhausted 非空派生：advanceRetryCap 填集合 + retryCapNotExhausted 滤掉（能取假）", (t) => {
+  const root = makeRoot("retry-derive");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 写两个 ready 候选（filter 只读 frontmatter/status，body 无需满四件套）。
+  fs.writeFileSync(path.join(root, "tasks", "gap-a.md"), "---\nid: gap-a\nstatus: ready\n---\n\n## Proposal\n\nprose\n");
+  fs.writeFileSync(path.join(root, "tasks", "gap-b.md"), "---\nid: gap-b\nstatus: ready\n---\n\n## Proposal\n\nprose\n");
+
+  const state = { counts: new Map(), needsHuman: new Set() };
+  assert.deepEqual(advanceRetryCap(state, ["gap-a"], 2), [], "1st exited-not-landed < N ⇒ not yet needs-human");
+  assert.deepEqual(advanceRetryCap(state, ["gap-a"], 2), ["gap-a"], "2nd exited-not-landed ≥ N ⇒ needsHuman 非空");
+  assert.ok(state.needsHuman.size === 1 && state.needsHuman.has("gap-a"), "retryExhausted 集合非空派生（⛔ 恒空集 ⇒ 假）");
+
+  // retryExhausted 非空 ⇒ retryCapNotExhausted 把 gap-a 滤掉、gap-b 保留（接线生效，⛔ 不再无限重派）。
+  const filtered = applyTaskFilters(["gap-a", "gap-b"], makeFilterContext(root, { retryExhausted: state.needsHuman }));
+  assert.deepEqual(filtered, ["gap-b"], "capped gap-a is filtered out; uncapped gap-b passes");
+});
+
+test("AC1 (gap-worker-driver-retry-cap-not-wired) — markNeedsHuman flips ready→needs-human（worker 重派的是 ready 任务，非 todo）", (t) => {
+  const root = makeRoot("mark-ready");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "tasks", "gap-cap.md"), "---\nid: gap-cap\nstatus: ready\n---\n\n## Proposal\n\nprose\n");
+
+  const res = markNeedsHuman(root, "gap-cap", "worker 连续 N 次 exited-not-landed 未落地");
+  assert.equal(res.ok, true, "ready task marked needs-human");
+  assert.equal(readTaskStatus(root, "gap-cap"), "needs-human", "status flipped ready → needs-human");
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-cap.md"), "utf8");
+  assert.ok(body.includes("## Needs-Human"), "grep-able ## Needs-Human audit record written");
+  assert.ok(body.includes("worker 连续 N 次 exited-not-landed 未落地"), "the reason is recorded in the body");
+
+  // needs-human 已是终态 ⇒ 拒写（同 promotion 的 fail-closed，⛔ 双标）。
+  const again = markNeedsHuman(root, "gap-cap", "again");
+  assert.equal(again.ok, false);
+  assert.equal(readTaskStatus(root, "gap-cap"), "needs-human", "status unchanged on refusal");
+});
+
+test("AC2 (gap-worker-driver-retry-cap-not-wired) — 反复 exited-not-landed 的任务在 N 次后停（不再无限重派，负控制）", async (t) => {
+  const root = makeGitRoot("retry-cap");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTaskFile(root, "gap-cap", "ready");
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-cap'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-cap\\x20flaky-red')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--max-retries", "2",
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+
+  // N=2 次 exited-not-landed（exit 0 但 status=ready 未落地）。
+  await waitFor(() => readOutcomeLines(root).length >= 2, 8000);
+  const records = readOutcomeLines(root);
+  assert.deepEqual(records.map((r) => r.final_state), ["exited-not-landed", "exited-not-landed"],
+    "AC2: both attempts exited-not-landed (exit 0 but status=ready not done)");
+
+  // 达上限 ⇒ 标 needs-human（ready→needs-human）+ ## Needs-Human 审计记录。
+  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 4000);
+  assert.equal(readTaskStatus(root, "gap-cap"), "needs-human", "AC2: task marked needs-human after N exited-not-landed");
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-cap.md"), "utf8");
+  assert.ok(body.includes("## Needs-Human"), "AC2: ## Needs-Human audit record written");
+
+  // 负控制：给驱动一个「可能第 3 次派发」的窗口，再断言仍只有 N=2 次派发（⛔ 无限重派）。
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 4000);
+  await new Promise((r) => setTimeout(r, 400));
+  const picks = drv.events().filter((e) => e.event === "selector-picked");
+  assert.equal(picks.length, 2, "AC2: exactly N=2 dispatches — the capped task is not re-dispatched (⛔ 无限重派)");
+  assert.equal(readOutcomeLines(root).length, 2, "AC2: still exactly 2 outcomes — no 3rd attempt wrote a record");
+});
+
+test("AC3 (gap-worker-driver-retry-cap-not-wired) — promotion 不回归：同一函数身份 + 缺省同值", () => {
+  assert.equal(advanceRetryCap, promoAdvanceRetryCap, "AC3: promotion re-exports the SAME advanceRetryCap (⛔ 非平行副本)");
+  assert.equal(markNeedsHuman, promoMarkNeedsHuman, "AC3: promotion re-exports the SAME markNeedsHuman (⛔ 非平行副本)");
+  assert.equal(MAX_FIX_RETRIES_DEFAULT, RETRY_CAP_DEFAULT, "AC3: promotion --max-fix-retries 缺省 = 共享 RETRY_CAP_DEFAULT（单一真相源）");
 });

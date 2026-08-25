@@ -345,15 +345,25 @@ copy_one() {
 # copy_dir <src_dir> <dst_dir>: idempotent-copy every file in src_dir.
 copy_dir() {
   local src_dir="$1" dst_dir="$2"
-  if [ ! -d "$src_dir" ] || [ -z "$(ls -A "$src_dir" 2>/dev/null)" ]; then
-    echo "  (source directory missing or empty — skipped category)"
+  if [ ! -d "$src_dir" ]; then
+    echo "  (source directory missing — skipped category)"
     return
   fi
-  local f
+  # gap-verify-referenced-landed-concurrency-hardening-insufficient: the empty-source check must NOT
+  # shell out to `ls -A` — under heavy concurrent load a `$(ls …)` command substitution can be killed
+  # mid-stream (returning empty) and an EMPTY source is falsely reported for a NON-empty dir, skipping
+  # the whole category (observed: .claude/workflows/* false-positived referenced-not-landed). The
+  # `for f in "$src_dir"/*` glob is a bash builtin (no subprocess), so it cannot be torn — count the
+  # files it actually iterates instead.
+  local f found=0
   for f in "$src_dir"/*; do
     [ -f "$f" ] || continue
+    found=1
     copy_one "$f" "$dst_dir/$(basename "$f")"
   done
+  if [ "$found" = 0 ]; then
+    echo "  (source directory empty — skipped category)"
+  fi
 }
 
 # render_substitutions has been REMOVED (gap-install-rewrites-files-so-upgrade-cannot-tell-
@@ -1109,48 +1119,66 @@ drift_report() {
 # includes the CONSUMER-LAID docs at <ws>/docs/analysis/ — the byte-identical copies a target
 # project actually reads. The source scan alone could not see the AC37 blind spot (a laid tick doc
 # referencing plugin/loop/* paths that never land); scanning the laid docs closes it.
-verify_referenced_landed() {
-  local ws="$1" missing=0 closure_missing=0 r sd script
-  local refs selfcreate refdoc mech_bare
+
+# _reference_set_once <ws> — ONE derivation pass of the complete verify_referenced_landed reference
+# set (one path per line, sorted unique): (1) path-prefixed refs in the shipped corpus (skills +
+# loop docs + workflows) — incl. the `.claude/workflows|.claude/agents` delivery class (AC91); (2)
+# path-prefixed refs in the CONSUMER-LAID docs at <ws>/docs/analysis/ (AC2 — the byte-identical
+# copy a target project actually reads; `plugin/loop` is in the alternation so a shipped doc
+# referencing the non-landed bundle-source path fails closed); (3) BARE filename refs in the
+# mechanism corpus resolved under plugin/scripts/ (bare_resolved_scripts — the SAME derivation the
+# laydown uses, AC3: checker and checked share no blind spot); (4) consolidated grouped-entry
+# members (SPEC-instruments-behind-one-entry.md — EVERY member of a shipped quay-<group>.ts must
+# land; a member absent from the plugin source is exactly the referenced-not-landed defect, so it is
+# unconditional). Read-only over the plugin source + <ws>.
+_reference_set_once() {
+  local ws="$1"
+  local mech_bare consolidated_refs member
   local -a mech_files=()
   while IFS= read -r f; do mech_files+=("$f"); done < <(mechanism_corpus)
-  # referenced set = docs' path-prefixed refs (full corpus) + docs' BARE filename refs in the
-  # MECHANISM corpus that resolve under plugin/scripts/ — the SAME derivation the laydown uses
-  # (AC3: checker and checked can no longer share the same blind spot).
   mech_bare="$(bare_resolved_scripts "${mech_files[@]}")"
-  # consolidated grouped-entry members (SPEC-instruments-behind-one-entry.md): EVERY member of a
-  # shipped quay-<group>.ts must land — the entry point dispatches to it. UNCONDITIONAL (a member
-  # absent from the plugin source is exactly the referenced-not-landed defect this check exists to
-  # catch — the AC2 live-specimens case: removing monitor-mount-check.sh / send-keys-reliable.sh
-  # must make the check name them, not silently pass because they no longer exist to resolve).
-  local consolidated_refs=""
-  local member
+  consolidated_refs=""
   for member in $(consolidated_member_files); do
     case " $NEVER_LAYDOWN " in *" $member "*) continue ;; esac
     consolidated_refs+="plugin/scripts/$member"$'\n'
   done
-  # AC91 (gap-ac91-delivery-core-refs-undelivered-files): the reference-set scan ALSO covers the
-  # shipped workflows (plugin/workflows/*.js → .claude/workflows/ on the target) and the `.claude/`
-  # delivery class. Previously a shipped tick doc referencing `.claude/workflows/execute-suite-fix.js`
-  # was INVISIBLE to this check (the `.claude/` prefix was not in the alternation), so a delivered
-  # execution core could point at an undelivered workflow and the install would pass — the exact
-  # referenced-not-landed defect this check exists to catch, escaped at the reference-set stage (NOT
-  # the init/SKILL.md declaration clause below — the ref never entered $refs to be exempted).
-  refs="$( ( grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis|\.claude/workflows|\.claude/agents)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md "$PLUGIN_ROOT"/workflows/*.js 2>/dev/null
-             # AC2 (gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop): the gate must
-             # ALSO verify the CONSUMER-LAID docs (docs/analysis/) — the reference set of the
-             # byte-identical copy a target project actually reads, not just the plugin source. A
-             # consumer doc referencing a path that does not land in the target (e.g. plugin/loop/
-             # when the loop lays only orchestration/ + docs/analysis/) is exactly the AC37
-             # referenced⊆landed blind spot (ad-arm1: docs/analysis/fast-mode-loop-tick.md refs 5
-             # paths that never landed). The laid copy IS the deliverable; the source scan alone
-             # cannot see a consumer-side mismatch. `plugin/loop` is in the alternation (the AC37
-             # path-spelling blind spot): a shipped doc referencing plugin/loop/* (a bundle-source
-             # path that does NOT land — the loop lays orchestration/ + docs/analysis/) fails closed.
-             grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$ws"/docs/analysis/*.md 2>/dev/null
-             printf '%s\n' "$mech_bare"
-             printf '%s' "$consolidated_refs"
-           ) | sort -u || true )"
+  ( grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis|\.claude/workflows|\.claude/agents)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md "$PLUGIN_ROOT"/workflows/*.js 2>/dev/null
+    grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$ws"/docs/analysis/*.md 2>/dev/null
+    printf '%s\n' "$mech_bare"
+    printf '%s' "$consolidated_refs"
+  ) | sort -u || true
+}
+
+# _read_references <ws> — stability-checked wrapper over _reference_set_once
+# (gap-verify-referenced-landed-concurrency-hardening-insufficient). The reference set is derived by
+# grep over the shipped corpus + the consumer-laid docs; under heavy concurrent load a grep/sort in a
+# command substitution can be killed mid-stream (the pipeline's `|| true` masks the death), returning
+# a PARTIAL (torn) set. Same torn-read class as _read_declarations (a4f1e41d) and derive_loop_scripts
+# (089365b5) — same fix: two independent passes must produce IDENTICAL output (a torn pass truncates
+# at a nondeterministic point ⇒ differs from a full pass ⇒ retry); only two agreeing non-empty passes
+# are accepted. A single torn pass would silently MISS a genuinely-referenced-but-not-landed file (a
+# false negative that violates fail-closed), so the check never accepts one. A genuinely-missing ref
+# is absent from EVERY pass, so real drift is never masked.
+_read_references() {
+  local ws="$1" a b attempt
+  for attempt in 1 2 3; do
+    a="$(_reference_set_once "$ws")"
+    b="$(_reference_set_once "$ws")"
+    if [ -n "$a" ] && [ "$a" = "$b" ]; then
+      printf '%s\n' "$a"
+      return 0
+    fi
+    [ "$attempt" -lt 3 ] && sleep 0.2
+  done
+  # All passes torn or mutually inconsistent — output the LAST snapshot (never a silent empty set;
+  # the downstream landed-scan + declaration/landed fresh re-read still fail-closes on a genuine miss).
+  printf '%s\n' "$a"
+  return 0
+}
+
+verify_referenced_landed() {
+  local ws="$1" missing=0 closure_missing=0 r sd script
+  local refs selfcreate refdoc
   # Machine-readable declarations live in the shipped init skill (single source of truth — the
   # same doc the human reads). Marker lines:
   #   <!-- self-create: <path> -->       local state, first run creates it (AC8)
@@ -1199,6 +1227,11 @@ verify_referenced_landed() {
   }
   selfcreate="" refdoc=""
   _read_declarations
+  # The reference set is derived once, STABILITY-CHECKED (two agreeing passes — _read_references),
+  # so the landed-scan below runs against a deterministic snapshot (gap-verify-referenced-landed-
+  # concurrency-hardening-insufficient: the reference-scan grep was the last single-pass "裸 grep"
+  # face, torn under concurrent --loop load).
+  refs="$(_read_references "$ws")"
   for r in $refs; do
     # exact-line membership in the declared sets (newline-separated — a `case` pattern would
     # need spaces the multi-line variable does not have)
@@ -1214,6 +1247,13 @@ verify_referenced_landed() {
       fresh_refdoc="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
       if printf '%s\n' "$fresh_selfcreate" "$fresh_refdoc" | grep -qxF "$r"; then
         continue   # fresh read confirms the declaration exists — the snapshot was transiently incomplete
+      fi
+      # last line of defense for the LANDED set (same torn-read class, opposite face): a concurrent
+      # --loop install's write can transiently make a just-laid file invisible to the `-e` scan (the
+      # "landed 集扫描" torn snapshot). Re-scan existence once more before failing; a genuinely-
+      # missing file is absent from BOTH scans, so real drift still fails (fail-closed unchanged).
+      if [ -e "$ws/$r" ]; then
+        continue   # fresh existence scan finds it landed — the first scan was a transiently-torn snapshot
       fi
       echo "  FAIL (referenced-not-landed): $r — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md" >&2
       echo "       Fix: add \"<!-- reference-doc: $r -->\" (or \"<!-- self-create: $r -->\" if the loop lays it down) to plugin/skills/init/SKILL.md, or fix the doc's path to a file the loop actually lays down" >&2

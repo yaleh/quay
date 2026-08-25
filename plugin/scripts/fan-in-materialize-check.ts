@@ -52,8 +52,10 @@
 //       dispatch and fan-in end via bootstrap-sync/merge-develop; cannot pin without the lost
 //       working tree)
 //
-// Exit codes: 0 = PASS or NOT-EVALUATED (read `evaluated`), 1 = RED (a materialization fallback was
-//             detected for an in-scope dispatch), 2 = usage/environment.
+// Exit codes: 0 = PASS, 1 = RED (a materialization fallback was detected for an in-scope dispatch),
+//             3 = NOT-EVALUATED (read `evaluated` — could not judge, never conflated with green;
+//                the unified exit-3 third state, gap-not-evaluated-harness-third-state),
+//             2 = usage/environment error.
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/fan-in-materialize-check.ts
@@ -450,9 +452,10 @@ Usage:
   --help                   this help.
 
 Exit codes:
-  0  PASS or NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green)
+  0  PASS
   1  RED — an in-scope worktree-scriptPath fan-in materialized a non-worktree version (fallback)
-  2  usage / environment error`;
+  2  usage / environment error
+  3  NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green)`;
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
@@ -502,6 +505,7 @@ export function main(argv: string[]): number {
       console.log(`    runId=${c.runId} task=${c.taskId ?? "?"} scriptPath=${c.scriptPath}`);
     }
   }
+  if (!out.evaluated) return 3; // NOT-EVALUATED (hard rule 3b) — the unified exit-3 third state
   return out.ok ? 0 : 1;
 }
 

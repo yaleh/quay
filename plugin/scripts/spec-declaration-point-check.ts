@@ -23,14 +23,15 @@
 //
 // NOT-EVALUATED (hard rule 3b): zero on-disk SPECs, or zero declaration points found (the grep
 // matched nothing — indistinguishable from "no files to check"), or the checked dirs are absent ⇒
-// exit 2, NEVER conflated with GREEN. A check that found no declaration points must not report PASS
-// (硬规则 4: a structurally-cannot-be-false verdict is not a measurement).
+// exit 3 (the unified NOT-EVALUATED exit code, gap-not-evaluated-harness-third-state), NEVER
+// conflated with GREEN. A check that found no declaration points must not report PASS (硬规则 4: a
+// structurally-cannot-be-false verdict is not a measurement).
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/spec-declaration-point-check.ts [--root <dir>] [--json]
 // stdout: a human line + (with --json) a machine-readable result object
 // exit: 0 = every SPEC declared in every declaration point · 1 = some (SPEC, point) missing ·
-//       2 = NOT-EVALUATED (no SPECs / no declaration points / missing dirs)
+//       3 = NOT-EVALUATED (no SPECs / no declaration points / missing dirs)
 
 import fs from "node:fs";
 import path from "node:path";
@@ -176,7 +177,7 @@ export function main(argv: string[]): number {
     } else {
       process.stderr.write(`NOT-EVALUATED: ${res.notEvaluatedReason}\n`);
     }
-    return 2;
+    return 3;
   }
 
   const pointCount = res.declarationPoints.length;
