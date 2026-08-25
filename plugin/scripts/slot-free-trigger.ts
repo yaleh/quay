@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // slot-free-trigger.ts — 空槽不是事件的执行者（gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace）。
 //
+// ⛔ 退役（gap-retire-outer-monitors-after-reconciler）：外层 Monitor 挂载（冷启动 4b3）已移除——
+// 「空槽出现」由 driver 协调循环接管（定时器地板 + 每趟 pass 现读 ready 池，SPEC §5.5），本脚本从
+// 正确性依赖降级为优化。脚本本体保留（判定逻辑与测试仍在），只是不再由外层 Monitor 挂载。
+//
 // PROBLEM IT FIXES: `in_flight < cap ∧ dispatchable > 0` (a freed dispatch slot + a dispatchable
 // candidate) only ever gets evaluated at the three-layer 20-25 min tick boundaries. When the tick
 // wakes, there is always something that looks more urgent (red suite / fan-in conflict /
