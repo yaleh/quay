@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 // suite-state-trigger.ts — 红窗规则的自动执行者（gap-red-window-has-no-automatic-executor）。
 //
+// ⛔ 退役（gap-retire-outer-monitors-after-reconciler）：外层 Monitor 挂载（冷启动 4b2）已移除——
+// 「套件转红」由协调循环接管（driver 地板 + 内层每 tick 现读 `.quay/full-suite-state.json`，SPEC §5.5），
+// 本脚本从正确性依赖降级为优化。脚本本体保留为共享库：`full-suite-runner.ts` 仍 import
+// `runOnce` / `isRunnerInFlight`（crash-watchdog / 起跑闸 / 红链自检），只是不再由外层 Monitor 挂载。
+//
 // 背景（管理者活实况 2026-08-05 ROUND 2）：套件转红且无人处置——`.quay/full-suite-state.json` 是
 // state=red（早期 RED 生效，这是 (a) 块设计的行为），但红窗规则要求的 RED 处置一步都没执行，因为
 // BOTH 分支（RED → stop-dispatch + 分诊；GREEN/RUNNING → 乐观派发）都只靠 `*/20` cron 或人驱动。
