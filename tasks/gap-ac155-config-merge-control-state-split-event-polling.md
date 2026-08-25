@@ -1,7 +1,7 @@
 ---
 id: gap-ac155-config-merge-control-state-split-event-polling
 title: AC155 配置合并 + 控制态分界 + 事件触发保留兜底轮询
-status: ready
+status: done
 labels:
   - gap
 parent: null
