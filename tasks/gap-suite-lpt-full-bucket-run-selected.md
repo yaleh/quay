@@ -1,7 +1,7 @@
 ---
 id: gap-suite-lpt-full-bucket-run-selected
 title: suite full bucket（run_selected 老路径）不享受 LPT——full 轮占 58% 墙钟零优化
-status: todo
+status: ready
 labels:
   - gap
   - feature
