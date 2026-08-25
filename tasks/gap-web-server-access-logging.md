@@ -1,7 +1,7 @@
 ---
 id: gap-web-server-access-logging
 title: web server 加访问日志（方法+路径+时间戳，可推热点页面/访问模式）
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -21,8 +21,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，成功请求有日志）：每次成功请求产生一条访问日志（含方法+路径+时间戳）；（⛔ 访问无日志行 ⇒ 假）。
-- [ ] AC2（能取假，可落盘 grep）：访问日志落盘，可 grep 到请求记录（非只存 stdout 易失）；（⛔ 不落盘 ⇒ 假）。
+- [x] AC1（能取假，成功请求有日志）：每次成功请求产生一条访问日志（含方法+路径+时间戳）；（⛔ 访问无日志行 ⇒ 假）。
+- [x] AC2（能取假，可落盘 grep）：访问日志落盘，可 grep 到请求记录（非只存 stdout 易失）；（⛔ 不落盘 ⇒ 假）。
 
 ## Definition of Done
 
