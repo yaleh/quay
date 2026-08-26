@@ -38,9 +38,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，单一判定源）：serve-send.ts 的「消息投递」状态改读 transcript-delivery-check.ts 的核证结果（或共享同一判定源），不再各自独立维护预测/核证两套逻辑；（⛔ 仍是两条独立逻辑 ⇒ 假）。
-- [ ] AC2（能取假，语义统一）：两套「投递状态」词汇语义一致（合并或明确标注各自语义），不再同名词不同义；（⛔ 仍「预测的 delivered」vs「核证的 送达」两义并存 ⇒ 假）。
-- [ ] AC3（能取假，边界不破）：共享判定源不破坏 packages/quay/src 零 plugin/ 依赖（⛔ import plugin/ ⇒ 假）。
+- [x] AC1（能取假，单一判定源）：serve-send.ts 的「消息投递」状态改读 transcript-delivery-check.ts 的核证结果（或共享同一判定源），不再各自独立维护预测/核证两套逻辑；（⛔ 仍是两条独立逻辑 ⇒ 假）。
+- [x] AC2（能取假，语义统一）：两套「投递状态」词汇语义一致（合并或明确标注各自语义），不再同名词不同义；（⛔ 仍「预测的 delivered」vs「核证的 送达」两义并存 ⇒ 假）。
+- [x] AC3（能取假，边界不破）：共享判定源不破坏 packages/quay/src 零 plugin/ 依赖（⛔ import plugin/ ⇒ 假）。
 
 ## Definition of Done
 
