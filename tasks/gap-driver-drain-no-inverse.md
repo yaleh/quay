@@ -1,7 +1,7 @@
 ---
 id: gap-driver-drain-no-inverse
 title: quay driver drain 无逆操作——drain+stop 后无表层通道解闸，start 遇 halted 静默进 respawn 循环（硬规则 3b 同形）
-status: ready
+status: done
 labels:
   - gap
   - defect
