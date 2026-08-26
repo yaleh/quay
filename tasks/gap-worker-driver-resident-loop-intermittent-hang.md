@@ -47,24 +47,34 @@ worker-driver.ts 是**当前生产驱动的核心机制本身**（`--root /home/
 - 对应测试：`plugin/test/worker-driver.test.mjs:1499-1531`（「liveness wiring — resident loop calls the liveness checker each round」）
 - 主循环：`plugin/scripts/worker-driver.ts:1592-1682`
 
+## 根因（实现方实测锁定，⛔ 推翻了 Proposal 的「主循环 0.57s 空转」假说）
+
+**实测复现（RUN 8，liveness-wiring 用例隔离跑 25 次内命中）**：`t.after(() => fs.rmSync(root))` 抛 `ENOTEMPTY, Directory not empty: /tmp/worker-driver-liveness-wire-<rand>`，栈指向 worker-driver.test.mjs 的 rmSync after 钩。
+
+**机制（三步，全部实证）**：
+1. **after 钩按注册序 FIFO 运行**，且一个 after 钩抛错会**跳过后续 after 钩**（node:test 实测：hook-1 抛 ⇒ hook-2 不跑）。
+2. 常驻测试的 `t.after(() => fs.rmSync(root))` **先注册**（紧跟 makeGitRoot）、`t.after(() => drv.stop())` **后注册**（紧跟 spawnResident）⇒ rmSync 先跑，此刻驱动仍活、每轮写 `root/.quay/worker-round.jsonl` ⇒ rmSync 竞态 ENOTEMPTY。
+3. ENOTEMPTY 抛错跳过 `drv.stop()` ⇒ **驱动泄漏**（常驻驱动永不自行退出、继续 spinning、持 stdout pipe）⇒ `node --test` 等不到 EOF ⇒ 文件级测试永不 resolve ⇒ 整个 suite 挂死。
+
+**关于 Proposal ② 的「0.57s 空转」**：`--interval 20` 的单位是 **毫秒**（`parseIntervalMs` 直接 `Number(raw)`），不是 Proposal 读的 20 秒 ⇒ 驱动「每 0.57s 一轮」正是 `--interval 20`（20ms）+ 每轮 3 次 node/git spawn 在满载机上的**正常轮询速率**，不是主循环空转。**主循环没有挂起 bug**——挂起的是「测试没把驱动杀掉」。故 Touches 收敛到测试文件，不改 worker-driver.ts。
+
 ## Plan
 
-1. **复现 + 锁定根因**：用活的卡死实例（pid 819605，--inspect-port 9229）接 debugger，或在高负载下加时序日志，定位到主循环挂起的确切分支/竞态（⛔ 从「疑似」推进到「已锁定到具体行/条件」）。
-2. **修复**：driver 子进程在 stop 条件下正常退出（不再空转/无限占槽）。
-3. `.claude/workflows/`/`plugin/workflows/` 若涉及 fan-in 副本，双副本逐字节一致。
+1. **复现 + 锁定根因**：隔离跑 liveness-wiring 用例 25 次，命中 ENOTEMPTY（RUN 8），锁定到 after 钩 FIFO 顺序 + rmSync 竞态 + drv.stop 被跳过（⛔ 已到具体行/条件，非「疑似」）。
+2. **修复**：① `spawnResident` 用 `detached:true` 让驱动成进程组组长、`stop()` 杀整组（driver+worker+counter 一起死）并 await 真退出；② 常驻测试统一「先 drv.stop 再 rmSync」的 after 钩顺序（多行 rmSync 的冷启动 3 测用 body 末 inline drv.stop）。
+3. `.claude/workflows/`/`plugin/workflows/` 未涉及，双副本无需核对。
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，锁定根因）：定位到主循环挂起的确切分支/竞态（⛔ 仍只「疑似 0.57s 空转」无具体行/条件 ⇒ 假）。
-- [ ] AC2（能取假，修复不挂起）：修复后 driver 子进程正常退出（不再 0.57s 空转/无限占槽）；（⛔ 仍挂起 ⇒ 假）。
-- [ ] AC3（能取假，负控制）：worker-driver.test.mjs 的 liveness-wiring 用例（:1499-1531）跑 N 次都完成（不再间歇挂起）；（⛔ 仍间歇挂起 ⇒ 假）。
+- [x] AC1（能取假，锁定根因）：锁定到 after 钩 FIFO 顺序 + rmSync ENOTEMPTY 竞态 + drv.stop 被跳过 → 驱动泄漏（⛔ 非「疑似 0.57s 空转」——那是对 `--interval 20` 单位的误读）。
+- [x] AC2（能取假，修复不挂起）：修复后常驻测试的驱动被 `stop()` 正常杀掉（杀整组 + await 真退出），不再泄漏/占槽。
+- [x] AC3（能取假，负控制）：liveness-wiring 用例 + 新增负控制（长命 worker sleep 100 在 stop 后不得持 stdout pipe）跑 N 次都完成；全文件 88 测绿。
 
 ## Definition of Done
 
-主循环挂起竞态已定位并修复；AC1-AC3 全勾；driver 子进程不再间歇挂起、不再无限占槽。
+常驻测试间歇挂起竞态已定位并修复（after 钩顺序 + 孤儿 worker 持 pipe）；AC1-AC3 全勾；driver 子进程不再间歇挂起、不再无限占槽。
 
 ## Touches
 
-- plugin/scripts/worker-driver.ts（主循环挂起竞态修复）
-- plugin/test/worker-driver.test.mjs（liveness-wiring 用例稳定不挂起 + 挂起复现负控制）
+- plugin/test/worker-driver.test.mjs（常驻测试 after 钩顺序修复 + 挂起复现负控制）
 - tasks/gap-worker-driver-resident-loop-intermittent-hang.md（自身）
