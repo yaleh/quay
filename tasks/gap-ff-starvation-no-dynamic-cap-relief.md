@@ -1,7 +1,7 @@
 ---
 id: gap-ff-starvation-no-dynamic-cap-relief
 title: 长窗口任务被 ff 竞速饿死——无动态 cap 纾解机制（实测 7 天 111 次 ff 失败，8 个任务 ≥4 次，最高 8 次）
-status: ready
+status: done
 labels:
   - gap
   - defect
