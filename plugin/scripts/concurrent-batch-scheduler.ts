@@ -14,6 +14,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import {
   parseTouches,
   expandGlobs,
@@ -40,6 +41,13 @@ import { parseTask } from "./task-schema.ts";
 // porcelain parser). The in-flight worktree detection below reuses them to find fan-in workflow /
 // just-dispatched worktrees the snapshot in-flight set misses.
 import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
+// IN-FLIGHT WORKTREE LIVENESS (tasks/gap-compute-inflight-worktree-touches-no-liveness-check):
+// the "is any process anchored under this worktree" direct quantity is single-sourced from
+// worktree-process-reaper.ts's /proc enumerator (enumerateProcs + cwdUnder), NOT a hand-rolled
+// /proc scan — CLAUDE.md 硬规则 1 (用机件，不手搓) and the same /proc predicate the reaper uses.
+// For LIVENESS we do NOT exclude real claude sessions (a live inner claude session IS the task
+// being worked) and we DO exclude zombies (state "Z" is a dead, un-reaped process — not activity).
+import { enumerateProcs, cwdUnder } from "./worktree-process-reaper.ts";
 // DIR-117 iteration-2 item 4: the SAME touch-set-expansion arithmetic that
 // milestone-preparation-check.ts's `Prepared` gate used to detect a checked Plan outgrowing its
 // declared '## Touches'. milestone-preparation-check.ts is retired with the prepare/execute
@@ -329,9 +337,54 @@ function isSelfOverlapOnly(result) {
  *  @param {object} o
  *  @param {string} o.root main checkout root (the main worktree is excluded)
  *  @param {string} o.tasksDir the task store dir (`<root>/tasks`)
+ *  @param {(wt:{path:string,branch:string|null}) => ({hasLiveProcess:boolean, lastCommitMs:number|null})|null|undefined} [o.liveness]
+ *         injected per-worktree liveness facts; null (default) ⇒ every worktree is alive (pre-fix).
+ *  @param {number} [o.nowMs] fixed "now" for hermetic staleness tests (default Date.now())
+ *  @param {number} [o.staleMs] the staleness threshold (default INFLIGHT_WORKTREE_STALE_MS)
  *  @returns {Array<{id:string, touches:object}>} resolvable in-flight task worktrees
  */
-export function resolveInFlightWorktrees(worktrees, { root, tasksDir }) {
+/** Staleness threshold for in-flight worktree LIVENESS (gap-compute-inflight-worktree-touches-
+ *  no-liveness-check): a worktree whose only "in-flight" evidence is its EXISTENCE — ZERO live
+ *  processes AND no commit on its branch for longer than this — is DEAD and must not occupy its
+ *  declared `## Touches` (a single dead worktree can otherwise lock out every overlapping
+ *  candidate; the live-process signal dominates, so this threshold only governs the zero-process
+ *  backstop — e.g. a just-`git worktree add`-ed worktree whose subagent has not spawned yet). */
+export const INFLIGHT_WORKTREE_STALE_MS = 15 * 60 * 1000;
+
+/** The dead predicate: ALIVE unless BOTH direct quantities prove otherwise — (a) zero live
+ *  processes under the worktree, AND (b) a known commit time older than `staleMs`. Unknown
+ *  liveness (`lv` null) or an unreadable commit time (null) is ALIVE (conservative — excluding
+ *  without evidence could dispatch a colliding task; hard rule 6: 缺值 = 未查, not 为假). */
+function isDeadInFlightWorktree(lv, nowMs, staleMs) {
+  if (!lv) return false; // no liveness facts ⇒ alive (backward-compatible, conservative)
+  if (lv.hasLiveProcess) return false; // a live process ⇒ alive regardless of commit age
+  const last = lv.lastCommitMs;
+  if (typeof last !== "number" || !Number.isFinite(last)) return false; // unknown commit ⇒ alive
+  return nowMs - last > staleMs; // zero processes AND stale ⇒ dead
+}
+
+/** The worktree HEAD's committer time (ms), or null when unreadable. `git -C <worktree> log -1`
+ *  reads the worktree's OWN checked-out HEAD — the direct "last commit in THIS worktree" quantity,
+ *  independent of the main checkout's branch namespace (a deleted-but-still-listed branch still
+ *  resolves via its worktree HEAD). */
+function lastCommitMsOfWorktree(worktreePath) {
+  try {
+    const out = execFileSync("git", ["-C", worktreePath, "log", "-1", "--format=%ct"], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    const line = out.trim();
+    if (line && /^\d+$/.test(line)) return Number(line) * 1000;
+  } catch (_) { /* unreadable worktree HEAD — conservative alive (null) */ }
+  return null;
+}
+
+export function resolveInFlightWorktrees(worktrees, {
+  root,
+  tasksDir,
+  liveness = null,
+  nowMs = Date.now(),
+  staleMs = INFLIGHT_WORKTREE_STALE_MS,
+} = {}) {
   const mainRoot = root ? path.resolve(root) : null;
   const seen = new Set();
   const out = [];
@@ -346,15 +399,34 @@ export function resolveInFlightWorktrees(worktrees, { root, tasksDir }) {
     if (!fs.existsSync(file)) continue; // a task worktree whose task file is gone blocks nothing
     const touches = parseTouches(fs.readFileSync(file, "utf8"));
     if (!touches.hasSection) continue; // no declared Touches ⇒ no usable conflict surface
+    // LIVENESS: a DEAD worktree (zero live processes + no commit within staleMs) does not occupy
+    // its Touches — `liveness` is INJECTED (null ⇒ every worktree is alive, the pre-fix behavior)
+    // so the pure core stays testable without faking /proc or git.
+    const lv = liveness ? liveness(wt) : null;
+    if (isDeadInFlightWorktree(lv, nowMs, staleMs)) continue;
     out.push({ id, touches });
   }
   return out;
 }
 
 /** Production wiring: enumerate open worktrees via `git worktree list --porcelain` (the DIRECT
- *  quantity) and resolve them to in-flight task entries. Fail-soft: an unreadable worktree list ⇒ []. */
+ *  quantity) and resolve them to in-flight task entries, applying the liveness DIRECT quantity
+ *  (live processes under each worktree + its HEAD commit time). Fail-soft: an unreadable worktree
+ *  list / process table / HEAD ⇒ [] or conservative-alive, never a fabricated block. */
 export function computeInFlightWorktreeTouches(root, tasksDir) {
-  return resolveInFlightWorktrees(listWorktrees(root), { root, tasksDir });
+  const worktrees = listWorktrees(root);
+  // Enumerate live processes ONCE (shared across every worktree) — the /proc scan is the cost, and
+  // it must not be re-done per worktree. A process whose cwd is under the worktree and is not a
+  // zombie is live activity.
+  const procs = enumerateProcs();
+  return resolveInFlightWorktrees(worktrees, {
+    root,
+    tasksDir,
+    liveness: (wt) => ({
+      hasLiveProcess: procs.some((p) => p.state !== "Z" && cwdUnder(p.cwd, wt.path)),
+      lastCommitMs: lastCommitMsOfWorktree(wt.path),
+    }),
+  });
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
