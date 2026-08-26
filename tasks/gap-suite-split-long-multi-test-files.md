@@ -1,7 +1,7 @@
 ---
 id: gap-suite-split-long-multi-test-files
 title: 拆分含多个独立 test() 的长耗时文件——压缩 LPT 队列头（不限 bucket，makespan 下限）
-status: ready
+status: done
 labels:
   - gap
   - feature
