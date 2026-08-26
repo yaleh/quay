@@ -269,7 +269,7 @@ export function readFfRetryRecords(root) {
 
 /** Read <root>/.quay/fan-in-ff-escalations.jsonl — the anti-livelock escalation ledger written by
  *  fan-in-ff-merge.sh when a task's ff failure is its attempt >= 3 (`ff-escalation` request) and on ff
- *  success (`quiet-window-resolved`). An ff-escalation WITHOUT a newer quiet-window-resolved for the
+ *  success (`ff-escalation-resolved`). An ff-escalation WITHOUT a newer ff-escalation-resolved for the
  *  SAME task = that task is currently starved at k≥3. Absent/unparseable ⇒ []. */
 export function readFfEscalationRecords(root) {
   try {
@@ -309,7 +309,7 @@ export function computeFfFailureCounts(retryRecords, liveTaskIds) {
 }
 
 /** Live tasks with an UNRESOLVED ff escalation (a k≥3 anti-livelock request without a newer
- *  `quiet-window-resolved`). The escalation ledger is the CLEAN "currently starved at k≥3" signal — a
+ *  `ff-escalation-resolved`). The escalation ledger is the CLEAN "currently starved at k≥3" signal — a
  *  task re-dispatched after a prior round's escalation keeps its old retry records, but its escalation
  *  is resolved only on ff success, so an unresolved escalation is the unambiguous live signal. Returns
  *  a Set<taskId>. Pure. */
