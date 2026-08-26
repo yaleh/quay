@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-stashifdirty-stashes-others-uncommitted
 title: worker-driver stashIfDirty 无归属区分——定时 stash 主检出【他人】的未提交改动（任何层在主检出的未提交工作都在与它赛跑）
-status: done
+status: ready
 labels:
   - gap
   - defect
