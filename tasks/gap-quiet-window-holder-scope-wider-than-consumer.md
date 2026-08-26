@@ -1,7 +1,7 @@
 ---
 id: gap-quiet-window-holder-scope-wider-than-consumer
 title: 退役 quiet-window 机制——它挡的是非瓶颈（ff churn 仅 34% 且收敛有界），真瓶颈是单飞锁排队（66%，归 lock-starvation）
-status: ready
+status: done
 labels:
   - gap
   - defect
