@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // measure-suite.test.mjs — validate the per-file duration reporter (AC1b/AC8 of
 // gap-suite-cost-model-is-wrong-optimizations-buy-nothing).
 // GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the

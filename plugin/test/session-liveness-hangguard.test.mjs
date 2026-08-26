@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // @load-sensitive wall-clock
 // KNOWN-LOAD-SENSITIVE (session-liveness family — this test DELIBERATELY saturates all cores to
 // prove the monitor survives it; the adaptive HANG_GUARD_MS floor reads availableParallelism()).

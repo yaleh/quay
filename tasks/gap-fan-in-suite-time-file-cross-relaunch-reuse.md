@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-suite-time-file-cross-relaunch-reuse
 title: fan-in-execute.js cpu_s 计算缺 full_suite_ran 守卫——isolate-rerun 读陈旧 .time 文件 → per-task-suite-record HARD FAIL（time-file 变体，未落地，阻 gap-ac148）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -31,10 +31,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，cpu_s 守卫对齐）：cpu_s 计算加 `full_suite_ran=true` 守卫；isolate-rerun（full_suite_ran=false）不再读陈旧 `.time` 文件 → cpu_s=null；（⛔ 仍读陈旧非 null ⇒ 假）。
-- [ ] AC2（能取假，ISOLATE_LAUNCH rm 对齐）：ISOLATE_LAUNCH `rm -f "$suite_time_file"`（对齐 SUITE_LAUNCH:196）；（⛔ 不 rm ⇒ 假）。
-- [ ] AC3（能取假，负控制回放）：回放 gap-ac148 的 isolate-rerun fan-in（full_suite_ran=false + 陈旧 `.time` 存在），修复后不再 per-task-suite-record HARD FAIL、能正常 flip/ff；（⛔ 仍 HARD FAIL ⇒ 假）。
-- [ ] AC4（能取假，多份同步）：`.claude/workflows/` + `plugin/workflows/` 两份 byte-identical 同步 + `fan-in-execute-paths.test.mjs` wait-block group 覆盖；（⛔ 两份不一致/无测试 ⇒ 假）。
+- [x] AC1（能取假，cpu_s 守卫对齐）：cpu_s 计算加 `full_suite_ran=true` 守卫；isolate-rerun（full_suite_ran=false）不再读陈旧 `.time` 文件 → cpu_s=null；（⛔ 仍读陈旧非 null ⇒ 假）。
+- [x] AC2（能取假，ISOLATE_LAUNCH rm 对齐）：ISOLATE_LAUNCH `rm -f "$suite_time_file"`（对齐 SUITE_LAUNCH:196）；（⛔ 不 rm ⇒ 假）。
+- [x] AC3（能取假，负控制回放）：回放 gap-ac148 的 isolate-rerun fan-in（full_suite_ran=false + 陈旧 `.time` 存在），修复后不再 per-task-suite-record HARD FAIL、能正常 flip/ff；（⛔ 仍 HARD FAIL ⇒ 假）。
+- [x] AC4（能取假，多份同步）：`.claude/workflows/` + `plugin/workflows/` 两份 byte-identical 同步 + `fan-in-execute-paths.test.mjs` wait-block group 覆盖；（⛔ 两份不一致/无测试 ⇒ 假）。
 
 ## Definition of Done
 

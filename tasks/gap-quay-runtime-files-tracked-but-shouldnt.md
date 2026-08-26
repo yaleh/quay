@@ -12,12 +12,14 @@ extra:
 ---
 **type:** execution
 
+> **⛔ 误分类更正（2026-08-26）**：AC1 把 `suite-bucket-reattribution.jsonl` 误列为「明显运行时产物」而 `git rm --cached`——**它是 AC121 的一次性判定记录（数据资产），不是运行时产物**（`suite-bucket-select.ts:45/:144` 读它当输入、测试断言 `reattr.size>0`、零生产者）。去跟踪后每个 worktree 结构上拿不到 ⇒ suite 必红（4 次红）。已于 32364a14 恢复跟踪 + 撤 gitignore。**AC1 的「5 个」应为「4 个」**。判「运行时产物」不能只看「在 .quay/ 下 + 像 jsonl」，得查「有没有代码把它当输入读」。回归立案见 gap-suite-bucket-reattribution-untracked-regression。
+
 ## Proposal
 
 `.quay/` 下 8 个文件是 **TRACKED（已提交进 git）** 的运行时产物，本不该进版本控制（已用 `git ls-files` 逐个确认，manager 抽 4 个复核属实）。与 `message-receipts.jsonl` 那次不同（那是 UNTRACKED、脏检出挡 `fan-in-ff-merge`），这些是 TRACKED——**不脏检出、不挡 ff**，纯「误提交」卫生问题，正常池序即可。
 
 8 个文件分两类：
-- **明显运行时产物（应清）**：`test.sh.lock`（锁文件）、`full-suite-state.json.suitefix-bak`（备份）、`no-code-caller-triage.jsonl` + `no-code-caller-triage-rescan.jsonl`（运行时 jsonl）、`suite-bucket-reattribution.jsonl`（运行时 jsonl）——共 5 个。
+- **明显运行时产物（应清）**：`test.sh.lock`（锁文件）、`full-suite-state.json.suitefix-bak`（备份）、`no-code-caller-triage.jsonl` + `no-code-caller-triage-rescan.jsonl`（运行时 jsonl）——共 4 个。（⛔ 原「共 5 个」含 `suite-bucket-reattribution.jsonl`，已更正为数据资产并恢复跟踪，见上注。）
 - **可能故意跟踪（逐个判）**：`profiles.yml`（近期改过 08-25）、`outer-inflight-coordination-20260812.md`（带日期的记录）、`red-on-omission-manifest.md`（manifest）——共 3 个，可能是故意跟踪的配置/记录。
 
 根因（同 `message-receipts` 那次）：`.gitignore` 对 `.quay/` 运行时文件是**逐条列**（约 60 条 `**/.quay/<name>`，无目录级通配），新运行时文件漏列就会要么脏检出（untracked）要么被误提交（tracked）。
@@ -28,7 +30,7 @@ extra:
 
 ## Acceptance Criteria
 
-- [x] AC1（能取假，明显运行时产物清出跟踪）：`test.sh.lock` / `full-suite-state.json.suitefix-bak` / `no-code-caller-triage.jsonl` / `no-code-caller-triage-rescan.jsonl` / `suite-bucket-reattribution.jsonl` 5 个 `git rm --cached` 去跟踪 + `.gitignore` 追加；（⛔ 仍 `git ls-files` tracked ⇒ 假）。
+- [x] AC1（能取假，明显运行时产物清出跟踪）：`test.sh.lock` / `full-suite-state.json.suitefix-bak` / `no-code-caller-triage.jsonl` / `no-code-caller-triage-rescan.jsonl` 4 个 `git rm --cached` 去跟踪 + `.gitignore` 追加（⛔ `suite-bucket-reattribution.jsonl` 已更正为数据资产、恢复跟踪，见上注）；（⛔ 仍 `git ls-files` tracked ⇒ 假）。
 - [x] AC2（能取假，可能故意的逐个判）：`profiles.yml` / `outer-inflight-coordination-20260812.md` / `red-on-omission-manifest.md` 3 个逐个判定「该跟踪」或「该清理」，判定理由写进任务 Evidence；（⛔ 盲清或不清且无理由 ⇒ 假）。
 - [x] AC3（能取假，清后不脏）：清理后 `git status --porcelain` 对这些文件不再显示（去跟踪的文件也不作为 untracked 出现，因已 gitignore）；（⛔ 仍脏 ⇒ 假）。
 
@@ -44,7 +46,7 @@ extra:
 - .quay/full-suite-state.json.suitefix-bak（git rm --cached 去跟踪）
 - .quay/no-code-caller-triage.jsonl（git rm --cached 去跟踪）
 - .quay/no-code-caller-triage-rescan.jsonl（git rm --cached 去跟踪）
-- .quay/suite-bucket-reattribution.jsonl（git rm --cached 去跟踪）
+- .quay/suite-bucket-reattribution.jsonl（⛔ 误分类：数据资产，已恢复跟踪 32364a14，非去跟踪）
 
 ## Evidence（inner 落盘 2026-08-25，impl 完成）
 
@@ -56,7 +58,7 @@ extra:
 - `.quay/full-suite-state.json.suitefix-bak`（suite-fix 备份）
 - `.quay/no-code-caller-triage.jsonl`（gap-ac111 三选一判定落盘）
 - `.quay/no-code-caller-triage-rescan.jsonl`（gap-ac111 复扫）
-- `.quay/suite-bucket-reattribution.jsonl`（gap-ac121 测试桶重归属落盘）
+- `.quay/suite-bucket-reattribution.jsonl`（⛔ 误分类：gap-ac121 一次性判定记录=数据资产，非运行时；已恢复跟踪）
 
 `.gitignore` 追加 5 条 `**/.quay/<name>`（:282-286）。验证：`git ls-files` 对这 5 个零命中
 （不再 tracked）；`git check-ignore -v` 对 5 个各自命中对应行（已 gitignore）；盘上文件仍在

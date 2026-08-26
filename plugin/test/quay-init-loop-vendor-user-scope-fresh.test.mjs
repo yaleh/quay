@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // @load-sensitive real-install
 // KNOWN-LOAD-SENSITIVE (real-install e2e — each test spawns a real quay-init.sh → python3 children).
 // quay-init-loop-vendor-user-scope-fresh.test.mjs — split out of quay-init-loop-vendor.test.mjs
