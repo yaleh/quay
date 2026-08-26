@@ -2446,19 +2446,21 @@ test("AC2 (gap-worker-driver-retry-cap-not-wired) — 反复 exited-not-landed �
   t.after(() => drv.stop());
 
   // N=2 次 exited-not-landed（exit 0 但 status=ready 未落地）。
-  await waitFor(() => readOutcomeLines(root).length >= 2, 8000);
+  // ⛔ 满载下 2 次 worker spawn + 落地判定的等待窗放宽到 60s（同 5045b9ab9 的 liveness 窗）——
+  // 全量 suite concurrency=16 时驱动冷启动 + node spawn 可 >8s，8s 窗把「慢而正确」误判为「只派 1 次」。
+  await waitFor(() => readOutcomeLines(root).length >= 2, 60000);
   const records = readOutcomeLines(root);
   assert.deepEqual(records.map((r) => r.final_state), ["exited-not-landed", "exited-not-landed"],
     "AC2: both attempts exited-not-landed (exit 0 but status=ready not done)");
 
   // 达上限 ⇒ 标 needs-human（ready→needs-human）+ ## Needs-Human 审计记录。
-  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 4000);
+  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 60000);
   assert.equal(readTaskStatus(root, "gap-cap"), "needs-human", "AC2: task marked needs-human after N exited-not-landed");
   const body = fs.readFileSync(path.join(root, "tasks", "gap-cap.md"), "utf8");
   assert.ok(body.includes("## Needs-Human"), "AC2: ## Needs-Human audit record written");
 
   // 负控制：给驱动一个「可能第 3 次派发」的窗口，再断言仍只有 N=2 次派发（⛔ 无限重派）。
-  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 4000);
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 60000);
   await new Promise((r) => setTimeout(r, 400));
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   assert.equal(picks.length, 2, "AC2: exactly N=2 dispatches — the capped task is not re-dispatched (⛔ 无限重派)");
