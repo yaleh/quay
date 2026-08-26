@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-suite-time-file-cross-relaunch-reuse
 title: fan-in-execute.js cpu_s 计算缺 full_suite_ran 守卫——isolate-rerun 读陈旧 .time 文件 → per-task-suite-record HARD FAIL（time-file 变体，未落地，阻 gap-ac148）
-status: ready
+status: done
 labels:
   - gap
   - defect
