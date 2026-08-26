@@ -61,9 +61,9 @@ import { pathToFileURL } from "node:url";
 // were authored/audited) — reopening DONE, landed work is a worse cost than the narrow gap it
 // would close. Left as a known, narrower limitation; the DIR-126-B content gap this would have
 // caught is instead closed directly in that task's own AC text.
-const WIRING_VERB_RE =
+export const WIRING_VERB_RE =
   /\b(invokes?|calls?|dispatches?|enforces?|wires?|routes?|delegates?)\b|(?<!(?:'s|s'|its|their|my|our|your|his|her|whose)\s)\bowns?\b/i;
-const EVIDENCE_RE = /\b(real|production|callsite|call site|reachability|reachable|evidence|wired|confirm(?:ed|s|ation)?|reproduc\w*|verifi(?:ed|es|cation)?|proven?|proves?)\b/i;
+export const EVIDENCE_RE = /\b(real|production|callsite|call site|reachability|reachable|evidence|wired|confirm(?:ed|s|ation)?|reproduc\w*|verifi(?:ed|es|cation)?|proven?|proves?)\b/i;
 
 // Split a paragraph into Markdown-list-aware blocks: a new block starts at every bullet-list line
 // (`- `/`* `/`1. ` at the start of a line, allowing leading indentation), so a dense,
@@ -120,7 +120,7 @@ export function splitSentences(text) {
 }
 
 // Extract every distinct backtick-quoted identifier from a sentence.
-function backtickIdentifiers(sentence) {
+export function backtickIdentifiers(sentence) {
   const idents = new Set();
   const re = /`([^`]+)`/g;
   let m;
@@ -459,6 +459,58 @@ export function checkWiringCoverage(sourceSectionText, acSectionText) {
     claims,
     uncovered: [],
   };
+}
+
+// ── checkWiringClaimAcProbe — a wiring/reachability-declaring AC must name a real input probe. ─────
+// (gap-wiring-claim-ac-requires-real-input-probe)
+// A DIFFERENT judgment than checkWiringCoverage above: that one asks "does an AC bullet cover a
+// source-section mechanism claim with evidence"; THIS one asks "an AC bullet that ITSELF declares a
+// quantified reachability/real-data relationship (backtick identifier + `N 条` count + a
+// read/existence verb) must also name a REAL INPUT PROBE — a direct量 that can be false". The defect
+// family this catches (≥17 instances / 22 days): an AC asserts "`readDependsOn` 认到缩进形态、10 条命中
+// 任务都能被读到" while its test calls `readDependsOn("depends_on: [a, b]\n")` on a string literal — the
+// 10 real tasks/*.md files are never read; or "`.quay/promotion-outcome.jsonl` 已有 3 条现成样本" while its
+// test copies the samples into an mkdtemp synthetic file. A string-literal direct call, a self-built
+// fixture, or an mkdtemp workspace is NOT a probe.
+//
+// CALIBRATION (against the full task store, 2026-08-26): the declaration is DELIBERATELY NARROW — a
+// backtick identifier + an ASCII `N 条` count + one of the read/existence verbs (读到/读取/样本/现成).
+// A bare "already has" (已有), a grep/cache "命中", or a code-structure "wired into / calls / dispatches"
+// claim is NOT this defect (the structure claims are covered by checkWiringCoverage above; the
+// grep/cache/已有 usages would flood the store — measured 405 tasks / 741 bullets on the broad verb set).
+// This narrow trigger flags EXACTLY the two canonical instances on the current store — nothing else.
+// The probe markers are the human-specified direct量: 真实生产载体记录数 / 真实 argv / /proc/<pid>/* /
+// 真实 curl / 真机回放, plus the real-source signals (主检出/正本/实读/实跑) that satisfy the requirement.
+// NON-GOAL (accepted, same posture as this module's own wiring NON-GOAL): Chinese-numeral counts
+// (`三份`, `零命中`) and non-`条` measure words are not recognized — the two canonical instances both use
+// ASCII `N 条`, and widening the measure word set re-flooded the store (measured).
+export const WIRING_REACHABILITY_DECL_RE =
+  /\d+\s*条[\s\S]*?(读到|读取|样本|现成)|(读到|读取|样本|现成)[\s\S]*?\d+\s*条/;
+export const REAL_INPUT_PROBE_RE = /(真实|生产|主检出|正本|实读|实跑|回放|真机|argv|\/proc\/|curl|现网|生产环境)/;
+
+/** Scan an `## Acceptance Criteria` section's checklist bullets (continuation lines joined — same
+ *  `bulletsOf` the coverage check uses) and return one finding per bullet that declares a quantified
+ *  reachability/real-data claim (backtick identifier + `N 条` + 读到/读取/样本/现成) WITHOUT naming a
+ *  real input probe. Empty/absent AC ⇒ [] (nothing to judge — the caller's own absent-section semantics
+ *  apply). */
+export function checkWiringClaimAcProbe(acSectionText) {
+  if (!acSectionText || !acSectionText.trim()) return [];
+  const findings = [];
+  for (const bullet of bulletsOf(acSectionText)) {
+    const identifiers = backtickIdentifiers(bullet);
+    if (identifiers.length === 0) continue; // no named component — not a wiring/reachability claim
+    if (!WIRING_REACHABILITY_DECL_RE.test(bullet)) continue; // no `N 条` + read/exist verb — not a claim
+    if (REAL_INPUT_PROBE_RE.test(bullet)) continue; // names a real input probe — requirement satisfied
+    findings.push({
+      code: "wiring-claim-ac-no-probe",
+      identifiers,
+      bullet,
+      message: `AC bullet names a quantified reachability/real-data declaration (${identifiers
+        .map((id) => "`" + id + "`")
+        .join(", ")}) but names no real input probe — a 真实生产载体记录数 / 真实 argv / /proc/<pid>/* / 真实 curl / 真机回放 direct量 is required; a string-literal/fixture/mkdtemp self-check is not a probe`,
+    });
+  }
+  return findings;
 }
 
 // ── CLI main (DIR-117-B/M195) — the grep-confirmable PRODUCTION call site ────────────
