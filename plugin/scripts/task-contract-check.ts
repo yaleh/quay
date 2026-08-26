@@ -54,6 +54,10 @@ import {
 // The ONE Touches parser (single-source) — the bare-dir + uncertain-annotation flag it exposes is the
 // mechanical rule from tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool (AC1).
 import { extractTouchesSection, flagBareDirUncertainTouches } from "./touches-parser.ts";
+// The wiring/reachability-declaration → real-input-probe check (gap-wiring-claim-ac-requires-real-input-
+// probe). Reuses wiring-coverage-check.ts's backtick-identifier extraction + the (calibrated)
+// `N 条`+verb declaration heuristic — NOT a second, independently-buggy parser.
+import { checkWiringClaimAcProbe } from "./wiring-coverage-check.ts";
 
 // ── Workspace-root discovery ─────────────────────────────────────────────────────────────────────────
 export function findWorkspaceRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
@@ -317,6 +321,45 @@ export function checkBareDirUncertainTouches(body, taskFileRel, root, grandfathe
   }];
 }
 
+// ── Check 8: a wiring/reachability-declaring AC must name a real input probe (gap-wiring-claim-ac-requires-real-input-probe) ──
+// A task's `## Acceptance Criteria` bullet that declares a quantified reachability/real-data relationship
+// (backtick identifier + `N 条` + 读到/读取/样本/现成) must ALSO name a real input probe (真实生产载体记录数 /
+// 真实 argv / /proc/<pid>/* / 真实 curl / 真机回放 — the direct量 from the task's human-specified criterion).
+// A string-literal direct call, a self-built fixture, or an mkdtemp workspace is NOT a probe. The legacy
+// occurrences (the two canonical instances: gap-readdepends-on-indented-extra-depends-on AC1,
+// gap-ac146-human-interface-explicit-owner AC2) are grandfathered in a SHRINK-ONLY baseline — a task file
+// NOT on that list whose AC carries the pattern is a NEW occurrence ⇒ violation.
+export const WIRING_CLAIM_AC_PROBE_BASELINE_REL = "docs/analysis/wiring-claim-ac-probe-baseline.md";
+
+/** Read the shrink-only grandfather list of task files whose AC legitimately still carries the wiring/
+ *  reachability declaration without a real input probe (pre-rule debt). Absent file ⇒ empty set. */
+export function readWiringClaimAcProbeBaseline(root) {
+  const p = path.join(root, WIRING_CLAIM_AC_PROBE_BASELINE_REL);
+  if (!fs.existsSync(p)) return { baseline: new Set(), baselineCount: null };
+  const text = fs.readFileSync(p, "utf8");
+  const countMatch = text.match(/^# baseline-count:\s*(\d+)/m);
+  const baseline = new Set();
+  for (const line of text.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    baseline.add(t);
+  }
+  return { baseline, baselineCount: countMatch ? Number(countMatch[1]) : null };
+}
+
+/** A task's `## Acceptance Criteria` carries a wiring/reachability declaration WITHOUT a real input
+ *  probe, AND the file is not grandfathered ⇒ a NEW occurrence (AC1 negative control: a constructed
+ *  declaration-without-probe is flagged; a real-probe bullet and a pure-function task are not). */
+export function checkWiringClaimAcProbeGated(body, taskFileRel, grandfathered) {
+  if (grandfathered.has(taskFileRel)) return [];
+  const ac = extractSectionFenceAware(body, "Acceptance Criteria");
+  if (ac === null) return [];
+  return checkWiringClaimAcProbe(ac).map((f) => ({
+    code: f.code,
+    what: `${f.message} — see tasks/gap-wiring-claim-ac-requires-real-input-probe.md`,
+  }));
+}
+
 // ── Per-task scan ────────────────────────────────────────────────────────────────────────────────────
 // Returns { taskId, violations: [{code, what}], info: [{code, what}] }.
 // `violations` feed the ratchet list; `info` is non-ratchet context (absent sections on tasks that
@@ -324,7 +367,7 @@ export function checkBareDirUncertainTouches(body, taskFileRel, root, grandfathe
 // `dodSuiteLineBaseline` (a Set of repo-root-relative task file paths) is the grandfather list for
 // the DoD full-suite-demand check (gap-suite-green-gate-..., AC2): files ON the list keep their
 // legacy DoD line; a file NOT on it with the demand is a NEW occurrence ⇒ violation.
-export function scanTaskText(text, taskFileRel = "", { dodSuiteLineBaseline = new Set(), bareDirTouchesBaseline = new Set(), root = null } = {}) {
+export function scanTaskText(text, taskFileRel = "", { dodSuiteLineBaseline = new Set(), bareDirTouchesBaseline = new Set(), wiringClaimAcProbeBaseline = new Set(), root = null } = {}) {
   const task = parseTask(text);
   const body = task.body;
   // parseTask does not surface `status`; read it from the raw frontmatter for the done-task
@@ -365,6 +408,12 @@ export function scanTaskText(text, taskFileRel = "", { dodSuiteLineBaseline = ne
   // Touches carries the bare-dir + uncertain pattern) is a violation. Runs regardless of whether the
   // task has a ## Contract (it is a ## Touches rule, not a Contract rule).
   violations.push(...checkBareDirUncertainTouches(body, taskFileRel, root, bareDirTouchesBaseline));
+
+  // Check 8: wiring/reachability-declaring AC without a real input probe (gap-wiring-claim-ac-requires-
+  // real-input-probe) — a NEW occurrence (a file not on the shrink-only grandfather list whose AC
+  // carries the pattern) is a violation. Runs regardless of ## Contract (it is an ## Acceptance Criteria
+  // rule, not a Contract rule — same as checks 6/7).
+  violations.push(...checkWiringClaimAcProbeGated(body, taskFileRel, wiringClaimAcProbeBaseline));
 
   const idMatch = task.frontmatterRaw.match(/^id:\s*(.+)$/m);
   const taskId = idMatch ? idMatch[1].trim().replace(/^["']|["']$/g, "") : path.basename(taskFileRel || "task", ".md");
@@ -522,12 +571,16 @@ export function runCli(argv) {
   // Check 7 (bare-dir-uncertain-touch): the shrink-only grandfather list for the bare-directory +
   // uncertain-annotation Touches pattern (gap-touches-bare-dir-uncertain-declaration-drags-the-pool).
   const bareDirBaseline = readBareDirTouchesBaseline(wsRoot);
+  // Check 8 (wiring-claim-ac-no-probe): the shrink-only grandfather list for the wiring/reachability
+  // declaration without a real input probe (gap-wiring-claim-ac-requires-real-input-probe).
+  const wiringClaimAcProbeBaseline = readWiringClaimAcProbeBaseline(wsRoot);
   for (const file of list) {
     const rel = path.relative(wsRoot, file);
     const text = fs.readFileSync(file, "utf8");
     const res = scanTaskText(text, rel, {
       dodSuiteLineBaseline: dodBaseline.baseline,
       bareDirTouchesBaseline: bareDirBaseline.baseline,
+      wiringClaimAcProbeBaseline: wiringClaimAcProbeBaseline.baseline,
       root: wsRoot,
     });
     for (const v of res.violations) allViolations.push(`${rel}: ${v.code}`);
@@ -552,6 +605,14 @@ export function runCli(argv) {
       ? `task-contract-check: bare-dir-touches baseline-count STALE (recorded, non-blocking) — docs/analysis/bare-dir-touches-baseline.md has ${bareDirBaseline.baseline.size} entries but baseline-count: ${bareDirBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-touches-bare-dir-uncertain-declaration-drags-the-pool, AC1)`
       : `task-contract-check: bare-dir-touches baseline CEILING BREACH — docs/analysis/bare-dir-touches-baseline.md has ${bareDirBaseline.baseline.size} entries but baseline-count: ${bareDirBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-touches-bare-dir-uncertain-declaration-drags-the-pool, AC1)`);
   }
+  const wiringClaimAcProbeCeilingBreach =
+    wiringClaimAcProbeBaseline.baselineCount !== null &&
+    wiringClaimAcProbeBaseline.baseline.size > wiringClaimAcProbeBaseline.baselineCount;
+  if (wiringClaimAcProbeCeilingBreach) {
+    console.error(noBlock
+      ? `task-contract-check: wiring-claim-ac-probe baseline-count STALE (recorded, non-blocking) — docs/analysis/wiring-claim-ac-probe-baseline.md has ${wiringClaimAcProbeBaseline.baseline.size} entries but baseline-count: ${wiringClaimAcProbeBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-wiring-claim-ac-requires-real-input-probe)`
+      : `task-contract-check: wiring-claim-ac-probe baseline CEILING BREACH — docs/analysis/wiring-claim-ac-probe-baseline.md has ${wiringClaimAcProbeBaseline.baseline.size} entries but baseline-count: ${wiringClaimAcProbeBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-wiring-claim-ac-requires-real-input-probe)`);
+  }
 
   const currentEntries = [...new Set(allViolations)].sort();
   // SUBSET MODE (explicit <task-file> args): the ratchet comparison is only meaningful over the full
@@ -574,13 +635,13 @@ export function runCli(argv) {
   // --write-ratchet stays a maintenance-time action only.
   if (writeRatchetFlag && !growth && !subset && !noBlock) {
     writeOutcome = writeRatchet(wsRoot, currentEntries, { reset: resetBaseline });
-    if (!writeOutcome.ok) return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth: true, writeOutcome, wsRoot, subset, strictSubset, dodCeilingBreach, bareDirCeilingBreach, noBlock });
+    if (!writeOutcome.ok) return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth: true, writeOutcome, wsRoot, subset, strictSubset, dodCeilingBreach, bareDirCeilingBreach, wiringClaimAcProbeCeilingBreach, noBlock });
   }
 
-  return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset, dodCeilingBreach, bareDirCeilingBreach, noBlock });
+  return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset, dodCeilingBreach, bareDirCeilingBreach, wiringClaimAcProbeCeilingBreach, noBlock });
 }
 
-function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset = false, dodCeilingBreach = false, bareDirCeilingBreach = false, noBlock = false }) {
+function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset = false, dodCeilingBreach = false, bareDirCeilingBreach = false, wiringClaimAcProbeCeilingBreach = false, noBlock = false }) {
   // --no-block (gap-task-file-static-syntax-should-not-block-product-verification, option ①): a NEW
   // task-file violation is RECORDED in the grow-only ledger (the "ratchet 只增不减 记账") but never
   // blocks the verification round — task-file Contract/AC syntax is a different risk class from "is
@@ -609,6 +670,7 @@ function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, bas
       ledger,
       dodSuiteLineCeilingBreach: dodCeilingBreach,
       bareDirTouchesCeilingBreach: bareDirCeilingBreach,
+      wiringClaimAcProbeCeilingBreach,
       writeOutcome,
     };
     console.log(JSON.stringify(report, null, 2));
@@ -645,7 +707,8 @@ function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, bas
   const strictFail = !noBlock && strictSubset && subset && perTask.some((t) => t.violations.length > 0);
   if (dodCeilingBreach && !json) console.log(noBlock ? "task-contract-check: DOD-SUITE-LINE BASELINE-COUNT STALE (recorded, non-blocking) — grandfather list can only get SHORTER" : "task-contract-check: DOD-SUITE-LINE BASELINE CEILING BREACH — grandfather list can only get SHORTER");
   if (bareDirCeilingBreach && !json) console.log(noBlock ? "task-contract-check: BARE-DIR-TOUCHES BASELINE-COUNT STALE (recorded, non-blocking) — grandfather list can only get SHORTER" : "task-contract-check: BARE-DIR-TOUCHES BASELINE CEILING BREACH — grandfather list can only get SHORTER");
-  const block = !noBlock && (growth || strictFail || dodCeilingBreach || bareDirCeilingBreach);
+  if (wiringClaimAcProbeCeilingBreach && !json) console.log(noBlock ? "task-contract-check: WIRING-CLAIM-AC-PROBE BASELINE-COUNT STALE (recorded, non-blocking) — grandfather list can only get SHORTER" : "task-contract-check: WIRING-CLAIM-AC-PROBE BASELINE CEILING BREACH — grandfather list can only get SHORTER");
+  const block = !noBlock && (growth || strictFail || dodCeilingBreach || bareDirCeilingBreach || wiringClaimAcProbeCeilingBreach);
   process.exit(block ? 1 : 0);
 }
 

@@ -797,6 +797,139 @@ test("AC2 — a non-status change inside tasks/*.md (body edit) still refuses ex
   }
 });
 
+// ── benign runtime dirty (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path) ───────────────────
+// A SECOND benign dirty shape is auto-passed (仅放行不处置 — NOT committed, NOT gitignored): an
+// UNTRACKED runtime file under .quay/ that is OUTSIDE this task's ## Touches (the gitignore-missed
+// runtime-state family — serve-send message-receipts.jsonl). The ff proceeds; the file stays untracked.
+// The negative controls still refuse: a task's own uncommitted code change (tracked ` M`) and a dirty
+// file WITHIN the task's ## Touches (the Touches-intersection is judged by checkBenignRuntimeDirty).
+
+/** Init a temp repo like initRepo but WITHOUT gitignoring .quay/ — the real repo tracks
+ *  .quay/config.yml and gitignores only SPECIFIC runtime files, so an untracked runtime file under
+ *  .quay/ shows as `?? .quay/<file>` (the live-ghost message-receipts.jsonl shape), not a dir-collapse. */
+function initRepoTrackedQuay(dir) {
+  gitCmd(dir, "init", "-q");
+  gitCmd(dir, "config", "user.name", "faninff-test");
+  gitCmd(dir, "config", "user.email", "fif@example.com");
+  gitCmd(dir, "branch", "-M", "master");
+  fs.writeFileSync(path.join(dir, ".gitignore"), "node_modules/\n", "utf8"); // ⛔ NOT .quay/
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".quay", "config.yml"), "provider: native\n", "utf8");
+  fs.writeFileSync(path.join(dir, "base.txt"), "base\n", "utf8");
+  gitCmd(dir, "add", "-A");
+  gitCmd(dir, "commit", "-q", "-m", "base");
+}
+
+/** Task-file body carrying an explicit `## Touches` section (the benign check's write-surface input). */
+function taskFileBodyWithTouches(taskId, status, touches) {
+  return `---\nid: ${taskId}\ntitle: test ${taskId}\nstatus: ${status}\nlabels:\n  - gap\n---\n\n## Proposal\n\nproposal body for ${taskId}\n\n## Touches\n${touches.map((t) => `- ${t}`).join("\n")}\n`;
+}
+
+/** Commit `tasks/<id>.md` (with `## Touches`) on the current branch. */
+function writeTaskFileWithTouches(dir, taskId, status, touches) {
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), taskFileBodyWithTouches(taskId, status, touches), "utf8");
+  gitCmd(dir, "add", "-A");
+  gitCmd(dir, "commit", "-q", "-m", `add ${taskId}`);
+}
+
+test("AC1 — an untracked .quay/ runtime file OUTSIDE the task's ## Touches is passed through and the ff completes (NOT exit 2)", () => {
+  const dir = makeTmp("benign");
+  const st = stateDir("benign");
+  try {
+    initRepoTrackedQuay(dir);
+    writeTaskFileWithTouches(dir, "benign-t", "ready", ["plugin/scripts/fan-in-ff-merge.sh", "plugin/test/", "tasks/benign-t.md"]);
+    const tip = makeTaskBranch(dir, "benign-t");
+    // The live-ghost shape: an untracked runtime file under .quay/ that the task does NOT touch.
+    fs.writeFileSync(path.join(dir, ".quay", "message-receipts.jsonl"), '{"msg":"x"}\n', "utf8");
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const capArgs = captureArgs(st, "benign-t", tip);
+
+    const r = runMerge(["--task", "benign-t", "--root", dir, ...capArgs, "--lock-events", events, "--retry-record", retries]);
+    assert.equal(r.status, 0, `benign runtime dirty must be passed through and complete the ff:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /not clean/, "the pass-through must remove the dirty-tree refusal, not report it");
+    assert.match(r.stderr, /passed through a benign runtime-dirty tree/, "the pass-through is attributed and observable");
+    assert.equal(gitCmd(dir, "rev-parse", "master").stdout.trim(), tip, "master fast-forwarded to the task tip");
+    // 仅放行不处置: the runtime file is left untracked, NOT committed / gitignored / deleted.
+    assert.match(gitCmd(dir, "status", "--porcelain").stdout, /\?\? \.quay\/message-receipts\.jsonl/, "the runtime file stays untracked");
+    assert.ok(!fs.existsSync(retries), "no retry record — the ff completed, not a retry");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("AC2 — a task's own uncommitted code change (tracked ` M`) still refuses exit 2", () => {
+  const dir = makeTmp("benignnegmod");
+  const st = stateDir("benignnegmod");
+  try {
+    initRepoTrackedQuay(dir);
+    writeTaskFileWithTouches(dir, "benign-t", "ready", ["plugin/scripts/fan-in-ff-merge.sh", "tasks/benign-t.md"]);
+    makeTaskBranch(dir, "benign-t");
+    // A TRACKED modification (the task's own uncommitted code edit) — not `??`, so not a runtime file.
+    fs.appendFileSync(path.join(dir, "base.txt"), "edited\n", "utf8");
+    const retries = path.join(st, "retries.jsonl");
+    const r = runMerge(["--task", "benign-t", "--root", dir, "--retry-record", retries]);
+    assert.equal(r.status, 2, `a tracked modification must still refuse exit 2:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.match(r.stderr, /not clean/, "the dirty-tree refusal fires (not silently passed)");
+    assert.ok(!fs.existsSync(retries), "no retry record — an environment guard, not an ff failure");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("AC2 — a dirty file WITHIN the task's ## Touches (a .quay/ path it declares) still refuses exit 2", () => {
+  const dir = makeTmp("benignnegtouch");
+  const st = stateDir("benignnegtouch");
+  try {
+    initRepoTrackedQuay(dir);
+    // The task DECLARES .quay/declared-runtime.jsonl in its ## Touches ⇒ an untracked file at that
+    // path is the task's own (uncommitted) work, NOT a benign runtime artifact.
+    writeTaskFileWithTouches(dir, "benign-t", "ready", [".quay/declared-runtime.jsonl", "tasks/benign-t.md"]);
+    makeTaskBranch(dir, "benign-t");
+    fs.writeFileSync(path.join(dir, ".quay", "declared-runtime.jsonl"), '{"declared":true}\n', "utf8");
+    const retries = path.join(st, "retries.jsonl");
+    const r = runMerge(["--task", "benign-t", "--root", dir, "--retry-record", retries]);
+    assert.equal(r.status, 2, `a dirty file within the task's ## Touches must still refuse exit 2:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.match(r.stderr, /not clean/, "the dirty-tree refusal fires (the Touches intersection is real dirt)");
+    assert.ok(!fs.existsSync(retries), "no retry record — an environment guard, not an ff failure");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("AC3 — production replay: `.quay/message-receipts.jsonl` dirty no longer causes exited-not-landed; it passes pre-flight in one shot", () => {
+  const dir = makeTmp("replay");
+  const st = stateDir("replay");
+  try {
+    initRepoTrackedQuay(dir);
+    writeTaskFileWithTouches(dir, "replay-t", "ready", ["plugin/scripts/fan-in-ff-merge.sh", "plugin/test/", "tasks/replay-t.md"]);
+    const tip = makeTaskBranch(dir, "replay-t");
+    // The EXACT live-ghost file name that dirtied the checkout and caused 4 exited-not-landed (105min).
+    fs.writeFileSync(path.join(dir, ".quay", "message-receipts.jsonl"), '{"delivered":true}\n', "utf8");
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const esc = path.join(st, "escalations.jsonl");
+    const capArgs = captureArgs(st, "replay-t", tip);
+
+    const r = runMerge(["--task", "replay-t", "--root", dir, ...capArgs, "--lock-events", events, "--retry-record", retries, "--escalations", esc, "--run-id", "fm-replay-1786000", "--agent-id", "sub-uuid"]);
+    assert.equal(r.status, 0, `the replay must land on the first try (millisecond pre-flight), not exit 2:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.match(r.stdout, /OK — master fast-forwarded/, "the ff landed");
+    assert.ok(!fs.existsSync(retries), "no retry record");
+    // The success path always appends an `ff-escalation-resolved` record (the escalation-resolution
+    // signal) — but there must be NO `ff-escalation` (anti-livelock) record: it landed on the first try.
+    const escLines = fs.existsSync(esc) ? fs.readFileSync(esc, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse) : [];
+    assert.ok(!escLines.some((e) => e.event === "ff-escalation"), "no anti-livelock escalation record — the ff landed on the first try");
+    assert.match(gitCmd(dir, "status", "--porcelain").stdout, /\?\? \.quay\/message-receipts\.jsonl/, "the runtime file stays untracked");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
 test("wrong branch (current checkout not the merge target) — exit 2", () => {
   const dir = makeTmp("wbr");
   try {
