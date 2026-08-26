@@ -1,7 +1,7 @@
 ---
 id: gap-delivery-status-two-parallel-implementations
 title: 「消息投递状态」两条独立实现回答同一问题——serve-send.ts 预测（读权限设置）vs transcript-delivery-check.ts 核证（读 transcript）互不 relate，同名词不同义
-status: ready
+status: done
 labels:
   - gap
   - defect
