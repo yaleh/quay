@@ -10,8 +10,12 @@ parent: null
 children: []
 extra:
   schema: execution
+  depends_on:
+    - gap-fan-in-failure-semantic-subagent
 ---
 **type:** execution
+
+> **排期（outer 2026-08-26）**：depends_on `gap-fan-in-failure-semantic-subagent`。⛔ 非结构前置（两任务改不同代码路径，本任务可经既有 re-dispatch 落地）——是本任务自身 landing 竞 develop、每输一次整份重跑 suite（24h ff-race 27/28、62% 墙钟浪费），且跑本任务会与落地 ff-race 修复竞争稀缺的单飞 suite 槽（S=2）⇒ 先落地语义 subagent 再重跑，避免烧 retry cap 走 needs-human。
 
 ## Proposal
 
