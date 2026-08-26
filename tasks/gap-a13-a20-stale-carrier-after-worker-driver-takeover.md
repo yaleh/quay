@@ -1,7 +1,7 @@
 ---
 id: gap-a13-a20-stale-carrier-after-worker-driver-takeover
 title: A13/A20 检查读陈旧载体——worker-driver 接管派发后不再写 inner-wakeup-heartbeat / last_reconcile_at_ms，两检查 ~2.6 天恒红（DEAD / non-compliant）而 inner 直接量健康
-status: ready
+status: done
 labels:
   - gap
   - defect
