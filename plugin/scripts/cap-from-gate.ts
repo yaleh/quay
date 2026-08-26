@@ -94,15 +94,16 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { defaultDriverConfig, driverCap } from "./driver-config.ts";
 
 /** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
  *  adaptive cap is retired. effective_cap is this constant — 5 — regardless of cpu pressure, suite
  *  state, or process budget. The band/budget fields returned alongside it are PURE OBSERVATION and
  *  must NOT participate in any decision (dispatch / slot-refill / floor all use this fixed 5).
- *  concurrency-default-fallback: human-ruled fixed cap (declared per
- *  gap-concurrency-literal-only-at-definition-points; the single source is QUAY_MAX_TASK_SUBAGENTS
- *  once gap-single-flight-lock-2-slot-concurrent-suites lands). */
-export const FIXED_EFFECTIVE_CAP = 5;
+ *  AC155: 单一真相源 —— 值从 driver-config 的声明式配置（drivers.yml）派生（⛔ 不再有本文件独立的
+ *  并发字面量；computeEffectiveCap 现在经 driverCap 现读 drivers.yml）。保留本符号仅为旧 import 面
+ *  （cap-from-gate-*.test.mjs 用「同一值」断言 effective_cap 恒固定）。 */
+export const FIXED_EFFECTIVE_CAP = defaultDriverConfig().worker.cap;
 
 /** Default GO/WAIT/EXTREME caps when config declares no concurrency_bands. quay's default (5/2/1);
  *  a project overrides in `.quay/config.yml` `loop:concurrency_bands` (e.g. archguard 4/2/1).
@@ -355,7 +356,8 @@ export function computeEffectiveCap(opts: {
   const budget = readBudgetFromGate(repoRoot, env);
   // FIXED-CAP RETIREMENT (AC2, human ruling 2026-08-09): the cap is a constant 5, NOT
   // min(bandCap, available). The band/budget above are pure observation.
-  const effective_cap = FIXED_EFFECTIVE_CAP;
+  // AC155: 单一真相源 —— 值经 driverCap 现读 drivers.yml（缺省 = 缺省配置 5）。
+  const effective_cap = driverCap(repoRoot, "worker");
   return {
     effective_cap,
     band,

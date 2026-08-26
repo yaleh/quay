@@ -778,10 +778,10 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
   }
   fs.mkdirSync(path.join(opts.root, ".quay"), { recursive: true });
 
-  // worker 并发缺省（对齐 inner=5，gap-launch-script-worker-cap-broken AC2）：无显式 --cap 时经定义点
-  // env 给驱动缺省并发 5（resolveConcurrency 读到 5，⛔ 否则 resident 模式 taskCount=0 ⇒ 兜底 1）。
+  // AC155：worker 并发缺省不再经 env 注入 QUAY_MAX_TASK_SUBAGENTS="5"（旧第三份并发真相源）——
+  // 驱动自己经 driver-config 读 drivers.yml（resolveConcurrency → driverCap 单一真相源）。supervisor
+  // 只透传显式 --cap/--concurrency（若有），⛔ 不再替驱动决定缺省并发。
   const env: NodeJS.ProcessEnv = { ...process.env };
-  if (opts.kind === "worker" && !opts.cap) env.QUAY_MAX_TASK_SUBAGENTS = "5";
 
   const args = driverArgvForKind(opts.root, opts.kind, {
     cap: opts.cap,

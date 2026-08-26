@@ -90,7 +90,7 @@ const FAKE_WORKER_DRIVER = [
 function run(args, opts = {}) {
   return spawnSync(process.execPath, ["--experimental-strip-types", KERNEL, ...args], {
     encoding: "utf8",
-    env: { ...process.env },
+    env: opts.env || { ...process.env },
     timeout: opts.timeout || 30000,
   });
 }
@@ -410,13 +410,18 @@ test("AC1 (worker cap) — start --kind worker --cap 2 ⇒ driver argv carries -
   assert.ok(dump.argv.includes("--concurrency") && dump.argv.includes("2"), `driver argv carries --concurrency 2: ${JSON.stringify(dump.argv)}`);
 });
 
-test("AC2 (worker 并发缺省) — start --kind worker with NO --cap ⇒ env QUAY_MAX_TASK_SUBAGENTS=5", async (t) => {
+test("AC2 (worker 并发缺省) — start --kind worker with NO --cap ⇒ supervisor 不注入 env、不传 --concurrency（driver 自读 drivers.yml）", async (t) => {
   const root = makeWorkerRoot("capdef");
   t.after(() => {
     run(["stop", "--kind", "worker", "--root", root], { timeout: 15000 });
     fs.rmSync(root, { recursive: true, force: true });
   });
-  const r = run(["start", "--kind", "worker", "--root", root, "--restart-delay", "1", "--run-id", "dr-wac2"]);
+  // AC155：supervisor 不再注入 QUAY_MAX_TASK_SUBAGENTS="5"（旧第三份并发真相源）——缺省并发由 driver
+  // 自己经 driver-config 读 drivers.yml（resolveConcurrency → driverCap 单一真相源）。剥掉环境里已有的
+  // QUAY_MAX_TASK_SUBAGENTS 使本测对「supervisor 是否注入」敏感（旧行为注入 "5" ⇒ 本测 FAIL，⛔ 防假绿）。
+  const env = { ...process.env };
+  delete env.QUAY_MAX_TASK_SUBAGENTS;
+  const r = run(["start", "--kind", "worker", "--root", root, "--restart-delay", "1", "--run-id", "dr-wac2"], { env });
   assert.equal(r.status, 0, `start failed: ${r.stdout}\n${r.stderr}`);
   const dump = await (async () => {
     const deadline = Date.now() + 5000;
@@ -428,6 +433,6 @@ test("AC2 (worker 并发缺省) — start --kind worker with NO --cap ⇒ env QU
     return null;
   })();
   assert.ok(dump, "worker driver dumped its argv/env");
-  assert.equal(dump.capEnv, "5", `worker default concurrency = 5 via env: ${JSON.stringify(dump)}`);
-  assert.ok(!dump.argv.includes("--concurrency"), `default carried by env, not an explicit flag: ${JSON.stringify(dump.argv)}`);
+  assert.equal(dump.capEnv, null, `supervisor must NOT inject QUAY_MAX_TASK_SUBAGENTS (driver resolves cap from drivers.yml itself): ${JSON.stringify(dump)}`);
+  assert.ok(!dump.argv.includes("--concurrency"), `default resolved by driver from drivers.yml, not an explicit flag: ${JSON.stringify(dump.argv)}`);
 });
