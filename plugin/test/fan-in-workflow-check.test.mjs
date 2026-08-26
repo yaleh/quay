@@ -672,14 +672,14 @@ test("PURE checkAgentIds — callers that do NOT pass a table are unchanged (def
 
 test("PURE parseEscalations — parses ff-escalation records; skips torn tail; empty ⇒ []", (t) => {
   const text = [
-    JSON.stringify({ event: "ff-escalation", taskId: "gap-ac63-judgment2-no-carrier", attempt: 3, developHead: "04659638f3a7e7cc6cc932dca846a87967db13da", action: "request-quiet-window-and-stop-retry", quietWindow: { requested: true } }),
+    JSON.stringify({ event: "ff-escalation", taskId: "gap-ac63-judgment2-no-carrier", attempt: 3, developHead: "04659638f3a7e7cc6cc932dca846a87967db13da", action: "stop-retry" }),
     JSON.stringify({ event: "ff-escalation", taskId: "gap-ac80-prompt-canonical-and-invariant-checker", attempt: 3 }),
     '{ "event": "ff-escalation", "taskId": "gap-x", "attempt": ',
   ].join("\n");
   const es = parseEscalations(text);
   assert.equal(es.length, 2);
   assert.equal(es[0].taskId, "gap-ac63-judgment2-no-carrier");
-  assert.equal(es[0].quietWindow.requested, true);
+  assert.equal(es[0].action, "stop-retry");
   assert.deepEqual(parseEscalations(""), []);
   assert.deepEqual(parseEscalations(null), []);
 });
@@ -695,17 +695,17 @@ test("PURE escalatedTaskIds — unique sorted task ids from escalation records",
   assert.deepEqual(escalatedTaskIds([]), []);
 });
 
-test("PURE escalatedTaskIds — a quiet-window-resolved record is NOT an escalation (gap-fan-in-ff-livelock-quiet-window-no-consumer)", (t) => {
-  // The escalation file now carries BOTH ff-escalation (request) and quiet-window-resolved
+test("PURE escalatedTaskIds — an ff-escalation-resolved record is NOT an escalation", (t) => {
+  // The escalation file carries BOTH ff-escalation (request) and ff-escalation-resolved
   // (resolution, written by fan-in-ff-merge.sh on ff success). A resolution is the FULFILLMENT of a
   // request, not a NEW escalation — it must not pollute 判据2(d) traceability.
   const es = parseEscalations([
     JSON.stringify({ event: "ff-escalation", taskId: "gap-livelock", attempt: 3 }),
-    JSON.stringify({ event: "quiet-window-resolved", taskId: "gap-livelock" }),
+    JSON.stringify({ event: "ff-escalation-resolved", taskId: "gap-livelock" }),
   ].join("\n"));
   assert.deepEqual(escalatedTaskIds(es), ["gap-livelock"], "the task appears once (the request), not twice");
   // A file holding ONLY a resolution contributes no escalated task.
-  const onlyResolved = parseEscalations(JSON.stringify({ event: "quiet-window-resolved", taskId: "gap-landed" }) + "\n");
+  const onlyResolved = parseEscalations(JSON.stringify({ event: "ff-escalation-resolved", taskId: "gap-landed" }) + "\n");
   assert.deepEqual(escalatedTaskIds(onlyResolved), [], "a bare resolution is not an escalation");
 });
 
@@ -1088,7 +1088,7 @@ test("CLI — escalation traceability: an escalated task WITH a Workflow call �
   fs.writeFileSync(wfFile, JSON.stringify({ message: { content: [{ type: "tool_use", name: "Workflow", input: { scriptPath: "/q/.claude/workflows/fan-in-execute.js", args: '{"task":"gap-ac63-judgment2-no-carrier"}' } }] } }) + "\n");
   // The escalation record (as written by fan-in-ff-merge.sh on attempt >= 3).
   const escFile = path.join(fx.dir, "escalations.jsonl");
-  fs.writeFileSync(escFile, JSON.stringify({ event: "ff-escalation", taskId: "gap-ac63-judgment2-no-carrier", attempt: 3, action: "request-quiet-window-and-stop-retry", quietWindow: { requested: true } }) + "\n");
+  fs.writeFileSync(escFile, JSON.stringify({ event: "ff-escalation", taskId: "gap-ac63-judgment2-no-carrier", attempt: 3, action: "stop-retry" }) + "\n");
   // real subagent file so 判据2(c) is green too.
   fs.mkdirSync(path.join(fx.dir, "subagents"), { recursive: true });
   fs.writeFileSync(path.join(fx.dir, "subagents", "agent-aab2d14d10a762ff4.jsonl"), "{}");
@@ -1113,7 +1113,7 @@ test("CLI — escalation traceability: an escalated task with NO Workflow call �
   // path did NOT go through the workflow (a main-session-direct escalation would be the AC72/AC73
   // defect). 判据2 traceability for the escalation path ⇒ RED.
   const escFile = path.join(fx.dir, "escalations.jsonl");
-  fs.writeFileSync(escFile, JSON.stringify({ event: "ff-escalation", taskId: "gap-ac63-judgment2-no-carrier", attempt: 3, action: "request-quiet-window-and-stop-retry" }) + "\n");
+  fs.writeFileSync(escFile, JSON.stringify({ event: "ff-escalation", taskId: "gap-ac63-judgment2-no-carrier", attempt: 3, action: "stop-retry" }) + "\n");
   fs.mkdirSync(path.join(fx.dir, "subagents"), { recursive: true });
   fs.writeFileSync(path.join(fx.dir, "subagents", "agent-aab2d14d10a762ff4.jsonl"), "{}");
   const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", escFile, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--json"], { encoding: "utf8" });

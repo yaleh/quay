@@ -83,7 +83,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { parseTask, extractSection } from "./task-schema.ts";
+import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
 import {
   analyzeTasks,
   POOL_FLOOR_MULT_DEFAULT,
@@ -121,6 +121,11 @@ import {
 // reads --all MERGE history, so it survives the two-line branch model's integration fan-in that the
 // master-only git-history signal misses).
 import { countAcCheckboxes } from "./task-status-drift-check.ts";
+// DEPENDENCY-GATE SHARED KERNEL (tasks/gap-slot-refill-depsreadyfor-ignores-depends-on + AC152): the
+// deps-ready judgment (all prerequisites done) reuses driver-filters' allDepsDone — the SAME single
+// implementation ready-pool-check's depsReadyFor consumes, ⛔ never a parallel "逐个查 status !== done"
+// loop. A missing dep file resolves to null status ⇒ not done ⇒ fail closed.
+import { allDepsDone } from "./driver-filters.ts";
 import {
   checkTaskTouchesResolve,
   checkTouchesPair,
@@ -264,7 +269,7 @@ export function readFfRetryRecords(root) {
 
 /** Read <root>/.quay/fan-in-ff-escalations.jsonl — the anti-livelock escalation ledger written by
  *  fan-in-ff-merge.sh when a task's ff failure is its attempt >= 3 (`ff-escalation` request) and on ff
- *  success (`quiet-window-resolved`). An ff-escalation WITHOUT a newer quiet-window-resolved for the
+ *  success (`ff-escalation-resolved`). An ff-escalation WITHOUT a newer ff-escalation-resolved for the
  *  SAME task = that task is currently starved at k≥3. Absent/unparseable ⇒ []. */
 export function readFfEscalationRecords(root) {
   try {
@@ -304,7 +309,7 @@ export function computeFfFailureCounts(retryRecords, liveTaskIds) {
 }
 
 /** Live tasks with an UNRESOLVED ff escalation (a k≥3 anti-livelock request without a newer
- *  `quiet-window-resolved`). The escalation ledger is the CLEAN "currently starved at k≥3" signal — a
+ *  `ff-escalation-resolved`). The escalation ledger is the CLEAN "currently starved at k≥3" signal — a
  *  task re-dispatched after a prior round's escalation keeps its old retry records, but its escalation
  *  is resolved only on ff success, so an unresolved escalation is the unambiguous live signal. Returns
  *  a Set<taskId>. Pure. */
@@ -423,19 +428,31 @@ function readFrontField(frontmatterRaw, key) {
   return m ? m[1].replace(/^["']|["']$/g, "") : null;
 }
 
-/** Parent done (or absent) ⇒ deps ready. Mirrors ready-pool-check's depsReadyFor; fail-closed when
- *  the parent file is missing (cannot confirm done). COMPOUND AGGREGATION (gap-compound-depsreadyfor-
- *  structural-deadlock AC2): a `role: compound` parent is an AGGREGATE — the parent is only `done`
- *  once ALL its children are done, so a child waiting on its compound parent is the 双向互等 deadlock
- *  (child waits on parent, parent waits on children). The compound-parent edge is therefore skipped;
- *  a child of a compound dispatches on its own depends_on edges alone. */
+/** ALL prerequisites done (parent AND every depends_on entry) ⇒ deps ready. Mirrors ready-pool-check's
+ *  depsReadyFor — the SAME field read (gap-prerequisite-gates-prose-invisible-to-mechanisms AC2: the
+ *  dispatch check reads the relation edges parent AND depends_on, ⛔ never the prose). Fail-closed when
+ *  a dependency file is missing (cannot confirm done) — a missing dep resolves to null status via
+ *  allDepsDone. COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC2): a `role:
+ *  compound` parent is an AGGREGATE — the parent is only `done` once ALL its children are done, so a
+ *  child waiting on its compound parent is the 双向互等 deadlock (child waits on parent, parent waits
+ *  on children). The compound-parent edge is therefore skipped from the PARENT arm only (a depends_on
+ *  entry is a true predecessor edge and is NEVER skipped); a child of a compound dispatches on its own
+ *  depends_on edges alone. */
 function depsReadyFor(task, metaById) {
+  const deps = [];
   const parent = task.parent;
-  if (!parent || parent === "null" || parent === "~") return true;
-  const meta = metaById.get(parent);
-  if (meta === undefined) return false; // parent file missing → fail closed
-  if (meta.role === "compound") return true; // aggregation, not a predecessor
-  return meta.status === "done";
+  if (parent && parent !== "null" && parent !== "~") {
+    const meta = metaById.get(parent);
+    if (meta === undefined) return false; // parent file missing → fail closed
+    if (meta.role !== "compound") deps.push(parent); // aggregation, not a predecessor
+  }
+  for (const d of readDependsOn(task.frontmatterRaw)) deps.push(d);
+  // AC152: reuse driver-filters' allDepsDone (single implementation, ⛔ no parallel status loop).
+  // A missing dep file ⇒ meta undefined ⇒ null status ⇒ not done ⇒ fail closed (conservative).
+  return allDepsDone(deps, (depId) => {
+    const meta = metaById.get(depId);
+    return meta ? meta.status : null;
+  });
 }
 
 /** Per-task dispatch metadata (id → { status, role }), for the deps-ready filter and the compound
