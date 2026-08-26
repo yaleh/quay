@@ -1,7 +1,7 @@
 ---
 id: gap-wiring-claim-ac-requires-real-input-probe
 title: 「实现了但没接线」族无检查器强制——接线/可达性声明 AC 不要求真实输入探针，且已有 prod-data-audit / wiring-coverage-check 两检查器自身也没接线（≥17 实例/22 天 ≈ 0.77/天）
-status: ready
+status: done
 labels:
   - gap
   - defect
