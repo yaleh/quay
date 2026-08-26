@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group product
 // @load-sensitive child-spawn
 // @load-sensitive-entry 2026-08-09 fake-gh subprocess HUNG 14:41 under full-suite load (round-202); suite spawn contention
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this test spawns a
