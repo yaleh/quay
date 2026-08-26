@@ -1396,13 +1396,11 @@ test("AC4 wiring — source tick doc step 6 (plugin/loop/fast-mode-loop-tick.md)
   assert.match(step6Section, /delaySeconds|ts|reason/, "the write must name the {ts, delaySeconds, reason} schema");
 });
 
-test("AC4 wiring — outer execution core A 段 (orchestration/orchestrator-tick-core.md) must READ+judge the heartbeat product", () => {
+test("AC4 wiring — A13 retired: outer core carries the retirement pointer (driver承接 liveness, not the checker invocation)", () => {
   const outer = fs.readFileSync(path.join(repoRoot, "orchestration", "orchestrator-tick-core.md"), "utf8");
-  assert.match(outer, /inner-wakeup-heartbeat-check\.ts/, "the outer A 段 must invoke the checker");
-  const aSectionLines = outer.split("\n").filter((l) => l.includes("inner-wakeup-heartbeat"));
-  assert.ok(aSectionLines.length >= 1, "the outer A 段 must carry the heartbeat product read");
-  assert.ok(aSectionLines.some((l) => /3\s*个 tick 周期|3\s*周期|5400/.test(l)), "the freshness band must be 3 tick periods");
-  assert.ok(aSectionLines.some((l) => /兜底心跳断/.test(l)), "the escalation phrase 兜底心跳断 must be named");
+  assert.match(outer, /A13 inner 兜底心跳已退役/, "the outer A 段 must mark A13 retired");
+  assert.match(outer, /driver-runtime\.ts/, "the retirement must point to driver-runtime.ts liveness承接");
+  assert.match(outer, /worker-round\.jsonl/, "the retirement must name worker-round.jsonl as the liveness 直接量");
 });
 
 test("AC2/AC4 — cross-reference to the same-family task (gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release)", () => {

@@ -75,7 +75,7 @@ test("AC2 — the audit list covers the C 段 hard-constraint ids and key A 段 
   for (const cid of ["C1", "C2", "C3", "C7", "C14"]) {
     assert.ok(ids.has(cid), `audit must cover C 段 constraint ${cid}`);
   }
-  for (const aid of ["A1", "A6", "A13", "A14", "A15", "A16", "A17"]) {
+  for (const aid of ["A1", "A6", "A14", "A15", "A16", "A17"]) {
     assert.ok(ids.has(aid), `audit must cover A 段 reading ${aid}`);
   }
 });
