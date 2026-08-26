@@ -41,6 +41,7 @@ B15/B17 驱动化、B16-C/B18 明确归 AC145；AC1/AC2/AC3 全勾；无 god-obj
 - plugin/scripts/capability-catalog.sh（新脚本六表注册）
 - plugin/test/quality-gate-driver.test.mjs（新增单测）
 - plugin/test/driver-runtime.test.mjs（KNOWN_KINDS 断言补 quality）
+- plugin/test/launch-settings.test.mjs（profiles.yml 新增 pool-judge role ⇒ role 计数 6→7）
 - .gitignore（quality-driver 运行时态 gitignore）
 - .quay/profiles.yml（pool-judge role）
 - orchestration/orchestrator-tick-core.md（B15/B17 标退役 → driver 承接）
