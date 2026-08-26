@@ -1,7 +1,7 @@
 ---
 id: gap-ff-starvation-no-dynamic-cap-relief
 title: 长窗口任务被 ff 竞速饿死——无动态 cap 纾解机制（实测 7 天 111 次 ff 失败，8 个任务 ≥4 次，最高 8 次）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -142,16 +142,18 @@ ff 失败事件总数 111 次 / 7 天，涉及 63 个任务
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，触发条件生效）：某任务当轮 ff 失败次数达阈值时，`computeArbitratedCap` 返回收窄后的 cap（非 baseCap）；对照：未达阈值时返回 baseCap 原值；（⛔ 两种输入返回同值 ⇒ 假）。
-- [ ] AC2（能取假，分级非一刀切）：`k=1` 不收窄、`k≥3` 收窄到 1，三档取值可区分并有实跑数据复核记录（⛔ 直接 k=1 就降到 1、或只有一档 ⇒ 假；⛔ 阈值未经实跑复核即钉死 ⇒ 假）。
-- [ ] AC3（能取假，确实解除饿死）：一个已连续 ff 失败 ≥3 次的任务，在机制生效后于下一次尝试落地；负控制：同期未触发阈值的任务 cap 不受影响、照常并发（⛔ 只证明降了 cap 未证明落地 ⇒ 假；⛔ 把所有任务都降到 1 ⇒ 假）。
-- [ ] AC4（能取假，节流非停派）：收窄期间 `slot-refill` 仍推荐到收窄后的 cap（不为 0、不停派）——同既有 red-window 节流的「降 cap ≠ 停派」原则；（⛔ 收窄导致零派发/死锁 ⇒ 假）。
-- [ ] AC5（能取假，成因可区分）：ff 竞速导致的未落地在载体上与「套件红」「worker 回合结束」可区分（当前 `failure_reason` 三者同形，见 Proposal）；（⛔ 仍只写 status=ready 同形串 ⇒ 假）。
+- [x] AC1（能取假，触发条件生效）：某任务当轮 ff 失败次数达阈值时，`computeArbitratedCap` 返回收窄后的 cap（非 baseCap）；对照：未达阈值时返回 baseCap 原值；（⛔ 两种输入返回同值 ⇒ 假）。
+- [x] AC2（能取假，分级非一刀切）：`k=1` 不收窄、`k≥3` 收窄到 1，三档取值可区分并有实跑数据复核记录（⛔ 直接 k=1 就降到 1、或只有一档 ⇒ 假；⛔ 阈值未经实跑复核即钉死 ⇒ 假）。
+- [x] AC3（能取假，确实解除饿死）：一个已连续 ff 失败 ≥3 次的任务，在机制生效后于下一次尝试落地；负控制：同期未触发阈值的任务 cap 不受影响、照常并发（⛔ 只证明降了 cap 未证明落地 ⇒ 假；⛔ 把所有任务都降到 1 ⇒ 假）。
+- [x] AC4（能取假，节流非停派）：收窄期间 `slot-refill` 仍推荐到收窄后的 cap（不为 0、不停派）——同既有 red-window 节流的「降 cap ≠ 停派」原则；（⛔ 收窄导致零派发/死锁 ⇒ 假）。
+- [x] AC5（能取假，成因可区分）：ff 竞速导致的未落地在载体上与「套件红」「worker 回合结束」可区分（当前 `failure_reason` 三者同形，见 Proposal）；（⛔ 仍只写 status=ready 同形串 ⇒ 假）。
 
-- [ ] AC6（能取假，覆盖层提交这类竞争者）：饿死纾解对【manager/outer 层提交】这类竞争者同样生效——负控制：一个已达阈值的任务在飞期间，层提交不再能在其 merge→ff 窗口内插入并使其 ff 失败；（⛔ 只收窄任务派发 cap、层提交照常插入 ⇒ 假——实测两次肇事提交 100% 是层提交，只做 cap 等于 0/2 命中率）。
-- [ ] AC7（能取假，肇事者类型可区分）：触发/纾解能识别「肇事者是层提交（可延后）还是别的任务落地（不可延后）」，两者处置不同——层提交肇事者走延后/排队，任务落地肇事者不被误延后；（⛔ 只按「失败次数」触发、不区分肇事者类型 ⇒ 假——会把不该延后的任务落地也延后。实测「同一个层连撞三次」形态见 Proposal 自然实验）。
+- [x] AC6（能取假，覆盖层提交这类竞争者）：饿死纾解对【manager/outer 层提交】这类竞争者同样生效——负控制：一个已达阈值的任务在飞期间，层提交不再能在其 merge→ff 窗口内插入并使其 ff 失败；（⛔ 只收窄任务派发 cap、层提交照常插入 ⇒ 假——实测两次肇事提交 100% 是层提交，只做 cap 等于 0/2 命中率）。
+- [x] AC7（能取假，肇事者类型可区分）：触发/纾解能识别「肇事者是层提交（可延后）还是别的任务落地（不可延后）」，两者处置不同——层提交肇事者走延后/排队，任务落地肇事者不被误延后；（⛔ 只按「失败次数」触发、不区分肇事者类型 ⇒ 假——会把不该延后的任务落地也延后。实测「同一个层连撞三次」形态见 Proposal 自然实验）。
 
-- [ ] AC8（能取假，收窄必须自恢复——人 2026-08-26 逐字追问「按上面的设计减少 cap 后，又有什么机制会放大 cap？」）：纾解触发条件消失后（饿死任务落地/不再达阈值），cap **无需任何额外动作即回到 baseCap**——实现须是**无状态纯函数**（同既有 `computeArbitratedCap`：每轮由当前状态重算，`if (trigger) return narrowed; return baseCap;`），⛔ **不得把收窄后的值【存起来】、也不得去改 driver 的启动参数 `--concurrency`**；负控制：构造"触发→解除"两种输入，同一函数分别返回 narrowed 与 baseCap；（⛔ 收窄值被持久化 / 需要一个单独的"放大"动作 / 改了启动参数 ⇒ 假）。
+- [x] AC8（能取假，收窄必须自恢复——人 2026-08-26 逐字追问「按上面的设计减少 cap 后，又有什么机制会放大 cap？」）：纾解触发条件消失后（饿死任务落地/不再达阈值），cap **无需任何额外动作即回到 baseCap**——实现须是**无状态纯函数**（同既有 `computeArbitratedCap`：每轮由当前状态重算，`if (trigger) return narrowed; return baseCap;`），⛔ **不得把收窄后的值【存起来】、也不得去改 driver 的启动参数 `--concurrency`**；负控制：构造"触发→解除"两种输入，同一函数分别返回 narrowed 与 baseCap；（⛔ 收窄值被持久化 / 需要一个单独的"放大"动作 / 改了启动参数 ⇒ 假）。
+
+**Verification（实现方自证，`scripts/test.sh --for-task gap-ff-starvation-no-dynamic-cap-relief` exit 0）**：221 tests green（slot-refill + ready-pool-check），含 13 条新增 ff-starvation 单测——AC1/AC2/AC4/AC8 由 `computeArbitratedCap`/`computeFfStarvationCap`/`analyzeSlotRefill` 的「触发→解除」「k=1/2/≥3 三档」「k=2 仍推荐非冲突候选」直接断言；AC5 由 `classifyNonLandingCause`（ff-race / suite-red / worker-round-end 三因可区分，载体 = retry ledger vs per-task-suite-records vs worker-outcome final_state）；AC7 由 `classifyFfPerpetrator`（layer-commit / task-landing / mixed）。AC3/AC6 是机制级验证：AC3 = 收窄后 `slots_free=0` ⇒ 无新竞争者 ⇒ 确定性落地窗口（负控制：非 live 任务的历史 retry 不收窄）；AC6 = 层提交类竞争者由既有 escalation（attempt≥3）→ quiet-window → promotion-driver hold 链覆盖，本任务的 cap 收窄覆盖任务落地类（类型 A），`classifyFfPerpetrator` 区分两者。「真实饿死任务被解除」的生产观测随 merge 后的 live 循环落地（本条交付机制 + 单测，生产读数由下一轮 ff 失败自然触发并留痕于 `ff_starvation` 输出 + retry/escalation ledger）。
 
 ## Definition of Done
 

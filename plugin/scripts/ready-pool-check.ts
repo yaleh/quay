@@ -1081,6 +1081,22 @@ export function computeRelevance(id, task, childrenByTask = new Map(), parentRef
   };
 }
 
+/** The depends_on REVERSE-EDGE index (gap-value-priority-signal-degraded-to-1-over-cost AC1, extracted
+ *  as a standalone helper for gap-ff-starvation-no-dynamic-cap-relief): how many tasks list each id in
+ *  their `depends_on`. A task others depend on IS blocking (its landing unblocks dependents) — the same
+ *  semantic as being named `parent`. `analyzeTasks` builds this map once and feeds it to computeRelevance
+ *  (single source — the ff-starvation relief reuses it to order starved live tasks「阻塞下游多的优先纾解」,
+ *  never a parallel copy). Pure. */
+export function computeDependedOnCount(allTasks) {
+  const dependedOnCount = new Map();
+  for (const [, t] of allTasks) {
+    for (const d of readDependsOn(t.frontmatterRaw)) {
+      dependedOnCount.set(d, (dependedOnCount.get(d) || 0) + 1);
+    }
+  }
+  return dependedOnCount;
+}
+
 // ── Consecutive-red-window reader (gap-ready-relevance-blind-to-suite-blocking-signal AC2/AC4) ──────
 // Best-effort JSONL parse of the .quay ledgers the outer's full-suite runner already writes. Absent
 // file / corrupt line ⇒ skip (an absent ledger = no suite history = no suite-blocking signal), the
@@ -1853,14 +1869,14 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // gap-value-priority-signal-degraded-to-1-over-cost AC1 — the depends_on reverse-edge index: how
   // many tasks list this id in their `depends_on`. A task others depend on IS blocking (its landing
   // unblocks dependents) — the same semantic as being named `parent`. Built once like parentRefCount.
-  const dependedOnCount = new Map();
+  // gap-ff-starvation-no-dynamic-cap-relief: the depends_on reverse-edge index is now the exported
+  // single-source computeDependedOnCount (shared with slot-refill's relief ordering — never a parallel
+  // copy); the childrenByTask/parentRefCount loop stays inline.
+  const dependedOnCount = computeDependedOnCount(allTasks);
   for (const [id, t] of allTasks) {
     childrenByTask.set(id, readChildren(t.frontmatterRaw));
     if (t.parent && t.parent !== "null" && t.parent !== "~") {
       parentRefCount.set(t.parent, (parentRefCount.get(t.parent) || 0) + 1);
-    }
-    for (const d of readDependsOn(t.frontmatterRaw)) {
-      dependedOnCount.set(d, (dependedOnCount.get(d) || 0) + 1);
     }
   }
 
