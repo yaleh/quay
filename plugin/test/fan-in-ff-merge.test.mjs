@@ -177,12 +177,13 @@ test("ff success — master fast-forwards to the task tip; lock events paired; N
   }
 });
 
-// ── quiet-window 兑现 (gap-fan-in-ff-livelock-quiet-window-no-consumer) ─────────────────────────────
-// On ff SUCCESS the script appends a `quiet-window-resolved` record to the escalation file — the
-// `endsEarly: "ff-success"` half of the attempt>=3 escalation request. The consumer
-// (promotion-driver) reads it to stop holding develop writes. Same file, same append.
+// ── escalation resolution (gap-fan-in-ff-livelock-quiet-window-no-consumer 的兑现半边) ─────────────
+// On ff SUCCESS the script appends an `ff-escalation-resolved` record to the escalation file — the
+// escalation-resolution signal (kept after the quiet-window request was retired by
+// gap-quiet-window-holder-scope-wider-than-consumer). slot-refill's ff-starvation relief reads it to
+// clear the task's unresolved-escalation state. Same file, same append.
 
-test("ff success writes a quiet-window-resolved record to the escalation file (endsEarly: ff-success)", () => {
+test("ff success writes an ff-escalation-resolved record to the escalation file", () => {
   const dir = makeTmp("resolved");
   const st = stateDir("resolved");
   try {
@@ -197,9 +198,9 @@ test("ff success writes a quiet-window-resolved record to the escalation file (e
     const r = runMerge(["--task", "ac62-res", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries, "--escalations", esc, "--run-id", "fm-res-1786", "--agent-id", "sub-uuid"]);
     assert.equal(r.status, 0, `ff should succeed: ${r.stdout}${r.stderr}`);
 
-    // The resolution record is appended (the escalation request's "endsEarly: ff-success" half).
+    // The resolution record is appended (the escalation-resolution signal for ff-starvation relief).
     const resLine = JSON.parse(fs.readFileSync(esc, "utf8").trim());
-    assert.equal(resLine.event, "quiet-window-resolved");
+    assert.equal(resLine.event, "ff-escalation-resolved");
     assert.equal(resLine.taskId, "ac62-res");
     assert.equal(resLine.runId, "fm-res-1786", "resolution carries the caller runId");
     assert.equal(resLine.agentId, "sub-uuid", "resolution carries the caller agentId");
@@ -327,9 +328,9 @@ test("ff failure attempt increments — second failure writes attempt 2 (anti-li
 // ── SPEC §7 anti-livelock trigger (gap-ff-livelock-trigger-no-action, attempt >= 3) ─────────────────
 // The retry record IS the anti-livelock data (§7): "同一任务 ff 失败 ≥3 次 才谈防活锁". Attempts 1-2
 // stay the plain retry (exit 1). Attempt >= 3 escalates (exit 3 — DISTINCT from 1 and 2), writes a
-// DISTINCT escalation record (with the SPEC §7 quiet-window request), and STOPS automatic retry.
+// DISTINCT escalation record, and STOPS automatic retry.
 
-test("anti-livelock — attempt 1 and 2 are plain retries (exit 1, NO escalation); attempt 3 escalates (exit 3 + escalation record + quiet-window request)", () => {
+test("anti-livelock — attempt 1 and 2 are plain retries (exit 1, NO escalation); attempt 3 escalates (exit 3 + escalation record + stop-retry)", () => {
   const dir = makeTmp("llock");
   const st = stateDir("llock");
   try {
@@ -362,8 +363,7 @@ test("anti-livelock — attempt 1 and 2 are plain retries (exit 1, NO escalation
     assert.equal(esRec.event, "ff-escalation");
     assert.equal(esRec.taskId, "llock-a");
     assert.equal(esRec.attempt, 3);
-    assert.equal(esRec.action, "request-quiet-window-and-stop-retry");
-    assert.equal(esRec.quietWindow.requested, true, "the escalation carries the SPEC §7 quiet-window request");
+    assert.equal(esRec.action, "stop-retry", "the escalation stops automatic retry (no quiet-window request)");
     assert.match(esRec.developHead, /^[0-9a-f]{40}$/, "escalation records the develop head at failure time");
     // Lock events are still written on the escalation path (the escalation is a real ff attempt).
     const lines = fs.readFileSync(events, "utf8").trim().split("\n").filter(Boolean);
@@ -435,8 +435,7 @@ test("anti-livelock — ac63 4 real retry samples replay (11:55/12:39/12:42/13:5
     const esRec = JSON.parse(fs.readFileSync(esc, "utf8").trim());
     assert.equal(esRec.taskId, "gap-ac63-judgment2-no-carrier");
     assert.equal(esRec.attempt, 5, "the escalation records attempt 5 (4 prior real failures + 1)");
-    assert.equal(esRec.action, "request-quiet-window-and-stop-retry");
-    assert.equal(esRec.quietWindow.requested, true);
+    assert.equal(esRec.action, "stop-retry");
   } finally {
     cleanup(dir);
     cleanup(st);
@@ -472,7 +471,7 @@ test("anti-livelock — ac80 2 real retry samples replay: a 3rd ff failure (the 
     assert.equal(r.status, 3, "the 3rd ff failure (2 real prior failures + 1) escalates — the AC80 gap is closed");
     const esRec = JSON.parse(fs.readFileSync(esc, "utf8").trim());
     assert.equal(esRec.attempt, 3, "escalation records attempt 3 (2 prior + 1)");
-    assert.equal(esRec.quietWindow.requested, true);
+    assert.equal(esRec.action, "stop-retry");
   } finally {
     cleanup(dir);
     cleanup(st);

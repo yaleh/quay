@@ -1255,7 +1255,7 @@ test("computeUnresolvedEscalationTaskIds — an ff-escalation without a newer re
   const recs = [
     { taskId: "gap-a", event: "ff-escalation", epoch: 100 },
     { taskId: "gap-b", event: "ff-escalation", epoch: 100 },
-    { taskId: "gap-b", event: "quiet-window-resolved", epoch: 200 },
+    { taskId: "gap-b", event: "ff-escalation-resolved", epoch: 200 },
   ];
   const ids = computeUnresolvedEscalationTaskIds(recs);
   assert.ok(ids.has("gap-a"), "unresolved escalation ⇒ still starved");

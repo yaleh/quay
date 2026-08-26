@@ -949,11 +949,16 @@ export async function startKind(
 
   // spawn detached supervisor（Node 侧等价原语：spawn(detached:true, stdio:["ignore",fd,fd]).unref()
   // ≡ setsid+nohup）。supervisor 的 cmdline 载体 = 本 kernel 的绝对路径（⛔ 非 worktree 路径）。
+  // ⛔ detached supervisor 绝不可继承调用者的 stdout/stderr：fallback 到 fd 2（stderr）会让 spawnSync
+  // 调用者等不到 pipe EOF 而 ETIMEDOUT（gap-driver-runtime-test-fixture-driver-not-reclaimed：测试
+  // fixture 的 root 无 .quay ⇒ openSync 失败 ⇒ fallback 2 ⇒ start 挂死 ⇒ t.after 回收永不执行）。
+  // 先 mkdir .quay 使 supLogFd 能开成真实文件；开失败仍退回 /dev/null，⛔ 不退回 stderr。
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   let supLogFd: number;
   try {
     supLogFd = fs.openSync(st.supervisorLog, "a");
   } catch {
-    supLogFd = 2;
+    supLogFd = fs.openSync("/dev/null", "w");
   }
   const supArgs = [
     process.execPath, "--experimental-strip-types", kernelSelfPath(), "__supervise",

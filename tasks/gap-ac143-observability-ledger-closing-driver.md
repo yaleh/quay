@@ -1,7 +1,7 @@
 ---
 id: gap-ac143-observability-ledger-closing-driver
 title: AC143 观测/账本/收尾面驱动化——outer 纯机械 A/B 段收进 driver（新 kind 或并入既有 kind）
-status: ready
+status: needs-human
 labels:
   - gap
   - feature
@@ -38,3 +38,9 @@ outer 机械 A/B 段收进 driver kind；AC1/AC2/AC3 全勾；outer 执行核对
 - plugin/scripts/promotion-driver-launch.sh（registry 表加行）
 - orchestration/orchestrator-tick-core.md（对应段标已驱动化）
 - tasks/gap-ac143-observability-ledger-closing-driver.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-26T14:40:12.426Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

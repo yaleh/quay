@@ -9,11 +9,12 @@
 // long run of short files — the classic makespan-minimizing schedule.
 //
 // The duration source is the EXISTING per-file wall-clock carrier — `.quay/verification-round.jsonl`
-// `perFile[].durationMs` — NOT a new measurer. A rolling average of the most recent `--rounds`
-// records that carry a `perFile` array smooths single-round noise; a file absent from history sorts
-// with duration 0 (unknown ⇒ LAST, but still runs). The reorder is scheduling-only: every input file
-// is emitted EXACTLY once, only the ORDER changes, so a bug here can never drop a test ⇒
-// pass/fail-neutral ⇒ NOT a hub file (suite-bucket-hub-list.ts).
+// `perFile[].durationMs` — NOT a new measurer. A PER-FILE rolling average of each file's own last
+// `--rounds` appearances smooths single-round noise (NOT the last `--rounds` records — those may all
+// come from a different bucket and omit this file, leaving its real duration invisible); a file
+// absent from history sorts with duration 0 (unknown ⇒ LAST, but still runs). The reorder is
+// scheduling-only: every input file is emitted EXACTLY once, only the ORDER changes, so a bug here
+// can never drop a test ⇒ pass/fail-neutral ⇒ NOT a hub file (suite-bucket-hub-list.ts).
 //
 // FAIL-OPEN: no perFile history, an unreadable carrier, or any parse failure ⇒ the input list is
 // emitted UNCHANGED (current behavior). The caller (scripts/test.sh) additionally refuses a
@@ -24,11 +25,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
-
-interface PerFileRec {
-  file: string;
-  durationMs: number;
-}
 
 /** Strip the worktree-root prefix (same 口径 as measure-trend-check.normalizePerFileKey) and then a
  *  plain repo-root prefix, so BOTH a main-checkout absolute path and a worktree absolute path
@@ -60,8 +56,11 @@ function parseArgs(argv: string[]): { root: string; rounds: number } {
   return { root: path.resolve(root), rounds };
 }
 
-/** Read the last `rounds` records that carry a `perFile` array from the carrier, returning a
- *  rolling-average map repo-rel-key → average durationMs. Returns an empty map on any failure
+/** Read a PER-FILE rolling average from the carrier: for each repo-rel key, average that file's own
+ *  LAST `rounds` durations (the carrier is append-ordered, so the last `rounds` entries in the
+ *  per-key list are its most recent appearances). Immune to a lookback window whose most recent
+ *  `rounds` records all come from a DIFFERENT bucket and so omit this file entirely — the file's
+ *  real duration is still found in its own history. Returns an empty map on any failure
  *  (fail-open — the caller then keeps the original order). */
 export function loadDurationAverages(carrier: string, root: string, rounds: number): Map<string, number> {
   const avg = new Map<string, number>();
@@ -71,8 +70,7 @@ export function loadDurationAverages(carrier: string, root: string, rounds: numb
   } catch {
     return avg; // no carrier / unreadable ⇒ no reordering signal
   }
-  const acc = new Map<string, { sum: number; n: number }>();
-  const perFileRounds: PerFileRec[][] = [];
+  const byFile = new Map<string, number[]>(); // repo-rel key → that file's durations, append order
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     let rec: any;
@@ -82,29 +80,24 @@ export function loadDurationAverages(carrier: string, root: string, rounds: numb
       continue; // tolerate a malformed appended line
     }
     if (!rec || !Array.isArray(rec.perFile) || rec.perFile.length === 0) continue;
-    const files: PerFileRec[] = [];
     for (const p of rec.perFile) {
       const dur = Number(p?.durationMs);
       const file = p?.file;
       if (typeof file !== "string" || !file) continue;
       if (!Number.isFinite(dur) || dur <= 0) continue;
-      files.push({ file, durationMs: dur });
-    }
-    if (files.length > 0) perFileRounds.push(files);
-  }
-  if (perFileRounds.length === 0) return avg;
-  // Most recent `rounds` perFile-bearing records (the carrier is append-ordered).
-  const recent = perFileRounds.slice(-rounds);
-  for (const files of recent) {
-    for (const { file, durationMs } of files) {
       const key = repoRelKey(file, root);
-      const e = acc.get(key) ?? { sum: 0, n: 0 };
-      e.sum += durationMs;
-      e.n += 1;
-      acc.set(key, e);
+      const durs = byFile.get(key);
+      if (durs) durs.push(dur);
+      else byFile.set(key, [dur]);
     }
   }
-  for (const [key, { sum, n }] of acc) avg.set(key, sum / n);
+  // Per-key rolling average over that file's LAST `rounds` appearances (NOT the last `rounds`
+  // records — those may all come from another bucket and omit this file).
+  for (const [key, durs] of byFile) {
+    const recent = durs.slice(-rounds);
+    const sum = recent.reduce((a, b) => a + b, 0);
+    avg.set(key, sum / recent.length);
+  }
   return avg;
 }
 
