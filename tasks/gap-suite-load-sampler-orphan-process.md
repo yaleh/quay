@@ -1,7 +1,7 @@
 ---
 id: gap-suite-load-sampler-orphan-process
 title: suite-load-sampler 孤儿进程残留——宿主结束后仍写数十分钟-小时，污染负载指标
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
