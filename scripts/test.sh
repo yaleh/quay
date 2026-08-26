@@ -1431,7 +1431,7 @@ elif [ "${1:-}" = "--buckets" ]; then
     _lpt_out="$(printf '%s\n' "${files[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-lpt-order.ts" --root "${main_root}" --rounds "${QUAY_TEST_LPT_ROUNDS:-3}")" || _lpt_out=""
     if [ -n "${_lpt_out}" ] && [ "$(printf '%s\n' "${_lpt_out}" | wc -l)" -eq "${#files[@]}" ]; then
       mapfile -t files <<< "${_lpt_out}"
-      echo "scripts/test.sh: lpt-order: M bucket reordered (${#files[@]} files; first=$(basename "${files[0]}"))" >&2
+      echo "scripts/test.sh: lpt-order: bucket file list reordered (${#files[@]} files; first=$(basename "${files[0]}"))" >&2
     fi
   fi
   # FULL static checks (verification-grade — no 降频), then the bucket test subset.

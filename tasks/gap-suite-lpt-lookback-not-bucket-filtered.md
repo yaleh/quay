@@ -1,7 +1,7 @@
 ---
 id: gap-suite-lpt-lookback-not-bucket-filtered
 title: "LPT 滚动均值不按 bucket 过滤——P 桶轮次 lookback 被 M 桶占满 ⇒ P-only 文件查不到历史值被 `?? 0` 排到末尾（违反 LPT，生产 #595/#599 实证）"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -26,9 +26,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，lookback 跨 bucket 免疫，负控制）：「lookback 最近 N 条全来自另一 bucket」场景下，P-only 文件（真实 duration 90-260s）在均值表里查到非零历史值、不被 `?? 0` 排末尾——**当前实现先复现假**（文件被当 0 排末尾），**修复后转真**（按真实 duration 排）；（⛔ 修复后仍查不到 ⇒ 假）。
-- [ ] AC2（能取假，生产回放）：用生产 `verification-round.jsonl` 的 `#599`（buckets=P，lookback=[596,597,598] 全 M）回放——修复后 `packages/quay/test/*` 长文件不再被排到 35%-65% 位置，按 duration 提前；（⛔ 仍被排末尾 ⇒ 假）。
-- [ ] AC3（能取假，不回归）：正常/含 full 的 lookback（`#583` 对照：lookback=[580(M),581(M),582(full)]）排序不回归——仍按 duration 降序、ties 保持原序（`a.i-b.i` tiebreaker）；（⛔ 排序退化 ⇒ 假）。
+- [x] AC1（能取假，lookback 跨 bucket 免疫，负控制）：「lookback 最近 N 条全来自另一 bucket」场景下，P-only 文件（真实 duration 90-260s）在均值表里查到非零历史值、不被 `?? 0` 排末尾——**当前实现先复现假**（文件被当 0 排末尾），**修复后转真**（按真实 duration 排）；（⛔ 修复后仍查不到 ⇒ 假）。
+- [x] AC2（能取假，生产回放）：用生产 `verification-round.jsonl` 的 `#599`（buckets=P，lookback=[596,597,598] 全 M）回放——修复后 `packages/quay/test/*` 长文件不再被排到 35%-65% 位置，按 duration 提前；（⛔ 仍被排末尾 ⇒ 假）。
+- [x] AC3（能取假，不回归）：正常/含 full 的 lookback（`#583` 对照：lookback=[580(M),581(M),582(full)]）排序不回归——仍按 duration 降序、ties 保持原序（`a.i-b.i` tiebreaker）；（⛔ 排序退化 ⇒ 假）。
 
 ## Definition of Done
 
@@ -37,6 +37,6 @@ extra:
 ## Touches
 
 - plugin/scripts/suite-lpt-order.ts（loadDurationAverages 逐文件/bucket 过滤）
-- plugin/scripts/suite-lpt-order.test.mjs（lookback 跨 bucket 负控制 + 生产回放）
+- plugin/test/suite-lpt-order.test.mjs（lookback 跨 bucket 负控制 + 生产回放）
 - scripts/test.sh（:1401 日志文案 bucket-agnostic 顺手改）
 - tasks/gap-suite-lpt-lookback-not-bucket-filtered.md（自身）
