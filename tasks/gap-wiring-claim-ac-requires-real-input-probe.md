@@ -1,7 +1,7 @@
 ---
 id: gap-wiring-claim-ac-requires-real-input-probe
 title: 「实现了但没接线」族无检查器强制——接线/可达性声明 AC 不要求真实输入探针，且已有 prod-data-audit / wiring-coverage-check 两检查器自身也没接线（≥17 实例/22 天 ≈ 0.77/天）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -36,10 +36,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，检测+回溯命中）：活的闸对「含接线声明但无真实输入探针」的 AC 报红——用两条历史样本之一干跑命中：`gap-readdepends-on-indented-extra-depends_on`（AC1 写「`readDependsOn` 认到缩进形态、10 条命中任务都能被读到」，验收测试却是 `readDependsOn("depends_on: [a, b]\n")` 字符串直调，10 条真实文件一次没跑）或 `gap-ac146-human-interface-explicit-owner`（AC2 写「`.quay/promotion-outcome.jsonl` 已有 3 条现成样本」，测试却把样本内容抄进 mkdtemp 合成文件，真文件从未读）；（⛔ 两样本都不报红 ⇒ 假；恒绿不算）。
-- [ ] AC2（能取假，负控制不误伤）：接线声明 AC 点名了真实输入探针（真实生产载体记录数 / 真实 argv / 真机回放）的任务不报红；（⛔ 误伤 ⇒ 假）。
-- [ ] AC3（能取假，边界）：纯函数/纯解析任务（无接线声明、无生产载体）不报红——判据只对「含接线声明 AC」子集生效，不是「每条任务都要 P 类 AC」；（⛔ 恒红形式主义 ⇒ 假）。
-- [ ] AC4（能取假，自身接线）：检查器接进活的闸（`artifactsComplete` / `task-contract-check.ts`），`grep scripts/test.sh` + `grep ci.yml`（及 import 图）≥1 命中——负控制：同一谓词查 `instrument-failure-check` ≥1 命中证明谓词没写错；（⛔ 0 命中（再造独立 audit 脚本、未进活闸）⇒ 假）。
+- [x] AC1（能取假，检测+回溯命中）：活的闸对「含接线声明但无真实输入探针」的 AC 报红——用两条历史样本之一干跑命中：`gap-readdepends-on-indented-extra-depends_on`（AC1 写「`readDependsOn` 认到缩进形态、10 条命中任务都能被读到」，验收测试却是 `readDependsOn("depends_on: [a, b]\n")` 字符串直调，10 条真实文件一次没跑）或 `gap-ac146-human-interface-explicit-owner`（AC2 写「`.quay/promotion-outcome.jsonl` 已有 3 条现成样本」，测试却把样本内容抄进 mkdtemp 合成文件，真文件从未读）；（⛔ 两样本都不报红 ⇒ 假；恒绿不算）。
+- [x] AC2（能取假，负控制不误伤）：接线声明 AC 点名了真实输入探针（真实生产载体记录数 / 真实 argv / 真机回放）的任务不报红；（⛔ 误伤 ⇒ 假）。
+- [x] AC3（能取假，边界）：纯函数/纯解析任务（无接线声明、无生产载体）不报红——判据只对「含接线声明 AC」子集生效，不是「每条任务都要 P 类 AC」；（⛔ 恒红形式主义 ⇒ 假）。
+- [x] AC4（能取假，自身接线）：检查器接进活的闸（`artifactsComplete` / `task-contract-check.ts`），`grep scripts/test.sh` + `grep ci.yml`（及 import 图）≥1 命中——负控制：同一谓词查 `instrument-failure-check` ≥1 命中证明谓词没写错；（⛔ 0 命中（再造独立 audit 脚本、未进活闸）⇒ 假）。
 
 ## Definition of Done
 
@@ -47,8 +47,30 @@ extra:
 
 ## Touches
 
-- plugin/scripts/wiring-coverage-check.ts（复用其声明抽取启发式，接入活闸）
-- plugin/scripts/prod-data-audit.ts（若冗余则并/废，落笔方定）
-- plugin/scripts/ready-pool-check.ts（artifactsComplete 接线点）或 plugin/scripts/task-contract-check.ts
-- plugin/test/（接线声明-无探针 报红 / 真探针-负控制 / 边界 测试）
+- plugin/scripts/wiring-coverage-check.ts（复用其声明抽取启发式，导出 backtickIdentifiers/WIRING_VERB_RE/EVIDENCE_RE，新增 checkWiringClaimAcProbe + WIRING_REACHABILITY_DECL_RE + REAL_INPUT_PROBE_RE）
+- plugin/scripts/task-contract-check.ts（scanTaskText 接线点：新增 check 8 checkWiringClaimAcProbeGated + readWiringClaimAcProbeBaseline + 祖父清单 ceiling-breach）
+- plugin/test/task-contract-check.test.mjs（接线声明-无探针 报红 / 真探针-负控制 / 边界 测试）
+- docs/analysis/wiring-claim-ac-probe-baseline.md（新增 shrink-only 祖父清单，2 条历史实例）
 - tasks/gap-wiring-claim-ac-requires-real-input-probe.md（自身）
+
+## Evidence
+
+**AC1（回溯命中 + 全仓校准）**：`checkWiringClaimAcProbe` 对两条历史样本各报 1 条 `wiring-claim-ac-no-probe`；全仓 405 任务校准，窄判据（反引号 + `N 条` + 读到/读取/样本/现成）恰命中这两条、零误伤：
+
+```
+bad1 "…readDependsOn 认到 extra: 缩进下的 depends_on（10 条命中任务都能被读到）…" → 1 finding
+bad2 "….quay/promotion-outcome.jsonl 已有 3 条现成样本…" → 1 finding
+FULL STORE flagged: 2 tasks
+  gap-ac146-human-interface-explicit-owner.md (1)
+  gap-readdepends-on-indented-extra-depends-on.md (1)
+```
+
+**AC2（负控制）**：真实探针 AC 不报红（`…实读主检出 store…恰 2 条…`、`用生产 verification-round.jsonl 的 #599…回放` → 0 finding）。
+
+**AC3（边界）**：纯函数/纯解析 AC（`parseFoo 对缩进输入返回…`、`6 条旧路径模式零命中（grep）`）→ 0 finding。
+
+**AC4（自身接线）**：`checkWiringClaimAcProbe` 由 `task-contract-check.ts` import 并接入 `scanTaskText`（check 8，contract 段外、与 check 6/7 同构）；`task-contract-check` 已由 `runner-static-gate.ts` 的 `run_static_checks` 以 `--no-block` 调用（`run_checker "task-contract-check" …`），`runner-static-gate.ts` 由 `scripts/test.sh` source。负控制：`grep -c instrument-failure-check scripts/test.sh` = 2（谓词有效）；本检查经 import 图 `scripts/test.sh → runner-static-gate.ts → task-contract-check.ts → wiring-coverage-check.ts` 可达。
+
+**祖父清单**：`docs/analysis/wiring-claim-ac-probe-baseline.md`（baseline-count: 2）列出两条历史实例为 shrink-only 祖父债务；加清单后 `task-contract-check --json` 的 `wiring-claim-ac-no-probe` 违规 = 0（祖父生效）、`wiringClaimAcProbeCeilingBreach` = false。
+
+**测试**：`node --test --experimental-strip-types plugin/test/task-contract-check.test.mjs` → tests 61 / pass 60 / fail 0 / skipped 1（skip = real-store smoke，需 `QUAY_TEST_REAL_STORE=1`）；新增 8 条 check 8 测试全绿。`npx tsc --noEmit -p tsconfig.json` → exit 0。

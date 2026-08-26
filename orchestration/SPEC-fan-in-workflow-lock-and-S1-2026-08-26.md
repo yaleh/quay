@@ -135,7 +135,7 @@ suite-red / infra-hang 的语义分类）。
 | `gap-fan-in-ff-ref-update-detach-develop`（ff 改 ref 更新）| **互补不重复**：它解决「clean tree 阻塞 ff」，不解决「develop 前进」。两者可并存（ref 更新 + fan-in 锁）。 |
 | `gap-fan-in-failure-semantic-subagent`（outcome_class 分类）| **部分重叠**：ff-race-loss 这个 class 与 fan-in 锁「二选一」（§3 约束 5）。suite-red / infra-hang 分类仍保留。 |
 | `gap-suite-concurrency-S-two-source-divergence`（cd72672e4）| **前置相关**：本 SPEC 的 S=1 会经过同一套「两处读 S」的链，先修分叉（统一读 `.concurrency` 文件）再落地 S=1。 |
-| `gap-suite-serial-lowconc-classification-recheck`（AC3 buckets 取锁）| **前置相关**：fan-in 锁假设 suite 锁在 buckets 路径也生效（AC3 已写只差落地），否则 buckets suite 绕过 suite 锁。 |
+| `gap-suite-serial-lowconc-classification-recheck`（AC3 buckets 取锁）| **落地后配套，⛔ 非前置**（2026-08-26 outer 证否：它自身 ff-race 饿死，而 fan-in 锁正是消 ff-race 的解药——设硬前置制造 chicken-and-egg）。fan-in 锁核心（锁 merge→suite→ff 整段）不依赖 AC3，它已串行化所有 fan-in；仅 S=1 对「fan-in 外 buckets suite」的边缘约束依赖 AC3（否则绕过 suite 锁）。故 AC3 是 fan-in 锁消 ff-race 后的补全，落地顺序见 §5。 |
 
 ---
 
@@ -143,8 +143,9 @@ suite-red / infra-hang 的语义分类）。
 
 ```
 先：gap-suite-concurrency-S-two-source-divergence（统一 S 读取，S=1 才有单一来源可改）
-     gap-suite-serial-lowconc-classification-recheck AC3（buckets 取锁，suite 锁才覆盖全路径）
 再：本 SPEC 的 fan-in 锁 + S=1（落地时显式修订 AC4 + 固定获取顺序 + driver 看门狗）
+    ⇒ fan-in 锁消 ff-race
+后：gap-suite-serial-lowconc-classification-recheck AC3（buckets 取锁）——不再饿死后落地，补全 S=1 边缘约束
 并：同步裁决 gap-fan-in-failure-semantic-subagent 的 ff-race-loss 部分去留（§3 约束 5）
 ```
 

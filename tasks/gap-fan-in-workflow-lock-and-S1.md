@@ -12,7 +12,6 @@ extra:
   schema: execution
   depends_on:
     - gap-suite-concurrency-S-two-source-divergence
-    - gap-suite-serial-lowconc-classification-recheck
 ---
 **type:** execution
 
