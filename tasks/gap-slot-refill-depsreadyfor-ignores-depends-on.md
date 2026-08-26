@@ -1,7 +1,7 @@
 ---
 id: gap-slot-refill-depsreadyfor-ignores-depends-on
 title: slot-refill.ts depsReadyFor 只读 parent 不读 depends_on——worker 派发依赖闸对 depends_on 结构上失效（与 ready-pool-check.ts 同名函数语义不一致）
-status: done
+status: ready
 labels:
   - gap
   - defect
