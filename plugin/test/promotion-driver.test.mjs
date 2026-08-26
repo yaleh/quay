@@ -76,6 +76,9 @@ import { resourceGateCheck as workerResourceGateCheck, isHalted as workerIsHalte
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DRIVER = path.resolve(__dirname, "..", "scripts", "promotion-driver.ts");
+// launchArgv（经 policy 解析 kind → profile）需要一个带 .quay/profiles.yml + .claude/launch.settings.json
+// 的 root——L3 后默认 fix-worker argv 不再 `bash quay-launch.sh`，改用真实 repo root 读真 profiles.yml。
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
 // The REAL ready-pool-check lives in the worktree's plugin/scripts (not under the temp task root), so
 // the AC2 test injects it via --ready-pool-cmd pointing at this path — the same seam worker-driver's
 // resident-loop tests use. splitArgs splits on whitespace, so both paths here are space-free.
@@ -527,13 +530,14 @@ test("buildFixWorkerPrompt — task id + structured missing list, ⛔ not a pros
   assert.ok(p.includes("structured_missing:"), "the prompt names the structured list (not 'go look what's wrong')");
 });
 
-test("buildFixWorkerArgv — default quay-launch.sh fix-worker; override prefix appends the prompt as the last arg", () => {
-  const def = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], "/r");
-  assert.deepEqual(def.slice(0, 4), ["bash", "/r/plugin/scripts/quay-launch.sh", "fix-worker", "-p"],
-    "AC140-1: fix worker routes through quay-launch.sh (not bare claude -p)");
-  assert.ok(def[4].includes("fourArtifacts=false missing=[dod]"), "the prompt is the argv payload");
+test("buildFixWorkerArgv — default policy-resolved fix-worker; override prefix appends the prompt as the last arg", () => {
+  const def = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], REPO_ROOT);
+  assert.equal(def[0], "claude-fjdac",
+    "AC140-1/L3: fix worker resolves via policy to the profile launcher (⛔ bash quay-launch.sh)");
+  assert.equal(def[def.indexOf("-n") + 1], "quay-fix-worker");
+  assert.ok(def[def.length - 1].includes("fourArtifacts=false missing=[dod]"), "the prompt is the argv payload");
 
-  const over = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], "/r", "node -e capture");
+  const over = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], REPO_ROOT, "node -e capture");
   assert.deepEqual(over.slice(0, 3), ["node", "-e", "capture"]);
   assert.ok(over[over.length - 1].includes("fourArtifacts=false missing=[dod]"), "override keeps the prompt as the last arg");
 });

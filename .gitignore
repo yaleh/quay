@@ -43,6 +43,10 @@ packages/quay/plugin/
 **/.quay/gate-events.jsonl
 **/.quay/supervisor-bus-ledger.jsonl
 **/.quay/inner-wakeup-heartbeat-refusals.jsonl
+# serve-send.ts runtime message-delivery receipts (SendMessage cross-session delivery record) — runtime
+# state, never git-tracked; same gitignored runtime-state family as gate-events.jsonl. A live file here
+# dirtied the checkout and made fan-in-ff-merge refuse (unrelated to the blocked task's code).
+**/.quay/message-receipts.jsonl
 # gap-ac115-spec-phase1-drive-single-worker (2026-08-22): the worker driver's per-task outcome record
 # (.quay/worker-outcome.jsonl) — runtime state, one line per driven task (SPEC-worker-driven-inner §4③:
 # outer reads it for cross-task checks, never git-tracked). Same gitignored runtime-state family as
@@ -267,6 +271,27 @@ orchestration/inner-idle-log.jsonl
 # written by full-suite-runner.ts after every suite via measure-trend-check.ts). Same live
 # runtime-state family as verification-round.jsonl / full-suite.log; never committed.
 **/.quay/measure-history.jsonl
+# gap-quay-runtime-files-tracked-but-shouldnt (2026-08-25): 5 runtime products under .quay/ were
+# accidentally TRACKED (git rm --cached'd in the same gap). test.sh.lock (scripts/test.sh
+# single-flight lock), full-suite-state.json.suitefix-bak (suite-fix backup), no-code-caller-triage.jsonl
+# + no-code-caller-triage-rescan.jsonl (gap-ac111 triage dumps) — machine-local runtime state /
+# one-off task outputs,
+#
+# 2026-08-26 更正 (gap-suite-bucket-reattribution-untracked-regression): 该批原列 5 个, 其中
+# suite-bucket-reattribution.jsonl 是误分类 —— 它不是运行时产物, 而是 AC121 的一次性判定记录
+# (230 行 {file,judgment,mechanism,signal}), 被 plugin/scripts/suite-bucket-select.ts:45/:144 当
+# 输入读入, 且 plugin/test/suite-bucket-select.test.mjs:52 断言 reattr.size > 0。去跟踪后
+# git worktree add 出的 worktree 结构上拿不到它 => 每个 worktree 的 suite 必红 (08-26 01:14 起实测 4 次)。
+# 已恢复跟踪、从本清单移除。
+# 判据教训: 判「运行时产物 vs 数据资产」不能只看「在 .quay/ 下 + 像 jsonl」,
+#   必须查【有没有代码把它当输入读】—— 有读取侧消费者的就是数据资产。
+# same family as full-suite-state.json / verification-round.jsonl; never committed. The 3 .quay/ files
+# that ARE deliberately tracked (profiles.yml / red-on-omission-manifest.md /
+# outer-inflight-coordination-20260812.md) stay tracked — reasons in the task Evidence.
+**/.quay/test.sh.lock
+**/.quay/full-suite-state.json.suitefix-bak
+**/.quay/no-code-caller-triage.jsonl
+**/.quay/no-code-caller-triage-rescan.jsonl
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/

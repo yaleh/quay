@@ -143,9 +143,10 @@ export function extractDeliverySettings(jsonText: string): RecipientSettings | n
 
 /**
  * Derive delivery settings from a process argv (`/proc/<pid>/cmdline` split on NUL). Order:
- * `--dangerously-skip-permissions` ⇒ bypassPermissions; else `--settings <path>` ⇒ read that file;
- * else the global `~/.claude/settings.json`. `readSettingsFile` is injectable for tests. null ⇒ the
- * recipient's settings could not be determined (the caller maps that to held, never to delivered).
+ * `--dangerously-skip-permissions` ⇒ bypassPermissions; else `--settings <path-or-inline-JSON>` ⇒
+ * read that file (a path) or parse it directly (an inline JSON blob); else the global
+ * `~/.claude/settings.json`. `readSettingsFile` is injectable for tests. null ⇒ the recipient's
+ * settings could not be determined (the caller maps that to held, never to delivered).
  */
 export function deliverySettingsFromArgv(
   argv: string[],
@@ -157,8 +158,19 @@ export function deliverySettingsFromArgv(
   }
   const si = argv.indexOf("--settings");
   if (si !== -1 && si + 1 < argv.length) {
-    const text = readSettingsFile(argv[si + 1]);
-    if (text != null) return extractDeliverySettings(text);
+    const settingsArg = argv[si + 1];
+    // `--settings` accepts a file path OR an inline JSON blob (quay-launch.sh:121 — the manager/
+    // worker form carries `--settings {json...}` with no file path). A value whose first non-space
+    // char is `{` is inline JSON and is parsed directly — never fed to `readSettingsFile` as if it
+    // were a path (fs.readFileSync on that JSON text ENOENTs ⇒ silent null ⇒ 100% held; the defect).
+    // Same inline-json detection convention as orphan-session-check.ts classifyArgv.
+    if (settingsArg.trimStart().startsWith("{")) {
+      const settings = extractDeliverySettings(settingsArg);
+      if (settings != null) return settings;
+    } else {
+      const text = readSettingsFile(settingsArg);
+      if (text != null) return extractDeliverySettings(text);
+    }
   }
   const global = readSettingsFile(path.join(home, ".claude", "settings.json"));
   if (global != null) return extractDeliverySettings(global);
