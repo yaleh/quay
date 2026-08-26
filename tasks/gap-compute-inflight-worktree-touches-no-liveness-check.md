@@ -41,9 +41,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，死 worktree 不计入在飞）：`computeInFlightWorktreeTouches` 对「零活进程 + 超 N 分钟无新提交」的 worktree 不计入在飞（不占用其 Touches）；（⛔ 死 worktree 仍计入 ⇒ 假）。
-- [ ] AC2（能取假，负控制解堵）：造一个死 worktree（有 Touches + 零活进程 + 无新提交），`slot-refill` 不再因其 Touches 而 defer 候选（候选不再被死 worktree 挡，recommended 非空）；（⛔ 仍被挡 / recommended 空 ⇒ 假）。
-- [ ] AC3（能取假，不误伤活 worktree）：有活进程的 worktree 仍计入在飞（不被误判为死、不被排除）；（⛔ 活 worktree 被误排除 ⇒ 假）。
+- [x] AC1（能取假，死 worktree 不计入在飞）：`computeInFlightWorktreeTouches` 对「零活进程 + 超 N 分钟无新提交」的 worktree 不计入在飞（不占用其 Touches）；（⛔ 死 worktree 仍计入 ⇒ 假）。
+- [x] AC2（能取假，负控制解堵）：造一个死 worktree（有 Touches + 零活进程 + 无新提交），`slot-refill` 不再因其 Touches 而 defer 候选（候选不再被死 worktree 挡，recommended 非空）；（⛔ 仍被挡 / recommended 空 ⇒ 假）。
+- [x] AC3（能取假，不误伤活 worktree）：有活进程的 worktree 仍计入在飞（不被误判为死、不被排除）；（⛔ 活 worktree 被误排除 ⇒ 假）。
 
 ## Definition of Done
 
