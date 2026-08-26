@@ -1,7 +1,7 @@
 ---
 id: gap-suite-pure-execution-900s-optimization
 title: full-bucket 纯执行时间超 900s（人裁触发条件已成立，4/6 轮 998.5–1224.5s）——触发测试优化
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -10,6 +10,8 @@ extra:
   schema: execution
 ---
 **type:** execution
+
+> **⛔ 暂持 needs-human（2026-08-26）**：AC1 依赖四个上游落地后重取基线，但 `depends_on:` 对 worker 派发结构上不生效（`slot-refill.ts` depsReadyFor 只读 parent、不读 depends_on——与 `ready-pool-check.ts` 同名函数语义不一致，manager 读码核实）⇒ 用 needs-human 作唯一生效的闸（promotion-driver 不自动晋 needs-human）。四个上游（gap-retire-governance-group-merge-into-bucket / gap-suite-serial-lowconc-classification-recheck / gap-suite-move-27-evidenced-files-out-serial-lowconc / gap-suite-split-long-multi-test-files）全部落地后，由 outer 翻回 ready。
 
 ## Proposal
 
