@@ -64,5 +64,8 @@ extra:
 
 - plugin/scripts/（full-suite 锁语义：持有上限 / 独立锁 + outcome 记录加 lock_hold/lock_wait 字段）
 - scripts/test.sh（锁获取/释放 + T 分钟自超时——⛔ 实现在持锁进程自身，非 worker-driver 杀）
+- plugin/test/pre-verified-round-record.test.mjs（lock_hold_ms 入 pre-verified-round-record 断言）
+- plugin/test/resource-gate.test.mjs（lock-hold cap / watchdog / lock_hold_ms 标记断言）
+- plugin/test/worker-driver.test.mjs（computeOutcome lock_wait_ms/lock_hold_ms + readLockMetricsForRun 断言）
 - plugin/scripts/worker-outcome 记录（lock_hold/lock_wait 分段）
 - tasks/gap-suite-lock-starvation-long-validation-hold.md（自身）
