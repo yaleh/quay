@@ -1,7 +1,7 @@
 ---
 id: gap-driver-runtime-test-fixture-driver-not-reclaimed
 title: driver-runtime.test.mjs 等测试 spawn worker-driver 进 /tmp/dr-* fixture 后不回收——16h 僵尸（PPID=1、0% CPU）污染 node_count 读数
-status: ready
+status: done
 labels:
   - gap
   - defect
