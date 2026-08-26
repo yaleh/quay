@@ -1,7 +1,7 @@
 ---
 id: gap-suite-bucket-reattribution-untracked-regression
 title: suite-bucket-reattribution.jsonl 被误分类为运行时产物去跟踪——它是 AC121 的 230 行判定记录（数据资产），去跟踪后每个 worktree suite 必红（4 次红实证）
-status: done
+status: ready
 labels:
   - gap
   - defect
