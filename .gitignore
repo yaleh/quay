@@ -84,6 +84,18 @@ packages/quay/plugin/
 **/.quay/worker-driver-liveness.log
 **/.quay/worker-driver.stop
 **/.quay/worker-driver-inflight.pid
+# gap-ac144-quality-gate-shape-separated-driver (2026-08-26): the quality-gate driver's production
+# launch state — round heartbeat (unconditional per-loop record of B15/B17 routine facts) +
+# supervisor state files + control state (halt/control plane quality-control.json). All runtime
+# state, never git-tracked; same gitignored family as promotion/worker round+control.
+**/.quay/quality-round.jsonl
+**/.quay/quality-control.json
+**/.quay/quality-driver.pid
+**/.quay/quality-driver-supervisor.pid
+**/.quay/quality-driver.log
+**/.quay/quality-driver-supervisor.log
+**/.quay/quality-driver-liveness.log
+**/.quay/quality-driver.stop
 # gap-outer-message-bus-needs-file-inbox-transport (2026-08-09): the OUTER target's file-inbox
 # (.quay/outer-inbox/) is runtime message state (SPEC-inbox-service D1 — 收件箱不进 git 跟踪,
 # 不假设内容持久). Same gitignored runtime-state family as gate-events.jsonl — a real manager→outer

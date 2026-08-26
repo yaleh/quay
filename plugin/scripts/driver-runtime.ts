@@ -104,8 +104,8 @@ export { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTas
 // 每个 kind 的差异全部由这张【数据表】承载（⛔ 非两份代码分支，AC139-2）。新增一个 kind = 这里加一行 +
 // 写该 kind 的 .ts（继承 Layer 0 + 1a 或 1b），⛔ 不需要重写 respawn 循环/心跳/判停。
 
-/** 驱动 kind 标识（promotion = 任务处理型 · worker = 任务处理型；manager-kind 属 AC143，落在 1b）。 */
-export type DriverKind = "promotion" | "worker";
+/** 驱动 kind 标识（promotion/worker = 任务处理型 · quality = 例程型（AC144，1b）；manager-kind 属 AC143，落在 1b）。 */
+export type DriverKind = "promotion" | "worker" | "quality";
 
 /** 一个 kind 的 registry 条目（KIND_* 八张 bash 表 → 一个 TS 数据结构）。 */
 export interface KindSpec {
@@ -156,6 +156,18 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
     runPrefix: "wk-prod",
     carriers: ["worker-outcome.jsonl", "worker-round.jsonl"],
     controlFile: "worker-control.json",
+  },
+  quality: {
+    driver: "quality-gate-driver.ts",
+    prefix: "quality-driver",
+    verbs: ["start", "stop", "drain", "status", "restart", "liveness"],
+    capFlag: "", // 例程型 kind 无任务池 ⇒ 无 cap（driverArgvForKind 仅在 opts.cap 非空时拼 capFlag）
+    hasInterval: true,
+    hasReconcile: false,
+    pidSelf: true,
+    runPrefix: "qg-prod",
+    carriers: ["quality-round.jsonl"],
+    controlFile: "quality-control.json",
   },
 };
 
