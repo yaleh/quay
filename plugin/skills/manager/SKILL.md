@@ -179,7 +179,6 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-unified-driver-architecture-2026-08-23.md` — 统一 `*-driver` 架构：机械化执行面与长会话规划面的分野。**两级分层**（Layer 0 runtime / 1a task-processing / 1b routine，人 2026-08-23 裁定，manager-kind 属 1b）· 核心不变式「⛔ 不信执行者自述」单一实现 · Filter 谓词列表 · Claude Code profile 抽层 · 配置与运行时控制态分界 · 事件触发保留兜底轮询（proposal·判据落为 AC151–155，排期在 AC142 系列收口后）
 - `orchestration/SPEC-web-session-observability-and-control-2026-08-24.md` — web server 通用 Claude Code 会话观测 / 消息投递 / 生命周期管理：会话发现三分流（交互式·`-p`·已结束）· 统一锚点 session-id + transcript · `send-to-session.ts` socket 通道 · profile 化启动配置（proposal·人 2026-08-24 裁定三条开放问题，泛化排期在 `gap-worker-task-transcript-access-webui` 落地之后）
 - `orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md` — Codex App Server 会话通信 Host Adapter：thread/turn 映射、宿主无关 `list/status/send/events` 契约、ack 状态、幂等性与 Claude/Codex 权限边界（proposal·不扩大 Stage 1 自治生命周期权限）
-- `orchestration/SPEC-methodology-layer-architecture-2026-08-25.md` — 方法学层架构：契约面的采纳而非重建抽象（现状盘点直读代码 → 目标架构 → 非目标 → 排期与验收方向；AC 正本由 outer 写，本文件是输入）
 - `orchestration/SPEC-one-observer-two-surfaces.md` — one observer, two surfaces
 - `orchestration/SPEC-methodology-layer-architecture-2026-08-25.md` — 方法学层架构：契约面采纳而非重建抽象（checker 契约三层 / state-IO / path-root 三角色，六批次 B0-B5 棘轮演进）
 - `orchestration/SPEC-quay-self-hosts-its-own-cold-start.md` — self-hosting the cold start

@@ -172,7 +172,6 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-instruments-behind-one-entry.md -->
 <!-- reference-doc: orchestration/SPEC-manager-productization-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-methodology-as-a-deliverable.md -->
-<!-- reference-doc: orchestration/SPEC-methodology-layer-architecture-2026-08-25.md -->
 <!-- reference-doc: orchestration/SPEC-no-text-substitution-at-install.md -->
 <!-- reference-doc: orchestration/SPEC-one-observer-two-surfaces.md -->
 <!-- reference-doc: orchestration/SPEC-outer-liveness-productization.md -->
