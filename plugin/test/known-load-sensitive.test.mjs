@@ -388,6 +388,8 @@ test("AC3 — the real repo: 27 evidenced files moved out of serial/lowconc to t
   // gap-suite-move-27-evidenced-files-out-serial-lowconc (2026-08-25) then moved 27 files with fail=0
   // high-load evidence OUT of the serial/lowconc concurrency-reduction lanes entirely — to the default
   // group (product for packages/*/test, engine for plugin/test). This test guards the RESULTING state.
+  // quay-init-loop-vendor.test.mjs was split into 7 per-scenario files (gap-suite-split-long-multi-
+  // test-files); the 7 split files inherit the default-group move (all @test-group engine).
   // quay-init-check-drift.test.mjs is RETIRED (gap-quay-init-check-drift-merge-into-drift-report —
   // its assertions were merged into quay-init-drift-report.test.mjs, so it is no longer a test file).
   const serialFiles = [];
@@ -398,11 +400,18 @@ test("AC3 — the real repo: 27 evidenced files moved out of serial/lowconc to t
     if (/^\s*\/\/\s*@test-group\s+lowconc\b/m.test(text)) lowconcFiles.push(rel);
   }
   // The 3 quay-init-loop files that WERE lowconc are now in the default group (engine) — moved out
-  // by gap-suite-move-27-evidenced-files-out-serial-lowconc (fail=0 high-load evidence).
+  // by gap-suite-move-27-evidenced-files-out-serial-lowconc (fail=0 high-load evidence). The vendor
+  // member was split into 7 per-scenario files, each inheriting the default-group (engine) move.
   const movedToDefault = [
     "plugin/test/quay-init-loop-driver.test.mjs",
     "plugin/test/quay-init-loop-runtime.test.mjs",
-    "plugin/test/quay-init-loop-vendor.test.mjs",
+    "plugin/test/quay-init-loop-vendor-user-scope-stale.test.mjs",
+    "plugin/test/quay-init-loop-vendor-user-scope-fresh.test.mjs",
+    "plugin/test/quay-init-loop-vendor-stale-rebuild.test.mjs",
+    "plugin/test/quay-init-loop-vendor-freshness-passes.test.mjs",
+    "plugin/test/quay-init-loop-vendor-fresh-passthrough.test.mjs",
+    "plugin/test/quay-init-loop-vendor-stale-fail-closed.test.mjs",
+    "plugin/test/quay-init-loop-vendor-freshness-fail-closed.test.mjs",
   ];
   for (const rel of movedToDefault) {
     assert.ok(!lowconcFiles.includes(rel), `${rel} must no longer be in the lowconc lane (moved to default group)`);

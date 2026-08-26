@@ -172,7 +172,6 @@
 {"file":"plugin/test/session-liveness-signals-thresholds.test.mjs","judgment":"S","mechanism":"S","signal":["--group","__GROUP__","concurrency"]}
 {"file":"plugin/test/session-liveness-sweep.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/session-liveness-target.test.mjs","judgment":"S","mechanism":"S","signal":["concurrency"]}
-{"file":"plugin/test/session-liveness.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/session-topology.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task","concurrency"]}
 {"file":"plugin/test/slot-free-trigger.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/slot-refill-heartbeat.test.mjs","judgment":"M","mechanism":"S","signal":[]}
