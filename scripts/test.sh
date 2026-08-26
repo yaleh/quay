@@ -461,7 +461,13 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 #
 # Test seams (unit test in plugin/test/resource-gate.test.mjs): RESOURCE_GATE_NPROC /
 # RESOURCE_GATE_CONCURRENT_SUITES / RESOURCE_GATE_OVERSUBSCRIPTION override the derivation inputs
-# deterministically (slots = 旋钮② S, oversub = 旋钮③ — both env-read, never literals).
+# deterministically (S read via suite_slot_count, oversub = 旋钮③ — env-read, never literals).
+# S single source (gap-suite-concurrency-S-two-source-divergence): default_concurrency_formula and
+# serial_lowconc_host_default read S via suite_slot_count — the SAME bash canonical the single-flight
+# lock uses (seam RESOURCE_GATE_CONCURRENT_SUITES → `<base>.concurrency` file →
+# QUAY_MAX_CONCURRENT_SUITES → 2). Sourced HERE (before the derivation functions below) so both can
+# call it; the lock section further down reuses this same canonical for its slot paths.
+source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
 default_concurrency_formula() {
   local total_budget oversub slots
   # MAIN-PHASE CONCURRENCY (gap-suite-budget-oversubscribe; human 14:4xZ 修正方向 — (b) 认领制 /
@@ -479,12 +485,13 @@ default_concurrency_formula() {
   # 再乘并发阶段数 P ⇒ S×P ⇒ 重叠窗口 Σ lane ≤ nproc×oversub 同样结构上不可能超（不变式恢复可守）。
   total_budget="${RESOURCE_GATE_NPROC:-}"
   oversub="${RESOURCE_GATE_OVERSUBSCRIPTION:-${QUAY_MAX_OVERSUBSCRIPTION:-1}}"
-  slots="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
+  # S single source: suite_slot_count reads seam → `<base>.concurrency` file → 旋钮② → 2 (the SAME
+  # precedence + validation as the single-flight lock). The old
+  # `RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}` read SKIPPED the `.concurrency`
+  # file — so `printf '2' > .concurrency` changed the lock slots but NOT this formula (the divergence).
+  slots="$(suite_slot_count)"
   if [ -z "${total_budget}" ]; then
     total_budget="$(nproc 2>/dev/null || echo 1)"
-  fi
-  if ! [[ "${slots}" =~ ^[0-9]+$ ]] || [ "${slots}" -lt 1 ]; then
-    slots=2
   fi
   if ! awk -v o="${oversub}" 'BEGIN { exit !(o ~ /^[0-9]+(\.[0-9]+)?$/ && o > 0) }'; then
     oversub=1
@@ -512,9 +519,10 @@ default_test_concurrency() {
 #   cc=1 WALL_MS=455613 (0 cancelled) vs cc=2 WALL_MS=289579 (0 cancelled) — c2 快 36% 且 0-cancelled;
 #   real-install e2e 双文件 c2 实测 0-cancelled (147s)。⇒ 默认上调至 2 (后经 AC44/AC74 改读宿主)。
 # serial_lowconc_host_default — the host-derived fallback shared by BOTH phase knobs: reads
-# RESOURCE_GATE_NPROC (test seam) → nproc, RESOURCE_GATE_CONCURRENT_SUITES (test seam) →
-# QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2, clamped at 1, and QUAY_PHASE_OVERLAP (default 1) → the
-# concurrent-PHASE count P (2 = serial+lowconc parallel, 1 = sequential). max(1, floor(nproc ÷ (S×P))).
+# RESOURCE_GATE_NPROC (test seam) → nproc, S via suite_slot_count (seam →
+# `<base>.concurrency` file → QUAY_MAX_CONCURRENT_SUITES → 2, the single source), and
+# QUAY_PHASE_OVERLAP (default 1) → the concurrent-PHASE count P (2 = serial+lowconc parallel,
+# 1 = sequential). max(1, floor(nproc ÷ (S×P))).
 # gap-lane-formula-ignores-phase-overlap-concurrency: QUAY_PHASE_OVERLAP=1 runs serial + lowconc in
 # PARALLEL, so the overlap window carries 2 concurrent phases each at its own budget — the denominator
 # must count the concurrent PHASES too (S×P), else each suite's overlap window runs serial+lowconc at
@@ -525,10 +533,9 @@ default_test_concurrency() {
 serial_lowconc_host_default() {
   local ncpu slots phases
   ncpu="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
-  slots="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
-  if ! [[ "${slots}" =~ ^[0-9]+$ ]] || [ "${slots}" -lt 1 ]; then
-    slots=2
-  fi
+  # S single source: suite_slot_count (seam → `<base>.concurrency` file → 旋钮② → 2) — the SAME read
+  # as default_concurrency_formula and the single-flight lock (gap-suite-concurrency-S-two-source-divergence).
+  slots="$(suite_slot_count)"
   phases=1
   if [ "${QUAY_PHASE_OVERLAP:-1}" != "0" ]; then
     phases=2
@@ -640,7 +647,8 @@ bucket_test_concurrency() {
 # `<repo_root>/.git` when git is unavailable (a non-git copy).
 # `FULL_SUITE_LOCK_FILE=<path>` (the pilot's per-worktree escape) still works — the `.0`..`.S-1`
 # suffixes are appended, so a per-worktree override yields a per-worktree S-slot lock.
-source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
+# (suite-slot-lib.sh is sourced ABOVE, before the derivation functions — the S single-source
+# gap-suite-concurrency-S-two-source-divergence fix; the slot paths below reuse that same canonical.)
 FULL_SUITE_LOCK_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
 if [ -z "${FULL_SUITE_LOCK_DIR}" ]; then
   FULL_SUITE_LOCK_DIR="${repo_root}/.git"
