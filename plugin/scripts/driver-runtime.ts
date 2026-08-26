@@ -104,8 +104,8 @@ export { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTas
 // 每个 kind 的差异全部由这张【数据表】承载（⛔ 非两份代码分支，AC139-2）。新增一个 kind = 这里加一行 +
 // 写该 kind 的 .ts（继承 Layer 0 + 1a 或 1b），⛔ 不需要重写 respawn 循环/心跳/判停。
 
-/** 驱动 kind 标识（promotion = 任务处理型 · worker = 任务处理型；manager-kind 属 AC143，落在 1b）。 */
-export type DriverKind = "promotion" | "worker";
+/** 驱动 kind 标识（promotion/worker = 任务处理型 · quality = 例程型（AC144，1b）；manager-kind 属 AC143，落在 1b）。 */
+export type DriverKind = "promotion" | "worker" | "quality";
 
 /** 一个 kind 的 registry 条目（KIND_* 八张 bash 表 → 一个 TS 数据结构）。 */
 export interface KindSpec {
@@ -156,6 +156,18 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
     runPrefix: "wk-prod",
     carriers: ["worker-outcome.jsonl", "worker-round.jsonl"],
     controlFile: "worker-control.json",
+  },
+  quality: {
+    driver: "quality-gate-driver.ts",
+    prefix: "quality-driver",
+    verbs: ["start", "stop", "drain", "status", "restart", "liveness"],
+    capFlag: "", // 例程型 kind 无任务池 ⇒ 无 cap（driverArgvForKind 仅在 opts.cap 非空时拼 capFlag）
+    hasInterval: true,
+    hasReconcile: false,
+    pidSelf: true,
+    runPrefix: "qg-prod",
+    carriers: ["quality-round.jsonl"],
+    controlFile: "quality-control.json",
   },
 };
 
@@ -766,10 +778,10 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
   }
   fs.mkdirSync(path.join(opts.root, ".quay"), { recursive: true });
 
-  // worker 并发缺省（对齐 inner=5，gap-launch-script-worker-cap-broken AC2）：无显式 --cap 时经定义点
-  // env 给驱动缺省并发 5（resolveConcurrency 读到 5，⛔ 否则 resident 模式 taskCount=0 ⇒ 兜底 1）。
+  // AC155：worker 并发缺省不再经 env 注入 QUAY_MAX_TASK_SUBAGENTS="5"（旧第三份并发真相源）——
+  // 驱动自己经 driver-config 读 drivers.yml（resolveConcurrency → driverCap 单一真相源）。supervisor
+  // 只透传显式 --cap/--concurrency（若有），⛔ 不再替驱动决定缺省并发。
   const env: NodeJS.ProcessEnv = { ...process.env };
-  if (opts.kind === "worker" && !opts.cap) env.QUAY_MAX_TASK_SUBAGENTS = "5";
 
   const args = driverArgvForKind(opts.root, opts.kind, {
     cap: opts.cap,
@@ -937,11 +949,16 @@ export async function startKind(
 
   // spawn detached supervisor（Node 侧等价原语：spawn(detached:true, stdio:["ignore",fd,fd]).unref()
   // ≡ setsid+nohup）。supervisor 的 cmdline 载体 = 本 kernel 的绝对路径（⛔ 非 worktree 路径）。
+  // ⛔ detached supervisor 绝不可继承调用者的 stdout/stderr：fallback 到 fd 2（stderr）会让 spawnSync
+  // 调用者等不到 pipe EOF 而 ETIMEDOUT（gap-driver-runtime-test-fixture-driver-not-reclaimed：测试
+  // fixture 的 root 无 .quay ⇒ openSync 失败 ⇒ fallback 2 ⇒ start 挂死 ⇒ t.after 回收永不执行）。
+  // 先 mkdir .quay 使 supLogFd 能开成真实文件；开失败仍退回 /dev/null，⛔ 不退回 stderr。
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   let supLogFd: number;
   try {
     supLogFd = fs.openSync(st.supervisorLog, "a");
   } catch {
-    supLogFd = 2;
+    supLogFd = fs.openSync("/dev/null", "w");
   }
   const supArgs = [
     process.execPath, "--experimental-strip-types", kernelSelfPath(), "__supervise",

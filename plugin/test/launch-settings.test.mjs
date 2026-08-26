@@ -93,7 +93,7 @@ test("AC1 — profiles.yml carries profiles/roles + flag-only params (AC154 prof
   assert.equal(p.promptSuggestions, false, "promptSuggestions must be false (REQUIRED, not optional)");
   assert.ok(p.profiles, "profiles section must exist");
   assert.ok(p.roles, "roles section must exist");
-  for (const role of ["manager", "outer", "inner", "task-worker", "selector", "fix-worker"]) {
+  for (const role of ["manager", "outer", "inner", "task-worker", "selector", "fix-worker", "pool-judge"]) {
     const r = p.roles?.[role];
     assert.ok(r, `role "${role}" must be defined in roles`);
     assert.ok(r.name, `role "${role}" must carry a session display name (-n)`);
@@ -104,7 +104,7 @@ test("AC1 — profiles.yml carries profiles/roles + flag-only params (AC154 prof
   }
   // distinct, stable names for session-liveness "whose session is this"
   const names = Object.values(p.roles).map((r) => r.name);
-  assert.equal(new Set(names).size, 6, "role names must be distinct");
+  assert.equal(new Set(names).size, 7, "role names must be distinct");
 });
 
 test("AC1 — bare lives ONLY in profiles (AC154 取假①: no top-level or role-level bare)", () => {

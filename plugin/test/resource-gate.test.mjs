@@ -846,6 +846,76 @@ test("AC1/AC4 — the full-suite default path holds a single-flight flock (full-
   assert.match(src, /QUAY_TEST_NESTED/, "same-root nested guard must exist for the lock");
 });
 
+// ── gap-suite-lock-starvation-long-validation-hold: lock-hold cap + lock_hold_ms ───────────────────
+// AC1 (能取假): a validation-type long task must not hold a single-flight slot for hours. The hold cap
+//   lives in the HOLDING process (test.sh → suite-slot-lib.sh watchdog), ⛔ not a worker-driver kill —
+//   the suite process can outlive its worker session (the suite-load-sampler orphan), so an outside
+//   tracker would be the SAME orphanization defect.
+// AC2 (能取假): lock_hold_ms rides the records so「长时间持锁」is distinguishable from「worker 慢」.
+const SUITE_SLOT_LIB = path.join(REPO_ROOT, "plugin", "scripts", "suite-slot-lib.sh");
+
+test("gap-suite-lock-starvation AC1/AC2 (structural) — the hold cap + lock_hold_ms markers live in the holding process (test.sh + suite-slot-lib.sh), not worker-driver", () => {
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  const lib = fs.readFileSync(SUITE_SLOT_LIB, "utf8");
+  assert.match(src, /FULL_SUITE_LOCK_HOLD_MAX_S/, "test.sh must carry the hold-cap knob (T seconds)");
+  assert.match(src, /spawn_suite_lock_hold_watchdog/, "test.sh must spawn the hold-cap watchdog after acquiring the slot");
+  assert.match(src, /__OVERHEAD__ lock_hold_ms=/, "test.sh must emit lock_hold_ms at release (the held half, alongside lock_wait_ms)");
+  assert.match(lib, /spawn_suite_lock_hold_watchdog/, "the watchdog spawn lives in suite-slot-lib.sh (single definition point, sourceable/testable)");
+  assert.match(lib, /lock_hold_exceeded=1/, "the watchdog must record a fail-loud lock_hold_exceeded=1 marker (never silent)");
+});
+
+test("gap-suite-lock-starvation AC1/AC3 (behavioral) — the watchdog releases the slot after T (a waiter acquires within ~T, not starved) + fail-loud marker", () => {
+  const script = `
+    set -u
+    . "${SUITE_SLOT_LIB}"
+    tmp="$(mktemp -d)"
+    base="\${tmp}/full-suite.lock"
+    exec {fd}>"\${base}.0"
+    flock -n "\${fd}" || { echo "PRE-FLOCK-FAILED"; exit 1; }
+    flag="\${tmp}/hold.flag"
+    : > "\${flag}"
+    wpid="$(spawn_suite_lock_hold_watchdog "\${fd}" "\${flag}" "$$" "2")"
+    if [ -e "\${flag}" ]; then echo "SPAWN-NON-BLOCKING"; else echo "SPAWN-BLOCKED"; fi
+    sleep 3
+    exec {probe}<>"\${base}.0"
+    if flock -n "\${probe}"; then echo "PROBE-ACQUIRED"; else echo "PROBE-STILL-HELD"; fi
+    flock -u "\${probe}" 2>/dev/null || true
+    exec {probe}>&- 2>/dev/null || true
+    if [ -e "\${flag}" ]; then echo "FLAG-PRESENT"; else echo "FLAG-REMOVED"; fi
+    wait "\${wpid}" 2>/dev/null || true
+    exec {fd}>&- 2>/dev/null || true
+    rm -rf "\${tmp}"
+  `;
+  const r = spawnSync("bash", ["-c", script], { encoding: "utf8", timeout: 15_000 });
+  assert.equal(r.status, 0, `watchdog script must exit 0, got status=${r.status} stderr=${r.stderr}`);
+  assert.match(r.stdout, /SPAWN-NON-BLOCKING/, `the watchdog spawn must NOT block the caller (⛔ 命令替换阻塞 T 秒 = 生产 30min hang), got stdout:\n${r.stdout}`);
+  assert.doesNotMatch(r.stdout, /SPAWN-BLOCKED/, "the spawn must return immediately (a blocked spawn waits T for the watchdog to fire)");
+  assert.match(r.stdout, /PROBE-ACQUIRED/, `a waiter must acquire the slot after the cap (within ~T), got stdout:\n${r.stdout}`);
+  assert.doesNotMatch(r.stdout, /PROBE-STILL-HELD/, "the slot must NOT still be held after the cap");
+  assert.match(r.stdout, /FLAG-REMOVED/, "the watchdog must remove the flag after releasing (no lingering)");
+  assert.match(r.stderr, /lock_hold_exceeded=1/, `the watchdog must emit the fail-loud marker, got stderr:\n${r.stderr}`);
+});
+
+test("gap-suite-lock-starvation AC3 (negative control) — WITHOUT the watchdog the slot is still held after the same window (the release is attributable to the cap, not an artifact)", () => {
+  const script = `
+    set -u
+    tmp="$(mktemp -d)"
+    base="\${tmp}/full-suite.lock"
+    exec {fd}>"\${base}.0"
+    flock -n "\${fd}" || { echo "PRE-FLOCK-FAILED"; exit 1; }
+    sleep 1
+    # probe from a SEPARATE process (fresh OFD) — must still be held without a watchdog
+    exec {probe}<>"\${base}.0"
+    if flock -n "\${probe}"; then echo "PROBE-ACQUIRED"; else echo "PROBE-STILL-HELD"; fi
+    exec {probe}>&- 2>/dev/null || true
+    exec {fd}>&- 2>/dev/null || true
+    rm -rf "\${tmp}"
+  `;
+  const r = spawnSync("bash", ["-c", script], { encoding: "utf8", timeout: 15_000 });
+  assert.equal(r.status, 0, `negative-control script must exit 0, got status=${r.status}`);
+  assert.match(r.stdout, /PROBE-STILL-HELD/, "without the watchdog the slot stays held (the positive release is the cap's doing)");
+});
+
 // ── --for full-suite arg validation ────────────────────────────────────────────────────────────────
 test("gate rejects an unknown --for target with exit 2 (usage)", () => {
   const r = runGate({}, ["--for", "bogus"]);

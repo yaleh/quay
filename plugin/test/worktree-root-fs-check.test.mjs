@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs AC3/AC4: quay-init
 // --loop must FAIL CLOSED when the worktree root is on tmpfs (memory, not disk — the 2026-08-04
 // machine-wide OOM traced straight to in-flight worktrees living in /tmp), and must PROCEED on a

@@ -2137,6 +2137,112 @@ test("⑧ split — the poll block parses a gnu-time '%U %S' line into cpu_user_
 });
 
 
+// ── ⑧ time-file 跨 relaunch 复用（gap-fan-in-suite-time-file-cross-relaunch-reuse AC1/AC2）──────────
+// THE DEFECT: the wait block's cpu_s calc was guarded only by `[ -f "$suite_time_file" ]` (missing the
+// full_suite_ran=true guard that the adjacent lane_count calc carries). An isolate-rerun
+// (full_suite_ran=false, ISOLATE_LAUNCH does NOT write a .time file) reading a stale
+// /tmp/fan-in-suite-<task>.time left over from a prior full-suite run produced a non-null cpu_s ⇒
+// per-task-suite-record rejects --cpu-time-s with --full-suite-ran=false (AC6「skip 不消耗 CPU」) ⇒ HARD
+// FAIL, no flip, no ff (gap-ac148 blocked). FIX: (AC1) guard cpu_s by full_suite_ran=true; (AC2)
+// ISOLATE_LAUNCH rm -f "$suite_time_file" (aligned with SUITE_LAUNCH). Sibling log-file variant
+// gap-fan-in-suite-log-cross-relaunch-reuse already done — this is the time-file variant.
+
+test("⑧ time-file guard — isolate-rerun (full_suite_ran=false) with a stale .time file leaves cpu_s=null (gap-fan-in-suite-time-file-cross-relaunch-reuse AC1)", async (t) => {
+  // AC1 能取假 (negative control): seed the exact cross-relaunch residue (full_suite_ran=false + a stale
+  // gnu-time .time file), run the REAL poll block. The fix's full_suite_ran guard must leave cpu_s=null;
+  // before the fix the `[ -f ]`-only guard would read the stale file → cpu_s=11313.883 (red).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-timeguard-"));
+  t.after(() => cleanup(dir));
+  const task = "gap-test-timeguard";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  const marker = `/tmp/fan-in-suite-${task}.exit`;
+  const timeFile = `/tmp/fan-in-suite-${task}.time`;
+  const logFile = `/tmp/fan-in-suite-${task}.log`;
+  t.after(() => { for (const f of [capture, marker, timeFile, logFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  // Seed an isolate-rerun capture (full_suite_ran=false) + a STALE gnu-time file (the residue this fix
+  // targets) + a green exit marker.
+  fs.writeFileSync(capture, [
+    "full_suite_ran=false",
+    "skip_reason=isolate-rerun-load-sensitive",
+    "start_iso=2026-08-20T00:00:00.000Z",
+    "start_ms=1755652800000",
+    "suite_head=" + "0".repeat(40),
+    `suite_log_file=${logFile}`,
+  ].join("\n") + "\n", "utf8");
+  fs.writeFileSync(marker, "exit=0\nend_ms=1755652801000\nend_iso=2026-08-20T00:00:01.000Z\n", "utf8");
+  fs.writeFileSync(timeFile, "4414.230 6899.653\n", "utf8");
+  fs.writeFileSync(logFile, "ok\n", "utf8");
+
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-timeguard", mergeTarget: "develop" },
+  });
+  const pollPrompt = promptContaining(prompts, "POLL=not-done");
+  const pollBlock = pollPrompt.slice(pollPrompt.indexOf("suite_capture="), pollPrompt.indexOf("返回 { done: bool"));
+  const r = runBash(pollBlock, { cwd: dir });
+  assert.equal(r.status, 0, `poll block failed: ${r.stderr}`);
+  assert.match(r.stdout, /POLL=done SUITE_EXIT=0/, `poll must report done exit 0, got: ${r.stdout}`);
+
+  const out = fs.readFileSync(capture, "utf8");
+  assert.match(out, /^cpu_s=null$/m, "isolate-rerun must NOT read the stale .time file — cpu_s stays null (full_suite_ran guard)");
+  assert.match(out, /^cpu_source=not-wired$/m, "cpu_source stays not-wired (no CPU captured for an isolate-rerun)");
+  assert.match(out, /^cpu_user_s=null$/m, "cpu_user_s stays null (no gnu-time columns read)");
+  assert.match(out, /^cpu_sys_s=null$/m, "cpu_sys_s stays null (no gnu-time columns read)");
+});
+
+test("⑧ time-file rm REAL — ISOLATE_LAUNCH removes the stale .time file at launch (gap-fan-in-suite-time-file-cross-relaunch-reuse AC2)", async (t) => {
+  // AC2 能取假 (REAL mechanism): extract the REAL ISOLATE_LAUNCH block, pre-seed a stale gnu-time .time
+  // file (the cross-relaunch residue), run the block — the rm at the top must delete it. Revert the rm
+  // ⇒ the stale file survives ⇒ red.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-isorm-"));
+  t.after(() => cleanup(dir));
+  const task = "gap-test-isorm";
+  const git = (args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  git(["init", "-q", "-b", "main"]);
+  git(["config", "user.email", "test@test"]);
+  git(["config", "user.name", "test"]);
+  fs.writeFileSync(path.join(dir, "README.md"), "base\n");
+  git(["add", "-A"]); git(["commit", "-qm", "base"]);
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/usr/bin/env bash\nsleep 1\nexit 0\n");
+  fs.chmodSync(path.join(dir, "scripts", "test.sh"), 0o755);
+  git(["add", "-A"]); git(["commit", "-qm", "add test.sh"]);
+
+  // Extract the REAL ISOLATE_LAUNCH block (a RED sequence drives the fix prompt carrying it).
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-isorm", mergeTarget: "develop" },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },
+      { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "" },
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
+    ],
+  });
+  const isolate = extractBlockFromPrompts(prompts, "# isolate-launch-block-start", "# isolate-launch-block-end");
+
+  // Pre-seed the cross-relaunch residue: a stale .time file (the gnu-time file a prior full-suite run left).
+  const timeFile = `/tmp/fan-in-suite-${task}.time`;
+  const captureFile = `/tmp/fan-in-suite-${task}.env`;
+  const isolateFiles = `/tmp/fan-in-scope-isolate-${task}.files`;
+  const logFile = `/tmp/fan-in-suite-${task}.log`;
+  const pidFile = `/tmp/fan-in-suite-${task}.pid`;
+  t.after(() => { for (const f of [timeFile, captureFile, isolateFiles, logFile, pidFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  fs.writeFileSync(timeFile, "4414.230 6899.653\n", "utf8");
+
+  // Run the isolate-launch block (async: it launches a detached suite that sleeps 1s).
+  const launchProc = spawn("bash", ["-c", isolate], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  let launchOut = "";
+  launchProc.stdout.on("data", (d) => { launchOut += d; });
+  launchProc.stderr.on("data", (d) => { launchOut += d; });
+  const launchExit = await new Promise((resolve) => { launchProc.on("exit", (code, sig) => resolve({ code, sig })); });
+
+  assert.equal(launchExit.code, 0, `isolate-launch block failed: ${launchOut}`);
+  assert.ok(!fs.existsSync(timeFile), "ISOLATE_LAUNCH must rm the stale .time file at launch (the cross-relaunch residue is gone)");
+});
+
+
 
 // ── ⑧⑩ 锁等待负控制（gap-single-flight-lock-timeout-double-value AC1/AC2）────────────────────────
 // THE DEFECT: test.sh 的 single-flight 锁有两套超时值（FULL_SUITE_LOCK_TIMEOUT 默认 600 + fan-in 的

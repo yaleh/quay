@@ -562,7 +562,7 @@ test("AC3/AC4 rehearsal: real repo reports the three known instances + the 6 rem
   // FIXED to os.tmpdir() — none may report shared-root-mkdtemp
   for (const f of [
     "experiments/quay-perpetual-stream/test/loadbearing-test-gate.test.mjs",
-    "packages/quay/test/ts-typecheck-gate.test.mjs",
+    "packages/quay/test/ts-typecheck-gate-cli-event.test.mjs",
     "plugin/test/run-identity.test.mjs",
   ]) {
     assert.ok(!lines.some((l) => l.startsWith(`${f}:shared-root-mkdtemp`)), `${f} R8 must not report (fixed to os.tmpdir):\n${res.stdout}`);

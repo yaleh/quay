@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group product
 // @load-sensitive child-spawn
 // @load-sensitive-entry 2026-08-09 real MCP server subprocess spawns; suite-level spawn contention (round-188 9.9s fail)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this test spawns a

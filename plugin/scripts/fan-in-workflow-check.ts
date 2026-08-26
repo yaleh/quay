@@ -514,8 +514,8 @@ export function checkAgentIds(
 // ── Pure: d — escalation traceability (gap-ff-livelock-trigger-no-action) ───────────────────────────
 
 /** One `.quay/fan-in-ff-escalations.jsonl` line — the anti-livelock escalation record written by
- *  fan-in-ff-merge.sh when a task's ff fails attempt >= 3 (SPEC §7). The escalation carries the
- *  SPEC §7 quiet-window request and exit code 3 (distinct from the plain retry exit 1). */
+ *  fan-in-ff-merge.sh when a task's ff fails attempt >= 3 (SPEC §7). The escalation carries exit
+ *  code 3 (distinct from the plain retry exit 1) and stops automatic retry. */
 export interface Escalation {
   event?: string;
   taskId?: string;
@@ -527,7 +527,6 @@ export interface Escalation {
   agentId?: string | null;
   mergeTarget?: string;
   action?: string;
-  quietWindow?: { requested?: boolean; holder?: string; criterion?: string; windowMinutes?: number; endsEarly?: string };
 }
 
 /** Parse the .quay/fan-in-ff-escalations.jsonl text into records. Unparseable lines are skipped (the
@@ -548,10 +547,11 @@ export function parseEscalations(text: string): Escalation[] {
 
 /** The unique task ids that carry an escalation record (the anti-livelock-triggered fan-ins). */
 export function escalatedTaskIds(escalations: Escalation[]): string[] {
-  // gap-fan-in-ff-livelock-quiet-window-no-consumer: the escalation file now also carries
-  // `quiet-window-resolved` records (written by fan-in-ff-merge.sh on ff success). Filter to
-  // `ff-escalation` only — a resolution is the FULFILLMENT of a request, not a NEW escalation, and
-  // must not pollute 判据2(d) traceability (a landed task is not an "escalated fan-in").
+  // The escalation file also carries `ff-escalation-resolved` records (written by fan-in-ff-merge.sh
+  // on ff success — the escalation-resolution signal, kept after the quiet-window request was
+  // retired by gap-quiet-window-holder-scope-wider-than-consumer). Filter to `ff-escalation` only —
+  // a resolution is the FULFILLMENT of a request, not a NEW escalation, and must not pollute
+  // 判据2(d) traceability (a landed task is not an "escalated fan-in").
   return [...new Set((escalations ?? [])
     .filter((e) => e.event === "ff-escalation")
     .map((e) => e.taskId)

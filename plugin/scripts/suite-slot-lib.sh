@@ -100,3 +100,35 @@ suite_slot_paths() {
     i=$((i + 1))
   done
 }
+
+# spawn_suite_lock_hold_watchdog — spawn the hold-cap watchdog (gap-suite-lock-starvation-long-
+# validation-hold AC1). Args: <held-fd> <flag-file> <main-pid> <hold-max-s>. The watchdog runs as a
+# child of the lock-HOLDING process (⛔ not an outside worker-driver kill): it polls the flag file each
+# 1s and (a) exits promptly when the holder releases normally (flag removed), (b) releases the slot
+# immediately if the holder died without releasing (crash-autorelease, ≤1s delay — the inherited FD
+# shares the same open-file-description lock), or (c) after <hold-max-s> seconds of the holder STILL
+# holding, releases the slot + emits a fail-loud `lock_hold_exceeded=1` marker (never silent). The cap
+# only yields the SLOT — the long suite keeps running; it accepts the contention risk of a (S+1)-th
+# suite joining rather than serializing the whole repo behind its re-check.
+# shellcheck disable=SC2317
+spawn_suite_lock_hold_watchdog() {
+  local _fd="$1" _flag="$2" _main_pid="$3" _max_s="$4"
+  (
+    _w_remaining="${_max_s}"
+    while [ "${_w_remaining}" -gt 0 ]; do
+      sleep 1
+      [ -e "${_flag}" ] || exit 0
+      kill -0 "${_main_pid}" 2>/dev/null || { flock -u "${_fd}" 2>/dev/null || true; rm -f "${_flag}"; exit 0; }
+      _w_remaining=$((_w_remaining - 1))
+    done
+    if [ -e "${_flag}" ]; then
+      flock -u "${_fd}" 2>/dev/null || true
+      rm -f "${_flag}"
+      echo "__OVERHEAD__ lock_hold_exceeded=1" >&2
+      echo "suite-lock-hold-watchdog: LOCK-HOLD-EXCEEDED — released full-suite slot after ${_max_s}s (long-validation yield, fail-loud)" >&2
+    fi
+  ) >/dev/null &  # ⛔ stdout→/dev/null: the watchdog's inherited stdout would otherwise hold the caller's
+                  # command-substitution pipe open and block `$(spawn_suite_lock_hold_watchdog …)` for the
+                  # FULL T seconds (实测 T=3 ⇒ 3.02s block) — the fail-loud markers are on STDERR, unaffected.
+  echo "$!"
+}

@@ -606,6 +606,13 @@ export function buildPreVerifiedRoundRecord(o) {
   } else if (phaseMs.lock_overhead !== undefined) {
     record.lock_wait_ms = phaseMs.lock_overhead;
   }
+  // gap-suite-lock-starvation-long-validation-hold AC2 — lock_hold_ms rides test.sh's
+  // `__OVERHEAD__ lock_hold_ms=N` marker (the acquire→release wall) into phaseMs.lock_hold, so the
+  // landing record can distinguish "long lock hold" from "worker slow". Absent on scoped/nested runs
+  // (no lock taken — 缺键, never 0), same contract as lock_wait_ms.
+  if (phaseMs.lock_hold !== undefined) {
+    record.lock_hold_ms = phaseMs.lock_hold;
+  }
   // gap-phase-overlap-field-always-false-negative — the fan-in landing path (this writer) must ALSO
   // carry phase_overlap (the DoD's "真实 fan-in 轮正确写入"): derive from the suite log's
   // `overlap: running` marker, mirroring full-suite-runner's phaseOverlapRan latch. Unlike
