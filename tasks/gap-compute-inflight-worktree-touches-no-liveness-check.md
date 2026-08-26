@@ -1,7 +1,7 @@
 ---
 id: gap-compute-inflight-worktree-touches-no-liveness-check
 title: computeInFlightWorktreeTouches 无活进程检查——死 worktree 占用 Touches 锁死全部派发（pool=31 候选全被挡，单死 worktree 锁 23 候选）
-status: ready
+status: done
 labels:
   - gap
   - defect
