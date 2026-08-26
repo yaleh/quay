@@ -281,16 +281,19 @@ Environment contract — when the default 'acceptance' gate spawns a command:
                     never clobbered).
 `);
   } else if (sub === "driver") {
-    process.stdout.write(`quay driver — start/stop/drain/status/restart the promotion & worker drivers (AC139)
+    process.stdout.write(`quay driver — start/stop/drain/resume/status/restart the promotion & worker drivers (AC139)
 
 Usage:
-  quay driver <start|stop|drain|status|restart> --kind <promotion|worker> [--root <path>] [flags]
+  quay driver <start|stop|drain|resume|status|restart> --kind <promotion|worker> [--root <path>] [flags]
 
   start      Start the resident driver under the single supervisor (respawn on exit/kill/crash).
+             ⛔ Refuses (exit non-zero) if the driver is halted — clear the halt with \`resume\` first.
   stop       Hard stop: terminate the supervisor + driver. For worker, in-flight workers are NOT
              killed (they orphan and finish) — use drain for a graceful stop.
   drain      Halt new dispatch WITHOUT killing in-flight workers (control-state halted=true).
              worker → worker-control.json; promotion → promotion-control.json (AC150).
+  resume     drain's inverse: clear the halt (control-state halted=false) so new dispatch resumes.
+             Surface recovery after drain+stop (⛔ no need to read driver-internal exports).
   status     Report {kind, supervisor_pid, driver_pid, alive, carrier_path, carrier_records,
              last_record_ts} — last_record_ts is the carrier's last-record timestamp (not just a
              record count, which cannot distinguish "growing" from "stalled").
