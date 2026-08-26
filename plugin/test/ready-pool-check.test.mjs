@@ -38,6 +38,7 @@ import {
   PARKED_MARKER_RE,
   SUPERSEDED_MARKER_RE,
   computeRelevance,
+  computeDependedOnCount,
   readChildren,
   strategicTraceable,
   touchesScale,
@@ -1629,6 +1630,18 @@ test("value-degradation AC1: blocking axis取数 gap — a task others `depends_
   // negative: a task NO ONE depends_on stays non-blocking on this axis.
   const isolated = computeRelevance("gap-isolated", { body: "plain\n## Touches\n- code/a.ts" }, childrenByTask, parentRefCount, null, dependedOnCount);
   assert.equal(isolated.blocking, false);
+});
+
+test("computeDependedOnCount — the depends_on reverse-edge index, single source shared with the ff-starvation relief (gap-ff-starvation-no-dynamic-cap-relief)", () => {
+  const fm = (extra) => parseTask(`---\nid: gap-x\nstatus: ready\n${extra}---\nbody\n`);
+  const a = fm("");
+  const b = fm("depends_on:\n  - gap-a\n");
+  const c = fm("depends_on:\n  - gap-a\n  - gap-b\n");
+  const allTasks = new Map([["gap-a", a], ["gap-b", b], ["gap-c", c]]);
+  const m = computeDependedOnCount(allTasks);
+  assert.equal(m.get("gap-a"), 2, "two tasks list gap-a in depends_on");
+  assert.equal(m.get("gap-b"), 1);
+  assert.equal(m.get("gap-c"), undefined, "no one depends_on gap-c ⇒ absent (never a fabricated 0)");
 });
 
 test("value-degradation AC2/AC3: a large-touches strategic task floats above a small plain task; composite not 1/cost (--top ordering)", (t) => {
