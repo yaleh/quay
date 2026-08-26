@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // @load-sensitive real-install
 // @load-sensitive-entry 2026-08-09 real-install e2e (quay-init → python3 children); install family flake rotation; re-split lowconc 2026-08-12 (fixture-amortized — gap-suite-tiering-kind-heavy-not-a-mechanism)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:

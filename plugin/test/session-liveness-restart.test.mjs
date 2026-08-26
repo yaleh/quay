@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // @load-sensitive wall-clock
 // session-liveness-restart.test.mjs — observer-blind-fix: a session RESTART in the same tmux window
 // must make the observer pick up the NEW transcript on its next poll (self-heal, no re-mount), while
