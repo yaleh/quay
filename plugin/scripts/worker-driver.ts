@@ -1,6 +1,6 @@
 // worker-driver.ts — SPEC-worker-driven-inner-2026-08-16 §5 阶段 2：机械驱动进程 spawn 多个
 // claude -p worker 跑完整任务（选择 → worktree → 开发 → suite → ff），并发由驱动数自己的子进程控制，
-// 超时 SIGTERM、checkout 前 stash 主检出。退出码 + 结构化 outcome 落盘；任何异常死亡终态清理 orphan
+// 超时 SIGTERM、⛔ 不 stash 主检出（gap-worker-driver-stashifdirty-stashes-others-uncommitted）。退出码 + 结构化 outcome 落盘；任何异常死亡终态清理 orphan
 // worktree（⛔ exited-not-landed = exit 0 跑到 fan-in 底但没落地——needs-human 闸拒绝属工作有效，保留
 // 分支/worktree 供续做，不走销毁；见 gap-worker-needs-human-destroys-branch-worktree）。
 //
@@ -10,9 +10,11 @@
 // 与任何代理量比对不一致时以驱动为准）。
 //
 // 权责边界（SPEC §3.2，人裁定的硬线）：
-//   驱动  ⛔ 不做任何 commit  ⛔ 不调用 LLM 做判断  ✅ 起/杀 worker、数并发、超时、stash 主检出、记录 outcome
+//   驱动  ⛔ 不做任何 commit  ⛔ 不调用 LLM 做判断  ⛔ 不 stash 主检出  ✅ 起/杀 worker、数并发、超时、记录 outcome
 //   worker ✅ 自己的 worktree 内全权  ✅ 最后 ff merge 到 develop  ⛔ 除最后 merge 外不碰 develop
-//   主检出 纯粹是驱动的镜像 —— 驱动 checkout 最新 develop 前，若发现未提交变更即 stash（⛔ 不 discard）。
+//   主检出 是【共享面】（manager/outer 都在此工作）——驱动【不】checkout、也【不】stash 它：驱动自己的
+//         写入全在 .quay/（gitignored），主检出上任何可被 stash 的未提交改动必属他人（gap-worker-driver-
+//         stashifdirty-stashes-others-uncommitted）。ff 前的干净判据由 fan-in-ff-merge.sh 自持，非驱动代劳。
 //
 // 阶段 2 新增（AC116，相对阶段 1 的三条能力）：
 //   ① 并发 N —— --task 可重复、--concurrency N 上限；在飞 = 驱动当前活子进程数（直接量，非硬编码 1）。
@@ -21,7 +23,8 @@
 //      worktree】（SPEC §1 设计点3「超时即杀 worker 会话，但保留 worktree」；gap-worker-print-bg-wait-
 //      ceiling-600s AC3）——超时≠其它异常死亡（failed/killed/exited-not-landed 仍清 orphan worktree，
 //      gap-worker-driver-no-record-on-abnormal-death AC2）。
-//   ③ checkout 前 stash —— spawn 前 `git stash push --include-untracked`（⛔ 不 discard），非 git 仓库 no-op。
+//   ③ ⛔ 不 stash 主检出 —— spawn 前【观察】主检出脏状态但不 stash（归属检查：可被 stash 的脏改动必属
+//      他人，卷走 = 本缺陷）。非 git 仓库 no-op。ff 的干净判据在 fan-in-ff-merge.sh，不在这里。
 //
 // outcome 记录（SPEC §4③，人裁定「跨任务行为检查由 outer 执行 ⇒ outer 只能读记录」）：
 //   每任务一条 JSONL，写入 <root>/.quay/worker-outcome.jsonl（gitignored 运行时日志，
@@ -219,9 +222,6 @@ export const EXITED_NOT_LANDED_EXIT = 3;
  *  改读 driver-config 的 drivers.yml（loadDriverConfig / driverCap 单一真相源）。本常量保留仅为历史
  *  引用/命名稳定性，⛔ 不再是并发解析的输入。 */
 export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
-
-/** checkout 前 stash 的缺省 message（`git stash list` 可核的标记，AC2）。 */
-export const DEFAULT_STASH_MESSAGE = "worker-driver: stash before checkout (SPEC §5 阶段 2)";
 
 /** 存活 worker 进程的 `-n` 名（launchArgv 经 profile-policy.ts 解析 .quay/profiles.yml 的
  *  `roles["task-worker"].name` 承载；AC140-2 测试钉死 name 以 quay- 开头）。
@@ -1132,7 +1132,9 @@ export function parseMaxRetries(raw: string | undefined): number {
   return Number.isInteger(n) && n >= 1 ? n : RETRY_CAP_DEFAULT;
 }
 
-/** 一次 stash 的结果（AC2 可核：stashed=true 且 git stash list 可见；⛔ 绝不 discard）。 */
+/** 一次「主检出脏状态观察 + stash 决策」的结果（gap-worker-driver-stashifdirty-stashes-others-
+ *  uncommitted AC1：stashed 恒 false——驱动【不】stash 共享主检出；files 列出观察到的脏文件供观测，
+ *  与「检出干净」的 files=[] 区分）。⛔ 绝不 discard。 */
 export interface StashResult {
   stashed: boolean;
   files: string[];
@@ -1140,24 +1142,23 @@ export interface StashResult {
 }
 
 /**
- * checkout 前 stash（AC116 阶段 2 ③）：主检出有未提交变更 ⇒ `git stash push --include-untracked`，
- * ⛔ 不 discard（不做 `git checkout -- .` / `git reset --hard` / `git clean`）。非 git 仓库 ⇒ no-op
- * （阶段 1 测试的临时目录不是仓库）。stash 后可核：`git stash list` 出现带 message 的 entry。
+ * 主检出脏状态归属检查（gap-worker-driver-stashifdirty-stashes-others-uncommitted AC1）：驱动【不】
+ * stash 主检出的任何未提交改动。归属判据是结构性的、非逐路径猜：驱动自己的写入全在 .quay/
+ * （gitignored）⇒ 主检出上【可被 `git stash --include-untracked` 卷走的】脏改动（tracked 未提交 +
+ * untracked 非忽略）一律属 manager/outer，stash 它们 = 卷走他人工作（本缺陷）。故本函数只观察、
+ * 恒不 stash（stashed=false），files 仍列出脏文件（供 --json 观测：驱动看见了脏、但正确地不碰）。
+ * ff 前的干净判据由 fan-in-ff-merge.sh 自持（含 promotion status-flip 自动收敛），非驱动代劳。
+ * 非 git 仓库 ⇒ no-op（阶段 1 测试的临时目录不是仓库）。⛔ 不 discard（不做 checkout -- . /
+ * reset --hard / clean）。
  */
-export function stashIfDirty(root: string, stashMessage: string = DEFAULT_STASH_MESSAGE): StashResult {
+export function stashIfDirty(root: string): StashResult {
   const inRepo = spawnSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" });
   if (inRepo.status !== 0) return { stashed: false, files: [], error: null };
   const before = spawnSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8" });
   if (before.status !== 0) return { stashed: false, files: [], error: (before.stderr || "").trim() || "git status failed" };
   const files = String(before.stdout ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
-  if (files.length === 0) return { stashed: false, files: [], error: null };
-  const stash = spawnSync("git", ["-C", root, "stash", "push", "--include-untracked", "-m", stashMessage], {
-    encoding: "utf8",
-  });
-  if (stash.status !== 0) return { stashed: false, files, error: (stash.stderr || "").trim() || "git stash failed" };
-  const after = spawnSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8" });
-  const stillDirty = after.status === 0 && String(after.stdout ?? "").trim() !== "";
-  return { stashed: true, files, error: stillDirty ? "stash ran but main checkout still dirty" : null };
+  // 有脏改动也【不】stash——它们不属于驱动。stashed 恒 false；files 供观测（⛔ 不碰这些文件）。
+  return { stashed: false, files, error: null };
 }
 
 /** 因 halt 未派发的任务也落一条 outcome（final_state=not-dispatched，⛔ 不静默丢任务）。 */
@@ -1471,7 +1472,8 @@ export interface ResidentOptions {
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs, maxRetries } = opts;
 
-  // checkout 前 stash（阶段 2 ③）：主检出脏 ⇒ stash 一次（常驻循环起跑前），⛔ 不 discard。非 git no-op。
+  // 主检出脏状态观察（阶段 2 ③，gap-worker-driver-stashifdirty-stashes-others-uncommitted）：⛔ 不 stash
+  // 共享主检出（脏改动属他人）。stash 事件仍发射供观测（stashed=false + files 列出脏文件）。非 git no-op。
   const stash = stashIfDirty(rootDir);
   if (json) {
     process.stdout.write(`${JSON.stringify({ event: "stash", stashed: stash.stashed, files: stash.files, error: stash.error })}\n`);
@@ -1739,7 +1741,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--port") port = Number(args[++i]);
     else if (a === "--help" || a === "-h") {
       console.log(
-        "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + checkout 前 stash + MCP 控制面 + 常驻选择环）\n" +
+        "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + ⛔ 不 stash 主检出 + MCP 控制面 + 常驻选择环）\n" +
           "  --task <id> [--task <id> …] [--reason \"<一句为什么选它>\"] [--concurrency <N>] [--timeout <ms>]\n" +
           "  [--root <repo>] [--worker-cmd \"<前缀>\"] [--worker-cmd-exact \"<argv>\"] [--pid-file <p>] [--outcome <p>] [--run-id <id>] [--json]\n" +
           "  ⛔ 无 --task ⇒ 常驻选择环（不再报错退出）\n" +
@@ -1806,7 +1808,8 @@ export async function main(argv: string[]): Promise<number> {
   const { taskIds, selectorReason, runPrefix, workerCmdOpts } = resolved;
   const cap = resolveConcurrency(concurrency, taskIds.length, driverCap(rootDir, "worker"));
 
-  // checkout 前 stash（阶段 2 ③，AC2）：主检出有未提交变更 ⇒ stash，⛔ 不 discard。非 git 仓库 no-op。
+  // 主检出脏状态观察（阶段 2 ③，gap-worker-driver-stashifdirty-stashes-others-uncommitted）：⛔ 不 stash
+  // 共享主检出（脏改动属他人）。stash 事件仍发射供观测（stashed=false + files 列出脏文件）。非 git no-op。
   const stash = stashIfDirty(rootDir);
   if (json) {
     process.stdout.write(
