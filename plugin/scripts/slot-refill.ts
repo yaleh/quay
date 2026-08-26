@@ -83,7 +83,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { parseTask, extractSection } from "./task-schema.ts";
+import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
 import {
   analyzeTasks,
   POOL_FLOOR_MULT_DEFAULT,
@@ -121,6 +121,11 @@ import {
 // reads --all MERGE history, so it survives the two-line branch model's integration fan-in that the
 // master-only git-history signal misses).
 import { countAcCheckboxes } from "./task-status-drift-check.ts";
+// DEPENDENCY-GATE SHARED KERNEL (tasks/gap-slot-refill-depsreadyfor-ignores-depends-on + AC152): the
+// deps-ready judgment (all prerequisites done) reuses driver-filters' allDepsDone — the SAME single
+// implementation ready-pool-check's depsReadyFor consumes, ⛔ never a parallel "逐个查 status !== done"
+// loop. A missing dep file resolves to null status ⇒ not done ⇒ fail closed.
+import { allDepsDone } from "./driver-filters.ts";
 import {
   checkTaskTouchesResolve,
   checkTouchesPair,
@@ -166,6 +171,21 @@ export const FIXED_DISPATCH_CAP = 5;
  *  "不在主会话修" a stop would be a deadlock). */
 export const RED_BACKLOG_CAP_DEFAULT = 2; // concurrency-default-fallback: red-window throttle (narrows the dispatch cap, not a slot count — declared per gap-concurrency-literal-only-at-definition-points)
 
+/** FF-STARVATION RELIEF (gap-ff-starvation-no-dynamic-cap-relief): the SECOND trigger condition on
+ *  `computeArbitratedCap`. When a LIVE task has accumulated ≥2 current-round ff failures (develop
+ *  advanced during its merge→ff window faster than it can catch up — the "总是合不进去的分支" shape),
+ *  the dispatch cap narrows so the starved task lands with no NEW competitor. Tiered (AC2, data-derived
+ *  threshold — see the task Proposal's conditional-failure-probability table): k=1 does NOT narrow
+ *  (retry genuinely helps, P(land)=0.65); k=2 narrows to `FF_STARVATION_CAP_K2`; k≥3 narrows to
+ *  `FF_STARVATION_CAP_DEFAULT` (1 — no competitor ⇒ deterministic landing). Throttle, NOT a stop
+ *  (AC4: 降 cap ≠ 停派 — slot-refill still recommends up to the narrowed cap, so the starved task keeps
+ *  its own dispatch slot). STATELESS (AC8): the narrowed value is RECOMPUTED every round from the
+ *  current retry record, never stored, never written to a driver startup param — the trigger condition
+ *  disappearing restores baseCap with no separate "un-narrow" action.
+ *  concurrency-default-fallback: relief throttle values (narrow the dispatch cap, not a slot count). */
+export const FF_STARVATION_CAP_DEFAULT = 1; // concurrency-default-fallback: ff-starvation relief throttle (k≥3 → no competitor ⇒ deterministic landing)
+export const FF_STARVATION_CAP_K2 = 2; // concurrency-default-fallback: ff-starvation relief throttle (k=2 → mild, not a stop)
+
 /** Free dispatch slots = max(0, cap − in_flight). The one definition; never hardcoded.
  *  RETIRED-BY-AC76 (C24-2, 人 2026-08-14 09:1xZ「在飞不应当靠任务记录,而应当查 inner 任务 subagent」):
  *  the in_flight INPUT to slots_free is retired as an in-flight READ when telemetry/bracket-measured
@@ -193,10 +213,194 @@ export function readSuiteRed(root) {
  *  2026-08-13). The old `suite_red && backlog > threshold` double condition required backlog > 50,
  *  which left the cap at 5 during a red round when the integration backlog was 10. Backlog is NOT part
  *  of the trigger; an inactive window leaves the base cap unchanged. Throttle, not a stop: the caller
- *  still recommends up to the narrowed cap. */
-export function computeArbitratedCap({ baseCap, redWindowActive, redBacklogCap = RED_BACKLOG_CAP_DEFAULT }) {
-  if (redWindowActive) return redBacklogCap;
-  return baseCap;
+ *  still recommends up to the narrowed cap.
+ *
+ *  FF-STARVATION SECOND TRIGGER (gap-ff-starvation-no-dynamic-cap-relief, AC1/AC8): the same pure
+ *  function now also narrows on `ffStarvationCap` — the relief narrowed cap computed by
+ *  `computeFfStarvationCap` from a LIVE task's current-round ff-failure count. `ffStarvationCap` null
+ *  (no live task at threshold) ⇒ no ff narrowing. Both triggers combine via `min` — a k≥3 starved task
+ *  (cap 1) and a red window (cap 2) resolve to 1 (the more urgent relief wins), and NO trigger can ever
+ *  WIDEN the base cap (a cap < redBacklogCap stays < redBacklogCap — the pre-ff version returned
+ *  `redBacklogCap` unconditionally on the red window, which could widen a cap-1 caller; `min` fixes
+ *  that). STATELESS (AC8): pure, no stored state, so the narrowed value is recomputed every round and
+ *  auto-restores to baseCap when the trigger condition disappears. */
+export function computeArbitratedCap({ baseCap, redWindowActive, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, ffStarvationCap = null }) {
+  let cap = baseCap;
+  if (redWindowActive) cap = Math.min(cap, redBacklogCap);
+  if (ffStarvationCap !== null && ffStarvationCap > 0) cap = Math.min(cap, ffStarvationCap);
+  return cap;
+}
+
+/** FF-STARVATION TIERED MAPPING (gap-ff-starvation-no-dynamic-cap-relief, AC2): map a live task's
+ *  current-round ff-failure count `k` to the relief narrowed cap. The tiers are DATA-DERIVED, not
+ *  invented (see the task Proposal's conditional-failure-probability table: P(land after 1 fail)=0.65 ⇒
+ *  retry works ⇒ no intervention; P(land after 3 fails)=0.27 ⇒ retry is worse than a coin flip ⇒ must
+ *  intervene). Three distinguishable levels:
+ *    k < 2 (0 or 1)  → null      — no intervention (a single ff failure is a normal retry)
+ *    k === 2         → 2         — mild throttle (FF_STARVATION_CAP_K2)
+ *    k >= 3          → 1         — deterministic landing (FF_STARVATION_CAP_DEFAULT, no competitor)
+ *  Pure + stateless. null return = "no narrowing" (the caller keeps baseCap). */
+export function computeFfStarvationCap(k) {
+  if (k == null || k < 2) return null;
+  if (k === 2) return FF_STARVATION_CAP_K2;
+  return FF_STARVATION_CAP_DEFAULT;
+}
+
+/** Read <root>/.quay/fan-in-retries.jsonl — the append-only fan-in ff retry ledger written by
+ *  fan-in-ff-merge.sh (one line per ff failure: {taskId, attempt, developHead, ts, epoch, runId,
+ *  agentId, mergeTarget, error}). This is the ff-race-specific carrier — the DISTINGUISHED cause (AC5):
+ *  an ff-race non-landing has a retry record here; a suite-red non-landing is in
+ *  per-task-suite-records.jsonl (state=red); a worker-round-end is worker-outcome.jsonl final_state
+ *  ∈ {timed-out, failed}. Absent/unparseable ⇒ [] (no ff failures ⇒ no starvation). */
+export function readFfRetryRecords(root) {
+  try {
+    const text = fs.readFileSync(path.join(root, ".quay", "fan-in-retries.jsonl"), "utf8");
+    const rows = [];
+    for (const line of text.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      try { rows.push(JSON.parse(t)); } catch { /* skip a corrupt line */ }
+    }
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+/** Read <root>/.quay/fan-in-ff-escalations.jsonl — the anti-livelock escalation ledger written by
+ *  fan-in-ff-merge.sh when a task's ff failure is its attempt >= 3 (`ff-escalation` request) and on ff
+ *  success (`ff-escalation-resolved`). An ff-escalation WITHOUT a newer ff-escalation-resolved for the
+ *  SAME task = that task is currently starved at k≥3. Absent/unparseable ⇒ []. */
+export function readFfEscalationRecords(root) {
+  try {
+    const text = fs.readFileSync(path.join(root, ".quay", "fan-in-ff-escalations.jsonl"), "utf8");
+    const rows = [];
+    for (const line of text.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      try { rows.push(JSON.parse(t)); } catch { /* skip a corrupt line */ }
+    }
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+/** Per-task current-round ff-failure count from the retry ledger (gap-ff-starvation-no-dynamic-cap-
+ *  relief): for each LIVE task id, the ff-failure count `k` = the `attempt` field of its most recent
+ *  retry record. `attempt` IS the per-dispatch "第几次" counter (prior failures for the task's current
+ *  runId + 1), so the most recent record for a live task carries its current-round count. Returns a
+ *  Map<taskId, k> covering only the supplied live ids (a task NOT in the live set is ignored — a stale
+ *  historical failure is not a current starvation). Pure. */
+export function computeFfFailureCounts(retryRecords, liveTaskIds) {
+  const liveSet = new Set(liveTaskIds);
+  const latest = new Map();
+  for (const rec of retryRecords) {
+    const id = rec && rec.taskId;
+    if (!id || !liveSet.has(id)) continue;
+    const attempt = Number(rec.attempt) || 0;
+    const epoch = Number(rec.epoch) || 0;
+    const cur = latest.get(id);
+    if (!cur || epoch >= cur.epoch) latest.set(id, { attempt, epoch });
+  }
+  const out = new Map();
+  for (const [id, v] of latest) out.set(id, v.attempt);
+  return out;
+}
+
+/** Live tasks with an UNRESOLVED ff escalation (a k≥3 anti-livelock request without a newer
+ *  `ff-escalation-resolved`). The escalation ledger is the CLEAN "currently starved at k≥3" signal — a
+ *  task re-dispatched after a prior round's escalation keeps its old retry records, but its escalation
+ *  is resolved only on ff success, so an unresolved escalation is the unambiguous live signal. Returns
+ *  a Set<taskId>. Pure. */
+export function computeUnresolvedEscalationTaskIds(escalationRecords) {
+  const latestEvent = new Map(); // taskId -> { event, epoch }
+  for (const rec of escalationRecords) {
+    const id = rec && rec.taskId;
+    if (!id) continue;
+    const epoch = Number(rec.epoch) || 0;
+    const event = rec.event;
+    const cur = latestEvent.get(id);
+    if (!cur || epoch >= cur.epoch) latestEvent.set(id, { event, epoch });
+  }
+  const unresolved = new Set();
+  for (const [id, v] of latestEvent) {
+    if (v.event === "ff-escalation") unresolved.add(id);
+  }
+  return unresolved;
+}
+
+/** The ff-starvation relief decision (gap-ff-starvation-no-dynamic-cap-relief): combine per-task
+ *  ff-failure counts and the unresolved-escalation set into ONE narrowing decision. `maxK` = the highest
+ *  current-round failure count among live tasks (an unresolved escalation forces maxK to ≥3). The
+ *  narrowed cap is `computeFfStarvationCap(maxK)`. Returns { active, tier, maxK, narrowedCap,
+ *  starvedTaskIds }. Pure — the caller feeds it retry-ledger counts, never a stored cap. */
+export function computeFfStarvationRelief({ ffCounts, unresolvedEscalationIds = new Set() }) {
+  let maxK = 0;
+  let tier = 0;
+  const starvedTaskIds = [];
+  for (const [id, k] of ffCounts) {
+    const effectiveK = unresolvedEscalationIds.has(id) ? Math.max(k, 3) : k;
+    if (effectiveK > maxK) maxK = effectiveK;
+    if (effectiveK >= 2) starvedTaskIds.push(id);
+  }
+  // A live task with an unresolved escalation but no retry record (a ledger reset / the escalation
+  // written by a different mechanism) still counts as k≥3.
+  for (const id of unresolvedEscalationIds) {
+    if (!ffCounts.has(id)) {
+      if (3 > maxK) maxK = 3;
+      if (!starvedTaskIds.includes(id)) starvedTaskIds.push(id);
+    }
+  }
+  const narrowedCap = computeFfStarvationCap(maxK);
+  if (maxK >= 3) tier = 3;
+  else if (maxK === 2) tier = 2;
+  else if (maxK === 1) tier = 1;
+  return {
+    active: narrowedCap !== null,
+    tier,
+    maxK,
+    narrowedCap,
+    starvedTaskIds,
+  };
+}
+
+/** Perpetrator-type classification for an ff failure (gap-ff-starvation-no-dynamic-cap-relief, AC7):
+ *  the develop increment that caused the ff failure is EITHER a task landing (another task's fan-in
+ *  fast-forward — NOT delayable, the relief must NOT queue it) OR a layer commit (manager/outer writing
+ *  develop directly: 立案 / 任务体更正 / orchestration 文档 / tick 记录 — DELAYABLE, the relief queues
+ *  it via the quiet-window hold). `commits` = the develop commit subjects that landed between the task's
+ *  suite_head and its ff-failure developHead. A commit is a TASK LANDING when its subject matches the
+ *  fan-in convention (`fan-in:` / `merge task/` / `task/<id>` merge / a `revert … done→ready` ff-failure
+ *  revert), else a LAYER COMMIT. Returns "task-landing" | "layer-commit" | "mixed" | "unknown". Pure. */
+export function classifyFfPerpetrator(commitSubjects) {
+  if (!Array.isArray(commitSubjects) || commitSubjects.length === 0) return "unknown";
+  const TASK_LANDING_RE = /(?:^|\s)(fan-in(?::|\s)|merge(?:\s|-).*task\/|Fast-forward.*task\/)/i;
+  let layer = 0;
+  let landing = 0;
+  for (const s of commitSubjects) {
+    const subject = String(s ?? "");
+    if (TASK_LANDING_RE.test(subject)) landing++;
+    else layer++;
+  }
+  if (layer > 0 && landing > 0) return "mixed";
+  if (landing > 0) return "task-landing";
+  return "layer-commit";
+}
+
+/** Non-landing CAUSE classification (gap-ff-starvation-no-dynamic-cap-relief, AC5): the three causes
+ *  that leave a worker `exited-not-landed` are currently same-form in worker-outcome.jsonl
+ *  (`failure_reason` = a symptom, not a cause). This pure classifier distinguishes them from the
+ *  carrier each cause writes: an ff-race has a fan-in retry record (fan-in-retries.jsonl, taskId match);
+ *  a suite-red has the suite state red (full-suite-state.json state=red); a worker-round-end is the
+ *  worker's own terminal state (final_state ∈ timed-out/killed/failed). Returns
+ *  "ff-race" | "suite-red" | "worker-round-end" | "unknown" (unknown = no positive carrier matched —
+ *  never a same-shaped "qualified" guess). Pure — the caller injects the three carrier reads. */
+export function classifyNonLandingCause({ hasRetryRecord = false, suiteRed = false, workerFinalState = null }) {
+  if (hasRetryRecord) return "ff-race";
+  if (suiteRed) return "suite-red";
+  if (workerFinalState === "timed-out" || workerFinalState === "killed" || workerFinalState === "failed") return "worker-round-end";
+  return "unknown";
 }
 
 /**
@@ -224,19 +428,31 @@ function readFrontField(frontmatterRaw, key) {
   return m ? m[1].replace(/^["']|["']$/g, "") : null;
 }
 
-/** Parent done (or absent) ⇒ deps ready. Mirrors ready-pool-check's depsReadyFor; fail-closed when
- *  the parent file is missing (cannot confirm done). COMPOUND AGGREGATION (gap-compound-depsreadyfor-
- *  structural-deadlock AC2): a `role: compound` parent is an AGGREGATE — the parent is only `done`
- *  once ALL its children are done, so a child waiting on its compound parent is the 双向互等 deadlock
- *  (child waits on parent, parent waits on children). The compound-parent edge is therefore skipped;
- *  a child of a compound dispatches on its own depends_on edges alone. */
+/** ALL prerequisites done (parent AND every depends_on entry) ⇒ deps ready. Mirrors ready-pool-check's
+ *  depsReadyFor — the SAME field read (gap-prerequisite-gates-prose-invisible-to-mechanisms AC2: the
+ *  dispatch check reads the relation edges parent AND depends_on, ⛔ never the prose). Fail-closed when
+ *  a dependency file is missing (cannot confirm done) — a missing dep resolves to null status via
+ *  allDepsDone. COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC2): a `role:
+ *  compound` parent is an AGGREGATE — the parent is only `done` once ALL its children are done, so a
+ *  child waiting on its compound parent is the 双向互等 deadlock (child waits on parent, parent waits
+ *  on children). The compound-parent edge is therefore skipped from the PARENT arm only (a depends_on
+ *  entry is a true predecessor edge and is NEVER skipped); a child of a compound dispatches on its own
+ *  depends_on edges alone. */
 function depsReadyFor(task, metaById) {
+  const deps = [];
   const parent = task.parent;
-  if (!parent || parent === "null" || parent === "~") return true;
-  const meta = metaById.get(parent);
-  if (meta === undefined) return false; // parent file missing → fail closed
-  if (meta.role === "compound") return true; // aggregation, not a predecessor
-  return meta.status === "done";
+  if (parent && parent !== "null" && parent !== "~") {
+    const meta = metaById.get(parent);
+    if (meta === undefined) return false; // parent file missing → fail closed
+    if (meta.role !== "compound") deps.push(parent); // aggregation, not a predecessor
+  }
+  for (const d of readDependsOn(task.frontmatterRaw)) deps.push(d);
+  // AC152: reuse driver-filters' allDepsDone (single implementation, ⛔ no parallel status loop).
+  // A missing dep file ⇒ meta undefined ⇒ null status ⇒ not done ⇒ fail closed (conservative).
+  return allDepsDone(deps, (depId) => {
+    const meta = metaById.get(depId);
+    return meta ? meta.status : null;
+  });
 }
 
 /** Per-task dispatch metadata (id → { status, role }), for the deps-ready filter and the compound
@@ -633,9 +849,21 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   const suiteRed = readSuiteRed(root);
   const backlog = integrationBacklog ?? readGitRevCount(root, "develop..integration") ?? 0;
   const baseCap = cap;
+  // FF-STARVATION RELIEF (gap-ff-starvation-no-dynamic-cap-relief, AC1/AC3): the second trigger on
+  // computeArbitratedCap. The live-task ids come from the WIDE in-flight set (inFlight + closedButLive
+  // — an awaiting-retry starved task has no subagent but its worktree/ff-retry state is live); the
+  // counts come from the fan-in ff retry ledger (per-task current-round ff failures) + the unresolved
+  // escalation set (k≥3). STATELESS: read every round, never stored — the trigger disappearing restores
+  // baseCap (AC8). The narrowed cap is fed to computeArbitratedCap alongside the red window.
+  const liveTaskIds = [...(inFlight || []), ...(closedButLive || [])].map((t) => t.id);
+  const ffRetryRecords = readFfRetryRecords(root);
+  const ffEscalationRecords = readFfEscalationRecords(root);
+  const ffCounts = computeFfFailureCounts(ffRetryRecords, liveTaskIds);
+  const unresolvedEscalationIds = computeUnresolvedEscalationTaskIds(ffEscalationRecords);
+  const ffStarvation = computeFfStarvationRelief({ ffCounts, unresolvedEscalationIds });
   let pool = analyzeTasks({ tasksDir, root, cap: baseCap, floorMult, inFlight, closedButLive });
   const redWindowActive = pool.suite_blocking ? pool.suite_blocking.window_active : false;
-  const effectiveCap = computeArbitratedCap({ baseCap, redWindowActive, redBacklogCap });
+  const effectiveCap = computeArbitratedCap({ baseCap, redWindowActive, redBacklogCap, ffStarvationCap: ffStarvation.narrowedCap });
   const capNarrowed = effectiveCap !== baseCap;
   if (capNarrowed) {
     pool = analyzeTasks({ tasksDir, root, cap: effectiveCap, floorMult, inFlight, closedButLive });
@@ -1025,8 +1253,23 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       red_backlog_cap: redBacklogCap,
       cap_narrowed: capNarrowed,
       reason: capNarrowed
-        ? `red window active ⇒ dispatch cap narrowed ${baseCap}→${effectiveCap}`
+        ? `${[redWindowActive ? "red window active" : null, ffStarvation.active ? `ff-starvation (k=${ffStarvation.maxK})` : null].filter(Boolean).join(" + ") || "arbitrated"} ⇒ dispatch cap narrowed ${baseCap}→${effectiveCap}`
         : null,
+    },
+    // FF-STARVATION RELIEF (gap-ff-starvation-no-dynamic-cap-relief, AC5/AC7 surfacing): the relief
+    // decision + the starved live tasks (id-sorted for determinism). The reverse-dependency blocking
+    // weight (computeDependedOnCount — ready-pool-check.ts, single source) is available to the consumer
+    // for「阻塞下游多的优先纾解」ordering; the cap narrowing itself is GLOBAL (a k≥3 starve narrows to 1,
+    // which relieves every live starved task at once — no per-task priority needed in the cap). `cause`
+    // is the DISTINGUISHED non-landing cause (classifyNonLandingCause: "ff-race" vs "suite-red" vs
+    // "worker-round-end" — AC5); a starved task here is by construction an ff-race.
+    ff_starvation: {
+      active: ffStarvation.active,
+      tier: ffStarvation.tier,
+      max_k: ffStarvation.maxK,
+      narrowed_cap: ffStarvation.narrowedCap,
+      starved_task_ids: [...ffStarvation.starvedTaskIds].sort(),
+      cause: ffStarvation.active ? "ff-race" : null,
     },
     floor_mult: floorMult,
     // AC6 DEGRADED-MEASUREMENT NULL (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 判据5

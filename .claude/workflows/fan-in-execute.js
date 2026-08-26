@@ -260,7 +260,7 @@ suite_capture="/tmp/fan-in-suite-${task}.env"
 suite_exit_marker="/tmp/fan-in-suite-${task}.exit"
 suite_time_file="/tmp/fan-in-suite-${task}.time"
 suite_log_file="/tmp/fan-in-suite-${task}.log"
-rm -f "$suite_exit_marker"
+rm -f "$suite_exit_marker" "$suite_time_file"
 suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 suite_start_ms=$(date +%s%3N)
 suite_head_now=$(git -C ${worktree} rev-parse HEAD 2>/dev/null || echo unknown)
@@ -461,7 +461,7 @@ cpu_s=null
 cpu_source=not-wired
 cpu_user_s=null
 cpu_sys_s=null
-if [ -f "$suite_time_file" ]; then
+if [ "$full_suite_ran" = "true" ] && [ -f "$suite_time_file" ]; then
   cpu_user=$(tail -1 "$suite_time_file" 2>/dev/null | awk '{printf "%.3f", $1}' || true)
   cpu_sys=$(tail -1 "$suite_time_file" 2>/dev/null | awk '{printf "%.3f", $2}' || true)
   cpu=$(tail -1 "$suite_time_file" 2>/dev/null | awk '{printf "%.3f", $1+$2}' || true)

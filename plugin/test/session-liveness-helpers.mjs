@@ -844,3 +844,54 @@ export function assistantUsageRecord(ts, cacheRead) {
     usage: { input_tokens: 89, cache_creation_input_tokens: 0, cache_read_input_tokens: cacheRead, output_tokens: 111 },
     timestamp: ts });
 }
+
+// ── SESSION-DISABLED composite (SCD) fixtures ──────────────────────────────────────────────────────
+// Moved here from session-liveness.test.mjs when it was split into per-scenario files
+// (gap-suite-split-long-multi-test-files): every split file resolves the SAME git-repo +
+// transcript fixtures, so the shared definitions live here (the session-liveness-helpers split
+// pattern). The test BODIES are byte-identical to the original — only their file placement changed.
+
+// A temp git repo whose develop branch points at a commit dated `backdateMin` minutes ago.
+// backdateMin=0 → develop commit is NOW (active); backdateMin>0 → develop is silent for that long.
+export function makeRepoWithDevelop(dir, { backdateMin = 0 } = {}) {
+  const env = { ...process.env };
+  if (backdateMin > 0) {
+    const when = new Date(Date.now() - backdateMin * 60000).toISOString();
+    env.GIT_AUTHOR_DATE = when;
+    env.GIT_COMMITTER_DATE = when;
+  }
+  const git = (args) => spawnSync("git", ["-C", dir, ...args], { encoding: "utf8", env });
+  fs.mkdirSync(dir, { recursive: true });
+  const init = git(["-c", "user.name=t", "-c", "user.email=t@t", "init", "-q", "-b", "master", "."]);
+  assert.equal(init.status, 0, `git init failed: ${init.stderr}`);
+  fs.writeFileSync(path.join(dir, "a.txt"), "x\n");
+  assert.equal(git(["-c", "user.name=t", "-c", "user.email=t@t", "add", "."]).status, 0, "git add failed");
+  const commit = git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c"]);
+  assert.equal(commit.status, 0, `git commit failed: ${commit.stderr}`);
+  assert.equal(git(["branch", "develop"]).status, 0, "git branch develop failed");
+  return dir;
+}
+
+export function addWorktree(repoDir, wtDir, branch) {
+  const git = (args) => spawnSync("git", ["-C", repoDir, ...args], { encoding: "utf8" });
+  const r = git(["worktree", "add", wtDir, "-b", branch]);
+  assert.equal(r.status, 0, `worktree add ${branch} failed: ${r.stderr}`);
+}
+
+export function removeWorktrees(repoDir, wtDirs) {
+  const git = (args) => spawnSync("git", ["-C", repoDir, ...args], { encoding: "utf8" });
+  for (const d of wtDirs) {
+    git(["worktree", "remove", "--force", d]);
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+}
+
+// A transcript fixture that the classifier reads as `saturated` (high cache_read + unanswered user
+// input). backdate ≥ SATURATION_SILENCE_MIN minutes so the SESSION-DISABLED composite's ⑤
+// 推进量合取项 is TRUE — a session that has STOPPED writing its heartbeat (genuinely disabled).
+// 20 > default T=10; the classifier reads record CONTENT (isoAgo timestamps), not file mtime.
+export function saturatedTranscript(p, name) {
+  const f = path.join(p.tmp, `${name}.jsonl`);
+  writeTranscript(f, [assistantUsageRecord(isoAgo(0.1), 600000), userInputRecord(isoAgo(0.05))], 20);
+  return f;
+}

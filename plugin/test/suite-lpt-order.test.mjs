@@ -20,8 +20,12 @@
 //     emits __PERFILE__ duration_ms=<d> <path> passed=<bool> — the LPT ordering's OWN input carrier
 //     (break it and LPT has no duration data ⇒ self-defeating).
 //   - ordering helpers: repoRelKey normalization, orderByLpt LPT sort, loadDurationAverages
-//     rolling-average + malformed-line tolerance, fail-open on an absent carrier, and the
+//     per-file rolling-average + malformed-line tolerance, fail-open on an absent carrier, and the
 //     --buckets branch wiring behind QUAY_TEST_LPT_ORDER.
+//   - gap-suite-lpt-lookback-not-bucket-filtered AC1-AC3 (ordering helper, cross-bucket lookback):
+//     AC1 loadDurationAverages finds a P-only file's OWN history even when the last-N records are
+//     all another bucket; AC2 production-replay shape (#599) reorders P-only long files ahead by
+//     duration; AC3 a normal/with-full lookback still sorts descending with the a.i-b.i tiebreaker.
 //
 // Run:
 //   scripts/test.sh plugin/test/suite-lpt-order.test.mjs
@@ -208,7 +212,7 @@ test("ordering — repoRelKey folds worktree + main-checkout absolute paths to t
   );
 });
 
-test("ordering — loadDurationAverages takes a rolling average over the most recent rounds and tolerates malformed lines", () => {
+test("ordering — loadDurationAverages takes a per-file rolling average over each file's last N appearances and tolerates malformed lines", () => {
   const root = makeRootWithCarrier([
     [
       ["plugin/test/x.test.mjs", 100],
@@ -224,6 +228,94 @@ test("ordering — loadDurationAverages takes a rolling average over the most re
     assert.equal(avg.get("plugin/test/x.test.mjs"), 200, "x averages (100+300)/2");
     assert.equal(avg.get("plugin/test/y.test.mjs"), 200, "y averages over its one appearance");
     assert.equal(avg.size, 2);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — a lookback whose last N records are all another bucket still finds a P-only file's OWN history (cross-bucket immunity)", () => {
+  const root = makeRootWithCarrier([
+    // Earlier history: the P-only files appear with their real durations (90–260s range).
+    [
+      ["packages/quay/test/p-long.test.mjs", 200],
+      ["packages/quay/test/p-short.test.mjs", 5],
+    ],
+    // The LAST 3 records are ALL M-bucket files — the P-only files are absent from them.
+    [["plugin/test/m1.test.mjs", 150]],
+    [["plugin/test/m2.test.mjs", 120]],
+    [["plugin/test/m3.test.mjs", 100]],
+  ]);
+  try {
+    const carrier = path.join(root, ".quay", "verification-round.jsonl");
+    const avg = loadDurationAverages(carrier, root, 3);
+    assert.equal(
+      avg.get("packages/quay/test/p-long.test.mjs"),
+      200,
+      "a P-only file's duration must be found from its OWN history, not dropped by a last-N window full of M records",
+    );
+    assert.equal(avg.get("packages/quay/test/p-short.test.mjs"), 5);
+    assert.equal(avg.get("plugin/test/m1.test.mjs"), 150);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — production-replay shape (#599: lookback all-M) reorders P-only long files ahead by duration, not to the tail", () => {
+  const root = makeRootWithCarrier([
+    // Earlier P-bucket history: the long P-only files' real durations.
+    [
+      ["packages/quay/test/long-p.test.mjs", 260],
+      ["packages/quay/test/mid-p.test.mjs", 90],
+    ],
+    // The LAST 3 records are all M (rounds 596/597/598 in #599's lookback) — no P files.
+    [["plugin/test/m1.test.mjs", 150]],
+    [["plugin/test/m2.test.mjs", 120]],
+    [["plugin/test/m3.test.mjs", 100]],
+  ]);
+  try {
+    const carrier = path.join(root, ".quay", "verification-round.jsonl");
+    const avg = loadDurationAverages(carrier, root, 3);
+    const input = [
+      `${root}/packages/quay/test/short-p.test.mjs`, // unknown (0) — must stay LAST
+      `${root}/packages/quay/test/long-p.test.mjs`, // 260 — must lead
+      `${root}/packages/quay/test/mid-p.test.mjs`, // 90 — must follow
+    ];
+    const out = orderByLpt(input, avg, root);
+    assert.deepEqual(
+      out.map((f) => path.basename(f)),
+      ["long-p.test.mjs", "mid-p.test.mjs", "short-p.test.mjs"],
+      "P-only long files must be reordered by real duration, not dropped to the tail as unknown",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — a normal/with-full lookback still sorts descending by duration with ties keeping original order", () => {
+  const root = makeRootWithCarrier([
+    // A mixed/full record plus M records, as in #583's lookback [580(M),581(M),582(full)].
+    [
+      ["plugin/test/full-a.test.mjs", 150],
+      ["plugin/test/tie-x.test.mjs", 60],
+    ],
+    [["plugin/test/tie-y.test.mjs", 60]],
+    [["plugin/test/full-b.test.mjs", 200]],
+  ]);
+  try {
+    const carrier = path.join(root, ".quay", "verification-round.jsonl");
+    const avg = loadDurationAverages(carrier, root, 3);
+    const input = [
+      `${root}/plugin/test/tie-x.test.mjs`, // 60 (tie)
+      `${root}/plugin/test/full-b.test.mjs`, // 200
+      `${root}/plugin/test/tie-y.test.mjs`, // 60 (tie)
+      `${root}/plugin/test/full-a.test.mjs`, // 150
+    ];
+    const out = orderByLpt(input, avg, root);
+    assert.deepEqual(
+      out.map((f) => path.basename(f)),
+      ["full-b.test.mjs", "full-a.test.mjs", "tie-x.test.mjs", "tie-y.test.mjs"],
+      "descending duration, ties keep original relative order (a.i-b.i tiebreaker)",
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

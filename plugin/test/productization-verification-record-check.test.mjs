@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // productization-verification-record-check.test.mjs — AC89 判据 fixture for the productization
 // verification record mechanism (plugin/scripts/productization-verification-record.ts writer +
 // productization-verification-record-check.ts checker). Proves the checker can go RED on a malformed
