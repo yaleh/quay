@@ -18,3 +18,6 @@ kinds:
     cap: 5               # 并发 cap（worker 常驻选择环的存活 worker 上限）
     interval_ms: 30000   # 无在飞 worker 且瞬时 WAIT 时的轮询间隔
     reconcile_interval_secs: 300  # 协调地板（SPEC §5.5：至少每 N 秒协调一次，边沿事件全丢也「慢但正确」而非静默停摆）
+  outer:
+    cap: 5               # ⛔ outer 例程型 kind 无并发概念（例程是「读→报」非「spawn 执行者」）；字段仅为齐整
+    interval_ms: 30000   # 轮询节奏（= outer tick 例程的 round heartbeat；生产由 --interval 覆盖为 ~20min）

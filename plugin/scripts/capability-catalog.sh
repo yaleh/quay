@@ -400,6 +400,7 @@ declare -A QUESTION=(
   [md-deletion-token-evaporation-check.sh]="Did any commit net-deleting ≥50 lines from *.md leave deleted-content unique tokens (identifiers/paths/专名) with ZERO occurrence in the post-delete repo (来源完备性整段蒸发)?"
   [workflows-dual-copy-drift-check.ts]="Are the five dual-copy workflow files (drain-directives / fan-in-execute / run-routines / execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped orchestrator-tick-core.md references them, so the plugin/workflows/ mirror must carry them) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships to installed targets) — a one-sided edit (改正本而落地副本不跟, the A6/fan-in-execute.js class) must go RED, the current byte-identical state GREEN (gap-workflows-dual-copy-drift-unchecked)?"
   [promotion-driver.ts]="Is the todo→ready promotion applied mechanically every round — a resident loop that calls ready-pool-check for the full-pool verdict and lands eligible promotions (zero LLM), and calls the supervisor/driver liveness check each round (gap-resident-driver-stable-carrier-liveness AC2 death-alarm caller), rather than role-will that vanishes when the session or model changes?"
+  [outer-driver.ts]="Does the outer's pure-mechanical A/B segments (A1/A3/A6/A9/A10/A18/A21 readings · B1/B2/B6 closing traces · B12/B17 self-audit) get absorbed into a resident routine-type driver — a resident loop that runs the routine table each round and writes structured Facts (verified/not-evaluated/failed) to .quay/outer-round.jsonl, where each routine that cannot read its input reports not-evaluated (⛔ not verified, AC153 Layer 1b form), rather than role-will that vanishes when the outer session or model changes (AC143)?"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
@@ -693,6 +694,7 @@ declare -A CADENCE=(
   [red-on-omission-audit.ts]="每轮"
   [workflows-dual-copy-drift-check.ts]="每轮"
   [promotion-driver.ts]="按需"
+  [outer-driver.ts]="按需"
 
 )
 
@@ -987,6 +989,7 @@ declare -A INVALIDATION=(
   [red-on-omission-audit.ts]="失效前提：执行核仍以 tick-core 文档固化行为；若行为固化面迁出 tick-core/plugin-scripts 文件系统，本条退休"
   [workflows-dual-copy-drift-check.ts]="失效前提：workflow 双副本结构仍存在（.claude/workflows/ 与 plugin/workflows/ 各有一份同一文件）；若双副本结构取消（同一文件只在一处），本条退休"
   [promotion-driver.ts]="失效前提：todo→ready 晋升仍经 ready-pool-check --apply 全池判定；若晋升并入别处（如 outer tick 内联）或 ready-pool-check 全池模式退役，本条退休"
+  [outer-driver.ts]="失效前提：outer 会话的纯机械 A/B 段仍需一个常驻机械进程承接（读数/收尾/自查），且例程型 driver（Layer 0+1b）仍是其承载；若 outer 会话退役后这些段也随会话消失（不再需要机械承接）或例程型承载迁出（如并入 manager 会话），本条退休"
 
 )
 
@@ -1281,6 +1284,7 @@ declare -A LAST_REAFFIRMED=(
   [red-on-omission-audit.ts]="2026-08-10"
   [workflows-dual-copy-drift-check.ts]="2026-08-14"
   [promotion-driver.ts]="2026-08-22"
+  [outer-driver.ts]="2026-08-26"
 
 )
 
@@ -1575,6 +1579,7 @@ declare -A MATCHING=(
   [red-on-omission-audit.ts]="keyword"
   [workflows-dual-copy-drift-check.ts]="enumerative"
   [promotion-driver.ts]="n/a"
+  [outer-driver.ts]="n/a"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1673,6 +1678,7 @@ declare -A CONSUMER=(
   [tick-core-static-check.ts]="消费方：pre-commit gate（run_doc_checks → precommit-guard.ts）——--check-drift 是 HARD 闸（gap-ac90-delivery-copy-drift-gate 收口），任一副本-正本对漂移（改正本而副本不落地 / 副本单边编辑）即 block 提交；reconcile 前的 --no-block 窗口已关闭"
   [worker-driver.ts]="谁按：inner 派发器在要驱动单个 claude -p worker 跑完整任务时按（AC115 阶段 1 显式 --task）；条件=任务要被机械驱动跑完 select→worktree→develop→suite→ff 并落盘结构化 outcome 到 .quay/worker-outcome.jsonl"
   [promotion-driver.ts]="谁按：outer 生产部署启动命令按（常驻进程，promotion-driver.ts 头注释「生产部署时由 outer 的启动命令传 --interval 覆盖」——接线为 AC130 后续/独立任务，本任务只做常驻循环这一半）；条件=生产部署启动常驻进程"
+  [outer-driver.ts]="谁按：outer 退役过渡期由 outer/manager 的启动命令起常驻进程（quay driver start --kind outer）承接 outer 纯机械 A/B 段，或 fan-in 验证轮跑 --once 冒烟；条件=outer 的机械 A/B 段需要机械承接（读→报→写载体）"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the
