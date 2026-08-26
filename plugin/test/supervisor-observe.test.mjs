@@ -318,7 +318,13 @@ test("AC3d — process_state self-match negative control: the observer's own tre
   try {
     const data = runObserve(["--host", "local", "--root", w.repo, "--comm", "bash", "--json"]);
     const procs = data.process_state;
-    const observer = procs.filter((p) => p.cmdline.includes("supervisor-observe.sh"));
+    // Self-match is scoped to THIS observer's own process (identified by its unique --root).
+    // Concurrent suites from OTHER tasks legitimately run their own supervisor-observe.sh with a
+    // DIFFERENT --root and match --comm bash — those are real observation results, not a self-match.
+    // A bare `cmdline.includes("supervisor-observe.sh")` conflates a concurrent observer (e.g. the
+    // gap-suite-serial-lowconc-... suite's observe --root /tmp/obs-git-<other>/repo) with the
+    // observer's own tree, breaking this negative control under full-suite concurrency.
+    const observer = procs.filter((p) => p.cmdline.includes("supervisor-observe.sh") && p.cmdline.includes(w.repo));
     assert.equal(observer.length, 0,
       `the observer's own process must be excluded (pgrep -c self-match): ${JSON.stringify(observer)}`);
     const pythons = procs.filter((p) => p.comm === "python3");
