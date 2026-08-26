@@ -1,7 +1,7 @@
 ---
 id: gap-suite-concurrency-S-two-source-divergence
 title: suite 单飞锁「槽数 S」两套读取链分叉——锁槽数读 .concurrency 文件、并发公式只读 env，改一处不改另一处静默分叉（S=2 落地实证 laneCount 未减半 → 32 lane 超订）
-status: ready
+status: done
 labels:
   - gap
   - defect
