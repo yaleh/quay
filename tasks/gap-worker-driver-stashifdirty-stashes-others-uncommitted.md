@@ -24,6 +24,8 @@ stash@{2} 03:30:52 / stash@{1} 03:32:01 / stash@{0} 03:32:30
 
 **⇒ 任何层（你/我）在主检出做未提交工作，都在与它赛跑。** 什么都不丢（在 stash 里），但反复困惑，并**放大硬规则 11「add 与 commit 之间不许有等待」的必要性**——不只是怕别层提交带走、更是怕被 stash 走。
 
+**爆炸半径实测（manager 08-26，读码 + `git stash push -h`）**：`worker-driver.ts:1081` 用的是 `--include-untracked`（=-u），**非 -a（include ignore files）** ⇒ ignored 文件不在 stash 范围内。两类会被卷走（tracked 未提交改动 + untracked 非忽略新文件）、ignored 文件不受影响。解释了整晚 tick-log（ignored）一次没丢、而 `.gitignore` 编辑（tracked）连丢两次的不对称。
+
 ## Plan
 
 给 stashIfDirty 加归属区分（方向候选，落笔方判）：① driver 只 stash 自己产生的未提交改动（而非全主检出脏）；② 或 driver 根本不在主检出操作、只在自己 worktree 内工作（则无需 stash 主检出）；③ 或 stash 前检查脏改动是否属于 driver（按路径/来源）。⛔ 恢复 driver 需人明示（当前 driver 已被人令停）。
@@ -31,7 +33,7 @@ stash@{2} 03:30:52 / stash@{1} 03:32:01 / stash@{0} 03:32:30
 ## Acceptance Criteria
 
 - [ ] AC1（能取假，不 stash 他人未提交改动）：stashIfDirty 不 stash manager/outer 在主检出的未提交改动（只 stash driver 自己的 / 或改在 worktree 内工作）；（⛔ 仍 stash 他人改动 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：造「driver 循环跑 + 主检出有 manager 未提交改动」场景，修复后该改动不被 stash 走、`git stash list` 无新增 "stash before checkout" 条目；（⛔ 仍被 stash ⇒ 假）。
+- [ ] AC2（能取假，三文件负控制）：同一时刻在主检出放三个文件（tracked 未提交改动 / untracked 非忽略新文件 / ignored 文件），跑一轮 driver 循环——**修好后三个全存活**；修好前恰好前两个被 stash、第三个存活（`--include-untracked` 不含 ignored）。⛔ 三文件对照能区分「修复生效」与「stash 根本没跑」（后者三个也全存活 ⇒ 与修好同形，硬规则 3b）；（⛔ 三个全消失 / 或前两个存活着无法区分 ⇒ 假）。
 
 ## Definition of Done
 
