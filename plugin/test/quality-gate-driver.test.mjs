@@ -97,6 +97,7 @@ test("AC3 — parseJudgmentConsumerReport parses the audit envelope / null on ga
 
 test("AC3 — runJudgmentConsumerCheck three-state vocab (verified / failed / not-evaluated)", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-b17-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const clean = runJudgmentConsumerCheck("/repo", ["node", fakeJudgmentScript(tmp, false)]);
   assert.equal(clean.name, "judgment-consumer-check");
   assert.equal(clean.state, "verified", "no drift ⇒ verified");
@@ -129,6 +130,7 @@ test("AC3 — parsePoolQualityPlan parses triggers/pool / null on malformed", ()
 
 test("AC3 — runPoolQualityJudge not-triggered ⇒ verified (fired=false 是真实测量)", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-b15-nt-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const planCmd = ["node", fakePlanScript(tmp, false)];
   const fact = runPoolQualityJudge("/repo", planCmd, null);
   assert.equal(fact.name, "pool-quality-judge");
@@ -139,6 +141,7 @@ test("AC3 — runPoolQualityJudge not-triggered ⇒ verified (fired=false 是真
 
 test("AC3 — runPoolQualityJudge fired ⇒ LLM judge + JS aggregate (should-remove → remove-or-rescope)", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-b15-fire-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const planCmd = ["node", fakePlanScript(tmp, true)];
   const judgeArgv = ["node", fakeJudgeScript(tmp)];
   const gateArgv = ["node", fakeGateGoScript(tmp)];
@@ -151,12 +154,14 @@ test("AC3 — runPoolQualityJudge fired ⇒ LLM judge + JS aggregate (should-rem
 
 test("AC3 — runPoolQualityJudge unreadable plan ⇒ not-evaluated (硬规则 3b)", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-b15-np-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const fact = runPoolQualityJudge("/repo", ["node", path.join(tmp, "nope.js")], null);
   assert.equal(fact.state, "not-evaluated");
 });
 
 test("AC3 — runPoolQualityJudge judge exit non-zero ⇒ failed", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-b15-jf-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const planCmd = ["node", fakePlanScript(tmp, true)];
   const failingJudge = writeFixture(tmp, "fake-judge-fail.js", `process.stdout.write(""); process.exit(1);`);
   const gateArgv = ["node", fakeGateGoScript(tmp)];
@@ -207,6 +212,7 @@ test("ROUND_LOG_REL / QUALITY_CONTROL_STATE_REL — 载体与控制态路径（g
 
 test("resident loop --once writes a round record with facts (spawn real process)", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-loop-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const planCmd = path.join(tmp, "fake-plan.js");
   const judgmentCmd = path.join(tmp, "fake-judgment.js");
   fs.writeFileSync(planCmd, `process.stdout.write(JSON.stringify({triggers:{fired:false,reasons:[],poolCount:0,oldestUnreviewedAgeMs:0,roundsSinceLastJudge:0},pool:[],tasks:[],lastJudgeState:{status:"ok"}}));`, "utf8");
