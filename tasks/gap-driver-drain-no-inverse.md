@@ -32,8 +32,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，drain 有逆操作）：`quay driver resume --kind <k>`（或 `drain --off`）把 halted:false 写回，drain+stop 后能通过表层恢复 driver；（⛔ 仍无逆操作、需读内部导出 ⇒ 假）。
-- [ ] AC2（能取假，start 遇 halted 明确拒绝）：`start` 遇 `halted:true` 明确报错并提示解闸命令（退出码非 0 / 明确 message），⛔ 不静默进 respawn 循环；（⛔ 仍静默 respawn ⇒ 假）。
+- [x] AC1（能取假，drain 有逆操作）：`quay driver resume --kind <k>`（或 `drain --off`）把 halted:false 写回，drain+stop 后能通过表层恢复 driver；（⛔ 仍无逆操作、需读内部导出 ⇒ 假）。
+- [x] AC2（能取假，start 遇 halted 明确拒绝）：`start` 遇 `halted:true` 明确报错并提示解闸命令（退出码非 0 / 明确 message），⛔ 不静默进 respawn 循环；（⛔ 仍静默 respawn ⇒ 假）。
 
 ## Definition of Done
 
@@ -41,7 +41,8 @@ drain 逆操作落地 + start 遇 halted 明确拒绝；AC1-AC2 全勾；drain+s
 
 ## Touches
 
-- packages/quay/src/cli/driver.ts（VERBS 加 resume / drain --off）
-- plugin/scripts/driver-runtime.ts（applyHalt false 的表层入口）
-- plugin/scripts/worker-driver.ts（start 遇 halted 的明确拒绝分支，⛔ 不 respawn）
+- packages/quay/src/cli/driver.ts（VERBS 加 resume + help）
+- packages/quay/src/cli/help.ts（driver help 加 resume）
+- plugin/scripts/driver-runtime.ts（resumeKind 表层入口 + startKind 遇 halted 拒绝）
+- plugin/test/driver-cli.test.mjs（AC1 resume / AC2 start 拒绝测试）
 - tasks/gap-driver-drain-no-inverse.md（自身）

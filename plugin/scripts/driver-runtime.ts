@@ -136,7 +136,7 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
   promotion: {
     driver: "promotion-driver.ts",
     prefix: "promotion-driver",
-    verbs: ["start", "stop", "drain", "status", "restart", "liveness"],
+    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
     capFlag: "--cap",
     hasInterval: true,
     hasReconcile: false,
@@ -148,7 +148,7 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
   worker: {
     driver: "worker-driver.ts",
     prefix: "worker-driver",
-    verbs: ["start", "stop", "drain", "status", "restart", "liveness"],
+    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
     capFlag: "--concurrency",
     hasInterval: false,
     hasReconcile: true,
@@ -160,7 +160,7 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
   quality: {
     driver: "quality-gate-driver.ts",
     prefix: "quality-driver",
-    verbs: ["start", "stop", "drain", "status", "restart", "liveness"],
+    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
     capFlag: "", // 例程型 kind 无任务池 ⇒ 无 cap（driverArgvForKind 仅在 opts.cap 非空时拼 capFlag）
     hasInterval: true,
     hasReconcile: false,
@@ -935,6 +935,20 @@ export async function startKind(
     out(`already-running: supervisor pid=${spidRaw}\n`);
     return statusForKind(root, kind, true, out);
   }
+  // gap-driver-drain-no-inverse AC2：drain 写 halted=true 后，若 start 照常 spawn supervisor，驱动会立刻
+  // 读到 halt 退出、supervisor 再 respawn ⇒ 无限 respawn 循环（「起不来却表现为正在重启」，硬规则 3b 同形）。
+  // 无活 supervisor 且控制态 halted ⇒ 明确拒绝并提示解闸命令（退出 1），⛔ 不静默进 respawn 循环。
+  // 读失败（parseError）⇒ 同样拒绝（fail-closed，⛔ 读不懂 ≠ 未 halt）。
+  const ctlRel = path.posix.join(".quay", spec.controlFile);
+  const ctl = readControlState(root, process.env, ctlRel);
+  if (ctl.parseError) {
+    err(`quay driver: could not read control state at ${path.join(root, ctlRel)} (${ctl.parseError}) — refusing to start (fail-closed)\n`);
+    return 1;
+  }
+  if (ctl.state.halted) {
+    err(`quay driver: ${kind} is halted (halted_by=${ctl.state.halted_by ?? "unknown"}${ctl.state.halted_at ? `, halted_at=${ctl.state.halted_at}` : ""}) — refusing to start; clear the halt first with: quay driver resume --kind ${kind}\n`);
+    return 1;
+  }
   // 无活 supervisor；清掉孤儿驱动（supervisor 已死但驱动还在的中间态）。
   const dpidRaw = readPidFile(st.driverPidFile);
   if (dpidRaw && pidAlive(dpidRaw)) {
@@ -1024,6 +1038,23 @@ export function drainKind(root: string, kind: DriverKind, out: (s: string) => vo
   return 0;
 }
 
+/** resume（drain 的逆操作，gap-driver-drain-no-inverse AC1）：写 <kind>-control.json halted=false，解闸。
+ *  纯文件操作、driver 停着也能写（与 drain 同性质）。读-改-写经 driver-shared 单一真相源
+ *  （applyHalt(state, caller, false) 只清 halted/halted_by/halted_at，保留 preference/forced）。 */
+export function resumeKind(root: string, kind: DriverKind, out: (s: string) => void = (s) => process.stdout.write(s)): number {
+  const spec = DRIVER_KINDS[kind];
+  const rel = path.posix.join(".quay", spec.controlFile);
+  const { state, parseError } = readControlState(root, process.env, rel);
+  if (parseError) {
+    process.stderr.write(`driver-runtime: resume: could not read ${path.join(root, rel)}: ${parseError}\n`);
+    return 2;
+  }
+  const next = applyHalt(state, "quay-driver-resume", false);
+  const file = writeControlState(root, next, rel);
+  out(`resumed: ${kind} halt cleared (new dispatch re-enabled) — control state at ${file}\n`);
+  return 0;
+}
+
 /** restart = stop then start。 */
 export async function restartKind(
   root: string,
@@ -1038,7 +1069,7 @@ export async function restartKind(
 
 // ── CLI（本 kernel 是 supervisor + 状态操作的【真正实现入口】，cli/driver.ts 直接 import 调用）──────
 
-const VERBS = ["start", "stop", "drain", "status", "restart", "liveness", "__supervise"];
+const VERBS = ["start", "stop", "drain", "resume", "status", "restart", "liveness", "__supervise"];
 
 function parseKernelArgs(argv: string[]) {
   const args = argv.slice(2);
@@ -1079,7 +1110,7 @@ export async function main(argv: string[]): Promise<number> {
     process.stdout.write(`driver-runtime — AC151 Layer 0 kernel（supervisor 港进 TS 的真正实现入口）
 
 Usage:
-  node --experimental-strip-types plugin/scripts/driver-runtime.ts <start|stop|drain|status|restart|liveness> \\
+  node --experimental-strip-types plugin/scripts/driver-runtime.ts <start|stop|drain|resume|status|restart|liveness> \\
     --kind <promotion|worker> [--root <repo>] [--interval <ms>] [--reconcile-interval <s>] [--cap <n>] \\
     [--restart-delay <s>] [--run-id <id>] [--json]
 `);
@@ -1146,6 +1177,8 @@ Usage:
       return await stopKind(root, k, out);
     case "drain":
       return drainKind(root, k, out);
+    case "resume":
+      return resumeKind(root, k, out);
     case "status":
       return statusForKind(root, k, json, out);
     case "liveness":

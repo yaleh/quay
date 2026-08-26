@@ -286,3 +286,57 @@ test("AC4 — cwd inside a worktree is also rejected (spawned subprocess)", (t) 
   assert.notEqual(r.status, 0, `cwd-in-worktree start must exit non-zero: ${r.stdout}\n${r.stderr}`);
   assert.match(r.stderr, /worktree/, `cwd rejection names a worktree: ${r.stderr}`);
 });
+
+// ── gap-driver-drain-no-inverse AC1 (falsifiable): drain has an inverse (resume) ───────────────────
+
+test("AC1 — resume is drain's inverse: clears halted=false (surface recovery, ⛔ no driver-internal exports)", async (t) => {
+  const root = makeRoot("resume");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // drain writes halted=true (worker-control.json).
+  const d = await cli(["driver", "drain", "--kind", "worker", "--root", root]);
+  assert.equal(d.code, 0, `drain must succeed: ${d.stdout}\n${d.stderr}`);
+  const ctl = JSON.parse(fs.readFileSync(path.join(root, ".quay", "worker-control.json"), "utf8"));
+  assert.equal(ctl.halted, true, "drain writes halted=true");
+
+  // resume (drain's inverse) writes halted=false back.
+  const r = await cli(["driver", "resume", "--kind", "worker", "--root", root]);
+  assert.equal(r.code, 0, `resume must succeed: ${r.stdout}\n${r.stderr}`);
+  const ctl2 = JSON.parse(fs.readFileSync(path.join(root, ".quay", "worker-control.json"), "utf8"));
+  assert.equal(ctl2.halted, false, "resume writes halted=false");
+  assert.equal(ctl2.halted_by, null, "resume clears halted_by (⛔ not a fake boolean)");
+  assert.equal(ctl2.halted_at, null, "resume clears halted_at");
+  assert.equal(ctl2.schemaVersion, 1, "resume preserves schemaVersion");
+});
+
+// ── gap-driver-drain-no-inverse AC2 (falsifiable): start when halted REFUSES, ⛔ no silent respawn ──
+
+test("AC2 — start when halted REFUSES with a clear message + resume hint (⛔ no silent respawn loop)", async (t) => {
+  const root = makeRoot("start-halted");
+  t.after(async () => {
+    await cli(["driver", "stop", "--kind", "worker", "--root", root]);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  // drain+stop 的模拟：drain 写 halted=true（stop 只杀 supervisor+driver、不碰控制态——同真实语义）。
+  const d = await cli(["driver", "drain", "--kind", "worker", "--root", root]);
+  assert.equal(d.code, 0, `drain must succeed: ${d.stdout}\n${d.stderr}`);
+
+  // start 遇 halted=true ⇒ 明确拒绝（退出码非 0）+ 提示解闸命令，⛔ 不 spawn supervisor（respawn 循环根）。
+  const s = await cli(["driver", "start", "--kind", "worker", "--root", root]);
+  assert.notEqual(s.code, 0, `start must refuse when halted: ${s.stdout}\n${s.stderr}`);
+  assert.match(s.stderr, /halted/, `refusal names "halted": ${s.stderr}`);
+  assert.match(s.stderr, /resume/, `refusal hints the resume command: ${s.stderr}`);
+  assert.ok(
+    !fs.existsSync(path.join(root, ".quay", "worker-driver-supervisor.pid")),
+    "no supervisor spawned while halted (falsifiable: a spawned supervisor ⇒ respawn loop)"
+  );
+
+  // resume 解闸后 start 成功（表层恢复闭环，⛔ 不再 respawn 循环）。
+  const r = await cli(["driver", "resume", "--kind", "worker", "--root", root]);
+  assert.equal(r.code, 0, `resume must succeed: ${r.stdout}\n${r.stderr}`);
+  const s2 = await cli(["driver", "start", "--kind", "worker", "--root", root]);
+  assert.equal(s2.code, 0, `start after resume succeeds: ${s2.stdout}\n${s2.stderr}`);
+  const st = JSON.parse((await statusJson(root, "worker")).stdout.trim());
+  assert.equal(st.running, 1, `worker running=1 after resume+start: ${JSON.stringify(st)}`);
+});
