@@ -1,7 +1,7 @@
 ---
 id: gap-ac148-inner-core-itemized-attribution
 title: AC148 inner 执行核逐条归属——fast-mode-tick-core A1-A26+B1-B5 每条三分类之一，⛔ 不得有未分类项
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -22,8 +22,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，逐条归属）：A1-A26 + B1-B5 每一条都有三分类之一（grep 到归属映射，覆盖全部条数）；（⛔ 任一条无归属 ⇒ 假）。
-- [ ] AC2（能取假，无「待定」搪塞）：无一条归属写成「待定/后续再说」；（⛔ 有「待定」⇒ 假）。
+- [x] AC1（能取假，逐条归属）：A1-A26 + B1-B5 每一条都有三分类之一（grep 到归属映射，覆盖全部条数）；（⛔ 任一条无归属 ⇒ 假）。
+- [x] AC2（能取假，无「待定」搪塞）：无一条归属写成「待定/后续再说」；（⛔ 有「待定」⇒ 假）。
 
 ## Definition of Done
 
@@ -31,5 +31,5 @@ inner 执行核逐条归属映射落地；AC1/AC2 全勾；映射为 AC149（真
 
 ## Touches
 
-- orchestration/fast-mode-tick-core.md（或归属映射文档）
+- orchestration/AC148-inner-core-itemized-attribution.md（归属映射文档）
 - tasks/gap-ac148-inner-core-itemized-attribution.md（自身）
