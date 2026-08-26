@@ -34,7 +34,16 @@ outer 机械 A/B 段收进 driver kind；AC1/AC2/AC3 全勾；outer 执行核对
 
 ## Touches
 
-- plugin/scripts/driver-runtime.ts / driver-*.ts（新 kind 或并入既有）
-- plugin/scripts/promotion-driver-launch.sh（registry 表加行）
-- orchestration/orchestrator-tick-core.md（对应段标已驱动化）
+- plugin/scripts/outer-driver.ts（新：AC143 例程型 driver，吸收 outer 纯机械 A/B 段）
+- plugin/scripts/driver-runtime.ts（DriverKind/DRIVER_KINDS 加 outer kind）
+- plugin/scripts/driver-config.ts（DriverConfig 加 outer）
+- plugin/scripts/drivers.yml（加 outer kind 配置块）
+- plugin/scripts/capability-catalog.sh（六表注册 outer-driver.ts）
+- packages/quay/src/cli/driver.ts（KINDS 加 outer）
+- plugin/test/outer-driver.test.mjs（新 test）
+- plugin/test/driver-runtime.test.mjs（registry 断言加 outer）
+- .gitignore（outer-driver 运行时状态 gitignore）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 291→292）
+- orchestration/orchestrator-tick-core.md（A1/A3/A6/A9/A10/A18/A21+B1/B2/B6+B12/B17 标已驱动化）
+- plugin/loop/orchestrator-tick-core.md（byte-identical 镜像，随正本同步）
 - tasks/gap-ac143-observability-ledger-closing-driver.md（自身）
