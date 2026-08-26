@@ -773,6 +773,14 @@ export interface SuiteRoundRecord {
    * attributable to lock-wait instead of reading as a slow suite.
    */
   lock_wait_ms?: number;
+  /**
+   * gap-suite-lock-starvation-long-validation-hold AC2 — the wall the suite HELD its single-flight slot
+   * (test.sh's acquire→release marker diff, in ms). This is the field that makes a validation-type long
+   * task distinguishable from a hung worker: high lock_wait_ms + low lock_hold_ms = starved in the queue;
+   * high lock_hold_ms = actually held the slot (a genuine long-validation run, or a hung holder). Absent
+   * on scoped/nested runs (no lock taken — 缺键, never a fabricated 0).
+   */
+  lock_hold_ms?: number;
   pass: number;
   fail: number;
   cancelled: number;
@@ -3256,6 +3264,11 @@ export async function run(argv: string[]): Promise<number> {
     // Present only when the suite actually took the lock (the acquire START + acquired markers both
     // fired); absent on scoped runs / lock-timeout aborts — a reader must tolerate absence.
     ...(lockWaitMs !== null ? { lock_wait_ms: lockWaitMs } : {}),
+    // gap-suite-lock-starvation-long-validation-hold AC2 — lock_hold_ms rides test.sh's
+    // `__OVERHEAD__ lock_hold_ms=N` marker (the acquire→release wall), accumulated into phaseMs by the
+    // generic overheadM parse. Absent on scoped/nested runs (no lock taken) — a reader must tolerate
+    // absence, same contract as lock_wait_ms.
+    ...(phaseMs.lock_hold !== undefined ? { lock_hold_ms: phaseMs.lock_hold } : {}),
     pass: tapPass,
     fail: tapFail,
     cancelled: tapCancelled,

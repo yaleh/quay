@@ -23,6 +23,7 @@ import { execFileSync, spawn } from "node:child_process";
 
 import {
   computeOutcome,
+  readLockMetricsForRun,
   newSessionId,
   appendOutcomeToFile,
   computeWorkerRoundRecord,
@@ -355,6 +356,57 @@ test("AC1 (unit) — computeOutcome writes session_id; newSessionId returns fres
   const b = newSessionId();
   assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "newSessionId yields a UUID");
   assert.notEqual(a, b, "two dispatches get DIFFERENT session ids (⛔ 重派同 session_id ⇒ 假)");
+});
+
+test("gap-suite-lock-starvation AC2 — computeOutcome carries lock_wait_ms/lock_hold_ms when present (缺键 when null)", () => {
+  const withLocks = computeOutcome({
+    task: "g", selectorReason: "r", exitCode: 0, signal: null,
+    startedAtMs: 0, endedAtMs: 1000, workerPid: 1, runId: "x", landed: true,
+    lockWaitMs: 12345, lockHoldMs: 67890,
+  });
+  assert.equal(withLocks.lock_wait_ms, 12345, "lock_wait_ms rides the outcome when the suite took the lock");
+  assert.equal(withLocks.lock_hold_ms, 67890, "lock_hold_ms rides the outcome — distinguishes「长时间持锁」from「worker 慢」");
+
+  const noLocks = computeOutcome({
+    task: "g", selectorReason: "r", exitCode: 0, signal: null,
+    startedAtMs: 0, endedAtMs: 1000, workerPid: 1, runId: "x", landed: true,
+  });
+  assert.equal(noLocks.lock_wait_ms, undefined, "no lock metrics → lock_wait_ms absent (缺键, not a fabricated 0)");
+  assert.equal(noLocks.lock_hold_ms, undefined, "no lock metrics → lock_hold_ms absent (缺键, not a fabricated 0)");
+});
+
+test("gap-suite-lock-starvation AC2 — readLockMetricsForRun reads lock_wait_ms/lock_hold_ms from the verification-round ledger (matched by runId+taskId; null on miss)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wd-lockmetrics-"));
+  try {
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    const ledger = path.join(root, ".quay", "verification-round.jsonl");
+    fs.writeFileSync(ledger, [
+      JSON.stringify({ round: 1, taskId: "gap-a", runId: "run-a", lock_wait_ms: 100, lock_hold_ms: 200 }),
+      JSON.stringify({ round: 2, taskId: "gap-b", runId: "run-b", lock_wait_ms: 300 }), // no lock_hold_ms
+      JSON.stringify({ round: 3, taskId: "gap-c", runId: "run-c" }), // neither field
+      // same task/run, LATER record wins (runId-reuse re-dispatch: the latest attempt's metrics)
+      JSON.stringify({ round: 4, taskId: "gap-a", runId: "run-a", lock_wait_ms: 500, lock_hold_ms: 600 }),
+      "not-json", // a bad line is skipped, never throws
+    ].join("\n") + "\n", "utf8");
+
+    const a = readLockMetricsForRun(root, "run-a", "gap-a");
+    assert.equal(a.lockWaitMs, 500, "last matching record wins (runId reuse → the current attempt's metrics)");
+    assert.equal(a.lockHoldMs, 600, "lock_hold_ms ← the last matching record");
+    const b = readLockMetricsForRun(root, "run-b", "gap-b");
+    assert.equal(b.lockWaitMs, 300, "a record with only lock_wait_ms → lock_wait_ms present");
+    assert.equal(b.lockHoldMs, null, "missing lock_hold_ms → null (缺键, not 0)");
+    const c = readLockMetricsForRun(root, "run-c", "gap-c");
+    assert.equal(c.lockWaitMs, null, "record without lock fields → null");
+    assert.equal(c.lockHoldMs, null, "record without lock fields → null");
+    const miss = readLockMetricsForRun(root, "run-zzz", "gap-a");
+    assert.equal(miss.lockWaitMs, null, "no matching runId → null");
+    assert.equal(miss.lockHoldMs, null, "no matching runId → null");
+    // taskId guard: a matching runId but a DIFFERENT task → miss.
+    const wrongTask = readLockMetricsForRun(root, "run-a", "gap-zzz");
+    assert.equal(wrongTask.lockWaitMs, null, "runId match + taskId mismatch → null");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("AC1 (integration) — re-dispatching the same task N times writes N distinct session_ids", (t) => {

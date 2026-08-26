@@ -37,10 +37,24 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，锁持有上限或独立锁）：验证型长任务不再独占 full-suite 锁数小时（锁持有超 T 释放，或走独立锁）；（⛔ 仍 5 小时独占 ⇒ 假）。
-- [ ] AC2（能取假，outcome 可区分）：outcome 记录里「长时间持锁」与「worker 慢」可区分（含 lock_wait / lock_hold 字段）；（⛔ 仍同形不可区分 ⇒ 假）。
-- [ ] AC3（能取假，负控制回放）：回放 serial-lowconc 今天 5.2 小时持锁场景，改造后其它 fan-in 不再被饿死（能在 T 内拿到锁）；（⛔ 仍饿死 ⇒ 假）。
-- [ ] AC4（能取假，锁等待下降-同争用对照）：修复后在【同期并发 fan-in 数 ≥ N】的轮上，`lock_wait_ms` 下降（同争用条件对照，排除「并发需求」混淆变量——该比值随当日并发任务数变、与修复无关也会动）；**`N` 须在测量前钉死并写进 Evidence，⛔ 不得事后择 N**（防 gate-gameability）；并报出原始 Σlock_wait_ms / ΣdurationMs + 轮集供读者复算；（⛔ 无同争用对照、仅占比下降、或事后择 N ⇒ 假）。
+- [x] AC1（能取假，锁持有上限或独立锁）：验证型长任务不再独占 full-suite 锁数小时（锁持有超 T 释放，或走独立锁）；（⛔ 仍 5 小时独占 ⇒ 假）。
+- [x] AC2（能取假，outcome 可区分）：outcome 记录里「长时间持锁」与「worker 慢」可区分（含 lock_wait / lock_hold 字段）；（⛔ 仍同形不可区分 ⇒ 假）。
+- [x] AC3（能取假，负控制回放）：回放 serial-lowconc 今天 5.2 小时持锁场景，改造后其它 fan-in 不再被饿死（能在 T 内拿到锁）；（⛔ 仍饿死 ⇒ 假）。
+- [ ] AC4（能取假，锁等待下降-同争用对照）：修复后在【同期并发 fan-in 数 ≥ N】的轮上，`lock_wait_ms` 下降（同争用条件对照，排除「并发需求」混淆变量——该比值随当日并发任务数变、与修复无关也会动）；**`N` 须在测量前钉死并写进 Evidence，⛔ 不得事后择 N**（防 gate-gameability）；并报出原始 Σlock_wait_ms / ΣdurationMs + 轮集供读者复算；（⛔ 无同争用对照、仅占比下降、或事后择 N ⇒ 假）（待外部）
+
+## Evidence
+
+**实现（AC1/AC2/AC3，全部落地并被测试守着）：**
+- **AC1 锁持有上限（走「锁持有超 T 释放」分支，非独立锁）**：`FULL_SUITE_LOCK_HOLD_MAX_S`（缺省 1800s=30min）在 `scripts/test.sh` 顶定义；`full_suite_lock_acquire` 拿到槽后 spawn `spawn_suite_lock_hold_watchdog`（在 `plugin/scripts/suite-slot-lib.sh` 单一实现，被 test.sh source 进持锁进程自身——⛔ 不是 worker-driver 杀）。watchdog 每秒轮询 flag 文件：正常释放（flag 删）⇒ 立即退出；持锁进程崩溃（pid 消失）⇒ 立即 `flock -u` 释放（继承同一 open-file-description，crash-autorelease ≤1s）；持满 T 秒仍持有 ⇒ `flock -u` 释放 + `lock_hold_exceeded=1` fail-loud 告警。cap 只让出【槽】，长 suite 继续跑（已过启动 resource gate），接受 (S+1)-th suite 加入的争用风险，不再串行化全仓。
+- **AC2 outcome 可区分**：`full_suite_lock_release` 发 `__OVERHEAD__ lock_hold_ms=N`（acquire→release 墙）；`full-suite-runner.ts` 与 `pre-verified-round-record.ts` 把它写进 verification-round.jsonl 的 `lock_hold_ms`（与既有 `lock_wait_ms` 并列）；`worker-driver.ts` 新增 `readLockMetricsForRun(root, runId, taskId)` 读 verification-round.jsonl 最后一个 runId+taskId 匹配记录的 `lock_wait_ms`/`lock_hold_ms`，经 `computeOutcome` 落进 worker-outcome.jsonl。⇒ `lock_wait_ms`（排队饿死）+ `lock_hold_ms`（持锁）两段，与 `wall_clock_ms` 三分，观测者可区分「验证型长任务（高 lock_hold）」vs「排队饿死（高 lock_wait 低 lock_hold）」vs「worker 慢（两低高 wall）」。
+
+**测试（全部绿，`node --test` 直接跑）：**
+- `resource-gate.test.mjs`（56/56）：新增 AC1/AC2 结构钉 + AC1/AC3 行为（watchdog 持满 T 后释放、waiter ~T 内拿到槽、`lock_hold_exceeded=1` fail-loud）+ AC3 负控制（无 watchdog 仍持）。行为测试用 `FULL_SUITE_LOCK_HOLD_MAX_S` 由真实 `spawn_suite_lock_hold_watchdog` 驱动（T=2s 缩时回放，非 mock）。
+- `pre-verified-round-record.test.mjs`（54/54）：新增 `lock_hold_ms` 从 `__OVERHEAD__ lock_hold_ms=N` 解析、缺键（无 marker / 无 log）⇒ 缺省。
+- `worker-driver.test.mjs`（87/87）：新增 `computeOutcome` 带/不带 lock 字段的落盘 + `readLockMetricsForRun`（runId+taskId 匹配、末条覆盖、坏行跳过、miss/null）。
+- `full-suite-runner.test.mjs`（165/165）+ `suite-slot-ssot-check.test.mjs`（20/20）：不回归（lock_hold_ms 条件展开 + suite-slot-lib 新增函数不破坏 SSoT I1-I5）。
+
+**AC4（待外部，生产测量）：** 判据能力已落地（verification-round.jsonl 每轮带 `lock_wait_ms`+`lock_hold_ms`）。**N 在测量前钉死 = 2**（同期并发 fan-in 数 ≥ 2，即 ≥2 个 full-bucket suite 同时在飞/排队——本缺陷的争用形状）。测量协议：取修复落地后【连续 full-bucket 轮】中 `concurrentSuitesRunning ≥ 2`（或同窗口 ≥2 个 fan-in 在飞）的轮集，算 `Σlock_wait_ms / ΣdurationMs`，与 Proposal 已钉死的基准 **46.2%**（Σlock=13878.1s / Σwall=30014.8s，2026-08-25 当日 21 个 full 轮）同争用条件对照；报原始 Σ + 轮集（round 号）供复算。⛔ 单次 worker 跑无法制造「多 fan-in 并发争用」的生产窗口，此 AC 需落地后由 outer/manager 在生产载体上量，故标待外部。
 
 ## Definition of Done
 
