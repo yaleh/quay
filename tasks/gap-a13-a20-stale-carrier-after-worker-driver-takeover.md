@@ -48,5 +48,6 @@ A13/A20 读回 worker-driver 真实 carrier 或标退役；AC1-AC2 全勾；不�
 - plugin/loop/orchestrator-tick-core.md（byte-identical 镜像副本，tick-core-drift-check 强制同步）
 - plugin/scripts/red-on-omission-audit.ts（退役 `a13_inner_heartbeat` / `a2_suite_chain` 两 registry 条目 + A_AUDIT 两行——退役后 verify 目标字符串随之从核内消失，恒红）
 - plugin/test/red-on-omission-audit.test.mjs（A 段 reading 断言列表去 A13）
+- plugin/test/inner-wakeup-heartbeat-check.test.mjs（AC4 wiring 断言改为退役指针）
 - .quay/red-on-omission-manifest.md（a13/a2 两固化行为标退役）
 - tasks/gap-a13-a20-stale-carrier-after-worker-driver-takeover.md（自身）
