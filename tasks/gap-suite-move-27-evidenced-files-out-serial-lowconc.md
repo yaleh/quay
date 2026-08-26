@@ -1,7 +1,7 @@
 ---
 id: gap-suite-move-27-evidenced-files-out-serial-lowconc
 title: 27 个有证据文件直接移出 serial/lowconc 降并发名单（fail=0 高负载验证，不抽查）
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -24,7 +24,7 @@ extra: {}
 ## Acceptance Criteria
 
 - [x] AC1（能取假，移出降并发）：27 文件 @test-group 从 serial/lowconc 改为默认组（⛔ 仍标 serial/lowconc ⇒ 假）。
-- [ ] AC2（能取假，suite 仍绿）：改后 suite 绿（行为不变）；（⛔ suite 红 ⇒ 假）。
+- [x] AC2（能取假，suite 仍绿）：改后 suite 绿（行为不变）；（⛔ suite 红 ⇒ 假）。
 
 ## Definition of Done
 
