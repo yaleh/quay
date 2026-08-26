@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group product
 // GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
 // `serial` group (B-class real wall-clock wait — spawns the built dist bundle across real surfaces
 // incl. serve + MCP round-trips) so it runs in the concurrency-1 serial phase, never competing with

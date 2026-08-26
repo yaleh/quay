@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // fan-in-workflow-check.test.mjs — AC78 判据2 (a)(b)(c) checker tests,
 // plugin/scripts/fan-in-workflow-check.ts. The negative-control fixtures prove the checker can go RED
 // on the three AC78 defects (判据能取假) plus NOT-EVALUATED (never conflated with green, 硬规则 3b).

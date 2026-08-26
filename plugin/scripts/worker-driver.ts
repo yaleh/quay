@@ -267,6 +267,8 @@ export function computeOutcome({
   landed = null,
   landReason = null,
   sessionId = null,
+  lockWaitMs = null,
+  lockHoldMs = null,
 }: {
   task: string;
   selectorReason: string;
@@ -285,6 +287,11 @@ export function computeOutcome({
    *  `--session-id <uuid>`，同一 uuid 落盘 ⇒ web 可逐次访问该尝试的 transcript）。null = 无会话
    *  （not-dispatched 等未 spawn 路径）。 */
   sessionId?: string | null;
+  /** gap-suite-lock-starvation-long-validation-hold AC2 — the suite's single-flight flock metrics,
+   *  读自 verification-round.jsonl（与 worker 的 runId 对齐）。null = 无记录 / 该轮没取锁（scoped/doc
+   *  / 读不懂）⇒ outcome 字段缺省（缺键，⛔ 不是伪造的 0）。 */
+  lockWaitMs?: number | null;
+  lockHoldMs?: number | null;
 }) {
   // AC3（能取假，超时路径）：timedOut ⇒ final_state=timed-out（区别于外部 kill 的 killed）。
   //   被信号杀（非超时）⇒ final_state=killed + signal 落盘，⛔ 静默丢任务。
@@ -334,7 +341,50 @@ export function computeOutcome({
     in_flight_count: inFlightCount,
     timed_out: timedOut,
     session_id: sessionId,
+    // gap-suite-lock-starvation-long-validation-hold AC2 — the suite's flock metrics, so a reader of
+    //   worker-outcome.jsonl can distinguish「长时间持锁」(high lock_hold_ms) from「worker 慢 / 排队饿死」
+    //   (high lock_wait_ms + low lock_hold_ms = starved in the queue; low both + high wall_clock = slow
+    //   outside the lock). Absent (缺键) when the suite didn't take the lock or no record matches the runId.
+    ...(lockWaitMs !== null && lockWaitMs !== undefined ? { lock_wait_ms: lockWaitMs } : {}),
+    ...(lockHoldMs !== null && lockHoldMs !== undefined ? { lock_hold_ms: lockHoldMs } : {}),
   };
+}
+
+// ── suite 锁指标（gap-suite-lock-starvation-long-validation-hold AC2）────────────────────────────
+// worker（claude -p）是黑盒，driver 不直接看到 suite 日志；但 worker 跑 fan-in 时，verification-round.jsonl
+// （<root>/.quay/，经 git common-dir 解析到主检出）会落一条带 runId 的记录，其 lock_wait_ms/lock_hold_ms
+// 就是本次尝试的锁等待/持有分段。worker 退出后读【最后一个 runId+taskId 匹配】的记录取这两个字段。
+// 读不到（无记录 / 该轮没取锁 / 字段缺省 / JSON 坏行）⇒ null（缺键，⛔ 不伪造 0）。runId 复用重派时，
+// 最后一个匹配记录是【本次尝试】的（后落盘者最新）——旧轮同 runId 记录被顺序覆盖。
+export function readLockMetricsForRun(
+  root: string,
+  runId: string,
+  taskId: string,
+): { lockWaitMs: number | null; lockHoldMs: number | null } {
+  const file = path.join(root, ".quay", "verification-round.jsonl");
+  let text = "";
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return { lockWaitMs: null, lockHoldMs: null };
+  }
+  let lockWaitMs: number | null = null;
+  let lockHoldMs: number | null = null;
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    let rec: Record<string, unknown>;
+    try {
+      rec = JSON.parse(t);
+    } catch {
+      continue;
+    }
+    if (rec.runId !== runId) continue;
+    if (taskId && rec.taskId !== taskId) continue;
+    if (typeof rec.lock_wait_ms === "number") lockWaitMs = rec.lock_wait_ms;
+    if (typeof rec.lock_hold_ms === "number") lockHoldMs = rec.lock_hold_ms;
+  }
+  return { lockWaitMs, lockHoldMs };
 }
 
 // ── 落地判定（gap-worker-driver-fake-completion-exit-0）──────────────────────────────────────────
@@ -1274,6 +1324,10 @@ function runOneWorker({
       // worktree）。只在 exit 0 路径有意义——spawn-failed/killed/timed-out/failed 分支在 computeOutcome
       // 里优先于 landed，落盘 result 由终态分支决定；但统一读一次无害（落地读是廉价 fs/git 调用）。
       const landing = computeLandingState(rootDir, taskId);
+      // gap-suite-lock-starvation-long-validation-hold AC2 — read the suite's flock metrics from the
+      // verification-round ledger (matched by this worker's runId) so worker-outcome.jsonl can
+      // distinguish「长时间持锁」from「worker 慢」. Absent (null) on doc-only / scoped / no-record runs.
+      const lockMetrics = readLockMetricsForRun(rootDir, runId, taskId);
       const outcome = computeOutcome({
         task: taskId, selectorReason, exitCode: code, signal,
         startedAtMs, endedAtMs, workerPid, runId,
@@ -1284,6 +1338,8 @@ function runOneWorker({
         landed: landing.state === "verified" ? true : landing.state === "failed" ? false : null,
         landReason: landing.state === "verified" ? null : landing.reason,
         sessionId,
+        lockWaitMs: lockMetrics.lockWaitMs,
+        lockHoldMs: lockMetrics.lockHoldMs,
       });
       // gap-worker-driver-no-record-on-abnormal-death（AC2，能取假）：worker 异常死亡（failed/killed——
       // worker 没跑完、无完成实现）后，orphan worktree 永久残留会挡 driver 下轮对同一 task 的

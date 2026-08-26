@@ -23,10 +23,12 @@
 //
 // Note on (c): the phase-goal baseline names "11 不可定位" as a COUNT, not a list. The strict
 // reference closure implemented here (relative imports + the three path-literal prefixes, comments
-// counted only as textual references where the baseline reproduces) yields the 9 files below as
-// UNRESOLVED — the 2-file delta vs the baseline's count is because the baseline's "路径字面量" (167)
+// counted only as textual references where the baseline reproduces) yields the 8 files below as
+// UNRESOLVED — the delta vs the baseline's count is because the baseline's "路径字面量" (167)
 // was a broader subject-location heuristic than this AC's stated criterion (import relative paths +
-// the three path prefixes). Those 9 are asserted here; the delta is reported, not papered over.
+// the three path prefixes). Those 8 are asserted here; the delta is reported, not papered over.
+// (quay-init-loop-vendor.test.mjs was in this group until gap-suite-split-long-multi-test-files
+// split it into per-scenario files; the group now lists the 8 surviving statically-unlocatable files.)
 //
 // Run: scripts/test.sh plugin/test/suite-bucket-attribution.test.mjs
 
@@ -48,14 +50,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 
 // ── AC2 known-sample groups (exact lists, replay of the baseline) ───────────────────────────────────
 
-// (a) 12 `packages/quay/test/*` files that touch `plugin/scripts` → cross-bucket P+M.
+// (a) 11 `packages/quay/test/*` files that touch `plugin/scripts` → cross-bucket P+M.
 const GROUP_A = [
   "build-plugin-dist.test.mjs",
   "gap-dashboard-parallelize.test.mjs",
   "install-config-driven-e2e-runtime.test.mjs",
   "install-config-driven-e2e-upgrade.test.mjs",
   "install-config-driven-e2e.test.mjs",
-  "lifecycle.test.mjs",
   "mcp-server.test.mjs",
   "npm-pack-e2e.test.mjs",
   "sea-artifact-consumer-e2e.test.mjs",
@@ -100,7 +101,6 @@ const GROUP_C = [
   "measure-suite.test.mjs",
   "outer-tick-log-check.test.mjs",
   "plugin-vendor-standalone.test.mjs",
-  "quay-init-loop-vendor.test.mjs",
   "session-liveness-restart.test.mjs",
   "sync-lag-check.test.mjs",
   "user-scope-reinstall.test.mjs",
@@ -108,8 +108,8 @@ const GROUP_C = [
 
 // ── AC2(a) ───────────────────────────────────────────────────────────────────────────────────────────
 
-test("AC2(a): the 12 packages/quay/test files touching plugin/scripts are cross-bucket P AND M", () => {
-  assert.equal(GROUP_A.length, 12, "group (a) must be exactly 12 files");
+test("AC2(a): the 11 packages/quay/test files touching plugin/scripts are cross-bucket P AND M", () => {
+  assert.equal(GROUP_A.length, 11, "group (a) must be exactly 11 files");
   for (const f of GROUP_A) {
     const rel = `packages/quay/test/${f}`;
     const buckets = bucketSetOf(rel, ROOT);
