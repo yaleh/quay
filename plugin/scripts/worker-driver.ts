@@ -922,7 +922,8 @@ export function readAcCheckState(root: string, taskId: string): { checked: numbe
 
 /** task/<id> 分支「自己的」提交数（AC2「分支已有提交」）——`HEAD..task/<id>`：只数前一轮 worker 提交的
  *  实现（⛔ 不含继承的 develop 历史，否则恒为整库提交数、无信息）。HEAD = 主检出当前分支（=develop，
- *  驱动在主检出跑、stash 后仍停在 develop）。git 失败 / 分支不存在 ⇒ null（读不懂 ≠ 0 提交）。 */
+ *  驱动在主检出跑、仍停在 develop（不 checkout、不 stash，见 gap-worker-driver-stashifdirty-stashes-
+ *  others-uncommitted））。git 失败 / 分支不存在 ⇒ null（读不懂 ≠ 0 提交）。 */
 export function countBranchCommits(root: string, taskId: string): number | null {
   const r = spawnSync("git", ["-C", root, "rev-list", "--count", `HEAD..task/${taskId}`], { encoding: "utf8" });
   if (r.status !== 0 || r.error) return null;
