@@ -105,7 +105,7 @@ function makeWorkspace(tag) {
   return dir;
 }
 
-function writeTask(root, id, { status = "todo", labels = [], parent = null, role = null, body, selfTouch = true } = {}) {
+function writeTask(root, id, { status = "todo", labels = [], parent = null, role = null, dependsOn = [], body, selfTouch = true } = {}) {
   const fm = [
     "---",
     `id: ${id}`,
@@ -115,6 +115,10 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, role
     "labels:",
     ...labels.map((l) => `  - ${l}`),
     `parent: ${parent}`,
+    // DEPENDS_ON (tasks/gap-slot-refill-depsreadyfor-ignores-depends-on): flow-form `depends_on:
+    // [a, b]` — the machine-readable prerequisite edges (readDependsOn). Absent when empty (no dead
+    // relation edge to confuse the mirror of a task that has no depends_on).
+    dependsOn.length ? `depends_on: [${dependsOn.join(", ")}]` : null,
     "extra:",
     "  schema: v1",
     "---",
@@ -514,6 +518,49 @@ test("COMPOUND: a READY child of a compound parent is recommended (compound-pare
   assert.ok(!r.recommended.includes("gap-compound"), "the compound parent itself is still not recommended");
   const reasons = (r.deferred || []).filter((d) => d.id === "gap-compound").map((d) => d.reason);
   assert.ok(reasons.includes("compound-not-dispatchable"), "compound parent deferred with the explicit compound reason");
+});
+
+// ── DEPENDS_ON DEPENDENCY GATE (tasks/gap-slot-refill-depsreadyfor-ignores-depends-on) ──────────────
+// slot-refill's depsReadyFor previously read ONLY task.parent and never depends_on — so a depends_on
+// edge (the machine-readable prerequisite home, gap-prerequisite-gates-prose-invisible-to-mechanisms)
+// was a DEAD field for worker dispatch: ready-pool-check deferred such a task but slot-refill
+// dispatched it anyway (the "以为闸上了、其实没有" hazard). These tests pin the fix: depsReadyFor reads
+// parent AND depends_on (mirroring ready-pool-check's depsReadyFor), and a depends_on predecessor that
+// has not landed ⇒ deps-not-ready.
+
+test("DEPENDS_ON (AC1) — a ready task whose depends_on predecessor is not done is deferred deps-not-ready, not recommended", (t) => {
+  const root = makeWorkspace("depends-on-defer");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Upstream predecessor: ready (NOT done) — the thing the child must wait on.
+  writeTask(root, "gap-upstream", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/upstream.ts (new)"]) });
+  // Child carries a depends_on edge to the not-done upstream.
+  writeTask(root, "gap-child", {
+    status: "ready", labels: ["gap"], dependsOn: ["gap-upstream"],
+    body: dispatchableBody(["- code/child.ts (new)"]),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r.pool, 2, "both upstream and child are ready and in the pool");
+  assert.ok(r.recommended.includes("gap-upstream"), "the upstream (no deps) IS recommended");
+  assert.ok(!r.recommended.includes("gap-child"), "the child with an unlanded depends_on is NOT recommended");
+  const reasons = (r.deferred || []).filter((d) => d.id === "gap-child").map((d) => d.reason);
+  assert.ok(reasons.includes("deps-not-ready"), "the depends_on-gated child is deferred deps-not-ready");
+});
+
+test("DEPENDS_ON (AC2) — negative control: the same task WITHOUT depends_on is recommended, and a DONE depends_on does not block", (t) => {
+  const root = makeWorkspace("depends-on-control");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // (a) WITHOUT the depends_on edge ⇒ recommended (the defer above is the edge, not another cause).
+  writeTask(root, "gap-free", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/free.ts (new)"]) });
+  // (b) depends_on → DONE predecessor ⇒ deps-ready ⇒ recommended (a satisfied edge does not block).
+  writeTask(root, "gap-done-upstream", { status: "done", labels: ["gap"], body: dispatchableBody(["- code/done-upstream.ts (new)"]) });
+  writeTask(root, "gap-satisfied", {
+    status: "ready", labels: ["gap"], dependsOn: ["gap-done-upstream"],
+    body: dispatchableBody(["- code/satisfied.ts (new)"]),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.ok(r.recommended.includes("gap-free"), "no depends_on ⇒ recommended (negative control: the defer is the edge)");
+  assert.ok(r.recommended.includes("gap-satisfied"), "depends_on → done predecessor ⇒ deps-ready ⇒ recommended");
+  assert.ok(!(r.deferred || []).some((d) => d.id === "gap-satisfied"), "a satisfied depends_on must NOT be deferred");
 });
 
 // ── AC3: recommended is production-disjoint (no two colliding candidates) ───────────────────────────

@@ -1,7 +1,7 @@
 ---
 id: gap-slot-refill-depsreadyfor-ignores-depends-on
 title: slot-refill.ts depsReadyFor 只读 parent 不读 depends_on——worker 派发依赖闸对 depends_on 结构上失效（与 ready-pool-check.ts 同名函数语义不一致）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -29,8 +29,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，depsReadyFor 读 depends_on）：slot-refill.ts depsReadyFor 读 depends_on（对齐 ready-pool-check），depends_on 前驱未 done 的任务 deps-not-ready 被 defer；（⛔ 仍只读 parent ⇒ 假）。
-- [ ] AC2（能取假，负控制派发）：造一个 `depends_on:` 指向未 done 任务的任务，`slot-refill --json` 不得推荐/派发它（dep 未落地仍被推荐 ⇒ 假）；（⛔ 需给出「加了 depends_on 后 slot-refill 确实 defer」与「不加则推荐」的对照——避免恒假/空转，硬规则 4c）。
+- [x] AC1（能取假，depsReadyFor 读 depends_on）：slot-refill.ts depsReadyFor 读 depends_on（对齐 ready-pool-check），depends_on 前驱未 done 的任务 deps-not-ready 被 defer；（⛔ 仍只读 parent ⇒ 假）。
+- [x] AC2（能取假，负控制派发）：造一个 `depends_on:` 指向未 done 任务的任务，`slot-refill --json` 不得推荐/派发它（dep 未落地仍被推荐 ⇒ 假）；（⛔ 需给出「加了 depends_on 后 slot-refill 确实 defer」与「不加则推荐」的对照——避免恒假/空转，硬规则 4c）。
 
 ## Definition of Done
 
