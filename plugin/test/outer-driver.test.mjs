@@ -12,7 +12,7 @@
 //
 // Run: scripts/test.sh plugin/test/outer-driver.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -40,8 +40,11 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const _createdDirs = [];
 function makeRoot(tag) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `outer-${tag}-`));
+  const created = fs.mkdtempSync(path.join(os.tmpdir(), `outer-${tag}-`));
+  _createdDirs.push(created);
+  return created;
 }
 
 // ── AC3：registry 表驱动（outer kind 经 DRIVER_KINDS 加一行接入） ─────────────────────────────
@@ -192,4 +195,8 @@ test("computeOuterRoundRecord: maps error/halted/facts actions", () => {
   assert.equal(computeOuterRoundRecord({ ...base, halted: false, error: null }).action, "facts");
   assert.equal(computeOuterRoundRecord({ ...base, halted: true, error: null }).action, "halted");
   assert.equal(computeOuterRoundRecord({ ...base, halted: false, error: "boom" }).action, "error");
+});
+
+after(() => {
+  for (const dir of _createdDirs) fs.rmSync(dir, { recursive: true, force: true });
 });

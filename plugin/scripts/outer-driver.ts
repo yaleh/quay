@@ -109,10 +109,10 @@ export function parseSlotRefill(text: string): {
       shouldRefill: !!j.should_refill,
       recommended: Array.isArray(j.recommended) ? j.recommended.map(String) : [],
       slotsFree: typeof j.slots_free === "number" ? j.slots_free : 0,
-      effectiveCap: typeof j.effective_cap === "number" ? j.effective_cap : (typeof j.cap === "number" ? j.cap : 0),
+      effectiveCap: typeof j.effective_cap === "number" ? j.effective_cap : (typeof j.cap === "number" ? j.cap : 0), // concurrency-default-fallback: parse fallback not-a-number → 0 (⛔ not a cap literal)
       noRefillReason: typeof j.no_refill_reason === "string" ? j.no_refill_reason : null,
       inFlight: typeof j.in_flight_count === "number" ? j.in_flight_count : 0,
-      occupiedSlots: typeof j.occupied_slots === "number" ? j.occupied_slots : 0,
+      occupiedSlots: typeof j.occupied_slots === "number" ? j.occupied_slots : 0, // concurrency-default-fallback: parse fallback not-a-number → 0 (⛔ not a cap literal)
     };
   } catch {
     return null;
