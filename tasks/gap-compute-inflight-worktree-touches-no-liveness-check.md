@@ -53,4 +53,5 @@ extra:
 
 - plugin/scripts/concurrent-batch-scheduler.ts（computeInFlightWorktreeTouches 加活进程 + 末次提交时刻活性检查）
 - plugin/test/concurrent-batch-scheduler.test.mjs（死 worktree 不计入 + 活 worktree 不误伤负控制）
+- plugin/test/driver-cli.test.mjs（KERNEL_DEPS 补 concurrent-batch-scheduler 新传递依赖 worktree-process-reaper.ts + suite-lock-slots.ts——本任务新增该 import 的 fan-out 回归）
 - tasks/gap-compute-inflight-worktree-touches-no-liveness-check.md（自身）
