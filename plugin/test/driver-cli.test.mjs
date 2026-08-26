@@ -48,6 +48,11 @@ const KERNEL_DEPS = [
   "touches-orthogonality-check.ts",
   "touches-parser.ts",
   "concurrent-batch-scheduler.ts",
+  // gap-compute-inflight-worktree-touches-no-liveness-check: concurrent-batch-scheduler.ts now
+  // imports worktree-process-reaper.ts (→ suite-lock-slots.ts) for the in-flight-worktree liveness
+  // check — the hermetic temp root must carry both or the copied kernel's import fails.
+  "worktree-process-reaper.ts",
+  "suite-lock-slots.ts",
   "derive-touches-heuristic.ts",
   "fast-mode-telemetry.ts",
   "wiring-coverage-check.ts",

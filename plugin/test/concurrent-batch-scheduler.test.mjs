@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import {
   parseCandidate,
   // IN-FLIGHT WORKTREE DIRECT QUANTITY (tasks/gap-scheduler-inflight-detection-misses-fan-in-
@@ -22,6 +23,10 @@ import {
   // (not only the telemetry-bracket snapshot).
   resolveInFlightWorktrees,
   computeInFlightWorktreeTouches,
+  // IN-FLIGHT WORKTREE LIVENESS (gap-compute-inflight-worktree-touches-no-liveness-check): the
+  // staleness threshold the dead-worktree predicate compares against (injected `staleMs`/`nowMs`
+  // in the pure tests, so the constant itself is the single source).
+  INFLIGHT_WORKTREE_STALE_MS,
 } from "../scripts/concurrent-batch-scheduler.ts";
 
 // A quay-task-shaped charter with frontmatter `labels:` (block-list form) plus a body.
@@ -184,4 +189,122 @@ test("computeInFlightWorktreeTouches: a non-git root yields [] (fail-soft, never
   const { dir, tasksDir } = makeWorktreeTasks("nogit", { "gap-nogit": ["- code/a.ts"] });
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   assert.deepEqual(computeInFlightWorktreeTouches(dir, tasksDir), []);
+});
+
+// ── IN-FLIGHT WORKTREE LIVENESS (gap-compute-inflight-worktree-touches-no-liveness-check) ────────
+// AC1/AC2/AC3: a worktree must be counted as in-flight ONLY while it shows direct-quantity liveness
+// (a live process under it, or a commit on its branch within INFLIGHT_WORKTREE_STALE_MS). A DEAD
+// worktree (zero live processes + stale commit) must NOT occupy its declared ## Touches — else a
+// single dead worktree locks out every overlapping candidate (pool=31 blocked by one dead worktree).
+// The pure core (resolveInFlightWorktrees) is tested with INJECTED liveness (hermetic, no /proc/git);
+// the production wiring (computeInFlightWorktreeTouches) is tested against a REAL git worktree.
+
+// A minimal real git repo with a tasks/ dir, for the production-wiring tests.
+function makeRealGitRepo(tag) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `cbs-git-${tag}-`));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
+  const tasksDir = path.join(dir, "tasks");
+  fs.mkdirSync(tasksDir, { recursive: true });
+  return { dir, tasksDir };
+}
+
+// Commit everything, optionally pinning the author+committer dates (GIT_COMMITTER_DATE is what
+// `git log --format=%ct` reads, so pinning it makes a worktree's last-commit-time deterministic).
+function gitCommit(dir, message, date) {
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  execFileSync("git", ["commit", "-q", "-m", message], {
+    cwd: dir,
+    env: date ? { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : process.env,
+  });
+}
+
+test("resolveInFlightWorktrees: a DEAD worktree (zero processes + stale commit) is excluded (AC1)", (t) => {
+  const { dir, tasksDir } = makeWorktreeTasks("dead-pure", { "gap-dead": ["- code/shared.ts"] });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const nowMs = 1_000_000_000_000; // arbitrary fixed "now"
+  const wt = { path: path.join(dir, "..", "quay-worktrees", "gap-dead"), branch: "refs/heads/task/gap-dead" };
+  const out = resolveInFlightWorktrees([wt], {
+    root: dir,
+    tasksDir,
+    nowMs,
+    liveness: () => ({ hasLiveProcess: false, lastCommitMs: nowMs - 2 * INFLIGHT_WORKTREE_STALE_MS }),
+  });
+  assert.equal(out.length, 0, "zero live processes + commit older than N ⇒ DEAD ⇒ not in-flight");
+});
+
+test("resolveInFlightWorktrees: a LIVE worktree (live process) is kept regardless of commit age (AC3)", (t) => {
+  const { dir, tasksDir } = makeWorktreeTasks("live-pure", { "gap-live": ["- code/shared.ts"] });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const nowMs = 1_000_000_000_000;
+  const wt = { path: path.join(dir, "..", "quay-worktrees", "gap-live"), branch: "refs/heads/task/gap-live" };
+  const out = resolveInFlightWorktrees([wt], {
+    root: dir,
+    tasksDir,
+    nowMs,
+    liveness: () => ({ hasLiveProcess: true, lastCommitMs: nowMs - 10 * INFLIGHT_WORKTREE_STALE_MS }),
+  });
+  assert.equal(out.length, 1, "a live process ⇒ in-flight even with a very old commit");
+  assert.equal(out[0].id, "gap-live");
+});
+
+test("resolveInFlightWorktrees: a zero-process worktree with a RECENT commit stays in-flight (backstop)", (t) => {
+  const { dir, tasksDir } = makeWorktreeTasks("recent-pure", { "gap-recent": ["- code/a.ts"] });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const nowMs = 1_000_000_000_000;
+  const wt = { path: path.join(dir, "..", "quay-worktrees", "gap-recent"), branch: "refs/heads/task/gap-recent" };
+  const out = resolveInFlightWorktrees([wt], {
+    root: dir,
+    tasksDir,
+    nowMs,
+    // commit just INSIDE the window (now - N + 1s) ⇒ NOT dead
+    liveness: () => ({ hasLiveProcess: false, lastCommitMs: nowMs - INFLIGHT_WORKTREE_STALE_MS + 1000 }),
+  });
+  assert.equal(out.length, 1, "a recent commit keeps a zero-process worktree in-flight (just-dispatched backstop)");
+});
+
+test("resolveInFlightWorktrees: unknown liveness / unreadable commit time is conservative-alive (not a fabricated block)", (t) => {
+  const { dir, tasksDir } = makeWorktreeTasks("unknown-pure", { "gap-unknown": ["- code/a.ts"] });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const nowMs = 1_000_000_000_000;
+  const wt = { path: path.join(dir, "..", "quay-worktrees", "gap-unknown"), branch: "refs/heads/task/gap-unknown" };
+  // No liveness injected (liveness omitted ⇒ null) ⇒ every worktree is alive (pre-fix behavior).
+  const noLiveness = resolveInFlightWorktrees([wt], { root: dir, tasksDir, nowMs });
+  assert.equal(noLiveness.length, 1, "no liveness injection ⇒ alive (backward-compatible)");
+  // Liveness returns an unreadable commit time (null) ⇒ alive (hard rule 6: 缺值 = 未查).
+  const nullCommit = resolveInFlightWorktrees([wt], {
+    root: dir,
+    tasksDir,
+    nowMs,
+    liveness: () => ({ hasLiveProcess: false, lastCommitMs: null }),
+  });
+  assert.equal(nullCommit.length, 1, "an unreadable commit time ⇒ alive (conservative)");
+});
+
+test("computeInFlightWorktreeTouches: a DEAD real worktree (old commit + zero processes) is excluded (AC1 wiring / AC2 negative control)", (t) => {
+  const { dir, tasksDir } = makeRealGitRepo("dead-wiring");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, "base.txt"), "base\n");
+  fs.writeFileSync(path.join(tasksDir, "gap-dead.md"), touchSectionBody(["- code/shared.ts"]));
+  gitCommit(dir, "base + task file", "2026-08-20T00:00:00Z");
+  execFileSync("git", ["branch", "task/gap-dead"], { cwd: dir });
+  const wtPath = path.join(path.dirname(dir), `${path.basename(dir)}-wt`);
+  execFileSync("git", ["worktree", "add", "-q", wtPath, "task/gap-dead"], { cwd: dir });
+  const out = computeInFlightWorktreeTouches(dir, tasksDir);
+  assert.equal(out.length, 0, "a DEAD worktree (stale commit + no live process) must not occupy its Touches");
+});
+
+test("computeInFlightWorktreeTouches: a JUST-DISPATCHED real worktree (recent commit, no process yet) stays in-flight (AC3 wiring)", (t) => {
+  const { dir, tasksDir } = makeRealGitRepo("fresh-wiring");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, "base.txt"), "base\n");
+  fs.writeFileSync(path.join(tasksDir, "gap-fresh.md"), touchSectionBody(["- code/x.ts"]));
+  gitCommit(dir, "base + task file"); // no date ⇒ committer time = now
+  execFileSync("git", ["branch", "task/gap-fresh"], { cwd: dir });
+  const wtPath = path.join(path.dirname(dir), `${path.basename(dir)}-wt`);
+  execFileSync("git", ["worktree", "add", "-q", wtPath, "task/gap-fresh"], { cwd: dir });
+  const out = computeInFlightWorktreeTouches(dir, tasksDir);
+  assert.equal(out.length, 1, "a recent commit keeps a zero-process worktree in-flight");
+  assert.equal(out[0].id, "gap-fresh");
 });
