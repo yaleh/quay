@@ -84,6 +84,18 @@ packages/quay/plugin/
 **/.quay/worker-driver-liveness.log
 **/.quay/worker-driver.stop
 **/.quay/worker-driver-inflight.pid
+# gap-ac144-quality-gate-shape-separated-driver (2026-08-26): the quality-gate driver's production
+# launch state — round heartbeat (unconditional per-loop record of B15/B17 routine facts) +
+# supervisor state files + control state (halt/control plane quality-control.json). All runtime
+# state, never git-tracked; same gitignored family as promotion/worker round+control.
+**/.quay/quality-round.jsonl
+**/.quay/quality-control.json
+**/.quay/quality-driver.pid
+**/.quay/quality-driver-supervisor.pid
+**/.quay/quality-driver.log
+**/.quay/quality-driver-supervisor.log
+**/.quay/quality-driver-liveness.log
+**/.quay/quality-driver.stop
 # gap-outer-message-bus-needs-file-inbox-transport (2026-08-09): the OUTER target's file-inbox
 # (.quay/outer-inbox/) is runtime message state (SPEC-inbox-service D1 — 收件箱不进 git 跟踪,
 # 不假设内容持久). Same gitignored runtime-state family as gate-events.jsonl — a real manager→outer
@@ -274,8 +286,17 @@ orchestration/inner-idle-log.jsonl
 # gap-quay-runtime-files-tracked-but-shouldnt (2026-08-25): 5 runtime products under .quay/ were
 # accidentally TRACKED (git rm --cached'd in the same gap). test.sh.lock (scripts/test.sh
 # single-flight lock), full-suite-state.json.suitefix-bak (suite-fix backup), no-code-caller-triage.jsonl
-# + no-code-caller-triage-rescan.jsonl (gap-ac111 triage dumps), suite-bucket-reattribution.jsonl
-# (gap-ac121 test-bucket re-attribution dump) — all machine-local runtime state / one-off task outputs,
+# + no-code-caller-triage-rescan.jsonl (gap-ac111 triage dumps) — machine-local runtime state /
+# one-off task outputs,
+#
+# 2026-08-26 更正 (gap-suite-bucket-reattribution-untracked-regression): 该批原列 5 个, 其中
+# suite-bucket-reattribution.jsonl 是误分类 —— 它不是运行时产物, 而是 AC121 的一次性判定记录
+# (230 行 {file,judgment,mechanism,signal}), 被 plugin/scripts/suite-bucket-select.ts:45/:144 当
+# 输入读入, 且 plugin/test/suite-bucket-select.test.mjs:52 断言 reattr.size > 0。去跟踪后
+# git worktree add 出的 worktree 结构上拿不到它 => 每个 worktree 的 suite 必红 (08-26 01:14 起实测 4 次)。
+# 已恢复跟踪、从本清单移除。
+# 判据教训: 判「运行时产物 vs 数据资产」不能只看「在 .quay/ 下 + 像 jsonl」,
+#   必须查【有没有代码把它当输入读】—— 有读取侧消费者的就是数据资产。
 # same family as full-suite-state.json / verification-round.jsonl; never committed. The 3 .quay/ files
 # that ARE deliberately tracked (profiles.yml / red-on-omission-manifest.md /
 # outer-inflight-coordination-20260812.md) stay tracked — reasons in the task Evidence.
@@ -283,7 +304,6 @@ orchestration/inner-idle-log.jsonl
 **/.quay/full-suite-state.json.suitefix-bak
 **/.quay/no-code-caller-triage.jsonl
 **/.quay/no-code-caller-triage-rescan.jsonl
-**/.quay/suite-bucket-reattribution.jsonl
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/

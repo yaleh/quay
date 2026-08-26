@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group product
 // sea-bundle-plugin-sidecar.test.mjs — gap-release-sea-bundle-excludes-plugin-tree.
 //
 // The SEA release archive (quay-sea-<ver>-<platform>.{tar.gz,zip}) is the RECOMMENDED

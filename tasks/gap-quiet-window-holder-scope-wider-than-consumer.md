@@ -1,11 +1,10 @@
 ---
 id: gap-quiet-window-holder-scope-wider-than-consumer
-title: quiet-window holder 声明「除 fan-in-executor 外所有层」但唯一消费者是 promotion-driver 自己——manager/outer 提交结构上无法被挡 ⇒ ff-livelock 反复落空（15h 实证）
+title: 退役 quiet-window 机制——它挡的是非瓶颈（ff churn 仅 34% 且收敛有界），真瓶颈是单飞锁排队（66%，归 lock-starvation）
 status: ready
 labels:
   - gap
   - defect
-  - delivery-critical
 parent: null
 children: []
 extra:
@@ -15,34 +14,29 @@ extra:
 
 ## Proposal
 
-`gap-fan-in-ff-livelock-quiet-window-no-consumer`（done，c82b50fe）的 AC2 只判「quiet-window 有真消费者」为真，**没检验「消费者集合是否覆盖 holder 字段声明的范围」**。缺口（manager 报，我读码复核）：
+**方向反转（人裁定 + manager 实测，推翻本任务先前「扩大覆盖」的 AC1）**：44 次 exited-not-landed 按 runId+时间窗精确匹配的真实构成——
 
-- `quietWindowActive(` 全仓库**唯一调用者 = promotion-driver.ts 自己**（:158 定义、:739 调用，`grep` 只 2 处命中同文件）；
-- escalation 记录的 `holder` 字段声明 **"all-layers-except-fan-in-executor"**（:732 注释「兑现 escalation 的 holder」）；
-- ⇒ **manager 自己的 git 提交、outer 的 git 提交，都不在消费者集合里，结构上无法被该窗口挡住**。
-
-**精确复现实例（sampler-orphan 第 3 次尝试内，全读原始记录）**：22:39:58Z ff-escalation 写 quietWindow 请求（windowMinutes:20，criterion "git log develop --since=… empty"）→ 22:43:22Z **manager 自己提交 develop**（「五项手跑」修复）⇒ 距窗口开始仅 3m24s 窗口被破坏 → 22:45:33Z worker 放弃 exited-not-landed（5.6 分钟，远未到 20 分钟）。
-
-**累计代价（worker-outcome.jsonl 直接量，今日）**：sampler-orphan 3 次尝试 727.8 分钟=12.13h + ac155 2 次 173.9 分钟=2.90h，**合计 15.03h worker 墙钟**，且期间套件几乎全绿（sampler-orphan 6/6 fullSuiteRan=true 轮全 green fail=0）——本质是「在等一个不会来的安静窗口」。`fan-in-retries.jsonl` 共 **175 条** "Diverging branches can't be fast-forwarded"。
-
-**与锁饥饿（46.2%）同族不同层**：锁饥饿是「排队」，这条是「追不上」——重跑越久 develop 移动越多次、ff 越难追上，两者互相加剧。
+- **真到 ff 并失败：15 次（34%）**；**根本没到 ff：29 次（66%）**——先前把整件事归给 ff churn 是错的，66% 卡在单飞锁排队（不是 ff）。
+- **ff churn（34%）有界且收敛**：24h 内 fan-in-retries 34 条 / 18 任务 / 25 次执行，attempt 分布 1×23·2×6·3×3·4×1·5×1，同期落地 32 个 ⇒ **34 失败 vs 32 落地 ≈ 1:1（频率未超吞吐率）、18/25 次只失败一次、最多 5 次收敛**。人逐字：「要挡住的不是'谁在提交'，而是'suite 期间 develop 会前进'这件事本身，而那是不该挡的」。
+- **⇒ 为 ff churn 加 quiet-window（无论覆盖多宽）是在给一个不是瓶颈的地方加阻塞**。先前本任务诊断的「holder 声明宽于消费者」是真实的，但它的正确处置不是「扩大覆盖」（那会让一个本不该挡的机制挡得更多），而是**退役整个 quiet-window**。
+- **真瓶颈是单飞锁排队**（66%）：worker 派发 → fan-in → 等单飞锁 → 超过 worker 回合 → end_turn → exited-not-landed → 重派 → 重新排队 → 队列更长 → 更易超时，**自放大**（当场实测：5 任务中 4 个等锁 7-83 分钟、只 1 个在跑）。归 `gap-suite-lock-starvation-long-validation-hold`（delivery-critical）。
 
 ## Plan
 
-三个方向候选（manager 不代拍，落笔方判）：① manager/outer 提交前查 quiet-window active 并暂缓；② 把 holder 范围收窄到实际覆盖的（promotion-driver 晋升 + fix-worker 派发）；③ fan-in 侧改用 rebase-retry 绕开整条路（`gap-ac75-fan-in-merge-not-rebase-delta-check` done 但报错仍是 ff，说明此路径未覆盖）。
+退役 quiet-window：移除 holder 声明、`quietWindowActive` 消费（promotion-driver.ts:158/739）、ff-escalation 的 quiet-window 请求写。⛔ 与 lock-starvation 的修复独立、不重叠——退役 quiet-window 不得掩盖真瓶颈。
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，声明范围=实际覆盖）：quiet-window 的 holder 声明范围与实际消费范围一致（收窄 holder / 或把 manager+outer 纳入消费），⛔ 声明宽于覆盖的缺口仍在；（⛔ 仍宽于覆盖 ⇒ 假）。
-- [ ] AC2（能取假，负控制回放）：回放「quiet-window active 期间 manager 提交 develop」场景（22:43:22Z 那次），修复后该提交不再静默破坏窗口（被挡 / 或窗口不受该层提交影响）；（⛔ 仍静默破坏 ⇒ 假）。
-- [ ] AC3（能取假，ff-livelock 不再空等）：修复后 sampler-orphan/ac155 类任务的 ff 不再因「安静窗口等不来」反复 exited-not-landed（直接量：`fan-in-retries.jsonl` 的 "Diverging branches" 不再累积）；（⛔ 仍反复落空 ⇒ 假）。
+- [ ] AC1（能取假，quiet-window 退役）：quiet-window 机制全移除（holder 声明 + quietWindowActive 消费 + ff-escalation 请求写），`grep quietWindowActive` 零命中；（⛔ 残留 ⇒ 假）。
+- [ ] AC2（能取假，负控制 ff churn 不恶化）：退役后 ff churn 仍保持有界（24h 频率比 ≈1:1、attempt 收敛分布不恶化）；（⛔ 退役后 ff churn 爆炸 ⇒ 假）。
+- [ ] AC3（能取假，不掩盖真瓶颈）：退役 quiet-window 后，66% 那类（单飞锁排队导致 exited-not-landed）的根因仍归 lock-starvation、不被 quiet-window 退役掩盖或更糟；（⛔ 被掩盖 ⇒ 假）。
 
 ## Definition of Done
 
-quiet-window holder 声明与实际消费一致；AC1-AC3 全勾；sampler-orphan/ac155 不再空等安静窗口；"Diverging branches" 不再累积。
+quiet-window 机制退役；AC1-AC3 全勾；ff churn 仍收敛有界；66% 的锁排队根因由 lock-starvation 任务承接。
 
 ## Touches
 
-- plugin/scripts/promotion-driver.ts（quietWindowActive 消费范围 / holder 声明收窄）
-- plugin/scripts/（fan-in-ff-merge.sh 或 fan-in-execute.js 的 rebase-retry 或 quiet-window 联动，若走方向③/①）
+- plugin/scripts/promotion-driver.ts（quietWindowActive 定义/消费移除 + holder 声明移除）
+- plugin/scripts/fan-in-ff-merge.sh 或 fan-in-execute.js（ff-escalation quiet-window 请求写移除）
 - tasks/gap-quiet-window-holder-scope-wider-than-consumer.md（自身）

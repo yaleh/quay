@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // fan-in-materialize-check.test.mjs — gap-workflow-scriptpath-materialize-falls-back-main,
 // plugin/scripts/fan-in-materialize-check.ts. The negative-control fixtures prove the checker can go
 // RED on the materialization-fallback defect (判据能取假) plus the GREEN / NOT-EVALUATED paths

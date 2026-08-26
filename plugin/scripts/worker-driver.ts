@@ -151,6 +151,9 @@ export {
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
 import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, type RetryState } from "./driver-filters.ts";
 export { readTaskStatus } from "./driver-filters.ts";
+// AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
+// ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
+import { defaultDriverConfig, loadDriverConfig, driverCap } from "./driver-config.ts";
 // AC153：核心不变式单一实现（「⛔ 不信执行者自述，用独立量复核」）+ DriverResult 词表强制含
 // not-evaluated。computeLandingState 消费它（⛔ 不各写一遍 exitCode/自述判定）。
 import { verifyIndependently, type DriverResult } from "./driver-result.ts";
@@ -212,7 +215,9 @@ export const FINAL_STATES = ["completed", "exited-not-landed", "failed", "killed
  *  区别于 spawn-failed=2 / killed=128+sig / timed-out=128+SIGTERM=143 / failed=worker 码）。 */
 export const EXITED_NOT_LANDED_EXIT = 3;
 
-/** 并发上限的定义点（concurrency-literal-check 的唯一定义点旋钮①，人 2026-08-13）。缺省并发读它。 */
+/** 并发上限的旧 env 定义点（concurrency-literal-check 的旧旋钮①）。AC155：env 源已退役——并发缺省
+ *  改读 driver-config 的 drivers.yml（loadDriverConfig / driverCap 单一真相源）。本常量保留仅为历史
+ *  引用/命名稳定性，⛔ 不再是并发解析的输入。 */
 export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
 
 /** checkout 前 stash 的缺省 message（`git stash list` 可核的标记，AC2）。 */
@@ -229,14 +234,16 @@ export const WORKER_PROCESS_NAME = "quay-task-worker";
 /** 常驻循环【无在飞 worker 且瞬时 WAIT】时的轮询间隔（ms，测试缝经 --interval 传小值）。与
  *  promotion-driver 的 INTERVAL_MS_DEFAULT 同语义：resource-gate-wait / pool-empty 是瞬时态
  *  （闸随负载降会放行、池随 promotion-driver 持续补），等 intervalMs 后重读而非退出
- *  （gap-worker-driver-stopreason-latch-permanent-stop）。 */
-export const RESIDENT_INTERVAL_MS_DEFAULT = 30_000;
+ *  （gap-worker-driver-stopreason-latch-permanent-stop）。AC155：值从 driver-config 的
+ *  drivers.yml 派生（单一真相源，⛔ 本文件不再有独立字面量）。 */
+export const RESIDENT_INTERVAL_MS_DEFAULT = defaultDriverConfig().worker.intervalMs;
 
 /** 协调地板（gap-worker-driver-reconcile-interval，SPEC §5.5）的缺省周期：至少每 N 秒协调一次，
- *  哪怕所有边沿事件（worker 退出）都丢了 ⇒ 降级「慢但正确」而非「静默停摆」。缺省【保守】——
- *  协调一趟只是读文件+扫进程+算 diff（配合异步化后廉价且有界），300s = 5 分钟：远小于停摆窗口
- *  （今日实测 1h48m），又不会高频重算 ready 池浪费资源（硬规则 4 推论：成本结构已知为「廉价」后才设值）。 */
-export const RECONCILE_INTERVAL_SECS_DEFAULT = 300;
+ *  哪怕所有边沿事件（worker 退出）都丢了 ⇒ 降级「慢但正确」而非「静默停摆」（AC155 AC3 兜底轮询）。
+ *  缺省【保守】——协调一趟只是读文件+扫进程+算 diff（配合异步化后廉价且有界），300s = 5 分钟：
+ *  远小于停摆窗口（今日实测 1h48m），又不会高频重算 ready 池浪费资源（硬规则 4 推论：成本结构已知
+ *  为「廉价」后才设值）。AC155：值从 driver-config 的 drivers.yml 派生（单一真相源）。 */
+export const RECONCILE_INTERVAL_SECS_DEFAULT = defaultDriverConfig().worker.reconcileIntervalSecs;
 
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
 
@@ -260,6 +267,8 @@ export function computeOutcome({
   landed = null,
   landReason = null,
   sessionId = null,
+  lockWaitMs = null,
+  lockHoldMs = null,
 }: {
   task: string;
   selectorReason: string;
@@ -278,6 +287,11 @@ export function computeOutcome({
    *  `--session-id <uuid>`，同一 uuid 落盘 ⇒ web 可逐次访问该尝试的 transcript）。null = 无会话
    *  （not-dispatched 等未 spawn 路径）。 */
   sessionId?: string | null;
+  /** gap-suite-lock-starvation-long-validation-hold AC2 — the suite's single-flight flock metrics,
+   *  读自 verification-round.jsonl（与 worker 的 runId 对齐）。null = 无记录 / 该轮没取锁（scoped/doc
+   *  / 读不懂）⇒ outcome 字段缺省（缺键，⛔ 不是伪造的 0）。 */
+  lockWaitMs?: number | null;
+  lockHoldMs?: number | null;
 }) {
   // AC3（能取假，超时路径）：timedOut ⇒ final_state=timed-out（区别于外部 kill 的 killed）。
   //   被信号杀（非超时）⇒ final_state=killed + signal 落盘，⛔ 静默丢任务。
@@ -327,7 +341,50 @@ export function computeOutcome({
     in_flight_count: inFlightCount,
     timed_out: timedOut,
     session_id: sessionId,
+    // gap-suite-lock-starvation-long-validation-hold AC2 — the suite's flock metrics, so a reader of
+    //   worker-outcome.jsonl can distinguish「长时间持锁」(high lock_hold_ms) from「worker 慢 / 排队饿死」
+    //   (high lock_wait_ms + low lock_hold_ms = starved in the queue; low both + high wall_clock = slow
+    //   outside the lock). Absent (缺键) when the suite didn't take the lock or no record matches the runId.
+    ...(lockWaitMs !== null && lockWaitMs !== undefined ? { lock_wait_ms: lockWaitMs } : {}),
+    ...(lockHoldMs !== null && lockHoldMs !== undefined ? { lock_hold_ms: lockHoldMs } : {}),
   };
+}
+
+// ── suite 锁指标（gap-suite-lock-starvation-long-validation-hold AC2）────────────────────────────
+// worker（claude -p）是黑盒，driver 不直接看到 suite 日志；但 worker 跑 fan-in 时，verification-round.jsonl
+// （<root>/.quay/，经 git common-dir 解析到主检出）会落一条带 runId 的记录，其 lock_wait_ms/lock_hold_ms
+// 就是本次尝试的锁等待/持有分段。worker 退出后读【最后一个 runId+taskId 匹配】的记录取这两个字段。
+// 读不到（无记录 / 该轮没取锁 / 字段缺省 / JSON 坏行）⇒ null（缺键，⛔ 不伪造 0）。runId 复用重派时，
+// 最后一个匹配记录是【本次尝试】的（后落盘者最新）——旧轮同 runId 记录被顺序覆盖。
+export function readLockMetricsForRun(
+  root: string,
+  runId: string,
+  taskId: string,
+): { lockWaitMs: number | null; lockHoldMs: number | null } {
+  const file = path.join(root, ".quay", "verification-round.jsonl");
+  let text = "";
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return { lockWaitMs: null, lockHoldMs: null };
+  }
+  let lockWaitMs: number | null = null;
+  let lockHoldMs: number | null = null;
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    let rec: Record<string, unknown>;
+    try {
+      rec = JSON.parse(t);
+    } catch {
+      continue;
+    }
+    if (rec.runId !== runId) continue;
+    if (taskId && rec.taskId !== taskId) continue;
+    if (typeof rec.lock_wait_ms === "number") lockWaitMs = rec.lock_wait_ms;
+    if (typeof rec.lock_hold_ms === "number") lockHoldMs = rec.lock_hold_ms;
+  }
+  return { lockWaitMs, lockHoldMs };
 }
 
 // ── 落地判定（gap-worker-driver-fake-completion-exit-0）──────────────────────────────────────────
@@ -1024,17 +1081,18 @@ export function signalExitCode(signal: string): number {
 }
 
 /**
- * 并发上限（AC116 阶段 2 ①）：显式 N 优先 → 定义点 QUAY_MAX_TASK_SUBAGENTS → 任务数（无字面量，
- * 不依赖宿主规格）。驱动数自己的子进程，达 cap 则等一个结束再起下一个。
+ * 并发上限（AC116 阶段 2 ①）：显式 N 优先 → 声明式配置 cap（driver-config 单一真相源，AC155——
+ * ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env）→ 任务数（无字面量，不依赖宿主规格）。驱动数自己的
+ * 子进程，达 cap 则等一个结束再起下一个。`configCap` = 调用方经 driverCap(root,"worker") 现读的
+ * drivers.yml cap（纯函数，不自己碰 fs/env）。
  */
 export function resolveConcurrency(
   explicit: number | undefined,
   taskCount: number,
-  env: NodeJS.ProcessEnv = process.env,
+  configCap?: number,
 ): number {
   if (explicit != null && Number.isInteger(explicit) && explicit >= 1) return explicit;
-  const envN = Number(env[MAX_TASK_SUBAGENTS_ENV]);
-  if (Number.isInteger(envN) && envN >= 1) return envN;
+  if (configCap != null && Number.isInteger(configCap) && configCap >= 1) return configCap;
   return Math.max(1, taskCount);
 }
 
@@ -1045,20 +1103,24 @@ export function parseTimeoutMs(raw: string | undefined): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
-/** 解析 --interval <ms>（常驻循环无在飞 worker 且瞬时 WAIT 时的轮询间隔）。缺省
- *  RESIDENT_INTERVAL_MS_DEFAULT；非法（非有限 / 负数）⇒ 缺省（⛔ 不因 flag 拼写炸常驻循环）。 */
-export function parseIntervalMs(raw: string | undefined): number {
-  if (raw == null) return RESIDENT_INTERVAL_MS_DEFAULT;
+/** 解析 --interval <ms>（常驻循环无在飞 worker 且瞬时 WAIT 时的轮询间隔）。缺省 = drivers.yml 的
+ *  interval_ms（root 缺省时回退 RESIDENT_INTERVAL_MS_DEFAULT 常量）；非法（非有限 / 负数）⇒ 缺省
+ *  （⛔ 不因 flag 拼写炸常驻循环）。 */
+export function parseIntervalMs(raw: string | undefined, root?: string): number {
+  const def = root ? loadDriverConfig(root).worker.intervalMs : RESIDENT_INTERVAL_MS_DEFAULT;
+  if (raw == null) return def;
   const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : RESIDENT_INTERVAL_MS_DEFAULT;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : def;
 }
 
-/** 解析 --reconcile-interval <s>（秒，协调地板周期）。缺省 RECONCILE_INTERVAL_SECS_DEFAULT（保守）；
- *  非法（非有限 / 负数）⇒ 缺省（⛔ 不因 flag 拼写炸常驻循环）。返回毫秒（内部统一用 ms）。 */
-export function parseReconcileIntervalSecs(raw: string | undefined): number {
-  if (raw == null) return RECONCILE_INTERVAL_SECS_DEFAULT * 1000;
+/** 解析 --reconcile-interval <s>（秒，协调地板周期）。缺省 = drivers.yml 的 reconcile_interval_secs
+ *  （root 缺省时回退 RECONCILE_INTERVAL_SECS_DEFAULT 常量，保守）；非法（非有限 / 负数）⇒ 缺省
+ *  （⛔ 不因 flag 拼写炸常驻循环）。返回毫秒（内部统一用 ms）。 */
+export function parseReconcileIntervalSecs(raw: string | undefined, root?: string): number {
+  const def = root ? loadDriverConfig(root).worker.reconcileIntervalSecs : RECONCILE_INTERVAL_SECS_DEFAULT;
+  if (raw == null) return def * 1000;
   const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) * 1000 : RECONCILE_INTERVAL_SECS_DEFAULT * 1000;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) * 1000 : def * 1000;
 }
 
 /** 解析 --max-retries <n>（重试上限，gap-worker-driver-retry-cap-not-wired）。缺省 RETRY_CAP_DEFAULT
@@ -1262,6 +1324,10 @@ function runOneWorker({
       // worktree）。只在 exit 0 路径有意义——spawn-failed/killed/timed-out/failed 分支在 computeOutcome
       // 里优先于 landed，落盘 result 由终态分支决定；但统一读一次无害（落地读是廉价 fs/git 调用）。
       const landing = computeLandingState(rootDir, taskId);
+      // gap-suite-lock-starvation-long-validation-hold AC2 — read the suite's flock metrics from the
+      // verification-round ledger (matched by this worker's runId) so worker-outcome.jsonl can
+      // distinguish「长时间持锁」from「worker 慢」. Absent (null) on doc-only / scoped / no-record runs.
+      const lockMetrics = readLockMetricsForRun(rootDir, runId, taskId);
       const outcome = computeOutcome({
         task: taskId, selectorReason, exitCode: code, signal,
         startedAtMs, endedAtMs, workerPid, runId,
@@ -1272,6 +1338,8 @@ function runOneWorker({
         landed: landing.state === "verified" ? true : landing.state === "failed" ? false : null,
         landReason: landing.state === "verified" ? null : landing.reason,
         sessionId,
+        lockWaitMs: lockMetrics.lockWaitMs,
+        lockHoldMs: lockMetrics.lockHoldMs,
       });
       // gap-worker-driver-no-record-on-abnormal-death（AC2，能取假）：worker 异常死亡（failed/killed——
       // worker 没跑完、无完成实现）后，orphan worktree 永久残留会挡 driver 下轮对同一 task 的
@@ -1703,13 +1771,13 @@ export async function main(argv: string[]): Promise<number> {
 
   const outcomeFile = outcomePath ? path.resolve(outcomePath) : path.join(rootDir, WORKER_OUTCOME_REL);
   const timeoutMs = parseTimeoutMs(timeoutRaw);
-  const intervalMs = parseIntervalMs(intervalRaw);
-  const reconcileMs = parseReconcileIntervalSecs(reconcileRaw);
+  const intervalMs = parseIntervalMs(intervalRaw, rootDir);
+  const reconcileMs = parseReconcileIntervalSecs(reconcileRaw, rootDir);
   const maxRetries = parseMaxRetries(maxRetriesRaw);
 
   // 阶段 4（AC129）：无 --task ⇒ 常驻选择环（不再报错退出）。--task 显式批量派发路径不变。
   if (tasks.length === 0) {
-    const cap = resolveConcurrency(concurrency, 0);
+    const cap = resolveConcurrency(concurrency, 0, driverCap(rootDir, "worker"));
     return runResidentLoop({
       rootDir,
       cap,
@@ -1736,7 +1804,7 @@ export async function main(argv: string[]): Promise<number> {
     return 2;
   }
   const { taskIds, selectorReason, runPrefix, workerCmdOpts } = resolved;
-  const cap = resolveConcurrency(concurrency, taskIds.length);
+  const cap = resolveConcurrency(concurrency, taskIds.length, driverCap(rootDir, "worker"));
 
   // checkout 前 stash（阶段 2 ③，AC2）：主检出有未提交变更 ⇒ stash，⛔ 不 discard。非 git 仓库 no-op。
   const stash = stashIfDirty(rootDir);

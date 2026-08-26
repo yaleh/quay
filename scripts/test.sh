@@ -652,6 +652,16 @@ FULL_SUITE_LOCK_SLOTS=()
 while IFS= read -r _suite_slot; do FULL_SUITE_LOCK_SLOTS+=("${_suite_slot}"); done < <(suite_slot_paths "${FULL_SUITE_LOCK_FILE}")
 FULL_SUITE_LOCK_FDS=()
 
+# Lock-hold cap (gap-suite-lock-starvation-long-validation-hold AC1): a validation-type long task
+# (e.g. serial/lowconc re-check runs — 33 files × N re-runs, 5.2h wall) must not hold a single-flight
+# slot for hours, starving every other fan-in. FULL_SUITE_LOCK_HOLD_MAX_S (default 1800s = 30min) caps
+# the hold: when the suite STILL holds its slot after T seconds, a watchdog child (part of THIS process
+# tree — the release must live in the holding process, ⛔ NOT a worker-driver kill) releases the slot and
+# records a fail-loud `lock_hold_exceeded=1` marker (never silent). The cap only yields the SLOT — the
+# long suite keeps running (it already passed the resource gate at startup); it accepts the contention
+# risk of a (S+1)-th suite joining rather than serializing the whole repo behind its re-check.
+FULL_SUITE_LOCK_HOLD_MAX_S="${FULL_SUITE_LOCK_HOLD_MAX_S:-1800}"
+
 # full_suite_lock_acquire — acquire one of the S single-flight slots (non-blocking try on each;
 # all busy ⇒ unbounded wait for any to release — never fail-closed, see the lock comment above).
 full_suite_lock_acquire() {
@@ -704,6 +714,7 @@ full_suite_lock_acquire() {
     done
   fi
   FULL_SUITE_LOCK_HELD="${_s_held}"
+  FULL_SUITE_LOCK_ACQUIRED_MS="${EPOCHREALTIME:-}"
   echo "scripts/test.sh: acquired full-suite single-flight slot ${_s_held} (${FULL_SUITE_LOCK_FILE}.${_s_held}) — held for the entire run"
   if [ -n "${_s_lock_start_ms:-}" ]; then
     _s_lock_end_ms="${EPOCHREALTIME:-}"
@@ -712,16 +723,38 @@ full_suite_lock_acquire() {
       echo "__OVERHEAD__ lock_wait_ms=${_s_lock_wait_ms}" >&2
     fi
   fi
+  # Hold-cap watchdog (gap-suite-lock-starvation-long-validation-hold AC1): a child of THIS process
+  # (the holder — ⛔ not an outside worker-driver kill) that releases the slot after T seconds of the
+  # suite STILL holding, and emits a fail-loud `lock_hold_exceeded=1` marker. The spawn lives in
+  # suite-slot-lib.sh (single definition point, sourceable/testable); it polls a flag file each 1s so a
+  # normal release (flag removed) or a crash (main pid gone) exits it promptly — no lingering FD.
+  FULL_SUITE_LOCK_FLAG="$(mktemp "${TMPDIR:-/tmp}/full-suite-lock-hold.XXXXXX")"
+  FULL_SUITE_LOCK_WATCHDOG_PID="$(spawn_suite_lock_hold_watchdog "${FULL_SUITE_LOCK_FDS[${_s_held}]}" "${FULL_SUITE_LOCK_FLAG}" "$$" "${FULL_SUITE_LOCK_HOLD_MAX_S}")"
 }
 
 # full_suite_lock_release — release the HELD slot and close all FDs (idempotent; flock also
 # auto-releases on exit — a skipped lock is a clean no-op).
 full_suite_lock_release() {
-  local _r_idx=0 _r_fd
+  local _r_idx=0 _r_fd _r_now="" _r_hold_ms=""
+  # Cancel the hold-cap watchdog: it polls the flag file each 1s, so removing it makes the watchdog
+  # exit promptly (its inherited FD closes, no lingering process). Idempotent (a skipped lock has no
+  # flag — rm -f is a no-op).
+  rm -f "${FULL_SUITE_LOCK_FLAG:-}"
   if [ -n "${FULL_SUITE_LOCK_HELD:-}" ]; then
     _r_idx="${FULL_SUITE_LOCK_HELD}"
     if [ "${_r_idx}" -lt "${#FULL_SUITE_LOCK_FDS[@]}" ]; then
       flock -u "${FULL_SUITE_LOCK_FDS[${_r_idx}]}" 2>/dev/null || true
+    fi
+  fi
+  # gap-suite-lock-starvation-long-validation-hold AC2 — emit lock_hold_ms (the acquire→release wall)
+  # so the outcome records can distinguish "long lock hold" from "worker slow": lock_wait_ms is the
+  # queued-wait half, lock_hold_ms is the held half. Absent on scoped/nested runs (no lock taken —
+  # 缺键, never a fabricated 0).
+  if [ -n "${FULL_SUITE_LOCK_ACQUIRED_MS:-}" ]; then
+    _r_now="${EPOCHREALTIME:-}"
+    if [ -n "${_r_now:-}" ]; then
+      _r_hold_ms="$(awk -v a="${FULL_SUITE_LOCK_ACQUIRED_MS}" -v b="${_r_now}" 'BEGIN { d = (b - a) * 1000; printf "%d", d < 0 ? 0 : d }')"
+      echo "__OVERHEAD__ lock_hold_ms=${_r_hold_ms}" >&2
     fi
   fi
   for _r_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
