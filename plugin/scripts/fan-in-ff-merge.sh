@@ -37,9 +37,9 @@
 # ff 失败原因唯一、处置唯一). Anti-livelock (SPEC §7, gap-ff-livelock-trigger-no-action): the retry
 # record IS the anti-livelock data — the trigger is "同一任务 ff 失败 ≥3 次". When THIS failure is
 # the same task's attempt >= 3, the script does NOT return the plain retry (exit 1): it escalates —
-# writes a DISTINCT escalation record (with the SPEC §7 quiet-window request), prints the
-# anti-livelock action, and exits 3. The no-auto-retry guard is the attempt count itself: once a
-# task reaches >= 3, every later invocation escalates (exit 3), never exit 1.
+# writes a DISTINCT escalation record, prints the anti-livelock action, and exits 3. The no-auto-
+# retry guard is the attempt count itself: once a task reaches >= 3, every later invocation
+# escalates (exit 3), never exit 1.
 #
 # Lock events (acquire/release) are appended to .quay/fan-in-merge-lock-events.jsonl so the protocol
 # checker (fan-in-ff-protocol-check.ts) can verify AC4 (the lock covers ONLY ff, never overlaps a
@@ -455,15 +455,15 @@ if [ "${merge_rc}" -ne 0 ]; then
   #      task / attempt / develop head / caller identity; exit code 3 is distinct from 1 (retry) and
   #      2 (usage/env), so a caller can mechanically tell "anti-livelock, do not auto-retry" apart
   #      from "develop advanced, retry".
-  #   2. REQUEST A QUIET WINDOW — the escalation record carries the SPEC §7 quiet-window request
-  #      (who holds: all layers except the fan-in executor; 判据: `git log <mergeTarget>
-  #      --since=<ts>` empty; ends early on ff success — the AC63 pattern). Other layers read this
-  #      record and hold develop so the retry can land.
-  #   3. STOP AUTOMATIC RETRY — the guard is the attempt count itself: once attempt >= 3, THIS and
+  #   2. STOP AUTOMATIC RETRY — the guard is the attempt count itself: once attempt >= 3, THIS and
   #      every later invocation escalates (exit 3), never returns the plain retry exit 1.
+  #   (gap-quiet-window-holder-scope-wider-than-consumer: the SPEC §7 quiet-window REQUEST that used
+  #    to be item 2 here is RETIRED — it held a non-bottleneck. The escalation record is now a pure
+  #    stop-retry signal + traceability carrier; the real bottleneck, single-flight lock queueing,
+  #    is handled by gap-suite-lock-starvation-long-validation-hold.)
   if [ "${attempt}" -ge 3 ]; then
-    printf '%s\n' "{\"event\":\"ff-escalation\",\"taskId\":\"${task_id}\",\"attempt\":${attempt},\"developHead\":\"${develop_head_now}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"mergeTarget\":\"${merge_target}\",\"action\":\"request-quiet-window-and-stop-retry\",\"quietWindow\":{\"requested\":true,\"holder\":\"all-layers-except-fan-in-executor\",\"criterion\":\"git log ${merge_target} --since=${now_iso} empty\",\"windowMinutes\":20,\"endsEarly\":\"ff-success\"}}" >> "${escalations}"
-    echo "fan-in-ff-merge: FF FAILED (attempt ${attempt} >= 3) — ANTI-LIVELOCK (SPEC §7, gap-ff-livelock-trigger-no-action): develop keeps advancing; escalating + requesting a quiet window + STOPPING automatic retry. Escalation record written to ${escalations}. Do NOT auto-retry: coordinate a develop-hold (quiet window), re-merge develop once quiet, then re-run." >&2
+    printf '%s\n' "{\"event\":\"ff-escalation\",\"taskId\":\"${task_id}\",\"attempt\":${attempt},\"developHead\":\"${develop_head_now}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"mergeTarget\":\"${merge_target}\",\"action\":\"stop-retry\"}" >> "${escalations}"
+    echo "fan-in-ff-merge: FF FAILED (attempt ${attempt} >= 3) — ANTI-LIVELOCK (SPEC §7, gap-ff-livelock-trigger-no-action): develop keeps advancing; escalating + STOPPING automatic retry. Escalation record written to ${escalations}. Do NOT auto-retry: re-merge develop and re-run the fan-in once develop settles." >&2
     echo "fan-in-ff-merge: measure ff_only_locked=false" >&2
     exit 3
   fi
@@ -480,14 +480,15 @@ if [ "${post_head}" != "${task_tip}" ]; then
   echo "fan-in-ff-merge: post-check FAILED — ${merge_target} is at ${post_head}, expected task tip ${task_tip}; needs human" >&2
   exit 1
 fi
-# ── quiet-window 兑现（gap-fan-in-ff-livelock-quiet-window-no-consumer）───────────────────────
-# The escalation (attempt >= 3) requested a quiet window (holder: all-layers-except-fan-in-executor).
+# ── escalation resolution（gap-fan-in-ff-livelock-quiet-window-no-consumer 的兑现半边；quiet-window
+#    请求已随 gap-quiet-window-holder-scope-wider-than-consumer 退役，本记录保留为 escalation 的
+#    【已落地】兑现信号，供 slot-refill 的 ff-starvation relief 读「该任务 escalation 已解除」）─────
 # On ff SUCCESS the escalated task has landed — append a resolution record (event
-# "quiet-window-resolved") to the SAME escalation file so the consumer (promotion-driver) stops
-# holding develop writes — the escalation's `endsEarly: "ff-success"` half. Written unconditionally:
-# a resolution with no prior request is a no-op for the consumer (its active-window logic keys on a
-# request NEWER than any resolution). Same file, same append — ⛔ no new jsonl.
-printf '%s\n' "{\"event\":\"quiet-window-resolved\",\"taskId\":\"${task_id}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"mergeTarget\":\"${merge_target}\"}" >> "${escalations}"
+# "ff-escalation-resolved") to the SAME escalation file so the escalation ledger marks the task's
+# escalation as cleared (slot-refill's computeUnresolvedEscalationTaskIds reads the LATEST event: a
+# non-ff-escalation latest event = resolved). Written unconditionally: a resolution with no prior
+# request is a no-op for that consumer. Same file, same append — ⛔ no new jsonl.
+printf '%s\n' "{\"event\":\"ff-escalation-resolved\",\"taskId\":\"${task_id}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"mergeTarget\":\"${merge_target}\"}" >> "${escalations}"
 echo "fan-in-ff-merge: OK — ${merge_target} fast-forwarded to task/${task_id} (${post_head}) [before ${develop_head_before}]${run_id:+ (runId: ${run_id})}"
 echo "fan-in-ff-merge: measure ff_only_locked=true"
 exit 0
