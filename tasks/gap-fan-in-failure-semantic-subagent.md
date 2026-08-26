@@ -28,6 +28,16 @@ extra:
 
 **⊢ 实测坐实（SPEC §1.1 泄漏②，manager 自查推翻自己前一轮判断）**：`gap-ac143` 三次 `exited-not-landed` 在 `fan-in-retries` / `fan-in-merge-lock-events` / `fan-in-ff-escalations` 三处载体**全部 0 命中**（正控制：同谓词对 load-sampler-orphan 有命中）⇒ 无一次走到过 ff-merge 这一步，却被「该不该放弃」计数器等价计数 → needs-human。**同族** `cause-carrier-must-be-distinguishable`：把「任务自己的问题」与「系统欠它的资源」压成一个整数。
 
+**⊢ 定量依据（manager 24h 窗口，verification-round + per-task-suite-records + fan-in-retries 三载体交叉，非单源）**：最近 24h 的 28 个 fan-in 任务——
+```
+suite 总运行 52 次，平均每个 fan-in 跑 1.86 次 suite
+suite 真红 = 0 次（52 全绿，verification-round 完整红绿记录，非只记绿的假零）
+ff-race 失败 = 27 次（27/28 = 96.4% 任务撞上）
+额外 suite 运行（=ff-race 整份重跑）= 24/52 = 46.2%
+白费墙钟 = 11.02h / 17.80h = 61.9%（最惨 load-sampler-orphan 8 次 suite 白费 5.1h）
+```
+**⊢ 含义**：suite 红与 infra-hang 在 24h 内 **0 次**——当前把「ff-race 输」「suite 红」「挂死」压进同一个退出码、喂给同一个 `advanceRetryCap`，是在为一件**发生率 0** 的事保留昂贵的「整份重跑」语义。**62% 墙钟纯由 ff-race 的「整份作废→重跑」造成，且多数 ff-race 是「develop 那条新提交与本分支根本不冲突」**（rebase 一下就行）⇒ AC3 落地理论上可回收这 46% 次数 / 62% 墙钟，是当前所有改进方向里投入产出比最高的一项（suite 执行本身 0 失败，压 suite 已无油水）。
+
 **⊢ 形态（SPEC §4.2）**：
 ```
 (a) 输入 = 完整现场（⛔ 非退出码）：失败发生在哪一相（suite/gate/ff）、suite 红的具体文件与断言、
