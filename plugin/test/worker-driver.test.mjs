@@ -175,7 +175,18 @@ function spawnResident(root, args) {
   const events = () => buf.trim().split("\n").filter(Boolean).map((l) => {
     try { return JSON.parse(l); } catch { return null; }
   }).filter(Boolean);
-  const stop = () => { if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch { /* already gone */ } } };
+  // ⛔ 完整 teardown（gap-worker-driver-stashifdirty-stashes-others-uncommitted suite-fix）：SIGKILL 是异步的——
+  // 旧 stop 只发信号不等待，driver 尚未退出时 t.after 的 rmSync 就跑（after 钩 FIFO：rmSync 先注册先跑），
+  // driver 仍在写 round 记录 ⇒ rmSync ENOTEMPTY。修法 = kill 后 await 'exit'，使 stop 成为「已停」的真 teardown。
+  // 返回 promise：t.after(() => drv.stop()) 与 await drv.stop() 都等 driver 真正退出后再删目录。
+  const stop = () => {
+    // ⛔ SIGKILL 死后 exitCode 为 null、signalCode 为 "SIGKILL"——只查 exitCode 会把「已被信号杀死」误判为
+    // 「仍存活」⇒ 二次 stop() 挂起（'exit' 已 fired，新 listener 永不触发）。两者任一非 null 即「已退出」。
+    if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+    const exited = new Promise((resolve) => child.once("exit", () => resolve()));
+    try { child.kill("SIGKILL"); } catch { /* already gone */ }
+    return exited;
+  };
   return { child, events, stop, pid: child.pid };
 }
 
@@ -1533,7 +1544,7 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, 5000);
+  await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, 60000);
   const rounds = readRoundLines(root);
   const livenessCount = Number(fs.readFileSync(livenessCnt, "utf8"));
   // liveness 在每轮【开头】跑（writeRound 之前）⇒ livenessCount ≥ rounds.length 恒成立；≥1 证明
@@ -1887,7 +1898,7 @@ test("AC1 — depends_on gate in the resident loop: a candidate whose dep is not
   const rounds = readRoundLines(root);
   assert.equal(rounds[rounds.length - 1].pool, 1, "ready-pool reported pool=1 (gap-dep), yet nothing dispatched — the filter is the cause");
   assert.equal(rounds[rounds.length - 1].in_flight, 0, "nothing in flight");
-  drv.stop(); // 先停驱动再让 after 钩 rmSync 删目录（node:test after 钩按注册序 FIFO：rmSync 先注册会先于 drv.stop 运行 ⇒ 驱动仍在写 round/cnt ⇒ ENOTEMPTY）
+  await drv.stop(); // 先停驱动再让 after 钩 rmSync 删目录（node:test after 钩按注册序 FIFO：rmSync 先注册会先于 drv.stop 运行 ⇒ 驱动仍在写 round/cnt ⇒ ENOTEMPTY；stop 现 await 'exit'）
 });
 
 test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the difference, not a blanket stop)", async (t) => {
@@ -1911,7 +1922,7 @@ test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the
   assert.equal(spawned.length, 1, "AC1 对照: dep-done candidate IS dispatched (exactly once)");
   assert.equal(spawned[0].task, "gap-dep");
   assert.equal(readOutcomeLines(root)[0].final_state, "completed", "the dep-done candidate lands cleanly");
-  drv.stop(); // 先停驱动再让 after 钩 rmSync 删目录（node:test after 钩按注册序 FIFO：rmSync 先注册会先于 drv.stop 运行 ⇒ 驱动仍在写 round/cnt ⇒ ENOTEMPTY）
+  await drv.stop(); // 先停驱动再让 after 钩 rmSync 删目录（node:test after 钩按注册序 FIFO：rmSync 先注册会先于 drv.stop 运行 ⇒ 驱动仍在写 round/cnt ⇒ ENOTEMPTY；stop 现 await 'exit'）
 });
 
 // ── gap-worker-driver-cold-start-inflight-blind：冷启动在飞盲区 ───────────────────────────────────
@@ -2206,7 +2217,7 @@ test("AC2 (gap-worker-driver-reconcile-interval) — all edge events lost (worke
   await waitFor(() => drv.events().some((e) => e.event === "selector-picked" && e.task === "gap-b"), 10000);
   const picks = drv.events().filter((e) => e.event === "selector-picked").map((e) => e.task);
   assert.ok(picks.includes("gap-b"), `AC2: floor re-ran ready pool and dispatched gap-b with zero worker-exit edge events (picks=${picks.join(",")})`);
-  drv.stop();
+  await drv.stop();
 });
 
 // ── gap-worker-driver-async-selector-readypool：循环体 spawnSync→spawn（selector/readyPool/liveness/git）──
@@ -2290,7 +2301,7 @@ test("AC3 (gap-worker-driver-async-selector-readypool) — a slow selector does 
   const rounds = readRoundLines(root);
   assert.ok(rounds.length >= 3, `AC3: the floor kept writing round heartbeats despite the 2s-slow selector (rounds=${rounds.length})`);
   assert.ok(rounds.some((r) => r.in_flight >= 1), "the round records carry in-flight workers (floor exercised in the in-flight branch)");
-  drv.stop();
+  await drv.stop();
 });
 
 test("AC1 (gap-worker-driver-stopreason-latch-permanent-stop) — gate first WAIT then GO ⇒ the SAME driver process (no restart) recovers dispatch", async (t) => {
@@ -2324,7 +2335,7 @@ test("AC1 (gap-worker-driver-stopreason-latch-permanent-stop) — gate first WAI
   assert.equal(spawned[0].task, "gap-ac1");
   await waitFor(() => readOutcomeLines(root).length >= 1, 5000);
   assert.equal(readOutcomeLines(root)[0].final_state, "completed", "the recovered dispatch lands cleanly");
-  drv.stop();
+  await drv.stop();
 });
 
 test("AC2 (gap-worker-driver-stopreason-latch-permanent-stop) — adjacent stop rounds re-acquire the resource reading (⛔ not byte-identical)", async (t) => {
@@ -2348,7 +2359,7 @@ test("AC2 (gap-worker-driver-stopreason-latch-permanent-stop) — adjacent stop 
   assert.match(stops[0].stop_reason, /resource-gate-wait/);
   assert.match(stops[1].stop_reason, /resource-gate-wait/);
   assert.notEqual(stops[0].stop_reason, stops[1].stop_reason, "AC2: adjacent stop readings differ (re-acquired each round, ⛔ not latched byte-identical)");
-  drv.stop();
+  await drv.stop();
 });
 
 test("AC3 (gap-worker-driver-stopreason-latch-permanent-stop) — pool non-empty + transient WAIT + running.length===0 ⇒ driver does NOT exit directly", async (t) => {
@@ -2366,7 +2377,7 @@ test("AC3 (gap-worker-driver-stopreason-latch-permanent-stop) — pool non-empty
   assert.equal(drv.child.exitCode, null, "AC3: pool non-empty + gate WAIT + no in-flight ⇒ driver does NOT exit directly");
   const stops = readRoundLines(root).filter((r) => r.action === "stop");
   assert.ok(stops.length >= 2, "AC3: the driver polled (≥2 stop rounds) — it did not exit after the first WAIT round");
-  drv.stop();
+  await drv.stop();
 });
 
 // ── gap-worker-driver-retry-cap-not-wired：worker 重试上限接线 ─────────────────────────────────────
