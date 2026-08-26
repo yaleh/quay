@@ -24,9 +24,9 @@ outer 执行核里**纯机械**的 A/B 段（A1/A3/A6/A9/A10/A18/A21 读数 · B
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，生产载体）：该 driver 的生产载体在其落地后 ≥N 轮有记录（能产出 ≠ 已产出，硬规则④推论三）；（⛔ N 轮无记录 ⇒ 假）。
-- [ ] AC2（能取假，无双真相源）：driver 落地后 outer tick-log 里不再出现该步骤的手动调用记录（同 AC135 形态）；（⛔ 仍出现手动调用 ⇒ 假）。
-- [ ] AC3（能取假，registry 表驱动）：新 kind 经 `KIND_DRIVER[]` 等 registry 表加一行接入（grep 到）；（⛔ 另起一套承载 ⇒ 假）。
+- [ ] AC1（能取假，生产载体）：该 driver 的生产载体在其落地后 ≥N 轮有记录（能产出 ≠ 已产出，硬规则④推论三）；（⛔ N 轮无记录 ⇒ 假）。（待外部）
+- [ ] AC2（能取假，无双真相源）：driver 落地后 outer tick-log 里不再出现该步骤的手动调用记录（同 AC135 形态）；（⛔ 仍出现手动调用 ⇒ 假）。（待外部）
+- [x] AC3（能取假，registry 表驱动）：新 kind 经 `KIND_DRIVER[]` 等 registry 表加一行接入（grep 到）；（⛔ 另起一套承载 ⇒ 假）。
 
 ## Definition of Done
 
