@@ -49,6 +49,7 @@ extra:
 ## Touches
 
 - packages/quay/src/serve-send.ts（投递状态改读核证结果/共享判定源）
+- packages/quay/test/serve-handlers.test.mjs（移除 settings 预测测试，改为 verdict→state 判定）
 - plugin/scripts/transcript-delivery-check.ts（判定源）
 - plugin/test/（投递状态单一真相源 + 边界不破测试）
 - tasks/gap-delivery-status-two-parallel-implementations.md（自身）
