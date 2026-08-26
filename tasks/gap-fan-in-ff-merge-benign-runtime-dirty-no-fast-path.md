@@ -43,5 +43,6 @@ pre-flight 对良性运行时文件脏的自动收敛落地；AC1-AC3 全勾；�
 ## Touches
 
 - plugin/scripts/fan-in-ff-merge.sh（pre-flight 良性运行时文件脏分支，与 status-only 收敛并列）
+- plugin/scripts/touches-orthogonality-check.ts（checkBenignRuntimeDirty 判定函数 + --runtime-dirty CLI，复用 parseTouches/matchGlob）
 - plugin/test/（良性运行时脏收敛 + 真脏负控制 + 生产回放 测试）
 - tasks/gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path.md（自身）
