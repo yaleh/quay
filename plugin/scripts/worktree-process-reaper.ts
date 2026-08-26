@@ -25,6 +25,12 @@
 //                       without first stopping it). Both are safe-by-construction: a legitimately
 //                       running suite has a LIVE cwd (never matched), a real claude session has
 //                       argv[0] `claude` (never matched by (a) and excluded from (b)).
+//   ⛔ The two modes cover MUTUALLY EXCLUSIVE residue classes, not a strong/weak relationship:
+//      `--orphans` matches ONLY a " (deleted)" cwd suffix (a worktree already removed) — a
+//      PPID=1 zombie whose cwd still points at a LIVE worktree is `--worktree` territory and is
+//      NEVER matched by `--orphans`. Running `--orphans` therefore does NOT mean the live
+//      worktrees were swept; `--worktree <path>` is the tool for that (and it in turn does not
+//      touch deleted-cwd residue).
 //
 // Safety envelope (the 2026-08-08 two-layer-blind incident's rule, same invariant the
 // session-liveness sweepers pin): a name-based batch kill of LIVE processes is forbidden. This
