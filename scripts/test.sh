@@ -877,6 +877,28 @@ mark_nested() {
   export QUAY_TEST_NESTED_ROOT="$repo_root"
 }
 
+# lpt_reorder_files <name-ref> — LPT-reorder the named array IN PLACE (longest-KNOWN first)
+# (gap-m-bucket-long-tail-lpt-scheduling + gap-suite-lpt-full-bucket-run-selected). Shared by the
+# --buckets M-bucket path AND the run_selected full-suite default path (bucket_full=1 + the no-args
+# full entry), so the LPT ordering has ONE definition point — never two inline copies that drift.
+# Durations come from the EXISTING carrier .quay/verification-round.jsonl perFile[].durationMs
+# (rolling average of the last QUAY_TEST_LPT_ROUNDS rounds) — no new measurer. Scheduling-only:
+# every file is emitted exactly once, so a bug can never drop a test (pass/fail-neutral). FAIL-OPEN:
+# no history / helper failure / a short result ⇒ keep the original order. QUAY_TEST_LPT_ORDER=0 is
+# the one-key rollback. Callers hand the array NAME (nameref) so the reorder lands back in the
+# caller's own array (mapfile on the nameref writes through to the referenced variable).
+lpt_reorder_files() {
+  local -n _lpt_arr="$1"
+  if [ "${QUAY_TEST_LPT_ORDER:-1}" = "1" ] && [ "${#_lpt_arr[@]}" -gt 1 ]; then
+    local _lpt_out
+    _lpt_out="$(printf '%s\n' "${_lpt_arr[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-lpt-order.ts" --root "${main_root}" --rounds "${QUAY_TEST_LPT_ROUNDS:-3}")" || _lpt_out=""
+    if [ -n "${_lpt_out}" ] && [ "$(printf '%s\n' "${_lpt_out}" | wc -l)" -eq "${#_lpt_arr[@]}" ]; then
+      mapfile -t _lpt_arr <<< "${_lpt_out}"
+      echo "scripts/test.sh: lpt-order: file list reordered (${#_lpt_arr[@]} files; first=$(basename "${_lpt_arr[0]}"))" >&2
+    fi
+  fi
+}
+
 # run_selected <groups-csv> [extra-node-flags...] — build the selected file list and exec node
 # --test. Runs the split-or-commit whole-store scan first (same invariant as the default/no-args
 # path). Extra flags (from the flags-only form) are PREPENDED to the file list; node --test is
@@ -941,13 +963,11 @@ run_selected() {
   # false reds (r4/r5/r6) and no longer participates in the red verdict. Re-enable when the
   # verification worktree achieves runtime single-writer via `git worktree lock` (re-enable
   # condition documented in the kept suite-after clean-tree script's header).
-  # The concurrency flag is bound to a variable here because the literal
-  # `--test-concurrency="$(default_test_concurrency)"` spelling is pinned by
-  # plugin/test/resource-gate.test.mjs AC5 (exactly 5 sites) and select-tests-for-touches.test.mjs
-  # AC11 — the default-path branch must not add a sixth literal site.
+  # The main phase's concurrency is delivered via bucket_test_concurrency (explicit flag wins, else
+  # the derived default) — NOT the `--test-concurrency="$(default_test_concurrency)"` literal, whose
+  # spelling is pinned by plugin/test/resource-gate.test.mjs AC5 (exactly 5 sites) and
+  # select-tests-for-touches.test.mjs AC11; the default-path branch must not add a sixth literal site.
   if [ "${FULL_SUITE_DEFAULT:-0}" = "1" ]; then
-    local cc
-    cc="$(default_test_concurrency)"
     mark_nested
     # Suite-BEFORE snapshot (gap-assert-clean-tree-premise-void-under-concurrent-writers): capture
     # the pre-run porcelain so a re-enabled suite-AFTER assertion is DELTA — only items newly added
@@ -1069,16 +1089,18 @@ run_selected() {
     # MAIN phase (the concurrency-N default body) — runs LAST, after serial/lowconc
     # (gap-phase-order-serial-lowconc-before-main): a serial/lowconc failure is now judged red at
     # the phase boundary, never after the entire main phase's cost has been paid.
-    # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency
-    # source — skip the default prepend (gap-full-suite-runner-concurrency-default-and-gate AC2).
+    # LPT order + order-preserving run({files}) (gap-suite-lpt-full-bucket-run-selected): the main
+    # body is LPT-reordered longest-known-first and handed to suite-lpt-runner.mjs — the ONLY path
+    # that preserves argv order (node --test re-sorts positional globs alphabetically, which is how
+    # the full default path previously ran the main body: longest files serialized at the tail).
+    # Concurrency rides in execArgv via bucket_test_concurrency (explicit flag wins, else the derived
+    # default — the SAME single-concurrency-source precedence as has_explicit_concurrency), and the
+    # runner composes spec→stdout + measure-suite-reporter→stderr (the suite_reporter_flags
+    # equivalents), so the per-file attribution + LPT input carrier stay intact.
     local mcode=0
-    if has_explicit_concurrency "$@"; then
-      node --test $(suite_reporter_flags) "$@" "${files[@]}"
-      mcode=$?
-    else
-      node --test --test-concurrency="$cc" $(suite_reporter_flags) "$@" "${files[@]}"
-      mcode=$?
-    fi
+    lpt_reorder_files files
+    node --test-concurrency="$(bucket_test_concurrency "$@")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "$@" "${files[@]}"
+    mcode=$?
     [ "$mcode" -eq 0 ] || code="$mcode"
     [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
     # Fixed-overhead breakdown (gap-suite-fixed-overhead-decomposition AC2): emit the deterministic
@@ -1419,21 +1441,10 @@ elif [ "${1:-}" = "--buckets" ]; then
     run_selected "$(effective_groups)"
   fi
   mapfile -t files <<< "${bucket_sel_out}"
-  # LPT order (gap-m-bucket-long-tail-lpt-scheduling): reorder the M-bucket file list so the
-  # longest-KNOWN files start FIRST and overlap the long run of short files instead of serializing
-  # at the tail (measured round 474/476/478: the last 5% of files = 27%+ of wall clock). Durations
-  # come from the EXISTING carrier .quay/verification-round.jsonl perFile[].durationMs (rolling
-  # average of the last QUAY_TEST_LPT_ROUNDS rounds) — no new measurer. Scheduling-only: every file
-  # is emitted exactly once, so a bug can never drop a test (pass/fail-neutral). FAIL-OPEN: no
-  # history / helper failure / a short result ⇒ keep the original order. QUAY_TEST_LPT_ORDER=0 is
-  # the one-key rollback.
-  if [ "${QUAY_TEST_LPT_ORDER:-1}" = "1" ] && [ "${#files[@]}" -gt 1 ]; then
-    _lpt_out="$(printf '%s\n' "${files[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-lpt-order.ts" --root "${main_root}" --rounds "${QUAY_TEST_LPT_ROUNDS:-3}")" || _lpt_out=""
-    if [ -n "${_lpt_out}" ] && [ "$(printf '%s\n' "${_lpt_out}" | wc -l)" -eq "${#files[@]}" ]; then
-      mapfile -t files <<< "${_lpt_out}"
-      echo "scripts/test.sh: lpt-order: bucket file list reordered (${#files[@]} files; first=$(basename "${files[0]}"))" >&2
-    fi
-  fi
+  # LPT order (gap-m-bucket-long-tail-lpt-scheduling): reorder the M-bucket file list longest-known-
+  # first — the mechanism lives in lpt_reorder_files() (single definition point, shared with the
+  # run_selected full-suite default path via gap-suite-lpt-full-bucket-run-selected).
+  lpt_reorder_files files
   # FULL static checks (verification-grade — no 降频), then the bucket test subset.
   run_static_checks
   build_dist_once
