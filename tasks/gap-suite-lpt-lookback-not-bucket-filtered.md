@@ -37,6 +37,6 @@ extra:
 ## Touches
 
 - plugin/scripts/suite-lpt-order.ts（loadDurationAverages 逐文件/bucket 过滤）
-- plugin/scripts/suite-lpt-order.test.mjs（lookback 跨 bucket 负控制 + 生产回放）
+- plugin/test/suite-lpt-order.test.mjs（lookback 跨 bucket 负控制 + 生产回放）
 - scripts/test.sh（:1401 日志文案 bucket-agnostic 顺手改）
 - tasks/gap-suite-lpt-lookback-not-bucket-filtered.md（自身）
