@@ -1,7 +1,7 @@
 ---
 id: gap-suite-load-sampler-orphan-process
 title: suite-load-sampler 孤儿进程残留——宿主结束后仍写数十分钟-小时，污染负载指标
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -34,3 +34,8 @@ sampler 随宿主生命周期终止；AC1-2 全勾；`suite-load-*.jsonl` 跨度
 - plugin/scripts/suite-load-sampler*（如独立脚本）
 - plugin/test/full-suite-runner.test.mjs（对应测试）
 - tasks/gap-suite-load-sampler-orphan-process.md（自身）
+## Needs-Human
+
+**执行 2026-08-26T18:24:46.751Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
