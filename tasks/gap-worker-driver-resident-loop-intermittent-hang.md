@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-resident-loop-intermittent-hang
 title: worker-driver.ts 常驻派发循环间歇性挂起——并发/负载触发的竞态，driver 子进程不退出无限占槽（3 次独立复现，治本）
-status: ready
+status: done
 labels:
   - gap
   - defect
