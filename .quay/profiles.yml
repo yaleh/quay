@@ -61,3 +61,6 @@ roles:
   fix-worker:
     profile: worker-default
     name: quay-fix-worker
+  pool-judge:
+    profile: worker-default
+    name: quay-pool-judge
