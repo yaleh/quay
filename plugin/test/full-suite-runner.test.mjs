@@ -2363,17 +2363,21 @@ test("AC5 — a signal-killed run writes state=red reason=aborted, which must NO
   );
   try {
     const child = runRunner({ root, command: `bash ${f}` });
+    // gap-suite-load-sampler-orphan-process load-hardening: the 10s "running" poll flaked RED under
+    // 16-way contention (runner node bootstrap > 10s ⇒ `poll timeout after 10000ms`), the same
+    // bootstrap-race shape the AC1/AC2 early-red fixes below widen. Widen both polls so
+    // in-flight/aborted are judged on the state file (wall-clock), not on a runner-bootstrap race.
     await poll(() => {
       const s = readState(root);
       return s && s.state === "running" ? s : null;
-    }, { timeoutMs: 10000 });
+    }, { timeoutMs: 20000 });
     // The fake suite signals the runner at ~t+1s; the runner exits when the handler runs.
     await waitExit(child);
     // The runner's signal handler writes red+aborted (no correctness conclusion).
     const s = await poll(() => {
       const cur = readState(root);
       return cur && cur.state === "red" && cur.reason === "aborted" ? cur : null;
-    }, { timeoutMs: 10000 });
+    }, { timeoutMs: 20000 });
     assert.equal(s.reason, "aborted", "a kill produces reason=aborted, not failed");
     // And the stop-dispatch consumer (runOnce) reports NO stop signal for aborted-red (AC5).
     const res = runOnce(root);
