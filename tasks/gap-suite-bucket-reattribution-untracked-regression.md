@@ -33,9 +33,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，文件恢复跟踪）：`.quay/suite-bucket-reattribution.jsonl` 重新 tracked（230 行在、`git ls-files` 命中、`.gitignore:286` 移除）；（⛔ 仍缺失/仍 gitignored ⇒ 假）。
-- [ ] AC2（能取假，负控制 suite 绿）：恢复后 `suite-bucket-select.test.mjs:52` 的 `reattr.size > 0` 断言过（worktree 能拿到该文件）；（⛔ 仍红 ⇒ 假）。
-- [ ] AC3（能取假，修正原任务）：`gap-quay-runtime-files-tracked-but-shouldnt` 的 AC1 修正（该文件从「5 个明显运行时产物」移除 + 标注数据资产误分类）；（⛔ 仍列在运行时产物 ⇒ 假）。
+- [x] AC1（能取假，文件恢复跟踪）：`.quay/suite-bucket-reattribution.jsonl` 重新 tracked（230 行在、`git ls-files` 命中、`.gitignore:286` 移除）；（⛔ 仍缺失/仍 gitignored ⇒ 假）。
+- [x] AC2（能取假，负控制 suite 绿）：恢复后 `suite-bucket-select.test.mjs:52` 的 `reattr.size > 0` 断言过（worktree 能拿到该文件）；（⛔ 仍红 ⇒ 假）。
+- [x] AC3（能取假，修正原任务）：`gap-quay-runtime-files-tracked-but-shouldnt` 的 AC1 修正（该文件从「5 个明显运行时产物」移除 + 标注数据资产误分类）；（⛔ 仍列在运行时产物 ⇒ 假）。
 
 ## Definition of Done
 
@@ -47,3 +47,23 @@ extra:
 - .gitignore（:286 撤除 suite-bucket-reattribution 忽略）
 - tasks/gap-quay-runtime-files-tracked-but-shouldnt.md（AC1 修正误分类）
 - tasks/gap-suite-bucket-reattribution-untracked-regression.md（自身）
+
+## Evidence（inner 落盘 2026-08-26，核实已完成）
+
+> **实现已 out-of-band 落地**：恢复跟踪（`32364a14` fix: 恢复 `.quay/suite-bucket-reattribution.jsonl` 跟踪）+ 原任务 AC1 更正（`a5fe741f`）在本任务派发前已由直接提交上 develop。本 Evidence 是**核实 + 负控制 suite 验证**，非重新恢复——三处 Touches（非自身）均已 land，核对如下。
+
+### AC1 — 文件恢复跟踪
+
+worktree 内逐项核验：
+- `.quay/suite-bucket-reattribution.jsonl` **tracked**：`git ls-files --error-unmatch` 命中；
+- **230 行**在盘（`wc -l` = 230），内容与 `git show 70ea6af7:.quay/suite-bucket-reattribution.jsonl` **逐字节一致**（`diff` 空输出）；
+- `.gitignore` 已无 `**/.quay/suite-bucket-reattribution.jsonl` 字面忽略行（仅余 :280-287 更正注释块）；`git check-ignore` 报「not ignored」。
+
+### AC2 — 负控制 suite 绿
+
+worktree 内 `bash scripts/test.sh plugin/test/suite-bucket-select.test.mjs`：**10 tests / 10 pass / 0 fail**。
+关键断言 `effectiveBucketSet applies the AC121 reattribution override as a singleton`（含 `reattr.size > 0`，test.mjs:54）通过——worktree 能拿到该文件。
+
+### AC3 — 原任务 AC1 修正
+
+`tasks/gap-quay-runtime-files-tracked-but-shouldnt.md`：:15 误分类更正注、:22「共 4 个」（原「共 5 个」含该文件、已更正为数据资产并恢复跟踪）、:33 AC1 复选框 `[x]` + 5→4 标注——三处均已在 develop（`a5fe741f`）。
