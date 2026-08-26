@@ -167,15 +167,34 @@ function readRoundLines(root) {
 // （gap-worker-driver-stopreason-latch-permanent-stop）。故常驻测试不能再用 execFileSync 等退出码：
 // spawn 收集 stdout JSON 事件 + 显式 stop（SIGKILL）。--json 由本 helper 恒追加（events() 依赖它）。
 function spawnResident(root, args) {
+  // detached:true ⇒ driver 是独立进程组组长。stop() 杀整个组（driver + worker + counter 子进程一起死），
+  // ⛔ 只杀 driver 会留孤儿：孤儿 worker（stdio:"inherit"）持 stdout pipe 写端 ⇒ node --test 等不到 EOF
+  // 挂死；孤儿 counter 子进程写 root/*.cnt ⇒ 与 after 钩 rmSync 竞态 ENOTEMPTY。二者都是本文件的
+  // 间歇挂起根因（gap-worker-driver-resident-loop-intermittent-hang）。
   const child = spawn(process.execPath, [
     "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root, ...args, "--json",
-  ], { stdio: ["ignore", "pipe", "ignore"] });
+  ], { stdio: ["ignore", "pipe", "ignore"], detached: true });
   let buf = "";
   child.stdout.on("data", (d) => { buf += d; });
   const events = () => buf.trim().split("\n").filter(Boolean).map((l) => {
     try { return JSON.parse(l); } catch { return null; }
   }).filter(Boolean);
-  const stop = () => { if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch { /* already gone */ } } };
+  // stop() 返回在【驱动真退出】后 resolve 的 promise（⛔ 只发 SIGKILL 就返回 ⇒ after 钩里的 rmSync
+  // 会在驱动还在写 round/cnt 时跑 ⇒ ENOTEMPTY）。idempotent：多次调用复用同一 promise。inline 调用
+  // （测试体末）fire-and-forget，after 钩里 `await drv.stop()` 会等它。
+  let stopPromise = null;
+  const stop = () => {
+    if (stopPromise) return stopPromise;
+    stopPromise = new Promise((resolve) => {
+      let timer = null;
+      const finish = () => { if (timer) clearTimeout(timer); resolve(); };
+      if (child.exitCode !== null) { finish(); return; }
+      child.once("exit", finish);
+      try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* already gone */ } }
+      timer = setTimeout(finish, 2000); // 兜底：SIGKILL 后驱动应在 ms 级死；2s 上限防 after 钩永挂
+    });
+    return stopPromise;
+  };
   return { child, events, stop, pid: child.pid };
 }
 
@@ -1234,7 +1253,6 @@ test("AC129 pure — shuffle returns a permutation of its input", () => {
 
 test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatches the Touches-overlapping pair concurrently", async (t) => {
   const root = makeGitRoot("ac3-integr");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTouchedTask(root, "gap-a", "plugin/scripts/foo.ts");
   writeTouchedTask(root, "gap-b", "plugin/scripts/foo.ts"); // overlaps gap-a
   writeTouchedTask(root, "gap-c", "plugin/scripts/bar.ts"); // disjoint
@@ -1249,6 +1267,7 @@ test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatch
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 5000);
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   // gap-a picked first (touches foo.ts); while it is in-flight, gap-b (also foo.ts) must be filtered
@@ -1282,7 +1301,6 @@ test("AC129 pure — defaultSelectorArgv / defaultReadyPoolArgv are launch / nod
 
 test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the selector's real reason (not 'explicit --task selection')", async (t) => {
   const root = makeGitRoot("ac2");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTaskFile(root, "gap-a", "done");
   const rpcFile = path.join(root, "rpc.cnt");
   const drv = spawnResident(root, [
@@ -1293,6 +1311,7 @@ test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the se
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await waitFor(() => readOutcomeLines(root).length >= 1, 5000);
   const picked = drv.events().find((e) => e.event === "selector-picked");
   assert.ok(picked, "the selection loop emitted a selector-picked event (AC2 chain is wired)");
@@ -1308,7 +1327,6 @@ test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the se
 
 test("AC1 — resident loop does not exit after one worker; keeps dispatching while pool non-empty (in-memory in-flight subtraction)", async (t) => {
   const root = makeGitRoot("ac1");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // gap-launch-script-worker-cap-broken AC3: the resident loop now reads each task's ## Touches to
   // filter Touches-overlapping candidates — so these fake ids need DISJOINT, COMMITTED Touches task
   // files (the loop stashes uncommitted changes before dispatching; a Touches-less file ⇒ conservative
@@ -1328,6 +1346,7 @@ test("AC1 — resident loop does not exit after one worker; keeps dispatching wh
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // 5000 → 10000：两次完整派发+落地循环（ready-pool/selector/worker 各 spawn 一个 node 子进程 + landing
   // 读 git）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时 flake、picks=1）；与同文件
   // 「第二次派发」的既有约定（gap-b 等 10000ms）一致。
@@ -1345,7 +1364,6 @@ test("AC1 — resident loop does not exit after one worker; keeps dispatching wh
 
 test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero spawned; WAIT is transient, not a latch)", async (t) => {
   const root = makeRoot("ac3-rg");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const drv = spawnResident(root, [
     "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-a'],pool:1}))",
     "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
@@ -1354,6 +1372,7 @@ test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero 
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await waitFor(() => readRoundLines(root).length >= 1, 5000);
   assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC3: no worker spawned while resource-gate reports WAIT");
   assert.equal(readOutcomeLines(root).length, 0, "zero outcome records — nothing was dispatched");
@@ -1431,7 +1450,6 @@ test("AC138-3 pure — computeWorkerRoundRecord: ts is the first field (supervis
 
 test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome stays absent; round is the liveness carrier)", async (t) => {
   const root = makeRoot("ac138-round");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // ready-pool returns empty ⇒ resident loop records a stop round then polls (no worker spawned; it no
   // longer exits on pool-empty — pool-empty is transient, promotion-driver keeps filling it).
   const drv = spawnResident(root, [
@@ -1442,6 +1460,7 @@ test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome s
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await waitFor(() => readRoundLines(root).length >= 1, 5000);
   const rounds = readRoundLines(root);
   assert.ok(rounds.length >= 1, "at least one round record written even when the pool is empty");
@@ -1499,7 +1518,6 @@ test("runLivenessCheck — checked/deaths/running semantics (checked=false = NOT
 test("liveness wiring — resident loop calls the liveness checker each round (Finding AC2 no-caller fix)", async (t) => {
   // 用 git root + done 任务（镜像 AC1 resident-loop 测试），worker 落地 → 驱动继续轮询（池空不退出）。
   const root = makeGitRoot("liveness-wire");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTaskFile(root, "gap-a", "done");
   writeTaskFile(root, "gap-b", "done");
   const rpcFile = path.join(root, "rpc.cnt");
@@ -1516,6 +1534,7 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, 5000);
   const rounds = readRoundLines(root);
   const livenessCount = Number(fs.readFileSync(livenessCnt, "utf8"));
@@ -1528,6 +1547,35 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
     assert.equal(rec.liveness.checked, true, `round carries liveness.checked=true: ${JSON.stringify(rec.liveness)}`);
     assert.equal(rec.liveness.deaths, null, "healthy check ⇒ deaths=null");
   }
+});
+
+// ── gap-worker-driver-resident-loop-intermittent-hang：挂起复现负控制 ───────────────────────────────
+// 根因（实测 RUN 8 ENOTEMPTY）：常驻测试 after 钩按注册序 FIFO 运行，`fs.rmSync(root)` 先注册先运行、
+// 此刻驱动仍活（每轮写 root/.quay/worker-round.jsonl）⇒ rmSync ENOTEMPTY ⇒ 抛错跳过后续 `drv.stop()`
+// ⇒ 驱动泄漏（spinning、持 stdout pipe）⇒ node --test 等不到 EOF 挂死。修法 = ① spawnResident 用
+// detached:true 让驱动成进程组组长、stop() 杀整组（⛔ 只杀驱动会留孤儿 worker 持 pipe + 孤儿 counter
+// 子进程与 rmSync 竞态）；② 常驻测试统一「先 drv.stop 再 rmSync」的 after 钩顺序（或 body 末 inline
+// drv.stop）。本负控制只验①：长命 worker（sleep 100，stdio:"inherit"）在 stop 后【不得】持 pipe——
+// stop 杀整组 ⇒ 孤儿 worker 一起死 ⇒ stdout pipe 界内关闭；旧只杀驱动 ⇒ 孤儿 worker 持 pipe 到 100s。
+test("negative control — drv.stop kills the whole process group: a long-lived worker does NOT hold the stdout pipe open", async (t) => {
+  const root = makeGitRoot("group-kill");
+  writeTaskFile(root, "gap-gk", "done");
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-gk'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-gk\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "sleep 100", // 长命 worker：若 stop 不杀整组，孤儿 worker 持 stdout pipe 写端
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 5000);
+  const closed = new Promise((resolve) => drv.child.stdout.on("close", resolve));
+  drv.stop();
+  await Promise.race([
+    closed,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("stdout pipe still open after stop — an orphaned worker held it (group-kill not applied)")), 3000)),
+  ]);
 });
 
 // ── AC140（可配 wrapper + model + 按 role；单一真相源；覆盖语义统一）+ L3（driver 消费 policy）─────
@@ -1844,7 +1892,6 @@ test("AC150-3 — worker-driver re-exports the SAME resourceGateCheck / isHalted
 
 test("AC1 — depends_on gate in the resident loop: a candidate whose dep is not done is NOT dispatched (ac138 白烧一轮防)", async (t) => {
   const root = makeGitRoot("ac1-deps");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // gap-prereq（ready，未 done）+ gap-dep（depends_on gap-prereq），都写进 tasks/ 并提交。
   fs.writeFileSync(path.join(root, "tasks", "gap-prereq.md"), "---\nid: gap-prereq\nstatus: ready\n---\n\nbody\n");
   runGit(root, ["add", "tasks/gap-prereq.md"]);
@@ -1861,6 +1908,7 @@ test("AC1 — depends_on gate in the resident loop: a candidate whose dep is not
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await waitFor(() => readRoundLines(root).length >= 1, 5000);
   assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC1: dep-not-done candidate is never dispatched");
   assert.equal(readOutcomeLines(root).length, 0, "zero workers dispatched");
@@ -1875,7 +1923,6 @@ test("AC1 — depends_on gate in the resident loop: a candidate whose dep is not
 
 test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the difference, not a blanket stop)", async (t) => {
   const root = makeGitRoot("ac1-deps-ok");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTaskFile(root, "gap-prereq", "done");
   fs.writeFileSync(path.join(root, "tasks", "gap-dep.md"), "---\nid: gap-dep\nstatus: done\ndepends_on:\n  - gap-prereq\n---\n\nbody\n");
   runGit(root, ["add", "tasks/gap-dep.md"]);
@@ -1889,6 +1936,7 @@ test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await waitFor(() => readOutcomeLines(root).length >= 1, 5000);
   const spawned = drv.events().filter((e) => e.event === "worker-spawned");
   assert.equal(spawned.length, 1, "AC1 对照: dep-done candidate IS dispatched (exactly once)");
@@ -1997,6 +2045,7 @@ test("AC1 (cold-start) — surviving worker + its worktree ⇒ resident loop doe
   assert.ok(cs, "the cold-start in-flight enumeration is recorded (not silent)");
   assert.deepEqual(cs.tasks, ["gap-cs-a"], "the survivor is the enumerated in-flight task");
   assert.equal(readOutcomeLines(root).length, 0, "zero outcomes — nothing dispatched");
+  drv.stop(); // 先停驱动再让 after 钩 rmSync 删目录（同 dep-done 对照：rmSync 先注册会先于 drv.stop 运行 ⇒ ENOTEMPTY 跳过 drv.stop ⇒ 驱动泄漏挂死）
 });
 
 test("AC1 对照 — orphan worktree (no live worker) ⇒ the task IS re-dispatched (the live-worker cross-check is the difference)", async (t) => {
@@ -2025,6 +2074,7 @@ test("AC1 对照 — orphan worktree (no live worker) ⇒ the task IS re-dispatc
   const spawned = drv.events().filter((e) => e.event === "worker-spawned");
   assert.equal(spawned.length, 1, "orphan worktree alone does NOT block re-dispatch — the task IS dispatched");
   assert.equal(spawned[0].task, "gap-cs-b");
+  drv.stop(); // 先停驱动再让 after 钩 rmSync 删目录（rmSync 先注册会先于 drv.stop 运行 ⇒ ENOTEMPTY 跳过 drv.stop ⇒ 驱动泄漏挂死）
 });
 
 test("AC2 (cold-start) — cleanupOrphanWorktree skips a worktree a live worker is using; cleans a true orphan", (t) => {
@@ -2103,6 +2153,7 @@ test("AC2 (cold-start-refresh) — survivor finishes ⇒ its task leaves the exc
   const spawned = drv.events().filter((e) => e.event === "worker-spawned");
   assert.equal(spawned.length, 1, "AC2: exactly one re-dispatch after the survivor finished (concurrency 1 + long-running worker ⇒ no re-dispatch loop)");
   assert.equal(spawned[0].task, "gap-cs-a", "the re-dispatched task is the former cold-start survivor");
+  drv.stop(); // 先停驱动再让 after 钩 rmSync 删目录（rmSync 先注册会先于 drv.stop 运行 ⇒ ENOTEMPTY 跳过 drv.stop ⇒ 驱动泄漏挂死）
 });
 
 test("AC3 (cold-start-refresh) — per-pass observation: no one-time `const coldInflight` snapshot outside the loop; reassigned each pass", () => {
@@ -2165,7 +2216,6 @@ test("AC1 (gap-worker-driver-reconcile-interval) — in-process timer re-coordin
 
 test("AC2 (gap-worker-driver-reconcile-interval) — all edge events lost (worker hangs) ⇒ floor still re-runs ready pool and dispatches within N s", async (t) => {
   const root = makeGitRoot("reconcile-ac2");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTouchedTask(root, "gap-a", "plugin/scripts/aa.ts");
   writeTouchedTask(root, "gap-b", "plugin/scripts/bb.ts"); // disjoint from gap-a
   const rpcFile = path.join(root, "rpc.cnt");
@@ -2182,6 +2232,7 @@ test("AC2 (gap-worker-driver-reconcile-interval) — all edge events lost (worke
     "--interval", "100",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // gap-a 先派发（挂起）。此后无任何 worker 退出边沿事件。
   await waitFor(() => drv.events().some((e) => e.event === "selector-picked" && e.task === "gap-a"), 5000);
@@ -2251,7 +2302,6 @@ test("AC2 (gap-worker-driver-async-selector-readypool) — async variants resolv
 
 test("AC3 (gap-worker-driver-async-selector-readypool) — a slow selector does not freeze the floor (round heartbeat keeps firing while the selector is slow)", async (t) => {
   const root = makeGitRoot("async-ac3");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTouchedTask(root, "gap-a", "plugin/scripts/aa.ts");
   writeTouchedTask(root, "gap-b", "plugin/scripts/bb.ts");
   // selector 慢（sleep 2s 后才输出 gap-b）。cap=2 + gap-a 在飞（挂起）⇒ selector 在 pass1 跑一次派 gap-b；
@@ -2266,6 +2316,7 @@ test("AC3 (gap-worker-driver-async-selector-readypool) — a slow selector does 
     "--interval", "100",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // 慢 selector 派发 gap-b（约 2s），然后地板在 ~1s 节奏继续写 round 心跳（⛔ 慢 selector 没冻住地板）。
   await waitFor(() => drv.events().some((e) => e.event === "selector-picked" && e.task === "gap-b"), 10000);
@@ -2278,7 +2329,6 @@ test("AC3 (gap-worker-driver-async-selector-readypool) — a slow selector does 
 
 test("AC1 (gap-worker-driver-stopreason-latch-permanent-stop) — gate first WAIT then GO ⇒ the SAME driver process (no restart) recovers dispatch", async (t) => {
   const root = makeGitRoot("stop-latch-ac1");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTaskFile(root, "gap-ac1", "done");
   // gate: WAIT (exit 1) while the go-marker file is absent; GO (exit 0) once the test writes it.
   const goFile = path.join(root, "gate.go");
@@ -2293,6 +2343,7 @@ test("AC1 (gap-worker-driver-stopreason-latch-permanent-stop) — gate first WAI
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // Phase 1: gate WAIT ⇒ no worker dispatched, and the driver does NOT exit (polls, ⛔ not latch).
   await waitFor(() => readRoundLines(root).length >= 1, 5000);
@@ -2312,7 +2363,6 @@ test("AC1 (gap-worker-driver-stopreason-latch-permanent-stop) — gate first WAI
 
 test("AC2 (gap-worker-driver-stopreason-latch-permanent-stop) — adjacent stop rounds re-acquire the resource reading (⛔ not byte-identical)", async (t) => {
   const root = makeRoot("stop-latch-ac2");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // gate: always WAIT (exit 1) but each call prints an incrementing reading ⇒ stop_reason differs per round.
   const gateCnt = path.join(root, "gate.cnt");
   const f = JSON.stringify(gateCnt);
@@ -2325,6 +2375,7 @@ test("AC2 (gap-worker-driver-stopreason-latch-permanent-stop) — adjacent stop 
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await waitFor(() => readRoundLines(root).length >= 3, 5000);
   const stops = readRoundLines(root).filter((r) => r.action === "stop");
   assert.ok(stops.length >= 2, "at least two stop rounds written (the driver re-reads the gate each poll)");
@@ -2336,7 +2387,6 @@ test("AC2 (gap-worker-driver-stopreason-latch-permanent-stop) — adjacent stop 
 
 test("AC3 (gap-worker-driver-stopreason-latch-permanent-stop) — pool non-empty + transient WAIT + running.length===0 ⇒ driver does NOT exit directly", async (t) => {
   const root = makeRoot("stop-latch-ac3");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const drv = spawnResident(root, [
     "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-ac3'],pool:1}))",
     "--selector-cmd", "node -e console.log('gap-ac3\\x20pick')",
@@ -2345,6 +2395,7 @@ test("AC3 (gap-worker-driver-stopreason-latch-permanent-stop) — pool non-empty
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await waitFor(() => readRoundLines(root).length >= 3, 5000);
   assert.equal(drv.child.exitCode, null, "AC3: pool non-empty + gate WAIT + no in-flight ⇒ driver does NOT exit directly");
   const stops = readRoundLines(root).filter((r) => r.action === "stop");
@@ -2405,7 +2456,6 @@ test("AC1 (gap-worker-driver-retry-cap-not-wired) — markNeedsHuman flips ready
 
 test("AC2 (gap-worker-driver-retry-cap-not-wired) — 反复 exited-not-landed 的任务在 N 次后停（不再无限重派，负控制）", async (t) => {
   const root = makeGitRoot("retry-cap");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTaskFile(root, "gap-cap", "ready");
   const drv = spawnResident(root, [
     "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-cap'],pool:1}))",
@@ -2416,6 +2466,7 @@ test("AC2 (gap-worker-driver-retry-cap-not-wired) — 反复 exited-not-landed �
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // N=2 次 exited-not-landed（exit 0 但 status=ready 未落地）。
   await waitFor(() => readOutcomeLines(root).length >= 2, 8000);
