@@ -1,7 +1,7 @@
 ---
 id: gap-test-isolation-race-tmp-leak-negative-fixture-writes-repo
 title: tmp-leak-pairing-check negative-control 把泄漏 fixture 写进真实仓 plugin/test/——与 test-framework-policy-check 全仓扫描并发 TOCTOU 竞态（阻塞 gap-ac143 fan-in）
-status: done
+status: ready
 labels:
   - gap
   - defect
