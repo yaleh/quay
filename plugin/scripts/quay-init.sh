@@ -227,6 +227,90 @@ except Exception:
 ' "$WORKSPACE_ROOT/.quay/quay-init-state.json" "$rel"
 }
 
+# ── batched file-state precompute (gap-suite-serial-install-copy-one-subprocess-batching) ────────────
+# copy_one / compute_drift_report used to spawn ONE `cmp -s` per file (plus one `sha256sum | cut` per
+# managed file) — ~400 subprocess spawns per --loop run, the dominant wall-clock cost of the serial-
+# install family (the 7 slow files run a real `quay init --loop` under concurrency-1 serial, so their
+# wall-clock floor IS the per-file subprocess count). The two associative arrays below hold the result
+# of ONE python3 pass over a <src>\t<dst> manifest:
+#   _CMP_STATE[dst] ∈ missing|identical|differ   (byte comparison, replaces per-file `cmp -s`)
+#   _DST_HASH[dst]  = sha256(dst) when present   (replaces per-managed-file `sha256sum | cut`)
+# The copy_one decision logic and every output line are UNCHANGED — only the comparison primitive is
+# swapped for an array lookup (AC2: byte-identical output). A dst whose state was NOT precomputed
+# (e.g. a standalone copy_one caller outside a precompute window) falls back to the subprocess form,
+# so a future caller stays correct, just unbatched.
+declare -A _CMP_STATE=()
+declare -A _DST_HASH=()
+
+# _precompute_states <manifest> — ONE python3 pass over a <src>\t<dst> manifest (one pair per line),
+# classifying each pair by in-memory byte comparison and hashing each present dst. Populates
+# _CMP_STATE + _DST_HASH. Deterministic: output order = manifest order, so the caller feeds a
+# manifest built in lay-down order and the copy_one lines stay byte-identical to the pre-batch form.
+_precompute_states() {
+  local manifest="$1" dst state hash
+  _CMP_STATE=()
+  _DST_HASH=()
+  while IFS=$'\t' read -r dst state hash; do
+    [ -n "$dst" ] || continue
+    _CMP_STATE["$dst"]="$state"
+    # `if` (not `&&`) so the loop body always ends exit-0 — under `set -e` a body ending on
+    # `[ -n "$hash" ] && …` aborts the whole loop when the last row's hash is empty (missing).
+    if [ -n "$hash" ]; then _DST_HASH["$dst"]="$hash"; fi
+  done < <(python3 - "$manifest" <<'PYEOF'
+import sys, os, hashlib
+manifest = sys.argv[1]
+pairs = []
+with open(manifest, "r", encoding="utf-8") as f:
+    for ln in f:
+        ln = ln.rstrip("\n")
+        if not ln or "\t" not in ln:
+            continue
+        src, dst = ln.split("\t", 1)
+        pairs.append((src, dst))
+for src, dst in pairs:
+    if not os.path.isfile(dst):
+        print("%s\tmissing\t" % dst)
+        continue
+    try:
+        with open(src, "rb") as fh:
+            sc = fh.read()
+        with open(dst, "rb") as fh:
+            dc = fh.read()
+    except OSError:
+        # Unreadable → treat as differ (the pre-batch `cmp -s` returned non-zero the same way).
+        print("%s\tdiffer\t" % dst)
+        continue
+    state = "identical" if sc == dc else "differ"
+    print("%s\t%s\t%s" % (dst, state, hashlib.sha256(dc).hexdigest()))
+PYEOF
+)
+}
+
+# _is_identical <src> <dst> — the batched replacement for `cmp -s "$src" "$dst"`. Consults the
+# precomputed _CMP_STATE when present; falls back to `cmp -s` for a dst that was never precomputed.
+_is_identical() {
+  local src="$1" dst="$2" st
+  st="${_CMP_STATE[$dst]:-}"
+  case "$st" in
+    identical) return 0 ;;
+    differ) return 1 ;;
+    missing) return 1 ;;
+    *) cmp -s "$src" "$dst" ;;
+  esac
+}
+
+# _dst_sha256 <dst> — the batched replacement for `sha256sum "$dst" | cut -d' ' -f1`. Consults the
+# precomputed _DST_HASH when present; falls back to the two-subprocess form otherwise.
+_dst_sha256() {
+  local dst="$1" h
+  h="${_DST_HASH[$dst]:-}"
+  if [ -n "$h" ]; then
+    printf '%s' "$h"
+  else
+    sha256sum "$dst" | cut -d' ' -f1
+  fi
+}
+
 # idempotent copy of one file. The 3rd arg MODE ("clean"|"preserve"|"managed", default preserve)
 # distinguishes three conflict classes for a same-name-different-content target:
 #   clean    — PRODUCT-OWNED files (loop mechanism executables: 可执行文件一律原样复制，只生成配置).
@@ -255,7 +339,7 @@ copy_one() {
       echo "  copied: $dst"
     fi
     COPIED=$((COPIED + 1))
-  elif cmp -s "$src" "$dst"; then
+  elif _is_identical "$src" "$dst"; then
     SKIPPED=$((SKIPPED + 1))
     if [ "$DRY_RUN" = true ]; then
       echo "  would-skip (identical): $dst"
@@ -286,7 +370,7 @@ copy_one() {
     # hash is a genuine user edit → CONFLICT, preserved (AC6 must still fire).
     local laid_hash cur_hash
     laid_hash="$(state_laid_hash "${dst#"$WORKSPACE_ROOT"/}")"
-    cur_hash="$(sha256sum "$dst" | cut -d' ' -f1)"
+    cur_hash="$(_dst_sha256 "$dst")"
     if [ -n "$laid_hash" ] && [ "$laid_hash" = "$cur_hash" ]; then
       CLEANED=$((CLEANED + 1))
       if [ "$DRY_RUN" = true ]; then
@@ -355,15 +439,28 @@ copy_dir() {
   # the whole category (observed: .claude/workflows/* false-positived referenced-not-landed). The
   # `for f in "$src_dir"/*` glob is a bash builtin (no subprocess), so it cannot be torn — count the
   # files it actually iterates instead.
-  local f found=0
+  local f found=0 manifest
+  manifest="$(mktemp)"
+  # First glob pass: build the (src,dst) manifest + detect emptiness. The glob stays a bash builtin
+  # (no subprocess) so the empty-source check cannot be torn (same rationale as above); the per-file
+  # `cmp -s` that copy_one used to spawn is then batched into ONE python3 pass (gap-suite-serial-
+  # install-copy-one-subprocess-batching), so the copy loop below consults _CMP_STATE instead.
   for f in "$src_dir"/*; do
     [ -f "$f" ] || continue
     found=1
-    copy_one "$f" "$dst_dir/$(basename "$f")"
+    printf '%s\t%s\n' "$f" "$dst_dir/$(basename "$f")" >> "$manifest"
   done
   if [ "$found" = 0 ]; then
+    rm -f "$manifest"
     echo "  (source directory empty — skipped category)"
+    return
   fi
+  _precompute_states "$manifest"
+  rm -f "$manifest"
+  for f in "$src_dir"/*; do
+    [ -f "$f" ] || continue
+    copy_one "$f" "$dst_dir/$(basename "$f")"
+  done
 }
 
 # render_substitutions has been REMOVED (gap-install-rewrites-files-so-upgrade-cannot-tell-
@@ -1545,7 +1642,7 @@ compute_drift_report() {
     n=$((n + 1))
     if [ ! -f "$tgt" ]; then
       missing=$((missing + 1)); missing_list+=("$rel")
-    elif cmp -s "$src" "$tgt"; then
+    elif _is_identical "$src" "$tgt"; then
       consistent=$((consistent + 1))
     else
       drift=$((drift + 1)); drift_list+=("$rel"); drift_src+=("$src"); drift_tgt+=("$tgt")
@@ -1913,6 +2010,22 @@ PYEOF
   # before-report's derived-set is non-empty (compute_drift_report reads the global — a stale
   # empty-array call reported derived-set 0 and the before/after reports disagreed with reality).
   # The POST report after the loop proves the upgrade brought the derived set to 一致.
+  # gap-suite-serial-install-copy-one-subprocess-batching: build ONE (src,dst) manifest for the
+  # loop-scripts lay-down and precompute the PRE-COPY byte-comparison state in a single python3 pass.
+  # This one pass feeds BOTH the before-drift report and the copy loop's copy_one decisions (which,
+  # like the pre-batch per-file `cmp -s`, see the target as it was BEFORE any copy). The manager-
+  # tick-core opt-in skip mirrors the copy loop below so the two never disagree on the pair set.
+  _laydown_manifest="$(mktemp)"
+  for s in "${LOOP_SCRIPTS[@]}"; do
+    if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then
+      printf '%s\t%s\n' "$PLUGIN_ROOT/scripts/$s" "$WORKSPACE_ROOT/plugin/scripts/$s" >> "$_laydown_manifest"
+    elif [ -f "$PLUGIN_ROOT/loop/$s" ]; then
+      [ "$s" = "manager-tick-core.md" ] && [ "$DO_MANAGER" != true ] && continue
+      printf '%s\t%s\n' "$(resolve_tick_core_src "$s")" "$WORKSPACE_ROOT/orchestration/$s" >> "$_laydown_manifest"
+    fi
+  done
+  _precompute_states "$_laydown_manifest"
+
   echo "  drift report (before upgrade):"
   compute_drift_report "$WORKSPACE_ROOT"
   for s in "${LOOP_SCRIPTS[@]}"; do
@@ -1938,6 +2051,11 @@ PYEOF
       echo "  WARN: loop mechanism file missing from plugin: plugin/scripts/$s (or plugin/loop/$s)" >&2
     fi
   done
+  # Re-precompute AFTER the copies: the after-drift report must see the UPDATED targets the copy
+  # loop just wrote, not the stale pre-copy state (the copy loop laid byte-identical content, so
+  # the after-report proves 漂移→一致 — the same semantics as the pre-batch per-file cmp re-scan).
+  _precompute_states "$_laydown_manifest"
+  rm -f "$_laydown_manifest"
   echo "  drift report (after upgrade):"
   compute_drift_report "$WORKSPACE_ROOT"
 
