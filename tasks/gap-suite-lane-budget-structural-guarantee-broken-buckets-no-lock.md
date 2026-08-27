@@ -43,5 +43,5 @@ extra:
 
 - scripts/test.sh（看门狗让槽同时让 lane）
 - plugin/scripts/full-suite-runner.ts（lane 预算公式 / 看门狗逻辑）
-- plugin/test/（看门狗让 lane + 单跑不退化负控制）
+- plugin/test/full-suite-runner.test.mjs（看门狗让 lane + 单跑不退化负控制）
 - tasks/gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock.md（自身）

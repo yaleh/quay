@@ -62,5 +62,5 @@ const reporterPath = path.join(repoRoot, "plugin", "scripts", "measure-suite-rep
 ## Touches
 
 - plugin/scripts/suite-bucket-attribution.ts（加 path.join/path.resolve 分段拼接解析信号）
-- plugin/test/（分段拼接解析测试 + 保底降为异常负控制）
+- plugin/test/suite-bucket-attribution.test.mjs（分段拼接解析测试 + 保底降为异常负控制）
 - tasks/gap-path-join-segmented-parse-blind-spot.md（自身）

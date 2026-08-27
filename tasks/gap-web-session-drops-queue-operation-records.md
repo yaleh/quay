@@ -49,5 +49,5 @@ queue-operation/attachment 有渲染路径；AC1-AC3 全勾；「忙时入队后
 
 - packages/quay/src/observation.ts（parseTranscript/readTranscriptTail 补 queue-operation/attachment 渲染路径）
 - packages/quay/src/serve-tests.ts（session 渲染层）
-- plugin/test/（queue-operation/attachment 渲染测试 + 闲时直达不回归负控制）
+- packages/quay/test/observation.test.mjs（queue-operation/attachment 渲染测试 + 闲时直达不回归负控制；serve 渲染测试文件实现方按 bucketSetOfFile 渲染路径定）
 - tasks/gap-web-session-drops-queue-operation-records.md（自身）

@@ -43,5 +43,5 @@ extra:
 ## Touches
 
 - plugin/scripts/full-suite-runner.ts（未完整轮次统一落记录 + taskId 归因）
-- plugin/scripts/（verification-round 记录写入方，fan-in 路径覆盖 + taskId 字段）
+- plugin/scripts/pre-verified-round-record.ts（verification-round 记录写入方，fan-in 桶路径 + taskId 字段）
 - tasks/gap-verification-round-static-fail-no-record.md（自身）
