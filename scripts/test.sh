@@ -465,7 +465,7 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 # S single source (gap-suite-concurrency-S-two-source-divergence): default_concurrency_formula and
 # serial_lowconc_host_default read S via suite_slot_count — the SAME bash canonical the single-flight
 # lock uses (seam RESOURCE_GATE_CONCURRENT_SUITES → `<base>.concurrency` file →
-# QUAY_MAX_CONCURRENT_SUITES → 2). Sourced HERE (before the derivation functions below) so both can
+# QUAY_MAX_CONCURRENT_SUITES → 1). Sourced HERE (before the derivation functions below) so both can
 # call it; the lock section further down reuses this same canonical for its slot paths.
 source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
 default_concurrency_formula() {
@@ -474,7 +474,7 @@ default_concurrency_formula() {
   # (c) 锁发配额 均被否，纯计算零新增运行时状态): default = max(1, floor(nproc × oversub / S)).
   #   nproc   ← 宿主（nproc --all，⛔ 不写字面量 — CLAUDE.md 硬规则 4 推论二）
   #   oversub ← 旋钮③ QUAY_MAX_OVERSUBSCRIPTION（现 1，现状非建议值）
-  #   S       ← 旋钮② QUAY_MAX_CONCURRENT_SUITES（现 2）
+  #   S       ← 旋钮② QUAY_MAX_CONCURRENT_SUITES（现 1）
   # 之前 AC74 的 `nproc − in_use`（读运行时 in_use，不读 S）固有超用：每条 lane 只减它启动那一刻
   # 已在用的 in_use、没人减将来会来的 ⇒ 先起读≈0 拿满 nproc、后起读≈in_use 拿 nproc−in_use，
   # 两并发 suite 合计 16+8=24 > 16（load 29.23，2026-08-14 14:39Z）。纯计算下 S 个 suite 各拿
@@ -485,7 +485,7 @@ default_concurrency_formula() {
   # 再乘并发阶段数 P ⇒ S×P ⇒ 重叠窗口 Σ lane ≤ nproc×oversub 同样结构上不可能超（不变式恢复可守）。
   total_budget="${RESOURCE_GATE_NPROC:-}"
   oversub="${RESOURCE_GATE_OVERSUBSCRIPTION:-${QUAY_MAX_OVERSUBSCRIPTION:-1}}"
-  # S single source: suite_slot_count reads seam → `<base>.concurrency` file → 旋钮② → 2 (the SAME
+  # S single source: suite_slot_count reads seam → `<base>.concurrency` file → 旋钮② → 1 (the SAME
   # precedence + validation as the single-flight lock). The old
   # `RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}` read SKIPPED the `.concurrency`
   # file — so `printf '2' > .concurrency` changed the lock slots but NOT this formula (the divergence).
@@ -520,7 +520,7 @@ default_test_concurrency() {
 #   real-install e2e 双文件 c2 实测 0-cancelled (147s)。⇒ 默认上调至 2 (后经 AC44/AC74 改读宿主)。
 # serial_lowconc_host_default — the host-derived fallback shared by BOTH phase knobs: reads
 # RESOURCE_GATE_NPROC (test seam) → nproc, S via suite_slot_count (seam →
-# `<base>.concurrency` file → QUAY_MAX_CONCURRENT_SUITES → 2, the single source), and
+# `<base>.concurrency` file → QUAY_MAX_CONCURRENT_SUITES → 1, the single source), and
 # QUAY_PHASE_OVERLAP (default 1) → the concurrent-PHASE count P (2 = serial+lowconc parallel,
 # 1 = sequential). max(1, floor(nproc ÷ (S×P))).
 # gap-lane-formula-ignores-phase-overlap-concurrency: QUAY_PHASE_OVERLAP=1 runs serial + lowconc in
@@ -533,7 +533,7 @@ default_test_concurrency() {
 serial_lowconc_host_default() {
   local ncpu slots phases
   ncpu="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
-  # S single source: suite_slot_count (seam → `<base>.concurrency` file → 旋钮② → 2) — the SAME read
+  # S single source: suite_slot_count (seam → `<base>.concurrency` file → 旋钮② → 1) — the SAME read
   # as default_concurrency_formula and the single-flight lock (gap-suite-concurrency-S-two-source-divergence).
   slots="$(suite_slot_count)"
   phases=1

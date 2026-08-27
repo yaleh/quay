@@ -17,6 +17,11 @@ extra:
 
 > **正本**：`orchestration/SPEC-suite-lifecycle-and-failure-semantics-2026-08-26.md` §4。**⛔ 边界**：lane/S 不动；⛔ 不为语义 agent 设准确率阈值（成本结构未测量前不设数值阈值，硬规则 4 推论）。
 > **前置**：`gap-suite-lifecycle-driver-kind`（§3）先落地——其 carrier（suite-round.jsonl 三态 outcome）是本条输入前提之一。
+> **⛔ 裁决（2026-08-26，`gap-fan-in-workflow-lock-and-S1` AC6 / SPEC-fan-in-workflow-lock-and-S1-2026-08-26 §3 约束 5）**：
+> **`ff-race-loss` class 砍掉**。fan-in WORKFLOW 锁落地后，develop 在持锁任务 fan-in 期间【不前进】⇒ ff-race
+> **结构上不可能发生**（24h 实测 27 次 ff-race 全部归零）⇒ 为 0 发生率 class 保留 `rebase-and-retry` 恢复路径是
+> 「为 0 发生率保留恢复路径」的镜像错误。**保留**：`suite-red-own` / `suite-red-other-task` / `infra-hang` /
+> `gate-blocked` 的语义分类。落地本条时 ⛔ 不得再实现 ff-race-loss 与 rebase-and-retry 分支。
 
 ## Proposal
 
@@ -43,8 +48,8 @@ ff-race 失败 = 27 次（27/28 = 96.4% 任务撞上）
 (a) 输入 = 完整现场（⛔ 非退出码）：失败发生在哪一相（suite/gate/ff）、suite 红的具体文件与断言、
     ff 时 develop 尖端 sha 及本分支与它的实际 diff 是否冲突、历史失败次数及各自原因
 (b) 输出 = 分类 + 建议动作（⛔ 不直接执行）：
-    outcome_class: ff-race-loss | suite-red-own | suite-red-other-task | infra-hang | gate-blocked
-    suggested:     rebase-and-retry | retry-as-is | fix-then-retry | escalate-human | defer-with-reason
+    outcome_class: suite-red-own | suite-red-other-task | infra-hang | gate-blocked
+    suggested:     retry-as-is | fix-then-retry | escalate-human | defer-with-reason
     confidence:    high|medium|low + 理由
     ⇒ agent【判定】，机械机制【执行】——不把「能不能改 develop」交给 agent 自由裁量
 (c) outcome_class 天然就是泄漏②缺的那个原因分类层——⛔ 不需要另造

@@ -13,7 +13,7 @@
 //                          `<suiteLockBase>.concurrency` (scalar file, fresh read every call —
 //                          gap-suite-concurrency-env-to-file-fresh-read: env is forked once per
 //                          process, a file is re-read by the next detached suite process without a
-//                          restart) → QUAY_MAX_CONCURRENT_SUITES (env 旋钮②, transition period) → 2.
+//                          restart) → QUAY_MAX_CONCURRENT_SUITES (env 旋钮②, transition period) → 1.
 //   suiteLockSlotPaths()  — `${base}.0 .. ${base}.S-1` (S-generated, never a hardcoded .0/.1 literal).
 //   suiteLockBase()       — the base path resolution (FULL_SUITE_LOCK_FILE env override →
 //                          git-common-dir → <root>/.git), SHARED by every consumer so all worktrees
@@ -56,7 +56,7 @@ function slotVal(name: string): string | undefined {
  *  (from slotVal / fileSlotVal), so `Number()` never sees a fractional or NaN form. */
 function clampCount(v: string): number {
   const raw = Number(v);
-  return raw >= 1 ? raw : 2;
+  return raw >= 1 ? raw : 1;
 }
 
 /** Read the `.concurrency` scalar file NEXT TO the suite-lock base: `${base}.concurrency` (e.g. a
@@ -83,7 +83,7 @@ function fileSlotVal(base?: string): string | undefined {
  *    2. `<base>.concurrency` — the scalar file, fresh-read every call (no restart needed for the next
  *       detached suite process to pick up a new S). Reads the file at the SAME base the slot paths use.
  *    3. QUAY_MAX_CONCURRENT_SUITES — env 旋钮② (transition period; the file now has priority over it).
- *    4. Default 2.
+ *    4. Default 1.
  *  Clamped to >= 1 — an invalid/zero setting fails open to the single-suite default (the old 1-slot
  *  behavior), never to 0 slots. This is the SAME expression full-suite-runner.ts's
  *  concurrentSuiteSlots() delegates to. `base` is optional — pass it when the caller already resolved
@@ -96,7 +96,7 @@ export function suiteLockSlotCount(base?: string): number {
   if (file !== undefined) return clampCount(file);
   const knob = slotVal("QUAY_MAX_CONCURRENT_SUITES");
   if (knob !== undefined) return clampCount(knob);
-  return 2;
+  return 1;
 }
 
 /** The S slot paths for a base — `${base}.0 .. ${base}.S-1`. S-generated via a loop variable, so a
@@ -134,7 +134,7 @@ const usage = [
   "",
   "Usage:",
   "  node --experimental-strip-types suite-lock-slots.ts --base <lock-file-base>",
-  "      print the S slot paths (`base.0`..`base.S-1`) one per line (S = seam → `<base>.concurrency` → knob → 2).",
+  "      print the S slot paths (`base.0`..`base.S-1`) one per line (S = seam → `<base>.concurrency` → knob → 1).",
   "  node --experimental-strip-types suite-lock-slots.ts --root <repo> [--count]",
   "      resolve the repo's suite-lock base and print its S slot paths; --count prints only S (the",
   "      `.concurrency` file next to the resolved base is honored — the AC3 negative-control surface).",

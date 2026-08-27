@@ -15,7 +15,7 @@
 # SAME precedence as this file — RESOURCE_GATE_CONCURRENT_SUITES (the deterministic test seam) FIRST,
 # then `<base>.concurrency` (the scalar file — gap-suite-concurrency-env-to-file-fresh-read: env is
 # forked once per process, a file is re-read by the next detached suite process without a restart),
-# then 旋钮② QUAY_MAX_CONCURRENT_SUITES, then the 2 default, with empty-string-as-unset (`:-`) on both.
+# then 旋钮② QUAY_MAX_CONCURRENT_SUITES, then the 1 default, with empty-string-as-unset (`:-`) on both.
 # The two canons therefore agree under ANY env AND any `.concurrency` file, including a test seam (they
 # could only drift if one side's semantics changed independently — exactly what suite-slot-ssot-check
 # I4 detects). Both read the file RAW (bash `[ -f "$f" ] && cat "$f"`, TS `fs.existsSync &&
@@ -25,7 +25,7 @@
 # Functions:
 #   suite_slot_count     — echo S = RESOURCE_GATE_CONCURRENT_SUITES (test seam) → `<base>.concurrency`
 #                          (scalar file next to the lock base, fresh-read) → QUAY_MAX_CONCURRENT_SUITES
-#                          (旋钮②) → 2. Optional first arg = the lock base (used for the file read);
+#                          (旋钮②) → 1. Optional first arg = the lock base (used for the file read);
 #                          when omitted the base is resolved like test.sh's full_suite_lock
 #                          (FULL_SUITE_LOCK_FILE env → git-common-dir → .git/full-suite.lock).
 #   suite_slot_paths     — echo the S slot paths for a base (`${base}.0`..`${base}.S-1`), one per line.
@@ -89,7 +89,7 @@ suite_slot_count() {
     esac
   fi
 
-  echo 2  # default: single-suite baseline (0/negative/non-numeric above all fail open here)
+  echo 1  # default: single-suite baseline (S=1, gap-fan-in-workflow-lock-and-S1 — 0/negative/non-numeric above all fail open here)
 }
 
 # shellcheck disable=SC2317
