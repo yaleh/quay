@@ -2,7 +2,7 @@
 id: gap-web-session-drops-queue-operation-records
 title: quay-web /session/<id>
   渲染管线静默丢弃「忙时入队、随后被吸收」的跨会话消息（queue-operation/attachment 无 .message 字段被过滤门丢弃）
-status: ready
+status: done
 labels:
   - gap
   - defect
