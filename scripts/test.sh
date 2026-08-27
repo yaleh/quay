@@ -681,6 +681,13 @@ full_suite_lock_acquire() {
     echo "scripts/test.sh: QUAY_TEST_NESTED=1 — skipping single-flight lock (nested invocation of the same suite)"
     return 0
   fi
+  # suite-driver holds the slot（SPEC-suite-lifecycle §3.3 资源集成）：常驻 suite-driver 已在 spawn 前取
+  # 单飞槽并持锁跨整个 suite（取/放同一执行点，释放原子）。test.sh 不再重复取槽——只跳过【锁】这一半，
+  # resource gate 照常跑（⛔ 不是 QUAY_TEST_SKIP_RESOURCE_GATE：那条连 gate 一起跳过，把 load 判定也丢了）。
+  if [ "${QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT:-}" = "1" ]; then
+    echo "scripts/test.sh: QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT=1 — suite-driver holds the single-flight slot; skipping re-acquire (resource gate still runs)"
+    return 0
+  fi
   mkdir -p "$(dirname "${FULL_SUITE_LOCK_FILE}")"
   local _s_fd _s_slot _s_idx _s_held="" _s_lock_start_ms="" _s_lock_end_ms=""
   FULL_SUITE_LOCK_FDS=()

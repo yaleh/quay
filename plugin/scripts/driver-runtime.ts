@@ -106,7 +106,7 @@ export { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTas
 
 /** 驱动 kind 标识（promotion/worker = 任务处理型，继承 0+1a；outer = 例程型，继承 0+1b——AC143 承接
  *  outer 的纯机械 A/B 段；quality = 例程型（AC144，1b）——均无任务池/无选择/无 verify）。 */
-export type DriverKind = "promotion" | "worker" | "outer" | "quality";
+export type DriverKind = "promotion" | "worker" | "outer" | "quality" | "suite";
 
 /** 一个 kind 的 registry 条目（KIND_* 八张 bash 表 → 一个 TS 数据结构）。 */
 export interface KindSpec {
@@ -184,6 +184,22 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
     runPrefix: "qg-prod",
     carriers: ["quality-round.jsonl"],
     controlFile: "quality-control.json",
+  },
+  // suite（SPEC-suite-lifecycle-and-failure-semantics §3）：per-task suite 生命周期收进一个常驻 driver。
+  // 它是【唯一】spawn per-task suite 的地方——直接 spawn suite 并 wait（进程级父子），辅以定时兜底静默
+  // 检测；spawn 前取单飞槽、子进程终结后释放槽（取/放同一执行点）。无任务池 ⇒ 无 cap（同 quality）。
+  // carrier = suite-round.jsonl（每轮一条，outcome 三态可分 done/red/hung）。
+  suite: {
+    driver: "suite-driver.ts",
+    prefix: "suite-driver",
+    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
+    capFlag: "",
+    hasInterval: true,
+    hasReconcile: false,
+    pidSelf: true,
+    runPrefix: "st-prod",
+    carriers: ["suite-round.jsonl"],
+    controlFile: "suite-control.json",
   },
 };
 
