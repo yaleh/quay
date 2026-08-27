@@ -34,9 +34,9 @@ fan-in 机械编排的「续做路径」没迁移——续做任务仍走旧 wor
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，续做走机械）：buildContinueWorkerPrompt 用 driverFanInNote()（⛔ 仍 fanInSignature ⇒ 假）。
-- [ ] AC2（能取假，冷启动孤儿不误路由）：成因②（worker-outcome 无 mechanical_fan_in 记录）走机械 fan-in（⛔ 误走 workflow ⇒ 假）。
-- [ ] AC3（能取假，语义兜底归 driver）：workflow 兜底由 driver 按 red step 唤起语义会话（⛔ 把「调 workflow」写进 worker prompt ⇒ 假）。
+- [x] AC1（能取假，续做走机械）：buildContinueWorkerPrompt 用 driverFanInNote()（⛔ 仍 fanInSignature ⇒ 假）。
+- [x] AC2（能取假，冷启动孤儿不误路由）：成因②（worker-outcome 无 mechanical_fan_in 记录）走机械 fan-in（⛔ 误走 workflow ⇒ 假）。
+- [x] AC3（能取假，语义兜底归 driver）：workflow 兜底由 driver 按 red step 唤起语义会话（⛔ 把「调 workflow」写进 worker prompt ⇒ 假）。
 
 ## Definition of Done
 

@@ -36,9 +36,10 @@
 //      effective_cap / total-process-budget 来裁决派发并发。标记落点：cap-from-gate.sh / cap-from-gate.ts /
 //      process-budget.sh 头部「并发裁决用途 RETIRED」横幅。剩余面（observation / test.sh C 面 /
 //      resource-gate A 面）不退役。
-//   ② A6「检查 fan-in 是否走 workflow」—— 驱动直接以 scriptPath 调 fan-in-execute workflow（见
-//      defaultWorkerArgv），结构上不需要事后检查「有没有走」。标记落点：fan-in-workflow-check.ts 头部
-//      「A6 检查退役面」横幅（过渡期仍保留给旧循环，驱动路径不消费它）。
+//   ② A6「检查 fan-in 是否走 workflow」—— worker 永不自己调 fan-in-execute workflow（创建 + 续做
+//      两条 prompt 都走 driverFanInNote：worker 实现后退出、driver 接手机械跑 fan-in；语义兜底归
+//      driver 按 red step 决定），结构上不需要事后检查「有没有走」。标记落点：fan-in-workflow-check.ts
+//      头部「A6 检查退役面」横幅（过渡期仍保留给旧循环，驱动路径不消费它）。
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/worker-driver.ts \
@@ -800,29 +801,12 @@ export interface WorkerCmdOptions {
 /** fan-in 归属说明（gap-fan-in-driver-mechanical-orchestration）：worker 只实现、实现后退出，
  *  driver 接手 worktree 机械跑 fan-in（锁/merge/delta/typecheck/scoped门/suite/ff）——worker 不再自己
  *  跑 suite、也不再以 scriptPath 调 fan-in-execute workflow（那套「子代理串行跑机械步骤」被 driver 取代，
- *  只作机械失败的语义兜底）。worktree 由调用方填（创建 prompt = 指引，续做 prompt = 实际路径）。 */
+ *  只作机械失败的语义兜底）。创建 prompt 与续做 prompt 共用（步骤序号由调用方填）。 */
 function driverFanInNote(): string {
   return [
-    `(3) exit — the worker-driver takes over your worktree and mechanically runs fan-in`,
+    `exit — the worker-driver takes over your worktree and mechanically runs fan-in`,
     `(merge develop → delta 判定 → typecheck → scoped门 → suite → ff) to develop.`,
     `You do NOT run the suite and do NOT call the fan-in workflow yourself.`,
-  ].join(" ");
-}
-
-/** fan-in-execute workflow 兜底签名（gap-fan-in-driver-mechanical-orchestration 已裁定①「失败时回退旧
- *  workflow 子代理兜底」）：机械 fan-in 失败（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / suite 红 /
- * ff 失败）⇒ 任务 exited-not-landed、worktree 保留 ⇒ 重派时走续做 prompt（本函数）——worker 续做 + 以
- *  scriptPath 调 fan-in-execute workflow 做语义修复 + 落地。真实绝对路径 + runId 取法 + 正本拷贝。
- *  ⛔ 旧版只给 `scriptPath` 字面占位词 + `runId` 键名 ⇒ 每个 worker 从源码反向工程一遍。 */
-function fanInSignature(task: string, root: string, worktree: string): string {
-  const fanInScript = path.join(root, ".claude", "workflows", "fan-in-execute.js");
-  const telemetryModule = path.join(root, "plugin", "scripts", "fast-mode-telemetry.ts");
-  return [
-    `ff-merge to develop via the fan-in-execute workflow: call the Workflow tool with the script file "${fanInScript}"`,
-    `(this .claude/workflows/ copy is the landed one that runs here — use it, do NOT diff it against plugin/workflows/fan-in-execute.js, its byte-identical shipped mirror guarded by workflows-dual-copy-drift-check)`,
-    `and args={task:"${task}", worktree:"${worktree}", root:"${root}", runId, mergeTarget:"develop"}.`,
-    `runId: import { generateRunId } from "${telemetryModule}" and call generateRunId("${task}") —`,
-    `or reuse the runId this task was dispatched with, if one was passed.`,
   ].join(" ");
 }
 
@@ -848,7 +832,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `provision it by running \`${dispatchSetupSignature(root, "<the worktree path you created in step 1>")}\``,
     `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch;`,
-    `${driverFanInNote()}`,
+    `(3) ${driverFanInNote()}`,
     `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree.`,
     `You own your worktree fully; apart from the final merge (done by the driver) do not touch develop.`,
   ].join(" ");
@@ -873,8 +857,9 @@ export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOpt
 
 /** 缺省 worker 命令：launchArgv("task-worker", <full-chain prompt>)（argv 形，child 即 worker，超时
  *  SIGTERM 杀得准）。launcher/model/--bare 由 `.quay/profiles.yml` 的 profiles/roles 承载（AC140-2 可配，
- *  L3 经 profile-policy.ts 解析）。prompt 里【直接】要求 worker 以 scriptPath 调 fan-in-execute
- *  workflow——驱动直调 ⇒ A6「检查 fan-in 是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
+ *  L3 经 profile-policy.ts 解析）。prompt（创建 + 续做）都走 driverFanInNote——worker 只实现后退出、
+ *  ⛔ 永不自己以 scriptPath 调 fan-in-execute workflow（机械 fan-in 由 driver 接手；语义兜底归 driver
+ *  按 red step 决定）⇒ A6「检查 fan-in 是否走 workflow」退役（SPEC §5 阶段 2 退役清单②）。 */
 export function defaultWorkerArgv(task: string, root: string): string[] {
   return launchArgv("task-worker", workerPromptForTask(task, root), root);
 }
@@ -1041,7 +1026,10 @@ export async function continueStateForTaskAsync(root: string, taskId: string): P
 
 /** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
  *  状态（分支提交 / AC 勾选 / 失败原因）供 worker 从保留 worktree 继续。⛔ 不含 "create an isolated
- *  git worktree"（AC1 取假判据——旧 prompt 逐字说 create 是撞死根因）。 */
+ *  git worktree"（AC1 取假判据——旧 prompt 逐字说 create 是撞死根因）。
+ *  gap-fan-in-continue-prompt-not-migrated-to-mechanical：续做同样用 driverFanInNote()（worker 实现后
+ *  退出、driver 接手机械跑 fan-in），⛔ 不再写 fanInSignature（旧 workflow 兜底签名——worker 永不自己
+ *  调 fan-in-execute workflow；语义兜底是 driver 按机械 red step 的决定，不再写进下一轮 worker 的 prompt）。 */
 export function buildContinueWorkerPrompt(task: string, root: string, state: ContinueWorkerState): string {
   const wt = state.worktreePath ?? "(unknown path)";
   const commits = state.branchCommits == null ? "?" : String(state.branchCommits);
@@ -1059,7 +1047,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch),`,
-    `(2) ${fanInSignature(task, root, wt)}.`,
+    `(2) ${driverFanInNote()}.`,
     `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
   ].join(" ");
