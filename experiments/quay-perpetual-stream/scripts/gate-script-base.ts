@@ -97,6 +97,37 @@ export function readFrontmatter(filePath: string): Record<string, any> | null {
   return front;
 }
 
+// ── readFileSafe ────────────────────────────────────────────────────────────────────────────────────
+// Read a file as UTF-8, returning "" on any error (missing file, permission, etc.) instead of
+// throwing — the single shared "read or empty" primitive (gap-b3-readfilesafe-normalizerel-unification:
+// was 4 byte-identical per-checker copies). Callers that must distinguish "absent" from "unreadable"
+// should read directly; this is the checker convention of "treat unreadable as empty".
+export function readFileSafe(p: string): string {
+  try {
+    return fs.readFileSync(p, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+// ── normalizeRel ────────────────────────────────────────────────────────────────────────────────────
+// Normalize a repo-relative path or glob to a canonical form: backslashes → forward slashes, drop
+// empty (`//`) and `.` segments, resolve `..` (a leading `..` is dropped), strip a leading `./`,
+// drop a trailing `/`. Wildcard segments are preserved untouched. This is the single normalization
+// the touches/resolver scripts share so path-shape tricks (`./`, `//`, trailing `/`) cannot spoof
+// identity (gap-b3: was 4 byte-identical per-file copies, two of whose comments each claimed to be
+// the canonical version — the code was identical, so this is that shared code).
+export function normalizeRel(p: string): string {
+  const parts = String(p).replace(/\\/g, "/").split("/");
+  const out: string[] = [];
+  for (const seg of parts) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") { out.pop(); continue; }
+    out.push(seg);
+  }
+  return out.join("/");
+}
+
 // ── emitPass / emitFail ─────────────────────────────────────────────────────────────────────────────
 // Standardized PASS / FAIL output lines.
 export function emitPass(message: string): void {
