@@ -894,6 +894,32 @@ test("parseTestCounts — returns null for a missing/unreadable/summary-less log
   assert.equal(parseTestCounts(noSummary), null, "a log with no spec summary → null (never {0,0,0})");
 });
 
+test("parseTestCounts — strips FORCE_COLOR ANSI so a colorized summary parses to the SAME counts as plain (gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi)", () => {
+  // #684/#685 regression: host FORCE_COLOR=3 forces node:test's spec reporter to colorize its
+  // summary even when redirected to a file ⇒ `ℹ pass N` arrives as `\x1b[34mℹ pass N\x1b[39m`
+  // (ESC at line start). The `^[#ℹ]` anchor then never matched ⇒ parseTestCounts returned null ⇒
+  // the four fields were absent. Negative control: the SAME counts parse from a colorized AND a
+  // plain log (the ANSI strip is a no-op on plain lines).
+  const coloredLog = writeSuiteLog(null, [
+    "\x1b[34mℹ pass 628\x1b[39m",
+    "\x1b[34mℹ fail 0\x1b[39m",
+    "\x1b[34mℹ cancelled 0\x1b[39m",
+    "\x1b[34mℹ pass 4175\x1b[39m",
+    "\x1b[34mℹ fail 3\x1b[39m",
+    "\x1b[34mℹ cancelled 0\x1b[39m",
+  ]);
+  const plainLog = writeSuiteLog(null, [
+    "ℹ pass 628",
+    "ℹ fail 0",
+    "ℹ cancelled 0",
+    "ℹ pass 4175",
+    "ℹ fail 3",
+    "ℹ cancelled 0",
+  ]);
+  assert.deepEqual(parseTestCounts(coloredLog), { pass: 628 + 4175, fail: 0 + 3, cancelled: 0 + 0 }, "colorized summary parses to the SUM across blocks");
+  assert.deepEqual(parseTestCounts(plainLog), parseTestCounts(coloredLog), "colorized ≡ plain (negative control)");
+});
+
 test("AC2/AC3 — buildPreVerifiedRoundRecord carries buckets/bucket_files/bucket_duration_ms on a bucket-mode log (M-only → buckets=M; hub → buckets=full)", () => {
   // M-only replay: the fan-in suite log carries `__BUCKETS__ buckets=M files=219 full=0` → record.buckets=M.
   const mLog = writeSuiteLog(null, ["__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=x round=full", "__BUCKETS__ buckets=M files=219 full=0", "__OVERHEAD__ serial_phase_ms=301000"]);

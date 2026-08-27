@@ -2369,6 +2369,15 @@ export async function run(argv: string[]): Promise<number> {
   let tapPass = 0;
   let tapFail = 0;
   let tapCancelled = 0;
+  // gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi — host FORCE_COLOR=3
+  // (also COLORTERM=truecolor) forces node:test's spec reporter to emit ANSI color EVEN when its
+  // stdout is redirected to a file ⇒ the summary line arrives as `\x1b[34mℹ pass N\x1b[39m` (ESC at
+  // line start) and the `^[#ℹ]` summary regexes below never match (pass/fail/cancelled/tests all
+  // record 0 — the #684/#685 regression). Strip ANSI CSI before matching (the same ANSI_CSI_RE
+  // pane-state-classify.ts uses) so colorized AND plain summary lines both parse. The stripped
+  // `summaryLine` feeds EVERY `^[#ℹ]` summary regex in onLine — the pass/fail/cancelled tallies
+  // below AND the testsSeen/cancelledSeen parses further down (same family, same file — 5b).
+  const ANSI_CSI_RE = /\x1B\[[0-9;]*[A-Za-z]/g;
   // gap-verification-round-reason-self-contradiction — set when a GATE/SCAN failure line (a subset of
   // FAILURE_PATTERNS: __PERFILE__ passed=false / tmux-leak-scan: FAIL) flipped red. Distinct from
   // staticCheckDetected (which names the static-check gate); both feed the round-record reason axis
@@ -2614,11 +2623,12 @@ export async function run(argv: string[]): Promise<number> {
     // gap-verification-round-counter-overwrites-not-sums — ACCUMULATE (+=) instead of overwrite (=):
     // one summary block per node --test phase, and the verification-round `tests` must be the SUM
     // across the phases that actually ran, never just the last phase's block (see the AC6 decl above).
-    const passM = line.match(/^[#ℹ]\s*pass\s+(\d+)/);
+    const summaryLine = line.replace(ANSI_CSI_RE, "");
+    const passM = summaryLine.match(/^[#ℹ]\s*pass\s+(\d+)/);
     if (passM) tapPass += Number(passM[1]);
-    const failM = line.match(/^[#ℹ]\s*fail\s+(\d+)/);
+    const failM = summaryLine.match(/^[#ℹ]\s*fail\s+(\d+)/);
     if (failM) tapFail += Number(failM[1]);
-    const cancelledM = line.match(/^[#ℹ]\s*cancelled\s+(\d+)/);
+    const cancelledM = summaryLine.match(/^[#ℹ]\s*cancelled\s+(\d+)/);
     if (cancelledM) tapCancelled += Number(cancelledM[1]);
     // gap-verification-round-missing-phase-ms-breaks-cost-attribution AC2 — the fixed-overhead
     // phase timings (`__OVERHEAD__ <phase>_ms=N`, test.sh:909-918). Same stream-accumulation family
@@ -2699,14 +2709,14 @@ export async function run(argv: string[]): Promise<number> {
     // AC1 — TAP summary parsing: `# tests N` / `# cancelled N` (node:test emits these on the
     // stream regardless of pass/fail). Fires on every line; a later summary overwrites an earlier
     // one (TAP prints exactly one summary, but a failing worker may print its own before the root).
-    const testsMatch = /^[#ℹ]\s*tests\s+(\d+)/.exec(line);
+    const testsMatch = /^[#ℹ]\s*tests\s+(\d+)/.exec(summaryLine);
     if (testsMatch) testsSeen = Number(testsMatch[1]);
     // test.sh prints "selected N files (groups=…)" exactly when the node --test phase starts; a
     // test-count summary (testsSeen > 0) is the TAP-side proof. Either ⇒ past the static-check
     // phase ⇒ the static-check patterns below must not fire (test fixtures can legitimately print
     // "FAIL: N violation(s)" — candidate-contracts.test.mjs's ANTI-DRIFT hard-fail fixtures).
     if (/^selected \d+ files?\b/.test(line) || testsSeen > 0) testPhaseStarted = true;
-    const cancelledMatch = /^[#ℹ]\s*cancelled\s+(\d+)/.exec(line);
+    const cancelledMatch = /^[#ℹ]\s*cancelled\s+(\d+)/.exec(summaryLine);
     if (cancelledMatch) cancelledSeen = Number(cancelledMatch[1]);
     lastOutputAt = Date.now(); // silence guard: any suite output (even a failure line) proves liveness
     if (isFailureLine(line)) {

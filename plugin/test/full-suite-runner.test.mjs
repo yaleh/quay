@@ -3374,6 +3374,40 @@ test("AC2 — a single-phase run records the block's values unchanged (no regres
   }
 });
 
+test("AC2 — FORCE_COLOR ANSI-colored `ℹ pass/fail/cancelled` summary lines still parse to the four fields (gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ansi-"));
+  // #684/#685 regression: host FORCE_COLOR=3 forces node:test's spec reporter to emit ANSI color
+  // even when its stdout is redirected ⇒ the summary arrives as `\x1b[34mℹ pass N\x1b[39m` (ESC at
+  // line start) and the `^[#ℹ]` summary regexes never matched ⇒ pass/fail/cancelled/tests recorded
+  // 0. This colored stream reproduces that shape; the runner must strip ANSI and land the real
+  // counts (and stay green — the colored `ℹ fail 0` must not false-red).
+  const esc = "\x1b";
+  const colored = (s) => `echo '${esc}[34m${s}${esc}[39m'`;
+  const suite = [
+    'echo "selected 5 files (groups=main)"',
+    colored("ℹ tests 5"),
+    colored("ℹ pass 5"),
+    colored("ℹ fail 0"),
+    colored("ℹ cancelled 0"),
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const rec = JSON.parse(fs.readFileSync(path.join(root, ".quay", "verification-round.jsonl"), "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "green", "colored summary does not false-red");
+    assert.equal(rec.pass, 5, "pass parsed from the ANSI-colored ℹ pass line");
+    assert.equal(rec.fail, 0, "fail parsed from the ANSI-colored ℹ fail line");
+    assert.equal(rec.cancelled, 0, "cancelled parsed from the ANSI-colored ℹ cancelled line");
+    assert.equal(rec.tests, 5, "tests = pass+fail+cancelled parsed from colored lines (never 0)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC2/AC3 e2e — a `✖ <testname> (Nms)` spec-reporter failure line flips red with failures non-empty", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-specx-"));
   const { f, dir } = fakeSuite(
