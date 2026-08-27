@@ -29,6 +29,8 @@ archguard 依赖环闸应接在 fan-in 过程（机械 driver 驱动的 fan-in�
 1. archguard 依赖环闸作为 fan-in driver 的机械步骤（typecheck 后、scoped门/suite 前；失败「依赖环 → Claude 会话」）。
 2. 退役 `scripts/test.sh:966` 旧接线（archguard 不再由 test.sh 触发）。
 
+⛔ **顺序（manager 2026-08-27 提醒）**：先接 archguard 进 fan-in driver（步骤 1），后退役 test.sh:966（步骤 2）——否则中间有 archguard 哪都不跑的窗口。AC2「生产能产出」天然覆盖此点，但实现顺序别反过来。
+
 ## Acceptance Criteria
 
 - [ ] AC1（能取假，单真相源）：`scripts/test.sh` 不再调用 `archguard-runner.ts`（旧接线 `:966` 退役）；（⛔ 仍调用 ⇒ 假——两个真相源）。
