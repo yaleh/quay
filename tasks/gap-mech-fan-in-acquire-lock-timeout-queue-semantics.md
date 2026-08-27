@@ -2,7 +2,7 @@
 id: gap-mech-fan-in-acquire-lock-timeout-queue-semantics
 title: 机械 fan-in acquire-workflow-lock 步 120s 超时与锁排队语义矛盾——队列等待被误杀（unbounded
   正确性锁不该有短超时）
-status: ready
+status: done
 labels:
   - gap
   - defect
