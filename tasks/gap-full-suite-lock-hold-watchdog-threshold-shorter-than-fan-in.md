@@ -33,10 +33,11 @@ extra:
 
 ## Plan
 
-修法三选一（实现方定，不代拍）：
-1. 阈值按真实全量 fan-in 时长重测（不写死 1800）。
-2. 看门狗只在 holder 真死（路径 (b)）时切锁，对「仍存活且在跑」不切。
-3. 把「饿死防护看门狗」与「正常长 suite」分开（死持有者 watchdog vs 正常长跑不断锁）。
+修法收敛（2026-08-27，fan-in lock watchdog 修订）：**option 2 为主**——suite-slot-lib.sh watchdog 路径 (b)（kill -0 失败 → ≤1s 崩溃自动释放）已原生覆盖死 holder；路径 (c)（纯 1800s 计时）对「alive 且在跑」也切，是误伤源。对 fan-in 锁：去掉 (c) 或改「alive 且不推进才切」，只留 (b)。理由：driver 持锁不会 hang 不崩（崩溃即 flock fd 自动释放）；suite 挂死已由静默 watchdog 兜（SIGKILL → suite 终 → fan-in 终 → 锁释放），(c) 对 fan-in 锁冗余且有害。
+
+**option 3 作框架**（死持有者 watchdog vs 正常长跑不断锁分离）。**option 1 降级为止血**（仅若必须留计时器）：≥ 真实全量 fan-in 上界 = 退役 SUITE_MAX_RUNTIME_MS(45min) + 开销(~10min) ≈ 55min → 3600s(60min)，⚠️ 挪悬崖非修复，61min 仍被切。
+
+**⛔ 关键边界**：1800s 对 suite 锁原用途（cap 5.2h validation）仍正确，别动；要修的是 fan-in 锁复用了它——fan-in 锁阈值应与 FULL_SUITE_LOCK_HOLD_MAX_S **解耦**，而非再抬一个共享常量。数字是止血不是结论，落笔当轮各取一次真实读数核对（硬规则 4c）。
 
 ## Acceptance Criteria
 
