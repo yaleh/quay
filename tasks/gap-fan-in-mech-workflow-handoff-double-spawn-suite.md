@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-mech-workflow-handoff-double-spawn-suite
 title: 机械→workflow 兜底交接非互斥——同任务双 spawn suite（争单飞槽饿死后继）
-status: todo
+status: ready
 labels:
   - gap
   - defect
