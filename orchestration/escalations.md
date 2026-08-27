@@ -612,3 +612,20 @@ resource-aware。
 
 ### 已解（2026-08-24 04:29Z）——manager 自行破局
 manager 只搬 (a) env var 到 launch.settings.json task-worker.env（`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:"0"`），commit f1ea7c26 到 develop（.claude/ 在 design-internal 排除集，非 bypass；已核实生效）。(b)(c)/测试留正常 fan-in（真实产品代码）。task 仍 ready，driver 自然重派——下一个 worker 带无限等待应能 land 完整 fix。外层不 merge 0658efa7。若重派仍死于同一处 ⇒ 问题更复杂（worker 等待方式不可靠），届时再升级。
+
+## 2026-08-27 00:1xZ — ⚠️ worker 泄漏根因 fix 卡在自指死锁：worker 修 worker-driver 泄漏 bug 会再泄漏，需人直改
+
+**现象**：fan-in 锁 worker（gap-fan-in-workflow-lock-and-S1）实现泄漏到主检出 6 文件（file-tools 不感知 shell cd、未用 worktree 绝对路径）⇒ 主检出脏树挡它自己 ff-merge ⇒ 重派循环（2568822→2583695）。根因 fix 任务 `gap-worker-leaks-implementation-to-main-checkout`（b645196a7）要改 `worker-driver.ts`（spawn cwd + dispatch prompt 明示 worktree 绝对路径）+ `dispatch-worktree-setup.sh`（provisioning fail-closed）——**但这是「用 worker 修 worker-driver 泄漏 bug」，bug 未修时 worker 自己的修复也落主检出 ⇒ 自指死锁，worker 修不了自己**。
+
+**外层已止损**：`git stash push -u` 保存 6 文件实现入 stash@{0}、清主检出、manager drain + kill worker 2583695、driver halted。环已断但根因未修。
+
+**为什么超出授权**：直改 worker-driver.ts + dispatch-worktree-setup.sh 是「写 plugin/ 实现」，AC65 只授权「同一轮对话一条命令可验证」的直改；本修复三处代码改动，验证靠「派 worker 看它泄不泄漏」，非一条命令 ⇒ 超出 AC65。manager（peer）不能授予越界权。
+
+**现状**：b645196a7 已改 needs-human（85fa19880，防 resume auto-dispatch）；driver halted、主检出干净、stash@{0} 保留。等**人直改** worker-driver.ts + dispatch-worktree-setup.sh（或人明确授权一方）。
+
+**选项**：
+1. **人直改** worker-driver.ts（spawn cwd + prompt 明示 worktree 绝对路径）+ dispatch-worktree-setup.sh（provisioning fail-closed）→ commit → 核实 → resume → stash pop 重派 fan-in 锁。
+2. **人授权** outer/manager 紧急越权直改（需人逐字授权，peer 不能代授权）。
+3. 其它（如人手工 merge 已 stashed 的实现到 worktree 分支再修）。
+
+**同类前例**：2026-08-24 04:26Z「worker 死于它自己要修的 600s 根因」catch-22——同为「fix 任务被它要修的 bug 卡死」，那次 manager 搬 env var 部分直改破局。本次是第二个同类。
