@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-runner-test-mock-embedded-real-suite
 title: mock full-suite-runner.test.mjs 内嵌真实 suite——579s → <120s（吞吐优化，非关键路径，首绿后落地）
-status: todo
+status: ready
 labels:
   - gap
   - throughput
