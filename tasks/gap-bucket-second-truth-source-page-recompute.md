@@ -1,7 +1,7 @@
 ---
 id: gap-bucket-second-truth-source-page-recompute
 title: bucket 判定存在第二真相源——页面 serve-tests.ts bucketSetOfFile 重算而非读派发侧结果（不读重归属表/镜像折叠 ⇒ 与派发决策相反）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -44,9 +44,9 @@ plugin/test/fan-in-ff-protocol-check.test.mjs judgment=M（同上）；页面算
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，单一真相源）：派发侧 effectiveBucketSet 结果落盘（含来源），页面 serve-tests.ts 只读该产物、不再自算 bucketSetOfFile 判定；（⛔ 页面仍有自算判定逻辑 ⇒ 假）。
-- [ ] AC2（能取假，页面与派发一致）：对 dead-loop-check.test.mjs / fan-in-ff-protocol-check.test.mjs 两例，页面显示的桶 == 派发侧 judgment（M），不再相反；（⛔ 仍显示 S/多桶 ⇒ 假）。
-- [ ] AC3（能取假，边界不破）：packages/quay/src 仍零 plugin/ 依赖（页面读落盘产物，⛔ 不 import 判定函数）；（⛔ import plugin/ ⇒ 假）。
+- [x] AC1（能取假，单一真相源）：派发侧 effectiveBucketSet 结果落盘（含来源），页面 serve-tests.ts 只读该产物、不再自算 bucketSetOfFile 判定；（⛔ 页面仍有自算判定逻辑 ⇒ 假）。
+- [x] AC2（能取假，页面与派发一致）：对 dead-loop-check.test.mjs / fan-in-ff-protocol-check.test.mjs 两例，页面显示的桶 == 派发侧 judgment（M），不再相反；（⛔ 仍显示 S/多桶 ⇒ 假）。
+- [x] AC3（能取假，边界不破）：packages/quay/src 仍零 plugin/ 依赖（页面读落盘产物，⛔ 不 import 判定函数）；（⛔ import plugin/ ⇒ 假）。
 
 ## Definition of Done
 
