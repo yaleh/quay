@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-continue-prompt-not-migrated-to-mechanical
 title: fan-in 机械编排续做路径未迁移——续做 worker 仍走旧 workflow 而非机械 fan-in + 冷启动孤儿误路由
-status: ready
+status: done
 labels:
   - gap
   - defect
