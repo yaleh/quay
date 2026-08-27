@@ -1,6 +1,7 @@
 ---
 id: gap-web-session-drops-queue-operation-records
-title: quay-web /session/<id> 渲染管线静默丢弃「忙时入队、随后被吸收」的跨会话消息（queue-operation/attachment 无 .message 字段被过滤门丢弃）
+title: quay-web /session/<id>
+  渲染管线静默丢弃「忙时入队、随后被吸收」的跨会话消息（queue-operation/attachment 无 .message 字段被过滤门丢弃）
 status: ready
 labels:
   - gap
@@ -48,6 +49,12 @@ queue-operation/attachment 有渲染路径；AC1-AC3 全勾；「忙时入队后
 ## Touches
 
 - packages/quay/src/observation.ts（parseTranscript/readTranscriptTail 补 queue-operation/attachment 渲染路径）
-- packages/quay/src/serve-tests.ts（session 渲染层）
+- packages/quay/src/serve-sessions.ts（session 渲染层）
 - packages/quay/test/observation.test.mjs（queue-operation/attachment 渲染测试 + 闲时直达不回归负控制；serve 渲染测试文件实现方按 bucketSetOfFile 渲染路径定）
 - tasks/gap-web-session-drops-queue-operation-records.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-27T15:15:04.978Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
