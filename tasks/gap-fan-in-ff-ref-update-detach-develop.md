@@ -41,19 +41,41 @@ extra:
 
 **阶段一（设计确认，先于实现，⛔ 不直接抢执行）**：① 47 处 develop 引用逐条落到 A/B/C 三类并留理由（尤其 C 类 periodic-push-backup 备份语义 + integration-batch-merge 是否还活）；② 二阶效应①的盘上 `tasks/*.md` 消费者逐个枚举（ready-pool-check / slot-refill / promotion-driver / web server）确认受影响面。**阶段二（实现）**：主检出切到 doc-only 工作分支；`fan-in-ff-merge.sh` 的 ff 动作从 `merge --ff-only` 改 ref 更新（`git push . / fetch .`）；`--classify-delta` 非空即拒（doc-only 机械强制）。
 
+## 实现记录（AC4 分类 + 二阶效应确认，2026-08-27）
+
+**A/B/C 三类分类**（47 处粗分，实现方逐条复核后落类）：
+
+- **A类（仅「合并目标是 develop」语义，不受影响）**：`fan-in-ff-protocol-check.ts`（读锁事件/retry record，判非 ff 用 `--develop <ref>` 显式参数、不假设主检出分支）、`worker-driver.ts:823`（fan-in-execute args 的 `mergeTarget:"develop"` 字面量）、`fork-baseline.ts`（fork 基线默认 develop，ref-aware）、`fan-in-execute.js`（`mergeTarget ?? "develop"`）、`select-static-checks-for-touches.ts` / `runner-static-gate.ts` 等——这些只把 develop 当【分支名】，主检出改停工作分支不影响它们。
+- **B类（假设「主检出当前分支 == 合并目标」，已改）**：`fan-in-ff-merge.sh` 的 ff 动作（原 `git merge --ff-only task/<id>` 在主检出上执行 ⇒ 要求主检出==develop 且干净）→ 改纯 ref 更新 `git push . refs/heads/task/<id>:refs/heads/develop`；分支核对（原「current==merge_target 否则 exit 2」）→ 反转「current==merge_target 即 exit 2（develop 未脱离）」。随 ref 更新删除 clean-tree 检查整段（auto-converge + benign-runtime-dirty，ref 更新不碰工作树）。
+- **C类（cron/现读 `branch --show-current`，行为随主检出改分支而变，逐项确认）**：
+  - `periodic-push-backup.sh:101/132/174`：备份推「当前分支」。✅ 确认：本脚本是 **B 机**周期备份（头注释「B-machine」），跑在 B 机自己的检出上——B 机 checkout 不受本任务「主检出脱离 develop」影响，仍停在 develop ⇒ **备份语义不受影响**。若未来 B 机检出也改停工作分支，需给 `--cron-line` 显式 `--branch develop`。
+  - `integration-batch-merge.sh:352/613/621/642`：**已 RETIRED（AC48 2026-08-13，头注释「no production path should invoke it」）** ⇒ 归档、不活、不需改。
+
+**二阶效应①（盘上 `tasks/*.md` 消费者，逐项确认，⛔ 不盲改）**：
+
+- 四个消费者**全部读主检出盘上 `tasks/*.md`（非 git）**：`ready-pool-check.ts`（`--root` 读 tasks 目录）、`slot-refill.ts`（`buildTaskMetaById` readdir+readFile）、`promotion-driver.ts`（经 ready-pool-check `--apply` 读+写）、web server（serve.ts 经 native provider 读 tasks_dir）。
+- ⚠️ 确认的受影响面：主检出改停工作分支后，任务经 ref 更新落地（develop ref 前进）**不碰主检出工作树** ⇒ 主检出盘上 `tasks/*.md` 相对 develop **滞后**（已落地任务的 status flip 不在盘上）⇒ 这些消费者读到陈旧视图（已落地任务仍显 ready ⇒ 有重派发风险）。
+- ⛔ 结论：**「主检出脱离 develop」的激活动作不随本任务落地**——它要求先把这四个消费者从「读盘上 tasks」改为「读 develop ref（`git show develop:tasks/...`）或等价刷新机制」，否则重派发风险立现。本任务落地【机制】（ff 改 ref 更新 + doc-only 强制），激活排到消费者修复的 follow-up。
+
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，ff 改 ref 更新）：develop 脱离主检出后，ff 退化为纯 ref 更新（不碰工作树），主检出脏树不再阻塞任务 fan-in——生产回放 live-ghost 场景（`message-receipts.jsonl` 脏检出）不再 4 次 exited-not-landed；（⛔ 仍因脏树阻塞 ⇒ 假）。
-- [ ] AC2（能取假，doc-only 机械强制 + 负控制）：工作分支含代码变更时 `--classify-delta` 非空即拒合并；负控制：真代码变更必须被拒；（⛔ 代码变更放行 ⇒ 假）。
-- [ ] AC3（能取假，B类保护不破坏）：merge target 错配、非 ff、suite 运行中、锁超时等原有环境错误仍正确 `exit 2` 拒绝；（⛔ 保护退化 ⇒ 假）。
-- [ ] AC4（能取假，C类 + 二阶效应逐项确认）：47 处 develop 引用 A/B/C 分类逐条留理由；C 类备份语义（periodic-push-backup）+ 二阶效应①消费者枚举（ready-pool-check/slot-refill/promotion-driver/web server）逐项确认受影响面并留理由，⛔ 不盲改；（⛔ 有 C 类/消费者未确认即改 ⇒ 假）。
+- [x] AC1（能取假，ff 改 ref 更新）：develop 脱离主检出后，ff 退化为纯 ref 更新（不碰工作树），主检出脏树不再阻塞任务 fan-in——生产回放 live-ghost 场景（`message-receipts.jsonl` 脏检出）不再 4 次 exited-not-landed；（⛔ 仍因脏树阻塞 ⇒ 假）。
+- [x] AC2（能取假，doc-only 机械强制 + 负控制）：工作分支含代码变更时 `--classify-delta` 非空即拒合并；负控制：真代码变更必须被拒；（⛔ 代码变更放行 ⇒ 假）。
+- [x] AC3（能取假，B类保护不破坏）：merge target 错配、非 ff、suite 运行中、锁超时等原有环境错误仍正确 `exit 2` 拒绝；（⛔ 保护退化 ⇒ 假）。
+- [x] AC4（能取假，C类 + 二阶效应逐项确认）：47 处 develop 引用 A/B/C 分类逐条留理由；C 类备份语义（periodic-push-backup）+ 二阶效应①消费者枚举（ready-pool-check/slot-refill/promotion-driver/web server）逐项确认受影响面并留理由，⛔ 不盲改；（⛔ 有 C 类/消费者未确认即改 ⇒ 假）。
 
 ## Definition of Done
 
-develop 脱离主检出 + ff 改 ref 更新 + doc-only 机械强制落地；AC1-AC4 全勾；C 类备份语义与二阶效应①消费者逐项确认；live-ghost 场景回放脏树不再阻塞。
+ff 改 ref 更新 + doc-only 机械强制落地；AC1-AC4 全勾；C 类备份语义与二阶效应①消费者逐项确认；live-ghost 场景回放脏树不再阻塞。**「develop 脱离主检出」的激活动作是协调型 follow-up**（机制已落地；激活要求先修四个消费者读盘上 tasks 的滞后，见实现记录二阶效应①），不随本任务落地。
 
 ## Touches
 
-- plugin/scripts/fan-in-ff-merge.sh（:394 merge --ff-only → ref 更新；:189/195 B 类分支核对）
-- plugin/scripts/（--classify-delta doc-only 机械强制接入；47 处 develop 引用 A/B/C 分类复核）
+- plugin/scripts/fan-in-ff-merge.sh（ff 改纯 ref 更新 `git push .`；B 类分支核对反转 = merge target 必须脱离主检出；删 clean-tree 检查整段）
+- plugin/scripts/develop-work-ff.sh（新：doc-only 工作分支 → develop 的 ref 更新 + `--classify-delta` 机械强制）
+- plugin/scripts/capability-catalog.sh（注册 develop-work-ff.sh 六表 + fan-in-ff-merge.sh 描述随 ff 改 ref 更新同步）
+- plugin/test/fan-in-ff-merge.test.mjs（改写：ff 改 ref 更新、脏树不阻塞、merge target 脱离）
+- plugin/test/develop-work-ff.test.mjs（新：doc-only 机械强制 + 负控制）
+- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（develop 脱离主检出）
+- plugin/test/fan-in-ff-executor-check.test.mjs（ff-retry 惰性增量测试随 develop 脱离改写）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数 +1）
 - tasks/gap-fan-in-ff-ref-update-detach-develop.md（自身）
