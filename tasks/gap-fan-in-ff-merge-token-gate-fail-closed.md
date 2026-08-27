@@ -2,7 +2,7 @@
 id: gap-fan-in-ff-merge-token-gate-fail-closed
 title: fan-in-ff-merge.sh --acquire-workflow-lock 加 token 闸——非 driver 一次性 token
   者 fail-closed（掐死所有非机械路径，L1）
-status: todo
+status: ready
 labels:
   - gap
   - defect
