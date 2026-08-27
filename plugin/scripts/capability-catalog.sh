@@ -97,6 +97,7 @@ unset _cs_violations
 # as a specific QUESTION, never the generic "checks correctness" (AC5 negative control:
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
+  [archguard-runner.ts]="Does the repo's TypeScript code have dependency cycles — a REAL archguard CLI analyze run at suite time, whose structural verdict (metricVector.sccCount === 0, no non-trivial SCCs) is read back from the produced ArchJSON, fail-closed (archguard missing / analyze failed / cycles > 0 ⇒ exit 1, tasks/gap-archguard-zero-production-calls)?"
   [a15-ruling5-counter.ts]="Is A15 裁定5 (suite-health 心跳缺失) mechanically counted — ticks since the outer's last Agent tool_use (read from the outer session transcript + tick-log), >=3 ⇒ 应 .halt / >=6 ⇒ 应 /clear?"
   [ac36-sortkey-criterion-check.ts]="Did AC36 判据② hold mechanically — the delivery-critical task strictly moved forward, same-family non-DC kept their relative order, and blocking_suite still ranks above delivery_critical (two slot-refill runs' ranking compared)?"
   [ac61-staleness-disposition-check.ts]="Has every AC61 list item (A-1..A-7 / B-1..B-4) been individually dispositioned — migrated (with landing-point map) OR verified still-valid (with a reading) — are the loop docs' integration hits classified one-row-per-hit (not just counted), and is the inner C7 live-instruction (integration-branch-model.ts --overlaps-unverified) gone from both core copies (AC61 判据1-3 + DoD 负控, tasks/gap-ac61-staleness-list-item-disposition)?"
@@ -407,6 +408,7 @@ declare -A QUESTION=(
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
+  [archguard-runner.ts]="每轮"
   [a15-ruling5-counter.ts]="每轮"
   [ac36-sortkey-criterion-check.ts]="按需"
   [ac61-staleness-disposition-check.ts]="按需"
@@ -704,6 +706,7 @@ declare -A CADENCE=(
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
+  [archguard-runner.ts]="失效前提：archguard CLI 在 PATH 上、TypeScript 能解析（tsconfig 存在）、两个 scope（packages/quay/src + plugin/scripts）目录结构不变；若 archguard 移除/scope 变更/sccCount 语义变更，本条需同步"
   [a15-ruling5-counter.ts]="失效前提：外层仍通过 transcript 心跳判执行；若执行面 API 化不再依赖 Agent tool_use 时间戳（不再有 transcript 可读），本条退休"
   [ac36-sortkey-criterion-check.ts]="失效前提：slot-refill --json 仍暴露 ranking 数组（移除或改形状则判据② 失去机械读面，本条失效）"
   [ac61-staleness-disposition-check.ts]="失效前提：AC61 清单（A-1..A-7 / B-1..B-4）仍被 AC58 archive / 执行核文档消费；若两线分支模型相关条款全部迁出且不再有活引用，本条随清单消退而失效"
@@ -1001,6 +1004,7 @@ declare -A INVALIDATION=(
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
+  [archguard-runner.ts]="2026-08-27"
   [a15-ruling5-counter.ts]="2026-08-10"
   [ac36-sortkey-criterion-check.ts]="2026-08-11"
   [ac61-staleness-disposition-check.ts]="2026-08-14"
@@ -1298,6 +1302,7 @@ declare -A LAST_REAFFIRMED=(
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
+  [archguard-runner.ts]="n/a"
   [a15-ruling5-counter.ts]="enumerative"
   [ac36-sortkey-criterion-check.ts]="position"
   [ac61-staleness-disposition-check.ts]="position"
@@ -1601,6 +1606,7 @@ declare -A MATCHING=(
 # Non-按需 mechanisms wired into the suite/execution cores need no CONSUMER row — their wiring IS
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
+  [archguard-runner.ts]="谁按：scripts/test.sh run_selected 全量 suite 路径按（run_static_checks 之后，code-class gate）；条件=每次全量验证轮跑 archguard analyze + 读产物判依赖环，fail-closed（archguard 缺失/analyze 失败/有环 ⇒ exit 1）"
   [ac36-sortkey-criterion-check.ts]="谁按：manager/outer 在 AC36 判据② 收口复核时手按；条件=delivery-critical 队列排序要作机械判定"
   [ac61-staleness-disposition-check.ts]="谁按：manager 在 AC61 清单处置表态时按；条件=清单项要做 A-1..B-4 的处置判定"
   [anti-drift-touches-check.ts]="谁按：任务 subagent 在落地后核验 Touches 一致性时按；条件=任务落地要验证 touches 精确命中"
