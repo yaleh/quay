@@ -1,7 +1,8 @@
 ---
 id: gap-fan-in-per-task-suite-no-silence-timeout-watchdog
-title: per-task fan-in suite 路径缺单次运行静默/超时看门狗——挂死无限等（已退役 full-suite-runner.ts 曾有 SUITE_SILENCE_MS，fan-in detached 直跑无对应物）
-status: ready
+title: per-task fan-in suite 路径缺单次运行静默/超时看门狗——挂死无限等（已退役 full-suite-runner.ts 曾有
+  SUITE_SILENCE_MS，fan-in detached 直跑无对应物）
+status: superseded
 labels:
   - gap
   - defect
@@ -9,8 +10,12 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded: true
+  superseded_at: 2026-08-27
+  superseded_by: gap-fan-in-driver-mechanical-orchestration
 ---
 **type:** execution
+> **SUPERSEDED / 作废（人 2026-08-27 裁定，新 SPEC gap-fan-in-driver-mechanical-orchestration）**：修复对象 fan-in-execute.js 随新 SPEC 退役（取消 workflow 子代理、driver 机械驱动）；新 SPEC「suite 不 detach」从根上消除挂死，per-task 看门狗失效。历史诊断保留，不重开。
 
 ## Proposal
 

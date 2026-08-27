@@ -1,6 +1,7 @@
 ---
 id: gap-fan-in-ff-ref-update-detach-develop
-title: fan-in 目标 develop 脱离主检出——ff 改纯 ref 更新（脏树结构上无关），doc-only 工作分支，架构级替代 449f111e 的 pre-flight 旁路
+title: fan-in 目标 develop 脱离主检出——ff 改纯 ref 更新（脏树结构上无关），doc-only 工作分支，架构级替代
+  449f111e 的 pre-flight 旁路
 status: ready
 labels:
   - gap
@@ -11,11 +12,11 @@ children: []
 extra:
   schema: execution
   depends_on:
-    - gap-fan-in-failure-semantic-subagent
+    - gap-fan-in-driver-mechanical-orchestration
 ---
 **type:** execution
 
-> **排期（outer 2026-08-26）**：depends_on `gap-fan-in-failure-semantic-subagent`。⛔ 非结构前置（两任务改不同代码路径，本任务可经既有 re-dispatch 落地）——是本任务自身 landing 竞 develop、每输一次整份重跑 suite（24h ff-race 27/28、62% 墙钟浪费），且跑本任务会与落地 ff-race 修复竞争稀缺的单飞 suite 槽（S=2）⇒ 先落地语义 subagent 再重跑，避免烧 retry cap 走 needs-human。
+> **排期（outer 2026-08-27 更新）**：depends_on `gap-fan-in-driver-mechanical-orchestration`（新 SPEC）——本任务改 fan-in-ff-merge.sh 的 ff→ref 更新，须排在 driver 机械编排落地之后，避免与新 SPEC 的 driver-driven ff 冲突。⛔ 非结构前置（本任务可经既有 re-dispatch 落地）。
 
 ## Proposal
 

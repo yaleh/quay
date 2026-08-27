@@ -1,7 +1,8 @@
 ---
 id: gap-fan-in-red-bucket-run-not-recorded
-title: fan-in 桶路径跑红不入账——第二套平行 harness + green-only writer 绕开 full-suite-runner.ts 的正确记录（硬规则 3b；人裁定「定义正确机制，不修修补补」）
-status: ready
+title: fan-in 桶路径跑红不入账——第二套平行 harness + green-only writer 绕开
+  full-suite-runner.ts 的正确记录（硬规则 3b；人裁定「定义正确机制，不修修补补」）
+status: superseded
 labels:
   - gap
   - defect
@@ -10,8 +11,12 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded: true
+  superseded_at: 2026-08-27
+  superseded_by: gap-fan-in-driver-mechanical-orchestration
 ---
 **type:** execution
+> **SUPERSEDED / 作废（人 2026-08-27 裁定，新 SPEC gap-fan-in-driver-mechanical-orchestration）**：修复对象 fan-in-execute.js 桶路径平行 harness 随新 SPEC 退役；新 SPEC driver 直接用 full-suite-runner.ts（本就记录 green+red），「跑红不入账」被自然满足。历史诊断保留，不重开。
 
 ## Proposal
 

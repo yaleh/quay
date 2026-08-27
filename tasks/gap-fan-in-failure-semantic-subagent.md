@@ -1,7 +1,8 @@
 ---
 id: gap-fan-in-failure-semantic-subagent
-title: fan-in 失败处置改语义 subagent——输入完整现场输出原因分类，outcome_class 替换 advanceRetryCap 的裸退出码（SPEC §4）
-status: ready
+title: fan-in 失败处置改语义 subagent——输入完整现场输出原因分类，outcome_class 替换 advanceRetryCap
+  的裸退出码（SPEC §4）
+status: superseded
 labels:
   - gap
   - feature
@@ -12,8 +13,12 @@ extra:
   schema: execution
   depends_on:
     - gap-suite-lifecycle-driver-kind
+  superseded: true
+  superseded_at: 2026-08-27
+  superseded_by: gap-fan-in-driver-mechanical-orchestration
 ---
 **type:** execution
+> **SUPERSEDED / 作废（人 2026-08-27 裁定，新 SPEC gap-fan-in-driver-mechanical-orchestration）**：语义 subagent 概念重定向到 driver，并入新 SPEC「失败点唤起 Claude 会话」（happy-path 之后的步骤），非独立任务；Touches 含已退役 fan-in-execute.js。历史分析保留，不重开。
 
 > **正本**：`orchestration/SPEC-suite-lifecycle-and-failure-semantics-2026-08-26.md` §4。**⛔ 边界**：lane/S 不动；⛔ 不为语义 agent 设准确率阈值（成本结构未测量前不设数值阈值，硬规则 4 推论）。
 > **前置**：`gap-suite-lifecycle-driver-kind`（§3）先落地——其 carrier（suite-round.jsonl 三态 outcome）是本条输入前提之一。
