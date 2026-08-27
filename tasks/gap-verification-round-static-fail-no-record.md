@@ -59,6 +59,7 @@ extra:
 - plugin/scripts/full-suite-runner.ts（未完整轮次统一落记录 + taskId 归因）
 - plugin/scripts/pre-verified-round-record.ts（verification-round 记录写入方，fan-in 桶路径 + 红轮记录 state=red + taskId 字段）
 - plugin/workflows/fan-in-execute.js（suite-red 路径写红轮记录）
+- .claude/workflows/fan-in-execute.js（双副本镜像——同上，两副本字节一致）
 - plugin/scripts/worker-driver.ts（机械 fan-in suite-red 路径写红轮记录）
 - plugin/test/pre-verified-round-record.test.mjs（红轮记录单测）
 - plugin/test/full-suite-runner.test.mjs（taskId 归因单测）
