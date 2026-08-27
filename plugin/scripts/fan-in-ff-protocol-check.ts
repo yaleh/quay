@@ -30,7 +30,8 @@
 //           events.jsonl, written by fan-in-ff-merge.sh --acquire/--release-workflow-lock), DISTINCT
 //           from the ms-scale merge lock of 判据2b/判据1. The OLD AC4「两把锁覆盖范围不得交叉」stays
 //           true for the MERGE lock (判据2b); the workflow lock is EXPECTED to overlap/cover the suite.
-//           A suite with no taskId, or no workflow-lock hold, is NOT-EVALUATED (硬规则 3b).
+//           A suite with no taskId, no workflow-lock hold, or whose taskId matches NO hold (a
+//           different task's suite) is NOT-EVALUATED (硬规则 3b — never folded into RED).
 //
 // Each sub-check runs when its inputs are present; the aggregate verdict is RED if ANY sub-check is
 // RED. `evaluated` is true iff at least one sub-check produced a hard verdict (per sub-check the
@@ -184,7 +185,15 @@ export function checkSuiteCoveredByWorkflowLock(workflowHoldIntervals, suiteRun)
     // property is unevaluable (硬规则 3b: 无法评估 ≠ 合格, reported distinctly, never folded green).
     return { ok: true, evaluated: false, reason: "suite-run-lacks-task-id (NOT-EVALUATED)" };
   }
-  const covers = holds.some((h) => h.taskId === suiteRun.taskId && h.start <= suiteRun.start && h.end >= suiteRun.end);
+  // 判据4 taskId scoping (gap-fan-in-ff-protocol-check-cross-task-false-positive, same class as
+  // 判据2b): the workflow lock is PER-TASK — task X's lock protects X's merge/suite, not task Y's.
+  // A suite run whose taskId matches NO workflow-lock hold is a DIFFERENT task's suite (or ran before
+  // any lock) ⇒ the containment property is unevaluable for it (硬规则 3b), never folded into RED.
+  const sameTaskHolds = holds.filter((h) => h.taskId === suiteRun.taskId);
+  if (sameTaskHolds.length === 0) {
+    return { ok: true, evaluated: false, reason: "no-matching-task-workflow-lock-hold (NOT-EVALUATED)" };
+  }
+  const covers = sameTaskHolds.some((h) => h.start <= suiteRun.start && h.end >= suiteRun.end);
   if (!covers) {
     return { ok: false, evaluated: true, reason: "suite-run-outside-workflow-lock" };
   }

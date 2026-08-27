@@ -405,6 +405,43 @@ test("PURE checkSuiteCoveredByWorkflowLock — no taskId / no holds ⇒ NOT-EVAL
   assert.equal(noRun.evaluated, false);
 });
 
+test("PURE checkSuiteCoveredByWorkflowLock — cross-task (a DIFFERENT task's suite) ⇒ NOT-EVALUATED (never red)", () => {
+  const hold = [{ start: 100, end: 500, taskId: "t1" }];
+  // t2's suite overlapping t1's lock window in time is a DIFFERENT task's suite — t1's lock does not
+  // (and must not) cover it ⇒ the containment property is unevaluable, never folded into RED.
+  const cross = checkSuiteCoveredByWorkflowLock(hold, { start: 200, end: 400, taskId: "t2" });
+  assert.equal(cross.evaluated, false, "cross-task suite must be NOT-EVALUATED");
+  assert.equal(cross.ok, true);
+  assert.equal(cross.reason, "no-matching-task-workflow-lock-hold (NOT-EVALUATED)");
+});
+
+test("判据4 cross-task negative control — a DIFFERENT task's suite vs this task's lock ⇒ exit 0", () => {
+  const dir = makeTmp("wf4cross");
+  const st = makeTmp("wf4crossstate");
+  try {
+    initRepo(dir);
+    fs.mkdirSync(path.join(st, ".quay"), { recursive: true });
+    const wfEvents = path.join(st, ".quay", "fan-in-workflow-lock-events.jsonl");
+    const suite = path.join(st, ".quay", "full-suite-state.json");
+    // workflow lock hold for t1, but the suite state carries t2 (a DIFFERENT task's last run) — the
+    // containment of t2's suite within t1's lock is meaningless ⇒ NOT-EVALUATED, never RED.
+    fs.writeFileSync(wfEvents, [
+      JSON.stringify({ event: "acquire", ts: "2026-08-26T03:00:00Z", epoch: 1787713200, taskId: "t1", pid: 1 }),
+      JSON.stringify({ event: "release", ts: "2026-08-26T03:20:00Z", epoch: 1787714400, taskId: "t1", pid: 1 }),
+    ].join("\n") + "\n", "utf8");
+    fs.writeFileSync(suite, JSON.stringify({ state: "green", startedAt: "2026-08-26T03:05:00Z", finishedAt: 1787714100, taskId: "t2" }), "utf8");
+    const r = runChecker(["--root", dir, "--workflow-lock-events", wfEvents, "--suite-state", suite]);
+    assert.equal(r.status, 0, `cross-task suite must NOT be red: ${r.stdout}${r.stderr}`);
+    const wf = jsonOut(r).checks.find((c) => c.check === "workflow-lock-covers-suite");
+    assert.equal(wf.evaluated, false);
+    assert.equal(wf.ok, true);
+    assert.equal(wf.reason, "no-matching-task-workflow-lock-hold (NOT-EVALUATED)");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
 test("判据4 — a same-task suite run outside its workflow-lock hold ⇒ RED (exit 1)", () => {
   const dir = makeTmp("wf4red");
   const st = makeTmp("wf4redstate");
