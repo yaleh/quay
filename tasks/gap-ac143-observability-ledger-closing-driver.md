@@ -1,7 +1,7 @@
 ---
 id: gap-ac143-observability-ledger-closing-driver
 title: AC143 观测/账本/收尾面驱动化——outer 纯机械 A/B 段收进 driver（新 kind 或并入既有 kind）
-status: ready
+status: done
 labels:
   - gap
   - feature
