@@ -1762,7 +1762,7 @@ test("AC2 (能取假) — buildContinueWorkerPrompt carries prior-round state (b
   assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
 });
 
-test("gap-fan-in-driver-mechanical-orchestration — buildContinueWorkerPrompt is the workflow fallback (concrete worktree + real fan-in signature; ⛔ no scriptPath placeholder)", () => {
+test("gap-fan-in-continue-prompt-not-migrated-to-mechanical — AC1: buildContinueWorkerPrompt is mechanical too (worker exits, driver takes over; ⛔ no fan-in-execute.js / generateRunId / scriptPath)", () => {
   const p = buildContinueWorkerPrompt("gap-x", "/r", {
     worktreePath: "/wt",
     branchCommits: 3,
@@ -1771,13 +1771,48 @@ test("gap-fan-in-driver-mechanical-orchestration — buildContinueWorkerPrompt i
     acTotal: 5,
     failureReason: "worker exited 0 but task did not land",
   });
-  // 已裁定①「失败时回退旧 workflow 子代理兜底」：续做 prompt 保留 workflow 兜底签名（机械 fan-in 失败
-  // 后，重派的 worker 续做 + 以 scriptPath 调 fan-in-execute workflow 做语义修复 + 落地）。
-  assert.match(p, /\/r\/\.claude\/workflows\/fan-in-execute\.js/, "continue prompt carries real absolute path (workflow fallback)");
-  assert.doesNotMatch(p, /scriptPath/, "continue prompt has no bare scriptPath placeholder");
-  assert.match(p, /worktree:"\/wt"/, "continue prompt embeds the concrete worktree path (not a placeholder)");
-  assert.match(p, /generateRunId/, "continue prompt names generateRunId");
-  assert.match(p, /plugin\/scripts\/fast-mode-telemetry\.ts/, "continue prompt names the generateRunId module");
+  // 续做 prompt 与创建 prompt 同源 driverFanInNote：worker 实现后退出、driver 接手机械跑 fan-in，
+  // ⛔ 不再写旧 workflow 兜底签名（fan-in-execute.js / generateRunId / scriptPath）。
+  assert.match(p, /exit — the worker-driver takes over/, "AC1: continue prompt also lets the driver take over fan-in");
+  assert.match(p, /mechanically runs fan-in/, "AC1: names the mechanical fan-in");
+  assert.match(p, /do NOT call the fan-in workflow/, "AC1: worker never calls the workflow (driver decision)");
+  assert.doesNotMatch(p, /fan-in-execute\.js/, "⛔ no fan-in-execute.js path (workflow retired from the worker prompt)");
+  assert.doesNotMatch(p, /generateRunId/, "⛔ no generateRunId (worker no longer dispatches the workflow)");
+  assert.doesNotMatch(p, /scriptPath/, "⛔ no scriptPath placeholder");
+  assert.match(p, /\/wt/, "continue prompt still embeds the concrete worktree path (reuse, not a placeholder)");
+});
+
+test("gap-fan-in-continue-prompt-not-migrated-to-mechanical — AC2: cold-start orphan (worktree present, no mechanical_fan_in record) routes to mechanical fan-in, ⛔ not the workflow", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 0,
+    branchHeadSubject: null,
+    acChecked: null,
+    acTotal: null,
+    failureReason: null, // 冷启动孤儿：worker-outcome 对该 task 无 exited-not-landed 记录 ⇒ 无 mechanical_fan_in
+  });
+  assert.match(p, /\(unknown\)/, "cold-start orphan: no prior failure record ⇒ (unknown)");
+  assert.match(p, /exit — the worker-driver takes over/, "AC2: still mechanical (driver re-runs fan-in), ⛔ not the workflow");
+  assert.doesNotMatch(p, /fan-in-execute\.js/, "AC2: no workflow mis-routing");
+});
+
+test("gap-fan-in-continue-prompt-not-migrated-to-mechanical — AC3: workflow fallback is the driver's decision, never written into the worker prompt (both create and continue)", () => {
+  // 语义兜底归 driver（runMechanicalFanIn 返回 red 时按 step 唤起语义会话），⛔ 不把「调 workflow」
+  // 写进 worker prompt——创建与续做两条 prompt 都不含调 workflow 的指令。
+  const create = buildWorkerPrompt("gap-x", "/r");
+  const cont = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "mechanical fan-in red at typecheck",
+  });
+  for (const [label, p] of [["create", create], ["continue", cont]]) {
+    assert.doesNotMatch(p, /Workflow tool/, `AC3: ${label} prompt never says to call the Workflow tool`);
+    assert.doesNotMatch(p, /fan-in-execute\.js/, `AC3: ${label} prompt has no workflow script path`);
+    assert.match(p, /do NOT call the fan-in workflow/, `AC3: ${label} prompt explicitly forbids calling the workflow`);
+  }
 });
 
 test("AC1 (能取假) — buildContinueWorkerPrompt wires dispatch-worktree-setup.sh on the reused worktree (idempotent re-provision)", () => {
