@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readSession, parseClaudeAgentsJson } from "../src/observation.ts";
+import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson } from "../src/observation.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
 import { taskRunsBlock } from "../src/serve-task.ts";
 
@@ -1038,5 +1038,98 @@ test("taskRunsBlock links the transcript only for a VALID session_id (AC3 reuse 
     assert.ok(!html.includes('href="/session/not-a-uuid"'), "AC3: a non-UUID session_id is NOT linked (isValidSessionId gate)");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-web-session-drops-queue-operation-records ───────────────────────────────────────────────
+// The /session/<id> rendering pipeline silently dropped the two native record types that carry no
+// `.message` field: `queue-operation` (a message queued because the receiver was busy, then absorbed
+// mid-turn — never materializing as its own `type:"user"` record) and `attachment` `queued_command`.
+// The fix renders them as a distinguishable `external` marker (AC1), leaves idle-arrival `type:"user"`
+// messages alone (AC2 negative control), and never fabricates a `.message.content` record (AC3).
+
+const absorbedLine = JSON.stringify({ type: "queue-operation", operation: "remove", timestamp: "2026-08-26T18:36:37.230Z", sessionId: "x", content: "<cross-session-message from=\"uds:/x\" from-name=\"quay-inner\" from-mode=\"bypass\">hello absorbed</cross-session-message>", reason: "absorbed_mid_turn" });
+const enqueueLine = JSON.stringify({ type: "queue-operation", operation: "enqueue", timestamp: "2026-08-26T18:36:37.230Z", sessionId: "x", content: "hello queued" });
+const dequeueLine = JSON.stringify({ type: "queue-operation", operation: "dequeue", timestamp: "2026-08-26T18:36:37.230Z", sessionId: "x" });
+const attachmentLine = JSON.stringify({ type: "attachment", timestamp: "2026-08-26T18:36:37.230Z", sessionId: "x", attachment: { type: "queued_command", prompt: "<cross-session-message from=\"uds:/x\" from-name=\"quay-a8\" from-mode=\"bypass\">hello attachment</cross-session-message>" }, origin: {} });
+const skillListingLine = JSON.stringify({ type: "attachment", timestamp: "2026-08-26T18:36:37.230Z", sessionId: "x", attachment: { type: "skill_listing", content: "- some-skill" } });
+const userLine = JSON.stringify({ type: "user", timestamp: "2026-08-26T18:36:37.230Z", sessionId: "x", message: { role: "user", content: "hello direct" } });
+
+function sessionViewFor(turns) {
+  return { status: "ok", reason: null, sessionId: "11111111-1111-4111-8111-111111111111", transcriptPath: "/x.jsonl", turns, truncated: false };
+}
+
+test("AC1: an absorbed_mid_turn queue-operation is visible on /session/<id> as an external marker", () => {
+  const turns = parseTranscript(absorbedLine);
+  assert.equal(turns.length, 1, "the absorbed event produces exactly one turn");
+  assert.equal(turns[0].role, "external");
+  assert.equal(turns[0].blocks.length, 1);
+  assert.equal(turns[0].blocks[0].kind, "external");
+  assert.equal(turns[0].blocks[0].label, "外部消息被吸收进当前回合（未开新回合）");
+  assert.ok(turns[0].blocks[0].text.includes("hello absorbed"), "the absorbed content is carried through");
+
+  const html = renderSessionPage(sessionViewFor(turns));
+  assert.ok(html.includes("外部消息被吸收进当前回合（未开新回合）"), "AC1: the distinguishable marker is rendered");
+  assert.ok(html.includes("hello absorbed"), "AC1: the absorbed message body is visible on the page");
+});
+
+test("AC1: an enqueue queue-operation and a queued_command attachment render as external markers", () => {
+  const turns = parseTranscript([enqueueLine, attachmentLine].join("\n"));
+  assert.equal(turns.length, 2);
+  assert.equal(turns[0].blocks[0].kind, "external");
+  assert.ok(turns[0].blocks[0].label.includes("入队"), "enqueue carries the queued label");
+  assert.ok(turns[0].blocks[0].text.includes("hello queued"));
+  assert.equal(turns[1].blocks[0].kind, "external");
+  assert.equal(turns[1].blocks[0].label, "外部消息附件（queued_command，未开新回合）");
+  assert.ok(turns[1].blocks[0].text.includes("hello attachment"));
+
+  const html = renderSessionPage(sessionViewFor(turns));
+  assert.ok(html.includes("hello queued"), "enqueue content visible");
+  assert.ok(html.includes("hello attachment"), "attachment content visible");
+});
+
+test("AC2 negative control: an idle-arrival type:\"user\" message still renders as a normal bubble", () => {
+  const turns = parseTranscript(userLine);
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].role, "user");
+  assert.equal(turns[0].blocks[0].kind, "text");
+  assert.equal(turns[0].blocks[0].text, "hello direct");
+
+  const html = renderSessionPage(sessionViewFor(turns));
+  assert.ok(html.includes("hello direct"), "AC2: the direct message still renders");
+  assert.ok(!html.includes("tx-external"), "AC2: no external marker for a normal user message");
+});
+
+test("AC3: queue-operation/attachment never fabricate a user turn (no .message forgery)", () => {
+  const turns = parseTranscript([absorbedLine, attachmentLine, userLine].join("\n"));
+  assert.equal(turns.length, 3);
+  assert.equal(turns[0].role, "external");
+  assert.equal(turns[0].blocks[0].kind, "external");
+  assert.equal(turns[1].role, "external");
+  assert.equal(turns[1].blocks[0].kind, "external");
+  assert.equal(turns[2].role, "user");
+  assert.equal(turns[2].blocks[0].kind, "text");
+  const userTurns = turns.filter((t) => t.role === "user");
+  assert.equal(userTurns.length, 1, "AC3: exactly one user turn (the real type:\"user\"), none forged from queue/attachment records");
+});
+
+test("dequeue (no content) and non-queued_command attachments are not rendered", () => {
+  assert.equal(parseTranscript(dequeueLine).length, 0, "dequeue carries no content — nothing to render");
+  assert.equal(parseTranscript(skillListingLine).length, 0, "skill_listing is an internal notice, not a cross-session message");
+});
+
+test("readTranscriptTail surfaces queue-operation as an external preview entry", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tx-ext-"));
+  const p = path.join(dir, "s.jsonl");
+  try {
+    fs.writeFileSync(p, `${absorbedLine}\n`);
+    const r = readTranscriptTail(p);
+    assert.equal(r.status, "ok");
+    assert.equal(r.messages.length, 1);
+    assert.equal(r.messages[0].role, "external");
+    assert.ok(r.messages[0].text.includes("外部消息被吸收进当前回合"), "list preview carries the label");
+    assert.ok(r.messages[0].text.includes("hello absorbed"), "list preview carries the content");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

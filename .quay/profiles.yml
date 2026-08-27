@@ -24,7 +24,7 @@ profiles:
   # 三个 worker role（task-worker / selector / fix-worker）+ outer / inner 共享的 recipe。
   worker-default:
     launcher: claude-fjdac
-    model: deepseek-v4-pro
+    model: deepseek-v4-pro-anthropic
     bare: false
     auth: token            # claude-fjdac 只提供 ANTHROPIC_AUTH_TOKEN（并置空 ANTHROPIC_API_KEY）
     # fallbackModel 缺省留空：当前无已知不可用的主 model。主备回退是 policy 能力（AC1），
