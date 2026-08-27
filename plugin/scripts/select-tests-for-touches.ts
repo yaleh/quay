@@ -55,7 +55,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
 import { parseTouchEntries } from "./touches-parser.ts";
 
@@ -197,25 +197,6 @@ export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.u
 }
 
 // ── Path helpers ──────────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Normalize a repo-relative path or glob: forward slashes, strip a leading `./`, collapse `//`,
- * resolve `.`/`..` segments, drop a trailing `/`. Wildcards are preserved untouched. This is the
- * single normalization the resolver uses so path-shape tricks (`./`, `//`, trailing `/`) cannot
- * spoof identity.
- * @param {string} p
- * @returns {string}
- */
-export function normalizeRel(p) {
-  const parts = String(p).replace(/\\/g, "/").split("/");
-  const out = [];
-  for (const seg of parts) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") { out.pop(); continue; }
-    out.push(seg);
-  }
-  return out.join("/");
-}
 
 /**
  * True iff the repo-relative path names a `.test.mjs` file (the runnable-by-`scripts/test.sh` kind).

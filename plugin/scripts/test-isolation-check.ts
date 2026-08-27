@@ -92,10 +92,10 @@ import { fileURLToPath } from "node:url";
 // gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib — 本条曾经是第三次手搓
 // buildNonCodeMask (写 A16 时又犯一次), 现在与 drive-contract/test-framework-policy 共用同一库。
 import { buildNonCodeMask } from "./checker-lib.ts";
+import { readFileSafe } from "./gate-script-base.ts";
 import {
   hasNodeTestImport,
   canonicalTestFiles,
-  readFileSafe,
 } from "./test-framework-policy-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
