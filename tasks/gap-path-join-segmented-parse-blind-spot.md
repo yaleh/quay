@@ -51,13 +51,34 @@ const reporterPath = path.join(repoRoot, "plugin", "scripts", "measure-suite-rep
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，分段拼接可解析）：解析器识别 path.join/path.resolve 的连续字符串字面量参数序列并拼接后分类，24 个 UNRESOLVED 中该形态命中的可正确归属；（⛔ 仍 UNRESOLVED ⇒ 假）。
-- [ ] AC2（能取假，保底降为异常）：修后落到 UNRESOLVED 保底的文件数从 24 显著下降（趋近零）——以条①的落盘产物直接查保底计数；（⛔ 仍 ~24 ⇒ 假）。
-- [ ] AC3（能取假，保底保留）：保底机制（fail-closed）保留、未破坏；（⛔ 保底被删 ⇒ 假）。
+- [x] AC1（能取假，分段拼接可解析）：解析器识别 path.join/path.resolve 的连续字符串字面量参数序列并拼接后分类，24 个 UNRESOLVED 中该形态命中的可正确归属；（⛔ 仍 UNRESOLVED ⇒ 假）。→ 新增 `extractJoinedPathSegments`（`suite-bucket-attribution.ts` signal ④：识别 `path.join`/`path.resolve` + 裸 `join`/`resolve` 的相邻字符串字面量参数序列、以 `/` 拼接、`classifyPath` 分类）；4 个该形态命中：integration-batch-merge/measure-suite/sync-lag-check → M、plugin-vendor-standalone → P（实测 `--write-effective` 落盘）。
+- [ ] AC2（能取假，保底降为异常）：修后落到 UNRESOLVED 保底的文件数从 24 显著下降（趋近零）——以条①的落盘产物直接查保底计数；（⛔ 仍 ~24 ⇒ 假）。→ **24 → 20（4 个分段拼接命中）⛔ 未达趋近零**：剩余 20 非「连续字符串字面量」形态，分三类另盲区——①变量前缀 2（manager-arm-loop/user-scope-reinstall：`pluginDir = path.resolve(__dirname,"..")` 后 `path.join(pluginDir,"scripts",…)`）；②相对锚 1（outer-tick-log-check：`join(import.meta.dirname,"..","scripts",…)`）；③helper 模块 17（session-liveness×10 + quay-init-loop-vendor×7：subject 在 `*-helpers.mjs`，不在测试文件自身文本）。**本信号（字面量拼接）不覆盖①②③——见 Evidence。**
+- [x] AC3（能取假，保底保留）：保底机制（fail-closed）保留、未破坏；（⛔ 保底被删 ⇒ 假）。→ `bucketSetOf` 返回空集仍映射 UNRESOLVED、绝不静默默认；负控制 `delivery-status-single-source`（相对 `../../packages/…` 分段 run 不被 `classifyPath` 子串误判为 P）+ `a15-ruling5-counter`/`acceptance-env` 保持原桶，测试钉住。
 
 ## Definition of Done
 
-分段拼接解析落地；AC1-AC3 全勾；保底从常规入口降为异常出口；24 个 UNRESOLVED 中可静态归属的都被正确归属。
+分段拼接解析（连续字符串字面量参数序列）落地；AC1/AC3 全勾、AC2 未达（24 → 20，非趋近零——剩余 20 是三种另类盲区，非本信号范围）；「24 个中**可经字面量拼接静态归属的**」4 个全部正确归属。
+
+## Evidence（inner 2026-08-27 实跑）
+
+**实现**：`plugin/scripts/suite-bucket-attribution.ts` 加 signal ④ —— `extractJoinedPathSegments` 识别 `path.join(…)`/`path.resolve(…)`（含裸 `join`/`resolve`，lookbehind 排除 `arr.join(` 成员访问）的相邻字符串字面量参数序列（`parseArgList` 跳嵌套 `()[]{}` 与字符串；`staticLiteralValue` 拒绝 `${…}` 模板插值），`≥2` 相邻字面量以 `/` 拼接；`bucketSetOf` 只对**仓库相对**（非 `.` 开头）的拼接串 `classifyPath`。
+
+**验证（落盘产物直查）**：
+```
+node --experimental-strip-types plugin/scripts/suite-bucket-select.ts --write-effective
+  baseline  unresolved = 24
+  after     unresolved = 20
+```
+4 个命中（UNRESOLVED → 桶）：
+- integration-batch-merge → M、measure-suite → M、sync-lag-check → M（`join/path.join(repoRoot, "plugin", "scripts", …)`）
+- plugin-vendor-standalone → P（`path.join(repoRoot, 'packages', 'quay-native', 'bin', …)`）
+
+**剩余 20（三类另盲区，超本信号范围，建议各自立案）**：
+- ①变量前缀 2：manager-arm-loop、user-scope-reinstall —— `pluginDir = path.resolve(__dirname, "..")` 后 `path.join(pluginDir, "scripts", …)`；字面量拼接只得 `scripts/…`，`plugin` 前缀在变量里。
+- ②相对锚 1：outer-tick-log-check —— `join(import.meta.dirname, "..", "scripts", …)`；需 `..` 相对解析（本信号跳过 `.` 开头串，防 `classifyPath` 子串误判）。
+- ③helper 模块 17：session-liveness×10（hangguard/restart/scd-busy/scd-config-gates/scd-develop-active/scd-fire/scd-inflight-changing/scd-multitask/scd-progress/scd-unsaturated）+ quay-init-loop-vendor×7 —— subject 在 `session-liveness-helpers.mjs`/`quay-init-loop-helpers.mjs`，测试文件自身文本无该路径，需扫 helper 模块。
+
+**测试**：`suite-bucket-attribution.test.mjs` 10/10 pass（新增 AC2(d) 分段拼接桶断言 + `extractJoinedPathSegments` 单测 + 相对分段负控制 `delivery-status-single-source` 不子串误判 P）；`suite-bucket-select.test.mjs` 12/12 pass（回归无破坏）。
 
 ## Touches
 
