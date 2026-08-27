@@ -483,7 +483,7 @@ printf 'cpu_s=%s\\ncpu_source=%s\\ncpu_user_s=%s\\ncpu_sys_s=%s\\nend_iso=%s\\ne
 # the suite-red verdict (the Fix agent still gets dispatched by the主循环).
 if [ "$full_suite_ran" = "true" ] && [ "$suite_exit" != "0" ]; then
   if ! node --experimental-strip-types ${worktree}/plugin/scripts/pre-verified-round-record.ts \
-    --task-id ${task} --run-id ${runId} --started-at "${start_iso}" --duration-ms "$wall_ms" \
+    --task-id ${task} --run-id ${runId} --started-at "$start_iso" --duration-ms "$wall_ms" \
     --lane-count "$lane_count" --load "$load" --commit "$suite_head" --preverified 0 --state red \
     --root ${worktree} \
     --suite-log "$suite_log_file" --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" \
