@@ -1,7 +1,7 @@
 ---
 id: gap-suite-serial-install-copy-one-subprocess-batching
 title: suite serial-install 族墙钟地板——quay-init.sh copy_one 逐文件 cmp/sha256sum 子进程爆炸，批量化是唯一杠杆（16-lane 并行主池，total_work 地板，拆分无效）
-status: ready
+status: done
 labels:
   - gap
   - defect
