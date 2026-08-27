@@ -1619,7 +1619,7 @@ test("AC140-1 — single constructor: launchArgv resolves kind → profile via p
   const tw = launchArgv("task-worker", "WPROMPT", REPO_ROOT);
   assert.equal(tw[0], "claude-fjdac", "launcher resolved from profile (⛔ bash quay-launch.sh)");
   assert.equal(tw[1], "--settings");
-  assert.equal(tw[tw.indexOf("--model") + 1], "deepseek-v4-pro");
+  assert.equal(tw[tw.indexOf("--model") + 1], "deepseek-v4-pro-anthropic");
   assert.equal(tw[tw.indexOf("-n") + 1], "quay-task-worker");
   assert.equal(tw[tw.length - 1], "WPROMPT", "prompt is the last argv payload");
   assert.ok(!tw.includes("quay-launch.sh"), "no bash quay-launch.sh in the spawn argv (⛔ bash 第二份实现)");
