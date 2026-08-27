@@ -46,7 +46,7 @@ extra:
 **A/B/C 三类分类**（47 处粗分，实现方逐条复核后落类）：
 
 - **A类（仅「合并目标是 develop」语义，不受影响）**：`fan-in-ff-protocol-check.ts`（读锁事件/retry record，判非 ff 用 `--develop <ref>` 显式参数、不假设主检出分支）、`worker-driver.ts:823`（fan-in-execute args 的 `mergeTarget:"develop"` 字面量）、`fork-baseline.ts`（fork 基线默认 develop，ref-aware）、`fan-in-execute.js`（`mergeTarget ?? "develop"`）、`select-static-checks-for-touches.ts` / `runner-static-gate.ts` 等——这些只把 develop 当【分支名】，主检出改停工作分支不影响它们。
-- **B类（假设「主检出当前分支 == 合并目标」，已改）**：`fan-in-ff-merge.sh` 的 ff 动作（原 `git merge --ff-only task/<id>` 在主检出上执行 ⇒ 要求主检出==develop 且干净）→ 改纯 ref 更新 `git push . refs/heads/task/<id>:refs/heads/develop`；分支核对（原「current==merge_target 否则 exit 2」）→ 反转「current==merge_target 即 exit 2（develop 未脱离）」。随 ref 更新删除 clean-tree 检查整段（auto-converge + benign-runtime-dirty，ref 更新不碰工作树）。
+- **B类（假设「主检出当前分支 == 合并目标」，已改 dual-mode）**：`fan-in-ff-merge.sh` 的 ff 动作按主检出所在分支 **auto-select**——develop **仍检出** ⇒ 旧 `git merge --ff-only`（clean-tree 检查保留，含 auto-converge + benign-runtime-dirty）；develop **已脱离**（主检出停 doc-only 工作分支）⇒ 纯 ref 更新 `git push . refs/heads/task/<id>:refs/heads/develop`（不碰工作树、脏树结构上无关）。**dual-mode 是过渡**：让机制落地而不破生产（develop 仍检出时走旧 merge 路径），「脱离主检出」激活 + 消费者读法修复排 follow-up。
 - **C类（cron/现读 `branch --show-current`，行为随主检出改分支而变，逐项确认）**：
   - `periodic-push-backup.sh:101/132/174`：备份推「当前分支」。✅ 确认：本脚本是 **B 机**周期备份（头注释「B-machine」），跑在 B 机自己的检出上——B 机 checkout 不受本任务「主检出脱离 develop」影响，仍停在 develop ⇒ **备份语义不受影响**。若未来 B 机检出也改停工作分支，需给 `--cron-line` 显式 `--branch develop`。
   - `integration-batch-merge.sh:352/613/621/642`：**已 RETIRED（AC48 2026-08-13，头注释「no production path should invoke it」）** ⇒ 归档、不活、不需改。
@@ -55,7 +55,7 @@ extra:
 
 - 四个消费者**全部读主检出盘上 `tasks/*.md`（非 git）**：`ready-pool-check.ts`（`--root` 读 tasks 目录）、`slot-refill.ts`（`buildTaskMetaById` readdir+readFile）、`promotion-driver.ts`（经 ready-pool-check `--apply` 读+写）、web server（serve.ts 经 native provider 读 tasks_dir）。
 - ⚠️ 确认的受影响面：主检出改停工作分支后，任务经 ref 更新落地（develop ref 前进）**不碰主检出工作树** ⇒ 主检出盘上 `tasks/*.md` 相对 develop **滞后**（已落地任务的 status flip 不在盘上）⇒ 这些消费者读到陈旧视图（已落地任务仍显 ready ⇒ 有重派发风险）。
-- ⛔ 结论：**「主检出脱离 develop」的激活动作不随本任务落地**——它要求先把这四个消费者从「读盘上 tasks」改为「读 develop ref（`git show develop:tasks/...`）或等价刷新机制」，否则重派发风险立现。本任务落地【机制】（ff 改 ref 更新 + doc-only 强制），激活排到消费者修复的 follow-up。
+- ⛔ 结论：**「主检出脱离 develop」的激活动作不随本任务落地**——它要求先把这四个消费者从「读盘上 tasks」改为「读 develop ref（`git show develop:tasks/...`）或等价刷新机制」，否则重派发风险立现。本任务落地【机制】以 **dual-mode**（develop 仍检出 ⇒ 旧 merge 路径，不破生产；已脱离 ⇒ ref 更新路径），激活排到消费者修复的 follow-up。
 
 ## Acceptance Criteria
 
@@ -66,11 +66,11 @@ extra:
 
 ## Definition of Done
 
-ff 改 ref 更新 + doc-only 机械强制落地；AC1-AC4 全勾；C 类备份语义与二阶效应①消费者逐项确认；live-ghost 场景回放脏树不再阻塞。**「develop 脱离主检出」的激活动作是协调型 follow-up**（机制已落地；激活要求先修四个消费者读盘上 tasks 的滞后，见实现记录二阶效应①），不随本任务落地。
+ff 以 dual-mode 落地（develop 仍检出 ⇒ `git merge --ff-only`；已脱离 ⇒ `git push .` ref 更新，auto-select）+ doc-only 机械强制落地；AC1-AC4 全勾；C 类备份语义与二阶效应①消费者逐项确认；live-ghost 场景回放脏树不再阻塞（ref 更新路径）。**「develop 脱离主检出」的激活动作是协调型 follow-up**（机制已落地为 dual-mode；激活要求先修四个消费者读盘上 tasks 的滞后，见实现记录二阶效应①），不随本任务落地。
 
 ## Touches
 
-- plugin/scripts/fan-in-ff-merge.sh（ff 改纯 ref 更新 `git push .`；B 类分支核对反转 = merge target 必须脱离主检出；删 clean-tree 检查整段）
+- plugin/scripts/fan-in-ff-merge.sh（ff 改 dual-mode：merge target 已脱离 ⇒ `git push .` ref 更新；仍检出 ⇒ `git merge --ff-only` + clean-tree 检查保留）
 - plugin/scripts/develop-work-ff.sh（新：doc-only 工作分支 → develop 的 ref 更新 + `--classify-delta` 机械强制）
 - plugin/scripts/capability-catalog.sh（注册 develop-work-ff.sh 六表 + fan-in-ff-merge.sh 描述随 ff 改 ref 更新同步）
 - plugin/test/fan-in-ff-merge.test.mjs（改写：ff 改 ref 更新、脏树不阻塞、merge target 脱离）
