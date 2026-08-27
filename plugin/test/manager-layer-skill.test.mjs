@@ -79,7 +79,7 @@ test('AC3 — the cold-start skill has ZERO inner-state.sh / send-keys-verified 
 });
 
 // ── AC4 — the launch config 三件套 is in the deliverable ────────────────────────────────────────────
-test('AC4 — the launch config 三件套 (deepseek-v4-pro + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000) is checked in', () => {
+test('AC4 — the launch config 三件套 (deepseek-v4-pro-anthropic + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000) is checked in', () => {
   const settingsPath = path.join(repoRoot, '.claude', 'launch.settings.json');
   assert.ok(fs.existsSync(settingsPath), '.claude/launch.settings.json must exist (checked-in deliverable)');
   const s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -92,7 +92,7 @@ test('AC4 — the launch config 三件套 (deepseek-v4-pro + CLAUDE_CODE_MAX_CON
   const p = JSON.parse(py.stdout);
   const outerProf = p.profiles[p.roles.outer.profile];
   assert.equal(outerProf.launcher, 'claude-fjdac', 'outer role must use claude-fjdac launcher (三件套 #2)');
-  assert.equal(outerProf.model, 'deepseek-v4-pro', 'outer role must pin deepseek-v4-pro (三件套 #3)');
+  assert.equal(outerProf.model, 'deepseek-v4-pro-anthropic', 'outer role must pin deepseek-v4-pro-anthropic (三件套 #3)');
   // The manager skill references the launch config for the manager's own start (tribal → installable),
   // WITHOUT exposing the bare launcher script — a skill is the user-facing interface, the launcher is
   // skill-internal (gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal AC2/AC4).

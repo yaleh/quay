@@ -2608,9 +2608,10 @@ export const SESSIONS_TRANSCRIPT_MAX_MSGS = 3;
 export const SESSIONS_TRANSCRIPT_TAIL_BYTES = 200_000;
 
 /**
- * Best-effort read of the last few user/assistant text messages from a Claude Code transcript
- * JSONL. Bounded to the file tail so a multi-GB transcript never loads fully. Returns null when
- * the path is missing/unreadable (the page then shows 未接入 for that layer).
+ * Best-effort read of the last few user/assistant/external text messages from a Claude Code
+ * transcript JSONL (queue-operation / attachment records render as an `external` entry). Bounded to
+ * the file tail so a multi-GB transcript never loads fully. Returns null when the path is
+ * missing/unreadable (the page then shows 未接入 for that layer).
  */
 export function readTranscriptTail(transcriptPath: string, maxMsgs = SESSIONS_TRANSCRIPT_MAX_MSGS): { status: ObservationStatus; reason: string | null; messages: SessionMessage[] | null } {
   try {
@@ -2629,6 +2630,14 @@ export function readTranscriptTail(transcriptPath: string, maxMsgs = SESSIONS_TR
       try { o = JSON.parse(line); } catch { continue; }
       if (!o || typeof o !== "object" || Array.isArray(o)) continue;
       const rec = o as { type?: unknown; timestamp?: unknown; message?: unknown };
+      const time = typeof rec.timestamp === "string" ? rec.timestamp : "";
+      // queue-operation / attachment carry no `.message` field — surface them as an `external`
+      // preview entry (same rendering path as parseTranscript, not a fabricated user message).
+      const ext = externalEvent(rec);
+      if (ext !== null) {
+        messages.push({ time, role: "external", text: `${ext.label}\n${ext.text}`.slice(0, 500) });
+        continue;
+      }
       const msg = rec.message as { role?: unknown; content?: unknown } | undefined;
       if (!msg || !msg.content) continue;
       const role = typeof msg.role === "string" ? msg.role : "";
@@ -2844,7 +2853,8 @@ export type TranscriptBlock =
   | { kind: "text"; text: string }
   | { kind: "thinking"; text: string }
   | { kind: "tool_use"; id: string; name: string; input: string }
-  | { kind: "tool_result"; toolUseId: string; text: string; isError: boolean };
+  | { kind: "tool_result"; toolUseId: string; text: string; isError: boolean }
+  | { kind: "external"; label: string; text: string };
 
 export interface TranscriptTurn {
   time: string;
@@ -2923,7 +2933,52 @@ export function transcriptContentBlocks(content: unknown): TranscriptBlock[] {
   return blocks;
 }
 
-/** Parse complete JSONL transcript text into ordered turns (each = one user/assistant message). Pure. */
+/** Human-readable marker for a queue-operation record's operation+reason. The `absorbed_mid_turn`
+ *  case (a message queued while the receiver was busy, then absorbed into the ongoing turn — never
+ *  materializing as its own `type:"user"` record) is the one this rendering path exists to surface. */
+function queueOperationLabel(operation: string, reason: string): string {
+  if (reason === "absorbed_mid_turn") return "外部消息被吸收进当前回合（未开新回合）";
+  if (operation === "enqueue") return "外部消息入队（接收方忙，未开新回合）";
+  return "外部消息队列事件（未开新回合）";
+}
+
+const ATTACHMENT_LABEL = "外部消息附件（queued_command，未开新回合）";
+
+/** The two native record types that carry NO `.message` field but still represent a user-visible
+ *  event: `queue-operation` (a message queued because the receiver was busy, later absorbed/removed
+ *  without ever becoming a `type:"user"` record) and `attachment` `queued_command` (the same event,
+ *  carried as a command attachment). Returns a renderable `{label, text}` marker, or null for any
+ *  other record / when no text is present. ⛔ Never fabricates a `.message.content` record (AC3) —
+ *  callers emit a dedicated `external` block, not a user/assistant turn. */
+function externalEvent(rec: {
+  type?: unknown;
+  operation?: unknown;
+  content?: unknown;
+  reason?: unknown;
+  attachment?: unknown;
+  origin?: unknown;
+}): { label: string; text: string } | null {
+  if (rec.type === "queue-operation") {
+    const content = typeof rec.content === "string" ? rec.content.trim() : "";
+    if (!content) return null; // dequeue carries no content — pure bookkeeping, nothing to render
+    const operation = typeof rec.operation === "string" ? rec.operation : "";
+    const reason = typeof rec.reason === "string" ? rec.reason : "";
+    return { label: queueOperationLabel(operation, reason), text: content };
+  }
+  if (rec.type === "attachment") {
+    const att = rec.attachment as { type?: unknown; prompt?: unknown } | undefined;
+    if (!att || att.type !== "queued_command") return null; // other attachment types are internal notices
+    const prompt = typeof att.prompt === "string" ? att.prompt.trim() : "";
+    const origin = rec.origin as { body?: unknown } | undefined;
+    const body = origin && typeof origin.body === "string" ? origin.body.trim() : "";
+    const text = prompt || body;
+    if (!text) return null;
+    return { label: ATTACHMENT_LABEL, text };
+  }
+  return null;
+}
+
+/** Parse complete JSONL transcript text into ordered turns (each = one user/assistant/external event). Pure. */
 export function parseTranscript(text: string): TranscriptTurn[] {
   const turns: TranscriptTurn[] = [];
   for (const line of text.split(/\r?\n/)) {
@@ -2932,12 +2987,20 @@ export function parseTranscript(text: string): TranscriptTurn[] {
     try { o = JSON.parse(line); } catch { continue; }
     if (!o || typeof o !== "object" || Array.isArray(o)) continue;
     const rec = o as { type?: unknown; timestamp?: unknown; message?: unknown };
+    const time = typeof rec.timestamp === "string" ? rec.timestamp : "";
+    // queue-operation / attachment carry no `.message` field — render them from their own
+    // content/prompt so a "queued-then-absorbed" cross-session message is not silently dropped.
+    const ext = externalEvent(rec);
+    if (ext !== null) {
+      turns.push({ time, role: "external", blocks: [{ kind: "external", label: ext.label, text: ext.text }] });
+      continue;
+    }
     const msg = rec.message as { role?: unknown; content?: unknown } | undefined;
     if (!msg || !msg.content) continue;
     const blocks = transcriptContentBlocks(msg.content);
     if (blocks.length === 0) continue;
     turns.push({
-      time: typeof rec.timestamp === "string" ? rec.timestamp : "",
+      time,
       role: typeof msg.role === "string" ? msg.role : "",
       blocks,
     });

@@ -2,7 +2,7 @@
 # 裸机 / 未迁移目标没有 dev-tree 根 .quay/profiles.yml 时，quay-launch.sh 回退到本文件（同 settings 的
 # plugin/.claude/launch.settings.json 回退手法，见 gap-manager-layer-no-verified-install-vector）。
 # 通用默认：launcher=claude、model=null——消费者按自己的栈编辑（dev-tree 用 claude-fjdac +
-# deepseek-v4-pro，见根 .quay/profiles.yml；两份 profiles 结构一致，只差 launcher/model 取值）。
+# deepseek-v4-pro-anthropic，见根 .quay/profiles.yml；两份 profiles 结构一致，只差 launcher/model 取值）。
 version: 1
 
 # flag-only 启动参数（对全部 role 生效；与 dev-tree 根 profiles.yml 一致）。
