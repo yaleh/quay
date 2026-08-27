@@ -1,17 +1,21 @@
 // @test-group engine
-// fan-in-ff-merge.test.mjs — AC62 持锁段: the merge lock that wraps ONLY `git merge --ff-only
-// task/<id>` (plugin/scripts/fan-in-ff-merge.sh, tasks/gap-ac62-fan-in-ff-merge-lock-protocol).
+// fan-in-ff-merge.test.mjs — AC62 持锁段: the merge lock that wraps ONLY the ff. DUAL-MODE
+// (gap-fan-in-ff-ref-update-detach-develop):
+//   merge mode (develop still checked out) → `git merge --ff-only` (clean tree required).
+//   push mode  (develop detached)          → `git push .` (a pure ref update, no clean tree needed).
+// (plugin/scripts/fan-in-ff-merge.sh, tasks/gap-ac62-fan-in-ff-merge-lock-protocol).
 //
 // The fan-in protocol (SPEC-fan-in-ff-merge-lock-2026-08-14) splits the landing into a 无锁段
 // (merge develop + full suite + doc check, in the task worktree — NOT this script) and a 持锁段
-// (THIS script: acquire merge lock → git merge --ff-only → release, success or failure). This test
-// covers the 持锁段 mechanics:
+// (THIS script: acquire merge lock → ff → release, success or failure). This test covers the 持锁段
+// mechanics in BOTH modes:
 //   * ff success — develop fast-forwards to the task tip, lock-hold events written, NO retry record
 //   * ff failure (develop advanced — the ONLY ff failure reason) — exit 1, retry record written
 //     (task id / attempt 第几次 / develop head / timestamp), lock events still paired, ref unchanged
 //   * attempt increments across repeated failures (the anti-livelock data, §7)
-//   * fail-closed guards (suite running / missing task branch / dirty tree / wrong branch) exit 2
+//   * fail-closed guards (suite running / missing task branch / merge-mode dirty tree) exit 2
 //     and write NO retry record (they are environment errors, not ff failures)
+//   * push mode — a dirty tree does NOT block (the ref update never touches the working tree, AC1)
 //   * the lock is a SEPARATE file from the suite lock and held only around the ff (AC4)
 //
 // Run:
@@ -47,12 +51,12 @@ function cleanup(dir) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best-effort */ }
 }
 
-/** Init a temp git repo on branch `master`; `.quay/` is gitignored (the runtime-state family). */
+/** Init a temp git repo on branch `develop`; `.quay/` is gitignored (the runtime-state family). */
 function initRepo(dir) {
   gitCmd(dir, "init", "-q");
   gitCmd(dir, "config", "user.name", "faninff-test");
   gitCmd(dir, "config", "user.email", "fif@example.com");
-  gitCmd(dir, "branch", "-M", "master");
+  gitCmd(dir, "branch", "-M", "develop");
   fs.writeFileSync(path.join(dir, ".gitignore"), ".quay/\n", "utf8");
   gitCmd(dir, "add", "-A");
   gitCmd(dir, "commit", "-q", "-m", "chore: gitignore");
@@ -61,15 +65,22 @@ function initRepo(dir) {
   gitCmd(dir, "commit", "-q", "-m", "base");
 }
 
-/** Create `task/<id>` with one commit on top of master, then return to master. Returns the task tip. */
+/** Create `task/<id>` with one commit on top of develop, then return to develop. Returns the task tip. */
 function makeTaskBranch(dir, taskId) {
   gitCmd(dir, "checkout", "-q", "-b", `task/${taskId}`);
   fs.writeFileSync(path.join(dir, "work.txt"), "work\n", "utf8");
   gitCmd(dir, "add", "-A");
   gitCmd(dir, "commit", "-q", "-m", "task work");
   const tip = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
-  gitCmd(dir, "checkout", "-q", "master");
+  gitCmd(dir, "checkout", "-q", "develop");
   return tip;
+}
+
+// gap-fan-in-ff-ref-update-detach-develop DUAL-MODE: the ff degenerates to a PURE REF UPDATE (git push .)
+// only AFTER develop is detached from the main checkout. Leave the checkout on a doc-only work branch to
+// exercise the push mode (the merge mode — develop still checked out — is the default of makeTaskBranch).
+function detachMergeTarget(dir) {
+  gitCmd(dir, "checkout", "-q", "-b", "work/docs");
 }
 
 /** Task-file body (frontmatter + a ## Proposal section) — the promotion-driver status-flip target. */
@@ -136,7 +147,7 @@ function captureArgs(st, taskId, tip, overrides = {}) {
 
 // ── FF success ─────────────────────────────────────────────────────────────────────────────────────────
 
-test("ff success — master fast-forwards to the task tip; lock events paired; NO retry record", () => {
+test("ff success — develop fast-forwards to the task tip; lock events paired; NO retry record", () => {
   const dir = makeTmp("ok");
   const st = stateDir("ok");
   try {
@@ -145,7 +156,7 @@ test("ff success — master fast-forwards to the task tip; lock events paired; N
     const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
     const events = path.join(st, "fan-in-merge-lock-events.jsonl");
     const retries = path.join(st, "fan-in-retries.jsonl");
-    const before = gitCmd(dir, "rev-parse", "master").stdout.trim();
+    const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
     // AC1 (gap-suite-concurrency-ff-gate-and-slot-ssot): the ff gate reads THIS task's suite capture —
     // suite_exit=0 ∧ suite_head == the task tip being ff'd.
     const capArgs = captureArgs(st, "ac62-a", tip);
@@ -153,10 +164,10 @@ test("ff success — master fast-forwards to the task tip; lock events paired; N
     const r = runMerge(["--task", "ac62-a", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries]);
     assert.equal(r.status, 0, `ff should succeed: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /measure ff_only_locked=true/);
-    // master fast-forwarded to the task tip (no merge commit — HEAD is the task tip, single parent).
-    assert.equal(gitCmd(dir, "rev-parse", "master").stdout.trim(), tip, "master must be at the task tip");
-    assert.notEqual(gitCmd(dir, "rev-parse", "master").stdout.trim(), before, "master advanced");
-    assert.equal(gitCmd(dir, "rev-list", "--parents", "-n", "1", "master").stdout.trim().split(" ").length, 2,
+    // develop fast-forwarded to the task tip (no merge commit — HEAD is the task tip, single parent).
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop must be at the task tip");
+    assert.notEqual(gitCmd(dir, "rev-parse", "develop").stdout.trim(), before, "develop advanced");
+    assert.equal(gitCmd(dir, "rev-list", "--parents", "-n", "1", "develop").stdout.trim().split(" ").length, 2,
       "ff creates NO merge commit (single parent)");
     // Lock events: acquire + release. The release event carries `landedSha` — the persistent fan-in
     // landing ledger (gap-direct-to-develop-check-reflog-to-revlist AC1), same file same append.
@@ -204,7 +215,7 @@ test("ff success writes an ff-escalation-resolved record to the escalation file"
     assert.equal(resLine.taskId, "ac62-res");
     assert.equal(resLine.runId, "fm-res-1786", "resolution carries the caller runId");
     assert.equal(resLine.agentId, "sub-uuid", "resolution carries the caller agentId");
-    assert.equal(resLine.mergeTarget, "master", "resolution names the merge target");
+    assert.equal(resLine.mergeTarget, "develop", "resolution names the merge target");
     assert.match(resLine.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, "ts must be ISO …Z");
     assert.equal(typeof resLine.epoch, "number", "epoch is a numeric timestamp");
   } finally {
@@ -225,7 +236,7 @@ test("ff failure (develop advanced) — exit 1, retry record with taskId/attempt
     fs.writeFileSync(path.join(dir, "adv.txt"), "B ff'd first\n", "utf8");
     gitCmd(dir, "add", "-A");
     gitCmd(dir, "commit", "-q", "-m", "develop advanced (B ff'd)");
-    const head = gitCmd(dir, "rev-parse", "master").stdout.trim();
+    const head = gitCmd(dir, "rev-parse", "develop").stdout.trim();
     const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
     const events = path.join(st, "events.jsonl");
     const retries = path.join(st, "retries.jsonl");
@@ -236,7 +247,7 @@ test("ff failure (develop advanced) — exit 1, retry record with taskId/attempt
     const r = runMerge(["--task", "ac62-b", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries]);
     assert.equal(r.status, 1, `ff must fail: ${r.stdout}${r.stderr}`);
     assert.match(r.stderr, /FF FAILED/);
-    assert.equal(gitCmd(dir, "rev-parse", "master").stdout.trim(), head, "ref unchanged on ff failure");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), head, "ref unchanged on ff failure");
     // Retry record: 判据3 — task id / attempt 第几次 / develop head / 时刻.
     const rec = JSON.parse(fs.readFileSync(retries, "utf8").trim());
     assert.equal(rec.taskId, "ac62-b");
@@ -595,7 +606,7 @@ test("AC1 gate — capture suite_head != 待 ff HEAD ⇒ exit 2 (证书必须钉
     const r = runMerge(["--task", "ac62-headmis", "--root", dir, ...capArgs, "--lock-events", events, "--retry-record", retries]);
     assert.equal(r.status, 2, "a suite_head != 待 ff tip must refuse (exit 2)");
     assert.match(r.stderr, /suite_head/, "the refusal reports the suite_head mismatch");
-    assert.equal(gitCmd(dir, "rev-parse", "master").stdout.trim(), gitCmd(dir, "rev-parse", "master").stdout.trim(), "ref unchanged");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), gitCmd(dir, "rev-parse", "develop").stdout.trim(), "ref unchanged");
     assert.ok(!fs.existsSync(events), "no lock events");
     assert.ok(!fs.existsSync(retries), "no retry record");
   } finally {
@@ -688,8 +699,8 @@ test("AC5 — contradiction B FIXED: BOTH global suite-lock slots held (S=2, two
     const r = spawnSync("bash", ["-c", inner], { encoding: "utf8" });
     // Two suites are "running" (BOTH slots held) yet A's ff MUST land — no mutual REFUSE.
     assert.equal(r.status, 0, `ff must proceed despite BOTH held global slots (contradiction B fixed):\nstdout=${r.stdout}\nstderr=${r.stderr}`);
-    assert.match(r.stdout, /OK — master fast-forwarded/, `task A's ff must land:\n${r.stdout}`);
-    assert.equal(gitCmd(dir, "rev-parse", "master").stdout.trim(), tipA, "master fast-forwarded to task A's tip (B untouched)");
+    assert.match(r.stdout, /OK — develop fast-forwarded/, `task A's ff must land:\n${r.stdout}`);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tipA, "develop fast-forwarded to task A's tip (B untouched)");
     // tipA/tipB may coincide (identical parent+tree+message ⇒ identical SHA) — the AC5 point is that
     // task A's ff proceeds while B's suite "runs" (a held slot), NOT that the branches differ.
   } finally {
@@ -706,7 +717,7 @@ test("missing task branch — exit 2, nothing merged", () => {
     const r = runMerge(["--task", "does-not-exist", "--root", dir]);
     assert.equal(r.status, 2);
     assert.match(r.stderr, /task branch task\/does-not-exist not found/);
-    assert.equal(gitCmd(dir, "rev-parse", "master").stdout.trim(), gitCmd(dir, "rev-parse", "master").stdout.trim());
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), gitCmd(dir, "rev-parse", "develop").stdout.trim());
   } finally {
     cleanup(dir);
   }
@@ -755,10 +766,10 @@ test("AC1 — status-only dirty (promotion-driver flip) auto-converges and the f
     assert.equal(r.status, 0, `status-only dirty must auto-converge and complete the ff:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
     assert.doesNotMatch(r.stderr, /not clean/, "the converge must remove the dirty-tree refusal, not report it");
     assert.match(r.stderr, /converged a status-only dirty tree/, "the converge is attributed and observable");
-    // master fast-forwarded to the (post-merge) task tip — the converge advanced master, the inert-retry
+    // develop fast-forwarded to the (post-merge) task tip — the converge advanced develop, the inert-retry
     // re-merged develop into the task branch, and the re-ff completed (full "继续完成 ff").
-    assert.equal(gitCmd(dir, "rev-parse", "master").stdout.trim(), gitCmd(dir, "rev-parse", "refs/heads/task/fanin-x").stdout.trim(), "master fast-forwarded to the task tip");
-    // The converge commit is on master, attributed, and pathspec-limited to the ONE flipped task file
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), gitCmd(dir, "rev-parse", "refs/heads/task/fanin-x").stdout.trim(), "develop fast-forwarded to the task tip");
+    // The converge commit is on develop, attributed, and pathspec-limited to the ONE flipped task file
     // (⛔ never a bare commit sweeping the shared index).
     const convHash = gitCmd(dir, "log", "--format=%H", "--grep=promotion-driver 翻转").stdout.trim().split("\n")[0];
     assert.ok(convHash, "the converge commit landed with the canonical message");
@@ -811,7 +822,7 @@ function initRepoTrackedQuay(dir) {
   gitCmd(dir, "init", "-q");
   gitCmd(dir, "config", "user.name", "faninff-test");
   gitCmd(dir, "config", "user.email", "fif@example.com");
-  gitCmd(dir, "branch", "-M", "master");
+  gitCmd(dir, "branch", "-M", "develop");
   fs.writeFileSync(path.join(dir, ".gitignore"), "node_modules/\n", "utf8"); // ⛔ NOT .quay/
   fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(dir, ".quay", "config.yml"), "provider: native\n", "utf8");
@@ -850,7 +861,7 @@ test("AC1 — an untracked .quay/ runtime file OUTSIDE the task's ## Touches is 
     assert.equal(r.status, 0, `benign runtime dirty must be passed through and complete the ff:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
     assert.doesNotMatch(r.stderr, /not clean/, "the pass-through must remove the dirty-tree refusal, not report it");
     assert.match(r.stderr, /passed through a benign runtime-dirty tree/, "the pass-through is attributed and observable");
-    assert.equal(gitCmd(dir, "rev-parse", "master").stdout.trim(), tip, "master fast-forwarded to the task tip");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop fast-forwarded to the task tip");
     // 仅放行不处置: the runtime file is left untracked, NOT committed / gitignored / deleted.
     assert.match(gitCmd(dir, "status", "--porcelain").stdout, /\?\? \.quay\/message-receipts\.jsonl/, "the runtime file stays untracked");
     assert.ok(!fs.existsSync(retries), "no retry record — the ff completed, not a retry");
@@ -917,7 +928,7 @@ test("AC3 — production replay: `.quay/message-receipts.jsonl` dirty no longer 
 
     const r = runMerge(["--task", "replay-t", "--root", dir, ...capArgs, "--lock-events", events, "--retry-record", retries, "--escalations", esc, "--run-id", "fm-replay-1786000", "--agent-id", "sub-uuid"]);
     assert.equal(r.status, 0, `the replay must land on the first try (millisecond pre-flight), not exit 2:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
-    assert.match(r.stdout, /OK — master fast-forwarded/, "the ff landed");
+    assert.match(r.stdout, /OK — develop fast-forwarded/, "the ff landed");
     assert.ok(!fs.existsSync(retries), "no retry record");
     // The success path always appends an `ff-escalation-resolved` record (the escalation-resolution
     // signal) — but there must be NO `ff-escalation` (anti-livelock) record: it landed on the first try.
@@ -930,17 +941,51 @@ test("AC3 — production replay: `.quay/message-receipts.jsonl` dirty no longer 
   }
 });
 
-test("wrong branch (current checkout not the merge target) — exit 2", () => {
-  const dir = makeTmp("wbr");
+test("push mode (develop detached) — a dirty main checkout does NOT block the ff (pure ref update, AC1)", () => {
+  const dir = makeTmp("pushdirty");
+  const st = stateDir("pushdirty");
   try {
     initRepo(dir);
-    makeTaskBranch(dir, "ac62-f");
-    gitCmd(dir, "checkout", "-q", "-b", "some-other-branch"); // checkout is NOT on master
-    const r = runMerge(["--task", "ac62-f", "--root", dir, "--merge-target", "master"]);
-    assert.equal(r.status, 2);
-    assert.match(r.stderr, /not the merge target/);
+    const tip = makeTaskBranch(dir, "ac62-push");
+    detachMergeTarget(dir); // develop detached → push mode
+    // A genuinely dirty tree — BOTH an untracked non-gitignored file AND a tracked modification. Under
+    // merge mode (develop checked out) this is exit 2 "not clean"; under push mode the ref update never
+    // touches the working tree, so it is structurally irrelevant.
+    fs.writeFileSync(path.join(dir, "uncommitted.txt"), "dirty\n", "utf8"); // untracked, not gitignored
+    fs.appendFileSync(path.join(dir, "base.txt"), "tracked-dirty\n", "utf8"); // tracked ` M`
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const capArgs = captureArgs(st, "ac62-push", tip);
+    const r = runMerge(["--task", "ac62-push", "--root", dir, ...capArgs, "--lock-events", events, "--retry-record", retries]);
+    assert.equal(r.status, 0, `push-mode dirty tree must NOT block the ff:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop fast-forwarded to the task tip despite the dirty tree");
+    assert.ok(!fs.existsSync(retries), "no retry record — the ff landed, not a retry");
+    // The dirty files are left untouched (the ref update moves the ref, not the working tree).
+    assert.match(gitCmd(dir, "status", "--porcelain").stdout, /\?\? uncommitted\.txt/, "untracked file stays untracked");
+    assert.match(gitCmd(dir, "status", "--porcelain").stdout, / M base\.txt/, "tracked modification stays modified");
   } finally {
     cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("push mode (develop detached) — ff success with a clean tree lands via git push .", () => {
+  const dir = makeTmp("pushok");
+  const st = stateDir("pushok");
+  try {
+    initRepo(dir);
+    const tip = makeTaskBranch(dir, "ac62-pushok");
+    detachMergeTarget(dir);
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const capArgs = captureArgs(st, "ac62-pushok", tip);
+    const r = runMerge(["--task", "ac62-pushok", "--root", dir, ...capArgs, "--lock-events", events, "--retry-record", retries]);
+    assert.equal(r.status, 0, `push-mode clean ff must land:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop fast-forwarded to the task tip");
+    assert.ok(!fs.existsSync(retries), "no retry record");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
   }
 });
 
@@ -1022,7 +1067,7 @@ test("lock is a SEPARATE file from the suite lock (AC4 — 对象不相干)", ()
     // The merge lock file exists in the git common dir, distinct from the suite lock.
     assert.ok(fs.existsSync(path.join(dir, commonDir, MERGE_LOCK)), "merge lock file created");
     assert.ok(!fs.existsSync(path.join(dir, commonDir, SUITE_LOCK_0)), "suite lock NOT created/touched by the ff");
-    assert.equal(gitCmd(dir, "rev-parse", "master").stdout.trim(), tip);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip);
   } finally {
     cleanup(dir);
     cleanup(st);

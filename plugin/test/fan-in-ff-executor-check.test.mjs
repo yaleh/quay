@@ -708,11 +708,13 @@ function ffGit(cwd, ...args) {
   return spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
 }
 
+const FF_WORK_BRANCH = "work/docs";
+
 function ffInitRepo(dir) {
   ffGit(dir, "init", "-q");
   ffGit(dir, "config", "user.name", "ffretry-test");
   ffGit(dir, "config", "user.email", "ffretry@example.com");
-  ffGit(dir, "branch", "-M", "master");
+  ffGit(dir, "branch", "-M", "develop");
   fs.writeFileSync(path.join(dir, ".gitignore"), ".quay/\n", "utf8");
   ffGit(dir, "add", "-A");
   ffGit(dir, "commit", "-q", "-m", "base");
@@ -721,14 +723,26 @@ function ffInitRepo(dir) {
   ffGit(dir, "commit", "-q", "-m", "base-file");
 }
 
-/** Create `task/<id>` with a work commit on top of master, then return to master. Returns the tip. */
+/** Leave the checkout on the doc-only work branch (⛔ NOT the merge target develop) — the ref-update
+ *  ff (git push .) requires the merge target to be detached from the main checkout. */
+function ffDetach(dir) {
+  if (ffGit(dir, "rev-parse", "--verify", "-q", `refs/heads/${FF_WORK_BRANCH}`).status === 0) {
+    ffGit(dir, "checkout", "-q", FF_WORK_BRANCH);
+  } else {
+    ffGit(dir, "checkout", "-q", "develop");
+    ffGit(dir, "checkout", "-q", "-b", FF_WORK_BRANCH);
+  }
+}
+
+/** Create `task/<id>` with a work commit on top of develop, then leave the checkout on the work branch.
+ *  Returns the tip. */
 function ffMakeTaskBranch(dir, taskId) {
   ffGit(dir, "checkout", "-q", "-b", `task/${taskId}`);
   fs.writeFileSync(path.join(dir, "work.txt"), "work\n", "utf8");
   ffGit(dir, "add", "-A");
   ffGit(dir, "commit", "-q", "-m", "task work");
   const tip = ffGit(dir, "rev-parse", "HEAD").stdout.trim();
-  ffGit(dir, "checkout", "-q", "master");
+  ffDetach(dir);
   return tip;
 }
 
@@ -762,21 +776,23 @@ test("AC1 inert increment — ff failure with a tasks/*.md develop delta ⇒ in-
     const tip = ffMakeTaskBranch(dir, "inert-a");
     wt = ffAddWorktree(dir, "inert-a");
     // develop advances with an INERT (doc-only) commit AFTER the suite ran on `tip`.
+    ffGit(dir, "checkout", "-q", "develop");
     fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
     fs.writeFileSync(path.join(dir, "tasks", "other-task.md"), "doc\n", "utf8");
     ffGit(dir, "add", "-A");
     ffGit(dir, "commit", "-q", "-m", "tasks: inert develop advance");
+    ffDetach(dir);
     const events = path.join(st, "events.jsonl");
     const retries = path.join(st, "retries.jsonl");
     const r = spawnSync("bash", [FF_MERGE_SCRIPT, "--task", "inert-a", "--root", dir, "--worktree", wt, ...ffCapture(st, "inert-a", tip), "--lock-events", events, "--retry-record", retries], { encoding: "utf8" });
     assert.equal(r.status, 0, `inert increment must be absorbed in-lock (exit 0):\nstdout=${r.stdout}\nstderr=${r.stderr}`);
     assert.match(r.stdout, /measure ff_only_locked=true/);
     assert.ok(!fs.existsSync(retries), "no retry record — the inert increment was merged in-lock, not a phase-1 retry");
-    // master advanced to a commit that now contains the inert tasks/other-task.md (the in-lock merge
+    // develop advanced to a commit that now contains the inert tasks/other-task.md (the in-lock merge
     // brought it in) AND the task work — i.e. the ff actually landed.
-    const masterFiles = ffGit(dir, "ls-tree", "-r", "--name-only", "HEAD").stdout;
-    assert.match(masterFiles, /tasks\/other-task\.md/, "master tree must now contain the inert develop file");
-    assert.match(masterFiles, /work\.txt/, "master tree must contain the task work (ff landed)");
+    const developFiles = ffGit(dir, "ls-tree", "-r", "--name-only", "develop").stdout;
+    assert.match(developFiles, /tasks\/other-task\.md/, "develop tree must now contain the inert develop file");
+    assert.match(developFiles, /work\.txt/, "develop tree must contain the task work (ff landed)");
   } finally {
     if (wt) { try { ffGit(dir, "worktree", "remove", "--force", wt); } catch { /* best-effort */ } }
     fs.rmSync(dir, { recursive: true, force: true });
@@ -794,17 +810,19 @@ test("AC2 code increment — ff failure with a code develop delta ⇒ exit 1 (�
     const tip = ffMakeTaskBranch(dir, "code-a");
     wt = ffAddWorktree(dir, "code-a");
     // develop advances with a CODE commit (a @static-object-covered plugin/scripts path).
+    ffGit(dir, "checkout", "-q", "develop");
     fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
     fs.writeFileSync(path.join(dir, "plugin", "scripts", "foo.ts"), "code\n", "utf8");
     ffGit(dir, "add", "-A");
     ffGit(dir, "commit", "-q", "-m", "code develop advance");
-    const head = ffGit(dir, "rev-parse", "master").stdout.trim();
+    const head = ffGit(dir, "rev-parse", "develop").stdout.trim();
+    ffDetach(dir);
     const events = path.join(st, "events.jsonl");
     const retries = path.join(st, "retries.jsonl");
     const r = spawnSync("bash", [FF_MERGE_SCRIPT, "--task", "code-a", "--root", dir, "--worktree", wt, ...ffCapture(st, "code-a", tip), "--lock-events", events, "--retry-record", retries], { encoding: "utf8" });
     assert.equal(r.status, 1, `code increment must exit 1 (照旧重跑):\nstdout=${r.stdout}\nstderr=${r.stderr}`);
     assert.match(r.stderr, /FF FAILED/);
-    assert.equal(ffGit(dir, "rev-parse", "master").stdout.trim(), head, "ref unchanged on a code increment (no in-lock absorb)");
+    assert.equal(ffGit(dir, "rev-parse", "develop").stdout.trim(), head, "ref unchanged on a code increment (no in-lock absorb)");
     const rec = JSON.parse(fs.readFileSync(retries, "utf8").trim());
     assert.equal(rec.taskId, "code-a");
     assert.equal(rec.attempt, 1, "code increment writes the plain retry record");
@@ -831,7 +849,7 @@ test("AC3 @static-object reject — suite_head ancestor of tip but delta touches
     fs.writeFileSync(path.join(dir, "orchestration", "manager-tick-core.md"), "code\n", "utf8");
     ffGit(dir, "add", "-A");
     ffGit(dir, "commit", "-q", "-m", "code touch orchestration (post-suite)");
-    ffGit(dir, "checkout", "-q", "master");
+    ffDetach(dir);
     const events = path.join(st, "events.jsonl");
     const retries = path.join(st, "retries.jsonl");
     const r = spawnSync("bash", [FF_MERGE_SCRIPT, "--task", "gate-a", "--root", dir, ...ffCapture(st, "gate-a", suiteHead), "--lock-events", events, "--retry-record", retries], { encoding: "utf8" });

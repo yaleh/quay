@@ -84,6 +84,9 @@ function makeRepoWithWorktree() {
   git(repo, "add", "-A");
   git(repo, "commit", "-q", "-m", "base");
   git(repo, "worktree", "add", worktree, "-b", `task/${TASK}`);
+  // develop 脱离主检出（gap-fan-in-ff-ref-update-detach-develop）：主检出改停 doc-only 工作分支，使
+  // ff 退化为纯 ref 更新（git push .）——develop 不再被任何检出占用。
+  git(repo, "checkout", "-q", "-b", "develop-work");
   // 实现提交：docs/feature.md（非 .ts ⇒ typecheck 闸直放行；doc 面 ⇒ classify 判 doc-only）。
   fs.mkdirSync(path.join(worktree, "docs"), { recursive: true });
   fs.writeFileSync(path.join(worktree, "docs", "feature.md"), "# feature\n", "utf8");
@@ -128,8 +131,10 @@ test("AC1/AC2/AC4 — 机械 fan-in 落地：锁持有时长 ≤ 机械时长（
     // 落地直接量：develop ff 到 task tip + status done + 无残留 worktree。
     const develop = git(repo, "rev-parse", "develop").stdout.trim();
     assert.equal(develop, r.landedSha, "develop must be at the landed sha");
-    const status = git(repo, "rev-parse", "HEAD").stdout.trim();
-    assert.equal(develop, status, "develop checkout must be at the landed tip");
+    // develop 脱离主检出：主检出停在 doc-only 工作分支（⛔ 不是 develop）——ff 是纯 ref 更新，不碰工作树。
+    const checkoutBranch = git(repo, "branch", "--show-current").stdout.trim();
+    assert.equal(checkoutBranch, "develop-work", "main checkout must be on the doc-only work branch, NOT develop (the ff is a ref update)");
+    assert.notEqual(git(repo, "rev-parse", "HEAD").stdout.trim(), develop, "the work branch HEAD is NOT the landed tip (develop moved without touching the checkout)");
     assert.equal(git(repo, "worktree", "list", "--porcelain").stdout.includes(`task/${TASK}`), false, "worktree must be removed after landing");
 
     // AC1（能取假，锁时长塌缩）：持有时长显著低于 1800s（旧 30min watchdog 恒值），且 > 0（真持锁）。

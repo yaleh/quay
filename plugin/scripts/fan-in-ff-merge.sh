@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# fan-in-ff-merge.sh — AC62 持锁段: a merge lock that wraps ONLY `git merge --ff-only task/<id>`.
+# fan-in-ff-merge.sh — AC62 持锁段: a merge lock that wraps ONLY the ff. DUAL-MODE
+# (gap-fan-in-ff-ref-update-detach-develop):
+#   merge mode (merge target still checked out)  → `git merge --ff-only task/<id>` (operates on the
+#                                                   current branch ⇒ clean tree still required).
+#   push mode  (merge target detached)           → `git push . refs/heads/task/<id>:refs/heads/<merge-
+#                                                   target>` (a pure ref update — no working tree
+#                                                   touched, dirty tree structurally irrelevant).
+# The mode is auto-selected by which branch the main checkout sits on.
 # (tasks/gap-ac62-fan-in-ff-merge-lock-protocol, SPEC-fan-in-ff-merge-lock-2026-08-14)
 #
 # The fan-in protocol is split into a 无锁段 and a 持锁段:
@@ -13,7 +20,7 @@
 #     4. run the doc check            ← the ff-only gap: ff triggers no pre-merge hook (AC63)
 #   持锁段 (THIS script — the lock covers the ff; on an inert develop increment it also covers the
 #            in-lock develop re-merge + immediate re-ff, gap-fan-in-ff-retry-reruns-suite-on-inert-increment):
-#     5. acquire merge lock → git merge --ff-only task/<id> → release (success or failure)
+#     5. acquire merge lock → ff (merge --ff-only OR git push . per ff_mode) → release
 #
 # The lock is a SEPARATE flock from the suite lock (full-suite.lock.0/.1): different file, different
 # object, and — because this script REFUSES to run while a full suite is RUNNING (AC84 — probed via
@@ -69,7 +76,7 @@
 #   0  ff performed (develop/merge-target fast-forwarded to task/<taskId>)
 #   1  ff NOT possible (develop advanced — retry record written; return to 无锁段 step 1).
 #      Only for attempts 1-2. This is the "develop advanced, retry" path.
-#   2  usage / environment error (missing task branch, suite running, dirty tree, wrong branch,
+#   2  usage / environment error (missing task branch, suite running, merge target still checked out,
 #      lock timeout — NOT an ff failure, NO retry record)
 #   3  ANTI-LIVELOCK (gap-ff-livelock-trigger-no-action): this ff failure is the SAME task's
 #      attempt >= 3 (SPEC §7: "同一任务 ff 失败 ≥3 次 才谈防活锁"). Develop keeps advancing faster
@@ -282,10 +289,8 @@ fi
 # select-static-checks-for-touches.ts / scripts/test.sh annotations exercises its own fix.
 classify_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/select-static-checks-for-touches.ts"
 classify_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# The Touches-intersection classifier (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path) — reused
-# by the pre-flight benign-runtime-dirty branch. Same self-bootstrapping resolution as classify_script:
-# dispatched as ${worktree}/plugin/scripts/fan-in-ff-merge.sh ⇒ this is the WORKTREE's own copy, so a
-# task that modifies touches-orthogonality-check.ts exercises its own fix.
+# The Touches-intersection classifier (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path) — used by
+# the merge-mode benign-runtime-dirty pass-through. Same self-bootstrapping resolution as classify_script.
 touches_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/touches-orthogonality-check.ts"
 
 # ── AC78 判据2(c): --agent-id 自校验 (manager 2026-08-14 裁定并入实现侧, gap-ac78) ────────────────
@@ -310,26 +315,33 @@ if ! git -C "${root}" rev-parse --verify --quiet "refs/heads/task/${task_id}" >/
   exit 2
 fi
 
-# The merge target: the branch the current checkout sits on (the inner shared checkout on
-# $MERGE_TARGET), or the explicit --merge-target. `git merge --ff-only` operates on the current branch,
-# so it MUST be the merge target — a mismatch is an environment error, not an ff failure.
+# The merge target: the branch the task fast-forwards into. Defaults to the BRANCH NAME (develop), not
+# `branch --show-current` — the old merge --ff-only operated on the current branch (which therefore had
+# to be the merge target); the ref-update ff (git push .) moves the ref without touching any working
+# tree, so the main checkout no longer needs to sit ON the merge target.
 if [ -z "${merge_target}" ]; then
-  merge_target="$(git -C "${root}" branch --show-current 2>/dev/null || true)"
-  if [ -z "${merge_target}" ]; then
-    echo "fan-in-ff-merge: cannot determine the current branch (detached HEAD?) in ${root}; pass --merge-target" >&2
-    exit 2
-  fi
+  merge_target="develop"
+fi
+# DUAL-MODE (gap-fan-in-ff-ref-update-detach-develop): the ff degenerates to a PURE REF UPDATE (git
+# push .) only AFTER the merge target is detached from the main checkout (the doc-only work branch
+# occupies it). Until then (develop still checked out), the ff stays the old `git merge --ff-only`,
+# which operates on the current branch and therefore still requires a clean tree. The ref update is
+# REFUSED by git when the target is the current branch (receive.denyCurrentBranch), so the two modes
+# are mutually exclusive and auto-selected by which branch the main checkout sits on. This keeps the
+# mechanism landed WITHOUT breaking fan-in during the transition — the detach + consumer-freshness fix
+# (二阶效应①) is a follow-up activation, not a precondition of this task's own landing.
+current="$(git -C "${root}" branch --show-current 2>/dev/null || true)"
+if [ "${current}" = "${merge_target}" ]; then
+  ff_mode="merge"
 else
-  current="$(git -C "${root}" branch --show-current 2>/dev/null || true)"
-  if [ "${current}" != "${merge_target}" ]; then
-    echo "fan-in-ff-merge: current checkout is on '${current}', not the merge target '${merge_target}' — the ff must run in the checkout that owns the target branch" >&2
-    exit 2
-  fi
+  ff_mode="push"
 fi
 
-# Clean tree required: an ff that would overwrite uncommitted work is an environment error, not a
-# "develop advanced" retry. (The shared checkout is clean at fan-in time; a dirty tree means the
-# caller broke the protocol's assumption.)
+if [ "${ff_mode}" = "merge" ]; then
+# ── clean-tree check (merge mode only) ────────────────────────────────────────────────────────────
+# `git merge --ff-only` operates on the current branch and overwrites the working tree ⇒ a clean tree
+# is still required while the merge target remains checked out. Two benign dirty shapes are handled
+# before the refusal (the ref-update mode below needs NONE of this — it never touches the tree):
 #
 # ── auto-converge (gap-fan-in-clean-tree-auto-converge-promotion-status, 方案③ 防御纵深) ─────────
 # ONE benign dirty shape is auto-converged before the refusal: promotion-driver's status-only flip
@@ -337,11 +349,8 @@ fi
 # real protocol violation. Criterion is CONTENT-level (⛔ not path-level): porcelain must be ALL
 # `tasks/*.md`, AND each file's `git diff HEAD` must hit ONLY the frontmatter `status:` line (every
 # +/- line matches `status:`; any body edit or other-field edit fails). When satisfied, stage + commit
-# those files (--no-verify — a mechanical status flip is content-neutral; the hook's doc/Touches
-# checks guard authored CONTENT and shelling test.sh per converge is slow; pathspec-limited ⛔ never a
-# bare commit sweeping the shared index, memory git-commit-no-pathspec-commits-shared-index), then
-# fall through to the ORIGINAL clean-tree check (now clean). Non-status-only dirty still refuses —
-# the protection is NOT widened (AC2).
+# those files (--no-verify — a mechanical status flip is content-neutral; pathspec-limited ⛔ never a
+# bare commit sweeping the shared index), then fall through to the ORIGINAL clean-tree check (now clean).
 porcelain="$(git -C "${root}" status --porcelain 2>/dev/null || true)"
 if [ -n "${porcelain}" ]; then
   converge_ok=1
@@ -363,7 +372,6 @@ if [ -n "${porcelain}" ]; then
     # content-level: the file's full uncommitted diff (HEAD→worktree) must hit ONLY the status: line
     _pdiff="$(git -C "${root}" diff HEAD -- "${_ppath}" 2>/dev/null | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' || true)"
     if [ -z "${_pdiff}" ]; then
-      # a modified tracked file with an empty +/- diff (e.g. mode-only) is not a status flip
       converge_ok=0; break
     fi
     _nonstatus="$(printf '%s\n' "${_pdiff}" | grep -vE '^[+-]status:' || true)"
@@ -389,14 +397,10 @@ fi
 # ── benign runtime dirty (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path) ───────────────
 # A SECOND benign dirty shape is auto-passed (仅放行不处置 — NOT committed, NOT gitignored) before the
 # refusal: an UNTRACKED runtime file under .quay/ that is OUTSIDE this task's ## Touches (the
-# gitignore-missed runtime-state family — serve-send message-receipts.jsonl, worker/promotion round
-# logs; a NEW one may appear at any time, so disposing ONE file is not the fix). Such a file is never
-# overwritten by the ff (it is not in the tree) and is unrelated to the task's declared write surface ⇒
-# the ff proceeds and the file stays untracked. Criterion is CONTENT-level (⛔ fail-closed): porcelain
-# must be ALL `?? .quay/…` entries AND none may match the task's ## Touches (reuse parseTouches +
-# matchGlob — the checkTouchesPair machinery; no new path matcher). Any tracked modification, a
-# non-.quay untracked file, or a dirty file within the task's ## Touches ⇒ NOT benign ⇒ the refusal
-# still fires (AC2 negative control).
+# gitignore-missed runtime-state family — serve-send message-receipts.jsonl). The ff proceeds; the file
+# stays untracked. Criterion is CONTENT-level (⛔ fail-closed): porcelain must be ALL `?? .quay/…`
+# entries AND none may match the task's ## Touches (reuse parseTouches + matchGlob). Any tracked
+# modification, a non-.quay untracked file, or a dirty file within the task's ## Touches ⇒ NOT benign.
 if [ -n "${porcelain}" ]; then
   benign_ok=1
   benign_paths=""
@@ -404,12 +408,10 @@ if [ -n "${porcelain}" ]; then
     [ -n "${_bline}" ] || continue
     _bstatus="${_bline:0:2}"
     _bpath="${_bline:3}"
-    # porcelain XY: only an untracked entry (`??`) is a runtime file; M/A/D/R/T ⇒ real dirt.
     case "${_bstatus}" in
       "??") : ;;
       *) benign_ok=0; break ;;
     esac
-    # every dirty path must be under .quay/ (the runtime-state surface), ⛔ not anywhere else
     case "${_bpath}" in
       .quay|.quay/|.quay/*) : ;;
       *) benign_ok=0; break ;;
@@ -420,9 +422,6 @@ ${porcelain}
 EOF
 
   if [ "${benign_ok}" = "1" ] && [ -n "${benign_paths}" ]; then
-    # The Touches-intersection is judged by the ONE computed classifier (parseTouches + matchGlob in
-    # touches-orthogonality-check.ts) — no hand-written path table. Self-bootstrapping like
-    # --classify-delta: touches_script NEXT TO this script is the worktree's own version.
     # shellcheck disable=SC2086
     touches_verdict="$(node --experimental-strip-types "${touches_script}" --runtime-dirty --task "${task_id}" --root "${root}" ${benign_paths} 2>/dev/null)" || touches_verdict="NOT-BENIGN (classifier failed)"
     case "${touches_verdict}" in
@@ -437,10 +436,14 @@ EOF
 fi
 
 if [ -n "${porcelain}" ]; then
-  echo "fan-in-ff-merge: working tree not clean in ${root} — the ff must run on a clean checkout (found uncommitted changes):" >&2
+  echo "fan-in-ff-merge: working tree not clean in ${root} — the merge-mode ff must run on a clean checkout (found uncommitted changes):" >&2
   printf '%s\n' "${porcelain}" | sed 's/^/fan-in-ff-merge:   /' >&2
   exit 2
 fi
+# ── end clean-tree check (merge mode) ────────────────────────────────────────────────────────────
+fi
+# (push mode needs NO clean tree — git push . moves the ref without touching the working tree, so the
+#  main checkout's dirty state is STRUCTURALLY irrelevant; that is the whole point of the ref update.)
 
 # AC1 判据收窄 (gap-suite-concurrency-ff-gate-and-slot-ssot, 人 2026-08-18「把 ff 的判据从『任何 suite
 # 在跑』收窄到『本任务自己的 suite 在跑』」): the ff gate reads THIS TASK's suite certificate, NOT any
@@ -567,9 +570,17 @@ printf '%s\n' "{\"event\":\"acquire\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoc
 merge_rc=0
 merge_err=""
 develop_head_before="$(git -C "${root}" rev-parse "${merge_target}" 2>/dev/null || echo "unresolvable")"
-# The ff inside the lock. `--ff-only` can never create a merge commit or a conflict: it either
-# fast-forwards the ref or refuses (develop advanced since step 1's merge develop).
-if ! merge_out="$(git -C "${root}" merge --ff-only "task/${task_id}" 2>&1)"; then
+# The ff inside the lock (DUAL-MODE, gap-fan-in-ff-ref-update-detach-develop):
+#   push mode  (merge target detached)    → `git push .` — a pure ref update, no working tree touched
+#                                           (the main checkout's dirty state is structurally irrelevant).
+#   merge mode (merge target checked out) → `git merge --ff-only` — operates on the current branch.
+# Both fast-forward and refuse a non-ff the same way ("develop advanced since step 1's merge develop").
+if [ "${ff_mode}" = "push" ]; then
+  ff_cmd=(git -C "${root}" push . "refs/heads/task/${task_id}:refs/heads/${merge_target}")
+else
+  ff_cmd=(git -C "${root}" merge --ff-only "task/${task_id}")
+fi
+if ! merge_out="$("${ff_cmd[@]}" 2>&1)"; then
   merge_rc=1
   merge_err="$(printf '%s\n' "${merge_out}" | head -n1)"
   # gap-fan-in-ff-retry-reruns-suite-on-inert-increment: ff 失败唯一原因 = develop 前进。当场判 develop
@@ -586,7 +597,7 @@ if ! merge_out="$(git -C "${root}" merge --ff-only "task/${task_id}" 2>&1)"; the
       if [ "${code_delta}" != "__CLASSIFY_FAILED__" ] && [ -z "${code_delta}" ]; then
         # inert increment ⇒ merge develop into the task branch (in the worktree), then retry the ff.
         if git -C "${worktree}" merge --no-edit "${merge_target}" >/dev/null 2>&1; then
-          if merge_out2="$(git -C "${root}" merge --ff-only "task/${task_id}" 2>&1)"; then
+          if merge_out2="$("${ff_cmd[@]}" 2>&1)"; then
             merge_rc=0
             merge_err=""
           else
