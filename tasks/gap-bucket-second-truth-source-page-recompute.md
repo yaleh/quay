@@ -57,4 +57,6 @@ bucket 判定收敛为单一真相源（派发侧算、落盘、页面读）；A
 - plugin/scripts/suite-bucket-select.ts（effectiveBucketSet 结果 + 来源落盘）
 - packages/quay/src/serve-tests.ts（bucketSetOfFile 改读落盘产物，删显示层判定镜像）
 - plugin/test/suite-bucket-select.test.mjs（bucket 单一真相源测试）
+- packages/quay/test/serve-handlers.test.mjs（bucketSetOfFile 改读产物后同步其测试）
+- .gitignore（.quay/suite-bucket-effective.jsonl 运行时派生产物，忽略）
 - tasks/gap-bucket-second-truth-source-page-recompute.md（自身）
