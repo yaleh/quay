@@ -191,7 +191,7 @@ workflow_lock_log="/tmp/fan-in-workflow-lock-${task_id}.log"
 # FULL_SUITE_LOCK_HOLD_MAX_S baseline; the fan-in lock's own value is derived later once the cost
 # structure is measured). FANIN_WORKFLOW_LOCK_HOLD_MAX_S overrides for a longer workflow.
 if [ -z "${workflow_lock_hold_max_s}" ]; then
-  workflow_lock_hold_max_s="${FANIN_WORKFLOW_LOCK_HOLD_MAX_S:-${FULL_SUITE_LOCK_HOLD_MAX_S:-1800}}"
+  workflow_lock_hold_max_s="${FANIN_WORKFLOW_LOCK_HOLD_MAX_S:-${FULL_SUITE_LOCK_HOLD_MAX_S:-3600}}"
 fi
 
 # The watchdog function (suite-slot-lib.sh spawn_suite_lock_hold_watchdog) — the SAME「持锁进程子进程」
