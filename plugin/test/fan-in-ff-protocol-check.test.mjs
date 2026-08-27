@@ -28,6 +28,7 @@ import {
   buildLockHoldIntervals,
   checkSuiteInLock,
   checkLockHoldDuration,
+  checkSuiteCoveredByWorkflowLock,
   checkRetryRecordShape,
   FAN_IN_MERGE_SUBJECT_RE,
 } from "../scripts/fan-in-ff-protocol-check.ts";
@@ -374,6 +375,120 @@ test("判据1 negative control — every real lock-hold is ms-scale (the live sa
     assert.equal(hold.reason, "all-lock-holds-ms-scale");
   } finally {
     cleanup(dir);
+  }
+});
+
+// ── 判据4 (gap-fan-in-workflow-lock-and-S1, AC4 修订) — workflow lock must COVER the suite ───────────
+
+test("PURE checkSuiteCoveredByWorkflowLock — suite outside the workflow-lock hold ⇒ red; covered ⇒ clean", () => {
+  const hold = [{ start: 100, end: 500, taskId: "t1" }];
+  const covered = checkSuiteCoveredByWorkflowLock(hold, { start: 200, end: 400, taskId: "t1" });
+  assert.equal(covered.ok, true);
+  assert.equal(covered.evaluated, true);
+  assert.equal(covered.reason, "suite-covered-by-workflow-lock");
+  // suite started before the lock or ended after it ⇒ the lock failed to protect the suite
+  const outsideBefore = checkSuiteCoveredByWorkflowLock(hold, { start: 50, end: 300, taskId: "t1" });
+  assert.equal(outsideBefore.ok, false);
+  assert.equal(outsideBefore.reason, "suite-run-outside-workflow-lock");
+  const outsideAfter = checkSuiteCoveredByWorkflowLock(hold, { start: 200, end: 600, taskId: "t1" });
+  assert.equal(outsideAfter.ok, false);
+});
+
+test("PURE checkSuiteCoveredByWorkflowLock — no taskId / no holds ⇒ NOT-EVALUATED (never red)", () => {
+  const hold = [{ start: 100, end: 500, taskId: "t1" }];
+  const legacy = checkSuiteCoveredByWorkflowLock(hold, { start: 200, end: 400 });
+  assert.equal(legacy.evaluated, false, "suite run without a taskId cannot be scoped ⇒ NOT-EVALUATED");
+  assert.equal(legacy.ok, true);
+  const noHold = checkSuiteCoveredByWorkflowLock([], { start: 200, end: 400, taskId: "t1" });
+  assert.equal(noHold.evaluated, false, "no workflow-lock holds ⇒ NOT-EVALUATED");
+  const noRun = checkSuiteCoveredByWorkflowLock(hold, null);
+  assert.equal(noRun.evaluated, false);
+});
+
+test("PURE checkSuiteCoveredByWorkflowLock — cross-task (a DIFFERENT task's suite) ⇒ NOT-EVALUATED (never red)", () => {
+  const hold = [{ start: 100, end: 500, taskId: "t1" }];
+  // t2's suite overlapping t1's lock window in time is a DIFFERENT task's suite — t1's lock does not
+  // (and must not) cover it ⇒ the containment property is unevaluable, never folded into RED.
+  const cross = checkSuiteCoveredByWorkflowLock(hold, { start: 200, end: 400, taskId: "t2" });
+  assert.equal(cross.evaluated, false, "cross-task suite must be NOT-EVALUATED");
+  assert.equal(cross.ok, true);
+  assert.equal(cross.reason, "no-matching-task-workflow-lock-hold (NOT-EVALUATED)");
+});
+
+test("判据4 cross-task negative control — a DIFFERENT task's suite vs this task's lock ⇒ exit 0", () => {
+  const dir = makeTmp("wf4cross");
+  const st = makeTmp("wf4crossstate");
+  try {
+    initRepo(dir);
+    fs.mkdirSync(path.join(st, ".quay"), { recursive: true });
+    const wfEvents = path.join(st, ".quay", "fan-in-workflow-lock-events.jsonl");
+    const suite = path.join(st, ".quay", "full-suite-state.json");
+    // workflow lock hold for t1, but the suite state carries t2 (a DIFFERENT task's last run) — the
+    // containment of t2's suite within t1's lock is meaningless ⇒ NOT-EVALUATED, never RED.
+    fs.writeFileSync(wfEvents, [
+      JSON.stringify({ event: "acquire", ts: "2026-08-26T03:00:00Z", epoch: 1787713200, taskId: "t1", pid: 1 }),
+      JSON.stringify({ event: "release", ts: "2026-08-26T03:20:00Z", epoch: 1787714400, taskId: "t1", pid: 1 }),
+    ].join("\n") + "\n", "utf8");
+    fs.writeFileSync(suite, JSON.stringify({ state: "green", startedAt: "2026-08-26T03:05:00Z", finishedAt: 1787714100, taskId: "t2" }), "utf8");
+    const r = runChecker(["--root", dir, "--workflow-lock-events", wfEvents, "--suite-state", suite]);
+    assert.equal(r.status, 0, `cross-task suite must NOT be red: ${r.stdout}${r.stderr}`);
+    const wf = jsonOut(r).checks.find((c) => c.check === "workflow-lock-covers-suite");
+    assert.equal(wf.evaluated, false);
+    assert.equal(wf.ok, true);
+    assert.equal(wf.reason, "no-matching-task-workflow-lock-hold (NOT-EVALUATED)");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("判据4 — a same-task suite run outside its workflow-lock hold ⇒ RED (exit 1)", () => {
+  const dir = makeTmp("wf4red");
+  const st = makeTmp("wf4redstate");
+  try {
+    initRepo(dir);
+    fs.mkdirSync(path.join(st, ".quay"), { recursive: true });
+    const wfEvents = path.join(st, ".quay", "fan-in-workflow-lock-events.jsonl");
+    const suite = path.join(st, ".quay", "full-suite-state.json");
+    // workflow lock hold 03:10:00–03:20:00 (600s), but the suite ran 03:00:00–03:15:00 — starts BEFORE the lock.
+    fs.writeFileSync(wfEvents, [
+      JSON.stringify({ event: "acquire", ts: "2026-08-26T03:10:00Z", epoch: 1787713800, taskId: "t1", pid: 1 }),
+      JSON.stringify({ event: "release", ts: "2026-08-26T03:20:00Z", epoch: 1787714400, taskId: "t1", pid: 1 }),
+    ].join("\n") + "\n", "utf8");
+    fs.writeFileSync(suite, JSON.stringify({ state: "green", startedAt: "2026-08-26T03:00:00Z", finishedAt: 1787714100, taskId: "t1" }), "utf8");
+    const r = runChecker(["--root", dir, "--workflow-lock-events", wfEvents, "--suite-state", suite]);
+    assert.equal(r.status, 1, `suite outside workflow lock must be RED: ${r.stdout}${r.stderr}`);
+    const wf = jsonOut(r).checks.find((c) => c.check === "workflow-lock-covers-suite");
+    assert.equal(wf.ok, false);
+    assert.equal(wf.reason, "suite-run-outside-workflow-lock");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("判据4 negative control — a same-task suite run CONTAINED within its workflow-lock hold ⇒ PASS", () => {
+  const dir = makeTmp("wf4ok");
+  const st = makeTmp("wf4okstate");
+  try {
+    initRepo(dir);
+    fs.mkdirSync(path.join(st, ".quay"), { recursive: true });
+    const wfEvents = path.join(st, ".quay", "fan-in-workflow-lock-events.jsonl");
+    const suite = path.join(st, ".quay", "full-suite-state.json");
+    // workflow lock hold 03:00:00–03:20:00, suite 03:05:00–03:15:00 (contained).
+    fs.writeFileSync(wfEvents, [
+      JSON.stringify({ event: "acquire", ts: "2026-08-26T03:00:00Z", epoch: 1787713200, taskId: "t1", pid: 1 }),
+      JSON.stringify({ event: "release", ts: "2026-08-26T03:20:00Z", epoch: 1787714400, taskId: "t1", pid: 1 }),
+    ].join("\n") + "\n", "utf8");
+    fs.writeFileSync(suite, JSON.stringify({ state: "green", startedAt: "2026-08-26T03:05:00Z", finishedAt: 1787714100, taskId: "t1" }), "utf8");
+    const r = runChecker(["--root", dir, "--workflow-lock-events", wfEvents, "--suite-state", suite]);
+    assert.equal(r.status, 0, `covered suite must pass: ${r.stdout}${r.stderr}`);
+    const wf = jsonOut(r).checks.find((c) => c.check === "workflow-lock-covers-suite");
+    assert.equal(wf.ok, true);
+    assert.equal(wf.reason, "suite-covered-by-workflow-lock");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
   }
 });
 

@@ -33,7 +33,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { detectMkdtempNoCleanup } from "./test-isolation-check.ts";
-import { canonicalTestFiles, readFileSafe } from "./test-framework-policy-check.ts";
+import { readFileSafe } from "./gate-script-base.ts";
+import { canonicalTestFiles } from "./test-framework-policy-check.ts";
 
 /** Scan the given repo-relative test files for unpaired mkdtemp results. */
 export function scanUnpairedMkdtemps(

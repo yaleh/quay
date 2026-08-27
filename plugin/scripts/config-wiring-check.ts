@@ -60,6 +60,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSafe } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // plugin/scripts -> plugin -> repo root. Robust to being invoked via the experiments/ symlink
@@ -85,14 +86,6 @@ interface FieldReport {
   field: LoopField;
   value: unknown;
   issues: FieldIssue[];
-}
-
-function readFileSafe(p: string): string {
-  try {
-    return fs.readFileSync(p, "utf8");
-  } catch {
-    return "";
-  }
 }
 
 // ── generalReader: does ANY reader for `field` exist? ──────────────────────────────────────────

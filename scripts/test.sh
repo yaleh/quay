@@ -461,14 +461,20 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 #
 # Test seams (unit test in plugin/test/resource-gate.test.mjs): RESOURCE_GATE_NPROC /
 # RESOURCE_GATE_CONCURRENT_SUITES / RESOURCE_GATE_OVERSUBSCRIPTION override the derivation inputs
-# deterministically (slots = 旋钮② S, oversub = 旋钮③ — both env-read, never literals).
+# deterministically (S read via suite_slot_count, oversub = 旋钮③ — env-read, never literals).
+# S single source (gap-suite-concurrency-S-two-source-divergence): default_concurrency_formula and
+# serial_lowconc_host_default read S via suite_slot_count — the SAME bash canonical the single-flight
+# lock uses (seam RESOURCE_GATE_CONCURRENT_SUITES → `<base>.concurrency` file →
+# QUAY_MAX_CONCURRENT_SUITES → 1). Sourced HERE (before the derivation functions below) so both can
+# call it; the lock section further down reuses this same canonical for its slot paths.
+source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
 default_concurrency_formula() {
   local total_budget oversub slots
   # MAIN-PHASE CONCURRENCY (gap-suite-budget-oversubscribe; human 14:4xZ 修正方向 — (b) 认领制 /
   # (c) 锁发配额 均被否，纯计算零新增运行时状态): default = max(1, floor(nproc × oversub / S)).
   #   nproc   ← 宿主（nproc --all，⛔ 不写字面量 — CLAUDE.md 硬规则 4 推论二）
   #   oversub ← 旋钮③ QUAY_MAX_OVERSUBSCRIPTION（现 1，现状非建议值）
-  #   S       ← 旋钮② QUAY_MAX_CONCURRENT_SUITES（现 2）
+  #   S       ← 旋钮② QUAY_MAX_CONCURRENT_SUITES（现 1）
   # 之前 AC74 的 `nproc − in_use`（读运行时 in_use，不读 S）固有超用：每条 lane 只减它启动那一刻
   # 已在用的 in_use、没人减将来会来的 ⇒ 先起读≈0 拿满 nproc、后起读≈in_use 拿 nproc−in_use，
   # 两并发 suite 合计 16+8=24 > 16（load 29.23，2026-08-14 14:39Z）。纯计算下 S 个 suite 各拿
@@ -479,12 +485,13 @@ default_concurrency_formula() {
   # 再乘并发阶段数 P ⇒ S×P ⇒ 重叠窗口 Σ lane ≤ nproc×oversub 同样结构上不可能超（不变式恢复可守）。
   total_budget="${RESOURCE_GATE_NPROC:-}"
   oversub="${RESOURCE_GATE_OVERSUBSCRIPTION:-${QUAY_MAX_OVERSUBSCRIPTION:-1}}"
-  slots="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
+  # S single source: suite_slot_count reads seam → `<base>.concurrency` file → 旋钮② → 1 (the SAME
+  # precedence + validation as the single-flight lock). The old
+  # `RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}` read SKIPPED the `.concurrency`
+  # file — so `printf '2' > .concurrency` changed the lock slots but NOT this formula (the divergence).
+  slots="$(suite_slot_count)"
   if [ -z "${total_budget}" ]; then
     total_budget="$(nproc 2>/dev/null || echo 1)"
-  fi
-  if ! [[ "${slots}" =~ ^[0-9]+$ ]] || [ "${slots}" -lt 1 ]; then
-    slots=2
   fi
   if ! awk -v o="${oversub}" 'BEGIN { exit !(o ~ /^[0-9]+(\.[0-9]+)?$/ && o > 0) }'; then
     oversub=1
@@ -512,9 +519,10 @@ default_test_concurrency() {
 #   cc=1 WALL_MS=455613 (0 cancelled) vs cc=2 WALL_MS=289579 (0 cancelled) — c2 快 36% 且 0-cancelled;
 #   real-install e2e 双文件 c2 实测 0-cancelled (147s)。⇒ 默认上调至 2 (后经 AC44/AC74 改读宿主)。
 # serial_lowconc_host_default — the host-derived fallback shared by BOTH phase knobs: reads
-# RESOURCE_GATE_NPROC (test seam) → nproc, RESOURCE_GATE_CONCURRENT_SUITES (test seam) →
-# QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2, clamped at 1, and QUAY_PHASE_OVERLAP (default 1) → the
-# concurrent-PHASE count P (2 = serial+lowconc parallel, 1 = sequential). max(1, floor(nproc ÷ (S×P))).
+# RESOURCE_GATE_NPROC (test seam) → nproc, S via suite_slot_count (seam →
+# `<base>.concurrency` file → QUAY_MAX_CONCURRENT_SUITES → 1, the single source), and
+# QUAY_PHASE_OVERLAP (default 1) → the concurrent-PHASE count P (2 = serial+lowconc parallel,
+# 1 = sequential). max(1, floor(nproc ÷ (S×P))).
 # gap-lane-formula-ignores-phase-overlap-concurrency: QUAY_PHASE_OVERLAP=1 runs serial + lowconc in
 # PARALLEL, so the overlap window carries 2 concurrent phases each at its own budget — the denominator
 # must count the concurrent PHASES too (S×P), else each suite's overlap window runs serial+lowconc at
@@ -525,10 +533,9 @@ default_test_concurrency() {
 serial_lowconc_host_default() {
   local ncpu slots phases
   ncpu="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
-  slots="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
-  if ! [[ "${slots}" =~ ^[0-9]+$ ]] || [ "${slots}" -lt 1 ]; then
-    slots=2
-  fi
+  # S single source: suite_slot_count (seam → `<base>.concurrency` file → 旋钮② → 1) — the SAME read
+  # as default_concurrency_formula and the single-flight lock (gap-suite-concurrency-S-two-source-divergence).
+  slots="$(suite_slot_count)"
   phases=1
   if [ "${QUAY_PHASE_OVERLAP:-1}" != "0" ]; then
     phases=2
@@ -640,7 +647,8 @@ bucket_test_concurrency() {
 # `<repo_root>/.git` when git is unavailable (a non-git copy).
 # `FULL_SUITE_LOCK_FILE=<path>` (the pilot's per-worktree escape) still works — the `.0`..`.S-1`
 # suffixes are appended, so a per-worktree override yields a per-worktree S-slot lock.
-source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
+# (suite-slot-lib.sh is sourced ABOVE, before the derivation functions — the S single-source
+# gap-suite-concurrency-S-two-source-divergence fix; the slot paths below reuse that same canonical.)
 FULL_SUITE_LOCK_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
 if [ -z "${FULL_SUITE_LOCK_DIR}" ]; then
   FULL_SUITE_LOCK_DIR="${repo_root}/.git"
@@ -877,6 +885,28 @@ mark_nested() {
   export QUAY_TEST_NESTED_ROOT="$repo_root"
 }
 
+# lpt_reorder_files <name-ref> — LPT-reorder the named array IN PLACE (longest-KNOWN first)
+# (gap-m-bucket-long-tail-lpt-scheduling + gap-suite-lpt-full-bucket-run-selected). Shared by the
+# --buckets M-bucket path AND the run_selected full-suite default path (bucket_full=1 + the no-args
+# full entry), so the LPT ordering has ONE definition point — never two inline copies that drift.
+# Durations come from the EXISTING carrier .quay/verification-round.jsonl perFile[].durationMs
+# (rolling average of the last QUAY_TEST_LPT_ROUNDS rounds) — no new measurer. Scheduling-only:
+# every file is emitted exactly once, so a bug can never drop a test (pass/fail-neutral). FAIL-OPEN:
+# no history / helper failure / a short result ⇒ keep the original order. QUAY_TEST_LPT_ORDER=0 is
+# the one-key rollback. Callers hand the array NAME (nameref) so the reorder lands back in the
+# caller's own array (mapfile on the nameref writes through to the referenced variable).
+lpt_reorder_files() {
+  local -n _lpt_arr="$1"
+  if [ "${QUAY_TEST_LPT_ORDER:-1}" = "1" ] && [ "${#_lpt_arr[@]}" -gt 1 ]; then
+    local _lpt_out
+    _lpt_out="$(printf '%s\n' "${_lpt_arr[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-lpt-order.ts" --root "${main_root}" --rounds "${QUAY_TEST_LPT_ROUNDS:-3}")" || _lpt_out=""
+    if [ -n "${_lpt_out}" ] && [ "$(printf '%s\n' "${_lpt_out}" | wc -l)" -eq "${#_lpt_arr[@]}" ]; then
+      mapfile -t _lpt_arr <<< "${_lpt_out}"
+      echo "scripts/test.sh: lpt-order: file list reordered (${#_lpt_arr[@]} files; first=$(basename "${_lpt_arr[0]}"))" >&2
+    fi
+  fi
+}
+
 # run_selected <groups-csv> [extra-node-flags...] — build the selected file list and exec node
 # --test. Runs the split-or-commit whole-store scan first (same invariant as the default/no-args
 # path). Extra flags (from the flags-only form) are PREPENDED to the file list; node --test is
@@ -941,13 +971,11 @@ run_selected() {
   # false reds (r4/r5/r6) and no longer participates in the red verdict. Re-enable when the
   # verification worktree achieves runtime single-writer via `git worktree lock` (re-enable
   # condition documented in the kept suite-after clean-tree script's header).
-  # The concurrency flag is bound to a variable here because the literal
-  # `--test-concurrency="$(default_test_concurrency)"` spelling is pinned by
-  # plugin/test/resource-gate.test.mjs AC5 (exactly 5 sites) and select-tests-for-touches.test.mjs
-  # AC11 — the default-path branch must not add a sixth literal site.
+  # The main phase's concurrency is delivered via bucket_test_concurrency (explicit flag wins, else
+  # the derived default) — NOT the `--test-concurrency="$(default_test_concurrency)"` literal, whose
+  # spelling is pinned by plugin/test/resource-gate.test.mjs AC5 (exactly 5 sites) and
+  # select-tests-for-touches.test.mjs AC11; the default-path branch must not add a sixth literal site.
   if [ "${FULL_SUITE_DEFAULT:-0}" = "1" ]; then
-    local cc
-    cc="$(default_test_concurrency)"
     mark_nested
     # Suite-BEFORE snapshot (gap-assert-clean-tree-premise-void-under-concurrent-writers): capture
     # the pre-run porcelain so a re-enabled suite-AFTER assertion is DELTA — only items newly added
@@ -1069,16 +1097,18 @@ run_selected() {
     # MAIN phase (the concurrency-N default body) — runs LAST, after serial/lowconc
     # (gap-phase-order-serial-lowconc-before-main): a serial/lowconc failure is now judged red at
     # the phase boundary, never after the entire main phase's cost has been paid.
-    # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency
-    # source — skip the default prepend (gap-full-suite-runner-concurrency-default-and-gate AC2).
+    # LPT order + order-preserving run({files}) (gap-suite-lpt-full-bucket-run-selected): the main
+    # body is LPT-reordered longest-known-first and handed to suite-lpt-runner.mjs — the ONLY path
+    # that preserves argv order (node --test re-sorts positional globs alphabetically, which is how
+    # the full default path previously ran the main body: longest files serialized at the tail).
+    # Concurrency rides in execArgv via bucket_test_concurrency (explicit flag wins, else the derived
+    # default — the SAME single-concurrency-source precedence as has_explicit_concurrency), and the
+    # runner composes spec→stdout + measure-suite-reporter→stderr (the suite_reporter_flags
+    # equivalents), so the per-file attribution + LPT input carrier stay intact.
     local mcode=0
-    if has_explicit_concurrency "$@"; then
-      node --test $(suite_reporter_flags) "$@" "${files[@]}"
-      mcode=$?
-    else
-      node --test --test-concurrency="$cc" $(suite_reporter_flags) "$@" "${files[@]}"
-      mcode=$?
-    fi
+    lpt_reorder_files files
+    node --test-concurrency="$(bucket_test_concurrency "$@")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "$@" "${files[@]}"
+    mcode=$?
     [ "$mcode" -eq 0 ] || code="$mcode"
     [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
     # Fixed-overhead breakdown (gap-suite-fixed-overhead-decomposition AC2): emit the deterministic
@@ -1419,21 +1449,10 @@ elif [ "${1:-}" = "--buckets" ]; then
     run_selected "$(effective_groups)"
   fi
   mapfile -t files <<< "${bucket_sel_out}"
-  # LPT order (gap-m-bucket-long-tail-lpt-scheduling): reorder the M-bucket file list so the
-  # longest-KNOWN files start FIRST and overlap the long run of short files instead of serializing
-  # at the tail (measured round 474/476/478: the last 5% of files = 27%+ of wall clock). Durations
-  # come from the EXISTING carrier .quay/verification-round.jsonl perFile[].durationMs (rolling
-  # average of the last QUAY_TEST_LPT_ROUNDS rounds) — no new measurer. Scheduling-only: every file
-  # is emitted exactly once, so a bug can never drop a test (pass/fail-neutral). FAIL-OPEN: no
-  # history / helper failure / a short result ⇒ keep the original order. QUAY_TEST_LPT_ORDER=0 is
-  # the one-key rollback.
-  if [ "${QUAY_TEST_LPT_ORDER:-1}" = "1" ] && [ "${#files[@]}" -gt 1 ]; then
-    _lpt_out="$(printf '%s\n' "${files[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-lpt-order.ts" --root "${main_root}" --rounds "${QUAY_TEST_LPT_ROUNDS:-3}")" || _lpt_out=""
-    if [ -n "${_lpt_out}" ] && [ "$(printf '%s\n' "${_lpt_out}" | wc -l)" -eq "${#files[@]}" ]; then
-      mapfile -t files <<< "${_lpt_out}"
-      echo "scripts/test.sh: lpt-order: bucket file list reordered (${#files[@]} files; first=$(basename "${files[0]}"))" >&2
-    fi
-  fi
+  # LPT order (gap-m-bucket-long-tail-lpt-scheduling): reorder the M-bucket file list longest-known-
+  # first — the mechanism lives in lpt_reorder_files() (single definition point, shared with the
+  # run_selected full-suite default path via gap-suite-lpt-full-bucket-run-selected).
+  lpt_reorder_files files
   # AC3 (gap-suite-serial-lowconc-classification-recheck 单飞锁侧): the bucket SUCCESS path
   # (non-hub, non-zero selection) structurally bypasses run_selected() — where
   # full_suite_lock_acquire() lives — so QUAY_MAX_CONCURRENT_SUITES=1 never applied to bucket runs

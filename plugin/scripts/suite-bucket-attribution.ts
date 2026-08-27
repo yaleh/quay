@@ -41,7 +41,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 
 export type Bucket = "P" | "S" | "M";
 
@@ -76,24 +76,6 @@ export function classifyPath(s: string): Bucket | null {
   if (P_PREFIX.test(s)) return "P";
   if (S_PREFIX.test(s)) return "S";
   return null;
-}
-
-/**
- * Normalize a repo-relative path: forward slashes, drop `.`/empty segments, resolve `..`.
- * This is the single normalization the reference resolver uses so path-shape tricks (`./`, `//`)
- * cannot spoof identity (same convention as `select-tests-for-touches.ts`).
- * @param {string} p
- * @returns {string}
- */
-export function normalizeRel(p: string): string {
-  const parts = String(p).replace(/\\/g, "/").split("/");
-  const out: string[] = [];
-  for (const seg of parts) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") { out.pop(); continue; }
-    out.push(seg);
-  }
-  return out.join("/");
 }
 
 /**

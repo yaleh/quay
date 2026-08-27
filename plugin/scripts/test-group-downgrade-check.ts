@@ -50,6 +50,7 @@ import path from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { readFileSafe } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -70,14 +71,6 @@ export const MARKER = "@test-group-downgrade";
 const GROUP_RE = /@test-group[ \t]+([A-Za-z]+)/;
 
 // ── small helpers ────────────────────────────────────────────────────────────────────────────────────
-
-export function readFileSafe(p: string): string {
-  try {
-    return fs.readFileSync(p, "utf8");
-  } catch {
-    return "";
-  }
-}
 
 /** First declared `@test-group <name>` in a source string; default `engine` when absent (AC7 —
  * an undeclared file defaults to engine, the current work surface). */

@@ -1,7 +1,7 @@
 ---
 id: gap-suite-concurrency-S-two-source-divergence
 title: suite 单飞锁「槽数 S」两套读取链分叉——锁槽数读 .concurrency 文件、并发公式只读 env，改一处不改另一处静默分叉（S=2 落地实证 laneCount 未减半 → 32 lane 超订）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -46,8 +46,8 @@ manager 受命「S 设为 2」时只 `printf '2' > .concurrency`（改锁槽数�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，两处读同一来源）：`default_concurrency_formula` 与 `suite_slot_count` 读同一个 S 来源（`.concurrency` 文件），改一个文件同时改锁槽数 + lane 公式；（⛔ 两处仍读不同来源 ⇒ 假）。
-- [ ] AC2（能取假，负控制分叉消除）：只 `printf '2' > .concurrency`（不改 env），`concurrentSuiteSlots=2` 且 `laneCount` 减半（16→8），不再超订；（⛔ laneCount 仍 16 ⇒ 假）。
+- [x] AC1（能取假，两处读同一来源）：`default_concurrency_formula` 与 `suite_slot_count` 读同一个 S 来源（`.concurrency` 文件），改一个文件同时改锁槽数 + lane 公式；（⛔ 两处仍读不同来源 ⇒ 假）。
+- [x] AC2（能取假，负控制分叉消除）：只 `printf '2' > .concurrency`（不改 env），`concurrentSuiteSlots=2` 且 `laneCount` 减半（16→8），不再超订；（⛔ laneCount 仍 16 ⇒ 假）。
 
 ## Definition of Done
 

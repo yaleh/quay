@@ -262,9 +262,10 @@ export function checkBashTsCountAgree(root: string): SsotVerdict {
  *
  *  The probe's slot COUNT is pinned to the checker's S via a `.concurrency` file at the hermetic base
  *  (plus a sanitized probe env) — without that pin the holders resolve their own count from the
- *  ambient env (default 2), which drifts from a production `.concurrency` file (e.g. S=1) ⇒ the probe
- *  contends on 2 slots while the checker compares against 1 ⇒ FALSE RED while real suites queue
- *  (gap-suite-slot-ssot-i5-false-positive: the reported "2/3 held (> S=1)" with a healthy host). */
+ *  ambient default (1), which drifts from a production `.concurrency` file (e.g. S=2) ⇒ the probe
+ *  contends on 1 slot while the checker compares against 2 ⇒ FALSE RED while real suites queue
+ *  (gap-suite-slot-ssot-i5-false-positive: the SAME drift class first observed as the old default-2
+ *  ambient vs a production S=1 file — "2/3 held (> S=1)" on a healthy host). */
 export interface ConcurrencyProbeResult {
   acquired: number;
   status: number;

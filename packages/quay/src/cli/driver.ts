@@ -27,7 +27,7 @@ import { findConfig } from "../config.ts";
 import type { CliCtx } from "./context.ts";
 
 const VERBS = ["start", "stop", "drain", "resume", "status", "restart"];
-const KINDS = ["promotion", "worker"];
+const KINDS = ["promotion", "worker", "outer"];
 const DRIVER_RUNTIME_REL = path.join("plugin", "scripts", "driver-runtime.ts");
 
 /** Resolve the workspace root from `--root` (walk-up) or the process cwd; null when no config. */
@@ -66,7 +66,7 @@ export async function handleDriver({ sub, rest, positional }: CliCtx) {
     process.stdout.write(`quay driver — start/stop/drain/resume/status/restart the promotion & worker drivers (AC139)
 
 Usage:
-  quay driver <start|stop|drain|resume|status|restart> --kind <promotion|worker> [--root <path>] [flags]
+  quay driver <start|stop|drain|resume|status|restart> --kind <promotion|worker|outer> [--root <path>] [flags]
 
   start      Start the resident driver under the single supervisor (respawn on exit/kill/crash).
              ⛔ Refuses (exit non-zero) if the driver is halted — clear the halt with \`resume\` first.
@@ -81,7 +81,7 @@ Usage:
              record count, which cannot distinguish "growing" from "stalled").
   restart    stop then start.
 
-  --kind <promotion|worker>   Required. Which driver the command targets.
+  --kind <promotion|worker|outer>   Required. Which driver the command targets.
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
   --reconcile-interval <s>    (worker only) Coordination floor: reconcile at least every N seconds
                               even if every edge event (worker exit) is lost — degrade to
