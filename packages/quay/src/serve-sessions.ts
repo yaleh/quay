@@ -138,6 +138,11 @@ function renderTurnsHtml(turns: TranscriptTurn[], maps: ToolMaps): string {
     if (b.kind === "thinking") {
       return html`<details class="tx-block tx-thinking" style="margin:0.25rem 0"><summary style="cursor:pointer;font-size:0.75rem;color:var(--color-neutral-700)">thinking</summary><pre style="margin:0.25rem 0 0;padding:0.5rem;background:var(--color-neutral-100);white-space:pre-wrap;font-size:0.78rem">${escapeHtml(b.text)}</pre></details>`;
     }
+    // queue-operation / attachment event (a queued cross-session message absorbed mid-turn — never a
+    // `type:"user"` record). Rendered as a distinguishable marker, NOT a forged user/assistant bubble.
+    if (b.kind === "external") {
+      return html`<div class="tx-block tx-external" style="margin:0.25rem 0;padding:0.5rem;background:var(--color-neutral-100);border-left:3px solid var(--color-accent-700)"><div style="font-size:0.7rem;color:var(--color-accent-800);font-weight:700">${escapeHtml(b.label)}</div><div style="margin-top:0.25rem;white-space:pre-wrap;line-height:1.5;font-size:0.85rem">${escapeHtml(b.text)}</div></div>`;
+    }
     if (b.kind === "tool_use") {
       const label = b.name ? `tool_use · ${b.name}` : "tool_use";
       const res = maps.toolResultByUseId.get(b.id);
