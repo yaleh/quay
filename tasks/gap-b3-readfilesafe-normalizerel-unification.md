@@ -31,7 +31,7 @@ SPEC §1.6 实测：`readFileSafe`(4) TRUE_DUP（另有 50 处 inline try/catch 
 
 ## Evidence
 
-- 单一来源：`readFileSafe` + `normalizeRel` 定义收敛到 `plugin/scripts/gate-script-base.ts`（框架原语库，已具 `node:fs`/`node:path` 导入、40+ 消费方）。
+- 单一来源：`readFileSafe` + `normalizeRel` 定义收敛到 `gate-script-base.ts`（框架原语库，已具 `node:fs`/`node:path` 导入、40+ 消费方）。它是 sync-vendor.sh `SYNC_SCRIPTS` vendored 文件（SOURCE=`experiments/quay-perpetual-stream/scripts/`、镜像=`plugin/scripts/`，`--check` 要求两副本字节一致——故源与镜像各 +31 行，两副本字节一致）。
 - 8 处迁移：readFileSafe 4 处（test-framework-policy-check / test-impl-census-check / test-group-downgrade-check / config-wiring-check）+ normalizeRel 4 处（select-static-checks-for-touches / select-tests-for-touches / suite-bucket-attribution / inner-exec-mode-report）各删局部拷贝、改 import；另有 3 处既有 readFileSafe import（test-isolation-check / tmp-leak-pairing-check / live-repo-literal-assert-check）改指向 gate-script-base。
 - 棘轮 + 负控制 + 语义测试：`plugin/test/gap-b3-readfilesafe-normalizerel-unification.test.mjs`（7 测试全绿）。
 - 越界同名词（非本任务收口，SPEC §1.6 只数 plugin/scripts）：`scripts/test-coverage-check.ts` 自带 readFileSafe（顶层产品层 checker）、`packages/quay/src/serve-tests.ts` 自带 normalizeRel（产品核心，零 plugin import 边界）——均非 plugin/scripts 方法学层 checker，本任务按 Touches 不触碰。
@@ -40,4 +40,5 @@ SPEC §1.6 实测：`readFileSafe`(4) TRUE_DUP（另有 50 处 inline try/catch 
 
 - plugin/scripts/（readFileSafe + normalizeRel 单一实现 + 8 处迁移）
 - plugin/test/（合并语义测试 + 负控制）
+- experiments/quay-perpetual-stream/scripts/gate-script-base.ts（sync-vendor SOURCE 副本，与 plugin 镜像字节一致）
 - tasks/gap-b3-readfilesafe-normalizerel-unification.md（自身）
