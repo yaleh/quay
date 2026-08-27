@@ -25,8 +25,8 @@ extra:
 
 ## Plan
 
-1. **先分方向**：取 15:15 那次 suite 的日志/进程态（`suite-driver.ts` 的 `logFile` / `--buckets` 输出），判定是「进程真的卡住零输出」还是「进程活着但输出没被看门狗看到」。
-2. **按方向修**：A → 查底层挂死根因（复用前身 ①② 诊断，⛔ 不假设与 ac143 同根）；B → 修阈值/观测面（⛔ 不盲设数值——硬规则 4 推论：成本结构未知前不设阈值；对齐 `full-suite-runner.ts` 的静默/最大时长双阈值语义，或让静默检测读「本轮 suite 是否仍在推进」的直接量）。
+1. **先分方向**：取 15:15 那次 suite 的日志/进程态（`suite-driver.ts` 的 `logFile` / `--buckets` 输出），判定是「进程真的卡住零输出」还是「进程活着但输出没被看门狗看到」。**附加现场证据（B 嫌疑加重）**：本任务（gap-mech-fan-in-suite-silence-watchdog-fired）自己的机械 fan-in 也死在 suite 步同一静默杀——worker-outcome 记 outcome=red step=suite reason="silence watchdog killed"、final_state=exited-not-landed，修复 commit 931fdc4dd 未进 develop。「连修静默看门狗的任务都过不了它」的自锁现场。
+2. **按方向修**：A → 查底层挂死根因（复用前身 ①② 诊断，⛔ 不假设与 ac143 同根），⛔ 不动阈值；B → 修观测面（非换数字）——`suite-driver.ts:197-226` 静默检测只读 stdout/stderr + 日志 mtime，若 `--buckets` suite 实际写第三条流（别的 log 文件 / 输出缓冲未 flush），观测面漏读 ⇒ 假杀。修法：读 suite 真实写的那条流 + 一个「仍在推进」的直接量（子进程 CPU 时间 rusage 在涨、或测试计数在涨），非只读 mtime。⛔ 不盲设数值（硬规则 4 推论）；数字是止血不是结论（落笔当轮取真实读数，硬规则 4c）。
 3. 修完给负控制：一个「真挂死」样本仍被看门狗杀（A 方向）或一个「长静默但正常」样本不被杀（B 方向）。
 
 ## Acceptance Criteria
