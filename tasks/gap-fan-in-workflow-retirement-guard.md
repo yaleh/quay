@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-workflow-retirement-guard
 title: fan-in workflow 退役防回归——retirement checker + lock-events 非 wk-prod- 前缀红灯（L3）
-status: ready
+status: todo
 labels:
   - gap
   - defect
@@ -39,6 +39,7 @@ fan-in workflow 退役后的防回归（人裁定迁移序 L3）：
 
 ## Touches
 
-- plugin/scripts/（retirement checker，gate-scripts-retirement 同模式）
-- plugin/test/（retirement checker 测试 + 非 wk-prod- 前缀红灯负控制）
+- plugin/scripts/fan-in-workflow-retirement-check.ts（retirement checker，gate-scripts-retirement 同模式，断言两路径不存在 + 引用归零）
+- plugin/scripts/capability-catalog.sh（新增机件三处注册面）
+- plugin/test/fan-in-workflow-retirement-check.test.mjs（retirement checker 测试 + 非 wk-prod- 前缀红灯负控制）
 - tasks/gap-fan-in-workflow-retirement-guard.md（自身）
