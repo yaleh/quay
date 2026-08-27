@@ -1636,8 +1636,12 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
   });
 
-  // 1. acquire fan-in workflow lock（机械包裹整段 merge→suite→ff，AC4）。
-  let a = await mechSh(["bash", ffMerge, "--task", task, "--root", root, "--run-id", runId, "--acquire-workflow-lock"], 120_000);
+  // 1. acquire fan-in workflow lock（机械包裹整段 merge→suite→ff，AC4）。⛔ unbounded（Infinity，无
+  // 超时）——workflow 锁是正确性锁（「此刻谁可 merge develop」），绝不因排队等待过久而放行
+  // （SPEC-suite-lifecycle §1.1 / fan-in-ff-merge.sh:203）；排队等待正是这把锁存在的意义，120s 短超时
+  // 会在「等待」时误杀（gap-mech-fan-in-acquire-lock-timeout-queue-semantics：首个机械 fan-in 生产任务
+  // 排第 2 位即 120s 被杀，exit null）。死持有者由锁内 1800s watchdog 兜底，不靠此处 SIGKILL。
+  let a = await mechSh(["bash", ffMerge, "--task", task, "--root", root, "--run-id", runId, "--acquire-workflow-lock"], Infinity);
   if (!a.ok) return fail("acquire-workflow-lock", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
 
   let released = false;

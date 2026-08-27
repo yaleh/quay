@@ -30,8 +30,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，排队语义）：acquire-workflow-lock 步不再有 120s 短超时——排队等锁时不被 kill（unbounded 或远超机械持有时长×队列深度，死持有者由 1800s watchdog 兜）；（⛔ 仍 120s kill ⇒ 假）。
-- [ ] AC2（能取假，生产能产）：一个排在队列第 2+ 位的机械 fan-in 任务成功 acquire（不 red at step 1、不 exit null）；（⛔ 仍 step 1 红 ⇒ 假）。
+- [x] AC1（能取假，排队语义）：acquire-workflow-lock 步不再有 120s 短超时——排队等锁时不被 kill（unbounded 或远超机械持有时长×队列深度，死持有者由 1800s watchdog 兜）；（⛔ 仍 120s kill ⇒ 假）。
+- [ ] AC2（能取假，生产能产）：一个排在队列第 2+ 位的机械 fan-in 任务成功 acquire（不 red at step 1、不 exit null）；（⛔ 仍 step 1 红 ⇒ 假）。（待外部）
 
 ## Definition of Done
 
@@ -40,5 +40,6 @@ acquire 步 120s 超时去掉/放宽；AC1-AC2 全勾；机械 fan-in 首个任�
 ## Touches
 
 - plugin/scripts/worker-driver.ts（:1640 acquire 步超时去掉/放宽）
-- plugin/test/worker-driver.test.mjs（acquire 排队语义测试 + 短超时负控制）
+- plugin/scripts/driver-runtime.ts（runAsync 支持 Infinity = unbounded，⛔ setTimeout(…, Infinity) → 1ms footgun）
+- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（acquire 排队语义测试 + 短超时负控制）
 - tasks/gap-mech-fan-in-acquire-lock-timeout-queue-semantics.md（自身）
