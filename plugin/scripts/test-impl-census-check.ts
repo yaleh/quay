@@ -33,18 +33,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSafe } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── glob parsing (single-source: read scripts/test.sh's own glob line) ─────────────────────────────
-function readFileSafe(p: string): string {
-  try {
-    return fs.readFileSync(p, "utf8");
-  } catch {
-    return "";
-  }
-}
-
 export function parseCanonicalGlobs(repoRoot: string): string[] {
   const src = readFileSafe(path.join(repoRoot, "scripts", "test.sh"));
   const m = src.match(/glob=\(([^)]*)\)/);

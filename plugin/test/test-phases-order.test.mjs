@@ -43,8 +43,8 @@ const lowconcSelect = markerAt(
   "lowconc select",
 );
 const mainRun = markerAt(
-  'node --test --test-concurrency="$cc" $(suite_reporter_flags) "$@" "${files[@]}"',
-  "main phase node --test",
+  'node --test-concurrency="$(bucket_test_concurrency "$@")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "$@" "${files[@]}"',
+  "main phase node --test (suite-lpt-runner.mjs)",
 );
 
 test("AC2 — serial and lowconc phases run BEFORE the main concurrency-N body in the full-suite default path", () => {

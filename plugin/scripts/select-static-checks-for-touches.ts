@@ -43,7 +43,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -178,18 +178,6 @@ export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.u
 }
 
 // ── Path helpers ──────────────────────────────────────────────────────────────────────────────────────
-
-/** Normalize a repo-relative path/glob (forward slashes, collapse ./ and //, resolve ..). */
-export function normalizeRel(p) {
-  const parts = String(p).replace(/\\/g, "/").split("/");
-  const out = [];
-  for (const seg of parts) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") { out.pop(); continue; }
-    out.push(seg);
-  }
-  return out.join("/");
-}
 
 function escapeRegExp(s) {
   // Escaped char-by-char (no tricky character-class literal — the TS type-stripper mis-parses

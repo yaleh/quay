@@ -47,7 +47,7 @@ manager 09:3xZ 那次是本仓历史上第一次真跑 archguard。这属于「�
 
 ## Touches
 
-- plugin/scripts/（接入 archguard 的真实机件，具体接点实现时定）
-- .archguard/（产物进入 git 或判据载体）
-- scripts/test.sh 或 tick 核（若接 suite/tick 面）
+- plugin/scripts/archguard-runner.ts
+- .archguard/metrics-history.jsonl
+- scripts/test.sh
 - tasks/gap-archguard-zero-production-calls.md（自身）

@@ -60,6 +60,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib。
 import { buildNonCodeMask, enumerativeExistence } from "./checker-lib.ts";
+import { readFileSafe } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -67,14 +68,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DATA_FILE_REL = "plugin/test-framework-policy-exemptions.txt";
 
 // ── helpers ────────────────────────────────────────────────────────────────────────────────────────
-
-export function readFileSafe(p: string): string {
-  try {
-    return fs.readFileSync(p, "utf8");
-  } catch {
-    return "";
-  }
-}
 
 /** True iff the nearest preceding CODE character (skipping comments/strings, which the mask marks
  * non-code) is a statement start — start of file, whitespace, or `;(){}[]`. Excludes `.`, so

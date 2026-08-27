@@ -202,6 +202,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-unified-driver-architecture-2026-08-23.md -->
 <!-- reference-doc: orchestration/SPEC-web-session-observability-and-control-2026-08-24.md -->
 <!-- reference-doc: orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md -->
+<!-- reference-doc: orchestration/SPEC-fan-in-workflow-lock-and-S1-2026-08-26.md -->
 
 ## Behavior
 

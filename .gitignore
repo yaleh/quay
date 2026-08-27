@@ -84,6 +84,19 @@ packages/quay/plugin/
 **/.quay/worker-driver-liveness.log
 **/.quay/worker-driver.stop
 **/.quay/worker-driver-inflight.pid
+# gap-ac143-observability-ledger-closing-driver (2026-08-26): the outer driver's production launch
+# state — round heartbeat (unconditional per-loop record, AC1 carrier) + supervisor state files
+# (driver-runtime start/stop --kind outer) + control state (drain/control plane outer-control.json).
+# All runtime state, never git-tracked; same gitignored family as worker-outcome.jsonl /
+# promotion-round.jsonl.
+**/.quay/outer-round.jsonl
+**/.quay/outer-control.json
+**/.quay/outer-driver.pid
+**/.quay/outer-driver-supervisor.pid
+**/.quay/outer-driver.log
+**/.quay/outer-driver-supervisor.log
+**/.quay/outer-driver-liveness.log
+**/.quay/outer-driver.stop
 # gap-ac144-quality-gate-shape-separated-driver (2026-08-26): the quality-gate driver's production
 # launch state — round heartbeat (unconditional per-loop record of B15/B17 routine facts) +
 # supervisor state files + control state (halt/control plane quality-control.json). All runtime
