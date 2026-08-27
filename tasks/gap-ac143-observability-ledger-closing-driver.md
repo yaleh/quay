@@ -47,3 +47,9 @@ outer 机械 A/B 段收进 driver kind；AC1/AC2/AC3 全勾；outer 执行核对
 - orchestration/orchestrator-tick-core.md（A1/A3/A6/A9/A10/A18/A21+B1/B2/B6+B12/B17 标已驱动化）
 - plugin/loop/orchestrator-tick-core.md（byte-identical 镜像，随正本同步）
 - tasks/gap-ac143-observability-ledger-closing-driver.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-26T14:40:12.426Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

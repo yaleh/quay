@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-stashifdirty-stashes-others-uncommitted
 title: worker-driver stashIfDirty 无归属区分——定时 stash 主检出【他人】的未提交改动（任何层在主检出的未提交工作都在与它赛跑）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -32,8 +32,8 @@ stash@{2} 03:30:52 / stash@{1} 03:32:01 / stash@{0} 03:32:30
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，不 stash 他人未提交改动）：stashIfDirty 不 stash manager/outer 在主检出的未提交改动（只 stash driver 自己的 / 或改在 worktree 内工作）；（⛔ 仍 stash 他人改动 ⇒ 假）。
-- [ ] AC2（能取假，三文件负控制）：同一时刻在主检出放三个文件（tracked 未提交改动 / untracked 非忽略新文件 / ignored 文件），跑一轮 driver 循环——**修好后三个全存活**；修好前恰好前两个被 stash、第三个存活（`--include-untracked` 不含 ignored）。⛔ 三文件对照能区分「修复生效」与「stash 根本没跑」（后者三个也全存活 ⇒ 与修好同形，硬规则 3b）；（⛔ 三个全消失 / 或前两个存活着无法区分 ⇒ 假）。
+- [x] AC1（能取假，不 stash 他人未提交改动）：stashIfDirty 不 stash manager/outer 在主检出的未提交改动（只 stash driver 自己的 / 或改在 worktree 内工作）；（⛔ 仍 stash 他人改动 ⇒ 假）。
+- [x] AC2（能取假，三文件负控制）：同一时刻在主检出放三个文件（tracked 未提交改动 / untracked 非忽略新文件 / ignored 文件），跑一轮 driver 循环——**修好后三个全存活**；修好前恰好前两个被 stash、第三个存活（`--include-untracked` 不含 ignored）。⛔ 三文件对照能区分「修复生效」与「stash 根本没跑」（后者三个也全存活 ⇒ 与修好同形，硬规则 3b）；（⛔ 三个全消失 / 或前两个存活着无法区分 ⇒ 假）。
 
 ## Definition of Done
 

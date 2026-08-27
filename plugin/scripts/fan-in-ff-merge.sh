@@ -159,6 +159,11 @@ if [ -z "${escalations}" ]; then escalations="${root}/.quay/fan-in-ff-escalation
 # select-static-checks-for-touches.ts / scripts/test.sh annotations exercises its own fix.
 classify_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/select-static-checks-for-touches.ts"
 classify_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# The Touches-intersection classifier (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path) — reused
+# by the pre-flight benign-runtime-dirty branch. Same self-bootstrapping resolution as classify_script:
+# dispatched as ${worktree}/plugin/scripts/fan-in-ff-merge.sh ⇒ this is the WORKTREE's own copy, so a
+# task that modifies touches-orthogonality-check.ts exercises its own fix.
+touches_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/touches-orthogonality-check.ts"
 
 # ── AC78 判据2(c): --agent-id 自校验 (manager 2026-08-14 裁定并入实现侧, gap-ac78) ────────────────
 # --agent-id is free text — anything passes. Fail-closed: if it resolves to a TOP-LEVEL session id
@@ -256,6 +261,56 @@ EOF
   fi
   # re-read porcelain after the (possible) converge commit
   porcelain="$(git -C "${root}" status --porcelain 2>/dev/null || true)"
+fi
+
+# ── benign runtime dirty (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path) ───────────────
+# A SECOND benign dirty shape is auto-passed (仅放行不处置 — NOT committed, NOT gitignored) before the
+# refusal: an UNTRACKED runtime file under .quay/ that is OUTSIDE this task's ## Touches (the
+# gitignore-missed runtime-state family — serve-send message-receipts.jsonl, worker/promotion round
+# logs; a NEW one may appear at any time, so disposing ONE file is not the fix). Such a file is never
+# overwritten by the ff (it is not in the tree) and is unrelated to the task's declared write surface ⇒
+# the ff proceeds and the file stays untracked. Criterion is CONTENT-level (⛔ fail-closed): porcelain
+# must be ALL `?? .quay/…` entries AND none may match the task's ## Touches (reuse parseTouches +
+# matchGlob — the checkTouchesPair machinery; no new path matcher). Any tracked modification, a
+# non-.quay untracked file, or a dirty file within the task's ## Touches ⇒ NOT benign ⇒ the refusal
+# still fires (AC2 negative control).
+if [ -n "${porcelain}" ]; then
+  benign_ok=1
+  benign_paths=""
+  while IFS= read -r _bline; do
+    [ -n "${_bline}" ] || continue
+    _bstatus="${_bline:0:2}"
+    _bpath="${_bline:3}"
+    # porcelain XY: only an untracked entry (`??`) is a runtime file; M/A/D/R/T ⇒ real dirt.
+    case "${_bstatus}" in
+      "??") : ;;
+      *) benign_ok=0; break ;;
+    esac
+    # every dirty path must be under .quay/ (the runtime-state surface), ⛔ not anywhere else
+    case "${_bpath}" in
+      .quay|.quay/|.quay/*) : ;;
+      *) benign_ok=0; break ;;
+    esac
+    benign_paths="${benign_paths}${benign_paths:+ }${_bpath}"
+  done <<EOF
+${porcelain}
+EOF
+
+  if [ "${benign_ok}" = "1" ] && [ -n "${benign_paths}" ]; then
+    # The Touches-intersection is judged by the ONE computed classifier (parseTouches + matchGlob in
+    # touches-orthogonality-check.ts) — no hand-written path table. Self-bootstrapping like
+    # --classify-delta: touches_script NEXT TO this script is the worktree's own version.
+    # shellcheck disable=SC2086
+    touches_verdict="$(node --experimental-strip-types "${touches_script}" --runtime-dirty --task "${task_id}" --root "${root}" ${benign_paths} 2>/dev/null)" || touches_verdict="NOT-BENIGN (classifier failed)"
+    case "${touches_verdict}" in
+      BENIGN*) : ;;
+      *) benign_ok=0 ;;
+    esac
+    if [ "${benign_ok}" = "1" ]; then
+      echo "fan-in-ff-merge: passed through a benign runtime-dirty tree (untracked .quay/ runtime files outside the task's ## Touches) — ${benign_paths}" >&2
+      porcelain=""
+    fi
+  fi
 fi
 
 if [ -n "${porcelain}" ]; then

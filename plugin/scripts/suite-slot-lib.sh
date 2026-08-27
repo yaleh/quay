@@ -35,7 +35,9 @@
 
 # shellcheck disable=SC2317  # sourced functions are not "unused"
 suite_slot_count() {
-  local base="$1" file="" s fv
+  # `${1:-}` not `$1` — the no-arg call (default_concurrency_formula / serial_lowconc_host_default and
+  # the I4 checker) runs under test.sh's `set -u`, where a bare `$1` is an unbound-variable error.
+  local base="${1:-}" file="" s fv
   if [ -n "$base" ]; then
     file="${base}.concurrency"
   else

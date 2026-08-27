@@ -52,3 +52,8 @@ serial+lowconc 两阶段合计吃掉 full-bucket suite 真实执行时间 ~50%�
 - plugin/scripts/suite-bucket-select.ts（如需按结论统一分相）
 - plugin/scripts/suite-lpt-runner.mjs（如需按结论统一分相）
 - tasks/gap-suite-serial-lowconc-classification-recheck.md（自身）
+## Needs-Human
+
+**执行 2026-08-26T20:29:38.597Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
