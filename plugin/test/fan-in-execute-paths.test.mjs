@@ -1438,7 +1438,7 @@ async function bootstrapBlockFor(task, worktree, root) {
   const { prompts } = await runWorkflow({
     args: { task, worktree, root, runId: "fm-bootstrap", mergeTarget: "develop" },
   });
-  return extractBlockFromPrompts(prompts, "【无锁段 step 0", "【无锁段 step 1");
+  return extractBlockFromPrompts(prompts, "【无锁段 step 0", "【无锁段 step 0.5");
 }
 
 test("⑦ worktree-resolution — every fan-in orchestration script call is ${worktree}-rooted (not cwd, not ${root})", async (t) => {

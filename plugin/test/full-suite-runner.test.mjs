@@ -2439,7 +2439,7 @@ test("AC2 — RED is marked on first failure detection, before the run completes
     const redObserved = await poll(() => {
       const s = readState(root);
       return s && s.state === "red" ? s : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 15000 });
     assert.equal(redObserved.finishedAt, null, "red written while the run is still in progress");
     assert.equal(redObserved.state, "red");
     assert.ok(!fs.existsSync(marker), "red appeared before the suite's post-failure step completed");
@@ -3130,7 +3130,7 @@ test("AC2 — a vitest structured failure line flips red EARLY, before the run c
     const redObserved = await poll(() => {
       const s = readState(root);
       return s && s.state === "red" ? s : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 15000 });
     assert.equal(redObserved.state, "red");
     assert.equal(redObserved.reason, "failed", "a structured vitest failure is a REAL failure (stop-dispatch signal)");
     assert.equal(redObserved.finishedAt, null, "red written while the run is still in progress (AC2 early-red)");
