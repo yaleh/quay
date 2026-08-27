@@ -31,7 +31,7 @@ sampler 随宿主生命周期终止；AC1-2 全勾；`suite-load-*.jsonl` 跨度
 ## Touches
 
 - plugin/scripts/full-suite-runner.ts（sampler 起停 + 清理路径）
-- plugin/scripts/suite-load-sampler*（如独立脚本）
+- plugin/scripts/suite-load-sampler.ts
 - plugin/test/full-suite-runner.test.mjs（对应测试）
 - tasks/gap-suite-load-sampler-orphan-process.md（自身）
 ## Needs-Human
