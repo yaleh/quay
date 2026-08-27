@@ -1,7 +1,7 @@
 ---
 id: gap-worker-leaks-implementation-to-main-checkout
 title: worker 实现泄漏到主检出（file-tools 不感知 shell cd、未用 worktree 绝对路径）——fan-in 锁被自己脏树卡死重派循环
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -33,8 +33,8 @@ per-task worker 的 Read/Edit/Write 用了**主检出绝对路径**而非 worktr
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，worker 实现不落主检出）：修后 worker 的 Read/Edit/Write 落 worktree 而非主检出；负控制：派一个测试任务，实现完成后主检出 `git status` 保持干净、worktree 含实现；（⛔ 主检出又脏 ⇒ 假）。
-- [ ] AC2（能取假，fan-in lock 落地）：stash@{0} 的实现 pop 到重建 worktree → commit → 重派后 fan-in lock 落地 done，不再 exited-not-landed 循环；（⛔ 仍重派循环 ⇒ 假）。
+- [x] AC1（能取假，worker 实现不落主检出）：修后 worker 的 Read/Edit/Write 落 worktree 而非主检出；负控制：派一个测试任务，实现完成后主检出 `git status` 保持干净、worktree 含实现；（⛔ 主检出又脏 ⇒ 假）。**落地=dfc3e7ee8**（buildWorkerPrompt + buildContinueWorkerPrompt 各加一句强制 worktree 绝对路径，88 test pass）；fan-in 锁重派后主检出全程干净（仅 benign `.quay/` untracked 运行时文件）⇒ 不泄漏。
+- [x] AC2（能取假，fan-in lock 落地）：stash@{0} 的实现 pop 到重建 worktree → commit → 重派后 fan-in lock 落地 done，不再 exited-not-landed 循环；（⛔ 仍重派循环 ⇒ 假）。**落地=0621a3066**（fan-in lock done，AC1-AC6 全勾），经 a8b211c6e（stash pop 恢复）→ 重派 → CONTINUE 复用 → 落地。
 
 ## Definition of Done
 
