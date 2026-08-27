@@ -744,7 +744,10 @@ full_suite_lock_acquire() {
   # suite-slot-lib.sh (single definition point, sourceable/testable); it polls a flag file each 1s so a
   # normal release (flag removed) or a crash (main pid gone) exits it promptly — no lingering FD.
   FULL_SUITE_LOCK_FLAG="$(mktemp "${TMPDIR:-/tmp}/full-suite-lock-hold.XXXXXX")"
-  FULL_SUITE_LOCK_WATCHDOG_PID="$(spawn_suite_lock_hold_watchdog "${FULL_SUITE_LOCK_FDS[${_s_held}]}" "${FULL_SUITE_LOCK_FLAG}" "$$" "${FULL_SUITE_LOCK_HOLD_MAX_S}")"
+  # 5th arg = the HELD slot path: the watchdog writes `<slot>.yielded` on fire so the lane formula of a
+  # joining (S+1)-th suite counts this still-running slot-less suite (gap-suite-lane-budget-structural-
+  # guarantee-broken-buckets-no-lock 漏口② — 让槽同时让 lane, not just slot).
+  FULL_SUITE_LOCK_WATCHDOG_PID="$(spawn_suite_lock_hold_watchdog "${FULL_SUITE_LOCK_FDS[${_s_held}]}" "${FULL_SUITE_LOCK_FLAG}" "$$" "${FULL_SUITE_LOCK_HOLD_MAX_S}" "${FULL_SUITE_LOCK_SLOTS[${_s_held}]}")"
 }
 
 # full_suite_lock_release — release the HELD slot and close all FDs (idempotent; flock also
@@ -759,6 +762,13 @@ full_suite_lock_release() {
     _r_idx="${FULL_SUITE_LOCK_HELD}"
     if [ "${_r_idx}" -lt "${#FULL_SUITE_LOCK_FDS[@]}" ]; then
       flock -u "${FULL_SUITE_LOCK_FDS[${_r_idx}]}" 2>/dev/null || true
+    fi
+    # Remove the watchdog's lane-yield marker (written on fire) on a NORMAL release — a joining suite's
+    # lane formula must no longer count this (now-finished) suite as slot-less (gap-suite-lane-budget-
+    # structural-guarantee-broken-buckets-no-lock). A crash leaks a dead-pid marker that readers ignore
+    # (pid-liveness self-cleanup), so the rm here only needs to cover the normal path.
+    if [ "${_r_idx}" -lt "${#FULL_SUITE_LOCK_SLOTS[@]}" ]; then
+      rm -f "${FULL_SUITE_LOCK_SLOTS[${_r_idx}]}.yielded" 2>/dev/null || true
     fi
   fi
   # gap-suite-lock-starvation-long-validation-hold AC2 — emit lock_hold_ms (the acquire→release wall)
