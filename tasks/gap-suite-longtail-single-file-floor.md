@@ -1,7 +1,7 @@
 ---
 id: gap-suite-longtail-single-file-floor
 title: suite 长尾硬地板——最慢单文件决定 73% 墙钟（199s→389s），LPT 排序只能重排不能拆分
-status: ready
+status: done
 labels:
   - gap
   - defect
