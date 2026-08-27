@@ -135,7 +135,7 @@ worker（Claude 会话）在 worktree 里实现 → 实现完退出
   「不 detach ≠ 同步阻塞」——driver 用 spawn 子进程 + 异步 poll（exit 文件），suite 跑时 driver 照常派 worker。
 - **② 语义循环由谁控**：红 suite 的 fix-scope 循环（maxFixRounds=4）现在是子代理内部循环。新机制下
   driver 控循环（检测红 → 调 Claude 会话修 → 重跑 suite → 再判），Claude 会话只做「看懂失败 + 出修复」。
-  driver 是状态机，会话是无状态的一次性判断。
+  driver 是状态机；**同一个 Claude 会话连续处理 fix-scope 循环（maxFixRounds），非每轮唤起新会话**（人 2026-08-27 裁定②）。
 - **③ worktree 归属**：现在 worker 建 worktree + 自己跑 fan-in。分离后 worker 只负责实现，实现完退出；
   driver 接管 worktree 跑机械 fan-in。这同时消掉 outer 报的「worker TaskOutput 收尾慢 30-40min」——
   worker 不再等 fan-in 结果。

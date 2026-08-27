@@ -21,7 +21,7 @@ extra:
 
 **⊢ 根因（SPEC §1.1 三组实测，非推演）**：S=1 workflow 锁的「ff-race 结构上归零」未兑现——① 锁持有恒 ~30min（1800s watchdog 强制释放）；② suite 跑在锁 release 之后（lifecycle-driver suite 07:20:50 > release 07:16:50）；③ archguard ff 失败二次 acquire 重试。三者同根：机械活不该由一个慢子代理跑（7 条命令每条之间 ~3-5min 模型延迟），「执行载体错」不是「锁对象错」。
 
-**⊢ 三个设计点（SPEC §3.1）**：① driver 不能同步阻塞 26min——不 detach ≠ 同步阻塞，driver 用 spawn 子进程 + 异步 poll（exit 文件），suite 跑时照常派 worker；② 语义循环由 driver 控（检测红 → 调 Claude 会话修 → 重跑 → 再判），Claude 会话是无状态一次性判断；③ worktree 归属——worker 只实现、driver 接管跑机械 fan-in，顺带消掉 outer 报的「worker TaskOutput 收尾慢 30-40min」。
+**⊢ 三个设计点（SPEC §3.1）**：① driver 不能同步阻塞 26min——不 detach ≠ 同步阻塞，driver 用 spawn 子进程 + 异步 poll（exit 文件），suite 跑时照常派 worker；② 语义循环由 driver 控（检测红 → 唤起一个 Claude 会话持续修 → 重跑 → 再判），同一个会话连续处理 fix-scope 循环（maxFixRounds），非每轮唤起新会话；③ worktree 归属——worker 只实现、driver 接管跑机械 fan-in，顺带消掉 outer 报的「worker TaskOutput 收尾慢 30-40min」。
 
 ## Plan
 
