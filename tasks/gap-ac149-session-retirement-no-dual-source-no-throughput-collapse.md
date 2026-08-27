@@ -1,7 +1,7 @@
 ---
 id: gap-ac149-session-retirement-no-dual-source-no-throughput-collapse
 title: AC149 会话真正退役 + 不留双真相源 + 产能不塌（AC149-1 真停 / -2 产能 / -3 无双真相源）
-status: todo
+status: ready
 labels:
   - gap
   - feature
