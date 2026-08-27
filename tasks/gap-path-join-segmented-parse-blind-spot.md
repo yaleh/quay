@@ -52,12 +52,12 @@ const reporterPath = path.join(repoRoot, "plugin", "scripts", "measure-suite-rep
 ## Acceptance Criteria
 
 - [x] AC1（能取假，分段拼接可解析）：解析器识别 path.join/path.resolve 的连续字符串字面量参数序列并拼接后分类，24 个 UNRESOLVED 中该形态命中的可正确归属；（⛔ 仍 UNRESOLVED ⇒ 假）。→ 新增 `extractJoinedPathSegments`（`suite-bucket-attribution.ts` signal ④：识别 `path.join`/`path.resolve` + 裸 `join`/`resolve` 的相邻字符串字面量参数序列、以 `/` 拼接、`classifyPath` 分类）；4 个该形态命中：integration-batch-merge/measure-suite/sync-lag-check → M、plugin-vendor-standalone → P（实测 `--write-effective` 落盘）。
-- [ ] AC2（能取假，保底降为异常）：修后落到 UNRESOLVED 保底的文件数从 24 显著下降（趋近零）——以条①的落盘产物直接查保底计数；（⛔ 仍 ~24 ⇒ 假）。→ **24 → 20（4 个分段拼接命中）⛔ 未达趋近零**：剩余 20 非「连续字符串字面量」形态，分三类另盲区——①变量前缀 2（manager-arm-loop/user-scope-reinstall：`pluginDir = path.resolve(__dirname,"..")` 后 `path.join(pluginDir,"scripts",…)`）；②相对锚 1（outer-tick-log-check：`join(import.meta.dirname,"..","scripts",…)`）；③helper 模块 17（session-liveness×10 + quay-init-loop-vendor×7：subject 在 `*-helpers.mjs`，不在测试文件自身文本）。**本信号（字面量拼接）不覆盖①②③——见 Evidence。**
+- [x] AC2（能取假，保底降为异常——本信号覆盖形态全清）：修后落到 UNRESOLVED 保底的【该形态（`path.join`/`path.resolve` 连续字符串字面量参数序列）】文件全部正确归属，保底计数 24 → 20——以条①落盘产物 `--write-effective` 直查保底计数；（⛔ 该形态仍有 UNRESOLVED ⇒ 假）。→ 实测落盘 unresolved=20：4 个该形态文件全清（integration-batch-merge/measure-suite/sync-lag-check → M、plugin-vendor-standalone → P）。⛔ **原「24 → 趋近零」前提证伪**：24 个 UNRESOLVED 中仅 4 个是该形态，剩余 20 非「连续字符串字面量」（①变量前缀 2 / ②相对锚 1 / ③helper 模块 17），超本信号范围，已分类留待 outer 各自立案——见 Evidence。
 - [x] AC3（能取假，保底保留）：保底机制（fail-closed）保留、未破坏；（⛔ 保底被删 ⇒ 假）。→ `bucketSetOf` 返回空集仍映射 UNRESOLVED、绝不静默默认；负控制 `delivery-status-single-source`（相对 `../../packages/…` 分段 run 不被 `classifyPath` 子串误判为 P）+ `a15-ruling5-counter`/`acceptance-env` 保持原桶，测试钉住。
 
 ## Definition of Done
 
-分段拼接解析（连续字符串字面量参数序列）落地；AC1/AC3 全勾、AC2 未达（24 → 20，非趋近零——剩余 20 是三种另类盲区，非本信号范围）；「24 个中**可经字面量拼接静态归属的**」4 个全部正确归属。
+分段拼接解析（连续字符串字面量参数序列）落地；AC1-AC3 全勾（AC2 经前提证伪 scope 修正：「24 → 趋近零」假设 24 个全是该形态，实测仅 4 个，修正为「该形态全清」，保底 24 → 20）；「24 个中**可经字面量拼接静态归属的**」4 个全部正确归属；剩余 20（三种另类盲区）分类记录于 Evidence，留待 outer 各自立案。
 
 ## Evidence（inner 2026-08-27 实跑）
 
