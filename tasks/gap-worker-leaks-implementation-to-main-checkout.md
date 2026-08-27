@@ -1,7 +1,7 @@
 ---
 id: gap-worker-leaks-implementation-to-main-checkout
 title: worker 实现泄漏到主检出（file-tools 不感知 shell cd、未用 worktree 绝对路径）——fan-in 锁被自己脏树卡死重派循环
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -12,6 +12,8 @@ extra:
   schema: execution
 ---
 **type:** execution
+
+> **needs-human（2026-08-27，自指死锁）**：本修复是自指死锁——修 worker-driver 泄漏 bug 需要 worker 实现，但 bug 未修时 worker 自己的 Read/Edit/Write 也会落主检出（泄漏）⇒ worker 修不了自己。需**人直改** `worker-driver.ts`（spawn cwd + dispatch prompt 明示 worktree 绝对路径）+ `dispatch-worktree-setup.sh`（provisioning fail-closed），或人授权直改。Touches 含 worker-driver.ts，resume 前必须处置（本 status=needs-human 防 auto-dispatch）。
 
 ## Proposal
 
