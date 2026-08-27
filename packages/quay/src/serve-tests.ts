@@ -236,77 +236,60 @@ function truncateLabel(s: string, max: number): string {
 
 // ── bucket attribution (gap-webui-bucket-color-distinction) ─────────────────────────────────────
 //
-// AUTHORITATIVE-SOURCE NOTE (hard rule: single source of truth): the file→bucket attribution is
-// plugin/scripts/suite-bucket-attribution.ts (bucketSetOf). Core cannot import plugin/
-// (packages/quay/src has zero plugin/ imports), and a per-perFile subprocess would be overkill for a
-// pure static classification — so this display-surface mirror reproduces bucketSetOf's documented
-// judgment (directory-home P + relative-reference closure + path literals) with the same three
-// signal regexes. A divergence can at worst mis-colour one Gantt bar, never a dispatch/skip decision
-// (that stays with plugin/scripts/suite-bucket-select.ts). Deliberate web-context deviation: an
-// unreadable/missing file returns UNRESOLVED (empty set) instead of throwing — the page must degrade
-// to a muted bar, never a 500.
+// SINGLE-SOURCE-OF-TRUTH NOTE (gap-bucket-second-truth-source-page-recompute): the file→bucket
+// attribution is NO LONGER re-derived here. The dispatch side (plugin/scripts/suite-bucket-select.ts)
+// computes `effectiveBucketSet` for every suite file (reattribution override → static closure →
+// mirror fold, source recorded) and writes it to `.quay/suite-bucket-effective.jsonl`; this page
+// READS that artifact only. Core cannot import plugin/ (packages/quay/src has zero plugin/ imports),
+// so the shared judgment travels through the artifact, not through an import — the same
+// dispatch-computes / disk-carries / page-reads pattern as verification-round.jsonl. A missing or
+// unreadable artifact (or a file absent from it) returns UNRESOLVED (empty set) — the page degrades
+// to a muted bar, never a 500 and never a divergent judgment.
 
 type Bucket = "P" | "S" | "M";
 
-const M_PREFIX = /plugin\/scripts(?=\/|["'`\s]|$)/;
-const P_PREFIX = /packages\/[^/]+\/(?:src|bin|dist)\//;
-const S_PREFIX = /scripts\/test\.sh/;
-const P_TEST_DIR = /^packages\/[^/]+\/test\//;
 const BUCKET_ORDER: readonly Bucket[] = ["P", "S", "M"];
 
-function classifyRef(s: string): Bucket | null {
-  if (M_PREFIX.test(s)) return "M";
-  if (P_PREFIX.test(s)) return "P";
-  if (S_PREFIX.test(s)) return "S";
-  return null;
+/** The single-truth-source artifact the dispatch side writes (mirror of suite-bucket-select.ts). */
+const EFFECTIVE_PATH = ".quay/suite-bucket-effective.jsonl";
+
+/** Normalize a file reference to the artifact's repo-relative key form (forward slashes, strip ./). */
+function normalizeFileRef(p: string): string {
+  return String(p).replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
-function normalizeRel(p: string): string {
-  const parts = String(p).replace(/\\/g, "/").split("/");
-  const out: string[] = [];
-  for (const seg of parts) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") { out.pop(); continue; }
-    out.push(seg);
-  }
-  return out.join("/");
-}
-
-function resolveRelSpec(fileRel: string, spec: string): string {
-  const dir = path.posix.dirname(normalizeRel(fileRel));
-  return normalizeRel(dir === "." ? spec : `${dir}/${spec}`);
-}
-
-function extractRelSpecifiers(text: string): string[] {
-  const out: string[] = [];
-  for (const m of text.matchAll(/["'`](\.\.?\/[^"'`\n]*?)["'`]/g)) {
-    if (m[1].includes("${")) continue; // dynamic interpolation — not a static reference
-    out.push(m[1]);
-  }
-  return out;
-}
-
-/** The bucket set of one test file (mirror of suite-bucket-attribution.ts bucketSetOf). */
-export function bucketSetOfFile(fileRef: string, root: string | null | undefined): Set<Bucket> {
-  if (!root) return new Set();
-  const fileRel = normalizeRel(fileRef);
+/**
+ * Read the dispatch-written effective bucket attribution (file → bucket set). Absent/unparseable
+ * artifact ⇒ empty map (the page degrades to UNRESOLVED, never throws — hard rule 3b: a read failure
+ * must not look like a bucket). Malformed lines are skipped.
+ */
+function readBucketEffective(root: string): Map<string, Set<Bucket>> {
+  const map = new Map<string, Set<Bucket>>();
   let text: string;
   try {
-    text = readFileSync(path.join(root, fileRel), "utf8");
+    text = readFileSync(path.join(root, EFFECTIVE_PATH), "utf8");
   } catch {
-    return new Set(); // missing/unreadable → UNRESOLVED (the page degrades, never throws)
+    return map;
   }
-  const buckets = new Set<Bucket>();
-  if (P_TEST_DIR.test(fileRel)) buckets.add("P"); // directory home — one signal, not the whole judgment
-  for (const spec of extractRelSpecifiers(text)) {
-    const b = classifyRef(resolveRelSpec(fileRel, spec));
-    if (b) buckets.add(b);
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const o = JSON.parse(line) as { file?: string; buckets?: unknown[] };
+      if (!o || typeof o.file !== "string" || !Array.isArray(o.buckets)) continue;
+      const set = new Set<Bucket>();
+      for (const b of o.buckets) if (b === "P" || b === "S" || b === "M") set.add(b);
+      map.set(o.file, set);
+    } catch {
+      // malformed line — skip (the artifact is a data file; one bad line must not kill the page)
+    }
   }
-  for (const m of text.matchAll(/plugin\/scripts(?=\/|["'`\s]|$)|packages\/[^/]+\/(?:src|bin|dist)\/|scripts\/test\.sh/g)) {
-    const b = classifyRef(m[0]);
-    if (b) buckets.add(b);
-  }
-  return buckets;
+  return map;
+}
+
+/** The bucket set of one test file, read from the dispatch-written single-truth-source artifact. */
+export function bucketSetOfFile(fileRef: string, root: string | null | undefined): Set<Bucket> {
+  if (!root) return new Set();
+  return readBucketEffective(root).get(normalizeFileRef(fileRef)) ?? new Set();
 }
 
 /** Canonical bucket string: `P | S | M | P+S | P+M | S+M | P+S+M | UNRESOLVED` (same as attribution). */
@@ -346,10 +329,11 @@ export function renderPerFileTimelineSvg(
   const rows = perFile.filter(hasTimestamps).sort((a, b) => a.startedAtMs - b.startedAtMs);
   if (rows.length === 0) return "";
 
-  // gap-webui-bucket-color-distinction AC2 — attribute each file to its bucket set (the
-  // suite-bucket-attribution.ts mirror) so bars are HUE-coloured by bucket, not just pass/fail.
+  // gap-webui-bucket-color-distinction AC2 — attribute each file to its bucket set (read once from the
+  // dispatch-written single-truth-source artifact) so bars are HUE-coloured by bucket, not pass/fail.
+  const effective = root ? readBucketEffective(root) : new Map<string, Set<Bucket>>();
   const attributed = rows.map((f) => {
-    const canonical = canonicalBuckets(bucketSetOfFile(f.file, root));
+    const canonical = canonicalBuckets(effective.get(normalizeFileRef(f.file)) ?? new Set());
     return { ...f, key: bucketColorKey(canonical), label: bucketLabel(canonical) };
   });
 

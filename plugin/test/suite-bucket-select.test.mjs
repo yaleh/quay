@@ -15,6 +15,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,6 +23,9 @@ import {
   listSuiteFiles,
   loadReattribution,
   effectiveBucketSet,
+  effectiveBucketAttribution,
+  computeEffectiveAttribution,
+  writeBucketAttribution,
   triggeredBuckets,
   selectBucketsForTouches,
 } from "../scripts/suite-bucket-select.ts";
@@ -145,4 +149,60 @@ test("listSuiteFiles matches test.sh's shallow glob universe (no nested fixtures
   // the nested runner-fixtures are NOT part of test.sh's shallow glob — they must be excluded
   assert.ok(!files.includes("plugin/test/runner-fixtures/gov.test.mjs"), "nested fixture must be excluded");
   assert.ok(files.includes("packages/quay/test/npm-pack-e2e.test.mjs"));
+});
+
+// ── single truth source (gap-bucket-second-truth-source-page-recompute) ─────────────────────────────
+
+test("effectiveBucketAttribution records which path won (reattr | static | mirror-fold | unresolved)", () => {
+  const reattr = loadReattribution(ROOT);
+  // The reattribution override (AC121) wins for a test.sh-as-shell re-attributed to M.
+  assert.equal(effectiveBucketAttribution("plugin/test/dead-loop-check.test.mjs", reattr, ROOT).source, "reattr");
+  // A non-reattributed product test wins via the static closure (AC120), not the override.
+  assert.equal(effectiveBucketAttribution("packages/quay/test/npm-pack-e2e.test.mjs", reattr, ROOT).source, "static");
+  // A mirror-importing experiments test wins via the mirror fold (AC120 alone cannot resolve it).
+  assert.equal(effectiveBucketAttribution("experiments/quay-perpetual-stream/test/task-schema.test.mjs", reattr, ROOT).source, "mirror-fold");
+});
+
+test("single truth source: the artifact carries effectiveBucketSet + source, and the two formerly-divergent examples resolve to the reattribution judgment M", () => {
+  const files = listSuiteFiles(ROOT);
+  const reattr = loadReattribution(ROOT);
+  const attribution = computeEffectiveAttribution(files, reattr, ROOT);
+
+  // The two files the display mirror used to mis-colour (its self-computed {S} / {S,M} vs the
+  // dispatch's reattributed M). The single truth source must say M for BOTH.
+  for (const f of ["plugin/test/dead-loop-check.test.mjs", "plugin/test/fan-in-ff-protocol-check.test.mjs"]) {
+    const a = attribution.get(f);
+    assert.ok(a, `${f} must be in the attribution map`);
+    assert.deepEqual([...a.buckets], ["M"], `${f} must attribute to the reattribution judgment M`);
+    assert.equal(a.source, "reattr", `${f} wins via the reattribution override`);
+  }
+
+  // Every attribution carries one of the four provenance values, and an unresolved attribution is an
+  // empty bucket set (never a silent default — hard rule 3b).
+  for (const [, a] of attribution) {
+    assert.ok(["reattr", "static", "mirror-fold", "unresolved"].includes(a.source), `source ${a.source} is one of the four provenance values`);
+    if (a.source === "unresolved") assert.equal(a.buckets.size, 0, "an unresolved attribution is an empty bucket set");
+  }
+
+  // The artifact is written to `.quay/suite-bucket-effective.jsonl` (a TEMP root so the test never
+  // dirties the repo's own .quay/), keyed by repo-relative path, with the same map.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-bucket-effective-"));
+  try {
+    fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+    writeBucketAttribution(tmp, attribution);
+    const written = fs.readFileSync(path.join(tmp, ".quay", "suite-bucket-effective.jsonl"), "utf8");
+    const parsed = new Map(
+      written.split(/\r?\n/).filter(Boolean).map((l) => {
+        const o = JSON.parse(l);
+        return [o.file, o];
+      }),
+    );
+    assert.equal(parsed.size, attribution.size, "the artifact carries one line per suite file");
+    for (const f of ["plugin/test/dead-loop-check.test.mjs", "plugin/test/fan-in-ff-protocol-check.test.mjs"]) {
+      assert.deepEqual(parsed.get(f).buckets, ["M"], `artifact line for ${f} carries buckets ["M"]`);
+      assert.equal(parsed.get(f).source, "reattr", `artifact line for ${f} carries source "reattr"`);
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

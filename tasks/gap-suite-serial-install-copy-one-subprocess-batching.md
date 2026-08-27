@@ -1,6 +1,6 @@
 ---
 id: gap-suite-serial-install-copy-one-subprocess-batching
-title: suite serial-install 族墙钟地板——quay-init.sh copy_one 逐文件 cmp/sha256sum 子进程爆炸，批量化是唯一杠杆（concurrency-1 串行，拆分无效）
+title: suite serial-install 族墙钟地板——quay-init.sh copy_one 逐文件 cmp/sha256sum 子进程爆炸，批量化是唯一杠杆（16-lane 并行主池，total_work 地板，拆分无效）
 status: ready
 labels:
   - gap
@@ -15,9 +15,9 @@ extra:
 
 ## Proposal
 
-serial install 族的 7 个慢文件（近 5 轮 M bucket avg>100s，实测）跑在 **concurrency-1 serial 泳道**（`@load-sensitive real-install` 一族被 `scripts/test.sh` 路由到独立 serial phase，`test.sh:83-91`），时长之和 ≈ **1321s** 是 serial phase 的墙钟，而全量 suite 总墙钟只有 ~316s——证明它们串行而非并行。
+serial install 族的 7 个慢文件（近 5 轮 M bucket avg>100s，实测）跑在 **16-lane 并行主池，非 concurrency-1 serial 泳道**（实测 measure-history 里这 7 文件 laneCount=16，全库无 laneCount=1 记录；全量 suite 总墙钟 429s < 7 文件时长之和 ~1400s ⇒ 并行摊开）。**1321s 是 total_work**（跨 16 lane 摊开只占 ~87s 墙钟），⛔ 不是 serial phase 墙钟。
 
-**⇒ 拆分对墙钟零作用**：concurrency-1 下一个接一个跑，拆成 8 个文件还是 8×28s 的和。**唯一降地板的杠杆是摊销/批量化——减少真实子进程次数。** 这是对 `gap-suite-longtail-single-file-floor`（已 done，只修了 prod-data-audit）方向纠偏：那一条的「拆分」对 `prod-data-audit` 成立（它要批量化），但对剩下这 7 个方向本身就错。
+**⇒ 拆分对墙钟零作用**：16-lane 并行下地板 = total_work/16，拆分不减 total_work。**唯一降地板的杠杆是摊销/批量化——减少真实子进程次数。** 这是对 `gap-suite-longtail-single-file-floor`（已 done，只修了 prod-data-audit）方向纠偏：那一条的「拆分」对 `prod-data-audit` 成立（它要批量化），但对剩下这 7 个方向本身就错。**收益估计**：批量化减 total_work ~1100s ⇒ 全量墙钟 −~60–70s（429s→~360s，方向性），⛔ 不是 −1321s。
 
 **核心机制（本任务的落地对象）**：`quay-init.sh` 的 `copy_one()`（`quay-init.sh:244`）在 `copy_dir` 的 `for f in "$src_dir"/*`（`:359`）循环里，对 ~815 个机制文件**每文件一次 `cmp -s`**（`:258`）+ managed 文件每文件一次 `sha256sum | cut`（`:289`，两个子进程）+ 真 install 每文件一次 `cp`（`:254`）。每次 `--loop`（含 `--dry-run`）⇒ **~800–1600 个子进程 spawn**。这是 `real-target-verify.sh` dry-run（~30s）与 install（28–37s）墙钟的主导成本。
 
@@ -28,6 +28,10 @@ serial install 族的 7 个慢文件（近 5 轮 M bucket avg>100s，实测）�
 - **② 已摊销、剩余成本在 dry-run 扫描（① 落地后自动消解）**：`real-target-verify.test.mjs`（install 已走 `laydownWorkspace` 摊销，6 test 各跑一次 dry-run ~30s）；① 落地后 dry-run → ~3–5s。
 - **③ 未摊销、测非标准 install（① 落地后大幅缩小，残留的减次数是次要杠杆）**：`quay-init-loop.test.mjs`（测 auto-commit/non-git/dry-run/decline-confirm，标准 fixture 不适用）、`install-config-driven-e2e-{runtime,upgrade,e2e}.test.mjs`（测 Node/Go 不同 target + upgrade，机制文件 byte-identical 只有 config 不同）。
 - **④ 已接近最优，不动**：`quay-init-loop-driver.test.mjs`（~14/17 已摊销，仅 AC2/AC3/AC6 因改 plugin 树需 fresh install）、`worker-driver.test.mjs`（~20 集成 test spawn 真实 driver，end-to-end 地板难摊销）。
+
+**追加摊销候选（2026-08-27，longtail worker 补）**：
+- `packages/quay/test/npm-pack-e2e.test.mjs`（P bucket，96.9s avg → 120s 上升）：9 test 每个跑一遍 `package.sh`（build-dist + npm pack）+ tarball install ⇒ 摊销：一次 pack+install、9 test 复用。
+- `plugin/test/verify-deliver-coldstart.test.mjs`（M bucket，115.9s avg → 160s 上升）：三步交付验证 ① npm install .tgz（独立成本，需摊销）② quay-init --loop（已被本任务 copy_one 批量化覆盖）③ 冷启动活性扫描。只①需额外处理。
 
 ## Plan
 
@@ -82,4 +86,6 @@ install 的 −4% 因为它的墙钟由 cp（145 次真写盘）+ derive_loop_sc
 ## Touches
 
 - plugin/scripts/quay-init.sh（copy_one/copy_dir 批量化：一次 diff/python3 替代逐文件 cmp，一次批量替代逐 managed sha256sum|cut）
+- packages/quay/test/npm-pack-e2e.test.mjs（pack+install 摊销：一次 pack+install、9 test 复用）
+- plugin/test/verify-deliver-coldstart.test.mjs（npm install .tgz 摊销）
 - tasks/gap-suite-serial-install-copy-one-subprocess-batching.md（自身）
