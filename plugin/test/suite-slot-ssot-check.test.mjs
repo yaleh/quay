@@ -94,7 +94,7 @@ test("canonical TS — suiteLockSlotPaths generates S slots: S=1 ⇒ [.0], S=3 �
 test("canonical TS — invalid S fails open to the single default (never 0 slots)", () => {
   for (const bad of ["0", "abc", "-1"]) {
     withSlots(bad, () => {
-      assert.equal(suiteLockSlotCount(), 2, `${bad} fails open to 2`);
+      assert.equal(suiteLockSlotCount(), 1, `${bad} fails open to 1`);
     });
   }
 });
@@ -238,8 +238,8 @@ test("AC2 — precedence: seam > `.concurrency` file > knob > default (both cano
 
     // invalid file 'abc' + knob unset → falls through to the default.
     delete process.env.QUAY_MAX_CONCURRENT_SUITES;
-    assert.equal(suiteLockSlotCount(), 2, "non-numeric file + no knob → default 2");
-    assert.equal(bashSlotCount(), 2, "bash agrees");
+    assert.equal(suiteLockSlotCount(), 1, "non-numeric file + no knob → default 1");
+    assert.equal(bashSlotCount(), 1, "bash agrees");
   } finally {
     if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
     else process.env.FULL_SUITE_LOCK_FILE = prevLock;

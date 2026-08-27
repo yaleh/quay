@@ -219,6 +219,13 @@ suite 锁覆盖无锁段的第 2 步，merge 锁覆盖第 4 步，**二者时间
 **（若当初采纳被否掉的 (a)，两把锁会嵌套 ⇒ 持 merge 锁者去抢仅有 2 个的 suite 槽 ⇒ 经典锁序死锁。
 这是 (a) 除持锁时长外的第二个致命问题，一并留档。）**
 
+**⛔ 修订记录（2026-08-26，`SPEC-fan-in-workflow-lock-and-S1-2026-08-26` §3 约束 2 显式修订本 AC4）**：
+上文「两把锁覆盖范围不得交叉」的「两把锁」指【毫秒级 merge 锁】与【suite 锁】——该结论对【merge 锁】
+**仍成立**（`fan-in-ff-protocol-check.ts` 判据 2b 继续断言 ms 级 merge 锁与 suite run 不重叠）。但新 SPEC
+引入的【fan-in WORKFLOW 锁】（`fan-in-workflow.lock`，覆盖 merge develop → 全量 suite → ff 整段）
+**被设计为覆盖 suite run**——它与 suite 锁在时间上【重叠】是预期，不是违规。协议检查器据此新增判据 4
+（workflow 锁必须覆盖 suite），判据 2b 仍只作用于 ms 级 merge 锁 ⇒ **不恒红**。
+
 ## 9. 不覆盖
 
 - **不改 A6 的其余前置门**：`fan-in-ts-typecheck-gate.ts`（新增/移动 .ts ⇒ 类型图检查）仍在第 2 步之前跑，本 SPEC 不动它。

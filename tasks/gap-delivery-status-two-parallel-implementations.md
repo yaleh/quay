@@ -1,7 +1,7 @@
 ---
 id: gap-delivery-status-two-parallel-implementations
 title: 「消息投递状态」两条独立实现回答同一问题——serve-send.ts 预测（读权限设置）vs transcript-delivery-check.ts 核证（读 transcript）互不 relate，同名词不同义
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -38,9 +38,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，单一判定源）：serve-send.ts 的「消息投递」状态改读 transcript-delivery-check.ts 的核证结果（或共享同一判定源），不再各自独立维护预测/核证两套逻辑；（⛔ 仍是两条独立逻辑 ⇒ 假）。
-- [ ] AC2（能取假，语义统一）：两套「投递状态」词汇语义一致（合并或明确标注各自语义），不再同名词不同义；（⛔ 仍「预测的 delivered」vs「核证的 送达」两义并存 ⇒ 假）。
-- [ ] AC3（能取假，边界不破）：共享判定源不破坏 packages/quay/src 零 plugin/ 依赖（⛔ import plugin/ ⇒ 假）。
+- [x] AC1（能取假，单一判定源）：serve-send.ts 的「消息投递」状态改读 transcript-delivery-check.ts 的核证结果（或共享同一判定源），不再各自独立维护预测/核证两套逻辑；（⛔ 仍是两条独立逻辑 ⇒ 假）。
+- [x] AC2（能取假，语义统一）：两套「投递状态」词汇语义一致（合并或明确标注各自语义），不再同名词不同义；（⛔ 仍「预测的 delivered」vs「核证的 送达」两义并存 ⇒ 假）。
+- [x] AC3（能取假，边界不破）：共享判定源不破坏 packages/quay/src 零 plugin/ 依赖（⛔ import plugin/ ⇒ 假）。
 
 ## Definition of Done
 
@@ -49,6 +49,7 @@ extra:
 ## Touches
 
 - packages/quay/src/serve-send.ts（投递状态改读核证结果/共享判定源）
+- packages/quay/test/serve-handlers.test.mjs（移除 settings 预测测试，改为 verdict→state 判定）
 - plugin/scripts/transcript-delivery-check.ts（判定源）
 - plugin/test/（投递状态单一真相源 + 边界不破测试）
 - tasks/gap-delivery-status-two-parallel-implementations.md（自身）

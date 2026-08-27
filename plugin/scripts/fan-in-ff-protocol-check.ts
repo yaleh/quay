@@ -24,6 +24,14 @@
 //           The retry record is the anti-livelock data (§7) — a malformed record is unusable for
 //           the "同一任务 ff 失败 ≥3 次" trigger. An absent/empty retry file is a PASS (no failures
 //           recorded — nothing to validate).
+//   判据4 — (gap-fan-in-workflow-lock-and-S1, AC4 修订) the fan-in WORKFLOW lock must COVER the suite
+//           ⇒ RED when a same-task suite run falls OUTSIDE its workflow-lock hold. This is the NEW
+//           whole-workflow lock (`fan-in-workflow.lock`, events in .quay/fan-in-workflow-lock-
+//           events.jsonl, written by fan-in-ff-merge.sh --acquire/--release-workflow-lock), DISTINCT
+//           from the ms-scale merge lock of 判据2b/判据1. The OLD AC4「两把锁覆盖范围不得交叉」stays
+//           true for the MERGE lock (判据2b); the workflow lock is EXPECTED to overlap/cover the suite.
+//           A suite with no taskId, no workflow-lock hold, or whose taskId matches NO hold (a
+//           different task's suite) is NOT-EVALUATED (硬规则 3b — never folded into RED).
 //
 // Each sub-check runs when its inputs are present; the aggregate verdict is RED if ANY sub-check is
 // RED. `evaluated` is true iff at least one sub-check produced a hard verdict (per sub-check the
@@ -145,6 +153,51 @@ export function checkSuiteInLock(holdIntervals, suiteRun) {
     return { ok: false, overlaps, evaluated: true, reason: "suite-call-inside-merge-lock" };
   }
   return { ok: true, overlaps: [], evaluated: true, reason: "no-suite-lock-overlap" };
+}
+
+// ── Pure: 判据4 (gap-fan-in-workflow-lock-and-S1 — the WORKFLOW lock must COVER the suite) ───────────
+// AC4 修订 (SPEC-fan-in-ff-merge-lock-2026-08-14 → SPEC-fan-in-workflow-lock-and-S1-2026-08-26 §3
+// 约束 2): the OLD AC4「两把锁覆盖范围不得交叉」(the ms-scale merge lock must never overlap a suite run)
+// stays TRUE for the MERGE lock (判据2b above) — but a NEW, separate fan-in WORKFLOW lock
+// (`fan-in-workflow.lock`, events in `.quay/fan-in-workflow-lock-events.jsonl`) is now EXPECTED to cover
+// the whole workflow INCLUDING the suite. 判据4 is that new lock's can-be-false invariant: for a task that
+// holds the workflow lock AND ran a suite, the suite run must be CONTAINED within the workflow-lock hold
+// (a suite that ran OUTSIDE its workflow lock means the lock failed to protect the merge → ff-race returns).
+
+/**
+ * Decide 判据4: does the workflow-lock hold interval CONTAIN (cover) the suite-run interval for the SAME
+ * task? Scoped by taskId — a suite run with no taskId, or no workflow-lock hold for that task, cannot be
+ * judged (NOT-EVALUATED, never conflated with green). PURE.
+ * @param {{start:number,end:number,taskId?:string}[]} workflowHoldIntervals — from buildLockHoldIntervals on the workflow-lock events
+ * @param {{start:number,end:number,taskId?:string|null}|null} suiteRun — the suite-run interval (may carry a taskId)
+ * @returns {{ok:boolean, evaluated:boolean, reason:string}}
+ */
+export function checkSuiteCoveredByWorkflowLock(workflowHoldIntervals, suiteRun) {
+  const holds = (workflowHoldIntervals ?? []).filter(Boolean);
+  if (suiteRun == null) {
+    return { ok: true, evaluated: false, reason: "no-suite-run-interval" };
+  }
+  if (holds.length === 0) {
+    return { ok: true, evaluated: false, reason: "no-workflow-lock-holds" };
+  }
+  if (suiteRun.taskId == null) {
+    // A legacy suite state without a taskId cannot be scoped to a workflow lock — the containment
+    // property is unevaluable (硬规则 3b: 无法评估 ≠ 合格, reported distinctly, never folded green).
+    return { ok: true, evaluated: false, reason: "suite-run-lacks-task-id (NOT-EVALUATED)" };
+  }
+  // 判据4 taskId scoping (gap-fan-in-ff-protocol-check-cross-task-false-positive, same class as
+  // 判据2b): the workflow lock is PER-TASK — task X's lock protects X's merge/suite, not task Y's.
+  // A suite run whose taskId matches NO workflow-lock hold is a DIFFERENT task's suite (or ran before
+  // any lock) ⇒ the containment property is unevaluable for it (硬规则 3b), never folded into RED.
+  const sameTaskHolds = holds.filter((h) => h.taskId === suiteRun.taskId);
+  if (sameTaskHolds.length === 0) {
+    return { ok: true, evaluated: false, reason: "no-matching-task-workflow-lock-hold (NOT-EVALUATED)" };
+  }
+  const covers = sameTaskHolds.some((h) => h.start <= suiteRun.start && h.end >= suiteRun.end);
+  if (!covers) {
+    return { ok: false, evaluated: true, reason: "suite-run-outside-workflow-lock" };
+  }
+  return { ok: true, evaluated: true, reason: "suite-covered-by-workflow-lock" };
 }
 
 // ── Pure: 判据1 (lock-hold covers ONLY the ff — AC66 给 AC62 判据1 配的产物) ─────────────────────────
@@ -272,6 +325,8 @@ Usage:
                         baseline the checker is NOT-EVALUATED (cannot tell new from history).
   --lock-events <file>  判据2b: the fan-in-ff-merge.sh lock-event log (default <root>/.quay/fan-in-
                         merge-lock-events.jsonl)
+  --workflow-lock-events <file>  判据4: the whole-workflow fan-in lock-event log (default
+                        <root>/.quay/fan-in-workflow-lock-events.jsonl)
   --suite-state <file>  判据2b: the suite-state file (default <root>/.quay/full-suite-state.json)
   --retry-record <file> 判据3: the ff retry-record log (default <root>/.quay/fan-in-retries.jsonl)
   --max-hold-seconds <n> 判据1 (AC62 唯一动作=ff): a lock-hold interval LONGER than this many seconds
@@ -295,6 +350,7 @@ export function main(argv) {
   const develop = getArgValue(args, "--develop") ?? "develop";
   const baseline = getArgValue(args, "--baseline");
   const lockEventsFile = path.resolve(getArgValue(args, "--lock-events") ?? path.join(root, ".quay", "fan-in-merge-lock-events.jsonl"));
+  const workflowLockEventsFile = path.resolve(getArgValue(args, "--workflow-lock-events") ?? path.join(root, ".quay", "fan-in-workflow-lock-events.jsonl"));
   const suiteStateFile = path.resolve(getArgValue(args, "--suite-state") ?? path.join(root, ".quay", "full-suite-state.json"));
   const retryRecordFile = path.resolve(getArgValue(args, "--retry-record") ?? path.join(root, ".quay", "fan-in-retries.jsonl"));
   const rawMaxHold = getArgValue(args, "--max-hold-seconds");
@@ -350,6 +406,28 @@ export function main(argv) {
         if (v1.evaluated) anyEvaluated = true;
         if (!v1.ok) anyRed = true;
         checks.push({ check: "lock-hold-only-ff", evaluated: v1.evaluated, ok: v1.ok, violations: v1.violations, reason: v1.reason });
+      }
+    }
+  }
+
+  // ── 判据4 (gap-fan-in-workflow-lock-and-S1, AC4 修订) — workflow lock must COVER the suite ────────
+  const wfEvents = readJsonlLines(workflowLockEventsFile);
+  if (wfEvents == null) {
+    checks.push({ check: "workflow-lock-covers-suite", evaluated: false, ok: true, reason: "no-workflow-lock-events-file" });
+  } else {
+    const unparseableWf = wfEvents.some((e) => e && e.__unparseable);
+    if (unparseableWf) {
+      checks.push({ check: "workflow-lock-covers-suite", evaluated: false, ok: true, reason: "malformed-workflow-lock-events (NOT-EVALUATED)" });
+    } else {
+      const { intervals: wfIntervals, malformed: wfMalformed } = buildLockHoldIntervals(wfEvents);
+      if (wfMalformed) {
+        checks.push({ check: "workflow-lock-covers-suite", evaluated: false, ok: true, reason: "unpaired-workflow-lock-events (NOT-EVALUATED)" });
+      } else {
+        const suiteRun = suiteRunInterval(root, suiteStateFile);
+        const v4 = checkSuiteCoveredByWorkflowLock(wfIntervals, suiteRun);
+        if (v4.evaluated) anyEvaluated = true;
+        if (!v4.ok) anyRed = true;
+        checks.push({ check: "workflow-lock-covers-suite", evaluated: v4.evaluated, ok: v4.ok, reason: v4.reason });
       }
     }
   }

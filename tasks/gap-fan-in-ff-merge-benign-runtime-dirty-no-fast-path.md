@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path
 title: fan-in-ff-merge pre-flight 对良性运行时文件脏无快速通道——exit 2 整轮重跑（~20-40min 含全量 suite），应像 status-only flip 一样自动收敛（live-ghost 4 次 105min 实证）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -32,9 +32,9 @@ pre-flight 判脏时，对「落在 `.quay/` 下、且与任务 Touches 无交�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，良性运行时脏自动收敛）：pre-flight 对「`.quay/` 下、与任务 Touches 无交集的 untracked 运行时文件」走良性分支，不再 `exit 2` 整轮重跑；（⛔ 仍 exit 2 整轮重跑 ⇒ 假）。
-- [ ] AC2（能取假，负控制真脏仍拒）：真正的脏（任务自己的未提交代码改动、或 Touches 内的文件）仍 `exit 2` 拒绝；（⛔ 误放行 ⇒ 假）。
-- [ ] AC3（能取假，生产回放）：回放 live-ghost 今天的场景（`message-receipts.jsonl` 脏检出），改造后不再 4 次 exited-not-landed 累计 105min，而是毫秒级通过 pre-flight；（⛔ 仍整轮重跑 ⇒ 假）。
+- [x] AC1（能取假，良性运行时脏自动收敛）：pre-flight 对「`.quay/` 下、与任务 Touches 无交集的 untracked 运行时文件」走良性分支，不再 `exit 2` 整轮重跑；（⛔ 仍 exit 2 整轮重跑 ⇒ 假）。
+- [x] AC2（能取假，负控制真脏仍拒）：真正的脏（任务自己的未提交代码改动、或 Touches 内的文件）仍 `exit 2` 拒绝；（⛔ 误放行 ⇒ 假）。
+- [x] AC3（能取假，生产回放）：回放 live-ghost 今天的场景（`message-receipts.jsonl` 脏检出），改造后不再 4 次 exited-not-landed 累计 105min，而是毫秒级通过 pre-flight；（⛔ 仍整轮重跑 ⇒ 假）。
 
 ## Definition of Done
 
@@ -43,5 +43,6 @@ pre-flight 对良性运行时文件脏的自动收敛落地；AC1-AC3 全勾；�
 ## Touches
 
 - plugin/scripts/fan-in-ff-merge.sh（pre-flight 良性运行时文件脏分支，与 status-only 收敛并列）
+- plugin/scripts/touches-orthogonality-check.ts（checkBenignRuntimeDirty 判定函数 + --runtime-dirty CLI，复用 parseTouches/matchGlob）
 - plugin/test/（良性运行时脏收敛 + 真脏负控制 + 生产回放 测试）
 - tasks/gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path.md（自身）

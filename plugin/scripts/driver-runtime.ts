@@ -28,16 +28,16 @@
 //     verify    ⛔ 独立复核（driver-result.ts verifyIndependently，AC153）
 //     outcome   task-keyed 记录（统一信封）
 //
-//   Layer 1b · routine（manager-kind 继承 0+1b）
+//   Layer 1b · routine（outer-kind 继承 0+1b）
 //     routines  [{name, schedule, run() → Facts}]
 //     schedule  复用 routine-scheduler.ts 判定函数（isDue）
 //     collect   汇集 Facts
 //     report    经 notify 上报
 //
 // 取假（AC1，一条命令可验）：
-//   ① manager-kind（1b）被骨架强制实现空的候选池/选择/verify 三段 ⇒ 假（那三段属 1a，⛔ 不属于 0）。
+//   ① outer-kind（1b）被骨架强制实现空的候选池/选择/verify 三段 ⇒ 假（那三段属 1a，⛔ 不属于 0）。
 //     结构保证：Layer 1b 的例程契约（RoutineSpec）不引用 Layer 1a 的 source/select/verify——1b 只 import
-//     Layer 0（循环/心跳/判停经 import，非重实现），manager-kind 继承 0+1b 时结构上无法被迫实现 1a 三段。
+//     Layer 0（循环/心跳/判停经 import，非重实现），outer-kind 继承 0+1b 时结构上无法被迫实现 1a 三段。
 //   ② 1b 重新实现了一份 Layer 0 已有的循环/心跳/判停 ⇒ 假（分层没起作用）。
 //     结构保证：stopCondition/heartbeat/notify 只在本文件（Layer 0）定义一次，1a/1b 都经 import 消费。
 
@@ -104,8 +104,9 @@ export { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTas
 // 每个 kind 的差异全部由这张【数据表】承载（⛔ 非两份代码分支，AC139-2）。新增一个 kind = 这里加一行 +
 // 写该 kind 的 .ts（继承 Layer 0 + 1a 或 1b），⛔ 不需要重写 respawn 循环/心跳/判停。
 
-/** 驱动 kind 标识（promotion/worker = 任务处理型 · quality = 例程型（AC144，1b）；manager-kind 属 AC143，落在 1b）。 */
-export type DriverKind = "promotion" | "worker" | "quality";
+/** 驱动 kind 标识（promotion/worker = 任务处理型，继承 0+1a；outer = 例程型，继承 0+1b——AC143 承接
+ *  outer 的纯机械 A/B 段；quality = 例程型（AC144，1b）——均无任务池/无选择/无 verify）。 */
+export type DriverKind = "promotion" | "worker" | "outer" | "quality" | "suite";
 
 /** 一个 kind 的 registry 条目（KIND_* 八张 bash 表 → 一个 TS 数据结构）。 */
 export interface KindSpec {
@@ -136,7 +137,7 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
   promotion: {
     driver: "promotion-driver.ts",
     prefix: "promotion-driver",
-    verbs: ["start", "stop", "drain", "status", "restart", "liveness"],
+    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
     capFlag: "--cap",
     hasInterval: true,
     hasReconcile: false,
@@ -148,7 +149,7 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
   worker: {
     driver: "worker-driver.ts",
     prefix: "worker-driver",
-    verbs: ["start", "stop", "drain", "status", "restart", "liveness"],
+    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
     capFlag: "--concurrency",
     hasInterval: false,
     hasReconcile: true,
@@ -157,10 +158,25 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
     carriers: ["worker-outcome.jsonl", "worker-round.jsonl"],
     controlFile: "worker-control.json",
   },
+  // AC143：outer 例程型 kind（继承 Layer 0 + 1b，⛔ 非 1a 任务处理型）。无 cap 概念（例程是「读→报」
+  // 不是「spawn 执行者」），capFlag 仅为 registry 字段齐整（⛔ 生产不传 --cap 给 outer）。carriers 单一：
+  // 每轮无条件写一条 round 记录（含 facts），AC1 生产载体。
+  outer: {
+    driver: "outer-driver.ts",
+    prefix: "outer-driver",
+    verbs: ["start", "stop", "drain", "status", "restart", "liveness"],
+    capFlag: "--cap",
+    hasInterval: true,
+    hasReconcile: false,
+    pidSelf: true,
+    runPrefix: "ot-prod",
+    carriers: ["outer-round.jsonl"],
+    controlFile: "outer-control.json",
+  },
   quality: {
     driver: "quality-gate-driver.ts",
     prefix: "quality-driver",
-    verbs: ["start", "stop", "drain", "status", "restart", "liveness"],
+    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
     capFlag: "", // 例程型 kind 无任务池 ⇒ 无 cap（driverArgvForKind 仅在 opts.cap 非空时拼 capFlag）
     hasInterval: true,
     hasReconcile: false,
@@ -168,6 +184,22 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
     runPrefix: "qg-prod",
     carriers: ["quality-round.jsonl"],
     controlFile: "quality-control.json",
+  },
+  // suite（SPEC-suite-lifecycle-and-failure-semantics §3）：per-task suite 生命周期收进一个常驻 driver。
+  // 它是【唯一】spawn per-task suite 的地方——直接 spawn suite 并 wait（进程级父子），辅以定时兜底静默
+  // 检测；spawn 前取单飞槽、子进程终结后释放槽（取/放同一执行点）。无任务池 ⇒ 无 cap（同 quality）。
+  // carrier = suite-round.jsonl（每轮一条，outcome 三态可分 done/red/hung）。
+  suite: {
+    driver: "suite-driver.ts",
+    prefix: "suite-driver",
+    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
+    capFlag: "",
+    hasInterval: true,
+    hasReconcile: false,
+    pidSelf: true,
+    runPrefix: "st-prod",
+    carriers: ["suite-round.jsonl"],
+    controlFile: "suite-control.json",
   },
 };
 
@@ -714,9 +746,9 @@ export async function runSelectorWorker(
 }
 
 // ── Layer 1b · routine（routines / schedule / collect / report）────────────────────────────────────
-// manager-kind（AC143 承接）继承 Layer 0 + 1b。⛔ 它没有候选池、没有任务选择、没有「spawn 执行者再复核
-// 其自述」——它的单元是【例程】不是【任务】，产出是【读数】不是【任务终态】。硬塞进 1a 会迫使它实现
-// 三个空段（source/select/verify），那正是 AC151 取假① 说的架构错误。
+// outer-kind（AC143 承接，吸收 outer 的纯机械 A/B 段）继承 Layer 0 + 1b。⛔ 它没有候选池、没有任务
+// 选择、没有「spawn 执行者再复核其自述」——它的单元是【例程】不是【任务】，产出是【读数】不是
+// 【任务终态】。硬塞进 1a 会迫使它实现三个空段（source/select/verify），那正是 AC151 取假① 说的架构错误。
 
 /** 一条例程的产出（读数）。state=not-evaluated 表示读不到输入（⛔ 与「合格」不同形，硬规则 3b）。 */
 export interface Fact<T = unknown> {
@@ -935,6 +967,20 @@ export async function startKind(
     out(`already-running: supervisor pid=${spidRaw}\n`);
     return statusForKind(root, kind, true, out);
   }
+  // gap-driver-drain-no-inverse AC2：drain 写 halted=true 后，若 start 照常 spawn supervisor，驱动会立刻
+  // 读到 halt 退出、supervisor 再 respawn ⇒ 无限 respawn 循环（「起不来却表现为正在重启」，硬规则 3b 同形）。
+  // 无活 supervisor 且控制态 halted ⇒ 明确拒绝并提示解闸命令（退出 1），⛔ 不静默进 respawn 循环。
+  // 读失败（parseError）⇒ 同样拒绝（fail-closed，⛔ 读不懂 ≠ 未 halt）。
+  const ctlRel = path.posix.join(".quay", spec.controlFile);
+  const ctl = readControlState(root, process.env, ctlRel);
+  if (ctl.parseError) {
+    err(`quay driver: could not read control state at ${path.join(root, ctlRel)} (${ctl.parseError}) — refusing to start (fail-closed)\n`);
+    return 1;
+  }
+  if (ctl.state.halted) {
+    err(`quay driver: ${kind} is halted (halted_by=${ctl.state.halted_by ?? "unknown"}${ctl.state.halted_at ? `, halted_at=${ctl.state.halted_at}` : ""}) — refusing to start; clear the halt first with: quay driver resume --kind ${kind}\n`);
+    return 1;
+  }
   // 无活 supervisor；清掉孤儿驱动（supervisor 已死但驱动还在的中间态）。
   const dpidRaw = readPidFile(st.driverPidFile);
   if (dpidRaw && pidAlive(dpidRaw)) {
@@ -1024,6 +1070,23 @@ export function drainKind(root: string, kind: DriverKind, out: (s: string) => vo
   return 0;
 }
 
+/** resume（drain 的逆操作，gap-driver-drain-no-inverse AC1）：写 <kind>-control.json halted=false，解闸。
+ *  纯文件操作、driver 停着也能写（与 drain 同性质）。读-改-写经 driver-shared 单一真相源
+ *  （applyHalt(state, caller, false) 只清 halted/halted_by/halted_at，保留 preference/forced）。 */
+export function resumeKind(root: string, kind: DriverKind, out: (s: string) => void = (s) => process.stdout.write(s)): number {
+  const spec = DRIVER_KINDS[kind];
+  const rel = path.posix.join(".quay", spec.controlFile);
+  const { state, parseError } = readControlState(root, process.env, rel);
+  if (parseError) {
+    process.stderr.write(`driver-runtime: resume: could not read ${path.join(root, rel)}: ${parseError}\n`);
+    return 2;
+  }
+  const next = applyHalt(state, "quay-driver-resume", false);
+  const file = writeControlState(root, next, rel);
+  out(`resumed: ${kind} halt cleared (new dispatch re-enabled) — control state at ${file}\n`);
+  return 0;
+}
+
 /** restart = stop then start。 */
 export async function restartKind(
   root: string,
@@ -1038,7 +1101,7 @@ export async function restartKind(
 
 // ── CLI（本 kernel 是 supervisor + 状态操作的【真正实现入口】，cli/driver.ts 直接 import 调用）──────
 
-const VERBS = ["start", "stop", "drain", "status", "restart", "liveness", "__supervise"];
+const VERBS = ["start", "stop", "drain", "resume", "status", "restart", "liveness", "__supervise"];
 
 function parseKernelArgs(argv: string[]) {
   const args = argv.slice(2);
@@ -1079,8 +1142,8 @@ export async function main(argv: string[]): Promise<number> {
     process.stdout.write(`driver-runtime — AC151 Layer 0 kernel（supervisor 港进 TS 的真正实现入口）
 
 Usage:
-  node --experimental-strip-types plugin/scripts/driver-runtime.ts <start|stop|drain|status|restart|liveness> \\
-    --kind <promotion|worker> [--root <repo>] [--interval <ms>] [--reconcile-interval <s>] [--cap <n>] \\
+  node --experimental-strip-types plugin/scripts/driver-runtime.ts <start|stop|drain|resume|status|restart|liveness> \\
+    --kind <promotion|worker|outer> [--root <repo>] [--interval <ms>] [--reconcile-interval <s>] [--cap <n>] \\
     [--restart-delay <s>] [--run-id <id>] [--json]
 `);
     return 0;
@@ -1146,6 +1209,8 @@ Usage:
       return await stopKind(root, k, out);
     case "drain":
       return drainKind(root, k, out);
+    case "resume":
+      return resumeKind(root, k, out);
     case "status":
       return statusForKind(root, k, json, out);
     case "liveness":

@@ -26,8 +26,8 @@ import { parseFlags, fsSyncExists } from "./flags.ts";
 import { findConfig } from "../config.ts";
 import type { CliCtx } from "./context.ts";
 
-const VERBS = ["start", "stop", "drain", "status", "restart"];
-const KINDS = ["promotion", "worker"];
+const VERBS = ["start", "stop", "drain", "resume", "status", "restart"];
+const KINDS = ["promotion", "worker", "outer"];
 const DRIVER_RUNTIME_REL = path.join("plugin", "scripts", "driver-runtime.ts");
 
 /** Resolve the workspace root from `--root` (walk-up) or the process cwd; null when no config. */
@@ -63,22 +63,25 @@ export async function handleDriver({ sub, rest, positional }: CliCtx) {
   const { flags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
 
   if (sub === "--help" || sub === "-h" || flags.help) {
-    process.stdout.write(`quay driver — start/stop/drain/status/restart the promotion & worker drivers (AC139)
+    process.stdout.write(`quay driver — start/stop/drain/resume/status/restart the promotion & worker drivers (AC139)
 
 Usage:
-  quay driver <start|stop|drain|status|restart> --kind <promotion|worker> [--root <path>] [flags]
+  quay driver <start|stop|drain|resume|status|restart> --kind <promotion|worker|outer> [--root <path>] [flags]
 
-  start      Start the resident driver under the single supervisor (respawn on exit/kill/crash)
+  start      Start the resident driver under the single supervisor (respawn on exit/kill/crash).
+             ⛔ Refuses (exit non-zero) if the driver is halted — clear the halt with \`resume\` first.
   stop       Hard stop: terminate the supervisor + driver. For worker, in-flight workers are
              NOT killed (they orphan and finish) — use drain for a graceful stop.
   drain      Halt new dispatch WITHOUT killing in-flight workers (control-state halted=true).
              worker → worker-control.json; promotion → promotion-control.json (AC150).
+  resume     drain's inverse: clear the halt (control-state halted=false) so new dispatch resumes.
+             Surface recovery after drain+stop (⛔ no need to read driver-internal exports).
   status     Report {kind, supervisor_pid, driver_pid, alive, carrier_path, carrier_records,
              last_record_ts} — last_record_ts is the carrier's last-record timestamp (⛔ not just a
              record count, which cannot distinguish "growing" from "stalled").
   restart    stop then start.
 
-  --kind <promotion|worker>   Required. Which driver the command targets.
+  --kind <promotion|worker|outer>   Required. Which driver the command targets.
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
   --reconcile-interval <s>    (worker only) Coordination floor: reconcile at least every N seconds
                               even if every edge event (worker exit) is lost — degrade to

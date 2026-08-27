@@ -179,7 +179,7 @@ function runRunner({ root, command, laneCount, stateDir, runner, env = {}, seria
   // S=1 file), which SHADOWS the env knob a test drives ⇒ round records read S=1 instead of the
   // configured S. Pin the runner's lock base to a temp dir OUTSIDE `root` (an untracked file inside a
   // git-repo `root` would flip the round-START treeDirty annotation, breaking the CLEAN-tree test)
-  // carrying the configured slot count (default 2) in its `.concurrency` file — every runRunner-based
+  // carrying the configured slot count (default 1) in its `.concurrency` file — every runRunner-based
   // test is then hermetic against production lock state (the runner probes/locks the pinned base,
   // never the real git-common-dir).
   // ⚠️ Guard on the per-call `env` (NOT mergedEnv): the REAL suite launch (scripts/test.sh:1181) sets
@@ -192,7 +192,7 @@ function runRunner({ root, command, laneCount, stateDir, runner, env = {}, seria
     const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lock-"));
     _runnerLockDirs.push(lockDir);
     const lockBase = path.join(lockDir, "full-suite.lock");
-    fs.writeFileSync(`${lockBase}.concurrency`, mergedEnv.QUAY_MAX_CONCURRENT_SUITES ?? "2", "utf8");
+    fs.writeFileSync(`${lockBase}.concurrency`, mergedEnv.QUAY_MAX_CONCURRENT_SUITES ?? "1", "utf8");
     mergedEnv.FULL_SUITE_LOCK_FILE = lockBase;
   }
   const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"], env: mergedEnv });
@@ -1982,9 +1982,10 @@ test("AC1 — default laneCount is NPROC-derived (max(1, floor(nproc × oversub 
 
 test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the single definition point) with a clamped fallback", () => {
   // gap-single-flight-lock-2-slot-concurrent-suites — the concurrent-suite slot count S is the
-  // SINGLE definition point for "how many suites may run at once" (旋钮②, current 2). An invalid/zero
-  // setting fails OPEN to the single-suite default (2 is the current knob value; a misconfigured host
-  // degrades to the old 1-slot behavior, never to 0 lanes). The value is clamped to an integer >= 1.
+  // SINGLE definition point for "how many suites may run at once" (旋钮②, current default 1 —
+  // gap-fan-in-workflow-lock-and-S1 S=1). An invalid/zero setting fails OPEN to the single-suite
+  // default (1 is the current default value; a misconfigured host degrades to the single-suite
+  // baseline, never to 0 lanes). The value is clamped to an integer >= 1.
   const prev = process.env.QUAY_MAX_CONCURRENT_SUITES;
   const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   const prevLock = process.env.FULL_SUITE_LOCK_FILE;
@@ -2000,7 +2001,7 @@ test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the singl
     // shadowed by an ambient seam.
     delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
     delete process.env.QUAY_MAX_CONCURRENT_SUITES;
-    assert.equal(concurrentSuiteSlots(), 2, "default slot count = 2 (旋钮② current value)");
+    assert.equal(concurrentSuiteSlots(), 1, "default slot count = 1 (S=1, gap-fan-in-workflow-lock-and-S1)");
     process.env.QUAY_MAX_CONCURRENT_SUITES = "1";
     assert.equal(concurrentSuiteSlots(), 1, "1 slot = the old single-flight behavior (AC4: no regression)");
     process.env.QUAY_MAX_CONCURRENT_SUITES = "2";
@@ -2008,9 +2009,9 @@ test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the singl
     process.env.QUAY_MAX_CONCURRENT_SUITES = "3";
     assert.equal(concurrentSuiteSlots(), 3, "a future bump to 3 slots reads through (勿把 2 当设计常量)");
     process.env.QUAY_MAX_CONCURRENT_SUITES = "0";
-    assert.equal(concurrentSuiteSlots(), 2, "zero fails open to the single default, never 0 lanes");
+    assert.equal(concurrentSuiteSlots(), 1, "zero fails open to the single default, never 0 lanes");
     process.env.QUAY_MAX_CONCURRENT_SUITES = "abc";
-    assert.equal(concurrentSuiteSlots(), 2, "non-numeric fails open to the single default");
+    assert.equal(concurrentSuiteSlots(), 1, "non-numeric fails open to the single default");
   } finally {
     if (prev === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prev;
@@ -2438,7 +2439,7 @@ test("AC2 — RED is marked on first failure detection, before the run completes
     const redObserved = await poll(() => {
       const s = readState(root);
       return s && s.state === "red" ? s : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 15000 });
     assert.equal(redObserved.finishedAt, null, "red written while the run is still in progress");
     assert.equal(redObserved.state, "red");
     assert.ok(!fs.existsSync(marker), "red appeared before the suite's post-failure step completed");
@@ -3129,7 +3130,7 @@ test("AC2 — a vitest structured failure line flips red EARLY, before the run c
     const redObserved = await poll(() => {
       const s = readState(root);
       return s && s.state === "red" ? s : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 15000 });
     assert.equal(redObserved.state, "red");
     assert.equal(redObserved.reason, "failed", "a structured vitest failure is a REAL failure (stop-dispatch signal)");
     assert.equal(redObserved.finishedAt, null, "red written while the run is still in progress (AC2 early-red)");

@@ -7,35 +7,41 @@
 // because `success:true` on a fire-and-forget socket write ≠ delivered (SPEC-web-session-observability
 // §7.3: the real state machine is 已发送 → held(待批准) → expired(到期未批准,丢弃) | 已批准 → 送达).
 //
-// The four states the response can display (§7.3 / §10.1):
-//   delivered — 接收方 settings 直通（permissions.defaultMode=bypassPermissions 或
-//               crossSessionInbound:accept 任一）⇒ 送达并被消费。
-//   held      — 两者皆无 ⇒ 待接收方批准；未经批准到期 ⇒ expired（未送达）。
-//   expired   — 一条 held 回执超过批准窗口仍未批准（收据在响应里被 classifyReceipt 折算出来）。
-//   error     — 无法解析目标会话 / socket 连接或写入失败。
+// gap-delivery-status-two-parallel-implementations: the delivery STATE is now VERIFIED, not predicted.
+// The former `deliveryStateFor(settings)` predicted "delivered" from the recipient's permission
+// settings — a SECOND, unrelated definition of the same word that plugin/scripts/transcript-delivery-
+// check.ts already defines (materialization in the target transcript). That prediction is REMOVED; the
+// single judgment source is now transcript-delivery-check.ts's three-state verdict (delivered/failed/
+// unknown), read here by SHELLING OUT to its CLI (`--check <transcript> --text <message>`) — the
+// observation.ts readBoardLanding subprocess pattern — so `packages/quay/src` keeps its zero-plugin-
+// import boundary (⛔ import plugin/ ⇒ 假).
 //
-// 决定变量是接收方 settings（§10.1 单变量对照结论），不是 socket 的 fire-and-forget「写成功」。
-// 因 socket 无 ack，`delivered` 是【按接收方 settings 的确定性预测】，`held` 同理；`expired` 只能由
-// 一条 held 回执随时间折算——故本模块把回执落盘（`message-receipts.jsonl`），响应据此显示 held→expired
-// 的完整路径（SPEC §7.3 的「并保留回执」）。
+// The four states the response can display (§7.3):
+//   delivered — 已在目标 transcript 物化核证（transcript-delivery-check.ts 判定 delivered）。
+//   held      — 已发送但 transcript 尚未物化（待确认/待批准）；到期仍未物化 ⇒ expired。
+//   expired   — 一条 held 回执超过窗口仍未物化（收据在响应里被 classifyReceipt 折算出来）。
+//   error     — 无法解析目标会话 / socket 连接写入失败 / transcript 判 failed（丢弃证据）。
+//
+// 因 socket 无 ack，`delivered` 只能【核证】不能【预测】——本模块在发送后 shell 出
+// transcript-delivery-check.ts 读目标 transcript 取真实判定；`expired` 仍由一条 held 回执随时间折算
+// ——本模块把回执落盘（`message-receipts.jsonl`），响应据此显示 held→expired 的完整路径（SPEC §7.3）。
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import net from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isValidSessionId } from "./observation.ts";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import { isValidSessionId, sessionTranscriptPath } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
+
+const execFileP = promisify(execFile);
 
 // ── Delivery states ────────────────────────────────────────────────────────────────────────────────
 
 export type DeliveryState = "delivered" | "held" | "expired" | "error";
-
-/** The recipient-settings pair that decides direct-delivery vs held (§10.1). */
-export interface RecipientSettings {
-  defaultMode: string | null;
-  crossSessionInbound: string | null;
-}
 
 /** A persisted delivery receipt — the state at send time; `expired` is DERIVED, never stored. */
 export interface MessageReceipt {
@@ -65,7 +71,8 @@ export const WEB_SEND_FROM_NAME = "quay-web";
  * SAME wire format plugin/scripts/send-to-session.ts writes (auth frame first, then the user frame),
  * shared so the diagnostic script and the web entry can never drift (AC1). The socket is fire-and-
  * forget (returns 0 bytes, no ack) — resolving `ok:true` means connect+write succeeded, NOT that the
- * message was consumed; delivery is decided by the recipient's settings (§10.1), never by this return.
+ * message was consumed; delivery is VERIFIED by the target transcript (see verifyTranscriptDelivery),
+ * never by this return.
  */
 export function sendSessionFrames(opts: {
   sockPath: string;
@@ -107,89 +114,89 @@ export function sendSessionFrames(opts: {
   });
 }
 
-// ── Delivery-state determination (pure — AC2's falsifiable core) ───────────────────────────────────
+// ── Delivery-state determination (VERIFIED via the single judgment source) ─────────────────────────
+
+/** The transcript-delivery-check.ts three-state verdict — the SINGLE source of truth for "did the
+ *  message materialize in the target transcript" (plugin/scripts/transcript-delivery-check.ts). */
+export type TranscriptVerdictState = "delivered" | "failed" | "unknown";
 
 /**
- * Classify a recipient's settings into direct (delivered) vs pending-approval (held). §10.1 单变量
- * 对照: `permissions.defaultMode=bypassPermissions` OR `crossSessionInbound:accept` 任一即直通；两者
- * 皆无 ⇒ held。纯函数 — 测试直接注入 settings 断言（bypass→delivered / 皆无→held，能取假）。
+ * Fold a transcript verdict into serve-send's delivery vocabulary. The core word `delivered` now
+ * means the SAME thing in both paths (materialized in the target transcript — a VERIFICATION), never
+ * a settings prediction. Pure + falsifiable (gap-delivery-status-two-parallel-implementations AC1/AC2).
  */
-export function deliveryStateFor(settings: RecipientSettings): "delivered" | "held" {
-  if (settings.defaultMode === "bypassPermissions" || settings.crossSessionInbound === "accept") {
-    return "delivered";
+export function verdictStateToDeliveryState(verdict: TranscriptVerdictState): "delivered" | "held" | "error" {
+  switch (verdict) {
+    case "delivered": return "delivered"; // verified materialization
+    case "failed": return "error";        // clear discard evidence (enqueue→remove, never materialized)
+    default: return "held";               // unknown — sent, not yet materialized (待确认/待批准)
   }
-  return "held";
 }
 
-/** Parse a Claude Code settings JSON document into the delivery-relevant pair. Unparseable/non-object
- *  ⇒ null (hard rule ③b: 读不懂 ≠ 合格，诚实 null 让调用方走「无法确定」路径). */
-export function extractDeliverySettings(jsonText: string): RecipientSettings | null {
+/** The transcript-delivery-check CLI path, resolved relative to THIS module (same dev/dist fallback as
+ *  observation.ts readBoardLanding's DRIFT_CHECKER_REL). */
+const TRANSCRIPT_CHECKER_REL = "../../../plugin/scripts/transcript-delivery-check.ts";
+const TRANSCRIPT_CHECK_TIMEOUT_MS = 5_000;
+
+/** Resolve the transcript-delivery-check CLI: the dev `.ts` (run with --experimental-strip-types),
+ *  falling back to the shipped dist bundle (a plain ESM `.js`, run without the flag). Absent in both
+ *  forms ⇒ null (the caller then reports "unknown" — never a fabricated "delivered"). */
+function resolveTranscriptChecker(): { scriptPath: string; stripTypes: boolean } | null {
   try {
-    const j: unknown = JSON.parse(jsonText);
-    if (!j || typeof j !== "object" || Array.isArray(j)) return null;
-    const o = j as Record<string, unknown>;
-    const permissions = o.permissions;
-    const defaultMode =
-      permissions && typeof permissions === "object" && !Array.isArray(permissions) &&
-        typeof (permissions as Record<string, unknown>).defaultMode === "string"
-        ? (permissions as Record<string, unknown>).defaultMode as string
-        : null;
-    const crossSessionInbound = typeof o.crossSessionInbound === "string" ? o.crossSessionInbound : null;
-    return { defaultMode, crossSessionInbound };
+    const dev = fileURLToPath(new URL(TRANSCRIPT_CHECKER_REL, import.meta.url));
+    if (fs.existsSync(dev)) return { scriptPath: dev, stripTypes: true };
+    const bundled = fileURLToPath(
+      new URL("../../../plugin/scripts/dist/transcript-delivery-check.js", import.meta.url)
+    );
+    if (fs.existsSync(bundled)) return { scriptPath: bundled, stripTypes: false };
   } catch {
-    return null;
+    // fall through — path resolution failed ⇒ null
   }
-}
-
-/**
- * Derive delivery settings from a process argv (`/proc/<pid>/cmdline` split on NUL). Order:
- * `--dangerously-skip-permissions` ⇒ bypassPermissions; else `--settings <path-or-inline-JSON>` ⇒
- * read that file (a path) or parse it directly (an inline JSON blob); else the global
- * `~/.claude/settings.json`. `readSettingsFile` is injectable for tests. null ⇒ the recipient's
- * settings could not be determined (the caller maps that to held, never to delivered).
- */
-export function deliverySettingsFromArgv(
-  argv: string[],
-  readSettingsFile: (p: string) => string | null,
-  home: string,
-): RecipientSettings | null {
-  if (argv.includes("--dangerously-skip-permissions")) {
-    return { defaultMode: "bypassPermissions", crossSessionInbound: null };
-  }
-  const si = argv.indexOf("--settings");
-  if (si !== -1 && si + 1 < argv.length) {
-    const settingsArg = argv[si + 1];
-    // `--settings` accepts a file path OR an inline JSON blob (quay-launch.sh:121 — the manager/
-    // worker form carries `--settings {json...}` with no file path). A value whose first non-space
-    // char is `{` is inline JSON and is parsed directly — never fed to `readSettingsFile` as if it
-    // were a path (fs.readFileSync on that JSON text ENOENTs ⇒ silent null ⇒ 100% held; the defect).
-    // Same inline-json detection convention as orphan-session-check.ts classifyArgv.
-    if (settingsArg.trimStart().startsWith("{")) {
-      const settings = extractDeliverySettings(settingsArg);
-      if (settings != null) return settings;
-    } else {
-      const text = readSettingsFile(settingsArg);
-      if (text != null) return extractDeliverySettings(text);
-    }
-  }
-  const global = readSettingsFile(path.join(home, ".claude", "settings.json"));
-  if (global != null) return extractDeliverySettings(global);
   return null;
 }
 
-/** Read a recipient process's delivery settings from `/proc/<pid>/cmdline`. Never throws; null when
- *  /proc is unavailable (non-linux / process gone) or the settings file is unreadable. */
-export function readRecipientSettings(pid: number, home: string = os.homedir()): RecipientSettings | null {
-  let argv: string[];
-  try {
-    argv = fs.readFileSync(`/proc/${pid}/cmdline`).toString("utf8").split("\0").filter(Boolean);
-  } catch {
-    argv = [];
+/**
+ * Verify delivery of `message` to `sessionId` by shelling out to transcript-delivery-check.ts
+ * (`--check <transcript> --text <message>`) — the SINGLE source for "did it materialize". ⛔ No import
+ * of plugin/ (the architecture boundary holds); the subprocess read is the readBoardLanding pattern.
+ * Any failure to verify (checker/transcript missing, spawn/parse/timeout error) returns "unknown" —
+ * never a fabricated "delivered". `checkerPath` is a test seam (defaults to the real CLI).
+ */
+export async function verifyTranscriptDelivery(opts: {
+  root: string;
+  sessionId: string;
+  message: string;
+  home: string;
+  checkerPath?: string | null;
+}): Promise<TranscriptVerdictState> {
+  const transcriptPath = sessionTranscriptPath(opts.root, opts.sessionId, opts.home);
+  if (transcriptPath == null) return "unknown";
+  let scriptPath: string;
+  let stripTypes: boolean;
+  if (opts.checkerPath) {
+    scriptPath = opts.checkerPath;
+    stripTypes = scriptPath.endsWith(".ts");
+  } else {
+    const resolved = resolveTranscriptChecker();
+    if (resolved == null) return "unknown";
+    scriptPath = resolved.scriptPath;
+    stripTypes = resolved.stripTypes;
   }
-  const readSettingsFile = (p: string): string | null => {
-    try { return fs.readFileSync(p, "utf8"); } catch { return null; }
-  };
-  return deliverySettingsFromArgv(argv, readSettingsFile, home);
+  const argv = stripTypes
+    ? ["--experimental-strip-types", scriptPath, "--check", transcriptPath, "--text", opts.message]
+    : [scriptPath, "--check", transcriptPath, "--text", opts.message];
+  try {
+    const { stdout } = await execFileP("node", argv, {
+      timeout: TRANSCRIPT_CHECK_TIMEOUT_MS,
+      maxBuffer: 1024 * 1024,
+      encoding: "utf8",
+    });
+    const m = /^state: (delivered|failed|unknown)$/m.exec(stdout);
+    if (m) return m[1] as TranscriptVerdictState;
+    return "unknown";
+  } catch {
+    return "unknown"; // spawn/parse/timeout ⇒ can't verify ⇒ honest pending, never "delivered"
+  }
 }
 
 // ── Session-endpoint resolution (sessionId → socket + token) ──────────────────────────────────────
@@ -306,10 +313,14 @@ export interface SendToSessionOpts {
   message: string;
   /** Registry home (test seam). Defaults to the real $HOME. */
   home?: string;
-  /** Override recipient settings (test seam). null/undefined ⇒ read from /proc/<pid>/cmdline. */
-  settings?: RecipientSettings | null;
+  /** Workspace root — resolves the target transcript path + the checker subprocess cwd. */
+  root?: string;
   /** Override the resolved endpoint (test seam). null/undefined ⇒ resolve from the registry. */
   endpoint?: SessionEndpoint | null;
+  /** Injectable verdict state (test seam). null/undefined ⇒ verify via the transcript checker. */
+  verdict?: TranscriptVerdictState | null;
+  /** Injectable checker path (test seam). Defaults to transcript-delivery-check.ts / its dist bundle. */
+  checkerPath?: string | null;
   /** Injectable clock (test seam) for the receipt sentAtMs. */
   nowMs?: number;
   /** Receipt dir; a string appends a receipt, null/undefined persists nothing (pure). */
@@ -328,10 +339,12 @@ export function deliveryStateLabel(state: DeliveryState): string {
 
 /**
  * The full send: validate sessionId (UUID look-up key, never a path) → resolve the live endpoint →
- * read recipient settings → write the frames → record a receipt. The returned state is the honest
- * four-state delivery result: `error` (unresolvable / socket write failed), `delivered` (recipient
- * settings direct), or `held` (neither — pending approval, will `expire`). Unreadable settings map to
- * `held`, never `delivered` (⛔ 不得在拿不到直通证据时声称已送达).
+ * write the frames → VERIFY delivery against the target transcript (the single judgment source) →
+ * record a receipt. The returned state is the honest four-state delivery result: `error`
+ * (unresolvable / socket write failed / transcript judged "failed"), `delivered` (verified
+ * materialization in the target transcript), or `held` (sent but not yet materialized — will
+ * `expire` if it never materializes). An unverifiable outcome maps to `held`, never `delivered`
+ * (⛔ 不得在拿不到物化证据时声称已送达 — gap-delivery-status-two-parallel-implementations AC1).
  */
 export async function sendToSession(opts: SendToSessionOpts): Promise<SendOutcome> {
   const home = opts.home ?? os.homedir();
@@ -350,9 +363,6 @@ export async function sendToSession(opts: SendToSessionOpts): Promise<SendOutcom
     return { state: "error", detail: "未找到目标会话（不在运行注册表，或已结束）", sessionId, name: null, message };
   }
 
-  const settings = opts.settings !== undefined ? opts.settings : readRecipientSettings(endpoint.pid, home);
-  const predicted = settings != null ? deliveryStateFor(settings) : "held";
-
   const sent = await sendSessionFrames({
     sockPath: endpoint.sockPath,
     token: endpoint.token,
@@ -363,20 +373,33 @@ export async function sendToSession(opts: SendToSessionOpts): Promise<SendOutcom
     return { state: "error", detail: `连接/写入失败：${sent.reason ?? "unknown"}`, sessionId, name: endpoint.name, message };
   }
 
-  const detail = predicted === "delivered"
-    ? "接收方 settings 直通（bypassPermissions / crossSessionInbound:accept）"
-    : "接收方未设直通（待批准）；到期未批准则未送达（expired）";
+  const verdict: TranscriptVerdictState = opts.verdict !== undefined && opts.verdict !== null
+    ? opts.verdict
+    : await verifyTranscriptDelivery({
+        root: opts.root ?? "",
+        sessionId,
+        message,
+        home,
+        checkerPath: opts.checkerPath,
+      });
+  const state = verdictStateToDeliveryState(verdict);
+
+  const detail = state === "delivered"
+    ? "已在目标 transcript 物化核证（与 fallback 核证同一判定源）"
+    : state === "error"
+      ? "消息被丢弃（enqueue 后未物化即 remove）"
+      : "已发送，transcript 尚未物化（待确认/待批准）；到期仍未物化则 expired";
 
   if (opts.receiptDir != null) {
     appendMessageReceipt(opts.receiptDir, {
       sessionId,
       name: endpoint.name,
       message,
-      state: predicted,
+      state,
       sentAtMs: opts.nowMs ?? Date.now(),
     });
   }
-  return { state: predicted, detail, sessionId, name: endpoint.name, message };
+  return { state, detail, sessionId, name: endpoint.name, message };
 }
 
 // ── Rendering ──────────────────────────────────────────────────────────────────────────────────────
@@ -425,7 +448,7 @@ export function renderSendResult(outcome: SendOutcome, receipts: MessageReceipt[
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay message delivery — 投递状态">${modernistStyles()}${pageStyles()}<title>消息投递 — ${escapeHtml(outcome.sessionId)}</title></head>
     <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main>
       <h1>消息投递 — <code>${escapeHtml(outcome.sessionId)}</code></h1>
-      <p class="meta"><a href="/session/${escapeHtml(outcome.sessionId)}">← 返回会话</a> · 投递状态是【接收方 settings 的决定性预测】+ 回执折算，非 socket「写成功」</p>
+      <p class="meta"><a href="/session/${escapeHtml(outcome.sessionId)}">← 返回会话</a> · 投递状态是【目标 transcript 物化核证】+ 回执折算，非 socket「写成功」</p>
       <section style="margin-bottom:1.5rem;background:var(--color-surface);padding:1rem">
         <h2>本次发送结果</h2>
         <div style="font-size:0.9rem;margin-bottom:0.5rem">${stateBadge(outcome.state)}</div>
@@ -474,7 +497,7 @@ export async function handleSend(
   const message = params.get("message") ?? "";
 
   const receiptDir = path.join(cfg.workspaceRoot, ".quay");
-  const outcome = await sendToSession({ sessionId, message, receiptDir });
+  const outcome = await sendToSession({ sessionId, message, receiptDir, root: cfg.workspaceRoot });
   const receipts = readMessageReceipts(receiptDir, isValidSessionId(sessionId) ? sessionId : null);
 
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });

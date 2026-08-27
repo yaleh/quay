@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // per-task-suite-record-check.test.mjs — AC72 判据2/判据3 负控制 fixture for the per-task suite
 // record mechanism (plugin/scripts/per-task-suite-record.ts writer + per-task-suite-record-check.ts
 // checker). Proves the checker can go RED on the REAL AC57 7 cert absence samples (判据3, D2 不构造)

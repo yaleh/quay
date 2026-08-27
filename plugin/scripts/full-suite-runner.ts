@@ -1043,7 +1043,7 @@ export function isAbortLine(line: string): boolean {
  * AC1 — the DEFAULT laneCount is nproc-derived, using the SAME formula as test.sh's AC5
  * derivation: max(1, floor(nproc × oversub / S)). nproc = host parallelism
  * (os.availableParallelism() — read-host, never a literal, hard-rule-4 推论二 family); S = the
- * concurrent-suite slot count (旋钮② QUAY_MAX_CONCURRENT_SUITES, default 2 — the SAME
+ * concurrent-suite slot count (旋钮② QUAY_MAX_CONCURRENT_SUITES, default 1 — the SAME
  * definition-point read as concurrentSuiteSlots()); oversub = 旋钮③ QUAY_MAX_OVERSUBSCRIPTION
  * (default 1, current value not a recommendation).
  *

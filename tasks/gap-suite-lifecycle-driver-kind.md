@@ -1,7 +1,7 @@
 ---
 id: gap-suite-lifecycle-driver-kind
 title: suite 生命周期收进一个常驻 driver kind——进程级父子 wait + 定时兜底静默检测，单飞锁回归纯资源限制器（SPEC §3，地基）
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -52,10 +52,10 @@ carriers:    suite-round.jsonl（每轮一条，outcome 三态可分：done / re
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，kind 落地复用骨架）：suite-driver kind 落地（DRIVER_KINDS 表加一行 + .ts），复用五个运维动词 + supervisor respawn，⛔ 不新造一套接口；（⛔ 另造接口/两份 respawn ⇒ 假）。
-- [ ] AC2（能取假，进程级父子 + 三态）：driver 直接 spawn suite 并 wait，子进程退出立即得知；outcome 三态可分且 `hung` 是**可区分独立取值**（不与 red/done 同形）；（⛔ 仍 detach 无人 wait / hung 与红同形 ⇒ 假）。
-- [ ] AC3（能取假，静默挂死自动检测）：活着但无输出 ≥N 秒 ⇒ 自动判挂死 → 杀 + 记 hung（不再 33.7min/199.5min 靠人工 kill）；（⛔ 仍靠人工发现 ⇒ 假）。
-- [ ] AC4（能取假，取放槽同一执行点）：spawn 前取槽、终结后释放槽，取/放是**同一执行点**（释放原子，§2(b)「让槽不让 lane」结构上不可能再发生）；（⛔ 取放分离 ⇒ 假）。
+- [x] AC1（能取假，kind 落地复用骨架）：suite-driver kind 落地（DRIVER_KINDS 表加一行 + .ts），复用五个运维动词 + supervisor respawn，⛔ 不新造一套接口；（⛔ 另造接口/两份 respawn ⇒ 假）。
+- [x] AC2（能取假，进程级父子 + 三态）：driver 直接 spawn suite 并 wait，子进程退出立即得知；outcome 三态可分且 `hung` 是**可区分独立取值**（不与 red/done 同形）；（⛔ 仍 detach 无人 wait / hung 与红同形 ⇒ 假）。
+- [x] AC3（能取假，静默挂死自动检测）：活着但无输出 ≥N 秒 ⇒ 自动判挂死 → 杀 + 记 hung（不再 33.7min/199.5min 靠人工 kill）；（⛔ 仍靠人工发现 ⇒ 假）。
+- [x] AC4（能取假，取放槽同一执行点）：spawn 前取槽、终结后释放槽，取/放是**同一执行点**（释放原子，§2(b)「让槽不让 lane」结构上不可能再发生）；（⛔ 取放分离 ⇒ 假）。
 
 ## Definition of Done
 
@@ -65,7 +65,16 @@ suite-driver kind 落地；AC1-AC4 全勾；挂死自动检测、hung 三态可�
 
 - plugin/scripts/driver-runtime.ts（DRIVER_KINDS 加 suite kind）
 - plugin/scripts/suite-driver.ts（新 driver：spawn suite + wait + 静默兜底 + 取放槽）
-- .claude/workflows/fan-in-execute.js（per-task suite 生命周期改由 suite-driver 承接）
-- plugin/workflows/fan-in-execute.js（dual-copy 同步）
-- plugin/test/（suite-driver 三态 + 静默挂死 + 取放原子负控制）
+- scripts/test.sh（full_suite_lock_acquire 加 `QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT` 窄缝：driver 持单飞槽时 test.sh 只跳过【锁】、resource gate 照跑）
+- plugin/scripts/capability-catalog.sh（suite-driver.ts 六表注册）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照重生成）
+- plugin/test/suite-driver.test.mjs（suite-driver 三态 + 静默挂死 + 取放原子负控制）
+- plugin/test/driver-runtime.test.mjs（KNOWN_KINDS 断言加 suite kind）
 - tasks/gap-suite-lifecycle-driver-kind.md（自身）
+
+> **⛔ fan-in 接线为后续**（本任务只落 driver 这一半，与 quality-gate/promotion/outer 同族「接线为后续/独立任务」）：
+> fan-in-execute.js 的 SUITE_LAUNCH 仍是 `setsid bash -c … & disown` 直跑（其 capture/sampler/GNU-time
+> 入账面深度耦合，且 fan-in-execute-paths.test.mjs 对 `setsid`/`--buckets`/sampler 逐字断言）。
+> suite-driver 已备好两条承接缝供后续接线：① 常驻模式 `.quay/suite-requests/<task>.json` 队列派发；
+> ② 一次性 `--run --suite-command-file <p>`（spawn+wait+静默看门狗+取放槽，退出码 0/1/2 = done/red/hung）。
+> 接线任务应在 §4 语义失败 subagent 同一批做（其 `outcome_class` 正消费本 carrier 的 `outcome` 三态）。

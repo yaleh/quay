@@ -58,6 +58,11 @@ A 从 develop@X 建树 → merge develop@X → 跑绿；期间 B 先 ff 上去 d
 - [x] AC2 能取假：develop 上非 ff 的 fan-in merge ⇒ 红；持锁段内 suite 调用 ⇒ 红。
 - [x] AC3 失败路径：ff 失败写重试记录（任务 id/第几次/当时 develop 头/时刻）。
 - [x] AC4 锁覆盖范围不与 suite 锁交叉（时间不重叠、对象不相干）。
+  > **⛔ 修订（2026-08-26，`gap-fan-in-workflow-lock-and-S1` AC3 / SPEC-fan-in-workflow-lock-and-S1-2026-08-26 §3 约束 2）**：
+  > 本 AC4 的「锁」指【毫秒级 merge 锁】——它对 merge 锁**仍成立**。新引入的【fan-in WORKFLOW 锁】
+  > （`fan-in-workflow.lock`，覆盖 merge develop → 全量 suite → ff 整段）**被设计为覆盖 suite run**，
+  > 与 suite 锁时间重叠是预期；`fan-in-ff-protocol-check.ts` 判据 2b 仍只断言 ms 级 merge 锁不重叠、
+  > 新增判据 4 断言 workflow 锁必须覆盖 suite ⇒ 不恒红。
 - [x] AC5 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done

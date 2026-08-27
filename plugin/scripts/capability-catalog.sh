@@ -149,6 +149,7 @@ declare -A QUESTION=(
   [suite-bucket-hub-list.ts]="Which files are HUB files whose change forces the FULL suite unconditionally (no precise fan-out), and does a given change touch any hub — the explicit hub list (scripts/test.sh, plugin/scripts/full-suite-runner.ts, plugin/scripts/runner-grouping*, plugin/scripts/select-tests-for-touches.ts) plus the hubDecision/touchesHub judgment?"
   [suite-bucket-select.ts]="Which test files does a CHANGE select to run — the FULL suite (a hub file touched, or no bucket triggerable ⇒ fail-closed) or a bucket subset (P-only ⇒ P bucket, M-only ⇒ M bucket, P+M ⇒ both), with UNRESOLVED tests always selected (safe side, 安全侧不做减法)?"
   [suite-cutoff-verdict.mjs]="Is a full-suite log's failure class heavy-file at-risk / genuine dangling-Promise / cascade-victim, and which files are at-risk?"
+  [suite-driver.ts]="Does the per-task suite lifecycle get absorbed into a resident driver kind (SPEC-suite-lifecycle §3) — the driver is the ONLY spawner of a per-task suite: it directly spawns and waits (process-level parent-child, child exit known immediately), runs a periodic silence-watchdog fallback (alive but no output ≥N seconds ⇒ SIGKILL the group + a distinguishable hung outcome), and acquires the single-flight slot before spawn / releases it after termination (acquire and release at ONE execution point, release atomic — §2(b)「让槽不让 lane」结构上不可能), writing a three-state outcome (done / red / hung, hung is a distinguishable independent value ⛔ not conflation with red/done) to .quay/suite-round.jsonl, reusing the five ops verbs + supervisor respawn (Layer 0, ⛔ no new interface), rather than the old setsid+&+disown detached spawn that NOTHING waits on (ac143 hung 33.7min / lpt-lookback hung 199.5min, manual kill only)?"
   [suite-execution-form-counter.ts]="Is the suite execution form silently rolled back to main-session-direct — 执行形态 = launch Bash tool_use 落在哪类 transcript 文件（主会话/agent/workflow 三类互斥，[startedAt ± ε] 窗匹配），invariant「近 N 轮已分类形态 ≥2 类」能取假（gap-a19-evidence-field-does-not-match-measured-object 重写；runner 字段已降级非执行面取证）?"
   [suite-lpt-order.ts]="What order should the M-bucket test files run in to minimize makespan — LPT (longest-KNOWN first) descending by rolling-average perFile durationMs from .quay/verification-round.jsonl (scheduling-only reorder, pass/fail-neutral, FAIL-OPEN when no history)?"
   [suite-lpt-runner.mjs]="How does the M-bucket LPT order survive into node:test execution — by handing the ordered list to run({files}) (which preserves the array order) instead of the node --test CLI (which re-sorts positional globs alphabetically)?"
@@ -401,6 +402,7 @@ declare -A QUESTION=(
   [md-deletion-token-evaporation-check.sh]="Did any commit net-deleting ≥50 lines from *.md leave deleted-content unique tokens (identifiers/paths/专名) with ZERO occurrence in the post-delete repo (来源完备性整段蒸发)?"
   [workflows-dual-copy-drift-check.ts]="Are the five dual-copy workflow files (drain-directives / fan-in-execute / run-routines / execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped orchestrator-tick-core.md references them, so the plugin/workflows/ mirror must carry them) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships to installed targets) — a one-sided edit (改正本而落地副本不跟, the A6/fan-in-execute.js class) must go RED, the current byte-identical state GREEN (gap-workflows-dual-copy-drift-unchecked)?"
   [promotion-driver.ts]="Is the todo→ready promotion applied mechanically every round — a resident loop that calls ready-pool-check for the full-pool verdict and lands eligible promotions (zero LLM), and calls the supervisor/driver liveness check each round (gap-resident-driver-stable-carrier-liveness AC2 death-alarm caller), rather than role-will that vanishes when the session or model changes?"
+  [outer-driver.ts]="Does the outer's pure-mechanical A/B segments (A1/A3/A6/A9/A10/A18/A21 readings · B1/B2/B6 closing traces · B12/B17 self-audit) get absorbed into a resident routine-type driver — a resident loop that runs the routine table each round and writes structured Facts (verified/not-evaluated/failed) to .quay/outer-round.jsonl, where each routine that cannot read its input reports not-evaluated (⛔ not verified, AC153 Layer 1b form), rather than role-will that vanishes when the outer session or model changes (AC143)?"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
@@ -629,6 +631,7 @@ declare -A CADENCE=(
   [suite-bucket-hub-list.ts]="按需"
   [suite-bucket-select.ts]="按需"
   [suite-cutoff-verdict.mjs]="每轮"
+  [suite-driver.ts]="每轮"
   [suite-execution-form-counter.ts]="每轮"
   [suite-lpt-order.ts]="按需"
   [suite-lpt-runner.mjs]="按需"
@@ -695,6 +698,7 @@ declare -A CADENCE=(
   [red-on-omission-audit.ts]="每轮"
   [workflows-dual-copy-drift-check.ts]="每轮"
   [promotion-driver.ts]="按需"
+  [outer-driver.ts]="按需"
 
 )
 
@@ -924,6 +928,7 @@ declare -A INVALIDATION=(
   [suite-bucket-hub-list.ts]="失效前提：分桶执行的枢纽退回仍以这份显式清单为准（scripts/test.sh / plugin/scripts/full-suite-runner.ts / plugin/scripts/runner-grouping* / plugin/scripts/select-tests-for-touches.ts）；若分桶执行启用后枢纽集合变化（新增/移除枢纽文件，或 runner-grouping 提取为具体脚本），本条需同步"
   [suite-bucket-select.ts]="失效前提：分桶执行的触发桶判定仍以 AC120 classifyPath 前缀（P=packages/*/(src|bin|dist)、M=plugin/scripts、S=scripts/test.sh）+ experiments mirror fold 为准，且 UNRESOLVED 恒入选（安全侧）；若新增桶/改 UNRESOLVED 语义/改选择规则（枢纽⇒全量、触发桶∩测试桶集合），本条需同步"
   [suite-cutoff-verdict.mjs]="无可测前提，靠周期复核"
+  [suite-driver.ts]="失效前提：per-task suite 仍需一个常驻 driver 直接 spawn+wait 承接生命周期（挂死检测从「没人做」变「父进程 wait」，单飞锁取/放同一执行点）；若 fan-in 改回 subagent 直跑 detach（无人 wait）或 suite 生命周期改由其它承载（如 systemd unit 直接管进程、绕过 driver-runtime 的 runSupervisor/registry），本条退休"
   [suite-execution-form-counter.ts]="失效前提：launch Bash tool_use 的 transcript 文件类别仍是执行形态的判据源（主会话/agent/workflow 三类路径互斥，[startedAt ± ε] 窗匹配）；若执行形态改为其它记录面（如套件由 suite-state-trigger 之外的机件启动、或 transcript 文件布局变更），本条逻辑需同步"
   [suite-lpt-order.ts]="失效前提：M bucket 文件列表仍由 scripts/test.sh --buckets 生成、耗时基准载体仍是 .quay/verification-round.jsonl 的 perFile[].durationMs（滚动平均）；若载体 schema 变更（字段改名/移除）或排序改由其它机件，本条需同步"
   [suite-lpt-runner.mjs]="失效前提：scripts/test.sh --buckets 仍把 LPT 排序后的文件列表交给本 runner、node:test run({files}) 仍保序、measure-suite-reporter.mjs 仍由 stream.compose 接入（__PERFILE__ 数据源不断）；若 node:test 变更 run({files}) 语义或 --buckets 改回 node --test CLI，本条需同步"
@@ -990,6 +995,7 @@ declare -A INVALIDATION=(
   [red-on-omission-audit.ts]="失效前提：执行核仍以 tick-core 文档固化行为；若行为固化面迁出 tick-core/plugin-scripts 文件系统，本条退休"
   [workflows-dual-copy-drift-check.ts]="失效前提：workflow 双副本结构仍存在（.claude/workflows/ 与 plugin/workflows/ 各有一份同一文件）；若双副本结构取消（同一文件只在一处），本条退休"
   [promotion-driver.ts]="失效前提：todo→ready 晋升仍经 ready-pool-check --apply 全池判定；若晋升并入别处（如 outer tick 内联）或 ready-pool-check 全池模式退役，本条退休"
+  [outer-driver.ts]="失效前提：outer 会话的纯机械 A/B 段仍需一个常驻机械进程承接（读数/收尾/自查），且例程型 driver（Layer 0+1b）仍是其承载；若 outer 会话退役后这些段也随会话消失（不再需要机械承接）或例程型承载迁出（如并入 manager 会话），本条退休"
 
 )
 
@@ -1219,6 +1225,7 @@ declare -A LAST_REAFFIRMED=(
   [suite-bucket-hub-list.ts]="2026-08-21"
   [suite-bucket-select.ts]="2026-08-21"
   [suite-cutoff-verdict.mjs]="2026-08-10"
+  [suite-driver.ts]="2026-08-27"
   [suite-execution-form-counter.ts]="2026-08-13"
   [suite-lpt-order.ts]="2026-08-24"
   [suite-lpt-runner.mjs]="2026-08-24"
@@ -1285,6 +1292,7 @@ declare -A LAST_REAFFIRMED=(
   [red-on-omission-audit.ts]="2026-08-10"
   [workflows-dual-copy-drift-check.ts]="2026-08-14"
   [promotion-driver.ts]="2026-08-22"
+  [outer-driver.ts]="2026-08-26"
 
 )
 
@@ -1514,6 +1522,7 @@ declare -A MATCHING=(
   [suite-bucket-hub-list.ts]="n/a"
   [suite-bucket-select.ts]="n/a"
   [suite-cutoff-verdict.mjs]="keyword"
+  [suite-driver.ts]="n/a"
   [suite-execution-form-counter.ts]="enumerative"
   [suite-lpt-order.ts]="n/a"
   [suite-lpt-runner.mjs]="n/a"
@@ -1580,6 +1589,7 @@ declare -A MATCHING=(
   [red-on-omission-audit.ts]="keyword"
   [workflows-dual-copy-drift-check.ts]="enumerative"
   [promotion-driver.ts]="n/a"
+  [outer-driver.ts]="n/a"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1643,6 +1653,7 @@ declare -A CONSUMER=(
   [suite-bucket-attribution.ts]="谁按：AC121-125 分桶执行启用后的派发/执行核在按变更选桶时按；条件=要判定本轮该跑哪几桶（P/S/M 归属，跨桶计入两边，UNRESOLVED 不静默归桶）"
   [suite-bucket-hub-list.ts]="谁按：AC121-125 分桶执行启用后的派发/执行核在按变更选桶前按；条件=要判本轮该跑全量还是按桶扇出（触及枢纽文件⇒无条件全量，不精算扇出）"
   [suite-bucket-select.ts]="谁按：AC124 启用后 full-suite-runner.ts --buckets / scripts/test.sh --buckets 在按变更选桶时按；条件=要判本轮跑全量还是按桶子集（枢纽⇒全量；否则触发桶∩测试桶集合，UNRESOLVED 恒入选）并产出选中的测试文件清单"
+  [suite-driver.ts]="谁按：生产部署启动命令按（常驻 suite-driver，接线为后续/独立任务——本任务只落 driver 这一半，与 quality-gate/promotion/outer 同族；常驻模式扫 .quay/suite-requests/ 队列派发，或一次性 --run --suite-command-file 单发）；条件=fan-in 的 per-task suite 生命周期要改由常驻 driver 承接（spawn+wait+静默看门狗+取放槽，退出码 0/1/2=done/red/hung）"
   [suite-duration-exceed-check.ts]="消费方：外层/人每轮读 full-suite.log 里打印的 SUITE-DURATION-EXCEEDED 行据此动作（超长轮趋势可见不静默）；--no-block 故不阻产品验证轮（趋势观测≠代码类不变量，超长历史轮不得红整轮）"
   [suite-lpt-order.ts]="谁按：scripts/test.sh --buckets 生成 M bucket 文件列表后按；条件=要按已知耗时降序（LPT）重排文件列表以最小化 makespan（长测试先抢 lane 与短测试并行）"
   [suite-lpt-runner.mjs]="谁按：scripts/test.sh --buckets 生成 LPT 排序后的 M bucket 文件列表后按；条件=要把该列表按 run({files}) 保序交给 node:test（node --test CLI 会按字母序重排位置参数，丢掉 LPT 顺序）"
@@ -1679,6 +1690,7 @@ declare -A CONSUMER=(
   [tick-core-static-check.ts]="消费方：pre-commit gate（run_doc_checks → precommit-guard.ts）——--check-drift 是 HARD 闸（gap-ac90-delivery-copy-drift-gate 收口），任一副本-正本对漂移（改正本而副本不落地 / 副本单边编辑）即 block 提交；reconcile 前的 --no-block 窗口已关闭"
   [worker-driver.ts]="谁按：inner 派发器在要驱动单个 claude -p worker 跑完整任务时按（AC115 阶段 1 显式 --task）；条件=任务要被机械驱动跑完 select→worktree→develop→suite→ff 并落盘结构化 outcome 到 .quay/worker-outcome.jsonl"
   [promotion-driver.ts]="谁按：outer 生产部署启动命令按（常驻进程，promotion-driver.ts 头注释「生产部署时由 outer 的启动命令传 --interval 覆盖」——接线为 AC130 后续/独立任务，本任务只做常驻循环这一半）；条件=生产部署启动常驻进程"
+  [outer-driver.ts]="谁按：outer 退役过渡期由 outer/manager 的启动命令起常驻进程（quay driver start --kind outer）承接 outer 纯机械 A/B 段，或 fan-in 验证轮跑 --once 冒烟；条件=outer 的机械 A/B 段需要机械承接（读→报→写载体）"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the

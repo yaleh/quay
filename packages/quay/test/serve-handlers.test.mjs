@@ -23,7 +23,7 @@ import { startServer } from "../src/serve.ts";
 import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
-import { sendSessionFrames, deliveryStateFor, classifyReceipt, extractDeliverySettings, deliverySettingsFromArgv, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
+import { sendSessionFrames, verdictStateToDeliveryState, classifyReceipt, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -1685,55 +1685,13 @@ test("AC1 (no two copies) — send-to-session.ts imports the shared module inste
   assert.match(src, /import\("\.\.\/\.\.\/packages\/quay\/src\/serve-send\.ts"\)/, "the plugin script imports the shared serve-send.ts module");
 });
 
-test("AC2 (falsifiable) — deliveryStateFor maps recipient settings to delivered/held (not a hardcoded success)", () => {
-  assert.equal(deliveryStateFor({ defaultMode: "bypassPermissions", crossSessionInbound: null }), "delivered", "defaultMode=bypassPermissions ⇒ 直通");
-  assert.equal(deliveryStateFor({ defaultMode: null, crossSessionInbound: "accept" }), "delivered", "crossSessionInbound=accept ⇒ 直通");
-  assert.equal(deliveryStateFor({ defaultMode: null, crossSessionInbound: null }), "held", "两者皆无 ⇒ held（能取假：≠ delivered）");
-  assert.equal(deliveryStateFor({ defaultMode: "manual", crossSessionInbound: "reject" }), "held", "非直通值 ⇒ held");
-});
-
-test("AC2 (falsifiable) — extractDeliverySettings parses the delivery-relevant pair, malformed ⇒ null", () => {
-  const s = extractDeliverySettings('{"permissions":{"defaultMode":"bypassPermissions"},"crossSessionInbound":"accept"}');
-  assert.deepEqual(s, { defaultMode: "bypassPermissions", crossSessionInbound: "accept" }, "both fields extracted");
-  assert.deepEqual(extractDeliverySettings('{"permissions":{}}'), { defaultMode: null, crossSessionInbound: null }, "absent fields ⇒ nulls (not fabricated)");
-  assert.equal(extractDeliverySettings("not json"), null, "malformed ⇒ null (读不懂 ≠ 合格)");
-});
-
-test("AC2 (falsifiable) — deliverySettingsFromArgv reads --settings / --dangerously-skip-permissions / global fallback", () => {
-  const read = (p) => (p === "/tmp/s.json" ? '{"permissions":{"defaultMode":"bypassPermissions"}}' : null);
-  assert.deepEqual(deliverySettingsFromArgv(["--dangerously-skip-permissions"], read, "/home"), { defaultMode: "bypassPermissions", crossSessionInbound: null }, "--dangerously-skip-permissions ⇒ bypass");
-  assert.deepEqual(deliverySettingsFromArgv(["--settings", "/tmp/s.json"], read, "/home"), { defaultMode: "bypassPermissions", crossSessionInbound: null }, "--settings <path> is read");
-  assert.deepEqual(deliverySettingsFromArgv(["--settings", "/tmp/missing.json"], read, "/home"), null, "unreadable --settings ⇒ null");
-  assert.deepEqual(deliverySettingsFromArgv([], read, "/home"), null, "no flags, no global settings ⇒ null");
-});
-
-test("gap-send-message-held-inline-settings-json — deliverySettingsFromArgv parses inline --settings JSON directly (not as a file path)", () => {
-  // AC1: `--settings <inline JSON>` (with defaultMode=bypassPermissions) is parsed directly — a
-  // readSettingsFile that returns null for EVERY path (i.e. any file-path read ENOENTs) must still
-  // yield bypassPermissions, proving the JSON never went through the file-path branch.
-  const inline = '{"permissions":{"defaultMode":"bypassPermissions"},"crossSessionInbound":"accept"}';
-  const readCalls = [];
-  const readNever = (p) => { readCalls.push(p); return null; };
-  assert.deepEqual(
-    deliverySettingsFromArgv(["--settings", inline], readNever, "/home"),
-    { defaultMode: "bypassPermissions", crossSessionInbound: "accept" },
-    "inline JSON parsed directly ⇒ bypass + accept (⛔ 仍当路径读 ENOENT ⇒ 假)"
-  );
-  assert.equal(readCalls.length, 0, "readSettingsFile is never called for the inline-JSON form (the file-path branch is bypassed)");
-
-  // AC3 negative control: a REAL file path still goes through readSettingsFile (no regression).
-  const readFile = (p) => (p === "/tmp/s.json" ? '{"permissions":{"defaultMode":"bypassPermissions"}}' : null);
-  assert.deepEqual(
-    deliverySettingsFromArgv(["--settings", "/tmp/s.json"], readFile, "/home"),
-    { defaultMode: "bypassPermissions", crossSessionInbound: null },
-    "--settings <path> still reads the file (no regression)"
-  );
-  // AC3: --dangerously-skip-permissions branch unchanged (still bypass without reading anything).
-  assert.deepEqual(
-    deliverySettingsFromArgv(["--dangerously-skip-permissions", "--settings", inline], readNever, "/home"),
-    { defaultMode: "bypassPermissions", crossSessionInbound: null },
-    "--dangerously-skip-permissions still wins (no regression)"
-  );
+test("AC1/AC2 (falsifiable) — verdictStateToDeliveryState maps the transcript verdict to the delivery state (single source, not settings)", () => {
+  // gap-delivery-status-two-parallel-implementations: "delivered" is now VERIFIED (transcript
+  // materialization — the SAME meaning as plugin/scripts/transcript-delivery-check.ts), never
+  // predicted from recipient settings.
+  assert.equal(verdictStateToDeliveryState("delivered"), "delivered", "verdict delivered ⇒ delivered（核证物化）");
+  assert.equal(verdictStateToDeliveryState("failed"), "error", "verdict failed（丢弃证据）⇒ error");
+  assert.equal(verdictStateToDeliveryState("unknown"), "held", "verdict unknown（未物化）⇒ held（能取假：≠ delivered）");
 });
 
 test("AC2 (falsifiable) — classifyReceipt folds a held receipt past TTL into expired (held→expired observable)", () => {
@@ -1769,23 +1727,25 @@ test("AC2 (unit) — resolveSessionEndpoint joins sessionId→socket+peerToken f
   }
 });
 
-test("AC2 (integration) — sendToSession returns delivered/held/error by recipient settings + socket outcome", async () => {
+test("AC1 (integration) — sendToSession returns delivered/held/error by the transcript VERDICT + socket outcome (not settings)", async () => {
   const endpoint = { pid: 4242, sockPath: "", token: "peer-123", name: "target" };
+  // gap-delivery-status-two-parallel-implementations: the delivery state is the transcript verdict
+  // (injected here as a test seam), never a settings prediction.
   const delivered = await captureSocketFrames((sockPath) =>
-    sendToSession({ sessionId: SEND_SID, message: "hi", endpoint: { ...endpoint, sockPath }, settings: { defaultMode: "bypassPermissions", crossSessionInbound: null } })
+    sendToSession({ sessionId: SEND_SID, message: "hi", endpoint: { ...endpoint, sockPath }, verdict: "delivered" })
   );
   try {
-    assert.equal(delivered.result.state, "delivered", "bypass settings + socket ok ⇒ delivered");
+    assert.equal(delivered.result.state, "delivered", "verdict delivered + socket ok ⇒ delivered");
   } finally { fs.rmSync(delivered.dir, { recursive: true, force: true }); }
 
   const held = await captureSocketFrames((sockPath) =>
-    sendToSession({ sessionId: SEND_SID, message: "hi", endpoint: { ...endpoint, sockPath }, settings: { defaultMode: null, crossSessionInbound: null } })
+    sendToSession({ sessionId: SEND_SID, message: "hi", endpoint: { ...endpoint, sockPath }, verdict: "unknown" })
   );
   try {
-    assert.equal(held.result.state, "held", "neither settings + socket ok ⇒ held");
+    assert.equal(held.result.state, "held", "verdict unknown + socket ok ⇒ held");
   } finally { fs.rmSync(held.dir, { recursive: true, force: true }); }
 
-  const errored = await sendToSession({ sessionId: SEND_SID, message: "hi", endpoint: { ...endpoint, sockPath: "/tmp/nonexistent-send.sock" }, settings: { defaultMode: "bypassPermissions", crossSessionInbound: null } });
+  const errored = await sendToSession({ sessionId: SEND_SID, message: "hi", endpoint: { ...endpoint, sockPath: "/tmp/nonexistent-send.sock" }, verdict: "delivered" });
   assert.equal(errored.state, "error", "socket connect failure ⇒ error");
   const invalid = await sendToSession({ sessionId: "not-a-uuid", message: "hi", endpoint });
   assert.equal(invalid.state, "error", "non-UUID sessionId ⇒ error");

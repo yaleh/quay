@@ -115,11 +115,56 @@ function runProbe(probeFiles, { concurrency, logFile }) {
 
 // ══ ordering-helper tests (suite-lpt-order.ts) ════════════════════════════════════════════════════
 
-test("ordering — the --buckets branch wires suite-lpt-order.ts behind the QUAY_TEST_LPT_ORDER gate", () => {
+test("ordering — LPT wiring lives in lpt_reorder_files (suite-lpt-order.ts behind QUAY_TEST_LPT_ORDER), called by the --buckets branch", () => {
   const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
   const branch = bucketsBranchSrc(testSh);
-  assert.match(branch, /suite-lpt-order\.ts/, "the --buckets branch must invoke suite-lpt-order.ts");
-  assert.match(branch, /QUAY_TEST_LPT_ORDER/, "the wiring must sit behind the QUAY_TEST_LPT_ORDER rollback gate");
+  // The --buckets branch hands its selected file list to the SHARED helper (single definition
+  // point with the full-suite default path — gap-suite-lpt-full-bucket-run-selected), never an
+  // inline copy that can drift.
+  assert.match(branch, /lpt_reorder_files files/, "the --buckets branch must call lpt_reorder_files");
+  // The helper itself wires suite-lpt-order.ts behind the QUAY_TEST_LPT_ORDER rollback gate.
+  assert.match(testSh, /lpt_reorder_files\(\)\s*\{/, "scripts/test.sh must define lpt_reorder_files()");
+  assert.match(testSh, /suite-lpt-order\.ts/, "the helper must invoke suite-lpt-order.ts");
+  assert.match(testSh, /QUAY_TEST_LPT_ORDER/, "the wiring must sit behind the QUAY_TEST_LPT_ORDER rollback gate");
+});
+
+// ══ full-suite-default-path LPT wiring (gap-suite-lpt-full-bucket-run-selected) ════════════════════
+// The full-suite DEFAULT path (no --buckets, and --buckets bucket_full=1) previously ran its MAIN
+// body through `node --test "${files[@]}"` — the node --test CLI re-sorts positional globs
+// alphabetically, so the longest-known files serialized at the tail (round #557: full-suite-runner.
+// test.mjs at 242.6s sat OUTSIDE the first 10 files). The fix routes the main body through
+// lpt_reorder_files + suite-lpt-runner.mjs (run({files}) preserves argv order).
+
+test("AC1 — the full-suite default path LPT-reorders its main body and runs it order-preserving via run({files})", () => {
+  const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
+  // The full path's MAIN phase must LPT-reorder `files` (longest-known-first, NOT alphabetical) and
+  // hand it to suite-lpt-runner.mjs. The `bucket_test_concurrency "$@"` spelling (vs the --buckets
+  // branch's `"${rest_args[@]}"`) is what pins THIS as the full-suite default path's main phase.
+  assert.match(
+    testSh,
+    /lpt_reorder_files files\n    node --test-concurrency="\$\(bucket_test_concurrency "\$@"\)" "\$\{repo_root\}\/plugin\/scripts\/suite-lpt-runner\.mjs"/,
+    "the full-suite main phase must LPT-reorder then run suite-lpt-runner.mjs (order-preserving)",
+  );
+});
+
+test("AC2 — LPT lands on the main body only; serial/lowconc phases keep their own concurrency and are NOT cross-mixed", () => {
+  const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
+  // Phase compatibility: the LPT reorder must land on the MAIN body's `files` array ONLY — never on
+  // serial_files / lowconc_files, which run at their OWN SERIAL_CONCURRENCY / LOWCONC_CONCURRENCY.
+  // Cross-mixing the three concurrency groups would break the phase isolation guarantee.
+  assert.doesNotMatch(testSh, /lpt_reorder_files serial_files/, "serial phase must NOT be LPT-reordered");
+  assert.doesNotMatch(testSh, /lpt_reorder_files lowconc_files/, "lowconc phase must NOT be LPT-reordered");
+  // The serial/lowconc phases still run via node --test at their own concurrency (unchanged).
+  assert.match(
+    testSh,
+    /node --test --test-concurrency="\$SERIAL_CONCURRENCY"( \$\(suite_reporter_flags\))? "\$\{serial_files\[@\]\}"/,
+    "serial phase must keep node --test at SERIAL_CONCURRENCY",
+  );
+  assert.match(
+    testSh,
+    /node --test --test-concurrency="\$LOWCONC_CONCURRENCY"( \$\(suite_reporter_flags\))? "\$\{lowconc_files\[@\]\}"/,
+    "lowconc phase must keep node --test at LOWCONC_CONCURRENCY",
+  );
 });
 
 test("ordering — orderByLpt sorts longest-known-first and keeps unknowns at the END in original order", () => {
