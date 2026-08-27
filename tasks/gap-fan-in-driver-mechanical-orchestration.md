@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-driver-mechanical-orchestration
 title: fan-in 机械编排——取消 workflow 子代理、机械部分交 driver、语义部分单独 Claude 会话（SPEC 正本 orchestration/SPEC-fan-in-driver-mechanical-orchestration-2026-08-27.md）
-status: done
+status: ready
 labels:
   - gap
   - feature
