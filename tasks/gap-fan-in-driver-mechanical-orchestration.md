@@ -31,11 +31,11 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，锁时长塌缩）：一次 fan-in 的 fan-in workflow 锁持有 ≤ 机械时长 + 余量，⛔ 不再 ~30min 恒值；实测多任务锁持有显著低于 1800s 且与任务内容相关。
+- [ ] AC1（能取假，锁时长塌缩）：一次 fan-in 的 fan-in workflow 锁持有时长 ≤ 机械时长 + 余量（merge + scoped门 + suite + ff），⛔ 不再是 ~30min 恒值；实测多个任务锁持有显著低于 1800s 且与任务内容相关。
 - [ ] AC2（能取假，锁罩住 suite）：fan-in 锁 release 不早于 suite 结束（`lock-events release ≥ suite exit end_iso`），⛔ 不再「suite 跑在 release 之后」。
 - [ ] AC3（能取假，无 detach）：suite 进程是 driver 子进程（ppid 指向 driver），⛔ 不是 `setsid & disown` 孤儿（ppid=1）。
-- [ ] AC4（能取假，ff-race 真归零）：连续 N 个 code-delta 任务 fan-in，ff 失败 = 0（或仅 inert-delta 毫秒级 re-ff），⛔ 不再 archguard 式「ff 失败 + 二次 acquire」。
-- [ ] AC5（能取假，吞吐恢复）：任务落地吞吐 ~1/h → ≥3/h（同 3 在飞下）。
+- [ ] AC4（能取假，ff-race 真归零）：连续 N 个 code-delta 任务 fan-in，ff 失败次数 = 0（或仅 inert-delta 的毫秒级 re-ff，非重跑 suite）；⛔ 不再出现 archguard 式「ff 失败 + 二次 acquire 重试」。
+- [ ] AC5（能取假，吞吐恢复）：任务落地吞吐从 ~1/h 回到 ≥ 3/h（同 3 在飞下，landing 不再被 30min 编排撑长）。
 
 ## Definition of Done
 
