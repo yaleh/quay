@@ -52,5 +52,6 @@ extra: {}
 
 - packages/quay/src/serve-handlers.ts（三板块 round 标注 + 无 perFile 提示）
 - packages/quay/src/observation.ts（TestRunRecord 增 runId 字段 + parseVerificationRound 解析，供负载曲线 runId→round 映射）
-- packages/quay/test/（对应测试，若新增断言）
+- packages/quay/test/observation.test.mjs
+- packages/quay/test/serve-handlers.test.mjs
 - tasks/gap-web-tests-three-sections-round-drift.md（自身）
