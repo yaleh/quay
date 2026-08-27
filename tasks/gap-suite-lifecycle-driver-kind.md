@@ -68,7 +68,8 @@ suite-driver kind 落地；AC1-AC4 全勾；挂死自动检测、hung 三态可�
 - scripts/test.sh（full_suite_lock_acquire 加 `QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT` 窄缝：driver 持单飞槽时 test.sh 只跳过【锁】、resource gate 照跑）
 - plugin/scripts/capability-catalog.sh（suite-driver.ts 六表注册）
 - docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照重生成）
-- plugin/test/（suite-driver 三态 + 静默挂死 + 取放原子负控制）
+- plugin/test/suite-driver.test.mjs（suite-driver 三态 + 静默挂死 + 取放原子负控制）
+- plugin/test/driver-runtime.test.mjs（KNOWN_KINDS 断言加 suite kind）
 - tasks/gap-suite-lifecycle-driver-kind.md（自身）
 
 > **⛔ fan-in 接线为后续**（本任务只落 driver 这一半，与 quality-gate/promotion/outer 同族「接线为后续/独立任务」）：
