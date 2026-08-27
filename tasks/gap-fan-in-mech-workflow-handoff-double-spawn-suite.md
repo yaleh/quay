@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-mech-workflow-handoff-double-spawn-suite
 title: 机械→workflow 兜底交接非互斥——同任务双 spawn suite（争单飞槽饿死后继）
-status: ready
+status: superseded
 labels:
   - gap
   - defect
@@ -10,8 +10,12 @@ children: []
 extra:
   schema: execution
   defer: post-mechanical-first-green
+  superseded_by: gap-fan-in-continue-prompt-not-migrated-to-mechanical
+  superseded_reason: 框架更正——workflow 应完全退役非保留为兜底；双 spawn 是双路径共存过渡期症状，修法是完成机械替代非交接互斥补丁
 ---
 **type:** execution
+
+> ⛔ 已撤回（2026-08-27 23:3x，inner 框架更正）：本任务假设 workflow 长期保留为「语义兜底」而做交接互斥补丁——假设错了。workflow 应**完全退役**，双 spawn 是双路径共存过渡期症状，机械迁移做完、workflow 退役后第二个 spawner 消失、问题自然归零。修法 = 完成替代（续做迁移 `gap-fan-in-continue-prompt-not-migrated-to-mechanical` 已落地 + 后续退役链），非补丁。若过渡期需短期止血，另立「双路径共存期单任务仅一 suite 观测项」，不作正式修复任务。
 
 ## Proposal
 
