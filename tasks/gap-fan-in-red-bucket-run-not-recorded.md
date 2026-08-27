@@ -2,7 +2,7 @@
 id: gap-fan-in-red-bucket-run-not-recorded
 title: fan-in 桶路径跑红不入账——第二套平行 harness + green-only writer 绕开
   full-suite-runner.ts 的正确记录（硬规则 3b；人裁定「定义正确机制，不修修补补」）
-status: superseded
+status: ready
 labels:
   - gap
   - defect
@@ -11,12 +11,21 @@ parent: null
 children: []
 extra:
   schema: execution
-  superseded: true
-  superseded_at: 2026-08-27
-  superseded_by: gap-fan-in-driver-mechanical-orchestration
 ---
 **type:** execution
-> **SUPERSEDED / 作废（人 2026-08-27 裁定，新 SPEC gap-fan-in-driver-mechanical-orchestration）**：修复对象 fan-in-execute.js 桶路径平行 harness 随新 SPEC 退役；新 SPEC driver 直接用 full-suite-runner.ts（本就记录 green+red），「跑红不入账」被自然满足。历史诊断保留，不重开。
+> **REOPENED / 重开（人 2026-08-27 逐字批准「同意。发给 outer。」）**：本条曾于 2026-08-27 被作废（5c53fb22d，superseded_by gap-fan-in-driver-mechanical-orchestration），作废前提「新 SPEC driver 直接用 full-suite-runner.ts，『跑红不入账』被自然满足」**已被生产证据证伪**：
+> ```
+> ① 机械路径 suite 命令缺省 = bash <worktree>/scripts/test.sh --buckets <task>（worker-driver.ts:1486），
+>    不是 full-suite-runner.ts；worker-driver 对 verification-round.jsonl 只读不写（:297/:360/:370）。
+> ② green 记录仍由 workflow 兜底 subagent 调 green-only writer pre-verified-round-record.ts 补写
+>    （state :547 硬编码 "green"、仅 suite_exit=0 后写）。
+> ③ 生产实证（2026-08-27，gap-full-suite-runner-test-poll-timeout-load-flake）：两轮红 suite
+>    （16:17–16:48 机械 fan-in 红；17:22 capture 落地 suite_exit=1、wall 1840.5s）在
+>    verification-round.jsonl 按 runId/taskId grep 均 0 条（谓词已对 round 683/684/685 真样本核对过），
+>    文件 mtime 停 16:13:57Z，/tests 最新三条全绿——约 1h 真实红运行无痕。
+> ④ 替代任务 gap-fan-in-driver-mechanical-orchestration（done）AC1-AC5 无一要求红轮入账，义务未被继承。
+> ```
+> 修复面随之扩大：**主修复面 = 机械路径**（worker-driver.ts runMechanicalFanIn 的 suite 步），workflow 兜底路径（fan-in-execute.js）是次要面。
 
 ## Proposal
 
@@ -70,9 +79,11 @@ fan-in 桶路径统一到正确 runner（full-suite-runner.ts --buckets），gre
 
 ## Touches
 
-- .claude/workflows/fan-in-execute.js（桶路径改走 full-suite-runner.ts --buckets，删/收窄平行 detached harness + green-only writer）
+- plugin/scripts/worker-driver.ts（机械路径 suite 步统一到 full-suite-runner.ts --buckets，主修复面）
+- .claude/workflows/fan-in-execute.js（兜底路径桶路径改走 full-suite-runner.ts --buckets，删/收窄平行 detached harness + green-only writer）
 - plugin/workflows/fan-in-execute.js（dual-copy 同步，逐字节一致）
 - plugin/scripts/pre-verified-round-record.ts
+- plugin/test/worker-driver.test.mjs（机械路径红轮入账测试）
 - plugin/test/fan-in-execute-paths.test.mjs
 - plugin/test/full-suite-runner.test.mjs
 - tasks/gap-fan-in-red-bucket-run-not-recorded.md（自身）

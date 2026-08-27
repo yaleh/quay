@@ -300,7 +300,7 @@ export function detectProvider(): string {
  * model/--bare/-n/unset) + flag-only params live in the sibling `.quay/profiles.yml`
  * scaffold (generateProfilesContent). Roles default to the generic `claude` launcher
  * / null model; a consumer edits them to their stack (quay itself uses
- * claude-fjdac + deepseek-v4-pro).
+ * claude-fjdac + deepseek-v4-pro-anthropic).
  */
 export function generateLaunchSettingsContent(): string {
   return (
@@ -323,7 +323,7 @@ export function generateLaunchSettingsContent(): string {
  * python3+yaml). Generic default: launcher=claude / model=null — a consumer edits
  * them to their stack. Kept structurally identical to the checked-in dev-tree
  * `.quay/profiles.yml` (worker-default / manager-local profiles + 3 roles), only
- * differing in launcher/model values (dev-tree uses claude-fjdac + deepseek-v4-pro).
+ * differing in launcher/model values (dev-tree uses claude-fjdac + deepseek-v4-pro-anthropic).
  */
 export function generateProfilesContent(): string {
   return [

@@ -29,14 +29,21 @@ extra:
 - 没落地：**7** 个 —— 含 web-session 连续两轮 30min 持有仍 ready、lane-budget 被 driver 重启杀。
 - 对照：fast 任务（10–21min，bucket 档）全部 ff 在锁内 release 前几秒 ⇒ 设计流程就是「ff 在锁内」，30min 任务的「ff 在锁外」是异常。
 
+**实时恶化 + 新增形态（2026-08-27 18:5x，fan-in suite watchdog 证据，已逐条核实）**：
+- **实锤 1（占槽者身份）**：占槽闷死 serial-install r1 的是 fan-in **workflow 路径**任务 poll-timeout（workflow-lock runId=fm-…-igm7j2 16:17:53 acquire；其 worker-outcome 今天无任何机械记录；suite 日志带 `__FANIN_SUITE_START__ head=` 标记——全仓无代码写它，workflow 烘焙脚本独有）。它 16:48:12 被 1800s 切（未落地）后 suite 16:51:32 起**无锁空跑 30min、占单飞槽 960s、ff 未落**（merge-lock 无条目、任务仍 ready）。
+- **实锤 2（刚发生）**：serial-install round-2（fm-…-k07mni）18:08:22 acquire → **18:38:40 被 1800s 切**（1818s，同签名），其 suite（18:27:51 起）此刻仍在无锁跑。
+- **新增形态（⛔ 危害范围扩大）**：切锁危害不止 ff-race——**僵尸 suite 继续占着单飞槽，闷死下一个排队的 fan-in**（serial-install r1 正是死于排在 poll-timeout 的无锁 suite 后面）。切锁 ⇒ **零落地 + 槽污染双重浪费**。
+- **实时读数**：16:17:53 后 `fan-in-merge-lock-events.jsonl` 零新增（~2.5h 零 ff 落地），每个 ≥30min 持有者全被切。
+
 **dedup（机制词不重复）**：`gap-suite-lock-starvation-long-validation-hold` = 设 1800s 的 feature（done）；`gap-fan-in-workflow-lock-and-S1` = 扩锁 scope（done）；`gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock` = 漏口②「让槽不让 lane」（ready，本条下游）；`gap-mech-fan-in-suite-silence-watchdog-fired` = 另一个看门狗（15min 静默 SIGKILL，不同对象）。**无人点名「阈值 < fan-in 时长」这个上游机制。**
 
 ## Plan
 
-修法三选一（实现方定，不代拍）：
-1. 阈值按真实全量 fan-in 时长重测（不写死 1800）。
-2. 看门狗只在 holder 真死（路径 (b)）时切锁，对「仍存活且在跑」不切。
-3. 把「饿死防护看门狗」与「正常长 suite」分开（死持有者 watchdog vs 正常长跑不断锁）。
+修法收敛（2026-08-27，fan-in lock watchdog 修订）：**option 2 为主**——suite-slot-lib.sh watchdog 路径 (b)（kill -0 失败 → ≤1s 崩溃自动释放）已原生覆盖死 holder；路径 (c)（纯 1800s 计时）对「alive 且在跑」也切，是误伤源。对 fan-in 锁：去掉 (c) 或改「alive 且不推进才切」，只留 (b)。理由：driver 持锁不会 hang 不崩（崩溃即 flock fd 自动释放）；suite 挂死已由静默 watchdog 兜（SIGKILL → suite 终 → fan-in 终 → 锁释放），(c) 对 fan-in 锁冗余且有害。
+
+**option 3 作框架**（死持有者 watchdog vs 正常长跑不断锁分离）。**option 1 降级为止血**（仅若必须留计时器）：≥ 真实全量 fan-in 上界 = 退役 SUITE_MAX_RUNTIME_MS(45min) + 开销(~10min) ≈ 55min → 3600s(60min)，⚠️ 挪悬崖非修复，61min 仍被切。
+
+**⛔ 关键边界**：1800s 对 suite 锁原用途（cap 5.2h validation）仍正确，别动；要修的是 fan-in 锁复用了它——fan-in 锁阈值应与 FULL_SUITE_LOCK_HOLD_MAX_S **解耦**，而非再抬一个共享常量。数字是止血不是结论，落笔当轮各取一次真实读数核对（硬规则 4c）。
 
 ## Acceptance Criteria
 

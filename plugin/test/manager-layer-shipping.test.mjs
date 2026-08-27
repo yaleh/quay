@@ -82,7 +82,7 @@ test('AC3 — cold-start/SKILL.md AC8c has no dead-key references (inner-state.s
 });
 
 // ── AC4: the launch-config trio ships in the checked-in settings + profiles files ────────────────────
-test('AC4 — the launch-config trio is checked-in: claude-fjdac + deepseek-v4-pro (profiles.yml) + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 (settings env)', () => {
+test('AC4 — the launch-config trio is checked-in: claude-fjdac + deepseek-v4-pro-anthropic (profiles.yml) + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 (settings env)', () => {
   assert.ok(fs.existsSync(LAUNCH_SETTINGS), '.claude/launch.settings.json must exist (checked-in launch config)');
   const settingsSrc = fs.readFileSync(LAUNCH_SETTINGS, 'utf8');
   assert.match(settingsSrc, /CLAUDE_CODE_MAX_CONTEXT_TOKENS/, 'launch config must set CLAUDE_CODE_MAX_CONTEXT_TOKENS');
@@ -91,7 +91,7 @@ test('AC4 — the launch-config trio is checked-in: claude-fjdac + deepseek-v4-p
   assert.ok(fs.existsSync(PROFILES), '.quay/profiles.yml must exist (AC154 profile carrier)');
   const profilesSrc = fs.readFileSync(PROFILES, 'utf8');
   assert.match(profilesSrc, /claude-fjdac/, 'launch config must use the claude-fjdac launcher (in profiles.yml)');
-  assert.match(profilesSrc, /deepseek-v4-pro/, 'launch config must set --model deepseek-v4-pro (in profiles.yml)');
+  assert.match(profilesSrc, /deepseek-v4-pro-anthropic/, 'launch config must set --model deepseek-v4-pro-anthropic (in profiles.yml)');
   // The cold-start skill must document the launch config as checked-in (tribal knowledge → installable).
   const cold = fs.readFileSync(COLD_START_SKILL, 'utf8');
   assert.match(cold, /launch\.settings\.json/, 'cold-start skill must reference the checked-in launch config');
