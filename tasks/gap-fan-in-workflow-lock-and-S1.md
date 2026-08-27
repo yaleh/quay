@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-workflow-lock-and-S1
 title: fan-in workflow 锁 + S=1——锁住 merge 阶段消除 ff-race 整份作废（SPEC 正本 orchestration/SPEC-fan-in-workflow-lock-and-S1-2026-08-26.md）
-status: ready
+status: done
 labels:
   - gap
   - feature
