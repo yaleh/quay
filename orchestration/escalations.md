@@ -639,3 +639,24 @@ manager 只搬 (a) env var 到 launch.settings.json task-worker.env（`CLAUDE_CO
 
 ### 已解（2026-08-27 03:0xZ）——人授权 manager 直改 + 恢复链闭环
 人单次授权 manager 直改根因 → `dfc3e7ee8`（buildWorkerPrompt + buildContinueWorkerPrompt 各加一句强制 worktree 绝对路径，88 test pass）。outer 恢复 fan-in 锁实现（worktree 重建 + stash pop → `a8b211c6e`）→ manager 四查 → resume → 重派 fan-in 锁（CONTINUE 复用，不泄漏）→ **`0621a3066` fan-in lock 落地 done（AC1-AC6 全勾）**。自指死锁环结构性断开。`gap-worker-leaks-implementation-to-main-checkout` 翻 done（6c58e28b6）。stash 全部清（仅剩历史 stashifdirty/worker-driver 两条）。
+
+
+## 2026-08-27 21:26Z — L1 token 闸卡死：suite 被 15min 静默看门狗连杀，迁移序 L0✓→L1→L2/L3 全堵
+
+**现象**：迁移序（人裁定 L0→L1→L2→L3）推进到 L1（`gap-fan-in-ff-merge-token-gate-fail-closed`）时卡死。L1 实现已提交（`b7f4e3411`，fan-in-ff-merge.sh --acquire-workflow-lock 加 driver 一次性 token 闸），但 fan-in 在 suite 步连红：worker-outcome 累计 **9 次**「suite hung: silence watchdog killed the suite (no output ≥ silence timeout)」，最新 20:48:43 `mf.outcome=red/step=suite/final_state=exited-not-landed`。**根因不是 L1 自身代码**，是已知缺陷 `gap-mech-fan-in-suite-silence-watchdog-fired`（`suite-driver.ts` `SILENCE_MS_DEFAULT=15min` 静默看门狗对 suite 启动/等锁静默段误杀，非真挂死）。
+
+**自锁形态**：修这个看门狗的任务 `gap-mech-fan-in-suite-silence-watchdog-fired` 自己 status=ready 未落地——它要改 `suite-driver.ts` + `scripts/test.sh`（跑全量 suite 验证），而它自己的 fan-in suite 同样被 15min 静默看门狗杀（与 2026-08-27 00:1xZ「worker 修 worker-driver 泄漏 bug 会再泄漏」同族：fix 任务被它要修的 bug 卡死）。
+
+**已试**：driver 对 L1 自动重派 ~9 次，每次同一静默看门狗杀；止血只对锁持有看门狗生效过（`ffc4a225d` fallback 3600，那是 `FULL_SUITE_LOCK_HOLD_MAX_S`，不是 suite 静默看门狗），静默看门狗无对应止血。
+
+**为什么需要升级**：迁移是**人裁定**的方向（eliminate fan-in workflow path），L1 是 token 闸（掐死非机械路径的关键缝），被一个**无关缺陷**（静默看门狗）挡住。修法要么是「盲抬数值止血」（正是 fix 任务自己警告的「⛔ 不盲设数值」），要么是「先修静默看门狗再回 L1」（改变人裁定的迁移序），两者都需人定方向，非 outer 可自行裁决。
+
+**选项**：
+1. **盲抬数值止血**：把 `suite-driver.ts` `SILENCE_MS_DEFAULT` 字面 15min→60min（或生产设 `QUAY_TEST_SUITE_DRIVER_SILENCE_MS=3600000`）——让 L1 suite 存活 >15min 静默落地，迁移继续。代价：真挂死检测变松（fix 任务已警告「数字是止血不是结论」）；需后续补心跳真修。
+2. **先修静默看门狗再回 L1（改迁移序）**：把 `gap-mech-fan-in-suite-silence-watchdog-fired` 提为迁移前置，但它自己也卡在静默看门狗 ⇒ 仍需 1 的止血才能落地 ⇒ 与 1 合并。
+3. **outer 直改静默看门狗 fix（AC65）**：test.sh 等锁心跳 + suite-driver 观测面，但需全量 suite 验证 ⇒ 超 AC65（一条命令不可验证），须走 inner ⇒ 又回自锁。
+4. **人直改/授权**：人直改 `suite-driver.ts` 静默看门狗观测面（读 suite 真实写的流 + 「仍在推进」直接量，非只读 mtime——fix 任务 Plan 已写清），或人明确授权一方越权止血。
+
+**判据（推荐）**：先做 **1 的止血**（盲抬数值是已知的止血形态、秒级可回退），让 L1 落地、迁移序走通；同时 `gap-mech-fan-in-suite-silence-watchdog-fired` 按正常 fan-in 落地真修（止血后它也不再被杀）。止血 = 用现有材料压住出血，非提前实现（硬规则 12 不违反：这是「止损」不是「实现 fix」）。
+
+**止血是否需止损判定（B18）**：`止损：需要 —— 抬 SILENCE_MS_DEFAULT 字面 15→60min`（或 env）。防的那条路径（静默看门狗误杀 suite）此刻**已启用**（9 次实锤），不是防一个不存在的成本。
