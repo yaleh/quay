@@ -48,5 +48,5 @@ poll timeout 上调 + 文件纳入 load-sensitive 家族；AC1-AC2 全勾；高�
 
 - plugin/test/full-suite-runner.test.mjs（poll timeout 上调/load-aware）
 - plugin/scripts/known-load-sensitive.ts（纳入 full-suite-runner.test.mjs，若走该方向）
-- plugin/test/（load-sensitive 隔离重跑负控制）
+- plugin/test/known-load-sensitive.test.mjs（load-sensitive 隔离重跑负控制）
 - tasks/gap-full-suite-runner-test-poll-timeout-load-flake.md（自身）
