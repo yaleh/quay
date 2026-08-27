@@ -151,8 +151,10 @@ worker（Claude 会话）在 worktree 里实现 → 实现完退出
   `SPEC-worker-driven-inner-2026-08-16.md`（机械驱动 + per-task claude 会话）——本 SPEC 是这两个
   SPEC 在 fan-in 这一段的自然延伸。
 
-**待裁定（人）**：① 是否先做「driver 机械 fan-in」的 happy-path（机械跑完，失败仍走旧 workflow 兜底），
-再逐步搬语义失败点；还是整体一步到位。② 语义会话的唤起粒度（每个失败点一个会话 vs 一个修复会话循环）。
+**已裁定（人 2026-08-27，逐字）**：① **happy-path 先做**——先让 driver 机械跑通「无失败的 fan-in」
+（merge → delta 判定 → typecheck → scoped门 → suite → ff），失败时回退旧 workflow 子代理兜底，再逐步搬
+语义失败点；非整体一步到位。② **一个修复循环会话**——driver 控循环（检测失败 → 唤起一个 Claude 会话持续
+修 → 机械重跑 → 再判），同一个会话连续处理 fix-scope 循环（maxFixRounds），非每轮唤起新会话。
 
 ---
 

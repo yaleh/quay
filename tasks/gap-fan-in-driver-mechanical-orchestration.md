@@ -51,7 +51,7 @@ driver 机械编排 fan-in 落地；AC1-AC5 全勾；反例判据（SPEC §6）�
 - plugin/test/（AC1-AC5 + 反例判据负控制）
 - tasks/gap-fan-in-driver-mechanical-orchestration.md（自身）
 
-## 待裁定（人，SPEC §4，⛔ 本任务不擅自定）
+## 已裁定（人 2026-08-27，逐字；SPEC §4）
 
-- ① 是否先做「driver 机械 fan-in」happy-path（失败仍走旧 workflow 兜底）再逐步搬语义失败点，还是整体一步到位。
-- ② 语义会话唤起粒度（每个失败点一个会话 vs 一个修复会话循环）。
+- ① **happy-path 先做**——先让 driver 机械跑通「无失败的 fan-in」（merge → delta 判定 → typecheck → scoped门 → suite → ff），失败时回退旧 workflow 子代理兜底，再逐步搬语义失败点；非整体一步到位。
+- ② **一个修复循环会话**——driver 控循环（检测失败 → 唤起一个 Claude 会话持续修 → 机械重跑 → 再判），同一个会话连续处理 fix-scope 循环（maxFixRounds），非每轮唤起新会话。
