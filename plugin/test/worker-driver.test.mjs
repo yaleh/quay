@@ -477,26 +477,24 @@ test("resolveRun / splitArgs / defaultWorkerArgv / signalExitCode / parseTimeout
   assert.equal(resolveConcurrency(0, 2, 7), 7, "non-positive explicit is ignored ⇒ config cap");
 });
 
-test("AC2 (gap-worker-print-bg-wait-ceiling-600s c) — buildWorkerPrompt hints to stay in-turn (TaskOutput blocking wait) during fan-in flight", () => {
+test("gap-fan-in-driver-mechanical-orchestration — buildWorkerPrompt is implement-only: worker exits, driver takes over mechanical fan-in (⛔ no suite / no workflow call)", () => {
   const prompt = buildWorkerPrompt("gap-x", "/r");
-  // 辅助 (c)：fan-in 在飞期间尽量留在回合内等（TaskOutput 阻塞等待），不要结束回合等完成通知。
-  assert.match(prompt, /fan-in 在飞期间尽量留在回合内等/, "prompt hints to stay in-turn during fan-in flight");
-  assert.match(prompt, /TaskOutput 阻塞等待/, "prompt names TaskOutput blocking wait (resets the 600s clock)");
-  assert.match(prompt, /不要结束回合等完成通知/, "prompt forbids ending the turn to await the notification");
-  assert.match(prompt, /600s 终止/, "prompt names the 600s termination risk");
+  // worker 只实现、实现后退出；driver 接手 worktree 机械跑 fan-in（取代旧「worker 跑 suite + 以
+  // scriptPath 调 fan-in-execute workflow」全链式 prompt）。
+  assert.match(prompt, /implement the task per its Proposal\/Plan\/AC\/DoD/, "worker implements the task");
+  assert.match(prompt, /exit — the worker-driver takes over/, "driver takes over fan-in (worker exits, not runs fan-in)");
+  assert.match(prompt, /mechanically runs fan-in/, "names the mechanical fan-in");
+  assert.match(prompt, /You do NOT run the suite/, "worker must NOT run the suite (driver does)");
+  assert.match(prompt, /do NOT call the fan-in workflow/, "worker must NOT call the fan-in workflow (retired as the worker path)");
 });
 
-test("gap-worker-prompt-fan-in-call-signature-placeholder — buildWorkerPrompt gives real fan-in signature (absolute path + runId 取法 + 正本拷贝), no scriptPath placeholder", () => {
+test("gap-fan-in-driver-mechanical-orchestration — buildWorkerPrompt drops the old fan-in workflow signature (⛔ no fan-in-execute.js / generateRunId / scriptPath)", () => {
   const prompt = buildWorkerPrompt("gap-x", "/r");
-  // AC1（能取假）：真实绝对路径（⛔ 非 scriptPath 字面词）。
-  assert.match(prompt, /\/r\/\.claude\/workflows\/fan-in-execute\.js/, "AC1: real absolute path to fan-in-execute.js");
-  assert.doesNotMatch(prompt, /scriptPath/, "AC1: no bare scriptPath placeholder");
-  // AC1（能取假）：runId 取法 —— 哪个模块导出 generateRunId。
-  assert.match(prompt, /generateRunId/, "AC1: names generateRunId");
-  assert.match(prompt, /plugin\/scripts\/fast-mode-telemetry\.ts/, "AC1: names the module exporting generateRunId");
-  // AC3（能取假）：正本拷贝明确 —— .claude/workflows/ vs plugin/workflows/。
-  assert.match(prompt, /\.claude\/workflows\/ copy is the landed one that runs here/, "AC3: says .claude/workflows/ is the landed copy");
-  assert.match(prompt, /plugin\/workflows\/fan-in-execute\.js/, "AC3: names the shipped mirror to NOT diff against");
+  // 旧「worker 以 scriptPath 调 fan-in-execute workflow」的正本拷贝指令已退役——worker 不再自己
+  // 派发 workflow，故 prompt 不含 workflow 路径 / generateRunId 取法 / scriptPath。
+  assert.doesNotMatch(prompt, /fan-in-execute\.js/, "⛔ no fan-in-execute.js path (workflow no longer the worker path)");
+  assert.doesNotMatch(prompt, /generateRunId/, "⛔ no generateRunId (worker no longer dispatches the workflow)");
+  assert.doesNotMatch(prompt, /scriptPath/, "⛔ no scriptPath placeholder");
 });
 
 test("AC1 (能取假) — buildWorkerPrompt wires dispatch-worktree-setup.sh after worktree create (机制接管 bootstrap)", () => {
@@ -1764,7 +1762,7 @@ test("AC2 (能取假) — buildContinueWorkerPrompt carries prior-round state (b
   assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
 });
 
-test("gap-worker-prompt-fan-in-call-signature-placeholder — buildContinueWorkerPrompt also gives real fan-in signature (no scriptPath placeholder, concrete worktree)", () => {
+test("gap-fan-in-driver-mechanical-orchestration — buildContinueWorkerPrompt is the workflow fallback (concrete worktree + real fan-in signature; ⛔ no scriptPath placeholder)", () => {
   const p = buildContinueWorkerPrompt("gap-x", "/r", {
     worktreePath: "/wt",
     branchCommits: 3,
@@ -1773,11 +1771,13 @@ test("gap-worker-prompt-fan-in-call-signature-placeholder — buildContinueWorke
     acTotal: 5,
     failureReason: "worker exited 0 but task did not land",
   });
-  assert.match(p, /\/r\/\.claude\/workflows\/fan-in-execute\.js/, "AC1: continue prompt carries real absolute path");
-  assert.doesNotMatch(p, /scriptPath/, "AC1: continue prompt has no bare scriptPath placeholder");
+  // 已裁定①「失败时回退旧 workflow 子代理兜底」：续做 prompt 保留 workflow 兜底签名（机械 fan-in 失败
+  // 后，重派的 worker 续做 + 以 scriptPath 调 fan-in-execute workflow 做语义修复 + 落地）。
+  assert.match(p, /\/r\/\.claude\/workflows\/fan-in-execute\.js/, "continue prompt carries real absolute path (workflow fallback)");
+  assert.doesNotMatch(p, /scriptPath/, "continue prompt has no bare scriptPath placeholder");
   assert.match(p, /worktree:"\/wt"/, "continue prompt embeds the concrete worktree path (not a placeholder)");
-  assert.match(p, /generateRunId/, "AC1: continue prompt names generateRunId");
-  assert.match(p, /plugin\/scripts\/fast-mode-telemetry\.ts/, "AC1: continue prompt names the generateRunId module");
+  assert.match(p, /generateRunId/, "continue prompt names generateRunId");
+  assert.match(p, /plugin\/scripts\/fast-mode-telemetry\.ts/, "continue prompt names the generateRunId module");
 });
 
 test("AC1 (能取假) — buildContinueWorkerPrompt wires dispatch-worktree-setup.sh on the reused worktree (idempotent re-provision)", () => {

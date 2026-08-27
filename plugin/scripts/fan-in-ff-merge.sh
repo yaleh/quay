@@ -168,6 +168,11 @@ if [ -z "${escalations}" ]; then escalations="${root}/.quay/fan-in-ff-escalation
 # before step-1 merge develop) and the suite lock is acquired INSIDE the suite ⇒ "先 fan-in 锁 → 再
 # suite 锁"; fan-in 外 suite tests never request the fan-in lock (test.sh has no fan-in-workflow.lock
 # reference — the reverse order / cross-request is structurally impossible).
+# ⚠️ 执行载体修订（gap-fan-in-driver-mechanical-orchestration / SPEC-fan-in-driver-mechanical-
+#   orchestration-2026-08-27）：acquire/release 的【调用方】从 fan-in-execute.js 的 subagent prompt 挪到
+#   worker-driver.ts 的 runMechanicalFanIn——driver 代码里的确定性控制流（acquire → merge → suite →
+#   ff → release），锁持有时长从「模型 ~30min」塌缩到「机械 ~10min」（AC1）。本脚本的 acquire/release
+#   机制不变（detached holder + 幂等 + watchdog 只作死持有者兜底），只是不再被一个慢子代理拿着。
 workflow_lock_file="${git_common_dir}/fan-in-workflow.lock"
 if [ -z "${workflow_lock_events}" ]; then workflow_lock_events="${root}/.quay/fan-in-workflow-lock-events.jsonl"; fi
 workflow_lock_pidfile="/tmp/fan-in-workflow-lock-${task_id}.pid"

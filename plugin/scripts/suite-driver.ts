@@ -70,6 +70,10 @@ export interface SuiteRunResult {
   finishedAt: string;
   durationMs: number;
   error: string | null;
+  /** suite 子进程 pid（spawn 后即有值；spawn 失败为 null）。gap-fan-in-driver-mechanical-
+   *  orchestration AC3 判据输入：suite 是 driver 的子进程（ppid 指向 driver）⛔ 非 setsid+&+disown
+   *  孤儿（ppid=1）——调用方据 pid 读 /proc/<pid>/stat 的 ppid 验证。 */
+  pid: number | null;
 }
 
 // ── slot-holder wrapper（bash）：取槽 → exec，持锁跨 exec、随子进程终结自然释放 ────────────────
@@ -168,10 +172,11 @@ export async function spawnSuiteAndWait(args: {
       resolve({
         outcome: "red", exitCode: null, signalCode: null, hungByWatchdog: false,
         startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedMs,
-        error: `spawn failed: ${(e as Error).message}`,
+        error: `spawn failed: ${(e as Error).message}`, pid: null,
       });
       return;
     }
+    const childPid: number | null = child?.pid ?? null;
 
     let settled = false;
     let hungByWatchdog = false;
@@ -205,7 +210,7 @@ export async function spawnSuiteAndWait(args: {
     }, SILENCE_POLL_MS);
 
     child.on("error", (e) => {
-      finish({ outcome: "red", exitCode: null, signalCode: null, hungByWatchdog, startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedMs, error: `spawn error: ${e.message}` });
+      finish({ outcome: "red", exitCode: null, signalCode: null, hungByWatchdog, startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedMs, error: `spawn error: ${e.message}`, pid: childPid });
     });
     child.on("close", (code, signal) => {
       const finishedAt = new Date().toISOString();
@@ -219,6 +224,7 @@ export async function spawnSuiteAndWait(args: {
         hungByWatchdog,
         startedAt, finishedAt, durationMs,
         error: hungByWatchdog ? "silence watchdog killed the suite (no output ≥ silence timeout)" : null,
+        pid: childPid,
       });
     });
   });
