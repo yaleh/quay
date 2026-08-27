@@ -636,3 +636,6 @@ manager 只搬 (a) env var 到 launch.settings.json task-worker.env（`CLAUDE_CO
 - `dispatch-worktree-setup.sh` 已 fail-closed（exit 2 on missing worktree）——seam ③「建 worktree 失败不继续」已覆盖。**主 seam = ① prompt 未强制 worktree 绝对路径**。
 
 **给人直改的最小形态**：`buildWorkerPrompt`（+ `buildContinueWorkerPrompt` 续做版同源）加一句强制——「所有 Read/Edit/Write 的 file_path 一律用 worktree 绝对路径（如 `/home/yale/work/quay-worktrees/<task>/…`），file-tools 用绝对路径不感知 cd，禁用主检出路径与相对路径」。纯 prompt 文本改动，静态 grep 可验证。
+
+### 已解（2026-08-27 03:0xZ）——人授权 manager 直改 + 恢复链闭环
+人单次授权 manager 直改根因 → `dfc3e7ee8`（buildWorkerPrompt + buildContinueWorkerPrompt 各加一句强制 worktree 绝对路径，88 test pass）。outer 恢复 fan-in 锁实现（worktree 重建 + stash pop → `a8b211c6e`）→ manager 四查 → resume → 重派 fan-in 锁（CONTINUE 复用，不泄漏）→ **`0621a3066` fan-in lock 落地 done（AC1-AC6 全勾）**。自指死锁环结构性断开。`gap-worker-leaks-implementation-to-main-checkout` 翻 done（6c58e28b6）。stash 全部清（仅剩历史 stashifdirty/worker-driver 两条）。
