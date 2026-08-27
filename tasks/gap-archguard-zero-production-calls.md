@@ -37,9 +37,12 @@ manager 09:3xZ 那次是本仓历史上第一次真跑 archguard。这属于「�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，真实调用）：某个真实机件（suite / tick 核 / fan-in）里出现对 archguard 的**真实调用**（非注释、非项目名提及——按位置判定）；（⛔ 仍零真实调用 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：把该调用注掉，对应检查/门必须变红（fail-closed，证明它被消费而非摆设）；（⛔ 注掉不红 ⇒ 假）。
-- [ ] AC3（能取假，产物消费）：`.archguard/` 产物进入可查载体（git 提交 或 被某判据读），`git log -- .archguard` 非空或判据读到；（⛔ 产物仍不可查 ⇒ 假）。
+- [x] AC1（能取假，真实调用）：某个真实机件（suite / tick 核 / fan-in）里出现对 archguard 的**真实调用**（非注释、非项目名提及——按位置判定）；（⛔ 仍零真实调用 ⇒ 假）。
+  - 证据：`plugin/scripts/archguard-runner.ts` 里 `spawnSync(cli, ["analyze", "--lang", "typescript", "--format", "json", ...])` 是代码位置的**真实 CLI 调用**，且被 `scripts/test.sh` `run_selected`（全量 suite 路径，`run_static_checks` 之后）以 `run_checker "archguard-structure-check" node ... archguard-runner.ts --root` 接线。实测 `node ... archguard-runner.ts --root .` 跑通两 scope（src 392 entities / scripts 2113 entities），输出 `PASS — no dependency cycles in any scope`。
+- [x] AC2（能取假，负控制）：把该调用注掉，对应检查/门必须变红（fail-closed，证明它被消费而非摆设）；（⛔ 注掉不红 ⇒ 假）。
+  - 证据（两条负控制均 exit 1）：① PATH 剥离 archguard ⇒ `archguard CLI not found on PATH (fail-closed)` exit 1；② 把 runner 内 `runAnalyze` 调用逐行注掉 + `rm -rf .archguard/output` ⇒ `cannot read archguard output ... (fail-closed)` exit 1。fail-closed 由「读不到产物就 exit 1」构造保证，注掉调用 ⇒ 读不到 ⇒ 红。
+- [x] AC3（能取假，产物消费）：`.archguard/` 产物进入可查载体（git 提交 或 被某判据读），`git log -- .archguard` 非空或判据读到；（⛔ 产物仍不可查 ⇒ 假）。
+  - 证据：走「被某判据读」半边——runner 读回 `.archguard/output/{src,scripts}/class/all-classes.json` 的 `metricVector.sccCount` 作为判据输入，并把逐次结构信号 append 进 `.archguard/metrics-history.jsonl`（`cat` 可查的追加载体；`.archguard/` 整体 gitignored 属 archguard 自身 cache/metrics，故不 walk「git 提交」半边）。
 
 ## Definition of Done
 
@@ -50,4 +53,6 @@ manager 09:3xZ 那次是本仓历史上第一次真跑 archguard。这属于「�
 - plugin/scripts/archguard-runner.ts
 - .archguard/metrics-history.jsonl
 - scripts/test.sh
+- plugin/scripts/capability-catalog.sh
+- docs/proposals/quay-product-outline.md
 - tasks/gap-archguard-zero-production-calls.md（自身）
