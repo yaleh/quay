@@ -831,6 +831,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, (3) run the suite,`,
     `(4) ${fanInSignature(task, root, "<the worktree path you created in step 1>")}.`,
+    `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree.`,
     `You own your worktree fully; apart from the final merge do not touch develop.`,
     `fan-in 在飞期间尽量留在回合内等（用 TaskOutput 阻塞等待其终态）——不要结束回合等完成通知：end_turn 时有存活后台任务会触发 600s 终止。`,
   ].join(" ");
@@ -1042,6 +1043,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch),`,
     `(2) run the suite, (3) ${fanInSignature(task, root, wt)}.`,
+    `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
   ].join(" ");
 }
