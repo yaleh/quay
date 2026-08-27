@@ -33,6 +33,8 @@ serial install 族的 7 个慢文件（近 5 轮 M bucket avg>100s，实测）�
 - `packages/quay/test/npm-pack-e2e.test.mjs`（P bucket，96.9s avg → 120s 上升）：9 test 每个跑一遍 `package.sh`（build-dist + npm pack）+ tarball install ⇒ 摊销：一次 pack+install、9 test 复用。
 - `plugin/test/verify-deliver-coldstart.test.mjs`（M bucket，115.9s avg → 160s 上升）：三步交付验证 ① npm install .tgz（独立成本，需摊销）② quay-init --loop（已被本任务 copy_one 批量化覆盖）③ 冷启动活性扫描。只①需额外处理。
 
+（⛔ 本任务 Touches 不含这两条——它们是【候选】非本任务落地范围；本任务 DoD/AC 仅覆盖 quay-init.sh copy_one/copy_dir 批量化。留作后续摊销任务。）
+
 ## Plan
 
 1. **先 profile 成本拆解（硬规则 4：成本结构未知前不设数值阈值）**：在 `copy_one`/`copy_dir` 里对 cmp / sha256sum / cp / 其它子进程各计时，产出「~30s dry-run 里各占多少秒」的实测表，再定批量化目标——不代拍 −92% 或任何具体数。
@@ -86,6 +88,4 @@ install 的 −4% 因为它的墙钟由 cp（145 次真写盘）+ derive_loop_sc
 ## Touches
 
 - plugin/scripts/quay-init.sh（copy_one/copy_dir 批量化：一次 diff/python3 替代逐文件 cmp，一次批量替代逐 managed sha256sum|cut）
-- packages/quay/test/npm-pack-e2e.test.mjs（pack+install 摊销：一次 pack+install、9 test 复用）
-- plugin/test/verify-deliver-coldstart.test.mjs（npm install .tgz 摊销）
 - tasks/gap-suite-serial-install-copy-one-subprocess-batching.md（自身）
