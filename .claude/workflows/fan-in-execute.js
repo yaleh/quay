@@ -1,6 +1,6 @@
 export const meta = {
   name: 'fan-in-execute',
-  description: 'AC78 fan-in 执行 workflow — 无锁段（merge develop → delta 断言面判定 → ts-typecheck → scoped 门+全量+doc）与持锁段（flip done → fan-in-ff-merge.sh）由本脚本生成的 subagent prompt 全权执行；全量 suite 的【等待】由阶段 2 agent 在本回合内多次 <600s Bash 循环承担（gap-subagent-turn-budget-13min-falsified：已证伪「subagent 回合预算硬超时」，真实限制仅 Bash 单次 600s 硬顶 + suite 实测 19+ min）；subagent 在 ff 成功后才返回。A6 只检查「是否走了本 workflow」（判据2 (a)(b)(c)）。',
+  description: 'AC78 fan-in 执行 workflow — 无锁段（merge develop → delta 断言面判定 → ts-typecheck → scoped 门+全量+doc）与持锁段（flip done → fan-in-ff-merge.sh）由本脚本生成的 subagent prompt 全权执行；全量 suite 的【等待】由阶段 2 agent 在本回合内多次 <600s Bash 循环承担（gap-subagent-turn-budget-13min-falsified：已证伪「subagent 回合预算硬超时」，真实限制仅 Bash 单次 600s 硬顶 + suite 实测 19+ min）；subagent 在 ff 成功后才返回。A6 只检查「是否走了本 workflow」（判据2 (a)(b)(c)）。gap-fan-in-workflow-lock-and-S1：step 0.5 先获取 fan-in workflow 锁（fan-in-ff-merge.sh --acquire-workflow-lock，持锁 merge develop→suite→ff 整段），ff 成功后释放（step 5 --release-workflow-lock）——develop 在持锁期间不前进 ⇒ ff-race 结构上归零。',
   whenToUse: 'inner 对某任务执行 fan-in 时（A6）：以 scriptPath 调用本 workflow，args={task, worktree, root, runId, mergeTarget}。禁止 name:（M176 陷阱：同会话第二次 name: 派发可能取旧脚本体）。',
   phases: [{ title: 'FanIn', detail: '阶段1（预备+启动 detached suite，立即返回）→ 阶段2 agent 回合内循环 <600s Bash 等 suite →（红则 Fix agent 重启动）→ 入账+flip+ff+bracket，ff 成功后才返回' }],
 }
@@ -551,6 +551,15 @@ else
   echo "FAN-IN-BOOTSTRAP=miss（本分支未修改 fan-in 编排文件，编排脚本从主检出解析）"
 fi
 
+【无锁段 step 0.5 — 获取 fan-in workflow 锁（gap-fan-in-workflow-lock-and-S1 AC1）】
+# 持锁整个 workflow（merge develop → suite → ff），使 develop 在本任务 fan-in 期间不前进 ⇒ ff-race
+# 结构上归零（SPEC-fan-in-workflow-lock-and-S1-2026-08-26 §2.1）。幂等：ff-retry 回阶段 1 重跑时
+# holder 仍持锁（acquire 幂等跳过，不重复 spawn）。锁在 merge develop（step 1）之前取得 ⇒「先
+# fan-in 锁 → 再 suite 锁」固定顺序（suite 锁在 step 4 的 suite 内部取得，AC4）。
+bash ${worktree}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --root ${root} --run-id ${runId} --acquire-workflow-lock
+  —— 队列等待（flock 无界排队，watchdog 界定持锁者崩溃/挂死的释放；正确性锁绝不因等待过久而放行，
+     SPEC-suite-lifecycle §1.1）。exit 非 0 ⇒ 未取得锁 ⇒ 返回 red（不 merge develop、不继续）。
+
 【无锁段 step 1 — merge develop】
 cd ${worktree} && git merge ${mergeTarget}
 —— 冲突【只可能在这】出现：慢慢解，不占任何人（AC75：必须 merge 不得 rebase）。解完 git add + git commit。
@@ -914,6 +923,13 @@ ff_rc=$?
 # step 4 会重写新 capture（gap-suite-concurrency-ff-gate-and-slot-ssot）。不在此 exit：step 5.5（仅 ff
 # 成功时执行）与清理仍需按序运行。ff_rc 由你在返回时上报（0=green, 1/3=ff-retry, 2=red）。
 rm -f "$suite_capture" 2>/dev/null || true
+# workflow-lock-release-block-start
+# ff 成功 ⇒ 释放 fan-in workflow 锁（持锁到 ff 完成——SPEC-fan-in-workflow-lock-and-S1 §2.1；ff 是锁
+# 保护的最后一个动作）。ff 失败（rc 1/3）⇒ 不释放：回阶段 1 重跑时 acquire 幂等跳过（holder 仍持锁）。
+if [ "$ff_rc" = "0" ]; then
+  bash ${worktree}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --root ${root} --release-workflow-lock
+fi
+# workflow-lock-release-block-end
   —— 锁只包 git merge --ff-only，毫秒级，成/败都解锁。ff 失败（develop 前进了，窗口 = merge 到 ff 之间
      的整个 suite 时长）⇒ 返回 { outcome: 'ff-retry' }（脚本将回阶段 1 重跑：重 merge develop、重判 delta、
      重跑 suite、重 ff），同一任务 ff 失败 ≥3 次才谈防活锁（脚本侧 maxFfRetries 兜底）。ff 成功（exit 0）
