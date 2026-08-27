@@ -10,7 +10,7 @@
 ## 0. 一句话
 
 **取消 `fan-in-execute.js` workflow（子代理串行跑机械步骤），改由 driver 机械驱动 fan-in 的机械部分
-（锁 / merge / delta 判定 / typecheck / scoped门 / suite / ff）；只有需要语义判断的失败点（冲突、
+（锁 / merge / delta 判定 / typecheck / archguard 结构闸 / scoped门 / suite / ff）；只有需要语义判断的失败点（冲突、
 红 suite、typecheck 红、anti-drift 越界）才单独唤起一个 Claude Code 会话。suite 因此不再需要 detach，
 fan-in 锁机械地包裹 suite 锁，锁持有时长从「模型的 ~30min」塌缩到「机械的 ~10min」。**
 
@@ -74,7 +74,7 @@ acquire（同一 runId `fm-...-twe1vf`）重试。这直接否证「ff-race 结�
 
 ## 2. 正确机制：机械/语义分离
 
-fan-in 的 7 步里，**happy path 100% 机械**，语义只出现在「失败时的处置」：
+fan-in 的 8 步里，**happy path 100% 机械**，语义只出现在「失败时的处置」：
 
 | 步骤 | 性质 | 失败时谁处置 |
 |---|---|---|
@@ -83,15 +83,21 @@ fan-in 的 7 步里，**happy path 100% 机械**，语义只出现在「失败�
 | anti-drift Touches 核对 | 机械 | **HARD FAIL → Claude 会话**（窄化 Touches vs 真违规） |
 | delta 断言面判定 | 机械（git diff + classify） | — |
 | ts-typecheck 闸 | 机械 | **typecheck 红 → Claude 会话** |
+| archguard 结构闸 | 机械（`archguard-runner.ts`，依赖环 sccCount=0） | **依赖环 → Claude 会话** |
 | scoped门 + doc + suite | 机械（scripts/test.sh） | **suite 红 → Claude 会话**（fix-scope 循环） |
 | ff-merge + 入账 + 释放锁 | 机械 | **ff 失败 → 重试** |
 
-**机制**：driver 机械跑完全链；只在四个失败点（冲突 / HARD FAIL / typecheck 红 / suite 红）唤起一个
+**机制**：driver 机械跑完全链；只在五个失败点（冲突 / HARD FAIL / typecheck 红 / 依赖环 / suite 红）唤起一个
 Claude Code 会话做「看懂失败 + 出修复」这一语义动作，修完 driver 机械重跑对应检查并继续。
+
+**⊢ archguard 的迁入（2026-08-27 人裁定「archguard 应接在 fan-in 过程，而不是 suite test」）**：
+archguard 依赖环闸此前错接在 `scripts/test.sh` 的 suite 路径（`gap-archguard-zero-production-calls` 的落点），
+生产 `--buckets` 非-hub 路径绕过 `run_selected()` ⇒ 结构闸零生产调用。正确位置是 fan-in 流水线的**一个机械步骤**
+（本表新增行，插在 typecheck 之后、scoped门/suite 之前），`test.sh` 内的旧接线随 driver 落地后退役（⛔ 两个真相源）。
 
 ### 2.1 为什么这修掉 30min
 
-30min = 7 条 Bash × 每条之间模型思考。driver 跑同样的 7 步是**纯命令执行**：merge 1min + scoped门
+30min = 8 条 Bash × 每条之间模型思考。driver 跑同样的 8 步是**纯命令执行**：merge 1min + scoped门
 5min + suite 5min + ff 1s ≈ **~10min 机械时长，零模型延迟**。30min → 10min，省掉的是模型磨蹭。
 
 ### 2.2 为什么不再需要 detach
@@ -169,6 +175,11 @@ worker（Claude 会话）在 worktree 里实现 → 实现完退出
 - [ ] **AC4（ff-race 归零，真兑现）**：连续 N 个 code-delta 任务 fan-in，ff 失败次数 = 0（或仅
   inert-delta 的毫秒级 re-ff，非重跑 suite）；⛔ 不再出现 archguard 式「ff 失败 + 二次 acquire 重试」。
 - [ ] **AC5（吞吐恢复）**：任务落地吞吐从 ~1/h 回到 ≥ 3/h（同 3 在飞下，landing 不再被 30min 编排撑长）。
+- [ ] **AC6（archguard 结构闸并入 fan-in 流水线，⛔ 非 suite）**：archguard 依赖环闸（`archguard-runner.ts`，
+  sccCount=0）是 fan-in driver 的一个机械步骤（typecheck 后、scoped门/suite 前），⛔ 不再由 `scripts/test.sh`
+  触发；`test.sh` 内那处接线（`:966`）随 driver 落地退役。**取假**：① `scripts/test.sh` 仍调用
+  `archguard-runner.ts` ⇒ 假（两个真相源）；② driver 落地后 `metrics-history.jsonl` 在 post-landing fan-in 中
+  仍无新记录 ⇒ 假（能产出≠已产出，硬规则④推论三）。
 
 ---
 
@@ -181,4 +192,5 @@ worker（Claude 会话）在 worktree 里实现 → 实现完退出
 (b) suite exit end_iso 晚于 lock release ts ⇒ AC2 假；
 (c) suite 进程 ppid=1（仍 detach）⇒ AC3 假；
 (d) fan-in-retries.jsonl 仍出现同一任务的 attempt=2/3 且 error 为 Diverging branches ⇒ AC4 假。
+(e) `grep -n archguard-runner scripts/test.sh` 仍命中，或 `metrics-history.jsonl` 自 driver 落地后无新记录 ⇒ AC6 假。
 ```
