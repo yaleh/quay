@@ -213,7 +213,7 @@ test("AC1 — Layer 1b (routine) reuses L0 schedule/heartbeat/notify; ⛔ 不重
 // ── AC2（supervisor 港进 TS）：registry 单一数据表 + 可单测纯函数 ─────────────────────────────────
 
 test("AC2 — 8 张 bash registry 表 → DRIVER_KINDS 单一 TS 数据表", () => {
-  assert.deepEqual(KNOWN_KINDS, ["promotion", "worker", "outer", "quality"], "四个 kind，registry 数据表承载差异");
+  assert.deepEqual(KNOWN_KINDS, ["promotion", "worker", "outer", "quality", "suite"], "五个 kind，registry 数据表承载差异");
   assert.equal(DRIVER_KINDS.promotion.driver, "promotion-driver.ts");
   assert.equal(DRIVER_KINDS.promotion.capFlag, "--cap", "promotion capFlag = --cap");
   assert.equal(DRIVER_KINDS.promotion.hasInterval, true);

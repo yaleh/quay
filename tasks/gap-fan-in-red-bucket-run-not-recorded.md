@@ -67,6 +67,7 @@ fan-in 桶路径统一到正确 runner（full-suite-runner.ts --buckets），gre
 
 - .claude/workflows/fan-in-execute.js（桶路径改走 full-suite-runner.ts --buckets，删/收窄平行 detached harness + green-only writer）
 - plugin/workflows/fan-in-execute.js（dual-copy 同步，逐字节一致）
-- plugin/scripts/pre-verified-round-record.ts（若保留，改按真实 suite_exit 记 green/red；若统一后冗余，评估退役）
-- plugin/test/（红桶入账测试 + 红绿对照 + full-suite-runner --buckets 路径覆盖）
+- plugin/scripts/pre-verified-round-record.ts
+- plugin/test/fan-in-execute-paths.test.mjs
+- plugin/test/full-suite-runner.test.mjs
 - tasks/gap-fan-in-red-bucket-run-not-recorded.md（自身）

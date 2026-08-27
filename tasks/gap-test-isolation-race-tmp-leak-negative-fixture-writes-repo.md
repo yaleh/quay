@@ -1,7 +1,7 @@
 ---
 id: gap-test-isolation-race-tmp-leak-negative-fixture-writes-repo
 title: tmp-leak-pairing-check negative-control 把泄漏 fixture 写进真实仓 plugin/test/——与 test-framework-policy-check 全仓扫描并发 TOCTOU 竞态（阻塞 gap-ac143 fan-in）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -43,8 +43,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，不写真实仓）：negative-control 的泄漏 fixture 写进 scratch 目录（os.tmpdir()），不再写 REPO_ROOT 的 plugin/test/；（⛔ 仍写真实仓 ⇒ 假）。
-- [ ] AC2（能取假，竞态消除）：tmp-leak-pairing-check.test.mjs 与 test-framework-policy-check.test.mjs 并发跑（同组 engine）不再触发 TOCTOU 红（glob→read 之间无文件被并发删）；（⛔ 仍偶发红 ⇒ 假）。
+- [x] AC1（能取假，不写真实仓）：negative-control 的泄漏 fixture 写进 scratch 目录（os.tmpdir()），不再写 REPO_ROOT 的 plugin/test/；（⛔ 仍写真实仓 ⇒ 假）。
+- [x] AC2（能取假，竞态消除）：tmp-leak-pairing-check.test.mjs 与 test-framework-policy-check.test.mjs 并发跑（同组 engine）不再触发 TOCTOU 红（glob→read 之间无文件被并发删）；（⛔ 仍偶发红 ⇒ 假）。
 
 ## Definition of Done
 
