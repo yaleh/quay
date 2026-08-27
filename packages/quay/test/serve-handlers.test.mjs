@@ -485,26 +485,29 @@ test("renderPerFileTimelineSvg renders one server-side SVG bar per timestamped f
   assert.equal(renderPerFileTimelineSvg([{ file: "a.test.mjs", durationMs: 10, passed: true }]), "", "a perFile with no timestamps renders nothing (legacy data has no time axis)");
 });
 
-test("AC1/AC2/AC3: timeline bars are bucket-coloured (P/M/S distinct hues, not just pass/fail) with a legend, and bucketSetOfFile mirrors suite-bucket-attribution", () => {
+test("AC1/AC2/AC3: timeline bars are bucket-coloured (P/M/S distinct hues, not just pass/fail) with a legend, and bucketSetOfFile reads the dispatch-written artifact", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-bucket-"));
   try {
-    // P — a product test file (directory home `packages/*/test/` → P).
+    // The single-truth-source artifact the dispatch side writes (.quay/suite-bucket-effective.jsonl) —
+    // the page reads it, never re-derives the judgment (gap-bucket-second-truth-source-page-recompute).
     const pFile = "packages/quay/test/p.test.mjs";
-    fs.mkdirSync(path.join(root, "packages/quay/test"), { recursive: true });
-    fs.writeFileSync(path.join(root, pFile), "// product test\n");
-    // M — a plugin test file that statically references plugin/scripts (→ M).
     const mFile = "plugin/test/m.test.mjs";
-    fs.mkdirSync(path.join(root, "plugin/test"), { recursive: true });
-    fs.writeFileSync(path.join(root, mFile), 'import "../scripts/foo.ts";\n');
-    // S — a test file that references the suite script (→ S).
     const sFile = "plugin/test/s.test.mjs";
-    fs.writeFileSync(path.join(root, sFile), "// Run: bash scripts/test.sh\n");
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, ".quay", "suite-bucket-effective.jsonl"),
+      [
+        JSON.stringify({ file: pFile, buckets: ["P"], source: "static" }),
+        JSON.stringify({ file: mFile, buckets: ["M"], source: "reattr" }),
+        JSON.stringify({ file: sFile, buckets: ["S"], source: "static" }),
+      ].join("\n") + "\n",
+    );
 
-    // AC2 — the mirror attributes each file to the SAME buckets as suite-bucket-attribution.ts.
-    assert.deepEqual([...bucketSetOfFile(pFile, root)].sort(), ["P"], "product test → {P}");
-    assert.deepEqual([...bucketSetOfFile(mFile, root)].sort(), ["M"], "plugin test importing ../scripts → {M}");
-    assert.deepEqual([...bucketSetOfFile(sFile, root)].sort(), ["S"], "scripts/test.sh reference → {S}");
-    assert.deepEqual([...bucketSetOfFile("no/such/file.test.mjs", root)], [], "missing file → empty set (UNRESOLVED, never throws)");
+    // AC2 — bucketSetOfFile reads the dispatch-written judgment (the artifact), not a self-recomputed one.
+    assert.deepEqual([...bucketSetOfFile(pFile, root)].sort(), ["P"], "product test → {P} (from the artifact)");
+    assert.deepEqual([...bucketSetOfFile(mFile, root)].sort(), ["M"], "plugin test → {M} (from the artifact)");
+    assert.deepEqual([...bucketSetOfFile(sFile, root)].sort(), ["S"], "scripts/test.sh test → {S} (from the artifact)");
+    assert.deepEqual([...bucketSetOfFile("no/such/file.test.mjs", root)], [], "file absent from the artifact → empty set (UNRESOLVED, never throws)");
 
     const t0 = 1724374800000;
     const out = renderPerFileTimelineSvg([
@@ -517,7 +520,7 @@ test("AC1/AC2/AC3: timeline bars are bucket-coloured (P/M/S distinct hues, not j
     assert.ok(out.includes('class="gantt-bucket-P"'), "P bar carries the P hue class");
     assert.ok(out.includes('class="gantt-bucket-M"'), "M bar carries the M hue class");
     assert.ok(out.includes('class="gantt-bucket-S"'), "S bar carries the S hue class");
-    assert.ok(!out.includes('class="gantt-svg-bar"'), "no bar still uses the old single pass hue");
+    assert.ok(!out.includes('class="gantt-svg-bar"'), "no bar still uses the old pass hue");
 
     // AC3 — a legend names each bucket's colour meaning.
     assert.ok(out.includes("图例"), "renders a legend");

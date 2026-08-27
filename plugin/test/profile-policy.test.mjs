@@ -162,7 +162,7 @@ test("AC3 — the three worker roles share ONE profile, declaring only name/env 
     assert.equal(spec.profile, "worker-default", `${role} must reference the shared worker-default profile`);
     const r = resolveRole(cfg, role);
     assert.equal(r.launcher, "claude-fjdac");
-    assert.equal(r.model, "deepseek-v4-pro");
+    assert.equal(r.model, "deepseek-v4-pro-anthropic");
     assert.equal(r.bare, false);
   }
 });
@@ -174,7 +174,7 @@ test("AC3 — outer/inner share the same worker-default recipe (换模型改一�
   assert.equal(outer.launcher, inner.launcher);
   assert.equal(outer.model, inner.model);
   assert.equal(outer.launcher, "claude-fjdac");
-  assert.equal(inner.model, "deepseek-v4-pro");
+  assert.equal(inner.model, "deepseek-v4-pro-anthropic");
 });
 
 // ── AC0 — 真 profiles.yml 钉死（文件可读 + 校验通过 + 六 role 可解析）──────────────────────────
