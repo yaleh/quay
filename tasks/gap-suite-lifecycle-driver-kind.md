@@ -1,7 +1,7 @@
 ---
 id: gap-suite-lifecycle-driver-kind
 title: suite 生命周期收进一个常驻 driver kind——进程级父子 wait + 定时兜底静默检测，单飞锁回归纯资源限制器（SPEC §3，地基）
-status: ready
+status: done
 labels:
   - gap
   - feature
