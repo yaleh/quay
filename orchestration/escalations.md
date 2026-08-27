@@ -629,3 +629,10 @@ manager 只搬 (a) env var 到 launch.settings.json task-worker.env（`CLAUDE_CO
 3. 其它（如人手工 merge 已 stashed 的实现到 worktree 分支再修）。
 
 **同类前例**：2026-08-24 04:26Z「worker 死于它自己要修的 600s 根因」catch-22——同为「fix 任务被它要修的 bug 卡死」，那次 manager 搬 env var 部分直改破局。本次是第二个同类。
+
+**根因定位（manager 读码到行号级，让人一步到位）**：
+- `worker-driver.ts:825-837` `buildWorkerPrompt`——告诉 worker「create isolated worktree」+「implement per Proposal/Plan/AC」，但**从未强制「Read/Edit/Write 的 file_path 必须用 worktree 绝对路径」**。setup/fan-in 签名处用占位词 `<the worktree path…>`，实现步骤（step 2）完全没提路径。Claude Code file-tools 用绝对路径、不感知 shell cd ⇒ 无强制指令时 worker 默认落主检出绝对路径。
+- `worker-driver.ts:1311` spawn `{ cwd: rootDir }` 是【对的】非 bug（worker 得在主检出跑 `git worktree add`，改 cwd 没用）。
+- `dispatch-worktree-setup.sh` 已 fail-closed（exit 2 on missing worktree）——seam ③「建 worktree 失败不继续」已覆盖。**主 seam = ① prompt 未强制 worktree 绝对路径**。
+
+**给人直改的最小形态**：`buildWorkerPrompt`（+ `buildContinueWorkerPrompt` 续做版同源）加一句强制——「所有 Read/Edit/Write 的 file_path 一律用 worktree 绝对路径（如 `/home/yale/work/quay-worktrees/<task>/…`），file-tools 用绝对路径不感知 cd，禁用主检出路径与相对路径」。纯 prompt 文本改动，静态 grep 可验证。

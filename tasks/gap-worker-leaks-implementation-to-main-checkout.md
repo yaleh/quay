@@ -13,7 +13,7 @@ extra:
 ---
 **type:** execution
 
-> **needs-human（2026-08-27，自指死锁）**：本修复是自指死锁——修 worker-driver 泄漏 bug 需要 worker 实现，但 bug 未修时 worker 自己的 Read/Edit/Write 也会落主检出（泄漏）⇒ worker 修不了自己。需**人直改** `worker-driver.ts`（spawn cwd + dispatch prompt 明示 worktree 绝对路径）+ `dispatch-worktree-setup.sh`（provisioning fail-closed），或人授权直改。Touches 含 worker-driver.ts，resume 前必须处置（本 status=needs-human 防 auto-dispatch）。
+> **needs-human（2026-08-27，自指死锁）**：本修复是自指死锁——修 worker-driver 泄漏 bug 需要 worker 实现，但 bug 未修时 worker 自己的 Read/Edit/Write 也会落主检出（泄漏）⇒ worker 修不了自己。需**人直改** `worker-driver.ts:825-837 buildWorkerPrompt`（+ `buildContinueWorkerPrompt` 续做版同源）——加一句强制「所有 Read/Edit/Write 的 file_path 一律用 worktree 绝对路径，file-tools 用绝对路径不感知 cd，禁用主检出路径与相对路径」。**主 seam = prompt 未强制 worktree 绝对路径**；`worker-driver.ts:1311` spawn `{ cwd: rootDir }` 是对的（worker 得在主检出跑 git worktree add）；`dispatch-worktree-setup.sh` 已 fail-closed。纯 prompt 文本改动，静态 grep 可验证（+ AC1 派 worker 负控制）。Touches 含 worker-driver.ts，resume 前必须处置（本 status=needs-human 防 auto-dispatch）。
 
 ## Proposal
 
