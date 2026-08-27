@@ -26,13 +26,17 @@ import { fileURLToPath } from "node:url";
 
 import { runMechanicalFanIn, readWorkflowLockHold } from "../scripts/worker-driver.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
+import { runAsync } from "../scripts/driver-runtime.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const SCRIPTS_DIR = path.join(REPO_ROOT, "plugin", "scripts");
 const SLOT_LIB = path.join(SCRIPTS_DIR, "suite-slot-lib.sh");
+const DRIVER_SRC = path.join(SCRIPTS_DIR, "worker-driver.ts");
+const RUNTIME_SRC = path.join(SCRIPTS_DIR, "driver-runtime.ts");
 
 const TASK = "gap-mf-mech";
+const HOLDER_TASK = "gap-mf-holder";
 
 function git(cwd, ...args) {
   return spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -255,4 +259,81 @@ test("merge develop 冲突 ⇒ 机械 fan-in red（step=merge-develop），锁�
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
+});
+
+// ── gap-mech-fan-in-acquire-lock-timeout-queue-semantics：acquire 步 120s 超时去掉（排队语义）─────
+// workflow 锁是正确性锁（fan-in-ff-merge.sh:203 unbounded `flock -x`），排队等待正是它存在的意义；
+// 机械 fan-in 首步 acquire 被套 120s kill 会在「排队等待」时误杀（首个生产任务排第 2 位即被杀）。
+// 修法 = acquire 步 unbounded（Infinity），死持有者由锁内 1800s watchdog 兜底，不靠 driver 侧 SIGKILL。
+
+// AC1（能取假，结构面）：acquire 步不再传 120_000，改传 Infinity（unbounded）。结构断言是唯一能在
+// 不真等 120s 的前提下取假的判据——排队等待时长本身不是可注入的 seam（120s 是硬编码字面量）。
+test("AC1 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics) — acquire 步 unbounded（Infinity，⛔ 非 120s）；其余步骤仍有限超时", () => {
+  const src = fs.readFileSync(DRIVER_SRC, "utf8");
+  // acquire 步是唯一带 --acquire-workflow-lock 的 mechSh 调用；它必须传 Infinity（unbounded）。
+  const acquire = src.match(/mechSh\(\["bash", ffMerge, "--task", task, "--root", root, "--run-id", runId, "--acquire-workflow-lock"\],\s*([^)]+)\)/);
+  assert.ok(acquire, "acquire-step mechSh call must be present in runMechanicalFanIn");
+  assert.equal(acquire[1].trim(), "Infinity", `acquire step must be unbounded (Infinity), got "${acquire[1].trim()}" (⛔ 120_000 kills a queued waiter)`);
+  assert.doesNotMatch(acquire[0], /120_000/, "acquire step must NOT carry the old 120s timeout");
+  // 其余机械步骤仍是有限时长步骤（超时照旧，⛔ 不把「去掉短超时」误扩成「去掉所有超时」）。
+  assert.match(src, /mechSh\(\["git", "-C", worktree, "merge", "--no-edit", mergeTarget\], 120_000\)/, "merge-develop step keeps its finite timeout");
+  assert.match(src, /mechSh\(\["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget\], 120_000\)/, "typecheck step keeps its finite timeout");
+  // runAsync 对 Infinity 显式不设 SIGKILL timer（⛔ setTimeout(…, Infinity) → Node 压到 1ms 立即杀的 footgun）。
+  const rt = fs.readFileSync(RUNTIME_SRC, "utf8");
+  assert.match(rt, /if \(Number\.isFinite\(timeoutMs\)\)\s*\{\s*\n\s*timer = setTimeout\(/, "runAsync guards the SIGKILL timer behind Number.isFinite(timeoutMs) — Infinity ⇒ no timer");
+});
+
+// AC2 机制（排队语义，能取假）：排在持有者之后的机械 fan-in 排队等待、不 red at step 1，持有者释放后落地。
+test("AC2 机制 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics) — 排在持有者之后的机械 fan-in 排队等锁、不 red at step 1，释放后落地", async () => {
+  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
+  const runId = "mf-run-queued";
+  const suiteLog = path.join(base, "suite.log");
+  try {
+    // 持有者（position 1）先 acquire workflow 锁并保持（detached holder，flock 已持，脚本确认后退出）。
+    const holder = spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", HOLDER_TASK, "--root", repo, "--run-id", "holder-run", "--acquire-workflow-lock"], { encoding: "utf8" });
+    assert.equal(holder.status, 0, `holder acquire must succeed: ${holder.stdout}${holder.stderr}`);
+
+    // 机械 fan-in（position 2）排队：其 acquire holder 在 flock 上排队，等持有者释放后落地。⛔ 若 acquire
+    // 步仍是 120s 短超时，这里 1.5s 的排队不会触发它（1.5s ≪ 120s）——所以本测试单独不取假，取假靠 AC1
+    // 的结构断言；本测试证明的是机制端到端通（排队→等→落地，不 red at step 1、不 exit null）。
+    const pending = runMechanicalFanIn({
+      task: TASK, worktree, root: repo, runId, mergeTarget: "develop", forceSuite: true,
+      scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
+      suiteCapture: capture, suiteLogFile: suiteLog,
+      suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
+      scopedGateCommand: ["true"], docCheckCommand: ["true"],
+    });
+
+    // 让机械 fan-in 的 acquire 先进入排队（此刻 blocked 在 flock 上，未落地）。
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // 释放持有者 ⇒ 机械 fan-in 的 holder 获得锁，继续 merge→…→ff 并落地。
+    const rel = spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", HOLDER_TASK, "--root", repo, "--release-workflow-lock"], { encoding: "utf8" });
+    assert.equal(rel.status, 0, `holder release must succeed: ${rel.stdout}${rel.stderr}`);
+
+    const r = await pending;
+    assert.equal(r.outcome, "landed", `queued mechanical fan-in must land after the holder releases (step=${r.step} reason=${r.reason})`);
+  } finally {
+    // 兜底释放持有者（测试中途失败也不留一个永睡的 detached holder 进程）。
+    try { spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", HOLDER_TASK, "--root", repo, "--release-workflow-lock"], { encoding: "utf8" }); } catch { /* best-effort */ }
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// runAsync(Infinity) 正向：无超时 ⇒ 子进程正常跑完（⛔ 不是 setTimeout(…, Infinity) → 1ms 立即 SIGKILL）。
+test("runAsync(Infinity) — 无超时：子进程正常跑完（⛔ 不是 1ms 立即 SIGKILL 的 footgun）", async () => {
+  const r = await runAsync(["sleep", "0.3"], { timeoutMs: Infinity, collectStderr: true });
+  assert.equal(r.status, 0, `Infinity must mean no timeout (child completes), got status=${r.status}`);
+  assert.equal(r.error, null, `no error for an unbounded completed child, got ${r.error?.message}`);
+});
+
+// 短超时负控制：有限超时仍 SIGKILL——证明「去掉 acquire 短超时」不是「全局禁掉超时」，AC1 的
+// 结构断言取假所依赖的超时机制本身仍在工作。
+test("短超时负控制 — runAsync 有限超时仍 SIGKILL（⛔ 超时机制未整体失效）", async () => {
+  const t0 = Date.now();
+  const r = await runAsync(["sleep", "5"], { timeoutMs: 150, collectStderr: true });
+  const elapsed = Date.now() - t0;
+  assert.equal(r.status, null, `SIGKILLed child must have null status, got ${r.status}`);
+  assert.ok(r.error && /spawn timeout after 150ms/.test(r.error.message), `finite timeout must SIGKILL with 'spawn timeout', got ${r.error?.message}`);
+  assert.ok(elapsed < 4000, `killed well before the 5s sleep would finish (elapsed=${elapsed}ms)`);
 });
