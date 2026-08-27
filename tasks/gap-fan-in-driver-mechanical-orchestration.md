@@ -15,6 +15,8 @@ extra:
 
 > **正本**：`orchestration/SPEC-fan-in-driver-mechanical-orchestration-2026-08-27.md`（人 2026-08-27 09:0xZ 提方案逐字在 §0.1，manager 三组实测 §1.1）。**取代** `SPEC-fan-in-workflow-lock-and-S1-2026-08-26.md` 的解法（保留其诊断）；不冲突 `SPEC-unified-driver-architecture` 与 `SPEC-worker-driven-inner`。
 
+> **串行让路（manager 2026-08-27）**：本任务落地 fan-in 时，暂停派发其它任务（别跟别的 fan-in 抢 S=1 锁排队）；ff 若报 Diverging branches，优先护航重试（它落地后 fan-in 30min→10min、16 个 plugin/test/ 任务解挡、ff-race 修好 archguard 也解挡）。
+
 ## Proposal
 
 **取消 `fan-in-execute.js` workflow（子代理串行跑机械步骤），改由 driver 机械驱动 fan-in 的机械部分（锁 / merge / delta 判定 / typecheck / scoped门 / suite / ff）；只有需要语义判断的失败点（冲突、红 suite、typecheck 红、anti-drift 越界）才单独唤起一个 Claude Code 会话。suite 不再 detach，fan-in 锁机械包裹 suite 锁，锁持有时长从「模型的 ~30min」塌缩到「机械的 ~10min」。**
@@ -48,7 +50,11 @@ driver 机械编排 fan-in 落地；AC1-AC5 全勾；反例判据（SPEC §6）�
 - plugin/scripts/worker-driver.ts（机械 fan-in 状态机 + 语义会话唤起）
 - plugin/scripts/suite-driver.ts（suite 不 detach，driver 子进程 + 异步 poll）
 - plugin/scripts/fan-in-ff-merge.sh（锁机械包裹 suite 锁）
-- plugin/test/（AC1-AC5 + 反例判据负控制）
+- plugin/test/worker-driver.test.mjs（机械 fan-in 状态机 + 反例判据负控制）
+- plugin/test/suite-driver.test.mjs（suite 不 detach，ppid 判据）
+- plugin/test/fan-in-ff-merge.test.mjs（锁机械包裹 suite 锁）
+- plugin/test/fan-in-execute-paths.test.mjs（fan-in-execute.js 退役）
+- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（AC1-AC5 集成，新）
 - tasks/gap-fan-in-driver-mechanical-orchestration.md（自身）
 
 ## 已裁定（人 2026-08-27，逐字；SPEC §4）
