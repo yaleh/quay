@@ -15,7 +15,7 @@
 # SAME precedence as this file — RESOURCE_GATE_CONCURRENT_SUITES (the deterministic test seam) FIRST,
 # then `<base>.concurrency` (the scalar file — gap-suite-concurrency-env-to-file-fresh-read: env is
 # forked once per process, a file is re-read by the next detached suite process without a restart),
-# then 旋钮② QUAY_MAX_CONCURRENT_SUITES, then the 2 default, with empty-string-as-unset (`:-`) on both.
+# then 旋钮② QUAY_MAX_CONCURRENT_SUITES, then the 1 default, with empty-string-as-unset (`:-`) on both.
 # The two canons therefore agree under ANY env AND any `.concurrency` file, including a test seam (they
 # could only drift if one side's semantics changed independently — exactly what suite-slot-ssot-check
 # I4 detects). Both read the file RAW (bash `[ -f "$f" ] && cat "$f"`, TS `fs.existsSync &&
@@ -25,7 +25,7 @@
 # Functions:
 #   suite_slot_count     — echo S = RESOURCE_GATE_CONCURRENT_SUITES (test seam) → `<base>.concurrency`
 #                          (scalar file next to the lock base, fresh-read) → QUAY_MAX_CONCURRENT_SUITES
-#                          (旋钮②) → 2. Optional first arg = the lock base (used for the file read);
+#                          (旋钮②) → 1. Optional first arg = the lock base (used for the file read);
 #                          when omitted the base is resolved like test.sh's full_suite_lock
 #                          (FULL_SUITE_LOCK_FILE env → git-common-dir → .git/full-suite.lock).
 #   suite_slot_paths     — echo the S slot paths for a base (`${base}.0`..`${base}.S-1`), one per line.
@@ -35,7 +35,9 @@
 
 # shellcheck disable=SC2317  # sourced functions are not "unused"
 suite_slot_count() {
-  local base="$1" file="" s fv
+  # `${1:-}` not `$1` — the no-arg call (default_concurrency_formula / serial_lowconc_host_default and
+  # the I4 checker) runs under test.sh's `set -u`, where a bare `$1` is an unbound-variable error.
+  local base="${1:-}" file="" s fv
   if [ -n "$base" ]; then
     file="${base}.concurrency"
   else
@@ -87,7 +89,7 @@ suite_slot_count() {
     esac
   fi
 
-  echo 2  # default: single-suite baseline (0/negative/non-numeric above all fail open here)
+  echo 1  # default: single-suite baseline (S=1, gap-fan-in-workflow-lock-and-S1 — 0/negative/non-numeric above all fail open here)
 }
 
 # shellcheck disable=SC2317
@@ -99,4 +101,36 @@ suite_slot_paths() {
     printf '%s\n' "${base}.${i}"
     i=$((i + 1))
   done
+}
+
+# spawn_suite_lock_hold_watchdog — spawn the hold-cap watchdog (gap-suite-lock-starvation-long-
+# validation-hold AC1). Args: <held-fd> <flag-file> <main-pid> <hold-max-s>. The watchdog runs as a
+# child of the lock-HOLDING process (⛔ not an outside worker-driver kill): it polls the flag file each
+# 1s and (a) exits promptly when the holder releases normally (flag removed), (b) releases the slot
+# immediately if the holder died without releasing (crash-autorelease, ≤1s delay — the inherited FD
+# shares the same open-file-description lock), or (c) after <hold-max-s> seconds of the holder STILL
+# holding, releases the slot + emits a fail-loud `lock_hold_exceeded=1` marker (never silent). The cap
+# only yields the SLOT — the long suite keeps running; it accepts the contention risk of a (S+1)-th
+# suite joining rather than serializing the whole repo behind its re-check.
+# shellcheck disable=SC2317
+spawn_suite_lock_hold_watchdog() {
+  local _fd="$1" _flag="$2" _main_pid="$3" _max_s="$4"
+  (
+    _w_remaining="${_max_s}"
+    while [ "${_w_remaining}" -gt 0 ]; do
+      sleep 1
+      [ -e "${_flag}" ] || exit 0
+      kill -0 "${_main_pid}" 2>/dev/null || { flock -u "${_fd}" 2>/dev/null || true; rm -f "${_flag}"; exit 0; }
+      _w_remaining=$((_w_remaining - 1))
+    done
+    if [ -e "${_flag}" ]; then
+      flock -u "${_fd}" 2>/dev/null || true
+      rm -f "${_flag}"
+      echo "__OVERHEAD__ lock_hold_exceeded=1" >&2
+      echo "suite-lock-hold-watchdog: LOCK-HOLD-EXCEEDED — released full-suite slot after ${_max_s}s (long-validation yield, fail-loud)" >&2
+    fi
+  ) >/dev/null &  # ⛔ stdout→/dev/null: the watchdog's inherited stdout would otherwise hold the caller's
+                  # command-substitution pipe open and block `$(spawn_suite_lock_hold_watchdog …)` for the
+                  # FULL T seconds (实测 T=3 ⇒ 3.02s block) — the fail-loud markers are on STDERR, unaffected.
+  echo "$!"
 }

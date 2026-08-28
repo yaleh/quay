@@ -343,22 +343,32 @@ export function readDoneTasks(root) {
 // ── 单载体三态判定 ─────────────────────────────────────────────────────────────────────────────────────
 export function classifyCarrier({
   name, doneTasks, prodRoot, gitRoot, retiredTexts, predicateHit,
+  refsById = null, landingById = null, writersById = null,
 }) {
   const base = basenameOf(name);
   const kind = readCarrierKind(base, retiredTexts);
 
-  // 引用计数（边界化，AC 段 + 全任务体）。
+  // 引用计数（边界化，AC 段 + 全任务体）。批量路径（buildAudit 传 refsById）用预计算索引，
+  // 否则逐任务逐载体跑 hasCarrierRef（独立调用 / fixture 路径保持原语义）。
   let acRefs = 0;
   let bodyRefs = 0;
-  const citing = new Set();
-  for (const task of doneTasks) {
-    const inAc = hasCarrierRef(extractAcSection(task.text), base);
-    const inBody = hasCarrierRef(task.text, base);
-    if (inAc) acRefs++;
-    if (inBody) bodyRefs++;
-    if (inAc) citing.add(task.id);
+  let citingTasks = [];
+  const ref = refsById ? refsById.get(base) : undefined;
+  if (ref) {
+    acRefs = ref.acRefs;
+    bodyRefs = ref.bodyRefs;
+    citingTasks = ref.citing;
+  } else {
+    const citing = new Set();
+    for (const task of doneTasks) {
+      const inAc = hasCarrierRef(extractAcSection(task.text), base);
+      const inBody = hasCarrierRef(task.text, base);
+      if (inAc) acRefs++;
+      if (inBody) bodyRefs++;
+      if (inAc) citing.add(task.id);
+    }
+    citingTasks = [...citing].sort();
   }
-  const citingTasks = [...citing].sort();
 
   // 已退役 → 直接出局。
   if (kind === CARRIER_KINDS.RETIRED) {
@@ -374,10 +384,23 @@ export function classifyCarrier({
   }
 
   const located = locateCarrier(prodRoot, base);
-  const writers = countWriters(prodRoot, base);
-  const { earliest: landingEpoch, latest: latestLandingEpoch } = citingTasks.length
-    ? carrierLandingEpoch(gitRoot, citingTasks)
-    : { earliest: null, latest: null };
+  const writers = writersById
+    ? (writersById.get(base) ?? { nonTest: 0, test: 0 })
+    : countWriters(prodRoot, base);
+  let landingEpoch = null;
+  let latestLandingEpoch = null;
+  if (citingTasks.length) {
+    if (landingById) {
+      for (const id of citingTasks) {
+        const e = landingById.get(id);
+        if (e === null || e === undefined) continue;
+        if (landingEpoch === null || e < landingEpoch) landingEpoch = e;
+        if (latestLandingEpoch === null || e > latestLandingEpoch) latestLandingEpoch = e;
+      }
+    } else {
+      ({ earliest: landingEpoch, latest: latestLandingEpoch } = carrierLandingEpoch(gitRoot, citingTasks));
+    }
+  }
   const landingVerified = landingEpoch !== null;
 
   // 载体不存在。
@@ -479,6 +502,136 @@ export function classifyCarrier({
   };
 }
 
+// ── 批量预计算（替代 O(n²) 子进程）──────────────────────────────────────────────────────────────────────────
+// buildAudit 原实现对每个载体跑 5×grep + 对每个引用任务跑 2×git log + 对每个载体×任务重提取 AC 段——载体数
+// (815) × 任务数 (1478) 的 O(n²) 子进程/JS 成本，实测 buildAudit 一度 148s（载体 27、任务 1478）。
+// 以下三个索引把同等工作压到 2×git log + 5×grep + 一次组合正则扫描，语义与单载体路径逐点一致。
+
+// 编译所有载体 basename 的组合边界正则——与 hasCarrierRef 完全同语义（(?<![A-Za-z0-9_.-])…(?![A-Za-z0-9_.-])），
+// 长优先（更具体的 basename 先匹配，如 gate-events.jsonl 先于 events.jsonl）。无载体 → null。
+export function compileCarrierRegex(basenames) {
+  const uniq = [...new Set(basenames)].filter((b) => b.length > 0).sort((a, b) => b.length - a.length);
+  if (uniq.length === 0) return null;
+  return new RegExp(
+    `(?<![A-Za-z0-9_.-])(${uniq.map(escapeRegExp).join("|")})(?![A-Za-z0-9_.-])`,
+    "g",
+  );
+}
+
+// 引用计数索引：base → { acRefs, bodyRefs, citing }。对每个任务全文 + AC 段各跑一次组合正则（而非逐载体逐任务
+// hasCarrierRef），引用语义与 classifyCarrier 原循环一致（acRefs = AC 段命中数；bodyRefs = 全任务体命中数；
+// citing = AC 段命中的任务 id 排序）。
+export function buildReferenceIndex(doneTasks, basenames) {
+  const combined = compileCarrierRegex(basenames);
+  const byName = new Map([...new Set(basenames)].filter((b) => b.length > 0).map((b) => [b, { acRefs: 0, bodyRefs: 0, citing: [] }]));
+  if (!combined) return byName;
+  for (const task of doneTasks) {
+    const acText = extractAcSection(task.text);
+    const acNames = new Set();
+    for (const m of acText.matchAll(combined)) acNames.add(m[0]);
+    const bodyNames = new Set();
+    for (const m of task.text.matchAll(combined)) bodyNames.add(m[0]);
+    for (const name of new Set([...acNames, ...bodyNames])) {
+      const rec = byName.get(name);
+      if (!rec) continue;
+      if (bodyNames.has(name)) rec.bodyRefs++;
+      if (acNames.has(name)) { rec.acRefs++; rec.citing.push(task.id); }
+    }
+  }
+  for (const rec of byName.values()) rec.citing.sort();
+  return byName;
+}
+
+// 落地时刻索引：taskId → epoch(ms)（无则 null）。一次 `git log --all`（全文消息提及，%B 含 subject+body，
+// 与 taskLandingEpoch 的 `--grep` 同语义——任务 id 会出现在提交正文的交叉引用里，只看 %s 会漏）+ 一次
+// `git log --name-only -- tasks/`（文件触碰）替代 taskLandingEpoch 的逐任务 2×git 子进程。epoch =
+// max(消息提及最新, 触碰 tasks/<id>.md 最新)，与 taskLandingEpoch 的 Math.max 语义一致。
+export function buildLandingEpochIndex(gitRoot, taskIds) {
+  const idx = new Map(taskIds.map((id) => [id, null]));
+  if (taskIds.length === 0) return idx;
+  // 全文消息提及：%ct%x00%B%x00（NUL 分隔，提交消息不含 NUL ⇒ 按 \0 切成 (ct, message) 对）。
+  try {
+    const raw = execFileSync("git", ["-C", gitRoot, "log", "--all", "--format=%ct%x00%B%x00"], {
+      encoding: "utf8", timeout: 60_000, maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
+    });
+    const parts = raw.split("\0");
+    for (let i = 0; i + 1 < parts.length; i += 2) {
+      const ctMs = Number(parts[i]) * 1000;
+      if (!Number.isFinite(ctMs)) continue;
+      const message = parts[i + 1];
+      for (const id of taskIds) {
+        if (message.includes(id)) {
+          if (idx.get(id) === null || ctMs > idx.get(id)) idx.set(id, ctMs);
+        }
+      }
+    }
+  } catch { /* no history — all null */ }
+  // 文件触碰：逐提交时间戳 + --name-only 的文件清单（最新在前）。裸数字行 = 新提交时间戳，tasks/*.md = 该提交触碰的任务文件。
+  // 用【默认简化】的 `git log --name-only -- tasks/`（不加 -m/--diff-merges）——它与旧实现的逐任务
+  // `git log -- tasks/<id>.md` 走同一套历史简化（merge 只在「非 treesame 于第一父」时才保留）。代价：
+  // 默认合并 diff 为空 ⇒ 只经 merge 触碰、且 merge 消息正文不含该任务 id 的文件会少记一个（更早）的落地时刻；
+  // 方向是【更早】⇒ 「落地后记录数」偏多 ⇒ 审计偏保守（更少假「落地后零数据」flag），是安全侧。
+  try {
+    const named = execFileSync("git", ["-C", gitRoot, "log", "--format=%ct", "--name-only", "--", "tasks/"], {
+      encoding: "utf8", timeout: 60_000, maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
+    });
+    let curCt = null;
+    for (const line of named.split("\n")) {
+      const t = line.trim();
+      if (t === "") continue;
+      if (/^\d+$/.test(t)) { curCt = Number(t) * 1000; continue; }
+      if (curCt !== null && t.startsWith("tasks/") && t.endsWith(".md")) {
+        const id = t.slice("tasks/".length, -".md".length);
+        if (idx.has(id) && (idx.get(id) === null || curCt > idx.get(id))) idx.set(id, curCt);
+      }
+    }
+  } catch { /* no history — keep message-mention only */ }
+  return idx;
+}
+
+// 写入者索引：base → { nonTest, test }。每个代码目录只跑一次 `grep -rl -F -f -`（全部 basename 字面量作模式，
+// 经 stdin 传入），再对候选文件跑一次组合边界正则把命中归因到各 basename——替代 countWriters 的逐载体 5×grep。
+// `-F` 字面量粗筛是 hasCarrierRef 的严格超集（字面量子串 ⊇ 边界字面量），故不会漏掉任何 hasCarrierRef 会命中的文件。
+export function buildWriterIndex(root, basenames) {
+  const uniq = [...new Set(basenames)].filter((b) => b.length > 0);
+  const idx = new Map(uniq.map((b) => [b, { nonTest: 0, test: 0 }]));
+  if (uniq.length === 0) return idx;
+  const combined = compileCarrierRegex(uniq);
+  const nonTestDirs = ["plugin/scripts", "plugin/loop", "orchestration", "packages"];
+  const testDirs = ["plugin/test"];
+  const scan = (dirs, key) => {
+    for (const d of dirs) {
+      const abs = path.join(root, d);
+      if (!fs.existsSync(abs)) continue;
+      let cand = [];
+      try {
+        const out = execFileSync("grep", ["-rl", "-F", "-f", "-", "--include=*.ts", "--include=*.js", "--include=*.mjs", "--include=*.sh", "--", abs], {
+          encoding: "utf8", timeout: 60_000, maxBuffer: 64 * 1024 * 1024, stdio: ["pipe", "pipe", "ignore"],
+          input: uniq.join("\n") + "\n",
+        }).trim();
+        if (out) cand = out.split("\n");
+      } catch { /* grep exit 1 = no match — 0 */ }
+      for (const f of cand) {
+        if (!f) continue;
+        let text;
+        try { text = fs.readFileSync(f, "utf8"); } catch { continue; }
+        if (!combined) continue;
+        // 按【文件】计数（与 countWriters 一致：一个文件无论引用几次只计 1），不是按出现次数——
+        // 同一文件多次引用同一 basename 时 matchAll 会给出多次命中，须先去重。
+        const seen = new Set();
+        for (const m of text.matchAll(combined)) seen.add(m[0]);
+        for (const b of seen) {
+          const rec = idx.get(b);
+          if (rec) rec[key]++;
+        }
+      }
+    }
+  };
+  scan(nonTestDirs, "nonTest");
+  scan(testDirs, "test");
+  return idx;
+}
+
 // ── 聚合审计 ────────────────────────────────────────────────────────────────────────────────────────────
 export function buildAudit(startDir, { root = null } = {}) {
   const repoRoot = root ?? findRepoRoot(startDir);
@@ -489,6 +642,17 @@ export function buildAudit(startDir, { root = null } = {}) {
 
   const discovered = discoverProductionCarriers(gitRoot);
   const carriers = new Set([...EXPLICIT_CARRIERS, ...discovered]);
+
+  // 批量预计算三个索引（替代逐载体 5×grep + 逐引用任务 2×git log + 逐载体×逐任务 AC 段重提取）：
+  //   refsById    引用计数（base → {acRefs, bodyRefs, citing}）
+  //   landingById 落地时刻（taskId → epoch，只覆盖被引用任务）
+  //   writersById 写入者计数（base → {nonTest, test}）
+  const basenames = [...carriers].map(basenameOf);
+  const refsById = buildReferenceIndex(doneTasks, basenames);
+  const citedTaskIds = new Set();
+  for (const rec of refsById.values()) for (const id of rec.citing) citedTaskIds.add(id);
+  const landingById = buildLandingEpochIndex(gitRoot, [...citedTaskIds]);
+  const writersById = buildWriterIndex(gitRoot, basenames);
 
   // 谓词自检（判据6）：挑一个已知存在的载体作「谓词命中」——证明 find 谓词本身工作。
   let predicateHit = null;
@@ -502,6 +666,7 @@ export function buildAudit(startDir, { root = null } = {}) {
     const rep = classifyCarrier({
       name, doneTasks, prodRoot, gitRoot, retiredTexts,
       predicateHit: predicateHit ? `${predicateHit.name}@${predicateHit.path}` : null,
+      refsById, landingById, writersById,
     });
     // 只保留「被 done 任务 AC 引用」的载体进主清单；显式命名的载体即使 0 引用也保留（假阳性显式呈现）。
     if (rep.refs === 0 && !EXPLICIT_CARRIERS.includes(name)) continue;

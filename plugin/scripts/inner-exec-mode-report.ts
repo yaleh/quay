@@ -46,7 +46,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 
 // ── Repo-root 检测（与 select-tests-for-touches.ts 同形态：.quay/config.yml 优先，git 兜底）──
 
@@ -75,18 +75,6 @@ export function repoSlug(repoRoot) {
 /** projects 目录（可被 INNER_EXEC_MODE_PROJECTS_DIR 覆盖 —— 测试接缝）。 */
 export function defaultProjectsDir(env = process.env) {
   return env.INNER_EXEC_MODE_PROJECTS_DIR || path.join(os.homedir(), ".claude", "projects");
-}
-
-/** 规范化相对路径（去 ./、//、尾 /，解析 ..）。 */
-export function normalizeRel(p) {
-  const parts = String(p).replace(/\\/g, "/").split("/");
-  const out = [];
-  for (const seg of parts) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") { out.pop(); continue; }
-    out.push(seg);
-  }
-  return out.join("/");
 }
 
 /**

@@ -1,7 +1,7 @@
 ---
 id: gap-spec-declaration-point-mechanical-check
 title: SPEC 声明点无机械保证（每个 orchestration/SPEC-*.md 须在全部已知声明点出现，声明点集合 grep 派生非硬编码）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -35,12 +35,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：新增 `orchestration/SPEC-*.md` 而漏任一声明点 ⇒ checker 红（⛔ 三连红同形再现 ⇒ 假）。
-- [ ] AC2：声明点集合是 grep 派生的（⛔ 硬编码「两处」⇒ 假）。
+- [x] AC1：新增 `orchestration/SPEC-*.md` 而漏任一声明点 ⇒ checker 红（⛔ 三连红同形再现 ⇒ 假）。
+- [x] AC2：声明点集合是 grep 派生的（⛔ 硬编码「两处」⇒ 假）。
 
 ## Definition of Done
 
-- [ ] SPEC 声明点机械检查落地 + 新增 SPEC 漏声明可被红；AC1-2 全勾；land 到 develop。
+- [x] SPEC 声明点机械检查落地 + 新增 SPEC 漏声明可被红；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
@@ -50,4 +50,8 @@ depends_on: []
 
 - plugin/scripts/spec-declaration-point-check.ts
 - plugin/test/spec-declaration-point-check.test.mjs
+- plugin/scripts/runner-static-gate.ts（注册进 run_static_checks）
+- plugin/scripts/checker-mutation-cases/spec-declaration-point-check.sh（mutation case，checker-mutation-check AC1b 强制）
+- plugin/scripts/capability-catalog.sh（QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER 六字段，AC1b 入口闸强制）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照 scripts 282→283，delivery-inventory-drift-gate 强制）
 - tasks/gap-spec-declaration-point-mechanical-check.md（自身）

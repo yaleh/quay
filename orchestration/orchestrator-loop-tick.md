@@ -93,6 +93,14 @@ transcript 有没有真实 user 消息（被驱动过）。三态判定与处理
 bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: healthy|empty-shell|missing, window, process, transcript, transcriptFresh}
 ```
 
+> **⚠️ 2026-08-24「缺失 ⇒ 重建」改为条件性（人裁定停 inner，AC141 收窄 inner 执行面）**：
+> AC141 把 inner 的执行面收窄为「默认 defer 给 worker-driver」（worker-driven 模型），
+> manager 核实 inner 冷启动后 57min 零真实任务执行；人 2026-08-24 明确裁定**把 inner 停掉**。
+> ⇒ **本步「缺失 ⇒ 无条件重建」不再适用**——inner 缺失时**不自动重建**（重建前先确认
+> inner 在 worker-driven 模型下是否仍有必须存在的职责；若仅剩自检/锚点价值，可保持停止）。
+> 实证代价：2026-08-24 外层冷启动/恢复各无条件重建了一次 inner，被 manager 按人裁定叫停
+> （两次都多建了一个被停掉的会话）。
+
 按 `state` 分派：
 
 - **`healthy`** ⇒ 什么都不做——不重建、不重启、不改启动参数（权限边界，负控制：健康 inner 不被动）。
@@ -195,27 +203,15 @@ Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",   # REP
          persistent: true, timeout_ms: 3600000})
 ```
 
-**4b2. 重挂套件状态触发者（红窗自动执行者，`gap-red-window-has-no-automatic-executor`）——状态变化即触发，不等 cron**
+**4b2. 已退役：不再挂 `suite-state-trigger` Monitor（`gap-retire-outer-monitors-after-reconciler`）**
 
-红窗规则（`gap-full-suite-belongs-to-outer-background-above-3-min` AC4）的 ROUND 2 事故证明「存在≠
-生效」：套件转红 30 分钟无人处置，因为 RED/GREEN-RUNNING 两个分支都只靠 `*/20` cron 或人驱动。本条
-给它补**执行者层**——状态变化（state=red / state=running）即转成动作（通知外层 / 驱动 inner 派发）。
-**它是事件监测（同 session-liveness），不是新调度源**——节奏仍唯一（步骤 4 的 cron）；它只把
-「cron 才检查状态」改成「状态变化即触发」：
-
-```
-Monitor({command: "node --no-warnings --experimental-strip-types $REPO_ROOT/plugin/scripts/suite-state-trigger.ts --monitor",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
-         description: "套件状态自动触发（SUITE-RED → 立即 RED 处置；SUITE-RUNNING → 乐观派发执行者）",
-         persistent: true, timeout_ms: 3600000})
-```
-
-事件流里出现 `SUITE-RED` ⇒ **立即**进入步骤 1b「红窗分诊」（不等下一次 cron——本轮的
-「红着无人处置 30 分钟」场景即被消灭）；出现 `SUITE-RUNNING` ⇒ 按「RUNNING 乐观派发执行者」驱动
-inner 照常派发。`SUITE-GREEN` / `SUITE-STATUS` 是平静基线，无需处置。挂载遗漏的代价同
-session-liveness：退回纯 20 分钟轮询（正是本轮事故形态）——所以 4c 的验证纪律对两者同样成立：
-跑 `bash plugin/scripts/monitor-mount-check.sh --json` 之外，还要确认套件触发者的 Monitor 已挂
-（`pgrep -af 'suite-state-trigger.ts --monitor'`，有 node 活进程即可；按步骤 0 的自匹配纪律
-排除 pgrep 自己那一行——发起查询的命令行里含同样字符串）。
+「套件转红」的 Monitor 挂载已退役——宿主是会话（Monitor 随会话死，tmux server 重置杀外层 ⇒ 静默消失，
+已实测证伪）。协调循环（driver 定时器地板 + 每趟 pass 现读 ready 池 / suite state，SPEC §5.5）落地后，
+「空槽出现」与「套件转红」由 driver 现读接管，trigger 从正确性依赖降级为优化（SPEC §5.8 第 5 步）。
+本层红窗分诊本身已随 AC84 退役（→ `orchestration/archive/AC58-retired-clauses.md#R33`），SUITE-RED 的
+外层消费者已不存在。脚本本体 `plugin/scripts/suite-state-trigger.ts` 保留为共享库（被
+`full-suite-runner.ts` import——crash-watchdog / 起跑闸 / 红链自检），只是不再由外层 Monitor 挂载。
+4c 的挂载验证现只覆盖 session-liveness。
 
 **4c. 重挂后立即验证挂上了 —— 两判据自检**
 
@@ -921,7 +917,7 @@ tick 做一次收尾 pass。
 与 `durationMs`、本轮全量 suite 是否在跑/绿/红。
 
 **套件状态自动触发者（红窗执行者层，`gap-red-window-has-no-automatic-executor`——把 (a) 块的
-机制从「被动响应驱动」变成「状态变化即执行」，AC1/AC2/AC4）**：
+机制从「被动响应驱动」变成「状态变化即执行」，AC1/AC2/AC4）**【已退役：Monitor 挂载移除（`gap-retire-outer-monitors-after-reconciler`），正文保留作理由档案——`suite-state-trigger.ts` 仍作共享库被 `full-suite-runner.ts` import】**:
 
 `suite-state-trigger.ts`（Monitor，冷启动 4b2 挂上）在 `.quay/full-suite-state.json` 的
 `state` **变化**时立即发事件（5 秒轮询，≪ cron 的 20 分钟窗口）并记 `.quay/suite-state-events.jsonl`
@@ -1219,8 +1215,6 @@ tick 或 `/clear` 后的会话会重犯。
   `serialEquivalentPerHour` = 旧 60/均耗时，与并发无关）
 - 异步收尾例程（步骤 1b）：本轮收尾几条、`.quay/full-suite-state.json` 最新 `state`（green/red/running）
   与 `durationMs`、本轮全量 suite 是否在跑/绿/红
-- 套件状态触发者（4b2/步骤 1b）：Monitor 是否挂上（`pgrep -af 'suite-state-trigger.ts --monitor'`，
-  排除 pgrep 自己那一行）、最近一次 `SUITE-*` 事件（`.quay/suite-state-events.jsonl` 尾部）与时刻
 - 累计动作类型分布（退化判据）
 - Monitor 两判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
   `targetRoot` 是否等于本仓根 / `targetOk`）——挂没挂、挂的哪个仓库

@@ -43,9 +43,13 @@ import {
   checkDodSuiteLine,
   readDodSuiteLineBaseline,
   readBareDirTouchesBaseline,
+  checkWiringClaimAcProbeGated,
+  readWiringClaimAcProbeBaseline,
   DATA_FILE_REL,
   DOD_SUITE_LINE_BASELINE_REL,
+  WIRING_CLAIM_AC_PROBE_BASELINE_REL,
 } from "../scripts/task-contract-check.ts";
+import { checkWiringClaimAcProbe } from "../scripts/wiring-coverage-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -823,6 +827,85 @@ test("findWorkspaceRoot walks up to .git", () => {
   const sub = path.join(root, "a", "b");
   fs.mkdirSync(sub, { recursive: true });
   assert.equal(findWorkspaceRoot(sub), root);
+});
+
+// ── Check 8: wiring/reachability-declaring AC must name a real input probe (gap-wiring-claim-ac-requires-real-input-probe) ──
+
+test("AC1: a wiring/reachability declaration without a real input probe → wiring-claim-ac-no-probe (sample 1)", () => {
+  // gap-readdepends-on-indented-extra-depends-on AC1: "10 条命中任务都能被读到" — the test called
+  // readDependsOn("depends_on: [a, b]\n") on a string literal, the 10 real files never read.
+  const ac = "- [x] AC1（能取假，缩进形态可读）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。";
+  const findings = checkWiringClaimAcProbe(ac);
+  assert.equal(findings.length, 1, JSON.stringify(findings));
+  assert.equal(findings[0].code, "wiring-claim-ac-no-probe");
+});
+
+test("AC1: sample 2 — '已有 3 条现成样本' without a real input probe → flagged", () => {
+  // gap-ac146-human-interface-explicit-owner AC2: "已有 3 条现成样本" — the test copied samples into an
+  // mkdtemp synthetic file, the real .quay/promotion-outcome.jsonl never read.
+  const ac = "- [x] AC2（能取假，负控制）：造一条 needs-human（`.quay/promotion-outcome.jsonl` 已有 3 条现成样本），该界面须显示它；（⛔ 不显示 ⇒ 假）。";
+  const findings = checkWiringClaimAcProbe(ac);
+  assert.equal(findings.length, 1, JSON.stringify(findings));
+  assert.equal(findings[0].code, "wiring-claim-ac-no-probe");
+});
+
+test("AC2 negative control: a declaration that NAMES a real input probe is NOT flagged", () => {
+  const acs = [
+    "- [x] AC2 — 负控制的真实输入（主检出真实读数，非 fixture）：`plugin/scripts/ready-pool-check.ts --root /home/yale/work/quay --cap 5 --json` 实读主检出 store，`candidates[]` 中 `eligible=false` 的已存在 todo 恰 2 条（都卡 `missing=dod`）",
+    "- [x] AC2（能取假，生产回放）：用生产 `verification-round.jsonl` 的 `#599`（buckets=P，lookback=[596,597,598] 全 M）回放——修复后 `packages/quay/test/*` 长文件不再被排到 35%-65% 位置",
+  ];
+  for (const ac of acs) {
+    assert.deepEqual(checkWiringClaimAcProbe(ac), [], ac.slice(0, 60));
+  }
+});
+
+test("AC3 boundary: a pure-function AC with no quantified reachability/existence claim is NOT flagged", () => {
+  const acs = [
+    "- [x] AC1（能取假）：`parseFoo` 对缩进输入返回正确的依赖列表；（⛔ 返回错 ⇒ 假）。",
+    "- [x] AC1: `--verbose` prints debug output to stderr.",
+    "- [x] AC2: 6 条旧路径模式零命中（grep 分写路径）——排除它不抑制任何命中。", // N 条 but grep-hit, not a read/exist claim
+  ];
+  for (const ac of acs) {
+    assert.deepEqual(checkWiringClaimAcProbe(ac), [], ac.slice(0, 60));
+  }
+});
+
+test("checkWiringClaimAcProbeGated: grandfathered file → [] ; a non-grandfathered file → violation", () => {
+  const ac = "- [x] AC1（能取假）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。";
+  const body = taskBody({ status: "done", ac });
+  const grandfathered = new Set(["tasks/legacy.md"]);
+  assert.deepEqual(checkWiringClaimAcProbeGated(body, "tasks/legacy.md", grandfathered), []);
+  const hits = checkWiringClaimAcProbeGated(body, "tasks/new.md", grandfathered);
+  assert.equal(hits.length, 1, JSON.stringify(hits));
+  assert.equal(hits[0].code, "wiring-claim-ac-no-probe");
+  assert.match(hits[0].what, /gap-wiring-claim-ac-requires-real-input-probe/);
+});
+
+test("scanTaskText integration: declaration-without-probe is a violation unless grandfathered", () => {
+  const ac = "- [x] AC1（能取假）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。";
+  const body = taskBody({ status: "done", ac });
+  // no baseline → NEW occurrence
+  assert.ok(scanTaskText(body, "tasks/x.md").violations.some((v) => v.code === "wiring-claim-ac-no-probe"));
+  // grandfathered → not a violation
+  const grandfathered = new Set(["tasks/x.md"]);
+  assert.ok(!scanTaskText(body, "tasks/x.md", { wiringClaimAcProbeBaseline: grandfathered }).violations.some((v) => v.code === "wiring-claim-ac-no-probe"));
+});
+
+test("readWiringClaimAcProbeBaseline: absent file → empty set + null count", () => {
+  const root = makeGitRoot("wcapbaseline-absent");
+  const { baseline, baselineCount } = readWiringClaimAcProbeBaseline(root);
+  assert.equal(baseline.size, 0);
+  assert.equal(baselineCount, null);
+});
+
+test("readWiringClaimAcProbeBaseline: present file → set + count", () => {
+  const root = makeGitRoot("wcapbaseline-present");
+  fs.mkdirSync(path.join(root, "docs", "analysis"), { recursive: true });
+  fs.writeFileSync(path.join(root, WIRING_CLAIM_AC_PROBE_BASELINE_REL), "# baseline-count: 1\n\ntasks/gap-x.md\n");
+  const { baseline, baselineCount } = readWiringClaimAcProbeBaseline(root);
+  assert.equal(baseline.size, 1);
+  assert.equal(baselineCount, 1);
+  assert.ok(baseline.has("tasks/gap-x.md"));
 });
 
 // ── Real-store smoke (opt-in; runs the AC6 full-store scan) ────────────────────────────────────────

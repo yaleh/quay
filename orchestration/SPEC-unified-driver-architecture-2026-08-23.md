@@ -173,6 +173,11 @@ notNeedsHuman          promotion 有    worker 无
 
 ### 2.2 事件触发：改接线，不新造
 
+> **🔴 本节的【框架】已被 §5 修正（2026-08-24）**：下文「driver **订阅**事件源，事件到达时立即评估」是
+> **边沿触发**；今日实测证明「边沿触发 + 存储决策」正是 1h48m 停摆的形态（`stopReason` 陈旧 73 分钟）。
+> **落地必须按 §5 的水平触发（协调循环）模型。** 本节「不新造事件系统、复用现有 trigger 脚本」的结论
+> **仍成立且更强**——在 §5 模型下那两个 trigger 从「正确性依赖」降级为「优化」。
+
 **现状**：`slot-free-trigger.ts` / `suite-state-trigger.ts` 已经能把"空槽出现"/"suite 状态变化"两类条件
 转成事件（`SLOT-FREE` / `SUITE-RED` 等），推给 outer 的 Monitor 流。
 
@@ -409,3 +414,133 @@ hold-for-approval 队列，失去自动通知的意义，且该路径的身份�
    异常发生时于合理延迟内知晓（对照当前每 20 分钟一次的固定节奏）。
 6. 冷启动步骤数下降（§4.3）——**取假点**：`cold-start/SKILL.md` 步骤数相比本文件成文时的 472 行/8 步
    有可验证的下降，且每条删除都能追溯到一条已 done 的 AC。
+
+---
+
+## 5. 事件模型：**协调循环（reconciler），不是事件分发器**（2026-08-24 追加，人 08:0xZ 裁定「同意上述方案」）
+
+> **⚠️ 本节修正 §2.2 的框架。** §2.2 的表述是「driver **订阅**已有事件源，事件到达时立即评估」——
+> 那是**边沿触发（edge-triggered）**。本节论证：**边沿触发 + 存储决策 = 今日实测的 1h48m 停摆形态**，
+> 落地时必须按本节的水平触发（level-triggered）模型做。§2.2 关于「不新造事件系统、复用现有 trigger 脚本」
+> 的结论**仍然成立且更强**——在本模型下那两个 trigger 从"正确性依赖"降级为"优化"。
+
+### 5.0 立本节的实测（今日，直接量）
+
+**① 系统里所有事件源都住在 Claude Code 会话里，且今日全部被证伪：**
+
+| 事件源 | 宿主 | 今日实证 |
+|---|---|---|
+| `CronCreate` 唤醒锚 | 会话内存 | 本会话重启后 `CronList`=0 条，**而 `manager-arm-loop.sh --verify` 仍报 `registry-verified`**——哨兵读不出锚已消失 |
+| `suite-state-trigger.ts` | **outer 会话的 `Monitor`**（`orchestrator-loop-tick.md:274`） | tmux server 重置杀 outer ⇒ 静默消失 |
+| `slot-free-trigger.ts` | **outer 会话的 `Monitor`**（同上 `:293`） | 同上 |
+| worker 退出 | driver 的 `Promise.race` | 唯一活在会话外的 |
+
+⇒ **唯一被证明能自愈的宿主是 driver**（`promotion-driver-launch.sh __supervise` = setsid+nohup + 崩溃 respawn）。
+**「把事件源搬进 driver」不是整洁性改进，是把它们从一个已被证伪的宿主搬到唯一可自愈的宿主。**
+
+**② 当前循环已经是事件循环，只是只有一种事件、没有队列**（`worker-driver.ts:1188-1245`）：
+```
+while (true) { reap; while (running<cap && !stopReason) dispatch; writeRound; 
+               if (running===0) break; await Promise.race(running.map(r=>r.promise)); }
+```
+
+**③ 今日 1h48m 零派发的根因是【陈旧决策】，不是缺事件源**：`stopReason` 于 05:09:52 存入一次
+`resource-gate-wait{load:44.82}`，此后 05:17/05:21/05:50/06:23 四轮**逐字节重打同一字符串**
+（PSI/loadavg 是秒级抖动量，73 分钟纹丝不动 ⇒ 只读过一次）。**而同期 load1 已降至 2.28/4.01，
+远低于阈值 32——闸若被重读会立刻放行。** ⇒ **给这样一个循环加队列，只会制造更多同形的陈旧决策。**
+
+### 5.1 核心原则：事件携带【触发】，不携带【决策】
+
+```
+✗ {type:"dispatch", task:"gap-xxx"}   ← 决策已固化，出队时世界可能已变
+✓ {type:"reconcile"}                   ← 只说「该重算了」，处理器现读现算
+```
+一旦所有事件退化为「重新评估」，三类失效同时消失：
+**陈旧无害**（处理器不看事件内容，只看当前世界）/ **重复无害**（N 个合并为 1 次幂等重算）/
+**嵌套无害**（处理器不发事件，只置脏位；下一趟自然观察到）。
+
+### 5.2 循环体形态
+
+```
+while (!shutdown) {
+  await wake()                 // 任一事件源唤醒，或定时器到期
+  do {
+    const desired = read()     // ready 池 / cap / 控制文件 / dispatch-preference  ← 每趟现读
+    const actual  = observe()  // ⚠️ 观测 live worker 进程 + worktree，不是记忆里的数组
+    const step    = diff(desired, actual)
+    if (step) take(step)       // 至多走一步
+  } while (step)               // 直到稳定
+}
+```
+
+### 5.3 它结构性修掉三个已知缺陷（同一个改动，不是顺带）
+
+| 缺陷 | 为什么消失 |
+|---|---|
+| `stopReason` latch（`gap-worker-driver-stopreason-latch-permanent-stop`） | **没有地方存决策**——资源闸每趟重读 |
+| `running===0 ⇒ break`（`:1241`）靠 supervisor 重启才复活 | 有定时器地板，永不需要退出等救 |
+| 冷启动在飞盲区（见 5.4） | `actual` 按定义必须观测，快照没有存在的空间 |
+
+### 5.4 ⚠️ 核实结论：`gap-worker-driver-cold-start-inflight-blind`（已 done）**只修了症状**
+
+**直接量（读码，非印象）**：`enumerateColdStartInflight()` 的**实现本身是观测式的**（枚举 task worktree +
+`/proc` cmdline 比对，正确）；**但调用点是 `worker-driver.ts:1121` 的 `const coldInflight = ...`——
+在 `while(true)`（`:1189`）之【前】，只算一次，全生命周期不刷新、不可变**（该标识符全文仅 4 处出现：
+`:1121` 定义、`:1122` 读、`:1123/:1125` 打印）。
+**残留缺陷**：一个冷启动 worker **完成后**，其 task 仍永久留在排除集里 ⇒ **假在飞** ⇒ 该任务在此 driver
+余生不可被派发。**原 AC 只测了「冷启动 ⇒ 不重复派发」这一个方向**，没测「冷启动 worker 结束 ⇒ 其 task
+应重新可派」——硬规则 5b 的实例（只修被报出来的那一个方向）。
+
+**⛔ 发生率 = NOT-EVALUATED，不是 0**（硬规则 6 + ③b 零计数复核救回的一次误报）：
+该事件的发射点是 `if (json && coldInflight.size>0)`，而**生产 driver 的 argv 无 `--json`**
+（实测 pid 4044391 的参数只有 `--root/--pid-file/--run-id`）⇒ **该诊断在生产结构上从不发射** ⇒
+日志里的 0 命中是「量从未被记录」，**不是「从未发生」**。
+（我第一次读到 0 时差点当成"未发生"；③b 要求把谓词对着已知为真的样本干跑，一跑发现该日志里
+`"event":"..."` 的命中数也是 0 ⇒ 载体根本不含 JSON 事件流 ⇒ 来源对该问题不完备。）
+**⇒ 附带结论：机制的自我可观测性在生产被一个 flag 关掉了，这本身是一个应修点。**
+
+### 5.5 定时器是【地板】，不是主驱动
+
+- **定位**：不是「每 N 秒做一次事」，而是**「至少每 N 秒协调一次，哪怕所有边沿事件都丢了」**。
+- **由此得到的性质**：**任何边沿事件源失效 ⇒ 系统降级为「慢但正确」，而非「静默停摆」。**
+  今日系统的性质正好相反（Monitor 死了就永久停）。⇒ 有了地板，`slot-free`/`suite-state` 两个 trigger
+  **从正确性依赖降级为优化**（§2.2 的复用结论因此更成立，且它们可在最后一步安全退役）。
+- **实现**：driver 进程内，继承 supervisor 自愈。**⛔ 不用 Claude Code 的 `CronCreate`**（会话级、
+  会话死即死、7 天过期，今日已实测哨兵读不出它消失）。§2.2 已指出 `routine-scheduler.ts` 的
+  `interval:<N>m` 判定可复用——**不需要重新发明定时器**。
+- CLI 面：`quay driver ... --reconcile-interval <s>`，缺省保守（协调一趟只是读文件+扫进程+算 diff）。
+
+### 5.6 嵌套事件：**禁止处理器发事件**（本节对人第 3 点的回答）
+
+**理由**：「处理器可发事件」买到的东西在协调模型下**已经免费**（下一趟 pass 自然看到新状态），
+而它带来的成本是一整类难调试的失效：因果链 A→B→C→A、深度爆炸、公平性（新事件插队还是排队）、
+以及最麻烦的——**排队机制本身成为一个需要被监控的内部状态**，而本系统已反复证明它不擅长监控自己的内部状态
+（`stopReason`、`coldInflight`、`concurrentSuitesRunning` 恒 1 皆是）。
+
+**最小让步（确需显式因果时）**：
+1. 处理器**只能置脏位** `markDirty(kind)`，不得构造事件对象；
+2. 脏位按 kind **天然合并**（置 N 次 = 1 次）；
+3. 一趟 `do...while` 有**步数上限**，超限 ⇒ 记 `reconcile-budget-exhausted` 并让出——
+   **⛔ 不静默继续、不崩溃；该取值必须与「已稳定」可区分**（硬规则 3b）。
+
+### 5.7 ⚠️ 必须同时解决的前置：循环体的同步调用会冻住地板
+
+现循环体内多处 `spawnSync`：`readyPoolCheck`（`:980`，timeout 120s）、`runSelectorWorker`
+（**LLM 调用，实测约 1 分钟**）、`runLivenessCheck`（`:535`）、多个 `git`（`:311/:321/:448/:456/:687/:689/:693`）。
+**在当前"一种事件"的循环里这只是慢；在有定时器的协调循环里这是正确性问题**——一个卡住的 selector
+会连定时器一起冻住，**于是"地板"这张安全网本身失效**。
+⇒ **慢操作必须改 spawn（异步），其完成本身是一个唤醒源。协调一趟必须廉价且有界：读文件、扫进程、算 diff、
+至多发起一个动作。**
+
+### 5.8 落地顺序（每步独立可验，不必一次做完）
+
+| # | 步骤 | 归属 | 状态 |
+|---|---|---|---|
+| 1 | **观测化 `actual`**——`running`+`coldInflight` 改为每趟扫活进程/worktree 派生 | 产品代码 | **需重新立案**（原任务 done 但只修症状，见 5.4） |
+| 2 | 去 `stopReason` latch + 去 `running===0 ⇒ break` | 产品代码 | 已立案 `gap-worker-driver-stopreason-latch-permanent-stop` |
+| 3 | 加定时器地板（driver 内，`--reconcile-interval`） | 产品代码 | 待立案 |
+| 4 | selector/readyPool 改异步 | 产品代码 | 待立案（3 的前置，见 5.7） |
+| 5 | （可选）退役 outer 的两个 Monitor | 产品代码 | 1-4 之后才安全 |
+
+**⊢ 顺序不可交换的一处**：**4 必须在 3 之前或同时**——先加地板再改异步，地板会被同步调用冻住，
+等于加了一张不生效的安全网（而"不生效的安全网"比"没有安全网"更贵：它让人以为有保障）。

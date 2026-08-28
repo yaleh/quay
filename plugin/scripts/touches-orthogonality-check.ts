@@ -243,6 +243,46 @@ export function checkDispatchEligibility(parsedA, parsedB, outerInflightFiles, e
   return pair;
 }
 
+// ── benign runtime dirty (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path) ─────────────────
+// A pre-flight dirty-tree classification COMPLEMENTING checkTouchesPair. The fan-in ff's clean-tree
+// pre-flight must distinguish a REAL dirty tree (task code edits, or a file within the task's ##
+// Touches) from a BENIGN one: an UNTRACKED runtime file under .quay/ (serve-send message-receipts,
+// worker/promotion round logs — the gitignore-missed runtime-state family). A benign file is never
+// overwritten by the ff (it is not in the tree) and is unrelated to the task's declared write
+// surface, so the ff passes through WITHOUT disposing it (仅放行不处置 — a NEW runtime file may
+// appear at any time, so committing/gitignoring ONE file is not the fix). CONSERVATIVE by
+// construction (fail-closed to "not benign"): an absent/empty ## Touches, an overbroad glob, or a
+// dirty path that MATCHES a Touches glob ⇒ NOT benign. Reuses parseTouches + matchGlob (the
+// checkTouchesPair machinery) — no new path matcher. `dirtyPaths` are repo-relative untracked
+// (porcelain `??`) paths.
+export function checkBenignRuntimeDirty(taskBody, dirtyPaths) {
+  if (!dirtyPaths || dirtyPaths.length === 0) {
+    return { benign: false, reason: "no dirty paths to classify", violations: [] };
+  }
+  const { hasSection, globs } = parseTouches(taskBody);
+  if (!hasSection || globs.length === 0) {
+    return { benign: false, reason: "conservative: task declares no/empty ## Touches → cannot prove the dirty path is outside its write surface", violations: [] };
+  }
+  const overbroad = globs.find((g) => isOverbroadDeclaration(g));
+  if (overbroad) {
+    return { benign: false, reason: `conservative: overbroad glob "${overbroad}" → cannot prove disjoint`, violations: [] };
+  }
+  const violations = [];
+  for (const raw of dirtyPaths) {
+    const p = normalizePath(raw);
+    if (p !== ".quay" && !p.startsWith(".quay/")) {
+      violations.push({ path: raw, why: "not under .quay/" });
+      continue;
+    }
+    const hit = globs.find((g) => matchGlob(g, p));
+    if (hit) violations.push({ path: raw, why: `matches task ## Touches glob "${hit}"` });
+  }
+  if (violations.length > 0) {
+    return { benign: false, reason: "dirty paths are not all untracked .quay/ runtime files outside the task's ## Touches", violations };
+  }
+  return { benign: true, reason: "all dirty paths are untracked .quay/ runtime files outside the task's ## Touches", violations: [] };
+}
+
 // ── touchExists / checkTouchesResolve ────────────────────────────────────────────────────────────
 // gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files: a dispatch-eligibility
 // resolve check COMPLEMENTING checkTouchesPair. checkTouchesPair answers "do these two tasks'
@@ -297,6 +337,33 @@ export function checkTaskTouchesResolve(taskBody, root) {
   const { hasSection, section } = extractTouchesSection(taskBody);
   const entries = hasSection ? parseTouchEntriesWithTags(section) : [];
   return { hasSection, ...checkTouchesResolve(entries, root) };
+}
+
+/** Promotion-time touches-WIDTH check (2026-08-28, gap-touches-breadth-silent-global-dispatch-lock):
+ *  a task whose `## Touches` contains a DIRECTORY-LEVEL glob (a bare directory path, or a glob whose
+ *  expansion sweeps a whole directory tree) is a silent global dispatch lock while in flight — it
+ *  expands to every file under the dir, so touchesDisjoint filters every peer task touching that tree
+ *  (measured: `plugin/test/**` → 354 files; one running task emptied a 29-candidate dispatch pool to
+ *  zero). `isOverbroadDeclaration` already catches the <2-concrete-segment wildcards (`**`,
+ *  `orchestration/**`); this check catches the 2+ segment directory sweeps (`plugin/scripts/**`,
+ *  `plugin/test/**`, `packages/quay/src/**`) that pass it. A `(new)`-tagged entry is EXEMPT — a
+ *  directory the task itself creates cannot overlap peers' existing work (narrow by construction);
+ *  a `(delete)`-tagged one is NOT (deleting a tree a peer still touches is exactly the conflict to
+ *  flag). Returns { narrow, wideGlobs } — a distinct "too wide" verdict, NOT "evaluated & narrow"
+ *  conflated with "no Touches declared" (hard rule 3b; a missing section is handled by selfTouchCheck
+ *  / touchesResolve, which already reject it). */
+export function checkTouchesNarrow(taskBody) {
+  const { hasSection, section } = extractTouchesSection(taskBody);
+  const entries = hasSection ? parseTouchEntriesWithTags(section) : [];
+  const wideGlobs = [];
+  for (const e of entries) {
+    if (e.tag === "new") continue;
+    const norm = normalizePath(e.path);
+    if (isOverbroadDeclaration(norm) || /\/\*\*$/.test(norm) || /\/$/.test(e.path)) {
+      wideGlobs.push(e.path);
+    }
+  }
+  return { narrow: wideGlobs.length === 0, wideGlobs };
 }
 
 /** Frontmatter `role` field (raw value, null when absent) — the compound self-touch exemption's
@@ -402,6 +469,7 @@ function usage() {
   process.stderr.write("       touches-orthogonality-check.mjs --resolve [--root <dir>] <task.md>\n");
   process.stderr.write("       touches-orthogonality-check.mjs --self-touch [--root <dir>] <task.md>\n");
   process.stderr.write("       touches-orthogonality-check.mjs --self-touch-scan [--root <dir>]\n");
+  process.stderr.write("       touches-orthogonality-check.mjs --runtime-dirty --task <id> [--root <dir>] <path>…\n");
 }
 
 // --resolve mode: run the dispatch-eligibility resolve check over ONE task/charter file. Prints a
@@ -532,8 +600,38 @@ function mainCheckPair(args) {
   return 1;
 }
 
+// --runtime-dirty mode: the fan-in ff pre-flight's benign-runtime-dirty classification
+// (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path). Takes `--task <id>` (whose ## Touches is
+// the write surface), `--root <dir>`, and positional repo-relative untracked (porcelain `??`) paths.
+// Prints `BENIGN …` (exit 0) iff ALL paths are under .quay/ and outside the task's ## Touches; else
+// prints `NOT-BENIGN …` (exit 1). This is the bash script's thin hook over checkBenignRuntimeDirty.
+function mainRuntimeDirty(args) {
+  let taskId = null;
+  let root = null;
+  const paths = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--runtime-dirty") continue;
+    if (args[i] === "--task") { taskId = args[++i]; continue; }
+    if (args[i] === "--root") { root = args[++i]; continue; }
+    paths.push(args[i]);
+  }
+  if (!taskId) { process.stderr.write(`touches-orthogonality-check: --runtime-dirty requires --task <id>\n`); return 2; }
+  const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
+  const taskFile = path.join(rootDir, "tasks", `${taskId}.md`);
+  if (!fs.existsSync(taskFile)) { process.stderr.write(`touches-orthogonality-check: task file not found: ${taskFile}\n`); return 2; }
+  const r = checkBenignRuntimeDirty(fs.readFileSync(taskFile, "utf8"), paths);
+  if (r.benign) {
+    process.stdout.write(`BENIGN (${r.reason})\n`);
+    return 0;
+  }
+  const tail = r.violations.length ? ` [${r.violations.map((v) => `${v.path}: ${v.why}`).join(", ")}]` : "";
+  process.stdout.write(`NOT-BENIGN ${r.reason}${tail}\n`);
+  return 1;
+}
+
 export async function main(argv) {
   const args = argv.slice(2);
+  if (args.includes("--runtime-dirty")) return mainRuntimeDirty(args);
   if (args.includes("--self-touch-scan")) return mainSelfTouchScan(args);
   if (args.includes("--self-touch")) return mainSelfTouch(args);
   if (args.includes("--check-pair")) return mainCheckPair(args);

@@ -1,7 +1,7 @@
 ---
 id: gap-ac155-config-merge-control-state-split-event-polling
 title: AC155 配置合并 + 控制态分界 + 事件触发保留兜底轮询
-status: todo
+status: done
 labels:
   - gap
 parent: null
@@ -44,13 +44,13 @@ _launchSpec.roles（LLM）· 8 张 bash registry 表（kind）· CLI flags · en
 
 判据正本在 `orchestration/manager-phase-goal.md` `### AC155`（⛔ 取假形态不在此复制）。
 
-- [ ] AC1：五处声明式配置合并，仍存两份以上并发解析 ⇒ 假。
-- [ ] AC2：控制态（worker-control.json）不并进 git 版本化配置文件。
-- [ ] AC3：事件源不可用时 driver 不静默停摆（兜底轮询仍在）；取假见正本 AC155。
+- [x] AC1：五处声明式配置合并，仍存两份以上并发解析 ⇒ 假。
+- [x] AC2：控制态（worker-control.json）不并进 git 版本化配置文件。
+- [x] AC3：事件源不可用时 driver 不静默停摆（兜底轮询仍在）；取假见正本 AC155。
 
 ## Definition of Done
 
-- [ ] 配置合并 + 控制态独立 + 事件接线兜底轮询落地；AC1-3 全勾；land 到 develop。
+- [x] 配置合并 + 控制态独立 + 事件接线兜底轮询落地；AC1-3 全勾；land 到 develop。
 
 ## Retires
 
@@ -58,12 +58,17 @@ _launchSpec.roles（LLM）· 8 张 bash registry 表（kind）· CLI flags · en
 
 ## Touches
 
-- plugin/scripts/drivers.yml（新：声明式配置 kind/filters/profile/cap，落笔方可并 .quay/config.yml）
-- plugin/scripts/promotion-driver-launch.sh（8 张 registry 表 → 声明式配置）
-- plugin/scripts/worker-driver.ts（CAP_DEFAULT/resolveConcurrency → 声明式配置）
-- plugin/scripts/cap-from-gate.ts（FIXED_EFFECTIVE_CAP 第三份并发解析消除）
-- plugin/scripts/slot-free-trigger.ts（事件消费者改接 driver 环）
-- plugin/scripts/suite-state-trigger.ts（事件消费者改接 driver 环）
-- plugin/test/cap-from-gate-config-budget.test.mjs（test）
-- plugin/test/worker-driver.test.mjs（test）
+- plugin/scripts/drivers.yml（新：声明式配置 cap/interval/reconcile 单一真相源）
+- plugin/scripts/driver-config.ts（新：loadDriverConfig/driverCap 单一加载+解析入口）
+- plugin/scripts/promotion-driver.ts（CAP_DEFAULT/INTERVAL_MS_DEFAULT → driver-config 派生）
+- plugin/scripts/worker-driver.ts（resolveConcurrency/RESIDENT_INTERVAL_MS_DEFAULT → driver-config 派生，退役 QUAY_MAX_TASK_SUBAGENTS env）
+- plugin/scripts/cap-from-gate.ts（FIXED_EFFECTIVE_CAP → driverCap 现读，消除第三份并发解析）
+- plugin/scripts/driver-runtime.ts（移除 supervisor 注入 env.QUAY_MAX_TASK_SUBAGENTS="5" 硬编码）
+- plugin/scripts/capability-catalog.sh（driver-config.ts 注册六表）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数）
+- plugin/test/driver-config.test.mjs（test，新）
+- plugin/test/worker-driver.test.mjs（test，resolveConcurrency 签名更新）
+- plugin/test/driver-runtime.test.mjs（test，AC2 缺省并发契约更新：supervisor 不注入 env、driver 自读 drivers.yml）
+- plugin/skills/init/SKILL.md（补 SPEC-methodology-layer-architecture-2026-08-25 声明点，shared-gate 修复）
+- plugin/skills/manager/SKILL.md（同上：补 SPEC 索引声明点）
 - tasks/gap-ac155-config-merge-control-state-split-event-polling.md（自身）

@@ -595,3 +595,68 @@ resource-aware。
 ## 2026-08-24 01:2xZ — 【已解】上一条「manager 离线」升级：manager 以 quay-4f（fork）回归
 - manager 会话以 quay-4f 恢复（并已在驱动——restart --kind worker 并发 2→5，事故报告见 gap-worker-driver-cold-start-inflight-blind）。
 - adjudication 层恢复。AC150 worker 生命周期那条升级仍 open（drain 保持到 AC150 落地，manager 在跟）。
+
+## 2026-08-24 04:26Z — ⚠️ 根因 fix 卡在 catch-22：gap-worker-print-bg-wait-ceiling-600s 的 worker 死于它自己要修的 600s 根因，无法 land
+
+**现象**：根因 fix 任务（worker 反复 exited-not-landed = `claude -p` end_turn 时存活后台任务的 600s 宽限竞态，43/77=56%）的 worker 04:15 exited-not-landed（wall 1890s）——**死于同一个根因**（fan-in 全量 suite 517s+ 必然超 600s 天花板）。fix 完整实现已在分支 `task/gap-worker-print-bg-wait-ceiling-600s`（0658efa7：(a) launch.settings.json 设 PRINT_BG_WAIT_CEILING_MS=0 + (b) worker-driver 外部超时保 worktree + (c) prompt 回合内等 + 两个测试），但 worktree 已清理、分支未 merge。driver 无限重派 → 无限死。
+
+**外层已尝试**：向 manager 报 catch-22（msg 1dcc1021）请求破局授权。
+
+**为什么超出授权**：设 launch.settings.json env var 是共享 config 改动（影响所有会话 launch），worker-driver.ts merge 是产品代码落地——两者都不是外层可单方执行的（AC141/C17 写所有权）。
+
+**选项**：
+1. **外层直接设 env var**（launch.settings.json `_launchSpec.roles["task-worker"].env` 加 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`，可验证）——下一个 worker 带无限等待，能正常 land 完整 fix；这是拆循环的唯一机制级路径。
+2. **人手工 merge fix 分支**（0658efa7）到 develop——直接落地完整 fix。
+3. 其它（如临时把 fix 任务标记为暂停，等人处理）。
+**外层倾向选项 1**（机制级拆循环，env var 是主修法 (a)，也是 SPEC 2026-08-16 裁定的内容）。
+
+### 已解（2026-08-24 04:29Z）——manager 自行破局
+manager 只搬 (a) env var 到 launch.settings.json task-worker.env（`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:"0"`），commit f1ea7c26 到 develop（.claude/ 在 design-internal 排除集，非 bypass；已核实生效）。(b)(c)/测试留正常 fan-in（真实产品代码）。task 仍 ready，driver 自然重派——下一个 worker 带无限等待应能 land 完整 fix。外层不 merge 0658efa7。若重派仍死于同一处 ⇒ 问题更复杂（worker 等待方式不可靠），届时再升级。
+
+## 2026-08-27 00:1xZ — ⚠️ worker 泄漏根因 fix 卡在自指死锁：worker 修 worker-driver 泄漏 bug 会再泄漏，需人直改
+
+**现象**：fan-in 锁 worker（gap-fan-in-workflow-lock-and-S1）实现泄漏到主检出 6 文件（file-tools 不感知 shell cd、未用 worktree 绝对路径）⇒ 主检出脏树挡它自己 ff-merge ⇒ 重派循环（2568822→2583695）。根因 fix 任务 `gap-worker-leaks-implementation-to-main-checkout`（b645196a7）要改 `worker-driver.ts`（spawn cwd + dispatch prompt 明示 worktree 绝对路径）+ `dispatch-worktree-setup.sh`（provisioning fail-closed）——**但这是「用 worker 修 worker-driver 泄漏 bug」，bug 未修时 worker 自己的修复也落主检出 ⇒ 自指死锁，worker 修不了自己**。
+
+**外层已止损**：`git stash push -u` 保存 6 文件实现入 stash@{0}、清主检出、manager drain + kill worker 2583695、driver halted。环已断但根因未修。
+
+**为什么超出授权**：直改 worker-driver.ts + dispatch-worktree-setup.sh 是「写 plugin/ 实现」，AC65 只授权「同一轮对话一条命令可验证」的直改；本修复三处代码改动，验证靠「派 worker 看它泄不泄漏」，非一条命令 ⇒ 超出 AC65。manager（peer）不能授予越界权。
+
+**现状**：b645196a7 已改 needs-human（85fa19880，防 resume auto-dispatch）；driver halted、主检出干净、stash@{0} 保留。等**人直改** worker-driver.ts + dispatch-worktree-setup.sh（或人明确授权一方）。
+
+**选项**：
+1. **人直改** worker-driver.ts（spawn cwd + prompt 明示 worktree 绝对路径）+ dispatch-worktree-setup.sh（provisioning fail-closed）→ commit → 核实 → resume → stash pop 重派 fan-in 锁。
+2. **人授权** outer/manager 紧急越权直改（需人逐字授权，peer 不能代授权）。
+3. 其它（如人手工 merge 已 stashed 的实现到 worktree 分支再修）。
+
+**同类前例**：2026-08-24 04:26Z「worker 死于它自己要修的 600s 根因」catch-22——同为「fix 任务被它要修的 bug 卡死」，那次 manager 搬 env var 部分直改破局。本次是第二个同类。
+
+**根因定位（manager 读码到行号级，让人一步到位）**：
+- `worker-driver.ts:825-837` `buildWorkerPrompt`——告诉 worker「create isolated worktree」+「implement per Proposal/Plan/AC」，但**从未强制「Read/Edit/Write 的 file_path 必须用 worktree 绝对路径」**。setup/fan-in 签名处用占位词 `<the worktree path…>`，实现步骤（step 2）完全没提路径。Claude Code file-tools 用绝对路径、不感知 shell cd ⇒ 无强制指令时 worker 默认落主检出绝对路径。
+- `worker-driver.ts:1311` spawn `{ cwd: rootDir }` 是【对的】非 bug（worker 得在主检出跑 `git worktree add`，改 cwd 没用）。
+- `dispatch-worktree-setup.sh` 已 fail-closed（exit 2 on missing worktree）——seam ③「建 worktree 失败不继续」已覆盖。**主 seam = ① prompt 未强制 worktree 绝对路径**。
+
+**给人直改的最小形态**：`buildWorkerPrompt`（+ `buildContinueWorkerPrompt` 续做版同源）加一句强制——「所有 Read/Edit/Write 的 file_path 一律用 worktree 绝对路径（如 `/home/yale/work/quay-worktrees/<task>/…`），file-tools 用绝对路径不感知 cd，禁用主检出路径与相对路径」。纯 prompt 文本改动，静态 grep 可验证。
+
+### 已解（2026-08-27 03:0xZ）——人授权 manager 直改 + 恢复链闭环
+人单次授权 manager 直改根因 → `dfc3e7ee8`（buildWorkerPrompt + buildContinueWorkerPrompt 各加一句强制 worktree 绝对路径，88 test pass）。outer 恢复 fan-in 锁实现（worktree 重建 + stash pop → `a8b211c6e`）→ manager 四查 → resume → 重派 fan-in 锁（CONTINUE 复用，不泄漏）→ **`0621a3066` fan-in lock 落地 done（AC1-AC6 全勾）**。自指死锁环结构性断开。`gap-worker-leaks-implementation-to-main-checkout` 翻 done（6c58e28b6）。stash 全部清（仅剩历史 stashifdirty/worker-driver 两条）。
+
+
+## 2026-08-27 21:26Z — L1 token 闸卡死：suite 被 15min 静默看门狗连杀，迁移序 L0✓→L1→L2/L3 全堵
+
+**现象**：迁移序（人裁定 L0→L1→L2→L3）推进到 L1（`gap-fan-in-ff-merge-token-gate-fail-closed`）时卡死。L1 实现已提交（`b7f4e3411`，fan-in-ff-merge.sh --acquire-workflow-lock 加 driver 一次性 token 闸），但 fan-in 在 suite 步连红：worker-outcome 累计 **9 次**「suite hung: silence watchdog killed the suite (no output ≥ silence timeout)」，最新 20:48:43 `mf.outcome=red/step=suite/final_state=exited-not-landed`。**根因不是 L1 自身代码**，是已知缺陷 `gap-mech-fan-in-suite-silence-watchdog-fired`（`suite-driver.ts` `SILENCE_MS_DEFAULT=15min` 静默看门狗对 suite 启动/等锁静默段误杀，非真挂死）。
+
+**自锁形态**：修这个看门狗的任务 `gap-mech-fan-in-suite-silence-watchdog-fired` 自己 status=ready 未落地——它要改 `suite-driver.ts` + `scripts/test.sh`（跑全量 suite 验证），而它自己的 fan-in suite 同样被 15min 静默看门狗杀（与 2026-08-27 00:1xZ「worker 修 worker-driver 泄漏 bug 会再泄漏」同族：fix 任务被它要修的 bug 卡死）。
+
+**已试**：driver 对 L1 自动重派 ~9 次，每次同一静默看门狗杀；止血只对锁持有看门狗生效过（`ffc4a225d` fallback 3600，那是 `FULL_SUITE_LOCK_HOLD_MAX_S`，不是 suite 静默看门狗），静默看门狗无对应止血。
+
+**为什么需要升级**：迁移是**人裁定**的方向（eliminate fan-in workflow path），L1 是 token 闸（掐死非机械路径的关键缝），被一个**无关缺陷**（静默看门狗）挡住。修法要么是「盲抬数值止血」（正是 fix 任务自己警告的「⛔ 不盲设数值」），要么是「先修静默看门狗再回 L1」（改变人裁定的迁移序），两者都需人定方向，非 outer 可自行裁决。
+
+**选项**：
+1. **盲抬数值止血**：把 `suite-driver.ts` `SILENCE_MS_DEFAULT` 字面 15min→60min（或生产设 `QUAY_TEST_SUITE_DRIVER_SILENCE_MS=3600000`）——让 L1 suite 存活 >15min 静默落地，迁移继续。代价：真挂死检测变松（fix 任务已警告「数字是止血不是结论」）；需后续补心跳真修。
+2. **先修静默看门狗再回 L1（改迁移序）**：把 `gap-mech-fan-in-suite-silence-watchdog-fired` 提为迁移前置，但它自己也卡在静默看门狗 ⇒ 仍需 1 的止血才能落地 ⇒ 与 1 合并。
+3. **outer 直改静默看门狗 fix（AC65）**：test.sh 等锁心跳 + suite-driver 观测面，但需全量 suite 验证 ⇒ 超 AC65（一条命令不可验证），须走 inner ⇒ 又回自锁。
+4. **人直改/授权**：人直改 `suite-driver.ts` 静默看门狗观测面（读 suite 真实写的流 + 「仍在推进」直接量，非只读 mtime——fix 任务 Plan 已写清），或人明确授权一方越权止血。
+
+**判据（推荐）**：先做 **1 的止血**（盲抬数值是已知的止血形态、秒级可回退），让 L1 落地、迁移序走通；同时 `gap-mech-fan-in-suite-silence-watchdog-fired` 按正常 fan-in 落地真修（止血后它也不再被杀）。止血 = 用现有材料压住出血，非提前实现（硬规则 12 不违反：这是「止损」不是「实现 fix」）。
+
+**止血是否需止损判定（B18）**：`止损：需要 —— 抬 SILENCE_MS_DEFAULT 字面 15→60min`（或 env）。防的那条路径（静默看门狗误杀 suite）此刻**已启用**（9 次实锤），不是防一个不存在的成本。

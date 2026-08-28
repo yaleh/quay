@@ -263,42 +263,14 @@ Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",   # REP
          persistent: true, timeout_ms: 3600000})
 ```
 
-**4b2. 重挂套件状态触发者（红窗自动执行者）——状态变化即触发，不等 cron**
+**4b2/4b3. 已退役：不再挂 `suite-state-trigger` / `slot-free-trigger` 两个 Monitor（`gap-retire-outer-monitors-after-reconciler`）**
 
-红窗规则要求「套件转红立即处置」，不能只靠 `*/20` cron 或人驱动。本条给它补**执行者层**——
-状态变化（state=red / state=running）即转成动作（通知外层 / 驱动 inner 派发）。**它是事件监测
-（同 session-liveness），不是新调度源**——节奏仍唯一（步骤 4 的 cron）；它只把「cron 才检查状态」
-改成「状态变化即触发」：
-
-```
-Monitor({command: "node --no-warnings --experimental-strip-types $REPO_ROOT/plugin/scripts/suite-state-trigger.ts --monitor",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
-         description: "套件状态自动触发（SUITE-RED → 立即 RED 处置；SUITE-RUNNING → 乐观派发执行者）",
-         persistent: true, timeout_ms: 3600000})
-```
-
-事件流里出现 `SUITE-RED` ⇒ **立即**进入步骤 1b「红窗分诊」（不等下一次 cron）；出现 `SUITE-RUNNING`
-⇒ 按「RUNNING 乐观派发执行者」驱动 inner 照常派发。`SUITE-GREEN` / `SUITE-STATUS` 是平静基线，
-无需处置。挂载遗漏的代价同 session-liveness：退回纯 20 分钟轮询——所以 4c 的验证纪律对两者同样成立。
-
-**4b3. 重挂空槽触发器（空槽事件执行者）——空槽即事件，不等 tick**
-
-空槽不是事件：`in_flight < cap ∧ dispatchable > 0`（空槽 + 有可派）之前只靠三层 tick 轮询到那一格
-才处置；tick 醒来时手上总有更急的事（红套件 / fan-in / needs-human），回填空槽永远排最后且漏了不留痕。
-本条给它补**事件执行者层**——`slot-free-trigger.ts`（照 `suite-state-trigger.ts` 形态，**触发者是
-执行者，不是新决策者/新调度源**）Monitor 轮询（~5s）读 `fast-mode-telemetry --slots` +
-`ready-pool-check`，`in_flight<cap ∧ dispatchable>0` ⇒ 发 `SLOT-FREE` 事件 + 追加
-`.quay/slot-free-events.jsonl`（append-only）：
-
-```
-Monitor({command: "node --no-warnings --experimental-strip-types $REPO_ROOT/plugin/scripts/slot-free-trigger.ts --monitor",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
-         description: "空槽自动触发（SLOT-FREE → 立即驱动 inner 回填，不等 20-min tick）",
-         persistent: true, timeout_ms: 3600000})
-```
-
-事件流里出现 `SLOT-FREE` ⇒ **立即**驱动 inner 回填（不等下一次 cron）：按步骤 4 从 `slot-refill.ts`
-的 `recommended` 取 1-2 条派给 inner——**同一空槽强制链**，事件只是把它的触发从「20 分钟 tick」提前
-到「空槽出现的那一刻」。**漏回填在事件日志可追责**：`.quay/slot-free-events.jsonl` 记录每次 SLOT-FREE
-的 `at` 时间戳；事件已发而未回填 ⇒ 下一 tick 的强制链仍兜底，且事件日志让「漏了」从看不见变成可查。
+「套件转红」与「空槽出现」的 Monitor 挂载已退役——宿主是会话（Monitor 随会话死，tmux server 重置即
+静默消失，已被证伪）。协调循环（driver 定时器地板 + 每趟 pass 现读 ready 池 / suite state，
+SPEC §5.5）落地后，两场景由 driver 现读接管，trigger 从正确性依赖降级为优化（SPEC §5.8 第 5 步）。
+脚本本体 `plugin/scripts/suite-state-trigger.ts` / `plugin/scripts/slot-free-trigger.ts` 保留为共享库
+（`suite-state-trigger.ts` 被 `full-suite-runner.ts` import——crash-watchdog / 起跑闸；空槽条件判定），
+只是不再由外层 Monitor 挂载。4c 的挂载验证现只覆盖 session-liveness。
 
 **4c. 重挂后立即验证挂上了 —— 两判据自检**
 
@@ -856,7 +828,7 @@ tick-log 与 commit message 沿用同一词汇：派发写「滚动派发」，�
    - **落盘**：每条结论追加一行到 `.quay/real-target-verification.jsonl`。
    - **结论不是闸门**：真实目标验证是**有机状态探测器**，结果进轮次记录与 tick 报告，不阻断派发/合并。
 
-**套件状态自动触发者（红窗执行者层）**：`suite-state-trigger.ts`（Monitor，冷启动 4b2 挂上）在
+**套件状态自动触发者（红窗执行者层）**【已退役：Monitor 挂载移除（`gap-retire-outer-monitors-after-reconciler`），正文保留作理由档案——`suite-state-trigger.ts` 仍作共享库被 `full-suite-runner.ts` import】：`suite-state-trigger.ts`（Monitor，冷启动 4b2 挂上）在
 `.quay/full-suite-state.json` 的 `state` **变化**时立即发事件（5 秒轮询，≪ cron 的 20 分钟窗口）并记
 `.quay/suite-state-events.jsonl`（append-only）：
 
@@ -867,7 +839,7 @@ tick-log 与 commit message 沿用同一词汇：派发写「滚动派发」，�
 | → `running` | `SUITE-RUNNING` | 「RUNNING 乐观派发执行者」：池有 `dispatchable_disjoint ≥ cap` 就按步骤 4 驱动 inner 照常派发（不待轮——(a) 块 AC4 的乐观行为被实际动用，AC3） |
 | → `green` | `SUITE-GREEN` | 平静基线，无处置 |
 
-**空槽状态自动触发者（空槽事件执行者层）**：`slot-free-trigger.ts`（Monitor，冷启动 4b3 挂上）在
+**空槽状态自动触发者（空槽事件执行者层）**【已退役：Monitor 挂载移除（`gap-retire-outer-monitors-after-reconciler`），正文保留作理由档案——空槽现由 driver 每趟 pass 现读 ready 池接管】：`slot-free-trigger.ts`（Monitor，冷启动 4b3 挂上）在
 `in_flight < cap ∧ dispatchable > 0` **成立时**立即发事件（5 秒轮询）并记 `.quay/slot-free-events.jsonl`
 （append-only）：
 
@@ -1126,8 +1098,6 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-sta
 - 遥测当前：任务数、均耗时、`tasksPerHour`。
 - 异步收尾例程（步骤 1b）：本轮收尾几条、`.quay/full-suite-state.json` 最新 `state`（green/red/running）
   与 `durationMs`、本轮全量 suite 是否在跑/绿/红。
-- 套件状态触发者（4b2）：Monitor 是否挂上、最近一次 `SUITE-*` 事件与时刻。
-- 空槽触发者（4b3）：Monitor 是否挂上、最近一次 `SLOT-FREE` 事件与时刻、是否已回填。
 - 累计动作类型分布（退化判据）。
 - Monitor 两判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` / `targetRoot`）。
 - 自述措辞审计（步骤 1c）：本轮 inner 自述 `count`（batch 式汇报数）与 `converged`（重锚收敛判据）。

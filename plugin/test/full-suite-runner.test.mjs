@@ -179,7 +179,7 @@ function runRunner({ root, command, laneCount, stateDir, runner, env = {}, seria
   // S=1 file), which SHADOWS the env knob a test drives ⇒ round records read S=1 instead of the
   // configured S. Pin the runner's lock base to a temp dir OUTSIDE `root` (an untracked file inside a
   // git-repo `root` would flip the round-START treeDirty annotation, breaking the CLEAN-tree test)
-  // carrying the configured slot count (default 2) in its `.concurrency` file — every runRunner-based
+  // carrying the configured slot count (default 1) in its `.concurrency` file — every runRunner-based
   // test is then hermetic against production lock state (the runner probes/locks the pinned base,
   // never the real git-common-dir).
   // ⚠️ Guard on the per-call `env` (NOT mergedEnv): the REAL suite launch (scripts/test.sh:1181) sets
@@ -192,7 +192,7 @@ function runRunner({ root, command, laneCount, stateDir, runner, env = {}, seria
     const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lock-"));
     _runnerLockDirs.push(lockDir);
     const lockBase = path.join(lockDir, "full-suite.lock");
-    fs.writeFileSync(`${lockBase}.concurrency`, mergedEnv.QUAY_MAX_CONCURRENT_SUITES ?? "2", "utf8");
+    fs.writeFileSync(`${lockBase}.concurrency`, mergedEnv.QUAY_MAX_CONCURRENT_SUITES ?? "1", "utf8");
     mergedEnv.FULL_SUITE_LOCK_FILE = lockBase;
   }
   const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"], env: mergedEnv });
@@ -1982,9 +1982,10 @@ test("AC1 — default laneCount is NPROC-derived (max(1, floor(nproc × oversub 
 
 test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the single definition point) with a clamped fallback", () => {
   // gap-single-flight-lock-2-slot-concurrent-suites — the concurrent-suite slot count S is the
-  // SINGLE definition point for "how many suites may run at once" (旋钮②, current 2). An invalid/zero
-  // setting fails OPEN to the single-suite default (2 is the current knob value; a misconfigured host
-  // degrades to the old 1-slot behavior, never to 0 lanes). The value is clamped to an integer >= 1.
+  // SINGLE definition point for "how many suites may run at once" (旋钮②, current default 1 —
+  // gap-fan-in-workflow-lock-and-S1 S=1). An invalid/zero setting fails OPEN to the single-suite
+  // default (1 is the current default value; a misconfigured host degrades to the single-suite
+  // baseline, never to 0 lanes). The value is clamped to an integer >= 1.
   const prev = process.env.QUAY_MAX_CONCURRENT_SUITES;
   const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   const prevLock = process.env.FULL_SUITE_LOCK_FILE;
@@ -2000,7 +2001,7 @@ test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the singl
     // shadowed by an ambient seam.
     delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
     delete process.env.QUAY_MAX_CONCURRENT_SUITES;
-    assert.equal(concurrentSuiteSlots(), 2, "default slot count = 2 (旋钮② current value)");
+    assert.equal(concurrentSuiteSlots(), 1, "default slot count = 1 (S=1, gap-fan-in-workflow-lock-and-S1)");
     process.env.QUAY_MAX_CONCURRENT_SUITES = "1";
     assert.equal(concurrentSuiteSlots(), 1, "1 slot = the old single-flight behavior (AC4: no regression)");
     process.env.QUAY_MAX_CONCURRENT_SUITES = "2";
@@ -2008,9 +2009,9 @@ test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the singl
     process.env.QUAY_MAX_CONCURRENT_SUITES = "3";
     assert.equal(concurrentSuiteSlots(), 3, "a future bump to 3 slots reads through (勿把 2 当设计常量)");
     process.env.QUAY_MAX_CONCURRENT_SUITES = "0";
-    assert.equal(concurrentSuiteSlots(), 2, "zero fails open to the single default, never 0 lanes");
+    assert.equal(concurrentSuiteSlots(), 1, "zero fails open to the single default, never 0 lanes");
     process.env.QUAY_MAX_CONCURRENT_SUITES = "abc";
-    assert.equal(concurrentSuiteSlots(), 2, "non-numeric fails open to the single default");
+    assert.equal(concurrentSuiteSlots(), 1, "non-numeric fails open to the single default");
   } finally {
     if (prev === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prev;
@@ -2363,17 +2364,21 @@ test("AC5 — a signal-killed run writes state=red reason=aborted, which must NO
   );
   try {
     const child = runRunner({ root, command: `bash ${f}` });
+    // gap-suite-load-sampler-orphan-process load-hardening: the 10s "running" poll flaked RED under
+    // 16-way contention (runner node bootstrap > 10s ⇒ `poll timeout after 10000ms`), the same
+    // bootstrap-race shape the AC1/AC2 early-red fixes below widen. Widen both polls so
+    // in-flight/aborted are judged on the state file (wall-clock), not on a runner-bootstrap race.
     await poll(() => {
       const s = readState(root);
       return s && s.state === "running" ? s : null;
-    }, { timeoutMs: 10000 });
+    }, { timeoutMs: 20000 });
     // The fake suite signals the runner at ~t+1s; the runner exits when the handler runs.
     await waitExit(child);
     // The runner's signal handler writes red+aborted (no correctness conclusion).
     const s = await poll(() => {
       const cur = readState(root);
       return cur && cur.state === "red" && cur.reason === "aborted" ? cur : null;
-    }, { timeoutMs: 10000 });
+    }, { timeoutMs: 20000 });
     assert.equal(s.reason, "aborted", "a kill produces reason=aborted, not failed");
     // And the stop-dispatch consumer (runOnce) reports NO stop signal for aborted-red (AC5).
     const res = runOnce(root);
@@ -2401,7 +2406,11 @@ test("AC6 — this task cross-annotates the shared stop-dispatch family (gap-red
 
 test("AC1 — while the suite runs, state=running (or early-red) with finishedAt/durationMs null", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-root-"));
-  const { f, dir } = fakeSuite('echo "started"\nsleep 2\necho "# fail 0"\nexit 0');
+  // gap-suite-load-sampler-orphan-process load-hardening: the 5s poll / 2s running window flaked
+  // RED under 16-way contention (runner node bootstrap > 5s ⇒ `poll timeout after 5000ms`). Widen
+  // the running window + poll timeout so "in-flight" is judged on the state file (wall-clock), not
+  // on a runner-bootstrap race. Same shape as the AC2 early-red fixes below.
+  const { f, dir } = fakeSuite('echo "started"\nsleep 10\necho "# fail 0"\nexit 0');
   try {
     const child = runRunner({ root, command: `bash ${f}` });
     // gap-streaming-red-cascade-amplifies-failures-array AC1 — the assertion is "the round is IN
@@ -2413,7 +2422,7 @@ test("AC1 — while the suite runs, state=running (or early-red) with finishedAt
     const inFlight = await poll(() => {
       const s = readState(root);
       return s && (s.state === "running" || s.state === "red") ? s : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 20000 });
     assert.equal(inFlight.runner, "outer");
     assert.equal(inFlight.finishedAt, null, "finishedAt null while the round is in flight");
     assert.equal(inFlight.durationMs, null, "durationMs null while the round is in flight");
@@ -2429,16 +2438,20 @@ test("AC1 — while the suite runs, state=running (or early-red) with finishedAt
 test("AC2 — RED is marked on first failure detection, before the run completes (marker-file proof)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-root-"));
   const marker = path.join(root, "post-failure-marker");
-  const { f, dir } = fakeSuite(`echo "not ok 1 - boom"\nsleep 2\necho done > "${marker}"\nexit 1`);
+  const { f, dir } = fakeSuite(`echo "not ok 1 - boom"\nsleep 10\necho done > "${marker}"\nexit 1`);
   try {
     const child = runRunner({ root, command: `bash ${f}` });
     // The failure line is printed immediately; the suite's post-failure step (writing the
-    // marker) happens only after `sleep 2`. If state=red is observed BEFORE the marker
+    // marker) happens only after `sleep 10`. If state=red is observed BEFORE the marker
     // exists, red was written on detection, not after the run completed (AC2).
+    // gap-suite-load-sampler-orphan-process load-hardening: the 5s poll / 2s marker window
+    // flaked RED under 16-way contention (runner node bootstrap > 5s ⇒ `poll timeout after
+    // 5000ms`). Widen the marker window + poll timeout so "early-red" is judged on the
+    // marker (wall-clock), not on a runner-bootstrap race.
     const redObserved = await poll(() => {
       const s = readState(root);
       return s && s.state === "red" ? s : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 20000 });
     assert.equal(redObserved.finishedAt, null, "red written while the run is still in progress");
     assert.equal(redObserved.state, "red");
     assert.ok(!fs.existsSync(marker), "red appeared before the suite's post-failure step completed");
@@ -3120,16 +3133,20 @@ test("AC2 — a vitest structured failure line flips red EARLY, before the run c
   // BEFORE its summary and exit. Red must be marked on that line, not at exit — the same early-red
   // property node:test/TAP gets from `not ok` (AC2 preserved for vitest projects).
   const { f, dir } = fakeSuite(
-    'echo " ❯ test/foo.test.ts (3 tests | 1 failed) 12ms"\nsleep 2\necho done > "' +
+    'echo " ❯ test/foo.test.ts (3 tests | 1 failed) 12ms"\nsleep 10\necho done > "' +
       marker +
       '"\nexit 1',
   );
   try {
     const child = runRunner({ root, command: `bash ${f}` });
+    // gap-suite-load-sampler-orphan-process load-hardening: 5s poll / 2s marker window flaked
+    // RED under 16-way contention (runner node bootstrap > 5s ⇒ `poll timeout after 5000ms`).
+    // Widen the marker window + poll timeout so early-red is judged on the marker (wall-clock),
+    // not on a runner-bootstrap race.
     const redObserved = await poll(() => {
       const s = readState(root);
       return s && s.state === "red" ? s : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 20000 });
     assert.equal(redObserved.state, "red");
     assert.equal(redObserved.reason, "failed", "a structured vitest failure is a REAL failure (stop-dispatch signal)");
     assert.equal(redObserved.finishedAt, null, "red written while the run is still in progress (AC2 early-red)");
@@ -5090,5 +5107,66 @@ test("gap-test-detail-load-timeseries — the runner spawns a load sampler that 
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("gap-suite-load-sampler-orphan-process AC2 — an UNCLEAN host exit (SIGKILL, no terminal state) reaps the sampler via host-death detection", async () => {
+  // The state-driven stop only fires when SOMEONE writes a terminal state / removes the state file.
+  // A host that dies UNCLEANLY (SIGKILL — uncatchable; worker mid-exit exception; fan-in wrapper
+  // killed before its `rm -f`) leaves the state file stuck at "running" and the sampler must still
+  // stop. This test drives that branch directly: the host backgrounds the sampler then never writes
+  // a terminal state — the host is SIGKILLed, and the sampler must detect the host's death (its
+  // ppid changes when the kernel reparents the orphan) and exit on its own.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-load-orphan-"));
+  const stateFile = path.join(root, "sampler.state.json");
+  const outFile = path.join(root, "suite-load-orphan.jsonl");
+  const samplerPath = path.join(REPO_ROOT, "plugin", "scripts", "suite-load-sampler.ts");
+  fs.writeFileSync(stateFile, JSON.stringify({ state: "running" }), "utf8");
+  // Host = a bash wrapper that backgrounds the sampler then sleeps, modeling the suite host the
+  // sampler must follow. It has NO terminal-state / rm -f step — the unclean-exit branch.
+  const host = spawn(
+    "bash",
+    [
+      "-c",
+      `node --no-warnings --experimental-strip-types "${samplerPath}" --state-file "${stateFile}" --out-file "${outFile}" --run-id "orphan-test" --interval 0.2 & sleep 60`,
+    ],
+    { stdio: "ignore", detached: true },
+  );
+  host.unref();
+  const pidFile = `${outFile}.pid`;
+  try {
+    // Wait (bounded) for the sampler to write its first sample + pid sidecar while the host is alive.
+    let samplerPid = 0;
+    let lines = [];
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      try { lines = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean); } catch { lines = []; }
+      try { samplerPid = Number(fs.readFileSync(pidFile, "utf8").trim()); } catch { samplerPid = 0; }
+      if (lines.length >= 1 && samplerPid > 0) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(lines.length >= 1, "the sampler wrote >=1 sample while its host was alive");
+    assert.ok(samplerPid > 0, "the sampler wrote its pid sidecar");
+
+    // Unclean host death: SIGKILL the host wrapper (no terminal state, no rm -f). The sampler must
+    // detect the host's death (ppid change) and exit on its own — the AC2 orphan-reaping invariant.
+    process.kill(host.pid, "SIGKILL");
+
+    let gone = false;
+    const stopDeadline = Date.now() + 10_000;
+    while (Date.now() < stopDeadline) {
+      try { process.kill(samplerPid, 0); } catch { gone = true; break; }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(gone, "the sampler exited after its host was SIGKILLed (host-death reaping, never an orphan)");
+
+    // The timeseries stops growing once the host is dead (no post-mortem pollution).
+    const countAfter = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean).length;
+    await new Promise((r) => setTimeout(r, 500));
+    const countLater = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean).length;
+    assert.equal(countLater, countAfter, "the timeseries stops growing once the host is dead");
+  } finally {
+    try { process.kill(host.pid, "SIGKILL"); } catch { /* already gone */ }
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

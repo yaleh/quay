@@ -11,6 +11,14 @@
 // in the shared plugin/test dir (that is what makes the undeclared→engine assertion meaningful);
 // the collision with test-file-snapshot is fixed on the SNAPSHOT side (test-file-snapshot.sh
 // excludes transient zz-* runtime fixtures).
+// RESTORE NOTE (gap-suite-serial-lowconc-classification-recheck direction-b revert): the 33-file
+// serial/lowconc→engine move (0af893f8) briefly placed this file in engine, exposing its AC0c
+// zz-unknown-group-anti-stomp transient fixture to the engine-phase tree sweepers
+// test-framework-policy-check ("real repo" AC5) and test-coverage-check (AC5 canonical==--list-files):
+// round-572 435!==436, round-573 "NEW test file ... no VALID @test-group" — the fixture-vs-sweeper
+// cross-file race the AC1 165-run measurement could NOT see (individual runs have no concurrency).
+// Restored to serial so the fixture window stays in the pre-main serial phase, never overlapping
+// the main body.
 // SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FIVE files split from the
 // original runner-grouping.test.mjs (204s serial floor) by test concern — this file holds the
 // group-CLASSIFICATION EDGE-CASE tests: the undeclared→engine fixture (AC7), the serial group

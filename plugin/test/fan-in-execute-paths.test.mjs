@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // fan-in-execute-paths.test.mjs — gap-fan-in-execute-three-unverified-paths: the three UNVERIFIED
 // hot points of .claude/workflows/fan-in-execute.js, exercised through the REAL invocation path
 // (判据3 — NOT fixture-only pure-function mocks; the AC78 lesson: "改 workflow 的唯一有效验证=实调").
@@ -1438,7 +1438,7 @@ async function bootstrapBlockFor(task, worktree, root) {
   const { prompts } = await runWorkflow({
     args: { task, worktree, root, runId: "fm-bootstrap", mergeTarget: "develop" },
   });
-  return extractBlockFromPrompts(prompts, "【无锁段 step 0", "【无锁段 step 1");
+  return extractBlockFromPrompts(prompts, "【无锁段 step 0", "【无锁段 step 0.5");
 }
 
 test("⑦ worktree-resolution — every fan-in orchestration script call is ${worktree}-rooted (not cwd, not ${root})", async (t) => {
@@ -1727,9 +1727,88 @@ test("AC126 AC1 — the fan-in suite launch command passes --buckets <task-id> (
   // workflow-build time, so the literal task id must appear (AC1: 生产 suite 路径真正传). test.sh is
   // the selection authority (P-only⇒P, M-only⇒M, hub/no-bucket⇒full).
   assert.ok(launch.includes("--buckets gap-ac126-wiring"), "suite-launch must pass --buckets <task-id> (the interpolated task id)");
-  const setsidLine = launch.split("\n").find((l) => l.includes("setsid env FULL_SUITE_LOCK_TIMEOUT="));
+  const setsidLine = launch.split("\n").find((l) => l.includes("setsid bash -c"));
   assert.ok(setsidLine, "suite-launch must contain the detached setsid launch line");
   assert.ok(setsidLine.includes("bash scripts/test.sh --buckets gap-ac126-wiring"), "the detached launch command must pass --buckets <task-id> to scripts/test.sh");
+});
+
+test("gap-suite-load-sampler-bypassed-by-fan-in-execute AC1 wiring — the detached suite-launch spawns the state-driven load sampler keyed to the fan-in runId", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-sampler-wiring", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-test-sampler-wiring", mergeTarget: "develop" },
+  });
+  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  // The sampler must be spawned from the detached launch (the direct run otherwise bypasses the ONLY
+  // spawner, full-suite-runner.ts) and keyed to the SAME runId mirror-full-suite-state.ts writes into
+  // full-suite-state.json at step 4.5 (so the /tests page joins them: readCurrentSuiteRunId → readSuiteLoadSamples).
+  assert.ok(launch.includes("suite-load-sampler.ts"), "suite-launch must spawn suite-load-sampler.ts");
+  assert.ok(launch.includes("--out-file"), "the sampler spawn must carry an explicit --out-file");
+  assert.ok(launch.includes("suite-load-fm-test-sampler-wiring.jsonl"), "sampler out-file must be suite-load-<runId>.jsonl keyed to the fan-in runId");
+  assert.ok(launch.includes('--run-id "fm-test-sampler-wiring"'), "sampler must receive the fan-in runId (joins the step-4.5 mirror-write)");
+  assert.ok(launch.includes("--interval 5"), "sampler must sample at the 5s default interval");
+  // State-driven stop: the outer launch establishes a running state file (single-quoted JSON, so bash
+  // does not strip the quotes — the template-literal quoting pitfall), the wrapper rm's it after the suite.
+  assert.ok(launch.includes(`printf '{"state":"running"}`), "the outer launch must establish a valid-JSON running state file before the detached suite starts");
+  assert.ok(launch.includes(`rm -f "/tmp/fan-in-suite-sampler-gap-test-sampler-wiring.state.json"`), "the wrapper must remove the state file after the suite so the sampler stops (state-driven, never a resident idle-spin)");
+  // 取假: the sampler spawn must NOT sit in the doc-only skip branch (no suite ran ⇒ no sampler).
+  const skipBranch = launch.slice(launch.indexOf("skip_reason=doc-only-delta"));
+  assert.ok(!skipBranch.includes("suite-load-sampler.ts"), "the doc-only skip branch must NOT spawn a sampler (no suite ran)");
+});
+
+test("gap-suite-load-sampler-bypassed-by-fan-in-execute AC1 REAL — the emitted sampler spawn samples while running and stops when the state file is removed", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-sampler-"));
+  const wt = path.join(tmp, "wt");
+  fs.mkdirSync(wt, { recursive: true });
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-sampler-real", worktree: wt, root: tmp, runId: "fm-test-sampler-real", mergeTarget: "develop" },
+  });
+  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  // Extract the EXACT sampler spawn command the phase-1 agent would run — verbatim, so the test catches
+  // the template-literal \n / quoting pitfalls the workflow header warns about (not a re-typed copy).
+  // Slice between `node …` and the wrapper's ` & cd "$1"` (the `&` that backgrounds the sampler) — a
+  // regex `[^&]*` would stop at the `&` inside `2>&1` and truncate the redirect.
+  const nodeIdx = launch.indexOf("node --no-warnings --experimental-strip-types");
+  const cdIdx = launch.indexOf(" & cd", nodeIdx);
+  assert.ok(nodeIdx !== -1 && cdIdx !== -1, "suite-launch must emit a suite-load-sampler.ts spawn command followed by the suite `cd`");
+  const samplerCmd = launch.slice(nodeIdx, cdIdx).replace(/--interval \d+(\.\d+)?/, "--interval 0.2");
+  // The sampler resolves through ${worktree}/plugin/scripts/… — symlink the REAL runtime tree so the
+  // temp worktree has a resolvable suite-load-sampler.ts (same pattern as the other REAL tests).
+  symlinkRuntimeTrees(wt, {});
+  const stateFile = "/tmp/fan-in-suite-sampler-gap-test-sampler-real.state.json";
+  const outFile = path.join(tmp, ".quay", "suite-load-fm-test-sampler-real.jsonl");
+  cleanup(stateFile); cleanup(outFile); cleanup(`${outFile}.pid`);
+  fs.writeFileSync(stateFile, JSON.stringify({ state: "running" }));
+  const child = spawn("bash", ["-c", samplerCmd], { stdio: "ignore", detached: true });
+  child.unref();
+  try {
+    let lines = [];
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try { lines = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean); } catch { lines = []; }
+      if (lines.length >= 1) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(lines.length >= 1, "the emitted sampler spawn wrote >=1 sample while the state was running");
+    const o = JSON.parse(lines[0]);
+    assert.equal(typeof o.t, "number", "every sample carries a numeric timestamp");
+    assert.ok("loadavg" in o, "every sample carries loadavg");
+    assert.ok("cpu_stall" in o, "every sample carries cpu_stall");
+    assert.ok("mem_avail" in o, "every sample carries mem_avail");
+    // The wrapper's terminal stop: remove the state file ⇒ the sampler exits on its next poll.
+    fs.rmSync(stateFile, { force: true });
+    const pidFile = `${outFile}.pid`;
+    assert.ok(fs.existsSync(pidFile), "sampler wrote its pid sidecar");
+    const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
+    let gone = false;
+    const stopDeadline = Date.now() + 10_000;
+    while (Date.now() < stopDeadline) {
+      try { process.kill(pid, 0); } catch { gone = true; break; }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(gone, "the sampler exited after the state file was removed (never a resident idle-spin)");
+  } finally {
+    try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+    cleanup(stateFile); cleanup(outFile); cleanup(`${outFile}.pid`); cleanup(tmp);
+  }
 });
 
 test("⑧ stage-2 wait block — completes the capture post-fields (cpu/end/wall/load/lane/suite_exit) on exit-marker hit", async (t) => {
@@ -2058,18 +2137,124 @@ test("⑧ split — the poll block parses a gnu-time '%U %S' line into cpu_user_
 });
 
 
+// ── ⑧ time-file 跨 relaunch 复用（gap-fan-in-suite-time-file-cross-relaunch-reuse AC1/AC2）──────────
+// THE DEFECT: the wait block's cpu_s calc was guarded only by `[ -f "$suite_time_file" ]` (missing the
+// full_suite_ran=true guard that the adjacent lane_count calc carries). An isolate-rerun
+// (full_suite_ran=false, ISOLATE_LAUNCH does NOT write a .time file) reading a stale
+// /tmp/fan-in-suite-<task>.time left over from a prior full-suite run produced a non-null cpu_s ⇒
+// per-task-suite-record rejects --cpu-time-s with --full-suite-ran=false (AC6「skip 不消耗 CPU」) ⇒ HARD
+// FAIL, no flip, no ff (gap-ac148 blocked). FIX: (AC1) guard cpu_s by full_suite_ran=true; (AC2)
+// ISOLATE_LAUNCH rm -f "$suite_time_file" (aligned with SUITE_LAUNCH). Sibling log-file variant
+// gap-fan-in-suite-log-cross-relaunch-reuse already done — this is the time-file variant.
 
-// ── ⑧⑩ 锁等待负控制（gap-single-flight-lock-wait-shorter-than-suite AC2/AC3）─────────────────────────
-// THE DEFECT: test.sh 的 single-flight 锁默认 FULL_SUITE_LOCK_TIMEOUT=600 < suite 实测上界 ~840s ⇒
-// 5 fan-in 撞 2 slot 时第 3+ suite 在 slot 释放前 fail-closed「not starting」白等 600s 后 relaunch。
-// FIX: SUITE_LAUNCH/ISOLATE_LAUNCH 启动 detached suite 时经 env 把 FULL_SUITE_LOCK_TIMEOUT 提到 ≥ suite
-// 时长（默认 suiteLockTimeoutSecs=900，args 可覆盖；调用方可经 env FULL_SUITE_LOCK_TIMEOUT 覆盖）。
-// ① 结构负控制（本缺陷的负控制）：launch 块必须携带 FULL_SUITE_LOCK_TIMEOUT ≥ 840 —— revert 本修复
-//    （丢掉 env / 回到 600）⇒ 此断言红。
-// ② REAL 机制（wait-and-acquire）：fake test.sh 忠实复现 test.sh 的锁等待语义（S=2 槽、非阻塞 try +
-//    有界等待 + FULL_SUITE_LOCK_TIMEOUT fail-closed）。两槽全忙时套件【等待】释放而【非】fail-closed；
-//    反向（正对照）：等待短于释放时刻 ⇒ 确实 fail-closed「not starting」——证明机制真实可取假。
-test("⑧⑩ 锁等待负控制 — suite-launch 携带 FULL_SUITE_LOCK_TIMEOUT ≥ suite 时长; REAL 槽忙→释放后获取而非 fail-closed", async (t) => {
+test("⑧ time-file guard — isolate-rerun (full_suite_ran=false) with a stale .time file leaves cpu_s=null (gap-fan-in-suite-time-file-cross-relaunch-reuse AC1)", async (t) => {
+  // AC1 能取假 (negative control): seed the exact cross-relaunch residue (full_suite_ran=false + a stale
+  // gnu-time .time file), run the REAL poll block. The fix's full_suite_ran guard must leave cpu_s=null;
+  // before the fix the `[ -f ]`-only guard would read the stale file → cpu_s=11313.883 (red).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-timeguard-"));
+  t.after(() => cleanup(dir));
+  const task = "gap-test-timeguard";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  const marker = `/tmp/fan-in-suite-${task}.exit`;
+  const timeFile = `/tmp/fan-in-suite-${task}.time`;
+  const logFile = `/tmp/fan-in-suite-${task}.log`;
+  t.after(() => { for (const f of [capture, marker, timeFile, logFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  // Seed an isolate-rerun capture (full_suite_ran=false) + a STALE gnu-time file (the residue this fix
+  // targets) + a green exit marker.
+  fs.writeFileSync(capture, [
+    "full_suite_ran=false",
+    "skip_reason=isolate-rerun-load-sensitive",
+    "start_iso=2026-08-20T00:00:00.000Z",
+    "start_ms=1755652800000",
+    "suite_head=" + "0".repeat(40),
+    `suite_log_file=${logFile}`,
+  ].join("\n") + "\n", "utf8");
+  fs.writeFileSync(marker, "exit=0\nend_ms=1755652801000\nend_iso=2026-08-20T00:00:01.000Z\n", "utf8");
+  fs.writeFileSync(timeFile, "4414.230 6899.653\n", "utf8");
+  fs.writeFileSync(logFile, "ok\n", "utf8");
+
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-timeguard", mergeTarget: "develop" },
+  });
+  const pollPrompt = promptContaining(prompts, "POLL=not-done");
+  const pollBlock = pollPrompt.slice(pollPrompt.indexOf("suite_capture="), pollPrompt.indexOf("返回 { done: bool"));
+  const r = runBash(pollBlock, { cwd: dir });
+  assert.equal(r.status, 0, `poll block failed: ${r.stderr}`);
+  assert.match(r.stdout, /POLL=done SUITE_EXIT=0/, `poll must report done exit 0, got: ${r.stdout}`);
+
+  const out = fs.readFileSync(capture, "utf8");
+  assert.match(out, /^cpu_s=null$/m, "isolate-rerun must NOT read the stale .time file — cpu_s stays null (full_suite_ran guard)");
+  assert.match(out, /^cpu_source=not-wired$/m, "cpu_source stays not-wired (no CPU captured for an isolate-rerun)");
+  assert.match(out, /^cpu_user_s=null$/m, "cpu_user_s stays null (no gnu-time columns read)");
+  assert.match(out, /^cpu_sys_s=null$/m, "cpu_sys_s stays null (no gnu-time columns read)");
+});
+
+test("⑧ time-file rm REAL — ISOLATE_LAUNCH removes the stale .time file at launch (gap-fan-in-suite-time-file-cross-relaunch-reuse AC2)", async (t) => {
+  // AC2 能取假 (REAL mechanism): extract the REAL ISOLATE_LAUNCH block, pre-seed a stale gnu-time .time
+  // file (the cross-relaunch residue), run the block — the rm at the top must delete it. Revert the rm
+  // ⇒ the stale file survives ⇒ red.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-isorm-"));
+  t.after(() => cleanup(dir));
+  const task = "gap-test-isorm";
+  const git = (args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  git(["init", "-q", "-b", "main"]);
+  git(["config", "user.email", "test@test"]);
+  git(["config", "user.name", "test"]);
+  fs.writeFileSync(path.join(dir, "README.md"), "base\n");
+  git(["add", "-A"]); git(["commit", "-qm", "base"]);
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/usr/bin/env bash\nsleep 1\nexit 0\n");
+  fs.chmodSync(path.join(dir, "scripts", "test.sh"), 0o755);
+  git(["add", "-A"]); git(["commit", "-qm", "add test.sh"]);
+
+  // Extract the REAL ISOLATE_LAUNCH block (a RED sequence drives the fix prompt carrying it).
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-isorm", mergeTarget: "develop" },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },
+      { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "" },
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
+    ],
+  });
+  const isolate = extractBlockFromPrompts(prompts, "# isolate-launch-block-start", "# isolate-launch-block-end");
+
+  // Pre-seed the cross-relaunch residue: a stale .time file (the gnu-time file a prior full-suite run left).
+  const timeFile = `/tmp/fan-in-suite-${task}.time`;
+  const captureFile = `/tmp/fan-in-suite-${task}.env`;
+  const isolateFiles = `/tmp/fan-in-scope-isolate-${task}.files`;
+  const logFile = `/tmp/fan-in-suite-${task}.log`;
+  const pidFile = `/tmp/fan-in-suite-${task}.pid`;
+  t.after(() => { for (const f of [timeFile, captureFile, isolateFiles, logFile, pidFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  fs.writeFileSync(timeFile, "4414.230 6899.653\n", "utf8");
+
+  // Run the isolate-launch block (async: it launches a detached suite that sleeps 1s).
+  const launchProc = spawn("bash", ["-c", isolate], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  let launchOut = "";
+  launchProc.stdout.on("data", (d) => { launchOut += d; });
+  launchProc.stderr.on("data", (d) => { launchOut += d; });
+  const launchExit = await new Promise((resolve) => { launchProc.on("exit", (code, sig) => resolve({ code, sig })); });
+
+  assert.equal(launchExit.code, 0, `isolate-launch block failed: ${launchOut}`);
+  assert.ok(!fs.existsSync(timeFile), "ISOLATE_LAUNCH must rm the stale .time file at launch (the cross-relaunch residue is gone)");
+});
+
+
+
+// ── ⑧⑩ 锁等待负控制（gap-single-flight-lock-timeout-double-value AC1/AC2）────────────────────────
+// THE DEFECT: test.sh 的 single-flight 锁有两套超时值（FULL_SUITE_LOCK_TIMEOUT 默认 600 + fan-in 的
+// suiteLockTimeoutSecs 900 覆盖），且 600s 线已被常态化的 819-1619s full-bucket suite 跨越 ⇒ 活 suite
+// 被 fail-closed「not starting」误杀 + 重试放大。
+// FIX: test.sh 的锁等待改为【无界排队】（flock crash-autorelease 保证死持有者不泄漏槽），fan-in 不再经
+// env 传 FULL_SUITE_LOCK_TIMEOUT（无双值、无 900 字面量）。
+// ① 结构负控制（本缺陷的负控制）：launch/isolate 块不得携带 FULL_SUITE_LOCK_TIMEOUT / suite_lock_timeout
+//    —— revert 本修复（重新经 env 传 / 重引入 suiteLockTimeoutSecs）⇒ 此断言红。
+// ② REAL 机制（wait-and-acquire）：fake test.sh 忠实复现 test.sh 的【无界】锁等待语义（S=2 槽、非阻塞
+//    try + 无界等待 + 永不 fail-closed）。两槽全忙时套件【等待】释放而【非】fail-closed。
+test("⑧⑩ 锁等待负控制 — suite-launch 不再携带 FULL_SUITE_LOCK_TIMEOUT (无双值); REAL 槽忙→释放后获取而非 fail-closed", async (t) => {
   // RED 序列驱动 vm 实执行：fix agent prompt 携带 ISOLATE_LAUNCH 块（SUITE_LAUNCH 在 phase-1 prompt）。
   const { prompts } = await runWorkflow({
     args: { task: "gap-test-lockwait", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-lockwait", mergeTarget: "develop" },
@@ -2081,14 +2266,13 @@ test("⑧⑩ 锁等待负控制 — suite-launch 携带 FULL_SUITE_LOCK_TIMEOUT 
     ],
   });
 
-  // ── ① 结构负控制 ──
+  // ── ① 结构负控制（无双值）──
   const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
-  const m = launch.match(/suite_lock_timeout="\$\{FULL_SUITE_LOCK_TIMEOUT:-(\d+)\}"/);
-  assert.ok(m, "suite-launch must define suite_lock_timeout from FULL_SUITE_LOCK_TIMEOUT (default ≥ suite duration)");
-  assert.ok(Number(m[1]) >= 840, `default suite-lock wait must be ≥ the measured suite duration (~840s, 807931ms), got ${m[1]}`);
-  assert.ok(launch.includes('setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout"'), "the launched suite must receive FULL_SUITE_LOCK_TIMEOUT via env");
+  assert.ok(!launch.includes("FULL_SUITE_LOCK_TIMEOUT"), "suite-launch must NOT pass FULL_SUITE_LOCK_TIMEOUT (single source = test.sh unbounded queue wait)");
+  assert.ok(!launch.includes("suite_lock_timeout"), "suite-launch must NOT define a suite_lock_timeout override");
   const isolate = extractBlockFromPrompts(prompts, "# isolate-launch-block-start", "# isolate-launch-block-end");
-  assert.ok(isolate.includes('FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout"'), "isolate-rerun launch must also pass FULL_SUITE_LOCK_TIMEOUT");
+  assert.ok(!isolate.includes("FULL_SUITE_LOCK_TIMEOUT"), "isolate-rerun launch must NOT pass FULL_SUITE_LOCK_TIMEOUT");
+  assert.ok(!isolate.includes("suite_lock_timeout"), "isolate-rerun launch must NOT define a suite_lock_timeout override");
 
   // ── ② REAL wait-and-acquire ──
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-lockwait-"));
@@ -2104,8 +2288,8 @@ test("⑧⑩ 锁等待负控制 — suite-launch 携带 FULL_SUITE_LOCK_TIMEOUT 
   fs.writeFileSync(path.join(dir, "README.md"), "base\n");
   git(["add", "-A"]); git(["commit", "-qm", "base"]);
 
-  // Fake test.sh: faithful single-flight lock semantics (S=2 slots, non-blocking try, bounded wait,
-  // fail-closed after FULL_SUITE_LOCK_TIMEOUT). The REAL scripts/test.sh is far too heavy for a unit test.
+  // Fake test.sh: faithful single-flight lock semantics (S=2 slots, non-blocking try, UNBOUNDED wait —
+  // never fail-closed). The REAL scripts/test.sh is far too heavy for a unit test.
   const fakeTest = [
     "#!/usr/bin/env bash",
     "set -u",
@@ -2116,17 +2300,10 @@ test("⑧⑩ 锁等待负控制 — suite-launch 携带 FULL_SUITE_LOCK_TIMEOUT 
     "idx=0",
     'for fd in "${fds[@]}"; do if flock -n "$fd"; then held="$idx"; break; fi; idx=$((idx+1)); done',
     'if [ -z "$held" ]; then',
-    "  start=$SECONDS; waited=0",
-    '  while [ "$waited" -lt "${FULL_SUITE_LOCK_TIMEOUT:-600}" ]; do',
+    '  while [ -z "$held" ]; do',
     "    idx=0",
     '    for fd in "${fds[@]}"; do if flock -w 1 "$fd"; then held="$idx"; break; fi; idx=$((idx+1)); done',
-    '    [ -n "$held" ] && break',
-    "    waited=$((SECONDS - start))",
     "  done",
-    '  if [ -z "$held" ]; then',
-    '    echo "scripts/test.sh: another full suite holds all slots — not starting (single-flight lock; waited ${FULL_SUITE_LOCK_TIMEOUT:-600}s)" >&2',
-    "    exit 1",
-    "  fi",
     "fi",
     'echo "acquired full-suite single-flight slot $held"',
     "sleep 1",
@@ -2157,20 +2334,21 @@ test("⑧⑩ 锁等待负控制 — suite-launch 携带 FULL_SUITE_LOCK_TIMEOUT 
   for (let i = 0; i < 50 && !fs.existsSync(path.join(dir, "slots-held")); i++) await new Promise((r) => setTimeout(r, 50));
   assert.ok(fs.existsSync(path.join(dir, "slots-held")), "holder must hold both slots before the suite launch");
 
-  // Launch the REAL SUITE_LAUNCH block with a SHORT lock wait (6s test seam — the suite finds both slots
-  // busy and must WAIT, not fail-closed). Spawn asynchronously (spawnSync would block until the detached
-  // suite's inherited stdout pipe closes — the suite is still waiting), free a slot while it waits, then
-  // await the block's ~3s confirm. The suite must acquire the freed slot (waited < 6s) and run to exit 0.
-  const launchProc = spawn("bash", ["-c", `export FULL_SUITE_LOCK_TIMEOUT=6; ${launchBlock}`], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  // Launch the REAL SUITE_LAUNCH block (no env seam — the unbounded wait lives in test.sh). Spawn
+  // asynchronously (spawnSync would block until the detached suite's inherited stdout pipe closes), verify
+  // the suite is STILL WAITING (no exit marker — it did NOT fail-closed), free a slot, then await the
+  // block's ~1s confirm. The suite must acquire the freed slot and run to exit 0.
+  const marker = `/tmp/fan-in-suite-${task}.exit`;
+  const launchProc = spawn("bash", ["-c", launchBlock], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
   let launchOut = "";
   launchProc.stdout.on("data", (d) => { launchOut += d; });
   launchProc.stderr.on("data", (d) => { launchOut += d; });
   await new Promise((r) => setTimeout(r, 1500)); // let the suite start waiting
+  assert.ok(!fs.existsSync(marker), "the suite must WAIT while both slots are held — no exit marker (never fail-closed)");
   holder.kill("SIGKILL");                       // free a slot WHILE the suite is waiting
   const launchExit = await new Promise((resolve) => { launchProc.on("exit", (code, sig) => resolve({ code, sig })); });
   assert.equal(launchExit.code, 0, `launch block failed: ${launchOut}`);
 
-  const marker = `/tmp/fan-in-suite-${task}.exit`;
   let seen = false;
   for (let i = 0; i < 50 && !seen; i++) { if (fs.existsSync(marker)) seen = true; else await new Promise((r) => setTimeout(r, 100)); }
   assert.ok(seen, "the waiting suite must acquire the freed slot and write its exit marker");
@@ -2179,32 +2357,6 @@ test("⑧⑩ 锁等待负控制 — suite-launch 携带 FULL_SUITE_LOCK_TIMEOUT 
   assert.match(markerText, /exit=0/, `the suite must run to exit 0 after acquiring the freed slot, got: ${markerText.trim()}`);
   assert.match(log, /acquired full-suite single-flight slot/, "the suite must log its slot acquisition");
   assert.ok(!log.includes("not starting"), "the suite must NOT fail-closed (no 'not starting' lock refusal)");
-
-  // ── ②b 正对照（机制可取假）：等待短于释放时刻 ⇒ 确实 fail-closed「not starting」。
-  const taskFc = "gap-test-lockwait-fc";
-  const codeDeltaFc = `/tmp/fan-in-code-delta-${taskFc}.txt`;
-  fs.writeFileSync(codeDeltaFc, "plugin/workflows/fan-in-execute.js\n");
-  t.after(() => { for (const f of [`/tmp/fan-in-suite-${taskFc}.env`, `/tmp/fan-in-suite-${taskFc}.exit`, `/tmp/fan-in-suite-${taskFc}.time`, `/tmp/fan-in-suite-${taskFc}.log`, codeDeltaFc]) { try { fs.rmSync(f, { force: true }); } catch (_) {} } });
-  const { prompts: prompts3 } = await runWorkflow({
-    args: { task: taskFc, worktree: dir, root: REPO_ROOT, runId: "fm-lockwait-fc", mergeTarget: "develop" },
-  });
-  const launchBlockFc = extractBlockFromPrompts(prompts3, "# suite-launch-block-start", "# suite-launch-block-end");
-  const holder2 = spawn("bash", ["-c",
-    `cd ${dir}; exec 8>"${dir}/.git/full-suite.lock.0"; flock -n 8 || exit 8; ` +
-    `exec 9>"${dir}/.git/full-suite.lock.1"; flock -n 9 || exit 9; ` +
-    `touch ${dir}/slots-held-2; sleep 30`], { stdio: "ignore" });
-  t.after(() => { try { holder2.kill("SIGKILL"); } catch (_) {} });
-  for (let i = 0; i < 50 && !fs.existsSync(path.join(dir, "slots-held-2")); i++) await new Promise((r) => setTimeout(r, 50));
-  assert.ok(fs.existsSync(path.join(dir, "slots-held-2")), "holder2 must hold both slots");
-  // FULL_SUITE_LOCK_TIMEOUT=1: slots stay held well past 1s ⇒ the suite fail-closes BEFORE any release.
-  runBash(`export FULL_SUITE_LOCK_TIMEOUT=1; ${launchBlockFc}`, { cwd: dir, timeout: 30_000 });
-  holder2.kill("SIGKILL");
-  const markerFc = `/tmp/fan-in-suite-${taskFc}.exit`;
-  let seenFc = false;
-  for (let i = 0; i < 50 && !seenFc; i++) { if (fs.existsSync(markerFc)) seenFc = true; else await new Promise((r) => setTimeout(r, 100)); }
-  assert.ok(seenFc, "the short-wait suite must fail-closed (marker written)");
-  const logFc = fs.readFileSync(`/tmp/fan-in-suite-${taskFc}.log`, "utf8");
-  assert.match(logFc, /not starting/, "the short-wait suite must log the lock refusal (fail-closed — the defect the fix prevents)");
 });
 
 // ── ⑧ durationMs 真墙钟一致性（gap-fan-in-suite-duration-poll-granularity-inflation）─────────────────
@@ -2642,12 +2794,16 @@ test("fix-scope REAL machine-partition — a task WITHOUT a ## Touches section �
   assert.ok(verdict.inScope.includes("pkg/a/x.test.mjs"), "unscoped: non-family failures stay inScope (machine-partition only)");
 });
 
-test("fix-scope REAL leak-residual — a tmux-leak-scan: FAIL with no per-file failure ⇒ outOfScope leak-residual (never fixed as a Touches regression)", async (t) => {
+test("fix-scope REAL leak-residual — a tmux-leak-scan: FAIL on a LATER line of the multi-line log (with no per-file failure) ⇒ outOfScope leak-residual (never fixed as a Touches regression)", async (t) => {
   const task = "gap-test-fixscope-leak";
   const dir = makeFixScopeDir("fan-in-fixscope-leak-", task, "---\nid: gap-test-fixscope-leak\nstatus: ready\n---\n## Touches\n- tasks/gap-test-fixscope-leak.md\n- pkg/a/**\n");
   t.after(() => cleanup(dir));
   const log = `/tmp/fan-in-suite-${task}.log`;
-  fs.writeFileSync(log, "tmux-leak-scan: FAIL\nresidual tmux server skv-1234\n", "utf8");
+  // gap-fan-in-leak-fail-regex-missing-m-flag (AC1/AC2): the gate tests TMUX_LEAK_FAIL_RE against
+  // the WHOLE multi-line logText, not one line. Put the FAIL on a LATER line — without the `m`
+  // flag `^` anchors only to string start and this would be misclassified (leak-residual dead
+  // code). A normal passing line above it keeps this a real multi-line-log reproduction.
+  fs.writeFileSync(log, "✔ some passing test (1.2ms)\ntmux-leak-scan: FAIL\nresidual tmux server skv-1234\n", "utf8");
   t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
   const block = await fixScopeGateBlockFor(task, dir);
   const r = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir });

@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group product
 // @load-sensitive child-spawn
 // @load-sensitive-entry 2026-08-12 real node CLI subprocess spawns (execFileSync) + real mkdtemp I/O; moved product→serial 2026-08-12 (8-lane flakes, isolated 36/36 — gap-suite-tiering-kind-heavy-not-a-mechanism 补缺省 kind)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — spawns real node CLI subprocesses for the acceptance gate; flaked under 8-lane (moved to serial by outer 2026-08-12)

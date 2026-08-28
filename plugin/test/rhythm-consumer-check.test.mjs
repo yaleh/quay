@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // rhythm-consumer-check.test.mjs — AC73 节奏栏消费检测 (判据1/2/3 gate + 判据4 report),
 // plugin/scripts/rhythm-consumer-check.ts. Negative-control fixtures prove the checker can go RED
 // on exactly the real samples the task names (D2, 不构造 — the mechanisms and their pre-fix catalog

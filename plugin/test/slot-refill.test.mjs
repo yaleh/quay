@@ -63,6 +63,18 @@ import {
   // in-flight identifier (worktree dir / branch / task id) to the TRUE task id so a truncated worktree
   // slug still resolves and the in-flight count stops under-reporting.
   resolveInFlightId,
+  // FF-STARVATION RELIEF (gap-ff-starvation-no-dynamic-cap-relief): the second trigger on
+  // computeArbitratedCap — a live task's current-round ff-failure count narrows the dispatch cap so
+  // the starved task lands with no NEW competitor. Tiered (k=1 no / k=2→2 / k≥3→1), stateless (AC8),
+  // with distinguishable non-landing cause (AC5) and perpetrator type (AC7).
+  computeFfStarvationCap,
+  readFfRetryRecords,
+  readFfEscalationRecords,
+  computeFfFailureCounts,
+  computeUnresolvedEscalationTaskIds,
+  computeFfStarvationRelief,
+  classifyFfPerpetrator,
+  classifyNonLandingCause,
 } from "../scripts/slot-refill.ts";
 // AC2 (gap-delivery-critical-label-at-promote-not-after-dispatch): the promote gate is the fix's
 // label DETERMINATION point — applyPromotions (ready-pool-check --apply heartbeat) flips todo→ready
@@ -93,7 +105,7 @@ function makeWorkspace(tag) {
   return dir;
 }
 
-function writeTask(root, id, { status = "todo", labels = [], parent = null, role = null, body, selfTouch = true } = {}) {
+function writeTask(root, id, { status = "todo", labels = [], parent = null, role = null, dependsOn = [], body, selfTouch = true } = {}) {
   const fm = [
     "---",
     `id: ${id}`,
@@ -103,6 +115,10 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, role
     "labels:",
     ...labels.map((l) => `  - ${l}`),
     `parent: ${parent}`,
+    // DEPENDS_ON (tasks/gap-slot-refill-depsreadyfor-ignores-depends-on): flow-form `depends_on:
+    // [a, b]` — the machine-readable prerequisite edges (readDependsOn). Absent when empty (no dead
+    // relation edge to confuse the mirror of a task that has no depends_on).
+    dependsOn.length ? `depends_on: [${dependsOn.join(", ")}]` : null,
     "extra:",
     "  schema: v1",
     "---",
@@ -502,6 +518,49 @@ test("COMPOUND: a READY child of a compound parent is recommended (compound-pare
   assert.ok(!r.recommended.includes("gap-compound"), "the compound parent itself is still not recommended");
   const reasons = (r.deferred || []).filter((d) => d.id === "gap-compound").map((d) => d.reason);
   assert.ok(reasons.includes("compound-not-dispatchable"), "compound parent deferred with the explicit compound reason");
+});
+
+// ── DEPENDS_ON DEPENDENCY GATE (tasks/gap-slot-refill-depsreadyfor-ignores-depends-on) ──────────────
+// slot-refill's depsReadyFor previously read ONLY task.parent and never depends_on — so a depends_on
+// edge (the machine-readable prerequisite home, gap-prerequisite-gates-prose-invisible-to-mechanisms)
+// was a DEAD field for worker dispatch: ready-pool-check deferred such a task but slot-refill
+// dispatched it anyway (the "以为闸上了、其实没有" hazard). These tests pin the fix: depsReadyFor reads
+// parent AND depends_on (mirroring ready-pool-check's depsReadyFor), and a depends_on predecessor that
+// has not landed ⇒ deps-not-ready.
+
+test("DEPENDS_ON (AC1) — a ready task whose depends_on predecessor is not done is deferred deps-not-ready, not recommended", (t) => {
+  const root = makeWorkspace("depends-on-defer");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Upstream predecessor: ready (NOT done) — the thing the child must wait on.
+  writeTask(root, "gap-upstream", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/upstream.ts (new)"]) });
+  // Child carries a depends_on edge to the not-done upstream.
+  writeTask(root, "gap-child", {
+    status: "ready", labels: ["gap"], dependsOn: ["gap-upstream"],
+    body: dispatchableBody(["- code/child.ts (new)"]),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r.pool, 2, "both upstream and child are ready and in the pool");
+  assert.ok(r.recommended.includes("gap-upstream"), "the upstream (no deps) IS recommended");
+  assert.ok(!r.recommended.includes("gap-child"), "the child with an unlanded depends_on is NOT recommended");
+  const reasons = (r.deferred || []).filter((d) => d.id === "gap-child").map((d) => d.reason);
+  assert.ok(reasons.includes("deps-not-ready"), "the depends_on-gated child is deferred deps-not-ready");
+});
+
+test("DEPENDS_ON (AC2) — negative control: the same task WITHOUT depends_on is recommended, and a DONE depends_on does not block", (t) => {
+  const root = makeWorkspace("depends-on-control");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // (a) WITHOUT the depends_on edge ⇒ recommended (the defer above is the edge, not another cause).
+  writeTask(root, "gap-free", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/free.ts (new)"]) });
+  // (b) depends_on → DONE predecessor ⇒ deps-ready ⇒ recommended (a satisfied edge does not block).
+  writeTask(root, "gap-done-upstream", { status: "done", labels: ["gap"], body: dispatchableBody(["- code/done-upstream.ts (new)"]) });
+  writeTask(root, "gap-satisfied", {
+    status: "ready", labels: ["gap"], dependsOn: ["gap-done-upstream"],
+    body: dispatchableBody(["- code/satisfied.ts (new)"]),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.ok(r.recommended.includes("gap-free"), "no depends_on ⇒ recommended (negative control: the defer is the edge)");
+  assert.ok(r.recommended.includes("gap-satisfied"), "depends_on → done predecessor ⇒ deps-ready ⇒ recommended");
+  assert.ok(!(r.deferred || []).some((d) => d.id === "gap-satisfied"), "a satisfied depends_on must NOT be deferred");
 });
 
 // ── AC3: recommended is production-disjoint (no two colliding candidates) ───────────────────────────
@@ -1143,6 +1202,168 @@ test("computeArbitratedCap — red window active narrows to redBacklogCap; inact
   // custom redBacklogCap honored; an inactive window still keeps base
   assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: true, redBacklogCap: 3 }), 3);
   assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: false, redBacklogCap: 3 }), 5);
+});
+
+// ── FF-STARVATION RELIEF (gap-ff-starvation-no-dynamic-cap-relief) ───────────────────────────────────
+// The second trigger on computeArbitratedCap: a LIVE task that has failed ff repeatedly in its current
+// round (develop advanced during its merge→ff window) narrows the dispatch cap so it lands with no NEW
+// competitor. Tiered (k=1 no / k=2→2 / k≥3→1), stateless (recomputed every round — AC8), the cause is
+// distinguishable from suite-red / worker-round-end (AC5), and the perpetrator is distinguishable as
+// layer-commit (delayable) vs task-landing (not delayable) (AC7).
+
+function writeFfRetries(root, records) {
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "fan-in-retries.jsonl"), records.map((r) => JSON.stringify(r)).join("\n"));
+}
+
+function writeFfEscalations(root, records) {
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "fan-in-ff-escalations.jsonl"), records.map((r) => JSON.stringify(r)).join("\n"));
+}
+
+test("computeFfStarvationCap — k=1 no narrow, k=2→2, k≥3→1: three distinguishable tiers (AC2)", () => {
+  assert.equal(computeFfStarvationCap(0), null, "no failure ⇒ no intervention");
+  assert.equal(computeFfStarvationCap(1), null, "k=1 retry genuinely helps ⇒ no intervention");
+  assert.equal(computeFfStarvationCap(2), 2, "k=2 ⇒ mild throttle");
+  assert.equal(computeFfStarvationCap(3), 1, "k=3 ⇒ deterministic landing");
+  assert.equal(computeFfStarvationCap(8), 1, "k≥3 ⇒ 1");
+  assert.equal(computeFfStarvationCap(null), null);
+});
+
+test("computeArbitratedCap — ff-starvation second trigger narrows; absent trigger keeps base (AC1/AC8 stateless)", () => {
+  assert.equal(computeArbitratedCap({ baseCap: 5, ffStarvationCap: 1 }), 1, "k≥3 ⇒ cap 1");
+  assert.equal(computeArbitratedCap({ baseCap: 5, ffStarvationCap: 2 }), 2, "k=2 ⇒ cap 2");
+  assert.equal(computeArbitratedCap({ baseCap: 5 }), 5, "no trigger ⇒ base (self-recovery, AC8)");
+  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: true, ffStarvationCap: 1 }), 1, "both triggers ⇒ min (the more urgent k≥3 relief wins)");
+  assert.equal(computeArbitratedCap({ baseCap: 1, redWindowActive: true }), 1, "never widens — a cap-1 caller stays ≤1 under a red window");
+});
+
+test("computeFfFailureCounts — the most recent retry record's attempt is the live task's current-round k", () => {
+  const recs = [
+    { taskId: "gap-a", attempt: 1, epoch: 100 },
+    { taskId: "gap-a", attempt: 2, epoch: 200 },
+    { taskId: "gap-b", attempt: 3, epoch: 100 },
+    { taskId: "gap-stale", attempt: 8, epoch: 500 }, // not live ⇒ ignored
+  ];
+  const counts = computeFfFailureCounts(recs, ["gap-a", "gap-b"]);
+  assert.equal(counts.get("gap-a"), 2, "latest record (epoch 200) attempt 2");
+  assert.equal(counts.get("gap-b"), 3);
+  assert.equal(counts.has("gap-stale"), false, "a non-live task's historical failures never count");
+});
+
+test("computeUnresolvedEscalationTaskIds — an ff-escalation without a newer resolution = starved k≥3", () => {
+  const recs = [
+    { taskId: "gap-a", event: "ff-escalation", epoch: 100 },
+    { taskId: "gap-b", event: "ff-escalation", epoch: 100 },
+    { taskId: "gap-b", event: "ff-escalation-resolved", epoch: 200 },
+  ];
+  const ids = computeUnresolvedEscalationTaskIds(recs);
+  assert.ok(ids.has("gap-a"), "unresolved escalation ⇒ still starved");
+  assert.ok(!ids.has("gap-b"), "a newer resolution clears the escalation");
+});
+
+test("computeFfStarvationRelief — k=1 no relief, k=2 narrows to 2, k≥3 narrows to 1 (AC1/AC2)", () => {
+  const live = ["gap-a"];
+  const k1 = computeFfFailureCounts([{ taskId: "gap-a", attempt: 1, epoch: 100 }], live);
+  const r1 = computeFfStarvationRelief({ ffCounts: k1 });
+  assert.equal(r1.active, false);
+  assert.equal(r1.tier, 1);
+  assert.equal(r1.narrowedCap, null);
+  assert.deepEqual(r1.starvedTaskIds, []);
+
+  const k2 = computeFfFailureCounts([{ taskId: "gap-a", attempt: 2, epoch: 100 }], live);
+  const r2 = computeFfStarvationRelief({ ffCounts: k2 });
+  assert.equal(r2.active, true);
+  assert.equal(r2.tier, 2);
+  assert.equal(r2.narrowedCap, 2);
+
+  const k3 = computeFfFailureCounts([{ taskId: "gap-a", attempt: 3, epoch: 100 }], live);
+  const r3 = computeFfStarvationRelief({ ffCounts: k3 });
+  assert.equal(r3.active, true);
+  assert.equal(r3.tier, 3);
+  assert.equal(r3.narrowedCap, 1);
+  assert.deepEqual(r3.starvedTaskIds, ["gap-a"]);
+});
+
+test("computeFfStarvationRelief — an unresolved escalation forces k≥3 even with no retry record", () => {
+  const r = computeFfStarvationRelief({ ffCounts: new Map(), unresolvedEscalationIds: new Set(["gap-a"]) });
+  assert.equal(r.active, true);
+  assert.equal(r.tier, 3);
+  assert.equal(r.narrowedCap, 1);
+  assert.deepEqual(r.starvedTaskIds, ["gap-a"]);
+});
+
+test("classifyFfPerpetrator — layer-commit (delayable) vs task-landing (not delayable) vs mixed (AC7)", () => {
+  assert.equal(classifyFfPerpetrator([]), "unknown");
+  assert.equal(classifyFfPerpetrator(["tasks: 立案 gap-x"]), "layer-commit");
+  assert.equal(classifyFfPerpetrator(["orchestration: tick 记录"]), "layer-commit");
+  assert.equal(classifyFfPerpetrator(["fan-in: task/gap-x"]), "task-landing");
+  assert.equal(classifyFfPerpetrator(["merge task/gap-x: fan-in"]), "task-landing");
+  assert.equal(classifyFfPerpetrator(["tasks: 立案 gap-x", "fan-in: task/gap-y"]), "mixed");
+});
+
+test("classifyNonLandingCause — ff-race / suite-red / worker-round-end distinguishable (AC5)", () => {
+  assert.equal(classifyNonLandingCause({ hasRetryRecord: true, suiteRed: true, workerFinalState: "timed-out" }), "ff-race", "a retry record is the ff-race-specific carrier");
+  assert.equal(classifyNonLandingCause({ suiteRed: true }), "suite-red");
+  assert.equal(classifyNonLandingCause({ workerFinalState: "failed" }), "worker-round-end");
+  assert.equal(classifyNonLandingCause({}), "unknown", "no positive carrier ⇒ unknown, never a same-shaped guess");
+});
+
+test("ARBITRATION — a live task at k≥3 narrows the cap to 1 (AC1/AC3/AC4)", (t) => {
+  const root = makeWorkspace("ff-starve-live");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-live", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/live.ts (new)"]) });
+  writeTask(root, "gap-other", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/other.ts (new)"]) });
+  writeFfRetries(root, [{ taskId: "gap-live", attempt: 3, developHead: "abc", ts: "2026-08-26T00:00:00Z", epoch: 100, runId: "r1", agentId: "a1", mergeTarget: "develop", error: "not a fast-forward" }]);
+  const liveBody = dispatchableBody(["- code/live.ts (new)"]);
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, inFlight: [{ id: "gap-live", body: liveBody }] });
+  assert.equal(r.base_cap, 5);
+  assert.equal(r.effective_cap, 1, "live task k=3 ⇒ narrowed to 1");
+  assert.equal(r.ff_starvation.active, true);
+  assert.equal(r.ff_starvation.tier, 3);
+  assert.equal(r.ff_starvation.narrowed_cap, 1);
+  assert.deepEqual(r.ff_starvation.starved_task_ids, ["gap-live"]);
+  assert.equal(r.ff_starvation.cause, "ff-race");
+  assert.equal(r.slots_free, 0, "narrowed cap 1 − 1 in-flight = 0 ⇒ no NEW competitor (deterministic landing window)");
+});
+
+test("ARBITRATION — k=2 narrows to 2 and still recommends up to the narrowed cap (AC2/AC4 throttle-not-stop)", (t) => {
+  const root = makeWorkspace("ff-starve-k2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-live", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/live.ts (new)"]) });
+  writeTask(root, "gap-other", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/other.ts (new)"]) });
+  writeFfRetries(root, [{ taskId: "gap-live", attempt: 2, developHead: "abc", ts: "2026-08-26T00:00:00Z", epoch: 100, runId: "r1" }]);
+  const liveBody = dispatchableBody(["- code/live.ts (new)"]);
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, inFlight: [{ id: "gap-live", body: liveBody }] });
+  assert.equal(r.effective_cap, 2, "k=2 ⇒ narrowed to 2 (not 1)");
+  assert.equal(r.slots_free, 1, "cap 2 − 1 in-flight = 1 free slot");
+  assert.deepEqual(r.recommended, ["gap-other"], "still dispatches the non-colliding candidate — throttle, not a stop");
+});
+
+test("ARBITRATION — no starved LIVE task ⇒ cap unchanged even with a retry record for a non-live task (AC3 negative control)", (t) => {
+  const root = makeWorkspace("ff-nostarve");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeFfRetries(root, [{ taskId: "gap-stale", attempt: 8, epoch: 100, runId: "r1" }]);
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, inFlight: [{ id: "gap-a", body: dispatchableBody(["- code/a.ts (new)"]) }] });
+  assert.equal(r.effective_cap, 5, "a historical failure for a NON-live task never narrows the cap");
+  assert.equal(r.ff_starvation.active, false);
+  assert.equal(r.ff_starvation.narrowed_cap, null);
+  assert.deepEqual(r.ff_starvation.starved_task_ids, []);
+});
+
+test("ARBITRATION — the relief self-restores to baseCap once the live task's retry record disappears (AC8)", (t) => {
+  const root = makeWorkspace("ff-restore");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-live", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/live.ts (new)"]) });
+  writeFfRetries(root, [{ taskId: "gap-live", attempt: 3, epoch: 100, runId: "r1" }]);
+  const liveBody = dispatchableBody(["- code/live.ts (new)"]);
+  const opts = { tasksDir: path.join(root, "tasks"), root, inFlight: [{ id: "gap-live", body: liveBody }] };
+  assert.equal(analyzeSlotRefill(opts).effective_cap, 1, "starved ⇒ narrowed");
+  // the trigger disappears (task landed, retry ledger reset) ⇒ the SAME pure function returns baseCap —
+  // no stored state, no separate "un-narrow" action.
+  writeFfRetries(root, []);
+  assert.equal(analyzeSlotRefill(opts).effective_cap, 5, "trigger gone ⇒ baseCap restored (stateless self-recovery)");
 });
 
 test("readSuiteRed — state red ⇒ true; green/running/absent/unparseable ⇒ false (A11 parity)", (t) => {

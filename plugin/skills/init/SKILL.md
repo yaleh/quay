@@ -167,6 +167,8 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-instruments-behind-one-entry.md -->
 <!-- reference-doc: orchestration/manager-phase-goal.md -->
 <!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
+<!-- reference-doc: orchestration/SPEC-methodology-layer-architecture-2026-08-25.md -->
+<!-- reference-doc: orchestration/SPEC-suite-lifecycle-and-failure-semantics-2026-08-26.md -->
 <!-- reference-doc: orchestration/SPEC-complete-delivery-surface-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-instruments-behind-one-entry.md -->
 <!-- reference-doc: orchestration/SPEC-manager-productization-2026-08-05.md -->
@@ -198,6 +200,10 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/outer-tick-prompt.txt -->
 <!-- reference-doc: plugin/loop/manager- -->
 <!-- reference-doc: orchestration/SPEC-unified-driver-architecture-2026-08-23.md -->
+<!-- reference-doc: orchestration/SPEC-web-session-observability-and-control-2026-08-24.md -->
+<!-- reference-doc: orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md -->
+<!-- reference-doc: orchestration/SPEC-fan-in-workflow-lock-and-S1-2026-08-26.md -->
+<!-- reference-doc: orchestration/SPEC-fan-in-driver-mechanical-orchestration-2026-08-27.md -->
 
 ## Behavior
 

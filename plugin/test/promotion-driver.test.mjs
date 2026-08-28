@@ -59,9 +59,23 @@ import {
   MAX_FIX_RETRIES_DEFAULT,
   FIX_WORKER_TIMEOUT_MS,
 } from "../scripts/promotion-driver.ts";
+// AC150-3：资源门/halt 判定与 worker-driver 共用同一份实现（driver-shared.ts）。
+import {
+  resourceGateCheck as sharedResourceGateCheck,
+  isHalted as sharedIsHalted,
+  readControlState,
+  writeControlState,
+  defaultControlState,
+  applyHalt,
+  PROMOTION_CONTROL_STATE_REL,
+} from "../scripts/driver-shared.ts";
+import { resourceGateCheck as workerResourceGateCheck, isHalted as workerIsHalted } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DRIVER = path.resolve(__dirname, "..", "scripts", "promotion-driver.ts");
+// launchArgv（经 policy 解析 kind → profile）需要一个带 .quay/profiles.yml + .claude/launch.settings.json
+// 的 root——L3 后默认 fix-worker argv 不再 `bash quay-launch.sh`，改用真实 repo root 读真 profiles.yml。
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
 // The REAL ready-pool-check lives in the worktree's plugin/scripts (not under the temp task root), so
 // the AC2 test injects it via --ready-pool-cmd pointing at this path — the same seam worker-driver's
 // resident-loop tests use. splitArgs splits on whitespace, so both paths here are space-free.
@@ -258,7 +272,9 @@ test("runPromotionRound — parses pool/promotions/applied_promotions from the i
   assert.equal(r.pool, 2);
   assert.equal(r.shouldApply, true);
   assert.deepEqual(r.promotedIds, ["gap-a", "gap-b"], "promotedIds = the gate's eligible-promotion id list");
-  assert.deepEqual(r.applied, [{ id: "gap-a", ok: true, from: "todo", to: "ready", deliveryCritical: false }]);
+  // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): the driver
+  // re-map now propagates reason + committed so a blocked promotion is not silent in the ledger.
+  assert.deepEqual(r.applied, [{ id: "gap-a", ok: true, from: "todo", to: "ready", deliveryCritical: false, reason: null, committed: false }]);
 });
 
 test("runPromotionRound — fail-closed: non-zero exit / unparseable output ⇒ error, ⛔ not 'no candidates'", () => {
@@ -511,13 +527,14 @@ test("buildFixWorkerPrompt — task id + structured missing list, ⛔ not a pros
   assert.ok(p.includes("structured_missing:"), "the prompt names the structured list (not 'go look what's wrong')");
 });
 
-test("buildFixWorkerArgv — default quay-launch.sh fix-worker; override prefix appends the prompt as the last arg", () => {
-  const def = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], "/r");
-  assert.deepEqual(def.slice(0, 4), ["bash", "/r/plugin/scripts/quay-launch.sh", "fix-worker", "-p"],
-    "AC140-1: fix worker routes through quay-launch.sh (not bare claude -p)");
-  assert.ok(def[4].includes("fourArtifacts=false missing=[dod]"), "the prompt is the argv payload");
+test("buildFixWorkerArgv — default policy-resolved fix-worker; override prefix appends the prompt as the last arg", () => {
+  const def = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], REPO_ROOT);
+  assert.equal(def[0], "claude-fjdac",
+    "AC140-1/L3: fix worker resolves via policy to the profile launcher (⛔ bash quay-launch.sh)");
+  assert.equal(def[def.indexOf("-n") + 1], "quay-fix-worker");
+  assert.ok(def[def.length - 1].includes("fourArtifacts=false missing=[dod]"), "the prompt is the argv payload");
 
-  const over = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], "/r", "node -e capture");
+  const over = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], REPO_ROOT, "node -e capture");
   assert.deepEqual(over.slice(0, 3), ["node", "-e", "capture"]);
   assert.ok(over[over.length - 1].includes("fourArtifacts=false missing=[dod]"), "override keeps the prompt as the last arg");
 });
@@ -572,6 +589,7 @@ test("AC132 AC2 — DoD<40 todo ⇒ fix worker prompt contains the structured mi
   runDriver(root, [
     "--ready-pool-cmd", realReadyPoolCmd(root),
     "--fix-worker-cmd", fixWorkerCaptureCmd(capture),
+    "--resource-gate-cmd", "node -e process.exit(0)",
     "--cap", "5", "--once",
   ]);
 
@@ -735,12 +753,13 @@ test("AC133 MAX_FIX_RETRIES_DEFAULT — 与 fan-in 侧 attempt>=3 同值，非�
   assert.equal(MAX_FIX_RETRIES_DEFAULT, 3, "default retry cap = 3 (gap-fan-in-relaunch-retry-cap 同值)");
 });
 
-test("computeReverifyOutcome — 闸的新判定归类：nowEligible / stillIneligible / neither（纯函数）", () => {
+test("computeReverifyOutcome — 闸的新判定归类：nowEligible / stillIneligible / notEvaluated / neither（纯函数）", () => {
   // gate now says eligible (promotions contains the id) ⇒ fix took
   const eligible = { ok: true, error: null, pool: 1, shouldApply: true, promotedIds: ["gap-a"], applied: [], promotePathLlmInvoked: false, fixDecisions: [] };
   const r1 = computeReverifyOutcome(["gap-a", "gap-b"], eligible);
   assert.deepEqual(r1.nowEligibleIds, ["gap-a"], "闸判合格 ⇒ nowEligible");
   assert.deepEqual(r1.stillIneligibleIds, []);
+  assert.deepEqual(r1.notEvaluatedIds, [], "ok=true ⇒ 无 not-evaluated");
 
   // gate still says ineligible (fixDecisions contains eligible=false) ⇒ fix did NOT take
   const stillBad = {
@@ -752,11 +771,20 @@ test("computeReverifyOutcome — 闸的新判定归类：nowEligible / stillInel
   const r2 = computeReverifyOutcome(["gap-a"], stillBad);
   assert.deepEqual(r2.nowEligibleIds, [], "闸仍判不合格 ⇒ ⛔ 不得晋升");
   assert.deepEqual(r2.stillIneligibleIds, ["gap-a"], "闸仍判不合格 ⇒ stillIneligible（⛔ 不信 worker 自述「已修好」）");
+  assert.deepEqual(r2.notEvaluatedIds, [], "ok=true ⇒ 无 not-evaluated");
 
   // neither (task left the todo pool) ⇒ not counted either way
   const gone = { ok: true, error: null, pool: 0, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked: false, fixDecisions: [] };
   const r3 = computeReverifyOutcome(["gap-z"], gone);
-  assert.deepEqual(r3, { nowEligibleIds: [], stillIneligibleIds: [] }, "task vanished from the pool ⇒ neither");
+  assert.deepEqual(r3, { nowEligibleIds: [], stillIneligibleIds: [], notEvaluatedIds: [] }, "task vanished from the pool ⇒ neither");
+
+  // ⛔ AC153：读不到输入（重跑闸 ok=false）⇒ 全部 notEvaluatedIds（不是 neither 静默丢弃，也不是
+  // stillIneligible 误计入失败上限）。
+  const unreadable = { ok: false, error: "ready-pool-check spawn failed", pool: null, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked: false, fixDecisions: [] };
+  const r4 = computeReverifyOutcome(["gap-a", "gap-b"], unreadable);
+  assert.deepEqual(r4.notEvaluatedIds, ["gap-a", "gap-b"], "重跑闸读不到 ⇒ notEvaluatedIds（⛔ 不是 neither/不是 stillIneligible）");
+  assert.deepEqual(r4.nowEligibleIds, [], "读不到 ⇒ ⛔ 不晋升");
+  assert.deepEqual(r4.stillIneligibleIds, [], "读不到 ⇒ ⛔ 不计失败上限");
 });
 
 test("advanceRetryCap — 连续失败达 N 次 ⇒ newlyNeedsHuman；去重不重复返回（纯函数）", () => {
@@ -801,6 +829,7 @@ test("AC133 AC2 — worker 声称修好（exit 0）但实际未改 ⇒ 驱动仍
   runDriver(root, [
     "--ready-pool-cmd", realReadyPoolCmd(root),
     "--fix-worker-cmd", "node -e process.exit(0)",
+    "--resource-gate-cmd", "node -e process.exit(0)",
     "--cap", "5", "--once",
   ]);
 
@@ -833,6 +862,7 @@ test("AC133 AC3 — 连续修 N 次仍不合格 ⇒ 标 needs-human 并停止修
   runDriver(root, [
     "--ready-pool-cmd", realReadyPoolCmd(root),
     "--fix-worker-cmd", fixWorkerNoopCounter(counter),
+    "--resource-gate-cmd", "node -e process.exit(0)",
     "--cap", "5", "--max-fix-retries", "2", "--max-rounds", "4", "--interval", "5",
   ]);
 
@@ -866,6 +896,7 @@ test("AC133 AC1 positive — fix worker 真的修好 ⇒ 重验证轮的闸判�
   runDriver(root, [
     "--ready-pool-cmd", realReadyPoolCmd(root),
     "--fix-worker-cmd", writeDoDFixer(root),
+    "--resource-gate-cmd", "node -e process.exit(0)",
     "--cap", "5", "--once",
   ]);
 
@@ -877,4 +908,103 @@ test("AC133 AC1 positive — fix worker 真的修好 ⇒ 重验证轮的闸判�
   assert.deepEqual(rec.reverify.nowEligibleIds, ["gap-ac133-fixed"],
     `the gate's new judgment (now eligible) is what counts, not the worker's self-report (reverify=${JSON.stringify(rec.reverify)})`);
   assert.deepEqual(rec.reverify.stillIneligibleIds, [], "a genuinely-fixed task is not still-ineligible");
+});
+
+// ── AC150（falsifiable）：promotion 资源门 + 控制面 halt 与 worker-driver 共用同一份实现 ──────────
+
+test("AC150-1 — resource gate WAIT ⇒ 本轮不 spawn fix worker（退避，⛔ 无 action=\"fix\" outcome）", (t) => {
+  const root = makeRoot("ac150-1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeDodShortTask(root, "gap-ac150-rg");
+
+  const capture = path.join(root, "fix-prompt.txt");
+  runDriver(root, [
+    "--ready-pool-cmd", realReadyPoolCmd(root),
+    "--fix-worker-cmd", fixWorkerCaptureCmd(capture),
+    "--resource-gate-cmd", "node -e process.exit(1)",
+    "--cap", "5", "--once",
+  ]);
+
+  // WAIT ⇒ 退避：fix worker 未被 spawn（capture 文件不存在）、无 action="fix" outcome（AC150-1 取假）。
+  assert.ok(!fs.existsSync(capture), "WAIT ⇒ no fix worker spawned (capture file absent)");
+  const records = readRoundLines(root);
+  assert.equal(records.length, 1, "exactly one round record");
+  assert.equal(records[0].gate.go, false, "round record carries the resource-gate WAIT verdict");
+  const outcomes = readOutcomeLines(root);
+  assert.ok(!outcomes.some((o) => o.action === "fix"), `AC150-1 取假：WAIT 期间无 action="fix" outcome (${JSON.stringify(outcomes)})`);
+
+  // Positive control：同一 fixture、gate GO ⇒ fix worker 被 spawn（证明该任务本可修，退避是资源门拦的）。
+  const root2 = makeRoot("ac150-1-go");
+  t.after(() => fs.rmSync(root2, { recursive: true, force: true }));
+  writeDodShortTask(root2, "gap-ac150-rg-go");
+  const capture2 = path.join(root2, "fix-prompt.txt");
+  runDriver(root2, [
+    "--ready-pool-cmd", realReadyPoolCmd(root2),
+    "--fix-worker-cmd", fixWorkerCaptureCmd(capture2),
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--cap", "5", "--once",
+  ]);
+  assert.ok(fs.existsSync(capture2), "gate GO ⇒ fix worker spawned (positive control)");
+  assert.ok(readOutcomeLines(root2).some((o) => o.action === "fix"), "gate GO ⇒ action=\"fix\" outcome written");
+});
+
+test("AC150-2 — 控制态 pre-halted ⇒ 驱动停止晋升与 fix spawn（运行期 halt，⛔ 非只能 kill）", (t) => {
+  const root = makeRoot("ac150-2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-ac150-eligible", "todo");
+  // 预置 halt（走 driver-shared 的同一 writer，写 promotion-control.json）。
+  writeControlState(root, applyHalt(defaultControlState(), "outer", true), PROMOTION_CONTROL_STATE_REL);
+
+  const capture = path.join(root, "fix-prompt.txt");
+  runDriver(root, [
+    "--ready-pool-cmd", realReadyPoolCmd(root),
+    "--fix-worker-cmd", fixWorkerCaptureCmd(capture),
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--cap", "5", "--once",
+  ]);
+
+  // AC150-2 取假：halt 后下一轮仍晋升/仍 spawn fix worker ⇒ 假。这里 halted ⇒ 不晋升、不 spawn。
+  assert.equal(readStatus(root, "gap-ac150-eligible"), "todo", "AC150-2 取假：halt 后不晋升（eligible todo 仍为 todo）");
+  assert.ok(!fs.existsSync(capture), "halt ⇒ no fix worker spawned");
+  const records = readRoundLines(root);
+  assert.equal(records.length, 1, "exactly one (halted) round record");
+  assert.equal(records[0].action, "halted", "round record action=halted");
+  assert.equal(records[0].halted, true, "round record carries halted=true");
+  const outcomes = readOutcomeLines(root);
+  assert.equal(outcomes.length, 0, "halt ⇒ no promote/fix outcome written");
+
+  // 正控制：同 fixture、未 halt ⇒ 驱动会晋升它（证明该任务本可晋，halt 才是拦住它的量）。
+  const root2 = makeRoot("ac150-2-go");
+  t.after(() => fs.rmSync(root2, { recursive: true, force: true }));
+  writeTask(root2, "gap-ac150-eligible-go", "todo");
+  runDriver(root2, ["--ready-pool-cmd", realReadyPoolCmd(root2), "--cap", "5", "--once"]);
+  assert.equal(readStatus(root2, "gap-ac150-eligible-go"), "ready", "guard: eligible todo promoted when NOT halted");
+});
+
+test("AC150-3 — 资源门/halt 判定只有 driver-shared.ts 一份实现（⛔ 无复制粘贴）", () => {
+  // 函数级同一份：worker-driver re-export 与 driver-shared 是同一个函数引用。
+  assert.equal(sharedResourceGateCheck, workerResourceGateCheck, "resourceGateCheck 同一份实现（worker re-export = shared）");
+  assert.equal(sharedIsHalted, workerIsHalted, "isHalted 同一份实现（worker re-export = shared）");
+
+  // 取假（grep 形）：三个源文件里，resourceGateCheck / isHalted 只定义在 driver-shared.ts 一份；
+  // worker-driver.ts 与 promotion-driver.ts 都只 import（⛔ 不各写一份独立实现）。
+  const sharedSrc = fs.readFileSync(path.resolve(__dirname, "..", "scripts", "driver-shared.ts"), "utf8");
+  const workerSrc = fs.readFileSync(path.resolve(__dirname, "..", "scripts", "worker-driver.ts"), "utf8");
+  const promoSrc = fs.readFileSync(path.resolve(__dirname, "..", "scripts", "promotion-driver.ts"), "utf8");
+  assert.match(sharedSrc, /export function resourceGateCheck/, "resourceGateCheck defined in driver-shared.ts");
+  assert.match(sharedSrc, /export function isHalted/, "isHalted defined in driver-shared.ts");
+  assert.doesNotMatch(workerSrc, /export function resourceGateCheck/, "worker-driver.ts does NOT define resourceGateCheck");
+  assert.doesNotMatch(workerSrc, /export function isHalted/, "worker-driver.ts does NOT define isHalted");
+  assert.doesNotMatch(promoSrc, /export function resourceGateCheck/, "promotion-driver.ts does NOT define resourceGateCheck");
+  assert.doesNotMatch(promoSrc, /export function isHalted/, "promotion-driver.ts does NOT define isHalted");
+});
+
+test("AC150-2 — promotion 控制态文件独立于 worker（halting one 不杀 another）", (t) => {
+  const root = makeRoot("ac150-indep");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // promotion 读 promotion-control.json；worker 读 worker-control.json（driver-shared 参数化 rel）。
+  writeControlState(root, applyHalt(defaultControlState(), "outer", true), PROMOTION_CONTROL_STATE_REL);
+  // promotion 控制态 = halted（用同一 isHalted 实现读 promotion 文件）。
+  assert.equal(readControlState(root, process.env, PROMOTION_CONTROL_STATE_REL).state.halted, true, "promotion control file halted");
+  assert.equal(sharedIsHalted(root, process.env, PROMOTION_CONTROL_STATE_REL), true, "shared isHalted reads promotion-control.json");
 });

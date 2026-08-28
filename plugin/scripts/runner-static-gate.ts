@@ -358,6 +358,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/dispatch-preference.md plugin/scripts/dispatch-preference-check.ts
   run_checker "dispatch-preference-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dispatch-preference-check.ts" --root "${repo_root}"
+  echo "== spec-declaration-point check (tasks/gap-spec-declaration-point-mechanical-check, AC1/AC2) =="
+  # Every on-disk orchestration/SPEC-*.md must be declared at EVERY known SPEC declaration point. The
+  # declaration-point SET is grep-DERIVED — a file under plugin/skills/** referencing
+  # `orchestration/SPEC-` (manager SKILL index + init SKILL reference-doc today) — never a hardcoded
+  # path list (AC2), so a THIRD declaration point is enforced automatically. A new SPEC missing from
+  # any point ⇒ RED (AC1: the bdf8b13d 漏索引 → AC6 红 / 01d4f4e8 补索引漏 reference-doc →
+  # referenced-not-landed 红 class). Zero declaration points ⇒ NOT-EVALUATED (exit 2, never conflated
+  # with green — hard rule 3b: a check that found nothing to verify must not report PASS). Mutation
+  # case + unit tests carry the negative control.
+  # @static-tier change
+  # @static-object orchestration/SPEC-*.md plugin/skills/** plugin/scripts/spec-declaration-point-check.ts plugin/test/spec-declaration-point-check.test.mjs plugin/scripts/checker-mutation-cases/spec-declaration-point-check.sh
+  run_checker "spec-declaration-point-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/spec-declaration-point-check.ts" --root "${repo_root}"
   echo "== retired-clause check (gap-ac58-retired-clauses-delete-and-archive, AC58 判据1-3) =="
   # AC58 退役即迁出 enforcement: the registry (the 落点映射) records every retired clause/annotation
   # migrated OUT of the high-frequency files INTO orchestration/archive/AC58-retired-clauses.md#<id>.

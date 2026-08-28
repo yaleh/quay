@@ -155,6 +155,17 @@
 
 set -euo pipefail
 
+# ── FORCE_COLOR normalization (gap-suite-force-color-ansi-test-sh-normalize) ──────────────────────
+# FORCE_COLOR=3 in the ambient env makes Node's console.log emit ANSI color codes EVEN WHEN piped
+# (\x1B[33m…\x1B[39m) — deterministically breaking any output-assertion test whose spawnSync'd node
+# inherits it (fan-in-workflow-lock.test.mjs:171, instrument-failure-check.sh's node -e parse; the same
+# root as gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi, superseded by this).
+# Normalize HERE at the entry so EVERY child process / spawnSync inherits the unset var (AC2:
+# entry-level, never a single-point patch). `unset` (⛔ not NO_COLOR=1 — Node IGNORES NO_COLOR while
+# FORCE_COLOR is set, warns and still colors) restores node's own TTY detection; suite subprocesses are
+# always piped so they emit no color regardless of a parent FORCE_COLOR value (1/2/3).
+unset FORCE_COLOR
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
@@ -461,14 +472,20 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 #
 # Test seams (unit test in plugin/test/resource-gate.test.mjs): RESOURCE_GATE_NPROC /
 # RESOURCE_GATE_CONCURRENT_SUITES / RESOURCE_GATE_OVERSUBSCRIPTION override the derivation inputs
-# deterministically (slots = 旋钮② S, oversub = 旋钮③ — both env-read, never literals).
+# deterministically (S read via suite_slot_count, oversub = 旋钮③ — env-read, never literals).
+# S single source (gap-suite-concurrency-S-two-source-divergence): default_concurrency_formula and
+# serial_lowconc_host_default read S via suite_slot_count — the SAME bash canonical the single-flight
+# lock uses (seam RESOURCE_GATE_CONCURRENT_SUITES → `<base>.concurrency` file →
+# QUAY_MAX_CONCURRENT_SUITES → 1). Sourced HERE (before the derivation functions below) so both can
+# call it; the lock section further down reuses this same canonical for its slot paths.
+source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
 default_concurrency_formula() {
   local total_budget oversub slots
   # MAIN-PHASE CONCURRENCY (gap-suite-budget-oversubscribe; human 14:4xZ 修正方向 — (b) 认领制 /
   # (c) 锁发配额 均被否，纯计算零新增运行时状态): default = max(1, floor(nproc × oversub / S)).
   #   nproc   ← 宿主（nproc --all，⛔ 不写字面量 — CLAUDE.md 硬规则 4 推论二）
   #   oversub ← 旋钮③ QUAY_MAX_OVERSUBSCRIPTION（现 1，现状非建议值）
-  #   S       ← 旋钮② QUAY_MAX_CONCURRENT_SUITES（现 2）
+  #   S       ← 旋钮② QUAY_MAX_CONCURRENT_SUITES（现 1）
   # 之前 AC74 的 `nproc − in_use`（读运行时 in_use，不读 S）固有超用：每条 lane 只减它启动那一刻
   # 已在用的 in_use、没人减将来会来的 ⇒ 先起读≈0 拿满 nproc、后起读≈in_use 拿 nproc−in_use，
   # 两并发 suite 合计 16+8=24 > 16（load 29.23，2026-08-14 14:39Z）。纯计算下 S 个 suite 各拿
@@ -479,12 +496,13 @@ default_concurrency_formula() {
   # 再乘并发阶段数 P ⇒ S×P ⇒ 重叠窗口 Σ lane ≤ nproc×oversub 同样结构上不可能超（不变式恢复可守）。
   total_budget="${RESOURCE_GATE_NPROC:-}"
   oversub="${RESOURCE_GATE_OVERSUBSCRIPTION:-${QUAY_MAX_OVERSUBSCRIPTION:-1}}"
-  slots="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
+  # S single source: suite_slot_count reads seam → `<base>.concurrency` file → 旋钮② → 1 (the SAME
+  # precedence + validation as the single-flight lock). The old
+  # `RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}` read SKIPPED the `.concurrency`
+  # file — so `printf '2' > .concurrency` changed the lock slots but NOT this formula (the divergence).
+  slots="$(suite_slot_count)"
   if [ -z "${total_budget}" ]; then
     total_budget="$(nproc 2>/dev/null || echo 1)"
-  fi
-  if ! [[ "${slots}" =~ ^[0-9]+$ ]] || [ "${slots}" -lt 1 ]; then
-    slots=2
   fi
   if ! awk -v o="${oversub}" 'BEGIN { exit !(o ~ /^[0-9]+(\.[0-9]+)?$/ && o > 0) }'; then
     oversub=1
@@ -512,9 +530,10 @@ default_test_concurrency() {
 #   cc=1 WALL_MS=455613 (0 cancelled) vs cc=2 WALL_MS=289579 (0 cancelled) — c2 快 36% 且 0-cancelled;
 #   real-install e2e 双文件 c2 实测 0-cancelled (147s)。⇒ 默认上调至 2 (后经 AC44/AC74 改读宿主)。
 # serial_lowconc_host_default — the host-derived fallback shared by BOTH phase knobs: reads
-# RESOURCE_GATE_NPROC (test seam) → nproc, RESOURCE_GATE_CONCURRENT_SUITES (test seam) →
-# QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2, clamped at 1, and QUAY_PHASE_OVERLAP (default 1) → the
-# concurrent-PHASE count P (2 = serial+lowconc parallel, 1 = sequential). max(1, floor(nproc ÷ (S×P))).
+# RESOURCE_GATE_NPROC (test seam) → nproc, S via suite_slot_count (seam →
+# `<base>.concurrency` file → QUAY_MAX_CONCURRENT_SUITES → 1, the single source), and
+# QUAY_PHASE_OVERLAP (default 1) → the concurrent-PHASE count P (2 = serial+lowconc parallel,
+# 1 = sequential). max(1, floor(nproc ÷ (S×P))).
 # gap-lane-formula-ignores-phase-overlap-concurrency: QUAY_PHASE_OVERLAP=1 runs serial + lowconc in
 # PARALLEL, so the overlap window carries 2 concurrent phases each at its own budget — the denominator
 # must count the concurrent PHASES too (S×P), else each suite's overlap window runs serial+lowconc at
@@ -525,10 +544,9 @@ default_test_concurrency() {
 serial_lowconc_host_default() {
   local ncpu slots phases
   ncpu="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
-  slots="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
-  if ! [[ "${slots}" =~ ^[0-9]+$ ]] || [ "${slots}" -lt 1 ]; then
-    slots=2
-  fi
+  # S single source: suite_slot_count (seam → `<base>.concurrency` file → 旋钮② → 1) — the SAME read
+  # as default_concurrency_formula and the single-flight lock (gap-suite-concurrency-S-two-source-divergence).
+  slots="$(suite_slot_count)"
   phases=1
   if [ "${QUAY_PHASE_OVERLAP:-1}" != "0" ]; then
     phases=2
@@ -572,6 +590,30 @@ has_explicit_concurrency() {
   return 1
 }
 
+# bucket_test_concurrency <args...> — the EFFECTIVE concurrency for the --buckets run({files})
+# runner (suite-lpt-runner.mjs). An explicit --test-concurrency=N in args wins (single source, the
+# SAME precedence as has_explicit_concurrency); otherwise the derived default. Returns the VALUE —
+# the runner needs a number in execArgv (`node --test-concurrency=N`), not the boolean
+# has_explicit_concurrency answers. The runner reads that SAME execArgv value for run()'s
+# concurrency, and measure-suite-reporter.mjs reads it too ⇒ one source, no drift.
+bucket_test_concurrency() {
+  local a
+  while [ "$#" -gt 0 ]; do
+    a="$1"; shift
+    case "$a" in
+      --test-concurrency=*)
+        a="${a#--test-concurrency=}"
+        if [[ "$a" =~ ^[0-9]+$ ]] && [ "$a" -ge 1 ]; then printf '%s' "$a"; return 0; fi
+        ;;
+      --test-concurrency)
+        if [ "$#" -gt 0 ] && [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ]; then printf '%s' "$1"; return 0; fi
+        shift
+        ;;
+    esac
+  done
+  default_test_concurrency
+}
+
 # resource_gate_check — extracted to plugin/scripts/runner-static-gate.ts (gap-ac128-hub-split-harness-concerns),
 # sourced above alongside run_static_checks.
 # ── single-flight lock, S slots (gap-resource-gate-no-single-flight-lock-two-suite-overlap →
@@ -594,11 +636,14 @@ has_explicit_concurrency() {
 # The lock is file-descriptor-based (one FD per slot, allocated dynamically via `exec {fd}>file`): the
 # FDs are opened once and held open for the whole run, so the lock releases automatically when this
 # process exits — even on an error abort — with no trap bookkeeping (flock's crash-autorelease is
-# PRESERVED: a dead suite can never leak a slot — the run2-a 600s lock-timeout abort becomes a clean
-# slot release, not a permanent leak). Acquire tries each slot NON-BLOCKING (`flock -n`); if ALL S are
-# held it WAITs for EITHER to release (bounded per-attempt flock-wait, re-checking all after each),
-# then FAILS CLOSED after FULL_SUITE_LOCK_TIMEOUT (default 600s) with a clear message — never a
-# (S+1)-th GO, never an infinite hang.
+# PRESERVED: a dead suite can never leak a slot). Acquire tries each slot NON-BLOCKING (`flock -n`); if
+# ALL S are held it WAITs for EITHER to release (bounded per-attempt flock-wait, re-checking all after
+# each) — an UNBOUNDED queue wait, never a fail-closed timeout (gap-single-flight-lock-timeout-double-
+# value: the old FULL_SUITE_LOCK_TIMEOUT 600s default + the fan-in 900s override were two values on one
+# lock, and the 600s line was crossed by the now-normal 819-1619s full-bucket suite — a live suite got
+# fail-closed「not starting」). Correctness (never a (S+1)-th GO) is flock-guarded; liveness (never an
+# infinite hang) is crash-autorelease for a dead holder + the runner's SUITE_SILENCE_MS/SUITE_MAX_RUNTIME_MS
+# and the fan-in stuck-holder reaper for a hung-but-alive holder.
 #
 # Scoped paths (--for-task, --scoped, --group <non-default>, explicit files) never take the lock —
 # they are the verification path that must stay usable while a full suite runs. Nested runners skip
@@ -613,7 +658,8 @@ has_explicit_concurrency() {
 # `<repo_root>/.git` when git is unavailable (a non-git copy).
 # `FULL_SUITE_LOCK_FILE=<path>` (the pilot's per-worktree escape) still works — the `.0`..`.S-1`
 # suffixes are appended, so a per-worktree override yields a per-worktree S-slot lock.
-source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
+# (suite-slot-lib.sh is sourced ABOVE, before the derivation functions — the S single-source
+# gap-suite-concurrency-S-two-source-divergence fix; the slot paths below reuse that same canonical.)
 FULL_SUITE_LOCK_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
 if [ -z "${FULL_SUITE_LOCK_DIR}" ]; then
   FULL_SUITE_LOCK_DIR="${repo_root}/.git"
@@ -624,10 +670,19 @@ FULL_SUITE_LOCK_FILE="${FULL_SUITE_LOCK_FILE:-${FULL_SUITE_LOCK_DIR}/full-suite.
 FULL_SUITE_LOCK_SLOTS=()
 while IFS= read -r _suite_slot; do FULL_SUITE_LOCK_SLOTS+=("${_suite_slot}"); done < <(suite_slot_paths "${FULL_SUITE_LOCK_FILE}")
 FULL_SUITE_LOCK_FDS=()
-FULL_SUITE_LOCK_TIMEOUT="${FULL_SUITE_LOCK_TIMEOUT:-600}"
+
+# Lock-hold cap (gap-suite-lock-starvation-long-validation-hold AC1): a validation-type long task
+# (e.g. serial/lowconc re-check runs — 33 files × N re-runs, 5.2h wall) must not hold a single-flight
+# slot for hours, starving every other fan-in. FULL_SUITE_LOCK_HOLD_MAX_S (default 1800s = 30min) caps
+# the hold: when the suite STILL holds its slot after T seconds, a watchdog child (part of THIS process
+# tree — the release must live in the holding process, ⛔ NOT a worker-driver kill) releases the slot and
+# records a fail-loud `lock_hold_exceeded=1` marker (never silent). The cap only yields the SLOT — the
+# long suite keeps running (it already passed the resource gate at startup); it accepts the contention
+# risk of a (S+1)-th suite joining rather than serializing the whole repo behind its re-check.
+FULL_SUITE_LOCK_HOLD_MAX_S="${FULL_SUITE_LOCK_HOLD_MAX_S:-1800}"
 
 # full_suite_lock_acquire — acquire one of the S single-flight slots (non-blocking try on each;
-# all busy ⇒ bounded wait for any to release, then fail-closed).
+# all busy ⇒ unbounded wait for any to release — never fail-closed, see the lock comment above).
 full_suite_lock_acquire() {
   if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
     echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping single-flight lock (nested runner)"
@@ -637,8 +692,15 @@ full_suite_lock_acquire() {
     echo "scripts/test.sh: QUAY_TEST_NESTED=1 — skipping single-flight lock (nested invocation of the same suite)"
     return 0
   fi
+  # suite-driver holds the slot（SPEC-suite-lifecycle §3.3 资源集成）：常驻 suite-driver 已在 spawn 前取
+  # 单飞槽并持锁跨整个 suite（取/放同一执行点，释放原子）。test.sh 不再重复取槽——只跳过【锁】这一半，
+  # resource gate 照常跑（⛔ 不是 QUAY_TEST_SKIP_RESOURCE_GATE：那条连 gate 一起跳过，把 load 判定也丢了）。
+  if [ "${QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT:-}" = "1" ]; then
+    echo "scripts/test.sh: QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT=1 — suite-driver holds the single-flight slot; skipping re-acquire (resource gate still runs)"
+    return 0
+  fi
   mkdir -p "$(dirname "${FULL_SUITE_LOCK_FILE}")"
-  local _s_fd _s_slot _s_idx _s_held="" _s_waited=0 _s_wall_start=0 _s_lock_start_ms="" _s_lock_end_ms=""
+  local _s_fd _s_slot _s_idx _s_held="" _s_lock_start_ms="" _s_lock_end_ms=""
   FULL_SUITE_LOCK_FDS=()
   # Open EVERY slot file on its own dynamically-allocated FD (append mode: the file exists + is
   # writable even if empty). FD-based flock auto-releases on process exit — a crash/abort cannot leak.
@@ -663,28 +725,22 @@ full_suite_lock_acquire() {
   done
   if [ -z "${_s_held}" ]; then
     # ALL S slots busy — WAIT for ANY to release (an S-slot counting semaphore made of S flocks).
-    # Bounded per-attempt flock-wait (1s per slot, re-checking all after each) so a release on ANY
-    # slot is picked up; fail-closed after FULL_SUITE_LOCK_TIMEOUT — never a (S+1)-th GO, never an
-    # infinite hang.
-    # Timeout is ELAPSED wall-clock (SECONDS), NOT an outer-iteration counter: each outer iteration
-    # does `flock -w 1` on ALL S slots (= ~S seconds), so counting iterations over-waits S×
-    # (S=2 ⇒ ~1200s instead of the intended 600s). gap-suite-slot-lock-not-enforcing-concurrency.
-    _s_wall_start="${SECONDS}"
-    while [ "${_s_waited}" -lt "${FULL_SUITE_LOCK_TIMEOUT}" ]; do
+    # Unbounded queue wait, never a fail-closed timeout: correctness (no (S+1)-th GO) is flock-guarded,
+    # liveness is crash-autorelease for a dead holder + the runner's SUITE_SILENCE_MS/SUITE_MAX_RUNTIME_MS
+    # and the fan-in stuck-holder reaper for a hung-but-alive holder (gap-single-flight-lock-timeout-
+    # double-value: the old 600s/900s timeout misfired on the now-normal 819-1619s suite). Bounded
+    # per-attempt flock-wait (1s per slot, re-checking all after each) so a release on ANY slot is
+    # picked up promptly.
+    while [ -z "${_s_held}" ]; do
       _s_idx=0
       for _s_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
         if flock -w 1 "${_s_fd}"; then _s_held="${_s_idx}"; break; fi
         _s_idx=$((_s_idx + 1))
       done
-      [ -n "${_s_held}" ] && break
-      _s_waited=$(( SECONDS - _s_wall_start ))
     done
-    if [ -z "${_s_held}" ]; then
-      echo "scripts/test.sh: another full suite holds all ${#FULL_SUITE_LOCK_SLOTS[@]} slots (${FULL_SUITE_LOCK_SLOTS[*]}) — not starting (single-flight lock; waited ${FULL_SUITE_LOCK_TIMEOUT}s). Re-run when a slot frees." >&2
-      exit 1
-    fi
   fi
   FULL_SUITE_LOCK_HELD="${_s_held}"
+  FULL_SUITE_LOCK_ACQUIRED_MS="${EPOCHREALTIME:-}"
   echo "scripts/test.sh: acquired full-suite single-flight slot ${_s_held} (${FULL_SUITE_LOCK_FILE}.${_s_held}) — held for the entire run"
   if [ -n "${_s_lock_start_ms:-}" ]; then
     _s_lock_end_ms="${EPOCHREALTIME:-}"
@@ -693,16 +749,38 @@ full_suite_lock_acquire() {
       echo "__OVERHEAD__ lock_wait_ms=${_s_lock_wait_ms}" >&2
     fi
   fi
+  # Hold-cap watchdog (gap-suite-lock-starvation-long-validation-hold AC1): a child of THIS process
+  # (the holder — ⛔ not an outside worker-driver kill) that releases the slot after T seconds of the
+  # suite STILL holding, and emits a fail-loud `lock_hold_exceeded=1` marker. The spawn lives in
+  # suite-slot-lib.sh (single definition point, sourceable/testable); it polls a flag file each 1s so a
+  # normal release (flag removed) or a crash (main pid gone) exits it promptly — no lingering FD.
+  FULL_SUITE_LOCK_FLAG="$(mktemp "${TMPDIR:-/tmp}/full-suite-lock-hold.XXXXXX")"
+  FULL_SUITE_LOCK_WATCHDOG_PID="$(spawn_suite_lock_hold_watchdog "${FULL_SUITE_LOCK_FDS[${_s_held}]}" "${FULL_SUITE_LOCK_FLAG}" "$$" "${FULL_SUITE_LOCK_HOLD_MAX_S}")"
 }
 
 # full_suite_lock_release — release the HELD slot and close all FDs (idempotent; flock also
 # auto-releases on exit — a skipped lock is a clean no-op).
 full_suite_lock_release() {
-  local _r_idx=0 _r_fd
+  local _r_idx=0 _r_fd _r_now="" _r_hold_ms=""
+  # Cancel the hold-cap watchdog: it polls the flag file each 1s, so removing it makes the watchdog
+  # exit promptly (its inherited FD closes, no lingering process). Idempotent (a skipped lock has no
+  # flag — rm -f is a no-op).
+  rm -f "${FULL_SUITE_LOCK_FLAG:-}"
   if [ -n "${FULL_SUITE_LOCK_HELD:-}" ]; then
     _r_idx="${FULL_SUITE_LOCK_HELD}"
     if [ "${_r_idx}" -lt "${#FULL_SUITE_LOCK_FDS[@]}" ]; then
       flock -u "${FULL_SUITE_LOCK_FDS[${_r_idx}]}" 2>/dev/null || true
+    fi
+  fi
+  # gap-suite-lock-starvation-long-validation-hold AC2 — emit lock_hold_ms (the acquire→release wall)
+  # so the outcome records can distinguish "long lock hold" from "worker slow": lock_wait_ms is the
+  # queued-wait half, lock_hold_ms is the held half. Absent on scoped/nested runs (no lock taken —
+  # 缺键, never a fabricated 0).
+  if [ -n "${FULL_SUITE_LOCK_ACQUIRED_MS:-}" ]; then
+    _r_now="${EPOCHREALTIME:-}"
+    if [ -n "${_r_now:-}" ]; then
+      _r_hold_ms="$(awk -v a="${FULL_SUITE_LOCK_ACQUIRED_MS}" -v b="${_r_now}" 'BEGIN { d = (b - a) * 1000; printf "%d", d < 0 ? 0 : d }')"
+      echo "__OVERHEAD__ lock_hold_ms=${_r_hold_ms}" >&2
     fi
   fi
   for _r_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
@@ -825,6 +903,28 @@ mark_nested() {
   export QUAY_TEST_NESTED_ROOT="$repo_root"
 }
 
+# lpt_reorder_files <name-ref> — LPT-reorder the named array IN PLACE (longest-KNOWN first)
+# (gap-m-bucket-long-tail-lpt-scheduling + gap-suite-lpt-full-bucket-run-selected). Shared by the
+# --buckets M-bucket path AND the run_selected full-suite default path (bucket_full=1 + the no-args
+# full entry), so the LPT ordering has ONE definition point — never two inline copies that drift.
+# Durations come from the EXISTING carrier .quay/verification-round.jsonl perFile[].durationMs
+# (rolling average of the last QUAY_TEST_LPT_ROUNDS rounds) — no new measurer. Scheduling-only:
+# every file is emitted exactly once, so a bug can never drop a test (pass/fail-neutral). FAIL-OPEN:
+# no history / helper failure / a short result ⇒ keep the original order. QUAY_TEST_LPT_ORDER=0 is
+# the one-key rollback. Callers hand the array NAME (nameref) so the reorder lands back in the
+# caller's own array (mapfile on the nameref writes through to the referenced variable).
+lpt_reorder_files() {
+  local -n _lpt_arr="$1"
+  if [ "${QUAY_TEST_LPT_ORDER:-1}" = "1" ] && [ "${#_lpt_arr[@]}" -gt 1 ]; then
+    local _lpt_out
+    _lpt_out="$(printf '%s\n' "${_lpt_arr[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-lpt-order.ts" --root "${main_root}" --rounds "${QUAY_TEST_LPT_ROUNDS:-3}")" || _lpt_out=""
+    if [ -n "${_lpt_out}" ] && [ "$(printf '%s\n' "${_lpt_out}" | wc -l)" -eq "${#_lpt_arr[@]}" ]; then
+      mapfile -t _lpt_arr <<< "${_lpt_out}"
+      echo "scripts/test.sh: lpt-order: file list reordered (${#_lpt_arr[@]} files; first=$(basename "${_lpt_arr[0]}"))" >&2
+    fi
+  fi
+}
+
 # run_selected <groups-csv> [extra-node-flags...] — build the selected file list and exec node
 # --test. Runs the split-or-commit whole-store scan first (same invariant as the default/no-args
 # path). Extra flags (from the flags-only form) are PREPENDED to the file list; node --test is
@@ -867,6 +967,14 @@ run_selected() {
   build_dist_once
   oh_t3=$(_oh_mark)
   run_static_checks
+  # archguard structural gate (gap-archguard-zero-production-calls): a REAL archguard CLI call wired
+  # into the suite — fail-closed (archguard missing / analyze failed / dependency cycles ⇒ exit 1).
+  # This is the mechanism that makes CLAUDE.md's「Consult archguard before calling a milestone done」
+  # executable instead of advisory: the meter is runnable, not asserted (AC1/AC2); the produced
+  # `.archguard/` product is read back as the criterion's input and appended to
+  # `.archguard/metrics-history.jsonl` (AC3). Runs AFTER the parallelized static-check block (the
+  # archguard analyze is CPU-heavy tree-sitter work, kept out of the parallel pool to avoid contention).
+  run_checker "archguard-structure-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/archguard-runner.ts" --root "${repo_root}"
   oh_t4=$(_oh_mark)
   export QUAY_TEST_GROUPS="$groups"
   local files=() f
@@ -889,13 +997,11 @@ run_selected() {
   # false reds (r4/r5/r6) and no longer participates in the red verdict. Re-enable when the
   # verification worktree achieves runtime single-writer via `git worktree lock` (re-enable
   # condition documented in the kept suite-after clean-tree script's header).
-  # The concurrency flag is bound to a variable here because the literal
-  # `--test-concurrency="$(default_test_concurrency)"` spelling is pinned by
-  # plugin/test/resource-gate.test.mjs AC5 (exactly 5 sites) and select-tests-for-touches.test.mjs
-  # AC11 — the default-path branch must not add a sixth literal site.
+  # The main phase's concurrency is delivered via bucket_test_concurrency (explicit flag wins, else
+  # the derived default) — NOT the `--test-concurrency="$(default_test_concurrency)"` literal, whose
+  # spelling is pinned by plugin/test/resource-gate.test.mjs AC5 (exactly 5 sites) and
+  # select-tests-for-touches.test.mjs AC11; the default-path branch must not add a sixth literal site.
   if [ "${FULL_SUITE_DEFAULT:-0}" = "1" ]; then
-    local cc
-    cc="$(default_test_concurrency)"
     mark_nested
     # Suite-BEFORE snapshot (gap-assert-clean-tree-premise-void-under-concurrent-writers): capture
     # the pre-run porcelain so a re-enabled suite-AFTER assertion is DELTA — only items newly added
@@ -1017,16 +1123,18 @@ run_selected() {
     # MAIN phase (the concurrency-N default body) — runs LAST, after serial/lowconc
     # (gap-phase-order-serial-lowconc-before-main): a serial/lowconc failure is now judged red at
     # the phase boundary, never after the entire main phase's cost has been paid.
-    # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency
-    # source — skip the default prepend (gap-full-suite-runner-concurrency-default-and-gate AC2).
+    # LPT order + order-preserving run({files}) (gap-suite-lpt-full-bucket-run-selected): the main
+    # body is LPT-reordered longest-known-first and handed to suite-lpt-runner.mjs — the ONLY path
+    # that preserves argv order (node --test re-sorts positional globs alphabetically, which is how
+    # the full default path previously ran the main body: longest files serialized at the tail).
+    # Concurrency rides in execArgv via bucket_test_concurrency (explicit flag wins, else the derived
+    # default — the SAME single-concurrency-source precedence as has_explicit_concurrency), and the
+    # runner composes spec→stdout + measure-suite-reporter→stderr (the suite_reporter_flags
+    # equivalents), so the per-file attribution + LPT input carrier stay intact.
     local mcode=0
-    if has_explicit_concurrency "$@"; then
-      node --test $(suite_reporter_flags) "$@" "${files[@]}"
-      mcode=$?
-    else
-      node --test --test-concurrency="$cc" $(suite_reporter_flags) "$@" "${files[@]}"
-      mcode=$?
-    fi
+    lpt_reorder_files files
+    node --test-concurrency="$(bucket_test_concurrency "$@")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "$@" "${files[@]}"
+    mcode=$?
     [ "$mcode" -eq 0 ] || code="$mcode"
     [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
     # Fixed-overhead breakdown (gap-suite-fixed-overhead-decomposition AC2): emit the deterministic
@@ -1073,7 +1181,8 @@ run_selected() {
     # residual, independent of test-failure reporting — merge its verdict into code so the runner's
     # tmux-leak-scan: FAIL line reaches the stream and failures[].
     # BOUNDED REAP-WAIT (gap-leak-scan-reap-race-false-red): the wait-before-judgment lives INSIDE
-    # --check — when NEW matches appear it polls up to $TMUX_LEAK_REAP_WAIT_MS (default 10000) for
+    # --check — when NEW matches appear it polls up to $TMUX_LEAK_REAP_WAIT_MS (default: host-derived
+    # reap_wait_default() in tmux-leak-scan.sh, ≥10000) for
     # them to clear before declaring a leak, so test-spawned tmux servers still exiting at run end
     # (round 95 false-red: tests=4150 all pass) are not swept as residue. A genuine leak persists
     # past the bound and still fails. A clean run adds zero latency (first scan wins immediately).
@@ -1366,6 +1475,21 @@ elif [ "${1:-}" = "--buckets" ]; then
     run_selected "$(effective_groups)"
   fi
   mapfile -t files <<< "${bucket_sel_out}"
+  # LPT order (gap-m-bucket-long-tail-lpt-scheduling): reorder the M-bucket file list longest-known-
+  # first — the mechanism lives in lpt_reorder_files() (single definition point, shared with the
+  # run_selected full-suite default path via gap-suite-lpt-full-bucket-run-selected).
+  lpt_reorder_files files
+  # AC3 (gap-suite-serial-lowconc-classification-recheck 单飞锁侧): the bucket SUCCESS path
+  # (non-hub, non-zero selection) structurally bypasses run_selected() — where
+  # full_suite_lock_acquire() lives — so QUAY_MAX_CONCURRENT_SUITES=1 never applied to bucket runs
+  # (round #572 M-bucket lock_wait_ms key missing vs #573 full overlap 5min). Acquire the
+  # single-flight lock HERE (before static checks + build, matching run_selected's lock-first
+  # order), so a bucket suite contends on the SAME S-slot lock as a full suite. The lock's own
+  # skip guards (QUAY_TEST_SKIP_RESOURCE_GATE=1 / nested) still hold — this runs before
+  # mark_nested below, so a top-level bucket run acquires while a nested one (outer already holds
+  # the slot) skips. FD-based flock auto-releases on `exit "${bucket_code}"` below — no explicit
+  # release needed (same crash-autorelease guarantee as the full path).
+  full_suite_lock_acquire
   # FULL static checks (verification-grade — no 降频), then the bucket test subset.
   run_static_checks
   build_dist_once
@@ -1376,15 +1500,16 @@ elif [ "${1:-}" = "--buckets" ]; then
   bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
   mark_nested
   set +e
-  # Per-file attribution (gap-fix-scope-perfile-buckets-parser): load the measure-suite reporter
-  # (suite_reporter_flags) so a red bucket round emits __PERFILE__ duration_ms=<d> <path>
-  # passed=<bool> lines — full-suite-runner.ts's fix-scope gate parses THOSE to attribute each
-  # failure to its file (without them a bucket red is unattributed / falls to the no-file defer).
-  if has_explicit_concurrency "${rest_args[@]}"; then
-    node --test $(suite_reporter_flags) "${rest_args[@]}" "${files[@]}"
-  else
-    node --test --test-concurrency="$(default_test_concurrency)" $(suite_reporter_flags) "${rest_args[@]}" "${files[@]}"
-  fi
+  # Per-file attribution + LPT-preserving run (gap-fix-scope-perfile-buckets-parser +
+  # gap-m-bucket-long-tail-lpt-scheduling): hand the LPT-ordered file list to suite-lpt-runner.mjs,
+  # which calls node:test run({files}) — the ONLY path that preserves argv order (the node --test
+  # CLI re-sorts positional globs alphabetically). The runner composes BOTH reporters via
+  # stream.compose: spec → stdout (判绿 markers) and measure-suite-reporter → stderr
+  # (__PERFILE__ duration_ms=<d> <path> passed=<bool> — the fix-scope gate's per-file attribution
+  # AND the LPT ordering's own input carrier; if this breaks the per-file duration data goes dark
+  # and LPT has no input ⇒ self-defeating). Concurrency rides in execArgv (--test-concurrency=N)
+  # so the reporter's readConcurrency() sees the SAME value (single source, no drift).
+  node --test-concurrency="$(bucket_test_concurrency "${rest_args[@]}")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${rest_args[@]}" "${files[@]}"
   bucket_code=$?
   # Same suite-AFTER tail as the full default path: session-liveness-sweep-kill is the best-effort
   # TRUE-CATCH-ALL registry kill (exit 0 always); the --check assertion is the leak verdict and

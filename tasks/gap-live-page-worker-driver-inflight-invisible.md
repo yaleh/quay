@@ -1,7 +1,7 @@
 ---
 id: gap-live-page-worker-driver-inflight-invisible
 title: Live 页「在飞任务」表只读 workflow-events，worker-driver 真实在飞全隐形（AC136 缺口的另一半）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -32,12 +32,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：Live 页「在飞任务」表显示 worker-driver 真实在飞（读 worker-round/outcome，⛔ 仍只 workflow-events ⇒ 假）。
-- [ ] AC2：9h 幽灵记录不再显示为 in-flight（记录无 end 且早于 driver 上线 ⇒ 非 in-flight）。
+- [x] AC1：Live 页「在飞任务」表显示 worker-driver 真实在飞（读 worker-round/outcome，⛔ 仍只 workflow-events ⇒ 假）。
+- [x] AC2：9h 幽灵记录不再显示为 in-flight（记录无 end 且早于 driver 上线 ⇒ 非 in-flight）。
 
 ## Definition of Done
 
-- [ ] readLive 合并 worker 载体 + 幽灵记录排除 + Live 页实测显示真实在飞；AC1-2 全勾；land 到 develop。
+- [x] readLive 合并 worker 载体 + 幽灵记录排除 + Live 页实测显示真实在飞；AC1-2 全勾；land 到 develop。
 
 ## Retires
 

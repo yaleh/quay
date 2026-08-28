@@ -43,11 +43,24 @@ packages/quay/plugin/
 **/.quay/gate-events.jsonl
 **/.quay/supervisor-bus-ledger.jsonl
 **/.quay/inner-wakeup-heartbeat-refusals.jsonl
+# serve-send.ts runtime message-delivery receipts (SendMessage cross-session delivery record) — runtime
+# state, never git-tracked; same gitignored runtime-state family as gate-events.jsonl. A live file here
+# dirtied the checkout and made fan-in-ff-merge refuse (unrelated to the blocked task's code).
+**/.quay/message-receipts.jsonl
 # gap-ac115-spec-phase1-drive-single-worker (2026-08-22): the worker driver's per-task outcome record
 # (.quay/worker-outcome.jsonl) — runtime state, one line per driven task (SPEC-worker-driven-inner §4③:
 # outer reads it for cross-task checks, never git-tracked). Same gitignored runtime-state family as
 # gate-events.jsonl / dispatch-record.jsonl.
 **/.quay/worker-outcome.jsonl
+# gap-fan-in-workflow-lock-stale-runid-detached-holder (2026-08-28): the fan-in workflow lock's
+# acquire/release event ledger (.quay/fan-in-workflow-lock-events.jsonl) + the fan-in lock's token
+# flag (.quay/fan-in-workflow-lock-token-*.json) + manager's fan-in failure classification
+# (.quay/fan-in-failure-classification.jsonl) — all runtime state, never git-tracked; a live file
+# here dirtied the checkout and made fan-in-ff-merge refuse the merge-mode ff (unrelated to the
+# blocked task's code). Same gitignored runtime-state family as worker-outcome.jsonl / gate-events.jsonl.
+**/.quay/fan-in-workflow-lock-events.jsonl
+**/.quay/fan-in-failure-classification.jsonl
+**/.quay/fan-in-workflow-lock-token-*.json
 # gap-ac134-promotion-outcome-ledger (2026-08-22): the promotion driver's per-task outcome record
 # (.quay/promotion-outcome.jsonl) — runtime state, one line per determination/promotion/fix
 # (manager-phase-goal ### AC134: outer reads it for cross-task promotion-pattern recognition, never
@@ -80,6 +93,31 @@ packages/quay/plugin/
 **/.quay/worker-driver-liveness.log
 **/.quay/worker-driver.stop
 **/.quay/worker-driver-inflight.pid
+# gap-ac143-observability-ledger-closing-driver (2026-08-26): the outer driver's production launch
+# state — round heartbeat (unconditional per-loop record, AC1 carrier) + supervisor state files
+# (driver-runtime start/stop --kind outer) + control state (drain/control plane outer-control.json).
+# All runtime state, never git-tracked; same gitignored family as worker-outcome.jsonl /
+# promotion-round.jsonl.
+**/.quay/outer-round.jsonl
+**/.quay/outer-control.json
+**/.quay/outer-driver.pid
+**/.quay/outer-driver-supervisor.pid
+**/.quay/outer-driver.log
+**/.quay/outer-driver-supervisor.log
+**/.quay/outer-driver-liveness.log
+**/.quay/outer-driver.stop
+# gap-ac144-quality-gate-shape-separated-driver (2026-08-26): the quality-gate driver's production
+# launch state — round heartbeat (unconditional per-loop record of B15/B17 routine facts) +
+# supervisor state files + control state (halt/control plane quality-control.json). All runtime
+# state, never git-tracked; same gitignored family as promotion/worker round+control.
+**/.quay/quality-round.jsonl
+**/.quay/quality-control.json
+**/.quay/quality-driver.pid
+**/.quay/quality-driver-supervisor.pid
+**/.quay/quality-driver.log
+**/.quay/quality-driver-supervisor.log
+**/.quay/quality-driver-liveness.log
+**/.quay/quality-driver.stop
 # gap-outer-message-bus-needs-file-inbox-transport (2026-08-09): the OUTER target's file-inbox
 # (.quay/outer-inbox/) is runtime message state (SPEC-inbox-service D1 — 收件箱不进 git 跟踪,
 # 不假设内容持久). Same gitignored runtime-state family as gate-events.jsonl — a real manager→outer
@@ -267,6 +305,34 @@ orchestration/inner-idle-log.jsonl
 # written by full-suite-runner.ts after every suite via measure-trend-check.ts). Same live
 # runtime-state family as verification-round.jsonl / full-suite.log; never committed.
 **/.quay/measure-history.jsonl
+# gap-quay-runtime-files-tracked-but-shouldnt (2026-08-25): 5 runtime products under .quay/ were
+# accidentally TRACKED (git rm --cached'd in the same gap). test.sh.lock (scripts/test.sh
+# single-flight lock), full-suite-state.json.suitefix-bak (suite-fix backup), no-code-caller-triage.jsonl
+# + no-code-caller-triage-rescan.jsonl (gap-ac111 triage dumps) — machine-local runtime state /
+# one-off task outputs,
+#
+# 2026-08-26 更正 (gap-suite-bucket-reattribution-untracked-regression): 该批原列 5 个, 其中
+# suite-bucket-reattribution.jsonl 是误分类 —— 它不是运行时产物, 而是 AC121 的一次性判定记录
+# (230 行 {file,judgment,mechanism,signal}), 被 plugin/scripts/suite-bucket-select.ts:45/:144 当
+# 输入读入, 且 plugin/test/suite-bucket-select.test.mjs:52 断言 reattr.size > 0。去跟踪后
+# git worktree add 出的 worktree 结构上拿不到它 => 每个 worktree 的 suite 必红 (08-26 01:14 起实测 4 次)。
+# 已恢复跟踪、从本清单移除。
+# 判据教训: 判「运行时产物 vs 数据资产」不能只看「在 .quay/ 下 + 像 jsonl」,
+#   必须查【有没有代码把它当输入读】—— 有读取侧消费者的就是数据资产。
+# same family as full-suite-state.json / verification-round.jsonl; never committed. The 3 .quay/ files
+# that ARE deliberately tracked (profiles.yml / red-on-omission-manifest.md /
+# outer-inflight-coordination-20260812.md) stay tracked — reasons in the task Evidence.
+**/.quay/test.sh.lock
+**/.quay/full-suite-state.json.suitefix-bak
+**/.quay/no-code-caller-triage.jsonl
+**/.quay/no-code-caller-triage-rescan.jsonl
+# gap-bucket-second-truth-source-page-recompute: the effective bucket-attribution artifact is a RUNTIME
+# DERIVED product (recomputed on every bucket dispatch by suite-bucket-select.ts, read by the /tests
+# page serve-tests.ts as the single truth source) — same family as verification-round.jsonl /
+# suite-load-*.jsonl; never committed. (The reattribution INPUT .quay/suite-bucket-reattribution.jsonl
+# is a tracked data asset — a reading consumer exists; this OUTPUT has none that would need a committed
+# value, only a page reader that degrades to UNRESOLVED when absent.)
+**/.quay/suite-bucket-effective.jsonl
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/

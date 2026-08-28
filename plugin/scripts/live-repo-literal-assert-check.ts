@@ -37,7 +37,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildNonCodeMask } from "./checker-lib.ts";
-import { canonicalTestFiles, readFileSafe } from "./test-framework-policy-check.ts";
+import { readFileSafe } from "./gate-script-base.ts";
+import { canonicalTestFiles } from "./test-framework-policy-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

@@ -26,6 +26,8 @@ import {
   touchExists,
   checkTouchesResolve,
   checkTaskTouchesResolve,
+  checkBenignRuntimeDirty,
+  checkTouchesNarrow,
 } from "../scripts/touches-orthogonality-check.ts";
 import { parseTouchEntriesWithTags } from "../scripts/touches-parser.ts";
 
@@ -438,6 +440,54 @@ test("checkTaskTouchesResolve: no ## Touches section → hasSection false, nothi
   assert.equal(r.majorityMissing, false);
 });
 
+// ── checkTouchesNarrow (2026-08-28, gap-touches-breadth-silent-global-dispatch-lock) ─────────────
+test("checkTouchesNarrow: directory-level globs (bare dir path / dir/**) are wide", () => {
+  const body = "## Touches\n\n- plugin/test/\n- plugin/scripts/**\n- tasks/x.md";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, false);
+  assert.ok(r.wideGlobs.includes("plugin/test/"));
+  assert.ok(r.wideGlobs.includes("plugin/scripts/**"));
+});
+
+test("checkTouchesNarrow: overbroad <2-segment glob flagged via isOverbroadDeclaration", () => {
+  const body = "## Touches\n\n- orchestration/**\n- tasks/x.md";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, false);
+  assert.deepEqual(r.wideGlobs, ["orchestration/**"]);
+});
+
+test("checkTouchesNarrow: 2+ segment directory sweep (packages/quay/src/**) is wide", () => {
+  const body = "## Touches\n\n- packages/quay/src/**\n- tasks/x.md";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, false);
+});
+
+test("checkTouchesNarrow: concrete file paths are narrow", () => {
+  const body = "## Touches\n\n- scripts/test.sh\n- plugin/scripts/foo.ts (new)\n- tasks/x.md";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, true);
+  assert.deepEqual(r.wideGlobs, []);
+});
+
+test("checkTouchesNarrow: (new)-tagged directory is exempt (task creates its own area)", () => {
+  const body = "## Touches\n\n- plugin/test/fixtures/fake-suite/ (new)\n- tasks/x.md";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, true);
+});
+
+test("checkTouchesNarrow: a (delete)-tagged directory is still wide", () => {
+  const body = "## Touches\n\n- plugin/old-tree/ (delete)\n- tasks/x.md";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, false);
+});
+
+test("checkTouchesNarrow: missing ## Touches section is not conflated with wide", () => {
+  const body = "## Proposal\nnothing";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, true);
+  assert.deepEqual(r.wideGlobs, []);
+});
+
 test("checkTaskTouchesResolve: full task body with (new) tag honored", () => {
   const root = makeTempTree(["existing.ts"]);
   try {
@@ -473,4 +523,78 @@ test("main --resolve: majority-missing task → exit 1; resolving task → exit 
 test("main --resolve: missing task file → exit 2; no-arg → usage exit 2", async () => {
   assert.equal(await main(["node", "s", "--resolve", "--root", ".", "does-not-exist.md"]), 2);
   assert.equal(await main(["node", "s", "--resolve", "--root", "."]), 2);
+});
+
+// ── checkBenignRuntimeDirty (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path) ───────────────
+// A pre-flight dirty-tree classification: an UNTRACKED runtime file under .quay/ that is OUTSIDE the
+// task's ## Touches is benign (the ff passes through, 仅放行不处置); everything else is NOT benign
+// (fail-closed). CONSERVATIVE by construction (硬规则 3b: 判不出 ≠ 合格): absent/empty ## Touches, an
+// overbroad glob, or a dirty path matching a Touches glob ⇒ NOT benign.
+
+const touchesTaskBody = (touches) => `---\nid: gap-x\nstatus: ready\n---\n\n## Touches\n${touches}\n`;
+
+test("checkBenignRuntimeDirty: untracked .quay/ runtime file outside Touches → benign", () => {
+  const r = checkBenignRuntimeDirty(touchesTaskBody("- plugin/scripts/fan-in-ff-merge.sh\n- plugin/test/\n"), [".quay/message-receipts.jsonl"]);
+  assert.equal(r.benign, true, `must be benign: ${JSON.stringify(r)}`);
+  assert.deepEqual(r.violations, []);
+});
+
+test("checkBenignRuntimeDirty: multiple .quay/ files (incl. nested) outside Touches → benign", () => {
+  const r = checkBenignRuntimeDirty(touchesTaskBody("- plugin/scripts/fan-in-ff-merge.sh\n"), [".quay/worker-round.jsonl", ".quay/residue/x.jsonl"]);
+  assert.equal(r.benign, true);
+});
+
+test("checkBenignRuntimeDirty: the whole .quay/ dir collapsed (porcelain `?? .quay/`) → benign", () => {
+  const r = checkBenignRuntimeDirty(touchesTaskBody("- plugin/scripts/fan-in-ff-merge.sh\n"), [".quay/"]);
+  assert.equal(r.benign, true);
+});
+
+test("checkBenignRuntimeDirty NEGATIVE — a non-.quay path (task's own untracked code) → NOT benign", () => {
+  const r = checkBenignRuntimeDirty(touchesTaskBody("- plugin/scripts/fan-in-ff-merge.sh\n"), ["plugin/test/new.test.mjs"]);
+  assert.equal(r.benign, false);
+  assert.equal(r.violations[0].why, "not under .quay/");
+});
+
+test("checkBenignRuntimeDirty NEGATIVE — a .quay/ path that MATCHES a Touches glob → NOT benign", () => {
+  const r = checkBenignRuntimeDirty(touchesTaskBody("- .quay/declared-runtime.jsonl\n"), [".quay/declared-runtime.jsonl"]);
+  assert.equal(r.benign, false);
+  assert.match(r.violations[0].why, /matches task ## Touches glob/);
+});
+
+test("checkBenignRuntimeDirty NEGATIVE — overbroad Touches glob (**) → NOT benign (conservative)", () => {
+  const r = checkBenignRuntimeDirty(touchesTaskBody("- **\n"), [".quay/message-receipts.jsonl"]);
+  assert.equal(r.benign, false);
+  assert.match(r.reason, /overbroad/);
+});
+
+test("checkBenignRuntimeDirty NEGATIVE — no ## Touches section → NOT benign (conservative)", () => {
+  const r = checkBenignRuntimeDirty("---\nid: gap-x\n---\n\n## Proposal\nno touches\n", [".quay/message-receipts.jsonl"]);
+  assert.equal(r.benign, false);
+  assert.match(r.reason, /no\/empty ## Touches/);
+});
+
+test("checkBenignRuntimeDirty NEGATIVE — empty dirtyPaths → NOT benign (not vacuous)", () => {
+  const r = checkBenignRuntimeDirty(touchesTaskBody("- plugin/test/\n"), []);
+  assert.equal(r.benign, false);
+});
+
+test("main --runtime-dirty: benign set → exit 0 `BENIGN`; Touches-hit set → exit 1 `NOT-BENIGN`", async () => {
+  const root = makeTempTree(["tasks/gap-x.md"]);
+  // The task declares .quay/declared.jsonl in its ## Touches — so that path is the task's OWN work,
+  // while .quay/message-receipts.jsonl is a benign runtime file outside the declared write surface.
+  fs.writeFileSync(
+    path.join(root, "tasks", "gap-x.md"),
+    touchesTaskBody("- plugin/scripts/fan-in-ff-merge.sh\n- plugin/test/\n- .quay/declared.jsonl\n"),
+  );
+  assert.equal(await main(["node", "s", "--runtime-dirty", "--task", "gap-x", "--root", root, ".quay/message-receipts.jsonl"]), 0);
+  assert.equal(await main(["node", "s", "--runtime-dirty", "--task", "gap-x", "--root", root, ".quay/declared.jsonl", ".quay/message-receipts.jsonl"]), 1, "one Touches-hit path fails the whole set");
+  assert.equal(await main(["node", "s", "--runtime-dirty", "--task", "gap-x", "--root", root, "plugin/test/new.test.mjs"]), 1, "a non-.quay path is not benign");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("main --runtime-dirty: missing --task → exit 2; missing task file → exit 2", async () => {
+  assert.equal(await main(["node", "s", "--runtime-dirty", "--root", ".", ".quay/x.jsonl"]), 2);
+  const root = makeTempTree([]);
+  assert.equal(await main(["node", "s", "--runtime-dirty", "--task", "gap-nope", "--root", root, ".quay/x.jsonl"]), 2);
+  fs.rmSync(root, { recursive: true, force: true });
 });

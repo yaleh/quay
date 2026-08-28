@@ -96,12 +96,20 @@ test("CLI: the real test corpus has ZERO unpaired mkdtemps (the 2026-08-12 leak 
 
 // ── negative control: the gate can fail ───────────────────────────────────────────────────────────
 test("CLI: a deliberately-leaky fixture FAILS the gate (exit 1) — the gate is not always-green", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tlp-negative-"));
-  const rel = "plugin/test/zz-tmp-leak-negative.test.mjs";
-  const abs = path.join(REPO_ROOT, rel);
+  // The leaky fixture lives in a scratch dir under os.tmpdir(), NOT in REPO_ROOT/plugin/test/.
+  // Writing it into the real repo races test-framework-policy-check.test.mjs's whole-repo scan
+  // (same @test-group engine ⇒ concurrent): the zz-* fixture is listed by the canonical glob, then
+  // deleted before readFileSafe reaches it ⇒ ENOENT ⇒ "" ⇒ spurious AC3/AC5 RED
+  // (gap-test-isolation-race-tmp-leak-negative-fixture-writes-repo).
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "tlp-negative-"));
   try {
+    // root probe only needs scripts/test.sh to exist (main() rejects a non-workspace root).
+    fs.mkdirSync(path.join(scratch, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(scratch, "scripts", "test.sh"), "");
+    const rel = "plugin/test/zz-tmp-leak-negative.test.mjs";
+    fs.mkdirSync(path.join(scratch, "plugin", "test"), { recursive: true });
     fs.writeFileSync(
-      abs,
+      path.join(scratch, rel),
       "// @test-group product\n" +
         'import { test } from "node:test";\n' +
         'import fs from "node:fs";\nimport os from "node:os";\nimport path from "node:path";\n' +
@@ -110,12 +118,11 @@ test("CLI: a deliberately-leaky fixture FAILS the gate (exit 1) — the gate is 
         '  fs.writeFileSync(path.join(dir, "a.md"), "x");\n' +
         "});\n"
     );
-    const r = spawnSync("bash", [CHECK_SH, REPO_ROOT, "--files", rel], { encoding: "utf8" });
+    const r = spawnSync("bash", [CHECK_SH, scratch, "--files", rel], { encoding: "utf8" });
     assert.equal(r.status, 1, `a leaky fixture must FAIL the gate:\n${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /FAIL — every mkdtemp result must be paired with a cleanup/);
   } finally {
-    try { fs.rmSync(abs, { force: true }); } catch { /* best-effort */ }
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(scratch, { recursive: true, force: true });
   }
 });
 

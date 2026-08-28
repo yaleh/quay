@@ -546,7 +546,7 @@ test("AC1 — a REAL-suite record (preverified:0) with a suite log carries seria
     assert.equal(record.lowconc_phase_ms, 0, "lowconc_phase_ms ← lowconc_phase_ms");
     assert.equal(record.main_phase_ms, 512000, "main_phase_ms ← main_phase_ms");
     assert.equal(typeof record.nproc, "number", "nproc is a number (read-host)");
-    assert.equal(record.concurrentSuiteSlots, concurrentSuiteSlots(), "concurrentSuiteSlots = the configured slot count (default 2; adaptive under QUAY_MAX_CONCURRENT_SUITES=1, gap-suite-lock-slot-seam-asymmetry AC2)");
+    assert.equal(record.concurrentSuiteSlots, concurrentSuiteSlots(), "concurrentSuiteSlots = the configured slot count (default 1; adaptive under QUAY_MAX_CONCURRENT_SUITES, gap-suite-lock-slot-seam-asymmetry AC2)");
     assert.equal(record.concurrentSuitesRunning, 1, "a lone round (no held other-suite slot) records concurrentSuitesRunning=1");
   } finally {
     if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
@@ -631,6 +631,29 @@ test("gap-wiring-B AC1 — lock_wait_ms rides the record from test.sh's `__OVERH
   assert.equal(noLog.lock_wait_ms, undefined, "no log → lock_wait_ms absent");
 });
 
+test("gap-suite-lock-starvation AC2 — lock_hold_ms rides the record from test.sh's `__OVERHEAD__ lock_hold_ms=N` marker (absent on a marker-less log)", () => {
+  // lock_hold_ms (the acquire→release wall) is the HELD half that, with lock_wait_ms (the queued-wait
+  // half), lets a reader distinguish「长时间持锁」(validation long task) from「worker 慢 / 排队饿死」.
+  const log = writeSuiteLog(null, [
+    "__OVERHEAD__ lock_wait_ms=12345",
+    "__OVERHEAD__ lock_hold_ms=67890",
+    "__OVERHEAD__ serial_phase_ms=301000",
+  ]);
+  const { record, error } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: log, root: REPO_ROOT });
+  assert.equal(error, undefined, `build must succeed: ${error}`);
+  assert.equal(record.lock_hold_ms, 67890, "lock_hold_ms ← the __OVERHEAD__ lock_hold_ms marker (acquire→release wall)");
+
+  // A log WITHOUT a lock_hold marker (e.g. a pre-cap log, or a scoped/no-lock run) → 缺键, never a fabricated 0.
+  const waitOnlyLog = writeSuiteLog(null, ["__OVERHEAD__ lock_wait_ms=12345", "__OVERHEAD__ serial_phase_ms=301000"]);
+  const waitOnly = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: waitOnlyLog, root: REPO_ROOT }).record;
+  assert.equal(waitOnly.lock_wait_ms, 12345, "lock_wait_ms still present");
+  assert.equal(waitOnly.lock_hold_ms, undefined, "no lock_hold marker → lock_hold_ms absent (缺键, never 0)");
+
+  // No log at all → absent.
+  const noLog = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", root: REPO_ROOT }).record;
+  assert.equal(noLog.lock_hold_ms, undefined, "no log → lock_hold_ms absent");
+});
+
 test("gap-wiring-B AC1 — lowconc_phase_ms carries the overlap_lowconc_ms sub-time on an overlap round (no longer the subsumed 0)", () => {
   // On overlap test.sh emits lowconc_phase_ms=0 (subsumed into the serial window) AND the real
   // per-process `__OVERHEAD__ overlap_lowconc_ms=N` sub-time — the record must carry the real value.
@@ -670,7 +693,7 @@ test("AC1 — the concurrency helpers read the host + QUAY_MAX_CONCURRENT_SUITES
   const prevLock = process.env.FULL_SUITE_LOCK_FILE;
   // Pin the base to an isolated temp dir with NO `.concurrency` file, so the knob this test drives is
   // authoritative — the PRODUCTION scalar (a live-suite S=1 file) would otherwise shadow the knob and
-  // break the "0 fails open to default 2" step (gap-suite-slot-ssot-i5-false-positive class).
+  // break the "0 fails open to default 1" step (gap-suite-slot-ssot-i5-false-positive class).
   const pinTmp = fs.mkdtempSync(path.join(os.tmpdir(), "pvr-pin-"));
   process.env.FULL_SUITE_LOCK_FILE = path.join(pinTmp, "full-suite.lock");
   try {
@@ -682,7 +705,7 @@ test("AC1 — the concurrency helpers read the host + QUAY_MAX_CONCURRENT_SUITES
     assert.equal(hostParallelism(), 8, "RESOURCE_GATE_NPROC is the deterministic nproc seam");
     assert.equal(concurrentSuiteSlots(), 1, "QUAY_MAX_CONCURRENT_SUITES is the slot definition point");
     process.env.QUAY_MAX_CONCURRENT_SUITES = "0";
-    assert.equal(concurrentSuiteSlots(), 2, "0 fails open to the single default (never 0 slots)");
+    assert.equal(concurrentSuiteSlots(), 1, "0 fails open to the single default (never 0 slots)");
   } finally {
     if (prevNproc === undefined) delete process.env.RESOURCE_GATE_NPROC;
     else process.env.RESOURCE_GATE_NPROC = prevNproc;

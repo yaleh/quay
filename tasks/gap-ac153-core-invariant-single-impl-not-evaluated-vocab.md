@@ -1,7 +1,7 @@
 ---
 id: gap-ac153-core-invariant-single-impl-not-evaluated-vocab
 title: AC153 核心不变式单一实现 + DriverResult 词表强制含 not-evaluated
-status: todo
+status: done
 labels:
   - gap
 parent: null
@@ -40,12 +40,12 @@ worker             computeLandingState（⛔ 2026-08-23 11:37 之前 exitCode===
 
 判据正本在 `orchestration/manager-phase-goal.md` `### AC153`（⛔ 取假形态不在此复制）。
 
-- [ ] AC1：核心不变式只存在一份，两 kind 共用；任一 kind 能在未经独立判据证实时产出 `verified` ⇒ 假。
-- [ ] AC2：`DriverResult` 词表强制含 `not-evaluated`；「读不到输入」被表达成非 `not-evaluated` 的值 ⇒ 假；取假见正本 AC153。
+- [x] AC1：核心不变式只存在一份，两 kind 共用；任一 kind 能在未经独立判据证实时产出 `verified` ⇒ 假。
+- [x] AC2：`DriverResult` 词表强制含 `not-evaluated`；「读不到输入」被表达成非 `not-evaluated` 的值 ⇒ 假；取假见正本 AC153。
 
 ## Definition of Done
 
-- [ ] 核心不变式单一实现 + DriverResult 词表含 not-evaluated 落地；AC1-2 全勾；land 到 develop。
+- [x] 核心不变式单一实现 + DriverResult 词表含 not-evaluated 落地；AC1-2 全勾；land 到 develop。
 
 ## Retires
 
@@ -59,4 +59,6 @@ worker             computeLandingState（⛔ 2026-08-23 11:37 之前 exitCode===
 - plugin/test/driver-result.test.mjs（新 test）
 - plugin/test/worker-driver.test.mjs（test）
 - plugin/test/promotion-driver.test.mjs（test）
+- plugin/scripts/capability-catalog.sh（新脚本 driver-result.ts 六表注册）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数 bump）
 - tasks/gap-ac153-core-invariant-single-impl-not-evaluated-vocab.md（自身）

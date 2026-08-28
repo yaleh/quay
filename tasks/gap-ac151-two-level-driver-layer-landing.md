@@ -1,7 +1,7 @@
 ---
 id: gap-ac151-two-level-driver-layer-landing
 title: AC151 两级分层落地（Layer 0 driver-runtime + Layer 1a/1b，⛔ 非 kernel+N 平级 plugin）
-status: todo
+status: done
 labels:
   - gap
 parent: null
@@ -38,11 +38,11 @@ depends_on:
 
 判据正本在 `orchestration/manager-phase-goal.md` `### AC151`（⛔ 取假形态不在此复制）。
 
-- [ ] AC1：存在 Layer 0 与 Layer 1a/1b 两级；promotion/worker 继承 0+1a，manager-kind 继承 0+1b；取假见正本 AC151（manager-kind 出现空候选池/选择/verify 三段，或 1b 重实现 Layer 0 循环/心跳/判停 ⇒ 假）。
+- [x] AC1：存在 Layer 0 与 Layer 1a/1b 两级；promotion/worker 继承 0+1a，manager-kind 继承 0+1b；取假见正本 AC151（manager-kind 出现空候选池/选择/verify 三段，或 1b 重实现 Layer 0 循环/心跳/判停 ⇒ 假）。
 
 ## Definition of Done
 
-- [ ] Layer 0 + 1a/1b 两级落地 + supervisor 港进 TS + 两 driver 改继承；AC1 全勾；land 到 develop。
+- [x] Layer 0 + 1a/1b 两级落地 + supervisor 港进 TS + 两 driver 改继承；AC1 全勾；land 到 develop。
 
 ## Retires
 
@@ -53,9 +53,13 @@ depends_on:
 - plugin/scripts/driver-runtime.ts（新：Layer 0 kernel）
 - plugin/scripts/promotion-driver.ts（改继承 Layer 0 + 1a）
 - plugin/scripts/worker-driver.ts（改继承 Layer 0 + 1a）
-- plugin/scripts/promotion-driver-launch.sh（supervisor/respawn/pid 记账港进 TS kernel）
+- plugin/scripts/promotion-driver-launch.sh（supervisor/respawn/pid 记账港进 TS kernel；删除）
+- plugin/scripts/capability-catalog.sh（六表注册 driver-runtime.ts、退役 promotion-driver-launch.sh）
+- docs/proposals/quay-product-outline.md（新脚本注册授权：DELIVERY-INVENTORY 计数 driver-runtime.ts +1 / promotion-driver-launch.sh -1 净零，快照无需改）
 - packages/quay/src/cli/driver.ts（spawnSync 薄壳变真正实现入口）
 - plugin/test/driver-runtime.test.mjs（新 test）
 - plugin/test/worker-driver.test.mjs（test）
-- plugin/test/promotion-driver.test.mjs（test）
+- plugin/test/driver-cli.test.mjs（改写：测 CLI→kernel 路径）
+- plugin/test/promotion-driver-launch.test.mjs（删除：被 driver-runtime.test.mjs 取代）
+- CLAUDE.md（driver liveness 指针由 launch.sh 更新为 driver-runtime.ts）
 - tasks/gap-ac151-two-level-driver-layer-landing.md（自身）

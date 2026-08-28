@@ -22,8 +22,10 @@
 //            同一任务连续修 N 次仍不合格 ⇒ 标 needs-human 并停止对它的修复循环（失败上限）
 //         ✅ AC134：每次判定/晋升/修复各写一条 outcome 记录（.quay/promotion-outcome.jsonl，gitignored，
 //            字段 task_id · gate（含 missing）· action（promote/fix/skip/needs-human）· result · ts，outer 可消费）
+//         ✅ AC150-1：起 fix worker 前经与 worker-driver 同一 resourceGateCheck 判定（WAIT ⇒ 退避，本轮不 spawn）
+//         ✅ AC150-2：运行期 halt = 读 .quay/promotion-control.json（单一真相源）；halted ⇒ 停止晋升与 fix spawn
 //   驱动  ⛔ 不做任何 commit（标 needs-human 是写 status 到 tasks/<id>.md，同 --apply 晋升的写类，非 commit）
-//         ⛔ 不读/不写 .halt（停机态 = 进程信号，单一真相源；AC135 才涉及 outer 退役）
+//         ⛔ 不读/不写 .halt（停机态 = promotion-control.json 单一真相源，与 worker-driver 同族；AC135 才涉及 outer 退役）
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/promotion-driver.ts \
@@ -59,7 +61,26 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./worker-driver.ts";
+// AC151：promotion 继承 Layer 0（driver-runtime：profile/liveness）。splitArgs/launchArgv/runLivenessCheck/
+// LivenessResult 直接从 Layer 0 import（⛔ 不再经 worker-driver 中转——两 driver 平级继承同一层）。
+import { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./driver-runtime.ts";
+// AC151：re-export 保持旧 import 面（promotion-driver.test.mjs 等）——两 driver 经同一函数身份
+// 证「继承 Layer 0 的 profile/liveness 单一实现」。
+export { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./driver-runtime.ts";
+// AC150-3：资源门判定 + halt 判定与 worker-driver 共用同一份实现（driver-shared.ts，⛔ 非复制粘贴）。
+// AC150-1 资源门（起 fix worker 前经同一 resourceGateCheck 判定）；AC150-2 控制面（运行期 halt =
+// 读 .quay/promotion-control.json 单一真相源，⛔ 不再「只能 kill」）。
+import { resourceGateCheck, isHalted, PROMOTION_CONTROL_STATE_REL } from "./driver-shared.ts";
+// AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。promotion 的 fix pass 经
+// applyTaskFilters 消费 retryCapNotExhausted / notNeedsHuman（⛔ 不各写一遍 retryState.needsHuman 判定）。
+import { applyTaskFilters, makeFilterContext, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, type RetryState } from "./driver-filters.ts";
+// AC155：并发 cap / 轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量）。
+import { defaultDriverConfig, loadDriverConfig, driverCap } from "./driver-config.ts";
+// AC153：核心不变式单一实现（「⛔ 不信执行者自述，用独立量复核」）。AC133 重闸验证（computeReverifyOutcome）
+// 消费它——worker 的 computeLandingState 与本文件的重闸判定共用同一份三态映射（⛔ 不各写一遍）。
+import { verifyIndependently } from "./driver-result.ts";
+// AC153：re-export verifyIndependently 值——测试用「同一函数身份」证两 driver 共用单一实现（⛔ 非平行副本）。
+export { verifyIndependently } from "./driver-result.ts";
 
 /** round 记录的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const ROUND_LOG_REL = ".quay/promotion-round.jsonl";
@@ -68,17 +89,19 @@ export const ROUND_LOG_REL = ".quay/promotion-round.jsonl";
  *  各一条，outer 可消费）。 */
 export const OUTCOME_LOG_REL = ".quay/promotion-outcome.jsonl";
 
-/** 轮间隔缺省（毫秒）。AC130 判据不设数值阈值（硬规则 4）——此值只是「机械心跳」的占位节奏，
- *  生产部署时由 outer 的启动命令传 --interval 覆盖；测试传小值。 */
-export const INTERVAL_MS_DEFAULT = 30_000;
+/** 轮间隔缺省（毫秒）。AC130 判据不设数值阈值（硬规则 4）——此值只是「机械心跳」的占位节奏。
+ *  AC155：值从 driver-config 的声明式配置（drivers.yml）派生（单一真相源）；生产由 --interval 覆盖，
+ *  测试传小值。 */
+export const INTERVAL_MS_DEFAULT = defaultDriverConfig().promotion.intervalMs;
 
-// 并发 cap 缺省。concurrency-default-fallback：生产调用方从 cap-from-gate.sh 传自适应 --cap；
-// 此值只是「未传 --cap」的手动/测试回退。AC48 后 cap 不闸晋升，传 5 避免 cap-3 回退的 floor 假象。
-export const CAP_DEFAULT = 5;
+// 并发 cap 缺省。AC155：值从 driver-config 的声明式配置（drivers.yml）派生（单一真相源——⛔ 本文件
+// 不再有独立的并发字面量）。生产由 --cap 覆盖；AC48 后 cap 不闸晋升，缺省 5 避免 cap-3 回退的 floor 假象。
+export const CAP_DEFAULT = defaultDriverConfig().promotion.cap;
 
 /** AC133 失败上限缺省：同一任务连续修 N 次仍不合格 ⇒ 标 needs-human。与 fan-in 侧 attempt>=3 同值
- *  （gap-fan-in-relaunch-retry-cap），非新设数值阈值——仅作「未传 --max-fix-retries」的手动/测试回退。 */
-export const MAX_FIX_RETRIES_DEFAULT = 3;
+ *  （gap-fan-in-relaunch-retry-cap），非新设数值阈值——仅作「未传 --max-fix-retries」的手动/测试回退。
+ *  单一真相源 = driver-filters.ts 的 RETRY_CAP_DEFAULT（worker-driver 同值共享，⛔ 不各写一遍 3）。 */
+export const MAX_FIX_RETRIES_DEFAULT = RETRY_CAP_DEFAULT;
 
 /** ready-pool-check 单轮的 wall-clock 上限（spawnSync timeout，毫秒）。 */
 export const ROUND_TIMEOUT_MS = 180_000;
@@ -114,7 +137,7 @@ export interface PromotionRound {
   pool: number | null;
   shouldApply: boolean;
   promotedIds: string[];
-  applied: Array<{ id: string; ok: boolean; from: string | null; to: string | null; deliveryCritical: boolean }>;
+  applied: Array<{ id: string; ok: boolean; from: string | null; to: string | null; deliveryCritical: boolean; reason: string | null; committed: boolean }>;
   promotePathLlmInvoked: boolean;
   fixDecisions: FixDecision[];
 }
@@ -139,6 +162,8 @@ export interface CandidateChecks {
   missingArtifacts: string[];
   selfTouchOk: boolean;
   touchesResolve: boolean;
+  touchesNarrow: boolean;
+  wideTouches: string[];
   depsReady: boolean;
   retiredMechanism: boolean;
   superseded: boolean;
@@ -166,6 +191,7 @@ export function classifyCandidate(c: CandidateChecks): FixDecision {
   if (!c.fourArtifacts) missing.push(`fourArtifacts=false missing=[${(c.missingArtifacts || []).join(",")}]`);
   if (!c.selfTouchOk) missing.push("selfTouchOk=false");
   if (!c.touchesResolve) missing.push("touchesResolve=false");
+  if (c.touchesNarrow === false) missing.push(`touchesNarrow=false wideTouches=[${(c.wideTouches || []).join(",")}]`);
   const unfixable: string[] = [];
   if (!c.depsReady) unfixable.push("depsReady=false");
   if (c.retiredMechanism) unfixable.push("retiredMechanism=true");
@@ -192,8 +218,8 @@ export function buildFixWorkerPrompt(id: string, missing: string[]): string {
   ].join("\n");
 }
 
-/** fix worker argv = `quay-launch.sh fix-worker -p <prompt>`（短命，launcher/model/--bare 由
- *  `_launchSpec.roles["fix-worker"]` 承载——AC140-2 可配，单一构造 launchArgv）。--fix-worker-cmd 覆盖
+/** fix worker argv = launchArgv("fix-worker", <prompt>)（短命，launcher/model/--bare 由
+ *  `.quay/profiles.yml` 的 profiles/roles 承载——AC140-2 可配，单一构造 launchArgv 经 L2 policy 解析）。--fix-worker-cmd 覆盖
  *  可执行【前缀】时把 prompt 作为末参数追加（测试缝捕获真实 prompt，AC2 取假实测——prompt 是数据、
  *  不是可执行串）。 */
 export function buildFixWorkerArgv(id: string, missing: string[], root: string, fixWorkerCmd?: string | null): string[] {
@@ -273,6 +299,12 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
         from: a && typeof a === "object" && "from" in a ? a.from : null,
         to: a && typeof a === "object" && "to" in a ? a.to : null,
         deliveryCritical: !!(a && a.deliveryCritical),
+        // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard):
+        // surface the block reason + commit outcome so a blocked (ok:false) promotion is NOT silent in
+        // the round/outcome ledger (the raw ready-pool-check JSON carries them; the driver re-map used
+        // to drop both).
+        reason: a && typeof a === "object" && "reason" in a && a.reason != null ? String(a.reason) : null,
+        committed: !!(a && a.committed),
       }))
       .filter((a) => a.id);
     // AC132：读 candidates[] 里 eligible=false 的条目，按 A24 分类成 fixDecisions（可修三类 spawn /
@@ -287,6 +319,8 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
           missingArtifacts: Array.isArray(c.missingArtifacts) ? c.missingArtifacts.map(String) : [],
           selfTouchOk: !!c.selfTouchOk,
           touchesResolve: !!c.touchesResolve,
+          touchesNarrow: c.touchesNarrow !== false,
+          wideTouches: Array.isArray(c.wideTouches) ? c.wideTouches.map(String) : [],
           depsReady: !!c.depsReady,
           retiredMechanism: !!c.retiredMechanism,
           superseded: !!c.superseded,
@@ -337,15 +371,21 @@ export function computeRoundRecord(opts: {
   fixes: FixOutcome[];
   reverify?: ReverifyOutcome | null;
   needsHuman?: string[];
+  /** AC150-2：本轮是否因控制态 halted 而停（true ⇒ 未跑 ready-pool-check、未 spawn fix worker）。 */
+  halted?: boolean;
+  /** AC150-1：本轮资源门判定（起 fix worker 前读；WAIT ⇒ 退避、fixes 为空）。 */
+  gate?: { go: boolean; reason: string | null } | null;
   liveness?: LivenessResult | null;
 }) {
   const action = opts.error
     ? "error"
-    : opts.promotedIds.length > 0
-      ? "promote"
-      : opts.fixes.some((f) => f.spawned)
-        ? "fix"
-        : "none";
+    : opts.halted
+      ? "halted"
+      : opts.promotedIds.length > 0
+        ? "promote"
+        : opts.fixes.some((f) => f.spawned)
+          ? "fix"
+          : "none";
   return {
     ts: opts.at, round: opts.round, run_id: opts.runId, pid: opts.pid, action,
     pool: opts.pool, should_apply: opts.shouldApply, promoted_ids: opts.promotedIds,
@@ -353,6 +393,9 @@ export function computeRoundRecord(opts: {
     // AC133：重验证结果（null = 本轮无 fix worker 可重验证）与本轮新标 needs-human 的 id 清单。
     reverify: opts.reverify ?? null,
     needs_human: opts.needsHuman ?? [],
+    // AC150：halted（控制态停）与 gate（资源门判定）落进 round 记录，outer 可观测。
+    halted: opts.halted ?? false,
+    gate: opts.gate ?? null,
     liveness: opts.liveness ?? null,
   };
 }
@@ -374,73 +417,54 @@ export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerC
 
 /** AC133 重验证结果。fixedIds = 本轮被 spawn 过 fix worker 的任务 id；重跑闸后按【闸的新判定】归类：
  *  nowEligibleIds = 闸判合格（fix 生效，已由 --apply 落地晋升）；stillIneligibleIds = 闸仍判不合格
- *  （fix 未生效，⛔ 不得晋升）。⛔ 不信 worker 自述「已修好」——worker 的退出码/自述不作为晋升依据。 */
+ *  （fix 未生效，⛔ 不得晋升）；notEvaluatedIds = 读不到输入（重跑闸 spawn 失败/输出不可解析 ⇒
+ *  无法评估，⛔ 不是「仍不合格」也不是「消失」——AC153 与 verified/failed 分离的第三态）。
+ *  ⛔ 不信 worker 自述「已修好」——worker 的退出码/自述不作为晋升依据。 */
 export interface ReverifyOutcome {
   nowEligibleIds: string[];
   stillIneligibleIds: string[];
+  notEvaluatedIds: string[];
 }
 
-/** 用重验证轮的闸判定给每个被修任务归类。闸判合格（出现在 promotions）⇒ nowEligible；闸判不合格
- *  （出现在 candidates 且 eligible=false）⇒ stillIneligible；两者都不在（任务从 todo 池消失）⇒ 不计数。
+/** 用重验证轮的闸判定给每个被修任务归类，经 AC153 单一不变式 verifyIndependently 表达三态。
+ *  读不到输入（reRound.ok=false ⇒ 闸没跑成/输出不可解析）⇒ 全部 notEvaluatedIds（⛔ 既不是
+ *  stillIneligible——那会误计入 AC133 失败上限，也不是静默「neither」——那正是 AC153 要消灭的
+ *  「读不懂伪装成既非晋也非否」）；ok=true 时闸判合格（在 promotions）⇒ nowEligible、闸判不合格
+ *  （eligible=false）⇒ stillIneligible；两者都不在（任务从 todo 池消失）⇒ 三态词表不承载、不计数
+ *  （沿用原行为）。
  *  纯函数，可单测（AC133 AC1/AC2——AC2 取假：worker 声称修好但实际未改 ⇒ 闸仍判不合格 ⇒ stillIneligible）。 */
 export function computeReverifyOutcome(fixedIds: string[], reRound: PromotionRound): ReverifyOutcome {
+  // 读不到输入（重跑闸没跑成）⇒ 全部 not-evaluated，⛔ 不伪造成「仍不合格」或「合格」。
+  if (!reRound.ok) {
+    return { nowEligibleIds: [], stillIneligibleIds: [], notEvaluatedIds: [...fixedIds] };
+  }
   const promoted = new Set(reRound.promotedIds);
   const stillBad = new Set(reRound.fixDecisions.map((d) => d.id));
   const nowEligibleIds: string[] = [];
   const stillIneligibleIds: string[] = [];
   for (const id of fixedIds) {
-    if (promoted.has(id)) nowEligibleIds.push(id);
-    else if (stillBad.has(id)) stillIneligibleIds.push(id);
+    // vanished（task 不再出现在候选池——被别的 actor 晋升/删除）：三态词表不承载，沿用原行为不计数。
+    if (!promoted.has(id) && !stillBad.has(id)) continue;
+    const res = verifyIndependently(
+      {
+        value: id,
+        verifiedBy: "re-run gate (ready-pool-check) judged eligible (in promotions)",
+        failedReason: "re-run gate still judged ineligible (eligible=false)",
+        notEvaluatedReason: "unreachable (ok=true and id present in candidates)",
+      },
+      () => (promoted.has(id) ? true : false),
+    );
+    if (res.state === "verified") nowEligibleIds.push(id);
+    else stillIneligibleIds.push(id);
   }
-  return { nowEligibleIds, stillIneligibleIds };
+  return { nowEligibleIds, stillIneligibleIds, notEvaluatedIds: [] };
 }
 
-/** AC133 失败上限的跨轮状态。counts = 每任务连续修仍不合格的累计次数；needsHuman = 已标 needs-human
- *  （后续轮不再对其 spawn fix worker）。跨轮存活于常驻循环内（⛔ 不落盘——运行时状态，与进程同寿命）。 */
-export interface RetryState {
-  counts: Map<string, number>;
-  needsHuman: Set<string>;
-}
-
-/** 推进失败上限：对每个仍不合格的 id 累计连续失败次数，达到 maxRetries 的进入 newlyNeedsHuman
- *  （去重——已标过的不重复返回）。原地更新传入 state，纯逻辑可单测（AC133 AC3）。 */
-export function advanceRetryCap(
-  state: RetryState,
-  stillIneligibleIds: string[],
-  maxRetries: number,
-): string[] {
-  const newly: string[] = [];
-  for (const id of stillIneligibleIds) {
-    const n = (state.counts.get(id) ?? 0) + 1;
-    state.counts.set(id, n);
-    if (n >= maxRetries && !state.needsHuman.has(id)) {
-      state.needsHuman.add(id);
-      newly.push(id);
-    }
-  }
-  return newly;
-}
-
-/** AC133 AC3：把连续修满上限仍不合格的任务标 needs-human（status todo → needs-human）+ 追加一条
- *  `## Needs-Human` 审计记录（grep-able 原因，⛔ 静默翻转）。只在 status=todo 时写（并发保护，同
- *  ready-pool-check 的 setTaskStatus）。返回 { id, ok, reason }——ok=false 表示未写（missing/无
- *  frontmatter/非 todo）。 */
-export function markNeedsHuman(root: string, id: string, reason: string): { id: string; ok: boolean; reason: string } {
-  const file = path.join(root, "tasks", `${id}.md`);
-  if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
-  const raw = fs.readFileSync(file, "utf8");
-  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
-  if (!m) return { id, ok: false, reason: "no-frontmatter" };
-  const [, open, fm, close] = m;
-  if (!/^status:\s*todo\s*$/m.test(fm)) return { id, ok: false, reason: "not-todo" };
-  const newFm = fm.replace(/^status:\s*todo\s*$/m, "status: needs-human");
-  const body = raw.slice(m[0].length);
-  const record =
-    `\n## Needs-Human\n\n**执行 ${new Date().toISOString()} — promotion-driver AC133：连续修满上限仍不合格**\n\n` +
-    `- 阻碍原因：${reason}\n`;
-  fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
-  return { id, ok: true, reason };
-}
+// AC133 失败上限（RetryState / advanceRetryCap / markNeedsHuman）已上收 driver-filters.ts（单一真相源
+// —— worker-driver 也从 exited-not-landed 计数派生同一个 retryExhausted 集合，⛔ 不各写一遍计数/翻转）。
+// re-export 保持旧 import 面（promotion-driver.test.mjs 等经同一函数身份 import）。
+export { advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT } from "./driver-filters.ts";
+export type { RetryState } from "./driver-filters.ts";
 
 /** 把一条 round 记录追加写入文件（pure append，⛔ 不截断不覆盖）。 */
 export function appendRoundRecord(file: string, record: ReturnType<typeof computeRoundRecord>): string {
@@ -483,7 +507,15 @@ export function computeOutcomeRecords(opts: {
       task_id: a.id,
       gate: { eligible: true, missing: [] },
       action: "promote",
-      result: { ok: a.ok, detail: a.from != null && a.to != null ? `${a.from}->${a.to}` : "promoted" },
+      // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): a
+      // blocked (ok:false) promotion must NOT record "promoted" — surface the block reason (e.g.
+      // touches-multi-path-bullet) so the ledger is truthful, not a silent "promoted" lie.
+      result: {
+        ok: a.ok,
+        detail: !a.ok
+          ? (a.reason ?? "promotion-blocked")
+          : (a.from != null && a.to != null ? `${a.from}->${a.to}` : "promoted"),
+      },
       ts: opts.at,
     });
   }
@@ -534,17 +566,20 @@ export function appendOutcomeRecord(file: string, record: PromotionOutcomeRecord
   return file;
 }
 
-/** 解析 --interval。缺省 INTERVAL_MS_DEFAULT；非负有限数才合法。 */
-export function parseIntervalMs(raw: string | undefined): { ok: true; value: number } | { ok: false; error: string } {
-  if (raw === undefined) return { ok: true, value: INTERVAL_MS_DEFAULT };
+/** 解析 --interval。缺省 = drivers.yml 的 interval_ms（root 缺省时回退 INTERVAL_MS_DEFAULT 常量）；
+ *  非负有限数才合法。 */
+export function parseIntervalMs(raw: string | undefined, root?: string): { ok: true; value: number } | { ok: false; error: string } {
+  if (raw === undefined) {
+    return { ok: true, value: root ? loadDriverConfig(root).promotion.intervalMs : INTERVAL_MS_DEFAULT };
+  }
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return { ok: false, error: `invalid --interval: ${raw}` };
   return { ok: true, value: n };
 }
 
-/** 解析 --cap。缺省 CAP_DEFAULT；正整数才合法。 */
-export function resolveCap(raw: string | undefined): { ok: true; value: number } | { ok: false; error: string } {
-  if (raw === undefined) return { ok: true, value: CAP_DEFAULT };
+/** 解析 --cap。缺省 = drivers.yml 的 cap（单一真相源；root 缺省时回退 CAP_DEFAULT 常量）；正整数才合法。 */
+export function resolveCap(raw: string | undefined, root?: string): { ok: true; value: number } | { ok: false; error: string } {
+  if (raw === undefined) return { ok: true, value: root ? driverCap(root, "promotion") : CAP_DEFAULT };
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0) return { ok: false, error: `invalid --cap: ${raw}` };
   return { ok: true, value: n };
@@ -569,6 +604,8 @@ export interface ResidentLoopOptions {
   runId: string;
   json: boolean;
   pidFile?: string;
+  /** AC150-1：覆盖 resource-gate 命令（测试缝；缺省 = 与 worker-driver 同一 resourceGateCheck 缺省）。 */
+  resourceGateArgv?: string[] | null;
   /** liveness 检查命令覆盖（测试缝）；null = 用 defaultLivenessCheckArgv(root, "promotion")。 */
   livenessCmd: string[] | null;
 }
@@ -581,7 +618,7 @@ export interface ResidentLoopOptions {
  *  （json 时）stdout 事件行。停机由进程信号驱动（⛔ 不读 .halt，单一真相源）。
  */
 export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promise<number> {
-  const { root, intervalMs, cap, once, maxRounds, maxFixRetries, readyPoolArgv, roundLogFile, outcomeLogFile, runId, json, pidFile, fixWorkerCmd, llmCommands, livenessCmd } = opts;
+  const { root, intervalMs, cap, once, maxRounds, maxFixRetries, readyPoolArgv, roundLogFile, outcomeLogFile, runId, json, pidFile, fixWorkerCmd, llmCommands, resourceGateArgv = null, livenessCmd } = opts;
 
   if (pidFile) {
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
@@ -604,17 +641,48 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
   const retryState: RetryState = { counts: new Map(), needsHuman: new Set() };
   while (!stopRequested) {
     round += 1;
+    // AC150-2 控制面：起新一轮前读控制态（.quay/promotion-control.json 单一真相源，与 worker-driver
+    // 共用同一 isHalted 实现）。halted ⇒ 停止晋升与 fix spawn（记一条 halted round 后退出，⛔ 不再跑
+    // ready-pool-check --apply、不再 spawn fix worker）。
+    if (isHalted(root, process.env, PROMOTION_CONTROL_STATE_REL)) {
+      const haltedRecord = computeRoundRecord({
+        round, runId, pid: process.pid, at: new Date().toISOString(),
+        pool: null, shouldApply: false, promotedIds: [], applied: [], error: null,
+        promotePathLlmInvoked: false, fixes: [], halted: true,
+      });
+      try { appendRoundRecord(roundLogFile, haltedRecord); } catch { /* 记录写失败不致命（运行时日志） */ }
+      if (json) process.stdout.write(`${JSON.stringify({ event: "halted", round })}\n`);
+      break;
+    }
     // liveness 检查（gap-resident-driver-stable-carrier-liveness Finding 的接线）：每轮顺手调一次
     // launch 脚本的 liveness 子命令。supervisor 死后 driver 成孤儿仍在跑 ⇒ 下一轮即检出 supervisor_dead
     // 并让子命令写 DEATH 告警（⛔ 载体停更 ≠ 一切正常）。checked=false（脚本缺失/失败）≠ 健康（硬规则 3b）。
     const liveness = runLivenessCheck(root, "promotion", livenessCmd);
     const r = runPromotionRound(root, readyPoolArgv, cap, llmCommands);
+    // AC150-1 资源门：起 fix worker 前经与 worker-driver 同一个 resourceGateCheck 判定（WAIT ⇒ 退避，
+    // 本轮不 spawn LLM fix worker）。机械的 ready-pool-check 晋升路径不受资源门约束（零 LLM）。
+    const gate = resourceGateCheck(root, resourceGateArgv);
     // AC133 失败上限：已标 needs-human 的任务不再进 fix pass（停止对它的修复循环——与 markNeedsHuman
     // 的 status 翻转双保险，即使 status 写失败也不会再 spawn）。
-    const activeDecisions = r.fixDecisions.filter((d) => !retryState.needsHuman.has(d.id));
+    // AC152：此过滤消费 driver-filters.ts 的【可组合谓词列表】——promotion 的 fix pass 只取
+    // retryCapNotExhausted / notNeedsHuman 两个谓词（⛔ 不各写一遍 retryState.needsHuman 判定）；
+    // 其余（deps/touches/in-flight）由 ready-pool-check 的 eligible 已在闸内判定，再滤一遍会丢掉
+    // AC134 的 skip 台账（depsReady=false 等 unfixable 原因仍须逐条记 outcome）。
+    const activeIds = new Set(applyTaskFilters(
+      r.fixDecisions.map((d) => d.id),
+      makeFilterContext(root, { inFlight: [], retryExhausted: retryState.needsHuman }),
+      ["retryCapNotExhausted", "notNeedsHuman"],
+    ));
+    const activeDecisions = r.fixDecisions.filter((d) => activeIds.has(d.id));
     // AC132：不合格者 → 短命 fix worker（可修三类 spawn、不可修五类逐条记原因不修）。spawn 前先跑
     // 分类（classifyCandidate 已做），fixDecisions 里 fixable=true 的才 spawn。
-    const fixes = runFixPass(activeDecisions, root, fixWorkerCmd);
+    // AC150-1：gate.go=false ⇒ 退避——只退【可修三类的 spawn】（⛔ 不再 spawn LLM fix worker，留待
+    // 下轮），不可修五类的 skip 台账零 LLM、不受资源门约束（仍逐条记原因，⛔ 不因 WAIT 丢失可观测性）。
+    const fixes = runFixPass(
+      gate.go ? activeDecisions : activeDecisions.filter((d) => !d.fixable),
+      root,
+      fixWorkerCmd,
+    );
 
     // AC133 AC1：fix worker 退出后【重新调同一个闸】验证，以闸的新判定为准（⛔ 不信 worker 自述）。
     const fixedIds = fixes.filter((f) => f.spawned).map((f) => f.id);
@@ -639,7 +707,7 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     const applied = [...r.applied, ...reApplied];
     const record = computeRoundRecord({
       round, runId, pid: process.pid, at: new Date().toISOString(), ...r,
-      promotedIds, applied, fixes, reverify, needsHuman: newlyNeedsHuman, liveness,
+      promotedIds, applied, fixes, reverify, needsHuman: newlyNeedsHuman, gate, liveness,
     });
     try { appendRoundRecord(roundLogFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     // AC134：判定/晋升/修复/needs-human 各写一条 outcome 记录（.quay/promotion-outcome.jsonl，outer 可消费）。
@@ -680,6 +748,7 @@ const HELP = [
   "  --max-fix-retries <n> AC133 失败上限（缺省 3；连续修满 N 次仍不合格 ⇒ 标 needs-human）",
   "  --ready-pool-cmd <s>  覆盖 ready-pool-check 命令（测试缝）",
   "  --fix-worker-cmd <s>  覆盖 fix worker 命令前缀（测试缝；prompt 仍作末参数追加）",
+  "  --resource-gate-cmd <s> 覆盖 resource-gate 命令（测试缝；AC150-1 起 fix worker 前判定，exit 0=GO 非 0=WAIT）",
   "  --llm-commands <csv>  配置声明的 LLM 命令集，逗号分隔（缺省 claude；AC140-4 判定读此集合）",
   "  --round-log <path>    轮记录文件（缺省 <root>/.quay/promotion-round.jsonl）",
   "  --outcome-log <path>  outcome 记录文件（缺省 <root>/.quay/promotion-outcome.jsonl，AC134）",
@@ -698,6 +767,7 @@ export async function main(argv: string[]): Promise<number> {
   let maxFixRetriesRaw: string | undefined;
   let readyPoolCmd: string | undefined;
   let fixWorkerCmd: string | undefined;
+  let resourceGateCmd: string | undefined;
   let roundLogPath: string | undefined;
   let outcomeLogPath: string | undefined;
   let runId: string | undefined;
@@ -716,6 +786,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--max-fix-retries") maxFixRetriesRaw = args[++i];
     else if (a === "--ready-pool-cmd") readyPoolCmd = args[++i];
     else if (a === "--fix-worker-cmd") fixWorkerCmd = args[++i];
+    else if (a === "--resource-gate-cmd") resourceGateCmd = args[++i];
     else if (a === "--round-log") roundLogPath = args[++i];
     else if (a === "--outcome-log") outcomeLogPath = args[++i];
     else if (a === "--run-id") runId = args[++i];
@@ -729,9 +800,9 @@ export async function main(argv: string[]): Promise<number> {
 
   const rootDir = root ? path.resolve(root) : path.resolve(process.cwd());
 
-  const interval = parseIntervalMs(intervalRaw);
+  const interval = parseIntervalMs(intervalRaw, rootDir);
   if (!interval.ok) { console.error(`promotion-driver: ${interval.error}`); return 2; }
-  const capRes = resolveCap(capRaw);
+  const capRes = resolveCap(capRaw, rootDir);
   if (!capRes.ok) { console.error(`promotion-driver: ${capRes.error}`); return 2; }
   if (maxRounds !== null && (!Number.isInteger(maxRounds) || maxRounds < 1)) {
     console.error("promotion-driver: --max-rounds must be a positive integer");
@@ -762,6 +833,7 @@ export async function main(argv: string[]): Promise<number> {
     maxFixRetries,
     readyPoolArgv: readyPoolCmd ? splitArgs(readyPoolCmd) : null,
     fixWorkerCmd: fixWorkerCmd ?? null,
+    resourceGateArgv: resourceGateCmd ? splitArgs(resourceGateCmd) : null,
     llmCommands,
     roundLogFile,
     outcomeLogFile,

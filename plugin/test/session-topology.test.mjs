@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion): routed to `lowconc`, NOT `serial`.
 // The serial group's ONLY criterion is nested-runner (a file that spawns its own worker-pool
 // sub-suites via `node --test` / test.sh --for-task). This file made itself concurrency-safe — 9
@@ -28,7 +28,7 @@
 //   AC4 — cold-start/SKILL.md cross-annotates the session topology (TOPOLOGY-IN-PLACE key + the
 //         factory/check references) — SKILL teaches the loop start, this task teaches the session
 //         topology; together they are 装得上.
-//   AC5 — this file is node:test + // @test-group lowconc (hermetic → lowconc, see GROUP NOTE).
+//   AC5 — this file is node:test + // @test-group engine (was lowconc; reclassified by gap-suite-serial-lowconc-classification-recheck).
 // Plus: the factory's --dry-run emits the two-window plan; a real build creates the windows.
 //
 // All tmux work is on a HERMETIC server on a private socket (TMUX_TMPDIR + explicit -S argv),
@@ -97,6 +97,7 @@ function runInit(workspace, args = []) {
 function isolateTmuxEnv(sockDir) {
   const env = { ...process.env, TMUX_TMPDIR: sockDir };
   delete env.TMUX;
+  env.HISTFILE = "/dev/null"; // gap-test-fixture-pollutes-bash-history: fixture bash must not write ~/.bash_history
   return env;
 }
 function tmuxAt(sockPath, args, env) {
@@ -147,12 +148,15 @@ function newHermetic(prefix = "quay-topo-") {
       for (const name of started) {
         tmuxAt(sockPath, ["kill-session", "-t", name], env);
       }
-      // TMUX_TMPDIR is NOT honored by tmux on this system (verified: a session spawned with
-      // TMUX_TMPDIR set still lands on /tmp/tmux-<uid>/default), so the factory scripts
-      // (quay-topology.sh --session topo-factory/topo-race/isc-factory) build on the DEFAULT
-      // socket — the hermetic sweep above cannot reach them. Kill the named factory sessions
-      // on the default socket explicitly (per-session kill-session, never kill-server). Scoped
-      // to the factory names this file creates so a real user session is never touched.
+      // TMUX_TMPDIR IS honored when $TMUX is stripped — `env -u TMUX TMUX_TMPDIR=<dir> tmux
+      // new-session -d` lands on <dir>/tmux-<uid>/default; an INHERITED $TMUX overrides
+      // TMUX_TMPDIR (gap-tmux-stale-not-honored-comment-private-socket-leak-scan AC1). The
+      // factory scripts (quay-topology.sh --session topo-factory/topo-race/isc-factory) run
+      // under this file's hermetic env ($TMUX stripped + TMUX_TMPDIR=sockDir), so they build on
+      // THIS private socket and the sweep above reaches them. The default-socket kill loop below
+      // is a harmless defensive net — scoped to the factory names this file creates, a
+      // kill-session on the default socket can only error "no such session" and never touches a
+      // real user session (per-session kill-session, never kill-server).
       for (const fname of ["topo-factory", "topo-idem", "topo-race", "isc-factory"]) {
         tmuxAt(null, ["kill-session", "-t", fname], process.env);
       }

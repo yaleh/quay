@@ -171,13 +171,17 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-tick-quality-2026-08-14.md` — the cross-layer tick spec (R1–R9, each with a criterion and the failure that bought it; D1–D8 quality dimensions with the three-layer baseline)
 - `orchestration/SPEC-in-flight-semantics-2026-08-14.md` — 「在飞」的完整语义 (A unlanded-tasks vs B running-subagents; the 10 prior fixes of the same quantity; §6 the system-wide proxy-quantity survey and the proxy registry proposal)
 - `orchestration/SPEC-tick-mechanical-checks-mcp-2026-08-15.md` — tick 的机械检查统一为一个 MCP 工具面 (proposed·未排期, future phase; §1 the seven measured per-round coverage points and why an MCP server is the first thing both mechanical AND outside every layer's context; §3 integration into the existing quay MCP server, reusing observation.ts's degradation contract)
+- `orchestration/SPEC-suite-lifecycle-and-failure-semantics-2026-08-26.md` — suite 生命周期与失败语义（单飞锁纯资源限制器 / suite-driver kind / 失败语义 subagent；§2/§3/§4，⛔ lane/S 不动）
 - `orchestration/SPEC-worker-driven-inner-2026-08-16.md` — inner 改造为「机械驱动进程 + per-task `claude -p` worker 会话」（人 2026-08-16 裁定六个设计点；并发由驱动数子进程控制而非模型自数 subagent；主检出纯为驱动镜像、checkout 前 stash 不 discard；三阶段判据含【检查机制净减少】的贯穿判据）
 - `orchestration/SPEC-instruments-behind-one-entry.md` — instrument discovery behind one entry
 - `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md` — isolation + resource governance
 - `orchestration/SPEC-methodology-as-a-deliverable.md` — methodology as a deliverable
 - `orchestration/SPEC-no-text-substitution-at-install.md` — install is configuration-driven, not text-substitution
 - `orchestration/SPEC-unified-driver-architecture-2026-08-23.md` — 统一 `*-driver` 架构：机械化执行面与长会话规划面的分野。**两级分层**（Layer 0 runtime / 1a task-processing / 1b routine，人 2026-08-23 裁定，manager-kind 属 1b）· 核心不变式「⛔ 不信执行者自述」单一实现 · Filter 谓词列表 · Claude Code profile 抽层 · 配置与运行时控制态分界 · 事件触发保留兜底轮询（proposal·判据落为 AC151–155，排期在 AC142 系列收口后）
+- `orchestration/SPEC-web-session-observability-and-control-2026-08-24.md` — web server 通用 Claude Code 会话观测 / 消息投递 / 生命周期管理：会话发现三分流（交互式·`-p`·已结束）· 统一锚点 session-id + transcript · `send-to-session.ts` socket 通道 · profile 化启动配置（proposal·人 2026-08-24 裁定三条开放问题，泛化排期在 `gap-worker-task-transcript-access-webui` 落地之后）
+- `orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md` — Codex App Server 会话通信 Host Adapter：thread/turn 映射、宿主无关 `list/status/send/events` 契约、ack 状态、幂等性与 Claude/Codex 权限边界（proposal·不扩大 Stage 1 自治生命周期权限）
 - `orchestration/SPEC-one-observer-two-surfaces.md` — one observer, two surfaces
+- `orchestration/SPEC-methodology-layer-architecture-2026-08-25.md` — 方法学层架构：契约面采纳而非重建抽象（checker 契约三层 / state-IO / path-root 三角色，六批次 B0-B5 棘轮演进）
 - `orchestration/SPEC-quay-self-hosts-its-own-cold-start.md` — self-hosting the cold start
 - `orchestration/SPEC-state-crystallization-2026-08-05.md` — state crystallization
 - `orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md` — the three-layer unified architecture (manager/outer/inner minimal unified architecture; AC28–AC34, P0 wiring = SPEC-carrying first-lines + ledger A + parallel-comparison rounds)
@@ -187,6 +191,8 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-per-task-suite-verification-2026-08-13.md` — per-task suite verification (人 2026-08-13 裁定：取消 integration，每任务从 develop 开 worktree 跑全量 suite 迭代至绿再 merge；suite 不得有 commit 知识；锁容量 2 + cgroup 读宿主；verification-round 降为任务粒度。**取代** `SPEC-branching-model-integration-branch-2026-08-05.md` 的解法而非其诊断；阶段 AC42-AC49）
 - `orchestration/SPEC-task-status-flow-target-vs-actual-2026-08-13.md` — task status 流转目标模式 × 当前实际 × 差异清单（人 2026-08-13 指令；不新增工作项——差异映射到已有 AC / 任务 / 观察项）
 - `orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md` — fan-in 改为「无锁段自测 + 锁内 ff-merge」：subagent 在 merge 前把 develop 最新变更 merge 回自己 worktree 并跑 suite，最后 ff merge 回 develop（单独 merge 锁，只包 ff，持锁期间唯一动作是 ff merge，成功/失败即解锁）；AC62–AC64
+- `orchestration/SPEC-fan-in-workflow-lock-and-S1-2026-08-26.md` — fan-in workflow 锁 + S=1：把 merge 锁从毫秒级 ff 扩大到整个 fan-in（merge→suite→ff）使 develop 不前进、ff 结构上不输，S 改 1（fan-in 锁串行化 suite）；修订 AC4 + 两锁固定顺序 + driver 看门狗；与语义 subagent 的 ff-race-loss 二选一（proposal·待 outer 立案、待人裁定排期）
+- `orchestration/SPEC-fan-in-driver-mechanical-orchestration-2026-08-27.md` — fan-in 机械编排：取消 fan-in workflow 子代理、机械部分（锁/merge/判定/typecheck/scoped门/suite/ff）交 driver、语义部分（冲突/红 suite/typecheck 红/anti-drift 越界）单独 Claude 会话；suite 不再 detach、fan-in 锁机械包裹 suite 锁；取代 S=1 workflow 锁的解法（保留其诊断），锁时长从模型 30min 塌缩到机械 ~10min（proposal·待 outer 立案、待人裁定排期）
 
 Cross-references:
 - `orchestration/REVIEW-cadence.md` — the daily-review cadence mechanism (this skill's cadence hook)

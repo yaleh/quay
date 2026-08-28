@@ -226,6 +226,9 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   `--test-concurrency=` 的 `=` 写法、`QUAY_TEST_LIVE_GITHUB`、`@test-group`/`@static-tier` 标注，
   **全部读脚本，不要在此处复制一份**（本节曾复制 144 行，占本文件 49%，正是漂移之源）。
 - **Web UI**：`node --experimental-strip-types packages/quay/bin/quay.ts serve --host <ip> --port <p>`
+  - **开发模式**：`node --watch --experimental-strip-types packages/quay/bin/quay.ts serve --host <ip> --port <p>`
+    —— Node ≥18 `--watch` 对 import 模块变更自动重启进程（改 `packages/quay/src` 立即生效），
+    **不新增 `--dev`/`--watch` CLI 入口**（`node --watch <既有入口>` 直接可用，零产品表层；人 2026-08-24 裁定）。
 - **两条没有别处正本、故留在此**：①测试要用真 `.quay/config.yml` 建临时 workspace（见某测试文件里的
   `makeWorkspace()`）——**裸 tasks 目录不是合法 workspace**，config 是 provider map 不是扁平路径；
   ②**覆盖率不是目标**：从未被测量、可被刷（本仓库自带 `gate-gameability.test.mjs`）、
@@ -235,17 +238,19 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   （`adr/ADR-010-scheduled-milestone-e2e-incl-browser-tests.md`，status: proposed）。
   **一次绿的 `scripts/test.sh` 不是这两类的证据。**
 - **driver 进程管理**（`quay driver <start|stop|drain|status|restart> --kind <promotion|worker>`——
-  **`liveness` 只有直调 `plugin/scripts/promotion-driver-launch.sh` 才有**，`quay driver`（`cli/driver.ts:27`
-  `VERBS`）未收录，2026-08-24 outer 核实的一个CLI表层缺口；正本仍是脚本 `--help`，**不要在此处复制参数表**）：
+  **`liveness` 只有直调 `plugin/scripts/driver-runtime.ts` 才有**，`quay driver`（`cli/driver.ts:27`
+  `VERBS`）未收录，2026-08-24 outer 核实的一个CLI表层缺口；正本仍是 kernel `--help`，**不要在此处复制参数表**）：
   `stop`/`restart` 只杀 supervisor+driver 自身，⛔ 不碰 worker kind 的在飞子进程（设计如此，见脚本注释）；
   worker kind 独有 `drain`（挡新派发、不杀在飞，写 `.quay/worker-control.json` `halted:true`）。
-  **⛔ 已知缺口（2026-08-24 实证，`gap-worker-driver-cold-start-inflight-blind`，未落地前必读）**：
-  driver 重启/崩溃自动 respawn 后，新进程的"在飞集合"是纯内存数组、从空集合起——它不认得重启前就存活的
-  worker，`ready-pool-check` 仍把那些任务判为可派发 ⇒ **重启当轮可能对同一任务重复派发**，而重复者被杀后
-  触发的 orphan-worktree 清理会**连带删除原 worker 仍在用的共享 worktree+分支**（哪怕原 worker 自愈无损，
-  仍有真实数据丢失风险）。该缺口修复前，**手工 restart 后务必立即人工核对是否产生重复 `quay-task-worker`
-  进程**（`ps aux | grep quay-task-worker`，按 task 名去重），发现重复立刻 kill 新的一个并 `drain` 直到
-  重启前的在飞任务全部自然落地。
+  **⛔ 已知缺口更新（2026-08-24，`gap-worker-driver-cold-start-inflight-blind` 已 done，读下面两行别读旧结论）**：
+  「重启会重复派发存活 worker」这个方向**已修复并被 manager 直接对生产实时状态验证过**（`enumerateColdStartInflight`
+  只读探测，非猜测/非采信自述）——手工 restart **不会**重派仍存活的 worker。**残留的是相反方向**：
+  该函数的观测结果在循环外被 `const` 冻结一次、全生命周期不刷新 ⇒ 一个冷启动 worker **结束后**其 task
+  仍永久假在飞，不可再派（`gap-worker-driver-cold-start-inflight-refresh`，ready，附 §5 协调循环修法，
+  见 `orchestration/SPEC-unified-driver-architecture-2026-08-23.md`）。**手工 restart 后仍建议核对
+  一次** `ps aux | grep quay-task-worker`（按 task 名去重）作为习惯性负控制，但不再是必须的救火步骤。
+  **manager 对 driver 生命周期（start/stop/restart）持人 2026-08-24 明确授权的常设控制权**（本项目后期
+  开发阶段内），无需逐次请示；执行前仍应做上述现场核实（避免过期判断），执行后仍应做负控制确认。
 ## Architecture — the product (`packages/`)
 
 Three packages, one ABI:

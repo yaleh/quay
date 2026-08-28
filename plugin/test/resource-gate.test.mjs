@@ -58,6 +58,10 @@ function _findRepoRoot(startDir) {
 const REPO_ROOT = _findRepoRoot(__dirname);
 const GATE = path.join(REPO_ROOT, "plugin", "scripts", "resource-gate.sh");
 const TEST_SH = path.join(REPO_ROOT, "scripts", "test.sh");
+// The bash canonical for S (suite_slot_count) — default_concurrency_formula / serial_lowconc_host_default
+// now delegate their S read to it (gap-suite-concurrency-S-two-source-divergence), so the isolated
+// subshells below must source it too.
+const SUITE_SLOT_LIB = path.join(REPO_ROOT, "plugin", "scripts", "suite-slot-lib.sh");
 
 /** Run the REAL gate with env-seam overrides. Returns { status, stdout } (stderr merged). */
 function runGate(envOverrides = {}, args = []) {
@@ -97,7 +101,7 @@ function derivedConcurrency(nproc, slots = 2, oversub = 1) {
   // gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived).
   const fnMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
   assert.ok(fnMatch, "scripts/test.sh must define default_concurrency_formula()");
-  const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_CONCURRENT_SUITES=${slots}\nRESOURCE_GATE_OVERSUBSCRIPTION=${oversub}\nprintf '%s' "$(default_concurrency_formula)"\n`;
+  const script = `. "${SUITE_SLOT_LIB}"\n${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_CONCURRENT_SUITES=${slots}\nRESOURCE_GATE_OVERSUBSCRIPTION=${oversub}\nprintf '%s' "$(default_concurrency_formula)"\n`;
   const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
   assert.equal(res.status, 0, `derivedConcurrency subshell failed: ${res.stderr}`);
   return Number(res.stdout.trim());
@@ -117,7 +121,7 @@ function currentDefaultConcurrency() {
   // isolated subshell is self-contained (matches the ## Contract effective_concurrency measure).
   const formulaMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
   assert.ok(formulaMatch, "scripts/test.sh must define default_concurrency_formula()");
-  const script = `${formulaMatch[0]}\n${fnMatch[0]}\nprintf '%s' "$(default_test_concurrency)"\n`;
+  const script = `. "${SUITE_SLOT_LIB}"\n${formulaMatch[0]}\n${fnMatch[0]}\nprintf '%s' "$(default_test_concurrency)"\n`;
   const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
   assert.equal(res.status, 0, `currentDefaultConcurrency subshell failed: ${res.stderr}`);
   return Number(res.stdout.trim());
@@ -132,9 +136,43 @@ function phaseConcurrencyDefault(nproc, slots, overlap = "1") {
   const src = fs.readFileSync(TEST_SH, "utf8");
   const fnMatch = src.match(/serial_lowconc_host_default\(\) \{[^]*?\n\}/);
   assert.ok(fnMatch, "scripts/test.sh must define serial_lowconc_host_default()");
-  const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_CONCURRENT_SUITES=${slots}\nQUAY_PHASE_OVERLAP=${overlap}\nprintf '%s' "$(serial_lowconc_host_default)"\n`;
+  const script = `. "${SUITE_SLOT_LIB}"\n${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_CONCURRENT_SUITES=${slots}\nQUAY_PHASE_OVERLAP=${overlap}\nprintf '%s' "$(serial_lowconc_host_default)"\n`;
   const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
   assert.equal(res.status, 0, `phaseConcurrencyDefault subshell failed: ${res.stderr}`);
+  return Number(res.stdout.trim());
+}
+
+/** The bash canonical slot count S in a subshell with the AMBIENT env (FULL_SUITE_LOCK_FILE /
+ *  `.concurrency` file honored, NO seam) — the direct reader for the AC2 file-wins negative control
+ *  (gap-suite-concurrency-S-two-source-divergence). */
+function bashSlotCount() {
+  const script = `. "${SUITE_SLOT_LIB}"\nsuite_slot_count\n`;
+  const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+  assert.equal(res.status, 0, `bashSlotCount subshell failed: ${res.stderr}`);
+  return Number(res.stdout.trim());
+}
+
+/** default_concurrency_formula with NO slots seam — S comes from the AMBIENT `.concurrency` file /
+ *  knob (the AC2 file-wins negative control: env knob left stale, the file must be authoritative). */
+function derivedConcurrencyNoSeam(nproc, oversub = 1) {
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  const fnMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
+  assert.ok(fnMatch, "scripts/test.sh must define default_concurrency_formula()");
+  const script = `. "${SUITE_SLOT_LIB}"\n${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_OVERSUBSCRIPTION=${oversub}\nprintf '%s' "$(default_concurrency_formula)"\n`;
+  const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+  assert.equal(res.status, 0, `derivedConcurrencyNoSeam subshell failed: ${res.stderr}`);
+  return Number(res.stdout.trim());
+}
+
+/** serial_lowconc_host_default with NO slots seam (same file-wins negative control as
+ *  derivedConcurrencyNoSeam). */
+function phaseConcurrencyDefaultNoSeam(nproc, overlap = "1") {
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  const fnMatch = src.match(/serial_lowconc_host_default\(\) \{[^]*?\n\}/);
+  assert.ok(fnMatch, "scripts/test.sh must define serial_lowconc_host_default()");
+  const script = `. "${SUITE_SLOT_LIB}"\n${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nQUAY_PHASE_OVERLAP=${overlap}\nprintf '%s' "$(serial_lowconc_host_default)"\n`;
+  const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+  assert.equal(res.status, 0, `phaseConcurrencyDefaultNoSeam subshell failed: ${res.stderr}`);
   return Number(res.stdout.trim());
 }
 
@@ -503,6 +541,62 @@ test("AC3 (判据3) — all three lane derivations read QUAY_MAX_CONCURRENT_SUIT
   assert.match(runnerTs, /defaultLaneCount\(\): number \{[^]*QUAY_MAX_OVERSUBSCRIPTION/, "defaultLaneCount must read QUAY_MAX_OVERSUBSCRIPTION");
 });
 
+test("AC1 — S single source: default_concurrency_formula + serial_lowconc_host_default delegate S to suite_slot_count (the .concurrency-file-reading canonical)", () => {
+  // gap-suite-concurrency-S-two-source-divergence: the lock's slot count (suite_slot_count) read
+  // seam → `<base>.concurrency` file → QUAY_MAX_CONCURRENT_SUITES → 2, while the lane formulas read
+  // seam → knob → 2 (SKIPPING the file). So `printf '2' > .concurrency` changed the lock but not the
+  // lanes. The fix: BOTH lane derivations now CALL suite_slot_count — one S reader, the divergence is
+  // structurally impossible (改一个文件同时改锁槽数 + lane 公式). By-position (the function body, not a
+  // file-wide greedy match), so a formula that stopped delegating goes RED here.
+  const testSh = fs.readFileSync(TEST_SH, "utf8");
+  const formulaBody = testSh.match(/default_concurrency_formula\(\) \{[^]*?\n\}/)?.[0] ?? "";
+  const phaseBody = testSh.match(/serial_lowconc_host_default\(\) \{[^]*?\n\}/)?.[0] ?? "";
+  assert.ok(formulaBody, "default_concurrency_formula must exist");
+  assert.ok(phaseBody, "serial_lowconc_host_default must exist");
+  assert.match(formulaBody, /slots="\$\(suite_slot_count\)"/, "default_concurrency_formula must delegate S to suite_slot_count");
+  assert.match(phaseBody, /slots="\$\(suite_slot_count\)"/, "serial_lowconc_host_default must delegate S to suite_slot_count");
+});
+
+test("AC2 — file-wins negative control: writing ONLY the `.concurrency` file (env knob left stale at 1) halves laneCount AND sets the slot count (no more divergence)", () => {
+  // The divergence's real shape (S=2 #655/#656): manager wrote `.concurrency`=2 (lock slots → 2) but
+  // the env knob stayed 1, so laneCount stayed nproc (16) → 2×16=32 > 16 oversubscription. After the
+  // fix the FILE wins for BOTH chains: concurrentSuiteSlots=2 AND laneCount halves (16→8).
+  const prevNproc = process.env.RESOURCE_GATE_NPROC;
+  const prevKnob = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  const prevOversub = process.env.QUAY_MAX_OVERSUBSCRIPTION;
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  const pinTmp = fs.mkdtempSync(path.join(os.tmpdir(), "rg-s2-"));
+  const pinBase = path.join(pinTmp, "full-suite.lock");
+  fs.writeFileSync(`${pinBase}.concurrency`, "2", "utf8");
+  process.env.FULL_SUITE_LOCK_FILE = pinBase;
+  delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;      // seam must not shadow the file
+  process.env.QUAY_MAX_CONCURRENT_SUITES = "1";             // STALE env — the old divergent value
+  process.env.RESOURCE_GATE_NPROC = "16";
+  process.env.QUAY_MAX_OVERSUBSCRIPTION = "1";
+  try {
+    // Both S readers agree on 2 (from the file), NOT 1 (the stale env).
+    assert.equal(concurrentSuiteSlots(), 2, "TS canonical must read S=2 from the .concurrency file (env knob=1 stale)");
+    assert.equal(bashSlotCount(), 2, "bash canonical must read S=2 from the .concurrency file (env knob=1 stale)");
+    // The lane formula halves: 16 × 1 / 2 = 8 (the old env-only read would return 16 — the divergence).
+    assert.equal(derivedConcurrencyNoSeam(16, 1), 8, "default_concurrency_formula must read S=2 from the file ⇒ 16/2=8 (env knob=1 would give 16)");
+    // The phase formula also reads the file: floor(16/(2×2)) = 4 (the old env-only read would give 8).
+    assert.equal(phaseConcurrencyDefaultNoSeam(16, "1"), 4, "serial_lowconc_host_default must read S=2 ⇒ floor(16/(2×2))=4 (env knob=1 would give 8)");
+  } finally {
+    if (prevNproc === undefined) delete process.env.RESOURCE_GATE_NPROC;
+    else process.env.RESOURCE_GATE_NPROC = prevNproc;
+    if (prevKnob === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    else process.env.QUAY_MAX_CONCURRENT_SUITES = prevKnob;
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevOversub === undefined) delete process.env.QUAY_MAX_OVERSUBSCRIPTION;
+    else process.env.QUAY_MAX_OVERSUBSCRIPTION = prevOversub;
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    fs.rmSync(pinTmp, { recursive: true, force: true });
+  }
+});
+
 test("AC4 (判据4) — single suite gets nproc/S (pure computation known cost, NOT full nproc); oversub knob is the express channel, no dynamic amplification", () => {
   // A lone suite under the pure formula gets nproc/S = 8 on a 16-core 2-slot host — the known cost
   // of the pure-computation approach (no "how many suites are running" runtime read, which was the
@@ -783,13 +877,20 @@ test("AC5 — process-budget.sh header documents the counting scope (test procs 
 
 test("AC5 — scripts/test.sh uses the derived default in its exec lines (no hardcoded 8)", () => {
   const src = fs.readFileSync(TEST_SH, "utf8");
-  // All SIX invocation sites must use the derived default: 4 `exec node --test ...` lines
-  // (run_selected, --group-explicit, explicit-file, --scoped <file...>) + 2 `node --test ...`
-  // lines (--for-task and --buckets, no exec). The --scoped <file...> site was added by
-  // gap-scoped-runs-pay-full-static-check-overhead; the --buckets site was added by
-  // gap-ac124-suite-bucket-production-carrier-benefit. Both correctly use the derived default.
+  // FIVE `node --test --test-concurrency="$(default_test_concurrency)"` sites remain: 4
+  // `exec node --test ...` lines (run_selected, --group-explicit, explicit-file, --scoped
+  // <file...>) + 1 `node --test ...` line (--for-task, no exec). The --buckets site
+  // (gap-ac124-suite-bucket-production-carrier-benefit) now hands its LPT-ordered list to
+  // suite-lpt-runner.mjs via `node --test-concurrency="$(bucket_test_concurrency ...)"`
+  // (gap-m-bucket-long-tail-lpt-scheduling: run({files}) preserves order) — the derived default
+  // STILL governs it (bucket_test_concurrency falls back to default_test_concurrency when no
+  // explicit --test-concurrency flag is passed), only delivered through execArgv instead of the
+  // node --test CLI flag.
   const allSites = src.match(/node --test --test-concurrency="\$\(default_test_concurrency\)"/g);
-  assert.equal(allSites.length, 6, `expected 6 derived-concurrency invocation sites, got ${allSites.length}`);
+  assert.equal(allSites.length, 5, `expected 5 derived-concurrency node --test sites, got ${allSites.length}`);
+  // The --buckets runner derives its concurrency from the SAME default (no hardcoded literal).
+  assert.match(src, /node --test-concurrency="\$\(bucket_test_concurrency/, "the --buckets runner must derive concurrency via bucket_test_concurrency");
+  assert.match(src, /default_test_concurrency\n}/, "bucket_test_concurrency must fall back to default_test_concurrency");
   assert.doesNotMatch(src, /--test-concurrency=8/, "no hardcoded 8 may remain in test.sh");
 });
 
@@ -837,6 +938,75 @@ test("AC1/AC4 — the full-suite default path holds a single-flight flock (full-
   // must not deadlock against the suite's own lock).
   assert.match(src, /QUAY_TEST_SKIP_RESOURCE_GATE/, "nested-runner escape hatch must exist for the lock");
   assert.match(src, /QUAY_TEST_NESTED/, "same-root nested guard must exist for the lock");
+});
+
+// ── gap-suite-lock-starvation-long-validation-hold: lock-hold cap + lock_hold_ms ───────────────────
+// AC1 (能取假): a validation-type long task must not hold a single-flight slot for hours. The hold cap
+//   lives in the HOLDING process (test.sh → suite-slot-lib.sh watchdog), ⛔ not a worker-driver kill —
+//   the suite process can outlive its worker session (the suite-load-sampler orphan), so an outside
+//   tracker would be the SAME orphanization defect.
+// AC2 (能取假): lock_hold_ms rides the records so「长时间持锁」is distinguishable from「worker 慢」.
+
+test("gap-suite-lock-starvation AC1/AC2 (structural) — the hold cap + lock_hold_ms markers live in the holding process (test.sh + suite-slot-lib.sh), not worker-driver", () => {
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  const lib = fs.readFileSync(SUITE_SLOT_LIB, "utf8");
+  assert.match(src, /FULL_SUITE_LOCK_HOLD_MAX_S/, "test.sh must carry the hold-cap knob (T seconds)");
+  assert.match(src, /spawn_suite_lock_hold_watchdog/, "test.sh must spawn the hold-cap watchdog after acquiring the slot");
+  assert.match(src, /__OVERHEAD__ lock_hold_ms=/, "test.sh must emit lock_hold_ms at release (the held half, alongside lock_wait_ms)");
+  assert.match(lib, /spawn_suite_lock_hold_watchdog/, "the watchdog spawn lives in suite-slot-lib.sh (single definition point, sourceable/testable)");
+  assert.match(lib, /lock_hold_exceeded=1/, "the watchdog must record a fail-loud lock_hold_exceeded=1 marker (never silent)");
+});
+
+test("gap-suite-lock-starvation AC1/AC3 (behavioral) — the watchdog releases the slot after T (a waiter acquires within ~T, not starved) + fail-loud marker", () => {
+  const script = `
+    set -u
+    . "${SUITE_SLOT_LIB}"
+    tmp="$(mktemp -d)"
+    base="\${tmp}/full-suite.lock"
+    exec {fd}>"\${base}.0"
+    flock -n "\${fd}" || { echo "PRE-FLOCK-FAILED"; exit 1; }
+    flag="\${tmp}/hold.flag"
+    : > "\${flag}"
+    wpid="$(spawn_suite_lock_hold_watchdog "\${fd}" "\${flag}" "$$" "2")"
+    if [ -e "\${flag}" ]; then echo "SPAWN-NON-BLOCKING"; else echo "SPAWN-BLOCKED"; fi
+    sleep 3
+    exec {probe}<>"\${base}.0"
+    if flock -n "\${probe}"; then echo "PROBE-ACQUIRED"; else echo "PROBE-STILL-HELD"; fi
+    flock -u "\${probe}" 2>/dev/null || true
+    exec {probe}>&- 2>/dev/null || true
+    if [ -e "\${flag}" ]; then echo "FLAG-PRESENT"; else echo "FLAG-REMOVED"; fi
+    wait "\${wpid}" 2>/dev/null || true
+    exec {fd}>&- 2>/dev/null || true
+    rm -rf "\${tmp}"
+  `;
+  const r = spawnSync("bash", ["-c", script], { encoding: "utf8", timeout: 15_000 });
+  assert.equal(r.status, 0, `watchdog script must exit 0, got status=${r.status} stderr=${r.stderr}`);
+  assert.match(r.stdout, /SPAWN-NON-BLOCKING/, `the watchdog spawn must NOT block the caller (⛔ 命令替换阻塞 T 秒 = 生产 30min hang), got stdout:\n${r.stdout}`);
+  assert.doesNotMatch(r.stdout, /SPAWN-BLOCKED/, "the spawn must return immediately (a blocked spawn waits T for the watchdog to fire)");
+  assert.match(r.stdout, /PROBE-ACQUIRED/, `a waiter must acquire the slot after the cap (within ~T), got stdout:\n${r.stdout}`);
+  assert.doesNotMatch(r.stdout, /PROBE-STILL-HELD/, "the slot must NOT still be held after the cap");
+  assert.match(r.stdout, /FLAG-REMOVED/, "the watchdog must remove the flag after releasing (no lingering)");
+  assert.match(r.stderr, /lock_hold_exceeded=1/, `the watchdog must emit the fail-loud marker, got stderr:\n${r.stderr}`);
+});
+
+test("gap-suite-lock-starvation AC3 (negative control) — WITHOUT the watchdog the slot is still held after the same window (the release is attributable to the cap, not an artifact)", () => {
+  const script = `
+    set -u
+    tmp="$(mktemp -d)"
+    base="\${tmp}/full-suite.lock"
+    exec {fd}>"\${base}.0"
+    flock -n "\${fd}" || { echo "PRE-FLOCK-FAILED"; exit 1; }
+    sleep 1
+    # probe from a SEPARATE process (fresh OFD) — must still be held without a watchdog
+    exec {probe}<>"\${base}.0"
+    if flock -n "\${probe}"; then echo "PROBE-ACQUIRED"; else echo "PROBE-STILL-HELD"; fi
+    exec {probe}>&- 2>/dev/null || true
+    exec {fd}>&- 2>/dev/null || true
+    rm -rf "\${tmp}"
+  `;
+  const r = spawnSync("bash", ["-c", script], { encoding: "utf8", timeout: 15_000 });
+  assert.equal(r.status, 0, `negative-control script must exit 0, got status=${r.status}`);
+  assert.match(r.stdout, /PROBE-STILL-HELD/, "without the watchdog the slot stays held (the positive release is the cap's doing)");
 });
 
 // ── --for full-suite arg validation ────────────────────────────────────────────────────────────────

@@ -41,7 +41,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 
 export type Bucket = "P" | "S" | "M";
 
@@ -79,24 +79,6 @@ export function classifyPath(s: string): Bucket | null {
 }
 
 /**
- * Normalize a repo-relative path: forward slashes, drop `.`/empty segments, resolve `..`.
- * This is the single normalization the reference resolver uses so path-shape tricks (`./`, `//`)
- * cannot spoof identity (same convention as `select-tests-for-touches.ts`).
- * @param {string} p
- * @returns {string}
- */
-export function normalizeRel(p: string): string {
-  const parts = String(p).replace(/\\/g, "/").split("/");
-  const out: string[] = [];
-  for (const seg of parts) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") { out.pop(); continue; }
-    out.push(seg);
-  }
-  return out.join("/");
-}
-
-/**
  * Resolve a relative specifier (`./x`, `../x`) against a test file's repo-relative path to an
  * absolute repo-relative path.
  * @param {string} fileRel — the test file's repo-relative path (e.g. `plugin/test/foo.test.mjs`).
@@ -122,6 +104,27 @@ export function extractRelativeSpecifiers(text: string): string[] {
     const spec = m[1];
     if (spec.includes("${")) continue; // dynamic interpolation — not a static reference
     out.push(spec);
+  }
+  return out;
+}
+
+/**
+ * Extract candidate repo-relative paths from `path.join(...)` calls: the quoted string fragments
+ * concatenated with `/` (e.g. `path.join(REPO_ROOT, "plugin", "scripts", "foo.sh")` →
+ * `plugin/scripts/foo.sh`). Variables and `${…}` interpolations are skipped — not static. A
+ * candidate leading `./`/`../` is resolved against the file's dir by the caller (like a relative
+ * specifier). This closes the path.join-constructed-path blind spot
+ * (gap-suite-bucket-attribution-pathjoin-run-header-blind-spot): a mechanism test that references
+ * its subject only via `path.join(…, "plugin", "scripts", …)` (no relative import) previously lost
+ * the M signal entirely.
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function extractPathJoinSpecifiers(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/path\.join\(([^)]*)\)/g)) {
+    const frags = [...m[1].matchAll(/["'`]([^"'`${}]+)["'`]/g)].map((x) => x[1]);
+    if (frags.length >= 2) out.push(frags.join("/"));
   }
   return out;
 }
@@ -183,9 +186,27 @@ export function bucketSetOf(fileRef: string, root = findRepoRoot()): Set<Bucket>
     if (b) buckets.add(b);
   }
 
+  // 2b. path.join(...) constructed paths — the fragments hide the subject (the M/P signal was lost
+  //     before this; gap-suite-bucket-attribution-pathjoin-run-header-blind-spot). Join static
+  //     fragments; a `./`/`../`-leading candidate resolves against the file's dir.
+  for (const spec of extractPathJoinSpecifiers(text)) {
+    const candidate = spec.startsWith("./") || spec.startsWith("../") ? resolveRelative(fileRel, spec) : spec;
+    const b = classifyPath(candidate);
+    if (b) buckets.add(b);
+  }
+
   // 3. Path literals — repo-relative tree prefixes as literal text (spawn args, fixture paths, the
   //    `Run:` header). Matched over the raw text (the baseline reproduces only with these counted).
-  for (const m of text.matchAll(/plugin\/scripts(?=\/|["'`\s]|$)|packages\/[^/]+\/(?:src|bin|dist)\/|scripts\/test\.sh/g)) {
+  // The `Run:` header block ("how to run", e.g. `// Run:\n//   scripts/test.sh …`) is NOT subject
+  // evidence ("what it tests") — strip the command lines so a Run:-header `scripts/test.sh` does not
+  // alone pin a mechanism test to S (gap-suite-bucket-attribution-pathjoin-run-header-blind-spot).
+  // Other comment/assertion mentions of `scripts/test.sh` still count (a test that genuinely asserts
+  // a property of test.sh keeps its S signal).
+  const subjectText = text.replace(
+    /^[ \t]*\/\/[ \t]*Run:[^\n]*(?:\n[ \t]*\/\/[ \t]+(?:scripts\/|node |bash |npx |npm )[^\n]*)*/gm,
+    "",
+  );
+  for (const m of subjectText.matchAll(/plugin\/scripts(?=\/|["'`\s]|$)|packages\/[^/]+\/(?:src|bin|dist)\/|scripts\/test\.sh/g)) {
     const b = classifyPath(m[0]);
     if (b) buckets.add(b);
   }

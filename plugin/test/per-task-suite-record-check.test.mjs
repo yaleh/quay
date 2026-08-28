@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // per-task-suite-record-check.test.mjs — AC72 判据2/判据3 负控制 fixture for the per-task suite
 // record mechanism (plugin/scripts/per-task-suite-record.ts writer + per-task-suite-record-check.ts
 // checker). Proves the checker can go RED on the REAL AC57 7 cert absence samples (判据3, D2 不构造)
@@ -767,6 +767,20 @@ test("checker CLI — AC72 判据3 conditional: EMPTY carrier + ffs BEFORE a FUT
   assert.equal(c.ok, true);
   assert.equal(c.evaluated, false);
   assert.match(c.reason, /no-per-task-suite-after-enforcement-boundary/);
+});
+
+test("checker CLI — a pure NOT-EVALUATED result (absent record file, no lock-events) exits 3, never conflated with green", () => {
+  // The record file is ABSENT (records == null) and no --lock-events is passed ⇒ every check is
+  // NOT-EVALUATED (nothing to judge) ⇒ the overall verdict is NOT-EVALUATED and the checker exits 3
+  // (the unified third-state exit code, gap-not-evaluated-harness-third-state) — never exit 0 (green).
+  const dir = tmpDir("ptsr-ne3-");
+  const absent = path.join(dir, "no-such-records.jsonl");
+  const r = spawnSync("node", ["--experimental-strip-types", CHECKER, "--record-file", absent, "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 3, `pure NOT-EVALUATED must exit 3, not 0 (green), got ${r.status}: ${r.stdout} ${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, true);
+  assert.equal(out.evaluated, false);
+  assert.match(out.reason, /NOT-EVALUATED/);
 });
 
 // ── resolveSharedCheckout / toIsoTimestamp (pure helpers) ───────────────────────────────────────────

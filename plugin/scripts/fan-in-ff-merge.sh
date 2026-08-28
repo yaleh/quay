@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# fan-in-ff-merge.sh — AC62 持锁段: a merge lock that wraps ONLY `git merge --ff-only task/<id>`.
+# fan-in-ff-merge.sh — AC62 持锁段: a merge lock that wraps ONLY the ff. DUAL-MODE
+# (gap-fan-in-ff-ref-update-detach-develop):
+#   merge mode (merge target still checked out)  → `git merge --ff-only task/<id>` (operates on the
+#                                                   current branch ⇒ clean tree still required).
+#   push mode  (merge target detached)           → `git push . refs/heads/task/<id>:refs/heads/<merge-
+#                                                   target>` (a pure ref update — no working tree
+#                                                   touched, dirty tree structurally irrelevant).
+# The mode is auto-selected by which branch the main checkout sits on.
 # (tasks/gap-ac62-fan-in-ff-merge-lock-protocol, SPEC-fan-in-ff-merge-lock-2026-08-14)
 #
 # The fan-in protocol is split into a 无锁段 and a 持锁段:
@@ -13,7 +20,7 @@
 #     4. run the doc check            ← the ff-only gap: ff triggers no pre-merge hook (AC63)
 #   持锁段 (THIS script — the lock covers the ff; on an inert develop increment it also covers the
 #            in-lock develop re-merge + immediate re-ff, gap-fan-in-ff-retry-reruns-suite-on-inert-increment):
-#     5. acquire merge lock → git merge --ff-only task/<id> → release (success or failure)
+#     5. acquire merge lock → ff (merge --ff-only OR git push . per ff_mode) → release
 #
 # The lock is a SEPARATE flock from the suite lock (full-suite.lock.0/.1): different file, different
 # object, and — because this script REFUSES to run while a full suite is RUNNING (AC84 — probed via
@@ -37,9 +44,9 @@
 # ff 失败原因唯一、处置唯一). Anti-livelock (SPEC §7, gap-ff-livelock-trigger-no-action): the retry
 # record IS the anti-livelock data — the trigger is "同一任务 ff 失败 ≥3 次". When THIS failure is
 # the same task's attempt >= 3, the script does NOT return the plain retry (exit 1): it escalates —
-# writes a DISTINCT escalation record (with the SPEC §7 quiet-window request), prints the
-# anti-livelock action, and exits 3. The no-auto-retry guard is the attempt count itself: once a
-# task reaches >= 3, every later invocation escalates (exit 3), never exit 1.
+# writes a DISTINCT escalation record, prints the anti-livelock action, and exits 3. The no-auto-
+# retry guard is the attempt count itself: once a task reaches >= 3, every later invocation
+# escalates (exit 3), never exit 1.
 #
 # Lock events (acquire/release) are appended to .quay/fan-in-merge-lock-events.jsonl so the protocol
 # checker (fan-in-ff-protocol-check.ts) can verify AC4 (the lock covers ONLY ff, never overlaps a
@@ -69,7 +76,7 @@
 #   0  ff performed (develop/merge-target fast-forwarded to task/<taskId>)
 #   1  ff NOT possible (develop advanced — retry record written; return to 无锁段 step 1).
 #      Only for attempts 1-2. This is the "develop advanced, retry" path.
-#   2  usage / environment error (missing task branch, suite running, dirty tree, wrong branch,
+#   2  usage / environment error (missing task branch, suite running, merge target still checked out,
 #      lock timeout — NOT an ff failure, NO retry record)
 #   3  ANTI-LIVELOCK (gap-ff-livelock-trigger-no-action): this ff failure is the SAME task's
 #      attempt >= 3 (SPEC §7: "同一任务 ff 失败 ≥3 次 才谈防活锁"). Develop keeps advancing faster
@@ -97,6 +104,10 @@ retry_record=""
 escalations=""
 lock_wait=30
 worktree=""
+acquire_workflow_lock=""
+release_workflow_lock=""
+workflow_lock_events=""
+workflow_lock_hold_max_s=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -112,6 +123,10 @@ while [ "$#" -gt 0 ]; do
     --escalations) escalations="$2"; shift 2 ;;
     --lock-wait) lock_wait="$2"; shift 2 ;;
     --worktree) worktree="$2"; shift 2 ;;
+    --acquire-workflow-lock) acquire_workflow_lock="1"; shift ;;
+    --release-workflow-lock) release_workflow_lock="1"; shift ;;
+    --workflow-lock-events) workflow_lock_events="$2"; shift 2 ;;
+    --workflow-lock-hold-max-s) workflow_lock_hold_max_s="$2"; shift 2 ;;
     *) echo "fan-in-ff-merge: unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -149,6 +164,157 @@ if [ -z "${lock_events}" ]; then lock_events="${root}/.quay/fan-in-merge-lock-ev
 if [ -z "${retry_record}" ]; then retry_record="${root}/.quay/fan-in-retries.jsonl"; fi
 if [ -z "${escalations}" ]; then escalations="${root}/.quay/fan-in-ff-escalations.jsonl"; fi
 
+# ── fan-in workflow lock (gap-fan-in-workflow-lock-and-S1) ────────────────────────────────────────────
+# A SEPARATE flock from the ms-scale merge lock (fan-in-merge.lock, above): `fan-in-workflow.lock` is
+# held by a DETACHED holder for the ENTIRE fan-in workflow (merge develop → full suite → ff), so
+# develop does NOT advance during a locked task's fan-in ⇒ ff-race is structurally impossible
+# (SPEC-fan-in-workflow-lock-and-S1-2026-08-26 §2.1: two ORTHOGONAL locks — the suite lock guards
+# compute, THIS lock guards "who may merge develop now"). The ms-scale merge lock above stays as the
+# ff's own correctness lock (backward-compat + the direct/应急 path); the workflow lock serializes the
+# WHOLE workflow. AC4 (fixed lock order): this lock is acquired BEFORE the suite starts (step 0.5,
+# before step-1 merge develop) and the suite lock is acquired INSIDE the suite ⇒ "先 fan-in 锁 → 再
+# suite 锁"; fan-in 外 suite tests never request the fan-in lock (test.sh has no fan-in-workflow.lock
+# reference — the reverse order / cross-request is structurally impossible).
+# ⚠️ 执行载体修订（gap-fan-in-driver-mechanical-orchestration / SPEC-fan-in-driver-mechanical-
+#   orchestration-2026-08-27）：acquire/release 的【调用方】从 fan-in-execute.js 的 subagent prompt 挪到
+#   worker-driver.ts 的 runMechanicalFanIn——driver 代码里的确定性控制流（acquire → merge → suite →
+#   ff → release），锁持有时长从「模型 ~30min」塌缩到「机械 ~10min」（AC1）。本脚本的 acquire/release
+#   机制不变（detached holder + 幂等 + watchdog 只作死持有者兜底），只是不再被一个慢子代理拿着。
+workflow_lock_file="${git_common_dir}/fan-in-workflow.lock"
+if [ -z "${workflow_lock_events}" ]; then workflow_lock_events="${root}/.quay/fan-in-workflow-lock-events.jsonl"; fi
+workflow_lock_pidfile="/tmp/fan-in-workflow-lock-${task_id}.pid"
+workflow_lock_flag="/tmp/fan-in-workflow-lock-${task_id}.flag"
+workflow_lock_watchdog="/tmp/fan-in-workflow-lock-${task_id}.watchdog"
+workflow_lock_acquired="/tmp/fan-in-workflow-lock-${task_id}.acquired"
+workflow_lock_log="/tmp/fan-in-workflow-lock-${task_id}.log"
+# Hold-cap watchdog threshold (SPEC §6: ⛔ no NEW numeric threshold — reuse the existing suite-lock
+# FULL_SUITE_LOCK_HOLD_MAX_S baseline; the fan-in lock's own value is derived later once the cost
+# structure is measured). FANIN_WORKFLOW_LOCK_HOLD_MAX_S overrides for a longer workflow.
+if [ -z "${workflow_lock_hold_max_s}" ]; then
+  workflow_lock_hold_max_s="${FANIN_WORKFLOW_LOCK_HOLD_MAX_S:-${FULL_SUITE_LOCK_HOLD_MAX_S:-3600}}"
+fi
+
+# The watchdog function (suite-slot-lib.sh spawn_suite_lock_hold_watchdog) — the SAME「持锁进程子进程」
+# pattern the suite lock uses (gap-suite-lock-starvation-long-validation-hold AC1). Sourced best-effort:
+# when it is absent (hermetic fan-in-ff-merge tests without the suite lib on the path), the holder still
+# holds the flock and crash-autorelease (flock fd close on process exit) covers a dead holder; the
+# hang-but-alive hold-cap branch is then unavailable (fail-loud, not silent — see the acquire block).
+_workflow_watchdog_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/suite-slot-lib.sh"
+
+# Acquire: spawn a detached holder that flocks fan-in-workflow.lock and holds until the release flag is
+# removed. IDEMPOTENT + retriable across the Bash 600s hard limit (the confirmation wait below may be
+# killed and re-run; the holder survives detached, so a re-run must NOT spawn a second holder). Two
+# markers make that possible: the pidfile is written BEFORE flock (a holder is trying), the acquired
+# marker is written AFTER flock (a holder HOLDS the lock). The holder spawns the suite-lock hold
+# watchdog as a child (inherited fd ⇒ the watchdog releases a crashed/hung holder's slot). flock is
+# UNBOUNDED (`flock -x`, no -w): the fan-in lock is a CORRECTNESS lock ("who may merge develop now"),
+# which never fail-closes on a long queue wait — the watchdog is what bounds a dead holder's hold, not
+# a timeout (SPEC-suite-lifecycle §1.1: 正确性锁绝不因等待过久而放行).
+if [ "${acquire_workflow_lock}" = "1" ]; then
+  mkdir -p "$(dirname "${workflow_lock_events}")" 2>/dev/null || true
+  if [ -n "${run_id}" ]; then _wfl_run_id_json="\"${run_id}\""; else _wfl_run_id_json="null"; fi
+  if [ -n "${agent_id}" ]; then _wfl_agent_id_json="\"${agent_id}\""; else _wfl_agent_id_json="null"; fi
+  # Idempotent + stale-runId-aware (gap-fan-in-workflow-lock-stale-runid-detached-holder): the pidfile now
+  # records `$$ <runId>` (a holder's PID + the runId it was spawned for). A live holder whose runId does
+  # NOT match THIS dispatch is a STALE holder — a detached holder spawned by a PREVIOUS dispatch that was
+  # killed at its confirmation wait and survived. Two cases, branched on the acquired marker:
+  #   - NO acquired marker ⇒ the stale holder is still QUEUED in flock (it has never held the lock / done
+  #     no work) ⇒ kill it + re-spawn with THIS runId (a queued holder is stuck in flock, so `rm flag`
+  #     alone would not stop it — a kill is the only way).
+  #   - acquired marker present ⇒ the stale holder ALREADY HOLDS the lock (merge/suite/ff in progress) ⇒
+  #     leave it alone (let it finish; the watchdog caps a dead hold).
+  _wfl_saved_pid=""
+  _wfl_saved_runid=""
+  if [ -s "${workflow_lock_pidfile}" ]; then
+    read -r _wfl_saved_pid _wfl_saved_runid < "${workflow_lock_pidfile}" 2>/dev/null || true
+  fi
+  _wfl_respawn=0
+  if [ -n "${_wfl_saved_pid}" ] && kill -0 "${_wfl_saved_pid}" 2>/dev/null; then
+    if [ "${_wfl_saved_runid}" != "${run_id}" ] && [ ! -e "${workflow_lock_acquired}" ]; then
+      # A stale QUEUED holder (different runId, never acquired ⇒ never did work) — kill it, then re-spawn.
+      kill "${_wfl_saved_pid}" 2>/dev/null || true
+      _wfl_respawn=1
+    fi
+    # else: holder is THIS runId, or it already holds the lock (acquired marker present) — reuse it.
+  else
+    _wfl_respawn=1
+  fi
+
+  if [ "${_wfl_respawn}" = "1" ]; then
+    rm -f "${workflow_lock_pidfile}" "${workflow_lock_flag}" "${workflow_lock_watchdog}" "${workflow_lock_acquired}"
+    # The release flag is created HERE (before spawn) so the holder's `while [ -e flag ]` hold-loop and
+    # the watchdog's `[ -e flag ] || exit` both see a held lock from the first instant — no race window
+    # where the pidfile exists but the flag does not (which would let a release no-op then leak the hold).
+    touch "${workflow_lock_flag}"
+    # setsid + & + disown: the holder lives in its own session, independent of the caller (which is a
+    # subagent bash step — it must survive the step's return, exactly like the detached suite).
+    setsid bash -c '
+      printf "%s\n" "$$ ${13}" > "$3"                  # alive marker BEFORE flock: pid + runId (a holder is trying)
+      _wfl_fd=""
+      exec {_wfl_fd}>"$1" || { rm -f "$3"; exit 2; }
+      flock -x "${_wfl_fd}" || { rm -f "$3"; exit 2; }
+      touch "${12}"                                   # acquired marker AFTER flock (the lock is held)
+      printf "%s\n" "{\"event\":\"acquire\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"epoch\":$(date +%s),\"taskId\":\"$4\",\"pid\":$$,\"runId\":$5,\"agentId\":$6}" >> "$7"
+      if [ -f "$8" ]; then . "$8"; spawn_suite_lock_hold_watchdog "${_wfl_fd}" "$9" "$$" "${10}" > "${11}" 2>/dev/null; fi
+      while [ -e "$9" ]; do sleep 1; done
+      printf "%s\n" "{\"event\":\"release\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"epoch\":$(date +%s),\"taskId\":\"$4\",\"pid\":$$,\"runId\":$5,\"agentId\":$6}" >> "$7"
+      flock -u "${_wfl_fd}" 2>/dev/null || true
+      rm -f "$3" "$9" "${12}" 2>/dev/null || true
+    ' _ "${workflow_lock_file}" "${lock_wait}" "${workflow_lock_pidfile}" "${task_id}" "${_wfl_run_id_json}" "${_wfl_agent_id_json}" "${workflow_lock_events}" "${_workflow_watchdog_lib}" "${workflow_lock_flag}" "${workflow_lock_hold_max_s}" "${workflow_lock_watchdog}" "${workflow_lock_acquired}" "${run_id}" >> "${workflow_lock_log}" 2>&1 & disown
+  fi
+  # Wait for the acquired marker (the holder HOLDS the lock). Unbounded — the watchdog bounds the current
+  # holder's hold, so a queued acquire WILL eventually land. Re-entrant: a killed bash step re-runs this
+  # wait and the idempotency guard above keeps the same holder. The holder dying without acquiring is the
+  # only fail path (flock error — a genuine environment failure, not a queue wait). A short grace first
+  # lets the async `setsid … &` holder write its alive marker before we can tell "spawning" from "dead".
+  _wfl_grace=0
+  while [ ! -s "${workflow_lock_pidfile}" ] && [ ! -e "${workflow_lock_acquired}" ] && [ "${_wfl_grace}" -lt 30 ]; do
+    sleep 0.1
+    _wfl_grace=$((_wfl_grace + 1))
+  done
+  _wfl_holder_pid=""
+  while [ ! -e "${workflow_lock_acquired}" ]; do
+    _wfl_holder_pid=""
+    if [ -s "${workflow_lock_pidfile}" ]; then
+      read -r _wfl_holder_pid _ < "${workflow_lock_pidfile}" 2>/dev/null || true
+    fi
+    if [ -z "${_wfl_holder_pid}" ] || ! kill -0 "${_wfl_holder_pid}" 2>/dev/null; then
+      echo "fan-in-ff-merge: workflow lock holder died before acquiring ${workflow_lock_file}" >&2
+      exit 2
+    fi
+    sleep 0.5
+  done
+  # The acquired marker was already present on the reuse path (the loop never ran) — read the pid once more.
+  if [ -z "${_wfl_holder_pid}" ] && [ -s "${workflow_lock_pidfile}" ]; then
+    read -r _wfl_holder_pid _ < "${workflow_lock_pidfile}" 2>/dev/null || true
+  fi
+  echo "fan-in-ff-merge: acquired fan-in workflow lock ${workflow_lock_file} (holder ${_wfl_holder_pid})"
+  exit 0
+fi
+
+# Release: remove the release flag so the holder writes the release event + drops the lock, then wait
+# (bounded) for the holder to exit. Idempotent — a missing holder (crash before release) is a clean
+# no-op (flock already auto-released on the holder's death).
+if [ "${release_workflow_lock}" = "1" ]; then
+  rm -f "${workflow_lock_flag}"
+  _wfl_wait=0
+  while [ -s "${workflow_lock_pidfile}" ]; do
+    _wfl_holder_pid=""
+    read -r _wfl_holder_pid _ < "${workflow_lock_pidfile}" 2>/dev/null || true
+    if [ -z "${_wfl_holder_pid}" ] || ! kill -0 "${_wfl_holder_pid}" 2>/dev/null; then
+      break
+    fi
+    sleep 0.2
+    _wfl_wait=$((_wfl_wait + 1))
+    if [ "${_wfl_wait}" -gt 150 ]; then
+      echo "fan-in-ff-merge: workflow lock holder ${_wfl_holder_pid} did not exit after release — leaving it (watchdog will cap the hold)" >&2
+      break
+    fi
+  done
+  echo "fan-in-ff-merge: released fan-in workflow lock ${workflow_lock_file}"
+  exit 0
+fi
+
 # ── inert-delta classifier (gap-fan-in-ff-retry-reruns-suite-on-inert-increment) ────────────────────
 # The "惰性" (doc-only) judgment — used by BOTH the suite-certificate gate (AC3) and the in-lock
 # ff-retry (AC1) — reuses the ONE computed classifier: select-static-checks-for-touches.ts
@@ -159,6 +325,9 @@ if [ -z "${escalations}" ]; then escalations="${root}/.quay/fan-in-ff-escalation
 # select-static-checks-for-touches.ts / scripts/test.sh annotations exercises its own fix.
 classify_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/select-static-checks-for-touches.ts"
 classify_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# The Touches-intersection classifier (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path) — used by
+# the merge-mode benign-runtime-dirty pass-through. Same self-bootstrapping resolution as classify_script.
+touches_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/touches-orthogonality-check.ts"
 
 # ── AC78 判据2(c): --agent-id 自校验 (manager 2026-08-14 裁定并入实现侧, gap-ac78) ────────────────
 # --agent-id is free text — anything passes. Fail-closed: if it resolves to a TOP-LEVEL session id
@@ -182,26 +351,33 @@ if ! git -C "${root}" rev-parse --verify --quiet "refs/heads/task/${task_id}" >/
   exit 2
 fi
 
-# The merge target: the branch the current checkout sits on (the inner shared checkout on
-# $MERGE_TARGET), or the explicit --merge-target. `git merge --ff-only` operates on the current branch,
-# so it MUST be the merge target — a mismatch is an environment error, not an ff failure.
+# The merge target: the branch the task fast-forwards into. Defaults to the BRANCH NAME (develop), not
+# `branch --show-current` — the old merge --ff-only operated on the current branch (which therefore had
+# to be the merge target); the ref-update ff (git push .) moves the ref without touching any working
+# tree, so the main checkout no longer needs to sit ON the merge target.
 if [ -z "${merge_target}" ]; then
-  merge_target="$(git -C "${root}" branch --show-current 2>/dev/null || true)"
-  if [ -z "${merge_target}" ]; then
-    echo "fan-in-ff-merge: cannot determine the current branch (detached HEAD?) in ${root}; pass --merge-target" >&2
-    exit 2
-  fi
+  merge_target="develop"
+fi
+# DUAL-MODE (gap-fan-in-ff-ref-update-detach-develop): the ff degenerates to a PURE REF UPDATE (git
+# push .) only AFTER the merge target is detached from the main checkout (the doc-only work branch
+# occupies it). Until then (develop still checked out), the ff stays the old `git merge --ff-only`,
+# which operates on the current branch and therefore still requires a clean tree. The ref update is
+# REFUSED by git when the target is the current branch (receive.denyCurrentBranch), so the two modes
+# are mutually exclusive and auto-selected by which branch the main checkout sits on. This keeps the
+# mechanism landed WITHOUT breaking fan-in during the transition — the detach + consumer-freshness fix
+# (二阶效应①) is a follow-up activation, not a precondition of this task's own landing.
+current="$(git -C "${root}" branch --show-current 2>/dev/null || true)"
+if [ "${current}" = "${merge_target}" ]; then
+  ff_mode="merge"
 else
-  current="$(git -C "${root}" branch --show-current 2>/dev/null || true)"
-  if [ "${current}" != "${merge_target}" ]; then
-    echo "fan-in-ff-merge: current checkout is on '${current}', not the merge target '${merge_target}' — the ff must run in the checkout that owns the target branch" >&2
-    exit 2
-  fi
+  ff_mode="push"
 fi
 
-# Clean tree required: an ff that would overwrite uncommitted work is an environment error, not a
-# "develop advanced" retry. (The shared checkout is clean at fan-in time; a dirty tree means the
-# caller broke the protocol's assumption.)
+if [ "${ff_mode}" = "merge" ]; then
+# ── clean-tree check (merge mode only) ────────────────────────────────────────────────────────────
+# `git merge --ff-only` operates on the current branch and overwrites the working tree ⇒ a clean tree
+# is still required while the merge target remains checked out. Two benign dirty shapes are handled
+# before the refusal (the ref-update mode below needs NONE of this — it never touches the tree):
 #
 # ── auto-converge (gap-fan-in-clean-tree-auto-converge-promotion-status, 方案③ 防御纵深) ─────────
 # ONE benign dirty shape is auto-converged before the refusal: promotion-driver's status-only flip
@@ -209,11 +385,8 @@ fi
 # real protocol violation. Criterion is CONTENT-level (⛔ not path-level): porcelain must be ALL
 # `tasks/*.md`, AND each file's `git diff HEAD` must hit ONLY the frontmatter `status:` line (every
 # +/- line matches `status:`; any body edit or other-field edit fails). When satisfied, stage + commit
-# those files (--no-verify — a mechanical status flip is content-neutral; the hook's doc/Touches
-# checks guard authored CONTENT and shelling test.sh per converge is slow; pathspec-limited ⛔ never a
-# bare commit sweeping the shared index, memory git-commit-no-pathspec-commits-shared-index), then
-# fall through to the ORIGINAL clean-tree check (now clean). Non-status-only dirty still refuses —
-# the protection is NOT widened (AC2).
+# those files (--no-verify — a mechanical status flip is content-neutral; pathspec-limited ⛔ never a
+# bare commit sweeping the shared index), then fall through to the ORIGINAL clean-tree check (now clean).
 porcelain="$(git -C "${root}" status --porcelain 2>/dev/null || true)"
 if [ -n "${porcelain}" ]; then
   converge_ok=1
@@ -235,7 +408,6 @@ if [ -n "${porcelain}" ]; then
     # content-level: the file's full uncommitted diff (HEAD→worktree) must hit ONLY the status: line
     _pdiff="$(git -C "${root}" diff HEAD -- "${_ppath}" 2>/dev/null | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' || true)"
     if [ -z "${_pdiff}" ]; then
-      # a modified tracked file with an empty +/- diff (e.g. mode-only) is not a status flip
       converge_ok=0; break
     fi
     _nonstatus="$(printf '%s\n' "${_pdiff}" | grep -vE '^[+-]status:' || true)"
@@ -258,11 +430,56 @@ EOF
   porcelain="$(git -C "${root}" status --porcelain 2>/dev/null || true)"
 fi
 
+# ── benign runtime dirty (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path) ───────────────
+# A SECOND benign dirty shape is auto-passed (仅放行不处置 — NOT committed, NOT gitignored) before the
+# refusal: an UNTRACKED runtime file under .quay/ that is OUTSIDE this task's ## Touches (the
+# gitignore-missed runtime-state family — serve-send message-receipts.jsonl). The ff proceeds; the file
+# stays untracked. Criterion is CONTENT-level (⛔ fail-closed): porcelain must be ALL `?? .quay/…`
+# entries AND none may match the task's ## Touches (reuse parseTouches + matchGlob). Any tracked
+# modification, a non-.quay untracked file, or a dirty file within the task's ## Touches ⇒ NOT benign.
 if [ -n "${porcelain}" ]; then
-  echo "fan-in-ff-merge: working tree not clean in ${root} — the ff must run on a clean checkout (found uncommitted changes):" >&2
+  benign_ok=1
+  benign_paths=""
+  while IFS= read -r _bline; do
+    [ -n "${_bline}" ] || continue
+    _bstatus="${_bline:0:2}"
+    _bpath="${_bline:3}"
+    case "${_bstatus}" in
+      "??") : ;;
+      *) benign_ok=0; break ;;
+    esac
+    case "${_bpath}" in
+      .quay|.quay/|.quay/*) : ;;
+      *) benign_ok=0; break ;;
+    esac
+    benign_paths="${benign_paths}${benign_paths:+ }${_bpath}"
+  done <<EOF
+${porcelain}
+EOF
+
+  if [ "${benign_ok}" = "1" ] && [ -n "${benign_paths}" ]; then
+    # shellcheck disable=SC2086
+    touches_verdict="$(node --experimental-strip-types "${touches_script}" --runtime-dirty --task "${task_id}" --root "${root}" ${benign_paths} 2>/dev/null)" || touches_verdict="NOT-BENIGN (classifier failed)"
+    case "${touches_verdict}" in
+      BENIGN*) : ;;
+      *) benign_ok=0 ;;
+    esac
+    if [ "${benign_ok}" = "1" ]; then
+      echo "fan-in-ff-merge: passed through a benign runtime-dirty tree (untracked .quay/ runtime files outside the task's ## Touches) — ${benign_paths}" >&2
+      porcelain=""
+    fi
+  fi
+fi
+
+if [ -n "${porcelain}" ]; then
+  echo "fan-in-ff-merge: working tree not clean in ${root} — the merge-mode ff must run on a clean checkout (found uncommitted changes):" >&2
   printf '%s\n' "${porcelain}" | sed 's/^/fan-in-ff-merge:   /' >&2
   exit 2
 fi
+# ── end clean-tree check (merge mode) ────────────────────────────────────────────────────────────
+fi
+# (push mode needs NO clean tree — git push . moves the ref without touching the working tree, so the
+#  main checkout's dirty state is STRUCTURALLY irrelevant; that is the whole point of the ref update.)
 
 # AC1 判据收窄 (gap-suite-concurrency-ff-gate-and-slot-ssot, 人 2026-08-18「把 ff 的判据从『任何 suite
 # 在跑』收窄到『本任务自己的 suite 在跑』」): the ff gate reads THIS TASK's suite certificate, NOT any
@@ -337,11 +554,28 @@ if [ "${suite_cert_ok}" != "1" ]; then
   exit 2
 fi
 
+# JSON-string-or-null encoding for runId/agentId. The `:+\"...\"${x:-null}` compound is WRONG (it fires
+# BOTH branches when the value is non-empty ⇒ the value is emitted twice, corrupting the JSON — a real
+# bug caught while wiring --agent-id). Precompute with an explicit if/else so a SET value is ONE quoted
+# string and an ABSENT value is `null` (the absence the executor check flags as the main-thread form).
+# Computed BEFORE the attempt counting below — the count keys on runId (gap-fan-in-ff-retry-counter-
+# scope), so run_id_json must already be resolved here.
+if [ -n "${run_id}" ]; then run_id_json="\"${run_id}\""; else run_id_json="null"; fi
+if [ -n "${agent_id}" ]; then agent_id_json="\"${agent_id}\""; else agent_id_json="null"; fi
+
 # ── attempt counting (判据3: 第几次) ──────────────────────────────────────────────────────────────────
 # The retry record is the anti-livelock data (§7): the attempt number is "how many times THIS task's
 # ff has failed already" + 1 (the current failure is the next try). A missing/empty retry file counts
 # zero prior failures ⇒ the first failure is attempt 1.
-prior_failures="$( { grep -c "\"taskId\":\"${task_id}\"" "${retry_record}" 2>/dev/null || true; } | tail -n1 )"
+# gap-fan-in-ff-retry-counter-scope (AC1/AC2): the retry record is APPEND-ONLY — no code prunes it
+# (grep -rn 'fan-in-retries.jsonl' plugin/ confirms it is never trimmed on success/re-dispatch), so a
+# taskId-only count accumulates across ALL dispatches. `maxFfRetries=3` in fan-in-execute.js is a
+# PER-DISPATCH budget (each fresh dispatch = a fresh runId, starting at 0) — the two counters' scopes
+# were mismatched: a task that failed twice historically was read as attempt 3 on a LATER dispatch's
+# first real try and escalated before spending its own budget. Fix: count only failures carrying the
+# CURRENT dispatch's runId, so a fresh dispatch's failures start from 0. (runId null/empty ⇒ the
+# pre-AC67 / main-thread form with no per-dispatch identity — those still group together as before.)
+prior_failures="$( { grep -c "\"taskId\":\"${task_id}\".*\"runId\":${run_id_json}" "${retry_record}" 2>/dev/null || true; } | tail -n1 )"
 [ -n "${prior_failures}" ] || prior_failures=0
 attempt=$(( prior_failures + 1 ))
 
@@ -349,12 +583,12 @@ attempt=$(( prior_failures + 1 ))
 # flock on an open fd: the lock is released automatically when the fd closes (process exit), so a
 # crash mid-ff cannot leak it — no stale-lock recovery design needed (§2). --lock-wait bounds the
 # wait (default 30s; the hold is milliseconds so a waiter never actually waits this long).
-# ⚠️ lock wait 语义（gap-single-flight-lock-wait-shorter-than-suite）：本锁是【正确性锁】——只包
+# ⚠️ lock wait 语义（gap-single-flight-lock-timeout-double-value）：本锁是【正确性锁】——只包
 # git merge --ff-only（毫秒级 hold），wait 30s 绰绰有余。它【不是】suite 的 single-flight【资源锁】
-# （<git-common-dir>/full-suite.lock.0/.1，hold 是整套 suite ~840s）。后者 600s 默认 < suite 时长 ⇒
-# 第 3+ suite 白等 fail-closed「not starting」；fan-in-execute.js 启动 detached suite 时经 env 把它
-# 提到 ≥ suite 时长（FULL_SUITE_LOCK_TIMEOUT，默认 900s）。fan-in 流程显式传 --lock-wait
-# （mergeLockWaitSecs，默认 30s，fan-in-execute.js args）——两个锁的 wait 语义互不混淆。
+# （<git-common-dir>/full-suite.lock.0/.1，hold 是整套 suite）。后者现在是【无界排队等待】（test.sh
+# full_suite_lock_acquire：flock crash-autorelease 保证死持有者不泄漏槽；无双值、无 fail-closed
+# 「not starting」）。fan-in 流程显式传 --lock-wait（mergeLockWaitSecs，默认 30s，fan-in-execute.js
+# args）——两个锁的 wait 语义互不混淆。
 mkdir -p "$(dirname "${lock_events}")" "$(dirname "${retry_record}")" "$(dirname "${escalations}")" 2>/dev/null || true
 lock_fd=9
 exec {lock_fd}>"${lock_file}"
@@ -365,21 +599,24 @@ fi
 
 now_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 now_epoch="$(date +%s)"
-# JSON-string-or-null encoding for runId/agentId. The `:+\"...\"${x:-null}` compound is WRONG (it fires
-# BOTH branches when the value is non-empty ⇒ the value is emitted twice, corrupting the JSON — a real
-# bug caught while wiring --agent-id). Precompute with an explicit if/else so a SET value is ONE quoted
-# string and an ABSENT value is `null` (the absence the executor check flags as the main-thread form).
-if [ -n "${run_id}" ]; then run_id_json="\"${run_id}\""; else run_id_json="null"; fi
-if [ -n "${agent_id}" ]; then agent_id_json="\"${agent_id}\""; else agent_id_json="null"; fi
+# (run_id_json / agent_id_json are resolved above, before attempt counting — see the encoding note there.)
 # Lock-hold event (acquire) — the checker reads these to verify the lock covers ONLY the ff.
 printf '%s\n' "{\"event\":\"acquire\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"taskId\":\"${task_id}\",\"pid\":$$,\"runId\":${run_id_json},\"agentId\":${agent_id_json}}" >> "${lock_events}"
 
 merge_rc=0
 merge_err=""
 develop_head_before="$(git -C "${root}" rev-parse "${merge_target}" 2>/dev/null || echo "unresolvable")"
-# The ff inside the lock. `--ff-only` can never create a merge commit or a conflict: it either
-# fast-forwards the ref or refuses (develop advanced since step 1's merge develop).
-if ! merge_out="$(git -C "${root}" merge --ff-only "task/${task_id}" 2>&1)"; then
+# The ff inside the lock (DUAL-MODE, gap-fan-in-ff-ref-update-detach-develop):
+#   push mode  (merge target detached)    → `git push .` — a pure ref update, no working tree touched
+#                                           (the main checkout's dirty state is structurally irrelevant).
+#   merge mode (merge target checked out) → `git merge --ff-only` — operates on the current branch.
+# Both fast-forward and refuse a non-ff the same way ("develop advanced since step 1's merge develop").
+if [ "${ff_mode}" = "push" ]; then
+  ff_cmd=(git -C "${root}" push . "refs/heads/task/${task_id}:refs/heads/${merge_target}")
+else
+  ff_cmd=(git -C "${root}" merge --ff-only "task/${task_id}")
+fi
+if ! merge_out="$("${ff_cmd[@]}" 2>&1)"; then
   merge_rc=1
   merge_err="$(printf '%s\n' "${merge_out}" | head -n1)"
   # gap-fan-in-ff-retry-reruns-suite-on-inert-increment: ff 失败唯一原因 = develop 前进。当场判 develop
@@ -396,7 +633,7 @@ if ! merge_out="$(git -C "${root}" merge --ff-only "task/${task_id}" 2>&1)"; the
       if [ "${code_delta}" != "__CLASSIFY_FAILED__" ] && [ -z "${code_delta}" ]; then
         # inert increment ⇒ merge develop into the task branch (in the worktree), then retry the ff.
         if git -C "${worktree}" merge --no-edit "${merge_target}" >/dev/null 2>&1; then
-          if merge_out2="$(git -C "${root}" merge --ff-only "task/${task_id}" 2>&1)"; then
+          if merge_out2="$("${ff_cmd[@]}" 2>&1)"; then
             merge_rc=0
             merge_err=""
           else
@@ -443,15 +680,15 @@ if [ "${merge_rc}" -ne 0 ]; then
   #      task / attempt / develop head / caller identity; exit code 3 is distinct from 1 (retry) and
   #      2 (usage/env), so a caller can mechanically tell "anti-livelock, do not auto-retry" apart
   #      from "develop advanced, retry".
-  #   2. REQUEST A QUIET WINDOW — the escalation record carries the SPEC §7 quiet-window request
-  #      (who holds: all layers except the fan-in executor; 判据: `git log <mergeTarget>
-  #      --since=<ts>` empty; ends early on ff success — the AC63 pattern). Other layers read this
-  #      record and hold develop so the retry can land.
-  #   3. STOP AUTOMATIC RETRY — the guard is the attempt count itself: once attempt >= 3, THIS and
+  #   2. STOP AUTOMATIC RETRY — the guard is the attempt count itself: once attempt >= 3, THIS and
   #      every later invocation escalates (exit 3), never returns the plain retry exit 1.
+  #   (gap-quiet-window-holder-scope-wider-than-consumer: the SPEC §7 quiet-window REQUEST that used
+  #    to be item 2 here is RETIRED — it held a non-bottleneck. The escalation record is now a pure
+  #    stop-retry signal + traceability carrier; the real bottleneck, single-flight lock queueing,
+  #    is handled by gap-suite-lock-starvation-long-validation-hold.)
   if [ "${attempt}" -ge 3 ]; then
-    printf '%s\n' "{\"event\":\"ff-escalation\",\"taskId\":\"${task_id}\",\"attempt\":${attempt},\"developHead\":\"${develop_head_now}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"mergeTarget\":\"${merge_target}\",\"action\":\"request-quiet-window-and-stop-retry\",\"quietWindow\":{\"requested\":true,\"holder\":\"all-layers-except-fan-in-executor\",\"criterion\":\"git log ${merge_target} --since=${now_iso} empty\",\"windowMinutes\":20,\"endsEarly\":\"ff-success\"}}" >> "${escalations}"
-    echo "fan-in-ff-merge: FF FAILED (attempt ${attempt} >= 3) — ANTI-LIVELOCK (SPEC §7, gap-ff-livelock-trigger-no-action): develop keeps advancing; escalating + requesting a quiet window + STOPPING automatic retry. Escalation record written to ${escalations}. Do NOT auto-retry: coordinate a develop-hold (quiet window), re-merge develop once quiet, then re-run." >&2
+    printf '%s\n' "{\"event\":\"ff-escalation\",\"taskId\":\"${task_id}\",\"attempt\":${attempt},\"developHead\":\"${develop_head_now}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"mergeTarget\":\"${merge_target}\",\"action\":\"stop-retry\"}" >> "${escalations}"
+    echo "fan-in-ff-merge: FF FAILED (attempt ${attempt} >= 3) — ANTI-LIVELOCK (SPEC §7, gap-ff-livelock-trigger-no-action): develop keeps advancing; escalating + STOPPING automatic retry. Escalation record written to ${escalations}. Do NOT auto-retry: re-merge develop and re-run the fan-in once develop settles." >&2
     echo "fan-in-ff-merge: measure ff_only_locked=false" >&2
     exit 3
   fi
@@ -468,6 +705,15 @@ if [ "${post_head}" != "${task_tip}" ]; then
   echo "fan-in-ff-merge: post-check FAILED — ${merge_target} is at ${post_head}, expected task tip ${task_tip}; needs human" >&2
   exit 1
 fi
+# ── escalation resolution（gap-fan-in-ff-livelock-quiet-window-no-consumer 的兑现半边；quiet-window
+#    请求已随 gap-quiet-window-holder-scope-wider-than-consumer 退役，本记录保留为 escalation 的
+#    【已落地】兑现信号，供 slot-refill 的 ff-starvation relief 读「该任务 escalation 已解除」）─────
+# On ff SUCCESS the escalated task has landed — append a resolution record (event
+# "ff-escalation-resolved") to the SAME escalation file so the escalation ledger marks the task's
+# escalation as cleared (slot-refill's computeUnresolvedEscalationTaskIds reads the LATEST event: a
+# non-ff-escalation latest event = resolved). Written unconditionally: a resolution with no prior
+# request is a no-op for that consumer. Same file, same append — ⛔ no new jsonl.
+printf '%s\n' "{\"event\":\"ff-escalation-resolved\",\"taskId\":\"${task_id}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"mergeTarget\":\"${merge_target}\"}" >> "${escalations}"
 echo "fan-in-ff-merge: OK — ${merge_target} fast-forwarded to task/${task_id} (${post_head}) [before ${develop_head_before}]${run_id:+ (runId: ${run_id})}"
 echo "fan-in-ff-merge: measure ff_only_locked=true"
 exit 0

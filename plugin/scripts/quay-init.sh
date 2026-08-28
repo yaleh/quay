@@ -227,6 +227,90 @@ except Exception:
 ' "$WORKSPACE_ROOT/.quay/quay-init-state.json" "$rel"
 }
 
+# ── batched file-state precompute (gap-suite-serial-install-copy-one-subprocess-batching) ────────────
+# copy_one / compute_drift_report used to spawn ONE `cmp -s` per file (plus one `sha256sum | cut` per
+# managed file) — ~400 subprocess spawns per --loop run, the dominant wall-clock cost of the serial-
+# install family (the 7 slow files run a real `quay init --loop` under concurrency-1 serial, so their
+# wall-clock floor IS the per-file subprocess count). The two associative arrays below hold the result
+# of ONE python3 pass over a <src>\t<dst> manifest:
+#   _CMP_STATE[dst] ∈ missing|identical|differ   (byte comparison, replaces per-file `cmp -s`)
+#   _DST_HASH[dst]  = sha256(dst) when present   (replaces per-managed-file `sha256sum | cut`)
+# The copy_one decision logic and every output line are UNCHANGED — only the comparison primitive is
+# swapped for an array lookup (AC2: byte-identical output). A dst whose state was NOT precomputed
+# (e.g. a standalone copy_one caller outside a precompute window) falls back to the subprocess form,
+# so a future caller stays correct, just unbatched.
+declare -A _CMP_STATE=()
+declare -A _DST_HASH=()
+
+# _precompute_states <manifest> — ONE python3 pass over a <src>\t<dst> manifest (one pair per line),
+# classifying each pair by in-memory byte comparison and hashing each present dst. Populates
+# _CMP_STATE + _DST_HASH. Deterministic: output order = manifest order, so the caller feeds a
+# manifest built in lay-down order and the copy_one lines stay byte-identical to the pre-batch form.
+_precompute_states() {
+  local manifest="$1" dst state hash
+  _CMP_STATE=()
+  _DST_HASH=()
+  while IFS=$'\t' read -r dst state hash; do
+    [ -n "$dst" ] || continue
+    _CMP_STATE["$dst"]="$state"
+    # `if` (not `&&`) so the loop body always ends exit-0 — under `set -e` a body ending on
+    # `[ -n "$hash" ] && …` aborts the whole loop when the last row's hash is empty (missing).
+    if [ -n "$hash" ]; then _DST_HASH["$dst"]="$hash"; fi
+  done < <(python3 - "$manifest" <<'PYEOF'
+import sys, os, hashlib
+manifest = sys.argv[1]
+pairs = []
+with open(manifest, "r", encoding="utf-8") as f:
+    for ln in f:
+        ln = ln.rstrip("\n")
+        if not ln or "\t" not in ln:
+            continue
+        src, dst = ln.split("\t", 1)
+        pairs.append((src, dst))
+for src, dst in pairs:
+    if not os.path.isfile(dst):
+        print("%s\tmissing\t" % dst)
+        continue
+    try:
+        with open(src, "rb") as fh:
+            sc = fh.read()
+        with open(dst, "rb") as fh:
+            dc = fh.read()
+    except OSError:
+        # Unreadable → treat as differ (the pre-batch `cmp -s` returned non-zero the same way).
+        print("%s\tdiffer\t" % dst)
+        continue
+    state = "identical" if sc == dc else "differ"
+    print("%s\t%s\t%s" % (dst, state, hashlib.sha256(dc).hexdigest()))
+PYEOF
+)
+}
+
+# _is_identical <src> <dst> — the batched replacement for `cmp -s "$src" "$dst"`. Consults the
+# precomputed _CMP_STATE when present; falls back to `cmp -s` for a dst that was never precomputed.
+_is_identical() {
+  local src="$1" dst="$2" st
+  st="${_CMP_STATE[$dst]:-}"
+  case "$st" in
+    identical) return 0 ;;
+    differ) return 1 ;;
+    missing) return 1 ;;
+    *) cmp -s "$src" "$dst" ;;
+  esac
+}
+
+# _dst_sha256 <dst> — the batched replacement for `sha256sum "$dst" | cut -d' ' -f1`. Consults the
+# precomputed _DST_HASH when present; falls back to the two-subprocess form otherwise.
+_dst_sha256() {
+  local dst="$1" h
+  h="${_DST_HASH[$dst]:-}"
+  if [ -n "$h" ]; then
+    printf '%s' "$h"
+  else
+    sha256sum "$dst" | cut -d' ' -f1
+  fi
+}
+
 # idempotent copy of one file. The 3rd arg MODE ("clean"|"preserve"|"managed", default preserve)
 # distinguishes three conflict classes for a same-name-different-content target:
 #   clean    — PRODUCT-OWNED files (loop mechanism executables: 可执行文件一律原样复制，只生成配置).
@@ -255,7 +339,7 @@ copy_one() {
       echo "  copied: $dst"
     fi
     COPIED=$((COPIED + 1))
-  elif cmp -s "$src" "$dst"; then
+  elif _is_identical "$src" "$dst"; then
     SKIPPED=$((SKIPPED + 1))
     if [ "$DRY_RUN" = true ]; then
       echo "  would-skip (identical): $dst"
@@ -286,7 +370,7 @@ copy_one() {
     # hash is a genuine user edit → CONFLICT, preserved (AC6 must still fire).
     local laid_hash cur_hash
     laid_hash="$(state_laid_hash "${dst#"$WORKSPACE_ROOT"/}")"
-    cur_hash="$(sha256sum "$dst" | cut -d' ' -f1)"
+    cur_hash="$(_dst_sha256 "$dst")"
     if [ -n "$laid_hash" ] && [ "$laid_hash" = "$cur_hash" ]; then
       CLEANED=$((CLEANED + 1))
       if [ "$DRY_RUN" = true ]; then
@@ -345,11 +429,34 @@ copy_one() {
 # copy_dir <src_dir> <dst_dir>: idempotent-copy every file in src_dir.
 copy_dir() {
   local src_dir="$1" dst_dir="$2"
-  if [ ! -d "$src_dir" ] || [ -z "$(ls -A "$src_dir" 2>/dev/null)" ]; then
-    echo "  (source directory missing or empty — skipped category)"
+  if [ ! -d "$src_dir" ]; then
+    echo "  (source directory missing — skipped category)"
     return
   fi
-  local f
+  # gap-verify-referenced-landed-concurrency-hardening-insufficient: the empty-source check must NOT
+  # shell out to `ls -A` — under heavy concurrent load a `$(ls …)` command substitution can be killed
+  # mid-stream (returning empty) and an EMPTY source is falsely reported for a NON-empty dir, skipping
+  # the whole category (observed: .claude/workflows/* false-positived referenced-not-landed). The
+  # `for f in "$src_dir"/*` glob is a bash builtin (no subprocess), so it cannot be torn — count the
+  # files it actually iterates instead.
+  local f found=0 manifest
+  manifest="$(mktemp)"
+  # First glob pass: build the (src,dst) manifest + detect emptiness. The glob stays a bash builtin
+  # (no subprocess) so the empty-source check cannot be torn (same rationale as above); the per-file
+  # `cmp -s` that copy_one used to spawn is then batched into ONE python3 pass (gap-suite-serial-
+  # install-copy-one-subprocess-batching), so the copy loop below consults _CMP_STATE instead.
+  for f in "$src_dir"/*; do
+    [ -f "$f" ] || continue
+    found=1
+    printf '%s\t%s\n' "$f" "$dst_dir/$(basename "$f")" >> "$manifest"
+  done
+  if [ "$found" = 0 ]; then
+    rm -f "$manifest"
+    echo "  (source directory empty — skipped category)"
+    return
+  fi
+  _precompute_states "$manifest"
+  rm -f "$manifest"
   for f in "$src_dir"/*; do
     [ -f "$f" ] || continue
     copy_one "$f" "$dst_dir/$(basename "$f")"
@@ -703,7 +810,7 @@ write_state_file() {
   # files under them (sorted). .quay/quay-init-state.json is included so the record self-tracks.
   for root in \
     "plugin/scripts" "plugin/probes" "orchestration" "docs/analysis" \
-    ".quay/config.yml" ".quay/quay-init-state.json" ".quay/runtime" \
+    ".quay/config.yml" ".quay/profiles.yml" ".quay/quay-init-state.json" ".quay/runtime" \
     ".claude/workflows" ".claude/agents" ".claude/launch.settings.json"; do
     if [ -f "$WORKSPACE_ROOT/$root" ]; then
       printf '%s\n' "$root" >> "$laid_rel_file"
@@ -1109,48 +1216,66 @@ drift_report() {
 # includes the CONSUMER-LAID docs at <ws>/docs/analysis/ — the byte-identical copies a target
 # project actually reads. The source scan alone could not see the AC37 blind spot (a laid tick doc
 # referencing plugin/loop/* paths that never land); scanning the laid docs closes it.
-verify_referenced_landed() {
-  local ws="$1" missing=0 closure_missing=0 r sd script
-  local refs selfcreate refdoc mech_bare
+
+# _reference_set_once <ws> — ONE derivation pass of the complete verify_referenced_landed reference
+# set (one path per line, sorted unique): (1) path-prefixed refs in the shipped corpus (skills +
+# loop docs + workflows) — incl. the `.claude/workflows|.claude/agents` delivery class (AC91); (2)
+# path-prefixed refs in the CONSUMER-LAID docs at <ws>/docs/analysis/ (AC2 — the byte-identical
+# copy a target project actually reads; `plugin/loop` is in the alternation so a shipped doc
+# referencing the non-landed bundle-source path fails closed); (3) BARE filename refs in the
+# mechanism corpus resolved under plugin/scripts/ (bare_resolved_scripts — the SAME derivation the
+# laydown uses, AC3: checker and checked share no blind spot); (4) consolidated grouped-entry
+# members (SPEC-instruments-behind-one-entry.md — EVERY member of a shipped quay-<group>.ts must
+# land; a member absent from the plugin source is exactly the referenced-not-landed defect, so it is
+# unconditional). Read-only over the plugin source + <ws>.
+_reference_set_once() {
+  local ws="$1"
+  local mech_bare consolidated_refs member
   local -a mech_files=()
   while IFS= read -r f; do mech_files+=("$f"); done < <(mechanism_corpus)
-  # referenced set = docs' path-prefixed refs (full corpus) + docs' BARE filename refs in the
-  # MECHANISM corpus that resolve under plugin/scripts/ — the SAME derivation the laydown uses
-  # (AC3: checker and checked can no longer share the same blind spot).
   mech_bare="$(bare_resolved_scripts "${mech_files[@]}")"
-  # consolidated grouped-entry members (SPEC-instruments-behind-one-entry.md): EVERY member of a
-  # shipped quay-<group>.ts must land — the entry point dispatches to it. UNCONDITIONAL (a member
-  # absent from the plugin source is exactly the referenced-not-landed defect this check exists to
-  # catch — the AC2 live-specimens case: removing monitor-mount-check.sh / send-keys-reliable.sh
-  # must make the check name them, not silently pass because they no longer exist to resolve).
-  local consolidated_refs=""
-  local member
+  consolidated_refs=""
   for member in $(consolidated_member_files); do
     case " $NEVER_LAYDOWN " in *" $member "*) continue ;; esac
     consolidated_refs+="plugin/scripts/$member"$'\n'
   done
-  # AC91 (gap-ac91-delivery-core-refs-undelivered-files): the reference-set scan ALSO covers the
-  # shipped workflows (plugin/workflows/*.js → .claude/workflows/ on the target) and the `.claude/`
-  # delivery class. Previously a shipped tick doc referencing `.claude/workflows/execute-suite-fix.js`
-  # was INVISIBLE to this check (the `.claude/` prefix was not in the alternation), so a delivered
-  # execution core could point at an undelivered workflow and the install would pass — the exact
-  # referenced-not-landed defect this check exists to catch, escaped at the reference-set stage (NOT
-  # the init/SKILL.md declaration clause below — the ref never entered $refs to be exempted).
-  refs="$( ( grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis|\.claude/workflows|\.claude/agents)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md "$PLUGIN_ROOT"/workflows/*.js 2>/dev/null
-             # AC2 (gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop): the gate must
-             # ALSO verify the CONSUMER-LAID docs (docs/analysis/) — the reference set of the
-             # byte-identical copy a target project actually reads, not just the plugin source. A
-             # consumer doc referencing a path that does not land in the target (e.g. plugin/loop/
-             # when the loop lays only orchestration/ + docs/analysis/) is exactly the AC37
-             # referenced⊆landed blind spot (ad-arm1: docs/analysis/fast-mode-loop-tick.md refs 5
-             # paths that never landed). The laid copy IS the deliverable; the source scan alone
-             # cannot see a consumer-side mismatch. `plugin/loop` is in the alternation (the AC37
-             # path-spelling blind spot): a shipped doc referencing plugin/loop/* (a bundle-source
-             # path that does NOT land — the loop lays orchestration/ + docs/analysis/) fails closed.
-             grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$ws"/docs/analysis/*.md 2>/dev/null
-             printf '%s\n' "$mech_bare"
-             printf '%s' "$consolidated_refs"
-           ) | sort -u || true )"
+  ( grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis|\.claude/workflows|\.claude/agents)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md "$PLUGIN_ROOT"/workflows/*.js 2>/dev/null
+    grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$ws"/docs/analysis/*.md 2>/dev/null
+    printf '%s\n' "$mech_bare"
+    printf '%s' "$consolidated_refs"
+  ) | sort -u || true
+}
+
+# _read_references <ws> — stability-checked wrapper over _reference_set_once
+# (gap-verify-referenced-landed-concurrency-hardening-insufficient). The reference set is derived by
+# grep over the shipped corpus + the consumer-laid docs; under heavy concurrent load a grep/sort in a
+# command substitution can be killed mid-stream (the pipeline's `|| true` masks the death), returning
+# a PARTIAL (torn) set. Same torn-read class as _read_declarations (a4f1e41d) and derive_loop_scripts
+# (089365b5) — same fix: two independent passes must produce IDENTICAL output (a torn pass truncates
+# at a nondeterministic point ⇒ differs from a full pass ⇒ retry); only two agreeing non-empty passes
+# are accepted. A single torn pass would silently MISS a genuinely-referenced-but-not-landed file (a
+# false negative that violates fail-closed), so the check never accepts one. A genuinely-missing ref
+# is absent from EVERY pass, so real drift is never masked.
+_read_references() {
+  local ws="$1" a b attempt
+  for attempt in 1 2 3; do
+    a="$(_reference_set_once "$ws")"
+    b="$(_reference_set_once "$ws")"
+    if [ -n "$a" ] && [ "$a" = "$b" ]; then
+      printf '%s\n' "$a"
+      return 0
+    fi
+    [ "$attempt" -lt 3 ] && sleep 0.2
+  done
+  # All passes torn or mutually inconsistent — output the LAST snapshot (never a silent empty set;
+  # the downstream landed-scan + declaration/landed fresh re-read still fail-closes on a genuine miss).
+  printf '%s\n' "$a"
+  return 0
+}
+
+verify_referenced_landed() {
+  local ws="$1" missing=0 closure_missing=0 r sd script
+  local refs selfcreate refdoc
   # Machine-readable declarations live in the shipped init skill (single source of truth — the
   # same doc the human reads). Marker lines:
   #   <!-- self-create: <path> -->       local state, first run creates it (AC8)
@@ -1199,6 +1324,11 @@ verify_referenced_landed() {
   }
   selfcreate="" refdoc=""
   _read_declarations
+  # The reference set is derived once, STABILITY-CHECKED (two agreeing passes — _read_references),
+  # so the landed-scan below runs against a deterministic snapshot (gap-verify-referenced-landed-
+  # concurrency-hardening-insufficient: the reference-scan grep was the last single-pass "裸 grep"
+  # face, torn under concurrent --loop load).
+  refs="$(_read_references "$ws")"
   for r in $refs; do
     # exact-line membership in the declared sets (newline-separated — a `case` pattern would
     # need spaces the multi-line variable does not have)
@@ -1214,6 +1344,13 @@ verify_referenced_landed() {
       fresh_refdoc="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
       if printf '%s\n' "$fresh_selfcreate" "$fresh_refdoc" | grep -qxF "$r"; then
         continue   # fresh read confirms the declaration exists — the snapshot was transiently incomplete
+      fi
+      # last line of defense for the LANDED set (same torn-read class, opposite face): a concurrent
+      # --loop install's write can transiently make a just-laid file invisible to the `-e` scan (the
+      # "landed 集扫描" torn snapshot). Re-scan existence once more before failing; a genuinely-
+      # missing file is absent from BOTH scans, so real drift still fails (fail-closed unchanged).
+      if [ -e "$ws/$r" ]; then
+        continue   # fresh existence scan finds it landed — the first scan was a transiently-torn snapshot
       fi
       echo "  FAIL (referenced-not-landed): $r — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md" >&2
       echo "       Fix: add \"<!-- reference-doc: $r -->\" (or \"<!-- self-create: $r -->\" if the loop lays it down) to plugin/skills/init/SKILL.md, or fix the doc's path to a file the loop actually lays down" >&2
@@ -1505,7 +1642,7 @@ compute_drift_report() {
     n=$((n + 1))
     if [ ! -f "$tgt" ]; then
       missing=$((missing + 1)); missing_list+=("$rel")
-    elif cmp -s "$src" "$tgt"; then
+    elif _is_identical "$src" "$tgt"; then
       consistent=$((consistent + 1))
     else
       drift=$((drift + 1)); drift_list+=("$rel"); drift_src+=("$src"); drift_tgt+=("$tgt")
@@ -1680,7 +1817,7 @@ auto_commit_laid_down() {
   # unrelated uncommitted work — AC3). Missing paths are skipped; gitignored runtime bundles never
   # reach the stage. Runs in a subshell at the workspace root so the literal `git add` / `git commit`
   # (the Contract invoke's surface) are the real operations, not prose.
-  for p in .gitignore .quay/config.yml .quay/quay-init-state.json plugin/scripts orchestration docs/analysis .claude/workflows .claude/agents .claude/launch.settings.json tasks; do
+  for p in .gitignore .quay/config.yml .quay/profiles.yml .quay/quay-init-state.json plugin/scripts orchestration docs/analysis .claude/workflows .claude/agents .claude/launch.settings.json tasks; do
     if [ -e "$WORKSPACE_ROOT/$p" ]; then
       ( cd "$WORKSPACE_ROOT" && git add -- "$p" ) 2>/dev/null || true
     fi
@@ -1873,6 +2010,22 @@ PYEOF
   # before-report's derived-set is non-empty (compute_drift_report reads the global — a stale
   # empty-array call reported derived-set 0 and the before/after reports disagreed with reality).
   # The POST report after the loop proves the upgrade brought the derived set to 一致.
+  # gap-suite-serial-install-copy-one-subprocess-batching: build ONE (src,dst) manifest for the
+  # loop-scripts lay-down and precompute the PRE-COPY byte-comparison state in a single python3 pass.
+  # This one pass feeds BOTH the before-drift report and the copy loop's copy_one decisions (which,
+  # like the pre-batch per-file `cmp -s`, see the target as it was BEFORE any copy). The manager-
+  # tick-core opt-in skip mirrors the copy loop below so the two never disagree on the pair set.
+  _laydown_manifest="$(mktemp)"
+  for s in "${LOOP_SCRIPTS[@]}"; do
+    if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then
+      printf '%s\t%s\n' "$PLUGIN_ROOT/scripts/$s" "$WORKSPACE_ROOT/plugin/scripts/$s" >> "$_laydown_manifest"
+    elif [ -f "$PLUGIN_ROOT/loop/$s" ]; then
+      [ "$s" = "manager-tick-core.md" ] && [ "$DO_MANAGER" != true ] && continue
+      printf '%s\t%s\n' "$(resolve_tick_core_src "$s")" "$WORKSPACE_ROOT/orchestration/$s" >> "$_laydown_manifest"
+    fi
+  done
+  _precompute_states "$_laydown_manifest"
+
   echo "  drift report (before upgrade):"
   compute_drift_report "$WORKSPACE_ROOT"
   for s in "${LOOP_SCRIPTS[@]}"; do
@@ -1898,6 +2051,11 @@ PYEOF
       echo "  WARN: loop mechanism file missing from plugin: plugin/scripts/$s (or plugin/loop/$s)" >&2
     fi
   done
+  # Re-precompute AFTER the copies: the after-drift report must see the UPDATED targets the copy
+  # loop just wrote, not the stale pre-copy state (the copy loop laid byte-identical content, so
+  # the after-report proves 漂移→一致 — the same semantics as the pre-batch per-file cmp re-scan).
+  _precompute_states "$_laydown_manifest"
+  rm -f "$_laydown_manifest"
   echo "  drift report (after upgrade):"
   compute_drift_report "$WORKSPACE_ROOT"
 
@@ -1958,8 +2116,9 @@ PYEOF
   fi
 
   # Launch config (gap-quay-init-coldstart-usability-launch-not-used-... F4/AC2): the checked-in
-  # per-role launch command lives in <target>/.claude/launch.settings.json (settings-schema keys +
-  # _launchSpec for flag-only params), materialized by quay-launch.sh — but quay-init NEVER laid it
+  # per-role launch command lives in <target>/.claude/launch.settings.json (Claude Code 认识的键
+  # $schema/permissions/env) + <target>/.quay/profiles.yml（AC154 profile 抽层后 launcher/model/--bare/
+  # -n/unset + flag-only 参数的承载），materialized by quay-launch.sh — but quay-init NEVER laid it
   # down, so a cold-started third-party target had a laid-down quay-launch.sh that FAILED CLOSED
   # ("launch settings file not found") and consumers hand-started sessions without --settings /
   # without the role-convention name (measured 2026-08-11 on ad-arm1 archguard). Lay the DEFAULT
@@ -1974,6 +2133,15 @@ PYEOF
   else
     copy_one "$ls_src" "$ls_dst" managed
     echo "  launch-config: laid down .claude/launch.settings.json (default template — edit model/env per project; quay-launch.sh materializes it)"
+  fi
+  # profiles.yml 同源铺设（AC154）：profile/roles/flags 承载；缺 plugin 模板则警告、不影响已铺设的 settings。
+  pf_src="$PLUGIN_ROOT/.quay/profiles.yml"
+  pf_dst="$WORKSPACE_ROOT/.quay/profiles.yml"
+  if [ ! -f "$pf_src" ]; then
+    echo "  WARN: profiles template missing from plugin: $pf_src" >&2
+  else
+    copy_one "$pf_src" "$pf_dst" managed
+    echo "  launch-config: laid down .quay/profiles.yml (default profile carrier — edit launcher/model per project)"
   fi
 
   # AC7b (gap-cold-start-...-eight-steps) + gap-vendor-runtime-not-in-git-clone-broken-mcp-entry

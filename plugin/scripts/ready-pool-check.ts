@@ -159,6 +159,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
+// AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（depsSatisfied 谓词同一份实现，
+// ⛔ 不各写一遍「逐个查 status !== done」的循环）。
+import { allDepsDone } from "./driver-filters.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
 // criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
@@ -168,6 +171,7 @@ import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
 import { recordCheckerCost, getLoad1 } from "./checker-cost.ts";
 import {
   checkTaskTouchesResolve,
+  checkTouchesNarrow,
   findRepoRoot,
   parseTouches,
   checkTouchesPair,
@@ -207,6 +211,15 @@ import { defaultLaneCount } from "./full-suite-runner.ts";
 // not a parallel porcelain parser). The merge-worktree detector below reuses it to find worktrees
 // where a MERGE is in flight.
 import { listWorktrees } from "./fast-mode-telemetry.ts";
+// MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): the
+// promotion commit path runs `git commit --no-verify` (a mechanical status flip is content-neutral),
+// so the pre-commit hook's Touches「一条目一路径」detector never runs there — a multi-path Touches bullet
+// silently lands in develop (production: e7be44a0 landed a `serve-handlers.ts + serve.ts` bullet).
+// Re-run the SAME judgment at the promotion write boundary, BEFORE the status write, so a multi-path
+// candidate is NOT promoted (stays todo, tree stays clean, block reason surfaces on the applied
+// record). Single source: checkTaskOneEntryOnePath — the SAME judge precommit-guard.ts uses (no
+// second Touches parser).
+import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
 
 /** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
  *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
@@ -1069,6 +1082,22 @@ export function computeRelevance(id, task, childrenByTask = new Map(), parentRef
   };
 }
 
+/** The depends_on REVERSE-EDGE index (gap-value-priority-signal-degraded-to-1-over-cost AC1, extracted
+ *  as a standalone helper for gap-ff-starvation-no-dynamic-cap-relief): how many tasks list each id in
+ *  their `depends_on`. A task others depend on IS blocking (its landing unblocks dependents) — the same
+ *  semantic as being named `parent`. `analyzeTasks` builds this map once and feeds it to computeRelevance
+ *  (single source — the ff-starvation relief reuses it to order starved live tasks「阻塞下游多的优先纾解」,
+ *  never a parallel copy). Pure. */
+export function computeDependedOnCount(allTasks) {
+  const dependedOnCount = new Map();
+  for (const [, t] of allTasks) {
+    for (const d of readDependsOn(t.frontmatterRaw)) {
+      dependedOnCount.set(d, (dependedOnCount.get(d) || 0) + 1);
+    }
+  }
+  return dependedOnCount;
+}
+
 // ── Consecutive-red-window reader (gap-ready-relevance-blind-to-suite-blocking-signal AC2/AC4) ──────
 // Best-effort JSONL parse of the .quay ledgers the outer's full-suite runner already writes. Absent
 // file / corrupt line ⇒ skip (an absent ledger = no suite history = no suite-blocking signal), the
@@ -1507,14 +1536,13 @@ function depsReadyFor(task, allTasks) {
     if (!isCompoundTask(allTasks.get(parent))) deps.push(parent);
   }
   for (const d of readDependsOn(task.frontmatterRaw)) deps.push(d);
-  if (deps.length === 0) return true;
-  for (const depId of deps) {
+  // AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（单一实现，⛔ 不各写一遍
+  // 「逐个查 status !== done」的循环）。statusOf 返回依赖的 status；Parent/dep 文件缺失 ⇒ null ⇒
+  // 非 done ⇒ fail closed（conservative, not dispatchable）。
+  return allDepsDone(deps, (depId) => {
     const p = allTasks.get(depId);
-    // Parent/dep file missing → cannot confirm done → fail closed (conservative, not dispatchable).
-    if (!p) return false;
-    if (p.status !== "done") return false;
-  }
-  return true;
+    return p ? p.status : null;
+  });
 }
 
 /** Largest subset of `parsed` (an array of parseTouches results) whose members are pairwise
@@ -1560,6 +1588,11 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   const kind = classifyKind(id);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
+  // TOUCHES-WIDTH (2026-08-28, gap-touches-breadth-silent-global-dispatch-lock): a directory-level
+  // `## Touches` glob (`plugin/scripts/**`, `plugin/test/**`) passes the existence-only touchesResolve
+  // but is a silent global dispatch lock while in flight. Gate it AT PROMOTION so the fix-worker
+  // narrows it before it ever enters the pool (overbroad → can't land; dir-glob → locks all peers).
+  const touchesNarrow = checkTouchesNarrow(task.body);
   const depsReady = depsReadyFor(task, allTasks);
   const four = artifactsComplete(task.body);
   const parsed = parseTouches(task.body);
@@ -1619,6 +1652,8 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     kind,
     kindOrder: kindOrder(kind),
     touchesResolve,
+    touchesNarrow: touchesNarrow.narrow,
+    wideTouches: touchesNarrow.wideGlobs,
     depsReady,
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
@@ -1659,7 +1694,10 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // its implementation premise is deleted by a human ruling (gap-send-keys-verified retreat).
     // AC1 (2026-08-13): the compound + self-touch guards are ADDED — slot-refill's step-4 defers now
     // gate promotion, so a task is rejected before ready instead of deferred after (判据1).
-    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
+    // TOUCHES-WIDTH (2026-08-28): the touchesNarrow guard is ADDED — a candidate with a
+    // directory-level `## Touches` glob is never eligible (it would silently lock the whole dispatch
+    // pool while in flight; the fix-worker narrows it before it ever enters ready).
+    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
   };
 }
 
@@ -1759,15 +1797,18 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
   const depsReady = depsReadyFor(task, allTasks);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
+  const touchesNarrow = checkTouchesNarrow(task.body);
   // PROSE-PREREQUISITE GAP (AC3): targeted promotion must NOT advance a task whose prose-declared
   // prereqs have no relation edge — same fail-closed as the bulk path.
   const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
-  const eligible = four.complete && depsReady && touchesResolve && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok;
+  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok;
   const checks = {
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
     depsReady,
     touchesResolve,
+    touchesNarrow: touchesNarrow.narrow,
+    wideTouches: touchesNarrow.wideGlobs,
     prosePrereqGap: prosePrereqGapIds,
     notFixture: true,
     notParked: true,
@@ -1842,14 +1883,14 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // gap-value-priority-signal-degraded-to-1-over-cost AC1 — the depends_on reverse-edge index: how
   // many tasks list this id in their `depends_on`. A task others depend on IS blocking (its landing
   // unblocks dependents) — the same semantic as being named `parent`. Built once like parentRefCount.
-  const dependedOnCount = new Map();
+  // gap-ff-starvation-no-dynamic-cap-relief: the depends_on reverse-edge index is now the exported
+  // single-source computeDependedOnCount (shared with slot-refill's relief ordering — never a parallel
+  // copy); the childrenByTask/parentRefCount loop stays inline.
+  const dependedOnCount = computeDependedOnCount(allTasks);
   for (const [id, t] of allTasks) {
     childrenByTask.set(id, readChildren(t.frontmatterRaw));
     if (t.parent && t.parent !== "null" && t.parent !== "~") {
       parentRefCount.set(t.parent, (parentRefCount.get(t.parent) || 0) + 1);
-    }
-    for (const d of readDependsOn(t.frontmatterRaw)) {
-      dependedOnCount.set(d, (dependedOnCount.get(d) || 0) + 1);
     }
   }
 
@@ -2337,9 +2378,27 @@ export function applyPromotions(opts) {
   const applied = [];
   if (shouldApply) {
     const candidateById = new Map(result.candidates.map((c) => [c.id, c]));
+    // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): the
+    // promotion commit runs `git commit --no-verify`, so the pre-commit hook's Touches detector never
+    // fires here (production: e7be44a0 landed a `serve-handlers.ts + serve.ts` multi-path bullet).
+    // Re-run the SAME judgment BEFORE writing anything — a multi-path candidate is NOT promoted
+    // (stays todo, tree stays clean, block reason surfaces on the applied record).
+    const { baseline } = readOneEntryBaseline(opts.root);
     for (const p of result.promotions) {
       const cand = candidateById.get(p.id);
       const deliveryCritical = !!(cand && cand.deliveryCritical);
+      const rel = path.join("tasks", `${p.id}.md`);
+      const file = path.join(opts.root, rel);
+      const body = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+      const touchesBlock = checkTaskOneEntryOnePath(body, rel, baseline);
+      if (touchesBlock.length > 0) {
+        applied.push({
+          id: p.id, ok: false, from: "todo", to: null, deliveryCritical, committed: false,
+          reason: "touches-multi-path-bullet",
+          detail: touchesBlock.map((v) => v.what).join(" · "),
+        });
+        continue;
+      }
       const out = setTaskStatus(opts.root, p.id, "ready", { ensureDeliveryCritical: deliveryCritical });
       // COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a landed status write is
       // committed immediately so the main checkout stays clean (a dirty tree blocks every fan-in at
