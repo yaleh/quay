@@ -2,7 +2,7 @@
 id: gap-fan-in-ff-merge-token-gate-fail-closed
 title: fan-in-ff-merge.sh --acquire-workflow-lock 加 token 闸——非 driver 一次性 token
   者 fail-closed（掐死所有非机械路径，L1）
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -50,3 +50,9 @@ token 闸落地；AC1-AC3 全勾；非机械路径无法 acquire workflow 锁；
 - plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（token 测试缝）
 - plugin/test/worker-driver.test.mjs（token 注入 + killTree）
 - tasks/gap-fan-in-ff-merge-token-gate-fail-closed.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-27T21:33:59.347Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
