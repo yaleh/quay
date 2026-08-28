@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import { TASK_STATUSES, TASK_STATUS, isTaskStatus, type Task } from '../../quay/src/abi.ts';
+import { TASK_STATUSES, TASK_STATUS, isTaskStatus, type Task, type TaskStatus } from '../../quay/src/abi.ts';
 
 export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
 
@@ -778,7 +778,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     // `extra.malformed`, so a stray `status: reddy` can never silently surface as a
     // legal-looking `Task.status` string downstream.
     const rawStatus = frontmatter.status;
-    const status = isTaskStatus(rawStatus) ? rawStatus : null;
+    const status: TaskStatus | null = isTaskStatus(rawStatus) ? rawStatus : null;
     if (status === null && rawStatus !== undefined) {
       const existing = Array.isArray(existingExtra.malformed) ? (existingExtra.malformed as string[]) : [];
       extra.malformed = [...new Set([...existing, "invalid-status"])];

@@ -29,9 +29,12 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，具名类型）：`abi.ts` 导出具名 `TaskStatus` 类型，≥1 个消费者 import 它标注自己的 status 变量/解析结果（grep 到 import）；（⛔ 仍只有内联 union 无导出 ⇒ 假）。
-- [ ] AC2（能取假，字面量收敛）：生命周期字面量（`"done"`/`"needs-human"`/`"todo"`/`"ready"`/`"superseded"`）散落的文件数从 ~30 降到 ≤3（单一来源 + 少量 typed 消费者），grep 计数；（⛔ 仍 ~30 文件散落 ⇒ 假）。
-- [ ] AC3（能取假，解析边界守卫）：盘读 status 的路径用 `isTaskStatus` 守卫，喂一个非法值（如 `"reddy"`）⇒ fail-closed（拒/报错），不静默当 string 通过；（⛔ 静默通过 ⇒ 假）。
+- [x] AC1（能取假，具名类型）：`abi.ts` 导出具名 `TaskStatus` 类型，≥1 个消费者 import 它标注自己的 status 变量/解析结果（grep 到 import）；（⛔ 仍只有内联 union 无导出 ⇒ 假）。
+  - 证据：`packages/quay-native/src/store.ts:12` 与 `packages/quay/src/observation.ts:33` 均 `import type { TaskStatus }`，并标注盘读 status 的解析结果（`const status: TaskStatus | null`、`readTaskStatusOnDisk(): TaskStatus | null`）。`grep -rn "type TaskStatus"`（消费者、排除 abi.ts 定义处）命中 2 处 import。
+- [x] AC2（能取假，字面量收敛）：生命周期字面量（`"done"`/`"needs-human"`/`"todo"`/`"ready"`/`"superseded"`）散落的文件数从 ~30 降到 ≤3（单一来源 + 少量 typed 消费者），grep 计数；（⛔ 仍 ~30 文件散落 ⇒ 假）。
+  - 证据：生命周期字面量单一来源 = `abi.ts`（`TASK_STATUSES`/`TASK_STATUS`/`isTaskStatus`）。19 个消费者文件已从裸字面量迁到 `TASK_STATUS.*`/`isTaskStatus`。仍以裸字面量比较**任务 status** 的文件恰为 3 个字节镜像脚本（`it0-split-or-commit-check.ts` / `portfolio-choice.ts` / `task-status-drift-check.ts`，与 `experiments/.../scripts/` 字节一致、跨树 import 会破坏镜像故不动）⇒ ≤3。其余 grep 命中为**异词表**：ADR 状态（`adr-store.ts`/`cli/adr.ts`）、goal 状态（`goal-store.ts`/`serve-goal.ts`）、workflow/suite/build 结果（`workflow-*.ts`/`suite-driver.ts`/`build-evidence-*`）、`TaskCandidate.status: string`（`candidate-*`/`coupling-graph.ts`）、bash 关键字（`config-validate.ts`/`dead-code-after-return-check.ts`）、散文/路由（`cli/help.ts`/`serve-render.ts`）。裸 grep 每词文件数已降：done 30→20、needs-human 17→11、todo 16→11、ready 17→11（src+plugin/scripts，不含 test/dist），残量为上述异词表。
+- [x] AC3（能取假，解析边界守卫）：盘读 status 的路径用 `isTaskStatus` 守卫，喂一个非法值（如 `"reddy"`）⇒ fail-closed（拒/报错），不静默当 string 通过；（⛔ 静默通过 ⇒ 假）。
+  - 证据：4 处盘读边界均已 `isTaskStatus` 守卫——`store.ts` `toViewModel`（YAML）、`github-client.ts` `issueToViewModel`（`status:*` 标签）、`observation.ts` `readTaskStatusOnDisk`、`ready-pool-check.ts` `analyzeTasks` `readFrontField`。负控制：盘上 `status: reddy` ⇒ `store.get` 返回 `status:"todo"` 且 `extra.malformed` 含 `invalid-status`；`isTaskStatus("reddy") === false`。测试 `plugin/test/abi-task-status-typing.test.mjs` 5/5 绿。
 
 ## Definition of Done
 

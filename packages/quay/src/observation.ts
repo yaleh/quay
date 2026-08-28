@@ -30,7 +30,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { QUAY_VERSION } from "./version.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
-import { TASK_STATUS, isTaskStatus } from "./abi.ts";
+import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
 
 const execFileP = promisify(execFile);
 
@@ -891,7 +891,7 @@ export function readNeedsHumanLedger(root: string): PromotionOutcomeRecord[] {
  *  throws). readLive uses it to drop a worker-carrier task whose status is already "done" — the
  *  driver's `exited-not-landed` on a done task is a leftover-worktree cleanup artifact, the same
  *  "not really in-flight" class as the AC2 ghost, not live work. */
-function readTaskStatusOnDisk(root: string, taskId: string): string | null {
+function readTaskStatusOnDisk(root: string, taskId: string): TaskStatus | null {
   try {
     const raw = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
     const parsed = parseFrontmatter(raw);
