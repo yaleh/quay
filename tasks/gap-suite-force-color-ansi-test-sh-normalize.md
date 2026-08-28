@@ -1,7 +1,7 @@
 ---
 id: gap-suite-force-color-ansi-test-sh-normalize
 title: FORCE_COLOR=3 环境雷——test.sh 整个运行归一（输出确定性是断言测试的前提，一行先落地）
-status: ready
+status: done
 labels:
   - gap
   - defect
