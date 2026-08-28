@@ -2,8 +2,11 @@
 # Mutation case for capability-catalog (gap-retired-script-still-callable, AC5 — the
 # superseded-capability check).
 # Fixture: a temp tree (with a COPIED capability-catalog.sh under plugin/scripts/ so its SELF_DIR
-# resolves to <tmp>/plugin/scripts and REPO_ROOT = the temp tree) holding NO superseded
-# implementation in the executable layer → GREEN.
+# resolves to <tmp>/plugin/scripts) holding NO superseded implementation in the executable layer
+# → GREEN. capability-catalog.sh now sources repo-root.sh (SPEC §2.4 B2 pair), so the dependency
+# is copied too; a `.git` marker makes repoRoot("${SELF_DIR}") resolve to the temp tree (it walks
+# up bundle→consumer→git) — without it the walk would fall through to the CALLER's `git rev-parse`
+# and check the real repo instead of this synthetic one.
 # Inject: a plugin/scripts/send-keys-verified.sh file — a superseded implementation that per the
 # SUPERSEDED table must NOT exist → --superseded-check MUST go RED.
 # Restore: remove the injected file → back to GREEN.
@@ -12,8 +15,9 @@ name="capability-catalog"
 workdir="${1:?usage: $name.sh <workdir>}"
 checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-mkdir -p "${workdir}/plugin/scripts"
+mkdir -p "${workdir}/plugin/scripts" "${workdir}/.git"
 cp "${checker_dir}/capability-catalog.sh" "${workdir}/plugin/scripts/capability-catalog.sh"
+cp "${checker_dir}/repo-root.sh" "${workdir}/plugin/scripts/repo-root.sh"
 
 checker_cmd() {
   bash "${workdir}/plugin/scripts/capability-catalog.sh" --superseded-check >/dev/null 2>&1
