@@ -2,7 +2,7 @@
 id: gap-suite-bucket-attribution-pathjoin-run-header-blind-spot
 title: "桶归因盲区——path.join 构造路径不可见 + Run: 头注释 scripts/test.sh 字面误当 subject ⇒ M
   机制测试归成 S 单例，M 触发静默跳过（166 文件受影响）"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -33,19 +33,23 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，M 信号不丢）：`suite-bucket-attribution` 对 fan-in-workflow-lock.test.mjs 返回含 M 的桶集（⛔ 仍返回 S 单例 ⇒ 假）。
-- [ ] AC2（能取假，Run: 头不算 subject）：把 `Run: scripts/test.sh` 加进一个仅测 M 机制的测试头部，归因不受 S 影响（⛔ 头注释仍归 S ⇒ 假）。
-- [ ] AC3（能取假，选择修复）：`suite-bucket-select --task gap-fan-in-workflow-lock-stale-runid-detached-holder --paths-only` 输出含 fan-in-workflow-lock.test.mjs + fan-in-ff-merge.test.mjs（⛔ 仍排除 ⇒ 假）。
-- [ ] AC4（能取假，负控制）：一个真 S-only 测试（subject 真是 scripts/test.sh）保持 S 归因（⛔ 修复把 S 信号也丢了 ⇒ 假）。
+- [x] AC1（能取假，M 信号不丢）：`suite-bucket-attribution` 对 fan-in-workflow-lock.test.mjs 返回含 M 的桶集（⛔ 仍返回 S 单例 ⇒ 假）。**Evidence: S+M（worker 的 import ../scripts/worker-driver.ts 已给 M；本修复 path.join 解析兜住其它仅 path.join 引用的测试）**
+- [x] AC2（能取假，Run: 头不算 subject）：把 `Run: scripts/test.sh` 加进一个仅测 M 机制的测试头部，归因不受 S 影响（⛔ 头注释仍归 S ⇒ 假）。**Evidence: fan-in-ff-merge.test.mjs 修复后归因 M（原 S 来自 Run: 头 scripts/test.sh + reattribution S pin）**
+- [x] AC3（能取假，选择修复）：`suite-bucket-select --task gap-fan-in-workflow-lock-stale-runid-detached-holder --paths-only` 输出含 fan-in-workflow-lock.test.mjs + fan-in-ff-merge.test.mjs（⛔ 仍排除 ⇒ 假）。**Evidence: M 桶 250→254 文件，两测试都含（实测）**
+- [x] AC4（能取假，负控制）：一个真 S-only 测试（subject 真是 scripts/test.sh）保持 S 归因（⛔ 修复把 S 信号也丢了 ⇒ 假）。**Evidence: 全量归因 S=16 个仍存在；真引用 test.sh 的测试保持 S+M / P+S+M**
 
 ## Definition of Done
 
 归因能解析 path.join 构造路径；Run: 头注释不构成 subject 证据；M 触发的 bucket 包含被改测试文件；真 S-only 测试归因不变；AC1-AC4 全勾；全量 bucket 归因对既有 166 个误分类测试重算后不引入新回归。
 
+**DoD Evidence**（manager 2026-08-28 直落 develop 2b33ac5ff，AC65）：
+- 全量归因 sanity：564 个测试文件 0 崩溃；分布 M:161 / P:188 / S:16 / S+M:60 / UNRESOLVED:89（稳定，2 个原 UNRESOLVED 被正确解析）
+- scoped test：`env -u FORCE_COLOR node --test plugin/test/suite-bucket-attribution.test.mjs plugin/test/suite-bucket-select.test.mjs` => 20/20 pass（含新增 AC2(d) path.join 解析断言 + GROUP_C 移除 2 个已解析文件）
+- 选择层实测：stale-runid 任务 M 桶 250→254，fan-in-workflow-lock + fan-in-ff-merge 均纳入
+
 ## Touches
 
 - plugin/scripts/suite-bucket-attribution.ts（path.join fragments 合并 + Run: 注释排除 subject）
 - plugin/test/suite-bucket-attribution.test.mjs（path.join 构造路径归因 + Run: 头负控制测试）
-- plugin/scripts/suite-bucket-select.ts（若选择侧需同步；首选不动——AC123 both-sides 应自带）
-- .quay/suite-bucket-reattribution.jsonl（fan-in-ff-merge.test.mjs 的 S pin 复核）
+- .quay/suite-bucket-reattribution.jsonl（fan-in-ff-merge.test.mjs 的错误 S pin 移除）
 - tasks/gap-suite-bucket-attribution-pathjoin-run-header-blind-spot.md（自身）
