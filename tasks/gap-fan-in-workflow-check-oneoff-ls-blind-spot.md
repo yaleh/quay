@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-workflow-check-oneoff-ls-blind-spot
 title: fan-in-workflow-check isMechanicalRunId 盲点——oneoff-ls-* runId 不认，scoped 门全局红挡 worker-driver/fan-in-execute 任务
-status: ready
+status: done
 labels:
   - gap
   - defect
