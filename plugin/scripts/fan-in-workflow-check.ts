@@ -174,19 +174,26 @@ export const RULED_HISTORICAL_GAPS: { taskId: string; reason: string }[] = [
   },
 ];
 
-// ── Mechanical fan-in recognition (gap-fan-in-workflow-check-stale-mechanical-blind-spot) ─────────
+// ── Mechanical fan-in recognition (gap-fan-in-workflow-check-stale-mechanical-blind-spot;
+//    oneoff-* added by gap-fan-in-workflow-check-oneoff-ls-blind-spot) ─────────
 // The driver-run mechanical fan-in is the production path since the workflow was retired (the worker
 // NEVER calls fan-in-execute). Its lock events carry driver runId prefixes and legitimately have
-// agentId=null (driver-run, not a subagent). The workflow-era contract ("every fan-in has a Workflow
-// call + a real subagent agent-id") must recognize these as COVERED — else EVERY mechanical fan-in
-// reds the NEXT task's scoped-gate (cascade: stale-runid landed via driver ⇒ watchdog's scoped-gate
-// reds on stale-runid's agentId=null events). Adding a RULED entry per task would be whack-a-mole.
+// agentId=null (driver-run, not a subagent). The manager one-off landing path (oneoff-ls-*,
+// oneoff-adr034-*) is the SAME shape — a main-thread landing with agentId=null and no Workflow call.
+// The `oneoff-adr034-* won't recur` assumption broke when oneoff-ls-* landed (gap-loop-shipping-
+// ac1b-walk-enoent-race, runId oneoff-ls-1787930114984) ⇒ oneoff-* is a RECURRING family, recognized
+// mechanically rather than by adding a RULED entry per task. The workflow-era contract ("every fan-in
+// has a Workflow call + a real subagent agent-id") must recognize these as COVERED — else EVERY
+// mechanical fan-in reds the NEXT task's scoped-gate (cascade: stale-runid landed via driver ⇒
+// watchdog's scoped-gate reds on stale-runid's agentId=null events). Adding a RULED entry per task
+// would be whack-a-mole.
 export function isMechanicalRunId(runId: string | null | undefined): boolean {
   if (!runId) return false;
   return (
     runId.startsWith("wk-prod-") || // driver resident
     runId.startsWith("driver-verify-") || // driver one-shot (--task)
-    runId.startsWith("manager-manual-") // manager manual verification fan-in
+    runId.startsWith("manager-manual-") || // manager manual verification fan-in
+    runId.startsWith("oneoff-") // manager one-off landing (oneoff-ls-* / oneoff-adr034-*)
   );
 }
 
