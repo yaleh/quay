@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // halt-check.test.mjs — the THREE-LAYER UNIFIED `.halt` check point
 // (orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md §2.8,
 //  task gap-spec-p2-halt-three-layer-mechanical-enforcement).

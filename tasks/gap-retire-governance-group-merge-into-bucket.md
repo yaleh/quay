@@ -41,10 +41,11 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，governance 退役）：39 段文件内自跳过守卫删除，`@test-group governance` 不再作为「选择/跳过」机制（无唤回路径的第三套语义移除）；（⛔ 守卫仍在 ⇒ 假）。
-- [ ] AC2（能取假，相标真实）：142 文件改标真实相（默认 engine；负载敏感含 worker-driver.test.mjs / full-suite-runner.test.mjs → serial/lowconc）；（⛔ 今天两 flake 文件仍在主池裸跑 ⇒ 假）。
-- [ ] AC3（能取假，bucket 单一选择）：「这次要不要跑」只由 bucket 回答；132/142 落现有桶、10 UNRESOLVED 落安全侧或新桶；（⛔ 仍有第三套选择机制 ⇒ 假）。
-- [ ] AC4（能取假，正本工具核对 + 时序）：实现前 `suite-bucket-attribution.ts` 对 10 UNRESOLVED 实跑取真值（⛔ 用 grep 近似当结论 ⇒ 假），**且须在 gap-suite-move-27-evidenced-files-out-serial-lowconc 与 gap-suite-serial-lowconc-classification-recheck 两个在飞任务 ff 之后重取**（它们的 diff 含 57+28 行 `@test-group` 改动，落地后 142 总数 / 各文件相 / bucket 归属都会变；在它们落地前跑正本工具仍是过期真值）。
+- [x] AC1（能取假，governance 退役）：39 段文件内自跳过守卫删除，`@test-group governance` 不再作为「选择/跳过」机制（无唤回路径的第三套语义移除）；（⛔ 守卫仍在 ⇒ 假）。
+- [x] AC2（能取假，相标真实）：142 文件改标真实相（默认 engine；负载敏感含 worker-driver.test.mjs / full-suite-runner.test.mjs → serial/lowconc）；（⛔ 今天两 flake 文件仍在主池裸跑 ⇒ 假）。
+- [x] AC3（能取假，bucket 单一选择）：「这次要不要跑」只由 bucket 回答；132/142 落现有桶、10 UNRESOLVED 落安全侧或新桶；（⛔ 仍有第三套选择机制 ⇒ 假）。
+- [x] AC4（能取假，正本工具核对 + 时序）：实现前 `suite-bucket-attribution.ts` 对 10 UNRESOLVED 实跑取真值（⛔ 用 grep 近似当结论 ⇒ 假），**且须在 gap-suite-move-27-evidenced-files-out-serial-lowconc 与 gap-suite-serial-lowconc-classification-recheck 两个在飞任务 ff 之后重取**（它们的 diff 含 57+28 行 `@test-group` 改动，落地后 142 总数 / 各文件相 / bucket 归属都会变；在它们落地前跑正本工具仍是过期真值）。
+  - **AC4 真值（两个在飞任务已 done 落地后重取）**：`suite-bucket-attribution.ts`（`bucketSetOf` 原始 AC120 闭包）对 10 命名文件 = **10/10 UNRESOLVED**（与 manager 实跑一致）；但**选择路径**（`suite-bucket-select.ts` → `effectiveBucketAttribution`，生产 bucket 判定真正走的函数）对同一 10 个 = **9 个 mirror-fold → M**（chart2-s1/s2/s3、portfolio-choice、vmeta-lag、rolling-slope、deliverable-governor、outward-vt、preparation-feedback，全部 `source=mirror-fold` 落 M 桶）+ **1 个真 UNRESOLVED**（`integration-batch-merge.test.mjs`，落安全侧=每桶必跑）。⇒ **「10 UNRESOLVED 落安全侧还是新开桶」已由现有机制消解，无需新开桶**：9 个经 EXP→PLUGIN 镜像折叠落 M、1 个安全侧；⛔ 故 `suite-bucket-select.ts`/`suite-bucket-attribution.ts`/`full-suite-runner.ts`（Touches 原列）**零改动**——本任务不动 bucket 机制本体。
 - [x] AC5（能取假，AC101 冲突人裁）：**人已逐字裁定（2026-08-26）**「等锁时间不计入上述预算。在此前提下，full bucket 可以放宽到 900s。超过就应当触发测试优化。」⇒ 选 (a) 真全量，AC101 预算重谈为 **900s、仅计纯执行时间（durationMs − lock_wait_ms）、专指 full-bucket 轮**；等锁时间（lock_wait_ms）明确不计入；超限后果 = 「触发测试优化」（动作触发点，非 fail-closed 硬闸）。⛔ 数据事实（已核实）：最近 6 个 full-bucket 轮已有 4 个纯执行超 900s——`612:1149.6 / 614:1224.5 / 615:1070.4 / 619:998.5`（620:848.1 / 621:880.6 未超）⇒ 阈值已被现实数据击穿，「触发测试优化」此刻已成立；（⛔ 未裁定即实现/默认滑过 ⇒ 假）。
 
 ## Definition of Done
@@ -53,12 +54,18 @@ governance 第三套退役、142 文件改标真实相、bucket 单一选择落�
 
 ## Touches
 
-- plugin/scripts/suite-bucket-select.ts（10 UNRESOLVED 真值核对 + 可能的镜像折叠）
-- plugin/scripts/suite-bucket-attribution.ts（10 UNRESOLVED 真值核对）
-- plugin/scripts/full-suite-runner.ts（governance 退役 + QUAY_TEST_GROUPS 语义收窄）
-- plugin/test/*.test.mjs（142 文件相标改标 + 39 守卫删除——有界顶层 glob，非递归；实现方按此 glob 内文件落地）
-- plugin/test/runner-fixtures/gov.test.mjs（fixture）
-- plugin/test/suite-bucket-select.test.mjs（bucket 归属测试）
-- plugin/test/suite-bucket-attribution.test.mjs（bucket 归属测试）
-- scripts/test.sh（governance 跳过语义移除）
+- plugin/scripts/runner-grouping.ts（group_of / select_files / list_groups 移除 governance）
+- plugin/scripts/test-group-downgrade-check.ts（TARGET_GROUPS 移除 governance + uncommitted 路径补 ORIGIN_GROUPS 判定）
+- plugin/scripts/test-framework-policy-check.ts（groupDeclRE 移除 governance）
+- plugin/scripts/runner-static-gate.ts（downgrade 注释收窄）
+- plugin/scripts/test-file-baseline.ts（关系示例注释收窄）
+- plugin/scripts/capability-catalog.sh（downgrade-check 描述收窄）
+- plugin/scripts/dispatch-worktree-setup.sh（测试指向注释 engine）
+- plugin/scripts/checker-mutation-cases/test-group-downgrade-check.sh（downgrade 目标 governance→serial）
+- scripts/test.sh（governance 跳过语义移除 + 组清单收窄）
+- scripts/test-coverage-check.ts（--group 四组枚举收窄）
+- plugin/test/*.test.mjs（145 文件相标改标 + 40 守卫删除 + 机制测试更新 + 删除 runner-grouping-governance/fixture-runs——有界顶层 glob）
+- experiments/quay-perpetual-stream/test/*.test.mjs（13 文件相标改标 + 守卫删除）
+- plugin/test/runner-fixtures/gov.test.mjs（fixture 删除）
 - tasks/gap-retire-governance-group-merge-into-bucket.md（自身）
+

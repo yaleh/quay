@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // blocked-signal-parameterized.test.mjs —
 // gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer: the "who-is-waiting"
 // mechanism (inner-blocked-signal.ts screen observer) is generalized from ONE-DIRECTIONAL +

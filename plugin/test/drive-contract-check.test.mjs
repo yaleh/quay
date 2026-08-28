@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // drive-contract-check.test.mjs — tasks/gap-drive-text-carries-data-not-behavior-outer-inner-handoff
 // (AC3/AC4/AC6): the drive-text contract checker.
 //
@@ -11,7 +11,7 @@
 //   AC4 — the negative control: a drive text with "按 A→B 顺序" and no pair output MUST be
 //         reported (+1); adding the output MUST make it clean (both directions asserted here and
 //         pasted into the task body).
-//   AC6 — this file uses node:test and declares // @test-group governance.
+//   AC6 — this file uses node:test and declares // @test-group engine.
 //
 // No global counts are hardcoded: every assertion is relative to a fixture.
 //

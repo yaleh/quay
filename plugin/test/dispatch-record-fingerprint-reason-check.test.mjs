@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // dispatch-record-fingerprint-reason-check.test.mjs — AC55 判据1/判据3 检查器测试
 // (tasks/gap-ac55-dispatch-record-fingerprint-reason).
 //

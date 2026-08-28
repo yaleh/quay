@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // ac61-staleness-disposition-check.test.mjs — AC61 清单逐条处置检查器测试
 // (tasks/gap-ac61-staleness-list-item-disposition, AC1/AC2/AC3 + DoD 负控制).
 //

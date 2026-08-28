@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // inner-forensics.test.mjs — gap-inner-forensics-verify-reports-nonruns-and-zero-durations:
 // RED/GREEN fixture tests for the three inner-forensics verify lies:
 //
@@ -7,7 +7,7 @@
 //   AC3 (取不到耗时 → 「未知」而非 0s；run_in_background 与 shell `&` 两条路径都有 fixture)
 //   AC4 (会话归属：外层 fork 不再当作内层更早会话；归属不同列出但不计入)
 //   AC6 (已知答案窗口 02:00–02:30Z：恰好 3 次真实全量套件，不多不少)
-//   AC7 (@test-group governance 声明)
+//   AC7 (@test-group engine 声明)
 //
 // Run:
 //   scripts/test.sh plugin/test/inner-forensics.test.mjs
@@ -234,9 +234,9 @@ test("AC6 — 窗口内恰好 3 次真实全量套件，不多不少（batch4a/b
   } finally { cleanup(tmp); }
 });
 
-// ── AC7: @test-group governance 声明 ───────────────────────────────────────────────────────────────
+// ── AC7: @test-group engine 声明 ───────────────────────────────────────────────────────────────
 
-test("AC7 — 本测试文件声明 // @test-group governance", () => {
+test("AC7 — 本测试文件声明 // @test-group engine", () => {
   const src = fs.readFileSync(new URL(import.meta.url), "utf8");
-  assert.match(src, /@test-group\s+governance/, "new test file must declare @test-group governance");
+  assert.match(src, /@test-group\s+engine/, "new test file must declare @test-group engine");
 });

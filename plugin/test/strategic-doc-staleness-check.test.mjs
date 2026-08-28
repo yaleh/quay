@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // strategic-doc-staleness-check.test.mjs — tasks/gap-establish-daily-review-cadence-mechanism
 // (AC2/AC3/AC7/AC8): the generic strategic-document staleness checker.
 //
@@ -11,7 +11,7 @@
 //          gap-stale-check-orchestration-arm-is-a-dead-glob, 2026-08-05 — AC1/AC2 below.)
 //   AC3  — the default doc gate is wired into scripts/test.sh run_static_checks (asserted here as a
 //          regression: the REAL repo's gate exits 0, i.e. no NEW stale doc beyond the baseline).
-//   AC7  — this file uses node:test and declares // @test-group governance.
+//   AC7  — this file uses node:test and declares // @test-group engine.
 //   AC8  — pool-candidate mode judges ready-pool promotion candidates: an unannotated reference to a
 //          deleted script flags the candidate. Regression control: gap-prepare-milestone-no-size-
 //          aware-routing (references prepare-milestone.js / execute-milestone.js, both ADR-022-deleted)

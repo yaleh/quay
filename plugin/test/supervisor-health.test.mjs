@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // supervisor-health.test.mjs — the supervisor base layer's HEALTH check
 // (tasks/gap-supervisor-base-layer-outside-sessions-architecture, ## Contract `measure`:
 //   `bash <supervisor 健康检查>` stdout 的 alive 字段; band: alive = the base layer process does
@@ -16,7 +16,7 @@
 //   AC1 — three-layer judgment: the health check's components are exactly the BASE layer
 //         (scheduling via the os-anchor timer; delivery; observation) — machinery and behavior
 //         are not health-checked here.
-//   AC7 — node:test + // @test-group governance.
+//   AC7 — node:test + // @test-group engine.
 //
 // Run: scripts/test.sh plugin/test/supervisor-health.test.mjs
 
@@ -31,9 +31,6 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "supervisor-health.sh");
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 /** A minimal fake repo root: the four machinery files the health check probes, plus a nonexec
  * .sh to exercise the missing/not-executable path. */
@@ -148,4 +145,3 @@ test("AC7: Contract `measure` shape — the alive field is the FIRST stdout line
   }
 });
 
-} // end governance group

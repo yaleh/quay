@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // suite-state-trigger.test.mjs — tasks/gap-red-window-has-no-automatic-executor.
 //
 // The EXECUTOR layer of the (a) red-window block (gap-full-suite-belongs-to-outer-background-above-3-min).
@@ -23,7 +23,7 @@
 //   Contract invoke — `full-suite-runner.ts --fail-fast-check` proves the chain end-to-end:
 //         failure suite => state=red => SUITE-RED event => stopSignal in place.
 //   Negative control (Contract control) — a green suite produces NO SUITE-RED.
-//   AC6 — node:test + // @test-group governance (this file).
+//   AC6 — node:test + // @test-group engine (this file).
 //
 // Run:
 //   scripts/test.sh plugin/test/suite-state-trigger.test.mjs
@@ -486,10 +486,10 @@ test("Contract control (negative) — a green suite produces NO SUITE-RED", () =
   }
 });
 
-test("AC6 — this file declares node:test and // @test-group governance", () => {
+test("AC6 — this file declares node:test and // @test-group engine", () => {
   const src = read(new URL(import.meta.url));
   assert.ok(src.includes('import { test } from "node:test"'), "uses node:test");
-  assert.match(src, /^\/\/ @test-group governance/m, "declares @test-group governance");
+  assert.match(src, /^\/\/ @test-group engine/m, "declares @test-group engine");
 });
 
 // ── AC6: crash-watchdog (gap-full-suite-state-red-no-failure-detail-static-check-invisible) ─────────

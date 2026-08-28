@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // profile-policy.test.mjs — gap-profile-policy-when-which-profile, AC1-3.
 // Pins the L2 policy module (plugin/scripts/profile-policy.ts) + its carrier (.quay/profiles.yml):
 //   AC1 — 主备回退：primary model 不可用时按 fallbackModel 自动降级（负控制：可用时不降级、无

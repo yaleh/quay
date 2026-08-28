@@ -17,7 +17,7 @@
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
 
 # group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
-# Valid groups: product|engine|governance (the default-run body) + serial (the load-sensitive
+# Valid groups: product|engine (the default-run body) + serial (the load-sensitive
 # concurrency-1 phase — nested-suite-spawn + real-wall-clock-wait + the real-install
 # install/quay-init family, gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests +
 # gap-install-family-tests-rotate-flakes-under-full-suite) + lowconc (the hermetic-but-load-sensitive
@@ -27,17 +27,19 @@
 # the r10 regression (four commits b209f4fd→174badc0→e92c54d8→c7176a37 each dropping one group
 # from this case, so serial/lowconc silently folded into the concurrency-N body and the isolation
 # guarantee was cancelled WITHOUT going red) must be a hard failure, not a silent pass.
+# `governance` is RETIRED (gap-retire-governance-group-merge-into-bucket): it is no longer a
+# recognized group — a file still declaring it now hits the FAIL-CLOSED branch.
 group_of() {
   local f="$1" g
   g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
   case "${g:-}" in
-    product|engine|governance|serial|lowconc) echo "$g" ;;
+    product|engine|serial|lowconc) echo "$g" ;;
     "")
       # No declaration at all — intentional default to engine (AC7). The undeclared → engine path
       # is a real rule, distinct from an unknown-group typo.
       echo "engine" ;;
     *)
-      echo "scripts/test.sh: group_of: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|governance|serial|lowconc); refusing to silently degrade it to engine" >&2
+      echo "scripts/test.sh: group_of: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|serial|lowconc); refusing to silently degrade it to engine" >&2
       exit 3
       ;;
   esac
@@ -56,15 +58,15 @@ check_group_declarations() {
   while IFS= read -r f; do
     g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
     case "${g:-}" in
-      ""|product|engine|governance|serial|lowconc) ;;
+      ""|product|engine|serial|lowconc) ;;
       *)
-        echo "scripts/test.sh: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|governance|serial|lowconc); refusing to silently degrade it to engine" >&2
+        echo "scripts/test.sh: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|serial|lowconc); refusing to silently degrade it to engine" >&2
         exit 3
         ;;
     esac
   done < <(build_deduped_files)
   # gap-test-group-downgrade-no-guard (AC1): a LEGAL-but-degrading re-tag
-  # (product/engine → governance/serial/lowconc) silently removes a test from the default set —
+  # (product/engine → serial/lowconc) silently removes a test from the default set —
   # check_group_declarations now ALSO runs the downgrade detector
   # (plugin/scripts/test-group-downgrade-check.ts), which requires a commit-message reason marker
   # ("@test-group-downgrade") for any default-set escape after the enforcement baseline.
@@ -114,16 +116,14 @@ is_default_set() {
   [ "${1:-}" = "product,engine" ]
 }
 
-# select_files <groups-csv> — echo the files to run for the given groups (respecting the
-# default-set self-skip passthrough so governance reports `skipped` rather than absent, AC4/AC6).
+# select_files <groups-csv> — echo the files to run for the given groups (AC4/AC6).
+# `governance` passthrough removed (gap-retire-governance-group-merge-into-bucket): governance is no
+# longer a select/skip group, so the only selection semantics here are exact group membership.
 select_files() {
   local groups="$1" f g
   while IFS= read -r f; do
     g="$(group_of "$f")"
     if in_group "$g" "$groups"; then
-      printf '%s\n' "$f"
-    elif [ "$g" = "governance" ] && is_default_set "$groups"; then
-      # governance self-skips via its in-file block; keep it in the run so it is VISIBLE.
       printf '%s\n' "$f"
     fi
   done < <(build_deduped_files)
@@ -131,9 +131,9 @@ select_files() {
 
 # list_groups — per-group counts over the full deduped glob (AC10). `serial` and `lowconc` are real
 # groups (the load-sensitive families routed to their own phases), so the default-set partition
-# product+engine+governance no longer equals total — serial and lowconc are the 4th and 5th parts.
+# product+engine no longer equals total — serial and lowconc are the 3rd and 4th parts.
 list_groups() {
-  declare -A counts=([product]=0 [engine]=0 [governance]=0 [serial]=0 [lowconc]=0)
+  declare -A counts=([product]=0 [engine]=0 [serial]=0 [lowconc]=0)
   local f g
   while IFS= read -r f; do
     g="$(group_of "$f")"
@@ -141,9 +141,8 @@ list_groups() {
   done < <(build_deduped_files)
   printf 'product:    %d\n' "${counts[product]:-0}"
   printf 'engine:     %d\n' "${counts[engine]:-0}"
-  printf 'governance: %d\n' "${counts[governance]:-0}"
   printf 'serial:     %d\n' "${counts[serial]:-0}"
   printf 'lowconc:    %d\n' "${counts[lowconc]:-0}"
-  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} + ${counts[serial]:-0} + ${counts[lowconc]:-0} ))
+  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[serial]:-0} + ${counts[lowconc]:-0} ))
   printf 'total:      %d (deduped by realpath)\n' "$total"
 }

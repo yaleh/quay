@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // loop-shipping.test.mjs — gap-loop-mechanism-lives-outside-the-package-and-cannot-ship.
 // Pins the physical facts the task's AC1/AC2/AC7 rest on, so a future move back out of the
 // package (or a second physical copy) fails loudly instead of silently re-introducing the

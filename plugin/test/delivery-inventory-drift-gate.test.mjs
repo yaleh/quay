@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // delivery-inventory-drift-gate.test.mjs — unit tests for the file-set change gate
 // (gap-delivery-inventory-drift-needs-file-add-gate, AC2/AC4 + gap-drift-gate-covers-only-plugin-
 // scripts-not-workflows AC2 + Contract invariants).
@@ -49,16 +49,8 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const GATE = path.join(REPO_ROOT, "plugin", "scripts", "delivery-inventory-drift-gate.sh");
 const OUTLINE_REL = path.join("docs", "proposals", "quay-product-outline.md");
 
-// Governance self-skip (AC7 @test-group governance, ADR-019 decision #1): in a DEFAULT
-// (product,engine) run this file reports `skipped`, not absent — QUAY_TEST_GROUPS is set to
-// product,engine on the default path, so the real tests run only with `--group governance`
-// or in the explicit-file form (QUAY_TEST_GROUPS unset).
-const GOV_SKIP_REASON =
-  process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")
-    ? "set QUAY_TEST_GROUPS=governance to run"
-    : false;
 function t(name, fn) {
-  test(name, GOV_SKIP_REASON ? { skip: GOV_SKIP_REASON } : {}, fn);
+  test(name, fn);
 }
 
 function git(cwd, ...args) {

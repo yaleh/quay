@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // fan-in-runid-check.test.mjs — gap-task-telemetry-6-percent-join: the fan-in runId existence +
 // traceability checker (plugin/scripts/fan-in-runid-check.ts). The 6% join-rate defect (git fan-in
 // commits vs telemetry records) is fixed by a fan-in commit subject carrying the telemetry runId at

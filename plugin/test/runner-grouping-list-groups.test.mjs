@@ -1,25 +1,24 @@
 // @test-group serial
 // @load-sensitive nested-spawn
-// @load-sensitive-entry 2026-08-08 A-class nested full-suite spawn (shells out to real scripts/test.sh --group governance)
+// @load-sensitive-entry 2026-08-08 A-class nested full-suite spawn (shells out to real scripts/test.sh --list-files/--list-groups)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this file shells
-// out to the REAL scripts/test.sh including `--group governance` (the grown governance sub-suite,
-// >830s isolated) — inherently heavy + fragile under full-suite concurrency (nested node --test
-// spawns; the outer reruns this family isolated per the 判绿 rules).
+// out to the REAL scripts/test.sh metadata modes (--list-files/--list-groups,
+// >830s isolated historically) — inherently heavy + fragile under full-suite concurrency (nested
+// node --test spawns; the outer reruns this family isolated per the 判绿 rules).
 // GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
 // `serial` group (A-class nested full-suite spawn) so it runs in the concurrency-1 serial phase,
 // never competing with the concurrency-8 main body's worker pool. Its D-class AC7 fixture is kept
 // in the shared plugin/test dir (that is what makes the undeclared→engine assertion meaningful);
 // the collision with test-file-snapshot is fixed on the SNAPSHOT side (test-file-snapshot.sh
 // excludes transient zz-* runtime fixtures).
-// SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FIVE files split from the
+// SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of the files split from the
 // original runner-grouping.test.mjs (204s serial floor) by test concern — this file holds the
-// --list-groups/--list-files RELATIONSHIP tests (the deduped partition invariants; the governance
-// --list-files membership test moved to runner-grouping-governance.test.mjs so no runner-grouping
-// file exceeds the 60s serial band). The nested `@load-sensitive nested-spawn` annotation is
-// preserved so the family membership + serial routing stay byte-identical.
+// --list-groups/--list-files RELATIONSHIP tests (the deduped partition invariants). The nested
+// `@load-sensitive nested-spawn` annotation is preserved so the family membership + serial routing
+// stay byte-identical.
 // gap-test-suite-has-no-layer-grouping — tests for the layer-grouping mechanics in
 // scripts/test.sh: extended glob (AC2), realpath dedup (AC3), default groups product,engine
-// with governance self-skipping (AC4/AC6), and --list-groups (AC10). These shell out to the REAL
+// (AC4/AC6), and --list-groups (AC10). These shell out to the REAL
 // scripts/test.sh (the single source of truth), not a copy of its logic.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -69,7 +68,7 @@ function runTestShRefresh(...args) {
 // goes stale the moment anyone adds a test file — B3-2 red on fan-in for exactly this reason
 // (B3-1 merged a new engine test 13 min after B3-2's worktree snapshot). Per the fast-mode tick
 // rule "测试不得硬编码全局计数", all assertions here are RELATIONSHIPS over the live glob:
-//   product + engine + governance + serial + lowconc == total (the deduped realpath partition),
+//   product + engine + serial + lowconc == total (the deduped realpath partition),
 //   and --list-files count + serial == --list-groups total (the default --list-files EXCLUDES the
 //   serial group, routed to the concurrency-1 phase —
 //   gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests — and INCLUDES the
@@ -81,19 +80,19 @@ function parseGroups(out) {
     assert.ok(m, `--list-groups missing ${label}: ${out}`);
     return Number(m[1]);
   };
-  return { product: parse("product"), engine: parse("engine"), governance: parse("governance"), serial: parse("serial"), lowconc: parse("lowconc"), total: parse("total") };
+  return { product: parse("product"), engine: parse("engine"), serial: parse("serial"), lowconc: parse("lowconc"), total: parse("total") };
 }
 
 test("AC10/AC2/AC3: --list-groups reports per-group counts of the deduped glob", () => {
   const out = runTestShCached("--list-groups");
   const g = parseGroups(out);
-  // Relationship, not snapshot: the FIVE groups partition the deduped realpath total (serial is
+  // Relationship, not snapshot: the FOUR groups partition the deduped realpath total (serial is
   // the load-sensitive family's group — gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests;
   // lowconc is the hermetic-but-load-sensitive concurrency-3 phase —
   // gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive).
-  assert.equal(g.product + g.engine + g.governance + g.serial + g.lowconc, g.total);
+  assert.equal(g.product + g.engine + g.serial + g.lowconc, g.total);
   // Structural sanity independent of absolute counts.
-  assert.ok(g.product > 0 && g.engine > 0 && g.governance > 0 && g.serial > 0 && g.lowconc > 0);
+  assert.ok(g.product > 0 && g.engine > 0 && g.serial > 0 && g.lowconc > 0);
 });
 
 // Any assertion here that reads the SHARED plugin/test dir with MORE THAN ONE glob read is
@@ -139,9 +138,8 @@ test("AC3: realpath dedup — --list-files count + serial equals --list-groups t
 });
 
 test("AC6: --group product,engine ∪ --group lowconc selects the same files as no-args", () => {
-  // The default run = the product,engine body (with governance self-skip passthrough) PLUS the
-  // lowconc phase (concurrency-3 hermetic-but-load-sensitive files). The governance passthrough
-  // only applies to exactly `product,engine` (is_default_set), so the no-args selection is the
+  // The default run = the product,engine body PLUS the
+  // lowconc phase (concurrency-3 hermetic-but-load-sensitive files). The no-args selection is the
   // concatenation of `--group product,engine --list-files` and `--group lowconc --list-files`
   // (same build_deduped_files order). gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive.
   // THREE non-atomic glob reads here (wider exposure than AC3's two), and the assertion is

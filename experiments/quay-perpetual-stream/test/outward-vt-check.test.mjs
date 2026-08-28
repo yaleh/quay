@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // Tests for outward-vt-check.mjs — DIR-038-C (unbounded outward VT term). Golden/real oracle: this
 // session's archguard signals. The term must be non-zero where the bounded cov ruler gave 0, and
 // non-saturating. RED-first (ADR-001 / DIR-019).
@@ -8,9 +8,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 const { outwardVT, nonSaturating, rescore, DEFAULT_WEIGHTS, main } = await import("../scripts/outward-vt-check.ts");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -54,4 +51,3 @@ test("main: real signals → exit 0 (non-zero, non-saturating); missing file →
   assert.equal(await main(["node", "s", fx("nope.json")]), 2);
 });
 
-}

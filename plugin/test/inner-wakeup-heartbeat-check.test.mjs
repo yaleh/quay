@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // inner-wakeup-heartbeat-check.test.mjs — inner 兜底心跳产物检查器（外层读）
 // (tasks/gap-inner-wakeup-heartbeat-invisible)
 //

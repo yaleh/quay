@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // supervisor-preempt.test.mjs — the supervisor base layer's PREEMPTION primitive
 // (tasks/gap-supervisor-preemption, 落地次序 step ④; SPEC-integration-architecture §4.4 #4).
 //
@@ -17,7 +17,7 @@
 //   AC2 — `.halt` enforcement moved to code: the slot-refill dispatch recommender is blocked
 //         (should_refill=false) when `.halt` is present — a mechanical mount point, mid-flow.
 //   AC4 — `claude -p` form: preempt of a PID = `kill <pid>` (the OS is the preemption primitive).
-//   AC5 — node:test + // @test-group governance.
+//   AC5 — node:test + // @test-group engine.
 //   Contract — halt-check's `halted=` field; fail-closed on an unreadable sentinel.
 //
 // Run: scripts/test.sh plugin/test/supervisor-preempt.test.mjs
@@ -34,9 +34,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "supervisor-preempt.sh");
 const SLOT_REFILL = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 function runPreempt(args, env = {}) {
   return spawnSync("bash", [SCRIPT, ...args], {
@@ -359,4 +356,3 @@ test("Contract invariant: preempt does not depend on the target calling anything
   }
 });
 
-}

@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // spec-declaration-point-check.test.mjs — SPEC 声明点机械检查测试
 // (tasks/gap-spec-declaration-point-mechanical-check).
 //

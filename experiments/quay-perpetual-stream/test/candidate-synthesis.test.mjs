@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // candidate-synthesis.test.mjs — M188/DIR-119-A Stage 1.1/1.3/1.4/1.5 tests.
 //
 // RED (Stage 1.1): the CURRENT SELECT representation (select-preflight.ts's CandidateEntry) is
@@ -20,9 +20,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 // gap-select-preflight-retirement-decision (2026-08-16): the legacy select-preflight.ts was
 // retired with the classic OUTER-LOOP SELECT phase; the two getCandidates-baseline tests below
 // were removed with it. The new-module assertions (RED/GREEN synthesis) are unaffected.
@@ -269,4 +266,3 @@ test("CONTRACT_VERSION is stable and referenced consistently", () => {
   assert.equal(CONTRACT_VERSION, 1);
 });
 
-}

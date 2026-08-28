@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // ac36-sortkey-criterion-check.test.mjs — mechanical checker for AC36 判据②
 // (tasks/gap-ac36-recommended-exposes-sort-key). slot-refill --json's `recommended` is a pure
 // string-id array that does NOT expose the sort axes (blocking_suite / delivery_critical / id), so

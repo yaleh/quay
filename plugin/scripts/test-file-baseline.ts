@@ -8,7 +8,7 @@
 //
 // The durable rule (fast-mode tick doc, 2026-08-02): global quantities (file count, test count,
 // group-member count) must be COMPUTED AT RUNTIME, never hardcoded as constants. Assertions may
-// be RELATIONS (e.g. "product + engine + governance == deduplicated realpath total"), not
+// be RELATIONS (e.g. "product + engine == deduplicated realpath total"), not
 // SNAPSHOTS. This module is the mechanical core for the baseline-snapshot form of that rule:
 //
 //   AC2  — record the test-file set snapshot at fork (worktree-creation) time.

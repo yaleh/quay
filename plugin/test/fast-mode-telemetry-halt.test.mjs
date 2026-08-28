@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // fast-mode-telemetry-halt.test.mjs — gap-tasksperhour-counts-halted-time-as-slow-work (AC1–AC8):
 // tasksPerHour used to put halted wall-clock in its denominator, so a `.halt` pause read as
 // degraded throughput — and rewarded picking light tasks. The fix subtracts RECORDED halt intervals
@@ -9,7 +9,7 @@
 // numbers exposed + independent verification), AC3 (zero-halt byte-identical invariance), AC4
 // (artificial halt raises the reading by exactly count/(elapsed−halted)), AC5 (tonight's real
 // 09:33:12Z→10:32:00Z halt retrocalculation + AC18 expiry shift), AC6 (numerator untouched — 10x
-// task-size differences contribute equally) and AC8 (node:test + @test-group governance).
+// task-size differences contribute equally) and AC8 (node:test + @test-group engine).
 //
 // Run:
 //   node --test plugin/test/fast-mode-telemetry-halt.test.mjs
@@ -87,13 +87,6 @@ const WS = MEASURE - Math.round(24.0402 * 3_600_000);
 const COUNT = 37;
 const BASE_WINDOW_HOURS = (MEASURE - WS) / 3_600_000; // exactly 24.0402h
 
-// ── Governance self-skip (AC8 @test-group governance) ─────────────────────────────────────────────
-// In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
-// precedent) — governance is PARKED until exp6 phase 2. It runs in full when invoked explicitly
-// (QUAY_TEST_GROUPS unset) or with `--group governance`.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 // ── AC1: data source decision + conservative missed-record semantics ────────────────────────────────
 
@@ -326,12 +319,11 @@ test("AC6 — two tasks whose durations differ 10x contribute equally to tasksPe
   assert.ok(Math.abs(byId.long - 600) < 1e-9, `the long task must be 10h, got ${byId.long}`);
 });
 
-// ── AC8: node:test + @test-group governance ─────────────────────────────────────────────────────────
+// ── AC8: node:test + @test-group engine ─────────────────────────────────────────────────────────
 
-test("AC8 — this file declares @test-group governance and imports node:test", () => {
+test("AC8 — this file declares @test-group engine and imports node:test", () => {
   const src = fs.readFileSync(__filename, "utf8");
-  assert.match(src, /\/\/ @test-group governance/, "file must declare // @test-group governance");
+  assert.match(src, /\/\/ @test-group engine/, "file must declare // @test-group engine");
   assert.match(src, /import \{ test \} from "node:test"/, "file must use node:test");
 });
 
-} // end governance self-skip else-branch

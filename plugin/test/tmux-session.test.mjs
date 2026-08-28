@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // tmux-session.test.mjs — the three-layer tmux-session library
 // (tasks/gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe, STAGE 3 / AC5-AC7).
 //
@@ -33,10 +33,6 @@ import {
   tmuxEnv,
 } from "../scripts/tmux-session.ts";
 
-// ── Governance self-skip (AC5 @test-group governance; ADR-019 decision #1 precedent) ───────────
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 const tmuxAvailable = (() => {
   try { return spawnSync("tmux", ["-V"], { encoding: "utf8" }).status === 0; } catch { return false; }
@@ -219,4 +215,3 @@ test("AC7: the library's tmux() spawns its own server on a private socket — a 
   }
 });
 
-} // end governance self-skip else

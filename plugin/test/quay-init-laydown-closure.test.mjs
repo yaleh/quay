@@ -25,7 +25,7 @@
 //       plugin/scripts/, lands, and verify passes; the verify surface covers it.
 //   AC4 — send-keys-reliable.sh FAILS LOUD at startup when its CHECKER is missing (exit 1 + named
 //       error), never a silent assignment.
-//   AC7 — this file is node:test + // @test-group governance.
+//   AC7 — this file is node:test + // @test-group serial.
 //
 // Run:
 //   scripts/test.sh plugin/test/quay-init-laydown-closure.test.mjs

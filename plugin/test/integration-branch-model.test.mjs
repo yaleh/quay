@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // integration-branch-model.test.mjs — gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.
 // The two-line branch model (orchestration/SPEC-branching-model-integration-branch-2026-08-05.md):
 // split the "fork baseline" (develop, verified) from the "merge point" (integration, pending
@@ -15,7 +15,7 @@
 //         conflict; invariant broken ⇒ blocked, never auto-merge.
 //   AC3 — the task→integration conflict fixture: overlapping declared touches surface the
 //         touch-declaration imprecision (SPEC §4 — the residual, bounded merge cost).
-//   AC7 — this file declares `// @test-group governance` and uses node:test.
+//   AC7 — this file declares `// @test-group engine` and uses node:test.
 //
 // Run:
 //   scripts/test.sh plugin/test/integration-branch-model.test.mjs
@@ -30,13 +30,6 @@ import {
   declaredTouches,
 } from "../scripts/integration-branch-model.ts";
 
-// ── Governance self-skip (AC7 @test-group governance) ──────────────────────────────────────────────
-// In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
-// precedent). It runs in full when invoked explicitly (QUAY_TEST_GROUPS unset) or with
-// `--group governance`.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 // ── AC2: fork baseline = dependency declaration ───────────────────────────────────────────────────
 test("AC2: independent task forks from develop (verified baseline)", () => {
@@ -102,4 +95,3 @@ test("AC2: declaredTouches returns [] for a body with no ## Touches section", ()
   assert.deepEqual(declaredTouches("## Proposal\n\nno touches here\n"), []);
 });
 
-}

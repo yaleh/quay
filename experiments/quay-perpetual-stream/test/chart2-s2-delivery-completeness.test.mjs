@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // Unit + CLI tests for chart2-s2-delivery-completeness.ts — the machine-verifiable cov calculator
 // for chart-2 surface S2 (Delivery completeness), per DIR-064 / DIR-064-A. Mirrors the
 // it0-split-or-commit-check test style: node:test + node:assert/strict, pure-function unit tests
@@ -15,9 +15,6 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 const { readVersionFields, versionsConsistent, computeS2Cov, loadS2Evidence, selftest, } = await import("../scripts/chart2-s2-delivery-completeness.ts");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -240,4 +237,3 @@ test("CLI: negative control — temp repo with both-false evidence → cov 0.0 (
   }
 });
 
-}

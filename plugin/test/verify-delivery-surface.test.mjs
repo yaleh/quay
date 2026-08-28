@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // verify-delivery-surface.test.mjs — L1 six-category delivery-completeness check
 // (gap-complete-delivery-surface-spec-and-l1-verification, AC2/AC5).
 //
@@ -13,7 +13,7 @@
 //          executable manifest; a drifted doc → spec_is_live=0.
 //   AC4  — attribution holes are reported: a category whose owning task is absent is
 //          surfaced (attributionHoles), so the six-category attribution is resolvable.
-//   AC5  — this file uses node:test and declares // @test-group governance.
+//   AC5  — this file uses node:test and declares // @test-group engine.
 //
 // Run:
 //   scripts/test.sh plugin/test/verify-delivery-surface.test.mjs

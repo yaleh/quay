@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // slot-visibility.test.mjs — gap-telemetry-brackets-vs-subagents-no-slot-visibility.
 // Telemetry in-flight brackets do NOT reflect real concurrency: the --task-start/--task-end pair
 // was not being called in the dispatch path, so telemetry degraded to a historical archive, and the
@@ -96,10 +96,6 @@ function seedGitWorkspace(tmp) {
   assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
 }
 
-// ── Governance self-skip (AC7 @test-group governance) ─────────────────────────────────────────────
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 test("AC1 — --report --json carries reconcile-aware reconcilable[] + realInFlight", async () => {
   const cli = await importCli();
@@ -275,4 +271,3 @@ test("AC2 doc — the slot signal is machine-readable from --slots in both tick 
   assert.match(outer, /--slots/, "outer tick must reference the --slots slot signal");
 });
 
-}

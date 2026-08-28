@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // sync-vendor.test.mjs — tasks/gap-release-postinstall-fallback-breaks-windows-sea-build
 // (AC1/AC3/AC5): the root package.json postinstall MUST be cross-platform.
 //
@@ -16,7 +16,7 @@
 //     (printed only in no-flag / postinstall mode, on failure), while sync-vendor.sh still exits
 //     NONZERO on failure so strict callers (publish-dist-branch.sh, quay-init.sh, package.sh)
 //     still fail loudly — only the postinstall's own `|| true` swallows it.
-//   - AC5: this file uses node:test and declares // @test-group governance.
+//   - AC5: this file uses node:test and declares // @test-group engine.
 //
 // The behavioral assertions copy sync-vendor.sh into a temp plugin dir with NO source tree
 // (packages/quay missing), so the rebuild+mirror path fails deterministically without a build.

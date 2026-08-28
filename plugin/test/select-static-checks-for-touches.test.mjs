@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // select-static-checks-for-touches.test.mjs —
 // gap-capability-catalog-declarations-not-enforced-at-script-creation.
 // The capability-catalog AC1c ENTRY-POINT gate (every shipped plugin/scripts check declares what
@@ -15,7 +15,7 @@
 //   AC2 — that task's new script is NOT in the catalog QUESTION table ⇒ the scoped gate goes RED
 //   AC3 — an ALREADY-declared script (claim-task.sh) is touched ⇒ scoped gate stays GREEN (no false positive)
 //   AC4 — negative control: ONLY new scripts trigger; existing tracked scripts are not rescanned
-//   AC5 — this file is node:test + declares // @test-group governance
+//   AC5 — this file is node:test + declares // @test-group engine
 //
 // Run:
 //   scripts/test.sh plugin/test/select-static-checks-for-touches.test.mjs
@@ -34,16 +34,8 @@ const SEL_CLI = path.join(REPO_ROOT, "plugin", "scripts", "select-static-checks-
 const TEST_SH = path.join(REPO_ROOT, "plugin", "scripts", "runner-static-gate.ts");
 const CATALOG = path.join(REPO_ROOT, "plugin", "scripts", "capability-catalog.sh");
 
-// Governance self-skip (ADR-019 decision #1, same pattern as scoped-static-checks.test.mjs): in a
-// DEFAULT (product,engine) run this file reports `skipped`, not absent — QUAY_TEST_GROUPS is set to
-// product,engine on the default path, so the real tests run only with `--group governance` or in the
-// explicit-file form (QUAY_TEST_GROUPS unset).
-const GOV_SKIP_REASON =
-  process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")
-    ? "set QUAY_TEST_GROUPS=governance to run"
-    : false;
 function t(name, fn) {
-  test(name, GOV_SKIP_REASON ? { skip: GOV_SKIP_REASON } : {}, fn);
+  test(name, fn);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────
@@ -478,10 +470,10 @@ t("AC4b — a NEW file under plugin/scripts/checker-mutation-cases/ is a FIXTURE
   }
 });
 
-// ── AC5: this file is node:test + @test-group governance (self-evident) ──────────────────────────────
+// ── AC5: this file is node:test + @test-group engine (self-evident) ──────────────────────────────
 
-t("AC5 — this test file is node:test with a governance @test-group", () => {
+t("AC5 — this test file is node:test with an engine @test-group", () => {
   const src = fs.readFileSync(new URL(import.meta.url), "utf8");
   assert.match(src, /from "node:test"/, "imports node:test");
-  assert.match(src, /^\/\/ @test-group governance/m, "declares @test-group governance");
+  assert.match(src, /^\/\/ @test-group engine/m, "declares @test-group engine");
 });

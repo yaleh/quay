@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // portability-strategy-check.test.mjs — AC1/AC2/AC3/AC4/AC5 of
 // tasks/gap-fast-mode-cross-project-portability-strategic-question.
 //

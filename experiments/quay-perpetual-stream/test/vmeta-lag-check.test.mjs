@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // Unit tests for vmeta-lag-check.mjs — the single-source V_meta consolidation-lag ARITHMETIC.
 // exp5-M-CRYST-D3 increment R5 (Axis-2′); R5 prose-parsing residual resolved in M70/D4 (ADR-004
 // structured [tag] field). Written RED-first (ADR-001 / DIR-019 discipline): the fix for any
@@ -13,9 +13,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 const { parseMilestoneNumber, parseRows, rowStatus, confirmingMilestone, hasDatedCarryForward, evaluateRow, checkLedger, } = await import("../scripts/vmeta-lag-check.ts");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -240,4 +237,3 @@ test("CLI: N/A ledger (no rows, no counter) → exit 0 and prints N/A explicitly
   }
 });
 
-}

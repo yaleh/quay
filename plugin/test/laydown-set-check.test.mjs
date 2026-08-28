@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // laydown-set-check.test.mjs — gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite.
 //
 // Pins the cold-start gate's Contract:
@@ -13,7 +13,7 @@
 //        helper 的派生集 == 复刻 quay-init 同一 grep 的输出。
 // AC4  — 真实使用：session-liveness.sh / session-liveness-mount.sh 在铺设集内（M3 回归会随铺扩散，
 //        所以本次等待正确）；铺设集外失败不阻塞。
-// AC6  — 本测试用 node:test 且带 `// @test-group governance`。
+// AC6  — 本测试用 node:test 且带 `// @test-group engine`。
 //
 // Run:
 //   scripts/test.sh plugin/test/laydown-set-check.test.mjs

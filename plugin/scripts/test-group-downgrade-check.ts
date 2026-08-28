@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // test-group-downgrade-check.ts — gap-test-group-downgrade-no-guard (AC1/AC2/AC3):
-// block un-reasoned @test-group downgrades (product/engine → governance/serial/lowconc) that
+// block un-reasoned @test-group downgrades (product/engine → serial/lowconc) that
 // silently remove a test from the default run set.
 //
 // THREAT (the finding this task closes): scripts/test.sh's check_group_declarations only rejected
 // UNRECOGNIZED group values (typo / dropped group). A LEGAL re-tag — `// @test-group engine` →
-// `// @test-group governance` — silently moved the test out of the default {product,engine} set:
-// governance self-skips in default runs, serial/lowconc route to their own lower-concurrency
-// phases. No check reported that a test had been downgraded out of the default set. An actor under
+// `// @test-group serial` — silently moved the test out of the default {product,engine} set:
+// serial/lowconc route to their own lower-concurrency phases. No check reported that a test had
+// been downgraded out of the default set. An actor under
 // suite-time pressure could (and, per the finding, likely did) take exactly this path to shrink a
 // red suite without any gate going red.
 //
@@ -16,7 +16,7 @@
 // --baseline / direct-to-develop-bypass-check --baseline):
 //   baseline = the commit where this guard landed on develop (develop HEAD at enforcement time).
 //   A "downgrade" is a file whose @test-group moved FROM product|engine TO
-//   governance|serial|lowconc. Two paths:
+//   serial|lowconc. Two paths:
 //
 //   1) UNCOMMITTED (working tree vs git HEAD): the downgrade sits in the working tree, so no
 //      commit message can carry the reason yet → always RED. The legitimate flow is: make the
@@ -59,8 +59,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * (pre-guard) are documented debt and are not re-scanned. */
 export const DEFAULT_BASELINE = "8ea050c7";
 
-/** The groups a downgrade may move INTO — each silently leaves the default {product,engine} set. */
-export const TARGET_GROUPS = ["governance", "serial", "lowconc"] as const;
+/** The groups a downgrade may move INTO — each silently leaves the default {product,engine} set.
+ * `governance` is RETIRED (gap-retire-governance-group-merge-into-bucket) — it is no longer a
+ * valid group, so it is not a downgrade target (a re-tag to it now fails closed in group_of). */
+export const TARGET_GROUPS = ["serial", "lowconc"] as const;
 
 /** The groups a downgrade moves OUT of — the default-run set. */
 export const ORIGIN_GROUPS = ["product", "engine"] as const;
@@ -175,7 +177,7 @@ function gitFilesAtRev(root: string, rev: string, files: string[]): Set<string> 
 /** The subset of `files` whose content at `rev` declares a target group (git grep — ONE command). */
 function gitTargetFiles(root: string, rev: string, files: string[]): Set<string> {
   if (files.length === 0) return new Set();
-  const r = git(root, ["grep", "-l", "-E", "@test-group[[:space:]]+(governance|serial|lowconc)", rev, "--", ...files], true);
+  const r = git(root, ["grep", "-l", "-E", "@test-group[[:space:]]+(serial|lowconc)", rev, "--", ...files], true);
   if (r.status !== 0) return new Set(); // exit 1 = no matches → empty set
   const out = new Set<string>();
   for (const line of r.stdout.split(/\r?\n/)) {
@@ -251,10 +253,14 @@ export function detectDowngrades(root: string, baseline: string): DowngradeResul
 
   // 1) Uncommitted downgrades: working-tree group is a target, HEAD group is product/engine, and the
   //    file exists at HEAD (a NEW file may declare any group — C3 in test-framework-policy-check).
+  //    A file whose HEAD group is NOT product/engine (a retired-group→target lateral move, e.g.
+  //    governance→serial after governance retired — gap-retire-governance-group-merge-into-bucket)
+  //    never left the default set, so it is NOT a downgrade.
   for (const f of wtTarget) {
     if (headTarget.has(f)) continue; // committed state is already target → judged by path 2
     if (!headFiles.has(f)) continue; // new file created with a target group → allowed
     const from = groupAt(root, f, "HEAD") ?? "engine";
+    if (!(ORIGIN_GROUPS as readonly string[]).includes(from)) continue; // lateral move, not a downgrade
     violations.push({ kind: "uncommitted", file: f, fromGroup: from, toGroup: wtGroups.get(f)! });
   }
 
@@ -363,13 +369,13 @@ export function runSelftest(): boolean {
 
   // Pure helpers.
   check("groupOfSource: engine", groupOfSource('// @test-group engine\n') === "engine");
-  check("groupOfSource: governance", groupOfSource('// @test-group governance\n') === "governance");
+  check("groupOfSource: lowconc", groupOfSource('// @test-group lowconc\n') === "lowconc");
   check("groupOfSource: default engine", groupOfSource('// no declaration\n') === "engine");
   check("groupOfSource: first only", groupOfSource('// @test-group serial\n// @test-group engine\n') === "serial");
   check("MARKER present", "@test-group-downgrade move flaky".includes(MARKER));
-  check("MARKER absent", "move flaky to governance".includes(MARKER) === false);
+  check("MARKER absent", "move flaky to serial".includes(MARKER) === false);
 
-  // Integration: temp git repos with real engine→governance downgrades. Each scenario gets a FRESH
+  // Integration: temp git repos with real engine→serial downgrades. Each scenario gets a FRESH
   // repo (a prior RED case in the same history would legitimately stay red and mask a later GREEN).
   const makeFixture = () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "test-group-downgrade-"));
@@ -401,13 +407,13 @@ export function runSelftest(): boolean {
         let res = detectDowngrades(fx.dir, fx.baseline);
         check("GREEN: no downgrade passes", res.violations.length === 0, JSON.stringify(res.violations));
 
-        // RED: uncommitted engine→governance downgrade.
-        fs.writeFileSync(path.join(fx.dir, fx.testFile), fx.src("governance"));
+        // RED: uncommitted engine→serial downgrade.
+        fs.writeFileSync(path.join(fx.dir, fx.testFile), fx.src("serial"));
         res = detectDowngrades(fx.dir, fx.baseline);
-        check("RED: uncommitted downgrade detected", res.violations.length === 1 && res.violations[0].kind === "uncommitted" && res.violations[0].toGroup === "governance", JSON.stringify(res.violations));
+        check("RED: uncommitted downgrade detected", res.violations.length === 1 && res.violations[0].kind === "uncommitted" && res.violations[0].toGroup === "serial", JSON.stringify(res.violations));
 
         // RED: committed downgrade WITHOUT marker.
-        fx.run(["commit", "-aqm", "move to governance"]);
+        fx.run(["commit", "-aqm", "move to serial"]);
         res = detectDowngrades(fx.dir, fx.baseline);
         check("RED: committed downgrade without marker detected", res.violations.length === 1 && res.violations[0].kind === "committed" && !res.violations[0].subject!.includes(MARKER), JSON.stringify(res.violations));
       } finally {
@@ -419,8 +425,8 @@ export function runSelftest(): boolean {
     {
       const fx = makeFixture();
       try {
-        fs.writeFileSync(path.join(fx.dir, fx.testFile), fx.src("governance"));
-        fx.run(["commit", "-aqm", `test: ${MARKER} move flaky to governance`]);
+        fs.writeFileSync(path.join(fx.dir, fx.testFile), fx.src("serial"));
+        fx.run(["commit", "-aqm", `test: ${MARKER} move flaky to serial`]);
         const res = detectDowngrades(fx.dir, fx.baseline);
         check("GREEN: marked downgrade passes", res.violations.length === 0, JSON.stringify(res.violations));
       } finally {
@@ -432,9 +438,9 @@ export function runSelftest(): boolean {
     {
       const fx = makeFixture();
       try {
-        fs.writeFileSync(path.join(fx.dir, "plugin/test/new-gov.test.mjs"), fx.src("governance"));
-        fx.run(["add", "plugin/test/new-gov.test.mjs"]);
-        fx.run(["commit", "-qm", "add new governance test"]);
+        fs.writeFileSync(path.join(fx.dir, "plugin/test/new-serial.test.mjs"), fx.src("serial"));
+        fx.run(["add", "plugin/test/new-serial.test.mjs"]);
+        fx.run(["commit", "-qm", "add new serial test"]);
         const res = detectDowngrades(fx.dir, fx.baseline);
         check("GREEN: new file with target group passes", res.violations.length === 0, JSON.stringify(res.violations));
       } finally {

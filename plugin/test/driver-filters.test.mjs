@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // driver-filters.test.mjs — AC152 (tasks/gap-ac152-filter-composable-predicate-list): the dispatch-pre-
 // filter is a COMPOSABLE PREDICATE LIST shared by the two task-processing drivers (worker / promotion),
 // not a per-kind private branch. The five predicates (notInFlight / depsSatisfied / touchesDisjoint /

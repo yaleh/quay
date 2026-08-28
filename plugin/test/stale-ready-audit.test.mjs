@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // stale-ready-audit.test.mjs — the 外层 stale-ready / bypass-complete detector (人 2026-08-12 裁定:
 // outer 机制要自我保障待办可派发). Two criteria:
 //   (a) staleReady  — status:ready + non-empty `## Evidence` (incl. the `## Evidence（…）` heading form)

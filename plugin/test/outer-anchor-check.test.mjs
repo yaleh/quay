@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // outer-anchor-check.test.mjs — AC80 三层 prompt 正本 + 不变式检查器测试
 // (tasks/gap-ac80-prompt-canonical-and-invariant-checker, AC1-AC4 + DoD).
 //

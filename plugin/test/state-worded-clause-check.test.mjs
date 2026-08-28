@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // state-worded-clause-check.test.mjs — tasks/gap-ac41-actionize-state-worded-clauses
 // (AC4 — the result-state-clause checker's mechanical realization of the ## Contract
 // `measure`/`band`).
@@ -14,7 +14,7 @@
 //         repo's actual current state.)
 //   AC5 — the checker is wired into scripts/test.sh run_static_checks (a static-tier `change`
 //         checker whose object is the three tick-cores); this file uses node:test and declares
-//         // @test-group governance.
+//         // @test-group engine.
 //
 // Run:
 //   scripts/test.sh plugin/test/state-worded-clause-check.test.mjs

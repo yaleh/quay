@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // slot-free-trigger.test.mjs — the empty-slot EVENT executor
 // (tasks/gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace).
 //
@@ -257,7 +257,7 @@ test("AC5 — the trigger is declared in capability-catalog.sh (entry gate: unde
   assert.ok(row.matching, "matching method declared");
 });
 
-test("AC6 — this file declares node:test and // @test-group governance", () => {
+test("AC6 — this file declares node:test and // @test-group engine", () => {
   const src = read(new URL(import.meta.url));
-  assert.match(src, /^\/\/ @test-group governance/m, "declares @test-group governance");
+  assert.match(src, /^\/\/ @test-group engine/m, "declares @test-group engine");
 });

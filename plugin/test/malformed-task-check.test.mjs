@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // malformed-task-check.test.mjs — RED/GREEN tests for the malformed-task gate
 // (plugin/scripts/malformed-task-check.ts, gap-malformed-task-silent-vanish-no-alert).
 //

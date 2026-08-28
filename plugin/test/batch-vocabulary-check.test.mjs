@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // batch-vocabulary-check.test.mjs — tasks/gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round
 // (AC4/AC5/AC6): the tick-doc batch-vocabulary checker.
 //
@@ -12,7 +12,7 @@
 //     probe restored clean must NOT be flagged (proves the whitelist is not a universal excuse).
 //   - AC5: the normative statement exists in both docs ("dispatch is rolling", the verification
 //     cadence is verification-round-N, and verification-round-N is "不是分派门控").
-//   - AC6: this file uses node:test and declares // @test-group governance.
+//   - AC6: this file uses node:test and declares // @test-group engine.
 //
 // No global counts are hardcoded: every assertion is relative to the repo's two tick docs plus
 // in-file fixtures.

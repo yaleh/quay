@@ -41,7 +41,7 @@
 #
 # Exit codes: 0 = provisioned (or already-provisioned); 2 = usage/env error.
 #
-# Tests: plugin/test/dispatch-worktree-setup.test.mjs (@test-group governance).
+# Tests: plugin/test/dispatch-worktree-setup.test.mjs (@test-group engine).
 
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "dispatch-worktree-setup.sh — make a freshly-created task worktree self-verifying (node_modules symlink-or-install + config.yml via worktree-include.sh)"

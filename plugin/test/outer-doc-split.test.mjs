@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // outer-doc-split.test.mjs — tasks/gap-ac38-outer-doc-split (AC38: outer 双份文档漂移未切分).
 //
 // AC38: `plugin/loop/orchestrator-loop-tick.md` (product behavior) vs

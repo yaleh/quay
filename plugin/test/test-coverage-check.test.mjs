@@ -121,7 +121,7 @@ test("AC5: canonical set == scripts/test.sh --list-files (realpath-deduped)", ()
   // gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive): the default --list-files
   // (product,engine + governance passthrough + the lowconc phase) EXCLUDES the serial group, so
   // the canonical-set comparison must enumerate ALL FIVE groups to stay single-source.
-  const listOut = spawnSync("bash", ["scripts/test.sh", "--group", "product,engine,governance,serial,lowconc", "--list-files"], {
+  const listOut = spawnSync("bash", ["scripts/test.sh", "--group", "product,engine,serial,lowconc", "--list-files"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
   });

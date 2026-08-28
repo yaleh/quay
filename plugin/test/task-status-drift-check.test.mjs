@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // task-status-drift-check.test.mjs — the closeout detector for direct (fast-mode) execution
 // (tasks/gap-task-status-closeout-not-mechanized). The detector reports tasks whose AC-declared
 // symbols already resolve in the codebase while status is still todo/ready — the "board lies"

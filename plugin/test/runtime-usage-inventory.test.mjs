@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // runtime-usage-inventory.test.mjs — gap-no-inventory-of-what-the-two-layer-mode-actually-runs.
 // Unit + integration tests for the runtime-usage-inventory tool (plugin/scripts/runtime-usage-inventory.ts).
 //
@@ -14,7 +14,7 @@
 //          portfolio), source-cited; never inferred from a path prefix.
 //   AC6  — never-runs-test lists every *.test.* outside scripts/test.sh's canonical glob.
 //   AC7  — buildInventory computes the main→long diff (low-frequency ≠ dead).
-//   AC10 — this file declares `// @test-group governance`.
+//   AC10 — this file declares `// @test-group engine`.
 //
 // Run:
 //   scripts/test.sh --for-task gap-no-inventory-of-what-the-two-layer-mode-actually-runs
@@ -50,9 +50,6 @@ after(() => {
   for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
@@ -388,4 +385,3 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
     const nrt = inv.summary.neverRunsTest.filter((p) => p.includes("experiments") && p.endsWith(".test.ts"));
     assert.ok(nrt.length >= 4, `expected >=4 experiments .test.ts never-runs-test, got ${nrt.length}`);
   });
-}

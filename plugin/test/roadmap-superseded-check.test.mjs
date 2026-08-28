@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // roadmap-superseded-check.test.mjs — AC1/AC2/AC4/AC5 of
 // tasks/gap-roadmap-silently-stale-mark-superseded-or-rewrite-fast-mode.
 //

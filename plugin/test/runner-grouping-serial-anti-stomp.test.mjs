@@ -80,7 +80,7 @@ function parseGroups(out) {
     assert.ok(m, `--list-groups missing ${label}: ${out}`);
     return Number(m[1]);
   };
-  return { product: parse("product"), engine: parse("engine"), governance: parse("governance"), serial: parse("serial"), lowconc: parse("lowconc"), total: parse("total") };
+  return { product: parse("product"), engine: parse("engine"), serial: parse("serial"), lowconc: parse("lowconc"), total: parse("total") };
 }
 
 // groupOfFile — mirror of scripts/test.sh's group_of (read a file's declared `// @test-group`).
@@ -129,7 +129,7 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
   //   - list_groups counts serial (the 4th group in the partition).
   const src = readFileSync(testSh, "utf8");
   const grouping = readFileSync(runnerGrouping, "utf8");
-  assert.match(grouping, /product\|engine\|governance\|serial\|lowconc\) echo "\$g" ;;/,
+  assert.match(grouping, /product\|engine\|serial\|lowconc\) echo "\$g" ;;/,
     "group_of must route serial AND lowconc as real groups (not fall back to engine)");
   assert.match(src, /local serial_files=\(\) sf serial_code/,
     "the FULL-SUITE-DEFAULT branch must declare a serial phase");
@@ -161,19 +161,19 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
   }
 });
 
-test("AC0c (anti-stomp): group_of recognizes ALL FIVE groups in one case arm — a dropped group goes red, not silent", () => {
+test("AC0c (anti-stomp): group_of recognizes ALL FOUR groups in one case arm — a dropped group goes red, not silent", () => {
   // The r10 regression (gap-verify-round-9-failures-from-recent-changes-fix-batch): four commits
   // b209f4fd→174badc0→e92c54d8→c7176a37 each dropped one group from group_of's case, so serial/
   // lowconc silently folded into the concurrency-N engine body and the isolation guarantee was
-  // cancelled WITHOUT going red. This pin fails the moment ANY of the five groups is dropped.
+  // cancelled WITHOUT going red. This pin fails the moment ANY of the four groups is dropped.
   const grouping = readFileSync(runnerGrouping, "utf8");
-  assert.match(grouping, /product\|engine\|governance\|serial\|lowconc\) echo "\$g" ;;/,
-    "group_of must recognize ALL FIVE groups (product|engine|governance|serial|lowconc) in one case arm");
-  // Behavioral double-check: all five counts are non-zero, and an unknown-group declaration is
+  assert.match(grouping, /product\|engine\|serial\|lowconc\) echo "\$g" ;;/,
+    "group_of must recognize ALL FOUR groups (product|engine|serial|lowconc) in one case arm");
+  // Behavioral double-check: all four counts are non-zero, and an unknown-group declaration is
   // FAIL-CLOSED (not silently degraded to engine — AC0b).
   const g = parseGroups(runTestShCached("--list-groups"));
-  assert.ok(g.product > 0 && g.engine > 0 && g.governance > 0 && g.serial > 0 && g.lowconc > 0,
-    "all five groups must have non-zero membership in --list-groups");
+  assert.ok(g.product > 0 && g.engine > 0 && g.serial > 0 && g.lowconc > 0,
+    "all four groups must have non-zero membership in --list-groups");
   const unknown = join(repoRoot, "plugin", "test", "zz-unknown-group-anti-stomp.test.mjs");
   rmSync(unknown, { force: true });
   try {
