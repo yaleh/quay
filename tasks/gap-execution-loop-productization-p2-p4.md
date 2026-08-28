@@ -1,7 +1,7 @@
 ---
 id: gap-execution-loop-productization-p2-p4
 title: 执行环产品化 P2–P4——runMechanicalFanIn→quay task fan-in + workflow 兜底降级 + suite/dispatch 产品化
-status: todo
+status: ready
 labels:
   - gap
   - productization
@@ -50,7 +50,10 @@ P2–P4 落地；AC1-AC5 全勾；执行环 3 实现 → 1、bash 业务面 ~2,5
 
 ## Touches
 
-- packages/quay/src/（runMechanicalFanIn 产品化为 quay task fan-in verb + MCP 工具）
+- packages/quay/src/cli/task-fan-in.ts (new)（runMechanicalFanIn 产品化为 `quay task fan-in` verb 处理器；吸收 fan-in-ff-merge.sh 锁/clean-tree/escalation/ff 业务为 TS 模块）
+- packages/quay/src/cli/help.ts（task fan-in verb 列表注册）
+- packages/quay/src/mcp-server.ts（task_fan_in MCP 工具注册）
+- packages/quay/src/mcp-handlers.ts（task_fan_in MCP 工具处理）
 - packages/quay/bin/quay.ts（task fan-in verb 注册）
 - plugin/scripts/worker-driver.ts（P2 调用新 verb；P4 dispatch 侧产品化衔接）
 - plugin/scripts/fan-in-ff-merge.sh（P2 删除）
