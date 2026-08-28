@@ -151,6 +151,16 @@ export const RULED_HISTORICAL_GAPS: { taskId: string; reason: string }[] = [
       "manager 2026-08-23 裁定 ruled one-off（同 99f845d9 类，先例 direct-to-develop-bypass-check.ts 的" +
       " RULED_HISTORICAL_COMMITS）。",
   },
+  {
+    taskId: "gap-suite-force-color-ansi-test-sh-normalize",
+    reason:
+      "manager 2026-08-28 手动验证 fan-in（机械 fan-in 首绿前的连续验证轮：HOLDS_SLOT 注入 / suite 日志 " +
+      "tee / runId 日志路径 / ENOENT 行为等修复）——直接调 runMechanicalFanIn 走 fan-in-ff-merge.sh 未传 " +
+      "--agent-id，锁事件 agentId=null（16 条：8 acquire/release 对，02:20-04:35Z）。该形态是机械 fan-in " +
+      "落地前的 manager 验证，非常规 subagent fan-in；随 worker-driver 正常派发（机械 fan-in）落地后不再发生。 " +
+      "manager 2026-08-28 裁定 ruled one-off（同 99f845d9 类，先例 direct-to-develop-bypass-check.ts 的" +
+      " RULED_HISTORICAL_COMMITS）。",
+  },
 ];
 
 // ── Pure: parse lock events ──────────────────────────────────────────────────────────────────────────
