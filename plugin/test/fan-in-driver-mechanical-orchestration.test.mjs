@@ -122,6 +122,7 @@ function runHappyPath(opts = {}) {
     suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
     scopedGateCommand: ["true"],
     docCheckCommand: ["true"],
+    archguardCommand: ["true"],
   }).then((r) => ({ r, repo, worktree, base, capture }));
 }
 
@@ -209,6 +210,7 @@ test("suite 红 ⇒ 机械 fan-in red（step=suite），不落地、锁仍 relea
       suiteCommand: ["bash", "-c", "echo failing; exit 3"],
       scopedGateCommand: ["true"],
       docCheckCommand: ["true"],
+      archguardCommand: ["true"],
     });
     assert.equal(r.outcome, "red");
     assert.equal(r.step, "suite");
@@ -254,9 +256,76 @@ test("merge develop 冲突 ⇒ 机械 fan-in red（step=merge-develop），锁�
       suiteCommand: ["bash", "-c", "exit 0"],
       scopedGateCommand: ["true"],
       docCheckCommand: ["true"],
+      archguardCommand: ["true"],
     });
     assert.equal(r.outcome, "red");
     assert.equal(r.step, "merge-develop");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── archguard 结构闸（gap-archguard-structural-gate-in-fan-in-driver）：typecheck 后 scoped门 前 ──
+
+test("archguard 结构闸在机械 fan-in 里真跑（seam）——fake 命令执行 + 落地", async () => {
+  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
+  const marker = path.join(base, "archguard-ran.txt");
+  try {
+    const r = await runMechanicalFanIn({
+      task: TASK, worktree, root: repo, runId: "mf-run-archguard", mergeTarget: "develop",
+      forceSuite: true, scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
+      suiteCapture: capture, suiteLogFile: path.join(base, "suite.log"),
+      suiteCommand: ["bash", "-c", "exit 0"],
+      scopedGateCommand: ["true"], docCheckCommand: ["true"],
+      archguardCommand: ["bash", "-c", `echo ran > "${marker}"`],
+    });
+    assert.equal(r.outcome, "landed", `mechanical fan-in must land (step=${r.step} reason=${r.reason})`);
+    assert.equal(fs.existsSync(marker), true, "archguard step must run (fake command wrote its marker)");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("archguard 依赖环 red ⇒ 机械 fan-in red（step=archguard-structure），不落地、锁仍 release", async () => {
+  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
+  const runId = "mf-run-archguard-red";
+  try {
+    const r = await runMechanicalFanIn({
+      task: TASK, worktree, root: repo, runId, mergeTarget: "develop",
+      forceSuite: true, scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
+      suiteCapture: capture, suiteLogFile: path.join(base, "suite.log"),
+      suiteCommand: ["bash", "-c", "exit 0"],
+      scopedGateCommand: ["true"], docCheckCommand: ["true"],
+      archguardCommand: ["bash", "-c", "echo dependency cycle; exit 3"],
+    });
+    assert.equal(r.outcome, "red");
+    assert.equal(r.step, "archguard-structure");
+    assert.equal(git(repo, "worktree", "list", "--porcelain").stdout.includes(`task/${TASK}`), true, "red path must NOT remove the worktree");
+    const lock = readWorkflowLockHold(repo, TASK, runId);
+    assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "red path must release the lock (finally)");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("archguard 结构信号镜像到主检出载体（AC2 机制）——worktree 记录 append 进 root 的 metrics-history.jsonl", async () => {
+  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
+  try {
+    const record = '{"tool":"archguard-runner","verdict":"pass"}';
+    // fake archguard 写一条结构信号记录进 worktree 的 .archguard/metrics-history.jsonl（真实
+    // archguard-runner 会 append 这条）；镜像步骤应把它复制到主检出（root）的同一载体。
+    const fake = ["bash", "-c", `mkdir -p "${worktree}/.archguard"; printf '%s\\n' '${record}' >> "${worktree}/.archguard/metrics-history.jsonl"`];
+    const r = await runMechanicalFanIn({
+      task: TASK, worktree, root: repo, runId: "mf-run-archguard-mirror", mergeTarget: "develop",
+      forceSuite: true, scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
+      suiteCapture: capture, suiteLogFile: path.join(base, "suite.log"),
+      suiteCommand: ["bash", "-c", "exit 0"],
+      scopedGateCommand: ["true"], docCheckCommand: ["true"],
+      archguardCommand: fake,
+    });
+    assert.equal(r.outcome, "landed", `mirror path must land (step=${r.step} reason=${r.reason})`);
+    const mainMetrics = fs.readFileSync(path.join(repo, ".archguard", "metrics-history.jsonl"), "utf8");
+    assert.match(mainMetrics, /archguard-runner/, "root's metrics-history.jsonl must carry the mirrored archguard record");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
@@ -305,7 +374,7 @@ test("AC2 机制 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics) — 排�
       scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
       suiteCapture: capture, suiteLogFile: suiteLog,
       suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
-      scopedGateCommand: ["true"], docCheckCommand: ["true"],
+      scopedGateCommand: ["true"], docCheckCommand: ["true"], archguardCommand: ["true"],
     });
 
     // 让机械 fan-in 的 acquire 先进入排队（此刻 blocked 在 flock 上，未落地）。

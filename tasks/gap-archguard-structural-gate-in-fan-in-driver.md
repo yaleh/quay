@@ -34,8 +34,8 @@ archguard 依赖环闸应接在 fan-in 过程（机械 driver 驱动的 fan-in�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，单真相源）：`scripts/test.sh` 不再调用 `archguard-runner.ts`（旧接线 `:966` 退役）；（⛔ 仍调用 ⇒ 假——两个真相源）。
-- [ ] AC2（能取假，生产能产出）：driver 落地后，一次 post-landing fan-in 在 `metrics-history.jsonl` 产生新记录（结构闸真跑，非仅实现）；（⛔ 落地后无新记录 ⇒ 假——能产出≠已产出）。
+- [x] AC1（能取假，单真相源）：`scripts/test.sh` 不再调用 `archguard-runner.ts`（旧接线 `:966` 退役）；（⛔ 仍调用 ⇒ 假——两个真相源）。
+- [ ] AC2（能取假，生产能产出）：driver 落地后，一次 post-landing fan-in 在 `metrics-history.jsonl` 产生新记录（结构闸真跑，非仅实现）；（⛔ 落地后无新记录 ⇒ 假——能产出≠已产出）。（待外部）
 
 ## Definition of Done
 
