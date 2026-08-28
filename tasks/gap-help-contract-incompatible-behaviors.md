@@ -30,9 +30,9 @@ usage 但 exit 2（2/14）       会被 harness 当失败
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，全量 exit 0 无副作用）：全部 77 个 `.ts` checker 的 `--help` 退出 0 且无业务副作用；负控制 = 对每个 checker 跑 `--help` 前后比对工作树与 `.quay/` 的 mtime 集合，必须无变化（现在 measure-trend-check 会变）；（⛔ 仍有 exit≠0 或 mtime 变化 ⇒ 假）。
-- [ ] AC2（能取假，自相矛盾消除）：`ready-pool-check --help` 不再报「unknown flag: --help (run with --help)」，改为正常打印用法退出 0；（⛔ 仍自相矛盾 ⇒ 假）。
-- [ ] AC3（能取假，有副作用消除）：`measure-trend-check --help` 不追加 `.quay/measure-history.jsonl`（跑前后 mtime/行数不变）；（⛔ 仍追加 ⇒ 假）。
+- [x] AC1（能取假，全量 exit 0 无副作用）：全部 77 个 `.ts` checker 的 `--help` 退出 0 且无业务副作用；负控制 = 对每个 checker 跑 `--help` 前后比对工作树与 `.quay/` 的 mtime 集合，必须无变化（现在 measure-trend-check 会变）；（⛔ 仍有 exit≠0 或 mtime 变化 ⇒ 假）。
+- [x] AC2（能取假，自相矛盾消除）：`ready-pool-check --help` 不再报「unknown flag: --help (run with --help)」，改为正常打印用法退出 0；（⛔ 仍自相矛盾 ⇒ 假）。
+- [x] AC3（能取假，有副作用消除）：`measure-trend-check --help` 不追加 `.quay/measure-history.jsonl`（跑前后 mtime/行数不变）；（⛔ 仍追加 ⇒ 假）。
 
 ## Definition of Done
 
