@@ -32,5 +32,9 @@ manager 侧落「语义面 subagent 派发」机制（同 A16b dispatch-record �
 ## Touches
 
 - plugin/scripts/（语义 subagent 派发机制 + 派发记录）
-- orchestration/manager-*.md（语义面职责清单 + 派发规范）
+- orchestration/manager-tick-core.md（语义面职责清单 + 派发规范）
+- orchestration/manager-tick-criteria.md（语义面职责清单）
+- orchestration/manager-tick-sending.md（语义面派发规范）
+- orchestration/manager-tick-closing.md（语义面职责清单）
+- orchestration/dispatch-preference.md（派发偏好——语义面覆盖段）
 - tasks/gap-ac145-semantic-face-subagent-manager-driven.md（自身）
