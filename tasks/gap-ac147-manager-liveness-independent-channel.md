@@ -33,4 +33,6 @@ manager 活性独立兜底落地：不经过 manager 的 heartbeat 超时检测 
 
 - plugin/scripts/manager-liveness-independent-check.ts (new)（manager 活性兜底检测 + 通知）
 - plugin/test/manager-liveness-independent-check.test.mjs (new)（负控制回放：AskUserQuestion 阻塞态 T 后须通知）
+- plugin/scripts/capability-catalog.sh（新脚本注册：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING 五表各加一行）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照 scripts 296→297）
 - tasks/gap-ac147-manager-liveness-independent-channel.md（自身）
