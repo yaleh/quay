@@ -32,11 +32,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] ②-AC1（能取假，trace 捕获变量片段路径）：`worktree-root-fs-check.test.mjs` 的动态真值含 `plugin/scripts/quay-init.sh`（⛔ 静态归因漏的、动态也漏 ⇒ 假）。
-- [ ] ②-AC2（能取假，增量缓存）：未变更的测试不重跑 trace（⛔ 每次全量重跑 ⇒ 假）。
-- [ ] ③-AC1（能取假，漂移 RED）：静态归 S 单例但动态触 M 的测试 ⇒ 漂移检测 RED（⛔ 静默 ⇒ 假）。
-- [ ] ③-AC2（能取假，负控制）：静态归因正确的测试不报漂移（⛔ 误报 ⇒ 假）。
-- [ ] ③-AC3（能取假，接入）：漂移检测在 scoped-gate/静态检查链里生效（⛔ 独立存在不接线 ⇒ 假）。
+- [x] ②-AC1（能取假，trace 捕获变量片段路径）：`worktree-root-fs-check.test.mjs` 的动态真值含 `plugin/scripts/quay-init.sh`（⛔ 静态归因漏的、动态也漏 ⇒ 假）。
+- [x] ②-AC2（能取假，增量缓存）：未变更的测试不重跑 trace（⛔ 每次全量重跑 ⇒ 假）。
+- [x] ③-AC1（能取假，漂移 RED）：静态归 S 单例但动态触 M 的测试 ⇒ 漂移检测 RED（⛔ 静默 ⇒ 假）。
+- [x] ③-AC2（能取假，负控制）：静态归因正确的测试不报漂移（⛔ 误报 ⇒ 假）。
+- [x] ③-AC3（能取假，接入）：漂移检测在 scoped-gate/静态检查链里生效（⛔ 独立存在不接线 ⇒ 假）。
 
 ## Definition of Done
 
@@ -44,9 +44,13 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/suite-lpt-runner.mjs（fs 访问 trace 包装）
-- scripts/test.sh（fs 访问 trace 包装）
-- plugin/scripts/suite-bucket-attribution.ts（静态归因导出给漂移检测比对）
-- plugin/scripts/suite-bucket-drift-check.ts (new)
+- plugin/scripts/suite-fs-trace-preload.cjs (new — the `--require` node:fs/node:child_process tracer)
+- plugin/scripts/suite-fs-trace.ts (new — the dynamic-truth collector + incremental cache)
+- plugin/scripts/suite-bucket-attribution.ts（bucketsFromPaths 导出给漂移检测比对）
+- plugin/scripts/suite-bucket-drift-check.ts (new — the static-vs-truth drift checker)
+- plugin/scripts/checker-mutation-cases/suite-bucket-drift-check.sh (new — mutation case)
+- plugin/scripts/runner-static-gate.ts（注册 suite-bucket-drift-check 进 run_static_checks）
+- plugin/scripts/capability-catalog.sh（注册 2 个新脚本六表）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数 296→299）
 - plugin/test/suite-bucket-drift-check.test.mjs (new)
 - tasks/gap-suite-bucket-dynamic-truth-drift-detector.md（自身）
