@@ -31,20 +31,20 @@ outer 将随 inner 退役、cron/loop 换外部触发的短会话 ⇒ 会从下�
 
 - **AC1（能取假，前置检查存在）**：`plugin/scripts/outer-retirement-precondition-check.ts` 落地，注册进
   `runner-static-gate.ts`（`run_checker "outer-retirement-precondition-check"`，`@static-tier full`）。
-  实测（真仓）枚举出执行核引用的 36 个脚本、其中 11 个 `-check.{ts,sh}` checker，逐个判定留存调用面
+  实测（真仓）枚举出执行核引用的 37 个脚本、其中 12 个 `-check.{ts,sh}` checker，逐个判定留存调用面
   （static-gate 注册表 + 外部代码位置引用 + 传递闭包）。`grep -rn "outer-retirement-precondition-check"
   plugin/scripts/runner-static-gate.ts plugin/scripts/capability-catalog.sh` 可命中调用/注册。
 - **AC2（能取假，负控制）**：`plugin/test/outer-retirement-precondition-check.test.mjs` 负控制
   「AC2 — a checker referenced ONLY by the retiring layer (no marker) ⇒ RED (exit 1)」钉住：造一个只被
   退役层引用的 `orphan-check.ts`（无注册表、无外部载体、无标记）⇒ 前置 exit 1（RED）。另有
   `plugin/scripts/checker-mutation-cases/outer-retirement-precondition-check.sh`（剥 RETIRED 标记 ⇒ 必红）。
-  全 13 条单测绿（`node --test plugin/test/outer-retirement-precondition-check.test.mjs` pass 13/13）。
+  全 15 条单测绿（`node --test plugin/test/outer-retirement-precondition-check.test.mjs` pass 15/15）。
 - **AC3（能取假，留存调用面清零）**：真仓实测 `undischarged=[]`（N=0）；`orphanCheckers=["outer-anchor-check.ts"]`
   带 `RETIRED-WITH-RETIRING-LAYER` 标记（`retiredWithMarker=["outer-anchor-check.ts"]`），`outer-cron-registry.ts`
   一并标同标记随退役层退役。处置前（剥标记）实测 `undischarged=["outer-anchor-check.ts"]`（N=1，RED）——
   判据能取假。命令：
   `node --no-warnings --experimental-strip-types plugin/scripts/outer-retirement-precondition-check.ts --json`
-  → `{"ok":true,"orphanCheckers":["outer-anchor-check.ts"],"retiredWithMarker":["outer-anchor-check.ts"],"undischarged":[]}`。
+  → `{"ok":true,"evaluated":true,"executionCore":"orchestration/orchestrator-tick-core.md","referencedCount":37,"checkerCount":12,"surviving":[…32 项…],"orphanCheckers":["outer-anchor-check.ts"],"retiredWithMarker":["outer-anchor-check.ts"],"undischarged":[],"orphanNonCheckers":["a15-ruling5-counter.ts","outer-cron-registry.ts","red-window-triage.ts","suite-execution-form-counter.ts"]}`。
 
 ## Definition of Done
 
