@@ -2349,7 +2349,7 @@ function commitTaskStatus(root, id, from, to) {
  * misread. Fast-forward push; if develop advanced (non-ff), merge develop first then push. Best-effort:
  * a conflict leaves the flip on the doc branch and the next landing's merge-develop reconciles.
  */
-function propagateDocBranchToDevelop(root) {
+export function propagateDocBranchToDevelop(root) {
   try {
     const cur = execFileSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).trim();
     if (!cur || cur === "develop") return;

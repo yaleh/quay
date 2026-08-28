@@ -1738,7 +1738,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
  * not-landed（watchdog 2026-08-28 实证：landed 但 final=exited-not-landed）。best-effort：冲突留待
  * 下次 landing 收敛。
  */
-function syncDocBranchToDevelop(root: string): void {
+export function syncDocBranchToDevelop(root: string): void {
   try {
     const cur = spawnSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).stdout.trim();
     if (!cur || cur === "develop") return;

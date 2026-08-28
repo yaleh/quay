@@ -97,6 +97,7 @@ import {
   taskBranchHasCommits,
   isSigtermExitCode,
   parseMaxRetries,
+  syncDocBranchToDevelop,
 } from "../scripts/worker-driver.ts";
 // gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
 // 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
@@ -338,6 +339,44 @@ test("computeLandingState — DriverResult 三态：verified = status=done ∧ �
   assert.equal(refuted.state, "failed", "status=ready 可读 ⇒ 证伪（⛔ 不因 worktree 读不懂降为 not-evaluated）");
   assert.match(refuted.reason, /status=ready/);
   fs.rmSync(nonGit, { recursive: true, force: true });
+});
+
+// ── DETACH REVERSE SYNC (gap-fan-in-ff-ref-update-detach-develop AC7) ─────────────────────────
+// After a mechanical fan-in lands (develop ref advances via push-mode ff, the main checkout's
+// working tree is NOT touched), the doc-only work branch (main/manager-doc) still reads the stale
+// task status — computeLandingState's readTaskStatus would misreport not-landed. syncDocBranchToDevelop
+// merges develop back into the doc branch so the landing verification reads the current status.
+
+test("syncDocBranchToDevelop: develop advance merges into the doc branch — computeLandingState reads current status (AC7)", (t) => {
+  const root = makeGitRoot("sync-ac7");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  runGit(root, ["checkout", "-q", "-b", "develop"]);
+  writeTaskFile(root, "gap-a", "ready");
+  // The detach: the main checkout moves to a doc-only branch.
+  runGit(root, ["checkout", "-q", "-b", "main/manager-doc"]);
+  // A landing advances develop (status flips done) — the doc branch's working tree is now stale.
+  runGit(root, ["checkout", "-q", "develop"]);
+  writeTaskFile(root, "gap-a", "done");
+  runGit(root, ["checkout", "-q", "main/manager-doc"]);
+  assert.equal(readTaskStatus(root, "gap-a"), "ready", "before sync the doc-branch view is stale (still ready)");
+
+  syncDocBranchToDevelop(root);
+
+  assert.equal(readTaskStatus(root, "gap-a"), "done",
+    "AC7: after sync the doc-branch view reflects develop (done) — computeLandingState no longer misreads not-landed");
+});
+
+test("syncDocBranchToDevelop: no-op when the checkout is already develop", (t) => {
+  const root = makeGitRoot("sync-noop");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  runGit(root, ["checkout", "-q", "-b", "develop"]);
+  writeTaskFile(root, "gap-a", "ready");
+  const headBefore = runGit(root, ["rev-parse", "develop"]);
+
+  syncDocBranchToDevelop(root); // must not throw, must not change anything
+
+  assert.equal(runGit(root, ["rev-parse", "develop"]), headBefore, "on develop ⇒ no-op (no self-merge)");
+  assert.equal(runGit(root, ["status", "--porcelain"]), "", "on develop ⇒ tree stays clean");
 });
 
 test("computeOutcome — non-zero ⇒ failed; signal ⇒ killed; timedOut ⇒ timed-out (AC3 终态/失败原因)", () => {
