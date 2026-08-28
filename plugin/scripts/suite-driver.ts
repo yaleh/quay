@@ -166,7 +166,17 @@ export async function spawnSuiteAndWait(args: {
       child = spawn(holder[0], holder.slice(1), {
         detached: true,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, ...(env ?? {}) },
+        // 「driver 持槽」是 spawnSuiteAndWait 的结构不变式（slot-holder 在 exec 前【总是】取单飞槽），
+        // 不是 caller 的选择 ⇒ 强制注入，放在 `...(env ?? {})` 之后（⛔ 不被 caller 的 env 覆盖）。
+        // gap-mech-fan-in-suite-silence-watchdog-fired：机械 fan-in 路径漏传本 env ⇒ scripts/test.sh
+        // --buckets 的 full_suite_lock_acquire 不跳过再取槽，用自己的新 FD 对【同一把槽】再 flock，
+        // 被 slot-holder 继承下来的 FD 拒绝（flock 按 open-file-description，同进程不同 FD 也互斥）⇒
+        // 卡进无界 while 等槽循环 ⇒ 零输出 ≥15min ⇒ 静默看门狗误当挂死 SIGKILL。
+        env: {
+          ...process.env,
+          ...(env ?? {}),
+          QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT: "1",
+        },
       });
     } catch (e) {
       resolve({
@@ -387,7 +397,7 @@ export async function runResidentSuiteLoop(opts: SuiteLoopOptions): Promise<numb
         suiteCommand: request.suiteCommand,
         logFile: request.logFile,
         silenceMs,
-        env: { QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT: "1" },
+        // QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT 由 spawnSuiteAndWait 强制注入（结构不变式），caller 不传。
       }).then((result) => {
         inFlight.delete(task);
         try { writeSuiteResult(root, task, { ...result, runId: request.runId }); } catch { /* 结果写失败不致命 */ }
@@ -500,7 +510,7 @@ export async function main(argv: string[]): Promise<number> {
       suiteCommand: cmd,
       logFile: logFile ?? null,
       silenceMs,
-      env: { QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT: "1" },
+      // QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT 由 spawnSuiteAndWait 强制注入（结构不变式），caller 不传。
     });
     writeSuiteResult(rootDir, task, { ...result, runId: resolvedRunId });
     appendSuiteRound(rootDir, computeSuiteRound({ runId: resolvedRunId, task, result, slotBase: resolvedSlotBase }));
