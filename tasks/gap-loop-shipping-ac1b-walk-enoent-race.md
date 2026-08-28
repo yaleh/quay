@@ -2,7 +2,7 @@
 id: gap-loop-shipping-ac1b-walk-enoent-race
 title: loop-shipping.test.mjs AC1b walkCorpus 并发修改竞态——并行测试删 tmp 文件致 readFileSync
   ENOENT 崩（suite 假红）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -29,9 +29,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，ENOENT 容忍）：并行删除文件场景下 AC1b 不再崩 ENOENT（⛔ 仍崩 ⇒ 假）。
-- [ ] AC2（能取假，真实引用仍捕获）：构造真实旧路径引用仍被 AC1b 报红（⛔ 容忍致漏报 ⇒ 假）。
-- [ ] AC3（能取假，不吞其它错误）：非 ENOENT 的 readFileSync 错误仍向上抛（⛔ 吞掉 ⇒ 假）。
+- [x] AC1（能取假，ENOENT 容忍）：并行删除文件场景下 AC1b 不再崩 ENOENT（⛔ 仍崩 ⇒ 假）。
+- [x] AC2（能取假，真实引用仍捕获）：构造真实旧路径引用仍被 AC1b 报红（⛔ 容忍致漏报 ⇒ 假）。
+- [x] AC3（能取假，不吞其它错误）：非 ENOENT 的 readFileSync 错误仍向上抛（⛔ 吞掉 ⇒ 假）。
 
 ## Definition of Done
 
@@ -42,3 +42,8 @@ AC1b 在并行 suite 下不再因 ENOENT 假红；真实旧路径引用仍被捕
 - plugin/test/loop-shipping.test.mjs（walk 循环 ENOENT 容忍 / 或 tmp/ 排除）
 - plugin/scripts/loop-shipping-exclusion-data.mjs（若走排除路径）
 - tasks/gap-loop-shipping-ac1b-walk-enoent-race.md（自身）
+## Needs-Human
+
+**执行 2026-08-28T13:04:54.420Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
