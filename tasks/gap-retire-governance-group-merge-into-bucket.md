@@ -67,5 +67,7 @@ governance 第三套退役、142 文件改标真实相、bucket 单一选择落�
 - plugin/test/*.test.mjs（145 文件相标改标 + 40 守卫删除 + 机制测试更新 + 删除 runner-grouping-governance/fixture-runs——有界顶层 glob）
 - experiments/quay-perpetual-stream/test/*.test.mjs（13 文件相标改标 + 守卫删除）
 - plugin/test/runner-fixtures/gov.test.mjs（fixture 删除）
+- plugin/test-isolation-violations.txt（spawns-test-sh ratchet 删 2 条指向已删 governance 测试的 entry）
+- docs/analysis/test-file-baseline.txt（test-file-snapshot 基线重生成——2 文件 engine→serial 移出 --list-files）
 - tasks/gap-retire-governance-group-merge-into-bucket.md（自身）
 
