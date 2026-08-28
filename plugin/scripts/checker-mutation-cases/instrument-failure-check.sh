@@ -58,7 +58,7 @@ fi
 # cannot stay green regardless of doc churn. (Pre-2026-08-12 this hardcoded ONE instance, which
 # broke when the AC38 doc-split shrank family-1 from 2 to 1 — injecting 1 gave 1→2 ≤ baseline=2,
 # a stale-mutation-case false-green, exactly the 7e6cec77 static-check red.)
-read -r cur base <<< "$(checker_json "${workdir}" | env -u FORCE_COLOR node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const j=JSON.parse(d);console.log(j.counts[1],j.baselines[1])})')"
+read -r cur base <<< "$(checker_json "${workdir}" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const j=JSON.parse(d);console.log(j.counts[1],j.baselines[1])})')"
 inject=$(( base - cur + 1 ))
 for _ in $(seq 1 "${inject}"); do
   echo "" >> "${workdir}/orchestration/orchestrator-loop-tick.md"

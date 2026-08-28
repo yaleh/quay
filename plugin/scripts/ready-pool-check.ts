@@ -2337,7 +2337,30 @@ function commitTaskStatus(root, id, from, to) {
   const rel = path.join("tasks", `${id}.md`);
   execFileSync("git", ["-C", root, "add", "--", rel]);
   execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", `tasks: ${id} ${from}→${to}（promotion-driver 机械晋升）`, "--", rel]);
+  propagateDocBranchToDevelop(root);
   return true;
+}
+
+/**
+ * The detach's propagation (gap-fan-in-ff-ref-update-detach-develop): the main checkout sits on the
+ * doc-only work branch (main/manager-doc). A promotion flip committed THERE must reach develop so task
+ * worktrees (branching from develop) see the new status — otherwise the dispatch reads ready on
+ * main/manager-doc while the worktree base (develop) still has the old status, and the fan-in gates
+ * misread. Fast-forward push; if develop advanced (non-ff), merge develop first then push. Best-effort:
+ * a conflict leaves the flip on the doc branch and the next landing's merge-develop reconciles.
+ */
+function propagateDocBranchToDevelop(root) {
+  try {
+    const cur = execFileSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).trim();
+    if (!cur || cur === "develop") return;
+    try {
+      execFileSync("git", ["-C", root, "push", ".", `${cur}:develop`], { stdio: "ignore" });
+    } catch (_) {
+      // Develop advanced past the doc branch — merge it in, then push (fast-forward now).
+      execFileSync("git", ["-C", root, "merge", "develop", "--no-edit"], { stdio: "ignore" });
+      execFileSync("git", ["-C", root, "push", ".", `${cur}:develop`], { stdio: "ignore" });
+    }
+  } catch (_) { /* best-effort — next landing's merge-develop reconciles */ }
 }
 
 /** HEARTBEAT MODE entry: run the same analysis as `analyzeTasks` (all options pass through) and —

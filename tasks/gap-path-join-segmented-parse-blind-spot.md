@@ -1,7 +1,7 @@
 ---
 id: gap-path-join-segmented-parse-blind-spot
 title: path.join 分段拼接解析盲区——24 个文件归属信息以解析器读不出的形式存在，使保底成为常规入口
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -64,3 +64,9 @@ const reporterPath = path.join(repoRoot, "plugin", "scripts", "measure-suite-rep
 - plugin/scripts/suite-bucket-attribution.ts（加 path.join/path.resolve 分段拼接解析信号）
 - plugin/test/suite-bucket-attribution.test.mjs（分段拼接解析测试 + 保底降为异常负控制）
 - tasks/gap-path-join-segmented-parse-blind-spot.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-27T21:31:18.486Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

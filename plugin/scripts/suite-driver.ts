@@ -194,7 +194,11 @@ export async function spawnSuiteAndWait(args: {
     // （生产路径 suite 输出 tee 到 log、stdout 空）。任一推进都刷新 lastActivityMs。
     let lastActivityMs = Date.now();
     let lastLogMtime = logMtimeMs(logFile);
-    child.stdout?.on("data", () => { lastActivityMs = Date.now(); });
+    // 统一输出机件（gap 诊断）：suite 的 stdout 持久化到 logFile——⛔ 之前只捕获做看门狗活性检测、
+    // 不落盘 ⇒ 机械 fan-in 的 suite 失败无法从日志诊断（workflow 路径靠 shell 重定向才有日志）。
+    // append 追加（同 workflow 路径的 `>> log` 语义，跨 relaunch 复用同一文件不轮转）。
+    const suiteLogStream = logFile ? fs.createWriteStream(logFile, { flags: "a" }) : null;
+    child.stdout?.on("data", (chunk: Buffer) => { lastActivityMs = Date.now(); suiteLogStream?.write(chunk); });
     child.stderr?.on("data", () => { lastActivityMs = Date.now(); });
 
     const finish = (r: SuiteRunResult): void => {
@@ -223,6 +227,7 @@ export async function spawnSuiteAndWait(args: {
       finish({ outcome: "red", exitCode: null, signalCode: null, hungByWatchdog, startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedMs, error: `spawn error: ${e.message}`, pid: childPid });
     });
     child.on("close", (code, signal) => {
+      suiteLogStream?.end();
       const finishedAt = new Date().toISOString();
       const durationMs = Date.now() - startedMs;
       // 三态可分（AC2）：被静默看门狗杀 ⇒ hung（独立取值）；正常退出 0 ⇒ done；非零/信号 ⇒ red。
