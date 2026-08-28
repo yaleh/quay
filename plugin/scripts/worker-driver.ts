@@ -1409,15 +1409,21 @@ function runOneWorker({
         if (paths.length > 0 && paths[0]) {
           const startMechMs = Date.now();
           // 每任务新进程（gap-fan-in-token-gate-version-mismatch-self-lock）：机械 fan-in 不再在本守护
-          // 进程 in-process 跑（守护是主检出旧代码、但 fan-in 脚本从 worktree 加载 ⇒ 版本错位自锁），
+          // 进程 in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），
           // 改为 spawn 一个 fresh node 进程加载 worktree 的 worker-driver.ts --mechanical-fan-in——
-          // 注入半与闸半同源（都在 worktree），改了 worker-driver.ts 的任务 fan-in 不再用旧注入/旧闸。
+          // 锁半（acquireFanInWorkflowLock）与编排半（fan-in-ff-merge.sh）同源（都在 worktree），改了
+          // worker-driver.ts 的任务 fan-in 不再用旧锁/旧编排。⛔ 不是 token 闸一例，是「fan-in 脚本从
+          // worktree 加载、发起者从主检出旧进程运行」的架构错位整个类。
           mechResult = await spawnMechanicalFanIn({ task: taskId, worktree: paths[0], root: rootDir, runId });
           if (json) {
             process.stdout.write(
               `${JSON.stringify({ event: "mechanical-fan-in", task: taskId, wall_clock_ms: Date.now() - startMechMs, ...mechResult })}\n`,
             );
           }
+          // 反向同步（gap-fan-in-ff-ref-update-detach-develop AC7）：landing 后把 develop merge 进 doc-only
+          // 工作分支（main/manager-doc），否则 computeLandingState 读主检出盘上 tasks/*.md 是滞后视图 →
+          // 假 exited-not-landed（watchdog 2026-08-28 实证）。best-effort：冲突留待下次 landing 收敛。
+          if (mechResult && mechResult.outcome === "landed") syncDocBranchToDevelop(rootDir);
         }
       }
       finish(code, signal, spawnErr, mechResult);
@@ -1567,6 +1573,108 @@ export function readWorkflowLockHold(
   return { lockHoldSecs, lockAcquireEpoch: acquire, lockReleaseEpoch: release };
 }
 
+// ── fan-in workflow 锁：driver 自身经非分离直接子进程持锁（ADR-034）────────────────────────────
+// 废除 gap-fan-in-workflow-lock-and-S1 的「分离 holder + flag 文件释放」协议（fan-in-ff-merge.sh
+// --acquire/--release-workflow-lock 里 `setsid bash … & disown` 的持锁进程 + `while [ -e flag ]` 死
+// 循环 + 外部删 flag 释放）。该协议让持锁进程活得过它的 caller：caller 在 ff 后删 flag 前被杀 ⇒
+// holder 孤儿化（PPID=1）+ 活着 ⇒ 死循环 ⇒ 锁持 23 分钟阻塞全仓 fan-in（gap-full-suite-lock-hold-
+// watchdog-threshold-shorter-than-fan-in 末次实证）。ADR-034 裁定：锁的生死 = 工作的进程生死——锁由
+// driver（受监督、可重启的常驻进程）经【非分离直接子进程】持有，释放只靠「持锁进程退出 → 内核自动关
+// fd → flock 释放」一种机制，⛔ 不设任何时间阈值、⛔ 不依赖第三方外部信号（无 hold-max/TTL/stale）。
+//
+// 实现：driver spawn 一个【非 detached、非 disown】的 bash 子进程（holder）做 flock，然后阻塞在
+// stdin 读上。driver 持有该子进程 stdin 管道的写端：driver 死（任何原因，含 SIGKILL）⇒ 内核关写端 ⇒
+// holder 的 stdin 读到 EOF ⇒ 写 release 事件 + flock -u + 退出 ⇒ flock 自动释放。正常 release = driver
+// 关 stdin 写端（同一路径）。锁文件/事件文件仍与旧协议同名同形（fan-in-workflow.lock /
+// .quay/fan-in-workflow-lock-events.jsonl），fan-in-ff-protocol-check 判据4 与 readWorkflowLockHold
+// 继续读同一载体。
+
+/** fan-in workflow 锁文件路径（git common dir 下的 fan-in-workflow.lock，与 suite 锁同目录不同文件）。
+ *  解析 git-common-dir（⛔ 不读 FULL_SUITE_LOCK_FILE env——那是 suite 锁的 seam，不属于 workflow 锁）。 */
+export function fanInWorkflowLockFile(root: string): string {
+  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" });
+  const commonDir = r.status === 0 && !r.error ? (r.stdout ?? "").trim() : "";
+  return path.join(path.resolve(root, commonDir || ".git"), "fan-in-workflow.lock");
+}
+
+/** 持锁 holder 的 bash 脚本（非分离直接子进程；`cat >/dev/null` 阻塞在 stdin，driver 死 ⇒ EOF ⇒ 释放）。
+ *  参数：$1=锁文件 $2=taskId $3=runIdJson（已编码 `"r"` 或 `null`）$4=agentIdJson $5=事件文件。 */
+const FAN_IN_WORKFLOW_LOCK_HOLDER = `exec {fd}>"$1" || exit 2
+flock -x "$fd" || exit 2
+_wfl_emit() {
+  printf '{"event":"%s","ts":"%s","epoch":%s,"taskId":"%s","pid":%s,"runId":%s,"agentId":%s}\\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date +%s)" "$2" "$$" "$3" "$4"
+}
+_wfl_emit acquire "$2" "$3" "$4" >> "$5"
+_wfl_emit acquire "$2" "$3" "$4"
+cat >/dev/null
+_wfl_emit release "$2" "$3" "$4" >> "$5"
+flock -u "$fd" 2>/dev/null || true
+exit 0`;
+
+/** 一次 fan-in workflow 锁的持有句柄（driver 侧）：release() 关 stdin 写端 ⇒ holder 写 release 事件 +
+ *  flock -u 退出；driver 死（SIGKILL）⇒ 内核关 stdin 写端 ⇒ 同一释放路径（无孤儿、无残留锁）。 */
+export interface FanInWorkflowLockHandle {
+  holderPid: number | null;
+  release: () => Promise<void>;
+}
+
+/** 经非分离直接子进程 acquire fan-in workflow 锁（ADR-034）。resolve = holder 已 flock 并写出 acquire
+ *  事件（stdout 出现该行）；reject = holder 在 acquire 前死（flock 错误 / spawn 失败）。unbounded——排队
+ *  等待正是这把正确性锁存在的意义（⛔ 无超时，与旧 --acquire-workflow-lock 的 `flock -x` 无界语义一致）。 */
+export function acquireFanInWorkflowLock(opts: {
+  root: string;
+  task: string;
+  runId: string;
+  agentId?: string | null;
+  lockFile?: string;
+  eventsFile?: string;
+}): Promise<FanInWorkflowLockHandle> {
+  const lockFile = opts.lockFile ?? fanInWorkflowLockFile(opts.root);
+  const eventsFile = opts.eventsFile ?? path.join(opts.root, ".quay", "fan-in-workflow-lock-events.jsonl");
+  const runIdJson = opts.runId ? JSON.stringify(opts.runId) : "null";
+  const agentIdJson = opts.agentId ? JSON.stringify(opts.agentId) : "null";
+  fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
+
+  const child = spawn(
+    "bash",
+    ["-c", FAN_IN_WORKFLOW_LOCK_HOLDER, "wfl-holder", lockFile, opts.task, runIdJson, agentIdJson, eventsFile],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
+
+  let released = false;
+  const release = (): Promise<void> => {
+    if (released) return Promise.resolve();
+    released = true;
+    child.stdin?.end();
+    if (child.exitCode !== null) return Promise.resolve();
+    return new Promise<void>((res) => child.once("close", () => res()));
+  };
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let stdoutBuf = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdoutBuf += chunk.toString("utf8");
+      if (!settled && stdoutBuf.includes('"event":"acquire"')) {
+        settled = true;
+        resolve({ holderPid: child.pid ?? null, release });
+      }
+    });
+    child.on("close", (code) => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`fan-in workflow lock holder exited before acquiring (code ${code})`));
+      }
+    });
+    child.on("error", (e) => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`fan-in workflow lock holder spawn error: ${(e as Error).message}`));
+      }
+    });
+  });
+}
+
 /** 写 suite capture（ff 闸 fan-in-ff-merge.sh 的证书——读 suite_exit + suite_head 判「本任务 suite 已
  *  绿且 suite_head 是待 ff tip 的祖先」）。写失败抛错（调用方 catch → red）。 */
 function writeSuiteCapture(captureFile: string, fields: Record<string, string>): void {
@@ -1614,7 +1722,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const slotBase = opts.slotBase ?? suiteLockBase(root);
   const slotLib = opts.slotLib ?? path.join(root, "plugin", "scripts", "suite-slot-lib.sh");
   const suiteCapture = opts.suiteCapture ?? `/tmp/fan-in-suite-${task}.env`;
-  const suiteLogFile = opts.suiteLogFile ?? `/tmp/fan-in-suite-${task}.log`;
+  // 独立日志/run：suite 日志文件名带 runId——⛔ 不再复用 /tmp/fan-in-suite-${task}.log（跨 relaunch
+  // 残留旧轮内容，gap-fan-in-suite-log-cross-relaunch-reuse；本次「每次测试独立日志文件」指令）。
+  const suiteLogFile =
+    opts.suiteLogFile ?? `/tmp/fan-in-suite-${task}-${runId.replace(/[^A-Za-z0-9_.-]/g, "_")}.log`;
   const scriptsDir = opts.scriptsDir ?? path.join(worktree, "plugin", "scripts");
   const ffMerge = path.join(scriptsDir, "fan-in-ff-merge.sh");
   const antiDrift = path.join(scriptsDir, "anti-drift-touches-check.ts");
@@ -1628,39 +1739,21 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
   });
 
-  // 1. acquire fan-in workflow lock（机械包裹整段 merge→suite→ff，AC4）。⛔ unbounded（Infinity，无
-  // 超时）——workflow 锁是正确性锁（「此刻谁可 merge develop」），绝不因排队等待过久而放行
-  // （SPEC-suite-lifecycle §1.1 / fan-in-ff-merge.sh:203）；排队等待正是这把锁存在的意义，120s 短超时
-  // 会在「等待」时误杀（gap-mech-fan-in-acquire-lock-timeout-queue-semantics：首个机械 fan-in 生产任务
-  // 排第 2 位即 120s 被杀，exit null）。死持有者由锁内 1800s watchdog 兜底，不靠此处 SIGKILL。
-  // L1 token gate（gap-fan-in-token-gate-version-mismatch-self-lock）：acquire 现在要求 driver 注入的
-  // 一次性 token——driver 写一个 fresh random token 到 per-task token 文件、并以 --workflow-lock-token
-  // 传参；脚本校验二者一致（非机械调用者无 token ⇒ fail-closed 拒）。token 文件是 .quay/ 运行时状态
-  // （gitignored），acquire 成功即消费（rm），一次性。⛔ 注入半与闸半同源（都经本 fresh 进程加载自
-  // worktree）⇒ 不再版本错位（旧守护无注入、但闸已 fail-closed 的自锁形态消失）。
-  const workflowLockToken = randomUUID();
-  const workflowLockTokenFile = path.join(root, ".quay", `fan-in-workflow-lock-token-${task}.json`);
+  // 1. acquire fan-in workflow lock（机械包裹整段 merge→suite→ff，AC4）。ADR-034：driver 自身经非分离
+  // 直接子进程持锁（⛔ 废除 fan-in-ff-merge.sh 的 `& disown` 分离 holder + flag 释放协议）——锁的生死 =
+  // 工作的进程生死，driver 死（含 SIGKILL）⇒ 内核关 stdin 写端 ⇒ holder 释放 flock。unbounded（无超时）：
+  // workflow 锁是正确性锁（「此刻谁可 merge develop」），排队等待正是它存在的意义（⛔ 120s 短超时会在
+  // 等待时误杀，gap-mech-fan-in-acquire-lock-timeout-queue-semantics）。⛔ 无时间阈值（无 hold-max/TTL/stale）。
+  let workflowLock: FanInWorkflowLockHandle;
   try {
-    fs.mkdirSync(path.dirname(workflowLockTokenFile), { recursive: true });
-    fs.writeFileSync(workflowLockTokenFile, `${workflowLockToken}\n`, "utf8");
+    workflowLock = await acquireFanInWorkflowLock({ root, task, runId });
   } catch (e) {
-    return fail("acquire-workflow-lock", `write workflow-lock token file failed: ${(e as Error).message}`);
+    return fail("acquire-workflow-lock", (e as Error)?.message ?? "acquire failed");
   }
-  let a = await mechSh(["bash", ffMerge, "--task", task, "--root", root, "--run-id", runId, "--acquire-workflow-lock", "--workflow-lock-token", workflowLockToken, "--workflow-lock-token-file", workflowLockTokenFile], Infinity);
-  if (!a.ok) {
-    try { fs.rmSync(workflowLockTokenFile, { force: true }); } catch { /* best-effort */ }
-    return fail("acquire-workflow-lock", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
-  }
-  // 一次性消费：acquire 成功 ⇒ token 已用掉，立即移除 token 文件（⛔ 不留到 finally——让 ff 的
-  // clean-tree 判据永不看见这个运行时文件，也封死「捕获 token 重放 acquire」）。
-  try { fs.rmSync(workflowLockTokenFile, { force: true }); } catch { /* best-effort */ }
-
-  let released = false;
   const releaseLock = async (): Promise<void> => {
-    if (released) return;
-    released = true;
-    await mechSh(["bash", ffMerge, "--task", task, "--root", root, "--release-workflow-lock"], 60_000);
+    await workflowLock.release();
   };
+  let a: MechShResult;
 
   let suiteOutcome: SuiteOutcome | null = null;
   let suiteFinishedEpoch: number | null = null;
@@ -1748,10 +1841,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
 
 /**
  * 每任务新进程执行（gap-fan-in-token-gate-version-mismatch-self-lock AC1）：机械 fan-in 不在守护进程
- * in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 注入半与闸半版本错位、自锁），
- * 改为每任务 spawn 一个 fresh node 进程加载 worktree 的 worker-driver.ts --mechanical-fan-in——当前代码。
- * fresh 进程里的 worker-driver.ts（注入半）与 fan-in-ff-merge.sh（闸半）同源（都在 worktree）⇒ 改了
- * worker-driver.ts 的任务 fan-in 用的是它自己的新注入/新闸，不再因「守护旧代码」自锁。结果经 stdout
+ * in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），改为每任务 spawn
+ * 一个 fresh node 进程加载 worktree 的 worker-driver.ts --mechanical-fan-in——当前代码。fresh 进程里的
+ * 锁半（acquireFanInWorkflowLock，ADR-034）与编排半（fan-in-ff-merge.sh）同源（都在 worktree）⇒ 改了
+ * worker-driver.ts 的任务 fan-in 用的是它自己的新锁/新编排，不再因「守护旧代码」自锁。结果经 stdout
  * 单行 JSON 回传（--mechanical-fan-in 只打一行 result JSON）；spawn 失败/输出不可解析 fail-closed 为 red
  * （硬规则 3b：读不懂 ≠ 合格）。
  */
@@ -1786,6 +1879,22 @@ async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promise<Mecha
     } catch { /* fall through to red */ }
   }
   return red("parse-mechanical-fan-in", `unparseable fresh mechanical fan-in output: ${(r.stderr || r.stdout || "").trim() || `exit ${r.status}`}`);
+}
+
+
+/**
+ * 反向同步（gap-fan-in-ff-ref-update-detach-develop AC7）：机械 fan-in landing 后，把 develop merge 进
+ * doc-only 工作分支（main/manager-doc）。computeLandingState / ready-pool-check 等读主检出盘上
+ * tasks/*.md（非 git）——主检出停工作分支后，若不同步，落地成功但验证读到滞后 status → 假
+ * not-landed（watchdog 2026-08-28 实证：landed 但 final=exited-not-landed）。best-effort：冲突留待
+ * 下次 landing 收敛。
+ */
+function syncDocBranchToDevelop(root: string): void {
+  try {
+    const cur = spawnSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).stdout.trim();
+    if (!cur || cur === "develop") return;
+    spawnSync("git", ["-C", root, "merge", "develop", "--no-edit"], { stdio: "ignore" });
+  } catch (_) { /* best-effort */ }
 }
 
 // ── 阶段 4（AC129）常驻驱动 + 自主选任务：选择环 / selector worker / 判停 ───────────────────────────

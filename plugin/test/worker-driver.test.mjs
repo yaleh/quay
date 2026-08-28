@@ -19,8 +19,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { execFileSync, spawn } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 
 import {
   computeOutcome,
@@ -97,6 +97,8 @@ import {
   taskBranchHasCommits,
   isSigtermExitCode,
   parseMaxRetries,
+  acquireFanInWorkflowLock,
+  fanInWorkflowLockFile,
 } from "../scripts/worker-driver.ts";
 // gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
 // 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
@@ -2548,24 +2550,73 @@ test("AC3 (gap-worker-driver-retry-cap-not-wired) — promotion 不回归：同�
   assert.equal(MAX_FIX_RETRIES_DEFAULT, RETRY_CAP_DEFAULT, "AC3: promotion --max-fix-retries 缺省 = 共享 RETRY_CAP_DEFAULT（单一真相源）");
 });
 
-// ── L1 token gate + 每任务新进程（gap-fan-in-token-gate-version-mismatch-self-lock）────────────────
-// worker-driver 侧两件事：① runMechanicalFanIn 注入一次性 token（写 per-task 数据文件 + acquire 传
-// --workflow-lock-token，注入半）；② 机械 fan-in 每任务起 fresh 进程加载 worktree 的 worker-driver.ts
-// --mechanical-fan-in（每任务新进程，⛔ 旧守护 in-process = 版本错位自锁）。均为结构断言。
+// ── gap-adr034-fan-in-lock-holder-supervised（ADR-034）— driver 死（SIGKILL）→ 锁自动释放 ──────────
+// fan-in workflow 锁的持锁者由「分离 holder + flag 释放协议」（fan-in-ff-merge.sh --acquire/--release-
+// workflow-lock 的 setsid & disown）收进 driver：worker-driver.ts 经非分离直接子进程持锁，锁的生死 =
+// 工作的进程生死。本测试负控制：spawn 一个「driver」子进程经 acquireFanInWorkflowLock 持锁 → 独立
+// flock -n 竞争者确认被挡 → SIGKILL driver → 内核关 stdin 写端 ⇒ holder 写 release + flock -u 退出 ⇒
+// 锁自动释放（flock -n 成功 + holder 进程死、无 PPID=1 持锁孤儿）→ 新 driver 可再 acquire 同一锁。
 
-test("L1 token gate (gap-fan-in-token-gate-version-mismatch-self-lock) — runMechanicalFanIn 注入一次性 token（acquire 带 --workflow-lock-token + 写 per-task 数据文件）", () => {
-  const src = fs.readFileSync(DRIVER, "utf8");
-  assert.match(src, /--acquire-workflow-lock", "--workflow-lock-token", workflowLockToken, "--workflow-lock-token-file", workflowLockTokenFile\]/, "acquire step injects the one-time token + file path");
-  assert.match(src, /const workflowLockToken = randomUUID\(\)/, "the token is a fresh random UUID per fan-in (one-time, ⛔ 非字面量)");
-  assert.match(src, /fs\.writeFileSync\(workflowLockTokenFile,/, "the driver writes the token to the per-task token file before acquire（注入半）");
-  assert.match(src, /fs\.rmSync\(workflowLockTokenFile, \{ force: true \}\)/, "the token is consumed (rm) after acquire — one-time, ⛔ 可重放");
+test("AC1/AC5 (gap-adr034-fan-in-lock-holder-supervised) — driver 死（SIGKILL）→ flock 自动释放；无孤儿 holder 挡排队 acquire", async () => {
+  const root = makeGitRoot("adr034-lock");
+  const task = "gap-adr034-holder";
+  const lockFile = fanInWorkflowLockFile(root);
+  const holdScript = `
+import { acquireFanInWorkflowLock } from ${JSON.stringify(pathToFileURL(DRIVER).href)};
+const lock = await acquireFanInWorkflowLock({ root: ${JSON.stringify(root)}, task: ${JSON.stringify(task)}, runId: "r1" });
+console.log("HELD " + lock.holderPid);
+await new Promise(() => {});
+`;
+  const driver = spawn(process.execPath, ["--no-warnings", "--experimental-strip-types", "--input-type=module", "-e", holdScript], { stdio: ["ignore", "pipe", "pipe"] });
+  let out = "";
+  let err = "";
+  driver.stdout.on("data", (d) => { out += d; });
+  driver.stderr.on("data", (d) => { err += d; });
+  try {
+    // 等 driver 子进程确认持锁（holder 写出 acquire 事件后打印 HELD <pid>）。
+    await waitFor(() => /HELD \d+/.test(out), 15000);
+    const holderPid = Number(out.match(/HELD (\d+)/)?.[1]);
+    assert.ok(Number.isInteger(holderPid) && holderPid > 0, `driver must report a valid holder pid (out=${JSON.stringify(out)} err=${JSON.stringify(err)})`);
+
+    // 锁正被 holder 持有：独立 flock -n 竞争者应失败（flock -n 拿不到 ⇒ 非零）。
+    const heldProbe = spawnSync("bash", ["-c", `exec {fd}>"$1"; flock -n "$fd"`, "probe", lockFile], { encoding: "utf8" });
+    assert.notEqual(heldProbe.status, 0, "while the driver holds the lock, an independent flock -n must FAIL (lock is held)");
+
+    // SIGKILL driver（⛔ 不是 graceful release）——内核关 driver 的 stdin 写端 ⇒ holder 读 EOF ⇒ 释放。
+    driver.kill("SIGKILL");
+
+    // 锁自动释放：独立 flock -n 竞争者随后成功。
+    await waitFor(() => {
+      const p = spawnSync("bash", ["-c", `exec {fd}>"$1"; flock -n "$fd"`, "probe", lockFile], { encoding: "utf8" });
+      return p.status === 0;
+    }, 15000);
+
+    // 无 PPID=1 持锁孤儿：holder 进程随 driver 死退出（kill -0 失败）。
+    await waitFor(() => {
+      try { process.kill(holderPid, 0); return false; } catch { return true; }
+    }, 15000);
+
+    // 新 driver 能再 acquire 同一锁并干净 release（端到端「重启不残留」）。
+    const lock2 = await acquireFanInWorkflowLock({ root, task: "gap-adr034-holder", runId: "r2" });
+    assert.ok(Number.isInteger(lock2.holderPid) && lock2.holderPid > 0, "a fresh acquire after restart must succeed (no orphan holder blocking)");
+    await lock2.release();
+  } finally {
+    try { driver.kill("SIGKILL"); } catch { /* already dead */ }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
+
+// ── gap-fan-in-token-gate-version-mismatch-self-lock：每任务新进程（版本错位类级修法）──────────────
+// 机械 fan-in 不再在守护进程 in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载
+// ⇒ 版本错位），改为每任务 spawn 一个 fresh node 进程加载 worktree 的 worker-driver.ts
+// --mechanical-fan-in。锁半（acquireFanInWorkflowLock，ADR-034）与编排半（fan-in-ff-merge.sh）同源。
+// ⛔ token 闸（L1）已由 fd902a824 重定范围到 P2 的 TS 模块 ff 入口，本任务不再实现 token 闸。
 
 test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程：finishAsync 调 spawnMechanicalFanIn 加载 worktree 代码（⛔ 不再 in-process）", () => {
   const src = fs.readFileSync(DRIVER, "utf8");
   assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "finishAsync spawns a fresh mechanical fan-in process (⛔ in-process runMechanicalFanIn)");
   assert.match(src, /const entry = path\.join\(opts\.worktree, "plugin", "scripts", "worker-driver\.ts"\)/, "spawnMechanicalFanIn loads the WORKTREE's worker-driver.ts (current code, ⛔ 主检出旧代码)");
-  assert.match(src, /process\.execPath, "--experimental-strip-types", entry,/, "the fresh process is node --experimental-strip-types <worktree>/worker-driver.ts");
-  assert.match(src, /if \(mechanicalFanIn\) \{/, "--mechanical-fan-in CLI mode exists in main()");
+  assert.match(src, /process\.execPath, "--experimental-strip-types", entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node --experimental-strip-types <worktree>/worker-driver.ts --mechanical-fan-in");
+  assert.match(src, /if \(mechanicalFanIn\) \{\s*\n\s*const task = tasks\[0\]/, "--mechanical-fan-in mode exists in main()");
   assert.match(src, /worktree: mechWorktree,/, "--mechanical-fan-in mode passes the worktree to runMechanicalFanIn");
 });

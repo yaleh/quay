@@ -36,7 +36,6 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const CHECKER = path.join(REPO_ROOT, "plugin", "scripts", "fan-in-ff-protocol-check.ts");
-const MERGE_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "fan-in-ff-merge.sh");
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -540,43 +539,4 @@ test("--help exits 0 with usage on stdout", () => {
   const r = runChecker(["--help"]);
   assert.equal(r.status, 0);
   assert.match(r.stdout, /fan-in-ff-protocol-check/);
-});
-
-// ── L1 token gate（gap-fan-in-token-gate-version-mismatch-self-lock）测试缝 ────────────────────────
-// --acquire-workflow-lock 的 token 闸协议：注入半（worker-driver 写 per-task token 文件）落地后，
-// 无 token / 错 token ⇒ fail-closed（exit 2 + 可区分 REJECTED）；正确 token ⇒ 放行；token 文件缺失
-// （过渡期，注入未落地）⇒ lenient（可区分 LENIENT warning）——落地顺序「注入先于闸」的机械保证。
-// ⛔ 拒绝输出与「exit null」acquire 失败区分（硬规则 3b：读不懂 ≠ 合格）。
-
-test("L1 token gate — token 文件缺失 ⇒ lenient；文件存在 ⇒ 无/错 token fail-closed（REJECTED）、正确 token 放行", () => {
-  const dir = makeTmp("ltk");
-  try {
-    initRepo(dir);
-    // token 文件缺失（过渡期）⇒ lenient（exit 0 + 可区分 LENIENT warning）。
-    const lenient = spawnSync("bash", [MERGE_SCRIPT, "--task", "t1", "--root", dir, "--run-id", "ltk-1", "--acquire-workflow-lock"], { encoding: "utf8" });
-    assert.equal(lenient.status, 0, `pre-injection acquire must be lenient (no token file): ${lenient.stdout}${lenient.stderr}`);
-    assert.match(lenient.stderr, /LENIENT \(L1 token gate\)/, `lenient path must carry the distinguishable marker: ${lenient.stderr}`);
-    spawnSync("bash", [MERGE_SCRIPT, "--task", "t1", "--root", dir, "--release-workflow-lock"], { encoding: "utf8" });
-
-    // 写 token 文件（注入半落地）⇒ 无 token fail-closed。
-    const td = path.join(dir, ".quay");
-    fs.mkdirSync(td, { recursive: true });
-    const tokenFile = path.join(td, "fan-in-workflow-lock-token-t1.json");
-    fs.writeFileSync(tokenFile, "proto-check-token\n", "utf8");
-    const noToken = spawnSync("bash", [MERGE_SCRIPT, "--task", "t1", "--root", dir, "--run-id", "ltk-2", "--acquire-workflow-lock"], { encoding: "utf8" });
-    assert.equal(noToken.status, 2, `no-token acquire must fail-closed when the token file exists: ${noToken.stdout}${noToken.stderr}`);
-    assert.match(noToken.stderr, /REJECTED \(L1 token gate\)/, `refusal must carry the distinguishable marker: ${noToken.stderr}`);
-
-    // 错 token fail-closed。
-    const wrong = spawnSync("bash", [MERGE_SCRIPT, "--task", "t1", "--root", dir, "--run-id", "ltk-3", "--acquire-workflow-lock", "--workflow-lock-token", "wrong-token", "--workflow-lock-token-file", tokenFile], { encoding: "utf8" });
-    assert.equal(wrong.status, 2, `mismatched-token acquire must fail-closed: ${wrong.stdout}${wrong.stderr}`);
-    assert.match(wrong.stderr, /REJECTED \(L1 token gate\)/, `mismatch refusal must be distinguishable: ${wrong.stderr}`);
-
-    // 正确 token 放行。
-    const ok = spawnSync("bash", [MERGE_SCRIPT, "--task", "t1", "--root", dir, "--run-id", "ltk-4", "--acquire-workflow-lock", "--workflow-lock-token", "proto-check-token", "--workflow-lock-token-file", tokenFile], { encoding: "utf8" });
-    assert.equal(ok.status, 0, `token-carrying acquire must succeed: ${ok.stdout}${ok.stderr}`);
-    spawnSync("bash", [MERGE_SCRIPT, "--task", "t1", "--root", dir, "--release-workflow-lock"], { encoding: "utf8" });
-  } finally {
-    cleanup(dir);
-  }
 });

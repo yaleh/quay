@@ -151,7 +151,33 @@ export const RULED_HISTORICAL_GAPS: { taskId: string; reason: string }[] = [
       "manager 2026-08-23 裁定 ruled one-off（同 99f845d9 类，先例 direct-to-develop-bypass-check.ts 的" +
       " RULED_HISTORICAL_COMMITS）。",
   },
+  {
+    taskId: "gap-suite-force-color-ansi-test-sh-normalize",
+    reason:
+      "manager 2026-08-28 手动验证 fan-in（机械 fan-in 首绿前的连续验证轮：HOLDS_SLOT 注入 / suite 日志 " +
+      "tee / runId 日志路径 / ENOENT 行为等修复）——直接调 runMechanicalFanIn 走 fan-in-ff-merge.sh 未传 " +
+      "--agent-id，锁事件 agentId=null（16 条：8 acquire/release 对，02:20-04:35Z）。该形态是机械 fan-in " +
+      "落地前的 manager 验证，非常规 subagent fan-in；随 worker-driver 正常派发（机械 fan-in）落地后不再发生。 " +
+      "manager 2026-08-28 裁定 ruled one-off（同 99f845d9 类，先例 direct-to-develop-bypass-check.ts 的" +
+      " RULED_HISTORICAL_COMMITS）。",
+  },
 ];
+
+// ── Mechanical fan-in recognition (gap-fan-in-workflow-check-stale-mechanical-blind-spot) ─────────
+// The driver-run mechanical fan-in is the production path since the workflow was retired (the worker
+// NEVER calls fan-in-execute). Its lock events carry driver runId prefixes and legitimately have
+// agentId=null (driver-run, not a subagent). The workflow-era contract ("every fan-in has a Workflow
+// call + a real subagent agent-id") must recognize these as COVERED — else EVERY mechanical fan-in
+// reds the NEXT task's scoped-gate (cascade: stale-runid landed via driver ⇒ watchdog's scoped-gate
+// reds on stale-runid's agentId=null events). Adding a RULED entry per task would be whack-a-mole.
+export function isMechanicalRunId(runId: string | null | undefined): boolean {
+  if (!runId) return false;
+  return (
+    runId.startsWith("wk-prod-") || // driver resident
+    runId.startsWith("driver-verify-") || // driver one-shot (--task)
+    runId.startsWith("manager-manual-") // manager manual verification fan-in
+  );
+}
 
 // ── Pure: parse lock events ──────────────────────────────────────────────────────────────────────────
 
@@ -396,7 +422,8 @@ export function checkWorkflowCoverage(
   dispatchEpochs: Map<string, number | null>,
   boundaryEpoch: number,
   enforcementBaselineEpoch: number = boundaryEpoch,
-  ruledHistoricalGaps: { taskId: string; reason: string }[] = []
+  ruledHistoricalGaps: { taskId: string; reason: string }[] = [],
+  mechanicalTaskIds: Set<string> = new Set()
 ): CoverageResult {
   const tasks = (fanInTasks ?? []).filter(Boolean);
   if (tasks.length === 0) {
@@ -411,6 +438,9 @@ export function checkWorkflowCoverage(
   const missing: string[] = [];
   for (const t of tasks) {
     if (withCalls.has(t)) continue;
+    // Mechanical fan-in (driver-run) — a legitimate dispatch since the workflow was retired; the
+    // driver takes over for lock/merge/typecheck/scoped/suite/ff. No Workflow call required.
+    if (mechanicalTaskIds.has(t)) continue;
     const exemptReason = exemptByTask.get(t);
     if (exemptReason != null) {
       // Ruled historical gap — already adjudicated as a known exception (manager-phase-goal.md etc.);
@@ -478,7 +508,8 @@ export function checkAgentIds(
   events: LockEvent[],
   topLevelStems: string[],
   subagentStems: string[],
-  ruledHistoricalTasks: { taskId: string; reason: string }[] = []
+  ruledHistoricalTasks: { taskId: string; reason: string }[] = [],
+  mechanicalRunIds: Set<string> = new Set()
 ): {
   ok: boolean;
   evaluated: boolean;
@@ -492,6 +523,9 @@ export function checkAgentIds(
   const violations: { taskId?: string; agentId?: string | null; kind: string }[] = [];
   const ruledHistorical: { taskId: string; reason: string }[] = [];
   for (const r of events) {
+    // Mechanical fan-in (driver-run) — agentId=null is EXPECTED (the driver, not a subagent, holds
+    // the lock during the mechanical fan-in). Not a violation.
+    if (r.runId && mechanicalRunIds.has(r.runId)) continue;
     const kind = classifyAgentId(r.agentId, topLevelStems, subagentStems);
     if (kind !== "subagent") {
       const ruledReason = r.taskId != null ? ruledByTask.get(r.taskId) : undefined;
@@ -822,7 +856,10 @@ export function main(argv: string[]): number {
       : scanWorkflowTaskIds(sessionRoot, boundaryEpoch);
     const dispatchRecords = parseDispatchRecords(fs.existsSync(dispatchRecordFile) ? fs.readFileSync(dispatchRecordFile, "utf8") : "");
     const dispatchEpochs = resolveDispatchEpochs(taskIds, events, wfEventsDir, dispatchRecords);
-    const vA = checkWorkflowCoverage(taskIds, tasksWithWorkflow, dispatchEpochs, boundaryEpoch, enforcementBaselineEpoch, RULED_HISTORICAL_GAPS);
+    const mechanicalTaskIds = new Set(
+      events.filter((r) => isMechanicalRunId(r.runId) && r.taskId).map((r) => r.taskId!),
+    );
+    const vA = checkWorkflowCoverage(taskIds, tasksWithWorkflow, dispatchEpochs, boundaryEpoch, enforcementBaselineEpoch, RULED_HISTORICAL_GAPS, mechanicalTaskIds);
     if (vA.evaluated) {
       anyEvaluated = true;
       if (!vA.ok) anyRed = true;
@@ -841,7 +878,8 @@ export function main(argv: string[]): number {
     // ── 判据2(c) — agentId is a real subagent ──────────────────────────────────────────────────
     const topLevel = topLevelSessionStems(projectDir);
     const subAgents = subagentStems(projectDir);
-    const vC = checkAgentIds(events, topLevel, subAgents, RULED_HISTORICAL_GAPS);
+    const mechanicalRunIds = new Set(events.filter((r) => isMechanicalRunId(r.runId)).map((r) => r.runId!));
+    const vC = checkAgentIds(events, topLevel, subAgents, RULED_HISTORICAL_GAPS, mechanicalRunIds);
     if (vC.evaluated) {
       anyEvaluated = true;
       if (!vC.ok) anyRed = true;

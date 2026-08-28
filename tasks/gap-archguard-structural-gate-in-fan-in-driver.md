@@ -28,6 +28,7 @@ archguard 依赖环闸应接在 fan-in 过程（机械 driver 驱动的 fan-in�
 
 1. archguard 依赖环闸作为 fan-in driver 的机械步骤（typecheck 后、scoped门/suite 前；失败「依赖环 → Claude 会话」）。
 2. 退役 `scripts/test.sh:966` 旧接线（archguard 不再由 test.sh 触发）。
+3. archguard 闸测试写进 `plugin/test/fan-in-driver-mechanical-orchestration.test.mjs` + `plugin/test/worker-driver.test.mjs`，新建独立闸测试 `plugin/test/archguard-structural-gate-fan-in.test.mjs`（⛔ 按此命名，不另取名）。
 
 ⛔ **顺序（manager 2026-08-27 提醒）**：先接 archguard 进 fan-in driver（步骤 1），后退役 test.sh:966（步骤 2）——否则中间有 archguard 哪都不跑的窗口。AC2「生产能产出」天然覆盖此点，但实现顺序别反过来。
 
@@ -44,5 +45,7 @@ archguard 结构闸接进 fan-in driver 机械步骤 + `scripts/test.sh:966` 旧
 
 - plugin/scripts/worker-driver.ts（fan-in 状态机加 archguard 结构闸机械步骤）
 - scripts/test.sh（退役 :966 旧接线）
-- plugin/test/（archguard 闸测试 + 单真相源负控制，具体文件实现方识别）
+- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（机械 fan-in 闸测试）
+- plugin/test/worker-driver.test.mjs（worker-driver 闸测试）
+- plugin/test/archguard-structural-gate-fan-in.test.mjs (new)（archguard 闸独立测试 + 单真相源负控制）
 - tasks/gap-archguard-structural-gate-in-fan-in-driver.md（自身）

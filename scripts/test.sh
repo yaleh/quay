@@ -155,6 +155,17 @@
 
 set -euo pipefail
 
+# ── FORCE_COLOR normalization (gap-suite-force-color-ansi-test-sh-normalize) ──────────────────────
+# FORCE_COLOR=3 in the ambient env makes Node's console.log emit ANSI color codes EVEN WHEN piped
+# (\x1B[33m…\x1B[39m) — deterministically breaking any output-assertion test whose spawnSync'd node
+# inherits it (fan-in-workflow-lock.test.mjs:171, instrument-failure-check.sh's node -e parse; the same
+# root as gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi, superseded by this).
+# Normalize HERE at the entry so EVERY child process / spawnSync inherits the unset var (AC2:
+# entry-level, never a single-point patch). `unset` (⛔ not NO_COLOR=1 — Node IGNORES NO_COLOR while
+# FORCE_COLOR is set, warns and still colors) restores node's own TTY detection; suite subprocesses are
+# always piped so they emit no color regardless of a parent FORCE_COLOR value (1/2/3).
+unset FORCE_COLOR
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 

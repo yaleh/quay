@@ -24,7 +24,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { runMechanicalFanIn, readWorkflowLockHold } from "../scripts/worker-driver.ts";
+import { runMechanicalFanIn, readWorkflowLockHold, acquireFanInWorkflowLock } from "../scripts/worker-driver.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { runAsync } from "../scripts/driver-runtime.ts";
 
@@ -214,10 +214,11 @@ test("suite 红 ⇒ 机械 fan-in red（step=suite），不落地、锁仍 relea
     assert.equal(r.step, "suite");
     // 不落地：task 分支仍在、worktree 仍在（red 不清理）。
     assert.equal(git(repo, "worktree", "list", "--porcelain").stdout.includes(`task/${TASK}`), true, "red path must NOT remove the worktree");
-    // 锁在任一退出路径都 release（finally）⇒ 后续可再 acquire。
-    const re = spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", TASK, "--root", repo, "--run-id", "mf-run-red-2", "--acquire-workflow-lock"], { encoding: "utf8" });
-    assert.equal(re.status, 0, `post-red re-acquire must succeed (lock was released): ${re.stdout}${re.stderr}`);
-    spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", TASK, "--root", repo, "--release-workflow-lock"], { encoding: "utf8" });
+    // 锁在任一退出路径都 release（finally）⇒ release 事件已写（干净 acquire→release 对，ADR-034 holder
+    // 在 driver 关 stdin 写端后写 release 事件）。读事件文件判据（⛔ 非 re-acquire——re-acquire 若锁未释放
+    // 会阻塞在 flock 上把测试挂死）。
+    const lock = readWorkflowLockHold(repo, TASK, runId);
+    assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "red path must release the lock (finally) — clean acquire+release pair in the events file");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
@@ -268,15 +269,16 @@ test("merge develop 冲突 ⇒ 机械 fan-in red（step=merge-develop），锁�
 
 // AC1（能取假，结构面）：acquire 步不再传 120_000，改传 Infinity（unbounded）。结构断言是唯一能在
 // 不真等 120s 的前提下取假的判据——排队等待时长本身不是可注入的 seam（120s 是硬编码字面量）。
-test("AC1 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics) — acquire 步 unbounded（Infinity，⛔ 非 120s）；其余步骤仍有限超时", () => {
+test("AC1 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics, ADR-034 修订) — acquire 步无超时：driver 经非分离 holder 持锁（flock -x 无 -w），⛔ 无 --acquire-workflow-lock 分离 holder、⛔ 无 120s 短超时", () => {
   const src = fs.readFileSync(DRIVER_SRC, "utf8");
-  // acquire 步是唯一带 --acquire-workflow-lock 的 mechSh 调用；它必须传 Infinity（unbounded）。L1 token
-  // gate 落点：acquire 步现在带 --workflow-lock-token + --workflow-lock-token-file 两个 token 参数，且
-  // 仍是 unbounded。正则匹配「--acquire-workflow-lock 后跟任意 token 参数直到 ]」。
-  const acquire = src.match(/mechSh\(\["bash", ffMerge, "--task", task, "--root", root, "--run-id", runId, "--acquire-workflow-lock",[^\]]*\]\s*,\s*([^)]+)\)/);
-  assert.ok(acquire, "acquire-step mechSh call must be present in runMechanicalFanIn");
-  assert.equal(acquire[1].trim(), "Infinity", `acquire step must be unbounded (Infinity), got "${acquire[1].trim()}" (⛔ 120_000 kills a queued waiter)`);
-  assert.doesNotMatch(acquire[0], /120_000/, "acquire step must NOT carry the old 120s timeout");
+  // ADR-034：acquire 不再经 fan-in-ff-merge.sh --acquire-workflow-lock（分离 holder + flag 协议已废除）。
+  // ⛔ 散文注释可合法提及被废除的 flag 名；本断言查【argv 字符串字面量】形态（`--acquire-workflow-lock"`，
+  // 带闭引号）——只有真调用会带闭引号，注释不会。
+  assert.doesNotMatch(src, /--acquire-workflow-lock"/, "no argv carries the --acquire-workflow-lock flag (detached-holder protocol abolished)");
+  assert.match(src, /acquireFanInWorkflowLock/, "runMechanicalFanIn must acquire via the driver-side non-detached holder");
+  // holder 的 flock 无 -w（unbounded）——workflow 锁是正确性锁，排队等待正是它存在的意义（⛔ 无超时）。
+  assert.match(src, /flock -x "\$fd"/, "holder flock must be unbounded (no -w)");
+  assert.doesNotMatch(src, /flock -x -w "\$fd"/, "holder flock must NOT carry a bounded wait");
   // 其余机械步骤仍是有限时长步骤（超时照旧，⛔ 不把「去掉短超时」误扩成「去掉所有超时」）。
   assert.match(src, /mechSh\(\["git", "-C", worktree, "merge", "--no-edit", mergeTarget\], 120_000\)/, "merge-develop step keeps its finite timeout");
   assert.match(src, /mechSh\(\["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget\], 120_000\)/, "typecheck step keeps its finite timeout");
@@ -290,14 +292,14 @@ test("AC2 机制 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics) — 排�
   const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
   const runId = "mf-run-queued";
   const suiteLog = path.join(base, "suite.log");
+  let holderLock = null;
   try {
-    // 持有者（position 1）先 acquire workflow 锁并保持（detached holder，flock 已持，脚本确认后退出）。
-    const holder = spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", HOLDER_TASK, "--root", repo, "--run-id", "holder-run", "--acquire-workflow-lock"], { encoding: "utf8" });
-    assert.equal(holder.status, 0, `holder acquire must succeed: ${holder.stdout}${holder.stderr}`);
+    // 持有者（position 1）先 acquire workflow 锁并保持（driver 经非分离 holder 持锁，ADR-034）。
+    holderLock = await acquireFanInWorkflowLock({ root: repo, task: HOLDER_TASK, runId: "holder-run" });
 
-    // 机械 fan-in（position 2）排队：其 acquire holder 在 flock 上排队，等持有者释放后落地。⛔ 若 acquire
-    // 步仍是 120s 短超时，这里 1.5s 的排队不会触发它（1.5s ≪ 120s）——所以本测试单独不取假，取假靠 AC1
-    // 的结构断言；本测试证明的是机制端到端通（排队→等→落地，不 red at step 1、不 exit null）。
+    // 机械 fan-in（position 2）排队：其 holder 在 flock 上排队，等持有者释放后落地。⛔ 若 acquire 步仍是
+    // 短超时，这里 1.5s 的排队不会触发它（1.5s ≪ 短超时）——本测试单独不取假，取假靠 AC1 的结构断言；
+    // 本测试证明机制端到端通（排队→等→落地，不 red at step 1、不 exit null）。
     const pending = runMechanicalFanIn({
       task: TASK, worktree, root: repo, runId, mergeTarget: "develop", forceSuite: true,
       scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
@@ -310,14 +312,14 @@ test("AC2 机制 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics) — 排�
     await new Promise((r) => setTimeout(r, 1500));
 
     // 释放持有者 ⇒ 机械 fan-in 的 holder 获得锁，继续 merge→…→ff 并落地。
-    const rel = spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", HOLDER_TASK, "--root", repo, "--release-workflow-lock"], { encoding: "utf8" });
-    assert.equal(rel.status, 0, `holder release must succeed: ${rel.stdout}${rel.stderr}`);
+    await holderLock.release();
+    holderLock = null;
 
     const r = await pending;
     assert.equal(r.outcome, "landed", `queued mechanical fan-in must land after the holder releases (step=${r.step} reason=${r.reason})`);
   } finally {
-    // 兜底释放持有者（测试中途失败也不留一个永睡的 detached holder 进程）。
-    try { spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", HOLDER_TASK, "--root", repo, "--release-workflow-lock"], { encoding: "utf8" }); } catch { /* best-effort */ }
+    // 兜底释放持有者（测试中途失败也不留一个永睡的非分离 holder 进程）。
+    if (holderLock) { try { await holderLock.release(); } catch { /* best-effort */ } }
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
@@ -340,77 +342,62 @@ test("短超时负控制 — runAsync 有限超时仍 SIGKILL（⛔ 超时机制
   assert.ok(elapsed < 4000, `killed well before the 5s sleep would finish (elapsed=${elapsed}ms)`);
 });
 
-// ── gap-fan-in-token-gate-version-mismatch-self-lock：每任务新进程 + token 数据文件 + 落地顺序 ───
-// 版本错位（旧守护 in-process 跑 fan-in、但 fan-in 脚本从 worktree 加载 ⇒ 注入半与闸半不一致、自锁）
-// 的类级修法：机械 fan-in 每任务起 fresh 进程加载 worktree 的 worker-driver.ts --mechanical-fan-in，
-// 注入半（token）与闸半（fan-in-ff-merge.sh）同源 ⇒ 一致。AC1（版本错位已消）/ AC2（真实穿闸 dry-run）
-// / AC3（不自锁）。
+// ── gap-fan-in-token-gate-version-mismatch-self-lock：每任务新进程（版本错位类级修法）──────────────
+// 版本错位（旧守护 in-process 跑 fan-in、但 fan-in 编排脚本从 worktree 加载 ⇒ 锁半与编排半不一致）的
+// 类级修法：机械 fan-in 每任务起 fresh 进程加载 worktree 的 worker-driver.ts --mechanical-fan-in，
+// 锁半（acquireFanInWorkflowLock，ADR-034）与编排半（fan-in-ff-merge.sh）同源 ⇒ 一致。
+// ⛔ token 闸（L1）已由 fd902a824 重定范围到 P2 的 TS 模块 ff 入口，本任务不再实现 token 闸。
+// AC1（版本错位已消）/ AC2（fresh 进程真实执行 + JSON 回传 round-trip）。
 
 test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程：finishAsync 调 spawnMechanicalFanIn（spawn worktree 的 worker-driver.ts --mechanical-fan-in），⛔ 不再 in-process", () => {
   const src = fs.readFileSync(DRIVER_SRC, "utf8");
-  // finishAsync 调 spawnMechanicalFanIn（fresh 进程），不是 in-process runMechanicalFanIn（⛔ 旧守护
-  // in-process = 用旧注入/旧闸 = 版本错位自锁）。
   assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "finishAsync must spawn a fresh mechanical fan-in process (⛔ in-process runMechanicalFanIn)");
-  // spawnMechanicalFanIn spawn 的是 worktree 的 worker-driver.ts --mechanical-fan-in（当前代码），不是主检出。
   assert.match(src, /const entry = path\.join\(opts\.worktree, "plugin", "scripts", "worker-driver\.ts"\)/, "spawnMechanicalFanIn loads the WORKTREE's worker-driver.ts (current code, ⛔ 主检出旧代码)");
   assert.match(src, /process\.execPath, "--experimental-strip-types", entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node --experimental-strip-types <worktree>/worker-driver.ts --mechanical-fan-in");
-  // --mechanical-fan-in CLI 模式存在（fresh 进程入口，跑 runMechanicalFanIn 后 stdout 单行 JSON result）。
   assert.match(src, /if \(mechanicalFanIn\) \{\s*\n\s*const task = tasks\[0\]/, "--mechanical-fan-in mode exists in main()");
   assert.match(src, /runMechanicalFanIn\(\{\s*\n\s*task,\s*\n\s*worktree: mechWorktree,/, "--mechanical-fan-in mode calls runMechanicalFanIn with the worktree");
 });
 
-test("AC2/AC3 (gap-fan-in-token-gate-version-mismatch-self-lock) — 真实机械 fan-in 穿真实 token 闸：注入 token + 闸校验一致 ⇒ 落地、token 一次性消费（不自锁）", async () => {
-  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
-  const runId = "mf-run-token";
-  const suiteLog = path.join(base, "suite.log");
+test("AC2 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程 round-trip：fresh 进程 --mechanical-fan-in 真实执行、stdout 单行 JSON result 可解析（merge 冲突 ⇒ red 可区分，⛔ 结构断言/fixture-only ⇒ 假）", () => {
+  // hermetic repo：develop 前进改 conflict.txt，task 分支也改它 ⇒ git merge develop 冲突 ⇒ 机械 fan-in
+  // red at merge-develop。fresh 进程真实 spawn、真实跑 runMechanicalFanIn、stdout 打单行 JSON result。
+  const base = makeTmp("spawn-rt");
+  const repo = path.join(base, "repo");
+  const worktree = path.join(base, "wt");
   try {
-    const r = await runMechanicalFanIn({
-      task: TASK, worktree, root: repo, runId, mergeTarget: "develop", forceSuite: true,
-      scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
-      suiteCapture: capture, suiteLogFile: suiteLog,
-      suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
-      scopedGateCommand: ["true"], docCheckCommand: ["true"],
-    });
-    // 闸任务自己的 fan-in 带 token 通过闸（AC3 不自锁）：注入半（token 写文件）与闸半（fan-in-ff-merge.sh
-    // 校验）同源（都在本测试的 scriptsDir = 当前 worktree 的 plugin/scripts）⇒ 一致 ⇒ 落地。
-    assert.equal(r.outcome, "landed", `token-injected mechanical fan-in must pass the real gate and land (step=${r.step} reason=${r.reason})`);
-    // token 是一次性数据文件：acquire 成功后立即消费（rm）⇒ 不可重放、ff 的 clean-tree 判据看不见它。
-    const tokenFile = path.join(repo, ".quay", `fan-in-workflow-lock-token-${TASK}.json`);
-    assert.equal(fs.existsSync(tokenFile), false, "token file must be consumed (rm) after a successful acquire — one-time, ⛔ 可重放");
+    fs.mkdirSync(repo, { recursive: true });
+    git(repo, "init", "-q");
+    git(repo, "config", "user.name", "mf-test");
+    git(repo, "config", "user.email", "mf@example.com");
+    git(repo, "branch", "-M", "develop");
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "tasks", `${TASK}.md`), taskBody(), "utf8");
+    fs.writeFileSync(path.join(repo, "conflict.txt"), "base\n", "utf8");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-q", "-m", "base");
+    git(repo, "worktree", "add", worktree, "-b", `task/${TASK}`);
+    // develop 前进：改 conflict.txt。
+    git(repo, "checkout", "-q", "develop");
+    fs.writeFileSync(path.join(repo, "conflict.txt"), "develop\n", "utf8");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-q", "-m", "develop advance");
+    // task 分支也改 conflict.txt ⇒ merge 冲突。
+    fs.writeFileSync(path.join(worktree, "conflict.txt"), "task\n", "utf8");
+    git(worktree, "add", "-A");
+    git(worktree, "commit", "-q", "-m", "task change");
+
+    // fresh 进程：加载当前 worktree 的 worker-driver.ts --mechanical-fan-in（入口 = 本测试仓库的
+    // SCRIPTS_DIR；runMechanicalFanIn 的 scriptsDir 缺省 <worktree>/plugin/scripts，但 merge 冲突在
+    // 任何编排脚本被用到之前就 red，故不依赖 hermetic worktree 携带 scripts）。
+    const entry = path.join(SCRIPTS_DIR, "worker-driver.ts");
+    const r = spawnSync(process.execPath, ["--experimental-strip-types", entry, "--mechanical-fan-in", "--task", TASK, "--worktree", worktree, "--root", repo, "--run-id", "mf-spawn-rt", "--json"], { encoding: "utf8", timeout: 120_000 });
+    const line = (r.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean).pop();
+    assert.ok(line, `fresh process must print a JSON result line, got stdout=${JSON.stringify(r.stdout)} stderr=${r.stderr}`);
+    const parsed = JSON.parse(line);
+    assert.equal(parsed.outcome, "red", `merge conflict ⇒ red; got ${line}`);
+    assert.equal(parsed.step, "merge-develop", `red at merge-develop (conflict); got step=${parsed.step}`);
+    assert.notEqual(r.status, 0, `fresh process exits non-zero on red; got status=${r.status}`);
   } finally {
-    fs.rmSync(base, { recursive: true, force: true });
-  }
-});
-
-test("L1 token gate (gap-fan-in-token-gate-version-mismatch-self-lock) — 闸 fail-closed when token file exists（无/错 token 拒，可区分 REJECTED）；token file absent ⇒ lenient（落地顺序注入先于闸）", () => {
-  const { base, repo } = makeRepoWithWorktree();
-  const merge = path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh");
-  const tokenFile = path.join(repo, ".quay", `fan-in-workflow-lock-token-${TASK}.json`);
-  try {
-    // token file absent（过渡期：注入未落地，旧守护无 token 注入）⇒ lenient（可区分 warning），⛔ 不自锁。
-    const lenient = spawnSync("bash", [merge, "--task", TASK, "--root", repo, "--run-id", "ltk-lenient", "--acquire-workflow-lock"], { encoding: "utf8" });
-    assert.equal(lenient.status, 0, `pre-injection acquire must be lenient (no token file): ${lenient.stdout}${lenient.stderr}`);
-    assert.match(lenient.stderr, /LENIENT \(L1 token gate\)/, `lenient path must carry the distinguishable marker: ${lenient.stderr}`);
-    spawnSync("bash", [merge, "--task", TASK, "--root", repo, "--release-workflow-lock"], { encoding: "utf8" });
-
-    // token file present（注入已落地）⇒ 无 token fail-closed（⛔ 非机械路径被拒，可区分 REJECTED）。
-    fs.mkdirSync(path.dirname(tokenFile), { recursive: true });
-    fs.writeFileSync(tokenFile, "expected-token\n", "utf8");
-    const noToken = spawnSync("bash", [merge, "--task", TASK, "--root", repo, "--run-id", "ltk-no-token", "--acquire-workflow-lock"], { encoding: "utf8" });
-    assert.equal(noToken.status, 2, `no-token acquire must fail-closed when the token file exists: ${noToken.stdout}${noToken.stderr}`);
-    assert.match(noToken.stderr, /REJECTED \(L1 token gate\)/, `refusal must carry the distinguishable marker: ${noToken.stderr}`);
-
-    // 错 token ⇒ fail-closed。
-    const wrong = spawnSync("bash", [merge, "--task", TASK, "--root", repo, "--run-id", "ltk-wrong", "--acquire-workflow-lock", "--workflow-lock-token", "wrong-token", "--workflow-lock-token-file", tokenFile], { encoding: "utf8" });
-    assert.equal(wrong.status, 2, `mismatched-token acquire must fail-closed: ${wrong.stdout}${wrong.stderr}`);
-    assert.match(wrong.stderr, /REJECTED \(L1 token gate\)/, `mismatch refusal must be distinguishable: ${wrong.stderr}`);
-
-    // 正确 token ⇒ 放行。
-    const ok = spawnSync("bash", [merge, "--task", TASK, "--root", repo, "--run-id", "ltk-ok", "--acquire-workflow-lock", "--workflow-lock-token", "expected-token", "--workflow-lock-token-file", tokenFile], { encoding: "utf8" });
-    assert.equal(ok.status, 0, `token-carrying acquire must succeed: ${ok.stdout}${ok.stderr}`);
-    spawnSync("bash", [merge, "--task", TASK, "--root", repo, "--release-workflow-lock"], { encoding: "utf8" });
-  } finally {
-    try { spawnSync("bash", [merge, "--task", TASK, "--root", repo, "--release-workflow-lock"], { encoding: "utf8" }); } catch { /* best-effort */ }
     fs.rmSync(base, { recursive: true, force: true });
   }
 });

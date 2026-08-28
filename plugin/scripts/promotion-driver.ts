@@ -162,6 +162,8 @@ export interface CandidateChecks {
   missingArtifacts: string[];
   selfTouchOk: boolean;
   touchesResolve: boolean;
+  touchesNarrow: boolean;
+  wideTouches: string[];
   depsReady: boolean;
   retiredMechanism: boolean;
   superseded: boolean;
@@ -189,6 +191,7 @@ export function classifyCandidate(c: CandidateChecks): FixDecision {
   if (!c.fourArtifacts) missing.push(`fourArtifacts=false missing=[${(c.missingArtifacts || []).join(",")}]`);
   if (!c.selfTouchOk) missing.push("selfTouchOk=false");
   if (!c.touchesResolve) missing.push("touchesResolve=false");
+  if (c.touchesNarrow === false) missing.push(`touchesNarrow=false wideTouches=[${(c.wideTouches || []).join(",")}]`);
   const unfixable: string[] = [];
   if (!c.depsReady) unfixable.push("depsReady=false");
   if (c.retiredMechanism) unfixable.push("retiredMechanism=true");
@@ -316,6 +319,8 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
           missingArtifacts: Array.isArray(c.missingArtifacts) ? c.missingArtifacts.map(String) : [],
           selfTouchOk: !!c.selfTouchOk,
           touchesResolve: !!c.touchesResolve,
+          touchesNarrow: c.touchesNarrow !== false,
+          wideTouches: Array.isArray(c.wideTouches) ? c.wideTouches.map(String) : [],
           depsReady: !!c.depsReady,
           retiredMechanism: !!c.retiredMechanism,
           superseded: !!c.superseded,
