@@ -60,7 +60,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib。
 import { buildNonCodeMask, enumerativeExistence } from "./checker-lib.ts";
-import { readFileSafe } from "./gate-script-base.ts";
+import { helpExit, readFileSafe } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -411,6 +411,7 @@ function usage(): never {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node test-framework-policy-check.ts [<workspace-root>] [--json] [--selftest] [--data-file <path>] [--baseline-file <path>] [--baseline-files <path>]");
   if (args.includes("--selftest")) {
     const ok = runSelftest();
     process.exit(ok ? 0 : 1);

@@ -185,7 +185,7 @@ import {
 // The dispatch gate's OWN declared-path expander (single-source — ready-pool-check must not carry a
 // parallel copy of "which files does a Touches declaration intend to touch?").
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, helpExit } from "./gate-script-base.ts";
 // Reused "work has landed on master" signal (AC6: reuse, never a parallel copy) — the same
 // symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
 // buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-
@@ -2496,6 +2496,9 @@ function main(argv) {
   let landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT;
   let redWindowMin = RED_WINDOW_MIN_DEFAULT;
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) {
+    helpExit(`usage: node --experimental-strip-types plugin/scripts/ready-pool-check.ts [--root <repo>] [--cap <n>] [--floor-mult <n>] [--floor-cap <n>] [--in-flight <ids>] [--closed-but-live <ids>] [--top <n>] [--targeted <id>] [--develop <ref>] [--integration <ref>] [--master <ref>] [--landing-staleness-ms <n>] [--landing-behind-threshold <n>] [--red-window-min <n>] [--apply] [--revaluate-apply] [--json]`);
+  }
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
     else if (args[i] === "--json") { /* output is always JSON — accepted for Contract parity */ }

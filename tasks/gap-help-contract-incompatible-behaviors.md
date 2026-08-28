@@ -41,5 +41,6 @@ usage 但 exit 2（2/14）       会被 harness 当失败
 ## Touches
 
 - plugin/scripts/*-check.ts（77 个 .ts checker 的 --help 契约统一，重点 measure-trend-check / ready-pool-check / anti-drift-touches-check / landing-target / strategic-doc-staleness / task-status-drift / trend-check——均被本 glob 覆盖）
+- plugin/scripts/gate-script-base.ts（helpExit 助手 + parseArgs --help/-h 契约基座——被 77 个 checker 复用，非 *-check.ts 故单列）
 - plugin/test/help-contract-incompatible-behaviors.test.mjs (new)（--help 无副作用契约测试）
 - tasks/gap-help-contract-incompatible-behaviors.md（自身）

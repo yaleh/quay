@@ -50,7 +50,7 @@ import path from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { readFileSafe } from "./gate-script-base.ts";
+import { helpExit, readFileSafe } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -298,6 +298,7 @@ function getArgValue(args: string[], name: string): string | undefined {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node test-group-downgrade-check.ts [--root <repo-root>] [--baseline <sha>] [--json] [--selftest]");
   if (args.includes("--selftest")) {
     return runSelftest() ? 0 : 1;
   }

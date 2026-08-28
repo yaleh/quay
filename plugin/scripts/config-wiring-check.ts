@@ -60,7 +60,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFileSafe } from "./gate-script-base.ts";
+import { helpExit, readFileSafe } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // plugin/scripts -> plugin -> repo root. Robust to being invoked via the experiments/ symlink
@@ -356,6 +356,7 @@ export {
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 async function main(argv: string[]): Promise<number> {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node config-wiring-check.ts [--workspace <path>] [--driver bespoke|generic|both] [--json] [--verify-readers] [--selftest]");
   if (args.includes("--selftest")) return runSelftest();
 
   if (args.includes("--verify-readers")) {

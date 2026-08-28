@@ -37,6 +37,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { matchAtCommandPosition } from "./checker-lib.ts";
+import { helpExit } from "./gate-script-base.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -439,6 +440,7 @@ function runSelftest(): boolean {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node mechanism-vitality-check.ts --check [--json] | --selftest");
   if (args.includes("--selftest")) return runSelftest() ? 0 : 1;
   if (args.includes("--check")) return runCheck(REPO_ROOT, args.includes("--json"));
   usage();

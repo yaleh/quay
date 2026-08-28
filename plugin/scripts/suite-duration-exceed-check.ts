@@ -37,7 +37,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -186,6 +186,7 @@ function getArgValue(argv: string[], name: string): string | undefined {
 }
 
 export function main(argv: string[]): number {
+  if (argv.includes("--help") || argv.includes("-h")) helpExit("usage: node suite-duration-exceed-check.ts [--root <dir>] [--limit-ms <n>] [--since-epoch <t>] [--json] [--no-block]");
   const root = path.resolve(getArgValue(argv, "--root") ?? REPO_ROOT);
   const limitMs = Number(getArgValue(argv, "--limit-ms") ?? String(DEFAULT_LIMIT_MS));
   const sinceRaw = getArgValue(argv, "--since-epoch");
