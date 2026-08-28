@@ -60,5 +60,7 @@ extra:
 - scripts/test.sh（FULL_SUITE_LOCK_HOLD_MAX_S :657-663/:671 阈值或语义）
 - plugin/scripts/suite-slot-lib.sh（spawn_suite_lock_hold_watchdog :106-175 路径 (b)/(c) 分叉）
 - plugin/scripts/full-suite-runner.ts（lane 公式/看门狗集成）
-- plugin/test/（看门狗切锁负控制 + ff-在锁内断言）
+- plugin/test/suite-slot-ssot-check.test.mjs（看门狗切锁负控制）
+- plugin/test/fan-in-workflow-lock.test.mjs（ff-在锁内断言，交叉 lock-events 与 merge-lock-events）
+- plugin/test/full-suite-runner.test.mjs（看门狗集成回归）
 - tasks/gap-full-suite-lock-hold-watchdog-threshold-shorter-than-fan-in.md（自身）
