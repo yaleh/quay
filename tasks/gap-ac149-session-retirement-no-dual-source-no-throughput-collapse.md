@@ -40,6 +40,12 @@ AC149-1/2/3 全勾；outer/inner 真退役、产能不塌、无双真相源；B0
 
 ## Touches
 
-- orchestration/（cron/tick-log/执行核文档标退役）
+- orchestration/manager-tick-core.md（执行核文档标退役）
+- orchestration/orchestrator-tick-core.md（执行核文档标退役）
+- orchestration/fast-mode-tick-core.md（执行核文档标退役）
+- orchestration/manager-loop-tick.md（tick-log 标退役）
+- orchestration/manager-tick-criteria.md（tick 判准标退役）
+- orchestration/manager-tick-sending.md（发送形态标退役）
+- orchestration/manager-tick-closing.md（收尾形态标退役）
 - plugin/scripts/（会话退役 + 产能监测 + 双真相源检查）
 - tasks/gap-ac149-session-retirement-no-dual-source-no-throughput-collapse.md（自身）
