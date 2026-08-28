@@ -87,10 +87,10 @@ test("runMonitor: collapse=true when the post window has zero land and pre is no
     execFileSync("git", ["init", "-q", "-b", "develop", tmp]);
     execFileSync("git", ["-C", tmp, "config", "user.email", "t@example.com"]);
     execFileSync("git", ["-C", tmp, "config", "user.name", "t"]);
-    // Commit dated clearly in the PAST (yesterday) so it is unambiguously in the pre window;
-    // a commit dated "now" (second precision) lands exactly on the before-boundary and leaks into
-    // both windows.
-    const past = "2026-08-27T00:00:00Z";
+    // Commit dated clearly in the PAST (6h ago — dynamically computed, not a hardcoded calendar date
+    // that rots) so it is unambiguously inside the 24h pre window [now-24h, now]; a commit dated
+    // "now" (second precision) would land exactly on the before-boundary and leak into the post window.
+    const past = new Date(Date.now() - 6 * 3600_000).toISOString();
     execFileSync("git", ["-C", tmp, "commit", "-q", "--allow-empty", "-m", "pre-stop land"], {
       env: { ...process.env, GIT_AUTHOR_DATE: past, GIT_COMMITTER_DATE: past },
     });

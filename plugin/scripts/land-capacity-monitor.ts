@@ -17,7 +17,8 @@
 // Run:
 //   node --no-warnings --experimental-strip-types plugin/scripts/land-capacity-monitor.ts --root <repo>
 //     [--before <YYYY-MM-DDTHH:MM:SS>] [--window-hours 24] [--json]
-//   --before        the stop boundary (default: now); pre = before-2w .. before, post = before .. now
+//   --before        the stop boundary (default: now); pre = before-w .. before, post = before .. before+w
+//                   (same-length windows — AC149-2 「同长度窗口」; post truncates at now if < w elapsed ⇒ probe)
 //   --window-hours  hours per window (default 24; a window shorter than 24h is a probe, not a verdict)
 
 import { execFileSync } from "node:child_process";
@@ -77,10 +78,14 @@ export function compareWindows(pre: WindowReport, post: WindowReport): MonitorRe
 }
 
 export function runMonitor(root: string, before: string, windowHours: number): MonitorResult {
-  const sincePre = new Date(new Date(before).getTime() - 2 * windowHours * 3600_000).toISOString();
+  // Same-length windows on both sides of the stop boundary (AC149-2 「同长度窗口」):
+  // pre = [before - w, before] and post = [before, before + w]. When less than w has elapsed since
+  // the stop, git log --until <future> naturally truncates post to [before, now] (the probe case).
+  const beforeMs = new Date(before).getTime();
+  const sincePre = new Date(beforeMs - windowHours * 3600_000).toISOString();
   const untilPre = before;
   const sincePost = before;
-  const untilPost = new Date(Date.now()).toISOString();
+  const untilPost = new Date(beforeMs + windowHours * 3600_000).toISOString();
   const pre = buildReport(listCommits(root, sincePre, untilPre), windowHours);
   const post = buildReport(listCommits(root, sincePost, untilPost), windowHours);
   return compareWindows(pre, post);
