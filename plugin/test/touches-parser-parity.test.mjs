@@ -263,6 +263,26 @@ test("parseTouchEntriesWithTags: (new)/(delete) tags captured, everything else n
   ]);
 });
 
+test("parseTouchEntriesWithTags: (new)/(delete) tag BEFORE a full-width （…） annotation is recovered", () => {
+  // 2026-08-28: a pre-existing quirk lost the structural tag when an ASCII (new) sat before a
+  // trailing full-width annotation — `` path (new)（描述） `` — the end-anchored ASCII match saw
+  // ）， not ), so every (new)（…） task was judged must-exist-missing (promotion reject). The
+  // tag is now recovered from the ASCII (…) that precedes the （; the PATH is unchanged.
+  const section = [
+    "- `plugin/scripts/foo.ts (new)（新建）`",
+    "- plugin/scripts/old.ts (delete)（删）",
+    "- plugin/test/fixtures/fake-suite/ (new)（假 suite fixture）",
+    "- plain.ts",
+  ].join("\n");
+  const tagged = parseTouchEntriesWithTags(section);
+  assert.deepEqual(tagged, [
+    { path: "plugin/scripts/foo.ts", tag: "new" },
+    { path: "plugin/scripts/old.ts", tag: "delete" },
+    { path: "plugin/test/fixtures/fake-suite/", tag: "new" },
+    { path: "plain.ts", tag: null },
+  ]);
+});
+
 test("parseTouchEntriesWithTags: empty/missing section → []", () => {
   assert.deepEqual(parseTouchEntriesWithTags(""), []);
   assert.deepEqual(parseTouchEntriesWithTags(null), []);

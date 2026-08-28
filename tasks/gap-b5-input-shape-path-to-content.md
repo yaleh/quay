@@ -17,7 +17,7 @@ SPEC §1.4 实测：~70% checker 吃【文件系统路径】⇒ 85 个 checker �
 
 ## Plan
 
-先 3-5 个 checker 做示范（用 audit-independence-check.ts 作模板，把判定逻辑抽成对字符串的纯函数导出 + 薄 main() CLI 壳），测出实际收益（测试耗时下降 + 撰写成本下降）再决定是否推广。⛔ 不凭已被否定的「缩短套件」链条推广，先测后写。
+先 3 个 checker 做示范（用 audit-independence-check.ts 作模板，把判定逻辑抽成对字符串的纯函数导出 + 薄 main() CLI 壳）：`adr016-screen-use-check.ts` / `concurrency-literal-check.ts` / `cap-counts-subagents-check.ts`（⛔ 若实现中发现某个不适合，改自身任务 Touches 换一个再动手，anti-drift 按最终 Touches 判）。测出实际收益（测试耗时下降 + 撰写成本下降）再决定是否推广。⛔ 不凭已被否定的「缩短套件」链条推广，先测后写。
 
 ## Acceptance Criteria
 
@@ -31,6 +31,10 @@ SPEC §1.4 实测：~70% checker 吃【文件系统路径】⇒ 85 个 checker �
 
 ## Touches
 
-- plugin/scripts/（3-5 个示范 checker 抽纯函数 + 薄 main 壳）
-- plugin/test/（纯函数测试 + 负控制 + 耗时对照）
+- plugin/scripts/adr016-screen-use-check.ts（抽纯函数 + 薄 main 壳）
+- plugin/scripts/concurrency-literal-check.ts（抽纯函数 + 薄 main 壳）
+- plugin/scripts/cap-counts-subagents-check.ts（抽纯函数 + 薄 main 壳）
+- plugin/test/adr016-screen-use-check.test.mjs（纯函数测试）
+- plugin/test/concurrency-literal-check.test.mjs（纯函数测试）
+- plugin/test/cap-counts-subagents-check.test.mjs（纯函数测试）
 - tasks/gap-b5-input-shape-path-to-content.md（自身）

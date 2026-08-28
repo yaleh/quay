@@ -31,7 +31,9 @@ manager 侧落「语义面 subagent 派发」机制（同 A16b dispatch-record �
 
 ## Touches
 
-- plugin/scripts/（语义 subagent 派发机制 + 派发记录）
+- plugin/scripts/semantic-face-dispatch-record.ts (new)（语义 subagent 派发机制 + 派发记录，同 A16b dispatch-record 形态）
+- plugin/test/semantic-face-dispatch-record.test.mjs (new)（派发记录可查性测试）
+- plugin/scripts/dispatch-record.ts（A16b 参照形态）
 - orchestration/manager-tick-core.md（语义面职责清单 + 派发规范）
 - orchestration/manager-tick-criteria.md（语义面职责清单）
 - orchestration/manager-tick-sending.md（语义面派发规范）

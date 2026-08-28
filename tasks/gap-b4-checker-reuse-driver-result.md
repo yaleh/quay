@@ -17,7 +17,7 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 
 ## Plan
 
-让 checker 复用 `driver-result.ts` 的 `DriverResult<T>`：先判定语义是否 1:1 适配（driver 的 `verified` ↔ checker 的 `pass`？`failed` ↔ `fail`？SPEC 不代为判定，实现方定；若需要更上位词表则先定词表）；然后逐批把 checker 的判定结果收敛到该类型（棘轮，采纳数只增不减）。⛔ 实现前先读 `checker-lib.test.mjs` 确认 checker-lib 是否保持纯净无 fs——若纯净则新建 `checker-io.ts` 而非扩 checker-lib（§2.3a 末）。
+让 checker 复用 `driver-result.ts` 的 `DriverResult<T>`：先判定语义是否 1:1 适配（driver 的 `verified` ↔ checker 的 `pass`？`failed` ↔ `fail`？SPEC 不代为判定，实现方定；若需要更上位词表则先定词表）；然后逐批把 checker 的判定结果收敛到该类型（棘轮，采纳数只增不减）。示范 4 个：`outer-anchor-check.ts` / `load-sensitive-release-check.ts` / `dead-code-after-return-check.ts` / `adr016-screen-use-check.ts`（⛔ 若实现中发现某个不适合，改自身任务 Touches 换一个再动手，anti-drift 按最终 Touches 判）。⛔ 实现前先读 `checker-lib.test.mjs` 确认 checker-lib 是否保持纯净无 fs——若纯净则新建 `plugin/scripts/checker-io.ts` 而非扩 checker-lib（§2.3a 末）。棘轮检查器放 `plugin/scripts/checker-driver-result-ratchet-check.ts` + 测试 `plugin/test/checker-driver-result-ratchet-check.test.mjs`。
 
 ## Acceptance Criteria
 
@@ -31,7 +31,16 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 
 ## Touches
 
-- plugin/scripts/（checker 复用 driver-result，示范 3-5 个 + 检查器棘轮）
-- plugin/scripts/driver-result.ts（如需语义适配/更上位词表）
-- plugin/test/（DriverResult 语义映射测试 + 负控制）
+- plugin/scripts/driver-result.ts（语义适配/更上位词表）
+- plugin/scripts/outer-anchor-check.ts（示范迁移）
+- plugin/scripts/load-sensitive-release-check.ts（示范迁移）
+- plugin/scripts/dead-code-after-return-check.ts（示范迁移）
+- plugin/scripts/adr016-screen-use-check.ts（示范迁移）
+- plugin/scripts/checker-io.ts (new)（若 checker-lib 纯净则新建，I/O 与纯判定分离）
+- plugin/scripts/checker-driver-result-ratchet-check.ts (new)（棘轮检查器）
+- plugin/test/outer-anchor-check.test.mjs（迁移测试）
+- plugin/test/load-sensitive-release-check.test.mjs（迁移测试）
+- plugin/test/dead-code-after-return-check.test.mjs（迁移测试）
+- plugin/test/adr016-screen-use-check.test.mjs（迁移测试）
+- plugin/test/checker-driver-result-ratchet-check.test.mjs (new)（棘轮负控制测试）
 - tasks/gap-b4-checker-reuse-driver-result.md（自身）
