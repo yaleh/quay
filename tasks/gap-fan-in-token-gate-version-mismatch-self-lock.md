@@ -39,9 +39,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，版本错位已消）：改了 worker-driver.ts 的任务 fan-in 不再因「守护旧代码」而用旧注入/旧闸（⛔ 仍版本错位 ⇒ 假）。
-- [ ] AC2（能取假，真实穿闸）：真实机械 fan-in 穿真实 token 闸 dry-run 通过（⛔ 只测「注入存在」/fixture-only ⇒ 假，硬规则 4 推论三）。
-- [ ] AC3（能取假，不自锁）：token 闸任务自己的 fan-in 带 token 通过闸（⛔ 自锁 needs-human 再现 ⇒ 假）。
+- [x] AC1（能取假，版本错位已消）：改了 worker-driver.ts 的任务 fan-in 不再因「守护旧代码」而用旧注入/旧闸（⛔ 仍版本错位 ⇒ 假）。
+- [x] AC2（能取假，真实穿闸）：真实机械 fan-in 穿真实 token 闸 dry-run 通过（⛔ 只测「注入存在」/fixture-only ⇒ 假，硬规则 4 推论三）。
+- [x] AC3（能取假，不自锁）：token 闸任务自己的 fan-in 带 token 通过闸（⛔ 自锁 needs-human 再现 ⇒ 假）。
 
 ## Definition of Done
 

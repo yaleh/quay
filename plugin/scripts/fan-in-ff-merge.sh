@@ -70,7 +70,9 @@
 #   fan-in-ff-merge.sh --task <taskId> [--root <repo>] [--merge-target <branch>] [--run-id <runId>]
 #                      [--agent-id <caller-agent-id>] [--suite-capture <file>] [--lock-events <file>]
 #                      [--retry-record <file>] [--escalations <file>] [--lock-wait <secs>]
-#                      [--worktree <path>] [--help]
+#                      [--worktree <path>] [--acquire-workflow-lock [--workflow-lock-token <token>
+#                      [--workflow-lock-token-file <path>]]] [--release-workflow-lock]
+#                      [--workflow-lock-events <file>] [--workflow-lock-hold-max-s <secs>] [--help]
 #
 # Exit codes:
 #   0  ff performed (develop/merge-target fast-forwarded to task/<taskId>)
@@ -108,6 +110,8 @@ acquire_workflow_lock=""
 release_workflow_lock=""
 workflow_lock_events=""
 workflow_lock_hold_max_s=""
+workflow_lock_token=""
+workflow_lock_token_file=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -127,6 +131,8 @@ while [ "$#" -gt 0 ]; do
     --release-workflow-lock) release_workflow_lock="1"; shift ;;
     --workflow-lock-events) workflow_lock_events="$2"; shift 2 ;;
     --workflow-lock-hold-max-s) workflow_lock_hold_max_s="$2"; shift 2 ;;
+    --workflow-lock-token) workflow_lock_token="$2"; shift 2 ;;
+    --workflow-lock-token-file) workflow_lock_token_file="$2"; shift 2 ;;
     *) echo "fan-in-ff-merge: unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -193,6 +199,14 @@ workflow_lock_log="/tmp/fan-in-workflow-lock-${task_id}.log"
 if [ -z "${workflow_lock_hold_max_s}" ]; then
   workflow_lock_hold_max_s="${FANIN_WORKFLOW_LOCK_HOLD_MAX_S:-${FULL_SUITE_LOCK_HOLD_MAX_S:-3600}}"
 fi
+# L1 token gate (gap-fan-in-token-gate-version-mismatch-self-lock): --acquire-workflow-lock requires a
+# worker-driver-injected one-time token ONCE the injection has landed. The driver writes a fresh random
+# token to this per-task file and passes it via --workflow-lock-token; the script validates the two match
+# (fail-closed otherwise). The token file lives next to the other workflow-lock runtime state (the same
+# .quay/ surface as the lock events — gitignored runtime state, ⛔ not part of the clean-tree judgment).
+if [ -z "${workflow_lock_token_file}" ]; then
+  workflow_lock_token_file="${root}/.quay/fan-in-workflow-lock-token-${task_id}.json"
+fi
 
 # The watchdog function (suite-slot-lib.sh spawn_suite_lock_hold_watchdog) — the SAME「持锁进程子进程」
 # pattern the suite lock uses (gap-suite-lock-starvation-long-validation-hold AC1). Sourced best-effort:
@@ -211,6 +225,30 @@ _workflow_watchdog_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/suite-slot
 # which never fail-closes on a long queue wait — the watchdog is what bounds a dead holder's hold, not
 # a timeout (SPEC-suite-lifecycle §1.1: 正确性锁绝不因等待过久而放行).
 if [ "${acquire_workflow_lock}" = "1" ]; then
+  # ── L1 token gate (gap-fan-in-token-gate-version-mismatch-self-lock) ────────────────────────────
+  # --acquire-workflow-lock requires a worker-driver-injected one-time token, but the fail-closed
+  # enforcement is keyed on the injection's presence — the per-task token file. The driver's fresh
+  # mechanical-fan-in process writes the file BEFORE acquire (and passes --workflow-lock-token); a
+  # non-mechanical caller (fan-in-execute workflow subagent / human / agent-written script) never writes
+  # the file nor carries the token ⇒ fail-closed. When the file is ABSENT (transition — the OLD daemon's
+  # in-process fan-in, injection not yet landed), the gate is LENIENT with a distinguishable warning —
+  # this is the mechanical form of 落地顺序「注入先于闸」: the gate's own fan-in can never be rejected by
+  # its own gate before the injection half has landed (⛔ 自锁 needs-human 再现 ⇒ 假). The refusal output
+  # is DISTINCT from the "holder died before acquiring" path and from a killed acquire (exit null) —
+  # each rejection carries the `REJECTED (L1 token gate)` marker (硬规则 3b: 读不懂 ≠ 合格, 拒 ≠ exit null).
+  if [ -f "${workflow_lock_token_file}" ]; then
+    if [ -z "${workflow_lock_token}" ]; then
+      echo "fan-in-ff-merge: workflow-lock acquire REJECTED (L1 token gate) — --workflow-lock-token is required (worker-driver-injected one-time token); refusing a non-mechanical acquire" >&2
+      exit 2
+    fi
+    _wfl_expected_token="$(tr -d '\r\n' < "${workflow_lock_token_file}" 2>/dev/null || true)"
+    if [ -z "${_wfl_expected_token}" ] || [ "${workflow_lock_token}" != "${_wfl_expected_token}" ]; then
+      echo "fan-in-ff-merge: workflow-lock acquire REJECTED (L1 token gate) — --workflow-lock-token does not match the worker-driver-injected one-time token; refusing a non-mechanical acquire" >&2
+      exit 2
+    fi
+  else
+    echo "fan-in-ff-merge: workflow-lock acquire LENIENT (L1 token gate) — token file ${workflow_lock_token_file} absent (injection not yet landed); allowing a pre-injection mechanical acquire" >&2
+  fi
   mkdir -p "$(dirname "${workflow_lock_events}")" 2>/dev/null || true
   if [ -n "${run_id}" ]; then _wfl_run_id_json="\"${run_id}\""; else _wfl_run_id_json="null"; fi
   if [ -n "${agent_id}" ]; then _wfl_agent_id_json="\"${agent_id}\""; else _wfl_agent_id_json="null"; fi

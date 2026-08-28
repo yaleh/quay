@@ -2547,3 +2547,25 @@ test("AC3 (gap-worker-driver-retry-cap-not-wired) — promotion 不回归：同�
   assert.equal(markNeedsHuman, promoMarkNeedsHuman, "AC3: promotion re-exports the SAME markNeedsHuman (⛔ 非平行副本)");
   assert.equal(MAX_FIX_RETRIES_DEFAULT, RETRY_CAP_DEFAULT, "AC3: promotion --max-fix-retries 缺省 = 共享 RETRY_CAP_DEFAULT（单一真相源）");
 });
+
+// ── L1 token gate + 每任务新进程（gap-fan-in-token-gate-version-mismatch-self-lock）────────────────
+// worker-driver 侧两件事：① runMechanicalFanIn 注入一次性 token（写 per-task 数据文件 + acquire 传
+// --workflow-lock-token，注入半）；② 机械 fan-in 每任务起 fresh 进程加载 worktree 的 worker-driver.ts
+// --mechanical-fan-in（每任务新进程，⛔ 旧守护 in-process = 版本错位自锁）。均为结构断言。
+
+test("L1 token gate (gap-fan-in-token-gate-version-mismatch-self-lock) — runMechanicalFanIn 注入一次性 token（acquire 带 --workflow-lock-token + 写 per-task 数据文件）", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  assert.match(src, /--acquire-workflow-lock", "--workflow-lock-token", workflowLockToken, "--workflow-lock-token-file", workflowLockTokenFile\]/, "acquire step injects the one-time token + file path");
+  assert.match(src, /const workflowLockToken = randomUUID\(\)/, "the token is a fresh random UUID per fan-in (one-time, ⛔ 非字面量)");
+  assert.match(src, /fs\.writeFileSync\(workflowLockTokenFile,/, "the driver writes the token to the per-task token file before acquire（注入半）");
+  assert.match(src, /fs\.rmSync\(workflowLockTokenFile, \{ force: true \}\)/, "the token is consumed (rm) after acquire — one-time, ⛔ 可重放");
+});
+
+test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程：finishAsync 调 spawnMechanicalFanIn 加载 worktree 代码（⛔ 不再 in-process）", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "finishAsync spawns a fresh mechanical fan-in process (⛔ in-process runMechanicalFanIn)");
+  assert.match(src, /const entry = path\.join\(opts\.worktree, "plugin", "scripts", "worker-driver\.ts"\)/, "spawnMechanicalFanIn loads the WORKTREE's worker-driver.ts (current code, ⛔ 主检出旧代码)");
+  assert.match(src, /process\.execPath, "--experimental-strip-types", entry,/, "the fresh process is node --experimental-strip-types <worktree>/worker-driver.ts");
+  assert.match(src, /if \(mechanicalFanIn\) \{/, "--mechanical-fan-in CLI mode exists in main()");
+  assert.match(src, /worktree: mechWorktree,/, "--mechanical-fan-in mode passes the worktree to runMechanicalFanIn");
+});
