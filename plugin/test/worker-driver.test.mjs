@@ -99,6 +99,9 @@ import {
   parseMaxRetries,
   acquireFanInWorkflowLock,
   fanInWorkflowLockFile,
+  runMechanicalFanIn,
+  fanInLogFileName,
+  appendFanInTrace,
 } from "../scripts/worker-driver.ts";
 // gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
 // 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
@@ -2602,6 +2605,72 @@ await new Promise(() => {});
     await lock2.release();
   } finally {
     try { driver.kill("SIGKILL"); } catch { /* already dead */ }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── gap-mech-fan-in-log-webui-visible-clickable（AC1）— 机械 fan-in 过程日志 ───────────────────
+// 机械 fan-in 的每一步 trace 持久化到 .quay/fan-in-<task>-<runId>.log（gitignored 运行时日志），
+// 每行 {ts, step, exit, wall_ms, ok}、失败步附 reason。runId 唯一后缀 ⇒ 跨 relaunch 不复用
+// （同 gap-fan-in-suite-log-cross-relaunch-reuse 防护：旧轮内容不残留、新 runId 写新文件）。
+
+test("AC1 (unit) — fanInLogFileName sanitizes runId; appendFanInTrace appends one {ts,step,exit,wall_ms,ok} JSON line per call", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fanin-trace-unit-"));
+  try {
+    const file = path.join(dir, fanInLogFileName("gap-trace-ac1", "wk/prod 123"));
+    assert.equal(path.basename(file), "fan-in-gap-trace-ac1-wk_prod_123.log", "runId sanitized to [A-Za-z0-9_.-] (slash/space → _)");
+    appendFanInTrace(file, { step: "merge-develop", exit: 128, wall_ms: 12, ok: false, reason: "boom" });
+    appendFanInTrace(file, { step: "acquire-workflow-lock", exit: 0, wall_ms: 3, ok: true });
+    const lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.equal(lines.length, 2, "one JSON line per call (append, not overwrite)");
+    for (const ln of lines) {
+      assert.ok("ts" in ln && "step" in ln && "exit" in ln && "wall_ms" in ln && "ok" in ln, `line carries {ts, step, exit, wall_ms, ok} (got ${JSON.stringify(ln)})`);
+    }
+    assert.equal(lines[0].step, "merge-develop");
+    assert.equal(lines[0].exit, 128);
+    assert.equal(lines[0].wall_ms, 12);
+    assert.equal(lines[0].ok, false);
+    assert.equal(lines[0].reason, "boom");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 (integration) — runMechanicalFanIn writes a per-step trace covering the steps up to the first failure; a new runId writes a NEW file (old one untouched)", async () => {
+  const root = makeGitRoot("fanin-trace");
+  const task = "gap-trace-ac1";
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "fanin-wt-"));
+  try {
+    const r1 = await runMechanicalFanIn({ task, worktree, root, runId: "r1" });
+    assert.equal(r1.outcome, "red", "non-git worktree merge fails → red");
+    assert.equal(r1.step, "merge-develop", "first failing step is merge-develop");
+    assert.equal(r1.fanInLog, `fan-in-${task}-r1.log`, "outcome carries the fan-in log file name (A3)");
+
+    const log1 = path.join(root, ".quay", `fan-in-${task}-r1.log`);
+    assert.ok(fs.existsSync(log1), "fan-in trace log exists after a real run");
+    const lines1 = fs.readFileSync(log1, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.ok(lines1.length >= 2, "trace covers acquire + at least the failing merge step");
+    for (const ln of lines1) {
+      assert.ok("step" in ln && "exit" in ln && "wall_ms" in ln && "ok" in ln, `each line carries {step, exit, wall_ms, ok} (got ${JSON.stringify(ln)})`);
+      assert.ok(typeof ln.wall_ms === "number", "wall_ms is a number");
+    }
+    const steps1 = lines1.map((l) => l.step);
+    assert.ok(steps1.includes("acquire-workflow-lock"), "acquire step traced");
+    assert.ok(steps1.includes("merge-develop"), "merge step traced");
+    const mergeLine = lines1.find((l) => l.step === "merge-develop");
+    assert.equal(mergeLine.ok, false, "failing merge step is marked ok=false");
+    assert.ok(typeof mergeLine.reason === "string" && mergeLine.reason.length > 0, "failing step carries a reason");
+
+    // 跨 relaunch：新 runId 写新文件、旧文件不被覆盖。
+    const before = fs.readFileSync(log1, "utf8");
+    const r2 = await runMechanicalFanIn({ task, worktree, root, runId: "r2" });
+    assert.equal(r2.fanInLog, `fan-in-${task}-r2.log`, "second run's outcome carries a distinct file name");
+    const log2 = path.join(root, ".quay", `fan-in-${task}-r2.log`);
+    assert.ok(fs.existsSync(log2), "second run writes a NEW file");
+    assert.notEqual(path.join(root, ".quay", r1.fanInLog), path.join(root, ".quay", r2.fanInLog), "distinct files per runId");
+    assert.equal(fs.readFileSync(log1, "utf8"), before, "old run's file is NOT overwritten by the new runId");
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

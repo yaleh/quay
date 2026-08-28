@@ -61,6 +61,14 @@ packages/quay/plugin/
 **/.quay/fan-in-workflow-lock-events.jsonl
 **/.quay/fan-in-failure-classification.jsonl
 **/.quay/fan-in-workflow-lock-token-*.json
+# gap-mech-fan-in-log-webui-visible-clickable (2026-08-28): the mechanical fan-in process log
+# (.quay/fan-in-<task>-<runId>.log) + its per-run suite log (.quay/fan-in-suite-<task>-<runId>.log) —
+# both runtime state, never git-tracked; a live file here dirtied the checkout and made
+# fan-in-ff-merge refuse the merge-mode ff (unrelated to the blocked task's code). Same gitignored
+# runtime-state family as worker-outcome.jsonl / fan-in-workflow-lock-events.jsonl. The suite log
+# moves from /tmp to .quay/ (durable — /tmp is system-cleanup terrain;本机实测积压 3389 个遗留目录);
+# the bare `*.log` rule above would also match, but an explicit entry documents the intent.
+**/.quay/fan-in-*.log
 # gap-ac134-promotion-outcome-ledger (2026-08-22): the promotion driver's per-task outcome record
 # (.quay/promotion-outcome.jsonl) — runtime state, one line per determination/promotion/fix
 # (manager-phase-goal ### AC134: outer reads it for cross-task promotion-pattern recognition, never
