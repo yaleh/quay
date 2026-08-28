@@ -2,7 +2,7 @@
 id: gap-loop-shipping-ac1b-walk-enoent-race
 title: loop-shipping.test.mjs AC1b walkCorpus 并发修改竞态——并行测试删 tmp 文件致 readFileSync
   ENOENT 崩（suite 假红）
-status: ready
+status: done
 labels:
   - gap
   - defect
