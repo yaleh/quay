@@ -39,5 +39,5 @@ fake suite 替代内嵌真实 512-file suite；AC1-AC4 全勾；`main_phase` 地
 ## Touches
 
 - plugin/test/full-suite-runner.test.mjs（扩展 fakeTestShRecordingArgs 缝，昂贵 e2e AC 用最小 fake suite）
-- plugin/test/fixtures/fake-suite/（假 suite fixture 文件，或复用现有 fake test.sh 机制）
+- plugin/test/fixtures/fake-suite/ (new)（假 suite fixture 文件，或复用现有 fake test.sh 机制）
 - tasks/gap-full-suite-runner-test-mock-embedded-real-suite.md（自身）

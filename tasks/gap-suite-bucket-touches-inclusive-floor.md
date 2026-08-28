@@ -1,7 +1,7 @@
 ---
 id: gap-suite-bucket-touches-inclusive-floor
 title: bucket 选择强制包含任务 Touches 测试文件——改了测试必须跑它（不依赖归因判定）；否则「改了测试文件但 fan-in 不跑」结构上可能
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -41,3 +41,9 @@ bucket 选择强制包含任务 Touches 的测试文件；非测试条目不并�
 - plugin/scripts/suite-bucket-select.ts（选中集并入 Touches 测试文件）
 - plugin/test/suite-bucket-select.test.mjs（Touches 并入 + 负控制测试）
 - tasks/gap-suite-bucket-touches-inclusive-floor.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T11:02:48.473Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

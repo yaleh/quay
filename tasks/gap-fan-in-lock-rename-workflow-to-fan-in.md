@@ -23,6 +23,8 @@ extra:
 
 **⛔ 非关键路径**：不加 `delivery-critical`，**在机械 fan-in 首绿后落地**（`extra.defer` 已标），不与关键路径（force-color/silence-watchdog/version-mismatch）争派发。
 
+**⛔ 时序（2026-08-28 补）**：锁改名须排在 `gap-adr034-fan-in-lock-holder-supervised`（ADR-034，P1，重设计 acquire/释放路径）落地**之后**——两任务改同一文件（fan-in-ff-merge.sh / worker-driver.ts），先改名后改机制会双重复用冲突；且 Plan#3 改的双副本 fan-in-execute.js 须在 SPEC P3（`gap-execution-loop-productization-p2-p4`，删除双副本）之前完成。
+
 ## Plan
 
 1. 标识符全量改名（锁名/flag/文件路径/事件文件/tmp 组/注释日志），⛔ 不做一半。
