@@ -48,10 +48,8 @@ export const SUITE_RESULTS_DIR_REL = path.posix.join(".quay", "suite-results");
 export const INTERVAL_MS_DEFAULT = 1000;
 
 /** 静默挂死阈值缺省（毫秒）：活着但无输出 ≥N 秒 ⇒ 判挂死。与 full-suite-runner 的 SUITE_SILENCE_MS
- *  同族；测试经 --silence-timeout-ms 或 env QUAY_TEST_SUITE_DRIVER_SILENCE_MS 传小值。
- *  ⚠️ 2026-08-28 止血（AC65 stop-loss）：15→60min，压住「启动/加载段静默 >15min 被误杀」的零落地
- *  红循环。数字是止血非结论，真修 = 心跳 + CPU 推进（gap-mech-fan-in-suite-silence-watchdog-fired）。 */
-export const SILENCE_MS_DEFAULT = Number(process.env.QUAY_TEST_SUITE_DRIVER_SILENCE_MS ?? 60 * 60_000);
+ *  同族（15 分钟）；测试经 --silence-timeout-ms 或 env QUAY_TEST_SUITE_DRIVER_SILENCE_MS 传小值。 */
+export const SILENCE_MS_DEFAULT = Number(process.env.QUAY_TEST_SUITE_DRIVER_SILENCE_MS ?? 15 * 60_000);
 
 /** 静默检测粒度（毫秒）：wait 循环里每隔这么长看一眼日志 mtime / 子进程存活。 */
 export const SILENCE_POLL_MS = 1000;
