@@ -2376,7 +2376,9 @@ export async function run(argv: string[]): Promise<number> {
   // record 0 — the #684/#685 regression). Strip ANSI CSI before matching (the same ANSI_CSI_RE
   // pane-state-classify.ts uses) so colorized AND plain summary lines both parse. The stripped
   // `summaryLine` feeds EVERY `^[#ℹ]` summary regex in onLine — the pass/fail/cancelled tallies
-  // below AND the testsSeen/cancelledSeen parses further down (same family, same file — 5b).
+  // below AND the testsSeen/cancelledSeen parses further down AND runner-red-parse.ts's
+  // `^[#ℹ]\s*(fail|cancelled)\s+[1-9]` red-detection patterns (isFailureLine/gateScanCause below —
+  // the same family, extracted to runner-red-parse.ts by gap-ac128-hub-split-harness-concerns, 5b).
   const ANSI_CSI_RE = /\x1B\[[0-9;]*[A-Za-z]/g;
   // gap-verification-round-reason-self-contradiction — set when a GATE/SCAN failure line (a subset of
   // FAILURE_PATTERNS: __PERFILE__ passed=false / tmux-leak-scan: FAIL) flipped red. Distinct from
@@ -2719,12 +2721,12 @@ export async function run(argv: string[]): Promise<number> {
     const cancelledMatch = /^[#ℹ]\s*cancelled\s+(\d+)/.exec(summaryLine);
     if (cancelledMatch) cancelledSeen = Number(cancelledMatch[1]);
     lastOutputAt = Date.now(); // silence guard: any suite output (even a failure line) proves liveness
-    if (isFailureLine(line)) {
+    if (isFailureLine(summaryLine)) {
       // gap-verification-round-reason-self-contradiction — record the gate/scan identity (if this
       // line is a __PERFILE__ passed=false / tmux-leak-scan: FAIL subset pattern) so the round
       // record can name WHICH gate failed when fail=0. First-wins (a round that hits both keeps the
       // first cause — the round record names one gate).
-      if (!redGateCause) redGateCause = gateScanCause(line);
+      if (!redGateCause) redGateCause = gateScanCause(summaryLine);
       // manager 2026-08-10 15:2x (failures[] structurally capped at 1): redFailures.push used to sit
       // inside the !redDetected guard, so after the FIRST failure line flipped redDetected=true, every
       // subsequent failure line was skipped — a round's record named only 1 of its N failures (r240
@@ -2767,7 +2769,7 @@ export async function run(argv: string[]): Promise<number> {
       // which test failed is already known) + open a short detail lookahead for the file context.
       // A file on the failure line itself (vitest `❯ <file>` / `test at <file>`) is captured now;
       // TAP detail-block files are captured by the lookahead.
-      const failure: SuiteFailure = enrichFailure({ line, file: extractFailureFile(line, root) });
+      const failure: SuiteFailure = enrichFailure({ line: summaryLine, file: extractFailureFile(summaryLine, root) });
       if (redFailures.length < MAX_RECORDED_FAILURES) redFailures.push(failure);
       pendingFailure = failure;
       detailRemaining = 15;
