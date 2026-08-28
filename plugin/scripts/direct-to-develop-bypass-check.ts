@@ -198,6 +198,13 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "非偷懒绕过 fan-in，不属于 detector 要抓的那一类。manager 2026-08-15 裁定 ruled one-off（形态=ruled 豁免+定案理由，非 AC65 sha 表）",
   },
   {
+    sha: "6c46304b7",
+    reason:
+      "manager 2026-08-28 裁定（用户「暂停 driver、在当前会话持续修」直接指令）：HOLDS_SLOT 自锁根因修复直接落地 develop（suite-driver.ts spawnSuiteAndWait 强制注入 QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT=1，自 watchdog-fired 分支 931fdc4dd）。" +
+      "非偷懒绕过 fan-in——机械 fan-in 因该缺 env 自锁、suite 步 100% 红，修复只能直落 develop（机械路径跑自己的 suite 就自锁，无法自落地）；" +
+      "形态=ruled 豁免+定案理由（先例 cddc55e2），落地后经正常 fan-in 验证，同类写不再发生。",
+  },
+  {
     sha: "f9577da1",
     reason:
       "inner AC81 锚重建（OOM 死会话 ff96ad7e → 0ccb57cf）——CronList 为空判据① 假，按 AC81 清扫重建；" +
