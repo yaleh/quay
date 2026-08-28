@@ -26,7 +26,7 @@ usage 但 exit 2（2/14）       会被 harness 当失败
 
 ## Plan
 
-全量 `.ts` checker（77 个）的 `--help` 统一到「用法在前、退出 0、无业务副作用」契约（优先让它们走 `gate-script-base.parseArgs`）；先修有副作用/有害的那几个（measure-trend-check 有副作用、2 个 exit 2 被当失败、2 个拒绝、5 个静默跑）。⛔ 逐个修，不假设全部同构。
+全量 `.ts` checker（77 个，即 `plugin/scripts/*-check.ts`）的 `--help` 统一到「用法在前、退出 0、无业务副作用」契约（优先让它们走 `gate-script-base.parseArgs`）；先修有副作用/有害的那几个（measure-trend-check 有副作用、2 个 exit 2 被当失败、2 个拒绝、5 个静默跑）。⛔ 逐个修，不假设全部同构。契约测试放 `plugin/test/help-contract-incompatible-behaviors.test.mjs`（--help 前后 mtime 集合零变化负控制）。
 
 ## Acceptance Criteria
 
@@ -40,6 +40,6 @@ usage 但 exit 2（2/14）       会被 harness 当失败
 
 ## Touches
 
-- plugin/scripts/（77 个 .ts checker 的 --help 契约统一，重点 measure-trend-check / ready-pool-check / anti-drift-touches-check / landing-target / strategic-doc-staleness / task-status-drift / trend-check）
-- plugin/test/（--help 无副作用契约测试）
+- plugin/scripts/*-check.ts（77 个 .ts checker 的 --help 契约统一，重点 measure-trend-check / ready-pool-check / anti-drift-touches-check / landing-target / strategic-doc-staleness / task-status-drift / trend-check——均被本 glob 覆盖）
+- plugin/test/help-contract-incompatible-behaviors.test.mjs (new)（--help 无副作用契约测试）
 - tasks/gap-help-contract-incompatible-behaviors.md（自身）

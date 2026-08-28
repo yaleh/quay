@@ -24,7 +24,7 @@ test-impl-census-check.ts               glob 匹配路径 ← 偏离
 
 ## Plan
 
-抽 `canonicalTestFiles` 公共库（单一来源），采用 realpath 语义（与 shell 正本一致）；3 个 checker 改为 import 公共库，删各自拷贝；补负控制 fixture（符号链接在其目标之前被 glob 到），断言抽库前后行为一致（realpath 语义）。
+抽 `canonicalTestFiles` 公共库（单一来源，放 `plugin/scripts/canonical-test-files.ts`），采用 realpath 语义（与 shell 正本一致）；3 个 checker（test-group-downgrade-check / test-framework-policy-check / test-impl-census-check）改为 import 公共库，删各自拷贝；补负控制 fixture（符号链接在其目标之前被 glob 到，测试放 `plugin/test/canonical-test-files-symlink-order.test.mjs`），断言抽库前后行为一致（realpath 语义）。⛔ 新建文件按上述命名落地，不另取名。
 
 ## Acceptance Criteria
 
@@ -38,6 +38,9 @@ test-impl-census-check.ts               glob 匹配路径 ← 偏离
 
 ## Touches
 
-- plugin/scripts/（canonicalTestFiles 公共库 + 3 checker 迁移）
-- plugin/test/（symlink 顺序负控制 fixture）
+- plugin/scripts/canonical-test-files.ts (new)（canonicalTestFiles 公共库，realpath 语义）
+- plugin/scripts/test-group-downgrade-check.ts（迁移到公共库）
+- plugin/scripts/test-framework-policy-check.ts（迁移到公共库）
+- plugin/scripts/test-impl-census-check.ts（迁移到公共库）
+- plugin/test/canonical-test-files-symlink-order.test.mjs (new)（symlink 顺序负控制 fixture）
 - tasks/gap-canonical-test-files-glob-vs-realpath-divergence.md（自身）

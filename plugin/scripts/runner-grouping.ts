@@ -71,7 +71,24 @@ check_group_declarations() {
   # stdout is redirected to stderr: this function also runs in the metadata modes
   # (--list-groups/--list-files) whose stdout IS the data (file list / group counts) — a checker
   # line leaking into it would be miscounted as a test file (test-coverage-check AC5 423 vs 421).
-  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-group-downgrade-check.ts" --root "${repo_root}" >&2 || exit
+  # Exit-code split (2026-08-28, list-files=0 CI root cause): the guard's 1 = downgrade found →
+  # HARD block; 2 = NOT-EVALUATED (enforcement baseline missing in a shallow/partial checkout) →
+  # warn-but-continue. Conflating the two (the old bare `|| exit`) made a shallow clone kill
+  # --list-files/--list-groups with EMPTY output, which broke test-coverage-check --selftest AC5
+  # (canonical=540 list-files=0) — and more importantly hid the guard's own can't-evaluate state
+  # behind a generic non-zero exit instead of the visible NOT-EVALUATED message (硬规则 3b).
+  # ⛔ errexit-safe: test.sh runs `set -euo pipefail`, so the guard call MUST capture its exit
+  # code without letting a non-zero result abort the script (a bare call would exit the script on
+  # the guard's exit 2 before the rc check runs). ⛔ NOT the pipe-ampersand rc-capture spelling
+  # (instrument-failure-check FAMILY-3 fires on it); the if/else form below is both errexit-safe
+  # and FAMILY-3-clean.
+  local dg_rc=0
+  if node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-group-downgrade-check.ts" --root "${repo_root}" >&2; then
+    :
+  else
+    dg_rc=$?
+  fi
+  if [ "$dg_rc" -eq 1 ]; then exit 1; fi
 }
 
 # build_deduped_files — deliberately STAYS in scripts/test.sh (NOT moved here): its `local glob=(...)`

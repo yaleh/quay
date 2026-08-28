@@ -10,7 +10,7 @@ children: []
 extra:
   schema: execution
   depends_on:
-    - gap-fan-in-ff-merge-token-gate-fail-closed
+    - gap-execution-loop-productization-p2-p4
 ---
 **type:** execution
 
@@ -20,7 +20,7 @@ fan-in workflow 退役后的防回归（人裁定迁移序 L3）：
 1. **retirement checker**（`gate-scripts-retirement` 同模式）：断言 `.claude/workflows/fan-in-execute.js` + `plugin/workflows/fan-in-execute.js` 两路径不存在 + 引用面归零（归档白名单除外）。
 2. **套件红灯**：lock-events 出现非 `wk-prod-` 前缀 acquire 即红——能取假判据（出现即假），防旧路径复活；防伪造前缀靠 L1 token 闸，两者分级明确。
 
-**前置（⛔ 硬依赖）**：L1 token 闸落地（`gap-fan-in-ff-merge-token-gate-fail-closed`）。
+**前置（⛔ 硬依赖）**：L1 token 闸落地（随 `gap-execution-loop-productization-p2-p4` AC1 在 TS 模块 ff 入口实现）；AC2（断言双副本不存在）须在 SPEC P3 删除双副本（`gap-execution-loop-productization-p2-p4`）之后才可判。
 
 ## Plan
 
