@@ -47,6 +47,12 @@
 //       [--report-line <text>] [--live-running <id1,id2>] [--task-status-dir <dir>]
 //       [--json] [--help]
 
+// ── path→content 判定形状 (tasks/gap-b5-input-shape-path-to-content) ─────────────────────────────
+// 判定逻辑 = 对【字符串/内容】的纯函数（judgeSlotRefillCanonical / judgeWorktreeVsSubagent /
+// judgeReportLine / judgeC24Retirement / judgeC24Coverage / judgeLiveVsTaskStatus）,
+// I/O（countActiveSubagentTranscripts / readTaskStatuses 读目录）留在薄 main() CLI 壳。
+// 纯函数测试零 spawn 零 mkdtemp 直调（plugin/test/cap-counts-subagents-check.test.mjs）。
+
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
