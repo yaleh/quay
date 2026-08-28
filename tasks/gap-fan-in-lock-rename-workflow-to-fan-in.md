@@ -33,10 +33,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，锁名已改）：`fan-in-ff-merge.sh --help` 无 `workflow` 字样（⛔ 仍含 workflow ⇒ 假）。
-- [ ] AC2（能取假，checker 读新路径绿）：三个 checker 读新事件文件路径且绿（⛔ 读旧路径/红 ⇒ 假）。
-- [ ] AC3（能取假，双副本一致）：plugin/.claude 两 fan-in-execute.js 字节一致（⛔ 不一致 ⇒ 假）。
-- [ ] AC4（能取假，两路径同锁）：机械 + workflow 兜底两路径仍能 acquire 同一 `fan-in.lock`（⛔ 拆成两锁/竞态 ⇒ 假）。
+- [x] AC1（能取假，锁名已改）：`fan-in-ff-merge.sh --help` 无 `workflow` 字样（⛔ 仍含 workflow ⇒ 假）。
+- [x] AC2（能取假，checker 读新路径绿）：三个 checker 读新事件文件路径且绿（⛔ 读旧路径/红 ⇒ 假）。
+- [x] AC3（能取假，双副本一致）：plugin/.claude 两 fan-in-execute.js 字节一致（⛔ 不一致 ⇒ 假）。
+- [x] AC4（能取假，两路径同锁）：机械 + workflow 兜底两路径仍能 acquire 同一 `fan-in.lock`（⛔ 拆成两锁/竞态 ⇒ 假）。
 
 ## Definition of Done
 
@@ -54,4 +54,9 @@ extra:
 - plugin/test/fan-in-workflow-lock.test.mjs（锁文件名/flag 断言）
 - plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（机械 acquire 新锁名）
 - plugin/test/fan-in-ff-protocol-check.test.mjs（checker 新路径）
+- plugin/test/worker-driver.test.mjs（import/调用 acquireFanInLock + fanInLockFile 同步改名）
+- plugin/test/resource-gate.test.mjs（注释：fan-in lock prose）
+- plugin/test/fan-in-execute-paths.test.mjs（注释：step 0.5 获取 fan-in 锁 prose）
+- plugin/scripts/suite-slot-lib.sh（注释：timer-cut=0 的 fan-in lock prose）
+- .gitignore（事件文件 + token flag 组路径改名）
 - tasks/gap-fan-in-lock-rename-workflow-to-fan-in.md（自身）

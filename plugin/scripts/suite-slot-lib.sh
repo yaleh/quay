@@ -111,7 +111,7 @@ suite_slot_paths() {
 # shares the same open-file-description lock), or (c) after <hold-max-s> seconds of the holder STILL
 # holding, releases the slot + emits a fail-loud `lock_hold_exceeded=1` marker (never silent). Path (c)
 # is the long-validation YIELD and fires ONLY when `timer-cut` is "1" (the default, used by the SUITE
-# lock — its cap is the 5.2h validation run). Pass `timer-cut=0` for the FAN-IN workflow lock
+# lock — its cap is the 5.2h validation run). Pass `timer-cut=0` for the fan-in lock
 # (gap-full-suite-lock-hold-watchdog-threshold-shorter-than-fan-in): its hold = merge→suite→ff, which
 # legitimately exceeds any fixed timer, so path (c) must never cut it — dead-holder release (b) is the
 # only guard (a crash closes the flock fd; a hung suite is SIGKILL'd by the runner's silence watchdog,
@@ -123,7 +123,7 @@ spawn_suite_lock_hold_watchdog() {
   local _fd="$1" _flag="$2" _main_pid="$3" _max_s="$4" _timer_cut="${5:-1}"
   (
     if [ "${_timer_cut}" != "1" ]; then
-      # Dead-holder-only mode (fan-in workflow lock): poll for (a) normal release or (b) crash, but
+      # Dead-holder-only mode (fan-in lock): poll for (a) normal release or (b) crash, but
       # NEVER time a live holder out — path (c) is disabled (the fan-in hold = merge→suite→ff outlives
       # any fixed timer; cutting it mid-suite makes the ff run lock-less, re-exposing ff-race).
       while :; do

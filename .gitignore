@@ -52,15 +52,15 @@ packages/quay/plugin/
 # outer reads it for cross-task checks, never git-tracked). Same gitignored runtime-state family as
 # gate-events.jsonl / dispatch-record.jsonl.
 **/.quay/worker-outcome.jsonl
-# gap-fan-in-workflow-lock-stale-runid-detached-holder (2026-08-28): the fan-in workflow lock's
-# acquire/release event ledger (.quay/fan-in-workflow-lock-events.jsonl) + the fan-in lock's token
-# flag (.quay/fan-in-workflow-lock-token-*.json) + manager's fan-in failure classification
+# gap-fan-in-workflow-lock-stale-runid-detached-holder (2026-08-28): the fan-in lock's
+# acquire/release event ledger (.quay/fan-in-lock-events.jsonl) + the fan-in lock's token
+# flag (.quay/fan-in-lock-token-*.json) + manager's fan-in failure classification
 # (.quay/fan-in-failure-classification.jsonl) — all runtime state, never git-tracked; a live file
 # here dirtied the checkout and made fan-in-ff-merge refuse the merge-mode ff (unrelated to the
 # blocked task's code). Same gitignored runtime-state family as worker-outcome.jsonl / gate-events.jsonl.
-**/.quay/fan-in-workflow-lock-events.jsonl
+**/.quay/fan-in-lock-events.jsonl
 **/.quay/fan-in-failure-classification.jsonl
-**/.quay/fan-in-workflow-lock-token-*.json
+**/.quay/fan-in-lock-token-*.json
 # gap-ac134-promotion-outcome-ledger (2026-08-22): the promotion driver's per-task outcome record
 # (.quay/promotion-outcome.jsonl) — runtime state, one line per determination/promotion/fix
 # (manager-phase-goal ### AC134: outer reads it for cross-task promotion-pattern recognition, never

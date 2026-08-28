@@ -97,8 +97,8 @@ import {
   taskBranchHasCommits,
   isSigtermExitCode,
   parseMaxRetries,
-  acquireFanInWorkflowLock,
-  fanInWorkflowLockFile,
+  acquireFanInLock,
+  fanInLockFile,
 } from "../scripts/worker-driver.ts";
 // gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
 // 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
@@ -2551,19 +2551,19 @@ test("AC3 (gap-worker-driver-retry-cap-not-wired) — promotion 不回归：同�
 });
 
 // ── gap-adr034-fan-in-lock-holder-supervised（ADR-034）— driver 死（SIGKILL）→ 锁自动释放 ──────────
-// fan-in workflow 锁的持锁者由「分离 holder + flag 释放协议」（fan-in-ff-merge.sh --acquire/--release-
-// workflow-lock 的 setsid & disown）收进 driver：worker-driver.ts 经非分离直接子进程持锁，锁的生死 =
-// 工作的进程生死。本测试负控制：spawn 一个「driver」子进程经 acquireFanInWorkflowLock 持锁 → 独立
+// fan-in 锁的持锁者由「分离 holder + flag 释放协议」（fan-in-ff-merge.sh --acquire/--release-
+// fan-in-lock 的 setsid & disown）收进 driver：worker-driver.ts 经非分离直接子进程持锁，锁的生死 =
+// 工作的进程生死。本测试负控制：spawn 一个「driver」子进程经 acquireFanInLock 持锁 → 独立
 // flock -n 竞争者确认被挡 → SIGKILL driver → 内核关 stdin 写端 ⇒ holder 写 release + flock -u 退出 ⇒
 // 锁自动释放（flock -n 成功 + holder 进程死、无 PPID=1 持锁孤儿）→ 新 driver 可再 acquire 同一锁。
 
 test("AC1/AC5 (gap-adr034-fan-in-lock-holder-supervised) — driver 死（SIGKILL）→ flock 自动释放；无孤儿 holder 挡排队 acquire", async () => {
   const root = makeGitRoot("adr034-lock");
   const task = "gap-adr034-holder";
-  const lockFile = fanInWorkflowLockFile(root);
+  const lockFile = fanInLockFile(root);
   const holdScript = `
-import { acquireFanInWorkflowLock } from ${JSON.stringify(pathToFileURL(DRIVER).href)};
-const lock = await acquireFanInWorkflowLock({ root: ${JSON.stringify(root)}, task: ${JSON.stringify(task)}, runId: "r1" });
+import { acquireFanInLock } from ${JSON.stringify(pathToFileURL(DRIVER).href)};
+const lock = await acquireFanInLock({ root: ${JSON.stringify(root)}, task: ${JSON.stringify(task)}, runId: "r1" });
 console.log("HELD " + lock.holderPid);
 await new Promise(() => {});
 `;
@@ -2597,7 +2597,7 @@ await new Promise(() => {});
     }, 15000);
 
     // 新 driver 能再 acquire 同一锁并干净 release（端到端「重启不残留」）。
-    const lock2 = await acquireFanInWorkflowLock({ root, task: "gap-adr034-holder", runId: "r2" });
+    const lock2 = await acquireFanInLock({ root, task: "gap-adr034-holder", runId: "r2" });
     assert.ok(Number.isInteger(lock2.holderPid) && lock2.holderPid > 0, "a fresh acquire after restart must succeed (no orphan holder blocking)");
     await lock2.release();
   } finally {

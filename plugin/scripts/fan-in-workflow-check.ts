@@ -165,7 +165,7 @@ export const RULED_HISTORICAL_GAPS: { taskId: string; reason: string }[] = [
     taskId: "gap-adr034-fan-in-lock-holder-supervised",
     reason:
       "manager 2026-08-28 授权的一次性机械 fan-in——driver 无法 fan-in 自己的锁重设计（旧 driver 仍调已被 " +
-      "ADR-034 废除的 --acquire-workflow-lock ⇒ 版本不匹配自锁，fan-in 首步 unknown arg 红），只能由 worktree " +
+      "ADR-034 废除的 --acquire-fan-in-lock ⇒ 版本不匹配自锁，fan-in 首步 unknown arg 红），只能由 worktree " +
       "新 worker-driver.ts import runMechanicalFanIn 驱动落地。runId oneoff-adr034-*（不被 isMechanicalRunId 认），" +
       "未走 fan-in-execute workflow + 未传 --agent-id（锁事件 agentId=null，8 条 acquire/release 对 11:45-12:19Z）。" +
       "该形态是 ADR-034 落地的唯一可行路径，随 driver 重启用新代码正常派发（机械 fan-in，wk-prod-* runId）后不再发生。 " +
