@@ -40,7 +40,7 @@ extra:
 - [x] AC3（能取假，不阻塞派发）：持锁不阻塞 driver 异步派发（⛔ 同步阻塞 ⇒ 假）。
 - [x] AC4（能取假，无时间阈值）：锁路径无 hold-max/TTL/stale 阈值（⛔ 引入时间阈值 ⇒ 假）。
 - [x] AC5（能取假，重启不残留孤儿持锁）：driver 重启后，排队中的 fan-in ff 不被孤儿 holder 阻塞——模拟 acquire 后 driver 被杀/重启，重启后某任务仍能 acquire 同一锁并完成 ff；进程树无 PPID=1 的持锁 bash（⛔ 重启后孤儿 holder 仍持锁挡排队 ff ⇒ 假）。（补：第二次同形事件 09:00-09:32 孤儿 holder 持锁 52 分钟挡 6 个 ff——AC1 验「driver 死锁随释放」但 flock fd 在孤儿 holder 手里不在 driver，AC1 与本次缺陷正交；本 AC 验端到端重启不残留。）
-- [ ] AC6（能取假，生产观测，待外部）：落地后真实生产 fan-in 全程无孤儿 holder——从本任务落地时刻起，worker-outcome 无「孤儿持锁」类失败、lock-events 无跨重启存活的 acquire（⛔ 用 fixture/注入数据满足 ⇒ 假；⛔ 计落地前历史 ⇒ 假）。（待外部：需真实多任务 fan-in 生产观测，非测试可造。）
+- [ ] AC6（能取假，生产观测，待外部）：落地后真实生产 fan-in 全程无孤儿 holder——从本任务落地时刻起，worker-outcome 无「孤儿持锁」类失败、lock-events 无跨重启存活的 acquire（⛔ 用 fixture/注入数据满足 ⇒ 假；⛔ 计落地前历史 ⇒ 假）（待外部）
 
 ## Definition of Done
 
