@@ -77,7 +77,7 @@ extra:
 - [x] AC5（能取假，激活已做）：主检出停 main/manager-doc，develop 未检出，ff dual-mode 走 push-mode（⛔ 主检出仍停 develop ⇒ 假）。**Evidence: main/manager-doc 已激活，f0d11209a 同步**
 - [x] AC6（能取假，翻转传播已实现）：promotion 翻转 commit 到 main/manager-doc 后自动 push 到 develop（⛔ 翻转滞留工作分支 ⇒ 假）。**Evidence: ready-pool-check propagateDocBranchToDevelop，f0d11209a + 本任务新增传播测试（ff / non-ff reconcile），119/119 ready-pool 绿**
 - [x] AC7（能取假，反向同步）：每次落地后 develop merge 进 main/manager-doc（⛔ 主检出滞后 develop ⇒ computeLandingState 假 not-landed）。**Evidence: worker-driver syncDocBranchToDevelop（landing 后 merge develop 进 doc 分支），27aa6faa5 + 本任务新增反向同步测试，92/92 worker-driver 绿**
-- [ ] AC8（能取假，激活端到端验证）：完整自主闭环 ≥1 任务落地且 computeLandingState 绿（⛔ 闭环中断 ⇒ 假）。**未验证——待生产闭环落地 ≥1 任务后确认**（待外部）
+- [x] AC8（能取假，激活端到端验证）：完整自主闭环 ≥1 任务落地且 computeLandingState 绿（⛔ 闭环中断 ⇒ 假）。**Evidence: 生产闭环已跑通 ≥1 任务——gap-b5-input-shape-path-to-content 机械 fan-in 落地（worker-outcome `final_state=completed` + `mechanical_fan_in.outcome=landed` + `suiteOutcome=done`，landedSha=318390290=develop「翻 gap-b5…done（driver 机械 fan-in）」15:01:56Z）；`completed` ⟺ `landed===true` ⟺ computeLandingState verified（computeOutcome 只在 landed!==true 时降 exited-not-landed）；反向同步 1c483d387「Merge develop into main/manager-doc」15:24:00Z（landing 后）**
 
 ## Definition of Done
 
