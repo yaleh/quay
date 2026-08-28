@@ -56,6 +56,12 @@
 //
 // Exit: 0 = PASS / measure; 1 = gate FAIL (>=1 violation); 2 = usage/env error.
 
+// ── path→content 判定形状 (tasks/gap-b5-input-shape-path-to-content) ─────────────────────────────
+// 判定逻辑 = 对【字符串/内容】的纯函数（scanText(rel, src)——逐条命中分类 定义点/已声明例外/违规,
+// stringLiteralSpans / scanSystemdRunLimitCpuQuota）, I/O（scanSurface/scanFiles 走树读文件）
+// 留在薄 main() CLI 壳。纯函数测试零 spawn 零 mkdtemp 直调
+// （plugin/test/concurrency-literal-check.test.mjs）。
+
 import fs from "node:fs";
 import path from "node:path";
 import { buildNonCodeMask, isRegexStart } from "./checker-lib.ts";
