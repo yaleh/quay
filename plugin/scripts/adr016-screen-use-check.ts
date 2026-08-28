@@ -43,6 +43,12 @@
 //   1 = FAIL — a NEW active violation (count > 1)
 //   2 = usage/environment error
 
+// ── path→content 判定形状 (tasks/gap-b5-input-shape-path-to-content) ─────────────────────────────
+// 判定逻辑 = 对【字符串/内容】的纯函数（detectFileViolations / detectTickDocViolations /
+// stripShellComments / extractBashBlocks / judgeBand——输入是文件内容字符串，不是路径）,
+// I/O（走树、读文件）留在薄 main() CLI 壳。纯函数测试零 spawn 零 mkdtemp 直调
+// （plugin/test/adr016-screen-use-check.test.mjs）。
+
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -305,6 +311,14 @@ export function scanForScreenHashViolations(root: string): ScanResult {
   return { violations, retired, files };
 }
 
+/** Pure band judgment (path→content, gap-b5): the whole-screen-hash band is 0..1 ACTIVE violations
+ * (one legacy observer tolerated); a count above 1 is a NEW active violation. PURE over the count —
+ * the same threshold main() applies, exported so the test can assert it without spawning the CLI. */
+export function judgeBand(activeCount: number): { inBand: boolean; verdict: "PASS" | "FAIL" } {
+  const inBand = activeCount <= 1;
+  return { inBand, verdict: inBand ? "PASS" : "FAIL" };
+}
+
 /** Pure RED/GREEN selftest (ADR-018 selfcheck-fixture pattern). */
 export function selftest(): boolean {
   let pass = 0;
@@ -373,7 +387,7 @@ function usage(): never {
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--selftest")) {
-    process.exit(selftest() ? 0 : 1);
+    return selftest() ? 0 : 1;
   }
   const asJson = args.includes("--json");
   const rootArg = args.indexOf("--root");
@@ -381,12 +395,12 @@ export function main(argv: string[]): number {
 
   if (!fs.existsSync(root)) {
     console.error(`ERROR: scan root not found: ${root}`);
-    process.exit(2);
+    return 2;
   }
 
   const { violations, retired, files } = scanForScreenHashViolations(root);
   const active = violations.length;
-  const inBand = active <= 1;
+  const { inBand } = judgeBand(active);
 
   if (asJson) {
     console.log(JSON.stringify({ ok: inBand, violations: active, active: violations, retired, files_scanned: files.length }, null, 2));
