@@ -41,6 +41,7 @@
 // the shrink-only ratchet blocking behavior for direct invocation / maintenance / mutation tests.
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -59,17 +60,6 @@ import { extractTouchesSection, flagBareDirUncertainTouches } from "./touches-pa
 // `N 条`+verb declaration heuristic — NOT a second, independently-buggy parser.
 import { checkWiringClaimAcProbe } from "./wiring-coverage-check.ts";
 
-// ── Workspace-root discovery ─────────────────────────────────────────────────────────────────────────
-export function findWorkspaceRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 12; i++) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
-}
 
 // ── Consumer checks (read content, match by declared position) ───────────────────────────────────────
 
@@ -550,7 +540,7 @@ export function runCli(argv) {
     console.error("task-contract-check: --reset-baseline requires --write-ratchet (it is the write that re-anchors the ceiling)");
     process.exit(2);
   }
-  const wsRoot = root ? path.resolve(root) : findWorkspaceRoot();
+  const wsRoot = root ? path.resolve(root) : repoRoot();
   const tasksDir = path.join(wsRoot, "tasks");
   const scanFiles = files.length > 0 ? files.map((f) => path.resolve(wsRoot, f)) : [];
   if (scanFiles.length === 0 && !fs.existsSync(tasksDir)) {

@@ -36,7 +36,6 @@ import {
 import {
   scanTaskText,
   hasThresholdMarker,
-  findWorkspaceRoot,
   readRatchet,
   writeRatchet,
   invokeEntryPath,
@@ -49,6 +48,7 @@ import {
   DOD_SUITE_LINE_BASELINE_REL,
   WIRING_CLAIM_AC_PROBE_BASELINE_REL,
 } from "../scripts/task-contract-check.ts";
+import { repoRoot } from "../scripts/repo-root.ts";
 import { checkWiringClaimAcProbe } from "../scripts/wiring-coverage-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -822,11 +822,11 @@ test("CLI --no-block + strict-subset: a touched task's violation is REPORTED + l
   assert.match(r.stdout, /recorded \(non-blocking, grow-only ledger\)/);
 });
 
-test("findWorkspaceRoot walks up to .git", () => {
+test("repoRoot walks up to .git", () => {
   const root = makeGitRoot("rootwalk");
   const sub = path.join(root, "a", "b");
   fs.mkdirSync(sub, { recursive: true });
-  assert.equal(findWorkspaceRoot(sub), root);
+  assert.equal(repoRoot(sub), root);
 });
 
 // ── Check 8: wiring/reachability-declaring AC must name a real input probe (gap-wiring-claim-ac-requires-real-input-probe) ──

@@ -90,6 +90,7 @@
 // (gap-fixed-cap-5-dynamic-cap-retired). Exit 0 always (a detector/recommender, not a gate).
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
@@ -148,16 +149,6 @@ export interface CapState {
 }
 export interface BudgetSnapshot { total_budget: number; in_use: number; available: number; }
 
-function findRepoRoot(startDir: string): string {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  throw new Error("Cannot find repo root: no .quay/config.yml found upward from " + startDir);
-}
 
 /** Parse the config.yml `loop: concurrency_bands:` block. Missing block => DEFAULT_BANDS. */
 export function readBandsFromConfig(configPath: string): BandConfig {
@@ -388,9 +379,9 @@ function main(argv: string[]): number {
       return 2;
     }
   }
-  const repoRoot = root ? path.resolve(root) : findRepoRoot(process.cwd());
+  const resolvedRoot = root ? path.resolve(root) : repoRoot(process.cwd());
   const result = computeEffectiveCap({
-    repoRoot,
+    repoRoot: resolvedRoot,
     stateFile: stateFile ?? undefined,
     samples,
   });

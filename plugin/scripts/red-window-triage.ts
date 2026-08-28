@@ -36,10 +36,11 @@
 // --record-verdict out-of-range index; 2 usage/env error.
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { scanFamily, kindForFile, isFamilyMember, findRepoRoot } from "./known-load-sensitive.ts";
+import { scanFamily, kindForFile, isFamilyMember } from "./known-load-sensitive.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");

@@ -73,6 +73,7 @@
 //   scripts/test.sh plugin/test/threshold-scope-check.test.mjs
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -138,17 +139,6 @@ export const STALE_ANNOT_RE =
 export const STALE_STRONG_ANNOT_RE =
   /(retired|superseded|RETIRED|SUPERSEDED|ADR-022|退役|退休|已退休|已废除|已删除|废除|不可用|已随|作废)/;
 
-// ── Workspace-root discovery (mirrors task-contract-check) ───────────────────────────────────────────
-export function findWorkspaceRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 12; i++) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
-}
 
 // ── File index (for the basename / same-stem-diff-ext layers) ────────────────────────────────────────
 export interface FileIndex {
@@ -499,7 +489,7 @@ export function runCli(argv: string[]): number {
     console.error("threshold-scope-check: --reset-baseline requires --write-ratchet (it is the write that re-anchors the ceiling)");
     return 2;
   }
-  const wsRoot = root ? path.resolve(root) : findWorkspaceRoot();
+  const wsRoot = root ? path.resolve(root) : repoRoot();
   if (!fs.existsSync(wsRoot)) {
     console.error(`threshold-scope-check: scan root not found: ${wsRoot}`);
     return 2;

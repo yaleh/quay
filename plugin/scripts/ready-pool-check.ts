@@ -156,6 +156,7 @@
 // The pure functions are exported and unit-tested; `main()` is a thin CLI over them.
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
@@ -172,7 +173,6 @@ import { recordCheckerCost, getLoad1 } from "./checker-cost.ts";
 import {
   checkTaskTouchesResolve,
   checkTouchesNarrow,
-  findRepoRoot,
   parseTouches,
   checkTouchesPair,
   walkFiles,
@@ -2531,7 +2531,7 @@ function main(argv) {
       process.exit(2);
     }
   }
-  const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
+  const rootDir = root ? path.resolve(root) : repoRoot(process.cwd());
   const readTasks = (ids) => {
     const out = [];
     for (const id of ids) {

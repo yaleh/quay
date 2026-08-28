@@ -46,6 +46,7 @@
 // 2 = usage.
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -217,25 +218,6 @@ export function runRegression(root: string): RegressionResult {
   return { ok: failures.length === 0, failures, details };
 }
 
-// ── Repo-root detection (mirrors select-static-checks-for-touches.ts) ──────────────────────────────
-export function findRepoRoot(startDir: string = __dirname): string {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      encoding: "utf8",
-      timeout: 5_000,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
 
 // ── CLI ────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -283,7 +265,7 @@ function main(argv: string[]): { code: number; json?: unknown } {
     }
   }
 
-  if (!root) root = findRepoRoot();
+  if (!root) root = repoRoot();
   if (!fs.existsSync(path.join(root, "plugin"))) {
     process.stderr.write(`check-set-after-change-check: scan surface plugin/ missing under --root ${root}\n`);
     return { code: 1 };

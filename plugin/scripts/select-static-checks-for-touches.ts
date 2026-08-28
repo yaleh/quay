@@ -38,6 +38,7 @@
 //       [--touches <csv>] [--commands|--names|--list] [--json]
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -160,22 +161,6 @@ export function checkTouchesRegistration(touches, newTouches) {
 
 // ── Repo-root detection (mirrors select-tests-for-touches.ts) ─────────────────────────────────────────
 
-export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
 
 // ── Path helpers ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -762,7 +747,7 @@ export function main(argv) {
   const commandsMode = args.includes("--commands");
   const checkRegOnly = args.includes("--check-registration");
 
-  const root = path.resolve(rootArg ?? findRepoRoot());
+  const root = path.resolve(rootArg ?? repoRoot());
   // --check-registration validates a task's ## Touches authorization — it requires a task id (the
   // --touches CSV mode is a raw file-list with no ## Touches to validate, so it is not a target).
   if (checkRegOnly && !taskId) {

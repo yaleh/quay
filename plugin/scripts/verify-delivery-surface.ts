@@ -37,6 +37,7 @@
 //      orchestration/ + docs/analysis/ present ⇒ laid.)
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -431,31 +432,6 @@ export function manifestsEqual(a: DeliveryCategory[], b: DeliveryCategory[]): bo
 
 // ── Root resolution ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Walk up to the workspace root. Two root shapes are recognized:
- *   - a BUNDLE root (quay's own repo / a task worktree): `package.json` + `plugin/` + `scripts/test.sh`;
- *   - a CONSUMER root (a quay-init --loop target, e.g. a laid-down copy of this script): `package.json`
- *     + `.quay/config.yml` (the consumer's provider map). The consumer never has `scripts/test.sh`.
- *   (`--root <dir>` is the explicit way to point at a target workspace after install.)
- */
-export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))): string {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 12; i++) {
-    const hasPkg = fs.existsSync(path.join(dir, "package.json"));
-    if (hasPkg && fs.existsSync(path.join(dir, "plugin")) && fs.existsSync(path.join(dir, "scripts", "test.sh"))) {
-      return dir;
-    }
-    if (hasPkg && fs.existsSync(path.join(dir, ".quay", "config.yml"))) {
-      return dir;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  throw new Error(
-    "Cannot find bundle or consumer root (package.json + plugin/ + scripts/test.sh, or package.json + .quay/config.yml) upward from " + startDir
-  );
-}
 
 // ── Surface check ───────────────────────────────────────────────────────────────────────────────────
 
@@ -591,7 +567,7 @@ export function main(argv: string[]): number {
   if (inventoryMode || writeInventoryMode) {
     let resolved: string;
     try {
-      resolved = root ? path.resolve(root) : findRepoRoot();
+      resolved = root ? path.resolve(root) : repoRoot();
     } catch (e) {
       console.error(`ERROR: ${(e as Error).message}`);
       return 2;
@@ -638,7 +614,7 @@ export function main(argv: string[]): number {
   }
   let resolved: string;
   try {
-    resolved = root ? path.resolve(root) : findRepoRoot();
+    resolved = root ? path.resolve(root) : repoRoot();
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`);
     return 2;

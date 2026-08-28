@@ -81,6 +81,7 @@
 // The pure functions are exported and unit-tested; main() is a thin CLI over them.
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
@@ -130,7 +131,6 @@ import {
   checkTaskTouchesResolve,
   checkTouchesPair,
   parseTouches,
-  findRepoRoot,
   walkFiles,
   selfTouchCheck,
   normalizePath,
@@ -1439,7 +1439,7 @@ function main(argv) {
     else if (args[i] === "--integration-backlog") integrationBacklog = Number(args[++i]);
     else if (args[i] === "--red-backlog-cap") redBacklogCap = Number(args[++i]);
   }
-  const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
+  const rootDir = root ? path.resolve(root) : repoRoot(process.cwd());
   const tasksDir = path.join(rootDir, "tasks");
   // AC115 RETIREMENT (SPEC §5 阶段 1 退役清单): the CLI no longer passes --in-flight/--closed-but-live/
   // --running id lists NOR measures in-flight from telemetry brackets. In-flight = the driver's direct

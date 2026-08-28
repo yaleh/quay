@@ -56,10 +56,10 @@
 // The pure audit function is exported and unit-tested; `main()` is a thin CLI over it.
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { findRepoRoot } from "./select-tests-for-touches.ts";
 
 // ── Vocabulary (single source for what the audit flags / treats as compliant) ──────────────────────
 
@@ -219,7 +219,7 @@ export function main(argv: string[]): number {
 
   const reports: string[] = [];
   if (gitLog > 0) {
-    const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
+    const rootDir = root ? path.resolve(root) : repoRoot(process.cwd());
     const subjects = execFileSync("git", ["log", "--format=%s", `-${gitLog}`], {
       cwd: rootDir,
       encoding: "utf8",

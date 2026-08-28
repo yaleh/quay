@@ -13,6 +13,7 @@
 // Pure functions are exported and unit-tested; `main()` is a thin CLI over them.
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
@@ -21,7 +22,6 @@ import {
   normalizePath,
   matchGlob,
   checkTouchesPair,
-  findRepoRoot,
 } from "./touches-orthogonality-check.ts";
 // gap-experiment-legacy-reclaim-and-touches-heuristic AC3: when a candidate charter lacks a
 // `## Touches` section, derive a MECHANICAL hint from body prose (derive-touches-heuristic.ts,
@@ -464,7 +464,7 @@ export async function main(argv) {
   for (const f of files) {
     if (!fs.existsSync(f)) { process.stderr.write(`ERROR: charter not found: ${f}\n`); return 2; }
   }
-  const expandRoot = root ? path.resolve(root) : findRepoRoot(path.resolve(path.dirname(files[0])));
+  const expandRoot = root ? path.resolve(root) : repoRoot(path.resolve(path.dirname(files[0])));
   // gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet: eligibility compares DECLARED
   // paths, not the filesystem — a task creating only NEW files must not be judged "matched nothing
   // (likely a typo)". Concrete declared paths resolve to themselves (whether or not they exist yet);

@@ -73,6 +73,8 @@ set -euo pipefail
 # installed target project (the laid-down copy at <workspace>/plugin/scripts/).
 SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 SELF_DIR="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd || true)"
+# Single bash root resolution (SPEC §2.4 B2 repo-root pair — repo-root.sh mirrors repo-root.ts).
+. "${SELF_DIR}/repo-root.sh"
 
 # ── AC5 gate (no command substitution in data values) — fail-fast BEFORE any array ──
 # assignment: a backtick or $( inside a double-quoted data value is EXECUTED by bash during
@@ -1841,7 +1843,7 @@ esac
 # deleted superseded implementation can never silently regrow. Exit 0 = every superseded
 # capability is gone and untaught; 1 = at least one still exists / is still taught.
 if [ "$MODE" = "superseded-check" ]; then
-  REPO_ROOT="$(cd "${SELF_DIR}/../.." 2>/dev/null && pwd || true)"
+  REPO_ROOT="$(repoRoot "${SELF_DIR}")"
   viol=""
   for b in "${!SUPERSEDED[@]}"; do
     stem="${b%.*}"

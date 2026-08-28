@@ -34,34 +34,13 @@
 // Output: `full` (unconditional full suite) or `bucket` (proceed to fan-out — a later concern).
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { extractTouchesSection, parseTouchEntries } from "./touches-parser.ts";
 
-/**
- * Find the workspace root by walking up from `startDir` (`.quay/config.yml` marker), with a git
- * top-level fallback — the same convention as `suite-bucket-attribution.ts` / `select-tests-for-touches.ts`.
- * @param {string} [startDir]
- * @returns {string}
- */
-export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))): string {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
 
 /** The explicit hub-file list (data, not a heuristic). `*` is the only glob metacharacter. */
 export const HUB_FILES: readonly string[] = [
@@ -162,7 +141,7 @@ export function main(argv: string[]): number {
   const args = argv.slice(2);
   const asJson = args.includes("--json");
   const rootArg = getArgValue(args, "--root");
-  const root = path.resolve(rootArg ?? findRepoRoot());
+  const root = path.resolve(rootArg ?? repoRoot());
   const positional = args.filter((a) => !a.startsWith("--") && !["--root", "--task", "--json"].includes(a));
 
   let touched: string[] = [];

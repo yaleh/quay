@@ -33,7 +33,6 @@ import {
   touchesAllExist,
   scanTasks,
   formatJsonReport,
-  findRepoRoot,
   isDistinctiveName,
   parseTouchEntries,
   isBookkeepingTouchEntry,
@@ -59,6 +58,7 @@ import {
   taskIdFromTouches,
   wordMatch,
 } from "../../experiments/quay-perpetual-stream/scripts/task-status-drift-check.ts";
+import { repoRoot } from "../scripts/repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -68,7 +68,7 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 // opt-in via QUAY_TEST_REAL_STORE=1; CI runs only the fast fixture cases by default.
 const REAL_STORE_ENABLED = process.env.QUAY_TEST_REAL_STORE === "1";
 
-// A git-rooted synthetic workspace the CLI can run in (findRepoRoot walks up to `.git`), so the CLI
+// A git-rooted synthetic workspace the CLI can run in (repoRoot walks up to `.git`), so the CLI
 // exit-0 / --json tests scan a tiny fixture store, not the real 553-task store.
 function makeGitWorkspace(tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `drift-cli-${tag}-`));
@@ -427,7 +427,7 @@ test("extractSymbolCandidates: distinctive names yes, generic words / file basen
   // Compound identifiers like `task_write` ARE name-distinctive; the resolve stage's frequency
   // filter (≤8 files) is what keeps over-recurring infrastructure words from resolving.
   assert.ok(cands.includes("task_write"), "task_write is a candidate by name; resolveSymbol freq-filters it");
-  assert.equal(resolveSymbol("task_write", findRepoRoot(process.cwd())), false, "task_write recurs across many files → must not resolve");
+  assert.equal(resolveSymbol("task_write", repoRoot(process.cwd())), false, "task_write recurs across many files → must not resolve");
 });
 
 test("isDistinctiveName: multi-part identifiers only", () => {
@@ -892,8 +892,8 @@ test("--closed-direction: json emits a bare array (jq length counts it); text na
 test("AC2: real store — batch-1 todo tasks (code not landed) are NOT flagged; landed stale tasks ARE",
   { skip: !REAL_STORE_ENABLED && "opt-in with QUAY_TEST_REAL_STORE=1 (scans the real 553-task store, ~47s)" },
   () => {
-  const repoRoot = findRepoRoot(process.cwd());
-  const { suspects, reverse } = scanTasks({ repoRoot });
+  const root = repoRoot(process.cwd());
+  const { suspects, reverse } = scanTasks({ repoRoot: root });
 
   // Forward-drift (todo/ready but code in the tree) measured 2026-08-03: these must be flagged.
   for (const landed of [

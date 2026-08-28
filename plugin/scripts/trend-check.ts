@@ -44,6 +44,7 @@
 // `trend_flags = 0` — a green state has no flags; a real deterioration must never be missed).
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
 
@@ -314,16 +315,6 @@ export function analyzeTrends(root: string, window: number, threshold: number): 
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 
-function findRepoRoot(startDir: string): string {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
-}
 
 export function main(argv: string[]): number {
   let root: string | null = null;
@@ -342,7 +333,7 @@ export function main(argv: string[]): number {
   if (!Number.isFinite(window) || window < 2) window = 5;
   if (!Number.isFinite(threshold)) threshold = 0.1;
 
-  const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
+  const rootDir = root ? path.resolve(root) : repoRoot(process.cwd());
   const flags = analyzeTrends(rootDir, window, threshold);
 
   if (json) {

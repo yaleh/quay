@@ -42,6 +42,7 @@
 //                      INNER_EXEC_MODE_PROJECTS_DIR 覆盖 projects 目录。
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -50,22 +51,6 @@ import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 
 // ── Repo-root 检测（与 select-tests-for-touches.ts 同形态：.quay/config.yml 优先，git 兜底）──
 
-export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
 
 /** 仓库 slug = ~/.claude/projects 下目录名的形态：/home/yale/work/quay → -home-yale-work-quay。 */
 export function repoSlug(repoRoot) {
@@ -128,8 +113,8 @@ export function parseLine(line) {
  * @returns {{main_thread_edits:number, agent_dispatches:number, total_edits:number,
  *            edits_no_file_path:number, since:string|null}}
  */
-export function analyzeRecords(records, { repoRoot, since } = {}) {
-  const root = repoRoot || findRepoRoot();
+export function analyzeRecords(records, { repoRoot: repoRootOpt, since } = {}) {
+  const root = repoRootOpt || repoRoot();
   const sinceMs = since ? Date.parse(since) : NaN;
   let mainThreadEdits = 0;
   let agentDispatches = 0;
@@ -327,7 +312,7 @@ export function main(argv = process.argv) {
 
   if (has("--help") || has("-h")) { console.log(USAGE); return 0; }
 
-  const repoRoot = repoRootArg ? path.resolve(repoRootArg) : findRepoRoot();
+  const root = repoRootArg ? path.resolve(repoRootArg) : repoRoot();
   let sessionPath = session;
   let sessionSource = "arg";
   let sessionWarning = null;
@@ -339,12 +324,12 @@ export function main(argv = process.argv) {
     }
   } else {
     // 缺省 --session：显式身份优先（pane pid → session），启发式仅 fallback 且报 WARN。
-    const resolved = resolveSessionPath(repoRoot, defaultProjectsDir());
+    const resolved = resolveSessionPath(root, defaultProjectsDir());
     sessionPath = resolved.path;
     sessionSource = resolved.source;
     sessionWarning = resolved.warning;
     if (!sessionPath) {
-      const out = { main_thread_edits: 0, agent_dispatches: 0, total_edits: 0, edits_no_file_path: 0, session: null, session_source: "none", session_warning: null, repo_root: repoRoot, since: since || null, error: "no session transcript detected" };
+      const out = { main_thread_edits: 0, agent_dispatches: 0, total_edits: 0, edits_no_file_path: 0, session: null, session_source: "none", session_warning: null, repo_root: root, since: since || null, error: "no session transcript detected" };
       if (json) console.log(JSON.stringify(out, null, 2));
       else { console.log(`session: (none detected under ${defaultProjectsDir()})`); console.log("main_thread_edits: 0"); console.log("agent_dispatches: 0"); }
       return 0;
@@ -352,8 +337,8 @@ export function main(argv = process.argv) {
   }
 
   const records = loadTranscript(sessionPath);
-  const res = analyzeRecords(records, { repoRoot, since });
-  const out = { ...res, session: sessionPath, session_source: sessionSource, session_warning: sessionWarning, repo_root: repoRoot };
+  const res = analyzeRecords(records, { repoRoot: root, since });
+  const out = { ...res, session: sessionPath, session_source: sessionSource, session_warning: sessionWarning, repo_root: root };
 
   if (json) {
     console.log(JSON.stringify(out, null, 2));

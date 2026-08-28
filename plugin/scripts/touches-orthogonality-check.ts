@@ -14,6 +14,7 @@
 // vmeta-lag-check.mjs's shape).
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
@@ -452,16 +453,6 @@ export function scanReadyTasksSelfTouch(tasksDir) {
   return out;
 }
 
-// ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
-export function findRepoRoot(start) {
-  let dir = start;
-  for (;;) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) return start;
-    dir = parent;
-  }
-}
 
 function usage() {
   process.stderr.write("Usage: touches-orthogonality-check.mjs [--root <dir>] <charterA.md> <charterB.md>\n");
@@ -487,7 +478,7 @@ function mainResolve(args) {
   if (files.length !== 1) { usage(); return 2; }
   const file = files[0];
   if (!fs.existsSync(file)) { process.stderr.write(`ERROR: task not found: ${file}\n`); return 2; }
-  const rootDir = root ? path.resolve(root) : findRepoRoot(path.resolve(path.dirname(file)));
+  const rootDir = root ? path.resolve(root) : repoRoot(path.resolve(path.dirname(file)));
   const r = checkTaskTouchesResolve(fs.readFileSync(file, "utf8"), rootDir);
   if (!r.hasSection) {
     process.stdout.write(`RESOLVE ${file}: no ## Touches section — no existence claims to verify\n`);
@@ -548,7 +539,7 @@ function mainSelfTouchScan(args) {
     if (args[i] === "--self-touch-scan") continue;
     if (args[i] === "--root") { root = args[++i]; continue; }
   }
-  const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
+  const rootDir = root ? path.resolve(root) : repoRoot(process.cwd());
   const rows = scanReadyTasksSelfTouch(path.join(rootDir, "tasks"));
   // COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC3): a `role: compound`
   // ready task is an aggregate — it never carries a self-file by convention, so it is NOT counted as
@@ -586,7 +577,7 @@ function mainCheckPair(args) {
   for (const f of files) {
     if (!fs.existsSync(f)) { process.stderr.write(`ERROR: charter not found: ${f}\n`); return 2; }
   }
-  const expandRoot = root ? path.resolve(root) : findRepoRoot(path.resolve(path.dirname(files[0])));
+  const expandRoot = root ? path.resolve(root) : repoRoot(path.resolve(path.dirname(files[0])));
   const A = parseTouches(fs.readFileSync(files[0], "utf8"));
   const B = parseTouches(fs.readFileSync(files[1], "utf8"));
   const expand = (globs) => expandGlobs(globs, expandRoot);
@@ -616,7 +607,7 @@ function mainRuntimeDirty(args) {
     paths.push(args[i]);
   }
   if (!taskId) { process.stderr.write(`touches-orthogonality-check: --runtime-dirty requires --task <id>\n`); return 2; }
-  const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
+  const rootDir = root ? path.resolve(root) : repoRoot(process.cwd());
   const taskFile = path.join(rootDir, "tasks", `${taskId}.md`);
   if (!fs.existsSync(taskFile)) { process.stderr.write(`touches-orthogonality-check: task file not found: ${taskFile}\n`); return 2; }
   const r = checkBenignRuntimeDirty(fs.readFileSync(taskFile, "utf8"), paths);
@@ -646,7 +637,7 @@ export async function main(argv) {
   for (const f of files) {
     if (!fs.existsSync(f)) { process.stderr.write(`ERROR: charter not found: ${f}\n`); return 2; }
   }
-  const expandRoot = root ? path.resolve(root) : findRepoRoot(path.resolve(path.dirname(files[0])));
+  const expandRoot = root ? path.resolve(root) : repoRoot(path.resolve(path.dirname(files[0])));
   const A = parseTouches(fs.readFileSync(files[0], "utf8"));
   const B = parseTouches(fs.readFileSync(files[1], "utf8"));
   const expand = (globs) => expandGlobs(globs, expandRoot);
