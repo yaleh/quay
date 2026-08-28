@@ -40,7 +40,7 @@ inner 层已由 `*-driver`（worker-driver 等后台常驻进程）取代，不�
 - [x] AC1（能取假，工厂只建 outer）：`quay-topology.sh --dry-run` 只产生 outer 窗口，不产生 inner 窗口。
   - 实测：`bash plugin/scripts/quay-topology.sh --session ac1-test --dry-run` → `would-create-session … -n outer` + `would-create (first window): ac1-test:outer` + `topology done: ac1-test (outer )`，输出无 `inner`。
 - [x] AC2（能取假，②类引用清零）：全仓 grep ②类 inner 拓扑/窗口/会话引用 = 0（①类 inner 层引用与历史归档/SPEC 文档豁免，实现方列豁免清单留理由）——⛔ 非「改 :72 一处」。
-  - ②类已清：quay-topology.sh / topology-check.sh / session-bootstrap.sh / manager-adopt.sh / quay-launch.sh / verify-deliver-coldstart.sh / verify-delivery-surface.ts / capability-catalog.sh / checker-mutation-cases/no-manager-tick-doc-check.sh / 两份 profiles.yml / 4 个测试。
+  - ②类已清：quay-topology.sh / topology-check.sh / session-bootstrap.sh / manager-adopt.sh / quay-launch.sh / verify-deliver-coldstart.sh / verify-delivery-surface.ts / capability-catalog.sh / checker-mutation-cases/no-manager-tick-doc-check.sh / no-manager-tick-doc-check.ts / supervisor-bus.sh / 两份 profiles.yml / 9 个测试（session-topology / session-bootstrap / manager-layer-shipping / profile-policy / launch-settings / inner-session-check / quay-init / no-manager-tick-doc-check / verify-deliver-coldstart——quay-init 是 roles.inner 删除的涟漪「断言 quay-inner 存在→不存在」；其余是「双层窗口 pane」等注释/夹具的兄弟②类，同硬规则 5b）。
   - 豁免清单见文末「## ②类豁免清单（AC2）」。⛔ 注意：`plugin/scripts` 下仍大量「inner」命中，**全部是 ①类 inner 层引用**（inner-blocked-signal / inner-exec-mode-report / inner-wakeup-heartbeat / slot-refill / session-liveness / cap-from-gate 等——inner 层 = *-driver 仍存在），非 inner 窗口/拓扑/会话。
 - [x] AC3（能取假，校验不漂移）：`topology-check.sh` 对单窗口 outer 拓扑校验通过（不再因缺 inner 窗口而红）。
   - 实测：单窗口 outer+claude ⇒ `{"ok":true,"windows":{"outer":"ok"}}` exit 0；无 outer 窗口 ⇒ `{"ok":false,"windows":{"outer":"missing"}}` exit 1。ROLES 已与工厂一致（均 `"outer"`）。
@@ -77,7 +77,9 @@ AC2 要求「全仓 grep ②类 inner 拓扑/窗口/会话引用 = 0，①类 + 
 - plugin/scripts/session-bootstrap.sh
 - plugin/scripts/quay-launch.sh
 - plugin/scripts/quay-session.ts
+- plugin/scripts/supervisor-bus.sh（--to 示例 quay-inner→quay-outer，②类窗口名）
 - plugin/scripts/checker-mutation-cases/no-manager-tick-doc-check.sh
+- plugin/scripts/no-manager-tick-doc-check.ts（②类注释示例 两窗口拓扑→单窗口拓扑，与 mutation case 同步）
 - .quay/profiles.yml
 - plugin/.quay/profiles.yml
 - plugin/test/session-topology.test.mjs（topology 单窗口 outer 测试）
@@ -91,6 +93,7 @@ AC2 要求「全仓 grep ②类 inner 拓扑/窗口/会话引用 = 0，①类 + 
 - plugin/test/manager-layer-shipping.test.mjs（其 AC8 断言 quay-topology.sh ROLES="outer inner"，须同步）
 - plugin/test/profile-policy.test.mjs（AC3/AC0 断言 profiles.yml 含 roles.inner，须同步去 inner）
 - plugin/test/launch-settings.test.mjs（多处 `launch("inner")` + 7 角色计数，须同步换 selector + 6 计数）
+- plugin/test/quay-init.test.mjs（AC2-launch 断言 laid profiles.yml 不再含 quay-inner——roles.inner 已删的涟漪）
 - plugin/test/manager-productization.test.mjs（manager-adopt.sh 的三态消费者，未改但须覆盖）
-- plugin/test/no-manager-tick-doc-check.test.mjs（mutation case 的配对测试，未改但须覆盖）
+- plugin/test/no-manager-tick-doc-check.test.mjs（mutation case 的配对测试，同步 建两窗口→建单窗口 fixture）
 - tasks/gap-retire-inner-session-references.md（自身）

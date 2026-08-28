@@ -22,14 +22,14 @@
 //         cross-project (NOT a topology window — :manager is absent from the definition).
 //   AC2 — quay-init --loop lays down the factory (quay-topology.sh) + check (topology-check.sh)
 //         into a target project, byte-identical to the plugin source (config-driven install).
-//   AC3 — topology-check.sh: two windows each with a claude process ⇒ ok:true (exit 0); a
-//         single bash window (the meta-cc-3/archguard-4 failure shape) ⇒ both missing (exit
-//         non-zero); a topology window that is a bare bash ⇒ no-claude (exit non-zero).
+//   AC3 — topology-check.sh: the outer window with a claude process ⇒ ok:true (exit 0); a
+//         single bash window (the meta-cc-3/archguard-4 failure shape) ⇒ outer missing (exit
+//         non-zero); the topology window as a bare bash ⇒ no-claude (exit non-zero).
 //   AC4 — cold-start/SKILL.md cross-annotates the session topology (TOPOLOGY-IN-PLACE key + the
 //         factory/check references) — SKILL teaches the loop start, this task teaches the session
 //         topology; together they are 装得上.
 //   AC5 — this file is node:test + // @test-group engine (was lowconc; reclassified by gap-suite-serial-lowconc-classification-recheck).
-// Plus: the factory's --dry-run emits the two-window plan; a real build creates the windows.
+// Plus: the factory's --dry-run emits the single-window plan; a real build creates the window.
 //
 // All tmux work is on a HERMETIC server on a private socket (TMUX_TMPDIR + explicit -S argv),
 // never the machine's real sessions. Cleanup kills each session it started (kill-session, never

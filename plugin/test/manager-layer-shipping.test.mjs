@@ -24,7 +24,7 @@
 //   AC7     — this file is node:test + // @test-group governance.
 //   AC8     — delivery vs startup independence: the plugin SHIPS the manager layer (the file above),
 //             but the project cold-start does NOT start it — quay-topology.sh builds only
-//             `outer inner`, and the cold-start TOPOLOGY-IN-PLACE key states manager is NOT part of
+//             `outer`, and the cold-start TOPOLOGY-IN-PLACE key states manager is NOT part of
 //             the project topology (one network = one manager).
 //
 // Run:

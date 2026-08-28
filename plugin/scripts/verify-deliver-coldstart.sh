@@ -151,8 +151,8 @@ done
 #   L2_GIT_COMMIT_AGE_MIN    --all 最近提交时刻距今分钟数（"-"=无提交）—— loop 产出过工作
 #   L2_GIT_IS_QUAYINIT_COMMIT 该提交是否 `chore(quay-init):` 前缀（硬规则 4b：排除安装自己的 auto-commit）
 #   L2_INNER_WORKTREE_COUNT  项目 worktree 里在飞 task worktree 数 —— inner 派发过任务
-#   L2_LAYER_PROCESS_CWD     /proc/<pid>/cwd 解析到项目根的 claude/node 进程数 —— 双层会话进程活着在项目里
-#   L2_STARTUP_PROMPT        双层窗口 pane 是否卡在启动信任弹窗（permission-prompt；复用
+#   L2_LAYER_PROCESS_CWD     /proc/<pid>/cwd 解析到项目根的 claude/node 进程数 —— 两层进程活着在项目里
+#   L2_STARTUP_PROMPT        outer 窗口 pane 是否卡在启动信任弹窗（permission-prompt；复用
 #                             pane-state-classify.ts 的 permission-prompt 识别，经 --pane-verdict
 #                             接缝——AC1「不新造」；1 = 有 pane 卡弹窗 ⇒ proc_ok 不得单独撑起，
 #                             硬规则 4b，gap-verify-deliver-coldstart-l2-proc-ok-false-positive）
@@ -172,7 +172,7 @@ L2_DEAD_LOOP_STATE="unknown"
 # （pane-state-classify.ts:101 PERMISSION_PROMPT_RE，特征串 Quick safety check / trust this folder /
 # Enter to confirm …；session-liveness.sh 已把该弹窗归类为 SESSION-INTERVENTION-REQUIRED，
 # busy=0 intervention=1），经 --pane-verdict 接缝（与 session-liveness.sh 的 _sl_pane_verdict 同一
-# 判定源）分类双层窗口 pane：
+# 判定源）分类 outer 窗口 pane：
 #   outer 窗口 pane 分类为 permission-prompt ⇒ L2_STARTUP_PROMPT=1（进程卡在启动弹窗）。
 # 捕获不到 pane（无 tmux / 会话未建 / 窗口缺失）⇒ L2_STARTUP_PROMPT=0 —— 无法观测弹窗，不据此推翻
 # proc_ok；这不是恒真项（能观测到弹窗时仍会置 1），git/wt 直接量仍独立判活。
@@ -504,7 +504,7 @@ step3_coldstart() {
   echo "    L2_GIT_IS_QUAYINIT_COMMIT=${L2_GIT_IS_QUAYINIT_COMMIT} (1 = the recent commit is quay-init's own auto-commit — excluded)"
   echo "    L2_INNER_WORKTREE_COUNT=${L2_INNER_WORKTREE_COUNT} (>=1 = inner dispatched)"
   echo "    L2_LAYER_PROCESS_CWD=${L2_LAYER_PROCESS_CWD} (>=2 = outer+inner processes in project)"
-  echo "    L2_STARTUP_PROMPT=${L2_STARTUP_PROMPT} (1 = a two-layer pane is stuck at the startup permission-prompt — proc_ok demoted, hard rule 4b)"
+  echo "    L2_STARTUP_PROMPT=${L2_STARTUP_PROMPT} (1 = the outer pane is stuck at the startup permission-prompt — proc_ok demoted, hard rule 4b)"
   echo "    L2_DEAD_LOOP_STATE=${L2_DEAD_LOOP_STATE} (shipped L2 criterion, corroboration)"
   if [ "$COLDSTART_LIVE" = "yes" ]; then
     echo "  COLDSTART_LIVE=yes — two-layer loop verified live by direct measures"
