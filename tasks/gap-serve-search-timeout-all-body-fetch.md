@@ -34,7 +34,7 @@ extra:
 
 ## Definition of Done
 
-搜索可用且不超时；无 q 列表不回归；1572 任务规模下稳定。
+搜索路径不向 MCP 全量取 1572 任务 body（改 provider/MCP 侧过滤或分页）；负控制：无 q 列表仍分页正常、`/tasks?q=<标题词>` 命中、无 -32001 超时；经 Web UI 实测。
 
 ## Touches
 
