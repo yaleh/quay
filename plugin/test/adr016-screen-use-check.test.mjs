@@ -32,7 +32,9 @@ import {
   scanForScreenHashViolations,
   stripShellComments,
   judgeBand,
+  judgeScreenHashScan,
 } from "../scripts/adr016-screen-use-check.ts";
+import { driverResultToExit } from "../scripts/checker-io.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
@@ -140,4 +142,31 @@ test("AC3: the compliant alternative (`tail -3 | grep 'esc to interrupt'`) in a 
 
 test("stripShellComments: comments are stripped but string literals preserved", () => {
   assert.equal(stripShellComments("# full line\necho hi # trailing\necho 'a#b'\necho \"c#d\"\n"), "\necho hi \necho 'a#b'\necho \"c#d\"\n");
+});
+
+// ── B4 DriverResult（gap-b4-checker-reuse-driver-result：判定收敛到 DriverResult<T> 词表）────────────
+
+test("B4 AC3: judgeScreenHashScan maps in-band⇒verified / out-of-band⇒failed (DriverResult, exit 0/1)", () => {
+  const inBand = judgeScreenHashScan({ violations: [], retired: [], files: ["a.sh"] });
+  assert.equal(inBand.state, "verified");
+  assert.equal(driverResultToExit(inBand), 0);
+
+  const one = judgeScreenHashScan({
+    violations: [{ rel: "a.sh", line: 1, snippet: "x", reason: "same-command" }],
+    retired: [],
+    files: ["a.sh"],
+  });
+  assert.equal(one.state, "verified", "band 0..1 tolerates one legacy observer");
+  assert.equal(driverResultToExit(one), 0);
+
+  const two = judgeScreenHashScan({
+    violations: [
+      { rel: "a.sh", line: 1, snippet: "x", reason: "same-command" },
+      { rel: "b.sh", line: 1, snippet: "y", reason: "same-command" },
+    ],
+    retired: [],
+    files: ["a.sh", "b.sh"],
+  });
+  assert.equal(two.state, "failed", "a second active violation exceeds the band");
+  assert.equal(driverResultToExit(two), 1);
 });

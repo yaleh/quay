@@ -21,7 +21,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-import { detectFileViolations, scanTree, stripShellComments } from "../scripts/dead-code-after-return-check.ts";
+import { detectFileViolations, scanTree, stripShellComments, judgeScan } from "../scripts/dead-code-after-return-check.ts";
+import { driverResultToExit } from "../scripts/checker-io.ts";
 
 import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
 
@@ -103,4 +104,19 @@ test("stripShellComments: comments stripped, string literals preserved (quote-aw
     stripShellComments("# full line\necho hi # trailing\necho 'a#b'\necho \"c#d\"\n"),
     "\necho hi \necho 'a#b'\necho \"c#d\"\n",
   );
+});
+
+// ── B4 DriverResult（gap-b4-checker-reuse-driver-result：判定收敛到 DriverResult<T> 词表）────────────
+
+test("B4 AC3: judgeScan maps clean⇒verified / violations⇒failed (DriverResult, exit 0/1)", () => {
+  const clean = judgeScan({ violations: [], files: ["a.sh", "b.sh"] });
+  assert.equal(clean.state, "verified");
+  assert.equal(driverResultToExit(clean), 0);
+
+  const dirty = judgeScan({
+    violations: [{ rel: "evil.sh", line: 2, fn: "f", returnStmt: "return 0", after: "echo never" }],
+    files: ["evil.sh"],
+  });
+  assert.equal(dirty.state, "failed");
+  assert.equal(driverResultToExit(dirty), 1);
 });

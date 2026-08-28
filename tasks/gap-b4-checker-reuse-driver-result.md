@@ -21,9 +21,9 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，采纳棘轮）：采纳 `driver-result` 的 checker 数 0 → k（k≥3 示范），且新增 checker 违例被检查器挡住（只增不减）；（⛔ 仍 0 采纳 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：删一个 checker 对 driver-result 的 import，该 checker 的第三态（not-evaluated）须塌回二值、对应断言须红；（⛔ 删了不红 ⇒ 假）。
-- [ ] AC3（能取假，语义适配已判定）：语义映射（DriverResult 的 verified/failed ↔ checker pass/fail/not-evaluated）有明文字段级对照 + 测试覆盖；（⛔ 无对照或误映射 ⇒ 假）。
+- [x] AC1（能取假，采纳棘轮）：采纳 `driver-result` 的 checker 数 0 → k（k≥3 示范），且新增 checker 违例被检查器挡住（只增不减）；（⛔ 仍 0 采纳 ⇒ 假）。
+- [x] AC2（能取假，负控制）：删一个 checker 对 driver-result 的 import，该 checker 的第三态（not-evaluated）须塌回二值、对应断言须红；（⛔ 删了不红 ⇒ 假）。
+- [x] AC3（能取假，语义适配已判定）：语义映射（DriverResult 的 verified/failed ↔ checker pass/fail/not-evaluated）有明文字段级对照 + 测试覆盖；（⛔ 无对照或误映射 ⇒ 假）。
 
 ## Definition of Done
 
@@ -43,4 +43,6 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 - plugin/test/dead-code-after-return-check.test.mjs（迁移测试）
 - plugin/test/adr016-screen-use-check.test.mjs（迁移测试）
 - plugin/test/checker-driver-result-ratchet-check.test.mjs (new)（棘轮负控制测试）
+- plugin/scripts/capability-catalog.sh（2 新脚本六表注册）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts= bump）
 - tasks/gap-b4-checker-reuse-driver-result.md（自身）

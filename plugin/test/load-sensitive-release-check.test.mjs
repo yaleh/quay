@@ -25,7 +25,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { hasMarker, checkMarked, MARKER } from "../scripts/load-sensitive-release-check.ts";
+import { hasMarker, checkMarked, judgeMarkedReport, MARKER } from "../scripts/load-sensitive-release-check.ts";
+import { driverResultToExit } from "../scripts/checker-io.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -145,4 +146,25 @@ test("AC4 real-use: serve.test.mjs is now marked (predeclared marker lands the d
   const r = runCli([serve]);
   assert.equal(r.status, 0, `serve.test.mjs must carry the marker; got:\n${r.stdout}${r.stderr}`);
   assert.ok(MARKER.length > 0, "MARKER constant is the grep literal");
+});
+
+// ── B4 DriverResult（gap-b4-checker-reuse-driver-result：判定收敛到 DriverResult<T> 词表）────────────
+
+test("B4 AC2/AC3: judgeMarkedReport 三态映射 —— all-marked⇒verified / unmarked⇒failed / unreadable⇒not-evaluated", () => {
+  const marked = tmpFile(MARKED_SRC);
+  const unmarked = tmpFile(UNMARKED_SRC);
+  const missing = path.join(os.tmpdir(), "missing-lsr-b4.test.mjs");
+
+  const ok = judgeMarkedReport(checkMarked([marked]));
+  assert.equal(ok.state, "verified");
+  assert.equal(driverResultToExit(ok), 0);
+
+  const bad = judgeMarkedReport(checkMarked([marked, unmarked]));
+  assert.equal(bad.state, "failed");
+  assert.equal(driverResultToExit(bad), 1);
+
+  // 读不到输入（unreadable）⇒ not-evaluated（硬规则 3b），⛔ 不伪造成 release（verified）也不伪造成 fail。
+  const ne = judgeMarkedReport(checkMarked([missing]));
+  assert.equal(ne.state, "not-evaluated");
+  assert.equal(driverResultToExit(ne), 2);
 });
