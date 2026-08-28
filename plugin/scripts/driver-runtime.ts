@@ -1149,7 +1149,7 @@ export async function main(argv: string[]): Promise<number> {
 
 Usage:
   node --experimental-strip-types plugin/scripts/driver-runtime.ts <start|stop|drain|resume|status|restart|liveness> \\
-    --kind <promotion|worker|outer> [--root <repo>] [--interval <ms>] [--reconcile-interval <s>] [--cap <n>] \\
+    --kind <promotion|worker|outer|quality|suite> [--root <repo>] [--interval <ms>] [--reconcile-interval <s>] [--cap <n>] \\
     [--restart-delay <s>] [--run-id <id>] [--json]
 `);
     return 0;
