@@ -1,7 +1,7 @@
 ---
 id: gap-adr034-fan-in-lock-holder-supervised
 title: ADR-034 落实——废除 & disown 分离 holder，锁改由受监督 driver 进程持有（活但停滞 holder 永不释放的根治）
-status: ready
+status: done
 labels:
   - gap
   - defect
