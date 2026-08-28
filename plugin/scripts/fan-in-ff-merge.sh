@@ -214,11 +214,33 @@ if [ "${acquire_workflow_lock}" = "1" ]; then
   mkdir -p "$(dirname "${workflow_lock_events}")" 2>/dev/null || true
   if [ -n "${run_id}" ]; then _wfl_run_id_json="\"${run_id}\""; else _wfl_run_id_json="null"; fi
   if [ -n "${agent_id}" ]; then _wfl_agent_id_json="\"${agent_id}\""; else _wfl_agent_id_json="null"; fi
-  # Idempotent: a live holder (trying OR holding) for THIS task means a prior acquire already spawned it
-  # (e.g. a previous bash step was killed at 600s while it waited) — do NOT spawn a second one.
-  if [ -s "${workflow_lock_pidfile}" ] && kill -0 "$(cat "${workflow_lock_pidfile}" 2>/dev/null)" 2>/dev/null; then
-    : # holder already trying/holding — fall through to the confirmation wait
+  # Idempotent + stale-runId-aware (gap-fan-in-workflow-lock-stale-runid-detached-holder): the pidfile now
+  # records `$$ <runId>` (a holder's PID + the runId it was spawned for). A live holder whose runId does
+  # NOT match THIS dispatch is a STALE holder — a detached holder spawned by a PREVIOUS dispatch that was
+  # killed at its confirmation wait and survived. Two cases, branched on the acquired marker:
+  #   - NO acquired marker ⇒ the stale holder is still QUEUED in flock (it has never held the lock / done
+  #     no work) ⇒ kill it + re-spawn with THIS runId (a queued holder is stuck in flock, so `rm flag`
+  #     alone would not stop it — a kill is the only way).
+  #   - acquired marker present ⇒ the stale holder ALREADY HOLDS the lock (merge/suite/ff in progress) ⇒
+  #     leave it alone (let it finish; the watchdog caps a dead hold).
+  _wfl_saved_pid=""
+  _wfl_saved_runid=""
+  if [ -s "${workflow_lock_pidfile}" ]; then
+    read -r _wfl_saved_pid _wfl_saved_runid < "${workflow_lock_pidfile}" 2>/dev/null || true
+  fi
+  _wfl_respawn=0
+  if [ -n "${_wfl_saved_pid}" ] && kill -0 "${_wfl_saved_pid}" 2>/dev/null; then
+    if [ "${_wfl_saved_runid}" != "${run_id}" ] && [ ! -e "${workflow_lock_acquired}" ]; then
+      # A stale QUEUED holder (different runId, never acquired ⇒ never did work) — kill it, then re-spawn.
+      kill "${_wfl_saved_pid}" 2>/dev/null || true
+      _wfl_respawn=1
+    fi
+    # else: holder is THIS runId, or it already holds the lock (acquired marker present) — reuse it.
   else
+    _wfl_respawn=1
+  fi
+
+  if [ "${_wfl_respawn}" = "1" ]; then
     rm -f "${workflow_lock_pidfile}" "${workflow_lock_flag}" "${workflow_lock_watchdog}" "${workflow_lock_acquired}"
     # The release flag is created HERE (before spawn) so the holder's `while [ -e flag ]` hold-loop and
     # the watchdog's `[ -e flag ] || exit` both see a held lock from the first instant — no race window
@@ -227,7 +249,7 @@ if [ "${acquire_workflow_lock}" = "1" ]; then
     # setsid + & + disown: the holder lives in its own session, independent of the caller (which is a
     # subagent bash step — it must survive the step's return, exactly like the detached suite).
     setsid bash -c '
-      printf "%s\n" "$$" > "$3"                       # alive marker BEFORE flock (a holder is trying)
+      printf "%s\n" "$$ ${13}" > "$3"                  # alive marker BEFORE flock: pid + runId (a holder is trying)
       _wfl_fd=""
       exec {_wfl_fd}>"$1" || { rm -f "$3"; exit 2; }
       flock -x "${_wfl_fd}" || { rm -f "$3"; exit 2; }
@@ -238,7 +260,7 @@ if [ "${acquire_workflow_lock}" = "1" ]; then
       printf "%s\n" "{\"event\":\"release\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"epoch\":$(date +%s),\"taskId\":\"$4\",\"pid\":$$,\"runId\":$5,\"agentId\":$6}" >> "$7"
       flock -u "${_wfl_fd}" 2>/dev/null || true
       rm -f "$3" "$9" "${12}" 2>/dev/null || true
-    ' _ "${workflow_lock_file}" "${lock_wait}" "${workflow_lock_pidfile}" "${task_id}" "${_wfl_run_id_json}" "${_wfl_agent_id_json}" "${workflow_lock_events}" "${_workflow_watchdog_lib}" "${workflow_lock_flag}" "${workflow_lock_hold_max_s}" "${workflow_lock_watchdog}" "${workflow_lock_acquired}" >> "${workflow_lock_log}" 2>&1 & disown
+    ' _ "${workflow_lock_file}" "${lock_wait}" "${workflow_lock_pidfile}" "${task_id}" "${_wfl_run_id_json}" "${_wfl_agent_id_json}" "${workflow_lock_events}" "${_workflow_watchdog_lib}" "${workflow_lock_flag}" "${workflow_lock_hold_max_s}" "${workflow_lock_watchdog}" "${workflow_lock_acquired}" "${run_id}" >> "${workflow_lock_log}" 2>&1 & disown
   fi
   # Wait for the acquired marker (the holder HOLDS the lock). Unbounded — the watchdog bounds the current
   # holder's hold, so a queued acquire WILL eventually land. Re-entrant: a killed bash step re-runs this
@@ -250,14 +272,23 @@ if [ "${acquire_workflow_lock}" = "1" ]; then
     sleep 0.1
     _wfl_grace=$((_wfl_grace + 1))
   done
+  _wfl_holder_pid=""
   while [ ! -e "${workflow_lock_acquired}" ]; do
-    if [ ! -s "${workflow_lock_pidfile}" ] || ! kill -0 "$(cat "${workflow_lock_pidfile}" 2>/dev/null)" 2>/dev/null; then
+    _wfl_holder_pid=""
+    if [ -s "${workflow_lock_pidfile}" ]; then
+      read -r _wfl_holder_pid _ < "${workflow_lock_pidfile}" 2>/dev/null || true
+    fi
+    if [ -z "${_wfl_holder_pid}" ] || ! kill -0 "${_wfl_holder_pid}" 2>/dev/null; then
       echo "fan-in-ff-merge: workflow lock holder died before acquiring ${workflow_lock_file}" >&2
       exit 2
     fi
     sleep 0.5
   done
-  echo "fan-in-ff-merge: acquired fan-in workflow lock ${workflow_lock_file} (holder $(cat "${workflow_lock_pidfile}"))"
+  # The acquired marker was already present on the reuse path (the loop never ran) — read the pid once more.
+  if [ -z "${_wfl_holder_pid}" ] && [ -s "${workflow_lock_pidfile}" ]; then
+    read -r _wfl_holder_pid _ < "${workflow_lock_pidfile}" 2>/dev/null || true
+  fi
+  echo "fan-in-ff-merge: acquired fan-in workflow lock ${workflow_lock_file} (holder ${_wfl_holder_pid})"
   exit 0
 fi
 
@@ -267,11 +298,16 @@ fi
 if [ "${release_workflow_lock}" = "1" ]; then
   rm -f "${workflow_lock_flag}"
   _wfl_wait=0
-  while [ -s "${workflow_lock_pidfile}" ] && kill -0 "$(cat "${workflow_lock_pidfile}" 2>/dev/null)" 2>/dev/null; do
+  while [ -s "${workflow_lock_pidfile}" ]; do
+    _wfl_holder_pid=""
+    read -r _wfl_holder_pid _ < "${workflow_lock_pidfile}" 2>/dev/null || true
+    if [ -z "${_wfl_holder_pid}" ] || ! kill -0 "${_wfl_holder_pid}" 2>/dev/null; then
+      break
+    fi
     sleep 0.2
     _wfl_wait=$((_wfl_wait + 1))
     if [ "${_wfl_wait}" -gt 150 ]; then
-      echo "fan-in-ff-merge: workflow lock holder $(cat "${workflow_lock_pidfile}" 2>/dev/null) did not exit after release — leaving it (watchdog will cap the hold)" >&2
+      echo "fan-in-ff-merge: workflow lock holder ${_wfl_holder_pid} did not exit after release — leaving it (watchdog will cap the hold)" >&2
       break
     fi
   done

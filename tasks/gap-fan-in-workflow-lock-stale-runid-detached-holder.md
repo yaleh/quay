@@ -35,13 +35,20 @@ fan-in workflow 锁的 acquire/release 事件会记录【陈旧 runId】（上�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，会计正确）：锁事件的 runId == 本次派发的 runId（⛔ 仍陈旧 runId ⇒ 假）。
-- [ ] AC2（能取假，判据读到）：readWorkflowLockHold(task, runId) 按正确 runId 读到 lockHoldSecs/lockAcquireEpoch（⛔ null ⇒ 假——机械 AC1/AC2 判据失效）。
-- [ ] AC3（能取假，陈旧 holder 清理）：runId 不匹配且无 acquired marker 的排队 holder 被 kill + 重新 spawn（⛔ 复用陈旧 holder ⇒ 假）。
+- [x] AC1（能取假，会计正确）：锁事件的 runId == 本次派发的 runId（⛔ 仍陈旧 runId ⇒ 假）。
+- [x] AC2（能取假，判据读到）：readWorkflowLockHold(task, runId) 按正确 runId 读到 lockHoldSecs/lockAcquireEpoch（⛔ null ⇒ 假——机械 AC1/AC2 判据失效）。
+- [x] AC3（能取假，陈旧 holder 清理）：runId 不匹配且无 acquired marker 的排队 holder 被 kill + 重新 spawn（⛔ 复用陈旧 holder ⇒ 假）。
 
 ## Definition of Done
 
 pidfile 记 runId + 守卫比对 + 陈旧排队 holder 清理；AC1-AC3 全勾；锁事件 runId 与派发 runId 一致；readWorkflowLockHold 读到 lock_hold 判据。
+
+## Evidence
+
+- AC1：`plugin/test/fan-in-workflow-lock.test.mjs` `AC1/AC2 — the lock events carry the dispatch runId` —— 锁事件 acquire+release 的 runId 均 == 派发 runId（`r-fresh`），负控制 `r-stale` 读 null。
+- AC2：同上测试 —— `readWorkflowLockHold(dir, "t1", "r-fresh")` 读到非 null 的 `lockAcquireEpoch`/`lockReleaseEpoch`/`lockHoldSecs`（≥0）。
+- AC3：`plugin/test/fan-in-ff-merge.test.mjs` `AC3 — a stale QUEUED holder (different runId, NO acquired marker) is killed + re-spawned` —— 陈旧 holder（live sleep + 旧 runId pidfile + 无 acquired marker）被 kill、新 spawn 的 holder 带本次 runId；负控制 `already-holding … is NOT killed`（有 acquired marker 不动）。
+- pidfile 记 runId：`plugin/test/fan-in-ff-merge.test.mjs` `workflow lock pidfile records \`$$ <runId>\` …` —— pidfile 内容 `$$ <runId>`，同 runId re-acquire 复用同 holder。
 
 ## Touches
 

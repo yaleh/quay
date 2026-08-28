@@ -69,6 +69,14 @@ function lockIsHeld(dir) {
   return r.status !== 0;
 }
 
+/** Read the workflow-lock pidfile for a task and parse its `$$ <runId>` form (gap-fan-in-workflow-lock-
+ *  stale-runid-detached-holder): the pidfile records the holder's PID + the runId it was spawned for. */
+function readPidfile(taskId) {
+  const raw = fs.readFileSync(path.join(os.tmpdir(), `fan-in-workflow-lock-${taskId}.pid`), "utf8").trim();
+  const parts = raw.split(/\s+/);
+  return { pid: parts[0] ? Number(parts[0]) : NaN, runId: parts.slice(1).join(" ") || null, raw };
+}
+
 // ── AC1: acquire holds the lock; release frees it ─────────────────────────────────────────────────────
 
 test("AC1 — acquire holds the workflow lock (flock -n fails); release frees it (flock -n succeeds)", () => {
@@ -93,10 +101,11 @@ test("AC1 idempotency — a re-acquire for the SAME task keeps the SAME holder (
     initRepo(dir);
     const a1 = runMerge(["--task", "t1", "--root", dir, "--run-id", "r1", "--acquire-workflow-lock"]);
     assert.equal(a1.status, 0);
-    const pid1 = fs.readFileSync(path.join(os.tmpdir(), "fan-in-workflow-lock-t1.pid"), "utf8").trim();
+    const { pid: pid1, runId: runId1 } = readPidfile("t1");
+    assert.equal(runId1, "r1", "the pidfile records the dispatch runId");
     const a2 = runMerge(["--task", "t1", "--root", dir, "--run-id", "r1", "--acquire-workflow-lock"]);
     assert.equal(a2.status, 0, `idempotent re-acquire must succeed: ${a2.stdout}${a2.stderr}`);
-    const pid2 = fs.readFileSync(path.join(os.tmpdir(), "fan-in-workflow-lock-t1.pid"), "utf8").trim();
+    const { pid: pid2 } = readPidfile("t1");
     assert.equal(pid2, pid1, "re-acquire must reuse the SAME holder (no second spawn)");
     runMerge(["--task", "t1", "--root", dir, "--release-workflow-lock"]);
   } finally {
@@ -112,13 +121,13 @@ test("AC5 — holder crash ⇒ the watchdog releases the lock (a later acquire s
     initRepo(dir);
     const acquire = runMerge(["--task", "t1", "--root", dir, "--run-id", "r1", "--acquire-workflow-lock"]);
     assert.equal(acquire.status, 0);
-    const holder = fs.readFileSync(path.join(os.tmpdir(), "fan-in-workflow-lock-t1.pid"), "utf8").trim();
-    assert.ok(holder, "holder pidfile must be written");
+    const { pid: holder } = readPidfile("t1");
+    assert.ok(Number.isInteger(holder) && holder > 0, "holder pidfile must be written");
     assert.equal(lockIsHeld(dir), true, "lock held before the crash");
     // Crash the holder (SIGKILL — no chance to clean up). flock auto-releases the holder's OWN fd, but
     // the watchdog (a child inheriting the same open-file-description) would otherwise keep it held ⇒
     // the watchdog must release it on the next poll.
-    process.kill(Number(holder), "SIGKILL");
+    process.kill(holder, "SIGKILL");
     // The watchdog polls each 1s; give it a couple of polls to detect the dead holder + release.
     let free = false;
     for (let i = 0; i < 30; i++) {
@@ -171,5 +180,41 @@ test("AC2 — S=1 via the .concurrency file is read identically by the bash and 
     assert.equal(ts.stdout.trim(), "1", "TS canonical must read S=1 from the .concurrency file");
   } finally {
     fs.rmSync(pinTmp, { recursive: true, force: true });
+  }
+});
+
+// ── AC1/AC2 (gap-fan-in-workflow-lock-stale-runid-detached-holder): lock events carry the dispatch
+//    runId, and readWorkflowLockHold reads the hold by the correct runId ───────────────────────────────
+
+test("AC1/AC2 — the lock events carry the dispatch runId, and readWorkflowLockHold reads lockHoldSecs/lockAcquireEpoch by that runId (⛔ a stale runId reads null)", async () => {
+  const dir = makeTmp("runid");
+  try {
+    initRepo(dir);
+    // NO --workflow-lock-events override: the events land at the DEFAULT path (<root>/.quay/fan-in-workflow-
+    // lock-events.jsonl), which is exactly the file readWorkflowLockHold reads — so AC2 exercises the real
+    // reader over the real writer (no fixture seam).
+    const events = path.join(dir, ".quay", "fan-in-workflow-lock-events.jsonl");
+    const acquire = runMerge(["--task", "t1", "--root", dir, "--run-id", "r-fresh", "--acquire-workflow-lock"]);
+    assert.equal(acquire.status, 0, `acquire must succeed: ${acquire.stdout}${acquire.stderr}`);
+    const release = runMerge(["--task", "t1", "--root", dir, "--run-id", "r-fresh", "--release-workflow-lock"]);
+    assert.equal(release.status, 0, `release must succeed: ${release.stdout}${release.stderr}`);
+
+    // AC1: every lock event carries THIS dispatch's runId (⛔ a stale runId ⇒ 会计错).
+    const lines = fs.readFileSync(events, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
+    assert.equal(lines.length, 2, "exactly acquire + release");
+    assert.deepEqual(lines.map((e) => e.runId), ["r-fresh", "r-fresh"], "AC1: every lock event carries the dispatch runId");
+
+    // AC2: readWorkflowLockHold(task, runId) reads the hold by the CORRECT runId (⛔ null ⇒ the
+    // mechanical AC1/AC2 判据 is dead). Imported from worker-driver.ts (the real reader, no reimplementation).
+    const { readWorkflowLockHold } = await import("../scripts/worker-driver.ts");
+    const hold = readWorkflowLockHold(dir, "t1", "r-fresh");
+    assert.ok(hold.lockAcquireEpoch !== null, "lockAcquireEpoch must be read (not null)");
+    assert.ok(hold.lockReleaseEpoch !== null, "lockReleaseEpoch must be read (not null)");
+    assert.ok(hold.lockHoldSecs !== null && hold.lockHoldSecs >= 0, "lockHoldSecs must be read (not null, ≥ 0)");
+    // The WRONG runId must read null — a stale-runId read is empty, which is the bug's exact symptom.
+    const stale = readWorkflowLockHold(dir, "t1", "r-stale");
+    assert.equal(stale.lockHoldSecs, null, "a different runId must read null (no cross-runId leak)");
+  } finally {
+    cleanup(dir);
   }
 });
