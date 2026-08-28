@@ -53,4 +53,5 @@ extra: {}
 - plugin/scripts/capability-catalog.sh（write-json-atomic.ts 六表注册）
 - docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 296→297）
 - plugin/test/writestate-atomicity-split.test.mjs (new)（原子写并发读负控制测试）
+- experiments/quay-perpetual-stream/test/write-json-atomic.test.mjs (new)（SOURCE 副本 write-json-atomic.ts 的 loadbearing-test-gate 兄弟单测，ADR-001 clause 2）
 - tasks/gap-writestate-atomicity-split.md（自身）
