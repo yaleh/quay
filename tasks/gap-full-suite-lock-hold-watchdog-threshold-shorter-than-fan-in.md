@@ -2,7 +2,7 @@
 id: gap-full-suite-lock-hold-watchdog-threshold-shorter-than-fan-in
 title: FULL_SUITE_LOCK_HOLD_MAX_S=1800 锁持有看门狗阈值结构性短于全量 fan-in 时长——每轮 ff
   落在锁释放后（无锁 ff、ff-race 重暴露）
-status: ready
+status: done
 labels:
   - gap
   - defect
