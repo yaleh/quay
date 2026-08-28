@@ -42,3 +42,8 @@ AC1b 在并行 suite 下不再因 ENOENT 假红；真实旧路径引用仍被捕
 - plugin/test/loop-shipping.test.mjs（walk 循环 ENOENT 容忍 / 或 tmp/ 排除）
 - plugin/scripts/loop-shipping-exclusion-data.mjs（若走排除路径）
 - tasks/gap-loop-shipping-ac1b-walk-enoent-race.md（自身）
+## Needs-Human
+
+**执行 2026-08-28T13:04:54.420Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
