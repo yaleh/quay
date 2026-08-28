@@ -205,6 +205,24 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "形态=ruled 豁免+定案理由（先例 cddc55e2），落地后经正常 fan-in 验证，同类写不再发生。",
   },
   {
+    sha: "7b09d2060",
+    reason:
+      "manager 2026-08-28 裁定（用户「暂停 driver、在当前会话持续修」指令）：checker-mutation fixture S 默认 2→1（对齐 78d4f026c 的 S=1 默认，修复 suite-slot-ssot always-red baseline）。" +
+      "非偷懒绕过 fan-in——机械 fan-in suite 步自锁修复链的一部分；形态=ruled 豁免+定案理由（先例 cddc55e2）。",
+  },
+  {
+    sha: "37746907c",
+    reason:
+      "ruling-add 提交自身豁免（同 8dfd2967 形）——37746907c 把 6c46304b7 加入 ruled 表，本身是 manager 直接提交（改 checker 源码）⇒ bypass 自指死锁。" +
+      "解：本条目把 37746907c 入表（6c46304b7 已按 ruledHistorical 分类）；用户「当前会话持续修」指令授权。形态=ruled 豁免+定案理由。",
+  },
+  {
+    sha: "18b10880a",
+    reason:
+      "outer 撤回 60min 静默看门狗止血（SILENCE_MS_DEFAULT 15min——自锁根因确诊后止血无意义，撤回）——非偷懒绕过 fan-in；" +
+      "形态=ruled 豁免+定案理由（先例 cddc55e2）。",
+  },
+  {
     sha: "f9577da1",
     reason:
       "inner AC81 锚重建（OOM 死会话 ff96ad7e → 0ccb57cf）——CronList 为空判据① 假，按 AC81 清扫重建；" +
