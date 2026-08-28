@@ -32,10 +32,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，收敛）：对「worktree done-flip 提交 + develop 未落地」的 worktree 重跑 runMechanicalFanIn ⇒ 不红在 flip-done，正常落地（⛔ 仍 `expected exactly 1 'status: ready' line` ⇒ 假）。
-- [ ] AC2（能取假，真落地不重翻）：status=done 且 develop 已含落地提交的任务重跑 ⇒ 不 reset、不重翻（⛔ 被 reset 到 ready 或重复 flip ⇒ 假）。
-- [ ] AC3（能取假，driver 自主重试不被卡）：exited-not-landed（flip-done+ff 失败）任务走 driver maxRetries 重试能收敛（⛔ 重试仍红 flip-done 到 needs-human ⇒ 假）。
-- [ ] AC4（能取假，负控制）：正常 `status: ready` 任务的 flip-done 行为不变（⛔ 破坏正常 flip ⇒ 假）。
+- [x] AC1（能取假，收敛）：对「worktree done-flip 提交 + develop 未落地」的 worktree 重跑 runMechanicalFanIn ⇒ 不红在 flip-done，正常落地（⛔ 仍 `expected exactly 1 'status: ready' line` ⇒ 假）。
+- [x] AC2（能取假，真落地不重翻）：status=done 且 develop 已含落地提交的任务重跑 ⇒ 不 reset、不重翻（⛔ 被 reset 到 ready 或重复 flip ⇒ 假）。
+- [x] AC3（能取假，driver 自主重试不被卡）：exited-not-landed（flip-done+ff 失败）任务走 driver maxRetries 重试能收敛（⛔ 重试仍红 flip-done 到 needs-human ⇒ 假）。
+- [x] AC4（能取假，负控制）：正常 `status: ready` 任务的 flip-done 行为不变（⛔ 破坏正常 flip ⇒ 假）。
 
 ## Definition of Done
 
