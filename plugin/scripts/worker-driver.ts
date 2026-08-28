@@ -1475,7 +1475,10 @@ export interface MechanicalFanInOptions {
   root: string;
   runId: string;
   mergeTarget?: string;
-  /** suite 命令（测试缝）；缺省 = bash <worktree>/scripts/test.sh --buckets <task>。 */
+  /** suite 命令（测试缝）；缺省 = node full-suite-runner.ts --buckets <task>（--root <worktree>
+   *  --state-dir <root>/.quay --runner inner --log-file <suiteLogFile>）。gap-fan-in-red-bucket-run-
+   *  not-recorded：机械路径不再跑平行 `bash scripts/test.sh --buckets`（绕开 verification-round 唯一
+   *  writer），改走正确的 runner——green+red 桶轮次都入 verification-round.jsonl（state=red 记录可见）。 */
   suiteCommand?: string[];
   /** suite 单飞槽 base（测试缝）；缺省 = suiteLockBase(root)。 */
   slotBase?: string;
@@ -1703,6 +1706,31 @@ async function flipTaskDone(worktree: string, task: string): Promise<{ ok: boole
   return { ok: true, reason: null };
 }
 
+/** gap-fan-in-red-bucket-run-not-recorded — 机械 fan-in 的 suite 步缺省命令：经 full-suite-runner.ts
+ *  --buckets 跑（正确的 runner，green+red 桶轮次都在 suite 退出时入 verification-round.jsonl），⛔ 不是
+ *  平行 `bash scripts/test.sh --buckets`（绕开唯一 writer，红桶轮次零记录——硬规则 3b「没跑过」与
+ *  「跑了但红」同形）。--root <worktree> 是受测检出（test.sh 在 worktree 内跑）；--state-dir <root>/.quay
+ *  把 state/verification-round/measure-history/suite-load 落进共享主检出（/tests 的读取处）；--runner inner
+ *  显式标注层身份；--log-file <suiteLogFile> 让 runner 把 suite 流 tee 进 fan-in 的 /tmp 日志
+ *  （spawnSuiteAndWait 的静默看门狗盯其 mtime——runner 不写 stdout，须经此缝让看门狗看到进度）。
+ *  抽成纯函数便于 worker-driver.test.mjs 断言缺省命令是 runner 而非 test.sh harness（AC2）。 */
+export function defaultMechanicalSuiteCommand(opts: {
+  task: string;
+  worktree: string;
+  root: string;
+  suiteLogFile: string;
+}): string[] {
+  return [
+    "node", "--no-warnings", "--experimental-strip-types",
+    path.join(opts.worktree, "plugin", "scripts", "full-suite-runner.ts"),
+    "--buckets", opts.task,
+    "--root", opts.worktree,
+    "--state-dir", path.join(opts.root, ".quay"),
+    "--runner", "inner",
+    "--log-file", opts.suiteLogFile,
+  ];
+}
+
 /**
  * driver 机械跑通一次无失败 fan-in 的 happy path（锁/merge/delta/typecheck/scoped门/suite/ff）。
  * ⛔ 语义失败点（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / suite 红 / ff 失败）一律返回
@@ -1788,7 +1816,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
     if (needSuite) {
-      const suiteCmd = opts.suiteCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--buckets", task];
+      const suiteCmd = opts.suiteCommand ?? defaultMechanicalSuiteCommand({ task, worktree, root, suiteLogFile });
       const sr: SuiteRunResult = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: suiteCmd, logFile: suiteLogFile, silenceMs: opts.silenceMs });
       suiteOutcome = sr.outcome;
       suiteFinishedEpoch = Math.floor(new Date(sr.finishedAt).getTime() / 1000);

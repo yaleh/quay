@@ -69,9 +69,9 @@ plugin/scripts/full-suite-runner.ts:1627  已原生支持 --buckets <task-id>（
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，记录定义正确）：一次跑红的 fan-in 桶路径落地，在 verification-round.jsonl 产生一条 `state=red` 记录（真实 suite_exit + fail 计数 + __BUCKETS__ marker）；（⛔ 仍无记录 / 记绿 ⇒ 假）。
-- [ ] AC2（能取假，机制正确——统一非补丁）：fan-in 桶路径通过 `full-suite-runner.ts --buckets <task>` 跑并记录，而非平行 `setsid bash scripts/test.sh` harness + green-only writer；若保留 detached harness，须给出「为什么 full-suite-runner.ts detached 形态不可用」的机械理由并仍走同一正确 writer；（⛔ 仍是无理由的平行 green-only writer ⇒ 假）。
-- [ ] AC3（能取假，展示定义正确）：`/tests` 页面（verification-round 消费者）显示红轮次（state=red 记录可见）——账本是完整真相，非 green-only 视图；（⛔ 红仍被隐藏 ⇒ 假）。
+- [x] AC1（能取假，记录定义正确）：一次跑红的 fan-in 桶路径落地，在 verification-round.jsonl 产生一条 `state=red` 记录（真实 suite_exit + fail 计数 + __BUCKETS__ marker）；（⛔ 仍无记录 / 记绿 ⇒ 假）。
+- [x] AC2（能取假，机制正确——统一非补丁）：fan-in 桶路径通过 `full-suite-runner.ts --buckets <task>` 跑并记录，而非平行 `setsid bash scripts/test.sh` harness + green-only writer；若保留 detached harness，须给出「为什么 full-suite-runner.ts detached 形态不可用」的机械理由并仍走同一正确 writer；（⛔ 仍是无理由的平行 green-only writer ⇒ 假）。
+- [x] AC3（能取假，展示定义正确）：`/tests` 页面（verification-round 消费者）显示红轮次（state=red 记录可见）——账本是完整真相，非 green-only 视图；（⛔ 红仍被隐藏 ⇒ 假）。
 
 ## Definition of Done
 

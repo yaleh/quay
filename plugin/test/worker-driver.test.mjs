@@ -99,6 +99,7 @@ import {
   parseMaxRetries,
   acquireFanInWorkflowLock,
   fanInWorkflowLockFile,
+  defaultMechanicalSuiteCommand,
 } from "../scripts/worker-driver.ts";
 // gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
 // 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
@@ -425,6 +426,71 @@ test("gap-suite-lock-starvation AC2 — readLockMetricsForRun reads lock_wait_ms
     // taskId guard: a matching runId but a DIFFERENT task → miss.
     const wrongTask = readLockMetricsForRun(root, "run-a", "gap-zzz");
     assert.equal(wrongTask.lockWaitMs, null, "runId match + taskId mismatch → null");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── gap-fan-in-red-bucket-run-not-recorded AC1/AC2 — 机械 fan-in 的 suite 步缺省命令 ───────────────
+// 机械路径此前跑平行 `bash scripts/test.sh --buckets`（绕开 verification-round.jsonl 唯一 writer，
+// 红桶轮次零记录——硬规则 3b「没跑过」与「跑了但红」同形）。现在缺省命令统一到 full-suite-runner.ts
+// --buckets：green+red 桶轮次都在 suite 退出时入账，/tests 趋势账本看到完整真相。
+
+test("AC2 — the mechanical fan-in default suite command is full-suite-runner.ts --buckets (not a parallel test.sh harness)", () => {
+  const cmd = defaultMechanicalSuiteCommand({
+    task: "gap-mech-red-bucket",
+    worktree: "/tmp/wt",
+    root: "/tmp/root",
+    suiteLogFile: "/tmp/fan-in-suite-gap-mech-red-bucket.log",
+  });
+  assert.ok(cmd.some((a) => a.endsWith("full-suite-runner.ts")), "the default suite command must be full-suite-runner.ts");
+  assert.ok(cmd.includes("--buckets") && cmd.includes("gap-mech-red-bucket"), "must pass --buckets <task>");
+  assert.ok(cmd.includes("--root") && cmd.includes("/tmp/wt"), "must pass --root <worktree> (the tested checkout)");
+  assert.ok(cmd.includes("--state-dir") && cmd.includes("/tmp/root/.quay"), "must pass --state-dir <root>/.quay (the shared checkout ledger)");
+  assert.ok(cmd.includes("--runner") && cmd.includes("inner"), "must pass --runner inner (explicit layer identity)");
+  assert.ok(cmd.includes("--log-file") && cmd.includes("/tmp/fan-in-suite-gap-mech-red-bucket.log"), "must pass --log-file <suiteLogFile> (the silence-watchdog tee)");
+  assert.ok(!cmd.some((a) => a.includes("scripts/test.sh")), "must NOT run a parallel `bash scripts/test.sh` harness");
+});
+
+test("AC1 — the mechanical fan-in default suite command, run against a red bucket suite, records state=red into verification-round.jsonl", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wd-mech-red-bucket-"));
+  try {
+    // A fake red bucket scripts/test.sh (the runner spawns `bash scripts/test.sh --buckets <task>` in cwd=root).
+    fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "scripts", "test.sh"), "#!/usr/bin/env bash\n" + [
+      'echo "__BUCKETS__ buckets=M files=3 full=0"',
+      'echo "# tests 5"',
+      'echo "# pass 3"',
+      'echo "# fail 2"',
+      'echo "# cancelled 0"',
+      "exit 1",
+    ].join("\n") + "\n", { mode: 0o755 });
+    // The default suite command resolves full-suite-runner.ts from the WORKTREE's plugin tree (the
+    // mechanical fan-in contract — the worktree carries the tested plugin code). Symlink the REAL plugin
+    // tree so the runner resolves in the temp "worktree" (same pattern as fan-in-execute-paths.test.mjs
+    // symlinkRuntimeTrees — untracked ⇒ never in any delta).
+    fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(root, "plugin"), "dir");
+    const suiteLog = path.join(root, "fan-in-suite.log");
+    const cmd = defaultMechanicalSuiteCommand({ task: "gap-mech-red-bucket", worktree: root, root, suiteLogFile: suiteLog });
+    // Hermetic seams (same family as full-suite-runner.test.mjs runRunner): skip the REAL resource gate
+    // + single-flight + systemd scope so a temp-repo fake suite is deterministic.
+    const child = spawn(cmd[0], cmd.slice(1), {
+      cwd: root,
+      env: { ...process.env, QUAY_TEST_SKIP_RESOURCE_GATE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (d) => { stderr += d; });
+    const code = await new Promise((resolve) => child.on("close", resolve));
+    assert.equal(code, 1, `the runner exits 1 on a red bucket round, got ${code} (stderr tail: ${stderr.slice(-400)})`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    assert.ok(fs.existsSync(vrf), "verification-round.jsonl written into --state-dir");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "red", "a red mechanical bucket round records state=red (not green, not absent)");
+    assert.equal(rec.fail, 2, "the fail count rides the record");
+    assert.equal(rec.buckets, "M", "the __BUCKETS__ marker is parsed into the buckets field");
+    assert.equal(rec.bucket_files, 3, "the __BUCKETS__ file count rides the record");
+    assert.equal(rec.runner, "inner", "explicit --runner inner is recorded");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
