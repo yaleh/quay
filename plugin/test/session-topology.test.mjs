@@ -243,51 +243,43 @@ test("AC2 — quay-init --loop lays down the topology factory + check, byte-iden
 
 // ── AC3 — topology-check verification (positive / negative / mixed controls) ───────────────────────
 
-test("AC3 — positive control: two windows each with a claude process ⇒ ok:true, exit 0", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test("AC3 — positive control: the outer window with a claude process ⇒ ok:true, exit 0", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const h = newHermetic();
   try {
     h.newSession("topo-pos", "bash");
-    for (const role of ["outer", "inner"]) {
-      h.newWindow("topo-pos", role, "bash");
-      h.send(`topo-pos:${role}`, "exec -a claude-probe sleep 10000 &");
-    }
-    for (const role of ["outer", "inner"]) {
-      assert.ok(await waitForClaude(h.env, `topo-pos:${role}`, 5000), `${role} must have a claude child before the check`);
-    }
+    h.newWindow("topo-pos", "outer", "bash");
+    h.send("topo-pos:outer", "exec -a claude-probe sleep 10000 &");
+    assert.ok(await waitForClaude(h.env, "topo-pos:outer", 5000), "outer must have a claude child before the check");
     const r = runCheck(h.env, ["--session", "topo-pos", "--json"]);
-    assert.equal(r.status, 0, `two-window topology in place must exit 0:\n${r.stdout}\n${r.stderr}`);
+    assert.equal(r.status, 0, `single-window topology in place must exit 0:\n${r.stdout}\n${r.stderr}`);
     const j = JSON.parse(r.stdout);
     assert.equal(j.ok, true, `must report ok:true:\n${r.stdout}`);
-    assert.deepEqual(j.windows, { outer: "ok", inner: "ok" });
+    assert.deepEqual(j.windows, { outer: "ok" });
   } finally { h.cleanup(); }
 });
 
-test("AC3 — negative control: a single bash window (no claude) ⇒ both topology windows missing, exit non-zero (the meta-cc-3/archguard-4 failure shape)", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
+test("AC3 — negative control: a single bash window (no claude) ⇒ the topology window missing, exit non-zero (the meta-cc-3/archguard-4 failure shape)", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
   const h = newHermetic();
   try {
-    h.newSession("topo-neg", "bash"); // only a bare bash window — no outer/inner
+    h.newSession("topo-neg", "bash"); // only a bare bash window — no outer
     const r = runCheck(h.env, ["--session", "topo-neg", "--json"]);
     assert.notEqual(r.status, 0, "a single-bash-window session must fail the check");
     const j = JSON.parse(r.stdout);
     assert.equal(j.ok, false);
-    assert.deepEqual(j.windows, { outer: "missing", inner: "missing" });
+    assert.deepEqual(j.windows, { outer: "missing" });
   } finally { h.cleanup(); }
 });
 
-test("AC3 — mixed: a topology window that is a bare bash (no claude) ⇒ no-claude, exit non-zero", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test("AC3 — mixed: the topology window is a bare bash (no claude) ⇒ no-claude, exit non-zero", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const h = newHermetic();
   try {
     h.newSession("topo-mix", "bash");
     h.newWindow("topo-mix", "outer", "bash"); // bare bash, no claude child
-    h.newWindow("topo-mix", "inner", "bash");
-    h.send("topo-mix:inner", "exec -a claude-probe sleep 10000 &");
-    assert.ok(await waitForClaude(h.env, "topo-mix:inner", 5000), "inner must be alive");
     const r = runCheck(h.env, ["--session", "topo-mix", "--json"]);
     assert.notEqual(r.status, 0, "an incomplete topology must fail the check");
     const j = JSON.parse(r.stdout);
     assert.equal(j.ok, false);
     assert.equal(j.windows.outer, "no-claude", "a bare-bash outer must be reported no-claude (window present, no claude process)");
-    assert.equal(j.windows.inner, "ok");
   } finally { h.cleanup(); }
 });
 
@@ -308,12 +300,12 @@ test("AC4 — cold-start/SKILL.md cross-annotates the session topology (TOPOLOGY
 
 // ── the factory (quay-topology.sh): dry-run plan + real build ──────────────────────────────────────
 
-test("factory — quay-topology.sh --dry-run emits the two-window plan; a real build creates the windows", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
+test("factory — quay-topology.sh --dry-run emits the single-window plan; a real build creates the window", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
   const h = newHermetic();
   try {
     const dry = spawnSync("bash", [FACTORY, "--session", "topo-factory", "--dry-run"], { encoding: "utf8", env: h.env });
     assert.equal(dry.status, 0, `dry-run must exit 0:\n${dry.stderr}`);
-    for (const role of ["outer", "inner"]) {
+    for (const role of ["outer"]) {
       assert.match(dry.stdout, new RegExp(role), `dry-run must plan the ${role} window`);
     }
     // Position-based (window name, not substring): the dry-run plan must not contain a `-n manager`
@@ -329,11 +321,11 @@ test("factory — quay-topology.sh --dry-run emits the two-window plan; a real b
     });
     assert.equal(build.status, 0, `build must exit 0:\n${build.stderr}`);
     const names = h.windowNames("topo-factory");
-    for (const role of ["outer", "inner"]) {
+    for (const role of ["outer"]) {
       assert.ok(names.includes(role), `the factory must create the ${role} window (got: ${names.join(", ")})`);
     }
     assert.ok(!names.includes("manager"), `the factory must NOT create a manager window (got: ${names.join(", ")})`);
-    // and the topology-check passes on the factory-built session (each window has a claude child).
+    // and the topology-check passes on the factory-built session (the window has a claude child).
     const r = runCheck(h.env, ["--session", "topo-factory", "--json"]);
     assert.equal(r.status, 0, `factory-built topology must pass the check:\n${r.stdout}\n${r.stderr}`);
   } finally { h.cleanup(); }
@@ -343,7 +335,7 @@ test("factory — idempotent on an EXISTING session (re-run must not error under
   const h = newHermetic();
   try {
     const launch = { ...h.env, TOPOLOGY_LAUNCH_CMD: "bash -c 'exec -a claude-probe sleep 10000 & wait'" };
-    // First run creates the session (outer first window + inner).
+    // First run creates the session (outer first window).
     const first = spawnSync("bash", [FACTORY, "--session", "topo-idem"], { encoding: "utf8", env: launch });
     assert.equal(first.status, 0, `first build must exit 0:\n${first.stderr}`);
     // Second run against the SAME session — the idempotent path (SESSION_EXISTED=1, FIRST unset).
@@ -351,9 +343,8 @@ test("factory — idempotent on an EXISTING session (re-run must not error under
     const second = spawnSync("bash", [FACTORY, "--session", "topo-idem"], { encoding: "utf8", env: launch });
     assert.equal(second.status, 0, `re-run must exit 0 (no FIRST-unbound under set -u):\n${second.stdout}\n${second.stderr}`);
     assert.match(second.stdout, /in-place: topo-idem:outer/, "re-run must leave the live outer window in place");
-    assert.match(second.stdout, /in-place: topo-idem:inner/, "re-run must leave the live inner window in place");
     const names = h.windowNames("topo-idem");
-    assert.deepEqual(names.filter((n) => n !== "topo-idem"), ["outer", "inner"], "windows must stay outer+inner (no manager, no duplicates)");
+    assert.deepEqual(names.filter((n) => n !== "topo-idem"), ["outer"], "windows must stay outer only (no manager, no duplicates)");
     // and the check still passes.
     const r = runCheck(h.env, ["--session", "topo-idem", "--json"]);
     assert.equal(r.status, 0, `idempotent-built topology must pass the check:\n${r.stdout}\n${r.stderr}`);
@@ -392,13 +383,13 @@ test("AC6 — single-flight lock: two concurrent creators → exactly ONE create
     const createWindows = (all.match(/^create-window:/gm) || []).length;
     // Exactly one session create (the first to hold the lock); the second must NOT create a second.
     assert.equal(createSessions, 1, `dual creators must create exactly ONE session (got ${createSessions}):\n${all}`);
-    // The only window create is inner (outer is the new session's first window). No duplicate.
-    assert.equal(createWindows, 1, `dual creators must create exactly ONE window (inner), got ${createWindows}:\n${all}`);
+    // No additional window create (outer is the new session's first window). No duplicate.
+    assert.equal(createWindows, 0, `dual creators must create ZERO extra windows (outer is the first window), got ${createWindows}:\n${all}`);
     // AC6's core invariant is atomic creation: exactly one session + one window set, no duplicates.
     // (A relaunch by the second creator — the window present but its claude child not yet spawned —
     // is BENIGN idempotence, not a double-create: it re-sends the same launch command. The lock's
     // job is preventing a second session/window, which the counts above pin.)
     const names = h.windowNames("topo-race");
-    assert.deepEqual(names.filter((n) => n !== "topo-race"), ["outer", "inner"], "window set must be outer+inner, no duplicates");
+    assert.deepEqual(names.filter((n) => n !== "topo-race"), ["outer"], "window set must be outer only, no duplicates");
   } finally { h.cleanup(); }
 });

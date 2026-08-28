@@ -118,7 +118,7 @@ test('AC6 — the manager SKILL indexes every on-disk orchestration/SPEC-*.md (i
 });
 
 // ── AC8: delivery vs startup independence — the plugin ships the manager, the cold-start does NOT start it ──
-test('AC8 — cold-start must NOT start the manager (one network = one manager); the topology factory builds only outer+inner', () => {
+test('AC8 — cold-start must NOT start the manager (one network = one manager); the topology factory builds only outer', () => {
   const cold = fs.readFileSync(COLD_START_SKILL, 'utf8');
   // The TOPOLOGY-IN-PLACE key must state manager is NOT part of the project topology.
   assert.match(cold, /manager is cross-project and NOT part of this topology|manager 跨项目|manager is cross-project/,
@@ -127,10 +127,10 @@ test('AC8 — cold-start must NOT start the manager (one network = one manager);
   const managerStartHits = cold.split('\n').filter((l) => /manager/i.test(l) && /(quay-launch\.sh manager|:manager|manager 窗口|manager window)/i.test(l));
   assert.deepEqual(managerStartHits, [], 'cold-start must not instruct starting a manager window (AC8)');
 
-  // The topology factory builds outer + inner only (the manager is not a project-topology window).
+  // The topology factory builds outer only (the manager and the retired inner are not project-topology windows).
   assert.ok(fs.existsSync(TOPOLOGY_FACTORY), 'plugin/scripts/quay-topology.sh must exist');
   const topo = fs.readFileSync(TOPOLOGY_FACTORY, 'utf8');
-  assert.match(topo, /ROLES="outer inner"/, 'quay-topology.sh must build ONLY outer+inner windows (AC8)');
+  assert.match(topo, /ROLES="outer"/, 'quay-topology.sh must build ONLY the outer window (AC8)');
   assert.ok(!/ROLES=.*manager/.test(topo), 'quay-topology.sh must NOT include manager in the project-topology roles (AC8)');
 });
 
