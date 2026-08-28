@@ -1009,6 +1009,46 @@ test("gap-suite-lock-starvation AC3 (negative control) — WITHOUT the watchdog 
   assert.match(r.stdout, /PROBE-STILL-HELD/, "without the watchdog the slot stays held (the positive release is the cap's doing)");
 });
 
+// ── gap-full-suite-lock-hold-watchdog-threshold-shorter-than-fan-in: dead-holder-only mode ────────────
+// AC2 (能取假): the fan-in workflow lock's hold = merge→suite→ff legitimately EXCEEDS any fixed timer.
+//   Reusing the suite lock's FULL_SUITE_LOCK_HOLD_MAX_S (1800s) cut the lock at 30min mid-suite ⇒ the ff
+//   ran lock-less (ff-race re-exposed). The fix: `timer-cut=0` disables path (c) (the timer yield) while
+//   path (b) (crash-autorelease) stays. This behavioral test proves a LIVE holder is NEVER cut in dead-
+//   holder-only mode — the contrast to the default (timer-cut=1) AC1/AC3 test above, where the SAME window
+//   DOES release the slot.
+
+test("gap-full-suite-lock-hold-watchdog-threshold (dead-holder-only) — timer-cut=0 never cuts a LIVE holder past the would-be timer (no path (c)), and emits no marker", () => {
+  const script = `
+    set -u
+    . "${SUITE_SLOT_LIB}"
+    tmp="$(mktemp -d)"
+    base="\${tmp}/full-suite.lock"
+    exec {fd}>"\${base}.0"
+    flock -n "\${fd}" || { echo "PRE-FLOCK-FAILED"; exit 1; }
+    flag="\${tmp}/hold.flag"
+    : > "\${flag}"
+    # timer-cut=0 (dead-holder-only): the 2s max-s is a placeholder that must NOT fire a timer cut.
+    wpid="$(spawn_suite_lock_hold_watchdog "\${fd}" "\${flag}" "$$" "2" "0")"
+    # Sleep PAST the 2s timer window: a LIVE holder must STILL hold the slot (no (c) cut).
+    sleep 3
+    exec {probe}<>"\${base}.0"
+    if flock -n "\${probe}"; then echo "PROBE-ACQUIRED"; else echo "PROBE-STILL-HELD"; fi
+    flock -u "\${probe}" 2>/dev/null || true
+    exec {probe}>&- 2>/dev/null || true
+    if [ -e "\${flag}" ]; then echo "FLAG-PRESENT"; else echo "FLAG-REMOVED"; fi
+    rm -f "\${flag}"          # normal release: flag removed ⇒ the watchdog exits (path a), no leak
+    wait "\${wpid}" 2>/dev/null || true
+    exec {fd}>&- 2>/dev/null || true
+    rm -rf "\${tmp}"
+  `;
+  const r = spawnSync("bash", ["-c", script], { encoding: "utf8", timeout: 15_000 });
+  assert.equal(r.status, 0, `dead-holder script must exit 0, got status=${r.status} stderr=${r.stderr}`);
+  assert.match(r.stdout, /PROBE-STILL-HELD/, `timer-cut=0 must NOT release a live holder past the would-be timer (no path (c)), got stdout:\n${r.stdout}`);
+  assert.doesNotMatch(r.stdout, /PROBE-ACQUIRED/, "a waiter must NOT acquire the slot in dead-holder-only mode (the holder is alive)");
+  assert.match(r.stdout, /FLAG-PRESENT/, "the flag must stay present (the watchdog did not remove it)");
+  assert.doesNotMatch(r.stderr, /lock_hold_exceeded=1/, "dead-holder-only mode must never emit the timer-cut marker");
+});
+
 // ── --for full-suite arg validation ────────────────────────────────────────────────────────────────
 test("gate rejects an unknown --for target with exit 2 (usage)", () => {
   const r = runGate({}, ["--for", "bogus"]);

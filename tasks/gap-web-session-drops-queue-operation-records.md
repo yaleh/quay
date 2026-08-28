@@ -1,7 +1,8 @@
 ---
 id: gap-web-session-drops-queue-operation-records
-title: quay-web /session/<id> 渲染管线静默丢弃「忙时入队、随后被吸收」的跨会话消息（queue-operation/attachment 无 .message 字段被过滤门丢弃）
-status: ready
+title: quay-web /session/<id>
+  渲染管线静默丢弃「忙时入队、随后被吸收」的跨会话消息（queue-operation/attachment 无 .message 字段被过滤门丢弃）
+status: done
 labels:
   - gap
   - defect
@@ -37,9 +38,9 @@ attachment：    {type, attachment:{type:"queued_command",...}, origin:{kind:"pe
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，吸收事件可渲染）：一条 `reason="absorbed_mid_turn"` 的 queue-operation 记录在 /session/<id> 页面可见（渲染成可区分标记）；（⛔ 仍不可见 ⇒ 假）。
-- [ ] AC2（能取假，闲时直达不回归）：空闲时到达的跨会话消息（type:"user"）仍正常渲染成气泡，不回归；（⛔ 被误删/误改 ⇒ 假）。
-- [ ] AC3（能取假，不伪造物化）：渲染不伪造 `.message.content` 记录（queue-operation/attachment 按 timestamp 就近挂，⛔ 不污染 transcript 本体）。
+- [x] AC1（能取假，吸收事件可渲染）：一条 `reason="absorbed_mid_turn"` 的 queue-operation 记录在 /session/<id> 页面可见（渲染成可区分标记）；（⛔ 仍不可见 ⇒ 假）。Evidence：`observation.test.mjs` AC1 测试 — `parseTranscript` 产出 `role:"external"` + `kind:"external"` turn，`renderSessionPage` 输出含「外部消息被吸收进当前回合（未开新回合）」+ 内容；48 测试全绿。
+- [x] AC2（能取假，闲时直达不回归）：空闲时到达的跨会话消息（type:"user"）仍正常渲染成气泡，不回归；（⛔ 被误删/误改 ⇒ 假）。Evidence：`observation.test.mjs` AC2 negative control — `type:"user"` 仍产出 `role:"user"` + `kind:"text"`，页面无 `tx-external` 标记。
+- [x] AC3（能取假，不伪造物化）：渲染不伪造 `.message.content` 记录（queue-operation/attachment 按 timestamp 就近挂，⛔ 不污染 transcript 本体）。Evidence：`observation.test.mjs` AC3 测试 — 混合 transcript 中 `user` turn 恰 1 条（真 type:"user"），queue/attachment 走独立 `external` block，不产出伪造 user turn。
 
 ## Definition of Done
 
@@ -48,6 +49,6 @@ queue-operation/attachment 有渲染路径；AC1-AC3 全勾；「忙时入队后
 ## Touches
 
 - packages/quay/src/observation.ts（parseTranscript/readTranscriptTail 补 queue-operation/attachment 渲染路径）
-- packages/quay/src/serve-tests.ts（session 渲染层）
-- packages/quay/test/observation.test.mjs（queue-operation/attachment 渲染测试 + 闲时直达不回归负控制；serve 渲染测试文件实现方按 bucketSetOfFile 渲染路径定）
+- packages/quay/src/serve-sessions.ts（session 渲染层 — renderTurnsHtml 补 external block 渲染分支）
+- packages/quay/test/observation.test.mjs（queue-operation/attachment 渲染测试 + 闲时直达不回归负控制；serve 渲染测试实现方按 renderSessionPage 归属并入本文件）
 - tasks/gap-web-session-drops-queue-operation-records.md（自身）

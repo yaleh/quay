@@ -20,7 +20,7 @@ checker_cmd() {
 # (I2 passes), and the bash canonical matches the TS canonical under the default env (I4 passes).
 write_green() {
   cat > plugin/scripts/suite-slot-lib.sh <<'EOF'
-suite_slot_count() { echo "${QUAY_MAX_CONCURRENT_SUITES:-2}"; }
+suite_slot_count() { echo "${QUAY_MAX_CONCURRENT_SUITES:-1}"; }
 suite_slot_paths() {
   local base="$1" count i
   count="$(suite_slot_count)"

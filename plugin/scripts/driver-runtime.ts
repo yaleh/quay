@@ -511,7 +511,9 @@ export function launchArgv(role: string, prompt: string, root: string): string[]
 // ── Layer 0 · 异步 spawn 原语（runAsync，SPEC §5.7：循环体用 spawnSync 会冻住协调地板）──────────────
 
 /** 异步 spawn（spawn 而非 spawnSync）：不阻塞事件循环，child exit 本身是一个唤醒源。collectStderr=true
- *  时捕获 stderr；缺省 stderr 丢弃。timeoutMs 到期 ⇒ SIGKILL child 并 resolve error。永不 throw。 */
+ *  时捕获 stderr；缺省 stderr 丢弃。timeoutMs 到期 ⇒ SIGKILL child 并 resolve error；timeoutMs=Infinity
+ *  ⇒ 无超时（unbounded，child exit/error 是唯一唤醒）——正确性锁的排队等待用（死持有者由调用侧的
+ *  watchdog 兜底，不靠此处 SIGKILL）。永不 throw。 */
 export async function runAsync(
   argv: string[],
   opts: { timeoutMs: number; collectStderr?: boolean } = { timeoutMs: 120_000 },
@@ -537,10 +539,14 @@ export async function runAsync(
       if (timer) clearTimeout(timer);
       resolve({ status, stdout, stderr, error });
     };
-    timer = setTimeout(() => {
-      try { child.kill("SIGKILL"); } catch { /* already gone */ }
-      finish(null, new Error(`spawn timeout after ${timeoutMs}ms (SIGKILL): ${argv[0]}`));
-    }, timeoutMs);
+    // ⛔ setTimeout(…, Infinity) 会被 Node 压到 1ms ⇒ 立即 SIGKILL（把「无超时」错当「立即超时」）。
+    // Infinity 显式 = 不设 timer（unbounded）；有限值仍照旧 SIGKILL。child close/error 是唯一唤醒源。
+    if (Number.isFinite(timeoutMs)) {
+      timer = setTimeout(() => {
+        try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        finish(null, new Error(`spawn timeout after ${timeoutMs}ms (SIGKILL): ${argv[0]}`));
+      }, timeoutMs);
+    }
     child.stdout?.on("data", (d) => { stdout += d; });
     if (child.stderr) child.stderr.on("data", (d) => { stderr += d; });
     child.on("error", (e) => finish(null, e));

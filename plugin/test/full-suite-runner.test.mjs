@@ -2001,7 +2001,7 @@ test("gap-suite-lane-budget AC1 (behavioral) — the watchdog writes `<slot>.yie
     flock -n "\${fd}" || { echo "PRE-FLOCK-FAILED"; exit 1; }
     flag="\${tmp}/hold.flag"
     : > "\${flag}"
-    wpid="$(spawn_suite_lock_hold_watchdog "\${fd}" "\${flag}" "$$" "2" "\${base}.0")"
+    wpid="$(spawn_suite_lock_hold_watchdog "\${fd}" "\${flag}" "$$" "2" "1" "\${base}.0")"
     if [ -e "\${flag}" ]; then echo "SPAWN-NON-BLOCKING"; else echo "SPAWN-BLOCKED"; fi
     sleep 3
     if [ -e "\${base}.0.yielded" ]; then echo "YIELD-MARKER-PRESENT"; else echo "YIELD-MARKER-ABSENT"; fi

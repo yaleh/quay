@@ -52,6 +52,15 @@ packages/quay/plugin/
 # outer reads it for cross-task checks, never git-tracked). Same gitignored runtime-state family as
 # gate-events.jsonl / dispatch-record.jsonl.
 **/.quay/worker-outcome.jsonl
+# gap-fan-in-workflow-lock-stale-runid-detached-holder (2026-08-28): the fan-in workflow lock's
+# acquire/release event ledger (.quay/fan-in-workflow-lock-events.jsonl) + the fan-in lock's token
+# flag (.quay/fan-in-workflow-lock-token-*.json) + manager's fan-in failure classification
+# (.quay/fan-in-failure-classification.jsonl) — all runtime state, never git-tracked; a live file
+# here dirtied the checkout and made fan-in-ff-merge refuse the merge-mode ff (unrelated to the
+# blocked task's code). Same gitignored runtime-state family as worker-outcome.jsonl / gate-events.jsonl.
+**/.quay/fan-in-workflow-lock-events.jsonl
+**/.quay/fan-in-failure-classification.jsonl
+**/.quay/fan-in-workflow-lock-token-*.json
 # gap-ac134-promotion-outcome-ledger (2026-08-22): the promotion driver's per-task outcome record
 # (.quay/promotion-outcome.jsonl) — runtime state, one line per determination/promotion/fix
 # (manager-phase-goal ### AC134: outer reads it for cross-task promotion-pattern recognition, never
@@ -317,6 +326,13 @@ orchestration/inner-idle-log.jsonl
 **/.quay/full-suite-state.json.suitefix-bak
 **/.quay/no-code-caller-triage.jsonl
 **/.quay/no-code-caller-triage-rescan.jsonl
+# gap-bucket-second-truth-source-page-recompute: the effective bucket-attribution artifact is a RUNTIME
+# DERIVED product (recomputed on every bucket dispatch by suite-bucket-select.ts, read by the /tests
+# page serve-tests.ts as the single truth source) — same family as verification-round.jsonl /
+# suite-load-*.jsonl; never committed. (The reattribution INPUT .quay/suite-bucket-reattribution.jsonl
+# is a tracked data asset — a reading consumer exists; this OUTPUT has none that would need a committed
+# value, only a page reader that degrades to UNRESOLVED when absent.)
+**/.quay/suite-bucket-effective.jsonl
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/

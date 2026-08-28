@@ -166,7 +166,17 @@ export async function spawnSuiteAndWait(args: {
       child = spawn(holder[0], holder.slice(1), {
         detached: true,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, ...(env ?? {}) },
+        // 「driver 持槽」是 spawnSuiteAndWait 的结构不变式（slot-holder 在 exec 前【总是】取单飞槽），
+        // 不是 caller 的选择 ⇒ 强制注入，放在 `...(env ?? {})` 之后（⛔ 不被 caller 的 env 覆盖）。
+        // gap-mech-fan-in-suite-silence-watchdog-fired：机械 fan-in 路径漏传本 env ⇒ scripts/test.sh
+        // --buckets 的 full_suite_lock_acquire 不跳过再取槽，用自己的新 FD 对【同一把槽】再 flock，
+        // 被 slot-holder 继承下来的 FD 拒绝（flock 按 open-file-description，同进程不同 FD 也互斥）⇒
+        // 卡进无界 while 等槽循环 ⇒ 零输出 ≥15min ⇒ 静默看门狗误当挂死 SIGKILL。
+        env: {
+          ...process.env,
+          ...(env ?? {}),
+          QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT: "1",
+        },
       });
     } catch (e) {
       resolve({
@@ -184,7 +194,11 @@ export async function spawnSuiteAndWait(args: {
     // （生产路径 suite 输出 tee 到 log、stdout 空）。任一推进都刷新 lastActivityMs。
     let lastActivityMs = Date.now();
     let lastLogMtime = logMtimeMs(logFile);
-    child.stdout?.on("data", () => { lastActivityMs = Date.now(); });
+    // 统一输出机件（gap 诊断）：suite 的 stdout 持久化到 logFile——⛔ 之前只捕获做看门狗活性检测、
+    // 不落盘 ⇒ 机械 fan-in 的 suite 失败无法从日志诊断（workflow 路径靠 shell 重定向才有日志）。
+    // append 追加（同 workflow 路径的 `>> log` 语义，跨 relaunch 复用同一文件不轮转）。
+    const suiteLogStream = logFile ? fs.createWriteStream(logFile, { flags: "a" }) : null;
+    child.stdout?.on("data", (chunk: Buffer) => { lastActivityMs = Date.now(); suiteLogStream?.write(chunk); });
     child.stderr?.on("data", () => { lastActivityMs = Date.now(); });
 
     const finish = (r: SuiteRunResult): void => {
@@ -213,6 +227,7 @@ export async function spawnSuiteAndWait(args: {
       finish({ outcome: "red", exitCode: null, signalCode: null, hungByWatchdog, startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedMs, error: `spawn error: ${e.message}`, pid: childPid });
     });
     child.on("close", (code, signal) => {
+      suiteLogStream?.end();
       const finishedAt = new Date().toISOString();
       const durationMs = Date.now() - startedMs;
       // 三态可分（AC2）：被静默看门狗杀 ⇒ hung（独立取值）；正常退出 0 ⇒ done；非零/信号 ⇒ red。
@@ -387,7 +402,7 @@ export async function runResidentSuiteLoop(opts: SuiteLoopOptions): Promise<numb
         suiteCommand: request.suiteCommand,
         logFile: request.logFile,
         silenceMs,
-        env: { QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT: "1" },
+        // QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT 由 spawnSuiteAndWait 强制注入（结构不变式），caller 不传。
       }).then((result) => {
         inFlight.delete(task);
         try { writeSuiteResult(root, task, { ...result, runId: request.runId }); } catch { /* 结果写失败不致命 */ }
@@ -500,7 +515,7 @@ export async function main(argv: string[]): Promise<number> {
       suiteCommand: cmd,
       logFile: logFile ?? null,
       silenceMs,
-      env: { QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT: "1" },
+      // QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT 由 spawnSuiteAndWait 强制注入（结构不变式），caller 不传。
     });
     writeSuiteResult(rootDir, task, { ...result, runId: resolvedRunId });
     appendSuiteRound(rootDir, computeSuiteRound({ runId: resolvedRunId, task, result, slotBase: resolvedSlotBase }));

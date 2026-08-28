@@ -56,6 +56,9 @@ governance 第三套退役、142 文件改标真实相、bucket 单一选择落�
 - plugin/scripts/suite-bucket-select.ts（10 UNRESOLVED 真值核对 + 可能的镜像折叠）
 - plugin/scripts/suite-bucket-attribution.ts（10 UNRESOLVED 真值核对）
 - plugin/scripts/full-suite-runner.ts（governance 退役 + QUAY_TEST_GROUPS 语义收窄）
-- plugin/test/（142 文件相标改标 + 39 守卫删除 + bucket 归属测试）
+- plugin/test/*.test.mjs（142 文件相标改标 + 39 守卫删除——有界顶层 glob，非递归；实现方按此 glob 内文件落地）
+- plugin/test/runner-fixtures/gov.test.mjs（fixture）
+- plugin/test/suite-bucket-select.test.mjs（bucket 归属测试）
+- plugin/test/suite-bucket-attribution.test.mjs（bucket 归属测试）
 - scripts/test.sh（governance 跳过语义移除）
 - tasks/gap-retire-governance-group-merge-into-bucket.md（自身）
