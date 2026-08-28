@@ -339,6 +339,33 @@ export function checkTaskTouchesResolve(taskBody, root) {
   return { hasSection, ...checkTouchesResolve(entries, root) };
 }
 
+/** Promotion-time touches-WIDTH check (2026-08-28, gap-touches-breadth-silent-global-dispatch-lock):
+ *  a task whose `## Touches` contains a DIRECTORY-LEVEL glob (a bare directory path, or a glob whose
+ *  expansion sweeps a whole directory tree) is a silent global dispatch lock while in flight — it
+ *  expands to every file under the dir, so touchesDisjoint filters every peer task touching that tree
+ *  (measured: `plugin/test/**` → 354 files; one running task emptied a 29-candidate dispatch pool to
+ *  zero). `isOverbroadDeclaration` already catches the <2-concrete-segment wildcards (`**`,
+ *  `orchestration/**`); this check catches the 2+ segment directory sweeps (`plugin/scripts/**`,
+ *  `plugin/test/**`, `packages/quay/src/**`) that pass it. A `(new)`-tagged entry is EXEMPT — a
+ *  directory the task itself creates cannot overlap peers' existing work (narrow by construction);
+ *  a `(delete)`-tagged one is NOT (deleting a tree a peer still touches is exactly the conflict to
+ *  flag). Returns { narrow, wideGlobs } — a distinct "too wide" verdict, NOT "evaluated & narrow"
+ *  conflated with "no Touches declared" (hard rule 3b; a missing section is handled by selfTouchCheck
+ *  / touchesResolve, which already reject it). */
+export function checkTouchesNarrow(taskBody) {
+  const { hasSection, section } = extractTouchesSection(taskBody);
+  const entries = hasSection ? parseTouchEntriesWithTags(section) : [];
+  const wideGlobs = [];
+  for (const e of entries) {
+    if (e.tag === "new") continue;
+    const norm = normalizePath(e.path);
+    if (isOverbroadDeclaration(norm) || /\/\*\*$/.test(norm) || /\/$/.test(e.path)) {
+      wideGlobs.push(e.path);
+    }
+  }
+  return { narrow: wideGlobs.length === 0, wideGlobs };
+}
+
 /** Frontmatter `role` field (raw value, null when absent) — the compound self-touch exemption's
  *  single read of the full task text (which INCLUDES the frontmatter). `role: compound` is the
  *  explicit aggregation marker (see ready-pool-check.ts's isCompoundTask for the same judgment). */
