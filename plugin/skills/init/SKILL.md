@@ -154,6 +154,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/archive -->
 <!-- reference-doc: orchestration/SPEC-cut-the-waiting.md -->
 <!-- reference-doc: orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-execution-loop-productization-2026-08-28.md -->
 <!-- reference-doc: orchestration/REVIEW-cadence.md -->
 <!-- reference-doc: orchestration/manager-loop-tick.md -->
 <!-- reference-doc: orchestration/manager-tick-log.md -->

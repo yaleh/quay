@@ -27,7 +27,8 @@
 //   判据4 — (gap-fan-in-workflow-lock-and-S1, AC4 修订) the fan-in WORKFLOW lock must COVER the suite
 //           ⇒ RED when a same-task suite run falls OUTSIDE its workflow-lock hold. This is the NEW
 //           whole-workflow lock (`fan-in-workflow.lock`, events in .quay/fan-in-workflow-lock-
-//           events.jsonl, written by fan-in-ff-merge.sh --acquire/--release-workflow-lock), DISTINCT
+//           events.jsonl, written by worker-driver.ts's acquireFanInWorkflowLock — the driver-side
+//           non-detached holder, ADR-034/gap-adr034-fan-in-lock-holder-supervised), DISTINCT
 //           from the ms-scale merge lock of 判据2b/判据1. The OLD AC4「两把锁覆盖范围不得交叉」stays
 //           true for the MERGE lock (判据2b); the workflow lock is EXPECTED to overlap/cover the suite.
 //           A suite with no taskId, no workflow-lock hold, or whose taskId matches NO hold (a
