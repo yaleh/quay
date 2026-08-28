@@ -16,6 +16,12 @@ jobs:
       issues: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # list-files=0 CI 根因 (2026-08-28): 默认浅克隆 (depth 1) 缺
+          # test-group-downgrade-check 的 enforcement baseline 8ea050c7 → NOT-EVALUATED exit 2 →
+          # scripts/test.sh --list-files 空输出 → test-coverage-check --selftest AC5 fail。
+          # fetch-depth: 0 = 全量历史, baseline 存在, 守卫可评估。
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           # M120 (DIR-060): this step SPAWNS the `.ts` CLI bins as subprocesses
@@ -70,6 +76,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # list-files=0 CI 根因 (2026-08-28): 默认浅克隆 (depth 1) 缺
+          # test-group-downgrade-check 的 enforcement baseline 8ea050c7 → NOT-EVALUATED exit 2 →
+          # scripts/test.sh --list-files 空输出 → test-coverage-check --selftest AC5 fail。
+          # fetch-depth: 0 = 全量历史, baseline 存在, 守卫可评估。
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -111,6 +123,12 @@ jobs:
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
+        with:
+          # list-files=0 CI 根因 (2026-08-28): 默认浅克隆 (depth 1) 缺
+          # test-group-downgrade-check 的 enforcement baseline 8ea050c7 → NOT-EVALUATED exit 2 →
+          # scripts/test.sh --list-files 空输出 → test-coverage-check --selftest AC5 fail。
+          # fetch-depth: 0 = 全量历史, baseline 存在, 守卫可评估。
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -142,6 +160,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # list-files=0 CI 根因 (2026-08-28): 默认浅克隆 (depth 1) 缺
+          # test-group-downgrade-check 的 enforcement baseline 8ea050c7 → NOT-EVALUATED exit 2 →
+          # scripts/test.sh --list-files 空输出 → test-coverage-check --selftest AC5 fail。
+          # fetch-depth: 0 = 全量历史, baseline 存在, 守卫可评估。
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'

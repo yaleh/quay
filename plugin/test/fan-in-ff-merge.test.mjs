@@ -28,7 +28,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -1071,104 +1071,5 @@ test("lock is a SEPARATE file from the suite lock (AC4 — 对象不相干)", ()
   } finally {
     cleanup(dir);
     cleanup(st);
-  }
-});
-
-// ── gap-fan-in-workflow-lock-stale-runid-detached-holder: the workflow-lock pidfile records the holder's
-//    runId, and the acquire guard kills a stale QUEUED holder (different runId, no acquired marker) ─────
-
-/** The workflow-lock pidfile / marker paths (per-task, under /tmp — the script's fixed surface). */
-function wlPidfile(taskId) { return path.join(os.tmpdir(), `fan-in-workflow-lock-${taskId}.pid`); }
-function wlAcquired(taskId) { return path.join(os.tmpdir(), `fan-in-workflow-lock-${taskId}.acquired`); }
-function wlFlag(taskId) { return path.join(os.tmpdir(), `fan-in-workflow-lock-${taskId}.flag`); }
-function wlWatchdog(taskId) { return path.join(os.tmpdir(), `fan-in-workflow-lock-${taskId}.watchdog`); }
-/** Parse the pidfile's `$$ <runId>` form (gap-fan-in-workflow-lock-stale-runid-detached-holder). */
-function wlReadPidfile(taskId) {
-  const parts = fs.readFileSync(wlPidfile(taskId), "utf8").trim().split(/\s+/);
-  return { pid: Number(parts[0]), runId: parts.slice(1).join(" ") || null };
-}
-
-test("workflow lock pidfile records `$$ <runId>` and a same-runId re-acquire reuses the SAME holder (runId 比对)", () => {
-  const dir = makeTmp("wlrunid");
-  try {
-    initRepo(dir);
-    const a1 = runMerge(["--task", "t1", "--root", dir, "--run-id", "r1", "--acquire-workflow-lock"]);
-    assert.equal(a1.status, 0, `acquire must succeed: ${a1.stdout}${a1.stderr}`);
-    const { pid: pid1, runId: runId1 } = wlReadPidfile("t1");
-    assert.equal(runId1, "r1", "AC1: the pidfile records the dispatch runId (⛔ pidfile 只记 PID ⇒ 假)");
-    assert.ok(Number.isInteger(pid1) && pid1 > 0, "the pidfile carries a valid pid");
-
-    // Re-acquire with the SAME runId ⇒ the guard reuses the holder (no kill, no re-spawn).
-    const a2 = runMerge(["--task", "t1", "--root", dir, "--run-id", "r1", "--acquire-workflow-lock"]);
-    assert.equal(a2.status, 0, `same-runId re-acquire must succeed: ${a2.stdout}${a2.stderr}`);
-    const { pid: pid2 } = wlReadPidfile("t1");
-    assert.equal(pid2, pid1, "same-runId re-acquire must reuse the SAME holder (no re-spawn)");
-
-    runMerge(["--task", "t1", "--root", dir, "--release-workflow-lock"]);
-  } finally {
-    cleanup(dir);
-  }
-});
-
-test("AC3 — a stale QUEUED holder (different runId, NO acquired marker) is killed + re-spawned with the new runId", async () => {
-  const dir = makeTmp("wlstale");
-  let stale = null;
-  try {
-    initRepo(dir);
-    // A REAL live process stands in for the detached holder a previous dispatch left behind: its pidfile
-    // carries the OLD runId and there is NO acquired marker (it never held the lock — still queued).
-    stale = spawn("sleep", ["100"], { detached: true, stdio: "ignore" });
-    fs.writeFileSync(wlPidfile("t1"), `${stale.pid} old-run\n`, "utf8");
-    for (const p of [wlAcquired("t1"), wlFlag("t1"), wlWatchdog("t1")]) {
-      try { fs.rmSync(p, { force: true }); } catch (_) { /* best-effort */ }
-    }
-
-    // Acquire with a NEW runId ⇒ the guard sees a live holder with a mismatched runId + no acquired
-    // marker ⇒ it must kill the stale holder and re-spawn with THIS runId (⛔ 复用陈旧 holder ⇒ 假).
-    const a = runMerge(["--task", "t1", "--root", dir, "--run-id", "new-run", "--acquire-workflow-lock"]);
-    assert.equal(a.status, 0, `acquire after stale-holder cleanup must succeed: ${a.stdout}${a.stderr}`);
-
-    // The stale holder is dead (the guard killed it). A SIGTERM'd child briefly lingers as a ZOMBIE
-    // (`kill -0` still succeeds on it) until node reaps it — await (not spawnSync sleep) yields the event
-    // loop so node reaps the zombie, then `kill -0` genuinely fails.
-    let staleAlive = true;
-    for (let i = 0; i < 40; i++) {
-      try { process.kill(stale.pid, 0); } catch (_) { staleAlive = false; break; }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    assert.equal(staleAlive, false, "AC3: the stale queued holder must be KILLED (not reused)");
-
-    // The new pidfile carries the NEW runId (the re-spawn was for THIS dispatch).
-    const { pid: newPid, runId: newRunId } = wlReadPidfile("t1");
-    assert.equal(newRunId, "new-run", "AC3: the re-spawned holder carries the NEW runId");
-    assert.ok(newPid !== stale.pid, "the re-spawn is a NEW holder (different pid)");
-
-    runMerge(["--task", "t1", "--root", dir, "--run-id", "new-run", "--release-workflow-lock"]);
-  } finally {
-    if (stale) { try { process.kill(stale.pid, "SIGKILL"); } catch (_) { /* already gone */ } }
-    cleanup(dir);
-  }
-});
-
-test("already-holding holder (different runId but acquired marker present) is NOT killed — the guard leaves it alone", () => {
-  const dir = makeTmp("wlhold");
-  try {
-    initRepo(dir);
-    // Acquire with runId r1 ⇒ holder H1 holds the lock AND writes the acquired marker.
-    const a1 = runMerge(["--task", "t1", "--root", dir, "--run-id", "r1", "--acquire-workflow-lock"]);
-    assert.equal(a1.status, 0, `acquire must succeed: ${a1.stdout}${a1.stderr}`);
-    const { pid: pid1 } = wlReadPidfile("t1");
-    assert.ok(fs.existsSync(wlAcquired("t1")), "the acquired marker is present (the holder HOLDS the lock)");
-
-    // Re-acquire with a DIFFERENT runId while the holder already holds the lock (mid-work) ⇒ the guard
-    // must NOT kill it (a kill would abort merge/suite/ff in progress).
-    const a2 = runMerge(["--task", "t1", "--root", dir, "--run-id", "r2", "--acquire-workflow-lock"]);
-    assert.equal(a2.status, 0, `already-holding re-acquire must succeed (reuse): ${a2.stdout}${a2.stderr}`);
-    const { pid: pid2 } = wlReadPidfile("t1");
-    assert.equal(pid2, pid1, "an already-holding holder must NOT be killed (the pidfile stays the same)");
-
-    runMerge(["--task", "t1", "--root", dir, "--release-workflow-lock"]);
-  } finally {
-    cleanup(dir);
   }
 });

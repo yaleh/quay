@@ -21,7 +21,7 @@ extra: {}
 
 ## Plan
 
-抽 `writeJsonAtomic<T>(path, value)` 公共实现（tmp + renameSync，收编 `_atomicWriteJson`），6 处全迁；对那 3 处无理由的非原子写，实现时逐处追调用方读时序，判断「并发读者能否观察到半写态」——若能，迁移是正确性修复；若不能，注释写明为何非原子安全（同 `writeMirrorState` 先例）。
+抽 `writeJsonAtomic<T>(path, value)` 公共实现（tmp + renameSync，收编 `_atomicWriteJson`，放 `plugin/scripts/write-json-atomic.ts`），6 处全迁（driver-shared / inner-blocked-signal / mirror-full-suite-state / red-window-triage / runner-state-write / suite-state-trigger）；对那 3 处无理由的非原子写，实现时逐处追调用方读时序，判断「并发读者能否观察到半写态」——若能，迁移是正确性修复；若不能，注释写明为何非原子安全（同 `writeMirrorState` 先例）。负控制测试放 `plugin/test/writestate-atomicity-split.test.mjs`。⛔ 新建文件按上述命名落地，不另取名。
 
 ## Acceptance Criteria
 
@@ -35,6 +35,13 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/（writeJsonAtomic 公共实现 + 6 处 write*State 迁移）
-- plugin/test/（原子写并发读负控制测试）
+- plugin/scripts/write-json-atomic.ts (new)（writeJsonAtomic 公共实现，收编 proposal-convergence 的 _atomicWriteJson）
+- plugin/scripts/driver-shared.ts（writeControlState 迁移）
+- plugin/scripts/inner-blocked-signal.ts（writeRulerObserverState 迁移）
+- plugin/scripts/mirror-full-suite-state.ts（writeMirrorState 迁移）
+- plugin/scripts/red-window-triage.ts（writeState 迁移）
+- plugin/scripts/runner-state-write.ts（writeState 迁移）
+- plugin/scripts/suite-state-trigger.ts（writeSuiteState 迁移）
+- plugin/scripts/proposal-convergence.ts（收编私有 _atomicWriteJson）
+- plugin/test/writestate-atomicity-split.test.mjs (new)（原子写并发读负控制测试）
 - tasks/gap-writestate-atomicity-split.md（自身）

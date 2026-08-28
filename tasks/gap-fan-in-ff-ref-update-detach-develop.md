@@ -2,7 +2,7 @@
 id: gap-fan-in-ff-ref-update-detach-develop
 title: fan-in 目标 develop 脱离主检出——ff 改纯 ref 更新（脏树结构上无关），doc-only 工作分支，架构级替代
   449f111e 的 pre-flight 旁路
-status: done
+status: ready
 labels:
   - gap
   - defect
@@ -57,24 +57,41 @@ extra:
 - ⚠️ 确认的受影响面：主检出改停工作分支后，任务经 ref 更新落地（develop ref 前进）**不碰主检出工作树** ⇒ 主检出盘上 `tasks/*.md` 相对 develop **滞后**（已落地任务的 status flip 不在盘上）⇒ 这些消费者读到陈旧视图（已落地任务仍显 ready ⇒ 有重派发风险）。
 - ⛔ 结论：**「主检出脱离 develop」的激活动作不随本任务落地**——它要求先把这四个消费者从「读盘上 tasks」改为「读 develop ref（`git show develop:tasks/...`）或等价刷新机制」，否则重派发风险立现。本任务落地【机制】以 **dual-mode**（develop 仍检出 ⇒ 旧 merge 路径，不破生产；已脱离 ⇒ ref 更新路径），激活排到消费者修复的 follow-up。
 
+## 激活记录 + 双向同步机制（manager 2026-08-28 落实）
+
+**已激活**：主检出已切到 doc-only 工作分支 `main/manager-doc`（从 develop f0d11209a 创建）；develop 已不被任何检出占用；ff dual-mode 现走 push-mode（ref-update，脏树结构上无关）。
+
+**激活暴露的真实缺口（已实现部分）**：主检出停工作分支后，promotion-driver 的 ready-pool-check --apply 翻转 commit 到 main/manager-doc 但不到 develop ⇒ 任务 worktree（从 develop 分支）看不到新 status，fan-in 闸错读（派发看到 ready、worktree 旧状态）。**已修**：ready-pool-check `commitTaskStatus` 后调 `propagateDocBranchToDevelop`（push main/manager-doc → develop；develop 已前进则先 merge 再 push，best-effort）——f0d11209a。
+
+**剩余（新 AC）**：
+- **AC5 反向同步**：每次落地后 driver 循环把 develop merge 进 main/manager-doc（否则 computeLandingState 读陈旧主检出 → 假 not-landed——watchdog 实证：落地成功但验证读到旧 status 误标 needs-human）。
+- **AC6 激活验证**：完整自主闭环（派发 → 翻转传播 → worktree 从 develop 见新状态 → 机械 fan-in → push-mode ff 落地 → 反向同步 → computeLandingState 绿）端到端跑通 ≥1 任务。
+- ⛔ **worktree 不从 main/manager-doc 分支**：改 base 会让未 push 的 .md 翻转进 fan-in delta → anti-drift out-of-declared HARD FAIL（anti-drift-touches-check.ts:183 实证）。传播机制（翻转 push 到 develop）后，从 develop 分支即见新状态，无需改 base。
+
 ## Acceptance Criteria
 
 - [x] AC1（能取假，ff 改 ref 更新）：develop 脱离主检出后，ff 退化为纯 ref 更新（不碰工作树），主检出脏树不再阻塞任务 fan-in——生产回放 live-ghost 场景（`message-receipts.jsonl` 脏检出）不再 4 次 exited-not-landed；（⛔ 仍因脏树阻塞 ⇒ 假）。
 - [x] AC2（能取假，doc-only 机械强制 + 负控制）：工作分支含代码变更时 `--classify-delta` 非空即拒合并；负控制：真代码变更必须被拒；（⛔ 代码变更放行 ⇒ 假）。
 - [x] AC3（能取假，B类保护不破坏）：merge target 错配、非 ff、suite 运行中、锁超时等原有环境错误仍正确 `exit 2` 拒绝；（⛔ 保护退化 ⇒ 假）。
 - [x] AC4（能取假，C类 + 二阶效应逐项确认）：47 处 develop 引用 A/B/C 分类逐条留理由；C 类备份语义（periodic-push-backup）+ 二阶效应①消费者枚举（ready-pool-check/slot-refill/promotion-driver/web server）逐项确认受影响面并留理由，⛔ 不盲改；（⛔ 有 C 类/消费者未确认即改 ⇒ 假）。
+- [x] AC5（能取假，激活已做）：主检出停 main/manager-doc，develop 未检出，ff dual-mode 走 push-mode（⛔ 主检出仍停 develop ⇒ 假）。**Evidence: main/manager-doc 已激活，f0d11209a 同步**
+- [x] AC6（能取假，翻转传播已实现）：promotion 翻转 commit 到 main/manager-doc 后自动 push 到 develop（⛔ 翻转滞留工作分支 ⇒ 假）。**Evidence: ready-pool-check propagateDocBranchToDevelop，f0d11209a，117/117 scoped 绿**
+- [ ] AC7（能取假，反向同步）：每次落地后 develop merge 进 main/manager-doc（⛔ 主检出滞后 develop ⇒ computeLandingState 假 not-landed）。**未实现——本任务重开后第一个要做的**
+- [ ] AC8（能取假，激活端到端验证）：完整自主闭环 ≥1 任务落地且 computeLandingState 绿（⛔ 闭环中断 ⇒ 假）。**未验证**
 
 ## Definition of Done
 
-ff 以 dual-mode 落地（develop 仍检出 ⇒ `git merge --ff-only`；已脱离 ⇒ `git push .` ref 更新，auto-select）+ doc-only 机械强制落地；AC1-AC4 全勾；C 类备份语义与二阶效应①消费者逐项确认；live-ghost 场景回放脏树不再阻塞（ref 更新路径）。**「develop 脱离主检出」的激活动作是协调型 follow-up**（机制已落地为 dual-mode；激活要求先修四个消费者读盘上 tasks 的滞后，见实现记录二阶效应①），不随本任务落地。
+ff 以 dual-mode 落地（develop 仍检出 ⇒ `git merge --ff-only`；已脱离 ⇒ `git push .` ref 更新，auto-select）+ doc-only 机械强制落地；AC1-AC4 全勾；**激活已做（AC5）+ 翻转传播已做（AC6）**；C 类备份语义与二阶效应①消费者逐项确认；**AC7 反向同步 + AC8 端到端验证** 达成后，本任务才是真正完成（此前 2026-08-27 done 的只是机制未激活的部分）。
 
 ## Touches
 
 - plugin/scripts/fan-in-ff-merge.sh（ff 改 dual-mode：merge target 已脱离 ⇒ `git push .` ref 更新；仍检出 ⇒ `git merge --ff-only` + clean-tree 检查保留）
+- plugin/scripts/ready-pool-check.ts（翻转传播：commitTaskStatus 后 propagateDocBranchToDevelop → push main/manager-doc → develop）
 - plugin/scripts/develop-work-ff.sh（新：doc-only 工作分支 → develop 的 ref 更新 + `--classify-delta` 机械强制）
 - plugin/scripts/capability-catalog.sh（注册 develop-work-ff.sh 六表 + fan-in-ff-merge.sh 描述随 ff 改 ref 更新同步）
 - plugin/test/fan-in-ff-merge.test.mjs（改写：ff 改 ref 更新、脏树不阻塞、merge target 脱离）
 - plugin/test/develop-work-ff.test.mjs（新：doc-only 机械强制 + 负控制）
+- plugin/test/ready-pool-check.test.mjs（传播机制测试）
 - plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（develop 脱离主检出）
 - plugin/test/fan-in-ff-executor-check.test.mjs（ff-retry 惰性增量测试随 develop 脱离改写）
 - docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数 +1）

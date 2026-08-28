@@ -18,7 +18,7 @@ extra:
 
 ## Plan
 
-落一个独立于 manager 的活性兜底（heartbeat 超时检测 + 通知），阈值 T 落笔方定；负控制用本会话现成样本回放（outer 04:13:54Z–07:30:07Z 的 AskUserQuestion 阻塞态）。
+落一个独立于 manager 的活性兜底（heartbeat 超时检测 + 通知，放 `plugin/scripts/manager-liveness-independent-check.ts` + 测试 `plugin/test/manager-liveness-independent-check.test.mjs`），阈值 T 落笔方定；负控制用本会话现成样本回放（outer 04:13:54Z–07:30:07Z 的 AskUserQuestion 阻塞态）。新建文件按上述命名落地，不另取名。
 
 ## Acceptance Criteria
 
@@ -31,5 +31,6 @@ manager 活性独立兜底落地：不经过 manager 的 heartbeat 超时检测 
 
 ## Touches
 
-- plugin/scripts/（manager 活性兜底检测 + 通知）
+- plugin/scripts/manager-liveness-independent-check.ts (new)（manager 活性兜底检测 + 通知）
+- plugin/test/manager-liveness-independent-check.test.mjs (new)（负控制回放：AskUserQuestion 阻塞态 T 后须通知）
 - tasks/gap-ac147-manager-liveness-independent-channel.md（自身）

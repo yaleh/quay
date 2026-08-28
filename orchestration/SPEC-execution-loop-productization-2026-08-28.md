@@ -59,7 +59,7 @@ worker-driver.ts (2200 行 TS，61 处 .sh 引用)
 
 **一个业务过程一套实现，落在 `packages/quay`（产品面）。**
 
-1. **`quay task fan-in` CLI verb + MCP 工具**（TS in packages/quay）：吸收 acquire-lock → merge develop → delta 判定 → ts-typecheck → scoped 门 → suite → anti-drift → AC 闸 → flip done → ff 全步骤。driver 调这一个 verb，替代 9 次 mechSh + bash ff-merge。
+1. **`quay task fan-in` CLI verb + MCP 工具**（TS in packages/quay）：吸收 acquire-lock → merge develop → delta 判定 → ts-typecheck → scoped 门 → suite → anti-drift → AC 闸 → flip done → ff 全步骤。driver 调这一个 verb，替代 9 次 mechSh + bash ff-merge。**⛔ `fan-in-ff-merge.sh` 改为 .ts 模块（packages/quay，如 fan-in/ff-merge.ts）被 worker-driver.ts / verb import**（人 2026-08-28 逐字裁定「fan-in-ff-merge.sh 应该改为 .ts 模块被 import」）——持锁段/ff/clean-tree/escalation 业务落 TS，不再 shell-out 到 bash；L1 token 闸（封非机械 ff，`--acquire-workflow-lock` 已被 ADR-034 废除）在该 TS 模块内实现。
 2. **锁按 ADR-034**：由 driver 自身持有（受监督、可重启的常驻进程），释放只靠进程退出——bash 锁包装器与 flag 协议消失。
 3. **workflow 兜底降级为纯调用**：driver 机械失败时调 `quay task fan-in --semantic-fallback`，不再是平行实现；删 fan-in-execute.js 双副本。
 4. **套件入口收进 TS**：full-suite-runner.ts 已是 TS；`scripts/test.sh`（1542 行 bash）收窄为薄转发或并入 TS runner。
@@ -74,7 +74,7 @@ worker-driver.ts (2200 行 TS，61 处 .sh 引用)
 | Phase | 内容 | 判据（能取假） |
 |---|---|---|
 | **P1** | ADR-034 落地：锁收进 driver（自身持锁 / 非分离直接子进程），废除分离 holder + flag 协议 | driver 被杀 → 锁自动释放（负控制单测）；一次真实 fan-in 全程无孤儿 holder |
-| **P2** | `runMechanicalFanIn` 产品化为 `quay task fan-in`（吸收 ff-merge.sh 的锁/clean-tree/escalation/ff 业务），删 fan-in-ff-merge.sh | 一次真实 fan-in 经新 verb 落地；旧 .sh 删除后无引用 |
+| **P2** | `runMechanicalFanIn` 产品化为 `quay task fan-in`；**fan-in-ff-merge.sh → .ts 模块（packages/quay，被 import，人 2026-08-28 裁定）**，持锁段/ff/clean-tree/escalation 业务落 TS，删 bash 版 | 一次真实 fan-in 经新 verb + TS 模块落地；旧 .sh 删除后无引用；无 shell-out 到 bash ff-merge |
 | **P3** | workflow 兜底降级为 `--semantic-fallback` 纯调用；删 fan-in-execute.js 双副本 | 机械失败时语义兜底仍生效；双副本删净 |
 | **P4** | suite 入口收进 TS；dispatch 侧（ready-pool-check/slot-refill）产品化 | 全量 suite 不回归；派发计算单一真相源 |
 
