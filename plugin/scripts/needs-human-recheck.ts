@@ -43,6 +43,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { TASK_STATUS } from "../../packages/quay/src/abi.ts";
 // SINGLE-SOURCE ruler (contract invariant same_ruler_on_needs_human): the SAME DELETED_SCRIPTS
 // list strategic-doc-staleness-check.ts uses — imported, never re-declared.
 import { DELETED_SCRIPTS } from "./strategic-doc-staleness-check.ts";
@@ -154,7 +155,7 @@ export function scanNeedsHuman(root: string, staleDays: number, now: Date): Need
     if (!e.endsWith(".md")) continue;
     const abs = path.join(tasksDir, e);
     const fm = readFrontmatter(abs);
-    if (fm?.status !== "needs-human") continue;
+    if (fm?.status !== TASK_STATUS.NEEDS_HUMAN) continue;
     out.push(classifyTask(abs, root, staleDays, now));
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));

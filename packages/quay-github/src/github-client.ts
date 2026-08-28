@@ -3,7 +3,7 @@
 // repository and maps them onto the canonical view-model (DESIGN.md §3).
 
 import { execFileSync } from "node:child_process";
-import type { Task } from "../../quay/src/abi.ts";
+import { TASK_STATUS, isTaskStatus, type Task } from "../../quay/src/abi.ts";
 
 const STATUS_LABEL_RE = /^status:(.+)$/;
 const LANE_LABEL_RE = /^lane:(.+)$/;
@@ -17,7 +17,7 @@ const LANE_LABEL_RE = /^lane:(.+)$/;
 // one almost always means the newer, more-advanced one. This is applied
 // only among the open-issue labels; issue.state == "closed" still
 // unconditionally forces "done" regardless of any label (unchanged rule).
-const STATUS_PRECEDENCE = ["done", "needs-human", "ready", "todo"];
+const STATUS_PRECEDENCE: readonly string[] = [TASK_STATUS.DONE, TASK_STATUS.NEEDS_HUMAN, TASK_STATUS.READY, TASK_STATUS.TODO];
 
 // GitHub task-list checkbox syntax referencing another issue in the SAME
 // repo, e.g. "- [ ] #12" or "- [x] #12". This is the closest thing GitHub
@@ -131,7 +131,7 @@ export function issueToViewModel(issue: Record<string, unknown>, parentIndex: Ma
     }
   }
 
-  let status: Task["status"] = "todo";
+  let status: Task["status"] = TASK_STATUS.TODO;
   if (statusLabelsFound.length === 1) {
     status = statusLabelsFound[0] as Task["status"];
   } else if (statusLabelsFound.length > 1) {
@@ -152,7 +152,15 @@ export function issueToViewModel(issue: Record<string, unknown>, parentIndex: Ma
   // issue.state == "closed" always wins -> done, regardless of any
   // status:* label left on a closed issue (DESIGN.md §3).
   if (issue.state === "closed") {
-    status = "done";
+    status = TASK_STATUS.DONE;
+  }
+
+  // Parse-boundary guard (gap-abi-status-lifecycle-vocab-scattered-no-named-type):
+  // a `status:*` label whose value is outside the five-word lifecycle vocab is
+  // REJECTED — fail closed to `todo` rather than silently casting an illegal
+  // label value into a legal-looking `Task.status`.
+  if (!isTaskStatus(status)) {
+    status = TASK_STATUS.TODO;
   }
 
   const body = (issue.body as string | null | undefined) ?? "";
@@ -327,7 +335,7 @@ export function pageIssues({ maxIssues, perPage, fetchPage }: { maxIssues: numbe
 //   labels are removed first, to avoid reintroducing the multi-label
 //   precedence ambiguity DESIGN.md §3.1 already had to solve for read.
 export function computeStatusWrite({ currentLabelNames, status }: { currentLabelNames: string[]; status: string }): { close: boolean; addLabels: string[]; removeLabels: string[] } {
-  if (status === "done") {
+  if (status === TASK_STATUS.DONE) {
     return { close: true, addLabels: [], removeLabels: [] };
   }
   const removeLabels = currentLabelNames.filter((n) => STATUS_LABEL_RE.test(n));
@@ -446,11 +454,11 @@ export function childrenStatus(task: TaskLike, getTask: (childId: string) => Tas
     if (!child) return { id: childId, status: "missing" };
     if (child.role === "compound") {
       const grandkids = childrenStatus(child, getTask, nextVisited);
-      const subtreeOk = grandkids.every((g) => g.status === "done");
-      const status = child.status === "done" && !subtreeOk ? "stale-done" : (child.status ?? "todo");
+      const subtreeOk = grandkids.every((g) => g.status === TASK_STATUS.DONE);
+      const status = child.status === TASK_STATUS.DONE && !subtreeOk ? "stale-done" : (child.status ?? TASK_STATUS.TODO);
       return { id: childId, status, childrenStatus: grandkids };
     }
-    return { id: childId, status: child.status ?? "todo" };
+    return { id: childId, status: child.status ?? TASK_STATUS.TODO };
   });
 }
 
@@ -480,7 +488,7 @@ export function checkGate(task: { id: string; status: string; body?: string | nu
   const artifacts = gateArtifactSections(body);
   const allArtifactsPresent = Object.values(artifacts).every(Boolean);
 
-  if (status === "todo") {
+  if (status === TASK_STATUS.TODO) {
     const gate = "author->ready";
     const acSection = extractGateSection(body, ["AC", "Acceptance Criteria"]);
     const acCheckboxes = acSection.match(/- \[[ xX]\]/g) || [];
@@ -517,7 +525,7 @@ export function checkGate(task: { id: string; status: string; body?: string | nu
     };
   }
 
-  if (status === "ready") {
+  if (status === TASK_STATUS.READY) {
     const acSection = extractGateSection(body, ["AC", "Acceptance Criteria"]);
     const checkboxes = acSection.match(/- \[[ xX]\]/g) || [];
     const checked = acSection.match(/- \[[xX]\]/g) || [];
@@ -532,9 +540,9 @@ export function checkGate(task: { id: string; status: string; body?: string | nu
     const isCompound = role === "compound" && (children || []).length > 0;
     const taskLike: TaskLike = { id, role: role ?? "primitive", children: children ?? [], status };
     const kids = isCompound ? childrenStatus(taskLike, getChildTask ?? (() => null)) : [];
-    const childrenOk = kids.every((c) => c.status === "done");
+    const childrenOk = kids.every((c) => c.status === TASK_STATUS.DONE);
     const ok = acOk && childrenOk;
-    const badChildren = kids.filter((c) => c.status !== "done");
+    const badChildren = kids.filter((c) => c.status !== TASK_STATUS.DONE);
     let reason: string;
     if (!acOk) {
       reason = `${checked.length}/${checkboxes.length} AC checkboxes checked`;
@@ -557,7 +565,7 @@ export function checkGate(task: { id: string; status: string; body?: string | nu
     return result;
   }
 
-  if (status === "done") {
+  if (status === TASK_STATUS.DONE) {
     // QN-035 (DIR-006): a `done` compound (epic) task's gate check must
     // actually re-verify that its children are still `done`, rather than
     // unconditionally rubber-stamping `ok: true` -- direct port of
@@ -566,9 +574,9 @@ export function checkGate(task: { id: string; status: string; body?: string | nu
     const isCompound = role === "compound" && (children || []).length > 0;
     const taskLike: TaskLike = { id, role: role ?? "primitive", children: children ?? [], status };
     const kids = isCompound ? childrenStatus(taskLike, getChildTask ?? (() => null)) : [];
-    const childrenOk = kids.every((c) => c.status === "done");
+    const childrenOk = kids.every((c) => c.status === TASK_STATUS.DONE);
     if (isCompound && !childrenOk) {
-      const badChildren = kids.filter((c) => c.status !== "done");
+      const badChildren = kids.filter((c) => c.status !== TASK_STATUS.DONE);
       return {
         id,
         gate: "none",
@@ -584,7 +592,7 @@ export function checkGate(task: { id: string; status: string; body?: string | nu
     return result;
   }
 
-  if (status === "needs-human") {
+  if (status === TASK_STATUS.NEEDS_HUMAN) {
     return { id, gate: "none", ok: false, reason: "soft stop; human action required" };
   }
 

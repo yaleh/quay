@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { QUAY_VERSION } from "./version.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
+import { TASK_STATUS, isTaskStatus } from "./abi.ts";
 
 const execFileP = promisify(execFile);
 
@@ -462,7 +463,7 @@ export function computeBlockingRelations(
     const blockedBy: string[] = [];
     for (const y of tasks) {
       if (y.id === x) continue;
-      const yReadyTodo = y.status === "ready" || y.status === "todo";
+      const yReadyTodo = y.status === TASK_STATUS.READY || y.status === TASK_STATUS.TODO;
       const overlap = y.touches.some((p) => xTouches.has(p));
       const yDependsOnX = y.dependsOn.includes(x);
       if (yReadyTodo && (overlap || yDependsOnX)) blocks.push(y.id);
@@ -895,7 +896,7 @@ function readTaskStatusOnDisk(root: string, taskId: string): string | null {
     const raw = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
     const parsed = parseFrontmatter(raw);
     const fm = parsed.frontmatter as Record<string, unknown>;
-    return typeof fm.status === "string" ? fm.status : null;
+    return isTaskStatus(fm.status) ? fm.status : null;
   } catch {
     return null;
   }
@@ -907,7 +908,7 @@ function readTaskStatusOnDisk(root: string, taskId: string): string | null {
  *  ghost (its worker session ended, was superseded, or escaped to a human WITHOUT a normal fan-in END
  *  telemetry). `todo`/`ready` are NOT terminal: `ready` is the genuine in-flight case (AC2), and a
  *  `todo` carrying a start event is not evidence of terminality. */
-const NON_LIVE_TASK_STATUSES: ReadonlySet<string> = new Set(["done", "superseded", "needs-human"]);
+const NON_LIVE_TASK_STATUSES: ReadonlySet<string> = new Set([TASK_STATUS.DONE, TASK_STATUS.SUPERSEDED, TASK_STATUS.NEEDS_HUMAN]);
 
 /**
  * Live loop view: in-flight fast-mode tasks + elapsed minutes + concurrency + CPU pressure +
@@ -1046,7 +1047,7 @@ export function readLive(
     const byTask = new Map<string, InFlightTask>();
     for (const t of inFlight) byTask.set(t.taskId, t);
     for (const t of workerInFlight) {
-      if (readTaskStatusOnDisk(root, t.taskId) === "done") continue;
+      if (readTaskStatusOnDisk(root, t.taskId) === TASK_STATUS.DONE) continue;
       byTask.set(t.taskId, t);
     }
     inFlight = [...byTask.values()].sort(

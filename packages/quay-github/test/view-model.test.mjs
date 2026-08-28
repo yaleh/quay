@@ -105,14 +105,16 @@ function mkIssue(overrides) {
 }
 
 {
-  // two unrecognized values, neither in STATUS_PRECEDENCE at all -- the
-  // documented "in the order encountered" tie-break for the fully-unranked
-  // case: first one wins (stable sort, both rank equally at
-  // STATUS_PRECEDENCE.length).
+  // two unrecognized values, neither in STATUS_PRECEDENCE at all. The
+  // precedence sort still ranks them equal (stable-sort "first encountered"),
+  // but the parse-boundary guard (gap-abi-status-lifecycle-vocab-scattered-
+  // no-named-type) then REJECTS the illegal value: it fails closed to `todo`
+  // rather than surfacing an unreadable status label as a legal-looking
+  // Task.status (hard rule 3b — an unreadable value must not look valid).
   const vm = issueToViewModel(
     mkIssue({ labels: [{ name: "status:alpha-unrecognized" }, { name: "status:beta-unrecognized" }] })
   );
-  assert(vm.status === "alpha-unrecognized", "two unrecognized status labels: first one encountered wins (stable-sort tie-break)");
+  assert(vm.status === "todo", "two unrecognized status labels: fail-closed to todo (illegal value never surfaces as a legal-looking status)");
 }
 
 // --- Bug #1: parent/children via task-list checkbox convention ---

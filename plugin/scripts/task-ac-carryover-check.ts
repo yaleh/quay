@@ -63,6 +63,7 @@ import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { recordNoBlockLedger } from "./task-contract-check.ts";
+import { TASK_STATUS } from "../../packages/quay/src/abi.ts";
 
 // ── Workspace-root discovery (same walk as task-contract-check) ────────────────────────────────────
 export function findWorkspaceRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
@@ -191,7 +192,7 @@ export function scanStore({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), f
   const unnamed = [];
   for (const [id, raw] of texts) {
     const status = (raw.match(/^status:\s*(\S+)/m) || [])[1];
-    if (status !== "done") continue;
+    if (status !== TASK_STATUS.DONE) continue;
     const acSection = extractSection(raw, "Acceptance Criteria");
     const unchecked = uncheckedAcIds(acSection);
     if (unchecked.length === 0) {

@@ -42,20 +42,21 @@ extra: {}
 - packages/quay/src/abi.ts（导出 TaskStatus + TASK_STATUSES 单一来源 + isTaskStatus 守卫）
 - packages/quay/src/gate/lifecycle.ts（消费者迁移）
 - packages/quay/src/gate/driver.ts（消费者迁移）
-- packages/quay/src/goal-store.ts（消费者迁移）
 - packages/quay/src/observation.ts（消费者迁移）
 - packages/quay/src/serve-dashboard.ts（消费者迁移）
+- packages/quay/src/serve-task.ts（消费者迁移）
+- packages/quay/src/serve-needs-human.ts（消费者迁移）
 - packages/quay-native/src/store.ts（YAML 盘读解析点，isTaskStatus 守卫）
 - packages/quay-github/src/github-client.ts（消费者迁移）
-- plugin/scripts/task-schema.ts（parseTask 盘读解析点，isTaskStatus 守卫）
+- packages/quay-github/test/view-model.test.mjs（非法 status 标签 fail-closed 断言更新）
 - plugin/scripts/cap-counts-subagents-check.ts（消费者迁移）
-- plugin/scripts/portfolio-choice.ts（消费者迁移）
+- plugin/scripts/driver-filters.ts（消费者迁移）
+- plugin/scripts/needs-human-recheck.ts（消费者迁移）
 - plugin/scripts/prod-data-audit.ts（消费者迁移）
-- plugin/scripts/ready-pool-check.ts（消费者迁移）
-- plugin/scripts/suite-driver.ts（消费者迁移）
-- plugin/scripts/task-status-drift-check.ts（消费者迁移）
+- plugin/scripts/ready-pool-check.ts（消费者迁移 + 盘读 status isTaskStatus 守卫）
+- plugin/scripts/stale-ready-audit.ts（消费者迁移）
+- plugin/scripts/task-ac-carryover-check.ts（消费者迁移）
+- plugin/scripts/task-contract-check.ts（消费者迁移）
 - plugin/scripts/worker-driver.ts（消费者迁移）
-- plugin/scripts/workflow-baseline-metrics.ts（消费者迁移）
-- plugin/scripts/workflow-replay.ts（消费者迁移）
 - plugin/test/abi-task-status-typing.test.mjs (new)（类型守卫 + 非法值 fail-closed 负控制）
 - tasks/gap-abi-status-lifecycle-vocab-scattered-no-named-type.md（自身）

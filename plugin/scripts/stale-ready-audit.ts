@@ -20,6 +20,7 @@
 // 只读契约（AC4）：只读 tasks/*.md + .quay/gate-events.jsonl，不写文件、不改状态。
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { TASK_STATUS } from "../../packages/quay/src/abi.ts";
 
 const root = process.argv[2] ?? process.cwd();
 const asJson = process.argv.includes("--json");
@@ -80,7 +81,7 @@ for (const f of readdirSync(tasksDir)) {
   const file = join(tasksDir, f);
   const body = readFileSync(file, "utf8");
   const fm = taskFrontmatter(body);
-  if (fm["status"] !== "ready") continue;
+  if (fm["status"] !== TASK_STATUS.READY) continue;
   if (evidenceSection(body).length < 20) continue;
   if (checkedAcCount(body) < 1) continue;
   staleReady.push({ id: f.replace(/\.md$/, ""), title: fm["title"] ?? "" });
@@ -110,7 +111,7 @@ for (const f of readdirSync(tasksDir)) {
   const file = join(tasksDir, f);
   const body = readFileSync(file, "utf8");
   const fm = taskFrontmatter(body);
-  if (fm["status"] !== "done") continue;
+  if (fm["status"] !== TASK_STATUS.DONE) continue;
   const mtimeMs = statSync(file).mtimeMs;
   if (now - mtimeMs > withinMs) continue; // not recently done — the flip predates the audit window
   if (completeByPipeline.has(f.replace(/\.md$/, ""))) continue; // went through the QENG gate path
