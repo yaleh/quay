@@ -1,17 +1,18 @@
 // @test-group engine
-// fan-in-workflow-lock.test.mjs — gap-fan-in-workflow-lock-and-S1: the fan-in WORKFLOW lock (a SEPARATE
-// flock from the ms-scale merge lock) held by a detached holder for the ENTIRE fan-in workflow
-// (merge develop → full suite → ff), so develop does not advance during a locked task's fan-in
-// (ff-race structurally impossible — SPEC-fan-in-workflow-lock-and-S1-2026-08-26).
+// fan-in-workflow-lock.test.mjs — gap-fan-in-workflow-lock-and-S1 + ADR-034 (gap-adr034-fan-in-lock-
+// holder-supervised): the fan-in WORKFLOW lock (a SEPARATE flock from the ms-scale merge lock). ADR-034
+// abolished the detached-holder + flag-release protocol — the lock is now held by the driver via
+// worker-driver.ts's acquireFanInWorkflowLock (a non-detached direct child that dies with the driver, so
+// the lock's release is the single "process exit → kernel closes fd" mechanism, no watchdog / timer /
+// third-party flag). This file covers the INVARIANTS that survive the protocol change:
 //
-//   * AC1 — acquire → lock HELD (a second flock -n fails) → release → lock FREE. The negative control
-//     (⛔ still only a ms-scale ff lock ⇒ false) is the flock -n probe itself: the lock must be held
-//     while the workflow runs, not just for the ff's millisecond.
-//   * AC1 idempotency — a re-acquire for the SAME task does not spawn a second holder (the pidfile
-//     stays the same), so a killed-then-re-run acquire step (Bash 600s) cannot double-hold.
-//   * AC5 — holder CRASH ⇒ the suite-lock hold watchdog releases the lock (re-acquire then succeeds).
-//   * AC4 (fixed lock order) — scripts/test.sh (the fan-in-EXTERNAL suite path) has NO reference to the
-//     fan-in workflow lock ⇒ the suite lock never requests the fan-in lock ⇒ reverse order impossible.
+//   * AC1 — acquireFanInWorkflowLock holds the lock (a second flock -n fails) → release frees it. The
+//     negative control (⛔ still only a ms-scale ff lock ⇒ false) is the flock -n probe itself.
+//   * AC1/AC2 — the lock events carry the dispatch runId, and readWorkflowLockHold reads the hold by
+//     that runId (⛔ a stale runId reads null).
+//   * AC4 (fixed lock order) — scripts/test.sh (fan-in-EXTERNAL suite path) never requests the lock.
+//   * AC4 — the workflow lock and the suite lock are DIFFERENT files (two orthogonal locks).
+//   * AC2 — S=1 via the .concurrency single source (bash + TS canons agree).
 //
 // Run:
 //   scripts/test.sh plugin/test/fan-in-workflow-lock.test.mjs
@@ -25,9 +26,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+import { acquireFanInWorkflowLock, readWorkflowLockHold } from "../scripts/worker-driver.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
-const MERGE_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "fan-in-ff-merge.sh");
 const TEST_SH = path.join(REPO_ROOT, "scripts", "test.sh");
 const SUITE_SLOT_LIB = path.join(REPO_ROOT, "plugin", "scripts", "suite-slot-lib.sh");
 
@@ -47,14 +49,10 @@ function initRepo(dir) {
   gitCmd(dir, "init", "-q");
   gitCmd(dir, "config", "user.name", "faninwfl-test");
   gitCmd(dir, "config", "user.email", "fwfl@example.com");
-  gitCmd(dir, "branch", "-M", "master");
+  gitCmd(dir, "branch", "-M", "develop");
   fs.writeFileSync(path.join(dir, "base.txt"), "base\n", "utf8");
   gitCmd(dir, "add", "-A");
   gitCmd(dir, "commit", "-q", "-m", "base");
-}
-
-function runMerge(args, opts = {}) {
-  return spawnSync("bash", [MERGE_SCRIPT, ...args], { encoding: "utf8", ...opts });
 }
 
 /** The workflow lock file for a repo (git-common-dir → `<dir>/.git/fan-in-workflow.lock`). */
@@ -69,67 +67,49 @@ function lockIsHeld(dir) {
   return r.status !== 0;
 }
 
-// ── AC1: acquire holds the lock; release frees it ─────────────────────────────────────────────────────
+// ── AC1 (ADR-034): acquire holds the lock; release frees it ───────────────────────────────────────────
 
-test("AC1 — acquire holds the workflow lock (flock -n fails); release frees it (flock -n succeeds)", () => {
+test("AC1 — acquireFanInWorkflowLock holds the workflow lock (flock -n fails); release frees it (flock -n succeeds)", async () => {
   const dir = makeTmp("ac1");
   try {
     initRepo(dir);
-    const acquire = runMerge(["--task", "t1", "--root", dir, "--run-id", "r1", "--acquire-workflow-lock"]);
-    assert.equal(acquire.status, 0, `acquire must succeed: ${acquire.stdout}${acquire.stderr}`);
+    const lock = await acquireFanInWorkflowLock({ root: dir, task: "t1", runId: "r1" });
     // ⛔ the whole point: the lock is HELD while the workflow runs, not just during the ff.
     assert.equal(lockIsHeld(dir), true, "after acquire the workflow lock must be HELD (a second flock -n must fail)");
-    const release = runMerge(["--task", "t1", "--root", dir, "--release-workflow-lock"]);
-    assert.equal(release.status, 0, `release must succeed: ${release.stdout}${release.stderr}`);
+    await lock.release();
     assert.equal(lockIsHeld(dir), false, "after release the workflow lock must be FREE");
   } finally {
     cleanup(dir);
   }
 });
 
-test("AC1 idempotency — a re-acquire for the SAME task keeps the SAME holder (no second spawn)", () => {
-  const dir = makeTmp("ac1idem");
+// ── AC1/AC2 (gap-fan-in-workflow-lock-stale-runid-detached-holder): lock events carry the dispatch
+//    runId, and readWorkflowLockHold reads the hold by the correct runId ───────────────────────────────
+
+test("AC1/AC2 — the lock events carry the dispatch runId, and readWorkflowLockHold reads the hold by that runId (⛔ a stale runId reads null)", async () => {
+  const dir = makeTmp("runid");
   try {
     initRepo(dir);
-    const a1 = runMerge(["--task", "t1", "--root", dir, "--run-id", "r1", "--acquire-workflow-lock"]);
-    assert.equal(a1.status, 0);
-    const pid1 = fs.readFileSync(path.join(os.tmpdir(), "fan-in-workflow-lock-t1.pid"), "utf8").trim();
-    const a2 = runMerge(["--task", "t1", "--root", dir, "--run-id", "r1", "--acquire-workflow-lock"]);
-    assert.equal(a2.status, 0, `idempotent re-acquire must succeed: ${a2.stdout}${a2.stderr}`);
-    const pid2 = fs.readFileSync(path.join(os.tmpdir(), "fan-in-workflow-lock-t1.pid"), "utf8").trim();
-    assert.equal(pid2, pid1, "re-acquire must reuse the SAME holder (no second spawn)");
-    runMerge(["--task", "t1", "--root", dir, "--release-workflow-lock"]);
-  } finally {
-    cleanup(dir);
-  }
-});
+    // NO eventsFile override: the events land at the DEFAULT path (<root>/.quay/fan-in-workflow-lock-
+    // events.jsonl), which is exactly the file readWorkflowLockHold reads — the real reader over the real writer.
+    const events = path.join(dir, ".quay", "fan-in-workflow-lock-events.jsonl");
+    const lock = await acquireFanInWorkflowLock({ root: dir, task: "t1", runId: "r-fresh" });
+    await lock.release();
 
-// ── AC5: holder crash ⇒ the suite-lock hold watchdog releases the lock ───────────────────────────────
+    // AC1: every lock event carries THIS dispatch's runId (⛔ a stale runId ⇒ 会计错).
+    const lines = fs.readFileSync(events, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
+    assert.equal(lines.length, 2, "exactly acquire + release");
+    assert.deepEqual(lines.map((e) => e.runId), ["r-fresh", "r-fresh"], "AC1: every lock event carries the dispatch runId");
 
-test("AC5 — holder crash ⇒ the watchdog releases the lock (a later acquire succeeds)", () => {
-  const dir = makeTmp("ac5");
-  try {
-    initRepo(dir);
-    const acquire = runMerge(["--task", "t1", "--root", dir, "--run-id", "r1", "--acquire-workflow-lock"]);
-    assert.equal(acquire.status, 0);
-    const holder = fs.readFileSync(path.join(os.tmpdir(), "fan-in-workflow-lock-t1.pid"), "utf8").trim();
-    assert.ok(holder, "holder pidfile must be written");
-    assert.equal(lockIsHeld(dir), true, "lock held before the crash");
-    // Crash the holder (SIGKILL — no chance to clean up). flock auto-releases the holder's OWN fd, but
-    // the watchdog (a child inheriting the same open-file-description) would otherwise keep it held ⇒
-    // the watchdog must release it on the next poll.
-    process.kill(Number(holder), "SIGKILL");
-    // The watchdog polls each 1s; give it a couple of polls to detect the dead holder + release.
-    let free = false;
-    for (let i = 0; i < 30; i++) {
-      spawnSync("sleep", ["0.1"], { encoding: "utf8" });
-      if (!lockIsHeld(dir)) { free = true; break; }
-    }
-    assert.equal(free, true, "after the holder crashes the watchdog must release the lock (≤ ~3s)");
-    // A fresh acquire must now succeed (the lock was genuinely released, not just probe-visible).
-    const re = runMerge(["--task", "t2", "--root", dir, "--run-id", "r2", "--acquire-workflow-lock"]);
-    assert.equal(re.status, 0, `post-crash acquire must succeed: ${re.stdout}${re.stderr}`);
-    runMerge(["--task", "t2", "--root", dir, "--release-workflow-lock"]);
+    // AC2: readWorkflowLockHold(task, runId) reads the hold by the CORRECT runId (⛔ null ⇒ the
+    // mechanical AC1/AC2 判据 is dead).
+    const hold = readWorkflowLockHold(dir, "t1", "r-fresh");
+    assert.ok(hold.lockAcquireEpoch !== null, "lockAcquireEpoch must be read (not null)");
+    assert.ok(hold.lockReleaseEpoch !== null, "lockReleaseEpoch must be read (not null)");
+    assert.ok(hold.lockHoldSecs !== null && hold.lockHoldSecs >= 0, "lockHoldSecs must be read (not null, ≥ 0)");
+    // The WRONG runId must read null — a stale-runId read is empty, which is the bug's exact symptom.
+    const stale = readWorkflowLockHold(dir, "t1", "r-stale");
+    assert.equal(stale.lockHoldSecs, null, "a different runId must read null (no cross-runId leak)");
   } finally {
     cleanup(dir);
   }
@@ -146,8 +126,8 @@ test("AC4 — the workflow lock and the suite lock are DIFFERENT files (two orth
   const dir = makeTmp("ac4files");
   try {
     initRepo(dir);
-    // fan-in-ff-merge.sh resolves the workflow lock file from git-common-dir; the suite lock uses the
-    // S-slot full-suite.lock.* family. They must be distinct files (SPEC §2.1 两把正交锁).
+    // fan-in-ff-merge.sh (the ms-scale merge lock) uses fan-in-merge.lock; the driver-held workflow lock
+    // uses fan-in-workflow.lock; the suite lock uses the S-slot full-suite.lock.* family. They are distinct.
     assert.notEqual(path.basename(lockFile(dir)), "full-suite.lock.0", "workflow lock ≠ a suite slot");
   } finally {
     cleanup(dir);

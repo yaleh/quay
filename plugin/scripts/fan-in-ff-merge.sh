@@ -104,10 +104,6 @@ retry_record=""
 escalations=""
 lock_wait=30
 worktree=""
-acquire_workflow_lock=""
-release_workflow_lock=""
-workflow_lock_events=""
-workflow_lock_hold_max_s=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -123,10 +119,6 @@ while [ "$#" -gt 0 ]; do
     --escalations) escalations="$2"; shift 2 ;;
     --lock-wait) lock_wait="$2"; shift 2 ;;
     --worktree) worktree="$2"; shift 2 ;;
-    --acquire-workflow-lock) acquire_workflow_lock="1"; shift ;;
-    --release-workflow-lock) release_workflow_lock="1"; shift ;;
-    --workflow-lock-events) workflow_lock_events="$2"; shift 2 ;;
-    --workflow-lock-hold-max-s) workflow_lock_hold_max_s="$2"; shift 2 ;;
     *) echo "fan-in-ff-merge: unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -164,120 +156,10 @@ if [ -z "${lock_events}" ]; then lock_events="${root}/.quay/fan-in-merge-lock-ev
 if [ -z "${retry_record}" ]; then retry_record="${root}/.quay/fan-in-retries.jsonl"; fi
 if [ -z "${escalations}" ]; then escalations="${root}/.quay/fan-in-ff-escalations.jsonl"; fi
 
-# ── fan-in workflow lock (gap-fan-in-workflow-lock-and-S1) ────────────────────────────────────────────
-# A SEPARATE flock from the ms-scale merge lock (fan-in-merge.lock, above): `fan-in-workflow.lock` is
-# held by a DETACHED holder for the ENTIRE fan-in workflow (merge develop → full suite → ff), so
-# develop does NOT advance during a locked task's fan-in ⇒ ff-race is structurally impossible
-# (SPEC-fan-in-workflow-lock-and-S1-2026-08-26 §2.1: two ORTHOGONAL locks — the suite lock guards
-# compute, THIS lock guards "who may merge develop now"). The ms-scale merge lock above stays as the
-# ff's own correctness lock (backward-compat + the direct/应急 path); the workflow lock serializes the
-# WHOLE workflow. AC4 (fixed lock order): this lock is acquired BEFORE the suite starts (step 0.5,
-# before step-1 merge develop) and the suite lock is acquired INSIDE the suite ⇒ "先 fan-in 锁 → 再
-# suite 锁"; fan-in 外 suite tests never request the fan-in lock (test.sh has no fan-in-workflow.lock
-# reference — the reverse order / cross-request is structurally impossible).
-# ⚠️ 执行载体修订（gap-fan-in-driver-mechanical-orchestration / SPEC-fan-in-driver-mechanical-
-#   orchestration-2026-08-27）：acquire/release 的【调用方】从 fan-in-execute.js 的 subagent prompt 挪到
-#   worker-driver.ts 的 runMechanicalFanIn——driver 代码里的确定性控制流（acquire → merge → suite →
-#   ff → release），锁持有时长从「模型 ~30min」塌缩到「机械 ~10min」（AC1）。本脚本的 acquire/release
-#   机制不变（detached holder + 幂等 + watchdog 只作死持有者兜底），只是不再被一个慢子代理拿着。
-workflow_lock_file="${git_common_dir}/fan-in-workflow.lock"
-if [ -z "${workflow_lock_events}" ]; then workflow_lock_events="${root}/.quay/fan-in-workflow-lock-events.jsonl"; fi
-workflow_lock_pidfile="/tmp/fan-in-workflow-lock-${task_id}.pid"
-workflow_lock_flag="/tmp/fan-in-workflow-lock-${task_id}.flag"
-workflow_lock_watchdog="/tmp/fan-in-workflow-lock-${task_id}.watchdog"
-workflow_lock_acquired="/tmp/fan-in-workflow-lock-${task_id}.acquired"
-workflow_lock_log="/tmp/fan-in-workflow-lock-${task_id}.log"
-# Hold-cap watchdog threshold (SPEC §6: ⛔ no NEW numeric threshold — reuse the existing suite-lock
-# FULL_SUITE_LOCK_HOLD_MAX_S baseline; the fan-in lock's own value is derived later once the cost
-# structure is measured). FANIN_WORKFLOW_LOCK_HOLD_MAX_S overrides for a longer workflow.
-if [ -z "${workflow_lock_hold_max_s}" ]; then
-  workflow_lock_hold_max_s="${FANIN_WORKFLOW_LOCK_HOLD_MAX_S:-${FULL_SUITE_LOCK_HOLD_MAX_S:-3600}}"
-fi
-
-# The watchdog function (suite-slot-lib.sh spawn_suite_lock_hold_watchdog) — the SAME「持锁进程子进程」
-# pattern the suite lock uses (gap-suite-lock-starvation-long-validation-hold AC1). Sourced best-effort:
-# when it is absent (hermetic fan-in-ff-merge tests without the suite lib on the path), the holder still
-# holds the flock and crash-autorelease (flock fd close on process exit) covers a dead holder; the
-# hang-but-alive hold-cap branch is then unavailable (fail-loud, not silent — see the acquire block).
-_workflow_watchdog_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/suite-slot-lib.sh"
-
-# Acquire: spawn a detached holder that flocks fan-in-workflow.lock and holds until the release flag is
-# removed. IDEMPOTENT + retriable across the Bash 600s hard limit (the confirmation wait below may be
-# killed and re-run; the holder survives detached, so a re-run must NOT spawn a second holder). Two
-# markers make that possible: the pidfile is written BEFORE flock (a holder is trying), the acquired
-# marker is written AFTER flock (a holder HOLDS the lock). The holder spawns the suite-lock hold
-# watchdog as a child (inherited fd ⇒ the watchdog releases a crashed/hung holder's slot). flock is
-# UNBOUNDED (`flock -x`, no -w): the fan-in lock is a CORRECTNESS lock ("who may merge develop now"),
-# which never fail-closes on a long queue wait — the watchdog is what bounds a dead holder's hold, not
-# a timeout (SPEC-suite-lifecycle §1.1: 正确性锁绝不因等待过久而放行).
-if [ "${acquire_workflow_lock}" = "1" ]; then
-  mkdir -p "$(dirname "${workflow_lock_events}")" 2>/dev/null || true
-  if [ -n "${run_id}" ]; then _wfl_run_id_json="\"${run_id}\""; else _wfl_run_id_json="null"; fi
-  if [ -n "${agent_id}" ]; then _wfl_agent_id_json="\"${agent_id}\""; else _wfl_agent_id_json="null"; fi
-  # Idempotent: a live holder (trying OR holding) for THIS task means a prior acquire already spawned it
-  # (e.g. a previous bash step was killed at 600s while it waited) — do NOT spawn a second one.
-  if [ -s "${workflow_lock_pidfile}" ] && kill -0 "$(cat "${workflow_lock_pidfile}" 2>/dev/null)" 2>/dev/null; then
-    : # holder already trying/holding — fall through to the confirmation wait
-  else
-    rm -f "${workflow_lock_pidfile}" "${workflow_lock_flag}" "${workflow_lock_watchdog}" "${workflow_lock_acquired}"
-    # The release flag is created HERE (before spawn) so the holder's `while [ -e flag ]` hold-loop and
-    # the watchdog's `[ -e flag ] || exit` both see a held lock from the first instant — no race window
-    # where the pidfile exists but the flag does not (which would let a release no-op then leak the hold).
-    touch "${workflow_lock_flag}"
-    # setsid + & + disown: the holder lives in its own session, independent of the caller (which is a
-    # subagent bash step — it must survive the step's return, exactly like the detached suite).
-    setsid bash -c '
-      printf "%s\n" "$$" > "$3"                       # alive marker BEFORE flock (a holder is trying)
-      _wfl_fd=""
-      exec {_wfl_fd}>"$1" || { rm -f "$3"; exit 2; }
-      flock -x "${_wfl_fd}" || { rm -f "$3"; exit 2; }
-      touch "${12}"                                   # acquired marker AFTER flock (the lock is held)
-      printf "%s\n" "{\"event\":\"acquire\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"epoch\":$(date +%s),\"taskId\":\"$4\",\"pid\":$$,\"runId\":$5,\"agentId\":$6}" >> "$7"
-      if [ -f "$8" ]; then . "$8"; spawn_suite_lock_hold_watchdog "${_wfl_fd}" "$9" "$$" "${10}" > "${11}" 2>/dev/null; fi
-      while [ -e "$9" ]; do sleep 1; done
-      printf "%s\n" "{\"event\":\"release\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"epoch\":$(date +%s),\"taskId\":\"$4\",\"pid\":$$,\"runId\":$5,\"agentId\":$6}" >> "$7"
-      flock -u "${_wfl_fd}" 2>/dev/null || true
-      rm -f "$3" "$9" "${12}" 2>/dev/null || true
-    ' _ "${workflow_lock_file}" "${lock_wait}" "${workflow_lock_pidfile}" "${task_id}" "${_wfl_run_id_json}" "${_wfl_agent_id_json}" "${workflow_lock_events}" "${_workflow_watchdog_lib}" "${workflow_lock_flag}" "${workflow_lock_hold_max_s}" "${workflow_lock_watchdog}" "${workflow_lock_acquired}" >> "${workflow_lock_log}" 2>&1 & disown
-  fi
-  # Wait for the acquired marker (the holder HOLDS the lock). Unbounded — the watchdog bounds the current
-  # holder's hold, so a queued acquire WILL eventually land. Re-entrant: a killed bash step re-runs this
-  # wait and the idempotency guard above keeps the same holder. The holder dying without acquiring is the
-  # only fail path (flock error — a genuine environment failure, not a queue wait). A short grace first
-  # lets the async `setsid … &` holder write its alive marker before we can tell "spawning" from "dead".
-  _wfl_grace=0
-  while [ ! -s "${workflow_lock_pidfile}" ] && [ ! -e "${workflow_lock_acquired}" ] && [ "${_wfl_grace}" -lt 30 ]; do
-    sleep 0.1
-    _wfl_grace=$((_wfl_grace + 1))
-  done
-  while [ ! -e "${workflow_lock_acquired}" ]; do
-    if [ ! -s "${workflow_lock_pidfile}" ] || ! kill -0 "$(cat "${workflow_lock_pidfile}" 2>/dev/null)" 2>/dev/null; then
-      echo "fan-in-ff-merge: workflow lock holder died before acquiring ${workflow_lock_file}" >&2
-      exit 2
-    fi
-    sleep 0.5
-  done
-  echo "fan-in-ff-merge: acquired fan-in workflow lock ${workflow_lock_file} (holder $(cat "${workflow_lock_pidfile}"))"
-  exit 0
-fi
-
-# Release: remove the release flag so the holder writes the release event + drops the lock, then wait
-# (bounded) for the holder to exit. Idempotent — a missing holder (crash before release) is a clean
-# no-op (flock already auto-released on the holder's death).
-if [ "${release_workflow_lock}" = "1" ]; then
-  rm -f "${workflow_lock_flag}"
-  _wfl_wait=0
-  while [ -s "${workflow_lock_pidfile}" ] && kill -0 "$(cat "${workflow_lock_pidfile}" 2>/dev/null)" 2>/dev/null; do
-    sleep 0.2
-    _wfl_wait=$((_wfl_wait + 1))
-    if [ "${_wfl_wait}" -gt 150 ]; then
-      echo "fan-in-ff-merge: workflow lock holder $(cat "${workflow_lock_pidfile}" 2>/dev/null) did not exit after release — leaving it (watchdog will cap the hold)" >&2
-      break
-    fi
-  done
-  echo "fan-in-ff-merge: released fan-in workflow lock ${workflow_lock_file}"
-  exit 0
-fi
+# fan-in workflow lock（fan-in-workflow.lock）已收进 driver（ADR-034, gap-adr034-fan-in-lock-holder-
+# supervised）：worker-driver.ts 的 acquireFanInWorkflowLock 经非分离直接子进程持锁、随 driver 死自动
+# 释放。本脚本的 --acquire/--release-workflow-lock 分离 holder + flag 释放协议已废除——锁事件仍写
+# .quay/fan-in-workflow-lock-events.jsonl（由 driver 的 holder 写），fan-in-ff-protocol-check 判据4 读它。
 
 # ── inert-delta classifier (gap-fan-in-ff-retry-reruns-suite-on-inert-increment) ────────────────────
 # The "惰性" (doc-only) judgment — used by BOTH the suite-certificate gate (AC3) and the in-lock

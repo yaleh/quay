@@ -1,7 +1,7 @@
 ---
 id: gap-suite-force-color-ansi-test-sh-normalize
 title: FORCE_COLOR=3 环境雷——test.sh 整个运行归一（输出确定性是断言测试的前提，一行先落地）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -32,8 +32,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，归一已生效）：FORCE_COLOR=3 环境下 `scripts/test.sh` 跑 `fan-in-workflow-lock.test.mjs` 绿（⛔ 仍 `'\x1B[33m1\x1B[39m' !== '1'` ⇒ 假）。
-- [ ] AC2（能取假，全运行覆盖）：test.sh 入口归一覆盖所有子进程/spawnSync 继承（⛔ 只修单点 ⇒ 假）。
+- [x] AC1（能取假，归一已生效）：FORCE_COLOR=3 环境下 `scripts/test.sh` 跑 `fan-in-workflow-lock.test.mjs` 绿（⛔ 仍 `'\x1B[33m1\x1B[39m' !== '1'` ⇒ 假）。
+- [x] AC2（能取假，全运行覆盖）：test.sh 入口归一覆盖所有子进程/spawnSync 继承（⛔ 只修单点 ⇒ 假）。
 
 ## Definition of Done
 

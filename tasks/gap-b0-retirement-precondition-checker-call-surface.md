@@ -19,7 +19,7 @@ outer 将随 inner 退役、cron/loop 换外部触发的短会话 ⇒ 会从下�
 
 ## Plan
 
-写一个退役前置检查器（或脚本）：读 `orchestration/orchestrator-tick-core.md` 的执行核，枚举其引用的全部 checker/脚本；对每个，判定其是否在 static-gate 注册表或有其它留存调用面；只被退役层引用的 ⇒ 报「缺留存调用面」。当前唯一命中 = `outer-anchor-check.ts`，处置它（随 outer-cron-registry 一起退役，或迁移调用面）。⛔ manager 侧 6 个 checker 的迁移不在本任务（manager 退役形态未定，§3.7）。
+写一个退役前置检查器（或脚本，放 `plugin/scripts/outer-retirement-precondition-check.ts` + 测试 `plugin/test/outer-retirement-precondition-check.test.mjs`）：读 `orchestration/orchestrator-tick-core.md` 的执行核，枚举其引用的全部 checker/脚本；对每个，判定其是否在 static-gate 注册表或有其它留存调用面；只被退役层引用的 ⇒ 报「缺留存调用面」。当前唯一命中 = `outer-anchor-check.ts`，处置它（随 outer-cron-registry 一起退役，或迁移调用面）。⛔ manager 侧 6 个 checker 的迁移不在本任务（manager 退役形态未定，§3.7）。新建文件按上述命名落地，不另取名。
 
 ## Acceptance Criteria
 
@@ -33,7 +33,10 @@ outer 将随 inner 退役、cron/loop 换外部触发的短会话 ⇒ 会从下�
 
 ## Touches
 
-- plugin/scripts/（退役前置检查器，读 tick-core 枚举 + 判定留存调用面）
+- plugin/scripts/outer-retirement-precondition-check.ts (new)（退役前置检查器，读 tick-core 枚举 + 判定留存调用面）
+- plugin/test/outer-retirement-precondition-check.test.mjs (new)（负控制：只被退役层引用的 checker 必红）
 - orchestration/orchestrator-tick-core.md（退役步骤引用该前置）
+- orchestration/SPEC-methodology-layer-architecture-2026-08-25.md（§2.3b 归属判定正本）
 - plugin/scripts/outer-anchor-check.ts（显式退役或迁移，与 outer-cron-registry.ts 一起）
+- plugin/scripts/outer-cron-registry.ts（随 outer-anchor-check 一起处置）
 - tasks/gap-b0-retirement-precondition-checker-call-surface.md（自身）

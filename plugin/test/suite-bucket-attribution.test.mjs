@@ -93,14 +93,14 @@ const GROUP_B = [
 ];
 
 // (c) statically-unlocatable `plugin/test/*` files → UNRESOLVED. Each constructs its subject via a
-// helper or `path.join(…, "scripts", …)` rather than a literal path, so the subject cannot be located
-// from the file's own text; the mechanism must say so, not guess.
+// HELPER (a variable computed elsewhere / passed in) so it cannot be located from the file's own text;
+// the mechanism must say so, not guess. (A `path.join(…, "plugin/scripts", …)` subject is now LOCATABLE
+// — gap-suite-bucket-attribution-pathjoin-run-header-blind-spot — so path.join-hidden files no longer
+// belong in this group.)
 const GROUP_C = [
   "integration-batch-merge.test.mjs",
   "manager-arm-loop.test.mjs",
-  "measure-suite.test.mjs",
   "outer-tick-log-check.test.mjs",
-  "plugin-vendor-standalone.test.mjs",
   "session-liveness-restart.test.mjs",
   "sync-lag-check.test.mjs",
   "user-scope-reinstall.test.mjs",
@@ -136,6 +136,16 @@ test("AC2(c): statically-unlocatable files return UNRESOLVED, never a silent def
     const rel = `plugin/test/${f}`;
     assert.equal(attributeBuckets(rel, ROOT), "UNRESOLVED", `${f}: subject is not statically locatable`);
   }
+});
+
+// ── AC2(d) ───────────────────────────────────────────────────────────────────────────────────────────
+
+test("AC2(d): path.join-constructed subjects resolve to the right bucket, NOT UNRESOLVED (gap-suite-bucket-attribution-pathjoin-run-header-blind-spot)", () => {
+  // measure-suite.test.mjs constructs `path.join(repoRoot, "plugin", "scripts", "measure-suite-reporter.mjs")`
+  // → the fragments concatenate to plugin/scripts/… → M (was UNRESOLVED before the fix).
+  assert.equal(attributeBuckets("plugin/test/measure-suite.test.mjs", ROOT), "M");
+  // plugin-vendor-standalone.test.mjs constructs a packages path via path.join → P.
+  assert.equal(attributeBuckets("plugin/test/plugin-vendor-standalone.test.mjs", ROOT), "P");
 });
 
 // ── AC1 unit surface: the reference-closure primitives ───────────────────────────────────────────────
