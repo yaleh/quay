@@ -1056,11 +1056,20 @@ _derive_loop_scripts_once() {
   #   precommit-guard.ts without its imported checker and the guard's `--install-hook` step dies with
   #   ERR_MODULE_NOT_FOUND (the delta-scope unverified-landing the touches fan-in's skipped full suite
   #   let through). Same class as the other checker transitive deps listed above.
+  #   repo-root.sh + repo-root.ts (gap-b2-repo-root-unification): capability-catalog.sh sources
+  #   repo-root.sh via `${SELF_DIR}/repo-root.sh` (NOT `${SCRIPT_DIR}/` — the closure step (d)
+  #   below only scans `${SCRIPT_DIR}/` shell sibling refs, so the SELF_DIR form is INVISIBLE to
+  #   it), and the migrated scripts import repo-root.ts via ESM `./repo-root.ts` (also invisible to
+  #   (d)). Without an explicit entry a laid-down catalog/precommit-guard sources/imports a missing
+  #   repo-root and dies with "No such file or directory" / ERR_MODULE_NOT_FOUND. Same class as
+  #   touches-one-entry-one-path-check.ts above — the single repo-root resolver must land with
+  #   every consumer.
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
-    verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts >> "$out"
+    verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \
+    repo-root.sh repo-root.ts >> "$out"
   # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
   #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
   #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the

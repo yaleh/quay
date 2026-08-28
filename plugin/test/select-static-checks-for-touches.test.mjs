@@ -207,6 +207,7 @@ t("AC2 — a task declaring a new script NOT in the catalog QUESTION table makes
   // that has NO declaration line in the QUESTION table (the ghost).
   fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
   fs.copyFileSync(CATALOG, path.join(root, "plugin", "scripts", "capability-catalog.sh"));
+  fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "repo-root.sh"), path.join(root, "plugin", "scripts", "repo-root.sh"));
   fs.writeFileSync(path.join(root, "plugin", "scripts", "ghost-check.sh"),
     "#!/usr/bin/env bash\n# a brand-new checker with no declared question\necho hi\n");
   try {
