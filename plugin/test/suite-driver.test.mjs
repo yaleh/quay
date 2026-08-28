@@ -189,6 +189,52 @@ test("AC3: 有持续输出 ⇒ 不误判挂死（静默看门狗只对真静默�
   }
 });
 
+// ── gap-mech-fan-in-suite-silence-watchdog-fired — 「driver 持槽」结构不变式 ─────────────────
+// 机械 fan-in 路径（worker-driver.runMechanicalFanIn）曾【漏传】QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT=1，
+// 与常驻 loop / --run 两调用点不一致 ⇒ scripts/test.sh --buckets 的 full_suite_lock_acquire 不跳过
+// 再取槽，用自己的新 FD 对【同一把槽】再 flock（被 slot-holder 继承 FD 拒绝——flock 按
+// open-file-description，同进程不同 FD 也互斥）⇒ 卡进无界 while 等槽循环 ⇒ 零输出 ≥15min ⇒ 静默
+// 看门狗误当挂死 SIGKILL（生产：gap-web-session-drops-queue-operation-records 15:15 suite 步 red）。
+// 修法：spawnSuiteAndWait 强制注入该 env（结构不变式——「driver 持槽」是 spawnSuiteAndWait 的事实，
+// ⛔ 不是 caller 的选择），caller 不传也有、也不可覆盖。
+
+test("spawnSuiteAndWait 强制注入 QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT=1（caller 漏传也不死锁）", async () => {
+  const tmp = makeTmp();
+  const { slotBase, logFile } = hermeticSuite(tmp);
+  const outFile = path.join(tmp, "child-env.out");
+  // ⛔ 不传 env —— 复现机械 fan-in 的调用形态（原缺陷：漏传 ⇒ test.sh 再取槽 ⇒ 死锁）。
+  const r = await spawnSuiteAndWait({
+    slotBase, slotLib: SLOT_LIB,
+    suiteCommand: ["bash", "-c", `printf '%s' "\${QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT:-unset}" > "${outFile}"; exit 0`],
+    logFile, silenceMs: 3000,
+  });
+  try {
+    assert.equal(r.outcome, "done");
+    assert.equal(r.hungByWatchdog, false);
+    assert.equal(fs.readFileSync(outFile, "utf8"), "1", "child must see HOLDS_SLOT=1 even when the caller omits env");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("spawnSuiteAndWait 的 HOLDS_SLOT 不被 caller env 覆盖（结构不变式放最后）", async () => {
+  const tmp = makeTmp();
+  const { slotBase, logFile } = hermeticSuite(tmp);
+  const outFile = path.join(tmp, "child-env.out");
+  const r = await spawnSuiteAndWait({
+    slotBase, slotLib: SLOT_LIB,
+    suiteCommand: ["bash", "-c", `printf '%s' "\${QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT:-unset}" > "${outFile}"; exit 0`],
+    logFile, silenceMs: 3000,
+    env: { QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT: "0" },   // 误传 "0" 也不得覆盖（否则死锁回归）
+  });
+  try {
+    assert.equal(r.outcome, "done");
+    assert.equal(fs.readFileSync(outFile, "utf8"), "1", "forced HOLDS_SLOT=1 must win over the caller env");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── AC4 — 取放槽同一执行点（释放原子）─────────────────────────────────────────────────────
 
 test("AC4: spawn 前取槽、终结后释放槽（运行期间槽被持，退出后空闲）", async () => {
