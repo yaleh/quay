@@ -39,10 +39,11 @@ extra:
 - [ ] AC2（能取假，无分离 holder）：`& disown` + flag 文件释放协议已废除（⛔ grep 仍见 disown holder / flag 释放 ⇒ 假）。
 - [ ] AC3（能取假，不阻塞派发）：持锁不阻塞 driver 异步派发（⛔ 同步阻塞 ⇒ 假）。
 - [ ] AC4（能取假，无时间阈值）：锁路径无 hold-max/TTL/stale 阈值（⛔ 引入时间阈值 ⇒ 假）。
+- [ ] AC5（能取假，重启不残留孤儿持锁）：driver 重启后，排队中的 fan-in ff 不被孤儿 holder 阻塞——模拟 acquire 后 driver 被杀/重启，重启后某任务仍能 acquire 同一锁并完成 ff；进程树无 PPID=1 的持锁 bash（⛔ 重启后孤儿 holder 仍持锁挡排队 ff ⇒ 假）。（补：第二次同形事件 09:00-09:32 孤儿 holder 持锁 52 分钟挡 6 个 ff——AC1 验「driver 死锁随释放」但 flock fd 在孤儿 holder 手里不在 driver，AC1 与本次缺陷正交；本 AC 验端到端重启不残留。）
 
 ## Definition of Done
 
-锁由受监督进程持有、随进程生死自动释放；分离 holder + flag 协议废除；AC1-AC4 全勾；孤儿 holder 死锁根除。
+锁由受监督进程持有、随进程生死自动释放；分离 holder + flag 协议废除；AC1-AC5 全勾；孤儿 holder 死锁根除。
 
 ## Touches
 
