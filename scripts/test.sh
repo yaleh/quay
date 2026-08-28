@@ -195,7 +195,14 @@ main_root="${QUAY_MAIN_CHECKOUT:-$repo_root}"
 # entry is the git primary (main) checkout, which is authoritative and always correct.
 # `|| _derived_main=""` guards the command substitution under `set -euo pipefail` (a non-git /
 # non-worktree cwd must NOT abort the suite — it just keeps main_root == repo_root).
-_derived_main="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')" || _derived_main=""
+# ⚠️ 2026-08-28 实测修复（manager，gap-loop-shipping suite 系统性红的根因）：不能用
+# `awk '/^worktree /{print $2; exit}'` 早退——awk 关读端后 git 的下一次 write 立即 EPIPE/SIGPIPE
+# （`git worktree list` 输出 >2 个 worktree 时必发生），pipefail 下管道 exit=141 ⇒ `|| _derived_main=""`
+# 把【已捕获的主检出路径】清空 ⇒ main_root 退回 repo_root=worktree ⇒ checker 扫 worktree slug
+# （无 subagent transcripts）⇒ agentId 不可解析 ⇒ 假红。新 driver（runMechanicalFanIn 直接在
+# worktree 跑 suite，不经 full-suite-runner 设 QUAY_MAIN_CHECKOUT）下所有 fan-in 必中。修法：awk
+# 读完整流、用 f 标志只取首条（不早退 ⇒ 无 SIGPIPE），`|| _derived_main=""` 只在真失败时兜底。
+_derived_main="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{if (!f) {print $2; f=1}}')" || _derived_main=""
 if [ -n "${_derived_main}" ] && [ "${_derived_main}" != "${repo_root}" ]; then
   main_root="${_derived_main}"
 fi
