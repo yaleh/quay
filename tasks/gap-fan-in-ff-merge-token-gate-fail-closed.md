@@ -2,7 +2,7 @@
 id: gap-fan-in-ff-merge-token-gate-fail-closed
 title: fan-in-ff-merge.sh --acquire-workflow-lock 加 token 闸——非 driver 一次性 token
   者 fail-closed（掐死所有非机械路径，L1）
-status: needs-human
+status: superseded
 labels:
   - gap
   - defect
@@ -13,8 +13,15 @@ extra:
   schema: execution
   depends_on:
     - gap-fan-in-continue-prompt-not-migrated-to-mechanical
+  superseded_by: gap-execution-loop-productization-p2-p4
+  superseded_reason: 人 2026-08-28 裁定「fan-in-ff-merge.sh 改为 .ts 模块被 import」+
+    ADR-034 废除 --acquire-workflow-lock——L1 token 闸与
+    P2（gap-execution-loop-productization-p2-p4）AC1 的 TS 模块化合一，本任务不再单独重派；AC1-AC3
+    实质逐字承载于 P2 AC1
 ---
 **type:** execution
+
+> ⛔ 已撤回（superseded，2026-08-28 人裁定）：本任务不再单独重派——L1 token 闸与 P2（`gap-execution-loop-productization-p2-p4` AC1）的 TS 模块化合一，在 TS 模块的 ff 入口实现；`--acquire-workflow-lock` 已被 ADR-034 废除。AC1-AC3 实质逐字承载于 P2 AC1（⛔ 仍经旧 .sh / shell-out ⇒ 假；⛔ token 闸语义丢失 ⇒ 假），判定对象在 P2；L3 依赖已改指 P2。
 
 ## Proposal
 
