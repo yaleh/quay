@@ -163,6 +163,26 @@ test("AC4 — the workflow lock and the suite lock are DIFFERENT files (two orth
   }
 });
 
+// ── AC2 (gap-full-suite-lock-hold-watchdog-threshold-shorter-than-fan-in): decouple the fan-in lock
+//    watchdog from the suite lock's hold-cap timer ────────────────────────────────────────────────────
+// The fan-in lock's hold = merge→suite→ff, which legitimately EXCEEDS any fixed timer. Reusing the suite
+// lock's FULL_SUITE_LOCK_HOLD_MAX_S (1800s) made the watchdog cut the lock at 30min mid-suite ⇒ the ff
+// ran lock-less (ff-race re-exposed). The fix is DECOUPLED (dead-holder-only, timer cut disabled), not a
+// bigger number. This structural check pins the decoupling: no `${FULL_SUITE_LOCK_HOLD_MAX_S}` expansion
+// (the reuse), no FANIN_WORKFLOW_LOCK_HOLD_MAX_S override seam, and the watchdog spawn passes timer-cut=0.
+
+test("AC2 (decouple) — the fan-in workflow lock watchdog is dead-holder-only (no suite-lock threshold reuse, timer cut disabled)", () => {
+  const src = fs.readFileSync(MERGE_SCRIPT, "utf8");
+  // The reuse was `${FULL_SUITE_LOCK_HOLD_MAX_S:-3600}` — a `${...}` EXPANSION of the suite-lock knob
+  // (按位置判定: a bare name in a prose comment is not a reuse, the expansion is).
+  assert.doesNotMatch(src, /\$\{FULL_SUITE_LOCK_HOLD_MAX_S\}/, "fan-in-ff-merge.sh must NOT expand the suite lock's hold-cap threshold (decoupled, not a bigger number)");
+  assert.doesNotMatch(src, /FANIN_WORKFLOW_LOCK_HOLD_MAX_S/, "the FANIN_WORKFLOW_LOCK_HOLD_MAX_S override seam is removed (no numeric threshold to outgrow)");
+  assert.match(src, /workflow_lock_timer_cut="0"/, "the fan-in lock must run the watchdog dead-holder-only (timer cut disabled)");
+  // The holder must spawn the watchdog with a "0" max-s placeholder + the timer-cut mode as the 5th arg
+  // (path (c) disabled; path (b) crash-autorelease stays — see AC5 above).
+  assert.match(src, /spawn_suite_lock_hold_watchdog "\$\{_wfl_fd\}" "\$9" "\$\$" "0" "\$\{10\}"/, "the holder must pass timer-cut=0 (the 5th arg) to the watchdog");
+});
+
 // ── AC2: S=1 via the .concurrency single source (bash + TS canons agree) ────────────────────────────
 
 test("AC2 — S=1 via the .concurrency file is read identically by the bash and TS canons (single source)", () => {
