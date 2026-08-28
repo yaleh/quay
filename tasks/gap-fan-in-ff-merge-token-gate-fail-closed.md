@@ -56,3 +56,5 @@ token 闸落地；AC1-AC3 全勾；非机械路径无法 acquire workflow 锁；
 **执行 2026-08-27T21:33:59.347Z — 连续修满重试上限仍不合格（标 needs-human）**
 
 - 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+
+**⛔ 重派裁定（2026-08-28 人裁定）**：等 `gap-adr034-fan-in-lock-holder-supervised`（ADR-034）落地后重派——3 次失败根因是同一孤儿持锁问题（gap-path-join 孤儿 holder ~21:48 释放前排队等锁触顶重试上限），非代码缺陷（worktree 内 AC 3/3 已勾）。ADR-034 根治后重派；且 P2（`gap-execution-loop-productization-p2-p4` AC1）吸收含本任务 token 闸语义，落地后别丢。
