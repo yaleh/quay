@@ -2,7 +2,7 @@
 id: gap-mech-fan-in-suite-silence-watchdog-fired
 title: 机械 fan-in suite 步 15min 静默看门狗触发——suite 真挂死 vs 看门狗对正常静默误杀未分（web-session
   生产任务 15:15 suite 步 red；旧看门狗任务方向相反已作废）
-status: done
+status: ready
 labels:
   - gap
   - defect
