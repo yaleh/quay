@@ -9,7 +9,7 @@
 本文件只给动作和判据;每条尾部的 `(src:N)` 是该条在源文档里的行号——**用它机械核对有没有漏抽**。
 **立此文件的原因**(2026-08-09):源文档 `### 1b 异步收尾例程(强制)`写着「每 tick 执行」却位于第 687 行,**静默停摆 8.5 小时无人发现**(`git log | grep 'outer: close'` 从每 ~20 分钟一次变为零),同期 not-yet-flipped 从 61% 涨到 82%。
 执行路径与理由档案混在一份 1095 行文档里,一次重读无法当 checklist 执行。
-**当前状态:并行对照期。锚(cron / skill / 冷启动)仍指向 `orchestrator-loop-tick.md`。** 每轮两份都跑,差异记进 tick-log;确认零遗漏后,**由 outer 自己决定**是否改锚。**冷启动(新会话 / `/clear` 后)不在本核内**——照源文档 7 步做(src:39-228)。
+**当前状态：已退役（AC149，2026-08-28）。** outer 会话停止，本核不再每轮执行；机制由 promotion-driver（晋升）· worker-driver（派发/实现）· manager-kind 例程（观测/账本/收尾）承接 → `orchestration/manager-phase-goal.md` ### AC149。~~并行对照期~~结束。**冷启动(新会话 / `/clear` 后)不在本核内**——照源文档 7 步做(src:39-228)。
 
 **切分声明（AC38，2026-08-12）**：外层双份 tick 文档已切分——**产品行为正本**（外层产品模板，随
 `quay-init --loop` 铺到任何项目，即本路径 `orchestration/orchestrator-loop-tick.md` 的产品源），

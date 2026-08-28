@@ -30,9 +30,9 @@ outer / inner 会话真正退役，三条子判据缺一不可：
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，真停）：outer/inner 会话停，cron 锚/tick-log/执行核文档按同一套写法标退役；（⛔ 文档仍写「每轮必跑」⇒ 假）。
-- [ ] AC2（能取假，产能不塌）：停会话后连续 ≥24h 任务持续 land，速率 ≥ 停机前 X%；（⛔ land 归零/断崖 ⇒ 假，回滚）。
-- [ ] AC3（能取假，无双真相源）：无「两个执行者做同一件事」的路径（任一职责只有 driver 或会话单一执行者）；（⛔ 双路径都在用 ⇒ 假）。
+- [ ] AC1（能取假，真停）：outer/inner 会话停，cron 锚/tick-log/执行核文档按同一套写法标退役；（⛔ 文档仍写「每轮必跑」⇒ 假）。（待外部）
+- [ ] AC2（能取假，产能不塌）：停会话后连续 ≥24h 任务持续 land，速率 ≥ 停机前 X%；（⛔ land 归零/断崖 ⇒ 假，回滚）。（待外部）
+- [ ] AC3（能取假，无双真相源）：无「两个执行者做同一件事」的路径（任一职责只有 driver 或会话单一执行者）；（⛔ 双路径都在用 ⇒ 假）。（待外部）
 
 ## Definition of Done
 
@@ -42,6 +42,7 @@ AC149-1/2/3 全勾；outer/inner 真退役、产能不塌、无双真相源；B0
 
 - orchestration/manager-tick-core.md（执行核文档标退役）
 - orchestration/orchestrator-tick-core.md（执行核文档标退役）
+- plugin/loop/orchestrator-tick-core.md（byte-identical 副本，随正本同步——AC90 drift 闸强制）
 - orchestration/fast-mode-tick-core.md（执行核文档标退役）
 - orchestration/manager-loop-tick.md（tick-log 标退役）
 - orchestration/manager-tick-criteria.md（tick 判准标退役）
@@ -53,4 +54,6 @@ AC149-1/2/3 全勾；outer/inner 真退役、产能不塌、无双真相源；B0
 - plugin/test/session-retirement-check.test.mjs (new)
 - plugin/test/land-capacity-monitor.test.mjs (new)
 - plugin/test/dual-source-check.test.mjs (new)
+- plugin/scripts/capability-catalog.sh（三脚本六表登记：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY scripts 计数 296→299，结构性 co-touch）
 - tasks/gap-ac149-session-retirement-no-dual-source-no-throughput-collapse.md（自身）

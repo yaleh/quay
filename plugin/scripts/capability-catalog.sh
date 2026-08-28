@@ -405,6 +405,9 @@ declare -A QUESTION=(
   [workflows-dual-copy-drift-check.ts]="Are the five dual-copy workflow files (drain-directives / fan-in-execute / run-routines / execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped orchestrator-tick-core.md references them, so the plugin/workflows/ mirror must carry them) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships to installed targets) — a one-sided edit (改正本而落地副本不跟, the A6/fan-in-execute.js class) must go RED, the current byte-identical state GREEN (gap-workflows-dual-copy-drift-unchecked)?"
   [promotion-driver.ts]="Is the todo→ready promotion applied mechanically every round — a resident loop that calls ready-pool-check for the full-pool verdict and lands eligible promotions (zero LLM), and calls the supervisor/driver liveness check each round (gap-resident-driver-stable-carrier-liveness AC2 death-alarm caller), rather than role-will that vanishes when the session or model changes?"
   [outer-driver.ts]="Does the outer's pure-mechanical A/B segments (A1/A3/A6/A9/A10/A18/A21 readings · B1/B2/B6 closing traces · B12/B17 self-audit) get absorbed into a resident routine-type driver — a resident loop that runs the routine table each round and writes structured Facts (verified/not-evaluated/failed) to .quay/outer-round.jsonl, where each routine that cannot read its input reports not-evaluated (⛔ not verified, AC153 Layer 1b form), rather than role-will that vanishes when the outer session or model changes (AC143)?"
+  [dual-source-check.ts]="Is every driverized responsibility (todo→ready 晋升 / ready→实现 派发 / 观测-账本-收尾) served by exactly ONE live executor — the driver file exists AND the former session/manual path is documented as retired (the AC135/AC141/AC143 退役 annotation present), so no two-executors-for-one-job path can exist (AC149-3 无双真相源)?"
+  [land-capacity-monitor.ts]="What is the develop land rate (fan-in merge commits per hour) in a pre-stop vs post-stop window, and is the post-stop rate ZERO while pre-stop was non-zero (AC149-2 归零 ⇒ 回滚) — a measurement that reports a ratio for a human to judge a cliff, never a hardcoded X% threshold (硬规则④推论一)?"
+  [session-retirement-check.ts]="Has each retired session's (outer/inner) execution-core doc been marked retired (删除线 + 指针 + 边界条件 banner) with no stale live claim (并行对照期 / 每轮必跑) left un-retired (AC149-1 真停 — the B9 drift shape)?"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
@@ -704,6 +707,9 @@ declare -A CADENCE=(
   [promotion-driver.ts]="按需"
   [outer-driver.ts]="按需"
 
+  [dual-source-check.ts]="按需"
+  [land-capacity-monitor.ts]="按需"
+  [session-retirement-check.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
@@ -1003,6 +1009,9 @@ declare -A INVALIDATION=(
   [promotion-driver.ts]="失效前提：todo→ready 晋升仍经 ready-pool-check --apply 全池判定；若晋升并入别处（如 outer tick 内联）或 ready-pool-check 全池模式退役，本条退休"
   [outer-driver.ts]="失效前提：outer 会话的纯机械 A/B 段仍需一个常驻机械进程承接（读数/收尾/自查），且例程型 driver（Layer 0+1b）仍是其承载；若 outer 会话退役后这些段也随会话消失（不再需要机械承接）或例程型承载迁出（如并入 manager 会话），本条退休"
 
+  [dual-source-check.ts]="失效前提：职责→driver 的退役仍以文档标注为唯一真相源；若退役改为机制强制（cron 删除即无锚），本条按 ④ 失效"
+  [land-capacity-monitor.ts]="失效前提：land 仍以 develop 上的 fan-in 合并提交为载体（git log develop）；若 land 载体改换（产品化后 fan-in 写结构化记录而非 commit），本条失效"
+  [session-retirement-check.ts]="失效前提：会话退役仍以文档标注为唯一真相源；若退役改为机制强制（cron 删除即无锚），本条按 ④ 失效"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
@@ -1302,6 +1311,9 @@ declare -A LAST_REAFFIRMED=(
   [promotion-driver.ts]="2026-08-22"
   [outer-driver.ts]="2026-08-26"
 
+  [dual-source-check.ts]="2026-08-28"
+  [land-capacity-monitor.ts]="2026-08-28"
+  [session-retirement-check.ts]="2026-08-28"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
@@ -1600,6 +1612,9 @@ declare -A MATCHING=(
   [workflows-dual-copy-drift-check.ts]="enumerative"
   [promotion-driver.ts]="n/a"
   [outer-driver.ts]="n/a"
+  [dual-source-check.ts]="enumerative"
+  [land-capacity-monitor.ts]="n/a"
+  [session-retirement-check.ts]="position"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1703,6 +1718,9 @@ declare -A CONSUMER=(
   [worker-driver.ts]="谁按：inner 派发器在要驱动单个 claude -p worker 跑完整任务时按（AC115 阶段 1 显式 --task）；条件=任务要被机械驱动跑完 select→worktree→develop→suite→ff 并落盘结构化 outcome 到 .quay/worker-outcome.jsonl"
   [promotion-driver.ts]="谁按：outer 生产部署启动命令按（常驻进程，promotion-driver.ts 头注释「生产部署时由 outer 的启动命令传 --interval 覆盖」——接线为 AC130 后续/独立任务，本任务只做常驻循环这一半）；条件=生产部署启动常驻进程"
   [outer-driver.ts]="谁按：outer 退役过渡期由 outer/manager 的启动命令起常驻进程（quay driver start --kind outer）承接 outer 纯机械 A/B 段，或 fan-in 验证轮跑 --once 冒烟；条件=outer 的机械 A/B 段需要机械承接（读→报→写载体）"
+  [dual-source-check.ts]="谁按：manager 在 AC149-3 无双真相源判定时按；条件=要判定任一职责是否同时有 driver 路径与人工/会话路径且都在用"
+  [land-capacity-monitor.ts]="谁按：manager 在 AC149-2 产能判定时按；条件=停会话后连续 ≥24h 要判定任务是否持续 land 且速率未归零/断崖"
+  [session-retirement-check.ts]="谁按：manager 在 AC149-1 真停判定时按；条件=要判定 outer/inner 会话的 cron 锚/tick-log/执行核文档是否按同一套写法标退役"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the

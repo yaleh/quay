@@ -2,7 +2,7 @@
 **执行路径,不是理由档案。** 理由/实测/代价在 `orchestration/manager-loop-tick.md`,按 `(src:N)` 反查;本文件只给**动作 + 判据**,每条最多一行指路。
 **⊢ 凡是必须跨压缩存活的东西,必须落在锚所指向的文件里** —— 实证:执行核建成后一度不在锚的可达范围内,只靠「我记得它存在」维持,而那种存在形式的寿命上界是下一次压缩。 (src:1205 "**立此执行核的原因**")
 **⊢ 立此文件的两条实证(outer 的强制步骤埋在 1095 行文档第 687 行而静默停摆 8.5 小时;`nyf-semantic-judge` 不在文档任何一行、用完即弃) → 档案 §头部-migrated**
-**当前状态:并行对照期。** 锚已于 2026-08-14 改指本文件(SPEC-tick-read-path-slimming §2-A)。
+**当前状态:并行对照期（manager 会话保留，人 2026-08-25 裁定「取消 manager 会话本身」为非目标）。** 锚已于 2026-08-14 改指本文件(SPEC-tick-read-path-slimming §2-A)。**本文件中引用 outer/inner 会话的条目（outer.liveness / inner 会话 subagent / 发送面等）已随 outer/inner 会话退役（AC149，2026-08-28）——机制由 promotion-driver / worker-driver / manager-kind 例程承接 → `orchestration/manager-phase-goal.md` ### AC149。**
 
 ---
 
