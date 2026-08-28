@@ -1610,7 +1610,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const slotBase = opts.slotBase ?? suiteLockBase(root);
   const slotLib = opts.slotLib ?? path.join(root, "plugin", "scripts", "suite-slot-lib.sh");
   const suiteCapture = opts.suiteCapture ?? `/tmp/fan-in-suite-${task}.env`;
-  const suiteLogFile = opts.suiteLogFile ?? `/tmp/fan-in-suite-${task}.log`;
+  // 独立日志/run：suite 日志文件名带 runId——⛔ 不再复用 /tmp/fan-in-suite-${task}.log（跨 relaunch
+  // 残留旧轮内容，gap-fan-in-suite-log-cross-relaunch-reuse；本次「每次测试独立日志文件」指令）。
+  const suiteLogFile =
+    opts.suiteLogFile ?? `/tmp/fan-in-suite-${task}-${runId.replace(/[^A-Za-z0-9_.-]/g, "_")}.log`;
   const scriptsDir = opts.scriptsDir ?? path.join(worktree, "plugin", "scripts");
   const ffMerge = path.join(scriptsDir, "fan-in-ff-merge.sh");
   const antiDrift = path.join(scriptsDir, "anti-drift-touches-check.ts");
