@@ -29,9 +29,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机械识别）：`oneoff-ls-*` runId 被 `isMechanicalRunId` 认（⛔ 仍不认 ⇒ 假）。
-- [ ] AC2（能取假，scoped 门解红）：Touches 含 fan-in-execute.js/worker-driver.ts 的任务，scoped 门不再被 fan-in-workflow-check 全局红挡（⛔ 仍红 ⇒ 假）。
-- [ ] AC3（不误伤）：真 workflow 路径（非机械）仍被 a-workflow-call-coverage 正确红（⛔ 机械误豁免 ⇒ 假）。
+- [x] AC1（能取假，机械识别）：`oneoff-ls-*` runId 被 `isMechanicalRunId` 认（⛔ 仍不认 ⇒ 假）。
+- [x] AC2（能取假，scoped 门解红）：Touches 含 fan-in-execute.js/worker-driver.ts 的任务，scoped 门不再被 fan-in-workflow-check 全局红挡（⛔ 仍红 ⇒ 假）。
+- [x] AC3（不误伤）：真 workflow 路径（非机械）仍被 a-workflow-call-coverage 正确红（⛔ 机械误豁免 ⇒ 假）。
 
 ## Definition of Done
 
