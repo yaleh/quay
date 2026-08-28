@@ -2,7 +2,7 @@
 id: gap-fan-in-workflow-lock-stale-runid-detached-holder
 title: fan-in workflow 锁事件记陈旧 runId（detached holder 跨调用存活 + pidfile 不记 runId +
   守卫不比对）→ readWorkflowLockHold 读空、lock_hold 判据 null
-status: ready
+status: done
 labels:
   - gap
   - defect
