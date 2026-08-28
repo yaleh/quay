@@ -171,6 +171,7 @@ import { allDepsDone } from "./driver-filters.ts";
 import { recordCheckerCost, getLoad1 } from "./checker-cost.ts";
 import {
   checkTaskTouchesResolve,
+  checkTouchesNarrow,
   findRepoRoot,
   parseTouches,
   checkTouchesPair,
@@ -1587,6 +1588,11 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   const kind = classifyKind(id);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
+  // TOUCHES-WIDTH (2026-08-28, gap-touches-breadth-silent-global-dispatch-lock): a directory-level
+  // `## Touches` glob (`plugin/scripts/**`, `plugin/test/**`) passes the existence-only touchesResolve
+  // but is a silent global dispatch lock while in flight. Gate it AT PROMOTION so the fix-worker
+  // narrows it before it ever enters the pool (overbroad → can't land; dir-glob → locks all peers).
+  const touchesNarrow = checkTouchesNarrow(task.body);
   const depsReady = depsReadyFor(task, allTasks);
   const four = artifactsComplete(task.body);
   const parsed = parseTouches(task.body);
@@ -1646,6 +1652,8 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     kind,
     kindOrder: kindOrder(kind),
     touchesResolve,
+    touchesNarrow: touchesNarrow.narrow,
+    wideTouches: touchesNarrow.wideGlobs,
     depsReady,
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
@@ -1686,7 +1694,10 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // its implementation premise is deleted by a human ruling (gap-send-keys-verified retreat).
     // AC1 (2026-08-13): the compound + self-touch guards are ADDED — slot-refill's step-4 defers now
     // gate promotion, so a task is rejected before ready instead of deferred after (判据1).
-    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
+    // TOUCHES-WIDTH (2026-08-28): the touchesNarrow guard is ADDED — a candidate with a
+    // directory-level `## Touches` glob is never eligible (it would silently lock the whole dispatch
+    // pool while in flight; the fix-worker narrows it before it ever enters ready).
+    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
   };
 }
 
@@ -1786,15 +1797,18 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
   const depsReady = depsReadyFor(task, allTasks);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
+  const touchesNarrow = checkTouchesNarrow(task.body);
   // PROSE-PREREQUISITE GAP (AC3): targeted promotion must NOT advance a task whose prose-declared
   // prereqs have no relation edge — same fail-closed as the bulk path.
   const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
-  const eligible = four.complete && depsReady && touchesResolve && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok;
+  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok;
   const checks = {
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
     depsReady,
     touchesResolve,
+    touchesNarrow: touchesNarrow.narrow,
+    wideTouches: touchesNarrow.wideGlobs,
     prosePrereqGap: prosePrereqGapIds,
     notFixture: true,
     notParked: true,
@@ -2337,7 +2351,30 @@ function commitTaskStatus(root, id, from, to) {
   const rel = path.join("tasks", `${id}.md`);
   execFileSync("git", ["-C", root, "add", "--", rel]);
   execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", `tasks: ${id} ${from}→${to}（promotion-driver 机械晋升）`, "--", rel]);
+  propagateDocBranchToDevelop(root);
   return true;
+}
+
+/**
+ * The detach's propagation (gap-fan-in-ff-ref-update-detach-develop): the main checkout sits on the
+ * doc-only work branch (main/manager-doc). A promotion flip committed THERE must reach develop so task
+ * worktrees (branching from develop) see the new status — otherwise the dispatch reads ready on
+ * main/manager-doc while the worktree base (develop) still has the old status, and the fan-in gates
+ * misread. Fast-forward push; if develop advanced (non-ff), merge develop first then push. Best-effort:
+ * a conflict leaves the flip on the doc branch and the next landing's merge-develop reconciles.
+ */
+function propagateDocBranchToDevelop(root) {
+  try {
+    const cur = execFileSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).trim();
+    if (!cur || cur === "develop") return;
+    try {
+      execFileSync("git", ["-C", root, "push", ".", `${cur}:develop`], { stdio: "ignore" });
+    } catch (_) {
+      // Develop advanced past the doc branch — merge it in, then push (fast-forward now).
+      execFileSync("git", ["-C", root, "merge", "develop", "--no-edit"], { stdio: "ignore" });
+      execFileSync("git", ["-C", root, "push", ".", `${cur}:develop`], { stdio: "ignore" });
+    }
+  } catch (_) { /* best-effort — next landing's merge-develop reconciles */ }
 }
 
 /** HEARTBEAT MODE entry: run the same analysis as `analyzeTasks` (all options pass through) and —

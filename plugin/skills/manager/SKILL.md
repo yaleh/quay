@@ -161,6 +161,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 
 - `orchestration/SPEC-manager-productization-2026-08-05.md` — the manager productization spec (C1–C5 constraints, build-vs-run ownership, two separate starts)
 - `orchestration/SPEC-branching-model-integration-branch-2026-08-05.md` — the develop/integration two-line branching model (verified baseline + pending-verification merge target)
+- `orchestration/SPEC-execution-loop-productization-2026-08-28.md` — the execution-loop productization umbrella (task-execution→fan-in business moves to quay CLI/MCP; ADR-034 is its locked child)
 - `orchestration/SPEC-integration-architecture-2026-08-05.md` — the integration architecture (merge target / batch merge)
 - `orchestration/SPEC-outer-liveness-productization.md` — outer liveness, the manager's own anchor gap
 - `orchestration/SPEC-cold-start-one-liner.md` — cold-start one-liner (delivery surface)
