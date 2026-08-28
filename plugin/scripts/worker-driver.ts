@@ -1414,6 +1414,10 @@ function runOneWorker({
               `${JSON.stringify({ event: "mechanical-fan-in", task: taskId, wall_clock_ms: Date.now() - startMechMs, ...mechResult })}\n`,
             );
           }
+          // 反向同步（gap-fan-in-ff-ref-update-detach-develop AC7）：landing 后把 develop merge 进 doc-only
+          // 工作分支（main/manager-doc），否则 computeLandingState 读主检出盘上 tasks/*.md 是滞后视图 →
+          // 假 exited-not-landed（watchdog 2026-08-28 实证）。best-effort：冲突留待下次 landing 收敛。
+          if (mechResult && mechResult.outcome === "landed") syncDocBranchToDevelop(rootDir);
         }
       }
       finish(code, signal, spawnErr, mechResult);
@@ -1724,6 +1728,22 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     outcome: "landed", step: null, reason: null,
     ...lock, suiteFinishedEpoch, suiteOutcome, suitePid, landedSha,
   };
+}
+
+
+/**
+ * 反向同步（gap-fan-in-ff-ref-update-detach-develop AC7）：机械 fan-in landing 后，把 develop merge 进
+ * doc-only 工作分支（main/manager-doc）。computeLandingState / ready-pool-check 等读主检出盘上
+ * tasks/*.md（非 git）——主检出停工作分支后，若不同步，落地成功但验证读到滞后 status → 假
+ * not-landed（watchdog 2026-08-28 实证：landed 但 final=exited-not-landed）。best-effort：冲突留待
+ * 下次 landing 收敛。
+ */
+function syncDocBranchToDevelop(root: string): void {
+  try {
+    const cur = spawnSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).stdout.trim();
+    if (!cur || cur === "develop") return;
+    spawnSync("git", ["-C", root, "merge", "develop", "--no-edit"], { stdio: "ignore" });
+  } catch (_) { /* best-effort */ }
 }
 
 // ── 阶段 4（AC129）常驻驱动 + 自主选任务：选择环 / selector worker / 判停 ───────────────────────────
