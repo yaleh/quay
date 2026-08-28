@@ -102,6 +102,14 @@ export function parseTouchEntries(touchesSection) {
 // (gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files): a `(new)` touch must
 // never be judged "missing from the tree", and the parity test asserts
 // parseTouchEntriesWithTags(s).map(e => e.path) === parseTouchEntries(s) for the fixture set.
+/** Structural-tag reader: `(new)` / `(delete)` / `(deleted)` → the tag; anything else → null. */
+function tagFromAnnotation(text) {
+  const a = String(text ?? "").trim().toLowerCase();
+  if (a === "new") return "new";
+  if (a === "delete" || a === "deleted") return "delete";
+  return null;
+}
+
 export function parseTouchEntriesWithTags(touchesSection) {
   if (!touchesSection) return [];
   const out = [];
@@ -111,12 +119,16 @@ export function parseTouchEntriesWithTags(touchesSection) {
     if (!m) continue;
     let entry = m[1].trim();
     entry = entry.replace(/^[`"'']+|[`"'']+$/g, "").trim(); // surrounding quotes/backticks first
-    let tag = null;
-    const ann = entry.match(/\s*\(([^)]*)\)\s*$/);
-    if (ann) {
-      const a = ann[1].trim().toLowerCase();
-      if (a === "new") tag = "new";
-      else if (a === "delete" || a === "deleted") tag = "delete";
+    // Structural tag (new/delete): FIRST the common end-anchored form `path (new)`; then, when the
+    // line terminates with a full-width annotation (）， not )）, the ASCII (…) sits BEFORE it —
+    // `` path/x.ts (new)（描述） `` — the end-anchored match can't see it, so a pre-existing quirk
+    // silently dropped the tag (every (new)（…） task was judged "must-exist-missing" → promotion
+    // reject). Match the last ASCII (…) that precedes a （ to recover it. The PATH is unaffected
+    // (stripTouchAnnotation below removes both annotations); only the tag is recovered.
+    let tag = tagFromAnnotation(entry.match(/\s*\(([^)]*)\)\s*$/)?.[1]);
+    if (!tag) {
+      const beforeFullWidth = entry.match(/\s*\(([^)]*)\)\s*[（]/);
+      tag = tagFromAnnotation(beforeFullWidth?.[1]);
     }
     const stripped = stripTouchAnnotation(entry); // the ONE annotation-strip implementation
     const cleaned = stripped.replace(/^[`"'']+|[`"'']+$/g, "").trim(); // backtick the annotation masked
