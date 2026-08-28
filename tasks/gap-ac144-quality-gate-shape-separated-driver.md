@@ -30,7 +30,7 @@ B15/B17 落 driver（B15 换调用方、B17 直接机械驱动化）；B16-A/B �
 
 - [x] AC1（能取假，非 god-object）：上述四项不被并入同一个 driver kind（B15/B17 驱动化，B16-C/B18 归语义面）；（⛔ 四项并入同一 kind ⇒ 假）。
 - [x] AC2（能取假，语义不伪装机械）：B16-C 类 / B18 不被声称"已驱动化"而无 LLM 参与（把语义判断伪装成机械判断）；（⛔ 声称驱动化而无 LLM ⇒ 假）。
-- [ ] AC3（能取假，B15/B17 真驱动化）：B15（pool-quality-judge）调用方从 outer tick 换成 driver，B17（judgment-consumer-check）由 driver 跑——grep 到 driver 里的调用；（⛔ 仍 outer tick 手动跑 ⇒ 假）。**⛔ 接线已落地（CLI KINDS + drivers.yml + driver-config + kernel help），但 `quay driver start --kind quality` 的实际激活 + `.quay/quality-round.jsonl` 载体产生产记录须在 fan-in 后由主检出执行——生产载体未产出前不勾本条（硬规则 4 推论三）。**
+- [ ] AC3（能取假，B15/B17 真驱动化）：B15（pool-quality-judge）调用方从 outer tick 换成 driver，B17（judgment-consumer-check）由 driver 跑——grep 到 driver 里的调用；（⛔ 仍 outer tick 手动跑 ⇒ 假）。**⛔ 接线已落地（CLI KINDS + drivers.yml + driver-config + kernel help），但 `quay driver start --kind quality` 的实际激活 + `.quay/quality-round.jsonl` 载体产生产记录须在 fan-in 后由主检出执行——生产载体未产出前不勾本条（硬规则 4 推论三）。**（待外部）
 
 ## Definition of Done
 
