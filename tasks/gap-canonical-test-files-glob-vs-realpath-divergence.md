@@ -1,6 +1,7 @@
 ---
 id: gap-canonical-test-files-glob-vs-realpath-divergence
-title: canonicalTestFiles 整组复制进 3 checker，2 份偏离 shell 正本的 realpath 语义（glob 顺序凑巧掩盖分歧，无测试守）
+title: canonicalTestFiles 整组复制进 3 checker，2 份偏离 shell 正本的 realpath 语义（glob
+  顺序凑巧掩盖分歧，无测试守）
 status: ready
 labels:
   - gap
@@ -76,3 +77,9 @@ capability-catalog: 293 scripts | 293 declared | 0 unclassified | 288 ship
 - plugin/scripts/capability-catalog.sh（canonical-test-files.ts 六表注册）
 - docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数 296→297）
 - tasks/gap-canonical-test-files-glob-vs-realpath-divergence.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T16:19:44.203Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-token-gate-version-mismatch-self-lock
-title: L1 token 闸自锁——机械 fan-in 版本错位（旧签发者×新校验者，fan-in-ff-merge.sh 的
-  token 闸在 worktree 而注入在主检出旧守护）
+title: L1 token 闸自锁——机械 fan-in 版本错位（旧签发者×新校验者，fan-in-ff-merge.sh 的 token 闸在
+  worktree 而注入在主检出旧守护）
 status: ready
 labels:
   - gap
@@ -55,3 +55,9 @@ extra:
 - plugin/test/fan-in-ff-protocol-check.test.mjs（token 闸协议）
 - plugin/test/worker-driver.test.mjs（token 注入 + 新进程）
 - tasks/gap-fan-in-token-gate-version-mismatch-self-lock.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T14:40:28.870Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

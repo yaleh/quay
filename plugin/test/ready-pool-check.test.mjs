@@ -79,6 +79,7 @@ import {
   readPerTaskSuiteRecords,
   isSuiteRecordSkip,
 } from "../scripts/ready-pool-check.ts";
+import { propagateDocBranchToDevelop } from "../scripts/driver-filters.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
 
@@ -2266,6 +2267,71 @@ test("applyPromotions commits the status write — git status clean + committed 
   assert.equal(git("status", "--porcelain"), "", "AC1: after promotion the tree is clean (dirty ⇒ the commit did not land)");
   const subject = git("log", "-1", "--format=%s");
   assert.equal(subject, "tasks: gap-candidate todo→ready（promotion-driver 机械晋升）", "the commit subject names the task and transition");
+});
+
+// ── DETACH PROPAGATION (gap-fan-in-ff-ref-update-detach-develop AC6) ─────────────────────────
+// The main checkout sits on a doc-only work branch (main/manager-doc) while develop is bare (the
+// detach). A promotion flip committed on the doc branch must reach develop — fast-forward push —
+// so task worktrees branching from develop see the new status (otherwise dispatch reads ready on the
+// doc branch while the worktree base still has the old status). Non-ff (develop advanced independently)
+// ⇒ merge develop first, then push.
+
+test("propagateDocBranchToDevelop: doc-branch flip fast-forwards to develop (AC6)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `propagate-ff-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-q", "-b", "develop", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  writeTask(root, "gap-base", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "init");
+  // The detach: the main checkout moves to a doc-only branch; develop is no longer checked out anywhere.
+  git("checkout", "-q", "-b", "main/manager-doc");
+  const developBefore = git("rev-parse", "develop");
+  // A flip lands on the doc branch (what commitTaskStatus commits before propagate).
+  writeTask(root, "gap-flip", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "tasks: gap-flip todo→ready（promotion-driver 机械晋升）");
+  assert.notEqual(git("rev-parse", "main/manager-doc"), developBefore, "doc branch advanced past develop");
+
+  propagateDocBranchToDevelop(root);
+
+  assert.equal(git("rev-parse", "develop"), git("rev-parse", "main/manager-doc"),
+    "AC6: develop fast-forwarded to the doc branch head — the flip is visible to task worktrees");
+});
+
+test("propagateDocBranchToDevelop: develop advanced independently ⇒ merge then push (non-ff reconcile)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `propagate-nonff-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-q", "-b", "develop", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  writeTask(root, "gap-base", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "init");
+  git("checkout", "-q", "-b", "main/manager-doc");
+  // Doc branch commits a flip (its own file).
+  writeTask(root, "gap-flip", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "flip on doc branch");
+  // Develop advances independently (a different file) — the two branches diverge.
+  git("checkout", "-q", "develop");
+  writeTask(root, "gap-land", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "land on develop");
+  const developHead = git("rev-parse", "develop");
+  git("checkout", "-q", "main/manager-doc");
+
+  propagateDocBranchToDevelop(root);
+
+  assert.notEqual(git("rev-parse", "develop"), developHead, "develop advanced (reconcile merge landed)");
+  assert.equal(git("status", "--porcelain"), "", "reconcile merge left the doc branch clean");
+  assert.match(git("show", "develop:tasks/gap-flip.md"), /^status: ready$/m,
+    "the doc-branch flip is visible on develop after reconcile");
 });
 
 test("applyPromotions in a repo-less root still lands the write (committed=false, no throw)", (t) => {
