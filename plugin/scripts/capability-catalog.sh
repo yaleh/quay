@@ -179,7 +179,7 @@ declare -A QUESTION=(
   [dead-loop-check.sh]="Is a target project's loop alive or dead (L2 continuous-health: transcript user-msg or git commit window)?"
   [dead-loop-check.sh]="Is the loop ACTUALLY RUNNING (L2 continuous health) — a recent transcript user message or git commit in the last N minutes, INDEPENDENT of backlog emptiness (dead-loop vs healthy-idle)?"
   [derive-touches-heuristic.ts]="When a task body lacks a ## Touches section, what globs would a cheap scheduling-time heuristic derive for it?"
-  [delivery-inventory-drift-gate.sh]="Did this change ADD/DELETE a file under plugin/scripts/ WITHOUT updating the outline §6 DELIVERY-INVENTORY snapshot in the same change (the 2026-08-10 red family's root cause)?"
+  [delivery-inventory-drift-gate.sh]="Did this change ADD/DELETE a file under .claude/workflows/ WITHOUT mirroring it into plugin/workflows/ in the same change (gap-drift-gate-covers-only-plugin-scripts-not-workflows)?"
   [develop-deliver-tgz.sh]="After a develop merge, was a FRESH hardware-independent quay .tgz built at the develop tip and delivered+verified (quay serve http_code=200) on the verification machines B/C — DIR-123 每次 merge 后自动 deliver 机制?"
   [develop-work-ff.sh]="Does the doc-only work branch (the main checkout, develop detached) land back onto develop as a pure ref update (git push . — no working tree touched), mechanically refusing any CODE delta via --classify-delta (the 承重墙: the work branch may never carry code — a code delta would need a full suite, relocating every problem unchanged)?"
   [deliver-verify-usage.sh]="After a quay tgz install on a target machine, do the TOP-N real-use mechanisms (capability-catalog.sh + the offline-runnable subset of the three-layer-core-named scripts) each REALLY run — assert exit 0 + non-empty output — and does the negative control (deleting any verified script) make verification fail (AC92: the delivery verification surface must INTERSECT the actual usage surface, not just prove the port is alive)?"
@@ -400,6 +400,7 @@ declare -A QUESTION=(
   [worktree-branch-hygiene-check.sh]="Is the worktree and branch state hygienic (no stale branches or stranded worktrees)?"
   [worktree-node-modules-check.sh]="Does every dispatched task worktree (branch task/*) have node_modules present, so its self-verification never silently falls back to the shared checkout (report-only by default; --fail fail-closed)?"
   [checker-lib.ts]="Do the shared checker primitives — matchAtCommandPosition (按位置不按关键词) and enumerativeExistence (枚举式存在性) — behave correctly, so a new checker stops re-implementing them?"
+  [checker-mechanical-spine-check.ts]="Does every shipped checker conform to the mechanical-spine contract — exit-code vocabulary within {0,1,2,3} (0=PASS, 1=FAIL, 2=usage/env-error, 3=NOT-EVALUATED) and a --json claim that actually emits JSON — with a shrink-only exemption-list ratchet (B1, tasks/gap-b1-mechanical-spine-doc-checker)?"
   [mechanism-vitality-check.ts]="Which shipped mechanisms are zero-call past 3x their declared cadence (待表态), have a stale last-reaffirmed stamp (待重新确认), or lack a 失效前提 field (entry-gate reject)?"
   [md-deletion-token-evaporation-check.sh]="Did any commit net-deleting ≥50 lines from *.md leave deleted-content unique tokens (identifiers/paths/专名) with ZERO occurrence in the post-delete repo (来源完备性整段蒸发)?"
   [workflows-dual-copy-drift-check.ts]="Are the five dual-copy workflow files (drain-directives / fan-in-execute / run-routines / execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped orchestrator-tick-core.md references them, so the plugin/workflows/ mirror must carry them) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships to installed targets) — a one-sided edit (改正本而落地副本不跟, the A6/fan-in-execute.js class) must go RED, the current byte-identical state GREEN (gap-workflows-dual-copy-drift-unchecked)?"
@@ -409,6 +410,7 @@ declare -A QUESTION=(
   [land-capacity-monitor.ts]="What is the develop land rate (fan-in merge commits per hour) in a pre-stop vs post-stop window, and is the post-stop rate ZERO while pre-stop was non-zero (AC149-2 归零 ⇒ 回滚) — a measurement that reports a ratio for a human to judge a cliff, never a hardcoded X% threshold (硬规则④推论一)?"
   [session-retirement-check.ts]="Has each retired session's (outer/inner) execution-core doc been marked retired (删除线 + 指针 + 边界条件 banner) with no stale live claim (并行对照期 / 每轮必跑) left un-retired (AC149-1 真停 — the B9 drift shape)?"
   [outer-retirement-precondition-check.ts]="Before retiring the outer layer, does every checker the outer execution core (orchestrator-tick-core.md) directly references — the plugin/scripts/*-check.{ts,sh} set — have a surviving call surface (static-gate registry, or an external executable carrier referencing it at a code position, transitive closure), so a checker referenced ONLY by the retiring layer is flagged unless its file carries the explicit RETIRED-WITH-RETIRING-LAYER disposition (SPEC §2.3b B0, gap-b0-retirement-precondition-checker-call-surface)?"
+  [write-json-atomic.ts]="Is every state file write atomic — a single writeJsonAtomic (tmp + renameSync) so a concurrent reader never observes a torn, half-written JSON, replacing the split of 6 state writers into 2 atomic + 4 non-atomic (tasks/gap-writestate-atomicity-split)?"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
@@ -443,6 +445,7 @@ declare -A CADENCE=(
   [checker-cost.sh]="每红窗"
   [checker-cost.ts]="每红窗"
   [checker-lib.ts]="按需"
+  [checker-mechanical-spine-check.ts]="每轮"
   [checker-mutation-check.sh]="每轮"
   [claim-task.sh]="按需"
   [claim-task.ts]="按需"
@@ -708,6 +711,7 @@ declare -A CADENCE=(
   [promotion-driver.ts]="按需"
   [outer-driver.ts]="按需"
   [outer-retirement-precondition-check.ts]="每轮"
+  [write-json-atomic.ts]="按需"
 
   [dual-source-check.ts]="按需"
   [land-capacity-monitor.ts]="按需"
@@ -746,6 +750,7 @@ declare -A INVALIDATION=(
   [checker-cost.sh]="无可测前提，靠周期复核"
   [checker-cost.ts]="无可测前提，靠周期复核"
   [checker-lib.ts]="失效前提：仍有检查器需要位置判定/枚举式存在性原语；若无任何 import 者，本条按 ④ 失效"
+  [checker-mechanical-spine-check.ts]="失效前提：checker 机械脊柱契约（orchestration/SPEC-checker-mechanical-spine-contract-*.md）仍以 exit 码词表 {0,1,2,3} + --json 兑现为正本，且 checker 仍按 plugin/scripts/*-check.{ts,sh} 派生；若脊柱契约迁移或 exit 3 第三态语义被推翻（gap-not-evaluated-harness-third-state），本条按 ④ 失效"
   [checker-mutation-check.sh]="无可测前提，靠周期复核"
   [claim-task.sh]="无可测前提，靠周期复核"
   [claim-task.ts]="无可测前提，靠周期复核"
@@ -765,7 +770,7 @@ declare -A INVALIDATION=(
   [dead-code-after-return-check.ts]="无可测前提，靠周期复核"
   [dead-loop-check.sh]="无可测前提，靠周期复核"
   [derive-touches-heuristic.ts]="无可测前提，靠周期复核"
-  [delivery-inventory-drift-gate.sh]="失效前提：outline §6 DELIVERY-INVENTORY 仍是 verify-delivery-surface --inventory 的派生快照且 plugin/scripts 仍按目录计数；若计数改为单一打包产物/取消目录计数，本条退休"
+  [delivery-inventory-drift-gate.sh]="失效前提：.claude/workflows/ 仍是 canonical 源且 plugin/workflows/ 是其 byte-identical 分布镜像（M143/AC9/C6 逐字节校）；若取消双副本/镜像约定，本条退休（outline §6 快照触发已于 2026-08-29 退休——inventory 改 check 时现算）"
   [develop-deliver-tgz.sh]="失效前提：投递面仍为 B/C 两台 ssh 可达的验证机且 quay 仍以硬件无关 .tgz 分发；若投递面迁出 ssh/tmux 协议或产物改回 arch-bound SEA，本条退休"
   [develop-work-ff.sh]="失效前提：主检出仍停 doc-only 工作分支、develop 仍须脱离主检出靠 ref 更新落地 .md 编辑（ff 改回 merge --ff-only 即本条失去对象）；若主检出改回停 develop 或 doc-only 工作分支机制整体退役，本条退休"
   [deliver-verify-usage.sh]="失效前提：plugin/scripts 仍以目录内可独立调用的 .sh/.js 机件形式交付且三层执行核仍直接点名其中的机件；若交付形式改为单一打包产物/核不再点名机件，本条退休"
@@ -1011,6 +1016,7 @@ declare -A INVALIDATION=(
   [promotion-driver.ts]="失效前提：todo→ready 晋升仍经 ready-pool-check --apply 全池判定；若晋升并入别处（如 outer tick 内联）或 ready-pool-check 全池模式退役，本条退休"
   [outer-driver.ts]="失效前提：outer 会话的纯机械 A/B 段仍需一个常驻机械进程承接（读数/收尾/自查），且例程型 driver（Layer 0+1b）仍是其承载；若 outer 会话退役后这些段也随会话消失（不再需要机械承接）或例程型承载迁出（如并入 manager 会话），本条退休"
   [outer-retirement-precondition-check.ts]="失效前提：outer 执行核（orchestrator-tick-core.md）仍是退役前 checker 调用面的枚举正本，且 static-gate 注册表（runner-static-gate.ts）仍是「留存调用面」的判定来源之一；若执行核退役后本前置随之退役（其使命就是退役那一步的前置），或 checker 留存调用面的判定改由别的正本承载，本检查退休"
+  [write-json-atomic.ts]="失效前提：6 处 state 写仍以本模块为唯一原子写实现（driver-shared / inner-blocked-signal / mirror-full-suite-state / red-window-triage / runner-state-write / suite-state-trigger 各自 import writeJsonAtomic）；若 rename(2) 原子性假设失效（如迁到非 POSIX 或跨文件系统 rename）或 state 写载体迁出 plugin/scripts/，本条退休"
 
   [dual-source-check.ts]="失效前提：职责→driver 的退役仍以文档标注为唯一真相源；若退役改为机制强制（cron 删除即无锚），本条按 ④ 失效"
   [land-capacity-monitor.ts]="失效前提：land 仍以 develop 上的 fan-in 合并提交为载体（git log develop）；若 land 载体改换（产品化后 fan-in 写结构化记录而非 commit），本条失效"
@@ -1049,6 +1055,7 @@ declare -A LAST_REAFFIRMED=(
   [checker-cost.sh]="2026-08-10"
   [checker-cost.ts]="2026-08-10"
   [checker-lib.ts]="2026-08-10"
+  [checker-mechanical-spine-check.ts]="2026-08-28"
   [checker-mutation-check.sh]="2026-08-10"
   [claim-task.sh]="2026-08-10"
   [claim-task.ts]="2026-08-10"
@@ -1068,7 +1075,7 @@ declare -A LAST_REAFFIRMED=(
   [dead-code-after-return-check.ts]="2026-08-10"
   [dead-loop-check.sh]="2026-08-10"
   [derive-touches-heuristic.ts]="2026-08-10"
-  [delivery-inventory-drift-gate.sh]="2026-08-10"
+  [delivery-inventory-drift-gate.sh]="2026-08-29"
   [develop-deliver-tgz.sh]="2026-08-11"
   [develop-work-ff.sh]="2026-08-27"
   [deliver-verify-usage.sh]="2026-08-16"
@@ -1314,6 +1321,7 @@ declare -A LAST_REAFFIRMED=(
   [promotion-driver.ts]="2026-08-22"
   [outer-driver.ts]="2026-08-26"
   [outer-retirement-precondition-check.ts]="2026-08-28"
+  [write-json-atomic.ts]="2026-08-28"
 
   [dual-source-check.ts]="2026-08-28"
   [land-capacity-monitor.ts]="2026-08-28"
@@ -1352,6 +1360,7 @@ declare -A MATCHING=(
   [checker-cost.sh]="keyword"
   [checker-cost.ts]="keyword"
   [checker-lib.ts]="position"
+  [checker-mechanical-spine-check.ts]="position"
   [checker-mutation-check.sh]="enumerative"
   [claim-task.sh]="keyword"
   [claim-task.ts]="keyword"
@@ -1620,6 +1629,7 @@ declare -A MATCHING=(
   [land-capacity-monitor.ts]="n/a"
   [session-retirement-check.ts]="position"
   [outer-retirement-precondition-check.ts]="enumerative"
+  [write-json-atomic.ts]="n/a"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1728,6 +1738,7 @@ declare -A CONSUMER=(
   [land-capacity-monitor.ts]="谁按：manager 在 AC149-2 产能判定时按；条件=停会话后连续 ≥24h 要判定任务是否持续 land 且速率未归零/断崖"
   [session-retirement-check.ts]="谁按：manager 在 AC149-1 真停判定时按；条件=要判定 outer/inner 会话的 cron 锚/tick-log/执行核文档是否按同一套写法标退役"
   [outer-retirement-precondition-check.ts]="谁按：run_static_checks 每轮自动按（runner-static-gate.ts @static-tier full，全量套件 code-class gate）；条件=退役 outer 前必须跑（前置检查是退役的必须步骤，SPEC §2.3b B0）——全量套件接线保证不靠会话意志"
+  [write-json-atomic.ts]="谁按：driver-shared / inner-blocked-signal / mirror-full-suite-state / red-window-triage / runner-state-write / suite-state-trigger / proposal-convergence 在写各自 state 文件时 import；条件=这些 writer 须共用同一份 writeJsonAtomic 实现（函数级复用，⛔ 非复制粘贴）"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the
