@@ -1627,6 +1627,13 @@ async function mechSh(argv: string[], timeoutMs = 120_000): Promise<MechShResult
   return { ...r, ok: r.status === 0 };
 }
 
+/** 合并 stdout+stderr 为单一流（⛔ 不丢弃任一流、⛔ 不 stderr 优先——未知失败签名可能在任一流，
+ *  硬规则 3b/4b/9 同族：stderr 恒非空恒良性时，只取 stderr 会把 stdout 的真失败签名丢掉）。
+ *  两流皆空/全空白 ⇒ 空串（调用方回退 `exit <code>`）。单一机件，fail() 与 flip 共用。 */
+export function combinedOutput(stdout: string, stderr: string): string {
+  return [stdout, stderr].filter((s) => s && s.trim() !== "").join("\n");
+}
+
 /** D6：从某步的 stdout+stderr 合并流里提取【可读失败摘要】——⛔ 裸流（MODULE_TYPELESS 噪声占满、
  *  ⛔ 丢真正测试结果）。去噪 + 保留失败信号行（node:test 的 not ok / ✖ / # fail、断言 expected/actual、
  *  anti-drift HARD FAIL、esbuild 的 Could not resolve / [ERROR] 构建失败），有界（最后 N 行 + 4000 字符）。
@@ -1815,9 +1822,9 @@ async function commitTaskStatusChange(
 ): Promise<{ ok: boolean; reason: string | null }> {
   fs.writeFileSync(file, nextText, "utf8");
   let a = await mechSh(["git", "-C", worktree, "add", `tasks/${task}.md`]);
-  if (!a.ok) return { ok: false, reason: `git add failed: ${a.stderr || `exit ${a.status}`}` };
+  if (!a.ok) return { ok: false, reason: `git add failed: ${combinedOutput(a.stdout, a.stderr) || `exit ${a.status}`}` };
   a = await mechSh(["git", "-C", worktree, "commit", "-q", "--no-verify", "-m", message, "--", `tasks/${task}.md`]);
-  if (!a.ok) return { ok: false, reason: `git commit failed: ${a.stderr || `exit ${a.status}`}` };
+  if (!a.ok) return { ok: false, reason: `git commit failed: ${combinedOutput(a.stdout, a.stderr) || `exit ${a.status}`}` };
   return { ok: true, reason: null };
 }
 
@@ -1941,7 +1948,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   // ⛔ 保持旧函数名 `fail`（不改名 failStep）——archguard-structural-gate-fan-in.test.mjs 钉死
   // `fail("archguard-structure"` 源面；改名会破坏该结构不变量（D6 只改产出，不改接点命名）。
   const fail = (step: string, a: MechShResult): MechanicalFanInResult => {
-    const combined = [a.stdout, a.stderr].filter((s) => s && s.trim() !== "").join("\n");
+    const combined = combinedOutput(a.stdout, a.stderr);
     const summary = extractFailureSummary(combined) || `exit ${a.status}`;
     const logFile = stepLogFile(step);
     try {

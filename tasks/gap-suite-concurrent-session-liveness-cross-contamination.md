@@ -1,7 +1,7 @@
 ---
 id: gap-suite-concurrent-session-liveness-cross-contamination
 title: 并发套件（全量+scoped）共享 session-liveness-sig-* 前缀 ⇒ leak-scan 跨套件误报假红
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
