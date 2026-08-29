@@ -216,7 +216,7 @@ import { defaultLaneCount } from "./full-suite-runner.ts";
 // enumerator (`git worktree list --porcelain`) — single source (fast-mode-telemetry's listWorktrees,
 // not a parallel porcelain parser). The merge-worktree detector below reuses it to find worktrees
 // where a MERGE is in flight.
-import { listWorktrees } from "./fast-mode-telemetry.ts";
+import { listWorktrees, worktreeExists } from "./fast-mode-telemetry.ts";
 // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): the
 // promotion commit path runs `git commit --no-verify` (a mechanical status flip is content-neutral),
 // so the pre-commit hook's Touches「一条目一路径」detector never runs there — a multi-path Touches bullet
@@ -986,7 +986,21 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   const commitTraceReady = traced && (allChecked || total === 0);
   const workLandedReady = workLanded && (allChecked || remainingAllExternal || total === 0);
   const doneFlipReady = workLandedReady || commitTraceReady;
-  return doneFlipReady || allChecked;
+  // LEFTOVER-WORKTREE EXEMPTION (gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption):
+  // the standalone `allChecked` arm (added 2026-08-08) excludes a ready task purely on its
+  // SELF-DECLARED completion — no landing evidence at all — so it judged not-yet-flipped and deferred
+  // forever. A mechanical fan-in FAILURE (suite red / merge-develop conflict) leaves the task
+  // `ready + all-checked + un-landed` WITH its `task/<id>` worktree still open (ff-merge success is
+  // what deletes it) — and the old arm excluded it every round, so the landing path (worker dispatch →
+  // driver fan-in) never ran again: permanent stranding that only a manual AC-uncheck could undo, and
+  // one such dead task froze the whole dispatch pool (dispatchable_disjoint 0). The open worktree is
+  // the DIRECT "fan-in not yet complete" quantity (same `git worktree list` source as
+  // computeInFlightWorktreeTouches): while it exists the task must stay dispatchable so the next
+  // dispatch triggers the driver's mechanical fan-in retry (self-heal). No worktree (true landed / the
+  // 2026-08-08 prose-AC shape) keeps the original exclude behavior. `worktreeExists` is fail-soft
+  // (non-git root / unreadable list ⇒ false ⇒ original behavior preserved).
+  const hasLeftoverWorktree = worktreeExists(repoRoot, task.id);
+  return doneFlipReady || (allChecked && !hasLeftoverWorktree);
 }
 
 export function isFixture(task) {
