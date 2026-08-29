@@ -195,6 +195,9 @@ import { suiteLockBase } from "./suite-lock-slots.ts";
 // D7：机械 fan-in 的 bucket suite 绿后，把本轮 suite 状态镜像到权威载体 full-suite-state.json
 // （复用 mirror-full-suite-state.ts 的 build/write/skip 单一实现，⛔ 不另写一份 state shape）。
 import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentState } from "./mirror-full-suite-state.ts";
+// D7：laneCount 取 full-suite-runner.ts 的 defaultLaneCount（nproc-derived 单一真相源，读宿主 + QUAY_MAX_*
+// 定义点，⛔ 不写字面量 1——concurrency-literal-check P4 会把 `laneCount: 1` 判为未声明并发字面量违规）。
+import { defaultLaneCount } from "./full-suite-runner.ts";
 export {
   splitArgs,
   launchArgv,
@@ -2051,6 +2054,8 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
  *  ⛔ 不伪造 full-green：scope=worktree + taskId + runner=inner 区分 bucket-run（本任务的 --buckets 子集）
  *  与 full-run（scope=main + runner=outer 无 taskId）——读面据此可分辨「退休已修 suite 绿」≠「全量 suite 绿」。
  *  finishedAt 与 mfi.suiteFinishedEpoch 同源（同一 sr.finishedAt 派生）⇒ 载体不再 28h 陈旧（D7 AC3）。
+ *  laneCount 取 defaultLaneCount()（nproc-derived 单一真相源，⛔ 非字面量——bucket suite 跑的是
+ *  test.sh AC5 派生的真实 lane 数，不是 1 条）。
  *  best-effort：写失败 / 状态在飞（shouldSkipMirrorWrite）不致命——mfi 仍是这次 fan-in 的权威记录。 */
 export function mirrorMechanicalFanInSuiteState(opts: {
   task: string;
@@ -2064,7 +2069,7 @@ export function mirrorMechanicalFanInSuiteState(opts: {
   try {
     const built = buildMirrorState({
       state: "green", startedAt: opts.startedAt, finishedAt: opts.finishedAt,
-      durationMs: opts.durationMs, laneCount: 1, commit: opts.commit,
+      durationMs: opts.durationMs, laneCount: defaultLaneCount(), commit: opts.commit,
       taskId: opts.task, runId: opts.runId, runner: "inner", scope: "worktree",
     });
     if (built.error) return;

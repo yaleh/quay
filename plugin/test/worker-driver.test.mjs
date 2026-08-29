@@ -102,6 +102,7 @@ import {
   extractFailureSummary,
   mirrorMechanicalFanInSuiteState,
 } from "../scripts/worker-driver.ts";
+import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 // gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
 // 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
 import { advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, applyTaskFilters, makeFilterContext } from "../scripts/driver-filters.ts";
@@ -435,6 +436,7 @@ test("D7 — mirrorMechanicalFanInSuiteState writes full-suite-state.json (finis
   assert.equal(st.taskId, "gap-d7", "D7: taskId set — bucket-run traceability (⛔ not a full-run fabrication)");
   assert.equal(st.runId, "mf-run-d7");
   assert.equal(st.runner, "inner");
+  assert.equal(st.laneCount, defaultLaneCount(), "D7: laneCount is nproc-derived (defaultLaneCount) — ⛔ not the literal 1 (concurrency-literal-check P4 violation)");
 
   // in-flight guard：权威载体停在 running（finishedAt null）⇒ 不覆盖（shouldSkipMirrorWrite）。
   fs.writeFileSync(stateFile, JSON.stringify({ state: "running", finishedAt: null }), "utf8");
