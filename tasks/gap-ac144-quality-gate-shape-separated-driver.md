@@ -1,7 +1,7 @@
 ---
 id: gap-ac144-quality-gate-shape-separated-driver
 title: AC144 质量把关按【形状】分开驱动化——B15/B17 驱动化，B16-C/B18 归语义面（⛔ 不得塞进 promotion-driver）
-status: ready
+status: done
 labels:
   - gap
   - feature
