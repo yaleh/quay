@@ -387,32 +387,12 @@ node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --
 
 ### 0. 哨兵
 
-`.halt` 存在 → 本 tick 空转，报告「已暂停」，重新排程，结束。
-
-**统一 halt 检查点（SPEC 2.8，`gap-spec-p2-halt-three-layer-mechanical-enforcement`）**：三层共用
-**同一个**机械读哨兵命令——`plugin/scripts/halt-check.sh --for <layer> --json`。它一次给出
-`halted`（fail-closed，读失败 = 停）+ **组合判据**（`无 .halt` **且** 最后提交 >24h ⇒ `stall=true`，
-未标记的停摆机械报出）。`--for inner` 是本层标签；输出与 `supervisor-preempt.sh halt-check` 同形
-（`halted=` / `reason=` 行），可当 drop-in 读。**放置 `.halt` ⇒ 下一执行点即停，不等到 tick 边界。**
-
-**抢占挂载（`gap-supervisor-preemption`：.halt 任意点生效，不再只是本步骤 0）**：本步骤只是
-tick 边界的**规则文本**；`.halt` 的**强制点在代码**（机械挂载，任意执行点生效——今晚事故 7
-halt 后仍派发 5 个 subagent 的根因就是「连续流程绕过步骤 0」，SPEC-state-crystallization §2.1）：
-
-1. **新派发被代码挡**：`slot-refill.ts`（事件驱动回填 + tick 心跳回填的派发推荐）读
-   `<root>/.halt` —— 存在 ⇒ `should_refill=false` + `no_refill_reason` 点名 halt（AC2 实测）。
-2. **在飞层被进程级停**：`plugin/scripts/supervisor-preempt.sh preempt <target>` 对目标
-   进程/会话发停止信号（TUI 形态 = tmux C-c；`-p` 迁移后 = `kill <pid>`，OS 就是抢占原语，
-   AC4/AC5b）；`preempt-all --root <根> --target <层>[,<层>] --pid <pid>[,<pid>]` 在 halt 时对
-   全部在飞层发信号。
-3. **读哨兵（统一）**：`bash plugin/scripts/halt-check.sh --for inner --json` 输出 `halted` 字段
-   （fail-closed——读失败 = 停，gap-halt-sentinel-path-mismatch）；`--projects <dir1,dir2,...>`
-   可加读各项目的 `.halt`（外层/管理者三项目读法）。`supervisor-preempt.sh halt-check --root <根>`
-   是同一语义的进程级抢占原语读法，两者等价。
-
-本 tick 每步派发前（步骤 3/4 与槽位回填）都要先问 halt-check/slot-refill——halt 置位即停派，
-不等到下一 tick 边界。**组合判据同 A1**：`halt-check.sh --for inner` 的 `stall=true`（无 `.halt` 且
->24h 无产出）⇒ 未标记的停摆，本 tick 必须升级报出，不静默空转。
+**（退役）`.halt` 哨兵暂停已死**（gap-retire-halt-file-driver-based，2026-08-29）：本层（inner）的
+晋升/执行暂停改由 driver control-state 承接（`.quay/worker-control.json`，`driver-shared.ts` `isHalted`，
+`worker-driver.ts` 起新轮前读控制态），driver 不再读 `.halt`。旧的三层统一检查点 `halt-check.sh` 已删除；
+`slot-refill.ts` 的 `.halt` 挂载随 B 类 `gap-retire-slot-refill-halt-mount` 另行退役。进程级抢占原语
+`supervisor-preempt.sh preempt <target>` / `preempt-all`（OS 就是抢占原语，AC4/AC5b）**保留**——它是
+对目标进程/会话发停止信号的机制，不依赖 `.halt` 哨兵。
 
 **Monitor 挂载自检**（`gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`）：外层靠
 `plugin/scripts/session-liveness.sh` 的 Monitor 消费本层停止条件（观测只有一个工具；`inner-state.sh` 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R11`）——它没挂上/挂错目标/属于上个会话，本层停摆就没人发现。每个 tick 用一条命令核实，不靠人判断：

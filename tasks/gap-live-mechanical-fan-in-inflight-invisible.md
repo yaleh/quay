@@ -1,7 +1,7 @@
 ---
 id: gap-live-mechanical-fan-in-inflight-invisible
 title: Live 页机械 fan-in 在飞任务不可见——round 只带 count 不带 task id，三载体在 fan-in 窗口全 miss
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -35,8 +35,8 @@ driver 自己知道任务在飞（`worker-driver.ts:1811` `inFlightTasks()`，ru
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，生产载体）：读生产 round 载体，`in_flight_tasks` 非空时 `readLive().inFlight` 含该 task（⛔ round 无 task id / readLive 不含 ⇒ 假）。
-- [ ] AC2（不误伤）：workflow-events-only fixture（无 round 文件）的既有 serve.test.mjs AC2 不受影响。
+- [x] AC1（能取假，生产载体）：读生产 round 载体，`in_flight_tasks` 非空时 `readLive().inFlight` 含该 task（⛔ round 无 task id / readLive 不含 ⇒ 假）。
+- [x] AC2（不误伤）：workflow-events-only fixture（无 round 文件）的既有 serve.test.mjs AC2 不受影响。
 
 ## Definition of Done
 

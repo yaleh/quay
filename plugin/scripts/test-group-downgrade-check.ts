@@ -51,6 +51,8 @@ import os from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { helpExit, readFileSafe } from "./gate-script-base.ts";
+import { canonicalTestFiles } from "./canonical-test-files.ts";
+export { canonicalTestFiles };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -86,80 +88,6 @@ function git(root: string, args: string[], allowFail = false): { status: number;
     throw new Error(`git ${args[0]} failed (exit ${status}): ${(r.stderr || r.stdout || "").trim().slice(0, 500)}`);
   }
   return { status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
-}
-
-// ── glob parsing (single-source: read scripts/test.sh's own glob line, never re-typed) ────────────────
-
-/** Parse the space-separated glob patterns out of `scripts/test.sh`'s `glob=(...)` line. */
-export function parseCanonicalGlobs(repoRoot: string): string[] {
-  const src = readFileSafe(path.join(repoRoot, "scripts", "test.sh"));
-  const m = src.match(/glob=\(([^)]*)\)/);
-  if (!m) return [];
-  return m[1]
-    .split(/\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function globSegmentToRegex(seg: string): RegExp {
-  const escaped = seg.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*");
-  return new RegExp(`^${escaped}$`);
-}
-
-/** Expand one glob pattern (each `/`-segment MAY contain `*`) against `root`. */
-export function expandGlob(pattern: string, root: string): string[] {
-  const segments = pattern.split("/");
-  let current = [root];
-  for (const seg of segments) {
-    if (!seg.includes("*")) {
-      current = current.map((dir) => path.join(dir, seg)).filter((p) => fs.existsSync(p));
-      continue;
-    }
-    const re = globSegmentToRegex(seg);
-    const next: string[] = [];
-    for (const dir of current) {
-      let entries: string[] = [];
-      try {
-        entries = fs.readdirSync(dir);
-      } catch {
-        entries = [];
-      }
-      for (const e of entries) {
-        if (re.test(e)) next.push(path.join(dir, e));
-      }
-    }
-    current = next;
-  }
-  return current.filter((p) => {
-    try {
-      return fs.statSync(p).isFile();
-    } catch {
-      return false;
-    }
-  });
-}
-
-/** The working-tree test files covered by scripts/test.sh's canonical glob, repo-relative, deduped
- * by realpath (AC3 of gap-test-suite-has-no-layer-grouping: the experiments/ symlink copies that
- * point back into plugin/test/ must never run — or be judged — twice). Returns the realpath's
- * repo-relative path, matching build_deduped_files in scripts/test.sh. */
-export function canonicalTestFiles(repoRoot: string): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const pattern of parseCanonicalGlobs(repoRoot)) {
-    for (const abs of expandGlob(pattern, repoRoot)) {
-      let rp = abs;
-      try {
-        rp = fs.realpathSync(abs);
-      } catch {
-        rp = abs;
-      }
-      if (seen.has(rp)) continue;
-      seen.add(rp);
-      out.push(path.relative(repoRoot, rp).split(path.sep).join("/"));
-    }
-  }
-  return out.sort();
 }
 
 // ── git set helpers ──────────────────────────────────────────────────────────────────────────────────

@@ -184,7 +184,13 @@ import {
 } from "./touches-orthogonality-check.ts";
 // The dispatch gate's OWN declared-path expander (single-source — ready-pool-check must not carry a
 // parallel copy of "which files does a Touches declaration intend to touch?").
-import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
+import { expandDeclaredTouches, INFLIGHT_WORKTREE_STALE_MS } from "./concurrent-batch-scheduler.ts";
+// MERGE-WORKTREE LIVENESS (gap-merge-worktree-surface-lacks-liveness-overbroad AC2): the same
+// worktree-process-reaper /proc enumerator the in-flight-worktree liveness uses (concurrent-batch-
+// scheduler.ts imports it for computeInFlightWorktreeTouches) — enumerateProcs + cwdUnder, NOT a
+// hand-rolled /proc scan. The shared staleness threshold (INFLIGHT_WORKTREE_STALE_MS, above) and
+// this enumerator give the merge-surface path the SAME liveness judgment as the task-worktree path.
+import { enumerateProcs, cwdUnder } from "./worktree-process-reaper.ts";
 import { isDirectEntry, helpExit } from "./gate-script-base.ts";
 // Reused "work has landed on master" signal (AC6: reuse, never a parallel copy) — the same
 // symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
@@ -210,7 +216,7 @@ import { defaultLaneCount } from "./full-suite-runner.ts";
 // enumerator (`git worktree list --porcelain`) — single source (fast-mode-telemetry's listWorktrees,
 // not a parallel porcelain parser). The merge-worktree detector below reuses it to find worktrees
 // where a MERGE is in flight.
-import { listWorktrees } from "./fast-mode-telemetry.ts";
+import { listWorktrees, worktreeExists } from "./fast-mode-telemetry.ts";
 // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): the
 // promotion commit path runs `git commit --no-verify` (a mechanical status flip is content-neutral),
 // so the pre-commit hook's Touches「一条目一路径」detector never runs there — a multi-path Touches bullet
@@ -430,39 +436,124 @@ export function isMergeWorktree(wtPath) {
   return mergeHeadPresent(wtPath) || hasUnmergedEntries(wtPath);
 }
 
-/** The merge's uncommitted surface: `git -C <wt> diff --name-only HEAD` — every file the in-flight
- *  merge has changed relative to HEAD (conflicts AND cleanly-merged changes; verified: a conflicted
- *  merge lists both the `UU` conflict path and the staged clean-merge additions). Repo-relative
- *  paths. Fail-soft: git failure ⇒ [] (never a fabricated surface). */
-export function diffNameOnlyHead(wtPath) {
+/** The merge's CONFLICT surface: the repo-relative paths of the unmerged (`UU`) index entries —
+ *  `git -C <wt> ls-files -u`, deduped to one entry per conflicted path (not one per stage 1/2/3).
+ *  NARROWED from the former `git diff --name-only HEAD` (gap-merge-worktree-surface-lacks-liveness-
+ *  overbroad AC3): a conflicted merge's full HEAD delta also listed every cleanly-merged change, so
+ *  a dead 3-file conflict read as a 121-file surface and locked out the whole dispatch pool. The
+ *  surface is now ONLY the true conflict paths. Repo-relative. Fail-soft: git failure ⇒ []
+ *  (never a fabricated surface). */
+export function unmergedConflictPaths(wtPath) {
   try {
-    const out = execFileSync("git", ["-C", wtPath, "diff", "--name-only", "HEAD"], {
+    const out = execFileSync("git", ["-C", wtPath, "ls-files", "-u"], {
       encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
     });
-    return out.split("\n").map((s) => s.trim()).filter(Boolean);
+    const files = new Set();
+    for (const line of out.split("\n")) {
+      if (!line) continue;
+      const tab = line.indexOf("\t");
+      const p = tab >= 0 ? line.slice(tab + 1) : line;
+      if (p) files.add(p);
+    }
+    return [...files];
   } catch {
     return [];
   }
+}
+
+/** The worktree HEAD's committer time (ms), or null when unreadable — the SAME direct quantity the
+ *  in-flight-worktree liveness uses (`lastCommitMsOfWorktree` in concurrent-batch-scheduler.ts;
+ *  reimplemented here because that one is module-private — this file must not modify its sibling, so
+ *  only the shared threshold `INFLIGHT_WORKTREE_STALE_MS` is imported). `git -C <wt> log -1
+ *  --format=%ct` reads the worktree's OWN checked-out HEAD. */
+function lastCommitMsOfWorktree(worktreePath) {
+  try {
+    const out = execFileSync("git", ["-C", worktreePath, "log", "-1", "--format=%ct"], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    const line = out.trim();
+    if (line && /^\d+$/.test(line)) return Number(line) * 1000;
+  } catch (_) { /* unreadable worktree HEAD — conservative alive (null) */ }
+  return null;
+}
+
+/** The dead predicate — SAME semantics as concurrent-batch-scheduler.ts `isDeadInFlightWorktree`
+ *  (gap-compute-inflight-worktree-touches-no-liveness-check; reimplemented because the source is
+ *  module-private and this file must not modify its sibling). ALIVE unless BOTH direct quantities
+ *  prove otherwise: (a) zero live processes under the worktree, AND (b) a known commit time older
+ *  than `staleMs`. Unknown liveness (`lv` null) or an unreadable commit time (null) is ALIVE
+ *  (conservative — hard rule 6: 缺值 = 未查, not 为假). */
+function isDeadMergeWorktree(lv, nowMs, staleMs) {
+  if (!lv) return false; // no liveness facts ⇒ alive (backward-compatible, conservative)
+  if (lv.hasLiveProcess) return false; // a live process ⇒ alive regardless of commit age
+  const last = lv.lastCommitMs;
+  if (typeof last !== "number" || !Number.isFinite(last)) return false; // unknown commit ⇒ alive
+  return nowMs - last > staleMs; // zero processes AND stale ⇒ dead
+}
+
+/** PURE core: resolve open-worktree listings to merge conflict surfaces, applying the liveness
+ *  DIRECT quantity. The worktree list / merge predicate / conflict-file enumerator / liveness facts
+ *  are all INJECTED so tests exercise the resolution without faking git or /proc;
+ *  `computeMergeWorktreeSurfaces` is the production wiring. A worktree contributes a surface only
+ *  when it is (a) not the main checkout, (b) mid-merge (`isMerge`), (c) NOT dead (liveness), and
+ *  (d) a non-empty conflict surface (`conflictFiles`).
+ *  @param {Array<{path:string, branch:string|null}>} worktrees from listWorktrees (inject in tests)
+ *  @param {object} o
+ *  @param {string} o.root main checkout root (the main worktree is excluded)
+ *  @param {(wtPath:string) => boolean} [o.isMerge] injected merge-in-flight predicate (default isMergeWorktree)
+ *  @param {(wtPath:string) => string[]} [o.conflictFiles] injected conflict-surface enumerator (default unmergedConflictPaths)
+ *  @param {(wt:{path:string, branch:string|null}) => ({hasLiveProcess:boolean, lastCommitMs:number|null})|null|undefined} [o.liveness]
+ *         injected per-worktree liveness facts; null (default) ⇒ every worktree is alive (pre-fix).
+ *  @param {number} [o.nowMs] fixed "now" for hermetic staleness tests (default Date.now())
+ *  @param {number} [o.staleMs] the staleness threshold (default INFLIGHT_WORKTREE_STALE_MS)
+ *  @returns {Array<{name:string, path:string, files:string[]}>} live mid-merge conflict surfaces
+ */
+export function resolveMergeWorktreeSurfaces(worktrees, {
+  root,
+  isMerge = isMergeWorktree,
+  conflictFiles = unmergedConflictPaths,
+  liveness = null,
+  nowMs = Date.now(),
+  staleMs = INFLIGHT_WORKTREE_STALE_MS,
+} = {}) {
+  const mainRoot = root ? path.resolve(root) : null;
+  const out = [];
+  for (const wt of worktrees || []) {
+    if (!wt || !wt.path) continue;
+    if (mainRoot !== null && path.resolve(wt.path) === mainRoot) continue; // main checkout, not a merge worktree
+    if (!isMerge(wt.path)) continue;
+    // LIVENESS (AC2): a DEAD mid-merge worktree (zero live processes + stale HEAD commit — the
+    // exited-not-landed merge-develop half-failure shape) must not present a conflict surface,
+    // else a dead 3-file conflict locks out the whole dispatch pool.
+    const lv = liveness ? liveness(wt) : null;
+    if (isDeadMergeWorktree(lv, nowMs, staleMs)) continue;
+    const files = conflictFiles(wt.path);
+    if (files.length === 0) continue; // a merge with no conflict surface blocks nothing
+    out.push({ name: path.basename(wt.path), path: wt.path, files });
+  }
+  return out;
 }
 
 /** Enumerate the conflict surfaces of all in-flight MERGE worktrees under `root`. The MAIN checkout
  *  itself is excluded — the outer's own hot-file edits in the main tree are the SEPARATE
  *  `--outer-inflight` occupancy axis (fast-mode-loop-tick.md step 3b), not a merge surface. Returns
  *  `[{ name, path, files }]`: `name` is the worktree basename (the identifier the deferred reason
- *  names), `path` its absolute path, `files` the `git diff --name-only HEAD` surface (non-empty).
+ *  names), `path` its absolute path, `files` the unmerged-conflict surface (non-empty). A DEAD
+ *  mid-merge worktree (zero live processes + stale commit) contributes nothing (liveness, AC2).
  *  Fail-soft: non-git root / unreadable worktree list / empty surface ⇒ [] — never a fabricated
  *  block. */
 export function computeMergeWorktreeSurfaces(root) {
   const worktrees = listWorktrees(root);
-  const out = [];
-  for (const wt of worktrees) {
-    if (!wt.path || path.resolve(wt.path) === path.resolve(root)) continue; // main checkout, not a merge worktree
-    if (!isMergeWorktree(wt.path)) continue;
-    const files = diffNameOnlyHead(wt.path);
-    if (files.length === 0) continue; // a merge with no changed surface blocks nothing
-    out.push({ name: path.basename(wt.path), path: wt.path, files });
-  }
-  return out;
+  // Enumerate live processes ONCE (shared across every worktree) — the /proc scan is the cost, and
+  // it must not be re-done per worktree (same as concurrent-batch-scheduler's computeInFlightWorktreeTouches).
+  const procs = enumerateProcs();
+  return resolveMergeWorktreeSurfaces(worktrees, {
+    root,
+    liveness: (wt) => ({
+      hasLiveProcess: procs.some((p) => p.state !== "Z" && cwdUnder(p.cwd, wt.path)),
+      lastCommitMs: lastCommitMsOfWorktree(wt.path),
+    }),
+  });
 }
 
 /** The merge-worktree arm of the touches-overlap judgment — the DEFERRED-REASON DISTINCTION (AC2):
@@ -895,7 +986,21 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   const commitTraceReady = traced && (allChecked || total === 0);
   const workLandedReady = workLanded && (allChecked || remainingAllExternal || total === 0);
   const doneFlipReady = workLandedReady || commitTraceReady;
-  return doneFlipReady || allChecked;
+  // LEFTOVER-WORKTREE EXEMPTION (gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption):
+  // the standalone `allChecked` arm (added 2026-08-08) excludes a ready task purely on its
+  // SELF-DECLARED completion — no landing evidence at all — so it judged not-yet-flipped and deferred
+  // forever. A mechanical fan-in FAILURE (suite red / merge-develop conflict) leaves the task
+  // `ready + all-checked + un-landed` WITH its `task/<id>` worktree still open (ff-merge success is
+  // what deletes it) — and the old arm excluded it every round, so the landing path (worker dispatch →
+  // driver fan-in) never ran again: permanent stranding that only a manual AC-uncheck could undo, and
+  // one such dead task froze the whole dispatch pool (dispatchable_disjoint 0). The open worktree is
+  // the DIRECT "fan-in not yet complete" quantity (same `git worktree list` source as
+  // computeInFlightWorktreeTouches): while it exists the task must stay dispatchable so the next
+  // dispatch triggers the driver's mechanical fan-in retry (self-heal). No worktree (true landed / the
+  // 2026-08-08 prose-AC shape) keeps the original exclude behavior. `worktreeExists` is fail-soft
+  // (non-git root / unreadable list ⇒ false ⇒ original behavior preserved).
+  const hasLeftoverWorktree = worktreeExists(repoRoot, task.id);
+  return doneFlipReady || (allChecked && !hasLeftoverWorktree);
 }
 
 export function isFixture(task) {
@@ -1847,6 +1952,63 @@ function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criter
   return s;
 }
 
+/** Read task files from a git ref in ONE `git cat-file --batch` process — the batched SINGLE-SOURCE
+ *  dispatch read face (tasks/gap-dispatch-reads-stale-main-checkout-task-status): the canonical store
+ *  is the develop ref; the manager working branch's disk is a STALE agent-proxy (硬规则 4b). Per-task
+ *  `git show` would be ~N subprocesses (the pool check already has a >150s timeout from per-task
+ *  git-history — gap-ready-pool-check-times-out-after-git-history-signal — so the develop read is
+ *  batched the same way). Returns a Map<taskId, rawContent> for the ids PRESENT at the ref; absent
+ *  ids are simply missing (callers fall back to the working-tree read). Returns an EMPTY map on any
+ *  git failure (never a positive from an unavailable source). Synchronous (dispatch callers are
+ *  sync); worker-driver.ts's async `readTaskStatusAtRef` is the same judgment in an async mechSh
+ *  context. */
+export function readTaskFilesAtRefBatch(root, ref, ids) {
+  if (ids.length === 0) return new Map();
+  const input = ids.map((id) => `${ref}:tasks/${id}.md`).join("\n") + "\n";
+  let buf;
+  try {
+    buf = execFileSync("git", ["-C", root, "cat-file", "--batch"], {
+      input,
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 30_000,
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+  } catch {
+    return new Map();
+  }
+  const map = new Map();
+  let off = 0;
+  for (const id of ids) {
+    const nl = buf.indexOf(0x0a, off);
+    if (nl === -1) break;
+    const header = buf.slice(off, nl).toString("utf8");
+    off = nl + 1;
+    const m = / blob (\d+)$/.exec(header);
+    if (!m) continue; // `<revspec> missing` (or unparseable) — no content line; off is already past the header
+    const size = Number(m[1]);
+    map.set(id, buf.slice(off, off + size).toString("utf8"));
+    off += size + 1; // skip content + the trailing newline after it
+  }
+  return map;
+}
+
+/** Read a single task file's raw content from a git ref (the per-task wrapper over the batched
+ *  reader; null when the ref/path is absent or git fails). */
+export function readTaskFileAtRef(root, ref, taskId) {
+  return readTaskFilesAtRefBatch(root, ref, [taskId]).get(taskId) ?? null;
+}
+
+/** Read `<ref>:tasks/<id>.md` `status:` frontmatter (the status half of readTaskFileAtRef).
+ *  null when the ref/path is unavailable or the frontmatter is unreadable. */
+export function readTaskStatusAtRef(root, ref, taskId) {
+  const raw = readTaskFileAtRef(root, ref, taskId);
+  if (raw === null) return null;
+  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!m) return null;
+  const statusLine = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
+  return statusLine ? (statusLine.slice("status:".length).trim() || null) : null;
+}
+
 /** Analyze a task store. Returns { pool, floor, cap, floorMult, deficit, dispatchable_disjoint,
  *  criterion_met, pool_big_all_colliding, report, ready, excluded, candidates, promotions,
  *  scanned, top_relevance, ready_relevance, closed_but_live, targeted_promotion }. `root` is the repo
@@ -1861,14 +2023,24 @@ function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criter
  *  TARGETED-PROMOTION query (gap-targeted-promotion-operation-does-not-exist) — when set, a
  *  `targeted_promotion` result for that one id is produced (floor-INDEPENDENT, AC2), supplemental
  *  to and never altering the bulk `promotions` path (AC3). */
-export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, floorCap, inFlight = [], closedButLive = [], topN = 0, targetedId = null, develop = "develop", integration = "integration", master = "master", landingStalenessMs = LANDING_STALENESS_MS_DEFAULT, landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT, redWindowMin = RED_WINDOW_MIN_DEFAULT, now = Date.now() }) {
+export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, floorCap, inFlight = [], closedButLive = [], topN = 0, targetedId = null, develop = "develop", integration = "integration", master = "master", landingStalenessMs = LANDING_STALENESS_MS_DEFAULT, landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT, redWindowMin = RED_WINDOW_MIN_DEFAULT, now = Date.now(), taskReadRef = null }) {
   const allTasks = new Map();
   const fileNames = fs.existsSync(tasksDir)
     ? fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))
     : [];
+  // SINGLE-SOURCE dispatch read (gap-dispatch-reads-stale-main-checkout-task-status): when
+  // taskReadRef names a git ref, ALL task files are read from THAT ref (the canonical develop store)
+  // in ONE batched `git cat-file --batch` process, falling back to the working-tree disk only for
+  // tasks not yet on the ref. The manager working branch's disk is a stale agent-proxy — reading it
+  // for status re-dispatches already-done tasks (硬规则 4b).
+  const refTasks = taskReadRef
+    ? readTaskFilesAtRefBatch(root, taskReadRef, fileNames.map((f) => f.replace(/\.md$/, "")))
+    : null;
   for (const f of fileNames) {
     const id = f.replace(/\.md$/, "");
-    const raw = fs.readFileSync(path.join(tasksDir, f), "utf8");
+    const raw = refTasks
+      ? (refTasks.get(id) ?? fs.readFileSync(path.join(tasksDir, f), "utf8"))
+      : fs.readFileSync(path.join(tasksDir, f), "utf8");
     const task = parseTask(raw);
     task.id = id;
     task.status = readFrontField(task.frontmatterRaw, "status") || "";
@@ -2524,7 +2696,7 @@ function main(argv) {
   // promotes OR revalues, never both mid-flight).
   let result;
   if (revaluateApply) result = applyRevaluations(base);
-  else result = apply ? applyPromotions(base) : analyzeTasks(base);
+  else result = apply ? applyPromotions(base) : analyzeTasks({ ...base, taskReadRef: develop });
   if (process.env.CHECKER_COST_SKIP !== "1") {
     recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: result.pool, load: getLoad1() });
   }
