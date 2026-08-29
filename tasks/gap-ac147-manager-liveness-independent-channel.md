@@ -34,3 +34,9 @@ manager 活性独立兜底落地：不经过 manager 的 heartbeat 超时检测 
 - plugin/scripts/manager-liveness-independent-check.ts (new)（manager 活性兜底检测 + 通知）
 - plugin/test/manager-liveness-independent-check.test.mjs (new)（负控制回放：AskUserQuestion 阻塞态 T 后须通知）
 - tasks/gap-ac147-manager-liveness-independent-channel.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T18:14:51.307Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

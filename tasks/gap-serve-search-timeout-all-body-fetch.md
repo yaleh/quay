@@ -1,7 +1,7 @@
 ---
 id: gap-serve-search-timeout-all-body-fetch
 title: serve /tasks ?q= 搜索超时——?q= 全量取 1572 任务 body 致 MCP -32001 超时、搜索恒空
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -34,11 +34,11 @@ extra:
 
 ## Definition of Done
 
-搜索可用且不超时；无 q 列表不回归；1572 任务规模下稳定。
+搜索路径不向 MCP 全量取 1572 任务 body（改 provider/MCP 侧过滤或分页）；负控制：无 q 列表仍分页正常、`/tasks?q=<标题词>` 命中、无 -32001 超时；经 Web UI 实测。
 
 ## Touches
 
 - packages/quay/src/serve-task.ts（qFilter 的 body 获取策略）
 - packages/quay/src/provider-client.ts（若改 taskList 搜索传递）
-- packages/quay-native/（若 MCP task_list 加 search 参数）
+- packages/quay-native/src/mcp-server.ts（若 MCP task_list 加 search 参数）
 - tasks/gap-serve-search-timeout-all-body-fetch.md（自身）
