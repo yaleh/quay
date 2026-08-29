@@ -205,7 +205,6 @@ post-friction**（被硌了才发现）。而探针**本来就是设计来做 pr
 | release 新鲜度 | `bash plugin/scripts/release-freshness-check.sh`（gap-release-freshness-no-recut-mechanism）——重切触发：develop 领先最新 release tag 超阈值报 WARN（机械量 `git rev-list --count <tag>..develop`）；漂移闸：release tag 树 vs develop 机制集逐目录计数对比（复用 delivery-inventory 思路对 release 面）。DIR-061 覆盖「构建」不覆盖「保持 release 当前」，此检查补该缺口 |
 | 升级通道 | `quay-init` 内有 upgrade 逻辑，但目标项目实测仍会冻结在安装那一刻——**交付面自己在长大，目标没有跟上的路径**（已立案未闭） |
 
-
 ### 6b. 前置条件（2026-08-08，`gap-delivery-outline-vs-verify-surface-single-source` AC4）
 
 | 前置 | 值 | 说明 |

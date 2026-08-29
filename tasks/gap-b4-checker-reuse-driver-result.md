@@ -31,7 +31,6 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 
 ## Touches
 
-- plugin/scripts/driver-result.ts（语义适配/更上位词表）
 - plugin/scripts/outer-anchor-check.ts（示范迁移）
 - plugin/scripts/load-sensitive-release-check.ts（示范迁移）
 - plugin/scripts/dead-code-after-return-check.ts（示范迁移）
@@ -44,7 +43,6 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 - plugin/test/adr016-screen-use-check.test.mjs（迁移测试）
 - plugin/test/checker-driver-result-ratchet-check.test.mjs (new)（棘轮负控制测试）
 - plugin/scripts/capability-catalog.sh（2 新脚本六表注册）
-- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts= bump）
 - tasks/gap-b4-checker-reuse-driver-result.md（自身）
 
 ## Needs-Human
