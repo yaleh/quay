@@ -437,8 +437,6 @@ export function classifyNonLandingCause({ hasRetryRecord = false, suiteRed = fal
   return "unknown";
 }
 
-/**
-
 function readFrontField(frontmatterRaw, key) {
   const m = frontmatterRaw.match(new RegExp(`^${key}:\\s*(\\S+)`, "m"));
   return m ? m[1].replace(/^["']|["']$/g, "") : null;

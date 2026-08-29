@@ -17,7 +17,8 @@
 //         control "halt 后不再产生新 subagent" (process-level count does not grow) is tested.
 //   AC2 — RETIRED (gap-retire-slot-refill-halt-mount): the slot-refill `.halt` dispatch mount
 //         (should_refill=false) was removed — the inner dispatch loop is dead; the `.halt` state
-//         signal survives via outer-driver A3 (haltStatusRoutine) direct read.
+//         signal survives via supervisor-preempt.sh (this preempt primitive) + manager-tick-readings.ts
+//         (manager cross-project halt observation).
 //   AC4 — `claude -p` form: preempt of a PID = `kill <pid>` (the OS is the preemption primitive).
 //   AC5 — node:test + // @test-group governance.
 //

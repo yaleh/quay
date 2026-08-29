@@ -36,9 +36,10 @@ depends_on: []
 `inner-wakeup-heartbeat-check.ts:36`（`analyzeSlotRefill`）import，且 `outer-driver.ts` A6/A18 仍跑
 `slot-refill --json` 读读数。**本任务只退 `.halt` 挂载，不退 slot-refill。**
 
-**`.halt` 信号不消失**：outer 已有独立直读——`outer-driver.ts:208` A3 `haltStatusRoutine` 直接读 `<root>/.halt`
-（存在性 + 内容 + develop 末次提交时距），不经 slot-refill。去掉 slot-refill 的 `no_refill_reason="halt"` 后，
-`.halt` 状态仍由 A3 报出——这是**去重**（同一信号两个载体），不是删除信号。
+**`.halt` 信号不消失**：`.halt` 状态信号仍由独立直读报出——`manager-tick-readings.ts` `projectStatus`
+（manager 跨项目停泊观察）与 `supervisor-preempt.sh` `preempt-all`（preempt 原语），不经 slot-refill。
+去掉 slot-refill 的 `no_refill_reason="halt"` 后，`.halt` 状态仍由这两者报出——这是**去重**（同一信号多个载体），
+不是删除信号。（注：outer-driver A3 `haltStatusRoutine` 的 `.halt` 直读已随 `gap-retire-halt-file-driver-based` 退役。）
 
 ## Plan
 
@@ -56,8 +57,9 @@ depends_on: []
 
 - [x] AC1（grep 判据）: 全仓 `grep -rn checkHaltSentinel plugin/` 命中 0（定义+调用全移除）；且 `slot-refill.ts`
   仍 export `isLandedCodeComplete` / `FIXED_DISPATCH_CAP` / `analyzeSlotRefill`（其余消费不破）。
-- [x] AC2（信号不丢）: `outer-driver.ts` 的 `haltStatusRoutine` 仍直接读 `<root>/.halt`（grep `haltStatusRoutine` +
-  `.halt` 均命中）——`.halt` 状态信号不因本任务消失。
+- [x] AC2（信号不丢）: `.halt` 状态信号不因本任务消失——`manager-tick-readings.ts` `projectStatus`（manager 跨项目
+  停泊观察）与 `supervisor-preempt.sh` `preempt-all`（preempt 原语）仍直接读 `<root>/.halt`（grep 均命中）；
+  outer-driver A3 `haltStatusRoutine` 已随 `gap-retire-halt-file-driver-based` 退役，非本任务范围。
 - [x] AC3（测试绿）: `plugin/test/slot-refill.test.mjs` + `slot-refill-heartbeat.test.mjs` +
   `slot-free-trigger.test.mjs` scoped 绿；`.halt` 阻断断言已同步。
 
