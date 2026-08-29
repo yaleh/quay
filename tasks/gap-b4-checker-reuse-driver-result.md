@@ -44,6 +44,8 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 - plugin/test/checker-driver-result-ratchet-check.test.mjs (new)（棘轮负控制测试）
 - plugin/scripts/capability-catalog.sh（2 新脚本六表注册）
 - plugin/scripts/quay-init.sh（checker-io.ts + driver-result.ts 显式 laydown——closure (d) 扫不到 ESM import）
+- plugin/scripts/outer-retirement-precondition-check.ts（棘轮 REQUIRED_ADOPTERS 是钉住清单元数据非调用面——入 NON_CALLER_BASENAMES，否则 "outer-anchor-check.ts" 字符串把孤儿伪造成有调用面）
+- plugin/test/help-contract-incompatible-behaviors.test.mjs（补 @load-sensitive-entry 记录——serial 族成员缺进入原因，known-load-sensitive --check-exit 分级闸红）
 - tasks/gap-b4-checker-reuse-driver-result.md（自身）
 
 ## Needs-Human
