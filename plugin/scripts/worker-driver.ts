@@ -1102,13 +1102,13 @@ export async function continueStateForTaskAsync(root: string, taskId: string): P
 
 /** 冲突消解协议（gap-continue-prompt-conflict-resolution-protocol）：机械 fan-in 的 merge develop 步
  *  在 CONTINUE 轮撞冲突时，旧 prompt 只带失败原因、不含消解指令 ⇒ 消冲突靠 worker 自行发挥（运气）。
- *  本段按文件类型分派消解动作：derived 文件重算（⛔ 不手并计数）、code 文件取语义并集、然后
+ *  本段按文件类型分派消解动作：outline 冲突取 develop 版（⛔ 不手并计数）、code 文件取语义并集、然后
  *  `git commit --no-edit` 完成 merge——⛔ 禁止带着 unmerged paths（UU）退出，否则下一轮 fan-in 的
  *  merge step 再失败。 */
 function continueConflictResolutionNote(): string {
   return [
     `CONFLICT RESOLUTION — if the prior mechanical fan-in left the worktree with unmerged paths (UU in \`git status\`), or \`git merge develop\` reports CONFLICT, resolve it BEFORE continuing implementation; ⛔ never exit while unmerged paths remain (the next fan-in merge step would fail again).`,
-    `(1) derived files (docs/proposals/quay-product-outline.md §6 DELIVERY-INVENTORY counts — mechanically derived): apply your own change, then re-run \`node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --write-inventory\` to recompute the counts; ⛔ do NOT hand-merge the counts.`,
+    `(1) outline doc (docs/proposals/quay-product-outline.md — its §6 DELIVERY-INVENTORY counts are computed at check-time, no snapshot to recompute): take the develop version (\`git checkout develop -- docs/proposals/quay-product-outline.md\`); ⛔ do NOT hand-merge the counts.`,
     `(2) code files (e.g. worker-driver.ts): read both sides of the diff and take the semantic union of the two changes (keep both changes where they do not conflict).`,
     `(3) \`git add <resolved files>\` then \`git commit --no-edit\` to complete the merge.`,
   ].join(" ");
