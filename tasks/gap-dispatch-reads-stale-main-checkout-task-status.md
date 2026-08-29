@@ -1,7 +1,7 @@
 ---
 id: gap-dispatch-reads-stale-main-checkout-task-status
 title: dispatch 读主检出 disk task status（落后 develop 20 提交）→ 落地任务被当 ready 重派；读源应改 develop git ref
-status: ready
+status: done
 labels:
   - gap
   - defect
