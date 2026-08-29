@@ -1,7 +1,7 @@
 ---
 id: gap-mech-fan-in-log-webui-visible-clickable
 title: 机械 fan-in 过程日志持久化 + web 详情页可点击访问：步骤 trace 落 .quay/fan-in-*.log + Runs 区块渲染 mechanical_fan_in + view/download 端点（带路径穿越防护）
-status: ready
+status: needs-human
 labels:
   - gap
   - feature
