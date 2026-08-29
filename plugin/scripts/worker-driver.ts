@@ -805,7 +805,7 @@ export interface WorkerCmdOptions {
 function driverFanInNote(): string {
   return [
     `exit — the worker-driver takes over your worktree and mechanically runs fan-in`,
-    `(merge develop → delta 判定 → typecheck → scoped门 → suite → ff) to develop.`,
+    `(merge develop → delta 判定 → typecheck → archguard结构闸 → scoped门 → suite → ff) to develop.`,
     `You do NOT run the suite and do NOT call the fan-in workflow yourself.`,
   ].join(" ");
 }
@@ -1461,7 +1461,7 @@ function runOneWorker({
 // ── 机械 fan-in（gap-fan-in-driver-mechanical-orchestration / SPEC 2026-08-27）────────────────────
 // 取消 fan-in-execute.js workflow 子代理串行跑机械步骤（每条命令间 ~3-5min 模型延迟把 ~10min 机械活
 // 撑到 ~30min + 30min watchdog 强制释放），改由 driver 机械驱动 fan-in 的机械部分
-// （锁/merge/delta/typecheck/scoped门/suite/ff）。happy-path 先做（人 2026-08-27 裁定①）：driver 跑通
+// （锁/merge/delta/typecheck/archguard结构闸/scoped门/suite/ff）。happy-path 先做（人 2026-08-27 裁定①）：driver 跑通
 // 「无失败 fan-in」，失败回退旧 workflow 子代理兜底。四判据：
 //   AC1 锁时长塌缩——driver 持锁整段 merge→suite→ff，机械时长（非 30min 模型恒值）；
 //   AC2 锁罩住 suite——release 不早于 suite 结束（driver 在 spawnSuiteAndWait 返回后才 release）；
@@ -1493,6 +1493,8 @@ export interface MechanicalFanInOptions {
   scopedGateCommand?: string[];
   /** doc 检查命令（测试缝）；缺省 = bash <worktree>/scripts/test.sh --static-checks-doc。 */
   docCheckCommand?: string[];
+  /** archguard 结构闸命令（测试缝）；缺省 = node archguard-runner.ts --root <worktree>（分析待落地代码）。 */
+  archguardCommand?: string[];
   /** fan-in 编排脚本目录（测试缝）；缺省 = <worktree>/plugin/scripts（自举：本分支的编排脚本自验）。 */
   scriptsDir?: string;
 }
@@ -1704,6 +1706,32 @@ async function commitTaskStatusChange(
   return { ok: true, reason: null };
 }
 
+/** 把 archguard-runner 写进 worktree 的结构信号记录镜像到主检出的生产载体（AC2）。
+ *  worktree 的 .archguard/ 在机械 fan-in 成功后随 `git worktree remove` 被删 ⇒ 记录必须持久化到
+ *  root（主检出）的 .archguard/metrics-history.jsonl，post-landing 才可查（硬规则④推论三：能产出≠已产出）。
+ *  archguard-runner 每次跑 append 一条，镜像最后一条（本次新写）；worktree 无记录（测试缝的 fake 命令
+ *  不写）⇒ no-op 非失败。镜像失败 fail-closed（记录是「被某判据读」半边，载体写失败 ≠ 静默通过）。 */
+function mirrorArchguardMetrics(worktree: string, root: string): { ok: boolean; reason: string | null } {
+  const wtFile = path.join(worktree, ".archguard", "metrics-history.jsonl");
+  let wtText: string;
+  try {
+    wtText = fs.readFileSync(wtFile, "utf8");
+  } catch {
+    return { ok: true, reason: null };
+  }
+  const lines = wtText.split("\n").map((s) => s.trim()).filter(Boolean);
+  const last = lines[lines.length - 1];
+  if (!last) return { ok: true, reason: null };
+  const mainFile = path.join(root, ".archguard", "metrics-history.jsonl");
+  try {
+    fs.mkdirSync(path.dirname(mainFile), { recursive: true });
+    fs.appendFileSync(mainFile, last + "\n", "utf8");
+    return { ok: true, reason: null };
+  } catch (e) {
+    return { ok: false, reason: `cannot mirror archguard metrics to ${mainFile}: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
 /** 读 worktree 的任务文件并翻 status ready→done（fail-closed：恰 1 行精确 `^status: ready$`，否则拒）。
  *  gap-fan-in-flip-done-already-done-not-landed：「先 flip 后 ff」（人 2026-08-14 裁定）留下的
  *  「done 但未落地」不一致中间态（worktree 已翻 done、develop 未含落地提交）在重跑时收敛——读到
@@ -1757,8 +1785,8 @@ async function flipTaskDone(
 }
 
 /**
- * driver 机械跑通一次无失败 fan-in 的 happy path（锁/merge/delta/typecheck/scoped门/suite/ff）。
- * ⛔ 语义失败点（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / suite 红 / ff 失败）一律返回
+ * driver 机械跑通一次无失败 fan-in 的 happy path（锁/merge/delta/typecheck/archguard结构闸/scoped门/suite/ff）。
+ * ⛔ 语义失败点（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / 依赖环 / suite 红 / ff 失败）一律返回
  * outcome=red + step，由调用方回退旧 workflow 子代理兜底（本函数不调 LLM、不做语义修复）。
  * 锁在任一退出路径都会 release（finally）——成功 release 于 ff 之后（AC2）；失败也 release（回退的
  * workflow 子代理会重新 acquire，幂等）。
@@ -1778,6 +1806,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const antiDrift = path.join(scriptsDir, "anti-drift-touches-check.ts");
   const classify = path.join(scriptsDir, "select-static-checks-for-touches.ts");
   const typecheck = path.join(scriptsDir, "fan-in-ts-typecheck-gate.ts");
+  const archguardRunner = path.join(scriptsDir, "archguard-runner.ts");
   const acGate = path.join(scriptsDir, "fan-in-ac-completion-gate.ts");
 
   const fail = (step: string, reason: string): MechanicalFanInResult => ({
@@ -1829,6 +1858,16 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 5. ts-typecheck 闸（非零 ⇒ red → 语义会话兜底）。
     a = await mechSh(["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
     if (!a.ok) return fail("typecheck", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
+
+    // 5.5 archguard 结构闸（依赖环 sccCount=0 ⇒ 绿；依赖环 ⇒ red → 语义会话兜底）。⛔ 分析 worktree
+    // （merge develop 后的待落地代码）——非 root（root 是 doc-only 工作分支，不含本任务 delta，任务引入
+    // 依赖环会被漏检）。archguard-runner 把结构信号 append 进 <worktree>/.archguard/metrics-history.jsonl；
+    // worktree 的 .archguard 在 cleanup 时被删 ⇒ 镜像到主检出（root）的生产载体（AC2：能产出≠已产出）。
+    const archguardCmd = opts.archguardCommand ?? ["node", "--experimental-strip-types", archguardRunner, "--root", worktree];
+    a = await mechSh(archguardCmd, 600_000);
+    if (!a.ok) return fail("archguard-structure", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
+    const mirrored = mirrorArchguardMetrics(worktree, root);
+    if (!mirrored.ok) return fail("archguard-metrics", mirrored.reason ?? "mirror failed");
 
     // 6. scoped 门 + doc 检查（必须绿）。
     const scopedCmd = opts.scopedGateCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
