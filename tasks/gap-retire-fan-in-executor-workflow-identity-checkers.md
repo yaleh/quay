@@ -3,7 +3,7 @@ id: gap-retire-fan-in-executor-workflow-identity-checkers
 title: 退休 fan-in 执行者/工作流身份检查器（fan-in-ff-executor-check +
   fan-in-workflow-check）——机械 fan-in 模式下「执行者=subagent / 必经 workflow」前提已死，检查链已由
   runMechanicalFanIn + ff capture 闸结构性保证
-status: ready
+status: done
 labels:
   - gap
 parent: null
