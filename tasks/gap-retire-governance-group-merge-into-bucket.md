@@ -1,6 +1,7 @@
 ---
 id: gap-retire-governance-group-merge-into-bucket
-title: 退役 @test-group governance 第三套机制——并入 bucket（人裁定「不要在 bucket 和相机制以外再搞一套」），142 文件改标真实相
+title: 退役 @test-group governance 第三套机制——并入 bucket（人裁定「不要在 bucket
+  和相机制以外再搞一套」），142 文件改标真实相
 status: ready
 labels:
   - gap
@@ -62,3 +63,9 @@ governance 第三套退役、142 文件改标真实相、bucket 单一选择落�
 - plugin/test/suite-bucket-attribution.test.mjs（bucket 归属测试）
 - scripts/test.sh（governance 跳过语义移除）
 - tasks/gap-retire-governance-group-merge-into-bucket.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T20:54:20.233Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

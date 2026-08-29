@@ -1,6 +1,7 @@
 ---
 id: gap-abi-status-lifecycle-vocab-scattered-no-named-type
-title: 任务状态生命周期词汇散落 ~30 文件、无具名 TaskStatus 类型（Task.status 内联 union 未导出 + AdrRecord.status 裸 string）
+title: 任务状态生命周期词汇散落 ~30 文件、无具名 TaskStatus 类型（Task.status 内联 union 未导出 +
+  AdrRecord.status 裸 string）
 status: ready
 labels:
   - gap
@@ -59,3 +60,9 @@ extra: {}
 - plugin/scripts/workflow-replay.ts（消费者迁移）
 - plugin/test/abi-task-status-typing.test.mjs (new)（类型守卫 + 非法值 fail-closed 负控制）
 - tasks/gap-abi-status-lifecycle-vocab-scattered-no-named-type.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T20:23:53.355Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

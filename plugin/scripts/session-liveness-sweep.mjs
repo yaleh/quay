@@ -381,8 +381,12 @@ export function resolveRegisteredServerPid(entry) {
  * Absent both, the expensive /proc discovery (socket-inode map walk + full-cmdline scan) would only
  * confirm a gone server — skip it. The recorded pid is captured at registration and a still-alive
  * server's pid is stable, so a live server whose socket later closed is still caught via
- * isLiveTmuxPid(entry.pid). Prevents the O(/proc × registry) walk on every pre-suite sweep (the
- * registry is append-only and grows: 344 dead entries ≈ 3s measured on this machine). */
+ * isLiveTmuxPid(entry.pid). Prevents the O(/proc × registry) walk on every pre-suite sweep.
+ * NOTE (gap-full-suite-runner-test-mock-embedded-real-suite): the registry is append-only with NO
+ * GC, so this per-entry isLiveTmuxPid read — while cheaper than the full /proc discovery — still
+ * costs one /proc/<pid>/cmdline open per historical dead entry. Measured 34,716 dead entries ≈
+ * 2.3s per runner spawn (the pre-suite sweep runs on EVERY suite). killRegisteredServers now PRUNES
+ * those permanently-dead entries so the registry stays bounded. */
 function serverPlausiblyAlive(entry) {
   try { if (fs.existsSync(sockOfDir(entry.dir))) return true; } catch { /* dir gone */ }
   if (entry.pid && isLiveTmuxPid(entry.pid)) return true;
@@ -397,10 +401,17 @@ function serverPlausiblyAlive(entry) {
  *                       the pre-suite sweep + legacy suite-tail kill). A concurrent scoped run's
  *                       ACTIVE servers (proc alive) are never touched.
  * Each kill is a PID-targeted SIGKILL (verified live tmux), NEVER a name-based batch kill (invariant
- * no_pkill_by_name_on_live = 1). Returns the killed records for the runner's round record. */
+ * no_pkill_by_name_on_live = 1). Returns the killed records for the runner's round record.
+ * The deadProcOnly pass also PRUNES permanently-dead entries (dead owner + dead server) from the
+ * append-only registry — see rewriteServerRegistry — so the file cannot grow without bound and
+ * cost an isLiveTmuxPid cmdline read per historical dead entry on EVERY pre-suite sweep
+ * (gap-full-suite-runner-test-mock-embedded-real-suite). */
 export function killRegisteredServers(filter = {}) {
   const killed = [];
-  for (const entry of readServerRegistry()) {
+  const entries = readServerRegistry();
+  const pruneIdx = new Set();
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
     if (filter.proc !== undefined && entry.proc !== filter.proc) continue;
     if (filter.runId !== undefined && entry.runId !== filter.runId) continue;
     if (filter.deadProcOnly && isProcAlive(entry.proc)) continue;
@@ -408,13 +419,36 @@ export function killRegisteredServers(filter = {}) {
     // sweep runs on EVERY suite (registry-driven TRUE catch-all), so a gone server must not cost a
     // full process-table scan per entry. Verified live servers (socket on disk / live recorded pid)
     // still reach resolveRegisteredServerPid and get their PID-targeted SIGKILL unchanged.
-    if (filter.deadProcOnly && !serverPlausiblyAlive(entry)) continue;
+    if (filter.deadProcOnly && !serverPlausiblyAlive(entry)) {
+      // A dead-owner + dead-server entry is PERMANENTLY dead: its owning test process and its tmux
+      // server are both gone, and a pid is never reused for the same tmux server. Prune it so the
+      // next sweep does not re-read its (already-gone) /proc/<pid>/cmdline.
+      pruneIdx.add(i);
+      continue;
+    }
     const pid = resolveRegisteredServerPid(entry);
     if (pid === null || pid === process.pid) continue;
     try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
     killed.push({ dir: entry.dir, pid, sock: entry.sock });
   }
+  if (filter.deadProcOnly && pruneIdx.size > 0) {
+    rewriteServerRegistry(entries.filter((_, i) => !pruneIdx.has(i)));
+  }
   return killed;
+}
+
+/** Rewrite the durable registry to exactly `entries` (atomic: temp write + rename — fs-only, never a
+ * name-based batch kill or process spawn). Best-effort: a failed prune must never break the kill path
+ * (the registry is a cleanup catch-all, not a correctness dependency). A concurrent appendFileSync
+ * (registerServer) racing this rename can lose its entry — acceptable, the same best-effort class the
+ * append-only registry already tolerates, and the full-suite lock / phase ordering make it rare. */
+function rewriteServerRegistry(entries) {
+  try {
+    const target = serverRegistryPath();
+    const tmp = `${target}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, entries.map((e) => JSON.stringify(e)).join("\n") + (entries.length ? "\n" : ""), "utf8");
+    fs.renameSync(tmp, target);
+  } catch { /* best-effort */ }
 }
 
 /** Pre-suite orphan sweeper over ALL /tmp/quay-run-* dirs. A namespace dir whose tmux server is

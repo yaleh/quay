@@ -18,6 +18,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { spawnSync } from "node:child_process";
+import { writeJsonAtomic } from "./write-json-atomic.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -110,13 +111,10 @@ export function readControlState(
   }
 }
 
-/** 写控制态（原子：写 .tmp 再 rename，避免派发环读到半截）。返回落盘路径。 */
+/** 写控制态（原子：经 writeJsonAtomic 写 .tmp 再 rename，避免派发环读到半截）。返回落盘路径。 */
 export function writeControlState(root: string, state: ControlState, rel: string = CONTROL_STATE_REL): string {
   const file = path.join(root, rel);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf8");
-  fs.renameSync(tmp, file);
+  writeJsonAtomic(file, state);
   return file;
 }
 
