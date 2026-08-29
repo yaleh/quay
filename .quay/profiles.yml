@@ -21,7 +21,7 @@ promptSuggestions: false
 # API key 的计费风险）/ --forward-subagent-text（减少手工读 subagent jsonl）。
 
 profiles:
-  # 三个 worker role（task-worker / selector / fix-worker）+ outer / inner 共享的 recipe。
+  # 三个 worker role（task-worker / selector / fix-worker）+ outer 共享的 recipe。
   worker-default:
     launcher: claude-fjdac
     model: deepseek-v4-pro-anthropic
@@ -47,9 +47,6 @@ roles:
   outer:
     profile: worker-default
     name: quay-outer
-  inner:
-    profile: worker-default
-    name: quay-inner
   task-worker:
     profile: worker-default
     name: quay-task-worker

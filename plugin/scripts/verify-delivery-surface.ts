@@ -113,7 +113,7 @@ export const MANIFEST: DeliveryCategory[] = [
     ],
     attribution: ["gap-tmux-session-topology-no-factory-definition"],
     criterion:
-      "三窗口（outer/inner/manager）拓扑出厂定义：quay-topology.sh + topology-check.sh + session-topology skill（每层起什么命令、谁驱动谁）",
+      "单窗口（outer）拓扑出厂定义：quay-topology.sh + topology-check.sh + session-topology skill（每层起什么命令、谁驱动谁；manager 跨项目，不属于项目拓扑）",
   },
   {
     id: 5,
