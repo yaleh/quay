@@ -98,7 +98,6 @@ unset _cs_violations
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
   [archguard-runner.ts]="Does the repo's TypeScript code have dependency cycles — a REAL archguard CLI analyze run at suite time, whose structural verdict (metricVector.sccCount === 0, no non-trivial SCCs) is read back from the produced ArchJSON, fail-closed (archguard missing / analyze failed / cycles > 0 ⇒ exit 1, tasks/gap-archguard-zero-production-calls)?"
-  [a15-ruling5-counter.ts]="Is A15 裁定5 (suite-health 心跳缺失) mechanically counted — ticks since the outer's last Agent tool_use (read from the outer session transcript + tick-log), >=3 ⇒ 应 .halt / >=6 ⇒ 应 /clear?"
   [ac36-sortkey-criterion-check.ts]="Did AC36 判据② hold mechanically — the delivery-critical task strictly moved forward, same-family non-DC kept their relative order, and blocking_suite still ranks above delivery_critical (two slot-refill runs' ranking compared)?"
   [ac61-staleness-disposition-check.ts]="Has every AC61 list item (A-1..A-7 / B-1..B-4) been individually dispositioned — migrated (with landing-point map) OR verified still-valid (with a reading) — are the loop docs' integration hits classified one-row-per-hit (not just counted), and is the inner C7 live-instruction (integration-branch-model.ts --overlaps-unverified) gone from both core copies (AC61 判据1-3 + DoD 负控, tasks/gap-ac61-staleness-list-item-disposition)?"
   [ac69-slot-queue-gap-check.ts]="Has the AC69 槽满排队「先量再改」measurement record (槽释放→下次派发差值, docs/analysis/ac69-slot-release-vs-dispatch-gap.json) been LANDED and structurally complete — task/measuredAt/dataSource/method/stats.medianSeconds/conclusion/conclusionReason all present with conclusion ∈ maintain|change — so the AC1 '先量再改' has a mechanical product (absent ⇒ exit 2 / corrupt ⇒ exit 3, distinct from 合格 exit 0 — 硬规则 3b, tasks/gap-ac69-suite-slot-full-should-queue-not-wait)?"
@@ -124,7 +123,7 @@ declare -A QUESTION=(
   [cap-from-gate.ts]="What cap should the loop use for in-flight agents at the dispatch point (adaptive cap = f(resource-gate some avg300, hysteresis banded, no fixed cap)?"
   [capability-catalog.sh]="What question does each shipped check make askable, and is every check declared?"
   [blocked-signal-check.sh]="Is an un-consumed blocked signal auto-escalated after the timeout window (no indefinite inner freeze)?"
-  [manager-adopt.sh]="Is a project adopted into the manager's scope (healthy → noop, empty-shell → drive, missing → build the two-window topology)?"
+  [manager-adopt.sh]="Is a project adopted into the manager's scope (healthy → noop, empty-shell → drive, missing → build the single-window topology)?"
   [manager-arm-loop.sh]="Is the manager's scheduling anchor armed (sentinel-clean + idempotent, zero-memory executable)?"
   [manager-liveness-independent-check.ts]="Is the manager itself alive on an INDEPENDENT channel — its heartbeat product (orchestration/manager-tick-log.md mtime, or a JSON heartbeat {ts}) fresh within T=3600s (3 × 20min ticks), else a notification fires carrying the failure mode (process-dead / interaction-blocked / heartbeat-stopped) so a manager disabled beyond T (AskUserQuestion 阻塞 / 心跳停 / 进程死) lets a human know without going through the manager (tasks/gap-ac147-manager-liveness-independent-channel)?"
   [manager-observation-runtime-check.ts]="Does the outer session's runtime behavior observe/check the manager (PANE / TICKLOG / transcript reads) in violation of C3's never-create/drive/check constraint?"
@@ -230,7 +229,6 @@ declare -A QUESTION=(
   [git-lens-l-g-structural-drift.ts]="How much has the structure drifted from the generative-alignment baseline (ADR-007 L_G lens)?"
   [git-lens-l-s-behavior-variance.ts]="How stable is behavior under light mutation (ADR-007 L_S lens)?"
   [gate-script-lib.sh]="Do bash gate/selfcheck scripts share the framework primitives they need?"
-  [halt-check.sh]="Is the layer halted at the unified .halt check point (SPEC 2.8), and is an unmarked stall (no .halt + >24h no output) mechanically reported?"
   [inner-blocked-signal.ts]="Is the inner layer explicitly signalling that it is blocked?"
   [inner-exec-mode-report.ts]="How many main-thread product-file Edits did the inner layer make this round, versus how many Agent dispatches (inner exec-mode report)?"
   [inner-forensics.mjs]="Did the inner layer run a given command, at second-granularity, with zero CPU interference?"
@@ -286,8 +284,8 @@ declare -A QUESTION=(
   [proposal-convergence.ts]="Has the proposal converged within the bounded review rounds?"
   [publish-dist-branch.sh]="Is the plugin bundle built and published to the dist branch?"
   [quay-init.sh]="What does quay-init lay into a fresh workspace, and is it byte-identical to the plugin?"
-  [quay-launch.sh]="What is the exact per-role launch command (manager/outer/inner), materialized verbatim from the checked-in launch settings?"
-  [quay-topology.sh]="Does the target tmux session have the two-window outer/inner topology built by definition (idempotent factory)? manager is cross-project, not per-project."
+  [quay-launch.sh]="What is the exact per-role launch command (manager/outer), materialized verbatim from the checked-in launch settings?"
+  [quay-topology.sh]="Does the target tmux session have the single-window outer topology built by definition (idempotent factory)? manager is cross-project, not per-project."
   [read-probe-spec.ts]="Is the probe spec well-formed and loadable?"
   [ready-pool-check.ts]="Is the ready pool the correct set of ready tasks (maintenance check)?"
   [real-target-verify.sh]="Is install/upgrade/cold-start verification passing against a REAL downstream workspace, not just synthetic mkdtemp fixtures?"
@@ -345,7 +343,7 @@ declare -A QUESTION=(
   [supervisor-deliver.sh]="Did a payload get delivered to a target Claude session, by intent, via the single hardened delivery implementation (deliver(target,payload) -> delivered|failed)? [FALLBACK delivery — native cross-session SendMessage is the default]"
   [supervisor-observe.sh]="What is a target quay checkout's git/suite/session/process state right now, read-only and ssh-transport-agnostic (observe(target) -> {git_state, suite_state, session_state, process_state}, local/remote same shape)?"
   [supervisor-health.sh]="Is the supervisor base layer alive outside any Claude session (os-anchor timer + delivery/observe adapters + session liveness)?"
-  [supervisor-preempt.sh]="Is the loop stopped at ANY point (preemptive .halt — process-level preempt(target) enforced in code, not just at a tick boundary)?"
+  [supervisor-preempt.sh]="Is a target stopped at ANY point (process-level preempt(target) — tmux C-c / kill — enforced in code, not just at a tick boundary)? (The former halt-check .halt-read subcommand was retired 2026-08-29 — gap-retire-halt-file-driver-based.)"
   [supervisor-preempt-candidates.ts]="Is a task deterministically preemptible right now (queryable facts only: telemetry duration >90m + task status in-progress + not landed), and can it be preempted as a deterministic action (kill its subprocess tree + close its bracket + record a ledger event)?"
   [cross-machine-verify.sh]="Has every merge that landed on the tracked branches been cross-machine verified by a NON-participating machine, and what is the detection latency d (post_merge_latency_h) of the ones that have?"
   [sync-lag-check.sh]="Is local <fork-baseline> (develop) leading origin/<fork-baseline> (and has it been pushed), OR is it strictly behind origin/<fork-baseline> (and has it been pulled) — the BIDIRECTIONAL cross-machine sync heartbeat (upsync --push + downsync --pull, the two-peer bidirectional-merge mechanism) + the event-driven push after a land closure?"
@@ -377,7 +375,7 @@ declare -A QUESTION=(
   [tmux-leak-scan.sh]="Did a test run leak any tmux server or characteristic temp dir (suite-tail residual-leak assertion)?"
   [tmux-session.ts]="Is a test's tmux invocation isolated to a private socket (explicit -S + \$TMUX stripped — both mandatory conditions structural)?"
   [tmux-test-isolation-check.ts]="Does any test file spawn real tmux without an isolation mechanism or both mandatory conditions (the bare default-socket crash path)?"
-  [topology-check.sh]="Does the target tmux session have all three topology windows in place, each with a claude process (not a bare bash window)?"
+  [topology-check.sh]="Does the target tmux session have the single-window outer topology in place, each window with a claude process (not a bare bash window)?"
   [touches-one-entry-one-path-check.ts]="Does every Touches bullet declare EXACTLY ONE path/glob entry — a bullet containing ' / ' (multi-path, e.g. AC66's 'orchestration/A.md / orchestration/B.md / orchestration/C.md') is RED because parseTouchEntriesWithTags turns the whole line into ONE composite entry that matches NO file and hides each real path from checkTouchesPair's overlap judgment (AC66's 3-path bullet hid orchestration/fast-mode-tick-core.md from AC78 — 判据3), 判据1/判据3, tasks/gap-touches-one-entry-one-path?"
   [touches-orthogonality-check.ts]="Do two milestones' ## Touches overlap?"
   [touches-parser.ts]="What files does this task's ## Touches declare?"
@@ -386,7 +384,7 @@ declare -A QUESTION=(
   [transcript-delivery-check.ts]="Did the reliable-send procedure deliver the transcript (delivery verdict)? [FALLBACK delivery — native cross-session SendMessage is the default]"
   [tree-hygiene-check.sh]="Is the repo tree hygienic for the loop (no stray files or commits)?"
   [verify-delivery-surface.ts]="Is the complete six-category delivery surface actually delivered (L1 completeness)?"
-  [verify-deliver-coldstart.sh]="Does the AC88 three-step deliver verification (① clean-dir fresh .tgz install → ② project quay-init → ③ two-layer outer+inner cold-start liveness by DIRECT measures — git commit / /proc cwd / worktree, NOT serve HTTP or layer heartbeat) produce mechanically-checkable evidence that the verification self-built the tgz from develop-tip (commit sha + sha256, newer than the 2026-08-16 phase switch)?"
+  [verify-deliver-coldstart.sh]="Does the AC88 three-step deliver verification (① clean-dir fresh .tgz install → ② project quay-init → ③ cold-start liveness (outer window + inner layer) by DIRECT measures — git commit / /proc cwd / worktree, NOT serve HTTP or layer heartbeat) produce mechanically-checkable evidence that the verification self-built the tgz from develop-tip (commit sha + sha256, newer than the 2026-08-16 phase switch)?"
   [trend-check.ts]="Is a standing criterion quantified as a trend over time, not a point-in-time snapshot (the TREND criterion)?"
   [verify-installed-executables.sh]="Is every installed executable byte-identical to its plugin source?"
   [vmeta-lag-check.sh]="How far is the V_meta consolidation lagging behind the evidence?"
@@ -406,7 +404,7 @@ declare -A QUESTION=(
   [md-deletion-token-evaporation-check.sh]="Did any commit net-deleting ≥50 lines from *.md leave deleted-content unique tokens (identifiers/paths/专名) with ZERO occurrence in the post-delete repo (来源完备性整段蒸发)?"
   [workflows-dual-copy-drift-check.ts]="Are the five dual-copy workflow files (drain-directives / fan-in-execute / run-routines / execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped orchestrator-tick-core.md references them, so the plugin/workflows/ mirror must carry them) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships to installed targets) — a one-sided edit (改正本而落地副本不跟, the A6/fan-in-execute.js class) must go RED, the current byte-identical state GREEN (gap-workflows-dual-copy-drift-unchecked)?"
   [promotion-driver.ts]="Is the todo→ready promotion applied mechanically every round — a resident loop that calls ready-pool-check for the full-pool verdict and lands eligible promotions (zero LLM), and calls the supervisor/driver liveness check each round (gap-resident-driver-stable-carrier-liveness AC2 death-alarm caller), rather than role-will that vanishes when the session or model changes?"
-  [outer-driver.ts]="Does the outer's pure-mechanical A/B segments (A1/A3/A6/A9/A10/A18/A21 readings · B1/B2/B6 closing traces · B12/B17 self-audit) get absorbed into a resident routine-type driver — a resident loop that runs the routine table each round and writes structured Facts (verified/not-evaluated/failed) to .quay/outer-round.jsonl, where each routine that cannot read its input reports not-evaluated (⛔ not verified, AC153 Layer 1b form), rather than role-will that vanishes when the outer session or model changes (AC143)?"
+  [outer-driver.ts]="Does the outer's pure-mechanical A/B segments (A1/A6/A9/A10/A18/A21 readings · B1/B2/B6 closing traces · B12/B17 self-audit) get absorbed into a resident routine-type driver — a resident loop that runs the routine table each round and writes structured Facts (verified/not-evaluated/failed) to .quay/outer-round.jsonl, where each routine that cannot read its input reports not-evaluated (⛔ not verified, AC153 Layer 1b form), rather than role-will that vanishes when the outer session or model changes (AC143)? (The former A3 .halt read was retired 2026-08-29 — gap-retire-halt-file-driver-based; the stall read is now A21 liveness_direct.)"
   [outer-retirement-precondition-check.ts]="Before retiring the outer layer, does every checker the outer execution core (orchestrator-tick-core.md) directly references — the plugin/scripts/*-check.{ts,sh} set — have a surviving call surface (static-gate registry, or an external executable carrier referencing it at a code position, transitive closure), so a checker referenced ONLY by the retiring layer is flagged unless its file carries the explicit RETIRED-WITH-RETIRING-LAYER disposition (SPEC §2.3b B0, gap-b0-retirement-precondition-checker-call-surface)?"
   [write-json-atomic.ts]="Is every state file write atomic — a single writeJsonAtomic (tmp + renameSync) so a concurrent reader never observes a torn, half-written JSON, replacing the split of 6 state writers into 2 atomic + 4 non-atomic (tasks/gap-writestate-atomicity-split)?"
 )
@@ -414,7 +412,6 @@ declare -A QUESTION=(
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
   [archguard-runner.ts]="每轮"
-  [a15-ruling5-counter.ts]="每轮"
   [ac36-sortkey-criterion-check.ts]="按需"
   [ac61-staleness-disposition-check.ts]="按需"
   [ac69-slot-queue-gap-check.ts]="每轮"
@@ -514,7 +511,6 @@ declare -A CADENCE=(
   [git-lens-l-d-code-doc-ratio.ts]="按需"
   [git-lens-l-g-structural-drift.ts]="按需"
   [git-lens-l-s-behavior-variance.ts]="按需"
-  [halt-check.sh]="每轮"
   [inner-blocked-signal.ts]="每轮"
   [inner-exec-mode-report.ts]="每轮"
   [inner-forensics.mjs]="每轮"
@@ -717,7 +713,6 @@ declare -A CADENCE=(
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
   [archguard-runner.ts]="失效前提：archguard CLI 在 PATH 上、TypeScript 能解析（tsconfig 存在）、两个 scope（packages/quay/src + plugin/scripts）目录结构不变；若 archguard 移除/scope 变更/sccCount 语义变更，本条需同步"
-  [a15-ruling5-counter.ts]="失效前提：外层仍通过 transcript 心跳判执行；若执行面 API 化不再依赖 Agent tool_use 时间戳（不再有 transcript 可读），本条退休"
   [ac36-sortkey-criterion-check.ts]="失效前提：slot-refill --json 仍暴露 ranking 数组（移除或改形状则判据② 失去机械读面，本条失效）"
   [ac61-staleness-disposition-check.ts]="失效前提：AC61 清单（A-1..A-7 / B-1..B-4）仍被 AC58 archive / 执行核文档消费；若两线分支模型相关条款全部迁出且不再有活引用，本条随清单消退而失效"
   [ac69-slot-queue-gap-check.ts]="失效前提：AC69 测量记录（docs/analysis/ac69-slot-release-vs-dispatch-gap.json）仍是本任务 AC1「先量再改」的产物；若槽满排队问题被重新打开并改为「槽满也起、排队」的落地形态（记录 conclusion 变 change 且 test.sh 同步改动），本条随任务重估而失效"
@@ -817,7 +812,6 @@ declare -A INVALIDATION=(
   [git-lens-l-d-code-doc-ratio.ts]="无可测前提，靠周期复核"
   [git-lens-l-g-structural-drift.ts]="无可测前提，靠周期复核"
   [git-lens-l-s-behavior-variance.ts]="无可测前提，靠周期复核"
-  [halt-check.sh]="无可测前提，靠周期复核"
   [inner-blocked-signal.ts]="无可测前提，靠周期复核"
   [inner-exec-mode-report.ts]="无可测前提，靠周期复核"
   [inner-forensics.mjs]="无可测前提，靠周期复核"
@@ -1020,7 +1014,6 @@ declare -A INVALIDATION=(
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
   [archguard-runner.ts]="2026-08-27"
-  [a15-ruling5-counter.ts]="2026-08-10"
   [ac36-sortkey-criterion-check.ts]="2026-08-11"
   [ac61-staleness-disposition-check.ts]="2026-08-14"
   [ac69-slot-queue-gap-check.ts]="2026-08-14"
@@ -1120,7 +1113,6 @@ declare -A LAST_REAFFIRMED=(
   [git-lens-l-d-code-doc-ratio.ts]="2026-08-10"
   [git-lens-l-g-structural-drift.ts]="2026-08-10"
   [git-lens-l-s-behavior-variance.ts]="2026-08-10"
-  [halt-check.sh]="2026-08-10"
   [inner-blocked-signal.ts]="2026-08-10"
   [inner-exec-mode-report.ts]="2026-08-10"
   [inner-forensics.mjs]="2026-08-10"
@@ -1323,7 +1315,6 @@ declare -A LAST_REAFFIRMED=(
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
   [archguard-runner.ts]="n/a"
-  [a15-ruling5-counter.ts]="enumerative"
   [ac36-sortkey-criterion-check.ts]="position"
   [ac61-staleness-disposition-check.ts]="position"
   [ac69-slot-queue-gap-check.ts]="enumerative"
@@ -1423,7 +1414,6 @@ declare -A MATCHING=(
   [git-lens-l-d-code-doc-ratio.ts]="keyword"
   [git-lens-l-g-structural-drift.ts]="keyword"
   [git-lens-l-s-behavior-variance.ts]="keyword"
-  [halt-check.sh]="keyword"
   [inner-blocked-signal.ts]="keyword"
   [inner-exec-mode-report.ts]="keyword"
   [inner-forensics.mjs]="keyword"
@@ -1718,7 +1708,7 @@ declare -A CONSUMER=(
   [touches-one-entry-one-path-check.ts]="谁按：任务 subagent / 复核者在落地后核验 Touches 形态时按；条件=任务 Touches 要验一条目一路径（未来接线 run_static_checks 后随 task-contract-check 每轮自动按）"
   [vmeta-lag-check.sh]="谁按：V_meta 复核者按；条件=要量 V_meta 合并滞后"
   [vmeta-lag-check.ts]="谁按：同上（canonical 算术面）；条件=要量 V_meta 滞后"
-  [verify-deliver-coldstart.sh]="谁按：AC88 跨主机验证驱动者按（develop-deliver-tgz.sh --verify-coldstart 或 AC88 驱动方在跨主机交付验证时）；条件=要可重复地验证 ①装 tgz →②项目内 quay-init →③双层(outer+inner)冷启动 三步并产出 AC5 证据（build commit sha + 产物 sha256，达成=新于 2026-08-16 阶段切换）"
+  [verify-deliver-coldstart.sh]="谁按：AC88 跨主机验证驱动者按（develop-deliver-tgz.sh --verify-coldstart 或 AC88 驱动方在跨主机交付验证时）；条件=要可重复地验证 ①装 tgz →②项目内 quay-init →③冷启动（outer 窗口 + inner 层）三步并产出 AC5 证据（build commit sha + 产物 sha256，达成=新于 2026-08-16 阶段切换）"
   [task-contract-check.ts]="消费方：manager/outer 每轮读 .quay/task-file-violation-ledger.jsonl（grow-only 账本），新违规进账本绝不静默；--no-block 故不阻产品验证轮（task-file 语法≠产品可用性）"
   [task-ac-carryover-check.ts]="消费方：manager 在翻 done 前读同一 grow-only 账本，新未继承 AC 进账本并据此决定是否阻止合入；--no-block 不阻轮"
   [tick-core-static-check.ts]="消费方：pre-commit gate（run_doc_checks → precommit-guard.ts）——--check-drift 是 HARD 闸（gap-ac90-delivery-copy-drift-gate 收口），任一副本-正本对漂移（改正本而副本不落地 / 副本单边编辑）即 block 提交；reconcile 前的 --no-block 窗口已关闭"
@@ -1739,6 +1729,8 @@ declare -A SUPERSEDED=(
   [send-keys-verified.sh]="REMOVED 2026-08-10 (gap-retired-script-still-callable, human ruling) — superseded by send-keys-reliable.sh under outer ruling F (2026-08-04); its md5 pane-hash criterion is ADR-016-forbidden. Deleted with its test (send-keys-verified.test.mjs) and leak doc (send-keys-verified-test-leaks-tmux-servers.md). Crystallization residue poisons context — the implementation must NOT exist."
   [fan-in-ff-executor-check.ts]="REMOVED 2026-08-29 (gap-retire-fan-in-executor-workflow-identity-checkers) — AC67/AC75 fan-in 执行者身份 checker. 机械 fan-in (worker-driver.ts runMechanicalFanIn) 已把检查链结构性内联且 actor 无关 (ff-merge.sh --agent-id 自校验 + suite-capture 闸 + flock)，执行者=subagent 前提已死 (driver 记 lock-events agentId:null)。Deleted with its test (fan-in-ff-executor-check.test.mjs)."
   [fan-in-workflow-check.ts]="REMOVED 2026-08-29 (gap-retire-fan-in-executor-workflow-identity-checkers) — AC78 判据2 必经-workflow checker. 机械 fan-in 不走 workflow ⇒ isMechanicalRunId runId 前缀嗅探 whack-a-mole (oneoff-adr034 → oneoff-ls → oneoff-*)，前提已死。Deleted with its test (fan-in-workflow-check.test.mjs) + mutation case (checker-mutation-cases/fan-in-workflow-check.sh)."
+  [halt-check.sh]="REMOVED 2026-08-29 (gap-retire-halt-file-driver-based) — 三层统一 .halt 检查点. The .halt sentinel's promotion/execution role is dead (停派发已迁 control-state: driver-shared.ts isHalted / worker-driver.ts, driver 不读 .halt), so the three-layer unified halt check point (halt-check.sh --for <layer>) has zero live callers. Deleted with its test (halt-check.test.mjs)."
+  [a15-ruling5-counter.ts]="REMOVED 2026-08-29 (gap-retire-halt-file-driver-based) — A15 裁定5 机械计数器. Its premise (执行面 API 化不再依赖 Agent tool_use) is satisfied — the outer no longer drives via the three-layer loop it counted, so the 'ticks since Agent tool_use ⇒ 应 .halt' signal is dead. Deleted with its test (a15-ruling5-counter.test.mjs)."
 )
 
 # ── exp5-legacy screening (AC2) ──────────────────────────────────────────────────
@@ -1790,7 +1782,6 @@ declare -A PUBLIC_ENTRYPOINTS=(
   [gate-staleness-check.sh]="consumer-facing: the gate-ledger freshness signal (last GateEvent vs claimed period) invoked by the goal-store Contract"
   [inner-session-check.sh]="consumer-facing: the three-state cold-start self-check invoked by the loop docs"
   [fan-in-ff-merge.sh]="consumer-facing: the AC62 持锁段 command invoked by the A6 fan-in docs — merge lock wrapping ONLY the ff (a pure ref update git push . task/<id> → develop; gap-ac67: called BY the task subagent with --agent-id, not the inner main thread)"
-  [halt-check.sh]="consumer-facing: the three-layer unified .halt check command in the tick docs"
   [integration-batch-merge.sh]="consumer-facing: the integration→develop batch-merge command in the branch-model docs"
   [laydown-set-check.sh]="consumer-facing: the cold-start lay-what-you-verify gate invoked by the cold-start skill"
   [loop-driver-check.sh]="consumer-facing: the exactly-one-driver liveness check documented in the tick docs"
@@ -1804,7 +1795,7 @@ declare -A PUBLIC_ENTRYPOINTS=(
   [process-budget.sh]="consumer-facing: the total test-process budget authority consumed by test.sh / cap-from-gate / resource-gate"
   [provision-verify-worktree.sh]="consumer-facing: provision a fresh verify worktree (node_modules + .quay/config.yml symlinks) so it can run the full suite — used by A15 ④ both paths"
   [quay-launch.sh]="consumer-facing: the per-role launch command materializing the checked-in launch settings — documented as the launch surface in the cold-start skill + orchestrator-loop-tick (gap-quay-init-coldstart-usability-launch-not-used-huge-tick-doc-selftest-dominant AC2/Contract; re-instated 2026-08-11, superseding the 2026-08-06 demotion-to-internal of gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal)"
-  [quay-topology.sh]="consumer-facing: the two-window topology factory in the tick docs"
+  [quay-topology.sh]="consumer-facing: the single-window topology factory in the tick docs"
   [release-task.sh]="consumer-facing: the claim-release command documented in the tick docs"
   [real-target-verify.sh]="consumer-facing: the real-downstream install/upgrade verification command in the verification-round docs"
   [resource-gate.sh]="consumer-facing: the resource-safety gate invoked by the tick docs before heavy ops"
@@ -1816,9 +1807,9 @@ declare -A PUBLIC_ENTRYPOINTS=(
   [slot-refill.sh]="consumer-facing: the event-driven slot-refill evaluator in the tick docs"
   [supervisor-bus.sh]="consumer-facing: the identity-attributable cross-session message bus (deliver with sender identity + attributable ledger)"
   [supervisor-bus-identity.sh]="consumer-facing: the sender-identity verification command in the manager docs"
-  [supervisor-preempt.sh]="consumer-facing: the process-level preempt (.halt) command in the supervisor docs"
+  [supervisor-preempt.sh]="consumer-facing: the process-level preempt command in the supervisor docs"
   [sync-lag-check.sh]="consumer-facing: the cross-machine sync heartbeat in the tick docs"
-  [topology-check.sh]="consumer-facing: the three-window topology gate in the tick docs"
+  [topology-check.sh]="consumer-facing: the single-window topology gate in the tick docs"
 )
 
 # ── derive the check set from the filesystem (never a hardcoded count) ────────────

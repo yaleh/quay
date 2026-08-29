@@ -1226,6 +1226,138 @@ export function parseMaxRetries(raw: string | undefined): number {
   return Number.isInteger(n) && n >= 1 ? n : RETRY_CAP_DEFAULT;
 }
 
+// ── 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff）────────────────────────────
+// worker-driver 对 selector API 错误 / fallback 失败的【快速死亡】（<60s 墙钟）无退避——17:22–17:56 两任务
+// 54 次「worker exited with code 1」全部 <60s 快速重派，纯烧派发预算（subagent spawn 预算 / 会话累计）。
+// 修法（⛔ 不修模型名——那是 a7a507eab 治「为什么 400」；本条治「出错时为什么无退避疯狂重试」，两条独立）：
+//   worker <quickDeathMs 连续死亡 ≥backoffThreshold 次 ⇒ 对该任务加指数退避（backoffUntil，⛔ 不立即重派），
+//   重派间隔随连续死亡次数指数增长、封顶 maxBackoffMs；退避到上限（maxRetries，复用现有重试上限机制的
+//   --max-retries 旋钮）⇒ markNeedsHuman（⛔ 不无限退避）。退避状态按 task 记（⛔ 不全局——一个任务退避
+//   不该拖垮别的任务，AC2）。机制常量值不依赖宿主规格（硬规则 4 推论二：quickDeathMs=60s 是提案观测到的
+//   「<60s 快速重派」、baseBackoffMs/maxBackoffMs 是【指数退避的几何底/顶】非机器核数/内存上限）。
+
+/** 快速死亡退避配置。quickDeathMs/backoffThreshold/baseBackoffMs/maxBackoffMs 是机制常量（非宿主
+ *  规格阈值），退避上限（markNeedsHuman 阈值）复用现有 --max-retries（backoffMaxRetries 由调用方传
+ *  maxRetries，⛔ 不再新设一个数值旋钮——plan item 3「复用现有重试上限机制」）。 */
+export interface QuickDeathBackoffConfig {
+  /** 墙钟 < 此值（ms）判为「快速死亡」。 */
+  quickDeathMs: number;
+  /** 连续快速死亡 ≥ 此次数才开始退避（M，AC1「连续死亡 ≥M 次后」）。 */
+  backoffThreshold: number;
+  /** 第一次退避的等待 ms（指数底数）。 */
+  baseBackoffMs: number;
+  /** 退避等待上限 ms（指数增长封顶——plan item 1「退避上限可配置」）。 */
+  maxBackoffMs: number;
+}
+
+export const QUICK_DEATH_BACKOFF_DEFAULT: QuickDeathBackoffConfig = {
+  quickDeathMs: 60_000,
+  backoffThreshold: 1,
+  baseBackoffMs: 30_000,
+  maxBackoffMs: 300_000,
+};
+
+/** 快速死亡终态：worker 没跑完就死（failed 退出非零 / spawn-failed 起不来 / killed 被信号杀）。
+ *  exited-not-landed 是「跑完没落地」（自有重试上限机制）、timed-out 是「超时被杀保留 worktree」
+ *  （自有语义），两者都不算「快速死亡」——⛔ 与既有机制重叠计数（同一条失败路径进两个桶）。 */
+const QUICK_DEATH_FINAL_STATES: ReadonlySet<string> = new Set(["failed", "spawn-failed", "killed"]);
+
+/** 是否「快速死亡」：终态属快速死亡类 ∧ 墙钟 < quickDeathMs。 */
+export function isQuickDeath(
+  finalState: string,
+  wallClockMs: number,
+  cfg: QuickDeathBackoffConfig = QUICK_DEATH_BACKOFF_DEFAULT,
+): boolean {
+  return QUICK_DEATH_FINAL_STATES.has(finalState) && wallClockMs < cfg.quickDeathMs;
+}
+
+/** 指数退避等待：baseBackoffMs * 2^(consecutive - backoffThreshold)，封顶 maxBackoffMs（⛔ 不无限增长）。 */
+export function backoffDelayMs(
+  consecutive: number,
+  cfg: QuickDeathBackoffConfig = QUICK_DEATH_BACKOFF_DEFAULT,
+): number {
+  const exp = Math.max(0, consecutive - cfg.backoffThreshold);
+  return Math.min(cfg.maxBackoffMs, cfg.baseBackoffMs * 2 ** exp);
+}
+
+/** 快速死亡退避状态（按 task 记，⛔ 不全局）。跨轮存活于常驻循环内（⛔ 不落盘，与 RetryState 同寿命）。 */
+export interface QuickDeathBackoffState {
+  /** task id → 连续快速死亡次数。 */
+  counts: Map<string, number>;
+  /** task id → 退避到此时刻（epoch ms）。now < until 期间不重派该 task。 */
+  backoffUntil: Map<string, number>;
+}
+
+/** 新建一个退避状态。 */
+export function newQuickDeathBackoffState(): QuickDeathBackoffState {
+  return { counts: new Map(), backoffUntil: new Map() };
+}
+
+/** 该 task 此刻是否在退避中（backoffUntil 未到）。 */
+export function isBackedOff(state: QuickDeathBackoffState, taskId: string, nowMs: number): boolean {
+  const until = state.backoffUntil.get(taskId);
+  return until != null && nowMs < until;
+}
+
+/** 记录一次 worker 终态对退避状态的影响（纯逻辑，可单测）：
+ *   非快速死亡（worker 活过 quickDeathMs，或 completed/exited-not-landed/timed-out）⇒ 复位连续计数
+ *   （「连续」断链，⛔ 不把慢速失败算进快速死亡序列）。
+ *   快速死亡 ⇒ 连续计数 +1；≥backoffMaxRetries ⇒ newlyNeedsHuman（⛔ 不设 backoffUntil——转 needs-human
+ *   由 notNeedsHuman/retryExhausted 过滤负责停止重派，不再退避）；否则 ≥backoffThreshold ⇒ 设 backoffUntil。
+ *  @returns { quickDeath, backedOff, newlyNeedsHuman } */
+export function recordQuickDeathBackoff(
+  state: QuickDeathBackoffState,
+  taskId: string,
+  finalState: string,
+  wallClockMs: number,
+  nowMs: number,
+  backoffMaxRetries: number,
+  cfg: QuickDeathBackoffConfig = QUICK_DEATH_BACKOFF_DEFAULT,
+): { quickDeath: boolean; backedOff: boolean; newlyNeedsHuman: boolean } {
+  if (!isQuickDeath(finalState, wallClockMs, cfg)) {
+    state.counts.delete(taskId);
+    state.backoffUntil.delete(taskId);
+    return { quickDeath: false, backedOff: false, newlyNeedsHuman: false };
+  }
+  const n = (state.counts.get(taskId) ?? 0) + 1;
+  state.counts.set(taskId, n);
+  if (n >= backoffMaxRetries) {
+    state.backoffUntil.delete(taskId);
+    return { quickDeath: true, backedOff: false, newlyNeedsHuman: true };
+  }
+  const backedOff = n >= cfg.backoffThreshold;
+  if (backedOff) state.backoffUntil.set(taskId, nowMs + backoffDelayMs(n, cfg));
+  return { quickDeath: true, backedOff, newlyNeedsHuman: false };
+}
+
+/** 解析 --quick-death-ms <ms>（快速死亡墙钟阈值）。缺省/非法 ⇒ 缺省（fail-to-default 约定）。 */
+export function parseQuickDeathMs(raw: string | undefined): number {
+  if (raw == null) return QUICK_DEATH_BACKOFF_DEFAULT.quickDeathMs;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : QUICK_DEATH_BACKOFF_DEFAULT.quickDeathMs;
+}
+
+/** 解析 --backoff-base-ms <ms>（指数退避底数）。缺省/非法 ⇒ 缺省（fail-to-default 约定）。 */
+export function parseBackoffBaseMs(raw: string | undefined): number {
+  if (raw == null) return QUICK_DEATH_BACKOFF_DEFAULT.baseBackoffMs;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : QUICK_DEATH_BACKOFF_DEFAULT.baseBackoffMs;
+}
+
+/** 解析 --backoff-max-ms <ms>（指数退避封顶）。缺省/非法 ⇒ 缺省（fail-to-default 约定）。 */
+export function parseBackoffMaxMs(raw: string | undefined): number {
+  if (raw == null) return QUICK_DEATH_BACKOFF_DEFAULT.maxBackoffMs;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : QUICK_DEATH_BACKOFF_DEFAULT.maxBackoffMs;
+}
+
+/** 解析 --backoff-threshold <n>（连续快速死亡 M 次才开始退避）。缺省/非法 ⇒ 缺省（fail-to-default）。 */
+export function parseBackoffThreshold(raw: string | undefined): number {
+  if (raw == null) return QUICK_DEATH_BACKOFF_DEFAULT.backoffThreshold;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : QUICK_DEATH_BACKOFF_DEFAULT.backoffThreshold;
+}
+
 /** 一次「主检出脏状态观察 + stash 决策」的结果（gap-worker-driver-stashifdirty-stashes-others-
  *  uncommitted AC1：stashed 恒 false——驱动【不】stash 共享主检出；files 列出观察到的脏文件供观测，
  *  与「检出干净」的 files=[] 区分）。⛔ 绝不 discard。 */
@@ -1500,7 +1632,13 @@ function runOneWorker({
         const paths = worktreePathsForTask(rootDir, taskId);
         if (paths.length > 0 && paths[0]) {
           const startMechMs = Date.now();
-          mechResult = await runMechanicalFanIn({ task: taskId, worktree: paths[0], root: rootDir, runId });
+          // 每任务新进程（gap-fan-in-token-gate-version-mismatch-self-lock）：机械 fan-in 不再在本守护
+          // 进程 in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），
+          // 改为 spawn 一个 fresh node 进程加载 worktree 的 worker-driver.ts --mechanical-fan-in——
+          // 锁半（acquireFanInWorkflowLock）与编排半（fan-in-ff-merge.sh）同源（都在 worktree），改了
+          // worker-driver.ts 的任务 fan-in 不再用旧锁/旧编排。⛔ 不是 token 闸一例，是「fan-in 脚本从
+          // worktree 加载、发起者从主检出旧进程运行」的架构错位整个类。
+          mechResult = await spawnMechanicalFanIn({ task: taskId, worktree: paths[0], root: rootDir, runId });
           if (json) {
             process.stdout.write(
               `${JSON.stringify({ event: "mechanical-fan-in", task: taskId, wall_clock_ms: Date.now() - startMechMs, ...mechResult })}\n`,
@@ -2202,6 +2340,52 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   };
 }
 
+/**
+ * 每任务新进程执行（gap-fan-in-token-gate-version-mismatch-self-lock AC1）：机械 fan-in 不在守护进程
+ * in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），改为每任务 spawn
+ * 一个 fresh node 进程加载 worktree 的 worker-driver.ts --mechanical-fan-in——当前代码。fresh 进程里的
+ * 锁半（acquireFanInWorkflowLock，ADR-034）与编排半（fan-in-ff-merge.sh）同源（都在 worktree）⇒ 改了
+ * worker-driver.ts 的任务 fan-in 用的是它自己的新锁/新编排，不再因「守护旧代码」自锁。结果经 stdout
+ * 单行 JSON 回传（--mechanical-fan-in 只打一行 result JSON）；spawn 失败/输出不可解析 fail-closed 为 red
+ * （硬规则 3b：读不懂 ≠ 合格）。
+ */
+async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promise<MechanicalFanInResult> {
+  const entry = path.join(opts.worktree, "plugin", "scripts", "worker-driver.ts");
+  const argv = [
+    process.execPath, "--experimental-strip-types", entry,
+    "--mechanical-fan-in",
+    "--task", opts.task,
+    "--worktree", opts.worktree,
+    "--root", opts.root,
+    "--run-id", opts.runId,
+    "--json",
+  ];
+  if (opts.mergeTarget) argv.push("--merge-target", opts.mergeTarget);
+  const r = await runAsync(argv, { timeoutMs: Infinity, collectStderr: true });
+  // MechanicalFanInResult 自 D5/D6/D7 起带 verdict 字段（outcome=red 时非 null）——spawn 失败 / 输出
+  // 不可解析的 red 也须构造结构化 verdict（⛔ 缺字段 ⇒ typecheck 红；硬规则 3b 读不懂 ≠ 合格）。
+  const red = (step: string, reason: string, exitCode: number | null = null): MechanicalFanInResult => ({
+    outcome: "red",
+    verdict: { step, verdict: "failed", exitCode, summary: reason, logFile: null },
+    step, reason,
+    lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
+    suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+  });
+  if (r.status === null) {
+    return red("spawn-mechanical-fan-in", r.error?.message ?? `fresh mechanical fan-in process failed: ${r.stderr || "no output"}`);
+  }
+  const lastJson = (r.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean).pop();
+  if (lastJson) {
+    try {
+      const parsed = JSON.parse(lastJson);
+      if (parsed && typeof parsed === "object" && (parsed.outcome === "landed" || parsed.outcome === "red")) {
+        return parsed as MechanicalFanInResult;
+      }
+    } catch { /* fall through to red */ }
+  }
+  return red("parse-mechanical-fan-in", `unparseable fresh mechanical fan-in output: ${(r.stderr || r.stdout || "").trim() || `exit ${r.status}`}`, r.status);
+}
+
 /** D7：机械 fan-in 的 bucket suite 绿后，把本轮 suite 状态镜像到权威载体 full-suite-state.json。
  *  ⛔ 不伪造 full-green：scope=worktree + taskId + runner=inner 区分 bucket-run（本任务的 --buckets 子集）
  *  与 full-run（scope=main + runner=outer 无 taskId）——读面据此可分辨「退休已修 suite 绿」≠「全量 suite 绿」。
@@ -2269,6 +2453,9 @@ export interface ResidentOptions {
   /** 重试上限（gap-worker-driver-retry-cap-not-wired）：同一任务连续 N 次 exited-not-landed 未落地 ⇒
    *  标 needs-human 并停止重派。缺省 RETRY_CAP_DEFAULT（与 promotion 的 --max-fix-retries 同值）。 */
   maxRetries: number;
+  /** 快速死亡退避配置（gap-worker-driver-selector-api-error-no-backoff）：quickDeathMs / backoffThreshold /
+   *  baseBackoffMs / maxBackoffMs。退避上限（markNeedsHuman 阈值）复用上面的 maxRetries。 */
+  backoffCfg: QuickDeathBackoffConfig;
 }
 
 /**
@@ -2282,7 +2469,7 @@ export interface ResidentOptions {
  *       supervisor 重启）。退出码 = 首个非零 worker 码（仅在终态 latch 后返回）。
  */
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
-  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs, maxRetries } = opts;
+  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs, maxRetries, backoffCfg } = opts;
 
   // 主检出脏状态观察（阶段 2 ③，gap-worker-driver-stashifdirty-stashes-others-uncommitted）：⛔ 不 stash
   // 共享主检出（脏改动属他人）。stash 事件仍发射供观测（stashed=false + files 列出脏文件）。非 git no-op。
@@ -2305,6 +2492,12 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // 每轮 round 记录（生产载体——生产 driver argv 无 --json ⇒ json 事件不可观测，同 cold-start-inflight）。
   // splice(0) 快照并清空 ⇒ 每轮只报【本轮新】的翻转，⛔ 不累积跨轮。
   const needsHumanResults: Array<{ id: string; ok: boolean; committed: boolean; reason: string }> = [];
+
+  // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff）：worker <quickDeathMs 快速死亡连续
+  // ≥backoffThreshold 次 ⇒ 对该 task 设 backoffUntil（指数退避，⛔ 不立即重派）；退避到上限（maxRetries）
+  // ⇒ markNeedsHuman（复用现有重试上限机制，⛔ 不无限退避）。状态按 task 记（⛔ 不全局——一个任务退避
+  // 不拖垮别的任务，AC2）。跨轮存活于常驻循环内（⛔ 不落盘，与 retryState 同寿命）。
+  const backoffState = newQuickDeathBackoffState();
 
   // gap-worker-driver-cold-start-inflight-refresh：冷启动在飞排除集【每趟 pass 现观测】（SPEC §5.2
   // actual=observe()），不再是循环外一次性 const 快照——原 gap-worker-driver-cold-start-inflight-blind
@@ -2386,6 +2579,22 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
           if (json) process.stdout.write(`${JSON.stringify({ event: "needs-human", ...nh })}\n`);
         }
       }
+      // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff）：worker 快速死亡（<quickDeathMs）
+      // ⇒ 对该 task 退避（backoffUntil，⛔ 不立即重派）；退避到上限（maxRetries）⇒ markNeedsHuman（复用
+      // 现有重试上限机制，⛔ 不无限退避）。needsHuman 集合与 markNeedsHuman 的 status 翻转双保险——
+      // 即使磁盘写失败，内存过滤（retryCapNotExhausted/notNeedsHuman）也挡重派。
+      const backoff = recordQuickDeathBackoff(
+        backoffState, r.taskId, r.outcome.final_state, r.outcome.wall_clock_ms, Date.now(), maxRetries, backoffCfg,
+      );
+      if (backoff.newlyNeedsHuman) {
+        retryState.needsHuman.add(r.taskId);
+        markNeedsHuman(rootDir, r.taskId, `worker-driver 连续 ${maxRetries} 次 <${backoffCfg.quickDeathMs}ms 快速死亡（退避上限）`);
+      }
+      if (backoff.quickDeath && json) {
+        process.stdout.write(
+          `${JSON.stringify({ event: "worker-backoff", task: r.taskId, consecutive_quick_deaths: backoffState.counts.get(r.taskId), backed_off: backoff.backedOff, needs_human: backoff.newlyNeedsHuman, wall_clock_ms: r.outcome.wall_clock_ms })}\n`,
+        );
+      }
       return r;
     });
     running.push(rw);
@@ -2460,12 +2669,17 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 三个散点已收进 applyTaskFilters 一次判完。
       // 重试上限（gap-worker-driver-retry-cap-not-wired）：retryExhausted = 本循环已标 needs-human 的
       // 任务集合（exited-not-landed 达上限派生）——retryCapNotExhausted 谓词据此滤掉不再重派。
-      const candidates = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks(), retryExhausted: retryState.needsHuman }));
+      const candidates = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks(), retryExhausted: retryState.needsHuman }))
+        // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff，AC2）：退避中的 task（backoffUntil
+        // 未到）本轮不派——⛔ 只滤掉退避的 task，不滤掉别的候选（退避按 task 记，不全局）。now 每候选
+        // 取一次现时刻（⛔ 循环外一次 now 快照会把「退避刚到期」的 task 误滤一整轮）。
+        .filter((id) => !isBackedOff(backoffState, id, Date.now()));
       if (candidates.length === 0) {
         // 真池空（ready 减在飞后无候选）⇒ 瞬时 WAIT：记 pool-empty，下一轮重读（⛔ 不再 latch）。
         //   池非空但全与在飞 Touches/deps 重叠 ⇒ 同为瞬时 WAIT：不设 stopReason（在飞 worker 结束释放
         //   Touches 或依赖由别的任务落地后重进选择环重新 filter）。两者都不退出——等 intervalMs 重读。
         if (shuffled.length === 0) waitReason = "pool-empty (no dispatchable candidate in the ready pool)";
+        else waitReason = "backoff (all dispatchable candidates are in quick-death backoff)";
         break;
       }
       const sel = await runSelectorWorker(candidates, selectorArgv, rootDir);
@@ -2530,6 +2744,10 @@ export async function main(argv: string[]): Promise<number> {
   let intervalRaw: string | undefined;
   let reconcileRaw: string | undefined;
   let maxRetriesRaw: string | undefined;
+  let quickDeathMsRaw: string | undefined;
+  let backoffBaseMsRaw: string | undefined;
+  let backoffMaxMsRaw: string | undefined;
+  let backoffThresholdRaw: string | undefined;
   let pidFile: string | undefined;
   let outcomePath: string | undefined;
   let runId: string | undefined;
@@ -2537,6 +2755,9 @@ export async function main(argv: string[]): Promise<number> {
   let serve = false;
   let host: string | undefined;
   let port: number | undefined;
+  let mechanicalFanIn = false;
+  let mechWorktree: string | undefined;
+  let mechMergeTarget: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -2554,6 +2775,10 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--interval") intervalRaw = args[++i];
     else if (a === "--reconcile-interval") reconcileRaw = args[++i];
     else if (a === "--max-retries") maxRetriesRaw = args[++i];
+    else if (a === "--quick-death-ms") quickDeathMsRaw = args[++i];
+    else if (a === "--backoff-base-ms") backoffBaseMsRaw = args[++i];
+    else if (a === "--backoff-max-ms") backoffMaxMsRaw = args[++i];
+    else if (a === "--backoff-threshold") backoffThresholdRaw = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
     else if (a === "--outcome") outcomePath = args[++i];
     else if (a === "--run-id") runId = args[++i];
@@ -2561,6 +2786,9 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--serve") serve = true;
     else if (a === "--host") host = args[++i];
     else if (a === "--port") port = Number(args[++i]);
+    else if (a === "--mechanical-fan-in") mechanicalFanIn = true;
+    else if (a === "--worktree") mechWorktree = args[++i];
+    else if (a === "--merge-target") mechMergeTarget = args[++i];
     else if (a === "--help" || a === "-h") {
       console.log(
         "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + ⛔ 不 stash 主检出 + MCP 控制面 + 常驻选择环）\n" +
@@ -2571,6 +2799,11 @@ export async function main(argv: string[]): Promise<number> {
           "  [--interval <ms>]   无在飞 worker 且瞬时 WAIT 时的轮询间隔（缺省 30000；测试缝传小值）\n" +
           "  [--reconcile-interval <s>]  协调地板：至少每 N 秒协调一次，边沿事件全丢也降级「慢但正确」而非静默停摆（缺省 300；0 = 无地板）\n" +
           "  [--max-retries <n>]  重试上限：同一任务连续 N 次 exited-not-landed 未落地 ⇒ 标 needs-human 并停止重派（缺省 3，同 promotion --max-fix-retries）\n" +
+          "  [--quick-death-ms <ms>]  快速死亡判据：worker 墙钟 < 此值视为快速死亡（缺省 60000）\n" +
+          "  [--backoff-threshold <n>]  连续快速死亡 ≥ 此次数才开始退避（缺省 1）\n" +
+          "  [--backoff-base-ms <ms>]  第一次退避等待 ms（指数底数，缺省 30000）\n" +
+          "  [--backoff-max-ms <ms>]  退避等待上限 ms（指数增长封顶，缺省 300000）\n" +
+          "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前 worktree 代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -2581,6 +2814,27 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const rootDir = root ? path.resolve(root) : path.resolve(process.cwd());
+
+  // --mechanical-fan-in：fresh 进程入口（每任务新进程执行，gap-fan-in-token-gate-version-mismatch-
+  // self-lock AC1）。守护 spawn 本入口加载 worktree 的 worker-driver.ts，跑机械 fan-in、把 result 以
+  // 单行 JSON 打回 stdout（spawnMechanicalFanIn 解析），exit 0 = landed / 2 = red。⛔ 不是派发路径：
+  // 不 stash、不读 selector、不写 outcome（结果由 spawn 方入账）。
+  if (mechanicalFanIn) {
+    const task = tasks[0];
+    if (!task || !mechWorktree) {
+      console.error("worker-driver: --mechanical-fan-in requires --task <id> and --worktree <path>");
+      return 2;
+    }
+    const result = await runMechanicalFanIn({
+      task,
+      worktree: mechWorktree,
+      root: rootDir,
+      runId: runId ?? `fm-${task}-${Date.now()}`,
+      mergeTarget: mechMergeTarget,
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result.outcome === "landed" ? 0 : 2;
+  }
 
   // --serve：起 MCP 控制面（常驻）。listening socket 保持事件循环存活 ⇒ 进程不退出，直到 SIGINT/SIGTERM。
   if (serve) {
@@ -2598,6 +2852,14 @@ export async function main(argv: string[]): Promise<number> {
   const intervalMs = parseIntervalMs(intervalRaw, rootDir);
   const reconcileMs = parseReconcileIntervalSecs(reconcileRaw, rootDir);
   const maxRetries = parseMaxRetries(maxRetriesRaw);
+  // 快速死亡退避配置（gap-worker-driver-selector-api-error-no-backoff）：四个机制旋钮经 --quick-death-ms /
+  // --backoff-base-ms / --backoff-max-ms / --backoff-threshold 覆盖；退避上限复用 maxRetries。
+  const backoffCfg: QuickDeathBackoffConfig = {
+    quickDeathMs: parseQuickDeathMs(quickDeathMsRaw),
+    backoffThreshold: parseBackoffThreshold(backoffThresholdRaw),
+    baseBackoffMs: parseBackoffBaseMs(backoffBaseMsRaw),
+    maxBackoffMs: parseBackoffMaxMs(backoffMaxMsRaw),
+  };
 
   // 阶段 4（AC129）：无 --task ⇒ 常驻选择环（不再报错退出）。--task 显式批量派发路径不变。
   if (tasks.length === 0) {
@@ -2619,6 +2881,7 @@ export async function main(argv: string[]): Promise<number> {
       intervalMs,
       reconcileMs,
       maxRetries,
+      backoffCfg,
     });
   }
 
