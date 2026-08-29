@@ -244,10 +244,10 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   worker kind 独有 `drain`（挡新派发、不杀在飞，写 `.quay/worker-control.json` `halted:true`）。
   **⛔ 已知缺口更新（2026-08-24，`gap-worker-driver-cold-start-inflight-blind` 已 done，读下面两行别读旧结论）**：
   「重启会重复派发存活 worker」这个方向**已修复并被 manager 直接对生产实时状态验证过**（`enumerateColdStartInflight`
-  只读探测，非猜测/非采信自述）——手工 restart **不会**重派仍存活的 worker。**残留的是相反方向**：
-  该函数的观测结果在循环外被 `const` 冻结一次、全生命周期不刷新 ⇒ 一个冷启动 worker **结束后**其 task
-  仍永久假在飞，不可再派（`gap-worker-driver-cold-start-inflight-refresh`，ready，附 §5 协调循环修法，
-  见 `orchestration/SPEC-unified-driver-architecture-2026-08-23.md`）。**手工 restart 后仍建议核对
+  只读探测，非猜测/非采信自述）——手工 restart **不会**重派仍存活的 worker。**相反方向的残留也已修**（冷启动 worker 结束后 task 永久假在飞 → 已修）：`coldInflight` 每趟 pass 在
+  `while` 循环内重扫（`enumerateColdStartInflightAsync`）——worker 退出 / worktree 消失任一生 ⇒ task 即离开
+  排除集、下一轮重新可派（`gap-worker-driver-cold-start-inflight-refresh`，done 2026-08-24）。冷启动孤儿会
+  自动收敛，无需手工救。**手工 restart 后仍建议核对
   一次** `ps aux | grep quay-task-worker`（按 task 名去重）作为习惯性负控制，但不再是必须的救火步骤。
   **manager 对 driver 生命周期（start/stop/restart）持人 2026-08-24 明确授权的常设控制权**（本项目后期
   开发阶段内），无需逐次请示；执行前仍应做上述现场核实（避免过期判断），执行后仍应做负控制确认。
@@ -293,6 +293,8 @@ Key cross-cutting facts (require reading several files to see):
 - **Directives are TASK-CANONICAL** (DIR-028 / "Plan A", the single-source-of-truth principle): a directive is a `label:directive` quay task (`tasks/DIR-NNN.md`) and nothing else — there is no `directives/*.md` file, no projection, no anti-drift check (all retired). Create/steer via the `quay-directive` skill. Milestone candidates are `label:milestone-candidate` tasks; `backlog.md`/`dashboard.md` are **generated views** of the task store, not hand-edited sources.
 - Recurring design principle enforced across this repo (see `docs/proposals/exp5-crystallization-strategy.md`): **single source of truth + executable invariants over prose.** When you find content living in two places (a file + a task copy; a charter copying a task's AC/DoD; a status in a field AND a body line), that is drift — fix the SOURCE (usually a doc/skill/template that generated it), not just the artifact.
 
+- **单任务派发记录接口 = `plugin/scripts/dispatch-record.ts --add --task-id <id> --reason "<一句为什么选它>"`**（fail-closed：理由<8 非空白字符 exit 1 不写不派；指纹自动 `git hash-object`，算不出写 null 由 `dispatch-record-fingerprint-reason-check` 报红；正本 `fast-mode-tick-core.md` A16b）。**派发(机械)=内层（`fast-mode-tick-core.md:83`）——外层/非-inner 不手搓 Python 写 `orchestration/dispatch-record.jsonl`**（2026-08-20 外层 B9 手搓三键 `{ts,taskId,reason}` 漏指纹，已删；inner A16b 已记同一次派发，勿扩豁免名单）。同款先例：manager 语义派发 `semantic-face-dispatch-record.ts --add --kind <八类> --reason "..."`（`manager-tick-core.md` C30/AC145）。
+
 ## Reference docs
 
 - `README.md` — install/usage + the three-package overview.
@@ -330,6 +332,7 @@ Key cross-cutting facts (require reading several files to see):
 ## Process
 
 - Development is driven via **background Claude Code workflows at milestone granularity** (→ ADR-009), with a **scheduled milestone e2e incl. browser tests** (Playwright/chrome-devtools) that keeps `L_T` on the real product surface (→ ADR-010). Follow DIR-027 steering hygiene (`.halt` or private worktree; never race the loop on `master`).
+- **后台会话编辑共享检出的正确姿势**：直接 Edit/Write 主检出会被 harness 的 worktree-isolation guard 拦（未 `EnterWorktree` 不可写）。任务体用 `task_write` MCP（Provider ABI 写 `tasks/*.md`）、代码改动进 worktree（`EnterWorktree` 或任务 worktree）。worker（claude -p）不撞 guard 是因 cwd 虽主检出、dispatch prompt 强制 file_path 用 worktree 绝对路径。⛔ 不要 Bash/Python 手搓硬插（2026-08-29 实证：解 worker-driver.ts 冲突时 Python 锚点插入吞 `/**` 留 orphan 注释，靠 worker 修回）。
 
 ## Split-decision routing policy
 

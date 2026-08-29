@@ -60,6 +60,22 @@ function walkCorpus(dir, { excluded = [], includeWorktrees = false } = {}) {
   return scanned;
 }
 
+// ENOENT-tolerant read for the AC1b corpus scan (gap-loop-shipping-ac1b-walk-enoent-race): walkCorpus
+// enumerates a path into `scanned`, then a PARALLEL test can delete it before readFileSync reaches it
+// (the run-identity-selftest-* tests mkdir/rm their tmp/ worktrees mid-suite). A file that vanished
+// between walk and read is a transient artifact, NOT a live old-path reference — skip it. ONLY ENOENT
+// is tolerated; any other read error still throws (硬规则 3b: a "can't read" must not masquerade as
+// "passed"). Returns null — a distinguishable "not read" value, never conflated with empty-string
+// content (硬规则 6: 缺值 = 未查, not 「为假」).
+function readCorpusText(p) {
+  try {
+    return fs.readFileSync(p, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return null;
+    throw e;
+  }
+}
+
 // The AC1b exclusion targets (files/dirs that MAY legitimately mention the old paths).
 const exclusionTargets = () => exclusionEntries(repoRoot, pluginDir).map((e) => e.target);
 
@@ -129,7 +145,8 @@ test('AC1b — after the move, no live reference to the 5 old paths remains (com
   for (const p of walkCorpus(repoRoot, { excluded: exclusionTargets() })) {
     scanned += 1;
     if (p === path.join(repoRoot, 'scripts', 'test.sh')) sawTestSh = true;
-    const src = fs.readFileSync(p, 'utf8');
+    const src = readCorpusText(p);
+    if (src === null) continue; // deleted mid-walk by a parallel test → transient file, not a live reference
     for (const re of oldPathPatterns) {
       if (re.test(src)) hits.push(`${path.relative(repoRoot, p)}: contains "${re}"`);
     }
@@ -137,6 +154,37 @@ test('AC1b — after the move, no live reference to the 5 old paths remains (com
   assert.deepEqual(hits, [], 'no live reference to the moved files\' old paths may remain (update callers to plugin/loop/ + plugin/scripts/)');
   assert.ok(scanned >= 200, `scan corpus must not be empty/starved: only ${scanned} files scanned`);
   assert.ok(sawTestSh, 'scripts/test.sh (a known live caller) must be in the scan corpus');
+});
+
+test('AC1 — readCorpusText tolerates ENOENT (a parallel test deleted the file between walk and read)', () => {
+  // The exact AC1b race: the file is enumerated into the corpus, then deleted before readFileSync.
+  // It must be skipped (null), not crash the scan with an ENOENT throw.
+  const probe = path.join(repoRoot, '.loop-shipping-enoent-probe.md');
+  fs.writeFileSync(probe, 'a file that will vanish before it is read\n');
+  fs.rmSync(probe, { force: true });
+  assert.equal(readCorpusText(probe), null, 'a file deleted between walk and read must be skipped, not throw ENOENT');
+});
+
+test('AC2 — a real old-path reference is still caught (ENOENT tolerance must not mask live refs)', () => {
+  const probe = path.join(repoRoot, '.loop-shipping-live-probe.md');
+  try {
+    fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
+    const src = readCorpusText(probe);
+    assert.ok(src !== null && oldPathPatterns.some((re) => re.test(src)),
+      'a live old-path reference must still be read and matched (ENOENT tolerance must not leak into live-ref capture)');
+  } finally {
+    fs.rmSync(probe, { force: true });
+  }
+});
+
+test('AC3 — a non-ENOENT read error still throws (not swallowed)', () => {
+  // A directory is a real non-ENOENT readFileSync failure (EISDIR): it must propagate, proving the
+  // tolerance is ENOENT-only, not a catch-all that hides "can't read" as "passed" (硬规则 3b).
+  assert.throws(
+    () => readCorpusText(path.join(pluginDir, 'scripts')),
+    (e) => e && e.code === 'EISDIR',
+    'non-ENOENT read errors must still throw'
+  );
 });
 
 test('AC1c — the tick-doc templates\' own /loop prompts and reciprocal cross-refs reference the CONSUMER landing (orchestration/ + docs/analysis/), not the non-landed plugin/loop/ bundle source', () => {

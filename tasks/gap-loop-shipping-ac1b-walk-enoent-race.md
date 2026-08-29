@@ -2,7 +2,7 @@
 id: gap-loop-shipping-ac1b-walk-enoent-race
 title: loop-shipping.test.mjs AC1b walkCorpus 并发修改竞态——并行测试删 tmp 文件致 readFileSync
   ENOENT 崩（suite 假红）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -29,9 +29,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，ENOENT 容忍）：并行删除文件场景下 AC1b 不再崩 ENOENT（⛔ 仍崩 ⇒ 假）。
-- [ ] AC2（能取假，真实引用仍捕获）：构造真实旧路径引用仍被 AC1b 报红（⛔ 容忍致漏报 ⇒ 假）。
-- [ ] AC3（能取假，不吞其它错误）：非 ENOENT 的 readFileSync 错误仍向上抛（⛔ 吞掉 ⇒ 假）。
+- [x] AC1（能取假，ENOENT 容忍）：并行删除文件场景下 AC1b 不再崩 ENOENT（⛔ 仍崩 ⇒ 假）。
+- [x] AC2（能取假，真实引用仍捕获）：构造真实旧路径引用仍被 AC1b 报红（⛔ 容忍致漏报 ⇒ 假）。
+- [x] AC3（能取假，不吞其它错误）：非 ENOENT 的 readFileSync 错误仍向上抛（⛔ 吞掉 ⇒ 假）。
 
 ## Definition of Done
 
