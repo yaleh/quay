@@ -62,3 +62,9 @@ AC149-1/2/3 全勾；outer/inner 真退役、产能不塌、无双真相源；B0
 **执行 2026-08-28T19:48:23.581Z — 连续修满重试上限仍不合格（标 needs-human）**
 
 - 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+
+## Needs-Human
+
+**执行 2026-08-29T15:48:29.610Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

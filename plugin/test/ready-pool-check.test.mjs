@@ -78,7 +78,13 @@ import {
   deriveDefaultLane,
   readPerTaskSuiteRecords,
   isSuiteRecordSkip,
+  computeMergeWorktreeSurfaces,
+  resolveMergeWorktreeSurfaces,
+  unmergedConflictPaths,
+  readTaskFileAtRef,
+  readTaskStatusAtRef,
 } from "../scripts/ready-pool-check.ts";
+import { INFLIGHT_WORKTREE_STALE_MS } from "../scripts/concurrent-batch-scheduler.ts";
 import { propagateDocBranchToDevelop } from "../scripts/driver-filters.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
@@ -698,6 +704,92 @@ test("AC-complete signal is a UNION not a replace: partial/zero/non-ready NOT su
   // Neither signal fires → stays in the pool.
   const pending = { status: "ready", body: fourArtifactBody({ touches: ["- code/never.ts"] }) };
   assert.equal(notYetFlipped(pending, root), false, "neither signal fires → stays in the pool");
+});
+
+// ── LEFTOVER-WORKTREE EXEMPTION (gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption) ──
+// The `allChecked` arm (2026-08-08) excluded a ready task purely on self-declared completion, with NO
+// landing evidence. A mechanical fan-in FAILURE (suite red / merge-develop conflict) leaves the task
+// `ready + all-checked + un-landed` WITH its `task/<id>` worktree still open (ff-merge success is what
+// deletes it) — the old arm excluded it forever, so the landing path never ran again (permanent
+// stranding, one dead task froze the pool). The fix: an OPEN `task/<id>` worktree is the DIRECT
+// "fan-in not yet complete" quantity (same `git worktree list` source as computeInFlightWorktreeTouches)
+// — while it exists the allChecked task stays dispatchable so the next dispatch triggers the driver's
+// mechanical fan-in retry. No worktree keeps the original exclude (the prose-AC shape).
+
+test("LEFTOVER-WORKTREE — allChecked + leftover task/<id> worktree is NOT not-yet-flipped (AC1); no worktree keeps the exclusion (AC2)", (t) => {
+  const root = makeRealGitRepo("nyf-leftover");
+  const wtPath = path.join(root, "..", `${path.basename(root)}-leftover`);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  gitCommit(root, "seed");
+
+  const id = "gap-nyf-leftover";
+  const body = fourArtifactBody({ checkedAc: 4, touches: ["- code/never.ts"] });
+  writeTask(root, id, { status: "ready", labels: ["gap"], body });
+
+  // AC2 negative control: allChecked + NO worktree ⇒ still excluded (2026-08-08 behavior unchanged).
+  assert.equal(notYetFlipped({ id, status: "ready", body }, root), true,
+    "all-checked + no leftover worktree is still not-yet-flipped (AC2)");
+
+  // Create the leftover task/<id> worktree (the fan-in-failed shape).
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${id}`, wtPath]);
+
+  // AC1 positive: allChecked + leftover worktree ⇒ NOT not-yet-flipped ⇒ stays dispatchable.
+  assert.equal(notYetFlipped({ id, status: "ready", body }, root), false,
+    "all-checked + leftover worktree is NOT not-yet-flipped (AC1)");
+
+  // Removing the worktree restores the exclusion — the exemption is keyed on the open worktree.
+  execFileSync("git", ["-C", root, "worktree", "remove", "--force", wtPath]);
+  assert.equal(notYetFlipped({ id, status: "ready", body }, root), true,
+    "removing the leftover worktree restores the not-yet-flipped exclusion (AC2)");
+});
+
+test("LEFTOVER-WORKTREE — analyzeTasks keeps an allChecked + leftover-worktree task in ready, not excluded (AC1/AC3)", (t) => {
+  const root = makeRealGitRepo("nyf-leftover-pool");
+  const wtPath = path.join(root, "..", `${path.basename(root)}-leftover`);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  gitCommit(root, "seed");
+
+  const id = "gap-nyf-leftover";
+  writeTask(root, id, {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 4, touches: ["- code/never.ts"] }),
+  });
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${id}`, wtPath]);
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  assert.equal(r.ready.includes(id), true, "allChecked + leftover worktree task stays in the ready pool (AC1/AC3)");
+  assert.equal(r.excluded.some((e) => e.id === id && e.reasons.includes("not-yet-flipped")), false,
+    "no not-yet-flipped exclusion when a leftover worktree is present (AC1/AC3)");
+});
+
+test("LEFTOVER-WORKTREE — a single allChecked dead task no longer zeroes the pool (dispatchable_disjoint ≥ 1, AC4)", (t) => {
+  const root = makeRealGitRepo("nyf-pool-effect");
+  const wtPath = path.join(root, "..", `${path.basename(root)}-leftover`);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  gitCommit(root, "seed");
+
+  const id = "gap-nyf-pool";
+  writeTask(root, id, {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 4, touches: ["- code/never.ts"] }),
+  });
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${id}`, wtPath]);
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  assert.equal(r.pool, 1, "the single allChecked dead task is counted in the pool, not dropped (AC4)");
+  assert.equal(r.dispatchable_disjoint, 1, "dispatchable_disjoint ≥ 1 — the dead task is itself dispatchable, no longer zeroed (AC4)");
+  assert.equal(r.pool_big_all_colliding, false, "pool_big_all_colliding stays false (AC4)");
 });
 
 // ── no-AC-section fallback (gap-git-history-landed-master-stale-under-two-line-model AC4) ──────────
@@ -3522,4 +3614,169 @@ test("AC2: applyRevaluations writes ready→todo + a grep-able ## Revaluation bo
   assert.equal(miss.ok, false, "missing ⇒ fail closed");
   fs.writeFileSync(path.join(root, "tasks", "gap-no-fm.md"), "no frontmatter here");
   assert.equal(retreatReadyToTodo(root, "gap-no-fm", ["x"]).ok, false, "no-frontmatter ⇒ fail closed");
+});
+
+// ── MERGE-WORKTREE LIVENESS + SURFACE NARROWING (gap-merge-worktree-surface-lacks-liveness-overbroad) ──
+// AC2/AC3/AC4: a mid-merge worktree must present a merge conflict surface ONLY while it shows
+// direct-quantity liveness (a live process under it, or a commit within INFLIGHT_WORKTREE_STALE_MS)
+// AND that surface must be ONLY the unmerged (`UU`) conflict paths — not the former full
+// `git diff --name-only HEAD` delta that also listed every cleanly-merged change (a dead 3-file
+// conflict read as a 121-file surface and locked out the whole dispatch pool, dispatchable_disjoint
+// 0). The pure core (resolveMergeWorktreeSurfaces) is tested with INJECTED isMerge/conflictFiles/
+// liveness (hermetic, no /proc/git); the production wiring (computeMergeWorktreeSurfaces) and the
+// surface enumerator (unmergedConflictPaths) are tested against a REAL conflicted-merge git worktree.
+
+function makeRealGitRepo(tag) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `rpc-git-${tag}-`));
+  execFileSync("git", ["init", "-q", "-b", "master"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
+  return dir;
+}
+
+// Commit everything, optionally pinning the author+committer dates (GIT_COMMITTER_DATE is what
+// `git log --format=%ct` reads, so pinning it makes a worktree's last-commit-time deterministic).
+function gitCommit(dir, message, date) {
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  execFileSync("git", ["commit", "-q", "-m", message], {
+    cwd: dir,
+    env: date ? { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : process.env,
+  });
+}
+
+// A real mid-merge worktree: `conflict-a/b/c.md` conflict on BOTH branches (3 unmerged paths),
+// `clean.md` changes only on master (merges cleanly, staged — the file the OLD full-delta surface
+// listed but the unmerged-only surface must NOT). Returns { dir (main repo), wtPath (mid-merge) }.
+function makeConflictedMergeWorktree(tag, date) {
+  const dir = makeRealGitRepo(tag);
+  fs.writeFileSync(path.join(dir, "conflict-a.md"), "base-a\n");
+  fs.writeFileSync(path.join(dir, "conflict-b.md"), "base-b\n");
+  fs.writeFileSync(path.join(dir, "conflict-c.md"), "base-c\n");
+  fs.writeFileSync(path.join(dir, "clean.md"), "base-clean\n");
+  gitCommit(dir, "base", date);
+  // ours branch: change the three conflict files, leave clean.md untouched.
+  execFileSync("git", ["checkout", "-q", "-b", "ours"], { cwd: dir });
+  fs.writeFileSync(path.join(dir, "conflict-a.md"), "ours-a\n");
+  fs.writeFileSync(path.join(dir, "conflict-b.md"), "ours-b\n");
+  fs.writeFileSync(path.join(dir, "conflict-c.md"), "ours-c\n");
+  gitCommit(dir, "ours", date);
+  // master (theirs): change the three conflict files AND clean.md.
+  execFileSync("git", ["checkout", "-q", "master"], { cwd: dir });
+  fs.writeFileSync(path.join(dir, "conflict-a.md"), "theirs-a\n");
+  fs.writeFileSync(path.join(dir, "conflict-b.md"), "theirs-b\n");
+  fs.writeFileSync(path.join(dir, "conflict-c.md"), "theirs-c\n");
+  fs.writeFileSync(path.join(dir, "clean.md"), "theirs-clean\n");
+  gitCommit(dir, "theirs", date);
+  // Worktree on ours, then merge master → 3 conflicts (a/b/c) + 1 clean merge (clean.md).
+  const wtPath = path.join(dir, "..", `${path.basename(dir)}-wt`);
+  execFileSync("git", ["worktree", "add", "-q", wtPath, "ours"], { cwd: dir });
+  try {
+    execFileSync("git", ["merge", "master"], { cwd: wtPath, stdio: ["ignore", "pipe", "pipe"] });
+  } catch (_) {
+    // A conflicted merge exits non-zero — expected; the worktree is left mid-conflict.
+  }
+  return { dir, wtPath };
+}
+
+test("resolveMergeWorktreeSurfaces: a DEAD mid-merge worktree (zero processes + stale commit) contributes no surface (AC2)", (t) => {
+  const dir = makeWorkspace("merge-dead-pure");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const nowMs = 1_000_000_000_000; // arbitrary fixed "now"
+  const wt = { path: path.join(dir, "..", "quay-worktrees", "gap-dead"), branch: "refs/heads/task/gap-dead" };
+  const out = resolveMergeWorktreeSurfaces([wt], {
+    root: dir,
+    isMerge: () => true,
+    conflictFiles: () => ["code/shared.md"],
+    nowMs,
+    liveness: () => ({ hasLiveProcess: false, lastCommitMs: nowMs - 2 * INFLIGHT_WORKTREE_STALE_MS }),
+  });
+  assert.equal(out.length, 0, "zero live processes + commit older than N ⇒ DEAD mid-merge ⇒ no surface");
+});
+
+test("resolveMergeWorktreeSurfaces: a LIVE mid-merge worktree (live process) keeps its surface regardless of commit age (AC2)", (t) => {
+  const dir = makeWorkspace("merge-live-pure");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const nowMs = 1_000_000_000_000;
+  const wt = { path: path.join(dir, "..", "quay-worktrees", "gap-live"), branch: "refs/heads/task/gap-live" };
+  const out = resolveMergeWorktreeSurfaces([wt], {
+    root: dir,
+    isMerge: () => true,
+    conflictFiles: () => ["code/shared.md"],
+    nowMs,
+    liveness: () => ({ hasLiveProcess: true, lastCommitMs: nowMs - 10 * INFLIGHT_WORKTREE_STALE_MS }),
+  });
+  assert.equal(out.length, 1, "a live process ⇒ surface kept even with a very old commit");
+  assert.deepEqual(out[0].files, ["code/shared.md"], "the injected conflict surface is carried through");
+});
+
+test("resolveMergeWorktreeSurfaces: a non-merge worktree never contributes a surface (negative control)", (t) => {
+  const dir = makeWorkspace("merge-nonmerge");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const wt = { path: path.join(dir, "..", "quay-worktrees", "gap-clean"), branch: "refs/heads/task/gap-clean" };
+  const out = resolveMergeWorktreeSurfaces([wt], { root: dir, isMerge: () => false, conflictFiles: () => ["code/shared.md"] });
+  assert.equal(out.length, 0, "a worktree with no merge in flight presents no merge surface");
+});
+
+test("unmergedConflictPaths: a conflicted merge returns ONLY the unmerged conflict paths, not the cleanly-merged delta (AC3)", (t) => {
+  const { dir, wtPath } = makeConflictedMergeWorktree("narrow", new Date().toISOString());
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const files = unmergedConflictPaths(wtPath).sort();
+  assert.deepEqual(files, ["conflict-a.md", "conflict-b.md", "conflict-c.md"], "surface = the 3 unmerged paths, clean.md excluded");
+});
+
+test("computeMergeWorktreeSurfaces: a DEAD mid-merge worktree (stale commit + zero processes) is excluded from the surface (AC2 wiring)", (t) => {
+  const { dir } = makeConflictedMergeWorktree("dead-wiring", "2020-01-01T00:00:00Z");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = computeMergeWorktreeSurfaces(dir);
+  assert.equal(out.length, 0, "a dead mid-merge worktree must not present a merge surface");
+});
+
+test("computeMergeWorktreeSurfaces: a LIVE mid-merge worktree surface = ONLY unmerged files (AC3 wiring)", (t) => {
+  const { dir } = makeConflictedMergeWorktree("live-wiring", new Date().toISOString());
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = computeMergeWorktreeSurfaces(dir);
+  assert.equal(out.length, 1, "one live mid-merge worktree surface");
+  assert.deepEqual(out[0].files.sort(), ["conflict-a.md", "conflict-b.md", "conflict-c.md"], "surface = unmerged conflict paths only (clean.md excluded)");
+});
+
+// ── STALE MAIN-CHECKOUT STATUS (tasks/gap-dispatch-reads-stale-main-checkout-task-status, AC1/AC3) ──
+// A task landed on develop as `status: done` but the manager working branch's disk still says
+// `status: ready` (the main checkout 20-commits-behind shape). Dispatch's status read must come from
+// the develop REF, not the stale disk — otherwise the done task is re-dispatched until the retry cap.
+// The read source is asserted directly: readTaskStatusAtRef/readTaskFileAtRef read develop (done),
+// while the working tree (fs.readFileSync) reads the stale ready.
+
+test("dispatch reads task status from the develop ref, not the stale working tree (AC1/AC3)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-stale-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "develop", "-q", ".");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  // develop: the task is done (landed + flip-done).
+  writeTask(root, "gap-stale-status", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "gap-stale-status: flip done");
+  // Stale manager branch: rewrite the same task back to `ready` and STAY on it (disk=ready, develop=done).
+  git("checkout", "-q", "-b", "manager-stale");
+  writeTask(root, "gap-stale-status", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "gap-stale-status: stale reset to ready");
+
+  // AC3 read-source assertion: the develop ref carries `done`; the stale working tree carries `ready`.
+  assert.equal(readTaskStatusAtRef(root, "develop", "gap-stale-status"), "done", "readTaskStatusAtRef reads develop → done");
+  assert.match(readTaskFileAtRef(root, "develop", "gap-stale-status"), /^status:\s*done/m, "readTaskFileAtRef reads develop → done");
+  assert.match(fs.readFileSync(path.join(root, "tasks", "gap-stale-status.md"), "utf8"), /^status:\s*ready/m, "stale working tree carries ready");
+
+  const tasksDir = path.join(root, "tasks");
+  // AC1: dispatch read (taskReadRef=develop) judges the task done → NOT in the ready pool.
+  const rDev = analyzeTasks({ tasksDir, root, taskReadRef: "develop" });
+  assert.equal(rDev.ready.includes("gap-stale-status"), false, "develop-read judges the task done → not dispatchable");
+  assert.equal(rDev.pool, 0, "no ready task when the develop ref is the source of truth");
+
+  // Negative control: WITHOUT the develop read (the old disk read), the stale `ready` WOULD be seen.
+  const rDisk = analyzeTasks({ tasksDir, root });
+  assert.equal(rDisk.ready.includes("gap-stale-status"), true, "the stale working tree alone would still see it ready (the defect)");
 });
