@@ -86,6 +86,7 @@ import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
 import {
   analyzeTasks,
+  readTaskFilesAtRefBatch,
   POOL_FLOOR_MULT_DEFAULT,
   readGitRevCount,
   // SUPERSEDED GUARD (gap-ac46-superseded-keyword-vs-marker): the pool/step-4 superseded filter must
@@ -501,14 +502,22 @@ function depsReadyFor(task, metaById) {
 }
 
 /** Per-task dispatch metadata (id → { status, role }), for the deps-ready filter and the compound
- *  aggregation exemption. ONE pass over the store (no parallel scan). */
-function buildTaskMetaById(tasksDir) {
+ *  aggregation exemption. ONE pass over the store (no parallel scan). When `taskReadRef` names a
+ *  git ref, the task files are read from THAT ref (the canonical develop store — tasks/gap-dispatch-
+ *  reads-stale-main-checkout-task-status) in ONE batched `git cat-file --batch` process, with a
+ *  working-tree fallback for tasks not yet on the ref (never a positive from an unavailable source). */
+function buildTaskMetaById(tasksDir, root, taskReadRef) {
   const metaById = new Map();
   if (!fs.existsSync(tasksDir)) return metaById;
-  for (const f of fs.readdirSync(tasksDir)) {
-    if (!f.endsWith(".md")) continue;
+  const fileNames = fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
+  const refTasks = taskReadRef
+    ? readTaskFilesAtRefBatch(root, taskReadRef, fileNames.map((f) => f.replace(/\.md$/, "")))
+    : null;
+  for (const f of fileNames) {
     const id = f.replace(/\.md$/, "");
-    const raw = fs.readFileSync(path.join(tasksDir, f), "utf8");
+    const raw = refTasks
+      ? (refTasks.get(id) ?? fs.readFileSync(path.join(tasksDir, f), "utf8"))
+      : fs.readFileSync(path.join(tasksDir, f), "utf8");
     const task = parseTask(raw);
     metaById.set(id, {
       status: readFrontField(task.frontmatterRaw, "status") || "",
@@ -884,7 +893,7 @@ export function checkTouchesPairInFlight(candidateParsed, inFlightParsed, expand
  *      exposes-sort-key) is the parallel array of {id, deliveryCritical, suiteBlocking, rank} that
  *      exposes each recommended id's sort axes for AC36 判据②'s mechanical check.
  */
-export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, runningSubagentCount = null, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null, inFlightWorktrees = undefined, continueExemptIds = undefined }) {
+export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, runningSubagentCount = null, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null, inFlightWorktrees = undefined, continueExemptIds = undefined, taskReadRef = "develop" }) {
   // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
   // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
   // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
@@ -915,12 +924,12 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   const ffCounts = computeFfFailureCounts(ffRetryRecords, liveTaskIds);
   const unresolvedEscalationIds = computeUnresolvedEscalationTaskIds(ffEscalationRecords);
   const ffStarvation = computeFfStarvationRelief({ ffCounts, unresolvedEscalationIds });
-  let pool = analyzeTasks({ tasksDir, root, cap: baseCap, floorMult, inFlight, closedButLive });
+  let pool = analyzeTasks({ tasksDir, root, cap: baseCap, floorMult, inFlight, closedButLive, taskReadRef });
   const redWindowActive = pool.suite_blocking ? pool.suite_blocking.window_active : false;
   const effectiveCap = computeArbitratedCap({ baseCap, redWindowActive, redBacklogCap, ffStarvationCap: ffStarvation.narrowedCap });
   const capNarrowed = effectiveCap !== baseCap;
   if (capNarrowed) {
-    pool = analyzeTasks({ tasksDir, root, cap: effectiveCap, floorMult, inFlight, closedButLive });
+    pool = analyzeTasks({ tasksDir, root, cap: effectiveCap, floorMult, inFlight, closedButLive, taskReadRef });
   }
   // AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 人 2026-08-14
   // 12:5xZ): Consumer A (touches-disjointness / dispatchable_disjoint) counts the WIDE un-landed set
@@ -993,7 +1002,7 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // decision, not a per-candidate read. Fail-soft: no merge in flight ⇒ [] (step-4 check 3 is
     // byte-unchanged — the peer arm alone applies, AC4 negative control).
     const mergeSurfaces = computeMergeWorktreeSurfaces(root);
-    const metaById = buildTaskMetaById(tasksDir);
+    const metaById = buildTaskMetaById(tasksDir, root, taskReadRef);
     // Concurrency eligibility must also respect closed-bracket-but-live agents' touches — a closed
     // bracket does NOT free the touches a still-live agent is working on.
     //

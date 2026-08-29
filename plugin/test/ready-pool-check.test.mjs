@@ -81,6 +81,8 @@ import {
   computeMergeWorktreeSurfaces,
   resolveMergeWorktreeSurfaces,
   unmergedConflictPaths,
+  readTaskFileAtRef,
+  readTaskStatusAtRef,
 } from "../scripts/ready-pool-check.ts";
 import { INFLIGHT_WORKTREE_STALE_MS } from "../scripts/concurrent-batch-scheduler.ts";
 import { propagateDocBranchToDevelop } from "../scripts/driver-filters.ts";
@@ -3735,4 +3737,46 @@ test("computeMergeWorktreeSurfaces: a LIVE mid-merge worktree surface = ONLY unm
   const out = computeMergeWorktreeSurfaces(dir);
   assert.equal(out.length, 1, "one live mid-merge worktree surface");
   assert.deepEqual(out[0].files.sort(), ["conflict-a.md", "conflict-b.md", "conflict-c.md"], "surface = unmerged conflict paths only (clean.md excluded)");
+});
+
+// ── STALE MAIN-CHECKOUT STATUS (tasks/gap-dispatch-reads-stale-main-checkout-task-status, AC1/AC3) ──
+// A task landed on develop as `status: done` but the manager working branch's disk still says
+// `status: ready` (the main checkout 20-commits-behind shape). Dispatch's status read must come from
+// the develop REF, not the stale disk — otherwise the done task is re-dispatched until the retry cap.
+// The read source is asserted directly: readTaskStatusAtRef/readTaskFileAtRef read develop (done),
+// while the working tree (fs.readFileSync) reads the stale ready.
+
+test("dispatch reads task status from the develop ref, not the stale working tree (AC1/AC3)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-stale-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "develop", "-q", ".");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  // develop: the task is done (landed + flip-done).
+  writeTask(root, "gap-stale-status", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "gap-stale-status: flip done");
+  // Stale manager branch: rewrite the same task back to `ready` and STAY on it (disk=ready, develop=done).
+  git("checkout", "-q", "-b", "manager-stale");
+  writeTask(root, "gap-stale-status", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "gap-stale-status: stale reset to ready");
+
+  // AC3 read-source assertion: the develop ref carries `done`; the stale working tree carries `ready`.
+  assert.equal(readTaskStatusAtRef(root, "develop", "gap-stale-status"), "done", "readTaskStatusAtRef reads develop → done");
+  assert.match(readTaskFileAtRef(root, "develop", "gap-stale-status"), /^status:\s*done/m, "readTaskFileAtRef reads develop → done");
+  assert.match(fs.readFileSync(path.join(root, "tasks", "gap-stale-status.md"), "utf8"), /^status:\s*ready/m, "stale working tree carries ready");
+
+  const tasksDir = path.join(root, "tasks");
+  // AC1: dispatch read (taskReadRef=develop) judges the task done → NOT in the ready pool.
+  const rDev = analyzeTasks({ tasksDir, root, taskReadRef: "develop" });
+  assert.equal(rDev.ready.includes("gap-stale-status"), false, "develop-read judges the task done → not dispatchable");
+  assert.equal(rDev.pool, 0, "no ready task when the develop ref is the source of truth");
+
+  // Negative control: WITHOUT the develop read (the old disk read), the stale `ready` WOULD be seen.
+  const rDisk = analyzeTasks({ tasksDir, root });
+  assert.equal(rDisk.ready.includes("gap-stale-status"), true, "the stale working tree alone would still see it ready (the defect)");
 });
