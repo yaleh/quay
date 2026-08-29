@@ -190,7 +190,7 @@ import {
 // orchestration-2026-08-27）：suite 不再 detach（setsid+&+disown 孤儿）——改由 driver 直接 spawn 并 wait
 // （进程级父子，ppid 指向 driver，AC3）。复用 suite-driver.ts 的 spawnSuiteAndWait（同一单飞槽语义 +
 // 静默看门狗，⛔ 不新写一份 suite 生命周期）。suiteLockBase 读 TS 侧单一真相源槽路径。
-import { spawnSuiteAndWait, writeRedSuiteRecord, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
+import { spawnSuiteAndWait, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
 import { suiteLockBase } from "./suite-lock-slots.ts";
 // D7：机械 fan-in 的 bucket suite 绿后，把本轮 suite 状态镜像到权威载体 full-suite-state.json
 // （复用 mirror-full-suite-state.ts 的 build/write/skip 单一实现，⛔ 不另写一份 state shape）。
@@ -1711,7 +1711,10 @@ export interface MechanicalFanInOptions {
   root: string;
   runId: string;
   mergeTarget?: string;
-  /** suite 命令（测试缝）；缺省 = bash <worktree>/scripts/test.sh --buckets <task>。 */
+  /** suite 命令（测试缝）；缺省 = node full-suite-runner.ts --buckets <task>（--root <worktree>
+   *  --state-dir <root>/.quay --runner inner --log-file <suiteLogFile>）。gap-fan-in-red-bucket-run-
+   *  not-recorded：机械路径不再跑平行 `bash scripts/test.sh --buckets`（绕开 verification-round 唯一
+   *  writer），改走正确的 runner——green+red 桶轮次都入 verification-round.jsonl（state=red 记录可见）。 */
   suiteCommand?: string[];
   /** suite 单飞槽 base（测试缝）；缺省 = suiteLockBase(root)。 */
   slotBase?: string;
@@ -2137,6 +2140,31 @@ async function flipTaskDone(
   return { ok: false, reason: `expected exactly 1 'status: ready' line, got ${readyCount}` };
 }
 
+/** gap-fan-in-red-bucket-run-not-recorded — 机械 fan-in 的 suite 步缺省命令：经 full-suite-runner.ts
+ *  --buckets 跑（正确的 runner，green+red 桶轮次都在 suite 退出时入 verification-round.jsonl），⛔ 不是
+ *  平行 `bash scripts/test.sh --buckets`（绕开唯一 writer，红桶轮次零记录——硬规则 3b「没跑过」与
+ *  「跑了但红」同形）。--root <worktree> 是受测检出（test.sh 在 worktree 内跑）；--state-dir <root>/.quay
+ *  把 state/verification-round/measure-history/suite-load 落进共享主检出（/tests 的读取处）；--runner inner
+ *  显式标注层身份；--log-file <suiteLogFile> 让 runner 把 suite 流 tee 进 fan-in 的 /tmp 日志
+ *  （spawnSuiteAndWait 的静默看门狗盯其 mtime——runner 不写 stdout，须经此缝让看门狗看到进度）。
+ *  抽成纯函数便于 worker-driver.test.mjs 断言缺省命令是 runner 而非 test.sh harness（AC2）。 */
+export function defaultMechanicalSuiteCommand(opts: {
+  task: string;
+  worktree: string;
+  root: string;
+  suiteLogFile: string;
+}): string[] {
+  return [
+    "node", "--no-warnings", "--experimental-strip-types",
+    path.join(opts.worktree, "plugin", "scripts", "full-suite-runner.ts"),
+    "--buckets", opts.task,
+    "--root", opts.worktree,
+    "--state-dir", path.join(opts.root, ".quay"),
+    "--runner", "inner",
+    "--log-file", opts.suiteLogFile,
+  ];
+}
+
 /**
  * driver 机械跑通一次无失败 fan-in 的 happy path（锁/merge/delta/typecheck/archguard结构闸/scoped门/suite/ff）。
  * ⛔ 语义失败点（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / 依赖环 / suite 红 / ff 失败）一律返回
@@ -2277,7 +2305,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
     if (needSuite) {
-      const suiteCmd = opts.suiteCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--buckets", task];
+      const suiteCmd = opts.suiteCommand ?? defaultMechanicalSuiteCommand({ task, worktree, root, suiteLogFile });
       trace("suite", "begin");
       const sr: SuiteRunResult = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: suiteCmd, logFile: suiteLogFile, silenceMs: opts.silenceMs });
       trace("suite", "end", { ok: sr.outcome === "done", outcome: sr.outcome });
@@ -2285,10 +2313,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       suiteFinishedEpoch = Math.floor(new Date(sr.finishedAt).getTime() / 1000);
       suitePid = sr.pid;
       if (sr.outcome !== "done") {
-        // gap-verification-round-static-fail-no-record AC1/AC2 — a red suite round must land a record.
-        if (sr.outcome === "red") {
-          await writeRedSuiteRecord({ task, runId, worktree, suiteHead, suiteLogFile, sr });
-        }
+        // 红 suite 记录由 full-suite-runner.ts --buckets 在 suite 退出时写入（gap-fan-in-red-bucket-run-
+        // not-recorded：runner 是 verification-round.jsonl 的唯一 writer，green+red 都入账，静态闸红亦由
+        // runner 的 staticCheckDetected → gate=static-check 记录）。⛔ 不再由 writeRedSuiteRecord 平行补写
+        // —— runner 已记 + 再补写 = 同一红 suite 两条记录、round 号虚增（与「两套平行机制收敛为一」相悖）。
         return failClean("suite", `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
       }
       writeSuiteCapture(suiteCapture, {

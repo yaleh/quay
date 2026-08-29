@@ -32,7 +32,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection } from "./task-schema.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
 import { stripTouchAnnotation, parseTouchEntries, parseTouchEntriesWithTags } from "./touches-parser.ts";
 export { stripTouchAnnotation, parseTouchEntries };
@@ -1088,6 +1088,7 @@ export function formatStrandedText(stranded, opts = {}) {
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 export function main(argv) {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node task-status-drift-check.ts [--json] [--stranded] [--closed-direction] [--check <id>]");
   const json = args.includes("--json");
   const strandedOnly = args.includes("--stranded");
   const closedOnly = args.includes("--closed-direction");

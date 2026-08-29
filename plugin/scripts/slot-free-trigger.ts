@@ -55,9 +55,6 @@
 //     realInFlight, subagentsInFlight, closedButLive, slotsTotal }
 //   · ready-pool-check.ts --cap <cap> --json --root <root>            → { dispatchable_disjoint,
 //     pool, floor }  (run ONLY when slotsRemaining > 0 — the common full-slot poll stays cheap)
-//   · <root>/.halt  → checkHaltSentinel (suppress the event while halted: a SLOT-FREE the outer
-//     cannot act on is noise; on un-halt the next poll re-detects free and fires — same coupling
-//     as slot-refill's `.halt` ⇒ should_refill=false).
 //
 // Memo file (this script's last observation): <root>/.quay/slot-free-last.json — {free: bool} —
 // keeps the transition detector across restarts so a cold-start-into-free fires immediately
@@ -65,7 +62,7 @@
 //
 // Event log (append-only, measure hook): <root>/.quay/slot-free-events.jsonl
 //   {"event":"SLOT-FREE","at":"<ISO>","slots_free":N,"dispatchable_disjoint":M,"effective_cap":C,
-//    "in_flight_count":K,"should_refill":true,"halted":false}
+//    "in_flight_count":K,"should_refill":true}
 //   —— Contract measure `slot_free_event_fired` (tail -1 的 stdout 含 SLOT-FREE) + invoke
 //   `tail -3 .quay/slot-free-events.jsonl`.
 //
@@ -84,7 +81,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { FIXED_DISPATCH_CAP, checkHaltSentinel } from "./slot-refill.ts";
+import { FIXED_DISPATCH_CAP } from "./slot-refill.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -144,12 +141,9 @@ export function parsePoolOutput(text: string): PoolView {
 }
 
 /**
- * The SLOT-FREE condition, pure: `in_flight < cap ∧ dispatchable > 0` (the task's AC2 phrasing),
- * plus the halt coupling (a SLOT-FREE the outer cannot act on is noise — slot-refill's `.halt`
- * ⇒ should_refill=false precedent).
+ * The SLOT-FREE condition, pure: `in_flight < cap ∧ dispatchable > 0` (the task's AC2 phrasing).
  */
-export function evaluateSlotFree(slotsRemaining: number, dispatchableDisjoint: number, halted: boolean): boolean {
-  if (halted) return false;
+export function evaluateSlotFree(slotsRemaining: number, dispatchableDisjoint: number): boolean {
   return slotsRemaining > 0 && dispatchableDisjoint >= 1;
 }
 
@@ -162,7 +156,6 @@ export function detectSlotFreeEvent(prevFree: boolean | null, nextFree: boolean)
 
 /** The per-poll state this trigger observes. */
 export interface SlotFreeInput {
-  halted: boolean;
   slotsRemaining: number;
   dispatchable_disjoint: number;
   effectiveCap: number;
@@ -180,7 +173,6 @@ export interface SlotFreeEvent {
   effective_cap: number;
   in_flight_count: number; // realInFlight + subagentsInFlight — the reconcile-aware in-flight
   should_refill: boolean; // == free — consumers reading slot-refill's vocabulary
-  halted: boolean;
 }
 
 /**
@@ -218,9 +210,7 @@ export function readSlotState(root: string, cap: number): SlotFreeInput | null {
       }
     }
   }
-  const halt = checkHaltSentinel(root);
   return {
-    halted: halt.halted,
     slotsRemaining: slots.slotsRemaining,
     dispatchable_disjoint: dispatchable,
     effectiveCap: cap,
@@ -245,7 +235,6 @@ export function recordSlotFreeEvent(root: string, input: SlotFreeInput): SlotFre
     effective_cap: input.effectiveCap,
     in_flight_count: input.realInFlight + input.subagentsInFlight,
     should_refill: true,
-    halted: input.halted,
   };
   try {
     fs.mkdirSync(path.dirname(eventsPath(root)), { recursive: true });
@@ -273,12 +262,7 @@ export function runOnce(root: string, opts?: { state?: SlotFreeInput; cap?: numb
   const prev: boolean | null = memo?.free ?? null;
   const state = opts?.state ?? readSlotState(root, opts?.cap ?? FIXED_DISPATCH_CAP);
   if (!state) return { free: false, events: [], state: null }; // read failure — skip this poll
-  // Halt coupling is GROUND TRUTH, never bypassed by an injected state: `.halt` present ⇒ no event
-  // (a free slot the outer cannot act on is noise). readSlotState already folds it into state.halted
-  // for the real path; an injected state (test seam) still has the actual sentinel OR'd in so the
-  // suppression cannot be accidentally disabled in a fixture.
-  const halted = state.halted || checkHaltSentinel(root).halted;
-  const free = evaluateSlotFree(state.slotsRemaining, state.dispatchable_disjoint, halted);
+  const free = evaluateSlotFree(state.slotsRemaining, state.dispatchable_disjoint);
 
   const events: SlotFreeEvent[] = [];
   if (detectSlotFreeEvent(prev, free)) {
@@ -299,7 +283,7 @@ export function runOnce(root: string, opts?: { state?: SlotFreeInput; cap?: numb
 function formatEventLine(ev: SlotFreeEvent): string {
   return (
     `${ev.event} slots_free=${ev.slots_free} dispatchable_disjoint=${ev.dispatchable_disjoint} ` +
-    `effective_cap=${ev.effective_cap} in_flight_count=${ev.in_flight_count} halted=${ev.halted} at=${ev.at}`
+    `effective_cap=${ev.effective_cap} in_flight_count=${ev.in_flight_count} at=${ev.at}`
   );
 }
 
@@ -338,7 +322,7 @@ export async function run(argv: string[]): Promise<number> {
     console.log(formatEventLine(ev));
   }
   if (state) {
-    console.log(`slots_free=${state.slotsRemaining} dispatchable_disjoint=${state.dispatchable_disjoint} effective_cap=${state.effectiveCap} halted=${state.halted}`);
+    console.log(`slots_free=${state.slotsRemaining} dispatchable_disjoint=${state.dispatchable_disjoint} effective_cap=${state.effectiveCap}`);
   }
   return 0;
 }

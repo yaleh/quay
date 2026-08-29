@@ -23,6 +23,7 @@
 
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 
 import { verified, notEvaluated, failed, driverResultToExit } from "./checker-io.ts";
 import type { DriverResult } from "./checker-io.ts";
@@ -91,6 +92,7 @@ function usage() {
 }
 
 function main(argv) {
+  if (argv.includes("--help") || argv.includes("-h")) helpExit("usage: load-sensitive-release-check.ts <file...> | stdin (one path per line)");
   let files = argv.filter((a) => !a.startsWith("-"));
   if (files.length === 0 && !process.stdin.isTTY) {
     const input = fs.readFileSync(0, "utf8");

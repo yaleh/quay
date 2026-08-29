@@ -52,18 +52,6 @@
 // so slot-refill and its derived floor (5 × 4 = 20) are stable regardless of load/suite state. An
 // explicit --cap still overrides (for manual runs/tests), but the production default is fixed 5.
 //
-// AC8-PREEMPT (tasks/gap-supervisor-preemption — .halt mechanical mount point): `.halt` used to be
-// checked ONLY at the tick boundary (fast-mode-loop-tick.md step 0), and the continuous flow
-// bypassed step 0 (incident 7: after `.halt`, inner still dispatched 5 subagents). THIS helper is a
-// CODE mount point for the preemptive `.halt`: when <root>/.halt is present, should_refill is forced
-// false with no_refill_reason naming the halt — so EVERY dispatch-recommendation path that consumes
-// this helper (the event-driven refill AND the tick-heartbeat refill) is mechanically blocked
-// mid-flow, not just at a tick boundary. The sentinel read mirrors checkHalt() (select-preflight.ts):
-// ENOENT ⇒ not halted; any other read failure ⇒ FAIL-CLOSED halted (never fail open). The process-
-// level stop of already-in-flight agents is supervisor-preempt.sh preempt/preempt-all — this helper
-// stops NEW dispatch, that primitive stops RUNNING agents; together they are the preemption family
-// (SPEC-isolation-and-resource-governance §2: 限额/抢占都是「不可被绕过」族).
-//
 // Run:
 //   node --experimental-strip-types plugin/scripts/slot-refill.ts [--root <repo>]
 //       [--cap <n>] [--in-flight-count <n>] [--floor-mult <n>] [--integration-backlog <n>]
@@ -447,26 +435,6 @@ export function classifyNonLandingCause({ hasRetryRecord = false, suiteRed = fal
   if (suiteRed) return "suite-red";
   if (workerFinalState === "timed-out" || workerFinalState === "killed" || workerFinalState === "failed") return "worker-round-end";
   return "unknown";
-}
-
-/**
- * Read the `.halt` sentinel at workspace root — the preemptive-halt mount point.
- * Mirrors checkHalt() in select-preflight.ts exactly (gap-halt-sentinel-path-mismatch:
- * a fail-open shape on an unreadable sentinel caused a real safety miss):
- *   ENOENT (no file)              → { halted: false }         — the common, expected state
- *   file exists                   → { halted: true, reason }  — empty file still halts
- *   any OTHER read failure        → { halted: true, reason }  — FAIL-CLOSED, never fail open
- */
-export function checkHaltSentinel(root) {
-  const haltPath = path.join(root, ".halt");
-  try {
-    const content = fs.readFileSync(haltPath, "utf8").trim();
-    return { halted: true, reason: content || ".halt sentinel present (empty)" };
-  } catch (e) {
-    if (e && e.code === "ENOENT") return { halted: false, reason: "" };
-    // Fail closed: any read failure other than a clean absence is a halted state.
-    return { halted: true, reason: `FAIL-CLOSED: could not read .halt at ${haltPath}: ${e?.message || String(e)}` };
-  }
 }
 
 function readFrontField(frontmatterRaw, key) {
@@ -894,10 +862,6 @@ export function checkTouchesPairInFlight(candidateParsed, inFlightParsed, expand
  *      exposes each recommended id's sort axes for AC36 判据②'s mechanical check.
  */
 export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, runningSubagentCount = null, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null, inFlightWorktrees = undefined, continueExemptIds = undefined, taskReadRef = "develop" }) {
-  // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
-  // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
-  // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
-  const halt = checkHaltSentinel(root);
   // B3 ①/④ ARBITRATION (gap-red-window-cap-trigger-backlog-not-suite-red): ① (in_flight<cap ⇒ dispatch)
   // conflicts with ④ (integration ahead + suite green ⇒ batch-merge) — ④ is a DOWNSTREAM constraint on
   // ①. The TRIGGER for the cap narrowing is now the CONSECUTIVE-RED WINDOW ALONE (red_window_active ⇒
@@ -950,24 +914,22 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
 
   // recommended — the production disjoint batch over the ready pool, filtered by the SAME step-4
   // dispatch checks (touches-resolve + deps-ready + disjoint-from-in-flight), capped at slots_free.
-  // While halted, no candidate is recommended at all — the human's stop supersedes the pool.
-  // (Pool stats are still reported for visibility; the dispatch recommendation is empty.)
   let recommended = [];
   // AC56 DE-ORDER ANNOTATION (gap-ac56-recommended-deordered): the explicit "order meaningless" mark
   // the output must carry when it recommends ≥2 ids (判据1 option 2). Assigned inside the candidate
-  // block; while halted nothing is recommended so the value records the null state. Read by
+  // block. Read by
   // ac56-recommended-deordered-check.ts from the OUTPUT ITSELF (判据3 — never a comment).
-  let recommendedOrder = "none (nothing recommended — halted)";
+  let recommendedOrder = "none";
   // RANKING EXPOSURE (gap-ac36-recommended-exposes-sort-key AC2): the `ranking` array carries each
   // recommended id's sort axes — `deliveryCritical` / `suiteBlocking` (the two axes candidates.sort
-  // ranks on) and its `rank` (0-based position WITHIN `recommended`). Empty while halted (nothing is
-  // recommended ⇒ nothing to rank). This is what makes AC36 判据② mechanical: an independent checker
+  // ranks on) and its `rank` (0-based position WITHIN `recommended`). This is what makes AC36 判据②
+  // mechanical: an independent checker
   // (ac36-sortkey-criterion-check.ts) can assert "DC task strictly moved forward / same-family
   // non-DC unchanged / blocking_suite above DC" from two runs' `ranking` arrays instead of a human
   // eyeballing two JSON dumps. The `recommended` STRING array is unchanged (backward compat).
   let ranking = [];
   // DEFER ACCOUNTING (gap-over90-clock-measures-queue-time-not-work-time): the deferred candidates
-  // (step-4-skips) accumulate at function scope — empty while halted (nothing is evaluated). Surfaced
+  // (step-4-skips) accumulate at function scope. Surfaced
   // in the result so the tick can close deferred candidates' open brackets (--close-task --outcome
   // deferred). slot-refill stays PURE; it only reports.
   let deferred = [];
@@ -983,7 +945,7 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // git-grep hasLandedImplementation MISSED (bodyLanded && !gitLanded). Each is a phantom-killer false
   // negative — an already-landed task whose implementation commits never carried its id, so absent the
   // body-side signal it WOULD have been recommended for dispatch. Declared at function scope so the
-  // result surfaces it even when halted (0 — nothing is evaluated while halted).
+  // result surfaces it (0 when nothing is evaluated).
   let phantomKillerFalseNegativeCaught = 0;
   // AC2/AC3 (gap-delivery-critical-label-at-promote-not-after-dispatch): the delivery-critical tasks
   // EXCLUDED from this round's recommendation because they are IN-FLIGHT (deferred with a
@@ -991,277 +953,275 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // self-excluded by its own in-flight touches). An in-flight DC task is legitimately absent from
   // `recommended`/`ranking` (the axis already acted at the PREVIOUS selection that dispatched it); a
   // label applied AFTER dispatch shows up HERE — in-flight, NOT ranked — which is the negative
-  // control "派发后补标签不被误记为 AC36 已触发". Empty while halted (nothing is evaluated).
+  // control "派发后补标签不被误记为 AC36 已触发".
   let deliveryCriticalInFlight = [];
-  if (!halt.halted) {
-    const sharedFiles = walkFiles(root);
-    const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
-    // MERGE-WORKTREE SURFACE (tasks/gap-dispatch-gate-blind-to-inflight-merge-worktree): the conflict
-    // surfaces of in-flight MERGE worktrees (the merge's uncommitted `git diff --name-only HEAD`).
-    // Computed ONCE per evaluation — a merge in flight is a structural condition of the whole dispatch
-    // decision, not a per-candidate read. Fail-soft: no merge in flight ⇒ [] (step-4 check 3 is
-    // byte-unchanged — the peer arm alone applies, AC4 negative control).
-    const mergeSurfaces = computeMergeWorktreeSurfaces(root);
-    const metaById = buildTaskMetaById(tasksDir, root, taskReadRef);
-    // Concurrency eligibility must also respect closed-bracket-but-live agents' touches — a closed
-    // bracket does NOT free the touches a still-live agent is working on.
-    //
-    // IN-FLIGHT WORKTREE DIRECT QUANTITY (tasks/gap-scheduler-inflight-detection-misses-fan-in-
-    // worktree): the snapshot in-flight set (inFlight + closedButLive) misses a fan-in workflow (its
-    // subagent is a WORKFLOW, not a standalone Agent) and a just-`git worktree add`-ed worktree
-    // (subagent not yet started). Both occupy files a new task would collide with, so their DECLARED
-    // `## Touches` must join the touches-disjointness set — else a hold task overlapping a fan-in
-    // worktree is recommended (recommended non-empty) with no_refill_reason=null and the AC53 gate
-    // falsely refuses the round. The direct quantity (`git worktree list`) is computed live unless the
-    // caller injected `inFlightWorktrees` (the test seam). Dedup by id so a worktree for an
-    // already-listed id adds nothing.
-    const worktreeInFlight = inFlightWorktrees !== undefined
-      ? inFlightWorktrees
-      : computeInFlightWorktreeTouches(root, tasksDir);
-    const existingInFlight = [...(inFlight || []), ...(closedButLive || [])];
-    const existingIds = new Set(existingInFlight.map((t) => t.id));
-    const inFlightParsed = [
-      ...existingInFlight.map((t) => ({ id: t.id, touches: parseTouches(t.body) })),
-      ...(Array.isArray(worktreeInFlight) ? worktreeInFlight : []).filter((w) => w && w.id && !existingIds.has(w.id)),
-    ];
+  const sharedFiles = walkFiles(root);
+  const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
+  // MERGE-WORKTREE SURFACE (tasks/gap-dispatch-gate-blind-to-inflight-merge-worktree): the conflict
+  // surfaces of in-flight MERGE worktrees (the merge's uncommitted `git diff --name-only HEAD`).
+  // Computed ONCE per evaluation — a merge in flight is a structural condition of the whole dispatch
+  // decision, not a per-candidate read. Fail-soft: no merge in flight ⇒ [] (step-4 check 3 is
+  // byte-unchanged — the peer arm alone applies, AC4 negative control).
+  const mergeSurfaces = computeMergeWorktreeSurfaces(root);
+  const metaById = buildTaskMetaById(tasksDir, root, taskReadRef);
+  // Concurrency eligibility must also respect closed-bracket-but-live agents' touches — a closed
+  // bracket does NOT free the touches a still-live agent is working on.
+  //
+  // IN-FLIGHT WORKTREE DIRECT QUANTITY (tasks/gap-scheduler-inflight-detection-misses-fan-in-
+  // worktree): the snapshot in-flight set (inFlight + closedButLive) misses a fan-in workflow (its
+  // subagent is a WORKFLOW, not a standalone Agent) and a just-`git worktree add`-ed worktree
+  // (subagent not yet started). Both occupy files a new task would collide with, so their DECLARED
+  // `## Touches` must join the touches-disjointness set — else a hold task overlapping a fan-in
+  // worktree is recommended (recommended non-empty) with no_refill_reason=null and the AC53 gate
+  // falsely refuses the round. The direct quantity (`git worktree list`) is computed live unless the
+  // caller injected `inFlightWorktrees` (the test seam). Dedup by id so a worktree for an
+  // already-listed id adds nothing.
+  const worktreeInFlight = inFlightWorktrees !== undefined
+    ? inFlightWorktrees
+    : computeInFlightWorktreeTouches(root, tasksDir);
+  const existingInFlight = [...(inFlight || []), ...(closedButLive || [])];
+  const existingIds = new Set(existingInFlight.map((t) => t.id));
+  const inFlightParsed = [
+    ...existingInFlight.map((t) => ({ id: t.id, touches: parseTouches(t.body) })),
+    ...(Array.isArray(worktreeInFlight) ? worktreeInFlight : []).filter((w) => w && w.id && !existingIds.has(w.id)),
+  ];
+  // EXITED-NOT-LANDED CONTINUE EXEMPTION (tasks/gap-slot-refill-continue-touches-overlap-redundant-
+  // exemption): the ids of exited-not-landed CONTINUE candidates (residual worktree + worker-outcome
+  // final_state=exited-not-landed) computed ONCE per evaluation — the exemption is a structural
+  // condition of the whole dispatch decision, not a per-candidate read. Injected via the test seam
+  // (`continueExemptIds`) unless live-computed. A continue candidate skips ONLY the touches-overlap
+  // defer below (merge-worktree + peer arms); every other step-4 gate still applies.
+  const continueExempt = continueExemptIds !== undefined
+    ? new Set(continueExemptIds)
+    : computeExitedNotLandedContinueIds(root);
+  // NOT-YET-FLIPPED SKIP (gap-slot-refill-repeats-done-eligible-recommendations): ready-pool-check's
+  // analyzeTasks already computes the not-yet-flipped exclusion into pool.excluded (reason
+  // "not-yet-flipped"). Wire that signal into the candidate path (AC2) — it is disjoint from
+  // pool.ready by construction, so this is the literal 4th step-4 check + defense-in-depth. The
+  // hasMergeRecord arm inside isNotYetFlippedSkip additionally catches tasks whose work landed on
+  // the two-line model's INTEGRATION line (fan-in merged) — invisible to the master-only git-history
+  // signal, yet already "已 fan-in 待翻 done".
+  const excludedNyfIds = new Set(
+    (pool.excluded || []).filter((e) => e.reasons.includes("not-yet-flipped")).map((e) => e.id),
+  );
+  // DEFER ACCOUNTING (gap-over90-clock-measures-queue-time-not-work-time): every step-4 skip is a
+  // DEFER — the candidate is NOT dispatched this round, so its telemetry bracket (if `--task-start`
+  // was called before the defer) must be closed via `closure-lag-check.sh --close-task --outcome
+  // deferred`, and re-`--task-start`ed when work actually begins. slot-refill stays PURE (never
+  // writes) — it surfaces `deferred` so the caller (the tick) can mechanically close those brackets
+  // instead of the queue segment silently accruing toward OVER90.
+  const candidates = [];
+  // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): ids of
+  // hasLandedImplementation=true candidates that PASS the recommendation exclusion (landed but NOT
+  // code-complete — stuck-work with real remaining implementation, gap-ready-pool-worklanded-traps-
+  // stuck-work). Their touches must NOT occupy the batch clique (see the assembleBatch call below).
+  const landedCandidateIds = new Set();
+  const defer = (id, reason) => deferred.push({ id, reason });
+  // AC2/AC3 (gap-delivery-critical-label-at-promote-not-after-dispatch): a delivery-critical task
+  // deferred by in-flight occupancy (touches-overlap-in-flight) is an IN-FLIGHT DC task — the label
+  // arrived after (or at) dispatch, so the task is legitimately absent from this round's ranking.
+  // It is surfaced in `delivery_critical_in_flight` (NOT in `recommended`/`ranking`), which is the
+  // negative control "派发后补标签不被误记为 AC36 已触发".
+  const dcLabels = (task) => Array.isArray(task.labels) && task.labels.includes("delivery-critical");
+  const deferInFlightDc = (task, id, reason) => {
+    defer(id, reason);
+    if (dcLabels(task)) deliveryCriticalInFlight.push(id);
+  };
+  for (const id of pool.ready) {
+    const file = path.join(tasksDir, `${id}.md`);
+    if (!fs.existsSync(file)) { defer(id, "task-file-missing"); continue; }
+    const text = fs.readFileSync(file, "utf8");
+    // step-4 check 1: touches-resolve (majority-missing ⇒ not dispatchable).
+    if (checkTaskTouchesResolve(text, root).majorityMissing) { defer(id, "touches-majority-missing"); continue; }
+    // step-4 check 2: deps-ready (parent done).
+    const task = parseTask(text);
+    task.parent = readFrontField(task.frontmatterRaw, "parent");
+    // COMPOUND NOT-LEAF (gap-compound-depsreadyfor-structural-deadlock AC2 + invariant
+    // compound_parent_not_dispatchable): a `role: compound` parent is an AGGREGATE — it is DONE
+    // when its children are done, so it is never leaf work and must NEVER be recommended for
+    // dispatch (派发只认叶子). Deferring it here with an explicit reason ALSO stops it reaching the
+    // self-touch check — its ## Touches delegate to children by convention, so the absence of a
+    // self-file is NOT a self-touch false negative (invariant no_self_touch_false_negative).
+    if (readFrontField(task.frontmatterRaw, "role") === "compound") { defer(id, "compound-not-dispatchable"); continue; }
+    if (!depsReadyFor(task, metaById)) { defer(id, "deps-not-ready"); continue; }
+    // step-4 check 3: concurrency eligibility — disjoint from every currently-running subagent AND
+    // from every in-flight MERGE worktree's conflict surface (gap-dispatch-gate-blind-to-inflight-
+    // merge-worktree: a merge worktree holding a conflict surface was structurally invisible — the
+    // vhs-merge accident — so a task the OUTER deferred as merge-colliding was dispatched anyway by
+    // the inner's refill). The merge-worktree arm is checked FIRST so a candidate that collides with
+    // a merge surface is deferred with the EXPLICIT merge-worktree reason (AC2: 不再只报 peer), and
+    // only merge-clear candidates fall through to the peer arm.
+    const parsed = parseTouches(text);
     // EXITED-NOT-LANDED CONTINUE EXEMPTION (tasks/gap-slot-refill-continue-touches-overlap-redundant-
-    // exemption): the ids of exited-not-landed CONTINUE candidates (residual worktree + worker-outcome
-    // final_state=exited-not-landed) computed ONCE per evaluation — the exemption is a structural
-    // condition of the whole dispatch decision, not a per-candidate read. Injected via the test seam
-    // (`continueExemptIds`) unless live-computed. A continue candidate skips ONLY the touches-overlap
-    // defer below (merge-worktree + peer arms); every other step-4 gate still applies.
-    const continueExempt = continueExemptIds !== undefined
-      ? new Set(continueExemptIds)
-      : computeExitedNotLandedContinueIds(root);
-    // NOT-YET-FLIPPED SKIP (gap-slot-refill-repeats-done-eligible-recommendations): ready-pool-check's
-    // analyzeTasks already computes the not-yet-flipped exclusion into pool.excluded (reason
-    // "not-yet-flipped"). Wire that signal into the candidate path (AC2) — it is disjoint from
-    // pool.ready by construction, so this is the literal 4th step-4 check + defense-in-depth. The
-    // hasMergeRecord arm inside isNotYetFlippedSkip additionally catches tasks whose work landed on
-    // the two-line model's INTEGRATION line (fan-in merged) — invisible to the master-only git-history
-    // signal, yet already "已 fan-in 待翻 done".
-    const excludedNyfIds = new Set(
-      (pool.excluded || []).filter((e) => e.reasons.includes("not-yet-flipped")).map((e) => e.id),
-    );
-    // DEFER ACCOUNTING (gap-over90-clock-measures-queue-time-not-work-time): every step-4 skip is a
-    // DEFER — the candidate is NOT dispatched this round, so its telemetry bracket (if `--task-start`
-    // was called before the defer) must be closed via `closure-lag-check.sh --close-task --outcome
-    // deferred`, and re-`--task-start`ed when work actually begins. slot-refill stays PURE (never
-    // writes) — it surfaces `deferred` so the caller (the tick) can mechanically close those brackets
-    // instead of the queue segment silently accruing toward OVER90.
-    const candidates = [];
-    // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): ids of
-    // hasLandedImplementation=true candidates that PASS the recommendation exclusion (landed but NOT
-    // code-complete — stuck-work with real remaining implementation, gap-ready-pool-worklanded-traps-
-    // stuck-work). Their touches must NOT occupy the batch clique (see the assembleBatch call below).
-    const landedCandidateIds = new Set();
-    const defer = (id, reason) => deferred.push({ id, reason });
-    // AC2/AC3 (gap-delivery-critical-label-at-promote-not-after-dispatch): a delivery-critical task
-    // deferred by in-flight occupancy (touches-overlap-in-flight) is an IN-FLIGHT DC task — the label
-    // arrived after (or at) dispatch, so the task is legitimately absent from this round's ranking.
-    // It is surfaced in `delivery_critical_in_flight` (NOT in `recommended`/`ranking`), which is the
-    // negative control "派发后补标签不被误记为 AC36 已触发".
-    const dcLabels = (task) => Array.isArray(task.labels) && task.labels.includes("delivery-critical");
-    const deferInFlightDc = (task, id, reason) => {
-      defer(id, reason);
-      if (dcLabels(task)) deliveryCriticalInFlight.push(id);
-    };
-    for (const id of pool.ready) {
-      const file = path.join(tasksDir, `${id}.md`);
-      if (!fs.existsSync(file)) { defer(id, "task-file-missing"); continue; }
-      const text = fs.readFileSync(file, "utf8");
-      // step-4 check 1: touches-resolve (majority-missing ⇒ not dispatchable).
-      if (checkTaskTouchesResolve(text, root).majorityMissing) { defer(id, "touches-majority-missing"); continue; }
-      // step-4 check 2: deps-ready (parent done).
-      const task = parseTask(text);
-      task.parent = readFrontField(task.frontmatterRaw, "parent");
-      // COMPOUND NOT-LEAF (gap-compound-depsreadyfor-structural-deadlock AC2 + invariant
-      // compound_parent_not_dispatchable): a `role: compound` parent is an AGGREGATE — it is DONE
-      // when its children are done, so it is never leaf work and must NEVER be recommended for
-      // dispatch (派发只认叶子). Deferring it here with an explicit reason ALSO stops it reaching the
-      // self-touch check — its ## Touches delegate to children by convention, so the absence of a
-      // self-file is NOT a self-touch false negative (invariant no_self_touch_false_negative).
-      if (readFrontField(task.frontmatterRaw, "role") === "compound") { defer(id, "compound-not-dispatchable"); continue; }
-      if (!depsReadyFor(task, metaById)) { defer(id, "deps-not-ready"); continue; }
-      // step-4 check 3: concurrency eligibility — disjoint from every currently-running subagent AND
-      // from every in-flight MERGE worktree's conflict surface (gap-dispatch-gate-blind-to-inflight-
-      // merge-worktree: a merge worktree holding a conflict surface was structurally invisible — the
-      // vhs-merge accident — so a task the OUTER deferred as merge-colliding was dispatched anyway by
-      // the inner's refill). The merge-worktree arm is checked FIRST so a candidate that collides with
-      // a merge surface is deferred with the EXPLICIT merge-worktree reason (AC2: 不再只报 peer), and
-      // only merge-clear candidates fall through to the peer arm.
-      const parsed = parseTouches(text);
-      // EXITED-NOT-LANDED CONTINUE EXEMPTION (tasks/gap-slot-refill-continue-touches-overlap-redundant-
-      // exemption): a continue candidate (residual worktree + exited-not-landed) is ALREADY worktree-
-      // isolated and its landing is serialized by the fan-in lock, so the dispatch-level touches-
-      // overlap defer below (merge-worktree + peer arms) is redundant over-conservatism — the two locks
-      // guard the same thing. Skip it so one fan-in failure no longer becomes a permanent
-      // touches-overlap queue. ⛔ Only the overlap defer is skipped; the not-yet-flipped / landed /
-      // self-touch / marker gates below still apply (a continue candidate with a real defect still
-      // fails them).
-      if (!continueExempt.has(id)) {
-        const mergeBlock = mergeSurfaceBlock(parsed, mergeSurfaces, expand);
-        if (mergeBlock.blocked) { deferInFlightDc(task, id, `touches-overlap-in-flight (merge-worktree ${mergeBlock.name})`); continue; }
-        let blocked = null;
-        for (const inf of inFlightParsed) {
-          // DIRECTORY-GLOB SELF-FILE EXEMPTION (tasks/gap-directory-level-tasks-touch-global-lock AC1):
-          // the candidate's OWN C8 self-file is excluded from the in-flight overlap when the in-flight
-          // side covers it only via a directory glob (e.g. `tasks/*.md`) — a directory-level declaration
-          // must not lock the whole queue while its holder is in flight. Genuine overlaps (candidate's
-          // other touches / concrete in-flight entries naming the candidate's file) still block
-          // (checkTouchesPairInFlight is fail-closed: it delegates to checkTouchesPair and only relaxes
-          // the exact self-file-only-glob-driven case).
-          if (!checkTouchesPairInFlight(parsed, inf.touches, expand, `tasks/${id}.md`).disjoint) { blocked = inf.id; break; }
-        }
-        if (blocked) { deferInFlightDc(task, id, `touches-overlap-in-flight (peer ${blocked})`); continue; }
+    // exemption): a continue candidate (residual worktree + exited-not-landed) is ALREADY worktree-
+    // isolated and its landing is serialized by the fan-in lock, so the dispatch-level touches-
+    // overlap defer below (merge-worktree + peer arms) is redundant over-conservatism — the two locks
+    // guard the same thing. Skip it so one fan-in failure no longer becomes a permanent
+    // touches-overlap queue. ⛔ Only the overlap defer is skipped; the not-yet-flipped / landed /
+    // self-touch / marker gates below still apply (a continue candidate with a real defect still
+    // fails them).
+    if (!continueExempt.has(id)) {
+      const mergeBlock = mergeSurfaceBlock(parsed, mergeSurfaces, expand);
+      if (mergeBlock.blocked) { deferInFlightDc(task, id, `touches-overlap-in-flight (merge-worktree ${mergeBlock.name})`); continue; }
+      let blocked = null;
+      for (const inf of inFlightParsed) {
+        // DIRECTORY-GLOB SELF-FILE EXEMPTION (tasks/gap-directory-level-tasks-touch-global-lock AC1):
+        // the candidate's OWN C8 self-file is excluded from the in-flight overlap when the in-flight
+        // side covers it only via a directory glob (e.g. `tasks/*.md`) — a directory-level declaration
+        // must not lock the whole queue while its holder is in flight. Genuine overlaps (candidate's
+        // other touches / concrete in-flight entries naming the candidate's file) still block
+        // (checkTouchesPairInFlight is fail-closed: it delegates to checkTouchesPair and only relaxes
+        // the exact self-file-only-glob-driven case).
+        if (!checkTouchesPairInFlight(parsed, inf.touches, expand, `tasks/${id}.md`).disjoint) { blocked = inf.id; break; }
       }
-      // step-4 check 4: not-yet-flipped — work already landed (fan-in merged / master-landed), don't
-      // re-dispatch a subagent to re-verify it (gap-slot-refill-repeats-done-eligible-recommendations).
-      if (isNotYetFlippedSkip({ id, body: text, root, excludedNyfIds })) { defer(id, "not-yet-flipped"); continue; }
-      // step-4 check 4b: LANDED-IMPLEMENTATION (gap-slot-refill-recommends-landed-code-complete-tasks)
-      // — a ready task whose IMPLEMENTATION is already in the tree (a develop commit whose message
-      // contains the id AND changed files outside tasks/) is "已合待翻 done": re-dispatching a subagent
-      // would only re-verify already-landed work (the observed B9 force-dispatch chain pointing at
-      // code-complete tasks). Stronger than isNotYetFlippedSkip: pure-git evidence that does not depend
-      // on the literal `## Acceptance Criteria` heading (the all-checked phantom tasks under `## AC`
-      // were invisible to extractSection) — AND gated by the shape-aware completion check so an
-      // AC-incomplete landed task (stuck-work with real remaining implementation) stays dispatchable.
-      // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): the `landed`
-      // signal is computed ONCE here and reused below — an AC-incomplete landed task stays a candidate
-      // (stuck-work), but its id is recorded so its touches never enter the batch clique.
-      // PHANTOM-KILLER FALSE-NEGATIVE BODY-SIDE OR-IN (gap-phantom-killer-false-negative-id-not-in-
-      // commits AC2): hasLandedImplementation (the git-grep — commit messages naming <task-id>) misses
-      // a landed task whose implementation commits NEVER carry the id (the empirical superseded-modeled
-      // shape — deba6463 etc. on develop but messages say "VALID_STATUSES 加 superseded"). OR-in the
-      // task-body-side signal (isBodyLanded — ACs 全勾 + 未勾项均为外层验证 ⇒ 视同 landed). The AC1 counter
-      // records the false-negative direction (body caught it when the git-grep missed). isLandedCodeComplete
-      // gates the union so an AC-incomplete landed task (stuck-work) stays dispatchable — isBodyLanded
-      // implies isLandedCodeComplete (both require the same code-complete-except-outer-verification
-      // disjunction; isBodyLanded additionally requires total > 0), so the body-side catch always defers.
-      const gitLanded = hasLandedImplementation(root, id);
-      const bodyLanded = isBodyLanded(text);
-      if (bodyLanded && !gitLanded) phantomKillerFalseNegativeCaught++;
-      const landed = gitLanded || bodyLanded;
-      if (landed && isLandedCodeComplete(text)) { defer(id, "landed-implementation"); continue; }
-      // step-4 check 5: C8 SELF-TOUCH (gap-slot-refill-c8-reject-no-backfill) — the dispatch gate
-      // (fast-mode-tick-core.md C8) requires the candidate's OWN `tasks/<id>.md` in ## Touches
-      // WITHOUT `(new)`. A candidate lacking it is NOT dispatchable — the inner's A15 gate ⑤ would
-      // reject it at dispatch. Rejecting it HERE (continue) means it never enters `candidates`, so
-      // the loop keeps iterating later-in-sort candidates — BACKFILL: a C8-rejected candidate is
-      // replaced by the next dispatchable one instead of being recommended and then rejected by the
-      // dispatch side with NO replacement (the "17 dispatchable yet none dispatched" deadlock:
-      // pool 有货 + 本 tick 无可派 同时为真).
-      if (!selfTouchCheck(text, id).ok) { defer(id, "self-touch-missing-c8"); continue; }
-      // SUPERSEDED FILTER (2026-08-11, outer retreat of gap-send-keys-verified): a ready-pool task
-      // whose body carries the SUPERSEDED marker (implementation premise deleted by a human ruling)
-      // must never be recommended for dispatch — recommending it keeps `recommended` non-empty while
-      // nothing is actually dispatchable (dispatchable_disjoint becomes a false reading). Same
-      // principle as not-yet-flipped: the marker is the mechanism's signal. Position-based
-      // (gap-ac46-superseded-keyword-vs-marker, 2026-08-13): only the bold **SUPERSEDED** MARKER
-      // matches — a task merely DISCUSSING the superseded category (e.g. the AC5 sample
-      // gap-slot-refill-clique-ignores-landed-touches, whose body names `superseded-capability`) stays
-      // dispatchable.
-      if (SUPERSEDED_MARKER_RE.test(text)) { defer(id, "superseded"); continue; }
-      // RETREATED / 搁置 FILTER (tasks/gap-retreated-state-not-mechanized): a ready task the outer
-      // retreated (load-induced red rollback, left `ready` so it stays in the pool) carries the
-      // line-start bold `**RETREATED` marker and must never be recommended for dispatch — "等 fix-scope
-      // gate land 前不重派" is now a MECHANICAL signal, not a manual skip (the AC53 heartbeat REFUSED
-      // root cause: should_refill=true with the retreated tasks recommended, then skipped by hand).
-      // Removing the marker (解除搁置) restores dispatchability. Same principle as superseded: the
-      // marker is the mechanism's signal, position-based (hard-rule ② — only the bold line-start
-      // MARKER matches, a prose mention of "retreated" stays dispatchable).
-      if (RETREATED_MARKER_RE.test(text)) { defer(id, "retreated"); continue; }
-      // INJECTED DISPATCH GATE (optional): any additional per-candidate check the caller wants to
-      // enforce (default none). A rejected candidate (ok:false) is skipped and the loop continues →
-      // BACKFILL from later-in-sort candidates, exactly like the built-in step-4 gates — a rejected
-      // candidate is never recommended with no replacement.
-      if (dispatchGate) {
-        const g = dispatchGate({ id, text, task });
-        if (g === false || (g && g.ok === false)) { defer(id, "dispatch-gate-reject"); continue; }
-      }
-      // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): record the
-      // landed-but-not-code-complete id so the batch clique below can exclude its touches.
-      if (landed) landedCandidateIds.add(id);
-      candidates.push(parseCandidate(id, text));
+      if (blocked) { deferInFlightDc(task, id, `touches-overlap-in-flight (peer ${blocked})`); continue; }
     }
-    // SUITE-BLOCKING RANK (gap-ready-relevance-blind-to-suite-blocking-signal AC3): a task the
-    // consecutive-red-window signal implicates (pool.suite_blocking.tasks — ready-pool-check's
-    // blocking_suite axis) ranks FIRST so the refill picks the suite-blocker before any other work.
-    // Ties stay id-deterministic. The signal only re-ranks; the step-4 dispatch checks above still
-    // gate admission (a suite-blocker that fails touches-resolve/deps/disjoint is never forced in).
-    const suiteBlockingIds = new Set((pool.suite_blocking && pool.suite_blocking.tasks) || []);
-    // DELIVERY-CRITICAL SECOND AXIS (gap-ac36-delivery-critical-priority-axis): the sort key is now
-    // (blocking_suite, delivery_critical, id). `deliveryCritical` comes from parseCandidate (which
-    // reads the task's frontmatter `labels` via task-schema's parseTask — reuse, no new parser). A
-    // task labeled `delivery-critical` ranks below a suite-blocker but ABOVE plain id order, so the
-    // productization-delivery phase's AC tasks are picked by the refill before ordinary pool work.
-    // The signal only re-ranks (SIGNAL, not a gate): the step-4 dispatch checks above still gate
-    // admission, and a delivery-critical task that fails touches-resolve/deps/disjoint is never
-    // forced in.
-    candidates.sort((a, b) => {
-      const ab = suiteBlockingIds.has(a.id) ? 0 : 1;
-      const bb = suiteBlockingIds.has(b.id) ? 0 : 1;
-      if (ab !== bb) return ab - bb;
-      const ad = a.deliveryCritical ? 0 : 1;
-      const bd = b.deliveryCritical ? 0 : 1;
-      if (ad !== bd) return ad - bd;
-      return a.id.localeCompare(b.id);
-    });
-    // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): a
-    // landed-but-not-flipped task's implementation is ALREADY in the tree — it won't (and shouldn't) be
-    // re-dispatched as NEW work, so its touches must NOT occupy the batch clique (they would block a
-    // genuinely-dispatchable task that touches the same file — the measured phase-overlap → 2-slot
-    // exclusion: P1 dropped from recommended AND deferred, in-clique crowding with no reading). The
-    // RECOMMENDATION exclusion (landed && code-complete above) is UNCHANGED; here the landed candidate
-    // is removed from the clique computation ONLY, then re-appended AFTER the batch so the stuck-work
-    // landed task stays dispatchable (gap-ready-pool-worklanded-traps-stuck-work parity) but never
-    // crowds out real work. AC4: two NON-landed tasks touching the same file remain mutually exclusive.
-    const cliqueCandidates = landedCandidateIds.size === 0
-      ? candidates
-      : candidates.filter((c) => !landedCandidateIds.has(c.id));
-    const { batch, deferred: batchDeferred } = assembleBatch(cliqueCandidates, { expand });
-    // ASSEMBLEBATCH-DEFERRED MERGE (gap-slot-refill-discards-assemblebatch-deferred AC1): the
-    // step-4 skips (deferred via defer()) and the batch scheduler's serialize reasons are BOTH
-    // deferrals — merge them so the output's `deferred` carries the REAL rejection reason
-    // (shared-state / learning-type / non-capability-growth / not-disjoint-from-peer /
-    // ill-declared-touches). Pre-fix the assembleBatch deferred was DESTRUCTURED AWAY, so a
-    // candidate that passed all step-4 checks yet was serialized by assembleBatch produced
-    // `deferred=[]` + the misleading "no dispatchable candidate passes step-4" no_refill_reason.
-    assembleBatchDeferred = batchDeferred;
-    for (const d of batchDeferred) deferred.push(d);
-    const landedRecommended = landedCandidateIds.size === 0
-      ? []
-      : candidates.filter((c) => landedCandidateIds.has(c.id)).map((c) => c.id);
-    recommended = [...batch, ...landedRecommended].slice(0, slotsFree);
-    // AC56 DE-ORDER (gap-ac56-recommended-deordered): the dispatch-consuming `recommended` array must
-    // NOT carry a meaningful priority order — an inner that reads "the mechanism's first pick" gets
-    // anchored even against its own semantic leanings (SPEC §5; 不去序则新划分只是名义上的). Re-sort
-    // lexicographically by id: a deterministic, obviously-meaningless dictionary order (判据1 option 2).
-    // The priority sort above (candidates.sort: blocking_suite → delivery_critical → id) still happens
-    // and still drives WHICH candidates the greedy disjoint batch admits; it is merely no longer the
-    // order of the OUTPUT array. The priority order remains machine-readable in the `ranking`
-    // diagnostic below (AC36 判据②), which the inner tick does NOT consume for dispatch — de-ordering
-    // `recommended` is the anchor removal; `ranking` stays a verification surface.
-    recommended.sort((a, b) => a.localeCompare(b));
-    recommendedOrder = "lexicographic-by-id (order meaningless — 字典序，不代表优先级)";
-    // Build the ranking array from the PRIORITY-SORTED candidate order (blocking_suite →
-    // delivery_critical → id — the same order candidates.sort produced above), filtered to the
-    // recommended SET and capped at the same slots_free window. `rank` = position WITHIN the
-    // priority-ordered recommendation, NOT the de-ordered `recommended` array's position — this keeps
-    // AC36 判据② mechanically assertable (DC strict forward movement / blocking_suite above DC) while
-    // the dispatch-facing `recommended` array itself stays de-ordered. deliveryCritical comes from the
-    // SAME parseCandidate source the sort used — never a second parser (rule: reuse, no parallel
-    // copy). suiteBlocking is derived from the same suiteBlockingIds set the sort's first axis used.
-    const recommendedSet = new Set(recommended);
-    ranking = candidates
-      .filter((c) => recommendedSet.has(c.id))
-      .map((c, rank) => ({
-        id: c.id,
-        deliveryCritical: c.deliveryCritical,
-        suiteBlocking: suiteBlockingIds.has(c.id),
-        rank,
-      }));
+    // step-4 check 4: not-yet-flipped — work already landed (fan-in merged / master-landed), don't
+    // re-dispatch a subagent to re-verify it (gap-slot-refill-repeats-done-eligible-recommendations).
+    if (isNotYetFlippedSkip({ id, body: text, root, excludedNyfIds })) { defer(id, "not-yet-flipped"); continue; }
+    // step-4 check 4b: LANDED-IMPLEMENTATION (gap-slot-refill-recommends-landed-code-complete-tasks)
+    // — a ready task whose IMPLEMENTATION is already in the tree (a develop commit whose message
+    // contains the id AND changed files outside tasks/) is "已合待翻 done": re-dispatching a subagent
+    // would only re-verify already-landed work (the observed B9 force-dispatch chain pointing at
+    // code-complete tasks). Stronger than isNotYetFlippedSkip: pure-git evidence that does not depend
+    // on the literal `## Acceptance Criteria` heading (the all-checked phantom tasks under `## AC`
+    // were invisible to extractSection) — AND gated by the shape-aware completion check so an
+    // AC-incomplete landed task (stuck-work with real remaining implementation) stays dispatchable.
+    // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): the `landed`
+    // signal is computed ONCE here and reused below — an AC-incomplete landed task stays a candidate
+    // (stuck-work), but its id is recorded so its touches never enter the batch clique.
+    // PHANTOM-KILLER FALSE-NEGATIVE BODY-SIDE OR-IN (gap-phantom-killer-false-negative-id-not-in-
+    // commits AC2): hasLandedImplementation (the git-grep — commit messages naming <task-id>) misses
+    // a landed task whose implementation commits NEVER carry the id (the empirical superseded-modeled
+    // shape — deba6463 etc. on develop but messages say "VALID_STATUSES 加 superseded"). OR-in the
+    // task-body-side signal (isBodyLanded — ACs 全勾 + 未勾项均为外层验证 ⇒ 视同 landed). The AC1 counter
+    // records the false-negative direction (body caught it when the git-grep missed). isLandedCodeComplete
+    // gates the union so an AC-incomplete landed task (stuck-work) stays dispatchable — isBodyLanded
+    // implies isLandedCodeComplete (both require the same code-complete-except-outer-verification
+    // disjunction; isBodyLanded additionally requires total > 0), so the body-side catch always defers.
+    const gitLanded = hasLandedImplementation(root, id);
+    const bodyLanded = isBodyLanded(text);
+    if (bodyLanded && !gitLanded) phantomKillerFalseNegativeCaught++;
+    const landed = gitLanded || bodyLanded;
+    if (landed && isLandedCodeComplete(text)) { defer(id, "landed-implementation"); continue; }
+    // step-4 check 5: C8 SELF-TOUCH (gap-slot-refill-c8-reject-no-backfill) — the dispatch gate
+    // (fast-mode-tick-core.md C8) requires the candidate's OWN `tasks/<id>.md` in ## Touches
+    // WITHOUT `(new)`. A candidate lacking it is NOT dispatchable — the inner's A15 gate ⑤ would
+    // reject it at dispatch. Rejecting it HERE (continue) means it never enters `candidates`, so
+    // the loop keeps iterating later-in-sort candidates — BACKFILL: a C8-rejected candidate is
+    // replaced by the next dispatchable one instead of being recommended and then rejected by the
+    // dispatch side with NO replacement (the "17 dispatchable yet none dispatched" deadlock:
+    // pool 有货 + 本 tick 无可派 同时为真).
+    if (!selfTouchCheck(text, id).ok) { defer(id, "self-touch-missing-c8"); continue; }
+    // SUPERSEDED FILTER (2026-08-11, outer retreat of gap-send-keys-verified): a ready-pool task
+    // whose body carries the SUPERSEDED marker (implementation premise deleted by a human ruling)
+    // must never be recommended for dispatch — recommending it keeps `recommended` non-empty while
+    // nothing is actually dispatchable (dispatchable_disjoint becomes a false reading). Same
+    // principle as not-yet-flipped: the marker is the mechanism's signal. Position-based
+    // (gap-ac46-superseded-keyword-vs-marker, 2026-08-13): only the bold **SUPERSEDED** MARKER
+    // matches — a task merely DISCUSSING the superseded category (e.g. the AC5 sample
+    // gap-slot-refill-clique-ignores-landed-touches, whose body names `superseded-capability`) stays
+    // dispatchable.
+    if (SUPERSEDED_MARKER_RE.test(text)) { defer(id, "superseded"); continue; }
+    // RETREATED / 搁置 FILTER (tasks/gap-retreated-state-not-mechanized): a ready task the outer
+    // retreated (load-induced red rollback, left `ready` so it stays in the pool) carries the
+    // line-start bold `**RETREATED` marker and must never be recommended for dispatch — "等 fix-scope
+    // gate land 前不重派" is now a MECHANICAL signal, not a manual skip (the AC53 heartbeat REFUSED
+    // root cause: should_refill=true with the retreated tasks recommended, then skipped by hand).
+    // Removing the marker (解除搁置) restores dispatchability. Same principle as superseded: the
+    // marker is the mechanism's signal, position-based (hard-rule ② — only the bold line-start
+    // MARKER matches, a prose mention of "retreated" stays dispatchable).
+    if (RETREATED_MARKER_RE.test(text)) { defer(id, "retreated"); continue; }
+    // INJECTED DISPATCH GATE (optional): any additional per-candidate check the caller wants to
+    // enforce (default none). A rejected candidate (ok:false) is skipped and the loop continues →
+    // BACKFILL from later-in-sort candidates, exactly like the built-in step-4 gates — a rejected
+    // candidate is never recommended with no replacement.
+    if (dispatchGate) {
+      const g = dispatchGate({ id, text, task });
+      if (g === false || (g && g.ok === false)) { defer(id, "dispatch-gate-reject"); continue; }
+    }
+    // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): record the
+    // landed-but-not-code-complete id so the batch clique below can exclude its touches.
+    if (landed) landedCandidateIds.add(id);
+    candidates.push(parseCandidate(id, text));
   }
+  // SUITE-BLOCKING RANK (gap-ready-relevance-blind-to-suite-blocking-signal AC3): a task the
+  // consecutive-red-window signal implicates (pool.suite_blocking.tasks — ready-pool-check's
+  // blocking_suite axis) ranks FIRST so the refill picks the suite-blocker before any other work.
+  // Ties stay id-deterministic. The signal only re-ranks; the step-4 dispatch checks above still
+  // gate admission (a suite-blocker that fails touches-resolve/deps/disjoint is never forced in).
+  const suiteBlockingIds = new Set((pool.suite_blocking && pool.suite_blocking.tasks) || []);
+  // DELIVERY-CRITICAL SECOND AXIS (gap-ac36-delivery-critical-priority-axis): the sort key is now
+  // (blocking_suite, delivery_critical, id). `deliveryCritical` comes from parseCandidate (which
+  // reads the task's frontmatter `labels` via task-schema's parseTask — reuse, no new parser). A
+  // task labeled `delivery-critical` ranks below a suite-blocker but ABOVE plain id order, so the
+  // productization-delivery phase's AC tasks are picked by the refill before ordinary pool work.
+  // The signal only re-ranks (SIGNAL, not a gate): the step-4 dispatch checks above still gate
+  // admission, and a delivery-critical task that fails touches-resolve/deps/disjoint is never
+  // forced in.
+  candidates.sort((a, b) => {
+    const ab = suiteBlockingIds.has(a.id) ? 0 : 1;
+    const bb = suiteBlockingIds.has(b.id) ? 0 : 1;
+    if (ab !== bb) return ab - bb;
+    const ad = a.deliveryCritical ? 0 : 1;
+    const bd = b.deliveryCritical ? 0 : 1;
+    if (ad !== bd) return ad - bd;
+    return a.id.localeCompare(b.id);
+  });
+  // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): a
+  // landed-but-not-flipped task's implementation is ALREADY in the tree — it won't (and shouldn't) be
+  // re-dispatched as NEW work, so its touches must NOT occupy the batch clique (they would block a
+  // genuinely-dispatchable task that touches the same file — the measured phase-overlap → 2-slot
+  // exclusion: P1 dropped from recommended AND deferred, in-clique crowding with no reading). The
+  // RECOMMENDATION exclusion (landed && code-complete above) is UNCHANGED; here the landed candidate
+  // is removed from the clique computation ONLY, then re-appended AFTER the batch so the stuck-work
+  // landed task stays dispatchable (gap-ready-pool-worklanded-traps-stuck-work parity) but never
+  // crowds out real work. AC4: two NON-landed tasks touching the same file remain mutually exclusive.
+  const cliqueCandidates = landedCandidateIds.size === 0
+    ? candidates
+    : candidates.filter((c) => !landedCandidateIds.has(c.id));
+  const { batch, deferred: batchDeferred } = assembleBatch(cliqueCandidates, { expand });
+  // ASSEMBLEBATCH-DEFERRED MERGE (gap-slot-refill-discards-assemblebatch-deferred AC1): the
+  // step-4 skips (deferred via defer()) and the batch scheduler's serialize reasons are BOTH
+  // deferrals — merge them so the output's `deferred` carries the REAL rejection reason
+  // (shared-state / learning-type / non-capability-growth / not-disjoint-from-peer /
+  // ill-declared-touches). Pre-fix the assembleBatch deferred was DESTRUCTURED AWAY, so a
+  // candidate that passed all step-4 checks yet was serialized by assembleBatch produced
+  // `deferred=[]` + the misleading "no dispatchable candidate passes step-4" no_refill_reason.
+  assembleBatchDeferred = batchDeferred;
+  for (const d of batchDeferred) deferred.push(d);
+  const landedRecommended = landedCandidateIds.size === 0
+    ? []
+    : candidates.filter((c) => landedCandidateIds.has(c.id)).map((c) => c.id);
+  recommended = [...batch, ...landedRecommended].slice(0, slotsFree);
+  // AC56 DE-ORDER (gap-ac56-recommended-deordered): the dispatch-consuming `recommended` array must
+  // NOT carry a meaningful priority order — an inner that reads "the mechanism's first pick" gets
+  // anchored even against its own semantic leanings (SPEC §5; 不去序则新划分只是名义上的). Re-sort
+  // lexicographically by id: a deterministic, obviously-meaningless dictionary order (判据1 option 2).
+  // The priority sort above (candidates.sort: blocking_suite → delivery_critical → id) still happens
+  // and still drives WHICH candidates the greedy disjoint batch admits; it is merely no longer the
+  // order of the OUTPUT array. The priority order remains machine-readable in the `ranking`
+  // diagnostic below (AC36 判据②), which the inner tick does NOT consume for dispatch — de-ordering
+  // `recommended` is the anchor removal; `ranking` stays a verification surface.
+  recommended.sort((a, b) => a.localeCompare(b));
+  recommendedOrder = "lexicographic-by-id (order meaningless — 字典序，不代表优先级)";
+  // Build the ranking array from the PRIORITY-SORTED candidate order (blocking_suite →
+  // delivery_critical → id — the same order candidates.sort produced above), filtered to the
+  // recommended SET and capped at the same slots_free window. `rank` = position WITHIN the
+  // priority-ordered recommendation, NOT the de-ordered `recommended` array's position — this keeps
+  // AC36 判据② mechanically assertable (DC strict forward movement / blocking_suite above DC) while
+  // the dispatch-facing `recommended` array itself stays de-ordered. deliveryCritical comes from the
+  // SAME parseCandidate source the sort used — never a second parser (rule: reuse, no parallel
+  // copy). suiteBlocking is derived from the same suiteBlockingIds set the sort's first axis used.
+  const recommendedSet = new Set(recommended);
+  ranking = candidates
+    .filter((c) => recommendedSet.has(c.id))
+    .map((c, rank) => ({
+      id: c.id,
+      deliveryCritical: c.deliveryCritical,
+      suiteBlocking: suiteBlockingIds.has(c.id),
+      rank,
+    }));
 
   // should_refill — the event-driven go/no-go. Based on the RECOMMENDED set (candidates that pass
   // the step-4 checks AND are disjoint from in-flight), not the raw pool capacity: a pool whose
@@ -1288,12 +1248,7 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   const unmeasured = measurementSource === "degraded-no-telemetry" || measurementSource === "not-measured";
   let shouldRefill = slotsFree > 0 && recommended.length >= 1;
   let noRefillReason = null;
-  if (halt.halted) {
-    // Preemptive halt takes precedence over every other reason — the human's stop is the
-    // highest-priority gate (gap-supervisor-preemption: `.halt` is 任意点生效, not tick-boundary).
-    shouldRefill = false;
-    noRefillReason = `halted (preemption: .halt present — ${halt.reason}; check with supervisor-preempt.sh halt-check)`;
-  } else if (unmeasured) {
+  if (unmeasured) {
     // A not-measured / degraded in-flight view is NOT a valid "0 in-flight" — fail CLOSED (no refill)
     // and say so. slots_free is null here; a consumer reading it gets null, never a silently-computed
     // "5" (the same family as a silently-computed "5 empty slots").
@@ -1403,8 +1358,6 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // criterion/slot-driven (AC4: no red window ⇒ suite_blocking.window_active=false, ordering
     // unchanged).
     suite_blocking: pool.suite_blocking,
-    halted: halt.halted,
-    halt_reason: halt.halted ? halt.reason : null,
     should_refill: shouldRefill,
     no_refill_reason: noRefillReason,
     recommended,

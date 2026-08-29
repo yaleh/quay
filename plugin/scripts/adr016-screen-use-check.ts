@@ -52,6 +52,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 
 import { verified, failed, driverResultToExit } from "./checker-io.ts";
 import type { DriverResult } from "./checker-io.ts";
@@ -402,6 +403,7 @@ function usage(): never {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node adr016-screen-use-check.ts [--root <dir>] [--json] [--selftest]");
   if (args.includes("--selftest")) {
     return selftest() ? 0 : 1;
   }
