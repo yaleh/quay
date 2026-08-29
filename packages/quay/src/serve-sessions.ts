@@ -345,6 +345,96 @@ export async function handleSessionDownload(
   stream.pipe(res);
 }
 
+// ── /fan-in-log/<task>/<file> ──────────────────────────────────────────────────────────────────
+// gap-mech-fan-in-log-webui-visible-clickable B3: the mechanical fan-in process log's view/download
+// endpoint — the worker-driver writes .quay/fan-in-<task>-<runId>.log (gitignored runtime state) and
+// the Runs block links it. Path-traversal protection is the SAME house pattern as /session/<id>/
+// download: a strict task slug + a strict filename whitelist resolve to a fixed `.quay/` join — a
+// non-whitelist / `..` / absolute-path segment is rejected with 400 BEFORE any disk access (AC3).
+
+/** Strict task-id shape (all live ids are [A-Za-z0-9-]); rejects `../`, absolute paths, and any
+ *  non-task-id before filesystem access. */
+export const TASK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
+/** Strict fan-in log filename whitelist (no `/`, no `\`, no `..` traversal via a bare `..` name). */
+export const FAN_IN_LOG_NAME_RE = /^[A-Za-z0-9_.-]+$/;
+
+/**
+ * Resolve a task id + fan-in log file name to its path — PURE (no filesystem access, AC3). A
+ * non-slug task or a non-whitelist file name (including `..` or an absolute path) returns null;
+ * otherwise the file must land strictly inside <root>/.quay/ (defense in depth: a bare `..` matches
+ * the filename whitelist literally, so the resolved-path containment check is the traversal guard).
+ */
+export function fanInLogPath(root: string, task: string, file: string): string | null {
+  if (!TASK_ID_RE.test(task)) return null;
+  if (!FAN_IN_LOG_NAME_RE.test(file)) return null;
+  const quayDir = path.resolve(root, ".quay");
+  const resolved = path.resolve(quayDir, file);
+  if (!resolved.startsWith(quayDir + path.sep)) return null;
+  return resolved;
+}
+
+/** Serve a fan-in log: view (inline text/plain) or download (Content-Disposition: attachment). A
+ *  non-slug task / non-whitelist file name ⇒ 400; valid-but-absent ⇒ 404; present ⇒ streamed. */
+async function handleFanInLog(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+  task: string,
+  file: string,
+  download: boolean,
+): Promise<void> {
+  const p = fanInLogPath(cfg.workspaceRoot, task, file);
+  if (p == null) {
+    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("invalid fan-in log path");
+    return;
+  }
+  let size: number;
+  try {
+    size = fs.statSync(p).size;
+  } catch {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("fan-in log not found");
+    return;
+  }
+  const headers: Record<string, string> = {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Content-Length": String(size),
+  };
+  if (download) {
+    // file is whitelist-validated ([A-Za-z0-9_.-]) ⇒ safe as a Content-Disposition filename (no CR/LF).
+    headers["Content-Disposition"] = `attachment; filename="${file}"`;
+  }
+  res.writeHead(200, headers);
+  const stream = fs.createReadStream(p);
+  stream.on("error", () => {
+    try { res.destroy(); } catch { /* client already gone */ }
+  });
+  stream.pipe(res);
+}
+
+/** GET /fan-in-log/<task>/<file> — inline view. */
+export async function handleFanInLogView(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+  task: string,
+  file: string,
+): Promise<void> {
+  await handleFanInLog(req, res, cfg, task, file, false);
+}
+
+/** GET /fan-in-log/<task>/<file>/download — attachment download. */
+export async function handleFanInLogDownload(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+  task: string,
+  file: string,
+): Promise<void> {
+  await handleFanInLog(req, res, cfg, task, file, true);
+}
+
 // ── 会话生命周期（gap-webui-session-lifecycle）─────────────────────────────────────────────────
 // headless driver 两个 kind 的 start/stop/restart 复用 `quay driver`（cli/driver.ts runDriver，⛔ 不
 // 重造 driver 逻辑）；新建会话 = `-p --input-format stream-json` + `--session-id <uuid>` + profile +
