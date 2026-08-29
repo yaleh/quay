@@ -1638,9 +1638,79 @@ interface MechShResult {
   error: Error | null;
 }
 
-async function mechSh(argv: string[], timeoutMs = 120_000): Promise<MechShResult> {
-  const r = await runAsync(argv, { timeoutMs, collectStderr: true });
-  return { ...r, ok: r.status === 0 };
+/** 机械 fan-in 步骤的进程组 spawn（gap-fan-in-subprocess-hang-timeout-recovery AC2/AC4）：detached:true
+ *  （子进程成进程组组长）+ timeout 到期 SIGKILL 整组。⛔ runAsync 的 timeout 只 SIGKILL 直接子进程——
+ *  孙进程（继承 stdout/stderr 管道 + 可能继承 flock FD）持管道写端存活 ⇒ close 永不触发、锁泄漏；
+ *  本函数组 kill 整棵进程树，且显式 resolve 不依赖 close 事件（孙进程持管道不阻塞返回，硬规则 4b）。
+ *  永不 throw；恒捕获 stdout+stderr（combinedOutput 需两流合并去噪，⛔ 不丢任一流的失败签名）。 */
+export async function mechSh(argv: string[], timeoutMs = 120_000): Promise<MechShResult> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(argv[0], argv.slice(1), { stdio: ["ignore", "pipe", "pipe"], detached: true });
+    } catch (e) {
+      resolve({ ok: false, status: null, stdout: "", stderr: "", error: e as Error });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (status: number | null, error: Error | null): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({ ok: status === 0, status, stdout, stderr, error });
+    };
+    if (Number.isFinite(timeoutMs)) {
+      timer = setTimeout(() => {
+        // ⛔ 组 kill（-pid）：只 child.kill 会留孙进程持管道/锁。detached:true ⇒ 子进程是组长 ⇒ -pid 命中整组。
+        try {
+          if (child.pid) process.kill(-child.pid, "SIGKILL");
+        } catch {
+          try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        }
+        // 显式 resolve（⛔ 不依赖 close——孙进程持管道时 close 可能永不触发）。
+        finish(null, new Error(`spawn timeout after ${timeoutMs}ms (SIGKILL process group): ${argv[0]}`));
+      }, timeoutMs);
+    }
+    child.stdout?.on("data", (d) => { stdout += d; });
+    child.stderr?.on("data", (d) => { stderr += d; });
+    child.on("error", (e) => finish(null, e));
+    child.on("close", (code) => finish(code, null));
+  });
+}
+
+/** 机械 fan-in 步骤 trace 载体（.quay/fan-in-step-trace.jsonl，gitignored 运行时诊断日志——AC1：
+ *  每步 begin/end 各一条；begin 无 end ⇒ 该步挂起/未返回，据 epoch 定位）。best-effort：写失败不致命
+ *  （诊断载体失败 ≠ fan-in 失败，硬规则 3b 的镜像半边）。 */
+export function appendFanInStepTrace(
+  root: string,
+  task: string,
+  runId: string,
+  step: string,
+  phase: "begin" | "end",
+  extra: Record<string, unknown> = {},
+): void {
+  try {
+    const file = path.join(root, ".quay", "fan-in-step-trace.jsonl");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(
+      file,
+      JSON.stringify({
+        event: `step-${phase}`,
+        step,
+        task,
+        runId,
+        ts: new Date().toISOString(),
+        epoch: Math.floor(Date.now() / 1000),
+        ...extra,
+      }) + "\n",
+      "utf8",
+    );
+  } catch {
+    // best-effort：trace 写失败 ≠ fan-in 失败。
+  }
 }
 
 /** 合并 stdout+stderr 为单一流（⛔ 不丢弃任一流、⛔ 不 stderr 优先——未知失败签名可能在任一流，
@@ -1979,6 +2049,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const failClean = (step: string, summary: string, exitCode: number | null = null): MechanicalFanInResult =>
     verdictOf(step, exitCode, summary, null);
 
+  // AC1 instrument：每步 begin/end trace——挂起时 begin 无 end（且无 fail log）⇒ 据 epoch 定位挂起步。
+  const trace = (step: string, phase: "begin" | "end", extra: Record<string, unknown> = {}): void =>
+    appendFanInStepTrace(root, task, runId, step, phase, extra);
+
   // 1. acquire fan-in workflow lock（机械包裹整段 merge→suite→ff，AC4）。ADR-034：driver 自身经非分离
   // 直接子进程持锁（⛔ 废除 fan-in-ff-merge.sh 的 `& disown` 分离 holder + flag 释放协议）——锁的生死 =
   // 工作的进程生死，driver 死（含 SIGKILL）⇒ 内核关 stdin 写端 ⇒ holder 释放 flock。unbounded（无超时）：
@@ -2001,14 +2075,19 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
 
   try {
     // 2. merge develop（冲突 ⇒ red → 语义会话兜底）。
+    trace("merge-develop", "begin");
     a = await mechSh(["git", "-C", worktree, "merge", "--no-edit", mergeTarget], 120_000);
+    trace("merge-develop", "end", { ok: a.ok });
     if (!a.ok) return fail("merge-develop", a);
 
     // 3. anti-drift Touches 核对（HARD FAIL ⇒ red）。
+    trace("anti-drift", "begin");
     a = await mechSh(["node", "--experimental-strip-types", antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
+    trace("anti-drift", "end", { ok: a.ok });
     if (!a.ok) return fail("anti-drift", a);
 
     // 4. delta 断言面判定（doc-only 跳过 suite，code 跑 suite；判不出 fail-closed 跑 suite）。
+    trace("delta-classify", "begin");
     const fork = await mechSh(["git", "-C", worktree, "merge-base", mergeTarget, "HEAD"], 30_000);
     const deltaFiles = await mechSh(["git", "-C", worktree, "diff", "--name-only", (fork.stdout || "").trim(), "HEAD"], 30_000);
     const deltaList = (deltaFiles.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
@@ -2018,9 +2097,12 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       codeDelta = cd.ok ? (cd.stdout || "").trim() : "__CLASSIFY_FAILED__";
     }
     const needSuite = opts.forceSuite === true || codeDelta === "__CLASSIFY_FAILED__" || codeDelta !== "";
+    trace("delta-classify", "end", { needSuite });
 
     // 5. ts-typecheck 闸（非零 ⇒ red → 语义会话兜底）。
+    trace("typecheck", "begin");
     a = await mechSh(["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
+    trace("typecheck", "end", { ok: a.ok });
     if (!a.ok) return fail("typecheck", a);
 
     // 5.5 archguard 结构闸（依赖环 sccCount=0 ⇒ 绿；依赖环 ⇒ red → 语义会话兜底）。⛔ 分析 worktree
@@ -2028,24 +2110,32 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 依赖环会被漏检）。archguard-runner 把结构信号 append 进 <worktree>/.archguard/metrics-history.jsonl；
     // worktree 的 .archguard 在 cleanup 时被删 ⇒ 镜像到主检出（root）的生产载体（AC2：能产出≠已产出）。
     const archguardCmd = opts.archguardCommand ?? ["node", "--experimental-strip-types", archguardRunner, "--root", worktree];
+    trace("archguard-structure", "begin");
     a = await mechSh(archguardCmd, 600_000);
+    trace("archguard-structure", "end", { ok: a.ok });
     if (!a.ok) return fail("archguard-structure", a);
     const mirrored = mirrorArchguardMetrics(worktree, root);
     if (!mirrored.ok) return failClean("archguard-metrics", mirrored.reason ?? "mirror failed");
 
     // 6. scoped 门 + doc 检查（必须绿）。
     const scopedCmd = opts.scopedGateCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
+    trace("scoped-gate", "begin");
     a = await mechSh(scopedCmd, 600_000);
+    trace("scoped-gate", "end", { ok: a.ok });
     if (!a.ok) return fail("scoped-gate", a);
     const docCmd = opts.docCheckCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--static-checks-doc"];
+    trace("doc-check", "begin");
     a = await mechSh(docCmd, 300_000);
+    trace("doc-check", "end", { ok: a.ok });
     if (!a.ok) return fail("doc-check", a);
 
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
     if (needSuite) {
       const suiteCmd = opts.suiteCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--buckets", task];
+      trace("suite", "begin");
       const sr: SuiteRunResult = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: suiteCmd, logFile: suiteLogFile, silenceMs: opts.silenceMs });
+      trace("suite", "end", { ok: sr.outcome === "done", outcome: sr.outcome });
       suiteOutcome = sr.outcome;
       suiteFinishedEpoch = Math.floor(new Date(sr.finishedAt).getTime() / 1000);
       suitePid = sr.pid;
@@ -2072,21 +2162,31 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     }
 
     // 8. land 前 anti-drift 重跑 + AC 完成闸 + flip done（先 flip 后 ff，人 2026-08-14 裁定）。
+    trace("anti-drift-land", "begin");
     a = await mechSh(["node", "--experimental-strip-types", antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
+    trace("anti-drift-land", "end", { ok: a.ok });
     if (!a.ok) return fail("anti-drift-land", a);
+    trace("ac-gate", "begin");
     a = await mechSh(["node", "--experimental-strip-types", acGate, "--task", task, "--worktree", worktree], 60_000);
+    trace("ac-gate", "end", { ok: a.ok });
     if (!a.ok) return fail("ac-gate", a);
+    trace("flip-done", "begin");
     const flip = await flipTaskDone(worktree, task, mergeTarget);
+    trace("flip-done", "end", { ok: flip.ok });
     if (!flip.ok) return failClean("flip-done", flip.reason ?? "flip failed");
 
     // 9. ff（fan-in-ff-merge.sh 读 suite capture 证书；成功 fall through，失败 red）。
+    trace("ff", "begin");
     a = await mechSh(["bash", ffMerge, "--task", task, "--run-id", runId, "--root", root, "--merge-target", mergeTarget, "--worktree", worktree, "--suite-capture", suiteCapture, "--lock-wait", "30"], 120_000);
+    trace("ff", "end", { ok: a.ok });
     if (!a.ok) return fail("ff", a);
 
     // 9.5 清理 worktree + 删 task 分支（ff 成功后——landed 判据 = status done ∧ 无残留 worktree）。
     // best-effort：移除失败不致命，landing 判定（computeLandingState）会据残留 worktree 诚实判未落地。
+    trace("cleanup", "begin");
     await mechSh(["git", "-C", root, "worktree", "remove", "--force", worktree], 60_000);
     await mechSh(["git", "-C", root, "branch", "-D", `task/${task}`], 60_000);
+    trace("cleanup", "end");
   } catch (e) {
     return failClean("exception", (e as Error)?.message ?? String(e));
   } finally {
