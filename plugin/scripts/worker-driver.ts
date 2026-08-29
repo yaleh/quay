@@ -770,6 +770,9 @@ export function computeWorkerRoundRecord(opts: {
   liveness?: LivenessResult | null;
   /** 本轮现观测到的冷启动在飞 task id（排序后）。空数组 = 观测过且无（⛔ 与「没观测」可区分）。 */
   coldStartInflight: string[];
+  /** 本轮 markNeedsHuman 翻转的结果（含 committed——gap-mark-needs-human-commit-after-write：翻转写盘
+   *  即提交，committed=false 表示 repo-less no-op / 提交失败，可观测非静默）。缺省 = 本轮无翻转。 */
+  needsHuman?: Array<{ id: string; ok: boolean; committed: boolean; reason: string }>;
 }) {
   return {
     ts: opts.at,
@@ -782,6 +785,8 @@ export function computeWorkerRoundRecord(opts: {
     stop_reason: opts.stopReason,
     liveness: opts.liveness ?? null,
     cold_start_inflight: opts.coldStartInflight,
+    needs_human: (opts.needsHuman ?? []).map((n) => n.id),
+    needs_human_committed: (opts.needsHuman ?? []).map((n) => ({ id: n.id, committed: n.committed })),
   };
 }
 
@@ -2025,6 +2030,10 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // needs-human（ready→needs-human），needsHuman 集合同进 retryCapNotExhausted / notNeedsHuman 过滤 ⇒
   // 不再无限重派。跨轮存活于常驻循环内（⛔ 不落盘，与 promotion 的 RetryState 同寿命）。
   const retryState: RetryState = { counts: new Map(), needsHuman: new Set() };
+  // gap-mark-needs-human-commit-after-write：markNeedsHuman 翻转结果（含 committed）经 writeRound 落进
+  // 每轮 round 记录（生产载体——生产 driver argv 无 --json ⇒ json 事件不可观测，同 cold-start-inflight）。
+  // splice(0) 快照并清空 ⇒ 每轮只报【本轮新】的翻转，⛔ 不累积跨轮。
+  const needsHumanResults: Array<{ id: string; ok: boolean; committed: boolean; reason: string }> = [];
 
   // gap-worker-driver-cold-start-inflight-refresh：冷启动在飞排除集【每趟 pass 现观测】（SPEC §5.2
   // actual=observe()），不再是循环外一次性 const 快照——原 gap-worker-driver-cold-start-inflight-blind
@@ -2055,6 +2064,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       stopReason: reason,
       liveness,
       coldStartInflight: [...coldInflight].sort(),
+      needsHuman: needsHumanResults.splice(0),
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -2097,7 +2107,12 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       if (r.outcome.final_state === "exited-not-landed") {
         const newly = advanceRetryCap(retryState, [r.taskId], maxRetries);
         for (const id of newly) {
-          markNeedsHuman(rootDir, id, `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`);
+          // gap-mark-needs-human-commit-after-write：markNeedsHuman 写盘即提交，返回
+          // { id, ok, reason, committed }——⛔ 不再丢弃 {ok,reason}；结果经 writeRound 落进 round 记录
+          // （生产载体），json 事件供测试/手动观测。
+          const nh = markNeedsHuman(rootDir, id, `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`);
+          needsHumanResults.push(nh);
+          if (json) process.stdout.write(`${JSON.stringify({ event: "needs-human", ...nh })}\n`);
         }
       }
       return r;
