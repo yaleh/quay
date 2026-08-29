@@ -20,6 +20,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { readFrontmatter } from "./gate-script-base.ts";
 import { parseTask, readDependsOn } from "./task-schema.ts";
 import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
@@ -163,26 +164,86 @@ export function advanceRetryCap(
   return newly;
 }
 
+// ── commit-after-write（主检出 status 翻转写盘即提交；单一真相源，⛔ 不各写一份） ───────────────────
+
+/** True when `root` is inside a git work tree (production root = the main checkout). False when git
+ *  itself errors (unit-test temp dirs, or a repo-less root) — the commit is then a no-op, not a throw. */
+export function isInsideGitWorkTree(root: string): boolean {
+  try {
+    const out = execFileSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.toString().trim() === "true";
+  } catch {
+    return false;
+  }
+}
+
+/** COMMIT-AFTER-WRITE (gap-mark-needs-human-commit-after-write): commit a single task file to git
+ *  immediately after a mechanical status flip. pathspec-limited to `rel` (⛔ never a bare `git commit`,
+ *  which would sweep whatever another layer staged into the SHARED index — memory
+ *  git-commit-no-pathspec-commits-shared-index). `--no-verify` skips the pre-commit hook: a mechanical
+ *  status flip is content-neutral. Repo-less unit-test temp dirs are a no-op (return false, not a throw).
+ *  Returns true when the commit landed; false on repo-less / git error (surfaced as `committed: false`,
+ *  observable not silent). */
+export function commitTaskFile(root: string, rel: string, message: string): boolean {
+  if (!isInsideGitWorkTree(root)) return false;
+  try {
+    execFileSync("git", ["-C", root, "add", "--", rel]);
+    execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", message, "--", rel]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Propagate the doc branch to develop (gap-fan-in-ff-ref-update-detach-develop): the main checkout
+ *  sits on the doc-only work branch (main/manager-doc). A flip committed THERE must reach develop so
+ *  task worktrees (branching from develop) see the new status — otherwise dispatch reads the new status
+ *  on main/manager-doc while the worktree base (develop) still has the old one. Fast-forward push; if
+ *  develop advanced (non-ff), merge develop first then push. Best-effort: a conflict leaves the flip on
+ *  the doc branch and the next landing's merge-develop reconciles. */
+export function propagateDocBranchToDevelop(root: string): void {
+  try {
+    const cur = execFileSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).trim();
+    if (!cur || cur === "develop") return;
+    try {
+      execFileSync("git", ["-C", root, "push", ".", `${cur}:develop`], { stdio: "ignore" });
+    } catch (_) {
+      // Develop advanced past the doc branch — merge it in, then push (fast-forward now).
+      execFileSync("git", ["-C", root, "merge", "develop", "--no-edit"], { stdio: "ignore" });
+      execFileSync("git", ["-C", root, "push", ".", `${cur}:develop`], { stdio: "ignore" });
+    }
+  } catch (_) { /* best-effort — next landing's merge-develop reconciles */ }
+}
+
 /** 把修满/派满上限仍不合格的任务标 needs-human（status todo/ready → needs-human）+ 追加一条
  *  `## Needs-Human` 审计记录（grep-able 原因，⛔ 静默翻转）。worker 派发的是 ready 任务、promotion
  *  修的是 todo 任务 ⇒ 两者都可翻 needs-human；其它状态（needs-human/done/superseded…）拒写。
- *  只在 status ∈ {todo, ready} 时写（并发保护，同 ready-pool-check 的 setTaskStatus）。返回
- *  { id, ok, reason }——ok=false 表示未写（missing/无 frontmatter/非 todo·ready）。 */
-export function markNeedsHuman(root: string, id: string, reason: string): { id: string; ok: boolean; reason: string } {
+ *  只在 status ∈ {todo, ready} 时写（并发保护，同 ready-pool-check 的 setTaskStatus）。
+ *  COMMIT-AFTER-WRITE (gap-mark-needs-human-commit-after-write)：写盘即提交（复用 commitTaskFile 族，
+ *  ⛔ 不写第四份）——翻转后主检出不留脏树（硬规则 11b：盘上翻转改变派发计算但对读 git 的人不可见）。
+ *  返回 { id, ok, reason, committed }——ok=false 表示未写（missing/无 frontmatter/非 todo·ready）；
+ *  committed=false 表示未提交（repo-less 单测临时目录 no-op，或 git 提交失败）。 */
+export function markNeedsHuman(root: string, id: string, reason: string): { id: string; ok: boolean; reason: string; committed: boolean } {
   const file = path.join(root, "tasks", `${id}.md`);
-  if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
+  if (!fs.existsSync(file)) return { id, ok: false, reason: "missing", committed: false };
   const raw = fs.readFileSync(file, "utf8");
   const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
-  if (!m) return { id, ok: false, reason: "no-frontmatter" };
+  if (!m) return { id, ok: false, reason: "no-frontmatter", committed: false };
   const [, open, fm, close] = m;
-  if (!/^status:\s*(todo|ready)\s*$/m.test(fm)) return { id, ok: false, reason: "not-todo" };
+  const fromMatch = /^status:\s*(todo|ready)\s*$/m.exec(fm);
+  if (!fromMatch) return { id, ok: false, reason: "not-todo", committed: false };
   const newFm = fm.replace(/^status:\s*(todo|ready)\s*$/m, "status: needs-human");
   const body = raw.slice(m[0].length);
   const record =
     `\n## Needs-Human\n\n**执行 ${new Date().toISOString()} — 连续修满重试上限仍不合格（标 needs-human）**\n\n` +
     `- 阻碍原因：${reason}\n`;
   fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
-  return { id, ok: true, reason };
+  const rel = path.join("tasks", `${id}.md`);
+  const committed = commitTaskFile(root, rel, `tasks: ${id} ${fromMatch[1]}→needs-human（重试上限机械翻转）`);
+  if (committed) propagateDocBranchToDevelop(root);
+  return { id, ok: true, reason, committed };
 }
 
 /** 候选未被标 needs-human（status 非 needs-human）。读不懂 ⇒ fail-closed 滤掉（⛔ 读不懂 ≠ 合格）。 */

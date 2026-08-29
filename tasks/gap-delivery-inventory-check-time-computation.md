@@ -1,7 +1,7 @@
 ---
 id: gap-delivery-inventory-check-time-computation
 title: delivery inventory 改 check 时现算，消除 outline snapshot 冲突热点
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -25,10 +25,14 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，快照移除）：`docs/proposals/quay-product-outline.md` §6 不再含手编辑的 `scripts=N` 计数（grep 不到 `scripts=`，或标注为「由 verify-delivery-surface --inventory 现算」生成视图）。
-- [ ] AC2（能取假，现算替代）：`delivery-inventory-drift-gate.sh`（或替代机件）经 `verify-delivery-surface.ts --inventory` 现算 inventory，不再依赖提交快照（grep 其源码含 `--inventory` 调用或已退役标注）。
-- [ ] AC3（能取假，冲突热点消除）：两个各自增删 plugin/scripts 的任务，其 worktree fork 于不同 develop 基点时，`merge develop` 不再因 outline 的 `scripts=N` 冲突（outline 已非手编辑值）。
-- [ ] AC4（能取假，摘要仍可读）：交付面摘要仍可经 `verify-delivery-surface.ts --inventory` 现算得到（release/人工审计时一条命令可查），不因移除快照而丢失。
+- [x] AC1（能取假，快照移除）：`docs/proposals/quay-product-outline.md` §6 不再含手编辑的 `scripts=N` 计数（grep 不到 `scripts=`，或标注为「由 verify-delivery-surface --inventory 现算」生成视图）。
+  - 实证：`<!-- DELIVERY-INVENTORY-BEGIN -->` / `scripts=294 · gate-scripts=14 · …` / `<!-- DELIVERY-INVENTORY-END -->` 块已删（`git show 48b41eb13`）；`grep -nE 'scripts=[0-9]+' docs/proposals/quay-product-outline.md` 归零（exit 1）——残留仅 §6 prose `scripts=N`（字面占位符缘由）一处，无数值 token。测试 `verify-delivery-surface.test.mjs` `assert.doesNotMatch(outline, /scripts=\d+/)` 绿。
+- [x] AC2（能取假，现算替代）：`delivery-inventory-drift-gate.sh`（或替代机件）经 `verify-delivery-surface.ts --inventory` 现算 inventory，不再依赖提交快照（grep 其源码含 `--inventory` 调用或已退役标注）。
+  - 实证：`delivery-inventory-drift-gate.sh` 头部带「RETIRED TRIGGER (gap-delivery-inventory-check-time-computation, 2026-08-29)」退役标注；outline-snapshot 触发已删，保留独立的 workflow 镜像触发；inventory 改由 `verify-delivery-surface.ts --inventory` check 时现算（exit 0 报告，无快照）。
+- [x] AC3（能取假，冲突热点消除）：两个各自增删 plugin/scripts 的任务，其 worktree fork 于不同 develop 基点时，`merge develop` 不再因 outline 的 `scripts=N` 冲突（outline 已非手编辑值）。
+  - 实证：outline 无数值 `scripts=N` token（AC1 归零）⇒ 两个 fork 于不同 develop 基点、各自增删 plugin/scripts 的任务不再共编同一条共享快照行；drift gate 不再要求 outline co-touch（`runner-static-gate.ts` `@static-object` 由 `plugin/scripts/ docs/proposals/quay-product-outline.md` 改为 `.claude/workflows/ plugin/workflows/`）。
+- [x] AC4（能取假，摘要仍可读）：交付面摘要仍可经 `verify-delivery-surface.ts --inventory` 现算得到（release/人工审计时一条命令可查），不因移除快照而丢失。
+  - 实证：`node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --inventory` → exit 0，报 `scripts=294 · gate-scripts=14 · skills=13 · probes=5 · loop=6 · workflows=5 · agents=1 · vendor=2`（8 目录磁盘真值）；直接测试全绿（verify-delivery-surface 22/22、drift-gate 8/8、select-static-checks 17/17）。
 
 ## Definition of Done
 
@@ -36,11 +40,14 @@ outline 的 §6 计数不再是手编辑的提交快照，而是由 `verify-deli
 
 ## Touches
 
-- plugin/scripts/delivery-inventory-drift-gate.sh（现算/退役）
 - plugin/scripts/verify-delivery-surface.ts（--inventory 现算承载）
+- plugin/scripts/delivery-inventory-drift-gate.sh（outline 触发退役，保留 workflow 镜像触发）
+- plugin/scripts/runner-static-gate.ts（gate @static-object/注释同步）
+- plugin/scripts/select-static-checks-for-touches.ts（移除 DELIVERY_INVENTORY_CHECKER + 注册表去 outline）
+- plugin/scripts/capability-catalog.sh（gate 六表标注）
+- plugin/scripts/checker-mutation-cases/delivery-inventory-drift-gate.sh（移除 script 阶段）
 - docs/proposals/quay-product-outline.md（§6 移除手编辑计数）
-- plugin/scripts/verify-deliver-coldstart.sh（改读现算）
-- plugin/scripts/release-freshness-check.sh（改读现算）
-- plugin/scripts/select-static-checks-for-touches.ts（gate 语义/退役）
-- plugin/scripts/capability-catalog.sh（gate 标注）
+- plugin/test/verify-delivery-surface.test.mjs（inventory 测试重写）
+- plugin/test/delivery-inventory-drift-gate.test.mjs（移除 outline 测试）
+- plugin/test/select-static-checks-for-touches.test.mjs（注册表断言更新）
 - tasks/gap-delivery-inventory-check-time-computation.md（自身）
