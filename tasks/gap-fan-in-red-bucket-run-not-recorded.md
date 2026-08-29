@@ -2,7 +2,7 @@
 id: gap-fan-in-red-bucket-run-not-recorded
 title: fan-in 桶路径跑红不入账——第二套平行 harness + green-only writer 绕开
   full-suite-runner.ts 的正确记录（硬规则 3b；人裁定「定义正确机制，不修修补补」）
-status: ready
+status: done
 labels:
   - gap
   - defect
