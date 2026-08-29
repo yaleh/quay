@@ -15,6 +15,8 @@ extra:
 
 > **前提修正（2026-08-25，pool-quality-judge should-remove → manager 复核 → 撤回 supersede → 再并入动态测试 fail 同族）**：本任务曾被我误判「前提证伪」而 supersede（f8fbf237），manager 复核后撤回并改精确前提（e8f56165）；后又并入 manager 新报的动态测试 fail 同族缺口。我两次没把「机制存在」与「机制今天触发」分开验——第一次照抄 manager 归因没核实前提，第二次信 judge「31 条存在=前提证伪」没查今天是否真触发。硬规则「verify 不 trust」同坑两次。
 
+> **阻塞已升级（2026-08-29，manager 诊断，非重派可解）**：连续 exited-not-landed 的真因不是挡路 check——`gap-mechanical-fan-in-result-single-authoritative-structured`（done，`f3115bf81`）已把 `runMechanicalFanIn` 重构为单一权威结构化结果（D5 final_state / D6 结构化 reason / D7 full-suite-state）。本任务 fix 的 `writeRedSuiteRecord` 插在 `runMechanicalFanIn` 旁、依赖的 `SuiteRunResult` 已迁 `suite-driver.ts`（`startedAt`/`durationMs` 字段保留）。⇒ 需对重构后的 `runMechanicalFanIn` 重锚定（逻辑与 writer `pre-verified-round-record.ts --state red --preverified 0` 现成，非重写）。
+
 ## Proposal
 
 `verification-round.jsonl` 对**未完整跑完的轮次结构性不落记录**——同一族「某类失败在生产载体里结构性缺席，观测者据此误判为『没发生』」，两个已核实的子类：
