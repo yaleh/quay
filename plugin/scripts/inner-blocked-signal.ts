@@ -137,6 +137,7 @@ import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { writeJsonAtomic } from "./write-json-atomic.ts";
 import { isDirectEntry, readFrontmatter } from "./gate-script-base.ts";
 import { SCHEMA_VERSION, validateEvent, emitEvent } from "./workflow-event-schema.mjs";
 import {
@@ -962,10 +963,7 @@ export function readRulingObserverState(root, target = DEFAULT_TARGET) {
  */
 export function writeRulingObserverState(root, state, target = DEFAULT_TARGET) {
   const f = rulingObserverStatePath(root, target);
-  fs.mkdirSync(path.dirname(f), { recursive: true });
-  const tmp = `${f}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf8");
-  fs.renameSync(tmp, f);
+  writeJsonAtomic(f, state);
 }
 
 /**

@@ -62,7 +62,7 @@ import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 import { recordNoBlockLedger } from "./task-contract-check.ts";
 
 
@@ -321,6 +321,7 @@ export function formatTextReport(scan, { baselineCount, newOnes = [], growth = f
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 export function runCli(argv) {
   const args = argv.slice(2); // skip node + script path (process.argv[0..1])
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node task-ac-carryover-check.ts [--root <dir>] [--json] [--write-ratchet] [--allow-growth] [--reset-baseline] [--no-block] [<task-file> ...]");
   let root = null;
   let json = false;
   let writeRatchetFlag = false;

@@ -454,3 +454,84 @@ test("runner — parseRunnerArgs splits files from pass-through flags (--test-co
   assert.deepEqual(files, ["a.test.mjs", "b.test.mjs"], "--test-concurrency args are consumed, not files");
   assert.deepEqual(testNamePatterns, ["keep me", "drop me"], "both --test-name-pattern spellings map to testNamePatterns");
 });
+
+// ══ gap-suite-lpt-runner-exitcode-diverges-spec-tally ══════════════════════════════════════════════
+// The runner's exit code used to be a SEPARATE `test:fail` event counter — two read surfaces, two
+// counts. A "fake red TAP" test file (one that PASSES but leaks a literal `not ok` line from a
+// subprocess it spawns) pollutes the spec output the outer runner greps for 判绿/红 while the
+// `test:fail` counter stays clean ⇒ exit code green / stdout red (分叉). Fix: ① the exit code reads
+// the ROOT test:summary counts (the SAME tally the spec reporter renders as `ℹ fail N` / `ℹ
+// cancelled N` — single source, no second driftable counter) and ② raw child stdout/stderr
+// (test:stdout / test:stderr) is dropped before the spec reporter so a phantom `not ok` never
+// reaches the runner's stdout.
+
+/** Write a test file that PASSES but leaks a literal `not ok 1 - boom` line from a child subprocess
+ *  (stdio inherited) — the "fake red TAP" shape of a failure-detection test. */
+function makePhantomLeakFile(dir) {
+  const file = path.join(dir, "phantom-leak.test.mjs");
+  fs.writeFileSync(
+    file,
+    'import { spawnSync } from "node:child_process";\n' +
+      'import { test } from "node:test";\n' +
+      'import assert from "node:assert/strict";\n' +
+      'test("passes despite phantom", () => {\n' +
+      '  spawnSync(process.execPath, ["-e", "console.log(\'not ok 1 - boom\')"], { stdio: "inherit" });\n' +
+      '  assert.equal(1, 1);\n' +
+      '});\n',
+  );
+  return file;
+}
+
+test("gap-suite-lpt-runner-exitcode AC1/AC2 — a fake-red-TAP file (leaks phantom `not ok`) exits 0 AND the runner stdout carries no `not ok` (exit code and spec output agree, both green)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lpt-phantom-"));
+  try {
+    const leaky = makePhantomLeakFile(dir);
+    const childEnv = { ...process.env };
+    delete childEnv.NODE_TEST_CONTEXT;
+    const r = spawnSync(process.execPath, ["--test-concurrency=1", RUNNER, leaky], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env: childEnv,
+    });
+    // Green exit code: the phantom `not ok` is not a real failure (the spec fail tally is 0).
+    assert.equal(r.status, 0, `a phantom-leaking file must exit 0 (stderr: ${r.stderr})`);
+    // The spec reporter's own tally is clean (fail 0) — the single source the exit code reads.
+    assert.match(r.stdout, /ℹ fail 0\b/, `spec must report fail 0:\n${r.stdout}`);
+    // 判据2 take-false: the phantom `not ok` must NOT reach stdout (the raw child output is dropped
+    // before the spec reporter). Before the fix this line leaked ⇒ exit code 0 / stdout red (分叉).
+    assert.doesNotMatch(r.stdout, /^not ok\b/m, `the runner stdout must not leak a phantom not ok:\n${r.stdout}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("gap-suite-lpt-runner-exitcode AC3 — single source: no `test:fail` counter, exit code reads the ROOT test:summary counts", () => {
+  const src = fs.readFileSync(RUNNER, "utf8");
+  // The second, independently-updated test:fail counter is deleted — the exit code now reads the
+  // SAME tally the spec reporter renders, so the two can never drift apart (判据3).
+  assert.doesNotMatch(src, /stream\.on\("test:fail"/, "the separate test:fail counter must be gone");
+  assert.match(src, /test:summary/, "the exit code must read the test:summary counts (single source)");
+  assert.match(src, /dropRawDiagnostics\(\)/, "the raw-diagnostic filter must be wired before the spec reporter");
+});
+
+test("gap-suite-lpt-runner-exitcode AC1 — a REAL failure still exits 1 and the exit code equals the spec fail tally (single source, no regression)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lpt-real-"));
+  try {
+    const bad = path.join(dir, "bad.test.mjs");
+    fs.writeFileSync(
+      bad,
+      'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("red", () => assert.equal(1, 2, "intentional"));\n',
+    );
+    const childEnv = { ...process.env };
+    delete childEnv.NODE_TEST_CONTEXT;
+    const r = spawnSync(process.execPath, ["--test-concurrency=1", RUNNER, bad], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env: childEnv,
+    });
+    assert.equal(r.status, 1, `one failing file ⇒ the runner exits non-zero (stderr: ${r.stderr})`);
+    assert.match(r.stdout, /ℹ fail 1\b/, `spec must report fail 1 (the exit code's single source):\n${r.stdout}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -1064,12 +1064,19 @@ _derive_loop_scripts_once() {
   #   repo-root and dies with "No such file or directory" / ERR_MODULE_NOT_FOUND. Same class as
   #   touches-one-entry-one-path-check.ts above — the single repo-root resolver must land with
   #   every consumer.
+  #   canonical-test-files.ts (gap-canonical-test-files-glob-vs-realpath-divergence): test-framework-
+  #   policy-check.ts is laid down via a bare-name mention in plugin/loop/orchestrator-tick-core.md,
+  #   and imports this lib via ESM `./canonical-test-files.ts` — an ESM relative `./` import is
+  #   INVISIBLE to the dependency-closure step (d) below (it only scans `${SCRIPT_DIR}/<name>`
+  #   sibling references in shell scripts), so without this explicit entry a cold-started consumer
+  #   lays down test-framework-policy-check.ts without its imported lib and the check dies with
+  #   ERR_MODULE_NOT_FOUND. Same class as touches-one-entry-one-path-check.ts above.
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \
-    repo-root.sh repo-root.ts >> "$out"
+    repo-root.sh repo-root.ts canonical-test-files.ts >> "$out"
   # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
   #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
   #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the

@@ -15,12 +15,10 @@
 # (SPEC-state-crystallization §2.1: ".halt 是『规则正确但缺机械挂载点』的实例").
 #
 # THIS SCRIPT IS THE MECHANICAL MOUNT POINT. It makes `.halt` PREEMPTIVE — it takes effect at
-# ANY execution point, not just the next tick boundary:
+# ANY execution point, not just the next tick boundary. (The former `halt-check` .halt-read
+# subcommand was retired 2026-08-29 with gap-retire-halt-file-driver-based — the .halt promotion/
+# execution role moved to the driver control-state, so the sentinel read no longer lives here.)
 #
-#   halt-check   — read the `.halt` sentinel (fail-closed). The Contract `measure` surface:
-#                  `bash <抢占原语> halt-check` stdout's `halted=` field. Any dispatch path /
-#                  any layer that wants to know "should I stop RIGHT NOW?" asks THIS, not a
-#                  prose step-0 rule. Grep-able, code-enforced, works mid-flow.
 #   preempt      — process-level stop signal against ONE target at ANY point. For the TUI form
 #                  (pre `claude -p`) the signal is a tmux C-c to the target pane (interrupts the
 #                  running agent wherever it is); for the `claude -p` form (AC4/AC5b) the signal
@@ -46,9 +44,6 @@
 # processes/sessions. Any line that would need to "understand what a task is about" is overreach.
 #
 # Usage:
-#   supervisor-preempt.sh halt-check [--root <repo-root>]
-#       stdout: halted=true|false ; reason=<content-or-fail-closed-message>
-#       exit 0 (a check, not a gate)
 #   supervisor-preempt.sh preempt <target> [--method auto|tmux-c-c|kill] [--dry-run]
 #       <target>  a numeric PID   → `kill <pid>`            (-p form; AC4)
 #                 a tmux target   → `tmux send-keys C-c`    (TUI form)
@@ -92,53 +87,6 @@ KILL_CMD="${SUPERVISOR_PREEMPT_KILL_CMD:-kill}"
 DRY_RUN="${SUPERVISOR_PREEMPT_DRY_RUN:-0}"
 CANDIDATES_TS="${SUPERVISOR_PREEMPT_CANDIDATES:-$SELF_DIR/supervisor-preempt-candidates.ts}"
 LEDGER_PATH="${SUPERVISOR_PREEMPT_LEDGER:-}"
-
-# ── halt-check ─────────────────────────────────────────────────────────────────────────────────────
-# Read .halt at workspace root. Mirror checkHalt()'s semantics EXACTLY (select-preflight.ts):
-#   * ENOENT (no file)      → halted=false — the expected, common non-halted state.
-#   * file exists           → halted=true  (empty file still halts — the sentinel is the pause).
-#   * any OTHER read error  → FAIL-CLOSED halted=true with the reason naming the failure.
-#     (gap-halt-sentinel-path-mismatch: a fail-open shape on an unreadable sentinel already
-#      caused a real safety miss — never silently fall through to "not halted".)
-halt_check() {
-  local i=1 a
-  while [ "$i" -le "$#" ]; do
-    a="${!i}"
-    case "$a" in
-      --root) i=$(( i + 1 )); ROOT="${!i:-$ROOT}" ;;
-      *) echo "halt-check: unknown arg $a" >&2; return 2 ;;
-    esac
-    i=$(( i + 1 ))
-  done
-  local halt_path="$ROOT/.halt" content
-  if [ -f "$halt_path" ]; then
-    content="$(cat "$halt_path" 2>/dev/null && printf '\n')" || {
-      echo "halted=true"
-      echo "reason=FAIL-CLOSED: could not read .halt sentinel at $halt_path"
-      return 0
-    }
-    content="$(printf '%s' "$content" | sed -n '1p' | cut -c1-200)"
-    [ -n "$content" ] || content=".halt sentinel present (empty)"
-    echo "halted=true"
-    echo "reason=$content"
-    return 0
-  fi
-  # Not present: is it a plain ENOENT or a genuine failure (dir in the way, perm denied…)?
-  if [ ! -e "$halt_path" ]; then
-    echo "halted=false"
-    echo "reason="
-    return 0
-  fi
-  # Path exists but is not a regular file (or unreadable) → fail closed.
-  if [ ! -r "$halt_path" ]; then
-    echo "halted=true"
-    echo "reason=FAIL-CLOSED: .halt sentinel present but unreadable at $halt_path"
-    return 0
-  fi
-  echo "halted=true"
-  echo "reason=FAIL-CLOSED: .halt sentinel present but not a readable file at $halt_path"
-  return 0
-}
 
 # ── preempt one target ─────────────────────────────────────────────────────────────────────────────
 # <target> is a PID (numeric → kill) or a tmux target (anything else → tmux send-keys C-c).
@@ -292,11 +240,6 @@ cmd_preempt_task() {
 
 CMD="${1:-}"
 case "$CMD" in
-  halt-check)
-    shift
-    halt_check "$@"
-    exit $?
-    ;;
   preempt)
     shift
     cmd_preempt "$@"
@@ -318,7 +261,7 @@ case "$CMD" in
     exit $?
     ;;
   *)
-    echo "用法: $0 {halt-check [--root <根>] | preempt <target> [--method …] | preempt-all [--root <根>] [--target <层>…] [--pid <pid>…] | --list-preemptible [--root <根>] | preempt-task <taskId> [--root <根>] [--dry-run]}" >&2
+    echo "用法: $0 {preempt <target> [--method …] | preempt-all [--root <根>] [--target <层>…] [--pid <pid>…] | --list-preemptible [--root <根>] | preempt-task <taskId> [--root <根>] [--dry-run]}" >&2
     exit 2
     ;;
 esac

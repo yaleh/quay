@@ -46,6 +46,7 @@ import { repoRoot } from "./repo-root.ts";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -161,6 +162,7 @@ function usage() {
 
 export async function main(argv) {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: malformed-task-check.ts [--root <dir>] [--selftest]");
   let root = process.cwd();
   let selfTest = false;
   for (let i = 0; i < args.length; i++) {

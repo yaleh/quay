@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-selector-api-error-no-backoff
 title: worker-driver selector API 错误/fallback 失败无退避——54 次 <60s 快速重派烧派发预算
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -30,9 +30,9 @@ worker-driver 对 selector API 错误 / fallback 失败**无退避**——17:22�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，退避生效）：worker <60s 连续死亡 ≥M 次后，driver 对该任务退避（不立即重派），重派间隔随次数增长；（⛔ 仍 <60s 立即重派 ⇒ 假）。
-- [ ] AC2（能取假，不全局）：一个任务退避时，其它任务照常派发（退避按 task 记）；（⛔ 退避拖垮全局 ⇒ 假）。
-- [ ] AC3（能取假，有上限）：退避到上限转 markNeedsHuman，不无限退避；（⛔ 无限退避 ⇒ 假）。
+- [x] AC1（能取假，退避生效）：worker <60s 连续死亡 ≥M 次后，driver 对该任务退避（不立即重派），重派间隔随次数增长；（⛔ 仍 <60s 立即重派 ⇒ 假）。
+- [x] AC2（能取假，不全局）：一个任务退避时，其它任务照常派发（退避按 task 记）；（⛔ 退避拖垮全局 ⇒ 假）。
+- [x] AC3（能取假，有上限）：退避到上限转 markNeedsHuman，不无限退避；（⛔ 无限退避 ⇒ 假）。
 
 ## Definition of Done
 
@@ -43,3 +43,9 @@ driver selector 错误/快速死亡退避落地；AC1-AC3 全勾；54 次级快�
 - plugin/scripts/worker-driver.ts（selector 错误/快速死亡退避 + markNeedsHuman 兜底）
 - plugin/test/worker-driver.test.mjs（退避 + 按 task 隔离 + 上限负控制）
 - tasks/gap-worker-driver-selector-api-error-no-backoff.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T18:24:45.124Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

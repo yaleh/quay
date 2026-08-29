@@ -82,33 +82,16 @@ export const CAPABILITY_CATALOG_CHECKER = {
 };
 
 /**
- * The DELIVERY-INVENTORY drift check (gap-inventory-drift-inner-exec-mode-report-missing-snapshot-
- * regen, AC2): the outline §6 DELIVERY-INVENTORY snapshot is a DERIVED copy of disk's
- * plugin-bundle directory counts, validated by verify-delivery-surface.ts --inventory. A NEW
- * plugin/scripts file (the `(new)` tag or git-untracked — the same signal CAPABILITY_CATALOG_CHECKER
- * uses) changes disk's scripts count, so the snapshot MUST be regenerated (--write-inventory).
- * Before this scoped-only VIRTUAL checker, a task that added a new script shipped scoped-green and
- * the drift surfaced only at the full-suite verification round (5 instances: halt-check/spec-goal/
- * accounting-emit/DIR-043/inner-exec-mode). Pulling --inventory into the scoped tier for new-script
- * tasks turns the scoped gate red at creation time when the snapshot was not regenerated.
- */
-export const DELIVERY_INVENTORY_CHECKER = {
-  name: "delivery-inventory",
-  tier: "change",
-  objects: [],
-  scopedMode: null,
-  commandLine: 'run_checker "delivery-inventory" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/verify-delivery-surface.ts" --inventory',
-};
-
-/**
  * The registration files a task whose Touches declare a NEW `plugin/scripts/*` file MUST ALSO
  * authorize in its Touches (gap-new-script-touches-missing-inventory-catalog-registration, AC3). A
- * new script landing in the plugin-bundle has TWO mechanical-necessity sync products that live
+ * new script landing in the plugin-bundle has ONE mechanical-necessity sync product that lives
  * OUTSIDE the script file itself:
- *   1. `plugin/scripts/capability-catalog.sh`  — the AC1c QUESTION-table declaration line (a new
- *      script with no declaration is `unclassified` and the catalog exits non-zero);
- *   2. `docs/proposals/quay-product-outline.md` — the §6 DELIVERY-INVENTORY snapshot (a DERIVED copy
- *      of disk's bundle counts; a new script drifts disk-vs-snapshot until `--write-inventory`).
+ *   1. `plugin/scripts/capability-catalog.sh` — the AC1c QUESTION-table declaration line (a new
+ *      script with no declaration is `unclassified` and the catalog exits non-zero).
+ *   (The former SECOND product — `docs/proposals/quay-product-outline.md` §6 DELIVERY-INVENTORY
+ *   snapshot — is RETIRED: the inventory is now computed at check time by
+ *   verify-delivery-surface.ts --inventory (gap-delivery-inventory-check-time-computation), so a new
+ *   script no longer drifts a committed snapshot and no longer needs outline authorization.)
  * When these are NOT in the task's Touches, the dispatched agent is NOT authorized to touch them —
  * the 3-instance regression this task closes (2 agents overstepped and edited them anyway, 1 agent
  * correctly stopped). This check turns that "post-hoc authorization" into a dispatch-preflight
@@ -116,16 +99,13 @@ export const DELIVERY_INVENTORY_CHECKER = {
  * `touches-missing-registration` and must be fixed (add the files to ## Touches) before it can be
  * worked — the agent either oversteps or stops today, both of which this task removes.
  */
-export const NEW_SCRIPT_REGISTRATION_REQUIRED = [
-  "plugin/scripts/capability-catalog.sh",
-  "docs/proposals/quay-product-outline.md",
-];
+export const NEW_SCRIPT_REGISTRATION_REQUIRED = ["plugin/scripts/capability-catalog.sh"];
 
 /**
  * Dispatch-preflight registration check (gap-new-script-touches-missing-inventory-catalog-
  * registration, AC2/AC3/AC4). Pure: given the task's declared `## Touches` paths and its NEW-file
  * subset (the `(new)`-tagged and/or git-untracked plugin/scripts paths — the SAME signal
- * CAPABILITY_CATALOG_CHECKER and DELIVERY_INVENTORY_CHECKER use), return ok:false with reason
+ * CAPABILITY_CATALOG_CHECKER uses), return ok:false with reason
  * `touches-missing-registration` when the task declares a NEW `plugin/scripts/*` file but its
  * Touches do NOT authorize the registration files. A task with NO new plugin/scripts file is always
  * ok:true (AC4 negative control — existing scripts are never re-gated, the artifact is not
@@ -546,16 +526,14 @@ export function selectStaticChecksForTouches(touches, registry, opts = {}) {
   }
   // AC1 (gap-capability-catalog-declarations-not-enforced-at-script-creation): a NEW plugin/scripts
   // file in this change pulls the capability-catalog AC1c entry-point gate into the scoped tier.
-  // AC2 (gap-inventory-drift-inner-exec-mode-report-missing-snapshot-regen): the SAME new-file
-  // signal ALSO pulls the DELIVERY-INVENTORY drift check — a new script changes disk's scripts count,
-  // and the outline §6 snapshot is a derived copy that must be regenerated (--write-inventory);
-  // without this wiring the drift surfaced only at the full-suite round (5 prior instances).
+  // (The former AC2 DELIVERY-INVENTORY drift check is RETIRED — gap-delivery-inventory-check-time-
+  // computation: the inventory is computed at check time by verify-delivery-surface.ts --inventory,
+  // so a new script no longer drifts a committed snapshot and needs no scoped drift gate.)
   const newTouches = opts && opts.newTouches ? opts.newTouches : [];
   const newPluginScript = [...new Set(newTouches.map(normalizeRel))]
     .some((t) => isShippedPluginScript(t));
   if (newPluginScript) {
     selected.push(CAPABILITY_CATALOG_CHECKER);
-    selected.push(DELIVERY_INVENTORY_CHECKER);
   }
   return { selected, deferred };
 }
@@ -597,7 +575,7 @@ Usage:
 Dispatch-preflight registration check (gap-new-script-touches-missing-inventory-catalog-registration):
   --check-registration — with --task <id>, validate that a task whose ## Touches declare a NEW
       plugin/scripts file ((new) tag, git-untracked, or the full-width （新：…） marker) ALSO authorizes
-      the registration files (plugin/scripts/capability-catalog.sh + docs/proposals/quay-product-outline.md).
+      the registration file (plugin/scripts/capability-catalog.sh).
       Prints JSON { ok, reason, missing, newScript, ... }, exits 0 when ok, 1 when touches-missing-registration.
       The same check runs implicitly in every --task selection mode: a failing task makes the scoped
       static-check selection exit non-zero, so scripts/test.sh's scoped gate turns red (fail-closed)
@@ -607,10 +585,10 @@ Selection rule (AC1/AC3, parsed mechanically from scripts/test.sh's run_static_c
   scoped = { tier=always } ∪ { tier=change whose object ∩ touches } − { tier=full }
   tier annotations live in scripts/test.sh (never hand-listed here).
   PLUS: a NEW plugin/scripts file in the touches ((new) tag or git-untracked) adds the
-  capability-catalog AC1c entry-point gate AND the DELIVERY-INVENTORY drift check
-  (verify-delivery-surface.ts --inventory) to the scoped set
-  (gap-capability-catalog-declarations-not-enforced-at-script-creation /
-   gap-inventory-drift-inner-exec-mode-report-missing-snapshot-regen).
+  capability-catalog AC1c entry-point gate to the scoped set
+  (gap-capability-catalog-declarations-not-enforced-at-script-creation).
+  (The former DELIVERY-INVENTORY drift check is RETIRED — gap-delivery-inventory-check-time-
+   computation.)
 
 Output modes:
   --commands (default) — concrete shell commands for the selected checkers (one per line)
@@ -725,8 +703,8 @@ function touchesFromTask(root, taskId) {
   const newPaths = parsed.filter((e) => e.tag === "new").map((e) => e.path).filter(Boolean);
   // Full-width new-marker augmentation (AC2): the shared parser only tags ASCII `(new)`; the repo's
   // real new-script Touches use `（新：…）`. Merge those plugin/scripts paths into the new-file subset
-  // so the capability-catalog / delivery-inventory scoped checkers AND the dispatch-preflight
-  // registration check fire for the ACTUAL annotation format, not just the ASCII test fixture form.
+  // so the capability-catalog scoped checker AND the dispatch-preflight registration check fire for
+  // the ACTUAL annotation format, not just the ASCII test fixture form.
   for (const p of fullWidthNewScriptPaths(sec)) {
     if (!newPaths.includes(p)) newPaths.push(p);
   }
@@ -873,8 +851,8 @@ export function main(argv) {
   // DISPATCH-PREFLIGHT REGISTRATION CHECK (gap-new-script-touches-missing-inventory-catalog-
   // registration, AC2/AC3/AC4): a task whose ## Touches declare a NEW plugin/scripts file must ALSO
   // authorize the registration files — otherwise the dispatched agent is not authorized to touch the
-  // catalog declaration / DELIVERY-INVENTORY snapshot, and either oversteps or stops (the 3-instance
-  // regression). The check runs ONLY in --task mode (the task's ## Touches are the authorization to
+  // catalog declaration, and either oversteps or stops (the 3-instance regression). The check runs
+  // ONLY in --task mode (the task's ## Touches are the authorization to
   // validate); the --touches CSV mode is a raw file-list (no ## Touches to validate) and is never
   // gated (a `--scoped <files>` run keyed to an untracked new script must not false-positive). A
   // failing task fails the scoped static-check selection (exit 1), which scripts/test.sh's

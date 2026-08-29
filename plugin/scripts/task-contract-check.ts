@@ -59,6 +59,7 @@ import { extractTouchesSection, flagBareDirUncertainTouches } from "./touches-pa
 // probe). Reuses wiring-coverage-check.ts's backtick-identifier extraction + the (calibrated)
 // `N 条`+verb declaration heuristic — NOT a second, independently-buggy parser.
 import { checkWiringClaimAcProbe } from "./wiring-coverage-check.ts";
+import { helpExit } from "./gate-script-base.ts";
 
 
 // ── Consumer checks (read content, match by declared position) ───────────────────────────────────────
@@ -516,6 +517,7 @@ export function recordNoBlockLedger(root, checker, violations, { at = new Date()
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
 export function runCli(argv) {
   const args = argv.slice();
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node task-contract-check.ts [--root <dir>] [--json] [--write-ratchet] [--allow-growth] [--reset-baseline] [--strict-subset] [--no-block] [<task-file> ...]");
   let root = null;
   let json = false;
   let writeRatchetFlag = false;

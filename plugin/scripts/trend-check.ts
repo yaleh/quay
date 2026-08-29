@@ -46,7 +46,7 @@
 import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 
 // ── Trend math (pure, unit-tested) ────────────────────────────────────────────────────────────────────
 
@@ -323,6 +323,7 @@ export function main(argv: string[]): number {
   let json = false;
   let human = false;
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node trend-check.ts [--root <dir>] [--window <n>] [--threshold <f>] [--json | --human]");
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
     else if (args[i] === "--window") window = Number(args[++i]);

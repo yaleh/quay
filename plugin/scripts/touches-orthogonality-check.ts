@@ -16,7 +16,7 @@
 import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
 import { parseTouchEntries, parseTouchEntriesWithTags, extractTouchesSection } from "./touches-parser.ts";
 
@@ -622,6 +622,7 @@ function mainRuntimeDirty(args) {
 
 export async function main(argv) {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: touches-orthogonality-check.ts [--root <dir>] <charterA.md> <charterB.md> | --check-pair | --resolve | --self-touch | --self-touch-scan | --runtime-dirty --task <id>");
   if (args.includes("--runtime-dirty")) return mainRuntimeDirty(args);
   if (args.includes("--self-touch-scan")) return mainSelfTouchScan(args);
   if (args.includes("--self-touch")) return mainSelfTouch(args);

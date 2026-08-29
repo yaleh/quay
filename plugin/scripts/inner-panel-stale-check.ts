@@ -31,7 +31,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 
 /** The panel's agent state verbs (the Contract measure's grep surface). */
 export const STATE_VERBS = Object.freeze([
@@ -244,7 +244,7 @@ export async function main(argv) {
     const i = args.indexOf(name);
     return i !== -1 ? args[i + 1] : undefined;
   };
-  if (args.includes("--help") || args.includes("-h")) { usage(); return 2; }
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node inner-panel-stale-check.ts [--pane <file>] [--target <target>] [--after <file>] [--after-target <target>] [--report <json>] [--root <dir>] [--json]");
   const paneFile = flagVal("--pane");
   const target = flagVal("--target");
   const afterFile = flagVal("--after");

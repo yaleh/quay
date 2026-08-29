@@ -38,6 +38,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -268,6 +269,7 @@ function usage(): never {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node dead-code-after-return-check.ts [--root <dir>] [--json] [--selftest]");
   if (args.includes("--selftest")) {
     process.exit(selftest() ? 0 : 1);
   }

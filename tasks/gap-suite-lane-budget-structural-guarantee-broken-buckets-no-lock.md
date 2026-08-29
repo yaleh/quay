@@ -1,7 +1,8 @@
 ---
 id: gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock
-title: 单飞锁看门狗让槽不让 lane——FULL_SUITE_LOCK_HOLD_MAX_S 超时释放槽位但 suite 继续占满 16 lanes ⇒ S+1 双倍超订（漏口②；漏口① buckets 不取锁已由 serial-lowconc AC3 覆盖）
-status: ready
+title: 单飞锁看门狗让槽不让 lane——FULL_SUITE_LOCK_HOLD_MAX_S 超时释放槽位但 suite 继续占满 16 lanes ⇒
+  S+1 双倍超订（漏口②；漏口① buckets 不取锁已由 serial-lowconc AC3 覆盖）
+status: done
 labels:
   - gap
   - defect
@@ -32,8 +33,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，看门狗让 lane）：看门狗让出槽位时同时让出 lane（不再只让槽不让 lane 的双倍超订）；（⛔ 只让槽不让 lane ⇒ 假）。
-- [ ] AC2（能取假，单跑不退化）：恢复后单 suite 独占时 lane 仍取满 16（⛔ 因修复而把单跑也限死 ⇒ 假——「S=1 时取满」是公式原意，不该被破坏）。
+- [x] AC1（能取假，看门狗让 lane）：看门狗让出槽位时同时让出 lane（不再只让槽不让 lane 的双倍超订）；（⛔ 只让槽不让 lane ⇒ 假）。
+- [x] AC2（能取假，单跑不退化）：恢复后单 suite 独占时 lane 仍取满 16（⛔ 因修复而把单跑也限死 ⇒ 假——「S=1 时取满」是公式原意，不该被破坏）。
 
 ## Definition of Done
 
@@ -41,7 +42,14 @@ extra:
 
 ## Touches
 
-- scripts/test.sh（看门狗让槽同时让 lane）
-- plugin/scripts/full-suite-runner.ts（lane 预算公式 / 看门狗逻辑）
+- scripts/test.sh（看门狗让槽同时让 lane：传 slot-path 给 watchdog + full_suite_lock_release 清 yielded 标记）
+- plugin/scripts/suite-slot-lib.sh（spawn_suite_lock_hold_watchdog 让槽同时写 `<slot>.yielded` 标记）
+- plugin/scripts/full-suite-runner.ts（lane 预算公式：defaultLaneCount 分母 S+yielded + yieldedSuiteSlotCount）
 - plugin/test/full-suite-runner.test.mjs（看门狗让 lane + 单跑不退化负控制）
 - tasks/gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T18:04:13.189Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

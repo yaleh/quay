@@ -35,7 +35,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 import { suiteLockSlotCount, suiteLockBase } from "./suite-lock-slots.ts";
 
 /** I2 — the slot-path literal shapes in CODE positions (直接对着表现形式 — the 槽文件名模式). The
@@ -390,6 +390,7 @@ function resolveRoot(rootArg: string | undefined): string {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit(usage);
   const flagVal = (name: string) => {
     const i = args.indexOf(name);
     return i !== -1 ? args[i + 1] : undefined;

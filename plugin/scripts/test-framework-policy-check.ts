@@ -60,7 +60,9 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib。
 import { buildNonCodeMask, enumerativeExistence } from "./checker-lib.ts";
-import { readFileSafe } from "./gate-script-base.ts";
+import { helpExit, readFileSafe } from "./gate-script-base.ts";
+import { canonicalTestFiles } from "./canonical-test-files.ts";
+export { canonicalTestFiles };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -153,81 +155,6 @@ export function parseExemptionList(text: string): string[] {
 export function parseBaselineCount(text: string): number | null {
   const m = text.match(/^#\s*baseline-count:\s*(\d+)\s*$/m);
   return m ? Number(m[1]) : null;
-}
-
-// ── glob parsing (single-source: read scripts/test.sh's own glob line) ─────────────────────────────
-
-/** Parse the space-separated glob patterns out of `scripts/test.sh`'s `glob=(...)` line. */
-export function parseCanonicalGlobs(repoRoot: string): string[] {
-  const src = readFileSafe(path.join(repoRoot, "scripts", "test.sh"));
-  const m = src.match(/glob=\(([^)]*)\)/);
-  if (!m) return [];
-  return m[1]
-    .split(/\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function globSegmentToRegex(seg: string): RegExp {
-  const escaped = seg.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*");
-  return new RegExp(`^${escaped}$`);
-}
-
-/** Expand one glob pattern (each `/`-segment MAY contain `*`) against `root`, returning absolute
- * paths. Supports exactly the whole-segment-wildcard shape scripts/test.sh uses. */
-export function expandGlob(pattern: string, root: string): string[] {
-  const segments = pattern.split("/");
-  let current = [root];
-  for (const seg of segments) {
-    if (!seg.includes("*")) {
-      current = current.map((dir) => path.join(dir, seg)).filter((p) => fs.existsSync(p));
-      continue;
-    }
-    const re = globSegmentToRegex(seg);
-    const next: string[] = [];
-    for (const dir of current) {
-      let entries: string[] = [];
-      try {
-        entries = fs.readdirSync(dir);
-      } catch {
-        entries = [];
-      }
-      for (const e of entries) {
-        if (re.test(e)) next.push(path.join(dir, e));
-      }
-    }
-    current = next;
-  }
-  return current.filter((p) => {
-    try {
-      return fs.statSync(p).isFile();
-    } catch {
-      return false;
-    }
-  });
-}
-
-/** The deduped, repo-root-relative set of files scripts/test.sh's canonical glob covers (same
- * realpath-deduplication scripts/test.sh uses via build_deduped_files). */
-export function canonicalTestFiles(repoRoot: string): string[] {
-  const patterns = parseCanonicalGlobs(repoRoot);
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const pattern of patterns) {
-    for (const abs of expandGlob(pattern, repoRoot)) {
-      const rel = path.relative(repoRoot, abs).split(path.sep).join("/");
-      let rp = abs;
-      try {
-        rp = fs.realpathSync(abs);
-      } catch {
-        rp = abs;
-      }
-      if (seen.has(rp)) continue;
-      seen.add(rp);
-      out.push(rel);
-    }
-  }
-  return out.sort();
 }
 
 // ── the pure policy check ──────────────────────────────────────────────────────────────────────────
@@ -411,6 +338,7 @@ function usage(): never {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node test-framework-policy-check.ts [<workspace-root>] [--json] [--selftest] [--data-file <path>] [--baseline-file <path>] [--baseline-files <path>]");
   if (args.includes("--selftest")) {
     const ok = runSelftest();
     process.exit(ok ? 0 : 1);
