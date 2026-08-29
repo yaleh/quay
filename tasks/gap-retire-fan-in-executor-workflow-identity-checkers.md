@@ -51,5 +51,7 @@ extra: {}
 - plugin/scripts/fan-in-workflow-check.ts（删，含 isMechanicalRunId）
 - plugin/test/fan-in-workflow-check.test.mjs（删）
 - plugin/scripts/runner-static-gate.ts（摘线 fan-in-workflow-check）
-- plugin/scripts/capability-catalog.sh（退休标注）
+- plugin/scripts/capability-catalog.sh（退休标注 + SUPERSEDED 表）
+- plugin/scripts/checker-mutation-cases/fan-in-workflow-check.sh（删，孤儿 mutation case——checker 已退休）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照刷新 scripts 296→294）
 - tasks/gap-retire-fan-in-executor-workflow-identity-checkers.md（自身）
