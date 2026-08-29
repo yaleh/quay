@@ -1,7 +1,7 @@
 ---
 id: gap-help-contract-incompatible-behaviors
 title: --help 四种互不相容行为，其中两种有害（exit 2 被 harness 当失败、静默跑完整检查含副作用）
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
