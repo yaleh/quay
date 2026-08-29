@@ -72,4 +72,5 @@ depends_on: []
 - plugin/test/slot-refill-heartbeat.test.mjs
 - plugin/test/slot-free-trigger.test.mjs
 - plugin/invariant-ownership.md
+- experiments/quay-perpetual-stream/invariant-ownership.md
 - tasks/gap-retire-slot-refill-halt-mount.md
