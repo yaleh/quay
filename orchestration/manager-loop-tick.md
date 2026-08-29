@@ -1,5 +1,7 @@
 # 管理者 tick 指令
 
+> ⚠️ **外层/内层会话已退役（AC149，2026-08-28）**：本文件引用 outer/inner 会话的内容（读数/判准/发送/收尾面）已随会话退役——会话停止，机制由 promotion-driver / worker-driver / manager-kind 例程承接；manager 会话本身保留（人 2026-08-25 裁定「取消 manager 会话本身」为非目标）。→ `orchestration/manager-phase-goal.md` ### AC149。
+
 > ## ⇒ 先读执行核：[`orchestration/manager-tick-core.md`](manager-tick-core.md)（64 行）
 >
 > **本文件是理由档案(1138 行),不是执行清单。** 每轮实际要跑的动作、必产出、硬约束、边界
