@@ -820,6 +820,10 @@ export function computeWorkerRoundRecord(opts: {
   liveness?: LivenessResult | null;
   /** 本轮现观测到的冷启动在飞 task id（排序后）。空数组 = 观测过且无（⛔ 与「没观测」可区分）。 */
   coldStartInflight: string[];
+  /** 本轮在飞的 task id（实现中 + 机械 fan-in + 冷启动在飞，= inFlightTasks() 的返回值）。空数组 =
+   *  观测过且无（⛔ 与「没观测」可区分）。gap-live-mechanical-fan-in-inflight-invisible：机械 fan-in
+   *  窗口 worker 已 exit、无 outcome、无 workflow-events，round 的 task id 是 Live 页唯一可见载体。 */
+  inFlightTasks?: string[];
   /** 本轮 markNeedsHuman 翻转的结果（含 committed——gap-mark-needs-human-commit-after-write：翻转写盘
    *  即提交，committed=false 表示 repo-less no-op / 提交失败，可观测非静默）。缺省 = 本轮无翻转。 */
   needsHuman?: Array<{ id: string; ok: boolean; committed: boolean; reason: string }>;
@@ -835,6 +839,7 @@ export function computeWorkerRoundRecord(opts: {
     stop_reason: opts.stopReason,
     liveness: opts.liveness ?? null,
     cold_start_inflight: opts.coldStartInflight,
+    in_flight_tasks: opts.inFlightTasks ?? [],
     needs_human: (opts.needsHuman ?? []).map((n) => n.id),
     needs_human_committed: (opts.needsHuman ?? []).map((n) => ({ id: n.id, committed: n.committed })),
   };
@@ -2533,6 +2538,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       stopReason: reason,
       liveness,
       coldStartInflight: [...coldInflight].sort(),
+      // gap-live-mechanical-fan-in-inflight-invisible：round 带上具体 task id（含机械 fan-in 窗口——
+      // worker 已 exit、无 outcome、无 workflow-events，Live 页据此仍可见该任务）。
+      inFlightTasks: inFlightTasks(),
       needsHuman: needsHumanResults.splice(0),
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
