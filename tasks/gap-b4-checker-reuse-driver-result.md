@@ -46,3 +46,9 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 - plugin/scripts/capability-catalog.sh（2 新脚本六表注册）
 - docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts= bump）
 - tasks/gap-b4-checker-reuse-driver-result.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T19:39:17.849Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

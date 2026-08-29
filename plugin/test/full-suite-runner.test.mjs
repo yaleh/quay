@@ -1,4 +1,12 @@
 // @test-group governance
+// @load-sensitive child-spawn
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — every test spawns a
+//   real node runner (full-suite-runner.ts) + a real bash fake-suite child; under full-suite concurrency
+//   the runner bootstrap + child spawn is start/schedule-delayed and the wall-clock polls flaked
+//   (gap-full-suite-runner-test-poll-timeout-load-flake: "poll timeout" under load 11.81 / 16 lanes).
+//   The 5s polls were already raised to 20s (gap-suite-load-sampler-orphan-process); this annotation
+//   closes the triage half — a failure must be classified load-sensitive (isolate-rerun), not
+//   other-task (defer anti-livelock).
 // full-suite-runner.test.mjs — tasks/gap-full-suite-belongs-to-outer-background-above-3-min.
 //
 // The (a) suite block of the three blocks that together eliminate "batch": the full suite
@@ -141,12 +149,13 @@ function fakeSuite(scriptBody) {
 }
 
 /** Spawn the runner against a temp root with a fake command. */
-function runRunner({ root, command, laneCount, stateDir, runner, env = {}, serialConcurrency, lowconcConcurrency }) {
+function runRunner({ root, command, laneCount, stateDir, runner, buckets, env = {}, serialConcurrency, lowconcConcurrency }) {
   const args = ["--no-warnings", "--experimental-strip-types", RUNNER, "--root", root];
   if (stateDir) args.push("--state-dir", stateDir);
   if (command) args.push("--command", command);
   if (laneCount !== undefined && laneCount !== null) args.push("--lane-count", String(laneCount));
   if (runner !== undefined && runner !== null) args.push("--runner", String(runner));
+  if (buckets !== undefined && buckets !== null) args.push("--buckets", String(buckets));
   if (serialConcurrency !== undefined) args.push("--serial-concurrency", String(serialConcurrency));
   if (lowconcConcurrency !== undefined) args.push("--lowconc-concurrency", String(lowconcConcurrency));
   const mergedEnv = { ...process.env, ...env };
@@ -360,6 +369,25 @@ test("AC1 — an explicit --runner inner is recorded in BOTH the state and the v
     const vr = lastRoundRecord(root);
     assert.ok(vr, "a verification-round row was appended");
     assert.equal(vr.runner, "inner", "the verification-round row records the same runner");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("gap-verification-round-static-fail-no-record AC3 — --buckets <task-id> records taskId on the verification-round row", async () => {
+  // A bucket-mode run (--buckets <task-id>) verifies ONE task's bucket subset, so the round row must
+  // carry WHICH task it verified — the 31 historical static-check rows carried no taskId ⇒ unattributable
+  // (a reader had to hand-dig the log to know what the red was about).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-bucket-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8, buckets: "gap-test-bucket-task" });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const vr = lastRoundRecord(root);
+    assert.ok(vr, "a verification-round row was appended");
+    assert.equal(vr.taskId, "gap-test-bucket-task", "the bucket-mode row carries taskId (AC3)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
