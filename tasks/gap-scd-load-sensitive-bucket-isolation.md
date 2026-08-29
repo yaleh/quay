@@ -21,10 +21,10 @@ SCD 族（`plugin/test/session-liveness-scd-*.test.mjs`，8 文件）是 KNOWN-L
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，分类）：8 个 `session-liveness-scd-*.test.mjs` 全部 `@test-group lowconc`（`grep -c '@test-group lowconc'` = 8，且无 `engine`）。
-- [ ] AC2（能取假，bucket 隔离）：`--buckets` 跑含 SCD 文件的桶时，SCD 文件在 ≤3 并发子相跑（结构或单测断言：`suite-lpt-runner.mjs` 或 test.sh bucket 路径按 `@test-group` 拆相，`lowconc` 文件不进主并发相）。
-- [ ] AC3（能取假，单测）：新增/扩展单测断言 bucket 路径把 `lowconc`/`serial` 文件路由到独立子相（改掉任一 ⇒ 测试红）。
-- [ ] AC4（能取假，回归）：`session-liveness-scd-fire.test.mjs` 与 `session-liveness-scd-progress.test.mjs` 在并发 ≥4 下连跑 3 次不 flake（用 `--test-concurrency=4` 显式压）。
+- [x] AC1（能取假，分类）：8 个 `session-liveness-scd-*.test.mjs` 全部 `@test-group lowconc`（`grep -c '@test-group lowconc'` = 8，且无 `engine`）。
+- [x] AC2（能取假，bucket 隔离）：`--buckets` 跑含 SCD 文件的桶时，SCD 文件在 ≤3 并发子相跑（结构或单测断言：`suite-lpt-runner.mjs` 或 test.sh bucket 路径按 `@test-group` 拆相，`lowconc` 文件不进主并发相）。
+- [x] AC3（能取假，单测）：新增/扩展单测断言 bucket 路径把 `lowconc`/`serial` 文件路由到独立子相（改掉任一 ⇒ 测试红）。
+- [x] AC4（能取假，回归）：`session-liveness-scd-fire.test.mjs` 与 `session-liveness-scd-progress.test.mjs` 在并发 ≥4 下连跑 3 次不 flake（用 `--test-concurrency=4` 显式压）。
 
 ## Definition of Done
 
