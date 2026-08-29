@@ -1,7 +1,7 @@
 ---
 id: gap-ac147-manager-liveness-independent-channel
 title: AC147 manager 自身活性由【不依赖 manager】的通道兜底——失能超 T 有机制让人知道
-status: ready
+status: done
 labels:
   - gap
   - feature
