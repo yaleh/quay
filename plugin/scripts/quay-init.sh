@@ -1064,6 +1064,14 @@ _derive_loop_scripts_once() {
   #   repo-root and dies with "No such file or directory" / ERR_MODULE_NOT_FOUND. Same class as
   #   touches-one-entry-one-path-check.ts above — the single repo-root resolver must land with
   #   every consumer.
+  #   checker-io.ts + driver-result.ts (gap-b4-checker-reuse-driver-result): the laid-down checkers
+  #   outer-anchor-check.ts (derived via (a)) and adr016-screen-use-check.ts (via (b)) import
+  #   checker-io.ts via ESM `./checker-io.ts`, which re-exports driver-result.ts at runtime — an ESM
+  #   `./` import is INVISIBLE to closure step (d) (same class as touches-one-entry-one-path-check.ts
+  #   above), so without an explicit entry a cold-started project lays the checkers without their
+  #   DriverResult<T> bridge and dies with ERR_MODULE_NOT_FOUND. driver-result.ts is itself the ESM dep
+  #   of the laid-down driver-runtime.ts / promotion-driver.ts / worker-driver.ts (AC153), so it ships
+  #   here too (checker-io.ts re-exports it at runtime — both must land or neither works).
   #   canonical-test-files.ts (gap-canonical-test-files-glob-vs-realpath-divergence): test-framework-
   #   policy-check.ts is laid down via a bare-name mention in plugin/loop/orchestrator-tick-core.md,
   #   and imports this lib via ESM `./canonical-test-files.ts` — an ESM relative `./` import is
@@ -1076,7 +1084,7 @@ _derive_loop_scripts_once() {
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \
-    repo-root.sh repo-root.ts canonical-test-files.ts >> "$out"
+    repo-root.sh repo-root.ts checker-io.ts driver-result.ts canonical-test-files.ts >> "$out"
   # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
   #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
   #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the

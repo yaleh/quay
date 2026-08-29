@@ -36,6 +36,7 @@ import {
   byteDiff,
   pointerFormFindings,
   gitUncommitted,
+  checkAnchor,
   LAYERS,
   DECISION_WORDS,
   INNER_ANCHOR_BEGIN_MARK,
@@ -44,6 +45,7 @@ import {
   EXIT_VIOLATED,
   EXIT_NOT_EVALUATED,
 } from "../scripts/outer-anchor-check.ts";
+import { driverResultToExit } from "../scripts/checker-io.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -398,4 +400,48 @@ test("LAYERS: outer requires 1-hop pointer to orchestrator-tick-core.md; inner r
   assert.ok(LAYERS.inner.requiredPointers.includes("inner-tick-log.jsonl"));
   assert.ok(LAYERS.inner.requiredPointers.includes("orchestration/manager-phase-goal.md"));
   assert.equal(LAYERS.inner.requireSentinel, true); // inner prompt 自带 AC81 哨兵规则
+});
+
+// ── B4 DriverResult（gap-b4-checker-reuse-driver-result：判定收敛到 DriverResult<T> 词表）────────────
+
+test("B4 AC2/AC3: checkAnchor 的判定是 DriverResult —— verified/failed/not-evaluated 三态独立，code 由 driverResult 派生", () => {
+  const { p } = tmpFile("md");
+  try {
+    writeInnerSection(p, INNER_PROMPT);
+
+    // verified：正本存在 + 指针形式合格 + 判据3 逐字节一致。
+    const ok = checkAnchor({ layer: "inner", root: process.cwd(), canonicalFileOverride: p, cronPrompt: INNER_PROMPT });
+    assert.equal(ok.driverResult.state, "verified", "byte-identical + pointer-clean ⇒ verified");
+    assert.equal(ok.code, driverResultToExit(ok.driverResult), "code 由 DriverResult 派生（⛔ 非并行常量）");
+    assert.equal(ok.code, EXIT_OK);
+
+    // failed：一个字符漂移 ⇒ 判据3 逐字节不一致。
+    const drift = INNER_PROMPT.slice(0, -1) + "。x";
+    const bad = checkAnchor({ layer: "inner", root: process.cwd(), canonicalFileOverride: p, cronPrompt: drift });
+    assert.equal(bad.driverResult.state, "failed", "byte drift ⇒ failed");
+    assert.equal(bad.code, driverResultToExit(bad.driverResult));
+    assert.equal(bad.code, EXIT_VIOLATED);
+
+    // not-evaluated：正本存在但未提供活 prompt ⇒ 判据3 无法评估（读不到输入 ≠ 合格）。
+    const noLive = checkAnchor({ layer: "inner", root: process.cwd(), canonicalFileOverride: p, cronPrompt: null });
+    assert.equal(noLive.driverResult.state, "not-evaluated", "no live prompt ⇒ not-evaluated（硬规则 3b）");
+    assert.equal(noLive.code, driverResultToExit(noLive.driverResult));
+    assert.equal(noLive.code, EXIT_NOT_EVALUATED);
+  } finally {
+    fs.rmSync(path.dirname(p), { recursive: true, force: true });
+  }
+
+  // not-evaluated（正本缺失）：第三态由 DriverResult.not-evaluated 承载，⛔ 非二值塌回。
+  const missing = checkAnchor({ layer: "outer", root: process.cwd(), cronPrompt: INNER_PROMPT });
+  // 正本可能缺失（⇒ not-evaluated）或存在（⇒ 判据3 与 INNER_PROMPT 逐字节不符 ⇒ failed）——两者都非 verified。
+  assert.notEqual(missing.driverResult.state, "verified");
+  assert.equal(missing.code, driverResultToExit(missing.driverResult));
+});
+
+test("B4 AC2 negative control: 删 import 后第三态塌回 —— notEvaluated 构造在源码的代码位置（删掉该 import 则本断言红）", () => {
+  // 结构性负控制：not-evaluated 态必须由 checker-io 的 notEvaluated(...) 构造，且 import 在代码位置。
+  // 若删掉该 import，checkAnchor 无法产出 DriverResult.not-evaluated ⇒ 上面三态断言红。
+  const src = fs.readFileSync(CHECKER, "utf8");
+  assert.match(src, /from "\.\/checker-io\.ts"/, "checker 必须 import checker-io（DriverResult 桥）");
+  assert.match(src, /notEvaluated\(/, "第三态必须经 notEvaluated(...) 构造（⛔ 硬编码 code=2）");
 });
