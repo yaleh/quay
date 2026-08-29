@@ -14,7 +14,7 @@
 //
 // JUDGMENT = STATIC REFERENCE CLOSURE. A test file is attributed by what its text STATICALLY
 // references, never by basename pairing and never by directory-ownership ALONE (`plugin/` ships
-// wholesale — a file's directory does not decide M). Two reference forms are read:
+// wholesale — a file's directory does not decide M). Three reference forms are read:
 //
 //   1. RELATIVE references — import specifiers and relative path strings (`./x`, `../x`), resolved
 //      against the file's own directory and normalized, then classified by which source tree they
@@ -25,11 +25,18 @@
 //      (`orchestration/manager-phase-goal.md` 切换前实测基线) reproduces ONLY when comment/header
 //      mentions are counted, so a header comment that names the subject IS a reference for this
 //      mechanism.
+//   3. SEGMENTED PATH LITERALS — `path.join(…)` / `path.resolve(…)` (and the destructured `join(…)` /
+//      `resolve(…)`) calls whose ADJACENT string-literal arguments, joined with `/`, spell a
+//      source-tree path (`path.join(repoRoot, "plugin", "scripts", "x.sh")` → `plugin/scripts/x.sh`).
+//      Neither form 1 (needs the whole path in one quote pair) nor form 2 (needs contiguous text — a
+//      comma-space breaks it) sees the segmented subject; joining the adjacent literal run recovers it
+//      (gap-path-join-segmented-parse-blind-spot).
 //
 // ⛔ A file whose bucket cannot be statically determined returns UNRESOLVED — never a silent default.
 //    Defaulting an unreadable subject to a bucket is the "read-unreadable disguised as qualified"
-//    defect (hard rule 3b): a test whose subject is constructed via `path.join(…, "scripts", …)` or
-//    hidden in a helper has NO literal subject path, so it must be reported, not guessed.
+//    defect (hard rule 3b): a test whose subject's prefix is a computed variable
+//    (`path.join(pluginDir, "scripts", …)` with `pluginDir = path.resolve(__dirname, "..")`) or lives
+//    in a helper module still has NO literal subject path, so it must be reported, not guessed.
 //
 // Output (canonical, buckets in P,S,M order):
 //   P | S | M | P+S | P+M | S+M | P+S+M | UNRESOLVED
@@ -104,6 +111,120 @@ export function extractRelativeSpecifiers(text: string): string[] {
     const spec = m[1];
     if (spec.includes("${")) continue; // dynamic interpolation — not a static reference
     out.push(spec);
+  }
+  return out;
+}
+
+// ── Segmented path.join(…) / path.resolve(…) literal runs ────────────────────────────────────────────
+// A subject built as `path.join(repoRoot, "plugin", "scripts", "x.sh")` has no single quoted relative
+// path (signal 2's regex needs the whole path in one pair of quotes) and no contiguous `plugin/scripts`
+// literal (signal 3 needs contiguous text — a comma-space breaks it). The segmented form spells the
+// subject out as a RUN of adjacent string literals; joining the run with `/` recovers the path.
+
+/** The path.join / path.resolve callee: `path.join(`, `path.resolve(`, or the destructured `join(` /
+ *  `resolve(` (bare — not a member access like `arr.join(`, which the lookbehind rejects). */
+const JOIN_CALL = /(?<![.\w])(?:path\.)?(?:join|resolve)\s*\(/g;
+
+/**
+ * Skip over a string/template literal starting at `text[i]` (its opening quote), returning the index
+ * just past its closing quote. Handles backslash escapes.
+ * @param {string} text
+ * @param {number} i — index of the opening quote.
+ * @returns {number}
+ */
+function skipStringLiteral(text: string, i: number): number {
+  const quote = text[i];
+  let j = i + 1;
+  while (j < text.length) {
+    if (text[j] === "\\") { j += 2; continue; }
+    if (text[j] === quote) return j + 1;
+    j++;
+  }
+  return j;
+}
+
+/**
+ * Parse the argument list of a call whose `(` is at `text[openIdx]`, returning the top-level arguments
+ * (trimmed), or null when the parens are unbalanced. Nested `()[]{}` and string/template literals are
+ * skipped so a `,` or `)` inside them does not split the list.
+ * @param {string} text
+ * @param {number} openIdx — index of the opening `(`.
+ * @returns {string[] | null}
+ */
+function parseArgList(text: string, openIdx: number): string[] | null {
+  let depth = 0;
+  const args: string[] = [];
+  let start = openIdx + 1;
+  let i = openIdx;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'" || ch === "`") { i = skipStringLiteral(text, i); continue; }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; i++; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") {
+      depth--;
+      if (ch === ")" && depth === 0) {
+        const arg = text.slice(start, i).trim();
+        if (arg) args.push(arg);
+        return args;
+      }
+      i++;
+      continue;
+    }
+    if (ch === "," && depth === 1) {
+      const arg = text.slice(start, i).trim();
+      if (arg) args.push(arg);
+      start = i + 1;
+      i++;
+      continue;
+    }
+    i++;
+  }
+  return null; // unbalanced — no closing paren
+}
+
+/**
+ * The string VALUE of one call argument that is exactly one static string literal, else null. A
+ * single/double quoted string always qualifies; a backtick string qualifies only without `${…}` (a
+ * template interpolation is not static).
+ * @param {string} arg — one trimmed call argument.
+ * @returns {string | null}
+ */
+function staticLiteralValue(arg: string): string | null {
+  const q = /^(["'])((?:[^\\"']|\\.)*)\1$/.exec(arg);
+  if (q) return q[2];
+  const t = /^`([\s\S]*)`$/.exec(arg);
+  if (t && !t[1].includes("${")) return t[1];
+  return null;
+}
+
+/**
+ * Extract the segmented-path literal runs from raw file text: within every `path.join(…)` /
+ * `path.resolve(…)` call (or the destructured `join(…)` / `resolve(…)`), each maximal run of ≥2
+ * ADJACENT static string-literal arguments is joined with `/`. A run interrupted by a non-literal
+ * argument (a variable, `os.tmpdir()`, …) is not joined past the interruption — only truly-adjacent
+ * literals spell one path segment sequence. This is the "path.join 分段拼接" blind spot: the subject
+ * is written out as adjacent literal arguments, invisible to both the relative-path regex (needs the
+ * whole path in one quote pair) and the raw path-literal scan (needs contiguous text).
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function extractJoinedPathSegments(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(JOIN_CALL)) {
+    const openIdx = m.index + m[0].length - 1; // the '('
+    const args = parseArgList(text, openIdx);
+    if (!args) continue;
+    let run: string[] = [];
+    const flush = () => {
+      if (run.length >= 2) out.push(run.join("/"));
+      run = [];
+    };
+    for (const arg of args) {
+      const lit = staticLiteralValue(arg);
+      if (lit === null) flush();
+      else run.push(lit);
+    }
+    flush();
   }
   return out;
 }
@@ -208,6 +329,17 @@ export function bucketSetOf(fileRef: string, root = findRepoRoot()): Set<Bucket>
   );
   for (const m of subjectText.matchAll(/plugin\/scripts(?=\/|["'`\s]|$)|packages\/[^/]+\/(?:src|bin|dist)\/|scripts\/test\.sh/g)) {
     const b = classifyPath(m[0]);
+    if (b) buckets.add(b);
+  }
+
+  // 4. Segmented path literals — `path.join(…, "plugin", "scripts", …)` / `path.resolve(…)` runs of
+  //    adjacent string literals, joined and classified (the "path.join 分段拼接" blind spot). Only a
+  //    REPO-RELATIVE joined string (starting `plugin/` / `packages/` / `scripts/`) is classified; a
+  //    `.`/`..`-prefixed run is RELATIVE to some anchor (signal 2's job — resolve against the file's
+  //    directory), and classifyPath would substring-match its embedded source-tree prefix.
+  for (const joined of extractJoinedPathSegments(text)) {
+    if (joined.startsWith(".")) continue;
+    const b = classifyPath(joined);
     if (b) buckets.add(b);
   }
 
