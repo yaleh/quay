@@ -175,13 +175,15 @@ test('AC5 — the STALLED disposition checks the registry before telling the hum
   assert.match(tick, /rm -f <root>\/\.quay\/loop-driver\.jsonl/, 'must name the stale-registry clear command');
 });
 
-// ── AC7: the .halt print is a control-plane reading, not a state assertion ──────────────────────────
-test('AC7 — the .halt print is a control-plane reading (未暂停), not a state assertion (运行中)', () => {
+// ── AC7: the outer `.halt` per-tick print is retired (gap-retire-halt-file-driver-based) ────────────
+test('AC7 — the outer `.halt` per-tick print is retired (no `head -c 80` line in the tick doc)', () => {
   const tick = fs.readFileSync(TICK_DOC, 'utf8');
-  const haltLine = tick.split('\n').find((l) => l.includes('.halt') && l.includes('head -c 80'));
-  assert.ok(haltLine, 'the .halt print line must exist in the tick doc');
-  assert.match(haltLine, /未暂停/, 'the no-.halt branch must print 未暂停');
-  assert.doesNotMatch(haltLine, /运行中/, 'must NOT print 运行中 — a control-plane absence is not a state assertion');
+  // The outer loop's per-tick `.halt` print (head -c 80) is retired: 跨项目 `.halt` 停泊观察现归
+  // manager 层 (`manager-tick-readings.ts`). Assert the retirement, not the print's existence.
+  assert.ok(!tick.includes('head -c 80'),
+    'the retired `head -c 80` .halt print must be absent from the tick doc');
+  assert.ok(tick.includes('本层不再「每 tick 报 `.halt` 状态」'),
+    'the tick doc must carry the retirement notice (gap-retire-halt-file-driver-based)');
 });
 
 // ── Invariant: a zero-driver repo never reports LIVE ────────────────────────────────────────────────

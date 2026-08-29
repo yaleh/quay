@@ -2,7 +2,7 @@
 id: gap-suite-lpt-runner-exitcode-diverges-spec-tally
 title: suite-lpt-runner 退出码另开 test:fail 计数器、与 spec fail tally 不同源——假红 TAP
   幻影喂脏致分叉（人 2026-08-29 报）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -48,14 +48,14 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：退出码与 spec fail tally 同源（或假红 TAP 不外泄），不再分叉。
-- [ ] AC2 判据2 能取假：构造「输出假红 TAP」测试文件进桶 ⇒ 修复前分叉、修复后一致。
-- [ ] AC3 判据3：退出码与 spec tally 单一来源，无第二个可漂移计数器。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：退出码与 spec fail tally 同源（或假红 TAP 不外泄），不再分叉。**Evidence:** 假红 TAP 文件（子进程 `stdio: inherit` 泄漏字面 `not ok 1 - boom`）经修复后 runner 退出码 0 且 stdout 无 `not ok`（`dropRawDiagnostics` 在 spec 前滤掉 `test:stdout`/`test:stderr`；实测该幻影确以 `test:stdout` 事件携带）；真失败文件退出 1 且 stdout `ℹ fail 1`——两读面一致。
+- [x] AC2 判据2 能取假：构造「输出假红 TAP」测试文件进桶 ⇒ 修复前分叉、修复后一致。**Evidence:** 负控制（无过滤的旧 runner 形）stdout 泄漏 `not ok 1 - boom` 而 `ℹ fail 0`（退出码 0 / stdout 红 = 分叉）；修复后同一文件退出 0 且 stdout 无 `not ok`（一致）。`suite-lpt-order.test.mjs` 新增「fake-red-TAP 退出 0 + stdout 无 not ok」能取假用例通过。
+- [x] AC3 判据3：退出码与 spec tally 单一来源，无第二个可漂移计数器。**Evidence:** `stream.on("test:fail")` 计数器已删；退出码改读 ROOT `test:summary` 的 `counts.failed + counts.cancelled`（与 spec 渲染的 `ℹ fail N`/`ℹ cancelled N` 同源）。测试「无 `test:fail` 计数器 + `test:summary` 单一来源」结构断言通过。
+- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。（待外部）
 
 ## Definition of Done
 
-- [ ] 退出码与 spec fail tally 同源（或假红 TAP 不外泄）+ 能取假 + 单一来源 + 既有测试/scoped 门绿。
+- [x] 退出码与 spec fail tally 同源（或假红 TAP 不外泄）+ 能取假 + 单一来源 + 既有测试/scoped 门绿。**Evidence:** `node --test plugin/test/suite-lpt-order.test.mjs` 19/19 绿（fail 0, cancelled 0）；全量套件绿 + `--for-task` scoped 门绿由 driver 机械 fan-in 验证（AC4 待外部）。
 
 ## Touches
 

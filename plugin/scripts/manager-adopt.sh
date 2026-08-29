@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# manager-adopt.sh — AC1/C5: `quay manager adopt <root>` 启动一个项目的 outer+inner（三态）。
+# manager-adopt.sh — AC1/C5: `quay manager adopt <root>` 启动一个项目的 outer（三态）。
 # (gap-manager-productization-five-constraints AC1/AC7)
 #
 # 规格：SPEC-manager-productization-2026-08-05 §4.2。manager 的「启动项目」与「启动自己」分开。
@@ -7,7 +7,7 @@
 # inner-session-check.sh 的判定，不写第二份：
 #   - healthy     ⇒ noop（可能是别人建的，不要动）
 #   - empty-shell ⇒ 驱动，不重建（不丢潜在上下文）
-#   - missing     ⇒ 调 quay-topology.sh 建两窗口（outer+inner）
+#   - missing     ⇒ 调 quay-topology.sh 建单窗口（outer）
 #
 # AC7（C5 可测性 / AC12b 操作定义）：`manager adopt` 之后，manager 对该项目的动作次数 = 0。
 # 即：adopt 是「登记」不是「持续驱动」——它只做一次性三态处置，然后写进 manager 的项目登记表
@@ -103,7 +103,7 @@ if [ "$DRY_RUN" = 1 ]; then
   case "$STATE" in
     healthy) echo "would-adopt: $ROOT (state=healthy → noop, register only)" ;;
     empty-shell) echo "would-adopt: $ROOT (state=empty-shell → drive inner, do not rebuild)" ;;
-    missing) echo "would-adopt: $ROOT (state=missing → call quay-topology.sh to build outer+inner)" ;;
+    missing) echo "would-adopt: $ROOT (state=missing → call quay-topology.sh to build outer)" ;;
   esac
   exit 0
 fi
