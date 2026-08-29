@@ -153,7 +153,6 @@ function runRunner({ root, command, laneCount, stateDir, runner, buckets, env = 
   const args = ["--no-warnings", "--experimental-strip-types", RUNNER, "--root", root];
   if (stateDir) args.push("--state-dir", stateDir);
   if (command) args.push("--command", command);
-  if (buckets !== undefined && buckets !== null) args.push("--buckets", String(buckets));
   if (laneCount !== undefined && laneCount !== null) args.push("--lane-count", String(laneCount));
   if (runner !== undefined && runner !== null) args.push("--runner", String(runner));
   if (buckets !== undefined && buckets !== null) args.push("--buckets", String(buckets));
