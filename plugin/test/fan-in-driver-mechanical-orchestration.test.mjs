@@ -414,16 +414,17 @@ test("短超时负控制 — runAsync 有限超时仍 SIGKILL（⛔ 超时机制
 
 // ── gap-fan-in-token-gate-version-mismatch-self-lock：每任务新进程（版本错位类级修法）──────────────
 // 版本错位（旧守护 in-process 跑 fan-in、但 fan-in 编排脚本从 worktree 加载 ⇒ 锁半与编排半不一致）的
-// 类级修法：机械 fan-in 每任务起 fresh 进程加载 worktree 的 worker-driver.ts --mechanical-fan-in，
+// 类级修法：机械 fan-in 每任务起 fresh 进程加载 worker-driver.ts --mechanical-fan-in（entry = 主检出
+// opts.root，⛔ 非 worktree——gap-fan-in-spawn-stale-worktree-executor-missing-argv），
 // 锁半（acquireFanInWorkflowLock，ADR-034）与编排半（fan-in-ff-merge.sh）同源 ⇒ 一致。
 // ⛔ token 闸（L1）已由 fd902a824 重定范围到 P2 的 TS 模块 ff 入口，本任务不再实现 token 闸。
 // AC1（版本错位已消）/ AC2（fresh 进程真实执行 + JSON 回传 round-trip）。
 
-test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程：finishAsync 调 spawnMechanicalFanIn（spawn worktree 的 worker-driver.ts --mechanical-fan-in），⛔ 不再 in-process", () => {
+test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程：finishAsync 调 spawnMechanicalFanIn（spawn 主检出的 worker-driver.ts --mechanical-fan-in），⛔ 不再 in-process", () => {
   const src = fs.readFileSync(DRIVER_SRC, "utf8");
   assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "finishAsync must spawn a fresh mechanical fan-in process (⛔ in-process runMechanicalFanIn)");
-  assert.match(src, /const entry = path\.join\(opts\.worktree, "plugin", "scripts", "worker-driver\.ts"\)/, "spawnMechanicalFanIn loads the WORKTREE's worker-driver.ts (current code, ⛔ 主检出旧代码)");
-  assert.match(src, /process\.execPath, "--experimental-strip-types", entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node --experimental-strip-types <worktree>/worker-driver.ts --mechanical-fan-in");
+  assert.match(src, /const entry = path\.join\(opts\.root, "plugin", "scripts", "worker-driver\.ts"\)/, "spawnMechanicalFanIn loads the ROOT checkout's worker-driver.ts (⛔ worktree：stale worktree 缺新 argv ⇒ unknown argument)");
+  assert.match(src, /process\.execPath, "--experimental-strip-types", entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node --experimental-strip-types <root>/worker-driver.ts --mechanical-fan-in");
   assert.match(src, /if \(mechanicalFanIn\) \{\s*\n\s*const task = tasks\[0\]/, "--mechanical-fan-in mode exists in main()");
   assert.match(src, /runMechanicalFanIn\(\{\s*\n\s*task,\s*\n\s*worktree: mechWorktree,/, "--mechanical-fan-in mode calls runMechanicalFanIn with the worktree");
 });
@@ -456,9 +457,10 @@ test("AC2 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进
     git(worktree, "add", "-A");
     git(worktree, "commit", "-q", "-m", "task change");
 
-    // fresh 进程：加载当前 worktree 的 worker-driver.ts --mechanical-fan-in（入口 = 本测试仓库的
-    // SCRIPTS_DIR；runMechanicalFanIn 的 scriptsDir 缺省 <worktree>/plugin/scripts，但 merge 冲突在
-    // 任何编排脚本被用到之前就 red，故不依赖 hermetic worktree 携带 scripts）。
+    // fresh 进程：加载主检出（SCRIPTS_DIR = REPO_ROOT/plugin/scripts）的 worker-driver.ts
+    // --mechanical-fan-in（entry = opts.root，⛔ 非 worktree——gap-fan-in-spawn-stale-worktree-
+    // executor-missing-argv；runMechanicalFanIn 的 scriptsDir 缺省 <worktree>/plugin/scripts，但
+    // merge 冲突在任何编排脚本被用到之前就 red，故不依赖 hermetic worktree 携带 scripts）。
     const entry = path.join(SCRIPTS_DIR, "worker-driver.ts");
     const r = spawnSync(process.execPath, ["--experimental-strip-types", entry, "--mechanical-fan-in", "--task", TASK, "--worktree", worktree, "--root", repo, "--run-id", "mf-spawn-rt", "--json"], { encoding: "utf8", timeout: 120_000 });
     const line = (r.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean).pop();

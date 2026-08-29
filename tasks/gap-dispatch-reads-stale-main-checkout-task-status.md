@@ -1,7 +1,7 @@
 ---
 id: gap-dispatch-reads-stale-main-checkout-task-status
 title: dispatch 读主检出 disk task status（落后 develop 20 提交）→ 落地任务被当 ready 重派；读源应改 develop git ref
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -25,9 +25,9 @@ dispatch 的 task status 读源从「主检出 disk」改「develop git ref」�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，主修）：构造「主检出 status=ready、develop status=done」的 case（git 层面 stale 主检出）→ dispatch 按 develop 判 done、不重派该任务；（⛔ 仍按主检出 ready 重派 ⇒ 假）。
-- [ ] AC2（能取假，回归）：fresh 任务（主检出与 develop 同 status）→ dispatch 正常判定，不受读源改影响。
-- [ ] AC3（能取假，单测）：ready-pool-check.test.mjs / slot-refill.test.mjs 断言「主检出 stale 时按 develop 判定」+「读源 = develop ref 非 disk」，改掉任一 ⇒ 红。
+- [x] AC1（能取假，主修）：构造「主检出 status=ready、develop status=done」的 case（git 层面 stale 主检出）→ dispatch 按 develop 判 done、不重派该任务；（⛔ 仍按主检出 ready 重派 ⇒ 假）。— 单测 `dispatch reads task status from the develop ref, not the stale working tree (AC1/AC3)`：`readTaskStatusAtRef(root,"develop",id)=done` 且 `analyzeTasks({taskReadRef:"develop"})` 不含该任务；负控制 `analyzeTasks({})`（旧 disk 读）仍见 ready（rDisk.ready 含 id，即缺陷形状）。
+- [x] AC2（能取假，回归）：fresh 任务（主检出与 develop 同 status）→ dispatch 正常判定，不受读源改影响。— 既有 ready-pool-check 129 + slot-refill 113 全绿（plain-dir fixture 无 develop ⇒ `readTaskFileAtRef` 返回 null ⇒ 回退 disk，行为不变）；我的 AC1 测试的负控制分支也覆盖「同 status 读源一致」路径。
+- [x] AC3（能取假，单测）：ready-pool-check.test.mjs / slot-refill.test.mjs 断言「主检出 stale 时按 develop 判定」+「读源 = develop ref 非 disk」，改掉任一 ⇒ 红。— 两个测试各新增一条：直接断言 `readTaskStatusAtRef/readTaskFileAtRef` 读 develop（done）而 `fs.readFileSync` 读 stale（ready）；把 `analyzeTasks`/`analyzeSlotRefill` 的 `taskReadRef` 接线去掉（或忽略该参数）⇒ `rDev.ready.includes(id)===false` 断言翻转 ⇒ 红。
 
 ## Definition of Done
 

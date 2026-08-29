@@ -7,9 +7,10 @@
 // PREEMPTIVE form: `.halt` takes effect at ANY execution point, enforced in CODE not prose.
 //
 // Contract surface (gap-supervisor-preemption ## Contract):
-//   measure   preemption_halt_no_new_subagent = `bash <抢占原语> halt-check` stdout 的字段
+//   measure   preemption_halt_no_new_subagent = preempt-all 后进程级计数不增长
 //   band      preemption_halt_no_new_subagent = 0  (halt 后新派发 subagent 计数不增长)
 //   invariant preemption_is_process_level     = 1  (抢占不依赖被抢占方主动调用——不可被绕过)
+//   (The former `halt-check` .halt-read subcommand was retired 2026-08-29 — gap-retire-halt-file-driver-based.)
 //
 // Coverage map (task ACs):
 //   AC1 — preempt(target) exists and is a stop signal at ANY execution point; the negative
@@ -18,7 +19,6 @@
 //         (should_refill=false) when `.halt` is present — a mechanical mount point, mid-flow.
 //   AC4 — `claude -p` form: preempt of a PID = `kill <pid>` (the OS is the preemption primitive).
 //   AC5 — node:test + // @test-group governance.
-//   Contract — halt-check's `halted=` field; fail-closed on an unreadable sentinel.
 //
 // Run: scripts/test.sh plugin/test/supervisor-preempt.test.mjs
 
@@ -70,61 +70,6 @@ function waitForExit(pid, timeoutMs = 2000) {
 function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
-
-// ── Contract: halt-check — the `halted=` measure field ────────────────────────────────────────────
-
-test("halt-check: no .halt ⇒ halted=false, reason empty (Contract measure)", () => {
-  const root = makeRoot();
-  try {
-    const r = runPreempt(["halt-check", "--root", root]);
-    assert.equal(r.status, 0);
-    assert.match(r.stdout, /^halted=false$/m);
-    assert.match(r.stdout, /^reason=$/m);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("halt-check: .halt present ⇒ halted=true with its content as reason", () => {
-  const root = makeRoot();
-  try {
-    fs.writeFileSync(path.join(root, ".halt"), "manual stop | 解除: x", "utf8");
-    const r = runPreempt(["halt-check", "--root", root]);
-    assert.equal(r.status, 0);
-    assert.match(r.stdout, /^halted=true$/m);
-    assert.match(r.stdout, /^reason=manual stop \| 解除: x$/m);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("halt-check: empty .halt still halts (the sentinel is the pause), reason names empty", () => {
-  const root = makeRoot();
-  try {
-    fs.writeFileSync(path.join(root, ".halt"), "", "utf8");
-    const r = runPreempt(["halt-check", "--root", root]);
-    assert.equal(r.status, 0);
-    assert.match(r.stdout, /^halted=true$/m);
-    assert.match(r.stdout, /empty/);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("halt-check: unreadable .halt is FAIL-CLOSED halted=true (never fail open)", () => {
-  const root = makeRoot();
-  try {
-    fs.writeFileSync(path.join(root, ".halt"), "stop", "utf8");
-    fs.chmodSync(path.join(root, ".halt"), 0o000);
-    const r = runPreempt(["halt-check", "--root", root]);
-    assert.equal(r.status, 0);
-    assert.match(r.stdout, /^halted=true$/m);
-    assert.match(r.stdout, /FAIL-CLOSED/);
-  } finally {
-    fs.chmodSync(path.join(root, ".halt"), 0o600);
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
 
 // ── AC4 / AC1-process: preempt <pid> = kill — the `claude -p` form (OS is the primitive) ───────────
 
