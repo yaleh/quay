@@ -1132,6 +1132,24 @@ test("parseRedFailures — parses STATIC_CHECK_FAILED fail-closed lines into {na
   assert.ok(red.failureLines.some((l) => /resident loop/.test(l)), "the ✖ test-failure line is also accumulated (isFailureLine 口径)");
 });
 
+test("parseRedFailures — strips FORCE_COLOR ANSI so a colorized red summary/✖ still yields CLEAN failureLines (gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi 5b sibling)", () => {
+  // Sibling surface of the FORCE_COLOR=3 defect (hard rule 5b): a RED suite's spec-reporter failure
+  // lines are colorized too — `ℹ fail N` → `\x1b[34mℹ fail N\x1b[39m` and `✖ <name> (Nms)` →
+  // `\x1b[31m✖ <name> (Nms)\x1b[39m`. isFailureLine's `^[#ℹ]\s*fail\s+[1-9]` / `^✖\s+…` anchors then
+  // miss them ⇒ failureLines dropped even though the round is red. The strip (same ANSI_CSI_RE as
+  // parseTestCounts) must recover them AND record the CLEAN (no-ESC) line — full-suite-runner.ts
+  // records summaryLine (stripped) for the same reason.
+  const log = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-27T00:00:00.000Z ms=100 head=x round=full",
+    "\x1b[34mℹ fail 1\x1b[39m",
+    "\x1b[31m✖ AC1 — resident loop does not exit after one worker (5831.7ms)\x1b[39m",
+  ]);
+  const red = parseRedFailures(log);
+  assert.ok(red.failureLines.some((l) => /^ℹ fail 1$/.test(l)), "the colorized ℹ fail 1 summary is captured (isFailureLine 口径)");
+  assert.ok(red.failureLines.some((l) => /resident loop/.test(l)), "the colorized ✖ test-failure line is captured");
+  assert.ok(red.failureLines.every((l) => !/\x1b/.test(l)), "recorded failure lines are ANSI-stripped (clean, no ESC bytes)");
+});
+
 test("parseRedFailures — an absent/unreadable log returns {staticCheck:false, failClosed:[], failureLines:[]} (honest empty)", () => {
   assert.deepEqual(parseRedFailures(undefined), { staticCheck: false, failClosed: [], failureLines: [] });
   assert.deepEqual(parseRedFailures("/nonexistent/pvr-red-missing.log"), { staticCheck: false, failClosed: [], failureLines: [] });

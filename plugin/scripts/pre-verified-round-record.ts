@@ -406,15 +406,21 @@ export function parseRedFailures(suiteLog) {
   const mk = lastSuiteStartOffset(text);
   const body = mk === -1 ? text : text.slice(mk);
   for (const line of body.split("\n")) {
-    const m = STATIC_CHECK_FAILED_RE.exec(line);
+    // Same FORCE_COLOR=3 ANSI strip as parseTestCounts (5b sibling surface): a RED suite's
+    // spec-reporter failure lines are colorized too (`\x1b[31m✖ …` / `\x1b[34mℹ fail N\x1b[39m`), so
+    // isFailureLine's `^✖` / `^[#ℹ]\s*fail\s+[1-9]` anchors miss them ⇒ failureLines (and the ✖/ℹ-fail
+    // shapes) would be dropped even though the round is red. STATIC_CHECK_FAILED_RE (shell output,
+    // never ANSI) is a no-op here, but stripping once keeps every matcher on a clean line.
+    const stripped = line.replace(ANSI_CSI_RE, "");
+    const m = STATIC_CHECK_FAILED_RE.exec(stripped);
     if (m) {
       const exitCode = Number(m[2]);
       if (Number.isInteger(exitCode) && exitCode >= 0) {
-        failClosed.push({ name: m[1], exitCode, line });
+        failClosed.push({ name: m[1], exitCode, line: stripped });
       }
       continue; // a static-check fail-closed line is not a test-failure line
     }
-    if (isFailureLine(line) && failureLines.length < MAX_RECORDED_FAILURES) failureLines.push(line);
+    if (isFailureLine(stripped) && failureLines.length < MAX_RECORDED_FAILURES) failureLines.push(stripped);
   }
   return { staticCheck: failClosed.length > 0, failClosed, failureLines };
 }
