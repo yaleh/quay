@@ -75,7 +75,7 @@ capability-catalog: 293 scripts | 293 declared | 0 unclassified | 288 ship
 - plugin/scripts/test-impl-census-check.ts（迁移到公共库）
 - plugin/test/canonical-test-files-symlink-order.test.mjs (new)（symlink 顺序负控制 fixture）
 - plugin/scripts/capability-catalog.sh（canonical-test-files.ts 六表注册）
-- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数 296→297）
+- plugin/scripts/quay-init.sh（canonical-test-files.ts 显式 laydown 注册——test-framework-policy-check.ts 被铺设并经 ESM import 本库，closure (d) 只扫 shell `${SCRIPT_DIR}/` 引用扫不到 ESM import）
 - tasks/gap-canonical-test-files-glob-vs-realpath-divergence.md（自身）
 
 ## Needs-Human
