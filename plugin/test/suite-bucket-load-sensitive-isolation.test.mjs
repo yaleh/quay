@@ -27,6 +27,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -103,4 +104,51 @@ test("AC2/AC3 — the --buckets branch splits its list by @test-group into seria
     /suite-lpt-runner\.mjs" "\$\{rest_args\[@\]\}" "\$\{files\[@\]\}"/,
     "suite-lpt-runner must run bucket_main_files, never the unsplit files[] list",
   );
+});
+
+/** Run the REAL `group_of` bash function (sourced from runner-grouping.ts, which scripts/test.sh
+ *  sources) against a repo-relative test file, returning its stdout trimmed. This pins the ACTUAL
+ *  mechanism, not a re-implemented regex — the regression AC5 guards against is "group_of is
+ *  referenced but undefined/empty", which silently folds every file into the main phase. */
+function groupOf(fileRel) {
+  const script =
+    `source "${path.join(REPO_ROOT, "plugin", "scripts", "runner-grouping.ts")}" >/dev/null 2>&1; ` +
+    `group_of "${path.join(REPO_ROOT, fileRel)}"`;
+  return execFileSync("bash", ["-c", script], { encoding: "utf8" }).trim();
+}
+
+test("AC5 — group_of is defined and returns the correct @test-group for engine/lowconc/serial", () => {
+  // engine: this very file (declared @test-group engine at the top).
+  assert.equal(groupOf("plugin/test/suite-bucket-load-sensitive-isolation.test.mjs"), "engine");
+  // lowconc: an SCD file (reclassified by this task, AC1).
+  assert.equal(groupOf("plugin/test/session-liveness-scd-fire.test.mjs"), "lowconc");
+  // serial: the real-install quay-init family.
+  assert.equal(groupOf("plugin/test/quay-init.test.mjs"), "serial");
+  // Take-false: a missing declaration must default to engine (group_of's AC7 default), NOT an
+  // empty string — an empty group_of is what the Discovered Issue #1 misdiagnosed as "undefined".
+  // (The fixture text must NOT contain the literal "@test-group <word>" — group_of FAIL-CLOSES on
+  // an unrecognized group, which is itself the guarantee AC5 pins.)
+  const tmp = path.join(REPO_ROOT, "plugin", "test", "__no-group-fixture__.test.mjs");
+  fs.writeFileSync(tmp, "// no grouping annotation in this fixture\n");
+  try {
+    assert.equal(groupOf("plugin/test/__no-group-fixture__.test.mjs"), "engine");
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+});
+
+test("AC6 — the --buckets branch aggregates sub-phase exit codes into bucket_code and exits it", () => {
+  const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
+  const branch = bucketsBranchSrc(testSh);
+  // Zero-init, then each sub-phase merges a non-zero exit code, then exit "${bucket_code}" —
+  // so a green serial+lowconc+main (+ clean leak-scan) exits 0, and any non-zero phase/leak flips
+  // the exit (the "suite green but non-zero exit" shape AC6 makes impossible).
+  assert.match(branch, /bucket_code=0/, "must zero-init bucket_code");
+  assert.match(branch, /\[\s*"\$_bscode"\s+-eq\s+0\s*\]\s*\|\|\s*bucket_code="\$_bscode"/, "serial exit merges into bucket_code");
+  assert.match(branch, /\[\s*"\$_blcode"\s+-eq\s+0\s*\]\s*\|\|\s*bucket_code="\$_blcode"/, "lowconc exit merges into bucket_code");
+  assert.match(branch, /\[\s*"\$_bmcode"\s+-eq\s+0\s*\]\s*\|\|\s*bucket_code="\$_bmcode"/, "main exit merges into bucket_code");
+  assert.match(branch, /exit\s+"\$\{bucket_code\}"/, "the bucket branch must exit ${bucket_code}");
+  // Take-false: the pre-fix single-command shape (`node ... suite-lpt-runner ...; bucket_code=$?`)
+  // had no per-phase aggregation — that is the regression AC6 guards against.
+  assert.doesNotMatch(branch, /suite-lpt-runner\.mjs[^\n]*\n\s*bucket_code=\$\?/, "must not regress to the unsplit single-command exit capture");
 });
