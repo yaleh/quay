@@ -2,7 +2,7 @@
 id: gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi
 title: suite 轮 pass/fail/cancel 摘要解析器在 FORCE_COLOR=3 ANSI
   下失效——verification-round 缺四字段（成簇缺陷，硬规则 5b 两表面）
-status: needs-human
+status: ready
 labels:
   - gap
   - defect

@@ -313,6 +313,7 @@ SYNC_SCRIPTS=(
   gate-script-base
   wiring-coverage-check
   proposal-convergence
+  write-json-atomic
   prepare-admission-check
   # NOTE (gap-retire-the-prepare-execute-pipeline-cluster): composite-{args,contracts,build,audit,
   # reconcile,land,preflight,manifest-synthesis} and milestone-preparation-check were retired with
