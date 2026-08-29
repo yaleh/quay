@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-selector-api-error-no-backoff
 title: worker-driver selector API 错误/fallback 失败无退避——54 次 <60s 快速重派烧派发预算
-status: ready
+status: done
 labels:
   - gap
   - defect
