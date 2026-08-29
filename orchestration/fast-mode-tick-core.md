@@ -9,7 +9,7 @@
 
 **立此文件的原因**(2026-08-09):执行路径与理由档案混在同一份千行文档里,一次重读无法当 checklist 执行 ⇒ 实际被执行的是注意力当轮选中的部分。两次实证:outer 的「强制」步骤在 1095 行第 687 行、静默停摆 8.5 小时;nyf-semantic-judge 工作流(49c0be86)用完即弃——4 次 done-flip 真产出却因执行核无「调用」步骤而丢。
 
-**当前状态:并行对照期。锚仍指向源文档,本文件不接锚/cron/skill;两份并行跑,差异记进 tick-log,零遗漏后 inner/outer 决定改锚。**
+**当前状态：已退役（AC149，2026-08-28）。** inner 会话停止，本核不再每轮执行；机制由 worker-driver 承接（A1/A6/A10–A13/A15/A16/B2 → ①，逐条归属见 `orchestration/AC148-inner-core-itemized-attribution.md`） → `orchestration/manager-phase-goal.md` ### AC149。~~并行对照期~~结束。
 
 **本文件是执行核正本（AC78 前置 (a)，2026-08-14 outer 裁定）**：`plugin/loop/fast-mode-tick-core.md` 是本文件随 `quay-init --loop` 铺到目标项目的**落地副本**——正本改动后由 inner 按正本语义落地副本（副本为 quay-init --loop 铺出模板、引用部署后的产品行为源，**非 byte-identical**，两副本承担不同角色；byte-copy 会破坏 quay-init `referenced⊆landed`，见 232e4171），**副本不得单边编辑**。要改执行核，改正本。
 
@@ -19,7 +19,7 @@
 
 | # | 动作 | 判据 / 陷阱 |
 |---|---|---|
-| A1 | `.halt` 哨兵 | 存在 ⇒ 本 tick 空转、报告、重新排程 (src:347);强制点在代码、任意执行点生效,**每步派发前都要再问一次 halt-check/slot-refill**,不等 tick 边界 (src:359,362)。**组合判据(SPEC 2.8)**:`无 .halt` **且** 长期无产出(>24h)⇒ **未标记的停摆**,必须升级——只读不判会稳定产生「看见但没发现」(与 manager A5 同形) |
+| A1 | `.halt` 哨兵 | 存在 ⇒ 本 tick 空转、报告、重新排程 (src:347);强制点在代码、任意执行点生效,**每步派发前都要再问一次 slot-refill**,不等 tick 边界 (src:359,362)。**组合判据(SPEC 2.8)**:`无 .halt` **且** 长期无产出(>24h)⇒ **未标记的停摆**,必须升级——只读不判会稳定产生「看见但没发现」(与 manager A5 同形) |
 | A2 | `bash plugin/scripts/monitor-mount-check.sh --json` | `mounted=true` 且 `targetOk=true`(targetRoot==本仓根)**缺一不可**;没挂/挂错 ⇒ 本层停摆无人发现 (src:370,373) |
 | A3 | 先判本回合唤起源 | transcript 有 `<task-notification>` ⇒ 走槽位回填(**只重评估派发,不 fan-in、不写任务状态、不重排程**);否则走全流程 (src:287,290) |
 | A4 | 读队列文件 `docs/analysis/batch2-queue-state.md` | 与 `git log`/`git worktree list` 不一致 ⇒ **以 git 为准**并修正文件 (src:379) |

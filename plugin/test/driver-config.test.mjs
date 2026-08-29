@@ -37,6 +37,10 @@ test("defaultDriverConfig — cap/interval/reconcile 缺省（单一回退字面
   assert.equal(d.worker.intervalMs, 30_000);
   assert.equal(d.promotion.reconcileIntervalSecs, 0, "promotion 无协调地板（定时驱动）");
   assert.equal(d.worker.reconcileIntervalSecs, 300, "worker 协调地板 300s（SPEC §5.5 兜底轮询）");
+  // AC144：quality 例程型 kind（B15/B17）——无协调地板、interval 缺省同 outer（30s）。
+  assert.equal(d.quality.cap, DEFAULT_DRIVER_CAP, "quality cap 仅为字段齐整（例程型无并发概念）");
+  assert.equal(d.quality.intervalMs, 30_000, "quality interval 缺省 30s（同 outer 例程型）");
+  assert.equal(d.quality.reconcileIntervalSecs, 0, "quality 无协调地板（例程型）");
 });
 
 test("loadDriverConfig — 读 drivers.yml 覆盖缺省；缺失/坏 YAML ⇒ 缺省（fail-open 到保守回退）", () => {
@@ -74,6 +78,19 @@ test("loadDriverConfig — 读 drivers.yml 覆盖缺省；缺失/坏 YAML ⇒ �
   writeDriversYml(c, "kinds: [unclosed");
   const cfgC = loadDriverConfig(c);
   assert.equal(cfgC.worker.cap, DEFAULT_DRIVER_CAP);
+});
+
+test("loadDriverConfig — quality 段（AC144）读 drivers.yml 覆盖缺省；driverCap 接受 quality kind", () => {
+  const a = tmpdir();
+  writeDriversYml(a, "version: 1\nkinds:\n  quality:\n    interval_ms: 45000\n");
+  const cfg = loadDriverConfig(a);
+  assert.equal(cfg.quality.intervalMs, 45000, "drivers.yml quality.interval_ms 覆盖缺省 30s");
+  assert.equal(cfg.quality.cap, DEFAULT_DRIVER_CAP, "quality cap 未写 ⇒ 缺省");
+
+  // 缺省（无 drivers.yml）：quality interval 回退 30s。
+  const b = tmpdir();
+  assert.equal(loadDriverConfig(b).quality.intervalMs, 30_000, "无 drivers.yml ⇒ quality interval 缺省 30s");
+  assert.equal(driverCap(a, "quality"), DEFAULT_DRIVER_CAP, "driverCap 接受 quality kind（单一并发解析）");
 });
 
 test("driverCap — 显式 > drivers.yml > 缺省（单一并发解析，AC1）", () => {

@@ -97,13 +97,30 @@ import {
   taskBranchHasCommits,
   isSigtermExitCode,
   parseMaxRetries,
+  isQuickDeath,
+  backoffDelayMs,
+  newQuickDeathBackoffState,
+  isBackedOff,
+  recordQuickDeathBackoff,
+  QUICK_DEATH_BACKOFF_DEFAULT,
+  parseQuickDeathMs,
+  parseBackoffBaseMs,
+  parseBackoffMaxMs,
+  parseBackoffThreshold,
   acquireFanInWorkflowLock,
   fanInWorkflowLockFile,
   extractFailureSummary,
   combinedOutput,
   mirrorMechanicalFanInSuiteState,
+  mechSh,
+  appendFanInStepTrace,
+  runMechanicalFanIn,
+  spawnMechanicalFanIn,
+  readWorkflowLockHold,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
+import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
+import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.ts";
 // gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
 // 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
 import { advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, applyTaskFilters, makeFilterContext } from "../scripts/driver-filters.ts";
@@ -2094,10 +2111,10 @@ test("AC1 (integration, 复现) — re-dispatch of an exited-not-landed task pas
 
 // ── gap-continue-prompt-conflict-resolution-protocol ────────────────────────────────────────────────
 // 机械 fan-in 的 merge develop 步在 CONTINUE 轮撞冲突时，旧 prompt 只带失败原因、不含消解指令 ⇒
-// 消冲突靠 worker 自行发挥（运气）。AC1（指令存在）/ AC2（derived 重算，⛔ 手并计数）/ AC3（code 语义
+// 消冲突靠 worker 自行发挥（运气）。AC1（指令存在）/ AC2（outline 冲突取 develop 版）/ AC3（code 语义
 // 并集 + git commit --no-edit）钉住 prompt 里三类消解指令，删掉任一条 ⇒ 测试红（AC4 能取假）。
 
-test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-conflict resolution protocol (derived re-compute / code semantic-union / commit --no-edit)", () => {
+test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-conflict resolution protocol (outline take-develop / code semantic-union / commit --no-edit)", () => {
   const p = buildContinueWorkerPrompt("gap-x", "/r", {
     worktreePath: "/wt",
     branchCommits: 3,
@@ -2110,9 +2127,11 @@ test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-co
   assert.match(p, /(unmerged|CONFLICT)/, "AC1: prompt names the merge-conflict state (unmerged paths / CONFLICT)");
   assert.match(p, /resolve/, "AC1: prompt instructs the worker to resolve the conflict");
   assert.match(p, /never exit while unmerged paths remain/, "AC1: prompt forbids exiting with unmerged paths (next fan-in merge step would fail again)");
-  // AC2 (derived 重算): outline inventory conflict ⇒ re-run the deriving command, ⛔ hand-merge the counts.
-  assert.match(p, /verify-delivery-surface\.ts --write-inventory/, "AC2: derived-file conflict ⇒ re-run verify-delivery-surface.ts --write-inventory");
-  assert.match(p, /do NOT hand-merge the counts/, "AC2: derived-file conflict ⇒ ⛔ hand-merge the counts (recompute instead)");
+  // AC2 (outline 冲突取 develop 版): outline inventory conflict ⇒ take the develop version (git checkout develop), ⛔ no --write-inventory.
+  assert.match(p, /git checkout develop/, "AC2: outline-doc conflict ⇒ take the develop version (git checkout develop)");
+  assert.match(p, /take the develop version/, "AC2: outline-doc conflict ⇒ take the develop version (⛔ no recompute)");
+  assert.doesNotMatch(p, /write-inventory/, "AC2: ⛔ no longer re-run the retired --write-inventory");
+  assert.match(p, /do NOT hand-merge the counts/, "AC2: outline-doc conflict ⇒ ⛔ hand-merge the counts");
   // AC3 (code 并集 + commit): code conflict ⇒ semantic union + git commit --no-edit.
   assert.match(p, /semantic union/, "AC3: code-file conflict ⇒ take the semantic union of both sides");
   assert.match(p, /git commit --no-edit/, "AC3: complete the merge with git commit --no-edit");
@@ -2792,6 +2811,178 @@ test("AC3 (gap-worker-driver-retry-cap-not-wired) — promotion 不回归：同�
   assert.equal(MAX_FIX_RETRIES_DEFAULT, RETRY_CAP_DEFAULT, "AC3: promotion --max-fix-retries 缺省 = 共享 RETRY_CAP_DEFAULT（单一真相源）");
 });
 
+// ── gap-worker-driver-selector-api-error-no-backoff：selector API 错误/快速死亡无退避 ───────────────
+// 根因：worker-driver 对 selector API 错误 / fallback 失败的【快速死亡】（<60s 墙钟）无退避——17:22–17:56
+// 两任务 54 次「worker exited with code 1」全部 <60s 快速重派，纯烧派发预算（subagent spawn 预算 / 会话累计）。
+// 修法：worker <quickDeathMs 连续死亡 ≥backoffThreshold 次 ⇒ 对该 task 指数退避（backoffUntil，⛔ 不立即重派），
+// 间隔随次数增长、封顶 maxBackoffMs；退避到上限（maxRetries，复用现有重试上限机制）⇒ markNeedsHuman。
+// 退避状态按 task 记（⛔ 不全局）。⛔ 不修模型名（a7a507eab 已治「为什么 400」）。
+
+test("AC1 pure (gap-worker-driver-selector-api-error-no-backoff) — isQuickDeath: failed/spawn-failed/killed + <quickDeathMs ⇒ 快速死亡；completed/exited-not-landed/timed-out 不算", () => {
+  assert.equal(isQuickDeath("failed", 59_999), true, "failed + <60s ⇒ quick death");
+  assert.equal(isQuickDeath("spawn-failed", 0), true, "spawn-failed ⇒ quick death");
+  assert.equal(isQuickDeath("killed", 1000), true, "killed ⇒ quick death");
+  assert.equal(isQuickDeath("failed", 60_000), false, "wall ≥ quickDeathMs ⇒ not quick death（⛔ 慢速失败不进快速死亡桶）");
+  assert.equal(isQuickDeath("completed", 1000), false, "completed is never quick death");
+  assert.equal(isQuickDeath("exited-not-landed", 1000), false, "exited-not-landed has its own retry-cap（⛔ 与既有机制重叠计数）");
+  assert.equal(isQuickDeath("timed-out", 1000), false, "timed-out has its own semantics");
+});
+
+test("AC1 pure — backoffDelayMs 指数增长 + 封顶 maxBackoffMs（⛔ 无限增长 ⇒ 假）", () => {
+  const cfg = { quickDeathMs: 60_000, backoffThreshold: 1, baseBackoffMs: 30_000, maxBackoffMs: 300_000 };
+  assert.equal(backoffDelayMs(1, cfg), 30_000, "consecutive=1 (threshold=1) ⇒ base");
+  assert.equal(backoffDelayMs(2, cfg), 60_000, "2nd ⇒ 2×base（随次数增长）");
+  assert.equal(backoffDelayMs(3, cfg), 120_000, "3rd ⇒ 4×base");
+  assert.equal(backoffDelayMs(4, cfg), 240_000, "4th ⇒ 8×base");
+  assert.equal(backoffDelayMs(5, cfg), 300_000, "5th ⇒ capped at maxBackoffMs");
+  assert.equal(backoffDelayMs(99, cfg), 300_000, "never grows past maxBackoffMs");
+});
+
+test("AC1+AC3 pure — recordQuickDeathBackoff: 退避按 task、间隔随次数增长、到上限转 needsHuman、非快速死亡复位", () => {
+  const state = newQuickDeathBackoffState();
+  const cfg = { quickDeathMs: 60_000, backoffThreshold: 1, baseBackoffMs: 1000, maxBackoffMs: 5000 };
+  // 1st quick death → backed off, delay = base（1000ms）。
+  const r1 = recordQuickDeathBackoff(state, "gap-a", "failed", 5000, 100_000, 3, cfg);
+  assert.equal(r1.quickDeath, true);
+  assert.equal(r1.backedOff, true, "1st quick death (≥threshold=1) ⇒ backed off");
+  assert.equal(r1.newlyNeedsHuman, false);
+  assert.equal(state.backoffUntil.get("gap-a"), 101_000, "1st backoff until = now + base");
+  assert.equal(isBackedOff(state, "gap-a", 100_000), true, "backed off at now");
+  assert.equal(isBackedOff(state, "gap-a", 100_999), true, "still backed off just before expiry");
+  assert.equal(isBackedOff(state, "gap-a", 101_000), false, "backoff elapsed ⇒ eligible again");
+  // 2nd quick death → backoff grows（2×base）。
+  const r2 = recordQuickDeathBackoff(state, "gap-a", "failed", 5000, 200_000, 3, cfg);
+  assert.equal(r2.backedOff, true);
+  assert.equal(state.backoffUntil.get("gap-a"), 202_000, "2nd backoff = now + 2×base（随次数增长）");
+  // 3rd quick death → cap → needsHuman（⛔ 不无限退避）。
+  const r3 = recordQuickDeathBackoff(state, "gap-a", "failed", 5000, 300_000, 3, cfg);
+  assert.equal(r3.newlyNeedsHuman, true, "3rd quick death ≥ maxRetries ⇒ needsHuman");
+  assert.equal(r3.backedOff, false, "needsHuman ⇒ no more backoff（notNeedsHuman 过滤停止重派）");
+  assert.equal(state.backoffUntil.get("gap-a"), undefined, "backoff cleared on needsHuman");
+  // 非快速死亡复位（「连续」断链）：quick death 后再活过 quickDeathMs ⇒ 计数清零。
+  const s2 = newQuickDeathBackoffState();
+  recordQuickDeathBackoff(s2, "gap-b", "failed", 5000, 100_000, 3, cfg);
+  assert.equal(s2.counts.get("gap-b"), 1, "one quick death counted");
+  const reset = recordQuickDeathBackoff(s2, "gap-b", "failed", 70_000, 200_000, 3, cfg); // 70s ≥ 60s ⇒ not quick death
+  assert.equal(reset.quickDeath, false);
+  assert.equal(s2.counts.get("gap-b"), undefined, "survived run resets the consecutive quick-death count");
+  assert.equal(s2.backoffUntil.get("gap-b"), undefined, "backoff cleared on non-quick-death");
+});
+
+test("AC1 pure — 按 task 隔离：一个 task 退避不影响另一个 task 的退避状态", () => {
+  const state = newQuickDeathBackoffState();
+  const cfg = { quickDeathMs: 60_000, backoffThreshold: 1, baseBackoffMs: 1000, maxBackoffMs: 5000 };
+  recordQuickDeathBackoff(state, "gap-a", "failed", 5000, 100_000, 3, cfg);
+  assert.equal(isBackedOff(state, "gap-a", 100_000), true, "gap-a backed off");
+  assert.equal(isBackedOff(state, "gap-b", 100_000), false, "gap-b unaffected（退避按 task，⛔ 不全局）");
+});
+
+test("parse helpers — quick-death-ms/backoff-base-ms/backoff-max-ms/backoff-threshold fail-to-default", () => {
+  assert.equal(QUICK_DEATH_BACKOFF_DEFAULT.quickDeathMs, 60_000);
+  assert.equal(parseQuickDeathMs(undefined), 60_000, "no --quick-death-ms ⇒ default 60s");
+  assert.equal(parseQuickDeathMs("120000"), 120_000, "explicit honored");
+  assert.equal(parseQuickDeathMs("garbage"), 60_000, "garbage ⇒ default");
+  assert.equal(parseBackoffBaseMs(undefined), 30_000);
+  assert.equal(parseBackoffBaseMs("100"), 100, "explicit honored");
+  assert.equal(parseBackoffBaseMs("0"), 30_000, "non-positive ⇒ default");
+  assert.equal(parseBackoffMaxMs(undefined), 300_000);
+  assert.equal(parseBackoffMaxMs("1000"), 1000);
+  assert.equal(parseBackoffMaxMs("-5"), 300_000, "negative ⇒ default");
+  assert.equal(parseBackoffThreshold(undefined), 1, "default threshold = 1");
+  assert.equal(parseBackoffThreshold("2"), 2);
+  assert.equal(parseBackoffThreshold("0"), 1, "threshold must be ≥1 ⇒ default");
+  assert.equal(parseBackoffThreshold("1.5"), 1, "non-integer ⇒ default");
+});
+
+test("AC1 (integration) — worker 快速死亡后 driver 退避：不立即重派（worker-backoff 事件 + 无第二次立即派发）", async (t) => {
+  const root = makeGitRoot("backoff-ac1");
+  writeTaskFile(root, "gap-qd", "ready");
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-qd'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-qd\\x20quick-death')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(1)",
+    "--backoff-base-ms", "3000",     // 3s 退避 ⇒ 第二次派发至少 3s 后
+    "--backoff-threshold", "1",       // 第一次快速死亡即退避
+    "--max-retries", "5",             // 高上限，避免标 needs-human 干扰「退避」观测
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // 第一次派发 → 快速死亡 → worker-backoff 事件（退避生效的直接量）。
+  await waitFor(() => drv.events().filter((e) => e.event === "worker-backoff").length >= 1, 60000);
+  const backoffs = drv.events().filter((e) => e.event === "worker-backoff");
+  assert.equal(backoffs[0].task, "gap-qd");
+  assert.equal(backoffs[0].backed_off, true, "AC1: quick death ⇒ backed_off=true（退避，⛔ 立即重派）");
+  assert.equal(backoffs[0].needs_human, false);
+
+  // 负控制：退避窗口（3s）内无第二次派发——给一个 1s 窗口断言仍只有 1 次 selector-picked。
+  await new Promise((r) => setTimeout(r, 1000));
+  let picks = drv.events().filter((e) => e.event === "selector-picked");
+  assert.equal(picks.length, 1, "AC1: 退避期间（<3s）不立即重派——仍只有 1 次派发（⛔ 仍 <60s 立即重派 ⇒ 假）");
+
+  // 退避到期（3s）后第二次派发发生（退避是延迟，⛔ 永久不派）。
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 20000);
+  picks = drv.events().filter((e) => e.event === "selector-picked");
+  assert.equal(picks.length, 2, "AC1: 退避到期后第二次派发发生");
+});
+
+test("AC2 (integration) — 一个任务退避时其它任务照常派发（退避按 task，⛔ 不全局）", async (t) => {
+  const root = makeGitRoot("backoff-ac2");
+  writeTaskFile(root, "gap-a", "ready");
+  writeTaskFile(root, "gap-b", "ready");
+  const selFile = path.join(root, "sel.cnt");
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-a','gap-b'],pool:2}))",
+    "--selector-cmd", counterNodeE(selFile, "n===0?'gap-a\\x20first':n===1?'gap-b\\x20second':'gap-a\\x20again'"),
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(1)",
+    "--backoff-base-ms", "5000",     // gap-a 退避 5s（gap-b 派发发生在退避窗口内）
+    "--backoff-threshold", "1",
+    "--max-retries", "5",
+    "--concurrency", "1",
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // gap-a 派发 → 快速死亡 → 退避。gap-a 退避期间 gap-b 仍被派发（退避不拖垮全局）。
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").map((e) => e.task).includes("gap-b"), 60000);
+  const picks = drv.events().filter((e) => e.event === "selector-picked");
+  assert.deepEqual(picks.map((p) => p.task).slice(0, 2), ["gap-a", "gap-b"],
+    "AC2: gap-a 退避期间 gap-b 仍照常派发（退避按 task，⛔ 不全局）");
+});
+
+test("AC3 (integration) — 退避到上限转 markNeedsHuman（⛔ 不无限退避）", async (t) => {
+  const root = makeGitRoot("backoff-ac3");
+  writeTaskFile(root, "gap-cap", "ready");
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-cap'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-cap\\x20quick-death')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(1)",
+    "--backoff-base-ms", "100",   // 小退避，让多次快速死亡快速推进到上限
+    "--backoff-threshold", "1",
+    "--max-retries", "2",         // 2 次快速死亡 ⇒ needs-human
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // 2 次快速死亡（每次之间隔 100ms 退避）⇒ 标 needs-human。
+  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 60000);
+  assert.equal(readTaskStatus(root, "gap-cap"), "needs-human", "AC3: 退避到上限（max-retries=2）⇒ needs-human");
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-cap.md"), "utf8");
+  assert.ok(body.includes("## Needs-Human"), "AC3: ## Needs-Human audit record written");
+  assert.match(body, /快速死亡/, "AC3: reason mentions 快速死亡（退避上限）");
+
+  // 负控制：不再无限重派——恰好 2 次派发。
+  const picks = drv.events().filter((e) => e.event === "selector-picked");
+  assert.equal(picks.length, 2, "AC3: exactly 2 dispatches — 退避到上限后不再重派（⛔ 无限退避 ⇒ 假）");
+  assert.equal(readOutcomeLines(root).length, 2, "AC3: still exactly 2 outcomes — no 3rd attempt wrote a record");
+});
+
 // ── gap-adr034-fan-in-lock-holder-supervised（ADR-034）— driver 死（SIGKILL）→ 锁自动释放 ──────────
 // fan-in workflow 锁的持锁者由「分离 holder + flag 释放协议」（fan-in-ff-merge.sh --acquire/--release-
 // workflow-lock 的 setsid & disown）收进 driver：worker-driver.ts 经非分离直接子进程持锁，锁的生死 =
@@ -2846,4 +3037,233 @@ await new Promise(() => {});
     try { driver.kill("SIGKILL"); } catch { /* already dead */ }
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── gap-fan-in-token-gate-version-mismatch-self-lock：每任务新进程（版本错位类级修法）──────────────
+// 机械 fan-in 不再在守护进程 in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载
+// ⇒ 版本错位），改为每任务 spawn 一个 fresh node 进程加载 worker-driver.ts（entry = 主检出 opts.root，
+// ⛔ 非 worktree——gap-fan-in-spawn-stale-worktree-executor-missing-argv）--mechanical-fan-in。
+// 锁半（acquireFanInWorkflowLock，ADR-034）与编排半（fan-in-ff-merge.sh）同源（仍在 worktree）。
+// ⛔ token 闸（L1）已由 fd902a824 重定范围到 P2 的 TS 模块 ff 入口，本任务不再实现 token 闸。
+
+test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程：finishAsync 调 spawnMechanicalFanIn 加载当前代码（⛔ 不再 in-process）", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "finishAsync spawns a fresh mechanical fan-in process (⛔ in-process runMechanicalFanIn)");
+  assert.match(src, /const entry = path\.join\(opts\.root, "plugin", "scripts", "worker-driver\.ts"\)/, "spawnMechanicalFanIn loads the ROOT checkout's worker-driver.ts (⛔ worktree：stale worktree 缺新 argv ⇒ unknown argument)");
+  assert.match(src, /process\.execPath, "--experimental-strip-types", entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node --experimental-strip-types <root>/worker-driver.ts --mechanical-fan-in");
+  assert.match(src, /if \(mechanicalFanIn\) \{\s*\n\s*const task = tasks\[0\]/, "--mechanical-fan-in mode exists in main()");
+  assert.match(src, /worktree: mechWorktree,/, "--mechanical-fan-in mode passes the worktree to runMechanicalFanIn");
+});
+
+// ── gap-fan-in-spawn-stale-worktree-executor-missing-argv：执行器 entry 用主检出（⛔ worktree）────
+// fresh-process fan-in spawn 用 worktree 的 worker-driver.ts 当执行器时，stale worktree（未 merge
+// develop）的旧 worker-driver.ts 缺新 argv（--mechanical-fan-in）⇒ fresh 进程报 unknown argument ⇒
+// 无 JSON 输出 ⇒ parse-mechanical-fan-in red。修法：entry = opts.root/plugin/scripts/worker-driver.ts
+// （与 driver 同版），worktree 只提供任务 delta、不提供执行器代码。AC2 负控制：root entry（有 argv）
+// 与 stale worktree entry（无 argv）两个 stub——entry 若指回 worktree 则 spawn 加载 stale stub ⇒
+// unknown argument ⇒ red（本测试断言 outcome=landed，改回即红）。
+
+test("AC2 (gap-fan-in-spawn-stale-worktree-executor-missing-argv) — stale worktree 缺 --mechanical-fan-in argv 仍 spawn 成功（entry=root，⛔ 改回 opts.worktree ⇒ unknown argument ⇒ parse-mechanical-fan-in red）", async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "stale-exec-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const root = path.join(base, "root");
+  const worktree = path.join(base, "wt");
+
+  // root 的 worker-driver.ts = 当前版（有 --mechanical-fan-in argv）——最小自足 stub（无 import），
+  // 命中 --mechanical-fan-in 即打一行 JSON result 退出。模拟「主检出当前版」。
+  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plugin", "scripts", "worker-driver.ts"), [
+    "// current worker-driver.ts (root entry): has --mechanical-fan-in argv",
+    "const argv = process.argv.slice(2);",
+    'if (argv.includes("--mechanical-fan-in")) {',
+    '  process.stdout.write(JSON.stringify({ outcome: "landed", step: null, reason: null, verdict: null }) + "\\n");',
+    "  process.exit(0);",
+    "}",
+    'const flag = argv.find((x) => x.startsWith("--"));',
+    'console.error("worker-driver: unknown argument: " + (flag ?? ""));',
+    "process.exit(2);",
+  ].join("\n"), "utf8");
+
+  // worktree 的 worker-driver.ts = 陈旧版（无 --mechanical-fan-in argv，任何 --* 都 unknown argument）。
+  // 模拟 stale worktree：落后 develop、缺新 argv。
+  fs.mkdirSync(path.join(worktree, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(worktree, "plugin", "scripts", "worker-driver.ts"), [
+    "// STALE worker-driver.ts: no --mechanical-fan-in argv (any --* flag => unknown argument)",
+    "const argv = process.argv.slice(2);",
+    'const flag = argv.find((x) => x.startsWith("--"));',
+    'console.error("worker-driver: unknown argument: " + (flag ?? ""));',
+    "process.exit(2);",
+  ].join("\n"), "utf8");
+
+  const r = await spawnMechanicalFanIn({ task: "gap-stale", worktree, root, runId: "r1" });
+  assert.equal(r.outcome, "landed", "stale worktree must not break spawn — entry=root has --mechanical-fan-in (⛔ 改回 opts.worktree ⇒ unknown argument ⇒ parse-mechanical-fan-in red)");
+  assert.equal(r.step, null, "no failure step when the root entry handles --mechanical-fan-in");
+});
+
+// ── gap-fan-in-subprocess-hang-timeout-recovery ────────────────────────────────────────────────
+// A+B 任务机械 fan-in 持 fan-in-workflow.lock 53min 挂死：mechSh 各步有超时、suite 有 silence
+// watchdog，仍 53min 无恢复 ⇒ 超时/看门狗有盲区（孙进程持管道 ⇒ close 不触发；suite 未起等槽锁）。
+// 修法三件套：AC1 每步 begin/end trace（挂起定位）、AC2 mechSh 进程组 kill + 显式 resolve（超时必达）、
+// AC3 suite 看门狗显式 resolve 不依赖 close（等槽锁零输出也 kill）、AC4 挂起 ⇒ 锁必释放（finally）。
+
+const SLOT_LIB = path.join(REPO_ROOT, "plugin", "scripts", "suite-slot-lib.sh");
+
+/** 建一个 hermetic git repo + task worktree（机械 fan-in 的输入，与 fan-in-driver-mechanical-
+ *  orchestration.test.mjs 的 makeRepoWithWorktree 同形——develop 上 ready 任务、task/<id> 分支上
+ *  doc-only 实现提交，使 merge/anti-drift/delta/typecheck/scoped/doc 直放行）。返回
+ *  { base, repo, worktree, slotBase, capture }。 */
+function makeMechRepo(tag, taskId = "gap-mfh") {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), `mechfanin-${tag}-`));
+  const repo = path.join(base, "repo");
+  const worktree = path.join(base, "wt");
+  fs.mkdirSync(repo, { recursive: true });
+  runGit(repo, ["init", "-q"]);
+  runGit(repo, ["config", "user.name", "mechfanin-test"]);
+  runGit(repo, ["config", "user.email", "mf@example.com"]);
+  runGit(repo, ["branch", "-M", "develop"]);
+  // scripts/test.sh（classify-delta 读 registry；空 registry ⇒ tasks/、docs/ 判 doc-only）。
+  fs.mkdirSync(path.join(repo, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+  fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "tasks", `${taskId}.md`), [
+    "---",
+    `id: ${taskId}`,
+    "title: mechanical fan-in hang test",
+    "status: ready",
+    "labels: []",
+    "extra: {}",
+    "---",
+    "## Proposal",
+    "test",
+    "## Plan",
+    "test",
+    "## Touches",
+    "- docs/feature.md",
+    `- tasks/${taskId}.md`,
+    "## Acceptance Criteria",
+    "- [x] AC1 landed",
+    "## Definition of Done",
+    "- [x] landed",
+    "",
+  ].join("\n"), "utf8");
+  runGit(repo, ["add", "-A"]);
+  runGit(repo, ["commit", "-q", "-m", "base"]);
+  runGit(repo, ["worktree", "add", "-q", worktree, "-b", `task/${taskId}`]);
+  // develop 脱离主检出（gap-fan-in-ff-ref-update-detach-develop）：主检出停 doc-only 工作分支，ff 退化
+  // 纯 ref 更新。
+  runGit(repo, ["checkout", "-q", "-b", "develop-work"]);
+  fs.mkdirSync(path.join(worktree, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(worktree, "docs", "feature.md"), "# feature\n", "utf8");
+  runGit(worktree, ["add", "-A"]);
+  runGit(worktree, ["commit", "-q", "-m", "implement feature"]);
+  const slotBase = path.join(base, "full-suite.lock");
+  const capture = path.join(base, "suite.env");
+  return { base, repo, worktree, slotBase, capture };
+}
+
+/** 一次机械 fan-in 的标准 opts（fake 命令缝，⛔ 不真跑 19+min 套件）。overrides 覆盖 suite/超时等。 */
+function mechOpts(m, runId, overrides = {}) {
+  return {
+    task: "gap-mfh",
+    worktree: m.worktree,
+    root: m.repo,
+    runId,
+    mergeTarget: "develop",
+    forceSuite: true,
+    scriptsDir: path.join(REPO_ROOT, "plugin", "scripts"),
+    slotBase: m.slotBase,
+    slotLib: SLOT_LIB,
+    silenceMs: 500,
+    suiteCapture: m.capture,
+    suiteLogFile: path.join(m.base, "suite.log"),
+    suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
+    scopedGateCommand: ["true"],
+    docCheckCommand: ["true"],
+    archguardCommand: ["true"],
+    ...overrides,
+  };
+}
+
+test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery) — appendFanInStepTrace 写 step-begin/step-end 到 .quay/fan-in-step-trace.jsonl（挂起 = begin 无 end）", (t) => {
+  const root = makeRoot("trace-ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  appendFanInStepTrace(root, "gap-t", "run-1", "merge-develop", "begin");
+  appendFanInStepTrace(root, "gap-t", "run-1", "merge-develop", "end", { ok: true });
+  appendFanInStepTrace(root, "gap-t", "run-1", "typecheck", "begin"); // 模拟挂起：无 end
+  const lines = fs.readFileSync(path.join(root, ".quay", "fan-in-step-trace.jsonl"), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(lines.length, 3, "begin+end+begin = 3 trace lines");
+  assert.equal(lines[0].event, "step-begin");
+  assert.equal(lines[0].step, "merge-develop");
+  assert.equal(lines[1].event, "step-end");
+  assert.equal(lines[1].step, "merge-develop");
+  assert.equal(lines[1].ok, true);
+  assert.equal(lines[2].step, "typecheck");
+  // 挂起定位：typecheck 只有 begin 无 end（⛔ 不可把「无 end」读成「没跑过」，硬规则 3b 可区分）。
+  assert.equal(lines.filter((l) => l.step === "typecheck" && l.event === "step-end").length, 0, "a hung step has begin without end");
+  assert.ok(Number.isInteger(lines[0].epoch) && lines[0].epoch > 0, "epoch is a sortable second-resolution timestamp");
+  assert.equal(lines[0].task, "gap-t");
+  assert.equal(lines[0].runId, "run-1");
+});
+
+test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery) — runMechanicalFanIn 每步都被 begin/end trace 包裹（⛔ 改掉 ⇒ 日志缺失）", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  for (const step of ["merge-develop", "anti-drift", "delta-classify", "typecheck", "archguard-structure", "scoped-gate", "doc-check", "suite", "anti-drift-land", "ac-gate", "flip-done", "ff", "cleanup"]) {
+    assert.ok(src.includes(`trace("${step}", "begin")`), `step ${step} must have a begin trace`);
+    assert.ok(src.includes(`trace("${step}", "end"`), `step ${step} must have an end trace`);
+  }
+});
+
+test("AC2 (gap-fan-in-subprocess-hang-timeout-recovery) — mechSh timeout 后 resolve（⛔ 依赖 close）+ 组 kill 杀孙进程（孙进程持管道不阻塞返回）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mech-ac2-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const pidFile = path.join(tmp, "grandchild.pid");
+  // 直接子进程（bash）spawn 孙进程（node）继承 stdout/stderr 管道并长期存活，bash `wait` 挂起等它。
+  // timeout 到期 ⇒ 组 kill（⛔ 只杀直接子进程会留孙进程持管道/锁泄漏）。
+  const cmd = `node -e 'require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(()=>{},1000)' & wait`;
+  const t0 = Date.now();
+  const r = await mechSh(["bash", "-c", cmd], 1000);
+  assert.ok(Date.now() - t0 < 5000, `mechSh must resolve at timeout (⛔ hang on close), took ${Date.now() - t0}ms`);
+  assert.equal(r.status, null, "SIGKILLed child ⇒ null status");
+  assert.match(r.error?.message ?? "", /spawn timeout after 1000ms/, "timeout must carry a 'spawn timeout' error");
+  // 孙进程被杀（组 kill）：⛔ 旧 runAsync 只杀直接子进程 ⇒ 孙进程存活持管道（本断言取假）。
+  const gp = Number(fs.readFileSync(pidFile, "utf8").trim());
+  await waitFor(() => {
+    try { process.kill(gp, 0); return false; } catch { return true; }
+  }, 5000);
+  assert.ok(true, "grandchild holding the pipe must be killed by the process-group kill");
+});
+
+test("AC3 (gap-fan-in-subprocess-hang-timeout-recovery) — spawnSuiteAndWait 在 suite 卡等槽锁（零输出）时，silence watchdog 有限时间 kill 并返回 hung", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mech-ac3-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const slotBase = path.join(tmp, "full-suite.lock");
+  const slots = suiteLockSlotPaths(slotBase);
+  assert.equal(slots.length, 1, "hermetic slot base defaults to S=1");
+  // 持住唯一槽：后台 flock holder 让 slot-holder 的 flock -n 失败 ⇒ 卡进无界等槽循环（零输出）。
+  const holder = spawn("bash", ["-c", `exec {fd}>"$1"; flock -x "$fd"; sleep 30`, "holder", slots[0]], { stdio: "ignore", detached: true });
+  t.after(() => { try { process.kill(-holder.pid, "SIGKILL"); } catch { /* gone */ } });
+  await waitFor(() => {
+    try { execFileSync("flock", ["-n", slots[0], "true"], { stdio: "ignore" }); return false; } catch { return true; }
+  }, 5000);
+  const t0 = Date.now();
+  const r = await spawnSuiteAndWait({ slotBase, slotLib: SLOT_LIB, suiteCommand: ["bash", "-c", "echo never-run"], logFile: null, silenceMs: 400 });
+  assert.ok(Date.now() - t0 < 5000, `spawnSuiteAndWait must return in finite time (⛔ 53min hang), took ${Date.now() - t0}ms`);
+  assert.equal(r.outcome, "hung", "suite stuck waiting for the slot ⇒ hung (independent value)");
+  assert.equal(r.hungByWatchdog, true);
+});
+
+test("AC4 (gap-fan-in-subprocess-hang-timeout-recovery) — 任一 fan-in 子进程挂起 ⇒ 有限时间 red + 释放 fan-in-workflow.lock（finally 必达）", async (t) => {
+  const m = makeMechRepo("ac4");
+  const runId = "mf-run-hang";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const t0 = Date.now();
+  // suite 挂起（零输出 ⇒ silence watchdog kill → hung → red at suite），⛔ 不落地、锁仍 release。
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { suiteCommand: ["bash", "-c", "sleep 100"], silenceMs: 400 }));
+  assert.ok(Date.now() - t0 < 20000, `mechanical fan-in must fail in finite time (⛔ 53min hang), took ${Date.now() - t0}ms`);
+  assert.equal(r.outcome, "red");
+  assert.equal(r.step, "suite");
+  // 锁在 finally 释放：事件文件里恰一对 acquire→release（⛔ 挂起残留锁阻塞全仓 fan-in）。
+  const lock = readWorkflowLockHold(m.repo, "gap-mfh", runId);
+  assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "hang ⇒ lock released (finally) — clean acquire+release pair");
 });

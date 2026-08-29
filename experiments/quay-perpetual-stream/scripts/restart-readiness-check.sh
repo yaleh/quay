@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# restart-readiness-check.sh — the mechanical go/no-go for un-halting exp5 (removing the .halt
-# sentinel to hand development back to the autonomous OUTER loop). Turns "is master safe to hand to
-# the loop?" from a judgment call into a runnable check (ADR-004 / Π_{S→E}). Operational script (not
-# load-bearing method-infra imported by other code), so it is a .sh, not a covered *.mjs.
+# restart-readiness-check.sh — the mechanical go/no-go for resuming a halted driver (before running
+# `quay driver resume` to hand development back to the autonomous driver loop). Turns "is the git
+# tree safe to resume?" from a judgment call into a runnable check (ADR-004 / Π_{S→E}). Operational
+# script (not load-bearing method-infra imported by other code), so it is a .sh, not a covered *.mjs.
+# (gap-retire-halt-file-driver-based, 2026-08-29: the .halt sentinel's promotion/execution role is
+# dead — the driver control-state (.quay/worker-control.json / promotion-control.json) replaced it —
+# so this check's target is now `quay driver resume`, not "remove .halt".)
 #
 # MANUAL-ONLY, NOT CI/LOOP-WIRED (gap-orphaned-check-scripts-not-wired, M-DIR119-C-CANARY,
 # 2026-07-27, explicit decision — named loudly here per that gap's own Requested action, not a
-# silent omission): nothing invokes this automatically before an un-halt. A human (or an agent
-# acting on human instruction) runs this BY HAND before deleting the repo-root `.halt` file. See
-# CLAUDE.md's `.halt sentinel` bullet for the pointer a fresh reader would actually find.
+# silent omission): nothing invokes this automatically before a resume. A human (or an agent
+# acting on human instruction) runs this BY HAND before running `quay driver resume`.
 #
-# Exit 0 = READY (all hard checks pass). Exit 1 = NOT READY (a hard check failed; do NOT un-halt).
+# Exit 0 = READY (all hard checks pass). Exit 1 = NOT READY (a hard check failed; do NOT resume).
 # The pending-directive count is INFORMATIONAL (the loop DRAINs pending directives — a non-zero count
 # is not a blocker, but is reported so you know what the loop's first act will process).
 #
@@ -18,8 +20,8 @@
 # 2026-08-02 for fast mode: the exp5 selfchecks never run scripts/test.sh (verified: the four
 # run_check entries only cover task-schema/dod-fixture/vmeta-lag/loadbearing), but fast mode runs
 # directly on master and its loop tick stops on "full suite not green". A READY ✓ here is only
-# meaningful if the suite actually passes — otherwise un-halting hands the loop a guaranteed
-# self-stop. Check 6 is deliberately slow (~560s on this repo): un-halt is a rare deliberate action.
+# meaningful if the suite actually passes — otherwise resuming hands the loop a guaranteed
+# self-stop. Check 6 is deliberately slow (~560s on this repo): resume is a rare deliberate action.
 #
 # Usage:  experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh
 
@@ -30,8 +32,6 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # full suite. Production callers never set it → default (real repo root), behavior unchanged.
 ROOT="${QUAY_RR_ROOT:-$(cd "$HERE/../../.." && pwd)}"   # scripts/ -> quay-perpetual-stream/ -> experiments/ -> repo root
 cd "$ROOT" || { echo "ERROR: cannot cd to repo root ($ROOT)" >&2; exit 1; }
-HALT=".halt"   # repo-root-relative — matches select-preflight.ts's checkHalt() and
-               # plugin/skills/loop-driver/SKILL.md's documented convention (gap-halt-sentinel-path-mismatch, M187).
 fail=0
 ok()   { echo "  [ok]   $1"; }
 bad()  { echo "  [FAIL] $1"; fail=1; }
@@ -41,9 +41,9 @@ echo "restart-readiness-check — repo: $ROOT"
 # ── 7. Inner-layer block signal (gap-no-explicit-blocked-signal-from-inner-layer, AC5) ─────────────
 # A present .quay/inner-blocked.json means the inner layer STOPPED and is waiting for a ruling — it
 # has NOT recovered. The record is PRINTED so the human knows exactly what to rule on. This is a
-# HARD FAIL, not informational: un-halting while a block is asserted hands the loop a self-stopping
+# HARD FAIL, not informational: resuming while a block is asserted hands the loop a self-stopping
 # state (the resumed tick re-hits the same stop-and-wait), and the task's own AC5 parenthetical says
-# it plainly — "内层在等裁定 ≠ 可以解除 .halt". The file is gitignored, so it does not disturb
+# it plainly — "内层在等裁定 ≠ 可以 resume". The file is gitignored, so it does not disturb
 # check 1's working-tree-clean assertion. Kept as a named function so the RR_ONLY_BLOCK_CHECK test
 # seam can run JUST this check behaviorally.
 check_inner_blocked() {
@@ -63,7 +63,7 @@ check_inner_blocked() {
 # ── 8. Stranded worktree branches (INFORMATIONAL — gap-stranded-worktree-branches-have-no-alarm-channel) ──
 # A silent fail-closed preserves a branch's work (Land fails closed rather than discarding) but NOTHING
 # reports it — 2026-08-01: 4 branches / 24,989 lines sat stranded for a day, found only because a human
-# ran `git worktree list` by accident. The un-halt go/no-go checks the clean tree and mid-flight merge
+# ran `git worktree list` by accident. The resume go/no-go checks the clean tree and mid-flight merge
 # but MISSED exactly this class; it must SHOW stranded branches even though they are NOT a hard blocker
 # (some are legitimately waiting to merge/adjudicate, e.g. the human-retained M239). Delegates to
 # task-status-drift-check.ts --stranded (the named check; the three-gate criterion lives THERE, reused
@@ -88,10 +88,10 @@ if [ "${RR_ONLY_BLOCK_CHECK:-0}" = "1" ]; then
   check_inner_blocked
   echo ""
   if [ "$fail" = 0 ]; then
-    echo "READY ✓ — mechanical preconditions met. (Un-halt is still a human decision; recommend SUPERVISED restart.)"
+    echo "READY ✓ — mechanical preconditions met. (Resume is still a human decision; recommend SUPERVISED restart.)"
     exit 0
   else
-    echo "NOT READY ✗ — at least one hard check failed; do NOT remove .halt until resolved."
+    echo "NOT READY ✗ — at least one hard check failed; do NOT run `quay driver resume` until resolved."
     exit 1
   fi
 fi
@@ -103,17 +103,17 @@ if [ "${RR_ONLY_STRANDED_CHECK:-0}" = "1" ]; then
   check_stranded_branches
   echo ""
   if [ "$fail" = 0 ]; then
-    echo "READY ✓ — mechanical preconditions met. (Un-halt is still a human decision; recommend SUPERVISED restart.)"
+    echo "READY ✓ — mechanical preconditions met. (Resume is still a human decision; recommend SUPERVISED restart.)"
     exit 0
   else
-    echo "NOT READY ✗ — at least one hard check failed; do NOT remove .halt until resolved."
+    echo "NOT READY ✗ — at least one hard check failed; do NOT run `quay driver resume` until resolved."
     exit 1
   fi
 fi
 
-# 1. Working tree clean (ignoring the .halt sentinel itself, which is expected to be present).
-dirty="$(git status --short 2>/dev/null | grep -vE "(^\?\? )?${HALT//./\\.}\$")"
-[ -z "$dirty" ] && ok "working tree clean (ignoring .halt)" || { bad "working tree NOT clean:"; echo "$dirty" | sed 's/^/         /'; }
+# 1. Working tree clean.
+dirty="$(git status --short 2>/dev/null)"
+[ -z "$dirty" ] && ok "working tree clean" || { bad "working tree NOT clean:"; echo "$dirty" | sed 's/^/         /'; }
 
 # 2. No merge in progress.
 [ ! -f .git/MERGE_HEAD ] && ok "no MERGE_HEAD (no merge in progress)" || bad ".git/MERGE_HEAD present — a merge is mid-flight"
@@ -144,9 +144,9 @@ run_check "loadbearing-test-gate"  bash "$SCR/loadbearing-test-gate.sh" \
 # 6. Full test suite green (the fast-mode tick's hard stop condition, NOT covered by the exp5-era
 #    selfchecks above — those only run task-schema/dod-fixture/vmeta-lag/loadbearing, never
 #    scripts/test.sh). Fast mode runs DIRECTLY on master and its tick stops on "full suite not
-#    green", so a READY here must mean the suite actually passes — otherwise un-halting hands a
+#    green", so a READY here must mean the suite actually passes — otherwise resuming hands a
 #    self-stopping loop to the next tick. This is the fast-mode "is master safe to hand to the
-#    loop?" gate; it is deliberately the SLOW check (~560s on this repo) — un-halt is a rare,
+#    loop?" gate; it is deliberately the SLOW check (~560s on this repo) — resume is a rare,
 #    deliberate action. Fast mode's default group is product,engine (governance self-skips).
 if [ -f "$ROOT/scripts/test.sh" ]; then
   run_check "full-test-suite (scripts/test.sh)" bash "$ROOT/scripts/test.sh"
@@ -169,9 +169,9 @@ echo "  [info] pending directives (loop DRAINs these): ${pend:-unknown}"
 
 echo ""
 if [ "$fail" = 0 ]; then
-  echo "READY ✓ — mechanical preconditions met. (Un-halt is still a human decision; recommend SUPERVISED restart.)"
+  echo "READY ✓ — mechanical preconditions met. (Resume is still a human decision; recommend SUPERVISED restart.)"
   exit 0
 else
-  echo "NOT READY ✗ — at least one hard check failed; do NOT remove .halt until resolved."
+  echo "NOT READY ✗ — at least one hard check failed; do NOT run `quay driver resume` until resolved."
   exit 1
 fi

@@ -10,7 +10,7 @@
 #
 # 用法：
 #   quay-launch.sh <role> [--dry-run] [--bare]
-#     role      ∈ manager | outer | inner | task-worker | selector | fix-worker（定义在 profiles.yml.roles）
+#     role      ∈ manager | outer | task-worker | selector | fix-worker（定义在 profiles.yml.roles）
 #     --dry-run  只打印将执行的启动命令，不实际启动（AC4 正/负控制校验用）
 #     --bare     追加 --bare 最小模式（一次性验证会话用，AC5；不长驻）
 #
@@ -47,7 +47,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # gap-manager-layer-no-verified-install-vector (bare-metal 冷启动向量): 在 npm pack 的裸机安装里
 # `.claude/launch.settings.json` 不在包根（npm `files` 只随包根 plugin/ 走），它在
 # `plugin/.claude/launch.settings.json`（plugin 交付面）。dev-tree 的包根 settings 带 deepseek
-# 917k 角色 env（外层/inner 用），是开发树的优先选择；裸机包只有 plugin 拷贝（manager 角色的
+# 917k 角色 env（外层用），是开发树的优先选择；裸机包只有 plugin 拷贝（manager 角色的
 # launcher=claude / name=quay-manager 两份一致）——回退到它，`quay manager start` 才能在裸机
 # 冷启动。fallback 顺序：显式 env > 包根 dev-tree settings > plugin 出厂 settings。
 SETTINGS_FILE="${QUAY_LAUNCH_SETTINGS:-}"
@@ -115,7 +115,7 @@ if [[ -z "$LAUNCHER" || -z "$NAME" ]]; then
   exit 1
 fi
 
-# 角色的有效 env 与文件顶层 env 合并：无 unset 且无角色级 env（outer/inner/selector/fix-worker，
+# 角色的有效 env 与文件顶层 env 合并：无 unset 且无角色级 env（outer/selector/fix-worker，
 # deepseek 角色直接用文件全量 env）→ 直接引用文件（可读、逐字可查）；有 unset（manager 取消继承
 # 917k 上下文/压缩变量）或有角色级 env（task-worker 叠加 PRINT_BG_WAIT）→ 合并成 JSON 字符串传给
 # --settings（--settings 接受 file-or-json）。这是把「917k 只给 deepseek、不给 manager」机械化的
