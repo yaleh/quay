@@ -26,10 +26,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，指令存在）：`buildContinueWorkerPrompt` 输出的 prompt 含冲突消解指令（grep 到 `unmerged` 或 `CONFLICT` 或 `resolve` 关键词）。
-- [ ] AC2（能取假，derived 重算）：prompt 明确「outline inventory 冲突 ⇒ 重跑 `verify-delivery-surface.ts --write-inventory`，非手并计数」。
-- [ ] AC3（能取假，code 并集 + commit）：prompt 明确「code 冲突 ⇒ 语义并集 + `git commit --no-edit` 完成 merge」。
-- [ ] AC4（能取假，单测）：`worker-driver.test.mjs` 有断言钉住 prompt 含这三类指令（改 prompt 删掉任一指令 ⇒ 测试红）。
+- [x] AC1（能取假，指令存在）：`buildContinueWorkerPrompt` 输出的 prompt 含冲突消解指令（grep 到 `unmerged` 或 `CONFLICT` 或 `resolve` 关键词）。
+- [x] AC2（能取假，derived 重算）：prompt 明确「outline inventory 冲突 ⇒ 重跑 `verify-delivery-surface.ts --write-inventory`，非手并计数」。
+- [x] AC3（能取假，code 并集 + commit）：prompt 明确「code 冲突 ⇒ 语义并集 + `git commit --no-edit` 完成 merge」。
+- [x] AC4（能取假，单测）：`worker-driver.test.mjs` 有断言钉住 prompt 含这三类指令（改 prompt 删掉任一指令 ⇒ 测试红）。
 
 ## Definition of Done
 
