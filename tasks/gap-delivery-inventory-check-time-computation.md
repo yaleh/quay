@@ -1,7 +1,7 @@
 ---
 id: gap-delivery-inventory-check-time-computation
 title: delivery inventory 改 check 时现算，消除 outline snapshot 冲突热点
-status: ready
+status: done
 labels:
   - gap
 parent: null
