@@ -27,6 +27,8 @@ extra:
 > ```
 > 修复面随之扩大：**主修复面 = 机械路径**（worker-driver.ts runMechanicalFanIn 的 suite 步），workflow 兜底路径（fan-in-execute.js）是次要面。
 
+> **阻塞已升级（2026-08-29，manager 诊断，非重派可解）**：连续 exited-not-landed 的真因不是挡路 check——`gap-mechanical-fan-in-result-single-authoritative-structured`（done，`f3115bf81`）已重构 `runMechanicalFanIn`（D5/D6/D7），本任务 fix 锚在 `worker-driver.ts` 的 suite 步与之冲突。⇒ 需对重构后的 `runMechanicalFanIn` 重锚定（主修复面：suite 步统一到 full-suite-runner.ts --buckets）。另：D6 已顺带修「reason 字段 `stderr || stdout` 丢 stdout」，本任务 scoped-gate 失败 reason 不可读的根因已消。
+
 ## Proposal
 
 **现象（manager 实读，outer 读码复核）**：`gap-suite-lock-starvation-long-validation-hold` 全量轮 `exit=1`（1 个已知 flaky fail），但 `/tests` 页面显示最近全绿（#628 等）。`verification-round.jsonl` 全文件搜「lock-starvation」=0 命中（628 行有效 JSON）。
