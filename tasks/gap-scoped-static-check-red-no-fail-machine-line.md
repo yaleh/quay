@@ -37,10 +37,10 @@ scoped 层为什么走同步路径：`scripts/test.sh:414-418` 的 `while … ev
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假·scoped 层机器行）：scoped 门里一个 fail-closed checker（exit 1）⇒ `bash scripts/test.sh --for-task <task> --allow-thin` 的 stdout+stderr 合并输出含 `STATIC_CHECK_FAILED: <checker名> exit=<rc>`；（⛔ 仍只有良性 preamble / 无该行 ⇒ 假）。
-- [ ] AC2（能取假·单测钉死）：`plugin/test/checker-cost.test.mjs` 断言同步 `run_checker`（RUN_CHECKER_PARALLEL 未设）在 checker exit 1 时向 stderr 发射 `STATIC_CHECK_FAILED: <name> exit=1` 且返回该退出码；（⛔ 删掉发射 ⇒ 测试红）。
-- [ ] AC3（第三态不混淆·硬规则 3b）：exit 3（NOT-EVALUATED）仍发射 `STATIC_CHECK_NOT_EVALUATED: <name>` 而非 `STATIC_CHECK_FAILED`；exit 0 不发射任何 `STATIC_CHECK_*` 行；（⛔ 第三态被当 RED / 通过被当失败 ⇒ 假）。
-- [ ] AC4（并行路径不回归·无重复发射）：全量 suite 的 `run_checker_parallel_wait` 仍每个失败 checker 恰一条 `STATIC_CHECK_FAILED`，full-suite-runner 的 failures[] 捕获不受同步路径新发射影响；（⛔ 并行路径双发射或漏捕获 ⇒ 假）。
+- [x] AC1（能取假·scoped 层机器行）：scoped 门里一个 fail-closed checker（exit 1）⇒ `bash scripts/test.sh --for-task <task> --allow-thin` 的 stdout+stderr 合并输出含 `STATIC_CHECK_FAILED: <checker名> exit=<rc>`；（⛔ 仍只有良性 preamble / 无该行 ⇒ 假）。——同步 `run_checker` 已发射；scoped 门 eval 循环走同步路径（`run_scoped_static_checks_sel` test.sh:414-418 未设 RUN_CHECKER_PARALLEL，`--commands` 发射 `run_checker "<name>" …`），AC2 单测直接钉住该行。
+- [x] AC2（能取假·单测钉死）：`plugin/test/checker-cost.test.mjs` 断言同步 `run_checker`（RUN_CHECKER_PARALLEL 未设）在 checker exit 1 时向 stderr 发射 `STATIC_CHECK_FAILED: <name> exit=1` 且返回该退出码；（⛔ 删掉发射 ⇒ 测试红）。——新测 `AC2 — synchronous run_checker … exit 1` 断言 `^STATIC_CHECK_FAILED: sync-red exit=1$` 且 status=1；直跑 17/17 绿。
+- [x] AC3（第三态不混淆·硬规则 3b）：exit 3（NOT-EVALUATED）仍发射 `STATIC_CHECK_NOT_EVALUATED: <name>` 而非 `STATIC_CHECK_FAILED`；exit 0 不发射任何 `STATIC_CHECK_*` 行；（⛔ 第三态被当 RED / 通过被当失败 ⇒ 假）。——exit 0 负控（`doesNotMatch /STATIC_CHECK_/`）+ exit 3 负控（`doesNotMatch /STATIC_CHECK_FAILED/`，仍 NOT_EVALUATED）两测通过。
+- [x] AC4（并行路径不回归·无重复发射）：全量 suite 的 `run_checker_parallel_wait` 仍每个失败 checker 恰一条 `STATIC_CHECK_FAILED`，full-suite-runner 的 failures[] 捕获不受同步路径新发射影响；（⛔ 并行路径双发射或漏捕获 ⇒ 假）。——并行路径 3 测（fail-closed/并发/bound）全绿；同步与并行分支互斥（`RUN_CHECKER_PARALLEL` 判定），无重复发射。
 
 ## Definition of Done
 
