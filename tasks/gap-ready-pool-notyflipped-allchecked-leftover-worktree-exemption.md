@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption
 title: ready-pool notYetFlipped allChecked 臂排除「fan-in 失败未落地」任务 → 永久搁浅 + 冻住整池
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -35,11 +35,11 @@ return doneFlipReady || (allChecked && !hasLeftoverWorktree);
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：ready 任务 AC 全勾 **且**存在 `task/<id>` 残留 worktree → **不在** `excluded`、在 `ready`（保持可派发）。
-- [ ] AC2（能取假，回归）：ready 任务 AC 全勾 **且无**残留 worktree → 仍判 not-yet-flipped、在 `excluded`（2026-08-08 行为不变）。
-- [ ] AC3（能取假，SCD 形状回归单测）：`ready-pool-check.test.mjs` 新增「全勾 + 造残留 worktree → 进 `ready` 列表」用例；既有 `acCompleteNotLanded`（无 worktree → excluded）保持绿。
-- [ ] AC4（能取假，池级效应）：单个 not-yet-flipped 死任务不再使 `dispatchable_disjoint` 归零 / `pool_big_all_colliding` 变 True。
-- [ ] AC5（能取假，消费者一致）：`slot-refill` 的 `excludedNyfIds` 消费随之正确——有 worktree 的 allChecked 任务进入推荐/可派发。
+- [x] AC1（能取假）：ready 任务 AC 全勾 **且**存在 `task/<id>` 残留 worktree → **不在** `excluded`、在 `ready`（保持可派发）。 **Evidence:** `ready-pool-check.test.mjs` 新增 `LEFTOVER-WORKTREE` 单测：allChecked + 造 `task/<id>` 残留 worktree → `notYetFlipped` 返回 false、`analyzeTasks` 把它放进 `ready` 不在 `excluded`；直接跑 128/128 pass。
+- [x] AC2（能取假，回归）：ready 任务 AC 全勾 **且无**残留 worktree → 仍判 not-yet-flipped、在 `excluded`（2026-08-08 行为不变）。 **Evidence:** 同一单测负控制：无 worktree → `notYetFlipped` true 仍 excluded；`git worktree remove` 后恢复 exclusion；既有 `acCompleteNotLanded`（无 worktree → excluded）保持绿，128/128 pass。
+- [x] AC3（能取假，SCD 形状回归单测）：`ready-pool-check.test.mjs` 新增「全勾 + 造残留 worktree → 进 `ready` 列表」用例；既有 `acCompleteNotLanded`（无 worktree → excluded）保持绿。 **Evidence:** 新增 `analyzeTasks keeps an allChecked + leftover-worktree task in ready, not excluded` 用例；既有 `acCompleteNotLanded` 仍在 128 通过集内不回归。
+- [x] AC4（能取假，池级效应）：单个 not-yet-flipped 死任务不再使 `dispatchable_disjoint` 归零 / `pool_big_all_colliding` 变 True。 **Evidence:** 新增 `a single allChecked dead task no longer zeroes the pool` 单测：`pool=1`、`dispatchable_disjoint=1`、`pool_big_all_colliding=false`。
+- [x] AC5（能取假，消费者一致）：`slot-refill` 的 `excludedNyfIds` 消费随之正确——有 worktree 的 allChecked 任务进入推荐/可派发。 **Evidence:** `slot-refill.test.mjs` 新增 `NOT-YET-FLIPPED — a leftover task/<id> worktree exempts the allChecked arm` 单测：`excludedNyfIds` 不含该任务、`isNotYetFlippedSkip` false + remove worktree 负控制恢复 excluded；107/107 pass。
 
 ## Definition of Done
 
