@@ -1,6 +1,7 @@
 ---
 id: gap-abi-status-lifecycle-vocab-scattered-no-named-type
-title: 任务状态生命周期词汇散落 ~30 文件、无具名 TaskStatus 类型（Task.status 内联 union 未导出 + AdrRecord.status 裸 string）
+title: 任务状态生命周期词汇散落 ~30 文件、无具名 TaskStatus 类型（Task.status 内联 union 未导出 +
+  AdrRecord.status 裸 string）
 status: ready
 labels:
   - gap
@@ -39,7 +40,29 @@ extra: {}
 
 ## Touches
 
-- packages/quay/src/abi.ts（导出 TaskStatus + 单一字面量来源）
-- packages/quay/src/（盘读 status 的解析点，isTaskStatus 守卫）
-- plugin/scripts/（散落字符串比较的消费者，改按类型/单一来源）
+- packages/quay/src/abi.ts（导出 TaskStatus + TASK_STATUSES 单一来源 + isTaskStatus 守卫）
+- packages/quay/src/gate/lifecycle.ts（消费者迁移）
+- packages/quay/src/gate/driver.ts（消费者迁移）
+- packages/quay/src/goal-store.ts（消费者迁移）
+- packages/quay/src/observation.ts（消费者迁移）
+- packages/quay/src/serve-dashboard.ts（消费者迁移）
+- packages/quay-native/src/store.ts（YAML 盘读解析点，isTaskStatus 守卫）
+- packages/quay-github/src/github-client.ts（消费者迁移）
+- plugin/scripts/task-schema.ts（parseTask 盘读解析点，isTaskStatus 守卫）
+- plugin/scripts/cap-counts-subagents-check.ts（消费者迁移）
+- plugin/scripts/portfolio-choice.ts（消费者迁移）
+- plugin/scripts/prod-data-audit.ts（消费者迁移）
+- plugin/scripts/ready-pool-check.ts（消费者迁移）
+- plugin/scripts/suite-driver.ts（消费者迁移）
+- plugin/scripts/task-status-drift-check.ts（消费者迁移）
+- plugin/scripts/worker-driver.ts（消费者迁移）
+- plugin/scripts/workflow-baseline-metrics.ts（消费者迁移）
+- plugin/scripts/workflow-replay.ts（消费者迁移）
+- plugin/test/abi-task-status-typing.test.mjs (new)（类型守卫 + 非法值 fail-closed 负控制）
 - tasks/gap-abi-status-lifecycle-vocab-scattered-no-named-type.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T20:23:53.355Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

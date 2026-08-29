@@ -154,6 +154,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/archive -->
 <!-- reference-doc: orchestration/SPEC-cut-the-waiting.md -->
 <!-- reference-doc: orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-execution-loop-productization-2026-08-28.md -->
 <!-- reference-doc: orchestration/REVIEW-cadence.md -->
 <!-- reference-doc: orchestration/manager-loop-tick.md -->
 <!-- reference-doc: orchestration/manager-tick-log.md -->
@@ -168,6 +169,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/manager-phase-goal.md -->
 <!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
 <!-- reference-doc: orchestration/SPEC-methodology-layer-architecture-2026-08-25.md -->
+<!-- reference-doc: orchestration/SPEC-checker-mechanical-spine-contract-2026-08-28.md -->
 <!-- reference-doc: orchestration/SPEC-suite-lifecycle-and-failure-semantics-2026-08-26.md -->
 <!-- reference-doc: orchestration/SPEC-complete-delivery-surface-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-instruments-behind-one-entry.md -->

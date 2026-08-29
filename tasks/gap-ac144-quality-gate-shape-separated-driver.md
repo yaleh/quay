@@ -1,7 +1,7 @@
 ---
 id: gap-ac144-quality-gate-shape-separated-driver
 title: AC144 质量把关按【形状】分开驱动化——B15/B17 驱动化，B16-C/B18 归语义面（⛔ 不得塞进 promotion-driver）
-status: done
+status: ready
 labels:
   - gap
   - feature
@@ -10,6 +10,8 @@ children: []
 extra:
   schema: execution
 ---
+> **RETREATED / 搁置（审计（2026-08-28）发现未实际接线：quality driver 从未被 `quay driver start --kind quality` 激活（drivers.yml 无 quality 段、无 quality 进程、.quay/quality-round.jsonl 与 quality-control.json 均不存在），而 outer tick 落地后已停跑 B15/B17——质量把关自 08-26T10:14 翻 done 起已停摆 2 天。AC3 取证是 grep driver 文件内调用（代码级自指），⛔ 判据「仍 outer tick 手动跑」在双路径死亡时仍为假（硬规则 4 推论三同形）。退回 ready 继续做：补 drivers.yml quality 段 + `quay driver start --kind quality` 激活 + 等质量载体产出生产记录。）**
+
 **type:** execution
 
 ## Proposal
@@ -26,9 +28,9 @@ B15/B17 落 driver（B15 换调用方、B17 直接机械驱动化）；B16-A/B �
 
 ## Acceptance Criteria
 
-- [x] AC1（能取假，非 god-object）：上述四项不被并入同一个 driver kind（B15/B17 驱动化，B16-C/B18 归语义面）；（⛔ 四项并入同一 kind ⇒ 假）。
-- [x] AC2（能取假，语义不伪装机械）：B16-C 类 / B18 不被声称"已驱动化"而无 LLM 参与（把语义判断伪装成机械判断）；（⛔ 声称驱动化而无 LLM ⇒ 假）。
-- [x] AC3（能取假，B15/B17 真驱动化）：B15（pool-quality-judge）调用方从 outer tick 换成 driver，B17（judgment-consumer-check）由 driver 跑——grep 到 driver 里的调用；（⛔ 仍 outer tick 手动跑 ⇒ 假）。
+- [ ] AC1（能取假，非 god-object）：上述四项不被并入同一个 driver kind（B15/B17 驱动化，B16-C/B18 归语义面）；（⛔ 四项并入同一 kind ⇒ 假）。
+- [ ] AC2（能取假，语义不伪装机械）：B16-C 类 / B18 不被声称"已驱动化"而无 LLM 参与（把语义判断伪装成机械判断）；（⛔ 声称驱动化而无 LLM ⇒ 假）。
+- [ ] AC3（能取假，B15/B17 真驱动化）：B15（pool-quality-judge）调用方从 outer tick 换成 driver，B17（judgment-consumer-check）由 driver 跑——grep 到 driver 里的调用；（⛔ 仍 outer tick 手动跑 ⇒ 假）。
 
 ## Definition of Done
 
@@ -67,3 +69,9 @@ $ grep -n "pool-quality-judge\|judgment-consumer-check" plugin/scripts/quality-g
 $ grep -c "已随 AC144 退役" orchestration/orchestrator-tick-core.md
 （B15/B17 两条标退役 → driver 承接）
 ```
+
+## Needs-Human
+
+**执行 2026-08-28T19:18:41.205Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

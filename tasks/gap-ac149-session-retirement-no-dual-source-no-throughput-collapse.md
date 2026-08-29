@@ -26,7 +26,7 @@ outer / inner 会话真正退役，三条子判据缺一不可：
 
 ## Plan
 
-按 AC149-1/2/3 执行：先标退役（cron/tick-log/文档）、再测产能（≥24h land 速率）、再查双真相源。⛔ 一次性退役十几条会批量制造 B9 漂移（09:0xZ 刚修），逐条核死。
+按 AC149-1/2/3 执行：先标退役（cron/tick-log/文档）、再测产能（≥24h land 速率）、再查双真相源。⛔ 一次性退役十几条会批量制造 B9 漂移（09:0xZ 刚修），逐条核死。三个机制脚本按以下命名落地（⛔ 不另取名）：`plugin/scripts/session-retirement-check.ts`（退役语义断言）、`plugin/scripts/land-capacity-monitor.ts`（≥24h land 速率监测）、`plugin/scripts/dual-source-check.ts`（双真相源判定），各配测试 `plugin/test/<同名>.test.mjs`。
 
 ## Acceptance Criteria
 
@@ -40,6 +40,23 @@ AC149-1/2/3 全勾；outer/inner 真退役、产能不塌、无双真相源；B0
 
 ## Touches
 
-- orchestration/（cron/tick-log/执行核文档标退役）
-- plugin/scripts/（会话退役 + 产能监测 + 双真相源检查）
+- orchestration/manager-tick-core.md（执行核文档标退役）
+- orchestration/orchestrator-tick-core.md（执行核文档标退役）
+- orchestration/fast-mode-tick-core.md（执行核文档标退役）
+- orchestration/manager-loop-tick.md（tick-log 标退役）
+- orchestration/manager-tick-criteria.md（tick 判准标退役）
+- orchestration/manager-tick-sending.md（发送形态标退役）
+- orchestration/manager-tick-closing.md（收尾形态标退役）
+- plugin/scripts/session-retirement-check.ts (new)（会话退役语义断言）
+- plugin/scripts/land-capacity-monitor.ts (new)（≥24h land 速率产能监测）
+- plugin/scripts/dual-source-check.ts (new)（双真相源判定）
+- plugin/test/session-retirement-check.test.mjs (new)
+- plugin/test/land-capacity-monitor.test.mjs (new)
+- plugin/test/dual-source-check.test.mjs (new)
 - tasks/gap-ac149-session-retirement-no-dual-source-no-throughput-collapse.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T19:48:23.581Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

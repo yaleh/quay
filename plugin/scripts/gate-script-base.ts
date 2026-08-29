@@ -75,7 +75,15 @@ export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
 // Read and parse YAML frontmatter from a markdown file.
 // Returns a Record of key→value for simple scalar/list fields, or null if no frontmatter found.
 export function readFrontmatter(filePath: string): Record<string, any> | null {
-  const text = fs.readFileSync(filePath, "utf8");
+  let text: string;
+  try {
+    text = fs.readFileSync(filePath, "utf8");
+  } catch (e: any) {
+    // 文件在扫描期间被并发删除（测试 fixture 竞态 / 并发写 tasks/）⇒ 视为不存在（缺值=未查，
+    // 硬规则 6——不因 ENOENT 崩溃整个检测器）。missing file has no frontmatter → null（与注释语义一致）。
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+    throw e;
+  }
   const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!m) return null;
 

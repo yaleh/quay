@@ -162,6 +162,8 @@ export interface CandidateChecks {
   missingArtifacts: string[];
   selfTouchOk: boolean;
   touchesResolve: boolean;
+  touchesNarrow: boolean;
+  wideTouches: string[];
   depsReady: boolean;
   retiredMechanism: boolean;
   superseded: boolean;
@@ -189,6 +191,7 @@ export function classifyCandidate(c: CandidateChecks): FixDecision {
   if (!c.fourArtifacts) missing.push(`fourArtifacts=false missing=[${(c.missingArtifacts || []).join(",")}]`);
   if (!c.selfTouchOk) missing.push("selfTouchOk=false");
   if (!c.touchesResolve) missing.push("touchesResolve=false");
+  if (c.touchesNarrow === false) missing.push(`touchesNarrow=false wideTouches=[${(c.wideTouches || []).join(",")}]`);
   const unfixable: string[] = [];
   if (!c.depsReady) unfixable.push("depsReady=false");
   if (c.retiredMechanism) unfixable.push("retiredMechanism=true");
@@ -316,6 +319,8 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
           missingArtifacts: Array.isArray(c.missingArtifacts) ? c.missingArtifacts.map(String) : [],
           selfTouchOk: !!c.selfTouchOk,
           touchesResolve: !!c.touchesResolve,
+          touchesNarrow: c.touchesNarrow !== false,
+          wideTouches: Array.isArray(c.wideTouches) ? c.wideTouches.map(String) : [],
           depsReady: !!c.depsReady,
           retiredMechanism: !!c.retiredMechanism,
           superseded: !!c.superseded,
@@ -365,7 +370,7 @@ export function computeRoundRecord(opts: {
   promotePathLlmInvoked: boolean;
   fixes: FixOutcome[];
   reverify?: ReverifyOutcome | null;
-  needsHuman?: string[];
+  needsHuman?: Array<{ id: string; ok: boolean; committed: boolean; reason: string }>;
   /** AC150-2：本轮是否因控制态 halted 而停（true ⇒ 未跑 ready-pool-check、未 spawn fix worker）。 */
   halted?: boolean;
   /** AC150-1：本轮资源门判定（起 fix worker 前读；WAIT ⇒ 退避、fixes 为空）。 */
@@ -387,7 +392,10 @@ export function computeRoundRecord(opts: {
     applied: opts.applied, error: opts.error, promote_path_llm_invoked: opts.promotePathLlmInvoked, fixes: opts.fixes,
     // AC133：重验证结果（null = 本轮无 fix worker 可重验证）与本轮新标 needs-human 的 id 清单。
     reverify: opts.reverify ?? null,
-    needs_human: opts.needsHuman ?? [],
+    needs_human: (opts.needsHuman ?? []).map((n) => n.id),
+    // gap-mark-needs-human-commit-after-write：needs-human 翻转的 committed 落进 round 记录（同
+    // applyPromotions 的 committed——翻转写盘即提交，committed=false 表示 repo-less no-op / 提交失败）。
+    needs_human_committed: (opts.needsHuman ?? []).map((n) => ({ id: n.id, committed: n.committed })),
     // AC150：halted（控制态停）与 gate（资源门判定）落进 round 记录，outer 可观测。
     halted: opts.halted ?? false,
     gate: opts.gate ?? null,
@@ -478,7 +486,8 @@ export interface PromotionOutcomeRecord {
   task_id: string;
   gate: { eligible: boolean; missing: string[] };
   action: "promote" | "fix" | "skip" | "needs-human";
-  result: { ok: boolean; detail: string | null };
+  // committed 仅 needs-human 记录携带（gap-mark-needs-human-commit-after-write：翻转写盘即提交）。
+  result: { ok: boolean; detail: string | null; committed?: boolean };
   ts: string;
 }
 
@@ -493,7 +502,7 @@ export function computeOutcomeRecords(opts: {
   at: string;
   applied: PromotionRound["applied"];
   fixes: FixOutcome[];
-  needsHuman?: Array<{ id: string }>;
+  needsHuman?: Array<{ id: string; ok: boolean; committed: boolean; reason: string }>;
   reverify?: ReverifyOutcome | null;
 }): PromotionOutcomeRecord[] {
   const out: PromotionOutcomeRecord[] = [];
@@ -547,7 +556,10 @@ export function computeOutcomeRecords(opts: {
       task_id: n.id,
       gate: { eligible: false, missing: [] },
       action: "needs-human",
-      result: { ok: true, detail: "retry-cap-exhausted" },
+      // gap-mark-needs-human-commit-after-write: `committed` 落进 result（同 applyPromotions 的
+      // committed）——needs-human 翻转写盘即提交，committed=false 表示 repo-less no-op 或提交失败
+      // （可观测非静默）；result.ok 改为 markNeedsHuman 的真实 ok（⛔ 不再硬编码 true）。
+      result: { ok: n.ok, committed: n.committed, detail: n.ok ? "retry-cap-exhausted" : (n.reason ?? "mark-needs-human-failed") },
       ts: opts.at,
     });
   }
@@ -694,22 +706,25 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
       // AC133 AC3：连续修满 N 次仍不合格 ⇒ 标 needs-human（失败上限）。
       newlyNeedsHuman = advanceRetryCap(retryState, reverify.stillIneligibleIds, maxFixRetries);
     }
-    for (const id of newlyNeedsHuman) {
-      markNeedsHuman(root, id, `连续修满 ${maxFixRetries} 次仍不合格（闸在重验证后仍判不合格）`);
-    }
+    // AC133 AC3：连续修满 N 次仍不合格 ⇒ 标 needs-human（失败上限）。markNeedsHuman 写盘即提交
+    // （gap-mark-needs-human-commit-after-write），返回 { id, ok, reason, committed }——⛔ 不再丢弃
+    // {ok,reason}；committed 落进 round/outcome 记录（同 applyPromotions 的 committed）。
+    const needsHumanResults = newlyNeedsHuman.map((id) =>
+      markNeedsHuman(root, id, `连续修满 ${maxFixRetries} 次仍不合格（闸在重验证后仍判不合格）`),
+    );
 
     const promotedIds = [...r.promotedIds, ...rePromotedIds];
     const applied = [...r.applied, ...reApplied];
     const record = computeRoundRecord({
       round, runId, pid: process.pid, at: new Date().toISOString(), ...r,
-      promotedIds, applied, fixes, reverify, needsHuman: newlyNeedsHuman, gate, liveness,
+      promotedIds, applied, fixes, reverify, needsHuman: needsHumanResults, gate, liveness,
     });
     try { appendRoundRecord(roundLogFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     // AC134：判定/晋升/修复/needs-human 各写一条 outcome 记录（.quay/promotion-outcome.jsonl，outer 可消费）。
     // gap-fix-worker-edit-exit-4：把 AC133 重闸结果 reverify 传给 outcome，fix 的 result.ok 以「闸判落地」为准。
     const outcomes = computeOutcomeRecords({
       at: record.ts, applied, fixes,
-      needsHuman: newlyNeedsHuman.map((id) => ({ id })),
+      needsHuman: needsHumanResults,
       reverify,
     });
     for (const o of outcomes) {

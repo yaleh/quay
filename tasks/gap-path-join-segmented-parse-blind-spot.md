@@ -85,3 +85,9 @@ node --experimental-strip-types plugin/scripts/suite-bucket-select.ts --write-ef
 - plugin/scripts/suite-bucket-attribution.ts（加 path.join/path.resolve 分段拼接解析信号）
 - plugin/test/suite-bucket-attribution.test.mjs（分段拼接解析测试 + 保底降为异常负控制）
 - tasks/gap-path-join-segmented-parse-blind-spot.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-27T21:31:18.486Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

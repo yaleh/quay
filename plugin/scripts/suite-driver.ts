@@ -26,11 +26,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0（driver-runtime 单一实现）：registry（controlFile/carriers 单源）、isHalted（控制面 halt）、
 // ts / sleep / appendHeartbeatLine（心跳/载体）。⛔ 不从 worker/promotion/quality 中转。
-import { DRIVER_KINDS, isHalted, ts, sleep, appendHeartbeatLine } from "./driver-runtime.ts";
+import { DRIVER_KINDS, isHalted, ts, sleep, appendHeartbeatLine, runAsync } from "./driver-runtime.ts";
 // suite 槽路径单一真相源（TS 侧；与 bash suite-slot-lib.sh 同语义）。
 import { suiteLockBase } from "./suite-lock-slots.ts";
 
@@ -166,7 +166,17 @@ export async function spawnSuiteAndWait(args: {
       child = spawn(holder[0], holder.slice(1), {
         detached: true,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, ...(env ?? {}) },
+        // 「driver 持槽」是 spawnSuiteAndWait 的结构不变式（slot-holder 在 exec 前【总是】取单飞槽），
+        // 不是 caller 的选择 ⇒ 强制注入，放在 `...(env ?? {})` 之后（⛔ 不被 caller 的 env 覆盖）。
+        // gap-mech-fan-in-suite-silence-watchdog-fired：机械 fan-in 路径漏传本 env ⇒ scripts/test.sh
+        // --buckets 的 full_suite_lock_acquire 不跳过再取槽，用自己的新 FD 对【同一把槽】再 flock，
+        // 被 slot-holder 继承下来的 FD 拒绝（flock 按 open-file-description，同进程不同 FD 也互斥）⇒
+        // 卡进无界 while 等槽循环 ⇒ 零输出 ≥15min ⇒ 静默看门狗误当挂死 SIGKILL。
+        env: {
+          ...process.env,
+          ...(env ?? {}),
+          QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT: "1",
+        },
       });
     } catch (e) {
       resolve({
@@ -184,7 +194,11 @@ export async function spawnSuiteAndWait(args: {
     // （生产路径 suite 输出 tee 到 log、stdout 空）。任一推进都刷新 lastActivityMs。
     let lastActivityMs = Date.now();
     let lastLogMtime = logMtimeMs(logFile);
-    child.stdout?.on("data", () => { lastActivityMs = Date.now(); });
+    // 统一输出机件（gap 诊断）：suite 的 stdout 持久化到 logFile——⛔ 之前只捕获做看门狗活性检测、
+    // 不落盘 ⇒ 机械 fan-in 的 suite 失败无法从日志诊断（workflow 路径靠 shell 重定向才有日志）。
+    // append 追加（同 workflow 路径的 `>> log` 语义，跨 relaunch 复用同一文件不轮转）。
+    const suiteLogStream = logFile ? fs.createWriteStream(logFile, { flags: "a" }) : null;
+    child.stdout?.on("data", (chunk: Buffer) => { lastActivityMs = Date.now(); suiteLogStream?.write(chunk); });
     child.stderr?.on("data", () => { lastActivityMs = Date.now(); });
 
     const finish = (r: SuiteRunResult): void => {
@@ -213,6 +227,7 @@ export async function spawnSuiteAndWait(args: {
       finish({ outcome: "red", exitCode: null, signalCode: null, hungByWatchdog, startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedMs, error: `spawn error: ${e.message}`, pid: childPid });
     });
     child.on("close", (code, signal) => {
+      suiteLogStream?.end();
       const finishedAt = new Date().toISOString();
       const durationMs = Date.now() - startedMs;
       // 三态可分（AC2）：被静默看门狗杀 ⇒ hung（独立取值）；正常退出 0 ⇒ done；非零/信号 ⇒ red。
@@ -271,6 +286,60 @@ export function writeSuiteResult(root: string, task: string, result: SuiteRunRes
   const file = path.join(dir, `${task}.json`);
   fs.writeFileSync(file, JSON.stringify(result) + "\n", "utf8");
   return file;
+}
+
+/**
+ * gap-verification-round-static-fail-no-record AC1/AC2 — write a RED verification-round record when a
+ * per-task suite FAILED (outcome=red). The mechanical fan-in path previously wrote NO record on a red
+ * suite (only the green path wrote), so a failed round left only /tmp/fan-in-suite-<task>.log — the
+ * /tests ledger blind to it. Best-effort: a write failure is WARNed, never blocks the red outcome (the
+ * task is exited-not-landed and the workflow fallback is dispatched either way). load + lane_count are
+ * derived with the SAME 口径 fan-in-execute.js uses (load ← /proc/loadavg 1min; lane_count ← the suite
+ * log's last `__GROUP__ concurrency=N` line, falling back to nproc).
+ * ⛔ 迁到这里（writeSuiteResult 旁）而非 worker-driver.ts 热区——结构性解耦：worker-driver 只留一行调用，
+ * merge-develop 冲突面从 ~50 行降到 ~1 行（gap-verification-round-static-fail-no-record 适配方案）。
+ */
+export async function writeRedSuiteRecord(args: {
+  task: string;
+  runId: string;
+  worktree: string;
+  suiteHead: string;
+  suiteLogFile: string;
+  sr: SuiteRunResult;
+}): Promise<void> {
+  const { task, runId, worktree, suiteHead, suiteLogFile, sr } = args;
+  try {
+    let load = "0";
+    try {
+      load = fs.readFileSync("/proc/loadavg", "utf8").trim().split(/\s+/)[0] || "0";
+    } catch { /* keep 0 */ }
+    let laneCount = "";
+    try {
+      const text = fs.readFileSync(suiteLogFile, "utf8");
+      const groups = text.match(/__GROUP__ concurrency=(\d+)/g);
+      if (groups && groups.length > 0) {
+        const m = groups[groups.length - 1].match(/(\d+)$/);
+        if (m) laneCount = m[1];
+      }
+    } catch { /* log unreadable */ }
+    if (!laneCount) {
+      const nproc = spawnSync("nproc", [], { encoding: "utf8" });
+      laneCount = (nproc.stdout || "").trim() || "1";
+    }
+    const argv = [
+      "node", "--experimental-strip-types", path.join(worktree, "plugin", "scripts", "pre-verified-round-record.ts"),
+      "--task-id", task, "--run-id", runId, "--started-at", sr.startedAt, "--duration-ms", String(sr.durationMs),
+      "--lane-count", laneCount, "--load", load, "--commit", suiteHead, "--preverified", "0", "--state", "red",
+      "--root", worktree,
+      "--suite-log", suiteLogFile,
+    ];
+    const w = await runAsync(argv, { timeoutMs: 60_000, collectStderr: true });
+    if (w.status !== 0) {
+      process.stderr.write(`suite-driver: verification-round red-record write failed (best-effort): ${(w.stderr || w.stdout || "").trim()}\n`);
+    }
+  } catch (e) {
+    process.stderr.write(`suite-driver: verification-round red-record write threw (best-effort): ${(e as Error)?.message ?? String(e)}\n`);
+  }
 }
 
 /** 追加一条三态 outcome 到主载体 suite-round.jsonl（每轮一条；一行一 JSON）。 */
@@ -387,7 +456,7 @@ export async function runResidentSuiteLoop(opts: SuiteLoopOptions): Promise<numb
         suiteCommand: request.suiteCommand,
         logFile: request.logFile,
         silenceMs,
-        env: { QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT: "1" },
+        // QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT 由 spawnSuiteAndWait 强制注入（结构不变式），caller 不传。
       }).then((result) => {
         inFlight.delete(task);
         try { writeSuiteResult(root, task, { ...result, runId: request.runId }); } catch { /* 结果写失败不致命 */ }
@@ -500,7 +569,7 @@ export async function main(argv: string[]): Promise<number> {
       suiteCommand: cmd,
       logFile: logFile ?? null,
       silenceMs,
-      env: { QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT: "1" },
+      // QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT 由 spawnSuiteAndWait 强制注入（结构不变式），caller 不传。
     });
     writeSuiteResult(rootDir, task, { ...result, runId: resolvedRunId });
     appendSuiteRound(rootDir, computeSuiteRound({ runId: resolvedRunId, task, result, slotBase: resolvedSlotBase }));

@@ -155,6 +155,17 @@
 
 set -euo pipefail
 
+# ── FORCE_COLOR normalization (gap-suite-force-color-ansi-test-sh-normalize) ──────────────────────
+# FORCE_COLOR=3 in the ambient env makes Node's console.log emit ANSI color codes EVEN WHEN piped
+# (\x1B[33m…\x1B[39m) — deterministically breaking any output-assertion test whose spawnSync'd node
+# inherits it (fan-in-workflow-lock.test.mjs:171, instrument-failure-check.sh's node -e parse; the same
+# root as gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi, superseded by this).
+# Normalize HERE at the entry so EVERY child process / spawnSync inherits the unset var (AC2:
+# entry-level, never a single-point patch). `unset` (⛔ not NO_COLOR=1 — Node IGNORES NO_COLOR while
+# FORCE_COLOR is set, warns and still colors) restores node's own TTY detection; suite subprocesses are
+# always piped so they emit no color regardless of a parent FORCE_COLOR value (1/2/3).
+unset FORCE_COLOR
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
@@ -184,7 +195,14 @@ main_root="${QUAY_MAIN_CHECKOUT:-$repo_root}"
 # entry is the git primary (main) checkout, which is authoritative and always correct.
 # `|| _derived_main=""` guards the command substitution under `set -euo pipefail` (a non-git /
 # non-worktree cwd must NOT abort the suite — it just keeps main_root == repo_root).
-_derived_main="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')" || _derived_main=""
+# ⚠️ 2026-08-28 实测修复（manager，gap-loop-shipping suite 系统性红的根因）：不能用
+# `awk '/^worktree /{print $2; exit}'` 早退——awk 关读端后 git 的下一次 write 立即 EPIPE/SIGPIPE
+# （`git worktree list` 输出 >2 个 worktree 时必发生），pipefail 下管道 exit=141 ⇒ `|| _derived_main=""`
+# 把【已捕获的主检出路径】清空 ⇒ main_root 退回 repo_root=worktree ⇒ checker 扫 worktree slug
+# （无 subagent transcripts）⇒ agentId 不可解析 ⇒ 假红。新 driver（runMechanicalFanIn 直接在
+# worktree 跑 suite，不经 full-suite-runner 设 QUAY_MAIN_CHECKOUT）下所有 fan-in 必中。修法：awk
+# 读完整流、用 f 标志只取首条（不早退 ⇒ 无 SIGPIPE），`|| _derived_main=""` 只在真失败时兜底。
+_derived_main="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{if (!f) {print $2; f=1}}')" || _derived_main=""
 if [ -n "${_derived_main}" ] && [ "${_derived_main}" != "${repo_root}" ]; then
   main_root="${_derived_main}"
 fi
@@ -956,14 +974,8 @@ run_selected() {
   build_dist_once
   oh_t3=$(_oh_mark)
   run_static_checks
-  # archguard structural gate (gap-archguard-zero-production-calls): a REAL archguard CLI call wired
-  # into the suite — fail-closed (archguard missing / analyze failed / dependency cycles ⇒ exit 1).
-  # This is the mechanism that makes CLAUDE.md's「Consult archguard before calling a milestone done」
-  # executable instead of advisory: the meter is runnable, not asserted (AC1/AC2); the produced
-  # `.archguard/` product is read back as the criterion's input and appended to
-  # `.archguard/metrics-history.jsonl` (AC3). Runs AFTER the parallelized static-check block (the
-  # archguard analyze is CPU-heavy tree-sitter work, kept out of the parallel pool to avoid contention).
-  run_checker "archguard-structure-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/archguard-runner.ts" --root "${repo_root}"
+  # archguard 结构闸已迁入 fan-in driver 机械步骤（runMechanicalFanIn 第 5.5 步，typecheck 后 scoped门 前，
+  # gap-archguard-structural-gate-in-fan-in-driver）——⛔ test.sh 不再触发（两个真相源）。
   oh_t4=$(_oh_mark)
   export QUAY_TEST_GROUPS="$groups"
   local files=() f
