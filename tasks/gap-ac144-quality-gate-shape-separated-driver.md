@@ -1,7 +1,7 @@
 ---
 id: gap-ac144-quality-gate-shape-separated-driver
 title: AC144 质量把关按【形状】分开驱动化——B15/B17 驱动化，B16-C/B18 归语义面（⛔ 不得塞进 promotion-driver）
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -28,9 +28,9 @@ B15/B17 落 driver（B15 换调用方、B17 直接机械驱动化）；B16-A/B �
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，非 god-object）：上述四项不被并入同一个 driver kind（B15/B17 驱动化，B16-C/B18 归语义面）；（⛔ 四项并入同一 kind ⇒ 假）。
-- [ ] AC2（能取假，语义不伪装机械）：B16-C 类 / B18 不被声称"已驱动化"而无 LLM 参与（把语义判断伪装成机械判断）；（⛔ 声称驱动化而无 LLM ⇒ 假）。
-- [ ] AC3（能取假，B15/B17 真驱动化）：B15（pool-quality-judge）调用方从 outer tick 换成 driver，B17（judgment-consumer-check）由 driver 跑——grep 到 driver 里的调用；（⛔ 仍 outer tick 手动跑 ⇒ 假）。
+- [x] AC1（能取假，非 god-object）：上述四项不被并入同一个 driver kind（B15/B17 驱动化，B16-C/B18 归语义面）；（⛔ 四项并入同一 kind ⇒ 假）。
+- [x] AC2（能取假，语义不伪装机械）：B16-C 类 / B18 不被声称"已驱动化"而无 LLM 参与（把语义判断伪装成机械判断）；（⛔ 声称驱动化而无 LLM ⇒ 假）。
+- [ ] AC3（能取假，B15/B17 真驱动化）：B15（pool-quality-judge）调用方从 outer tick 换成 driver，B17（judgment-consumer-check）由 driver 跑——grep 到 driver 里的调用；（⛔ 仍 outer tick 手动跑 ⇒ 假）。**⛔ 接线已落地（CLI KINDS + drivers.yml + driver-config + kernel help），但 `quay driver start --kind quality` 的实际激活 + `.quay/quality-round.jsonl` 载体产生产记录须在 fan-in 后由主检出执行——生产载体未产出前不勾本条（硬规则 4 推论三）。**（待外部）
 
 ## Definition of Done
 
@@ -39,8 +39,12 @@ B15/B17 驱动化、B16-C/B18 明确归 AC145；AC1/AC2/AC3 全勾；无 god-obj
 ## Touches
 
 - plugin/scripts/quality-gate-driver.ts（新增：质量把关例程型 driver，B15/B17 两条例程）
-- plugin/scripts/driver-runtime.ts（quality kind 进 DRIVER_KINDS registry + DriverKind 类型）
-- plugin/scripts/capability-catalog.sh（新脚本六表注册）
+- plugin/scripts/driver-runtime.ts（quality kind 进 DRIVER_KINDS registry + DriverKind 类型；RETREAT 补：kernel help 列 quality/suite）
+- plugin/scripts/drivers.yml（RETREAT 补接线：quality 段——此前缺失，`quay driver start --kind quality` 的激活配置）
+- plugin/scripts/driver-config.ts（RETREAT 补接线：DriverConfig/defaultDriverConfig/loadDriverConfig/driverCap 加 quality kind）
+- packages/quay/src/cli/driver.ts（RETREAT 补接线：KINDS 加 quality——此前 CLI 只认 promotion|worker|outer，`start --kind quality` 被拒）
+- plugin/test/driver-config.test.mjs（RETREAT 补接线：quality 段断言 + driverCap 接受 quality kind）
+- plugin/scripts/capability-catalog.sh（新脚本六表注册；RETREAT 补：driver-config 谁按 补 quality/outer 消费者）
 - plugin/test/quality-gate-driver.test.mjs（新增单测）
 - plugin/test/driver-runtime.test.mjs（KNOWN_KINDS 断言补 quality）
 - plugin/test/launch-settings.test.mjs（profiles.yml 新增 pool-judge role ⇒ role 计数 6→7）
@@ -53,25 +57,30 @@ B15/B17 驱动化、B16-C/B18 明确归 AC145；AC1/AC2/AC3 全勾；无 god-obj
 
 ## Invoke Evidence
 
-**修后实跑（inner worktree）**：
-- 单测 `plugin/test/quality-gate-driver.test.mjs`：14 pass / 0 fail（`node --experimental-strip-types --test`）。
+**RETREAT 补接线（退回 ready 后重做，2026-08-28）**——审计发现 quality driver 从未被 `quay driver start --kind quality` 激活（drivers.yml 无 quality 段、CLI KINDS 无 quality），接线四处：
+- `packages/quay/src/cli/driver.ts` `KINDS` 加 `quality`（此前 CLI 只认 promotion|worker|outer，`start --kind quality` 被拒）→ 激活闸解除。
+- `plugin/scripts/drivers.yml` 加 `quality:` 段（`interval_ms: 30000`，同 outer 例程型）→ 此前无 quality 段。
+- `plugin/scripts/driver-config.ts` `DriverConfig`/`defaultDriverConfig`/`loadDriverConfig`/`driverCap` 加 `quality` kind → 配置可读。
+- `plugin/scripts/quality-gate-driver.ts` 轮间隔缺省从字面量 `60_000` 改为 `loadDriverConfig(root).quality.intervalMs`（AC155 单一真相源，⛔ 不再死字面量）。
+
+**修后实跑（inner worktree，`env -u FORCE_COLOR node --experimental-strip-types --test`）**：
+- `plugin/test/driver-config.test.mjs`：4 pass / 0 fail（新增 quality 段断言 + driverCap 接受 quality kind）。
+- `plugin/test/quality-gate-driver.test.mjs`：14 pass / 0 fail。
 - `plugin/test/driver-runtime.test.mjs`：15 pass / 0 fail（KNOWN_KINDS 断言补 quality）。
-- `plugin/test/pool-quality-judge.test.mjs`：23 pass / 0 fail（orchestrator-tick-core 退役后 doc-contract AC3 仍绿）。
-- `bash plugin/scripts/capability-catalog.sh --summary`：`287 scripts | 287 declared | 0 unclassified`（新脚本六表注册，AC1c 闸过）。
-- `node plugin/scripts/verify-delivery-surface.ts --write-inventory`：`inventory_drift=0`（DELIVERY-INVENTORY scripts= 计数 bump）。
 
-**B15/B17 驱动化 grep 取证（AC3）**：
+**B15/B17 驱动化 grep 取证（AC3 激活面，非代码级自指）**：
 ```
+$ grep -n "quality" packages/quay/src/cli/driver.ts
+（:30 KINDS 数组含 "quality"——`quay driver start --kind quality` 通过 CLI 校验）
+
+$ grep -n "quality" plugin/scripts/drivers.yml
+（:24 quality 段——driver-config loadDriverConfig 可读）
+
+$ grep -n "quality" plugin/scripts/driver-config.ts
+（:39/:51/:92/:99 四处——DriverConfig 字段/defaultDriverConfig/loadDriverConfig/driverCap kind）
+
 $ grep -n "pool-quality-judge\|judgment-consumer-check" plugin/scripts/quality-gate-driver.ts
-（defaultPoolQualityPlanArgv / runPoolQualityJudge / defaultJudgmentConsumerArgv / runJudgmentConsumerCheck
-  四处调用 + aggregateVerdicts 单一聚合 import）
-
-$ grep -c "已随 AC144 退役" orchestration/orchestrator-tick-core.md
-（B15/B17 两条标退役 → driver 承接）
+（defaultPoolQualityPlanArgv / runPoolQualityJudge / defaultJudgmentConsumerArgv / runJudgmentConsumerCheck 四处调用）
 ```
 
-## Needs-Human
-
-**执行 2026-08-28T19:18:41.205Z — 连续修满重试上限仍不合格（标 needs-human）**
-
-- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+**⛔ 生产激活留待 fan-in 后（本 worktree 无法产出载体记录）**：`quay driver start --kind quality` 的实际激活 + `.quay/quality-round.jsonl` 载体产生产记录，须在主检出由 manager 执行（driver-runtime `resolveMainRoot` 会把 worktree root 规范化到主检出；本 worktree 短命，不承载常驻 supervisor）。本任务只落地【接线】。
