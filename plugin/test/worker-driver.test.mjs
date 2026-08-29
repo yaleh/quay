@@ -418,6 +418,35 @@ test("D6 — fail 产出结构化 verdict（step/verdict/exitCode/summary/logFil
   assert.match(src, /extractFailureSummary\(combined\)/, "D6: summary extracted via the noise-stripping pure fn");
 });
 
+// ── gap-scoped-gate-reason-stderr-drops-stdout ─────────────────────────────────────────────────────
+// scoped 门红时 reason 载体失真：旧 (stderr||stdout).trim() 用 || 短路，stderr 恒非空恒良性（refresh
+// 成功行 + MODULE_TYPELESS 噪声）⇒ 整个 stdout 真失败（esbuild Could not resolve / node:test not ok）
+// 被丢弃。D6 已改 stdout+stderr 拼接，但 esbuild 的 Could not resolve 未进 isSignal ⇒ 与 TAP not ok
+// 并存时被 slice(-60) 尾截掉。AC1：真失败签名必须进 reason（⛔ 只剩 stderr 良性 preamble 无失败签名 ⇒ 假）。
+
+test("AC1 (gap-scoped-gate-reason-stderr-drops-stdout) — scoped-gate red reason 含 stdout 失败签名（Could not resolve / not ok），⛔ 只剩 stderr 良性 preamble", () => {
+  // scoped 门（bash scripts/test.sh --for-task <task> --allow-thin）的 stderr 恒非空且恒良性，
+  // 真失败在 stdout（esbuild 构建崩 + node:test TAP 失败）——与 ABI 任务实测的失败同形。
+  const benignStderr = [
+    "refresh-worktree-quay: copied 499 file(s) from /x/.quay",
+    "(node:1978230) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///x.ts is not specified...",
+    "Reparsing as ES module because module syntax was detected. This incurs a performance overhead.",
+  ].join("\n");
+
+  // ① esbuild 构建崩（build-plugin-dist 跨包 import Core src，独立打包不可解析）——stdout 只有 Could not resolve。
+  const buildCrash = '✘ [ERROR] Could not resolve "../../packages/quay/src/abi.ts"\n    imported by "plugin/scripts/abi.ts"\n';
+  assert.match(extractFailureSummary(buildCrash + "\n" + benignStderr), /Could not resolve/, "AC1: 构建失败签名进 reason（⛔ 只剩 stderr 良性 preamble）");
+
+  // ② node:test TAP 失败——stdout not ok / expected / actual。
+  const tapFail = "not ok 1 - unrecognized-status-unknown\n  ---\n  expected: 'author'\n  actual:   'unknown'\n  ...\n# fail 1\n";
+  assert.match(extractFailureSummary(tapFail + "\n" + benignStderr), /not ok 1 - unrecognized-status-unknown/, "AC1: TAP 失败签名进 reason");
+
+  // ③ 并存：构建崩 + TAP 失败——两签名都进 reason（⛔ Could not resolve 不再被 TAP 挤掉，isSignal 已收录）。
+  const both = buildCrash + tapFail + "\n" + benignStderr;
+  assert.match(extractFailureSummary(both), /Could not resolve/, "AC1: 构建失败签名与 TAP 并存仍保留");
+  assert.match(extractFailureSummary(both), /not ok 1 - unrecognized-status-unknown/, "AC1: TAP 失败签名与构建失败并存仍保留");
+});
+
 test("D7 — mirrorMechanicalFanInSuiteState writes full-suite-state.json (finishedAt == suiteFinishedEpoch, scope=worktree, taskId)", (t) => {
   const root = makeRoot("d7");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
