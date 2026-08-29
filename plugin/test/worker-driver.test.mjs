@@ -2094,10 +2094,10 @@ test("AC1 (integration, 复现) — re-dispatch of an exited-not-landed task pas
 
 // ── gap-continue-prompt-conflict-resolution-protocol ────────────────────────────────────────────────
 // 机械 fan-in 的 merge develop 步在 CONTINUE 轮撞冲突时，旧 prompt 只带失败原因、不含消解指令 ⇒
-// 消冲突靠 worker 自行发挥（运气）。AC1（指令存在）/ AC2（derived 重算，⛔ 手并计数）/ AC3（code 语义
+// 消冲突靠 worker 自行发挥（运气）。AC1（指令存在）/ AC2（outline 冲突取 develop 版）/ AC3（code 语义
 // 并集 + git commit --no-edit）钉住 prompt 里三类消解指令，删掉任一条 ⇒ 测试红（AC4 能取假）。
 
-test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-conflict resolution protocol (derived re-compute / code semantic-union / commit --no-edit)", () => {
+test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-conflict resolution protocol (outline take-develop / code semantic-union / commit --no-edit)", () => {
   const p = buildContinueWorkerPrompt("gap-x", "/r", {
     worktreePath: "/wt",
     branchCommits: 3,
@@ -2110,9 +2110,11 @@ test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-co
   assert.match(p, /(unmerged|CONFLICT)/, "AC1: prompt names the merge-conflict state (unmerged paths / CONFLICT)");
   assert.match(p, /resolve/, "AC1: prompt instructs the worker to resolve the conflict");
   assert.match(p, /never exit while unmerged paths remain/, "AC1: prompt forbids exiting with unmerged paths (next fan-in merge step would fail again)");
-  // AC2 (derived 重算): outline inventory conflict ⇒ re-run the deriving command, ⛔ hand-merge the counts.
-  assert.match(p, /verify-delivery-surface\.ts --write-inventory/, "AC2: derived-file conflict ⇒ re-run verify-delivery-surface.ts --write-inventory");
-  assert.match(p, /do NOT hand-merge the counts/, "AC2: derived-file conflict ⇒ ⛔ hand-merge the counts (recompute instead)");
+  // AC2 (outline 冲突取 develop 版): outline inventory conflict ⇒ take the develop version (git checkout develop), ⛔ no --write-inventory.
+  assert.match(p, /git checkout develop/, "AC2: outline-doc conflict ⇒ take the develop version (git checkout develop)");
+  assert.match(p, /take the develop version/, "AC2: outline-doc conflict ⇒ take the develop version (⛔ no recompute)");
+  assert.doesNotMatch(p, /write-inventory/, "AC2: ⛔ no longer re-run the retired --write-inventory");
+  assert.match(p, /do NOT hand-merge the counts/, "AC2: outline-doc conflict ⇒ ⛔ hand-merge the counts");
   // AC3 (code 并集 + commit): code conflict ⇒ semantic union + git commit --no-edit.
   assert.match(p, /semantic union/, "AC3: code-file conflict ⇒ take the semantic union of both sides");
   assert.match(p, /git commit --no-edit/, "AC3: complete the merge with git commit --no-edit");
