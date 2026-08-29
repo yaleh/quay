@@ -2,7 +2,7 @@
 id: gap-execution-loop-productization-p2-p4
 title: 执行环产品化 P2–P4——runMechanicalFanIn→quay task fan-in + workflow 兜底降级 +
   suite/dispatch 产品化
-status: ready
+status: needs-human
 labels:
   - gap
   - productization

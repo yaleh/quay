@@ -87,3 +87,9 @@ fan-in 桶路径统一到正确 runner（full-suite-runner.ts --buckets），gre
 - plugin/test/fan-in-execute-paths.test.mjs
 - plugin/test/full-suite-runner.test.mjs
 - tasks/gap-fan-in-red-bucket-run-not-recorded.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T21:53:09.198Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
