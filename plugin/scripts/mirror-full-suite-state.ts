@@ -53,6 +53,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { resolveSharedCheckout, toIsoTimestamp } from "./per-task-suite-record.ts";
+import { writeJsonAtomic } from "./write-json-atomic.ts";
 
 const COMMIT_RE = /^[0-9a-f]{40}$/i;
 const VALID_STATES = new Set(["green", "red"]);
@@ -129,12 +130,12 @@ export function buildMirrorState(o) {
   return { state: record };
 }
 
-/** Overwrite the single-state file (mkdir + writeFileSync — the same non-atomic overwrite
- *  full-suite-runner.writeState uses; the consumers read a terminal state, never a partial
- *  write-during-overwrite is a concern for a terminal mirror). */
+/** Overwrite the single-state file atomically via writeJsonAtomic (tmp + renameSync). The
+ *  consumers (the /tests page currentState, collectFailureFiles, suite-state-trigger) read a
+ *  terminal state, but a concurrent reader now also never observes a torn mid-overwrite — the one
+ *  write every state writer shares (tasks/gap-writestate-atomicity-split). */
 export function writeMirrorState(file, state) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n", "utf8");
+  writeJsonAtomic(file, state);
 }
 
 /** Read the current on-disk state, or null when absent/unparseable (an unparseable state is treated
