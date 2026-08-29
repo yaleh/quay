@@ -70,3 +70,9 @@ inner 层已由 `*-driver`（worker-driver 等后台常驻进程）取代，不�
 - plugin/test/inner-session-check.test.mjs
 - plugin/test/l1-delivery-surface-check.test.mjs
 - tasks/gap-retire-inner-session-references.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T17:28:16.643Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

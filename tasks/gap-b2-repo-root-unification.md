@@ -1,6 +1,7 @@
 ---
 id: gap-b2-repo-root-unification
-title: B2·repo-root 合一——findRepoRoot(14)+findWorkspaceRoot(4) 三策略并存，18 处 → 1（bash+TS 成对）
+title: B2·repo-root 合一——findRepoRoot(14)+findWorkspaceRoot(4) 三策略并存，18 处 →
+  1（bash+TS 成对）
 status: ready
 labels:
   - gap
@@ -68,3 +69,9 @@ SPEC §1.6/§2.4 实测：`findRepoRoot`(14) + `findWorkspaceRoot`(4) 是**同�
 - plugin/scripts/trend-check.ts（迁移）
 - plugin/scripts/verify-delivery-surface.ts（迁移）
 - tasks/gap-b2-repo-root-unification.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T23:06:35.876Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

@@ -1,7 +1,7 @@
 ---
 id: gap-suite-bucket-touches-inclusive-floor
 title: bucket 选择强制包含任务 Touches 测试文件——改了测试必须跑它（不依赖归因判定）；否则「改了测试文件但 fan-in 不跑」结构上可能
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -27,10 +27,10 @@ bucket selection 的选中集 = `触发的桶 ∩ 测试桶集`（`suite-bucket-
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，Touches 测试必含）：一个 Touches 列出 `fan-in-workflow-lock.test.mjs`（S 归因）的任务触发 M 桶 ⇒ 选中集含它（⛔ 仍被排除 ⇒ 假）。
-- [ ] AC2（能取假，非测试条目不并入）：Touches 里只有源文件/脚本的任务 ⇒ 选中集不变（⛔ 被并入了非测试文件 ⇒ 假）。
-- [ ] AC3（能取假，负控制）：未在 Touches 里的测试仍按桶归因选择（⛔ 全部测试被并入 ⇒ 假）。
-- [ ] AC4（能取假，selection 不退化）：原 bucket 选择行为对不含测试 Touches 的任务不变（⛔ 触发的桶语义被破坏 ⇒ 假）。
+- [x] AC1（能取假，Touches 测试必含）：一个 Touches 列出 `fan-in-workflow-lock.test.mjs`（S 归因）的任务触发 M 桶 ⇒ 选中集含它（⛔ 仍被排除 ⇒ 假）。**Evidence**：`selectBucketsForTouches` 现并入 Touches 里以 `.test.mjs`/`.test.ts` 结尾的测试文件；新增测试「AC1: a Touches-listed test attributed to a non-triggered bucket is still force-included」——P 触发 + Touches 列出 pure-M 的 `plugin/test/concurrent-batch-scheduler.test.mjs`（reattribution 判 M）⇒ 选中集含它（改动前会被排除，见「P-only change」测试的 `!includes(PURE_M)` 断言）。`node --experimental-strip-types --test plugin/test/suite-bucket-select.test.mjs` 16/16 绿。
+- [x] AC2（能取假，非测试条目不并入）：Touches 里只有源文件/脚本的任务 ⇒ 选中集不变（⛔ 被并入了非测试文件 ⇒ 假）。**Evidence**：新增测试「AC2: non-test Touches entries (source/script/self) are never unioned into the selection」——并集按后缀过滤，源/脚本/自身条目不进选中集，断言每个选中项都匹配 `\.test\.(mjs|ts)$` 且源条目不在选中集内。
+- [x] AC3（能取假，负控制）：未在 Touches 里的测试仍按桶归因选择（⛔ 全部测试被并入 ⇒ 假）。**Evidence**：新增测试「AC3: tests NOT in Touches are still governed by bucket attribution (union only adds)」——并集只做加法，未在 Touches 的 cross-bucket P 测试仍按 P 归因选中，未在 Touches 的 pure-M 测试（`dead-loop-check.test.mjs`）仍被排除。
+- [x] AC4（能取假，selection 不退化）：原 bucket 选择行为对不含测试 Touches 的任务不变（⛔ 触发的桶语义被破坏 ⇒ 假）。**Evidence**：新增测试「AC4: selection is unchanged for a task whose Touches carry no test files」+ 既有「P-only change」测试仍绿——不含测试 Touches 时 pure-M 仍被排除、cross-bucket P 仍被选中、P 桶仍为全量严格子集。
 
 ## Definition of Done
 

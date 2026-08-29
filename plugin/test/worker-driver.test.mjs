@@ -97,10 +97,13 @@ import {
   taskBranchHasCommits,
   isSigtermExitCode,
   parseMaxRetries,
-  syncDocBranchToDevelop,
   acquireFanInWorkflowLock,
   fanInWorkflowLockFile,
+  extractFailureSummary,
+  combinedOutput,
+  mirrorMechanicalFanInSuiteState,
 } from "../scripts/worker-driver.ts";
+import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 // gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
 // 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
 import { advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, applyTaskFilters, makeFilterContext } from "../scripts/driver-filters.ts";
@@ -343,42 +346,163 @@ test("computeLandingState — DriverResult 三态：verified = status=done ∧ �
   fs.rmSync(nonGit, { recursive: true, force: true });
 });
 
-// ── DETACH REVERSE SYNC (gap-fan-in-ff-ref-update-detach-develop AC7) ─────────────────────────
-// After a mechanical fan-in lands (develop ref advances via push-mode ff, the main checkout's
-// working tree is NOT touched), the doc-only work branch (main/manager-doc) still reads the stale
-// task status — computeLandingState's readTaskStatus would misreport not-landed. syncDocBranchToDevelop
-// merges develop back into the doc branch so the landing verification reads the current status.
+// ── gap-mechanical-fan-in-result-single-authoritative-structured：D5/D6/D7 ───────────────────────────
+// runMechanicalFanIn 结果成为「这次 fan-in 发生了什么」的单一权威结构化记录：final_state（D5）/ reason
+// （D6）/ suite 状态（D7）三处下游全部从它派生，⛔ 不再投影到有损/陈旧的 ad-hoc 载体。
 
-test("syncDocBranchToDevelop: develop advance merges into the doc branch — computeLandingState reads current status (AC7)", (t) => {
-  const root = makeGitRoot("sync-ac7");
+test("D5 — computeLandingState(root, task, landedSha) derives landing from ff result (⛔ not stale main-checkout status)", (t) => {
+  const root = makeGitRoot("d5");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  runGit(root, ["checkout", "-q", "-b", "develop"]);
-  writeTaskFile(root, "gap-a", "ready");
-  // The detach: the main checkout moves to a doc-only branch.
-  runGit(root, ["checkout", "-q", "-b", "main/manager-doc"]);
-  // A landing advances develop (status flips done) — the doc branch's working tree is now stale.
-  runGit(root, ["checkout", "-q", "develop"]);
-  writeTaskFile(root, "gap-a", "done");
-  runGit(root, ["checkout", "-q", "main/manager-doc"]);
-  assert.equal(readTaskStatus(root, "gap-a"), "ready", "before sync the doc-branch view is stale (still ready)");
 
-  syncDocBranchToDevelop(root);
+  // develop 上 task 已 done（机械 fan-in 已 flip+ff）……
+  writeTaskFile(root, "gap-d5", "done");
+  runGit(root, ["branch", "develop"]);
+  const landedSha = runGit(root, ["rev-parse", "develop"]).trim();
+  // ……而主检出停在 doc-only 工作分支、status 仍 ready（合法滞后 develop，⛔ 不 sync）。
+  runGit(root, ["checkout", "-q", "-b", "doc-only"]);
+  fs.writeFileSync(path.join(root, "tasks", "gap-d5.md"), "---\nid: gap-d5\nstatus: ready\n---\n\n## Proposal\n\nbody\n", "utf8");
+  runGit(root, ["add", "tasks/gap-d5.md"]);
+  runGit(root, ["commit", "-q", "-m", "doc-only stale ready"]);
 
-  assert.equal(readTaskStatus(root, "gap-a"), "done",
-    "AC7: after sync the doc-branch view reflects develop (done) — computeLandingState no longer misreads not-landed");
+  // 前置：读主检出 status = ready ⇒ 旧判据据此判 exited-not-landed（这正是 D5 的假负例）。
+  assert.equal(readTaskStatus(root, "gap-d5"), "ready", "precondition: main checkout (doc-only) still stale ready");
+  const old = computeLandingState(root, "gap-d5");
+  assert.equal(old.state, "failed", "precondition: without landedSha, the stale status ⇒ failed (the D5 bug)");
+
+  // 修后：传 landedSha（develop tip）⇒ 从 ff 结果派生，⛔ 不再读主检出 stale status ⇒ verified。
+  const derived = computeLandingState(root, "gap-d5", landedSha);
+  assert.equal(derived.state, "verified", "D5: landedSha is develop tip + no leftover worktree ⇒ verified (⛔ not exited-not-landed)");
+  assert.match(derived.verifiedBy, /landedSha/, "D5: verified reason names the ff-result-derived judge");
+
+  // 负控制 1：landedSha 是【有效】提交但不在 develop 历史 ⇒ failed（证伪，⛔ 不因读不懂降 not-evaluated）。
+  const bogus = runGit(root, ["commit-tree", `${landedSha}^{tree}`, "-m", "bogus not-on-develop"]).trim();
+  const notAncestor = computeLandingState(root, "gap-d5", bogus);
+  assert.equal(notAncestor.state, "failed", "D5: landedSha not develop tip/ancestor ⇒ failed");
+  assert.match(notAncestor.reason, /not develop tip\/ancestor/);
+
+  // 负控制 2：landedSha 是祖先但仍残留 worktree ⇒ failed。
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-d5", wtPath]);
+  const leftover = computeLandingState(root, "gap-d5", landedSha);
+  assert.equal(leftover.state, "failed", "D5: landedSha ancestor but leftover worktree ⇒ failed");
+  assert.match(leftover.reason, /leftover worktree/);
+  runGit(root, ["worktree", "remove", "--force", wtPath]);
 });
 
-test("syncDocBranchToDevelop: no-op when the checkout is already develop", (t) => {
-  const root = makeGitRoot("sync-noop");
+test("D6 — extractFailureSummary strips MODULE_TYPELESS noise + keeps the failing test name (⛔ raw stream dump)", () => {
+  const noisy = [
+    "refresh-worktree-quay: copied 499 file(s) from /x/.quay",
+    "(node:1978230) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///x.ts is not specified...",
+    "Reparsing as ES module because module syntax was detected. This incurs a performance overhead.",
+    'To eliminate this warning, add "type": "module" to /x/package.json.',
+    "(Use `node --trace-warnings ...` to show where the warning was created)",
+    "not ok 1 - my-flaky-test",
+    "  ---",
+    "  expected: 'a'",
+    "  actual:   'b'",
+    "# fail 1",
+  ].join("\n");
+  const summary = extractFailureSummary(noisy);
+  assert.doesNotMatch(summary, /MODULE_TYPELESS/, "D6: summary must NOT carry MODULE_TYPELESS noise");
+  assert.match(summary, /not ok 1 - my-flaky-test/, "D6: summary keeps the failing test name (能定位「哪个测试失败」)");
+  assert.match(summary, /expected: 'a'/, "D6: summary keeps the assertion diff (定位失败)");
+  // 纯噪声 / 空输入 ⇒ 空串（调用方回退 `exit <code>`，⛔ 不伪造）。
+  assert.equal(extractFailureSummary(""), "");
+  assert.equal(extractFailureSummary("(node:1) [MODULE_TYPELESS_PACKAGE_JSON] Warning: x\nReparsing as ES module..."), "");
+});
+
+test("D6 — fail 产出结构化 verdict（step/verdict/exitCode/summary/logFile），⛔ 不再 (stderr||stdout).trim() 裸流", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  assert.match(src, /verdict: \{ step, verdict: "failed", exitCode, summary, logFile \}/, "D6: verdictOf produces the structured per-step verdict");
+  assert.match(src, /reason: summary/, "D6: reason is the summary projection (⛔ not the raw stream)");
+  assert.doesNotMatch(src, /\(a\.stderr \|\| a\.stdout \|\| ""\)\.trim\(\)/, "D6: the raw (stderr||stdout).trim() dump is gone");
+  assert.match(src, /extractFailureSummary\(combined\)/, "D6: summary extracted via the noise-stripping pure fn");
+});
+
+// ── gap-scoped-gate-reason-stderr-drops-stdout ─────────────────────────────────────────────────────
+// scoped 门红时 reason 载体失真：旧 (stderr||stdout).trim() 用 || 短路，stderr 恒非空恒良性（refresh
+// 成功行 + MODULE_TYPELESS 噪声）⇒ 整个 stdout 真失败（esbuild Could not resolve / node:test not ok）
+// 被丢弃。D6 已改 stdout+stderr 拼接，但 esbuild 的 Could not resolve 未进 isSignal ⇒ 与 TAP not ok
+// 并存时被 slice(-60) 尾截掉。AC1：真失败签名必须进 reason（⛔ 只剩 stderr 良性 preamble 无失败签名 ⇒ 假）。
+
+test("AC1 (gap-scoped-gate-reason-stderr-drops-stdout) — scoped-gate red reason 含 stdout 失败签名（Could not resolve / not ok），⛔ 只剩 stderr 良性 preamble", () => {
+  // scoped 门（bash scripts/test.sh --for-task <task> --allow-thin）的 stderr 恒非空且恒良性，
+  // 真失败在 stdout（esbuild 构建崩 + node:test TAP 失败）——与 ABI 任务实测的失败同形。
+  const benignStderr = [
+    "refresh-worktree-quay: copied 499 file(s) from /x/.quay",
+    "(node:1978230) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///x.ts is not specified...",
+    "Reparsing as ES module because module syntax was detected. This incurs a performance overhead.",
+  ].join("\n");
+
+  // ① esbuild 构建崩（build-plugin-dist 跨包 import Core src，独立打包不可解析）——stdout 只有 Could not resolve。
+  const buildCrash = '✘ [ERROR] Could not resolve "../../packages/quay/src/abi.ts"\n    imported by "plugin/scripts/abi.ts"\n';
+  assert.match(extractFailureSummary(buildCrash + "\n" + benignStderr), /Could not resolve/, "AC1: 构建失败签名进 reason（⛔ 只剩 stderr 良性 preamble）");
+
+  // ② node:test TAP 失败——stdout not ok / expected / actual。
+  const tapFail = "not ok 1 - unrecognized-status-unknown\n  ---\n  expected: 'author'\n  actual:   'unknown'\n  ...\n# fail 1\n";
+  assert.match(extractFailureSummary(tapFail + "\n" + benignStderr), /not ok 1 - unrecognized-status-unknown/, "AC1: TAP 失败签名进 reason");
+
+  // ③ 并存：构建崩 + TAP 失败——两签名都进 reason（⛔ Could not resolve 不再被 TAP 挤掉，isSignal 已收录）。
+  const both = buildCrash + tapFail + "\n" + benignStderr;
+  assert.match(extractFailureSummary(both), /Could not resolve/, "AC1: 构建失败签名与 TAP 并存仍保留");
+  assert.match(extractFailureSummary(both), /not ok 1 - unrecognized-status-unknown/, "AC1: TAP 失败签名与构建失败并存仍保留");
+});
+
+// ── gap-worker-driver-complete-logging-doc ───────────────────────────────────────────────────────────
+// 机制层防 reason 载体失真再犯：worker-driver 每步完整记录 stdout+stderr（⛔ 不 stderr 优先/丢弃），
+// 单一机件 combinedOutput 供 fail() 与 flip 共用。AC1（能取假，失败必记全）：某步失败时 reason 含
+// stdout 失败签名（⛔ 只含 stderr 良性 preamble ⇒ 假）。
+
+test("AC1 (gap-worker-driver-complete-logging-doc) — combinedOutput 合并 stdout+stderr（⛔ 不 stderr 优先丢弃 stdout）", () => {
+  // 两流皆有签名 ⇒ 都保留（stdout 先、stderr 后）。
+  assert.equal(combinedOutput("stdout-sig", "stderr-sig"), "stdout-sig\nstderr-sig");
+  // stdout 有真失败签名、stderr 恒非空恒良性 ⇒ stdout 签名【不丢】（⛔ 旧 a.stderr||a.stdout 短路会丢它）。
+  const combined = combinedOutput("Could not resolve foo", "(node:1) Warning: benign preamble");
+  assert.match(combined, /Could not resolve/, "stdout 失败签名保留（stderr 良性时不被丢弃）");
+  // 只 stdout / 只 stderr ⇒ 单流保留。
+  assert.equal(combinedOutput("only-stdout", ""), "only-stdout");
+  assert.equal(combinedOutput("", "only-stderr"), "only-stderr");
+  // 两流皆空/全空白 ⇒ 空串（调用方回退 `exit <code>`，⛔ 不伪造）。
+  assert.equal(combinedOutput("", ""), "");
+  assert.equal(combinedOutput("  \n", ""), "");
+});
+
+test("AC1 (gap-worker-driver-complete-logging-doc) — flip 的 git add/commit 失败 reason 用 combinedOutput（⛔ 不再 a.stderr||exit 丢弃 stdout）", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  assert.doesNotMatch(src, /a\.stderr \|\| `exit/, "flip 的 git add/commit 失败 reason 不再 stderr-only");
+  assert.match(src, /combinedOutput\(a\.stdout, a\.stderr\)/, "flip reason 用 combinedOutput 合并 stdout+stderr");
+  assert.match(src, /export function combinedOutput/, "combinedOutput 是单一共享机件（fail() 与 flip 共用）");
+});
+
+test("D7 — mirrorMechanicalFanInSuiteState writes full-suite-state.json (finishedAt == suiteFinishedEpoch, scope=worktree, taskId)", (t) => {
+  const root = makeRoot("d7");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  runGit(root, ["checkout", "-q", "-b", "develop"]);
-  writeTaskFile(root, "gap-a", "ready");
-  const headBefore = runGit(root, ["rev-parse", "develop"]);
+  const stateFile = path.join(root, ".quay", "full-suite-state.json");
+  const finishedAt = "2026-08-29T06:00:00.000Z";
 
-  syncDocBranchToDevelop(root); // must not throw, must not change anything
+  mirrorMechanicalFanInSuiteState({
+    task: "gap-d7", runId: "mf-run-d7", commit: "0".repeat(40),
+    startedAt: "2026-08-29T05:59:00.000Z", finishedAt, durationMs: 60000,
+    stateFile,
+  });
+  const st = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(st.state, "green");
+  assert.equal(st.finishedAt, Math.floor(Date.parse(finishedAt) / 1000), "D7: finishedAt is epoch of sr.finishedAt (=== mfi.suiteFinishedEpoch, ⛔ not 28h stale)");
+  assert.equal(st.scope, "worktree", "D7: bucket run scope=worktree (⛔ not full-run scope=main)");
+  assert.equal(st.taskId, "gap-d7", "D7: taskId set — bucket-run traceability (⛔ not a full-run fabrication)");
+  assert.equal(st.runId, "mf-run-d7");
+  assert.equal(st.runner, "inner");
+  assert.equal(st.laneCount, defaultLaneCount(), "D7: laneCount is nproc-derived (defaultLaneCount) — ⛔ not the literal 1 (concurrency-literal-check P4 violation)");
 
-  assert.equal(runGit(root, ["rev-parse", "develop"]), headBefore, "on develop ⇒ no-op (no self-merge)");
-  assert.equal(runGit(root, ["status", "--porcelain"]), "", "on develop ⇒ tree stays clean");
+  // in-flight guard：权威载体停在 running（finishedAt null）⇒ 不覆盖（shouldSkipMirrorWrite）。
+  fs.writeFileSync(stateFile, JSON.stringify({ state: "running", finishedAt: null }), "utf8");
+  mirrorMechanicalFanInSuiteState({
+    task: "gap-d7", runId: "mf-run-d7", commit: "0".repeat(40),
+    startedAt: "2026-08-29T05:59:00.000Z", finishedAt, durationMs: 60000,
+    stateFile,
+  });
+  const still = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(still.state, "running", "D7: in-flight full-suite state (finishedAt null) is NOT clobbered");
 });
 
 test("computeOutcome — non-zero ⇒ failed; signal ⇒ killed; timedOut ⇒ timed-out (AC3 终态/失败原因)", () => {
@@ -1968,6 +2092,32 @@ test("AC1 (integration, 复现) — re-dispatch of an exited-not-landed task pas
   assert.equal(worktreePresentForTask(root, "gap-ce"), true, "worktree still preserved after re-dispatch (⛔ not cleaned)");
 });
 
+// ── gap-continue-prompt-conflict-resolution-protocol ────────────────────────────────────────────────
+// 机械 fan-in 的 merge develop 步在 CONTINUE 轮撞冲突时，旧 prompt 只带失败原因、不含消解指令 ⇒
+// 消冲突靠 worker 自行发挥（运气）。AC1（指令存在）/ AC2（derived 重算，⛔ 手并计数）/ AC3（code 语义
+// 并集 + git commit --no-edit）钉住 prompt 里三类消解指令，删掉任一条 ⇒ 测试红（AC4 能取假）。
+
+test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-conflict resolution protocol (derived re-compute / code semantic-union / commit --no-edit)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "mechanical fan-in red at merge develop (CONFLICT in docs/proposals/quay-product-outline.md)",
+  });
+  // AC1 (指令存在): prompt names the conflict state (unmerged paths / CONFLICT) and the resolve action.
+  assert.match(p, /(unmerged|CONFLICT)/, "AC1: prompt names the merge-conflict state (unmerged paths / CONFLICT)");
+  assert.match(p, /resolve/, "AC1: prompt instructs the worker to resolve the conflict");
+  assert.match(p, /never exit while unmerged paths remain/, "AC1: prompt forbids exiting with unmerged paths (next fan-in merge step would fail again)");
+  // AC2 (derived 重算): outline inventory conflict ⇒ re-run the deriving command, ⛔ hand-merge the counts.
+  assert.match(p, /verify-delivery-surface\.ts --write-inventory/, "AC2: derived-file conflict ⇒ re-run verify-delivery-surface.ts --write-inventory");
+  assert.match(p, /do NOT hand-merge the counts/, "AC2: derived-file conflict ⇒ ⛔ hand-merge the counts (recompute instead)");
+  // AC3 (code 并集 + commit): code conflict ⇒ semantic union + git commit --no-edit.
+  assert.match(p, /semantic union/, "AC3: code-file conflict ⇒ take the semantic union of both sides");
+  assert.match(p, /git commit --no-edit/, "AC3: complete the merge with git commit --no-edit");
+});
+
 // ── AC150-3 (falsifiable): 资源门/halt 判定抽到 driver-shared.ts，worker-driver 只是 re-export ──
 
 test("AC150-3 — worker-driver re-exports the SAME resourceGateCheck / isHalted as driver-shared (单份实现)", async () => {
@@ -2254,6 +2404,21 @@ test("AC3 (cold-start-refresh) — per-pass observation: no one-time `const cold
   assert.doesNotMatch(src, /const\s+coldInflight\s*=/, "AC3: the one-time `const coldInflight` snapshot is gone (⛔ frozen snapshot ⇒ fake in-flight forever)");
   assert.match(src, /let\s+coldInflight\s*=\s*new Set/, "coldInflight is a mutable per-pass binding, not a frozen snapshot");
   assert.match(src, /coldInflight\s*=\s*await\s+enumerateColdStartInflightAsync\(rootDir\)/, "coldInflight is re-observed via enumerateColdStartInflightAsync each pass (async — 不阻塞地板)");
+});
+
+// ── gap-archguard-structural-gate-in-fan-in-driver：archguard 结构闸接进机械 fan-in ──────────────
+
+test("AC1 (gap-archguard-structural-gate-in-fan-in-driver) — runMechanicalFanIn 在 typecheck 后、scoped门 前接 archguard 结构闸（step=archguard-structure），带 archguardCommand 测试缝", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  // 步骤顺序按位置判定（⛔ 不按关键词）：typecheck（第 5 步）→ archguard（第 5.5 步）→ scoped门（第 6 步）。
+  const typecheckIdx = src.indexOf("// 5. ts-typecheck 闸");
+  const archguardIdx = src.indexOf("// 5.5 archguard 结构闸");
+  const scopedIdx = src.indexOf("// 6. scoped 门 + doc 检查");
+  assert.ok(typecheckIdx !== -1 && archguardIdx !== -1 && scopedIdx !== -1, "all three step markers must be present");
+  assert.ok(typecheckIdx < archguardIdx && archguardIdx < scopedIdx, `archguard must sit between typecheck and scoped门 (${typecheckIdx} < ${archguardIdx} < ${scopedIdx})`);
+  assert.match(src, /archguardCommand\?/, "the archguardCommand test seam is declared on MechanicalFanInOptions");
+  assert.match(src, /fail\("archguard-structure"/, "dependency-cycle red returns step=archguard-structure");
+  assert.match(src, /archguard-runner\.ts/, "the default archguard command references archguard-runner.ts");
 });
 
 // ── gap-worker-driver-stopreason-latch-permanent-stop ──────────────────────────────────────────────
