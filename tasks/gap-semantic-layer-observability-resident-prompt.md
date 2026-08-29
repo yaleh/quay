@@ -24,15 +24,21 @@ manager/outer 常驻 tick 增加「读当次日志 + 历史复发」一步（pro
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，常驻注入）：语义层检查 prompt 常驻注入可被检查到（grep tick-core 文档命中该步）（⛔ 非 ad-hoc / 无注入点 ⇒ 假）。
-- [ ] AC2（能取假，读历史复发）：检查含「grep 该 task 历史 outcome 看复发」这一步（⛔ 只读当次不看历史 ⇒ 假）。
+- [x] AC1（能取假，常驻注入）：语义层检查 prompt 常驻注入可被检查到（grep tick-core 文档命中该步）（⛔ 非 ad-hoc / 无注入点 ⇒ 假）。
+- [x] AC2（能取假，读历史复发）：检查含「grep 该 task 历史 outcome 看复发」这一步（⛔ 只读当次不看历史 ⇒ 假）。
 
 ## Definition of Done
 
 manager/outer 常驻 tick 增加可观测检查 prompt；AC1-AC2 全勾。
 
+## Evidence
+
+- `grep -n '常驻可观测检查 prompt' orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md` → manager:34（A21）、orchestrator:49（A25）——AC1：常驻注入命中 tick-core 文档两处。
+- `grep -n 'grep 该 task 历史 outcome 看复发' orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md` → 同上两行——AC2：检查含「grep 该 task 历史 outcome 看复发」这一步。
+
 ## Touches
 
 - orchestration/manager-tick-core.md（常驻可观测检查 prompt 一步，manager 侧）
 - orchestration/orchestrator-tick-core.md（常驻可观测检查 prompt 一步，outer 侧）
+- plugin/loop/orchestrator-tick-core.md（orchestrator-tick-core 的 shipped 副本，byte-identical 镜像——tick-core-drift-check 硬闸要求改正本必同步副本）
 - tasks/gap-semantic-layer-observability-resident-prompt.md（自身）
