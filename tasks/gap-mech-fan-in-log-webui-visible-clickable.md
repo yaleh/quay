@@ -56,6 +56,7 @@ extra: {}
 
 - plugin/scripts/worker-driver.ts（runMechanicalFanIn 步骤 trace 写入 + suite 日志落点 `.quay/` + outcome `mechanical_fan_in.fanInLog` 字段）
 - plugin/test/worker-driver.test.mjs（AC1 trace 行 / 跨 relaunch 不覆盖测试）
+- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（AC1 结构断言跟随 step() 调用形态：mechSh→step 包层，超时字面量 120_000 不变）
 - packages/quay/src/observation.ts（`WorkerOutcomeRecord` + parser 增 `mechanical_fan_in` / `fanInLog` 透传）
 - packages/quay/src/serve-task.ts（Runs 区块渲染 mechanical_fan_in + view/download 链接）
 - packages/quay/src/serve-sessions.ts（fan-in log view/download handler + 路径穿越防护，复用 handleSessionDownload 同款 UUID/白名单校验）
