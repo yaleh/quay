@@ -1,7 +1,7 @@
 ---
 id: gap-tmux-leak-scan-sweep-orphaned-servers
 title: tmux-leak-scan 加 --sweep 启动清扫孤立 server（SIGKILL 残留自动治愈）
-status: ready
+status: done
 labels:
   - gap
 parent: null
