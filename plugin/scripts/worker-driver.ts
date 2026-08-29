@@ -208,6 +208,11 @@ export {
   makeStopCondition,
   type LivenessResult,
 } from "./driver-runtime.ts";
+// 机械 fan-in step 2 的 derived 冲突重算（gap-fan-in-merge-develop-derived-recompute-and-reason）：
+// 冲突文件全落在 derived 集合（outline §6 DELIVERY-INVENTORY 快照，单一真相源 = verify-delivery-surface.ts
+// 从 plugin/ 目录计数派生）才机械重算；含 code 文件仍 fail 交 worker。OUTLINE_DOC_REL 是 derived 文件的
+// 唯一常量（⛔ 不复制一份路径字面量——与 verify-delivery-surface.ts 的单一真相源保持一致）。
+import { OUTLINE_DOC_REL } from "./verify-delivery-surface.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -964,6 +969,22 @@ export async function branchHeadSubjectAsync(root: string, taskId: string): Prom
   return out === "" ? null : out;
 }
 
+/** 把一条 exited-not-landed 记录格式化为人可读的失败原因（gap-fan-in-merge-develop-derived-recompute-
+ *  and-reason B）。优先读 mechanical_fan_in（step + reason 拼接成「step=merge-develop: CONFLICT in <file>」）
+ *  ——merge develop 冲突的具体文件在 mechanical_fan_in.reason 里，通用 failure_reason 只写「task status=ready
+ *  not done」，⛔ 不含冲突文件 ⇒ worker 无从精准 resolve。mechanical_fan_in 无 step（缺键 / 非 red / 非对象）
+ *  ⇒ 回退 failure_reason（保留旧行为——非机械 fan-in 失败 / 落地未证实的记录仍读通用 reason）。 */
+function formatExitedNotLandedReason(failureReason: unknown, mechanicalFanIn: unknown): string | null {
+  if (mechanicalFanIn && typeof mechanicalFanIn === "object") {
+    const m = mechanicalFanIn as { step?: unknown; reason?: unknown };
+    if (typeof m.step === "string" && m.step) {
+      const reason = typeof m.reason === "string" && m.reason ? m.reason : "(no reason)";
+      return `step=${m.step}: ${reason}`;
+    }
+  }
+  return typeof failureReason === "string" ? failureReason : null;
+}
+
 /** 该 task 最近一条 exited-not-landed 的失败原因（AC2「上次失败原因」，读 worker-outcome.jsonl）。
  *  无记录 / 读失败 ⇒ null（读不懂 ≠ 无失败——但续做 prompt 以 "(unknown)" 呈现，不伪装成「没有失败」）。 */
 export function lastExitedNotLandedReason(root: string, taskId: string): string | null {
@@ -977,14 +998,14 @@ export function lastExitedNotLandedReason(root: string, taskId: string): string 
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    let rec: { task?: unknown; final_state?: unknown; failure_reason?: unknown };
+    let rec: { task?: unknown; final_state?: unknown; failure_reason?: unknown; mechanical_fan_in?: unknown };
     try {
       rec = JSON.parse(trimmed);
     } catch {
       continue;
     }
     if (rec.task === taskId && rec.final_state === "exited-not-landed") {
-      last = typeof rec.failure_reason === "string" ? rec.failure_reason : null;
+      last = formatExitedNotLandedReason(rec.failure_reason, rec.mechanical_fan_in);
     }
   }
   return last;
@@ -1799,6 +1820,49 @@ async function flipTaskDone(
   return { ok: false, reason: `expected exactly 1 'status: ready' line, got ${readyCount}` };
 }
 
+/** 机械 fan-in step 2 冲突可【机械重算】的 derived 文件集（⛔ 仅限「从磁盘派生的副本」，不手并）。
+ *  outline §6 DELIVERY-INVENTORY 快照由 verify-delivery-surface.ts 从 plugin/ 目录计数派生（单一真相源，
+ *  OUTLINE_DOC_REL），merge develop 撞它的冲突可机械重算（取 mergeTarget 版 + 重跑 generator），⛔ 不得
+ *  当作 code 冲突交 worker。 */
+const DERIVED_CONFLICT_FILES = new Set([OUTLINE_DOC_REL]);
+
+/** step 2 merge develop 冲突的 derived 机械重算（gap-fan-in-merge-develop-derived-recompute-and-reason A）。
+ *  冲突文件【全部】落在 derived 集合（outline §6）⇒ 机械 resolve：取 mergeTarget 版 + 重跑
+ *  verify-delivery-surface.ts --write-inventory 重算 §6 + git add + git commit --no-edit 完成 merge，
+ *  返回 ok（后续步继续）。含任一非 derived（code）文件 / 无 unmerged 文件 / 任一步失败 ⇒ 返回 ok=false +
+ *  reason（携带具体冲突文件，供 B 的 CONTINUE reason 精准 resolve）。
+ *  ⛔ 不手并计数（重算是唯一合法编辑）；⛔ 不带着 unmerged paths 退出（下一轮 fan-in 的 merge step 会再失败）。 */
+async function resolveDerivedMergeConflict(
+  worktree: string,
+  mergeTarget: string,
+  scriptsDir: string,
+): Promise<{ ok: boolean; reason: string | null }> {
+  // 1. 取 unmerged 文件（⛔ --diff-filter=U 只列冲突文件，非全 diff）。
+  const diff = await mechSh(["git", "-C", worktree, "diff", "--name-only", "--diff-filter=U"], 30_000);
+  if (!diff.ok) return { ok: false, reason: `git diff --name-only --diff-filter=U failed: ${diff.stderr || `exit ${diff.status}`}` };
+  const unmerged = (diff.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
+  if (unmerged.length === 0) {
+    return { ok: false, reason: "merge conflict but no unmerged files listed (git diff --diff-filter=U empty)" };
+  }
+  // 2. 全部落在 derived 集合才机械重算；含 code 文件 ⇒ 照旧 fail（交 worker 精准 resolve）。
+  const codeFiles = unmerged.filter((f) => !DERIVED_CONFLICT_FILES.has(f));
+  if (codeFiles.length > 0) {
+    return { ok: false, reason: `CONFLICT in ${codeFiles.join(", ")}` };
+  }
+  // 3. 取 mergeTarget 版（derived 是派生副本，取 base 版后重算，⛔ 不手并）。
+  const checkout = await mechSh(["git", "-C", worktree, "checkout", mergeTarget, "--", ...unmerged], 30_000);
+  if (!checkout.ok) return { ok: false, reason: `git checkout ${mergeTarget} -- <derived> failed: ${checkout.stderr || `exit ${checkout.status}`}` };
+  // 4. 重跑 generator 重算 §6（⛔ 不手并计数）。
+  const gen = await mechSh(["node", "--experimental-strip-types", path.join(scriptsDir, "verify-delivery-surface.ts"), "--write-inventory", "--root", worktree], 120_000);
+  if (!gen.ok) return { ok: false, reason: `verify-delivery-surface.ts --write-inventory failed: ${gen.stderr || gen.stdout || `exit ${gen.status}`}` };
+  // 5. git add + git commit --no-edit 完成 merge（⛔ 不带 unmerged paths 退出）。
+  const add = await mechSh(["git", "-C", worktree, "add", ...unmerged], 30_000);
+  if (!add.ok) return { ok: false, reason: `git add <derived> failed: ${add.stderr || `exit ${add.status}`}` };
+  const commit = await mechSh(["git", "-C", worktree, "commit", "--no-edit"], 30_000);
+  if (!commit.ok) return { ok: false, reason: `git commit --no-edit failed: ${commit.stderr || `exit ${commit.status}`}` };
+  return { ok: true, reason: null };
+}
+
 /**
  * driver 机械跑通一次无失败 fan-in 的 happy path（锁/merge/delta/typecheck/archguard结构闸/scoped门/suite/ff）。
  * ⛔ 语义失败点（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / 依赖环 / suite 红 / ff 失败）一律返回
@@ -1851,9 +1915,14 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   let suitePid: number | null = null;
 
   try {
-    // 2. merge develop（冲突 ⇒ red → 语义会话兜底）。
+    // 2. merge develop（冲突 ⇒ 若全为 derived 文件则机械重算继续；含 code 文件 ⇒ red → 语义会话兜底）。
     a = await mechSh(["git", "-C", worktree, "merge", "--no-edit", mergeTarget], 120_000);
-    if (!a.ok) return fail("merge-develop", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
+    if (!a.ok) {
+      const resolved = await resolveDerivedMergeConflict(worktree, mergeTarget, scriptsDir);
+      if (!resolved.ok) {
+        return fail("merge-develop", resolved.reason ?? ((a.stderr || a.stdout || "").trim() || `exit ${a.status}`));
+      }
+    }
 
     // 3. anti-drift Touches 核对（HARD FAIL ⇒ red）。
     a = await mechSh(["node", "--experimental-strip-types", antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
