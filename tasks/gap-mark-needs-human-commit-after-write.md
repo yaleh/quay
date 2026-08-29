@@ -1,7 +1,7 @@
 ---
 id: gap-mark-needs-human-commit-after-write
 title: markNeedsHuman 写盘不提交 git——needs-human 翻转缺 commit-after-write（硬规则 5b 只落到 todo→ready 兄弟）
-status: ready
+status: done
 labels:
   - gap
   - defect
