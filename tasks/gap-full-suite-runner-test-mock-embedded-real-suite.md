@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-runner-test-mock-embedded-real-suite
 title: full-suite-runner.test.mjs 地板 579s——真因是 registry 无界增长（34k 死条目 × 每 spawn 扫 /proc），非「内嵌真实 suite」
-status: ready
+status: done
 labels:
   - gap
   - throughput
