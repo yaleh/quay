@@ -38,6 +38,7 @@ import {
   parseTestCounts,
   parsePerFile,
   parseCeilingFloor,
+  parseRedFailures,
   hostParallelism,
   concurrentSuiteSlots,
   countHeldSuiteLocks,
@@ -1107,4 +1108,116 @@ test("CLI — a bucket-mode --suite-log flows perFile/ceiling/floor_ms into the 
   assert.deepEqual(out.record.perFile, [{ file: "plugin/test/foo.test.mjs", durationMs: 123.456, passed: true }], "CLI record carries perFile");
   assert.deepEqual(out.record.floor_ms, [123.4], "CLI record carries floor_ms");
   assert.deepEqual(out.record.ceiling, ["/home/yale/work/quay-worktrees/gap-foo/plugin/test/slow.test.mjs"], "CLI record carries ceiling");
+});
+
+// ── gap-verification-round-static-fail-no-record: a RED fan-in round lands a record ──────────────────
+// The fan-in suite path previously wrote verification-round.jsonl ONLY on the green path — a red round
+// (static-check fail-closed / dynamic test fail) left 0 records, so the /tests ledger (and anything else
+// that reads verification-round.jsonl) was blind to it. The writer now accepts --state red and carries
+// reason/gate/failures (parsed from --suite-log) + the taskId it already had.
+
+test("parseRedFailures — parses STATIC_CHECK_FAILED fail-closed lines into {name,exitCode,line} and test-failure lines via the shared isFailureLine 口径", () => {
+  const log = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-27T00:00:00.000Z ms=100 head=x round=full",
+    "STATIC_CHECK_FAILED: spec-declaration-point-check exit=1",
+    "✖ AC1 — resident loop does not exit after one worker (5831.7ms)",
+    "ℹ fail 1",
+  ]);
+  const red = parseRedFailures(log);
+  assert.equal(red.staticCheck, true, "a fail-closed checker fired ⇒ staticCheck=true");
+  assert.equal(red.failClosed.length, 1, "one STATIC_CHECK_FAILED line → one fail-closed checker");
+  assert.equal(red.failClosed[0].name, "spec-declaration-point-check", "the checker name is parsed (AC1: failures[] 含 checker 名)");
+  assert.equal(red.failClosed[0].exitCode, 1);
+  assert.match(red.failClosed[0].line, /^STATIC_CHECK_FAILED: spec-declaration-point-check exit=1$/);
+  assert.ok(red.failureLines.some((l) => /resident loop/.test(l)), "the ✖ test-failure line is also accumulated (isFailureLine 口径)");
+});
+
+test("parseRedFailures — an absent/unreadable log returns {staticCheck:false, failClosed:[], failureLines:[]} (honest empty)", () => {
+  assert.deepEqual(parseRedFailures(undefined), { staticCheck: false, failClosed: [], failureLines: [] });
+  assert.deepEqual(parseRedFailures("/nonexistent/pvr-red-missing.log"), { staticCheck: false, failClosed: [], failureLines: [] });
+});
+
+test("AC1 — a red static-check round writes state=red reason=gate-failed gate=static-check + failures[] carrying the checker name", () => {
+  const log = writeSuiteLog(null, ["STATIC_CHECK_FAILED: spec-declaration-point-check exit=1"]);
+  const { record, error } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", state: "red", suiteLog: log, root: REPO_ROOT });
+  assert.equal(error, undefined, `build must succeed: ${error}`);
+  assert.equal(record.state, "red");
+  assert.equal(record.reason, "gate-failed", "a fail-closed checker (fail=0) ⇒ reason=gate-failed");
+  assert.equal(record.gate, "static-check", "the named gate is static-check");
+  assert.equal(record.failures.length, 1);
+  assert.equal(record.failures[0].staticCheck, true);
+  assert.match(record.failures[0].line, /spec-declaration-point-check/, "failures[] carries the checker name (AC1)");
+  assert.equal(record.taskId, BASE.taskId, "the red record carries taskId (AC3)");
+  assert.equal(record.runId, BASE.runId);
+});
+
+test("AC2 — a red test-failure round writes state=red reason=failed + failures[] (no gate)", () => {
+  const log = writeSuiteLog(null, [
+    "✖ AC1 — resident loop does not exit after one worker (5831.7ms)",
+    "ℹ fail 1",
+  ]);
+  const { record, error } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", state: "red", suiteLog: log, root: REPO_ROOT });
+  assert.equal(error, undefined, `build must succeed: ${error}`);
+  assert.equal(record.state, "red");
+  assert.equal(record.reason, "failed", "a test failure ⇒ reason=failed (the reason axis, AC2)");
+  assert.equal(record.gate, undefined, "a test failure carries no gate (fail>0 ⇒ reason=failed)");
+  assert.ok(record.failures.length > 0, "failures[] carries the matched failure lines");
+  assert.ok(record.failures.some((f) => /resident loop/.test(f.line)), "the failing test name rides failures[]");
+  assert.equal(record.taskId, BASE.taskId, "the red record carries taskId (AC3)");
+});
+
+test("AC4 — a red round with NO parseable failure signal still records reason=failed (fail-closed, never a fabricated gate)", () => {
+  const log = writeSuiteLog(null, ["__OVERHEAD__ serial_phase_ms=301000"]); // a red log with no failure line
+  const { record } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", state: "red", suiteLog: log, root: REPO_ROOT });
+  assert.equal(record.state, "red");
+  assert.equal(record.reason, "failed", "a red run IS a failure even when the log's signal shape was unparseable");
+  assert.equal(record.gate, undefined, "no gate is fabricated when the cause is unparseable");
+  assert.equal(record.failures, undefined, "failures[] absent when no failure line parsed");
+});
+
+test("AC4 — the green path is unchanged: no --state ⇒ state=green with no reason/gate/failures (no regression)", () => {
+  const { record } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", root: REPO_ROOT });
+  assert.equal(record.state, "green");
+  assert.equal(record.reason, undefined);
+  assert.equal(record.gate, undefined);
+  assert.equal(record.failures, undefined);
+});
+
+test("--state must be green|red (invalid value fail-closed)", () => {
+  assert.match(buildPreVerifiedRoundRecord({ ...BASE, state: "blue" }).error ?? "", /--state/);
+  assert.equal(buildPreVerifiedRoundRecord({ ...BASE, state: "GREEN" }).record.state, "green", "case-insensitive green accepted");
+  assert.equal(buildPreVerifiedRoundRecord({ ...BASE, state: "RED" }).record.state, "red", "case-insensitive red accepted");
+});
+
+test("CLI — --state red writes a red static-check record (reason=gate-failed gate=static-check + taskId)", () => {
+  const file = tmpFile("pvr-redcli-");
+  const log = writeSuiteLog(null, ["STATIC_CHECK_FAILED: spec-declaration-point-check exit=1"]);
+  const args = [
+    "--task-id", BASE.taskId,
+    "--run-id", BASE.runId,
+    "--started-at", BASE.startedAt,
+    "--duration-ms", BASE.durationMs,
+    "--lane-count", BASE.laneCount,
+    "--load", BASE.load,
+    "--commit", BASE.commit,
+    "--preverified", "0",
+    "--state", "red",
+    "--suite-log", log,
+    "--record-file", file,
+    "--json",
+  ];
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER, ...args], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, true);
+  assert.equal(out.record.state, "red");
+  assert.equal(out.record.reason, "gate-failed");
+  assert.equal(out.record.gate, "static-check");
+  assert.equal(out.record.taskId, BASE.taskId);
+  const lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+  assert.equal(lines.length, 1, "one line appended");
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.reason, "gate-failed");
+  assert.equal(rec.gate, "static-check");
+  assert.match(rec.failures[0].line, /spec-declaration-point-check/);
 });

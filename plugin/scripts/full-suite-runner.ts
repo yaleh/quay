@@ -790,6 +790,13 @@ export interface SuiteRoundRecord {
   // gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1: main|worktree — which
   // checkout produced this round (the same `scope` the state file carries). Absent on legacy rows.
   scope?: "main" | "worktree";
+  /**
+   * gap-verification-round-static-fail-no-record AC3 — which task this round verified (present ONLY on
+   * a bucket-mode run `--buckets <task-id>`, where the runner knows the task identity; a main-checkout
+   * full suite / one-shot verify round omits it — absent-field contract, same as scope_unit). Lets the
+   * red/failed round be attributed to the task whose bucket it verified, without hand-digging the log.
+   */
+  taskId?: string;
   // gap-verification-round-in-one-shot-worktree — true when this round ran in a one-shot verify
   // worktree (the same flag the suite-state carries). Absent on non-one-shot rows.
   oneShotWorktree?: boolean;
@@ -3272,6 +3279,11 @@ export async function run(argv: string[]): Promise<number> {
     nproc: roundNproc,
     concurrentSuiteSlots: roundConcurrentSuiteSlots,
     concurrentSuitesRunning: roundConcurrentSuitesRunning,
+    // gap-verification-round-static-fail-no-record AC3 — taskId attribution. Present only on a
+    // bucket-mode run (`--buckets <task-id>`), where the runner KNOWS which task's bucket subset it
+    // verified; a main-checkout full suite / one-shot verify round has no task identity and omits the
+    // field (the 31 historical static-check rows stay shape-identical — AC4 不回归).
+    ...(bucketTaskId ? { taskId: bucketTaskId } : {}),
     // gap-verification-round-observability-holes AC1 — the flock wait (test.sh's lock-acquire markers).
     // Present only when the suite actually took the lock (the acquire START + acquired markers both
     // fired); absent on scoped runs / lock-timeout aborts — a reader must tolerate absence.
