@@ -1,7 +1,7 @@
 ---
 id: gap-b0-retirement-precondition-checker-call-surface
 title: B0·退役前置检查——枚举 outer 执行核引用的全部 checker，逐个确认留存调用面或显式退役（防孤儿静默产生，唯一有时限批次）
-status: ready
+status: done
 labels:
   - gap
   - feature
