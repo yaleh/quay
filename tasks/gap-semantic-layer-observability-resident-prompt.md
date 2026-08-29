@@ -1,7 +1,7 @@
 ---
 id: gap-semantic-layer-observability-resident-prompt
 title: 语义层常驻可观测检查 prompt——manager/outer 每 tick 读当次日志 + 历史复发，未解释/复发即报
-status: ready
+status: done
 labels:
   - gap
   - defect
