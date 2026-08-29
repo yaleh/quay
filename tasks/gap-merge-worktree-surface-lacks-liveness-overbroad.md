@@ -2,7 +2,7 @@
 id: gap-merge-worktree-surface-lacks-liveness-overbroad
 title: merge-worktree surface 无 liveness + 面过宽（diffNameOnlyHead 用全 delta）——4
   个零进程卡死 mid-merge worktree 把 28 ready 滤空致 dispatchable_disjoint=0
-status: ready
+status: done
 labels:
   - gap
   - defect
