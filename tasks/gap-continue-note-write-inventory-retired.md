@@ -2,7 +2,7 @@
 id: gap-continue-note-write-inventory-retired
 title: continueConflictResolutionNote 的 derived 指令改「outline 冲突取 develop
   版」（--write-inventory 已退役）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -22,9 +22,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`grep -n 'write-inventory' plugin/scripts/worker-driver.ts` 命中 0（唯一引用已移除）。
-- [ ] AC2（能取假）：`continueConflictResolutionNote()` 返回串含「取 develop 版」（或 `checkout develop` 指令），且不再含 `--write-inventory`。
-- [ ] AC3（能取假，单测）：`worker-driver.test.mjs` 对 note 的断言绿（改掉任一 ⇒ 测试红）。
+- [x] AC1（能取假）：`grep -n 'write-inventory' plugin/scripts/worker-driver.ts` 命中 0（唯一引用已移除）。
+- [x] AC2（能取假）：`continueConflictResolutionNote()` 返回串含「取 develop 版」（或 `checkout develop` 指令），且不再含 `--write-inventory`。
+- [x] AC3（能取假，单测）：`worker-driver.test.mjs` 对 note 的断言绿（改掉任一 ⇒ 测试红）。
 
 ## Definition of Done
 
