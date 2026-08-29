@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption
 title: ready-pool notYetFlipped allChecked 臂排除「fan-in 失败未落地」任务 → 永久搁浅 + 冻住整池
-status: ready
+status: done
 labels:
   - gap
 parent: null
