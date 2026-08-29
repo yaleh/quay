@@ -55,3 +55,9 @@ extra: {}
 - plugin/test/writestate-atomicity-split.test.mjs (new)（原子写并发读负控制测试）
 - experiments/quay-perpetual-stream/test/write-json-atomic.test.mjs (new)（SOURCE 副本 write-json-atomic.ts 的 loadbearing-test-gate 兄弟单测，ADR-001 clause 2）
 - tasks/gap-writestate-atomicity-split.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T17:03:02.959Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

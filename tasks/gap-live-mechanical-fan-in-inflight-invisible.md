@@ -48,3 +48,9 @@ round 记录带 `in_flight_tasks`（task id）；readLive 把其映射进 inFlig
 - packages/quay/src/observation.ts（readLive 读 round in_flight_tasks 推入 workerInFlight）
 - packages/quay/test/serve.test.mjs（AC1 生产载体断言 + AC2 不误伤）
 - tasks/gap-live-mechanical-fan-in-inflight-invisible.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T19:11:09.101Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
