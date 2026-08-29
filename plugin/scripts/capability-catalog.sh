@@ -2006,9 +2006,16 @@ VIOLATION_COUNT=$(printf '%s\n' "${VIOLATIONS}" | sed '/^$/d' | wc -l | tr -d ' 
 
 # ── output ──────────────────────────────────────────────────────────────────────────
 if [ "$MODE" = "json" ]; then
-  python3 - "$ROWS" <<'PYEOF'
+  # ROWS is the full tab-separated catalog (one row per script). Pass it via a temp file,
+  # NOT as a single argv — a single argument over Linux's MAX_ARG_STRLEN (~128KB) fails with
+  # "Argument list too long" once the catalog grows past that (observed 2026-08-28 adding
+  # gap-ac149's three scripts). stdin is occupied by the here-doc (the python source), so a
+  # temp file is the transport that keeps both the script and the data unambiguous.
+  _rows_tmp="$(mktemp)"
+  printf '%s\n' "$ROWS" > "$_rows_tmp"
+  python3 - "$_rows_tmp" <<'PYEOF'
 import json, sys
-rows = sys.argv[1].splitlines()
+rows = open(sys.argv[1], encoding="utf-8").read().splitlines()
 entries = []
 for line in rows:
     if not line:
@@ -2034,6 +2041,7 @@ for line in rows:
 json.dump(entries, sys.stdout, ensure_ascii=False, indent=2)
 print()
 PYEOF
+  rm -f "$_rows_tmp"
 elif [ "$MODE" = "entry-surface" ]; then
   if [ "$ENTRY_SURFACE_SUBMODE" = "json" ]; then
     python3 - "${SH_SHIPPED}" "${PUBLIC_SH}" "${INTERNAL_SH}" "${DOC_REFERENCED_SH_COUNT}" "${VIOLATIONS}" <<'PYEOF'
