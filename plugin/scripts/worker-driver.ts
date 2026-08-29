@@ -1639,7 +1639,9 @@ function runOneWorker({
           const startMechMs = Date.now();
           // 每任务新进程（gap-fan-in-token-gate-version-mismatch-self-lock）：机械 fan-in 不再在本守护
           // 进程 in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），
-          // 改为 spawn 一个 fresh node 进程加载 worktree 的 worker-driver.ts --mechanical-fan-in——
+          // 改为 spawn 一个 fresh node 进程加载【主检出】的 worker-driver.ts --mechanical-fan-in——
+          // 执行器（entry）跟 driver 同版（⛔ 不用 worktree 的：stale worktree 缺新 argv ⇒ unknown
+          // argument ⇒ parse-mechanical-fan-in red，gap-fan-in-spawn-stale-worktree-executor-missing-argv）；
           // 锁半（acquireFanInWorkflowLock）与编排半（fan-in-ff-merge.sh）同源（都在 worktree），改了
           // worker-driver.ts 的任务 fan-in 不再用旧锁/旧编排。⛔ 不是 token 闸一例，是「fan-in 脚本从
           // worktree 加载、发起者从主检出旧进程运行」的架构错位整个类。
@@ -2348,14 +2350,17 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
 /**
  * 每任务新进程执行（gap-fan-in-token-gate-version-mismatch-self-lock AC1）：机械 fan-in 不在守护进程
  * in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），改为每任务 spawn
- * 一个 fresh node 进程加载 worktree 的 worker-driver.ts --mechanical-fan-in——当前代码。fresh 进程里的
- * 锁半（acquireFanInWorkflowLock，ADR-034）与编排半（fan-in-ff-merge.sh）同源（都在 worktree）⇒ 改了
- * worker-driver.ts 的任务 fan-in 用的是它自己的新锁/新编排，不再因「守护旧代码」自锁。结果经 stdout
- * 单行 JSON 回传（--mechanical-fan-in 只打一行 result JSON）；spawn 失败/输出不可解析 fail-closed 为 red
- * （硬规则 3b：读不懂 ≠ 合格）。
+ * 一个 fresh node 进程加载 worker-driver.ts --mechanical-fan-in。执行器（entry）用【主检出】的
+ * worker-driver.ts（opts.root/plugin/scripts/worker-driver.ts，与 driver 同版）——⛔ 不用 worktree 的
+ * （gap-fan-in-spawn-stale-worktree-executor-missing-argv：stale worktree 缺新 argv 如 --mechanical-fan-in
+ * ⇒ fresh 进程报 unknown argument ⇒ 无 JSON 输出 ⇒ parse-mechanical-fan-in red）。fan-in 编排器本就是
+ * 基础设施，应跟 driver 同版；任务 delta（含对 worker-driver.ts 自身的改动）由 suite step（worktree
+ * test.sh）验证，不因执行器用主检出版而丢。锁半（acquireFanInWorkflowLock，ADR-034）与编排半
+ * （fan-in-ff-merge.sh）仍在 worktree 同源。结果经 stdout 单行 JSON 回传（--mechanical-fan-in 只打一行
+ * result JSON）；spawn 失败/输出不可解析 fail-closed 为 red（硬规则 3b：读不懂 ≠ 合格）。
  */
-async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promise<MechanicalFanInResult> {
-  const entry = path.join(opts.worktree, "plugin", "scripts", "worker-driver.ts");
+export async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promise<MechanicalFanInResult> {
+  const entry = path.join(opts.root, "plugin", "scripts", "worker-driver.ts");
   const argv = [
     process.execPath, "--experimental-strip-types", entry,
     "--mechanical-fan-in",
@@ -2811,7 +2816,7 @@ export async function main(argv: string[]): Promise<number> {
           "  [--backoff-threshold <n>]  连续快速死亡 ≥ 此次数才开始退避（缺省 1）\n" +
           "  [--backoff-base-ms <ms>]  第一次退避等待 ms（指数底数，缺省 30000）\n" +
           "  [--backoff-max-ms <ms>]  退避等待上限 ms（指数增长封顶，缺省 300000）\n" +
-          "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前 worktree 代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
+          "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -2824,9 +2829,10 @@ export async function main(argv: string[]): Promise<number> {
   const rootDir = root ? path.resolve(root) : path.resolve(process.cwd());
 
   // --mechanical-fan-in：fresh 进程入口（每任务新进程执行，gap-fan-in-token-gate-version-mismatch-
-  // self-lock AC1）。守护 spawn 本入口加载 worktree 的 worker-driver.ts，跑机械 fan-in、把 result 以
-  // 单行 JSON 打回 stdout（spawnMechanicalFanIn 解析），exit 0 = landed / 2 = red。⛔ 不是派发路径：
-  // 不 stash、不读 selector、不写 outcome（结果由 spawn 方入账）。
+  // self-lock AC1）。守护 spawn 本入口（entry = 主检出 worker-driver.ts，⛔ 非 worktree——stale worktree
+  // 缺新 argv ⇒ unknown argument，gap-fan-in-spawn-stale-worktree-executor-missing-argv），跑机械 fan-in、
+  // 把 result 以单行 JSON 打回 stdout（spawnMechanicalFanIn 解析），exit 0 = landed / 2 = red。⛔ 不是
+  // 派发路径：不 stash、不读 selector、不写 outcome（结果由 spawn 方入账）。
   if (mechanicalFanIn) {
     const task = tasks[0];
     if (!task || !mechWorktree) {

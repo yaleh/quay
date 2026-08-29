@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-spawn-stale-worktree-executor-missing-argv
 title: fresh-process fan-in spawn 用 worktree 的 worker-driver.ts 当执行器——stale worktree 缺新 argv（--mechanical-fan-in）⇒ unknown argument ⇒ parse-mechanical-fan-in fail
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -25,9 +25,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：stale worktree（落后 develop、缺新 argv）的 fan-in spawn 成功——entry 用主检出 worker-driver.ts，无 `unknown argument`，fan-in 正常 proceed；（⛔ 仍报 unknown argument ⇒ 假）。
-- [ ] AC2（能取假，单测）：worker-driver.test.mjs 断言 entry 路径 = `opts.root`（非 `opts.worktree`）+「stale worktree 缺 argv 仍 spawn 成功」负控制，改掉任一 ⇒ 红。
-- [ ] AC3（能取假，回归）：改 worker-driver.ts 自身的任务（delta 含执行器）仍能 fan-in——其 delta 由 suite step（worktree test.sh）验证，不因执行器用主检出版而丢。
+- [x] AC1（能取假）：stale worktree（落后 develop、缺新 argv）的 fan-in spawn 成功——entry 用主检出 worker-driver.ts，无 `unknown argument`，fan-in 正常 proceed；（⛔ 仍报 unknown argument ⇒ 假）。
+- [x] AC2（能取假，单测）：worker-driver.test.mjs 断言 entry 路径 = `opts.root`（非 `opts.worktree`）+「stale worktree 缺 argv 仍 spawn 成功」负控制，改掉任一 ⇒ 红。
+- [x] AC3（能取假，回归）：改 worker-driver.ts 自身的任务（delta 含执行器）仍能 fan-in——其 delta 由 suite step（worktree test.sh）验证，不因执行器用主检出版而丢。
 
 ## Definition of Done
 
@@ -37,4 +37,5 @@ extra: {}
 
 - plugin/scripts/worker-driver.ts（spawnMechanicalFanIn entry 改 opts.root）
 - plugin/test/worker-driver.test.mjs（AC2 单测）
+- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（AC1 结构断言 entry=opts.root 同步改）
 - tasks/gap-fan-in-spawn-stale-worktree-executor-missing-argv.md（自身）
