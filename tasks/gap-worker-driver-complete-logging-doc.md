@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-complete-logging-doc
 title: worker-driver 可观测性——每步完整记录 stdout+stderr + 日志路径单一正本（防 reason 载体失真再犯）
-status: ready
+status: done
 labels:
   - gap
   - defect
