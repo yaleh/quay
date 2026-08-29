@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-runner-test-poll-timeout-load-flake
 title: full-suite-runner.test.mjs poll(5000ms) 高负载下超时 flake + 文件未入 known-load-sensitive 致 fix-scope gate 误判确定性失败（defer anti-livelock）
-status: ready
+status: done
 labels:
   - gap
   - defect
