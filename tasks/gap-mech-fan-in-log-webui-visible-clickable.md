@@ -63,3 +63,9 @@ extra: {}
 - packages/quay/test/serve-handlers.test.mjs（AC2 渲染 + AC3 穿越防护测试）
 - .gitignore（`.quay/fan-in-*.log`）
 - tasks/gap-mech-fan-in-log-webui-visible-clickable.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-29T01:48:39.196Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
