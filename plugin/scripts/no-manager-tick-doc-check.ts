@@ -43,8 +43,8 @@ import { isDirectEntry } from "./gate-script-base.ts";
  *     `CronCreate … manager`, `/loop … manager`
  *   - tight Chinese verb-object conjunctions where manager is the DIRECT object of a creation/
  *     drive/check/restart verb: 创建/启动/拉起/驱动/检查/重启 + manager (optional whitespace between).
- *     The object must be IMMEDIATE ("创建 manager"), so boundary phrases like "创建两窗口拓扑（…manager…）"
- *     (创建's object is 两窗口拓扑, not manager) do not match.
+ *     The object must be IMMEDIATE ("创建 manager"), so boundary phrases like "创建单窗口拓扑（…manager…）"
+ *     (创建's object is 单窗口拓扑, not manager) do not match.
  */
 export const ACTIONABLE_STEP_RE =
   /(?:quay\s+manager\s+(?:start|adopt|arm)|(?:^|\s)manager\s+(?:start|adopt)|CronCreate[^\n]{0,40}manager|\/loop[^\n]{0,20}manager|创建\s*manager|启动\s*manager|拉起\s*manager|驱动\s*manager|检查\s*manager|重启\s*manager)/;

@@ -1,7 +1,7 @@
 ---
 id: gap-retire-halt-file-driver-based
 title: 退役已死的 .halt 消费者——6 个死脚本/死读点删除 + restart-readiness-check.sh 重定向到 driver resume；正交面（跨项目/session/metric）另立案
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -65,33 +65,48 @@ worker/promotion 两个 control-state 活着）。
 
 ## Acceptance Criteria
 
-- [ ] AC1（死脚本删除）: `halt-check.sh` + `a15-ruling5-counter.ts` 及其 test 删除；`grep -rn` 无残留引用（除退役记录）。
-- [ ] AC2（死读点删除）: `suite-execution-form-counter.ts` / `supervisor-preempt.sh` / `config-wiring-check.ts` /
+- [x] AC1（死脚本删除）: `halt-check.sh` + `a15-ruling5-counter.ts` 及其 test 删除；`grep -rn` 无残留引用（除退役记录）。
+- [x] AC2（死读点删除）: `suite-execution-form-counter.ts` / `supervisor-preempt.sh` / `config-wiring-check.ts` /
   `outer-driver.ts` 的 `.halt` 读点归零（grep）；outer-driver 的 stall 判据改 driver 活性。
-- [ ] AC3（stale 面清理）: `capability-catalog.sh` 无这 7 个的「每轮」stale 条目；tick-core prose /
+- [x] AC3（stale 面清理）: `capability-catalog.sh` 无这 7 个的「每轮」stale 条目；tick-core prose /
   CLAUDE.md / invariant-ownership / manager SKILL 无「.halt 暂停循环/派发」旧语义。
-- [ ] AC4（人闸重定向）: `restart-readiness-check.sh` 目标改「`quay driver resume` 前可安全恢复」，git 树检查保留。
-- [ ] AC5（正交面脱钩）: 退役映射表显式列出 manager-tick-readings / os-anchor-watchdog / fast-mode-telemetry 为「另立案」。
-- [ ] AC6（测试绿）: 受影响 test 文件 scoped 绿，`.halt` 断言同步。
+- [x] AC4（人闸重定向）: `restart-readiness-check.sh` 目标改「`quay driver resume` 前可安全恢复」，git 树检查保留。
+- [x] AC5（正交面脱钩）: 退役映射表显式列出 manager-tick-readings / os-anchor-watchdog / fast-mode-telemetry 为「另立案」。
+- [x] AC6（测试绿）: 受影响 test 文件 scoped 绿，`.halt` 断言同步。
 
 ## Definition of Done
 
-- [ ] 退役映射表 + 删脚本/删读点 + 重定向 + stale 清理 + scoped 绿；AC1-6 全勾；land 到 develop。
+- [x] 退役映射表 + 删脚本/删读点 + 重定向 + stale 清理 + scoped 绿；AC1-6 全勾；land 到 develop。
 
 ## Touches
 
-- plugin/scripts/halt-check.sh
+- CLAUDE.md
+- docs/analysis/test-file-baseline.txt
+- experiments/quay-perpetual-stream/invariant-ownership.md
+- experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh
+- orchestration/fast-mode-tick-core.md
+- orchestration/manager-loop-tick.md
+- orchestration/orchestrator-loop-tick.md
+- orchestration/orchestrator-tick-core.md
+- plugin/invariant-ownership.md
+- plugin/loop/fast-mode-loop-tick.md
+- plugin/loop/fast-mode-tick-core.md
+- plugin/loop/orchestrator-loop-tick.md
+- plugin/loop/orchestrator-tick-core.md
 - plugin/scripts/a15-ruling5-counter.ts
+- plugin/scripts/capability-catalog.sh
+- plugin/scripts/config-wiring-check.ts
+- plugin/scripts/halt-check.sh
+- plugin/scripts/outer-driver.ts
+- plugin/scripts/quay-deliver.ts
 - plugin/scripts/suite-execution-form-counter.ts
 - plugin/scripts/supervisor-preempt.sh
-- plugin/scripts/config-wiring-check.ts
-- plugin/scripts/outer-driver.ts
-- experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh
-- plugin/test/halt-check.test.mjs
 - plugin/test/a15-ruling5-counter.test.mjs
-- plugin/test/suite-execution-form-counter.test.mjs
-- plugin/test/supervisor-preempt.test.mjs
+- plugin/test/halt-check.test.mjs
 - plugin/test/outer-driver.test.mjs
 - plugin/test/restart-readiness-check.test.mjs
-- plugin/scripts/capability-catalog.sh
+- plugin/test/suite-bucket-attribution.test.mjs
+- plugin/test/suite-execution-form-counter.test.mjs
+- plugin/test/supervisor-preempt.test.mjs
+- plugin/test/verify-delivery-surface.test.mjs
 - tasks/gap-retire-halt-file-driver-based.md

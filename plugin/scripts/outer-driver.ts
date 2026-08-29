@@ -1,5 +1,5 @@
 // plugin/scripts/outer-driver.ts — AC143 (tasks/gap-ac143-observability-ledger-closing-driver):
-// the outer's PURE-MECHANICAL A/B segments (A1/A3/A6/A9/A10/A18/A21 读数 · B1/B2/B6 收尾留痕 ·
+// the outer's PURE-MECHANICAL A/B segments (A1/A6/A9/A10/A18/A21 读数 · B1/B2/B6 收尾留痕 ·
 // B12/B17 自查审计) absorbed into a resident routine-type driver.
 //
 // WHY THIS EXISTS（manager-phase-goal.md ### AC143 · SPEC-unified-driver-architecture §2.1）：
@@ -11,8 +11,10 @@
 // ⛔ 不继承 Layer 1a（task-processing：source/select/verify 三段）。
 //
 // 权责边界（⛔ 只做 AC143 判据的机械面，不越界到语义判断——那是 AC145 manager 的事）：
-//   驱动  ✅ 每轮跑一遍例程：A1 挂载读数 · A3 .halt 读数 · A6 占用率 · A9 not-yet-flipped ·
-//             A10 closure-lag 信号 · A18 slot-refill 读数 · A21 直接量活性 · B1 收尾 pass ·
+//   驱动  ✅ 每轮跑一遍例程：A1 挂载读数 · A6 占用率 · A9 not-yet-flipped ·
+//             A10 closure-lag 信号 · A18 slot-refill 读数 · A21 直接量活性（driver 活性：
+//             develop 提交时距 + worktree 条数——⛔ 旧 A3 .halt 读数已退役，stall 判据换成
+//             driver 活性直接量，gap-retire-halt-file-driver-based）· B1 收尾 pass ·
 //             B2 留痕 · B6 落盘聚合 · B12 自身停止条件 · B17 判据消费审计
 //         ✅ 每个例程读不到输入 ⇒ 产出 not-evaluated Fact（⛔ 与「合格」不同形，硬规则 3b / AC153）
 //         ✅ 每轮无条件写一条 round 记录（.quay/outer-round.jsonl，AC1 生产载体）
@@ -205,35 +207,6 @@ export function monitorMountRoutine(root: string, cmd: string[] | null): () => F
   };
 }
 
-/** A3 · .halt 读数：repo-root `.halt` 存在性 + 内容 + develop 最后提交时距。 */
-export function haltStatusRoutine(root: string): () => Fact[] {
-  return () => {
-    try {
-      const haltFile = path.join(root, ".halt");
-      const haltExists = fs.existsSync(haltFile);
-      const haltContent = haltExists ? fs.readFileSync(haltFile, "utf8").trim().slice(0, 200) : "";
-      let lastCommitIso: string | null = null;
-      let lastCommitAgeSecs: number | null = null;
-      try {
-        const r = spawnSync("git", ["-C", root, "log", "--oneline", "develop", "-1", "--format=%ci"], {
-          encoding: "utf8", timeout: ROUTINE_TIMEOUT_MS,
-        });
-        if (!r.error && r.status === 0) {
-          const line = String(r.stdout ?? "").trim();
-          const m = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/);
-          if (m) {
-            lastCommitIso = m[1].replace(" ", "T") + "Z";
-            lastCommitAgeSecs = Math.max(0, Math.floor((Date.now() - Date.parse(lastCommitIso)) / 1000));
-          }
-        }
-      } catch { /* git 读失败 ⇒ 保持 null */ }
-      return [factOf("halt_status", { halted: haltExists, content: haltContent, lastCommitIso, lastCommitAgeSecs }, "halt status unreadable")];
-    } catch {
-      return [{ name: "halt_status", value: null, state: "not-evaluated", reason: "halt status unreadable" }];
-    }
-  };
-}
-
 /** A6 · 占用率：`slot-refill --cap 5 --json` → in_flight / occupied_slots / effective_cap。 */
 export function occupancyRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
@@ -378,7 +351,6 @@ export function outerRoutines(root: string, opts: {
 } = {}): RoutineSpec[] {
   return [
     { name: "monitor_mount", schedule: EVERY_ROUND, run: monitorMountRoutine(root, opts.monitorMountCmd ?? null) },
-    { name: "halt_status", schedule: EVERY_ROUND, run: haltStatusRoutine(root) },
     { name: "occupancy", schedule: EVERY_ROUND, run: occupancyRoutine(root, opts.slotRefillCmd ?? null) },
     { name: "not_yet_flipped", schedule: EVERY_ROUND, run: notYetFlippedRoutine(root, opts.readyPoolCmd ?? null) },
     { name: "closure_lag", schedule: EVERY_ROUND, run: closureLagRoutine(root, opts.closureLagCmd ?? null) },

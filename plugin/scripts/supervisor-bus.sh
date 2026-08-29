@@ -36,7 +36,7 @@
 #   --from <layer>    the sender identity LAYER ∈ {inner, outer, manager} (agent identities —
 #                     the human cannot claim the TUI agent channel; AC2 spoof gate)
 #   --project <name>  the sender identity PROJECT (default: repo-root basename, e.g. "quay")
-#   --to <target>     the tmux target session to deliver to (e.g. quay-inner)
+#   --to <target>     the tmux target session to deliver to (e.g. quay-outer)
 #   --payload <msg>   the message text (opaque — the bus never parses it)
 #   --transcript <path>  the target session transcript jsonl (a known, existing session)
 #   --root <path>     auto-discover the target transcript under ~/.claude/projects/<slug>/
