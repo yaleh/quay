@@ -350,8 +350,10 @@ test("AC1 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics, ADR-034 修订)
   assert.match(src, /flock -x "\$fd"/, "holder flock must be unbounded (no -w)");
   assert.doesNotMatch(src, /flock -x -w "\$fd"/, "holder flock must NOT carry a bounded wait");
   // 其余机械步骤仍是有限时长步骤（超时照旧，⛔ 不把「去掉短超时」误扩成「去掉所有超时」）。
-  assert.match(src, /mechSh\(\["git", "-C", worktree, "merge", "--no-edit", mergeTarget\], 120_000\)/, "merge-develop step keeps its finite timeout");
-  assert.match(src, /mechSh\(\["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget\], 120_000\)/, "typecheck step keeps its finite timeout");
+  // gap-mech-fan-in-log-webui-visible-clickable A1：这些步骤现经 step(name, argv, timeoutMs) 包一层
+  // （run + 计时 + trace 落 .quay/fan-in-*.log）——超时字面量仍是 120_000，只是调用形态从 mechSh 变 step。
+  assert.match(src, /step\("merge-develop", \["git", "-C", worktree, "merge", "--no-edit", mergeTarget\], 120_000\)/, "merge-develop step keeps its finite timeout");
+  assert.match(src, /step\("typecheck", \["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget\], 120_000\)/, "typecheck step keeps its finite timeout");
   // runAsync 对 Infinity 显式不设 SIGKILL timer（⛔ setTimeout(…, Infinity) → Node 压到 1ms 立即杀的 footgun）。
   const rt = fs.readFileSync(RUNTIME_SRC, "utf8");
   assert.match(rt, /if \(Number\.isFinite\(timeoutMs\)\)\s*\{\s*\n\s*timer = setTimeout\(/, "runAsync guards the SIGKILL timer behind Number.isFinite(timeoutMs) — Infinity ⇒ no timer");

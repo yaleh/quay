@@ -25,6 +25,9 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { helpExit } from "./gate-script-base.ts";
 
+import { verified, notEvaluated, failed, driverResultToExit } from "./checker-io.ts";
+import type { DriverResult } from "./checker-io.ts";
+
 export const MARKER = "KNOWN-LOAD-SENSITIVE";
 
 /** grep-equivalent marker test: true = marked, false = unmarked, null = unreadable/missing. */
@@ -47,6 +50,28 @@ export function checkMarked(files) {
     else unmarked.push(f);
   }
   return { marked, unmarked, unreadable };
+}
+
+export interface MarkedReport {
+  marked: string[];
+  unmarked: string[];
+  unreadable: string[];
+}
+
+/**
+ * B4 (gap-b4-checker-reuse-driver-result)：判定收敛到 DriverResult<T> 词表。
+ *   全部标记 ⇒ verified（release permitted）；任一未标记 ⇒ failed（release NOT permitted）；
+ *   有不可读文件 ⇒ not-evaluated（读不到输入，硬规则 3b——⛔ 不伪造成 release 或 fail）。
+ * 判断依据是【文件内容】而非调用方自述——hasMarker 读文件、includes(MARKER) 与文档 grep 协议等价。
+ */
+export function judgeMarkedReport(report: MarkedReport): DriverResult<MarkedReport> {
+  if (report.unreadable.length > 0) {
+    return notEvaluated(`${report.unreadable.length} unreadable file(s): ${report.unreadable.join(", ")}`);
+  }
+  if (report.unmarked.length > 0) {
+    return failed(`${report.unmarked.length} unmarked file(s) — release NOT permitted (apply-for-marker path)`);
+  }
+  return verified(report, "全部 proposed files 携带 KNOWN-LOAD-SENSITIVE 标记");
 }
 
 export function printReport(report) {
@@ -80,13 +105,11 @@ function main(argv) {
   const report = checkMarked(files);
   const out = printReport(report);
   if (out) console.log(out);
-  if (report.unreadable.length > 0) {
-    console.error(
-      `ERROR: ${report.unreadable.length} unreadable file(s): ${report.unreadable.join(", ")}`
-    );
-    process.exit(2);
+  const result = judgeMarkedReport(report);
+  if (result.state === "not-evaluated") {
+    console.error(`ERROR: ${result.reason}`);
   }
-  process.exit(report.unmarked.length > 0 ? 1 : 0);
+  process.exit(driverResultToExit(result));
 }
 
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

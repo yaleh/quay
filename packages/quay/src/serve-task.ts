@@ -12,7 +12,7 @@ import {
   readWorkerOutcomeRecords, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
   workerDriverActive,
 } from "./observation.ts";
-import type { LiveWorker } from "./observation.ts";
+import type { LiveWorker, WorkerOutcomeRecord } from "./observation.ts";
 
 export async function handleTaskList(
   req: IncomingMessage,
@@ -456,6 +456,29 @@ export async function handleTaskList(
  *  mirrored here). The auto-scan is gated on the worker driver being active for THIS root (a
  *  non-worker workspace never scans /proc, which would surface OTHER workspaces' workers); the
  *  `liveWorkers` test seam bypasses the gate, and `sessionHome` makes the pid→sessionId join testable. */
+
+/** Render one attempt's mechanical-fan-in cell (gap-mech-fan-in-log-webui-visible-clickable B2):
+ *  landed/red + first failing step + lock hold + suite outcome + landed sha, plus a view/download
+ *  link when the record carries a fanInLog file name. A null record renders an honest "—" (never a
+ *  fabricated "landed"). */
+export function renderFanInCell(taskId: string, r: WorkerOutcomeRecord): string {
+  const mfi = r.mechanical_fan_in;
+  if (mfi == null) return "—";
+  const parts: string[] = [];
+  if (mfi.outcome === "landed") parts.push(html`<strong>landed</strong>`);
+  else if (mfi.outcome === "red") parts.push(html`<strong>red</strong>`);
+  else parts.push(escapeHtml(mfi.outcome ?? "?"));
+  if (mfi.outcome === "red" && mfi.step) parts.push(`step ${escapeHtml(mfi.step)}`);
+  if (mfi.reason != null) parts.push(html`<span style="font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(mfi.reason)}</span>`);
+  if (mfi.lockHoldSecs != null) parts.push(`lock ${mfi.lockHoldSecs}s`);
+  if (mfi.suiteOutcome != null) parts.push(`suite ${escapeHtml(mfi.suiteOutcome)}`);
+  if (mfi.landedSha != null) parts.push(`sha <code>${escapeHtml(mfi.landedSha.slice(0, 7))}</code>`);
+  if (mfi.fanInLog != null && mfi.fanInLog.length > 0) {
+    parts.push(html`<a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}">view</a> · <a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}/download">download</a>`);
+  }
+  return parts.join("<br>");
+}
+
 export function taskRunsBlock(
   root: string,
   taskId: string,
@@ -484,6 +507,7 @@ export function taskRunsBlock(
       <td>${escapeHtml(w.pid)}</td>
       <td><code>${escapeHtml(`worker-${w.taskId}`)}</code></td>
       <td>${transcript}</td>
+      <td>—</td>
     </tr>`;
   }).join("\n");
 
@@ -504,11 +528,12 @@ export function taskRunsBlock(
       <td>${r.worker_pid != null ? escapeHtml(String(r.worker_pid)) : "—"}</td>
       <td><code>${escapeHtml(r.run_id ?? "—")}</code></td>
       <td>${transcript}</td>
+      <td>${renderFanInCell(taskId, r)}</td>
     </tr>`;
   }).join("\n");
   return html`<h2>Runs</h2>
     <table>
-      <tr><th>started</th><th>state</th><th>exit</th><th>wall</th><th>worker pid</th><th>run id</th><th>transcript</th></tr>
+      <tr><th>started</th><th>state</th><th>exit</th><th>wall</th><th>worker pid</th><th>run id</th><th>transcript</th><th>fan-in</th></tr>
       ${inFlightRows}
       ${rows}
     </table>`;
