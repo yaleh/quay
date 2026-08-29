@@ -1,7 +1,7 @@
 ---
 id: gap-b1-mechanical-spine-doc-checker
 title: B1·层 1 机械脊柱写成文档+检查器（exit 0/1/2 语义 + --json 输出契约，不符者 N→0）
-status: ready
+status: needs-human
 labels:
   - gap
   - feature
@@ -40,5 +40,11 @@ checker 的层 1「机械脊柱」目前是 CODIFY-EXISTING（几乎免费）：
 ## Needs-Human
 
 **执行 2026-08-28T18:06:33.724Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+
+## Needs-Human
+
+**执行 2026-08-29T14:39:53.342Z — 连续修满重试上限仍不合格（标 needs-human）**
 
 - 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
