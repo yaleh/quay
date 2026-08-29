@@ -57,7 +57,7 @@ test("AC4 — positive control: an actionable manager step (quay manager start) 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nmtdc-pos-"));
   try {
     const doc = path.join(dir, "outer.md");
-    fs.writeFileSync(doc, "## 冷启动\n先调 quay manager start 拉起 manager，再建两窗口。\n", "utf8");
+    fs.writeFileSync(doc, "## 冷启动\n先调 quay manager start 拉起 manager，再建单窗口。\n", "utf8");
     const r = runChecker(["--root", repoRoot, "--judge", doc, "--json"]);
     assert.equal(r.status, 1, `actionable step must fail (exit 1):\n${r.stdout}\n${r.stderr}`);
     const j = JSON.parse(r.stdout);
@@ -71,7 +71,7 @@ test("AC4 — negative control: boundary-only doc (manager 跨项目不属于项
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nmtdc-neg-"));
   try {
     const doc = path.join(dir, "outer.md");
-    fs.writeFileSync(doc, "调 quay-topology.sh 建两窗口（outer+inner，manager 跨项目不属于项目拓扑，不建）。\n", "utf8");
+    fs.writeFileSync(doc, "调 quay-topology.sh 建单窗口（outer，manager 跨项目不属于项目拓扑，不建）。\n", "utf8");
     const r = runChecker(["--root", repoRoot, "--judge", doc, "--json"]);
     assert.equal(r.status, 0, `boundary-only doc must pass:\n${r.stdout}\n${r.stderr}`);
     const j = JSON.parse(r.stdout);

@@ -3402,6 +3402,74 @@ test("AC2 — a single-phase run records the block's values unchanged (no regres
   }
 });
 
+test("AC2 — FORCE_COLOR ANSI-colored `ℹ pass/fail/cancelled` summary lines still parse to the four fields (gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ansi-"));
+  // #684/#685 regression: host FORCE_COLOR=3 forces node:test's spec reporter to emit ANSI color
+  // even when its stdout is redirected ⇒ the summary arrives as `\x1b[34mℹ pass N\x1b[39m` (ESC at
+  // line start) and the `^[#ℹ]` summary regexes never matched ⇒ pass/fail/cancelled/tests recorded
+  // 0. This colored stream reproduces that shape; the runner must strip ANSI and land the real
+  // counts (and stay green — the colored `ℹ fail 0` must not false-red).
+  const esc = "\x1b";
+  const colored = (s) => `echo '${esc}[34m${s}${esc}[39m'`;
+  const suite = [
+    'echo "selected 5 files (groups=main)"',
+    colored("ℹ tests 5"),
+    colored("ℹ pass 5"),
+    colored("ℹ fail 0"),
+    colored("ℹ cancelled 0"),
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const rec = JSON.parse(fs.readFileSync(path.join(root, ".quay", "verification-round.jsonl"), "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "green", "colored summary does not false-red");
+    assert.equal(rec.pass, 5, "pass parsed from the ANSI-colored ℹ pass line");
+    assert.equal(rec.fail, 0, "fail parsed from the ANSI-colored ℹ fail line");
+    assert.equal(rec.cancelled, 0, "cancelled parsed from the ANSI-colored ℹ cancelled line");
+    assert.equal(rec.tests, 5, "tests = pass+fail+cancelled parsed from colored lines (never 0)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — a FORCE_COLOR ANSI-colored `ℹ fail 1` summary still flips RED via the failure-detection path, with a CLEAN (ANSI-stripped) failure line (gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi — 5b third surface)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ansi-red-"));
+  // Third surface of the same FORCE_COLOR=3 defect family (5b): runner-red-parse.ts's
+  // FAILURE_PATTERNS carry `^[#ℹ]\s*fail\s+[1-9]` / `^[#ℹ]\s*cancelled\s+[1-9]` (red-detection,
+  // extracted from full-suite-runner.ts by gap-ac128-hub-split-harness-concerns). Before this fix the
+  // call site fed them the RAW colorized line, so `\x1b[34mℹ fail 1\x1b[39m` (ESC at line start)
+  // never matched and red was only caught by the exit-time aggregate backstop. Now the runner feeds
+  // the ANSI-stripped summaryLine, so the colorized summary flips red on the stream AND the recorded
+  // failure line is clean (no ESC bytes).
+  const esc = "\x1b";
+  const colored = (s) => `echo '${esc}[34m${s}${esc}[39m'`;
+  const suite = [
+    colored("ℹ tests 1"),
+    colored("ℹ pass 0"),
+    colored("ℹ fail 1"),
+    colored("ℹ cancelled 0"),
+    "exit 1",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "colored ℹ fail 1 flips state to red");
+    assert.equal(s.reason, "failed", "reason=failed (a real test failure)");
+    assert.ok(redPayload(s).length >= 1, `colored red carries a failure payload; got ${JSON.stringify(s)}`);
+    assert.equal(redPayload(s)[0].line, "ℹ fail 1", "the recorded failure line is ANSI-stripped (clean, no ESC bytes)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC2/AC3 e2e — a `✖ <testname> (Nms)` spec-reporter failure line flips red with failures non-empty", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-specx-"));
   const { f, dir } = fakeSuite(

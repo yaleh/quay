@@ -86,6 +86,7 @@ import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
 import {
   analyzeTasks,
+  readTaskFilesAtRefBatch,
   POOL_FLOOR_MULT_DEFAULT,
   readGitRevCount,
   // SUPERSEDED GUARD (gap-ac46-superseded-keyword-vs-marker): the pool/step-4 superseded filter must
@@ -146,6 +147,12 @@ import {
   computeInFlightWorktreeTouches,
 } from "./concurrent-batch-scheduler.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+// EXITED-NOT-LANDED CONTINUE EXEMPTION (tasks/gap-slot-refill-continue-touches-overlap-redundant-
+// exemption): the worktree-list direct quantity + task-id-from-branch resolver — reused to detect a
+// residual `task/<id>` worktree (single source: fast-mode-telemetry's listWorktrees/taskIdFromBranch,
+// ⛔ never a parallel `git worktree list` parse). A residual worktree is the "already isolated" half of
+// the continue-task exemption (the other half is worker-outcome final_state=exited-not-landed).
+import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
 
 /** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
  *  adaptive cap is retired. `--cap` defaults to this constant — 5 — so slot-refill and its derived
@@ -284,6 +291,45 @@ export function readFfEscalationRecords(root) {
   } catch {
     return [];
   }
+}
+
+/** EXITED-NOT-LANDED CONTINUE EXEMPTION (tasks/gap-slot-refill-continue-touches-overlap-redundant-
+ *  exemption): the task ids that are BOTH (a) exited-not-landed per <root>/.quay/worker-outcome.jsonl
+ *  (final_state === "exited-not-landed" — the worker ran to the fan-in floor but did not land, hard
+ *  rule 3b: 跑完没落地 ≠ 完成) AND (b) carrying a residual `task/<id>` worktree (already worktree-
+ *  isolated). Such a CONTINUE candidate's dispatch-level touches-overlap defer is redundant — its
+ *  changes are isolated in its own worktree and landing serialization is already enforced by the
+ *  fan-in lock — so the dispatch gate exempts it. Fail-soft: an unreadable worker-outcome.jsonl or
+ *  worktree list ⇒ empty set (⛔ not a fabricated "everyone is continue-exempt" — the exemption is an
+ *  EXEMPTION, its absence only restores the pre-existing conservative defer). */
+export function computeExitedNotLandedContinueIds(root) {
+  let exitedIds = new Set();
+  try {
+    const text = fs.readFileSync(path.join(root, ".quay", "worker-outcome.jsonl"), "utf8");
+    for (const line of text.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      let rec;
+      try { rec = JSON.parse(t); } catch { continue; }
+      if (rec && rec.final_state === "exited-not-landed" && typeof rec.task === "string" && rec.task) {
+        exitedIds.add(rec.task);
+      }
+    }
+  } catch {
+    return new Set();
+  }
+  if (exitedIds.size === 0) return new Set();
+  // Residual-worktree half: only a task whose `task/<id>` worktree is still open is a CONTINUE
+  // candidate (a fresh task has no worktree — its changes would land straight on the shared checkout,
+  // so the conservative defer must stay).
+  const worktreeIds = new Set();
+  for (const wt of listWorktrees(root)) {
+    const id = taskIdFromBranch(wt.branch);
+    if (id) worktreeIds.add(id);
+  }
+  const out = new Set();
+  for (const id of exitedIds) if (worktreeIds.has(id)) out.add(id);
+  return out;
 }
 
 /** Per-task current-round ff-failure count from the retry ledger (gap-ff-starvation-no-dynamic-cap-
@@ -456,14 +502,22 @@ function depsReadyFor(task, metaById) {
 }
 
 /** Per-task dispatch metadata (id → { status, role }), for the deps-ready filter and the compound
- *  aggregation exemption. ONE pass over the store (no parallel scan). */
-function buildTaskMetaById(tasksDir) {
+ *  aggregation exemption. ONE pass over the store (no parallel scan). When `taskReadRef` names a
+ *  git ref, the task files are read from THAT ref (the canonical develop store — tasks/gap-dispatch-
+ *  reads-stale-main-checkout-task-status) in ONE batched `git cat-file --batch` process, with a
+ *  working-tree fallback for tasks not yet on the ref (never a positive from an unavailable source). */
+function buildTaskMetaById(tasksDir, root, taskReadRef) {
   const metaById = new Map();
   if (!fs.existsSync(tasksDir)) return metaById;
-  for (const f of fs.readdirSync(tasksDir)) {
-    if (!f.endsWith(".md")) continue;
+  const fileNames = fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
+  const refTasks = taskReadRef
+    ? readTaskFilesAtRefBatch(root, taskReadRef, fileNames.map((f) => f.replace(/\.md$/, "")))
+    : null;
+  for (const f of fileNames) {
     const id = f.replace(/\.md$/, "");
-    const raw = fs.readFileSync(path.join(tasksDir, f), "utf8");
+    const raw = refTasks
+      ? (refTasks.get(id) ?? fs.readFileSync(path.join(tasksDir, f), "utf8"))
+      : fs.readFileSync(path.join(tasksDir, f), "utf8");
     const task = parseTask(raw);
     metaById.set(id, {
       status: readFrontField(task.frontmatterRaw, "status") || "",
@@ -819,6 +873,15 @@ export function checkTouchesPairInFlight(candidateParsed, inFlightParsed, expand
  *      array models the fan-in worktree the snapshot in-flight set misses). The worktree entries join
  *      the WIDE Consumer-A touches-disjointness set only — never the slot count (a fan-in worktree
  *      occupies files, but has no subagent ⇒ does not occupy a cap slot; the AC5 dual-consumer split).
+ *  @param {string[]} [o.continueExemptIds] OPTIONAL injected exited-not-landed CONTINUE task ids (the
+ *      `computeExitedNotLandedContinueIds` output) — a candidate whose id is in this set SKIPS the
+ *      touches-overlap defer (its changes are worktree-isolated and landing serialization is already
+ *      enforced by the fan-in lock). `undefined` (default) ⇒ the LIVE quantity is computed
+ *      (`computeExitedNotLandedContinueIds(root)`); a real array (including `[]`) ⇒ use exactly that
+ *      set (test seam — a non-git test workspace has no worktree list, so the injected array models
+ *      the continue candidate). ⛔ The exemption skips ONLY the touches-overlap defer (merge-worktree +
+ *      peer arms); every other step-4 gate (deps / not-yet-flipped / landed / self-touch / markers)
+ *      still applies.
  *  @returns {object} { cap, base_cap, effective_cap, arbitration, in_flight_count,
  *      closed_but_live_count, occupied_slots, slots_free, pool, floor, deficit,
  *      dispatchable_disjoint, criterion_met, should_refill, no_refill_reason, recommended,
@@ -830,7 +893,7 @@ export function checkTouchesPairInFlight(candidateParsed, inFlightParsed, expand
  *      exposes-sort-key) is the parallel array of {id, deliveryCritical, suiteBlocking, rank} that
  *      exposes each recommended id's sort axes for AC36 判据②'s mechanical check.
  */
-export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, runningSubagentCount = null, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null, inFlightWorktrees = undefined }) {
+export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, runningSubagentCount = null, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null, inFlightWorktrees = undefined, continueExemptIds = undefined, taskReadRef = "develop" }) {
   // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
   // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
   // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
@@ -861,12 +924,12 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   const ffCounts = computeFfFailureCounts(ffRetryRecords, liveTaskIds);
   const unresolvedEscalationIds = computeUnresolvedEscalationTaskIds(ffEscalationRecords);
   const ffStarvation = computeFfStarvationRelief({ ffCounts, unresolvedEscalationIds });
-  let pool = analyzeTasks({ tasksDir, root, cap: baseCap, floorMult, inFlight, closedButLive });
+  let pool = analyzeTasks({ tasksDir, root, cap: baseCap, floorMult, inFlight, closedButLive, taskReadRef });
   const redWindowActive = pool.suite_blocking ? pool.suite_blocking.window_active : false;
   const effectiveCap = computeArbitratedCap({ baseCap, redWindowActive, redBacklogCap, ffStarvationCap: ffStarvation.narrowedCap });
   const capNarrowed = effectiveCap !== baseCap;
   if (capNarrowed) {
-    pool = analyzeTasks({ tasksDir, root, cap: effectiveCap, floorMult, inFlight, closedButLive });
+    pool = analyzeTasks({ tasksDir, root, cap: effectiveCap, floorMult, inFlight, closedButLive, taskReadRef });
   }
   // AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 人 2026-08-14
   // 12:5xZ): Consumer A (touches-disjointness / dispatchable_disjoint) counts the WIDE un-landed set
@@ -939,7 +1002,7 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // decision, not a per-candidate read. Fail-soft: no merge in flight ⇒ [] (step-4 check 3 is
     // byte-unchanged — the peer arm alone applies, AC4 negative control).
     const mergeSurfaces = computeMergeWorktreeSurfaces(root);
-    const metaById = buildTaskMetaById(tasksDir);
+    const metaById = buildTaskMetaById(tasksDir, root, taskReadRef);
     // Concurrency eligibility must also respect closed-bracket-but-live agents' touches — a closed
     // bracket does NOT free the touches a still-live agent is working on.
     //
@@ -961,6 +1024,15 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       ...existingInFlight.map((t) => ({ id: t.id, touches: parseTouches(t.body) })),
       ...(Array.isArray(worktreeInFlight) ? worktreeInFlight : []).filter((w) => w && w.id && !existingIds.has(w.id)),
     ];
+    // EXITED-NOT-LANDED CONTINUE EXEMPTION (tasks/gap-slot-refill-continue-touches-overlap-redundant-
+    // exemption): the ids of exited-not-landed CONTINUE candidates (residual worktree + worker-outcome
+    // final_state=exited-not-landed) computed ONCE per evaluation — the exemption is a structural
+    // condition of the whole dispatch decision, not a per-candidate read. Injected via the test seam
+    // (`continueExemptIds`) unless live-computed. A continue candidate skips ONLY the touches-overlap
+    // defer below (merge-worktree + peer arms); every other step-4 gate still applies.
+    const continueExempt = continueExemptIds !== undefined
+      ? new Set(continueExemptIds)
+      : computeExitedNotLandedContinueIds(root);
     // NOT-YET-FLIPPED SKIP (gap-slot-refill-repeats-done-eligible-recommendations): ready-pool-check's
     // analyzeTasks already computes the not-yet-flipped exclusion into pool.excluded (reason
     // "not-yet-flipped"). Wire that signal into the candidate path (AC2) — it is disjoint from
@@ -1019,20 +1091,30 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       // a merge surface is deferred with the EXPLICIT merge-worktree reason (AC2: 不再只报 peer), and
       // only merge-clear candidates fall through to the peer arm.
       const parsed = parseTouches(text);
-      const mergeBlock = mergeSurfaceBlock(parsed, mergeSurfaces, expand);
-      if (mergeBlock.blocked) { deferInFlightDc(task, id, `touches-overlap-in-flight (merge-worktree ${mergeBlock.name})`); continue; }
-      let blocked = null;
-      for (const inf of inFlightParsed) {
-        // DIRECTORY-GLOB SELF-FILE EXEMPTION (tasks/gap-directory-level-tasks-touch-global-lock AC1):
-        // the candidate's OWN C8 self-file is excluded from the in-flight overlap when the in-flight
-        // side covers it only via a directory glob (e.g. `tasks/*.md`) — a directory-level declaration
-        // must not lock the whole queue while its holder is in flight. Genuine overlaps (candidate's
-        // other touches / concrete in-flight entries naming the candidate's file) still block
-        // (checkTouchesPairInFlight is fail-closed: it delegates to checkTouchesPair and only relaxes
-        // the exact self-file-only-glob-driven case).
-        if (!checkTouchesPairInFlight(parsed, inf.touches, expand, `tasks/${id}.md`).disjoint) { blocked = inf.id; break; }
+      // EXITED-NOT-LANDED CONTINUE EXEMPTION (tasks/gap-slot-refill-continue-touches-overlap-redundant-
+      // exemption): a continue candidate (residual worktree + exited-not-landed) is ALREADY worktree-
+      // isolated and its landing is serialized by the fan-in lock, so the dispatch-level touches-
+      // overlap defer below (merge-worktree + peer arms) is redundant over-conservatism — the two locks
+      // guard the same thing. Skip it so one fan-in failure no longer becomes a permanent
+      // touches-overlap queue. ⛔ Only the overlap defer is skipped; the not-yet-flipped / landed /
+      // self-touch / marker gates below still apply (a continue candidate with a real defect still
+      // fails them).
+      if (!continueExempt.has(id)) {
+        const mergeBlock = mergeSurfaceBlock(parsed, mergeSurfaces, expand);
+        if (mergeBlock.blocked) { deferInFlightDc(task, id, `touches-overlap-in-flight (merge-worktree ${mergeBlock.name})`); continue; }
+        let blocked = null;
+        for (const inf of inFlightParsed) {
+          // DIRECTORY-GLOB SELF-FILE EXEMPTION (tasks/gap-directory-level-tasks-touch-global-lock AC1):
+          // the candidate's OWN C8 self-file is excluded from the in-flight overlap when the in-flight
+          // side covers it only via a directory glob (e.g. `tasks/*.md`) — a directory-level declaration
+          // must not lock the whole queue while its holder is in flight. Genuine overlaps (candidate's
+          // other touches / concrete in-flight entries naming the candidate's file) still block
+          // (checkTouchesPairInFlight is fail-closed: it delegates to checkTouchesPair and only relaxes
+          // the exact self-file-only-glob-driven case).
+          if (!checkTouchesPairInFlight(parsed, inf.touches, expand, `tasks/${id}.md`).disjoint) { blocked = inf.id; break; }
+        }
+        if (blocked) { deferInFlightDc(task, id, `touches-overlap-in-flight (peer ${blocked})`); continue; }
       }
-      if (blocked) { deferInFlightDc(task, id, `touches-overlap-in-flight (peer ${blocked})`); continue; }
       // step-4 check 4: not-yet-flipped — work already landed (fan-in merged / master-landed), don't
       // re-dispatch a subagent to re-verify it (gap-slot-refill-repeats-done-eligible-recommendations).
       if (isNotYetFlippedSkip({ id, body: text, root, excludedNyfIds })) { defer(id, "not-yet-flipped"); continue; }

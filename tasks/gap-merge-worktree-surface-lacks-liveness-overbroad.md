@@ -2,7 +2,7 @@
 id: gap-merge-worktree-surface-lacks-liveness-overbroad
 title: merge-worktree surface 无 liveness + 面过宽（diffNameOnlyHead 用全 delta）——4
   个零进程卡死 mid-merge worktree 把 28 ready 滤空致 dispatchable_disjoint=0
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -32,20 +32,20 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 4 卡死 worktree（MERGE_HEAD + 3 unmerged + 零进程）+ `dispatchable_disjoint` 0→9 止血证据（本任务 Proposal 已含）
-- [ ] AC2: **merge-surface 加 liveness**——零进程且 commit 陈旧的 mid-merge worktree 不贡献 merge 面（判据与 task-worktree 的 `isDeadInFlightWorktree` 同源，`INFLIGHT_WORKTREE_STALE_MS` 复用）
-- [ ] AC3: **面收窄**——`diffNameOnlyHead` 只返回 unmerged 冲突文件，不再返回 cleanly-merged 全 delta（活 merge worktree 的面 = 真冲突路径）
-- [ ] AC4: **不回归 + 测试**——`--for-task` scoped 门绿；新增测试覆盖「死 mid-merge 不呈面」「活 mid-merge 面 = unmerged 文件」两态
+- [x] AC1: **复现固化**——任务体记录 4 卡死 worktree（MERGE_HEAD + 3 unmerged + 零进程）+ `dispatchable_disjoint` 0→9 止血证据（本任务 Proposal 已含）
+- [x] AC2: **merge-surface 加 liveness**——零进程且 commit 陈旧的 mid-merge worktree 不贡献 merge 面（判据与 task-worktree 的 `isDeadInFlightWorktree` 同源，`INFLIGHT_WORKTREE_STALE_MS` 复用）**Evidence: `resolveMergeWorktreeSurfaces`（纯核，注入 isMerge/conflictFiles/liveness）+ `isDeadMergeWorktree`（同源语义）+ `computeMergeWorktreeSurfaces` wiring（`enumerateProcs`/`cwdUnder` 单次枚举 + `lastCommitMsOfWorktree`）**
+- [x] AC3: **面收窄**——`diffNameOnlyHead` 只返回 unmerged 冲突文件，不再返回 cleanly-merged 全 delta（活 merge worktree 的面 = 真冲突路径）**Evidence: `diffNameOnlyHead` 改名 `unmergedConflictPaths`（`git ls-files -u` 去重）；真实 conflicted-merge fixture（3 unmerged + 1 clean）→ 只返回 3 条 unmerged**
+- [x] AC4: **不回归 + 测试**——`--for-task` scoped 门绿；新增测试覆盖「死 mid-merge 不呈面」「活 mid-merge 面 = unmerged 文件」两态**Evidence: 新增 6 条测试（3 纯核 + 2 真实 git wiring + 1 负控制）覆盖两态；`scripts/test.sh plugin/test/ready-pool-check.test.mjs` 125/125 绿（fail 0, cancelled 0）；`--for-task` scoped 门 + 全量套件绿由 driver fan-in 验证**
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：造一个零进程 mid-merge worktree fixture，`ready-pool-check` 的 `dispatchable_disjoint` 不再被它压到 0（贴输出）
-- [ ] `--for-task` scoped 绿 + 全量套件绿（`fail 0` 且 `cancelled 0`）
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：造一个零进程 mid-merge worktree fixture，`ready-pool-check` 的 `dispatchable_disjoint` 不再被它压到 0（贴输出）**Evidence: 死 mid-merge fixture（unmerged: code/a.md code/b.md + 零活进程 + commit 2020-01-01）→ `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root <root> --cap 5` 输出 `pool: 2`、`dispatchable_disjoint: 2`（非 0）、`pool_big_all_colliding: false`**
+- [ ] `--for-task` scoped 绿 + 全量套件绿（`fail 0` 且 `cancelled 0`）——由 driver fan-in 验证（本 worker 不跑全量 suite）
 
 ## Touches
 
-- plugin/scripts/ready-pool-check.ts（`computeMergeWorktreeSurfaces` 加 liveness + `diffNameOnlyHead` 收窄为 unmerged）
+- plugin/scripts/ready-pool-check.ts（`computeMergeWorktreeSurfaces` 加 liveness + `diffNameOnlyHead` 改名 `unmergedConflictPaths` 收窄为 unmerged）
 - plugin/test/ready-pool-check.test.mjs（AC2/AC3 测试：死/活 mid-merge 两态）
 - tasks/gap-merge-worktree-surface-lacks-liveness-overbroad.md（自身）
 
