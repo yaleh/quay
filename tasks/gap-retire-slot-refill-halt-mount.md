@@ -1,6 +1,7 @@
 ---
 id: gap-retire-slot-refill-halt-mount
-title: 退役 slot-refill.ts 的 .halt 挂载（checkHaltSentinel + should_refill 耦合）与 slot-free-trigger.ts 对它的 import——inner 旧派发环死层，.halt 状态信号由 outer A3 直读保留
+title: 退役 slot-refill.ts 的 .halt 挂载（checkHaltSentinel + should_refill 耦合）与
+  slot-free-trigger.ts 对它的 import——inner 旧派发环死层，.halt 状态信号由 outer A3 直读保留
 status: ready
 labels:
   - gap
@@ -71,6 +72,13 @@ depends_on: []
 - plugin/test/slot-refill.test.mjs
 - plugin/test/slot-refill-heartbeat.test.mjs
 - plugin/test/slot-free-trigger.test.mjs
+- plugin/test/supervisor-preempt.test.mjs
 - plugin/invariant-ownership.md
 - experiments/quay-perpetual-stream/invariant-ownership.md
 - tasks/gap-retire-slot-refill-halt-mount.md
+
+## Needs-Human
+
+**执行 2026-08-29T13:24:03.246Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
