@@ -2,7 +2,7 @@
 id: gap-continue-note-write-inventory-retired
 title: continueConflictResolutionNote 的 derived 指令改「outline 冲突取 develop
   版」（--write-inventory 已退役）
-status: ready
+status: done
 labels:
   - gap
 parent: null
