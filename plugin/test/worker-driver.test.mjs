@@ -100,6 +100,7 @@ import {
   acquireFanInWorkflowLock,
   fanInWorkflowLockFile,
   extractFailureSummary,
+  combinedOutput,
   mirrorMechanicalFanInSuiteState,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
@@ -445,6 +446,32 @@ test("AC1 (gap-scoped-gate-reason-stderr-drops-stdout) — scoped-gate red reaso
   const both = buildCrash + tapFail + "\n" + benignStderr;
   assert.match(extractFailureSummary(both), /Could not resolve/, "AC1: 构建失败签名与 TAP 并存仍保留");
   assert.match(extractFailureSummary(both), /not ok 1 - unrecognized-status-unknown/, "AC1: TAP 失败签名与构建失败并存仍保留");
+});
+
+// ── gap-worker-driver-complete-logging-doc ───────────────────────────────────────────────────────────
+// 机制层防 reason 载体失真再犯：worker-driver 每步完整记录 stdout+stderr（⛔ 不 stderr 优先/丢弃），
+// 单一机件 combinedOutput 供 fail() 与 flip 共用。AC1（能取假，失败必记全）：某步失败时 reason 含
+// stdout 失败签名（⛔ 只含 stderr 良性 preamble ⇒ 假）。
+
+test("AC1 (gap-worker-driver-complete-logging-doc) — combinedOutput 合并 stdout+stderr（⛔ 不 stderr 优先丢弃 stdout）", () => {
+  // 两流皆有签名 ⇒ 都保留（stdout 先、stderr 后）。
+  assert.equal(combinedOutput("stdout-sig", "stderr-sig"), "stdout-sig\nstderr-sig");
+  // stdout 有真失败签名、stderr 恒非空恒良性 ⇒ stdout 签名【不丢】（⛔ 旧 a.stderr||a.stdout 短路会丢它）。
+  const combined = combinedOutput("Could not resolve foo", "(node:1) Warning: benign preamble");
+  assert.match(combined, /Could not resolve/, "stdout 失败签名保留（stderr 良性时不被丢弃）");
+  // 只 stdout / 只 stderr ⇒ 单流保留。
+  assert.equal(combinedOutput("only-stdout", ""), "only-stdout");
+  assert.equal(combinedOutput("", "only-stderr"), "only-stderr");
+  // 两流皆空/全空白 ⇒ 空串（调用方回退 `exit <code>`，⛔ 不伪造）。
+  assert.equal(combinedOutput("", ""), "");
+  assert.equal(combinedOutput("  \n", ""), "");
+});
+
+test("AC1 (gap-worker-driver-complete-logging-doc) — flip 的 git add/commit 失败 reason 用 combinedOutput（⛔ 不再 a.stderr||exit 丢弃 stdout）", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  assert.doesNotMatch(src, /a\.stderr \|\| `exit/, "flip 的 git add/commit 失败 reason 不再 stderr-only");
+  assert.match(src, /combinedOutput\(a\.stdout, a\.stderr\)/, "flip reason 用 combinedOutput 合并 stdout+stderr");
+  assert.match(src, /export function combinedOutput/, "combinedOutput 是单一共享机件（fail() 与 flip 共用）");
 });
 
 test("D7 — mirrorMechanicalFanInSuiteState writes full-suite-state.json (finishedAt == suiteFinishedEpoch, scope=worktree, taskId)", (t) => {
