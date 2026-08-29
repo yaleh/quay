@@ -1,7 +1,7 @@
 ---
 id: gap-live-mechanical-fan-in-inflight-invisible
 title: Live 页机械 fan-in 在飞任务不可见——round 只带 count 不带 task id，三载体在 fan-in 窗口全 miss
-status: done
+status: ready
 labels:
   - gap
   - defect
