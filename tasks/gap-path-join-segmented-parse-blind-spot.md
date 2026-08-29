@@ -1,7 +1,7 @@
 ---
 id: gap-path-join-segmented-parse-blind-spot
 title: path.join 分段拼接解析盲区——24 个文件归属信息以解析器读不出的形式存在，使保底成为常规入口
-status: ready
+status: done
 labels:
   - gap
   - defect
