@@ -2,7 +2,7 @@
 id: gap-suite-bucket-dynamic-truth-drift-detector
 title: 桶归因动态真值 + 漂移检测——fs 访问追踪建 ground truth（抓变量 path.join 等静态盲区），checker 对比静态
   vs 真值报 RED
-status: ready
+status: needs-human
 labels:
   - gap
   - feature

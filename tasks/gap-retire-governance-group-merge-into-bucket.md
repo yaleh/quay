@@ -1,7 +1,7 @@
 ---
 id: gap-retire-governance-group-merge-into-bucket
 title: 退役 @test-group governance 第三套机制——并入 bucket（人裁定「不要在 bucket 和相机制以外再搞一套」），142 文件改标真实相
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
