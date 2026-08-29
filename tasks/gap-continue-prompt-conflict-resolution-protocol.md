@@ -2,7 +2,7 @@
 id: gap-continue-prompt-conflict-resolution-protocol
 title: CONTINUE 轮 prompt 编码 merge 冲突消解协议——derived 文件（outline inventory）重算 + code
   文件语义并集 + git commit --no-edit
-status: ready
+status: done
 labels:
   - gap
 parent: null
