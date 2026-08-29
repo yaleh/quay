@@ -85,6 +85,8 @@ worker/promotion 两个 control-state 活着）。
 - experiments/quay-perpetual-stream/invariant-ownership.md
 - experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh
 - orchestration/fast-mode-tick-core.md
+- orchestration/manager-loop-tick.md
+- orchestration/orchestrator-loop-tick.md
 - orchestration/orchestrator-tick-core.md
 - plugin/invariant-ownership.md
 - plugin/loop/fast-mode-loop-tick.md
