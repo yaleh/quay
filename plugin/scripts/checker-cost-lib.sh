@@ -145,6 +145,16 @@ run_checker() {
     echo "STATIC_CHECK_NOT_EVALUATED: ${_name}" >&2
     return 0
   fi
+  # FAIL-CLOSED MACHINE LINE (gap-scoped-static-check-red-no-fail-machine-line): the parallel wait
+  # (run_checker_parallel_wait) already emits `STATIC_CHECK_FAILED: <name> exit=<rc>` per failing
+  # checker, but the synchronous scoped tier left a RED (1) / usage error (2) with NO machine line —
+  # a fail-closed checker's identity vanished from the carrier (hard rule 3b/4b/9), so worker-driver's
+  # extractFailureSummary fell back to a benign preamble ("copied N file(s)" + a module warning). Emit
+  # the SAME machine line here so a scoped-gate red carries the checker name + exit code. NOT-EVALUATED
+  # (3) already emitted its distinct STATIC_CHECK_NOT_EVALUATED line above; exit 0 emits nothing.
+  if [ "$_rc" -ne 0 ]; then
+    echo "STATIC_CHECK_FAILED: ${_name} exit=${_rc}" >&2
+  fi
   return "$_rc"
 }
 

@@ -1,0 +1,5 @@
+{
+  "_comment": "checker-mechanical-spine-exemptions — historical mechanical-spine violations, SHRINK-ONLY (B1 ratchet, tasks/gap-b1-mechanical-spine-doc-checker). exit[] / json[] name checker basenames grandfathered for that dimension. A NEW violation not listed here red-lights the commit; the list itself can only shrink (vs git HEAD). Measured 2026-08-28: the checker corpus is at ZERO unexempted violations, so both lists start empty.",
+  "exit": [],
+  "json": []
+}
