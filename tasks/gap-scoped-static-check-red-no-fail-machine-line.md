@@ -2,7 +2,7 @@
 id: gap-scoped-static-check-red-no-fail-machine-line
 title: scoped 静态检查 fail-closed 非零退出无 FAIL 行——同步 run_checker 不吐
   STATIC_CHECK_FAILED 机器行（仅并行路径有）
-status: ready
+status: done
 labels:
   - gap
   - defect
