@@ -69,3 +69,9 @@ $ grep -n "pool-quality-judge\|judgment-consumer-check" plugin/scripts/quality-g
 $ grep -c "已随 AC144 退役" orchestration/orchestrator-tick-core.md
 （B15/B17 两条标退役 → driver 承接）
 ```
+
+## Needs-Human
+
+**执行 2026-08-28T19:18:41.205Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

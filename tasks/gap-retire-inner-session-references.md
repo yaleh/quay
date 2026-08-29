@@ -61,5 +61,18 @@ inner 层已由 `*-driver`（worker-driver 等后台常驻进程）取代，不�
 - plugin/scripts/checker-mutation-cases/no-manager-tick-doc-check.sh
 - .quay/profiles.yml
 - plugin/.quay/profiles.yml
-- plugin/test/（topology/delivery-surface/capability-catalog 相关测试，实现方识别具体文件）
+- plugin/test/session-topology.test.mjs（topology 单窗口 outer 测试）
+- plugin/test/verify-delivery-surface.test.mjs（delivery-surface 去 inner 测试）
+- plugin/test/capability-catalog.test.mjs（capability-catalog 去 inner 测试）
+- plugin/test/verify-deliver-coldstart.test.mjs
+- plugin/test/session-bootstrap.test.mjs
+- plugin/test/quay-session.test.mjs
+- plugin/test/inner-session-check.test.mjs
+- plugin/test/l1-delivery-surface-check.test.mjs
 - tasks/gap-retire-inner-session-references.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T17:28:16.643Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

@@ -24,7 +24,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { runMechanicalFanIn, readWorkflowLockHold } from "../scripts/worker-driver.ts";
+import { runMechanicalFanIn, readWorkflowLockHold, acquireFanInWorkflowLock, readTaskStatus } from "../scripts/worker-driver.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { runAsync } from "../scripts/driver-runtime.ts";
 
@@ -61,6 +61,7 @@ function taskBody() {
     "test",
     "## Touches",
     "- docs/feature.md",
+    `- tasks/${TASK}.md`,
     "## Acceptance Criteria",
     "- [x] AC1 landed",
     "## Definition of Done",
@@ -122,6 +123,7 @@ function runHappyPath(opts = {}) {
     suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
     scopedGateCommand: ["true"],
     docCheckCommand: ["true"],
+    archguardCommand: ["true"],
   }).then((r) => ({ r, repo, worktree, base, capture }));
 }
 
@@ -209,15 +211,17 @@ test("suite 红 ⇒ 机械 fan-in red（step=suite），不落地、锁仍 relea
       suiteCommand: ["bash", "-c", "echo failing; exit 3"],
       scopedGateCommand: ["true"],
       docCheckCommand: ["true"],
+      archguardCommand: ["true"],
     });
     assert.equal(r.outcome, "red");
     assert.equal(r.step, "suite");
     // 不落地：task 分支仍在、worktree 仍在（red 不清理）。
     assert.equal(git(repo, "worktree", "list", "--porcelain").stdout.includes(`task/${TASK}`), true, "red path must NOT remove the worktree");
-    // 锁在任一退出路径都 release（finally）⇒ 后续可再 acquire。
-    const re = spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", TASK, "--root", repo, "--run-id", "mf-run-red-2", "--acquire-workflow-lock"], { encoding: "utf8" });
-    assert.equal(re.status, 0, `post-red re-acquire must succeed (lock was released): ${re.stdout}${re.stderr}`);
-    spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", TASK, "--root", repo, "--release-workflow-lock"], { encoding: "utf8" });
+    // 锁在任一退出路径都 release（finally）⇒ release 事件已写（干净 acquire→release 对，ADR-034 holder
+    // 在 driver 关 stdin 写端后写 release 事件）。读事件文件判据（⛔ 非 re-acquire——re-acquire 若锁未释放
+    // 会阻塞在 flock 上把测试挂死）。
+    const lock = readWorkflowLockHold(repo, TASK, runId);
+    assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "red path must release the lock (finally) — clean acquire+release pair in the events file");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
@@ -253,9 +257,76 @@ test("merge develop 冲突 ⇒ 机械 fan-in red（step=merge-develop），锁�
       suiteCommand: ["bash", "-c", "exit 0"],
       scopedGateCommand: ["true"],
       docCheckCommand: ["true"],
+      archguardCommand: ["true"],
     });
     assert.equal(r.outcome, "red");
     assert.equal(r.step, "merge-develop");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── archguard 结构闸（gap-archguard-structural-gate-in-fan-in-driver）：typecheck 后 scoped门 前 ──
+
+test("archguard 结构闸在机械 fan-in 里真跑（seam）——fake 命令执行 + 落地", async () => {
+  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
+  const marker = path.join(base, "archguard-ran.txt");
+  try {
+    const r = await runMechanicalFanIn({
+      task: TASK, worktree, root: repo, runId: "mf-run-archguard", mergeTarget: "develop",
+      forceSuite: true, scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
+      suiteCapture: capture, suiteLogFile: path.join(base, "suite.log"),
+      suiteCommand: ["bash", "-c", "exit 0"],
+      scopedGateCommand: ["true"], docCheckCommand: ["true"],
+      archguardCommand: ["bash", "-c", `echo ran > "${marker}"`],
+    });
+    assert.equal(r.outcome, "landed", `mechanical fan-in must land (step=${r.step} reason=${r.reason})`);
+    assert.equal(fs.existsSync(marker), true, "archguard step must run (fake command wrote its marker)");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("archguard 依赖环 red ⇒ 机械 fan-in red（step=archguard-structure），不落地、锁仍 release", async () => {
+  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
+  const runId = "mf-run-archguard-red";
+  try {
+    const r = await runMechanicalFanIn({
+      task: TASK, worktree, root: repo, runId, mergeTarget: "develop",
+      forceSuite: true, scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
+      suiteCapture: capture, suiteLogFile: path.join(base, "suite.log"),
+      suiteCommand: ["bash", "-c", "exit 0"],
+      scopedGateCommand: ["true"], docCheckCommand: ["true"],
+      archguardCommand: ["bash", "-c", "echo dependency cycle; exit 3"],
+    });
+    assert.equal(r.outcome, "red");
+    assert.equal(r.step, "archguard-structure");
+    assert.equal(git(repo, "worktree", "list", "--porcelain").stdout.includes(`task/${TASK}`), true, "red path must NOT remove the worktree");
+    const lock = readWorkflowLockHold(repo, TASK, runId);
+    assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "red path must release the lock (finally)");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("archguard 结构信号镜像到主检出载体（AC2 机制）——worktree 记录 append 进 root 的 metrics-history.jsonl", async () => {
+  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
+  try {
+    const record = '{"tool":"archguard-runner","verdict":"pass"}';
+    // fake archguard 写一条结构信号记录进 worktree 的 .archguard/metrics-history.jsonl（真实
+    // archguard-runner 会 append 这条）；镜像步骤应把它复制到主检出（root）的同一载体。
+    const fake = ["bash", "-c", `mkdir -p "${worktree}/.archguard"; printf '%s\\n' '${record}' >> "${worktree}/.archguard/metrics-history.jsonl"`];
+    const r = await runMechanicalFanIn({
+      task: TASK, worktree, root: repo, runId: "mf-run-archguard-mirror", mergeTarget: "develop",
+      forceSuite: true, scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
+      suiteCapture: capture, suiteLogFile: path.join(base, "suite.log"),
+      suiteCommand: ["bash", "-c", "exit 0"],
+      scopedGateCommand: ["true"], docCheckCommand: ["true"],
+      archguardCommand: fake,
+    });
+    assert.equal(r.outcome, "landed", `mirror path must land (step=${r.step} reason=${r.reason})`);
+    const mainMetrics = fs.readFileSync(path.join(repo, ".archguard", "metrics-history.jsonl"), "utf8");
+    assert.match(mainMetrics, /archguard-runner/, "root's metrics-history.jsonl must carry the mirrored archguard record");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
@@ -268,13 +339,16 @@ test("merge develop 冲突 ⇒ 机械 fan-in red（step=merge-develop），锁�
 
 // AC1（能取假，结构面）：acquire 步不再传 120_000，改传 Infinity（unbounded）。结构断言是唯一能在
 // 不真等 120s 的前提下取假的判据——排队等待时长本身不是可注入的 seam（120s 是硬编码字面量）。
-test("AC1 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics) — acquire 步 unbounded（Infinity，⛔ 非 120s）；其余步骤仍有限超时", () => {
+test("AC1 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics, ADR-034 修订) — acquire 步无超时：driver 经非分离 holder 持锁（flock -x 无 -w），⛔ 无 --acquire-workflow-lock 分离 holder、⛔ 无 120s 短超时", () => {
   const src = fs.readFileSync(DRIVER_SRC, "utf8");
-  // acquire 步是唯一带 --acquire-workflow-lock 的 mechSh 调用；它必须传 Infinity（unbounded）。
-  const acquire = src.match(/mechSh\(\["bash", ffMerge, "--task", task, "--root", root, "--run-id", runId, "--acquire-workflow-lock"\],\s*([^)]+)\)/);
-  assert.ok(acquire, "acquire-step mechSh call must be present in runMechanicalFanIn");
-  assert.equal(acquire[1].trim(), "Infinity", `acquire step must be unbounded (Infinity), got "${acquire[1].trim()}" (⛔ 120_000 kills a queued waiter)`);
-  assert.doesNotMatch(acquire[0], /120_000/, "acquire step must NOT carry the old 120s timeout");
+  // ADR-034：acquire 不再经 fan-in-ff-merge.sh --acquire-workflow-lock（分离 holder + flag 协议已废除）。
+  // ⛔ 散文注释可合法提及被废除的 flag 名；本断言查【argv 字符串字面量】形态（`--acquire-workflow-lock"`，
+  // 带闭引号）——只有真调用会带闭引号，注释不会。
+  assert.doesNotMatch(src, /--acquire-workflow-lock"/, "no argv carries the --acquire-workflow-lock flag (detached-holder protocol abolished)");
+  assert.match(src, /acquireFanInWorkflowLock/, "runMechanicalFanIn must acquire via the driver-side non-detached holder");
+  // holder 的 flock 无 -w（unbounded）——workflow 锁是正确性锁，排队等待正是它存在的意义（⛔ 无超时）。
+  assert.match(src, /flock -x "\$fd"/, "holder flock must be unbounded (no -w)");
+  assert.doesNotMatch(src, /flock -x -w "\$fd"/, "holder flock must NOT carry a bounded wait");
   // 其余机械步骤仍是有限时长步骤（超时照旧，⛔ 不把「去掉短超时」误扩成「去掉所有超时」）。
   assert.match(src, /mechSh\(\["git", "-C", worktree, "merge", "--no-edit", mergeTarget\], 120_000\)/, "merge-develop step keeps its finite timeout");
   assert.match(src, /mechSh\(\["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget\], 120_000\)/, "typecheck step keeps its finite timeout");
@@ -288,34 +362,34 @@ test("AC2 机制 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics) — 排�
   const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
   const runId = "mf-run-queued";
   const suiteLog = path.join(base, "suite.log");
+  let holderLock = null;
   try {
-    // 持有者（position 1）先 acquire workflow 锁并保持（detached holder，flock 已持，脚本确认后退出）。
-    const holder = spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", HOLDER_TASK, "--root", repo, "--run-id", "holder-run", "--acquire-workflow-lock"], { encoding: "utf8" });
-    assert.equal(holder.status, 0, `holder acquire must succeed: ${holder.stdout}${holder.stderr}`);
+    // 持有者（position 1）先 acquire workflow 锁并保持（driver 经非分离 holder 持锁，ADR-034）。
+    holderLock = await acquireFanInWorkflowLock({ root: repo, task: HOLDER_TASK, runId: "holder-run" });
 
-    // 机械 fan-in（position 2）排队：其 acquire holder 在 flock 上排队，等持有者释放后落地。⛔ 若 acquire
-    // 步仍是 120s 短超时，这里 1.5s 的排队不会触发它（1.5s ≪ 120s）——所以本测试单独不取假，取假靠 AC1
-    // 的结构断言；本测试证明的是机制端到端通（排队→等→落地，不 red at step 1、不 exit null）。
+    // 机械 fan-in（position 2）排队：其 holder 在 flock 上排队，等持有者释放后落地。⛔ 若 acquire 步仍是
+    // 短超时，这里 1.5s 的排队不会触发它（1.5s ≪ 短超时）——本测试单独不取假，取假靠 AC1 的结构断言；
+    // 本测试证明机制端到端通（排队→等→落地，不 red at step 1、不 exit null）。
     const pending = runMechanicalFanIn({
       task: TASK, worktree, root: repo, runId, mergeTarget: "develop", forceSuite: true,
       scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
       suiteCapture: capture, suiteLogFile: suiteLog,
       suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
-      scopedGateCommand: ["true"], docCheckCommand: ["true"],
+      scopedGateCommand: ["true"], docCheckCommand: ["true"], archguardCommand: ["true"],
     });
 
     // 让机械 fan-in 的 acquire 先进入排队（此刻 blocked 在 flock 上，未落地）。
     await new Promise((r) => setTimeout(r, 1500));
 
     // 释放持有者 ⇒ 机械 fan-in 的 holder 获得锁，继续 merge→…→ff 并落地。
-    const rel = spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", HOLDER_TASK, "--root", repo, "--release-workflow-lock"], { encoding: "utf8" });
-    assert.equal(rel.status, 0, `holder release must succeed: ${rel.stdout}${rel.stderr}`);
+    await holderLock.release();
+    holderLock = null;
 
     const r = await pending;
     assert.equal(r.outcome, "landed", `queued mechanical fan-in must land after the holder releases (step=${r.step} reason=${r.reason})`);
   } finally {
-    // 兜底释放持有者（测试中途失败也不留一个永睡的 detached holder 进程）。
-    try { spawnSync("bash", [path.join(SCRIPTS_DIR, "fan-in-ff-merge.sh"), "--task", HOLDER_TASK, "--root", repo, "--release-workflow-lock"], { encoding: "utf8" }); } catch { /* best-effort */ }
+    // 兜底释放持有者（测试中途失败也不留一个永睡的非分离 holder 进程）。
+    if (holderLock) { try { await holderLock.release(); } catch { /* best-effort */ } }
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
@@ -336,4 +410,107 @@ test("短超时负控制 — runAsync 有限超时仍 SIGKILL（⛔ 超时机制
   assert.equal(r.status, null, `SIGKILLed child must have null status, got ${r.status}`);
   assert.ok(r.error && /spawn timeout after 150ms/.test(r.error.message), `finite timeout must SIGKILL with 'spawn timeout', got ${r.error?.message}`);
   assert.ok(elapsed < 4000, `killed well before the 5s sleep would finish (elapsed=${elapsed}ms)`);
+});
+
+// ── gap-fan-in-flip-done-already-done-not-landed ────────────────────────────────────────────────
+// 「先 flip 后 ff」留下的「done 但未落地」不一致中间态（worktree 已翻 done、develop 未含落地提交）
+// 在重跑时收敛：flipTaskDone 读到 `status: done` 先判真落地——已落地 ⇒ skip（不 reset、不重翻）；
+// 未落地 ⇒ reset 到 ready 再 flip。真落地不重翻；正常 ready flip 不变；driver 自主重试不被 flip-done 卡死。
+
+/** 读 `<ref>:tasks/<TASK>.md` 的 status frontmatter（git show；ref 不存在/缺失/读不懂 ⇒ null）。 */
+function readStatusAtRef(repo, ref) {
+  const r = git(repo, "show", `${ref}:tasks/${TASK}.md`);
+  if (r.status !== 0) return null;
+  const m = r.stdout.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!m) return null;
+  const line = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
+  return line ? line.slice("status:".length).trim() : null;
+}
+
+/** 模拟「先 flip 后 ff」的 flip 半程：worktree 任务文件 ready→done + 提交（develop 未动）。 */
+function flipWorktreeToDone(worktree) {
+  const file = path.join(worktree, "tasks", `${TASK}.md`);
+  const text = fs.readFileSync(file, "utf8").replace(/^status: ready$/m, "status: done");
+  fs.writeFileSync(file, text, "utf8");
+  git(worktree, "add", `tasks/${TASK}.md`);
+  git(worktree, "commit", "-q", "-m", "flip done (simulate prior flip)");
+}
+
+/** 一次机械 fan-in 的标准 opts（与 runHappyPath 同形，供 flip-done 收敛/负控制测试复用）。 */
+function mechRun(base, repo, worktree, slotBase, capture, runId) {
+  return runMechanicalFanIn({
+    task: TASK,
+    worktree,
+    root: repo,
+    runId,
+    mergeTarget: "develop",
+    forceSuite: true,
+    scriptsDir: SCRIPTS_DIR,
+    slotBase,
+    slotLib: SLOT_LIB,
+    silenceMs: 5000,
+    suiteCapture: capture,
+    suiteLogFile: path.join(base, "suite.log"),
+    suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
+    scopedGateCommand: ["true"],
+    docCheckCommand: ["true"],
+    // gap-archguard-structural-gate-in-fan-in-driver 给 runMechanicalFanIn 加了 archguard 结构闸
+    // （step 5.5）；本组测试的临时 repo 不是真 packages/quay/src，真实 archguard-runner 会红——fake 成
+    // ["true"] 跳过（与同文件其它测试同形），flip-done 收敛逻辑才是被测对象。
+    archguardCommand: ["true"],
+  });
+}
+
+// AC1 + AC3（能取假）：done-not-landed 重跑收敛 —— 不 red at flip-done，正常落地。AC3 的「driver
+// maxRetries 重试不被卡死」收敛性正是本机制的机械半边：重跑若仍 red flip-done ⇒ 每次 retry 都
+// exited-not-landed ⇒ 达上限 needs-human；本测试断言重跑 landed（⛔ red at flip-done ⇒ 假）。
+test("gap-fan-in-flip-done-already-done-not-landed AC1+AC3 — done-not-landed 重跑收敛（⛔ 不 red at flip-done）", async () => {
+  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
+  try {
+    flipWorktreeToDone(worktree);
+    assert.equal(readTaskStatus(worktree, TASK), "done", "precondition: worktree task file already done (prior flip)");
+    assert.equal(readStatusAtRef(repo, "develop"), "ready", "precondition: develop task file still ready (not landed)");
+
+    const r = await mechRun(base, repo, worktree, slotBase, capture, "mf-run-flipdone-retry");
+    assert.equal(r.outcome, "landed", `done-not-landed re-run must converge (step=${r.step} reason=${r.reason})`);
+    assert.notEqual(r.step, "flip-done", "must NOT red at flip-done (⛔ the pre-fix failure)");
+    assert.equal(readStatusAtRef(repo, "develop"), "done", "develop task file must be done after convergence (the flip truly landed)");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// AC2（能取假）：真落地不重翻 —— status=done 且 develop 已含落地提交的任务重跑 ⇒ 不 reset、不重翻
+// （⛔ 被 reset 到 ready 或重复 flip ⇒ 假）。误 reset+flip 会在 develop 上追加一个新 tip；本测试断言
+// develop ref 不变（无新增提交），直接量取假。
+test("gap-fan-in-flip-done-already-done-not-landed AC2 — 真落地不重翻（⛔ 被 reset 到 ready 或重复 flip）", async () => {
+  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
+  try {
+    flipWorktreeToDone(worktree);
+    // 模拟「已落地但 worktree 残留」：develop ff 到 done-flip 提交（landed），worktree 分支仍在。
+    git(repo, "push", ".", `refs/heads/task/${TASK}:refs/heads/develop`);
+    const developBefore = git(repo, "rev-parse", "develop").stdout.trim();
+    assert.equal(readStatusAtRef(repo, "develop"), "done", "precondition: develop already landed (done)");
+
+    const r = await mechRun(base, repo, worktree, slotBase, capture, "mf-run-flipdone-landed");
+    assert.equal(r.outcome, "landed", `already-landed re-run must land (step=${r.step} reason=${r.reason})`);
+    assert.equal(git(repo, "rev-parse", "develop").stdout.trim(), developBefore, "develop ref must be unchanged — no reset/re-flip commit appended");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// AC4（能取假，负控制）：正常 status: ready 任务的 flip-done 行为不变（⛔ 破坏正常 flip ⇒ 假）。
+// 负控制核心：正常 ready 路径只有一个「翻 done」提交，无任何 done→ready reset 提交。
+test("gap-fan-in-flip-done-already-done-not-landed AC4 — 正常 ready flip 行为不变（负控制，无 reset 提交）", async () => {
+  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
+  try {
+    const r = await mechRun(base, repo, worktree, slotBase, capture, "mf-run-flipdone-ready");
+    assert.equal(r.outcome, "landed", `normal ready flip must land unchanged (step=${r.step} reason=${r.reason})`);
+    assert.equal(readStatusAtRef(repo, "develop"), "done", "normal ready flip lands done");
+    const resetLog = git(repo, "log", "--all", "--oneline", "--grep=done→ready").stdout.trim();
+    assert.equal(resetLog, "", "normal ready flip must NOT produce any done→ready reset commit");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
 });

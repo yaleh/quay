@@ -27,6 +27,7 @@ import {
   checkTouchesResolve,
   checkTaskTouchesResolve,
   checkBenignRuntimeDirty,
+  checkTouchesNarrow,
 } from "../scripts/touches-orthogonality-check.ts";
 import { parseTouchEntriesWithTags } from "../scripts/touches-parser.ts";
 
@@ -437,6 +438,54 @@ test("checkTaskTouchesResolve: no ## Touches section → hasSection false, nothi
   assert.equal(r.hasSection, false);
   assert.equal(r.mustExist, 0);
   assert.equal(r.majorityMissing, false);
+});
+
+// ── checkTouchesNarrow (2026-08-28, gap-touches-breadth-silent-global-dispatch-lock) ─────────────
+test("checkTouchesNarrow: directory-level globs (bare dir path / dir/**) are wide", () => {
+  const body = "## Touches\n\n- plugin/test/\n- plugin/scripts/**\n- tasks/x.md";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, false);
+  assert.ok(r.wideGlobs.includes("plugin/test/"));
+  assert.ok(r.wideGlobs.includes("plugin/scripts/**"));
+});
+
+test("checkTouchesNarrow: overbroad <2-segment glob flagged via isOverbroadDeclaration", () => {
+  const body = "## Touches\n\n- orchestration/**\n- tasks/x.md";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, false);
+  assert.deepEqual(r.wideGlobs, ["orchestration/**"]);
+});
+
+test("checkTouchesNarrow: 2+ segment directory sweep (packages/quay/src/**) is wide", () => {
+  const body = "## Touches\n\n- packages/quay/src/**\n- tasks/x.md";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, false);
+});
+
+test("checkTouchesNarrow: concrete file paths are narrow", () => {
+  const body = "## Touches\n\n- scripts/test.sh\n- plugin/scripts/foo.ts (new)\n- tasks/x.md";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, true);
+  assert.deepEqual(r.wideGlobs, []);
+});
+
+test("checkTouchesNarrow: (new)-tagged directory is exempt (task creates its own area)", () => {
+  const body = "## Touches\n\n- plugin/test/fixtures/fake-suite/ (new)\n- tasks/x.md";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, true);
+});
+
+test("checkTouchesNarrow: a (delete)-tagged directory is still wide", () => {
+  const body = "## Touches\n\n- plugin/old-tree/ (delete)\n- tasks/x.md";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, false);
+});
+
+test("checkTouchesNarrow: missing ## Touches section is not conflated with wide", () => {
+  const body = "## Proposal\nnothing";
+  const r = checkTouchesNarrow(body);
+  assert.equal(r.narrow, true);
+  assert.deepEqual(r.wideGlobs, []);
 });
 
 test("checkTaskTouchesResolve: full task body with (new) tag honored", () => {

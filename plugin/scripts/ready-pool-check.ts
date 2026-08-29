@@ -161,7 +161,7 @@ import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
 // AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（depsSatisfied 谓词同一份实现，
 // ⛔ 不各写一遍「逐个查 status !== done」的循环）。
-import { allDepsDone } from "./driver-filters.ts";
+import { allDepsDone, commitTaskFile, propagateDocBranchToDevelop } from "./driver-filters.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
 // criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
@@ -171,6 +171,7 @@ import { allDepsDone } from "./driver-filters.ts";
 import { recordCheckerCost, getLoad1 } from "./checker-cost.ts";
 import {
   checkTaskTouchesResolve,
+  checkTouchesNarrow,
   findRepoRoot,
   parseTouches,
   checkTouchesPair,
@@ -1587,6 +1588,11 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   const kind = classifyKind(id);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
+  // TOUCHES-WIDTH (2026-08-28, gap-touches-breadth-silent-global-dispatch-lock): a directory-level
+  // `## Touches` glob (`plugin/scripts/**`, `plugin/test/**`) passes the existence-only touchesResolve
+  // but is a silent global dispatch lock while in flight. Gate it AT PROMOTION so the fix-worker
+  // narrows it before it ever enters the pool (overbroad → can't land; dir-glob → locks all peers).
+  const touchesNarrow = checkTouchesNarrow(task.body);
   const depsReady = depsReadyFor(task, allTasks);
   const four = artifactsComplete(task.body);
   const parsed = parseTouches(task.body);
@@ -1646,6 +1652,8 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     kind,
     kindOrder: kindOrder(kind),
     touchesResolve,
+    touchesNarrow: touchesNarrow.narrow,
+    wideTouches: touchesNarrow.wideGlobs,
     depsReady,
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
@@ -1686,7 +1694,10 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // its implementation premise is deleted by a human ruling (gap-send-keys-verified retreat).
     // AC1 (2026-08-13): the compound + self-touch guards are ADDED — slot-refill's step-4 defers now
     // gate promotion, so a task is rejected before ready instead of deferred after (判据1).
-    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
+    // TOUCHES-WIDTH (2026-08-28): the touchesNarrow guard is ADDED — a candidate with a
+    // directory-level `## Touches` glob is never eligible (it would silently lock the whole dispatch
+    // pool while in flight; the fix-worker narrows it before it ever enters ready).
+    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
   };
 }
 
@@ -1786,15 +1797,18 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
   const depsReady = depsReadyFor(task, allTasks);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
+  const touchesNarrow = checkTouchesNarrow(task.body);
   // PROSE-PREREQUISITE GAP (AC3): targeted promotion must NOT advance a task whose prose-declared
   // prereqs have no relation edge — same fail-closed as the bulk path.
   const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
-  const eligible = four.complete && depsReady && touchesResolve && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok;
+  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok;
   const checks = {
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
     depsReady,
     touchesResolve,
+    touchesNarrow: touchesNarrow.narrow,
+    wideTouches: touchesNarrow.wideGlobs,
     prosePrereqGap: prosePrereqGapIds,
     notFixture: true,
     notParked: true,
@@ -2302,19 +2316,6 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
   return { id, ok: true, from: "todo", to: newStatus, deliveryCritical };
 }
 
-/** True when `root` is inside a git work tree (production root = the main checkout). False when git
- *  itself errors (unit-test temp dirs, or a repo-less root) — the commit is then a no-op, not a throw. */
-function isInsideGitWorkTree(root) {
-  try {
-    const out = execFileSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return out.toString().trim() === "true";
-  } catch {
-    return false;
-  }
-}
-
 /** COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a todo→ready status write must be
  *  committed to git IMMEDIATELY — `applyPromotions` is the SINGLE write point shared by the A22 manual
  *  path and the promotion-driver auto path, and a status write left uncommitted makes the main checkout
@@ -2327,40 +2328,18 @@ function isInsideGitWorkTree(root) {
  *  status flip is content-neutral (the hook's doc-class + Touches checks guard authored CONTENT, and
  *  shelling `scripts/test.sh --static-checks-doc` per promotion is slow and could fail on a doc change
  *  another layer left in-flight). Returns true when the commit landed.
+ *  ⛔ 单一真相源：git add/commit 与 propagateDocBranchToDevelop 都复用 driver-filters.ts 的 commitTaskFile
+ *  族（gap-mark-needs-human-commit-after-write 收敛），本函数只剩「组装 message + 落 committed」。
  *  @param {string} root  repo root (tasks/<id>.md lives here)
  *  @param {string} id    task id
  *  @param {string} from  old status (todo)
  *  @param {string} to    new status (ready)
  */
 function commitTaskStatus(root, id, from, to) {
-  if (!isInsideGitWorkTree(root)) return false;
   const rel = path.join("tasks", `${id}.md`);
-  execFileSync("git", ["-C", root, "add", "--", rel]);
-  execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", `tasks: ${id} ${from}→${to}（promotion-driver 机械晋升）`, "--", rel]);
-  propagateDocBranchToDevelop(root);
-  return true;
-}
-
-/**
- * The detach's propagation (gap-fan-in-ff-ref-update-detach-develop): the main checkout sits on the
- * doc-only work branch (main/manager-doc). A promotion flip committed THERE must reach develop so task
- * worktrees (branching from develop) see the new status — otherwise the dispatch reads ready on
- * main/manager-doc while the worktree base (develop) still has the old status, and the fan-in gates
- * misread. Fast-forward push; if develop advanced (non-ff), merge develop first then push. Best-effort:
- * a conflict leaves the flip on the doc branch and the next landing's merge-develop reconciles.
- */
-function propagateDocBranchToDevelop(root) {
-  try {
-    const cur = execFileSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).trim();
-    if (!cur || cur === "develop") return;
-    try {
-      execFileSync("git", ["-C", root, "push", ".", `${cur}:develop`], { stdio: "ignore" });
-    } catch (_) {
-      // Develop advanced past the doc branch — merge it in, then push (fast-forward now).
-      execFileSync("git", ["-C", root, "merge", "develop", "--no-edit"], { stdio: "ignore" });
-      execFileSync("git", ["-C", root, "push", ".", `${cur}:develop`], { stdio: "ignore" });
-    }
-  } catch (_) { /* best-effort — next landing's merge-develop reconciles */ }
+  const committed = commitTaskFile(root, rel, `tasks: ${id} ${from}→${to}（promotion-driver 机械晋升）`);
+  if (committed) propagateDocBranchToDevelop(root);
+  return committed;
 }
 
 /** HEARTBEAT MODE entry: run the same analysis as `analyzeTasks` (all options pass through) and —

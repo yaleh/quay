@@ -17,7 +17,7 @@ checker 的层 1「机械脊柱」目前是 CODIFY-EXISTING（几乎免费）：
 
 ## Plan
 
-写 `checker-mechanical-spine` 契约文档（正本）+ 一个检查器：对 77 个 `.ts` checker（+ 32 `.sh`）逐个跑/静态判 exit 码语义与 `--json` 支持，输出不符者清单；配套 exemption list 棘轮（历史不符者豁免、新增不符者红）。⛔ 层 2 判定契约（复用 driver-result）归 B4，层 3 输入形状归 B5，不并入本任务。
+写 `orchestration/SPEC-checker-mechanical-spine-contract-2026-08-28.md` 契约文档（正本）+ `plugin/scripts/checker-mechanical-spine-check.ts` 检查器 + `plugin/test/checker-mechanical-spine-check.test.mjs` 负控制测试：对 77 个 `.ts` checker（+ 32 `.sh`）逐个跑/静态判 exit 码语义与 `--json` 支持，输出不符者清单；配套 exemption list 棘轮（历史不符者豁免、新增不符者红，名单放 `plugin/scripts/checker-mechanical-spine-exemptions.json`）。⛔ 层 2 判定契约（复用 driver-result）归 B4，层 3 输入形状归 B5，不并入本任务。新建文件按上述命名落地，⛔ 不另取名。
 
 ## Acceptance Criteria
 
@@ -31,6 +31,14 @@ checker 的层 1「机械脊柱」目前是 CODIFY-EXISTING（几乎免费）：
 
 ## Touches
 
-- plugin/scripts/（checker-mechanical-spine 检查器 + 契约文档正本）
-- plugin/test/（检查器负控制测试）
+- plugin/scripts/checker-mechanical-spine-check.ts (new)（检查器：跑 77 .ts + 32 .sh 判 exit/--json 契约）
+- plugin/scripts/checker-mechanical-spine-exemptions.json (new)（exemption list 棘轮）
+- orchestration/SPEC-checker-mechanical-spine-contract-2026-08-28.md (new)（契约文档正本）
+- plugin/test/checker-mechanical-spine-check.test.mjs (new)（负控制测试）
 - tasks/gap-b1-mechanical-spine-doc-checker.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T18:06:33.724Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

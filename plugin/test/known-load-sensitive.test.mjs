@@ -134,7 +134,11 @@ test("AC1 — kindForFile resolves the root causes distinctly (no conflation)", 
   assert.equal(kindForFile(family, "packages/quay-github/test/create.test.mjs"), "child-spawn");
   assert.equal(kindForFile(family, "plugin/test/definitely-not-a-test.test.mjs"), undefined);
   assert.equal(isFamilyMember(family, "plugin/test/runner-grouping-list-groups.test.mjs"), true);
-  assert.equal(isFamilyMember(family, "plugin/test/full-suite-runner.test.mjs"), false);
+  // gap-full-suite-runner-test-poll-timeout-load-flake: full-suite-runner.test.mjs is now a
+  // child-spawn family member (spawns a real node runner + bash fake-suite per test), so its
+  // failure is classified load-sensitive → isolate-rerun, not other-task → defer anti-livelock.
+  assert.equal(kindForFile(family, "plugin/test/full-suite-runner.test.mjs"), "child-spawn");
+  assert.equal(isFamilyMember(family, "plugin/test/full-suite-runner.test.mjs"), true);
 });
 
 test("AC2 — checkNoUnannotatedClaims passes on the real repo (every header claim is annotated)", () => {
@@ -160,7 +164,13 @@ test("Contract invoke — --kind prints the kind for a family member, empty for 
   assert.equal(member.status, 0, member.stdout + member.stderr);
   assert.equal(member.stdout.trim(), "nested-spawn");
 
-  const nonMember = runCli(["--kind", "plugin/test/full-suite-runner.test.mjs"]);
+  // gap-full-suite-runner-test-poll-timeout-load-flake: full-suite-runner.test.mjs is now a
+  // child-spawn member (was the non-member example before its admission).
+  const childSpawn = runCli(["--kind", "plugin/test/full-suite-runner.test.mjs"]);
+  assert.equal(childSpawn.status, 0, childSpawn.stdout + childSpawn.stderr);
+  assert.equal(childSpawn.stdout.trim(), "child-spawn");
+
+  const nonMember = runCli(["--kind", "plugin/test/known-load-sensitive.test.mjs"]);
   assert.equal(nonMember.status, 0, nonMember.stdout + nonMember.stderr);
   assert.equal(nonMember.stdout.trim(), "");
 });
