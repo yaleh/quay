@@ -1024,6 +1024,20 @@ export async function continueStateForTaskAsync(root: string, taskId: string): P
   };
 }
 
+/** 冲突消解协议（gap-continue-prompt-conflict-resolution-protocol）：机械 fan-in 的 merge develop 步
+ *  在 CONTINUE 轮撞冲突时，旧 prompt 只带失败原因、不含消解指令 ⇒ 消冲突靠 worker 自行发挥（运气）。
+ *  本段按文件类型分派消解动作：derived 文件重算（⛔ 不手并计数）、code 文件取语义并集、然后
+ *  `git commit --no-edit` 完成 merge——⛔ 禁止带着 unmerged paths（UU）退出，否则下一轮 fan-in 的
+ *  merge step 再失败。 */
+function continueConflictResolutionNote(): string {
+  return [
+    `CONFLICT RESOLUTION — if the prior mechanical fan-in left the worktree with unmerged paths (UU in \`git status\`), or \`git merge develop\` reports CONFLICT, resolve it BEFORE continuing implementation; ⛔ never exit while unmerged paths remain (the next fan-in merge step would fail again).`,
+    `(1) derived files (docs/proposals/quay-product-outline.md §6 DELIVERY-INVENTORY counts — mechanically derived): apply your own change, then re-run \`node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --write-inventory\` to recompute the counts; ⛔ do NOT hand-merge the counts.`,
+    `(2) code files (e.g. worker-driver.ts): read both sides of the diff and take the semantic union of the two changes (keep both changes where they do not conflict).`,
+    `(3) \`git add <resolved files>\` then \`git commit --no-edit\` to complete the merge.`,
+  ].join(" ");
+}
+
 /** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
  *  状态（分支提交 / AC 勾选 / 失败原因）供 worker 从保留 worktree 继续。⛔ 不含 "create an isolated
  *  git worktree"（AC1 取假判据——旧 prompt 逐字说 create 是撞死根因）。
@@ -1044,6 +1058,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `(it would fail: the path/branch already exists). Prior round state: branch task/${task} already has`,
     `${commits} commits${head}; Acceptance Criteria currently checked ${ac};`,
     `the last round exited-not-landed because: ${reason}.`,
+    `${continueConflictResolutionNote()}`,
     `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch),`,

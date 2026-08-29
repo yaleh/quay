@@ -309,6 +309,7 @@ declare -A QUESTION=(
   [runner-tree-state.ts]="What is the tested checkout's tree state at round start — readVerifiedCommit (the tested commit) + readTreeState/TreeState (dirty flag + tested-content tree hash) + contentHash/AssertionSurfaceSnapshot/snapshotAssertionSurface (the assertion-surface mid-round-edit snapshot) — the tree-state family, extracted from full-suite-runner.ts into a HUB file (harness-critical, gap-ac128-hub-split-harness-concerns)?"
   [select-tests-for-touches.ts]="Which tests should run for this task's ## Touches?"
   [self-report-vocab-audit.ts]="Do the inner's recent self-reports avoid batch-style vocabulary (reanchor convergence)?"
+  [semantic-face-dispatch-record.ts]="Does each semantic-face duty the manager performs (task-authoring / requirements-analysis / escalation-judgment / learning / ac65-quickfix / b16c-conflict-intent / b18-stop-loss / cross-layer-correction) carry a queryable dispatch record — and does the writer fail closed on a missing/invalid duty kind or a thin reason (AC145 AC2, same form as A16b dispatch-record)?"
   [semantic-observer-judge.ts]="Is the inner/outer layer semantically stopped and awaiting an external action — reading FREE TEXT (heartbeat reason + tick report transcript), not just structured fields — outputting {stopped, awaiting, needs, contradictsStructured, confidence}, where contradictsStructured names the failure (structured says blocked=[], free text says 'dispatch stopped, awaiting outer /clear')?"
   [red-on-omission-audit.ts]="Is every solidified behavior able to point at a reading that turns RED when it is NOT done (AC41 判据 3) — the registry lists each behavior → redReading and mechanically verifies the reading is declared in the workspace; missing readings are listed 未固化 (uncov>0 ⇒ exit 1), with a15_ruling5 / scope_worktree_gate / ruling5_status as invariants?"
   [self-report-vocab-check.ts]="Has the inner layer's self-reported vocabulary drifted from the shipped semantics (reanchor convergence)?"
@@ -406,6 +407,7 @@ declare -A QUESTION=(
   [dual-source-check.ts]="Is every driverized responsibility (todo→ready 晋升 / ready→实现 派发 / 观测-账本-收尾) served by exactly ONE live executor — the driver file exists AND the former session/manual path is documented as retired (the AC135/AC141/AC143 退役 annotation present), so no two-executors-for-one-job path can exist (AC149-3 无双真相源)?"
   [land-capacity-monitor.ts]="What is the develop land rate (fan-in merge commits per hour) in a pre-stop vs post-stop window, and is the post-stop rate ZERO while pre-stop was non-zero (AC149-2 归零 ⇒ 回滚) — a measurement that reports a ratio for a human to judge a cliff, never a hardcoded X% threshold (硬规则④推论一)?"
   [session-retirement-check.ts]="Has each retired session's (outer/inner) execution-core doc been marked retired (删除线 + 指针 + 边界条件 banner) with no stale live claim (并行对照期 / 每轮必跑) left un-retired (AC149-1 真停 — the B9 drift shape)?"
+  [outer-retirement-precondition-check.ts]="Before retiring the outer layer, does every checker the outer execution core (orchestrator-tick-core.md) directly references — the plugin/scripts/*-check.{ts,sh} set — have a surviving call surface (static-gate registry, or an external executable carrier referencing it at a code position, transitive closure), so a checker referenced ONLY by the retiring layer is flagged unless its file carries the explicit RETIRED-WITH-RETIRING-LAYER disposition (SPEC §2.3b B0, gap-b0-retirement-precondition-checker-call-surface)?"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
@@ -697,11 +699,13 @@ declare -A CADENCE=(
   [obligation-discharge-agent.ts]="按需"
   [obligation-ledger-check.ts]="每轮"
   [obligation-ledger.ts]="每轮"
+  [semantic-face-dispatch-record.ts]="按需"
   [semantic-observer-judge.ts]="按需"
   [red-on-omission-audit.ts]="每轮"
   [workflows-dual-copy-drift-check.ts]="每轮"
   [promotion-driver.ts]="按需"
   [outer-driver.ts]="按需"
+  [outer-retirement-precondition-check.ts]="每轮"
 
   [dual-source-check.ts]="按需"
   [land-capacity-monitor.ts]="按需"
@@ -997,11 +1001,13 @@ declare -A INVALIDATION=(
   [obligation-discharge-agent.ts]="失效前提：义务裁决仍由 discharge/defer agent 判定；若改为纯机械判定或取消义务裁决，本条退休"
   [obligation-ledger-check.ts]="失效前提：义务账本仍由 obligation-ledger.ts 派生；若派生并入他处或账本文件删除，本条退休"
   [obligation-ledger.ts]="失效前提：轮次仍产生义务账本；若义务跟踪改为别处，本条退休"
+  [semantic-face-dispatch-record.ts]="失效前提：AC145 八类语义职责仍由 manager 派后台 subagent 执行（driver 读不出因果故事这一前提仍成立）且每类职责须留可查记录；若语义职责被 driver 承接或职责清单增减（SEMANTIC_DUTY_KINDS 需同步），本条退休或需改 enum"
   [semantic-observer-judge.ts]="失效前提：inner/outer 状态仍以自由文本（心跳 reason + tick 报告）承载；若观测面改为纯结构化 schema 且无自由文本，本条退休"
   [red-on-omission-audit.ts]="失效前提：执行核仍以 tick-core 文档固化行为；若行为固化面迁出 tick-core/plugin-scripts 文件系统，本条退休"
   [workflows-dual-copy-drift-check.ts]="失效前提：workflow 双副本结构仍存在（.claude/workflows/ 与 plugin/workflows/ 各有一份同一文件）；若双副本结构取消（同一文件只在一处），本条退休"
   [promotion-driver.ts]="失效前提：todo→ready 晋升仍经 ready-pool-check --apply 全池判定；若晋升并入别处（如 outer tick 内联）或 ready-pool-check 全池模式退役，本条退休"
   [outer-driver.ts]="失效前提：outer 会话的纯机械 A/B 段仍需一个常驻机械进程承接（读数/收尾/自查），且例程型 driver（Layer 0+1b）仍是其承载；若 outer 会话退役后这些段也随会话消失（不再需要机械承接）或例程型承载迁出（如并入 manager 会话），本条退休"
+  [outer-retirement-precondition-check.ts]="失效前提：outer 执行核（orchestrator-tick-core.md）仍是退役前 checker 调用面的枚举正本，且 static-gate 注册表（runner-static-gate.ts）仍是「留存调用面」的判定来源之一；若执行核退役后本前置随之退役（其使命就是退役那一步的前置），或 checker 留存调用面的判定改由别的正本承载，本检查退休"
 
   [dual-source-check.ts]="失效前提：职责→driver 的退役仍以文档标注为唯一真相源；若退役改为机制强制（cron 删除即无锚），本条按 ④ 失效"
   [land-capacity-monitor.ts]="失效前提：land 仍以 develop 上的 fan-in 合并提交为载体（git log develop）；若 land 载体改换（产品化后 fan-in 写结构化记录而非 commit），本条失效"
@@ -1297,11 +1303,13 @@ declare -A LAST_REAFFIRMED=(
   [obligation-discharge-agent.ts]="2026-08-10"
   [obligation-ledger-check.ts]="2026-08-10"
   [obligation-ledger.ts]="2026-08-10"
+  [semantic-face-dispatch-record.ts]="2026-08-28"
   [semantic-observer-judge.ts]="2026-08-10"
   [red-on-omission-audit.ts]="2026-08-10"
   [workflows-dual-copy-drift-check.ts]="2026-08-14"
   [promotion-driver.ts]="2026-08-22"
   [outer-driver.ts]="2026-08-26"
+  [outer-retirement-precondition-check.ts]="2026-08-28"
 
   [dual-source-check.ts]="2026-08-28"
   [land-capacity-monitor.ts]="2026-08-28"
@@ -1597,6 +1605,7 @@ declare -A MATCHING=(
   [obligation-discharge-agent.ts]="enumerative"
   [obligation-ledger-check.ts]="enumerative"
   [obligation-ledger.ts]="enumerative"
+  [semantic-face-dispatch-record.ts]="enumerative"
   [semantic-observer-judge.ts]="keyword"
   [red-on-omission-audit.ts]="keyword"
   [workflows-dual-copy-drift-check.ts]="enumerative"
@@ -1605,6 +1614,7 @@ declare -A MATCHING=(
   [dual-source-check.ts]="enumerative"
   [land-capacity-monitor.ts]="n/a"
   [session-retirement-check.ts]="position"
+  [outer-retirement-precondition-check.ts]="enumerative"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1689,6 +1699,7 @@ declare -A CONSUMER=(
   [release-task.sh]="谁按：认领机在任务完成后按；条件=要释放任务/分支认领"
   [select-static-checks-for-touches.ts]="谁按：test.sh scoped tier 按；条件=scoped run 要为变更选静态检查"
   [select-tests-for-touches.ts]="谁按：test.sh scoped tier 按；条件=scoped run 要为 Touches 选测试"
+  [semantic-face-dispatch-record.ts]="谁按：manager 在派语义面 subagent（任务撰写/需求分析/升级判断/学习/AC65快修/B16-C/B18/跨层纠错）时按；条件=每类语义职责须留可查派发记录（AC145 AC2）"
   [semantic-observer-judge.ts]="谁按：semantic observer 判定调用方按；条件=要判内/外层是否语义停止"
   [send-to-session.ts]="谁按：owner / 外层在需要从非 Claude 进程给目标会话投递消息时按；条件=跨进程投递（--pid peer-token 或 --token childToken），或 --self 自检"
   [spec-declaration-point-check.ts]="谁按：run_static_checks 每轮自动按（code-class gate）；条件=要判定新增 orchestration/SPEC-*.md 是否漏了任一 SPEC 声明点（manager SKILL 索引 / init SKILL reference-doc / 任何第三个 grep 派生的声明点）"
@@ -1710,6 +1721,7 @@ declare -A CONSUMER=(
   [dual-source-check.ts]="谁按：manager 在 AC149-3 无双真相源判定时按；条件=要判定任一职责是否同时有 driver 路径与人工/会话路径且都在用"
   [land-capacity-monitor.ts]="谁按：manager 在 AC149-2 产能判定时按；条件=停会话后连续 ≥24h 要判定任务是否持续 land 且速率未归零/断崖"
   [session-retirement-check.ts]="谁按：manager 在 AC149-1 真停判定时按；条件=要判定 outer/inner 会话的 cron 锚/tick-log/执行核文档是否按同一套写法标退役"
+  [outer-retirement-precondition-check.ts]="谁按：run_static_checks 每轮自动按（runner-static-gate.ts @static-tier full，全量套件 code-class gate）；条件=退役 outer 前必须跑（前置检查是退役的必须步骤，SPEC §2.3b B0）——全量套件接线保证不靠会话意志"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the
