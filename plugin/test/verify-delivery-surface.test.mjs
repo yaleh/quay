@@ -426,9 +426,9 @@ test("AC5 — the five historical drift scripts exist and --inventory computes t
   // The 5 prior drift instances each added a plugin/scripts file without regenerating the outline §6
   // snapshot (halt-check/spec-goal/accounting-emit/DIR-043/inner-exec-mode). The snapshot is now gone,
   // but these shipped surfaces must stay put (regression guard against a future edit silently dropping
-  // them). --inventory must still compute the current bundle.
+  // them); halt-check.sh was retired 2026-08-29 (gap-retire-halt-file-driver-based) and so dropped from
+  // the shipped-surface guard. --inventory must still compute the current bundle.
   const shipped = [
-    "plugin/scripts/halt-check.sh",
     "plugin/scripts/accounting-emit.ts",
     "plugin/scripts/external-dogfooding-check.ts",
     "plugin/scripts/inner-exec-mode-report.ts",

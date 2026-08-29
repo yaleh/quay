@@ -177,8 +177,9 @@ test("AC1 negative control: a pure-P product test is not attributed M", () => {
 });
 
 test("AC1 negative control: a pure-M mechanism test is not attributed P", () => {
-  // a15-ruling5-counter.test.mjs tests a plugin mechanism only — no packages/src reference.
-  const buckets = bucketSetOf("plugin/test/a15-ruling5-counter.test.mjs", ROOT);
+  // outer-driver.test.mjs tests a plugin mechanism only — no packages/src reference.
+  // (was a15-ruling5-counter.test.mjs — retired 2026-08-29 with gap-retire-halt-file-driver-based.)
+  const buckets = bucketSetOf("plugin/test/outer-driver.test.mjs", ROOT);
   assert.ok(buckets.has("M"));
   assert.ok(!buckets.has("P"), "a M-only file must not gain P from its directory or basename");
 });

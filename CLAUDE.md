@@ -283,13 +283,7 @@ Key cross-cutting facts (require reading several files to see):
   **⛔ 但不要用它回答「有几个任务在干活」——那要配一个活性直接量**（worktree 末次提交时刻 / 该路径下活进程数）。
   **⊢ 同硬规则 4b：worktree 数是代理量，`git log` 时刻与活进程是直接量。**（`isolationMode`/Land 锁等 milestone 级并发隔离旋钮属 RETIRED classic-loop → `orchestration/archive/AC58-retired-clauses.md#R19`；当前两层模式按任务无条件 `git worktree add`，无该旋钮。）
 - **`prepare-milestone.js` worktree-isolation 支持（已随 ADR-022 退役）→ `orchestration/archive/AC58-retired-clauses.md#R20`**（文件已删，机制细节与理由档案见归档）
-- **`.halt` sentinel** — pauses the loop at the next milestone boundary. **Correction (2026-07-27, `gap-halt-sentinel-path-mismatch`):** the real, mechanically-checked location is the **repo root** (`<repo-root>/.halt`, workspace-root-relative — matches `plugin/skills/loop-driver/SKILL.md`'s documented convention and `select-preflight.ts`'s actual `checkHalt()` implementation). A previous version of this file incorrectly documented `experiments/quay-perpetual-stream/.halt`; that path is NOT read by any live code path. **When editing while the loop may run, follow DIR-027 human-steering hygiene: pause via a root-level `.halt`, OR work in a private git worktree off `master` and fast-forward at a clean window** — never race the loop on `master`. Before REMOVING `.halt` to un-pause, run
-  `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh` (fixed to check this same
-  repo-root path at M187) — the mechanical go/no-go for whether `master` is safe to hand back to
-  the loop (clean tree, no mid-flight merge, `master` not checked out in a stray worktree, etc.).
-  **This is a manual, human-invoked check, not CI/loop-wired** (`gap-orphaned-check-scripts-not-
-  wired`, M-DIR119-C-CANARY, 2026-07-27, explicit decision) — nothing runs it for you automatically
-  before an un-halt; run it yourself.
+- **暂停/恢复（driver control-state）**：晋升/执行暂停已迁 driver control-state（`.quay/worker-control.json` / `.quay/promotion-control.json`, `driver-shared.ts` `isHalted`；旧 `.halt` 哨兵的 promotion/execution 角色已退役 2026-08-29, `gap-retire-halt-file-driver-based`——**manager 层跨项目 `.halt` 停泊态观察仍活**，归 `manager-tick-readings.ts`）。**编辑时仍遵循 DIR-027 人导卫生：在私有 worktree off `master` 工作，clean window 快进——不 race the loop on `master`。** `quay driver resume` 前跑 `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh`（manual，非 CI/loop-wired）——git 树安全 go/no-go（clean tree / 无 mid-flight merge / master 无 stray worktree）。
 - **Directives are TASK-CANONICAL** (DIR-028 / "Plan A", the single-source-of-truth principle): a directive is a `label:directive` quay task (`tasks/DIR-NNN.md`) and nothing else — there is no `directives/*.md` file, no projection, no anti-drift check (all retired). Create/steer via the `quay-directive` skill. Milestone candidates are `label:milestone-candidate` tasks; `backlog.md`/`dashboard.md` are **generated views** of the task store, not hand-edited sources.
 - Recurring design principle enforced across this repo (see `docs/proposals/exp5-crystallization-strategy.md`): **single source of truth + executable invariants over prose.** When you find content living in two places (a file + a task copy; a charter copying a task's AC/DoD; a status in a field AND a body line), that is drift — fix the SOURCE (usually a doc/skill/template that generated it), not just the artifact.
 
@@ -329,7 +323,7 @@ Key cross-cutting facts (require reading several files to see):
 
 ## Process
 
-- Development is driven via **background Claude Code workflows at milestone granularity** (→ ADR-009), with a **scheduled milestone e2e incl. browser tests** (Playwright/chrome-devtools) that keeps `L_T` on the real product surface (→ ADR-010). Follow DIR-027 steering hygiene (`.halt` or private worktree; never race the loop on `master`).
+- Development is driven via **background Claude Code workflows at milestone granularity** (→ ADR-009), with a **scheduled milestone e2e incl. browser tests** (Playwright/chrome-devtools) that keeps `L_T` on the real product surface (→ ADR-010). Follow DIR-027 steering hygiene (private worktree; never race the loop on `master`).
 
 ## Split-decision routing policy
 

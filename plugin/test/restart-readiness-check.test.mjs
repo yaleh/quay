@@ -1,7 +1,7 @@
 // @test-group engine
 // restart-readiness-check.test.mjs — gap-no-explicit-blocked-signal-from-inner-layer (AC5): the
-// mechanical un-halt go/no-go must PRINT the inner-layer block signal when one is asserted
-// (「内层在等裁定 ≠ 可以解除 .halt」). Two layers of verification:
+// mechanical resume (quay driver resume) go/no-go must PRINT the inner-layer block signal when one is
+// asserted (「内层在等裁定 ≠ 可以 resume」). Two layers of verification:
 //   (a) source contract — the script reads the block via the CLI (single parser, AC4) and prints
 //       reason + question; and
 //   (b) BEHAVIORAL — run the actual script against a temp workspace (RR_ONLY_BLOCK_CHECK + the
@@ -141,8 +141,8 @@ test("AC5 — restart-readiness-check.sh prints the inner-layer block record via
   assert.match(script, /inner-blocked-signal\.ts/, "readiness check must read via the CLI (single parser, AC4)");
   assert.match(script, /is BLOCKED|BLOCKED/, "readiness check must print the block state");
   assert.match(script, /question/, "the printed record must include the ruling question");
-  // The block must be a HARD FAIL (not informational): un-halting into a blocked inner layer hands
-  // the loop a self-stopping state. The task's own AC5 parenthetical: "内层在等裁定 ≠ 可以解除 .halt".
+  // The block must be a HARD FAIL (not informational): resuming into a blocked inner layer hands
+  // the loop a self-stopping state. The task's own AC5 parenthetical: "内层在等裁定 ≠ 可以 resume".
   assert.match(script, /bad "inner layer is BLOCKED/, "a present block must trip the hard-fail path");
   assert.match(script, /ok "no inner-layer block signal/, "an absent block must be reported ok");
 });
