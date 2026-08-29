@@ -1,7 +1,7 @@
 ---
 id: gap-slot-refill-continue-touches-overlap-redundant-exemption
 title: slot-refill 对 exited-not-landed CONTINUE 任务的 touches-overlap 串行冗余（worktree 已隔离 + 落地已由 fan-in 锁串行）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -23,10 +23,10 @@ slot-refill dispatch gate 判 touches-overlap 之前，先判候选是否 exited
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：exited-not-landed 候选（有 worktree）touches 与在飞任务重叠 → 不 defer、进 ready/recommended；（⛔ 仍被 touches-overlap defer ⇒ 假）。
-- [ ] AC2（能取假，回归）：fresh 候选（无 worktree）同重叠 → 仍 defer（原行为不变）。
-- [ ] AC3（能取假，落地仍串行）：两个 overlap 的 CONTINUE 任务落地时 fan-in 锁仍串行（merge develop + ff 不并发）——豁免不破坏锁覆盖。
-- [ ] AC4（能取假，单测）：slot-refill.test.mjs 断言「exited-not-landed 免 overlap defer」+「fresh 仍 defer」，改掉任一 ⇒ 红。
+- [x] AC1（能取假）：exited-not-landed 候选（有 worktree）touches 与在飞任务重叠 → 不 defer、进 ready/recommended；（⛔ 仍被 touches-overlap defer ⇒ 假）。
+- [x] AC2（能取假，回归）：fresh 候选（无 worktree）同重叠 → 仍 defer（原行为不变）。
+- [x] AC3（能取假，落地仍串行）：两个 overlap 的 CONTINUE 任务落地时 fan-in 锁仍串行（merge develop + ff 不并发）——豁免不破坏锁覆盖。
+- [x] AC4（能取假，单测）：slot-refill.test.mjs 断言「exited-not-landed 免 overlap defer」+「fresh 仍 defer」，改掉任一 ⇒ 红。
 
 ## Definition of Done
 

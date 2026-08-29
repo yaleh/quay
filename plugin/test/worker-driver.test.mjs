@@ -115,6 +115,7 @@ import {
   mechSh,
   appendFanInStepTrace,
   runMechanicalFanIn,
+  spawnMechanicalFanIn,
   readWorkflowLockHold,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
@@ -3038,17 +3039,63 @@ await new Promise(() => {});
 
 // ── gap-fan-in-token-gate-version-mismatch-self-lock：每任务新进程（版本错位类级修法）──────────────
 // 机械 fan-in 不再在守护进程 in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载
-// ⇒ 版本错位），改为每任务 spawn 一个 fresh node 进程加载 worktree 的 worker-driver.ts
-// --mechanical-fan-in。锁半（acquireFanInWorkflowLock，ADR-034）与编排半（fan-in-ff-merge.sh）同源。
+// ⇒ 版本错位），改为每任务 spawn 一个 fresh node 进程加载 worker-driver.ts（entry = 主检出 opts.root，
+// ⛔ 非 worktree——gap-fan-in-spawn-stale-worktree-executor-missing-argv）--mechanical-fan-in。
+// 锁半（acquireFanInWorkflowLock，ADR-034）与编排半（fan-in-ff-merge.sh）同源（仍在 worktree）。
 // ⛔ token 闸（L1）已由 fd902a824 重定范围到 P2 的 TS 模块 ff 入口，本任务不再实现 token 闸。
 
-test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程：finishAsync 调 spawnMechanicalFanIn 加载 worktree 代码（⛔ 不再 in-process）", () => {
+test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程：finishAsync 调 spawnMechanicalFanIn 加载当前代码（⛔ 不再 in-process）", () => {
   const src = fs.readFileSync(DRIVER, "utf8");
   assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "finishAsync spawns a fresh mechanical fan-in process (⛔ in-process runMechanicalFanIn)");
-  assert.match(src, /const entry = path\.join\(opts\.worktree, "plugin", "scripts", "worker-driver\.ts"\)/, "spawnMechanicalFanIn loads the WORKTREE's worker-driver.ts (current code, ⛔ 主检出旧代码)");
-  assert.match(src, /process\.execPath, "--experimental-strip-types", entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node --experimental-strip-types <worktree>/worker-driver.ts --mechanical-fan-in");
+  assert.match(src, /const entry = path\.join\(opts\.root, "plugin", "scripts", "worker-driver\.ts"\)/, "spawnMechanicalFanIn loads the ROOT checkout's worker-driver.ts (⛔ worktree：stale worktree 缺新 argv ⇒ unknown argument)");
+  assert.match(src, /process\.execPath, "--experimental-strip-types", entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node --experimental-strip-types <root>/worker-driver.ts --mechanical-fan-in");
   assert.match(src, /if \(mechanicalFanIn\) \{\s*\n\s*const task = tasks\[0\]/, "--mechanical-fan-in mode exists in main()");
   assert.match(src, /worktree: mechWorktree,/, "--mechanical-fan-in mode passes the worktree to runMechanicalFanIn");
+});
+
+// ── gap-fan-in-spawn-stale-worktree-executor-missing-argv：执行器 entry 用主检出（⛔ worktree）────
+// fresh-process fan-in spawn 用 worktree 的 worker-driver.ts 当执行器时，stale worktree（未 merge
+// develop）的旧 worker-driver.ts 缺新 argv（--mechanical-fan-in）⇒ fresh 进程报 unknown argument ⇒
+// 无 JSON 输出 ⇒ parse-mechanical-fan-in red。修法：entry = opts.root/plugin/scripts/worker-driver.ts
+// （与 driver 同版），worktree 只提供任务 delta、不提供执行器代码。AC2 负控制：root entry（有 argv）
+// 与 stale worktree entry（无 argv）两个 stub——entry 若指回 worktree 则 spawn 加载 stale stub ⇒
+// unknown argument ⇒ red（本测试断言 outcome=landed，改回即红）。
+
+test("AC2 (gap-fan-in-spawn-stale-worktree-executor-missing-argv) — stale worktree 缺 --mechanical-fan-in argv 仍 spawn 成功（entry=root，⛔ 改回 opts.worktree ⇒ unknown argument ⇒ parse-mechanical-fan-in red）", async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "stale-exec-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const root = path.join(base, "root");
+  const worktree = path.join(base, "wt");
+
+  // root 的 worker-driver.ts = 当前版（有 --mechanical-fan-in argv）——最小自足 stub（无 import），
+  // 命中 --mechanical-fan-in 即打一行 JSON result 退出。模拟「主检出当前版」。
+  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plugin", "scripts", "worker-driver.ts"), [
+    "// current worker-driver.ts (root entry): has --mechanical-fan-in argv",
+    "const argv = process.argv.slice(2);",
+    'if (argv.includes("--mechanical-fan-in")) {',
+    '  process.stdout.write(JSON.stringify({ outcome: "landed", step: null, reason: null, verdict: null }) + "\\n");',
+    "  process.exit(0);",
+    "}",
+    'const flag = argv.find((x) => x.startsWith("--"));',
+    'console.error("worker-driver: unknown argument: " + (flag ?? ""));',
+    "process.exit(2);",
+  ].join("\n"), "utf8");
+
+  // worktree 的 worker-driver.ts = 陈旧版（无 --mechanical-fan-in argv，任何 --* 都 unknown argument）。
+  // 模拟 stale worktree：落后 develop、缺新 argv。
+  fs.mkdirSync(path.join(worktree, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(worktree, "plugin", "scripts", "worker-driver.ts"), [
+    "// STALE worker-driver.ts: no --mechanical-fan-in argv (any --* flag => unknown argument)",
+    "const argv = process.argv.slice(2);",
+    'const flag = argv.find((x) => x.startsWith("--"));',
+    'console.error("worker-driver: unknown argument: " + (flag ?? ""));',
+    "process.exit(2);",
+  ].join("\n"), "utf8");
+
+  const r = await spawnMechanicalFanIn({ task: "gap-stale", worktree, root, runId: "r1" });
+  assert.equal(r.outcome, "landed", "stale worktree must not break spawn — entry=root has --mechanical-fan-in (⛔ 改回 opts.worktree ⇒ unknown argument ⇒ parse-mechanical-fan-in red)");
+  assert.equal(r.step, null, "no failure step when the root entry handles --mechanical-fan-in");
 });
 
 // ── gap-fan-in-subprocess-hang-timeout-recovery ────────────────────────────────────────────────
