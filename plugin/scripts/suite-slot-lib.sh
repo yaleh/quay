@@ -104,23 +104,29 @@ suite_slot_paths() {
 }
 
 # spawn_suite_lock_hold_watchdog — spawn the hold-cap watchdog (gap-suite-lock-starvation-long-
-# validation-hold AC1). Args: <held-fd> <flag-file> <main-pid> <hold-max-s> [timer-cut]. The watchdog
-# runs as a child of the lock-HOLDING process (⛔ not an outside worker-driver kill): it polls the flag
-# file each 1s and (a) exits promptly when the holder releases normally (flag removed), (b) releases the
-# slot immediately if the holder died without releasing (crash-autorelease, ≤1s delay — the inherited FD
-# shares the same open-file-description lock), or (c) after <hold-max-s> seconds of the holder STILL
-# holding, releases the slot + emits a fail-loud `lock_hold_exceeded=1` marker (never silent). Path (c)
-# is the long-validation YIELD and fires ONLY when `timer-cut` is "1" (the default, used by the SUITE
-# lock — its cap is the 5.2h validation run). Pass `timer-cut=0` for the FAN-IN workflow lock
-# (gap-full-suite-lock-hold-watchdog-threshold-shorter-than-fan-in): its hold = merge→suite→ff, which
-# legitimately exceeds any fixed timer, so path (c) must never cut it — dead-holder release (b) is the
-# only guard (a crash closes the flock fd; a hung suite is SIGKILL'd by the runner's silence watchdog,
-# which ends the fan-in ⇒ the lock is released). The cap only yields the SLOT — the long suite keeps
-# running; it accepts the contention risk of a (S+1)-th suite joining rather than serializing the whole
-# repo behind its re-check.
+# validation-hold AC1). Args: <held-fd> <flag-file> <main-pid> <hold-max-s> [timer-cut] [slot-path].
+# The watchdog runs as a child of the lock-HOLDING process (⛔ not an outside worker-driver kill): it
+# polls the flag file each 1s and (a) exits promptly when the holder releases normally (flag removed),
+# (b) releases the slot immediately if the holder died without releasing (crash-autorelease, ≤1s delay —
+# the inherited FD shares the same open-file-description lock), or (c) after <hold-max-s> seconds of the
+# holder STILL holding, releases the slot + emits a fail-loud `lock_hold_exceeded=1` marker (never
+# silent). Path (c) is the long-validation YIELD and fires ONLY when `timer-cut` is "1" (the default,
+# used by the SUITE lock — its cap is the 5.2h validation run). Pass `timer-cut=0` for the FAN-IN
+# workflow lock (gap-full-suite-lock-hold-watchdog-threshold-shorter-than-fan-in): its hold =
+# merge→suite→ff, which legitimately exceeds any fixed timer, so path (c) must never cut it —
+# dead-holder release (b) is the only guard (a crash closes the flock fd; a hung suite is SIGKILL'd by
+# the runner's silence watchdog, which ends the fan-in ⇒ the lock is released). The cap yields the SLOT
+# — the long suite keeps running; it accepts the contention risk of a (S+1)-th suite joining rather
+# than serializing the whole repo behind its re-check.
+# gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock (漏口②): the cap must ALSO yield
+# the LANE, not just the slot — when <slot-path> is given, the watchdog writes `<slot-path>.yielded`
+# (content = <main-pid>) so the joining suite's lane formula counts this still-running-but-slot-less
+# suite in its divisor (no more「只让槽不让 lane」double oversubscription). The marker is removed by
+# full_suite_lock_release on a normal exit; a crash leaves a dead-pid marker that the reader ignores
+# (pid-liveness self-cleanup, no leak).
 # shellcheck disable=SC2317
 spawn_suite_lock_hold_watchdog() {
-  local _fd="$1" _flag="$2" _main_pid="$3" _max_s="$4" _timer_cut="${5:-1}"
+  local _fd="$1" _flag="$2" _main_pid="$3" _max_s="$4" _timer_cut="${5:-1}" _slot_path="${6:-}"
   (
     if [ "${_timer_cut}" != "1" ]; then
       # Dead-holder-only mode (fan-in workflow lock): poll for (a) normal release or (b) crash, but
@@ -142,8 +148,11 @@ spawn_suite_lock_hold_watchdog() {
     if [ -e "${_flag}" ]; then
       flock -u "${_fd}" 2>/dev/null || true
       rm -f "${_flag}"
+      if [ -n "${_slot_path:-}" ]; then
+        printf '%s' "${_main_pid}" > "${_slot_path}.yielded" 2>/dev/null || true
+      fi
       echo "__OVERHEAD__ lock_hold_exceeded=1" >&2
-      echo "suite-lock-hold-watchdog: LOCK-HOLD-EXCEEDED — released full-suite slot after ${_max_s}s (long-validation yield, fail-loud)" >&2
+      echo "suite-lock-hold-watchdog: LOCK-HOLD-EXCEEDED — released full-suite slot + lane after ${_max_s}s (long-validation yield, fail-loud)" >&2
     fi
   ) >/dev/null &  # ⛔ stdout→/dev/null: the watchdog's inherited stdout would otherwise hold the caller's
                   # command-substitution pipe open and block `$(spawn_suite_lock_hold_watchdog …)` for the

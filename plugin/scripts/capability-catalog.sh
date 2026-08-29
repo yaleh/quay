@@ -405,6 +405,9 @@ declare -A QUESTION=(
   [workflows-dual-copy-drift-check.ts]="Are the five dual-copy workflow files (drain-directives / fan-in-execute / run-routines / execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped orchestrator-tick-core.md references them, so the plugin/workflows/ mirror must carry them) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships to installed targets) — a one-sided edit (改正本而落地副本不跟, the A6/fan-in-execute.js class) must go RED, the current byte-identical state GREEN (gap-workflows-dual-copy-drift-unchecked)?"
   [promotion-driver.ts]="Is the todo→ready promotion applied mechanically every round — a resident loop that calls ready-pool-check for the full-pool verdict and lands eligible promotions (zero LLM), and calls the supervisor/driver liveness check each round (gap-resident-driver-stable-carrier-liveness AC2 death-alarm caller), rather than role-will that vanishes when the session or model changes?"
   [outer-driver.ts]="Does the outer's pure-mechanical A/B segments (A1/A6/A9/A10/A18/A21 readings · B1/B2/B6 closing traces · B12/B17 self-audit) get absorbed into a resident routine-type driver — a resident loop that runs the routine table each round and writes structured Facts (verified/not-evaluated/failed) to .quay/outer-round.jsonl, where each routine that cannot read its input reports not-evaluated (⛔ not verified, AC153 Layer 1b form), rather than role-will that vanishes when the outer session or model changes (AC143)? (The former A3 .halt read was retired 2026-08-29 — gap-retire-halt-file-driver-based; the stall read is now A21 liveness_direct.)"
+  [dual-source-check.ts]="Is every driverized responsibility (todo→ready 晋升 / ready→实现 派发 / 观测-账本-收尾) served by exactly ONE live executor — the driver file exists AND the former session/manual path is documented as retired (the AC135/AC141/AC143 退役 annotation present), so no two-executors-for-one-job path can exist (AC149-3 无双真相源)?"
+  [land-capacity-monitor.ts]="What is the develop land rate (fan-in merge commits per hour) in a pre-stop vs post-stop window, and is the post-stop rate ZERO while pre-stop was non-zero (AC149-2 归零 ⇒ 回滚) — a measurement that reports a ratio for a human to judge a cliff, never a hardcoded X% threshold (硬规则④推论一)?"
+  [session-retirement-check.ts]="Has each retired session's (outer/inner) execution-core doc been marked retired (删除线 + 指针 + 边界条件 banner) with no stale live claim (并行对照期 / 每轮必跑) left un-retired (AC149-1 真停 — the B9 drift shape)?"
   [outer-retirement-precondition-check.ts]="Before retiring the outer layer, does every checker the outer execution core (orchestrator-tick-core.md) directly references — the plugin/scripts/*-check.{ts,sh} set — have a surviving call surface (static-gate registry, or an external executable carrier referencing it at a code position, transitive closure), so a checker referenced ONLY by the retiring layer is flagged unless its file carries the explicit RETIRED-WITH-RETIRING-LAYER disposition (SPEC §2.3b B0, gap-b0-retirement-precondition-checker-call-surface)?"
   [write-json-atomic.ts]="Is every state file write atomic — a single writeJsonAtomic (tmp + renameSync) so a concurrent reader never observes a torn, half-written JSON, replacing the split of 6 state writers into 2 atomic + 4 non-atomic (tasks/gap-writestate-atomicity-split)?"
 )
@@ -708,6 +711,9 @@ declare -A CADENCE=(
   [outer-retirement-precondition-check.ts]="每轮"
   [write-json-atomic.ts]="按需"
 
+  [dual-source-check.ts]="按需"
+  [land-capacity-monitor.ts]="按需"
+  [session-retirement-check.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
@@ -1009,6 +1015,9 @@ declare -A INVALIDATION=(
   [outer-retirement-precondition-check.ts]="失效前提：outer 执行核（orchestrator-tick-core.md）仍是退役前 checker 调用面的枚举正本，且 static-gate 注册表（runner-static-gate.ts）仍是「留存调用面」的判定来源之一；若执行核退役后本前置随之退役（其使命就是退役那一步的前置），或 checker 留存调用面的判定改由别的正本承载，本检查退休"
   [write-json-atomic.ts]="失效前提：6 处 state 写仍以本模块为唯一原子写实现（driver-shared / inner-blocked-signal / mirror-full-suite-state / red-window-triage / runner-state-write / suite-state-trigger 各自 import writeJsonAtomic）；若 rename(2) 原子性假设失效（如迁到非 POSIX 或跨文件系统 rename）或 state 写载体迁出 plugin/scripts/，本条退休"
 
+  [dual-source-check.ts]="失效前提：职责→driver 的退役仍以文档标注为唯一真相源；若退役改为机制强制（cron 删除即无锚），本条按 ④ 失效"
+  [land-capacity-monitor.ts]="失效前提：land 仍以 develop 上的 fan-in 合并提交为载体（git log develop）；若 land 载体改换（产品化后 fan-in 写结构化记录而非 commit），本条失效"
+  [session-retirement-check.ts]="失效前提：会话退役仍以文档标注为唯一真相源；若退役改为机制强制（cron 删除即无锚），本条按 ④ 失效"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
@@ -1310,6 +1319,9 @@ declare -A LAST_REAFFIRMED=(
   [outer-retirement-precondition-check.ts]="2026-08-28"
   [write-json-atomic.ts]="2026-08-28"
 
+  [dual-source-check.ts]="2026-08-28"
+  [land-capacity-monitor.ts]="2026-08-28"
+  [session-retirement-check.ts]="2026-08-28"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
@@ -1608,6 +1620,9 @@ declare -A MATCHING=(
   [workflows-dual-copy-drift-check.ts]="enumerative"
   [promotion-driver.ts]="n/a"
   [outer-driver.ts]="n/a"
+  [dual-source-check.ts]="enumerative"
+  [land-capacity-monitor.ts]="n/a"
+  [session-retirement-check.ts]="position"
   [outer-retirement-precondition-check.ts]="enumerative"
   [write-json-atomic.ts]="n/a"
 )
@@ -1715,6 +1730,9 @@ declare -A CONSUMER=(
   [worker-driver.ts]="谁按：inner 派发器在要驱动单个 claude -p worker 跑完整任务时按（AC115 阶段 1 显式 --task）；条件=任务要被机械驱动跑完 select→worktree→develop→suite→ff 并落盘结构化 outcome 到 .quay/worker-outcome.jsonl"
   [promotion-driver.ts]="谁按：outer 生产部署启动命令按（常驻进程，promotion-driver.ts 头注释「生产部署时由 outer 的启动命令传 --interval 覆盖」——接线为 AC130 后续/独立任务，本任务只做常驻循环这一半）；条件=生产部署启动常驻进程"
   [outer-driver.ts]="谁按：outer 退役过渡期由 outer/manager 的启动命令起常驻进程（quay driver start --kind outer）承接 outer 纯机械 A/B 段，或 fan-in 验证轮跑 --once 冒烟；条件=outer 的机械 A/B 段需要机械承接（读→报→写载体）"
+  [dual-source-check.ts]="谁按：manager 在 AC149-3 无双真相源判定时按；条件=要判定任一职责是否同时有 driver 路径与人工/会话路径且都在用"
+  [land-capacity-monitor.ts]="谁按：manager 在 AC149-2 产能判定时按；条件=停会话后连续 ≥24h 要判定任务是否持续 land 且速率未归零/断崖"
+  [session-retirement-check.ts]="谁按：manager 在 AC149-1 真停判定时按；条件=要判定 outer/inner 会话的 cron 锚/tick-log/执行核文档是否按同一套写法标退役"
   [outer-retirement-precondition-check.ts]="谁按：run_static_checks 每轮自动按（runner-static-gate.ts @static-tier full，全量套件 code-class gate）；条件=退役 outer 前必须跑（前置检查是退役的必须步骤，SPEC §2.3b B0）——全量套件接线保证不靠会话意志"
   [write-json-atomic.ts]="谁按：driver-shared / inner-blocked-signal / mirror-full-suite-state / red-window-triage / runner-state-write / suite-state-trigger / proposal-convergence 在写各自 state 文件时 import；条件=这些 writer 须共用同一份 writeJsonAtomic 实现（函数级复用，⛔ 非复制粘贴）"
 )
@@ -1985,9 +2003,16 @@ VIOLATION_COUNT=$(printf '%s\n' "${VIOLATIONS}" | sed '/^$/d' | wc -l | tr -d ' 
 
 # ── output ──────────────────────────────────────────────────────────────────────────
 if [ "$MODE" = "json" ]; then
-  python3 - "$ROWS" <<'PYEOF'
+  # ROWS is the full tab-separated catalog (one row per script). Pass it via a temp file,
+  # NOT as a single argv — a single argument over Linux's MAX_ARG_STRLEN (~128KB) fails with
+  # "Argument list too long" once the catalog grows past that (observed 2026-08-28 adding
+  # gap-ac149's three scripts). stdin is occupied by the here-doc (the python source), so a
+  # temp file is the transport that keeps both the script and the data unambiguous.
+  _rows_tmp="$(mktemp)"
+  printf '%s\n' "$ROWS" > "$_rows_tmp"
+  python3 - "$_rows_tmp" <<'PYEOF'
 import json, sys
-rows = sys.argv[1].splitlines()
+rows = open(sys.argv[1], encoding="utf-8").read().splitlines()
 entries = []
 for line in rows:
     if not line:
@@ -2013,6 +2038,7 @@ for line in rows:
 json.dump(entries, sys.stdout, ensure_ascii=False, indent=2)
 print()
 PYEOF
+  rm -f "$_rows_tmp"
 elif [ "$MODE" = "entry-surface" ]; then
   if [ "$ENTRY_SURFACE_SUBMODE" = "json" ]; then
     python3 - "${SH_SHIPPED}" "${PUBLIC_SH}" "${INTERNAL_SH}" "${DOC_REFERENCED_SH_COUNT}" "${VIOLATIONS}" <<'PYEOF'
