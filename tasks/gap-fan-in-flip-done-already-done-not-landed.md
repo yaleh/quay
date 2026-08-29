@@ -2,7 +2,7 @@
 id: gap-fan-in-flip-done-already-done-not-landed
 title: "flip-done「已 done 未落地」不收敛——fan-in 在 ff 前翻 done、ff 失败后重跑撞「expected exactly
   1 status: ready」；driver 自主重试路径会卡死到 needs-human"
-status: ready
+status: done
 labels:
   - gap
   - defect
