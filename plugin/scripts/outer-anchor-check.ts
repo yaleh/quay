@@ -1,6 +1,12 @@
 // outer-anchor-check.ts — AC80 三层 prompt 正本 + 不变式检查器（outer + inner 两层的 CronCreate 锚）。
 // (tasks/gap-ac80-prompt-canonical-and-invariant-checker, AC1-AC4 + DoD).
 //
+// ⛔ RETIRED-WITH-RETIRING-LAYER (gap-b0-retirement-precondition-checker-call-surface)：本 checker 只被
+//   outer 执行核（orchestrator-tick-core.md A23，AC81 锚核实）与同属退役层的 outer-cron-registry.ts 引用，
+//   无任何退役层之外的留存调用面。outer/inner 的 CronCreate 锚将随两层退役而消失（SPEC §2.3b），
+//   本检查随之失去对象——【随退役层显式退役】（与 outer-cron-registry.ts 一并），非静默孤儿。
+//   该标记被 outer-retirement-precondition-check.ts 机械识别为「已处置」。
+//
 // 回答的问题（@instrument）：「outer/inner 的 CronCreate 锚 prompt 是否（①）有 git 跟踪正本、
 //   （②）保持纯指针形式（不渗入状态/决策）、且（③）正本内容与真正投进 CronCreate 的活 prompt 逐字节一致？」
 //
