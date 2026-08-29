@@ -102,8 +102,14 @@ import {
   extractFailureSummary,
   combinedOutput,
   mirrorMechanicalFanInSuiteState,
+  mechSh,
+  appendFanInStepTrace,
+  runMechanicalFanIn,
+  readWorkflowLockHold,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
+import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
+import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.ts";
 // gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
 // 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
 import { advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, applyTaskFilters, makeFilterContext } from "../scripts/driver-filters.ts";
@@ -2846,4 +2852,172 @@ await new Promise(() => {});
     try { driver.kill("SIGKILL"); } catch { /* already dead */ }
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── gap-fan-in-subprocess-hang-timeout-recovery ────────────────────────────────────────────────
+// A+B 任务机械 fan-in 持 fan-in-workflow.lock 53min 挂死：mechSh 各步有超时、suite 有 silence
+// watchdog，仍 53min 无恢复 ⇒ 超时/看门狗有盲区（孙进程持管道 ⇒ close 不触发；suite 未起等槽锁）。
+// 修法三件套：AC1 每步 begin/end trace（挂起定位）、AC2 mechSh 进程组 kill + 显式 resolve（超时必达）、
+// AC3 suite 看门狗显式 resolve 不依赖 close（等槽锁零输出也 kill）、AC4 挂起 ⇒ 锁必释放（finally）。
+
+const SLOT_LIB = path.join(REPO_ROOT, "plugin", "scripts", "suite-slot-lib.sh");
+
+/** 建一个 hermetic git repo + task worktree（机械 fan-in 的输入，与 fan-in-driver-mechanical-
+ *  orchestration.test.mjs 的 makeRepoWithWorktree 同形——develop 上 ready 任务、task/<id> 分支上
+ *  doc-only 实现提交，使 merge/anti-drift/delta/typecheck/scoped/doc 直放行）。返回
+ *  { base, repo, worktree, slotBase, capture }。 */
+function makeMechRepo(tag, taskId = "gap-mfh") {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), `mechfanin-${tag}-`));
+  const repo = path.join(base, "repo");
+  const worktree = path.join(base, "wt");
+  fs.mkdirSync(repo, { recursive: true });
+  runGit(repo, ["init", "-q"]);
+  runGit(repo, ["config", "user.name", "mechfanin-test"]);
+  runGit(repo, ["config", "user.email", "mf@example.com"]);
+  runGit(repo, ["branch", "-M", "develop"]);
+  // scripts/test.sh（classify-delta 读 registry；空 registry ⇒ tasks/、docs/ 判 doc-only）。
+  fs.mkdirSync(path.join(repo, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+  fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "tasks", `${taskId}.md`), [
+    "---",
+    `id: ${taskId}`,
+    "title: mechanical fan-in hang test",
+    "status: ready",
+    "labels: []",
+    "extra: {}",
+    "---",
+    "## Proposal",
+    "test",
+    "## Plan",
+    "test",
+    "## Touches",
+    "- docs/feature.md",
+    `- tasks/${taskId}.md`,
+    "## Acceptance Criteria",
+    "- [x] AC1 landed",
+    "## Definition of Done",
+    "- [x] landed",
+    "",
+  ].join("\n"), "utf8");
+  runGit(repo, ["add", "-A"]);
+  runGit(repo, ["commit", "-q", "-m", "base"]);
+  runGit(repo, ["worktree", "add", "-q", worktree, "-b", `task/${taskId}`]);
+  // develop 脱离主检出（gap-fan-in-ff-ref-update-detach-develop）：主检出停 doc-only 工作分支，ff 退化
+  // 纯 ref 更新。
+  runGit(repo, ["checkout", "-q", "-b", "develop-work"]);
+  fs.mkdirSync(path.join(worktree, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(worktree, "docs", "feature.md"), "# feature\n", "utf8");
+  runGit(worktree, ["add", "-A"]);
+  runGit(worktree, ["commit", "-q", "-m", "implement feature"]);
+  const slotBase = path.join(base, "full-suite.lock");
+  const capture = path.join(base, "suite.env");
+  return { base, repo, worktree, slotBase, capture };
+}
+
+/** 一次机械 fan-in 的标准 opts（fake 命令缝，⛔ 不真跑 19+min 套件）。overrides 覆盖 suite/超时等。 */
+function mechOpts(m, runId, overrides = {}) {
+  return {
+    task: "gap-mfh",
+    worktree: m.worktree,
+    root: m.repo,
+    runId,
+    mergeTarget: "develop",
+    forceSuite: true,
+    scriptsDir: path.join(REPO_ROOT, "plugin", "scripts"),
+    slotBase: m.slotBase,
+    slotLib: SLOT_LIB,
+    silenceMs: 500,
+    suiteCapture: m.capture,
+    suiteLogFile: path.join(m.base, "suite.log"),
+    suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
+    scopedGateCommand: ["true"],
+    docCheckCommand: ["true"],
+    archguardCommand: ["true"],
+    ...overrides,
+  };
+}
+
+test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery) — appendFanInStepTrace 写 step-begin/step-end 到 .quay/fan-in-step-trace.jsonl（挂起 = begin 无 end）", (t) => {
+  const root = makeRoot("trace-ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  appendFanInStepTrace(root, "gap-t", "run-1", "merge-develop", "begin");
+  appendFanInStepTrace(root, "gap-t", "run-1", "merge-develop", "end", { ok: true });
+  appendFanInStepTrace(root, "gap-t", "run-1", "typecheck", "begin"); // 模拟挂起：无 end
+  const lines = fs.readFileSync(path.join(root, ".quay", "fan-in-step-trace.jsonl"), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(lines.length, 3, "begin+end+begin = 3 trace lines");
+  assert.equal(lines[0].event, "step-begin");
+  assert.equal(lines[0].step, "merge-develop");
+  assert.equal(lines[1].event, "step-end");
+  assert.equal(lines[1].step, "merge-develop");
+  assert.equal(lines[1].ok, true);
+  assert.equal(lines[2].step, "typecheck");
+  // 挂起定位：typecheck 只有 begin 无 end（⛔ 不可把「无 end」读成「没跑过」，硬规则 3b 可区分）。
+  assert.equal(lines.filter((l) => l.step === "typecheck" && l.event === "step-end").length, 0, "a hung step has begin without end");
+  assert.ok(Number.isInteger(lines[0].epoch) && lines[0].epoch > 0, "epoch is a sortable second-resolution timestamp");
+  assert.equal(lines[0].task, "gap-t");
+  assert.equal(lines[0].runId, "run-1");
+});
+
+test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery) — runMechanicalFanIn 每步都被 begin/end trace 包裹（⛔ 改掉 ⇒ 日志缺失）", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  for (const step of ["merge-develop", "anti-drift", "delta-classify", "typecheck", "archguard-structure", "scoped-gate", "doc-check", "suite", "anti-drift-land", "ac-gate", "flip-done", "ff", "cleanup"]) {
+    assert.ok(src.includes(`trace("${step}", "begin")`), `step ${step} must have a begin trace`);
+    assert.ok(src.includes(`trace("${step}", "end"`), `step ${step} must have an end trace`);
+  }
+});
+
+test("AC2 (gap-fan-in-subprocess-hang-timeout-recovery) — mechSh timeout 后 resolve（⛔ 依赖 close）+ 组 kill 杀孙进程（孙进程持管道不阻塞返回）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mech-ac2-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const pidFile = path.join(tmp, "grandchild.pid");
+  // 直接子进程（bash）spawn 孙进程（node）继承 stdout/stderr 管道并长期存活，bash `wait` 挂起等它。
+  // timeout 到期 ⇒ 组 kill（⛔ 只杀直接子进程会留孙进程持管道/锁泄漏）。
+  const cmd = `node -e 'require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(()=>{},1000)' & wait`;
+  const t0 = Date.now();
+  const r = await mechSh(["bash", "-c", cmd], 1000);
+  assert.ok(Date.now() - t0 < 5000, `mechSh must resolve at timeout (⛔ hang on close), took ${Date.now() - t0}ms`);
+  assert.equal(r.status, null, "SIGKILLed child ⇒ null status");
+  assert.match(r.error?.message ?? "", /spawn timeout after 1000ms/, "timeout must carry a 'spawn timeout' error");
+  // 孙进程被杀（组 kill）：⛔ 旧 runAsync 只杀直接子进程 ⇒ 孙进程存活持管道（本断言取假）。
+  const gp = Number(fs.readFileSync(pidFile, "utf8").trim());
+  await waitFor(() => {
+    try { process.kill(gp, 0); return false; } catch { return true; }
+  }, 5000);
+  assert.ok(true, "grandchild holding the pipe must be killed by the process-group kill");
+});
+
+test("AC3 (gap-fan-in-subprocess-hang-timeout-recovery) — spawnSuiteAndWait 在 suite 卡等槽锁（零输出）时，silence watchdog 有限时间 kill 并返回 hung", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mech-ac3-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const slotBase = path.join(tmp, "full-suite.lock");
+  const slots = suiteLockSlotPaths(slotBase);
+  assert.equal(slots.length, 1, "hermetic slot base defaults to S=1");
+  // 持住唯一槽：后台 flock holder 让 slot-holder 的 flock -n 失败 ⇒ 卡进无界等槽循环（零输出）。
+  const holder = spawn("bash", ["-c", `exec {fd}>"$1"; flock -x "$fd"; sleep 30`, "holder", slots[0]], { stdio: "ignore", detached: true });
+  t.after(() => { try { process.kill(-holder.pid, "SIGKILL"); } catch { /* gone */ } });
+  await waitFor(() => {
+    try { execFileSync("flock", ["-n", slots[0], "true"], { stdio: "ignore" }); return false; } catch { return true; }
+  }, 5000);
+  const t0 = Date.now();
+  const r = await spawnSuiteAndWait({ slotBase, slotLib: SLOT_LIB, suiteCommand: ["bash", "-c", "echo never-run"], logFile: null, silenceMs: 400 });
+  assert.ok(Date.now() - t0 < 5000, `spawnSuiteAndWait must return in finite time (⛔ 53min hang), took ${Date.now() - t0}ms`);
+  assert.equal(r.outcome, "hung", "suite stuck waiting for the slot ⇒ hung (independent value)");
+  assert.equal(r.hungByWatchdog, true);
+});
+
+test("AC4 (gap-fan-in-subprocess-hang-timeout-recovery) — 任一 fan-in 子进程挂起 ⇒ 有限时间 red + 释放 fan-in-workflow.lock（finally 必达）", async (t) => {
+  const m = makeMechRepo("ac4");
+  const runId = "mf-run-hang";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const t0 = Date.now();
+  // suite 挂起（零输出 ⇒ silence watchdog kill → hung → red at suite），⛔ 不落地、锁仍 release。
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { suiteCommand: ["bash", "-c", "sleep 100"], silenceMs: 400 }));
+  assert.ok(Date.now() - t0 < 20000, `mechanical fan-in must fail in finite time (⛔ 53min hang), took ${Date.now() - t0}ms`);
+  assert.equal(r.outcome, "red");
+  assert.equal(r.step, "suite");
+  // 锁在 finally 释放：事件文件里恰一对 acquire→release（⛔ 挂起残留锁阻塞全仓 fan-in）。
+  const lock = readWorkflowLockHold(m.repo, "gap-mfh", runId);
+  assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "hang ⇒ lock released (finally) — clean acquire+release pair");
 });
