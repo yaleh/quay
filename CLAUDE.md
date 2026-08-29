@@ -330,6 +330,7 @@ Key cross-cutting facts (require reading several files to see):
 ## Process
 
 - Development is driven via **background Claude Code workflows at milestone granularity** (→ ADR-009), with a **scheduled milestone e2e incl. browser tests** (Playwright/chrome-devtools) that keeps `L_T` on the real product surface (→ ADR-010). Follow DIR-027 steering hygiene (`.halt` or private worktree; never race the loop on `master`).
+- **后台会话编辑共享检出的正确姿势**：直接 Edit/Write 主检出会被 harness 的 worktree-isolation guard 拦（未 `EnterWorktree` 不可写）。任务体用 `task_write` MCP（Provider ABI 写 `tasks/*.md`）、代码改动进 worktree（`EnterWorktree` 或任务 worktree）。worker（claude -p）不撞 guard 是因 cwd 虽主检出、dispatch prompt 强制 file_path 用 worktree 绝对路径。⛔ 不要 Bash/Python 手搓硬插（2026-08-29 实证：解 worker-driver.ts 冲突时 Python 锚点插入吞 `/**` 留 orphan 注释，靠 worker 修回）。
 
 ## Split-decision routing policy
 
