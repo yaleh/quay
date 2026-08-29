@@ -244,10 +244,10 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   worker kind 独有 `drain`（挡新派发、不杀在飞，写 `.quay/worker-control.json` `halted:true`）。
   **⛔ 已知缺口更新（2026-08-24，`gap-worker-driver-cold-start-inflight-blind` 已 done，读下面两行别读旧结论）**：
   「重启会重复派发存活 worker」这个方向**已修复并被 manager 直接对生产实时状态验证过**（`enumerateColdStartInflight`
-  只读探测，非猜测/非采信自述）——手工 restart **不会**重派仍存活的 worker。**残留的是相反方向**：
-  该函数的观测结果在循环外被 `const` 冻结一次、全生命周期不刷新 ⇒ 一个冷启动 worker **结束后**其 task
-  仍永久假在飞，不可再派（`gap-worker-driver-cold-start-inflight-refresh`，ready，附 §5 协调循环修法，
-  见 `orchestration/SPEC-unified-driver-architecture-2026-08-23.md`）。**手工 restart 后仍建议核对
+  只读探测，非猜测/非采信自述）——手工 restart **不会**重派仍存活的 worker。**相反方向的残留也已修**（冷启动 worker 结束后 task 永久假在飞 → 已修）：`coldInflight` 每趟 pass 在
+  `while` 循环内重扫（`enumerateColdStartInflightAsync`）——worker 退出 / worktree 消失任一生 ⇒ task 即离开
+  排除集、下一轮重新可派（`gap-worker-driver-cold-start-inflight-refresh`，done 2026-08-24）。冷启动孤儿会
+  自动收敛，无需手工救。**手工 restart 后仍建议核对
   一次** `ps aux | grep quay-task-worker`（按 task 名去重）作为习惯性负控制，但不再是必须的救火步骤。
   **manager 对 driver 生命周期（start/stop/restart）持人 2026-08-24 明确授权的常设控制权**（本项目后期
   开发阶段内），无需逐次请示；执行前仍应做上述现场核实（避免过期判断），执行后仍应做负控制确认。
