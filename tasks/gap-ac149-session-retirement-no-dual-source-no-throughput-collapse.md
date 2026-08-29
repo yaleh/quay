@@ -55,7 +55,6 @@ AC149-1/2/3 全勾；outer/inner 真退役、产能不塌、无双真相源；B0
 - plugin/test/land-capacity-monitor.test.mjs (new)
 - plugin/test/dual-source-check.test.mjs (new)
 - plugin/scripts/capability-catalog.sh（三脚本六表登记：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER）
-- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY scripts 计数 296→299，结构性 co-touch）
 - tasks/gap-ac149-session-retirement-no-dual-source-no-throughput-collapse.md（自身）
 
 ## Needs-Human
