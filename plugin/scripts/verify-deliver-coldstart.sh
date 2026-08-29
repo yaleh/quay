@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# @instrument "AC88 三步交付验证机制：① 干净目录全新 .tgz 安装 → ② 项目内 quay-init → ③ 双层(outer+inner)冷启动活性（直接量：git 提交 / /proc cwd / worktree）"
+# @instrument "AC88 三步交付验证机制：① 干净目录全新 .tgz 安装 → ② 项目内 quay-init → ③ 冷启动活性（outer 窗口 + inner 层，直接量：git 提交 / /proc cwd / worktree）"
 # verify-deliver-coldstart.sh — AC88 前置机制 (gap-ac88-verification-mechanism-extend-deliver, 人 2026-08-16 裁定).
 #
 # 目标：把 AC88 的跨主机验证从「装 tgz + 端口 HTTP 探活」的手工一次性形态，升级为【可重复的机制】——
@@ -19,7 +19,7 @@
 #               outer tick doc (orchestration/orchestrator-loop-tick.md) + inner tick doc
 #               (docs/analysis/fast-mode-loop-tick.md) + loop 脚本 (session-liveness.sh) +
 #               .quay/config.yml + 项目本地 runtime (.quay/runtime/bin/quay.js)。
-#   ③ 冷启动 — 双层 (outer+inner) 活性验证，判据是【直接量】(AC2 / CLAUDE.md 硬规则 4b)：
+#   ③ 冷启动 — 活性验证（outer 窗口 + inner 层），判据是【直接量】(AC2 / CLAUDE.md 硬规则 4b)：
 #               · git 提交时间戳     —— loop 产出过提交（外部可核：git 对象）
 #               · /proc/<pid>/cwd   —— 会话进程落在项目内（内核态），【且已通过启动信任弹窗】
 #                                      （复用 pane-state-classify 的 permission-prompt 识别——
@@ -488,7 +488,7 @@ coldstart_drive() {
 
 # ── ③ 执行 ─────────────────────────────────────────────────────────────────────────────
 step3_coldstart() {
-  echo "== ③ two-layer (outer+inner) cold-start liveness (DIRECT measures, AC2) =="
+  echo "== ③ cold-start liveness (outer window + inner layer, DIRECT measures, AC2) =="
   if [ "$COLD_START_DRIVE" = 1 ]; then
     coldstart_drive "$ROOT"
     echo "  waiting ${WAIT}s for the loop to produce direct-measure signals..."
@@ -503,16 +503,16 @@ step3_coldstart() {
   echo "    L2_GIT_COMMIT_AGE_MIN=${L2_GIT_COMMIT_AGE_MIN} (<=${LIVENESS_WINDOW}min and not chore(quay-init) = live signal)"
   echo "    L2_GIT_IS_QUAYINIT_COMMIT=${L2_GIT_IS_QUAYINIT_COMMIT} (1 = the recent commit is quay-init's own auto-commit — excluded)"
   echo "    L2_INNER_WORKTREE_COUNT=${L2_INNER_WORKTREE_COUNT} (>=1 = inner dispatched)"
-  echo "    L2_LAYER_PROCESS_CWD=${L2_LAYER_PROCESS_CWD} (>=2 = outer+inner processes in project)"
+  echo "    L2_LAYER_PROCESS_CWD=${L2_LAYER_PROCESS_CWD} (>=2 = outer-window + inner-layer processes in project)"
   echo "    L2_STARTUP_PROMPT=${L2_STARTUP_PROMPT} (1 = the outer pane is stuck at the startup permission-prompt — proc_ok demoted, hard rule 4b)"
   echo "    L2_DEAD_LOOP_STATE=${L2_DEAD_LOOP_STATE} (shipped L2 criterion, corroboration)"
   if [ "$COLDSTART_LIVE" = "yes" ]; then
-    echo "  COLDSTART_LIVE=yes — two-layer loop verified live by direct measures"
+    echo "  COLDSTART_LIVE=yes — loop verified live (outer window + inner layer) by direct measures"
   else
     echo "  COLDSTART_LIVE=no — cold-start not verified live. This is DATA, not a defect:"
     echo "    · if the cold-start has not been performed yet: perform it per plugin/skills/cold-start/SKILL.md"
     echo "      (or bash ${ROOT}/plugin/scripts/session-bootstrap.sh ${ROOT} outer), then re-run with --verify-only --require-live."
-    echo "    · if it was performed: the direct measures show no live outer+inner — investigate (dead loop)."
+    echo "    · if it was performed: the direct measures show no live outer-window + inner-layer — investigate (dead loop)."
   fi
 }
 
@@ -573,7 +573,7 @@ selfcheck() {
   echo "selfcheck: alive(recent-non-chore-commit) L1_OK=$a1 COLDSTART_LIVE=$a2 (expect 1/yes)"
 
   # control 6 (AC2 负向 —— proc_ok 假阳性回归, gap-verify-deliver-coldstart-l2-proc-ok-false-positive):
-  # 进程存在(>=2)但双层 pane 卡启动信任弹窗（L2_STARTUP_PROMPT=1）⇒ proc_ok 不得单独撑起 ⇒
+  # 进程存在(>=2)但 outer 窗口 pane 卡启动信任弹窗（L2_STARTUP_PROMPT=1）⇒ proc_ok 不得单独撑起 ⇒
   # COLDSTART_LIVE=no。B/C 实测形态：git_recent/wt_recent 均 0，4 个 claude 进程卡 "Quick safety
   # check" 弹窗 6.2h，coldstart_live 曾由 proc_ok 单独撑起（判据被实现违反）。
   L2_LAYER_PROCESS_CWD=2

@@ -3,8 +3,8 @@
 //
 // Tests for plugin/scripts/verify-deliver-coldstart.sh — the repeatable mechanism that upgrades
 // AC88's cross-host verification from "install tgz + serve HTTP probe" to:
-//   ① clean-dir fresh .tgz install → ② project quay-init → ③ two-layer (outer+inner) cold-start
-//   liveness by DIRECT measures (git commit / /proc cwd / worktree, NOT serve HTTP or layer
+//   ① clean-dir fresh .tgz install → ② project quay-init → ③ cold-start liveness
+//   (outer window + inner layer) by DIRECT measures (git commit / /proc cwd / worktree, NOT serve HTTP or layer
 //   heartbeat), with AC5 evidence that the verification self-built the tgz from develop-tip
 //   (commit sha + sha256,达成 = newer than the 2026-08-16 phase switch).
 //
