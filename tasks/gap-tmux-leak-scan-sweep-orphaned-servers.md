@@ -1,7 +1,7 @@
 ---
 id: gap-tmux-leak-scan-sweep-orphaned-servers
 title: tmux-leak-scan 加 --sweep 启动清扫孤立 server（SIGKILL 残留自动治愈）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -21,11 +21,11 @@ SIGKILL（静默看门狗/超时/崩溃）打断 suite 后，`inner-session-chec
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，正）：造一个 `quay-isc-` 前缀孤儿 tmux server + 对应 `/tmp` 目录 → `--sweep` → 断言 server 死（`pgrep` 无命中）且目录删。
-- [ ] AC2（能取假，负控制）：造一个**不在 scope** 的 server（socket 无 `quay-isc-`/`skv-`/`session-liveness-` 等前缀）→ `--sweep` → 断言它**仍存活**（sweep 不越界）。
-- [ ] AC3（能取假，幂等）：连续跑两次 `--sweep`，第二次 no-op、exit 0，不报错不误杀。
-- [ ] AC4（能取假，接线）：`scripts/test.sh` 的 `--buckets` 路径里，`--sweep` 在 `--snapshot` 之前执行（grep 顺序：`--sweep` 行先于 `--snapshot` 行）。
-- [ ] AC5（能取假，单测）：`plugin/test/tmux-leak-scan.test.mjs` 断言 AC1-AC4，改掉任一 ⇒ 测试红。
+- [x] AC1（能取假，正）：造一个 `quay-isc-` 前缀孤儿 tmux server + 对应 `/tmp` 目录 → `--sweep` → 断言 server 死（`pgrep` 无命中）且目录删。
+- [x] AC2（能取假，负控制）：造一个**不在 scope** 的 server（socket 无 `quay-isc-`/`skv-`/`session-liveness-` 等前缀）→ `--sweep` → 断言它**仍存活**（sweep 不越界）。
+- [x] AC3（能取假，幂等）：连续跑两次 `--sweep`，第二次 no-op、exit 0，不报错不误杀。
+- [x] AC4（能取假，接线）：`scripts/test.sh` 的 `--buckets` 路径里，`--sweep` 在 `--snapshot` 之前执行（grep 顺序：`--sweep` 行先于 `--snapshot` 行）。
+- [x] AC5（能取假，单测）：`plugin/test/tmux-leak-scan.test.mjs` 断言 AC1-AC4，改掉任一 ⇒ 测试红。
 
 ## Definition of Done
 
