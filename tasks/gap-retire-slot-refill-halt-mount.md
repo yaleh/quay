@@ -53,16 +53,16 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1（grep 判据）: 全仓 `grep -rn checkHaltSentinel plugin/` 命中 0（定义+调用全移除）；且 `slot-refill.ts`
+- [x] AC1（grep 判据）: 全仓 `grep -rn checkHaltSentinel plugin/` 命中 0（定义+调用全移除）；且 `slot-refill.ts`
   仍 export `isLandedCodeComplete` / `FIXED_DISPATCH_CAP` / `analyzeSlotRefill`（其余消费不破）。
-- [ ] AC2（信号不丢）: `outer-driver.ts` 的 `haltStatusRoutine` 仍直接读 `<root>/.halt`（grep `haltStatusRoutine` +
+- [x] AC2（信号不丢）: `outer-driver.ts` 的 `haltStatusRoutine` 仍直接读 `<root>/.halt`（grep `haltStatusRoutine` +
   `.halt` 均命中）——`.halt` 状态信号不因本任务消失。
-- [ ] AC3（测试绿）: `plugin/test/slot-refill.test.mjs` + `slot-refill-heartbeat.test.mjs` +
+- [x] AC3（测试绿）: `plugin/test/slot-refill.test.mjs` + `slot-refill-heartbeat.test.mjs` +
   `slot-free-trigger.test.mjs` scoped 绿；`.halt` 阻断断言已同步。
 
 ## Definition of Done
 
-- [ ] 消费者枚举复核完成 + 移除 + 三测试文件 scoped 绿；AC1-3 全勾；land 到 develop。
+- [x] 消费者枚举复核完成 + 移除 + 三测试文件 scoped 绿；AC1-3 全勾；land 到 develop。
 
 ## Touches
 
@@ -71,4 +71,5 @@ depends_on: []
 - plugin/test/slot-refill.test.mjs
 - plugin/test/slot-refill-heartbeat.test.mjs
 - plugin/test/slot-free-trigger.test.mjs
+- plugin/invariant-ownership.md
 - tasks/gap-retire-slot-refill-halt-mount.md

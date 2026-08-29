@@ -1734,17 +1734,6 @@ test("RANKING — a suite-blocker's ranking entry carries suiteBlocking:true (bl
   assert.equal(crit.rank, 1);
 });
 
-test("RANKING — halted ⇒ ranking is empty (parallel to the empty recommended) (AC2)", (t) => {
-  const root = makeWorkspace("ranking-halt");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "ac36-a", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/a.ts (new)"]) });
-  fs.writeFileSync(path.join(root, ".halt"), "paused");
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
-  assert.equal(r.halted, true);
-  assert.deepEqual(r.recommended, [], "halted ⇒ nothing recommended");
-  assert.deepEqual(r.ranking, [], "halted ⇒ nothing ranked");
-});
-
 // ── NOT-YET-FLIPPED SKIP (tasks/gap-slot-refill-repeats-done-eligible-recommendations) ──────────────
 // slot-refill's candidate loop at :243 used to iterate pool.ready + 3 step-4 checks and NEVER looked
 // at the not-yet-flipped signal (grep not-yet-flipped|excluded = 0 hits). A task whose work LANDED
