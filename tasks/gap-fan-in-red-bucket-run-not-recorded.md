@@ -91,6 +91,13 @@ fan-in 桶路径统一到正确 runner（full-suite-runner.ts --buckets），gre
 - plugin/test/full-suite-runner.test.mjs
 - tasks/gap-fan-in-red-bucket-run-not-recorded.md（自身）
 
+## Re-anchor / 重锚定（2026-08-29，manager 落地）
+
+- **merge develop**：把 f3115bf81（D5/D6/D7 重构 runMechanicalFanIn）+ 949e4a7be（writeRedSuiteRecord 解耦）并入任务分支，解决 3 处冲突（worker-driver.ts suiteCmd 保留 defaultMechanicalSuiteCommand + restore trace；测试 import 取并集；runRunner 参数取 develop 顺序）。
+- **设计决策**：移除机械路径 suite 步的 writeRedSuiteRecord —— runner 已是唯一 writer（green+red 都入账，静态闸红由 staticCheckDetected → gate=static-check），保留会双写红记录、round 虚增，违背「两套平行机制收敛为一」。
+- **验证**：npx tsc --noEmit 0 错；worker-driver.test.mjs AC1/AC2（默认 suite 命令 = full-suite-runner --buckets + 假红桶 suite → verification-round state=red 记录）通过；fan-in-execute-paths.test.mjs runner wiring 3/3 通过；delta ⊆ Touches 核对通过。
+- AC1-AC3 全勾；AC3（/tests 显示红）机制已由 AC1 测试证实（记录进主账本、页面读主账本），生产红轮视觉确认待落地后观察。
+
 ## Needs-Human
 
 **执行 2026-08-28T21:53:09.198Z — 连续修满重试上限仍不合格（标 needs-human）**
