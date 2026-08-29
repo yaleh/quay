@@ -63,6 +63,7 @@ SPEC §1.6/§2.4 实测：`findRepoRoot`(14) + `findWorkspaceRoot`(4) 是**同�
 - plugin/scripts/inner-exec-mode-report.ts（迁移）
 - plugin/scripts/known-load-sensitive.ts（迁移）
 - plugin/scripts/malformed-task-check.ts（迁移）
+- plugin/scripts/manager-liveness-independent-check.ts（迁移——merge develop 带入 gap-ac147 新文件，本地 `repoRoot` 定义改 import）
 - plugin/scripts/precommit-guard.ts（迁移——预存 repoRoot 合一）
 - plugin/scripts/prod-data-audit.ts（迁移）
 - plugin/scripts/ready-pool-check.ts（迁移）
