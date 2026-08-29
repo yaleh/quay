@@ -190,7 +190,7 @@ import {
 // orchestration-2026-08-27）：suite 不再 detach（setsid+&+disown 孤儿）——改由 driver 直接 spawn 并 wait
 // （进程级父子，ppid 指向 driver，AC3）。复用 suite-driver.ts 的 spawnSuiteAndWait（同一单飞槽语义 +
 // 静默看门狗，⛔ 不新写一份 suite 生命周期）。suiteLockBase 读 TS 侧单一真相源槽路径。
-import { spawnSuiteAndWait, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
+import { spawnSuiteAndWait, writeRedSuiteRecord, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
 import { suiteLockBase } from "./suite-lock-slots.ts";
 // D7：机械 fan-in 的 bucket suite 绿后，把本轮 suite 状态镜像到权威载体 full-suite-state.json
 // （复用 mirror-full-suite-state.ts 的 build/write/skip 单一实现，⛔ 不另写一份 state shape）。
@@ -1019,6 +1019,22 @@ export async function branchHeadSubjectAsync(root: string, taskId: string): Prom
   return out === "" ? null : out;
 }
 
+/** 把一条 exited-not-landed 记录格式化为人可读的失败原因（gap-fan-in-merge-develop-derived-recompute-
+ *  and-reason B）。优先读 mechanical_fan_in（step + reason 拼接成「step=merge-develop: CONFLICT in <file>」）
+ *  ——merge develop 冲突的具体文件在 mechanical_fan_in.reason 里，通用 failure_reason 只写「task status=ready
+ *  not done」，⛔ 不含冲突文件 ⇒ worker 无从精准 resolve。mechanical_fan_in 无 step（缺键 / 非 red / 非对象）
+ *  ⇒ 回退 failure_reason（保留旧行为——非机械 fan-in 失败 / 落地未证实的记录仍读通用 reason）。 */
+function formatExitedNotLandedReason(failureReason: unknown, mechanicalFanIn: unknown): string | null {
+  if (mechanicalFanIn && typeof mechanicalFanIn === "object") {
+    const m = mechanicalFanIn as { step?: unknown; reason?: unknown };
+    if (typeof m.step === "string" && m.step) {
+      const reason = typeof m.reason === "string" && m.reason ? m.reason : "(no reason)";
+      return `step=${m.step}: ${reason}`;
+    }
+  }
+  return typeof failureReason === "string" ? failureReason : null;
+}
+
 /** 该 task 最近一条 exited-not-landed 的失败原因（AC2「上次失败原因」，读 worker-outcome.jsonl）。
  *  无记录 / 读失败 ⇒ null（读不懂 ≠ 无失败——但续做 prompt 以 "(unknown)" 呈现，不伪装成「没有失败」）。 */
 export function lastExitedNotLandedReason(root: string, taskId: string): string | null {
@@ -1032,14 +1048,14 @@ export function lastExitedNotLandedReason(root: string, taskId: string): string 
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    let rec: { task?: unknown; final_state?: unknown; failure_reason?: unknown };
+    let rec: { task?: unknown; final_state?: unknown; failure_reason?: unknown; mechanical_fan_in?: unknown };
     try {
       rec = JSON.parse(trimmed);
     } catch {
       continue;
     }
     if (rec.task === taskId && rec.final_state === "exited-not-landed") {
-      last = typeof rec.failure_reason === "string" ? rec.failure_reason : null;
+      last = formatExitedNotLandedReason(rec.failure_reason, rec.mechanical_fan_in);
     }
   }
   return last;
@@ -2033,7 +2049,13 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       suiteOutcome = sr.outcome;
       suiteFinishedEpoch = Math.floor(new Date(sr.finishedAt).getTime() / 1000);
       suitePid = sr.pid;
-      if (sr.outcome !== "done") return failClean("suite", `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
+      if (sr.outcome !== "done") {
+        // gap-verification-round-static-fail-no-record AC1/AC2 — a red suite round must land a record.
+        if (sr.outcome === "red") {
+          await writeRedSuiteRecord({ task, runId, worktree, suiteHead, suiteLogFile, sr });
+        }
+        return failClean("suite", `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
+      }
       writeSuiteCapture(suiteCapture, {
         full_suite_ran: "true", skip_reason: "", suite_exit: "0",
         suite_head: suiteHead, start_iso: sr.startedAt, end_iso: sr.finishedAt,

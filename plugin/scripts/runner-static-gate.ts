@@ -74,6 +74,18 @@ run_static_checks() {
   echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
   # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
   run_checker "it0-split-or-commit-check" bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
+  echo "== checker mechanical-spine check (gap-b1-mechanical-spine-doc-checker, AC1/AC2/AC3) =="
+  # Mechanical spine (B1, SPEC-checker-mechanical-spine-contract-2026-08-28.md): every checker's
+  # exit-code vocabulary must be within {0,1,2,3} (0=PASS, 1=FAIL, 2=usage/env-error,
+  # 3=NOT-EVALUATED) and a --json claim must actually emit JSON. A NEW violation (not on the
+  # shrink-only exemption list plugin/scripts/checker-mechanical-spine-exemptions.json) or an ADDED
+  # exemption entry red-lights the commit (set -euo pipefail abort) — a fixed file can never
+  # silently drift back. Whole-store scan of the checker corpus (plugin/scripts/*-check.{ts,sh}),
+  # cheap (read 110 files + regex). Negative/positive controls:
+  # plugin/scripts/checker-mutation-cases/checker-mechanical-spine-check.sh + the checker's own
+  # plugin/test/checker-mechanical-spine-check.test.mjs.
+  # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
+  run_checker "checker-mechanical-spine-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/checker-mechanical-spine-check.ts" --root "${repo_root}"
   echo "== test-framework-policy check (gap-no-test-framework-policy-for-new-tests, AC1/AC3-AC5) =="
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/

@@ -477,6 +477,20 @@ if [ "$full_suite_ran" = "true" ] && [ -f "$suite_time_file" ]; then
 fi
 printf 'cpu_s=%s\\ncpu_source=%s\\ncpu_user_s=%s\\ncpu_sys_s=%s\\nend_iso=%s\\nend_ms=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\nsuite_exit=%s\\n' \\
   "$cpu_s" "$cpu_source" "$cpu_user_s" "$cpu_sys_s" "$end_iso" "$end_ms" "$wall_ms" "$load" "$lane_count" "$suite_exit" >> "$suite_capture"
+# gap-verification-round-static-fail-no-record AC1/AC2 — a RED suite (suite_exit != 0) must ALSO write a
+# verification-round record (state=red + reason + failures + taskId) so the /tests ledger is not blind to a
+# failed round (previously only the green path wrote). Best-effort: a write failure is WARNed, never blocks
+# the suite-red verdict (the Fix agent still gets dispatched by the主循环).
+if [ "$full_suite_ran" = "true" ] && [ "$suite_exit" != "0" ]; then
+  if ! node --experimental-strip-types ${worktree}/plugin/scripts/pre-verified-round-record.ts \
+    --task-id ${task} --run-id ${runId} --started-at "$start_iso" --duration-ms "$wall_ms" \
+    --lane-count "$lane_count" --load "$load" --commit "$suite_head" --preverified 0 --state red \
+    --root ${worktree} \
+    --suite-log "$suite_log_file" --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" \
+    --cpu-user-s "$cpu_user_s" --cpu-sys-s "$cpu_sys_s"; then
+    echo "WARN: verification-round red-record 入账失败（不挡 suite-red 判定 / Fix agent 派发）" >&2
+  fi
+fi
 echo "POLL=done SUITE_EXIT=$suite_exit"`
 
 // 等待块的内部输出语义（阶段 2 prompt 里跟随在 ${SUITE_WAIT_BASH} 之后说明；不是 agent 的最终返回）：
