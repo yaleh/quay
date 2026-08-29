@@ -1,3 +1,5 @@
+> ⚠️ **本文件已退役（AC149，2026-08-28）**：outer/inner 会话停止，「给 outer / inner 发消息」不再有投递目标——机制由 driver 的派发/收尾面承接；manager 会话保留但不再向退役会话投递。→ `orchestration/manager-phase-goal.md` ### AC149。
+
 **给 outer / inner 发消息 —— 默认走原生跨会话消息（人 2026-08-12 裁定「实际应用 SendMessage，替换本项目原先使用的信道」）**
 
 ## 默认路径（原生，零脚本）
