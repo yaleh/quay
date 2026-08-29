@@ -43,3 +43,9 @@ usage 但 exit 2（2/14）       会被 harness 当失败
 - plugin/scripts/*-check.ts（77 个 .ts checker 的 --help 契约统一，重点 measure-trend-check / ready-pool-check / anti-drift-touches-check / landing-target / strategic-doc-staleness / task-status-drift / trend-check——均被本 glob 覆盖）
 - plugin/test/help-contract-incompatible-behaviors.test.mjs (new)（--help 无副作用契约测试）
 - tasks/gap-help-contract-incompatible-behaviors.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T18:36:53.219Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

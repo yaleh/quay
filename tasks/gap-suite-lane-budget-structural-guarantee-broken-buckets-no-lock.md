@@ -46,3 +46,9 @@ extra:
 - plugin/scripts/full-suite-runner.ts（lane 预算公式：defaultLaneCount 分母 S+yielded + yieldedSuiteSlotCount）
 - plugin/test/full-suite-runner.test.mjs（看门狗让 lane + 单跑不退化负控制）
 - tasks/gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T18:04:13.189Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

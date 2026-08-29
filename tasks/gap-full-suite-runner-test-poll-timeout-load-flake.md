@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-runner-test-poll-timeout-load-flake
 title: full-suite-runner.test.mjs poll(5000ms) 高负载下超时 flake + 文件未入 known-load-sensitive 致 fix-scope gate 误判确定性失败（defer anti-livelock）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -37,8 +37,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，poll 不再超时）：高负载下 full-suite-runner.test.mjs 的 poll 不再 5000ms 超时（timeout 上调或 load-aware）；（⛔ 仍 5000ms 超时 ⇒ 假）。
-- [ ] AC2（能取假，triage 正确）：full-suite-runner.test.mjs 的失败被 fix-scope gate 判为 load-sensitive（走 isolate-rerun）而非确定性 other-task（defer anti-livelock）；（⛔ 仍判 other-task ⇒ 假）。
+- [x] AC1（能取假，poll 不再超时）：高负载下 full-suite-runner.test.mjs 的 poll 不再 5000ms 超时（timeout 上调或 load-aware）；（⛔ 仍 5000ms 超时 ⇒ 假）。**Evidence**：3 个 named 失败测试（AC1 in-flight / AC2 marker / AC2 vitest early-red）的 poll 已由 gap-suite-load-sampler-orphan-process 升到 `timeoutMs: 20000`（commits e5cc71d62 / dd888a5de / 53accd57e / 2631eabd8，develop 已含）。审计 20 处 `poll()` 调用：8 处「runner 引导/运行中」load-prone poll 全 ≥8000ms（20000×5 + 8000×2 + 10000×1）；其余 12 处（waitExit 负控制的 bare `process.exit(0)` 子进程退出等待 ×1 + `await waitExit` 之后 state/文件已落盘的显式 5000ms ×4 + 默认 `fs.existsSync` ×7）均非 runner-bootstrap 形状，poll 立即 resolve。
+- [x] AC2（能取假，triage 正确）：full-suite-runner.test.mjs 的失败被 fix-scope gate 判为 load-sensitive（走 isolate-rerun）而非确定性 other-task（defer anti-livelock）；（⛔ 仍判 other-task ⇒ 假）。**Evidence**：header 加 `// @load-sensitive child-spawn`（spawns real node runner + bash fake-suite per test）；`known-load-sensitive.ts --kind plugin/test/full-suite-runner.test.mjs` → `child-spawn`（fix-scope gate 读 `scanFamily`/`kindForFile`，kind 非 undefined ⇒ load-sensitive → isolate-rerun）；`--check`/`--check-exit` 均 ok。known-load-sensitive.test.mjs 28/28、red-window-triage.test.mjs 10/10 绿。
 
 ## Definition of Done
 
@@ -46,7 +46,13 @@ poll timeout 上调 + 文件纳入 load-sensitive 家族；AC1-AC2 全勾；高�
 
 ## Touches
 
-- plugin/test/full-suite-runner.test.mjs（poll timeout 上调/load-aware）
-- plugin/scripts/known-load-sensitive.ts（纳入 full-suite-runner.test.mjs，若走该方向）
-- plugin/test/known-load-sensitive.test.mjs（load-sensitive 隔离重跑负控制）
+- plugin/test/full-suite-runner.test.mjs（header 加 @load-sensitive child-spawn 纳入 load-sensitive 家族）
+- plugin/test/known-load-sensitive.test.mjs（2 处 family 断言翻转：isFamilyMember false→true + --kind 正控制 child-spawn）
+- plugin/test/red-window-triage.test.mjs（4 处 non-family fixture 换文件：full-suite-runner → known-load-sensitive，因前者已入族）
 - tasks/gap-full-suite-runner-test-poll-timeout-load-flake.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T17:15:53.068Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

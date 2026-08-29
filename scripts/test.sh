@@ -985,14 +985,8 @@ run_selected() {
   build_dist_once
   oh_t3=$(_oh_mark)
   run_static_checks
-  # archguard structural gate (gap-archguard-zero-production-calls): a REAL archguard CLI call wired
-  # into the suite — fail-closed (archguard missing / analyze failed / dependency cycles ⇒ exit 1).
-  # This is the mechanism that makes CLAUDE.md's「Consult archguard before calling a milestone done」
-  # executable instead of advisory: the meter is runnable, not asserted (AC1/AC2); the produced
-  # `.archguard/` product is read back as the criterion's input and appended to
-  # `.archguard/metrics-history.jsonl` (AC3). Runs AFTER the parallelized static-check block (the
-  # archguard analyze is CPU-heavy tree-sitter work, kept out of the parallel pool to avoid contention).
-  run_checker "archguard-structure-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/archguard-runner.ts" --root "${repo_root}"
+  # archguard 结构闸已迁入 fan-in driver 机械步骤（runMechanicalFanIn 第 5.5 步，typecheck 后 scoped门 前，
+  # gap-archguard-structural-gate-in-fan-in-driver）——⛔ test.sh 不再触发（两个真相源）。
   oh_t4=$(_oh_mark)
   export QUAY_TEST_GROUPS="$groups"
   local files=() f

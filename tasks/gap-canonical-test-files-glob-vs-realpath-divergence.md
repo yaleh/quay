@@ -44,3 +44,9 @@ test-impl-census-check.ts               glob 匹配路径 ← 偏离
 - plugin/scripts/test-impl-census-check.ts（迁移到公共库）
 - plugin/test/canonical-test-files-symlink-order.test.mjs (new)（symlink 顺序负控制 fixture）
 - tasks/gap-canonical-test-files-glob-vs-realpath-divergence.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T16:19:44.203Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
