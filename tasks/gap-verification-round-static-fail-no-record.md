@@ -65,6 +65,7 @@ extra:
 - plugin/workflows/fan-in-execute.js（suite-red 路径写红轮记录）
 - .claude/workflows/fan-in-execute.js（双副本镜像——同上，两副本字节一致）
 - plugin/scripts/worker-driver.ts（机械 fan-in suite-red 路径写红轮记录）
+- plugin/scripts/suite-driver.ts（结构性解耦：writeRedSuiteRecord 迁入 writeSuiteResult 旁，worker-driver 只留一行调用）
 - plugin/test/pre-verified-round-record.test.mjs（红轮记录单测）
 - plugin/test/full-suite-runner.test.mjs（taskId 归因单测）
 - tasks/gap-verification-round-static-fail-no-record.md（自身）

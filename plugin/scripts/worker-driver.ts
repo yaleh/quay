@@ -190,7 +190,7 @@ import {
 // orchestration-2026-08-27）：suite 不再 detach（setsid+&+disown 孤儿）——改由 driver 直接 spawn 并 wait
 // （进程级父子，ppid 指向 driver，AC3）。复用 suite-driver.ts 的 spawnSuiteAndWait（同一单飞槽语义 +
 // 静默看门狗，⛔ 不新写一份 suite 生命周期）。suiteLockBase 读 TS 侧单一真相源槽路径。
-import { spawnSuiteAndWait, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
+import { spawnSuiteAndWait, writeRedSuiteRecord, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
 import { suiteLockBase } from "./suite-lock-slots.ts";
 // D7：机械 fan-in 的 bucket suite 绿后，把本轮 suite 状态镜像到权威载体 full-suite-state.json
 // （复用 mirror-full-suite-state.ts 的 build/write/skip 单一实现，⛔ 不另写一份 state shape）。
@@ -1897,58 +1897,6 @@ async function flipTaskDone(
     return commitTaskStatusChange(worktree, task, file, flipped, `tasks: 翻 ${task} done（driver 机械 fan-in）`);
   }
   return { ok: false, reason: `expected exactly 1 'status: ready' line, got ${readyCount}` };
-}
-
-/**
- * gap-verification-round-static-fail-no-record AC1/AC2 — write a RED verification-round record when the
- * mechanical fan-in's suite FAILED (outcome=red). The mechanical path previously wrote NO record on a red
- * suite (only fan-in-execute.js's green path wrote), so a failed round left only /tmp/fan-in-suite-<task>.log
- * — the /tests ledger blind to it. Best-effort: a write failure is WARNed, never blocks the red outcome
- * (the task is exited-not-landed and the workflow fallback is dispatched either way). load + lane_count are
- * derived with the SAME 口径 fan-in-execute.js uses (load ← /proc/loadavg 1min; lane_count ← the suite log's
- * last `__GROUP__ concurrency=N` line, falling back to nproc).
- */
-async function writeRedSuiteRecord(args: {
-  task: string;
-  runId: string;
-  worktree: string;
-  suiteHead: string;
-  suiteLogFile: string;
-  sr: SuiteRunResult;
-}): Promise<void> {
-  const { task, runId, worktree, suiteHead, suiteLogFile, sr } = args;
-  try {
-    let load = "0";
-    try {
-      load = fs.readFileSync("/proc/loadavg", "utf8").trim().split(/\s+/)[0] || "0";
-    } catch { /* keep 0 */ }
-    let laneCount = "";
-    try {
-      const text = fs.readFileSync(suiteLogFile, "utf8");
-      const groups = text.match(/__GROUP__ concurrency=(\d+)/g);
-      if (groups && groups.length > 0) {
-        const m = groups[groups.length - 1].match(/(\d+)$/);
-        if (m) laneCount = m[1];
-      }
-    } catch { /* log unreadable */ }
-    if (!laneCount) {
-      const nproc = spawnSync("nproc", [], { encoding: "utf8" });
-      laneCount = (nproc.stdout || "").trim() || "1";
-    }
-    const argv = [
-      "node", "--experimental-strip-types", path.join(worktree, "plugin", "scripts", "pre-verified-round-record.ts"),
-      "--task-id", task, "--run-id", runId, "--started-at", sr.startedAt, "--duration-ms", String(sr.durationMs),
-      "--lane-count", laneCount, "--load", load, "--commit", suiteHead, "--preverified", "0", "--state", "red",
-      "--root", worktree,
-      "--suite-log", suiteLogFile,
-    ];
-    const w = await mechSh(argv, 60_000);
-    if (!w.ok) {
-      process.stderr.write(`worker-driver: verification-round red-record write failed (best-effort): ${(w.stderr || w.stdout || "").trim()}\n`);
-    }
-  } catch (e) {
-    process.stderr.write(`worker-driver: verification-round red-record write threw (best-effort): ${(e as Error)?.message ?? String(e)}\n`);
-  }
 }
 
 /**
