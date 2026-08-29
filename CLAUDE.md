@@ -293,6 +293,8 @@ Key cross-cutting facts (require reading several files to see):
 - **Directives are TASK-CANONICAL** (DIR-028 / "Plan A", the single-source-of-truth principle): a directive is a `label:directive` quay task (`tasks/DIR-NNN.md`) and nothing else — there is no `directives/*.md` file, no projection, no anti-drift check (all retired). Create/steer via the `quay-directive` skill. Milestone candidates are `label:milestone-candidate` tasks; `backlog.md`/`dashboard.md` are **generated views** of the task store, not hand-edited sources.
 - Recurring design principle enforced across this repo (see `docs/proposals/exp5-crystallization-strategy.md`): **single source of truth + executable invariants over prose.** When you find content living in two places (a file + a task copy; a charter copying a task's AC/DoD; a status in a field AND a body line), that is drift — fix the SOURCE (usually a doc/skill/template that generated it), not just the artifact.
 
+- **单任务派发记录接口 = `plugin/scripts/dispatch-record.ts --add --task-id <id> --reason "<一句为什么选它>"`**（fail-closed：理由<8 非空白字符 exit 1 不写不派；指纹自动 `git hash-object`，算不出写 null 由 `dispatch-record-fingerprint-reason-check` 报红；正本 `fast-mode-tick-core.md` A16b）。**派发(机械)=内层（`fast-mode-tick-core.md:83`）——外层/非-inner 不手搓 Python 写 `orchestration/dispatch-record.jsonl`**（2026-08-20 外层 B9 手搓三键 `{ts,taskId,reason}` 漏指纹，已删；inner A16b 已记同一次派发，勿扩豁免名单）。同款先例：manager 语义派发 `semantic-face-dispatch-record.ts --add --kind <八类> --reason "..."`（`manager-tick-core.md` C30/AC145）。
+
 ## Reference docs
 
 - `README.md` — install/usage + the three-package overview.
