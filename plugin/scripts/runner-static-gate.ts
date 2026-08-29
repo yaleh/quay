@@ -392,6 +392,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/orchestrator-tick-core.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md CLAUDE.md plugin/scripts/integration-branch-model.ts plugin/scripts/integration-batch-merge.sh orchestration/SPEC-branching-model-integration-branch-2026-08-05.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/retired-clause-check.ts plugin/scripts/checker-mutation-cases/retired-clause-check.sh plugin/test/retired-clause-check.test.mjs
   run_checker "retired-clause-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/retired-clause-check.ts" --root "${repo_root}"
+  echo "== outer-retirement-precondition check (gap-b0-retirement-precondition-checker-call-surface, SPEC §2.3b B0) =="
+  # B0 退役前置 (SPEC §2.3b): 退役 outer 前，枚举 outer 执行核 (orchestrator-tick-core.md) 直接引用的
+  # `-check.{ts,sh}` checker，逐个判定留存调用面（static-gate 注册表 / 外部代码引用，传递闭包）。
+  # 只被退役层引用（orphan）的 checker 必须带 RETIRED-WITH-RETIRING-LAYER 标记 = 显式退役；无标记 ⇒
+  # RED (exit 1, fail-closed) — 退役后静默孤儿被前置挡住。NOT-EVALUATED (exit 3) 当执行核缺失/零引用
+  # （独立取值，非通过，硬规则 3b/4）。负控制由 mutation case + 单测钉住。真实仓库当前 N=0
+  # （outer-anchor-check.ts 带标记）。whole-store 引用扫描 ⇒ full（scoped 模式推迟到 full-suite 门）。
+  # @static-tier full
+  run_checker "outer-retirement-precondition-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/outer-retirement-precondition-check.ts" --root "${repo_root}"
   echo "== ac61-staleness-disposition check (tasks/gap-ac61-staleness-list-item-disposition, AC61 判据1-3 + DoD 负控制) =="
   # AC61 清单逐条处置 enforcement: the task file's `## AC61 处置记录` section must carry a record for
   # EVERY A-1..A-7 / B-1..B-4 item (迁出带落点映射 或 经核实仍有效+读数). CHECK-A (判据1/DoD 负控):

@@ -1,7 +1,7 @@
 ---
 id: gap-retire-halt-file-driver-based
 title: 退役已死的 .halt 消费者——6 个死脚本/死读点删除 + restart-readiness-check.sh 重定向到 driver resume；正交面（跨项目/session/metric）另立案
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
