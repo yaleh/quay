@@ -33,7 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { detectMkdtempNoCleanup } from "./test-isolation-check.ts";
-import { readFileSafe } from "./gate-script-base.ts";
+import { helpExit, readFileSafe } from "./gate-script-base.ts";
 import { canonicalTestFiles } from "./test-framework-policy-check.ts";
 
 /** Scan the given repo-relative test files for unpaired mkdtemp results. */
@@ -61,6 +61,7 @@ function usage(): never {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node tmp-leak-pairing-check.ts [<workspace-root>] [--selftest] [--files <rel> ...]");
   if (args.includes("--selftest")) {
     process.exit(runSelftest() ? 0 : 1);
   }

@@ -31,6 +31,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 
 /** The committed measurement record (relative to repo root). */
 export const RECORD_REL = "docs/analysis/ac69-slot-release-vs-dispatch-gap.json";
@@ -143,7 +144,9 @@ function parseArgs(argv: string[]): { root: string; record: string; json: boolea
 
 // Import.meta guard: only run the CLI when executed directly (not when imported by the test).
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { root, record, json } = parseArgs(process.argv.slice(2));
+  const args = process.argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node ac69-slot-queue-gap-check.ts [--root <dir>] [--record <file>] [--json]");
+  const { root, record, json } = parseArgs(args);
   const result = checkRecord(record);
   if (json) {
     process.stdout.write(JSON.stringify({ ok: result.ok, reason: result.reason, code: result.code, fields: result.fields, root }) + "\n");

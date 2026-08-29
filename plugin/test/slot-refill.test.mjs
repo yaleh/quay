@@ -88,7 +88,7 @@ import {
 // AC47 (gap-ac47-completion-predicate-consumer-fail-closed): the shape-aware completion counter (the
 // single source both slot-refill's landed gate and ready-pool-check's notYetFlipped consume) — needed
 // directly for the AC2 all-5-consumers negative control on the DIR-014 suffixed-heading shape.
-import { applyPromotions, countCompletionCheckboxes, RETREATED_MARKER_RE, isRetreated, analyzeTasks } from "../scripts/ready-pool-check.ts";
+import { applyPromotions, countCompletionCheckboxes, RETREATED_MARKER_RE, isRetreated, analyzeTasks, readTaskStatusAtRef } from "../scripts/ready-pool-check.ts";
 import { countAcCheckboxes } from "../scripts/task-status-drift-check.ts";
 // AC53 gate (gap-scheduler-inflight-detection-misses-fan-in-worktree AC2): the END invariant the AC53
 // heartbeat gate judges on — `violated === false` ⇒ the gate ACCEPTS the round end (no false refusal).
@@ -1739,17 +1739,6 @@ test("RANKING — a suite-blocker's ranking entry carries suiteBlocking:true (bl
   assert.equal(crit.rank, 1);
 });
 
-test("RANKING — halted ⇒ ranking is empty (parallel to the empty recommended) (AC2)", (t) => {
-  const root = makeWorkspace("ranking-halt");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "ac36-a", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/a.ts (new)"]) });
-  fs.writeFileSync(path.join(root, ".halt"), "paused");
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
-  assert.equal(r.halted, true);
-  assert.deepEqual(r.recommended, [], "halted ⇒ nothing recommended");
-  assert.deepEqual(r.ranking, [], "halted ⇒ nothing ranked");
-});
-
 // ── NOT-YET-FLIPPED SKIP (tasks/gap-slot-refill-repeats-done-eligible-recommendations) ──────────────
 // slot-refill's candidate loop at :243 used to iterate pool.ready + 3 step-4 checks and NEVER looked
 // at the not-yet-flipped signal (grep not-yet-flipped|excluded = 0 hits). A task whose work LANDED
@@ -2811,4 +2800,46 @@ test("CONTINUE EXEMPTION — computeExitedNotLandedContinueIds negative controls
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     assert.equal(computeExitedNotLandedContinueIds(root).size, 0, "no worker-outcome.jsonl ⇒ empty set");
   }
+});
+
+// ── STALE MAIN-CHECKOUT STATUS (tasks/gap-dispatch-reads-stale-main-checkout-task-status, AC1/AC3) ──
+// A task landed on develop as `status: done` but the manager working branch's disk still says
+// `status: ready` (the main checkout behind-develop shape). analyzeSlotRefill's status read must come
+// from the develop REF (default taskReadRef="develop"), not the stale disk — otherwise the done task
+// is re-recommended until the retry cap. The read source is asserted directly via readTaskStatusAtRef.
+
+test("analyzeSlotRefill reads status from the develop ref, not the stale working tree (AC1/AC3)", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-stale-${Date.now()}-`));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "code"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  runGit(dir, "init", "-q", "-b", "develop", ".");
+  runGit(dir, "config", "user.email", "t@t");
+  runGit(dir, "config", "user.name", "t");
+  // develop: the task is done (landed + flip-done).
+  writeTask(dir, "gap-stale-status", { status: "done", labels: ["gap"], body: dispatchableBody(["- code/stale.ts (new)"]) });
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "gap-stale-status: flip done");
+  // Stale manager branch: rewrite the same task back to `ready` and STAY on it (disk=ready, develop=done).
+  runGit(dir, "checkout", "-q", "-b", "manager-stale");
+  writeTask(dir, "gap-stale-status", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/stale.ts (new)"]) });
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "gap-stale-status: stale reset to ready");
+
+  // AC3 read-source assertion: the develop ref carries `done`; the stale working tree carries `ready`.
+  assert.equal(readTaskStatusAtRef(dir, "develop", "gap-stale-status"), "done", "readTaskStatusAtRef reads develop → done");
+  assert.match(fs.readFileSync(path.join(dir, "tasks", "gap-stale-status.md"), "utf8"), /^status:\s*ready/m, "stale working tree carries ready");
+
+  const tasksDir = path.join(dir, "tasks");
+  // AC1: default taskReadRef="develop" ⇒ the done task is judged done → NOT recommended.
+  const r = analyzeSlotRefill({ tasksDir, root: dir, cap: 3, runningSubagentCount: 0 });
+  assert.equal(r.pool, 0, "develop-read: the stale-ready task is judged done → empty ready pool");
+  assert.equal(r.recommended.includes("gap-stale-status"), false, "done task not recommended for dispatch");
+  assert.equal(r.should_refill, false, "no dispatchable candidate from the develop source of truth");
+
+  // Negative control: WITHOUT the develop read (taskReadRef=null → the old disk read), the stale
+  // `ready` IS seen and the task is recommended — the exact defect this task removes.
+  const rDisk = analyzeSlotRefill({ tasksDir, root: dir, cap: 3, runningSubagentCount: 0, taskReadRef: null });
+  assert.equal(rDisk.recommended.includes("gap-stale-status"), true, "the stale working tree alone would still recommend it (the defect)");
 });

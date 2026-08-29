@@ -28,7 +28,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // AC53 判据① gate (gap-inner-self-wake-sleep-empty-slots-not-dispatch, outer 2026-08-13 ruling): the
 // end-invariant MUST be judged on the MACHINE's fresh slot-refill output, never the heartbeat's
 // self-reported fields. analyzeSlotRefill is the pure machine decision; FIXED_DISPATCH_CAP is the
@@ -701,7 +701,7 @@ export function main(argv) {
     const i = args.indexOf(name);
     return i !== -1 ? args[i + 1] : def;
   };
-  if (args.includes("--help") || args.includes("-h")) { usage(); return 2; }
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node inner-wakeup-heartbeat-check.ts --root <dir> [--max-age-secs <N>] [--in-flight <ids>] [--running <ids>] [--json]");
   const root = flagVal("--root", ".");
   const maxAge = Number(flagVal("--max-age-secs", String(DEFAULT_MAX_AGE_SECS)));
   const jsonOut = args.includes("--json");

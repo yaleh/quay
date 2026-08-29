@@ -1072,9 +1072,48 @@ export function defaultLaneCount(): number {
   );
   const ncpu = Number(ncpuRaw);
   const slots = concurrentSuiteSlots();
+  // gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock (漏口②): the divisor is S + the
+  // count of slots whose holder yielded the SLOT via the hold-cap watchdog but is STILL running — those
+  // grandfathered lanes are budgeted, so a joining (S+1)-th suite takes fewer lanes instead of the
+  // pre-fix「只让槽不让 lane」double oversubscription (each suite × nproc×oversub/S with no bound on the
+  // slot-less one). A lone suite (no yielded slot) keeps the pure S formula unchanged (AC2 no-regression).
+  const yielded = yieldedSuiteSlotCount();
   const oversubRaw = Number(process.env.QUAY_MAX_OVERSUBSCRIPTION ?? "1");
   const oversub = Number.isFinite(oversubRaw) && oversubRaw > 0 ? oversubRaw : 1;
-  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) * oversub / slots));
+  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) * oversub / (slots + yielded)));
+}
+
+/**
+ * gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock (漏口②) — the number of full-suite
+ * lock slots whose HOLDER released the slot via the hold-cap watchdog (`FULL_SUITE_LOCK_HOLD_MAX_S`,
+ * scripts/test.sh → suite-slot-lib.sh `spawn_suite_lock_hold_watchdog`) but is STILL running. The
+ * watchdog writes `<slot>.yielded` (content = the holder pid) on fire; defaultLaneCount() adds this
+ * count to the divisor so a joining suite takes fewer lanes. Pid-liveness self-cleanup: a dead-pid
+ * marker (the holder crashed or finished without a normal release) is NOT counted — a stale marker can
+ * never permanently shrink the budget. Resolves the SAME lock base as concurrentSuiteSlots() (env
+ * override → git-common-dir → .git), so the slot paths and the S they derive from cannot drift.
+ * Best-effort — any read failure degrades to 0 (fail-open; lane accounting never blocks or fails a run).
+ */
+export function yieldedSuiteSlotCount(): number {
+  try {
+    const base = suiteLockBase(process.cwd());
+    let yielded = 0;
+    for (const slot of suiteLockSlotPaths(base)) {
+      const marker = `${slot}.yielded`;
+      if (!fs.existsSync(marker)) continue;
+      const pid = Number(fs.readFileSync(marker, "utf8").trim());
+      if (!Number.isFinite(pid) || pid < 1) continue;
+      try {
+        process.kill(pid, 0); // liveness probe: a live holder's pid does not throw (ESRCH = dead)
+        yielded += 1;
+      } catch {
+        // dead pid → stale marker, ignore (self-cleanup, no leak)
+      }
+    }
+    return yielded;
+  } catch {
+    return 0;
+  }
 }
 
 

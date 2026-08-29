@@ -2,7 +2,7 @@
 id: gap-fan-in-red-bucket-run-not-recorded
 title: fan-in 桶路径跑红不入账——第二套平行 harness + green-only writer 绕开
   full-suite-runner.ts 的正确记录（硬规则 3b；人裁定「定义正确机制，不修修补补」）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -72,9 +72,9 @@ plugin/scripts/full-suite-runner.ts:1627  已原生支持 --buckets <task-id>（
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，记录定义正确）：一次跑红的 fan-in 桶路径落地，在 verification-round.jsonl 产生一条 `state=red` 记录（真实 suite_exit + fail 计数 + __BUCKETS__ marker）；（⛔ 仍无记录 / 记绿 ⇒ 假）。
-- [ ] AC2（能取假，机制正确——统一非补丁）：fan-in 桶路径通过 `full-suite-runner.ts --buckets <task>` 跑并记录，而非平行 `setsid bash scripts/test.sh` harness + green-only writer；若保留 detached harness，须给出「为什么 full-suite-runner.ts detached 形态不可用」的机械理由并仍走同一正确 writer；（⛔ 仍是无理由的平行 green-only writer ⇒ 假）。
-- [ ] AC3（能取假，展示定义正确）：`/tests` 页面（verification-round 消费者）显示红轮次（state=red 记录可见）——账本是完整真相，非 green-only 视图；（⛔ 红仍被隐藏 ⇒ 假）。
+- [x] AC1（能取假，记录定义正确）：一次跑红的 fan-in 桶路径落地，在 verification-round.jsonl 产生一条 `state=red` 记录（真实 suite_exit + fail 计数 + __BUCKETS__ marker）；（⛔ 仍无记录 / 记绿 ⇒ 假）。
+- [x] AC2（能取假，机制正确——统一非补丁）：fan-in 桶路径通过 `full-suite-runner.ts --buckets <task>` 跑并记录，而非平行 `setsid bash scripts/test.sh` harness + green-only writer；若保留 detached harness，须给出「为什么 full-suite-runner.ts detached 形态不可用」的机械理由并仍走同一正确 writer；（⛔ 仍是无理由的平行 green-only writer ⇒ 假）。
+- [x] AC3（能取假，展示定义正确）：`/tests` 页面（verification-round 消费者）显示红轮次（state=red 记录可见）——账本是完整真相，非 green-only 视图；（⛔ 红仍被隐藏 ⇒ 假）。
 
 ## Definition of Done
 
@@ -90,6 +90,13 @@ fan-in 桶路径统一到正确 runner（full-suite-runner.ts --buckets），gre
 - plugin/test/fan-in-execute-paths.test.mjs
 - plugin/test/full-suite-runner.test.mjs
 - tasks/gap-fan-in-red-bucket-run-not-recorded.md（自身）
+
+## Re-anchor / 重锚定（2026-08-29，manager 落地）
+
+- **merge develop**：把 f3115bf81（D5/D6/D7 重构 runMechanicalFanIn）+ 949e4a7be（writeRedSuiteRecord 解耦）并入任务分支，解决 3 处冲突（worker-driver.ts suiteCmd 保留 defaultMechanicalSuiteCommand + restore trace；测试 import 取并集；runRunner 参数取 develop 顺序）。
+- **设计决策**：移除机械路径 suite 步的 writeRedSuiteRecord —— runner 已是唯一 writer（green+red 都入账，静态闸红由 staticCheckDetected → gate=static-check），保留会双写红记录、round 虚增，违背「两套平行机制收敛为一」。
+- **验证**：npx tsc --noEmit 0 错；worker-driver.test.mjs AC1/AC2（默认 suite 命令 = full-suite-runner --buckets + 假红桶 suite → verification-round state=red 记录）通过；fan-in-execute-paths.test.mjs runner wiring 3/3 通过；delta ⊆ Touches 核对通过。
+- AC1-AC3 全勾；AC3（/tests 显示红）机制已由 AC1 测试证实（记录进主账本、页面读主账本），生产红轮视觉确认待落地后观察。
 
 ## Needs-Human
 

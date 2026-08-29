@@ -191,7 +191,7 @@ import { expandDeclaredTouches, INFLIGHT_WORKTREE_STALE_MS } from "./concurrent-
 // hand-rolled /proc scan. The shared staleness threshold (INFLIGHT_WORKTREE_STALE_MS, above) and
 // this enumerator give the merge-surface path the SAME liveness judgment as the task-worktree path.
 import { enumerateProcs, cwdUnder } from "./worktree-process-reaper.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, helpExit } from "./gate-script-base.ts";
 // Reused "work has landed on master" signal (AC6: reuse, never a parallel copy) — the same
 // symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
 // buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-
@@ -1952,6 +1952,63 @@ function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criter
   return s;
 }
 
+/** Read task files from a git ref in ONE `git cat-file --batch` process — the batched SINGLE-SOURCE
+ *  dispatch read face (tasks/gap-dispatch-reads-stale-main-checkout-task-status): the canonical store
+ *  is the develop ref; the manager working branch's disk is a STALE agent-proxy (硬规则 4b). Per-task
+ *  `git show` would be ~N subprocesses (the pool check already has a >150s timeout from per-task
+ *  git-history — gap-ready-pool-check-times-out-after-git-history-signal — so the develop read is
+ *  batched the same way). Returns a Map<taskId, rawContent> for the ids PRESENT at the ref; absent
+ *  ids are simply missing (callers fall back to the working-tree read). Returns an EMPTY map on any
+ *  git failure (never a positive from an unavailable source). Synchronous (dispatch callers are
+ *  sync); worker-driver.ts's async `readTaskStatusAtRef` is the same judgment in an async mechSh
+ *  context. */
+export function readTaskFilesAtRefBatch(root, ref, ids) {
+  if (ids.length === 0) return new Map();
+  const input = ids.map((id) => `${ref}:tasks/${id}.md`).join("\n") + "\n";
+  let buf;
+  try {
+    buf = execFileSync("git", ["-C", root, "cat-file", "--batch"], {
+      input,
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 30_000,
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+  } catch {
+    return new Map();
+  }
+  const map = new Map();
+  let off = 0;
+  for (const id of ids) {
+    const nl = buf.indexOf(0x0a, off);
+    if (nl === -1) break;
+    const header = buf.slice(off, nl).toString("utf8");
+    off = nl + 1;
+    const m = / blob (\d+)$/.exec(header);
+    if (!m) continue; // `<revspec> missing` (or unparseable) — no content line; off is already past the header
+    const size = Number(m[1]);
+    map.set(id, buf.slice(off, off + size).toString("utf8"));
+    off += size + 1; // skip content + the trailing newline after it
+  }
+  return map;
+}
+
+/** Read a single task file's raw content from a git ref (the per-task wrapper over the batched
+ *  reader; null when the ref/path is absent or git fails). */
+export function readTaskFileAtRef(root, ref, taskId) {
+  return readTaskFilesAtRefBatch(root, ref, [taskId]).get(taskId) ?? null;
+}
+
+/** Read `<ref>:tasks/<id>.md` `status:` frontmatter (the status half of readTaskFileAtRef).
+ *  null when the ref/path is unavailable or the frontmatter is unreadable. */
+export function readTaskStatusAtRef(root, ref, taskId) {
+  const raw = readTaskFileAtRef(root, ref, taskId);
+  if (raw === null) return null;
+  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!m) return null;
+  const statusLine = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
+  return statusLine ? (statusLine.slice("status:".length).trim() || null) : null;
+}
+
 /** Analyze a task store. Returns { pool, floor, cap, floorMult, deficit, dispatchable_disjoint,
  *  criterion_met, pool_big_all_colliding, report, ready, excluded, candidates, promotions,
  *  scanned, top_relevance, ready_relevance, closed_but_live, targeted_promotion }. `root` is the repo
@@ -1966,14 +2023,24 @@ function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criter
  *  TARGETED-PROMOTION query (gap-targeted-promotion-operation-does-not-exist) — when set, a
  *  `targeted_promotion` result for that one id is produced (floor-INDEPENDENT, AC2), supplemental
  *  to and never altering the bulk `promotions` path (AC3). */
-export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, floorCap, inFlight = [], closedButLive = [], topN = 0, targetedId = null, develop = "develop", integration = "integration", master = "master", landingStalenessMs = LANDING_STALENESS_MS_DEFAULT, landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT, redWindowMin = RED_WINDOW_MIN_DEFAULT, now = Date.now() }) {
+export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, floorCap, inFlight = [], closedButLive = [], topN = 0, targetedId = null, develop = "develop", integration = "integration", master = "master", landingStalenessMs = LANDING_STALENESS_MS_DEFAULT, landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT, redWindowMin = RED_WINDOW_MIN_DEFAULT, now = Date.now(), taskReadRef = null }) {
   const allTasks = new Map();
   const fileNames = fs.existsSync(tasksDir)
     ? fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))
     : [];
+  // SINGLE-SOURCE dispatch read (gap-dispatch-reads-stale-main-checkout-task-status): when
+  // taskReadRef names a git ref, ALL task files are read from THAT ref (the canonical develop store)
+  // in ONE batched `git cat-file --batch` process, falling back to the working-tree disk only for
+  // tasks not yet on the ref. The manager working branch's disk is a stale agent-proxy — reading it
+  // for status re-dispatches already-done tasks (硬规则 4b).
+  const refTasks = taskReadRef
+    ? readTaskFilesAtRefBatch(root, taskReadRef, fileNames.map((f) => f.replace(/\.md$/, "")))
+    : null;
   for (const f of fileNames) {
     const id = f.replace(/\.md$/, "");
-    const raw = fs.readFileSync(path.join(tasksDir, f), "utf8");
+    const raw = refTasks
+      ? (refTasks.get(id) ?? fs.readFileSync(path.join(tasksDir, f), "utf8"))
+      : fs.readFileSync(path.join(tasksDir, f), "utf8");
     const task = parseTask(raw);
     task.id = id;
     task.status = readFrontField(task.frontmatterRaw, "status") || "";
@@ -2566,6 +2633,9 @@ function main(argv) {
   let landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT;
   let redWindowMin = RED_WINDOW_MIN_DEFAULT;
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) {
+    helpExit(`usage: node --experimental-strip-types plugin/scripts/ready-pool-check.ts [--root <repo>] [--cap <n>] [--floor-mult <n>] [--floor-cap <n>] [--in-flight <ids>] [--closed-but-live <ids>] [--top <n>] [--targeted <id>] [--develop <ref>] [--integration <ref>] [--master <ref>] [--landing-staleness-ms <n>] [--landing-behind-threshold <n>] [--red-window-min <n>] [--apply] [--revaluate-apply] [--json]`);
+  }
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
     else if (args[i] === "--json") { /* output is always JSON — accepted for Contract parity */ }
@@ -2626,7 +2696,7 @@ function main(argv) {
   // promotes OR revalues, never both mid-flight).
   let result;
   if (revaluateApply) result = applyRevaluations(base);
-  else result = apply ? applyPromotions(base) : analyzeTasks(base);
+  else result = apply ? applyPromotions(base) : analyzeTasks({ ...base, taskReadRef: develop });
   if (process.env.CHECKER_COST_SKIP !== "1") {
     recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: result.pool, load: getLoad1() });
   }

@@ -37,7 +37,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildNonCodeMask } from "./checker-lib.ts";
-import { readFileSafe } from "./gate-script-base.ts";
+import { helpExit, readFileSafe } from "./gate-script-base.ts";
 import { canonicalTestFiles } from "./test-framework-policy-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -315,6 +315,7 @@ function usage(): never {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node live-repo-literal-assert-check.ts [<workspace-root>] [--json] [--selftest] [--files <rel> ...]");
   if (args.includes("--selftest")) return runSelftest() ? 0 : 1;
   const asJson = args.includes("--json");
   const filesIdx = args.indexOf("--files");
