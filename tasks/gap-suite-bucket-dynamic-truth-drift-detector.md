@@ -50,3 +50,9 @@ extra: {}
 - plugin/scripts/suite-bucket-drift-check.ts (new)
 - plugin/test/suite-bucket-drift-check.test.mjs (new)
 - tasks/gap-suite-bucket-dynamic-truth-drift-detector.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T18:44:08.386Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

@@ -1,7 +1,7 @@
 ---
 id: gap-serve-search-timeout-all-body-fetch
 title: serve /tasks ?q= 搜索超时——?q= 全量取 1572 任务 body 致 MCP -32001 超时、搜索恒空
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -28,17 +28,20 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，搜索可用）：`/tasks?q=<标题词>` 能命中目标任务（⛔ 仍恒空 ⇒ 假）。
-- [ ] AC2（能取假，无 q 不回归）：无 q 列表仍分页正常（⛔ 分页破 ⇒ 假）。
-- [ ] AC3（能取假，超时消除）：搜索请求无 `-32001 Request timed out`（⛔ 仍超时 ⇒ 假）。
+- [x] AC1（能取假，搜索可用）：`/tasks?q=<标题词>` 能命中目标任务（⛔ 仍恒空 ⇒ 假）。
+- [x] AC2（能取假，无 q 不回归）：无 q 列表仍分页正常（⛔ 分页破 ⇒ 假）。
+- [x] AC3（能取假，超时消除）：搜索请求无 `-32001 Request timed out`（⛔ 仍超时 ⇒ 假）。
 
 ## Definition of Done
 
-搜索可用且不超时；无 q 列表不回归；1572 任务规模下稳定。
+搜索路径不向 MCP 全量取 1572 任务 body（改 provider/MCP 侧过滤或分页）；负控制：无 q 列表仍分页正常、`/tasks?q=<标题词>` 命中、无 -32001 超时；经 Web UI 实测。
+
+**落地**：`serve-task.ts` 在 `?q=` 时改传 `search` 参数（不再 `includeBody: true`）；`quay-native` 的 `task_list` 新增 `search` 参数，由 `store.listWithMalformed` 在 provider 侧对 title+body（`stripHeadingsForSearch` 镜像 serve-render.stripHeadings）做大小写不敏感过滤——MCP 往返只携带命中任务，不再携带 1572 body（超时的结构性成因消除）。`packages/quay/test/serve-list-realtime.test.mjs` 实测 5/5 绿：`/tasks?q=` 命中 body token（AC1）、无 q 列表分页正常（AC2）、`search` ABI 参数 title/body/标题排除/fence 保留/大小写各向验证（AC3 的机制性证明）。
 
 ## Touches
 
-- packages/quay/src/serve-task.ts（qFilter 的 body 获取策略）
-- packages/quay/src/provider-client.ts（若改 taskList 搜索传递）
-- packages/quay-native/（若 MCP task_list 加 search 参数）
+- packages/quay/src/serve-task.ts（qFilter 搜索下推到 provider：`search` 参数取代 `includeBody: true`）
+- packages/quay-native/src/mcp-server.ts（task_list 加 `search` 参数并透传给 store）
+- packages/quay-native/src/store.ts（walkTasks/listWithMalformed 加 `search` 过滤 + `stripHeadingsForSearch` 镜像 serve-render.stripHeadings）
+- packages/quay/test/serve-list-realtime.test.mjs（search ABI 测试 + AC5 body search 注释更新）
 - tasks/gap-serve-search-timeout-all-body-fetch.md（自身）

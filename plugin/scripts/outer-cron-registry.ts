@@ -2,6 +2,12 @@
 // (tasks/gap-ac81-registry-receipt-and-four-criteria, AC1-AC6 + DoD;
 //  tasks/gap-cron-registry-global-path-migration, AC1-AC5).
 //
+// ⛔ RETIRED-WITH-RETIRING-LAYER (gap-b0-retirement-precondition-checker-call-surface)：本脚本只被 outer
+//   执行核（orchestrator-tick-core.md A23，AC81 锚核实）引用，无任何退役层之外的留存调用面。
+//   outer/inner 的 CronCreate 锚将随两层退役而消失（SPEC §2.3b），本注册表收据/四判据核实随之失去
+//   对象——【随退役层显式退役】（与 outer-anchor-check.ts 一并，它是本脚本的唯一 import 来源）。
+//   该标记被 outer-retirement-precondition-check.ts 机械识别为「已处置」。
+//
 // 回答的问题（@instrument）：「outer/inner 的 CronCreate 锚是否有一个注册表收据（cron id +
 //   cron 表达式 + prompt sha256 + 创建时刻），且每轮四判据核实（① CronList 恰一条 ∧ ② id==注册表 ∧
 //   ③ 收据未过期 registry-verified ∧ ④ prompt sha256==正本）能取假——并在 CronCreate 文档的

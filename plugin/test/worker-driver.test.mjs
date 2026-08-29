@@ -1929,6 +1929,32 @@ test("AC1 (integration, 复现) — re-dispatch of an exited-not-landed task pas
   assert.equal(worktreePresentForTask(root, "gap-ce"), true, "worktree still preserved after re-dispatch (⛔ not cleaned)");
 });
 
+// ── gap-continue-prompt-conflict-resolution-protocol ────────────────────────────────────────────────
+// 机械 fan-in 的 merge develop 步在 CONTINUE 轮撞冲突时，旧 prompt 只带失败原因、不含消解指令 ⇒
+// 消冲突靠 worker 自行发挥（运气）。AC1（指令存在）/ AC2（derived 重算，⛔ 手并计数）/ AC3（code 语义
+// 并集 + git commit --no-edit）钉住 prompt 里三类消解指令，删掉任一条 ⇒ 测试红（AC4 能取假）。
+
+test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-conflict resolution protocol (derived re-compute / code semantic-union / commit --no-edit)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "mechanical fan-in red at merge develop (CONFLICT in docs/proposals/quay-product-outline.md)",
+  });
+  // AC1 (指令存在): prompt names the conflict state (unmerged paths / CONFLICT) and the resolve action.
+  assert.match(p, /(unmerged|CONFLICT)/, "AC1: prompt names the merge-conflict state (unmerged paths / CONFLICT)");
+  assert.match(p, /resolve/, "AC1: prompt instructs the worker to resolve the conflict");
+  assert.match(p, /never exit while unmerged paths remain/, "AC1: prompt forbids exiting with unmerged paths (next fan-in merge step would fail again)");
+  // AC2 (derived 重算): outline inventory conflict ⇒ re-run the deriving command, ⛔ hand-merge the counts.
+  assert.match(p, /verify-delivery-surface\.ts --write-inventory/, "AC2: derived-file conflict ⇒ re-run verify-delivery-surface.ts --write-inventory");
+  assert.match(p, /do NOT hand-merge the counts/, "AC2: derived-file conflict ⇒ ⛔ hand-merge the counts (recompute instead)");
+  // AC3 (code 并集 + commit): code conflict ⇒ semantic union + git commit --no-edit.
+  assert.match(p, /semantic union/, "AC3: code-file conflict ⇒ take the semantic union of both sides");
+  assert.match(p, /git commit --no-edit/, "AC3: complete the merge with git commit --no-edit");
+});
+
 // ── AC150-3 (falsifiable): 资源门/halt 判定抽到 driver-shared.ts，worker-driver 只是 re-export ──
 
 test("AC150-3 — worker-driver re-exports the SAME resourceGateCheck / isHalted as driver-shared (单份实现)", async () => {
@@ -2215,6 +2241,21 @@ test("AC3 (cold-start-refresh) — per-pass observation: no one-time `const cold
   assert.doesNotMatch(src, /const\s+coldInflight\s*=/, "AC3: the one-time `const coldInflight` snapshot is gone (⛔ frozen snapshot ⇒ fake in-flight forever)");
   assert.match(src, /let\s+coldInflight\s*=\s*new Set/, "coldInflight is a mutable per-pass binding, not a frozen snapshot");
   assert.match(src, /coldInflight\s*=\s*await\s+enumerateColdStartInflightAsync\(rootDir\)/, "coldInflight is re-observed via enumerateColdStartInflightAsync each pass (async — 不阻塞地板)");
+});
+
+// ── gap-archguard-structural-gate-in-fan-in-driver：archguard 结构闸接进机械 fan-in ──────────────
+
+test("AC1 (gap-archguard-structural-gate-in-fan-in-driver) — runMechanicalFanIn 在 typecheck 后、scoped门 前接 archguard 结构闸（step=archguard-structure），带 archguardCommand 测试缝", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  // 步骤顺序按位置判定（⛔ 不按关键词）：typecheck（第 5 步）→ archguard（第 5.5 步）→ scoped门（第 6 步）。
+  const typecheckIdx = src.indexOf("// 5. ts-typecheck 闸");
+  const archguardIdx = src.indexOf("// 5.5 archguard 结构闸");
+  const scopedIdx = src.indexOf("// 6. scoped 门 + doc 检查");
+  assert.ok(typecheckIdx !== -1 && archguardIdx !== -1 && scopedIdx !== -1, "all three step markers must be present");
+  assert.ok(typecheckIdx < archguardIdx && archguardIdx < scopedIdx, `archguard must sit between typecheck and scoped门 (${typecheckIdx} < ${archguardIdx} < ${scopedIdx})`);
+  assert.match(src, /archguardCommand\?/, "the archguardCommand test seam is declared on MechanicalFanInOptions");
+  assert.match(src, /fail\("archguard-structure"/, "dependency-cycle red returns step=archguard-structure");
+  assert.match(src, /archguard-runner\.ts/, "the default archguard command references archguard-runner.ts");
 });
 
 // ── gap-worker-driver-stopreason-latch-permanent-stop ──────────────────────────────────────────────
