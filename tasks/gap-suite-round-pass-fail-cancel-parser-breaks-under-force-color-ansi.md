@@ -2,7 +2,7 @@
 id: gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi
 title: suite 轮 pass/fail/cancel 摘要解析器在 FORCE_COLOR=3 ANSI
   下失效——verification-round 缺四字段（成簇缺陷，硬规则 5b 两表面）
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -50,3 +50,9 @@ extra:
 - plugin/test/pre-verified-round-record.test.mjs（ANSI 摘要行解析测试 + 负控制）
 - plugin/test/full-suite-runner.test.mjs（ANSI 摘要行解析测试）
 - tasks/gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T14:52:56.722Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

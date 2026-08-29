@@ -97,3 +97,9 @@ AC2 要求「全仓 grep ②类 inner 拓扑/窗口/会话引用 = 0，①类 + 
 - plugin/test/manager-productization.test.mjs（manager-adopt.sh 的三态消费者，未改但须覆盖）
 - plugin/test/no-manager-tick-doc-check.test.mjs（mutation case 的配对测试，同步 建两窗口→建单窗口 fixture）
 - tasks/gap-retire-inner-session-references.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T17:28:16.643Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
