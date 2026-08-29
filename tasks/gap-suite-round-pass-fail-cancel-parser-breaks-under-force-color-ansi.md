@@ -2,7 +2,7 @@
 id: gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi
 title: suite 轮 pass/fail/cancel 摘要解析器在 FORCE_COLOR=3 ANSI
   下失效——verification-round 缺四字段（成簇缺陷，硬规则 5b 两表面）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -35,9 +35,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，生产载体）：在 FORCE_COLOR=3 环境下，`verification-round.jsonl` 每轮记录仍含 pass/fail/cancelled/tests 四字段且值>0（⛔ 缺字段或值=0 ⇒ 假——把 fixture/注入 seam 关掉仍能过才是测量）。
-- [ ] AC2（能取假，两表面都覆盖）：pre-verified-round-record.ts 与 full-suite-runner.ts 两处解析器在 ANSI 摘要行下都能正确解析（⛔ 只修一处 ⇒ 假——硬规则 5b）。
-- [ ] AC3（能取假，负控制）：FORCE_COLOR=3 下回放 #684/#685 的带色 log，四字段解析出与无 ANSI 时一致的正确值。
+- [ ] AC1（能取假，生产载体）：在 FORCE_COLOR=3 环境下，`verification-round.jsonl` 每轮记录仍含 pass/fail/cancelled/tests 四字段且值>0（⛔ 缺字段或值=0 ⇒ 假——把 fixture/注入 seam 关掉仍能过才是测量）。（待外部）
+- [x] AC2（能取假，两表面都覆盖）：pre-verified-round-record.ts 与 full-suite-runner.ts 两处解析器在 ANSI 摘要行下都能正确解析（⛔ 只修一处 ⇒ 假——硬规则 5b）。
+- [x] AC3（能取假，负控制）：FORCE_COLOR=3 下回放 #684/#685 的带色 log，四字段解析出与无 ANSI 时一致的正确值。
 
 ## Definition of Done
 
