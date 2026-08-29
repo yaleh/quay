@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption
 title: ready-pool notYetFlipped allChecked 臂排除「fan-in 失败未落地」任务 → 永久搁浅 + 冻住整池
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -52,3 +52,8 @@ return doneFlipReady || (allChecked && !hasLeftoverWorktree);
 - plugin/test/ready-pool-check.test.mjs（AC1/AC2/AC3 用例）
 - plugin/test/slot-refill.test.mjs（AC5，excludedNyfIds 消费行为）
 - tasks/gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption.md（自身）
+## Needs-Human
+
+**执行 2026-08-29T17:57:37.044Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
