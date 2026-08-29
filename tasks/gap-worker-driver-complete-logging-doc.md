@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-complete-logging-doc
 title: worker-driver 可观测性——每步完整记录 stdout+stderr + 日志路径单一正本（防 reason 载体失真再犯）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -28,8 +28,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，失败必记全）：某步失败时，其日志/outcome reason 含 stdout 失败签名（⛔ 只含 stderr 良性 preamble ⇒ 假）。
-- [ ] AC2（能取假，正本覆盖）：日志路径正本文档覆盖全部载体，且「失败必记 stdout+stderr」不变量在文档中（⛔ 漏载体 / 无不变量 ⇒ 假）。
+- [x] AC1（能取假，失败必记全）：某步失败时，其日志/outcome reason 含 stdout 失败签名（⛔ 只含 stderr 良性 preamble ⇒ 假）。
+- [x] AC2（能取假，正本覆盖）：日志路径正本文档覆盖全部载体，且「失败必记 stdout+stderr」不变量在文档中（⛔ 漏载体 / 无不变量 ⇒ 假）。
 
 ## Definition of Done
 
