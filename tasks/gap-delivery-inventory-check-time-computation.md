@@ -36,11 +36,14 @@ outline 的 §6 计数不再是手编辑的提交快照，而是由 `verify-deli
 
 ## Touches
 
-- plugin/scripts/delivery-inventory-drift-gate.sh（现算/退役）
 - plugin/scripts/verify-delivery-surface.ts（--inventory 现算承载）
+- plugin/scripts/delivery-inventory-drift-gate.sh（outline 触发退役，保留 workflow 镜像触发）
+- plugin/scripts/runner-static-gate.ts（gate @static-object/注释同步）
+- plugin/scripts/select-static-checks-for-touches.ts（移除 DELIVERY_INVENTORY_CHECKER + 注册表去 outline）
+- plugin/scripts/capability-catalog.sh（gate 六表标注）
+- plugin/scripts/checker-mutation-cases/delivery-inventory-drift-gate.sh（移除 script 阶段）
 - docs/proposals/quay-product-outline.md（§6 移除手编辑计数）
-- plugin/scripts/verify-deliver-coldstart.sh（改读现算）
-- plugin/scripts/release-freshness-check.sh（改读现算）
-- plugin/scripts/select-static-checks-for-touches.ts（gate 语义/退役）
-- plugin/scripts/capability-catalog.sh（gate 标注）
+- plugin/test/verify-delivery-surface.test.mjs（inventory 测试重写）
+- plugin/test/delivery-inventory-drift-gate.test.mjs（移除 outline 测试）
+- plugin/test/select-static-checks-for-touches.test.mjs（注册表断言更新）
 - tasks/gap-delivery-inventory-check-time-computation.md（自身）

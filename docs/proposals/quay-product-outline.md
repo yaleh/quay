@@ -191,23 +191,19 @@ post-friction**（被硌了才发现）。而探针**本来就是设计来做 pr
 
 ## 6. 交付
 
-> **单一事实源（2026-08-08，`gap-delivery-outline-vs-verify-surface-single-source`，人裁定）**：
-> plugin bundle 的目录计数不再是本节的独立散文——单一事实源是
-> `plugin/scripts/verify-delivery-surface.ts --inventory`（机械计算磁盘真值）。本节下方的
-> **机读快照是派生副本**，由该检查逐项校验（改一份不提醒另一份 = 漂移被 `inventory_drift` 报出）。
-> 交叉标注：ADR-024（裁定↔机械检查可追溯绑定）——本裁定（verify-delivery-surface 为交付物清单源）
-> 与 `--inventory` 漂移检查机械绑定，覆盖了 ADR-024 原案未覆盖的 outline-vs-check 对。
+> **单一事实源（2026-08-08 `gap-delivery-outline-vs-verify-surface-single-source` 人裁定；2026-08-29
+> `gap-delivery-inventory-check-time-computation` 收官）**：plugin bundle 的目录计数**现算、不再有提交快照**——
+> 单一事实源是 `plugin/scripts/verify-delivery-surface.ts --inventory`（机械计算磁盘真值，一条命令可查）。
+> 2026-08-08 的裁定曾保留一个「机读快照 = 派生副本」并要求逐项校验（改一份不提醒另一份 = 漂移被 `inventory_drift` 报出），
+> 但那份副本本身成了所有 script 任务的公共串行点（2026-08-29 批量重派 4 个 merge 冲突里 3 个撞在 outline 的 `scripts=N`）。
+> 现移除派生副本：计数只在 check 时现算，无快照可漂移、无共享冲突热点。
 
 | 项 | 内容 |
 |---|---|
-| plugin bundle | 目录计数由 `node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --inventory` 派生（单一事实源）；当前快照见下方机读块（**非独立维护**——漂移会被机械报出）。向 `plugin/` 加/删文件后跑 `verify-delivery-surface.ts --write-inventory` 再生成快照（`--inventory` 报 `inventory_drift>0` 即提示该做） |
+| plugin bundle | 目录计数由 `node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --inventory` **check 时现算**（单一事实源，一条命令可查）——无提交快照、无需再生成（`--write-inventory` 已退役） |
 | 铺设 | `quay-init`（幂等），铺设集由文档引用**派生**而非硬编码 |
 | release 新鲜度 | `bash plugin/scripts/release-freshness-check.sh`（gap-release-freshness-no-recut-mechanism）——重切触发：develop 领先最新 release tag 超阈值报 WARN（机械量 `git rev-list --count <tag>..develop`）；漂移闸：release tag 树 vs develop 机制集逐目录计数对比（复用 delivery-inventory 思路对 release 面）。DIR-061 覆盖「构建」不覆盖「保持 release 当前」，此检查补该缺口 |
 | 升级通道 | `quay-init` 内有 upgrade 逻辑，但目标项目实测仍会冻结在安装那一刻——**交付面自己在长大，目标没有跟上的路径**（已立案未闭） |
-
-<!-- DELIVERY-INVENTORY-BEGIN -->
-scripts=294 · gate-scripts=14 · skills=13 · probes=5 · loop=6 · workflows=5 · agents=1 · vendor=2
-<!-- DELIVERY-INVENTORY-END -->
 
 ### 6b. 前置条件（2026-08-08，`gap-delivery-outline-vs-verify-surface-single-source` AC4）
 
