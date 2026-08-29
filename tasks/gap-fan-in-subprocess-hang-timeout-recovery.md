@@ -26,10 +26,10 @@ A+B 任务（gap-fan-in-merge-develop-derived-recompute-and-reason）的机械 f
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，instrument）：fan-in 每步有开始/结束日志，可据日志定位挂起步（改掉 ⇒ 日志缺失）。
-- [ ] AC2（能取假，超时盲区）：构造「子进程 spawn 孙进程持有 stdout/stderr 管道」场景，断言 `runAsync` 在 timeout 后**仍能 resolve**（不依赖 close 事件，孙进程持管道不阻塞返回）。
-- [ ] AC3（能取假，suite 未起）：`spawnSuiteAndWait` 在「suite 子进程卡在等 suite slot 锁、未产生日志」时，silence watchdog 或显式超时能在有限时间 kill 并返回（非 53min 挂死）。
-- [ ] AC4（能取假，锁释放）：任一 fan-in 子进程挂起 ⇒ fan-in 在有限时间失败并**释放 fan-in-workflow.lock**（`releaseLock` 必达，锁不残留）。
+- [x] AC1（能取假，instrument）：fan-in 每步有开始/结束日志，可据日志定位挂起步（改掉 ⇒ 日志缺失）。
+- [x] AC2（能取假，超时盲区）：构造「子进程 spawn 孙进程持有 stdout/stderr 管道」场景，断言 `runAsync` 在 timeout 后**仍能 resolve**（不依赖 close 事件，孙进程持管道不阻塞返回）。
+- [x] AC3（能取假，suite 未起）：`spawnSuiteAndWait` 在「suite 子进程卡在等 suite slot 锁、未产生日志」时，silence watchdog 或显式超时能在有限时间 kill 并返回（非 53min 挂死）。
+- [x] AC4（能取假，锁释放）：任一 fan-in 子进程挂起 ⇒ fan-in 在有限时间失败并**释放 fan-in-workflow.lock**（`releaseLock` 必达，锁不残留）。
 
 ## Definition of Done
 

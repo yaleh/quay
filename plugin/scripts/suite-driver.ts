@@ -205,6 +205,7 @@ export async function spawnSuiteAndWait(args: {
       if (settled) return;
       settled = true;
       clearInterval(watchdog);
+      suiteLogStream?.end();
       resolve(r);
     };
 
@@ -220,6 +221,20 @@ export async function spawnSuiteAndWait(args: {
       if (Date.now() - lastActivityMs >= silenceMs) {
         hungByWatchdog = true;
         killTree(child, "SIGKILL");
+        // 显式 resolve（⛔ 不依赖 close 事件）：孙进程持 stdout/stderr 管道 ⇒ close 永不触发 ⇒ 挂死。
+        // kill 后立即 finish(hung)，即使 close 被管道持有的孙进程拖住，也在有限时间返回
+        // （gap-fan-in-subprocess-hang-timeout-recovery AC3：suite 未起/等槽锁零输出也覆盖）。
+        finish({
+          outcome: "hung",
+          exitCode: null,
+          signalCode: "SIGKILL",
+          hungByWatchdog: true,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          durationMs: Date.now() - startedMs,
+          error: "silence watchdog killed the suite (no output ≥ silence timeout)",
+          pid: childPid,
+        });
       }
     }, SILENCE_POLL_MS);
 
@@ -227,7 +242,6 @@ export async function spawnSuiteAndWait(args: {
       finish({ outcome: "red", exitCode: null, signalCode: null, hungByWatchdog, startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedMs, error: `spawn error: ${e.message}`, pid: childPid });
     });
     child.on("close", (code, signal) => {
-      suiteLogStream?.end();
       const finishedAt = new Date().toISOString();
       const durationMs = Date.now() - startedMs;
       // 三态可分（AC2）：被静默看门狗杀 ⇒ hung（独立取值）；正常退出 0 ⇒ done；非零/信号 ⇒ red。
