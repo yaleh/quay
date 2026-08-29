@@ -75,6 +75,11 @@ import {
   computeFfStarvationRelief,
   classifyFfPerpetrator,
   classifyNonLandingCause,
+  // EXITED-NOT-LANDED CONTINUE EXEMPTION (tasks/gap-slot-refill-continue-touches-overlap-redundant-
+  // exemption): the live detection of exited-not-landed CONTINUE candidates (residual worktree +
+  // worker-outcome final_state=exited-not-landed) — unit-tested directly so the production mechanism
+  // (not just the injected seam) is covered.
+  computeExitedNotLandedContinueIds,
 } from "../scripts/slot-refill.ts";
 // AC2 (gap-delivery-critical-label-at-promote-not-after-dispatch): the promote gate is the fix's
 // label DETERMINATION point — applyPromotions (ready-pool-check --apply heartbeat) flips todo→ready
@@ -83,7 +88,7 @@ import {
 // AC47 (gap-ac47-completion-predicate-consumer-fail-closed): the shape-aware completion counter (the
 // single source both slot-refill's landed gate and ready-pool-check's notYetFlipped consume) — needed
 // directly for the AC2 all-5-consumers negative control on the DIR-014 suffixed-heading shape.
-import { applyPromotions, countCompletionCheckboxes, RETREATED_MARKER_RE, isRetreated } from "../scripts/ready-pool-check.ts";
+import { applyPromotions, countCompletionCheckboxes, RETREATED_MARKER_RE, isRetreated, analyzeTasks } from "../scripts/ready-pool-check.ts";
 import { countAcCheckboxes } from "../scripts/task-status-drift-check.ts";
 // AC53 gate (gap-scheduler-inflight-detection-misses-fan-in-worktree AC2): the END invariant the AC53
 // heartbeat gate judges on — `violated === false` ⇒ the gate ACCEPTS the round end (no false refusal).
@@ -1816,6 +1821,55 @@ test("isNotYetFlippedSkip — pure unit: excludedNyfIds arm, merge arm, AC gate,
   assert.equal(hasFanInMerge(root, "gap-nonexistent"), false);
 });
 
+// ── LEFTOVER-WORKTREE EXEMPTION (gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption) ──
+// slot-refill's `excludedNyfIds` is DERIVED from ready-pool-check.analyzeTasks' pool.excluded (reason
+// "not-yet-flipped") — single source. Before the fix, an allChecked task whose fan-in FAILED (a leftover
+// `task/<id>` worktree, no merge record) was excluded by the allChecked arm ⇒ excludedNyfIds ⇒
+// isNotYetFlippedSkip true ⇒ deferred forever. After the fix, the leftover worktree exempts the
+// allChecked arm ⇒ the task stays in pool.ready (dispatchable) ⇒ NOT in excludedNyfIds ⇒ not skipped.
+// AC5: the slot-refill consumer is correct with NO slot-refill change.
+
+test("NOT-YET-FLIPPED — a leftover task/<id> worktree exempts the allChecked arm ⇒ task NOT in excludedNyfIds ⇒ isNotYetFlippedSkip false (leftover-worktree exemption, AC5)", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-leftover-`));
+  const wtPath = path.join(dir, "..", `${path.basename(dir)}-leftover`);
+  t.after(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "code"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  runGit(dir, "init", "-q");
+  runGit(dir, "config", "user.email", "t@t");
+  runGit(dir, "config", "user.name", "t");
+  fs.writeFileSync(path.join(dir, "base.txt"), "base\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "base");
+  runGit(dir, "branch", "-M", "develop");
+
+  const id = "gap-nyf-leftover";
+  // All 3 ACs checked; `code/touched.ts` is an existing (non-(new)) touch ⇒ taskWorkLanded stays false;
+  // no merge record ⇒ the ONLY not-yet-flipped candidate signal is the allChecked arm.
+  writeTask(dir, id, { status: "ready", labels: ["gap"], body: fannedInBody(3, 3) });
+  // The leftover task/<id> worktree (the fan-in-failed shape — branch present, never merged).
+  runGit(dir, "worktree", "add", "-q", "-b", `task/${id}`, wtPath);
+
+  // Single source: analyzeTasks keeps the task in ready (not excluded) ⇒ excludedNyfIds is empty.
+  const pool = analyzeTasks({ tasksDir: path.join(dir, "tasks"), root: dir });
+  const excludedNyfIds = new Set(
+    (pool.excluded || []).filter((e) => e.reasons.includes("not-yet-flipped")).map((e) => e.id),
+  );
+  assert.equal(pool.ready.includes(id), true, "leftover-worktree allChecked task stays in pool.ready — dispatchable (AC5)");
+  assert.equal(excludedNyfIds.has(id), false, "leftover-worktree allChecked task is NOT in excludedNyfIds (AC5)");
+  assert.equal(isNotYetFlippedSkip({ id, body: fannedInBody(3, 3), root: dir, excludedNyfIds }), false,
+    "isNotYetFlippedSkip false — not deferred as not-yet-flipped (AC5)");
+
+  // Negative control: removing the worktree restores the 2026-08-08 allChecked exclusion.
+  runGit(dir, "worktree", "remove", "--force", wtPath);
+  const pool2 = analyzeTasks({ tasksDir: path.join(dir, "tasks"), root: dir });
+  const excludedNyfIds2 = new Set(
+    (pool2.excluded || []).filter((e) => e.reasons.includes("not-yet-flipped")).map((e) => e.id),
+  );
+  assert.equal(excludedNyfIds2.has(id), true, "without the worktree the allChecked task is excluded again (AC5 negative control)");
+});
+
 // ── LANDED-IMPLEMENTATION (tasks/gap-slot-refill-recommends-landed-code-complete-tasks) ──────────────
 // slot-refill's recommended used to PERMANENTLY include tasks whose IMPLEMENTATION is already in the
 // tree — a develop commit whose message contains the task id AND changed files outside tasks/ — but
@@ -2648,4 +2702,113 @@ test("IN-FLIGHT WORKTREE (AC2) — the default (no injection) reads the live wor
   // (fail-soft) ⇒ behavior is byte-identical to the pre-fix path.
   const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5, inFlight: [] });
   assert.ok(r.recommended.includes("gap-a"), "no worktree in flight ⇒ the candidate is recommended as before");
+});
+
+// ── EXITED-NOT-LANDED CONTINUE EXEMPTION (gap-slot-refill-continue-touches-overlap-redundant-
+// exemption): an exited-not-landed CONTINUE candidate (residual task/<id> worktree + worker-outcome
+// final_state=exited-not-landed) is already worktree-isolated and its landing serialization is
+// enforced by the fan-in lock — so the dispatch-level touches-overlap defer is redundant and must be
+// SKIPPED (AC1); a fresh candidate (no worktree) keeps the defer (AC2 regression); the exemption must
+// NOT mask any other step-4 gate. ──────────────────────────────────────────────────────────────────
+
+test("CONTINUE EXEMPTION (AC1) — an exited-not-landed continue candidate overlapping an in-flight peer is NOT deferred ⇒ enters recommended", (t) => {
+  const root = makeWorkspace("continue-exempt");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The continue candidate declares the SAME file as the in-flight peer (a genuine overlap).
+  writeTask(root, "gap-cont", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/shared.ts (new)"]) });
+  const inFlight = [inFlightTask("gap-other", ["- code/shared.ts (new)"])];
+
+  const r = analyzeSlotRefill({
+    tasksDir: path.join(root, "tasks"),
+    root,
+    cap: 5,
+    inFlight,
+    continueExemptIds: ["gap-cont"],
+  });
+
+  assert.ok(r.recommended.includes("gap-cont"), "the continue candidate is recommended (exempt from touches-overlap defer)");
+  const deferred = (r.deferred || []).filter((d) => d.id === "gap-cont");
+  assert.equal(deferred.length, 0, `gap-cont must NOT be deferred, got: ${JSON.stringify(deferred)}`);
+});
+
+test("CONTINUE EXEMPTION (AC2) — regression: a fresh candidate (NOT exempt) with the same overlap is still deferred", (t) => {
+  const root = makeWorkspace("continue-fresh");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-fresh", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/shared.ts (new)"]) });
+  const inFlight = [inFlightTask("gap-other", ["- code/shared.ts (new)"])];
+
+  const r = analyzeSlotRefill({
+    tasksDir: path.join(root, "tasks"),
+    root,
+    cap: 5,
+    inFlight,
+    continueExemptIds: [], // fresh (no worktree) ⇒ not exempt
+  });
+
+  assert.ok(!r.recommended.includes("gap-fresh"), "the fresh candidate stays deferred");
+  const deferred = (r.deferred || []).filter((d) => d.id === "gap-fresh");
+  assert.equal(deferred.length, 1, "the fresh candidate is deferred");
+  assert.match(deferred[0].reason, /touches-overlap-in-flight/, "deferred with the touches-overlap-in-flight reason");
+});
+
+test("CONTINUE EXEMPTION — the exemption skips ONLY the overlap defer; other gates still apply (deps-not-ready)", (t) => {
+  const root = makeWorkspace("continue-gate");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // A continue-exempt candidate whose PARENT is not done must still be deferred (deps-not-ready) —
+  // the exemption must not mask a genuine defect.
+  writeTask(root, "gap-cont", { status: "ready", labels: ["gap"], parent: "gap-never-done", body: dispatchableBody(["- code/shared.ts (new)"]) });
+  const inFlight = [inFlightTask("gap-other", ["- code/shared.ts (new)"])];
+
+  const r = analyzeSlotRefill({
+    tasksDir: path.join(root, "tasks"),
+    root,
+    cap: 5,
+    inFlight,
+    continueExemptIds: ["gap-cont"],
+  });
+
+  assert.ok(!r.recommended.includes("gap-cont"), "a continue candidate with an unmet dep is still deferred");
+  const deferred = (r.deferred || []).filter((d) => d.id === "gap-cont");
+  assert.equal(deferred.length, 1, "deferred once");
+  assert.match(deferred[0].reason, /deps-not-ready/, "deferred with deps-not-ready (not the skipped overlap reason)");
+});
+
+test("CONTINUE EXEMPTION — computeExitedNotLandedContinueIds: exited-not-landed record + residual task/<id> worktree ⇒ id present", (t) => {
+  const root = makeGitWorkspace("continue-live", 0);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // A real residual task/<id> worktree (the worktree-isolated half).
+  const wtDir = fs.mkdtempSync(path.join(os.tmpdir(), "slot-refill-cont-wt-"));
+  t.after(() => fs.rmSync(wtDir, { recursive: true, force: true }));
+  runGit(root, "worktree", "add", "-b", "task/gap-cont", wtDir, "develop");
+  // worker-outcome final_state=exited-not-landed (the other half).
+  fs.writeFileSync(path.join(root, ".quay", "worker-outcome.jsonl"), JSON.stringify({ task: "gap-cont", final_state: "exited-not-landed" }) + "\n");
+
+  const ids = computeExitedNotLandedContinueIds(root);
+  assert.ok(ids.has("gap-cont"), `exited-not-landed + residual worktree ⇒ continue-exempt, got ${JSON.stringify([...ids])}`);
+});
+
+test("CONTINUE EXEMPTION — computeExitedNotLandedContinueIds negative controls: no worktree / completed record / no record ⇒ absent", (t) => {
+  // (a) record WITHOUT a residual worktree ⇒ not continue (fresh task keeps the conservative defer).
+  {
+    const root = makeGitWorkspace("continue-neg-a", 0);
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(root, ".quay", "worker-outcome.jsonl"), JSON.stringify({ task: "gap-cont", final_state: "exited-not-landed" }) + "\n");
+    assert.equal(computeExitedNotLandedContinueIds(root).has("gap-cont"), false, "record without worktree ⇒ not exempt");
+  }
+  // (b) a COMPLETED record + residual worktree ⇒ not continue (only exited-not-landed is continue).
+  {
+    const root = makeGitWorkspace("continue-neg-b", 0);
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const wtDir = fs.mkdtempSync(path.join(os.tmpdir(), "slot-refill-cont-wtb-"));
+    t.after(() => fs.rmSync(wtDir, { recursive: true, force: true }));
+    runGit(root, "worktree", "add", "-b", "task/gap-done", wtDir, "develop");
+    fs.writeFileSync(path.join(root, ".quay", "worker-outcome.jsonl"), JSON.stringify({ task: "gap-done", final_state: "completed" }) + "\n");
+    assert.equal(computeExitedNotLandedContinueIds(root).has("gap-done"), false, "completed record ⇒ not exempt");
+  }
+  // (c) NO record at all ⇒ empty (fail-soft, the exemption restores the pre-existing conservative defer).
+  {
+    const root = makeGitWorkspace("continue-neg-c", 0);
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    assert.equal(computeExitedNotLandedContinueIds(root).size, 0, "no worker-outcome.jsonl ⇒ empty set");
+  }
 });
