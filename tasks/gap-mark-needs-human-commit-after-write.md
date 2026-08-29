@@ -1,7 +1,7 @@
 ---
 id: gap-mark-needs-human-commit-after-write
 title: markNeedsHuman 写盘不提交 git——needs-human 翻转缺 commit-after-write（硬规则 5b 只落到 todo→ready 兄弟）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -32,10 +32,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，写盘即提交）：markNeedsHuman 翻转 needs-human 后，`tasks/<id>.md` 已 commit（⛔ 翻转后 git status 仍 M ⇒ 假）。
-- [ ] AC2（能取假，pathspec 限定）：commit 用 `-- <rel>` 单文件，不扫共享索引（⛔ 裸 commit ⇒ 假）。
-- [ ] AC3（能取假，ff 到 develop）：翻转 commit 后 `propagateDocBranchToDevelop` 执行，develop 读到新 status（⛔ 只提交 doc 分支不 ff ⇒ 假）。
-- [ ] AC4（不误伤）：repo-less 单测临时目录 no-op，不抛错。
+- [x] AC1（能取假，写盘即提交）：markNeedsHuman 翻转 needs-human 后，`tasks/<id>.md` 已 commit（⛔ 翻转后 git status 仍 M ⇒ 假）。
+- [x] AC2（能取假，pathspec 限定）：commit 用 `-- <rel>` 单文件，不扫共享索引（⛔ 裸 commit ⇒ 假）。
+- [x] AC3（能取假，ff 到 develop）：翻转 commit 后 `propagateDocBranchToDevelop` 执行，develop 读到新 status（⛔ 只提交 doc 分支不 ff ⇒ 假）。
+- [x] AC4（不误伤）：repo-less 单测临时目录 no-op，不抛错。
 
 ## Definition of Done
 
@@ -43,7 +43,8 @@ markNeedsHuman 写盘即提交（复用 commitTaskStatus 族）；AC1-AC4 全勾
 
 ## Touches
 
-- plugin/scripts/driver-filters.ts（markNeedsHuman 加 commit-after-write / markNeedsHumanAndCommit）
+- plugin/scripts/driver-filters.ts（markNeedsHuman 加 commit-after-write / markNeedsHumanAndCommit + commitTaskFile 族上收）
+- plugin/scripts/ready-pool-check.ts（commitTaskStatus 收敛为 driver-filters 的 commitTaskFile + propagateDocBranchToDevelop，删本地重复）
 - plugin/scripts/worker-driver.ts（调用点传 committed / 不丢 {ok,reason}）
 - plugin/scripts/promotion-driver.ts（同上）
 - plugin/test/driver-filters.test.mjs（needs-human commit-after-write + repo-less no-op）
