@@ -1,7 +1,7 @@
 ---
 id: gap-scoped-gate-reason-stderr-drops-stdout
 title: scoped-gate 红 reason 载体失真——stderr 优先 || 短路丢弃 stdout 真失败（掩蔽）
-status: todo
+status: ready
 labels:
   - gap
   - defect
