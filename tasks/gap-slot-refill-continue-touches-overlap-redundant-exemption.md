@@ -1,7 +1,7 @@
 ---
 id: gap-slot-refill-continue-touches-overlap-redundant-exemption
 title: slot-refill 对 exited-not-landed CONTINUE 任务的 touches-overlap 串行冗余（worktree 已隔离 + 落地已由 fan-in 锁串行）
-status: ready
+status: done
 labels:
   - gap
   - defect
