@@ -445,6 +445,46 @@ test("AC3 — non-parallel run_checker (the scoped tier) runs synchronously and 
   // propagate the wrapped exit code exactly as before the parallelization.
   assert.equal(res.status, 2, "synchronous run_checker propagates the wrapped command's exit code");
   assert.equal(readLedgerRows(root).length, 1, "one append-only cost row");
+  // gap-scoped-static-check-red-no-fail-machine-line — a usage error (exit 2) is ALSO a non-zero
+  // non-NOT-EVALUATED exit, so it must emit the same machine line as a RED (identity on the carrier,
+  // not a benign preamble).
+  assert.match(res.stderr, /^STATIC_CHECK_FAILED: sync-fail exit=2$/m, `a usage error emits STATIC_CHECK_FAILED: ${res.stderr}`);
+});
+
+// ── Synchronous fail-closed machine line (gap-scoped-static-check-red-no-fail-machine-line) ─────────
+// The synchronous run_checker path (RUN_CHECKER_PARALLEL unset) is what the scoped tier
+// (run_scoped_static_checks_sel in scripts/test.sh) and the doc checks use. Before this gap it
+// returned the non-zero exit code with NO machine line, so a scoped-gate red carried only a benign
+// preamble (worker-driver's extractFailureSummary had no FAIL line to grab). AC2 pins the emit; AC3
+// pins the two negative controls (exit 3 stays NOT_EVALUATED, exit 0 emits nothing).
+
+test("AC2 — synchronous run_checker (scoped tier) emits STATIC_CHECK_FAILED with name + exit code on a RED (exit 1)", () => {
+  const root = makeTmpDir("cc-sync-red-");
+  const res = runLibScript(root, `
+    set -euo pipefail
+    source "${CHECKER_COST_LIB}"
+    run_checker "sync-red" bash -c "exit 1"
+  `);
+  // RUN_CHECKER_PARALLEL is unset — the synchronous scoped tier. A RED (exit 1) must emit the SAME
+  // machine-parseable STATIC_CHECK_FAILED line the parallel wait emits, so a scoped-gate red carries
+  // the failing checker's identity (name + exit code), not a benign preamble. ⛔ delete the emit ⇒ red.
+  assert.equal(res.status, 1, `synchronous run_checker propagates the RED exit code (got ${res.status}): ${res.stderr}`);
+  assert.match(res.stderr, /^STATIC_CHECK_FAILED: sync-red exit=1$/m, `a machine-parseable STATIC_CHECK_FAILED line on stderr: ${res.stderr}`);
+  assert.doesNotMatch(res.stderr, /STATIC_CHECK_NOT_EVALUATED/, "a RED is never conflated with NOT-EVALUATED");
+  assert.equal(readLedgerRows(root).length, 1, "one append-only cost row");
+});
+
+test("AC3 — synchronous run_checker exit 0 emits no STATIC_CHECK_* line (a pass is never a failure)", () => {
+  const root = makeTmpDir("cc-sync-ok-");
+  const res = runLibScript(root, `
+    set -euo pipefail
+    source "${CHECKER_COST_LIB}"
+    run_checker "sync-ok" bash -c "exit 0"
+    echo "after-run-checker"
+  `);
+  assert.equal(res.status, 0, `a passing checker exits 0 (got ${res.status}): ${res.stderr}`);
+  assert.doesNotMatch(res.stderr, /STATIC_CHECK_/, `exit 0 emits no STATIC_CHECK_* line (neither FAILED nor NOT_EVALUATED): ${res.stderr}`);
+  assert.match(res.stdout, /after-run-checker/, "the script continues past the passing checker");
 });
 
 // ── NOT-EVALUATED third state (gap-not-evaluated-harness-third-state) ───────────────────────────────
@@ -505,4 +545,7 @@ test("AC2 (negative control) — synchronous run_checker maps exit 3 to a non-fa
   assert.equal(res.status, 0, `NOT-EVALUATED must not abort a set -e script (got ${res.status}): ${res.stderr}`);
   assert.match(res.stdout, /after-run-checker/, "the script continues past the NOT-EVALUATED checker");
   assert.match(res.stderr, /^STATIC_CHECK_NOT_EVALUATED: sync-ne$/m, "the NOT-EVALUATED checker is surfaced");
+  // gap-scoped-static-check-red-no-fail-machine-line AC3 — exit 3 emits NOT_EVALUATED, NEVER the
+  // fail-closed line (the third state must not be conflated with a RED).
+  assert.doesNotMatch(res.stderr, /STATIC_CHECK_FAILED/, "NOT-EVALUATED never emits STATIC_CHECK_FAILED");
 });

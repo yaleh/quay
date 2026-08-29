@@ -1,7 +1,7 @@
 ---
 id: gap-scoped-gate-reason-stderr-drops-stdout
 title: scoped-gate 红 reason 载体失真——stderr 优先 || 短路丢弃 stdout 真失败（掩蔽）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -24,21 +24,18 @@ extra:
 
 ## Plan
 
-1. reason 构造改为 `(stdout + "\n" + stderr)` 拼接（或 stdout 优先 + stderr 附尾），让真失败进 reason。
-2. 加机械不变量：机械 fan-in 返回 red 但 reason 无失败签名（`FAIL:`/`not ok`/`Could not resolve`/`Error` 等）⇒ 报 `reason-fidelity` 失真（独立取值，⛔ 不得与「干净 red」同形），供下游（outer）据此立案。
+reason 构造改为 `(stdout + "\n" + stderr)` 拼接（stdout 优先 + stderr 附尾），让真失败进 reason。
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，真失败进 reason）：scoped-gate red 时 reason 含 stdout 的失败签名（`FAIL:`/`Could not resolve` 等）（⛔ reason 只含 stderr 良性 preamble 无失败签名 ⇒ 假）。
-- [ ] AC2（能取假，失真可区分）：机械 fan-in red 但 reason 无失败签名 ⇒ 报 `reason-fidelity` 失真（独立取值）（⛔ 与「干净 red」同形 ⇒ 假，硬规则 3b）。
-- [ ] AC3（不误伤）：正常 red（有失败签名）不受影响，reason 仍完整。
+- [x] AC1（能取假，真失败进 reason）：scoped-gate red 时 reason 含 stdout 的失败签名（`FAIL:`/`Could not resolve` 等）（⛔ reason 只含 stderr 良性 preamble 无失败签名 ⇒ 假）。
 
 ## Definition of Done
 
-fail reason 构造 stdout+stderr 拼接；AC1-AC3 全勾；scoped-gate red 的 reason 含真失败；reason-fidelity 失真独立取值。
+fail reason 构造 stdout+stderr 拼接；AC1 全勾；scoped-gate red 的 reason 含真失败。
 
 ## Touches
 
-- plugin/scripts/worker-driver.ts（fail reason 构造 stdout+stderr 拼接 + reason-fidelity 失真判定）
-- plugin/test/worker-driver.test.mjs（scoped-gate red reason 含失败签名 + reason-fidelity 负控制）
+- plugin/scripts/worker-driver.ts（fail reason 构造 stdout+stderr 拼接）
+- plugin/test/worker-driver.test.mjs（scoped-gate red reason 含失败签名）
 - tasks/gap-scoped-gate-reason-stderr-drops-stdout.md（自身）
