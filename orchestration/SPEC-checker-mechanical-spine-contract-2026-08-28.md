@@ -13,10 +13,10 @@ checker 的「机械脊柱」= 两个每个 checker 都该守、且可**逐条 g
 
 ## 1. 适用范围
 
-- 对象 = `plugin/scripts/*-check.ts`（76 个，含本 checker 自身）+ `plugin/scripts/*-check.sh`（32 个），
-  即 108 个 checker（SPEC-methodology-layer-architecture §1.7 记的「checker 109 个」是 B1 落地前的快照：
-  本 checker +1、develop 退役 fan-in 双 checker −2 ⇒ 当前 108）。检查器**按文件系统 glob 派生**
-  （`ls plugin/scripts/*-check.{ts,sh}`），不硬编码 76/32——新增/删除 checker 自动进审查面。
+- 对象 = `plugin/scripts/*-check.ts`（78 个，含本 checker 自身）+ `plugin/scripts/*-check.sh`（32 个），
+  即 110 个 checker（SPEC-methodology-layer-architecture §1.7 记的「checker 109 个（77 .ts + 32 .sh）」是 B1 落地前的快照：
+  本 checker +1 ⇒ 当前 110）。检查器**按文件系统 glob 派生**
+  （`ls plugin/scripts/*-check.{ts,sh}`），不硬编码 78/32——新增/删除 checker 自动进审查面。
 - 层 2（判定契约，复用 `driver-result.ts` 的 `DriverResult<T>`）归 **B4**；
   层 3（输入形状 path→content）归 **B5**。二者**不并入本契约**。
 
@@ -51,7 +51,7 @@ checker 的「机械脊柱」= 两个每个 checker 都该守、且可**逐条 g
 
 ## 4. 执行（棘轮，只减不增）
 
-- `plugin/scripts/checker-mechanical-spine-check.ts` 机械枚举 108 个 checker（含本 checker 自身），对每个静态判
+- `plugin/scripts/checker-mechanical-spine-check.ts` 机械枚举 110 个 checker（含本 checker 自身），对每个静态判
   上述两条（exit 码词表 + `--json` 兑现），输出**不符者清单**（枚举，不布尔）。
 - 配套 `plugin/scripts/checker-mechanical-spine-exemptions.json` **exemption list 棘轮**：
   - **历史不符者豁免**（在名单里 ⇒ 报告但不红）；
@@ -63,6 +63,6 @@ checker 的「机械脊柱」= 两个每个 checker 都该守、且可**逐条 g
 
 | 主张 | 等级 |
 |---|---|
-| 当前不符者数 = 0（exit 码 + `--json` 均已清零） | **实跑检查器**（108 个 checker 逐个静态扫），非印象 |
+| 当前不符者数 = 0（exit 码 + `--json` 均已清零） | **实跑检查器**（110 个 checker 逐个静态扫），非印象 |
 | 12/14 / 13/14（14 抽样） | 上游 SPEC 的**当时**测量；本 SPEC 以【当前实跑】为准 |
 | `.sh` 的 `--json` 兑现原语集（jq/python/node/printf） | **启发式**——委托型 `.sh`（`gate_delegate_ts`）会透传 `--json` 到 node，静态 grep 看不穿；若出现假阳性/假阴性需再修（不因「结构上不可能取假」而误当测量，硬规则 4） |
