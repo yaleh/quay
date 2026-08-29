@@ -1500,7 +1500,13 @@ function runOneWorker({
         const paths = worktreePathsForTask(rootDir, taskId);
         if (paths.length > 0 && paths[0]) {
           const startMechMs = Date.now();
-          mechResult = await runMechanicalFanIn({ task: taskId, worktree: paths[0], root: rootDir, runId });
+          // 每任务新进程（gap-fan-in-token-gate-version-mismatch-self-lock）：机械 fan-in 不再在本守护
+          // 进程 in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），
+          // 改为 spawn 一个 fresh node 进程加载 worktree 的 worker-driver.ts --mechanical-fan-in——
+          // 锁半（acquireFanInWorkflowLock）与编排半（fan-in-ff-merge.sh）同源（都在 worktree），改了
+          // worker-driver.ts 的任务 fan-in 不再用旧锁/旧编排。⛔ 不是 token 闸一例，是「fan-in 脚本从
+          // worktree 加载、发起者从主检出旧进程运行」的架构错位整个类。
+          mechResult = await spawnMechanicalFanIn({ task: taskId, worktree: paths[0], root: rootDir, runId });
           if (json) {
             process.stdout.write(
               `${JSON.stringify({ event: "mechanical-fan-in", task: taskId, wall_clock_ms: Date.now() - startMechMs, ...mechResult })}\n`,
@@ -2202,6 +2208,52 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   };
 }
 
+/**
+ * 每任务新进程执行（gap-fan-in-token-gate-version-mismatch-self-lock AC1）：机械 fan-in 不在守护进程
+ * in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），改为每任务 spawn
+ * 一个 fresh node 进程加载 worktree 的 worker-driver.ts --mechanical-fan-in——当前代码。fresh 进程里的
+ * 锁半（acquireFanInWorkflowLock，ADR-034）与编排半（fan-in-ff-merge.sh）同源（都在 worktree）⇒ 改了
+ * worker-driver.ts 的任务 fan-in 用的是它自己的新锁/新编排，不再因「守护旧代码」自锁。结果经 stdout
+ * 单行 JSON 回传（--mechanical-fan-in 只打一行 result JSON）；spawn 失败/输出不可解析 fail-closed 为 red
+ * （硬规则 3b：读不懂 ≠ 合格）。
+ */
+async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promise<MechanicalFanInResult> {
+  const entry = path.join(opts.worktree, "plugin", "scripts", "worker-driver.ts");
+  const argv = [
+    process.execPath, "--experimental-strip-types", entry,
+    "--mechanical-fan-in",
+    "--task", opts.task,
+    "--worktree", opts.worktree,
+    "--root", opts.root,
+    "--run-id", opts.runId,
+    "--json",
+  ];
+  if (opts.mergeTarget) argv.push("--merge-target", opts.mergeTarget);
+  const r = await runAsync(argv, { timeoutMs: Infinity, collectStderr: true });
+  // MechanicalFanInResult 自 D5/D6/D7 起带 verdict 字段（outcome=red 时非 null）——spawn 失败 / 输出
+  // 不可解析的 red 也须构造结构化 verdict（⛔ 缺字段 ⇒ typecheck 红；硬规则 3b 读不懂 ≠ 合格）。
+  const red = (step: string, reason: string, exitCode: number | null = null): MechanicalFanInResult => ({
+    outcome: "red",
+    verdict: { step, verdict: "failed", exitCode, summary: reason, logFile: null },
+    step, reason,
+    lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
+    suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+  });
+  if (r.status === null) {
+    return red("spawn-mechanical-fan-in", r.error?.message ?? `fresh mechanical fan-in process failed: ${r.stderr || "no output"}`);
+  }
+  const lastJson = (r.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean).pop();
+  if (lastJson) {
+    try {
+      const parsed = JSON.parse(lastJson);
+      if (parsed && typeof parsed === "object" && (parsed.outcome === "landed" || parsed.outcome === "red")) {
+        return parsed as MechanicalFanInResult;
+      }
+    } catch { /* fall through to red */ }
+  }
+  return red("parse-mechanical-fan-in", `unparseable fresh mechanical fan-in output: ${(r.stderr || r.stdout || "").trim() || `exit ${r.status}`}`, r.status);
+}
+
 /** D7：机械 fan-in 的 bucket suite 绿后，把本轮 suite 状态镜像到权威载体 full-suite-state.json。
  *  ⛔ 不伪造 full-green：scope=worktree + taskId + runner=inner 区分 bucket-run（本任务的 --buckets 子集）
  *  与 full-run（scope=main + runner=outer 无 taskId）——读面据此可分辨「退休已修 suite 绿」≠「全量 suite 绿」。
@@ -2537,6 +2589,9 @@ export async function main(argv: string[]): Promise<number> {
   let serve = false;
   let host: string | undefined;
   let port: number | undefined;
+  let mechanicalFanIn = false;
+  let mechWorktree: string | undefined;
+  let mechMergeTarget: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -2561,6 +2616,9 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--serve") serve = true;
     else if (a === "--host") host = args[++i];
     else if (a === "--port") port = Number(args[++i]);
+    else if (a === "--mechanical-fan-in") mechanicalFanIn = true;
+    else if (a === "--worktree") mechWorktree = args[++i];
+    else if (a === "--merge-target") mechMergeTarget = args[++i];
     else if (a === "--help" || a === "-h") {
       console.log(
         "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + ⛔ 不 stash 主检出 + MCP 控制面 + 常驻选择环）\n" +
@@ -2571,6 +2629,7 @@ export async function main(argv: string[]): Promise<number> {
           "  [--interval <ms>]   无在飞 worker 且瞬时 WAIT 时的轮询间隔（缺省 30000；测试缝传小值）\n" +
           "  [--reconcile-interval <s>]  协调地板：至少每 N 秒协调一次，边沿事件全丢也降级「慢但正确」而非静默停摆（缺省 300；0 = 无地板）\n" +
           "  [--max-retries <n>]  重试上限：同一任务连续 N 次 exited-not-landed 未落地 ⇒ 标 needs-human 并停止重派（缺省 3，同 promotion --max-fix-retries）\n" +
+          "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前 worktree 代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -2581,6 +2640,27 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const rootDir = root ? path.resolve(root) : path.resolve(process.cwd());
+
+  // --mechanical-fan-in：fresh 进程入口（每任务新进程执行，gap-fan-in-token-gate-version-mismatch-
+  // self-lock AC1）。守护 spawn 本入口加载 worktree 的 worker-driver.ts，跑机械 fan-in、把 result 以
+  // 单行 JSON 打回 stdout（spawnMechanicalFanIn 解析），exit 0 = landed / 2 = red。⛔ 不是派发路径：
+  // 不 stash、不读 selector、不写 outcome（结果由 spawn 方入账）。
+  if (mechanicalFanIn) {
+    const task = tasks[0];
+    if (!task || !mechWorktree) {
+      console.error("worker-driver: --mechanical-fan-in requires --task <id> and --worktree <path>");
+      return 2;
+    }
+    const result = await runMechanicalFanIn({
+      task,
+      worktree: mechWorktree,
+      root: rootDir,
+      runId: runId ?? `fm-${task}-${Date.now()}`,
+      mergeTarget: mechMergeTarget,
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result.outcome === "landed" ? 0 : 2;
+  }
 
   // --serve：起 MCP 控制面（常驻）。listening socket 保持事件循环存活 ⇒ 进程不退出，直到 SIGINT/SIGTERM。
   if (serve) {

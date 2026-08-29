@@ -78,7 +78,11 @@ import {
   deriveDefaultLane,
   readPerTaskSuiteRecords,
   isSuiteRecordSkip,
+  computeMergeWorktreeSurfaces,
+  resolveMergeWorktreeSurfaces,
+  unmergedConflictPaths,
 } from "../scripts/ready-pool-check.ts";
+import { INFLIGHT_WORKTREE_STALE_MS } from "../scripts/concurrent-batch-scheduler.ts";
 import { propagateDocBranchToDevelop } from "../scripts/driver-filters.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
@@ -3522,4 +3526,127 @@ test("AC2: applyRevaluations writes ready→todo + a grep-able ## Revaluation bo
   assert.equal(miss.ok, false, "missing ⇒ fail closed");
   fs.writeFileSync(path.join(root, "tasks", "gap-no-fm.md"), "no frontmatter here");
   assert.equal(retreatReadyToTodo(root, "gap-no-fm", ["x"]).ok, false, "no-frontmatter ⇒ fail closed");
+});
+
+// ── MERGE-WORKTREE LIVENESS + SURFACE NARROWING (gap-merge-worktree-surface-lacks-liveness-overbroad) ──
+// AC2/AC3/AC4: a mid-merge worktree must present a merge conflict surface ONLY while it shows
+// direct-quantity liveness (a live process under it, or a commit within INFLIGHT_WORKTREE_STALE_MS)
+// AND that surface must be ONLY the unmerged (`UU`) conflict paths — not the former full
+// `git diff --name-only HEAD` delta that also listed every cleanly-merged change (a dead 3-file
+// conflict read as a 121-file surface and locked out the whole dispatch pool, dispatchable_disjoint
+// 0). The pure core (resolveMergeWorktreeSurfaces) is tested with INJECTED isMerge/conflictFiles/
+// liveness (hermetic, no /proc/git); the production wiring (computeMergeWorktreeSurfaces) and the
+// surface enumerator (unmergedConflictPaths) are tested against a REAL conflicted-merge git worktree.
+
+function makeRealGitRepo(tag) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `rpc-git-${tag}-`));
+  execFileSync("git", ["init", "-q", "-b", "master"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
+  return dir;
+}
+
+// Commit everything, optionally pinning the author+committer dates (GIT_COMMITTER_DATE is what
+// `git log --format=%ct` reads, so pinning it makes a worktree's last-commit-time deterministic).
+function gitCommit(dir, message, date) {
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  execFileSync("git", ["commit", "-q", "-m", message], {
+    cwd: dir,
+    env: date ? { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : process.env,
+  });
+}
+
+// A real mid-merge worktree: `conflict-a/b/c.md` conflict on BOTH branches (3 unmerged paths),
+// `clean.md` changes only on master (merges cleanly, staged — the file the OLD full-delta surface
+// listed but the unmerged-only surface must NOT). Returns { dir (main repo), wtPath (mid-merge) }.
+function makeConflictedMergeWorktree(tag, date) {
+  const dir = makeRealGitRepo(tag);
+  fs.writeFileSync(path.join(dir, "conflict-a.md"), "base-a\n");
+  fs.writeFileSync(path.join(dir, "conflict-b.md"), "base-b\n");
+  fs.writeFileSync(path.join(dir, "conflict-c.md"), "base-c\n");
+  fs.writeFileSync(path.join(dir, "clean.md"), "base-clean\n");
+  gitCommit(dir, "base", date);
+  // ours branch: change the three conflict files, leave clean.md untouched.
+  execFileSync("git", ["checkout", "-q", "-b", "ours"], { cwd: dir });
+  fs.writeFileSync(path.join(dir, "conflict-a.md"), "ours-a\n");
+  fs.writeFileSync(path.join(dir, "conflict-b.md"), "ours-b\n");
+  fs.writeFileSync(path.join(dir, "conflict-c.md"), "ours-c\n");
+  gitCommit(dir, "ours", date);
+  // master (theirs): change the three conflict files AND clean.md.
+  execFileSync("git", ["checkout", "-q", "master"], { cwd: dir });
+  fs.writeFileSync(path.join(dir, "conflict-a.md"), "theirs-a\n");
+  fs.writeFileSync(path.join(dir, "conflict-b.md"), "theirs-b\n");
+  fs.writeFileSync(path.join(dir, "conflict-c.md"), "theirs-c\n");
+  fs.writeFileSync(path.join(dir, "clean.md"), "theirs-clean\n");
+  gitCommit(dir, "theirs", date);
+  // Worktree on ours, then merge master → 3 conflicts (a/b/c) + 1 clean merge (clean.md).
+  const wtPath = path.join(dir, "..", `${path.basename(dir)}-wt`);
+  execFileSync("git", ["worktree", "add", "-q", wtPath, "ours"], { cwd: dir });
+  try {
+    execFileSync("git", ["merge", "master"], { cwd: wtPath, stdio: ["ignore", "pipe", "pipe"] });
+  } catch (_) {
+    // A conflicted merge exits non-zero — expected; the worktree is left mid-conflict.
+  }
+  return { dir, wtPath };
+}
+
+test("resolveMergeWorktreeSurfaces: a DEAD mid-merge worktree (zero processes + stale commit) contributes no surface (AC2)", (t) => {
+  const dir = makeWorkspace("merge-dead-pure");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const nowMs = 1_000_000_000_000; // arbitrary fixed "now"
+  const wt = { path: path.join(dir, "..", "quay-worktrees", "gap-dead"), branch: "refs/heads/task/gap-dead" };
+  const out = resolveMergeWorktreeSurfaces([wt], {
+    root: dir,
+    isMerge: () => true,
+    conflictFiles: () => ["code/shared.md"],
+    nowMs,
+    liveness: () => ({ hasLiveProcess: false, lastCommitMs: nowMs - 2 * INFLIGHT_WORKTREE_STALE_MS }),
+  });
+  assert.equal(out.length, 0, "zero live processes + commit older than N ⇒ DEAD mid-merge ⇒ no surface");
+});
+
+test("resolveMergeWorktreeSurfaces: a LIVE mid-merge worktree (live process) keeps its surface regardless of commit age (AC2)", (t) => {
+  const dir = makeWorkspace("merge-live-pure");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const nowMs = 1_000_000_000_000;
+  const wt = { path: path.join(dir, "..", "quay-worktrees", "gap-live"), branch: "refs/heads/task/gap-live" };
+  const out = resolveMergeWorktreeSurfaces([wt], {
+    root: dir,
+    isMerge: () => true,
+    conflictFiles: () => ["code/shared.md"],
+    nowMs,
+    liveness: () => ({ hasLiveProcess: true, lastCommitMs: nowMs - 10 * INFLIGHT_WORKTREE_STALE_MS }),
+  });
+  assert.equal(out.length, 1, "a live process ⇒ surface kept even with a very old commit");
+  assert.deepEqual(out[0].files, ["code/shared.md"], "the injected conflict surface is carried through");
+});
+
+test("resolveMergeWorktreeSurfaces: a non-merge worktree never contributes a surface (negative control)", (t) => {
+  const dir = makeWorkspace("merge-nonmerge");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const wt = { path: path.join(dir, "..", "quay-worktrees", "gap-clean"), branch: "refs/heads/task/gap-clean" };
+  const out = resolveMergeWorktreeSurfaces([wt], { root: dir, isMerge: () => false, conflictFiles: () => ["code/shared.md"] });
+  assert.equal(out.length, 0, "a worktree with no merge in flight presents no merge surface");
+});
+
+test("unmergedConflictPaths: a conflicted merge returns ONLY the unmerged conflict paths, not the cleanly-merged delta (AC3)", (t) => {
+  const { dir, wtPath } = makeConflictedMergeWorktree("narrow", new Date().toISOString());
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const files = unmergedConflictPaths(wtPath).sort();
+  assert.deepEqual(files, ["conflict-a.md", "conflict-b.md", "conflict-c.md"], "surface = the 3 unmerged paths, clean.md excluded");
+});
+
+test("computeMergeWorktreeSurfaces: a DEAD mid-merge worktree (stale commit + zero processes) is excluded from the surface (AC2 wiring)", (t) => {
+  const { dir } = makeConflictedMergeWorktree("dead-wiring", "2020-01-01T00:00:00Z");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = computeMergeWorktreeSurfaces(dir);
+  assert.equal(out.length, 0, "a dead mid-merge worktree must not present a merge surface");
+});
+
+test("computeMergeWorktreeSurfaces: a LIVE mid-merge worktree surface = ONLY unmerged files (AC3 wiring)", (t) => {
+  const { dir } = makeConflictedMergeWorktree("live-wiring", new Date().toISOString());
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = computeMergeWorktreeSurfaces(dir);
+  assert.equal(out.length, 1, "one live mid-merge worktree surface");
+  assert.deepEqual(out[0].files.sort(), ["conflict-a.md", "conflict-b.md", "conflict-c.md"], "surface = unmerged conflict paths only (clean.md excluded)");
 });
