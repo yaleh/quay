@@ -1013,6 +1013,10 @@ run_selected() {
     bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" --snapshot "${repo_root}" || true
     # Same-family DELTA for tmux-leak-scan: pre-existing outer/manager tmux sessions are not this
     # run's leak. Snapshot failure is non-fatal (the absolute suite-tail check still runs after).
+    # --sweep FIRST (gap-tmux-leak-scan-sweep-orphaned-servers): cure the HISTORICAL SIGKILL orphans
+    # (hermetic servers stranded on /tmp/<prefix>* sockets) before the snapshot, so --snapshot/--check
+    # stay a pure "this run's NEW leak" delta. best-effort, exit 0 always.
+    bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --sweep "${repo_root}" || true
     bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
     set +e
     # Phase order (gap-phase-order-serial-lowconc-before-main): serial and lowconc phases run
@@ -1498,6 +1502,9 @@ elif [ "${1:-}" = "--buckets" ]; then
   # tmux-leak-scan --snapshot/--check delta pair + session-liveness-sweep-kill is a PER-ROUND
   # checker, NOT 全量专属 — a bucket subset that skips it drops the checker from every-round to
   # never-run (降频 violation). Snapshot failure is non-fatal (the absolute --check still runs).
+  # --sweep FIRST (gap-tmux-leak-scan-sweep-orphaned-servers): cure historical SIGKILL orphans
+  # before the snapshot so --snapshot/--check stay a pure "this run's NEW leak" delta.
+  bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --sweep "${repo_root}" || true
   bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
   mark_nested
   set +e
