@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-spawn-stale-worktree-executor-missing-argv
 title: fresh-process fan-in spawn 用 worktree 的 worker-driver.ts 当执行器——stale worktree 缺新 argv（--mechanical-fan-in）⇒ unknown argument ⇒ parse-mechanical-fan-in fail
-status: ready
+status: done
 labels:
   - gap
   - defect
