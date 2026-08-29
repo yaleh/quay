@@ -64,3 +64,9 @@ outer 将随 inner 退役、cron/loop 换外部触发的短会话 ⇒ 会从下�
 - plugin/scripts/outer-anchor-check.ts（RETIRED-WITH-RETIRING-LAYER 标记，显式退役）
 - plugin/scripts/outer-cron-registry.ts（随 outer-anchor-check 一起处置）
 - tasks/gap-b0-retirement-precondition-checker-call-surface.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T16:31:55.640Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

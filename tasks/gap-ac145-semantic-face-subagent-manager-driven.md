@@ -40,3 +40,9 @@ manager 侧落「语义面 subagent 派发」机制（同 A16b dispatch-record �
 - orchestration/manager-tick-closing.md（语义面职责清单）
 - orchestration/dispatch-preference.md（派发偏好——语义面覆盖段）
 - tasks/gap-ac145-semantic-face-subagent-manager-driven.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T19:35:28.064Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
