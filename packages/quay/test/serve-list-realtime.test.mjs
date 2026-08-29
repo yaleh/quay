@@ -123,9 +123,14 @@ test("AC5: a task written to the store appears on the very next request (mtime c
   }
 });
 
-test("AC5: body search (?q=) still matches task bodies when includeBody=false is in play", async () => {
-  // The list route passes includeBody=false when no ?q= is active; when ?q= IS
-  // active it requests full bodies so body search keeps working.
+test("AC5: body search (?q=) still matches task bodies", async () => {
+  // gap-serve-search-timeout-all-body-fetch: when ?q= IS active the list route
+  // pushes `search` down to the Provider (the task_list `search` param) instead
+  // of requesting every task's body — the provider filters title+body
+  // server-side, so the MCP round-trip carries only the matches and body search
+  // keeps working without the 1572-body payload that timed out (-32001). This
+  // drives the REAL quay-native MCP child process + a REAL serve server, so the
+  // server-side filter is exercised end-to-end.
   const fx = await startFixture({
     seed: [
       { id: "SRCH-1", title: "Unrelated title", status: "todo", body: VALID_SECTIONS + "\nunique-body-token-lr-42\n" },
@@ -175,6 +180,62 @@ test("includeBody=false omits task bodies over the Provider ABI; the default kee
     assert.ok(!("body" in slimTasks[0]), "includeBody:false strips the body field from each task");
     assert.ok("status" in slimTasks[0] && "labels" in slimTasks[0] && "role" in slimTasks[0],
       "includeBody:false keeps the frontmatter fields the list page renders");
+  } finally {
+    try { await client.close(); } catch { /* ignore */ }
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+  }
+});
+
+test("search param filters server-side over the Provider ABI (title + body, heading-excluded)", async () => {
+  // gap-serve-search-timeout-all-body-fetch: the native task_list accepts a
+  // `search` param and filters title+body server-side. This drives the REAL
+  // quay-native MCP child process (same as the includeBody ABI test above) to
+  // prove the filtering happens in the provider, not the caller — which is what
+  // lets the web UI stop requesting every task's body for search.
+  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-lr-search-tasks-"));
+  const store = createStore(tasksDir);
+  const bodyWithFence =
+    VALID_SECTIONS +
+    "\n```\n# not-a-heading-just-code\n```\n" +
+    "\nunique-body-token-srch\n";
+  store.write("SRCH-A", { title: "Alpha search task", status: "todo", body: bodyWithFence });
+  store.write("SRCH-B", { title: "Beta unrelated", status: "todo", body: VALID_SECTIONS + "\n## OnlyHeadingToken\n" });
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [nativeBin, "mcp"],
+    cwd: nativeProviderDir,
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+  });
+  const client = new Client({ name: "serve-list-realtime-search-test", version: "0.0.1" });
+  try {
+    await client.connect(transport);
+
+    // Title match.
+    const byTitle = await client.callTool({ name: "task_list", arguments: { search: "Alpha search" } });
+    assert.ok(!byTitle.isError, "search task_list succeeds");
+    assert.deepEqual(byTitle.structuredContent.tasks.map((t) => t.id), ["SRCH-A"],
+      "search matches the task title server-side");
+
+    // Body-only token match (the token is in the body, never the title).
+    const byBody = await client.callTool({ name: "task_list", arguments: { search: "unique-body-token-srch" } });
+    assert.deepEqual(byBody.structuredContent.tasks.map((t) => t.id), ["SRCH-A"],
+      "search matches a body-only token server-side");
+
+    // Heading lines are excluded from the body index (template boilerplate must
+    // not cause false positives — the stripHeadings mirror of serve-render).
+    const byHeading = await client.callTool({ name: "task_list", arguments: { search: "OnlyHeadingToken" } });
+    assert.equal(byHeading.structuredContent.tasks.length, 0,
+      "a token that only appears in a ## heading is NOT matched (headings stripped)");
+
+    // Fenced code content (including `# comment` lines) IS searchable.
+    const byFence = await client.callTool({ name: "task_list", arguments: { search: "not-a-heading-just-code" } });
+    assert.deepEqual(byFence.structuredContent.tasks.map((t) => t.id), ["SRCH-A"],
+      "a token inside a ``` fence is still searchable (fence content preserved)");
+
+    // Case-insensitive.
+    const byCase = await client.callTool({ name: "task_list", arguments: { search: "ALPHA SEARCH" } });
+    assert.deepEqual(byCase.structuredContent.tasks.map((t) => t.id), ["SRCH-A"],
+      "search is case-insensitive");
   } finally {
     try { await client.close(); } catch { /* ignore */ }
     fs.rmSync(tasksDir, { recursive: true, force: true });
