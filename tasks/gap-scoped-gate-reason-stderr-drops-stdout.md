@@ -28,7 +28,7 @@ reason 构造改为 `(stdout + "\n" + stderr)` 拼接（stdout 优先 + stderr �
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，真失败进 reason）：scoped-gate red 时 reason 含 stdout 的失败签名（`FAIL:`/`Could not resolve` 等）（⛔ reason 只含 stderr 良性 preamble 无失败签名 ⇒ 假）。
+- [x] AC1（能取假，真失败进 reason）：scoped-gate red 时 reason 含 stdout 的失败签名（`FAIL:`/`Could not resolve` 等）（⛔ reason 只含 stderr 良性 preamble 无失败签名 ⇒ 假）。
 
 ## Definition of Done
 
