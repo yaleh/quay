@@ -34,6 +34,5 @@ SCD 族重新分类为 `lowconc`，bucket 路径像全量 suite 一样对 load-s
 
 - plugin/test/session-liveness-scd-*.test.mjs（8 文件，`@test-group engine` → `lowconc`）
 - scripts/test.sh（bucket 路径补 `@test-group` 分相）
-- plugin/scripts/suite-lpt-runner.mjs（按 `@test-group` 拆子相，保持 LPT 序）
-- plugin/test/ 对应单测（bucket 隔离断言）
+- plugin/test/suite-bucket-load-sensitive-isolation.test.mjs（新增，bucket 隔离断言单测）
 - tasks/gap-scd-load-sensitive-bucket-isolation.md（自身）
