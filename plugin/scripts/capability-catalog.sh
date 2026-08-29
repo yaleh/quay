@@ -2005,9 +2005,13 @@ VIOLATION_COUNT=$(printf '%s\n' "${VIOLATIONS}" | sed '/^$/d' | wc -l | tr -d ' 
 
 # ── output ──────────────────────────────────────────────────────────────────────────
 if [ "$MODE" = "json" ]; then
-  python3 - "$ROWS" <<'PYEOF'
+  # ROWS is passed via stdin, NOT argv — argv carries a per-argument size limit (MAX_ARG_STRLEN
+  # ≈ 128 KiB on Linux) and ROWS grows with every catalog entry; passing it as argv[1] fails with
+  # "Argument list too long" once the catalog crosses that bound (gap-b4-checker-reuse-driver-result
+  # added 2 entries and crossed it). stdin is a byte stream with no such limit.
+  printf '%s' "$ROWS" | python3 -c '
 import json, sys
-rows = sys.argv[1].splitlines()
+rows = sys.stdin.read().splitlines()
 entries = []
 for line in rows:
     if not line:
@@ -2032,7 +2036,7 @@ for line in rows:
     })
 json.dump(entries, sys.stdout, ensure_ascii=False, indent=2)
 print()
-PYEOF
+'
 elif [ "$MODE" = "entry-surface" ]; then
   if [ "$ENTRY_SURFACE_SUBMODE" = "json" ]; then
     python3 - "${SH_SHIPPED}" "${PUBLIC_SH}" "${INTERNAL_SH}" "${DOC_REFERENCED_SH_COUNT}" "${VIOLATIONS}" <<'PYEOF'
