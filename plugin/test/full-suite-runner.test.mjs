@@ -1,4 +1,12 @@
 // @test-group governance
+// @load-sensitive child-spawn
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — every test spawns a
+//   real node runner (full-suite-runner.ts) + a real bash fake-suite child; under full-suite concurrency
+//   the runner bootstrap + child spawn is start/schedule-delayed and the wall-clock polls flaked
+//   (gap-full-suite-runner-test-poll-timeout-load-flake: "poll timeout" under load 11.81 / 16 lanes).
+//   The 5s polls were already raised to 20s (gap-suite-load-sampler-orphan-process); this annotation
+//   closes the triage half — a failure must be classified load-sensitive (isolate-rerun), not
+//   other-task (defer anti-livelock).
 // full-suite-runner.test.mjs — tasks/gap-full-suite-belongs-to-outer-background-above-3-min.
 //
 // The (a) suite block of the three blocks that together eliminate "batch": the full suite

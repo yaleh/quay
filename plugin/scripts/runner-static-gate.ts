@@ -483,24 +483,6 @@ run_static_checks() {
   # verify worktree. Pointing --root at the main checkout makes the worktree round read the SAME data
   # as a main run ⇒ verdicts identical (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
   run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${main_root}" --baseline 19fea6f0 --json
-  echo "== fan-in-workflow-check (AC78 判据2 (a)(b)(c) — fan-in 是否真的走了 fan-in-execute workflow) =="
-  # AC78 moves the fan-in steps INTO a workflow script (.claude/workflows/fan-in-execute.js); A6
-  # stops being a step checklist and becomes a CHECK. Wired here as a code-class 每轮 gate (NOT the
-  # zero-wiring disease fan-in-ff-protocol-check cured): for every fan-in task AFTER the workflow
-  # landed (boundary = git commit time of the commit that added fan-in-execute.js), the checker
-  # verifies (a) a Workflow(fan-in-execute) call record exists in the session transcripts, and (c) the
-  # lock event's agentId is a real subagent id (top-level <id>.jsonl ⇒ RED — the old main-thread
-  # form, AC72/AC73). 差集非空 ⇒ RED. Pre-workflow fan-in is excluded by the time boundary (the
-  # manager 13−1=12 vs 真值 6 over-count lesson). NOT-EVALUATED (never conflated with green) when no
-  # fan-in follows the boundary or the workflow has not landed.
-  # @static-tier change
-  # @static-object .claude/workflows/fan-in-execute.js plugin/scripts/fan-in-workflow-check.ts plugin/scripts/fan-in-ff-merge.sh plugin/loop/fast-mode-tick-core.md plugin/test/fan-in-workflow-check.test.mjs
-  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the lock-events + dispatch
-  # records + session transcripts this checker audits are MAIN-checkout state, absent from the one-shot
-  # verify worktree. Pointing --root at the main checkout makes the worktree round read the SAME data
-  # as a main run ⇒ verdicts identical (AC3: gap-ac81 caught red in the round, never masked); on a main
-  # run main_root == repo_root ⇒ unchanged (AC2: real drift stays red).
-  run_checker "fan-in-workflow-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-workflow-check.ts" --root "${main_root}" --json
   echo "== fan-in-materialize-check (gap-workflow-scriptpath-materialize-falls-back-main — workflow scriptPath 静默回退主检出版) =="
   # Detects the M176-family materialization fallback: a bootstrap-HIT fan-in dispatched with
   # scriptPath=<worktree>/.claude/workflows/fan-in-execute.js must run the WORKTREE version (so the

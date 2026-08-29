@@ -216,8 +216,6 @@ declare -A QUESTION=(
   [fan-in-ac-completion-gate.ts]="Does the fan-in flip's task satisfy its AC-completion gate before being flipped to done — AC/DoD 全勾, 或段存在零复选框（total=0）, 或剩余未勾均为（待外部）/外层验证（AC47 谓词 countCompletionCheckboxes / isLandedCodeComplete 同源不新造）; AC 未全勾（含非待外部剩余项）或段缺失（NOT-EVALUATED）⇒ 不翻 done (gap-fan-in-flip-no-ac-completion-check)?"
   [fan-in-ff-merge.sh]="AC62 持锁段：merge 锁只包 ff（纯 ref 更新 git push . task/<id> → develop，develop 脱离主检出、不碰工作树；毫秒级、成功/失败即解锁），ff 失败写重试记录（任务 id/第几次/develop 头/时刻），suite running 时拒绝持锁（两把锁覆盖范围不交叉）——fan-in 落地 = 无锁段自测 + 锁内 ref 更新?"
   [fan-in-ff-protocol-check.ts]="AC62 判据1/判据2/判据3：锁内唯一动作=ff（持锁时长毫秒级——超过 --max-hold-seconds 的持锁区间 ⇒ 红，AC66 给 AC62 判据1 配的产物）；develop 上非 ff 的 fan-in merge（基线后）⇒ 红；持锁段内 suite 调用 ⇒ 红；ff 重试记录缺 taskId/attempt/developHead/ts ⇒ 红；无基线/锁事件不成对 ⇒ NOT-EVALUATED（无法评估 ≠ 合格）?"
-  [fan-in-ff-executor-check.ts]="AC67 fan-in 执行者：A6 主语还是『Fan-in 已返回任务』或 git -C <wt> 形态（主线程从外部操作 worktree）⇒ 红；ff 记录（锁事件/重试记录）的 agentId 缺失或 == 主会话 ⇒ 红——执行者必须落到任务 subagent（无锁段+持锁段全在 subagent 自回合内,ff 成功后才返回）?"
-  [fan-in-workflow-check.ts]="AC78 判据2 (a)(b)(c)：fan-in（该 workflow 落地后）是否真的走了 fan-in-execute workflow——(a) 每次 fan-in 有对应 Workflow 调用记录（meta-cc tool_name=Workflow,第三方可读）∧ (b) 每次 fan-in 在 fan-in-merge-lock-events.jsonl 留 ≥1 条带 agentId ∧ (c) agentId 是真实 subagent 标识（顶层 <id>.jsonl 存在 ⇒ 红；subagents/agent-<id>.jsonl 存在 ⇒ 绿）；差集非空 ⇒ 红+列差集任务名?"
   [fan-in-materialize-check.ts]="workflow scriptPath materialize 是否静默回退主检出版——bootstrap-HIT 的 fan-in 以 <worktree>/.claude/workflows/fan-in-execute.js 派发时，materialized 脚本是否真的是 worktree 版（读生产载体 ~/.claude/projects/<slug>/<session>/workflows/wf_*.json 的 script 字段，非 fixture）；回退 ⇒ 红（自举修改未被自身 suite 验证）?"
   [fork-baseline.ts]="Should a task fork from develop or integration — dependency-based by default (ref-aware); --force-integration RETIRED (exit 2, gap-worktree-fork-baseline-always-integration: quay's dispatch forks every worktree from \$FORK_BASELINE, drift absorbed by the A6 rebase-rerun loop)?"
   [finding-backpropagate.ts]="Should a finding be back-propagated to the earliest detector that could have caught it (Prepare/Execute feedback)?"
@@ -498,8 +496,6 @@ declare -A CADENCE=(
   [fan-in-ac-completion-gate.ts]="按需"
   [fan-in-ff-merge.sh]="按需"
   [fan-in-ff-protocol-check.ts]="每轮"
-  [fan-in-ff-executor-check.ts]="按需"
-  [fan-in-workflow-check.ts]="每轮"
   [fan-in-materialize-check.ts]="每轮"
   [finding-backpropagate.ts]="每里程碑"
   [fork-baseline.ts]="每里程碑"
@@ -798,8 +794,6 @@ declare -A INVALIDATION=(
   [fan-in-ac-completion-gate.ts]="失效前提：fan-in flip 仍须在翻 done 前判 AC 完成（workflow 持锁段 step 5 仍先 AC 闸后 sed）；若 fan-in 改回不翻 done（只 merge 不翻）或 AC 完成判定移入其它机件，本条失去对象，退休"
   [fan-in-ff-merge.sh]="失效前提：fan-in 落地仍走『无锁段自测 + 锁内 ref 更新（git push .）』；若 fan-in 改回 --no-ff 无锁，本条失去对象，退休"
   [fan-in-ff-protocol-check.ts]="失效前提：fan-in 仍必须 ff-only 且锁只包 ff；若协议本体退役（改回 --no-ff 无锁），本条判据失去对象，退休"
-  [fan-in-ff-executor-check.ts]="失效前提：fan-in 执行者仍须落到任务 subagent（A6 主语非主线程、ff 记录带 subagent agentId）；若协议本体改回主线程整段执行，本条失去对象，退休"
-  [fan-in-workflow-check.ts]="失效前提：fan-in 步骤正身仍在 .claude/workflows/fan-in-execute.js 且 A6 要求经它执行；若协议改回主线程整段执行（不经过 workflow），本条判据失去对象，退休"
   [fan-in-materialize-check.ts]="失效前提：bootstrap-HIT 的 fan-in 仍以 worktree scriptPath 派发（A6 自举规则）；若自举规则废除（不再要求 worktree 版被自身验证），本条失去对象，退休"
   [finding-backpropagate.ts]="无可测前提，靠周期复核"
   [fork-baseline.ts]="无可测前提，靠周期复核"
@@ -1098,8 +1092,6 @@ declare -A LAST_REAFFIRMED=(
   [fan-in-ac-completion-gate.ts]="2026-08-14"
   [fan-in-ff-merge.sh]="2026-08-14"
   [fan-in-ff-protocol-check.ts]="2026-08-14"
-  [fan-in-ff-executor-check.ts]="2026-08-14"
-  [fan-in-workflow-check.ts]="2026-08-14"
   [fan-in-materialize-check.ts]="2026-08-21"
   [finding-backpropagate.ts]="2026-08-10"
   [fork-baseline.ts]="2026-08-10"
@@ -1398,8 +1390,6 @@ declare -A MATCHING=(
   [fan-in-ac-completion-gate.ts]="enumerative"
   [fan-in-ff-merge.sh]="keyword"
   [fan-in-ff-protocol-check.ts]="enumerative"
-  [fan-in-ff-executor-check.ts]="position"
-  [fan-in-workflow-check.ts]="enumerative"
   [fan-in-materialize-check.ts]="enumerative"
   [finding-backpropagate.ts]="keyword"
   [fork-baseline.ts]="keyword"
@@ -1640,7 +1630,6 @@ declare -A CONSUMER=(
   [test-group-downgrade-check.ts]="谁按：run_static_checks 每轮自动按 + check_group_declarations 前置/元数据模式按（code-class gate）；条件=要判定是否有测试被合法改标移出默认集（product/engine→governance/serial/lowconc）而无 commit message 理由"
   [drivable-workspace-check.ts]="谁按：同上（canonical fail-closed 判定面）；条件=workspace 可驱动性判定"
   [external-dogfooding-check.ts]="谁按：external-dogfooding 例程调度器按；条件=外部 dogfooding 契约要判定"
-  [fan-in-ff-executor-check.ts]="谁按：manager 在 AC67/AC75 收口复核时按（--a6-file/--command/--main-session）；条件=要判定 fan-in 执行者是否落到任务 subagent"
   [fan-in-ff-merge.sh]="谁按：inner 任务 subagent 在 A6 fan-in 回合按；条件=任务回归完成要 ff 合入 develop（持锁段，锁只包 ff）"
   [fan-in-runid-check.ts]="谁按：fan-in merge 复核者在核验 merge commit 时按；条件=要判定 commit 是否带 runId 遥测"
   [fan-in-ts-typecheck-gate.ts]="谁按：派发器在任务 Touches 含新增/移动 .ts 时按；条件=新 .ts 要过 ts-typecheck"
@@ -1718,6 +1707,8 @@ declare -A CONSUMER=(
 # run_static_checks in scripts/test.sh), so a deleted implementation can never silently regrow.
 declare -A SUPERSEDED=(
   [send-keys-verified.sh]="REMOVED 2026-08-10 (gap-retired-script-still-callable, human ruling) — superseded by send-keys-reliable.sh under outer ruling F (2026-08-04); its md5 pane-hash criterion is ADR-016-forbidden. Deleted with its test (send-keys-verified.test.mjs) and leak doc (send-keys-verified-test-leaks-tmux-servers.md). Crystallization residue poisons context — the implementation must NOT exist."
+  [fan-in-ff-executor-check.ts]="REMOVED 2026-08-29 (gap-retire-fan-in-executor-workflow-identity-checkers) — AC67/AC75 fan-in 执行者身份 checker. 机械 fan-in (worker-driver.ts runMechanicalFanIn) 已把检查链结构性内联且 actor 无关 (ff-merge.sh --agent-id 自校验 + suite-capture 闸 + flock)，执行者=subagent 前提已死 (driver 记 lock-events agentId:null)。Deleted with its test (fan-in-ff-executor-check.test.mjs)."
+  [fan-in-workflow-check.ts]="REMOVED 2026-08-29 (gap-retire-fan-in-executor-workflow-identity-checkers) — AC78 判据2 必经-workflow checker. 机械 fan-in 不走 workflow ⇒ isMechanicalRunId runId 前缀嗅探 whack-a-mole (oneoff-adr034 → oneoff-ls → oneoff-*)，前提已死。Deleted with its test (fan-in-workflow-check.test.mjs) + mutation case (checker-mutation-cases/fan-in-workflow-check.sh)."
 )
 
 # ── exp5-legacy screening (AC2) ──────────────────────────────────────────────────
