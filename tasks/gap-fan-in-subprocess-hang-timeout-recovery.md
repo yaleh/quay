@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-subprocess-hang-timeout-recovery
 title: fan-in 子进程挂起无超时恢复——A+B fan-in 持锁 53min（instrument + 修超时盲区）
-status: ready
+status: done
 labels:
   - gap
 parent: null
