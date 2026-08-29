@@ -315,17 +315,18 @@ t("AC4 — isGitUntracked unit: false for non-git, false for tracked, true for a
 // ── gap-new-script-touches-missing-inventory-catalog-registration ─────────────────────────────────────
 // AC2/AC3/AC4 — dispatch-preflight registration check: a task whose ## Touches declare a NEW
 // plugin/scripts file ((new) tag, git-untracked, or the full-width （新：…） marker the repo's real
-// new-script Touches use) MUST ALSO authorize the registration files (capability-catalog.sh +
-// quay-product-outline.md). Missing ⇒ the scoped static-check selection exits non-zero with
-// `touches-missing-registration` (fail-closed: the task cannot pass its own scoped run until its
-// Touches authorize the sync products — the 3-instance overstep/stop regression this task closes).
+// new-script Touches use) MUST ALSO authorize the registration file (capability-catalog.sh). Missing ⇒
+// the scoped static-check selection exits non-zero with `touches-missing-registration` (fail-closed:
+// the task cannot pass its own scoped run until its Touches authorize the sync product — the
+// 3-instance overstep/stop regression this task closes). The former SECOND registration file
+// (docs/proposals/quay-product-outline.md §6 DELIVERY-INVENTORY snapshot) is RETIRED
+// (gap-delivery-inventory-check-time-computation): the inventory is computed at check time.
 
 const REG_CATALOG = "plugin/scripts/capability-catalog.sh";
-const REG_OUTLINE = "docs/proposals/quay-product-outline.md";
 
 t("AC2 — a new plugin/scripts touch without the registration files ⇒ touches-missing-registration (pure)", async () => {
   const mod = await importMod();
-  assert.deepEqual(mod.NEW_SCRIPT_REGISTRATION_REQUIRED, [REG_CATALOG, REG_OUTLINE], "AC3 file list");
+  assert.deepEqual(mod.NEW_SCRIPT_REGISTRATION_REQUIRED, [REG_CATALOG], "AC3 file list");
   const r = mod.checkTouchesRegistration(
     ["tasks/foo.md", "plugin/scripts/new-check.ts"],
     ["plugin/scripts/new-check.ts"],
@@ -333,7 +334,7 @@ t("AC2 — a new plugin/scripts touch without the registration files ⇒ touches
   assert.equal(r.ok, false);
   assert.equal(r.reason, "touches-missing-registration");
   assert.equal(r.newScript, "plugin/scripts/new-check.ts");
-  assert.deepEqual(r.missing, [REG_CATALOG, REG_OUTLINE]);
+  assert.deepEqual(r.missing, [REG_CATALOG]);
 });
 
 t("AC2 — missing registration fails the scoped selection CLI end-to-end (--check-registration / --json / --commands)", async () => {
@@ -346,7 +347,7 @@ t("AC2 — missing registration fails the scoped selection CLI end-to-end (--che
     assert.equal(r.status, 1, r.stderr);
     const out = JSON.parse(r.stdout);
     assert.equal(out.registrationCheck.reason, "touches-missing-registration");
-    assert.deepEqual(out.registrationCheck.missing, [REG_CATALOG, REG_OUTLINE]);
+    assert.deepEqual(out.registrationCheck.missing, [REG_CATALOG]);
     // --json: also exits 1 (fail-closed) and carries registrationCheck for machine consumers.
     const rj = runSelCli(root, "--task", "bad-reg", "--json");
     assert.equal(rj.status, 1, rj.stderr);
@@ -374,16 +375,16 @@ t("AC2 — the full-width （新：…） marker (the repo's REAL annotation for
     const out = JSON.parse(r.stdout);
     assert.equal(out.registrationCheck.reason, "touches-missing-registration");
     assert.equal(out.registrationCheck.newScript, "plugin/scripts/fan-in-runid-check.ts");
-    assert.deepEqual(out.registrationCheck.missing, [REG_CATALOG, REG_OUTLINE]);
+    assert.deepEqual(out.registrationCheck.missing, [REG_CATALOG]);
   } finally {
     cleanup(root);
   }
 });
 
-t("AC3 — a new plugin/scripts touch WITH the registration files in Touches ⇒ ok (the fix for the gap)", async () => {
+t("AC3 — a new plugin/scripts touch WITH the registration file in Touches ⇒ ok (the fix for the gap)", async () => {
   const mod = await importMod();
   const r = mod.checkTouchesRegistration(
-    ["plugin/scripts/new-check.ts", REG_CATALOG, REG_OUTLINE],
+    ["plugin/scripts/new-check.ts", REG_CATALOG],
     ["plugin/scripts/new-check.ts"],
   );
   assert.deepEqual(r, { ok: true });
@@ -392,7 +393,7 @@ t("AC3 — a new plugin/scripts touch WITH the registration files in Touches ⇒
   writeTestSh(root);
   try {
     writeTask(root, "ok-reg",
-      `## Touches\n- plugin/scripts/new-check.ts (new)\n- ${REG_CATALOG}\n- ${REG_OUTLINE}\n- tasks/ok-reg.md\n`);
+      `## Touches\n- plugin/scripts/new-check.ts (new)\n- ${REG_CATALOG}\n- tasks/ok-reg.md\n`);
     const r0 = runSelCli(root, "--task", "ok-reg", "--check-registration");
     assert.equal(r0.status, 0, r0.stderr);
     assert.equal(JSON.parse(r0.stdout).registrationCheck.ok, true);
@@ -413,13 +414,14 @@ t("AC4 — negative controls: no new script, non-bundle new file, and partial re
     mod.checkTouchesRegistration(["tasks/foo.md", "docs/proposals/exp5-x.md"], ["docs/proposals/exp5-x.md"]),
     { ok: true },
   );
-  // Only ONE registration file present ⇒ the OTHER is reported missing (no silent pass).
+  // A NEW script authorized with only an UNRELATED file ⇒ the registration file is still reported
+  // missing (no silent pass).
   const partial = mod.checkTouchesRegistration(
-    ["plugin/scripts/new-check.ts", REG_CATALOG],
+    ["plugin/scripts/new-check.ts", "docs/proposals/exp5-x.md"],
     ["plugin/scripts/new-check.ts"],
   );
   assert.equal(partial.ok, false);
-  assert.deepEqual(partial.missing, [REG_OUTLINE]);
+  assert.deepEqual(partial.missing, [REG_CATALOG]);
   // An existing (tracked) script edit — no (new) tag, nothing untracked — is not gated (zero impact
   // on non-new-script tasks, AC4).
   const root = makeWorkspace({});

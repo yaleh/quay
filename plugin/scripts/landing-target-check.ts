@@ -50,7 +50,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, helpExit } from "./gate-script-base.ts";
 
 /** The two-line model's refs — the SPEC's relation (develop..integration=0), not a hardcoded forward. */
 export const MODEL_REFS = ["develop", "integration"] as const;
@@ -275,6 +275,7 @@ function resolveRoot(rootArg: string | undefined): string {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit(usage);
   const flagVal = (name: string) => {
     const i = args.indexOf(name);
     return i !== -1 ? args[i + 1] : undefined;

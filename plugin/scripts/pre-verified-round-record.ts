@@ -2,6 +2,15 @@
 // pre-verified-round-record.ts — the SHARED verification-round writer for the fan-in suite paths.
 // gap-preverified-suite-bypasses-verification-round-ledger AC1/AC2 (the pre-verified branch) +
 // gap-fan-in-realsuite-bypasses-verification-round-ledger AC1/AC2 (the real-suite branch).
+//
+// ⛔ RETIRED FROM THE FAN-IN PATH (gap-fan-in-red-bucket-run-not-recorded, 人裁定「定义正确机制并实现」):
+// the fan-in bucket path now runs through full-suite-runner.ts --buckets (SUITE_LAUNCH in
+// fan-in-execute.js), which is the single writer of verification-round.jsonl GREEN AND RED — a red bucket
+// round is recorded at suite exit, never left unrecorded. This module's green-only writer (state:"green")
+// was the parallel harness's graft; its CALL SITE was removed from fan-in-execute.js step 4.5 (两套平行
+// 机制收敛为一). The module is retained (uncalled) because it is a HUB file (orchestration list) with its
+// own test surface; do NOT re-wire it into the fan-in path — route through the runner instead.
+//
 // writer: append ONE verification-round.jsonl record for a full-suite round that ran OUTSIDE
 // full-suite-runner.ts (the only other verification-round writer) — i.e. a fan-in landing whose
 // suite went through fan-in-execute.js's detached `bash scripts/test.sh` path.
@@ -100,7 +109,7 @@
 //       [--preverified <0|1|true|false>] [--cpu-time-s <n|null>] [--cpu-source <name>]
 //       [--cpu-user-s <n|null>] [--cpu-sys-s <n|null>]
 //       [--suite-log <path>] [--runner <name>] [--root <dir>] [--record-file <file>]
-//       [--json] [--help]
+//       [--state <green|red>] [--json] [--help]
 //
 //   --task-id         the fan-in task whose suite landed (required)
 //   --run-id          the fan-in runId (required)
@@ -112,6 +121,8 @@
 //   --preverified     the reuse marker: 1/true = this round REUSED a caller-produced capture
 //                     (the pre-verified branch); 0/false = the suite RAN inside this fan-in (the
 //                     real-suite branch). Default 1/true (backward compat).
+//   --state           green (default) / red — a RED round writes state=red + reason (+gate/failures)
+//                     parsed from --suite-log (gap-verification-round-static-fail-no-record).
 //   --cpu-time-s      the suite's CPU seconds — a real number, or the literal null when the source
 //                     was considered and UNAVAILABLE (AC6; 0 normalizes to null)
 //   --cpu-source      WHERE the cpu_time_s came from ('gnu-time' / 'not-wired'; optional)
@@ -147,6 +158,11 @@ import { isDirectEntry } from "./gate-script-base.ts";
 import { suiteLockSlotCount } from "./suite-lock-slots.ts";
 import { resolveSharedCheckout, toIsoTimestamp } from "./per-task-suite-record.ts";
 import { parsePerFileLines } from "./measure-trend-check.ts";
+// gap-verification-round-static-fail-no-record — the shared test-failure matcher (the SAME
+// single-definition-point FAILURE_PATTERNS full-suite-runner uses), imported from the lightweight
+// runner-red-parse.ts module (its only runtime import is tmux-leak-fail-re.ts; the full-suite-runner
+// types it imports are `import type` — erased — so this writer never pulls the heavy hub at runtime).
+import { isFailureLine } from "./runner-red-parse.ts";
 
 const COMMIT_RE = /^[0-9a-f]{40}$/i;
 
@@ -169,6 +185,20 @@ const COMMIT_RE = /^[0-9a-f]{40}$/i;
 // byte-identical so the record is 同口径.
 
 const PHASE_OVERHEAD_RE = /^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial=1)?$/;
+
+// gap-verification-round-static-fail-no-record AC1/AC2 — a RED fan-in round (suite_exit != 0) must ALSO
+// write a verification-round record (state=red + reason + failures + taskId), not only the green path.
+// Two failure shapes are distinguished, mirroring full-suite-runner's red-parsing 口径:
+//   - static-check fail-closed: `STATIC_CHECK_FAILED: <name> exit=<rc>` (checker-cost-lib, stderr) — a
+//     run_static_checks checker exited non-zero BEFORE the test phase ⇒ reason=gate-failed + gate=static-check
+//     (the round-84 / split-long spec-declaration-point-check shape).
+//   - test failure: isFailureLine (runner-red-parse.ts — the shared matcher) ⇒ reason=failed.
+// STATIC_CHECK_FAILED_RE is a THIN LOCAL REPLICA of full-suite-runner.ts:538's regex (byte-identical),
+// same as the PHASE_OVERHEAD_RE / TEST_COUNT_RE / CEILING_RE replicas below — the thin writer never
+// imports the heavy full-suite-runner module.
+const STATIC_CHECK_FAILED_RE = /^STATIC_CHECK_FAILED:\s*(\S+)\s+exit=(\d+)/;
+// Mirror full-suite-runner's failures[] cap (a pathological red round cannot grow the record unbounded).
+const MAX_RECORDED_FAILURES = 200;
 
 /** Byte offset of the LAST `__FANIN_SUITE_START__` LINE (anchored at line start), or -1.
  *  gap-wiring-B-verification-round-write-path: the previous `lastIndexOf(substring)` was fooled by the
@@ -274,6 +304,16 @@ export function parseBucketMarker(suiteLog) {
 // 硬规则⑥ 缺值=未查≠为假). Slices by the last __FANIN_SUITE_START__ marker (current round only).
 const TEST_COUNT_RE = /^[#ℹ]\s*(pass|fail|cancelled)\s+(\d+)/;
 
+// gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi — the host env can carry
+// FORCE_COLOR=3 (also COLORTERM=truecolor), which forces node:test's spec reporter to emit ANSI
+// color EVEN when its stdout is redirected to a file: the summary line arrives as
+// `\x1b[34mℹ pass N\x1b[39m` (ESC at line start). `^[#ℹ]` anchoring then never matches ⇒
+// parseTestCounts returns null ⇒ verification-round's pass/fail/cancelled/tests fields honestly
+// absent (the #684/#685 regression). Strip ANSI CSI before matching (the same ANSI_CSI_RE
+// pane-state-classify.ts uses) so colorized AND plain summary lines both parse — the parser, not
+// the spawn point, owns the fix (AC3 requires re-parsing an already-colorized log).
+const ANSI_CSI_RE = /\x1B\[[0-9;]*[A-Za-z]/g;
+
 export function parseTestCounts(suiteLog) {
   if (!suiteLog) return null;
   let text;
@@ -287,7 +327,7 @@ export function parseTestCounts(suiteLog) {
   const acc = { pass: 0, fail: 0, cancelled: 0 };
   let seen = false;
   for (const line of body.split("\n")) {
-    const m = line.match(TEST_COUNT_RE);
+    const m = line.replace(ANSI_CSI_RE, "").match(TEST_COUNT_RE);
     if (m) {
       seen = true;
       acc[m[1]] += Number(m[2]);
@@ -351,6 +391,47 @@ export function parseCeilingFloor(suiteLog) {
     }
   }
   return { ceiling, floor_ms: floorMsSeen };
+}
+
+/** Parse a RED suite log into the failure facts a red record carries (gap-verification-round-static-fail-
+ *  no-record AC1/AC2). Reads the CURRENT round only (sliced by the last __FANIN_SUITE_START__ marker, the
+ *  same discipline as every other log parser in this file). Returns:
+ *    staticCheck   true when ≥1 fail-closed checker fired (a run_static_checks checker exited non-zero)
+ *    failClosed    the parsed `STATIC_CHECK_FAILED: <name> exit=<rc>` lines {name, exitCode, line}
+ *    failureLines  the raw test-failure lines (isFailureLine 口径), capped at MAX_RECORDED_FAILURES.
+ *  An absent/unreadable log returns {staticCheck:false, failClosed:[], failureLines:[]} — a red round
+ *  with an unreadable log still records reason=failed (honest: the failure facts are simply absent).
+ */
+export function parseRedFailures(suiteLog) {
+  const failClosed = [];
+  const failureLines = [];
+  if (!suiteLog) return { staticCheck: false, failClosed, failureLines };
+  let text;
+  try {
+    text = fs.readFileSync(suiteLog, "utf8");
+  } catch {
+    return { staticCheck: false, failClosed, failureLines };
+  }
+  const mk = lastSuiteStartOffset(text);
+  const body = mk === -1 ? text : text.slice(mk);
+  for (const line of body.split("\n")) {
+    // Same FORCE_COLOR=3 ANSI strip as parseTestCounts (5b sibling surface): a RED suite's
+    // spec-reporter failure lines are colorized too (`\x1b[31m✖ …` / `\x1b[34mℹ fail N\x1b[39m`), so
+    // isFailureLine's `^✖` / `^[#ℹ]\s*fail\s+[1-9]` anchors miss them ⇒ failureLines (and the ✖/ℹ-fail
+    // shapes) would be dropped even though the round is red. STATIC_CHECK_FAILED_RE (shell output,
+    // never ANSI) is a no-op here, but stripping once keeps every matcher on a clean line.
+    const stripped = line.replace(ANSI_CSI_RE, "");
+    const m = STATIC_CHECK_FAILED_RE.exec(stripped);
+    if (m) {
+      const exitCode = Number(m[2]);
+      if (Number.isInteger(exitCode) && exitCode >= 0) {
+        failClosed.push({ name: m[1], exitCode, line: stripped });
+      }
+      continue; // a static-check fail-closed line is not a test-failure line
+    }
+    if (isFailureLine(stripped) && failureLines.length < MAX_RECORDED_FAILURES) failureLines.push(stripped);
+  }
+  return { staticCheck: failClosed.length > 0, failClosed, failureLines };
 }
 
 /** Host parallelism (nproc) — the same read-host expression as full-suite-runner.hostParallelism
@@ -538,13 +619,25 @@ export function buildPreVerifiedRoundRecord(o) {
     else if (pv === "1" || pv === "true") preverified = true;
     else return { error: `--preverified must be 0|1|true|false (got ${JSON.stringify(o.preverified)})` };
   }
+  // gap-verification-round-static-fail-no-record AC1/AC2 — the record's state/reason axis. The fan-in
+  // writer previously hardcoded state=green (both branches only write after suite_exit=0). A RED round
+  // (suite_exit != 0) must ALSO land a record so a reader can distinguish "didn't run" (no record) from
+  // "ran and failed" (state=red + reason) and attribute it to a task (taskId). --state red is the new
+  // entry; green (the default) keeps the existing shape byte-for-byte (backward compat, AC4).
+  let state = "green";
+  if (o.state != null) {
+    const st = String(o.state).trim().toLowerCase();
+    if (st === "green") state = "green";
+    else if (st === "red") state = "red";
+    else return { error: `--state must be green|red (got ${JSON.stringify(o.state)})` };
+  }
   const record = {
     round: 0, // computed from prior line count in the appender
     startedAt,
     durationMs,
     laneCount,
     load,
-    state: "green", // both fan-in branches only write after suite_exit=0
+    state, // green (default) or red (gap-verification-round-static-fail-no-record: a red fan-in round)
     runner,
     scope: "worktree", // the fan-in suite ran against the task worktree's HEAD
     commit,
@@ -575,6 +668,25 @@ export function buildPreVerifiedRoundRecord(o) {
   // is EXPLICITLY phase-less (no fabricated fields). This does not conflate the two branches: a
   // preverified=1 capture WITHOUT a log path records no phase data, honestly.
   const suiteLog = o.suiteLog ? String(o.suiteLog).trim() : "";
+  // gap-verification-round-static-fail-no-record AC1/AC2 — on a RED round carry the failure facts:
+  // reason/gate/failures. A static-check fail-closed ⇒ reason=gate-failed + gate=static-check +
+  // failures[]=the checker lines (each staticCheck:true, so the shared-gate dispatch sees them); a
+  // test failure ⇒ reason=failed + failures[]=the matched failure lines. A red round whose log carries
+  // NO parseable failure signal still records reason=failed (fail-closed — a red run IS a failure even
+  // when the log's signal shape was unparseable; failures[] is simply absent).
+  if (state === "red") {
+    const red = parseRedFailures(suiteLog);
+    if (red.staticCheck) {
+      record.reason = "gate-failed";
+      record.gate = "static-check";
+      record.failures = red.failClosed.map((c) => ({ line: c.line, staticCheck: true }));
+    } else {
+      record.reason = "failed";
+      if (red.failureLines.length > 0) {
+        record.failures = red.failureLines.map((line) => ({ line }));
+      }
+    }
+  }
   const phaseMs = parseSuitePhases(suiteLog);
   const phaseOverlap = detectPhaseOverlap(suiteLog);
   if (phaseMs.run_static_checks !== undefined) record.static_phase_ms = phaseMs.run_static_checks;
@@ -709,6 +821,9 @@ Usage:
   --commit          the pinned verified HEAD (suite_head), 40-hex (required)
   --preverified     1/true = reused a caller-produced capture (pre-verified branch); 0/false = the
                     suite RAN inside this fan-in (real-suite branch). Default 1/true.
+  --state           green (default) or red — a RED round writes state=red + reason (+gate/failures)
+                    parsed from --suite-log (gap-verification-round-static-fail-no-record: a red fan-in
+                    round must land a record, not only the green path).
   --cpu-time-s      the suite's CPU seconds — a real number, or the literal null when the source was
                     considered and UNAVAILABLE (AC6; 0 normalizes to null)
   --cpu-source      WHERE the cpu_time_s came from ('gnu-time' / 'not-wired'; optional)
@@ -769,6 +884,7 @@ export function main(argv) {
     cpuSysS: getArgValue(args, "--cpu-sys-s"),
     runner: getArgValue(args, "--runner"),
     suiteLog: getArgValue(args, "--suite-log"),
+    state: getArgValue(args, "--state"),
     root,
   });
   if (built.error) return fail(built.error);

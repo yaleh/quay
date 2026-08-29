@@ -244,10 +244,10 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   worker kind 独有 `drain`（挡新派发、不杀在飞，写 `.quay/worker-control.json` `halted:true`）。
   **⛔ 已知缺口更新（2026-08-24，`gap-worker-driver-cold-start-inflight-blind` 已 done，读下面两行别读旧结论）**：
   「重启会重复派发存活 worker」这个方向**已修复并被 manager 直接对生产实时状态验证过**（`enumerateColdStartInflight`
-  只读探测，非猜测/非采信自述）——手工 restart **不会**重派仍存活的 worker。**残留的是相反方向**：
-  该函数的观测结果在循环外被 `const` 冻结一次、全生命周期不刷新 ⇒ 一个冷启动 worker **结束后**其 task
-  仍永久假在飞，不可再派（`gap-worker-driver-cold-start-inflight-refresh`，ready，附 §5 协调循环修法，
-  见 `orchestration/SPEC-unified-driver-architecture-2026-08-23.md`）。**手工 restart 后仍建议核对
+  只读探测，非猜测/非采信自述）——手工 restart **不会**重派仍存活的 worker。**相反方向的残留也已修**（冷启动 worker 结束后 task 永久假在飞 → 已修）：`coldInflight` 每趟 pass 在
+  `while` 循环内重扫（`enumerateColdStartInflightAsync`）——worker 退出 / worktree 消失任一生 ⇒ task 即离开
+  排除集、下一轮重新可派（`gap-worker-driver-cold-start-inflight-refresh`，done 2026-08-24）。冷启动孤儿会
+  自动收敛，无需手工救。**手工 restart 后仍建议核对
   一次** `ps aux | grep quay-task-worker`（按 task 名去重）作为习惯性负控制，但不再是必须的救火步骤。
   **manager 对 driver 生命周期（start/stop/restart）持人 2026-08-24 明确授权的常设控制权**（本项目后期
   开发阶段内），无需逐次请示；执行前仍应做上述现场核实（避免过期判断），执行后仍应做负控制确认。
@@ -283,15 +283,11 @@ Key cross-cutting facts (require reading several files to see):
   **⛔ 但不要用它回答「有几个任务在干活」——那要配一个活性直接量**（worktree 末次提交时刻 / 该路径下活进程数）。
   **⊢ 同硬规则 4b：worktree 数是代理量，`git log` 时刻与活进程是直接量。**（`isolationMode`/Land 锁等 milestone 级并发隔离旋钮属 RETIRED classic-loop → `orchestration/archive/AC58-retired-clauses.md#R19`；当前两层模式按任务无条件 `git worktree add`，无该旋钮。）
 - **`prepare-milestone.js` worktree-isolation 支持（已随 ADR-022 退役）→ `orchestration/archive/AC58-retired-clauses.md#R20`**（文件已删，机制细节与理由档案见归档）
-- **`.halt` sentinel** — pauses the loop at the next milestone boundary. **Correction (2026-07-27, `gap-halt-sentinel-path-mismatch`):** the real, mechanically-checked location is the **repo root** (`<repo-root>/.halt`, workspace-root-relative — matches `plugin/skills/loop-driver/SKILL.md`'s documented convention and `select-preflight.ts`'s actual `checkHalt()` implementation). A previous version of this file incorrectly documented `experiments/quay-perpetual-stream/.halt`; that path is NOT read by any live code path. **When editing while the loop may run, follow DIR-027 human-steering hygiene: pause via a root-level `.halt`, OR work in a private git worktree off `master` and fast-forward at a clean window** — never race the loop on `master`. Before REMOVING `.halt` to un-pause, run
-  `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh` (fixed to check this same
-  repo-root path at M187) — the mechanical go/no-go for whether `master` is safe to hand back to
-  the loop (clean tree, no mid-flight merge, `master` not checked out in a stray worktree, etc.).
-  **This is a manual, human-invoked check, not CI/loop-wired** (`gap-orphaned-check-scripts-not-
-  wired`, M-DIR119-C-CANARY, 2026-07-27, explicit decision) — nothing runs it for you automatically
-  before an un-halt; run it yourself.
+- **暂停/恢复（driver control-state）**：晋升/执行暂停已迁 driver control-state（`.quay/worker-control.json` / `.quay/promotion-control.json`, `driver-shared.ts` `isHalted`；旧 `.halt` 哨兵的 promotion/execution 角色已退役 2026-08-29, `gap-retire-halt-file-driver-based`——**manager 层跨项目 `.halt` 停泊态观察仍活**，归 `manager-tick-readings.ts`）。**编辑时仍遵循 DIR-027 人导卫生：在私有 worktree off `master` 工作，clean window 快进——不 race the loop on `master`。** `quay driver resume` 前跑 `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh`（manual，非 CI/loop-wired）——git 树安全 go/no-go（clean tree / 无 mid-flight merge / master 无 stray worktree）。
 - **Directives are TASK-CANONICAL** (DIR-028 / "Plan A", the single-source-of-truth principle): a directive is a `label:directive` quay task (`tasks/DIR-NNN.md`) and nothing else — there is no `directives/*.md` file, no projection, no anti-drift check (all retired). Create/steer via the `quay-directive` skill. Milestone candidates are `label:milestone-candidate` tasks; `backlog.md`/`dashboard.md` are **generated views** of the task store, not hand-edited sources.
 - Recurring design principle enforced across this repo (see `docs/proposals/exp5-crystallization-strategy.md`): **single source of truth + executable invariants over prose.** When you find content living in two places (a file + a task copy; a charter copying a task's AC/DoD; a status in a field AND a body line), that is drift — fix the SOURCE (usually a doc/skill/template that generated it), not just the artifact.
+
+- **单任务派发记录接口 = `plugin/scripts/dispatch-record.ts --add --task-id <id> --reason "<一句为什么选它>"`**（fail-closed：理由<8 非空白字符 exit 1 不写不派；指纹自动 `git hash-object`，算不出写 null 由 `dispatch-record-fingerprint-reason-check` 报红；正本 `fast-mode-tick-core.md` A16b）。**派发(机械)=内层（`fast-mode-tick-core.md:83`）——外层/非-inner 不手搓 Python 写 `orchestration/dispatch-record.jsonl`**（2026-08-20 外层 B9 手搓三键 `{ts,taskId,reason}` 漏指纹，已删；inner A16b 已记同一次派发，勿扩豁免名单）。同款先例：manager 语义派发 `semantic-face-dispatch-record.ts --add --kind <八类> --reason "..."`（`manager-tick-core.md` C30/AC145）。
 
 ## Reference docs
 
@@ -329,7 +325,8 @@ Key cross-cutting facts (require reading several files to see):
 
 ## Process
 
-- Development is driven via **background Claude Code workflows at milestone granularity** (→ ADR-009), with a **scheduled milestone e2e incl. browser tests** (Playwright/chrome-devtools) that keeps `L_T` on the real product surface (→ ADR-010). Follow DIR-027 steering hygiene (`.halt` or private worktree; never race the loop on `master`).
+- Development is driven via **background Claude Code workflows at milestone granularity** (→ ADR-009), with a **scheduled milestone e2e incl. browser tests** (Playwright/chrome-devtools) that keeps `L_T` on the real product surface (→ ADR-010). Follow DIR-027 steering hygiene (private worktree; never race the loop on `master`).
+- **后台会话编辑共享检出的正确姿势**：直接 Edit/Write 主检出会被 harness 的 worktree-isolation guard 拦（未 `EnterWorktree` 不可写）。任务体用 `task_write` MCP（Provider ABI 写 `tasks/*.md`）、代码改动进 worktree（`EnterWorktree` 或任务 worktree）。worker（claude -p）不撞 guard 是因 cwd 虽主检出、dispatch prompt 强制 file_path 用 worktree 绝对路径。⛔ 不要 Bash/Python 手搓硬插（2026-08-29 实证：解 worker-driver.ts 冲突时 Python 锚点插入吞 `/**` 留 orphan 注释，靠 worker 修回）。
 
 ## Split-decision routing policy
 

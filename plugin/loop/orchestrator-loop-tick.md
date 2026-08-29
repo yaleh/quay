@@ -522,24 +522,11 @@ fail-closed**（权限/是目录/I/O 错误 → 判为已暂停）；空文件�
 **已知且接受的粗糙之处**：`.halt` 使整个 tick 空转，**fan-in 也停**。所以在飞任务会算完但不落地，
 直到解除。**人已裁定接受这一点。** 缓解只有一条纪律：**暂停不是终点，解除条件必须写在 `.halt` 内容里**。
 
-**外层每个 tick 必须报各项目的 `.halt` 状态**——这是「暂停后忘了」的唯一防线。**统一读法**：
-`plugin/scripts/halt-check.sh` 是本层（及三层）共用的机械检查点——`--for outer --json` 给出
-`halted`（fail-closed）+ 组合判据 `stall`（`无 .halt` **且** 最后提交 >24h ⇒ 未标记停摆）；
-`--projects <根清单>` 一次读各项目的 `.halt` + 最后提交时距，逐项目报 `stall`。`halted=true` ⇒ 本 tick
-空转；`stall=true` ⇒ 升级报出。
-
-```bash
-bash plugin/scripts/halt-check.sh --for outer --json \
-  --projects <目标项目根1,目标项目根2,...>
-# 每个目标项目的根见各自 .quay/config.yml loop.repo_root（目标项目清单 = 本网络实例值，不写死）
-# `.halt` 是控制面不是传感器：没有 `.halt` 只回答「下一个边界不停」，不回答「项目在不在跑」——
-# 一个没有循环在跑的项目同样打印这一行。措辞因此是「未暂停」而不是「运行中」。
-# 人读 fallback（兼容旧式）：
-for d in <目标项目根清单>; do
-  printf "%-12s %s\n" "$(basename $d)" \
-    "$([ -f "$d/.halt" ] && echo "暂停: $(head -c 80 $d/.halt)" || echo 未暂停)"
-done
-```
+**（退役）外层 `.halt` 暂停已死**（gap-retire-halt-file-driver-based，2026-08-29）：外层（outer-driver）已
+注册未部署，晋升/执行暂停改由 driver control-state 承接（`.quay/worker-control.json` /
+`.quay/promotion-control.json`，`driver-shared.ts` `isHalted`），driver 不再读 `.halt`。旧的三层统一检查点
+`halt-check.sh` 已删除。本层不再「每 tick 报 `.halt` 状态」——跨项目 `.halt` 停泊态观察现归 **manager 层**
+（`manager-tick-readings.ts` 跨项目读，manager 层活机制）。
 
 **优先级（人已裁定，各网络自定）**：**本仓高于其它目标项目**（各网络的优先级取值见本层状态节）。
 必要时暂停后两者以保本仓推进。**优先级由暂停哪个项目执行，不进跨项目令牌**——

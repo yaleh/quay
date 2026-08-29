@@ -48,6 +48,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 
 /**
  * A "verified"-class ASSERTION: an assertion of a PASS state with a subject. Positional —
@@ -202,6 +203,7 @@ function usage(): never {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node commit-message-verified-check.ts [--root <dir>] [--depth <n>] [--json] [--selftest]");
   if (args.includes("--selftest")) {
     process.exit(selftest() ? 0 : 1);
   }

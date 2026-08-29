@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, helpExit } from "./gate-script-base.ts";
 import { matchGlob, isOverbroadDeclaration, normalizePath, parseTouches } from "./touches-orthogonality-check.ts";
 
 // normalizePath (canonical: strips ./, collapses //, resolves ./.. segments, drops trailing /, case
@@ -188,6 +188,14 @@ function runTaskDriver({ taskId, worktree, mergeTarget, allowEmpty }) {
 
 export async function main(argv) {
   const args = argv.slice(2).filter((a) => a !== undefined);
+  if (args.includes("--help") || args.includes("-h")) {
+    helpExit(
+      "Usage:\n" +
+        "  anti-drift-touches-check.mjs [--allow-empty] <ran-batch-manifest.json>\n" +
+        "  anti-drift-touches-check.mjs --task <id> --worktree <dir> [--merge-target <ref>] [--allow-empty]\n" +
+        "    (driver mode — fast-mode fan-in gate: actual diff vs declared ## Touches)",
+    );
+  }
   const allowEmpty = args.includes("--allow-empty");
   // Driver mode (gap-anti-drift-touches-zero-coverage-fast-mode): --task <id> --worktree <dir>
   // [--merge-target <ref>] — the fast-mode fan-in gate. Reads the task body's declared Touches and

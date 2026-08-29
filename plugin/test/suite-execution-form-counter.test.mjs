@@ -292,16 +292,6 @@ test("judgeInvariant — all unclassified / insufficient evidence ⇒ NO signal 
   assert.equal(v.unclassified_in_recent_n, 5);
 });
 
-test("judgeInvariant — .halt 接管期豁免 (halt_present ⇒ no signal)", () => {
-  const v = judgeInvariant(
-    Array.from({ length: 5 }, () => ({ form: FORM_MAIN_SESSION })),
-    5,
-    true,
-  );
-  assert.equal(v.signal, false);
-  assert.equal(v.band, "halt-takeover");
-});
-
 test("deriveProjectDir — encodes workspace root to Claude project transcript root", () => {
   // 只在 homedir 存在时断言编码形态（不依赖具体 home 路径）
   const p = deriveProjectDir("/home/yale/work/quay");
@@ -317,18 +307,16 @@ function makeCliFixture(builder) {
   const proj = join(dir, "proj");
   mkdirSync(proj, { recursive: true });
   const vr = join(dir, "verification-round.jsonl");
-  const halt = join(dir, ".halt");
-  const { records, transcripts, haltText } = builder();
+  const { records, transcripts } = builder();
   writeFileSync(vr, records.map((r) => JSON.stringify(r)).join("\n") + "\n");
   for (const [rel, recs] of Object.entries(transcripts)) {
     writeTranscript(proj, rel, recs);
   }
-  if (haltText) writeFileSync(halt, haltText, "utf8");
-  return { dir, proj, vr, halt };
+  return { dir, proj, vr };
 }
 
 test("CLI — 三类各报对应形态；窗口错开 ⇒ unclassified 不误报 (AC1)", () => {
-  const { dir, proj, vr, halt } = makeCliFixture(() => ({
+  const { dir, proj, vr } = makeCliFixture(() => ({
     records: [
       suiteRound(1, "2026-08-10T01:00:01.000Z"), // 主会话 launch 01:00:00 → main-session
       suiteRound(2, "2026-08-10T02:00:00.000Z"), // subagent launch 02:00:01 → subagent
@@ -342,10 +330,9 @@ test("CLI — 三类各报对应形态；窗口错开 ⇒ unclassified 不误报
       // 一个 30 分钟外的 launch —— 窗口错开，不得误报
       "abc-session/subagents/agent-z.jsonl": [launchRecord("2026-08-10T04:30:00.000Z", launchCmd())],
     },
-    haltText: null,
   }));
   try {
-    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--halt", halt, "--json"]);
+    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--json"]);
     assert.equal(res.status, 0, `stderr: ${res.stderr}`);
     const o = JSON.parse(res.stdout);
     assert.deepEqual(o.forms_by_round, { main_session: 1, subagent: 1, workflow: 1, unclassified: 1 });
@@ -363,7 +350,7 @@ test("CLI — 三类各报对应形态；窗口错开 ⇒ unclassified 不误报
 });
 
 test("CLI — OOM 后 5 轮主会话直跑 ⇒ 逐轮报 main-session，invariant 不成立 ⇒ rollback signal (AC3 正侧)", () => {
-  const { dir, proj, vr, halt } = makeCliFixture(() => ({
+  const { dir, proj, vr } = makeCliFixture(() => ({
     records: [
       suiteRound(265, "2026-08-11T01:08:00.000Z"),
       suiteRound(266, "2026-08-11T01:20:00.000Z"),
@@ -380,10 +367,9 @@ test("CLI — OOM 后 5 轮主会话直跑 ⇒ 逐轮报 main-session，invarian
         launchRecord("2026-08-11T01:55:59.000Z", launchCmd()),
       ],
     },
-    haltText: null,
   }));
   try {
-    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--halt", halt, "--json"]);
+    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--json"]);
     assert.equal(res.status, 1, `OOM 5 轮主会话直跑应报回落 signal，stderr: ${res.stderr}`);
     const o = JSON.parse(res.stdout);
     assert.equal(o.signal, true);
@@ -397,17 +383,16 @@ test("CLI — OOM 后 5 轮主会话直跑 ⇒ 逐轮报 main-session，invarian
 });
 
 test("CLI — suite-fix workflow 发起轮 ⇒ 报 workflow，不报 main-session (AC3 负侧)", () => {
-  const { dir, proj, vr, halt } = makeCliFixture(() => ({
+  const { dir, proj, vr } = makeCliFixture(() => ({
     records: [suiteRound(41, "2026-08-12T16:00:34.941Z")],
     transcripts: {
       "outer-session/subagents/workflows/wf_4ce5e599/agent-a7e8d414.jsonl": [
         launchRecord("2026-08-12T16:00:33.950Z", launchCmd()),
       ],
     },
-    haltText: null,
   }));
   try {
-    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--halt", halt, "--json"]);
+    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--json"]);
     assert.equal(res.status, 0);
     const o = JSON.parse(res.stdout);
     assert.equal(o.execution_forms[0].form, "workflow");
@@ -419,46 +404,17 @@ test("CLI — suite-fix workflow 发起轮 ⇒ 报 workflow，不报 main-sessio
   }
 });
 
-test("CLI — .halt 接管期豁免：全 main-session 也不报 signal (halt-takeover)", () => {
-  const { dir, proj, vr, halt } = makeCliFixture(() => ({
-    records: [
-      suiteRound(1, "2026-08-10T01:00:01.000Z"),
-      suiteRound(2, "2026-08-10T01:12:00.000Z"),
-      suiteRound(3, "2026-08-10T01:24:00.000Z"),
-    ],
-    transcripts: {
-      "main-session.jsonl": [
-        launchRecord("2026-08-10T01:00:00.000Z", launchCmd()),
-        launchRecord("2026-08-10T01:11:59.000Z", launchCmd()),
-        launchRecord("2026-08-10T01:23:59.000Z", launchCmd()),
-      ],
-    },
-    haltText: "paused\n",
-  }));
-  try {
-    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--halt", halt, "--json"]);
-    assert.equal(res.status, 0);
-    const o = JSON.parse(res.stdout);
-    assert.equal(o.signal, false);
-    assert.equal(o.band, "halt-takeover");
-    assert.equal(o.halt_present, true);
-  } finally {
-    cleanup(dir);
-  }
-});
-
 test("CLI — 全部 unclassified（触发自动治理）⇒ insufficient-evidence，不报 signal (不恒报)", () => {
-  const { dir, proj, vr, halt } = makeCliFixture(() => ({
+  const { dir, proj, vr } = makeCliFixture(() => ({
     records: [
       suiteRound(1, "2026-08-10T01:00:00.000Z"),
       suiteRound(2, "2026-08-10T01:12:00.000Z"),
       suiteRound(3, "2026-08-10T01:24:00.000Z"),
     ],
     transcripts: {}, // 无任何 launch
-    haltText: null,
   }));
   try {
-    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--halt", halt, "--json"]);
+    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--json"]);
     assert.equal(res.status, 0);
     const o = JSON.parse(res.stdout);
     assert.equal(o.signal, false);
@@ -470,7 +426,7 @@ test("CLI — 全部 unclassified（触发自动治理）⇒ insufficient-eviden
 });
 
 test("CLI — runner 恒 outer 不驱动 signal：同轮次 runner 全 outer，但执行形态 2 类 ⇒ healthy (AC4 断言非执行面取证)", () => {
-  const { dir, proj, vr, halt } = makeCliFixture(() => ({
+  const { dir, proj, vr } = makeCliFixture(() => ({
     records: [
       suiteRound(1, "2026-08-10T01:00:01.000Z", "outer"),
       suiteRound(2, "2026-08-10T02:00:00.000Z", "outer"),
@@ -479,10 +435,9 @@ test("CLI — runner 恒 outer 不驱动 signal：同轮次 runner 全 outer，�
       "main-session.jsonl": [launchRecord("2026-08-10T01:00:00.000Z", launchCmd())],
       "abc/subagents/agent-x.jsonl": [launchRecord("2026-08-10T02:00:01.000Z", launchCmd())],
     },
-    haltText: null,
   }));
   try {
-    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--halt", halt, "--json"]);
+    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--json"]);
     assert.equal(res.status, 0);
     const o = JSON.parse(res.stdout);
     assert.equal(o.consecutive_outer_rounds, 2, "runner 恒 outer ⇒ 展示 consecutive=2");
@@ -500,8 +455,7 @@ test("CLI — missing verification-round / missing project-dir ⇒ 0 classified,
   try {
     const proj = join(dir, "proj"); // 不存在
     const vr = join(dir, "verification-round.jsonl"); // 不存在
-    const halt = join(dir, ".halt"); // 不存在
-    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--halt", halt, "--json"]);
+    const res = run(["--root", dir, "--project-dir", proj, "--verification-round", vr, "--json"]);
     assert.equal(res.status, 0);
     const o = JSON.parse(res.stdout);
     assert.equal(o.signal, false);

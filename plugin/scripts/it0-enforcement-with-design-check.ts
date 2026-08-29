@@ -36,6 +36,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -298,6 +299,7 @@ function usage(): never {
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "it0-enforcement-with-design-check";
 if (isDirect) {
   const args = process.argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node it0-enforcement-with-design-check.ts [--root <dir>] [--inherited-core <path>] [--dod-check <path>] <workspace-root>");
   if (args.includes("--selftest")) {
     const ok = selftest();
     process.exit(ok ? 0 : 1);

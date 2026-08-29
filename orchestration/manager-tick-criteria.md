@@ -1,3 +1,5 @@
+> ⚠️ **外层/内层会话已退役（AC149，2026-08-28）**：本文件中引用 outer/inner 会话的判准已随会话退役（会话停止，机制由 promotion-driver / worker-driver / manager-kind 例程承接）；manager 会话本身保留。→ `orchestration/manager-phase-goal.md` ### AC149。
+
 **判准（逐条应用，并把结论写进 tick-log 行——自审会检查你是否真做了）**
 
 ① **PC 有效性**：`PC` 必须远大于 0。为 0 ⇒ 查询本身坏了，**后续所有时间窗读数不可信**。
@@ -585,3 +587,14 @@ cpu_time_s 缺失 / null / ≤ 0 的条数 == 0
 **⊢ 恒红与恒绿同害**：若不加窗口，本判据将对历史存量永远报红 ⇒ 携带零信息，与它曾是的恒真同形。
 **已知残余空洞（记录不扩）**：fail-closed exit-2 使 kill-on-red 轮**根本写不出记录** ⇒「无记录」≠「捕获无虞」；
 远期以 verification-round.jsonl 轮数 × 对账 records 条数兜底，判据暂不纳入。
+
+---
+
+## 语义面职责清单（AC145，2026-08-28 立；⛔ 不占 ①-⑥′ 的编号，硬规则 ⑧）
+
+八类语义职责（结构上不能是 driver——driver 读不出「听起来自洽但错了」的因果故事）：
+**任务撰写/立案 · 需求分析 · 升级判断（B11）· 学习（B10）· AC65 快修判断 · B16-C 类冲突意图 · B18 止损 · 跨层纠错（单列）**。
+机器正本 = `plugin/scripts/semantic-face-dispatch-record.ts` 的 `SEMANTIC_DUTY_KINDS`（closed enum）。
+
+- **AC1（能取假，后台 subagent）**：上述职责由 manager 派后台 subagent 执行，非主线程直接做；取假 = `node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --session <本会话> --json` 的 `main_thread_edits > 0`（同 inner A24 判据形态）。
+- **AC2（能取假，可查派发记录）**：每类职责有可查派发记录；取假 = 一次语义产出而无对应 `semantic-face-dispatch-record.jsonl` 行（`semantic-face-dispatch-record.ts --list --kind <kind>` 得 0）。

@@ -1,7 +1,7 @@
 ---
 id: gap-live-mechanical-fan-in-inflight-invisible
 title: Live 页机械 fan-in 在飞任务不可见——round 只带 count 不带 task id，三载体在 fan-in 窗口全 miss
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -35,8 +35,8 @@ driver 自己知道任务在飞（`worker-driver.ts:1811` `inFlightTasks()`，ru
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，生产载体）：读生产 round 载体，`in_flight_tasks` 非空时 `readLive().inFlight` 含该 task（⛔ round 无 task id / readLive 不含 ⇒ 假）。
-- [ ] AC2（不误伤）：workflow-events-only fixture（无 round 文件）的既有 serve.test.mjs AC2 不受影响。
+- [x] AC1（能取假，生产载体）：读生产 round 载体，`in_flight_tasks` 非空时 `readLive().inFlight` 含该 task（⛔ round 无 task id / readLive 不含 ⇒ 假）。
+- [x] AC2（不误伤）：workflow-events-only fixture（无 round 文件）的既有 serve.test.mjs AC2 不受影响。
 
 ## Definition of Done
 
@@ -48,3 +48,9 @@ round 记录带 `in_flight_tasks`（task id）；readLive 把其映射进 inFlig
 - packages/quay/src/observation.ts（readLive 读 round in_flight_tasks 推入 workerInFlight）
 - packages/quay/test/serve.test.mjs（AC1 生产载体断言 + AC2 不误伤）
 - tasks/gap-live-mechanical-fan-in-inflight-invisible.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T19:11:09.101Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

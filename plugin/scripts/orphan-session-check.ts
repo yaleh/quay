@@ -42,6 +42,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 
 export interface ClaudeSessionProc {
   pid: number;
@@ -308,6 +309,7 @@ function printJson(procs: ClaudeSessionProc[]): number {
 }
 
 export async function main(argv: string[]): Promise<number> {
+  if (argv.includes("--help") || argv.includes("-h")) helpExit("usage: node orphan-session-check.ts [--json] [--kill-workspace <path>] [--list|--dry-run]");
   const procs = enumerateClaudeProcesses();
 
   if (argv.includes("--json")) {
