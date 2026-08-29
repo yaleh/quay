@@ -33,7 +33,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFileSafe } from "./gate-script-base.ts";
+import { helpExit, readFileSafe } from "./gate-script-base.ts";
 import { canonicalTestFiles } from "./canonical-test-files.ts";
 export { canonicalTestFiles };
 
@@ -132,6 +132,7 @@ export function runCensus(repoRoot: string): ImplCensusResult {
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node test-impl-census-check.ts [--root <dir>] [--json] [--selftest]");
   let root = process.cwd();
   const files: string[] = [];
   for (let i = 0; i < args.length; i++) {

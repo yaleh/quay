@@ -2,6 +2,15 @@
 // pre-verified-round-record.ts — the SHARED verification-round writer for the fan-in suite paths.
 // gap-preverified-suite-bypasses-verification-round-ledger AC1/AC2 (the pre-verified branch) +
 // gap-fan-in-realsuite-bypasses-verification-round-ledger AC1/AC2 (the real-suite branch).
+//
+// ⛔ RETIRED FROM THE FAN-IN PATH (gap-fan-in-red-bucket-run-not-recorded, 人裁定「定义正确机制并实现」):
+// the fan-in bucket path now runs through full-suite-runner.ts --buckets (SUITE_LAUNCH in
+// fan-in-execute.js), which is the single writer of verification-round.jsonl GREEN AND RED — a red bucket
+// round is recorded at suite exit, never left unrecorded. This module's green-only writer (state:"green")
+// was the parallel harness's graft; its CALL SITE was removed from fan-in-execute.js step 4.5 (两套平行
+// 机制收敛为一). The module is retained (uncalled) because it is a HUB file (orchestration list) with its
+// own test surface; do NOT re-wire it into the fan-in path — route through the runner instead.
+//
 // writer: append ONE verification-round.jsonl record for a full-suite round that ran OUTSIDE
 // full-suite-runner.ts (the only other verification-round writer) — i.e. a fan-in landing whose
 // suite went through fan-in-execute.js's detached `bash scripts/test.sh` path.

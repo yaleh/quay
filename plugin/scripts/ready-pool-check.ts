@@ -191,7 +191,7 @@ import { expandDeclaredTouches, INFLIGHT_WORKTREE_STALE_MS } from "./concurrent-
 // hand-rolled /proc scan. The shared staleness threshold (INFLIGHT_WORKTREE_STALE_MS, above) and
 // this enumerator give the merge-surface path the SAME liveness judgment as the task-worktree path.
 import { enumerateProcs, cwdUnder } from "./worktree-process-reaper.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, helpExit } from "./gate-script-base.ts";
 // Reused "work has landed on master" signal (AC6: reuse, never a parallel copy) — the same
 // symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
 // buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-
@@ -2633,6 +2633,9 @@ function main(argv) {
   let landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT;
   let redWindowMin = RED_WINDOW_MIN_DEFAULT;
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) {
+    helpExit(`usage: node --experimental-strip-types plugin/scripts/ready-pool-check.ts [--root <repo>] [--cap <n>] [--floor-mult <n>] [--floor-cap <n>] [--in-flight <ids>] [--closed-but-live <ids>] [--top <n>] [--targeted <id>] [--develop <ref>] [--integration <ref>] [--master <ref>] [--landing-staleness-ms <n>] [--landing-behind-threshold <n>] [--red-window-min <n>] [--apply] [--revaluate-apply] [--json]`);
+  }
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
     else if (args[i] === "--json") { /* output is always JSON — accepted for Contract parity */ }

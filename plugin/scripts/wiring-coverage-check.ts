@@ -45,6 +45,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 
 // `owns?` intentionally excludes the ubiquitous possessive-determiner usage ("the task's own AC
 // section", "its own merits") via a negative lookbehind on `'s `/`s' `/a possessive pronoun
@@ -599,6 +600,7 @@ const _runAsCli = (() => {
 
 if (_runAsCli) {
   const argv = process.argv.slice(2);
+  if (argv.includes("--help") || argv.includes("-h")) helpExit("usage: wiring-coverage-check.ts --task <path/to/task.md> [--allow-empty]");
   const allowEmpty = argv.includes("--allow-empty");
   const taskIdx = argv.indexOf("--task");
   const taskPath = taskIdx >= 0 ? argv[taskIdx + 1] : undefined;

@@ -203,6 +203,7 @@ export function checkArtifact(fullText: string, orchestratorId: string | null | 
 export async function main(argv: string[]): Promise<number> {
   const fs = await import("node:fs");
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node audit-independence-check.ts [--orchestrator-id <id>] [--orchestrator-env <name>] [--dispatch-record <file>] [--allow-uncorroborated] <audit-artifact.md>");
   // --orchestrator-env: override the env-var name for the orchestrator session id (default QUAY_ORCHESTRATOR_SESSION_ID)
   let orchestratorEnvName = "QUAY_ORCHESTRATOR_SESSION_ID";
   let orchestratorId: string | undefined;
@@ -254,6 +255,7 @@ export async function main(argv: string[]): Promise<number> {
 
 // Run the CLI only when this file is the entry point (not when imported by tests / a quay gate).
 import { fileURLToPath } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isDirect) {
   main(process.argv).then((code) => process.exit(code));

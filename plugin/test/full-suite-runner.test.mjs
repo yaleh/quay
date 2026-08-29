@@ -522,6 +522,70 @@ test("AC2/AC3 — a kill-on-red-TRUNCATED red round is distinguishable: serial/l
   }
 });
 
+// ── gap-fan-in-red-bucket-run-not-recorded AC1/AC3 — --buckets red/green contrast ───────────────────
+// The fan-in bucket path now runs through full-suite-runner.ts --buckets. The runner is the single writer
+// of verification-round.jsonl GREEN AND RED; a red bucket round must land state=red (real suite_exit + fail
+// count + __BUCKETS__ marker), never left unrecorded (硬规则 3b: 「没跑过」与「跑了但红」同形).
+
+/** Write a fake `<root>/scripts/test.sh` that emits the given body (the runner's --buckets path spawns
+ *  `bash scripts/test.sh --buckets <task-id>` in cwd=root). */
+function fakeBucketTestSh(root, body) {
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "test.sh"), "#!/usr/bin/env bash\n" + body + "\n", { mode: 0o755 });
+}
+
+test("AC1 — full-suite-runner.ts --buckets records a RED bucket round (state=red + fail count + __BUCKETS__ marker) into verification-round.jsonl", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-bucket-red-"));
+  fakeBucketTestSh(root, [
+    'echo "__BUCKETS__ buckets=M files=3 full=0"',
+    'echo "# tests 5"',
+    'echo "# pass 3"',
+    'echo "# fail 2"',
+    'echo "# cancelled 0"',
+    "exit 1",
+  ].join("\n"));
+  try {
+    const child = runRunner({ root, buckets: "gap-test-red-bucket", laneCount: 8, runner: "inner" });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, `runner exits 1 on a red bucket round, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    assert.ok(fs.existsSync(vrf), "verification-round.jsonl written");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "red", "a red bucket round records state=red (not green, not absent)");
+    assert.equal(rec.fail, 2, "the fail count rides the record");
+    assert.equal(rec.buckets, "M", "the __BUCKETS__ marker is parsed into the buckets field");
+    assert.equal(rec.bucket_files, 3, "the __BUCKETS__ file count rides the record");
+    assert.equal(rec.runner, "inner", "explicit --runner inner is recorded");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 green contrast — full-suite-runner.ts --buckets records a GREEN bucket round (state=green) into verification-round.jsonl", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-bucket-green-"));
+  fakeBucketTestSh(root, [
+    'echo "__BUCKETS__ buckets=P files=2 full=0"',
+    'echo "# tests 4"',
+    'echo "# pass 4"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n"));
+  try {
+    const child = runRunner({ root, buckets: "gap-test-green-bucket", laneCount: 8, runner: "inner" });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on a green bucket round, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "green", "a green bucket round records state=green");
+    assert.equal(rec.fail, 0, "the fail count is 0 on green");
+    assert.equal(rec.buckets, "P", "the __BUCKETS__ marker is parsed into the buckets field");
+    assert.equal(rec.bucket_files, 2, "the __BUCKETS__ file count rides the record");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC2 backward-compat — a suite with NO __OVERHEAD__ emission records NO *_phase_ms fields", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-none-"));
   const { f, dir } = fakeSuite(GREEN_SUITE);

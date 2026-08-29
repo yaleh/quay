@@ -31,15 +31,33 @@ export interface ParsedArgs {
   flags: Record<string, string | boolean>;
 }
 
+// ── helpExit ────────────────────────────────────────────────────────────────────────────────────────
+// Print a usage line to stdout and exit 0 — the single `--help` contract shared by every checker
+// (gap-help-contract-incompatible-behaviors): usage FIRST, exit 0, NO business side effect. Call this
+// BEFORE any argument parsing / repo-root resolution / file write; a checker that reaches its own
+// full-check logic on `--help` violates the contract (it silently runs — or worse, appends to a
+// history/ledger file, as measure-trend-check did to .quay/measure-history.jsonl).
+export function helpExit(usage: string): never {
+  process.stdout.write(usage.endsWith("\n") ? usage : usage + "\n");
+  process.exit(0);
+}
+
 // ── parseArgs ──────────────────────────────────────────────────────────────────────────────────────
 // Parse CLI arguments according to a spec. Flags are parsed as --name value or --name=value (string),
 // or --name alone (boolean). Positional args are everything else.
 //
-// Exits with code 2 and a usage message if fewer than minArgs positional args are provided.
+// `--help` / `-h` anywhere in argv ⇒ print usage to stdout and exit 0 (the shared contract above),
+// evaluated BEFORE the minArgs failure path so `--help` never reads as a missing-arg error.
+// Otherwise exits with code 2 and a usage message if fewer than minArgs positional args are provided.
 export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
   const result: ParsedArgs = { args: [], flags: {} };
   const raw = argv.slice(2);
   const flagDefs = spec.flags || {};
+
+  const scriptName = path.basename(argv[1] || "script");
+  if (raw.includes("--help") || raw.includes("-h")) {
+    helpExit(`usage: ${scriptName} ${spec.usage}`);
+  }
 
   for (let i = 0; i < raw.length; i++) {
     const a = raw[i];
@@ -63,7 +81,6 @@ export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
 
   const minArgs = spec.minArgs ?? 1;
   if (result.args.length < minArgs) {
-    const scriptName = path.basename(argv[1] || "script");
     console.error(`Usage: ${scriptName} ${spec.usage}`);
     process.exit(2);
   }
