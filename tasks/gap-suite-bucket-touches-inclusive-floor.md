@@ -1,7 +1,7 @@
 ---
 id: gap-suite-bucket-touches-inclusive-floor
 title: bucket 选择强制包含任务 Touches 测试文件——改了测试必须跑它（不依赖归因判定）；否则「改了测试文件但 fan-in 不跑」结构上可能
-status: ready
+status: done
 labels:
   - gap
   - defect
