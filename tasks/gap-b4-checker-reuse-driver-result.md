@@ -1,7 +1,7 @@
 ---
 id: gap-b4-checker-reuse-driver-result
 title: B4·层 2 判定契约——checker 复用已落地的 driver-result.ts DriverResult<T>（非设计新契约，采纳数 0→k 棘轮）
-status: ready
+status: done
 labels:
   - gap
   - feature
