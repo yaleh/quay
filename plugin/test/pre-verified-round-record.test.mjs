@@ -895,6 +895,32 @@ test("parseTestCounts — returns null for a missing/unreadable/summary-less log
   assert.equal(parseTestCounts(noSummary), null, "a log with no spec summary → null (never {0,0,0})");
 });
 
+test("parseTestCounts — strips FORCE_COLOR ANSI so a colorized summary parses to the SAME counts as plain (gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi)", () => {
+  // #684/#685 regression: host FORCE_COLOR=3 forces node:test's spec reporter to colorize its
+  // summary even when redirected to a file ⇒ `ℹ pass N` arrives as `\x1b[34mℹ pass N\x1b[39m`
+  // (ESC at line start). The `^[#ℹ]` anchor then never matched ⇒ parseTestCounts returned null ⇒
+  // the four fields were absent. Negative control: the SAME counts parse from a colorized AND a
+  // plain log (the ANSI strip is a no-op on plain lines).
+  const coloredLog = writeSuiteLog(null, [
+    "\x1b[34mℹ pass 628\x1b[39m",
+    "\x1b[34mℹ fail 0\x1b[39m",
+    "\x1b[34mℹ cancelled 0\x1b[39m",
+    "\x1b[34mℹ pass 4175\x1b[39m",
+    "\x1b[34mℹ fail 3\x1b[39m",
+    "\x1b[34mℹ cancelled 0\x1b[39m",
+  ]);
+  const plainLog = writeSuiteLog(null, [
+    "ℹ pass 628",
+    "ℹ fail 0",
+    "ℹ cancelled 0",
+    "ℹ pass 4175",
+    "ℹ fail 3",
+    "ℹ cancelled 0",
+  ]);
+  assert.deepEqual(parseTestCounts(coloredLog), { pass: 628 + 4175, fail: 0 + 3, cancelled: 0 + 0 }, "colorized summary parses to the SUM across blocks");
+  assert.deepEqual(parseTestCounts(plainLog), parseTestCounts(coloredLog), "colorized ≡ plain (negative control)");
+});
+
 test("AC2/AC3 — buildPreVerifiedRoundRecord carries buckets/bucket_files/bucket_duration_ms on a bucket-mode log (M-only → buckets=M; hub → buckets=full)", () => {
   // M-only replay: the fan-in suite log carries `__BUCKETS__ buckets=M files=219 full=0` → record.buckets=M.
   const mLog = writeSuiteLog(null, ["__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=100 head=x round=full", "__BUCKETS__ buckets=M files=219 full=0", "__OVERHEAD__ serial_phase_ms=301000"]);
@@ -1104,6 +1130,24 @@ test("parseRedFailures — parses STATIC_CHECK_FAILED fail-closed lines into {na
   assert.equal(red.failClosed[0].exitCode, 1);
   assert.match(red.failClosed[0].line, /^STATIC_CHECK_FAILED: spec-declaration-point-check exit=1$/);
   assert.ok(red.failureLines.some((l) => /resident loop/.test(l)), "the ✖ test-failure line is also accumulated (isFailureLine 口径)");
+});
+
+test("parseRedFailures — strips FORCE_COLOR ANSI so a colorized red summary/✖ still yields CLEAN failureLines (gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi 5b sibling)", () => {
+  // Sibling surface of the FORCE_COLOR=3 defect (hard rule 5b): a RED suite's spec-reporter failure
+  // lines are colorized too — `ℹ fail N` → `\x1b[34mℹ fail N\x1b[39m` and `✖ <name> (Nms)` →
+  // `\x1b[31m✖ <name> (Nms)\x1b[39m`. isFailureLine's `^[#ℹ]\s*fail\s+[1-9]` / `^✖\s+…` anchors then
+  // miss them ⇒ failureLines dropped even though the round is red. The strip (same ANSI_CSI_RE as
+  // parseTestCounts) must recover them AND record the CLEAN (no-ESC) line — full-suite-runner.ts
+  // records summaryLine (stripped) for the same reason.
+  const log = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-27T00:00:00.000Z ms=100 head=x round=full",
+    "\x1b[34mℹ fail 1\x1b[39m",
+    "\x1b[31m✖ AC1 — resident loop does not exit after one worker (5831.7ms)\x1b[39m",
+  ]);
+  const red = parseRedFailures(log);
+  assert.ok(red.failureLines.some((l) => /^ℹ fail 1$/.test(l)), "the colorized ℹ fail 1 summary is captured (isFailureLine 口径)");
+  assert.ok(red.failureLines.some((l) => /resident loop/.test(l)), "the colorized ✖ test-failure line is captured");
+  assert.ok(red.failureLines.every((l) => !/\x1b/.test(l)), "recorded failure lines are ANSI-stripped (clean, no ESC bytes)");
 });
 
 test("parseRedFailures — an absent/unreadable log returns {staticCheck:false, failClosed:[], failureLines:[]} (honest empty)", () => {
