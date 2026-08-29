@@ -4,8 +4,8 @@
 //
 // Merging config files (DIR-050) does not fix the "declared but dead" failure mode — it can make
 // it WORSE, because a dead field in the canonical file looks MORE authoritative while still being
-// unread ([[gap-halt-sentinel-path-mismatch]] is the real-world proof: an authoritative-looking,
-// off-path `.halt` doc caused a genuine safety miss). This check distinguishes THREE distinct
+// unread (an authoritative-looking, off-path doc caused a genuine safety miss — the real-world
+// proof that motivated this check). This check distinguishes THREE distinct
 // failure shapes that "does it have a reader?" prose blurs together:
 //
 //   NO_READER              — no reader for this field exists ANYWHERE in the codebase.

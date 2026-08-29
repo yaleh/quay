@@ -32,8 +32,7 @@
 //             - 已分类 ≥2 且全部同类  ⇒ rollback（invariant 不成立——执行形态回落，主会话直跑越界）
 //             - 已分类 <2（多为 unclassified/触发自动治理）⇒ insufficient-evidence（不计 signal，如实报组成）
 //   invariant 近 N 轮已分类形态 ≥2 类（替换恒真的 `runner_field_tracked=1`——「字段被记录了」永远为真）
-//   invariant halt_taken_into_account = 1（.halt 接管期不计数；接管期主会话直跑是合法形态）
-//   control   回落报 signal；.halt 期豁免；主会话越界检测
+//   control   回落报 signal；主会话越界检测
 //
 // 展示（非执行面取证）：consecutive_outer_rounds / runner_counts 仍从 runner 字段计算，
 // 但只作展示/历史对照，绝不驱动 signal。
@@ -43,10 +42,10 @@
 //
 // Usage:
 //   node --no-warnings --experimental-strip-types plugin/scripts/suite-execution-form-counter.ts \
-//        [--root <dir>] [--project-dir <dir>] [--verification-round <path>] [--halt <path>] \
+//        [--root <dir>] [--project-dir <dir>] [--verification-round <path>] \
 //        [--epsilon-ms <n>] [--recent-n <n>] [--json] [--help]
 //
-// Exit: 0 = healthy / .halt 接管期豁免 / insufficient-evidence · 1 = 回落 signal（invariant 不成立）·
+// Exit: 0 = healthy / insufficient-evidence · 1 = 回落 signal（invariant 不成立）·
 //       2 = 用法/环境错误。
 
 import fs from "node:fs";
@@ -57,9 +56,6 @@ import { isDirectEntry } from "./gate-script-base.ts";
 
 /** 默认 verification-round 相对路径（<root>/.quay/verification-round.jsonl）——外层每轮一行套件记录。 */
 export const DEFAULT_VERIFICATION_ROUND_REL = path.join(".quay", "verification-round.jsonl");
-
-/** 默认 .halt 相对路径（<root>/.halt）——人裁定「.halt 期间由主会话跑」的接管期豁免。 */
-export const DEFAULT_HALT_REL = ".halt";
 
 /** 默认 ε 匹配窗（ms，90 秒）：launch tool_use 时间戳须落在 [startedAt ± ε]。实测真 launch 与轮次差距 1–90s（命令前缀步骤）；轮间 ≥5min ⇒ 90s 无跨轮歧义，且排除 100s+ 的巧合命令。 */
 export const DEFAULT_EPSILON_MS = 90 * 1000;
@@ -293,20 +289,8 @@ export function countConsecutiveOuterRounds(records) {
  * invariant 判定（AC2，可取假）：「近 N 轮已分类形态出现 ≥2 类」。PURE。
  * @param {Array<{form: string}>} roundForms 逐轮执行形态（保序，旧→新）
  * @param {number} n 窗口大小
- * @param {boolean} haltPresent .halt 接管期豁免
  */
-export function judgeInvariant(roundForms, n, haltPresent = false) {
-  if (haltPresent) {
-    return {
-      band: "halt-takeover",
-      signal: false,
-      action: null,
-      distinct_forms: 0,
-      classified_in_recent_n: 0,
-      unclassified_in_recent_n: 0,
-      message: `.halt 接管期豁免——主会话直跑是合法形态，不计数`,
-    };
-  }
+export function judgeInvariant(roundForms, n) {
   const window = roundForms.slice(-n);
   const classified = window.filter((f) => f.form !== FORM_UNCLASSIFIED);
   const unclassifiedInWindow = window.length - classified.length;
@@ -356,19 +340,18 @@ function usage() {
 无匹配 ⇒ unclassified（缺值=未查，触发自动治理是健康态，不是回落）。
 
 invariant（可取假，替换恒真 runner_field_tracked=1）：「近 N 轮已分类形态出现 ≥2 类」。
-  已分类 ≥2 且全同类 ⇒ band=rollback signal=1（exit 1）；否则 healthy / insufficient-evidence / halt-takeover（exit 0）。
+  已分类 ≥2 且全同类 ⇒ band=rollback signal=1（exit 1）；否则 healthy / insufficient-evidence（exit 0）。
 
 Usage:
   --root <dir>                 workspace root (default: auto-derived from this script's location)
   --project-dir <dir>          transcript project root override (default: ~/.claude/projects/<encoded-root>)
   --verification-round <path>  override the verification-round.jsonl path (test seam)
-  --halt <path>                override the .halt path (test seam)
   --epsilon-ms <n>             launch match window (default 300000 = 5min)
   --recent-n <n>               invariant window N (default 5)
   --json                       JSON output (measure-only, never mutates)
   --help|-h                    this usage (exit 0)
 
-Exit: 0 healthy / .halt takeover-exempt / insufficient-evidence · 1 rollback signal (invariant false) · 2 usage/env error`);
+Exit: 0 healthy / insufficient-evidence · 1 rollback signal (invariant false) · 2 usage/env error`);
 }
 
 export function main(argv) {
@@ -400,11 +383,7 @@ export function main(argv) {
 
   const verificationRound =
     flagVal("--verification-round", "") || path.join(root, DEFAULT_VERIFICATION_ROUND_REL);
-  const haltPath = flagVal("--halt", "") || path.join(root, DEFAULT_HALT_REL);
   const projectDir = flagVal("--project-dir", "") || deriveProjectDir(root);
-
-  // ── .halt 接管期豁免 ──────────────────────────────────────────────────────────────────────────────
-  const haltPresent = fs.existsSync(haltPath);
 
   // ── verification-round 解析 ───────────────────────────────────────────────────────────────────────
   let records = [];
@@ -425,7 +404,7 @@ export function main(argv) {
   const projectExists = fs.existsSync(projectDir);
   const launches = projectExists ? collectLaunches(projectDir) : [];
   const roundForms = classifyRounds(records, launches, epsilonMs);
-  const verdict = judgeInvariant(roundForms, n, haltPresent);
+  const verdict = judgeInvariant(roundForms, n);
 
   // ── 展示字段（非执行面取证）：runner 字段计数，仅作历史对照 ─────────────────────────────────────
   const { consecutive, runnerCounts } = countConsecutiveOuterRounds(records);
@@ -433,9 +412,9 @@ export function main(argv) {
 
   const out = {
     signal: verdict.signal,
-    band: haltPresent ? "halt-takeover" : verdict.band,
+    band: verdict.band,
     action: verdict.action,
-    message: haltPresent ? verdict.message : verdict.message,
+    message: verdict.message,
     invariant_holds: verdict.signal ? false : verdict.band === "healthy",
     distinct_forms_in_recent_n: verdict.distinct_forms,
     classified_in_recent_n: verdict.classified_in_recent_n,
@@ -464,8 +443,6 @@ export function main(argv) {
     // 不代表执行形态，绝不驱动 signal。仅保留展示/历史对照。
     consecutive_outer_rounds: consecutive,
     runner_counts: runnerCounts,
-    halt_present: haltPresent,
-    halt_path: haltPath,
     project_dir: projectDir,
     project_dir_exists: projectExists,
     verification_round: verificationRound,
