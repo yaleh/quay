@@ -2217,6 +2217,21 @@ test("AC3 (cold-start-refresh) — per-pass observation: no one-time `const cold
   assert.match(src, /coldInflight\s*=\s*await\s+enumerateColdStartInflightAsync\(rootDir\)/, "coldInflight is re-observed via enumerateColdStartInflightAsync each pass (async — 不阻塞地板)");
 });
 
+// ── gap-archguard-structural-gate-in-fan-in-driver：archguard 结构闸接进机械 fan-in ──────────────
+
+test("AC1 (gap-archguard-structural-gate-in-fan-in-driver) — runMechanicalFanIn 在 typecheck 后、scoped门 前接 archguard 结构闸（step=archguard-structure），带 archguardCommand 测试缝", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  // 步骤顺序按位置判定（⛔ 不按关键词）：typecheck（第 5 步）→ archguard（第 5.5 步）→ scoped门（第 6 步）。
+  const typecheckIdx = src.indexOf("// 5. ts-typecheck 闸");
+  const archguardIdx = src.indexOf("// 5.5 archguard 结构闸");
+  const scopedIdx = src.indexOf("// 6. scoped 门 + doc 检查");
+  assert.ok(typecheckIdx !== -1 && archguardIdx !== -1 && scopedIdx !== -1, "all three step markers must be present");
+  assert.ok(typecheckIdx < archguardIdx && archguardIdx < scopedIdx, `archguard must sit between typecheck and scoped门 (${typecheckIdx} < ${archguardIdx} < ${scopedIdx})`);
+  assert.match(src, /archguardCommand\?/, "the archguardCommand test seam is declared on MechanicalFanInOptions");
+  assert.match(src, /fail\("archguard-structure"/, "dependency-cycle red returns step=archguard-structure");
+  assert.match(src, /archguard-runner\.ts/, "the default archguard command references archguard-runner.ts");
+});
+
 // ── gap-worker-driver-stopreason-latch-permanent-stop ──────────────────────────────────────────────
 // stopReason 一旦赋值永不复位 ⇒ 瞬时闸拒绝（resource-gate-wait）被永久 latch ⇒ 同一 driver 进程内
 // 恢复不可能 ⇒ 1h48m 零派发（234 槽·分钟）。修法：WAIT（瞬时）不 latch、下一轮重读 stopCondition；

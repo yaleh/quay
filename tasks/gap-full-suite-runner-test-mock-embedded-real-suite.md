@@ -41,3 +41,9 @@ fake suite 替代内嵌真实 512-file suite；AC1-AC4 全勾；`main_phase` 地
 - plugin/test/full-suite-runner.test.mjs（扩展 fakeTestShRecordingArgs 缝，昂贵 e2e AC 用最小 fake suite）
 - plugin/test/fixtures/fake-suite/ (new)（假 suite fixture 文件，或复用现有 fake test.sh 机制）
 - tasks/gap-full-suite-runner-test-mock-embedded-real-suite.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T19:28:54.763Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
