@@ -43,10 +43,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，trace 落盘）：实跑一条真任务机械 fan-in（含 suite 或 doc-only 皆可）后，`.quay/fan-in-<task>-<runId>.log` 存在且非空，每行含 {step, exit, wall_ms}，步序列覆盖 merge-develop → ff（或覆盖首个失败步前的全部步）；同任务新 runId 重跑 ⇒ 新文件、旧文件不被覆盖（⛔ 无文件 / 行缺 step/exit/wall_ms / 旧轮被覆盖 ⇒ 假）。
-- [ ] AC2（能取假，web 渲染）：task 详情页 Runs 区块对该任务显示 mechanical_fan_in 结果（landed/red + 失败 step）；`fanInLog` 非空的行显示 view/download 链接，点击可访问（⛔ 不显示结果 / 链接 404 ⇒ 假）。
-- [ ] AC3（能取假，路径穿越防护）：非白名单文件名 / `../` / 绝对路径的任务名或文件名被拒（400），不可读取 `.quay/` 之外的任意文件（⛔ 任意路径可读 ⇒ 假）。
-- [ ] AC4（能取假，生产载体，硬规则 4 推论三）：实现落地后，production `.quay/worker-outcome.jsonl` 中带 `mechanical_fan_in` 且 `fanInLog` 非空的记录 ≥ 1，且其对应 `.quay/fan-in-<task>-<runId>.log` 存在非空（⛔ 只被 fixture/测试缝满足、production 零记录 ⇒ 假）。
+- [ ] AC1（能取假，trace 落盘）：实跑一条真任务机械 fan-in（含 suite 或 doc-only 皆可）后，`.quay/fan-in-<task>-<runId>.log` 存在且非空，每行含 {step, exit, wall_ms}，步序列覆盖 merge-develop → ff（或覆盖首个失败步前的全部步）；同任务新 runId 重跑 ⇒ 新文件、旧文件不被覆盖（⛔ 无文件 / 行缺 step/exit/wall_ms / 旧轮被覆盖 ⇒ 假）。（待外部）
+- [x] AC2（能取假，web 渲染）：task 详情页 Runs 区块对该任务显示 mechanical_fan_in 结果（landed/red + 失败 step）；`fanInLog` 非空的行显示 view/download 链接，点击可访问（⛔ 不显示结果 / 链接 404 ⇒ 假）。
+- [x] AC3（能取假，路径穿越防护）：非白名单文件名 / `../` / 绝对路径的任务名或文件名被拒（400），不可读取 `.quay/` 之外的任意文件（⛔ 任意路径可读 ⇒ 假）。
+- [ ] AC4（能取假，生产载体，硬规则 4 推论三）：实现落地后，production `.quay/worker-outcome.jsonl` 中带 `mechanical_fan_in` 且 `fanInLog` 非空的记录 ≥ 1，且其对应 `.quay/fan-in-<task>-<runId>.log` 存在非空（⛔ 只被 fixture/测试缝满足、production 零记录 ⇒ 假）。（待外部）
 
 ## Definition of Done
 
