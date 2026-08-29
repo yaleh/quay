@@ -206,7 +206,7 @@ post-friction**（被硌了才发现）。而探针**本来就是设计来做 pr
 | 升级通道 | `quay-init` 内有 upgrade 逻辑，但目标项目实测仍会冻结在安装那一刻——**交付面自己在长大，目标没有跟上的路径**（已立案未闭） |
 
 <!-- DELIVERY-INVENTORY-BEGIN -->
-scripts=295 · gate-scripts=14 · skills=13 · probes=5 · loop=6 · workflows=5 · agents=1 · vendor=2
+scripts=296 · gate-scripts=14 · skills=13 · probes=5 · loop=6 · workflows=5 · agents=1 · vendor=2
 <!-- DELIVERY-INVENTORY-END -->
 
 ### 6b. 前置条件（2026-08-08，`gap-delivery-outline-vs-verify-surface-single-source` AC4）
@@ -315,3 +315,4 @@ milestone 概念已随 ADR-022 退休）。
 |---|---|
 | 2026-08-05 | 创建。触发：人问「有文档描述这一轮廓吗？如果没有，创建并持续维护」。实测确认 README/DESIGN/quay-proposal 三份各覆盖一片，`supervisor` 与 `upgrade` 几乎全缺，无单一文档覆盖完整轮廓。 |
 | 2026-08-25 | driver 运行时两级分层落地（gap-ac151）：supervisor 由 bash `promotion-driver-launch.sh` 港进 TS `driver-runtime.ts`（Layer 0），promotion/worker 改继承 Layer 0+1a。DELIVERY-INVENTORY scripts 计数净零（+1 driver-runtime.ts / -1 promotion-driver-launch.sh），快照数值不变。 |
+| 2026-08-28 | 退役前置检查落地（gap-b0-retirement-precondition-checker-call-surface）：新增 `outer-retirement-precondition-check.ts`（枚举 outer 执行核引用的 checker、判定留存调用面、孤儿必须显式退役），并把 `outer-anchor-check.ts` / `outer-cron-registry.ts` 标为随退役层显式退役（RETIRED-WITH-RETIRING-LAYER）。DELIVERY-INVENTORY scripts 计数 +1（+outer-retirement-precondition-check.ts）。 |
