@@ -76,7 +76,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 
 export const DATA_FILE_REL = "docs/analysis/threshold-scope-violations.md";
 
@@ -480,6 +480,7 @@ export function writeRatchet(root: string, currentKeys: string[], { reset = fals
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
 export function runCli(argv: string[]): number {
   const args = argv.slice();
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node threshold-scope-check.ts [--root <dir>] [--json] [--judge <j>] [--write-ratchet] [--reset-baseline]");
   let root: string | null = null;
   let json = false;
   let judge: string | null = null;

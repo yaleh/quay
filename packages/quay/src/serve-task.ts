@@ -32,13 +32,26 @@ export async function handleTaskList(
   // does NOT render task bodies. The Provider ABI task_list accepts an
   // optional `includeBody` (default true = full tasks, backward compatible).
   // Passing false when no ?q= search is active shrinks the MCP round-trip
-  // payload from ~5.7MB (all 619 task bodies) to ~0.3MB (frontmatter only) —
+  // payload from ~5.7MB (all task bodies) to ~0.3MB (frontmatter only) —
   // the dominant cost of the "MCP round-trip + rendering" half of this route.
-  // When ?q= IS active, body search needs the bodies, so we request them.
+  //
+  // gap-serve-search-timeout-all-body-fetch: when ?q= IS active we previously
+  // requested EVERY body (`includeBody: true`) so the client-side filter below
+  // could search body text — with 1572 tasks that payload timed out the MCP
+  // round-trip (-32001) and the search rendered 0 rows. Now the search is
+  // pushed DOWN to the Provider: task_list accepts a `search` param that filters
+  // title+body server-side, so the round-trip carries only the matches (whose
+  // bodies default to included — a handful, not 1572). The client-side filter
+  // below is kept because a Provider that does not implement `search` (e.g.
+  // quay-github) still returns the full list and the local filter is the correct
+  // search for it; for a Provider that DID filter, re-filtering the
+  // already-scoped matches is an idempotent no-op.
   // (The qFilter read is duplicated below where it drives filtering; reading
   // the URLSearchParams twice is cheap and keeps the two uses independent.)
   const qFilter = url.searchParams.get("q") || null;
-  const { tasks: allTasks, malformed } = await client.taskList({ includeBody: qFilter ? true : false });
+  const { tasks: allTasks, malformed } = await client.taskList(
+    qFilter ? { search: qFilter } : { includeBody: false }
+  );
   // QX-004 (experiment 4, iteration 1): filter by ?prefix=<value> query param.
   // Closes CB-002: "show only QX-* tasks" affordance in Web UI.
   // Applied FIRST, before status/label filters — prefix scopes the whole view.

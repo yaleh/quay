@@ -1,6 +1,7 @@
 ---
 id: gap-mech-fan-in-log-webui-visible-clickable
-title: 机械 fan-in 过程日志持久化 + web 详情页可点击访问：步骤 trace 落 .quay/fan-in-*.log + Runs 区块渲染 mechanical_fan_in + view/download 端点（带路径穿越防护）
+title: 机械 fan-in 过程日志持久化 + web 详情页可点击访问：步骤 trace 落 .quay/fan-in-*.log + Runs
+  区块渲染 mechanical_fan_in + view/download 端点（带路径穿越防护）
 status: ready
 labels:
   - gap
@@ -64,3 +65,9 @@ extra: {}
 - packages/quay/test/serve-handlers.test.mjs（AC2 渲染 + AC3 穿越防护测试）
 - .gitignore（`.quay/fan-in-*.log`）
 - tasks/gap-mech-fan-in-log-webui-visible-clickable.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-29T01:48:39.196Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

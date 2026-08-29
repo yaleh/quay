@@ -790,6 +790,13 @@ export interface SuiteRoundRecord {
   // gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1: main|worktree — which
   // checkout produced this round (the same `scope` the state file carries). Absent on legacy rows.
   scope?: "main" | "worktree";
+  /**
+   * gap-verification-round-static-fail-no-record AC3 — which task this round verified (present ONLY on
+   * a bucket-mode run `--buckets <task-id>`, where the runner knows the task identity; a main-checkout
+   * full suite / one-shot verify round omits it — absent-field contract, same as scope_unit). Lets the
+   * red/failed round be attributed to the task whose bucket it verified, without hand-digging the log.
+   */
+  taskId?: string;
   // gap-verification-round-in-one-shot-worktree — true when this round ran in a one-shot verify
   // worktree (the same flag the suite-state carries). Absent on non-one-shot rows.
   oneShotWorktree?: boolean;
@@ -1065,9 +1072,48 @@ export function defaultLaneCount(): number {
   );
   const ncpu = Number(ncpuRaw);
   const slots = concurrentSuiteSlots();
+  // gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock (漏口②): the divisor is S + the
+  // count of slots whose holder yielded the SLOT via the hold-cap watchdog but is STILL running — those
+  // grandfathered lanes are budgeted, so a joining (S+1)-th suite takes fewer lanes instead of the
+  // pre-fix「只让槽不让 lane」double oversubscription (each suite × nproc×oversub/S with no bound on the
+  // slot-less one). A lone suite (no yielded slot) keeps the pure S formula unchanged (AC2 no-regression).
+  const yielded = yieldedSuiteSlotCount();
   const oversubRaw = Number(process.env.QUAY_MAX_OVERSUBSCRIPTION ?? "1");
   const oversub = Number.isFinite(oversubRaw) && oversubRaw > 0 ? oversubRaw : 1;
-  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) * oversub / slots));
+  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) * oversub / (slots + yielded)));
+}
+
+/**
+ * gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock (漏口②) — the number of full-suite
+ * lock slots whose HOLDER released the slot via the hold-cap watchdog (`FULL_SUITE_LOCK_HOLD_MAX_S`,
+ * scripts/test.sh → suite-slot-lib.sh `spawn_suite_lock_hold_watchdog`) but is STILL running. The
+ * watchdog writes `<slot>.yielded` (content = the holder pid) on fire; defaultLaneCount() adds this
+ * count to the divisor so a joining suite takes fewer lanes. Pid-liveness self-cleanup: a dead-pid
+ * marker (the holder crashed or finished without a normal release) is NOT counted — a stale marker can
+ * never permanently shrink the budget. Resolves the SAME lock base as concurrentSuiteSlots() (env
+ * override → git-common-dir → .git), so the slot paths and the S they derive from cannot drift.
+ * Best-effort — any read failure degrades to 0 (fail-open; lane accounting never blocks or fails a run).
+ */
+export function yieldedSuiteSlotCount(): number {
+  try {
+    const base = suiteLockBase(process.cwd());
+    let yielded = 0;
+    for (const slot of suiteLockSlotPaths(base)) {
+      const marker = `${slot}.yielded`;
+      if (!fs.existsSync(marker)) continue;
+      const pid = Number(fs.readFileSync(marker, "utf8").trim());
+      if (!Number.isFinite(pid) || pid < 1) continue;
+      try {
+        process.kill(pid, 0); // liveness probe: a live holder's pid does not throw (ESRCH = dead)
+        yielded += 1;
+      } catch {
+        // dead pid → stale marker, ignore (self-cleanup, no leak)
+      }
+    }
+    return yielded;
+  } catch {
+    return 0;
+  }
 }
 
 
@@ -2369,6 +2415,17 @@ export async function run(argv: string[]): Promise<number> {
   let tapPass = 0;
   let tapFail = 0;
   let tapCancelled = 0;
+  // gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi — host FORCE_COLOR=3
+  // (also COLORTERM=truecolor) forces node:test's spec reporter to emit ANSI color EVEN when its
+  // stdout is redirected to a file ⇒ the summary line arrives as `\x1b[34mℹ pass N\x1b[39m` (ESC at
+  // line start) and the `^[#ℹ]` summary regexes below never match (pass/fail/cancelled/tests all
+  // record 0 — the #684/#685 regression). Strip ANSI CSI before matching (the same ANSI_CSI_RE
+  // pane-state-classify.ts uses) so colorized AND plain summary lines both parse. The stripped
+  // `summaryLine` feeds EVERY `^[#ℹ]` summary regex in onLine — the pass/fail/cancelled tallies
+  // below AND the testsSeen/cancelledSeen parses further down AND runner-red-parse.ts's
+  // `^[#ℹ]\s*(fail|cancelled)\s+[1-9]` red-detection patterns (isFailureLine/gateScanCause below —
+  // the same family, extracted to runner-red-parse.ts by gap-ac128-hub-split-harness-concerns, 5b).
+  const ANSI_CSI_RE = /\x1B\[[0-9;]*[A-Za-z]/g;
   // gap-verification-round-reason-self-contradiction — set when a GATE/SCAN failure line (a subset of
   // FAILURE_PATTERNS: __PERFILE__ passed=false / tmux-leak-scan: FAIL) flipped red. Distinct from
   // staticCheckDetected (which names the static-check gate); both feed the round-record reason axis
@@ -2614,11 +2671,12 @@ export async function run(argv: string[]): Promise<number> {
     // gap-verification-round-counter-overwrites-not-sums — ACCUMULATE (+=) instead of overwrite (=):
     // one summary block per node --test phase, and the verification-round `tests` must be the SUM
     // across the phases that actually ran, never just the last phase's block (see the AC6 decl above).
-    const passM = line.match(/^[#ℹ]\s*pass\s+(\d+)/);
+    const summaryLine = line.replace(ANSI_CSI_RE, "");
+    const passM = summaryLine.match(/^[#ℹ]\s*pass\s+(\d+)/);
     if (passM) tapPass += Number(passM[1]);
-    const failM = line.match(/^[#ℹ]\s*fail\s+(\d+)/);
+    const failM = summaryLine.match(/^[#ℹ]\s*fail\s+(\d+)/);
     if (failM) tapFail += Number(failM[1]);
-    const cancelledM = line.match(/^[#ℹ]\s*cancelled\s+(\d+)/);
+    const cancelledM = summaryLine.match(/^[#ℹ]\s*cancelled\s+(\d+)/);
     if (cancelledM) tapCancelled += Number(cancelledM[1]);
     // gap-verification-round-missing-phase-ms-breaks-cost-attribution AC2 — the fixed-overhead
     // phase timings (`__OVERHEAD__ <phase>_ms=N`, test.sh:909-918). Same stream-accumulation family
@@ -2699,22 +2757,22 @@ export async function run(argv: string[]): Promise<number> {
     // AC1 — TAP summary parsing: `# tests N` / `# cancelled N` (node:test emits these on the
     // stream regardless of pass/fail). Fires on every line; a later summary overwrites an earlier
     // one (TAP prints exactly one summary, but a failing worker may print its own before the root).
-    const testsMatch = /^[#ℹ]\s*tests\s+(\d+)/.exec(line);
+    const testsMatch = /^[#ℹ]\s*tests\s+(\d+)/.exec(summaryLine);
     if (testsMatch) testsSeen = Number(testsMatch[1]);
     // test.sh prints "selected N files (groups=…)" exactly when the node --test phase starts; a
     // test-count summary (testsSeen > 0) is the TAP-side proof. Either ⇒ past the static-check
     // phase ⇒ the static-check patterns below must not fire (test fixtures can legitimately print
     // "FAIL: N violation(s)" — candidate-contracts.test.mjs's ANTI-DRIFT hard-fail fixtures).
     if (/^selected \d+ files?\b/.test(line) || testsSeen > 0) testPhaseStarted = true;
-    const cancelledMatch = /^[#ℹ]\s*cancelled\s+(\d+)/.exec(line);
+    const cancelledMatch = /^[#ℹ]\s*cancelled\s+(\d+)/.exec(summaryLine);
     if (cancelledMatch) cancelledSeen = Number(cancelledMatch[1]);
     lastOutputAt = Date.now(); // silence guard: any suite output (even a failure line) proves liveness
-    if (isFailureLine(line)) {
+    if (isFailureLine(summaryLine)) {
       // gap-verification-round-reason-self-contradiction — record the gate/scan identity (if this
       // line is a __PERFILE__ passed=false / tmux-leak-scan: FAIL subset pattern) so the round
       // record can name WHICH gate failed when fail=0. First-wins (a round that hits both keeps the
       // first cause — the round record names one gate).
-      if (!redGateCause) redGateCause = gateScanCause(line);
+      if (!redGateCause) redGateCause = gateScanCause(summaryLine);
       // manager 2026-08-10 15:2x (failures[] structurally capped at 1): redFailures.push used to sit
       // inside the !redDetected guard, so after the FIRST failure line flipped redDetected=true, every
       // subsequent failure line was skipped — a round's record named only 1 of its N failures (r240
@@ -2757,7 +2815,7 @@ export async function run(argv: string[]): Promise<number> {
       // which test failed is already known) + open a short detail lookahead for the file context.
       // A file on the failure line itself (vitest `❯ <file>` / `test at <file>`) is captured now;
       // TAP detail-block files are captured by the lookahead.
-      const failure: SuiteFailure = enrichFailure({ line, file: extractFailureFile(line, root) });
+      const failure: SuiteFailure = enrichFailure({ line: summaryLine, file: extractFailureFile(summaryLine, root) });
       if (redFailures.length < MAX_RECORDED_FAILURES) redFailures.push(failure);
       pendingFailure = failure;
       detailRemaining = 15;
@@ -3260,6 +3318,11 @@ export async function run(argv: string[]): Promise<number> {
     nproc: roundNproc,
     concurrentSuiteSlots: roundConcurrentSuiteSlots,
     concurrentSuitesRunning: roundConcurrentSuitesRunning,
+    // gap-verification-round-static-fail-no-record AC3 — taskId attribution. Present only on a
+    // bucket-mode run (`--buckets <task-id>`), where the runner KNOWS which task's bucket subset it
+    // verified; a main-checkout full suite / one-shot verify round has no task identity and omits the
+    // field (the 31 historical static-check rows stay shape-identical — AC4 不回归).
+    ...(bucketTaskId ? { taskId: bucketTaskId } : {}),
     // gap-verification-round-observability-holes AC1 — the flock wait (test.sh's lock-acquire markers).
     // Present only when the suite actually took the lock (the acquire START + acquired markers both
     // fired); absent on scoped runs / lock-timeout aborts — a reader must tolerate absence.

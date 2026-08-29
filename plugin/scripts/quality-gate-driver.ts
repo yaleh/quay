@@ -44,6 +44,10 @@ import {
 // B15 判词聚合的单一实现（ADR-033：判定用 agent、聚合用 JS 算术）。⛔ 不复制一份平行版本——
 // should-remove → remove-or-rescope 的路由表只有一个（pool-quality-judge.ts actionFor）。
 import { aggregateVerdicts, type VerdictRecord } from "./pool-quality-judge.ts";
+// AC155：轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量——同
+// outer-driver / promotion-driver 的接法）。quality 段由此前的「字面量 60_000」改为从
+// loadDriverConfig(root).quality.intervalMs 派生（缺省 30000，与 outer 例程型 kind 对齐）。
+import { defaultDriverConfig, loadDriverConfig } from "./driver-config.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
@@ -52,9 +56,10 @@ export const ROUND_LOG_REL = QUALITY_SPEC.carriers[0];
 /** 控制态文件（.quay/quality-control.json，halt 单一真相源，与 promotion/worker-control.json 同族）。 */
 export const QUALITY_CONTROL_STATE_REL = path.posix.join(".quay", QUALITY_SPEC.controlFile);
 
-/** 轮间隔缺省（毫秒）。AC144 判据不设数值阈值（硬规则 4）——此值只是例程驱动的占位节奏，
- *  生产部署由启动命令传 --interval 覆盖；测试传小值。 */
-export const INTERVAL_MS_DEFAULT = 60_000;
+/** 轮间隔缺省（毫秒）。AC155：值从 drivers.yml 派生（单一真相源，同 outer/promotion 的接法）；
+ *  AC144 判据不设数值阈值（硬规则 4）——此值只是例程驱动的占位节奏，生产部署由启动命令传
+ *  --interval 覆盖；测试传小值。 */
+export const INTERVAL_MS_DEFAULT = defaultDriverConfig().quality.intervalMs;
 
 /** 两条例程各自的缺省复核间隔（分钟）。同上——占位节奏，非未测量过的阈值。 */
 export const POOL_JUDGE_INTERVAL_MIN_DEFAULT = 10;
@@ -415,7 +420,7 @@ const HELP = [
   "quality-gate-driver — AC144：质量把关按【形状】分开驱动化（例程型，继承 Layer 0 + 1b）。",
   "每轮评估 due 例程（B15 pool-quality-judge + B17 judgment-consumer-check）→ 跑 due → 汇集 Facts → 写 round 心跳。",
   "  --root <repo> [--interval <ms>] [--once] [--max-rounds <n>] [--round-log <p>] [--run-id <id>] [--pid-file <p>] [--json]",
-  "  --interval <ms>           轮间隔（缺省 60000；测试缝传小值）",
+  "  --interval <ms>           轮间隔（缺省 30000，来自 drivers.yml quality.interval_ms；测试缝传小值）",
   "  --once                    跑一轮即退出（手动单发 / 测试）",
   "  --max-rounds <n>          跑满 N 轮退出（测试缝，防常驻环无限跑）",
   "  --pool-judge-interval <m> B15 例程复核间隔（分钟，缺省 10）",
@@ -476,7 +481,7 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const rootDir = root ? path.resolve(root) : path.resolve(process.cwd());
-  const interval = intervalRaw !== undefined && isNonNegInt(intervalRaw) ? Number(intervalRaw) : INTERVAL_MS_DEFAULT;
+  const interval = intervalRaw !== undefined && isNonNegInt(intervalRaw) ? Number(intervalRaw) : loadDriverConfig(rootDir).quality.intervalMs;
   if (maxRounds !== null && (!Number.isInteger(maxRounds) || maxRounds < 1)) {
     console.error("quality-gate-driver: --max-rounds must be a positive integer");
     return 2;

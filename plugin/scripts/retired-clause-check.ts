@@ -26,6 +26,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { helpExit } from "./gate-script-base.ts";
 
 const ARCHIVE_REL = "orchestration/archive/AC58-retired-clauses.md";
 
@@ -235,6 +236,7 @@ export function runCheck(root: string): { ok: boolean; issues: string[] } {
 
 function main() {
   const args = process.argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node retired-clause-check.ts [--root <dir>]");
   let root = process.cwd();
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root" && args[i + 1]) root = args[i + 1];
