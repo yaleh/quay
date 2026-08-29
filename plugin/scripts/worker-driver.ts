@@ -810,7 +810,7 @@ export interface WorkerCmdOptions {
 function driverFanInNote(): string {
   return [
     `exit — the worker-driver takes over your worktree and mechanically runs fan-in`,
-    `(merge develop → delta 判定 → typecheck → scoped门 → suite → ff) to develop.`,
+    `(merge develop → delta 判定 → typecheck → archguard结构闸 → scoped门 → suite → ff) to develop.`,
     `You do NOT run the suite and do NOT call the fan-in workflow yourself.`,
   ].join(" ");
 }
@@ -1029,6 +1029,20 @@ export async function continueStateForTaskAsync(root: string, taskId: string): P
   };
 }
 
+/** 冲突消解协议（gap-continue-prompt-conflict-resolution-protocol）：机械 fan-in 的 merge develop 步
+ *  在 CONTINUE 轮撞冲突时，旧 prompt 只带失败原因、不含消解指令 ⇒ 消冲突靠 worker 自行发挥（运气）。
+ *  本段按文件类型分派消解动作：derived 文件重算（⛔ 不手并计数）、code 文件取语义并集、然后
+ *  `git commit --no-edit` 完成 merge——⛔ 禁止带着 unmerged paths（UU）退出，否则下一轮 fan-in 的
+ *  merge step 再失败。 */
+function continueConflictResolutionNote(): string {
+  return [
+    `CONFLICT RESOLUTION — if the prior mechanical fan-in left the worktree with unmerged paths (UU in \`git status\`), or \`git merge develop\` reports CONFLICT, resolve it BEFORE continuing implementation; ⛔ never exit while unmerged paths remain (the next fan-in merge step would fail again).`,
+    `(1) derived files (docs/proposals/quay-product-outline.md §6 DELIVERY-INVENTORY counts — mechanically derived): apply your own change, then re-run \`node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --write-inventory\` to recompute the counts; ⛔ do NOT hand-merge the counts.`,
+    `(2) code files (e.g. worker-driver.ts): read both sides of the diff and take the semantic union of the two changes (keep both changes where they do not conflict).`,
+    `(3) \`git add <resolved files>\` then \`git commit --no-edit\` to complete the merge.`,
+  ].join(" ");
+}
+
 /** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
  *  状态（分支提交 / AC 勾选 / 失败原因）供 worker 从保留 worktree 继续。⛔ 不含 "create an isolated
  *  git worktree"（AC1 取假判据——旧 prompt 逐字说 create 是撞死根因）。
@@ -1049,6 +1063,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `(it would fail: the path/branch already exists). Prior round state: branch task/${task} already has`,
     `${commits} commits${head}; Acceptance Criteria currently checked ${ac};`,
     `the last round exited-not-landed because: ${reason}.`,
+    `${continueConflictResolutionNote()}`,
     `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch),`,
@@ -1466,7 +1481,7 @@ function runOneWorker({
 // ── 机械 fan-in（gap-fan-in-driver-mechanical-orchestration / SPEC 2026-08-27）────────────────────
 // 取消 fan-in-execute.js workflow 子代理串行跑机械步骤（每条命令间 ~3-5min 模型延迟把 ~10min 机械活
 // 撑到 ~30min + 30min watchdog 强制释放），改由 driver 机械驱动 fan-in 的机械部分
-// （锁/merge/delta/typecheck/scoped门/suite/ff）。happy-path 先做（人 2026-08-27 裁定①）：driver 跑通
+// （锁/merge/delta/typecheck/archguard结构闸/scoped门/suite/ff）。happy-path 先做（人 2026-08-27 裁定①）：driver 跑通
 // 「无失败 fan-in」，失败回退旧 workflow 子代理兜底。四判据：
 //   AC1 锁时长塌缩——driver 持锁整段 merge→suite→ff，机械时长（非 30min 模型恒值）；
 //   AC2 锁罩住 suite——release 不早于 suite 结束（driver 在 spawnSuiteAndWait 返回后才 release）；
@@ -1498,6 +1513,8 @@ export interface MechanicalFanInOptions {
   scopedGateCommand?: string[];
   /** doc 检查命令（测试缝）；缺省 = bash <worktree>/scripts/test.sh --static-checks-doc。 */
   docCheckCommand?: string[];
+  /** archguard 结构闸命令（测试缝）；缺省 = node archguard-runner.ts --root <worktree>（分析待落地代码）。 */
+  archguardCommand?: string[];
   /** fan-in 编排脚本目录（测试缝）；缺省 = <worktree>/plugin/scripts（自举：本分支的编排脚本自验）。 */
   scriptsDir?: string;
 }
@@ -1682,8 +1699,72 @@ function writeSuiteCapture(captureFile: string, fields: Record<string, string>):
   fs.writeFileSync(captureFile, lines.join("\n") + "\n", "utf8");
 }
 
-/** 读 worktree 的任务文件并翻 status ready→done（fail-closed：恰 1 行精确 `^status: ready$`，否则拒）。 */
-async function flipTaskDone(worktree: string, task: string): Promise<{ ok: boolean; reason: string | null }> {
+/** 读 `<ref>:tasks/<task>.md` 的 status frontmatter（git show；ref 不存在 / 文件缺失 / 读不懂 ⇒ null）。 */
+async function readTaskStatusAtRef(worktree: string, ref: string, task: string): Promise<string | null> {
+  const r = await mechSh(["git", "-C", worktree, "show", `${ref}:tasks/${task}.md`], 30_000);
+  if (!r.ok) return null;
+  const m = (r.stdout ?? "").match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!m) return null;
+  const statusLine = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
+  if (!statusLine) return null;
+  return statusLine.slice("status:".length).trim() || null;
+}
+
+/** 写 worktree 任务文件 + 提交（flip / reset 共用的机械步：写盘 → add → commit --no-verify）。 */
+async function commitTaskStatusChange(
+  worktree: string,
+  task: string,
+  file: string,
+  nextText: string,
+  message: string,
+): Promise<{ ok: boolean; reason: string | null }> {
+  fs.writeFileSync(file, nextText, "utf8");
+  let a = await mechSh(["git", "-C", worktree, "add", `tasks/${task}.md`]);
+  if (!a.ok) return { ok: false, reason: `git add failed: ${a.stderr || `exit ${a.status}`}` };
+  a = await mechSh(["git", "-C", worktree, "commit", "-q", "--no-verify", "-m", message, "--", `tasks/${task}.md`]);
+  if (!a.ok) return { ok: false, reason: `git commit failed: ${a.stderr || `exit ${a.status}`}` };
+  return { ok: true, reason: null };
+}
+
+/** 把 archguard-runner 写进 worktree 的结构信号记录镜像到主检出的生产载体（AC2）。
+ *  worktree 的 .archguard/ 在机械 fan-in 成功后随 `git worktree remove` 被删 ⇒ 记录必须持久化到
+ *  root（主检出）的 .archguard/metrics-history.jsonl，post-landing 才可查（硬规则④推论三：能产出≠已产出）。
+ *  archguard-runner 每次跑 append 一条，镜像最后一条（本次新写）；worktree 无记录（测试缝的 fake 命令
+ *  不写）⇒ no-op 非失败。镜像失败 fail-closed（记录是「被某判据读」半边，载体写失败 ≠ 静默通过）。 */
+function mirrorArchguardMetrics(worktree: string, root: string): { ok: boolean; reason: string | null } {
+  const wtFile = path.join(worktree, ".archguard", "metrics-history.jsonl");
+  let wtText: string;
+  try {
+    wtText = fs.readFileSync(wtFile, "utf8");
+  } catch {
+    return { ok: true, reason: null };
+  }
+  const lines = wtText.split("\n").map((s) => s.trim()).filter(Boolean);
+  const last = lines[lines.length - 1];
+  if (!last) return { ok: true, reason: null };
+  const mainFile = path.join(root, ".archguard", "metrics-history.jsonl");
+  try {
+    fs.mkdirSync(path.dirname(mainFile), { recursive: true });
+    fs.appendFileSync(mainFile, last + "\n", "utf8");
+    return { ok: true, reason: null };
+  } catch (e) {
+    return { ok: false, reason: `cannot mirror archguard metrics to ${mainFile}: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+/** 读 worktree 的任务文件并翻 status ready→done（fail-closed：恰 1 行精确 `^status: ready$`，否则拒）。
+ *  gap-fan-in-flip-done-already-done-not-landed：「先 flip 后 ff」（人 2026-08-14 裁定）留下的
+ *  「done 但未落地」不一致中间态（worktree 已翻 done、develop 未含落地提交）在重跑时收敛——读到
+ *  `status: done` 先判真落地：
+ *    - 已真落地（mergeTarget 的 tasks/<task>.md status=done）⇒ skip（不 reset、不重翻，返回 ok）；
+ *    - 未真落地（mergeTarget 仍是 ready / 读不到）⇒ reset 到 ready 再 flip（两提交，ff 落在新 flip tip）。
+ *  正常 `status: ready` 的 flip 行为不变（AC4）。判落地用「mergeTarget 的任务文件 status」直接量
+ *  （⛔ 不各写一遍 computeLandingState 的 landing 判定——本函数只判 flip 侧的一致性）。 */
+async function flipTaskDone(
+  worktree: string,
+  task: string,
+  mergeTarget: string,
+): Promise<{ ok: boolean; reason: string | null }> {
   const file = path.join(worktree, "tasks", `${task}.md`);
   let text: string;
   try {
@@ -1692,25 +1773,40 @@ async function flipTaskDone(worktree: string, task: string): Promise<{ ok: boole
     return { ok: false, reason: `read task file failed: ${(e as Error).message}` };
   }
   const lines = text.split("\n");
-  const readyIdx = lines.filter((l) => l === "status: ready");
-  if (readyIdx.length !== 1) {
-    return { ok: false, reason: `expected exactly 1 'status: ready' line, got ${readyIdx.length}` };
+  const readyCount = lines.filter((l) => l === "status: ready").length;
+  if (readyCount === 1) {
+    const flipped = text.replace(/^status: ready$/m, "status: done");
+    if (!/^status: done$/m.test(flipped)) {
+      return { ok: false, reason: "flip produced no 'status: done' line" };
+    }
+    return commitTaskStatusChange(worktree, task, file, flipped, `tasks: 翻 ${task} done（driver 机械 fan-in）`);
   }
-  const flipped = text.replace(/^status: ready$/m, "status: done");
-  if (!/^status: done$/m.test(flipped)) {
-    return { ok: false, reason: "flip produced no 'status: done' line" };
+  const doneCount = lines.filter((l) => l === "status: done").length;
+  if (doneCount === 1) {
+    // done 已存在：判真落地（mergeTarget 的任务文件是否已 done）。已落地 ⇒ skip；未落地 ⇒ reset→flip。
+    const landed = await readTaskStatusAtRef(worktree, mergeTarget, task);
+    if (landed === "done") return { ok: true, reason: null };
+    const reset = text.replace(/^status: done$/m, "status: ready");
+    if (!/^status: ready$/m.test(reset)) {
+      return { ok: false, reason: "reset to ready produced no 'status: ready' line" };
+    }
+    const resetResult = await commitTaskStatusChange(
+      worktree, task, file, reset,
+      `tasks: reset ${task} done→ready（fan-in 收敛「done 未落地」中间态）`,
+    );
+    if (!resetResult.ok) return resetResult;
+    const flipped = reset.replace(/^status: ready$/m, "status: done");
+    if (!/^status: done$/m.test(flipped)) {
+      return { ok: false, reason: "flip after reset produced no 'status: done' line" };
+    }
+    return commitTaskStatusChange(worktree, task, file, flipped, `tasks: 翻 ${task} done（driver 机械 fan-in）`);
   }
-  fs.writeFileSync(file, flipped, "utf8");
-  let a = await mechSh(["git", "-C", worktree, "add", `tasks/${task}.md`]);
-  if (!a.ok) return { ok: false, reason: `git add failed: ${a.stderr || `exit ${a.status}`}` };
-  a = await mechSh(["git", "-C", worktree, "commit", "-q", "--no-verify", "-m", `tasks: 翻 ${task} done（driver 机械 fan-in）`, "--", `tasks/${task}.md`]);
-  if (!a.ok) return { ok: false, reason: `git commit failed: ${a.stderr || `exit ${a.status}`}` };
-  return { ok: true, reason: null };
+  return { ok: false, reason: `expected exactly 1 'status: ready' line, got ${readyCount}` };
 }
 
 /**
- * driver 机械跑通一次无失败 fan-in 的 happy path（锁/merge/delta/typecheck/scoped门/suite/ff）。
- * ⛔ 语义失败点（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / suite 红 / ff 失败）一律返回
+ * driver 机械跑通一次无失败 fan-in 的 happy path（锁/merge/delta/typecheck/archguard结构闸/scoped门/suite/ff）。
+ * ⛔ 语义失败点（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / 依赖环 / suite 红 / ff 失败）一律返回
  * outcome=red + step，由调用方回退旧 workflow 子代理兜底（本函数不调 LLM、不做语义修复）。
  * 锁在任一退出路径都会 release（finally）——成功 release 于 ff 之后（AC2）；失败也 release（回退的
  * workflow 子代理会重新 acquire，幂等）。
@@ -1730,6 +1826,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const antiDrift = path.join(scriptsDir, "anti-drift-touches-check.ts");
   const classify = path.join(scriptsDir, "select-static-checks-for-touches.ts");
   const typecheck = path.join(scriptsDir, "fan-in-ts-typecheck-gate.ts");
+  const archguardRunner = path.join(scriptsDir, "archguard-runner.ts");
   const acGate = path.join(scriptsDir, "fan-in-ac-completion-gate.ts");
 
   const fail = (step: string, reason: string): MechanicalFanInResult => ({
@@ -1782,6 +1879,16 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     a = await mechSh(["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
     if (!a.ok) return fail("typecheck", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
 
+    // 5.5 archguard 结构闸（依赖环 sccCount=0 ⇒ 绿；依赖环 ⇒ red → 语义会话兜底）。⛔ 分析 worktree
+    // （merge develop 后的待落地代码）——非 root（root 是 doc-only 工作分支，不含本任务 delta，任务引入
+    // 依赖环会被漏检）。archguard-runner 把结构信号 append 进 <worktree>/.archguard/metrics-history.jsonl；
+    // worktree 的 .archguard 在 cleanup 时被删 ⇒ 镜像到主检出（root）的生产载体（AC2：能产出≠已产出）。
+    const archguardCmd = opts.archguardCommand ?? ["node", "--experimental-strip-types", archguardRunner, "--root", worktree];
+    a = await mechSh(archguardCmd, 600_000);
+    if (!a.ok) return fail("archguard-structure", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
+    const mirrored = mirrorArchguardMetrics(worktree, root);
+    if (!mirrored.ok) return fail("archguard-metrics", mirrored.reason ?? "mirror failed");
+
     // 6. scoped 门 + doc 检查（必须绿）。
     const scopedCmd = opts.scopedGateCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
     a = await mechSh(scopedCmd, 600_000);
@@ -1812,7 +1919,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     if (!a.ok) return fail("anti-drift-land", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
     a = await mechSh(["node", "--experimental-strip-types", acGate, "--task", task, "--worktree", worktree], 60_000);
     if (!a.ok) return fail("ac-gate", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
-    const flip = await flipTaskDone(worktree, task);
+    const flip = await flipTaskDone(worktree, task, mergeTarget);
     if (!flip.ok) return fail("flip-done", flip.reason ?? "flip failed");
 
     // 9. ff（fan-in-ff-merge.sh 读 suite capture 证书；成功 fall through，失败 red）。

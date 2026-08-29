@@ -36,3 +36,9 @@ checker 的层 1「机械脊柱」目前是 CODIFY-EXISTING（几乎免费）：
 - orchestration/SPEC-checker-mechanical-spine-contract-2026-08-28.md (new)（契约文档正本）
 - plugin/test/checker-mechanical-spine-check.test.mjs (new)（负控制测试）
 - tasks/gap-b1-mechanical-spine-doc-checker.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T18:06:33.724Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
