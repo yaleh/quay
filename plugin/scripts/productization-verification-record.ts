@@ -48,7 +48,7 @@
 //   --host              REQUIRED for AC88 — the cross-host machine (B|C)
 //   --step-install      REQUIRED for AC88 — true|false: fresh .tgz install succeeded
 //   --step-init         REQUIRED for AC88 — true|false: project quay-init succeeded
-//   --step-coldstart    REQUIRED for AC88 — true|false: two-layer outer+inner cold-start live
+//   --step-coldstart    REQUIRED for AC88 — true|false: cold-start live (outer window + inner layer)
 //   --root              repo root (default: cwd) — resolves the shared checkout via git common-dir
 //   --record-file       override the shared-checkout record path (hermetic tests)
 //   --json              machine-readable output {ok, record, file}
@@ -158,7 +158,7 @@ Usage:
   --host             REQUIRED for AC88 — the cross-host machine (B|C)
   --step-install     REQUIRED for AC88 — true|false: fresh .tgz install succeeded
   --step-init        REQUIRED for AC88 — true|false: project quay-init succeeded
-  --step-coldstart   REQUIRED for AC88 — true|false: two-layer cold-start live
+  --step-coldstart   REQUIRED for AC88 — true|false: cold-start live (outer window + inner layer)
   --root             repo root (default: cwd) — resolves the shared checkout via git common-dir
   --record-file      override the shared-checkout record path (hermetic tests)
   --json             machine-readable output {ok, record, file}

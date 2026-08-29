@@ -16,21 +16,21 @@ checker_cmd() {
 }
 
 # GREEN baseline: boundary context only (manager 跨项目不属于项目拓扑 — the legitimate mention).
-printf '## 冷启动\n调 quay-topology.sh 建两窗口（outer+inner，manager 跨项目不属于项目拓扑，不建）。\n' > "${doc}"
+printf '## 冷启动\n调 quay-topology.sh 建单窗口（outer，manager 跨项目不属于项目拓扑，不建）。\n' > "${doc}"
 if checker_cmd "${doc}"; then :; else
   echo "baseline RED on a boundary-context-only doc (checker always-red?)" >&2
   exit 4
 fi
 
 # INJECT the incident shape: an actionable manager step — `quay manager start` → MUST go RED.
-printf '## 冷启动\n先调 quay manager start 拉起 manager，再建两窗口。\n' > "${doc}"
+printf '## 冷启动\n先调 quay manager start 拉起 manager，再建单窗口。\n' > "${doc}"
 if checker_cmd "${doc}"; then
   echo "STAYED-GREEN — a doc instructing the outer to create the manager did not redden the checker" >&2
   exit 3
 fi
 
 # RESTORE: revert to boundary-only → back to GREEN (the +1 → 0 direction).
-printf '## 冷启动\n调 quay-topology.sh 建两窗口（outer+inner，manager 跨项目不属于项目拓扑，不建）。\n' > "${doc}"
+printf '## 冷启动\n调 quay-topology.sh 建单窗口（outer，manager 跨项目不属于项目拓扑，不建）。\n' > "${doc}"
 if checker_cmd "${doc}"; then :; else
   echo "ALWAYS-RED — restored boundary-only doc still reddens the checker" >&2
   exit 4

@@ -704,6 +704,92 @@ test("AC-complete signal is a UNION not a replace: partial/zero/non-ready NOT su
   assert.equal(notYetFlipped(pending, root), false, "neither signal fires → stays in the pool");
 });
 
+// ── LEFTOVER-WORKTREE EXEMPTION (gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption) ──
+// The `allChecked` arm (2026-08-08) excluded a ready task purely on self-declared completion, with NO
+// landing evidence. A mechanical fan-in FAILURE (suite red / merge-develop conflict) leaves the task
+// `ready + all-checked + un-landed` WITH its `task/<id>` worktree still open (ff-merge success is what
+// deletes it) — the old arm excluded it forever, so the landing path never ran again (permanent
+// stranding, one dead task froze the pool). The fix: an OPEN `task/<id>` worktree is the DIRECT
+// "fan-in not yet complete" quantity (same `git worktree list` source as computeInFlightWorktreeTouches)
+// — while it exists the allChecked task stays dispatchable so the next dispatch triggers the driver's
+// mechanical fan-in retry. No worktree keeps the original exclude (the prose-AC shape).
+
+test("LEFTOVER-WORKTREE — allChecked + leftover task/<id> worktree is NOT not-yet-flipped (AC1); no worktree keeps the exclusion (AC2)", (t) => {
+  const root = makeRealGitRepo("nyf-leftover");
+  const wtPath = path.join(root, "..", `${path.basename(root)}-leftover`);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  gitCommit(root, "seed");
+
+  const id = "gap-nyf-leftover";
+  const body = fourArtifactBody({ checkedAc: 4, touches: ["- code/never.ts"] });
+  writeTask(root, id, { status: "ready", labels: ["gap"], body });
+
+  // AC2 negative control: allChecked + NO worktree ⇒ still excluded (2026-08-08 behavior unchanged).
+  assert.equal(notYetFlipped({ id, status: "ready", body }, root), true,
+    "all-checked + no leftover worktree is still not-yet-flipped (AC2)");
+
+  // Create the leftover task/<id> worktree (the fan-in-failed shape).
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${id}`, wtPath]);
+
+  // AC1 positive: allChecked + leftover worktree ⇒ NOT not-yet-flipped ⇒ stays dispatchable.
+  assert.equal(notYetFlipped({ id, status: "ready", body }, root), false,
+    "all-checked + leftover worktree is NOT not-yet-flipped (AC1)");
+
+  // Removing the worktree restores the exclusion — the exemption is keyed on the open worktree.
+  execFileSync("git", ["-C", root, "worktree", "remove", "--force", wtPath]);
+  assert.equal(notYetFlipped({ id, status: "ready", body }, root), true,
+    "removing the leftover worktree restores the not-yet-flipped exclusion (AC2)");
+});
+
+test("LEFTOVER-WORKTREE — analyzeTasks keeps an allChecked + leftover-worktree task in ready, not excluded (AC1/AC3)", (t) => {
+  const root = makeRealGitRepo("nyf-leftover-pool");
+  const wtPath = path.join(root, "..", `${path.basename(root)}-leftover`);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  gitCommit(root, "seed");
+
+  const id = "gap-nyf-leftover";
+  writeTask(root, id, {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 4, touches: ["- code/never.ts"] }),
+  });
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${id}`, wtPath]);
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  assert.equal(r.ready.includes(id), true, "allChecked + leftover worktree task stays in the ready pool (AC1/AC3)");
+  assert.equal(r.excluded.some((e) => e.id === id && e.reasons.includes("not-yet-flipped")), false,
+    "no not-yet-flipped exclusion when a leftover worktree is present (AC1/AC3)");
+});
+
+test("LEFTOVER-WORKTREE — a single allChecked dead task no longer zeroes the pool (dispatchable_disjoint ≥ 1, AC4)", (t) => {
+  const root = makeRealGitRepo("nyf-pool-effect");
+  const wtPath = path.join(root, "..", `${path.basename(root)}-leftover`);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  gitCommit(root, "seed");
+
+  const id = "gap-nyf-pool";
+  writeTask(root, id, {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 4, touches: ["- code/never.ts"] }),
+  });
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${id}`, wtPath]);
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  assert.equal(r.pool, 1, "the single allChecked dead task is counted in the pool, not dropped (AC4)");
+  assert.equal(r.dispatchable_disjoint, 1, "dispatchable_disjoint ≥ 1 — the dead task is itself dispatchable, no longer zeroed (AC4)");
+  assert.equal(r.pool_big_all_colliding, false, "pool_big_all_colliding stays false (AC4)");
+});
+
 // ── no-AC-section fallback (gap-git-history-landed-master-stale-under-two-line-model AC4) ──────────
 // A task with NO `## Acceptance Criteria` checkboxes (total=0) is STRUCTURALLY unable to tick ACs:
 // allAcsChecked is恒 false, so it could never be a done-flip through the checkbox signals and would

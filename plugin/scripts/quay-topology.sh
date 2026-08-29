@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# quay-topology.sh — 两窗口会话拓扑工厂（gap-tmux-session-topology-no-factory-definition, AC2；
-# 两窗口修正：gap-manager-baked-into-project-topology-factory——manager 跨项目，不属于项目拓扑）。
+# quay-topology.sh — 单窗口会话拓扑工厂（gap-tmux-session-topology-no-factory-definition, AC2；
+# 单窗口修正：gap-retire-inner-session-references——inner 已由 *-driver 取代，不再建 inner 窗口；
+# manager 跨项目，不属于项目拓扑）。
 #
-# 把 `<project>-N:outer / :inner` 两窗口结构按出厂定义建出来
+# 把 `<project>-N:outer` 单窗口结构按出厂定义建出来
 # （定义见 plugin/skills/session-topology/SKILL.md）。manager 是跨项目的，由人另行启动，
-# 不属于项目拓扑——本工厂只建 outer + inner。冷启动不再手工拼：
+# 不属于项目拓扑——本工厂只建 outer。冷启动不再手工拼：
 # 每个窗口的运行命令由 plugin/scripts/quay-launch.sh <role> 生成（从检查进仓库的
 # .claude/launch.settings.json 读启动参数），本脚本只负责按定义摆窗口。
 #
@@ -68,8 +69,8 @@ if [ -z "$SESSION" ]; then
   exit 2
 fi
 
-# 拓扑窗口顺序（与 quay-0 实测布局一致：outer=窗口0, inner=1）。manager 跨项目，不属于项目拓扑。
-ROLES="outer inner"
+# 拓扑窗口（单窗口 outer；inner 层已由 *-driver 后台进程取代，不再是 tmux 窗口）。manager 跨项目，不属于项目拓扑。
+ROLES="outer"
 LAUNCH_CMD_OVERRIDE="${TOPOLOGY_LAUNCH_CMD:-}"
 
 launch_cmd() {
