@@ -64,8 +64,14 @@ function snapshotMtimeSet(dir) {
     }
     for (const e of es) {
       const p = path.join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile()) {
+      if (e.isDirectory()) {
+        // `scripts/test.sh` sets NODE_COMPILE_CACHE=<root>/.quay/node-compile-cache (gap-node-compile-
+        // cache-is-never-enabled…), so every `--experimental-strip-types` spawn here legitimately writes
+        // there — a Node build artifact, not a business side effect (same exclusion rationale as
+        // task-status-drift-check.ts listRepoFiles: "bookkeeping, never implementation evidence").
+        if (e.name === "node-compile-cache") continue;
+        walk(p);
+      } else if (e.isFile()) {
         const st = fs.statSync(p);
         out.set(path.relative(dir, p), `${st.mtimeMs}:${st.size}`);
       }
