@@ -109,13 +109,15 @@ import {
   parseBackoffThreshold,
   acquireFanInWorkflowLock,
   fanInWorkflowLockFile,
+  runMechanicalFanIn,
+  fanInLogFileName,
+  appendFanInTrace,
   defaultMechanicalSuiteCommand,
   extractFailureSummary,
   combinedOutput,
   mirrorMechanicalFanInSuiteState,
   mechSh,
   appendFanInStepTrace,
-  runMechanicalFanIn,
   spawnMechanicalFanIn,
   readWorkflowLockHold,
 } from "../scripts/worker-driver.ts";
@@ -3105,6 +3107,72 @@ await new Promise(() => {});
   }
 });
 
+// ── gap-mech-fan-in-log-webui-visible-clickable（AC1）— 机械 fan-in 过程日志 ───────────────────
+// 机械 fan-in 的每一步 trace 持久化到 .quay/fan-in-<task>-<runId>.log（gitignored 运行时日志），
+// 每行 {ts, step, exit, wall_ms, ok}、失败步附 reason。runId 唯一后缀 ⇒ 跨 relaunch 不复用
+// （同 gap-fan-in-suite-log-cross-relaunch-reuse 防护：旧轮内容不残留、新 runId 写新文件）。
+
+test("AC1 (unit) — fanInLogFileName sanitizes runId; appendFanInTrace appends one {ts,step,exit,wall_ms,ok} JSON line per call", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fanin-trace-unit-"));
+  try {
+    const file = path.join(dir, fanInLogFileName("gap-trace-ac1", "wk/prod 123"));
+    assert.equal(path.basename(file), "fan-in-gap-trace-ac1-wk_prod_123.log", "runId sanitized to [A-Za-z0-9_.-] (slash/space → _)");
+    appendFanInTrace(file, { step: "merge-develop", exit: 128, wall_ms: 12, ok: false, reason: "boom" });
+    appendFanInTrace(file, { step: "acquire-workflow-lock", exit: 0, wall_ms: 3, ok: true });
+    const lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.equal(lines.length, 2, "one JSON line per call (append, not overwrite)");
+    for (const ln of lines) {
+      assert.ok("ts" in ln && "step" in ln && "exit" in ln && "wall_ms" in ln && "ok" in ln, `line carries {ts, step, exit, wall_ms, ok} (got ${JSON.stringify(ln)})`);
+    }
+    assert.equal(lines[0].step, "merge-develop");
+    assert.equal(lines[0].exit, 128);
+    assert.equal(lines[0].wall_ms, 12);
+    assert.equal(lines[0].ok, false);
+    assert.equal(lines[0].reason, "boom");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 (integration) — runMechanicalFanIn writes a per-step trace covering the steps up to the first failure; a new runId writes a NEW file (old one untouched)", async () => {
+  const root = makeGitRoot("fanin-trace");
+  const task = "gap-trace-ac1";
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "fanin-wt-"));
+  try {
+    const r1 = await runMechanicalFanIn({ task, worktree, root, runId: "r1" });
+    assert.equal(r1.outcome, "red", "non-git worktree merge fails → red");
+    assert.equal(r1.step, "merge-develop", "first failing step is merge-develop");
+    assert.equal(r1.fanInLog, `fan-in-${task}-r1.log`, "outcome carries the fan-in log file name (A3)");
+
+    const log1 = path.join(root, ".quay", `fan-in-${task}-r1.log`);
+    assert.ok(fs.existsSync(log1), "fan-in trace log exists after a real run");
+    const lines1 = fs.readFileSync(log1, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.ok(lines1.length >= 2, "trace covers acquire + at least the failing merge step");
+    for (const ln of lines1) {
+      assert.ok("step" in ln && "exit" in ln && "wall_ms" in ln && "ok" in ln, `each line carries {step, exit, wall_ms, ok} (got ${JSON.stringify(ln)})`);
+      assert.ok(typeof ln.wall_ms === "number", "wall_ms is a number");
+    }
+    const steps1 = lines1.map((l) => l.step);
+    assert.ok(steps1.includes("acquire-workflow-lock"), "acquire step traced");
+    assert.ok(steps1.includes("merge-develop"), "merge step traced");
+    const mergeLine = lines1.find((l) => l.step === "merge-develop");
+    assert.equal(mergeLine.ok, false, "failing merge step is marked ok=false");
+    assert.ok(typeof mergeLine.reason === "string" && mergeLine.reason.length > 0, "failing step carries a reason");
+
+    // 跨 relaunch：新 runId 写新文件、旧文件不被覆盖。
+    const before = fs.readFileSync(log1, "utf8");
+    const r2 = await runMechanicalFanIn({ task, worktree, root, runId: "r2" });
+    assert.equal(r2.fanInLog, `fan-in-${task}-r2.log`, "second run's outcome carries a distinct file name");
+    const log2 = path.join(root, ".quay", `fan-in-${task}-r2.log`);
+    assert.ok(fs.existsSync(log2), "second run writes a NEW file");
+    assert.notEqual(path.join(root, ".quay", r1.fanInLog), path.join(root, ".quay", r2.fanInLog), "distinct files per runId");
+    assert.equal(fs.readFileSync(log1, "utf8"), before, "old run's file is NOT overwritten by the new runId");
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // ── gap-fan-in-token-gate-version-mismatch-self-lock：每任务新进程（版本错位类级修法）──────────────
 // 机械 fan-in 不再在守护进程 in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载
 // ⇒ 版本错位），改为每任务 spawn 一个 fresh node 进程加载 worker-driver.ts（entry = 主检出 opts.root，
@@ -3272,12 +3340,19 @@ test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery) — appendFanInStepTrace
   assert.equal(lines[0].runId, "run-1");
 });
 
-test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery) — runMechanicalFanIn 每步都被 begin/end trace 包裹（⛔ 改掉 ⇒ 日志缺失）", () => {
+test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery / gap-mech-fan-in-log-webui-visible-clickable) — runMechanicalFanIn 每步都有 begin/end（挂起定位）+ A1 过程日志 trace", () => {
   const src = fs.readFileSync(DRIVER, "utf8");
-  for (const step of ["merge-develop", "anti-drift", "delta-classify", "typecheck", "archguard-structure", "scoped-gate", "doc-check", "suite", "anti-drift-land", "ac-gate", "flip-done", "ff", "cleanup"]) {
-    assert.ok(src.includes(`trace("${step}", "begin")`), `step ${step} must have a begin trace`);
-    assert.ok(src.includes(`trace("${step}", "end"`), `step ${step} must have an end trace`);
+  // mechSh 步经 step() 包层——包层内 appendFanInStepTrace begin/end（挂起 = begin 无 end）+ A1 一行。
+  for (const step of ["merge-develop", "anti-drift", "typecheck", "archguard-structure", "scoped-gate", "doc-check", "anti-drift-land", "ac-gate", "ff"]) {
+    assert.ok(src.includes(`step("${step}"`), `step ${step} must go through the step() wrapper (begin/end + A1 trace)`);
   }
+  // 自定义步（delta / suite 起止 / flip-done / cleanup）写 A1 过程日志 trace。
+  for (const step of ["delta", "suite-start", "suite-end", "flip-done", "cleanup"]) {
+    assert.ok(src.includes(`step: "${step}"`), `custom step ${step} must write an A1 trace`);
+  }
+  // step() 包层内 begin/end 两路都写（挂起定位：begin 无 end 可区分）。
+  assert.ok(src.includes('appendFanInStepTrace(root, task, runId, name, "begin")'), "step() emits a begin trace");
+  assert.ok(src.includes('appendFanInStepTrace(root, task, runId, name, "end"'), "step() emits an end trace");
 });
 
 test("AC2 (gap-fan-in-subprocess-hang-timeout-recovery) — mechSh timeout 后 resolve（⛔ 依赖 close）+ 组 kill 杀孙进程（孙进程持管道不阻塞返回）", async (t) => {
