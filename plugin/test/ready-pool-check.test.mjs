@@ -78,8 +78,8 @@ import {
   deriveDefaultLane,
   readPerTaskSuiteRecords,
   isSuiteRecordSkip,
-  propagateDocBranchToDevelop,
 } from "../scripts/ready-pool-check.ts";
+import { propagateDocBranchToDevelop } from "../scripts/driver-filters.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
 
