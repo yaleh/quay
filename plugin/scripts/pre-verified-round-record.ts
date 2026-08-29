@@ -295,6 +295,16 @@ export function parseBucketMarker(suiteLog) {
 // 硬规则⑥ 缺值=未查≠为假). Slices by the last __FANIN_SUITE_START__ marker (current round only).
 const TEST_COUNT_RE = /^[#ℹ]\s*(pass|fail|cancelled)\s+(\d+)/;
 
+// gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi — the host env can carry
+// FORCE_COLOR=3 (also COLORTERM=truecolor), which forces node:test's spec reporter to emit ANSI
+// color EVEN when its stdout is redirected to a file: the summary line arrives as
+// `\x1b[34mℹ pass N\x1b[39m` (ESC at line start). `^[#ℹ]` anchoring then never matches ⇒
+// parseTestCounts returns null ⇒ verification-round's pass/fail/cancelled/tests fields honestly
+// absent (the #684/#685 regression). Strip ANSI CSI before matching (the same ANSI_CSI_RE
+// pane-state-classify.ts uses) so colorized AND plain summary lines both parse — the parser, not
+// the spawn point, owns the fix (AC3 requires re-parsing an already-colorized log).
+const ANSI_CSI_RE = /\x1B\[[0-9;]*[A-Za-z]/g;
+
 export function parseTestCounts(suiteLog) {
   if (!suiteLog) return null;
   let text;
@@ -308,7 +318,7 @@ export function parseTestCounts(suiteLog) {
   const acc = { pass: 0, fail: 0, cancelled: 0 };
   let seen = false;
   for (const line of body.split("\n")) {
-    const m = line.match(TEST_COUNT_RE);
+    const m = line.replace(ANSI_CSI_RE, "").match(TEST_COUNT_RE);
     if (m) {
       seen = true;
       acc[m[1]] += Number(m[2]);
@@ -396,15 +406,21 @@ export function parseRedFailures(suiteLog) {
   const mk = lastSuiteStartOffset(text);
   const body = mk === -1 ? text : text.slice(mk);
   for (const line of body.split("\n")) {
-    const m = STATIC_CHECK_FAILED_RE.exec(line);
+    // Same FORCE_COLOR=3 ANSI strip as parseTestCounts (5b sibling surface): a RED suite's
+    // spec-reporter failure lines are colorized too (`\x1b[31m✖ …` / `\x1b[34mℹ fail N\x1b[39m`), so
+    // isFailureLine's `^✖` / `^[#ℹ]\s*fail\s+[1-9]` anchors miss them ⇒ failureLines (and the ✖/ℹ-fail
+    // shapes) would be dropped even though the round is red. STATIC_CHECK_FAILED_RE (shell output,
+    // never ANSI) is a no-op here, but stripping once keeps every matcher on a clean line.
+    const stripped = line.replace(ANSI_CSI_RE, "");
+    const m = STATIC_CHECK_FAILED_RE.exec(stripped);
     if (m) {
       const exitCode = Number(m[2]);
       if (Number.isInteger(exitCode) && exitCode >= 0) {
-        failClosed.push({ name: m[1], exitCode, line });
+        failClosed.push({ name: m[1], exitCode, line: stripped });
       }
       continue; // a static-check fail-closed line is not a test-failure line
     }
-    if (isFailureLine(line) && failureLines.length < MAX_RECORDED_FAILURES) failureLines.push(line);
+    if (isFailureLine(stripped) && failureLines.length < MAX_RECORDED_FAILURES) failureLines.push(stripped);
   }
   return { staticCheck: failClosed.length > 0, failClosed, failureLines };
 }
