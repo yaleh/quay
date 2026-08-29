@@ -2,7 +2,7 @@
 id: gap-verification-round-static-fail-no-record
 title: verification-round 对未完整跑完的轮次结构性不落记录（静态闸 fail + 动态测试 fail 同族）——今天两例 0 记录 +
   记录无 taskId 归因
-status: ready
+status: done
 labels:
   - gap
   - defect
