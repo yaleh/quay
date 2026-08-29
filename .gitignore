@@ -401,6 +401,10 @@ milestones/fast-mode-telemetry/*.json
 # 不进 git（历史可丢弃，检查器读磁盘当前文件）。其指纹指向的倾向文件 orchestration/dispatch-preference.md
 # 是 git 可见的正本；本记录是它被消费的证明，但证明本身是运行时产物。
 orchestration/dispatch-record.jsonl
+# AC145 语义面派发记录（tasks/gap-ac145-semantic-face-subagent-manager-driven）——同 dispatch-record.jsonl
+# 的运行时遥测家族：manager 每派一条语义 subagent 就 append 一行（职责类别 + 一句理由），运行时状态
+# 不是代码，不进 git（历史可丢弃，查询面读磁盘当前文件）。
+orchestration/semantic-face-dispatch-record.jsonl
 docs/analysis/batch2-queue-state.md
 
 # 管理者的待办队列（条件触发项）——运行时状态不是代码，人 2026-08-08 02:3x 裁定：
