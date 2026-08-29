@@ -1,7 +1,7 @@
 ---
 id: gap-writestate-atomicity-split
 title: write*State 原子性分裂——6 处 state 写两派并存（2 原子 + 4 非原子），不一致本身无人知晓
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
