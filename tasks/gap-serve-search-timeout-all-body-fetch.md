@@ -1,7 +1,7 @@
 ---
 id: gap-serve-search-timeout-all-body-fetch
 title: serve /tasks ?q= 搜索超时——?q= 全量取 1572 任务 body 致 MCP -32001 超时、搜索恒空
-status: ready
+status: done
 labels:
   - gap
   - defect
