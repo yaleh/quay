@@ -137,7 +137,7 @@ This manifest is self-hosting: its own entries are validated by the enforcement 
 - **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/drain-scheduler.ts` `[authoritative]`
 
 ## Invariant: halt-sentinel-check
-- **Rule:** The .halt sentinel's dispatch-gate reading is retired — both halt-check.sh (gap-retire-halt-file-driver-based, 2026-08-29) and slot-refill.ts checkHaltSentinel() (gap-retire-slot-refill-halt-mount) are gone; the .halt promotion/execution role moved to the driver control-state (.quay/<kind>-control.json). The .halt FILE survives only as the manager cross-project halt observation (manager-tick-readings.ts) and the supervisor preempt primitive (supervisor-preempt.sh).
+- **Rule:** The .halt sentinel's dispatch-gate reading is retired — both halt-check.sh (gap-retire-halt-file-driver-based, 2026-08-29) and slot-refill.ts's .halt dispatch mount (gap-retire-slot-refill-halt-mount) are gone; the .halt promotion/execution role moved to the driver control-state (.quay/<kind>-control.json). The .halt FILE survives only as the manager cross-project halt observation (manager-tick-readings.ts) and the supervisor preempt primitive (supervisor-preempt.sh).
 - **Authoritative owner:** `plugin/scripts/manager-tick-readings.ts` `[authoritative]`
 - **Other occurrences:**
   - `CLAUDE.md` `[generated-view]` -- prose description of halt behavior; the executable check is authoritative
@@ -170,7 +170,7 @@ This manifest is self-hosting: its own entries are validated by the enforcement 
 - **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh` `[authoritative]`
 
 ## Invariant: out13-halt-sentinel
-- **Rule:** I6 (halt-sentinel): The .halt sentinel pauses the loop at the next milestone boundary; the former dispatch-code mounts (halt-check.sh, slot-refill.ts checkHaltSentinel()) are retired (gap-retire-halt-file-driver-based + gap-retire-slot-refill-halt-mount, 2026-08-29) — the surviving .halt read is the manager cross-project observation (manager-tick-readings.ts) + supervisor-preempt.sh preempt primitive.
+- **Rule:** I6 (halt-sentinel): The .halt sentinel pauses the loop at the next milestone boundary; the former dispatch-code mounts (halt-check.sh, slot-refill.ts's .halt dispatch mount) are retired (gap-retire-halt-file-driver-based + gap-retire-slot-refill-halt-mount, 2026-08-29) — the surviving .halt read is the manager cross-project observation (manager-tick-readings.ts) + supervisor-preempt.sh preempt primitive.
 - **Authoritative owner:** `plugin/scripts/manager-tick-readings.ts` `[authoritative]`
 
 ## Invariant: out13-not-self-tick
