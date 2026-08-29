@@ -137,8 +137,8 @@ This manifest is self-hosting: its own entries are validated by the enforcement 
 - **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/drain-scheduler.ts` `[authoritative]`
 
 ## Invariant: halt-sentinel-check
-- **Rule:** The .halt sentinel is read via the unified three-layer check point halt-check.sh (SPEC 2.8, orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md §2.8) + slot-refill.ts:197 checkHaltSentinel() (the dispatch-code mount).
-- **Authoritative owner:** `plugin/scripts/halt-check.sh` + `plugin/scripts/slot-refill.ts` `[authoritative]`
+- **Rule:** The .halt sentinel is read via slot-refill.ts:197 checkHaltSentinel() (the dispatch-code mount). The former three-layer unified check point halt-check.sh was retired 2026-08-29 (gap-retire-halt-file-driver-based) — the .halt promotion/execution role moved to the driver control-state.
+- **Authoritative owner:** `plugin/scripts/slot-refill.ts` `[authoritative]`
 - **Other occurrences:**
   - `CLAUDE.md` `[generated-view]` -- prose description of halt behavior; the executable check is authoritative
   - `experiments/quay-perpetual-stream/OUTER-LOOP.md` `[generated-view]` -- prose description of halt behavior
@@ -170,8 +170,8 @@ This manifest is self-hosting: its own entries are validated by the enforcement 
 - **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh` `[authoritative]`
 
 ## Invariant: out13-halt-sentinel
-- **Rule:** I6 (halt-sentinel): The .halt sentinel pauses the loop at the next milestone boundary; mechanically enforced by the unified check point halt-check.sh + slot-refill.ts:197 checkHaltSentinel().
-- **Authoritative owner:** `plugin/scripts/halt-check.sh` + `plugin/scripts/slot-refill.ts` `[authoritative]`
+- **Rule:** I6 (halt-sentinel): The .halt sentinel pauses the loop at the next milestone boundary; mechanically enforced by slot-refill.ts:197 checkHaltSentinel() (halt-check.sh retired 2026-08-29, gap-retire-halt-file-driver-based).
+- **Authoritative owner:** `plugin/scripts/slot-refill.ts` `[authoritative]`
 
 ## Invariant: out13-not-self-tick
 - **Rule:** I7 (not-self-tick): The loop must not self-tick (DIR-020); enforced by discipline only.
