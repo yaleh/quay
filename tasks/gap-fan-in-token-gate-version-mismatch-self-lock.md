@@ -2,7 +2,7 @@
 id: gap-fan-in-token-gate-version-mismatch-self-lock
 title: 机械 fan-in 版本错位自锁——旧守护 in-process × worktree 编排（每任务新进程修法；token 闸
   半已由 fd902a824 重定范围到 P2 TS 模块）
-status: done
+status: ready
 labels:
   - gap
   - defect
