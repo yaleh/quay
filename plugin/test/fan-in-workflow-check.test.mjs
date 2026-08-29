@@ -66,6 +66,7 @@ import {
   parseEscalations,
   escalatedTaskIds,
   checkEscalationTraceability,
+  isMechanicalRunId,
   RULED_HISTORICAL_GAPS,
 } from "../scripts/fan-in-workflow-check.ts";
 
@@ -668,6 +669,63 @@ test("PURE checkAgentIds — callers that do NOT pass a table are unchanged (def
   assert.equal(v.reason, "lock-event-agent-id-not-subagent");
 });
 
+// ── PURE mechanical recognition (gap-fan-in-workflow-check-oneoff-ls-blind-spot) ───────────────────
+// isMechanicalRunId must recognize the manager one-off landing family (oneoff-ls-* / oneoff-adr034-*):
+// gap-loop-shipping-ac1b-walk-enoent-race landed with runId oneoff-ls-1787930114984, agentId=null, no
+// Workflow call, and is NOT in RULED_HISTORICAL_GAPS ⇒ the a/c checks went 双红 and blocked every
+// fan-in-execute.js / worker-driver.ts task's scoped gate. The `oneoff-adr034-* won't recur` assumption
+// broke when oneoff-ls-* recurred — oneoff-* is a recurring family, recognized MECHANICALLY (not per-task
+// RULED). AC3 不误伤: a real workflow-era runId (fm-*) must stay non-mechanical.
+
+test("PURE isMechanicalRunId — recognizes the manager one-off landing family oneoff-* (AC1)", (t) => {
+  assert.equal(isMechanicalRunId("oneoff-ls-1787930114984"), true, "the real landing runId");
+  assert.equal(isMechanicalRunId("oneoff-adr034-1787930114984"), true, "unified oneoff-* prefix covers the adr034 family");
+  assert.equal(isMechanicalRunId("oneoff-anything-else"), true, "future one-off landings");
+  // Existing mechanical families are unchanged:
+  assert.equal(isMechanicalRunId("wk-prod-123"), true);
+  assert.equal(isMechanicalRunId("driver-verify-123"), true);
+  assert.equal(isMechanicalRunId("manager-manual-123"), true);
+});
+
+test("PURE isMechanicalRunId — a real workflow-era runId (fm-*) is NOT mechanical (AC3 不误伤)", (t) => {
+  // The workflow-era fan-in runIds all carry the fm- prefix. If isMechanicalRunId swallowed fm-*, EVERY
+  // workflow-era fan-in without a Workflow call would be silently exempted — a-workflow-call-coverage
+  // would go green when it should RED. The negative control proves fm-* stays non-mechanical.
+  assert.equal(isMechanicalRunId("fm-gap-ac78-fan-in-workflow-a6-check-1786697920972-3tzt6u"), false);
+  assert.equal(isMechanicalRunId("fm-gap-post-boundary-2000000000-r1"), false);
+  assert.equal(isMechanicalRunId(""), false);
+  assert.equal(isMechanicalRunId(null), false);
+  assert.equal(isMechanicalRunId(undefined), false);
+});
+
+test("PURE checkWorkflowCoverage — a mechanical (oneoff-ls-*) task is skipped from the difference ⇒ GREEN (AC2)", (t) => {
+  // A oneoff-ls-* landing has no Workflow call and unresolvable dispatch (main-thread landing) — WITHOUT
+  // mechanical recognition it would be missing + unresolvableDispatch ⇒ RED. WITH the mechanicalTaskIds
+  // set it is covered (driver/manager took over; no Workflow call required).
+  const v = checkWorkflowCoverage(
+    ["gap-loop-shipping-ac1b-walk-enoent-race"],
+    [],
+    new Map(), // dispatch unresolvable — would otherwise fail-closed
+    BOUNDARY_EPOCH,
+    ENFORCEMENT_BASELINE_EPOCH,
+    RULED_HISTORICAL_GAPS,
+    new Set(["gap-loop-shipping-ac1b-walk-enoent-race"]), // mechanicalTaskIds
+  );
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+  assert.deepEqual(v.missing, []);
+  assert.deepEqual(v.unresolvableDispatch, []);
+});
+
+test("PURE checkAgentIds — a oneoff-ls-* runId event with agentId=null is mechanically covered (not a violation)", (t) => {
+  const events = [{ event: "acquire", taskId: "gap-loop-shipping-ac1b-walk-enoent-race", runId: "oneoff-ls-1787930114984", agentId: null }];
+  const v = checkAgentIds(events, REAL_TOP_LEVEL_STEMS, REAL_SUBAGENT_STEMS, RULED_HISTORICAL_GAPS, new Set(["oneoff-ls-1787930114984"]));
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+  assert.deepEqual(v.violations, []);
+  assert.deepEqual(v.ruledHistorical, []);
+});
+
 // ── PURE d: escalation traceability (gap-ff-livelock-trigger-no-action, SPEC §7 anti-livelock) ─────
 
 test("PURE parseEscalations — parses ff-escalation records; skips torn tail; empty ⇒ []", (t) => {
@@ -989,6 +1047,31 @@ test("CLI — 负控制: a fan-in dispatched AFTER the enforcement baseline with
   assert.deepEqual(a.missing, ["gap-post-baseline"]);
   assert.deepEqual(a.knownPreBaselineDebt, []);
   assert.deepEqual(a.preBoundaryDispatch, []);
+});
+
+test("CLI — a oneoff-ls-* mechanical landing (agentId=null, no Workflow call) ⇒ exit 0: a + c both green (AC2)", (t) => {
+  const fx = makeFixture();
+  t.after(() => cleanup(fx.dir));
+  const lockFile = path.join(fx.dir, "lock.jsonl");
+  // The real gap-loop-shipping-ac1b-walk-enoent-race landing: runId oneoff-ls-1787930114984, agentId=null
+  // (manager one-off main-thread landing, no --agent-id), no Workflow(fan-in-execute) call. WITHOUT the
+  // isMechanicalRunId oneoff-* recognition this event reds BOTH a-workflow-call-coverage (missing) and
+  // c-agent-id-real-subagent (agentId null ⇒ missing). WITH it, both checks recognize the mechanical
+  // landing as COVERED (no Workflow call / no subagent agentId required).
+  const ev = { event: "acquire", taskId: "gap-loop-shipping-ac1b-walk-enoent-race", epoch: 2000000000, runId: "oneoff-ls-1787930114984", agentId: null };
+  fs.writeFileSync(lockFile, JSON.stringify(ev) + "\n");
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", fx.escFile, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
+  assert.equal(res.status, 0);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.ok, true);
+  assert.equal(out.evaluated, true);
+  const a = out.checks.find((c) => c.check === "a-workflow-call-coverage");
+  assert.equal(a.ok, true);
+  assert.deepEqual(a.missing, []);
+  assert.deepEqual(a.unresolvableDispatch, []);
+  const c = out.checks.find((x) => x.check === "c-agent-id-real-subagent");
+  assert.equal(c.ok, true);
+  assert.deepEqual(c.violations, []);
 });
 
 test("AC3 (gap-gitignored-carriers-absent-in-verify-worktree) — feeding the round the MAIN root makes the checker evaluate (not nothing-to-judge); the REAL difference gap-ac81 is now RULED-EXEMPT (classification) ⇒ ok=true, verdict-identical to a main run", (t) => {
