@@ -99,7 +99,6 @@ import {
   parseMaxRetries,
   acquireFanInWorkflowLock,
   fanInWorkflowLockFile,
-  runMechanicalFanIn,
 } from "../scripts/worker-driver.ts";
 // gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
 // 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
@@ -108,11 +107,6 @@ import { advanceRetryCap as promoAdvanceRetryCap, markNeedsHuman as promoMarkNee
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DRIVER = path.resolve(__dirname, "..", "scripts", "worker-driver.ts");
-// gap-fan-in-merge-develop-derived-recompute-and-reason：runMechanicalFanIn 的机械 fan-in 测试 seam
-// （真实 plugin/scripts 里的编排脚本 + suite 锁槽 lib）——derived 冲突重算测试复用机械 fan-in 的
-// scriptsDir/slotLib seam（与 fan-in-driver-mechanical-orchestration.test.mjs 同形）。
-const SCRIPTS_DIR = path.resolve(__dirname, "..", "scripts");
-const SLOT_LIB = path.join(SCRIPTS_DIR, "suite-slot-lib.sh");
 
 function makeRoot(tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `worker-driver-${tag}-`));
@@ -1961,147 +1955,16 @@ test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-co
   assert.match(p, /git commit --no-edit/, "AC3: complete the merge with git commit --no-edit");
 });
 
-// ── gap-fan-in-merge-develop-derived-recompute-and-reason（A/B）─────────────────────────────────────
-// 机械 fan-in step 2 `git merge develop` 冲突是批量 fan-in 主力卡点（4 outline 计数冲突 + 1 worker-driver.ts
-// 冲突），且冲突信息没传回下一轮 worker。A：纯 derived（outline §6）冲突 ⇒ driver 机械重算（取 develop 版 +
-// 重跑 verify-delivery-surface.ts --write-inventory）继续；含 code 文件 ⇒ 仍 fail("merge-develop")。
-// B：CONTINUE reason 改读 mechanical_fan_in（step + reason 拼接「step=merge-develop: CONFLICT in <file>」）。
-
-/** outline §6 DELIVERY-INVENTORY 快照（scripts=N，其余 0）——derived 文件的最小可解析形态。 */
-function outlineBody(scriptsCount) {
-  return [
-    "# quay-product-outline",
-    "",
-    "## §6 Delivery inventory",
-    "<!-- DELIVERY-INVENTORY-BEGIN -->",
-    `scripts=${scriptsCount} · gate-scripts=0 · skills=0 · probes=0 · loop=0 · workflows=0 · agents=0 · vendor=0`,
-    "<!-- DELIVERY-INVENTORY-END -->",
-    "",
-  ].join("\n");
-}
-
-/** 测试任务体：status=ready + Touches + AC 全勾 + DoD 全勾（机械 fan-in 的 flip/AC-gate/anti-drift 全放行）。 */
-function dvTaskBody(touches) {
-  return [
-    "---",
-    "id: gap-dv",
-    "title: derived re-compute test",
-    "status: ready",
-    "labels: []",
-    "extra: {}",
-    "---",
-    "## Proposal",
-    "test",
-    "## Plan",
-    "test",
-    "## Touches",
-    ...touches.map((t) => `- ${t}`),
-    "## Acceptance Criteria",
-    "- [x] AC1 landed",
-    "## Definition of Done",
-    "- [x] landed",
-    "",
-  ].join("\n");
-}
-
-/** 建 hermetic 仓库 + task worktree：develop 上有 outline（scripts=1）+ plugin/scripts/aa.sh + task 文件；
- *  task 分支加 bb.sh/cc.sh（或 code.ts）并把 outline 改到 scripts=3；develop 前进加 zz.sh（或 code.ts）并把
- *  outline 改到 scripts=2 ⇒ merge develop 撞 outline（+ 可选 code.ts）冲突。主检出停 develop-work 使 develop
- *  可被 ff 纯 ref 更新。返回 { base, repo, worktree, slotBase, capture }。 */
-function makeDerivedConflictRepo(opts = {}) {
-  const { withCodeConflict = false } = opts;
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), "wdv-"));
-  const repo = path.join(base, "repo");
-  const worktree = path.join(base, "wt");
-  const TASK = "gap-dv";
-  fs.mkdirSync(repo, { recursive: true });
-  runGit(repo, ["init", "-q"]);
-  runGit(repo, ["config", "user.name", "dv-test"]);
-  runGit(repo, ["config", "user.email", "dv@example.com"]);
-  runGit(repo, ["branch", "-M", "develop"]);
-  fs.mkdirSync(path.join(repo, "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(repo, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
-  fs.mkdirSync(path.join(repo, "plugin", "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(repo, "plugin", "scripts", "aa.sh"), "#!/usr/bin/env bash\n", "utf8");
-  fs.mkdirSync(path.join(repo, "docs", "proposals"), { recursive: true });
-  fs.writeFileSync(path.join(repo, "docs", "proposals", "quay-product-outline.md"), outlineBody(1), "utf8");
-  fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
-  const touches = withCodeConflict
-    ? ["plugin/scripts/code.ts", "docs/proposals/quay-product-outline.md", `tasks/${TASK}.md`]
-    : ["plugin/scripts/bb.sh", "plugin/scripts/cc.sh", "docs/proposals/quay-product-outline.md", `tasks/${TASK}.md`];
-  fs.writeFileSync(path.join(repo, "tasks", `${TASK}.md`), dvTaskBody(touches), "utf8");
-  runGit(repo, ["add", "-A"]);
-  runGit(repo, ["commit", "-q", "-m", "base"]);
-  runGit(repo, ["worktree", "add", worktree, "-b", `task/${TASK}`]);
-  runGit(repo, ["checkout", "-q", "-b", "develop-work"]);
-
-  // task 分支：加文件 + 改 outline（scripts=3）。
-  if (withCodeConflict) {
-    fs.writeFileSync(path.join(worktree, "plugin", "scripts", "code.ts"), "// task version\n", "utf8");
-  } else {
-    fs.writeFileSync(path.join(worktree, "plugin", "scripts", "bb.sh"), "#!/usr/bin/env bash\n", "utf8");
-    fs.writeFileSync(path.join(worktree, "plugin", "scripts", "cc.sh"), "#!/usr/bin/env bash\n", "utf8");
-  }
-  fs.writeFileSync(path.join(worktree, "docs", "proposals", "quay-product-outline.md"), outlineBody(3), "utf8");
-  runGit(worktree, ["add", "-A"]);
-  runGit(worktree, ["commit", "-q", "-m", "implement gap-dv"]);
-
-  // develop 前进：加文件 + 改 outline（scripts=2）⇒ 撞 outline（code 冲突时再撞 code.ts）。
-  runGit(repo, ["checkout", "-q", "develop"]);
-  if (withCodeConflict) {
-    fs.writeFileSync(path.join(repo, "plugin", "scripts", "code.ts"), "// develop version\n", "utf8");
-  } else {
-    fs.writeFileSync(path.join(repo, "plugin", "scripts", "zz.sh"), "#!/usr/bin/env bash\n", "utf8");
-  }
-  fs.writeFileSync(path.join(repo, "docs", "proposals", "quay-product-outline.md"), outlineBody(2), "utf8");
-  runGit(repo, ["add", "-A"]);
-  runGit(repo, ["commit", "-q", "-m", "develop advances"]);
-  runGit(repo, ["checkout", "-q", "develop-work"]); // free develop for the ff
-
-  const slotBase = path.join(base, "full-suite.lock");
-  const capture = path.join(base, "suite.env");
-  return { base, repo, worktree, slotBase, capture };
-}
-
-/** 一次 derived 冲突场景的标准 runMechanicalFanIn（seam 与 fan-in-driver-mechanical-orchestration.test.mjs 同形）。 */
-function runDvMechanicalFanIn(base, repo, worktree, slotBase, capture, runId) {
-  return runMechanicalFanIn({
-    task: "gap-dv", worktree, root: repo, runId, mergeTarget: "develop",
-    forceSuite: true, scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
-    suiteCapture: capture, suiteLogFile: path.join(base, "suite.log"),
-    suiteCommand: ["bash", "-c", "exit 0"],
-    scopedGateCommand: ["true"], docCheckCommand: ["true"], archguardCommand: ["true"],
-  });
-}
-
-test("A (能取假, AC1) — 纯 derived（outline §6）冲突 ⇒ runMechanicalFanIn step 2 机械重算并 landed（⛔ 不 red、⛔ 不 exited-not-landed）", async () => {
-  const { base, repo, worktree, slotBase, capture } = makeDerivedConflictRepo({ withCodeConflict: false });
-  try {
-    const r = await runDvMechanicalFanIn(base, repo, worktree, slotBase, capture, "dv-run-derived");
-    assert.equal(r.outcome, "landed", `derived-only conflict must be mechanically re-computed and land (step=${r.step} reason=${r.reason})`);
-    // 落地后 outline §6 重算为 develop 的 zz.sh + task 的 bb.sh/cc.sh（+ base aa.sh）= 4 个 scripts。
-    const devOutline = runGit(repo, ["show", "develop:docs/proposals/quay-product-outline.md"]);
-    assert.match(devOutline, /scripts=4/, "outline §6 must be regenerated to the merged plugin/scripts count (4)");
-  } finally {
-    fs.rmSync(base, { recursive: true, force: true });
-  }
-});
-
-test("A (能取假, AC2) — 冲突含 code 文件（code.ts）⇒ step 2 仍 fail('merge-develop')（机械重算只对 derived，不对 code）", async () => {
-  const { base, repo, worktree, slotBase, capture } = makeDerivedConflictRepo({ withCodeConflict: true });
-  try {
-    const r = await runDvMechanicalFanIn(base, repo, worktree, slotBase, capture, "dv-run-code");
-    assert.equal(r.outcome, "red", "code-file conflict must NOT be mechanically resolved");
-    assert.equal(r.step, "merge-develop", "code-file conflict still red at step=merge-develop");
-    assert.match(r.reason, /code\.ts/, "reason carries the specific code file (code.ts)");
-  } finally {
-    fs.rmSync(base, { recursive: true, force: true });
-  }
-});
+// ── gap-fan-in-merge-develop-derived-recompute-and-reason（B；A 已退役）─────────────────────────────
+// 机械 fan-in step 2 `git merge develop` 冲突的【具体文件】没传回下一轮 worker——CONTINUE prompt 的 reason
+// 读通用 failure_reason（「task status=ready not done」），⛔ 不含冲突文件 ⇒ worker 无从精准 resolve。
+// 修法（原 B）：lastExitedNotLandedReason 改读 mechanical_fan_in（step + reason 拼接「step=merge-develop:
+// CONFLICT in <file>」）。原 A（driver 对 derived 文件机械重算）已退役：outline §6 DELIVERY-INVENTORY 快照被
+// gap-delivery-inventory-check-time-computation 删除（计数改 check-time 计算），无 derived 文件可重算。
 
 test("B (能取假) — lastExitedNotLandedReason reads mechanical_fan_in (step + reason) ⛔ not generic failure_reason", () => {
   const root = makeRoot("mech-reason");
-  const mech = { outcome: "red", step: "merge-develop", reason: "CONFLICT (content): Merge conflict in docs/proposals/quay-product-outline.md" };
+  const mech = { outcome: "red", step: "merge-develop", reason: "CONFLICT (content): Merge conflict in plugin/scripts/worker-driver.ts" };
   fs.appendFileSync(path.join(root, WORKER_OUTCOME_REL), JSON.stringify({
     ts: new Date().toISOString(), task: "gap-dv", final_state: "exited-not-landed",
     failure_reason: "task status=ready not done", mechanical_fan_in: mech,
@@ -2109,7 +1972,7 @@ test("B (能取假) — lastExitedNotLandedReason reads mechanical_fan_in (step 
   const reason = lastExitedNotLandedReason(root, "gap-dv");
   assert.match(reason, /step=merge-develop/, "B: reason leads with the mechanical_fan_in step");
   assert.match(reason, /CONFLICT/, "B: reason carries the conflict marker");
-  assert.match(reason, /docs\/proposals\/quay-product-outline\.md/, "B: reason carries the specific conflicting file");
+  assert.match(reason, /plugin\/scripts\/worker-driver\.ts/, "B: reason carries the specific conflicting file");
   assert.doesNotMatch(reason, /status=ready not done/, "B: ⛔ not the generic failure_reason");
   // fallback：无 mechanical_fan_in ⇒ 回退 failure_reason（旧行为保留）。
   fs.writeFileSync(path.join(root, WORKER_OUTCOME_REL), JSON.stringify({
@@ -2119,14 +1982,15 @@ test("B (能取假) — lastExitedNotLandedReason reads mechanical_fan_in (step 
   assert.match(lastExitedNotLandedReason(root, "gap-dv"), /did not land/, "B: no mechanical_fan_in ⇒ fall back to failure_reason");
 });
 
-test("A/B (能取假, 结构面) — worker-driver.ts 含 derived 重算逻辑 + code 冲突仍 fail + reason 读 mechanical_fan_in", () => {
+test("B (能取假, 结构面) — worker-driver.ts reason 读 mechanical_fan_in；A 的 derived 重算逻辑无残留", () => {
   const src = fs.readFileSync(DRIVER, "utf8");
-  assert.match(src, /--diff-filter=U/, "step 2 resolver lists unmerged files via --diff-filter=U");
-  assert.match(src, /--write-inventory/, "derived conflict ⇒ re-run verify-delivery-surface.ts --write-inventory");
-  assert.match(src, /DERIVED_CONFLICT_FILES/, "derived file set is declared (outline §6)");
-  assert.match(src, /"git", "-C", worktree, "commit", "--no-edit"/, "resolve completes the merge with git commit --no-edit");
   assert.match(src, /formatExitedNotLandedReason/, "B: reason formatting reads mechanical_fan_in");
-  assert.match(src, /return fail\("merge-develop", resolved\.reason/, "code conflict still fail('merge-develop')");
+  assert.match(src, /mechanical_fan_in/, "B: lastExitedNotLandedReason reads the mechanical_fan_in field");
+  // A 已退役（superseded by gap-delivery-inventory-check-time-computation）：⛔ 不残留 derived 重算逻辑
+  // （OUTLINE_DOC_REL 常量 / resolveDerivedMergeConflict / DERIVED_CONFLICT_FILES 会引用已删除的 §6 快照 + 退役 flag）。
+  assert.doesNotMatch(src, /OUTLINE_DOC_REL/, "A retired: no OUTLINE_DOC_REL import");
+  assert.doesNotMatch(src, /resolveDerivedMergeConflict/, "A retired: no derived-recompute resolver");
+  assert.doesNotMatch(src, /DERIVED_CONFLICT_FILES/, "A retired: no derived file set");
 });
 
 // ── AC150-3 (falsifiable): 资源门/halt 判定抽到 driver-shared.ts，worker-driver 只是 re-export ──
