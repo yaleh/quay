@@ -43,6 +43,7 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 - plugin/test/adr016-screen-use-check.test.mjs（迁移测试）
 - plugin/test/checker-driver-result-ratchet-check.test.mjs (new)（棘轮负控制测试）
 - plugin/scripts/capability-catalog.sh（2 新脚本六表注册）
+- plugin/scripts/quay-init.sh（checker-io.ts + driver-result.ts 显式 laydown——closure (d) 扫不到 ESM import）
 - tasks/gap-b4-checker-reuse-driver-result.md（自身）
 
 ## Needs-Human
