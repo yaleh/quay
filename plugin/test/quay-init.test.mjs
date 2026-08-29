@@ -90,7 +90,7 @@ test("AC2-launch — --loop lays down .claude/launch.settings.json + .quay/profi
     const p = JSON.parse(py.stdout);
     const names = new Set(Object.values(p.roles).map((r) => r.name));
     assert.equal(names.has("quay-outer"), true, "outer role must carry the role-convention name quay-outer");
-    assert.equal(names.has("quay-inner"), true, "inner role must carry the role-convention name quay-inner");
+    assert.equal(names.has("quay-inner"), false, "inner role retired (inner 层已由 *-driver 取代) — must NOT carry the role-convention name quay-inner");
     // The launcher in the laid-down target materializes --settings + the role name (F4's missing half).
     const launcher = path.join(ws, "plugin", "scripts", "quay-launch.sh");
     const dry = spawnSync("bash", [launcher, "outer", "--dry-run"], { encoding: "utf8", env: { ...process.env, QUAY_LAUNCH_SETTINGS: settings } });

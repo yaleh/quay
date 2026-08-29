@@ -43,3 +43,9 @@ driver selector 错误/快速死亡退避落地；AC1-AC3 全勾；54 次级快�
 - plugin/scripts/worker-driver.ts（selector 错误/快速死亡退避 + markNeedsHuman 兜底）
 - plugin/test/worker-driver.test.mjs（退避 + 按 task 隔离 + 上限负控制）
 - tasks/gap-worker-driver-selector-api-error-no-backoff.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T18:24:45.124Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

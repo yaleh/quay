@@ -95,6 +95,14 @@ function normalizeTouched(p: string): string {
   return String(p).replace(/\\/g, "/").replace(/^\.\//, "").trim();
 }
 
+/** A suite test-file suffix (`.test.mjs` / `.test.ts` — the shallow-glob universe test.sh runs). */
+const TEST_FILE_SUFFIXES = [".test.mjs", ".test.ts"] as const;
+
+/** True when a normalized repo-relative path is a suite test file (by suffix). */
+function isTestFile(p: string): boolean {
+  return TEST_FILE_SUFFIXES.some((s) => p.endsWith(s));
+}
+
 /**
  * Expand one shallow glob (a single `*` per segment) under `root` to existing file paths, then
  * realpath-dedup — the same enumeration contract as scripts/test.sh's build_deduped_files.
@@ -319,27 +327,38 @@ export function selectBucketsForTouches(touchedPaths: readonly string[], root = 
     };
   }
 
-  const selected: string[] = [];
+  const selected = new Set<string>();
   for (const f of files) {
     const eff = attribution.get(f)?.buckets ?? new Set<Bucket>();
     if (eff.size === 0) {
       // UNRESOLVED — cannot be proven safe to skip (AC123 安全侧不做减法): always selected.
-      selected.push(f);
+      selected.add(f);
       continue;
     }
     for (const b of eff) {
       if (triggered.has(b)) {
-        selected.push(f);
+        selected.add(f);
         break;
       }
     }
   }
 
+  // gap-suite-bucket-touches-inclusive-floor: the task's `## Touches` is the DIRECT declaration of
+  // "what this task changed" — a changed TEST file must be run regardless of where the attribution
+  // (a static proxy with blind spots) placed it. Union the Touches-listed test files into the
+  // selection (restricted to the suite universe so we never emit a phantom path; non-test Touches
+  // entries — sources/scripts/self — are NOT unioned: the selected set is a TEST-file set).
+  const suiteFiles = new Set(files);
+  for (const raw of touchedPaths ?? []) {
+    const p = normalizeTouched(raw);
+    if (isTestFile(p) && suiteFiles.has(p)) selected.add(p);
+  }
+
   return {
     fullSuite: false,
     buckets: canonicalBuckets(triggered),
-    selectedFiles: selected,
-    fileCount: selected.length,
+    selectedFiles: [...selected].sort(),
+    fileCount: selected.size,
     hubMatches: hub.hubMatches,
     triggered: [...triggered].sort(),
   };

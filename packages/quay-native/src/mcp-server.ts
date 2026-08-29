@@ -56,17 +56,26 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
   // to ~0.3MB (frontmatter only) — the dominant cost in the
   // "MCP round-trip + rendering" half of the task-list route. The param is
   // additive and opt-in: providers/callers that never pass it are unaffected.
+  //
+  // gap-serve-search-timeout-all-body-fetch: an OPTIONAL `search` param does
+  // server-side title+body filtering (heading lines stripped, case-insensitive)
+  // BEFORE the response is built, so the MCP round-trip carries only the
+  // matching tasks instead of every task's body. The web UI's `/tasks?q=`
+  // search uses this to avoid the 1572-body payload that timed out the MCP
+  // round-trip (-32001). Search is applied in the store walk (status → label →
+  // search), independent of `includeBody` (which only shapes the response).
   server.registerTool(
     "task_list",
     {
-      description: "List tasks in the native Provider's task store, optionally filtered by status/label.",
+      description: "List tasks in the native Provider's task store, optionally filtered by status/label/search.",
       inputSchema: {
         status: z.string().optional(),
         label: z.string().optional(),
         includeBody: z.boolean().optional(),
+        search: z.string().optional(),
       },
     },
-    async ({ status, label, includeBody }) => {
+    async ({ status, label, includeBody, search }) => {
       // gap-one-unparseable-task-takes-down-the-whole-board: partial success.
       // One task file whose frontmatter fails to parse must not take down the
       // whole task_list call (that was the "all-or-nothing" defect) — return
@@ -74,7 +83,7 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
       // error}) so the Core can surface the bad file visibly instead of 500ing
       // the board. isError stays reserved for genuine call-level failures
       // (store itself unreachable, etc.), which still throw.
-      const { tasks, malformed } = store.listWithMalformed({ status, label });
+      const { tasks, malformed } = store.listWithMalformed({ status, label, search });
       const outTasks = includeBody === false
         ? tasks.map((t) => { const { body: _omit, ...rest } = t; return rest; })
         : tasks;

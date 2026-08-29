@@ -30,6 +30,7 @@
 //   node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface
 //   node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface --root <dir>
 //   node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --json [--root <dir>]
+//   node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --inventory [--root <dir>] [--json]
 //   node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface --root <consumer-dir> [--layout source|laid|auto]
 //     (gap-verify-delivery-surface-checks-source-layout-not-consumer-laid: --layout laid checks a
 //      quay-init --loop CONSUMER's laid layout — orchestration/+docs/analysis/ — instead of the
@@ -112,7 +113,7 @@ export const MANIFEST: DeliveryCategory[] = [
     ],
     attribution: ["gap-tmux-session-topology-no-factory-definition"],
     criterion:
-      "三窗口（outer/inner/manager）拓扑出厂定义：quay-topology.sh + topology-check.sh + session-topology skill（每层起什么命令、谁驱动谁）",
+      "单窗口（outer）拓扑出厂定义：quay-topology.sh + topology-check.sh + session-topology skill（每层起什么命令、谁驱动谁；manager 跨项目，不属于项目拓扑）",
   },
   {
     id: 5,
@@ -241,20 +242,20 @@ export function manifestForLayout(layout: Layout): DeliveryCategory[] {
   return layout === "laid" ? LAID_MANIFEST : MANIFEST;
 }
 
-// ── Delivery inventory (AC1/AC2 — single source for the plugin-bundle directory counts) ───────────
-// gap-delivery-outline-vs-verify-surface-single-source (human ruling 2026-08-06):
-// quay-product-outline.md §6 previously hardcoded the plugin-bundle directory counts
-// (scripts/skills/probes/...) as independent prose — a SECOND, unbound copy that drifted
-// (scripts 97 → 120 → 168; skills 11 → 13). verify-delivery-surface is the SINGLE SOURCE:
-// the authoritative counts are COMPUTED from disk by `--inventory`; the outline §6 carries a
-// machine-readable snapshot (a DERIVED copy) that `--inventory` validates against disk (AC2 —
-// outline drift is mechanically caught: edit one without the other ⇒ inventory_drift reported).
-// Cross-annotation: ADR-024 (ruling↔mechanized-check traceability) — this task's ruling
-// ("verify-delivery-surface is the delivery-inventory source") is mechanically bound to the
-// `--inventory` drift check: the outline-vs-check PAIR the original ADR-024 case did not cover.
+// ── Delivery inventory (computed at check time — no committed snapshot) ───────────────────────────
+// gap-delivery-inventory-check-time-computation (2026-08-29): the outline §6 DELIVERY-INVENTORY
+// counts (scripts=294 · gate-scripts=14 · …) were a COMMITTED, hand-synced snapshot. Every
+// plugin/scripts A/D forced a same-change outline edit (delivery-inventory-drift-gate.sh), which
+// made the outline a SHARED merge-conflict hotspot (2026-08-29 batch re-dispatch: 3 of 4 merge
+// conflicts landed on the outline's `scripts=N`). The snapshot is REMOVED; the counts are now
+// COMPUTED AT CHECK TIME by `--inventory` (this module) — the single command release/human audit
+// runs. With no snapshot to drift against, `--inventory` is a REPORT (exit 0 on a valid root), not
+// a pass/fail drift check. Predecessor ruling (gap-delivery-outline-vs-verify-surface-single-source,
+// 2026-08-06) made verify-delivery-surface the single source for the counts; this task completes it
+// by deleting the derived copy instead of keeping it in sync.
 
 export interface DeliveryInventoryEntry {
-  /** stable key — must match the outline snapshot's `key=count` token */
+  /** stable key — the `name=count` token printed by `--inventory` */
   name: string;
   /** repo-relative dir under the checked root */
   dir: string;
@@ -273,109 +274,43 @@ export const DELIVERY_INVENTORY: DeliveryInventoryEntry[] = [
   { name: "vendor", dir: "plugin/vendor", criterion: "自包含运行时（quay/quay-native bundles）" },
 ];
 
-export const OUTLINE_DOC_REL = "docs/proposals/quay-product-outline.md";
-export const INV_BEGIN_MARKER = "<!-- DELIVERY-INVENTORY-BEGIN -->";
-export const INV_END_MARKER = "<!-- DELIVERY-INVENTORY-END -->";
-
-/** Count non-hidden entries under <root>/<dir> (matches the outline's `ls plugin/<d> | wc -l` semantics). */
+/** Count non-hidden entries under <root>/<dir> (top-level readdirSync, non-hidden). */
 export function countInventoryDir(root: string, dir: string): number {
   const abs = path.join(root, dir);
-  if (!fs.existsSync(abs)) return -1; // missing dir → reportable drift
+  if (!fs.existsSync(abs)) return -1; // missing dir → reported as -1 by --inventory
   return fs.readdirSync(abs).filter((f) => !f.startsWith(".")).length;
-}
-
-export interface InventorySnapshot {
-  counts: Record<string, number>;
-  raw: string;
-}
-
-/** Parse the outline §6 DELIVERY-INVENTORY snapshot block; null when the block is absent. */
-export function parseInventorySnapshot(outlineText: string): InventorySnapshot | null {
-  const start = outlineText.indexOf(INV_BEGIN_MARKER);
-  if (start === -1) return null;
-  const end = outlineText.indexOf(INV_END_MARKER, start);
-  if (end === -1) return null;
-  const block = outlineText.slice(start + INV_BEGIN_MARKER.length, end);
-  const counts: Record<string, number> = {};
-  for (const m of block.matchAll(/([a-z][a-z0-9-]*)\s*=\s*(\d+)/g)) {
-    counts[m[1]] = Number(m[2]);
-  }
-  return { counts, raw: block };
 }
 
 export interface InventoryEntryResult {
   name: string;
   dir: string;
   disk: number;
-  snapshot?: number;
-  match: boolean;
   criterion: string;
 }
 
 export interface InventoryReport {
   root: string;
-  outlinePath: string;
   entries: InventoryEntryResult[];
-  drift: number;
-  snapshotPresent: boolean;
-  snapshotMatches: boolean;
 }
 
-/** Validate the outline §6 snapshot against the disk-derived inventory (AC2 drift check). */
-export function checkInventory(root: string, outlinePath?: string): InventoryReport {
-  const outlineFile = outlinePath ?? path.join(root, OUTLINE_DOC_REL);
-  const outlineText = fs.existsSync(outlineFile) ? fs.readFileSync(outlineFile, "utf8") : "";
-  const snapshot = parseInventorySnapshot(outlineText);
-  const entries: InventoryEntryResult[] = DELIVERY_INVENTORY.map((e) => {
-    const disk = countInventoryDir(root, e.dir);
-    const snap = snapshot?.counts[e.name];
-    const match = snap === undefined ? true : snap === disk;
-    return { name: e.name, dir: e.dir, disk, snapshot: snap, match, criterion: e.criterion };
-  });
-  const drift = entries.filter((e) => !e.match).length;
-  return {
-    root,
-    outlinePath: outlineFile,
-    entries,
-    drift,
-    snapshotPresent: snapshot !== null,
-    snapshotMatches: snapshot !== null && drift === 0,
-  };
-}
-
-/** Regenerate the outline §6 DELIVERY-INVENTORY snapshot block from disk (generation — AC1). */
-export function writeInventorySnapshot(root: string, outlinePath?: string): InventoryReport {
-  const outlineFile = outlinePath ?? path.join(root, OUTLINE_DOC_REL);
-  const before = checkInventory(root, outlineFile);
-  const blockText = DELIVERY_INVENTORY.map((e) => `${e.name}=${countInventoryDir(root, e.dir)}`).join(" · ");
-  const block = `${INV_BEGIN_MARKER}\n${blockText}\n${INV_END_MARKER}`;
-  let outline = fs.existsSync(outlineFile) ? fs.readFileSync(outlineFile, "utf8") : "";
-  if (before.snapshotPresent) {
-    outline = outline.replace(
-      new RegExp(`${escapeRegExp(INV_BEGIN_MARKER)}[\\s\\S]*?${escapeRegExp(INV_END_MARKER)}`),
-      block
-    );
-  } else {
-    outline = outline.length === 0 ? block : `${outline}\n${block}\n`;
-  }
-  fs.writeFileSync(outlineFile, outline, "utf8");
-  return checkInventory(root, outlineFile);
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Compute the delivery-inventory counts from disk (no committed snapshot involved). */
+export function computeInventory(root: string): InventoryReport {
+  const entries: InventoryEntryResult[] = DELIVERY_INVENTORY.map((e) => ({
+    name: e.name,
+    dir: e.dir,
+    disk: countInventoryDir(root, e.dir),
+    criterion: e.criterion,
+  }));
+  return { root, entries };
 }
 
 function formatInventory(report: InventoryReport): string {
   const lines: string[] = [];
   lines.push(`delivery-inventory (root=${report.root})`);
-  lines.push(`  inventory_snapshot=${report.snapshotPresent ? "present" : "missing"}`);
+  lines.push(`  inventory_snapshot=none (computed at check time — no committed snapshot)`);
   for (const e of report.entries) {
-    const snap = e.snapshot === undefined ? "n/a" : String(e.snapshot);
-    const status = e.match ? "OK" : "DRIFT";
-    lines.push(`  [${status}] ${e.name}: disk=${e.disk} snapshot=${snap} (${e.criterion})`);
+    lines.push(`  ${e.name}=${e.disk} (${e.criterion})`);
   }
-  lines.push(`inventory_drift=${report.drift}`);
   return lines.join("\n");
 }
 
@@ -550,7 +485,6 @@ export function main(argv: string[]): number {
   let root: string | null = null;
   let asJson = false;
   let inventoryMode = false;
-  let writeInventoryMode = false;
   let layoutArg: Layout | "auto" | null = null;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") {
@@ -563,7 +497,10 @@ export function main(argv: string[]): number {
     } else if (args[i] === "--inventory") {
       inventoryMode = true;
     } else if (args[i] === "--write-inventory") {
-      writeInventoryMode = true;
+      // Retired (gap-delivery-inventory-check-time-computation): there is no committed snapshot to
+      // regenerate — the inventory is computed at check time by `--inventory`.
+      console.error("ERROR: --write-inventory is retired — the inventory is computed at check time (use --inventory)");
+      return 2;
     } else if (args[i] === "--layout") {
       const v = args[i + 1];
       if (v !== "source" && v !== "laid" && v !== "auto") {
@@ -587,8 +524,8 @@ export function main(argv: string[]): number {
     }
   }
 
-  // ── inventory mode (AC1/AC2): the outline §6 snapshot vs the disk-derived inventory ───────────────
-  if (inventoryMode || writeInventoryMode) {
+  // ── inventory mode (computed at check time — a REPORT, not a drift check) ─────────────────────────
+  if (inventoryMode) {
     let resolved: string;
     try {
       resolved = root ? path.resolve(root) : findRepoRoot();
@@ -600,22 +537,13 @@ export function main(argv: string[]): number {
       console.error(`ERROR: check root not found: ${resolved}`);
       return 2;
     }
-    const report = writeInventoryMode ? writeInventorySnapshot(resolved) : checkInventory(resolved);
+    const report = computeInventory(resolved);
     if (asJson) {
       console.log(
         JSON.stringify(
           {
-            inventory_drift: report.drift,
-            inventory_snapshot: report.snapshotPresent ? "present" : "missing",
-            snapshot_matches: report.snapshotMatches,
-            outline: report.outlinePath,
-            entries: report.entries.map((e) => ({
-              name: e.name,
-              dir: e.dir,
-              disk: e.disk,
-              snapshot: e.snapshot ?? null,
-              match: e.match,
-            })),
+            root: report.root,
+            entries: report.entries.map((e) => ({ name: e.name, dir: e.dir, disk: e.disk })),
           },
           null,
           2
@@ -624,17 +552,7 @@ export function main(argv: string[]): number {
     } else {
       console.log(formatInventory(report));
     }
-    if (writeInventoryMode) {
-      console.log("PASS: outline §6 DELIVERY-INVENTORY snapshot regenerated to match disk");
-      return 0;
-    }
-    if (!report.snapshotPresent) {
-      console.error(
-        `ERROR: ${report.outlinePath} has no DELIVERY-INVENTORY snapshot block — the outline §6 derived copy is missing (AC1 requires outline §6 to derive from verify-delivery-surface)`
-      );
-      return 1;
-    }
-    return report.drift === 0 ? 0 : 1;
+    return 0;
   }
   let resolved: string;
   try {
