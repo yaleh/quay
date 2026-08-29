@@ -9,8 +9,8 @@
 #                        [--socket <path>] [--help]
 #     <root>   项目根（默认 $(pwd)）。用于读 orchestration/session-liveness.env 的会话名，
 #             以及定位 plugin/scripts/quay-launch.sh。
-#     <layout> 命名窗口集：`manager/inner/outer` 或 `inner/outer`（默认 inner/outer）。
-#             每个 token 必须是 manager|outer|inner，按给定顺序创建（窗口按名寻址，顺序不影响正确性）。
+#     <layout> 命名窗口集：`manager/outer`（默认 outer）。
+#             每个 token 必须是 manager|outer，按给定顺序创建（窗口按名寻址，顺序不影响正确性）。
 #     --session <sess>  覆盖会话名（默认：SESSION_BOOTSTRAP_SESSION → SESSION_TMUX_SESSION →
 #                       <root>/orchestration/session-liveness.env → fail-closed，绝不猜会话名）。
 #     --dry-run         只打印将执行的命令，不实际改动（校验用）。
@@ -36,9 +36,9 @@
 #
 # 依赖：tmux、jq（经 quay-launch.sh）。
 #
-# 与 quay-topology.sh 的关系：quay-topology.sh 是「项目拓扑」工厂（outer+inner；manager 跨项目，
+# 与 quay-topology.sh 的关系：quay-topology.sh 是「项目拓扑」工厂（单窗口 outer；manager 跨项目，
 # 不属于项目拓扑）。本脚本是更高一层的裸机引导入口，接受任意命名布局（含 manager 的完整布局）。
-# inner/outer 部分与 quay-topology.sh 的幂等/存活语义一致（同一 has_live_process 判据），
+# outer 部分与 quay-topology.sh 的幂等/存活语义一致（同一 has_live_process 判据），
 # 唯一差别是本脚本在统一验证阶段等待每窗进程真实存活（AC1 要求「确认活着」而非「命令已发出」）。
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
@@ -82,20 +82,20 @@ if [ "${#POSITIONAL[@]}" -gt 2 ]; then
   exit 2
 fi
 ROOT="${POSITIONAL[0]:-$PWD}"
-LAYOUT="${POSITIONAL[1]:-inner/outer}"
+LAYOUT="${POSITIONAL[1]:-outer}"
 if [ ! -d "$ROOT" ]; then
   echo "ERROR: root is not a directory: $ROOT" >&2
   exit 2
 fi
 
-# ── 布局解析：/ 分隔的角色集，每个角色 ∈ manager|outer|inner，去重保留首次出现 ─────────────
+# ── 布局解析：/ 分隔的角色集，每个角色 ∈ manager|outer，去重保留首次出现 ─────────────
 LAYOUT_ROLES=()
 IFS='/' read -r -a _tokens <<<"$LAYOUT"
 for r in "${_tokens[@]:-}"; do
   [ -n "$r" ] || continue
   case "$r" in
-    manager|outer|inner) ;;
-    *) echo "ERROR: unknown layout role: '$r' (expected manager|outer|inner in <layout>, got '$LAYOUT')" >&2; exit 2 ;;
+    manager|outer) ;;
+    *) echo "ERROR: unknown layout role: '$r' (expected manager|outer in <layout>, got '$LAYOUT')" >&2; exit 2 ;;
   esac
   _dup=0
   for _e in "${LAYOUT_ROLES[@]:-}"; do [ "$_e" = "$r" ] && _dup=1; done
