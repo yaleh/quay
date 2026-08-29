@@ -24,11 +24,14 @@ SCD 族（`plugin/test/session-liveness-scd-*.test.mjs`，8 文件）是 KNOWN-L
 1. **`group_of()` 未定义 → 误判，已证伪**：`group_of` 定义在 `plugin/scripts/runner-grouping.ts:30`（`scripts/test.sh:807` `source` 引入，机械 fan-in 的 merge develop 已带入）。实测三态返回正确：engine → engine、lowconc → lowconc、serial → serial。当时 grep「全无」是只 grep 了 test.sh 本体、漏了 source 进的 `runner-grouping.ts`。AC5 单测已锁定真实 `group_of`（bash source + 调用，非复刻正则）。
 2. **suite 非零退出但 fail 0 → 误判，已证伪**：suite 是**真红**——serial 相 `session-liveness-events.test.mjs:407` AC2 失败（`quay-init --loop` 报 `referenced-not-landed` ×3，见下「实际阻塞」）。当时只看到 main 相 `ℹ fail 0 (5407 pass)` 而漏了 serial 相 `ℹ fail 1 (123 pass)`；退出码 1 **正确反映**该失败，无退出码 bug。AC6 单测锁定 bucket 退出码聚合（bucket_code=0 初值 + 三相非零合并 + `exit "${bucket_code}"`）。
 
-### 实际阻塞（非本任务范围，develop 已存在）
+### 实际阻塞（非本任务范围，develop 级，已由 develop 修复）
 
-fan-in 卡 suite red 的真实根因是【无关】的 quay-init 铺装完整性失败：`quay-init --loop` 报 `referenced-not-landed` ×3——
-`.claude/workflows/fan-in-execute.js`、`docs/analysis/fast-mode-loop-tick.md`、`orchestration/fast-mode-tick-core.md`
-（init/SKILL.md 缺对应 `<!-- reference-doc: <path> -->` 声明）。此失败 develop 已存在、非本任务 delta 引入（本任务只改 SCD 分类 + test.sh bucket 分相 + 单测）；同形已由 done 任务 `gap-merge-introduced-referenced-not-landed-manager-tick-log` 处置过一次（reference-doc 声明法）。属 quay-init 铺装声明，应另立案，不在本任务 SCD/bucket 隔离范围。
+fan-in 卡 suite red 的真实根因是【无关】的 develop 级 suite 失败，两条都非本任务 delta 引入（本任务只改 SCD 分类 + test.sh bucket 分相 + 单测）：
+
+1. **referenced-not-landed**：`quay-init --loop` 报 `referenced-not-landed`（`.claude/workflows/fan-in-execute.js`、`docs/analysis/fast-mode-loop-tick.md`、`orchestration/fast-mode-tick-core.md` 等——init/SKILL.md 缺对应 `<!-- reference-doc: <path> -->` 声明）。同形已由 done 任务 `gap-merge-introduced-referenced-not-landed-manager-tick-log` 处置过一次（reference-doc 声明法）。属 quay-init 铺装声明，应另立案，不在本任务 SCD/bucket 隔离范围。
+2. **reap-wait note 未发出**：`tmux-leak-scan.test.mjs` R2 在 16-lane 负载下 reap-wait 默认值过短，`97f0b4f05` 已改为宿主派生 `reap_wait_default`。亦属 develop 级，非本任务 delta。
+
+本轮 merge develop（`b12e4ab61`）已带入两条修复，实测复核：`quay-init --loop` 报 `verify-referenced-landed: OK`（exit 0）；`tmux-leak-scan.test.mjs` 7/7 绿（含 R2）。本任务不触碰 `plugin/skills/init/SKILL.md` / `plugin/scripts/tmux-leak-scan.sh`，Touches 不含二者。
 
 ## Acceptance Criteria
 
