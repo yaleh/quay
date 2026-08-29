@@ -267,76 +267,48 @@ test("Contract measure — --json emits surface_categories_covered + spec_is_liv
   assert.equal(json.categories.length, 6, "all six categories present in json output");
 });
 
-// ── AC1/AC2 (gap-delivery-outline-vs-verify-surface-single-source): delivery inventory ─────────────
-// AC1 — verify-delivery-surface is the SINGLE SOURCE for the plugin-bundle directory counts; the
-//       outline §6 carries a derived snapshot that `--inventory` validates. AC2 — outline drift is
-//       mechanically caught: a snapshot that disagrees with disk ⇒ inventory_drift reported + exit 1.
+// ── Delivery inventory (gap-delivery-inventory-check-time-computation): computed at check time ─────
+// The outline §6 DELIVERY-INVENTORY counts were a COMMITTED snapshot (scripts=N · …) that every
+// plugin/scripts A/D had to co-touch — a shared merge-conflict hotspot. The snapshot is REMOVED; the
+// counts are now COMPUTED AT CHECK TIME by `--inventory`, a REPORT (exit 0) rather than a drift check.
+// AC1 — outline §6 no longer carries a committed snapshot; AC4 — `--inventory` still yields the
+// delivery-surface summary (release/human audit: one command).
 
-test("AC1/AC2 — the real bundle inventory matches the outline §6 snapshot (--inventory exits 0)", async () => {
+test("compute-at-check-time — --inventory computes the eight delivery dirs and exits 0 (no snapshot)", async () => {
   const m = await mod();
   assert.ok(Array.isArray(m.DELIVERY_INVENTORY) && m.DELIVERY_INVENTORY.length >= 8,
     "the delivery inventory must cover the eight plugin-bundle directories");
   const r = runScript(["--inventory", "--root", REPO_ROOT]);
-  assert.equal(r.status, 0, `bundle inventory must be consistent:\n${r.stdout}`);
-  assert.match(r.stdout, /inventory_snapshot=present/, "outline §6 must carry the derived snapshot block");
-  assert.match(r.stdout, /inventory_drift=0/, "no inventory drift on the bundle root (AC2)");
+  assert.equal(r.status, 0, `--inventory must be a report that exits 0:\n${r.stdout}`);
+  assert.match(r.stdout, /inventory_snapshot=none/, "no committed snapshot — computed at check time");
+  for (const e of m.DELIVERY_INVENTORY) {
+    assert.match(r.stdout, new RegExp(`${e.name}=`), `the inventory must print the ${e.name} count`);
+  }
+  assert.doesNotMatch(r.stdout, /inventory_drift/, "a report has no drift line (no snapshot to drift against)");
 });
 
-test("AC2 control — a drifted outline snapshot is reported (--inventory exits 1, names the drifted dir)", async () => {
-  const m = await mod();
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), "l1-inv-drift-"));
+test("compute-at-check-time — --inventory counts disk entries (a dir with 2 files reports its count, exit 0)", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "l1-inv-compute-"));
   try {
-    for (const e of m.DELIVERY_INVENTORY) {
-      const p = path.join(base, e.dir);
-      fs.mkdirSync(p, { recursive: true });
-      fs.writeFileSync(path.join(p, "a.txt"), "");
-      fs.writeFileSync(path.join(p, "b.txt"), "");
-    }
-    // A snapshot block that claims scripts=999 while disk has 2 → drift on the scripts entry.
-    const outline = `# x\n\n${m.INV_BEGIN_MARKER}\nscripts=999 · skills=2\n${m.INV_END_MARKER}\n`;
-    const outlineFile = path.join(base, "docs", "proposals", "quay-product-outline.md");
-    fs.mkdirSync(path.dirname(outlineFile), { recursive: true });
-    fs.writeFileSync(outlineFile, outline);
+    fs.mkdirSync(path.join(base, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(base, "plugin", "scripts", "a.sh"), "");
+    fs.writeFileSync(path.join(base, "plugin", "scripts", "b.ts"), "");
     const r = runScript(["--inventory", "--root", base]);
-    assert.equal(r.status, 1, "a drifted outline snapshot must fail --inventory");
-    assert.match(r.stdout, /inventory_drift=1/, "drift count must be reported");
-    assert.match(r.stdout, /\[DRIFT\] scripts/, "the drifted dir must be named");
+    assert.equal(r.status, 0, `--inventory must exit 0 on a partial tree (a report, not a fail-closed check):\n${r.stdout}`);
+    assert.match(r.stdout, /scripts=2/, "the computed scripts count must reflect disk");
   } finally { rmrf(base); }
 });
 
-test("AC2 negative — --inventory fails closed when the outline §6 snapshot block is absent", async () => {
-  const m = await mod();
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), "l1-inv-missing-"));
-  try {
-    for (const e of m.DELIVERY_INVENTORY) {
-      fs.mkdirSync(path.join(base, e.dir), { recursive: true });
-      fs.writeFileSync(path.join(base, e.dir, "a.txt"), "");
-    }
-    // No outline at all → the derived snapshot is absent → AC1 violated → fail-closed.
-    const r = runScript(["--inventory", "--root", base]);
-    assert.equal(r.status, 1, "missing outline snapshot block must fail --inventory (AC1: outline must derive)");
-    assert.match(r.stdout, /inventory_snapshot=missing/, "must report the snapshot as missing");
-  } finally { rmrf(base); }
+test("AC1 — outline §6 no longer carries a committed DELIVERY-INVENTORY snapshot", () => {
+  const outline = fs.readFileSync(path.join(REPO_ROOT, "docs", "proposals", "quay-product-outline.md"), "utf8");
+  assert.doesNotMatch(outline, /<!-- DELIVERY-INVENTORY-BEGIN -->/, "the snapshot block must be gone");
+  assert.doesNotMatch(outline, /scripts=\d+/, "no hand-edited scripts=N token remains");
 });
 
-test("AC1 generation — --write-inventory regenerates the outline snapshot to match disk", async () => {
-  const m = await mod();
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), "l1-inv-write-"));
-  try {
-    for (const e of m.DELIVERY_INVENTORY) {
-      fs.mkdirSync(path.join(base, e.dir), { recursive: true });
-      fs.writeFileSync(path.join(base, e.dir, "a.txt"), "");
-    }
-    const outline = `# x\n\n${m.INV_BEGIN_MARKER}\nscripts=999\n${m.INV_END_MARKER}\n`;
-    const outlineFile = path.join(base, "docs", "proposals", "quay-product-outline.md");
-    fs.mkdirSync(path.dirname(outlineFile), { recursive: true });
-    fs.writeFileSync(outlineFile, outline);
-    const r = runScript(["--write-inventory", "--root", base]);
-    assert.equal(r.status, 0, "--write-inventory must exit 0");
-    assert.match(r.stdout, /inventory_drift=0/, "after regeneration the snapshot must match disk");
-    const after = fs.readFileSync(outlineFile, "utf8");
-    assert.match(after, /scripts=1/, "the regenerated snapshot must carry the disk count");
-  } finally { rmrf(base); }
+test("--write-inventory is retired (exit 2, points at --inventory)", () => {
+  const r = runScript(["--write-inventory", "--root", REPO_ROOT]);
+  assert.equal(r.status, 2, "--write-inventory must be retired (exit 2)");
+  assert.match(r.stderr, /retired/, "the retired message must name the retirement");
 });
 
 // ── LAID layout (gap-verify-delivery-surface-checks-source-layout-not-consumer-laid) ────────────────
@@ -430,102 +402,31 @@ test("Contract measure — a complete laid consumer emits an ok/PASS token the o
   } finally { rmrf(root); }
 });
 
-// ── AC2/AC4/AC5 (gap-inventory-drift-inner-exec-mode-report-missing-snapshot-regen) ────────────────
-// The 5th DELIVERY-INVENTORY drift: fan-in 27f44be5 added plugin/scripts/inner-exec-mode-report.ts but
-// the outline §6 snapshot was not regenerated (disk 182 vs snapshot 181) — the drift surfaced only at
-// the full-suite verification round, because no scoped/creation-time mechanism ran `--inventory` for a
-// NEW plugin/scripts file. AC2 wires the drift check into the SCOPED static tier (a new-script task
-// selects verify-delivery-surface --inventory), so a new script without snapshot regeneration turns
-// the scoped gate red at creation time. AC4 negative control: a correct snapshot never false-positives,
-// and only a NEW plugin/scripts touch selects the check. AC5: the five historical drift instances
-// (halt-check/spec-goal/accounting-emit/DIR-043/inner-exec-mode) are all present and drift-free.
+// ── selector wiring (gap-delivery-inventory-check-time-computation) ─────────────────────────────────
+// The DELIVERY-INVENTORY scoped drift check is RETIRED. A new plugin/scripts file no longer drifts a
+// committed snapshot (the inventory is computed at check time), so the scoped tier no longer selects a
+// `delivery-inventory` checker — but the capability-catalog AC1c gate for a new script REMAINS. AC5:
+// the five historical drift scripts still exist (regression guard that the retired drift's historical
+// surfaces stay put).
 
-test("AC2 — a new plugin/scripts file WITHOUT regenerating the snapshot ⇒ --inventory reports drift (scoped-tier fixture)", async () => {
-  const m = await mod();
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), "l1-inv-newscript-"));
-  try {
-    // Build all 8 inventory dirs with 1 file each, and a snapshot block that matches that disk state.
-    for (const e of m.DELIVERY_INVENTORY) {
-      const p = path.join(base, e.dir);
-      fs.mkdirSync(p, { recursive: true });
-      fs.writeFileSync(path.join(p, "a.txt"), "");
-    }
-    const outlineFile = path.join(base, "docs", "proposals", "quay-product-outline.md");
-    fs.mkdirSync(path.dirname(outlineFile), { recursive: true });
-    const block = m.DELIVERY_INVENTORY.map((e) => `${e.name}=1`).join(" · ");
-    fs.writeFileSync(outlineFile, `# x\n\n${m.INV_BEGIN_MARKER}\n${block}\n${m.INV_END_MARKER}\n`);
-    // The snapshot matches disk → clean.
-    const clean = runScript(["--inventory", "--root", base]);
-    assert.equal(clean.status, 0, `baseline must be drift-free:\n${clean.stdout}`);
-    // NOW the task adds a NEW plugin/scripts file but does NOT regenerate the snapshot — the exact
-    // 5th-drift shape. --inventory (the check AC2 wires into the scoped tier) must report drift.
-    fs.writeFileSync(path.join(base, "plugin", "scripts", "b.txt"), "");
-    const r = runScript(["--inventory", "--root", base]);
-    assert.equal(r.status, 1, "a new script without snapshot regeneration must fail --inventory (AC2 creation-time red)");
-    assert.match(r.stdout, /inventory_drift=1/, "drift count must be reported");
-    assert.match(r.stdout, /\[DRIFT\] scripts/, "the scripts dir must be named");
-  } finally { rmrf(base); }
-});
-
-test("AC4 — negative control: a snapshot that matches disk does NOT false-positive (--inventory exits 0)", async () => {
-  const m = await mod();
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), "l1-inv-correct-"));
-  try {
-    for (const e of m.DELIVERY_INVENTORY) {
-      const p = path.join(base, e.dir);
-      fs.mkdirSync(p, { recursive: true });
-      fs.writeFileSync(path.join(p, "a.txt"), "");
-    }
-    const outlineFile = path.join(base, "docs", "proposals", "quay-product-outline.md");
-    fs.mkdirSync(path.dirname(outlineFile), { recursive: true });
-    const block = m.DELIVERY_INVENTORY.map((e) => `${e.name}=1`).join(" · ");
-    fs.writeFileSync(outlineFile, `# x\n\n${m.INV_BEGIN_MARKER}\n${block}\n${m.INV_END_MARKER}\n`);
-    const r = runScript(["--inventory", "--root", base]);
-    assert.equal(r.status, 0, "a correct snapshot must not false-positive");
-    assert.match(r.stdout, /inventory_drift=0/);
-  } finally { rmrf(base); }
-});
-
-test("AC2 — a NEW plugin/scripts touch selects delivery-inventory in the SCOPED static tier (selector wiring)", async () => {
+test("a NEW plugin/scripts touch selects capability-catalog but NOT the retired delivery-inventory (selector wiring)", async () => {
   const sel = await import(path.join(REPO_ROOT, "plugin", "scripts", "select-static-checks-for-touches.ts"));
-  const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
-  const registry = sel.parseStaticCheckRegistry(testSh);
-  // A task declaring a NEW plugin/scripts file gets BOTH the capability-catalog AC1c gate (pre-existing)
-  // AND the delivery-inventory drift check (AC2 — the new wiring).
   const { selected } = sel.selectStaticChecksForTouches(
     ["tasks/foo.md", "plugin/scripts/new-helper.ts"],
-    registry,
+    [],
     { newTouches: ["plugin/scripts/new-helper.ts"] },
   );
-  assert.ok(selected.some((s) => s.name === "delivery-inventory"),
-    `delivery-inventory must be selected for a new plugin/scripts touch: ${selected.map((s) => s.name)}`);
-  const inv = selected.find((s) => s.name === "delivery-inventory");
-  assert.match(inv.commandLine, /verify-delivery-surface\.ts/, "the selected checker runs verify-delivery-surface");
-  assert.match(inv.commandLine, /--inventory/, "in --inventory mode");
   assert.ok(selected.some((s) => s.name === "capability-catalog"),
-    "capability-catalog must still be selected (AC3 — no regression on the existing mechanism)");
-});
-
-test("AC4 — a task with NO new plugin/scripts touch does NOT select delivery-inventory", async () => {
-  const sel = await import(path.join(REPO_ROOT, "plugin", "scripts", "select-static-checks-for-touches.ts"));
-  const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
-  const registry = sel.parseStaticCheckRegistry(testSh);
-  const { selected } = sel.selectStaticChecksForTouches(
-    ["tasks/foo.md", "plugin/test/foo.test.mjs"],
-    registry,
-    {}, // no newTouches — an existing-script task must not be gated by the inventory drift check
-  );
+    `capability-catalog must still be selected for a new plugin/scripts touch: ${selected.map((s) => s.name)}`);
   assert.ok(!selected.some((s) => s.name === "delivery-inventory"),
-    `an existing-script task must not select delivery-inventory: ${selected.map((s) => s.name)}`);
+    `delivery-inventory must NOT be selected (retired): ${selected.map((s) => s.name)}`);
 });
 
-test("AC5 — the five historical drift scripts exist and the real bundle snapshot is drift-free", async () => {
-  // The 5 prior instances each added a plugin/scripts file without regenerating the outline §6 snapshot
-  // (halt-check 175→176, spec-goal 176→178, accounting-emit 178→179, DIR-043 round-169, inner-exec-mode
-  // 181→182). Their scripts must all be present and the current bundle snapshot must match disk. The
-  // newer shipped scripts (tmp-leak-pairing-check + stale-ready-audit, added after the last snapshot
-  // regeneration) are legitimate shipped surfaces (declared in capability-catalog.sh at npm-pack-fix
-  // 07adf075) — they are listed here too so a future snapshot edit cannot silently drop them.
+test("AC5 — the five historical drift scripts exist and --inventory computes the current bundle", async () => {
+  // The 5 prior drift instances each added a plugin/scripts file without regenerating the outline §6
+  // snapshot (halt-check/spec-goal/accounting-emit/DIR-043/inner-exec-mode). The snapshot is now gone,
+  // but these shipped surfaces must stay put (regression guard against a future edit silently dropping
+  // them). --inventory must still compute the current bundle.
   const shipped = [
     "plugin/scripts/halt-check.sh",
     "plugin/scripts/accounting-emit.ts",
@@ -539,8 +440,7 @@ test("AC5 — the five historical drift scripts exist and the real bundle snapsh
     assert.ok(fs.existsSync(path.join(REPO_ROOT, rel)), `${rel} must exist (a shipped plugin/scripts surface)`);
   }
   const r = runScript(["--inventory", "--root", REPO_ROOT]);
-  assert.equal(r.status, 0, `real bundle must be drift-free:\n${r.stdout}`);
-  assert.match(r.stdout, /inventory_drift=0/, "bundle snapshot matches disk (no historical drift recurs)");
+  assert.equal(r.status, 0, `--inventory must compute the current bundle:\n${r.stdout}`);
 });
 
 // ── AC5: this file uses node:test with a governance group declaration (checked by policy) ─────────

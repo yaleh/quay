@@ -312,15 +312,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/obligation-ledger.ts plugin/scripts/obligation-ledger-check.ts plugin/scripts/obligation-discharge-agent.ts plugin/test/obligation-ledger.test.mjs plugin/test/obligation-ledger-check.test.mjs
   run_checker "obligation-ledger-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/obligation-ledger-check.ts" --root "${repo_root}"
-  echo "== delivery-inventory drift gate (gap-delivery-inventory-drift-needs-file-add-gate, AC2) =="
-  # The file-set change gate on the delivery-inventory snapshot (candidate B): `--diff-filter=AD` on plugin/scripts/ — git committed range + working-tree staged/unstaged/untracked — is the ONLY
-  # trigger; when it fires, the SAME change set must update docs/proposals/quay-product-outline.md
-  # §6 (the derived DELIVERY-INVENTORY snapshot). Content-only edits to existing scripts do NOT
-  # trigger (invariant content_only_change_skipped = 1). FAIL-closed: a plugin/scripts A/D without
-  # an outline update exits 1. 2026-08-10 red family (r216/r222/r223/r226/r248/r253) fixed at the
-  # root cause (7d2faf06 fixed the symptom only).
+  echo "== delivery-inventory drift gate (gap-drift-gate-covers-only-plugin-scripts-not-workflows, AC2) =="
+  # The file-set change gate on the plugin/workflows mirror: `--diff-filter=AD` on .claude/workflows/
+  # — git committed range + working-tree staged/unstaged/untracked — is the ONLY trigger; when it
+  # fires, the SAME change set must mirror into plugin/workflows/. Content-only edits to existing
+  # workflows do NOT trigger (invariant content_only_change_skipped = 1). FAIL-closed: a
+  # .claude/workflows A/D without a plugin/workflows mirror touch exits 1. The ORIGINAL trigger on
+  # the outline §6 DELIVERY-INVENTORY snapshot is RETIRED (gap-delivery-inventory-check-time-computation):
+  # the snapshot is now computed at check time by verify-delivery-surface.ts --inventory, so there is
+  # nothing for a plugin/scripts A/D to co-touch.
   # @static-tier change
-  # @static-object plugin/scripts/ docs/proposals/quay-product-outline.md
+  # @static-object .claude/workflows/ plugin/workflows/
   run_checker "delivery-inventory-drift-gate" bash "${repo_root}/plugin/scripts/delivery-inventory-drift-gate.sh" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
@@ -380,6 +382,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/orchestrator-tick-core.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md CLAUDE.md plugin/scripts/integration-branch-model.ts plugin/scripts/integration-batch-merge.sh orchestration/SPEC-branching-model-integration-branch-2026-08-05.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/retired-clause-check.ts plugin/scripts/checker-mutation-cases/retired-clause-check.sh plugin/test/retired-clause-check.test.mjs
   run_checker "retired-clause-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/retired-clause-check.ts" --root "${repo_root}"
+  echo "== outer-retirement-precondition check (gap-b0-retirement-precondition-checker-call-surface, SPEC §2.3b B0) =="
+  # B0 退役前置 (SPEC §2.3b): 退役 outer 前，枚举 outer 执行核 (orchestrator-tick-core.md) 直接引用的
+  # `-check.{ts,sh}` checker，逐个判定留存调用面（static-gate 注册表 / 外部代码引用，传递闭包）。
+  # 只被退役层引用（orphan）的 checker 必须带 RETIRED-WITH-RETIRING-LAYER 标记 = 显式退役；无标记 ⇒
+  # RED (exit 1, fail-closed) — 退役后静默孤儿被前置挡住。NOT-EVALUATED (exit 3) 当执行核缺失/零引用
+  # （独立取值，非通过，硬规则 3b/4）。负控制由 mutation case + 单测钉住。真实仓库当前 N=0
+  # （outer-anchor-check.ts 带标记）。whole-store 引用扫描 ⇒ full（scoped 模式推迟到 full-suite 门）。
+  # @static-tier full
+  run_checker "outer-retirement-precondition-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/outer-retirement-precondition-check.ts" --root "${repo_root}"
   echo "== ac61-staleness-disposition check (tasks/gap-ac61-staleness-list-item-disposition, AC61 判据1-3 + DoD 负控制) =="
   # AC61 清单逐条处置 enforcement: the task file's `## AC61 处置记录` section must carry a record for
   # EVERY A-1..A-7 / B-1..B-4 item (迁出带落点映射 或 经核实仍有效+读数). CHECK-A (判据1/DoD 负控):

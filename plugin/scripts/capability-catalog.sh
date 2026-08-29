@@ -126,6 +126,7 @@ declare -A QUESTION=(
   [blocked-signal-check.sh]="Is an un-consumed blocked signal auto-escalated after the timeout window (no indefinite inner freeze)?"
   [manager-adopt.sh]="Is a project adopted into the manager's scope (healthy → noop, empty-shell → drive, missing → build the two-window topology)?"
   [manager-arm-loop.sh]="Is the manager's scheduling anchor armed (sentinel-clean + idempotent, zero-memory executable)?"
+  [manager-liveness-independent-check.ts]="Is the manager itself alive on an INDEPENDENT channel — its heartbeat product (orchestration/manager-tick-log.md mtime, or a JSON heartbeat {ts}) fresh within T=3600s (3 × 20min ticks), else a notification fires carrying the failure mode (process-dead / interaction-blocked / heartbeat-stopped) so a manager disabled beyond T (AskUserQuestion 阻塞 / 心跳停 / 进程死) lets a human know without going through the manager (tasks/gap-ac147-manager-liveness-independent-channel)?"
   [manager-observation-runtime-check.ts]="Does the outer session's runtime behavior observe/check the manager (PANE / TICKLOG / transcript reads) in violation of C3's never-create/drive/check constraint?"
   [manager-start.sh]="What does the manager's own start command do, independent of any single project (identity = cross-project, its own session + home)?"
   [manager-tick-log-check.sh]="Did the manager's previous tick leave a row in the tick log (the mechanical 'last tick didn't log' detector)?"
@@ -178,7 +179,7 @@ declare -A QUESTION=(
   [dead-loop-check.sh]="Is a target project's loop alive or dead (L2 continuous-health: transcript user-msg or git commit window)?"
   [dead-loop-check.sh]="Is the loop ACTUALLY RUNNING (L2 continuous health) — a recent transcript user message or git commit in the last N minutes, INDEPENDENT of backlog emptiness (dead-loop vs healthy-idle)?"
   [derive-touches-heuristic.ts]="When a task body lacks a ## Touches section, what globs would a cheap scheduling-time heuristic derive for it?"
-  [delivery-inventory-drift-gate.sh]="Did this change ADD/DELETE a file under plugin/scripts/ WITHOUT updating the outline §6 DELIVERY-INVENTORY snapshot in the same change (the 2026-08-10 red family's root cause)?"
+  [delivery-inventory-drift-gate.sh]="Did this change ADD/DELETE a file under .claude/workflows/ WITHOUT mirroring it into plugin/workflows/ in the same change (gap-drift-gate-covers-only-plugin-scripts-not-workflows)?"
   [develop-deliver-tgz.sh]="After a develop merge, was a FRESH hardware-independent quay .tgz built at the develop tip and delivered+verified (quay serve http_code=200) on the verification machines B/C — DIR-123 每次 merge 后自动 deliver 机制?"
   [develop-work-ff.sh]="Does the doc-only work branch (the main checkout, develop detached) land back onto develop as a pure ref update (git push . — no working tree touched), mechanically refusing any CODE delta via --classify-delta (the 承重墙: the work branch may never carry code — a code delta would need a full suite, relocating every problem unchanged)?"
   [deliver-verify-usage.sh]="After a quay tgz install on a target machine, do the TOP-N real-use mechanisms (capability-catalog.sh + the offline-runnable subset of the three-layer-core-named scripts) each REALLY run — assert exit 0 + non-empty output — and does the negative control (deleting any verified script) make verification fail (AC92: the delivery verification surface must INTERSECT the actual usage surface, not just prove the port is alive)?"
@@ -404,6 +405,7 @@ declare -A QUESTION=(
   [workflows-dual-copy-drift-check.ts]="Are the five dual-copy workflow files (drain-directives / fan-in-execute / run-routines / execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped orchestrator-tick-core.md references them, so the plugin/workflows/ mirror must carry them) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships to installed targets) — a one-sided edit (改正本而落地副本不跟, the A6/fan-in-execute.js class) must go RED, the current byte-identical state GREEN (gap-workflows-dual-copy-drift-unchecked)?"
   [promotion-driver.ts]="Is the todo→ready promotion applied mechanically every round — a resident loop that calls ready-pool-check for the full-pool verdict and lands eligible promotions (zero LLM), and calls the supervisor/driver liveness check each round (gap-resident-driver-stable-carrier-liveness AC2 death-alarm caller), rather than role-will that vanishes when the session or model changes?"
   [outer-driver.ts]="Does the outer's pure-mechanical A/B segments (A1/A3/A6/A9/A10/A18/A21 readings · B1/B2/B6 closing traces · B12/B17 self-audit) get absorbed into a resident routine-type driver — a resident loop that runs the routine table each round and writes structured Facts (verified/not-evaluated/failed) to .quay/outer-round.jsonl, where each routine that cannot read its input reports not-evaluated (⛔ not verified, AC153 Layer 1b form), rather than role-will that vanishes when the outer session or model changes (AC143)?"
+  [outer-retirement-precondition-check.ts]="Before retiring the outer layer, does every checker the outer execution core (orchestrator-tick-core.md) directly references — the plugin/scripts/*-check.{ts,sh} set — have a surviving call surface (static-gate registry, or an external executable carrier referencing it at a code position, transitive closure), so a checker referenced ONLY by the retiring layer is flagged unless its file carries the explicit RETIRED-WITH-RETIRING-LAYER disposition (SPEC §2.3b B0, gap-b0-retirement-precondition-checker-call-surface)?"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
@@ -540,6 +542,7 @@ declare -A CADENCE=(
   [loop-shipping-exclusion-data.mjs]="按需"
   [manager-adopt.sh]="每轮"
   [manager-arm-loop.sh]="每轮"
+  [manager-liveness-independent-check.ts]="按需"
   [manager-observation-runtime-check.ts]="每轮"
   [manager-start.sh]="每轮"
   [manager-tick-log-check.sh]="每轮"
@@ -701,6 +704,7 @@ declare -A CADENCE=(
   [workflows-dual-copy-drift-check.ts]="每轮"
   [promotion-driver.ts]="按需"
   [outer-driver.ts]="按需"
+  [outer-retirement-precondition-check.ts]="每轮"
 
 )
 
@@ -755,7 +759,7 @@ declare -A INVALIDATION=(
   [dead-code-after-return-check.ts]="无可测前提，靠周期复核"
   [dead-loop-check.sh]="无可测前提，靠周期复核"
   [derive-touches-heuristic.ts]="无可测前提，靠周期复核"
-  [delivery-inventory-drift-gate.sh]="失效前提：outline §6 DELIVERY-INVENTORY 仍是 verify-delivery-surface --inventory 的派生快照且 plugin/scripts 仍按目录计数；若计数改为单一打包产物/取消目录计数，本条退休"
+  [delivery-inventory-drift-gate.sh]="失效前提：.claude/workflows/ 仍是 canonical 源且 plugin/workflows/ 是其 byte-identical 分布镜像（M143/AC9/C6 逐字节校）；若取消双副本/镜像约定，本条退休（outline §6 快照触发已于 2026-08-29 退休——inventory 改 check 时现算）"
   [develop-deliver-tgz.sh]="失效前提：投递面仍为 B/C 两台 ssh 可达的验证机且 quay 仍以硬件无关 .tgz 分发；若投递面迁出 ssh/tmux 协议或产物改回 arch-bound SEA，本条退休"
   [develop-work-ff.sh]="失效前提：主检出仍停 doc-only 工作分支、develop 仍须脱离主检出靠 ref 更新落地 .md 编辑（ff 改回 merge --ff-only 即本条失去对象）；若主检出改回停 develop 或 doc-only 工作分支机制整体退役，本条退休"
   [deliver-verify-usage.sh]="失效前提：plugin/scripts 仍以目录内可独立调用的 .sh/.js 机件形式交付且三层执行核仍直接点名其中的机件；若交付形式改为单一打包产物/核不再点名机件，本条退休"
@@ -838,6 +842,7 @@ declare -A INVALIDATION=(
   [loop-shipping-exclusion-data.mjs]="无可测前提，靠周期复核"
   [manager-adopt.sh]="无可测前提，靠周期复核"
   [manager-arm-loop.sh]="无可测前提，靠周期复核"
+  [manager-liveness-independent-check.ts]="无可测前提，靠周期复核"
   [manager-observation-runtime-check.ts]="无可测前提，靠周期复核"
   [manager-start.sh]="无可测前提，靠周期复核"
   [manager-tick-log-check.sh]="无可测前提，靠周期复核"
@@ -999,6 +1004,7 @@ declare -A INVALIDATION=(
   [workflows-dual-copy-drift-check.ts]="失效前提：workflow 双副本结构仍存在（.claude/workflows/ 与 plugin/workflows/ 各有一份同一文件）；若双副本结构取消（同一文件只在一处），本条退休"
   [promotion-driver.ts]="失效前提：todo→ready 晋升仍经 ready-pool-check --apply 全池判定；若晋升并入别处（如 outer tick 内联）或 ready-pool-check 全池模式退役，本条退休"
   [outer-driver.ts]="失效前提：outer 会话的纯机械 A/B 段仍需一个常驻机械进程承接（读数/收尾/自查），且例程型 driver（Layer 0+1b）仍是其承载；若 outer 会话退役后这些段也随会话消失（不再需要机械承接）或例程型承载迁出（如并入 manager 会话），本条退休"
+  [outer-retirement-precondition-check.ts]="失效前提：outer 执行核（orchestrator-tick-core.md）仍是退役前 checker 调用面的枚举正本，且 static-gate 注册表（runner-static-gate.ts）仍是「留存调用面」的判定来源之一；若执行核退役后本前置随之退役（其使命就是退役那一步的前置），或 checker 留存调用面的判定改由别的正本承载，本检查退休"
 
 )
 
@@ -1053,7 +1059,7 @@ declare -A LAST_REAFFIRMED=(
   [dead-code-after-return-check.ts]="2026-08-10"
   [dead-loop-check.sh]="2026-08-10"
   [derive-touches-heuristic.ts]="2026-08-10"
-  [delivery-inventory-drift-gate.sh]="2026-08-10"
+  [delivery-inventory-drift-gate.sh]="2026-08-29"
   [develop-deliver-tgz.sh]="2026-08-11"
   [develop-work-ff.sh]="2026-08-27"
   [deliver-verify-usage.sh]="2026-08-16"
@@ -1136,6 +1142,7 @@ declare -A LAST_REAFFIRMED=(
   [loop-shipping-exclusion-data.mjs]="2026-08-10"
   [manager-adopt.sh]="2026-08-10"
   [manager-arm-loop.sh]="2026-08-10"
+  [manager-liveness-independent-check.ts]="2026-08-28"
   [manager-observation-runtime-check.ts]="2026-08-10"
   [manager-start.sh]="2026-08-10"
   [manager-tick-log-check.sh]="2026-08-10"
@@ -1297,6 +1304,7 @@ declare -A LAST_REAFFIRMED=(
   [workflows-dual-copy-drift-check.ts]="2026-08-14"
   [promotion-driver.ts]="2026-08-22"
   [outer-driver.ts]="2026-08-26"
+  [outer-retirement-precondition-check.ts]="2026-08-28"
 
 )
 
@@ -1434,6 +1442,7 @@ declare -A MATCHING=(
   [loop-shipping-exclusion-data.mjs]="n/a"
   [manager-adopt.sh]="keyword"
   [manager-arm-loop.sh]="keyword"
+  [manager-liveness-independent-check.ts]="n/a"
   [manager-observation-runtime-check.ts]="keyword"
   [manager-start.sh]="keyword"
   [manager-tick-log-check.sh]="keyword"
@@ -1595,6 +1604,7 @@ declare -A MATCHING=(
   [workflows-dual-copy-drift-check.ts]="enumerative"
   [promotion-driver.ts]="n/a"
   [outer-driver.ts]="n/a"
+  [outer-retirement-precondition-check.ts]="enumerative"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1656,6 +1666,7 @@ declare -A CONSUMER=(
   [pre-verified-round-record.ts]="谁按：fan-in-execute workflow step 4.5 的 # preverified-round-block 在 full_suite_ran=true 时按（AC1/AC2 共用 writer，preverified 布尔由 suite_preverified 标记决定：1=pre-verified 复用，0=本 fan-in 真跑）；条件=fan-in 的 suite 走了本 workflow 内 detached 直跑或 pre-verified 复用（不经 full-suite-runner）要写 verification-round 记录到共享 checkout"
   [mirror-full-suite-state.ts]="谁按：fan-in-execute workflow step 4.5 的 # mirror-state-block 在 full_suite_ran=true 时按（AC1/AC3 writer）；条件=fan-in 的 suite 走了本 workflow 内 detached 直跑或 pre-verified 复用（不经 full-suite-runner）要 mirror-write full-suite-state.json 到共享 checkout"
   [mirror-measure-history.ts]="谁按：fan-in-execute workflow step 4.5 的 # mirror-history-block 在 full_suite_ran=true 时按（AC1/AC3 writer）；条件=fan-in 的 suite 走了本 workflow 内 detached 直跑或 pre-verified 复用（不经 full-suite-runner）要 mirror-append measure-history.jsonl 到共享 checkout"
+  [manager-liveness-independent-check.ts]="谁按：不经过 manager 的独立调度者（worker-driver 协调循环 / OS 定时 / 人在怀疑 manager 失能时）按下；条件=要判 manager 是否失能（交互阻塞/心跳停/进程死）超 T（3600s）并产通知让人知道——被计量对象（manager）不参与判定（hard rule 4b）"
   [suite-bucket-attribution.ts]="谁按：AC121-125 分桶执行启用后的派发/执行核在按变更选桶时按；条件=要判定本轮该跑哪几桶（P/S/M 归属，跨桶计入两边，UNRESOLVED 不静默归桶）"
   [suite-bucket-hub-list.ts]="谁按：AC121-125 分桶执行启用后的派发/执行核在按变更选桶前按；条件=要判本轮该跑全量还是按桶扇出（触及枢纽文件⇒无条件全量，不精算扇出）"
   [suite-bucket-select.ts]="谁按：AC124 启用后 full-suite-runner.ts --buckets / scripts/test.sh --buckets 在按变更选桶时按；条件=要判本轮跑全量还是按桶子集（枢纽⇒全量；否则触发桶∩测试桶集合，UNRESOLVED 恒入选）并产出选中的测试文件清单"
@@ -1698,6 +1709,7 @@ declare -A CONSUMER=(
   [worker-driver.ts]="谁按：inner 派发器在要驱动单个 claude -p worker 跑完整任务时按（AC115 阶段 1 显式 --task）；条件=任务要被机械驱动跑完 select→worktree→develop→suite→ff 并落盘结构化 outcome 到 .quay/worker-outcome.jsonl"
   [promotion-driver.ts]="谁按：outer 生产部署启动命令按（常驻进程，promotion-driver.ts 头注释「生产部署时由 outer 的启动命令传 --interval 覆盖」——接线为 AC130 后续/独立任务，本任务只做常驻循环这一半）；条件=生产部署启动常驻进程"
   [outer-driver.ts]="谁按：outer 退役过渡期由 outer/manager 的启动命令起常驻进程（quay driver start --kind outer）承接 outer 纯机械 A/B 段，或 fan-in 验证轮跑 --once 冒烟；条件=outer 的机械 A/B 段需要机械承接（读→报→写载体）"
+  [outer-retirement-precondition-check.ts]="谁按：run_static_checks 每轮自动按（runner-static-gate.ts @static-tier full，全量套件 code-class gate）；条件=退役 outer 前必须跑（前置检查是退役的必须步骤，SPEC §2.3b B0）——全量套件接线保证不靠会话意志"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the
