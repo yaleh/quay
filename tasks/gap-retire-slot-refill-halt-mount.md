@@ -2,7 +2,7 @@
 id: gap-retire-slot-refill-halt-mount
 title: 退役 slot-refill.ts 的 .halt 挂载（checkHaltSentinel + should_refill 耦合）与
   slot-free-trigger.ts 对它的 import——inner 旧派发环死层，.halt 状态信号由 outer A3 直读保留
-status: ready
+status: done
 labels:
   - gap
   - mechanism
