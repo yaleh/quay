@@ -1,7 +1,7 @@
 ---
 id: gap-loop-driver-check-ac7-halt-retired-stale-assert
 title: loop-driver-check AC7 断言已退役的 .halt print（head -c 80）→ develop 全库红挡所有 full-suite fan-in
-status: ready
+status: done
 labels:
   - gap
   - defect
