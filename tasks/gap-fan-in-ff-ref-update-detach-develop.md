@@ -2,7 +2,7 @@
 id: gap-fan-in-ff-ref-update-detach-develop
 title: fan-in 目标 develop 脱离主检出——ff 改纯 ref 更新（脏树结构上无关），doc-only 工作分支，架构级替代
   449f111e 的 pre-flight 旁路
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
