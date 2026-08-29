@@ -44,3 +44,9 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 - plugin/test/adr016-screen-use-check.test.mjs（迁移测试）
 - plugin/test/checker-driver-result-ratchet-check.test.mjs (new)（棘轮负控制测试）
 - tasks/gap-b4-checker-reuse-driver-result.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T19:39:17.849Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
