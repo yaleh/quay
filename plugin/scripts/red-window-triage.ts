@@ -40,6 +40,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { scanFamily, kindForFile, isFamilyMember, findRepoRoot } from "./known-load-sensitive.ts";
+import { writeJsonAtomic } from "./write-json-atomic.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -161,8 +162,7 @@ function readState(file) {
 }
 
 function writeState(file, state) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n", "utf8");
+  writeJsonAtomic(file, state);
 }
 
 function getArgValue(args, name) {

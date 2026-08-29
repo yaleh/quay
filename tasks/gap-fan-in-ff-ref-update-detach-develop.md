@@ -2,7 +2,7 @@
 id: gap-fan-in-ff-ref-update-detach-develop
 title: fan-in 目标 develop 脱离主检出——ff 改纯 ref 更新（脏树结构上无关），doc-only 工作分支，架构级替代
   449f111e 的 pre-flight 旁路
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -96,3 +96,9 @@ ff 以 dual-mode 落地（develop 仍检出 ⇒ `git merge --ff-only`；已脱�
 - plugin/test/fan-in-ff-executor-check.test.mjs（ff-retry 惰性增量测试随 develop 脱离改写）
 - docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts 计数 +1）
 - tasks/gap-fan-in-ff-ref-update-detach-develop.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T16:11:38.880Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

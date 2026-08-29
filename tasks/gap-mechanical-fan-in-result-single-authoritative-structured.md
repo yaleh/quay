@@ -2,7 +2,7 @@
 id: gap-mechanical-fan-in-result-single-authoritative-structured
 title: 机械 fan-in 结果单一权威结构化——final_state 从 ff 结果派生（不重读主检出陈旧 status）、reason 结构化
   verdict（不裸流）、suite 状态单一真源（D5/D6/D7 同根）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -34,9 +34,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（D5，能取假，读生产载体）：在一条 `mfi.outcome=landed` 且 `landedSha` 是 develop tip/祖先的落地记录上，`final_state` = `completed`（不是 `exited-not-landed`）。构造「主检出停 doc-only 分支、不 sync」的负例仍判 landed（验证不再依赖主检出分支）。
-- [ ] AC2（D6，能取假，读生产载体）：`worker-outcome.jsonl` 中 `mechanical_fan_in.step` ∈ {scoped-gate, anti-drift} 的失败记录，其 reason 含结构化 verdict（step/verdict/exitCode/summary/logFile），且不含 MODULE_TYPELESS 噪声；能从记录定位「哪个测试失败」。
-- [ ] AC3（D7，能取假，读生产载体）：机械 fan-in 的 suite 运行后，权威 suite 状态载体的 finishedAt 与 `mfi.suiteFinishedEpoch` 一致（不再 28h 陈旧）；且 bucket-run 与 full-run 的结果在载体上可区分（不把 bucket-green 伪造成 full-green）。
+- [ ] AC1（D5，能取假，读生产载体）：在一条 `mfi.outcome=landed` 且 `landedSha` 是 develop tip/祖先的落地记录上，`final_state` = `completed`（不是 `exited-not-landed`）。构造「主检出停 doc-only 分支、不 sync」的负例仍判 landed（验证不再依赖主检出分支）。（待外部）
+- [ ] AC2（D6，能取假，读生产载体）：`worker-outcome.jsonl` 中 `mechanical_fan_in.step` ∈ {scoped-gate, anti-drift} 的失败记录，其 reason 含结构化 verdict（step/verdict/exitCode/summary/logFile），且不含 MODULE_TYPELESS 噪声；能从记录定位「哪个测试失败」。（待外部）
+- [ ] AC3（D7，能取假，读生产载体）：机械 fan-in 的 suite 运行后，权威 suite 状态载体的 finishedAt 与 `mfi.suiteFinishedEpoch` 一致（不再 28h 陈旧）；且 bucket-run 与 full-run 的结果在载体上可区分（不把 bucket-green 伪造成 full-green）。（待外部）
 
 ## Definition of Done
 

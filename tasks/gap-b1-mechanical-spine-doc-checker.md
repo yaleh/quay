@@ -1,7 +1,7 @@
 ---
 id: gap-b1-mechanical-spine-doc-checker
 title: B1·层 1 机械脊柱写成文档+检查器（exit 0/1/2 语义 + --json 输出契约，不符者 N→0）
-status: ready
+status: needs-human
 labels:
   - gap
   - feature

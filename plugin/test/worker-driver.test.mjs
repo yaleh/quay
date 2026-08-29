@@ -99,7 +99,10 @@ import {
   parseMaxRetries,
   acquireFanInWorkflowLock,
   fanInWorkflowLockFile,
+  extractFailureSummary,
+  mirrorMechanicalFanInSuiteState,
 } from "../scripts/worker-driver.ts";
+import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 // gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
 // 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
 import { advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, applyTaskFilters, makeFilterContext } from "../scripts/driver-filters.ts";
@@ -340,6 +343,110 @@ test("computeLandingState — DriverResult 三态：verified = status=done ∧ �
   assert.equal(refuted.state, "failed", "status=ready 可读 ⇒ 证伪（⛔ 不因 worktree 读不懂降为 not-evaluated）");
   assert.match(refuted.reason, /status=ready/);
   fs.rmSync(nonGit, { recursive: true, force: true });
+});
+
+// ── gap-mechanical-fan-in-result-single-authoritative-structured：D5/D6/D7 ───────────────────────────
+// runMechanicalFanIn 结果成为「这次 fan-in 发生了什么」的单一权威结构化记录：final_state（D5）/ reason
+// （D6）/ suite 状态（D7）三处下游全部从它派生，⛔ 不再投影到有损/陈旧的 ad-hoc 载体。
+
+test("D5 — computeLandingState(root, task, landedSha) derives landing from ff result (⛔ not stale main-checkout status)", (t) => {
+  const root = makeGitRoot("d5");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // develop 上 task 已 done（机械 fan-in 已 flip+ff）……
+  writeTaskFile(root, "gap-d5", "done");
+  runGit(root, ["branch", "develop"]);
+  const landedSha = runGit(root, ["rev-parse", "develop"]).trim();
+  // ……而主检出停在 doc-only 工作分支、status 仍 ready（合法滞后 develop，⛔ 不 sync）。
+  runGit(root, ["checkout", "-q", "-b", "doc-only"]);
+  fs.writeFileSync(path.join(root, "tasks", "gap-d5.md"), "---\nid: gap-d5\nstatus: ready\n---\n\n## Proposal\n\nbody\n", "utf8");
+  runGit(root, ["add", "tasks/gap-d5.md"]);
+  runGit(root, ["commit", "-q", "-m", "doc-only stale ready"]);
+
+  // 前置：读主检出 status = ready ⇒ 旧判据据此判 exited-not-landed（这正是 D5 的假负例）。
+  assert.equal(readTaskStatus(root, "gap-d5"), "ready", "precondition: main checkout (doc-only) still stale ready");
+  const old = computeLandingState(root, "gap-d5");
+  assert.equal(old.state, "failed", "precondition: without landedSha, the stale status ⇒ failed (the D5 bug)");
+
+  // 修后：传 landedSha（develop tip）⇒ 从 ff 结果派生，⛔ 不再读主检出 stale status ⇒ verified。
+  const derived = computeLandingState(root, "gap-d5", landedSha);
+  assert.equal(derived.state, "verified", "D5: landedSha is develop tip + no leftover worktree ⇒ verified (⛔ not exited-not-landed)");
+  assert.match(derived.verifiedBy, /landedSha/, "D5: verified reason names the ff-result-derived judge");
+
+  // 负控制 1：landedSha 是【有效】提交但不在 develop 历史 ⇒ failed（证伪，⛔ 不因读不懂降 not-evaluated）。
+  const bogus = runGit(root, ["commit-tree", `${landedSha}^{tree}`, "-m", "bogus not-on-develop"]).trim();
+  const notAncestor = computeLandingState(root, "gap-d5", bogus);
+  assert.equal(notAncestor.state, "failed", "D5: landedSha not develop tip/ancestor ⇒ failed");
+  assert.match(notAncestor.reason, /not develop tip\/ancestor/);
+
+  // 负控制 2：landedSha 是祖先但仍残留 worktree ⇒ failed。
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-d5", wtPath]);
+  const leftover = computeLandingState(root, "gap-d5", landedSha);
+  assert.equal(leftover.state, "failed", "D5: landedSha ancestor but leftover worktree ⇒ failed");
+  assert.match(leftover.reason, /leftover worktree/);
+  runGit(root, ["worktree", "remove", "--force", wtPath]);
+});
+
+test("D6 — extractFailureSummary strips MODULE_TYPELESS noise + keeps the failing test name (⛔ raw stream dump)", () => {
+  const noisy = [
+    "refresh-worktree-quay: copied 499 file(s) from /x/.quay",
+    "(node:1978230) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///x.ts is not specified...",
+    "Reparsing as ES module because module syntax was detected. This incurs a performance overhead.",
+    'To eliminate this warning, add "type": "module" to /x/package.json.',
+    "(Use `node --trace-warnings ...` to show where the warning was created)",
+    "not ok 1 - my-flaky-test",
+    "  ---",
+    "  expected: 'a'",
+    "  actual:   'b'",
+    "# fail 1",
+  ].join("\n");
+  const summary = extractFailureSummary(noisy);
+  assert.doesNotMatch(summary, /MODULE_TYPELESS/, "D6: summary must NOT carry MODULE_TYPELESS noise");
+  assert.match(summary, /not ok 1 - my-flaky-test/, "D6: summary keeps the failing test name (能定位「哪个测试失败」)");
+  assert.match(summary, /expected: 'a'/, "D6: summary keeps the assertion diff (定位失败)");
+  // 纯噪声 / 空输入 ⇒ 空串（调用方回退 `exit <code>`，⛔ 不伪造）。
+  assert.equal(extractFailureSummary(""), "");
+  assert.equal(extractFailureSummary("(node:1) [MODULE_TYPELESS_PACKAGE_JSON] Warning: x\nReparsing as ES module..."), "");
+});
+
+test("D6 — fail 产出结构化 verdict（step/verdict/exitCode/summary/logFile），⛔ 不再 (stderr||stdout).trim() 裸流", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  assert.match(src, /verdict: \{ step, verdict: "failed", exitCode, summary, logFile \}/, "D6: verdictOf produces the structured per-step verdict");
+  assert.match(src, /reason: summary/, "D6: reason is the summary projection (⛔ not the raw stream)");
+  assert.doesNotMatch(src, /\(a\.stderr \|\| a\.stdout \|\| ""\)\.trim\(\)/, "D6: the raw (stderr||stdout).trim() dump is gone");
+  assert.match(src, /extractFailureSummary\(combined\)/, "D6: summary extracted via the noise-stripping pure fn");
+});
+
+test("D7 — mirrorMechanicalFanInSuiteState writes full-suite-state.json (finishedAt == suiteFinishedEpoch, scope=worktree, taskId)", (t) => {
+  const root = makeRoot("d7");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const stateFile = path.join(root, ".quay", "full-suite-state.json");
+  const finishedAt = "2026-08-29T06:00:00.000Z";
+
+  mirrorMechanicalFanInSuiteState({
+    task: "gap-d7", runId: "mf-run-d7", commit: "0".repeat(40),
+    startedAt: "2026-08-29T05:59:00.000Z", finishedAt, durationMs: 60000,
+    stateFile,
+  });
+  const st = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(st.state, "green");
+  assert.equal(st.finishedAt, Math.floor(Date.parse(finishedAt) / 1000), "D7: finishedAt is epoch of sr.finishedAt (=== mfi.suiteFinishedEpoch, ⛔ not 28h stale)");
+  assert.equal(st.scope, "worktree", "D7: bucket run scope=worktree (⛔ not full-run scope=main)");
+  assert.equal(st.taskId, "gap-d7", "D7: taskId set — bucket-run traceability (⛔ not a full-run fabrication)");
+  assert.equal(st.runId, "mf-run-d7");
+  assert.equal(st.runner, "inner");
+  assert.equal(st.laneCount, defaultLaneCount(), "D7: laneCount is nproc-derived (defaultLaneCount) — ⛔ not the literal 1 (concurrency-literal-check P4 violation)");
+
+  // in-flight guard：权威载体停在 running（finishedAt null）⇒ 不覆盖（shouldSkipMirrorWrite）。
+  fs.writeFileSync(stateFile, JSON.stringify({ state: "running", finishedAt: null }), "utf8");
+  mirrorMechanicalFanInSuiteState({
+    task: "gap-d7", runId: "mf-run-d7", commit: "0".repeat(40),
+    startedAt: "2026-08-29T05:59:00.000Z", finishedAt, durationMs: 60000,
+    stateFile,
+  });
+  const still = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(still.state, "running", "D7: in-flight full-suite state (finishedAt null) is NOT clobbered");
 });
 
 test("computeOutcome — non-zero ⇒ failed; signal ⇒ killed; timedOut ⇒ timed-out (AC3 终态/失败原因)", () => {
