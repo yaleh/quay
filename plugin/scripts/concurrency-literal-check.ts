@@ -65,7 +65,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildNonCodeMask, isRegexStart } from "./checker-lib.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 
 /** Concurrency keywords carried by a value's identifier (P1) or key (P4) — the structural signal
  *  that a numeric literal is a CONCURRENCY value (并发数/槽数/lane 数), as opposed to a timeout,
@@ -376,6 +376,7 @@ function resolveRoot(rootArg: string | undefined): string {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit(usage);
   const flagVal = (name: string) => {
     const i = args.indexOf(name);
     return i !== -1 ? args[i + 1] : undefined;

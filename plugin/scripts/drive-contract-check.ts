@@ -41,7 +41,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib — 按位置不按关键词。
 import { matchAtCommandPosition, hasMatchAtCommandPosition } from "./checker-lib.ts";
 
@@ -130,6 +130,7 @@ function usage(): never {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node drive-contract-check.ts [--root <dir>] [--judge <path>] [--json]");
   const asJson = args.includes("--json");
   const rootArg = args.indexOf("--root");
   const root = path.resolve(rootArg !== -1 ? args[rootArg + 1] : process.cwd());

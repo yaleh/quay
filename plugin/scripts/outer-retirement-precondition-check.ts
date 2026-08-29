@@ -347,6 +347,13 @@ function parseArg(argv: string[], name: string): string | undefined {
 }
 
 export function main(argv: string[]): number {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    process.stdout.write(
+      `outer-retirement-precondition-check.ts — 退役前置检查：枚举 outer 执行核直接引用的 checker，判定每个是否有留存调用面（只被退役层引用的 orphan 须带 ${RETIRED_MARKER} 标记）。
+usage: node --experimental-strip-types plugin/scripts/outer-retirement-precondition-check.ts [--root <dir>] [--json]\n`,
+    );
+    return 0;
+  }
   const root = path.resolve(parseArg(argv, "--root") ?? DEFAULT_ROOT);
   const json = argv.includes("--json");
 

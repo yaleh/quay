@@ -41,7 +41,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // The ONE Touches parser — extract the `## Touches` section the same way every other consumer does.
 import { extractTouchesSection } from "./touches-parser.ts";
 
@@ -259,6 +259,7 @@ function usage() {
 
 export function main(argv) {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: touches-one-entry-one-path-check.ts --root <repo-root>");
   let root = null;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") { root = args[++i]; continue; }

@@ -15,8 +15,10 @@
 // Coverage map (task ACs):
 //   AC1 — preempt(target) exists and is a stop signal at ANY execution point; the negative
 //         control "halt 后不再产生新 subagent" (process-level count does not grow) is tested.
-//   AC2 — `.halt` enforcement moved to code: the slot-refill dispatch recommender is blocked
-//         (should_refill=false) when `.halt` is present — a mechanical mount point, mid-flow.
+//   AC2 — RETIRED (gap-retire-slot-refill-halt-mount): the slot-refill `.halt` dispatch mount
+//         (should_refill=false) was removed — the inner dispatch loop is dead; the `.halt` state
+//         signal survives via supervisor-preempt.sh (this preempt primitive) + manager-tick-readings.ts
+//         (manager cross-project halt observation).
 //   AC4 — `claude -p` form: preempt of a PID = `kill <pid>` (the OS is the preemption primitive).
 //   AC5 — node:test + // @test-group governance.
 //
@@ -32,7 +34,6 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "supervisor-preempt.sh");
-const SLOT_REFILL = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
 
 if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
   test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
@@ -183,104 +184,6 @@ test("AC1: preempt-all with .halt but no resolvable targets fails loud (did not 
     const r = runPreempt(["preempt-all", "--root", root]);
     assert.equal(r.status, 1);
     assert.match(r.stderr, /no targets\/pids resolved to signal/);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-// ── AC2: .halt mechanical mount point in the dispatch recommender (slot-refill) ───────────────────
-
-function writeDispatchableTask(root, id) {
-  const body = [
-    "---",
-    `id: ${id}`,
-    `title: fixture ${id}`,
-    "status: ready",
-    "labels:",
-    "  - gap",
-    "parent: null",
-    "extra:",
-    "  schema: v1",
-    "---",
-    "",
-    "**type:** execution",
-    "## Proposal",
-    "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
-    "## Touches",
-    `- tasks/${id}.md`,
-    `- code/${id}.ts (new)`,
-    "## Acceptance Criteria",
-    "- [ ] an AC item",
-    "## Definition of Done",
-    "standard DoD",
-  ].join("\n");
-  fs.writeFileSync(path.join(root, "tasks", `${id}.md`), body, "utf8");
-}
-
-function slotRefill(root) {
-  // AC115 (SPEC-worker-driven-inner §5 阶段 1): slot-refill's --in-flight/--running param passing
-  // is RETIRED — the in-flight count is now the worker driver's DIRECT child-process count. A bare
-  // invocation reports measurement_source="not-measured" and NULLS the slot family (fail-closed),
-  // which would break these .halt assertions (they need a measured 0-in-flight view). The .halt
-  // mechanism under test is orthogonal to in-flight measurement, so pass an explicit --in-flight-count 0
-  // (the driver's count when nothing is driven) to exercise the .halt mount point directly.
-  const r = spawnSync(
-    "node",
-    ["--experimental-strip-types", SLOT_REFILL, "--root", root, "--cap", "3", "--in-flight-count", "0"],
-    { encoding: "utf8" }
-  );
-  assert.equal(r.status, 0, `slot-refill exit 0 (stderr: ${r.stderr})`);
-  return JSON.parse(r.stdout);
-}
-
-test("AC2: .halt present ⇒ slot-refill (dispatch recommender) is blocked mid-flow, should_refill=false", () => {
-  const root = makeRoot();
-  try {
-    writeDispatchableTask(root, "gap-halt-a");
-    // Control: no .halt → would dispatch.
-    const r1 = slotRefill(root);
-    assert.equal(r1.halted, false);
-    assert.equal(r1.should_refill, true, "a dispatchable candidate and free slots ⇒ refill (control)");
-    // Place .halt → mechanically blocked, regardless of free slots/candidates.
-    fs.writeFileSync(path.join(root, ".halt"), "manual stop", "utf8");
-    const r2 = slotRefill(root);
-    assert.equal(r2.halted, true);
-    assert.equal(r2.halt_reason, "manual stop");
-    assert.equal(r2.should_refill, false, "halt blocks dispatch at ANY recommendation point");
-    assert.match(r2.no_refill_reason, /halted \(preemption: \.halt present — manual stop/);
-    assert.deepEqual(r2.recommended, [], "no candidate recommended while halted");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("AC2: .halt blocking is PREEMPTIVE — free slot + candidate + halt ⇒ still blocked (mid-flow, not tick-boundary)", () => {
-  const root = makeRoot();
-  try {
-    writeDispatchableTask(root, "gap-halt-b");
-    // 3 free slots, 1 dispatchable candidate, in-flight is EMPTY — under the old tick-step-0
-    // rule this mid-flow state would dispatch; the code mount point blocks it.
-    fs.writeFileSync(path.join(root, ".halt"), "stop", "utf8");
-    const r = slotRefill(root);
-    assert.equal(r.slots_free, 3);
-    assert.equal(r.in_flight_count, 0);
-    assert.equal(r.pool, 1);
-    assert.equal(r.should_refill, false, "halt wins over free slots — the stop is at ANY point");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("AC2: removing .halt restores dispatch (the sentinel is the single switch)", () => {
-  const root = makeRoot();
-  try {
-    writeDispatchableTask(root, "gap-halt-c");
-    fs.writeFileSync(path.join(root, ".halt"), "stop", "utf8");
-    assert.equal(slotRefill(root).should_refill, false);
-    fs.rmSync(path.join(root, ".halt"));
-    const r = slotRefill(root);
-    assert.equal(r.halted, false);
-    assert.equal(r.should_refill, true, "removing .halt unblocks dispatch");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
