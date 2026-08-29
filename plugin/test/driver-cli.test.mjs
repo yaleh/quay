@@ -57,6 +57,7 @@ const KERNEL_DEPS = [
   "fast-mode-telemetry.ts",
   "wiring-coverage-check.ts",
   "workflow-event-schema.mjs",
+  "write-json-atomic.ts",
 ];
 
 // A fake driver for both kinds: idles forever (the supervisor writes the driver's own pid via the
