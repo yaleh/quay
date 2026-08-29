@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-merge-develop-derived-recompute-and-reason
 title: 机械 fan-in merge-develop 冲突：CONTINUE reason 携带具体冲突文件（B）——derived 机械重算（A）已退役
-status: ready
+status: done
 labels:
   - gap
 parent: null
