@@ -2,7 +2,7 @@
 id: gap-mechanical-fan-in-result-single-authoritative-structured
 title: 机械 fan-in 结果单一权威结构化——final_state 从 ff 结果派生（不重读主检出陈旧 status）、reason 结构化
   verdict（不裸流）、suite 状态单一真源（D5/D6/D7 同根）
-status: ready
+status: done
 labels:
   - gap
   - defect
