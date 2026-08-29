@@ -2,7 +2,7 @@
 id: gap-retire-inner-session-references
 title: inner 会话（tmux 窗口）已由 *-driver 取代——全量清 inner 拓扑引用 + profiles.yml
   roles.inner（quay-topology.sh:72 只是表象）
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
