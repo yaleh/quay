@@ -1,7 +1,7 @@
 ---
 id: gap-ac145-semantic-face-subagent-manager-driven
 title: AC145 语义面 subagent 化 + 由 manager 后台驱动（任务撰写/需求分析/升级/学习/AC65快修/B16-C/B18/跨层纠错）
-status: ready
+status: done
 labels:
   - gap
   - feature
