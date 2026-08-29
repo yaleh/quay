@@ -2,7 +2,7 @@
 id: gap-archguard-structural-gate-in-fan-in-driver
 title: archguard 依赖环结构闸接进 fan-in driver 机械步骤 + 退役 scripts/test.sh:966 旧接线（人
   2026-08-27 裁定「archguard 接 fan-in 非 suite test」）
-status: ready
+status: done
 labels:
   - gap
   - feature
