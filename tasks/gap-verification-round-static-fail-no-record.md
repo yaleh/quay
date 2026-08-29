@@ -2,7 +2,7 @@
 id: gap-verification-round-static-fail-no-record
 title: verification-round 对未完整跑完的轮次结构性不落记录（静态闸 fail + 动态测试 fail 同族）——今天两例 0 记录 +
   记录无 taskId 归因
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -53,5 +53,11 @@ extra:
 ## Needs-Human
 
 **执行 2026-08-28T17:21:00.825Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+
+## Needs-Human
+
+**执行 2026-08-29T12:39:49.873Z — 连续修满重试上限仍不合格（标 needs-human）**
 
 - 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
