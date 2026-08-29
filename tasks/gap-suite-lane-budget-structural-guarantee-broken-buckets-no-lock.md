@@ -1,6 +1,7 @@
 ---
 id: gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock
-title: 单飞锁看门狗让槽不让 lane——FULL_SUITE_LOCK_HOLD_MAX_S 超时释放槽位但 suite 继续占满 16 lanes ⇒ S+1 双倍超订（漏口②；漏口① buckets 不取锁已由 serial-lowconc AC3 覆盖）
+title: 单飞锁看门狗让槽不让 lane——FULL_SUITE_LOCK_HOLD_MAX_S 超时释放槽位但 suite 继续占满 16 lanes ⇒
+  S+1 双倍超订（漏口②；漏口① buckets 不取锁已由 serial-lowconc AC3 覆盖）
 status: ready
 labels:
   - gap

@@ -20,8 +20,8 @@ extra: {}
 
 ## Plan
 
-1. **A**：`runMechanicalFanIn` 的 step 2（`git merge develop`）失败时，`git diff --name-only --diff-filter=U` 取 unmerged 文件；若**全部**落在 derived 集合（`docs/proposals/quay-product-outline.md`），则：`git checkout develop -- <derived>` + 重跑 `node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --write-inventory` 重算 §6 + `git add` + `git commit --no-edit` 完成 merge，然后继续后续步；若含 code 文件则照旧 `fail("merge-develop")`（worker 兜底）。
-2. **B**：`lastExitedNotLandedReason`（worker-driver.ts）改读 `mechanical_fan_in`（先 `step` 后 `reason`，拼接成「step=merge-develop: CONFLICT in <file>」），非通用 `failure_reason`；`continueConflictResolutionNote()` 不变（已有 derived 重算/code 并集/commit --no-edit 指令）。
+1. **A**：`runMechanicalFanIn` 的 step 2（`git merge develop`）失败时，`git diff --name-only --diff-filter=U` 取 unmerged 文件；若**全部**落在 derived 集合（`docs/proposals/quay-product-outline.md`），则机械取 mergeTarget 版：`git checkout develop -- <derived>` + `git add` + `git commit --no-edit` 完成 merge，然后继续后续步（⛔ **不再重跑 `--write-inventory`**——该 flag 已退役，outline §6 快照移除、改 check-time 计算，见 verify-delivery-surface.ts:502「ERROR: --write-inventory is retired」）；若含 code 文件则照旧 `fail("merge-develop")`（worker 兜底）。**import 直接引用 outline 路径 `docs/proposals/quay-product-outline.md`，⛔ 不用不存在的 `OUTLINE_DOC_REL`**（verify-delivery-surface.ts 不导出该符号——它导出 SPEC_DOC_REL/DELIVERY_INVENTORY 等，坏 import 是当前 scoped-gate 红的直接根因）。
+2. **B**：`lastExitedNotLandedReason`（worker-driver.ts）改读 `mechanical_fan_in`（先 `step` 后 `reason`，拼接成「step=merge-develop: CONFLICT in <file>」），非通用 `failure_reason`；`continueConflictResolutionNote()` 的「derived 重算」同步改为「outline 冲突取 develop 版」（⛔ 也引用过 --write-inventory，同属过时）。
 
 ## Acceptance Criteria
 
