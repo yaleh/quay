@@ -2,7 +2,7 @@
 id: gap-suite-lpt-runner-exitcode-diverges-spec-tally
 title: suite-lpt-runner 退出码另开 test:fail 计数器、与 spec fail tally 不同源——假红 TAP
   幻影喂脏致分叉（人 2026-08-29 报）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
