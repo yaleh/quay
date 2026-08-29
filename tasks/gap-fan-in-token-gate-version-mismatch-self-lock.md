@@ -1,8 +1,8 @@
 ---
 id: gap-fan-in-token-gate-version-mismatch-self-lock
-title: L1 token 闸自锁——机械 fan-in 版本错位（旧签发者×新校验者，fan-in-ff-merge.sh 的
-  token 闸在 worktree 而注入在主检出旧守护）
-status: needs-human
+title: L1 token 闸自锁——机械 fan-in 版本错位（旧签发者×新校验者，fan-in-ff-merge.sh 的 token 闸在
+  worktree 而注入在主检出旧守护）
+status: ready
 labels:
   - gap
   - defect
