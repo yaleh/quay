@@ -2124,6 +2124,44 @@ test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-co
   assert.match(p, /git commit --no-edit/, "AC3: complete the merge with git commit --no-edit");
 });
 
+// ── gap-fan-in-merge-develop-derived-recompute-and-reason（B；A 已退役）─────────────────────────────
+// 机械 fan-in step 2 `git merge develop` 冲突的【具体文件】没传回下一轮 worker——CONTINUE prompt 的 reason
+// 读通用 failure_reason（「task status=ready not done」），⛔ 不含冲突文件 ⇒ worker 无从精准 resolve。
+// 修法（原 B）：lastExitedNotLandedReason 改读 mechanical_fan_in（step + reason 拼接「step=merge-develop:
+// CONFLICT in <file>」）。原 A（driver 对 derived 文件机械重算）已退役：outline §6 DELIVERY-INVENTORY 快照被
+// gap-delivery-inventory-check-time-computation 删除（计数改 check-time 计算），无 derived 文件可重算。
+
+test("B (能取假) — lastExitedNotLandedReason reads mechanical_fan_in (step + reason) ⛔ not generic failure_reason", () => {
+  const root = makeRoot("mech-reason");
+  const mech = { outcome: "red", step: "merge-develop", reason: "CONFLICT (content): Merge conflict in plugin/scripts/worker-driver.ts" };
+  fs.appendFileSync(path.join(root, WORKER_OUTCOME_REL), JSON.stringify({
+    ts: new Date().toISOString(), task: "gap-dv", final_state: "exited-not-landed",
+    failure_reason: "task status=ready not done", mechanical_fan_in: mech,
+  }) + "\n", "utf8");
+  const reason = lastExitedNotLandedReason(root, "gap-dv");
+  assert.match(reason, /step=merge-develop/, "B: reason leads with the mechanical_fan_in step");
+  assert.match(reason, /CONFLICT/, "B: reason carries the conflict marker");
+  assert.match(reason, /plugin\/scripts\/worker-driver\.ts/, "B: reason carries the specific conflicting file");
+  assert.doesNotMatch(reason, /status=ready not done/, "B: ⛔ not the generic failure_reason");
+  // fallback：无 mechanical_fan_in ⇒ 回退 failure_reason（旧行为保留）。
+  fs.writeFileSync(path.join(root, WORKER_OUTCOME_REL), JSON.stringify({
+    ts: new Date().toISOString(), task: "gap-dv", final_state: "exited-not-landed",
+    failure_reason: "worker exited 0 but task did not land (status≠done or leftover worktree)",
+  }) + "\n", "utf8");
+  assert.match(lastExitedNotLandedReason(root, "gap-dv"), /did not land/, "B: no mechanical_fan_in ⇒ fall back to failure_reason");
+});
+
+test("B (能取假, 结构面) — worker-driver.ts reason 读 mechanical_fan_in；A 的 derived 重算逻辑无残留", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  assert.match(src, /formatExitedNotLandedReason/, "B: reason formatting reads mechanical_fan_in");
+  assert.match(src, /mechanical_fan_in/, "B: lastExitedNotLandedReason reads the mechanical_fan_in field");
+  // A 已退役（superseded by gap-delivery-inventory-check-time-computation）：⛔ 不残留 derived 重算逻辑
+  // （OUTLINE_DOC_REL 常量 / resolveDerivedMergeConflict / DERIVED_CONFLICT_FILES 会引用已删除的 §6 快照 + 退役 flag）。
+  assert.doesNotMatch(src, /OUTLINE_DOC_REL/, "A retired: no OUTLINE_DOC_REL import");
+  assert.doesNotMatch(src, /resolveDerivedMergeConflict/, "A retired: no derived-recompute resolver");
+  assert.doesNotMatch(src, /DERIVED_CONFLICT_FILES/, "A retired: no derived file set");
+});
+
 // ── AC150-3 (falsifiable): 资源门/halt 判定抽到 driver-shared.ts，worker-driver 只是 re-export ──
 
 test("AC150-3 — worker-driver re-exports the SAME resourceGateCheck / isHalted as driver-shared (单份实现)", async () => {
