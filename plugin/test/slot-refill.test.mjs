@@ -83,7 +83,7 @@ import {
 // AC47 (gap-ac47-completion-predicate-consumer-fail-closed): the shape-aware completion counter (the
 // single source both slot-refill's landed gate and ready-pool-check's notYetFlipped consume) — needed
 // directly for the AC2 all-5-consumers negative control on the DIR-014 suffixed-heading shape.
-import { applyPromotions, countCompletionCheckboxes, RETREATED_MARKER_RE, isRetreated } from "../scripts/ready-pool-check.ts";
+import { applyPromotions, countCompletionCheckboxes, RETREATED_MARKER_RE, isRetreated, analyzeTasks } from "../scripts/ready-pool-check.ts";
 import { countAcCheckboxes } from "../scripts/task-status-drift-check.ts";
 // AC53 gate (gap-scheduler-inflight-detection-misses-fan-in-worktree AC2): the END invariant the AC53
 // heartbeat gate judges on — `violated === false` ⇒ the gate ACCEPTS the round end (no false refusal).
@@ -1814,6 +1814,55 @@ test("isNotYetFlippedSkip — pure unit: excludedNyfIds arm, merge arm, AC gate,
   // (f) hasFanInMerge itself: merge record fires, and a plain (non-merge) commit never does.
   assert.equal(hasFanInMerge(root, "gap-fanned"), true, "the fan-in merge record is durable evidence");
   assert.equal(hasFanInMerge(root, "gap-nonexistent"), false);
+});
+
+// ── LEFTOVER-WORKTREE EXEMPTION (gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption) ──
+// slot-refill's `excludedNyfIds` is DERIVED from ready-pool-check.analyzeTasks' pool.excluded (reason
+// "not-yet-flipped") — single source. Before the fix, an allChecked task whose fan-in FAILED (a leftover
+// `task/<id>` worktree, no merge record) was excluded by the allChecked arm ⇒ excludedNyfIds ⇒
+// isNotYetFlippedSkip true ⇒ deferred forever. After the fix, the leftover worktree exempts the
+// allChecked arm ⇒ the task stays in pool.ready (dispatchable) ⇒ NOT in excludedNyfIds ⇒ not skipped.
+// AC5: the slot-refill consumer is correct with NO slot-refill change.
+
+test("NOT-YET-FLIPPED — a leftover task/<id> worktree exempts the allChecked arm ⇒ task NOT in excludedNyfIds ⇒ isNotYetFlippedSkip false (leftover-worktree exemption, AC5)", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-leftover-`));
+  const wtPath = path.join(dir, "..", `${path.basename(dir)}-leftover`);
+  t.after(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "code"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  runGit(dir, "init", "-q");
+  runGit(dir, "config", "user.email", "t@t");
+  runGit(dir, "config", "user.name", "t");
+  fs.writeFileSync(path.join(dir, "base.txt"), "base\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "base");
+  runGit(dir, "branch", "-M", "develop");
+
+  const id = "gap-nyf-leftover";
+  // All 3 ACs checked; `code/touched.ts` is an existing (non-(new)) touch ⇒ taskWorkLanded stays false;
+  // no merge record ⇒ the ONLY not-yet-flipped candidate signal is the allChecked arm.
+  writeTask(dir, id, { status: "ready", labels: ["gap"], body: fannedInBody(3, 3) });
+  // The leftover task/<id> worktree (the fan-in-failed shape — branch present, never merged).
+  runGit(dir, "worktree", "add", "-q", "-b", `task/${id}`, wtPath);
+
+  // Single source: analyzeTasks keeps the task in ready (not excluded) ⇒ excludedNyfIds is empty.
+  const pool = analyzeTasks({ tasksDir: path.join(dir, "tasks"), root: dir });
+  const excludedNyfIds = new Set(
+    (pool.excluded || []).filter((e) => e.reasons.includes("not-yet-flipped")).map((e) => e.id),
+  );
+  assert.equal(pool.ready.includes(id), true, "leftover-worktree allChecked task stays in pool.ready — dispatchable (AC5)");
+  assert.equal(excludedNyfIds.has(id), false, "leftover-worktree allChecked task is NOT in excludedNyfIds (AC5)");
+  assert.equal(isNotYetFlippedSkip({ id, body: fannedInBody(3, 3), root: dir, excludedNyfIds }), false,
+    "isNotYetFlippedSkip false — not deferred as not-yet-flipped (AC5)");
+
+  // Negative control: removing the worktree restores the 2026-08-08 allChecked exclusion.
+  runGit(dir, "worktree", "remove", "--force", wtPath);
+  const pool2 = analyzeTasks({ tasksDir: path.join(dir, "tasks"), root: dir });
+  const excludedNyfIds2 = new Set(
+    (pool2.excluded || []).filter((e) => e.reasons.includes("not-yet-flipped")).map((e) => e.id),
+  );
+  assert.equal(excludedNyfIds2.has(id), true, "without the worktree the allChecked task is excluded again (AC5 negative control)");
 });
 
 // ── LANDED-IMPLEMENTATION (tasks/gap-slot-refill-recommends-landed-code-complete-tasks) ──────────────
