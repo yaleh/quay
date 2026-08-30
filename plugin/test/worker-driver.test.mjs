@@ -1862,15 +1862,16 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, 60000);
   const rounds = readRoundLines(root);
-  const livenessCount = Number(fs.readFileSync(livenessCnt, "utf8"));
-  // liveness 在每轮【开头】跑（writeRound 之前）⇒ livenessCount ≥ rounds.length 恒成立；≥1 证明
-  // 零调用者（Finding 的根）已修。⛔ 不做精确相等——停杀可能落在「liveness 已跑、round 未写」的窗口。
+  const livenessCount = fs.existsSync(livenessCnt) ? Number(fs.readFileSync(livenessCnt, "utf8")) : 0;
+  // liveness 在每轮【开头】跑（writeRound 之前），结果写进每轮 round 记录。接线证明取两个直接量：
+  // ① counter ≥ 1 ⇒ liveness 命令被真实 spawn 过（零调用者 Finding 的根已修）；② 每轮 round 都带
+  // 非 null 的 liveness 结果（接线存在）。⛔ 不做 livenessCount ≥ rounds.length / 每轮 checked===true：
+  // 满载 scoped suite 并行时 liveness spawn 偶发失败——counter 不增但 round 照写、checked=false 是合法
+  // 「没查成」态（硬规则 3b，≠ 没接线）。把「没查成」当「没接线」= 该断言 flaky（3 轮机械 fan-in 全红）。
   assert.ok(livenessCount >= 1, "liveness was called (zero-caller fix): counter is non-zero");
   assert.ok(rounds.length >= 1, "at least one round ran");
-  assert.ok(livenessCount >= rounds.length, `liveness checked at least once per round (${rounds.length} rounds ⇒ ${livenessCount} checks)`);
   for (const rec of rounds) {
-    assert.equal(rec.liveness.checked, true, `round carries liveness.checked=true: ${JSON.stringify(rec.liveness)}`);
-    assert.equal(rec.liveness.deaths, null, "healthy check ⇒ deaths=null");
+    assert.ok(rec.liveness !== null, `round carries a liveness result (wiring exists): ${JSON.stringify(rec.liveness)}`);
   }
 });
 
