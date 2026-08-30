@@ -2331,15 +2331,18 @@ test("B (能取假) — lastExitedNotLandedReason reads mechanical_fan_in (step 
   assert.match(lastExitedNotLandedReason(root, "gap-dv"), /did not land/, "B: no mechanical_fan_in ⇒ fall back to failure_reason");
 });
 
-test("B (能取假, 结构面) — worker-driver.ts reason 读 mechanical_fan_in；A 的 derived 重算逻辑无残留", () => {
-  const src = fs.readFileSync(DRIVER, "utf8");
+test("B (能取假, 结构面) — reason 读 mechanical_fan_in（已上收 driver-filters.ts）；A 的 derived 重算逻辑无残留", () => {
+  // 读法已上收 driver-filters.ts（gap-needs-human-note-carries-step-verdict：markNeedsHuman 注记与 worker
+  // 续做 prompt 共用同一读法）。worker-driver.ts 只 re-export，⛔ 不残留第二份实现。
+  const src = fs.readFileSync(path.resolve(__dirname, "..", "scripts", "driver-filters.ts"), "utf8");
   assert.match(src, /formatExitedNotLandedReason/, "B: reason formatting reads mechanical_fan_in");
   assert.match(src, /mechanical_fan_in/, "B: lastExitedNotLandedReason reads the mechanical_fan_in field");
+  const wsrc = fs.readFileSync(DRIVER, "utf8");
   // A 已退役（superseded by gap-delivery-inventory-check-time-computation）：⛔ 不残留 derived 重算逻辑
   // （OUTLINE_DOC_REL 常量 / resolveDerivedMergeConflict / DERIVED_CONFLICT_FILES 会引用已删除的 §6 快照 + 退役 flag）。
-  assert.doesNotMatch(src, /OUTLINE_DOC_REL/, "A retired: no OUTLINE_DOC_REL import");
-  assert.doesNotMatch(src, /resolveDerivedMergeConflict/, "A retired: no derived-recompute resolver");
-  assert.doesNotMatch(src, /DERIVED_CONFLICT_FILES/, "A retired: no derived file set");
+  assert.doesNotMatch(wsrc, /OUTLINE_DOC_REL/, "A retired: no OUTLINE_DOC_REL import");
+  assert.doesNotMatch(wsrc, /resolveDerivedMergeConflict/, "A retired: no derived-recompute resolver");
+  assert.doesNotMatch(wsrc, /DERIVED_CONFLICT_FILES/, "A retired: no derived file set");
 });
 
 // ── AC150-3 (falsifiable): 资源门/halt 判定抽到 driver-shared.ts，worker-driver 只是 re-export ──
