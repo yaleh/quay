@@ -2,7 +2,7 @@
 id: gap-retired-mechanisms-cleanup-corpses-stale-refs
 title: 清理近期退役机制残留——删除三个零消费者尸体脚本 + 修复陈旧引用（worker-driver 注释 / manager-loop-tick
   inbox-summary）
-status: ready
+status: done
 labels:
   - gap
 parent: null
