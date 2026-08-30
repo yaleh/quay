@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson } from "../src/observation.ts";
+import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef } from "../src/observation.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
 import { taskRunsBlock } from "../src/serve-task.ts";
 
@@ -1131,5 +1131,50 @@ test("readTranscriptTail surfaces queue-operation as an external preview entry",
     assert.ok(r.messages[0].text.includes("hello absorbed"), "list preview carries the content");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — readLive drops a task landed on develop (done) whose stale disk still says ready", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-stale-"));
+  try {
+    const tasksDir = path.join(root, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const writeTask = (id, status) => fs.writeFileSync(path.join(tasksDir, `${id}.md`), `---\nid: ${id}\nstatus: ${status}\n---\nbody\n`);
+    git("init", "-b", "develop", "-q", ".");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    writeTask("gap-stale", "done");
+    writeTask("gap-fresh", "ready");
+    git("add", ".");
+    git("commit", "-q", "-m", "develop: gap-stale done, gap-fresh ready");
+    git("checkout", "-q", "-b", "manager-stale");
+    writeTask("gap-stale", "ready"); // stale branch rewrites it back to ready
+    git("add", ".");
+    git("commit", "-q", "-m", "manager-stale: reset gap-stale to ready");
+
+    // Orphan START events (no END) for both — both pair as in-flight BEFORE the status filter, so
+    // the drop of gap-stale must come from the develop-read (done), not from any other filter.
+    const eventsDir = path.join(root, ".workflow-events");
+    fs.mkdirSync(eventsDir, { recursive: true });
+    const nowMs = Date.now();
+    const start = (runId, taskId) => ({
+      schemaVersion: "1", agentLabel: "fast-mode", attempt: 0, stage: "Fast", eventKind: "start",
+      runId, taskId, commandIdentity: "fast-mode-telemetry:task-start", recordedAtMs: nowMs,
+      timing: { queuedAtMs: null, startedAtMs: nowMs - 120_000, endedAtMs: null },
+    });
+    fs.writeFileSync(path.join(eventsDir, "fm-stale-1.jsonl"), JSON.stringify(start("fm-STALE-1", "gap-stale")) + "\n");
+    fs.writeFileSync(path.join(eventsDir, "fm-fresh-1.jsonl"), JSON.stringify(start("fm-FRESH-1", "gap-fresh")) + "\n");
+
+    // Falsifiability: the develop ref says done, the working tree says ready.
+    assert.equal(readTaskStatusAtRef(root, "develop", "gap-stale"), "done", "develop ref carries done");
+    assert.match(fs.readFileSync(path.join(tasksDir, "gap-stale.md"), "utf8"), /^status:\s*ready/m, "working tree carries ready");
+
+    const live = readLive(root, { nowMs, liveWorkers: [] });
+    const ids = new Set(live.inFlight.map((t) => t.taskId));
+    assert.ok(!ids.has("gap-stale"), "AC1: develop=done drops gap-stale even though disk=ready (⛔ 仍显示在飞 ⇒ 假)");
+    assert.ok(ids.has("gap-fresh"), "AC2: gap-fresh (ready in both) stays in-flight");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

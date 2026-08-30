@@ -10,7 +10,7 @@ import {
 } from "./serve-render.ts";
 import {
   readWorkerOutcomeRecords, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
-  workerDriverActive,
+  workerDriverActive, readTaskStatusMapAtRef,
 } from "./observation.ts";
 import type { LiveWorker, WorkerOutcomeRecord } from "./observation.ts";
 import { TASK_STATUSES } from "./abi.ts";
@@ -21,6 +21,7 @@ export async function handleTaskList(
   url: URL,
   client: ProviderClient,
   manifest: Manifest,
+  cfg: { workspaceRoot: string },
 ): Promise<void> {
   // gap-one-unparseable-task-takes-down-the-whole-board: the Provider's
   // task_list now returns PARTIAL success — the parseable tasks plus a
@@ -50,9 +51,20 @@ export async function handleTaskList(
   // (The qFilter read is duplicated below where it drives filtering; reading
   // the URLSearchParams twice is cheap and keeps the two uses independent.)
   const qFilter = url.searchParams.get("q") || null;
-  const { tasks: allTasks, malformed } = await client.taskList(
+  const { tasks: rawTasks, malformed } = await client.taskList(
     qFilter ? { search: qFilter } : { includeBody: false }
   );
+  // gap-web-task-status-reads-stale-main-checkout: the list's status read face is the develop git
+  // ref, not the manager working branch's disk (a stale agent-proxy — 硬规则 4b). Override each
+  // task's status from develop; a task absent from develop keeps its disk-read status (fail-open).
+  const devStatus = readTaskStatusMapAtRef(cfg.workspaceRoot, "develop");
+  const allTasks = devStatus.size === 0
+    ? rawTasks
+    : rawTasks.map((t) => {
+        const id = typeof t.id === "string" ? t.id : "";
+        const atRef = id ? devStatus.get(id) : undefined;
+        return atRef != null ? { ...t, status: atRef } : t;
+      });
   // QX-004 (experiment 4, iteration 1): filter by ?prefix=<value> query param.
   // Closes CB-002: "show only QX-* tasks" affordance in Web UI.
   // Applied FIRST, before status/label filters — prefix scopes the whole view.
