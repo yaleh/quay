@@ -2,7 +2,7 @@
 id: gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered
 title: serial + lowconc 两相未走 LPT 排序——裸 node --test 字母序，尾部等待 ≈38% 整轮
   makespan（full 4 派发点 + --buckets 2 派发点范围遗留）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -29,9 +29,9 @@ serial/lowconc 两相用裸 `node --test --test-concurrency=N <files…>`，node
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，接线）：serial/lowconc 六条派发点全走 LPT（无裸 `node --test` 直传 files；grep test.sh 的 serial/lowconc 分支——含 --buckets 路径 1543/1549——无未排序裸调用）；（⛔ 仍有裸调用 ⇒ 假）。
-- [ ] AC2（能取假，生产载体，硬规则 4 推论三）：实现落地后时间窗内，真实 full-suite 轮 serial/lowconc 相无 400s+ 尾部等待（N 只计落地后轮次）；（⛔ 用落地前历史轮冒充 ⇒ 假）。
-- [ ] AC3（能取假，pass/fail-neutral）：成员不变只变顺序，serial/lowconc 的 pass/fail 结果与排序前一致。
+- [x] AC1（能取假，接线）：serial/lowconc 六条派发点全走 LPT（无裸 `node --test` 直传 files；grep test.sh 的 serial/lowconc 分支——含 --buckets 路径 1543/1549——无未排序裸调用）；（⛔ 仍有裸调用 ⇒ 假）。
+- [ ] AC2（能取假，生产载体，硬规则 4 推论三）：实现落地后时间窗内，真实 full-suite 轮 serial/lowconc 相无 400s+ 尾部等待（N 只计落地后轮次）；（⛔ 用落地前历史轮冒充 ⇒ 假）。（待外部）
+- [x] AC3（能取假，pass/fail-neutral）：成员不变只变顺序，serial/lowconc 的 pass/fail 结果与排序前一致。
 
 ## Definition of Done
 
@@ -39,7 +39,10 @@ serial/lowconc 六派发点接 LPT；AC1-AC3 全勾；全量 suite 绿；serial/
 
 ## Touches
 
-- scripts/test.sh（serial/lowconc 六派发点接 lpt_reorder_files + suite-lpt-runner.mjs：1091/1093/1115/1133 full + 1543/1549 --buckets）
+- scripts/test.sh（serial/lowconc 六派发点接 lpt_reorder_files + suite-lpt-runner.mjs：full 路径 overlap+sequential 四条 + --buckets 路径 bucket_serial/bucket_lowconc 两条）
+- plugin/test/suite-lpt-order.test.mjs（AC2 结构 pin 改写：serial/lowconc 相现在 LPT 重排 + runner 保序）
+- plugin/test/suite-bucket-load-sensitive-isolation.test.mjs（bucket serial/lowconc 子相断言改为 runner）
+- plugin/test/runner-grouping-serial-anti-stomp.test.mjs（serial 相断言改为 runner）
 - tasks/gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered.md（自身）
 ## Needs-Human
 
