@@ -327,6 +327,10 @@ Key cross-cutting facts (require reading several files to see):
 
 - Development is driven via **background Claude Code workflows at milestone granularity** (→ ADR-009), with a **scheduled milestone e2e incl. browser tests** (Playwright/chrome-devtools) that keeps `L_T` on the real product surface (→ ADR-010). Follow DIR-027 steering hygiene (private worktree; never race the loop on `master`).
 - **后台会话编辑共享检出的正确姿势**：直接 Edit/Write 主检出会被 harness 的 worktree-isolation guard 拦（未 `EnterWorktree` 不可写）。任务体用 `task_write` MCP（Provider ABI 写 `tasks/*.md`）、代码改动进 worktree（`EnterWorktree` 或任务 worktree）。worker（claude -p）不撞 guard 是因 cwd 虽主检出、dispatch prompt 强制 file_path 用 worktree 绝对路径。⛔ 不要 Bash/Python 手搓硬插（2026-08-29 实证：解 worker-driver.ts 冲突时 Python 锚点插入吞 `/**` 留 orphan 注释，靠 worker 修回）。
+- **分支同步（main/manager-doc ↔ develop）**：正本 = `plugin/scripts/driver-filters.ts`（`propagateDocBranchToDevelop` / `commitTaskFile` 调用点）+ `tasks/gap-ff-propagate-structurally-broken-filing-must-target-develop.md`（退役过渡）。角色与不随代码过期的纪律如下，机制细节读代码。
+  - **角色**：`develop` = 权威基线（任务状态唯一正源、worktree 分叉点、fan-in 快进目标）；`main/manager-doc` = doc-only 工作分支（主检出所在），**非权威**。
+  - **同步（当前实现）**：doc→develop 由 `propagateDocBranchToDevelop` 在每次 driver 翻转提交后 push/merge；develop→doc 由 worker-driver landing 后反向 merge。⚠️ **正在退役**：任务状态改由 `commitTaskFile` 直接落 develop（ref-level，不 checkout develop），doc 分支不再承载状态。
+  - **纪律（不随代码过期）**：任务文件/状态变更必须以 develop 为终点；⛔ 只写主检出（main/manager-doc）等「自动传播」不可靠（退役后无此路径）——写完先核它在 develop 上可见。
 
 ## Split-decision routing policy
 
