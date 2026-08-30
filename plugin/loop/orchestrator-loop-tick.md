@@ -268,9 +268,10 @@ Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",   # REP
 「套件转红」与「空槽出现」的 Monitor 挂载已退役——宿主是会话（Monitor 随会话死，tmux server 重置即
 静默消失，已被证伪）。协调循环（driver 定时器地板 + 每趟 pass 现读 ready 池 / suite state，
 SPEC §5.5）落地后，两场景由 driver 现读接管，trigger 从正确性依赖降级为优化（SPEC §5.8 第 5 步）。
-脚本本体 `plugin/scripts/suite-state-trigger.ts` / `plugin/scripts/slot-free-trigger.ts` 保留为共享库
-（`suite-state-trigger.ts` 被 `full-suite-runner.ts` import——crash-watchdog / 起跑闸；空槽条件判定），
-只是不再由外层 Monitor 挂载。4c 的挂载验证现只覆盖 session-liveness。
+脚本本体 `plugin/scripts/suite-state-trigger.ts` 保留为共享库
+（被 `full-suite-runner.ts` import——crash-watchdog / 起跑闸；空槽条件判定）；`slot-free-trigger.ts` 已删除
+（gap-retired-mechanisms-cleanup-corpses-stale-refs，2026-08-30，零运行时消费者）。只是不再由外层
+Monitor 挂载。4c 的挂载验证现只覆盖 session-liveness。
 
 **4c. 重挂后立即验证挂上了 —— 两判据自检**
 

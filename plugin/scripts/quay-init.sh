@@ -328,13 +328,16 @@ _dst_sha256() {
 copy_one() {
   local src="$1" dst="$2" mode="${3:-preserve}"
   local fname
-  fname="$(basename "$dst")"
+  # ${dst##*/} is the bash builtin for basename (no subprocess) — same for ${dst%/*} (dirname).
+  # All callers pass an absolute dst, so ${dst%/*} is always the parent dir (gap-quay-init-install-
+  # wall-clock-slow: per-file basename/dirname subprocess spawns in the copy loop).
+  fname="${dst##*/}"
 
   if [ ! -f "$dst" ]; then
     if [ "$DRY_RUN" = true ]; then
       echo "  would-copy: $dst"
     else
-      mkdir -p "$(dirname "$dst")"
+      mkdir -p "${dst%/*}"
       cp "$src" "$dst"
       echo "  copied: $dst"
     fi
@@ -357,7 +360,7 @@ copy_one() {
       local backup_dir="$WORKSPACE_ROOT/.quay/quay-init-backups/$BACKUP_TS"
       mkdir -p "$backup_dir"
       cp "$dst" "$backup_dir/$fname"
-      mkdir -p "$(dirname "$dst")"
+      mkdir -p "${dst%/*}"
       cp "$src" "$dst"
       echo "  cleaned-residue: $dst"
       echo "    backup: $backup_dir/$fname"
@@ -379,7 +382,7 @@ copy_one() {
         local backup_dir="$WORKSPACE_ROOT/.quay/quay-init-backups/$BACKUP_TS"
         mkdir -p "$backup_dir"
         cp "$dst" "$backup_dir/$fname"
-        mkdir -p "$(dirname "$dst")"
+        mkdir -p "${dst%/*}"
         cp "$src" "$dst"
         echo "  replaced-stale-install: $dst"
         echo "    backup: $backup_dir/$fname"
@@ -389,7 +392,7 @@ copy_one() {
       if [ "$DRY_RUN" = true ]; then
         echo "  would-overwrite (conflict, --force): $dst"
       else
-        mkdir -p "$(dirname "$dst")"
+        mkdir -p "${dst%/*}"
         cp "$dst" "$dst.bak.$(date +%s)"
         cp "$src" "$dst"
         echo "  overwritten (backed up): $dst"
@@ -409,7 +412,7 @@ copy_one() {
       if [ "$DRY_RUN" = true ]; then
         echo "  would-overwrite (conflict, --force): $dst"
       else
-        mkdir -p "$(dirname "$dst")"
+        mkdir -p "${dst%/*}"
         cp "$dst" "$dst.bak.$(date +%s)"
         cp "$src" "$dst"
         echo "  overwritten (backed up): $dst"
@@ -448,7 +451,7 @@ copy_dir() {
   for f in "$src_dir"/*; do
     [ -f "$f" ] || continue
     found=1
-    printf '%s\t%s\n' "$f" "$dst_dir/$(basename "$f")" >> "$manifest"
+    printf '%s\t%s\n' "$f" "$dst_dir/${f##*/}" >> "$manifest"
   done
   if [ "$found" = 0 ]; then
     rm -f "$manifest"
@@ -459,7 +462,7 @@ copy_dir() {
   rm -f "$manifest"
   for f in "$src_dir"/*; do
     [ -f "$f" ] || continue
-    copy_one "$f" "$dst_dir/$(basename "$f")"
+    copy_one "$f" "$dst_dir/${f##*/}"
   done
 }
 
@@ -1098,30 +1101,58 @@ _derive_loop_scripts_once() {
     printf '%s\n' "$f" >> "$out"
   done
   sort -u "$out" -o "$out"
-  # (d) dependency closure — repeat until fixpoint
-  changed=1; round=0
-  while [ "$changed" -eq 1 ] && [ "$round" -lt 20 ]; do
-    changed=0; round=$((round + 1))
-    for s in $(cat "$out"); do
-      [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
-      # gap-delivery-laydown-dist-closure-gap: the closure regex must tolerate the PACKAGED
-      # two-segment form `${SCRIPT_DIR}/dist/X.js` (package.sh rewrites .ts refs to dist/X.js;
-      # the single-segment `[a-zA-Z0-9._-]*` truncated it to `dist` and the sed basename-strip
-      # then dropped the dist/ prefix — the bundle never entered the laydown set). Allow `/` in
-      # the matched path and strip ONLY the ${SCRIPT_DIR}/ or $SCRIPT_DIR/ prefix (NOT the
-      # basename-strip `s#.*/##`, which truncates `dist/X.js` to `X.js`) so the scripts/-relative
-      # path `dist/X.js` (or the source-tree single-segment `X.ts`) resolves under scripts/.
-      for dep in $(grep -oE '\$\{SCRIPT_DIR\}/[a-zA-Z0-9][a-zA-Z0-9._/-]*|\$SCRIPT_DIR/[a-zA-Z0-9][a-zA-Z0-9._/-]*' "$PLUGIN_ROOT/scripts/$s" 2>/dev/null | sed -E 's#^\$\{SCRIPT_DIR\}/##; s#^\$SCRIPT_DIR/##' | sort -u || true); do
-        [ -n "$dep" ] || continue
-        case " $NEVER_LAYDOWN " in *" $dep "*) continue ;; esac
-        [ -f "$PLUGIN_ROOT/scripts/$dep" ] || continue
-        if ! grep -qxF "$dep" "$out"; then
-          printf '%s\n' "$dep" >> "$out"
-          changed=1
-        fi
-      done
-    done
-  done
+  # (d) dependency closure — repeat until fixpoint. ONE python3 pass replaces the retired per-script
+  # `grep -oE … | sed … | sort -u` triple + per-dep `grep -qxF` (the per-script subprocess spawns were
+  # the dominant wall-clock cost of derive_loop_scripts; gap-quay-init-install-wall-clock-slow AC1/AC3
+  # batched ~1000 fork/execve per pass into ONE). The closure regex keeps the PACKAGED two-segment
+  # form `${SCRIPT_DIR}/dist/X.js` (gap-delivery-laydown-dist-closure-gap: package.sh rewrites .ts refs
+  # to dist/X.js; a single-segment `[a-zA-Z0-9._-]*` truncated it to `dist` and the sed basename-strip
+  # then dropped the dist/ prefix — the bundle never entered the laydown set). Allow `/` in the matched
+  # path and strip ONLY the ${SCRIPT_DIR}/ or $SCRIPT_DIR/ prefix (NOT a basename-strip) so the
+  # scripts/-relative path `dist/X.js` resolves under scripts/. The python pass mirrors the retired
+  # loop EXACTLY: iterate the round-start snapshot (`for s in $(cat "$out")`), append new deps (picked
+  # up next round), membership = the LIVE set (`grep -qxF "$dep" "$out"`), same filters (non-empty →
+  # not NEVER_LAYDOWN → exists under scripts/), same round<20 bound, same sorted-unique output.
+  python3 - "$out" "$PLUGIN_ROOT" "$NEVER_LAYDOWN" <<'PYEOF'
+import sys, os, re
+out_path, root, never = sys.argv[1], sys.argv[2], set(sys.argv[3].split())
+pat = re.compile(r'(?:\$\{SCRIPT_DIR\}/|\$SCRIPT_DIR/)([a-zA-Z0-9][a-zA-Z0-9._/-]*)')
+def read(p):
+    try:
+        with open(p, "rb") as fh:
+            return fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+names = []
+with open(out_path, "r", encoding="utf-8") as fh:
+    for ln in fh:
+        ln = ln.strip("\n")
+        if ln:
+            names.append(ln)
+seen = set(names)
+changed, rnd = True, 0
+while changed and rnd < 20:
+    changed = False
+    rnd += 1
+    for s in names[:]:                        # the round-start snapshot ($(cat "$out"))
+        script = os.path.join(root, "scripts", s)
+        if not os.path.isfile(script):        # [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
+            continue
+        for dep in pat.findall(read(script)):
+            if not dep:                       # [ -n "$dep" ] || continue
+                continue
+            if dep in never:                  # case " $NEVER_LAYDOWN " in *" $dep "*
+                continue
+            if not os.path.isfile(os.path.join(root, "scripts", dep)):  # [ -f …/$dep ]
+                continue
+            if dep not in seen:               # ! grep -qxF "$dep" "$out"
+                names.append(dep)
+                seen.add(dep)
+                changed = True
+with open(out_path, "w", encoding="utf-8") as fh:
+    for x in sorted(set(names)):              # sort -u "$out"
+        fh.write(x + "\n")
+PYEOF
   sort -u "$out"
   rm -f "$out"
 }
@@ -2086,7 +2117,7 @@ PYEOF
     mkdir -p "$WORKSPACE_ROOT/plugin/probes"
     for pprobe in "$PLUGIN_ROOT"/probes/*; do
       [ -f "$pprobe" ] || continue
-      copy_one "$pprobe" "$WORKSPACE_ROOT/plugin/probes/$(basename "$pprobe")" clean
+      copy_one "$pprobe" "$WORKSPACE_ROOT/plugin/probes/${pprobe##*/}" clean
     done
     echo "  probes: copied from plugin/probes/ (routine-track probe specs — DIR-056)"
   else
