@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-lock-rename-workflow-to-fan-in
 title: fan-in 串行化锁改名——「workflow 锁」→「fan-in 锁」（纯语义，非关键路径，机械 fan-in 首绿后落地）
-status: ready
+status: done
 labels:
   - gap
   - refactor
