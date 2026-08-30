@@ -521,6 +521,7 @@ plugin/test/user-scope-reinstall.test.mjs
 plugin/test/verification-round.test.mjs
 plugin/test/verify-deliver-coldstart.test.mjs
 plugin/test/verify-delivery-surface.test.mjs
+plugin/test/worker-driver.test.mjs
 plugin/test/workflow-baseline-metrics.test.mjs
 plugin/test/workflow-event-schema.test.mjs
 plugin/test/workflow-invariant-ownership.test.mjs
