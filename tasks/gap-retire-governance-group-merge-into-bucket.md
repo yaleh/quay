@@ -80,6 +80,7 @@ governance 第三套退役、142 文件改标真实相、bucket 单一选择落�
 - scripts/test-coverage-check.ts（五组→四组枚举）
 - scripts/test.sh（governance 跳过语义移除）
 - tasks/gap-retire-governance-group-merge-into-bucket.md（自身）
+- tasks/gap-merge-worktree-surface-lacks-liveness-overbroad.md（补 Contract band NAME + Dispatch review 段——修静态检查门红，解 fan-in 全线红）
 
 ## Needs-Human
 

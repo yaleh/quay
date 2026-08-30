@@ -52,9 +52,16 @@ extra: {}
 ## Contract
 
 measure   dispatchable_disjoint_with_dead_merge = `ready-pool-check.ts --root <root> --cap 5` 在存在一个零进程 mid-merge worktree fixture 时的 `dispatchable_disjoint` 值
-band      dispatchable_disjoint_with_dead_merge > 0（死 merge 面不得把派发压到 0）
+band      dispatchable_disjoint_above_zero = dispatchable_disjoint_with_dead_merge > 0（死 merge 面不得把派发压到 0）
 invariant dead_merge_excluded_from_surface = 1（零进程 + commit 陈旧的 mid-merge worktree 不呈 merge 面）
 invariant surface_is_unmerged_only = 1（活 merge worktree 的面只含 unmerged 冲突文件，不含 cleanly-merged）
 invoke    `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root <root> --cap 5`（贴 `dispatchable_disjoint` 数字，附 fixture 态）
 control   死 merge worktree 存在时 `dispatchable_disjoint` 保持 >0 且 `pool_big_all_colliding` = false
 resume    liveness 与面收窄分步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-30T19:35:16Z
+changed: 补 band NAME（contract-measure-no-name）+ 补 Dispatch review 段（dispatch-review-missing）——
+  修复静态检查门红（合并后完整 runner 首次覆盖 develop task 文件暴露的 done 任务 Contract 违规）
