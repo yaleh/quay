@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
+import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
 import { sendSessionFrames, verdictStateToDeliveryState, classifyReceipt, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
@@ -388,15 +388,19 @@ test("load curve: readSuiteLoadSamples parses the sampler's jsonl, skips malform
   }
 });
 
-test("load curve: GET /tests renders the server-side load curve for the current runId", async () => {
+test("load curve: GET /tests renders the server-side load curve for the latest round's runId", async () => {
   const { ws, tasksDir } = makeWorkspace("tests-loadcurve-");
   const cwd0 = process.cwd();
   let server;
   try {
     createStore(tasksDir).write("LC-T", { title: "load curve web tests", status: "todo" });
-    // full-suite-state.json carries the current runId; the sampler's file is keyed by it.
+    // Strict history: the load curve keys off the LATEST ledger round's OWN runId (no
+    // full-suite-state.json read), so the fixture must carry that runId in verification-round.jsonl.
     const runId = "11111111-2222-3333-4444-555555555555";
-    fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId }));
+    const startedAt = new Date().toISOString();
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), `${JSON.stringify({
+      round: 1, startedAt, durationMs: 60000, state: "green", runId,
+    })}\n`);
     fs.writeFileSync(
       path.join(ws, ".quay", `suite-load-${runId}.jsonl`),
       [
@@ -646,9 +650,10 @@ test("AC1/AC2: GET /tests renders a startedAt column per history row (carrier-so
 // the history table = runs[0]. AC1 makes each section name its own round; AC2 surfaces the fallback
 // instead of hiding it; AC3 is the negative control (all three agree when they reference one round).
 
-/** Seed the drift scenario: newest round (red, NO perFile) + an older round (green, WITH perFile),
- *  plus a full-suite-state.json whose runId points at the NEWEST (red) round. The three sections then
- *  reference three DIFFERENT rounds (the proposal's bug). Returns the two runIds. */
+/** Seed the drift scenario: newest round (red, NO perFile) + an older round (green, WITH perFile).
+ *  Strict history — the default page keys the load curve off the NEWEST ledger round's own runId, so
+ *  no full-suite-state.json is seeded at all. The three sections reference three DIFFERENT rounds
+ *  (the proposal's bug). Returns the two runIds. */
 function seedDriftFixture(ws) {
   const t0 = 1724374800000;
   const runIdLatest = "fm-drift-latest-479-aaaaaa";
@@ -658,7 +663,6 @@ function seedDriftFixture(ws) {
     JSON.stringify({ round: 478, startedAt: "2026-08-23T03:14:00.000Z", durationMs: 517000, state: "green", runner: "outer", scope: "worktree", runId: runIdOlder, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/a.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 500, startedAtMs: t0 + 500 - 210 }, { file: "packages/quay/test/b.test.mjs", durationMs: 12, passed: true, endedAtMs: t0 + 6000, startedAtMs: t0 + 6000 - 12 }] }),
     JSON.stringify({ round: 479, startedAt: "2026-08-23T03:33:00.000Z", durationMs: 645000, state: "red", runner: "outer", scope: "worktree", runId: runIdLatest, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 0, fail: 1, cancelled: 0, tests: 2, failures: [] }),
   ].join("\n"));
-  fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "red", runId: runIdLatest, startedAt: "2026-08-23T03:33:00.000Z" }));
   // gap-tests-round-load-curve-time-window-clip — samples must land INSIDE round 479's declared
   // [03:33:00Z, 03:33:00Z+645s] window: the round page now clips the load curve to that window, so
   // out-of-window samples (the old `Date.now()` values, ~2 days later) would be dropped and the
@@ -740,7 +744,6 @@ test("AC3: negative control — all three sections reference the same round cons
     fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
       JSON.stringify({ round: 230, startedAt: "2026-08-23T01:00:00.000Z", durationMs: 500000, state: "green", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/a.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 500, startedAtMs: t0 + 500 - 210 }, { file: "packages/quay/test/b.test.mjs", durationMs: 12, passed: true, endedAtMs: t0 + 6000, startedAtMs: t0 + 6000 - 12 }] }),
     ].join("\n"));
-    fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId, startedAt: "2026-08-23T01:00:00.000Z" }));
     fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
       JSON.stringify({ t: Date.parse("2026-08-23T01:00:00.000Z") + 1000, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
     ].join("\n"));
@@ -780,7 +783,6 @@ function seedFileDetailFixture(ws) {
     JSON.stringify({ round: 230, startedAt: "2026-08-22T02:00:00.000Z", durationMs: 400000, state: "red", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 1, fail: 1, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 1000, startedAtMs: t0 + 790 }, { file: "packages/quay/test/fast.test.mjs", durationMs: 9, passed: true }] }),
     JSON.stringify({ round: 231, startedAt: "2026-08-22T03:00:00.000Z", durationMs: 400000, state: "green", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 150, passed: true, endedAtMs: t0 + 1500, startedAtMs: t0 + 1350 }, { file: "packages/quay/test/onlyonce.test.mjs", durationMs: 77, passed: true }] }),
   ].join("\n"));
-  fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId, startedAt: "2026-08-22T03:00:00.000Z" }));
   fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
     JSON.stringify({ t: t0 + 1300, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
     JSON.stringify({ t: t0 + 1400, loadavg: 4.5, cpu_stall: 40.0, mem_avail: 7500.0 }),
@@ -981,9 +983,9 @@ test("AC1: GET /tests?round=N shows THAT round's timeline + load curve (not the 
       JSON.stringify({ round: 510, startedAt: "2026-08-23T01:00:00.000Z", durationMs: 500000, state: "green", runner: "outer", scope: "worktree", runId: runId510, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 500, startedAtMs: t0 + 290 }] }),
       JSON.stringify({ round: 511, startedAt: "2026-08-23T02:00:00.000Z", durationMs: 400000, state: "green", runner: "outer", scope: "worktree", runId: runId511, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/fast.test.mjs", durationMs: 12, passed: true, endedAtMs: t0 + 6000, startedAtMs: t0 + 5988 }] }),
     ].join("\n"));
-    // full-suite-state.json points at the LATEST runId (default page = round 511); round 510's own
-    // runId has its own sampler file, so ?round=510 must read THAT, not the current runId.
-    fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId: runId511 }));
+    // Strict history: the default page keys the load curve off runs[0] = round 511's own runId; round
+    // 510's runId has its own sampler file, so ?round=510 must read THAT (the selected round), not the
+    // latest. No full-suite-state.json is seeded.
     // gap-tests-round-load-curve-time-window-clip — samples land INSIDE their round's declared window
     // (round 510 = [01:00Z, 01:00Z+500s], round 511 = [02:00Z, 02:00Z+400s]); the round page now clips
     // to that window, so the old 2023-dated samples would be dropped and the heading assertions break.
@@ -1465,6 +1467,115 @@ test("AC3 (integration) — /session/<id>/download serves raw JSONL (attachment)
     process.chdir(cwd0);
     fs.rmSync(transcriptPath, { force: true });
     try { fs.rmdirSync(transcriptDir); } catch { /* leave the (empty) dir */ }
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-mech-fan-in-log-webui-visible-clickable (AC2 + AC3) ───────────────────────────────────
+// 机械 fan-in 过程日志落 .quay/fan-in-<task>-<runId>.log；worker-outcome.jsonl 的 mechanical_fan_in
+// 携带 fanInLog 文件名。AC2: Runs 区块渲染 mechanical_fan_in 结果（landed/red + step + lock + suite +
+// sha）+ view/download 链接。AC3: /fan-in-log/<task>/<file> 端点严格 slug + 白名单校验，非白名单 /
+// `..` / 绝对路径 ⇒ 400，永不读 .quay/ 之外（同 /session/<id>/download 的路径穿越防护房式）。
+
+test("AC2 (unit) — renderFanInCell renders landed/red + step + lock + suite + sha, and links view/download only when fanInLog is non-empty", () => {
+  const landed = renderFanInCell("gap-runs-1", {
+    mechanical_fan_in: { outcome: "landed", step: null, reason: null, lockHoldSecs: 12, suiteOutcome: "done", landedSha: "abc1234567890", fanInLog: "fan-in-gap-runs-1-r1.log" },
+  });
+  assert.match(landed, /landed/, "landed outcome rendered");
+  assert.match(landed, /lock 12s/, "lock hold rendered");
+  assert.match(landed, /suite done/, "suite outcome rendered");
+  assert.match(landed, /abc1234/, "landed sha (7-char) rendered");
+  assert.match(landed, /href="\/fan-in-log\/gap-runs-1\/fan-in-gap-runs-1-r1.log"/, "view link constructed from fanInLog");
+  assert.match(landed, /href="\/fan-in-log\/gap-runs-1\/fan-in-gap-runs-1-r1.log\/download"/, "download link constructed");
+
+  const red = renderFanInCell("gap-runs-1", {
+    mechanical_fan_in: { outcome: "red", step: "typecheck", reason: "tsc failed", lockHoldSecs: null, suiteOutcome: null, landedSha: null, fanInLog: null },
+  });
+  assert.match(red, /red/, "red outcome rendered");
+  assert.match(red, /step typecheck/, "failing step rendered");
+  assert.match(red, /tsc failed/, "failure reason rendered");
+  assert.doesNotMatch(red, /href="\/fan-in-log\//, "no fanInLog ⇒ no dead link");
+
+  assert.equal(renderFanInCell("gap-runs-1", { mechanical_fan_in: null }), "—", "no mechanical_fan_in ⇒ honest —");
+});
+
+test("AC2 (unit) — taskRunsBlock renders a fan-in column + view/download link when a record carries mechanical_fan_in.fanInLog", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-fanin-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  fs.writeFileSync(path.join(q, "worker-outcome.jsonl"), [
+    JSON.stringify({ ts: "2026-08-28T00:00:00Z", task: "gap-runs-1", final_state: "completed", exit_code: 0, session_id: null, mechanical_fan_in: { outcome: "landed", step: null, reason: null, lockHoldSecs: 3, suiteOutcome: "done", landedSha: "abc1234567890", fanInLog: "fan-in-gap-runs-1-r1.log" } }),
+  ].join("\n") + "\n");
+  try {
+    const recs = readWorkerOutcomeRecords(root).filter((r) => r.task === "gap-runs-1");
+    assert.equal(recs[0].mechanical_fan_in.fanInLog, "fan-in-gap-runs-1-r1.log", "mechanical_fan_in.fanInLog parsed from the carrier");
+    assert.equal(recs[0].mechanical_fan_in.outcome, "landed", "mechanical_fan_in.outcome parsed");
+    const htmlBlock = taskRunsBlock(root, "gap-runs-1", { liveWorkers: [] });
+    assert.match(htmlBlock, /<th>fan-in<\/th>/, "fan-in column header present");
+    assert.match(htmlBlock, /href="\/fan-in-log\/gap-runs-1\/fan-in-gap-runs-1-r1.log"/, "Runs block links the fan-in log view");
+    assert.match(htmlBlock, /href="\/fan-in-log\/gap-runs-1\/fan-in-gap-runs-1-r1.log\/download"/, "Runs block links the fan-in log download");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 (unit) — fanInLogPath is traversal-proof: non-slug task / non-whitelist file / `..` / absolute path ⇒ null; valid joins .quay", () => {
+  assert.equal(fanInLogPath("/a/b", "../etc/passwd", "x.log"), null, "`..` task ⇒ null (not a task slug)");
+  assert.equal(fanInLogPath("/a/b", "gap-x", "../etc/passwd"), null, "`..` file ⇒ null (whitelist fails on `/`)");
+  assert.equal(fanInLogPath("/a/b", "gap-x", ".."), null, "bare `..` file ⇒ null (resolved path escapes .quay)");
+  assert.equal(fanInLogPath("/a/b", "gap-x", "/etc/passwd"), null, "absolute-path file ⇒ null");
+  assert.equal(fanInLogPath("/a/b", "gap-x", "a/../b.log"), null, "embedded `..` ⇒ null");
+  assert.equal(fanInLogPath("/a/b", "gap-x", "ok log.txt"), null, "space (non-whitelist) ⇒ null");
+  assert.equal(
+    fanInLogPath("/a/b", "gap-x", "fan-in-gap-x-r1.log"),
+    path.join("/a/b", ".quay", "fan-in-gap-x-r1.log"),
+    "valid task + whitelist file joins the FIXED .quay dir (never used as a raw path)",
+  );
+});
+
+test("AC3 (integration) — /fan-in-log/<task>/<file> serves inline + download, and rejects non-slug/traversal segments with 400", async () => {
+  const { ws, tasksDir } = makeWorkspace("fanin-log-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const q = path.join(ws, ".quay");
+    fs.mkdirSync(q, { recursive: true });
+    fs.writeFileSync(path.join(q, "fan-in-gap-runs-1-r1.log"), '{"ts":"x","step":"merge-develop","exit":0,"wall_ms":1,"ok":true}\n');
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const ok = await getRes(port, "/fan-in-log/gap-runs-1/fan-in-gap-runs-1-r1.log");
+    assert.equal(ok.status, 200, "valid fan-in log view → 200");
+    assert.ok(ok.body.includes('"step":"merge-develop"'), "view streams the log content inline");
+    assert.equal(String(ok.headers["content-disposition"] ?? "").includes("attachment"), false, "view is inline (no attachment disposition)");
+
+    const dl = await getRes(port, "/fan-in-log/gap-runs-1/fan-in-gap-runs-1-r1.log/download");
+    assert.equal(dl.status, 200, "valid download → 200");
+    assert.match(String(dl.headers["content-disposition"] ?? ""), /attachment/, "download is an attachment");
+
+    const badTask = await getRes(port, "/fan-in-log/..%2Fetc%2Fpasswd/fan-in-gap-runs-1-r1.log");
+    assert.equal(badTask.status, 400, "non-slug task ⇒ 400");
+
+    const traversal = await getRes(port, "/fan-in-log/gap-runs-1/%2e%2e%2fetc%2fpasswd");
+    assert.equal(traversal.status, 400, "encoded traversal file ⇒ 400");
+
+    // A bare `..` (no slash) is collapsed by the WHATWG URL parser BEFORE routing
+    // (`/fan-in-log/gap-runs-1/%2e%2e` → pathname `/fan-in-log/`), so it 404s as an unmatched route —
+    // the resolver-level `..` rejection (fanInLogPath returns null) is the defense-in-depth unit-tested
+    // above, and the encoded-slash traversal below is the HTTP-level 400 surface.
+    const bareDots = await getRes(port, "/fan-in-log/gap-runs-1/%2e%2e");
+    assert.equal(bareDots.status, 404, "bare `..` is URL-parser-collapsed to /fan-in-log/ before routing ⇒ 404");
+
+    const absent = await getRes(port, "/fan-in-log/gap-runs-1/fan-in-gap-runs-1-missing.log");
+    assert.equal(absent.status, 404, "valid shape but absent log ⇒ 404 (honest, not a 500)");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
     fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(ws, { recursive: true, force: true });
   }

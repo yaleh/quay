@@ -967,7 +967,7 @@ async function bootstrapBlockFor(task, worktree, root) {
   const { prompts } = await runWorkflow({
     args: { task, worktree, root, runId: "fm-bootstrap", mergeTarget: "develop" },
   });
-  // ADR-034（gap-adr034-fan-in-lock-holder-supervised）：step 0.5（获取 workflow 锁）已从 prompt 废除，
+  // ADR-034（gap-adr034-fan-in-lock-holder-supervised）：step 0.5（获取 fan-in 锁）已从 prompt 废除，
   // step 0（bootstrap-sync）现在直接以 step 1 为界。
   return extractBlockFromPrompts(prompts, "【无锁段 step 0", "【无锁段 step 1");
 }

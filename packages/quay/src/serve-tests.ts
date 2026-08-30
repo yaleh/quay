@@ -59,30 +59,11 @@ export function clipSuiteLoadSamplesToWindow(samples: SuiteLoadSample[], startMs
   return samples.filter((s) => s.t >= startMs && s.t <= endMs);
 }
 
-/**
- * The current `.quay/full-suite-state.json` run identity (runId + startedAt + state) — the load
- * curve's data source. Absent/unparseable file ⇒ all-null (never throw). `runId` maps back to a
- * verification-round record's `round`/`startedAt` (gap-web-tests-three-sections-round-drift AC1).
- */
-interface CurrentSuiteState {
-  runId: string | null;
-  startedAt: string | null;
-  state: string | null;
-}
-
-function readCurrentSuiteState(root: string): CurrentSuiteState {
-  try {
-    const j = JSON.parse(readFileSync(path.join(root, ".quay", "full-suite-state.json"), "utf8"));
-    return {
-      runId: typeof j?.runId === "string" && j.runId ? j.runId : null,
-      startedAt: typeof j?.startedAt === "string" && j.startedAt ? j.startedAt : null,
-      state: typeof j?.state === "string" && j.state ? j.state : null,
-    };
-  } catch {
-    return { runId: null, startedAt: null, state: null };
-  }
-}
-
+// The /tests page is a HISTORY surface: it reads ONLY the data-plane ledger (verification-round.jsonl)
+// + per-runId telemetry (suite-load-<runId>.jsonl, keyed by the ledger's own runId). The control-plane
+// single-state file full-suite-state.json (gate signal; the D7 mirror writes only green; scope-annotated)
+// is deliberately NOT read here — a worktree red must not flip the main signal, and a history page must
+// not show a live/current state it cannot source from the record.
 function isPlottableSample(s: SuiteLoadSample): s is SuiteLoadSample & { loadavg: number } {
   return s.loadavg != null && Number.isFinite(s.loadavg);
 }
@@ -413,7 +394,6 @@ function renderTestsPage(
   tests: TestsResult,
   root: string,
   samples: SuiteLoadSample[] = [],
-  current: CurrentSuiteState = { runId: null, startedAt: null, state: null },
   selected: TestRunRecord | null = null,
   roundRequested: number | null = null,
 ): string {
@@ -422,19 +402,11 @@ function renderTestsPage(
   // names one (null on the default page, which keeps the pre-existing latest-run focus). The banner,
   // load-curve label, and timeline/table then all reference THAT round instead of the newest.
   const focus = selected;
-  // gap-web-tests-three-sections-round-drift AC1 — map the load curve's current runId
-  // (full-suite-state.json) back to its verification-round record so the three sections each name
-  // the round they reference (instead of all three claiming 「最近一轮」 while plotting different
-  // rounds). null when the current run is still running (no round record yet) or the record lacks
-  // runId (standalone full-suite-runner rows) — then the label falls back to the state's startedAt.
-  const currentRun = current.runId ? tests.runs.find((r) => r.runId === current.runId) ?? null : null;
-  const loadLabel = focus
-    ? roundLabel(focus)
-    : currentRun
-      ? roundLabel(currentRun)
-      : current.startedAt
-        ? `${shortUtcTime(current.startedAt)}${current.state === "running" ? " · 运行中" : ""}`
-        : "";
+  // gap-web-tests-three-sections-round-drift — the load curve keys off the LATEST ledger round's own
+  // runId (tests.runs[0]), so the three sections each name the round they reference and stay trivially
+  // consistent (no full-suite-state.json mapping). A still-running round has no ledger record yet, so
+  // the default page shows the newest COMPLETED round and never a live "运行中" label.
+  const loadLabel = focus ? roundLabel(focus) : roundLabel(latest);
   const bannerRun = focus ?? latest;
   const latestBanner = bannerRun
     ? html`<div style="border:1px solid var(--color-divider);background:var(--color-surface);padding:1rem;margin-bottom:1.5rem">
@@ -505,7 +477,7 @@ function renderTestsPage(
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>Tests — 验证轮记录</title></head>
     <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
       <h1>Tests — 验证轮记录</h1>
-      <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（suite-state 机制写入）${tests.currentState ? html` · 当前 suite-state: <strong>${escapeHtml(tests.currentState)}</strong>` : ""}</p>
+      <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（每轮 suite 完成时追加，红绿皆入账）</p>
       ${obsNote(tests.status, tests.reason)}
       ${focusNote}
       ${notFoundNote}
@@ -532,9 +504,8 @@ export async function handleTests(
   try {
     tests = readTests(cfg.workspaceRoot);
   } catch (err) {
-    tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [], currentState: null };
+    tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [] };
   }
-  const current = readCurrentSuiteState(cfg.workspaceRoot);
   // gap-webui-round-detail-page AC1 — /tests?round=N names a specific round; its OWN runId feeds the
   // load curve (absent runId → no curve, the same data-source degradation as the default page). A
   // non-numeric / non-matching round is treated as "not requested" / "not found" (never fabricated).
@@ -543,8 +514,8 @@ export async function handleTests(
   const selected = roundNum != null ? tests.runs.find((r) => r.round === roundNum) ?? null : null;
   // gap-tests-round-load-curve-time-window-clip — clip the load curve to the focused round's declared
   // [startedAt, startedAt+durationMs] window (the SAME helper as /tests/file). An uncomputable window
-  // (legacy row without durationMs; still-running current run with no round record) keeps the samples
-  // unclipped rather than fabricate a window or drop the curve.
+  // (a latest/selected round without durationMs — legacy/standalone rows) keeps the samples unclipped
+  // rather than fabricate a window or drop the curve.
   const samples = ((): SuiteLoadSample[] => {
     if (selected) {
       if (!selected.runId) return [];
@@ -552,16 +523,16 @@ export async function handleTests(
       const w = roundTimeWindowMs(selected);
       return w ? clipSuiteLoadSamplesToWindow(raw, w.start, w.end) : raw;
     }
-    if (current.runId) {
-      const currentRun = tests.runs.find((r) => r.runId === current.runId) ?? null;
-      const raw = readSuiteLoadSamples(cfg.workspaceRoot, current.runId);
-      const w = roundTimeWindowMs(currentRun);
+    const latest = tests.runs[0] ?? null;
+    if (latest?.runId) {
+      const raw = readSuiteLoadSamples(cfg.workspaceRoot, latest.runId);
+      const w = roundTimeWindowMs(latest);
       return w ? clipSuiteLoadSamplesToWindow(raw, w.start, w.end) : raw;
     }
     return [];
   })();
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderTestsPage(tests, cfg.workspaceRoot, samples, current, selected, roundNum));
+  res.end(renderTestsPage(tests, cfg.workspaceRoot, samples, selected, roundNum));
 }
 
 // ── /tests/file — single-file cross-round detail page (gap-webui-test-file-detail-page) ──────────
@@ -748,7 +719,7 @@ export async function handleTestsFile(
   try {
     tests = readTests(cfg.workspaceRoot);
   } catch (err) {
-    tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [], currentState: null };
+    tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [] };
   }
   const fragment = fileLoadFragment(cfg.workspaceRoot, tests.runs, filePath);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });

@@ -54,6 +54,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { helpExit } from "./gate-script-base.ts";
 
+import { verified, failed, driverResultToExit } from "./checker-io.ts";
+import type { DriverResult } from "./checker-io.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Hash tools whose co-occurrence with a capture-pane result is the forbidden whole-screen hash
@@ -320,6 +323,19 @@ export function judgeBand(activeCount: number): { inBand: boolean; verdict: "PAS
   return { inBand, verdict: inBand ? "PASS" : "FAIL" };
 }
 
+/**
+ * B4 (gap-b4-checker-reuse-driver-result)：判定收敛到 DriverResult<T> 词表。
+ *   活跃违例 ≤ 1（band 0..1）⇒ verified；> 1（新活跃违例）⇒ failed。
+ * 判定依据是【文件内容】（detectFileViolations 按代码位置），⛔ 非调用方自述。
+ */
+export function judgeScreenHashScan(scan: ScanResult): DriverResult<ScanResult> {
+  const { inBand } = judgeBand(scan.violations.length);
+  if (!inBand) {
+    return failed(`${scan.violations.length} active whole-screen-hash violations — band is 0..1`);
+  }
+  return verified(scan, "活跃 whole-screen-hash 违例在 band 内（0..1）");
+}
+
 /** Pure RED/GREEN selftest (ADR-018 selfcheck-fixture pattern). */
 export function selftest(): boolean {
   let pass = 0;
@@ -400,9 +416,11 @@ export function main(argv: string[]): number {
     return 2;
   }
 
-  const { violations, retired, files } = scanForScreenHashViolations(root);
+  const scan = scanForScreenHashViolations(root);
+  const { violations, retired, files } = scan;
   const active = violations.length;
-  const { inBand } = judgeBand(active);
+  const result = judgeScreenHashScan(scan);
+  const inBand = result.state === "verified";
 
   if (asJson) {
     console.log(JSON.stringify({ ok: inBand, violations: active, active: violations, retired, files_scanned: files.length }, null, 2));
@@ -427,7 +445,7 @@ export function main(argv: string[]): number {
       console.log(`FAIL: ${active} active whole-screen-hash violations — band is 0..1 (new active violation detected)`);
     }
   }
-  return inBand ? 0 : 1;
+  return driverResultToExit(result);
 }
 
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "adr016-screen-use-check";

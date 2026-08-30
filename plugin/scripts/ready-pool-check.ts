@@ -192,6 +192,7 @@ import { expandDeclaredTouches, INFLIGHT_WORKTREE_STALE_MS } from "./concurrent-
 // this enumerator give the merge-surface path the SAME liveness judgment as the task-worktree path.
 import { enumerateProcs, cwdUnder } from "./worktree-process-reaper.ts";
 import { isDirectEntry, helpExit } from "./gate-script-base.ts";
+import { TASK_STATUS, isTaskStatus } from "./task-status.ts";
 // Reused "work has landed on master" signal (AC6: reuse, never a parallel copy) — the same
 // symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
 // buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-
@@ -936,7 +937,7 @@ export function isPendingImplementationItem(text) {
  *  analyzeTasks caller): `ref` names the landing ref (default: landingRef's integration→develop→master
  *  resolution). */
 export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
-  if (task.status !== "ready") return false;
+  if (task.status !== TASK_STATUS.READY) return false;
   // opts is EITHER the legacy commit-subject array OR an options bag { ref, commitTraceSubjects }.
   const commitTraceSubjects = Array.isArray(opts) ? opts : (opts ? opts.commitTraceSubjects : null);
   const o = { taskId: task.id };
@@ -1587,7 +1588,7 @@ export function computeSuiteBlocking({ rounds, stateFailures, stateUnattributed 
   const unattributedCount = countUnattributedFailures(realRounds, stateFailures, stateUnattributed, consecutiveRed, stateStartedAt);
   const ids = new Set();
   for (const [id, task] of tasks) {
-    if (task.status !== "ready" && task.status !== "todo") continue;
+    if (task.status !== TASK_STATUS.READY && task.status !== TASK_STATUS.TODO) continue;
     const parsed = parseTouches(task.body);
     if (!parsed.hasSection || parsed.globs.length === 0) continue;
     // gap-suite-blocking-directory-glob-overbroad AC2 — a DIRECTORY glob (a bare directory like
@@ -1816,7 +1817,7 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
   if (!task) {
     return { id, found: false, eligible: false, floor_independent: true, reason: "task-not-found" };
   }
-  if (task.status !== "todo") {
+  if (task.status !== TASK_STATUS.TODO) {
     return {
       id,
       found: true,
@@ -2043,7 +2044,8 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
       : fs.readFileSync(path.join(tasksDir, f), "utf8");
     const task = parseTask(raw);
     task.id = id;
-    task.status = readFrontField(task.frontmatterRaw, "status") || "";
+    const rawStatus = readFrontField(task.frontmatterRaw, "status");
+    task.status = isTaskStatus(rawStatus) ? rawStatus : "";
     task.parent = readFrontField(task.frontmatterRaw, "parent");
     allTasks.set(id, task);
   }
@@ -2070,7 +2072,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // BATCHED git-history (gap-ready-pool-check-times-out-after-git-history-signal): build the
   // master-history path→commit index ONCE for the whole pool scan — ONE `git log` pass instead of
   // ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
-  const readyCount = [...allTasks.values()].filter((t) => t.status === "ready").length;
+  const readyCount = [...allTasks.values()].filter((t) => t.status === TASK_STATUS.READY).length;
   // Landing ref for the git-history signal (gap-git-history-landed-master-stale-under-two-line-model):
   // follow the two-line model's working line — the CONFIGURED integration/develop/master refs
   // (--integration/--develop/--master) resolved to the first that exists, so a stale master no longer
@@ -2089,7 +2091,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   let nyfContradictionCount = 0; // 乙 — not-yet-flipped AND an open box that is this task's OWN implementation/evidence (judged landed but NOT done — criterion misfire)
   let awaitingVerificationCount = 0; // awaiting-verification — not-yet-flipped AND every open box is annotated （待外部） (work done, legitimately waiting for suite green / outer verification)
   for (const [id, t] of allTasks) {
-    if (t.status !== "ready") continue;
+    if (t.status !== TASK_STATUS.READY) continue;
     const reasons = [];
     if (isFixture(t)) reasons.push("fixture");
     if (isParked(t)) reasons.push("parked");
@@ -2157,7 +2159,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     const fourR = artifactsComplete(task.body);
     if (!fourR.complete) reasons.push(`four-artifacts-incomplete (${fourR.missing.join(",")})`);
     if (reasons.length > 0) {
-      revaluation.push({ id, reasons, destination: "todo" });
+      revaluation.push({ id, reasons, destination: TASK_STATUS.TODO });
     }
   }
 
@@ -2191,7 +2193,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // untouched (AC4).
   const relevanceOf = (id) => computeRelevance(id, allTasks.get(id), childrenByTask, parentRefCount, suiteBlocking.ids, dependedOnCount);
   const todoRelevance = [...allTasks.values()]
-    .filter((t) => t.status === "todo" && !isFixture(t) && !isParked(t))
+    .filter((t) => t.status === TASK_STATUS.TODO && !isFixture(t) && !isParked(t))
     .map((t) => relevanceOf(t.id))
     .sort((a, b) => b.value - a.value || a.id.localeCompare(b.id));
   // ready_relevance ranks the ready pool by value — the "who to dispatch next" answer. In-flight ids
@@ -2261,7 +2263,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   const promotions = [];
   const intercepted = [];
   for (const [id, t] of allTasks) {
-    if (t.status !== "todo") continue;
+    if (t.status !== TASK_STATUS.TODO) continue;
     if (isFixture(t) || isParked(t)) continue; // never promotion candidates
     candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount));
   }
@@ -2324,7 +2326,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   if (topN > 0) {
     const ranked = [];
     for (const [id, t] of allTasks) {
-      if (t.status !== "todo") continue;
+      if (t.status !== TASK_STATUS.TODO) continue;
       if (isFixture(t) || isParked(t)) continue;
       const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount);
       ranked.push({ id, kind: c.kind, kindOrder: c.kindOrder, relevance: c.relevance, eligible: c.eligible, reason: c.relevance.reason });
@@ -2485,7 +2487,7 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
     deliveryCritical = ensured.deliveryCritical;
   }
   fs.writeFileSync(file, `${open}${newFm}${close}${raw.slice(m[0].length)}`);
-  return { id, ok: true, from: "todo", to: newStatus, deliveryCritical };
+  return { id, ok: true, from: TASK_STATUS.TODO, to: newStatus, deliveryCritical };
 }
 
 /** COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a todo→ready status write must be
@@ -2553,13 +2555,13 @@ export function applyPromotions(opts) {
       const touchesBlock = checkTaskOneEntryOnePath(body, rel, baseline);
       if (touchesBlock.length > 0) {
         applied.push({
-          id: p.id, ok: false, from: "todo", to: null, deliveryCritical, committed: false,
+          id: p.id, ok: false, from: TASK_STATUS.TODO, to: null, deliveryCritical, committed: false,
           reason: "touches-multi-path-bullet",
           detail: touchesBlock.map((v) => v.what).join(" · "),
         });
         continue;
       }
-      const out = setTaskStatus(opts.root, p.id, "ready", { ensureDeliveryCritical: deliveryCritical });
+      const out = setTaskStatus(opts.root, p.id, TASK_STATUS.READY, { ensureDeliveryCritical: deliveryCritical });
       // COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a landed status write is
       // committed immediately so the main checkout stays clean (a dirty tree blocks every fan-in at
       // fan-in-ff-merge.sh BEFORE the bypass check runs). `committed` is surfaced on the applied
@@ -2592,7 +2594,7 @@ export function retreatReadyToTodo(root, id, reasons = []) {
     `\n## Revaluation\n\n**执行 ${new Date().toISOString()} — 静态条件变质，ready.back="todo"**\n\n` +
     `- 去向：ready → todo\n- 阻碍原因：${reasons.join(", ")}\n`;
   fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
-  return { id, ok: true, from: "ready", to: "todo", reasons, record };
+  return { id, ok: true, from: TASK_STATUS.READY, to: TASK_STATUS.TODO, reasons, record };
 }
 
 /** REVALUATION EXECUTOR (AC46 判据3 / AC2 — gap-ac46-pool-criteria-in-gate-plus-revaluation-executor):

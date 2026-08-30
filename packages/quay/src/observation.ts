@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { QUAY_VERSION } from "./version.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
+import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
 
 const execFileP = promisify(execFile);
 
@@ -462,7 +463,7 @@ export function computeBlockingRelations(
     const blockedBy: string[] = [];
     for (const y of tasks) {
       if (y.id === x) continue;
-      const yReadyTodo = y.status === "ready" || y.status === "todo";
+      const yReadyTodo = y.status === TASK_STATUS.READY || y.status === TASK_STATUS.TODO;
       const overlap = y.touches.some((p) => xTouches.has(p));
       const yDependsOnX = y.dependsOn.includes(x);
       if (yReadyTodo && (overlap || yDependsOnX)) blocks.push(y.id);
@@ -566,6 +567,34 @@ export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
  *  live process cmdline (`Task: <id>`) is the only carrier that shows it in-flight. */
 export const WORKER_PROCESS_NAME = "quay-task-worker";
 
+/** The worker-driver's mechanical-fan-in result (gap-mech-fan-in-log-webui-visible-clickable A3):
+ *  the per-task mechanical fan-in terminal state the driver writes into worker-outcome.jsonl. Unknown/
+ *  missing fields degrade to null rather than a fabricated reading (hard rule ③b) — same best-effort
+ *  carrier contract as WorkerOutcomeRecord. */
+export interface MechanicalFanInRecord {
+  /** Terminal mechanical fan-in state: "landed" | "red". */
+  outcome: string | null;
+  /** First failing step name (outcome=red); null when landed. */
+  step: string | null;
+  /** Failure reason (outcome=red); null when landed. */
+  reason: string | null;
+  /** fan-in workflow lock hold duration (sec), read from lock-events. */
+  lockHoldSecs: number | null;
+  lockAcquireEpoch: number | null;
+  lockReleaseEpoch: number | null;
+  /** suite end epoch (sec), only when the suite actually ran. */
+  suiteFinishedEpoch: number | null;
+  /** suite three-state outcome ("done" | "red" | "hung"), only when it ran. */
+  suiteOutcome: string | null;
+  /** suite child pid (AC3 ppid probe input), only when it ran. */
+  suitePid: number | null;
+  /** landed sha (develop tip after ff); null when red. */
+  landedSha: string | null;
+  /** fan-in process log file name (`.quay/fan-in-<task>-<runId>.log` basename) — the Runs block's
+   *  view/download link key. null when absent. */
+  fanInLog: string | null;
+}
+
 /** The full outcome record the worker-driver writes (computeOutcome's 14 fields + the
  *  gap-worker-task-transcript-access-webui `session_id` that lands later). Unknown/missing fields
  *  degrade to null rather than a fabricated reading (hard rule ③b) — the carrier is a best-effort
@@ -596,6 +625,31 @@ export interface WorkerOutcomeRecord {
    *  Parses to null until that lands, so a Runs block can link the transcript with zero
    *  re-implementation (this task reuses that task's read+validation, hard rule ③b / AC3). */
   session_id: string | null;
+  /** Mechanical fan-in terminal state (gap-mech-fan-in-log-webui-visible-clickable B1); null when the
+   *  record predates mechanical fan-in or the driver didn't run it. */
+  mechanical_fan_in: MechanicalFanInRecord | null;
+}
+
+/** Parse the driver's `mechanical_fan_in` sub-object into a MechanicalFanInRecord. Pure — a non-object
+ *  / malformed value degrades to null (best-effort runtime log, never a fabricated reading — hard rule ③b). */
+export function parseMechanicalFanIn(v: unknown): MechanicalFanInRecord | null {
+  if (v == null || typeof v !== "object" || Array.isArray(v)) return null;
+  const j = v as Record<string, unknown>;
+  const str = (x: unknown): string | null => (typeof x === "string" && x.length > 0 ? x : null);
+  const num = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) ? x : null);
+  return {
+    outcome: str(j.outcome),
+    step: str(j.step),
+    reason: str(j.reason),
+    lockHoldSecs: num(j.lockHoldSecs),
+    lockAcquireEpoch: num(j.lockAcquireEpoch),
+    lockReleaseEpoch: num(j.lockReleaseEpoch),
+    suiteFinishedEpoch: num(j.suiteFinishedEpoch),
+    suiteOutcome: str(j.suiteOutcome),
+    suitePid: num(j.suitePid),
+    landedSha: str(j.landedSha),
+    fanInLog: str(j.fanInLog),
+  };
 }
 
 /** Parse `.quay/worker-outcome.jsonl` (one JSON object per line) into outcome records. Pure — never
@@ -628,6 +682,7 @@ export function parseWorkerOutcomeRecords(text: string): WorkerOutcomeRecord[] {
       in_flight_count: num(j.in_flight_count),
       timed_out: bool(j.timed_out),
       session_id: str(j.session_id),
+      mechanical_fan_in: parseMechanicalFanIn(j.mechanical_fan_in),
     });
   }
   return out;
@@ -920,12 +975,12 @@ export function readNeedsHumanLedger(root: string): PromotionOutcomeRecord[] {
  *  throws). readLive uses it to drop a worker-carrier task whose status is already "done" — the
  *  driver's `exited-not-landed` on a done task is a leftover-worktree cleanup artifact, the same
  *  "not really in-flight" class as the AC2 ghost, not live work. */
-function readTaskStatusOnDisk(root: string, taskId: string): string | null {
+function readTaskStatusOnDisk(root: string, taskId: string): TaskStatus | null {
   try {
     const raw = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
     const parsed = parseFrontmatter(raw);
     const fm = parsed.frontmatter as Record<string, unknown>;
-    return typeof fm.status === "string" ? fm.status : null;
+    return isTaskStatus(fm.status) ? fm.status : null;
   } catch {
     return null;
   }
@@ -937,7 +992,7 @@ function readTaskStatusOnDisk(root: string, taskId: string): string | null {
  *  ghost (its worker session ended, was superseded, or escaped to a human WITHOUT a normal fan-in END
  *  telemetry). `todo`/`ready` are NOT terminal: `ready` is the genuine in-flight case (AC2), and a
  *  `todo` carrying a start event is not evidence of terminality. */
-const NON_LIVE_TASK_STATUSES: ReadonlySet<string> = new Set(["done", "superseded", "needs-human"]);
+const NON_LIVE_TASK_STATUSES: ReadonlySet<string> = new Set([TASK_STATUS.DONE, TASK_STATUS.SUPERSEDED, TASK_STATUS.NEEDS_HUMAN]);
 
 /**
  * Live loop view: in-flight fast-mode tasks + elapsed minutes + concurrency + CPU pressure +
@@ -1096,7 +1151,7 @@ export function readLive(
     const byTask = new Map<string, InFlightTask>();
     for (const t of inFlight) byTask.set(t.taskId, t);
     for (const t of workerInFlight) {
-      if (readTaskStatusOnDisk(root, t.taskId) === "done") continue;
+      if (readTaskStatusOnDisk(root, t.taskId) === TASK_STATUS.DONE) continue;
       byTask.set(t.taskId, t);
     }
     inFlight = [...byTask.values()].sort(
@@ -2423,7 +2478,7 @@ export async function readManager(root: string): Promise<ManagerResult> {
   };
 }
 
-// ── Tests view (verification-round.jsonl + full-suite-state.json) ──────────────────────────────────
+// ── Tests view (verification-round.jsonl) ─────────────────────────────────────────────────────────
 
 export interface TestRunRecord {
   round: number | null;
@@ -2466,8 +2521,8 @@ export interface TestRunRecord {
   perFile?: { file: string; durationMs: number; passed: boolean; endedAtMs?: number; startedAtMs?: number }[] | null;
   // gap-web-tests-three-sections-round-drift — the round's suite runId (written by the fan-in thin
   // writer, `pre-verified-round-record`). Absent on legacy/full-suite-runner rows → undefined (never a
-  // fabricated ""), the same absent-field contract as buckets/perFile. Lets the /tests page map the
-  // load curve's current runId (full-suite-state.json) back to its round number + startedAt.
+  // fabricated ""), the same absent-field contract as buckets/perFile. Lets the /tests page key the
+  // load curve's suite-load-<runId>.jsonl directly off the ledger row (no full-suite-state.json read).
   runId?: string | null;
 }
 
@@ -2475,12 +2530,9 @@ export interface TestsResult {
   status: ObservationStatus;
   reason: string | null;
   runs: TestRunRecord[];
-  /** Current `.quay/full-suite-state.json` `state` (running|green|red|absent), null when absent. */
-  currentState: string | null;
 }
 
 export const VERIFICATION_ROUND_REL = "../../../.quay/verification-round.jsonl";
-export const FULL_SUITE_STATE_REL = "../../../.quay/full-suite-state.json";
 
 /** Parse one verification-round.jsonl line into a TestRunRecord. Malformed → null (never throw). */
 export function parseVerificationRound(line: string): TestRunRecord | null {
@@ -2589,16 +2641,9 @@ export function readTests(root: string): TestsResult {
     reason = `verification-round.jsonl 读失败：${err instanceof Error ? err.message : String(err)}`;
   }
 
-  let currentState: string | null = null;
-  try {
-    const statePath = path.join(root, ".quay", "full-suite-state.json");
-    if (fs.existsSync(statePath)) {
-      const j = JSON.parse(fs.readFileSync(statePath, "utf8"));
-      currentState = typeof j.state === "string" ? j.state : null;
-    }
-  } catch { currentState = null; }
-
-  return { status: statePathStatus, reason, runs, currentState };
+  // /tests 页是历史/可观测性面，只读数据面载体 verification-round.jsonl（红绿都入账）；控制面
+  // 单状态文件 full-suite-state.json（gate 信号、D7 镜像只写绿、scope 标注）不进入显示层。
+  return { status: statePathStatus, reason, runs };
 }
 
 // ── Sessions view (session-liveness + resolved transcript tails) ───────────────────────────────────

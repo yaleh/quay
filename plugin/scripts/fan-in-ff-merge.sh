@@ -60,7 +60,7 @@
 # --agent-id is OPTIONAL for backward compat with pre-AC67 callers; when absent the fields are null
 # (which is exactly the absence the checker flags — the field is only "real" when the subagent sets it).
 #
-# AC78 (gap-ac78-fan-in-workflow-a6-check, 判据2(c)): --agent-id is now FAIL-CLOSED self-validated —
+# AC78 (判据2(c)): --agent-id is now FAIL-CLOSED self-validated —
 # if it resolves to a TOP-LEVEL session id (a `<project>/<id>.jsonl` or `<project>/<id>/` exists),
 # the ff is being executed by the MAIN SESSION (AC72/AC73's defect) ⇒ exit 2 before any lock event /
 # retry record is written. The fan-in must be executed by a subagent, whose own id resolves to
@@ -156,10 +156,10 @@ if [ -z "${lock_events}" ]; then lock_events="${root}/.quay/fan-in-merge-lock-ev
 if [ -z "${retry_record}" ]; then retry_record="${root}/.quay/fan-in-retries.jsonl"; fi
 if [ -z "${escalations}" ]; then escalations="${root}/.quay/fan-in-ff-escalations.jsonl"; fi
 
-# fan-in workflow lock（fan-in-workflow.lock）已收进 driver（ADR-034, gap-adr034-fan-in-lock-holder-
-# supervised）：worker-driver.ts 的 acquireFanInWorkflowLock 经非分离直接子进程持锁、随 driver 死自动
-# 释放。本脚本的 --acquire/--release-workflow-lock 分离 holder + flag 释放协议已废除——锁事件仍写
-# .quay/fan-in-workflow-lock-events.jsonl（由 driver 的 holder 写），fan-in-ff-protocol-check 判据4 读它。
+# fan-in lock（fan-in.lock）已收进 driver（ADR-034, gap-adr034-fan-in-lock-holder-
+# supervised）：worker-driver.ts 的 acquireFanInLock 经非分离直接子进程持锁、随 driver 死自动
+# 释放。本脚本的 --acquire/--release-fan-in-lock 分离 holder + flag 释放协议已废除——锁事件仍写
+# .quay/fan-in-lock-events.jsonl（由 driver 的 holder 写），fan-in-ff-protocol-check 判据4 读它。
 
 # ── inert-delta classifier (gap-fan-in-ff-retry-reruns-suite-on-inert-increment) ────────────────────
 # The "惰性" (doc-only) judgment — used by BOTH the suite-certificate gate (AC3) and the in-lock

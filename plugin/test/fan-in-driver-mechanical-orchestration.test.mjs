@@ -5,7 +5,7 @@
 // fan-in 锁机械包裹 suite 锁。取代 fan-in-execute.js workflow 子代理串行跑机械步骤（30min 模型延迟）。
 //
 // Coverage map (task ACs):
-//   AC1（锁时长塌缩）— 一次机械 fan-in 的 workflow 锁持有时长 ≤ 机械时长（⛔ 不再 ~1800s 恒值），
+//   AC1（锁时长塌缩）— 一次机械 fan-in 的 fan-in 锁持有时长 ≤ 机械时长（⛔ 不再 ~1800s 恒值），
 //         显著低于 1800s 且与任务内容相关（fake suite 快 ⇒ 持有时长小）。
 //   AC2（锁罩住 suite）— lock release epoch ≥ suite 结束 epoch（⛔ 不再「suite 跑在 release 之后」）。
 //   AC3（无 detach）— suite 进程 ppid 指向 driver（⛔ 不是 setsid+&+disown 的孤儿 ppid=1）。
@@ -24,7 +24,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { runMechanicalFanIn, readWorkflowLockHold, acquireFanInWorkflowLock, readTaskStatus } from "../scripts/worker-driver.ts";
+import { runMechanicalFanIn, readFanInLockHold, acquireFanInLock, readTaskStatus } from "../scripts/worker-driver.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { runAsync } from "../scripts/driver-runtime.ts";
 
@@ -156,7 +156,7 @@ test("AC1/AC2/AC4 — 机械 fan-in 落地：锁持有时长 ≤ 机械时长（
     assert.equal(fs.existsSync(retries), false, "no retry record for a clean mechanical fan-in");
 
     // 反例判据（SPEC §6）负控制：锁事件恰一对 acquire→release（无二次 acquire / 无 watchdog 强制释放）。
-    const lock = readWorkflowLockHold(repo, TASK, "mf-run-1");
+    const lock = readFanInLockHold(repo, TASK, "mf-run-1");
     assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "exactly one acquire+release pair must exist");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
@@ -220,7 +220,7 @@ test("suite 红 ⇒ 机械 fan-in red（step=suite），不落地、锁仍 relea
     // 锁在任一退出路径都 release（finally）⇒ release 事件已写（干净 acquire→release 对，ADR-034 holder
     // 在 driver 关 stdin 写端后写 release 事件）。读事件文件判据（⛔ 非 re-acquire——re-acquire 若锁未释放
     // 会阻塞在 flock 上把测试挂死）。
-    const lock = readWorkflowLockHold(repo, TASK, runId);
+    const lock = readFanInLockHold(repo, TASK, runId);
     assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "red path must release the lock (finally) — clean acquire+release pair in the events file");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
@@ -302,7 +302,7 @@ test("archguard 依赖环 red ⇒ 机械 fan-in red（step=archguard-structure�
     assert.equal(r.outcome, "red");
     assert.equal(r.step, "archguard-structure");
     assert.equal(git(repo, "worktree", "list", "--porcelain").stdout.includes(`task/${TASK}`), true, "red path must NOT remove the worktree");
-    const lock = readWorkflowLockHold(repo, TASK, runId);
+    const lock = readFanInLockHold(repo, TASK, runId);
     assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "red path must release the lock (finally)");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
@@ -333,25 +333,27 @@ test("archguard 结构信号镜像到主检出载体（AC2 机制）——worktr
 });
 
 // ── gap-mech-fan-in-acquire-lock-timeout-queue-semantics：acquire 步 120s 超时去掉（排队语义）─────
-// workflow 锁是正确性锁（fan-in-ff-merge.sh:203 unbounded `flock -x`），排队等待正是它存在的意义；
+// fan-in 锁是正确性锁（fan-in-ff-merge.sh:203 unbounded `flock -x`），排队等待正是它存在的意义；
 // 机械 fan-in 首步 acquire 被套 120s kill 会在「排队等待」时误杀（首个生产任务排第 2 位即被杀）。
 // 修法 = acquire 步 unbounded（Infinity），死持有者由锁内 1800s watchdog 兜底，不靠 driver 侧 SIGKILL。
 
 // AC1（能取假，结构面）：acquire 步不再传 120_000，改传 Infinity（unbounded）。结构断言是唯一能在
 // 不真等 120s 的前提下取假的判据——排队等待时长本身不是可注入的 seam（120s 是硬编码字面量）。
-test("AC1 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics, ADR-034 修订) — acquire 步无超时：driver 经非分离 holder 持锁（flock -x 无 -w），⛔ 无 --acquire-workflow-lock 分离 holder、⛔ 无 120s 短超时", () => {
+test("AC1 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics, ADR-034 修订) — acquire 步无超时：driver 经非分离 holder 持锁（flock -x 无 -w），⛔ 无 --acquire-fan-in-lock 分离 holder、⛔ 无 120s 短超时", () => {
   const src = fs.readFileSync(DRIVER_SRC, "utf8");
-  // ADR-034：acquire 不再经 fan-in-ff-merge.sh --acquire-workflow-lock（分离 holder + flag 协议已废除）。
-  // ⛔ 散文注释可合法提及被废除的 flag 名；本断言查【argv 字符串字面量】形态（`--acquire-workflow-lock"`，
+  // ADR-034：acquire 不再经 fan-in-ff-merge.sh --acquire-fan-in-lock（分离 holder + flag 协议已废除）。
+  // ⛔ 散文注释可合法提及被废除的 flag 名；本断言查【argv 字符串字面量】形态（`--acquire-fan-in-lock"`，
   // 带闭引号）——只有真调用会带闭引号，注释不会。
-  assert.doesNotMatch(src, /--acquire-workflow-lock"/, "no argv carries the --acquire-workflow-lock flag (detached-holder protocol abolished)");
-  assert.match(src, /acquireFanInWorkflowLock/, "runMechanicalFanIn must acquire via the driver-side non-detached holder");
-  // holder 的 flock 无 -w（unbounded）——workflow 锁是正确性锁，排队等待正是它存在的意义（⛔ 无超时）。
+  assert.doesNotMatch(src, /--acquire-fan-in-lock"/, "no argv carries the --acquire-fan-in-lock flag (detached-holder protocol abolished)");
+  assert.match(src, /acquireFanInLock/, "runMechanicalFanIn must acquire via the driver-side non-detached holder");
+  // holder 的 flock 无 -w（unbounded）——fan-in 锁是正确性锁，排队等待正是它存在的意义（⛔ 无超时）。
   assert.match(src, /flock -x "\$fd"/, "holder flock must be unbounded (no -w)");
   assert.doesNotMatch(src, /flock -x -w "\$fd"/, "holder flock must NOT carry a bounded wait");
   // 其余机械步骤仍是有限时长步骤（超时照旧，⛔ 不把「去掉短超时」误扩成「去掉所有超时」）。
-  assert.match(src, /mechSh\(\["git", "-C", worktree, "merge", "--no-edit", mergeTarget\], 120_000\)/, "merge-develop step keeps its finite timeout");
-  assert.match(src, /mechSh\(\["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget\], 120_000\)/, "typecheck step keeps its finite timeout");
+  // gap-mech-fan-in-log-webui-visible-clickable A1：这些步骤现经 step(name, argv, timeoutMs) 包一层
+  // （run + 计时 + trace 落 .quay/fan-in-*.log）——超时字面量仍是 120_000，只是调用形态从 mechSh 变 step。
+  assert.match(src, /step\("merge-develop", \["git", "-C", worktree, "merge", "--no-edit", mergeTarget\], 120_000\)/, "merge-develop step keeps its finite timeout");
+  assert.match(src, /step\("typecheck", \["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget\], 120_000\)/, "typecheck step keeps its finite timeout");
   // runAsync 对 Infinity 显式不设 SIGKILL timer（⛔ setTimeout(…, Infinity) → Node 压到 1ms 立即杀的 footgun）。
   const rt = fs.readFileSync(RUNTIME_SRC, "utf8");
   assert.match(rt, /if \(Number\.isFinite\(timeoutMs\)\)\s*\{\s*\n\s*timer = setTimeout\(/, "runAsync guards the SIGKILL timer behind Number.isFinite(timeoutMs) — Infinity ⇒ no timer");
@@ -364,8 +366,8 @@ test("AC2 机制 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics) — 排�
   const suiteLog = path.join(base, "suite.log");
   let holderLock = null;
   try {
-    // 持有者（position 1）先 acquire workflow 锁并保持（driver 经非分离 holder 持锁，ADR-034）。
-    holderLock = await acquireFanInWorkflowLock({ root: repo, task: HOLDER_TASK, runId: "holder-run" });
+    // 持有者（position 1）先 acquire fan-in 锁并保持（driver 经非分离 holder 持锁，ADR-034）。
+    holderLock = await acquireFanInLock({ root: repo, task: HOLDER_TASK, runId: "holder-run" });
 
     // 机械 fan-in（position 2）排队：其 holder 在 flock 上排队，等持有者释放后落地。⛔ 若 acquire 步仍是
     // 短超时，这里 1.5s 的排队不会触发它（1.5s ≪ 短超时）——本测试单独不取假，取假靠 AC1 的结构断言；
@@ -416,7 +418,7 @@ test("短超时负控制 — runAsync 有限超时仍 SIGKILL（⛔ 超时机制
 // 版本错位（旧守护 in-process 跑 fan-in、但 fan-in 编排脚本从 worktree 加载 ⇒ 锁半与编排半不一致）的
 // 类级修法：机械 fan-in 每任务起 fresh 进程加载 worker-driver.ts --mechanical-fan-in（entry = 主检出
 // opts.root，⛔ 非 worktree——gap-fan-in-spawn-stale-worktree-executor-missing-argv），
-// 锁半（acquireFanInWorkflowLock，ADR-034）与编排半（fan-in-ff-merge.sh）同源 ⇒ 一致。
+// 锁半（acquireFanInLock，ADR-034）与编排半（fan-in-ff-merge.sh）同源 ⇒ 一致。
 // ⛔ token 闸（L1）已由 fd902a824 重定范围到 P2 的 TS 模块 ff 入口，本任务不再实现 token 闸。
 // AC1（版本错位已消）/ AC2（fresh 进程真实执行 + JSON 回传 round-trip）。
 
