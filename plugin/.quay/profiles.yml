@@ -31,6 +31,3 @@ roles:
   outer:
     profile: worker-default
     name: quay-outer
-  inner:
-    profile: worker-default
-    name: quay-inner

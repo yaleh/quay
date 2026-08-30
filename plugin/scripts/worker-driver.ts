@@ -193,6 +193,12 @@ import {
 // 静默看门狗，⛔ 不新写一份 suite 生命周期）。suiteLockBase 读 TS 侧单一真相源槽路径。
 import { spawnSuiteAndWait, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
 import { suiteLockBase } from "./suite-lock-slots.ts";
+// D7：机械 fan-in 的 bucket suite 绿后，把本轮 suite 状态镜像到权威载体 full-suite-state.json
+// （复用 mirror-full-suite-state.ts 的 build/write/skip 单一实现，⛔ 不另写一份 state shape）。
+import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentState } from "./mirror-full-suite-state.ts";
+// D7：laneCount 取 full-suite-runner.ts 的 defaultLaneCount（nproc-derived 单一真相源，读宿主 + QUAY_MAX_*
+// 定义点，⛔ 不写字面量 1——concurrency-literal-check P4 会把 `laneCount: 1` 判为未声明并发字面量违规）。
+import { defaultLaneCount } from "./full-suite-runner.ts";
 export {
   splitArgs,
   launchArgv,
@@ -693,17 +699,61 @@ export interface LandingEvidence {
   worktreePresent: false;
 }
 
-/** 落地判定（AC1 判据）：landed = status=done ∧ 无残留 worktree，经 AC153 单一不变式
- *  verifyIndependently 表达成 DriverResult（⛔ 不信 exitCode，读任务侧独立直接量）。三态（证伪优先）：
- *   verified      = status=done ∧ 无残留 worktree（独立判据证实落地）
- *   failed        = status≠done 或 残留 worktree（任一独立量证伪即可，⛔ 不需读全另一量）
- *   not-evaluated = 既未证真也未证伪（status 读不到且未证伪、或 worktree 读不到且 status 未证伪）
+/** `landedSha` 是否为 `branch`（缺省 develop）的 tip 或祖先（`git merge-base --is-ancestor`）。
+ *  D5：机械 fan-in 落地后，落地判定从 ff 结果派生——读【正确的】独立量（git develop 状态），
+ *  ⛔ 不再读主检出工作分支的 `tasks/*.md`（主检出停 doc-only 分支 = 合法滞后，读它 ⇒ 假 not-landed）。
+ *  git 读失败（非 git 仓库 / 对象不存在 / rev-parse 失败）⇒ null（读不懂 ≠ 非祖先）。 */
+export function isShaAncestorOfBranch(root: string, sha: string, branch: string = "develop"): boolean | null {
+  const tip = spawnSync("git", ["-C", root, "rev-parse", branch], { encoding: "utf8" });
+  if (tip.status !== 0 || tip.error || !(tip.stdout ?? "").trim()) return null;
+  const r = spawnSync("git", ["-C", root, "merge-base", "--is-ancestor", sha, (tip.stdout ?? "").trim()], { encoding: "utf8" });
+  if (r.error) return null;
+  return r.status === 0;
+}
+
+/** 落地判定（AC1 判据），经 AC153 单一不变式 verifyIndependently 表达成 DriverResult（⛔ 不信
+ *  exitCode，读任务侧独立直接量）。两态输入：
+ *   - `landedSha`（机械 fan-in 落地后传入）= ff 结果的落地 sha ⇒ 判定从 ff 结果派生
+ *     （landedSha 是 develop tip/祖先 ∧ 无残留 worktree），⛔ 不读 readTaskStatus（D5）；
+ *   - `landedSha` null（未跑机械 fan-in / red / 旧路径）⇒ 沿用 status-based 判定（status=done ∧ 无残留）。
+ * 三态（证伪优先）：
+ *   verified      = 落地判据证实（独立判据证实落地）
+ *   failed        = 任一独立量证伪（⛔ 不需读全另一量）
+ *   not-evaluated = 既未证真也未证伪（读不懂，⛔ 不伪造成 failed）
  * 下游 computeOutcome 把 verified→completed、failed/not-evaluated→exited-not-landed（fail-closed 朝
  * 「未完成」，但保留 reason 区分「证伪」与「未评估」）。 */
-export function computeLandingState(root: string, taskId: string): DriverResult<LandingEvidence> {
-  const status = readTaskStatus(root, taskId);
+export function computeLandingState(root: string, taskId: string, landedSha: string | null = null): DriverResult<LandingEvidence> {
   const worktreePresent = worktreePresentForTask(root, taskId);
 
+  // D5：机械 fan-in 落地后，判定从 ff 结果派生（读 git develop 状态，⛔ 非主检出工作分支的 tasks/*.md）。
+  if (landedSha != null && landedSha !== "") {
+    const ancestor = isShaAncestorOfBranch(root, landedSha);
+    const failedParts: string[] = [];
+    if (ancestor === false) failedParts.push(`landedSha ${landedSha} is not develop tip/ancestor`);
+    if (worktreePresent === true) failedParts.push(`leftover worktree task/${taskId} still present`);
+    return verifyIndependently(
+      {
+        value: { status: "done", worktreePresent: false },
+        verifiedBy: "landedSha is develop tip/ancestor ∧ no leftover worktree (ff-result-derived, ⛔ not stale main-checkout status)",
+        failedReason: failedParts.join(" and "),
+        notEvaluatedReason:
+          ancestor === null
+            ? "landedSha ancestry unreadable (git merge-base failed)"
+            : "worktree state unreadable (git worktree list failed)",
+      },
+      () => {
+        // 证伪优先：landedSha 不在 develop 历史 / 残留 worktree，任一证伪 ⇒ failed。
+        if (ancestor === false) return false;
+        if (worktreePresent === true) return false;
+        // 证真：landedSha 是 develop tip/祖先 ∧ 确认无残留。
+        if (ancestor === true && worktreePresent === false) return true;
+        // 读不懂（ancestor 或 worktree 读不到，且未证伪）⇒ not-evaluated。
+        return null;
+      },
+    );
+  }
+
+  const status = readTaskStatus(root, taskId);
   return verifyIndependently(
     {
       value: { status: TASK_STATUS.DONE, worktreePresent: false },
@@ -771,6 +821,13 @@ export function computeWorkerRoundRecord(opts: {
   liveness?: LivenessResult | null;
   /** 本轮现观测到的冷启动在飞 task id（排序后）。空数组 = 观测过且无（⛔ 与「没观测」可区分）。 */
   coldStartInflight: string[];
+  /** 本轮在飞的 task id（实现中 + 机械 fan-in + 冷启动在飞，= inFlightTasks() 的返回值）。空数组 =
+   *  观测过且无（⛔ 与「没观测」可区分）。gap-live-mechanical-fan-in-inflight-invisible：机械 fan-in
+   *  窗口 worker 已 exit、无 outcome、无 workflow-events，round 的 task id 是 Live 页唯一可见载体。 */
+  inFlightTasks?: string[];
+  /** 本轮 markNeedsHuman 翻转的结果（含 committed——gap-mark-needs-human-commit-after-write：翻转写盘
+   *  即提交，committed=false 表示 repo-less no-op / 提交失败，可观测非静默）。缺省 = 本轮无翻转。 */
+  needsHuman?: Array<{ id: string; ok: boolean; committed: boolean; reason: string }>;
 }) {
   return {
     ts: opts.at,
@@ -783,6 +840,9 @@ export function computeWorkerRoundRecord(opts: {
     stop_reason: opts.stopReason,
     liveness: opts.liveness ?? null,
     cold_start_inflight: opts.coldStartInflight,
+    in_flight_tasks: opts.inFlightTasks ?? [],
+    needs_human: (opts.needsHuman ?? []).map((n) => n.id),
+    needs_human_committed: (opts.needsHuman ?? []).map((n) => ({ id: n.id, committed: n.committed })),
   };
 }
 
@@ -806,7 +866,7 @@ export interface WorkerCmdOptions {
 function driverFanInNote(): string {
   return [
     `exit — the worker-driver takes over your worktree and mechanically runs fan-in`,
-    `(merge develop → delta 判定 → typecheck → scoped门 → suite → ff) to develop.`,
+    `(merge develop → delta 判定 → typecheck → archguard结构闸 → scoped门 → suite → ff) to develop.`,
     `You do NOT run the suite and do NOT call the fan-in workflow yourself.`,
   ].join(" ");
 }
@@ -965,6 +1025,22 @@ export async function branchHeadSubjectAsync(root: string, taskId: string): Prom
   return out === "" ? null : out;
 }
 
+/** 把一条 exited-not-landed 记录格式化为人可读的失败原因（gap-fan-in-merge-develop-derived-recompute-
+ *  and-reason B）。优先读 mechanical_fan_in（step + reason 拼接成「step=merge-develop: CONFLICT in <file>」）
+ *  ——merge develop 冲突的具体文件在 mechanical_fan_in.reason 里，通用 failure_reason 只写「task status=ready
+ *  not done」，⛔ 不含冲突文件 ⇒ worker 无从精准 resolve。mechanical_fan_in 无 step（缺键 / 非 red / 非对象）
+ *  ⇒ 回退 failure_reason（保留旧行为——非机械 fan-in 失败 / 落地未证实的记录仍读通用 reason）。 */
+function formatExitedNotLandedReason(failureReason: unknown, mechanicalFanIn: unknown): string | null {
+  if (mechanicalFanIn && typeof mechanicalFanIn === "object") {
+    const m = mechanicalFanIn as { step?: unknown; reason?: unknown };
+    if (typeof m.step === "string" && m.step) {
+      const reason = typeof m.reason === "string" && m.reason ? m.reason : "(no reason)";
+      return `step=${m.step}: ${reason}`;
+    }
+  }
+  return typeof failureReason === "string" ? failureReason : null;
+}
+
 /** 该 task 最近一条 exited-not-landed 的失败原因（AC2「上次失败原因」，读 worker-outcome.jsonl）。
  *  无记录 / 读失败 ⇒ null（读不懂 ≠ 无失败——但续做 prompt 以 "(unknown)" 呈现，不伪装成「没有失败」）。 */
 export function lastExitedNotLandedReason(root: string, taskId: string): string | null {
@@ -978,14 +1054,14 @@ export function lastExitedNotLandedReason(root: string, taskId: string): string 
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    let rec: { task?: unknown; final_state?: unknown; failure_reason?: unknown };
+    let rec: { task?: unknown; final_state?: unknown; failure_reason?: unknown; mechanical_fan_in?: unknown };
     try {
       rec = JSON.parse(trimmed);
     } catch {
       continue;
     }
     if (rec.task === taskId && rec.final_state === "exited-not-landed") {
-      last = typeof rec.failure_reason === "string" ? rec.failure_reason : null;
+      last = formatExitedNotLandedReason(rec.failure_reason, rec.mechanical_fan_in);
     }
   }
   return last;
@@ -1025,6 +1101,20 @@ export async function continueStateForTaskAsync(root: string, taskId: string): P
   };
 }
 
+/** 冲突消解协议（gap-continue-prompt-conflict-resolution-protocol）：机械 fan-in 的 merge develop 步
+ *  在 CONTINUE 轮撞冲突时，旧 prompt 只带失败原因、不含消解指令 ⇒ 消冲突靠 worker 自行发挥（运气）。
+ *  本段按文件类型分派消解动作：outline 冲突取 develop 版（⛔ 不手并计数）、code 文件取语义并集、然后
+ *  `git commit --no-edit` 完成 merge——⛔ 禁止带着 unmerged paths（UU）退出，否则下一轮 fan-in 的
+ *  merge step 再失败。 */
+function continueConflictResolutionNote(): string {
+  return [
+    `CONFLICT RESOLUTION — if the prior mechanical fan-in left the worktree with unmerged paths (UU in \`git status\`), or \`git merge develop\` reports CONFLICT, resolve it BEFORE continuing implementation; ⛔ never exit while unmerged paths remain (the next fan-in merge step would fail again).`,
+    `(1) outline doc (docs/proposals/quay-product-outline.md — its §6 DELIVERY-INVENTORY counts are computed at check-time, no snapshot to recompute): take the develop version (\`git checkout develop -- docs/proposals/quay-product-outline.md\`); ⛔ do NOT hand-merge the counts.`,
+    `(2) code files (e.g. worker-driver.ts): read both sides of the diff and take the semantic union of the two changes (keep both changes where they do not conflict).`,
+    `(3) \`git add <resolved files>\` then \`git commit --no-edit\` to complete the merge.`,
+  ].join(" ");
+}
+
 /** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
  *  状态（分支提交 / AC 勾选 / 失败原因）供 worker 从保留 worktree 继续。⛔ 不含 "create an isolated
  *  git worktree"（AC1 取假判据——旧 prompt 逐字说 create 是撞死根因）。
@@ -1045,6 +1135,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `(it would fail: the path/branch already exists). Prior round state: branch task/${task} already has`,
     `${commits} commits${head}; Acceptance Criteria currently checked ${ac};`,
     `the last round exited-not-landed because: ${reason}.`,
+    `${continueConflictResolutionNote()}`,
     `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch),`,
@@ -1139,6 +1230,138 @@ export function parseMaxRetries(raw: string | undefined): number {
   if (raw == null) return RETRY_CAP_DEFAULT;
   const n = Number(raw);
   return Number.isInteger(n) && n >= 1 ? n : RETRY_CAP_DEFAULT;
+}
+
+// ── 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff）────────────────────────────
+// worker-driver 对 selector API 错误 / fallback 失败的【快速死亡】（<60s 墙钟）无退避——17:22–17:56 两任务
+// 54 次「worker exited with code 1」全部 <60s 快速重派，纯烧派发预算（subagent spawn 预算 / 会话累计）。
+// 修法（⛔ 不修模型名——那是 a7a507eab 治「为什么 400」；本条治「出错时为什么无退避疯狂重试」，两条独立）：
+//   worker <quickDeathMs 连续死亡 ≥backoffThreshold 次 ⇒ 对该任务加指数退避（backoffUntil，⛔ 不立即重派），
+//   重派间隔随连续死亡次数指数增长、封顶 maxBackoffMs；退避到上限（maxRetries，复用现有重试上限机制的
+//   --max-retries 旋钮）⇒ markNeedsHuman（⛔ 不无限退避）。退避状态按 task 记（⛔ 不全局——一个任务退避
+//   不该拖垮别的任务，AC2）。机制常量值不依赖宿主规格（硬规则 4 推论二：quickDeathMs=60s 是提案观测到的
+//   「<60s 快速重派」、baseBackoffMs/maxBackoffMs 是【指数退避的几何底/顶】非机器核数/内存上限）。
+
+/** 快速死亡退避配置。quickDeathMs/backoffThreshold/baseBackoffMs/maxBackoffMs 是机制常量（非宿主
+ *  规格阈值），退避上限（markNeedsHuman 阈值）复用现有 --max-retries（backoffMaxRetries 由调用方传
+ *  maxRetries，⛔ 不再新设一个数值旋钮——plan item 3「复用现有重试上限机制」）。 */
+export interface QuickDeathBackoffConfig {
+  /** 墙钟 < 此值（ms）判为「快速死亡」。 */
+  quickDeathMs: number;
+  /** 连续快速死亡 ≥ 此次数才开始退避（M，AC1「连续死亡 ≥M 次后」）。 */
+  backoffThreshold: number;
+  /** 第一次退避的等待 ms（指数底数）。 */
+  baseBackoffMs: number;
+  /** 退避等待上限 ms（指数增长封顶——plan item 1「退避上限可配置」）。 */
+  maxBackoffMs: number;
+}
+
+export const QUICK_DEATH_BACKOFF_DEFAULT: QuickDeathBackoffConfig = {
+  quickDeathMs: 60_000,
+  backoffThreshold: 1,
+  baseBackoffMs: 30_000,
+  maxBackoffMs: 300_000,
+};
+
+/** 快速死亡终态：worker 没跑完就死（failed 退出非零 / spawn-failed 起不来 / killed 被信号杀）。
+ *  exited-not-landed 是「跑完没落地」（自有重试上限机制）、timed-out 是「超时被杀保留 worktree」
+ *  （自有语义），两者都不算「快速死亡」——⛔ 与既有机制重叠计数（同一条失败路径进两个桶）。 */
+const QUICK_DEATH_FINAL_STATES: ReadonlySet<string> = new Set(["failed", "spawn-failed", "killed"]);
+
+/** 是否「快速死亡」：终态属快速死亡类 ∧ 墙钟 < quickDeathMs。 */
+export function isQuickDeath(
+  finalState: string,
+  wallClockMs: number,
+  cfg: QuickDeathBackoffConfig = QUICK_DEATH_BACKOFF_DEFAULT,
+): boolean {
+  return QUICK_DEATH_FINAL_STATES.has(finalState) && wallClockMs < cfg.quickDeathMs;
+}
+
+/** 指数退避等待：baseBackoffMs * 2^(consecutive - backoffThreshold)，封顶 maxBackoffMs（⛔ 不无限增长）。 */
+export function backoffDelayMs(
+  consecutive: number,
+  cfg: QuickDeathBackoffConfig = QUICK_DEATH_BACKOFF_DEFAULT,
+): number {
+  const exp = Math.max(0, consecutive - cfg.backoffThreshold);
+  return Math.min(cfg.maxBackoffMs, cfg.baseBackoffMs * 2 ** exp);
+}
+
+/** 快速死亡退避状态（按 task 记，⛔ 不全局）。跨轮存活于常驻循环内（⛔ 不落盘，与 RetryState 同寿命）。 */
+export interface QuickDeathBackoffState {
+  /** task id → 连续快速死亡次数。 */
+  counts: Map<string, number>;
+  /** task id → 退避到此时刻（epoch ms）。now < until 期间不重派该 task。 */
+  backoffUntil: Map<string, number>;
+}
+
+/** 新建一个退避状态。 */
+export function newQuickDeathBackoffState(): QuickDeathBackoffState {
+  return { counts: new Map(), backoffUntil: new Map() };
+}
+
+/** 该 task 此刻是否在退避中（backoffUntil 未到）。 */
+export function isBackedOff(state: QuickDeathBackoffState, taskId: string, nowMs: number): boolean {
+  const until = state.backoffUntil.get(taskId);
+  return until != null && nowMs < until;
+}
+
+/** 记录一次 worker 终态对退避状态的影响（纯逻辑，可单测）：
+ *   非快速死亡（worker 活过 quickDeathMs，或 completed/exited-not-landed/timed-out）⇒ 复位连续计数
+ *   （「连续」断链，⛔ 不把慢速失败算进快速死亡序列）。
+ *   快速死亡 ⇒ 连续计数 +1；≥backoffMaxRetries ⇒ newlyNeedsHuman（⛔ 不设 backoffUntil——转 needs-human
+ *   由 notNeedsHuman/retryExhausted 过滤负责停止重派，不再退避）；否则 ≥backoffThreshold ⇒ 设 backoffUntil。
+ *  @returns { quickDeath, backedOff, newlyNeedsHuman } */
+export function recordQuickDeathBackoff(
+  state: QuickDeathBackoffState,
+  taskId: string,
+  finalState: string,
+  wallClockMs: number,
+  nowMs: number,
+  backoffMaxRetries: number,
+  cfg: QuickDeathBackoffConfig = QUICK_DEATH_BACKOFF_DEFAULT,
+): { quickDeath: boolean; backedOff: boolean; newlyNeedsHuman: boolean } {
+  if (!isQuickDeath(finalState, wallClockMs, cfg)) {
+    state.counts.delete(taskId);
+    state.backoffUntil.delete(taskId);
+    return { quickDeath: false, backedOff: false, newlyNeedsHuman: false };
+  }
+  const n = (state.counts.get(taskId) ?? 0) + 1;
+  state.counts.set(taskId, n);
+  if (n >= backoffMaxRetries) {
+    state.backoffUntil.delete(taskId);
+    return { quickDeath: true, backedOff: false, newlyNeedsHuman: true };
+  }
+  const backedOff = n >= cfg.backoffThreshold;
+  if (backedOff) state.backoffUntil.set(taskId, nowMs + backoffDelayMs(n, cfg));
+  return { quickDeath: true, backedOff, newlyNeedsHuman: false };
+}
+
+/** 解析 --quick-death-ms <ms>（快速死亡墙钟阈值）。缺省/非法 ⇒ 缺省（fail-to-default 约定）。 */
+export function parseQuickDeathMs(raw: string | undefined): number {
+  if (raw == null) return QUICK_DEATH_BACKOFF_DEFAULT.quickDeathMs;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : QUICK_DEATH_BACKOFF_DEFAULT.quickDeathMs;
+}
+
+/** 解析 --backoff-base-ms <ms>（指数退避底数）。缺省/非法 ⇒ 缺省（fail-to-default 约定）。 */
+export function parseBackoffBaseMs(raw: string | undefined): number {
+  if (raw == null) return QUICK_DEATH_BACKOFF_DEFAULT.baseBackoffMs;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : QUICK_DEATH_BACKOFF_DEFAULT.baseBackoffMs;
+}
+
+/** 解析 --backoff-max-ms <ms>（指数退避封顶）。缺省/非法 ⇒ 缺省（fail-to-default 约定）。 */
+export function parseBackoffMaxMs(raw: string | undefined): number {
+  if (raw == null) return QUICK_DEATH_BACKOFF_DEFAULT.maxBackoffMs;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : QUICK_DEATH_BACKOFF_DEFAULT.maxBackoffMs;
+}
+
+/** 解析 --backoff-threshold <n>（连续快速死亡 M 次才开始退避）。缺省/非法 ⇒ 缺省（fail-to-default）。 */
+export function parseBackoffThreshold(raw: string | undefined): number {
+  if (raw == null) return QUICK_DEATH_BACKOFF_DEFAULT.backoffThreshold;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : QUICK_DEATH_BACKOFF_DEFAULT.backoffThreshold;
 }
 
 /** 一次「主检出脏状态观察 + stash 决策」的结果（gap-worker-driver-stashifdirty-stashes-others-
@@ -1330,10 +1553,16 @@ function runOneWorker({
       finished = true;
       if (timer) clearTimeout(timer);
       const endedAtMs = Date.now();
-      // gap-worker-driver-fake-completion-exit-0：写终态前读一次任务侧直接量（status=done ∧ 无残留
-      // worktree）。只在 exit 0 路径有意义——spawn-failed/killed/timed-out/failed 分支在 computeOutcome
-      // 里优先于 landed，落盘 result 由终态分支决定；但统一读一次无害（落地读是廉价 fs/git 调用）。
-      const landing = computeLandingState(rootDir, taskId);
+      // gap-worker-driver-fake-completion-exit-0：写终态前读一次任务侧直接量。机械 fan-in 落地后
+      // （mechResult.outcome=landed）落地判定从 ff 结果（landedSha）派生，⛔ 不读主检出 stale status
+      // （D5：主检出停 doc-only 工作分支 ⇒ readTaskStatus 是滞后视图 ⇒ 假 exited-not-landed）；未跑机械
+      // fan-in / red 时仍走 status-based 判定。spawn-failed/killed/timed-out/failed 分支在 computeOutcome
+      // 里优先于 landed，但统一读一次无害（廉价 fs/git 调用）。
+      const landing = computeLandingState(
+        rootDir,
+        taskId,
+        mechResult?.outcome === "landed" ? mechResult.landedSha : null,
+      );
       // gap-suite-lock-starvation-long-validation-hold AC2 — read the suite's flock metrics from the
       // verification-round ledger (matched by this worker's runId) so worker-outcome.jsonl can
       // distinguish「长时间持锁」from「worker 慢」. Absent (null) on doc-only / scoped / no-record runs.
@@ -1409,16 +1638,23 @@ function runOneWorker({
         const paths = worktreePathsForTask(rootDir, taskId);
         if (paths.length > 0 && paths[0]) {
           const startMechMs = Date.now();
-          mechResult = await runMechanicalFanIn({ task: taskId, worktree: paths[0], root: rootDir, runId });
+          // 每任务新进程（gap-fan-in-token-gate-version-mismatch-self-lock）：机械 fan-in 不再在本守护
+          // 进程 in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），
+          // 改为 spawn 一个 fresh node 进程加载【主检出】的 worker-driver.ts --mechanical-fan-in——
+          // 执行器（entry）跟 driver 同版（⛔ 不用 worktree 的：stale worktree 缺新 argv ⇒ unknown
+          // argument ⇒ parse-mechanical-fan-in red，gap-fan-in-spawn-stale-worktree-executor-missing-argv）；
+          // 锁半（acquireFanInLock）与编排半（fan-in-ff-merge.sh）同源（都在 worktree），改了
+          // worker-driver.ts 的任务 fan-in 不再用旧锁/旧编排。⛔ 不是 token 闸一例，是「fan-in 脚本从
+          // worktree 加载、发起者从主检出旧进程运行」的架构错位整个类。
+          mechResult = await spawnMechanicalFanIn({ task: taskId, worktree: paths[0], root: rootDir, runId });
           if (json) {
             process.stdout.write(
               `${JSON.stringify({ event: "mechanical-fan-in", task: taskId, wall_clock_ms: Date.now() - startMechMs, ...mechResult })}\n`,
             );
           }
-          // 反向同步（gap-fan-in-ff-ref-update-detach-develop AC7）：landing 后把 develop merge 进 doc-only
-          // 工作分支（main/manager-doc），否则 computeLandingState 读主检出盘上 tasks/*.md 是滞后视图 →
-          // 假 exited-not-landed（watchdog 2026-08-28 实证）。best-effort：冲突留待下次 landing 收敛。
-          if (mechResult && mechResult.outcome === "landed") syncDocBranchToDevelop(rootDir);
+          // D5：落地判定改从 ff 结果（mechResult.landedSha）派生 ⇒ 不再需要 syncDocBranchToDevelop
+          // 把 develop merge 进 doc-only 工作分支（那是一个 best-effort + 静默 catch 的补丁，冲突即假
+          // exited-not-landed）——该补丁随 D5 退役，finish() 里 computeLandingState 直接读 landedSha。
         }
       }
       finish(code, signal, spawnErr, mechResult);
@@ -1462,7 +1698,7 @@ function runOneWorker({
 // ── 机械 fan-in（gap-fan-in-driver-mechanical-orchestration / SPEC 2026-08-27）────────────────────
 // 取消 fan-in-execute.js workflow 子代理串行跑机械步骤（每条命令间 ~3-5min 模型延迟把 ~10min 机械活
 // 撑到 ~30min + 30min watchdog 强制释放），改由 driver 机械驱动 fan-in 的机械部分
-// （锁/merge/delta/typecheck/scoped门/suite/ff）。happy-path 先做（人 2026-08-27 裁定①）：driver 跑通
+// （锁/merge/delta/typecheck/archguard结构闸/scoped门/suite/ff）。happy-path 先做（人 2026-08-27 裁定①）：driver 跑通
 // 「无失败 fan-in」，失败回退旧 workflow 子代理兜底。四判据：
 //   AC1 锁时长塌缩——driver 持锁整段 merge→suite→ff，机械时长（非 30min 模型恒值）；
 //   AC2 锁罩住 suite——release 不早于 suite 结束（driver 在 spawnSuiteAndWait 返回后才 release）；
@@ -1476,7 +1712,10 @@ export interface MechanicalFanInOptions {
   root: string;
   runId: string;
   mergeTarget?: string;
-  /** suite 命令（测试缝）；缺省 = bash <worktree>/scripts/test.sh --buckets <task>。 */
+  /** suite 命令（测试缝）；缺省 = node full-suite-runner.ts --buckets <task>（--root <worktree>
+   *  --state-dir <root>/.quay --runner inner --log-file <suiteLogFile>）。gap-fan-in-red-bucket-run-
+   *  not-recorded：机械路径不再跑平行 `bash scripts/test.sh --buckets`（绕开 verification-round 唯一
+   *  writer），改走正确的 runner——green+red 桶轮次都入 verification-round.jsonl（state=red 记录可见）。 */
   suiteCommand?: string[];
   /** suite 单飞槽 base（测试缝）；缺省 = suiteLockBase(root)。 */
   slotBase?: string;
@@ -1484,7 +1723,7 @@ export interface MechanicalFanInOptions {
   slotLib?: string;
   /** 静默看门狗阈值（测试缝）。 */
   silenceMs?: number;
-  /** suite 日志（静默看门狗盯的）；缺省 /tmp/fan-in-suite-<task>.log。 */
+  /** suite 日志（静默看门狗盯的）；缺省 .quay/fan-in-suite-<task>-<runId>.log（durable，⛔ 不再 /tmp）。 */
   suiteLogFile?: string | null;
   /** suite capture（ff 闸读的证书）；缺省 /tmp/fan-in-suite-<task>.env。 */
   suiteCapture?: string;
@@ -1494,18 +1733,37 @@ export interface MechanicalFanInOptions {
   scopedGateCommand?: string[];
   /** doc 检查命令（测试缝）；缺省 = bash <worktree>/scripts/test.sh --static-checks-doc。 */
   docCheckCommand?: string[];
+  /** archguard 结构闸命令（测试缝）；缺省 = node archguard-runner.ts --root <worktree>（分析待落地代码）。 */
+  archguardCommand?: string[];
   /** fan-in 编排脚本目录（测试缝）；缺省 = <worktree>/plugin/scripts（自举：本分支的编排脚本自验）。 */
   scriptsDir?: string;
+  /** 权威 suite 状态载体 full-suite-state.json 的路径（D7 测试缝）；缺省 = <root>/.quay/full-suite-state.json。 */
+  suiteStateFile?: string;
 }
 
-/** 机械 fan-in 的三态结果（landed / red）。not-evaluated 由调用方按「未落地」处理（硬规则 3b）。 */
+/** 机械 fan-in 单步失败的【结构化 verdict】（D6）：⛔ 不再是 `(stderr||stdout).trim()` 裸流。
+ *  step = 失败步骤、verdict = 该步判定（恒 "failed"，与 outcome=red 同向）、exitCode = 子进程退出码、
+ *  summary = 去噪后的可读失败摘要（能定位「哪个测试失败」）、logFile = 裸流 dump 路径（记录留指针，
+ *  ⛔ 不把裸流塞进 reason）。logFile=null 仅当该步无裸流（如 flip-done 的 reason 已结构化）。 */
+export interface MechanicalFanInStepVerdict {
+  step: string;
+  verdict: "failed";
+  exitCode: number | null;
+  summary: string;
+  logFile: string | null;
+}
+
+/** 机械 fan-in 的三态结果（landed / red）。not-evaluated 由调用方按「未落地」处理（硬规则 3b）。
+ *  单步失败的富结构在 `verdict`（step/reason 是其投影，保持旧读面）。 */
 export interface MechanicalFanInResult {
   outcome: "landed" | "red";
-  /** 失败步骤名（outcome=red 时非空；landed 时 null）。 */
+  /** 结构化 per-step verdict（outcome=red 时非 null；landed 时 null）。 */
+  verdict: MechanicalFanInStepVerdict | null;
+  /** 失败步骤名（= verdict.step；outcome=red 时非空，landed 时 null）。 */
   step: string | null;
-  /** 失败原因（outcome=red 时非空）。 */
+  /** 失败原因（= verdict.summary，去噪后的摘要；outcome=red 时非空）。 */
   reason: string | null;
-  /** fan-in workflow 锁持有时长（release epoch - acquire epoch，秒；读自 workflow-lock-events）。 */
+  /** fan-in 锁持有时长（release epoch - acquire epoch，秒；读自 fan-in-lock-events）。 */
   lockHoldSecs: number | null;
   /** 锁 acquire / release 的 epoch（秒）——AC2 判据（release ≥ suite 结束）的输入。 */
   lockAcquireEpoch: number | null;
@@ -1518,6 +1776,9 @@ export interface MechanicalFanInResult {
   suitePid: number | null;
   /** 落地 sha（develop 被 ff 到的 tip；landed 时非 null）。 */
   landedSha: string | null;
+  /** fan-in 过程日志文件名（`.quay/fan-in-<task>-<runId>.log` 的 basename——web 链接据此构造，
+   *  ⛔ 不重算 sanitize，单一真相源）。red/landed 两态都非 null。 */
+  fanInLog: string | null;
 }
 
 /** runAsync 的结果收窄为「成/败 + 输出」，机械 fan-in 各步骤的共用判定（⛔ 不各写一遍 status!==0）。 */
@@ -1529,18 +1790,118 @@ interface MechShResult {
   error: Error | null;
 }
 
-async function mechSh(argv: string[], timeoutMs = 120_000): Promise<MechShResult> {
-  const r = await runAsync(argv, { timeoutMs, collectStderr: true });
-  return { ...r, ok: r.status === 0 };
+/** 机械 fan-in 步骤的进程组 spawn（gap-fan-in-subprocess-hang-timeout-recovery AC2/AC4）：detached:true
+ *  （子进程成进程组组长）+ timeout 到期 SIGKILL 整组。⛔ runAsync 的 timeout 只 SIGKILL 直接子进程——
+ *  孙进程（继承 stdout/stderr 管道 + 可能继承 flock FD）持管道写端存活 ⇒ close 永不触发、锁泄漏；
+ *  本函数组 kill 整棵进程树，且显式 resolve 不依赖 close 事件（孙进程持管道不阻塞返回，硬规则 4b）。
+ *  永不 throw；恒捕获 stdout+stderr（combinedOutput 需两流合并去噪，⛔ 不丢任一流的失败签名）。 */
+export async function mechSh(argv: string[], timeoutMs = 120_000): Promise<MechShResult> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(argv[0], argv.slice(1), { stdio: ["ignore", "pipe", "pipe"], detached: true });
+    } catch (e) {
+      resolve({ ok: false, status: null, stdout: "", stderr: "", error: e as Error });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (status: number | null, error: Error | null): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({ ok: status === 0, status, stdout, stderr, error });
+    };
+    if (Number.isFinite(timeoutMs)) {
+      timer = setTimeout(() => {
+        // ⛔ 组 kill（-pid）：只 child.kill 会留孙进程持管道/锁。detached:true ⇒ 子进程是组长 ⇒ -pid 命中整组。
+        try {
+          if (child.pid) process.kill(-child.pid, "SIGKILL");
+        } catch {
+          try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        }
+        // 显式 resolve（⛔ 不依赖 close——孙进程持管道时 close 可能永不触发）。
+        finish(null, new Error(`spawn timeout after ${timeoutMs}ms (SIGKILL process group): ${argv[0]}`));
+      }, timeoutMs);
+    }
+    child.stdout?.on("data", (d) => { stdout += d; });
+    child.stderr?.on("data", (d) => { stderr += d; });
+    child.on("error", (e) => finish(null, e));
+    child.on("close", (code) => finish(code, null));
+  });
 }
 
-/** 读 fan-in workflow 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。 */
-export function readWorkflowLockHold(
+/** 机械 fan-in 步骤 trace 载体（.quay/fan-in-step-trace.jsonl，gitignored 运行时诊断日志——AC1：
+ *  每步 begin/end 各一条；begin 无 end ⇒ 该步挂起/未返回，据 epoch 定位）。best-effort：写失败不致命
+ *  （诊断载体失败 ≠ fan-in 失败，硬规则 3b 的镜像半边）。 */
+export function appendFanInStepTrace(
+  root: string,
+  task: string,
+  runId: string,
+  step: string,
+  phase: "begin" | "end",
+  extra: Record<string, unknown> = {},
+): void {
+  try {
+    const file = path.join(root, ".quay", "fan-in-step-trace.jsonl");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(
+      file,
+      JSON.stringify({
+        event: `step-${phase}`,
+        step,
+        task,
+        runId,
+        ts: new Date().toISOString(),
+        epoch: Math.floor(Date.now() / 1000),
+        ...extra,
+      }) + "\n",
+      "utf8",
+    );
+  } catch {
+    // best-effort：trace 写失败 ≠ fan-in 失败。
+  }
+}
+
+/** 合并 stdout+stderr 为单一流（⛔ 不丢弃任一流、⛔ 不 stderr 优先——未知失败签名可能在任一流，
+ *  硬规则 3b/4b/9 同族：stderr 恒非空恒良性时，只取 stderr 会把 stdout 的真失败签名丢掉）。
+ *  两流皆空/全空白 ⇒ 空串（调用方回退 `exit <code>`）。单一机件，fail() 与 flip 共用。 */
+export function combinedOutput(stdout: string, stderr: string): string {
+  return [stdout, stderr].filter((s) => s && s.trim() !== "").join("\n");
+}
+
+/** D6：从某步的 stdout+stderr 合并流里提取【可读失败摘要】——⛔ 裸流（MODULE_TYPELESS 噪声占满、
+ *  ⛔ 丢真正测试结果）。去噪 + 保留失败信号行（node:test 的 not ok / ✖ / # fail、断言 expected/actual、
+ *  anti-drift HARD FAIL、esbuild 的 Could not resolve / [ERROR] 构建失败），有界（最后 N 行 + 4000 字符）。
+ *  裸流本身落进 logFile（fail dump），记录里留指针。提取不出任何行 ⇒ 空串（调用方回退 `exit <code>`）。
+ *  gap-scoped-gate-reason-stderr-drops-stdout：scoped 门红时 stdout 的真失败（esbuild 构建崩 = Could not
+ *  resolve）必须进 reason——⛔ stderr 良性 preamble 优先 || 短路丢弃 stdout（硬规则 3b/4b/9 同族）。
+ *  esbuild 失败行加入 isSignal：即使与 TAP not ok 并存，构建失败签名也不再被 slice(-60) 尾截掉。 */
+export function extractFailureSummary(combined: string): string {
+  const isNoise = (l: string): boolean =>
+    l.includes("MODULE_TYPELESS_PACKAGE_JSON") ||
+    l.includes("Reparsing as ES module") ||
+    l.includes("This incurs a performance overhead") ||
+    l.includes("To eliminate this warning") ||
+    l.includes('add "type": "module"') ||
+    l.includes("--trace-warnings");
+  const meaningful = combined.split("\n").filter((l) => l.trim() !== "" && !isNoise(l));
+  const isSignal = (l: string): boolean =>
+    /^\s*not ok\b|^\s*✖|\bFAIL\b|# fail\b|HARD FAIL|AssertionError|\bexpected:|\bactual:|\bfail \d+\b|\bexit=\d+|Could not resolve|\[ERROR\]/i.test(l);
+  const signals = meaningful.filter(isSignal);
+  const chosen = signals.length > 0 ? signals : meaningful;
+  return chosen.slice(-60).join("\n").trim().slice(0, 4000);
+}
+
+/** 读 fan-in 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。 */
+export function readFanInLockHold(
   root: string,
   task: string,
   runId: string,
 ): { lockHoldSecs: number | null; lockAcquireEpoch: number | null; lockReleaseEpoch: number | null } {
-  const file = path.join(root, ".quay", "fan-in-workflow-lock-events.jsonl");
+  const file = path.join(root, ".quay", "fan-in-lock-events.jsonl");
   let text = "";
   try {
     text = fs.readFileSync(file, "utf8");
@@ -1568,9 +1929,9 @@ export function readWorkflowLockHold(
   return { lockHoldSecs, lockAcquireEpoch: acquire, lockReleaseEpoch: release };
 }
 
-// ── fan-in workflow 锁：driver 自身经非分离直接子进程持锁（ADR-034）────────────────────────────
+// ── fan-in 锁：driver 自身经非分离直接子进程持锁（ADR-034）────────────────────────────
 // 废除 gap-fan-in-workflow-lock-and-S1 的「分离 holder + flag 文件释放」协议（fan-in-ff-merge.sh
-// --acquire/--release-workflow-lock 里 `setsid bash … & disown` 的持锁进程 + `while [ -e flag ]` 死
+// --acquire/--release-fan-in-lock 里 `setsid bash … & disown` 的持锁进程 + `while [ -e flag ]` 死
 // 循环 + 外部删 flag 释放）。该协议让持锁进程活得过它的 caller：caller 在 ff 后删 flag 前被杀 ⇒
 // holder 孤儿化（PPID=1）+ 活着 ⇒ 死循环 ⇒ 锁持 23 分钟阻塞全仓 fan-in（gap-full-suite-lock-hold-
 // watchdog-threshold-shorter-than-fan-in 末次实证）。ADR-034 裁定：锁的生死 = 工作的进程生死——锁由
@@ -1580,59 +1941,59 @@ export function readWorkflowLockHold(
 // 实现：driver spawn 一个【非 detached、非 disown】的 bash 子进程（holder）做 flock，然后阻塞在
 // stdin 读上。driver 持有该子进程 stdin 管道的写端：driver 死（任何原因，含 SIGKILL）⇒ 内核关写端 ⇒
 // holder 的 stdin 读到 EOF ⇒ 写 release 事件 + flock -u + 退出 ⇒ flock 自动释放。正常 release = driver
-// 关 stdin 写端（同一路径）。锁文件/事件文件仍与旧协议同名同形（fan-in-workflow.lock /
-// .quay/fan-in-workflow-lock-events.jsonl），fan-in-ff-protocol-check 判据4 与 readWorkflowLockHold
+// 关 stdin 写端（同一路径）。锁文件/事件文件 = fan-in.lock /
+// .quay/fan-in-lock-events.jsonl，fan-in-ff-protocol-check 判据4 与 readFanInLockHold
 // 继续读同一载体。
 
-/** fan-in workflow 锁文件路径（git common dir 下的 fan-in-workflow.lock，与 suite 锁同目录不同文件）。
- *  解析 git-common-dir（⛔ 不读 FULL_SUITE_LOCK_FILE env——那是 suite 锁的 seam，不属于 workflow 锁）。 */
-export function fanInWorkflowLockFile(root: string): string {
+/** fan-in 锁文件路径（git common dir 下的 fan-in.lock，与 suite 锁同目录不同文件）。
+ *  解析 git-common-dir（⛔ 不读 FULL_SUITE_LOCK_FILE env——那是 suite 锁的 seam，不属于 fan-in 锁）。 */
+export function fanInLockFile(root: string): string {
   const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" });
   const commonDir = r.status === 0 && !r.error ? (r.stdout ?? "").trim() : "";
-  return path.join(path.resolve(root, commonDir || ".git"), "fan-in-workflow.lock");
+  return path.join(path.resolve(root, commonDir || ".git"), "fan-in.lock");
 }
 
 /** 持锁 holder 的 bash 脚本（非分离直接子进程；`cat >/dev/null` 阻塞在 stdin，driver 死 ⇒ EOF ⇒ 释放）。
  *  参数：$1=锁文件 $2=taskId $3=runIdJson（已编码 `"r"` 或 `null`）$4=agentIdJson $5=事件文件。 */
-const FAN_IN_WORKFLOW_LOCK_HOLDER = `exec {fd}>"$1" || exit 2
+const FAN_IN_LOCK_HOLDER = `exec {fd}>"$1" || exit 2
 flock -x "$fd" || exit 2
-_wfl_emit() {
+_emit() {
   printf '{"event":"%s","ts":"%s","epoch":%s,"taskId":"%s","pid":%s,"runId":%s,"agentId":%s}\\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date +%s)" "$2" "$$" "$3" "$4"
 }
-_wfl_emit acquire "$2" "$3" "$4" >> "$5"
-_wfl_emit acquire "$2" "$3" "$4"
+_emit acquire "$2" "$3" "$4" >> "$5"
+_emit acquire "$2" "$3" "$4"
 cat >/dev/null
-_wfl_emit release "$2" "$3" "$4" >> "$5"
+_emit release "$2" "$3" "$4" >> "$5"
 flock -u "$fd" 2>/dev/null || true
 exit 0`;
 
-/** 一次 fan-in workflow 锁的持有句柄（driver 侧）：release() 关 stdin 写端 ⇒ holder 写 release 事件 +
+/** 一次 fan-in 锁的持有句柄（driver 侧）：release() 关 stdin 写端 ⇒ holder 写 release 事件 +
  *  flock -u 退出；driver 死（SIGKILL）⇒ 内核关 stdin 写端 ⇒ 同一释放路径（无孤儿、无残留锁）。 */
-export interface FanInWorkflowLockHandle {
+export interface FanInLockHandle {
   holderPid: number | null;
   release: () => Promise<void>;
 }
 
-/** 经非分离直接子进程 acquire fan-in workflow 锁（ADR-034）。resolve = holder 已 flock 并写出 acquire
+/** 经非分离直接子进程 acquire fan-in 锁（ADR-034）。resolve = holder 已 flock 并写出 acquire
  *  事件（stdout 出现该行）；reject = holder 在 acquire 前死（flock 错误 / spawn 失败）。unbounded——排队
- *  等待正是这把正确性锁存在的意义（⛔ 无超时，与旧 --acquire-workflow-lock 的 `flock -x` 无界语义一致）。 */
-export function acquireFanInWorkflowLock(opts: {
+ *  等待正是这把正确性锁存在的意义（⛔ 无超时，与旧 --acquire-fan-in-lock 的 `flock -x` 无界语义一致）。 */
+export function acquireFanInLock(opts: {
   root: string;
   task: string;
   runId: string;
   agentId?: string | null;
   lockFile?: string;
   eventsFile?: string;
-}): Promise<FanInWorkflowLockHandle> {
-  const lockFile = opts.lockFile ?? fanInWorkflowLockFile(opts.root);
-  const eventsFile = opts.eventsFile ?? path.join(opts.root, ".quay", "fan-in-workflow-lock-events.jsonl");
+}): Promise<FanInLockHandle> {
+  const lockFile = opts.lockFile ?? fanInLockFile(opts.root);
+  const eventsFile = opts.eventsFile ?? path.join(opts.root, ".quay", "fan-in-lock-events.jsonl");
   const runIdJson = opts.runId ? JSON.stringify(opts.runId) : "null";
   const agentIdJson = opts.agentId ? JSON.stringify(opts.agentId) : "null";
   fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
 
   const child = spawn(
     "bash",
-    ["-c", FAN_IN_WORKFLOW_LOCK_HOLDER, "wfl-holder", lockFile, opts.task, runIdJson, agentIdJson, eventsFile],
+    ["-c", FAN_IN_LOCK_HOLDER, "fan-in-lock-holder", lockFile, opts.task, runIdJson, agentIdJson, eventsFile],
     { stdio: ["pipe", "pipe", "pipe"] },
   );
 
@@ -1658,13 +2019,13 @@ export function acquireFanInWorkflowLock(opts: {
     child.on("close", (code) => {
       if (!settled) {
         settled = true;
-        reject(new Error(`fan-in workflow lock holder exited before acquiring (code ${code})`));
+        reject(new Error(`fan-in lock holder exited before acquiring (code ${code})`));
       }
     });
     child.on("error", (e) => {
       if (!settled) {
         settled = true;
-        reject(new Error(`fan-in workflow lock holder spawn error: ${(e as Error).message}`));
+        reject(new Error(`fan-in lock holder spawn error: ${(e as Error).message}`));
       }
     });
   });
@@ -1678,8 +2039,72 @@ function writeSuiteCapture(captureFile: string, fields: Record<string, string>):
   fs.writeFileSync(captureFile, lines.join("\n") + "\n", "utf8");
 }
 
-/** 读 worktree 的任务文件并翻 status ready→done（fail-closed：恰 1 行精确 `^status: ready$`，否则拒）。 */
-async function flipTaskDone(worktree: string, task: string): Promise<{ ok: boolean; reason: string | null }> {
+/** 读 `<ref>:tasks/<task>.md` 的 status frontmatter（git show；ref 不存在 / 文件缺失 / 读不懂 ⇒ null）。 */
+async function readTaskStatusAtRef(worktree: string, ref: string, task: string): Promise<string | null> {
+  const r = await mechSh(["git", "-C", worktree, "show", `${ref}:tasks/${task}.md`], 30_000);
+  if (!r.ok) return null;
+  const m = (r.stdout ?? "").match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!m) return null;
+  const statusLine = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
+  if (!statusLine) return null;
+  return statusLine.slice("status:".length).trim() || null;
+}
+
+/** 写 worktree 任务文件 + 提交（flip / reset 共用的机械步：写盘 → add → commit --no-verify）。 */
+async function commitTaskStatusChange(
+  worktree: string,
+  task: string,
+  file: string,
+  nextText: string,
+  message: string,
+): Promise<{ ok: boolean; reason: string | null }> {
+  fs.writeFileSync(file, nextText, "utf8");
+  let a = await mechSh(["git", "-C", worktree, "add", `tasks/${task}.md`]);
+  if (!a.ok) return { ok: false, reason: `git add failed: ${combinedOutput(a.stdout, a.stderr) || `exit ${a.status}`}` };
+  a = await mechSh(["git", "-C", worktree, "commit", "-q", "--no-verify", "-m", message, "--", `tasks/${task}.md`]);
+  if (!a.ok) return { ok: false, reason: `git commit failed: ${combinedOutput(a.stdout, a.stderr) || `exit ${a.status}`}` };
+  return { ok: true, reason: null };
+}
+
+/** 把 archguard-runner 写进 worktree 的结构信号记录镜像到主检出的生产载体（AC2）。
+ *  worktree 的 .archguard/ 在机械 fan-in 成功后随 `git worktree remove` 被删 ⇒ 记录必须持久化到
+ *  root（主检出）的 .archguard/metrics-history.jsonl，post-landing 才可查（硬规则④推论三：能产出≠已产出）。
+ *  archguard-runner 每次跑 append 一条，镜像最后一条（本次新写）；worktree 无记录（测试缝的 fake 命令
+ *  不写）⇒ no-op 非失败。镜像失败 fail-closed（记录是「被某判据读」半边，载体写失败 ≠ 静默通过）。 */
+function mirrorArchguardMetrics(worktree: string, root: string): { ok: boolean; reason: string | null } {
+  const wtFile = path.join(worktree, ".archguard", "metrics-history.jsonl");
+  let wtText: string;
+  try {
+    wtText = fs.readFileSync(wtFile, "utf8");
+  } catch {
+    return { ok: true, reason: null };
+  }
+  const lines = wtText.split("\n").map((s) => s.trim()).filter(Boolean);
+  const last = lines[lines.length - 1];
+  if (!last) return { ok: true, reason: null };
+  const mainFile = path.join(root, ".archguard", "metrics-history.jsonl");
+  try {
+    fs.mkdirSync(path.dirname(mainFile), { recursive: true });
+    fs.appendFileSync(mainFile, last + "\n", "utf8");
+    return { ok: true, reason: null };
+  } catch (e) {
+    return { ok: false, reason: `cannot mirror archguard metrics to ${mainFile}: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+/** 读 worktree 的任务文件并翻 status ready→done（fail-closed：恰 1 行精确 `^status: ready$`，否则拒）。
+ *  gap-fan-in-flip-done-already-done-not-landed：「先 flip 后 ff」（人 2026-08-14 裁定）留下的
+ *  「done 但未落地」不一致中间态（worktree 已翻 done、develop 未含落地提交）在重跑时收敛——读到
+ *  `status: done` 先判真落地：
+ *    - 已真落地（mergeTarget 的 tasks/<task>.md status=done）⇒ skip（不 reset、不重翻，返回 ok）；
+ *    - 未真落地（mergeTarget 仍是 ready / 读不到）⇒ reset 到 ready 再 flip（两提交，ff 落在新 flip tip）。
+ *  正常 `status: ready` 的 flip 行为不变（AC4）。判落地用「mergeTarget 的任务文件 status」直接量
+ *  （⛔ 不各写一遍 computeLandingState 的 landing 判定——本函数只判 flip 侧的一致性）。 */
+async function flipTaskDone(
+  worktree: string,
+  task: string,
+  mergeTarget: string,
+): Promise<{ ok: boolean; reason: string | null }> {
   const file = path.join(worktree, "tasks", `${task}.md`);
   let text: string;
   try {
@@ -1688,25 +2113,83 @@ async function flipTaskDone(worktree: string, task: string): Promise<{ ok: boole
     return { ok: false, reason: `read task file failed: ${(e as Error).message}` };
   }
   const lines = text.split("\n");
-  const readyIdx = lines.filter((l) => l === "status: ready");
-  if (readyIdx.length !== 1) {
-    return { ok: false, reason: `expected exactly 1 'status: ready' line, got ${readyIdx.length}` };
+  const readyCount = lines.filter((l) => l === "status: ready").length;
+  if (readyCount === 1) {
+    const flipped = text.replace(/^status: ready$/m, "status: done");
+    if (!/^status: done$/m.test(flipped)) {
+      return { ok: false, reason: "flip produced no 'status: done' line" };
+    }
+    return commitTaskStatusChange(worktree, task, file, flipped, `tasks: 翻 ${task} done（driver 机械 fan-in）`);
   }
-  const flipped = text.replace(/^status: ready$/m, "status: done");
-  if (!/^status: done$/m.test(flipped)) {
-    return { ok: false, reason: "flip produced no 'status: done' line" };
+  const doneCount = lines.filter((l) => l === "status: done").length;
+  if (doneCount === 1) {
+    // done 已存在：判真落地（mergeTarget 的任务文件是否已 done）。已落地 ⇒ skip；未落地 ⇒ reset→flip。
+    const landed = await readTaskStatusAtRef(worktree, mergeTarget, task);
+    if (landed === "done") return { ok: true, reason: null };
+    const reset = text.replace(/^status: done$/m, "status: ready");
+    if (!/^status: ready$/m.test(reset)) {
+      return { ok: false, reason: "reset to ready produced no 'status: ready' line" };
+    }
+    const resetResult = await commitTaskStatusChange(
+      worktree, task, file, reset,
+      `tasks: reset ${task} done→ready（fan-in 收敛「done 未落地」中间态）`,
+    );
+    if (!resetResult.ok) return resetResult;
+    const flipped = reset.replace(/^status: ready$/m, "status: done");
+    if (!/^status: done$/m.test(flipped)) {
+      return { ok: false, reason: "flip after reset produced no 'status: done' line" };
+    }
+    return commitTaskStatusChange(worktree, task, file, flipped, `tasks: 翻 ${task} done（driver 机械 fan-in）`);
   }
-  fs.writeFileSync(file, flipped, "utf8");
-  let a = await mechSh(["git", "-C", worktree, "add", `tasks/${task}.md`]);
-  if (!a.ok) return { ok: false, reason: `git add failed: ${a.stderr || `exit ${a.status}`}` };
-  a = await mechSh(["git", "-C", worktree, "commit", "-q", "--no-verify", "-m", `tasks: 翻 ${task} done（driver 机械 fan-in）`, "--", `tasks/${task}.md`]);
-  if (!a.ok) return { ok: false, reason: `git commit failed: ${a.stderr || `exit ${a.status}`}` };
-  return { ok: true, reason: null };
+  return { ok: false, reason: `expected exactly 1 'status: ready' line, got ${readyCount}` };
+}
+
+/** gap-fan-in-red-bucket-run-not-recorded — 机械 fan-in 的 suite 步缺省命令：经 full-suite-runner.ts
+ *  --buckets 跑（正确的 runner，green+red 桶轮次都在 suite 退出时入 verification-round.jsonl），⛔ 不是
+ *  平行 `bash scripts/test.sh --buckets`（绕开唯一 writer，红桶轮次零记录——硬规则 3b「没跑过」与
+ *  「跑了但红」同形）。--root <worktree> 是受测检出（test.sh 在 worktree 内跑）；--state-dir <root>/.quay
+ *  把 state/verification-round/measure-history/suite-load 落进共享主检出（/tests 的读取处）；--runner inner
+ *  显式标注层身份；--log-file <suiteLogFile> 让 runner 把 suite 流 tee 进 fan-in 的 /tmp 日志
+ *  （spawnSuiteAndWait 的静默看门狗盯其 mtime——runner 不写 stdout，须经此缝让看门狗看到进度）。
+ *  抽成纯函数便于 worker-driver.test.mjs 断言缺省命令是 runner 而非 test.sh harness（AC2）。 */
+export function defaultMechanicalSuiteCommand(opts: {
+  task: string;
+  worktree: string;
+  root: string;
+  suiteLogFile: string;
+}): string[] {
+  return [
+    "node", "--no-warnings", "--experimental-strip-types",
+    path.join(opts.worktree, "plugin", "scripts", "full-suite-runner.ts"),
+    "--buckets", opts.task,
+    "--root", opts.worktree,
+    "--state-dir", path.join(opts.root, ".quay"),
+    "--runner", "inner",
+    "--log-file", opts.suiteLogFile,
+  ];
+}
+
+/** fan-in 过程日志文件名（`.quay/fan-in-<task>-<runId>.log` 的 basename）。runId 唯一后缀 ⇒ 跨 relaunch
+ *  不复用（同 gap-fan-in-suite-log-cross-relaunch-reuse 防护——旧轮内容不残留）；runId 先 sanitize 到
+ *  `[A-Za-z0-9_.-]`（⛔ 不把未净化的 runId 当路径段）。 */
+export function fanInLogFileName(task: string, runId: string): string {
+  const runIdSafe = runId.replace(/[^A-Za-z0-9_.-]/g, "_");
+  return `fan-in-${task}-${runIdSafe}.log`;
+}
+
+/** 追加一行 fan-in 过程 trace（JSONL，一行一 JSON；首字段 ts）。写失败不致命（运行时日志，
+ *  ⛔ 不因日志写失败炸 fan-in——trace 是观测面不是正确性闸）。 */
+export function appendFanInTrace(file: string, entry: Record<string, unknown>): void {
+  const rec = { ts: new Date().toISOString(), ...entry };
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, JSON.stringify(rec) + "\n", "utf8");
+  } catch { /* best-effort runtime log */ }
 }
 
 /**
- * driver 机械跑通一次无失败 fan-in 的 happy path（锁/merge/delta/typecheck/scoped门/suite/ff）。
- * ⛔ 语义失败点（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / suite 红 / ff 失败）一律返回
+ * driver 机械跑通一次无失败 fan-in 的 happy path（锁/merge/delta/typecheck/archguard结构闸/scoped门/suite/ff）。
+ * ⛔ 语义失败点（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / 依赖环 / suite 红 / ff 失败）一律返回
  * outcome=red + step，由调用方回退旧 workflow 子代理兜底（本函数不调 LLM、不做语义修复）。
  * 锁在任一退出路径都会 release（finally）——成功 release 于 ff 之后（AC2）；失败也 release（回退的
  * workflow 子代理会重新 acquire，幂等）。
@@ -1717,36 +2200,88 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const slotBase = opts.slotBase ?? suiteLockBase(root);
   const slotLib = opts.slotLib ?? path.join(root, "plugin", "scripts", "suite-slot-lib.sh");
   const suiteCapture = opts.suiteCapture ?? `/tmp/fan-in-suite-${task}.env`;
-  // 独立日志/run：suite 日志文件名带 runId——⛔ 不再复用 /tmp/fan-in-suite-${task}.log（跨 relaunch
-  // 残留旧轮内容，gap-fan-in-suite-log-cross-relaunch-reuse；本次「每次测试独立日志文件」指令）。
+  const runIdSafe = runId.replace(/[^A-Za-z0-9_.-]/g, "_");
+  // 过程日志（A1，gitignored 运行时日志）：.quay/fan-in-<task>-<runId>.log，逐步骤 trace。
+  const fanInLog = path.join(root, ".quay", `fan-in-${task}-${runIdSafe}.log`);
+  // 套件日志（A2）：从 /tmp 迁到 .quay/（durable——/tmp 系统清理实证见 3389 个测试遗留目录）。文件名带
+  // runId——⛔ 不再复用 /tmp/fan-in-suite-${task}.log（跨 relaunch 残留旧轮内容，
+  // gap-fan-in-suite-log-cross-relaunch-reuse；本次「每次测试独立日志文件」指令）。
   const suiteLogFile =
-    opts.suiteLogFile ?? `/tmp/fan-in-suite-${task}-${runId.replace(/[^A-Za-z0-9_.-]/g, "_")}.log`;
+    opts.suiteLogFile ?? path.join(root, ".quay", `fan-in-suite-${task}-${runIdSafe}.log`);
+  const suiteStateFile = opts.suiteStateFile ?? path.join(root, ".quay", "full-suite-state.json");
   const scriptsDir = opts.scriptsDir ?? path.join(worktree, "plugin", "scripts");
   const ffMerge = path.join(scriptsDir, "fan-in-ff-merge.sh");
   const antiDrift = path.join(scriptsDir, "anti-drift-touches-check.ts");
   const classify = path.join(scriptsDir, "select-static-checks-for-touches.ts");
   const typecheck = path.join(scriptsDir, "fan-in-ts-typecheck-gate.ts");
+  const archguardRunner = path.join(scriptsDir, "archguard-runner.ts");
   const acGate = path.join(scriptsDir, "fan-in-ac-completion-gate.ts");
 
-  const fail = (step: string, reason: string): MechanicalFanInResult => ({
-    outcome: "red", step, reason,
+  // D6：单步失败产出结构化 verdict（⛔ 不再是 `(stderr||stdout).trim()` 裸流）。裸流 dump 进 logFile、
+  // summary 去噪保留「哪个测试失败」，reason 是 summary 的投影（旧读面，⛔ 不含 MODULE_TYPELESS 噪声）。
+  const verdictOf = (step: string, exitCode: number | null, summary: string, logFile: string | null): MechanicalFanInResult => ({
+    outcome: "red",
+    verdict: { step, verdict: "failed", exitCode, summary, logFile },
+    step, reason: summary,
     lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
     suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+    fanInLog: path.basename(fanInLog),
   });
+  const stepLogFile = (step: string): string =>
+    `/tmp/fan-in-step-${task}-${runId.replace(/[^A-Za-z0-9_.-]/g, "_")}-${step}.log`;
+  // 有裸流的机械步：stdout+stderr 全量 dump 进 logFile，summary 从合并流提取（⛔ 只取 stderr 会丢
+  // stdout 里真正的测试结果——D6 的病根）。dump 失败不致命（logFile=null，summary 仍可定位）。
+  // ⛔ 保持旧函数名 `fail`（不改名 failStep）——archguard-structural-gate-fan-in.test.mjs 钉死
+  // `fail("archguard-structure"` 源面；改名会破坏该结构不变量（D6 只改产出，不改接点命名）。
+  const fail = (step: string, a: MechShResult): MechanicalFanInResult => {
+    const combined = combinedOutput(a.stdout, a.stderr);
+    const summary = extractFailureSummary(combined) || `exit ${a.status}`;
+    const logFile = stepLogFile(step);
+    try {
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      fs.writeFileSync(logFile, combined, "utf8");
+    } catch {
+      return verdictOf(step, a.status, summary, null);
+    }
+    return verdictOf(step, a.status, summary, logFile);
+  };
+  // 无裸流的机械步（reason 已结构化：flip-done / archguard-metrics / acquire-fan-in-lock / exception）。
+  const failClean = (step: string, summary: string, exitCode: number | null = null): MechanicalFanInResult =>
+    verdictOf(step, exitCode, summary, null);
 
-  // 1. acquire fan-in workflow lock（机械包裹整段 merge→suite→ff，AC4）。ADR-034：driver 自身经非分离
+  // 逐步骤 trace（A1，gap-mech-fan-in-log-webui-visible-clickable）：每步追加一行 {ts, step, exit,
+  // wall_ms, ok} 到 .quay/fan-in-<task>-<runId>.log（web 可见的过程日志），失败步附 reason。
+  const trace = (entry: Record<string, unknown>): void => appendFanInTrace(fanInLog, entry);
+  // mechSh 步的包层：跑 + 计时 + 两路 trace——① appendFanInStepTrace begin/end（挂起 = begin 无 end，
+  // 据 epoch 定位挂起步；gap-fan-in-subprocess-hang-timeout-recovery AC1）；② A1 一行过程日志。
+  const step = async (name: string, argv: string[], timeoutMs = 120_000): Promise<MechShResult> => {
+    const t0 = Date.now();
+    appendFanInStepTrace(root, task, runId, name, "begin");
+    const r = await mechSh(argv, timeoutMs);
+    appendFanInStepTrace(root, task, runId, name, "end", { ok: r.ok });
+    trace({
+      step: name, exit: r.status, wall_ms: Date.now() - t0, ok: r.ok,
+      ...(r.ok ? {} : { reason: (r.stderr || r.stdout || "").trim() || `exit ${r.status}` }),
+    });
+    return r;
+  };
+
+  // 1. acquire fan-in lock（机械包裹整段 merge→suite→ff，AC4）。ADR-034：driver 自身经非分离
   // 直接子进程持锁（⛔ 废除 fan-in-ff-merge.sh 的 `& disown` 分离 holder + flag 释放协议）——锁的生死 =
   // 工作的进程生死，driver 死（含 SIGKILL）⇒ 内核关 stdin 写端 ⇒ holder 释放 flock。unbounded（无超时）：
-  // workflow 锁是正确性锁（「此刻谁可 merge develop」），排队等待正是它存在的意义（⛔ 120s 短超时会在
+  // fan-in 锁是正确性锁（「此刻谁可 merge develop」），排队等待正是它存在的意义（⛔ 120s 短超时会在
   // 等待时误杀，gap-mech-fan-in-acquire-lock-timeout-queue-semantics）。⛔ 无时间阈值（无 hold-max/TTL/stale）。
-  let workflowLock: FanInWorkflowLockHandle;
+  let fanInLock: FanInLockHandle;
+  const acquireT0 = Date.now();
   try {
-    workflowLock = await acquireFanInWorkflowLock({ root, task, runId });
+    fanInLock = await acquireFanInLock({ root, task, runId });
+    trace({ step: "acquire-fan-in-lock", exit: 0, wall_ms: Date.now() - acquireT0, ok: true });
   } catch (e) {
-    return fail("acquire-workflow-lock", (e as Error)?.message ?? "acquire failed");
+    trace({ step: "acquire-fan-in-lock", exit: 1, wall_ms: Date.now() - acquireT0, ok: false, reason: (e as Error)?.message ?? "acquire failed" });
+    return failClean("acquire-fan-in-lock", (e as Error)?.message ?? "acquire failed");
   }
   const releaseLock = async (): Promise<void> => {
-    await workflowLock.release();
+    await fanInLock.release();
   };
   let a: MechShResult;
 
@@ -1756,14 +2291,15 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
 
   try {
     // 2. merge develop（冲突 ⇒ red → 语义会话兜底）。
-    a = await mechSh(["git", "-C", worktree, "merge", "--no-edit", mergeTarget], 120_000);
-    if (!a.ok) return fail("merge-develop", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
+    a = await step("merge-develop", ["git", "-C", worktree, "merge", "--no-edit", mergeTarget], 120_000);
+    if (!a.ok) return fail("merge-develop", a);
 
     // 3. anti-drift Touches 核对（HARD FAIL ⇒ red）。
-    a = await mechSh(["node", "--experimental-strip-types", antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
-    if (!a.ok) return fail("anti-drift", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
+    a = await step("anti-drift", ["node", "--experimental-strip-types", antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
+    if (!a.ok) return fail("anti-drift", a);
 
     // 4. delta 断言面判定（doc-only 跳过 suite，code 跑 suite；判不出 fail-closed 跑 suite）。
+    const deltaT0 = Date.now();
     const fork = await mechSh(["git", "-C", worktree, "merge-base", mergeTarget, "HEAD"], 30_000);
     const deltaFiles = await mechSh(["git", "-C", worktree, "diff", "--name-only", (fork.stdout || "").trim(), "HEAD"], 30_000);
     const deltaList = (deltaFiles.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
@@ -1773,81 +2309,179 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       codeDelta = cd.ok ? (cd.stdout || "").trim() : "__CLASSIFY_FAILED__";
     }
     const needSuite = opts.forceSuite === true || codeDelta === "__CLASSIFY_FAILED__" || codeDelta !== "";
+    trace({ step: "delta", exit: 0, wall_ms: Date.now() - deltaT0, ok: true, reason: needSuite ? (codeDelta === "__CLASSIFY_FAILED__" ? "classify failed → run suite (fail-closed)" : `code delta (${codeDelta || "forced"}) → run suite`) : "doc-only delta → skip suite" });
 
     // 5. ts-typecheck 闸（非零 ⇒ red → 语义会话兜底）。
-    a = await mechSh(["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
-    if (!a.ok) return fail("typecheck", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
+    a = await step("typecheck", ["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
+    if (!a.ok) return fail("typecheck", a);
+
+    // 5.5 archguard 结构闸（依赖环 sccCount=0 ⇒ 绿；依赖环 ⇒ red → 语义会话兜底）。⛔ 分析 worktree
+    // （merge develop 后的待落地代码）——非 root（root 是 doc-only 工作分支，不含本任务 delta，任务引入
+    // 依赖环会被漏检）。archguard-runner 把结构信号 append 进 <worktree>/.archguard/metrics-history.jsonl；
+    // worktree 的 .archguard 在 cleanup 时被删 ⇒ 镜像到主检出（root）的生产载体（AC2：能产出≠已产出）。
+    const archguardCmd = opts.archguardCommand ?? ["node", "--experimental-strip-types", archguardRunner, "--root", worktree];
+    a = await step("archguard-structure", archguardCmd, 600_000);
+    if (!a.ok) return fail("archguard-structure", a);
+    const mirrored = mirrorArchguardMetrics(worktree, root);
+    if (!mirrored.ok) return failClean("archguard-metrics", mirrored.reason ?? "mirror failed");
 
     // 6. scoped 门 + doc 检查（必须绿）。
     const scopedCmd = opts.scopedGateCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
-    a = await mechSh(scopedCmd, 600_000);
-    if (!a.ok) return fail("scoped-gate", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
+    a = await step("scoped-gate", scopedCmd, 600_000);
+    if (!a.ok) return fail("scoped-gate", a);
     const docCmd = opts.docCheckCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--static-checks-doc"];
-    a = await mechSh(docCmd, 300_000);
-    if (!a.ok) return fail("doc-check", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
+    a = await step("doc-check", docCmd, 300_000);
+    if (!a.ok) return fail("doc-check", a);
 
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
     if (needSuite) {
-      const suiteCmd = opts.suiteCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--buckets", task];
+      trace({ step: "suite-start", exit: 0, wall_ms: 0, ok: true });
+      const suiteCmd = opts.suiteCommand ?? defaultMechanicalSuiteCommand({ task, worktree, root, suiteLogFile });
       const sr: SuiteRunResult = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: suiteCmd, logFile: suiteLogFile, silenceMs: opts.silenceMs });
       suiteOutcome = sr.outcome;
       suiteFinishedEpoch = Math.floor(new Date(sr.finishedAt).getTime() / 1000);
       suitePid = sr.pid;
-      if (sr.outcome !== "done") return fail("suite", `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`);
+      trace({ step: "suite-end", exit: sr.exitCode, wall_ms: sr.durationMs, ok: sr.outcome === "done", ...(sr.outcome === "done" ? {} : { reason: sr.error ?? `suite ${sr.outcome}` }) });
+      if (sr.outcome !== "done") {
+        // 红 suite 记录由 full-suite-runner.ts --buckets 在 suite 退出时写入（gap-fan-in-red-bucket-run-
+        // not-recorded：runner 是 verification-round.jsonl 的唯一 writer，green+red 都入账，静态闸红亦由
+        // runner 的 staticCheckDetected → gate=static-check 记录）。⛔ 不再由 writeRedSuiteRecord 平行补写
+        // —— runner 已记 + 再补写 = 同一红 suite 两条记录、round 号虚增（与「两套平行机制收敛为一」相悖）。
+        return failClean("suite", `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
+      }
       writeSuiteCapture(suiteCapture, {
         full_suite_ran: "true", skip_reason: "", suite_exit: "0",
         suite_head: suiteHead, start_iso: sr.startedAt, end_iso: sr.finishedAt,
       });
+      // D7：把本轮 bucket suite 状态镜像到权威载体 full-suite-state.json（scope=worktree + taskId 区分
+      // bucket-run 与 full-run，⛔ 不伪造 full-green；finishedAt 与 mfi.suiteFinishedEpoch 同源 ⇒ 不陈旧）。
+      mirrorMechanicalFanInSuiteState({
+        task, runId, commit: suiteHead,
+        startedAt: sr.startedAt, finishedAt: sr.finishedAt, durationMs: sr.durationMs,
+        stateFile: suiteStateFile,
+      });
     } else {
       writeSuiteCapture(suiteCapture, { full_suite_ran: "false", skip_reason: "doc-only-delta", suite_exit: "0", suite_head: suiteHead });
+      trace({ step: "suite-skip", exit: 0, wall_ms: 0, ok: true, reason: "doc-only-delta" });
     }
 
     // 8. land 前 anti-drift 重跑 + AC 完成闸 + flip done（先 flip 后 ff，人 2026-08-14 裁定）。
-    a = await mechSh(["node", "--experimental-strip-types", antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
-    if (!a.ok) return fail("anti-drift-land", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
-    a = await mechSh(["node", "--experimental-strip-types", acGate, "--task", task, "--worktree", worktree], 60_000);
-    if (!a.ok) return fail("ac-gate", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
-    const flip = await flipTaskDone(worktree, task);
-    if (!flip.ok) return fail("flip-done", flip.reason ?? "flip failed");
+    a = await step("anti-drift-land", ["node", "--experimental-strip-types", antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
+    if (!a.ok) return fail("anti-drift-land", a);
+    a = await step("ac-gate", ["node", "--experimental-strip-types", acGate, "--task", task, "--worktree", worktree], 60_000);
+    if (!a.ok) return fail("ac-gate", a);
+    const flipT0 = Date.now();
+    const flip = await flipTaskDone(worktree, task, mergeTarget);
+    trace({ step: "flip-done", exit: flip.ok ? 0 : 1, wall_ms: Date.now() - flipT0, ok: flip.ok, ...(flip.ok ? {} : { reason: flip.reason ?? "flip failed" }) });
+    if (!flip.ok) return failClean("flip-done", flip.reason ?? "flip failed");
 
     // 9. ff（fan-in-ff-merge.sh 读 suite capture 证书；成功 fall through，失败 red）。
-    a = await mechSh(["bash", ffMerge, "--task", task, "--run-id", runId, "--root", root, "--merge-target", mergeTarget, "--worktree", worktree, "--suite-capture", suiteCapture, "--lock-wait", "30"], 120_000);
-    if (!a.ok) return fail("ff", (a.stderr || a.stdout || "").trim() || `exit ${a.status}`);
+    a = await step("ff", ["bash", ffMerge, "--task", task, "--run-id", runId, "--root", root, "--merge-target", mergeTarget, "--worktree", worktree, "--suite-capture", suiteCapture, "--lock-wait", "30"], 120_000);
+    if (!a.ok) return fail("ff", a);
 
     // 9.5 清理 worktree + 删 task 分支（ff 成功后——landed 判据 = status done ∧ 无残留 worktree）。
     // best-effort：移除失败不致命，landing 判定（computeLandingState）会据残留 worktree 诚实判未落地。
-    await mechSh(["git", "-C", root, "worktree", "remove", "--force", worktree], 60_000);
-    await mechSh(["git", "-C", root, "branch", "-D", `task/${task}`], 60_000);
+    const cleanupT0 = Date.now();
+    const wr = await mechSh(["git", "-C", root, "worktree", "remove", "--force", worktree], 60_000);
+    const bd = await mechSh(["git", "-C", root, "branch", "-D", `task/${task}`], 60_000);
+    const cleanupOk = wr.ok && bd.ok;
+    trace({ step: "cleanup", exit: cleanupOk ? 0 : 1, wall_ms: Date.now() - cleanupT0, ok: cleanupOk, ...(cleanupOk ? {} : { reason: "worktree remove / branch delete best-effort (non-fatal)" }) });
   } catch (e) {
-    return fail("exception", (e as Error)?.message ?? String(e));
+    return failClean("exception", (e as Error)?.message ?? String(e));
   } finally {
+    const relT0 = Date.now();
     await releaseLock();
+    trace({ step: "release-fan-in-lock", exit: 0, wall_ms: Date.now() - relT0, ok: true });
   }
 
   // 成功路径（try 未 return）：release 之后读锁持有时长 + 落地 sha。
   const landedSha = (await mechSh(["git", "-C", root, "rev-parse", mergeTarget], 30_000)).stdout.trim();
-  const lock = readWorkflowLockHold(root, task, runId);
+  const lock = readFanInLockHold(root, task, runId);
   return {
-    outcome: "landed", step: null, reason: null,
+    outcome: "landed", verdict: null, step: null, reason: null,
     ...lock, suiteFinishedEpoch, suiteOutcome, suitePid, landedSha,
+    fanInLog: path.basename(fanInLog),
   };
 }
 
-
 /**
- * 反向同步（gap-fan-in-ff-ref-update-detach-develop AC7）：机械 fan-in landing 后，把 develop merge 进
- * doc-only 工作分支（main/manager-doc）。computeLandingState / ready-pool-check 等读主检出盘上
- * tasks/*.md（非 git）——主检出停工作分支后，若不同步，落地成功但验证读到滞后 status → 假
- * not-landed（watchdog 2026-08-28 实证：landed 但 final=exited-not-landed）。best-effort：冲突留待
- * 下次 landing 收敛。
+ * 每任务新进程执行（gap-fan-in-token-gate-version-mismatch-self-lock AC1）：机械 fan-in 不在守护进程
+ * in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），改为每任务 spawn
+ * 一个 fresh node 进程加载 worker-driver.ts --mechanical-fan-in。执行器（entry）用【主检出】的
+ * worker-driver.ts（opts.root/plugin/scripts/worker-driver.ts，与 driver 同版）——⛔ 不用 worktree 的
+ * （gap-fan-in-spawn-stale-worktree-executor-missing-argv：stale worktree 缺新 argv 如 --mechanical-fan-in
+ * ⇒ fresh 进程报 unknown argument ⇒ 无 JSON 输出 ⇒ parse-mechanical-fan-in red）。fan-in 编排器本就是
+ * 基础设施，应跟 driver 同版；任务 delta（含对 worker-driver.ts 自身的改动）由 suite step（worktree
+ * test.sh）验证，不因执行器用主检出版而丢。锁半（acquireFanInLock，ADR-034）与编排半
+ * （fan-in-ff-merge.sh）仍在 worktree 同源。结果经 stdout 单行 JSON 回传（--mechanical-fan-in 只打一行
+ * result JSON）；spawn 失败/输出不可解析 fail-closed 为 red（硬规则 3b：读不懂 ≠ 合格）。
  */
-function syncDocBranchToDevelop(root: string): void {
+export async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promise<MechanicalFanInResult> {
+  const entry = path.join(opts.root, "plugin", "scripts", "worker-driver.ts");
+  const argv = [
+    process.execPath, "--experimental-strip-types", entry,
+    "--mechanical-fan-in",
+    "--task", opts.task,
+    "--worktree", opts.worktree,
+    "--root", opts.root,
+    "--run-id", opts.runId,
+    "--json",
+  ];
+  if (opts.mergeTarget) argv.push("--merge-target", opts.mergeTarget);
+  const r = await runAsync(argv, { timeoutMs: Infinity, collectStderr: true });
+  // MechanicalFanInResult 自 D5/D6/D7 起带 verdict 字段（outcome=red 时非 null）——spawn 失败 / 输出
+  // 不可解析的 red 也须构造结构化 verdict（⛔ 缺字段 ⇒ typecheck 红；硬规则 3b 读不懂 ≠ 合格）。
+  const red = (step: string, reason: string, exitCode: number | null = null): MechanicalFanInResult => ({
+    outcome: "red",
+    verdict: { step, verdict: "failed", exitCode, summary: reason, logFile: null },
+    step, reason,
+    lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
+    suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+  });
+  if (r.status === null) {
+    return red("spawn-mechanical-fan-in", r.error?.message ?? `fresh mechanical fan-in process failed: ${r.stderr || "no output"}`);
+  }
+  const lastJson = (r.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean).pop();
+  if (lastJson) {
+    try {
+      const parsed = JSON.parse(lastJson);
+      if (parsed && typeof parsed === "object" && (parsed.outcome === "landed" || parsed.outcome === "red")) {
+        return parsed as MechanicalFanInResult;
+      }
+    } catch { /* fall through to red */ }
+  }
+  return red("parse-mechanical-fan-in", `unparseable fresh mechanical fan-in output: ${(r.stderr || r.stdout || "").trim() || `exit ${r.status}`}`, r.status);
+}
+
+/** D7：机械 fan-in 的 bucket suite 绿后，把本轮 suite 状态镜像到权威载体 full-suite-state.json。
+ *  ⛔ 不伪造 full-green：scope=worktree + taskId + runner=inner 区分 bucket-run（本任务的 --buckets 子集）
+ *  与 full-run（scope=main + runner=outer 无 taskId）——读面据此可分辨「退休已修 suite 绿」≠「全量 suite 绿」。
+ *  finishedAt 与 mfi.suiteFinishedEpoch 同源（同一 sr.finishedAt 派生）⇒ 载体不再 28h 陈旧（D7 AC3）。
+ *  laneCount 取 defaultLaneCount()（nproc-derived 单一真相源，⛔ 非字面量——bucket suite 跑的是
+ *  test.sh AC5 派生的真实 lane 数，不是 1 条）。
+ *  best-effort：写失败 / 状态在飞（shouldSkipMirrorWrite）不致命——mfi 仍是这次 fan-in 的权威记录。 */
+export function mirrorMechanicalFanInSuiteState(opts: {
+  task: string;
+  runId: string;
+  commit: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  stateFile: string;
+}): void {
   try {
-    const cur = spawnSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).stdout.trim();
-    if (!cur || cur === "develop") return;
-    spawnSync("git", ["-C", root, "merge", "develop", "--no-edit"], { stdio: "ignore" });
-  } catch (_) { /* best-effort */ }
+    const built = buildMirrorState({
+      state: "green", startedAt: opts.startedAt, finishedAt: opts.finishedAt,
+      durationMs: opts.durationMs, laneCount: defaultLaneCount(), commit: opts.commit,
+      taskId: opts.task, runId: opts.runId, runner: "inner", scope: "worktree",
+    });
+    if (built.error) return;
+    if (shouldSkipMirrorWrite(readCurrentState(opts.stateFile))) return;
+    writeMirrorState(opts.stateFile, built.state);
+  } catch {
+    // best-effort：镜像写失败 ≠ fan-in 失败（mfi 仍是权威）。
+  }
 }
 
 // ── 阶段 4（AC129）常驻驱动 + 自主选任务：选择环 / selector worker / 判停 ───────────────────────────
@@ -1887,6 +2521,9 @@ export interface ResidentOptions {
   /** 重试上限（gap-worker-driver-retry-cap-not-wired）：同一任务连续 N 次 exited-not-landed 未落地 ⇒
    *  标 needs-human 并停止重派。缺省 RETRY_CAP_DEFAULT（与 promotion 的 --max-fix-retries 同值）。 */
   maxRetries: number;
+  /** 快速死亡退避配置（gap-worker-driver-selector-api-error-no-backoff）：quickDeathMs / backoffThreshold /
+   *  baseBackoffMs / maxBackoffMs。退避上限（markNeedsHuman 阈值）复用上面的 maxRetries。 */
+  backoffCfg: QuickDeathBackoffConfig;
 }
 
 /**
@@ -1900,7 +2537,7 @@ export interface ResidentOptions {
  *       supervisor 重启）。退出码 = 首个非零 worker 码（仅在终态 latch 后返回）。
  */
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
-  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs, maxRetries } = opts;
+  const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs, maxRetries, backoffCfg } = opts;
 
   // 主检出脏状态观察（阶段 2 ③，gap-worker-driver-stashifdirty-stashes-others-uncommitted）：⛔ 不 stash
   // 共享主检出（脏改动属他人）。stash 事件仍发射供观测（stashed=false + files 列出脏文件）。非 git no-op。
@@ -1919,6 +2556,16 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // needs-human（ready→needs-human），needsHuman 集合同进 retryCapNotExhausted / notNeedsHuman 过滤 ⇒
   // 不再无限重派。跨轮存活于常驻循环内（⛔ 不落盘，与 promotion 的 RetryState 同寿命）。
   const retryState: RetryState = { counts: new Map(), needsHuman: new Set() };
+  // gap-mark-needs-human-commit-after-write：markNeedsHuman 翻转结果（含 committed）经 writeRound 落进
+  // 每轮 round 记录（生产载体——生产 driver argv 无 --json ⇒ json 事件不可观测，同 cold-start-inflight）。
+  // splice(0) 快照并清空 ⇒ 每轮只报【本轮新】的翻转，⛔ 不累积跨轮。
+  const needsHumanResults: Array<{ id: string; ok: boolean; committed: boolean; reason: string }> = [];
+
+  // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff）：worker <quickDeathMs 快速死亡连续
+  // ≥backoffThreshold 次 ⇒ 对该 task 设 backoffUntil（指数退避，⛔ 不立即重派）；退避到上限（maxRetries）
+  // ⇒ markNeedsHuman（复用现有重试上限机制，⛔ 不无限退避）。状态按 task 记（⛔ 不全局——一个任务退避
+  // 不拖垮别的任务，AC2）。跨轮存活于常驻循环内（⛔ 不落盘，与 retryState 同寿命）。
+  const backoffState = newQuickDeathBackoffState();
 
   // gap-worker-driver-cold-start-inflight-refresh：冷启动在飞排除集【每趟 pass 现观测】（SPEC §5.2
   // actual=observe()），不再是循环外一次性 const 快照——原 gap-worker-driver-cold-start-inflight-blind
@@ -1949,6 +2596,10 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       stopReason: reason,
       liveness,
       coldStartInflight: [...coldInflight].sort(),
+      // gap-live-mechanical-fan-in-inflight-invisible：round 带上具体 task id（含机械 fan-in 窗口——
+      // worker 已 exit、无 outcome、无 workflow-events，Live 页据此仍可见该任务）。
+      inFlightTasks: inFlightTasks(),
+      needsHuman: needsHumanResults.splice(0),
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -1991,8 +2642,29 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       if (r.outcome.final_state === "exited-not-landed") {
         const newly = advanceRetryCap(retryState, [r.taskId], maxRetries);
         for (const id of newly) {
-          markNeedsHuman(rootDir, id, `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`);
+          // gap-mark-needs-human-commit-after-write：markNeedsHuman 写盘即提交，返回
+          // { id, ok, reason, committed }——⛔ 不再丢弃 {ok,reason}；结果经 writeRound 落进 round 记录
+          // （生产载体），json 事件供测试/手动观测。
+          const nh = markNeedsHuman(rootDir, id, `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`);
+          needsHumanResults.push(nh);
+          if (json) process.stdout.write(`${JSON.stringify({ event: "needs-human", ...nh })}\n`);
         }
+      }
+      // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff）：worker 快速死亡（<quickDeathMs）
+      // ⇒ 对该 task 退避（backoffUntil，⛔ 不立即重派）；退避到上限（maxRetries）⇒ markNeedsHuman（复用
+      // 现有重试上限机制，⛔ 不无限退避）。needsHuman 集合与 markNeedsHuman 的 status 翻转双保险——
+      // 即使磁盘写失败，内存过滤（retryCapNotExhausted/notNeedsHuman）也挡重派。
+      const backoff = recordQuickDeathBackoff(
+        backoffState, r.taskId, r.outcome.final_state, r.outcome.wall_clock_ms, Date.now(), maxRetries, backoffCfg,
+      );
+      if (backoff.newlyNeedsHuman) {
+        retryState.needsHuman.add(r.taskId);
+        markNeedsHuman(rootDir, r.taskId, `worker-driver 连续 ${maxRetries} 次 <${backoffCfg.quickDeathMs}ms 快速死亡（退避上限）`);
+      }
+      if (backoff.quickDeath && json) {
+        process.stdout.write(
+          `${JSON.stringify({ event: "worker-backoff", task: r.taskId, consecutive_quick_deaths: backoffState.counts.get(r.taskId), backed_off: backoff.backedOff, needs_human: backoff.newlyNeedsHuman, wall_clock_ms: r.outcome.wall_clock_ms })}\n`,
+        );
       }
       return r;
     });
@@ -2068,12 +2740,17 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 三个散点已收进 applyTaskFilters 一次判完。
       // 重试上限（gap-worker-driver-retry-cap-not-wired）：retryExhausted = 本循环已标 needs-human 的
       // 任务集合（exited-not-landed 达上限派生）——retryCapNotExhausted 谓词据此滤掉不再重派。
-      const candidates = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks(), retryExhausted: retryState.needsHuman }));
+      const candidates = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks(), retryExhausted: retryState.needsHuman }))
+        // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff，AC2）：退避中的 task（backoffUntil
+        // 未到）本轮不派——⛔ 只滤掉退避的 task，不滤掉别的候选（退避按 task 记，不全局）。now 每候选
+        // 取一次现时刻（⛔ 循环外一次 now 快照会把「退避刚到期」的 task 误滤一整轮）。
+        .filter((id) => !isBackedOff(backoffState, id, Date.now()));
       if (candidates.length === 0) {
         // 真池空（ready 减在飞后无候选）⇒ 瞬时 WAIT：记 pool-empty，下一轮重读（⛔ 不再 latch）。
         //   池非空但全与在飞 Touches/deps 重叠 ⇒ 同为瞬时 WAIT：不设 stopReason（在飞 worker 结束释放
         //   Touches 或依赖由别的任务落地后重进选择环重新 filter）。两者都不退出——等 intervalMs 重读。
         if (shuffled.length === 0) waitReason = "pool-empty (no dispatchable candidate in the ready pool)";
+        else waitReason = "backoff (all dispatchable candidates are in quick-death backoff)";
         break;
       }
       const sel = await runSelectorWorker(candidates, selectorArgv, rootDir);
@@ -2138,6 +2815,10 @@ export async function main(argv: string[]): Promise<number> {
   let intervalRaw: string | undefined;
   let reconcileRaw: string | undefined;
   let maxRetriesRaw: string | undefined;
+  let quickDeathMsRaw: string | undefined;
+  let backoffBaseMsRaw: string | undefined;
+  let backoffMaxMsRaw: string | undefined;
+  let backoffThresholdRaw: string | undefined;
   let pidFile: string | undefined;
   let outcomePath: string | undefined;
   let runId: string | undefined;
@@ -2145,6 +2826,9 @@ export async function main(argv: string[]): Promise<number> {
   let serve = false;
   let host: string | undefined;
   let port: number | undefined;
+  let mechanicalFanIn = false;
+  let mechWorktree: string | undefined;
+  let mechMergeTarget: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -2162,6 +2846,10 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--interval") intervalRaw = args[++i];
     else if (a === "--reconcile-interval") reconcileRaw = args[++i];
     else if (a === "--max-retries") maxRetriesRaw = args[++i];
+    else if (a === "--quick-death-ms") quickDeathMsRaw = args[++i];
+    else if (a === "--backoff-base-ms") backoffBaseMsRaw = args[++i];
+    else if (a === "--backoff-max-ms") backoffMaxMsRaw = args[++i];
+    else if (a === "--backoff-threshold") backoffThresholdRaw = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
     else if (a === "--outcome") outcomePath = args[++i];
     else if (a === "--run-id") runId = args[++i];
@@ -2169,6 +2857,9 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--serve") serve = true;
     else if (a === "--host") host = args[++i];
     else if (a === "--port") port = Number(args[++i]);
+    else if (a === "--mechanical-fan-in") mechanicalFanIn = true;
+    else if (a === "--worktree") mechWorktree = args[++i];
+    else if (a === "--merge-target") mechMergeTarget = args[++i];
     else if (a === "--help" || a === "-h") {
       console.log(
         "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + ⛔ 不 stash 主检出 + MCP 控制面 + 常驻选择环）\n" +
@@ -2179,6 +2870,11 @@ export async function main(argv: string[]): Promise<number> {
           "  [--interval <ms>]   无在飞 worker 且瞬时 WAIT 时的轮询间隔（缺省 30000；测试缝传小值）\n" +
           "  [--reconcile-interval <s>]  协调地板：至少每 N 秒协调一次，边沿事件全丢也降级「慢但正确」而非静默停摆（缺省 300；0 = 无地板）\n" +
           "  [--max-retries <n>]  重试上限：同一任务连续 N 次 exited-not-landed 未落地 ⇒ 标 needs-human 并停止重派（缺省 3，同 promotion --max-fix-retries）\n" +
+          "  [--quick-death-ms <ms>]  快速死亡判据：worker 墙钟 < 此值视为快速死亡（缺省 60000）\n" +
+          "  [--backoff-threshold <n>]  连续快速死亡 ≥ 此次数才开始退避（缺省 1）\n" +
+          "  [--backoff-base-ms <ms>]  第一次退避等待 ms（指数底数，缺省 30000）\n" +
+          "  [--backoff-max-ms <ms>]  退避等待上限 ms（指数增长封顶，缺省 300000）\n" +
+          "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -2189,6 +2885,28 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const rootDir = root ? path.resolve(root) : path.resolve(process.cwd());
+
+  // --mechanical-fan-in：fresh 进程入口（每任务新进程执行，gap-fan-in-token-gate-version-mismatch-
+  // self-lock AC1）。守护 spawn 本入口（entry = 主检出 worker-driver.ts，⛔ 非 worktree——stale worktree
+  // 缺新 argv ⇒ unknown argument，gap-fan-in-spawn-stale-worktree-executor-missing-argv），跑机械 fan-in、
+  // 把 result 以单行 JSON 打回 stdout（spawnMechanicalFanIn 解析），exit 0 = landed / 2 = red。⛔ 不是
+  // 派发路径：不 stash、不读 selector、不写 outcome（结果由 spawn 方入账）。
+  if (mechanicalFanIn) {
+    const task = tasks[0];
+    if (!task || !mechWorktree) {
+      console.error("worker-driver: --mechanical-fan-in requires --task <id> and --worktree <path>");
+      return 2;
+    }
+    const result = await runMechanicalFanIn({
+      task,
+      worktree: mechWorktree,
+      root: rootDir,
+      runId: runId ?? `fm-${task}-${Date.now()}`,
+      mergeTarget: mechMergeTarget,
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result.outcome === "landed" ? 0 : 2;
+  }
 
   // --serve：起 MCP 控制面（常驻）。listening socket 保持事件循环存活 ⇒ 进程不退出，直到 SIGINT/SIGTERM。
   if (serve) {
@@ -2206,6 +2924,14 @@ export async function main(argv: string[]): Promise<number> {
   const intervalMs = parseIntervalMs(intervalRaw, rootDir);
   const reconcileMs = parseReconcileIntervalSecs(reconcileRaw, rootDir);
   const maxRetries = parseMaxRetries(maxRetriesRaw);
+  // 快速死亡退避配置（gap-worker-driver-selector-api-error-no-backoff）：四个机制旋钮经 --quick-death-ms /
+  // --backoff-base-ms / --backoff-max-ms / --backoff-threshold 覆盖；退避上限复用 maxRetries。
+  const backoffCfg: QuickDeathBackoffConfig = {
+    quickDeathMs: parseQuickDeathMs(quickDeathMsRaw),
+    backoffThreshold: parseBackoffThreshold(backoffThresholdRaw),
+    baseBackoffMs: parseBackoffBaseMs(backoffBaseMsRaw),
+    maxBackoffMs: parseBackoffMaxMs(backoffMaxMsRaw),
+  };
 
   // 阶段 4（AC129）：无 --task ⇒ 常驻选择环（不再报错退出）。--task 显式批量派发路径不变。
   if (tasks.length === 0) {
@@ -2227,6 +2953,7 @@ export async function main(argv: string[]): Promise<number> {
       intervalMs,
       reconcileMs,
       maxRetries,
+      backoffCfg,
     });
   }
 

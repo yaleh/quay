@@ -1,6 +1,6 @@
 export const meta = {
   name: 'fan-in-execute',
-  description: 'AC78 fan-in 执行 workflow — 无锁段（merge develop → delta 断言面判定 → ts-typecheck → scoped 门+全量+doc）与持锁段（flip done → fan-in-ff-merge.sh）由本脚本生成的 subagent prompt 全权执行；全量 suite 的【等待】由阶段 2 agent 在本回合内多次 <600s Bash 循环承担（gap-subagent-turn-budget-13min-falsified：已证伪「subagent 回合预算硬超时」，真实限制仅 Bash 单次 600s 硬顶 + suite 实测 19+ min）；subagent 在 ff 成功后才返回。A6 只检查「是否走了本 workflow」（判据2 (a)(b)(c)）。gap-adr034-fan-in-lock-holder-supervised：fan-in workflow 锁已收进 driver（worker-driver.ts acquireFanInWorkflowLock 非分离 holder，随 driver 死自动释放）；本 workflow 不再持该锁（分离 holder + flag 释放协议已废除），ff-race 防护在机械 fan-in（driver）路径由 driver 持锁提供。gap-fan-in-driver-mechanical-orchestration：本 workflow 退役为【机械 fan-in 失败时的语义兜底】（happy-path primary = worker-driver.ts runMechanicalFanIn 机械驱动锁/merge/delta/typecheck/scoped门/suite/ff；机械失败 ⇒ 任务 exited-not-landed、worktree 保留，续做 prompt 以 scriptPath 调本 workflow 兜底）。',
+  description: 'AC78 fan-in 执行 workflow — 无锁段（merge develop → delta 断言面判定 → ts-typecheck → scoped 门+全量+doc）与持锁段（flip done → fan-in-ff-merge.sh）由本脚本生成的 subagent prompt 全权执行；全量 suite 的【等待】由阶段 2 agent 在本回合内多次 <600s Bash 循环承担（gap-subagent-turn-budget-13min-falsified：已证伪「subagent 回合预算硬超时」，真实限制仅 Bash 单次 600s 硬顶 + suite 实测 19+ min）；subagent 在 ff 成功后才返回。A6 只检查「是否走了本 workflow」（判据2 (a)(b)(c)）。gap-adr034-fan-in-lock-holder-supervised：fan-in 锁已收进 driver（worker-driver.ts acquireFanInLock 非分离 holder，随 driver 死自动释放）；本 workflow 不再持该锁（分离 holder + flag 释放协议已废除），ff-race 防护在机械 fan-in（driver）路径由 driver 持锁提供。gap-fan-in-driver-mechanical-orchestration：本 workflow 退役为【机械 fan-in 失败时的语义兜底】（happy-path primary = worker-driver.ts runMechanicalFanIn 机械驱动锁/merge/delta/typecheck/scoped门/suite/ff；机械失败 ⇒ 任务 exited-not-landed、worktree 保留，续做 prompt 以 scriptPath 调本 workflow 兜底）。',
   whenToUse: 'inner 对某任务执行 fan-in 时（A6）：以 scriptPath 调用本 workflow，args={task, worktree, root, runId, mergeTarget}。禁止 name:（M176 陷阱：同会话第二次 name: 派发可能取旧脚本体）。',
   phases: [{ title: 'FanIn', detail: '阶段1（预备+启动 detached suite，立即返回）→ 阶段2 agent 回合内循环 <600s Bash 等 suite →（红则 Fix agent 重启动）→ 入账+flip+ff+bracket，ff 成功后才返回' }],
 }
@@ -100,17 +100,15 @@ export const meta = {
 //     捕获 suite 起止/CPU（GNU time）/判定到 /tmp 临时 env；step 4.5 全绿后 # suite-record-block 写
 //     per-task-suite-record（plugin/scripts/per-task-suite-record.ts）——含跳过全量（fullSuiteRan=
 //     false + skipReason=doc-only-delta，判据2 能取假），写失败 HARD FAIL（AC1 判据1 义务）。
-//  ⚠️ verification-round 入账（gap-preverified-suite-bypasses-verification-round-ledger +
-//     gap-fan-in-realsuite-bypasses-verification-round-ledger）：本 fan-in 的 suite 走了【本 workflow
-//     内的 detached 直跑】（9327056a 的 setsid `bash scripts/test.sh`，不经 full-suite-runner.ts——后者
-//     是唯一写 verification-round 的 full-suite 入口）或 pre-verified 复用（ec434eb8，capture 在回合外
-//     已跑绿）⇒ 两分支都从不触发 full-suite-runner 的 verification-round 写入，趋势账本（/tests + 成本
-//     分析数据源）对最新落地路径变盲。step 4 在复用 capture 时追加 suite_preverified=1 标记；step 4.5
-//     # preverified-round-block 的【共用判定】是 full_suite_ran=true（有真跑——本 fan-in 直跑或复用），
-//     preverified 布尔由 suite_preverified 标记决定（1=复用，0=本 fan-in 真跑），两分支共用同一 writer
-//     （plugin/scripts/pre-verified-round-record.ts --preverified <0|1>），写失败 HARD FAIL（AC1 判据1
-//     义务）。doc-only 跳过（full_suite_ran=false）无 suite 可记账，不写。正常全量路径由
-//     full-suite-runner 写 verification-round，fan-in 不重复写。
+//  ⚠️ verification-round 入账（gap-fan-in-red-bucket-run-not-recorded，人裁定「定义正确机制并实现」）：
+//     本 fan-in 桶路径改走 full-suite-runner.ts --buckets（SUITE_LAUNCH 里的 detached 形态），runner 是
+//     verification-round.jsonl / full-suite-state.json / measure-history.jsonl / suite-load-<runId>.jsonl
+//     的唯一 writer——green 与 red 都入账（旧的 `setsid bash scripts/test.sh` 平行 harness + pre-verified-
+//     round-record 只认 green 的窄 writer 已删除，两套平行机制收敛为一）。red 桶轮次在 suite 退出时由
+//     runner 直接记 state=red 进 verification-round.jsonl（/tests 趋势账本），不再只在 green 分支事后补记。
+//     step 4.5 只剩 per-task-suite-record（runner 不写 per-task-suite-records.jsonl 那个独立账本）。
+//     改本文件必须同步 plugin/workflows/fan-in-execute.js（双拷贝，workflows-dual-copy-drift-check）与
+//     plugin/test/fan-in-execute-paths.test.mjs（--buckets 走 runner 的 wiring + red/green 对照）。
 //  ⑧ land 前 anti-drift 重跑（gap-fan-in-fix-commit-delta-escapes-touches-coverage）：step 1 的
 //     anti-drift 检查在 merge 后立即跑，fix-agent 的修复提交（suite-fix 重跑路径）在其后引入——其触碰
 //     文件从未被 Touches 复核（实证 c2917261 改 full-suite-runner.test.mjs 不在 Touches，已 land 才
@@ -197,10 +195,11 @@ rm -f "$suite_exit_marker" "$suite_time_file"
 suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 suite_start_ms=$(date +%s%3N)
 suite_head_now=$(git -C ${worktree} rev-parse HEAD 2>/dev/null || echo unknown)
-# gap-fan-in-suite-log-cross-relaunch-reuse: 每轮 relaunch 轮转日志 + 打起始标记。旧轮内容移到
-# .prev（诊断可查），当前轮从【空文件 + 起始标记】开始，读者按标记切片（不再整份线性 grep 读旧轮）。
+# gap-fan-in-suite-log-cross-relaunch-reuse: 每轮 relaunch 轮转日志。旧轮内容移到 .prev（诊断可查）；
+# 当前轮日志由 full-suite-runner.ts 的 --log-file 以 "w" 截断重写（runner 拥有日志，每轮天然只含当前轮，
+# 不再需要 __FANIN_SUITE_START__ 标记切片——读者按整份读即当前轮；FIX_SCOPE_GATE / parsePerFileLines
+# 的标记切片回退到整份，等价正确）。
 if [ -f "$suite_log_file" ]; then mv -f "$suite_log_file" "\${suite_log_file}.prev" 2>/dev/null || true; fi
-printf '__FANIN_SUITE_START__ iso=%s ms=%s head=%s round=full\\n' "$suite_start_iso" "$suite_start_ms" "$suite_head_now" > "$suite_log_file"
 printf 'full_suite_ran=true\\nskip_reason=\\nstart_iso=%s\\nstart_ms=%s\\nsuite_head=%s\\nsuite_log_file=%s\\n' \\
   "$suite_start_iso" "$suite_start_ms" "$suite_head_now" "$suite_log_file" > "$suite_capture"
 # gap-suite-fix-relaunch-stale-tmux-snapshot：launch/relaunch 前【显式】落新鲜 tmux-leak before-run 快照。
@@ -219,24 +218,22 @@ bash ${worktree}/plugin/scripts/tmux-leak-scan.sh --snapshot ${worktree} >/dev/n
 suite_pid_file="/tmp/fan-in-suite-${task}.pid"
 ${STALE_HOLDER_REAP}
 rm -f "$suite_pid_file"
-# gap-ac126-suite-bucket-execution-enable-wiring AC1 — the production suite path passes --buckets
-# <task-id> so the fan-in suite runs the task's bucket subset (P-only⇒P, M-only⇒M, hub/no-bucket⇒full)
-# via test.sh's own --buckets flag (the selection authority, gap-ac124). test.sh emits a __BUCKETS__
-# marker into this suite log; the fan-in's verification-round writer (pre-verified-round-record.ts)
-# parses it into the bucket fields (AC2/AC3). ISOLATE_LAUNCH (below) is NOT bucket-wired: it is the
-# C11 isolate rerun of an explicit load-sensitive file list — --buckets would override that list.
-# gap-suite-load-sampler-bypassed-by-fan-in-execute AC1 — the detached direct run (setsid bash
-# scripts/test.sh) bypasses full-suite-runner.ts (the ONLY spawner of suite-load-sampler.ts) ⇒ the
-# /tests load-curve data source (.quay/suite-load-<runId>.jsonl) went dark (5+ hour gap, 08-24). Re-wire
-# the SAME state-driven sampler on this path: the detached wrapper below establishes a per-task "running"
-# state file, spawns the sampler with its lifetime tied to the suite session (a group SIGKILL on a hung
-# holder also reaps it), and writes the terminal state right after the suite exits so the sampler stops
-# on its next poll (never a resident idle-spin; the sampler's own 结束即停 invariant). The out-file is the
-# SHARED checkout's .quay/suite-load-<runId>.jsonl — the SAME runId mirror-full-suite-state.ts writes into
-# full-suite-state.json at step 4.5, so the /tests page joins them (readCurrentSuiteRunId → readSuiteLoadSamples).
-rm -f "/tmp/fan-in-suite-sampler-${task}.state.json"
-printf '{"state":"running"}\\n' > "/tmp/fan-in-suite-sampler-${task}.state.json"
-setsid bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$5"; node --no-warnings --experimental-strip-types ${worktree}/plugin/scripts/suite-load-sampler.ts --state-file "/tmp/fan-in-suite-sampler-${task}.state.json" --out-file "${root}/.quay/suite-load-${runId}.jsonl" --run-id "${runId}" --interval 5 >/dev/null 2>&1 & cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh --buckets ${task}; else bash scripts/test.sh --buckets ${task}; fi; } >> "$3" 2>&1; rc=$?; rm -f "/tmp/fan-in-suite-sampler-${task}.state.json"; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
+# gap-fan-in-red-bucket-run-not-recorded AC1/AC2 — the fan-in bucket path runs through
+# full-suite-runner.ts --buckets <task> (the CORRECT runner — the single writer of verification-round.jsonl
+# green AND red, full-suite-state.json, measure-history.jsonl and suite-load-<runId>.jsonl), NOT a parallel
+# setsid-bash-scripts-test.sh harness + a green-only writer. The runner is the one place that records a
+# RED bucket round into the trend ledger (/tests) — the old detached direct run left a red round with ZERO
+# records (硬规则 3b: 「没跑过」与「跑了但红」同形). --root <worktree> is the tested checkout (test.sh runs
+# in the worktree); --state-dir <root>/.quay lands state/log/verification-round/measure-history/suite-load in
+# the SHARED checkout (the /tests read location; the same --state-dir split gap-suite-state-split-across-
+# worktree-and-gate documents). --runner inner is explicit (matches the derived worktree⇒inner default).
+# --log-file <suite_log_file> tees the suite stream (__BUCKETS__/__GROUP__/__PERFILE__ markers) into the
+# fan-in's own /tmp log so SUITE_WAIT_BASH (lane_count) + FIX_SCOPE_GATE (__PERFILE__) keep reading it; the
+# runner's OWN load sampler (suite-load-<runId>.jsonl) is spawned by the runner itself (state-driven stop),
+# so the manual sampler spawn is gone — the runner is the single spawner again (converged, not parallel).
+# ISOLATE_LAUNCH (below) is NOT bucket-wired: it is the C11 isolate rerun of an explicit load-sensitive
+# file list — --buckets would override that list (it still runs scripts/test.sh directly, NOT the runner).
+setsid bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$5"; cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --buckets ${task} --root "$1" --state-dir "${root}/.quay" --runner inner --log-file "$3"; else node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --buckets ${task} --root "$1" --state-dir "${root}/.quay" --runner inner --log-file "$3"; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
 suite_pid=""
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   if [ -s "$suite_pid_file" ]; then suite_pid=$(cut -d' ' -f1 "$suite_pid_file" 2>/dev/null); break; fi
@@ -477,6 +474,20 @@ if [ "$full_suite_ran" = "true" ] && [ -f "$suite_time_file" ]; then
 fi
 printf 'cpu_s=%s\\ncpu_source=%s\\ncpu_user_s=%s\\ncpu_sys_s=%s\\nend_iso=%s\\nend_ms=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\nsuite_exit=%s\\n' \\
   "$cpu_s" "$cpu_source" "$cpu_user_s" "$cpu_sys_s" "$end_iso" "$end_ms" "$wall_ms" "$load" "$lane_count" "$suite_exit" >> "$suite_capture"
+# gap-verification-round-static-fail-no-record AC1/AC2 — a RED suite (suite_exit != 0) must ALSO write a
+# verification-round record (state=red + reason + failures + taskId) so the /tests ledger is not blind to a
+# failed round (previously only the green path wrote). Best-effort: a write failure is WARNed, never blocks
+# the suite-red verdict (the Fix agent still gets dispatched by the主循环).
+if [ "$full_suite_ran" = "true" ] && [ "$suite_exit" != "0" ]; then
+  if ! node --experimental-strip-types ${worktree}/plugin/scripts/pre-verified-round-record.ts \
+    --task-id ${task} --run-id ${runId} --started-at "$start_iso" --duration-ms "$wall_ms" \
+    --lane-count "$lane_count" --load "$load" --commit "$suite_head" --preverified 0 --state red \
+    --root ${worktree} \
+    --suite-log "$suite_log_file" --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" \
+    --cpu-user-s "$cpu_user_s" --cpu-sys-s "$cpu_sys_s"; then
+    echo "WARN: verification-round red-record 入账失败（不挡 suite-red 判定 / Fix agent 派发）" >&2
+  fi
+fi
 echo "POLL=done SUITE_EXIT=$suite_exit"`
 
 // 等待块的内部输出语义（阶段 2 prompt 里跟随在 ${SUITE_WAIT_BASH} 之后说明；不是 agent 的最终返回）：
@@ -768,70 +779,13 @@ else
     exit 2
   fi
 fi
-# verification-round 入账（gap-preverified-suite-bypasses-verification-round-ledger AC1/AC2 +
-#   gap-fan-in-realsuite-bypasses-verification-round-ledger AC1/AC2）：本 fan-in 的 suite 走了【本
-#   workflow 内的 detached 直跑】（不经 full-suite-runner.ts——唯一写 verification-round 的 full-suite
-#   入口）或 pre-verified 复用（capture 在回合外已跑绿）⇒ 写 verification-round.jsonl，不让趋势账本
-#   （/tests + 成本分析数据源）对最新落地路径变盲。共用判定：full_suite_ran=true ⇒ 有真跑（本 fan-in
-#   直跑 或 复用），两分支共用同一 writer；preverified 布尔由 suite_preverified 标记决定（1=复用，
-#   0=本 fan-in 真跑）。doc-only 跳过（full_suite_ran=false）无 suite 可记账，不写。
-# 写失败 ⇒ HARD FAIL（AC1 判据1 义务）。
-# preverified-round-block-start
-if [ "$full_suite_ran" = "true" ]; then
-  preverified_flag="\${suite_preverified:-0}"
-  if ! node --experimental-strip-types ${worktree}/plugin/scripts/pre-verified-round-record.ts \
-    --task-id ${task} --run-id ${runId} --started-at "$start_iso" --duration-ms "$wall_ms" \
-    --lane-count "$lane_count" --load "$load" --commit "$suite_head" --preverified "$preverified_flag" \
-    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" \
-    --cpu-user-s "$cpu_user_s" --cpu-sys-s "$cpu_sys_s" --suite-log "\${suite_log_file:-}"; then
-    echo "FATAL: verification-round 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
-    exit 2
-  fi
-  # mirror-state-block-start
-  # full-suite-state.json mirror-write (gap-full-suite-state-stale-no-writer AC1/AC3): the detached
-  # suite (setsid bash scripts/test.sh) never goes through full-suite-runner.ts (the ONLY
-  # full-suite-state.json writer) ⇒ <shared-checkout>/.quay/full-suite-state.json went stale (the
-  # /tests page read a stale currentState; collectFailureFiles carried a latent unbounded-union of a
-  # stale state's failures[]). Mirror-write the terminal GREEN state reflecting THIS round, reusing
-  # full-suite-runner's mirrorStateFile pattern (write <root>/.quay/full-suite-state.json). Guarded by
-  # full_suite_ran=true (a doc-only skip never fabricates a green — the same guard as the
-  # verification-round write). Only green (suite_exit=0) reaches phase 2. 写失败 ⇒ HARD FAIL
-  # (AC1 判据1 义务)。writer 经 git common-dir 从 worktree 解析主检出（同 pre-verified-round-record）。
-  if ! node --experimental-strip-types ${worktree}/plugin/scripts/mirror-full-suite-state.ts \
-    --state green --started-at "$start_iso" --finished-at "$end_iso" --duration-ms "$wall_ms" \
-    --lane-count "$lane_count" --load "$load" --commit "$suite_head" \
-    --task-id ${task} --run-id ${runId}; then
-    echo "FATAL: full-suite-state.json mirror-write 失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
-    exit 2
-  fi
-  # mirror-state-block-end
-  # mirror-history-block-start
-  # measure-history.jsonl mirror-write (gap-measure-history-detached-suite-mirror-write AC1/AC3):
-  # the detached suite (setsid bash scripts/test.sh) never goes through full-suite-runner.ts (the ONLY
-  # measure-history.jsonl writer) ⇒ <shared-checkout>/.quay/measure-history.jsonl went stale (last record
-  # 2026-08-17T04:29:08Z; every detached-suite round after that carried no per-file durations — the sibling
-  # victim of gap-full-suite-state-stale-no-writer's root cause). Append a round parsed from THIS round's
-  # REAL suite log (the __PERFILE__ lines measure-suite-reporter.mjs already emitted into the suite's
-  # stdout, redirected to /tmp/fan-in-suite-<task>.log), reusing landMeasureHistory — the SAME function
-  # full-suite-runner.ts calls — so the data format is identical to the runner's direct writes (AC3: the
-  # measure-trend-check.ts consumer reads the same shape). Guarded by full_suite_ran=true (a doc-only skip
-  # never fabricates a round). writer 经 git common-dir 从 worktree 解析主检出（同 pre-verified-round-record /
-  # mirror-full-suite-state）。写失败 ⇒ HARD FAIL（AC1 义务）；benign no-op（无 __PERFILE__ 行 / 重复日志）
-  # 由 writer 以 exit 0 返回（不挡 fan-in）。capture 无 suite_log_file（pre-verified 复用时 caller 未记录其
-  # 日志路径）⇒ SKIP + WARN（响亮不静默——本 finding 正是「停摆两天无人知」；无法解析的轮不假装已入账）。
-  if [ -n "$suite_log_file" ]; then
-    if ! node --experimental-strip-types ${worktree}/plugin/scripts/mirror-measure-history.ts \
-      --log "$suite_log_file" --lane-count "$lane_count" --run-at "$end_iso" \
-      --task-id ${task} --run-id ${runId}; then
-      echo "FATAL: measure-history.jsonl mirror-write 失败（AC1 义务）⇒ 不翻 done、不 ff" >&2
-      exit 2
-    fi
-  else
-    echo "WARN: measure-history mirror-write skip — capture 无 suite_log_file（caller 未记录 suite 日志路径）⇒ 无法解析 __PERFILE__ 行入账" >&2
-  fi
-  # mirror-history-block-end
-fi
-# preverified-round-block-end
+# verification-round / full-suite-state / measure-history 入账（gap-fan-in-red-bucket-run-not-recorded
+# AC1/AC2）：已由 SUITE_LAUNCH 的 full-suite-runner.ts --buckets 统一写入（green+red 皆入账）——runner 是
+# verification-round.jsonl / full-suite-state.json / measure-history.jsonl / suite-load-<runId>.jsonl 的唯一
+# writer。旧的三段 mirror 写（pre-verified-round-record / mirror-full-suite-state / mirror-measure-history）
+# 是「绕开 runner 的平行 harness」的嫁接，已删除（两套平行机制收敛为一）。red 桶轮次现在由 runner 在
+# suite 退出时直接记 state=red 进 verification-round.jsonl（不再只在 green 分支事后补记）。doc-only 跳过
+# （full_suite_ran=false）无 suite 可记账——runner 从未跑，各账本自然无新增。
 # ⚠️ 本步【不】rm "$suite_capture"——ff 闸 (fan-in-ff-merge.sh AC1 收窄) 要读本任务 capture 的
 # suite_exit/suite_head；capture 保留到 ff 之后（step 5 持锁段末）再清理（gap-suite-concurrency-
 # ff-gate-and-slot-ssot）。旧实现在此删除 capture，ff 无证可查。

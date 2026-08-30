@@ -4,8 +4,8 @@
 //
 // Merging config files (DIR-050) does not fix the "declared but dead" failure mode — it can make
 // it WORSE, because a dead field in the canonical file looks MORE authoritative while still being
-// unread ([[gap-halt-sentinel-path-mismatch]] is the real-world proof: an authoritative-looking,
-// off-path `.halt` doc caused a genuine safety miss). This check distinguishes THREE distinct
+// unread (an authoritative-looking, off-path doc caused a genuine safety miss — the real-world
+// proof that motivated this check). This check distinguishes THREE distinct
 // failure shapes that "does it have a reader?" prose blurs together:
 //
 //   NO_READER              — no reader for this field exists ANYWHERE in the codebase.
@@ -60,7 +60,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFileSafe } from "./gate-script-base.ts";
+import { helpExit, readFileSafe } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // plugin/scripts -> plugin -> repo root. Robust to being invoked via the experiments/ symlink
@@ -356,6 +356,7 @@ export {
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 async function main(argv: string[]): Promise<number> {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node config-wiring-check.ts [--workspace <path>] [--driver bespoke|generic|both] [--json] [--verify-readers] [--selftest]");
   if (args.includes("--selftest")) return runSelftest();
 
   if (args.includes("--verify-readers")) {

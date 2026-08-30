@@ -49,7 +49,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // REUSE (gap-judgepoolcandidate-keyword-vs-position): the same code-span stripper the ready-pool
 // prose-prereq detector uses (ready-pool-check.ts:641) — single source, no parallel copy.
 import { stripCodeSpans } from "./ready-pool-check.ts";
@@ -228,6 +228,7 @@ function usage(): never {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node strategic-doc-staleness-check.ts [--root <dir>] [--pool-candidate <task-id> | --judge <path>] [--json]");
   const asJson = args.includes("--json");
   const rootArg = args.indexOf("--root");
   const root = path.resolve(rootArg !== -1 ? args[rootArg + 1] : process.cwd());

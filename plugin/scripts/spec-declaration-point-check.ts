@@ -36,6 +36,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** The default checked surface = the quay repo root (this script lives at <repo>/plugin/scripts/). */
@@ -165,6 +166,7 @@ function parseArg(argv: string[], name: string): string | undefined {
 }
 
 export function main(argv: string[]): number {
+  if (argv.includes("--help") || argv.includes("-h")) helpExit("usage: node spec-declaration-point-check.ts [--root <dir>] [--json]");
   const root = path.resolve(parseArg(argv, "--root") ?? DEFAULT_ROOT);
   const json = argv.includes("--json");
 

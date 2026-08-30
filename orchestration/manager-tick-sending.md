@@ -1,3 +1,5 @@
+> ⚠️ **本文件已退役（AC149，2026-08-28）**：outer/inner 会话停止，「给 outer / inner 发消息」不再有投递目标——机制由 driver 的派发/收尾面承接；manager 会话保留但不再向退役会话投递。→ `orchestration/manager-phase-goal.md` ### AC149。
+
 **给 outer / inner 发消息 —— 默认走原生跨会话消息（人 2026-08-12 裁定「实际应用 SendMessage，替换本项目原先使用的信道」）**
 
 ## 默认路径（原生，零脚本）
@@ -50,3 +52,18 @@
 再用 `SendMessage` 发一句指针（「报告已写到 `<路径>`」）。短状态直接 SendMessage 全文。
 **理由**：SendMessage 的消息落进上下文，**compact 后即不可重读**；而本项目大量依赖「外部文件抗 compact」
 （tick-log / 判准正本 / phase-goal 都是这个理由）。**这不是重建收件箱——文件不再是信道，只是记录。**
+
+## 语义职责的后台 subagent 派发（AC145，语义面派发规范）
+
+八类语义职责（任务撰写/立案 · 需求分析 · 升级判断 B11 · 学习 B10 · AC65 快修判断 · B16-C 类冲突意图 ·
+B18 止损 · 跨层纠错）**一律派后台 subagent（`Agent(run_in_background: true)`）执行，⛔ 不在 manager
+主线程直接做**（主线程编辑产品文件 ⇒ AC1 取假，`main_thread_edits > 0` 机械可查）。
+
+每次派发前**先**写派发记录（fail-closed，类别非法/理由过薄 ⇒ exit 1 不写不派）：
+
+```bash
+node --experimental-strip-types plugin/scripts/semantic-face-dispatch-record.ts --add \
+  --kind <八类之一> --reason "<一句产出/判断什么>" [--task-id <id>]
+```
+
+查询（AC2「可查」）：`node --experimental-strip-types plugin/scripts/semantic-face-dispatch-record.ts --list --kind <kind> [--json]`。

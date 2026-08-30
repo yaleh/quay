@@ -1,17 +1,9 @@
 #!/usr/bin/env bash
-# Mutation case for delivery-inventory-drift-gate (gap-delivery-inventory-drift-needs-file-add-gate +
-# gap-drift-gate-covers-only-plugin-scripts-not-workflows).
-# Fixture: a temp GIT repo whose docs/proposals/quay-product-outline.md carries a DELIVERY-INVENTORY
-# snapshot block, whose plugin/scripts/ has one committed existing.sh, and whose .claude/workflows/
-# + plugin/workflows/ carry one committed mirrored workflow (existing-wf.js) → GREEN baseline.
-#   INJECT-A (invariant new_script_requires_outline): ADD plugin/scripts/foo-new.sh WITHOUT touching
-#     the outline → the gate MUST go RED (exit 1).
-#   RESTORE-A: rm foo-new.sh → GREEN.
-#   INJECT-B (invariant content_only_change_skipped): edit an EXISTING script's content (no A/D) →
-#     the gate must stay GREEN (candidate B: content edits do not trigger).
-#   RESTORE-B: git checkout the edited script → GREEN.
-#   INJECT-C (outline_updated_alongside): ADD another script AND update the outline snapshot → GREEN.
-#   RESTORE-C: rm bar-new.sh + revert the outline → GREEN (clean slate for the workflow phases).
+# Mutation case for delivery-inventory-drift-gate (gap-drift-gate-covers-only-plugin-scripts-not-workflows).
+# Fixture: a temp GIT repo whose .claude/workflows/ + plugin/workflows/ carry one committed mirrored
+# workflow (existing-wf.js) → GREEN baseline. The OUTLINE-snapshot trigger (INJECT-A/B/C phases) is
+# RETIRED (gap-delivery-inventory-check-time-computation): the inventory is computed at check time, so
+# a plugin/scripts A/D no longer reddens the gate.
 #   INJECT-D (invariant new_workflow_requires_mirror): ADD .claude/workflows/foo-new.js WITHOUT
 #     touching plugin/workflows/ → the gate MUST go RED (exit 1).
 #   RESTORE-D: rm foo-new.js → GREEN.
@@ -25,18 +17,7 @@ name="delivery-inventory-drift-gate"
 workdir="${1:?usage: $name.sh <workdir>}"
 checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-mkdir -p "${workdir}/docs/proposals" "${workdir}/plugin/scripts" "${workdir}/.claude/workflows" "${workdir}/plugin/workflows"
-cat > "${workdir}/docs/proposals/quay-product-outline.md" <<'EOF'
-# outline
-
-<!-- DELIVERY-INVENTORY-BEGIN -->
-scripts=1
-<!-- DELIVERY-INVENTORY-END -->
-EOF
-cat > "${workdir}/plugin/scripts/existing.sh" <<'EOF'
-#!/usr/bin/env bash
-echo existing
-EOF
+mkdir -p "${workdir}/.claude/workflows" "${workdir}/plugin/workflows"
 cat > "${workdir}/.claude/workflows/existing-wf.js" <<'EOF'
 export const meta = { name: "existing-wf" };
 EOF
@@ -55,59 +36,9 @@ checker_cmd() {
   bash "${checker_dir}/delivery-inventory-drift-gate.sh" --root "$1" --base HEAD >/dev/null 2>&1
 }
 
-# GREEN baseline: clean tree, no plugin/scripts or .claude/workflows A/D → exit 0.
+# GREEN baseline: clean tree, no .claude/workflows A/D → exit 0.
 if checker_cmd "${workdir}"; then :; else
   echo "baseline RED on a clean tree (checker always-red?)" >&2
-  exit 4
-fi
-
-# INJECT-A: add a NEW plugin/scripts file without touching the outline → the gate MUST go RED.
-cat > "${workdir}/plugin/scripts/foo-new.sh" <<'EOF'
-#!/usr/bin/env bash
-echo new
-EOF
-if checker_cmd "${workdir}"; then
-  echo "STAYED-GREEN — plugin/scripts addition without outline update did not redden the gate (new_script_requires_outline broken)" >&2
-  exit 3
-fi
-
-# RESTORE-A: remove the injected file → back to green.
-rm -f "${workdir}/plugin/scripts/foo-new.sh"
-if checker_cmd "${workdir}"; then :; else
-  echo "ALWAYS-RED — restored clean tree still reddens the gate" >&2
-  exit 4
-fi
-
-# INJECT-B: modify an EXISTING script's content (no A/D) → the gate must stay GREEN (candidate B).
-printf '\necho changed\n' >> "${workdir}/plugin/scripts/existing.sh"
-if checker_cmd "${workdir}"; then :; else
-  echo "ALWAYS-RED — content-only edit to an existing script triggered the gate (content_only_change_skipped broken)" >&2
-  exit 4
-fi
-
-# RESTORE-B: revert the content edit → green (clean slate for the next phase).
-git -C "${workdir}" checkout -- plugin/scripts/existing.sh
-if checker_cmd "${workdir}"; then :; else
-  echo "ALWAYS-RED — tree after content-edit revert still reddens the gate" >&2
-  exit 4
-fi
-
-# INJECT-C: add a new script AND update the outline snapshot → GREEN.
-cat > "${workdir}/plugin/scripts/bar-new.sh" <<'EOF'
-#!/usr/bin/env bash
-echo bar
-EOF
-sed -i 's/scripts=1/scripts=2/' "${workdir}/docs/proposals/quay-product-outline.md"
-if checker_cmd "${workdir}"; then :; else
-  echo "ALWAYS-RED — script addition WITH outline update still reddens the gate" >&2
-  exit 4
-fi
-
-# RESTORE-C: remove bar-new.sh + revert the outline → green (clean slate for the workflow phases).
-rm -f "${workdir}/plugin/scripts/bar-new.sh"
-sed -i 's/scripts=2/scripts=1/' "${workdir}/docs/proposals/quay-product-outline.md"
-if checker_cmd "${workdir}"; then :; else
-  echo "ALWAYS-RED — tree after INJECT-C revert still reddens the gate" >&2
   exit 4
 fi
 

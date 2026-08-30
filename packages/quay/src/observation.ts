@@ -555,8 +555,10 @@ export function computeInFlightBlocking(root: string, inFlight: InFlightTask[]):
  *  dispatch-record family). NOT a plugin script: resolved against the workspace root. */
 export const WORKER_OUTCOME_REL = ".quay/worker-outcome.jsonl";
 
-/** The worker-driver's round (heartbeat) carrier, repo-relative. Used only for the "driver online"
- *  instant (AC2) and the worker-active discriminator — it carries no per-task list. */
+/** The worker-driver's round (heartbeat) carrier, repo-relative. Used for the "driver online"
+ *  instant (AC2), the worker-active discriminator, and — gap-live-mechanical-fan-in-inflight-invisible
+ *  — the in-flight task id list (`in_flight_tasks`), the only carrier that names the specific task
+ *  during the mechanical fan-in window (worker exited, no outcome yet, no workflow-events). */
 export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
 
 /** The worker-driver's spawned worker process `-n` name (worker-driver.ts WORKER_PROCESS_NAME —
@@ -564,6 +566,34 @@ export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
  *  /proc process-signal probe (方向二): a first-dispatched worker has no outcome record yet, so its
  *  live process cmdline (`Task: <id>`) is the only carrier that shows it in-flight. */
 export const WORKER_PROCESS_NAME = "quay-task-worker";
+
+/** The worker-driver's mechanical-fan-in result (gap-mech-fan-in-log-webui-visible-clickable A3):
+ *  the per-task mechanical fan-in terminal state the driver writes into worker-outcome.jsonl. Unknown/
+ *  missing fields degrade to null rather than a fabricated reading (hard rule ③b) — same best-effort
+ *  carrier contract as WorkerOutcomeRecord. */
+export interface MechanicalFanInRecord {
+  /** Terminal mechanical fan-in state: "landed" | "red". */
+  outcome: string | null;
+  /** First failing step name (outcome=red); null when landed. */
+  step: string | null;
+  /** Failure reason (outcome=red); null when landed. */
+  reason: string | null;
+  /** fan-in workflow lock hold duration (sec), read from lock-events. */
+  lockHoldSecs: number | null;
+  lockAcquireEpoch: number | null;
+  lockReleaseEpoch: number | null;
+  /** suite end epoch (sec), only when the suite actually ran. */
+  suiteFinishedEpoch: number | null;
+  /** suite three-state outcome ("done" | "red" | "hung"), only when it ran. */
+  suiteOutcome: string | null;
+  /** suite child pid (AC3 ppid probe input), only when it ran. */
+  suitePid: number | null;
+  /** landed sha (develop tip after ff); null when red. */
+  landedSha: string | null;
+  /** fan-in process log file name (`.quay/fan-in-<task>-<runId>.log` basename) — the Runs block's
+   *  view/download link key. null when absent. */
+  fanInLog: string | null;
+}
 
 /** The full outcome record the worker-driver writes (computeOutcome's 14 fields + the
  *  gap-worker-task-transcript-access-webui `session_id` that lands later). Unknown/missing fields
@@ -595,6 +625,31 @@ export interface WorkerOutcomeRecord {
    *  Parses to null until that lands, so a Runs block can link the transcript with zero
    *  re-implementation (this task reuses that task's read+validation, hard rule ③b / AC3). */
   session_id: string | null;
+  /** Mechanical fan-in terminal state (gap-mech-fan-in-log-webui-visible-clickable B1); null when the
+   *  record predates mechanical fan-in or the driver didn't run it. */
+  mechanical_fan_in: MechanicalFanInRecord | null;
+}
+
+/** Parse the driver's `mechanical_fan_in` sub-object into a MechanicalFanInRecord. Pure — a non-object
+ *  / malformed value degrades to null (best-effort runtime log, never a fabricated reading — hard rule ③b). */
+export function parseMechanicalFanIn(v: unknown): MechanicalFanInRecord | null {
+  if (v == null || typeof v !== "object" || Array.isArray(v)) return null;
+  const j = v as Record<string, unknown>;
+  const str = (x: unknown): string | null => (typeof x === "string" && x.length > 0 ? x : null);
+  const num = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) ? x : null);
+  return {
+    outcome: str(j.outcome),
+    step: str(j.step),
+    reason: str(j.reason),
+    lockHoldSecs: num(j.lockHoldSecs),
+    lockAcquireEpoch: num(j.lockAcquireEpoch),
+    lockReleaseEpoch: num(j.lockReleaseEpoch),
+    suiteFinishedEpoch: num(j.suiteFinishedEpoch),
+    suiteOutcome: str(j.suiteOutcome),
+    suitePid: num(j.suitePid),
+    landedSha: str(j.landedSha),
+    fanInLog: str(j.fanInLog),
+  };
 }
 
 /** Parse `.quay/worker-outcome.jsonl` (one JSON object per line) into outcome records. Pure — never
@@ -627,6 +682,7 @@ export function parseWorkerOutcomeRecords(text: string): WorkerOutcomeRecord[] {
       in_flight_count: num(j.in_flight_count),
       timed_out: bool(j.timed_out),
       session_id: str(j.session_id),
+      mechanical_fan_in: parseMechanicalFanIn(j.mechanical_fan_in),
     });
   }
   return out;
@@ -822,6 +878,34 @@ export function workerDriverOnlineMs(root: string): number | null {
   return onlineMs;
 }
 
+/**
+ * The task ids the worker-driver's LATEST round record considers in-flight (`in_flight_tasks`:
+ * implementing + mechanical-fan-in + cold-start-inflight). This is the ONLY carrier that names the
+ * specific task during the mechanical fan-in window — the worker process has exited (no /proc), no
+ * outcome record yet (written at `finish()`, AFTER `runMechanicalFanIn`), and the driver never writes
+ * workflow-events task-start. gap-live-mechanical-fan-in-inflight-invisible. Absent/unreadable round
+ * file, or a round record predating the field, ⇒ [] (degrade, never throw — a real "none", not a
+ * fabricated empty). Iterates every line and keeps the LAST `in_flight_tasks` array (append-order ⇒
+ * newest wins, so a stale earlier snapshot is superseded).
+ */
+function readWorkerRoundInFlightTasks(root: string): string[] {
+  try {
+    const roundText = fs.readFileSync(path.join(root, WORKER_ROUND_REL), "utf8");
+    let tasks: string[] = [];
+    for (const line of String(roundText).split("\n")) {
+      const s = line.trim();
+      if (!s) continue;
+      let j: Record<string, unknown>;
+      try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
+      const arr = j.in_flight_tasks;
+      if (Array.isArray(arr)) tasks = arr.filter((v): v is string => typeof v === "string" && v.length > 0);
+    }
+    return tasks;
+  } catch {
+    return [];
+  }
+}
+
 /** True when the worker-driver has produced ANY record (outcome or round) — i.e. the driver is wired
  *  and active. readLive uses this so an empty workflow-events store does NOT read as 「循环没跑」 once
  *  the driver is the real executor. */
@@ -979,6 +1063,26 @@ export function readLive(
     }
   } catch {
     workerInFlight = [];
+  }
+
+  // gap-live-mechanical-fan-in-inflight-invisible: the round carrier names the specific in-flight
+  // task ids during the mechanical fan-in window (worker exited, no outcome yet, no workflow-events).
+  // Surface each round-carried task id as in-flight with pid null (the worker process is gone). The
+  // /proc loop BELOW appends after this, so an implementing task keeps its pid/sessionId join (the
+  // merge Map's later-wins semantics let the /proc entry overwrite this round entry).
+  for (const taskId of readWorkerRoundInFlightTasks(root)) {
+    workerInFlight.push({
+      taskId,
+      runId: `worker-${taskId}`,
+      pid: null, // round-carrier task: worker process has exited (mechanical fan-in window)
+      sessionId: null, // no live process ⇒ no live session join
+      startedAtMs: nowMs, // no per-task start on the round carrier — "just now", never a fabricated long elapsed
+      implCompletedAtMs: null,
+      minutes: 0,
+      liveness: "unknown",
+      blocks: [],
+      blockedBy: [],
+    });
   }
 
   // gap-live-page-worker-inflight-bidirectional-error 方向二: the outcome carrier is written only at

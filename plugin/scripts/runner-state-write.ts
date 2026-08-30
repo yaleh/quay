@@ -17,6 +17,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { SuiteState, SuiteRoundRecord } from "./full-suite-runner.ts";
+import { writeJsonAtomic } from "./write-json-atomic.ts";
 
 /**
  * Read the runId (generation token) currently on disk at `file`, or undefined when absent /
@@ -49,7 +50,6 @@ export function writeStateGuarded(file: string, state: SuiteState): void {
 }
 
 export function writeState(file: string, state: SuiteState, opts?: { guard?: boolean }): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
   if (opts?.guard && state.runId) {
     const current = readStateRunId(file);
     if (current !== undefined && current !== state.runId) {
@@ -58,7 +58,7 @@ export function writeState(file: string, state: SuiteState, opts?: { guard?: boo
       return;
     }
   }
-  fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n", "utf8");
+  writeJsonAtomic(file, state);
 }
 /**
  * Append one suite-round record to <stateDir>/verification-round.jsonl (round = prior lines + 1).

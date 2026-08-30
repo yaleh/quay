@@ -93,7 +93,7 @@ test("AC1 — profiles.yml carries profiles/roles + flag-only params (AC154 prof
   assert.equal(p.promptSuggestions, false, "promptSuggestions must be false (REQUIRED, not optional)");
   assert.ok(p.profiles, "profiles section must exist");
   assert.ok(p.roles, "roles section must exist");
-  for (const role of ["manager", "outer", "inner", "task-worker", "selector", "fix-worker", "pool-judge"]) {
+  for (const role of ["manager", "outer", "task-worker", "selector", "fix-worker", "pool-judge"]) {
     const r = p.roles?.[role];
     assert.ok(r, `role "${role}" must be defined in roles`);
     assert.ok(r.name, `role "${role}" must carry a session display name (-n)`);
@@ -104,7 +104,7 @@ test("AC1 — profiles.yml carries profiles/roles + flag-only params (AC154 prof
   }
   // distinct, stable names for session-liveness "whose session is this"
   const names = Object.values(p.roles).map((r) => r.name);
-  assert.equal(new Set(names).size, 7, "role names must be distinct");
+  assert.equal(new Set(names).size, 6, "role names must be distinct");
 });
 
 test("AC1 — bare lives ONLY in profiles (AC154 取假①: no top-level or role-level bare)", () => {
@@ -119,7 +119,7 @@ test("AC1 — bare lives ONLY in profiles (AC154 取假①: no top-level or role
 
 test("AC1 — worker+loop roles share one profile; 换模型改一处 (AC154 取假②)", () => {
   const p = readProfiles();
-  const sharedRoles = ["outer", "inner", "task-worker", "selector", "fix-worker"];
+  const sharedRoles = ["outer", "task-worker", "selector", "fix-worker"];
   const profName = p.roles["task-worker"].profile;
   for (const role of sharedRoles) {
     assert.equal(p.roles[role].profile, profName, `${role} must reference the SAME profile as task-worker`);
@@ -162,10 +162,10 @@ test("AC1 — no secrets checked in (deepseek key / anthropic token / sk- patter
 // ── AC5 — --bare is opt-in, not the default ──────────────────────────────────────────────────────
 
 test("AC5 — --bare appears only when explicitly requested; normal launch omits it", () => {
-  const normal = launch("inner", ["--dry-run"]);
+  const normal = launch("selector", ["--dry-run"]);
   assert.equal(normal.status, 0);
   assert.ok(!normal.stdout.includes("--bare"), "normal launch must NOT include --bare");
-  const bare = launch("inner", ["--dry-run", "--bare"]);
+  const bare = launch("selector", ["--dry-run", "--bare"]);
   assert.equal(bare.status, 0);
   assert.ok(bare.stdout.includes("--bare"), "--bare flag must be appendable for one-shot sessions");
 });
@@ -203,9 +203,9 @@ test("AC4 — positive control: every role's launch command carries the profile 
 
 test("AC4 — deepseek roles reference the checked-in settings file; manager's effective env excludes 917k (via unset)", () => {
   const outer = extractSettingsArg(launch("outer", ["--dry-run"]).stdout.trim());
-  const inner = extractSettingsArg(launch("inner", ["--dry-run"]).stdout.trim());
+  const selector = extractSettingsArg(launch("selector", ["--dry-run"]).stdout.trim());
   assert.equal(outer.__file, SETTINGS, "outer must pass the checked-in file verbatim");
-  assert.equal(inner.__file, SETTINGS, "inner must pass the checked-in file verbatim");
+  assert.equal(selector.__file, SETTINGS, "selector must pass the checked-in file verbatim");
   // manager: effective env is the top-level env MINUS the deepseek-specific 917k vars (profile.unset)
   const mgr = extractSettingsArg(launch("manager", ["--dry-run"]).stdout.trim());
   assert.ok(mgr.env, "manager settings must carry an env object");
@@ -220,12 +220,12 @@ test("AC4 — deepseek roles reference the checked-in settings file; manager's e
 // ── AC4 — negative control: a broken profiles.yml produces a DIFFERENT command ───────────────────
 
 test("AC4 — negative control: flipping promptSuggestions to true removes the REQUIRED flag", () => {
-  const good = launch("inner", ["--dry-run"]).stdout.trim();
+  const good = launch("selector", ["--dry-run"]).stdout.trim();
   assert.ok(good.includes("--prompt-suggestions false"), "baseline must carry the flag");
   const raw = fs.readFileSync(PROFILES, "utf8");
   const broken = raw.replace("promptSuggestions: false", "promptSuggestions: true");
   assert.notEqual(broken, raw, "the substitution must actually change profiles.yml");
-  const r = launchWithProfiles("inner", broken, ["--dry-run"]);
+  const r = launchWithProfiles("selector", broken, ["--dry-run"]);
   assert.equal(r.status, 0);
   assert.ok(!r.stdout.includes("--prompt-suggestions"), "promptSuggestions=true must drop the flag");
   assert.notEqual(r.stdout.trim(), good, "a changed promptSuggestions must change the launch command");
@@ -262,7 +262,7 @@ test("AC6 — negative control: removing promptSuggestions drops the CLI flag (c
   const raw = fs.readFileSync(PROFILES, "utf8");
   const broken = raw.replace(/promptSuggestions: false\n/, "");
   assert.notEqual(broken, raw, "the substitution must actually remove the promptSuggestions key");
-  const r = launchWithProfiles("inner", broken, ["--dry-run"]);
+  const r = launchWithProfiles("selector", broken, ["--dry-run"]);
   assert.equal(r.status, 0);
   assert.ok(!r.stdout.includes("--prompt-suggestions false"),
     "removing promptSuggestions must drop the CLI flag (the REQUIRED invariant is what pins it)");

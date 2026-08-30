@@ -199,6 +199,27 @@ export function resolveDefaultStatus(value: string): string {
 }
 
 /**
+ * gap-serve-search-timeout-all-body-fetch: strip structural heading lines from
+ * a task body before using it as a search index, so template boilerplate
+ * (`## Proposal`, `## Plan`, `## AC`, `## DoD`) does not produce false positives
+ * when a search term matches a standard section name. This is the native-store
+ * mirror of Core's serve-render.stripHeadings (the exact function the web UI's
+ * own client-side search filter used) — byte-for-byte the same semantics, so a
+ * server-side `search` filter returns exactly the tasks the web UI's
+ * (now-removed-for-native) client-side filter would have. Heading lines outside
+ * fenced code blocks are stripped; `# comment` lines inside ``` fences are
+ * preserved (they are code content, still searchable).
+ */
+function stripHeadingsForSearch(text: string | undefined | null): string {
+  let inFence = false;
+  return (text || "").split("\n").filter((line) => {
+    if (/^```/.test(line)) { inFence = !inFence; return true; }
+    if (inFence) return true; // preserve code content (including # comment lines)
+    return !/^#+\s/.test(line); // strip structural headings outside fences
+  }).join(" ");
+}
+
+/**
  * QN-015: thrown by `write()` when a caller supplies `expectedStatus` and the
  * task's actual current status (read inside the same lock acquisition used
  * for the read-modify-write) does not match — a distinguishable class (not a
@@ -862,10 +883,16 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   // is a CLEAR error, safe degradation per DIR-001; listWithMalformed()
   // collects it into a machine-readable failure list).
   function walkTasks(
-    filter: { status?: string; label?: string },
+    filter: { status?: string; label?: string; search?: string },
     onError: (id: string, err: unknown) => void,
   ): (Task & { updatedAt?: number })[] {
     const tasks: (Task & { updatedAt?: number })[] = [];
+    // gap-serve-search-timeout-all-body-fetch: precompute the lowercased search
+    // needle once per walk (not once per task). The search matches title + body
+    // (with heading lines stripped), case-insensitively — the same predicate the
+    // web UI's client-side filter used, moved server-side so the MCP round-trip
+    // carries only the matches instead of every task's body.
+    const sq = filter.search ? filter.search.toLowerCase() : null;
     for (const id of listIds()) {
       let t: (Task & { updatedAt?: number }) | null;
       try {
@@ -877,6 +904,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       if (t === null) continue;
       if (filter.status && t.status !== filter.status) continue;
       if (filter.label && !(t.labels || []).includes(filter.label)) continue;
+      if (sq && !((t.title + " " + stripHeadingsForSearch(t.body)).toLowerCase().includes(sq))) continue;
       tasks.push(t);
     }
     return tasks;
@@ -920,7 +948,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * partial success, not a call-level failure.
    */
   function listWithMalformed(
-    filter: { status?: string; label?: string } = {},
+    filter: { status?: string; label?: string; search?: string } = {},
   ): { tasks: (Task & { updatedAt?: number })[]; malformed: Array<{ file: string; error: string }> } {
     const malformed: Array<{ file: string; error: string }> = [];
     ensurePersistentCacheLoaded();
