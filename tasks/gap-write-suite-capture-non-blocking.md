@@ -1,7 +1,7 @@
 ---
 id: gap-write-suite-capture-non-blocking
 title: writeSuiteCapture 观测写不得阻塞 fan-in——写失败 fail-open，ff 闸改读权威源
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -25,9 +25,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，负控制）：构造 capture 写失败（如目标目录只读）⇒ fan-in 不因 capture 失败 fail，绿 suite 仍落地。
-- [ ] AC2（能取假，ff 不误拒）：capture 缺失但 suite 真实绿（权威源可见）⇒ ff 不误拒。
-- [ ] AC3（能取假，回归）：正常路径 capture 照常写出、ff 闸主路径行为不变。
+- [x] AC1（能取假，负控制）：构造 capture 写失败（如目标目录只读）⇒ fan-in 不因 capture 失败 fail，绿 suite 仍落地。
+- [x] AC2（能取假，ff 不误拒）：capture 缺失但 suite 真实绿（权威源可见）⇒ ff 不误拒。
+- [x] AC3（能取假，回归）：正常路径 capture 照常写出、ff 闸主路径行为不变。
 
 ## Definition of Done
 
