@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-governance-self-skip-missing
 title: 5 个重 governance 文件改标 lowconc（gap-retire-governance-group-merge-into-bucket 的 AC2 子集）——主池不再裸跑 ~1080s lane-time；不加守卫、不建机械检查
-status: ready
+status: done
 labels:
   - gap
 parent: null
