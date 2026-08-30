@@ -1204,6 +1204,55 @@ test("pool < floor but no qualified candidate ⇒ no promotions", (t) => {
   assert.equal(byId["gap-child"].depsReady, false);
 });
 
+// ── DEPENDS_ON READS DEVELOP REF (gap-ready-pool-depends-on-status-stale-read) ─────────────────────
+// The depends_on/parent statusOf in depsReadyFor used to read the `allTasks` Map — built from the
+// manager working branch's DISK (a stale agent-proxy, 硬规则 4b) — so a dependency already `done` on
+// develop still reported blocking. The fix reads the canonical develop ref via readTaskStatusAtRef.
+// AC1/AC3: dep done on develop + stale disk ⇒ deps-ready (not blocking). AC2: dep genuinely not done
+// on develop ⇒ still blocking (fail-closed unchanged). Needs a REAL git repo (the ref read is
+// `git cat-file --batch`), created inline like the git-history tests above.
+
+test("depends_on statusOf reads develop ref, not the stale disk allTasks (gap-ready-pool-depends-on-status-stale-read AC1/AC2/AC3)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-depref-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+
+  // Deps as they exist ON DEVELOP: gap-dep-done is done; gap-dep-todo is genuinely todo.
+  writeTask(root, "gap-dep-done", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-dep-todo", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+  fs.writeFileSync(path.join(root, ".gitkeep"), "base\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "deps as committed on develop");
+  git("branch", "-q", "develop"); // develop ← the snapshot where gap-dep-done is done
+
+  // The manager working branch's DISK goes STALE: gap-dep-done flips back to todo on disk, while
+  // develop still has it done. (gap-dep-todo stays todo on both — the AC2 negative control.)
+  writeTask(root, "gap-dep-done", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+
+  // Two todo candidates, each depending on one dep (patched in after writeTask — writeTask has no
+  // dependsOn param).
+  for (const [id, dep] of [["gap-cand-done", "gap-dep-done"], ["gap-cand-todo", "gap-dep-todo"]]) {
+    writeTask(root, id, {
+      status: "todo", labels: ["gap"], parent: null, children: [],
+      body: fourArtifactBody({ touches: [`- code/${id}.ts (new)`] }),
+    });
+    const f = path.join(root, "tasks", `${id}.md`);
+    fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace("parent: null", `depends_on:\n  - ${dep}\nparent: null`));
+  }
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  const byId = Object.fromEntries(r.candidates.map((c) => [c.id, c]));
+  assert.equal(byId["gap-cand-done"].depsReady, true,
+    "dep done on develop ⇒ deps-ready even though the disk allTasks view is stale (todo)");
+  assert.equal(byId["gap-cand-todo"].depsReady, false,
+    "dep genuinely not done on develop ⇒ still blocking (fail-closed unchanged)");
+});
+
 // ── COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC2/AC3) ─────────────────────
 // The structural deadlock: a compound parent (`role: compound`, status ready NOT done) is only done
 // once ALL its children are done (parent-done-iff-children, DIR-026), so a child waiting on its
