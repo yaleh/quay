@@ -23,6 +23,7 @@ import {
   allDepsDone,
   readTaskStatus,
   markNeedsHuman,
+  WORKER_OUTCOME_REL,
 } from "../scripts/driver-filters.ts";
 import { readTaskStatus as workerReadTaskStatus } from "../scripts/worker-driver.ts";
 
@@ -280,4 +281,35 @@ test("AC3 — propagateDocBranchToDevelop: a flip on the doc branch reaches deve
     /^status: needs-human$/m,
     "develop sees the flipped status (propagateDocBranchToDevelop ran)",
   );
+});
+
+// ── needs-human 注记携带实际失败步（gap-needs-human-note-carries-step-verdict）─────────────────────
+
+test("AC2 (能取假) — needs-human 注记含 step+verdict 非纯模板（⛔ 仍只有模板句 ⇒ 假）", (t) => {
+  const root = makeRoot("nh-step");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
+  // 最近一条 exited-not-landed 记录带 mechanical_fan_in.step + reason（= verdict.summary）。
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, WORKER_OUTCOME_REL), JSON.stringify({
+    ts: new Date().toISOString(), task: "gap-nh", final_state: "exited-not-landed",
+    failure_reason: "task status=ready not done",
+    mechanical_fan_in: { outcome: "red", step: "suite", reason: "full-suite-runner.test.mjs:4889 ENOTEMPTY" },
+  }) + "\n", "utf8");
+
+  const res = markNeedsHuman(root, "gap-nh", "worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）");
+  assert.equal(res.ok, true);
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-nh.md"), "utf8");
+  assert.match(body, /失败步\/判词：step=suite/, "AC2: 注记带失败步名 step=suite（⛔ 仍只有模板句 ⇒ 假）");
+  assert.match(body, /full-suite-runner\.test\.mjs:4889 ENOTEMPTY/, "AC2: 注记带判词/summary（改掉任一 ⇒ 红）");
+});
+
+test("AC2 (负控制) — 无 exited-not-landed 记录 ⇒ 不追加「失败步/判词」行（与旧行为同形，⛔ 不伪造成有失败步）", (t) => {
+  const root = makeRoot("nh-nostep");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
+  const res = markNeedsHuman(root, "gap-nh", "worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）");
+  assert.equal(res.ok, true);
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-nh.md"), "utf8");
+  assert.doesNotMatch(body, /失败步\/判词/, "AC2 负控制: no step line when no outcome record");
 });

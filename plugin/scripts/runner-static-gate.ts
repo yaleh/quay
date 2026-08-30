@@ -265,6 +265,16 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ plugin/test/ scripts/test.sh
   run_checker "suite-bucket-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-bucket-drift-check.ts" --gate --root "${repo_root}"
+  echo "== suite-bucket reattribution ratchet (gap-suite-bucket-dynamic-truth-drift-detector, ③-AC6/③-AC7) =="
+  # AC121 把 230 个调 test.sh 的测试逐条重归属为 S|M（.quay/suite-bucket-reattribution.jsonl），但覆盖保证是
+  # 一次性人工声称（"重扫=0"），非机械 ratchet。本检查让「漏判」变响：新增一个静态纯 S（bucketSetOf={S}，
+  # 仅 scripts/test.sh 提及为 subject）且未入重归因的测试 ⇒ RED（第 1 层，阻断——AC121 误归 S 的漏测形态，
+  # 基线=0）；含 S 信号但非纯 S（S+M/P+S/P+S+M）未入重归因 ⇒ 只报计数不阻断（第 2 层，留痕——过度选择是
+  # 安全方向，现状 14）。重归因文件缺失 ⇒ NOT-EVALUATED（exit 3，硬规则 3b——永不与「0 漏判」同形）。
+  # mutation case: 纯 S 已重归属 → 绿；移除归属 → 红；恢复 → 绿。
+  # @static-tier change
+  # @static-object .quay/suite-bucket-reattribution.jsonl plugin/scripts/suite-bucket-reattr-ratchet-check.ts plugin/test/suite-bucket-reattr-ratchet-check.test.mjs plugin/test/ experiments/*/test/ packages/*/test/
+  run_checker "suite-bucket-reattr-ratchet-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-bucket-reattr-ratchet-check.ts" --gate --root "${repo_root}"
   echo "== landing-target branch-consistency check (gap-landing-target-branch-consistency-check, AC1-AC4) =="
   # 任务落地目标分支必须 == 当前前锋分支（develop..integration=0 不变式；机制家族第 4 次——「落地路径」
   # 字段与当前分支模型的一致性没有消费者）。前锋分支由 git 关系读宿主推出（integration ⊆ develop ⇒

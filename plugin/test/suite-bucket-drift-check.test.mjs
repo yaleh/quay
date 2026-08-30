@@ -209,3 +209,56 @@ test("③-AC3 — the checker is registered in run_static_checks (the static-gat
   );
   assert.ok(/# @static-tier (always|change|full)/.test(body), "the checker must carry a @static-tier annotation");
 });
+
+// ── ③-AC4 — production trigger (the --buckets path collects the trace cache from real runs) ─────────
+
+test("③-AC4 — scripts/test.sh --buckets path invokes suite-fs-trace.ts --update (the production trigger, not fixture injection)", () => {
+  const sh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
+  const start = sh.indexOf('elif [ "${1:-}" = "--buckets" ]');
+  const end = sh.indexOf("elif all_flags", start);
+  const bucketBranch = start === -1 ? "" : sh.slice(start, end === -1 ? sh.length : end);
+  assert.ok(
+    /suite-fs-trace\.ts["']?[^\n]*--update/.test(bucketBranch),
+    "the --buckets branch must invoke suite-fs-trace.ts --update (the production trigger that populates .quay/suite-fs-trace.jsonl from real runs)",
+  );
+});
+
+test("③-AC4 — updateTraceCache --limit bounds the trace batch (cost-bounded production trigger)", () => {
+  const root = makeFixture({
+    "plugin/test/a.test.mjs": `import { test } from "node:test";\ntest("a", () => {});\n`,
+    "plugin/test/b.test.mjs": `import { test } from "node:test";\ntest("b", () => {});\n`,
+  });
+  try {
+    const files = ["plugin/test/a.test.mjs", "plugin/test/b.test.mjs"];
+    const first = updateTraceCache(root, files, { limit: 1 });
+    assert.equal(first.traced.length, 1, `limit=1 must trace at most 1 file per call, got ${first.traced.length}`);
+    const second = updateTraceCache(root, files, { limit: 1 });
+    assert.equal(second.traced.length, 1, `the second call traces the remaining un-cached file, got ${second.traced.length}`);
+    assert.equal(loadTraceCache(root).size, 2, "both files end up cached across the two bounded calls");
+  } finally { cleanup(root); }
+});
+
+// ── ③-AC5 — a real collect feeds checkStaticVsTruth a real verdict, not NOT-EVALUATED ───────────────
+
+test("③-AC5 — a real collect (updateTraceCache) feeds the checker a real verdict (evaluated=true, covered>0)", () => {
+  const root = makeFixture({
+    "plugin/scripts/quay-init.sh": "#!/usr/bin/env bash\nexit 0\n",
+    "plugin/test/varjoin.test.mjs": [
+      `import { spawnSync } from "node:child_process";`,
+      `import path from "node:path";`,
+      `import { fileURLToPath } from "node:url";`,
+      `import { test } from "node:test";`,
+      `const __dirname = path.dirname(fileURLToPath(import.meta.url));`,
+      `const pluginDir = path.resolve(__dirname, "..");`,
+      `test("probe", () => { spawnSync("bash", [path.join(pluginDir, "scripts", "quay-init.sh")], { encoding: "utf8" }); });`,
+    ].join("\n"),
+  });
+  try {
+    const collect = updateTraceCache(root, ["plugin/test/varjoin.test.mjs"]);
+    assert.equal(collect.failed.length, 0, `the real collect must succeed, got ${collect.failed.join("; ")}`);
+    assert.ok(collect.traced.includes("plugin/test/varjoin.test.mjs"), "the test must be traced by the real collect");
+    const rep = checkStaticVsTruth(root);
+    assert.equal(rep.evaluated, true, "after a real collect the checker must be evaluated (③-AC5 — never the constant NOT-EVALUATED)");
+    assert.ok(rep.coveredCount >= 1, `the covered count must be a real number from the real cache, got ${rep.coveredCount}`);
+  } finally { cleanup(root); }
+});

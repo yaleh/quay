@@ -86,3 +86,8 @@ governance 第三套退役、142 文件改标真实相、bucket 单一选择落�
 
 - 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
 - **2026-08-30 更新：全量红已消，重派条件成立**——`@load-sensitive-entry` 已落 develop（2026-08-27）、known-load-sensitive 28/28、full-suite-state green（见 `gap-full-suite-runner-missing-load-sensitive-entry` 收尾）。重派/执行前先完成「关系与前置」两步：develop 计数重取 + 5 个重文件 lowconc 测时。
+## Needs-Human
+
+**执行 2026-08-30T13:33:39.615Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

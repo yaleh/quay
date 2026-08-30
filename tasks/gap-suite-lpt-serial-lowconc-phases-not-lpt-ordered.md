@@ -2,7 +2,7 @@
 id: gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered
 title: serial + lowconc 两相未走 LPT 排序——裸 node --test 字母序，尾部等待 ≈38% 整轮
   makespan（full 4 派发点 + --buckets 2 派发点范围遗留）
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null

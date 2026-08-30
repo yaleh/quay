@@ -101,6 +101,12 @@ export function traceOne(testFileRel: string, root = findRepoRoot(), timeoutMs =
           ...process.env,
           QUAY_FS_TRACE_FILE: out,
           QUAY_FS_TRACE_ROOT: root,
+          // A traced test may itself spawn scripts/test.sh (the suite-runner test family). Mark the
+          // traced subprocess nested so that nested run skips the single-flight lock / static checks /
+          // rebuild (scripts/test.sh's QUAY_TEST_NESTED guards) — otherwise it would contend on the
+          // full-suite lock the collector's caller may hold, or re-run whole-store checks re-entrantly.
+          QUAY_TEST_NESTED: "1",
+          QUAY_TEST_NESTED_ROOT: root,
         },
       },
     );
@@ -172,10 +178,13 @@ export interface UpdateResult {
  * Incrementally update the trace cache: re-trace ONLY test files whose content hash changed (or that
  * have no entry); unchanged files keep their cached trace (AC2 ②-AC2). `force` re-traces everything.
  * A failed trace is recorded in `failed` and the entry is left untouched (fail-closed: a test we
- * could not trace must not silently keep/claim a stale truth).
+ * could not trace must not silently keep/claim a stale truth). `limit` bounds the expensive work
+ * per call (a production trigger piggybacks a SMALL batch per suite run — the trace is a separate
+ * subprocess execution of each test's own code, so "at most limit traces" is a real cost bound):
+ * unchanged files are still cheaply skipped past the limit, but at most `limit` subprocess traces run.
  * @param {readonly string[]} testFiles — repo-relative test files (listSuiteFiles).
  */
-export function updateTraceCache(root: string, testFiles: readonly string[], opts: { force?: boolean } = {}): UpdateResult {
+export function updateTraceCache(root: string, testFiles: readonly string[], opts: { force?: boolean; limit?: number } = {}): UpdateResult {
   const cache = loadTraceCache(root);
   const traced: string[] = [];
   const skipped: string[] = [];
@@ -189,6 +198,7 @@ export function updateTraceCache(root: string, testFiles: readonly string[], opt
       skipped.push(rel);
       continue;
     }
+    if (opts.limit !== undefined && traced.length >= opts.limit) break; // bounded batch — no more traces this call
     const r = traceOne(rel, root);
     if (r.status !== 0) {
       failed.push(`${rel} (status=${r.status}: ${r.error})`);
@@ -208,8 +218,8 @@ const usage = `suite-fs-trace.ts — dynamic-truth file-access trace collector (
 Usage:
   node --experimental-strip-types suite-fs-trace.ts --collect <test-file>... [--root <dir>] [--json]
       trace the given test files (write their truth into the cache).
-  node --experimental-strip-types suite-fs-trace.ts --update [--root <dir>] [--force] [--json]
-      incrementally re-trace changed/new suite test files.
+  node --experimental-strip-types suite-fs-trace.ts --update [--root <dir>] [--force] [--limit N] [--json]
+      incrementally re-trace changed/new suite test files (at most --limit traces per call).
   node --experimental-strip-types suite-fs-trace.ts --list [--root <dir>] [--json]
       print the cached test→{reads,writes} map.`;
 
@@ -249,7 +259,12 @@ export function main(argv: string[]): number {
   }
 
   if (args.includes("--update")) {
-    const res = updateTraceCache(root, listSuiteFiles(root), { force: args.includes("--force") });
+    const limitRaw = getArgValue(args, "--limit");
+    const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined;
+    const res = updateTraceCache(root, listSuiteFiles(root), {
+      force: args.includes("--force"),
+      limit: limit !== undefined && Number.isFinite(limit) ? limit : undefined,
+    });
     if (asJson) process.stdout.write(JSON.stringify(res, null, 2) + "\n");
     else {
       process.stdout.write(`traced=${res.traced.length} skipped=${res.skipped.length} failed=${res.failed.length} cache=${res.count}\n`);
