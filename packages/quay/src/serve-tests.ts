@@ -1,7 +1,7 @@
 // serve-tests.ts — /tests + /tests/file route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import path from "node:path";
 import { readTests, type TestsResult, type TestRunRecord } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote } from "./serve-render.ts";
@@ -57,6 +57,136 @@ export function readSuiteLoadSamples(root: string, runId: string): SuiteLoadSamp
  */
 export function clipSuiteLoadSamplesToWindow(samples: SuiteLoadSample[], startMs: number, endMs: number): SuiteLoadSample[] {
   return samples.filter((s) => s.t >= startMs && s.t <= endMs);
+}
+
+// ── gap-tests-load-curve-time-window-fallback — two-level load resolution ─────────────────────
+//
+// The /tests load lookup used to key ONLY off record.runId (suite-load-<runId>.jsonl). The
+// mechanical fan-in path broke that key for a stretch of rounds (#692+): red records carry the
+// literal runId "wk-prod-*", green records carry NO runId, while the load file is keyed by the
+// runner UUID / fm-* token. gap-mechanical-fan-in-per-suite-runid-unified fixed NEW rounds; this
+// fallback recovers the HISTORICAL broken-key rounds by matching on the round's declared
+// [startedAt, startedAt+durationMs] time window instead of the (unreliable) id. Two levels:
+//   ① runId exact hit — the post-fix rounds, and every pre-#692 round, keep keying directly.
+//   ② window fallback — when the runId is absent or maps to no samples, find the load file whose
+//      samples fall INSIDE the round's window (matching on sample TIME, not the writer's id).
+// The page no longer depends on the writer's id convention — the same principle as the strict-
+// history surface (the display reads the data-plane ledger, not the control-plane's internal id).
+
+/**
+ * Read a suite-load file's first + last sample timestamp (epoch ms) WITHOUT a full-file read — the
+ * per-file min/max index the window fallback matches on (the proposal's 「首末样本时间小索引」, so
+ * ~200 files are matched without parsing them all). The sampler appends in monotonically increasing
+ * `t` (append-only, one sample per interval), so the first valid line is the min and the last valid
+ * line is the max. A torn trailing line (partial write) is skipped by scanning backward. null bounds
+ * mean the file has no parseable sample timestamp (empty / all-malformed) and can never match.
+ */
+function readFileSampleTBounds(file: string): { min: number | null; max: number | null } {
+  let size: number;
+  try {
+    size = statSync(file).size;
+  } catch {
+    return { min: null, max: null };
+  }
+  if (size === 0) return { min: null, max: null };
+
+  const parseT = (line: string): number | null => {
+    const s = line.trim();
+    if (!s) return null;
+    try {
+      const o = JSON.parse(s);
+      const t = o && typeof o === "object" ? (o as { t?: unknown }).t : undefined;
+      return typeof t === "number" && Number.isFinite(t) ? t : null;
+    } catch {
+      return null;
+    }
+  };
+
+  // A bounded head/tail chunk read (a sample line is a short single JSON line, so the first line is
+  // fully inside the head chunk and the last complete line is fully inside the tail chunk) — never a
+  // whole-file read, which is the full-scan this index exists to avoid.
+  const readChunk = (position: number, length: number): string => {
+    let fd: number | null = null;
+    try {
+      fd = openSync(file, "r");
+      const buf = Buffer.alloc(length);
+      const n = readSync(fd, buf, 0, length, position);
+      return buf.toString("utf8", 0, Math.max(0, n));
+    } catch {
+      return "";
+    } finally {
+      if (fd != null) {
+        try { closeSync(fd); } catch { /* ignore */ }
+      }
+    }
+  };
+
+  const headLen = Math.min(size, 4096);
+  let min: number | null = null;
+  for (const line of readChunk(0, headLen).split(/\r?\n/)) {
+    const t = parseT(line);
+    if (t != null) { min = t; break; }
+  }
+
+  const tailLen = Math.min(size, 16384);
+  let max: number | null = null;
+  const tailLines = readChunk(size - tailLen, tailLen).split(/\r?\n/);
+  for (let i = tailLines.length - 1; i >= 0; i--) {
+    const t = parseT(tailLines[i]);
+    if (t != null) { max = t; break; }
+  }
+
+  return { min, max };
+}
+
+/**
+ * Window fallback (level ②): find every `.quay/suite-load-*.jsonl` whose sample-time range
+ * [minT, maxT] overlaps [startMs, endMs] and return its samples clipped to the window. The overlap
+ * test uses the per-file first/last-sample index (readFileSampleTBounds — no full-file read), so
+ * only the (typically zero-or-one) matching file is fully parsed. A matching file with no in-window
+ * samples contributes nothing. Returns [] when nothing matches or the directory is unreadable — a
+ * no-match and a read-failure both degrade to no-curve (never a 500), the same as the exact-hit path.
+ */
+function readSuiteLoadSamplesByWindow(root: string, startMs: number, endMs: number): SuiteLoadSample[] {
+  const dir = path.join(root, ".quay");
+  let files: string[];
+  try {
+    files = readdirSync(dir).filter((f) => f.startsWith("suite-load-") && f.endsWith(".jsonl")).sort();
+  } catch {
+    return [];
+  }
+  const out: SuiteLoadSample[] = [];
+  for (const f of files) {
+    const { min, max } = readFileSampleTBounds(path.join(dir, f));
+    if (min == null || max == null) continue;
+    if (max < startMs || min > endMs) continue; // the file's samples fall entirely outside the window
+    const runId = f.slice("suite-load-".length, f.length - ".jsonl".length);
+    out.push(...clipSuiteLoadSamplesToWindow(readSuiteLoadSamples(root, runId), startMs, endMs));
+  }
+  return out;
+}
+
+/**
+ * Two-level load resolution (the fallback task's core): ① record.runId exact hit (post-fix rounds);
+ * ② window fallback (historical broken-key rounds) when the runId is absent or maps to no samples.
+ * `window` is the round's (or file's) declared [start, end] in epoch ms; when null (legacy: no
+ * durationMs) only the exact-hit path runs — the fallback has no window to match on.
+ */
+function resolveSuiteLoadSamples(
+  root: string,
+  runId: string | null | undefined,
+  window: { start: number; end: number } | null,
+): SuiteLoadSample[] {
+  // ① exact hit (priority): the ledger's own runId — post-fix rounds key here and win over any
+  //    window overlap (AC2: 「runId 精确命中的轮照常出曲线（优先于窗口回退）」).
+  if (runId) {
+    const raw = readSuiteLoadSamples(root, runId);
+    if (raw.length > 0) return window ? clipSuiteLoadSamplesToWindow(raw, window.start, window.end) : raw;
+  }
+  // ② window fallback: only meaningful when a window is computable (a round/file without durationMs
+  //    has no window to match on — AC3's legacy tolerance).
+  if (window) return readSuiteLoadSamplesByWindow(root, window.start, window.end);
+  return [];
 }
 
 // The /tests page is a HISTORY surface: it reads ONLY the data-plane ledger (verification-round.jsonl)
@@ -517,19 +647,13 @@ export async function handleTests(
   // (a latest/selected round without durationMs — legacy/standalone rows) keeps the samples unclipped
   // rather than fabricate a window or drop the curve.
   const samples = ((): SuiteLoadSample[] => {
+    // gap-tests-load-curve-time-window-fallback — two-level resolution (runId exact hit → window
+    // fallback), applied to BOTH the selected round and the default latest round.
     if (selected) {
-      if (!selected.runId) return [];
-      const raw = readSuiteLoadSamples(cfg.workspaceRoot, selected.runId);
-      const w = roundTimeWindowMs(selected);
-      return w ? clipSuiteLoadSamplesToWindow(raw, w.start, w.end) : raw;
+      return resolveSuiteLoadSamples(cfg.workspaceRoot, selected.runId, roundTimeWindowMs(selected));
     }
     const latest = tests.runs[0] ?? null;
-    if (latest?.runId) {
-      const raw = readSuiteLoadSamples(cfg.workspaceRoot, latest.runId);
-      const w = roundTimeWindowMs(latest);
-      return w ? clipSuiteLoadSamplesToWindow(raw, w.start, w.end) : raw;
-    }
-    return [];
+    return resolveSuiteLoadSamples(cfg.workspaceRoot, latest?.runId, roundTimeWindowMs(latest));
   })();
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderTestsPage(tests, cfg.workspaceRoot, samples, selected, roundNum));
@@ -658,13 +782,16 @@ function fileLoadFragment(
   filePath: string,
 ): { samples: SuiteLoadSample[]; label: string } | null {
   for (const r of runs) {
-    if (!r.runId || !r.perFile) continue;
+    if (!r.perFile) continue;
     const entry = r.perFile.find((f) => f.file === filePath);
     if (!entry) continue;
     const start = entry.startedAtMs;
     const end = entry.endedAtMs;
     if (typeof start !== "number" || typeof end !== "number") continue;
-    const samples = clipSuiteLoadSamplesToWindow(readSuiteLoadSamples(root, r.runId), start, end);
+    // gap-tests-load-curve-time-window-fallback — the file page reuses the SAME two-level resolution
+    // (runId exact hit → window fallback) with the file's [startedAtMs, endedAtMs] window, so a
+    // broken-key round (no/wrong runId) whose load file overlaps the file's run window still renders.
+    const samples = resolveSuiteLoadSamples(root, r.runId, { start, end });
     return { samples, label: roundLabel(r) };
   }
   return null;
