@@ -2,7 +2,7 @@
 id: gap-suite-metadata-query-subprocess-spawn
 title: metadata 查询 30s 的逐文件子进程 spawn——group_of/realpath 合成单次 in-process
   pass，--list-files 30s→<3s
-status: ready
+status: done
 labels:
   - gap
 parent: null
