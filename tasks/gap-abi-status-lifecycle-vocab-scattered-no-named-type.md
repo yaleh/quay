@@ -2,7 +2,7 @@
 id: gap-abi-status-lifecycle-vocab-scattered-no-named-type
 title: 任务状态生命周期词汇散落 ~30 文件、无具名 TaskStatus 类型（Task.status 内联 union 未导出 +
   AdrRecord.status 裸 string）
-status: ready
+status: done
 labels:
   - gap
   - defect
