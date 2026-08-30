@@ -1784,7 +1784,12 @@ export async function run(argv: string[]): Promise<number> {
   // write establishes it (the newest runner owns the file from then on); every later write must
   // still own the generation or it is dropped (gap-full-suite-state-race-last-write-wins-no-
   // generation-guard AC1/AC4).
-  const runId = randomUUID();
+  // gap-mechanical-fan-in-per-suite-runid-unified — an explicit --run-id (from the mechanical fan-in
+  // driver) is honored VERBATIM as the canonical run id, so it flows through full-suite-state /
+  // generation guard / suite-load-<runId>.jsonl / the verification-round record as ONE key (the
+  // record ↔ telemetry join the /tests page keys the load curve on). Default (no --run-id) =
+  // randomUUID() — an independent run keeps self-naming.
+  const runId = parseArg(argv, "--run-id") ?? randomUUID();
   // gap-leak-residue-per-run-namespace-isolation AC1 — the per-run NAMESPACE id delivered to the
   // child (and hence to every node --test probe via session-liveness-helpers.mjs's QUAY_RUN_ID):
   // a SHORT id (8 hex chars from the state-file UUID) so the tmux socket sun_path (~107 bytes —

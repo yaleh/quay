@@ -1717,6 +1717,11 @@ export interface MechanicalFanInOptions {
   worktree: string;
   root: string;
   runId: string;
+  /** per-suite runId 覆盖（测试缝）。缺省 = newMechanicalSuiteRunId(task)（`mfi-<task>-<epoch-ms>-<rand>`，
+   *  每次 fan-in 唯一）。它是【suite 身份】——传给 runner --run-id 并贯穿 full-suite-state /
+   *  suite-load-<runId>.jsonl / verification-round 记录，⛔ 不是 runId（那个是 fan-in 过程身份，锁/日志/ff
+   *  用它）。gap-mechanical-fan-in-per-suite-runid-unified。 */
+  perSuiteRunId?: string;
   mergeTarget?: string;
   /** suite 命令（测试缝）；缺省 = node full-suite-runner.ts --buckets <task>（--root <worktree>
    *  --state-dir <root>/.quay --runner inner --log-file <suiteLogFile>）。gap-fan-in-red-bucket-run-
@@ -2158,6 +2163,15 @@ async function flipTaskDone(
   return { ok: false, reason: `expected exactly 1 'status: ready' line, got ${readyCount}` };
 }
 
+/** gap-mechanical-fan-in-per-suite-runid-unified — 生成一次机械 fan-in 的 per-suite runId
+ *  （`mfi-<task>-<epoch-ms>-<rand>`）。⛔ 不用共享的 wk-prod（那是 driver 轮次号，一 driver 轮次内多个
+ *  suite 共用，不能当 suite 身份）；也⛔ 不把 runId（fan-in 过程身份，锁/日志/ff 用它）当 suite 身份——
+ *  suite 身份必须每次 fan-in 唯一（epoch-ms + rand 双重唯一）——AC2「同一 driver 轮次两个不同任务的
+ *  per-suite runId 不同」。独立成函数供测试直接调用（⛔ 不内联 randomUUID 让「每次新」无处可验）。 */
+export function newMechanicalSuiteRunId(task: string): string {
+  return `mfi-${task}-${Date.now()}-${randomUUID().slice(0, 6)}`;
+}
+
 /** gap-fan-in-red-bucket-run-not-recorded — 机械 fan-in 的 suite 步缺省命令：经 full-suite-runner.ts
  *  --buckets 跑（正确的 runner，green+red 桶轮次都在 suite 退出时入 verification-round.jsonl），⛔ 不是
  *  平行 `bash scripts/test.sh --buckets`（绕开唯一 writer，红桶轮次零记录——硬规则 3b「没跑过」与
@@ -2165,12 +2179,16 @@ async function flipTaskDone(
  *  把 state/verification-round/measure-history/suite-load 落进共享主检出（/tests 的读取处）；--runner inner
  *  显式标注层身份；--log-file <suiteLogFile> 让 runner 把 suite 流 tee 进 fan-in 的 /tmp 日志
  *  （spawnSuiteAndWait 的静默看门狗盯其 mtime——runner 不写 stdout，须经此缝让看门狗看到进度）。
+ *  --run-id <runId> 把 per-suite 身份传给 runner（gap-mechanical-fan-in-per-suite-runid-unified：
+ *  runner 用它当 runId，贯穿 full-suite-state / generation guard / suite-load-<runId>.jsonl / 记录，
+ *  使 /tests 按记录 runId 查得到负载曲线）。
  *  抽成纯函数便于 worker-driver.test.mjs 断言缺省命令是 runner 而非 test.sh harness（AC2）。 */
 export function defaultMechanicalSuiteCommand(opts: {
   task: string;
   worktree: string;
   root: string;
   suiteLogFile: string;
+  runId: string;
 }): string[] {
   return [
     "node", "--no-warnings", "--experimental-strip-types",
@@ -2180,6 +2198,7 @@ export function defaultMechanicalSuiteCommand(opts: {
     "--state-dir", path.join(opts.root, ".quay"),
     "--runner", "inner",
     "--log-file", opts.suiteLogFile,
+    "--run-id", opts.runId,
   ];
 }
 
@@ -2210,6 +2229,10 @@ export function appendFanInTrace(file: string, entry: Record<string, unknown>): 
  */
 export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<MechanicalFanInResult> {
   const { task, worktree, root, runId } = opts;
+  // gap-mechanical-fan-in-per-suite-runid-unified — the per-suite runId (suite 身份，非 runId 的过程身份)。
+  // Generated ONCE per fan-in (each fan-in = one suite) so the runner's full-suite-state / suite-load-
+  // <runId>.jsonl / verification-round record all carry the SAME key the /tests page joins on.
+  const perSuiteRunId = opts.perSuiteRunId ?? newMechanicalSuiteRunId(task);
   const mergeTarget = opts.mergeTarget ?? "develop";
   const slotBase = opts.slotBase ?? suiteLockBase(root);
   const slotLib = opts.slotLib ?? path.join(root, "plugin", "scripts", "suite-slot-lib.sh");
@@ -2351,7 +2374,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
     if (needSuite) {
       trace({ step: "suite-start", exit: 0, wall_ms: 0, ok: true });
-      const suiteCmd = opts.suiteCommand ?? defaultMechanicalSuiteCommand({ task, worktree, root, suiteLogFile });
+      const suiteCmd = opts.suiteCommand ?? defaultMechanicalSuiteCommand({ task, worktree, root, suiteLogFile, runId: perSuiteRunId });
       const sr: SuiteRunResult = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: suiteCmd, logFile: suiteLogFile, silenceMs: opts.silenceMs });
       suiteOutcome = sr.outcome;
       suiteFinishedEpoch = Math.floor(new Date(sr.finishedAt).getTime() / 1000);
@@ -2370,8 +2393,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       });
       // D7：把本轮 bucket suite 状态镜像到权威载体 full-suite-state.json（scope=worktree + taskId 区分
       // bucket-run 与 full-run，⛔ 不伪造 full-green；finishedAt 与 mfi.suiteFinishedEpoch 同源 ⇒ 不陈旧）。
+      // ⛔ runId 用 perSuiteRunId（非过程 runId）——runner 已用 perSuiteRunId 写 full-suite-state，镜像
+      // 必须同键，否则 AC1「state/load/记录三者同键」被镜像最后一写破坏（gap-mechanical-fan-in-per-suite-runid-unified）。
       mirrorMechanicalFanInSuiteState({
-        task, runId, commit: suiteHead,
+        task, runId: perSuiteRunId, commit: suiteHead,
         startedAt: sr.startedAt, finishedAt: sr.finishedAt, durationMs: sr.durationMs,
         stateFile: suiteStateFile,
       });
