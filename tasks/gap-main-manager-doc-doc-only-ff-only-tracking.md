@@ -6,7 +6,8 @@ status: todo
 labels:
   - gap
 parent: gap-ff-propagate-structurally-broken-filing-must-target-develop
-children: []
+children:
+  - gap-doc-develop-sync-semantic-conflict-resolution
 extra: {}
 ---
 **type:** execution
