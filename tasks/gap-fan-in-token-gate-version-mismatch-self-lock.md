@@ -1,8 +1,8 @@
 ---
 id: gap-fan-in-token-gate-version-mismatch-self-lock
-title: L1 token 闸自锁——机械 fan-in 版本错位（旧签发者×新校验者，fan-in-ff-merge.sh 的
-  token 闸在 worktree 而注入在主检出旧守护）
-status: ready
+title: 机械 fan-in 版本错位自锁——旧守护 in-process × worktree 编排（每任务新进程修法；token 闸
+  半已由 fd902a824 重定范围到 P2 TS 模块）
+status: done
 labels:
   - gap
   - defect
@@ -16,42 +16,33 @@ extra:
 
 ## Proposal
 
-`gap-fan-in-ff-merge-token-gate-fail-closed`（L1 token 闸）已 needs-human（3× exited-not-landed 至重试上限）。根因不是实现错，是**版本错位**：
+`gap-fan-in-ff-merge-token-gate-fail-closed`（L1 token 闸）曾 needs-human（3× exited-not-landed）。根因不是实现错，是**版本错位**：闸在任务 worktree 的 `fan-in-ff-merge.sh`，注入在 `worker-driver.ts`，但发起 fan-in 的守护是主检出旧代码 ⇒ 旧签发者 × 新校验者自锁。
 
-- 闸在任务 worktree 的 `fan-in-ff-merge.sh:202-234`（`--acquire-workflow-lock` fail-closed 要求 token）；
-- 注入在 worktree 的 `worker-driver.ts:1654-1661`（生成 token + 传参）；
-- 但 `runMechanicalFanIn` 的 `scriptsDir` 默认 = worktree/plugin/scripts（`worker-driver.ts:1614`），而**运行中的守护进程是主检出旧代码（无注入）**。
+**类级缺陷**：任何「改了 worker-driver.ts 但守护仍是旧的」的任务都会命中——不是 token 闸一例，是「fan-in 编排脚本从 worktree 加载、但发起者从主检出旧进程运行」的**架构错位**。
 
-⇒ 旧签发者 × 新校验者：任务自己的 fan-in 用 worktree 的新闸（要求 token），但发起 fan-in 的守护是主检出旧 worker-driver.ts（不注入 token）⇒ 无 token 穿新闸被 fail-closed 拒。
-
-**类级缺陷**：任何「改了 worker-driver.ts 但守护仍是旧的」的任务都会命中——不是 token 闸一例，是「fan-in 脚本从 worktree 加载、但发起者从主检出旧进程运行」的**架构错位**。
+**⛔ 范围变更（2026-08-28 develop 演进，人裁定）**：ADR-034（`afba4ae23`/`055cf9fdd`）已把 fan-in 锁收进 driver（`acquireFanInWorkflowLock`，废除 bash `--acquire/--release-workflow-lock` 分离 holder）；`fd902a824` 把 **L1 token 闸重定范围到 P2（`gap-execution-loop-productization-p2-p4` AC1）的 TS 模块 ff 入口**（`fan-in-ff-merge.sh` → 被 import 的 .ts 模块）。⇒ 本任务**不再实现 bash token 闸**（闸半已不在 bash、且随 P2 TS 化落地）；**保留并落地的是类级修法——每任务新进程**，它消灭「改了 worker-driver.ts 但守护仍是旧的」整个类，P2 的产品化（fan-in → verb）是同一类级修法的产品层正解。
 
 ## Plan
 
-机制修法（⛔ 不打补丁，四个都做）：
+机制修法（⛔ 不打补丁）：
 
-1. **每任务新进程执行**：机械 fan-in 改为每任务起新进程执行（加载当前代码），消灭「改了 worker-driver.ts 但守护是旧的」整个类。
-2. **token 改数据文件**：token 在 dispatch 时以 per-task 数据文件生成、fan-in 读文件传参（不依赖进程内状态）。
-3. **落地顺序**：注入半先合入 develop + 守护吃到新代码，再让闸半合入（闸的 fan-in 已带 token，不自锁）。
-4. **AC2 用真实穿闸 dry-run 验证**：真实机械 fan-in 穿真实闸 dry-run，而不是只测「注入存在」。
-
-**当前 needs-human 处置**：L1 需先撤回（retreat）、注入半合入后重派。
+1. **每任务新进程执行**：机械 fan-in 不再在守护进程 in-process 跑（守护是主检出旧代码、但编排脚本从 worktree 加载 ⇒ 版本错位），改为每任务 spawn 一个 fresh node 进程加载 worktree 的 `worker-driver.ts --mechanical-fan-in`——锁半（`acquireFanInWorkflowLock`，ADR-034）与编排半（`fan-in-ff-merge.sh`）同源（都在 worktree），改了 worker-driver.ts 的任务 fan-in 用它自己的新锁/新编排。
+2. **`--mechanical-fan-in` CLI 入口**：fresh 进程跑 `runMechanicalFanIn`、stdout 打单行 JSON result（exit 0=landed / 2=red），spawn 方解析——spawn 失败/输出不可解析 fail-closed 为 red（硬规则 3b：读不懂 ≠ 合格）。
+3. **⛔ 不实现 bash token 闸**：L1 token 闸已由 `fd902a824` 重定范围到 P2 的 TS 模块 ff 入口，本任务不重复实现（bash `--acquire-workflow-lock` 已被 ADR-034 废除）。
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，版本错位已消）：改了 worker-driver.ts 的任务 fan-in 不再因「守护旧代码」而用旧注入/旧闸（⛔ 仍版本错位 ⇒ 假）。
-- [ ] AC2（能取假，真实穿闸）：真实机械 fan-in 穿真实 token 闸 dry-run 通过（⛔ 只测「注入存在」/fixture-only ⇒ 假，硬规则 4 推论三）。
-- [ ] AC3（能取假，不自锁）：token 闸任务自己的 fan-in 带 token 通过闸（⛔ 自锁 needs-human 再现 ⇒ 假）。
+- [x] AC1（能取假，版本错位已消）：finishAsync 机械 fan-in 改为每任务 spawn fresh 进程加载 worktree 的 `worker-driver.ts --mechanical-fan-in`（⛔ 仍 in-process 旧守护 ⇒ 假）。
+- [x] AC2（能取假，fresh 进程真实执行）：fresh 进程 `--mechanical-fan-in` 真实 spawn 执行、stdout 单行 JSON result round-trip 可解析（⛔ 只测结构断言/fixture-only ⇒ 假，硬规则 4 推论三）。
+- [x] AC3（能取假，不自锁 + L1 重定范围一致）：本任务不再实现 bash token 闸（L1 已由 `fd902a824` 重定范围到 P2 TS 模块 ff 入口；⛔ 仍实现 bash token 闸 ⇒ 与裁定冲突 ⇒ 假）。
 
 ## Definition of Done
 
-每任务新进程 + token 数据文件 + 落地顺序（注入先于闸）落地；AC1-AC3 全勾；L1 撤回重派后不再自锁。
+每任务新进程落地（finishAsync → `spawnMechanicalFanIn` → `--mechanical-fan-in`）；AC1-AC3 全勾；版本错位自锁类（旧守护 in-process × worktree 编排）被每任务新进程消灭；token 闸不再由本任务实现（L1 已重定范围到 P2）。
 
 ## Touches
 
-- plugin/scripts/worker-driver.ts（每任务新进程 + token 数据文件 + scriptsDir 加载当前代码）
-- plugin/scripts/fan-in-ff-merge.sh（闸半 + 读数据文件 token）
-- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（新进程 + 真实穿闸 dry-run）
-- plugin/test/fan-in-ff-protocol-check.test.mjs（token 闸协议）
-- plugin/test/worker-driver.test.mjs（token 注入 + 新进程）
+- plugin/scripts/worker-driver.ts（每任务新进程 spawnMechanicalFanIn + --mechanical-fan-in CLI 入口）
+- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（AC1 结构 + AC2 fresh 进程 round-trip）
+- plugin/test/worker-driver.test.mjs（AC1 结构）
 - tasks/gap-fan-in-token-gate-version-mismatch-self-lock.md（自身）

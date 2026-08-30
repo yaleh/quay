@@ -138,13 +138,15 @@ test("notYetFlippedRoutine: unreadable ready-pool ⇒ not-evaluated (not verifie
 
 // ── 例程表 ────────────────────────────────────────────────────────────────────────────────────────
 
-test("outerRoutines: assembles the 11 mechanical routines (each every-round)", () => {
-  // 11 routines — B12 自身停止条件是跨轮有状态的计数（counter 跨轮），住在循环体里，⛔ 不是无状态例程。
+test("outerRoutines: assembles the 10 mechanical routines (each every-round)", () => {
+  // 10 routines — the former A3 halt_status routine was retired with gap-retire-halt-file-driver-based
+  // (the .halt read moved to the driver control-state; A21 liveness_direct carries the driver-liveness
+  // stall read). B12 自身停止条件是跨轮有状态的计数（counter 跨轮），住在循环体里，⛔ 不是无状态例程。
   const routines = outerRoutines(makeRoot("tbl"));
-  assert.equal(routines.length, 11);
+  assert.equal(routines.length, 10);
   const names = routines.map((r) => r.name);
   for (const expected of [
-    "monitor_mount", "halt_status", "occupancy", "not_yet_flipped", "closure_lag", "slot_refill",
+    "monitor_mount", "occupancy", "not_yet_flipped", "closure_lag", "slot_refill",
     "liveness_direct", "closure_pass", "closure_record", "telemetry_snapshot", "judgment_consumer",
   ]) {
     assert.ok(names.includes(expected), `routine table should include ${expected}`);

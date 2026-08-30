@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
+import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
 import { sendSessionFrames, verdictStateToDeliveryState, classifyReceipt, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
@@ -1465,6 +1465,115 @@ test("AC3 (integration) — /session/<id>/download serves raw JSONL (attachment)
     process.chdir(cwd0);
     fs.rmSync(transcriptPath, { force: true });
     try { fs.rmdirSync(transcriptDir); } catch { /* leave the (empty) dir */ }
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-mech-fan-in-log-webui-visible-clickable (AC2 + AC3) ───────────────────────────────────
+// 机械 fan-in 过程日志落 .quay/fan-in-<task>-<runId>.log；worker-outcome.jsonl 的 mechanical_fan_in
+// 携带 fanInLog 文件名。AC2: Runs 区块渲染 mechanical_fan_in 结果（landed/red + step + lock + suite +
+// sha）+ view/download 链接。AC3: /fan-in-log/<task>/<file> 端点严格 slug + 白名单校验，非白名单 /
+// `..` / 绝对路径 ⇒ 400，永不读 .quay/ 之外（同 /session/<id>/download 的路径穿越防护房式）。
+
+test("AC2 (unit) — renderFanInCell renders landed/red + step + lock + suite + sha, and links view/download only when fanInLog is non-empty", () => {
+  const landed = renderFanInCell("gap-runs-1", {
+    mechanical_fan_in: { outcome: "landed", step: null, reason: null, lockHoldSecs: 12, suiteOutcome: "done", landedSha: "abc1234567890", fanInLog: "fan-in-gap-runs-1-r1.log" },
+  });
+  assert.match(landed, /landed/, "landed outcome rendered");
+  assert.match(landed, /lock 12s/, "lock hold rendered");
+  assert.match(landed, /suite done/, "suite outcome rendered");
+  assert.match(landed, /abc1234/, "landed sha (7-char) rendered");
+  assert.match(landed, /href="\/fan-in-log\/gap-runs-1\/fan-in-gap-runs-1-r1.log"/, "view link constructed from fanInLog");
+  assert.match(landed, /href="\/fan-in-log\/gap-runs-1\/fan-in-gap-runs-1-r1.log\/download"/, "download link constructed");
+
+  const red = renderFanInCell("gap-runs-1", {
+    mechanical_fan_in: { outcome: "red", step: "typecheck", reason: "tsc failed", lockHoldSecs: null, suiteOutcome: null, landedSha: null, fanInLog: null },
+  });
+  assert.match(red, /red/, "red outcome rendered");
+  assert.match(red, /step typecheck/, "failing step rendered");
+  assert.match(red, /tsc failed/, "failure reason rendered");
+  assert.doesNotMatch(red, /href="\/fan-in-log\//, "no fanInLog ⇒ no dead link");
+
+  assert.equal(renderFanInCell("gap-runs-1", { mechanical_fan_in: null }), "—", "no mechanical_fan_in ⇒ honest —");
+});
+
+test("AC2 (unit) — taskRunsBlock renders a fan-in column + view/download link when a record carries mechanical_fan_in.fanInLog", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runs-fanin-"));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  fs.writeFileSync(path.join(q, "worker-outcome.jsonl"), [
+    JSON.stringify({ ts: "2026-08-28T00:00:00Z", task: "gap-runs-1", final_state: "completed", exit_code: 0, session_id: null, mechanical_fan_in: { outcome: "landed", step: null, reason: null, lockHoldSecs: 3, suiteOutcome: "done", landedSha: "abc1234567890", fanInLog: "fan-in-gap-runs-1-r1.log" } }),
+  ].join("\n") + "\n");
+  try {
+    const recs = readWorkerOutcomeRecords(root).filter((r) => r.task === "gap-runs-1");
+    assert.equal(recs[0].mechanical_fan_in.fanInLog, "fan-in-gap-runs-1-r1.log", "mechanical_fan_in.fanInLog parsed from the carrier");
+    assert.equal(recs[0].mechanical_fan_in.outcome, "landed", "mechanical_fan_in.outcome parsed");
+    const htmlBlock = taskRunsBlock(root, "gap-runs-1", { liveWorkers: [] });
+    assert.match(htmlBlock, /<th>fan-in<\/th>/, "fan-in column header present");
+    assert.match(htmlBlock, /href="\/fan-in-log\/gap-runs-1\/fan-in-gap-runs-1-r1.log"/, "Runs block links the fan-in log view");
+    assert.match(htmlBlock, /href="\/fan-in-log\/gap-runs-1\/fan-in-gap-runs-1-r1.log\/download"/, "Runs block links the fan-in log download");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 (unit) — fanInLogPath is traversal-proof: non-slug task / non-whitelist file / `..` / absolute path ⇒ null; valid joins .quay", () => {
+  assert.equal(fanInLogPath("/a/b", "../etc/passwd", "x.log"), null, "`..` task ⇒ null (not a task slug)");
+  assert.equal(fanInLogPath("/a/b", "gap-x", "../etc/passwd"), null, "`..` file ⇒ null (whitelist fails on `/`)");
+  assert.equal(fanInLogPath("/a/b", "gap-x", ".."), null, "bare `..` file ⇒ null (resolved path escapes .quay)");
+  assert.equal(fanInLogPath("/a/b", "gap-x", "/etc/passwd"), null, "absolute-path file ⇒ null");
+  assert.equal(fanInLogPath("/a/b", "gap-x", "a/../b.log"), null, "embedded `..` ⇒ null");
+  assert.equal(fanInLogPath("/a/b", "gap-x", "ok log.txt"), null, "space (non-whitelist) ⇒ null");
+  assert.equal(
+    fanInLogPath("/a/b", "gap-x", "fan-in-gap-x-r1.log"),
+    path.join("/a/b", ".quay", "fan-in-gap-x-r1.log"),
+    "valid task + whitelist file joins the FIXED .quay dir (never used as a raw path)",
+  );
+});
+
+test("AC3 (integration) — /fan-in-log/<task>/<file> serves inline + download, and rejects non-slug/traversal segments with 400", async () => {
+  const { ws, tasksDir } = makeWorkspace("fanin-log-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const q = path.join(ws, ".quay");
+    fs.mkdirSync(q, { recursive: true });
+    fs.writeFileSync(path.join(q, "fan-in-gap-runs-1-r1.log"), '{"ts":"x","step":"merge-develop","exit":0,"wall_ms":1,"ok":true}\n');
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const ok = await getRes(port, "/fan-in-log/gap-runs-1/fan-in-gap-runs-1-r1.log");
+    assert.equal(ok.status, 200, "valid fan-in log view → 200");
+    assert.ok(ok.body.includes('"step":"merge-develop"'), "view streams the log content inline");
+    assert.equal(String(ok.headers["content-disposition"] ?? "").includes("attachment"), false, "view is inline (no attachment disposition)");
+
+    const dl = await getRes(port, "/fan-in-log/gap-runs-1/fan-in-gap-runs-1-r1.log/download");
+    assert.equal(dl.status, 200, "valid download → 200");
+    assert.match(String(dl.headers["content-disposition"] ?? ""), /attachment/, "download is an attachment");
+
+    const badTask = await getRes(port, "/fan-in-log/..%2Fetc%2Fpasswd/fan-in-gap-runs-1-r1.log");
+    assert.equal(badTask.status, 400, "non-slug task ⇒ 400");
+
+    const traversal = await getRes(port, "/fan-in-log/gap-runs-1/%2e%2e%2fetc%2fpasswd");
+    assert.equal(traversal.status, 400, "encoded traversal file ⇒ 400");
+
+    // A bare `..` (no slash) is collapsed by the WHATWG URL parser BEFORE routing
+    // (`/fan-in-log/gap-runs-1/%2e%2e` → pathname `/fan-in-log/`), so it 404s as an unmatched route —
+    // the resolver-level `..` rejection (fanInLogPath returns null) is the defense-in-depth unit-tested
+    // above, and the encoded-slash traversal below is the HTTP-level 400 surface.
+    const bareDots = await getRes(port, "/fan-in-log/gap-runs-1/%2e%2e");
+    assert.equal(bareDots.status, 404, "bare `..` is URL-parser-collapsed to /fan-in-log/ before routing ⇒ 404");
+
+    const absent = await getRes(port, "/fan-in-log/gap-runs-1/fan-in-gap-runs-1-missing.log");
+    assert.equal(absent.status, 404, "valid shape but absent log ⇒ 404 (honest, not a 500)");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
     fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(ws, { recursive: true, force: true });
   }

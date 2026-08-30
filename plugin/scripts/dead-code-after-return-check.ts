@@ -38,6 +38,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
+
+import { verified, failed, driverResultToExit } from "./checker-io.ts";
+import type { DriverResult } from "./checker-io.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -210,6 +214,23 @@ export function scanTree(root: string): { violations: Violation[]; files: string
   return { violations, files };
 }
 
+export interface ScanReport {
+  violations: Violation[];
+  files: string[];
+}
+
+/**
+ * B4 (gap-b4-checker-reuse-driver-result)：判定收敛到 DriverResult<T> 词表。
+ *   violations 非空 ⇒ failed（存在 dead-code-after-return 实例）；空 ⇒ verified（strict-zero band）。
+ * 判定依据是【文件内容】（detectFileViolations 按代码位置），⛔ 非调用方自述。
+ */
+export function judgeScan(scan: ScanReport): DriverResult<ScanReport> {
+  if (scan.violations.length > 0) {
+    return failed(`${scan.violations.length} dead-code-after-return instance(s)`);
+  }
+  return verified(scan, "全树无 dead-code-after-return 实例（strict-zero band）");
+}
+
 /** Pure RED/GREEN selftest (ADR-018 selfcheck-fixture pattern). */
 export function selftest(): boolean {
   let pass = 0;
@@ -268,6 +289,7 @@ function usage(): never {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node dead-code-after-return-check.ts [--root <dir>] [--json] [--selftest]");
   if (args.includes("--selftest")) {
     process.exit(selftest() ? 0 : 1);
   }
@@ -280,8 +302,10 @@ export function main(argv: string[]): number {
     process.exit(2);
   }
 
-  const { violations, files } = scanTree(root);
-  const ok = violations.length === 0;
+  const scan = scanTree(root);
+  const { violations, files } = scan;
+  const result = judgeScan(scan);
+  const ok = result.state === "verified";
 
   if (asJson) {
     console.log(JSON.stringify({ ok, violations: violations.length, active: violations, files_scanned: files.length }, null, 2));
@@ -301,7 +325,7 @@ export function main(argv: string[]): number {
       console.log("FAIL: dead code after a top-level return detected — a function body must not have statements after its return (the 2026-08-03 pin shape)");
     }
   }
-  return ok ? 0 : 1;
+  return driverResultToExit(result);
 }
 
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "dead-code-after-return-check";

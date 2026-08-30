@@ -7,7 +7,7 @@
 //         拒（⛔ 不是 spawn 后 13/13 全败才知道）；bare:true + auth:key 通过；auth 未声明也拒（fail-closed）。
 //   AC3 — 继承去重：三个 worker role 共享 worker-default，只声明 name 差异（不逐字重复 launcher/model）；
 //         `""` = 取消继承（mergeEnv 删键）、`"0"` 保留、`unset` 显式取消继承、`extends` 单链继承。
-//   AC0 — 真 profiles.yml 钉死：文件可读 + 校验通过 + 六个 role 全可解析。
+//   AC0 — 真 profiles.yml 钉死：文件可读 + 校验通过 + 五个 role 全可解析。
 //
 // Run: scripts/test.sh plugin/test/profile-policy.test.mjs
 
@@ -167,14 +167,14 @@ test("AC3 — the three worker roles share ONE profile, declaring only name/env 
   }
 });
 
-test("AC3 — outer/inner share the same worker-default recipe (换模型改一处)", () => {
+test("AC3 — outer/selector share the same worker-default recipe (换模型改一处)", () => {
   const cfg = readProfilesConfig(REPO_ROOT);
   const outer = resolveRole(cfg, "outer");
-  const inner = resolveRole(cfg, "inner");
-  assert.equal(outer.launcher, inner.launcher);
-  assert.equal(outer.model, inner.model);
+  const selector = resolveRole(cfg, "selector");
+  assert.equal(outer.launcher, selector.launcher);
+  assert.equal(outer.model, selector.model);
   assert.equal(outer.launcher, "claude-fjdac");
-  assert.equal(inner.model, "deepseek-v4-pro-anthropic");
+  assert.equal(selector.model, "deepseek-v4-pro-anthropic");
 });
 
 // ── AC0 — 真 profiles.yml 钉死（文件可读 + 校验通过 + 六 role 可解析）──────────────────────────
@@ -185,9 +185,9 @@ test("AC0 — .quay/profiles.yml exists, parses, and validates clean", () => {
   assert.equal(cfg.version, 1);
 });
 
-test("AC0 — all six roles resolve with a non-empty launcher", () => {
+test("AC0 — all five roles resolve with a non-empty launcher", () => {
   const cfg = readProfilesConfig(REPO_ROOT);
-  for (const role of ["manager", "outer", "inner", "task-worker", "selector", "fix-worker"]) {
+  for (const role of ["manager", "outer", "task-worker", "selector", "fix-worker"]) {
     const r = resolveRole(cfg, role);
     assert.ok(r.launcher, `role ${role} must resolve a non-empty launcher`);
     assert.ok(r.name, `role ${role} must carry a name`);

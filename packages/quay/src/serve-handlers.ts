@@ -20,7 +20,7 @@ import { handleBoard } from "./serve-board.ts";
 import { handleGitHistory } from "./serve-git.ts";
 import { handleSystem, handleManager } from "./serve-system.ts";
 import { handleTests, handleTestsFile } from "./serve-tests.ts";
-import { handleSessions, handleSession, handleSessionEarlier, handleSessionDownload, handleDriverLifecycle, handleNewSession, handleResumeSession } from "./serve-sessions.ts";
+import { handleSessions, handleSession, handleSessionEarlier, handleSessionDownload, handleDriverLifecycle, handleNewSession, handleResumeSession, handleFanInLogView, handleFanInLogDownload } from "./serve-sessions.ts";
 import { handleArchitecture } from "./serve-architecture.ts";
 import { handleDashboard } from "./serve-dashboard.ts";
 import { handleSend } from "./serve-send.ts";
@@ -254,6 +254,31 @@ export async function handleAllRoutes(
   if (taskM) {
     const id = decodeURIComponent(taskM[1]);
     await handleTaskDetail(req, res, url, id, client, cfg);
+    return;
+  }
+
+  // gap-mech-fan-in-log-webui-visible-clickable B3: the mechanical fan-in process log's
+  // view/download routes. task + file are each decoded with a malformed-%-escape fallback, then
+  // rejected by fanInLogPath's strict slug + filename whitelist BEFORE any disk read (same
+  // traversal-proof house pattern as /session/<id>/download). The download matcher is checked FIRST
+  // (distinct `/download` suffix), so it can never be swallowed by the view matcher below.
+  const fanInLogDlM = /^\/fan-in-log\/([^/]+)\/([^/]+)\/download$/.exec(url.pathname);
+  if (fanInLogDlM) {
+    let task: string;
+    let file: string;
+    try { task = decodeURIComponent(fanInLogDlM[1]); } catch { task = fanInLogDlM[1]; }
+    try { file = decodeURIComponent(fanInLogDlM[2]); } catch { file = fanInLogDlM[2]; }
+    await handleFanInLogDownload(req, res, cfg, task, file);
+    return;
+  }
+
+  const fanInLogM = /^\/fan-in-log\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+  if (fanInLogM) {
+    let task: string;
+    let file: string;
+    try { task = decodeURIComponent(fanInLogM[1]); } catch { task = fanInLogM[1]; }
+    try { file = decodeURIComponent(fanInLogM[2]); } catch { file = fanInLogM[2]; }
+    await handleFanInLogView(req, res, cfg, task, file);
     return;
   }
 

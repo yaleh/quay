@@ -1,5 +1,7 @@
 # 管理者 tick 指令
 
+> ⚠️ **外层/内层会话已退役（AC149，2026-08-28）**：本文件引用 outer/inner 会话的内容（读数/判准/发送/收尾面）已随会话退役——会话停止，机制由 promotion-driver / worker-driver / manager-kind 例程承接；manager 会话本身保留（人 2026-08-25 裁定「取消 manager 会话本身」为非目标）。→ `orchestration/manager-phase-goal.md` ### AC149。
+
 > ## ⇒ 先读执行核：[`orchestration/manager-tick-core.md`](manager-tick-core.md)（64 行）
 >
 > **本文件是理由档案(1138 行),不是执行清单。** 每轮实际要跑的动作、必产出、硬约束、边界
@@ -480,14 +482,11 @@ archguard / meta-cc 是**交付物的消费者**，人在那里的干预才是**
 
 ### a. 三项目状态（一次读，不逐个深挖）
 
-**统一机械读法（SPEC 2.8，`gap-spec-p2-halt-three-layer-mechanical-enforcement`）**：`halt-check.sh`
-一次给三项目的 `halted`（fail-closed）+ **组合判据**（`无 .halt` **且** 最后提交 >24h ⇒ `stall=true`，
-未标记停摆机械报出——A5 的「只读不判会稳定产生看见但没发现」由代码判，不靠自觉）：
-```bash
-bash plugin/scripts/halt-check.sh --for manager --json \
-  --projects /home/yale/work/quay,/home/yale/work/archguard,/home/yale/work/meta-cc
-# 逐项目字段：projects[].halted / projects[].stall / projects[].last_commit_age_hours
-```
+**统一机械读法**：`halt-check.sh` 已退役（2026-08-29，`gap-retire-halt-file-driver-based`）——三层统一
+检查点的 `.halt` 角色已死，三项目停泊态观察现归 **manager 层活机制** `manager-tick-readings.ts:144`
+（跨项目 `.halt` 读，属正交面，随 manager-tick-readings 自身命运）。机械读法统一走
+`node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings`（本文件 §1 的 8 个
+散落 bash 块已由它收成一条命令）。人读 fallback 见下：
 
 ```bash
 for p in quay archguard meta-cc; do
@@ -501,7 +500,7 @@ for p in quay archguard meta-cc; do
 done
 # 判读：「无.halt」只说明没人按下暂停键。**是否在跑要看最后提交 + 会话是否存在（§1.b）**，
 #       三者对不上时（如 无.halt + 会话不存在 + 提交停在两天前）报【已停但未标记】，不报运行中。
-#       ——统一读法由上面 halt-check.sh 的 projects[].stall 机械给出（同一判据），本块为人读 fallback。
+#       ——统一读法由 manager-tick-readings.ts 机械给出（同一判据），本块为人读 fallback。
 awk '/^some/{split($2,a,"=");print "cpu some avg10: "a[2]}' /proc/pressure/cpu | head -1
 echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)MB"
 ```

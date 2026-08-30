@@ -33,6 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { helpExit } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -208,6 +209,9 @@ function usage(): never {
 
 async function main(argv: string[]): Promise<number> {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) {
+    helpExit("usage: node drivable-workspace-check.ts <path> [<path> ...] --registry <file>\n       node drivable-workspace-check.ts --selftest");
+  }
   if (args.includes("--selftest")) {
     return selftest() ? 0 : 1;
   }

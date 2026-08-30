@@ -21,10 +21,13 @@
 # Usage:
 #   tmux-leak-scan.sh --snapshot <workspace-root>   # record pre-existing matching servers/dirs
 #   tmux-leak-scan.sh --check <workspace-root>      # delta: only NEW matches are leaks
+#   tmux-leak-scan.sh --sweep <workspace-root>      # cure: reap matching servers + rm matching dirs
 #   tmux-leak-scan.sh                               # absolute (historical): any match is a leak
 #
-# Exit 0 = clean; exit 1 = residual leaks found (names printed to stderr). Never invokes `tmux`
-# (a client call could itself be the only tmux process alive); scans `pgrep`/`ls` snapshots only.
+# Exit 0 = clean; exit 1 = residual leaks found (names printed to stderr). The SCAN modes (snapshot/
+# check/absolute) never invoke `tmux` (a client call could itself be the only tmux process alive) —
+# they scan `pgrep`/`ls` snapshots only. `--sweep` is the exception: it invokes `tmux -S <socket>
+# kill-server` to actually reap an orphaned server (socket-targeted, never an unqualified client).
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
@@ -68,10 +71,11 @@ root=""
 case "${1:-}" in
   --snapshot) mode="snapshot"; shift ;;
   --check)    mode="check";    shift ;;
+  --sweep)    mode="sweep";    shift ;;
 esac
 if [ "$mode" != "absolute" ]; then
   if [ "$#" -lt 1 ]; then
-    echo "tmux-leak-scan: usage: $0 [--snapshot|--check] <workspace-root>" >&2
+    echo "tmux-leak-scan: usage: $0 [--snapshot|--check|--sweep] <workspace-root>" >&2
     exit 2
   fi
   root="$1"
@@ -171,6 +175,57 @@ if [ "$mode" = "check" ]; then
   echo "tmux-leak-scan: FAIL — NEW residual test tmux servers/dirs STILL PRESENT after ${waited_ms}ms reap-wait (delta vs the before-run snapshot; scan scope: ${scan_desc}):" >&2
   printf '%s\n' "$new_matches" >&2
   exit 1
+fi
+
+if [ "$mode" = "sweep" ]; then
+  # --sweep (gap-tmux-leak-scan-sweep-orphaned-servers): the CURE for the orphan class --check can
+  # only DETECT. A SIGKILL'd/panicked suite leaves hermetic tmux servers on their private sockets
+  # (/tmp/quay-isc-* etc. — inner-session-check's os.tmpdir()-direct mkdtemp) with no teardown left
+  # to reap them (2026-08-29: pid 1406623 leaked 1h23m). Reuses scan_matches + prefixes (single
+  # source of truth — sweep and scan never drift), but forces the LEGACY prefix scope: the run
+  # namespace (/tmp/quay-run-<id>/) is empty at suite start (the runner's sweepRunNamespaces already
+  # handles it), while the SIGKILL residue lives at /tmp/<prefix>*. An explicit --scope still
+  # overrides (test confinement). Per match line: a proc line ("PID tmux -S <socket> ...") → extract
+  # the socket and `tmux -S <socket> kill-server`; a dir line ("/tmp/<prefix>*") → rm -rf. best-effort:
+  # exit 0 always (a failed cleanup never changes the verdict); idempotent (no orphans → no-op).
+  if [ -z "$scope_dir" ]; then
+    run_root=""
+  fi
+  scan_desc="${run_root}"
+  [ -n "${scan_desc}" ] || scan_desc="${prefixes}"
+  matches="$(scan_matches)"
+  swept_servers=0
+  swept_dirs=0
+  # TWO PASSES, servers FIRST: scan_matches sorts its output, and `/` (dir lines) sorts BEFORE
+  # `0-9` (proc lines) in ASCII — so a single sorted pass would `rm -rf` the socket dir before
+  # kill-server could reach the server, leaving the server alive with its socket gone (删目录 ≠
+  # 杀进程 — the exact orphan shape this task exists for). Pass 1 reaps every server while its
+  # socket still exists; pass 2 then removes the dir lines.
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in
+      [0-9]*)   # proc line — "PID tmux -S <socket> ..."; reap that socket's server
+        sock="$(printf '%s\n' "$line" | sed -nE 's/^[0-9]+ [^ ]* -S ([^ ]+).*/\1/p')"
+        if [ -n "$sock" ] && command -v tmux >/dev/null 2>&1; then
+          if tmux -S "$sock" kill-server >/dev/null 2>&1; then
+            swept_servers=$((swept_servers + 1))
+          fi
+        fi
+        ;;
+    esac
+  done <<< "$matches"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in
+      /*)       # dir line — an absolute /tmp path; remove it (its server, if any, was reaped above)
+        if rm -rf -- "$line" 2>/dev/null; then
+          swept_dirs=$((swept_dirs + 1))
+        fi
+        ;;
+    esac
+  done <<< "$matches"
+  echo "tmux-leak-scan: sweep — reaped ${swept_servers} orphaned server(s), removed ${swept_dirs} dir(s) (scan scope: ${scan_desc})"
+  exit 0
 fi
 
 # absolute (historical) mode — same run-subtree / legacy-prefix split as scan_matches.

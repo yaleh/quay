@@ -1,26 +1,16 @@
 // @test-group engine
-// delivery-inventory-drift-gate.test.mjs — unit tests for the file-set change gate
-// (gap-delivery-inventory-drift-needs-file-add-gate, AC2/AC4 + gap-drift-gate-covers-only-plugin-
-// scripts-not-workflows AC2 + Contract invariants).
+// delivery-inventory-drift-gate.test.mjs — unit tests for the plugin/workflows mirror gate
+// (gap-drift-gate-covers-only-plugin-scripts-not-workflows AC2 + Contract invariants).
 //
-// The gate answers: "Did this change ADD/DELETE a file under plugin/scripts/ WITHOUT updating the
-// outline §6 DELIVERY-INVENTORY snapshot in the same change?" — the 2026-08-10 red family
-// (r216/r222/r223/r226/r248/r253) fixed at the ROOT CAUSE instead of the symptom (7d2faf06). And,
-// since gap-drift-gate-covers-only-plugin-scripts-not-workflows (2026-08-11, r265 red M143/AC9/C6):
-// "did this change ADD/DELETE a file under .claude/workflows/ WITHOUT touching the plugin/workflows/
-// mirror in the same change?" — the r265 root cause was a NEW workflow (execute-suite-fix.js,
-// pool-quality-judge.js) added to .claude/workflows/ without a plugin/workflows/ mirror.
+// The gate answers: "Did this change ADD/DELETE a file under .claude/workflows/ WITHOUT touching the
+// plugin/workflows/ mirror in the same change?" — the r265 root cause was a NEW workflow
+// (execute-suite-fix.js, pool-quality-judge.js) added to .claude/workflows/ without a mirror.
+// The ORIGINAL outline-snapshot trigger (plugin/scripts A/D without updating the outline §6
+// DELIVERY-INVENTORY snapshot — gap-delivery-inventory-drift-needs-file-add-gate, the 2026-08-10 red
+// family) is RETIRED (gap-delivery-inventory-check-time-computation): the inventory is computed at
+// check time, so there is no snapshot for a script A/D to co-touch.
 //
 // Coverage map (task ACs + Contract):
-//   AC2 — candidate B: `--diff-filter=AD` on plugin/scripts ⇒ the same change set must update the
-//         outline; FAIL-closed. Exercised via the WORKING-TREE surface (a new untracked script
-//         without an outline update → exit 1) AND the COMMITTED surface (a committed deletion
-//         without an outline update → exit 1).
-//   Contract invariant new_script_requires_outline = 1 — add a script ⇒ same-change outline update,
-//         else FAIL. (RED test.)
-//   Contract invariant content_only_change_skipped = 1 — editing an existing script's content does
-//         NOT trigger. (GREEN test.)
-//   outline_updated_alongside — add a script + update the outline in the same change ⇒ PASS.
 //   AC2 (workflows) — .claude/workflows A/D ⇒ the same change set must touch plugin/workflows/
 //         (the mirror); FAIL-closed. Exercised on the WORKING-TREE surface (a new untracked
 //         workflow without a mirror → exit 1) AND the COMMITTED surface (a committed workflow
@@ -30,8 +20,6 @@
 //   Contract invariant content_only_change_skipped = 1 (workflows) — editing an existing workflow's
 //         content does NOT trigger. (GREEN test.)
 //   workflow_mirror_alongside — add a workflow + mirror it in the same change ⇒ PASS.
-//   AC3 — existing verify-delivery-surface tests are not broken (run separately via the task's
-//         ## Test-Files declaration; this file does not duplicate them).
 //
 // Run:
 //   scripts/test.sh plugin/test/delivery-inventory-drift-gate.test.mjs
@@ -47,7 +35,6 @@ import { spawnSync } from "node:child_process";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const GATE = path.join(REPO_ROOT, "plugin", "scripts", "delivery-inventory-drift-gate.sh");
-const OUTLINE_REL = path.join("docs", "proposals", "quay-product-outline.md");
 
 function t(name, fn) {
   test(name, fn);
@@ -59,18 +46,11 @@ function git(cwd, ...args) {
   return r.stdout.trim();
 }
 
-/** Build a temp GIT repo with an outline snapshot (scripts=1) + one existing script, committed. */
+/** Build a temp GIT repo with one committed mirrored workflow pair, committed. */
 function makeRepo() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "inv-drift-gate-"));
-  fs.mkdirSync(path.join(root, "docs", "proposals"), { recursive: true });
-  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
   fs.mkdirSync(path.join(root, ".claude", "workflows"), { recursive: true });
   fs.mkdirSync(path.join(root, "plugin", "workflows"), { recursive: true });
-  fs.writeFileSync(
-    path.join(root, OUTLINE_REL),
-    "# outline\n\n<!-- DELIVERY-INVENTORY-BEGIN -->\nscripts=1\n<!-- DELIVERY-INVENTORY-END -->\n"
-  );
-  fs.writeFileSync(path.join(root, "plugin", "scripts", "existing.sh"), "#!/usr/bin/env bash\necho existing\n");
   // Committed mirrored workflow pair — the .claude/workflows/ canonical source + plugin/workflows/ mirror.
   fs.writeFileSync(
     path.join(root, ".claude", "workflows", "existing-wf.js"),
@@ -97,125 +77,6 @@ function runGate(root, extraArgs = []) {
 function rmrf(p) {
   fs.rmSync(p, { recursive: true, force: true });
 }
-
-// ── AC2 / new_script_requires_outline ──────────────────────────────────────────────────────────────
-
-t("GREEN — a clean tree with no plugin/scripts A/D passes", () => {
-  const root = makeRepo();
-  try {
-    const r = runGate(root);
-    assert.equal(r.status, 0, `clean tree must pass:\n${r.stderr}`);
-    assert.match(r.stdout, /PASS/);
-  } finally { rmrf(root); }
-});
-
-t("RED — a NEW plugin/scripts file without an outline update fails FAIL-closed (new_script_requires_outline)", () => {
-  const root = makeRepo();
-  try {
-    fs.writeFileSync(path.join(root, "plugin", "scripts", "foo-new.sh"), "#!/usr/bin/env bash\necho new\n");
-    const r = runGate(root);
-    assert.equal(r.status, 1, "script addition without outline update must fail (FAIL-closed)");
-    assert.match(r.stderr, /DELIVERY-INVENTORY|quay-product-outline/, "the failure must name the outline snapshot");
-  } finally { rmrf(root); }
-});
-
-t("RED — a staged NEW plugin/scripts file (git add) without an outline update also fails", () => {
-  const root = makeRepo();
-  try {
-    fs.writeFileSync(path.join(root, "plugin", "scripts", "staged-new.sh"), "#!/usr/bin/env bash\necho staged\n");
-    git(root, "add", "plugin/scripts/staged-new.sh");
-    const r = runGate(root);
-    assert.equal(r.status, 1, "staged addition without outline update must fail (A status is structural)");
-  } finally { rmrf(root); }
-});
-
-t("GREEN — a NEW file under plugin/scripts/checker-mutation-cases/ does NOT trigger (fixture, not a shipped script; the snapshot counts top-level entries only — gap-checker-mutation-cases-4-checkers)", () => {
-  const root = makeRepo();
-  try {
-    fs.mkdirSync(path.join(root, "plugin", "scripts", "checker-mutation-cases"), { recursive: true });
-    fs.writeFileSync(
-      path.join(root, "plugin", "scripts", "checker-mutation-cases", "cap-counts-subagents-check.sh"),
-      "#!/usr/bin/env bash\necho fixture\n"
-    );
-    const r = runGate(root);
-    assert.equal(r.status, 0, `mutation-case fixture must NOT be structural:\n${r.stderr}`);
-    assert.match(r.stdout, /PASS/);
-  } finally { rmrf(root); }
-});
-
-t("RED — a committed plugin/scripts DELETION without an outline update fails (committed path)", () => {
-  const root = makeRepo();
-  try {
-    fs.rmSync(path.join(root, "plugin", "scripts", "existing.sh"));
-    git(root, "add", "-A");
-    git(root, "commit", "-q", "-m", "delete script without outline");
-    // Committed range must be the previous commit (--base HEAD would be an empty range now).
-    const res = spawnSync("bash", [GATE, "--root", root, "--base", "HEAD~1"], { encoding: "utf8" });
-    assert.equal(res.status, 1, "committed deletion without outline update must fail");
-    assert.match(res.stdout + res.stderr, /DELIVERY-INVENTORY|quay-product-outline/);
-  } finally { rmrf(root); }
-});
-
-// ── content_only_change_skipped ────────────────────────────────────────────────────────────────────
-
-t("GREEN — a content-only edit to an existing script does NOT trigger (content_only_change_skipped)", () => {
-  const root = makeRepo();
-  try {
-    fs.appendFileSync(path.join(root, "plugin", "scripts", "existing.sh"), "\necho changed\n");
-    const r = runGate(root);
-    assert.equal(r.status, 0, "content-only edit must not trigger candidate B");
-  } finally { rmrf(root); }
-});
-
-t("GREEN — a content-only edit with NO outline change and a committed-only change passes", () => {
-  const root = makeRepo();
-  try {
-    fs.appendFileSync(path.join(root, "plugin", "scripts", "existing.sh"), "\necho changed\n");
-    git(root, "add", "-A");
-    git(root, "commit", "-q", "-m", "content edit only");
-    const res = spawnSync("bash", [GATE, "--root", root, "--base", "HEAD~1"], { encoding: "utf8" });
-    assert.equal(res.status, 0, "committed content-only edit must not trigger (M status is not structural)");
-  } finally { rmrf(root); }
-});
-
-// ── outline_updated_alongside ──────────────────────────────────────────────────────────────────────
-
-t("GREEN — a NEW script WITH an outline update in the same change passes", () => {
-  const root = makeRepo();
-  try {
-    fs.writeFileSync(path.join(root, "plugin", "scripts", "bar-new.sh"), "#!/usr/bin/env bash\necho bar\n");
-    const outlinePath = path.join(root, OUTLINE_REL);
-    fs.writeFileSync(outlinePath, fs.readFileSync(outlinePath, "utf8").replace("scripts=1", "scripts=2"));
-    const r = runGate(root);
-    assert.equal(r.status, 0, "script addition WITH outline update must pass");
-  } finally { rmrf(root); }
-});
-
-t("GREEN — a DELETION WITH an outline update in the same change passes", () => {
-  const root = makeRepo();
-  try {
-    fs.rmSync(path.join(root, "plugin", "scripts", "existing.sh"));
-    const outlinePath = path.join(root, OUTLINE_REL);
-    fs.writeFileSync(outlinePath, fs.readFileSync(outlinePath, "utf8").replace("scripts=1", "scripts=0"));
-    const r = runGate(root);
-    assert.equal(r.status, 0, "script deletion WITH outline update must pass");
-  } finally { rmrf(root); }
-});
-
-t("GREEN — a committed script ADD + outline MODIFY in the same commit passes (outline touched via M, not A/D)", () => {
-  const root = makeRepo();
-  try {
-    fs.writeFileSync(path.join(root, "plugin", "scripts", "committed-new.sh"), "#!/usr/bin/env bash\necho committed\n");
-    const outlinePath = path.join(root, OUTLINE_REL);
-    fs.writeFileSync(outlinePath, fs.readFileSync(outlinePath, "utf8").replace("scripts=1", "scripts=2"));
-    git(root, "add", "-A");
-    git(root, "commit", "-q", "-m", "script add + outline modify in one commit");
-    // Committed range = HEAD~1..HEAD: the outline appears as M (not A/D) — a --diff-filter=AD-only
-    // committed scan would MISS it (the 2026-08-10 post-commit regression this test pins).
-    const res = spawnSync("bash", [GATE, "--root", root, "--base", "HEAD~1"], { encoding: "utf8" });
-    assert.equal(res.status, 0, "committed script-add + outline-modify must pass (outline touched via M status)");
-  } finally { rmrf(root); }
-});
 
 // ── workflows trigger (gap-drift-gate-covers-only-plugin-scripts-not-workflows, AC2) ──────────────
 

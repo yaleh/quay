@@ -761,7 +761,11 @@ full_suite_lock_acquire() {
   # suite-slot-lib.sh (single definition point, sourceable/testable); it polls a flag file each 1s so a
   # normal release (flag removed) or a crash (main pid gone) exits it promptly — no lingering FD.
   FULL_SUITE_LOCK_FLAG="$(mktemp "${TMPDIR:-/tmp}/full-suite-lock-hold.XXXXXX")"
-  FULL_SUITE_LOCK_WATCHDOG_PID="$(spawn_suite_lock_hold_watchdog "${FULL_SUITE_LOCK_FDS[${_s_held}]}" "${FULL_SUITE_LOCK_FLAG}" "$$" "${FULL_SUITE_LOCK_HOLD_MAX_S}")"
+  # 5th arg = timer-cut (1 = the suite lock's path (c) timer yield, the default); 6th arg = the HELD
+  # slot path: the watchdog writes `<slot>.yielded` on fire so the lane formula of a joining (S+1)-th
+  # suite counts this still-running slot-less suite (gap-suite-lane-budget-structural-guarantee-broken-
+  # buckets-no-lock 漏口② — 让槽同时让 lane, not just slot).
+  FULL_SUITE_LOCK_WATCHDOG_PID="$(spawn_suite_lock_hold_watchdog "${FULL_SUITE_LOCK_FDS[${_s_held}]}" "${FULL_SUITE_LOCK_FLAG}" "$$" "${FULL_SUITE_LOCK_HOLD_MAX_S}" "1" "${FULL_SUITE_LOCK_SLOTS[${_s_held}]}")"
 }
 
 # full_suite_lock_release — release the HELD slot and close all FDs (idempotent; flock also
@@ -776,6 +780,13 @@ full_suite_lock_release() {
     _r_idx="${FULL_SUITE_LOCK_HELD}"
     if [ "${_r_idx}" -lt "${#FULL_SUITE_LOCK_FDS[@]}" ]; then
       flock -u "${FULL_SUITE_LOCK_FDS[${_r_idx}]}" 2>/dev/null || true
+    fi
+    # Remove the watchdog's lane-yield marker (written on fire) on a NORMAL release — a joining suite's
+    # lane formula must no longer count this (now-finished) suite as slot-less (gap-suite-lane-budget-
+    # structural-guarantee-broken-buckets-no-lock). A crash leaks a dead-pid marker that readers ignore
+    # (pid-liveness self-cleanup), so the rm here only needs to cover the normal path.
+    if [ "${_r_idx}" -lt "${#FULL_SUITE_LOCK_SLOTS[@]}" ]; then
+      rm -f "${FULL_SUITE_LOCK_SLOTS[${_r_idx}]}.yielded" 2>/dev/null || true
     fi
   fi
   # gap-suite-lock-starvation-long-validation-hold AC2 — emit lock_hold_ms (the acquire→release wall)
@@ -973,14 +984,8 @@ run_selected() {
   build_dist_once
   oh_t3=$(_oh_mark)
   run_static_checks
-  # archguard structural gate (gap-archguard-zero-production-calls): a REAL archguard CLI call wired
-  # into the suite — fail-closed (archguard missing / analyze failed / dependency cycles ⇒ exit 1).
-  # This is the mechanism that makes CLAUDE.md's「Consult archguard before calling a milestone done」
-  # executable instead of advisory: the meter is runnable, not asserted (AC1/AC2); the produced
-  # `.archguard/` product is read back as the criterion's input and appended to
-  # `.archguard/metrics-history.jsonl` (AC3). Runs AFTER the parallelized static-check block (the
-  # archguard analyze is CPU-heavy tree-sitter work, kept out of the parallel pool to avoid contention).
-  run_checker "archguard-structure-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/archguard-runner.ts" --root "${repo_root}"
+  # archguard 结构闸已迁入 fan-in driver 机械步骤（runMechanicalFanIn 第 5.5 步，typecheck 后 scoped门 前，
+  # gap-archguard-structural-gate-in-fan-in-driver）——⛔ test.sh 不再触发（两个真相源）。
   oh_t4=$(_oh_mark)
   export QUAY_TEST_GROUPS="$groups"
   local files=() f
@@ -1018,6 +1023,10 @@ run_selected() {
     bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" --snapshot "${repo_root}" || true
     # Same-family DELTA for tmux-leak-scan: pre-existing outer/manager tmux sessions are not this
     # run's leak. Snapshot failure is non-fatal (the absolute suite-tail check still runs after).
+    # --sweep FIRST (gap-tmux-leak-scan-sweep-orphaned-servers): cure the HISTORICAL SIGKILL orphans
+    # (hermetic servers stranded on /tmp/<prefix>* sockets) before the snapshot, so --snapshot/--check
+    # stay a pure "this run's NEW leak" delta. best-effort, exit 0 always.
+    bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --sweep "${repo_root}" || true
     bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
     set +e
     # Phase order (gap-phase-order-serial-lowconc-before-main): serial and lowconc phases run
@@ -1501,6 +1510,9 @@ elif [ "${1:-}" = "--buckets" ]; then
   # tmux-leak-scan --snapshot/--check delta pair + session-liveness-sweep-kill is a PER-ROUND
   # checker, NOT 全量专属 — a bucket subset that skips it drops the checker from every-round to
   # never-run (降频 violation). Snapshot failure is non-fatal (the absolute --check still runs).
+  # --sweep FIRST (gap-tmux-leak-scan-sweep-orphaned-servers): cure historical SIGKILL orphans
+  # before the snapshot so --snapshot/--check stay a pure "this run's NEW leak" delta.
+  bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --sweep "${repo_root}" || true
   bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
   mark_nested
   set +e

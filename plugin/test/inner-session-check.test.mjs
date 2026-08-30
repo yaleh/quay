@@ -179,14 +179,13 @@ test("AC3 — the tick doc drives (not rebuilds) the empty-shell inner", () => {
 });
 
 // ── AC4 — missing ⇒ call the two-window factory (quay-topology.sh), no manager ─────────────────────
-test("AC4 — the tick doc calls quay-topology.sh (two-window factory) when inner is missing, no manager", () => {
+test("AC4 — the tick doc calls quay-topology.sh (single-window factory) when the topology is missing, no manager", () => {
   assert.match(tickSrc, /quay-topology\.sh/, "missing ⇒ the tick doc must call the topology factory");
-  assert.match(tickSrc, /两窗口/, "the created topology must be the two-window one");
   const factorySrc = fs.readFileSync(FACTORY, "utf8");
-  assert.match(factorySrc, /ROLES="outer inner"/, "the factory must be two-window (outer+inner)");
+  assert.match(factorySrc, /ROLES="outer"/, "the factory must be single-window (outer)");
   assert.ok(!/ROLES="[^"]*manager/.test(factorySrc), "the factory must NOT include a manager window");
   const checkSrc = fs.readFileSync(CHECK, "utf8");
-  assert.match(checkSrc, /ROLES="outer inner"/, "the check must verify exactly the two-window topology");
+  assert.match(checkSrc, /ROLES="outer"/, "the check must verify the single-window topology");
 });
 
 // ── AC5 — after creating, the drive is verified INNER-DRIVEN (transcript user message) ──────────────
@@ -387,7 +386,7 @@ test("AC3 — a discovery-sourced USER_MSG transcript (would-be-healthy breeding
   }
 });
 
-test("factory — quay-topology.sh builds the two-window topology that the self-check reports healthy", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test("factory — quay-topology.sh builds the single-window topology (outer only, no inner, no manager)", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
   const h = newHermetic();
   try {
     const build = spawnSync("bash", [FACTORY, "--session", "isc-factory"], {
@@ -397,17 +396,8 @@ test("factory — quay-topology.sh builds the two-window topology that the self-
     assert.equal(build.status, 0, `factory build must exit 0:\n${build.stderr}`);
     const names = spawnSync("tmux", ["list-windows", "-t", "isc-factory", "-F", "#{window_name}"], { encoding: "utf8", env: h.env })
       .stdout.trim().split("\n").filter(Boolean);
-    for (const role of ["outer", "inner"]) assert.ok(names.includes(role), `factory must create ${role}`);
+    assert.ok(names.includes("outer"), `factory must create outer (got: ${names.join(", ")})`);
     assert.ok(!names.includes("manager"), `factory must NOT create manager (got: ${names.join(", ")})`);
-    // inner has a claude child; a fresh (no user message) transcript → empty-shell (the factory-built,
-    // not-yet-driven shape). Use an explicit empty fixture so the verdict does not depend on the host's
-    // real ~/.claude transcripts.
-    assert.ok(await waitForClaude(h.env, "isc-factory:inner", 5000), "factory-built inner must have a claude child");
-    const tr = path.join(h.tmp, "fresh-inner.jsonl");
-    fs.writeFileSync(tr, SYSTEM_ONLY, "utf8");
-    const r = runCheck(h.env, ["--session", "isc-factory", "--json", "--transcript", tr]);
-    assert.equal(r.status, 0, `self-check must exit 0:\n${r.stdout}\n${r.stderr}`);
-    const j = JSON.parse(r.stdout);
-    assert.equal(j.state, "empty-shell", "a factory-built but never-driven inner is an empty shell — drive, don't rebuild");
+    assert.ok(!names.includes("inner"), `factory must NOT create inner (got: ${names.join(", ")})`);
   } finally { h.cleanup(); }
 });

@@ -141,6 +141,51 @@ test("P+M change selects the union of both buckets", () => {
   assert.ok(sel.selectedFiles.includes(PURE_M));
 });
 
+// ── gap-suite-bucket-touches-inclusive-floor: the task's Touches test files are a DIRECT declaration ──
+// (a changed test file must run regardless of where the attribution proxy placed it). AC1-AC4.
+
+const OTHER_PURE_M = "plugin/test/dead-loop-check.test.mjs"; // reattributed M (a second pure-M)
+
+test("AC1: a Touches-listed test attributed to a non-triggered bucket is still force-included", () => {
+  // P-only change whose Touches ALSO lists a pure-M test (S/M attribution): without the floor, the
+  // pure-M test would be excluded from the P selection (see the P-only test above).
+  const sel = selectBucketsForTouches(["packages/quay/src/gate/lifecycle.ts", PURE_M], ROOT);
+  assert.equal(sel.fullSuite, false);
+  assert.equal(sel.buckets, "P");
+  assert.ok(sel.selectedFiles.includes(PURE_M), "a Touches-listed test must be run even when attributed M-only");
+});
+
+test("AC2: non-test Touches entries (source/script/self) are never unioned into the selection", () => {
+  const sel = selectBucketsForTouches(
+    ["packages/quay/src/gate/lifecycle.ts", "plugin/scripts/ready-pool-check.ts", "tasks/gap-suite-bucket-touches-inclusive-floor.md"],
+    ROOT,
+  );
+  assert.equal(sel.fullSuite, false);
+  assert.equal(sel.buckets, "P+M");
+  // the selection is a TEST-file set — a source/script/doc path must not leak in via the union
+  assert.ok(!sel.selectedFiles.includes("plugin/scripts/ready-pool-check.ts"), "a source Touches entry must not be selected");
+  for (const f of sel.selectedFiles) {
+    assert.match(f, /\.test\.(mjs|ts)$/, `${f} must be a test file (non-test Touches entries are not unioned)`);
+  }
+});
+
+test("AC3: tests NOT in Touches are still governed by bucket attribution (union only adds)", () => {
+  const sel = selectBucketsForTouches(["packages/quay/src/gate/lifecycle.ts", PURE_M], ROOT);
+  // a cross-bucket P test that is NOT in the Touches list is still selected via P attribution
+  assert.ok(sel.selectedFiles.includes(CROSS_BUCKET_P), "a non-Touches cross-bucket P test is still selected by attribution");
+  // a different pure-M test that is NOT in the Touches list is still excluded (attribution governs the rest)
+  assert.ok(!sel.selectedFiles.includes(OTHER_PURE_M), "a non-Touches pure-M test is NOT force-included");
+});
+
+test("AC4: selection is unchanged for a task whose Touches carry no test files", () => {
+  const sel = selectBucketsForTouches(["packages/quay/src/gate/lifecycle.ts"], ROOT);
+  assert.equal(sel.fullSuite, false);
+  assert.equal(sel.buckets, "P");
+  assert.ok(sel.selectedFiles.includes(CROSS_BUCKET_P), "cross-bucket P test still selected");
+  assert.ok(!sel.selectedFiles.includes(PURE_M), "pure-M is still excluded when it is not in Touches");
+  assert.ok(sel.fileCount < listSuiteFiles(ROOT).length, "P bucket stays a strict subset of the full suite");
+});
+
 // ── enumeration sanity (the selector must list the SAME universe test.sh runs, not a recursive one) ──
 
 test("listSuiteFiles matches test.sh's shallow glob universe (no nested fixtures)", () => {

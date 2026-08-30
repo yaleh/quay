@@ -1,6 +1,7 @@
 ---
 id: gap-retire-governance-group-merge-into-bucket
-title: 退役 @test-group governance 第三套机制——并入 bucket（人裁定「不要在 bucket 和相机制以外再搞一套」），142 文件改标真实相
+title: 退役 @test-group governance 第三套机制——并入 bucket（人裁定「不要在 bucket
+  和相机制以外再搞一套」），142 文件改标真实相
 status: ready
 labels:
   - gap
@@ -70,4 +71,3 @@ governance 第三套退役、142 文件改标真实相、bucket 单一选择落�
 - plugin/test-isolation-violations.txt（spawns-test-sh ratchet 删 2 条指向已删 governance 测试的 entry）
 - docs/analysis/test-file-baseline.txt（test-file-snapshot 基线重生成——2 文件 engine→serial 移出 --list-files）
 - tasks/gap-retire-governance-group-merge-into-bucket.md（自身）
-

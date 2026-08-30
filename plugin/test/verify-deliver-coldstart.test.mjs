@@ -3,8 +3,8 @@
 //
 // Tests for plugin/scripts/verify-deliver-coldstart.sh — the repeatable mechanism that upgrades
 // AC88's cross-host verification from "install tgz + serve HTTP probe" to:
-//   ① clean-dir fresh .tgz install → ② project quay-init → ③ two-layer (outer+inner) cold-start
-//   liveness by DIRECT measures (git commit / /proc cwd / worktree, NOT serve HTTP or layer
+//   ① clean-dir fresh .tgz install → ② project quay-init → ③ cold-start liveness
+//   (outer window + inner layer) by DIRECT measures (git commit / /proc cwd / worktree, NOT serve HTTP or layer
 //   heartbeat), with AC5 evidence that the verification self-built the tgz from develop-tip
 //   (commit sha + sha256,达成 = newer than the 2026-08-16 phase switch).
 //
@@ -53,7 +53,7 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
   assert.match(r.stdout, /alive\(recent-non-chore-commit\) L1_OK=1 COLDSTART_LIVE=yes/,
     "positive control: a real loop commit must be live");
   // AC1 regression (gap-verify-deliver-coldstart-l2-proc-ok-false-positive): proc_ok must NOT be
-  // a standalone sufficient liveness signal when a two-layer pane is stuck at the startup
+  // a standalone sufficient liveness signal when the outer pane is stuck at the startup
   // permission-prompt — even with >=2 claude/node processes in the project (B/C 实测 4 进程卡
   // "Quick safety check" 弹窗 6.2h, coldstart_live 曾由 proc_ok 单独撑起).
   assert.match(r.stdout, /prompt-blocked\(procs=2,prompt=1\) L2_OK=0 COLDSTART_LIVE=no/,

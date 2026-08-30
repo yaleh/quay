@@ -1,7 +1,7 @@
 ---
 id: gap-b4-checker-reuse-driver-result
 title: B4·层 2 判定契约——checker 复用已落地的 driver-result.ts DriverResult<T>（非设计新契约，采纳数 0→k 棘轮）
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -21,9 +21,9 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，采纳棘轮）：采纳 `driver-result` 的 checker 数 0 → k（k≥3 示范），且新增 checker 违例被检查器挡住（只增不减）；（⛔ 仍 0 采纳 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：删一个 checker 对 driver-result 的 import，该 checker 的第三态（not-evaluated）须塌回二值、对应断言须红；（⛔ 删了不红 ⇒ 假）。
-- [ ] AC3（能取假，语义适配已判定）：语义映射（DriverResult 的 verified/failed ↔ checker pass/fail/not-evaluated）有明文字段级对照 + 测试覆盖；（⛔ 无对照或误映射 ⇒ 假）。
+- [x] AC1（能取假，采纳棘轮）：采纳 `driver-result` 的 checker 数 0 → k（k≥3 示范），且新增 checker 违例被检查器挡住（只增不减）；（⛔ 仍 0 采纳 ⇒ 假）。
+- [x] AC2（能取假，负控制）：删一个 checker 对 driver-result 的 import，该 checker 的第三态（not-evaluated）须塌回二值、对应断言须红；（⛔ 删了不红 ⇒ 假）。
+- [x] AC3（能取假，语义适配已判定）：语义映射（DriverResult 的 verified/failed ↔ checker pass/fail/not-evaluated）有明文字段级对照 + 测试覆盖；（⛔ 无对照或误映射 ⇒ 假）。
 
 ## Definition of Done
 
@@ -31,7 +31,6 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 
 ## Touches
 
-- plugin/scripts/driver-result.ts（语义适配/更上位词表）
 - plugin/scripts/outer-anchor-check.ts（示范迁移）
 - plugin/scripts/load-sensitive-release-check.ts（示范迁移）
 - plugin/scripts/dead-code-after-return-check.ts（示范迁移）
@@ -43,4 +42,14 @@ SPEC §2.3a ⭐ 跨角色发现：`plugin/scripts/driver-result.ts`（AC153，20
 - plugin/test/dead-code-after-return-check.test.mjs（迁移测试）
 - plugin/test/adr016-screen-use-check.test.mjs（迁移测试）
 - plugin/test/checker-driver-result-ratchet-check.test.mjs (new)（棘轮负控制测试）
+- plugin/scripts/capability-catalog.sh（2 新脚本六表注册）
+- plugin/scripts/quay-init.sh（checker-io.ts + driver-result.ts 显式 laydown——closure (d) 扫不到 ESM import）
+- plugin/scripts/outer-retirement-precondition-check.ts（棘轮 REQUIRED_ADOPTERS 是钉住清单元数据非调用面——入 NON_CALLER_BASENAMES，否则 "outer-anchor-check.ts" 字符串把孤儿伪造成有调用面）
+- plugin/test/help-contract-incompatible-behaviors.test.mjs（补 @load-sensitive-entry 记录——serial 族成员缺进入原因，known-load-sensitive --check-exit 分级闸红）
 - tasks/gap-b4-checker-reuse-driver-result.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-28T19:39:17.849Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

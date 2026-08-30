@@ -21,7 +21,7 @@
 //         A11/A12/A13 + refill BEFORE fan-in/report.
 //   AC5 — no new scheduler: the trigger is Monitor event monitoring (no CronCreate/ScheduleWakeup/
 //         /loop); cadence stays the outer cron. Negative control: slot full / no dispatchable ⇒ no
-//         SLOT-FREE. Halt suppression: `.halt` present ⇒ no event (the outer cannot act on it).
+//         SLOT-FREE.
 //   Contract invoke — `tail -3 .quay/slot-free-events.jsonl` (贴 SLOT-FREE 事件 + 时间戳); measure
 //         `slot_free_event_fired` = tail -1 含 SLOT-FREE.
 //   Catalog — slot-free-trigger.ts is DECLARED in capability-catalog.sh (entry gate: an undeclared
@@ -65,7 +65,6 @@ function tmpRoot() {
 /** The task's field reading (manager 04:2x): 在飞 1 / 空槽 4 / 可派 11, cap 5. */
 function freeState(over = {}) {
   return {
-    halted: false,
     slotsRemaining: 4,
     dispatchable_disjoint: 11,
     effectiveCap: 5,
@@ -106,11 +105,10 @@ test("AC2 unit — parseSlotsOutput / parsePoolOutput read the existing mechanis
 
 test("AC2 unit — evaluateSlotFree: in_flight<cap ∧ dispatchable>0 is the SLOT-FREE condition", () => {
   // the manager's exact field reading: in-flight 1 < cap 5 ∧ dispatchable 11 > 0 ⇒ free
-  assert.equal(evaluateSlotFree(4, 11, false), true, "空槽 4 + 可派 11 ⇒ free");
+  assert.equal(evaluateSlotFree(4, 11), true, "空槽 4 + 可派 11 ⇒ free");
   // negative controls
-  assert.equal(evaluateSlotFree(0, 11, false), false, "in_flight ≥ cap ⇒ not free");
-  assert.equal(evaluateSlotFree(4, 0, false), false, "dispatchable 0 ⇒ not free");
-  assert.equal(evaluateSlotFree(4, 11, true), false, "halted ⇒ not free (the outer cannot act on it)");
+  assert.equal(evaluateSlotFree(0, 11), false, "in_flight ≥ cap ⇒ not free");
+  assert.equal(evaluateSlotFree(4, 0), false, "dispatchable 0 ⇒ not free");
 });
 
 test("AC2 unit — detectSlotFreeEvent is a pure transition detector (false→true fires, true→false is calm)", () => {
@@ -157,19 +155,6 @@ test("AC2 negative control — slot full OR no dispatchable ⇒ no SLOT-FREE", (
     const noCand = runOnce(root, { state: freeState({ dispatchable_disjoint: 0 }) });
     assert.equal(noCand.free, false);
     assert.deepEqual(noCand.events, [], "dispatchable 0 ⇒ no event");
-    assert.deepEqual(readSlotFreeEvents(root), [], "nothing appended");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("AC2 halt suppression — `.halt` present ⇒ no SLOT-FREE (a free slot the outer cannot act on is noise)", () => {
-  const root = tmpRoot();
-  try {
-    fs.writeFileSync(path.join(root, ".halt"), "paused for review");
-    const r = runOnce(root, { state: freeState() });
-    assert.equal(r.free, false);
-    assert.deepEqual(r.events, [], "halted ⇒ no event");
     assert.deepEqual(readSlotFreeEvents(root), [], "nothing appended");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

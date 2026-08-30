@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -21,6 +22,7 @@ import {
   makeFilterContext,
   allDepsDone,
   readTaskStatus,
+  markNeedsHuman,
 } from "../scripts/driver-filters.ts";
 import { readTaskStatus as workerReadTaskStatus } from "../scripts/worker-driver.ts";
 
@@ -39,6 +41,21 @@ function writeTask(root, id, fm, body) {
 }
 
 const ctx = (root, overrides = {}) => makeFilterContext(root, overrides);
+
+/** 跑一条 git 命令（cwd=root，编码 utf8，非零退出抛错）。 */
+function git(root, ...args) {
+  return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+/** 建一个可提交的 git 临时仓库（git init + user 身份 + tasks/ 目录）。 */
+function makeGitRoot(tag) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `driver-filters-git-${tag}-`));
+  execFileSync("git", ["init", "-q", dir]);
+  git(dir, "config", "user.email", "test@example.com");
+  git(dir, "config", "user.name", "driver-filters-test");
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  return dir;
+}
 
 // ── AC1：五个谓词是一个列表里的元素 ──────────────────────────────────────────────────────────────
 
@@ -197,4 +214,70 @@ test("readTaskStatus — reads status; missing/unreadable ⇒ null", (t) => {
   writeTask(root, "gap-done", "---\nid: gap-done\nstatus: done\n---");
   assert.equal(readTaskStatus(root, "gap-done"), "done");
   assert.equal(readTaskStatus(root, "gap-missing"), null);
+});
+
+// ── markNeedsHuman commit-after-write（gap-mark-needs-human-commit-after-write）────────────────────
+
+test("AC4 — markNeedsHuman in a repo-less temp dir is a commit no-op (committed:false, no throw)", (t) => {
+  const root = makeRoot("nh-norepo");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: todo\n---");
+  const res = markNeedsHuman(root, "gap-nh", "test reason");
+  assert.equal(res.ok, true, "status flip still lands on disk");
+  assert.equal(res.committed, false, "repo-less ⇒ commit no-op (not a throw)");
+  assert.ok(
+    fs.readFileSync(path.join(root, "tasks", "gap-nh.md"), "utf8").includes("status: needs-human"),
+    "the flip itself is written even though the commit is a no-op",
+  );
+});
+
+test("AC1 — markNeedsHuman commits the flipped task file (⛔ 翻转后 git status 仍 M ⇒ 假)", (t) => {
+  const root = makeGitRoot("ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-nh.md");
+  git(root, "commit", "-q", "-m", "baseline");
+
+  const res = markNeedsHuman(root, "gap-nh", "reason");
+  assert.equal(res.ok, true);
+  assert.equal(res.committed, true, "commit landed");
+  const status = git(root, "status", "--porcelain");
+  assert.equal(status.trim(), "", `tree clean after flip: ${JSON.stringify(status)}`);
+  assert.match(git(root, "log", "--oneline", "-1"), /needs-human/, "the flip is a commit in the log");
+});
+
+test("AC2 — commit is pathspec-limited: a pre-staged unrelated file stays staged (⛔ 裸 commit 扫共享索引 ⇒ 假)", (t) => {
+  const root = makeGitRoot("ac2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-nh.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  // 模拟另一层已 stage 进共享索引的文件（git add 不 commit）。
+  fs.writeFileSync(path.join(root, "other.md"), "other\n", "utf8");
+  git(root, "add", "--", "other.md");
+
+  const res = markNeedsHuman(root, "gap-nh", "reason");
+  assert.equal(res.committed, true);
+  const status = git(root, "status", "--porcelain");
+  assert.match(status, /^A  other\.md$/m, `other.md still staged (not swept by the commit): ${JSON.stringify(status)}`);
+  assert.doesNotMatch(status, /tasks\/gap-nh\.md/, "task file is committed, not left dirty");
+});
+
+test("AC3 — propagateDocBranchToDevelop: a flip on the doc branch reaches develop (⛔ 只提交 doc 分支不 ff ⇒ 假)", (t) => {
+  const root = makeGitRoot("ac3");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-nh.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  // develop 停在 baseline；主检出在 doc 分支 main/manager-doc 上翻转。
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", "main/manager-doc");
+
+  const res = markNeedsHuman(root, "gap-nh", "reason");
+  assert.equal(res.committed, true);
+  assert.match(
+    git(root, "show", "develop:tasks/gap-nh.md"),
+    /^status: needs-human$/m,
+    "develop sees the flipped status (propagateDocBranchToDevelop ran)",
+  );
 });

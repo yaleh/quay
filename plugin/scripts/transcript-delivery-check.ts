@@ -52,6 +52,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 
 export type DeliveryState = "delivered" | "failed" | "unknown";
 
@@ -313,6 +314,7 @@ function readJsonlTailRemote(host: string, jsonlPath: string, startBytes: number
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: transcript-delivery-check.ts --check <transcript.jsonl> [--start <bytes>] --text <sent-text> [--remote <host>] | --is-fresh <transcript.jsonl> [--remote <host>]");
   let jsonlPath: string | undefined;
   let sentText: string | undefined;
   let startBytes = 0;

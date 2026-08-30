@@ -264,6 +264,39 @@ test("AC1 (TRUE catch-all) — killRegisteredServers({ deadProcOnly: true }) kil
   }
 });
 
+test("AC1 (registry GC) — killRegisteredServers({ deadProcOnly: true }) PRUNES a permanently-dead entry and keeps a live-owner entry", () => {
+  // gap-full-suite-runner-test-mock-embedded-real-suite: the append-only registry had NO GC, so a
+  // dead-owner + dead-server entry was re-read (/proc/<pid>/cmdline) on EVERY pre-suite sweep —
+  // measured 34k dead entries ≈ 2.3s per runner spawn. A permanently-dead entry must be PRUNED; a
+  // live-owner entry must SURVIVE (cross-run safety — never prune a still-running test's server).
+  const reg = serverRegistryPath();
+  const deadProc = spawnSync("true").pid;   // reaped ⇒ isProcAlive false
+  const deadServer = spawnSync("true").pid; // reaped ⇒ isLiveTmuxPid false (no /proc/<pid>/cmdline)
+  const deadDir = `session-liveness-swp-gc-dead-${process.pid}-${Date.now()}`;
+  const aliveDir = `session-liveness-swp-gc-alive-${process.pid}-${Date.now()}`;
+  try {
+    fs.appendFileSync(reg,
+      JSON.stringify({ dir: deadDir, sock: sockOfDir(deadDir), pid: deadServer, proc: deadProc, runId: "", ts: Date.now() }) + "\n" +
+      JSON.stringify({ dir: aliveDir, sock: sockOfDir(aliveDir), pid: process.pid, proc: process.pid, runId: "", ts: Date.now() }) + "\n",
+      "utf8");
+    killRegisteredServers({ deadProcOnly: true });
+    const afterEntries = readServerRegistry();
+    assert.ok(!afterEntries.some((e) => e.dir === deadDir),
+      "the permanently-dead entry must be PRUNED from the registry (unbounded-growth guard)");
+    assert.ok(afterEntries.some((e) => e.dir === aliveDir),
+      "the live-owner entry must SURVIVE deadProcOnly (never prune a still-running test's server)");
+  } finally {
+    // Remove the surviving synthetic live-owner entry so the shared registry is not polluted (fs-only,
+    // same atomic rewrite as the prune). The dead entry was already pruned by the sweep above.
+    try {
+      const kept = readServerRegistry().filter((e) => e.dir !== aliveDir);
+      const tmp = `${reg}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, kept.map((e) => JSON.stringify(e)).join("\n") + (kept.length ? "\n" : ""), "utf8");
+      fs.renameSync(tmp, reg);
+    } catch { /* best-effort */ }
+  }
+});
+
 test("reapSpawnedChildren — SIGKILLs a leaked touch-loop child (cancelled-test finally skip)", { skip: noTmux }, async () => {
   // gap-session-liveness-teardown-unified-kill-servers: alongside the leaked servers, ONE leaked
   // touch-loop (startTouchLoop) survived 62min — a cancelled test skips the caller's
