@@ -1,7 +1,7 @@
 ---
 id: gap-step-trace-reason-captures-gate-stdout
 title: step-trace reason 捕获 gate 完整 stdout——现只留 MODULE_TYPELESS 警告行，真判词没进载体
-status: ready
+status: done
 labels:
   - gap
   - defect
