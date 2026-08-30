@@ -165,33 +165,43 @@ export function _hashOfRoots(roots, base = pluginDir) {
   return h.digest("hex").slice(0, 16);
 }
 
-// Export (not just the private name) so quay-init-loop-fixture-hash.test.mjs can assert the real
-// production hash covers the workflow roots directly.
-export function _fixtureHash() {
-  // Every installed-plugin surface the fixture content-addresses. Adding a root here means a change
-  // to any file under it yields a FRESH fixture (never a stale reuse) — and the fixture is what
-  // real-target-verify compares against, so a workflow-only change must be visible.
+// _pluginSurfaceHash(pluginRoot): content-addressed sha1 over the installed-plugin surface the
+// fixture addresses — scripts + loop + skills/init + shipped workflows + the vendored dist bundles
+// + package.json. Parameterized by pluginRoot so the PARAMETERIZED fixture (sharedFixtureVariant)
+// can hash an OLD-plugin copy (A3's legacy-marked source) the same way the base fixture hashes the
+// live plugin. Adding a root here means a change to any file under it yields a FRESH fixture (never
+// a stale reuse).
+function _pluginSurfaceHash(pluginRoot) {
   const roots = [
-    path.join(pluginDir, "scripts"),
-    path.join(pluginDir, "loop"),
-    path.join(pluginDir, "skills", "init"),
+    path.join(pluginRoot, "scripts"),
+    path.join(pluginRoot, "loop"),
+    path.join(pluginRoot, "skills", "init"),
     // Shipped workflows (plugin/workflows/* → <workspace>/.claude/workflows/ on install) AND the
     // live repo-root copy (.claude/workflows/* — the dual-copy source of the shipped bundle,
     // gap-fixture-hash-omits-workflows-dirs). A fan-in-execute.js edit changes BOTH; either alone
     // must invalidate the fixture. Without these roots a workflow-only change reused a stale
     // fixture and real-target-verify reported a false would-conflict (occurrence 2/日 2026-08-17).
-    path.join(pluginDir, "workflows"),
-    path.join(pluginDir, "..", ".claude", "workflows"),
+    // For a pluginRoot that is NOT the live plugin (an old-plugin copy in /tmp), the repo-root copy
+    // does not exist beside it — _hashOfRoots skips it, which is correct (the copy lays its OWN
+    // plugin/workflows, fully captured above).
+    path.join(pluginRoot, "workflows"),
+    path.join(pluginRoot, "..", ".claude", "workflows"),
   ];
   // The vendored dist bundles are gitignored generated artifacts the install lays verbatim into the
   // target's .quay/runtime/ — include them when present so a rebuilt bundle yields a fresh fixture.
   for (const b of ["vendor/quay/dist/quay.js", "vendor/quay-native/dist/quay-native.js"]) {
-    const p = path.join(pluginDir, b);
+    const p = path.join(pluginRoot, b);
     if (fs.existsSync(p)) roots.push(p);
   }
-  const pkg = path.join(pluginDir, "package.json");
+  const pkg = path.join(pluginRoot, "package.json");
   if (fs.existsSync(pkg)) roots.push(pkg);
-  return _hashOfRoots(roots, pluginDir);
+  return _hashOfRoots(roots, pluginRoot);
+}
+
+// Export (not just the private name) so quay-init-loop-fixture-hash.test.mjs can assert the real
+// production hash covers the workflow roots directly.
+export function _fixtureHash() {
+  return _pluginSurfaceHash(pluginDir);
 }
 
 function _fixturePath() {
@@ -236,26 +246,20 @@ function _buildSharedFixture(ws) {
   return { ws, install, wtRoot };
 }
 
-// sharedFixture() — the family's ONE real install per serial phase. Lazy, single-flight (atomic
-// mkdir lock), cached across files AND runs (content-addressed). Returns { ws, install, wtRoot }:
-// ws is the read-only fixture root; install is the captured install result (from .install.json on a
-// cache hit), used by laydownWorkspace to return install output with paths rewritten to the copy.
-export function sharedFixture() {
-  const ws = _fixturePath();
-  const readyMarker = path.join(ws, ".fixture-ready");
-  // A fixture is reusable only when BOTH the ready marker AND a valid captured install result exist
-  // (a marker without .install.json is a partial/corrupt build — rebuild, don't reuse).
-  const ready = () => fs.existsSync(readyMarker) && _readFixtureInstall(ws) !== null;
-  if (ready()) {
-    return { ws, install: _readFixtureInstall(ws), wtRoot: null };
-  }
+// _withFixtureLock(ws, ready, cached, build): the shared single-flight build protocol — a ready
+// check, an atomic mkdir lock with stale-lock stealing (a crashed builder), and build-with-finally-
+// release. `ready` is the boolean predicate for "a valid fixture exists"; `cached` builds the
+// ready-cache-hit return; `build` builds the fixture while holding the lock. Shared by
+// sharedFixture() (the single-form fixture) and sharedFixtureVariant() (the parameterized fixture).
+function _withFixtureLock(ws, ready, cached, build) {
+  if (ready()) return cached();
   const lock = `${ws}.lock`;
   let held = false;
   try { fs.mkdirSync(lock); held = true; } catch { /* another file holds the lock — wait below */ }
   if (!held) {
     const deadline = Date.now() + 180000;
     while (Date.now() < deadline) {
-      if (ready()) return { ws, install: _readFixtureInstall(ws), wtRoot: null };
+      if (ready()) return cached();
       // Steal a stale lock (a crashed builder) — the lock dir's mtime is the acquisition time.
       try {
         const st = fs.statSync(lock);
@@ -274,10 +278,24 @@ export function sharedFixture() {
     }
   }
   try {
-    return _buildSharedFixture(ws);
+    return build();
   } finally {
     fs.rmSync(lock, { recursive: true, force: true });
   }
+}
+
+// sharedFixture() — the family's ONE real install per serial phase. Lazy, single-flight (atomic
+// mkdir lock), cached across files AND runs (content-addressed). Returns { ws, install, wtRoot }:
+// ws is the read-only fixture root; install is the captured install result (from .install.json on a
+// cache hit), used by laydownWorkspace to return install output with paths rewritten to the copy.
+export function sharedFixture() {
+  const ws = _fixturePath();
+  const readyMarker = path.join(ws, ".fixture-ready");
+  // A fixture is reusable only when BOTH the ready marker AND a valid captured install result exist
+  // (a marker without .install.json is a partial/corrupt build — rebuild, don't reuse).
+  const ready = () => fs.existsSync(readyMarker) && _readFixtureInstall(ws) !== null;
+  const cached = () => ({ ws, install: _readFixtureInstall(ws), wtRoot: null });
+  return _withFixtureLock(ws, ready, cached, () => _buildSharedFixture(ws));
 }
 
 // laydownTemplate() — the read-only template THIS file's tests copy from. Now served by the SHARED
@@ -323,6 +341,134 @@ export function laydownWorkspace(prefix = "laydown-") {
         line.startsWith("  worktree_root:") ? `  worktree_root: ${freshWt}` : line)
       .join("\n");
     fs.writeFileSync(cfg, rewritten);
+  }
+  const install = {
+    status: t.install.status,
+    stdout: t.install.stdout.split(t.ws).join(ws),
+    stderr: t.install.stderr.split(t.ws).join(ws),
+  };
+  return { ws, install };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Parameterized shared fixture (gap-upgrade-channel-install-cache)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// The single-form sharedFixture installs ONE fixed workspace shape (STANDARD_INIT_ARGS → a Node
+// empty ws). The upgrade/config-preservation tests need a DIFFERENT install per test, and each has
+// a cacheable baseline/old-install half + a real-install upgrade half (the upgrade half stays real —
+// it IS the assertion object):
+//   A3      — install FROM an old-plugin copy (legacy tick docs laid); key = the old source content.
+//   AC6/AC1 — install ONTO a pre-existing evolved consumer .quay/config.yml, NO --worktree-root
+//             (config-preserving upgrade keeps the consumer's recorded loop.worktree_root).
+//   AC2     — same pre-config but an explicit testCommand + a fresh worktree root.
+// The variant key folds in the parameterized plugin surface + the pre-install files + the init args,
+// so each parameterization is a DISTINCT content-addressed fixture, reusable across rounds for its
+// baseline/old-install half.
+
+function _variantFixtureHash({ pluginRoot, preFiles, repoRoot, project, tmux, testCommand, worktreeRoot }) {
+  const h = createHash("sha1");
+  h.update(_pluginSurfaceHash(pluginRoot));
+  h.update(" ");
+  // The worktree-root MODE is part of the key (null = keep the consumer's recorded root vs a fresh
+  // root), but a fresh root's actual value is not (it is a per-build mkdtemp — nondeterministic).
+  h.update(JSON.stringify({
+    repoRoot: repoRoot ?? null,
+    project: project ?? "proj",
+    tmux: tmux ?? null,
+    testCommand: testCommand ?? null,
+    worktreeRoot: worktreeRoot === null ? null : (typeof worktreeRoot === "string" ? worktreeRoot : "UNIQUE"),
+  }));
+  for (const f of preFiles) {
+    h.update(" ");
+    h.update(f.rel);
+    h.update(" ");
+    h.update(String(f.content));
+  }
+  return h.digest("hex").slice(0, 16);
+}
+
+function _variantFixturePath(spec) {
+  return path.join(FIXTURE_BASE, `${FIXTURE_PREFIX}${_variantFixtureHash(spec)}`);
+}
+
+// _buildVariantFixture(ws, spec): write the pre-install files, run ONE real parameterized install
+// into a clean fixture dir, then make it read-only and record the ready marker + captured install
+// result — the same protocol as _buildSharedFixture, but parameterized. FAILS LOUD on a non-zero
+// install (a real product defect, not something to paper over).
+function _buildVariantFixture(ws, spec) {
+  const { pluginRoot, preFiles, repoRoot, project, tmux, testCommand, worktreeRoot } = spec;
+  if (fs.existsSync(ws)) fs.rmSync(ws, { recursive: true, force: true });
+  fs.mkdirSync(ws, { recursive: true });
+  for (const f of preFiles) {
+    const p = path.join(ws, f.rel);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, f.content);
+  }
+  const session = tmux ?? "proj-0:0.0";
+  const args = ["--loop", "--root", ws, "--project", project, "--tmux-session", session];
+  if (repoRoot !== undefined) args.push("--repo-root", repoRoot);
+  if (worktreeRoot !== null) args.push("--worktree-root", worktreeRoot ?? diskWorktreeRoot());
+  if (testCommand) args.push("--test-command", testCommand);
+  const install = spawnSync("bash", [path.join(pluginRoot, "scripts", "quay-init.sh"), ...args], {
+    cwd: ws,
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
+  });
+  if (install.status !== 0) {
+    fs.rmSync(ws, { recursive: true, force: true });
+    throw new Error(`parameterized install fixture build failed:\n${install.stderr}`);
+  }
+  fs.writeFileSync(path.join(ws, ".install.json"),
+    JSON.stringify({ status: install.status, stdout: install.stdout, stderr: install.stderr }));
+  _makeReadOnly(ws);
+  fs.writeFileSync(path.join(ws, ".fixture-ready"), `${pluginRoot}\n`);
+  return { ws, install, wtRoot: null };
+}
+
+// sharedFixtureVariant(spec) — the parameterized fixture's ONE real install, same lazy/single-flight
+// content-addressed protocol as sharedFixture. Returns { ws, install, wtRoot }: ws is the read-only
+// fixture root; install is the captured install result (from .install.json on a cache hit).
+export function sharedFixtureVariant(spec = {}) {
+  const resolved = {
+    pluginRoot: spec.pluginRoot ?? pluginDir,
+    preFiles: spec.preFiles ?? [],
+    repoRoot: spec.repoRoot,
+    project: spec.project ?? "proj",
+    tmux: spec.tmux,
+    testCommand: spec.testCommand,
+    worktreeRoot: spec.worktreeRoot,
+  };
+  const ws = _variantFixturePath(resolved);
+  const readyMarker = path.join(ws, ".fixture-ready");
+  const ready = () => fs.existsSync(readyMarker) && _readFixtureInstall(ws) !== null;
+  const cached = () => ({ ws, install: _readFixtureInstall(ws), wtRoot: null });
+  return _withFixtureLock(ws, ready, cached, () => _buildVariantFixture(ws, resolved));
+}
+
+// laydownVariantWorkspace(spec, opts) — a fresh WRITABLE copy of the parameterized fixture, like
+// laydownWorkspace but for a variant. `rewriteWorktreeRoot` (default true) rewrites the copy's
+// loop.worktree_root to a fresh disk root; the config-preserving upgrade (AC6/AC1) passes false so
+// the consumer's recorded worktree_root is preserved byte-for-byte (the "entire loop section
+// unchanged" assertion). Returns { ws, install } with the template's captured install paths
+// rewritten to the copy.
+export function laydownVariantWorkspace(spec = {}, { prefix = "laydown-", rewriteWorktreeRoot = true } = {}) {
+  const t = sharedFixtureVariant(spec);
+  const ws = makeTmp(prefix);
+  const cp = spawnSync("cp", ["-a", `${t.ws}/.`, ws], { encoding: "utf8" });
+  if (cp.status !== 0) {
+    cleanup(ws);
+    throw new Error(`laydown variant cp -a failed:\n${cp.stderr}`);
+  }
+  spawnSync("chmod", ["-R", "u+w", ws]);
+  const cfg = path.join(ws, ".quay", "config.yml");
+  if (fs.existsSync(cfg)) {
+    let text = fs.readFileSync(cfg, "utf8").split(t.ws).join(ws);
+    if (rewriteWorktreeRoot) {
+      const freshWt = diskWorktreeRoot();
+      text = text.split("\n").map((line) =>
+        line.startsWith("  worktree_root:") ? `  worktree_root: ${freshWt}` : line).join("\n");
+    }
+    fs.writeFileSync(cfg, text);
   }
   const install = {
     status: t.install.status,
