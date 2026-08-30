@@ -28,8 +28,19 @@
 # from this case, so serial/lowconc silently folded into the concurrency-N body and the isolation
 # guarantee was cancelled WITHOUT going red) must be a hard failure, not a silent pass.
 group_of() {
-  local f="$1" g
-  g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
+  local f="$1" g=""
+  # gap-suite-metadata-query-subprocess-spawn: prefer the in-process cache populated by
+  # build_deduped_files (scripts/test.sh) — the metadata modes + full-suite path already warm it, so
+  # this is a bash associative-array lookup instead of a per-file `grep|awk` spawn. The guard on
+  # _RG_CACHE_READY keeps a STANDALONE sourcing (no cache — suite-bucket-load-sensitive-isolation
+  # AC5 sources this file alone) on the grep fallback; the `-z` re-check also covers a cache miss
+  # (a file outside the canonical glob, e.g. the --buckets path).
+  if [ -n "${_RG_CACHE_READY:-}" ]; then
+    g="${_RG_GROUP["$f"]:-}"
+  fi
+  if [ -z "${g:-}" ]; then
+    g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
+  fi
   case "${g:-}" in
     product|engine|governance|serial|lowconc) echo "$g" ;;
     "")
@@ -52,9 +63,15 @@ group_of() {
 # `*)` branch is defense-in-depth (it runs inside a command substitution, so its exit cannot abort
 # the parent); this check runs directly in the dispatch path and exits the script.
 check_group_declarations() {
+  # gap-suite-metadata-query-subprocess-spawn: warm the in-process cache ONCE in the PARENT shell
+  # (build_deduped_files runs the single node pass that realpath-dedups AND validates every file's
+  # @test-group, fail-closing on an unknown group). The loop below then reads the cached group per
+  # file instead of re-spawning `grep|awk` — and because the helper already fail-closed, the `*)`
+  # branch here is defense-in-depth, mirroring group_of's own.
+  build_deduped_files > /dev/null
   local f g
   while IFS= read -r f; do
-    g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
+    g="${_RG_GROUP["$f"]:-}"
     case "${g:-}" in
       ""|product|engine|governance|serial|lowconc) ;;
       *)
@@ -117,9 +134,14 @@ is_default_set() {
 # select_files <groups-csv> — echo the files to run for the given groups (respecting the
 # default-set self-skip passthrough so governance reports `skipped` rather than absent, AC4/AC6).
 select_files() {
+  # gap-suite-metadata-query-subprocess-spawn: warm the in-process cache in the PARENT shell (a
+  # no-op when already warm) so the loop reads the cached group directly instead of forking a
+  # `$(group_of ...)` command substitution per file (~550 forks/call). check_group_declarations
+  # already warms it on every real path; this defensive warm keeps a direct standalone call correct.
+  build_deduped_files > /dev/null
   local groups="$1" f g
   while IFS= read -r f; do
-    g="$(group_of "$f")"
+    g="${_RG_GROUP["$f"]:-}"
     if in_group "$g" "$groups"; then
       printf '%s\n' "$f"
     elif [ "$g" = "governance" ] && is_default_set "$groups"; then
@@ -133,10 +155,14 @@ select_files() {
 # groups (the load-sensitive families routed to their own phases), so the default-set partition
 # product+engine+governance no longer equals total — serial and lowconc are the 4th and 5th parts.
 list_groups() {
+  # gap-suite-metadata-query-subprocess-spawn: warm the in-process cache in the PARENT shell (no-op
+  # when already warm) so the loop reads the cached group directly, not via a per-file
+  # `$(group_of ...)` fork. check_group_declarations already warms it on every real path.
+  build_deduped_files > /dev/null
   declare -A counts=([product]=0 [engine]=0 [governance]=0 [serial]=0 [lowconc]=0)
   local f g
   while IFS= read -r f; do
-    g="$(group_of "$f")"
+    g="${_RG_GROUP["$f"]:-}"
     counts[$g]=$(( ${counts[$g]:-0} + 1 ))
   done < <(build_deduped_files)
   printf 'product:    %d\n' "${counts[product]:-0}"
