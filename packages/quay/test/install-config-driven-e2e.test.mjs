@@ -69,6 +69,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createStore } from "../../quay-native/src/store.ts";
+import { laydownWorkspace } from "../../../plugin/test/helpers/quay-init-install-fixture.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -340,10 +341,9 @@ test("A1 — two workspaces with genuinely different derived test commands lay d
 // A2 — byte-identical to product artifacts + idempotent re-install
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 test("A2 — laid-down files are byte-identical to the product artifacts, and a second install changes ZERO product files", () => {
-  const ws = makeWorkspace();
+  const { ws, install: r1 } = laydownWorkspace();
   fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2));
 
-  const r1 = runInit(ws);
   assert.equal(r1.status, 0, `install failed:\n${r1.stderr}`);
 
   // Artifact identity: every laid-down product file equals the plugin source.
@@ -351,7 +351,7 @@ test("A2 — laid-down files are byte-identical to the product artifacts, and a 
   assert.deepEqual(diffs, [],
     `A2: every laid-down file must be byte-identical to the product artifact; differing=${JSON.stringify(diffs)}`);
 
-  // Idempotency: a second install changes ZERO product files.
+  // Idempotency: ONE real install on the fixture copy changes ZERO product files.
   const before = snapshotProductFiles(ws);
   const r2 = runInit(ws);
   assert.equal(r2.status, 0, `second install failed:\n${r2.stderr}`);

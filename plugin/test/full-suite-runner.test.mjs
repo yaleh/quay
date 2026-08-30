@@ -586,6 +586,50 @@ test("AC1 green contrast — full-suite-runner.ts --buckets records a GREEN buck
   }
 });
 
+// ── gap-verification-round-record-runid: AC1/AC3 (runId on the round record) ─────────────────────────
+// The round record must carry the suite's canonical runId (the SAME value the state write carries and
+// the SAME key the load sampler uses for suite-load-<runId>.jsonl) so /tests can key the load curve
+// off record.runId (its OWN load key rides the ledger row). Red AND green rows both carry it.
+
+test("AC1/AC3 — a GREEN round record carries runId = the state's runId (gap-verification-round-record-runid)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-runid-green-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const s = readState(root);
+    assert.ok(s && s.runId, "the state write carries a runId generation token");
+    const vr = lastRoundRecord(root);
+    assert.ok(vr, "a verification-round row was appended");
+    assert.ok(typeof vr.runId === "string" && vr.runId.length > 0, "the green round record carries a runId");
+    assert.equal(vr.runId, s.runId, "record.runId === the state write's runId (one canonical value)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — a RED round record carries runId = the state's runId (gap-verification-round-record-runid)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-runid-red-"));
+  const red = 'echo "# tests 5"\necho "# pass 3"\necho "# fail 2"\necho "# cancelled 0"\nexit 1';
+  const { f, dir } = fakeSuite(red);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, `runner exits 1 on red, got ${code}`);
+    const s = readState(root);
+    assert.ok(s && s.runId, "the state write carries a runId generation token");
+    const vr = lastRoundRecord(root);
+    assert.ok(vr, "a verification-round row was appended");
+    assert.ok(typeof vr.runId === "string" && vr.runId.length > 0, "the red round record carries a runId");
+    assert.equal(vr.runId, s.runId, "record.runId === the state write's runId (one canonical value)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC2 backward-compat — a suite with NO __OVERHEAD__ emission records NO *_phase_ms fields", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-none-"));
   const { f, dir } = fakeSuite(GREEN_SUITE);
@@ -1156,6 +1200,10 @@ test("AC4 — a runner CRASH mid-round writes the phase records via the trap (st
     assert.ok(rec && rec.phases && rec.phases.length >= 1, "crash path appends a phase-carrying round row");
     assert.equal(rec.state, "red");
     assert.equal(rec.reason, "crashed");
+    // gap-verification-round-record-runid — the crash-trap row is ALSO self-describing (carries the
+    // same canonical runId the state write carries), same as the normal red/green path.
+    assert.ok(typeof rec.runId === "string" && rec.runId.length > 0, "the crash-trap round row carries a runId");
+    assert.equal(rec.runId, s.runId, "crash-trap record.runId === the state write's runId");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });

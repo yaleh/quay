@@ -340,7 +340,7 @@ fi
 # suite ran on — which IS the commit to be ff'd). The gate asks "本任务的 suite 是否已终结、且 suite_head
 # == 待 ff 的 HEAD" — a per-task DIRECT quantity, no global lock needed.
 #
-# `--suite-state` (full-suite-state.json) 现在是 capture 缺失/不可读时的【回退权威源】
+# `--suite-state` (full-suite-state.json) 现在是 capture 缺失/失效时的【回退权威源】
 # （gap-write-suite-capture-non-blocking AC2）：mirrorMechanicalFanInSuiteState 在 suite 绿后写
 # state=green + commit=suite_head + taskId（与 capture 同源，同一 suiteHead）⇒ capture 写失败
 # （观测写 fail-open）时 ff 闸仍能从权威源判 suite 真实绿，⛔ 不误拒一个真实绿 suite。⛔ 不伪造
