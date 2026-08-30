@@ -1,7 +1,7 @@
 ---
 id: gap-ff-propagate-structurally-broken-filing-must-target-develop
 title: ff-propagate 结构不可用——立案落 main/manager-doc 靠 ff 到 develop 永远分叉；立案必须直接落 develop
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -46,3 +46,8 @@ extra: {}
   3. **③ 本任务落地**：① 落 develop 后，把本任务从 needs-human 重新 promote 到 ready → fan-in `1e7fb9be4`（写侧落 develop，propagateDocBranchToDevelop 退役）。
   4. **④ 收尾**：AC1（新立案直接落 develop）+ AC3（dispatch 读 develop 与立案落 develop 两端一致）闭环。
   - ⛔ **不得跳过 ① 直接 fan-in**——晋升路径仍读盘上时写侧落地 = 重复晋升。
+## Needs-Human
+
+**执行 2026-08-30T13:35:39.134Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
