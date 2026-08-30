@@ -141,9 +141,7 @@
 {"file":"plugin/test/roadmap-superseded-check.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/ruling-required-wiring.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/run-identity.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/runner-grouping-fixture-runs.test.mjs","judgment":"S","mechanism":"S","signal":["--group","runner-grouping","concurrency"]}
 {"file":"plugin/test/runner-grouping-flags-only.test.mjs","judgment":"S","mechanism":"S","signal":["--list-files","--group","--test-concurrency","--experimental-test-coverage","runner-grouping","concurrency"]}
-{"file":"plugin/test/runner-grouping-governance.test.mjs","judgment":"S","mechanism":"S","signal":["--list-files","--list-groups","--group","runner-grouping","concurrency"]}
 {"file":"plugin/test/runner-grouping-list-groups.test.mjs","judgment":"S","mechanism":"S","signal":["--list-files","--list-groups","--group","runner-grouping","concurrency"]}
 {"file":"plugin/test/runner-grouping-serial-anti-stomp.test.mjs","judgment":"S","mechanism":"S","signal":["--list-files","--list-groups","--group","--test-concurrency","runner-grouping","lane","concurrency"]}
 {"file":"plugin/test/runtime-landing.test.mjs","judgment":"S","mechanism":"S","signal":["runner-grouping","concurrency"]}
