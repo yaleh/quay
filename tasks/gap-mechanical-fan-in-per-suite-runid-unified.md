@@ -1,7 +1,7 @@
 ---
 id: gap-mechanical-fan-in-per-suite-runid-unified
 title: 机械 fan-in 的 per-suite runId 统一贯穿——runner 接受 --run-id，state/load/记录三者同键
-status: ready
+status: done
 labels:
   - gap
 parent: null
