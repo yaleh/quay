@@ -61,6 +61,7 @@ governance 第三套退役、142 文件改标真实相、bucket 单一选择落�
 
 - plugin/scripts/suite-bucket-select.ts（10 UNRESOLVED 真值核对 + 可能的镜像折叠）
 - plugin/scripts/suite-bucket-attribution.ts（10 UNRESOLVED 真值核对）
+- .quay/suite-bucket-reattribution.jsonl（数据资产：清 2 条已删测试文件 runner-grouping-governance/runner-grouping-fixture-runs 的僵尸 reattr 记录）
 - plugin/scripts/full-suite-runner.ts（governance 退役 + QUAY_TEST_GROUPS 语义收窄）
 - plugin/test/*.test.mjs（142 文件相标改标 + 39 守卫删除——有界顶层 glob，非递归；实现方按此 glob 内文件落地）
 - plugin/test/runner-fixtures/gov.test.mjs（fixture）
