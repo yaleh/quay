@@ -46,6 +46,7 @@ web 显示（/tasks、/board、/live done 过滤）的 task status 读面改读 
 - packages/quay/src/serve-task.ts（任务列表读面改 develop ref）
 - packages/quay/src/serve-board.ts（board 读面改 develop ref）
 - packages/quay/src/observation.ts（readTaskStatusOnDisk 显示路径改 develop ref，或新增 develop-ref 版）
+- packages/quay/src/serve-handlers.ts（/tasks 路由把 cfg 传给 handleTaskList）
 - packages/quay/test/serve-task.test.mjs（AC1-AC3 单测）
 - packages/quay/test/serve-board.test.mjs（AC1-AC3 单测）
 - packages/quay/test/observation.test.mjs（live done 过滤 AC1 单测）
