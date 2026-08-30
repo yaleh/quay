@@ -22,7 +22,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir, laydownTemplate, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
+import { makeTmp, cleanup, diskWorktreeRoot, runInit, pluginDir, laydownTemplate, laydownWorkspace } from "./helpers/quay-init-install-fixture.mjs";
+import { extractRefs, declaredSet } from "./quay-init-loop-helpers.mjs";
 
 // AC1/AC2 — session-liveness.sh is laid down VERBATIM (cp, not render_substitutions); the
 // per-project session is CONFIG, generated into orchestration/session-liveness.env.

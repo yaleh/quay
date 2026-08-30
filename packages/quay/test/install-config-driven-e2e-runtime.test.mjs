@@ -26,6 +26,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { laydownWorkspace } from "../../../plugin/test/helpers/quay-init-install-fixture.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -175,12 +176,11 @@ function antiPassThroughCheck(ws1, ws2) {
 // directory name, so the GO half is the one that can expose the collision (task AC11, the reinstall
 // gate's A5 was missing `go build`).
 test("A5 — a Node target still builds (npm test) after quay-init lands the runtime", () => {
-  const ws = makeWorkspace();
+  const { ws, install: r } = laydownWorkspace();
   fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "node --test test/smoke.test.mjs" } }, null, 2));
   fs.mkdirSync(path.join(ws, "test"), { recursive: true });
   fs.writeFileSync(path.join(ws, "test", "smoke.test.mjs"),
     'import { test } from "node:test";\nimport assert from "node:assert";\ntest("smoke", () => assert.equal(1, 1));\n');
-  const r = runInit(ws);
   assert.equal(r.status, 0, `install must succeed:\n${r.stderr}`);
   // AC8 Node half: the target's own build must still pass after the runtime lands.
   const npmTest = spawnSync("npm", ["test"], { cwd: ws, encoding: "utf8" });
@@ -193,11 +193,10 @@ test("A5 — a Go target still builds (go build ./...) after quay-init lands the
   // present locally (proven green here) but not on the CI image — a missing tool must SKIP, not fail.
   const goProbe = spawnSync("go", ["version"], { encoding: "utf8" });
   if (goProbe.status !== 0) return t.skip(`go toolchain not available on this image (${goProbe.error?.message ?? goProbe.stderr})`);
-  const ws = makeWorkspace();
+  const { ws, install: r } = laydownWorkspace();
   fs.writeFileSync(path.join(ws, "go.mod"), "module example.com/proj\n\ngo 1.22\n");
   // A real main package so `go build ./...` compiles something (no network: no external requires).
   fs.writeFileSync(path.join(ws, "main.go"), 'package main\n\nfunc main() {}\n');
-  const r = runInit(ws);
   assert.equal(r.status, 0, `install must succeed:\n${r.stderr}`);
   // AC8/AC11 Go half: the target's Go build must still pass after the runtime lands. If the runtime
   // still sat in `vendor/`, Go's module resolution could treat that reserved directory specially and
@@ -214,9 +213,8 @@ test("A5 — a Go target still builds (go build ./...) after quay-init lands the
 // npm node_modules/, cargo/rust target/, make/cmake build/, bundler dist/). The check is by PATH
 // LITERAL segment, extensible — the list below is the current exclusion set, not an exhaustive one.
 test("AC9 — the laid-down runtime path contains no reserved directory segment (vendor/node_modules/target/build/dist)", () => {
-  const ws = makeWorkspace();
+  const { ws, install: r } = laydownWorkspace();
   fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "node --test" } }, null, 2));
-  const r = runInit(ws);
   assert.equal(r.status, 0, `install must succeed:\n${r.stderr}`);
   const RESERVED = ["vendor", "node_modules", "target", "build", "dist"];
   // f9414dd3 moved the landing layout to .quay/runtime/bin/ (keeps the native bundle's
@@ -304,9 +302,8 @@ test("AC6 — anti-pass-through: configs genuinely differ + laid-down count > 0;
 // one letter; a green "AC6" says nothing about this "A6".
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 test("A6 — a landed quay-init --loop writes a loop.worktree_root that is NOT on tmpfs (a tmpfs root is rejected)", () => {
-  const ws = makeWorkspace();
+  const { ws, install: r } = laydownWorkspace();
   fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2));
-  const r = runInit(ws);
   assert.equal(r.status, 0, `install must succeed (precondition):\n${r.stderr}`);
 
   // The landed config must carry loop.worktree_root, and that root's filesystem type must NOT be

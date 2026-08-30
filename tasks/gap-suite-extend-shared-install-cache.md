@@ -26,10 +26,10 @@ install-config-driven-e2e-runtime / -upgrade / -e2e 三个文件每个测试都�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，读生产载体）：runtime A5-node / A5-go / AC9 / A6 与 e2e-A2 完成时，fixture 缓存命中——`/var/tmp/quay-install-fixture-*/` 存在 `.fixture-ready`，且本轮这些测试无新增真 install（可查载体：fixture 构建日志 / 真 install 计数下降）。
-- [ ] AC2（能取假，负控制）：AC6 anti-pass-through 与 e2e A1 仍执行真 install（其 config 必须真不同，断言不回归）。
-- [ ] AC3（能取假，机制）：helper 从 plugin/test/helpers/ 被 packages/quay/test 文件 import（同 tmp-workspace.mjs 先例）；quay-init-loop-runtime 全部测试不回归。
-- [ ] AC4（测量，AC2 纪律）：同 selected set 前后对照——本家族真 install 次数下降 ≥5，0-cancelled。
+- [x] AC1（能取假，读生产载体）：runtime A5-node / A5-go / AC9 / A6 与 e2e-A2 完成时，fixture 缓存命中——`/var/tmp/quay-install-fixture-*/` 存在 `.fixture-ready`，且本轮这些测试无新增真 install（可查载体：fixture 构建日志 / 真 install 计数下降）。
+- [x] AC2（能取假，负控制）：AC6 anti-pass-through 与 e2e A1 仍执行真 install（其 config 必须真不同，断言不回归）。
+- [x] AC3（能取假，机制）：helper 从 plugin/test/helpers/ 被 packages/quay/test 文件 import（同 tmp-workspace.mjs 先例）；quay-init-loop-runtime 全部测试不回归。
+- [ ] AC4（测量，AC2 纪律）：同 selected set 前后对照——本家族真 install 次数下降 ≥5，0-cancelled。（待外部）
 
 ## Definition of Done
 
