@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-record-runid
 title: appendVerificationRound 记录加 runId 字段——轮记录自描述，可自解析本轮遥测
-status: ready
+status: done
 labels:
   - gap
 parent: null
