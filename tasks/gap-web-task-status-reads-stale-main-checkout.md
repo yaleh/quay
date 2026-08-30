@@ -2,7 +2,7 @@
 id: gap-web-task-status-reads-stale-main-checkout
 title: web 显示（/tasks、/board、/live done 过滤）读主检出 disk task status（落后 develop）→
   落地任务显示失真；读源应改 develop git ref
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -32,10 +32,10 @@ web 显示的任务 status 读面从「主检出 disk」改「develop git ref」
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：构造「主检出 status=ready、develop status=done」的 case → /tasks 与 /live 按 develop 判 done（落地任务不再显示成 ready/在飞）；（⛔ 仍按主检出 ready ⇒ 假）。
-- [ ] AC2（能取假，回归）：主检出与 develop 同 status 时显示不变（fresh 任务不受读源改影响）。
-- [ ] AC3（能取假）：改动代码无任何 `git checkout develop` / `git worktree add` 指向 develop（grep 变更集确认）；主检出分支保持 main/manager-doc。
-- [ ] AC4（能取假）：1500+ 任务场景下 /tasks 渲染延迟可接受（批量读/缓存生效，不逐任务 git show）。
+- [x] AC1（能取假）：构造「主检出 status=ready、develop status=done」的 case → /tasks 与 /live 按 develop 判 done（落地任务不再显示成 ready/在飞）；（⛔ 仍按主检出 ready ⇒ 假）。
+- [x] AC2（能取假，回归）：主检出与 develop 同 status 时显示不变（fresh 任务不受读源改影响）。
+- [x] AC3（能取假）：改动代码无任何 `git checkout develop` / `git worktree add` 指向 develop（grep 变更集确认）；主检出分支保持 main/manager-doc。
+- [x] AC4（能取假）：1500+ 任务场景下 /tasks 渲染延迟可接受（批量读/缓存生效，不逐任务 git show）。
 
 ## Definition of Done
 
@@ -46,6 +46,7 @@ web 显示（/tasks、/board、/live done 过滤）的 task status 读面改读 
 - packages/quay/src/serve-task.ts（任务列表读面改 develop ref）
 - packages/quay/src/serve-board.ts（board 读面改 develop ref）
 - packages/quay/src/observation.ts（readTaskStatusOnDisk 显示路径改 develop ref，或新增 develop-ref 版）
+- packages/quay/src/serve-handlers.ts（/tasks 路由把 cfg 传给 handleTaskList）
 - packages/quay/test/serve-task.test.mjs（AC1-AC3 单测）
 - packages/quay/test/serve-board.test.mjs（AC1-AC3 单测）
 - packages/quay/test/observation.test.mjs（live done 过滤 AC1 单测）
