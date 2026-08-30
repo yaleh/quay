@@ -1,7 +1,7 @@
 ---
 id: gap-writestate-atomicity-liveness-assertion-flaky
 title: writestate-atomicity-split liveness 断言 flaky——seen.has("B")&&seen.has("C") 负载下漏采样，挡全量 fan-in
-status: todo
+status: ready
 labels:
   - gap
   - defect
