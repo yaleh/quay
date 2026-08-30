@@ -1519,17 +1519,50 @@ elif [ "${1:-}" = "--buckets" ]; then
   bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
   mark_nested
   set +e
-  # Per-file attribution + LPT-preserving run (gap-fix-scope-perfile-buckets-parser +
-  # gap-m-bucket-long-tail-lpt-scheduling): hand the LPT-ordered file list to suite-lpt-runner.mjs,
-  # which calls node:test run({files}) — the ONLY path that preserves argv order (the node --test
-  # CLI re-sorts positional globs alphabetically). The runner composes BOTH reporters via
-  # stream.compose: spec → stdout (判绿 markers) and measure-suite-reporter → stderr
-  # (__PERFILE__ duration_ms=<d> <path> passed=<bool> — the fix-scope gate's per-file attribution
-  # AND the LPT ordering's own input carrier; if this breaks the per-file duration data goes dark
-  # and LPT has no input ⇒ self-defeating). Concurrency rides in execArgv (--test-concurrency=N)
-  # so the reporter's readConcurrency() sees the SAME value (single source, no drift).
-  node --test-concurrency="$(bucket_test_concurrency "${rest_args[@]}")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${rest_args[@]}" "${files[@]}"
-  bucket_code=$?
+  # ── bucket load-sensitive isolation (gap-scd-load-sensitive-bucket-isolation) ──
+  # The full-suite default path routes serial/lowconc files to their OWN phases (serial at
+  # $SERIAL_CONCURRENCY, lowconc at $LOWCONC_CONCURRENCY) BEFORE the main concurrency-N body; the
+  # bucket path previously handed the WHOLE selected list to suite-lpt-runner.mjs at
+  # bucket_test_concurrency, so load-sensitive files (the SCD session-observation family) ran under
+  # the full concurrent load and flaked/hung. Split the bucket list by @test-group and run the SAME
+  # three-phase order (serial → lowconc → main) with the SAME per-phase concurrency knobs, keeping
+  # the LPT-reordered main body order-preserving via suite-lpt-runner.mjs run({files}).
+  bucket_serial_files=()
+  bucket_lowconc_files=()
+  bucket_main_files=()
+  for bf in "${files[@]}"; do
+    case "$(group_of "$bf")" in
+      serial) bucket_serial_files+=("$bf") ;;
+      lowconc) bucket_lowconc_files+=("$bf") ;;
+      *) bucket_main_files+=("$bf") ;;
+    esac
+  done
+  bucket_code=0
+  if [ "${#bucket_serial_files[@]}" -gt 0 ]; then
+    echo "selected ${#bucket_serial_files[@]} files (groups=serial)"
+    node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${bucket_serial_files[@]}"
+    _bscode=$?
+    [ "$_bscode" -eq 0 ] || bucket_code="$_bscode"
+  fi
+  if [ "${#bucket_lowconc_files[@]}" -gt 0 ]; then
+    echo "selected ${#bucket_lowconc_files[@]} files (groups=lowconc)"
+    node --test --test-concurrency="$LOWCONC_CONCURRENCY" $(suite_reporter_flags) "${bucket_lowconc_files[@]}"
+    _blcode=$?
+    [ "$_blcode" -eq 0 ] || bucket_code="$_blcode"
+  fi
+  # MAIN phase — the remaining files at bucket_test_concurrency, LPT-ordered, order-preserving via
+  # suite-lpt-runner.mjs run({files}) (gap-m-bucket-long-tail-lpt-scheduling + per-file attribution
+  # gap-fix-scope-perfile-buckets-parser). The runner composes BOTH reporters via stream.compose:
+  # spec → stdout (判绿 markers) and measure-suite-reporter → stderr (__PERFILE__ duration_ms=<d>
+  # <path> passed=<bool> — the fix-scope gate's per-file attribution AND the LPT ordering's own
+  # input carrier; if this breaks the per-file duration data goes dark and LPT has no input ⇒
+  # self-defeating). Concurrency rides in execArgv (--test-concurrency=N) so the reporter's
+  # readConcurrency() sees the SAME value (single source, no drift).
+  if [ "${#bucket_main_files[@]}" -gt 0 ]; then
+    node --test-concurrency="$(bucket_test_concurrency "${rest_args[@]}")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${rest_args[@]}" "${bucket_main_files[@]}"
+    _bmcode=$?
+    [ "$_bmcode" -eq 0 ] || bucket_code="$_bmcode"
+  fi
   # Same suite-AFTER tail as the full default path: session-liveness-sweep-kill is the best-effort
   # TRUE-CATCH-ALL registry kill (exit 0 always); the --check assertion is the leak verdict and
   # merges into the exit code so a bucket-round leak still reports `tmux-leak-scan: FAIL`.
