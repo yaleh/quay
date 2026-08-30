@@ -25,7 +25,7 @@ function oldGroupOf(file) {
     { encoding: "utf8" },
   );
   const g = r.stdout.trim();
-  if (["product", "engine", "governance", "serial", "lowconc"].includes(g)) return g;
+  if (["product", "engine", "serial", "lowconc"].includes(g)) return g;
   if (g === "") return "engine";
   return `UNKNOWN:${g}`;
 }
@@ -41,7 +41,7 @@ function makeFixture() {
   w("a-product.test.mjs", "// @test-group product\n");
   w("b-engine.test.mjs", "// @test-group engine\n");
   w("c-undeclared.test.mjs", "// no declaration\n");
-  w("d-governance.test.mjs", "// @test-group governance\n");
+  w("d-serial.test.mjs", "// @test-group serial\n");
   // Binary file: @test-group product declared AFTER a NUL byte in the first 32 KiB — GNU grep treats
   // it as binary and prints nothing to stdout, so old group_of defaulted it to engine. The helper
   // must stay byte-identical (classify engine, never its unreachable decl).
@@ -59,7 +59,7 @@ test("helper output matches the old grep|awk group_of byte-for-byte (incl. dedup
     join(dir, "a-product.test.mjs"),
     join(dir, "b-engine.test.mjs"),
     join(dir, "c-undeclared.test.mjs"),
-    join(dir, "d-governance.test.mjs"),
+    join(dir, "d-serial.test.mjs"),
     join(dir, "e-binary.test.mjs"),
     join(dir, "f-link.test.mjs"),
   ];

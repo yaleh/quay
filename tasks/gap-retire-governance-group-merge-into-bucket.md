@@ -69,6 +69,7 @@ governance 第三套退役、142 文件改标真实相、bucket 单一选择落�
 - plugin/test/suite-bucket-attribution.test.mjs（bucket 归属测试）
 - experiments/quay-perpetual-stream/test/*.test.mjs（13 个 exp5 计量/图表类测试——governance→engine，属 142 改标）
 - plugin/scripts/runner-grouping.ts（governance 组语义移除，FAIL-CLOSED）
+- plugin/scripts/runner-grouping-metadata.mjs（RECOGNIZED 集移除 governance，与 group_of 字节兼容契约一致）
 - plugin/scripts/test-group-downgrade-check.ts（允许降级集移除 governance）
 - plugin/scripts/test-framework-policy-check.ts（@test-group 策略——governance 移除）
 - plugin/scripts/runner-static-gate.ts（governance 移除）

@@ -12,13 +12,16 @@
 //     source in scripts/test.sh AND the output order is byte-identical by construction (no glob
 //     re-implementation in node to drift).
 //   - stdout: one `realpath<TAB>group` line per deduped file, in argv order, first-wins dedup.
-//   - group = the file's declared `// @test-group <name>` (product|engine|governance|serial|lowconc);
+//   - group = the file's declared `// @test-group <name>` (product|engine|serial|lowconc);
 //     an UNDECLARED file defaults to engine (AC7); an UNKNOWN name is FAIL-CLOSED (exit 3), never
 //     silently degraded to engine (the r10 dropped-group regression must stay a hard failure).
+//     `governance` is RETIRED (gap-retire-governance-group-merge-into-bucket) — no longer a
+//     recognized group; it must stay byte-identical with runner-grouping.ts group_of, which
+//     removed it from its case arm (a file still declaring it now hits the FAIL-CLOSED branch).
 
 import fs from "node:fs";
 
-const RECOGNIZED = new Set(["product", "engine", "governance", "serial", "lowconc"]);
+const RECOGNIZED = new Set(["product", "engine", "serial", "lowconc"]);
 
 // groupOf(content) — mirror of runner-grouping.ts group_of's grep|awk:
 //   grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" | awk '{print $2}'
@@ -34,7 +37,7 @@ function groupOf(content) {
 
 function failClosed(file, g) {
   process.stderr.write(
-    `scripts/test.sh: FAIL-CLOSED: '${file}' declares unknown @test-group '${g}' — a group was dropped or mis-typed (recognized: product|engine|governance|serial|lowconc); refusing to silently degrade it to engine\n`
+    `scripts/test.sh: FAIL-CLOSED: '${file}' declares unknown @test-group '${g}' — a group was dropped or mis-typed (recognized: product|engine|serial|lowconc); refusing to silently degrade it to engine\n`
   );
   process.exit(3);
 }
