@@ -2,7 +2,7 @@
 id: gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered
 title: serial + lowconc 两相未走 LPT 排序——裸 node --test 字母序，尾部等待 ≈38% 整轮
   makespan（full 4 派发点 + --buckets 2 派发点范围遗留）
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -41,3 +41,8 @@ serial/lowconc 六派发点接 LPT；AC1-AC3 全勾；全量 suite 绿；serial/
 
 - scripts/test.sh（serial/lowconc 六派发点接 lpt_reorder_files + suite-lpt-runner.mjs：1091/1093/1115/1133 full + 1543/1549 --buckets）
 - tasks/gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered.md（自身）
+## Needs-Human
+
+**执行 2026-08-30T09:46:25.303Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
