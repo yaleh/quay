@@ -63,7 +63,7 @@ import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { recordNoBlockLedger } from "./task-contract-check.ts";
-import { TASK_STATUS } from "../../packages/quay/src/abi.ts";
+import { TASK_STATUS } from "./task-status.ts";
 
 // ── Workspace-root discovery (same walk as task-contract-check) ────────────────────────────────────
 export function findWorkspaceRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {

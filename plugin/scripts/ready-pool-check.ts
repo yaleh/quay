@@ -186,7 +186,7 @@ import {
 // parallel copy of "which files does a Touches declaration intend to touch?").
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { TASK_STATUS, isTaskStatus } from "../../packages/quay/src/abi.ts";
+import { TASK_STATUS, isTaskStatus } from "./task-status.ts";
 // Reused "work has landed on master" signal (AC6: reuse, never a parallel copy) — the same
 // symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
 // buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-

@@ -43,7 +43,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { TASK_STATUS } from "../../packages/quay/src/abi.ts";
+import { TASK_STATUS } from "./task-status.ts";
 // SINGLE-SOURCE ruler (contract invariant same_ruler_on_needs_human): the SAME DELETED_SCRIPTS
 // list strategic-doc-staleness-check.ts uses — imported, never re-declared.
 import { DELETED_SCRIPTS } from "./strategic-doc-staleness-check.ts";

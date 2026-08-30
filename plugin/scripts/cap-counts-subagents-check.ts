@@ -57,7 +57,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { TASK_STATUS } from "../../packages/quay/src/abi.ts";
+import { TASK_STATUS } from "./task-status.ts";
 
 // ── 判据1 markers (position: the slot-refill.ts canonical comment block) ──────────────────────────────
 /** The canonical comment names the measured object: 被计量对象 = 并发 subagent (the task's exact

@@ -54,7 +54,7 @@ import {
 // The ONE Touches parser (single-source) — the bare-dir + uncertain-annotation flag it exposes is the
 // mechanical rule from tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool (AC1).
 import { extractTouchesSection, flagBareDirUncertainTouches } from "./touches-parser.ts";
-import { TASK_STATUS } from "../../packages/quay/src/abi.ts";
+import { TASK_STATUS } from "./task-status.ts";
 // The wiring/reachability-declaration → real-input-probe check (gap-wiring-claim-ac-requires-real-input-
 // probe). Reuses wiring-coverage-check.ts's backtick-identifier extraction + the (calibrated)
 // `N 条`+verb declaration heuristic — NOT a second, independently-buggy parser.

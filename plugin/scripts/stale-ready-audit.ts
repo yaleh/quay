@@ -20,7 +20,7 @@
 // 只读契约（AC4）：只读 tasks/*.md + .quay/gate-events.jsonl，不写文件、不改状态。
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { TASK_STATUS } from "../../packages/quay/src/abi.ts";
+import { TASK_STATUS } from "./task-status.ts";
 
 const root = process.argv[2] ?? process.cwd();
 const asJson = process.argv.includes("--json");

@@ -766,7 +766,7 @@ export async function main(argv = process.argv) {
 
 // 直接入口（isDirectEntry 同形——被 import 时不跑 CLI）。
 import { isDirectEntry } from "./gate-script-base.ts";
-import { TASK_STATUS } from "../../packages/quay/src/abi.ts";
+import { TASK_STATUS } from "./task-status.ts";
 if (isDirectEntry(import.meta, undefined, "prod-data-audit")) {
   main(process.argv).then((code) => process.exit(code));
 }

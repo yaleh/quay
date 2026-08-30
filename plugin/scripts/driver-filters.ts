@@ -24,7 +24,7 @@ import { readFrontmatter } from "./gate-script-base.ts";
 import { parseTask, readDependsOn } from "./task-schema.ts";
 import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
-import { TASK_STATUS } from "../../packages/quay/src/abi.ts";
+import { TASK_STATUS } from "./task-status.ts";
 
 // ── 谓词上下文 ───────────────────────────────────────────────────────────────────────────────────────
 
