@@ -1,7 +1,7 @@
 ---
 id: gap-observability-blocks-main-execution-audit
 title: worker-driver 全程审计——观测性写入/闸门是否阻塞主执行（ledger 不得 gate 落地）
-status: ready
+status: done
 labels:
   - gap
 parent: null
