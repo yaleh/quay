@@ -3513,6 +3513,56 @@ test("AC4 (gap-fan-in-subprocess-hang-timeout-recovery) — 任一 fan-in 子进
   assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "hang ⇒ lock released (finally) — clean acquire+release pair");
 });
 
+// ── gap-fan-in-ac-precheck-before-suite ─────────────────────────────────────────────────────────────
+// 机械 fan-in 在 suite 前加 AC 全勾 fail-fast 预检（未全勾 ⇒ step=ac-precheck 拒翻 + 跳过 suite，省注定
+// 无效的 9-11min/cycle；gap-execution-loop 08-30 两次 ac-gate 拒各耗 542s/684s 的注定无效 suite）。AC1
+// 取假（未全勾 ⇒ 无 suite 运行记录）；AC2 负控制（全勾 ⇒ 正常进 suite）；AC3 单测钉死两半边。
+
+test("AC3 (gap-fan-in-ac-precheck-before-suite) — AC 未全勾 ⇒ suite 前 fail-fast 拒翻（step=ac-precheck，无 suite 运行记录）", async (t) => {
+  const m = makeMechRepo("acpre-fail");
+  const runId = "mf-run-acpre-fail";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  // 改写任务体：AC 未全勾（- [ ] AC2 todo 无标注 ⇒ 待本任务）⇒ 预检应拒翻跳过 suite。
+  fs.writeFileSync(path.join(m.worktree, "tasks", "gap-mfh.md"), [
+    "---", "id: gap-mfh", "title: mechanical fan-in ac-precheck", "status: ready",
+    "labels: []", "extra: {}", "---",
+    "## Proposal", "test", "## Plan", "test",
+    "## Touches", "- docs/feature.md", "- tasks/gap-mfh.md",
+    "## Acceptance Criteria", "- [x] AC1 landed", "- [ ] AC2 todo",
+    "## Definition of Done", "- [x] landed", "",
+  ].join("\n"), "utf8");
+  const suiteMarker = path.join(m.base, "suite-ran.marker");
+  const r = await runMechanicalFanIn(mechOpts(m, runId, {
+    suiteCommand: ["bash", "-c", `echo ran > "${suiteMarker}"; exit 0`],
+  }));
+  assert.equal(r.outcome, "red");
+  assert.equal(r.step, "ac-precheck");
+  assert.match(r.reason ?? "", /AC 未全勾/);
+  assert.match(r.reason ?? "", /2\/3/, "reason carries checked/total (2/3 = AC1✓ + DoD✓ / AC2✗)");
+  assert.equal(fs.existsSync(suiteMarker), false, "suite must NOT run (fail-fast before suite)");
+  // 无 suite 运行记录：suiteFinishedEpoch / suiteOutcome 保持 null（⛔ 仍跑 suite 再拒 ⇒ 假）。
+  assert.equal(r.suiteFinishedEpoch, null);
+  assert.equal(r.suiteOutcome, null);
+  // 锁仍释放（finally 必达）。
+  const lock = readFanInLockHold(m.repo, "gap-mfh", runId);
+  assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "precheck red ⇒ lock released (finally)");
+});
+
+test("AC3 (gap-fan-in-ac-precheck-before-suite) — AC 全勾 ⇒ 预检不误挡，正常进 suite 并 landed（负控制 AC2）", async (t) => {
+  const m = makeMechRepo("acpre-pass");
+  const runId = "mf-run-acpre-pass";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn(mechOpts(m, runId));
+  assert.equal(r.outcome, "landed", `all-checked must pass the precheck and land (step=${r.step} reason=${r.reason})`);
+  assert.equal(r.suiteOutcome, "done", "the suite must have run (precheck did not falsely block)");
+  // 预检通过步应记录在过程日志（suite 前）。
+  const log = path.join(m.repo, ".quay", `fan-in-gap-mfh-${runId}.log`);
+  const lines = fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const pre = lines.find((l) => l.step === "ac-precheck");
+  assert.ok(pre, "ac-precheck pass must be traced");
+  assert.equal(pre.ok, true);
+});
+
 // ── gap-write-suite-capture-non-blocking AC1 ──────────────────────────────────────────────────────────
 // writeSuiteCapture 写失败（观测写）不得弄死 fan-in（人 2026-08-30「观测不得阻塞主执行」）。capture 是
 // suite 结果的派生观测载体；写失败 fail-open（WARN 不抛），ff 闸回退读权威源 full-suite-state.json

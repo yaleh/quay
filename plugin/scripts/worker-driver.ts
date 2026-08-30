@@ -2383,6 +2383,33 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
     if (needSuite) {
+      // 6.5 AC 全勾 fail-fast 预检（suite 前——未全勾直接拒翻跳过 suite，省注定无效的 9-11min/cycle；
+      // gap-fan-in-ac-precheck-before-suite）。⛔ 用同源 ac-gate 脚本 --json 读结构化 verdict
+      // （checked/total）——不新造计数函数（countCompletionCheckboxes / isLandedCodeComplete 同源，与
+      // flip 闸 fan-in-ac-completion-gate.ts 一致）。not-evaluated（段缺失）fail-closed 拒翻（硬规则 3b：
+      // 无法评估 ≠ 合格）。⛔ 保留 step 8 的 ac-gate（flip 闸）——flip 前再判一次（幂等双保险）。
+      const acPreT0 = Date.now();
+      const acPre = await mechSh(["node", "--experimental-strip-types", acGate, "--task", task, "--worktree", worktree, "--json"], 60_000);
+      if (!acPre.ok) {
+        let checkedTotal = "?/?";
+        let status = "fail";
+        try {
+          const parsed = JSON.parse((acPre.stdout || "").trim());
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            const c = typeof parsed.checked === "number" ? String(parsed.checked) : "?";
+            const n = typeof parsed.total === "number" ? String(parsed.total) : "?";
+            checkedTotal = `${c}/${n}`;
+            if (typeof parsed.status === "string") status = parsed.status;
+          }
+        } catch { /* JSON 解析失败 ⇒ 保守 ?/?（仍拒翻，fail-closed） */ }
+        const summary = status === "not-evaluated"
+          ? `AC/DoD 段缺失或无法识别（${checkedTotal}）——suite 前 fail-fast 拒翻`
+          : `AC 未全勾（${checkedTotal}）——suite 前 fail-fast 拒翻`;
+        trace({ step: "ac-precheck", exit: acPre.status, wall_ms: Date.now() - acPreT0, ok: false, reason: summary });
+        return failClean("ac-precheck", summary, acPre.status);
+      }
+      trace({ step: "ac-precheck", exit: 0, wall_ms: Date.now() - acPreT0, ok: true });
+
       trace({ step: "suite-start", exit: 0, wall_ms: 0, ok: true });
       const suiteCmd = opts.suiteCommand ?? defaultMechanicalSuiteCommand({ task, worktree, root, suiteLogFile, runId: perSuiteRunId });
       const sr: SuiteRunResult = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: suiteCmd, logFile: suiteLogFile, silenceMs: opts.silenceMs });

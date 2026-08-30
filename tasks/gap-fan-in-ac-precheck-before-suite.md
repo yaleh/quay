@@ -21,9 +21,9 @@ worker-driver.ts 机械 fan-in 在 suite 前加 `isLandedCodeComplete`（或等�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，fail-fast）：AC 未全勾时 fan-in 在 suite 前拒翻（step=ac-precheck，无 suite 运行记录）；（⛔ 仍跑 suite 再拒 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：AC 全勾时正常进 suite（预检不误挡）。
-- [ ] AC3（能取假，单测）：worker-driver.test.mjs 断言「未全勾 → 预检拒、不 spawn suite」，改掉任一 ⇒ 红。
+- [x] AC1（能取假，fail-fast）：AC 未全勾时 fan-in 在 suite 前拒翻（step=ac-precheck，无 suite 运行记录）；（⛔ 仍跑 suite 再拒 ⇒ 假）。
+- [x] AC2（能取假，负控制）：AC 全勾时正常进 suite（预检不误挡）。
+- [x] AC3（能取假，单测）：worker-driver.test.mjs 断言「未全勾 → 预检拒、不 spawn suite」，改掉任一 ⇒ 红。
 
 ## Definition of Done
 
