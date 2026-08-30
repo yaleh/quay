@@ -34,7 +34,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, helpExit } from "./gate-script-base.ts";
 import {
   bucketSetOf,
   canonicalBuckets,
@@ -163,6 +163,9 @@ function getArgValue(args: string[], name: string): string | undefined {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  // --help is the shared checker contract (gap-help-contract-incompatible-behaviors): usage FIRST,
+  // exit 0, NO side effect — evaluated BEFORE root resolution, never as a usage error (exit 2).
+  if (args.includes("--help") || args.includes("-h")) helpExit(usage);
   const root = path.resolve(getArgValue(args, "--root") ?? findRepoRoot());
   const asJson = args.includes("--json");
   const gate = args.includes("--gate") || args.includes("--touches") || args.includes("--task");
