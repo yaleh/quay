@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-install-wall-clock-slow
 title: quay-init --loop 单次安装 32.8s 墙钟——逐文件 spawn 子进程（6265 fork / 2921 execve）是主因
-status: todo
+status: ready
 labels:
   - gap
 parent: null
