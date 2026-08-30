@@ -27,8 +27,11 @@ import {
   clearLandingCache,
   getLandingColdRunCount,
   LANDING_CACHE_TTL_MS,
+  readTaskStatusAtRef,
+  clearTaskStatusRefCache,
 } from "../src/observation.ts";
 import { renderBoardPage } from "../src/serve-handlers.ts";
+import { handleBoard } from "../src/serve-board.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -650,4 +653,57 @@ test("AC3 fail-open: a landing subprocess exceeding the second-level timeout ren
   });
   assert.ok(okPage.includes("读失败") && !okPage.includes("读取超时"),
     "AC3: a non-timeout failure renders 读失败, not 读取超时 (the two are distinguishable)");
+});
+
+// ── gap-web-task-status-reads-stale-main-checkout: the board's 意图 column must read the develop
+// ref, not the stale manager working branch's disk (AC1). The board handler is driven directly with
+// a mock Provider client returning the DISK view (stale ready); the develop override is the fix.
+
+test("AC1 — /board 意图 column renders the develop status (done), not the stale disk status (ready)", async () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "board-stale-"));
+  try {
+    const tasksDir = path.join(ws, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    const git = (...args) => execFileSync("git", args, { cwd: ws, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const writeTask = (id, status) => fs.writeFileSync(path.join(tasksDir, `${id}.md`),
+      `---\nid: ${id}\nstatus: ${status}\n---\n## Proposal\nproposal for ${id}\n`);
+    git("init", "-b", "develop", "-q", ".");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    writeTask("gap-stale", "done");
+    writeTask("gap-fresh", "ready");
+    git("add", ".");
+    git("commit", "-q", "-m", "develop: gap-stale done, gap-fresh ready");
+    git("checkout", "-q", "-b", "manager-stale");
+    writeTask("gap-stale", "ready"); // stale branch rewrites it back to ready
+    git("add", ".");
+    git("commit", "-q", "-m", "manager-stale: reset gap-stale to ready");
+
+    // Falsifiability: develop=done, working tree=ready.
+    assert.equal(readTaskStatusAtRef(ws, "develop", "gap-stale"), "done", "develop ref carries done");
+    assert.match(fs.readFileSync(path.join(tasksDir, "gap-stale.md"), "utf8"), /^status:\s*ready/m, "working tree carries ready");
+
+    clearTaskStatusRefCache();
+    const client = {
+      taskList: async () => ({
+        tasks: [
+          { id: "gap-stale", title: "stale", status: "ready", labels: [], parent: null, children: [], body: "x", extra: {} },
+          { id: "gap-fresh", title: "fresh", status: "ready", labels: [], parent: null, children: [], body: "x", extra: {} },
+        ],
+        malformed: [],
+      }),
+    };
+    let body = "";
+    const res = { writeHead: () => {}, end: (chunk) => { body = chunk; } };
+    const url = new URL("http://localhost/board");
+    await handleBoard({}, res, url, client, { name: "test", id: "native" }, { workspaceRoot: ws });
+
+    const cell = body.match(/gap-stale<\/a><\/td>\s*<td>([^<]*)/);
+    assert.ok(cell, "gap-stale board row present");
+    assert.equal(cell[1], "done", "AC1: /board 意图 column renders done (⛔ 仍 ready ⇒ 假)");
+    const freshCell = body.match(/gap-fresh<\/a><\/td>\s*<td>([^<]*)/);
+    assert.equal(freshCell?.[1], "ready", "AC2: gap-fresh (ready in both) renders ready unchanged");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
 });

@@ -32,10 +32,10 @@ web 显示的任务 status 读面从「主检出 disk」改「develop git ref」
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：构造「主检出 status=ready、develop status=done」的 case → /tasks 与 /live 按 develop 判 done（落地任务不再显示成 ready/在飞）；（⛔ 仍按主检出 ready ⇒ 假）。
-- [ ] AC2（能取假，回归）：主检出与 develop 同 status 时显示不变（fresh 任务不受读源改影响）。
-- [ ] AC3（能取假）：改动代码无任何 `git checkout develop` / `git worktree add` 指向 develop（grep 变更集确认）；主检出分支保持 main/manager-doc。
-- [ ] AC4（能取假）：1500+ 任务场景下 /tasks 渲染延迟可接受（批量读/缓存生效，不逐任务 git show）。
+- [x] AC1（能取假）：构造「主检出 status=ready、develop status=done」的 case → /tasks 与 /live 按 develop 判 done（落地任务不再显示成 ready/在飞）；（⛔ 仍按主检出 ready ⇒ 假）。
+- [x] AC2（能取假，回归）：主检出与 develop 同 status 时显示不变（fresh 任务不受读源改影响）。
+- [x] AC3（能取假）：改动代码无任何 `git checkout develop` / `git worktree add` 指向 develop（grep 变更集确认）；主检出分支保持 main/manager-doc。
+- [x] AC4（能取假）：1500+ 任务场景下 /tasks 渲染延迟可接受（批量读/缓存生效，不逐任务 git show）。
 
 ## Definition of Done
 

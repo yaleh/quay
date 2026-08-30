@@ -2,7 +2,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import { readBoardLanding, readBoardExecution, type BoardLanding, type BoardExecution } from "./observation.ts";
+import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, type BoardLanding, type BoardExecution } from "./observation.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, buildHref, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
 
@@ -199,6 +199,17 @@ export async function handleBoard(
   try {
     const r = await client.taskList({ includeBody: false });
     tasks = r.tasks ?? [];
+    // gap-web-task-status-reads-stale-main-checkout: the board's 意图 column status read face is
+    // the develop git ref, not the manager working branch's disk (a stale agent-proxy — 硬规则 4b).
+    // Override each task's status from develop; a task absent from develop keeps its disk status.
+    const devStatus = readTaskStatusMapAtRef(cfg.workspaceRoot, "develop");
+    if (devStatus.size > 0) {
+      tasks = tasks.map((t) => {
+        const id = typeof t.id === "string" ? t.id : "";
+        const atRef = id ? devStatus.get(id) : undefined;
+        return atRef != null ? { ...t, status: atRef } : t;
+      });
+    }
   } catch (err) {
     intentStatus = "error";
     intentReason = err instanceof Error ? err.message : String(err);

@@ -972,9 +972,10 @@ export function readNeedsHumanLedger(root: string): PromotionOutcomeRecord[] {
 }
 
 /** Read a single task's status frontmatter from the on-disk store. Missing/unreadable ⇒ null (never
- *  throws). readLive uses it to drop a worker-carrier task whose status is already "done" — the
- *  driver's `exited-not-landed` on a done task is a leftover-worktree cleanup artifact, the same
- *  "not really in-flight" class as the AC2 ghost, not live work. */
+ *  throws). This is the FALLBACK read: tasks/gap-web-task-status-reads-stale-main-checkout makes the
+ *  canonical store the develop git ref (the manager working branch's disk is a STALE agent-proxy,
+ *  硬规则 4b); `readTaskStatusForLive` reads develop first and falls back here when the ref/path is
+ *  unavailable (not a git repo, no develop ref, a fresh task not yet committed to develop). */
 function readTaskStatusOnDisk(root: string, taskId: string): TaskStatus | null {
   try {
     const raw = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
@@ -984,6 +985,129 @@ function readTaskStatusOnDisk(root: string, taskId: string): TaskStatus | null {
   } catch {
     return null;
   }
+}
+
+/** Read `<ref>:tasks/<taskId>.md` status frontmatter (the single-task half of the develop-ref read;
+ *  `git show` reads the object store only — never checks out `ref`, never touches fan-in). null when
+ *  the ref/path is unavailable or the frontmatter is unreadable — callers fall back to the on-disk
+ *  read. Mirrors plugin/scripts/worker-driver.ts's `readTaskStatusAtRef` (the same `git show
+ *  develop:tasks/<id>.md` judgment, re-implemented here because observation.ts is the ONLY serve-path
+ *  module allowed to know git). */
+export function readTaskStatusAtRef(root: string, ref: string, taskId: string): TaskStatus | null {
+  let out: string;
+  try {
+    out = execFileSync("git", ["-C", root, "show", `${ref}:tasks/${taskId}.md`], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = parseFrontmatter(out);
+    const fm = parsed.frontmatter as Record<string, unknown>;
+    return isTaskStatus(fm.status) ? fm.status : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read `<ref>:tasks/<id>.md` raw contents for a set of ids in ONE `git cat-file --batch` process
+ *  (the batched read face — per-task `git show` at 1500+ tasks would be ~1500 subprocesses). Returns
+ *  a Map<taskId, rawContent> for the ids PRESENT at the ref; absent ids are simply missing (callers
+ *  fall back to the working-tree read). Empty map on any git failure (never a positive from an
+ *  unavailable source). Mirrors plugin/scripts/ready-pool-check.ts's dispatch-read batch. */
+function readTaskFilesAtRefBatch(root: string, ref: string, ids: string[]): Map<string, string> {
+  if (ids.length === 0) return new Map();
+  const input = ids.map((id) => `${ref}:tasks/${id}.md`).join("\n") + "\n";
+  let buf: Buffer;
+  try {
+    buf = execFileSync("git", ["-C", root, "cat-file", "--batch"], {
+      input,
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 30_000,
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+  } catch {
+    return new Map();
+  }
+  const map = new Map<string, string>();
+  let off = 0;
+  for (const id of ids) {
+    const nl = buf.indexOf(0x0a, off);
+    if (nl === -1) break;
+    const header = buf.slice(off, nl).toString("utf8");
+    off = nl + 1;
+    const m = / blob (\d+)$/.exec(header);
+    if (!m) continue; // `<revspec> missing` (or unparseable) — no content line; off is already past the header
+    const size = Number(m[1]);
+    map.set(id, buf.slice(off, off + size).toString("utf8"));
+    off += size + 1; // skip content + the trailing newline after it
+  }
+  return map;
+}
+
+/** TTL for the batched develop-status cache — a rendered /tasks list need not re-run `git cat-file`
+ *  over the whole tree on every refresh within the same render burst (AC4: 1500+ tasks). */
+export const TASK_STATUS_REF_CACHE_TTL_MS = 2000;
+
+const taskStatusRefCache = new Map<string, { at: number; map: Map<string, TaskStatus> }>();
+
+/** Clear the batched develop-status cache (test seam — a fixture that rewrites the develop ref
+ *  mid-test must not read a cached prior read). */
+export function clearTaskStatusRefCache(): void {
+  taskStatusRefCache.clear();
+}
+
+/** Read every task's `status:` frontmatter at a git ref in ONE `git ls-tree` + ONE `git cat-file
+ *  --batch` pair (two subprocesses total for a ~1500-task tree), short-TTL cached. Returns a
+ *  Map<taskId, TaskStatus> of the ids PRESENT at the ref; absent ids are missing (callers fall back
+ *  to the working-tree read). Empty map on any git failure — never a positive from an unavailable
+ *  source (硬规则 ③b). */
+export function readTaskStatusMapAtRef(
+  root: string,
+  ref: string,
+  { nowMs = Date.now(), ttlMs = TASK_STATUS_REF_CACHE_TTL_MS, force = false } = {},
+): Map<string, TaskStatus> {
+  const key = `${root}\n${ref}`;
+  const hit = taskStatusRefCache.get(key);
+  if (!force && hit != null && nowMs - hit.at < ttlMs) return hit.map;
+  const map = new Map<string, TaskStatus>();
+  try {
+    const names = execFileSync("git", ["-C", root, "ls-tree", "-r", "--name-only", ref, "--", "tasks/"], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    })
+      .split(/\r?\n/)
+      .filter(Boolean);
+    const ids = names
+      .map((n) => {
+        const base = n.split("/").pop() ?? "";
+        return base.endsWith(".md") ? base.slice(0, -3) : null;
+      })
+      .filter((x): x is string => x != null && x.length > 0);
+    const rawMap = readTaskFilesAtRefBatch(root, ref, ids);
+    for (const [id, raw] of rawMap) {
+      try {
+        const parsed = parseFrontmatter(raw);
+        const fm = parsed.frontmatter as Record<string, unknown>;
+        if (isTaskStatus(fm.status)) map.set(id, fm.status);
+      } catch {
+        // unparseable frontmatter at the ref — leave absent (caller falls back to disk), never fabricate
+      }
+    }
+  } catch {
+    // git unavailable / not a repo / no such ref — empty map, callers fall back to the disk read
+  }
+  taskStatusRefCache.set(key, { at: nowMs, map });
+  return map;
+}
+
+/** readLive's task-status read: the canonical develop ref first, the on-disk store as fallback. A
+ *  task landed on develop (status done) but not yet synced to the manager working branch's disk still
+ *  reads as done here — the landed task leaves the in-flight view immediately (AC1). A fresh task that
+ *  exists only on disk (not yet committed to develop) falls back to the disk read (AC2). */
+export function readTaskStatusForLive(root: string, taskId: string): TaskStatus | null {
+  const atRef = readTaskStatusAtRef(root, "develop", taskId);
+  return atRef ?? readTaskStatusOnDisk(root, taskId);
 }
 
 /** Task statuses that mean "no worker is currently running for this task" — the terminal/non-live
@@ -1139,7 +1263,7 @@ export function readLive(
   // below applies — but UNCONDITIONAL, because the ghost bug fires precisely when workerInFlight is
   // empty (workerOutcomeOpen is always false) and the merge block below is skipped entirely.
   inFlight = inFlight.filter(
-    (t) => !NON_LIVE_TASK_STATUSES.has(readTaskStatusOnDisk(root, t.taskId)),
+    (t) => !NON_LIVE_TASK_STATUSES.has(readTaskStatusForLive(root, t.taskId)),
   );
 
   // Merge: a task carried by the worker-driver replaces any same-task workflow-events run (the driver
@@ -1151,7 +1275,7 @@ export function readLive(
     const byTask = new Map<string, InFlightTask>();
     for (const t of inFlight) byTask.set(t.taskId, t);
     for (const t of workerInFlight) {
-      if (readTaskStatusOnDisk(root, t.taskId) === TASK_STATUS.DONE) continue;
+      if (readTaskStatusForLive(root, t.taskId) === TASK_STATUS.DONE) continue;
       byTask.set(t.taskId, t);
     }
     inFlight = [...byTask.values()].sort(
