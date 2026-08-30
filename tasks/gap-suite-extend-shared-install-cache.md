@@ -2,7 +2,7 @@
 id: gap-suite-extend-shared-install-cache
 title: 把共享 install 缓存（sharedFixture）扩展到 install-config-driven-e2e
   家族可复用测试——runtime 4 题 + e2e-A2 免真 install
-status: ready
+status: done
 labels:
   - gap
 parent: null
