@@ -29,9 +29,9 @@ serial/lowconc 两相用裸 `node --test --test-concurrency=N <files…>`，node
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，接线）：serial/lowconc 六条派发点全走 LPT（无裸 `node --test` 直传 files；grep test.sh 的 serial/lowconc 分支——含 --buckets 路径 1543/1549——无未排序裸调用）；（⛔ 仍有裸调用 ⇒ 假）。
-- [ ] AC2（能取假，生产载体，硬规则 4 推论三）：实现落地后时间窗内，真实 full-suite 轮 serial/lowconc 相无 400s+ 尾部等待（N 只计落地后轮次）；（⛔ 用落地前历史轮冒充 ⇒ 假）。
-- [ ] AC3（能取假，pass/fail-neutral）：成员不变只变顺序，serial/lowconc 的 pass/fail 结果与排序前一致。
+- [x] AC1（能取假，接线）：serial/lowconc 六条派发点全走 LPT（无裸 `node --test` 直传 files；grep test.sh 的 serial/lowconc 分支——含 --buckets 路径 1543/1549——无未排序裸调用）；（⛔ 仍有裸调用 ⇒ 假）。
+- [ ] AC2（能取假，生产载体，硬规则 4 推论三）：实现落地后时间窗内，真实 full-suite 轮 serial/lowconc 相无 400s+ 尾部等待（N 只计落地后轮次）；（⛔ 用落地前历史轮冒充 ⇒ 假）。（待外部）
+- [x] AC3（能取假，pass/fail-neutral）：成员不变只变顺序，serial/lowconc 的 pass/fail 结果与排序前一致。
 
 ## Definition of Done
 
