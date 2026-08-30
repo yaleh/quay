@@ -2,7 +2,7 @@
 id: gap-dispatch-reads-stale-main-checkout-task-status
 title: task 状态/body/updated 读面统一以 develop git ref 为单一正源（dispatch + web
   列表/详情/live；updated 与 status 同源；disk≠develop 显式标记）——对象库只读，不 checkout develop
-status: ready
+status: done
 labels:
   - gap
   - defect
