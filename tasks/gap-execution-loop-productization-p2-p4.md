@@ -2,7 +2,7 @@
 id: gap-execution-loop-productization-p2-p4
 title: 执行环产品化 P2–P4——runMechanicalFanIn→quay task fan-in + workflow 兜底降级 +
   suite/dispatch 产品化
-status: ready
+status: needs-human
 labels:
   - gap
   - productization
@@ -73,3 +73,8 @@ P2–P4 落地；AC1/AC2/AC3a/AC3b/AC4/AC5 全勾；执行环 3 实现 → 1、b
 
 - 根因：fan-in 机制错误——`scripts/test.sh` main_root 推导 SIGPIPE 清空（awk 早退→git EPIPE→`|| x=""` 覆盖主检出路径→checker 扫 worktree slug→agentId 不可解析→fan-in suite 步假红），任务无法落地。
 - 解除：`2aff811b8` 修复（awk 读全流不早退）已上 develop + 主检出；受控 fan-in 落地验证通过（`532607156`）。人 2026-08-29 裁定解除，重派 ready。
+## Needs-Human
+
+**执行 2026-08-30T12:27:11.464Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
