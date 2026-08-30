@@ -21,8 +21,8 @@ step-trace 的 reason 捕获 gate 完整 stdout（非 stderr 警告优先）—�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：ac-gate/anti-drift 失败时 step-trace reason 含 stdout 判词（grep 到 checked/violation）非纯 MODULE 警告；（⛔ 仍只有警告 ⇒ 假）。
-- [ ] AC2（能取假，单测）：worker-driver.test.mjs 断言「失败步 reason 含 stdout 判词」，改掉任一 ⇒ 红。
+- [x] AC1（能取假）：ac-gate/anti-drift 失败时 step-trace reason 含 stdout 判词（grep 到 checked/violation）非纯 MODULE 警告；（⛔ 仍只有警告 ⇒ 假）。
+- [x] AC2（能取假，单测）：worker-driver.test.mjs 断言「失败步 reason 含 stdout 判词」，改掉任一 ⇒ 红。
 
 ## Definition of Done
 
