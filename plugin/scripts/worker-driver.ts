@@ -154,8 +154,8 @@ export {
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
-import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, type RetryState } from "./driver-filters.ts";
-export { readTaskStatus } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, WORKER_OUTCOME_REL, type RetryState } from "./driver-filters.ts";
+export { readTaskStatus, lastExitedNotLandedReason, WORKER_OUTCOME_REL } from "./driver-filters.ts";
 // AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
 // ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
 import { defaultDriverConfig, loadDriverConfig, driverCap } from "./driver-config.ts";
@@ -217,9 +217,6 @@ export {
 } from "./driver-runtime.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
-
-/** outcome 文件的仓库相对路径（gitignored 运行时日志，dispatch-record.jsonl 同族）。 */
-export const WORKER_OUTCOME_REL = ".quay/worker-outcome.jsonl";
 
 /** round 记录（无条件心跳）的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
@@ -1023,48 +1020,6 @@ export async function branchHeadSubjectAsync(root: string, taskId: string): Prom
   if (r.error || r.status !== 0) return null;
   const out = r.stdout.trim();
   return out === "" ? null : out;
-}
-
-/** 把一条 exited-not-landed 记录格式化为人可读的失败原因（gap-fan-in-merge-develop-derived-recompute-
- *  and-reason B）。优先读 mechanical_fan_in（step + reason 拼接成「step=merge-develop: CONFLICT in <file>」）
- *  ——merge develop 冲突的具体文件在 mechanical_fan_in.reason 里，通用 failure_reason 只写「task status=ready
- *  not done」，⛔ 不含冲突文件 ⇒ worker 无从精准 resolve。mechanical_fan_in 无 step（缺键 / 非 red / 非对象）
- *  ⇒ 回退 failure_reason（保留旧行为——非机械 fan-in 失败 / 落地未证实的记录仍读通用 reason）。 */
-function formatExitedNotLandedReason(failureReason: unknown, mechanicalFanIn: unknown): string | null {
-  if (mechanicalFanIn && typeof mechanicalFanIn === "object") {
-    const m = mechanicalFanIn as { step?: unknown; reason?: unknown };
-    if (typeof m.step === "string" && m.step) {
-      const reason = typeof m.reason === "string" && m.reason ? m.reason : "(no reason)";
-      return `step=${m.step}: ${reason}`;
-    }
-  }
-  return typeof failureReason === "string" ? failureReason : null;
-}
-
-/** 该 task 最近一条 exited-not-landed 的失败原因（AC2「上次失败原因」，读 worker-outcome.jsonl）。
- *  无记录 / 读失败 ⇒ null（读不懂 ≠ 无失败——但续做 prompt 以 "(unknown)" 呈现，不伪装成「没有失败」）。 */
-export function lastExitedNotLandedReason(root: string, taskId: string): string | null {
-  let text: string;
-  try {
-    text = fs.readFileSync(path.join(root, WORKER_OUTCOME_REL), "utf8");
-  } catch {
-    return null;
-  }
-  let last: string | null = null;
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let rec: { task?: unknown; final_state?: unknown; failure_reason?: unknown; mechanical_fan_in?: unknown };
-    try {
-      rec = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-    if (rec.task === taskId && rec.final_state === "exited-not-landed") {
-      last = formatExitedNotLandedReason(rec.failure_reason, rec.mechanical_fan_in);
-    }
-  }
-  return last;
 }
 
 /** 派发前搜集续做状态（AC1 复用 / AC2 状态）。⛔ 无 worktree（worktreePresentForTask 非 true）⇒ null

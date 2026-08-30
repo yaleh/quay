@@ -21,8 +21,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，注记带 step）：needs-human 注记含失败 step（grep 到 ac-gate/suite/merge-develop 等实际步名）；（⛔ 仍只有模板句 ⇒ 假）。
-- [ ] AC2（能取假，单测）：driver-filters.test.mjs 断言「needs-human reason 含 step+verdict 非纯模板」，改掉任一 ⇒ 红。
+- [x] AC1（能取假，注记带 step）：needs-human 注记含失败 step（grep 到 ac-gate/suite/merge-develop 等实际步名）；（⛔ 仍只有模板句 ⇒ 假）。
+- [x] AC2（能取假，单测）：driver-filters.test.mjs 断言「needs-human reason 含 step+verdict 非纯模板」，改掉任一 ⇒ 红。
 
 ## Definition of Done
 
@@ -30,6 +30,8 @@ needs-human 注记带实际失败步+判词；AC1-AC2 全勾；全量 suite 绿�
 
 ## Touches
 
-- plugin/scripts/driver-filters.ts（markNeedsHuman reason 读 mechanical_fan_in.step+verdict）
+- plugin/scripts/driver-filters.ts（markNeedsHuman reason 读 mechanical_fan_in.step+verdict；上收 lastExitedNotLandedReason/formatExitedNotLandedReason/WORKER_OUTCOME_REL）
+- plugin/scripts/worker-driver.ts（re-export lastExitedNotLandedReason/WORKER_OUTCOME_REL，删本地副本）
 - plugin/test/driver-filters.test.mjs（AC2 单测）
+- plugin/test/worker-driver.test.mjs（B 结构面测试改指向 driver-filters.ts）
 - tasks/gap-needs-human-note-carries-step-verdict.md（自身）
