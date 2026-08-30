@@ -2,7 +2,7 @@
 // session-bootstrap.test.mjs — gap-no-formalized-bare-metal-session-bootstrap, AC1–AC5.
 //
 // The step BEFORE quay:cold-start (a tmux window layout with a Claude Code process live in each
-// pane) used to have zero formalized product — tonight's manager/inner/outer windows were all
+// pane) used to have zero formalized product — tonight's manager/outer windows were all
 // hand-typed tmux commands with no record. This test pins plugin/scripts/session-bootstrap.sh:
 //
 //   AC1 — running against bare tmux (no windows) produces the named layout, each window's
@@ -11,7 +11,7 @@
 //         kill/restart already-live processes (the SAME pane pid survives the re-run).
 //   AC3 — a window whose process fails to start is reported BY NAME, the script exits non-zero,
 //         and the other window is still named too (nothing silently half-built).
-//   AC4 — quay:cold-start's own precondition check ("inner session reachable",
+//   AC4 — quay:cold-start's own precondition check ("outer window reachable",
 //         `tmux list-panes -t <session>`) can run immediately after, with the session name read
 //         from <root>/orchestration/session-liveness.env (no extra manual step).
 //   AC5 — this file is node:test + `// @test-group product`; and cold-start/SKILL.md cross-
@@ -125,15 +125,15 @@ test("AC1 — bare tmux produces the named layout with every window's claude pro
   const h = newHermetic();
   const root = fakeRoot("sb-ac1");
   try {
-    const r = runBootstrap(root, "inner/outer", ["--socket", h.sockPath], {
+    const r = runBootstrap(root, "outer", ["--socket", h.sockPath], {
       SESSION_BOOTSTRAP_LAUNCH_CMD: LIVE_CMD,
     });
     assert.equal(r.status, 0, `bootstrap must exit 0:\n${r.stdout}\n${r.stderr}`);
-    assert.match(r.stdout, /bootstrap ok: sb-ac1 layout 'inner outer' all windows live/, "must report the full layout as live");
+    assert.match(r.stdout, /bootstrap ok: sb-ac1 layout 'outer' all windows live/, "must report the full layout as live");
     const names = h.windowNames("sb-ac1");
-    assert.deepEqual(names, ["inner", "outer"], `must build exactly inner+outer (got: ${names.join(", ")})`);
+    assert.deepEqual(names, ["outer"], `must build exactly outer (got: ${names.join(", ")})`);
     // liveness is a REAL process check: each window has a non-empty pane pid (a live pane shell).
-    for (const role of ["inner", "outer"]) {
+    for (const role of ["outer"]) {
       assert.ok(h.panePid("sb-ac1", role), `window ${role} must have a live pane after bootstrap`);
     }
   } finally {
@@ -142,15 +142,15 @@ test("AC1 — bare tmux produces the named layout with every window's claude pro
   }
 });
 
-test("AC1 — manager/inner/outer layout builds all three windows live", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
+test("AC1 — manager/outer layout builds both windows live", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
   const h = newHermetic();
   const root = fakeRoot("sb-mgr");
   try {
-    const r = runBootstrap(root, "manager/inner/outer", ["--socket", h.sockPath], {
+    const r = runBootstrap(root, "manager/outer", ["--socket", h.sockPath], {
       SESSION_BOOTSTRAP_LAUNCH_CMD: LIVE_CMD,
     });
     assert.equal(r.status, 0, `bootstrap must exit 0:\n${r.stdout}\n${r.stderr}`);
-    assert.deepEqual(h.windowNames("sb-mgr"), ["manager", "inner", "outer"]);
+    assert.deepEqual(h.windowNames("sb-mgr"), ["manager", "outer"]);
     assert.match(r.stdout, /all windows live/);
   } finally {
     h.cleanup();
@@ -165,21 +165,18 @@ test("AC2 — re-running against an already-built session does not duplicate win
   const root = fakeRoot("sb-idem");
   try {
     const env = { SESSION_BOOTSTRAP_LAUNCH_CMD: LIVE_CMD };
-    const first = runBootstrap(root, "inner/outer", ["--socket", h.sockPath], env);
+    const first = runBootstrap(root, "outer", ["--socket", h.sockPath], env);
     assert.equal(first.status, 0, `first build must exit 0:\n${first.stdout}\n${first.stderr}`);
-    const pids1 = { inner: h.panePid("sb-idem", "inner"), outer: h.panePid("sb-idem", "outer") };
-    assert.ok(pids1.inner && pids1.outer, "both windows must have live panes after the first build");
+    const pids1 = { outer: h.panePid("sb-idem", "outer") };
+    assert.ok(pids1.outer, "the window must have a live pane after the first build");
 
-    const second = runBootstrap(root, "inner/outer", ["--socket", h.sockPath], env);
+    const second = runBootstrap(root, "outer", ["--socket", h.sockPath], env);
     assert.equal(second.status, 0, `re-run must exit 0:\n${second.stdout}\n${second.stderr}`);
-    // no duplicates: exactly inner+outer, in the same order.
-    assert.deepEqual(h.windowNames("sb-idem"), ["inner", "outer"], "re-run must not duplicate windows");
+    // no duplicates: exactly outer.
+    assert.deepEqual(h.windowNames("sb-idem"), ["outer"], "re-run must not duplicate windows");
     // no restart: the SAME pane pid is still the live one (the re-run left the window alone).
-    for (const role of ["inner", "outer"]) {
-      assert.equal(h.panePid("sb-idem", role), pids1[role],
-        `re-run must NOT restart ${role} (pane pid changed ${pids1[role]} -> ${h.panePid("sb-idem", role)})`);
-    }
-    assert.match(second.stdout, /in-place: sb-idem:inner/, "re-run must report inner as in-place (not relaunch)");
+    assert.equal(h.panePid("sb-idem", "outer"), pids1.outer,
+      `re-run must NOT restart outer (pane pid changed ${pids1.outer} -> ${h.panePid("sb-idem", "outer")})`);
     assert.match(second.stdout, /in-place: sb-idem:outer/, "re-run must report outer as in-place (not relaunch)");
   } finally {
     h.cleanup();
@@ -193,15 +190,15 @@ test("AC3 — a window whose process fails to start is reported by name; script 
   const h = newHermetic();
   const root = fakeRoot("sb-ac3");
   try {
-    // inner's launch produces a process but NOT a claude process → liveness must fail.
-    const r = runBootstrap(root, "inner/outer", ["--socket", h.sockPath, "--wait", "3"], {
+    // outer's launch produces a process but NOT a claude process → liveness must fail.
+    const r = runBootstrap(root, "manager/outer", ["--socket", h.sockPath, "--wait", "3"], {
       SESSION_BOOTSTRAP_LAUNCH_CMD: LIVE_CMD,
-      SESSION_BOOTSTRAP_LAUNCH_CMD_INNER: FAIL_CMD,
+      SESSION_BOOTSTRAP_LAUNCH_CMD_OUTER: FAIL_CMD,
     });
     assert.notEqual(r.status, 0, `a failed window must make the script exit non-zero:\n${out(r)}`);
-    assert.match(out(r), /FAILED: sb-ac3:inner/, "the failing window must be reported BY NAME");
-    assert.match(out(r), /verified: sb-ac3:outer/, "the passing window must ALSO be named (no silent half-build)");
-    assert.match(out(r), /bootstrap FAILED: sb-ac3 layout 'inner outer'/, "the final summary must name the layout");
+    assert.match(out(r), /FAILED: sb-ac3:outer/, "the failing window must be reported BY NAME");
+    assert.match(out(r), /verified: sb-ac3:manager/, "the passing window must ALSO be named (no silent half-build)");
+    assert.match(out(r), /bootstrap FAILED: sb-ac3 layout 'manager outer'/, "the final summary must name the layout");
   } finally {
     h.cleanup();
     fs.rmSync(root, { recursive: true, force: true });
@@ -210,20 +207,20 @@ test("AC3 — a window whose process fails to start is reported by name; script 
 
 // ── AC4 — cold-start's precondition ("inner session reachable") runs immediately after ─────────────
 
-test("AC4 — cold-start's inner-session-reachable precondition passes right after, session name from session-liveness.env", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
+test("AC4 — cold-start's outer-window-reachable precondition passes right after, session name from session-liveness.env", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
   const h = newHermetic();
   const root = fakeRoot("sb-ac4");
   try {
     // NO --session: the script must read the session name from <root>/orchestration/session-liveness.env.
-    const r = runBootstrap(root, "inner/outer", ["--socket", h.sockPath], {
+    const r = runBootstrap(root, "outer", ["--socket", h.sockPath], {
       SESSION_BOOTSTRAP_LAUNCH_CMD: LIVE_CMD,
     });
     assert.equal(r.status, 0, `bootstrap must exit 0:\n${r.stdout}\n${r.stderr}`);
     // The cold-start precondition is exactly `tmux list-panes -t <session>` (the session the env names).
     const check = h.tmux(["list-panes", "-t", "sb-ac4"]);
     assert.equal(check.status, 0, `cold-start's precondition (tmux list-panes -t <session>) must succeed immediately after:\n${check.stderr}`);
-    const inner = h.tmux(["list-panes", "-t", "sb-ac4:inner"]);
-    assert.equal(inner.status, 0, "the inner window must be reachable by name (tmux list-panes -t <session>:inner)");
+    const outer = h.tmux(["list-panes", "-t", "sb-ac4:outer"]);
+    assert.equal(outer.status, 0, "the outer window must be reachable by name (tmux list-panes -t <session>:outer)");
   } finally {
     h.cleanup();
     fs.rmSync(root, { recursive: true, force: true });
@@ -268,13 +265,12 @@ test("--dry-run emits the build plan and changes nothing", { skip: tmuxAvailable
   const h = newHermetic();
   const root = fakeRoot("sb-dry");
   try {
-    const r = runBootstrap(root, "inner/outer", ["--socket", h.sockPath, "--dry-run"], {
+    const r = runBootstrap(root, "outer", ["--socket", h.sockPath, "--dry-run"], {
       SESSION_BOOTSTRAP_LAUNCH_CMD: LIVE_CMD,
     });
     assert.equal(r.status, 0, `dry-run must exit 0:\n${r.stdout}\n${r.stderr}`);
-    assert.match(r.stdout, /would-create-session: tmux new-session -d -s sb-dry -n inner/, "dry-run must plan the first (session-creating) window");
-    assert.match(r.stdout, /would-create-window: tmux new-window -t sb-dry -n outer/, "dry-run must plan the second window");
-    assert.match(r.stdout, /dry-run: layout 'inner outer' on sb-dry \(no changes made\)/, "dry-run must state no changes are made");
+    assert.match(r.stdout, /would-create-session: tmux new-session -d -s sb-dry -n outer/, "dry-run must plan the session-creating window");
+    assert.match(r.stdout, /dry-run: layout 'outer' on sb-dry \(no changes made\)/, "dry-run must state no changes are made");
     // nothing was actually created: the session must not exist.
     const ls = h.tmux(["has-session", "-t", "sb-dry"]);
     assert.notEqual(ls.status, 0, "dry-run must NOT create the session");

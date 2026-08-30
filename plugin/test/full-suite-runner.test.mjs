@@ -1,4 +1,12 @@
 // @test-group governance
+// @load-sensitive child-spawn
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — every test spawns a
+//   real node runner (full-suite-runner.ts) + a real bash fake-suite child; under full-suite concurrency
+//   the runner bootstrap + child spawn is start/schedule-delayed and the wall-clock polls flaked
+//   (gap-full-suite-runner-test-poll-timeout-load-flake: "poll timeout" under load 11.81 / 16 lanes).
+//   The 5s polls were already raised to 20s (gap-suite-load-sampler-orphan-process); this annotation
+//   closes the triage half — a failure must be classified load-sensitive (isolate-rerun), not
+//   other-task (defer anti-livelock).
 // full-suite-runner.test.mjs — tasks/gap-full-suite-belongs-to-outer-background-above-3-min.
 //
 // The (a) suite block of the three blocks that together eliminate "batch": the full suite
@@ -33,7 +41,7 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn, execSync } from "node:child_process";
+import { spawn, spawnSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -80,12 +88,15 @@ import {
   effectiveParallelism,
   concurrentPhaseCount,
   countHeldSuiteLocks,
+  defaultLaneCount,
+  yieldedSuiteSlotCount,
 } from "../scripts/full-suite-runner.ts";
 import { runOnce, classifyFailure, routeRed, shouldStopDispatch, shouldDispatchOnRed } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const RUNNER = path.join(REPO_ROOT, "plugin/scripts/full-suite-runner.ts");
+const SUITE_SLOT_LIB = path.join(REPO_ROOT, "plugin/scripts/suite-slot-lib.sh");
 const OUTER_TICK = path.join(REPO_ROOT, "plugin/loop/orchestrator-loop-tick.md");
 const INNER_TICK = path.join(REPO_ROOT, "plugin/loop/fast-mode-loop-tick.md");
 
@@ -141,12 +152,13 @@ function fakeSuite(scriptBody) {
 }
 
 /** Spawn the runner against a temp root with a fake command. */
-function runRunner({ root, command, laneCount, stateDir, runner, env = {}, serialConcurrency, lowconcConcurrency }) {
+function runRunner({ root, command, laneCount, stateDir, runner, buckets, env = {}, serialConcurrency, lowconcConcurrency }) {
   const args = ["--no-warnings", "--experimental-strip-types", RUNNER, "--root", root];
   if (stateDir) args.push("--state-dir", stateDir);
   if (command) args.push("--command", command);
   if (laneCount !== undefined && laneCount !== null) args.push("--lane-count", String(laneCount));
   if (runner !== undefined && runner !== null) args.push("--runner", String(runner));
+  if (buckets !== undefined && buckets !== null) args.push("--buckets", String(buckets));
   if (serialConcurrency !== undefined) args.push("--serial-concurrency", String(serialConcurrency));
   if (lowconcConcurrency !== undefined) args.push("--lowconc-concurrency", String(lowconcConcurrency));
   const mergedEnv = { ...process.env, ...env };
@@ -366,6 +378,25 @@ test("AC1 — an explicit --runner inner is recorded in BOTH the state and the v
   }
 });
 
+test("gap-verification-round-static-fail-no-record AC3 — --buckets <task-id> records taskId on the verification-round row", async () => {
+  // A bucket-mode run (--buckets <task-id>) verifies ONE task's bucket subset, so the round row must
+  // carry WHICH task it verified — the 31 historical static-check rows carried no taskId ⇒ unattributable
+  // (a reader had to hand-dig the log to know what the red was about).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-bucket-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8, buckets: "gap-test-bucket-task" });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const vr = lastRoundRecord(root);
+    assert.ok(vr, "a verification-round row was appended");
+    assert.equal(vr.taskId, "gap-test-bucket-task", "the bucket-mode row carries taskId (AC3)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC1 — an invalid --runner value fails closed (nothing written), not a silent fallback (gap-runner-field-hardcoded-outer-not-measurement)", async () => {
   // 硬规则 3b: an unreadable/unparseable input must NOT return a value identical to a valid one —
   // a garbage --runner must exit non-zero before any state write, never silently record "outer".
@@ -488,6 +519,70 @@ test("AC2/AC3 — a kill-on-red-TRUNCATED red round is distinguishable: serial/l
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-fan-in-red-bucket-run-not-recorded AC1/AC3 — --buckets red/green contrast ───────────────────
+// The fan-in bucket path now runs through full-suite-runner.ts --buckets. The runner is the single writer
+// of verification-round.jsonl GREEN AND RED; a red bucket round must land state=red (real suite_exit + fail
+// count + __BUCKETS__ marker), never left unrecorded (硬规则 3b: 「没跑过」与「跑了但红」同形).
+
+/** Write a fake `<root>/scripts/test.sh` that emits the given body (the runner's --buckets path spawns
+ *  `bash scripts/test.sh --buckets <task-id>` in cwd=root). */
+function fakeBucketTestSh(root, body) {
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "test.sh"), "#!/usr/bin/env bash\n" + body + "\n", { mode: 0o755 });
+}
+
+test("AC1 — full-suite-runner.ts --buckets records a RED bucket round (state=red + fail count + __BUCKETS__ marker) into verification-round.jsonl", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-bucket-red-"));
+  fakeBucketTestSh(root, [
+    'echo "__BUCKETS__ buckets=M files=3 full=0"',
+    'echo "# tests 5"',
+    'echo "# pass 3"',
+    'echo "# fail 2"',
+    'echo "# cancelled 0"',
+    "exit 1",
+  ].join("\n"));
+  try {
+    const child = runRunner({ root, buckets: "gap-test-red-bucket", laneCount: 8, runner: "inner" });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, `runner exits 1 on a red bucket round, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    assert.ok(fs.existsSync(vrf), "verification-round.jsonl written");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "red", "a red bucket round records state=red (not green, not absent)");
+    assert.equal(rec.fail, 2, "the fail count rides the record");
+    assert.equal(rec.buckets, "M", "the __BUCKETS__ marker is parsed into the buckets field");
+    assert.equal(rec.bucket_files, 3, "the __BUCKETS__ file count rides the record");
+    assert.equal(rec.runner, "inner", "explicit --runner inner is recorded");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 green contrast — full-suite-runner.ts --buckets records a GREEN bucket round (state=green) into verification-round.jsonl", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-bucket-green-"));
+  fakeBucketTestSh(root, [
+    'echo "__BUCKETS__ buckets=P files=2 full=0"',
+    'echo "# tests 4"',
+    'echo "# pass 4"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n"));
+  try {
+    const child = runRunner({ root, buckets: "gap-test-green-bucket", laneCount: 8, runner: "inner" });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on a green bucket round, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "green", "a green bucket round records state=green");
+    assert.equal(rec.fail, 0, "the fail count is 0 on green");
+    assert.equal(rec.buckets, "P", "the __BUCKETS__ marker is parsed into the buckets field");
+    assert.equal(rec.bucket_files, 2, "the __BUCKETS__ file count rides the record");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -1980,6 +2075,81 @@ test("AC1 — default laneCount is NPROC-derived (max(1, floor(nproc × oversub 
   }
 });
 
+// ── gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock (漏口②) ──────────────────────
+// The hold-cap watchdog (FULL_SUITE_LOCK_HOLD_MAX_S) releases the SLOT after T but the long suite keeps
+// its lanes; a joining (S+1)-th suite then derives nproc×oversub/S lanes too ⇒ 2 suites × 16 lanes on
+// 16 cores (double oversubscription — the lane formula did not account for the slot-less running suite).
+// Fix: the watchdog writes `<slot>.yielded` (holder pid) on fire, and defaultLaneCount() divides by
+// S + yielded so the joining suite takes fewer lanes. A lone suite (no yielded slot) keeps the full
+// nproc budget (AC2 no-regression —「S=1 时取满」is the formula's intent and must not be broken).
+
+test("gap-suite-lane-budget AC1 (behavioral) — the watchdog writes `<slot>.yielded` (holder pid) when it fires (让槽同时让 lane)", () => {
+  const script = `
+    set -u
+    . "${SUITE_SLOT_LIB}"
+    tmp="$(mktemp -d)"
+    base="\${tmp}/full-suite.lock"
+    exec {fd}>"\${base}.0"
+    flock -n "\${fd}" || { echo "PRE-FLOCK-FAILED"; exit 1; }
+    flag="\${tmp}/hold.flag"
+    : > "\${flag}"
+    wpid="$(spawn_suite_lock_hold_watchdog "\${fd}" "\${flag}" "$$" "2" "1" "\${base}.0")"
+    if [ -e "\${flag}" ]; then echo "SPAWN-NON-BLOCKING"; else echo "SPAWN-BLOCKED"; fi
+    sleep 3
+    if [ -e "\${base}.0.yielded" ]; then echo "YIELD-MARKER-PRESENT"; else echo "YIELD-MARKER-ABSENT"; fi
+    if [ -s "\${base}.0.yielded" ] && [ "$(cat "\${base}.0.yielded")" = "$$" ]; then echo "YIELD-MARKER-PID-MATCHES"; fi
+    wait "\${wpid}" 2>/dev/null || true
+    exec {fd}>&- 2>/dev/null || true
+    rm -rf "\${tmp}"
+  `;
+  const r = spawnSync("bash", ["-c", script], { encoding: "utf8", timeout: 15_000 });
+  assert.equal(r.status, 0, `watchdog script must exit 0, got status=${r.status} stderr=${r.stderr}`);
+  assert.match(r.stdout, /SPAWN-NON-BLOCKING/, `the watchdog spawn must NOT block the caller, got stdout:\n${r.stdout}`);
+  assert.match(r.stdout, /YIELD-MARKER-PRESENT/, `the watchdog must write <slot>.yielded on fire (not just release the slot), got stdout:\n${r.stdout}`);
+  assert.doesNotMatch(r.stdout, /YIELD-MARKER-ABSENT/, "the marker must exist after the cap (让槽同时让 lane)");
+  assert.match(r.stdout, /YIELD-MARKER-PID-MATCHES/, `the marker must carry the holder pid (liveness self-cleanup), got stdout:\n${r.stdout}`);
+  assert.match(r.stderr, /lock_hold_exceeded=1/, `the fail-loud marker is unchanged, got stderr:\n${r.stderr}`);
+});
+
+test("gap-suite-lane-budget AC1/AC2 (formula) — defaultLaneCount divides by S + yielded; a lone suite keeps the full nproc budget", () => {
+  const prevNproc = process.env.RESOURCE_GATE_NPROC;
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  const prevKnob = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  const prevOversub = process.env.QUAY_MAX_OVERSUBSCRIPTION;
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  // Hermetic lock base (no `.concurrency` scalar, no production `.yielded` files) so the knob drives S
+  // and the yielded count reads only this test's own markers (gap-suite-slot-ssot-i5-false-positive
+  // class: production lock state must not perturb a derived value).
+  const pinTmp = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lane-yield-"));
+  const pinBase = path.join(pinTmp, "full-suite.lock");
+  process.env.FULL_SUITE_LOCK_FILE = pinBase;
+  process.env.RESOURCE_GATE_NPROC = "16";
+  process.env.QUAY_MAX_CONCURRENT_SUITES = "1"; // S=1 ⇒ a single suite takes the whole host
+  process.env.QUAY_MAX_OVERSUBSCRIPTION = "1";
+  delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  try {
+    // AC2 negative control — no yielded marker ⇒ a lone suite keeps the full nproc budget (16).
+    assert.equal(yieldedSuiteSlotCount(), 0, "no marker ⇒ yielded count 0");
+    assert.equal(defaultLaneCount(), 16, "S=1, nproc=16, no yielded slot ⇒ 16 (single-run no-regression, AC2)");
+    // AC1 — a live yielded marker ⇒ the divisor bumps to S+1 ⇒ the joining suite takes fewer lanes.
+    fs.writeFileSync(`${pinBase}.0.yielded`, String(process.pid), "utf8");
+    assert.equal(yieldedSuiteSlotCount(), 1, "a live-pid marker ⇒ yielded count 1");
+    assert.equal(defaultLaneCount(), 8, "S=1 + 1 yielded ⇒ floor(16×1/(1+1)) = 8 (让 lane, AC1)");
+    // Self-cleanup — a dead-pid marker (the holder crashed / finished without a normal release) is
+    // ignored, so a stale marker can never permanently shrink the lone-suite budget.
+    fs.writeFileSync(`${pinBase}.0.yielded`, "99999999", "utf8"); // well above Linux pid_max ⇒ ESRCH
+    assert.equal(yieldedSuiteSlotCount(), 0, "a dead-pid marker is ignored (self-cleanup)");
+    assert.equal(defaultLaneCount(), 16, "a dead marker does not shrink the lone-suite budget");
+  } finally {
+    if (prevNproc === undefined) delete process.env.RESOURCE_GATE_NPROC; else process.env.RESOURCE_GATE_NPROC = prevNproc;
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES; else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevKnob === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES; else process.env.QUAY_MAX_CONCURRENT_SUITES = prevKnob;
+    if (prevOversub === undefined) delete process.env.QUAY_MAX_OVERSUBSCRIPTION; else process.env.QUAY_MAX_OVERSUBSCRIPTION = prevOversub;
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE; else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    fs.rmSync(pinTmp, { recursive: true, force: true });
+  }
+});
+
 test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the single definition point) with a clamped fallback", () => {
   // gap-single-flight-lock-2-slot-concurrent-suites — the concurrent-suite slot count S is the
   // SINGLE definition point for "how many suites may run at once" (旋钮②, current default 1 —
@@ -3368,6 +3538,74 @@ test("AC2 — a single-phase run records the block's values unchanged (no regres
     assert.equal(rec.fail, 0, "single-block fail unchanged");
     assert.equal(rec.cancelled, 0, "single-block cancelled unchanged");
     assert.equal(rec.tests, 5, "single-block tests unchanged");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — FORCE_COLOR ANSI-colored `ℹ pass/fail/cancelled` summary lines still parse to the four fields (gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ansi-"));
+  // #684/#685 regression: host FORCE_COLOR=3 forces node:test's spec reporter to emit ANSI color
+  // even when its stdout is redirected ⇒ the summary arrives as `\x1b[34mℹ pass N\x1b[39m` (ESC at
+  // line start) and the `^[#ℹ]` summary regexes never matched ⇒ pass/fail/cancelled/tests recorded
+  // 0. This colored stream reproduces that shape; the runner must strip ANSI and land the real
+  // counts (and stay green — the colored `ℹ fail 0` must not false-red).
+  const esc = "\x1b";
+  const colored = (s) => `echo '${esc}[34m${s}${esc}[39m'`;
+  const suite = [
+    'echo "selected 5 files (groups=main)"',
+    colored("ℹ tests 5"),
+    colored("ℹ pass 5"),
+    colored("ℹ fail 0"),
+    colored("ℹ cancelled 0"),
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const rec = JSON.parse(fs.readFileSync(path.join(root, ".quay", "verification-round.jsonl"), "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "green", "colored summary does not false-red");
+    assert.equal(rec.pass, 5, "pass parsed from the ANSI-colored ℹ pass line");
+    assert.equal(rec.fail, 0, "fail parsed from the ANSI-colored ℹ fail line");
+    assert.equal(rec.cancelled, 0, "cancelled parsed from the ANSI-colored ℹ cancelled line");
+    assert.equal(rec.tests, 5, "tests = pass+fail+cancelled parsed from colored lines (never 0)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — a FORCE_COLOR ANSI-colored `ℹ fail 1` summary still flips RED via the failure-detection path, with a CLEAN (ANSI-stripped) failure line (gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi — 5b third surface)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ansi-red-"));
+  // Third surface of the same FORCE_COLOR=3 defect family (5b): runner-red-parse.ts's
+  // FAILURE_PATTERNS carry `^[#ℹ]\s*fail\s+[1-9]` / `^[#ℹ]\s*cancelled\s+[1-9]` (red-detection,
+  // extracted from full-suite-runner.ts by gap-ac128-hub-split-harness-concerns). Before this fix the
+  // call site fed them the RAW colorized line, so `\x1b[34mℹ fail 1\x1b[39m` (ESC at line start)
+  // never matched and red was only caught by the exit-time aggregate backstop. Now the runner feeds
+  // the ANSI-stripped summaryLine, so the colorized summary flips red on the stream AND the recorded
+  // failure line is clean (no ESC bytes).
+  const esc = "\x1b";
+  const colored = (s) => `echo '${esc}[34m${s}${esc}[39m'`;
+  const suite = [
+    colored("ℹ tests 1"),
+    colored("ℹ pass 0"),
+    colored("ℹ fail 1"),
+    colored("ℹ cancelled 0"),
+    "exit 1",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "colored ℹ fail 1 flips state to red");
+    assert.equal(s.reason, "failed", "reason=failed (a real test failure)");
+    assert.ok(redPayload(s).length >= 1, `colored red carries a failure payload; got ${JSON.stringify(s)}`);
+    assert.equal(redPayload(s)[0].line, "ℹ fail 1", "the recorded failure line is ANSI-stripped (clean, no ESC bytes)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });

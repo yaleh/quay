@@ -76,6 +76,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { matchGlob, parseTouches } from "./touches-orthogonality-check.ts";
+import { writeJsonAtomic } from "./write-json-atomic.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -973,8 +974,7 @@ function writeCrashState(root: string, crashed: SuiteState): void {
     const onDisk = readJson<SuiteState>(p);
     if (!onDisk || onDisk.state !== "running") return; // already terminal / absent — nothing to do
     if (crashed.runId && onDisk.runId !== crashed.runId) return; // newer generation owns the file
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(crashed, null, 2) + "\n", "utf8");
+    writeJsonAtomic(p, crashed);
   } catch {
     // best-effort — the watchdog is a notifier, never a gate
   }
@@ -1394,8 +1394,7 @@ export async function run(argv: string[]): Promise<number> {
 
 // 测试辅助：把状态文件写到临时根（fixture 构造用）。
 export function writeSuiteState(root: string, state: SuiteState): void {
-  fs.mkdirSync(path.dirname(statePath(root)), { recursive: true });
-  fs.writeFileSync(statePath(root), JSON.stringify(state, null, 2) + "\n", "utf8");
+  writeJsonAtomic(statePath(root), state);
 }
 
 // 测试辅助：读事件日志。

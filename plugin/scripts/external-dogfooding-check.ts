@@ -38,7 +38,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 import { parseTrigger } from "./routine-scheduler.ts";
 import { isCovered, loadRegistry, parseRegistry } from "./drivable-workspace-check.ts";
 import type { Registry } from "./drivable-workspace-check.ts";
@@ -310,6 +310,7 @@ function printResult(name: string, ok: boolean, detail: string): boolean {
 
 async function main(argv: string[]): Promise<number> {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node external-dogfooding-check.ts <mode> [args]");
 
   if (args.includes("--selftest")) {
     return selftest() ? 0 : 1;

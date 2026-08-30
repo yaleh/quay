@@ -71,7 +71,7 @@ test("AC3 — partitionFailure marks an in-family file with in_family + kind, an
 
 test("AC4 — a not-in-family failure stays not-in-family and never auto-isolates", () => {
   const family = scanFamily(REPO_ROOT);
-  const nonFamily = partitionFailure({ line: "not ok 1 - x", file: "plugin/test/full-suite-runner.test.mjs" }, family);
+  const nonFamily = partitionFailure({ line: "not ok 1 - x", file: "plugin/test/known-load-sensitive.test.mjs" }, family);
   assert.equal(nonFamily.in_family, false);
   assert.equal(nonFamily.kind, undefined);
 
@@ -108,7 +108,7 @@ test("AC3 — applyTriage writes in_family + kind + isolate_rerun onto the state
     reason: "failed",
     failures: [
       { line: "not ok 1 - x", file: "plugin/test/cold-start-skill.test.mjs" },
-      { line: "not ok 1 - y", file: "plugin/test/full-suite-runner.test.mjs" },
+      { line: "not ok 1 - y", file: "plugin/test/known-load-sensitive.test.mjs" },
     ],
   };
   const { state: out, inFamily, notInFamily, command } = applyTriage(state, family, REPO_ROOT);
@@ -146,7 +146,7 @@ test("AC6 — unverifiedFamilyFailures counts in-family failures WITHOUT an isol
     reason: "failed",
     failures: [
       { line: "not ok 1 - x", file: "plugin/test/cold-start-skill.test.mjs", in_family: true, kind: "wall-clock" },
-      { line: "not ok 1 - y", file: "plugin/test/full-suite-runner.test.mjs", in_family: false },
+      { line: "not ok 1 - y", file: "plugin/test/known-load-sensitive.test.mjs", in_family: false },
     ],
   };
   const unverified = unverifiedFamilyFailures(state.failures);
@@ -178,7 +178,7 @@ test("Contract --partition — partitions a red state and writes in_family/kind/
     reason: "failed",
     failures: [
       { line: "not ok 1 - x", file: "plugin/test/runner-grouping-list-groups.test.mjs" },
-      { line: "not ok 1 - y", file: "plugin/test/full-suite-runner.test.mjs" },
+      { line: "not ok 1 - y", file: "plugin/test/known-load-sensitive.test.mjs" },
     ],
   });
   const r = runCli(["--partition"], file);

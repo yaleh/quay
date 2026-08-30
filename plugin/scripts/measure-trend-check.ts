@@ -366,6 +366,13 @@ function parseArg(argv: string[], name: string): string | undefined {
 const isDirect = process.argv[1] && path.basename(process.argv[1]).replace(/\.(?:js|ts|mjs)$/, "") === "measure-trend-check";
 if (isDirect) {
   const argv = process.argv.slice(2);
+  if (argv.includes("--help") || argv.includes("-h")) {
+    process.stdout.write(
+      `measure-trend-check.ts — land per-file test durations into .quay/measure-history.jsonl, then report single-file duration GROWTH.
+usage: node --experimental-strip-types plugin/scripts/measure-trend-check.ts [--history <file>] [--log <file>] [--relative-factor <n>] [--absolute-ms <n>] [--small-test-ms <n>] [--json] [--no-land]\n`,
+    );
+    process.exit(0);
+  }
   const historyFile = parseArg(argv, "--history") ?? DEFAULT_HISTORY_FILE;
   const logFile = parseArg(argv, "--log") ?? DEFAULT_LOG_FILE;
   const relativeFactorRaw = Number(parseArg(argv, "--relative-factor") ?? String(DEFAULT_RELATIVE_FACTOR));

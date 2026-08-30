@@ -212,6 +212,7 @@ export function checkLedger(fullText: string, opts: CheckLedgerOpts = {}): Ledge
 async function main(argv: string[]): Promise<number> {
   const fs = await import("node:fs");
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node vmeta-lag-check.ts [--counter <N>] [--threshold <K>] <v-meta-ledger.md>");
   let counterOverride: number | undefined;
   let thresholdOverride: number | undefined;
   const files: string[] = [];
@@ -247,6 +248,7 @@ async function main(argv: string[]): Promise<number> {
 
 // Run the CLI only when this file is the entry point (not when imported by tests / a quay gate).
 import { fileURLToPath } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isDirect) {
   main(process.argv).then((code) => process.exit(code));

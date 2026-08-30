@@ -1,6 +1,12 @@
 // outer-anchor-check.ts — AC80 三层 prompt 正本 + 不变式检查器（outer + inner 两层的 CronCreate 锚）。
 // (tasks/gap-ac80-prompt-canonical-and-invariant-checker, AC1-AC4 + DoD).
 //
+// ⛔ RETIRED-WITH-RETIRING-LAYER (gap-b0-retirement-precondition-checker-call-surface)：本 checker 只被
+//   outer 执行核（orchestrator-tick-core.md A23，AC81 锚核实）与同属退役层的 outer-cron-registry.ts 引用，
+//   无任何退役层之外的留存调用面。outer/inner 的 CronCreate 锚将随两层退役而消失（SPEC §2.3b），
+//   本检查随之失去对象——【随退役层显式退役】（与 outer-cron-registry.ts 一并），非静默孤儿。
+//   该标记被 outer-retirement-precondition-check.ts 机械识别为「已处置」。
+//
 // 回答的问题（@instrument）：「outer/inner 的 CronCreate 锚 prompt 是否（①）有 git 跟踪正本、
 //   （②）保持纯指针形式（不渗入状态/决策）、且（③）正本内容与真正投进 CronCreate 的活 prompt 逐字节一致？」
 //
@@ -46,6 +52,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+
+import { verified, notEvaluated, failed, driverResultToExit } from "./checker-io.ts";
+import type { DriverResult } from "./checker-io.ts";
 
 export const EXIT_OK = 0;
 export const EXIT_VIOLATED = 1;
@@ -218,6 +227,9 @@ export interface CheckResult {
     notEvaluatedReason?: string;
   };
   uncommitted: string;
+  /** B4 (gap-b4-checker-reuse-driver-result): 判定收敛到 driver-result 的 DriverResult<T> 词表。
+   *  `code` 由 driverResultToExit(driverResult) 派生——checker 不再自造第三态（硬规则 3b）。 */
+  driverResult: DriverResult<unknown>;
 }
 
 export function checkAnchor(opts: CheckOptions): CheckResult {
@@ -228,12 +240,15 @@ export function checkAnchor(opts: CheckOptions): CheckResult {
     : path.join(root, cfg.canonicalRel);
   const relPath = opts.canonicalFileOverride ? canonicalPath : cfg.canonicalRel;
 
-  // 正本缺失 ⇒ NOT-EVALUATED（独立取值，非通过；硬规则 3b）。
+  // 正本缺失 ⇒ NOT-EVALUATED（独立取值，非通过；硬规则 3b）——由 DriverResult.not-evaluated 承载。
   if (!fs.existsSync(canonicalPath)) {
+    const driverResult = notEvaluated(
+      `MISSING-正本: ${relPath} 不存在（该层正本尚未落地；重挂 cron 时无对照物可 diff）`,
+    );
     return {
       ok: false,
-      code: EXIT_NOT_EVALUATED,
-      reason: `MISSING-正本: ${relPath} 不存在（该层正本尚未落地；重挂 cron 时无对照物可 diff）`,
+      code: driverResultToExit(driverResult),
+      reason: driverResult.reason,
       layer,
       canonicalPath,
       canonical: null,
@@ -249,15 +264,19 @@ export function checkAnchor(opts: CheckOptions): CheckResult {
         notEvaluatedReason: "正本缺失",
       },
       uncommitted: "",
+      driverResult,
     };
   }
 
   const canonical = extractCanonical(fs.readFileSync(canonicalPath, "utf8"), layer);
   if (canonical === null) {
+    const driverResult = notEvaluated(
+      `MISSING-正本: ${relPath} 内未找到 ${INNER_ANCHOR_BEGIN_MARK}…${INNER_ANCHOR_END_MARK} 段（inner 正本段尚未落地）`,
+    );
     return {
       ok: false,
-      code: EXIT_NOT_EVALUATED,
-      reason: `MISSING-正本: ${relPath} 内未找到 ${INNER_ANCHOR_BEGIN_MARK}…${INNER_ANCHOR_END_MARK} 段（inner 正本段尚未落地）`,
+      code: driverResultToExit(driverResult),
+      reason: driverResult.reason,
       layer,
       canonicalPath,
       canonical: null,
@@ -273,6 +292,7 @@ export function checkAnchor(opts: CheckOptions): CheckResult {
         notEvaluatedReason: "正本段缺失",
       },
       uncommitted: "",
+      driverResult,
     };
   }
 
@@ -320,14 +340,20 @@ export function checkAnchor(opts: CheckOptions): CheckResult {
     }
   }
 
-  let code = EXIT_OK;
+  // 判定收敛到 DriverResult 词表（B4）：code 由 driverResultToExit 派生，checker 不自造第三态。
+  const driverResult: DriverResult<unknown> =
+    findings.length > 0
+      ? failed(findings.join(" / "))
+      : !byteCompare.evaluated
+        ? notEvaluated(byteCompare.notEvaluatedReason ?? "未提供活 prompt")
+        : verified(canonical, "正本存在 + 指针形式合格 + 判据3 逐字节一致");
+
+  const code = driverResultToExit(driverResult);
   let reason = "OK";
-  if (findings.length > 0) {
-    code = EXIT_VIOLATED;
-    reason = "VIOLATED: " + findings.join(" / ");
-  } else if (!byteCompare.evaluated) {
-    code = EXIT_NOT_EVALUATED;
-    reason = "NOT-EVALUATED: 指针形式合格，但判据3 未评估——" + (byteCompare.notEvaluatedReason ?? "未提供活 prompt");
+  if (driverResult.state === "failed") {
+    reason = "VIOLATED: " + driverResult.reason;
+  } else if (driverResult.state === "not-evaluated") {
+    reason = "NOT-EVALUATED: 指针形式合格，但判据3 未评估——" + driverResult.reason;
   }
 
   return {
@@ -342,6 +368,7 @@ export function checkAnchor(opts: CheckOptions): CheckResult {
     pointerForm: { ok: pointerFindings.length === 0, findings: pointerFindings },
     byteCompare: byteCompare as CheckResult["byteCompare"],
     uncommitted,
+    driverResult,
   };
 }
 

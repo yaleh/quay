@@ -74,6 +74,18 @@ run_static_checks() {
   echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
   # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
   run_checker "it0-split-or-commit-check" bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
+  echo "== checker mechanical-spine check (gap-b1-mechanical-spine-doc-checker, AC1/AC2/AC3) =="
+  # Mechanical spine (B1, SPEC-checker-mechanical-spine-contract-2026-08-28.md): every checker's
+  # exit-code vocabulary must be within {0,1,2,3} (0=PASS, 1=FAIL, 2=usage/env-error,
+  # 3=NOT-EVALUATED) and a --json claim must actually emit JSON. A NEW violation (not on the
+  # shrink-only exemption list plugin/scripts/checker-mechanical-spine-exemptions.json) or an ADDED
+  # exemption entry red-lights the commit (set -euo pipefail abort) — a fixed file can never
+  # silently drift back. Whole-store scan of the checker corpus (plugin/scripts/*-check.{ts,sh}),
+  # cheap (read 110 files + regex). Negative/positive controls:
+  # plugin/scripts/checker-mutation-cases/checker-mechanical-spine-check.sh + the checker's own
+  # plugin/test/checker-mechanical-spine-check.test.mjs.
+  # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
+  run_checker "checker-mechanical-spine-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/checker-mechanical-spine-check.ts" --root "${repo_root}"
   echo "== test-framework-policy check (gap-no-test-framework-policy-for-new-tests, AC1/AC3-AC5) =="
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
@@ -321,15 +333,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/obligation-ledger.ts plugin/scripts/obligation-ledger-check.ts plugin/scripts/obligation-discharge-agent.ts plugin/test/obligation-ledger.test.mjs plugin/test/obligation-ledger-check.test.mjs
   run_checker "obligation-ledger-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/obligation-ledger-check.ts" --root "${repo_root}"
-  echo "== delivery-inventory drift gate (gap-delivery-inventory-drift-needs-file-add-gate, AC2) =="
-  # The file-set change gate on the delivery-inventory snapshot (candidate B): `--diff-filter=AD` on plugin/scripts/ — git committed range + working-tree staged/unstaged/untracked — is the ONLY
-  # trigger; when it fires, the SAME change set must update docs/proposals/quay-product-outline.md
-  # §6 (the derived DELIVERY-INVENTORY snapshot). Content-only edits to existing scripts do NOT
-  # trigger (invariant content_only_change_skipped = 1). FAIL-closed: a plugin/scripts A/D without
-  # an outline update exits 1. 2026-08-10 red family (r216/r222/r223/r226/r248/r253) fixed at the
-  # root cause (7d2faf06 fixed the symptom only).
+  echo "== delivery-inventory drift gate (gap-drift-gate-covers-only-plugin-scripts-not-workflows, AC2) =="
+  # The file-set change gate on the plugin/workflows mirror: `--diff-filter=AD` on .claude/workflows/
+  # — git committed range + working-tree staged/unstaged/untracked — is the ONLY trigger; when it
+  # fires, the SAME change set must mirror into plugin/workflows/. Content-only edits to existing
+  # workflows do NOT trigger (invariant content_only_change_skipped = 1). FAIL-closed: a
+  # .claude/workflows A/D without a plugin/workflows mirror touch exits 1. The ORIGINAL trigger on
+  # the outline §6 DELIVERY-INVENTORY snapshot is RETIRED (gap-delivery-inventory-check-time-computation):
+  # the snapshot is now computed at check time by verify-delivery-surface.ts --inventory, so there is
+  # nothing for a plugin/scripts A/D to co-touch.
   # @static-tier change
-  # @static-object plugin/scripts/ docs/proposals/quay-product-outline.md
+  # @static-object .claude/workflows/ plugin/workflows/
   run_checker "delivery-inventory-drift-gate" bash "${repo_root}/plugin/scripts/delivery-inventory-drift-gate.sh" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
@@ -389,6 +403,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/orchestrator-tick-core.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md CLAUDE.md plugin/scripts/integration-branch-model.ts plugin/scripts/integration-batch-merge.sh orchestration/SPEC-branching-model-integration-branch-2026-08-05.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/retired-clause-check.ts plugin/scripts/checker-mutation-cases/retired-clause-check.sh plugin/test/retired-clause-check.test.mjs
   run_checker "retired-clause-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/retired-clause-check.ts" --root "${repo_root}"
+  echo "== outer-retirement-precondition check (gap-b0-retirement-precondition-checker-call-surface, SPEC §2.3b B0) =="
+  # B0 退役前置 (SPEC §2.3b): 退役 outer 前，枚举 outer 执行核 (orchestrator-tick-core.md) 直接引用的
+  # `-check.{ts,sh}` checker，逐个判定留存调用面（static-gate 注册表 / 外部代码引用，传递闭包）。
+  # 只被退役层引用（orphan）的 checker 必须带 RETIRED-WITH-RETIRING-LAYER 标记 = 显式退役；无标记 ⇒
+  # RED (exit 1, fail-closed) — 退役后静默孤儿被前置挡住。NOT-EVALUATED (exit 3) 当执行核缺失/零引用
+  # （独立取值，非通过，硬规则 3b/4）。负控制由 mutation case + 单测钉住。真实仓库当前 N=0
+  # （outer-anchor-check.ts 带标记）。whole-store 引用扫描 ⇒ full（scoped 模式推迟到 full-suite 门）。
+  # @static-tier full
+  run_checker "outer-retirement-precondition-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/outer-retirement-precondition-check.ts" --root "${repo_root}"
   echo "== ac61-staleness-disposition check (tasks/gap-ac61-staleness-list-item-disposition, AC61 判据1-3 + DoD 负控制) =="
   # AC61 清单逐条处置 enforcement: the task file's `## AC61 处置记录` section must carry a record for
   # EVERY A-1..A-7 / B-1..B-4 item (迁出带落点映射 或 经核实仍有效+读数). CHECK-A (判据1/DoD 负控):
@@ -480,24 +503,6 @@ run_static_checks() {
   # verify worktree. Pointing --root at the main checkout makes the worktree round read the SAME data
   # as a main run ⇒ verdicts identical (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
   run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${main_root}" --baseline 19fea6f0 --json
-  echo "== fan-in-workflow-check (AC78 判据2 (a)(b)(c) — fan-in 是否真的走了 fan-in-execute workflow) =="
-  # AC78 moves the fan-in steps INTO a workflow script (.claude/workflows/fan-in-execute.js); A6
-  # stops being a step checklist and becomes a CHECK. Wired here as a code-class 每轮 gate (NOT the
-  # zero-wiring disease fan-in-ff-protocol-check cured): for every fan-in task AFTER the workflow
-  # landed (boundary = git commit time of the commit that added fan-in-execute.js), the checker
-  # verifies (a) a Workflow(fan-in-execute) call record exists in the session transcripts, and (c) the
-  # lock event's agentId is a real subagent id (top-level <id>.jsonl ⇒ RED — the old main-thread
-  # form, AC72/AC73). 差集非空 ⇒ RED. Pre-workflow fan-in is excluded by the time boundary (the
-  # manager 13−1=12 vs 真值 6 over-count lesson). NOT-EVALUATED (never conflated with green) when no
-  # fan-in follows the boundary or the workflow has not landed.
-  # @static-tier change
-  # @static-object .claude/workflows/fan-in-execute.js plugin/scripts/fan-in-workflow-check.ts plugin/scripts/fan-in-ff-merge.sh plugin/loop/fast-mode-tick-core.md plugin/test/fan-in-workflow-check.test.mjs
-  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the lock-events + dispatch
-  # records + session transcripts this checker audits are MAIN-checkout state, absent from the one-shot
-  # verify worktree. Pointing --root at the main checkout makes the worktree round read the SAME data
-  # as a main run ⇒ verdicts identical (AC3: gap-ac81 caught red in the round, never masked); on a main
-  # run main_root == repo_root ⇒ unchanged (AC2: real drift stays red).
-  run_checker "fan-in-workflow-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-workflow-check.ts" --root "${main_root}" --json
   echo "== fan-in-materialize-check (gap-workflow-scriptpath-materialize-falls-back-main — workflow scriptPath 静默回退主检出版) =="
   # Detects the M176-family materialization fallback: a bootstrap-HIT fan-in dispatched with
   # scriptPath=<worktree>/.claude/workflows/fan-in-execute.js must run the WORKTREE version (so the

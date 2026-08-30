@@ -28,7 +28,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 
 // ── Flag patterns (batch-style SELF-REPORT vocabulary) ──────────────────────────────────────────────
 //
@@ -163,6 +163,7 @@ function parseArgs(argv) {
 }
 
 export function main(argv) {
+  if (argv.includes("--help") || argv.includes("-h")) helpExit("usage: node self-report-vocab-check.ts [--root <dir>] [--count <n>] [--convergence-rounds <n>] [--state <file>] [--no-state] [--json] [--text <s>] [--stdin]");
   const args = parseArgs(argv);
 
   let textSource;

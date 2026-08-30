@@ -28,6 +28,7 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { helpExit } from "./gate-script-base.ts";
 
 let failures = 0;
 function ok(cond: boolean, msg: string): void {
@@ -39,6 +40,7 @@ function ok(cond: boolean, msg: string): void {
 }
 
 const file = process.argv[2];
+if (file === "--help" || file === "-h") helpExit("usage: node --experimental-strip-types plugin/scripts/codex-stage1-live-proof-check.ts <milestone-evidence.json>");
 if (!file) {
   console.error("usage: node plugin/scripts/codex-stage1-live-proof-check.ts <milestone-evidence.json>");
   process.exit(2);

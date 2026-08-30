@@ -20,8 +20,10 @@
 
 import fs from "node:fs";
 import { checkTask } from "./task-schema.ts";
+import { helpExit } from "./gate-script-base.ts";
 
 const files = process.argv.slice(2);
+if (files.includes("--help") || files.includes("-h")) helpExit("usage: node task-schema-check.ts <task-file.md> [<task-file.md> ...]");
 if (files.length === 0) {
   console.error("usage: node task-schema-check.mjs <task-file.md> [<task-file.md> ...]");
   process.exit(2);

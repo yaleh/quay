@@ -15,7 +15,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 export const GROUP = "quay-deliver";
 export const MEMBERS: InstrumentSpec[] = [
   { name: "send-keys-reliable", file: "send-keys-reliable.sh", kind: "bash", description: "可靠 send-keys（C-u→文本→Enter 三段；ADR-016 驱动）" },
-  { name: "supervisor-preempt", file: "supervisor-preempt.sh", kind: "bash", description: "派发/抢占/停止信号（preempt / halt-check）" },
+  { name: "supervisor-preempt", file: "supervisor-preempt.sh", kind: "bash", description: "派发/抢占/停止信号（preempt / preempt-all / preempt-task）" },
   { name: "supervisor-bus-identity", file: "supervisor-bus-identity.sh", kind: "bash", description: "tmux 总线身份/消息汇总" },
   { name: "supervisor-deliver", file: "supervisor-deliver.sh", kind: "bash", description: "跨项目送达（--root 选对 transcript）" },
   { name: "inner-blocked-signal", file: "inner-blocked-signal.ts", kind: "ts", description: "内层阻塞信号检测（--detect-stop / 心跳）" },

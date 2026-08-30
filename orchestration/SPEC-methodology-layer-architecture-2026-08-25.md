@@ -288,11 +288,17 @@ workflows                                           6
 | `drive-contract-check.ts` | `red-on-omission-audit.ts` + mutation-cases | ✅ 安全 |
 | `monitor-mount-check.sh` | `quay-session.ts` · `manager-start.sh` · `quay-init.sh` | ✅ 安全 |
 | `drive-target-check.sh` | `os-anchor-watchdog.sh` · `send-keys-reliable.sh` | ✅ 安全 |
-| **`outer-anchor-check.ts`** | 仅 `outer-cron-registry.ts`（**同属退役层**） | ⚠️ **真正绑死在退役层上的唯一一个** |
+| **`outer-anchor-check.ts`** | 仅 `outer-cron-registry.ts`（**同属退役层**） | ✅ **已显式退役**（gap-b0-retirement-precondition-checker-call-surface：文件头 `RETIRED-WITH-RETIRING-LAYER` 标记，与 outer-cron-registry.ts 一并随退役层退役） |
 
 ⊢ **结论：checker 侧的退役风险面比预期小得多——只有 1 个真正需要在退役前处置。**
 ⊢ **但这条必须写成退役的【前置检查】而非事后清理**：判据形如「退役 outer 前，枚举其执行核引用的
 全部 checker，逐个确认存在留存调用面或显式退役」。**没有这个前置，孤儿是静默产生的。**
+⊢ **已落地（2026-08-28，B0 唯一有时限批次）**：`plugin/scripts/outer-retirement-precondition-check.ts`
+把上面这条判据机械化——枚举 outer 执行核引用的 `-check.{ts,sh}` checker，判定留存调用面
+（static-gate 注册表 / 外部代码引用，传递闭包），孤儿必须带 `RETIRED-WITH-RETIRING-LAYER` 标记
+（= 显式退役），否则 RED（fail-closed）。注册进 static-gate（`@static-tier full`）+ capability-catalog +
+mutation case + 单测负控制；执行核「退役/迁出条款纪律」⑤ 把它列为退役外层本身前的必须步骤。
+`outer-anchor-check.ts` 当前 N=1 → 已处置 → N=0。
 ⊢ ⚠️ **未查**：manager 侧那 6 个、以及 cron/loop 换成短会话后 `manager-tick-readings.ts` 的
 调用面是否同样受影响。**manager 自身的退役形态尚未定，留待人裁定后再补测。**
 

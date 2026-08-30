@@ -26,6 +26,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { deriveObligationId } from "./obligation-discharge-agent.ts";
+import { helpExit } from "./gate-script-base.ts";
 
 interface Obligation {
   id: string;
@@ -135,6 +136,7 @@ export function checkLedger(file: string): LedgerCheckResult {
 }
 
 function main(argv: string[]): void {
+  if (argv.includes("--help") || argv.includes("-h")) helpExit("usage: node obligation-ledger-check.ts [--root <dir>] [--ledger <file>]");
   const rootIdx = argv.indexOf("--root");
   const root = rootIdx >= 0 && argv[rootIdx + 1] ? argv[rootIdx + 1] : process.cwd();
   const ledgerIdx = argv.indexOf("--ledger");

@@ -7,18 +7,20 @@
 // PREEMPTIVE form: `.halt` takes effect at ANY execution point, enforced in CODE not prose.
 //
 // Contract surface (gap-supervisor-preemption ## Contract):
-//   measure   preemption_halt_no_new_subagent = `bash <抢占原语> halt-check` stdout 的字段
+//   measure   preemption_halt_no_new_subagent = preempt-all 后进程级计数不增长
 //   band      preemption_halt_no_new_subagent = 0  (halt 后新派发 subagent 计数不增长)
 //   invariant preemption_is_process_level     = 1  (抢占不依赖被抢占方主动调用——不可被绕过)
+//   (The former `halt-check` .halt-read subcommand was retired 2026-08-29 — gap-retire-halt-file-driver-based.)
 //
 // Coverage map (task ACs):
 //   AC1 — preempt(target) exists and is a stop signal at ANY execution point; the negative
 //         control "halt 后不再产生新 subagent" (process-level count does not grow) is tested.
-//   AC2 — `.halt` enforcement moved to code: the slot-refill dispatch recommender is blocked
-//         (should_refill=false) when `.halt` is present — a mechanical mount point, mid-flow.
+//   AC2 — RETIRED (gap-retire-slot-refill-halt-mount): the slot-refill `.halt` dispatch mount
+//         (should_refill=false) was removed — the inner dispatch loop is dead; the `.halt` state
+//         signal survives via supervisor-preempt.sh (this preempt primitive) + manager-tick-readings.ts
+//         (manager cross-project halt observation).
 //   AC4 — `claude -p` form: preempt of a PID = `kill <pid>` (the OS is the preemption primitive).
 //   AC5 — node:test + // @test-group governance.
-//   Contract — halt-check's `halted=` field; fail-closed on an unreadable sentinel.
 //
 // Run: scripts/test.sh plugin/test/supervisor-preempt.test.mjs
 
@@ -32,7 +34,6 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "supervisor-preempt.sh");
-const SLOT_REFILL = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
 
 if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
   test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
@@ -70,61 +71,6 @@ function waitForExit(pid, timeoutMs = 2000) {
 function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
-
-// ── Contract: halt-check — the `halted=` measure field ────────────────────────────────────────────
-
-test("halt-check: no .halt ⇒ halted=false, reason empty (Contract measure)", () => {
-  const root = makeRoot();
-  try {
-    const r = runPreempt(["halt-check", "--root", root]);
-    assert.equal(r.status, 0);
-    assert.match(r.stdout, /^halted=false$/m);
-    assert.match(r.stdout, /^reason=$/m);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("halt-check: .halt present ⇒ halted=true with its content as reason", () => {
-  const root = makeRoot();
-  try {
-    fs.writeFileSync(path.join(root, ".halt"), "manual stop | 解除: x", "utf8");
-    const r = runPreempt(["halt-check", "--root", root]);
-    assert.equal(r.status, 0);
-    assert.match(r.stdout, /^halted=true$/m);
-    assert.match(r.stdout, /^reason=manual stop \| 解除: x$/m);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("halt-check: empty .halt still halts (the sentinel is the pause), reason names empty", () => {
-  const root = makeRoot();
-  try {
-    fs.writeFileSync(path.join(root, ".halt"), "", "utf8");
-    const r = runPreempt(["halt-check", "--root", root]);
-    assert.equal(r.status, 0);
-    assert.match(r.stdout, /^halted=true$/m);
-    assert.match(r.stdout, /empty/);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("halt-check: unreadable .halt is FAIL-CLOSED halted=true (never fail open)", () => {
-  const root = makeRoot();
-  try {
-    fs.writeFileSync(path.join(root, ".halt"), "stop", "utf8");
-    fs.chmodSync(path.join(root, ".halt"), 0o000);
-    const r = runPreempt(["halt-check", "--root", root]);
-    assert.equal(r.status, 0);
-    assert.match(r.stdout, /^halted=true$/m);
-    assert.match(r.stdout, /FAIL-CLOSED/);
-  } finally {
-    fs.chmodSync(path.join(root, ".halt"), 0o600);
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
 
 // ── AC4 / AC1-process: preempt <pid> = kill — the `claude -p` form (OS is the primitive) ───────────
 
@@ -238,104 +184,6 @@ test("AC1: preempt-all with .halt but no resolvable targets fails loud (did not 
     const r = runPreempt(["preempt-all", "--root", root]);
     assert.equal(r.status, 1);
     assert.match(r.stderr, /no targets\/pids resolved to signal/);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-// ── AC2: .halt mechanical mount point in the dispatch recommender (slot-refill) ───────────────────
-
-function writeDispatchableTask(root, id) {
-  const body = [
-    "---",
-    `id: ${id}`,
-    `title: fixture ${id}`,
-    "status: ready",
-    "labels:",
-    "  - gap",
-    "parent: null",
-    "extra:",
-    "  schema: v1",
-    "---",
-    "",
-    "**type:** execution",
-    "## Proposal",
-    "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
-    "## Touches",
-    `- tasks/${id}.md`,
-    `- code/${id}.ts (new)`,
-    "## Acceptance Criteria",
-    "- [ ] an AC item",
-    "## Definition of Done",
-    "standard DoD",
-  ].join("\n");
-  fs.writeFileSync(path.join(root, "tasks", `${id}.md`), body, "utf8");
-}
-
-function slotRefill(root) {
-  // AC115 (SPEC-worker-driven-inner §5 阶段 1): slot-refill's --in-flight/--running param passing
-  // is RETIRED — the in-flight count is now the worker driver's DIRECT child-process count. A bare
-  // invocation reports measurement_source="not-measured" and NULLS the slot family (fail-closed),
-  // which would break these .halt assertions (they need a measured 0-in-flight view). The .halt
-  // mechanism under test is orthogonal to in-flight measurement, so pass an explicit --in-flight-count 0
-  // (the driver's count when nothing is driven) to exercise the .halt mount point directly.
-  const r = spawnSync(
-    "node",
-    ["--experimental-strip-types", SLOT_REFILL, "--root", root, "--cap", "3", "--in-flight-count", "0"],
-    { encoding: "utf8" }
-  );
-  assert.equal(r.status, 0, `slot-refill exit 0 (stderr: ${r.stderr})`);
-  return JSON.parse(r.stdout);
-}
-
-test("AC2: .halt present ⇒ slot-refill (dispatch recommender) is blocked mid-flow, should_refill=false", () => {
-  const root = makeRoot();
-  try {
-    writeDispatchableTask(root, "gap-halt-a");
-    // Control: no .halt → would dispatch.
-    const r1 = slotRefill(root);
-    assert.equal(r1.halted, false);
-    assert.equal(r1.should_refill, true, "a dispatchable candidate and free slots ⇒ refill (control)");
-    // Place .halt → mechanically blocked, regardless of free slots/candidates.
-    fs.writeFileSync(path.join(root, ".halt"), "manual stop", "utf8");
-    const r2 = slotRefill(root);
-    assert.equal(r2.halted, true);
-    assert.equal(r2.halt_reason, "manual stop");
-    assert.equal(r2.should_refill, false, "halt blocks dispatch at ANY recommendation point");
-    assert.match(r2.no_refill_reason, /halted \(preemption: \.halt present — manual stop/);
-    assert.deepEqual(r2.recommended, [], "no candidate recommended while halted");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("AC2: .halt blocking is PREEMPTIVE — free slot + candidate + halt ⇒ still blocked (mid-flow, not tick-boundary)", () => {
-  const root = makeRoot();
-  try {
-    writeDispatchableTask(root, "gap-halt-b");
-    // 3 free slots, 1 dispatchable candidate, in-flight is EMPTY — under the old tick-step-0
-    // rule this mid-flow state would dispatch; the code mount point blocks it.
-    fs.writeFileSync(path.join(root, ".halt"), "stop", "utf8");
-    const r = slotRefill(root);
-    assert.equal(r.slots_free, 3);
-    assert.equal(r.in_flight_count, 0);
-    assert.equal(r.pool, 1);
-    assert.equal(r.should_refill, false, "halt wins over free slots — the stop is at ANY point");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("AC2: removing .halt restores dispatch (the sentinel is the single switch)", () => {
-  const root = makeRoot();
-  try {
-    writeDispatchableTask(root, "gap-halt-c");
-    fs.writeFileSync(path.join(root, ".halt"), "stop", "utf8");
-    assert.equal(slotRefill(root).should_refill, false);
-    fs.rmSync(path.join(root, ".halt"));
-    const r = slotRefill(root);
-    assert.equal(r.halted, false);
-    assert.equal(r.should_refill, true, "removing .halt unblocks dispatch");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
