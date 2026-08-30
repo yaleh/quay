@@ -42,12 +42,12 @@ task 的**状态/body/updated 三类读面应统一以 develop git ref 为单一
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，主修）：构造「主检出 status=ready、develop status=done」的 fixture → /tasks 行 **与** /task/<id> 详情页都按 develop 显示 done；（⛔ 仍按主检出 ready ⇒ 假；列表 done/详情 ready 的自相矛盾即缺陷形）。— 单测：serve-task.test.mjs 断言两个读面读 develop。
-- [ ] AC2（能取假，updated 同源）：develop 有该文件时，updated 显示 develop 末次提交时刻；**develop 翻 done 之后对 disk 写一次（bump disk mtime）→ 显示的 updated 不变**；（⛔ 若 updated 跟随 disk mtime ⇒ 假）。— 单测：写盘后断言相对时间输入仍是 develop 时刻。
-- [ ] AC3（能取假，分歧显式）：disk 与 develop 的 status 或 title 不一致 → 列表与详情页渲染可见分歧标记（不静默取一边）；一致时无标记。— 单测：分歧 case 断言标记存在、收敛 case 断言无。
-- [ ] AC4（能取假，机制）：变更集无 `git checkout develop` / `git worktree add *develop*`（grep 负向断言）；新增读函数只 exec `git show`/`git cat-file`/`git log`。
-- [ ] AC5（回归）：fresh 任务（disk==develop）显示不变；既有 dispatch 单测（ready-pool-check 129 + slot-refill 113）与 web 单测全绿；1500+ 任务下 /tasks 渲染延迟可接受（批量读 + TTL 生效，不逐任务 git show）。
-- [ ] AC6（能取假，晋升路径读 develop——ff-propagate 写侧硬前置）：`ready-pool-check --apply`（promotion-driver 晋升路径）决策读 develop——`applyPromotions` 走 `taskReadRef: develop`；单测：构造「develop 已翻 ready、盘上仍 todo」fixture → `--apply` 不重复晋升（develop 无新增同内容提交、晋升判定读 develop 非盘上）；（⛔ 仍读盘上、重复晋升 ⇒ 假）。
+- [x] AC1（能取假，主修）：构造「主检出 status=ready、develop status=done」的 fixture → /tasks 行 **与** /task/<id> 详情页都按 develop 显示 done；（⛔ 仍按主检出 ready ⇒ 假；列表 done/详情 ready 的自相矛盾即缺陷形）。— 单测：serve-task.test.mjs 断言两个读面读 develop。
+- [x] AC2（能取假，updated 同源）：develop 有该文件时，updated 显示 develop 末次提交时刻；**develop 翻 done 之后对 disk 写一次（bump disk mtime）→ 显示的 updated 不变**；（⛔ 若 updated 跟随 disk mtime ⇒ 假）。— 单测：写盘后断言相对时间输入仍是 develop 时刻。
+- [x] AC3（能取假，分歧显式）：disk 与 develop 的 status 或 title 不一致 → 列表与详情页渲染可见分歧标记（不静默取一边）；一致时无标记。— 单测：分歧 case 断言标记存在、收敛 case 断言无。
+- [x] AC4（能取假，机制）：变更集无 `git checkout develop` / `git worktree add *develop*`（grep 负向断言）；新增读函数只 exec `git show`/`git cat-file`/`git log`。
+- [x] AC5（回归）：fresh 任务（disk==develop）显示不变；既有 dispatch 单测（ready-pool-check 129 + slot-refill 113）与 web 单测全绿；1500+ 任务下 /tasks 渲染延迟可接受（批量读 + TTL 生效，不逐任务 git show）。
+- [x] AC6（能取假，晋升路径读 develop——ff-propagate 写侧硬前置）：`ready-pool-check --apply`（promotion-driver 晋升路径）决策读 develop——`applyPromotions` 走 `taskReadRef: develop`；单测：构造「develop 已翻 ready、盘上仍 todo」fixture → `--apply` 不重复晋升（develop 无新增同内容提交、晋升判定读 develop 非盘上）；（⛔ 仍读盘上、重复晋升 ⇒ 假）。
 
 ## Definition of Done
 
