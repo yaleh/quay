@@ -2032,11 +2032,19 @@ export function acquireFanInLock(opts: {
 }
 
 /** 写 suite capture（ff 闸 fan-in-ff-merge.sh 的证书——读 suite_exit + suite_head 判「本任务 suite 已
- *  绿且 suite_head 是待 ff tip 的祖先」）。写失败抛错（调用方 catch → red）。 */
+ *  绿且 suite_head 是待 ff tip 的祖先」）。fail-open（gap-write-suite-capture-non-blocking AC1）：
+ *  capture 是 suite 结果的派生观测载体，写失败（磁盘/权限）只 WARN 到 stderr、⛔ 不抛——ff 闸在 capture
+ *  缺失/不可读时回退读权威源 full-suite-state.json（同一轮 mirrorMechanicalFanInSuiteState 已写
+ *  state=green + commit=suite_head + taskId），观测写失败不得弄死一个真实绿 suite 的落地
+ *  （人 2026-08-30 裁定「观测不得阻塞主执行」）。 */
 function writeSuiteCapture(captureFile: string, fields: Record<string, string>): void {
-  const lines = Object.entries(fields).map(([k, v]) => `${k}=${v}`);
-  fs.mkdirSync(path.dirname(captureFile), { recursive: true });
-  fs.writeFileSync(captureFile, lines.join("\n") + "\n", "utf8");
+  try {
+    const lines = Object.entries(fields).map(([k, v]) => `${k}=${v}`);
+    fs.mkdirSync(path.dirname(captureFile), { recursive: true });
+    fs.writeFileSync(captureFile, lines.join("\n") + "\n", "utf8");
+  } catch (e) {
+    console.error(`worker-driver: writeSuiteCapture failed (fail-open — fan-in continues, ff gate falls back to the authoritative source): ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** 读 `<ref>:tasks/<task>.md` 的 status frontmatter（git show；ref 不存在 / 文件缺失 / 读不懂 ⇒ null）。 */

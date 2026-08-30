@@ -3408,3 +3408,23 @@ test("AC4 (gap-fan-in-subprocess-hang-timeout-recovery) — 任一 fan-in 子进
   const lock = readFanInLockHold(m.repo, "gap-mfh", runId);
   assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "hang ⇒ lock released (finally) — clean acquire+release pair");
 });
+
+// ── gap-write-suite-capture-non-blocking AC1 ──────────────────────────────────────────────────────────
+// writeSuiteCapture 写失败（观测写）不得弄死 fan-in（人 2026-08-30「观测不得阻塞主执行」）。capture 是
+// suite 结果的派生观测载体；写失败 fail-open（WARN 不抛），ff 闸回退读权威源 full-suite-state.json
+// （同一轮 mirrorMechanicalFanInSuiteState 已写 state=green + commit=suite_head + taskId）⇒ 绿 suite 落地。
+
+test("AC1 (gap-write-suite-capture-non-blocking) — capture 写失败（父目录是文件）⇒ fan-in fail-open 落地（⛔ 不因观测写失败弄红）", async (t) => {
+  const m = makeMechRepo("capfail");
+  const runId = "mf-run-capfail";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  // capture 路径的父目录是一个【文件】⇒ writeSuiteCapture 的 mkdirSync 失败（真实构造，非 mock）。
+  // ⛔ fan-in 不得因此 fail：capture 缺失 ⇒ ff 闸回退读权威源 full-suite-state.json。
+  const blocker = path.join(m.base, "capture-blocker");
+  fs.writeFileSync(blocker, "not a dir", "utf8");
+  const badCapture = path.join(blocker, "suite.env");
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { suiteCapture: badCapture }));
+  assert.equal(r.outcome, "landed", `capture write failure must fail-open (fan-in lands, ⛔ not red) — step=${r.step} reason=${r.reason}`);
+  assert.equal(r.suiteOutcome, "done", "the suite itself must still be green");
+  assert.ok(!fs.existsSync(badCapture), "the capture path is genuinely unwritable (no capture file written)");
+});
