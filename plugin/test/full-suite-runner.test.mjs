@@ -153,7 +153,7 @@ function fakeSuite(scriptBody) {
 }
 
 /** Spawn the runner against a temp root with a fake command. */
-function runRunner({ root, command, laneCount, stateDir, runner, buckets, env = {}, serialConcurrency, lowconcConcurrency }) {
+function runRunner({ root, command, laneCount, stateDir, runner, buckets, env = {}, serialConcurrency, lowconcConcurrency, runId }) {
   const args = ["--no-warnings", "--experimental-strip-types", RUNNER, "--root", root];
   if (stateDir) args.push("--state-dir", stateDir);
   if (command) args.push("--command", command);
@@ -162,6 +162,9 @@ function runRunner({ root, command, laneCount, stateDir, runner, buckets, env = 
   if (buckets !== undefined && buckets !== null) args.push("--buckets", String(buckets));
   if (serialConcurrency !== undefined) args.push("--serial-concurrency", String(serialConcurrency));
   if (lowconcConcurrency !== undefined) args.push("--lowconc-concurrency", String(lowconcConcurrency));
+  // gap-mechanical-fan-in-per-suite-runid-unified — pass an explicit --run-id (the mechanical fan-in
+  // driver's per-suite id) so tests can assert the runner honors it as its canonical runId.
+  if (runId !== undefined && runId !== null) args.push("--run-id", String(runId));
   const mergedEnv = { ...process.env, ...env };
   // AC3 seam — hermetic tests skip the REAL resource gate by default; the AC3 tests override it
   // (QUAY_TEST_SKIP_RESOURCE_GATE != "1") and force GO/WAIT via the gate's RESOURCE_GATE_TEST_* seams.
@@ -5402,6 +5405,59 @@ test("gap-test-detail-load-timeseries — the runner spawns a load sampler that 
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("gap-mechanical-fan-in-per-suite-runid-unified AC3 — --run-id is honored verbatim; default falls back to a fresh randomUUID", async () => {
+  // OVERRIDE: an explicit --run-id (the mechanical fan-in per-suite id) becomes the canonical runId
+  // in BOTH the state and the round record (the record ↔ suite-load-<runId>.jsonl join key). The fake
+  // suite also captures the QUAY_RUN_ID env the runner delivers, to pin the shortRunId truncation
+  // (a LONG --run-id must still deliver a ≤8-char short id — the tmux socket sun_path length constraint).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-runid-override-"));
+  const { f, dir } = fakeSuite(
+    'printf "%s" "$QUAY_RUN_ID" > quay-run-id.txt\n' +
+      'echo "# tests 1"\n' +
+      'echo "# pass 1"\n' +
+      'echo "# fail 0"\n' +
+      'echo "# cancelled 0"\n' +
+      "exit 0",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 2, runId: "mfi-gap-test-1788022868-abc123" });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on a green suite");
+    const s = readState(root);
+    assert.equal(s.runId, "mfi-gap-test-1788022868-abc123", "--run-id is used verbatim as the state runId (not a fresh randomUUID)");
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.runId, "mfi-gap-test-1788022868-abc123", "the round record carries the SAME canonical runId (record ↔ telemetry join key)");
+    // shortRunId length constraint: the runner derives its per-run namespace id by truncating the runId
+    // to 8 chars — a LONG --run-id must not leak a long id into QUAY_RUN_ID (tmux socket sun_path bound).
+    const delivered = fs.readFileSync(path.join(root, "quay-run-id.txt"), "utf8");
+    assert.equal(delivered, "mfigapte", `the child received the 8-char truncated short id (got ${JSON.stringify(delivered)})`);
+    assert.ok(delivered.length <= 8, "the delivered QUAY_RUN_ID is ≤8 chars (tmux socket sun_path length constraint)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // DEFAULT: no --run-id ⇒ a fresh randomUUID (an independent run stays self-naming — no regression).
+  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-runid-default-"));
+  const faked = fakeSuite(
+    'echo "# tests 1"\n' +
+      'echo "# pass 1"\n' +
+      'echo "# fail 0"\n' +
+      'echo "# cancelled 0"\n' +
+      "exit 0",
+  );
+  try {
+    const child = runRunner({ root: root2, command: `bash ${faked.f}`, laneCount: 2 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on a green suite");
+    const s = readState(root2);
+    assert.ok(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.runId), `default runId is a randomUUID (got ${s.runId})`);
+  } finally {
+    fs.rmSync(root2, { recursive: true, force: true });
+    fs.rmSync(faked.dir, { recursive: true, force: true });
   }
 });
 
