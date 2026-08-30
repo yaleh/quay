@@ -1,7 +1,7 @@
 ---
 id: gap-archguard-metrics-mirror-non-blocking
 title: mirrorArchguardMetrics 镜像写不得阻塞 fan-in——结构闸判定与 metrics 镜像解耦
-status: ready
+status: done
 labels:
   - gap
 parent: null
