@@ -1,7 +1,7 @@
 ---
 id: gap-live-fan-in-execution-phase-two-axis
 title: live 页在飞任务「执行阶段」两轴分离 + fan-in 阶段建模（人 2026-08-30 裁定 Option A）
-status: ready
+status: done
 labels:
   - gap
 parent: null
