@@ -1097,6 +1097,14 @@ run_selected() {
     # identical between this and the pre-change sequential scheduling.
     local lowconc_files=() lf lowconc_code
     while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
+    # LPT order for the serial/lowconc phases (gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered):
+    # these were the last bare `node --test` dispatch points on the full path — node --test re-sorts
+    # positional args alphabetically, so a longest-known-first order is discarded (the serial/lowconc
+    # tail waited ≈38% of the round). Reorder IN PLACE before EITHER branch (overlap/sequential) so
+    # both get the LPT order, then hand to suite-lpt-runner.mjs run({files}) — the ONLY path that
+    # preserves argv order. Same invariant as the main phase (membership unchanged, order only).
+    lpt_reorder_files serial_files
+    lpt_reorder_files lowconc_files
     # PHASE OVERLAP (gap-phase-overlap-two-phase-parallel-exploration AC1, default-ON since AC101):
     # when QUAY_PHASE_OVERLAP=1 (the default) AND both phases are non-empty, run serial + lowconc in
     # PARALLEL (each at its OWN concurrency, $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY — scheduling-
@@ -1116,9 +1124,9 @@ run_selected() {
       # contributions stay distinguishable (the fixed-overhead serial_phase_ms stays the combined
       # window — the analyst's serial+lowconc sum == the window, unchanged for the before/after metric).
       overlap_s_start=$(_oh_mark)
-      node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${serial_files[@]}" & serial_pid=$!
+      node --test-concurrency="$SERIAL_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${serial_files[@]}" & serial_pid=$!
       overlap_l_start=$(_oh_mark)
-      node --test --test-concurrency="$LOWCONC_CONCURRENCY" $(suite_reporter_flags) "${lowconc_files[@]}" & lowconc_pid=$!
+      node --test-concurrency="$LOWCONC_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${lowconc_files[@]}" & lowconc_pid=$!
       wait "$serial_pid"; serial_code=$?
       overlap_s_end=$(_oh_mark)
       echo "__OVERHEAD__ overlap_serial_ms=$((overlap_s_end - overlap_s_start))" >&2
@@ -1140,7 +1148,7 @@ run_selected() {
       [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
       if [ "${#serial_files[@]}" -gt 0 ]; then
         echo "selected ${#serial_files[@]} files (groups=serial)"
-        node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${serial_files[@]}"
+        node --test-concurrency="$SERIAL_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${serial_files[@]}"
         serial_code=$?
         [ "$serial_code" -eq 0 ] || code="$serial_code"
       fi
@@ -1158,7 +1166,7 @@ run_selected() {
       [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
       if [ "${#lowconc_files[@]}" -gt 0 ]; then
         echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
-        node --test --test-concurrency="$LOWCONC_CONCURRENCY" $(suite_reporter_flags) "${lowconc_files[@]}"
+        node --test-concurrency="$LOWCONC_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${lowconc_files[@]}"
         local lcode=$?
         [ "$lcode" -eq 0 ] || code="$lcode"
       fi
@@ -1563,16 +1571,22 @@ elif [ "${1:-}" = "--buckets" ]; then
       *) bucket_main_files+=("$bf") ;;
     esac
   done
+  # LPT order for the bucket serial/lowconc sub-phases (gap-suite-lpt-serial-lowconc-phases-not-lpt-
+  # ordered): same as the full path — bare `node --test` re-sorts alphabetically and discards the LPT
+  # order, so these two sub-phases were the last bare dispatch points on the --buckets path. Reorder
+  # IN PLACE then hand to suite-lpt-runner.mjs run({files}) (order-preserving). Membership unchanged.
+  lpt_reorder_files bucket_serial_files
+  lpt_reorder_files bucket_lowconc_files
   bucket_code=0
   if [ "${#bucket_serial_files[@]}" -gt 0 ]; then
     echo "selected ${#bucket_serial_files[@]} files (groups=serial)"
-    node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${bucket_serial_files[@]}"
+    node --test-concurrency="$SERIAL_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${bucket_serial_files[@]}"
     _bscode=$?
     [ "$_bscode" -eq 0 ] || bucket_code="$_bscode"
   fi
   if [ "${#bucket_lowconc_files[@]}" -gt 0 ]; then
     echo "selected ${#bucket_lowconc_files[@]} files (groups=lowconc)"
-    node --test --test-concurrency="$LOWCONC_CONCURRENCY" $(suite_reporter_flags) "${bucket_lowconc_files[@]}"
+    node --test-concurrency="$LOWCONC_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${bucket_lowconc_files[@]}"
     _blcode=$?
     [ "$_blcode" -eq 0 ] || bucket_code="$_blcode"
   fi

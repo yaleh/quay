@@ -79,16 +79,19 @@ test("AC2/AC3 — the --buckets branch splits its list by @test-group into seria
   assert.match(branch, /serial\)\s+bucket_serial_files\+=\("\$bf"\)/, "serial files route to bucket_serial_files");
   assert.match(branch, /lowconc\)\s+bucket_lowconc_files\+=\("\$bf"\)/, "lowconc files route to bucket_lowconc_files");
   assert.match(branch, /\*\)\s+bucket_main_files\+=\("\$bf"\)/, "everything else routes to bucket_main_files");
-  // Serial sub-phase at its own concurrency knob.
+  // Serial sub-phase at its own concurrency knob, LPT-reordered then order-preserving via
+  // suite-lpt-runner.mjs run({files}) (gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered).
+  assert.match(branch, /lpt_reorder_files bucket_serial_files/, "serial sub-phase must be LPT-reordered");
   assert.match(
     branch,
-    /node --test --test-concurrency="\$SERIAL_CONCURRENCY" \$\(suite_reporter_flags\) "\$\{bucket_serial_files\[@\]\}"/,
+    /node --test-concurrency="\$SERIAL_CONCURRENCY" "\$\{repo_root\}\/plugin\/scripts\/suite-lpt-runner\.mjs" "\$\{bucket_serial_files\[@\]\}"/,
     "serial sub-phase must run at SERIAL_CONCURRENCY",
   );
-  // Lowconc sub-phase at its own concurrency knob (≤3, not the main body's concurrency).
+  // Lowconc sub-phase at its own concurrency knob (≤3, not the main body's concurrency), LPT-ordered.
+  assert.match(branch, /lpt_reorder_files bucket_lowconc_files/, "lowconc sub-phase must be LPT-reordered");
   assert.match(
     branch,
-    /node --test --test-concurrency="\$LOWCONC_CONCURRENCY" \$\(suite_reporter_flags\) "\$\{bucket_lowconc_files\[@\]\}"/,
+    /node --test-concurrency="\$LOWCONC_CONCURRENCY" "\$\{repo_root\}\/plugin\/scripts\/suite-lpt-runner\.mjs" "\$\{bucket_lowconc_files\[@\]\}"/,
     "lowconc sub-phase must run at LOWCONC_CONCURRENCY",
   );
   // Main sub-phase = suite-lpt-runner.mjs over bucket_main_files at bucket_test_concurrency.

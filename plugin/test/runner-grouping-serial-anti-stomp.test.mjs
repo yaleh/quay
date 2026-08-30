@@ -135,8 +135,8 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
     "the FULL-SUITE-DEFAULT branch must declare a serial phase");
   assert.match(src, /selected \$\{#serial_files\[@\]\} files \(groups=serial\)/,
     "the serial phase must self-report its selection (AC4 self-report invariant)");
-  assert.match(src, /node --test --test-concurrency="\$SERIAL_CONCURRENCY"( \$\(suite_reporter_flags\))? "\$\{serial_files\[@\]\}"/,
-    "the serial phase must use the env-driven SERIAL_CONCURRENCY (default 1 = isolation invariant); the optional suite_reporter_flags splice is the gap-install-suite-cost-instrument-reporter-not-wired wiring");
+  assert.match(src, /node --test-concurrency="\$SERIAL_CONCURRENCY" "\$\{repo_root\}\/plugin\/scripts\/suite-lpt-runner\.mjs" "\$\{serial_files\[@\]\}"/,
+    "the serial phase must use the env-driven SERIAL_CONCURRENCY (default 1 = isolation invariant) via the order-preserving suite-lpt-runner.mjs run({files}) (gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered)");
   assert.match(src, /SERIAL_CONCURRENCY="\$\{QUAY_SERIAL_CONCURRENCY:-\$\(serial_lowconc_host_default\)\}"/,
     "the serial concurrency must default to the HOST derivation (H÷S — the AC2 experiment raised 1→2, AC44 read the host, AC74 wired the same derivation into the DIRECT path; gap-ac74-serial-lowconc-literal-direct-path)");
   assert.match(src, /in_group "serial" "\$groups"/,
