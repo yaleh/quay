@@ -25,9 +25,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，负控制）：结构闸绿 + 镜像写失败（mock）⇒ fan-in 不因镜像失败 fail，继续到 scoped-gate。
-- [ ] AC2（能取假，执行语义不回归）：结构闸红（依赖环）⇒ 仍 failClean，不因镜像 open 而放宽。
-- [ ] AC3（能取假，回归）：正常路径 metrics 镜像照常写到生产载体。
+- [x] AC1（能取假，负控制）：结构闸绿 + 镜像写失败（mock）⇒ fan-in 不因镜像失败 fail，继续到 scoped-gate。
+- [x] AC2（能取假，执行语义不回归）：结构闸红（依赖环）⇒ 仍 failClean，不因镜像 open 而放宽。
+- [x] AC3（能取假，回归）：正常路径 metrics 镜像照常写到生产载体。
 
 ## Definition of Done
 

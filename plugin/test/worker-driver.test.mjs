@@ -2607,6 +2607,49 @@ test("AC1 (gap-archguard-structural-gate-in-fan-in-driver) — runMechanicalFanI
   assert.match(src, /archguard-runner\.ts/, "the default archguard command references archguard-runner.ts");
 });
 
+// ── gap-archguard-metrics-mirror-non-blocking：metrics 镜像写 fail-open（观测不 gate 落地）──────
+// 结构判定（archguard-structure 步，执行语义）与 metrics 镜像写（观测）解耦：镜像写失败 WARN + 继续，
+// 不 failClean("archguard-metrics")——人 2026-08-30 裁定「观测写不得 gate 落地」（审计实锤 2）。
+
+test("AC1/AC2 (gap-archguard-metrics-mirror-non-blocking) — 源面：镜像写失败 fail-open（⛔ 不再 return failClean('archguard-metrics')），结构判定仍 fail('archguard-structure') 挡", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  // 负控制（AC1）：镜像失败不再 failClean 返回——fail-open 的 WARN（stderr + trace）替代。
+  assert.doesNotMatch(src, /return failClean\("archguard-metrics"/, "mirror write failure must NOT return failClean (fail-open)");
+  assert.match(src, /process\.stderr\.write\(`WARN archguard-metrics: /, "mirror failure must WARN to stderr");
+  assert.match(src, /step: "archguard-metrics", exit: 1, wall_ms: 0, ok: false, warn: true/, "mirror failure must be traced (warn:true, ok:false — honest ⛔ not silently green)");
+  // 正控制（AC2）：结构判定不回归——依赖环仍 fail("archguard-structure") 挡。
+  assert.match(src, /fail\("archguard-structure"/, "dependency-cycle red must still fail at archguard-structure (execution semantics unchanged)");
+});
+
+test("AC1 (gap-archguard-metrics-mirror-non-blocking) — 结构闸绿 + metrics 镜像写失败（mock）⇒ fan-in 继续到 scoped-gate 并 landed", async (t) => {
+  const m = makeMechRepo("mirror-open-ac1");
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const runId = "mf-run-mirror-open";
+  // 结构闸绿（exit 0）且 archguard 往 worktree/.archguard 写一条结构信号（镜像有东西可镜）；
+  // 把 root/.archguard 建成普通文件 ⇒ 镜像的 mkdirSync/appendFileSync 抛错 ⇒ 镜像写失败。
+  const record = '{"tool":"archguard-runner","verdict":"pass"}';
+  const archguardCmd = ["bash", "-c", `mkdir -p "${m.worktree}/.archguard"; printf '%s\\n' '${record}' >> "${m.worktree}/.archguard/metrics-history.jsonl"`];
+  fs.writeFileSync(path.join(m.repo, ".archguard"), "not-a-dir", "utf8");
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { archguardCommand: archguardCmd }));
+  assert.equal(r.outcome, "landed", `mirror write failure must NOT block fan-in (step=${r.step} reason=${r.reason})`);
+  assert.notEqual(r.step, "archguard-metrics", "fan-in must not fail at archguard-metrics (fail-open)");
+  // 过程日志留 WARN 行（ok=false、warn=true）：镜像失败可见但未阻塞。
+  const log = path.join(m.repo, ".quay", `fan-in-gap-mfh-${runId}.log`);
+  const lines = fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const warnLine = lines.find((l) => l.step === "archguard-metrics");
+  assert.ok(warnLine, "mirror failure must be traced as an archguard-metrics step");
+  assert.equal(warnLine.ok, false, "mirror failure traced ok=false (honest, ⛔ not silently green)");
+  assert.equal(warnLine.warn, true, "mirror failure traced warn:true (fail-open WARN)");
+});
+
+test("AC2 (gap-archguard-metrics-mirror-non-blocking) — 结构闸红（依赖环）⇒ 仍 failClean（执行语义不回归），不因镜像 open 而放宽", async (t) => {
+  const m = makeMechRepo("mirror-open-ac2");
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn(mechOpts(m, "mf-run-structure-red", { archguardCommand: ["bash", "-c", "echo dependency cycle; exit 3"] }));
+  assert.equal(r.outcome, "red", "dependency cycle must still fail fan-in");
+  assert.equal(r.step, "archguard-structure", "structure judgment still blocks at archguard-structure (execution semantics preserved)");
+});
+
 // ── gap-worker-driver-stopreason-latch-permanent-stop ──────────────────────────────────────────────
 // stopReason 一旦赋值永不复位 ⇒ 瞬时闸拒绝（resource-gate-wait）被永久 latch ⇒ 同一 driver 进程内
 // 恢复不可能 ⇒ 1h48m 零派发（234 槽·分钟）。修法：WAIT（瞬时）不 latch、下一轮重读 stopCondition；
