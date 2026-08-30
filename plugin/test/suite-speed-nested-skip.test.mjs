@@ -25,9 +25,8 @@ const src = readFileSync(testSh, "utf8");
 const staticGate = join(repoRoot, "plugin", "scripts", "runner-static-gate.ts");
 const staticGateSrc = readFileSync(staticGate, "utf8");
 
-// In-file self-skip block (governance pattern, ADR-019 decision #1): in a default product,engine
-// run this file reports `skipped`, not absent; with QUAY_TEST_GROUPS including governance the
-// real assertions run.
+// The in-file governance self-skip guard was REMOVED (gap-retire-governance-group-merge-into-bucket):
+// this file now runs its real assertions on every default run (re-tagged @test-group engine).
   test("mark_nested() is defined and exports QUAY_TEST_NESTED + QUAY_TEST_NESTED_ROOT", () => {
     assert.match(src, /mark_nested\(\)\s*\{/, "mark_nested() function must be defined");
     assert.match(src, /export QUAY_TEST_NESTED=1/, "must export QUAY_TEST_NESTED=1");
