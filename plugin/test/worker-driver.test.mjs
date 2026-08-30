@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group lowconc
 // worker-driver.test.mjs — SPEC-worker-driven-inner-2026-08-16 §5 阶段 2（AC116）+ 阶段 3（AC117）: the
 // mechanical worker driver spawns claude -p workers with N-concurrency (in-flight = the driver's OWN spawned
 // child-process count, 硬规则 4b), a wall-clock timeout that SIGTERMs the worker (preserving the
