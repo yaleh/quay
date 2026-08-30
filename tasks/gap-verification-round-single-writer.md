@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-single-writer
 title: verification-round 单一 writer——删除 writeRedSuiteRecord 平行红写，红绿统一由 runner 记录
-status: ready
+status: done
 labels:
   - gap
 parent: null
