@@ -469,6 +469,44 @@ test("AC1 (gap-scoped-gate-reason-stderr-drops-stdout) — scoped-gate red reaso
   assert.match(extractFailureSummary(both), /not ok 1 - unrecognized-status-unknown/, "AC1: TAP 失败签名与构建失败并存仍保留");
 });
 
+// ── gap-step-trace-reason-captures-gate-stdout ──────────────────────────────────────────────────────
+// step-trace（A1 过程日志 .quay/fan-in-<task>-<runId>.log）的失败步 reason 现用 (r.stderr||r.stdout).trim()
+// ——stderr 优先 || 短路，MODULE_TYPELESS 噪声恒占 stderr ⇒ reason 只留噪声，真判词（ac-gate 的 checked
+// X/Y / anti-drift 的 violation）没进载体。与 gap-scoped-gate-reason-stderr-drops-stdout 同族，但这是
+// step-trace 载体（不是 fail() 的 reason 构造）。AC1（能取假）：失败步 reason 含 stdout 判词
+// （checked/violation），⛔ 纯 MODULE 警告 ⇒ 假。AC2（能取假，单测）：断言「失败步 reason 含 stdout 判词」。
+
+test("AC1 (gap-step-trace-reason-captures-gate-stdout) — ac-gate/anti-drift 失败时 step-trace reason 含 stdout 判词（checked/violation），⛔ 纯 MODULE 警告", () => {
+  const stderrNoise = [
+    "(node:941011) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///x.ts is not specified...",
+    "Reparsing as ES module because module syntax was detected. This incurs a performance overhead.",
+  ].join("\n");
+
+  // ac-gate fail（exit 1）——判词在「checked X/Y」行，⛔ FAIL 行匹配 isSignal 会把它尾截掉（signals-first）。
+  const acGateFail = [
+    "fan-in-ac-completion-gate: AC 未全勾（checked 3/5，剩余未勾 2 含非待外部项）——未翻 done",
+    "fan-in-ac-completion-gate: FAIL (exit 1) — flip refused",
+  ].join("\n");
+  const acSummary = extractFailureSummary(combinedOutput(acGateFail, stderrNoise));
+  assert.match(acSummary, /checked 3\/5/, "AC1: ac-gate 判词（checked X/Y）进 reason");
+  assert.doesNotMatch(acSummary, /MODULE_TYPELESS/, "AC1: reason ⛔ 纯 MODULE 警告");
+
+  // anti-drift HARD FAIL（exit 1）——判词在 violation 列表（HARD FAIL 头 + 违规明细）。
+  const antiDriftFail = [
+    "ANTI-DRIFT HARD FAIL: task gap-x — 2 violation(s)",
+    "  out-of-declared: task wrote plugin/scripts/foo.ts (matches no declared Touches glob)",
+  ].join("\n");
+  const antiSummary = extractFailureSummary(combinedOutput(antiDriftFail, stderrNoise));
+  assert.match(antiSummary, /violation\(s\)/, "AC1: anti-drift 判词（violation）进 reason");
+  assert.doesNotMatch(antiSummary, /MODULE_TYPELESS/, "AC1: reason ⛔ 纯 MODULE 警告");
+});
+
+test("AC2 (gap-step-trace-reason-captures-gate-stdout) — step() 包层 trace reason 用 extractFailureSummary(combinedOutput)，⛔ 不再 (r.stderr||r.stdout).trim()", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  assert.doesNotMatch(src, /reason: \(r\.stderr \|\| r\.stdout \|\| ""\)\.trim\(\)/, "AC2: step() trace 的 stderr 优先裸流已移除");
+  assert.match(src, /extractFailureSummary\(combinedOutput\(r\.stdout, r\.stderr\)\)/, "AC2: step() trace reason 走同一去噪机件（与 fail() 共用）");
+});
+
 // ── gap-worker-driver-complete-logging-doc ───────────────────────────────────────────────────────────
 // 机制层防 reason 载体失真再犯：worker-driver 每步完整记录 stdout+stderr（⛔ 不 stderr 优先/丢弃），
 // 单一机件 combinedOutput 供 fail() 与 flip 共用。AC1（能取假，失败必记全）：某步失败时 reason 含

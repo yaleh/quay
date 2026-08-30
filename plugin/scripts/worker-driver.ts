@@ -1844,7 +1844,9 @@ export function combinedOutput(stdout: string, stderr: string): string {
  *  裸流本身落进 logFile（fail dump），记录里留指针。提取不出任何行 ⇒ 空串（调用方回退 `exit <code>`）。
  *  gap-scoped-gate-reason-stderr-drops-stdout：scoped 门红时 stdout 的真失败（esbuild 构建崩 = Could not
  *  resolve）必须进 reason——⛔ stderr 良性 preamble 优先 || 短路丢弃 stdout（硬规则 3b/4b/9 同族）。
- *  esbuild 失败行加入 isSignal：即使与 TAP not ok 并存，构建失败签名也不再被 slice(-60) 尾截掉。 */
+ *  esbuild 失败行加入 isSignal：即使与 TAP not ok 并存，构建失败签名也不再被 slice(-60) 尾截掉。
+ *  gap-step-trace-reason-captures-gate-stdout：ac-gate/anti-drift 的 stdout 判词（checked X/Y / violation）
+ *  加入 isSignal——⛔ ac-gate 的 FAIL 行与「checked X/Y」并存时后者被 signals-first 丢弃，真判词不进 reason。 */
 export function extractFailureSummary(combined: string): string {
   const isNoise = (l: string): boolean =>
     l.includes("MODULE_TYPELESS_PACKAGE_JSON") ||
@@ -1855,7 +1857,7 @@ export function extractFailureSummary(combined: string): string {
     l.includes("--trace-warnings");
   const meaningful = combined.split("\n").filter((l) => l.trim() !== "" && !isNoise(l));
   const isSignal = (l: string): boolean =>
-    /^\s*not ok\b|^\s*✖|\bFAIL\b|# fail\b|HARD FAIL|AssertionError|\bexpected:|\bactual:|\bfail \d+\b|\bexit=\d+|Could not resolve|\[ERROR\]/i.test(l);
+    /^\s*not ok\b|^\s*✖|\bFAIL\b|# fail\b|HARD FAIL|AssertionError|\bexpected:|\bactual:|\bfail \d+\b|\bexit=\d+|Could not resolve|\[ERROR\]|\bchecked\b|\bviolation\b/i.test(l);
   const signals = meaningful.filter(isSignal);
   const chosen = signals.length > 0 ? signals : meaningful;
   return chosen.slice(-60).join("\n").trim().slice(0, 4000);
@@ -2255,7 +2257,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     appendFanInStepTrace(root, task, runId, name, "end", { ok: r.ok });
     trace({
       step: name, exit: r.status, wall_ms: Date.now() - t0, ok: r.ok,
-      ...(r.ok ? {} : { reason: (r.stderr || r.stdout || "").trim() || `exit ${r.status}` }),
+      ...(r.ok ? {} : { reason: extractFailureSummary(combinedOutput(r.stdout, r.stderr)) || `exit ${r.status}` }),
     });
     return r;
   };
