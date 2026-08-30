@@ -318,7 +318,7 @@ registerTransport("outer", createFileInboxTransport({ inboxDir: outerInboxDir(ro
 # ② 正向：outer 有没有【在别处】继续通信 —— 只查 ① 是不够的：
 #    既不发 tmux 也不在别处出声，那是【静默】不是【遵守】
 #    ⚠️ 正向通道要【穷举】，不是只查我预设的那一个（见下方 08:3xZ 的实测教训）
-bash plugin/scripts/supervisor-bus-identity.sh inbox-summary   # 总线收件箱
+# ① 总线收件箱 —— 已退役（inbox 随 gap-inbox-message-bus-teardown 08-20 删除，本命令为死命令），不再查
 stat -c '%y' orchestration/escalations.md                      # 基线 2026-08-07T18:09Z
 git log --since='<禁令时刻>' --format='%h %s' | grep -v '^.\{8\} manager:'   # ← git 提交也是通道
 ```
