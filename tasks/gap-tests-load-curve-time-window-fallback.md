@@ -1,7 +1,7 @@
 ---
 id: gap-tests-load-curve-time-window-fallback
 title: "/tests 负载解析鲁棒化——runId 精确命中 + 时间窗回退，恢复 #692 起错键轮次的曲线"
-status: ready
+status: done
 labels:
   - gap
 parent: null
