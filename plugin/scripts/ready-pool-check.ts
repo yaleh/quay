@@ -2703,9 +2703,14 @@ function main(argv) {
   // legal `ready.back="todo"` transition the task body names. The detector half is always in the JSON;
   // this flag is the write half. Precedence: --revaluate-apply over --apply (a single run either
   // promotes OR revalues, never both mid-flight).
+  // PROMOTION DECISION READS DEVELOP (gap-dispatch-reads-stale-main-checkout-task-status AC6): the
+  // `--apply` write path must JUDGE candidates from the develop ref, not the disk — the write side
+  // (gap-ff-propagate-…, 1e7fb9be4) flips develop and restores the disk to the pre-promotion status,
+  // so a disk-read here would re-promote the same task every tick (duplicate same-content commits).
+  // Same taskReadRef as the dispatch-read arm below: develop is the single source of truth.
   let result;
   if (revaluateApply) result = applyRevaluations(base);
-  else result = apply ? applyPromotions(base) : analyzeTasks({ ...base, taskReadRef: develop });
+  else result = apply ? applyPromotions({ ...base, taskReadRef: develop }) : analyzeTasks({ ...base, taskReadRef: develop });
   if (process.env.CHECKER_COST_SKIP !== "1") {
     recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: result.pool, load: getLoad1() });
   }

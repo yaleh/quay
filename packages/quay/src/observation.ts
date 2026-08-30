@@ -1143,13 +1143,12 @@ function readTaskStatusOnDisk(root: string, taskId: string): TaskStatus | null {
   }
 }
 
-/** Read `<ref>:tasks/<taskId>.md` status frontmatter (the single-task half of the develop-ref read;
- *  `git show` reads the object store only — never checks out `ref`, never touches fan-in). null when
- *  the ref/path is unavailable or the frontmatter is unreadable — callers fall back to the on-disk
- *  read. Mirrors plugin/scripts/worker-driver.ts's `readTaskStatusAtRef` (the same `git show
- *  develop:tasks/<id>.md` judgment, re-implemented here because observation.ts is the ONLY serve-path
- *  module allowed to know git). */
-export function readTaskStatusAtRef(root: string, ref: string, taskId: string): TaskStatus | null {
+/** Read `<ref>:tasks/<taskId>.md` frontmatter `status:` + `title:` in ONE `git show` (the single-task
+ *  develop-ref read — object store only, never checks out `ref`, never touches fan-in). null when the
+ *  ref/path is unavailable or the frontmatter is unreadable — callers fall back to the on-disk read.
+ *  The /task detail page reads BOTH halves from this one call (status + title develop-first, so list
+ *  and detail agree), and `readTaskStatusAtRef` is its status-only projection. */
+export function readTaskAtRefMeta(root: string, ref: string, taskId: string): { status: TaskStatus | null; title: string | null } | null {
   let out: string;
   try {
     out = execFileSync("git", ["-C", root, "show", `${ref}:tasks/${taskId}.md`], {
@@ -1161,10 +1160,23 @@ export function readTaskStatusAtRef(root: string, ref: string, taskId: string): 
   try {
     const parsed = parseFrontmatter(out);
     const fm = parsed.frontmatter as Record<string, unknown>;
-    return isTaskStatus(fm.status) ? fm.status : null;
+    return {
+      status: isTaskStatus(fm.status) ? fm.status : null,
+      title: typeof fm.title === "string" ? fm.title : null,
+    };
   } catch {
     return null;
   }
+}
+
+/** Read `<ref>:tasks/<taskId>.md` status frontmatter (the single-task half of the develop-ref read;
+ *  `git show` reads the object store only — never checks out `ref`, never touches fan-in). null when
+ *  the ref/path is unavailable or the frontmatter is unreadable — callers fall back to the on-disk
+ *  read. Mirrors plugin/scripts/worker-driver.ts's `readTaskStatusAtRef` (the same `git show
+ *  develop:tasks/<id>.md` judgment, re-implemented here because observation.ts is the ONLY serve-path
+ *  module allowed to know git). */
+export function readTaskStatusAtRef(root: string, ref: string, taskId: string): TaskStatus | null {
+  return readTaskAtRefMeta(root, ref, taskId)?.status ?? null;
 }
 
 /** Read `<ref>:tasks/<id>.md` raw contents for a set of ids in ONE `git cat-file --batch` process
@@ -1207,11 +1219,36 @@ function readTaskFilesAtRefBatch(root: string, ref: string, ids: string[]): Map<
 export const TASK_STATUS_REF_CACHE_TTL_MS = 2000;
 
 const taskStatusRefCache = new Map<string, { at: number; map: Map<string, TaskStatus> }>();
+const taskTitleRefCache = new Map<string, { at: number; map: Map<string, string> }>();
+const taskCommitTimesRefCache = new Map<string, { at: number; map: Map<string, number> }>();
 
-/** Clear the batched develop-status cache (test seam — a fixture that rewrites the develop ref
- *  mid-test must not read a cached prior read). */
+/** Clear the batched develop-ref caches (test seam — a fixture that rewrites the develop ref
+ *  mid-test must not read a cached prior read). Clears status + title + commit-time together: the
+ *  three develop-ref read faces share one source of truth and one TTL clock. */
 export function clearTaskStatusRefCache(): void {
   taskStatusRefCache.clear();
+  taskTitleRefCache.clear();
+  taskCommitTimesRefCache.clear();
+}
+
+/** List the task ids (frontmatter `.md` basenames) under `tasks/` at a git ref in ONE `git ls-tree`
+ *  (object store only). Empty array on any git failure (never a positive from an unavailable source).
+ *  Shared by the status / title / commit-time batched readers — one ls-tree, not three. */
+function listTaskIdsAtRef(root: string, ref: string): string[] {
+  try {
+    return execFileSync("git", ["-C", root, "ls-tree", "-r", "--name-only", ref, "--", "tasks/"], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    })
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((n) => {
+        const base = n.split("/").pop() ?? "";
+        return base.endsWith(".md") ? base.slice(0, -3) : null;
+      })
+      .filter((x): x is string => x != null && x.length > 0);
+  } catch {
+    return [];
+  }
 }
 
 /** Read every task's `status:` frontmatter at a git ref in ONE `git ls-tree` + ONE `git cat-file
@@ -1229,18 +1266,7 @@ export function readTaskStatusMapAtRef(
   if (!force && hit != null && nowMs - hit.at < ttlMs) return hit.map;
   const map = new Map<string, TaskStatus>();
   try {
-    const names = execFileSync("git", ["-C", root, "ls-tree", "-r", "--name-only", ref, "--", "tasks/"], {
-      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
-    })
-      .split(/\r?\n/)
-      .filter(Boolean);
-    const ids = names
-      .map((n) => {
-        const base = n.split("/").pop() ?? "";
-        return base.endsWith(".md") ? base.slice(0, -3) : null;
-      })
-      .filter((x): x is string => x != null && x.length > 0);
-    const rawMap = readTaskFilesAtRefBatch(root, ref, ids);
+    const rawMap = readTaskFilesAtRefBatch(root, ref, listTaskIdsAtRef(root, ref));
     for (const [id, raw] of rawMap) {
       try {
         const parsed = parseFrontmatter(raw);
@@ -1255,6 +1281,92 @@ export function readTaskStatusMapAtRef(
   }
   taskStatusRefCache.set(key, { at: nowMs, map });
   return map;
+}
+
+/** Read every task's `title:` frontmatter at a git ref in ONE `git ls-tree` + ONE `git cat-file
+ *  --batch` pair, short-TTL cached. The title half of the develop-ref read — the /tasks divergence
+ *  marker compares the disk title against the develop title, so the list needs BOTH maps without a
+ *  per-task `git show`. Absent ids are missing (callers fall back to the disk title). Empty map on
+ *  any git failure — never a positive from an unavailable source (硬规则 ③b). */
+export function readTaskTitleMapAtRef(
+  root: string,
+  ref: string,
+  { nowMs = Date.now(), ttlMs = TASK_STATUS_REF_CACHE_TTL_MS, force = false } = {},
+): Map<string, string> {
+  const key = `${root}\n${ref}`;
+  const hit = taskTitleRefCache.get(key);
+  if (!force && hit != null && nowMs - hit.at < ttlMs) return hit.map;
+  const map = new Map<string, string>();
+  try {
+    const rawMap = readTaskFilesAtRefBatch(root, ref, listTaskIdsAtRef(root, ref));
+    for (const [id, raw] of rawMap) {
+      try {
+        const parsed = parseFrontmatter(raw);
+        const fm = parsed.frontmatter as Record<string, unknown>;
+        if (typeof fm.title === "string") map.set(id, fm.title);
+      } catch {
+        // unparseable frontmatter at the ref — leave absent (caller falls back to disk)
+      }
+    }
+  } catch {
+    // git unavailable / not a repo / no such ref — empty map, callers fall back to the disk read
+  }
+  taskTitleRefCache.set(key, { at: nowMs, map });
+  return map;
+}
+
+/** Read every task's last-commit time at a git ref in ONE `git log --format=%cI --name-only` pass
+ *  (single subprocess). The updated-at source: a develop-derived status ⇒ updated = that file's last
+ *  commit time on develop, so a disk mtime bump after a develop flip no longer moves the display
+ *  (AC2). Returns Map<taskId, epochMs> for ids PRESENT at the ref — the FIRST occurrence of a file in
+ *  newest-first log order is its last commit; absent ids are missing (callers fall back to disk
+ *  mtime). Empty map on any git failure. */
+export function readTaskCommitTimesAtRef(
+  root: string,
+  ref: string,
+  { nowMs = Date.now(), ttlMs = TASK_STATUS_REF_CACHE_TTL_MS, force = false } = {},
+): Map<string, number> {
+  const key = `${root}\n${ref}`;
+  const hit = taskCommitTimesRefCache.get(key);
+  if (!force && hit != null && nowMs - hit.at < ttlMs) return hit.map;
+  const map = new Map<string, number>();
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "--format=%cI", "--name-only", ref, "--", "tasks/"], {
+      encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"],
+    });
+    let cur: number | null = null;
+    for (const line of out.split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t) continue;
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(t)) {
+        cur = Date.parse(t);
+      } else if (cur != null && t.startsWith("tasks/") && t.endsWith(".md")) {
+        const id = t.slice("tasks/".length, -3);
+        if (!map.has(id)) map.set(id, cur); // first occurrence = last commit (log is newest-first)
+      }
+    }
+  } catch {
+    // git unavailable / not a repo / no such ref — empty map, callers fall back to the disk mtime
+  }
+  taskCommitTimesRefCache.set(key, { at: nowMs, map });
+  return map;
+}
+
+/** Read a single task's last-commit time at a ref (`git log -1 --format=%cI ref -- tasks/<id>.md`).
+ *  The /task detail page's `last updated` source — the same develop-derived time as the list's
+ *  updated column (list and detail must agree, not list=done/detail=ready). null when the file has no
+ *  commit at the ref (caller falls back to disk mtime). */
+export function readTaskCommitTimeAtRef(root: string, ref: string, taskId: string): number | null {
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "-1", "--format=%cI", ref, "--", `tasks/${taskId}.md`], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    if (!out) return null;
+    const ms = Date.parse(out);
+    return Number.isFinite(ms) ? ms : null;
+  } catch {
+    return null;
+  }
 }
 
 /** readLive's task-status read: the canonical develop ref first, the on-disk store as fallback. A

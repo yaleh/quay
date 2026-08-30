@@ -88,7 +88,6 @@ test("plugin 产品模板保留关键脚本引用（laydown set 覆盖不塌缩�
   const outerOnlyCritical = [
     "plugin/scripts/full-suite-runner.ts",
     "plugin/scripts/suite-state-trigger.ts",
-    "plugin/scripts/slot-free-trigger.ts",
     "plugin/scripts/inner-session-check.sh",
     "plugin/scripts/loop-driver-check.sh",
     "plugin/scripts/session-liveness-mount.sh",

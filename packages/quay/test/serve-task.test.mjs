@@ -15,8 +15,8 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { handleTaskList } from "../src/serve-task.ts";
-import { readTaskStatusMapAtRef, readTaskStatusAtRef, clearTaskStatusRefCache } from "../src/observation.ts";
+import { handleTaskList, handleTaskDetail } from "../src/serve-task.ts";
+import { readTaskStatusMapAtRef, readTaskStatusAtRef, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, clearTaskStatusRefCache } from "../src/observation.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC_DIR = path.join(__dirname, "..", "src");
@@ -64,10 +64,29 @@ async function renderList(root, tasks) {
   return body;
 }
 
-/** Extract the status cell text of the row whose id link reads `id`. */
+/** Extract the status cell text of the row whose id link reads `id`. The capture stops at the first
+ *  `<` so a divergence marker (`done<span …> ⚠ disk:ready</span>`) still reads as its leading
+ *  displayed status (`done`), the value this helper's assertions are about. */
 function statusCell(body, id) {
-  const m = body.match(new RegExp(`${id}<\\/a><\\/td>\\s*<td>([^<]*)<\\/td>`));
+  const m = body.match(new RegExp(`${id}<\\/a><\\/td>\\s*<td>([^<]*)`));
   return m ? m[1] : null;
+}
+
+/** Extract the first `<td class="col-updated">` cell text (the list's updated column). */
+function updatedCell(body) {
+  const m = body.match(/<td class="col-updated">([^<]*)<\/td>/);
+  return m ? m[1] : null;
+}
+
+/** Drive handleTaskDetail with a mock Provider client returning the DISK view (`diskTask`); the
+ *  develop-first override is what the assertions check. */
+async function renderDetail(root, taskId, diskTask) {
+  const client = { taskGet: async () => diskTask };
+  let body = "";
+  const res = { writeHead: () => {}, end: (chunk) => { body = chunk; } };
+  const url = new URL(`http://localhost/task/${taskId}`);
+  await handleTaskDetail({}, res, url, taskId, client, { workspaceRoot: root });
+  return body;
 }
 
 test("AC1 — /tasks renders the develop status (done), not the stale disk status (ready)", async () => {
@@ -135,6 +154,105 @@ test("AC4 — the many-task read is batched (one map) and TTL-cached, not per-ta
     const m3 = readTaskStatusMapAtRef(root, "develop", { force: true });
     assert.notEqual(m3, m1, "force re-reads (the cache is real)");
     assert.equal(m3.size, N);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── gap-dispatch-reads-stale-main-checkout-task-status (AC1/AC2/AC3) — the read-face unification
+// beyond the status-only fix: the /task/<id> DETAIL page reads develop first (kills list=done/
+// detail=ready), the `updated` column reads the develop last-commit time (not the disk mtime), and a
+// disk≠develop divergence renders a visible marker on BOTH the list and the detail page.
+
+test("AC1 — /task/<id> detail renders the develop status, not the stale disk status (list & detail agree)", async () => {
+  const { root } = makeStaleRepo("stale-detail-");
+  try {
+    clearTaskStatusRefCache();
+    const body = await renderDetail(root, "gap-stale", task("gap-stale", "ready"));
+    // The h1 status bracket opens with the develop value `done`; the stale disk `ready` only appears
+    // as the divergence marker (`⚠ disk:ready`), never as the displayed status (the marker sits
+    // between the status and the closing bracket, so the displayed value is `[done`, not `[done]`).
+    assert.match(body, /\[done/, "AC1: detail h1 shows develop done (⛔ 仍 [ready ⇒ 假)");
+    assert.doesNotMatch(body, /\[ready/, "AC1: the stale disk ready must not be the displayed status");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — the updated column renders the develop last-commit time, not the disk mtime (a disk write after the flip does not move it)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "stale-updated-"));
+  try {
+    const tasksDir = path.join(root, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const writeTask = (id, status) => fs.writeFileSync(path.join(tasksDir, `${id}.md`), `---\nid: ${id}\nstatus: ${status}\n---\n## Proposal\nbody\n`);
+    git("init", "-b", "develop", "-q", ".");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    writeTask("gap-stale", "done");
+    // Pin the develop commit 25h ago — so its relative time is "1d ago", stable against ±seconds
+    // drift. Whole-second: git `%cI` is second-precision, so the pinned ISO must be too (a
+    // millisecond fraction would make `Date.parse(pinned)` ≠ `Date.parse(%cI)`).
+    const pinnedMs = Math.floor(Date.now() / 1000) * 1000 - 25 * 3600 * 1000;
+    const pinned = new Date(pinnedMs).toISOString();
+    execFileSync("git", ["add", "-A"], { cwd: root, env: { ...process.env, GIT_AUTHOR_DATE: pinned, GIT_COMMITTER_DATE: pinned } });
+    execFileSync("git", ["commit", "-q", "-m", "flip done"], { cwd: root, env: { ...process.env, GIT_AUTHOR_DATE: pinned, GIT_COMMITTER_DATE: pinned } });
+    // A post-flip disk write (bump mtime + stale ready) must NOT move the displayed updated.
+    writeTask("gap-stale", "ready");
+    clearTaskStatusRefCache();
+
+    // Falsifiability: develop carries the pinned time; the disk mtime is "now" (≈0s ago), far later.
+    assert.equal(readTaskCommitTimesAtRef(root, "develop").get("gap-stale"), Date.parse(pinned), "develop last-commit time = pinned");
+    assert.ok(fs.statSync(path.join(tasksDir, "gap-stale.md")).mtimeMs > Date.parse(pinned), "disk mtime is after the develop commit");
+
+    const body = await renderList(root, [task("gap-stale", "ready")]);
+    const cell = updatedCell(body);
+    assert.equal(cell, "1d ago", "AC2: updated renders the develop time (⛔ 0s ago ⇒ 跟 disk mtime 假)");
+
+    // The detail page's `last updated` reads the SAME develop time (list & detail agree).
+    const detailBody = await renderDetail(root, "gap-stale", task("gap-stale", "ready"));
+    assert.match(detailBody, /last updated: 1d ago/, "AC2: detail last updated renders the develop time, not the bumped disk mtime");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — divergence marker renders when disk ≠ develop (status or title), absent when they agree", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "stale-diverge-"));
+  try {
+    const tasksDir = path.join(root, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const writeTask = (id, status, title) => fs.writeFileSync(path.join(tasksDir, `${id}.md`), `---\nid: ${id}\ntitle: ${title}\nstatus: ${status}\n---\n## Proposal\nbody\n`);
+    git("init", "-b", "develop", "-q", ".");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    writeTask("gap-a", "done", "develop title a");
+    writeTask("gap-same", "ready", "same title");
+    git("add", ".");
+    git("commit", "-q", "-m", "develop state");
+    // Uncommitted disk divergence: status ready (≠ done) + title "disk title a" (≠ "develop title a").
+    // gap-same is left untouched — disk == develop ⇒ no marker (negative control).
+    writeTask("gap-a", "ready", "disk title a");
+    clearTaskStatusRefCache();
+
+    const diskA = { id: "gap-a", title: "disk title a", status: "ready", role: "primitive", labels: [], parent: null, children: [], body: "## Proposal\nbody\n", extra: {} };
+    const diskSame = { id: "gap-same", title: "same title", status: "ready", role: "primitive", labels: [], parent: null, children: [], body: "## Proposal\nbody\n", extra: {} };
+
+    // List: both markers present on the diverged row; the converged row carries none.
+    const list = await renderList(root, [diskA, diskSame]);
+    assert.match(list, /data-divergence="status"> ⚠ disk:ready/, "AC3: list status marker names the disk value");
+    assert.match(list, /data-divergence="title"> ⚠ develop:develop title a/, "AC3: list title marker names the develop value");
+    // Precise negative control: the converged row renders NO divergence marker at all.
+    const sameRow = list.match(/gap-same<\/a>[\s\S]*?<\/tr>/);
+    assert.ok(sameRow, "gap-same row present");
+    assert.doesNotMatch(sameRow[0], /data-divergence/, "AC3: converged row has no divergence marker");
+
+    // Detail: the same markers appear on the diverged task's detail page.
+    const detail = await renderDetail(root, "gap-a", diskA);
+    assert.match(detail, /data-divergence="status"> ⚠ disk:ready/, "AC3: detail status marker names the disk value");
+    assert.match(detail, /data-divergence="title"> ⚠ develop:develop title a/, "AC3: detail title marker names the develop value");
+    assert.doesNotMatch(detail, /\[ready\]/, "AC3: detail displayed status is develop done, the stale ready is only the marker");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
