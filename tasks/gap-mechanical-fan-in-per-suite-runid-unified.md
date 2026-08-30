@@ -28,9 +28,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，读生产载体）：一条机械 fan-in 落地后，full-suite-state 的 runId、suite-load-<runId>.jsonl 文件名、verification-round 记录 runId 三者一致（不再 wk-prod 混入记录）。
-- [ ] AC2（能取假，唯一性）：同一 driver 轮次内两个不同任务的 per-suite runId 不同（一次 fan-in 一个 id）。
-- [ ] AC3（能取假，单元）：runner 传 --run-id 用该值、缺省回退 randomUUID；shortRunId 仍满足 tmux socket 长度约束。
+- [ ] AC1（能取假，读生产载体）：一条机械 fan-in 落地后，full-suite-state 的 runId、suite-load-<runId>.jsonl 文件名、verification-round 记录 runId 三者一致（不再 wk-prod 混入记录）。（待外部）
+- [x] AC2（能取假，唯一性）：同一 driver 轮次内两个不同任务的 per-suite runId 不同（一次 fan-in 一个 id）。
+- [x] AC3（能取假，单元）：runner 传 --run-id 用该值、缺省回退 randomUUID；shortRunId 仍满足 tmux socket 长度约束。
 
 ## Definition of Done
 
@@ -40,7 +40,7 @@ extra:
 
 - plugin/scripts/full-suite-runner.ts（接受 --run-id）
 - plugin/scripts/worker-driver.ts（per-suite runId 生成 + defaultMechanicalSuiteCommand 传参）
-- plugin/scripts/suite-driver.ts（writeRedSuiteRecord 用 per-suite runId，若仍在）
+- plugin/scripts/suite-driver.ts（writeRedSuiteRecord 已被 gap-verification-round-single-writer 删——本任务无改动）
 - plugin/test/full-suite-runner.test.mjs（--run-id 缺省/覆盖）
 - plugin/test/worker-driver.test.mjs（per-suite 唯一性）
 - tasks/gap-mechanical-fan-in-per-suite-runid-unified.md（自身）

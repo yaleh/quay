@@ -113,6 +113,7 @@ import {
   fanInLogFileName,
   appendFanInTrace,
   defaultMechanicalSuiteCommand,
+  newMechanicalSuiteRunId,
   extractFailureSummary,
   combinedOutput,
   mirrorMechanicalFanInSuiteState,
@@ -624,6 +625,7 @@ test("AC2 — the mechanical fan-in default suite command is full-suite-runner.t
     worktree: "/tmp/wt",
     root: "/tmp/root",
     suiteLogFile: "/tmp/fan-in-suite-gap-mech-red-bucket.log",
+    runId: "mfi-gap-mech-red-bucket-1788022868-abc123",
   });
   assert.ok(cmd.some((a) => a.endsWith("full-suite-runner.ts")), "the default suite command must be full-suite-runner.ts");
   assert.ok(cmd.includes("--buckets") && cmd.includes("gap-mech-red-bucket"), "must pass --buckets <task>");
@@ -631,7 +633,18 @@ test("AC2 — the mechanical fan-in default suite command is full-suite-runner.t
   assert.ok(cmd.includes("--state-dir") && cmd.includes("/tmp/root/.quay"), "must pass --state-dir <root>/.quay (the shared checkout ledger)");
   assert.ok(cmd.includes("--runner") && cmd.includes("inner"), "must pass --runner inner (explicit layer identity)");
   assert.ok(cmd.includes("--log-file") && cmd.includes("/tmp/fan-in-suite-gap-mech-red-bucket.log"), "must pass --log-file <suiteLogFile> (the silence-watchdog tee)");
+  // gap-mechanical-fan-in-per-suite-runid-unified — the per-suite runId is passed to the runner so the
+  // suite-load-<runId>.jsonl key + full-suite-state runId + verification-round record runId share ONE key.
+  assert.ok(cmd.includes("--run-id") && cmd.includes("mfi-gap-mech-red-bucket-1788022868-abc123"), "must pass --run-id <per-suite runId> to the runner");
   assert.ok(!cmd.some((a) => a.includes("scripts/test.sh")), "must NOT run a parallel `bash scripts/test.sh` harness");
+});
+
+test("gap-mechanical-fan-in-per-suite-runid-unified AC2 — newMechanicalSuiteRunId is per-suite unique (two tasks ⇒ two ids, one per fan-in)", () => {
+  const a = newMechanicalSuiteRunId("gap-task-a");
+  const b = newMechanicalSuiteRunId("gap-task-b");
+  assert.notEqual(a, b, "two different tasks produce two DIFFERENT per-suite runIds");
+  assert.ok(a.startsWith("mfi-gap-task-a-") && b.startsWith("mfi-gap-task-b-"), "the id carries the mfi-<task>- prefix (suite identity, not the shared wk-prod round id)");
+  assert.ok(!a.startsWith("wk-prod"), "the per-suite id is NOT the shared wk-prod driver round id");
 });
 
 test("AC1 — the mechanical fan-in default suite command, run against a red bucket suite, records state=red into verification-round.jsonl", async () => {
@@ -653,7 +666,8 @@ test("AC1 — the mechanical fan-in default suite command, run against a red buc
     // symlinkRuntimeTrees — untracked ⇒ never in any delta).
     fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(root, "plugin"), "dir");
     const suiteLog = path.join(root, "fan-in-suite.log");
-    const cmd = defaultMechanicalSuiteCommand({ task: "gap-mech-red-bucket", worktree: root, root, suiteLogFile: suiteLog });
+    const perSuiteRunId = "mfi-gap-mech-red-bucket-1788022868-abc123";
+    const cmd = defaultMechanicalSuiteCommand({ task: "gap-mech-red-bucket", worktree: root, root, suiteLogFile: suiteLog, runId: perSuiteRunId });
     // Hermetic seams (same family as full-suite-runner.test.mjs runRunner): skip the REAL resource gate
     // + single-flight + systemd scope so a temp-repo fake suite is deterministic.
     const child = spawn(cmd[0], cmd.slice(1), {
@@ -677,6 +691,9 @@ test("AC1 — the mechanical fan-in default suite command, run against a red buc
     assert.equal(rec.bucket_files, 3, "the __BUCKETS__ file count rides the record");
     assert.equal(rec.runner, "inner", "explicit --runner inner is recorded");
     assert.equal(rec.preverified, undefined, "the runner-shape record carries NO preverified field (single writer)");
+    // gap-mechanical-fan-in-per-suite-runid-unified AC1 — the record runId == the --run-id passed to the
+    // runner (the SAME key the suite-load-<runId>.jsonl file + full-suite-state carry).
+    assert.equal(rec.runId, perSuiteRunId, "the verification-round record carries the per-suite runId (record ↔ telemetry join key)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
