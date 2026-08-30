@@ -38,8 +38,8 @@
 //      resource-gate A 面）不退役。
 //   ② A6「检查 fan-in 是否走 workflow」—— worker 永不自己调 fan-in-execute workflow（创建 + 续做
 //      两条 prompt 都走 driverFanInNote：worker 实现后退出、driver 接手机械跑 fan-in；语义兜底归
-//      driver 按 red step 决定），结构上不需要事后检查「有没有走」。标记落点：fan-in-workflow-check.ts
-//      头部「A6 检查退役面」横幅（过渡期仍保留给旧循环，驱动路径不消费它）。
+//      driver 按 red step 决定），结构上不需要事后检查「有没有走」。原 A6 检查器已随
+//      gap-retire-fan-in-executor-workflow-identity-checkers（08-29）删除（SUPERSEDED），无残留检查面。
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/worker-driver.ts \
@@ -79,8 +79,8 @@
 //   `.halt` 文件机制对【驱动】退役 —— 驱动的停机态 = `.quay/worker-control.json`（MCP halt 写、派发环读），
 //   ⛔ 驱动【不再】读 `.halt`、⛔ 不两者并存（两个真相源）。worker-control.json 与 worker-outcome.jsonl 同族
 //   （gitignored 运行时状态）。读失败 fail-closed（读失败/解析失败 ⇒ halted=true，硬规则 3b：读不懂 ≠ 合格）。
-//   注：.halt 仍被【旧三层循环】的 halt-check.sh / slot-refill.ts 等消费——它们的退役属外层 SPEC 迁移范围，
-//   本文件只管【驱动】这一条停机来源，不读 .halt、也不与它并存为驱动停机态。
+//   注：.halt 哨兵机制已随 gap-retire-halt-file-driver-based（08-29）整体退役——旧三层循环的消费点已删除
+//   （SUPERSEDED）。本文件只管【驱动】这一条停机来源（.quay/worker-control.json），不读 .halt。
 //
 // 控制态文件（.quay/worker-control.json，单一真相源）：
 //   { schemaVersion:1, halted:boolean, halted_by, halted_at, preference:{k:v}, forced:[{task,reason,caller,at}] }

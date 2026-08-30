@@ -2,7 +2,7 @@
 id: gap-retired-mechanisms-cleanup-corpses-stale-refs
 title: 清理近期退役机制残留——删除三个零消费者尸体脚本 + 修复陈旧引用（worker-driver 注释 / manager-loop-tick
   inbox-summary）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -43,16 +43,16 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：三个尸体文件及其测试不在仓库——`git ls-files 'plugin/scripts/{slot-free-trigger,integration-branch-model,unverified-integration-task-ids}.{ts,sh,mjs}' plugin/test/{slot-free-trigger,integration-branch-model,unverified-integration-task-ids}.test.mjs` 输出为空
-- [ ] AC2：capability-catalog.sh 不再声明三个名字——`grep -c 'slot-free-trigger\|integration-branch-model\|unverified-integration-task-ids' plugin/scripts/capability-catalog.sh` = 0
-- [ ] AC3：quay-branch.ts 不再含 integration-branch-model——`grep -c integration-branch-model plugin/scripts/quay-branch.ts` = 0
-- [ ] AC4（能取假）：worker-driver.ts 不再指向已删除文件——`grep -c 'halt-check.sh\|fan-in-workflow-check' plugin/scripts/worker-driver.ts` = 0
-- [ ] AC5（能取假）：manager-loop-tick.md 无 `supervisor-bus-identity.sh inbox-summary` 命令形态——grep 命中需为退役指针说明文字，非反引号命令/代码块指令
-- [ ] AC6：套件绿——`scripts/test.sh --for-task <本任务>` scoped 门 0 红 + 全量 suite pass（删测试后无残留红因；若 rhythm-consumer/runner-static-gate/retired-clause 需同步则一并绿）
+- [x] AC1（能取假）：三个尸体文件及其测试不在仓库——`git ls-files 'plugin/scripts/{slot-free-trigger,integration-branch-model,unverified-integration-task-ids}.{ts,sh,mjs}' plugin/test/{slot-free-trigger,integration-branch-model,unverified-integration-task-ids}.test.mjs` 输出为空
+- [x] AC2：capability-catalog.sh 不再声明三个名字——`grep -c 'slot-free-trigger\|integration-branch-model\|unverified-integration-task-ids' plugin/scripts/capability-catalog.sh` = 0
+- [x] AC3：quay-branch.ts 不再含 integration-branch-model——`grep -c integration-branch-model plugin/scripts/quay-branch.ts` = 0
+- [x] AC4（能取假）：worker-driver.ts 不再指向已删除文件——`grep -c 'halt-check.sh\|fan-in-workflow-check' plugin/scripts/worker-driver.ts` = 0
+- [x] AC5（能取假）：manager-loop-tick.md 无 `supervisor-bus-identity.sh inbox-summary` 命令形态——grep 命中需为退役指针说明文字，非反引号命令/代码块指令
+- [ ] AC6：套件绿——`scripts/test.sh --for-task <本任务>` scoped 门 0 红 + 全量 suite pass（删测试后无残留红因；若 rhythm-consumer/runner-static-gate/retired-clause 需同步则一并绿）（待外部）
 
 ## Definition of Done
 
-- [ ] 三尸体（脚本+测试+catalog+quay-branch 注册表）删除/清理落地并 commit；worker-driver 两条注释与 manager-loop-tick 指令已修；全量 suite 绿；DELIVERY-INVENTORY（check-time 计算）一致、无残留声明
+- [ ] 三尸体（脚本+测试+catalog+quay-branch 注册表）删除/清理落地并 commit；worker-driver 两条注释与 manager-loop-tick 指令已修；全量 suite 绿；DELIVERY-INVENTORY（check-time 计算）一致、无残留声明（待外部）
 
 ## Touches
 
@@ -69,4 +69,7 @@ extra:
 - plugin/scripts/rhythm-consumer-check.ts（census 条目，套件核实后定）
 - plugin/scripts/runner-static-gate.ts（@static-object 条目，套件核实后定）
 - plugin/scripts/retired-clause-check.ts（R21/R25 条目，套件核实后定）
+- plugin/loop/orchestrator-loop-tick.md（slot-free-trigger 陈旧引用，套件暴露）
+- plugin/test/outer-loop-tick-split.test.mjs（outerOnlyCritical 列表去 slot-free-trigger，套件暴露）
+- docs/analysis/test-file-baseline.txt（test-file-snapshot 结构性 co-touch：删除三个尸体测试触发相对基线移除；snapshot 再生成一并吸收 develop 并发新增测试文件）
 - tasks/gap-retired-mechanisms-cleanup-corpses-stale-refs.md（自身）
