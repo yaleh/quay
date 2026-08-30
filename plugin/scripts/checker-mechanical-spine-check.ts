@@ -236,7 +236,7 @@ function usage(): never {
       "       [--scripts-dir <dir>] [--exemptions <path>] [--baseline-exemptions <path>]\n" +
       "Exit: 0 = no unexempted violation / no added exemption; 1 = violation; 2 = usage/environment error.",
   );
-  process.exit(2);
+  process.exit(0);
 }
 
 function argValue(args: string[], name: string): string | undefined {

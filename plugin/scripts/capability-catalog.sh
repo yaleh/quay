@@ -149,6 +149,8 @@ declare -A QUESTION=(
   [suite-bucket-attribution.ts]="Which suite bucket does a test file belong to — P (product: packages/*/(src|bin|dist) or packages/*/test/ home), S (suite infra: scripts/test.sh), M (mechanism: plugin/scripts), a cross-bucket combination, or UNRESOLVED (subject not statically locatable) — by STATIC REFERENCE CLOSURE (normalized relative imports + path literals, never basename pairing, never directory-ownership as the sole signal)?"
   [suite-bucket-hub-list.ts]="Which files are HUB files whose change forces the FULL suite unconditionally (no precise fan-out), and does a given change touch any hub — the explicit hub list (scripts/test.sh, plugin/scripts/full-suite-runner.ts, plugin/scripts/runner-grouping*, plugin/scripts/select-tests-for-touches.ts) plus the hubDecision/touchesHub judgment?"
   [suite-bucket-select.ts]="Which test files does a CHANGE select to run — the FULL suite (a hub file touched, or no bucket triggerable ⇒ fail-closed) or a bucket subset (P-only ⇒ P bucket, M-only ⇒ M bucket, P+M ⇒ both), with UNRESOLVED tests always selected (safe side, 安全侧不做减法)?"
+  [suite-bucket-drift-check.ts]="Does a test file's STATIC bucket attribution disagree with its DYNAMIC truth — static non-empty yet the runtime trace (suite-fs-trace.ts) reaches a bucket the static set missed ⇒ static-vs-truth-drift RED (the S-singleton-but-dynamic-M case), and with a touched-file context a dynamic-truth-covering test the bucket selection missed ⇒ truth-selection-drift RED; no trace cache ⇒ NOT-EVALUATED never conflated with '0 drift' (gap-suite-bucket-dynamic-truth-drift-detector)?"
+  [suite-fs-trace.ts]="What repo files does a test file ACTUALLY read/write at runtime — the dynamic-truth ground truth produced by running the test in a traced subprocess (node --require suite-fs-trace-preload.cjs patching node:fs/node:child_process), with an incremental content-hash cache so an unchanged test is never re-traced (gap-suite-bucket-dynamic-truth-drift-detector)?"
   [suite-cutoff-verdict.mjs]="Is a full-suite log's failure class heavy-file at-risk / genuine dangling-Promise / cascade-victim, and which files are at-risk?"
   [suite-driver.ts]="Does the per-task suite lifecycle get absorbed into a resident driver kind (SPEC-suite-lifecycle §3) — the driver is the ONLY spawner of a per-task suite: it directly spawns and waits (process-level parent-child, child exit known immediately), runs a periodic silence-watchdog fallback (alive but no output ≥N seconds ⇒ SIGKILL the group + a distinguishable hung outcome), and acquires the single-flight slot before spawn / releases it after termination (acquire and release at ONE execution point, release atomic — §2(b)「让槽不让 lane」结构上不可能), writing a three-state outcome (done / red / hung, hung is a distinguishable independent value ⛔ not conflation with red/done) to .quay/suite-round.jsonl, reusing the five ops verbs + supervisor respawn (Layer 0, ⛔ no new interface), rather than the old setsid+&+disown detached spawn that NOTHING waits on (ac143 hung 33.7min / lpt-lookback hung 199.5min, manual kill only)?"
   [suite-execution-form-counter.ts]="Is the suite execution form silently rolled back to main-session-direct — 执行形态 = launch Bash tool_use 落在哪类 transcript 文件（主会话/agent/workflow 三类互斥，[startedAt ± ε] 窗匹配），invariant「近 N 轮已分类形态 ≥2 类」能取假（gap-a19-evidence-field-does-not-match-measured-object 重写；runner 字段已降级非执行面取证）?"
@@ -355,6 +357,7 @@ declare -A QUESTION=(
   [task-schema-check.ts]="Is this task's authoring schema valid (standalone CLI)?"
   [task-schema.ts]="Is a task body a valid quay task per the canonical schema?"
   [task-status-drift-check.ts]="Has any task's status drifted from its evidence?"
+  [task-status.ts]="Is a value one of the five valid task-status lifecycle words (todo/ready/done/needs-human/superseded) — the plugin tree's single-source TaskStatus type + TASK_STATUS constants + isTaskStatus guard?"
   [needs-human-recheck.ts]="Which needs-human tasks are stale or dead-retired (time-age + survival axis — the black hole is measurable)?"
   [stage-receipt.ts]="What is the durable hash-bound receipt for a workflow stage (control-plane kernel substrate)?"
   [workflow-journal.ts]="What is the durable stage journal for the workflow (control-plane kernel substrate)?"
@@ -399,12 +402,18 @@ declare -A QUESTION=(
   [worktree-branch-hygiene-check.sh]="Is the worktree and branch state hygienic (no stale branches or stranded worktrees)?"
   [worktree-node-modules-check.sh]="Does every dispatched task worktree (branch task/*) have node_modules present, so its self-verification never silently falls back to the shared checkout (report-only by default; --fail fail-closed)?"
   [checker-lib.ts]="Do the shared checker primitives — matchAtCommandPosition (按位置不按关键词) and enumerativeExistence (枚举式存在性) — behave correctly, so a new checker stops re-implementing them?"
+  [checker-io.ts]="Do checkers converge their judgment result onto the SAME DriverResult<T> vocabulary (verified/not-evaluated/failed, single-sourced from driver-result.ts) via the driverResultToExit exit-code mapping, so a checker's third state (not-evaluated, 硬规则 3b) is no longer a three-way-conflicting exit 2 (SPEC-methodology-layer-architecture §2.3a, gap-b4-checker-reuse-driver-result)?"
+  [checker-driver-result-ratchet-check.ts]="Do the migrated checkers (REQUIRED_ADOPTERS: outer-anchor-check / load-sensitive-release-check / dead-code-after-return-check / adr016-screen-use-check) still position-import the DriverResult vocabulary (checker-io.ts / driver-result.ts), so checker-side adoption of DriverResult<T> can only GROW (棘轮只增不减, SPEC §5.1, gap-b4-checker-reuse-driver-result)?"
   [checker-mechanical-spine-check.ts]="Does every shipped checker conform to the mechanical-spine contract — exit-code vocabulary within {0,1,2,3} (0=PASS, 1=FAIL, 2=usage/env-error, 3=NOT-EVALUATED) and a --json claim that actually emits JSON — with a shrink-only exemption-list ratchet (B1, tasks/gap-b1-mechanical-spine-doc-checker)?"
+
   [mechanism-vitality-check.ts]="Which shipped mechanisms are zero-call past 3x their declared cadence (待表态), have a stale last-reaffirmed stamp (待重新确认), or lack a 失效前提 field (entry-gate reject)?"
   [md-deletion-token-evaporation-check.sh]="Did any commit net-deleting ≥50 lines from *.md leave deleted-content unique tokens (identifiers/paths/专名) with ZERO occurrence in the post-delete repo (来源完备性整段蒸发)?"
   [workflows-dual-copy-drift-check.ts]="Are the five dual-copy workflow files (drain-directives / fan-in-execute / run-routines / execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped orchestrator-tick-core.md references them, so the plugin/workflows/ mirror must carry them) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships to installed targets) — a one-sided edit (改正本而落地副本不跟, the A6/fan-in-execute.js class) must go RED, the current byte-identical state GREEN (gap-workflows-dual-copy-drift-unchecked)?"
   [promotion-driver.ts]="Is the todo→ready promotion applied mechanically every round — a resident loop that calls ready-pool-check for the full-pool verdict and lands eligible promotions (zero LLM), and calls the supervisor/driver liveness check each round (gap-resident-driver-stable-carrier-liveness AC2 death-alarm caller), rather than role-will that vanishes when the session or model changes?"
   [outer-driver.ts]="Does the outer's pure-mechanical A/B segments (A1/A6/A9/A10/A18/A21 readings · B1/B2/B6 closing traces · B12/B17 self-audit) get absorbed into a resident routine-type driver — a resident loop that runs the routine table each round and writes structured Facts (verified/not-evaluated/failed) to .quay/outer-round.jsonl, where each routine that cannot read its input reports not-evaluated (⛔ not verified, AC153 Layer 1b form), rather than role-will that vanishes when the outer session or model changes (AC143)? (The former A3 .halt read was retired 2026-08-29 — gap-retire-halt-file-driver-based; the stall read is now A21 liveness_direct.)"
+  [dual-source-check.ts]="Is every driverized responsibility (todo→ready 晋升 / ready→实现 派发 / 观测-账本-收尾) served by exactly ONE live executor — the driver file exists AND the former session/manual path is documented as retired (the AC135/AC141/AC143 退役 annotation present), so no two-executors-for-one-job path can exist (AC149-3 无双真相源)?"
+  [land-capacity-monitor.ts]="What is the develop land rate (fan-in merge commits per hour) in a pre-stop vs post-stop window, and is the post-stop rate ZERO while pre-stop was non-zero (AC149-2 归零 ⇒ 回滚) — a measurement that reports a ratio for a human to judge a cliff, never a hardcoded X% threshold (硬规则④推论一)?"
+  [session-retirement-check.ts]="Has each retired session's (outer/inner) execution-core doc been marked retired (删除线 + 指针 + 边界条件 banner) with no stale live claim (并行对照期 / 每轮必跑) left un-retired (AC149-1 真停 — the B9 drift shape)?"
   [outer-retirement-precondition-check.ts]="Before retiring the outer layer, does every checker the outer execution core (orchestrator-tick-core.md) directly references — the plugin/scripts/*-check.{ts,sh} set — have a surviving call surface (static-gate registry, or an external executable carrier referencing it at a code position, transitive closure), so a checker referenced ONLY by the retiring layer is flagged unless its file carries the explicit RETIRED-WITH-RETIRING-LAYER disposition (SPEC §2.3b B0, gap-b0-retirement-precondition-checker-call-surface)?"
   [write-json-atomic.ts]="Is every state file write atomic — a single writeJsonAtomic (tmp + renameSync) so a concurrent reader never observes a torn, half-written JSON, replacing the split of 6 state writers into 2 atomic + 4 non-atomic (tasks/gap-writestate-atomicity-split)?"
 )
@@ -440,7 +449,10 @@ declare -A CADENCE=(
   [checker-cost.sh]="每红窗"
   [checker-cost.ts]="每红窗"
   [checker-lib.ts]="按需"
+  [checker-io.ts]="按需"
+  [checker-driver-result-ratchet-check.ts]="按需"
   [checker-mechanical-spine-check.ts]="每轮"
+
   [checker-mutation-check.sh]="每轮"
   [claim-task.sh]="按需"
   [claim-task.ts]="按需"
@@ -635,6 +647,8 @@ declare -A CADENCE=(
   [suite-bucket-attribution.ts]="按需"
   [suite-bucket-hub-list.ts]="按需"
   [suite-bucket-select.ts]="按需"
+  [suite-bucket-drift-check.ts]="每轮"
+  [suite-fs-trace.ts]="按需"
   [suite-cutoff-verdict.mjs]="每轮"
   [suite-driver.ts]="每轮"
   [suite-execution-form-counter.ts]="每轮"
@@ -658,6 +672,7 @@ declare -A CADENCE=(
   [task-schema-check.ts]="每里程碑"
   [task-schema.ts]="每里程碑"
   [task-status-drift-check.ts]="每轮"
+  [task-status.ts]="每里程碑"
   [test-file-baseline.ts]="每红窗"
   [test-file-snapshot.sh]="每轮"
   [test-framework-policy-check.sh]="每轮"
@@ -708,6 +723,9 @@ declare -A CADENCE=(
   [outer-retirement-precondition-check.ts]="每轮"
   [write-json-atomic.ts]="按需"
 
+  [dual-source-check.ts]="按需"
+  [land-capacity-monitor.ts]="按需"
+  [session-retirement-check.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
@@ -741,7 +759,10 @@ declare -A INVALIDATION=(
   [checker-cost.sh]="无可测前提，靠周期复核"
   [checker-cost.ts]="无可测前提，靠周期复核"
   [checker-lib.ts]="失效前提：仍有检查器需要位置判定/枚举式存在性原语；若无任何 import 者，本条按 ④ 失效"
+  [checker-io.ts]="失效前提：仍有 checker 需要把 DriverResult<T> 判定映射到退出码且词表单源到 driver-result.ts；若 harness 三态识别（gap-not-evaluated-harness-third-state）改退出码协议或 DriverResult 词表迁出，本桥随迁"
+  [checker-driver-result-ratchet-check.ts]="失效前提：仍需 checker 复用 driver-result 的 DriverResult<T> 词表且要防回潮（REQUIRED_ADOPTERS 清单）；若层 2 判定契约改由更上位词表承载或 DriverResult 迁出/拆分，本棘轮随迁"
   [checker-mechanical-spine-check.ts]="失效前提：checker 机械脊柱契约（orchestration/SPEC-checker-mechanical-spine-contract-*.md）仍以 exit 码词表 {0,1,2,3} + --json 兑现为正本，且 checker 仍按 plugin/scripts/*-check.{ts,sh} 派生；若脊柱契约迁移或 exit 3 第三态语义被推翻（gap-not-evaluated-harness-third-state），本条按 ④ 失效"
+
   [checker-mutation-check.sh]="无可测前提，靠周期复核"
   [claim-task.sh]="无可测前提，靠周期复核"
   [claim-task.ts]="无可测前提，靠周期复核"
@@ -936,6 +957,8 @@ declare -A INVALIDATION=(
   [suite-bucket-attribution.ts]="失效前提：suite 三桶（P/S/M）定义仍以静态引用闭包为准（P=packages/*/(src|bin|dist) 或 packages/*/test 归属、S=scripts/test.sh、M=plugin/scripts），且分桶执行尚未启用（AC121-125 为启用前提）；若桶集合或判据源变化（新增桶/改运行时动态归属），本条需同步"
   [suite-bucket-hub-list.ts]="失效前提：分桶执行的枢纽退回仍以这份显式清单为准（scripts/test.sh / plugin/scripts/full-suite-runner.ts / plugin/scripts/runner-grouping* / plugin/scripts/select-tests-for-touches.ts）；若分桶执行启用后枢纽集合变化（新增/移除枢纽文件，或 runner-grouping 提取为具体脚本），本条需同步"
   [suite-bucket-select.ts]="失效前提：分桶执行的触发桶判定仍以 AC120 classifyPath 前缀（P=packages/*/(src|bin|dist)、M=plugin/scripts、S=scripts/test.sh）+ experiments mirror fold 为准，且 UNRESOLVED 恒入选（安全侧）；若新增桶/改 UNRESOLVED 语义/改选择规则（枢纽⇒全量、触发桶∩测试桶集合），本条需同步"
+  [suite-bucket-drift-check.ts]="失效前提：桶归因仍以静态引用闭包为代理（动态真值对照才有意义）、动态真值载体仍是 .quay/suite-fs-trace.jsonl（suite-fs-trace.ts 采集）；若静态归因改为直接读运行时、或 trace 缓存 schema 变更（字段改名/移除）、或漂移方向语义（动态⊄静态⇒红）改变，本条需同步"
+  [suite-fs-trace.ts]="失效前提：动态真值仍通过 node --require suite-fs-trace-preload.cjs 包装 node:fs/node:child_process 采集、缓存键仍是测试文件内容 sha256（未变更不重跑 trace）；若 node 变更 --require 预加载语义（命名导入快照行为变化）、或测试文件不再能 standalone 执行，本条需同步"
   [suite-cutoff-verdict.mjs]="无可测前提，靠周期复核"
   [suite-driver.ts]="失效前提：per-task suite 仍需一个常驻 driver 直接 spawn+wait 承接生命周期（挂死检测从「没人做」变「父进程 wait」，单飞锁取/放同一执行点）；若 fan-in 改回 subagent 直跑 detach（无人 wait）或 suite 生命周期改由其它承载（如 systemd unit 直接管进程、绕过 driver-runtime 的 runSupervisor/registry），本条退休"
   [suite-execution-form-counter.ts]="失效前提：launch Bash tool_use 的 transcript 文件类别仍是执行形态的判据源（主会话/agent/workflow 三类路径互斥，[startedAt ± ε] 窗匹配）；若执行形态改为其它记录面（如套件由 suite-state-trigger 之外的机件启动、或 transcript 文件布局变更），本条逻辑需同步"
@@ -959,6 +982,7 @@ declare -A INVALIDATION=(
   [task-schema-check.ts]="无可测前提，靠周期复核"
   [task-schema.ts]="无可测前提，靠周期复核"
   [task-status-drift-check.ts]="无可测前提，靠周期复核"
+  [task-status.ts]="无可测前提，靠周期复核"
   [test-file-baseline.ts]="无可测前提，靠周期复核"
   [test-file-snapshot.sh]="无可测前提，靠周期复核"
   [test-framework-policy-check.sh]="失效前提：同上（.sh 壳调用 .ts 实现）"
@@ -1009,6 +1033,9 @@ declare -A INVALIDATION=(
   [outer-retirement-precondition-check.ts]="失效前提：outer 执行核（orchestrator-tick-core.md）仍是退役前 checker 调用面的枚举正本，且 static-gate 注册表（runner-static-gate.ts）仍是「留存调用面」的判定来源之一；若执行核退役后本前置随之退役（其使命就是退役那一步的前置），或 checker 留存调用面的判定改由别的正本承载，本检查退休"
   [write-json-atomic.ts]="失效前提：6 处 state 写仍以本模块为唯一原子写实现（driver-shared / inner-blocked-signal / mirror-full-suite-state / red-window-triage / runner-state-write / suite-state-trigger 各自 import writeJsonAtomic）；若 rename(2) 原子性假设失效（如迁到非 POSIX 或跨文件系统 rename）或 state 写载体迁出 plugin/scripts/，本条退休"
 
+  [dual-source-check.ts]="失效前提：职责→driver 的退役仍以文档标注为唯一真相源；若退役改为机制强制（cron 删除即无锚），本条按 ④ 失效"
+  [land-capacity-monitor.ts]="失效前提：land 仍以 develop 上的 fan-in 合并提交为载体（git log develop）；若 land 载体改换（产品化后 fan-in 写结构化记录而非 commit），本条失效"
+  [session-retirement-check.ts]="失效前提：会话退役仍以文档标注为唯一真相源；若退役改为机制强制（cron 删除即无锚），本条按 ④ 失效"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
@@ -1042,7 +1069,10 @@ declare -A LAST_REAFFIRMED=(
   [checker-cost.sh]="2026-08-10"
   [checker-cost.ts]="2026-08-10"
   [checker-lib.ts]="2026-08-10"
+  [checker-io.ts]="2026-08-28"
+  [checker-driver-result-ratchet-check.ts]="2026-08-28"
   [checker-mechanical-spine-check.ts]="2026-08-28"
+
   [checker-mutation-check.sh]="2026-08-10"
   [claim-task.sh]="2026-08-10"
   [claim-task.ts]="2026-08-10"
@@ -1237,6 +1267,8 @@ declare -A LAST_REAFFIRMED=(
   [suite-bucket-attribution.ts]="2026-08-21"
   [suite-bucket-hub-list.ts]="2026-08-21"
   [suite-bucket-select.ts]="2026-08-21"
+  [suite-bucket-drift-check.ts]="2026-08-28"
+  [suite-fs-trace.ts]="2026-08-28"
   [suite-cutoff-verdict.mjs]="2026-08-10"
   [suite-driver.ts]="2026-08-27"
   [suite-execution-form-counter.ts]="2026-08-13"
@@ -1260,6 +1292,7 @@ declare -A LAST_REAFFIRMED=(
   [task-schema-check.ts]="2026-08-10"
   [task-schema.ts]="2026-08-10"
   [task-status-drift-check.ts]="2026-08-10"
+  [task-status.ts]="2026-08-30"
   [test-file-baseline.ts]="2026-08-10"
   [test-file-snapshot.sh]="2026-08-10"
   [test-framework-policy-check.sh]="2026-08-10"
@@ -1310,6 +1343,9 @@ declare -A LAST_REAFFIRMED=(
   [outer-retirement-precondition-check.ts]="2026-08-28"
   [write-json-atomic.ts]="2026-08-28"
 
+  [dual-source-check.ts]="2026-08-28"
+  [land-capacity-monitor.ts]="2026-08-28"
+  [session-retirement-check.ts]="2026-08-28"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
@@ -1343,7 +1379,10 @@ declare -A MATCHING=(
   [checker-cost.sh]="keyword"
   [checker-cost.ts]="keyword"
   [checker-lib.ts]="position"
+  [checker-io.ts]="n/a"
+  [checker-driver-result-ratchet-check.ts]="position"
   [checker-mechanical-spine-check.ts]="position"
+
   [checker-mutation-check.sh]="enumerative"
   [claim-task.sh]="keyword"
   [claim-task.ts]="keyword"
@@ -1538,6 +1577,8 @@ declare -A MATCHING=(
   [suite-bucket-attribution.ts]="n/a"
   [suite-bucket-hub-list.ts]="n/a"
   [suite-bucket-select.ts]="n/a"
+  [suite-bucket-drift-check.ts]="position"
+  [suite-fs-trace.ts]="n/a"
   [suite-cutoff-verdict.mjs]="keyword"
   [suite-driver.ts]="n/a"
   [suite-execution-form-counter.ts]="enumerative"
@@ -1561,6 +1602,7 @@ declare -A MATCHING=(
   [task-schema-check.ts]="keyword"
   [task-schema.ts]="n/a"
   [task-status-drift-check.ts]="position"
+  [task-status.ts]="n/a"
   [test-file-baseline.ts]="n/a"
   [test-file-snapshot.sh]="keyword"
   [test-framework-policy-check.sh]="keyword"
@@ -1608,6 +1650,9 @@ declare -A MATCHING=(
   [workflows-dual-copy-drift-check.ts]="enumerative"
   [promotion-driver.ts]="n/a"
   [outer-driver.ts]="n/a"
+  [dual-source-check.ts]="enumerative"
+  [land-capacity-monitor.ts]="n/a"
+  [session-retirement-check.ts]="position"
   [outer-retirement-precondition-check.ts]="enumerative"
   [write-json-atomic.ts]="n/a"
 )
@@ -1627,6 +1672,8 @@ declare -A CONSUMER=(
   [anti-drift-touches-check.ts]="谁按：任务 subagent 在落地后核验 Touches 一致性时按；条件=任务落地要验证 touches 精确命中"
   [axis-generator.ts]="谁按：判据作者在定义新判据的测量轴时按；条件=要量化判据的时间/范围轴"
   [checker-lib.ts]="谁按：新检查器作者在实现按位置/枚举判定时 import；条件=要复用 matchAtCommandPosition / enumerativeExistence"
+  [checker-io.ts]="谁按：已迁移到 DriverResult 的 checker（outer-anchor-check / load-sensitive-release-check / dead-code-after-return-check / adr016-screen-use-check）在判定函数返回 DriverResult 后经 driverResultToExit 映射退出码；条件=一个 checker 的判定结果要收敛到 DriverResult 词表（gap-b4-checker-reuse-driver-result）"
+  [checker-driver-result-ratchet-check.ts]="谁按：plugin/test/checker-driver-result-ratchet-check.test.mjs（默认 suite product,engine 每轮）对真实仓库跑 checkRatchet，断言 REQUIRED_ADOPTERS 全部采纳 + 采纳数 ≥ 地板；条件=要防 DriverResult 采纳回潮（只增不减）"
   [claim-task.sh]="谁按：派发器/inner 在认领任务分支时按；条件=任务要被某台机器认领（claim 协议）"
   [claim-task.ts]="谁按：quay-branch 命令族在 fork 候选任务时按；条件=要决定从哪个基分支 fork"
   [codex-stage1-live-proof-check.ts]="谁按：Codex stage1 实验者在验证 live-proof 时按；条件=要证明 stage1 有内部一致证据"
@@ -1676,6 +1723,8 @@ declare -A CONSUMER=(
   [suite-bucket-attribution.ts]="谁按：AC121-125 分桶执行启用后的派发/执行核在按变更选桶时按；条件=要判定本轮该跑哪几桶（P/S/M 归属，跨桶计入两边，UNRESOLVED 不静默归桶）"
   [suite-bucket-hub-list.ts]="谁按：AC121-125 分桶执行启用后的派发/执行核在按变更选桶前按；条件=要判本轮该跑全量还是按桶扇出（触及枢纽文件⇒无条件全量，不精算扇出）"
   [suite-bucket-select.ts]="谁按：AC124 启用后 full-suite-runner.ts --buckets / scripts/test.sh --buckets 在按变更选桶时按；条件=要判本轮跑全量还是按桶子集（枢纽⇒全量；否则触发桶∩测试桶集合，UNRESOLVED 恒入选）并产出选中的测试文件清单"
+  [suite-bucket-drift-check.ts]="谁按：run_static_checks（scripts/test.sh 全量/静态检查链，change tier）每轮按；条件=要判测试的静态桶归因与动态真值是否漂移（static-vs-truth-drift RED，缓存缺失 NOT-EVALUATED）"
+  [suite-fs-trace.ts]="谁按：suite-bucket-drift-check.ts 读取其缓存作为动态真值输入；维护者/AC 验证用 --update/--collect 显式按（采集不自动跑，避免扰动在跑 suite）"
   [suite-driver.ts]="谁按：生产部署启动命令按（常驻 suite-driver，接线为后续/独立任务——本任务只落 driver 这一半，与 quality-gate/promotion/outer 同族；常驻模式扫 .quay/suite-requests/ 队列派发，或一次性 --run --suite-command-file 单发）；条件=fan-in 的 per-task suite 生命周期要改由常驻 driver 承接（spawn+wait+静默看门狗+取放槽，退出码 0/1/2=done/red/hung）"
   [suite-duration-exceed-check.ts]="消费方：外层/人每轮读 full-suite.log 里打印的 SUITE-DURATION-EXCEEDED 行据此动作（超长轮趋势可见不静默）；--no-block 故不阻产品验证轮（趋势观测≠代码类不变量，超长历史轮不得红整轮）"
   [suite-lpt-order.ts]="谁按：scripts/test.sh --buckets 生成 M bucket 文件列表后按；条件=要按已知耗时降序（LPT）重排文件列表以最小化 makespan（长测试先抢 lane 与短测试并行）"
@@ -1715,6 +1764,9 @@ declare -A CONSUMER=(
   [worker-driver.ts]="谁按：inner 派发器在要驱动单个 claude -p worker 跑完整任务时按（AC115 阶段 1 显式 --task）；条件=任务要被机械驱动跑完 select→worktree→develop→suite→ff 并落盘结构化 outcome 到 .quay/worker-outcome.jsonl"
   [promotion-driver.ts]="谁按：outer 生产部署启动命令按（常驻进程，promotion-driver.ts 头注释「生产部署时由 outer 的启动命令传 --interval 覆盖」——接线为 AC130 后续/独立任务，本任务只做常驻循环这一半）；条件=生产部署启动常驻进程"
   [outer-driver.ts]="谁按：outer 退役过渡期由 outer/manager 的启动命令起常驻进程（quay driver start --kind outer）承接 outer 纯机械 A/B 段，或 fan-in 验证轮跑 --once 冒烟；条件=outer 的机械 A/B 段需要机械承接（读→报→写载体）"
+  [dual-source-check.ts]="谁按：manager 在 AC149-3 无双真相源判定时按；条件=要判定任一职责是否同时有 driver 路径与人工/会话路径且都在用"
+  [land-capacity-monitor.ts]="谁按：manager 在 AC149-2 产能判定时按；条件=停会话后连续 ≥24h 要判定任务是否持续 land 且速率未归零/断崖"
+  [session-retirement-check.ts]="谁按：manager 在 AC149-1 真停判定时按；条件=要判定 outer/inner 会话的 cron 锚/tick-log/执行核文档是否按同一套写法标退役"
   [outer-retirement-precondition-check.ts]="谁按：run_static_checks 每轮自动按（runner-static-gate.ts @static-tier full，全量套件 code-class gate）；条件=退役 outer 前必须跑（前置检查是退役的必须步骤，SPEC §2.3b B0）——全量套件接线保证不靠会话意志"
   [write-json-atomic.ts]="谁按：driver-shared / inner-blocked-signal / mirror-full-suite-state / red-window-triage / runner-state-write / suite-state-trigger / proposal-convergence 在写各自 state 文件时 import；条件=这些 writer 须共用同一份 writeJsonAtomic 实现（函数级复用，⛔ 非复制粘贴）"
 )
@@ -1985,9 +2037,16 @@ VIOLATION_COUNT=$(printf '%s\n' "${VIOLATIONS}" | sed '/^$/d' | wc -l | tr -d ' 
 
 # ── output ──────────────────────────────────────────────────────────────────────────
 if [ "$MODE" = "json" ]; then
-  python3 - "$ROWS" <<'PYEOF'
+  # ROWS is the full tab-separated catalog (one row per script). Pass it via a temp file,
+  # NOT as a single argv — a single argument over Linux's MAX_ARG_STRLEN (~128KB) fails with
+  # "Argument list too long" once the catalog grows past that (observed 2026-08-28 adding
+  # gap-ac149's three scripts). stdin is occupied by the here-doc (the python source), so a
+  # temp file is the transport that keeps both the script and the data unambiguous.
+  _rows_tmp="$(mktemp)"
+  printf '%s\n' "$ROWS" > "$_rows_tmp"
+  python3 - "$_rows_tmp" <<'PYEOF'
 import json, sys
-rows = sys.argv[1].splitlines()
+rows = open(sys.argv[1], encoding="utf-8").read().splitlines()
 entries = []
 for line in rows:
     if not line:
@@ -2013,6 +2072,7 @@ for line in rows:
 json.dump(entries, sys.stdout, ensure_ascii=False, indent=2)
 print()
 PYEOF
+  rm -f "$_rows_tmp"
 elif [ "$MODE" = "entry-surface" ]; then
   if [ "$ENTRY_SURFACE_SUBMODE" = "json" ]; then
     python3 - "${SH_SHIPPED}" "${PUBLIC_SH}" "${INTERNAL_SH}" "${DOC_REFERENCED_SH_COUNT}" "${VIOLATIONS}" <<'PYEOF'

@@ -224,7 +224,7 @@ export function probeProcessAlive(session, env = process.env) {
 }
 
 function usage() {
-  console.error(`manager-liveness-independent-check.ts — manager 自身活性独立兜底（不经过 manager）
+  console.log(`manager-liveness-independent-check.ts — manager 自身活性独立兜底（不经过 manager）
 
 Reads <root>/${DEFAULT_HEARTBEAT_REL} (mtime = 最后 tick 落行时刻；或 --heartbeat-file 指定的 JSON
 心跳 {ts}) and judges freshness. 心跳陈旧超 T（default ${DEFAULT_MAX_AGE_SECS}s = 3 × 20min tick）⇒
@@ -249,7 +249,7 @@ Exit: 0 ALIVE · 1 DISABLED (stale/missing/malformed — notification produced) 
 
 export function main(argv, importMetaUrl = import.meta.url, env = process.env) {
   const args = argv.slice(2);
-  if (args.includes("--help") || args.includes("-h")) { usage(); return 2; }
+  if (args.includes("--help") || args.includes("-h")) { usage(); return 0; }
   const root = path.resolve(flagVal(args, "--root", repoRoot(importMetaUrl)));
   const heartbeatFile = flagVal(args, "--heartbeat-file", path.join(root, DEFAULT_HEARTBEAT_REL));
   const lastTsFlag = flagVal(args, "--last-heartbeat-ts");

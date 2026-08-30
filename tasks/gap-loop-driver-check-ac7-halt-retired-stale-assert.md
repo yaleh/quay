@@ -1,7 +1,7 @@
 ---
 id: gap-loop-driver-check-ac7-halt-retired-stale-assert
 title: loop-driver-check AC7 断言已退役的 .halt print（head -c 80）→ develop 全库红挡所有 full-suite fan-in
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -27,8 +27,8 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：develop 全库 suite 绿，AC7 不再因 `head -c 80` 缺失而红；（⛔ 仍红 ⇒ 假）。
-- [ ] AC2（能取假，方向对）：更新后 AC7 断言的是「退役」而非「存在」——`grep 'head -c 80' loop-driver-check.test.mjs` 不再有 `assert.ok(...must exist)` 形断言（⛔ 仍断言存在 ⇒ 假）。
+- [x] AC1（能取假）：develop 全库 suite 绿，AC7 不再因 `head -c 80` 缺失而红；（⛔ 仍红 ⇒ 假）。
+- [x] AC2（能取假，方向对）：更新后 AC7 断言的是「退役」而非「存在」——`grep 'head -c 80' loop-driver-check.test.mjs` 不再有 `assert.ok(...must exist)` 形断言（⛔ 仍断言存在 ⇒ 假）。
 
 ## Definition of Done
 

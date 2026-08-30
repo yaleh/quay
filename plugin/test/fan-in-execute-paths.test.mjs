@@ -141,6 +141,14 @@ function cleanup(dir) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best-effort */ }
 }
 
+// Hermetic runner env for the REAL launch tests: the detached suite now runs full-suite-runner.ts
+// (gap-fan-in-red-bucket-run-not-recorded), which consults the resource gate + single-flight + systemd
+// scope by default. These seams make a temp-repo fake suite deterministic (same family as
+// full-suite-runner.test.mjs runRunner — QUAY_TEST_SKIP_RESOURCE_GATE skips the gate AND single-flight).
+function runnerHermeticEnv(extra = {}) {
+  return { ...process.env, QUAY_TEST_SKIP_RESOURCE_GATE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "1", ...extra };
+}
+
 // ── ① real git repo helpers ────────────────────────────────────────────────────────────────────────
 // gap-fan-in-delta-scope-doc-only-skip (AC2 取假一): the repo models the AC97 shape — the BRANCH (main,
 // = the fan-in worktree's HEAD) holds the files under test, develop advances with a DOC-ONLY commit
@@ -925,505 +933,26 @@ test("⑥ REAL idempotent — a task with NO open bracket is a no-op (exit 0, no
   assert.equal((report.tasks || []).filter((c) => c.taskId === "gap-test-close-a").length, 1, "exactly one completed pair");
 });
 
-// ── ⑦ verification-round 入账 (gap-preverified-suite-bypasses-verification-round-ledger) ────────────
-// The pre-verified path (step 4 reuses a caller-produced capture) must ALSO write verification-round.jsonl
-// (含 preverified 标记) — the trend ledger (the /tests page + suite-cost analysis data source) was blind
-// to the most-used landing path. The write lives in step 4.5 as # preverified-round-block, guarded by
-// suite_preverified=1 (the marker step 4 appends to the reused capture). These tests run the REAL block
-// from the emitted prompt against a real temp git repo + a real pre-verified capture file.
+// ── ⑦ verification-round 入账统一 (gap-fan-in-red-bucket-run-not-recorded) ──────────────────────────
+// The fan-in bucket path now runs through full-suite-runner.ts --buckets (SUITE_LAUNCH), which is the
+// single writer of verification-round.jsonl (green AND red), full-suite-state.json, measure-history.jsonl
+// and suite-load-<runId>.jsonl. The OLD step-4.5 mirror writers (pre-verified-round-record.ts /
+// mirror-full-suite-state.ts / mirror-measure-history.ts) — a green-only parallel harness grafted onto the
+// bypassed runner — are REMOVED (两套平行机制收敛为一). A red bucket round is now recorded by the runner
+// at suite exit (state=red in verification-round.jsonl), not left unrecorded (硬规则 3b).
 
-/** A temp git repo acting as the task "worktree": the real plugin/ tree is symlinked so the writer's
- *  `node plugin/scripts/pre-verified-round-record.ts` resolves through the real files. The writer
- *  resolves the shared checkout from git common-dir — for a plain repo the shared checkout IS the repo,
- *  so the record lands in <repo>/.quay/verification-round.jsonl. */
-function makePreVerifiedWorktree(prefix = "fan-in-pvr-") {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  const run = (args) => {
-    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
-    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed (${r.status}): ${r.stderr}`);
-  };
-  run(["init", "-q", "-b", "main"]);
-  run(["config", "user.email", "test@test"]);
-  run(["config", "user.name", "test"]);
-  fs.writeFileSync(path.join(dir, "README.md"), "base\n");
-  run(["add", "README.md"]);
-  run(["commit", "-qm", "base"]);
-  fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(dir, "plugin"), "dir");
-  return dir;
-}
-
-async function preVerifiedBlockFor(task, worktree, root) {
-  const { prompts } = await runWorkflow({
-    args: { task, worktree, root, runId: "fm-pvr-1", mergeTarget: "develop" },
-  });
-  return extractBlockFromPrompts(prompts, "# preverified-round-block-start", "# preverified-round-block-end");
-}
-
-test("⑦ wiring — the fan-in prompt carries a verification-round write block guarded by full_suite_ran=true (both branches, shared writer + --preverified flag)", async (t) => {
+test("⑦ wiring — the fan-in prompt no longer carries the green-only mirror writers (the runner writes verification-round green+red)", async () => {
   const { prompts } = await runWorkflow({
     args: { task: "gap-test-pvr", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-pvr", mergeTarget: "develop" },
   });
-  const block = extractBlockFromPrompts(prompts, "# preverified-round-block-start", "# preverified-round-block-end");
-  assert.ok(block.includes("pre-verified-round-record.ts"), "block must invoke the verification-round writer");
-  // Shared guard (AC3, gap-fan-in-realsuite-bypasses-verification-round-ledger): full_suite_ran=true ⇒ a
-  // full suite RAN in this fan-in (either this fan-in's detached run OR a pre-verified reuse) ⇒ write.
-  assert.ok(block.includes('[ "$full_suite_ran" = "true" ]'), "block must be guarded by full_suite_ran=true (the shared both-branch guard)");
-  assert.ok(block.includes('preverified_flag="${suite_preverified:-0}"'), "block must derive the preverified flag from the suite_preverified marker");
-  assert.ok(block.includes('--preverified "$preverified_flag"'), "block must pass the preverified flag to the shared writer");
-  assert.ok(block.includes("--commit \"$suite_head\""), "block must pin the verified suite_head as commit");
-  assert.ok(block.includes("--duration-ms \"$wall_ms\""), "block must reuse the capture's wall-clock (AC2)");
-  // gap-fan-in-verification-round-thin-schema-phase-gap AC1/AC2 — the block passes the capture's
-  // suite_log_file so the writer can parse the phase fields (real-run capture always carries it; a
-  // pre-verified capture only when the caller recorded its log path — the "单独定案" seam).
-  assert.ok(block.includes('--suite-log "${suite_log_file:-}"'), "block must pass the suite log path to the shared writer");
-  // gap-verification-round-cpu-split-not-recorded AC1 — the block passes the gnu-time user/sys split
-  // (parsed by the poll block into the capture) so the verification-round record carries cpu_user_s /
-  // cpu_sys_s (the finding's sys=61% lever is then measurable round-over-round).
-  assert.ok(block.includes('--cpu-user-s "$cpu_user_s"'), "block must pass the gnu-time USER cpu seconds to the writer");
-  assert.ok(block.includes('--cpu-sys-s "$cpu_sys_s"'), "block must pass the gnu-time SYSTEM cpu seconds to the writer");
-  // Placement: the write runs in step 4.5 (suite-record-block), BEFORE the capture is removed — all in the phase-2 prompt.
-  const p2 = promptContaining(prompts, "# preverified-round-block-start");
-  const blockIdx = p2.indexOf("# preverified-round-block-start");
-  const recordIdx = p2.indexOf("# suite-record-block-start");
-  const rmIdx = p2.indexOf('rm -f "$suite_capture"');
-  assert.ok(blockIdx > recordIdx, "verification-round write runs inside step 4.5's suite-record-block");
-  assert.ok(blockIdx < rmIdx, "verification-round write runs BEFORE the capture file is removed");
-});
-
-test("⑦ REAL pre-verified round — a reused capture (suite_preverified=1) writes ONE verification-round record (preverified:true) to the shared checkout's ledger", async (t) => {
-  const dir = makePreVerifiedWorktree();
-  t.after(() => cleanup(dir));
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
-  const task = "gap-test-pvr-real";
-  const capture = `/tmp/fan-in-suite-${task}.env`;
-  fs.writeFileSync(capture, [
-    "full_suite_ran=true",
-    "skip_reason=",
-    "cpu_s=null",
-    "cpu_source=not-wired",
-    "start_iso=2026-08-17T04:30:00.000Z",
-    "end_iso=2026-08-17T04:45:36.519Z",
-    "wall_ms=936519",
-    "load=8.03",
-    "lane_count=8",
-    "suite_exit=0",
-    `suite_head=${head}`,
-    "suite_preverified=1",
-  ].join("\n") + "\n", "utf8");
-  t.after(() => { try { fs.rmSync(capture, { force: true }); } catch (_) { /* best-effort */ } });
-
-  const block = await preVerifiedBlockFor(task, dir, REPO_ROOT);
-  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
-  assert.equal(r.status, 0, `pre-verified write must exit 0: ${r.stderr}`);
-  const ledger = path.join(dir, ".quay", "verification-round.jsonl");
-  assert.ok(fs.existsSync(ledger), "verification-round.jsonl was written");
-  const lines = fs.readFileSync(ledger, "utf8").trim().split("\n").filter(Boolean);
-  assert.equal(lines.length, 1, "exactly one record");
-  const rec = JSON.parse(lines[0]);
-  assert.equal(rec.preverified, true, "the record carries the pre-verified marker (AC1)");
-  assert.equal(rec.state, "green");
-  assert.equal(rec.durationMs, 936519, "durationMs = the reused capture's wall-clock");
-  assert.equal(rec.startedAt, "2026-08-17T04:30:00.000Z");
-  assert.equal(rec.laneCount, 8);
-  assert.equal(rec.load, 8.03);
-  assert.equal(rec.commit, head, "commit = the pinned suite_head");
-  assert.equal(rec.scope, "worktree");
-  assert.equal(rec.taskId, task);
-  assert.equal(rec.round, 1, "round = prior line count + 1");
-});
-
-test("⑦ REAL real-suite — a NON-pre-verified capture (full_suite_ran=true, NO suite_preverified marker) writes ONE verification-round record with preverified:false (gap-fan-in-realsuite-bypasses-verification-round-ledger AC1)", async (t) => {
-  // THE DEFECT THIS TASK FIXES: the real-suite branch (a full suite that RAN inside this fan-in via the
-  // detached `setsid bash scripts/test.sh` path) left ZERO verification-round records (three real landings
-  // at 19:45/20:36/20:52, all 0 records — 2026-08-17). The shared guard (full_suite_ran=true) + shared
-  // writer (--preverified 0) must now produce a record for such a capture.
-  const dir = makePreVerifiedWorktree();
-  t.after(() => cleanup(dir));
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
-  const task = "gap-test-realsuite";
-  const capture = `/tmp/fan-in-suite-${task}.env`;
-  // A real detached run's capture: full_suite_ran=true, NO suite_preverified marker (this fan-in's own run).
-  fs.writeFileSync(capture, [
-    "full_suite_ran=true",
-    "skip_reason=",
-    "cpu_s=42.5",
-    "cpu_source=gnu-time",
-    "start_iso=2026-08-17T19:45:00.000Z",
-    "end_iso=2026-08-17T20:02:00.000Z",
-    "wall_ms=1020000",
-    "load=12.3",
-    "lane_count=16",
-    "suite_exit=0",
-    `suite_head=${head}`,
-  ].join("\n") + "\n", "utf8");
-  t.after(() => { try { fs.rmSync(capture, { force: true }); } catch (_) { /* best-effort */ } });
-
-  const block = await preVerifiedBlockFor(task, dir, REPO_ROOT);
-  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
-  assert.equal(r.status, 0, `real-suite write must exit 0: ${r.stderr}`);
-  const ledger = path.join(dir, ".quay", "verification-round.jsonl");
-  assert.ok(fs.existsSync(ledger), "verification-round.jsonl was written for the real-suite branch");
-  const lines = fs.readFileSync(ledger, "utf8").trim().split("\n").filter(Boolean);
-  assert.equal(lines.length, 1, "exactly one record");
-  const rec = JSON.parse(lines[0]);
-  assert.equal(rec.preverified, false, "a real-suite round carries preverified:false (distinct from a reused-capture round)");
-  assert.equal(rec.state, "green");
-  assert.equal(rec.durationMs, 1020000, "durationMs = the REAL suite's wall-clock (this fan-in's run)");
-  assert.equal(rec.startedAt, "2026-08-17T19:45:00.000Z");
-  assert.equal(rec.laneCount, 16);
-  assert.equal(rec.load, 12.3);
-  assert.equal(rec.commit, head, "commit = the pinned suite_head");
-  assert.equal(rec.scope, "worktree");
-  assert.equal(rec.taskId, task);
-  assert.equal(rec.cpu_time_s, 42.5);
-  assert.equal(rec.cpu_source, "gnu-time");
-  assert.equal(rec.round, 1, "round = prior line count + 1");
-});
-
-test("⑦ REAL skip — a doc-only capture (full_suite_ran=false) writes NO verification-round record (no suite ran, nothing to account)", async (t) => {
-  const dir = makePreVerifiedWorktree();
-  t.after(() => cleanup(dir));
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
-  const task = "gap-test-pvr-skip";
-  const capture = `/tmp/fan-in-suite-${task}.env`;
-  // A doc-only skip's capture (step 4 wrote skip_reason=doc-only-delta, full_suite_ran=false) — no suite
-  // ran, so there is NO verification-round record to write (the shared guard reads full_suite_ran=true).
-  fs.writeFileSync(capture, [
-    "full_suite_ran=false",
-    "skip_reason=doc-only-delta",
-    "cpu_s=null",
-    "cpu_source=not-wired",
-    "start_iso=2026-08-17T05:00:00.000Z",
-    "end_iso=2026-08-17T05:00:00.000Z",
-    "wall_ms=0",
-    "load=4.5",
-    "lane_count=1",
-    "suite_exit=0",
-    `suite_head=${head}`,
-  ].join("\n") + "\n", "utf8");
-  t.after(() => { try { fs.rmSync(capture, { force: true }); } catch (_) { /* best-effort */ } });
-
-  const block = await preVerifiedBlockFor(task, dir, REPO_ROOT);
-  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
-  assert.equal(r.status, 0, `doc-only skip must exit 0 (no write): ${r.stderr}`);
-  assert.equal(fs.existsSync(path.join(dir, ".quay", "verification-round.jsonl")), false, "no verification-round record for a doc-only skip (no suite ran)");
-});
-
-// ── ⑦b full-suite-state.json mirror-write (gap-full-suite-state-stale-no-writer AC1/AC3) ─────────────
-// The detached suite (setsid bash scripts/test.sh) never goes through full-suite-runner.ts (the ONLY
-// full-suite-state.json writer) ⇒ the state file went stale (the /tests page read a stale currentState;
-// collectFailureFiles carried a latent unbounded-union of a stale state's failures[]). The fix: step 4.5
-// mirror-writes the terminal GREEN state (reusing full-suite-runner's mirrorStateFile pattern) via
-// plugin/scripts/mirror-full-suite-state.ts, guarded by full_suite_ran=true (a doc-only skip never
-// fabricates a green). These tests run the REAL block against a real temp repo + a real capture.
-
-async function mirrorBlockFor(task, worktree, root) {
-  const { prompts } = await runWorkflow({
-    args: { task, worktree, root, runId: "fm-mirror-1", mergeTarget: "develop" },
-  });
-  return extractBlockFromPrompts(prompts, "# mirror-state-block-start", "# mirror-state-block-end");
-}
-
-test("⑦b wiring — the fan-in prompt carries a full-suite-state.json mirror-write block (mirror-full-suite-state.ts, guarded by full_suite_ran=true, inside the preverified-round-block)", async (t) => {
-  const { prompts } = await runWorkflow({
-    args: { task: "gap-test-mirror", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-mirror", mergeTarget: "develop" },
-  });
-  const block = extractBlockFromPrompts(prompts, "# mirror-state-block-start", "# mirror-state-block-end");
-  assert.ok(block.includes("mirror-full-suite-state.ts"), "block must invoke the mirror writer");
-  assert.ok(block.includes("--state green"), "the mirror writes the terminal GREEN state (phase 2 only runs green)");
-  assert.ok(block.includes('--finished-at "$end_iso"'), "block must pass the capture's real end time (end_iso)");
-  assert.ok(block.includes('--commit "$suite_head"'), "block must pin the verified suite_head as commit");
-  assert.ok(block.includes('--duration-ms "$wall_ms"'), "block must reuse the capture's wall-clock");
-  assert.ok(block.includes('--lane-count "$lane_count"'), "block must reuse the capture's lane count");
-  assert.ok(block.includes('--load "$load"'), "block must reuse the capture's load");
-  assert.ok(block.includes("--task-id gap-test-mirror"), "block must carry the fan-in task id (traceability)");
-  assert.ok(block.includes("--run-id fm-mirror"), "block must carry the fan-in runId (traceability)");
-  // The mirror write lives INSIDE the full_suite_ran=true guard (the same shared guard as the
-  // verification-round write) — a doc-only skip must not fabricate a green state.
-  const p2 = promptContaining(prompts, "# mirror-state-block-start");
-  const guardIdx = p2.indexOf('[ "$full_suite_ran" = "true" ]');
-  const blockIdx = p2.indexOf("# mirror-state-block-start");
-  const guardEndIdx = p2.indexOf("# preverified-round-block-end");
-  assert.ok(guardIdx >= 0, "the full_suite_ran=true guard must be present in the phase-2 prompt");
-  assert.ok(blockIdx > guardIdx && blockIdx < guardEndIdx, "the mirror write runs INSIDE the full_suite_ran=true guard");
-});
-
-test("⑦b REAL mirror — a green fan-in capture writes a FRESH full-suite-state.json to the shared checkout (gap-full-suite-state-stale-no-writer AC1/AC3)", async (t) => {
-  const dir = makePreVerifiedWorktree();
-  t.after(() => cleanup(dir));
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
-  const task = "gap-test-mirror-real";
-  const capture = `/tmp/fan-in-suite-${task}.env`;
-  fs.writeFileSync(capture, [
-    "full_suite_ran=true",
-    "skip_reason=",
-    "cpu_s=42.5",
-    "cpu_source=gnu-time",
-    "start_iso=2026-08-18T04:30:00.000Z",
-    "end_iso=2026-08-18T04:45:36.519Z",
-    "wall_ms=936519",
-    "load=8.03",
-    "lane_count=8",
-    "suite_exit=0",
-    `suite_head=${head}`,
-  ].join("\n") + "\n", "utf8");
-  t.after(() => { try { fs.rmSync(capture, { force: true }); } catch (_) { /* best-effort */ } });
-
-  const block = await mirrorBlockFor(task, dir, REPO_ROOT);
-  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
-  assert.equal(r.status, 0, `mirror write must exit 0: ${r.stderr}`);
-  const stateFile = path.join(dir, ".quay", "full-suite-state.json");
-  assert.ok(fs.existsSync(stateFile), "full-suite-state.json was written");
-  const st = JSON.parse(fs.readFileSync(stateFile, "utf8"));
-  assert.equal(st.state, "green");
-  assert.equal(st.startedAt, "2026-08-18T04:30:00.000Z");
-  assert.equal(st.finishedAt, Math.floor(Date.parse("2026-08-18T04:45:36.519Z") / 1000), "finishedAt is EPOCH SECONDS (full-suite-runner convention)");
-  assert.equal(st.durationMs, 936519);
-  assert.equal(st.laneCount, 8);
-  assert.equal(st.load, 8.03);
-  assert.equal(st.commit, head, "commit = the pinned suite_head");
-  assert.equal(st.runner, "inner", "the fan-in suite is an inner-layer run");
-  assert.equal(st.scope, "worktree");
-  assert.equal(st.taskId, task);
-  assert.equal(st.runId, "fm-mirror-1");
-});
-
-test("⑦b REAL skip — a doc-only capture (full_suite_ran=false) writes NO full-suite-state.json (no suite ran ⇒ no fabricated green)", async (t) => {
-  const dir = makePreVerifiedWorktree();
-  t.after(() => cleanup(dir));
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
-  const task = "gap-test-mirror-skip";
-  const capture = `/tmp/fan-in-suite-${task}.env`;
-  fs.writeFileSync(capture, [
-    "full_suite_ran=false",
-    "skip_reason=doc-only-delta",
-    "cpu_s=null",
-    "cpu_source=not-wired",
-    "start_iso=2026-08-18T05:00:00.000Z",
-    "end_iso=2026-08-18T05:00:00.000Z",
-    "wall_ms=0",
-    "load=4.5",
-    "lane_count=1",
-    "suite_exit=0",
-    `suite_head=${head}`,
-  ].join("\n") + "\n", "utf8");
-  t.after(() => { try { fs.rmSync(capture, { force: true }); } catch (_) { /* best-effort */ } });
-
-  // Run the FULL preverified-round-block (which wraps the mirror block in the full_suite_ran=true
-  // guard) so the guard is what excludes the write — not a manually-skipped block.
-  const block = await preVerifiedBlockFor(task, dir, REPO_ROOT);
-  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
-  assert.equal(r.status, 0, `doc-only skip must exit 0 (no write): ${r.stderr}`);
-  assert.equal(fs.existsSync(path.join(dir, ".quay", "full-suite-state.json")), false, "no full-suite-state.json for a doc-only skip (the full_suite_ran=true guard excludes it)");
-});
-
-// ── ⑦c measure-history.jsonl mirror-write (gap-measure-history-detached-suite-mirror-write AC1/AC3) ──
-// The detached suite (setsid bash scripts/test.sh) never goes through full-suite-runner.ts (the ONLY
-// measure-history.jsonl writer) ⇒ the per-file duration ledger went stale (last record 2026-08-17T04:29:08Z;
-// two days of detached-suite rounds with no records). The fix: step 4.5 mirror-appends a round parsed from
-// THIS round's REAL suite log (the __PERFILE__ lines measure-suite-reporter.mjs already emitted) via
-// plugin/scripts/mirror-measure-history.ts (reusing landMeasureHistory — the SAME function the runner
-// calls, so the data format is identical), guarded by full_suite_ran=true (a doc-only skip never fabricates
-// a round). These tests run the REAL block against a real temp repo + a real capture + a real suite log.
-
-async function mirrorHistoryBlockFor(task, worktree, root) {
-  const { prompts } = await runWorkflow({
-    args: { task, worktree, root, runId: "fm-mhist-1", mergeTarget: "develop" },
-  });
-  return extractBlockFromPrompts(prompts, "# mirror-history-block-start", "# mirror-history-block-end");
-}
-
-test("⑦c wiring — the fan-in prompt carries a measure-history.jsonl mirror-write block (mirror-measure-history.ts, guarded by full_suite_ran=true, inside the preverified-round-block)", async (t) => {
-  const { prompts } = await runWorkflow({
-    args: { task: "gap-test-mhist", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-mhist", mergeTarget: "develop" },
-  });
-  const block = extractBlockFromPrompts(prompts, "# mirror-history-block-start", "# mirror-history-block-end");
-  assert.ok(block.includes("mirror-measure-history.ts"), "block must invoke the mirror writer");
-  assert.ok(block.includes('--log "$suite_log_file"'), "block must pass the capture's REAL suite log path (the __PERFILE__ source)");
-  assert.ok(block.includes('--lane-count "$lane_count"'), "block must reuse the capture's lane count");
-  assert.ok(block.includes('--run-at "$end_iso"'), "block must pass the capture's real end time as runAt");
-  assert.ok(block.includes("--task-id gap-test-mhist"), "block must carry the fan-in task id (traceability)");
-  assert.ok(block.includes("--run-id fm-mhist"), "block must carry the fan-in runId (traceability)");
-  // The mirror write lives INSIDE the full_suite_ran=true guard (the same shared guard as the
-  // verification-round write) — a doc-only skip must not fabricate a round.
-  const p2 = promptContaining(prompts, "# mirror-history-block-start");
-  const guardIdx = p2.indexOf('[ "$full_suite_ran" = "true" ]');
-  const blockIdx = p2.indexOf("# mirror-history-block-start");
-  const guardEndIdx = p2.indexOf("# preverified-round-block-end");
-  assert.ok(guardIdx >= 0, "the full_suite_ran=true guard must be present in the phase-2 prompt");
-  assert.ok(blockIdx > guardIdx && blockIdx < guardEndIdx, "the mirror write runs INSIDE the full_suite_ran=true guard");
-});
-
-test("⑦c REAL mirror — a green fan-in capture with a REAL suite log appends a measure-history.jsonl round to the shared checkout (gap-measure-history-detached-suite-mirror-write AC1/AC3)", async (t) => {
-  const dir = makePreVerifiedWorktree();
-  t.after(() => cleanup(dir));
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
-  const task = "gap-test-mhist-real";
-  const capture = `/tmp/fan-in-suite-${task}.env`;
-  const suiteLog = `/tmp/fan-in-suite-${task}.log`;
-  fs.writeFileSync(suiteLog, [
-    "__PERFILE__ duration_ms=1204.5 /home/yale/work/quay-worktrees/gap-demo/plugin/test/a.test.mjs passed=true",
-    "__PERFILE__ duration_ms=842.25 /home/yale/work/quay-worktrees/gap-demo/plugin/test/b.test.mjs passed=true",
-    "__PERFILE__ duration_ms=999999.5 /home/yale/work/quay-worktrees/gap-demo/plugin/test/c.test.mjs passed=false",
-  ].join("\n") + "\n", "utf8");
-  t.after(() => { for (const f of [capture, suiteLog]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
-  fs.writeFileSync(capture, [
-    "full_suite_ran=true",
-    "skip_reason=",
-    "cpu_s=42.5",
-    "cpu_source=gnu-time",
-    "start_iso=2026-08-18T04:30:00.000Z",
-    "end_iso=2026-08-18T04:45:36.519Z",
-    "wall_ms=936519",
-    "load=8.03",
-    "lane_count=8",
-    "suite_exit=0",
-    `suite_head=${head}`,
-    `suite_log_file=${suiteLog}`,
-  ].join("\n") + "\n", "utf8");
-
-  const block = await mirrorHistoryBlockFor(task, dir, REPO_ROOT);
-  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
-  assert.equal(r.status, 0, `mirror write must exit 0: ${r.stderr}`);
-  const historyFile = path.join(dir, ".quay", "measure-history.jsonl");
-  assert.ok(fs.existsSync(historyFile), "measure-history.jsonl was written to the shared checkout");
-  const lines = fs.readFileSync(historyFile, "utf8").trim().split("\n");
-  assert.equal(lines.length, 3, "one record per test file in the round");
-  const rec = JSON.parse(lines[0]);
-  // The record shape is IDENTICAL to full-suite-runner's direct writes (AC3 — the measure-trend-check.ts
-  // consumer reads this exact shape; no worktree-root prefix on the key).
-  assert.equal(typeof rec.round, "number");
-  assert.equal(rec.runAt, "2026-08-18T04:45:36.519Z", "runAt = the capture's end_iso");
-  assert.equal(rec.file, "plugin/test/a.test.mjs", "file key is normalized repo-root-relative");
-  assert.equal(rec.durationMs, 1204.5);
-  assert.equal(rec.passed, true);
-  assert.equal(rec.laneCount, 8);
-  assert.equal(typeof rec.logDigest, "string");
-});
-
-test("⑦c REAL no-op — a green fan-in capture whose suite log has NO __PERFILE__ lines writes NO round (exit 0, never a fabricated measure-history round)", async (t) => {
-  const dir = makePreVerifiedWorktree();
-  t.after(() => cleanup(dir));
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
-  const task = "gap-test-mhist-nop";
-  const capture = `/tmp/fan-in-suite-${task}.env`;
-  const suiteLog = `/tmp/fan-in-suite-${task}.log`;
-  fs.writeFileSync(suiteLog, "__OVERHEAD__ run_static_checks_ms=100\nno perfile lines here\n", "utf8");
-  t.after(() => { for (const f of [capture, suiteLog]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
-  fs.writeFileSync(capture, [
-    "full_suite_ran=true",
-    "skip_reason=",
-    "cpu_s=42.5",
-    "cpu_source=gnu-time",
-    "start_iso=2026-08-18T05:00:00.000Z",
-    "end_iso=2026-08-18T05:15:00.000Z",
-    "wall_ms=900000",
-    "load=4.5",
-    "lane_count=8",
-    "suite_exit=0",
-    `suite_head=${head}`,
-    `suite_log_file=${suiteLog}`,
-  ].join("\n") + "\n", "utf8");
-
-  const block = await mirrorHistoryBlockFor(task, dir, REPO_ROOT);
-  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
-  assert.equal(r.status, 0, `no-perfile-lines must exit 0 (benign no-op, never blocks the fan-in): ${r.stderr}`);
-  assert.equal(fs.existsSync(path.join(dir, ".quay", "measure-history.jsonl")), false, "no measure-history.jsonl for a suite with no __PERFILE__ lines (no fabricated round)");
-});
-
-test("⑦ REAL real-suite WITH a suite log — the fan-in landing row carries the phase fields + concurrency variables (gap-fan-in-verification-round-thin-schema-phase-gap AC1/AC4)", async (t) => {
-  // THE DEFECT THIS TASK FIXES: fan-in landing rows were thin — no serial/main/static phase ms, no
-  // nproc/concurrentSuiteSlots/concurrentSuitesRunning — so AC101's lane-concurrency control round
-  // (S=1) could not compare the fan-in baseline against a full-suite-runner control round at the same
-  // 口径. The real-run capture now records suite_log_file, and the block passes it via --suite-log.
-  const dir = makePreVerifiedWorktree();
-  t.after(() => cleanup(dir));
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
-  const task = "gap-test-phases";
-  const capture = `/tmp/fan-in-suite-${task}.env`;
-  const suiteLog = `/tmp/fan-in-suite-${task}.log`;
-  fs.writeFileSync(suiteLog, [
-    "__OVERHEAD__ run_static_checks_ms=12345",
-    "__OVERHEAD__ serial_phase_ms=301234",
-    "__OVERHEAD__ lowconc_phase_ms=0",
-    "__OVERHEAD__ main_phase_ms=512345",
-  ].join("\n") + "\n", "utf8");
-  t.after(() => { for (const f of [capture, suiteLog]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
-  fs.writeFileSync(capture, [
-    "full_suite_ran=true",
-    "skip_reason=",
-    "cpu_s=42.5",
-    "cpu_source=gnu-time",
-    "start_iso=2026-08-17T19:45:00.000Z",
-    "end_iso=2026-08-17T20:02:00.000Z",
-    "wall_ms=1020000",
-    "load=12.3",
-    "lane_count=16",
-    "suite_exit=0",
-    `suite_head=${head}`,
-    `suite_log_file=${suiteLog}`,
-  ].join("\n") + "\n", "utf8");
-
-  const block = await preVerifiedBlockFor(task, dir, REPO_ROOT);
-  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
-  assert.equal(r.status, 0, `phase-bearing write must exit 0: ${r.stderr}`);
-  const ledger = path.join(dir, ".quay", "verification-round.jsonl");
-  const lines = fs.readFileSync(ledger, "utf8").trim().split("\n").filter(Boolean);
-  assert.equal(lines.length, 1, "exactly one record");
-  const rec = JSON.parse(lines[0]);
-  assert.equal(rec.preverified, false, "real-suite round carries preverified:false");
-  assert.equal(rec.static_phase_ms, 12345, "static_phase_ms ← run_static_checks_ms");
-  assert.equal(rec.serial_phase_ms, 301234, "serial_phase_ms ← serial_phase_ms");
-  assert.equal(rec.lowconc_phase_ms, 0, "lowconc_phase_ms ← lowconc_phase_ms (0 is a real value)");
-  assert.equal(rec.main_phase_ms, 512345, "main_phase_ms ← main_phase_ms");
-  assert.equal(typeof rec.nproc, "number", "nproc present on the fan-in landing row");
-  assert.equal(typeof rec.concurrentSuiteSlots, "number", "concurrentSuiteSlots present");
-  assert.equal(typeof rec.concurrentSuitesRunning, "number", "concurrentSuitesRunning present");
-});
-
-test("⑦ preverified=1 分支单独定案 — a reused capture WITH a recorded suite log carries phases; WITHOUT one records NONE (gap-fan-in-verification-round-thin-schema-phase-gap AC2)", async (t) => {
-  const dir = makePreVerifiedWorktree();
-  t.after(() => cleanup(dir));
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
-
-  // (a) caller recorded its suite log path ⇒ the preverified landing row carries phase data.
-  const taskA = "gap-test-pvr-ph-a";
-  const captureA = `/tmp/fan-in-suite-${taskA}.env`;
-  const suiteLogA = `/tmp/fan-in-suite-${taskA}.log`;
-  fs.writeFileSync(suiteLogA, ["__OVERHEAD__ serial_phase_ms=301234", "__OVERHEAD__ main_phase_ms=512345"].join("\n") + "\n", "utf8");
-  fs.writeFileSync(captureA, [
-    "full_suite_ran=true", "skip_reason=", "cpu_s=null", "cpu_source=not-wired",
-    "start_iso=2026-08-17T04:30:00.000Z", "end_iso=2026-08-17T04:45:36.519Z",
-    "wall_ms=936519", "load=8.03", "lane_count=8", "suite_exit=0",
-    `suite_head=${head}`, "suite_preverified=1", `suite_log_file=${suiteLogA}`,
-  ].join("\n") + "\n", "utf8");
-  t.after(() => { for (const f of [captureA, suiteLogA]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
-  const blockA = await preVerifiedBlockFor(taskA, dir, REPO_ROOT);
-  const rA = runBash(`suite_capture="${captureA}"; . "$suite_capture"; ${blockA}`, { cwd: dir });
-  assert.equal(rA.status, 0, `preverified-with-log write must exit 0: ${rA.stderr}`);
-  const recA = JSON.parse(fs.readFileSync(path.join(dir, ".quay", "verification-round.jsonl"), "utf8").trim().split("\n").filter(Boolean)[0]);
-  assert.equal(recA.preverified, true);
-  assert.equal(recA.serial_phase_ms, 301234, "preverified=1 WITH a caller-recorded log carries phase data");
-  assert.equal(recA.main_phase_ms, 512345);
-
-  // (b) reused capture WITHOUT a suite log ⇒ the row is EXPLICITLY phase-less (AC2: 不伪造, 不两分支一概而论).
-  const taskB = "gap-test-pvr-ph-b";
-  const captureB = `/tmp/fan-in-suite-${taskB}.env`;
-  fs.writeFileSync(captureB, [
-    "full_suite_ran=true", "skip_reason=", "cpu_s=null", "cpu_source=not-wired",
-    "start_iso=2026-08-17T04:30:00.000Z", "end_iso=2026-08-17T04:45:36.519Z",
-    "wall_ms=936519", "load=8.03", "lane_count=8", "suite_exit=0",
-    `suite_head=${head}`, "suite_preverified=1",
-  ].join("\n") + "\n", "utf8");
-  t.after(() => { try { fs.rmSync(captureB, { force: true }); } catch (_) { /* best-effort */ } });
-  const blockB = await preVerifiedBlockFor(taskB, dir, REPO_ROOT);
-  const rB = runBash(`suite_capture="${captureB}"; . "$suite_capture"; ${blockB}`, { cwd: dir });
-  assert.equal(rB.status, 0, `preverified-without-log write must exit 0: ${rB.stderr}`);
-  const linesB = fs.readFileSync(path.join(dir, ".quay", "verification-round.jsonl"), "utf8").trim().split("\n").filter(Boolean);
-  const recB = JSON.parse(linesB[linesB.length - 1]);
-  assert.equal(recB.preverified, true);
-  assert.equal(recB.serial_phase_ms, undefined, "preverified=1 WITHOUT a recorded log ⇒ phase-less (honest, not fabricated)");
-  assert.equal(recB.main_phase_ms, undefined, "preverified=1 WITHOUT a recorded log ⇒ phase-less");
+  // The phase-2 prompt (step 4.5) must NOT invoke any of the three mirror writers — the runner already
+  // wrote verification-round.jsonl / full-suite-state.json / measure-history.jsonl at suite exit (green+red).
+  const p2 = promptContaining(prompts, "per-task-suite-record.ts");
+  assert.ok(!p2.includes("pre-verified-round-record.ts"), "phase-2 must NOT call pre-verified-round-record.ts (the green-only writer is retired from the fan-in path)");
+  assert.ok(!p2.includes("mirror-full-suite-state.ts"), "phase-2 must NOT call mirror-full-suite-state.ts (the runner writes full-suite-state.json)");
+  assert.ok(!p2.includes("mirror-measure-history.ts"), "phase-2 must NOT call mirror-measure-history.ts (the runner writes measure-history.jsonl)");
+  // per-task-suite-record stays: it writes per-task-suite-records.jsonl (a SEPARATE ledger the runner does not write).
+  assert.ok(p2.includes("per-task-suite-record.ts"), "phase-2 must still write the per-task-suite record (a separate ledger)");
 });
 
 // ── ⑦ fan-in orchestration bootstrap (gap-fan-in-orchestration-bootstrap-self-fix) ───────────────────
@@ -1438,7 +967,7 @@ async function bootstrapBlockFor(task, worktree, root) {
   const { prompts } = await runWorkflow({
     args: { task, worktree, root, runId: "fm-bootstrap", mergeTarget: "develop" },
   });
-  // ADR-034（gap-adr034-fan-in-lock-holder-supervised）：step 0.5（获取 workflow 锁）已从 prompt 废除，
+  // ADR-034（gap-adr034-fan-in-lock-holder-supervised）：step 0.5（获取 fan-in 锁）已从 prompt 废除，
   // step 0（bootstrap-sync）现在直接以 step 1 为界。
   return extractBlockFromPrompts(prompts, "【无锁段 step 0", "【无锁段 step 1");
 }
@@ -1455,8 +984,6 @@ test("⑦ worktree-resolution — every fan-in orchestration script call is ${wo
   const mustBeWorktreeRooted = [
     "select-static-checks-for-touches.ts --classify-delta", // step 2 (phase 1)
     "per-task-suite-record.ts",                             // step 4.5 (phase 2)
-    "pre-verified-round-record.ts",                         // step 4.5 (phase 2, both fan-in branches)
-    "mirror-full-suite-state.ts",                           // step 4.5 (phase 2, gap-full-suite-state-stale-no-writer)
     "fan-in-ac-completion-gate.ts",                         // step 5 (phase 2)
     "fan-in-ff-merge.sh",                                   // step 5 (phase 2)
     "closure-lag-check.sh",                                 // step 5.5 (phase 2)
@@ -1470,8 +997,9 @@ test("⑦ worktree-resolution — every fan-in orchestration script call is ${wo
     assert.ok(line, `a prompt must carry a ${WT}-rooted call to ${frag}`);
     assert.doesNotMatch(line, /bash \$\{?root\}?\/plugin\/scripts/, `call must NOT be root-rooted: ${line}`);
   }
-  // full-suite-runner.ts is reached via `cd ${worktree} && bash scripts/test.sh` (step 4) — already
-  // worktree-rooted; assert the explicit cd survives in the phase-1 prompt.
+  // The scoped gate (step 4) still runs `cd ${worktree} && bash scripts/test.sh --for-task` (worktree-rooted);
+  // the full-suite bucket path is the SUITE_LAUNCH `cd "$1" && node plugin/scripts/full-suite-runner.ts` —
+  // also worktree-rooted (the runner resolves through the worktree's plugin tree).
   assert.ok(all.includes(`cd ${WT} && bash scripts/test.sh --for-task`), "step-4 scoped run must cd into the worktree");
   // step-2 classify carries the worktree-rooted registry (--root <worktree>) so a branch-modified
   // scripts/test.sh @static-object annotation is what the classification reads.
@@ -1720,97 +1248,38 @@ test("⑧ turn-budget 取假 — suite-launch block decides by code_delta: non-e
   assert.ok(launch.includes("PRE-VERIFIED-SUITE"), "the pre-verified reuse branch must be present (suite_head-pinned)");
 });
 
-test("AC126 AC1 — the fan-in suite launch command passes --buckets <task-id> (production bucket-execution wiring)", async () => {
+test("AC126 AC1 — the fan-in suite launch runs full-suite-runner.ts --buckets <task-id> (bucket-execution wiring, unified onto the correct runner)", async () => {
   const { prompts } = await runWorkflow({
     args: { task: "gap-ac126-wiring", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-ac126", mergeTarget: "develop" },
   });
   const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
   // The suite-launch command string must carry `--buckets <task-id>` — the task id is interpolated at
-  // workflow-build time, so the literal task id must appear (AC1: 生产 suite 路径真正传). test.sh is
-  // the selection authority (P-only⇒P, M-only⇒M, hub/no-bucket⇒full).
+  // workflow-build time, so the literal task id must appear (AC1: 生产 suite 路径真正传).
   assert.ok(launch.includes("--buckets gap-ac126-wiring"), "suite-launch must pass --buckets <task-id> (the interpolated task id)");
   const setsidLine = launch.split("\n").find((l) => l.includes("setsid bash -c"));
   assert.ok(setsidLine, "suite-launch must contain the detached setsid launch line");
-  assert.ok(setsidLine.includes("bash scripts/test.sh --buckets gap-ac126-wiring"), "the detached launch command must pass --buckets <task-id> to scripts/test.sh");
+  // gap-fan-in-red-bucket-run-not-recorded AC2 — the bucket path runs through the CORRECT runner
+  // (full-suite-runner.ts --buckets), the single writer of verification-round.jsonl green AND red — NOT a
+  // parallel `bash scripts/test.sh` harness + green-only writer (the human ruling: 定义正确机制并实现).
+  assert.ok(setsidLine.includes("full-suite-runner.ts"), "the detached launch command must run full-suite-runner.ts (the correct runner)");
+  assert.ok(setsidLine.includes("--buckets gap-ac126-wiring"), "the runner must be passed --buckets <task-id>");
+  assert.ok(setsidLine.includes("--state-dir"), "the runner must be passed --state-dir (writes state/ledgers into the shared checkout)");
+  assert.ok(setsidLine.includes("--runner inner"), "the runner must be passed --runner inner (explicit layer identity)");
+  assert.ok(setsidLine.includes("--log-file"), "the runner must be passed --log-file (tees the suite stream into the fan-in log)");
+  assert.ok(!setsidLine.includes("bash scripts/test.sh --buckets"), "the detached launch must NOT run a parallel bash scripts/test.sh harness");
 });
 
-test("gap-suite-load-sampler-bypassed-by-fan-in-execute AC1 wiring — the detached suite-launch spawns the state-driven load sampler keyed to the fan-in runId", async (t) => {
+test("gap-fan-in-red-bucket-run-not-recorded AC2 — the detached suite-launch no longer hand-spawns a suite-load-sampler (the runner spawns its own state-driven sampler)", async () => {
   const { prompts } = await runWorkflow({
     args: { task: "gap-test-sampler-wiring", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-test-sampler-wiring", mergeTarget: "develop" },
   });
   const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
-  // The sampler must be spawned from the detached launch (the direct run otherwise bypasses the ONLY
-  // spawner, full-suite-runner.ts) and keyed to the SAME runId mirror-full-suite-state.ts writes into
-  // full-suite-state.json at step 4.5 (so the /tests page joins them: readCurrentSuiteRunId → readSuiteLoadSamples).
-  assert.ok(launch.includes("suite-load-sampler.ts"), "suite-launch must spawn suite-load-sampler.ts");
-  assert.ok(launch.includes("--out-file"), "the sampler spawn must carry an explicit --out-file");
-  assert.ok(launch.includes("suite-load-fm-test-sampler-wiring.jsonl"), "sampler out-file must be suite-load-<runId>.jsonl keyed to the fan-in runId");
-  assert.ok(launch.includes('--run-id "fm-test-sampler-wiring"'), "sampler must receive the fan-in runId (joins the step-4.5 mirror-write)");
-  assert.ok(launch.includes("--interval 5"), "sampler must sample at the 5s default interval");
-  // State-driven stop: the outer launch establishes a running state file (single-quoted JSON, so bash
-  // does not strip the quotes — the template-literal quoting pitfall), the wrapper rm's it after the suite.
-  assert.ok(launch.includes(`printf '{"state":"running"}`), "the outer launch must establish a valid-JSON running state file before the detached suite starts");
-  assert.ok(launch.includes(`rm -f "/tmp/fan-in-suite-sampler-gap-test-sampler-wiring.state.json"`), "the wrapper must remove the state file after the suite so the sampler stops (state-driven, never a resident idle-spin)");
-  // 取假: the sampler spawn must NOT sit in the doc-only skip branch (no suite ran ⇒ no sampler).
-  const skipBranch = launch.slice(launch.indexOf("skip_reason=doc-only-delta"));
-  assert.ok(!skipBranch.includes("suite-load-sampler.ts"), "the doc-only skip branch must NOT spawn a sampler (no suite ran)");
-});
-
-test("gap-suite-load-sampler-bypassed-by-fan-in-execute AC1 REAL — the emitted sampler spawn samples while running and stops when the state file is removed", async (t) => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-sampler-"));
-  const wt = path.join(tmp, "wt");
-  fs.mkdirSync(wt, { recursive: true });
-  const { prompts } = await runWorkflow({
-    args: { task: "gap-test-sampler-real", worktree: wt, root: tmp, runId: "fm-test-sampler-real", mergeTarget: "develop" },
-  });
-  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
-  // Extract the EXACT sampler spawn command the phase-1 agent would run — verbatim, so the test catches
-  // the template-literal \n / quoting pitfalls the workflow header warns about (not a re-typed copy).
-  // Slice between `node …` and the wrapper's ` & cd "$1"` (the `&` that backgrounds the sampler) — a
-  // regex `[^&]*` would stop at the `&` inside `2>&1` and truncate the redirect.
-  const nodeIdx = launch.indexOf("node --no-warnings --experimental-strip-types");
-  const cdIdx = launch.indexOf(" & cd", nodeIdx);
-  assert.ok(nodeIdx !== -1 && cdIdx !== -1, "suite-launch must emit a suite-load-sampler.ts spawn command followed by the suite `cd`");
-  const samplerCmd = launch.slice(nodeIdx, cdIdx).replace(/--interval \d+(\.\d+)?/, "--interval 0.2");
-  // The sampler resolves through ${worktree}/plugin/scripts/… — symlink the REAL runtime tree so the
-  // temp worktree has a resolvable suite-load-sampler.ts (same pattern as the other REAL tests).
-  symlinkRuntimeTrees(wt, {});
-  const stateFile = "/tmp/fan-in-suite-sampler-gap-test-sampler-real.state.json";
-  const outFile = path.join(tmp, ".quay", "suite-load-fm-test-sampler-real.jsonl");
-  cleanup(stateFile); cleanup(outFile); cleanup(`${outFile}.pid`);
-  fs.writeFileSync(stateFile, JSON.stringify({ state: "running" }));
-  const child = spawn("bash", ["-c", samplerCmd], { stdio: "ignore", detached: true });
-  child.unref();
-  try {
-    let lines = [];
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      try { lines = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean); } catch { lines = []; }
-      if (lines.length >= 1) break;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    assert.ok(lines.length >= 1, "the emitted sampler spawn wrote >=1 sample while the state was running");
-    const o = JSON.parse(lines[0]);
-    assert.equal(typeof o.t, "number", "every sample carries a numeric timestamp");
-    assert.ok("loadavg" in o, "every sample carries loadavg");
-    assert.ok("cpu_stall" in o, "every sample carries cpu_stall");
-    assert.ok("mem_avail" in o, "every sample carries mem_avail");
-    // The wrapper's terminal stop: remove the state file ⇒ the sampler exits on its next poll.
-    fs.rmSync(stateFile, { force: true });
-    const pidFile = `${outFile}.pid`;
-    assert.ok(fs.existsSync(pidFile), "sampler wrote its pid sidecar");
-    const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
-    let gone = false;
-    const stopDeadline = Date.now() + 10_000;
-    while (Date.now() < stopDeadline) {
-      try { process.kill(pid, 0); } catch { gone = true; break; }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    assert.ok(gone, "the sampler exited after the state file was removed (never a resident idle-spin)");
-  } finally {
-    try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
-    cleanup(stateFile); cleanup(outFile); cleanup(`${outFile}.pid`); cleanup(tmp);
-  }
+  // The old detached direct run (setsid bash scripts/test.sh) bypassed full-suite-runner.ts (the ONLY
+  // spawner of suite-load-sampler.ts), so it hand-spawned the sampler + a per-task state file. Now the
+  // bucket path runs THROUGH the runner, which spawns its OWN state-driven sampler — the manual spawn is
+  // gone (two parallel mechanisms converged to one: the runner is the single sampler spawner again).
+  assert.ok(!launch.includes("suite-load-sampler.ts"), "suite-launch must NOT hand-spawn suite-load-sampler.ts (the runner spawns it)");
+  assert.ok(!launch.includes("fan-in-suite-sampler-"), "suite-launch must NOT manage a per-task sampler state file (the runner owns the sampler lifecycle)");
 });
 
 test("⑧ stage-2 wait block — completes the capture post-fields (cpu/end/wall/load/lane/suite_exit) on exit-marker hit", async (t) => {
@@ -1957,18 +1426,21 @@ test("⑧ turn-budget REAL — a real detached suite (setsid) + the real poll bl
   fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/usr/bin/env bash\nsleep 1\nexit 0\n");
   fs.chmodSync(path.join(dir, "scripts", "test.sh"), 0o755);
   git(["add", "-A"]); git(["commit", "-qm", "add test.sh"]);
+  // The detached launch now runs full-suite-runner.ts — symlink the REAL plugin tree so it resolves
+  // (untracked ⇒ never in `git diff --name-only`; scripts/ already exists with the fake test.sh).
+  symlinkRuntimeTrees(dir, {});
 
   const codeDeltaFile = `/tmp/fan-in-code-delta-${task}.txt`;
   fs.writeFileSync(codeDeltaFile, "plugin/workflows/fan-in-execute.js\n");
   t.after(() => { for (const f of [`/tmp/fan-in-suite-${task}.env`, `/tmp/fan-in-suite-${task}.exit`, `/tmp/fan-in-suite-${task}.time`, `/tmp/fan-in-suite-${task}.log`, `/tmp/fan-in-suite-${task}.pid`, codeDeltaFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
 
   const { prompts } = await runWorkflow({
-    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-tb-real", mergeTarget: "develop" },
+    args: { task, worktree: dir, root: dir, runId: "fm-tb-real", mergeTarget: "develop" },
   });
   const launchBlock = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
 
   // Run the REAL launch block (cwd = the worktree). code_delta 非空 ⇒ the full-suite branch must fire.
-  const launchRun = runBash(launchBlock, { cwd: dir, timeout: 30_000 });
+  const launchRun = runBash(launchBlock, { cwd: dir, timeout: 30_000, env: runnerHermeticEnv() });
   assert.equal(launchRun.status, 0, `launch block failed: ${launchRun.stderr}`);
   assert.match(launchRun.stdout, /SUITE_OUTCOME=started/, `code_delta non-empty must start the full suite, got: ${launchRun.stdout}`);
 
@@ -2034,6 +1506,8 @@ exit 0
 `);
   fs.chmodSync(path.join(dir, "scripts", "test.sh"), 0o755);
   git(["add", "-A"]); git(["commit", "-qm", "add test.sh"]);
+  // The detached launch now runs full-suite-runner.ts — symlink the REAL plugin tree so it resolves.
+  symlinkRuntimeTrees(dir, {});
 
   const roundFile = `/tmp/fan-in-suite-${task}.round`;
   const suiteLog = `/tmp/fan-in-suite-${task}.log`;
@@ -2045,7 +1519,7 @@ exit 0
   t.after(() => { try { fs.rmSync(codeDeltaFile, { force: true }); } catch (_) { /* best-effort */ } });
 
   const { prompts } = await runWorkflow({
-    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-logrot", mergeTarget: "develop" },
+    args: { task, worktree: dir, root: dir, runId: "fm-logrot", mergeTarget: "develop" },
   });
   const launchBlock = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
 
@@ -2059,24 +1533,23 @@ exit 0
   };
 
   // Round 1 (initial launch).
-  const r1 = runBash(launchBlock, { cwd: dir, timeout: 30_000 });
+  const r1 = runBash(launchBlock, { cwd: dir, timeout: 30_000, env: runnerHermeticEnv() });
   assert.equal(r1.status, 0, `round-1 launch failed: ${r1.stderr}`);
   assert.match(r1.stdout, /SUITE_OUTCOME=started/, "code_delta non-empty must start the full suite");
   await waitRound(1);
   const log1 = fs.readFileSync(suiteLog, "utf8");
-  assert.ok(log1.startsWith("__FANIN_SUITE_START__"), "round-1 log must start with the __FANIN_SUITE_START__ marker");
-  assert.match(log1, /round=full/, "round-1 marker is round=full");
-  assert.ok(log1.includes("__PERFILE__ duration_ms=1.1 "), "round-1 suite output follows the marker");
+  // gap-fan-in-red-bucket-run-not-recorded: the runner now owns the log (--log-file "w" truncate), so there
+  // is NO __FANIN_SUITE_START__ marker — the current log IS the current round's suite stream (teed by the runner).
+  assert.ok(log1.includes("__PERFILE__ duration_ms=1.1 "), "round-1 suite output is in the log");
   assert.ok(log1.includes("__GROUP__ concurrency=2"), "round-1 __GROUP__ lane line present");
 
   // Round 2 (relaunch — the contaminated path this task fixes: same path reused without rotation).
-  const r2 = runBash(launchBlock, { cwd: dir, timeout: 30_000 });
+  const r2 = runBash(launchBlock, { cwd: dir, timeout: 30_000, env: runnerHermeticEnv() });
   assert.equal(r2.status, 0, `round-2 launch failed: ${r2.stderr}`);
   assert.match(r2.stdout, /SUITE_OUTCOME=started/, "relaunch must start the suite again");
   await waitRound(2);
 
   const log2 = fs.readFileSync(suiteLog, "utf8");
-  assert.ok(log2.startsWith("__FANIN_SUITE_START__"), "round-2 log must start fresh with a new marker");
   assert.ok(log2.includes("__PERFILE__ duration_ms=1.2 "), "round-2 suite output is in the CURRENT log");
   assert.ok(!log2.includes("__PERFILE__ duration_ms=1.1 "), "round-1 output must NOT be in the current log (rotated away — 误读旧轮 eliminated)");
 
@@ -2316,6 +1789,8 @@ test("⑧⑩ 锁等待负控制 — suite-launch 不再携带 FULL_SUITE_LOCK_TI
   fs.writeFileSync(path.join(dir, "scripts", "test.sh"), fakeTest);
   fs.chmodSync(path.join(dir, "scripts", "test.sh"), 0o755);
   git(["add", "-A"]); git(["commit", "-qm", "add fake test.sh"]);
+  // The detached launch now runs full-suite-runner.ts — symlink the REAL plugin tree so it resolves.
+  symlinkRuntimeTrees(dir, {});
 
   const codeDeltaFile = `/tmp/fan-in-code-delta-${task}.txt`;
   fs.writeFileSync(codeDeltaFile, "plugin/workflows/fan-in-execute.js\n");
@@ -2323,7 +1798,7 @@ test("⑧⑩ 锁等待负控制 — suite-launch 不再携带 FULL_SUITE_LOCK_TI
   t.after(() => { for (const f of tmpFiles) { try { fs.rmSync(f, { force: true }); } catch (_) {} } });
 
   const { prompts: prompts2 } = await runWorkflow({
-    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-lockwait-real", mergeTarget: "develop" },
+    args: { task, worktree: dir, root: dir, runId: "fm-lockwait-real", mergeTarget: "develop" },
   });
   const launchBlock = extractBlockFromPrompts(prompts2, "# suite-launch-block-start", "# suite-launch-block-end");
 
@@ -2341,7 +1816,7 @@ test("⑧⑩ 锁等待负控制 — suite-launch 不再携带 FULL_SUITE_LOCK_TI
   // the suite is STILL WAITING (no exit marker — it did NOT fail-closed), free a slot, then await the
   // block's ~1s confirm. The suite must acquire the freed slot and run to exit 0.
   const marker = `/tmp/fan-in-suite-${task}.exit`;
-  const launchProc = spawn("bash", ["-c", launchBlock], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  const launchProc = spawn("bash", ["-c", launchBlock], { cwd: dir, stdio: ["ignore", "pipe", "pipe"], env: runnerHermeticEnv() });
   let launchOut = "";
   launchProc.stdout.on("data", (d) => { launchOut += d; });
   launchProc.stderr.on("data", (d) => { launchOut += d; });
@@ -2352,7 +1827,10 @@ test("⑧⑩ 锁等待负控制 — suite-launch 不再携带 FULL_SUITE_LOCK_TI
   assert.equal(launchExit.code, 0, `launch block failed: ${launchOut}`);
 
   let seen = false;
-  for (let i = 0; i < 50 && !seen; i++) { if (fs.existsSync(marker)) seen = true; else await new Promise((r) => setTimeout(r, 100)); }
+  // gap-fan-in-red-bucket-run-not-recorded: the runner's post-verdict teardown (measure-history append,
+  // post-suite sweep, registered-server kill) adds a ~0.6-1.4s tail after test.sh exits — widen the
+  // marker wait so the runner's teardown is not mistaken for a stuck flock wait under load.
+  for (let i = 0; i < 150 && !seen; i++) { if (fs.existsSync(marker)) seen = true; else await new Promise((r) => setTimeout(r, 100)); }
   assert.ok(seen, "the waiting suite must acquire the freed slot and write its exit marker");
   const markerText = fs.readFileSync(marker, "utf8");
   const log = fs.readFileSync(`/tmp/fan-in-suite-${task}.log`, "utf8");
@@ -2407,16 +1885,18 @@ test("⑧ duration REAL — wall_ms equals the suite TRUE wall clock (marker end
   fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/usr/bin/env bash\nsleep 1\nexit 0\n");
   fs.chmodSync(path.join(dir, "scripts", "test.sh"), 0o755);
   git(["add", "-A"]); git(["commit", "-qm", "add test.sh"]);
+  // The detached launch now runs full-suite-runner.ts — symlink the REAL plugin tree so it resolves.
+  symlinkRuntimeTrees(dir, {});
 
   const codeDeltaFile = `/tmp/fan-in-code-delta-${task}.txt`;
   fs.writeFileSync(codeDeltaFile, "plugin/workflows/fan-in-execute.js\n");
   t.after(() => { for (const f of [`/tmp/fan-in-suite-${task}.env`, `/tmp/fan-in-suite-${task}.exit`, `/tmp/fan-in-suite-${task}.time`, `/tmp/fan-in-suite-${task}.log`, `/tmp/fan-in-suite-${task}.pid`, codeDeltaFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
 
   const { prompts } = await runWorkflow({
-    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-tb-duration", mergeTarget: "develop" },
+    args: { task, worktree: dir, root: dir, runId: "fm-tb-duration", mergeTarget: "develop" },
   });
   const launchBlock = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
-  const launchRun = runBash(launchBlock, { cwd: dir, timeout: 30_000 });
+  const launchRun = runBash(launchBlock, { cwd: dir, timeout: 30_000, env: runnerHermeticEnv() });
   assert.equal(launchRun.status, 0, `launch block failed: ${launchRun.stderr}`);
   assert.match(launchRun.stdout, /SUITE_OUTCOME=started/, `code_delta non-empty must start the full suite, got: ${launchRun.stdout}`);
 

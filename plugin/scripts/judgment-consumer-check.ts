@@ -45,7 +45,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 
 // ── registry types ─────────────────────────────────────────────────────────────────────────────────
 
@@ -281,6 +281,7 @@ function usage(): never {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node judgment-consumer-check.ts [--root <dir>] [--json | --list | --judge-entry <json>]");
   const asJson = args.includes("--json");
   const asList = args.includes("--list");
   const rootArg = args.indexOf("--root");

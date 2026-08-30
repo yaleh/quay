@@ -25,6 +25,7 @@ import { readFrontmatter } from "./gate-script-base.ts";
 import { parseTask, readDependsOn } from "./task-schema.ts";
 import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
+import { TASK_STATUS } from "./task-status.ts";
 
 // ── 谓词上下文 ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ export interface TaskFilter {
 export function allDepsDone(depIds: string[], statusOf: (depId: string) => string | null): boolean {
   if (depIds.length === 0) return true;
   for (const depId of depIds) {
-    if (statusOf(depId) !== "done") return false;
+    if (statusOf(depId) !== TASK_STATUS.DONE) return false;
   }
   return true;
 }
@@ -251,7 +252,7 @@ export const notNeedsHuman: TaskFilter = {
   name: "notNeedsHuman",
   predicate: (ctx) => (id) => {
     const status = readTaskStatus(ctx.root, id);
-    return status !== null && status !== "needs-human";
+    return status !== null && status !== TASK_STATUS.NEEDS_HUMAN;
   },
 };
 

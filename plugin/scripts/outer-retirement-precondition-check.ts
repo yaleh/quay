@@ -56,10 +56,15 @@ export const CHECKER_RE = /-check\.(ts|sh)$/;
 export const RETIRED_MARKER = "RETIRED-WITH-RETIRING-LAYER";
 /** 引用扫描的可执行扩展名（.md 一律排除——SPEC §2.3b「⛔ 已排除 .md 提及」）。 */
 const EXEC_EXTENSIONS = new Set([".ts", ".sh", ".mjs", ".js", ".cjs", ".bash"]);
-/** 不算调用面的元数据/测试文件（测试随 checker 退役；catalog/shipping 是元数据）。 */
+/** 不算调用面的元数据/测试文件（测试随 checker 退役；catalog/shipping 是元数据）。
+ *  checker-driver-result-ratchet-check.ts（gap-b4-checker-reuse-driver-result）的 REQUIRED_ADOPTERS
+ *  是一个【钉住清单】（把已迁移 checker 的 basename 作为字符串数据列出），不是 `import from` 式调用面——
+ *  与 capability-catalog.sh 的表格、loop-shipping-exclusion-data.mjs 的排除表同类。若不算元数据，
+ *  它的 "outer-anchor-check.ts" 字符串会把这名孤儿伪造成「有外部调用面」而漏报（实测 suite 红）。 */
 const NON_CALLER_BASENAMES = new Set([
   "capability-catalog.sh",
   "loop-shipping-exclusion-data.mjs",
+  "checker-driver-result-ratchet-check.ts",
 ]);
 const TEST_FILE_RE = /\.test\.(mjs|ts|cjs|js)$/;
 
@@ -347,6 +352,13 @@ function parseArg(argv: string[], name: string): string | undefined {
 }
 
 export function main(argv: string[]): number {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    process.stdout.write(
+      `outer-retirement-precondition-check.ts — 退役前置检查：枚举 outer 执行核直接引用的 checker，判定每个是否有留存调用面（只被退役层引用的 orphan 须带 ${RETIRED_MARKER} 标记）。
+usage: node --experimental-strip-types plugin/scripts/outer-retirement-precondition-check.ts [--root <dir>] [--json]\n`,
+    );
+    return 0;
+  }
   const root = path.resolve(parseArg(argv, "--root") ?? DEFAULT_ROOT);
   const json = argv.includes("--json");
 

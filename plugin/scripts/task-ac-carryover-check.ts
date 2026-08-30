@@ -61,8 +61,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 import { recordNoBlockLedger } from "./task-contract-check.ts";
+import { TASK_STATUS } from "./task-status.ts";
 
 // ── Workspace-root discovery (same walk as task-contract-check) ────────────────────────────────────
 export function findWorkspaceRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
@@ -191,7 +192,7 @@ export function scanStore({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), f
   const unnamed = [];
   for (const [id, raw] of texts) {
     const status = (raw.match(/^status:\s*(\S+)/m) || [])[1];
-    if (status !== "done") continue;
+    if (status !== TASK_STATUS.DONE) continue;
     const acSection = extractSection(raw, "Acceptance Criteria");
     const unchecked = uncheckedAcIds(acSection);
     if (unchecked.length === 0) {
@@ -331,6 +332,7 @@ export function formatTextReport(scan, { baselineCount, newOnes = [], growth = f
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 export function runCli(argv) {
   const args = argv.slice(2); // skip node + script path (process.argv[0..1])
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node task-ac-carryover-check.ts [--root <dir>] [--json] [--write-ratchet] [--allow-growth] [--reset-baseline] [--no-block] [<task-file> ...]");
   let root = null;
   let json = false;
   let writeRatchetFlag = false;

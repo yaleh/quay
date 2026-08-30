@@ -46,6 +46,7 @@ import path from "node:path";
 import os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { newHermeticTmux } from "./helpers/hermetic-tmux.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const SCAN_SH = path.join(REPO_ROOT, "plugin", "scripts", "tmux-leak-scan.sh");
@@ -235,4 +236,114 @@ test("prefix coverage — the absolute-mode scan flags a private-socket mkdtemp 
   } finally {
     for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
   }
+});
+
+// ── --sweep (gap-tmux-leak-scan-sweep-orphaned-servers AC1–AC3) ───────────────────────────────────
+// The CURE for the orphan class --check can only DETECT: a SIGKILL'd/panicked suite strands hermetic
+// tmux servers on their private /tmp/<prefix>* sockets (inner-session-check's os.tmpdir()-direct
+// mkdtemp) with no teardown left to reap them. --sweep reuses scan_matches + prefixes (single source
+// of truth) but forces the LEGACY prefix scope (ignores QUAY_RUN_ID — the run namespace is empty at
+// suite start), then per match line: a proc line ("PID tmux -S <socket> ...") → `tmux -S <socket>
+// kill-server`; a dir line ("/tmp/<prefix>*") → rm -rf. Servers are reaped FIRST (two passes over the
+// sorted matches, because `/` sorts before `0-9` — a single sorted pass would rm -rf the socket dir
+// before kill-server could reach the server). best-effort (exit 0 always), idempotent.
+//
+// TEST CONFINEMENT (round-133 cross-flag class, gap-leak-residue-per-run-namespace-isolation): the
+// PRODUCTION sweep mutates the SHARED /tmp/<prefix>* scope, so a test that ran `--sweep` with NO
+// --scope would kill CONCURRENT tests' hermetic servers (session-liveness-scd-fire's
+// session-liveness-scd-a-* probe, inner-session-check's quay-isc-*) → deterministic suite red. The
+// reaping LOGIC is therefore exercised through the script's own `--scope <subroot>` confinement (a
+// first-class seam added for exactly this class): the fixture lives UNDER a test-local subroot, so
+// `--sweep --scope <subroot>` reaps the in-scope orphan while an out-of-scope server (outside the
+// subroot) survives. The production force-legacy scope-selection is pinned separately by the
+// source-level "force-legacy scope" test below + AC4's wiring grep.
+
+function runSweep(scope) {
+  return spawnSync("bash", [SCAN_SH, "--scope", scope, "--sweep", REPO_ROOT], {
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+}
+
+function liveTmuxProcs() {
+  const r = spawnSync("pgrep", ["-a", "tmux"], { encoding: "utf8", timeout: 30_000 });
+  return r.stdout ?? "";
+}
+
+test("AC1 — --sweep reaps an in-scope orphan server + its socket dir", () => {
+  const h = newHermeticTmux("leakscan-sweep-");
+  h.newSession("orphan", "sleep 10000");
+  try {
+    assert.ok(fs.existsSync(h.sockDir), `fixture socket dir ${h.sockDir} must exist before the sweep`);
+    const res = runSweep(h.tmp);
+    assert.equal(res.status, 0, `sweep must exit 0:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stdout, /sweep — reaped/, "sweep must emit its success line");
+    assert.ok(!liveTmuxProcs().includes(h.sockPath), "the orphan server must be dead after the sweep");
+    assert.equal(fs.existsSync(h.sockDir), false, `the orphan socket dir ${h.sockDir} must be removed`);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("AC2 — --sweep leaves an out-of-scope server (outside the --scope subroot) alive", () => {
+  const orphan = newHermeticTmux("leakscan-sweep-");
+  orphan.newSession("orphan", "sleep 10000");
+  const survivor = newHermeticTmux("leakscan-noscope-");
+  survivor.newSession("keep", "sleep 10000");
+  try {
+    const res = runSweep(orphan.tmp);
+    assert.equal(res.status, 0, `sweep must exit 0:\n${res.stdout}\n${res.stderr}`);
+    assert.ok(!liveTmuxProcs().includes(orphan.sockPath), "the in-scope orphan must be reaped");
+    assert.ok(liveTmuxProcs().includes(survivor.sockPath), "out-of-scope server must survive the sweep");
+    assert.ok(fs.existsSync(survivor.tmp), "out-of-scope dir must survive the sweep");
+  } finally {
+    orphan.cleanup();
+    survivor.cleanup();
+  }
+});
+
+test("AC3 — a second --sweep is a no-op (exit 0, no error, no false kill)", () => {
+  const orphan = newHermeticTmux("leakscan-sweep-");
+  orphan.newSession("orphan", "sleep 10000");
+  const survivor = newHermeticTmux("leakscan-noscope-");
+  survivor.newSession("keep", "sleep 10000");
+  try {
+    const res1 = runSweep(orphan.tmp);
+    assert.equal(res1.status, 0, `first sweep must exit 0:\n${res1.stdout}\n${res1.stderr}`);
+    const res2 = runSweep(orphan.tmp);
+    assert.equal(res2.status, 0, `second sweep must exit 0 (idempotent):\n${res2.stdout}\n${res2.stderr}`);
+    assert.match(res2.stdout, /sweep — reaped/, "second sweep must emit the success line, not error");
+    assert.ok(liveTmuxProcs().includes(survivor.sockPath), "out-of-scope server must survive BOTH sweeps");
+  } finally {
+    orphan.cleanup();
+    survivor.cleanup();
+  }
+});
+
+test("force-legacy scope — --sweep drops the QUAY_RUN_ID namespace when no --scope is given", () => {
+  // Production wiring runs `--sweep "${repo_root}"` with NO --scope under a runner env that carries
+  // QUAY_RUN_ID (full-suite-runner.ts exports it to test.sh). If the sweep kept the namespaced
+  // run_root it would scan /tmp/quay-run-<id>/ (empty at suite start) and reap NOTHING — the exact
+  // orphan class this task exists for. Assert the force-legacy guard (drop run_root when --scope is
+  // absent) is present. Source-level because exercising it behaviorally would sweep the SHARED
+  // /tmp/<prefix>* scope and kill concurrent tests' hermetic servers (round-133 cross-flag class).
+  const src = fs.readFileSync(SCAN_SH, "utf8");
+  assert.match(src, /if \[ -z "\$scope_dir" \]; then\s*\n\s*run_root=""/,
+    "--sweep must force run_root=\"\" (legacy scope) when --scope is absent");
+});
+
+test("AC4 — scripts/test.sh --buckets path runs --sweep BEFORE --snapshot", () => {
+  const src = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
+  const lines = src.split("\n");
+  // The bucket path is identified by its unique marker comment (the full-suite default path carries
+  // the same delta pair but no marker). Bound the search AFTER the marker so the assertion is about
+  // the --buckets path, not the full-suite path.
+  const bucketIdx = lines.findIndex((l) => l.includes("gap-bucket-subset-tmux-leak-scan-missing"));
+  assert.ok(bucketIdx >= 0, "test.sh must still carry the bucket-path marker comment");
+  const sweepIdx = lines.findIndex((l, i) => i > bucketIdx && l.includes('tmux-leak-scan.sh" --sweep'));
+  const snapIdx = lines.findIndex((l, i) => i > bucketIdx && l.includes('tmux-leak-scan.sh" --snapshot'));
+  assert.ok(sweepIdx >= 0, "--sweep must be wired into the --buckets path");
+  assert.ok(snapIdx >= 0, "--snapshot must still be in the --buckets path");
+  assert.ok(sweepIdx < snapIdx,
+    `--sweep (line ${sweepIdx + 1}) must precede --snapshot (line ${snapIdx + 1}) in the --buckets path`);
 });
