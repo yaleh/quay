@@ -1,7 +1,7 @@
 ---
 id: gap-scd-load-sensitive-bucket-isolation
 title: SCD 族 load-sensitive 测试在 bucket 路径不隔离 → flake/hang（重分类 lowconc + bucket 分相）
-status: ready
+status: done
 labels:
   - gap
 parent: null
