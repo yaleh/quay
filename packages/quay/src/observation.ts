@@ -87,6 +87,30 @@ export interface ActivitySignals {
  */
 export type RunLiveness = "alive" | "orphan" | "unknown";
 
+/**
+ * Execution phase of an open fast-mode run (gap-live-fan-in-execution-phase-two-axis) — the SECOND
+ * axis, DISTINCT from the lifecycle status (todo/ready/done/needs-human). Derived from direct signals
+ * with a fixed priority (landed → fan-in → implementing → awaiting-land → implementing fallback); see
+ * `deriveInFlightPhase`. The old /live 状态 column conflated this with the lifecycle status, so the
+ * mechanical fan-in window (worker exited, suite running) was indistinguishable from a still-working
+ * worker — both rendered 「实现中」.
+ */
+export type InFlightPhase = "implementing" | "fan-in" | "awaiting-land" | "landed";
+
+/** The display slice of `.quay/full-suite-state.json` carried on a fan-in task
+ *  (gap-live-fan-in-execution-phase-two-axis). Best-effort — a missing/unreadable field degrades to
+ *  null, never a fabricated value (hard rule ③b). */
+export interface SuiteStateView {
+  /** suite state: "running" | "green" | "red". */
+  state: string | null;
+  /** suite runner identity ("outer" | "inner"). */
+  runner: string | null;
+  /** suite start, ISO 8601. */
+  startedAt: string | null;
+  /** suite wall-clock ms; null while running. */
+  durationMs: number | null;
+}
+
 export interface InFlightTask {
   taskId: string;
   runId: string;
@@ -113,6 +137,23 @@ export interface InFlightTask {
    * them as two independent counts.
    */
   implCompletedAtMs: number | null;
+  /**
+   * Lifecycle status (todo/ready/done/needs-human) read from the task store — the FIRST axis
+   * (gap-live-fan-in-execution-phase-two-axis AC4). Distinct from `phase` (the execution axis): the
+   * old /live 状态 column labeled the impl-complete boundary (an execution signal) with lifecycle
+   * words. null when the store has no such task (e.g. a workflow-events run with no on-disk task).
+   * `pairInFlight` leaves it null (pure); `readLive` annotates the real value from the store.
+   */
+  status: TaskStatus | null;
+  /**
+   * Execution phase — the SECOND axis (gap-live-fan-in-execution-phase-two-axis AC1-AC3). Derived
+   * from direct signals with a fixed priority (landed → fan-in → implementing → awaiting-land →
+   * implementing fallback). `pairInFlight` sets a provisional value from the impl-complete event;
+   * `readLive` re-derives it from the direct signals (fan-in lock / worker process / task status).
+   */
+  phase: InFlightPhase;
+  /** Suite state carried on a fan-in task (`.quay/full-suite-state.json`); null otherwise. */
+  suite: SuiteStateView | null;
   /** Elapsed minutes from startedAtMs to the observation instant, rounded to 1 decimal. */
   minutes: number;
   /**
@@ -250,6 +291,15 @@ export function pairInFlight(events: RawEvent[], nowMs: number): InFlightTask[] 
           rec.implComplete && typeof rec.implComplete.recordedAtMs === "number"
             ? rec.implComplete.recordedAtMs
             : null,
+        // pairInFlight is PURE and cannot read the task store — status stays null, readLive annotates.
+        status: null,
+        // Provisional phase from the impl-complete event only (the pure function knows no fan-in
+        // lock / worker process); readLive re-derives the real phase from the direct signals.
+        phase:
+          rec.implComplete && typeof rec.implComplete.recordedAtMs === "number"
+            ? "awaiting-land"
+            : "implementing",
+        suite: null,
         minutes: Math.max(0, (nowMs - rec.start.timing.startedAtMs) / 60_000),
         // pairInFlight is a PURE event-pairing function and cannot probe /proc — the fail-closed
         // "unknown" default keeps the field total. readLive overwrites it with the real process
@@ -561,6 +611,17 @@ export const WORKER_OUTCOME_REL = ".quay/worker-outcome.jsonl";
  *  during the mechanical fan-in window (worker exited, no outcome yet, no workflow-events). */
 export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
 
+/** The fan-in lock events carrier, repo-relative (one acquire/release per fan-in lock hold, written
+ *  by the driver's holder — worker-driver.ts FAN_IN_LOCK_HOLDER). gap-live-fan-in-execution-phase-
+ *  two-axis: an acquire-without-release is the DIRECT signal that a task is in the fan-in phase
+ *  (worker exited, suite running, no outcome yet) — event-level, so it fixes the ~5min round-carrier
+ *  display lag (G5). */
+export const FAN_IN_LOCK_EVENTS_REL = ".quay/fan-in-lock-events.jsonl";
+
+/** The single-state suite status file (full-suite-runner + the D7 mirror write it), repo-relative.
+ *  gap-live-fan-in-execution-phase-two-axis: carried on a fan-in task as its suite state. */
+export const FULL_SUITE_STATE_REL = ".quay/full-suite-state.json";
+
 /** The worker-driver's spawned worker process `-n` name (worker-driver.ts WORKER_PROCESS_NAME —
  *  `quay-launch.sh task-worker`). Core cannot import plugin/, so the name is mirrored here for the
  *  /proc process-signal probe (方向二): a first-dispatched worker has no outcome record yet, so its
@@ -731,6 +792,9 @@ export function workerInFlightTasks(records: WorkerOutcomeRecord[], nowMs: numbe
       sessionId: null, // outcome-carrier task: no live process ⇒ no live session join (readLive annotates)
       startedAtMs: r.startedMs,
       implCompletedAtMs: null,
+      status: null,
+      phase: "implementing",
+      suite: null,
       minutes: Math.max(0, (nowMs - r.startedMs) / 60_000),
       liveness: "unknown",
       blocks: [],
@@ -911,6 +975,98 @@ function readWorkerRoundInFlightTasks(root: string): string[] {
  *  the driver is the real executor. */
 export function workerDriverActive(root: string): boolean {
   return fs.existsSync(path.join(root, WORKER_OUTCOME_REL)) || fs.existsSync(path.join(root, WORKER_ROUND_REL));
+}
+
+/**
+ * The task ids currently holding the fan-in lock — the DIRECT fan-in-phase signal
+ * (gap-live-fan-in-execution-phase-two-axis G3/G5). Reads `.quay/fan-in-lock-events.jsonl` (one
+ * acquire/release per hold, append-order) and returns the set of task ids whose MOST RECENT event is
+ * an `acquire` (no matching release yet). Event-level ⇒ no ~5min round-carrier lag. The lock is
+ * global (one holder at a time), so the set has ≤1 member in a well-formed stream; a torn
+ * acquire-without-release (holder SIGKILLed before its release) reads as fan-in — a REAL problem
+ * state, not a false positive to paper over. Absent/unreadable/malformed ⇒ empty set (degrade, never
+ * throw — hard rule ③b: a missing carrier reads as "no fan-in", never a fabricated one).
+ */
+export function readFanInLockAcquiredTasks(root: string): Set<string> {
+  const held = new Set<string>();
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, FAN_IN_LOCK_EVENTS_REL), "utf8");
+  } catch {
+    return held;
+  }
+  for (const line of String(text).split("\n")) {
+    const s = line.trim();
+    if (!s) continue;
+    let j: Record<string, unknown>;
+    try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
+    const taskId = typeof j.taskId === "string" && j.taskId.length > 0 ? j.taskId : null;
+    if (taskId == null) continue;
+    if (j.event === "acquire") held.add(taskId);
+    else if (j.event === "release") held.delete(taskId);
+  }
+  return held;
+}
+
+/** The raw `.quay/full-suite-state.json` object, or null when absent/unparseable (degrade, never
+ *  throw). Shared by readFullSuiteState (the fan-in suite annotation) — a single read, no second
+ *  carrier walk. */
+function readFullSuiteStateRaw(root: string): Record<string, unknown> | null {
+  try {
+    const text = fs.readFileSync(path.join(root, FULL_SUITE_STATE_REL), "utf8");
+    const j = JSON.parse(text) as Record<string, unknown>;
+    return j && typeof j === "object" && !Array.isArray(j) ? j : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The suite state carried on a fan-in task (gap-live-fan-in-execution-phase-two-axis): the task the
+ * suite is currently running for (`.quay/full-suite-state.json` `taskId`) plus a display slice of the
+ * state. null when the state file is absent/unreadable or carries no taskId — so a fan-in task whose
+ * suite never wrote a taskId simply renders its phase with no suite annotation (honest null, never a
+ * fabricated "suite running").
+ */
+export function readFullSuiteState(root: string): { taskId: string; view: SuiteStateView } | null {
+  const j = readFullSuiteStateRaw(root);
+  if (j == null) return null;
+  const taskId = typeof j.taskId === "string" && j.taskId.length > 0 ? j.taskId : null;
+  if (taskId == null) return null;
+  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return {
+    taskId,
+    view: {
+      state: str(j.state),
+      runner: str(j.runner),
+      startedAt: str(j.startedAt),
+      durationMs: num(j.durationMs),
+    },
+  };
+}
+
+/**
+ * Derive an in-flight task's execution phase (gap-live-fan-in-execution-phase-two-axis AC1-AC3) from
+ * DIRECT signals, in the priority the task pins (直接量优先):
+ *   a. lifecycle status terminal (done/superseded/needs-human) → "landed" (readLive removes these
+ *      before this point; the branch is totality/defense, not the removal path);
+ *   b. fan-in lock held (acquire-without-release) → "fan-in";
+ *   c. worker process present (pid known / liveness alive) → "implementing";
+ *   d. workflow-events impl-complete event → "awaiting-land" (compat: the old inner-era boundary);
+ *   e. else → "implementing" (round-carrier fallback — in-flight by the driver's heartbeat, no
+ *      positive fan-in/live signal, so "implementing" is the honest default, never a fabricated fan-in).
+ * Pure — `fanInLockAcquired` is passed in (readLive reads the carrier once).
+ */
+export function deriveInFlightPhase(
+  t: Pick<InFlightTask, "taskId" | "status" | "pid" | "liveness" | "implCompletedAtMs">,
+  fanInLockAcquired: ReadonlySet<string>,
+): InFlightPhase {
+  if (t.status === TASK_STATUS.DONE || t.status === TASK_STATUS.SUPERSEDED || t.status === TASK_STATUS.NEEDS_HUMAN) return "landed";
+  if (fanInLockAcquired.has(t.taskId)) return "fan-in";
+  if (t.pid != null || t.liveness === "alive") return "implementing";
+  if (t.implCompletedAtMs != null) return "awaiting-land";
+  return "implementing";
 }
 
 // ── needs-human 显式承接（gap-ac146-human-interface-explicit-owner） ──────────────────────────
@@ -1202,6 +1358,9 @@ export function readLive(
       sessionId: null, // no live process ⇒ no live session join
       startedAtMs: nowMs, // no per-task start on the round carrier — "just now", never a fabricated long elapsed
       implCompletedAtMs: null,
+      status: null,
+      phase: "implementing", // round-carrier fallback — readLive re-derives (fan-in lock wins for the fan-in window)
+      suite: null,
       minutes: 0,
       liveness: "unknown",
       blocks: [],
@@ -1230,6 +1389,9 @@ export function readLive(
       sessionId: liveSessionIdForPid(w.pid, sessionHome),
       startedAtMs,
       implCompletedAtMs: null,
+      status: null,
+      phase: "implementing", // the worker process IS the live signal — readLive re-derives (fan-in lock wins)
+      suite: null,
       minutes: Math.max(0, (nowMs - startedAtMs) / 60_000),
       liveness: "alive", // the process IS the live signal — this worker is observably running
       blocks: [],
@@ -1281,6 +1443,19 @@ export function readLive(
     inFlight = [...byTask.values()].sort(
       (a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId),
     );
+  }
+
+  // gap-live-fan-in-execution-phase-two-axis: annotate the merged in-flight set with the TWO axes —
+  // lifecycle status (axis 1, from the task store) and execution phase (axis 2, from direct signals:
+  // fan-in lock → worker process → impl-complete → round fallback). The fan-in lock and suite state
+  // carriers are read ONCE here (not per task). A store/carrier read failure degrades to a null
+  // status / implementing fallback — never 500s the page (the header degradation contract).
+  const fanInLockAcquired = readFanInLockAcquiredTasks(root);
+  const suiteState = readFullSuiteState(root);
+  for (const t of inFlight) {
+    t.status = readTaskStatusForLive(root, t.taskId);
+    t.phase = deriveInFlightPhase(t, fanInLockAcquired);
+    t.suite = t.phase === "fan-in" && suiteState != null && suiteState.taskId === t.taskId ? suiteState.view : null;
   }
 
   // Cross-task blocking (gap-webui-cross-task-blocking-visibility): annotate every in-flight task
