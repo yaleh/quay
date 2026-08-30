@@ -71,4 +71,5 @@ extra:
 - plugin/scripts/retired-clause-check.ts（R21/R25 条目，套件核实后定）
 - plugin/loop/orchestrator-loop-tick.md（slot-free-trigger 陈旧引用，套件暴露）
 - plugin/test/outer-loop-tick-split.test.mjs（outerOnlyCritical 列表去 slot-free-trigger，套件暴露）
+- docs/analysis/test-file-baseline.txt（test-file-snapshot 结构性 co-touch：删除三个尸体测试触发相对基线移除；snapshot 再生成一并吸收 develop 并发新增测试文件）
 - tasks/gap-retired-mechanisms-cleanup-corpses-stale-refs.md（自身）
