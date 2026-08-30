@@ -36,6 +36,8 @@ extra: {}
 - **含 S 信号（S+M / P+S+M）未入重归因 = 14 个**：其中 5 个为 8-28 后新增，**9 个早于 AC121 完成却不在重归因内**（`suite-bucket-select` 08-21、`suite-bucket-hub-list` 08-21、`suite-bucket-perfile-emit` 08-22、`worker-driver` 08-22、`suite-lpt-order` 08-24、`fan-in-driver-mechanical-orchestration` 08-27、`fan-in-workflow-lock` 08-27、`suite-driver` 08-27、`touches-orthogonality-check`）。⇒ **AC121 自称「重扫=0」未覆盖这 9 个**（行数 228 vs 声称 230 的对账缺口同源）。这 9 个是**安全方向**（S+M 过度选择、非漏测），但说明重归因覆盖保证本身不完整。
 - 重归因文件含 **4 条僵尸条目**（指向已删测试：`ac66-a22-agent-id-check`/`fan-in-ff-executor-check`/`fan-in-workflow-check`/`halt-check`），行数与 AC121 记录需 reconcile。
 
+**③-AC8 执行口径（2026-08-30，本轮落地）**：实际移除 **7 条**僵尸——上述 4 条 + 3 条审计后新增（`integration-branch-model`/`slot-free-trigger`/`unverified-integration-task-ids`，由 `099563834` gap-retired-mechanisms-cleanup-corpses-stale-refs 于 2026-08-30 10:02Z 删测试后留下）。行数对账：AC121 记 **230** → 文件实有 **228**（2 条随更早删测试已移除）→ 移 7 条僵尸 → **221** 条真实条目，且重扫「条目 file ∈ listSuiteFiles」= 0 残留。
+
 ## Plan
 
 **阶段 A——动态真值（文件访问追踪）**：
@@ -65,11 +67,11 @@ extra: {}
 - [x] ③-AC1（能取假，漂移 RED）：静态归 S 单例但动态触 M 的测试 ⇒ 漂移检测 RED（⛔ 静默 ⇒ 假）。【已达成 2026-08-28，机件落地 + mutation case 在，本次重验】
 - [x] ③-AC2（能取假，负控制）：静态归因正确的测试不报漂移（⛔ 误报 ⇒ 假）。【已达成 2026-08-28，机件落地 + 测试在，本次重验】
 - [x] ③-AC3（部分达成，仅「checker 被调用」）：漂移检测注册进 scoped-gate/静态检查链（`runner-static-gate.ts:267` 已接）。⛔ 此 AC 达成的是**接线**，非**能检测**——「能检测」由下方 ③-AC4/③-AC5 承担。【接线已做，本次不重做】
-- [ ] ③-AC4（能取假，生产有输入）：`suite-fs-trace.ts --update` 在生产路径有触发点，且 `.quay/suite-fs-trace.jsonl` 由真实运行产生（⛔ 仅测试 fixture 注入 ⇒ 假）。
-- [ ] ③-AC5（能取假，读到真值）：drift-check 对生产产生的 trace cache 至少一次读到非空、输出真实判定（覆盖数 + 漂移数，而非每轮 NOT-EVALUATED）（⛔ 恒 NOT-EVALUATED ⇒ 假）。
-- [ ] ③-AC6（能取假，ratchet 第 1 层防漏测）：新增一个静态纯 S 且未入重归因的测试 ⇒ ratchet checker RED（⛔ 静默 ⇒ 假；⛔ 基线非 0 ⇒ 假）。
-- [ ] ③-AC7（能取假，ratchet 第 2 层留痕）：含 S 未判（S+M/P+S+M）文件被报告为**计数、不阻断**（⛔ 全量 RED 把安全文件当缺陷 ⇒ 假；⛔ 计数恒 0 ⇒ 假——现为 14）。
-- [ ] ③-AC8（能取假，数据清理）：重归因文件中 4 条指向已删测试的僵尸条目被移除，行数与 AC121 记录 reconcile（⛔ 僵尸条目仍在 ⇒ 假）。
+- [x] ③-AC4（能取假，生产有输入）：`suite-fs-trace.ts --update` 在生产路径有触发点，且 `.quay/suite-fs-trace.jsonl` 由真实运行产生（⛔ 仅测试 fixture 注入 ⇒ 假）。
+- [x] ③-AC5（能取假，读到真值）：drift-check 对生产产生的 trace cache 至少一次读到非空、输出真实判定（覆盖数 + 漂移数，而非每轮 NOT-EVALUATED）（⛔ 恒 NOT-EVALUATED ⇒ 假）。
+- [x] ③-AC6（能取假，ratchet 第 1 层防漏测）：新增一个静态纯 S 且未入重归因的测试 ⇒ ratchet checker RED（⛔ 静默 ⇒ 假；⛔ 基线非 0 ⇒ 假）。
+- [x] ③-AC7（能取假，ratchet 第 2 层留痕）：含 S 未判（S+M/P+S+M）文件被报告为**计数、不阻断**（⛔ 全量 RED 把安全文件当缺陷 ⇒ 假；⛔ 计数恒 0 ⇒ 假——现为 14）。
+- [x] ③-AC8（能取假，数据清理）：重归因文件中指向已删测试的僵尸条目被移除，行数与 AC121 记录 reconcile（⛔ 僵尸条目仍在 ⇒ 假）。
 
 ## Definition of Done
 
@@ -86,6 +88,7 @@ extra: {}
 - plugin/scripts/checker-mutation-cases/suite-bucket-reattr-ratchet-check.sh (new — mutation case)
 - plugin/scripts/runner-static-gate.ts（注册 suite-bucket-drift-check + ratchet checker 进 run_static_checks）
 - plugin/scripts/capability-catalog.sh（注册新脚本六表）
+- scripts/test.sh（--buckets 路径顺带增量 collect：suite-fs-trace.ts --update --limit，生产触发点）
 - plugin/test/suite-bucket-drift-check.test.mjs (new)
 - plugin/test/suite-bucket-reattr-ratchet-check.test.mjs (new)
 - .quay/suite-bucket-reattribution.jsonl（僵尸条目清理 + 行数 reconcile）
