@@ -26,11 +26,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0（driver-runtime 单一实现）：registry（controlFile/carriers 单源）、isHalted（控制面 halt）、
 // ts / sleep / appendHeartbeatLine（心跳/载体）。⛔ 不从 worker/promotion/quality 中转。
-import { DRIVER_KINDS, isHalted, ts, sleep, appendHeartbeatLine, runAsync } from "./driver-runtime.ts";
+import { DRIVER_KINDS, isHalted, ts, sleep, appendHeartbeatLine } from "./driver-runtime.ts";
 // suite 槽路径单一真相源（TS 侧；与 bash suite-slot-lib.sh 同语义）。
 import { suiteLockBase } from "./suite-lock-slots.ts";
 
@@ -300,60 +300,6 @@ export function writeSuiteResult(root: string, task: string, result: SuiteRunRes
   const file = path.join(dir, `${task}.json`);
   fs.writeFileSync(file, JSON.stringify(result) + "\n", "utf8");
   return file;
-}
-
-/**
- * gap-verification-round-static-fail-no-record AC1/AC2 — write a RED verification-round record when a
- * per-task suite FAILED (outcome=red). The mechanical fan-in path previously wrote NO record on a red
- * suite (only the green path wrote), so a failed round left only /tmp/fan-in-suite-<task>.log — the
- * /tests ledger blind to it. Best-effort: a write failure is WARNed, never blocks the red outcome (the
- * task is exited-not-landed and the workflow fallback is dispatched either way). load + lane_count are
- * derived with the SAME 口径 fan-in-execute.js uses (load ← /proc/loadavg 1min; lane_count ← the suite
- * log's last `__GROUP__ concurrency=N` line, falling back to nproc).
- * ⛔ 迁到这里（writeSuiteResult 旁）而非 worker-driver.ts 热区——结构性解耦：worker-driver 只留一行调用，
- * merge-develop 冲突面从 ~50 行降到 ~1 行（gap-verification-round-static-fail-no-record 适配方案）。
- */
-export async function writeRedSuiteRecord(args: {
-  task: string;
-  runId: string;
-  worktree: string;
-  suiteHead: string;
-  suiteLogFile: string;
-  sr: SuiteRunResult;
-}): Promise<void> {
-  const { task, runId, worktree, suiteHead, suiteLogFile, sr } = args;
-  try {
-    let load = "0";
-    try {
-      load = fs.readFileSync("/proc/loadavg", "utf8").trim().split(/\s+/)[0] || "0";
-    } catch { /* keep 0 */ }
-    let laneCount = "";
-    try {
-      const text = fs.readFileSync(suiteLogFile, "utf8");
-      const groups = text.match(/__GROUP__ concurrency=(\d+)/g);
-      if (groups && groups.length > 0) {
-        const m = groups[groups.length - 1].match(/(\d+)$/);
-        if (m) laneCount = m[1];
-      }
-    } catch { /* log unreadable */ }
-    if (!laneCount) {
-      const nproc = spawnSync("nproc", [], { encoding: "utf8" });
-      laneCount = (nproc.stdout || "").trim() || "1";
-    }
-    const argv = [
-      "node", "--experimental-strip-types", path.join(worktree, "plugin", "scripts", "pre-verified-round-record.ts"),
-      "--task-id", task, "--run-id", runId, "--started-at", sr.startedAt, "--duration-ms", String(sr.durationMs),
-      "--lane-count", laneCount, "--load", load, "--commit", suiteHead, "--preverified", "0", "--state", "red",
-      "--root", worktree,
-      "--suite-log", suiteLogFile,
-    ];
-    const w = await runAsync(argv, { timeoutMs: 60_000, collectStderr: true });
-    if (w.status !== 0) {
-      process.stderr.write(`suite-driver: verification-round red-record write failed (best-effort): ${(w.stderr || w.stdout || "").trim()}\n`);
-    }
-  } catch (e) {
-    process.stderr.write(`suite-driver: verification-round red-record write threw (best-effort): ${(e as Error)?.message ?? String(e)}\n`);
-  }
 }
 
 /** 追加一条三态 outcome 到主载体 suite-round.jsonl（每轮一条；一行一 JSON）。 */

@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-single-writer
 title: verification-round 单一 writer——删除 writeRedSuiteRecord 平行红写，红绿统一由 runner 记录
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -25,9 +25,9 @@ verification-round.jsonl 在机械 fan-in 路径是**两个 writer 混写**（�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，读生产载体）：一条红 suite 机械 fan-in 后 ledger 恰有一条该轮记录（runner 形状、无 preverified 字段），无 writeRedSuiteRecord 双写。
-- [ ] AC2（能取假，对称）：一条绿 suite 后恰有一条记录（与红同 writer、同 shape）。
-- [ ] AC3（能取假，静态）：`writeRedSuiteRecord` 在 suite-driver.ts 中不再存在，且无残留调用点。
+- [x] AC1（能取假，读生产载体）：一条红 suite 机械 fan-in 后 ledger 恰有一条该轮记录（runner 形状、无 preverified 字段），无 writeRedSuiteRecord 双写。（worker-driver.test.mjs AC1 机械缺省命令跑红桶 → 恰一条 record、无 preverified、state=red；生产载体 round 717 已见 runner 单写红：state=red、runId、无 preverified）
+- [x] AC2（能取假，对称）：一条绿 suite 后恰有一条记录（与红同 writer、同 shape）。（full-suite-runner.test.mjs green contrast → 恰一条、无 preverified；与红同 runner appendVerificationRound、同 shape）
+- [x] AC3（能取假，静态）：`writeRedSuiteRecord` 在 suite-driver.ts 中不再存在，且无残留调用点。（已删 suite-driver.ts 定义 + 内部 pre-verified-round-record --state red 调用；grep 全 plugin 树 0 残留；suite-driver.test.mjs AC3 静态断言）
 
 ## Definition of Done
 
