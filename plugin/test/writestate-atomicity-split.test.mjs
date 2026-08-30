@@ -96,9 +96,15 @@ test("writeJsonAtomic: a concurrent reader never observes a torn state file", as
   assert.equal(code, 0, "writer child must exit cleanly");
   assert.ok(reads > 0, "reader must have made reads during the write window");
   assert.equal(torn, 0, "an atomic write must never expose a torn file");
+  // Liveness (NOT atomicity): at least one non-initial marker proves writes actually landed.
+  // Requiring BOTH alternating markers (`seen.has("B") && seen.has("C")`) is a sampling bet —
+  // each marker only exists for one write-window, and under 16-lane full load the reader's
+  // sampling interval can stretch past a marker's window and miss it (round 719 flaky:
+  // "reader must observe both written markers; saw A,C"). torn == 0 above is the atomicity
+  // contract and is unchanged.
   assert.ok(
-    seen.has("B") && seen.has("C"),
-    `reader must observe both written markers (writes actually landed); saw ${[...seen].join(",")}`
+    seen.has("B") || seen.has("C"),
+    `reader must observe at least one non-initial marker (writes actually landed); saw ${[...seen].join(",")}`
   );
 });
 
