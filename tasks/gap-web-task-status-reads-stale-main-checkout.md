@@ -2,7 +2,7 @@
 id: gap-web-task-status-reads-stale-main-checkout
 title: web 显示（/tasks、/board、/live done 过滤）读主检出 disk task status（落后 develop）→
   落地任务显示失真；读源应改 develop git ref
-status: ready
+status: done
 labels:
   - gap
   - defect
