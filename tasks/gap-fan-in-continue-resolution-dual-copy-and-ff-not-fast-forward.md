@@ -2,7 +2,7 @@
 id: gap-fan-in-continue-resolution-dual-copy-and-ff-not-fast-forward
 title: fan-in CONTINUE 冲突消解协议缺口——dual-copy 文件冲突 + ff-not-fast-forward +
   modify/delete 三型，worker 反复 ENL 无解
-status: ready
+status: done
 labels:
   - gap
   - defect
