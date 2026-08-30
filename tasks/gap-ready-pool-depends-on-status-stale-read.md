@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-depends-on-status-stale-read
 title: ready-pool-check 的 depends_on 依赖状态读 stale（依赖已 done 仍报 blocking Y）——statusOf 读 allTasks 磁盘 Map，非 develop
-status: todo
+status: ready
 labels:
   - gap
   - defect
