@@ -16,6 +16,8 @@ serial/lowconc 两相用裸 `node --test --test-concurrency=N <files…>`（test
 
 **量化（round 721，2026-08-30 06:51Z）**：serial_phase_ms=327s + lowconc_phase_ms=327s ≈ 整轮 855s 的 38%。两相时长分布极宽（serial 20 文件 1.2s→302s、lowconc 20 文件 0.6s→161s），字母序下短文件等 lane 到几百秒：test-coverage-check(59s) 等 +540s、known-load-sensitive(10s) +794s。模拟 list-scheduling：serial 相 conc=8 时 makespan 398s→302s（LPT −96s/−24%）。
 
+**期望管理（非 AC）**：LPT 只能让 quay-init-* 家族（6×110–302s，若彼此互斥共享安装位置则相 floor≈Σ/conc≈282s）与短文件重叠，不能缩短自身——target 是拉回下界≈282s，不是快于下界。
+
 ## Plan
 
 `lpt_reorder_files` + `suite-lpt-runner.mjs` 接到 4 条派发点（test.sh:1091/1093 overlap + 1115/1133 sequential），复用现成机件零新机制：runner 已组合同 spec+measure-suite-reporter、从 execArgv 读并发。只改顺序不改成员 ⇒ pass/fail-neutral（与 M-bucket 同一不变式）。顺带补全 test.sh:924「LPT 只有一个定义点」承诺（现在 4 条路径里 3 条绕过）。
