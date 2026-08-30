@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, symlinkSync, realpathSync } from "node:fs";
+import { mkdtempSync, writeFileSync, symlinkSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,8 +52,9 @@ function makeFixture() {
   return dir;
 }
 
-test("helper output matches the old grep|awk group_of byte-for-byte (incl. dedup + binary + undeclared)", () => {
+test("helper output matches the old grep|awk group_of byte-for-byte (incl. dedup + binary + undeclared)", (t) => {
   const dir = makeFixture();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const files = [
     join(dir, "a-product.test.mjs"),
     join(dir, "b-engine.test.mjs"),
@@ -84,16 +85,18 @@ test("helper output matches the old grep|awk group_of byte-for-byte (incl. dedup
   }
 });
 
-test("unknown @test-group is fail-closed (exit 3), never silently degraded to engine", () => {
+test("unknown @test-group is fail-closed (exit 3), never silently degraded to engine", (t) => {
   const dir = makeFixture();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(join(dir, "z-unknown.test.mjs"), "// @test-group bogus\n");
   const r = runHelper([join(dir, "z-unknown.test.mjs")]);
   assert.equal(r.status, 3, `expected exit 3, got ${r.status}`);
   assert.match(r.stderr, /FAIL-CLOSED/);
 });
 
-test("binary file (NUL in first 32 KiB) is classified engine even with a @test-group decl", () => {
+test("binary file (NUL in first 32 KiB) is classified engine even with a @test-group decl", (t) => {
   const dir = makeFixture();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const r = runHelper([join(dir, "e-binary.test.mjs")]);
   assert.equal(r.status, 0);
   const line = r.stdout.trim();
