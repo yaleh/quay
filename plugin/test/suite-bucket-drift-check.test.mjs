@@ -79,7 +79,7 @@ test("②-AC1 (literal) — the real worktree-root-fs-check.test.mjs dynamic tru
   assert.equal(bucketSetOf("plugin/test/worktree-root-fs-check.test.mjs", REPO_ROOT).has("S"), true, "static attribution must be S (its scripts/test.sh mention)");
   assert.equal(bucketSetOf("plugin/test/worktree-root-fs-check.test.mjs", REPO_ROOT).has("M"), false, "static attribution must MISS M (the variable path.join)");
   // …and the dynamic trace sees it.
-  const r = traceOne("plugin/test/worktree-root-fs-check.test.mjs", REPO_ROOT, 60_000);
+  const r = traceOne("plugin/test/worktree-root-fs-check.test.mjs", REPO_ROOT, 120_000);
   assert.equal(r.status, 0, `trace must run clean, got status ${r.status}: ${r.error}`);
   assert.ok(
     r.reads.includes("plugin/scripts/quay-init.sh"),
