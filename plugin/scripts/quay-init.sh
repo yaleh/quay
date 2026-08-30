@@ -1320,6 +1320,42 @@ _read_references() {
   return 0
 }
 
+# _read_declarations — stability-checked declaration reads (self-create + reference-doc), EXTRACTED
+# from verify_referenced_landed (gap-quay-init-reduce-real-install-count) so a torn-read test can
+# SOURCE quay-init.sh and call it directly (免完整安装) instead of running a full --loop install.
+# Reads the machine-readable `<!-- self-create: … -->` / `<!-- reference-doc: … -->` declarations in
+# plugin/skills/init/SKILL.md with the SAME multi-attempt stability check the gate has always used:
+# two independent reads must agree AND the always-present sentinel lines must be in the agreed
+# snapshot. On success it sets the globals QUAY_INIT_SELFCREATE / QUAY_INIT_REFDOC (newline-separated
+# sets) and returns 0; on exhaustion (all attempts torn/inconsistent) it sets them to the LAST
+# snapshot and returns 1. verify_referenced_landed consumes the globals; a direct caller uses the
+# return code.
+_read_declarations() {
+  local attempt=1 s r s2 r2
+  for attempt in 1 2 3; do
+    s="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
+    r="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
+    # Stability check: a SECOND, independent read must return the SAME sets. A transiently
+    # incomplete read (that kept the old 2-line sentinel but dropped a later declaration) will
+    # differ from a full read here, so this is strictly stronger than the retired sentinel.
+    s2="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
+    r2="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
+    # The original 2-line sentinel is kept as a cheap additional guard on top of stability:
+    # the always-present sentinel lines must be in the agreed snapshot too (a read torn before
+    # them is caught even if both reads agree on the torn set). A genuinely-missing declaration
+    # file never passes either guard.
+    if [ "$s" = "$s2" ] && [ "$r" = "$r2" ] \
+      && printf '%s\n' "$s" | grep -qxF 'orchestration/tick-log.md' \
+      && printf '%s\n' "$r" | grep -qxF 'orchestration/manager-tick-log.md'; then
+      QUAY_INIT_SELFCREATE="$s"; QUAY_INIT_REFDOC="$r"; return 0
+    fi
+    [ "$attempt" -lt 3 ] && sleep 0.2
+  done
+  # All 3 reads incomplete or mutually inconsistent — keep the LAST snapshot; the per-reference
+  # loop in verify_referenced_landed will fail on a genuine miss (real drift is never masked).
+  QUAY_INIT_SELFCREATE="$s"; QUAY_INIT_REFDOC="$r"; return 1
+}
+
 verify_referenced_landed() {
   local ws="$1" missing=0 closure_missing=0 r sd script
   local refs selfcreate refdoc
@@ -1344,33 +1380,9 @@ verify_referenced_landed() {
   # nondeterministic point) differs from a full read, so it retries; only two agreeing reads are
   # accepted as complete. A genuinely-undeclared ref is absent from every read, so real drift
   # still fails (negative control unchanged).
-  _read_declarations() {
-    local attempt=1 s r s2 r2
-    for attempt in 1 2 3; do
-      s="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
-      r="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
-      # Stability check: a SECOND, independent read must return the SAME sets. A transiently
-      # incomplete read (that kept the old 2-line sentinel but dropped a later declaration) will
-      # differ from a full read here, so this is strictly stronger than the retired sentinel.
-      s2="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
-      r2="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
-      # The original 2-line sentinel is kept as a cheap additional guard on top of stability:
-      # the always-present sentinel lines must be in the agreed snapshot too (a read torn before
-      # them is caught even if both reads agree on the torn set). A genuinely-missing declaration
-      # file never passes either guard.
-      if [ "$s" = "$s2" ] && [ "$r" = "$r2" ] \
-        && printf '%s\n' "$s" | grep -qxF 'orchestration/tick-log.md' \
-        && printf '%s\n' "$r" | grep -qxF 'orchestration/manager-tick-log.md'; then
-        selfcreate="$s"; refdoc="$r"; return 0
-      fi
-      [ "$attempt" -lt 3 ] && sleep 0.2
-    done
-    # All 3 reads incomplete or mutually inconsistent — keep the LAST snapshot; the per-reference
-    # loop below will fail on a genuine miss (real drift is never masked by retries).
-    selfcreate="$s"; refdoc="$r"; return 1
-  }
-  selfcreate="" refdoc=""
   _read_declarations
+  selfcreate="$QUAY_INIT_SELFCREATE"
+  refdoc="$QUAY_INIT_REFDOC"
   # The reference set is derived once, STABILITY-CHECKED (two agreeing passes — _read_references),
   # so the landed-scan below runs against a deterministic snapshot (gap-verify-referenced-landed-
   # concurrency-hardening-insufficient: the reference-scan grep was the last single-pass "裸 grep"
@@ -1776,6 +1788,18 @@ if [ "$DO_CHECK_DEPENDENCY_CLOSURE" = true ]; then
   derive_loop_scripts
   compute_dependency_closure_gaps
   exit $?
+fi
+
+# ── library mode (gap-quay-init-reduce-real-install-count) ────────────────────────────────────────────
+# When SOURCED (not executed as $0), stop here — the caller wants to invoke a derivation/stability
+# function directly (derive_loop_scripts / _read_declarations / _read_references /
+# verify_referenced_landed) without running a full install. Every function + its deps
+# (mechanism_corpus / bare_resolved_scripts / consolidated_member_files) and the PLUGIN_ROOT /
+# NEVER_LAYDOWN environment are defined ABOVE this guard; the install flow below must not run.
+# The torn-read family (quay-init.test.mjs + quay-init-loop-consumer-doc-refs.test.mjs) sources this
+# script and calls the function it exercises, so a stability-check test no longer pays a ~33s install.
+if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
+  return 0
 fi
 
 # ── categories ─────────────────────────────────────────────────────────────────────────────────────

@@ -31,7 +31,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 // AC3 (gap-serial-install-family-shared-prebuilt-fixture): the positive-case install is pure setup —
 // copy it from the shared prebuilt fixture; the negative controls stay REAL installs.
-import { laydownWorkspace, laydownTemplate, runInit, makeTmp, cleanup, pluginDir, declaredSet, diskWorktreeRoot } from "./quay-init-loop-helpers.mjs";
+import { laydownWorkspace, laydownTemplate, runInit, makeTmp, cleanup, pluginDir, declaredSet } from "./quay-init-loop-helpers.mjs";
 
 const INIT_ARGS = (ws) => ["--loop", "--root", ws, "--project", "proj",
   "--test-command", "node --test", "--tmux-session", "proj-0:0.0"];
@@ -47,15 +47,17 @@ const INIT_ARGS = (ws) => ["--loop", "--root", ws, "--project", "proj",
 // nondeterministic point) is retried; only two agreeing reads are accepted as complete. A genuinely
 // undeclared ref is absent from every read, so real drift still fails (negative control unchanged).
 //
-// These tests exercise the REAL quay-init.sh --loop install path with a fake `grep` injected first
-// on PATH. The fake passes through every invocation to the real grep EXCEPT the declaration reads on
-// init/SKILL.md (a pattern arg mentioning self-create/reference-doc AND a file arg ending in
-// skills/init/SKILL.md); those it can truncate deterministically by dropping one declaration line,
-// simulating a torn read that keeps the sentinels but loses a later declaration. The drop schedule
-// forces reads 1..6 (the first two attempts of the stability check, plus the first fresh re-read of
-// the per-reference loop) to differ from each other, then lets reads 7+ return the full set — the
-// stability check retries until two agreeing full reads, while the pre-fix sentinel would accept the
-// first torn snapshot and fail on the dropped declaration.
+// These tests SOURCE the REAL quay-init.sh and call its declaration stability check directly
+// (_read_declarations; the negative control calls verify_referenced_landed) — 免完整安装
+// (gap-quay-init-reduce-real-install-count) — with a fake `grep` injected first on PATH. The fake
+// passes through every invocation to the real grep EXCEPT the declaration reads on init/SKILL.md
+// (a pattern arg mentioning self-create/reference-doc AND a file arg ending in skills/init/SKILL.md);
+// those it can truncate deterministically by dropping one declaration line, simulating a torn read
+// that keeps the sentinels but loses a later declaration. The drop schedule forces reads 1..6 (the
+// first two attempts of the stability check, plus the first fresh re-read of the per-reference loop)
+// to differ from each other, then lets reads 7+ return the full set — the stability check retries
+// until two agreeing full reads, while the pre-fix sentinel would accept the first torn snapshot and
+// fail on the dropped declaration.
 const FAKE_GREP_SOURCE = `#!/usr/bin/env bash
 # Torn-read simulation grep (quay-init torn-read regression test only).
 # Passes through to the real grep except for declaration reads on init/SKILL.md, which it can tear.
@@ -130,19 +132,28 @@ function realGrepPath() {
   return "/usr/bin/grep";
 }
 
-// Like the helpers' runInit, but with an extra env layer (the fake-grep PATH + policy) so a real
-// --loop install runs with the torn-read seam in place.
-function runInitEnv(workspace, args, extraEnv, pluginRoot = pluginDir) {
-  const loop = args.includes("--loop");
-  const argv = ["bash", path.join(pluginRoot, "scripts", "quay-init.sh")];
-  if (loop && !args.some((a) => a === "--worktree-root")) {
-    argv.push("--worktree-root", diskWorktreeRoot());
-  }
-  argv.push(...args);
-  return spawnSync(argv[0], argv.slice(1), {
-    cwd: workspace,
+// runSourced(fnLine, { env, args, cwd }) — SOURCE quay-init.sh and invoke ONE of its top-level
+// derivation/stability functions DIRECTLY (no full install), with the fake-grep seam (env) in place.
+// gap-quay-init-reduce-real-install-count: the torn-read family previously ran a full `--loop` install
+// (~33s) per test just to exercise one stability check (or the verify gate); quay-init.sh is now
+// sourceable (its library-mode guard stops before the install flow), so the test calls the function
+// itself. fnLine is the LAST command of a `bash -c`, so the child's exit code IS the function's
+// return code and stderr carries any FAIL line (e.g. referenced-not-landed).
+function runSourced(fnLine, { env = {}, args = [], cwd } = {}) {
+  // Capture the positional args into _fargs and CLEAR $@ BEFORE sourcing: quay-init.sh parses $@ at
+  // the top level (its arg parser rejects an unknown positional with "unknown argument"), and
+  // sourcing would otherwise feed it the fnLine's args (e.g. the workspace path). fnLine reads them
+  // back via ${_fargs[0]}.
+  const script = '_fargs=("$@")\nset --\nsource "$QUAY_INIT_SCRIPT"\n' + fnLine;
+  return spawnSync("bash", ["-c", script, "quay-init-sourced", ...args], {
+    cwd: cwd || pluginDir,
     encoding: "utf8",
-    env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot, ...extraEnv },
+    env: {
+      ...process.env,
+      CLAUDE_PLUGIN_ROOT: pluginDir,
+      QUAY_INIT_SCRIPT: path.join(pluginDir, "scripts", "quay-init.sh"),
+      ...env,
+    },
   });
 }
 
@@ -389,16 +400,13 @@ test("AC91 negative — a shipped tick doc referencing `.claude/workflows/<name>
 // reads (each keeping the sentinels but dropping a declared-not-landed path), then lets reads 7+
 // return the full set — the stability check must retry to a clean attempt and the install must pass.
 // A pre-fix sentinel-only check would accept the first torn snapshot and fail referenced-not-landed.
-test("torn-read stability — torn declaration reads (keeping sentinels, dropping a later declaration) are retried; a real --loop install still passes", () => {
+test("torn-read stability — torn declaration reads (keeping sentinels, dropping a later declaration) are retried; _read_declarations still stabilizes", () => {
   const { drop0, drop1, drop2 } = tornDropCandidates();
   const binDir = makeTmp("torn-grep-");
   const env = tornEnv(binDir, { policy: "torn", tornUntil: 6, drop0, drop1, drop2 });
-  const ws = makeTmp("torn-ws-");
   try {
-    const r = runInitEnv(ws, INIT_ARGS(ws), env);
-    assert.equal(r.status, 0, `torn reads must NOT fail the install (stability check retries to a clean read):\n${r.stdout}${r.stderr}`);
-    assert.match(r.stdout + r.stderr, /verify-referenced-landed: OK/,
-      "the referenced⊆landed gate must pass once the declaration reads stabilize");
+    const r = runSourced("_read_declarations", { env });
+    assert.equal(r.status, 0, `torn reads must NOT fail the declaration read (stability check retries to a clean read):\n${r.stdout}${r.stderr}`);
 
     // The fake-grep log proves the retry really happened: reads 1-6 were torn (a declaration dropped,
     // so consecutive reads disagreed), and the check read on past them instead of accepting the first
@@ -413,31 +421,29 @@ test("torn-read stability — torn declaration reads (keeping sentinels, droppin
     const accepted = log.slice(8).filter((e) => e.kind === "self-create");
     assert.ok(accepted.length >= 1 && accepted.every((e) => e.torn === "no"),
       `the reads the check finally accepted must be complete (not torn), got ${JSON.stringify(accepted)}`);
-  } finally { cleanup(ws); cleanup(binDir); }
+  } finally { cleanup(binDir); }
 });
 
 test("torn-read control — the pass-through seam preserves the happy path: consistent reads exit 0", () => {
   const binDir = makeTmp("torn-grep-");
   const env = tornEnv(binDir, { policy: "pass" });
-  const ws = makeTmp("torn-ws-");
   try {
-    const r = runInitEnv(ws, INIT_ARGS(ws), env);
-    assert.equal(r.status, 0, `the pass-through seam must not change a clean install verdict:\n${r.stdout}${r.stderr}`);
-    assert.match(r.stdout + r.stderr, /verify-referenced-landed: OK/,
-      "the referenced⊆landed gate must pass on consistent reads");
-  } finally { cleanup(ws); cleanup(binDir); }
+    const r = runSourced("_read_declarations", { env });
+    assert.equal(r.status, 0, `the pass-through seam must not change a clean declaration-read verdict:\n${r.stdout}${r.stderr}`);
+  } finally { cleanup(binDir); }
 });
 
-test("torn-read negative control — a genuinely missing ref still FAILS --loop (referenced-not-landed), unchanged under the seam", () => {
+test("torn-read negative control — a genuinely missing ref still FAILS the verify gate (referenced-not-landed), unchanged under the seam", () => {
   const binDir = makeTmp("torn-grep-");
   const env = tornEnv(binDir, { policy: "pass" });
-  const ws = makeTmp("torn-ws-");
+  // A LAID workspace (the shared prebuilt fixture) — the verify gate must fail on the SPECIFIC evil
+  // ref, not merely because the tree is empty (a bare ws would fail on the entire shipped corpus).
+  const { ws } = laydownWorkspace();
   try {
-    fs.mkdirSync(path.join(ws, "docs", "analysis"), { recursive: true });
     fs.writeFileSync(path.join(ws, "docs", "analysis", "torn-evil-consumer.md"),
       "this consumer doc references a path the loop never lays: plugin/scripts/nonexistent-checker.ts\n", "utf8");
-    const r = runInitEnv(ws, INIT_ARGS(ws), env);
-    assert.notEqual(r.status, 0, "--loop must FAIL when a consumer-laid docs/analysis/ doc references a non-landed path");
+    const r = runSourced('verify_referenced_landed "${_fargs[0]}"', { env, args: [ws] });
+    assert.notEqual(r.status, 0, "verify_referenced_landed must FAIL when a consumer-laid docs/analysis/ doc references a non-landed path");
     assert.match(r.stderr, /referenced-not-landed/, "must use the referenced-not-landed category");
     assert.match(r.stderr, /nonexistent-checker\.ts/, "must name the non-landed referenced path");
   } finally { cleanup(ws); cleanup(binDir); }
@@ -453,13 +459,15 @@ test("torn-read negative control — a genuinely missing ref still FAILS --loop 
 // wraps it in the SAME stability check as _read_declarations (a4f1e41d) and derive_loop_scripts
 // (089365b5): two independent passes must produce IDENTICAL output, else retry.
 //
-// These tests inject a fake `grep` that passes through everything EXCEPT the reference-scan greps
-// (the two greps in _reference_set_once whose pattern starts with `(plugin/scripts`). On a torn
-// policy it truncates those to the first KEEP lines, simulating a grep killed mid-stream. The drop
-// schedule tears only the FIRST TWO reference-scan greps (the two greps of the first
-// _reference_set_once pass) and lets greps 3+ return the full set — the first pass is torn, the
-// second is full, so the stability check's two passes disagree and it retries to two agreeing full
-// passes. A pre-fix (single-pass) derivation would accept the torn subset.
+// These tests SOURCE the REAL quay-init.sh and call _read_references (the reference-scan stability
+// wrapper) directly — 免完整安装 (gap-quay-init-reduce-real-install-count) — injecting a fake `grep`
+// that passes through everything EXCEPT the reference-scan greps (the two greps in
+// _reference_set_once whose pattern starts with `(plugin/scripts`). On a torn policy it truncates
+// those to the first KEEP lines, simulating a grep killed mid-stream. The drop schedule tears only
+// the FIRST TWO reference-scan greps (the two greps of the first _reference_set_once pass) and lets
+// greps 3+ return the full set — the first pass is torn, the second is full, so the stability
+// check's two passes disagree and it retries to two agreeing full passes. A pre-fix (single-pass)
+// derivation would accept the torn subset.
 const REFSCAN_FAKE_GREP_SOURCE = `#!/usr/bin/env bash
 # Torn-read simulation grep (verify_referenced_landed reference-scan regression test only).
 # Passes through to the real grep except the reference-scan greps (pattern starting with "(plugin/scripts").
@@ -533,16 +541,14 @@ function readRefscanLog(logPath) {
   });
 }
 
-test("torn-read stability (reference-scan) — a torn reference-scan grep is retried; a real --loop install still passes", () => {
+test("torn-read stability (reference-scan) — a torn reference-scan grep is retried; _read_references still returns a stable set", () => {
   const binDir = makeTmp("torn-refscan-");
   const env = refscanTornEnv(binDir, { policy: "torn", tornUntil: 2, keep: 5 });
   const ws = makeTmp("torn-refscan-ws-");
   try {
-    const r = runInitEnv(ws, INIT_ARGS(ws), env);
+    const r = runSourced('_read_references "${_fargs[0]}"', { env, args: [ws] });
     assert.equal(r.status, 0,
-      `a torn reference-scan must NOT fail the install (the stability check retries to a clean pass):\n${r.stdout}${r.stderr}`);
-    assert.match(r.stdout + r.stderr, /verify-referenced-landed: OK/,
-      "the referenced ⊆ landed gate must pass once the reference-scan stabilizes");
+      `a torn reference-scan must NOT fail the reference derivation (the stability check retries to a clean pass):\n${r.stdout}${r.stderr}`);
 
     // The fake-grep log proves the tear really fired and that a full reference-scan followed it.
     const log = readRefscanLog(env.FAKE_GREP_LOG);
@@ -560,23 +566,22 @@ test("torn-read control (reference-scan) — the pass-through seam preserves the
   const env = refscanTornEnv(binDir, { policy: "pass" });
   const ws = makeTmp("torn-refscan-ws-");
   try {
-    const r = runInitEnv(ws, INIT_ARGS(ws), env);
-    assert.equal(r.status, 0, `the pass-through seam must not change a clean install verdict:\n${r.stdout}${r.stderr}`);
-    assert.match(r.stdout + r.stderr, /verify-referenced-landed: OK/,
-      "the referenced ⊆ landed gate must pass on consistent reads");
+    const r = runSourced('_read_references "${_fargs[0]}"', { env, args: [ws] });
+    assert.equal(r.status, 0, `the pass-through seam must not change a clean reference-derivation verdict:\n${r.stdout}${r.stderr}`);
   } finally { cleanup(ws); cleanup(binDir); }
 });
 
 test("torn-read negative control (reference-scan) — a genuinely missing ref still FAILS (referenced-not-landed), unchanged under the seam", () => {
   const binDir = makeTmp("torn-refscan-");
   const env = refscanTornEnv(binDir, { policy: "pass" });
-  const ws = makeTmp("torn-refscan-ws-");
+  // A LAID workspace (the shared prebuilt fixture) — the verify gate must fail on the SPECIFIC evil
+  // ref, not merely because the tree is empty (a bare ws would fail on the entire shipped corpus).
+  const { ws } = laydownWorkspace();
   try {
-    fs.mkdirSync(path.join(ws, "docs", "analysis"), { recursive: true });
     fs.writeFileSync(path.join(ws, "docs", "analysis", "refscan-evil-consumer.md"),
       "this consumer doc references a path the loop never lays: plugin/scripts/refscan-nonexistent-checker.ts\n", "utf8");
-    const r = runInitEnv(ws, INIT_ARGS(ws), env);
-    assert.notEqual(r.status, 0, "--loop must FAIL when a consumer-laid docs/analysis/ doc references a non-landed path");
+    const r = runSourced('verify_referenced_landed "${_fargs[0]}"', { env, args: [ws] });
+    assert.notEqual(r.status, 0, "verify_referenced_landed must FAIL when a consumer-laid docs/analysis/ doc references a non-landed path");
     assert.match(r.stderr, /referenced-not-landed/, "must use the referenced-not-landed category");
     assert.match(r.stderr, /refscan-nonexistent-checker\.ts/, "must name the non-landed referenced path");
   } finally { cleanup(ws); cleanup(binDir); }
