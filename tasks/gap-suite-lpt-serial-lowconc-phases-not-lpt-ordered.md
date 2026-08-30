@@ -44,3 +44,8 @@ serial/lowconc 六派发点接 LPT；AC1-AC3 全勾；全量 suite 绿；serial/
 - plugin/test/suite-bucket-load-sensitive-isolation.test.mjs（bucket serial/lowconc 子相断言改为 runner）
 - plugin/test/runner-grouping-serial-anti-stomp.test.mjs（serial 相断言改为 runner）
 - tasks/gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered.md（自身）
+## Needs-Human
+
+**执行 2026-08-30T09:46:25.303Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）

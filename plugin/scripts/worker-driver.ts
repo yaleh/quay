@@ -38,8 +38,8 @@
 //      resource-gate A 面）不退役。
 //   ② A6「检查 fan-in 是否走 workflow」—— worker 永不自己调 fan-in-execute workflow（创建 + 续做
 //      两条 prompt 都走 driverFanInNote：worker 实现后退出、driver 接手机械跑 fan-in；语义兜底归
-//      driver 按 red step 决定），结构上不需要事后检查「有没有走」。标记落点：fan-in-workflow-check.ts
-//      头部「A6 检查退役面」横幅（过渡期仍保留给旧循环，驱动路径不消费它）。
+//      driver 按 red step 决定），结构上不需要事后检查「有没有走」。原 A6 检查器已随
+//      gap-retire-fan-in-executor-workflow-identity-checkers（08-29）删除（SUPERSEDED），无残留检查面。
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/worker-driver.ts \
@@ -79,8 +79,8 @@
 //   `.halt` 文件机制对【驱动】退役 —— 驱动的停机态 = `.quay/worker-control.json`（MCP halt 写、派发环读），
 //   ⛔ 驱动【不再】读 `.halt`、⛔ 不两者并存（两个真相源）。worker-control.json 与 worker-outcome.jsonl 同族
 //   （gitignored 运行时状态）。读失败 fail-closed（读失败/解析失败 ⇒ halted=true，硬规则 3b：读不懂 ≠ 合格）。
-//   注：.halt 仍被【旧三层循环】的 halt-check.sh / slot-refill.ts 等消费——它们的退役属外层 SPEC 迁移范围，
-//   本文件只管【驱动】这一条停机来源，不读 .halt、也不与它并存为驱动停机态。
+//   注：.halt 哨兵机制已随 gap-retire-halt-file-driver-based（08-29）整体退役——旧三层循环的消费点已删除
+//   （SUPERSEDED）。本文件只管【驱动】这一条停机来源（.quay/worker-control.json），不读 .halt。
 //
 // 控制态文件（.quay/worker-control.json，单一真相源）：
 //   { schemaVersion:1, halted:boolean, halted_by, halted_at, preference:{k:v}, forced:[{task,reason,caller,at}] }
@@ -154,8 +154,8 @@ export {
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
-import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, type RetryState } from "./driver-filters.ts";
-export { readTaskStatus } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, WORKER_OUTCOME_REL, type RetryState } from "./driver-filters.ts";
+export { readTaskStatus, lastExitedNotLandedReason, WORKER_OUTCOME_REL } from "./driver-filters.ts";
 // AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
 // ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
 import { defaultDriverConfig, loadDriverConfig, driverCap } from "./driver-config.ts";
@@ -217,9 +217,6 @@ export {
 } from "./driver-runtime.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
-
-/** outcome 文件的仓库相对路径（gitignored 运行时日志，dispatch-record.jsonl 同族）。 */
-export const WORKER_OUTCOME_REL = ".quay/worker-outcome.jsonl";
 
 /** round 记录（无条件心跳）的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
@@ -1025,48 +1022,6 @@ export async function branchHeadSubjectAsync(root: string, taskId: string): Prom
   return out === "" ? null : out;
 }
 
-/** 把一条 exited-not-landed 记录格式化为人可读的失败原因（gap-fan-in-merge-develop-derived-recompute-
- *  and-reason B）。优先读 mechanical_fan_in（step + reason 拼接成「step=merge-develop: CONFLICT in <file>」）
- *  ——merge develop 冲突的具体文件在 mechanical_fan_in.reason 里，通用 failure_reason 只写「task status=ready
- *  not done」，⛔ 不含冲突文件 ⇒ worker 无从精准 resolve。mechanical_fan_in 无 step（缺键 / 非 red / 非对象）
- *  ⇒ 回退 failure_reason（保留旧行为——非机械 fan-in 失败 / 落地未证实的记录仍读通用 reason）。 */
-function formatExitedNotLandedReason(failureReason: unknown, mechanicalFanIn: unknown): string | null {
-  if (mechanicalFanIn && typeof mechanicalFanIn === "object") {
-    const m = mechanicalFanIn as { step?: unknown; reason?: unknown };
-    if (typeof m.step === "string" && m.step) {
-      const reason = typeof m.reason === "string" && m.reason ? m.reason : "(no reason)";
-      return `step=${m.step}: ${reason}`;
-    }
-  }
-  return typeof failureReason === "string" ? failureReason : null;
-}
-
-/** 该 task 最近一条 exited-not-landed 的失败原因（AC2「上次失败原因」，读 worker-outcome.jsonl）。
- *  无记录 / 读失败 ⇒ null（读不懂 ≠ 无失败——但续做 prompt 以 "(unknown)" 呈现，不伪装成「没有失败」）。 */
-export function lastExitedNotLandedReason(root: string, taskId: string): string | null {
-  let text: string;
-  try {
-    text = fs.readFileSync(path.join(root, WORKER_OUTCOME_REL), "utf8");
-  } catch {
-    return null;
-  }
-  let last: string | null = null;
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let rec: { task?: unknown; final_state?: unknown; failure_reason?: unknown; mechanical_fan_in?: unknown };
-    try {
-      rec = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-    if (rec.task === taskId && rec.final_state === "exited-not-landed") {
-      last = formatExitedNotLandedReason(rec.failure_reason, rec.mechanical_fan_in);
-    }
-  }
-  return last;
-}
-
 /** 派发前搜集续做状态（AC1 复用 / AC2 状态）。⛔ 无 worktree（worktreePresentForTask 非 true）⇒ null
  *  （走创建 prompt）。worktree 读不懂（null）⇒ null（创建，与「确认无残留」同向——撞死由 git 自己报，
  *  比误判复用更安全；且读不懂时 `git worktree add` 同样会失败，属 git 不可用的同一次故障）。 */
@@ -1115,7 +1070,7 @@ function continueConflictResolutionNote(): string {
     `(2) code files (e.g. worker-driver.ts): read both sides of the diff and take the semantic union of the two changes (keep both changes where they do not conflict).`,
     `(3) dual-copy files (a workflow script that lives in BOTH \`.claude/workflows/*\` AND its \`plugin/workflows/*\` mirror): take the develop version, then re-sync BOTH copies byte-identical (\`git checkout develop -- .claude/workflows/<file> plugin/workflows/<file>\`); ⛔ do NOT take a semantic union — a union would make the two copies diverge and the dual-copy drift check would go red.`,
     `(4) tick doc (orchestration/*-tick-core.md, e.g. orchestration/fast-mode-tick-core.md — not outline, not code): take the develop version (\`git checkout develop -- <file>\`); ⛔ do NOT hand-merge.`,
-    `(5) modify/delete CONFLICT (one side deleted the file, the other modified it): first judge WHICH side deleted — if YOUR task branch deleted it intentionally (a replacement implementation lives on the branch, e.g. a TS reincarnation of a deleted shell script) accept the deletion (\`git rm <file>\`); if develop deleted it, accept develop's deletion (\`git rm <file>\`). ⛔ never silently restore the deleted file (reviving a retired implementation), and never treat your branch's intentional deletion as "take the develop version".`,
+    `(5) modify/delete CONFLICT (one side deleted the file, the other modified it): first judge WHICH side deleted — if YOUR task branch deleted it intentionally (a replacement implementation lives on the branch, e.g. a TS reincarnation of a deleted shell script) first read develop's version (\`git show develop:<file>\`) and absorb any develop-side semantic changes into your replacement implementation (e.g. writeSuiteCapture fail-open + capture 缺失回退) — THEN accept the deletion (\`git rm <file>\`), ⛔ never \`git rm\` a branch-side intentional deletion before absorbing develop's post-branch changes or you silently drop them; if develop deleted it, accept develop's deletion (\`git rm <file>\`). ⛔ never silently restore the deleted file (reviving a retired implementation), and never treat your branch's intentional deletion as "take the develop version".`,
     `(6) \`git add <resolved files>\` then \`git commit --no-edit\` to complete the merge.`,
     `FF NOT FAST-FORWARD — if the prior failure was \`step=ff: ... not fast-forward\` (NOT a merge CONFLICT; develop advanced during the long suite so the task branch fell behind): merge develop again (\`git merge develop\`, resolving any conflict per the rules above), \`git commit --no-edit\`, then re-exit — the driver re-runs fan-in and the ff will then succeed. ⛔ do NOT re-implement; this failure is branch-lag, not a code defect.`,
   ].join(" ");
@@ -1889,7 +1844,9 @@ export function combinedOutput(stdout: string, stderr: string): string {
  *  裸流本身落进 logFile（fail dump），记录里留指针。提取不出任何行 ⇒ 空串（调用方回退 `exit <code>`）。
  *  gap-scoped-gate-reason-stderr-drops-stdout：scoped 门红时 stdout 的真失败（esbuild 构建崩 = Could not
  *  resolve）必须进 reason——⛔ stderr 良性 preamble 优先 || 短路丢弃 stdout（硬规则 3b/4b/9 同族）。
- *  esbuild 失败行加入 isSignal：即使与 TAP not ok 并存，构建失败签名也不再被 slice(-60) 尾截掉。 */
+ *  esbuild 失败行加入 isSignal：即使与 TAP not ok 并存，构建失败签名也不再被 slice(-60) 尾截掉。
+ *  gap-step-trace-reason-captures-gate-stdout：ac-gate/anti-drift 的 stdout 判词（checked X/Y / violation）
+ *  加入 isSignal——⛔ ac-gate 的 FAIL 行与「checked X/Y」并存时后者被 signals-first 丢弃，真判词不进 reason。 */
 export function extractFailureSummary(combined: string): string {
   const isNoise = (l: string): boolean =>
     l.includes("MODULE_TYPELESS_PACKAGE_JSON") ||
@@ -1900,7 +1857,7 @@ export function extractFailureSummary(combined: string): string {
     l.includes("--trace-warnings");
   const meaningful = combined.split("\n").filter((l) => l.trim() !== "" && !isNoise(l));
   const isSignal = (l: string): boolean =>
-    /^\s*not ok\b|^\s*✖|\bFAIL\b|# fail\b|HARD FAIL|AssertionError|\bexpected:|\bactual:|\bfail \d+\b|\bexit=\d+|Could not resolve|\[ERROR\]/i.test(l);
+    /^\s*not ok\b|^\s*✖|\bFAIL\b|# fail\b|HARD FAIL|AssertionError|\bexpected:|\bactual:|\bfail \d+\b|\bexit=\d+|Could not resolve|\[ERROR\]|\bchecked\b|\bviolation\b/i.test(l);
   const signals = meaningful.filter(isSignal);
   const chosen = signals.length > 0 ? signals : meaningful;
   return chosen.slice(-60).join("\n").trim().slice(0, 4000);
@@ -2300,7 +2257,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     appendFanInStepTrace(root, task, runId, name, "end", { ok: r.ok });
     trace({
       step: name, exit: r.status, wall_ms: Date.now() - t0, ok: r.ok,
-      ...(r.ok ? {} : { reason: (r.stderr || r.stdout || "").trim() || `exit ${r.status}` }),
+      ...(r.ok ? {} : { reason: extractFailureSummary(combinedOutput(r.stdout, r.stderr)) || `exit ${r.status}` }),
     });
     return r;
   };
@@ -2383,6 +2340,33 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
     if (needSuite) {
+      // 6.5 AC 全勾 fail-fast 预检（suite 前——未全勾直接拒翻跳过 suite，省注定无效的 9-11min/cycle；
+      // gap-fan-in-ac-precheck-before-suite）。⛔ 用同源 ac-gate 脚本 --json 读结构化 verdict
+      // （checked/total）——不新造计数函数（countCompletionCheckboxes / isLandedCodeComplete 同源，与
+      // flip 闸 fan-in-ac-completion-gate.ts 一致）。not-evaluated（段缺失）fail-closed 拒翻（硬规则 3b：
+      // 无法评估 ≠ 合格）。⛔ 保留 step 8 的 ac-gate（flip 闸）——flip 前再判一次（幂等双保险）。
+      const acPreT0 = Date.now();
+      const acPre = await mechSh(["node", "--experimental-strip-types", acGate, "--task", task, "--worktree", worktree, "--json"], 60_000);
+      if (!acPre.ok) {
+        let checkedTotal = "?/?";
+        let status = "fail";
+        try {
+          const parsed = JSON.parse((acPre.stdout || "").trim());
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            const c = typeof parsed.checked === "number" ? String(parsed.checked) : "?";
+            const n = typeof parsed.total === "number" ? String(parsed.total) : "?";
+            checkedTotal = `${c}/${n}`;
+            if (typeof parsed.status === "string") status = parsed.status;
+          }
+        } catch { /* JSON 解析失败 ⇒ 保守 ?/?（仍拒翻，fail-closed） */ }
+        const summary = status === "not-evaluated"
+          ? `AC/DoD 段缺失或无法识别（${checkedTotal}）——suite 前 fail-fast 拒翻`
+          : `AC 未全勾（${checkedTotal}）——suite 前 fail-fast 拒翻`;
+        trace({ step: "ac-precheck", exit: acPre.status, wall_ms: Date.now() - acPreT0, ok: false, reason: summary });
+        return failClean("ac-precheck", summary, acPre.status);
+      }
+      trace({ step: "ac-precheck", exit: 0, wall_ms: Date.now() - acPreT0, ok: true });
+
       trace({ step: "suite-start", exit: 0, wall_ms: 0, ok: true });
       const suiteCmd = opts.suiteCommand ?? defaultMechanicalSuiteCommand({ task, worktree, root, suiteLogFile, runId: perSuiteRunId });
       const sr: SuiteRunResult = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: suiteCmd, logFile: suiteLogFile, silenceMs: opts.silenceMs });
