@@ -1,7 +1,7 @@
 ---
 id: gap-write-suite-capture-non-blocking
 title: writeSuiteCapture 观测写不得阻塞 fan-in——写失败 fail-open，ff 闸改读权威源
-status: ready
+status: done
 labels:
   - gap
 parent: null
