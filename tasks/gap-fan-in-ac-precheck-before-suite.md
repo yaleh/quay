@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-ac-precheck-before-suite
 title: fan-in 前 AC 全勾 fail-fast 预检——未全勾直接拒翻跳过 suite，省注定无效的 9-11min/cycle
-status: ready
+status: done
 labels:
   - gap
   - defect
