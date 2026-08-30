@@ -7,9 +7,7 @@ labels:
   - gap
   - productization
 parent: null
-children:
-  - gap-execution-loop-p4-suite-entry-ts-ization
-  - gap-execution-loop-p4-dispatch-productization
+children: []
 extra:
   schema: execution
   depends_on:
