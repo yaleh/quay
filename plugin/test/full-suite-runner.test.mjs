@@ -27,7 +27,7 @@
 //   AC5 — the >=3min/<3min threshold rule + durationMs measurement hook are in both loop docs.
 //   AC7 — the three batch-eliminating blocks (a/b/c) are cross-annotated in the closure-sync
 //         task file and the loop docs reference the (c) closure-decomposition task id.
-//   AC8 — this file uses node:test and declares // @test-group governance.
+//   AC8 — this file uses node:test and declares // @test-group lowconc.
 //
 // Task: gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red
 //   AC1 — FAILURE_PATTERNS no longer matches the bare ✖ glyph; a vitest-style suite whose
@@ -752,7 +752,7 @@ test("AC2 — PHASE_OVERLAP round: the overlap window closes at the second done-
   // window — only the two `overlap_<phase>_done=1` markers close it.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ovl-"));
   const suite = [
-    'echo "selected 30 files (groups=product,engine,governance,serial,lowconc)"',
+    'echo "selected 30 files (groups=product,engine,serial,lowconc)"',
     'echo "overlap: running 5 serial + 8 lowconc files in parallel (serial conc=2, lowconc conc=3)"',
     // serial finishes first (its __GROUP__ + sub-time + done-marker)
     'echo "__GROUP__ concurrency=2 files=5 sum_ms=1000 floor_ms=700 capped=0"',

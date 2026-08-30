@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // semantic-observer-judge.test.mjs — inner/outer 语义观测器 judge
 // (tasks/gap-semantic-observer-judge-stopped-awaiting)
 //

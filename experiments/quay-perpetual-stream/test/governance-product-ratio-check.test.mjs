@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // Golden-replay + unit tests for governance-product-ratio-check.mjs — originally DIR-038-B. The frozen
 // oracle is the recorded restart-window ratio (DIR-038 finding #2: governance:product ≈ 8:1, ≈6249:756).
 // A breach is now INFORMATIONAL ONLY since DIR-066 (2026-07-23) retired the hard-halt wiring — it no
@@ -10,9 +10,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 const { classifyPath, sumByClass, ratio, isBreach, evaluateRatio, DEFAULT_THRESHOLD, main, } = await import("../scripts/governance-product-ratio-check.ts");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -104,4 +101,3 @@ test("main: numstat entries file classified + exit 1 (breach); missing file → 
   assert.equal(await main(["node", "s", fx("nope.json")]), 2);
 });
 
-}

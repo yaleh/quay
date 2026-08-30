@@ -1,8 +1,8 @@
 // @test-group serial
 // @load-sensitive nested-spawn
-// @load-sensitive-entry 2026-08-08 A-class nested full-suite spawn (shells out to real scripts/test.sh --group governance)
+// @load-sensitive-entry 2026-08-08 A-class nested full-suite spawn (shells out to real scripts/test.sh --group lowconc)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this file shells
-// out to the REAL scripts/test.sh including `--group governance` (the grown governance sub-suite,
+// out to the REAL scripts/test.sh including `--group lowconc` (the grown lowconc sub-suite,
 // >830s isolated) — inherently heavy + fragile under full-suite concurrency (nested node --test
 // spawns; the outer reruns this family isolated per the 判绿 rules).
 // GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
@@ -21,12 +21,12 @@
 // `exec node --test ... "$@"` with an EMPTY file list → node auto-discovered ~3.7x more tests
 // (8573 vs 2296, measured 2026-08-02), silently swapping the suite.
 //
-// SELECTION PARITY IS ASSERTED WITH --list-files LIST COMPARISON, NOT by running the governance
+// SELECTION PARITY IS ASSERTED WITH --list-files LIST COMPARISON, NOT by running the lowconc
 // sub-suite 3× (~296s — 28% of the serial segment, the single largest serial item,
 // gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles AC1). `--list-files`
 // prints the EXACT file list `run_selected` builds for a group (both call select_files), so a
 // list-vs-list comparison proves a flags-only form selects the same set as the group default
-// WITHOUT executing a single test. The behavioral pin runs through `--group governance` (the
+// WITHOUT executing a single test. The behavioral pin runs through `--group lowconc` (the
 // smallest NON-RECURSIVE group — its files never spawn test.sh, so this cannot recurse) because
 // the full product,engine default is ~2296 tests / ~7min and would recurse through this very file.
 import { test } from "node:test";
@@ -60,18 +60,18 @@ test("--group product runs a product fixture; product has no skip block", () => 
 });
 
 test("AC1/AC2/AC6: flags-only forms run the same test count as the group default; AC4 self-report", () => {
-  // The group default's selection — exactly what run_selected would execute for --group governance.
-  const listed = runTestSh("--group", "governance", "--list-files").trim().split("\n").filter(Boolean);
-  assert.ok(listed.length > 0, "governance group must select files");
+  // The group default's selection — exactly what run_selected would execute for --group lowconc.
+  const listed = runTestSh("--group", "lowconc", "--list-files").trim().split("\n").filter(Boolean);
+  assert.ok(listed.length > 0, "lowconc group must select files");
 
   // AC1/AC2/AC6: the flags-only forms (a bare --test-concurrency=4, and the documented
   // --experimental-test-coverage form) must NOT change the selected set. `--list-files` builds the
   // SAME select_files output the flags-only branch's run_selected executes, so a list-vs-list
-  // comparison proves selection parity WITHOUT running the governance sub-suite. List-vs-list —
+  // comparison proves selection parity WITHOUT running the lowconc sub-suite. List-vs-list —
   // no hardcoded count (the 2296 literal goes stale the moment a test file is added).
-  const flagged = runTestSh("--group", "governance", "--list-files", "--test-concurrency=4")
+  const flagged = runTestSh("--group", "lowconc", "--list-files", "--test-concurrency=4")
     .trim().split("\n").filter(Boolean);
-  const covered = runTestSh("--group", "governance", "--list-files", "--test-concurrency=8", "--experimental-test-coverage")
+  const covered = runTestSh("--group", "lowconc", "--list-files", "--test-concurrency=8", "--experimental-test-coverage")
     .trim().split("\n").filter(Boolean);
   assert.equal(flagged.length, listed.length,
     "AC1: --test-concurrency=4 must keep the same selected-set size (before the fix it ran ~3.7x more)");
@@ -82,9 +82,9 @@ test("AC1/AC2/AC6: flags-only forms run the same test count as the group default
   assert.deepEqual(covered, listed,
     "AC2: --experimental-test-coverage must select the same files as the group default");
 
-  // AC4/AC6: the selected set IS the governance partition of the deduped realpath glob (the
-  // --group governance --list-files count == governance partition relationship is asserted
-  // directly by the "--group governance --list-files lists exactly the governance files" test),
+  // AC4/AC6: the selected set IS the lowconc partition of the deduped realpath glob (the
+  // --group lowconc --list-files count == lowconc partition relationship is asserted
+  // directly by the "--group lowconc --list-files lists exactly the lowconc files" test),
   // and run_selected's self-report echo counts this same select_files output (structural pin in
   // the AC1 structural test) — so "self-reported N == --list-files count" holds by construction,
   // no suite run needed.

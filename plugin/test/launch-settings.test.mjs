@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // launch-settings.test.mjs — gap-crystallize-launch-config-into-checked-in-settings-file, AC7
 // （2026-08-25 更新至 AC154：profile 抽层后，launch.settings.json 只留 Claude Code 认识的键，
 //  launcher/model/--bare/-n/unset/flags 全部迁到 .quay/profiles.yml）。
@@ -11,7 +11,7 @@
 //         a deliberately-broken profiles.yml produces a DIFFERENT command.
 //   AC5 — --bare is available as a one-shot verification mode, not the default.
 //   AC6 — BOTH routes REQUIRED: promptSuggestions=false (→ CLI flag) AND env var.
-//   AC7 — this file is node:test + // @test-group governance.
+//   AC7 — this file is node:test + // @test-group engine.
 //
 // Run: scripts/test.sh plugin/test/launch-settings.test.mjs
 

@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // task-ac-carryover-check.test.mjs — the AC-carryover gate
 // (tasks/gap-nothing-checks-whether-a-done-task-left-its-acs-behind).
 //
@@ -14,7 +14,7 @@
 // with a carrying successor) — only proving "can block" is indistinguishable from "blocks
 // everything", so both are pinned · AC5 partial coverage reports the missing ids · AC6 executor is
 // wired (covered by scripts/test.sh's run_static_checks) · AC7 shrink-only legacy ratchet ·
-// AC9 @test-group governance.
+// AC9 @test-group engine.
 //
 // Run: scripts/test.sh plugin/test/task-ac-carryover-check.test.mjs
 
@@ -91,14 +91,9 @@ function runCli(root, args = []) {
   return spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, ...args], { encoding: "utf8" });
 }
 
-// ── Governance self-skip (AC9 @test-group governance) ─────────────────────────────────────────────
+// ── Governance self-skip (AC9 @test-group engine) ─────────────────────────────────────────────
 // In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
 // precedent); the checker itself is enforced unconditionally via scripts/test.sh's
-// run_static_checks, and the file runs in full when invoked explicitly (QUAY_TEST_GROUPS unset) or
-// with `--group governance`.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 // ── AC1: ## Carries machine-readable shape ─────────────────────────────────────────────────────────
 
@@ -399,4 +394,3 @@ test("REAL-STORE: no unowned ACs beyond the baselined legacy set", { skip: !REAL
   assert.equal(report.ratchet.newViolations.length, 0, `new unowned ACs: ${report.ratchet.newViolations.join(", ")}`);
 });
 
-}

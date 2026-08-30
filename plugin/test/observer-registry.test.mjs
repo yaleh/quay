@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // observer-registry.test.mjs — tasks/gap-observer-registry-target-decommission-and-criterion-invalidation.
 //
 // THE CLASS (2026-08-06, four independent consumers hit the same shape in one night):

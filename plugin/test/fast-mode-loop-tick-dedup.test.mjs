@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // fast-mode-loop-tick-dedup.test.mjs — tasks/gap-fast-mode-loop-tick-duplicate-paste-blocks.
 //
 // The inner tick doc (`plugin/loop/fast-mode-loop-tick.md`) had 4 confirmed duplicate paste blocks

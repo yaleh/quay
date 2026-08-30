@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // send-keys-reliable.test.mjs — pure-function tests for the reliable-send delivery verdict
 // (tasks/gap-reliable-send-crystallize-the-five-failure-modes-into-a-script).
 //
@@ -26,7 +26,7 @@
 // AC4 pure function, imported directly · AC5 negative controls (absent message ⇒ not delivered;
 // present-but-mismatched ⇒ not delivered) · AC7 zero hash (script + test contain zero
 // occurrences of the three hash-tool names ruling F killed — the whole-pane hash family stays
-// dead) · AC8 node:test + @test-group governance · plus the ## Contract `measure` CLI path and
+// dead) · AC8 node:test + @test-group engine · plus the ## Contract `measure` CLI path and
 // the fault-4 "NEW message only" baseline semantics.
 //
 // Run: scripts/test.sh plugin/test/send-keys-reliable.test.mjs
@@ -54,13 +54,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "send-keys-reliable.sh");
 const CHECKER = path.resolve(__dirname, "..", "scripts", "transcript-delivery-check.ts");
 
-// ── Governance self-skip (AC8 @test-group governance) ─────────────────────────────────────────────
-// In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
-// precedent); it runs in full when invoked explicitly (QUAY_TEST_GROUPS unset) or with
-// `--group governance`.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 // ── realistic transcript line shapes (mirrors ~/.claude/projects/<slug>/<session>.jsonl) ─────────
 
@@ -737,4 +730,3 @@ test("DoD e2e: a target that NEVER turns idle → bounded wait, fail loud (not a
   }
 });
 
-} // end governance self-skip else

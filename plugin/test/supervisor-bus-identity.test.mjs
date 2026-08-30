@@ -1,7 +1,7 @@
-// @test-group governance
+// @test-group engine
 // supervisor-bus-identity.test.mjs — the supervisor IDENTITY interface
 // (tasks/gap-supervisor-message-bus-with-identity, supervisor step ⑤; AC6: node:test +
-// @test-group governance).
+// @test-group engine).
 //
 // The message bus was retired (tasks/gap-inbox-message-bus-teardown, 人 2026-08-20 裁定范围A);
 // plugin/scripts/supervisor-bus-identity.sh is RETAINED as the control-plane identity shell

@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // inner-blocked-signal.test.mjs — gap-no-explicit-blocked-signal-from-inner-layer +
 // gap-the-blocked-channel-has-a-writer-nobody-calls: RED/GREEN tests for the inner layer's explicit
 // "I am stopped and waiting" signal. The inner layer writes .quay/inner-blocked.json ONLY through
@@ -10,7 +10,7 @@
 //
 // Covers: AC1 schema + gitignore, AC2 reason vocabulary (no new semantics), AC3 tick-file wiring,
 // AC4 CLI (--assert-blocked/--clear/--read), AC5 readiness print, AC6 inotifywait monitor, AC7
-// telemetry aggregation, AC9 @test-group governance, and — for the blocked-channel task — the REAL
+// telemetry aggregation, AC9 @test-group engine, and — for the blocked-channel task — the REAL
 // trigger path (AC1/AC6): `--detect-stop` writes the block as a MECHANICAL CONSEQUENCE of a
 // detected stop condition (merge-conflict, task-over-90m), not because someone remembered to call
 // --assert-blocked. AC4 (end-to-end replay) is both a behavioral test here (the outer reads the

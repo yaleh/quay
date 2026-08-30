@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // Unit tests for chart2-s3-external-validation.ts — the load-bearing cov-calculator for chart-2
 // surface S3 (External-validation reach) per DIR-064-A. Closes the ADR-001 clause 2 requirement:
 // a load-bearing script must have a sibling test at ≥80% coverage. The registry is the objective,
@@ -15,9 +15,6 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 const { parseRegistryWorkspaces, workspaceHasAbiTransition, computeS3Cov, selftest, } = await import("../scripts/chart2-s3-external-validation.ts");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -184,4 +181,3 @@ test("CLI: default run against the real registry → prints a cov line, exit 0",
   assert.match(r.stdout, /registered workspaces have a real ABI transition/);
 });
 
-}

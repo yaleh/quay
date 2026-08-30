@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // accounting-emit-layer-map.test.mjs — AC39 layer→mechanisms mapping + three-layer emitter behavior
 // (task gap-ac39-accounting-emit-layer, manager 034125).
 //

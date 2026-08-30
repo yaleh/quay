@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // driver-cli.test.mjs — AC1-4 (tasks/gap-ac139-unified-driver-subcommand):
 // the two drivers' launch surface converges onto ONE `quay driver <verb> --kind <promotion|worker>`
 // subcommand + a single generalized supervisor. AC151 ports that supervisor from bash

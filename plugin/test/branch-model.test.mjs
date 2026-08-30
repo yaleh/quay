@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point — AC2/AC3/AC7: the
 // two-line branch model. AC2's fork-baseline determination (independent → develop, declared
 // dependency → integration) and AC3's integration→develop batch-merge (always a fast-forward) are
@@ -22,7 +22,7 @@
 //      collision is surfaced at merge time as a real conflict, not silently hidden.
 //
 // All fixtures are self-contained temp git repos; nothing in the real checkout is mutated
-// (R3 test-isolation). `// @test-group governance` — methodology-execution surface, not product.
+// (R3 test-isolation). `// @test-group engine` — methodology-execution surface, not product.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

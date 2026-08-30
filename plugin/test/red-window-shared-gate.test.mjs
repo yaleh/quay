@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // red-window-shared-gate.test.mjs — tasks/gap-red-window-dispatch-stop-should-be-shared-gate-conditional.
 //
 // The red-window dispatch-stop is a SHARED, gate-conditional rule (NOT two divergent copies):
@@ -23,7 +23,7 @@
 //   AC4 — real-use evidence: this round's counter-example (suite early-RED + inner 30 min no dispatch
 //         + pool 16/disjoint 9 healthy) is asserted in the task body; after the refinement a
 //         non-shared-gate red lets disjoint candidates dispatch.
-//   AC5 — node:test + // @test-group governance (this file) with the two-way fixture.
+//   AC5 — node:test + // @test-group engine (this file) with the two-way fixture.
 //
 // Run:
 //   scripts/test.sh plugin/test/red-window-shared-gate.test.mjs
@@ -255,8 +255,8 @@ test("AC3 — the inner tick doc names the failure-location mechanism (state.fai
   assert.match(inner, /shouldDispatchOnRed/, "inner doc names the executable dispatch-conditional helper");
 });
 
-test("AC5 — this file declares node:test and // @test-group governance", () => {
+test("AC5 — this file declares node:test and // @test-group engine", () => {
   const src = read(new URL(import.meta.url));
   assert.ok(src.includes('import { test } from "node:test"'), "uses node:test");
-  assert.match(src, /^\/\/ @test-group governance/m, "declares @test-group governance");
+  assert.match(src, /^\/\/ @test-group engine/m, "declares @test-group engine");
 });

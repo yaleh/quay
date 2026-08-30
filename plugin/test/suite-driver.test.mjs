@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // suite-driver.test.mjs — gap-suite-lifecycle-driver-kind (SPEC-suite-lifecycle-and-failure-semantics §3):
 // per-task suite 生命周期收进一个常驻 driver kind——进程级父子 wait + 定时兜底静默检测，单飞锁回归纯
 // 资源限制器。本文件验证 suite-driver.ts 的四条 AC（fake suite 命令缝，不真跑 19+min 全量套件）。

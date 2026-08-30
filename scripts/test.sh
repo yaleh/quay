@@ -18,7 +18,7 @@
 # the test-framework-policy static check below (AC6): every file in the glob must either import
 # node:test or be on the legacy exemption list (`plugin/test-framework-policy-exemptions.txt`,
 # currently 34 files — the shrink-only ratchet of AC4, it can only get shorter, never longer).
-# NEW files must also carry a `// @test-group <product|engine|governance|serial|lowconc>`
+# NEW files must also carry a `// @test-group <product|engine|serial|lowconc>`
 # declaration (AC5); existing files may omit it and default to `engine`. `serial` is the
 # load-sensitive family routed to its own concurrency-1 phase — nested-suite-spawn + real-wall-
 # clock-wait + the real-install install/quay-init family, the latter admitted at round 162 after
@@ -41,7 +41,7 @@
 #
 # Usage:
 #   scripts/test.sh                                  # default groups product,engine; runs the full
-#                                                    # deduped glob (governance files self-skip)
+#                                                    # deduped glob
 #   scripts/test.sh --group <name[,name]>            # run only the given group(s); sets QUAY_TEST_GROUPS
 #   scripts/test.sh --group <name[,name]> <file...>  # run explicit files with QUAY_TEST_GROUPS set
 #   scripts/test.sh --list-groups                    # report per-group file counts (deduped by realpath)
@@ -68,9 +68,10 @@
 #
 # Layer grouping (gap-test-suite-has-no-layer-grouping):
 #   Every test file declares its layer at the very top: `// @test-group <name>` where name is
-#   one of product / engine / governance / serial / lowconc (AC1). The DEFAULT for an undeclared
+#   one of product / engine / serial / lowconc (AC1). The DEFAULT for an undeclared
 #   file is `engine` (AC7) — the current work surface, so a missed declaration never silently
-#   vanishes.
+#   vanishes. (`governance` is RETIRED — gap-retire-governance-group-merge-into-bucket — its
+#   files re-tagged to their real phase; a file still declaring it now fails closed.)
 #
 #   - product     packages/*/test/ — Core CLI, Provider ABI, gate engine, web UI; plus
 #                 plugin/test/plugin-packaging.test.mjs — plugin-packaging (incl. M136's
@@ -78,8 +79,6 @@
 #                 (AC8 of gap-sync-vendor-drift-mislabelled-as-task-schema).
 #   - engine      methodology EXECUTION path (the rest of plugin/test + the execution-path
 #                 tests under experiments/quay-perpetual-stream/test/)
-#   - governance  exp5 metering (PARKED but not deleted — exp6 phase-2 needs it; the in-file
-#                 skip block makes it visible as `skipped` in default runs instead of absent)
 #   - serial      KNOWN-LOAD-SENSITIVE A/B-class family (nested-suite-spawn, real-wall-clock-wait)
 #                 + the REAL-INSTALL install/quay-init family, routed OUT of the concurrency-N body
 #                 into its own phase at concurrency 1. The serial admission criterion
@@ -100,8 +99,8 @@
 #   The glob now ALSO includes experiments/quay-perpetual-stream/test/*.test.mjs (AC2), so the
 #   44 previously-invisible files always appear in the output. Symlinks under that dir that
 #   point back into plugin/test/ are deduped by realpath (AC3) so they never run twice.
-#   Non-default-group files self-skip BEFORE their heavy imports (AC8), so `--group product`
-#   does not pay the governance load cost. Default (no --group) = product,engine (AC4).
+#   Default (no --group) = product,engine (AC4). `--group product` runs only the product group —
+#   the load-sensitive serial/lowconc files route to their own phases, never the default body.
 #
 # --test-concurrency default is now DERIVED (gap-no-resource-awareness-heavy-ops-run-blind, AC5):
 #   default = max(1, floor(nproc / AMPLIFICATION))   with AMPLIFICATION = 1.0 (see
@@ -993,7 +992,7 @@ run_selected() {
   # degrade to engine — a dropped group cancels the isolation guarantee without going red.
   check_group_declarations
   # The resource gate guards the FULL-SUITE default (product,engine). A non-default --group is a
-  # subset run (e.g. --group governance) — scoped, skip it (QUAY_TEST_SKIP_RESOURCE_GATE=1 is
+  # subset run (e.g. --group serial) — scoped, skip it (QUAY_TEST_SKIP_RESOURCE_GATE=1 is
   # honored inside resource_gate_check for nested runners).
   if is_default_set "$groups"; then
     FULL_SUITE_DEFAULT=1
@@ -1312,7 +1311,7 @@ groups=""
 if [ "${1:-}" = "--group" ]; then
   groups="${2:-}"
   if [ -z "${groups}" ]; then
-    echo "scripts/test.sh: --group requires a group name (product|engine|governance|serial|lowconc, comma-separated)" >&2
+    echo "scripts/test.sh: --group requires a group name (product|engine|serial|lowconc, comma-separated)" >&2
     exit 2
   fi
   shift 2
@@ -1326,10 +1325,10 @@ if [ "${1:-}" = "--list-groups" ]; then
   exit 0
 elif [ "${1:-}" = "--list-files" ]; then
   # Metadata mode (test support / AC6) — print the selected file list, one per line. Respects
-  # --group if given; else the DEFAULT RUN's full selection = the product,engine body (with
-  # governance self-skip passthrough) PLUS the lowconc phase files — a default `bash
-  # scripts/test.sh` executes BOTH (the concurrent body, then the serial phase, then the lowconc
-  # phase), so no-args --list-files reports the full reachable surface and keeps the
+  # --group if given; else the DEFAULT RUN's full selection = the product,engine body PLUS the
+  # lowconc phase files — a default `bash scripts/test.sh` executes BOTH (the concurrent body,
+  # then the serial phase, then the lowconc phase), so no-args --list-files reports the full
+  # reachable surface and keeps the
   # runner-grouping AC3 invariant (`--list-files count + serial == --list-groups total`) and the
   # test-coverage-check AC5 canonical-coverage invariant. A serial/lowconc file is NOT in the
   # default GROUP SET; it is in the default RUN (its own phase) — hence
@@ -1349,7 +1348,7 @@ elif [ -n "${groups}" ]; then
     run_selected "$groups"
   elif all_flags "$@"; then
     # gap-test-sh-flags-only-...: bare node --test flags + the group's glob (e.g.
-    # `--group governance --test-concurrency=4`). Previously this fell to the explicit-file branch
+    # `--group serial --test-concurrency=4`). Previously this fell to the explicit-file branch
     # with an EMPTY file list → node --test auto-discovered a 3.7x-larger, different suite.
     run_selected "$groups" "$@"
   else
@@ -1369,9 +1368,7 @@ elif [ -n "${groups}" ]; then
 fi
 
 if [ "$#" -eq 0 ]; then
-  # Default: product,engine (AC4). Governance files are passed through too — they self-skip,
-  # so they report `skipped`, not absent (ADR-019 decision #1 precedent). run_selected runs
-  # the split-or-commit whole-store scan.
+  # Default: product,engine (AC4). run_selected runs the split-or-commit whole-store scan.
   run_selected "$(effective_groups)"
 elif [ "${1:-}" = "--static-checks" ]; then
   # Gate-only mode (gap-scoped-runs-pay-full-static-check-overhead, AC2 proof): run the COMPLETE
@@ -1630,8 +1627,8 @@ elif all_flags "$@"; then
 else
   build_dist_once
   run_static_checks
-  # Explicit file list (no --group): QUAY_TEST_GROUPS stays unset, so in-file skips do not
-  # trigger and the named files run in full.
+  # Explicit file list (no --group): QUAY_TEST_GROUPS stays unset, so the named files run in
+  # full (the bucket path uses exactly this explicit-file form).
   mark_nested
   # has_explicit_concurrency: explicit flag wins as the single concurrency source (AC2).
   if has_explicit_concurrency "$@"; then

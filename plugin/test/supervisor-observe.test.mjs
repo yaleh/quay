@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // supervisor-observe.test.mjs — tests for plugin/scripts/supervisor-observe.sh
 // (tasks/gap-cross-machine-readonly-observation-orchestration-not-a-tool).
 //

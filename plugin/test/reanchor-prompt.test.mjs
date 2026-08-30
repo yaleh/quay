@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // reanchor-prompt.test.mjs — gap-inner-has-no-periodic-anchor-prose-only-drives-drift.
 //
 // The inner loop's ONLY anchor used to be outer drive prose (inner Cron count = 0, all overnight
@@ -16,7 +16,7 @@
 //   AC5 — the shipped inner doc (plugin/loop/fast-mode-loop-tick.md) carries the mechanical
 //         状态自检清单 section the inner runs on re-anchor (in-flight / pool / closure /
 //         stop-conditions), so "check state conforms" is mechanically executable, not prose.
-//   AC7 — this file uses `import { test } from "node:test"` + `// @test-group governance`.
+//   AC7 — this file uses `import { test } from "node:test"` + `// @test-group engine`.
 //
 // Run:
 //   scripts/test.sh plugin/test/reanchor-prompt.test.mjs

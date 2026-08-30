@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // Unit tests for chart2-s1-distribution-reliability.ts — the chart-2 Surface S1
 // (Distribution reliability) value ruler (DIR-064 / DIR-064-A). Mirrors the
 // it0-split-or-commit-check.test.mjs style: node:test + node:assert/strict, imports the
@@ -16,9 +16,6 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 const { computeS1Cov, loadArtifacts, selftest, DEFAULT_ARTIFACTS_JSON, } = await import("../scripts/chart2-s1-distribution-reliability.ts");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -188,4 +185,3 @@ test("CLI: missing evidence file → exit 2", () => {
   assert.match(r.stderr, /ERROR/);
 });
 
-}

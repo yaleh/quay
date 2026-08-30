@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // ready-pool-check.test.mjs — the ready-pool maintenance mechanism
 // (tasks/gap-promotion-cadence-is-role-volition-not-product-mechanism). Promotion cadence used to
 // live in an outer's VOLUNTARY AC-queue (role volition, lost on session/model change); this test
@@ -11,7 +11,7 @@
 // AC1 floor = cap × 4 (12 at cap 3, configurable) · AC2 dispatchable_disjoint via checkTouchesPair
 // AC3 pool-big-but-all-colliding self-report + no-false-report-on-criterion-met · AC4 disjointness
 //   ranks before kind, incl. in-flight · AC5 touchesResolve guard kept · AC6 cost asymmetry doc
-// AC7 real use · AC8 node:test + @test-group governance
+// AC7 real use · AC8 node:test + @test-group engine
 //
 // Run: scripts/test.sh plugin/test/ready-pool-check.test.mjs
 

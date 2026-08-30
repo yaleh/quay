@@ -2,7 +2,7 @@
 id: gap-retire-governance-group-merge-into-bucket
 title: 退役 @test-group governance 第三套机制——并入 bucket（人裁定「不要在 bucket
   和相机制以外再搞一套」），142 文件改标真实相
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -47,10 +47,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，governance 退役）：39 段文件内自跳过守卫删除，`@test-group governance` 不再作为「选择/跳过」机制（无唤回路径的第三套语义移除）；（⛔ 守卫仍在 ⇒ 假）。
-- [ ] AC2（能取假，相标真实）：142 文件改标真实相（默认 engine；负载敏感含 worker-driver.test.mjs / full-suite-runner.test.mjs → serial/lowconc）；（⛔ 今天两 flake 文件仍在主池裸跑 ⇒ 假）。⛔ **重分类以实测耗时为准**：实现前先测 5 个重文件 lowconc/serial 实际墙钟（AC5 预算用它们跳过的轮次测得，见「关系与前置」），child-spawn 族优先 lowconc。
-- [ ] AC3（能取假，bucket 单一选择）：「这次要不要跑」只由 bucket 回答；132/142 落现有桶、10 UNRESOLVED 落安全侧或新桶；（⛔ 仍有第三套选择机制 ⇒ 假）。
-- [ ] AC4（能取假，正本工具核对 + 时序）：实现前 `suite-bucket-attribution.ts` 对 10 UNRESOLVED 实跑取真值（⛔ 用 grep 近似当结论 ⇒ 假），**且须在 gap-suite-move-27-evidenced-files-out-serial-lowconc、gap-suite-serial-lowconc-classification-recheck（均已 done）与 gap-worker-driver-governance-self-skip-missing（AC2 子集，5 重文件改标 lowconc）落地之后重取**（它们的 diff 含 57+28 行 `@test-group` 改动 + 5 行低并发改标，落地后 142 总数 / 各文件相 / bucket 归属都会变；在它们落地前跑正本工具仍是过期真值）。**全量清单（非仅 10 UNRESOLVED）以 develop git ref 为单一正源重取**（计数漂移见「关系与前置」）。
+- [x] AC1（能取假，governance 退役）：39 段文件内自跳过守卫删除，`@test-group governance` 不再作为「选择/跳过」机制（无唤回路径的第三套语义移除）；（⛔ 守卫仍在 ⇒ 假）。
+- [x] AC2（能取假，相标真实）：142 文件改标真实相（默认 engine；负载敏感含 worker-driver.test.mjs / full-suite-runner.test.mjs → serial/lowconc）；（⛔ 今天两 flake 文件仍在主池裸跑 ⇒ 假）。⛔ **重分类以实测耗时为准**：实现前先测 5 个重文件 lowconc/serial 实际墙钟（AC5 预算用它们跳过的轮次测得，见「关系与前置」），child-spawn 族优先 lowconc。
+- [x] AC3（能取假，bucket 单一选择）：「这次要不要跑」只由 bucket 回答；132/142 落现有桶、10 UNRESOLVED 落安全侧或新桶；（⛔ 仍有第三套选择机制 ⇒ 假）。
+- [x] AC4（能取假，正本工具核对 + 时序）：实现前 `suite-bucket-attribution.ts` 对 10 UNRESOLVED 实跑取真值（⛔ 用 grep 近似当结论 ⇒ 假），**且须在 gap-suite-move-27-evidenced-files-out-serial-lowconc、gap-suite-serial-lowconc-classification-recheck（均已 done）与 gap-worker-driver-governance-self-skip-missing（AC2 子集，5 重文件改标 lowconc）落地之后重取**（它们的 diff 含 57+28 行 `@test-group` 改动 + 5 行低并发改标，落地后 142 总数 / 各文件相 / bucket 归属都会变；在它们落地前跑正本工具仍是过期真值）。**全量清单（非仅 10 UNRESOLVED）以 develop git ref 为单一正源重取**（计数漂移见「关系与前置」）。✅ **真值已重取（develop git ref，本 CONTINUE 轮）**：develop 上 `@test-group governance` 文件 = **146**（漂移自 142）；正本工具对原「10 UNRESOLVED」实跑 → **9 个仍 UNRESOLVED**（chart2-s1/s2/s3、portfolio-choice、vmeta-lag、rolling-slope、deliverable-governor、outward-vt、preparation-feedback，全在 experiments/quay-perpetual-stream/test/）+ **integration-batch-merge.test.mjs 现解析为 M**（非 UNRESOLVED）。9 UNRESOLVED 由 bucket-select AC123 安全侧（每轮必跑）吸收，无新桶。
 - [x] AC5（能取假，AC101 冲突人裁）：**人已逐字裁定（2026-08-26）**「等锁时间不计入上述预算。在此前提下，full bucket 可以放宽到 900s。超过就应当触发测试优化。」⇒ 选 (a) 真全量，AC101 预算重谈为 **900s、仅计纯执行时间（durationMs − lock_wait_ms）、专指 full-bucket 轮**；等锁时间（lock_wait_ms）明确不计入；超限后果 = 「触发测试优化」（动作触发点，非 fail-closed 硬闸）。⛔ 数据事实（已核实）：最近 6 个 full-bucket 轮已有 4 个纯执行超 900s——`612:1149.6 / 614:1224.5 / 615:1070.4 / 619:998.5`（620:848.1 / 621:880.6 未超）⇒ 阈值已被现实数据击穿，「触发测试优化」此刻已成立；（⛔ 未裁定即实现/默认滑过 ⇒ 假）。
 
 ## Definition of Done
@@ -61,13 +61,27 @@ governance 第三套退役、142 文件改标真实相、bucket 单一选择落�
 
 - plugin/scripts/suite-bucket-select.ts（10 UNRESOLVED 真值核对 + 可能的镜像折叠）
 - plugin/scripts/suite-bucket-attribution.ts（10 UNRESOLVED 真值核对）
+- .quay/suite-bucket-reattribution.jsonl（数据资产：清 2 条已删测试文件 runner-grouping-governance/runner-grouping-fixture-runs 的僵尸 reattr 记录）
 - plugin/scripts/full-suite-runner.ts（governance 退役 + QUAY_TEST_GROUPS 语义收窄）
 - plugin/test/*.test.mjs（142 文件相标改标 + 39 守卫删除——有界顶层 glob，非递归；实现方按此 glob 内文件落地）
 - plugin/test/runner-fixtures/gov.test.mjs（fixture）
 - plugin/test/suite-bucket-select.test.mjs（bucket 归属测试）
 - plugin/test/suite-bucket-attribution.test.mjs（bucket 归属测试）
+- experiments/quay-perpetual-stream/test/*.test.mjs（13 个 exp5 计量/图表类测试——governance→engine，属 142 改标）
+- plugin/scripts/runner-grouping.ts（governance 组语义移除，FAIL-CLOSED）
+- plugin/scripts/runner-grouping-metadata.mjs（RECOGNIZED 集移除 governance，与 group_of 字节兼容契约一致）
+- plugin/scripts/test-group-downgrade-check.ts（允许降级集移除 governance）
+- plugin/scripts/test-framework-policy-check.ts（@test-group 策略——governance 移除）
+- plugin/scripts/runner-static-gate.ts（governance 移除）
+- plugin/scripts/test-file-baseline.ts（基线重生成）
+- plugin/scripts/capability-catalog.sh（描述更新——governance 移除）
+- plugin/scripts/checker-mutation-cases/test-group-downgrade-check.sh（mutation case）
+- plugin/scripts/dispatch-worktree-setup.sh（注释 @test-group 改标）
+- plugin/test-isolation-violations.txt（ratchet 清已删文件条目）
+- scripts/test-coverage-check.ts（五组→四组枚举）
 - scripts/test.sh（governance 跳过语义移除）
 - tasks/gap-retire-governance-group-merge-into-bucket.md（自身）
+- tasks/gap-merge-worktree-surface-lacks-liveness-overbroad.md（补 Contract band NAME + Dispatch review 段——修静态检查门红，解 fan-in 全线红）
 
 ## Needs-Human
 

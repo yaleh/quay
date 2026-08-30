@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // suite-speed-nested-skip.test.mjs — pins the nested-invocation setup-skip mechanism
 // (gap-suite-speed-under-a-297-second-sigma). scripts/test.sh marks its own node --test
 // exec boundary with QUAY_TEST_NESTED / QUAY_TEST_NESTED_ROOT (mark_nested), so a test that
@@ -25,12 +25,8 @@ const src = readFileSync(testSh, "utf8");
 const staticGate = join(repoRoot, "plugin", "scripts", "runner-static-gate.ts");
 const staticGateSrc = readFileSync(staticGate, "utf8");
 
-// In-file self-skip block (governance pattern, ADR-019 decision #1): in a default product,engine
-// run this file reports `skipped`, not absent; with QUAY_TEST_GROUPS including governance the
-// real assertions run.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("suite-speed nested-skip (governance) skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
+// The in-file governance self-skip guard was REMOVED (gap-retire-governance-group-merge-into-bucket):
+// this file now runs its real assertions on every default run (re-tagged @test-group engine).
   test("mark_nested() is defined and exports QUAY_TEST_NESTED + QUAY_TEST_NESTED_ROOT", () => {
     assert.match(src, /mark_nested\(\)\s*\{/, "mark_nested() function must be defined");
     assert.match(src, /export QUAY_TEST_NESTED=1/, "must export QUAY_TEST_NESTED=1");
@@ -55,4 +51,3 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
     const calls = src.match(/^\s+mark_nested$/gm) || [];
     assert.equal(calls.length, 7, `expected exactly 7 mark_nested call sites, got ${calls.length}`);
   });
-}

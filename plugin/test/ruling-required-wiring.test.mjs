@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // ruling-required-wiring.test.mjs — gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick:
 // the "ruling-required" trigger is re-wired from dead code (the `--transcript` composite was never
 // passed by any production tick) to the SCREEN observer: `--detect-stop --pane <pane.txt>` classifies

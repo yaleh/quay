@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // dispatch-preference-check.test.mjs — AC54 判据1/判据2 检查器测试
 // (tasks/gap-ac54-dispatch-preference-file).
 //

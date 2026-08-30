@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // task-write-ownership.test.mjs — gap-task-file-develop-integration-drift-fan-in-conflicts, AC3:
 // WRITE-OWNERSHIP SEPARATION for task files. The `status:` frontmatter is owned EXCLUSIVELY by the
 // outer layer (status flips / records); the inner task agent only APPENDS body sections (AC

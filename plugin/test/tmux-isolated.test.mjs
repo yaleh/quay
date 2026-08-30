@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // tmux-isolated.test.mjs — the L0 defense
 // (tasks/gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX).
 //
@@ -10,7 +10,7 @@
 //      Proved hermetically with TWO isolated sockets under a per-test TMPDIR (the stand-in plays
 //      the role of the real default server). The real default server (quay-0) is never touched
 //      here — the live proof against it is recorded in the task body.
-// AC5  node:test + @test-group governance; the test NEVER bare-calls `tmux kill-server` — every
+// AC5  node:test + @test-group engine; the test NEVER bare-calls `tmux kill-server` — every
 //      tmux invocation goes through the helper (tmux-isolated.sh) or the explicit isolated form
 //      `env -u TMUX tmux -S <socket>`. No literal `tmux kill-server` string appears in this file.
 //
@@ -29,12 +29,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const HELPER = path.join(REPO_ROOT, "plugin", "scripts", "tmux-isolated.sh");
 
-// ── Governance self-skip (AC5 @test-group governance; ADR-019 decision #1 precedent) ───────────
-// In a default (product,engine) run this file reports `skipped`, not absent; it runs in full when
-// invoked explicitly (QUAY_TEST_GROUPS unset) or with `--group governance`.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 const tmuxAvailable = (() => {
   try { return spawnSync("tmux", ["-V"], { encoding: "utf8" }).status === 0; } catch { return false; }
@@ -154,4 +148,3 @@ test("AC2 negative control: helper kill-server kills ONLY its own socket; anothe
   }
 });
 
-}

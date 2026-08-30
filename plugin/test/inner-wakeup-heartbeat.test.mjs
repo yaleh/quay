@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // inner-wakeup-heartbeat.test.mjs — inner 兜底心跳写入方（结构化字段）
 // (tasks/gap-inner-heartbeat-fields-shrunk-no-minimal-contract)
 //

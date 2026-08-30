@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // ac56-recommended-deordered-check.test.mjs — AC56 判据1/判据2/判据3 检查器测试
 // (tasks/gap-ac56-recommended-deordered, "AC56 去锚").
 //

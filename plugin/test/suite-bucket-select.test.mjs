@@ -192,7 +192,7 @@ test("listSuiteFiles matches test.sh's shallow glob universe (no nested fixtures
   const files = listSuiteFiles(ROOT);
   assert.ok(files.length > 400, `expected >400 suite files, got ${files.length}`);
   // the nested runner-fixtures are NOT part of test.sh's shallow glob — they must be excluded
-  assert.ok(!files.includes("plugin/test/runner-fixtures/gov.test.mjs"), "nested fixture must be excluded");
+  assert.ok(!files.includes("plugin/test/runner-fixtures/nodecl.test.mjs"), "nested fixture must be excluded");
   assert.ok(files.includes("packages/quay/test/npm-pack-e2e.test.mjs"));
 });
 

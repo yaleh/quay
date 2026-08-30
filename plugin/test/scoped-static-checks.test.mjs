@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // scoped-static-checks.test.mjs — gap-scoped-runs-pay-full-static-check-overhead: the change-
 // relevant static-check TIER for scoped task runs. Covers AC1 (subset rule), AC2 (full set
 // unchanged — the registry is a complete partition), AC3 (the mapping is MECHANICAL, parsed from
@@ -24,16 +24,8 @@ const SEL_CLI = path.join(REPO_ROOT, "plugin", "scripts", "select-static-checks-
 const CONTRACT_CLI = path.join(REPO_ROOT, "plugin", "scripts", "task-contract-check.ts");
 const TEST_SH = path.join(REPO_ROOT, "plugin", "scripts", "runner-static-gate.ts");
 
-// Governance self-skip (AC7 @test-group governance, ADR-019 decision #1): in a DEFAULT
-// (product,engine) run this file reports `skipped`, not absent — QUAY_TEST_GROUPS is set to
-// product,engine on the default path, so the real tests run only with `--group governance`
-// (QUAY_TEST_GROUPS includes governance) or in the explicit-file form (QUAY_TEST_GROUPS unset).
-const GOV_SKIP_REASON =
-  process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")
-    ? "set QUAY_TEST_GROUPS=governance to run"
-    : false;
 function t(name, fn) {
-  test(name, GOV_SKIP_REASON ? { skip: GOV_SKIP_REASON } : {}, fn);
+  test(name, fn);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────

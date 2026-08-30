@@ -91,8 +91,8 @@ run_static_checks() {
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
   run_checker "test-framework-policy-check" bash "${repo_root}/plugin/scripts/test-framework-policy-check.sh" "${repo_root}"
   echo "== @test-group downgrade check (gap-test-group-downgrade-no-guard, AC1/AC2/AC3) =="
-  # A LEGAL-but-degrading @test-group re-tag (product/engine → governance/serial/lowconc) silently
-  # removes a test from the default {product,engine} set (governance self-skips, serial/lowconc drop
+  # A LEGAL-but-degrading @test-group re-tag (product/engine → serial/lowconc) silently
+  # removes a test from the default {product,engine} set (serial/lowconc drop
   # out of the default concurrency body) — previously NO check reported it. This checker requires a
   # commit-message reason marker ("@test-group-downgrade") for any default-set escape after the
   # enforcement baseline (8ea050c7 — develop HEAD when the guard landed); uncommitted escapes always

@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // pool-quality-judge.test.mjs — pool 任务质量语义闸的确定性部分（ADR-033）
 // (tasks/gap-pool-quality-semantic-gate)
 //

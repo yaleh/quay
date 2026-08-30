@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling — the integration→develop
 // batch-merge helper's REAL-MERGE mode.
 //
@@ -32,7 +32,7 @@
 //      FAILS the criterion FAILS CLOSED (never blind-choose).
 //
 // All fixtures are self-contained temp git repos; nothing in the real checkout is mutated (R3
-// test-isolation). `// @test-group governance` — methodology-execution surface, not product.
+// test-isolation). `// @test-group engine` — methodology-execution surface, not product.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

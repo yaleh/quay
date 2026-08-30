@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // outer-loop-tick-split.test.mjs — tasks/gap-ac38-outer-doc-split
 // (AC2-AC4 切分一致性：外层双份文档按 manager 先例同形切分后，plugin=产品行为正本 / orchestration=本层实例状态)
 //

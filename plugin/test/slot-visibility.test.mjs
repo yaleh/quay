@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // slot-visibility.test.mjs — gap-telemetry-brackets-vs-subagents-no-slot-visibility.
 // Telemetry in-flight brackets do NOT reflect real concurrency: the --task-start/--task-end pair
 // was not being called in the dispatch path, so telemetry degraded to a historical archive, and the
@@ -26,7 +26,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -96,10 +96,6 @@ function seedGitWorkspace(tmp) {
   assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
 }
 
-// ── Governance self-skip (AC7 @test-group governance) ─────────────────────────────────────────────
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 test("AC1 — --report --json carries reconcile-aware reconcilable[] + realInFlight", async () => {
   const cli = await importCli();
@@ -122,9 +118,12 @@ test("AC1 — --report --json carries reconcile-aware reconcilable[] + realInFli
   }
 });
 
-test("AC2/AC3/AC5 — --slots: 5 stale brackets + 1 live worktree ⇒ real-in-flight 1, slots-remaining 2 (cap 3)", async () => {
+test("AC2/AC3/AC5 — --slots: 5 stale brackets + 1 live process ⇒ real-in-flight 1, slots-remaining 2 (cap 3)", async () => {
   const cli = await importCli();
   const tmp = makeTmpWorkspace();
+  const live = "live-task";
+  const liveRunId = cli.generateRunId(live);
+  let child = null;
   try {
     seedGitWorkspace(tmp);
     // 5 stale brackets: taskIds with NO branch, NO worktree, NO process ⇒ executor observably gone.
@@ -132,10 +131,19 @@ test("AC2/AC3/AC5 — --slots: 5 stale brackets + 1 live worktree ⇒ real-in-fl
       const id = `stale-${i}`;
       cli.writeEvent(cli.buildStartEvent({ taskId: id, runId: cli.generateRunId(id) }), tmp);
     }
-    // 1 live bracket: branch checked out in an OPEN worktree ⇒ executor present ⇒ real in-flight.
-    const live = "live-task";
-    assert.equal(gitCmd(tmp, "worktree", "add", "-b", `task/${live}`, path.join(tmp, "wt-live")).status, 0);
-    cli.writeEvent(cli.buildStartEvent({ taskId: live, runId: cli.generateRunId(live) }), tmp);
+    // 1 live bracket: a REAL process whose cmdline carries the runId needle ⇒ executor present ⇒ real
+    // in-flight. An OPEN worktree is NOT a liveness signal since gap-inflight-states-missing-impl-complete-event
+    // retired the worktree probe in --reconcile — a worktree is implementation detail, not an executor.
+    child = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)", liveRunId], { detached: true, stdio: "ignore" });
+    child.unref();
+    // Ensure the child is visible in /proc before the sync CLI scan (mirrors the RECONCILE live-process test).
+    let alive = false;
+    for (let i = 0; i < 50 && !alive; i++) {
+      alive = cli.processAlive(liveRunId);
+      if (!alive) await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.equal(alive, true, `live process must be visible in /proc: ${liveRunId}`);
+    cli.writeEvent(cli.buildStartEvent({ taskId: live, runId: liveRunId }), tmp);
 
     const slots = runCli(tmp, "--slots", "--cap", "3", "--json");
     assert.equal(slots.status, 0, slots.stderr);
@@ -154,6 +162,7 @@ test("AC2/AC3/AC5 — --slots: 5 stale brackets + 1 live worktree ⇒ real-in-fl
     assert.equal(repObj.realInFlight, 1, "--report realInFlight reflects the 1 real in-flight");
     assert.equal(repObj.reconcilable.length, 5, "--report reconcilable names the 5 stale brackets");
   } finally {
+    if (child) { try { process.kill(child.pid, "SIGKILL"); } catch (_) { /* already gone */ } }
     cleanup(tmp);
   }
 });
@@ -275,4 +284,3 @@ test("AC2 doc — the slot signal is machine-readable from --slots in both tick 
   assert.match(outer, /--slots/, "outer tick must reference the --slots slot signal");
 });
 
-}

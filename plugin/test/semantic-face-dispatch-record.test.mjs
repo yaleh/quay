@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // semantic-face-dispatch-record.test.mjs — AC145 判据2（AC2）语义面派发记录测试
 // (tasks/gap-ac145-semantic-face-subagent-manager-driven).
 //

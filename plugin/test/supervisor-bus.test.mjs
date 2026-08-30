@@ -1,7 +1,7 @@
-// @test-group governance
+// @test-group engine
 // supervisor-bus.test.mjs — the supervisor base layer's IDENTITY-ATTRIBUTABLE message bus
 // (tasks/gap-supervisor-step-5-message-bus-with-identity, supervisor step ⑤; AC6: node:test +
-// @test-group governance).
+// @test-group engine).
 //
 // Exercises plugin/scripts/supervisor-bus.sh:
 //   Contract measure — `delivered_identity = bash supervisor-bus.sh --send --from <layer>
@@ -21,7 +21,7 @@
 //     ledger records it) instead of 3 consumers silently bypassing the broken path.
 //   AC4 — boundary: the bus reads NO message semantics and writes NO code (grep-asserted: no
 //     task/AC/proposal parsing in the script).
-//   AC7 — node:test + // @test-group governance.
+//   AC7 — node:test + // @test-group engine.
 //
 // Run: scripts/test.sh plugin/test/supervisor-bus.test.mjs
 
@@ -39,10 +39,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "supervisor-bus.sh");
 const DELIVER = path.resolve(__dirname, "..", "scripts", "supervisor-deliver.sh");
 
-// ── Governance self-skip (AC7 @test-group governance) ─────────────────────────────────────────────
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 function userStringLine(content) {
   return JSON.stringify({
@@ -268,4 +264,3 @@ test("AC3 negative control: a BROKEN delivery is intercepted (delivered=false + 
   assert.equal(rec.delivered, false, "the ledger records the failed delivery — the consumer cannot pretend it succeeded");
 });
 
-} // end governance group

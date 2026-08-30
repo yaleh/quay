@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // manager-layer-shipping.test.mjs — gap-productize-the-manager-layer, AC1/AC2/AC3/AC4/AC5/AC6/AC7/AC8.
 //
 // The THIRD (manager) layer exists in practice (three layers run) but only two shipped — the manager
@@ -21,7 +21,7 @@
 //             (docs/proposals/fast-mode-cross-project-portability.md), not the SUPERSEDED roadmap.
 //   AC6     — the manager SKILL indexes the orchestration/SPEC-*.md methodology sources
 //             (index only, no batch crystallization) — every on-disk SPEC is listed.
-//   AC7     — this file is node:test + // @test-group governance.
+//   AC7     — this file is node:test + // @test-group engine.
 //   AC8     — delivery vs startup independence: the plugin SHIPS the manager layer (the file above),
 //             but the project cold-start does NOT start it — quay-topology.sh builds only
 //             `outer`, and the cold-start TOPOLOGY-IN-PLACE key states manager is NOT part of

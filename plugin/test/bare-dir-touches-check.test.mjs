@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // bare-dir-touches-check.test.mjs — the bare-directory + uncertain-annotation Touches rule
 // (tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool, AC1). A Touches entry must NOT
 // declare a BARE DIRECTORY with an UNCERTAIN annotation ('若成脚本' / '或等价' / '可能') — a bare dir

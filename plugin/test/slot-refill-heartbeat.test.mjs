@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // slot-refill-heartbeat.test.mjs — the tick heartbeat MUST unconditionally run slot-refill
 // (tasks/gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat).
 //
@@ -20,7 +20,7 @@
 //
 // This is a DOC-CONTRACT test (the behavior is the doc the inner mechanically follows), not a
 // slot-refill.ts logic test — the helper's decision logic is already covered by
-// plugin/test/slot-refill.test.mjs (node:test + @test-group governance).
+// plugin/test/slot-refill.test.mjs (node:test + @test-group engine).
 //
 // Run: scripts/test.sh plugin/test/slot-refill-heartbeat.test.mjs
 

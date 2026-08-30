@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // axis-generator.test.mjs — the predictive dimension generator + the nightly falsifiable count
 // (tasks/gap-axis-generator-question-what-range-every-standing-criterion, AC1-AC5).
 //
@@ -12,7 +12,7 @@
 //   known axes from SYNTHESIS-axis-generation) + negative fixtures (axes DO open when a range is
 //   quantified) + the not-keyword-scan invariant (axis-name words alone must not open an axis).
 // AC4 (annotations live in the two projection task bodies, asserted by their own gates).
-// AC5 this file uses node:test and declares `// @test-group governance`.
+// AC5 this file uses node:test and declares `// @test-group engine`.
 //
 // Run: scripts/test.sh plugin/test/axis-generator.test.mjs
 
