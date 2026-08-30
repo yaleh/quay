@@ -28,6 +28,8 @@ export {
   sharedFixture,
   laydownTemplate,
   laydownWorkspace,
+  sharedFixtureVariant,
+  laydownVariantWorkspace,
 } from "./helpers/quay-init-install-fixture.mjs";
 
 // extractRefs(pluginRoot, prefix): every `<prefix>/<file>` reference in the shipped skills + tick
