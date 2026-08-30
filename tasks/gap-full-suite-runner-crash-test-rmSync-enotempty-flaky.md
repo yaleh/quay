@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-runner-crash-test-rmSync-enotempty-flaky
 title: full-suite-runner.test.mjs:4889 AC6 crash 测试 teardown rmSync 撞 ENOTEMPTY flaky——随机挡任意 fan-in
-status: todo
+status: ready
 labels:
   - gap
   - defect
