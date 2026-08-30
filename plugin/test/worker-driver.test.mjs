@@ -667,12 +667,16 @@ test("AC1 — the mechanical fan-in default suite command, run against a red buc
     assert.equal(code, 1, `the runner exits 1 on a red bucket round, got ${code} (stderr tail: ${stderr.slice(-400)})`);
     const vrf = path.join(root, ".quay", "verification-round.jsonl");
     assert.ok(fs.existsSync(vrf), "verification-round.jsonl written into --state-dir");
-    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    const lines = fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim());
+    // gap-verification-round-single-writer AC1 — 恰一条记录（⛔ 无 writeRedSuiteRecord 平行双写 ⇒ round 号虚增）。
+    assert.equal(lines.length, 1, "a red mechanical bucket round lands EXACTLY ONE record (no parallel red double-write)");
+    const rec = JSON.parse(lines[0]);
     assert.equal(rec.state, "red", "a red mechanical bucket round records state=red (not green, not absent)");
     assert.equal(rec.fail, 2, "the fail count rides the record");
     assert.equal(rec.buckets, "M", "the __BUCKETS__ marker is parsed into the buckets field");
     assert.equal(rec.bucket_files, 3, "the __BUCKETS__ file count rides the record");
     assert.equal(rec.runner, "inner", "explicit --runner inner is recorded");
+    assert.equal(rec.preverified, undefined, "the runner-shape record carries NO preverified field (single writer)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

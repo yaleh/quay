@@ -550,12 +550,16 @@ test("AC1 — full-suite-runner.ts --buckets records a RED bucket round (state=r
     assert.equal(code, 1, `runner exits 1 on a red bucket round, got ${code}`);
     const vrf = path.join(root, ".quay", "verification-round.jsonl");
     assert.ok(fs.existsSync(vrf), "verification-round.jsonl written");
-    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    const lines = fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim());
+    // gap-verification-round-single-writer AC1 — 恰一条记录（⛔ 无 writeRedSuiteRecord 平行双写 ⇒ round 号虚增）。
+    assert.equal(lines.length, 1, "a red bucket round lands EXACTLY ONE record (no parallel red double-write)");
+    const rec = JSON.parse(lines[0]);
     assert.equal(rec.state, "red", "a red bucket round records state=red (not green, not absent)");
     assert.equal(rec.fail, 2, "the fail count rides the record");
     assert.equal(rec.buckets, "M", "the __BUCKETS__ marker is parsed into the buckets field");
     assert.equal(rec.bucket_files, 3, "the __BUCKETS__ file count rides the record");
     assert.equal(rec.runner, "inner", "explicit --runner inner is recorded");
+    assert.equal(rec.preverified, undefined, "the runner-shape record carries NO preverified field (single writer)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -576,11 +580,15 @@ test("AC1 green contrast — full-suite-runner.ts --buckets records a GREEN buck
     const { code } = await waitExit(child);
     assert.equal(code, 0, `runner exits 0 on a green bucket round, got ${code}`);
     const vrf = path.join(root, ".quay", "verification-round.jsonl");
-    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    const lines = fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim());
+    // gap-verification-round-single-writer AC2 — 绿轮与红轮同 writer 同 shape：恰一条、无 preverified 字段。
+    assert.equal(lines.length, 1, "a green bucket round lands EXACTLY ONE record (same single writer as red)");
+    const rec = JSON.parse(lines[0]);
     assert.equal(rec.state, "green", "a green bucket round records state=green");
     assert.equal(rec.fail, 0, "the fail count is 0 on green");
     assert.equal(rec.buckets, "P", "the __BUCKETS__ marker is parsed into the buckets field");
     assert.equal(rec.bucket_files, 2, "the __BUCKETS__ file count rides the record");
+    assert.equal(rec.preverified, undefined, "the runner-shape record carries NO preverified field (symmetric with red)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
