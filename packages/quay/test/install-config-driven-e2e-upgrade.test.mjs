@@ -26,6 +26,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import YAML from "yaml";
+import { laydownVariantWorkspace } from "../../../plugin/test/helpers/quay-init-install-fixture.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -169,20 +170,26 @@ test("A3 — an old-install workspace upgrades to all-new product files, and exi
   fs.appendFileSync(path.join(oldPlugin, "loop", "orchestrator-loop-tick.md"), legacy);
   fs.appendFileSync(path.join(oldPlugin, "loop", "fast-mode-loop-tick.md"), legacy);
 
-  const ws = makeWorkspace();
-  fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2));
-
   // Existing loop state that must survive the upgrade: workflow events, tick log, gate events.
   const eventLine = JSON.stringify({ ts: 1, kind: "fixture", note: "pre-upgrade" });
-  const workflowDir = path.join(ws, ".workflow-events");
-  fs.mkdirSync(workflowDir, { recursive: true });
-  fs.writeFileSync(path.join(workflowDir, "fm-e2e-fixture.jsonl"), `${eventLine}\n`);
-  fs.writeFileSync(path.join(ws, "tick-log.md"), "# Tick log\n\n- 2026-08-04: e2e fixture tick\n");
-  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
-  fs.writeFileSync(path.join(ws, ".quay", "gate-events.jsonl"), `${eventLine}\n`);
+  const workflowDir = ".workflow-events";
+  const tickLog = "# Tick log\n\n- 2026-08-04: e2e fixture tick\n";
 
-  // OLD install (old plugin version lays the legacy tick docs).
-  const rOld = runInit(ws, { pluginRoot: oldPlugin });
+  // OLD install (old plugin version lays the legacy tick docs) — served by the parameterized
+  // fixture, content-addressed on oldPlugin (a legacy-marker change yields a FRESH fixture, never a
+  // stale reuse). The pre-install package.json (so detection finds "vitest run") + the loop state
+  // the upgrade must preserve are the preFiles. The NEW upgrade half stays a real install — it IS
+  // the assertion object.
+  const { ws, install: rOld } = laydownVariantWorkspace({
+    pluginRoot: oldPlugin,
+    repoRoot: "/srv/target",
+    preFiles: [
+      { rel: "package.json", content: JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2) },
+      { rel: ".workflow-events/fm-e2e-fixture.jsonl", content: `${eventLine}\n` },
+      { rel: "tick-log.md", content: tickLog },
+      { rel: ".quay/gate-events.jsonl", content: `${eventLine}\n` },
+    ],
+  }, { prefix: "install-e2e-a3-" });
   assert.equal(rOld.status, 0, `old install failed:\n${rOld.stderr}`);
   assert.ok(
     fs.readFileSync(path.join(ws, "orchestration", "orchestrator-loop-tick.md"), "utf8").includes("legacy-1.0.0"),
@@ -200,13 +207,13 @@ test("A3 — an old-install workspace upgrades to all-new product files, and exi
 
   // Part 2: existing loop state readable AND semantically unchanged (byte-identical).
   assert.equal(
-    fs.readFileSync(path.join(workflowDir, "fm-e2e-fixture.jsonl"), "utf8"),
+    fs.readFileSync(path.join(ws, workflowDir, "fm-e2e-fixture.jsonl"), "utf8"),
     `${eventLine}\n`,
     "A3: .workflow-events must survive the upgrade readable and unchanged"
   );
   assert.equal(
     fs.readFileSync(path.join(ws, "tick-log.md"), "utf8"),
-    "# Tick log\n\n- 2026-08-04: e2e fixture tick\n",
+    tickLog,
     "A3: tick-log.md must survive the upgrade readable and unchanged"
   );
   assert.equal(
@@ -225,9 +232,8 @@ test("A3 — an old-install workspace upgrades to all-new product files, and exi
 // concurrency_bands/fork_baseline/merge_target + the four fast-mode values) and asserts the
 // config-preserving upgrade keeps the ENTIRE loop section unchanged while laying down the mechanism.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
-function writeEvolvedConsumerConfig(ws) {
-  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
-  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), [
+function evolvedConsumerConfig() {
+  return [
     "providers:",
     "  native:",
     "    enabled: true",
@@ -249,23 +255,31 @@ function writeEvolvedConsumerConfig(ws) {
     "  tmux_session: proj-session",
     "  worktree_root: /srv/proj-worktrees",
     "",
-  ].join("\n"));
+  ].join("\n");
 }
 
 test("AC6/AC1 — an organically evolved consumer keeps the ENTIRE loop section after a config-preserving --loop upgrade (no --force), and the mechanism files are laid down", () => {
-  const ws = makeWorkspace();
-  fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2));
-  writeEvolvedConsumerConfig(ws);
-  const cfgPath = path.join(ws, ".quay", "config.yml");
-  const loopBefore = YAML.parse(fs.readFileSync(cfgPath, "utf8")).loop;
+  const cfgText = evolvedConsumerConfig();
+  const loopBefore = YAML.parse(cfgText).loop;
+  const cfgPath = ".quay/config.yml";
 
   // Config-preserving upgrade WITHOUT --force (AC1). The test command is deliberately NOT passed:
   // the prefer-existing path must keep the consumer's recorded loop.test_command (a real
   // downstream run of `quay init --loop` has no fresh detection clobbering it). worktreeRoot: null
   // keeps the consumer's recorded loop.worktree_root too — this is the upgrade path that must
   // preserve the ENTIRE loop section (task gap-serial-phase-install-test-residue-dependency: the
-  // default unique-root injection must NOT clobber an organic consumer's recorded root).
-  const r = runInit(ws, { repoRoot: "/srv/proj", tmux: "proj-session", worktreeRoot: null });
+  // default unique-root injection must NOT clobber an organic consumer's recorded root). The
+  // baseline install is served by the parameterized fixture (consumer-config in the key); the
+  // laydown does NOT rewrite worktree_root, so the preserved root survives byte-for-byte.
+  const { ws, install: r } = laydownVariantWorkspace({
+    repoRoot: "/srv/proj",
+    tmux: "proj-session",
+    worktreeRoot: null,
+    preFiles: [
+      { rel: "package.json", content: JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2) },
+      { rel: ".quay/config.yml", content: cfgText },
+    ],
+  }, { prefix: "install-e2e-ac61-", rewriteWorktreeRoot: false });
   assert.equal(r.status, 0, `config-preserving upgrade must succeed:\n${r.stderr}`);
 
   // AC1 first half: mechanism files ARE laid down.
@@ -277,7 +291,7 @@ test("AC6/AC1 — an organically evolved consumer keeps the ENTIRE loop section 
   // AC1 second half: config PRESERVED — the ENTIRE loop section (custom keys + the four
   // fast-mode values) is unchanged. The pre-fix `data["loop"] = {...}` replacement dropped
   // board/gates/stop/policy/concurrency_bands/fork_baseline/merge_target here.
-  const loopAfter = YAML.parse(fs.readFileSync(cfgPath, "utf8")).loop;
+  const loopAfter = YAML.parse(fs.readFileSync(path.join(ws, cfgPath), "utf8")).loop;
   assert.deepEqual(loopAfter, loopBefore,
     `AC1: the config-preserving upgrade must keep every loop key (loop values unchanged); got ${JSON.stringify(loopAfter)}`);
 
@@ -287,18 +301,26 @@ test("AC6/AC1 — an organically evolved consumer keeps the ENTIRE loop section 
 });
 
 test("AC2 — config backup before upgrade + rollback restores the config unchanged on a failed upgrade", () => {
-  const ws = makeWorkspace();
-  fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2));
-  writeEvolvedConsumerConfig(ws);
-  const cfgPath = path.join(ws, ".quay", "config.yml");
+  const cfgText = evolvedConsumerConfig();
+  const cfgPath = ".quay/config.yml";
   // The pre-upgrade config captured BEFORE the baseline install — a backup taken by an upgrade
   // must capture exactly this (the config as it was on disk before that upgrade wrote it).
-  const originalConfig = fs.readFileSync(cfgPath, "utf8");
+  const originalConfig = cfgText;
 
-  // Baseline install (mechanism present, config written by quay-init).
-  const r0 = runInit(ws, { repoRoot: "/srv/proj", tmux: "proj-session", testCommand: "original-test-cmd" });
+  // Baseline install (mechanism present, config written by quay-init) — served by the
+  // parameterized fixture (consumer-config in the key + explicit testCommand). The backup/rollback
+  // upgrade half below stays a real install (it IS the assertion object).
+  const { ws, install: r0 } = laydownVariantWorkspace({
+    repoRoot: "/srv/proj",
+    tmux: "proj-session",
+    testCommand: "original-test-cmd",
+    preFiles: [
+      { rel: "package.json", content: JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2) },
+      { rel: ".quay/config.yml", content: cfgText },
+    ],
+  }, { prefix: "install-e2e-ac2-" });
   assert.equal(r0.status, 0, `baseline install must succeed:\n${r0.stderr}`);
-  const beforeUpgrade = fs.readFileSync(cfgPath, "utf8");
+  const beforeUpgrade = fs.readFileSync(path.join(ws, cfgPath), "utf8");
 
   // AC2 first half: a config backup must exist after an upgrade (backup before upgrade), and it
   // must capture the PRE-upgrade config (what was on disk before that run modified it).
@@ -324,7 +346,7 @@ test("AC2 — config backup before upgrade + rollback restores the config unchan
     "AC2: the failed upgrade must report the config rollback");
 
   // AC2 second half: the failed upgrade restored the config byte-for-byte (rollback unchanged).
-  const afterFailed = fs.readFileSync(cfgPath, "utf8");
+  const afterFailed = fs.readFileSync(path.join(ws, cfgPath), "utf8");
   assert.equal(afterFailed, beforeUpgrade,
     "AC2: a failed upgrade must restore the config unchanged (rollback); the SHOULD-NOT-STICK-cmd write must be undone");
 });
