@@ -89,6 +89,31 @@ test("AC1: DRIVER_KINDS.suite 落地且复用五运维动词 + Layer 0（不新�
   assert.doesNotMatch(src, /function\s+respawn/i, "must NOT carry a second respawn loop");
 });
 
+// ── gap-verification-round-single-writer AC3 — 红平行写已删（runner 是唯一 writer）─────────────────
+// writeRedSuiteRecord（suite-driver.ts 曾并行补写红 verification-round，红绿双 writer 混写）已删除：
+// runner 的 appendVerificationRound 是机械路径唯一 writer（green+red 都记）。静态判据：suite-driver.ts
+// 无 writeRedSuiteRecord 定义、plugin 源码树无残留调用点。
+
+test("AC3 — writeRedSuiteRecord 已从 suite-driver.ts 删除，且 plugin 源码树无残留调用点", () => {
+  const src = fs.readFileSync(SUITE_DRIVER_SRC, "utf8");
+  assert.doesNotMatch(src, /writeRedSuiteRecord/, "writeRedSuiteRecord 定义不得存在于 suite-driver.ts");
+  // 无残留调用点：plugin/scripts + plugin/workflows 的 .ts/.js/.mjs（非测试）文件均不得引用。
+  const walk = (rel) => {
+    const abs = path.join(REPO_ROOT, rel);
+    for (const ent of fs.readdirSync(abs, { withFileTypes: true })) {
+      const p = path.join(rel, ent.name);
+      if (ent.isDirectory()) {
+        walk(p);
+      } else if (/\.(ts|js|mjs)$/.test(ent.name) && !/\.test\.(mjs|ts)$/.test(ent.name)) {
+        const text = fs.readFileSync(path.join(REPO_ROOT, p), "utf8");
+        assert.ok(!text.includes("writeRedSuiteRecord"), `${p} 不得残留 writeRedSuiteRecord 调用点`);
+      }
+    }
+  };
+  walk("plugin/scripts");
+  walk("plugin/workflows");
+});
+
 // ── AC2 — 进程级父子 + 三态 outcome（hung 可区分）─────────────────────────────────────────
 
 test("AC2: 直接 spawn + wait，正常退出 ⇒ done（exit 0 立即得知）", async () => {

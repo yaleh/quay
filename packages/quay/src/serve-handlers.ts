@@ -87,7 +87,7 @@ export async function handleAllRoutes(
   }
 
   if (url.pathname === "/tasks") {
-    await handleTaskList(req, res, url, client, manifest);
+    await handleTaskList(req, res, url, client, manifest, cfg);
     return;
   }
 

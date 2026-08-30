@@ -6,7 +6,7 @@ import { readLive, readSystem, readManagerLight, readTests, readGitHistory, type
 import { TASK_STATUS } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
-import { awaitingLandMs, formatAwaitingDuration } from "./serve-live.ts";
+import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -24,10 +24,23 @@ function renderDashboardPage(d: {
   // it renders a mini list of the first 3 in-flight tasks with a per-task state tag, so a task that
   // finished implementing but is stuck awaiting-land is visible at a glance (待落地 + duration in
   // the warning color), instead of hiding inside a "在飞 N" number.
-  const liveMiniList = live.inFlight.slice(0, 3).map((t) => html`<div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.78rem;line-height:1.4">
+  // gap-live-fan-in-execution-phase-two-axis: the liveCard's per-task tag now keys on the execution
+  // PHASE (not the impl-complete boundary), so a fan-in task (worker exited, suite running) reads
+  // 「fan-in · suite <state>」 instead of a misleading 「实现中」.
+  const liveMiniList = live.inFlight.slice(0, 3).map((t) => {
+    const tag = t.phase === "awaiting-land"
+      ? `待落地 ${formatAwaitingDuration(awaitingLandMs(t))}`
+      : t.phase === "fan-in"
+        ? `fan-in${suiteSuffix(t.suite)}`
+        : t.phase === "landed"
+          ? "已落地"
+          : "实现中";
+    const emphasis = t.phase === "awaiting-land" || t.phase === "fan-in" || t.phase === "landed";
+    return html`<div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.78rem;line-height:1.4">
       <a href="/task/${encodeURIComponent(t.taskId)}" style="color:var(--color-text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.taskId)}</a>
-      <span style="flex:none;${t.implCompletedAtMs == null ? "color:var(--color-neutral-700)" : "color:var(--color-accent-700);font-weight:700"}">${t.implCompletedAtMs == null ? "实现中" : `待落地 ${formatAwaitingDuration(awaitingLandMs(t))}`}</span>
-    </div>`).join("");
+      <span style="flex:none;${emphasis ? "color:var(--color-accent-700);font-weight:700" : "color:var(--color-neutral-700)"}">${escapeHtml(tag)}</span>
+    </div>`;
+  }).join("");
   const liveCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">循环脉搏</div>
     <div style="font-weight:800">${escapeHtml(liveStateText)}</div>
@@ -186,7 +199,7 @@ export async function handleDashboard(
   ]);
   let tests: TestsResult;
   try { tests = readTests(cfg.workspaceRoot); } catch {
-    tests = { status: "error", reason: "internal", runs: [], currentState: null };
+    tests = { status: "error", reason: "internal", runs: [] };
   }
   let history: GitHistoryResult;
   try { history = readGitHistory(cfg.workspaceRoot); } catch {

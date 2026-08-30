@@ -747,6 +747,12 @@ export function effectiveParallelism(cpuTimeS: number | null | undefined, durati
 
 export interface SuiteRoundRecord {
   round: number;
+  // gap-verification-round-record-runid — the suite's canonical runId (the SAME value the state write
+  // carries and the SAME key the load sampler uses for suite-load-<runId>.jsonl / measure-history). The
+  // round record carrying it makes the row self-describing (its OWN load key rides the ledger row).
+  // Absent on legacy rows (红绿 pre-fix records had no runId) — a reader must tolerate its absence
+  // (same absent-field contract as commit/scope).
+  runId?: string;
   startedAt: string;
   durationMs: number;
   laneCount: number;
@@ -1778,7 +1784,12 @@ export async function run(argv: string[]): Promise<number> {
   // write establishes it (the newest runner owns the file from then on); every later write must
   // still own the generation or it is dropped (gap-full-suite-state-race-last-write-wins-no-
   // generation-guard AC1/AC4).
-  const runId = randomUUID();
+  // gap-mechanical-fan-in-per-suite-runid-unified — an explicit --run-id (from the mechanical fan-in
+  // driver) is honored VERBATIM as the canonical run id, so it flows through full-suite-state /
+  // generation guard / suite-load-<runId>.jsonl / the verification-round record as ONE key (the
+  // record ↔ telemetry join the /tests page keys the load curve on). Default (no --run-id) =
+  // randomUUID() — an independent run keeps self-naming.
+  const runId = parseArg(argv, "--run-id") ?? randomUUID();
   // gap-leak-residue-per-run-namespace-isolation AC1 — the per-run NAMESPACE id delivered to the
   // child (and hence to every node --test probe via session-liveness-helpers.mjs's QUAY_RUN_ID):
   // a SHORT id (8 hex chars from the state-file UUID) so the tmux socket sun_path (~107 bytes —
@@ -2114,6 +2125,9 @@ export async function run(argv: string[]): Promise<number> {
       try {
         appendVerificationRound(stateDir, {
           round: 0, // computed from prior line count inside appendVerificationRound
+          // gap-verification-round-record-runid — the crash-trap row carries the SAME canonical runId
+          // so a crashed round is also self-describing (load-key connectable) like the normal path.
+          runId,
           startedAt,
           durationMs: Date.parse(at) - Date.parse(startedAt),
           laneCount,
@@ -3308,6 +3322,10 @@ export async function run(argv: string[]): Promise<number> {
   // from the authoritative total when available (or null fail-open).
   appendVerificationRound(stateDir, {
     round: 0, // computed from prior line count inside appendVerificationRound
+    // gap-verification-round-record-runid — the round's canonical runId (the SAME value the state
+    // write carries and the SAME key the load sampler uses for suite-load-<runId>.jsonl). The round
+    // record now self-describes (its OWN load key rides the ledger row).
+    runId,
     startedAt,
     durationMs,
     laneCount,

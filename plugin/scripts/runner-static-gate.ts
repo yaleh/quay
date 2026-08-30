@@ -401,7 +401,7 @@ run_static_checks() {
   #   archive (全部有家). A marker in source-but-not-archive = the 判据3 负控 sample ⇒ RED (exit 1,
   #   set -euo pipefail abort). Mutation case + unit tests carry the negative control.
   # @static-tier change
-  # @static-object orchestration/orchestrator-tick-core.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md CLAUDE.md plugin/scripts/integration-branch-model.ts plugin/scripts/integration-batch-merge.sh orchestration/SPEC-branching-model-integration-branch-2026-08-05.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/retired-clause-check.ts plugin/scripts/checker-mutation-cases/retired-clause-check.sh plugin/test/retired-clause-check.test.mjs
+  # @static-object orchestration/orchestrator-tick-core.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md CLAUDE.md plugin/scripts/integration-batch-merge.sh orchestration/SPEC-branching-model-integration-branch-2026-08-05.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/retired-clause-check.ts plugin/scripts/checker-mutation-cases/retired-clause-check.sh plugin/test/retired-clause-check.test.mjs
   run_checker "retired-clause-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/retired-clause-check.ts" --root "${repo_root}"
   echo "== outer-retirement-precondition check (gap-b0-retirement-precondition-checker-call-surface, SPEC §2.3b B0) =="
   # B0 退役前置 (SPEC §2.3b): 退役 outer 前，枚举 outer 执行核 (orchestrator-tick-core.md) 直接引用的

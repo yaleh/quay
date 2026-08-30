@@ -10,7 +10,8 @@ import {
 } from "./serve-render.ts";
 import {
   readWorkerOutcomeRecords, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
-  workerDriverActive,
+  workerDriverActive, readTaskStatusMapAtRef, readTaskTitleMapAtRef, readTaskCommitTimesAtRef,
+  readTaskAtRefMeta, readTaskCommitTimeAtRef,
 } from "./observation.ts";
 import type { LiveWorker, WorkerOutcomeRecord } from "./observation.ts";
 import { TASK_STATUSES } from "./abi.ts";
@@ -21,6 +22,7 @@ export async function handleTaskList(
   url: URL,
   client: ProviderClient,
   manifest: Manifest,
+  cfg: { workspaceRoot: string },
 ): Promise<void> {
   // gap-one-unparseable-task-takes-down-the-whole-board: the Provider's
   // task_list now returns PARTIAL success — the parseable tasks plus a
@@ -50,9 +52,36 @@ export async function handleTaskList(
   // (The qFilter read is duplicated below where it drives filtering; reading
   // the URLSearchParams twice is cheap and keeps the two uses independent.)
   const qFilter = url.searchParams.get("q") || null;
-  const { tasks: allTasks, malformed } = await client.taskList(
+  const { tasks: rawTasks, malformed } = await client.taskList(
     qFilter ? { search: qFilter } : { includeBody: false }
   );
+  // gap-dispatch-reads-stale-main-checkout-task-status: the list's status AND updated read faces are
+  // the develop git ref, not the manager working branch's disk (a stale agent-proxy — 硬规则 4b).
+  // Override each task's status + updatedAt from develop (its last-commit time); a task absent from
+  // develop keeps its disk-read status/updatedAt (fail-open). The disk-vs-develop status/title pair is
+  // carried per-task as `_dev*`/`_disk*` fields so the row renderer can emit the divergence marker.
+  const devStatus = readTaskStatusMapAtRef(cfg.workspaceRoot, "develop");
+  const devTitle = readTaskTitleMapAtRef(cfg.workspaceRoot, "develop");
+  const devTimes = readTaskCommitTimesAtRef(cfg.workspaceRoot, "develop");
+  const devRead = devStatus.size > 0 || devTitle.size > 0 || devTimes.size > 0;
+  const allTasks = !devRead
+    ? rawTasks
+    : rawTasks.map((t) => {
+        const id = typeof t.id === "string" ? t.id : "";
+        const devStatusVal = id ? devStatus.get(id) : undefined;
+        const devTitleVal = id ? devTitle.get(id) : undefined;
+        const devTime = id ? devTimes.get(id) : undefined;
+        const out = {
+          ...t,
+          _devStatus: devStatusVal,
+          _devTitle: devTitleVal,
+          _diskStatus: t.status,
+          _diskTitle: t.title,
+        };
+        if (devStatusVal != null) out.status = devStatusVal;
+        if (devTime != null) (out as unknown as Record<string, unknown>).updatedAt = devTime;
+        return out;
+      });
   // QX-004 (experiment 4, iteration 1): filter by ?prefix=<value> query param.
   // Closes CB-002: "show only QX-* tasks" affordance in Web UI.
   // Applied FIRST, before status/label filters — prefix scopes the whole view.
@@ -189,13 +218,24 @@ export async function handleTaskList(
         const updatedCell = typeof updatedAt === "number"
           ? escapeHtml(relativeTime(updatedAt))
           : "—";
+        // gap-dispatch-reads-stale-main-checkout-task-status (AC3): when the develop ref disagrees
+        // with the disk on status or title, the row renders a VISIBLE divergence marker — never a
+        // silent pick of one source. status is develop-first (overridden above), so its marker names
+        // the disk value; title stays disk-displayed, so its marker names the develop value.
+        const ext = t as unknown as Record<string, unknown>;
+        const devStatusVal = typeof ext._devStatus === "string" ? ext._devStatus as string : null;
+        const devTitleVal = typeof ext._devTitle === "string" ? ext._devTitle as string : null;
+        const diskStatus = typeof ext._diskStatus === "string" ? ext._diskStatus as string : String(t.status ?? "");
+        const diskTitle = typeof ext._diskTitle === "string" ? ext._diskTitle as string : String(t.title ?? "");
+        const statusDiverged = devStatusVal != null && devStatusVal !== diskStatus;
+        const titleDiverged = devTitleVal != null && devTitleVal !== diskTitle;
         // QX-011 (iteration 3): task title link includes ?from= so the detail page
         // back link can return to the current filtered list view (UQ-009).
         return html`<tr>
         <td><a href="/task/${encodeURIComponent(t.id)}?from=${encodeURIComponent(currentListHref)}">${escapeHtml(t.id)}</a></td>
-        <td>${escapeHtml(t.status)}</td>
+        <td>${escapeHtml(t.status)}${statusDiverged ? html`<span class="meta" data-divergence="status"> ⚠ disk:${escapeHtml(diskStatus)}</span>` : ""}</td>
         <td class="col-role">${escapeHtml(t.role)}</td>
-        <td>${escapeHtml(t.title)}</td>
+        <td>${escapeHtml(t.title)}${titleDiverged ? html`<span class="meta" data-divergence="title"> ⚠ develop:${escapeHtml(devTitleVal!)}</span>` : ""}</td>
         <td class="col-labels">${escapeHtml((Array.isArray(t.labels) ? t.labels : []).join(", "))}</td>
         <td class="col-updated">${updatedCell}</td>
       </tr>`;
@@ -579,7 +619,21 @@ export async function handleTaskDetail(
         html`<a href="/task/${escapeHtml(c)}">${escapeHtml(c)}</a>`
       ).join(" · ")}</p>`
     : "";
+  // gap-dispatch-reads-stale-main-checkout-task-status (AC1/AC2/AC3): the detail page's status and
+  // last-updated read the develop git ref first (the disk is a stale agent-proxy — 硬规则 4b), with
+  // the disk value as the fallback for a task not yet committed to develop. This kills the
+  // list=done/detail=ready self-contradiction: the SAME develop value drives both pages.
+  const devMeta = readTaskAtRefMeta(cfg.workspaceRoot, "develop", taskId);
+  const devStatusVal = devMeta?.status ?? null;
+  const devTitleVal = devMeta?.title ?? null;
+  const devTime = readTaskCommitTimeAtRef(cfg.workspaceRoot, "develop", taskId);
+  const diskStatus = t.status;
+  const diskTitle = t.title;
+  const displayStatus = devStatusVal ?? diskStatus;
+  const statusDiverged = devStatusVal != null && devStatusVal !== diskStatus;
+  const titleDiverged = devTitleVal != null && devTitleVal !== diskTitle;
   const tExt = t as unknown as Record<string, unknown>;
+  const displayUpdated = devTime ?? (typeof tExt.updatedAt === "number" ? tExt.updatedAt as number : null);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(t.id)}: ${escapeHtml(t.title)}">${modernistStyles()}${pageStyles()}<title>${escapeHtml(t.id)}</title></head>
@@ -588,11 +642,11 @@ export async function handleTaskDetail(
            The site-nav above already carries the full 15-view nav; this contextual
            link restores the list's filter/sort/page context. -->
       <nav><a href="${escapeHtml(backHref)}">&larr; back to list</a></nav>
-      <h1>${escapeHtml(t.id)}: ${escapeHtml(t.title)} [${escapeHtml(t.status)}]</h1>
+      <h1>${escapeHtml(t.id)}: ${escapeHtml(diskTitle)}${titleDiverged ? html`<span class="meta" data-divergence="title"> ⚠ develop:${escapeHtml(devTitleVal!)}</span>` : ""} [${escapeHtml(displayStatus)}${statusDiverged ? html`<span class="meta" data-divergence="status"> ⚠ disk:${escapeHtml(diskStatus)}</span>` : ""}]</h1>
       ${detailErrorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(detailErrorParam)}</div>` : ""}
       ${detailSuccessParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(detailSuccessParam)}</div>` : ""}
       <p class="meta">role: ${escapeHtml(t.role)} · labels: ${escapeHtml((t.labels || []).join(", "))}${parentMeta}</p>
-      ${typeof tExt.updatedAt === "number" ? html`<p class="meta">last updated: ${escapeHtml(relativeTime(tExt.updatedAt as number))}</p>` : ""}
+      ${displayUpdated != null ? html`<p class="meta">last updated: ${escapeHtml(relativeTime(displayUpdated))}</p>` : ""}
       ${childrenMeta}
       ${taskRunsBlock(cfg.workspaceRoot, taskId)}
       <h2 class="sr-only">Details</h2>

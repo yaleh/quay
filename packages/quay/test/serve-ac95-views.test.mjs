@@ -382,6 +382,32 @@ test("AC3: readTests parses a fixture round sequence newest-first", () => {
   }
 });
 
+// gap-tests-load-curve-time-window-fallback — view-level regression: a round whose runId now flows
+// into the two-level load resolver must still render /tests 200 (and degrade to no-curve, not a 500)
+// when that runId maps to no load file — the parse→render contract is untouched by the fallback.
+test("regression: /tests renders a broken-key runId round as 200 with no fabricated curve (no 500)", async () => {
+  const ws = makeWorkspace("ac95-fallback-reg-");
+  const cwd0 = process.cwd();
+  process.chdir(ws);
+  const port = await freePort();
+  const server = await startServer({ port, host: "127.0.0.1" });
+  try {
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 692, startedAt: "2026-08-29T17:28:27.282Z", durationMs: 60000, state: "red", runId: "wk-prod-1788022868", pass: 0, fail: 1, cancelled: 0, tests: 1, failures: [] }),
+    ].join("\n"));
+    const r = await get(port, "/tests");
+    assert.equal(r.status, 200, "GET /tests with a broken-key runId round returns 200");
+    assert.ok(r.body.includes("Tests — 验证轮记录"), "the page still renders");
+    assert.ok(!r.body.includes("<polyline"), "no load file → no fabricated curve");
+  } finally {
+    process.chdir(cwd0);
+    server.close();
+    server.client?.close?.();
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("AC3: readTranscriptTail reads the last user/assistant texts from a transcript JSONL tail", () => {
   const p = path.join(os.tmpdir(), `ac95-tx-${process.pid}.jsonl`);
   try {

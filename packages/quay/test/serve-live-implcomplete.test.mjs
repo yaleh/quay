@@ -65,10 +65,15 @@ function distinctiveRunId(taskId) {
 
 // Two-segment telemetry: IM-1 = start only (implementing, implCompletedAtMs null); AL-1 = start +
 // impl-complete (awaiting-land, implCompletedAtMs non-null). AL-1's impl-complete is exactly 5 min
-// before the observation instant, so its awaiting-land duration renders as "5m".
+// before the observation instant, so its awaiting-land duration renders as "5m". Both tasks also get
+// an on-disk lifecycle status (ready) so the two-axis 状态 column renders a real lifecycle value.
 function writeFixture(ws) {
   const eventsDir = path.join(ws, ".workflow-events");
   fs.mkdirSync(eventsDir, { recursive: true });
+  const tasksDir = path.join(ws, "tasks");
+  fs.mkdirSync(tasksDir, { recursive: true });
+  fs.writeFileSync(path.join(tasksDir, "IM-1.md"), "---\nid: IM-1\nstatus: ready\n---\nbody\n");
+  fs.writeFileSync(path.join(tasksDir, "AL-1.md"), "---\nid: AL-1\nstatus: ready\n---\nbody\n");
   const now = Date.now();
   const imRunId = distinctiveRunId("IM-1");
   const alRunId = distinctiveRunId("AL-1");
@@ -81,7 +86,7 @@ function writeFixture(ws) {
     startEvent(alRunId, "AL-1", now - 20 * 60_000) + implCompleteEvent(alRunId, "AL-1", now - 5 * 60_000));
 }
 
-test("AC1: /live table distinguishes 实现中 (implCompletedAtMs null) vs 已完工待落地 (non-null) with 待落地时长", async () => {
+test("AC1: /live table renders the two axes — 状态 (lifecycle) vs 阶段 (execution phase) — and 待落地时长 only for awaiting-land", async () => {
   const { ws } = makeWorkspace("live-impl-");
   const cwd0 = process.cwd();
   let server;
@@ -93,19 +98,26 @@ test("AC1: /live table distinguishes 实现中 (implCompletedAtMs null) vs 已�
 
     const live = await get(port, "/live");
     assert.equal(live.status, 200, "AC1: GET /live returns 200");
-    // The two NEW columns render.
+    // The two-axis columns render (状态 = lifecycle, 阶段 = execution phase).
     assert.ok(live.body.includes("<th>状态</th>"), "AC1: /live table has a 状态 column");
+    assert.ok(live.body.includes("<th>阶段</th>"), "AC1: /live table has a 阶段 column");
     assert.ok(live.body.includes("<th>待落地时长</th>"), "AC1: /live table has a 待落地时长 column");
 
     const imRow = live.body.split("</tr>").find((r) => r.includes("IM-1"));
     const alRow = live.body.split("</tr>").find((r) => r.includes("AL-1"));
     assert.ok(imRow, "AC1: /live renders the implementing task row (IM-1)");
     assert.ok(alRow, "AC1: /live renders the awaiting-land task row (AL-1)");
-    assert.ok(imRow.includes("实现中"), "AC1: the implementing task row shows 实现中");
-    assert.ok(!imRow.includes("已完工待落地"), "AC1: the implementing task row does NOT show 已完工待落地");
-    assert.ok(alRow.includes("已完工待落地"), "AC1: the awaiting-land task row shows 已完工待落地");
-    assert.ok(!alRow.includes("实现中"), "AC1: the awaiting-land task row does NOT show 实现中");
-    // The implementing task's 待落地时长 cell is a placeholder (no impl-complete ⇒ no duration).
+    // 状态 column renders the lifecycle status (ready) for both — the two axes are no longer
+    // crammed into one label (the old 「已完工待落地」 conflated an execution signal with lifecycle words).
+    assert.ok(imRow.includes(">ready<"), "AC1: the 状态 column renders the lifecycle status (ready) for the implementing task");
+    assert.ok(alRow.includes(">ready<"), "AC1: the 状态 column renders the lifecycle status (ready) for the awaiting-land task");
+    // 阶段 column renders the execution phase: implementing vs awaiting-land.
+    assert.ok(imRow.includes("实现中"), "AC1: the implementing task's 阶段 column shows 实现中");
+    assert.ok(!imRow.includes("待落地"), "AC1: the implementing task's 阶段 column does NOT show 待落地");
+    assert.ok(alRow.includes("待落地"), "AC1: the awaiting-land task's 阶段 column shows 待落地");
+    assert.ok(!alRow.includes("实现中"), "AC1: the awaiting-land task's 阶段 column does NOT show 实现中");
+    assert.ok(!live.body.includes("已完工待落地"), "AC1: the old conflated 已完工待落地 label is gone");
+    // The implementing task's 待落地时长 cell is a placeholder (not awaiting-land ⇒ no duration).
     assert.ok(imRow.includes("—"), "AC1: the implementing task's 待落地时长 cell is a placeholder (—)");
     // The awaiting-land task's 待落地时长 is now − implCompletedAtMs = ~5 minutes → "5m".
     assert.ok(alRow.includes("5m"), "AC1: the awaiting-land task shows the 待落地时长 (~5m)");

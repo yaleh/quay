@@ -228,6 +228,7 @@ packages/quay/test/serve-live-implcomplete.test.mjs
 packages/quay/test/serve-nav-inconsistent-routes.test.mjs
 packages/quay/test/serve-needs-human.test.mjs
 packages/quay/test/serve-sessions.test.mjs
+packages/quay/test/serve-task.test.mjs
 packages/quay/test/serve.test.mjs
 packages/quay/test/task-check.test.mjs
 packages/quay/test/task-list-root-scope.test.mjs
@@ -240,6 +241,7 @@ packages/quay/test/unparseable-frontmatter.test.mjs
 packages/quay/test/verify-sea-artifact.test.mjs
 packages/quay/test/web-ui-browser.test.mjs
 packages/quay/test/webui-modernist-sync.test.mjs
+plugin/test/abi-task-status-typing.test.mjs
 plugin/test/ac36-sortkey-criterion-check.test.mjs
 plugin/test/ac56-recommended-deordered-check.test.mjs
 plugin/test/ac61-staleness-disposition-check.test.mjs
@@ -312,6 +314,7 @@ plugin/test/fast-mode-telemetry-gitignore.test.mjs
 plugin/test/fast-mode-telemetry-halt.test.mjs
 plugin/test/fast-mode-telemetry.test.mjs
 plugin/test/finding-backpropagate.test.mjs
+plugin/test/full-suite-runner.test.mjs
 plugin/test/gap-b3-readfilesafe-normalizerel-unification.test.mjs
 plugin/test/gate-dispatch-coverage.test.mjs
 plugin/test/gate-event-store.test.mjs
@@ -328,7 +331,6 @@ plugin/test/inner-wakeup-heartbeat-check.test.mjs
 plugin/test/inner-wakeup-heartbeat.test.mjs
 plugin/test/instrument-failure-check.test.mjs
 plugin/test/integration-batch-merge.test.mjs
-plugin/test/integration-branch-model.test.mjs
 plugin/test/judgment-consumer-check.test.mjs
 plugin/test/known-load-sensitive.test.mjs
 plugin/test/l1-delivery-surface-check.test.mjs
@@ -429,6 +431,7 @@ plugin/test/rhythm-consumer-check.test.mjs
 plugin/test/roadmap-superseded-check.test.mjs
 plugin/test/ruling-required-wiring.test.mjs
 plugin/test/run-identity.test.mjs
+plugin/test/runner-grouping-metadata.test.mjs
 plugin/test/runtime-landing.test.mjs
 plugin/test/runtime-usage-inventory.test.mjs
 plugin/test/scoped-static-checks.test.mjs
@@ -461,7 +464,6 @@ plugin/test/session-liveness-signals-thresholds.test.mjs
 plugin/test/session-liveness-target.test.mjs
 plugin/test/session-retirement-check.test.mjs
 plugin/test/session-topology.test.mjs
-plugin/test/slot-free-trigger.test.mjs
 plugin/test/slot-refill-heartbeat.test.mjs
 plugin/test/slot-refill.test.mjs
 plugin/test/slot-visibility.test.mjs
@@ -471,7 +473,9 @@ plugin/test/stale-ready-audit.test.mjs
 plugin/test/state-worded-clause-check.test.mjs
 plugin/test/strategic-doc-staleness-check.test.mjs
 plugin/test/suite-bucket-attribution.test.mjs
+plugin/test/suite-bucket-drift-check.test.mjs
 plugin/test/suite-bucket-hub-list.test.mjs
+plugin/test/suite-bucket-load-sensitive-isolation.test.mjs
 plugin/test/suite-bucket-perfile-emit.test.mjs
 plugin/test/suite-bucket-select.test.mjs
 plugin/test/suite-cutoff-verdict.test.mjs
@@ -513,7 +517,6 @@ plugin/test/touches-orthogonality-check.test.mjs
 plugin/test/touches-parser-parity.test.mjs
 plugin/test/transcript-delivery-check.test.mjs
 plugin/test/trend-check.test.mjs
-plugin/test/unverified-integration-task-ids.test.mjs
 plugin/test/user-scope-reinstall.test.mjs
 plugin/test/verification-round.test.mjs
 plugin/test/verify-deliver-coldstart.test.mjs

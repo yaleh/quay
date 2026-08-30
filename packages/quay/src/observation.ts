@@ -87,6 +87,30 @@ export interface ActivitySignals {
  */
 export type RunLiveness = "alive" | "orphan" | "unknown";
 
+/**
+ * Execution phase of an open fast-mode run (gap-live-fan-in-execution-phase-two-axis) — the SECOND
+ * axis, DISTINCT from the lifecycle status (todo/ready/done/needs-human). Derived from direct signals
+ * with a fixed priority (landed → fan-in → implementing → awaiting-land → implementing fallback); see
+ * `deriveInFlightPhase`. The old /live 状态 column conflated this with the lifecycle status, so the
+ * mechanical fan-in window (worker exited, suite running) was indistinguishable from a still-working
+ * worker — both rendered 「实现中」.
+ */
+export type InFlightPhase = "implementing" | "fan-in" | "awaiting-land" | "landed";
+
+/** The display slice of `.quay/full-suite-state.json` carried on a fan-in task
+ *  (gap-live-fan-in-execution-phase-two-axis). Best-effort — a missing/unreadable field degrades to
+ *  null, never a fabricated value (hard rule ③b). */
+export interface SuiteStateView {
+  /** suite state: "running" | "green" | "red". */
+  state: string | null;
+  /** suite runner identity ("outer" | "inner"). */
+  runner: string | null;
+  /** suite start, ISO 8601. */
+  startedAt: string | null;
+  /** suite wall-clock ms; null while running. */
+  durationMs: number | null;
+}
+
 export interface InFlightTask {
   taskId: string;
   runId: string;
@@ -113,6 +137,23 @@ export interface InFlightTask {
    * them as two independent counts.
    */
   implCompletedAtMs: number | null;
+  /**
+   * Lifecycle status (todo/ready/done/needs-human) read from the task store — the FIRST axis
+   * (gap-live-fan-in-execution-phase-two-axis AC4). Distinct from `phase` (the execution axis): the
+   * old /live 状态 column labeled the impl-complete boundary (an execution signal) with lifecycle
+   * words. null when the store has no such task (e.g. a workflow-events run with no on-disk task).
+   * `pairInFlight` leaves it null (pure); `readLive` annotates the real value from the store.
+   */
+  status: TaskStatus | null;
+  /**
+   * Execution phase — the SECOND axis (gap-live-fan-in-execution-phase-two-axis AC1-AC3). Derived
+   * from direct signals with a fixed priority (landed → fan-in → implementing → awaiting-land →
+   * implementing fallback). `pairInFlight` sets a provisional value from the impl-complete event;
+   * `readLive` re-derives it from the direct signals (fan-in lock / worker process / task status).
+   */
+  phase: InFlightPhase;
+  /** Suite state carried on a fan-in task (`.quay/full-suite-state.json`); null otherwise. */
+  suite: SuiteStateView | null;
   /** Elapsed minutes from startedAtMs to the observation instant, rounded to 1 decimal. */
   minutes: number;
   /**
@@ -250,6 +291,15 @@ export function pairInFlight(events: RawEvent[], nowMs: number): InFlightTask[] 
           rec.implComplete && typeof rec.implComplete.recordedAtMs === "number"
             ? rec.implComplete.recordedAtMs
             : null,
+        // pairInFlight is PURE and cannot read the task store — status stays null, readLive annotates.
+        status: null,
+        // Provisional phase from the impl-complete event only (the pure function knows no fan-in
+        // lock / worker process); readLive re-derives the real phase from the direct signals.
+        phase:
+          rec.implComplete && typeof rec.implComplete.recordedAtMs === "number"
+            ? "awaiting-land"
+            : "implementing",
+        suite: null,
         minutes: Math.max(0, (nowMs - rec.start.timing.startedAtMs) / 60_000),
         // pairInFlight is a PURE event-pairing function and cannot probe /proc — the fail-closed
         // "unknown" default keeps the field total. readLive overwrites it with the real process
@@ -561,6 +611,17 @@ export const WORKER_OUTCOME_REL = ".quay/worker-outcome.jsonl";
  *  during the mechanical fan-in window (worker exited, no outcome yet, no workflow-events). */
 export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
 
+/** The fan-in lock events carrier, repo-relative (one acquire/release per fan-in lock hold, written
+ *  by the driver's holder — worker-driver.ts FAN_IN_LOCK_HOLDER). gap-live-fan-in-execution-phase-
+ *  two-axis: an acquire-without-release is the DIRECT signal that a task is in the fan-in phase
+ *  (worker exited, suite running, no outcome yet) — event-level, so it fixes the ~5min round-carrier
+ *  display lag (G5). */
+export const FAN_IN_LOCK_EVENTS_REL = ".quay/fan-in-lock-events.jsonl";
+
+/** The single-state suite status file (full-suite-runner + the D7 mirror write it), repo-relative.
+ *  gap-live-fan-in-execution-phase-two-axis: carried on a fan-in task as its suite state. */
+export const FULL_SUITE_STATE_REL = ".quay/full-suite-state.json";
+
 /** The worker-driver's spawned worker process `-n` name (worker-driver.ts WORKER_PROCESS_NAME —
  *  `quay-launch.sh task-worker`). Core cannot import plugin/, so the name is mirrored here for the
  *  /proc process-signal probe (方向二): a first-dispatched worker has no outcome record yet, so its
@@ -731,6 +792,9 @@ export function workerInFlightTasks(records: WorkerOutcomeRecord[], nowMs: numbe
       sessionId: null, // outcome-carrier task: no live process ⇒ no live session join (readLive annotates)
       startedAtMs: r.startedMs,
       implCompletedAtMs: null,
+      status: null,
+      phase: "implementing",
+      suite: null,
       minutes: Math.max(0, (nowMs - r.startedMs) / 60_000),
       liveness: "unknown",
       blocks: [],
@@ -913,6 +977,98 @@ export function workerDriverActive(root: string): boolean {
   return fs.existsSync(path.join(root, WORKER_OUTCOME_REL)) || fs.existsSync(path.join(root, WORKER_ROUND_REL));
 }
 
+/**
+ * The task ids currently holding the fan-in lock — the DIRECT fan-in-phase signal
+ * (gap-live-fan-in-execution-phase-two-axis G3/G5). Reads `.quay/fan-in-lock-events.jsonl` (one
+ * acquire/release per hold, append-order) and returns the set of task ids whose MOST RECENT event is
+ * an `acquire` (no matching release yet). Event-level ⇒ no ~5min round-carrier lag. The lock is
+ * global (one holder at a time), so the set has ≤1 member in a well-formed stream; a torn
+ * acquire-without-release (holder SIGKILLed before its release) reads as fan-in — a REAL problem
+ * state, not a false positive to paper over. Absent/unreadable/malformed ⇒ empty set (degrade, never
+ * throw — hard rule ③b: a missing carrier reads as "no fan-in", never a fabricated one).
+ */
+export function readFanInLockAcquiredTasks(root: string): Set<string> {
+  const held = new Set<string>();
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, FAN_IN_LOCK_EVENTS_REL), "utf8");
+  } catch {
+    return held;
+  }
+  for (const line of String(text).split("\n")) {
+    const s = line.trim();
+    if (!s) continue;
+    let j: Record<string, unknown>;
+    try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
+    const taskId = typeof j.taskId === "string" && j.taskId.length > 0 ? j.taskId : null;
+    if (taskId == null) continue;
+    if (j.event === "acquire") held.add(taskId);
+    else if (j.event === "release") held.delete(taskId);
+  }
+  return held;
+}
+
+/** The raw `.quay/full-suite-state.json` object, or null when absent/unparseable (degrade, never
+ *  throw). Shared by readFullSuiteState (the fan-in suite annotation) — a single read, no second
+ *  carrier walk. */
+function readFullSuiteStateRaw(root: string): Record<string, unknown> | null {
+  try {
+    const text = fs.readFileSync(path.join(root, FULL_SUITE_STATE_REL), "utf8");
+    const j = JSON.parse(text) as Record<string, unknown>;
+    return j && typeof j === "object" && !Array.isArray(j) ? j : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The suite state carried on a fan-in task (gap-live-fan-in-execution-phase-two-axis): the task the
+ * suite is currently running for (`.quay/full-suite-state.json` `taskId`) plus a display slice of the
+ * state. null when the state file is absent/unreadable or carries no taskId — so a fan-in task whose
+ * suite never wrote a taskId simply renders its phase with no suite annotation (honest null, never a
+ * fabricated "suite running").
+ */
+export function readFullSuiteState(root: string): { taskId: string; view: SuiteStateView } | null {
+  const j = readFullSuiteStateRaw(root);
+  if (j == null) return null;
+  const taskId = typeof j.taskId === "string" && j.taskId.length > 0 ? j.taskId : null;
+  if (taskId == null) return null;
+  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return {
+    taskId,
+    view: {
+      state: str(j.state),
+      runner: str(j.runner),
+      startedAt: str(j.startedAt),
+      durationMs: num(j.durationMs),
+    },
+  };
+}
+
+/**
+ * Derive an in-flight task's execution phase (gap-live-fan-in-execution-phase-two-axis AC1-AC3) from
+ * DIRECT signals, in the priority the task pins (直接量优先):
+ *   a. lifecycle status terminal (done/superseded/needs-human) → "landed" (readLive removes these
+ *      before this point; the branch is totality/defense, not the removal path);
+ *   b. fan-in lock held (acquire-without-release) → "fan-in";
+ *   c. worker process present (pid known / liveness alive) → "implementing";
+ *   d. workflow-events impl-complete event → "awaiting-land" (compat: the old inner-era boundary);
+ *   e. else → "implementing" (round-carrier fallback — in-flight by the driver's heartbeat, no
+ *      positive fan-in/live signal, so "implementing" is the honest default, never a fabricated fan-in).
+ * Pure — `fanInLockAcquired` is passed in (readLive reads the carrier once).
+ */
+export function deriveInFlightPhase(
+  t: Pick<InFlightTask, "taskId" | "status" | "pid" | "liveness" | "implCompletedAtMs">,
+  fanInLockAcquired: ReadonlySet<string>,
+): InFlightPhase {
+  if (t.status === TASK_STATUS.DONE || t.status === TASK_STATUS.SUPERSEDED || t.status === TASK_STATUS.NEEDS_HUMAN) return "landed";
+  if (fanInLockAcquired.has(t.taskId)) return "fan-in";
+  if (t.pid != null || t.liveness === "alive") return "implementing";
+  if (t.implCompletedAtMs != null) return "awaiting-land";
+  return "implementing";
+}
+
 // ── needs-human 显式承接（gap-ac146-human-interface-explicit-owner） ──────────────────────────
 // The promotion-driver's outcome ledger (AC134) carries `action: "needs-human"` records — the
 // historical "was ever escalated to a human" ledger, INCLUDING tasks whose store status has since
@@ -972,9 +1128,10 @@ export function readNeedsHumanLedger(root: string): PromotionOutcomeRecord[] {
 }
 
 /** Read a single task's status frontmatter from the on-disk store. Missing/unreadable ⇒ null (never
- *  throws). readLive uses it to drop a worker-carrier task whose status is already "done" — the
- *  driver's `exited-not-landed` on a done task is a leftover-worktree cleanup artifact, the same
- *  "not really in-flight" class as the AC2 ghost, not live work. */
+ *  throws). This is the FALLBACK read: tasks/gap-web-task-status-reads-stale-main-checkout makes the
+ *  canonical store the develop git ref (the manager working branch's disk is a STALE agent-proxy,
+ *  硬规则 4b); `readTaskStatusForLive` reads develop first and falls back here when the ref/path is
+ *  unavailable (not a git repo, no develop ref, a fresh task not yet committed to develop). */
 function readTaskStatusOnDisk(root: string, taskId: string): TaskStatus | null {
   try {
     const raw = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
@@ -984,6 +1141,241 @@ function readTaskStatusOnDisk(root: string, taskId: string): TaskStatus | null {
   } catch {
     return null;
   }
+}
+
+/** Read `<ref>:tasks/<taskId>.md` frontmatter `status:` + `title:` in ONE `git show` (the single-task
+ *  develop-ref read — object store only, never checks out `ref`, never touches fan-in). null when the
+ *  ref/path is unavailable or the frontmatter is unreadable — callers fall back to the on-disk read.
+ *  The /task detail page reads BOTH halves from this one call (status + title develop-first, so list
+ *  and detail agree), and `readTaskStatusAtRef` is its status-only projection. */
+export function readTaskAtRefMeta(root: string, ref: string, taskId: string): { status: TaskStatus | null; title: string | null } | null {
+  let out: string;
+  try {
+    out = execFileSync("git", ["-C", root, "show", `${ref}:tasks/${taskId}.md`], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = parseFrontmatter(out);
+    const fm = parsed.frontmatter as Record<string, unknown>;
+    return {
+      status: isTaskStatus(fm.status) ? fm.status : null,
+      title: typeof fm.title === "string" ? fm.title : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Read `<ref>:tasks/<taskId>.md` status frontmatter (the single-task half of the develop-ref read;
+ *  `git show` reads the object store only — never checks out `ref`, never touches fan-in). null when
+ *  the ref/path is unavailable or the frontmatter is unreadable — callers fall back to the on-disk
+ *  read. Mirrors plugin/scripts/worker-driver.ts's `readTaskStatusAtRef` (the same `git show
+ *  develop:tasks/<id>.md` judgment, re-implemented here because observation.ts is the ONLY serve-path
+ *  module allowed to know git). */
+export function readTaskStatusAtRef(root: string, ref: string, taskId: string): TaskStatus | null {
+  return readTaskAtRefMeta(root, ref, taskId)?.status ?? null;
+}
+
+/** Read `<ref>:tasks/<id>.md` raw contents for a set of ids in ONE `git cat-file --batch` process
+ *  (the batched read face — per-task `git show` at 1500+ tasks would be ~1500 subprocesses). Returns
+ *  a Map<taskId, rawContent> for the ids PRESENT at the ref; absent ids are simply missing (callers
+ *  fall back to the working-tree read). Empty map on any git failure (never a positive from an
+ *  unavailable source). Mirrors plugin/scripts/ready-pool-check.ts's dispatch-read batch. */
+function readTaskFilesAtRefBatch(root: string, ref: string, ids: string[]): Map<string, string> {
+  if (ids.length === 0) return new Map();
+  const input = ids.map((id) => `${ref}:tasks/${id}.md`).join("\n") + "\n";
+  let buf: Buffer;
+  try {
+    buf = execFileSync("git", ["-C", root, "cat-file", "--batch"], {
+      input,
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 30_000,
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+  } catch {
+    return new Map();
+  }
+  const map = new Map<string, string>();
+  let off = 0;
+  for (const id of ids) {
+    const nl = buf.indexOf(0x0a, off);
+    if (nl === -1) break;
+    const header = buf.slice(off, nl).toString("utf8");
+    off = nl + 1;
+    const m = / blob (\d+)$/.exec(header);
+    if (!m) continue; // `<revspec> missing` (or unparseable) — no content line; off is already past the header
+    const size = Number(m[1]);
+    map.set(id, buf.slice(off, off + size).toString("utf8"));
+    off += size + 1; // skip content + the trailing newline after it
+  }
+  return map;
+}
+
+/** TTL for the batched develop-status cache — a rendered /tasks list need not re-run `git cat-file`
+ *  over the whole tree on every refresh within the same render burst (AC4: 1500+ tasks). */
+export const TASK_STATUS_REF_CACHE_TTL_MS = 2000;
+
+const taskStatusRefCache = new Map<string, { at: number; map: Map<string, TaskStatus> }>();
+const taskTitleRefCache = new Map<string, { at: number; map: Map<string, string> }>();
+const taskCommitTimesRefCache = new Map<string, { at: number; map: Map<string, number> }>();
+
+/** Clear the batched develop-ref caches (test seam — a fixture that rewrites the develop ref
+ *  mid-test must not read a cached prior read). Clears status + title + commit-time together: the
+ *  three develop-ref read faces share one source of truth and one TTL clock. */
+export function clearTaskStatusRefCache(): void {
+  taskStatusRefCache.clear();
+  taskTitleRefCache.clear();
+  taskCommitTimesRefCache.clear();
+}
+
+/** List the task ids (frontmatter `.md` basenames) under `tasks/` at a git ref in ONE `git ls-tree`
+ *  (object store only). Empty array on any git failure (never a positive from an unavailable source).
+ *  Shared by the status / title / commit-time batched readers — one ls-tree, not three. */
+function listTaskIdsAtRef(root: string, ref: string): string[] {
+  try {
+    return execFileSync("git", ["-C", root, "ls-tree", "-r", "--name-only", ref, "--", "tasks/"], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    })
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((n) => {
+        const base = n.split("/").pop() ?? "";
+        return base.endsWith(".md") ? base.slice(0, -3) : null;
+      })
+      .filter((x): x is string => x != null && x.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** Read every task's `status:` frontmatter at a git ref in ONE `git ls-tree` + ONE `git cat-file
+ *  --batch` pair (two subprocesses total for a ~1500-task tree), short-TTL cached. Returns a
+ *  Map<taskId, TaskStatus> of the ids PRESENT at the ref; absent ids are missing (callers fall back
+ *  to the working-tree read). Empty map on any git failure — never a positive from an unavailable
+ *  source (硬规则 ③b). */
+export function readTaskStatusMapAtRef(
+  root: string,
+  ref: string,
+  { nowMs = Date.now(), ttlMs = TASK_STATUS_REF_CACHE_TTL_MS, force = false } = {},
+): Map<string, TaskStatus> {
+  const key = `${root}\n${ref}`;
+  const hit = taskStatusRefCache.get(key);
+  if (!force && hit != null && nowMs - hit.at < ttlMs) return hit.map;
+  const map = new Map<string, TaskStatus>();
+  try {
+    const rawMap = readTaskFilesAtRefBatch(root, ref, listTaskIdsAtRef(root, ref));
+    for (const [id, raw] of rawMap) {
+      try {
+        const parsed = parseFrontmatter(raw);
+        const fm = parsed.frontmatter as Record<string, unknown>;
+        if (isTaskStatus(fm.status)) map.set(id, fm.status);
+      } catch {
+        // unparseable frontmatter at the ref — leave absent (caller falls back to disk), never fabricate
+      }
+    }
+  } catch {
+    // git unavailable / not a repo / no such ref — empty map, callers fall back to the disk read
+  }
+  taskStatusRefCache.set(key, { at: nowMs, map });
+  return map;
+}
+
+/** Read every task's `title:` frontmatter at a git ref in ONE `git ls-tree` + ONE `git cat-file
+ *  --batch` pair, short-TTL cached. The title half of the develop-ref read — the /tasks divergence
+ *  marker compares the disk title against the develop title, so the list needs BOTH maps without a
+ *  per-task `git show`. Absent ids are missing (callers fall back to the disk title). Empty map on
+ *  any git failure — never a positive from an unavailable source (硬规则 ③b). */
+export function readTaskTitleMapAtRef(
+  root: string,
+  ref: string,
+  { nowMs = Date.now(), ttlMs = TASK_STATUS_REF_CACHE_TTL_MS, force = false } = {},
+): Map<string, string> {
+  const key = `${root}\n${ref}`;
+  const hit = taskTitleRefCache.get(key);
+  if (!force && hit != null && nowMs - hit.at < ttlMs) return hit.map;
+  const map = new Map<string, string>();
+  try {
+    const rawMap = readTaskFilesAtRefBatch(root, ref, listTaskIdsAtRef(root, ref));
+    for (const [id, raw] of rawMap) {
+      try {
+        const parsed = parseFrontmatter(raw);
+        const fm = parsed.frontmatter as Record<string, unknown>;
+        if (typeof fm.title === "string") map.set(id, fm.title);
+      } catch {
+        // unparseable frontmatter at the ref — leave absent (caller falls back to disk)
+      }
+    }
+  } catch {
+    // git unavailable / not a repo / no such ref — empty map, callers fall back to the disk read
+  }
+  taskTitleRefCache.set(key, { at: nowMs, map });
+  return map;
+}
+
+/** Read every task's last-commit time at a git ref in ONE `git log --format=%cI --name-only` pass
+ *  (single subprocess). The updated-at source: a develop-derived status ⇒ updated = that file's last
+ *  commit time on develop, so a disk mtime bump after a develop flip no longer moves the display
+ *  (AC2). Returns Map<taskId, epochMs> for ids PRESENT at the ref — the FIRST occurrence of a file in
+ *  newest-first log order is its last commit; absent ids are missing (callers fall back to disk
+ *  mtime). Empty map on any git failure. */
+export function readTaskCommitTimesAtRef(
+  root: string,
+  ref: string,
+  { nowMs = Date.now(), ttlMs = TASK_STATUS_REF_CACHE_TTL_MS, force = false } = {},
+): Map<string, number> {
+  const key = `${root}\n${ref}`;
+  const hit = taskCommitTimesRefCache.get(key);
+  if (!force && hit != null && nowMs - hit.at < ttlMs) return hit.map;
+  const map = new Map<string, number>();
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "--format=%cI", "--name-only", ref, "--", "tasks/"], {
+      encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"],
+    });
+    let cur: number | null = null;
+    for (const line of out.split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t) continue;
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(t)) {
+        cur = Date.parse(t);
+      } else if (cur != null && t.startsWith("tasks/") && t.endsWith(".md")) {
+        const id = t.slice("tasks/".length, -3);
+        if (!map.has(id)) map.set(id, cur); // first occurrence = last commit (log is newest-first)
+      }
+    }
+  } catch {
+    // git unavailable / not a repo / no such ref — empty map, callers fall back to the disk mtime
+  }
+  taskCommitTimesRefCache.set(key, { at: nowMs, map });
+  return map;
+}
+
+/** Read a single task's last-commit time at a ref (`git log -1 --format=%cI ref -- tasks/<id>.md`).
+ *  The /task detail page's `last updated` source — the same develop-derived time as the list's
+ *  updated column (list and detail must agree, not list=done/detail=ready). null when the file has no
+ *  commit at the ref (caller falls back to disk mtime). */
+export function readTaskCommitTimeAtRef(root: string, ref: string, taskId: string): number | null {
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "-1", "--format=%cI", ref, "--", `tasks/${taskId}.md`], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    if (!out) return null;
+    const ms = Date.parse(out);
+    return Number.isFinite(ms) ? ms : null;
+  } catch {
+    return null;
+  }
+}
+
+/** readLive's task-status read: the canonical develop ref first, the on-disk store as fallback. A
+ *  task landed on develop (status done) but not yet synced to the manager working branch's disk still
+ *  reads as done here — the landed task leaves the in-flight view immediately (AC1). A fresh task that
+ *  exists only on disk (not yet committed to develop) falls back to the disk read (AC2). */
+export function readTaskStatusForLive(root: string, taskId: string): TaskStatus | null {
+  const atRef = readTaskStatusAtRef(root, "develop", taskId);
+  return atRef ?? readTaskStatusOnDisk(root, taskId);
 }
 
 /** Task statuses that mean "no worker is currently running for this task" — the terminal/non-live
@@ -1078,6 +1470,9 @@ export function readLive(
       sessionId: null, // no live process ⇒ no live session join
       startedAtMs: nowMs, // no per-task start on the round carrier — "just now", never a fabricated long elapsed
       implCompletedAtMs: null,
+      status: null,
+      phase: "implementing", // round-carrier fallback — readLive re-derives (fan-in lock wins for the fan-in window)
+      suite: null,
       minutes: 0,
       liveness: "unknown",
       blocks: [],
@@ -1106,6 +1501,9 @@ export function readLive(
       sessionId: liveSessionIdForPid(w.pid, sessionHome),
       startedAtMs,
       implCompletedAtMs: null,
+      status: null,
+      phase: "implementing", // the worker process IS the live signal — readLive re-derives (fan-in lock wins)
+      suite: null,
       minutes: Math.max(0, (nowMs - startedAtMs) / 60_000),
       liveness: "alive", // the process IS the live signal — this worker is observably running
       blocks: [],
@@ -1139,7 +1537,7 @@ export function readLive(
   // below applies — but UNCONDITIONAL, because the ghost bug fires precisely when workerInFlight is
   // empty (workerOutcomeOpen is always false) and the merge block below is skipped entirely.
   inFlight = inFlight.filter(
-    (t) => !NON_LIVE_TASK_STATUSES.has(readTaskStatusOnDisk(root, t.taskId)),
+    (t) => !NON_LIVE_TASK_STATUSES.has(readTaskStatusForLive(root, t.taskId)),
   );
 
   // Merge: a task carried by the worker-driver replaces any same-task workflow-events run (the driver
@@ -1151,12 +1549,25 @@ export function readLive(
     const byTask = new Map<string, InFlightTask>();
     for (const t of inFlight) byTask.set(t.taskId, t);
     for (const t of workerInFlight) {
-      if (readTaskStatusOnDisk(root, t.taskId) === TASK_STATUS.DONE) continue;
+      if (readTaskStatusForLive(root, t.taskId) === TASK_STATUS.DONE) continue;
       byTask.set(t.taskId, t);
     }
     inFlight = [...byTask.values()].sort(
       (a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId),
     );
+  }
+
+  // gap-live-fan-in-execution-phase-two-axis: annotate the merged in-flight set with the TWO axes —
+  // lifecycle status (axis 1, from the task store) and execution phase (axis 2, from direct signals:
+  // fan-in lock → worker process → impl-complete → round fallback). The fan-in lock and suite state
+  // carriers are read ONCE here (not per task). A store/carrier read failure degrades to a null
+  // status / implementing fallback — never 500s the page (the header degradation contract).
+  const fanInLockAcquired = readFanInLockAcquiredTasks(root);
+  const suiteState = readFullSuiteState(root);
+  for (const t of inFlight) {
+    t.status = readTaskStatusForLive(root, t.taskId);
+    t.phase = deriveInFlightPhase(t, fanInLockAcquired);
+    t.suite = t.phase === "fan-in" && suiteState != null && suiteState.taskId === t.taskId ? suiteState.view : null;
   }
 
   // Cross-task blocking (gap-webui-cross-task-blocking-visibility): annotate every in-flight task
@@ -2478,7 +2889,7 @@ export async function readManager(root: string): Promise<ManagerResult> {
   };
 }
 
-// ── Tests view (verification-round.jsonl + full-suite-state.json) ──────────────────────────────────
+// ── Tests view (verification-round.jsonl) ─────────────────────────────────────────────────────────
 
 export interface TestRunRecord {
   round: number | null;
@@ -2521,8 +2932,8 @@ export interface TestRunRecord {
   perFile?: { file: string; durationMs: number; passed: boolean; endedAtMs?: number; startedAtMs?: number }[] | null;
   // gap-web-tests-three-sections-round-drift — the round's suite runId (written by the fan-in thin
   // writer, `pre-verified-round-record`). Absent on legacy/full-suite-runner rows → undefined (never a
-  // fabricated ""), the same absent-field contract as buckets/perFile. Lets the /tests page map the
-  // load curve's current runId (full-suite-state.json) back to its round number + startedAt.
+  // fabricated ""), the same absent-field contract as buckets/perFile. Lets the /tests page key the
+  // load curve's suite-load-<runId>.jsonl directly off the ledger row (no full-suite-state.json read).
   runId?: string | null;
 }
 
@@ -2530,12 +2941,9 @@ export interface TestsResult {
   status: ObservationStatus;
   reason: string | null;
   runs: TestRunRecord[];
-  /** Current `.quay/full-suite-state.json` `state` (running|green|red|absent), null when absent. */
-  currentState: string | null;
 }
 
 export const VERIFICATION_ROUND_REL = "../../../.quay/verification-round.jsonl";
-export const FULL_SUITE_STATE_REL = "../../../.quay/full-suite-state.json";
 
 /** Parse one verification-round.jsonl line into a TestRunRecord. Malformed → null (never throw). */
 export function parseVerificationRound(line: string): TestRunRecord | null {
@@ -2644,16 +3052,9 @@ export function readTests(root: string): TestsResult {
     reason = `verification-round.jsonl 读失败：${err instanceof Error ? err.message : String(err)}`;
   }
 
-  let currentState: string | null = null;
-  try {
-    const statePath = path.join(root, ".quay", "full-suite-state.json");
-    if (fs.existsSync(statePath)) {
-      const j = JSON.parse(fs.readFileSync(statePath, "utf8"));
-      currentState = typeof j.state === "string" ? j.state : null;
-    }
-  } catch { currentState = null; }
-
-  return { status: statePathStatus, reason, runs, currentState };
+  // /tests 页是历史/可观测性面，只读数据面载体 verification-round.jsonl（红绿都入账）；控制面
+  // 单状态文件 full-suite-state.json（gate 信号、D7 镜像只写绿、scope 标注）不进入显示层。
+  return { status: statePathStatus, reason, runs };
 }
 
 // ── Sessions view (session-liveness + resolved transcript tails) ───────────────────────────────────

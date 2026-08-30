@@ -1,7 +1,7 @@
 // serve-live.ts — /live + /journal route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readLive, readJournal, type LiveResult, type JournalResult, type JournalSection } from "./observation.ts";
+import { readLive, readJournal, type LiveResult, type JournalResult, type JournalSection, type InFlightPhase, type SuiteStateView } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relativeTime, renderSiteNav, renderMobileChrome, LIVE_STATE_RUNNING_UNWIRED_LABEL, LIVE_STATE_NOT_RUNNING_LABEL } from "./serve-render.ts";
 
 // ── Loop-observation routes (gap-web-cannot-show-what-the-loop-is-doing-now) ────────────────
@@ -46,6 +46,26 @@ export function formatAwaitingDuration(ms: number | null): string {
   return m === 0 ? `${h}h` : `${h}h${m}m`;
 }
 
+/** The execution-phase label for the /live 阶段 column (gap-live-fan-in-execution-phase-two-axis
+ *  AC4). The phase enum is the machine key; the label is human-readable. A null/undefined phase (a
+ *  hand-built task literal missing the field) degrades to —, never a fabricated phase (hard rule ③b). */
+export function phaseLabel(phase: InFlightPhase | null | undefined): string {
+  switch (phase) {
+    case "implementing": return "实现中";
+    case "fan-in": return "fan-in";
+    case "awaiting-land": return "待落地";
+    case "landed": return "已落地";
+    default: return "—";
+  }
+}
+
+/** fan-in 阶段的套件状态后缀（full-suite-state.json — gap-live-fan-in-execution-phase-two-axis）：
+ *  ` · suite green` 之类；无 suite 状态时为 ""（诚实无标注，不伪造「suite 在跑」）。 */
+export function suiteSuffix(suite: SuiteStateView | null): string {
+  if (suite == null || suite.state == null) return "";
+  return ` · suite ${suite.state}`;
+}
+
 export function renderLivePage(live: LiveResult): string {
   // gap-webui-cross-task-blocking-visibility: render the cross-task blocking relation (Touches
   // intersection + depends_on chain) computed by observation.computeInFlightBlocking. A task-id list
@@ -56,8 +76,13 @@ export function renderLivePage(live: LiveResult): string {
       ? ids.map((id) => html`<a href="/task/${encodeURIComponent(id)}">${escapeHtml(id)}</a>`).join(", ")
       : html`<span class="meta">无</span>`;
 
+  // gap-live-fan-in-execution-phase-two-axis (AC4): the 状态 column renders the LIFECYCLE status
+  // (todo/ready/done/needs-human, axis 1) and a NEW 阶段 column renders the execution phase enum
+  // (axis 2) — the two axes are no longer crammed into one label (the old 「实现中 / 已完工待落地」
+  // conflated an execution signal with lifecycle words). 待落地时长 renders only for the
+  // awaiting-land phase (a placeholder — for every other phase).
   const rows = live.inFlight.length > 0 ? html`<table>
-    <tr><th>task id</th><th>run id</th><th>pid</th><th>transcript</th><th>started</th><th>elapsed</th><th>状态</th><th>待落地时长</th><th>阻塞 (blocks)</th><th>被阻塞 (blockedBy)</th></tr>
+    <tr><th>task id</th><th>run id</th><th>pid</th><th>transcript</th><th>started</th><th>elapsed</th><th>状态</th><th>阶段</th><th>待落地时长</th><th>阻塞 (blocks)</th><th>被阻塞 (blockedBy)</th></tr>
     ${live.inFlight.map((t) => html`<tr>
       <td><a href="/task/${encodeURIComponent(t.taskId)}">${escapeHtml(t.taskId)}</a></td>
       <td>${escapeHtml(t.runId)}</td>
@@ -65,8 +90,9 @@ export function renderLivePage(live: LiveResult): string {
       <td>${t.sessionId != null ? html`<a href="/session/${encodeURIComponent(t.sessionId)}">transcript</a>` : html`<span class="meta">—</span>`}</td>
       <td>${escapeHtml(relativeTime(t.startedAtMs))}</td>
       <td>${escapeHtml(t.minutes.toFixed(1))} 分钟</td>
-      <td>${t.implCompletedAtMs == null ? "实现中" : html`<strong>已完工待落地</strong>`}</td>
-      <td>${escapeHtml(formatAwaitingDuration(awaitingLandMs(t)))}</td>
+      <td>${t.status != null ? escapeHtml(t.status) : html`<span class="meta">—</span>`}</td>
+      <td>${t.phase === "fan-in" ? html`<strong>${escapeHtml(phaseLabel(t.phase) + suiteSuffix(t.suite))}</strong>` : escapeHtml(phaseLabel(t.phase))}</td>
+      <td>${escapeHtml(t.phase === "awaiting-land" ? formatAwaitingDuration(awaitingLandMs(t)) : "—")}</td>
       <td>${linkList(t.blocks)}</td>
       <td>${linkList(t.blockedBy)}</td>
     </tr>`).join("\n")}

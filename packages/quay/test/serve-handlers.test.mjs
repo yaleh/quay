@@ -388,15 +388,19 @@ test("load curve: readSuiteLoadSamples parses the sampler's jsonl, skips malform
   }
 });
 
-test("load curve: GET /tests renders the server-side load curve for the current runId", async () => {
+test("load curve: GET /tests renders the server-side load curve for the latest round's runId", async () => {
   const { ws, tasksDir } = makeWorkspace("tests-loadcurve-");
   const cwd0 = process.cwd();
   let server;
   try {
     createStore(tasksDir).write("LC-T", { title: "load curve web tests", status: "todo" });
-    // full-suite-state.json carries the current runId; the sampler's file is keyed by it.
+    // Strict history: the load curve keys off the LATEST ledger round's OWN runId (no
+    // full-suite-state.json read), so the fixture must carry that runId in verification-round.jsonl.
     const runId = "11111111-2222-3333-4444-555555555555";
-    fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId }));
+    const startedAt = new Date().toISOString();
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), `${JSON.stringify({
+      round: 1, startedAt, durationMs: 60000, state: "green", runId,
+    })}\n`);
     fs.writeFileSync(
       path.join(ws, ".quay", `suite-load-${runId}.jsonl`),
       [
@@ -646,9 +650,10 @@ test("AC1/AC2: GET /tests renders a startedAt column per history row (carrier-so
 // the history table = runs[0]. AC1 makes each section name its own round; AC2 surfaces the fallback
 // instead of hiding it; AC3 is the negative control (all three agree when they reference one round).
 
-/** Seed the drift scenario: newest round (red, NO perFile) + an older round (green, WITH perFile),
- *  plus a full-suite-state.json whose runId points at the NEWEST (red) round. The three sections then
- *  reference three DIFFERENT rounds (the proposal's bug). Returns the two runIds. */
+/** Seed the drift scenario: newest round (red, NO perFile) + an older round (green, WITH perFile).
+ *  Strict history — the default page keys the load curve off the NEWEST ledger round's own runId, so
+ *  no full-suite-state.json is seeded at all. The three sections reference three DIFFERENT rounds
+ *  (the proposal's bug). Returns the two runIds. */
 function seedDriftFixture(ws) {
   const t0 = 1724374800000;
   const runIdLatest = "fm-drift-latest-479-aaaaaa";
@@ -658,7 +663,6 @@ function seedDriftFixture(ws) {
     JSON.stringify({ round: 478, startedAt: "2026-08-23T03:14:00.000Z", durationMs: 517000, state: "green", runner: "outer", scope: "worktree", runId: runIdOlder, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/a.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 500, startedAtMs: t0 + 500 - 210 }, { file: "packages/quay/test/b.test.mjs", durationMs: 12, passed: true, endedAtMs: t0 + 6000, startedAtMs: t0 + 6000 - 12 }] }),
     JSON.stringify({ round: 479, startedAt: "2026-08-23T03:33:00.000Z", durationMs: 645000, state: "red", runner: "outer", scope: "worktree", runId: runIdLatest, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 0, fail: 1, cancelled: 0, tests: 2, failures: [] }),
   ].join("\n"));
-  fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "red", runId: runIdLatest, startedAt: "2026-08-23T03:33:00.000Z" }));
   // gap-tests-round-load-curve-time-window-clip — samples must land INSIDE round 479's declared
   // [03:33:00Z, 03:33:00Z+645s] window: the round page now clips the load curve to that window, so
   // out-of-window samples (the old `Date.now()` values, ~2 days later) would be dropped and the
@@ -740,7 +744,6 @@ test("AC3: negative control — all three sections reference the same round cons
     fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
       JSON.stringify({ round: 230, startedAt: "2026-08-23T01:00:00.000Z", durationMs: 500000, state: "green", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/a.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 500, startedAtMs: t0 + 500 - 210 }, { file: "packages/quay/test/b.test.mjs", durationMs: 12, passed: true, endedAtMs: t0 + 6000, startedAtMs: t0 + 6000 - 12 }] }),
     ].join("\n"));
-    fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId, startedAt: "2026-08-23T01:00:00.000Z" }));
     fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
       JSON.stringify({ t: Date.parse("2026-08-23T01:00:00.000Z") + 1000, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
     ].join("\n"));
@@ -780,7 +783,6 @@ function seedFileDetailFixture(ws) {
     JSON.stringify({ round: 230, startedAt: "2026-08-22T02:00:00.000Z", durationMs: 400000, state: "red", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 1, fail: 1, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 1000, startedAtMs: t0 + 790 }, { file: "packages/quay/test/fast.test.mjs", durationMs: 9, passed: true }] }),
     JSON.stringify({ round: 231, startedAt: "2026-08-22T03:00:00.000Z", durationMs: 400000, state: "green", runner: "outer", scope: "worktree", runId, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 150, passed: true, endedAtMs: t0 + 1500, startedAtMs: t0 + 1350 }, { file: "packages/quay/test/onlyonce.test.mjs", durationMs: 77, passed: true }] }),
   ].join("\n"));
-  fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId, startedAt: "2026-08-22T03:00:00.000Z" }));
   fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
     JSON.stringify({ t: t0 + 1300, loadavg: 1.5, cpu_stall: 10.0, mem_avail: 8000.0 }),
     JSON.stringify({ t: t0 + 1400, loadavg: 4.5, cpu_stall: 40.0, mem_avail: 7500.0 }),
@@ -981,9 +983,9 @@ test("AC1: GET /tests?round=N shows THAT round's timeline + load curve (not the 
       JSON.stringify({ round: 510, startedAt: "2026-08-23T01:00:00.000Z", durationMs: 500000, state: "green", runner: "outer", scope: "worktree", runId: runId510, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: true, endedAtMs: t0 + 500, startedAtMs: t0 + 290 }] }),
       JSON.stringify({ round: 511, startedAt: "2026-08-23T02:00:00.000Z", durationMs: 400000, state: "green", runner: "outer", scope: "worktree", runId: runId511, commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [], perFile: [{ file: "packages/quay/test/fast.test.mjs", durationMs: 12, passed: true, endedAtMs: t0 + 6000, startedAtMs: t0 + 5988 }] }),
     ].join("\n"));
-    // full-suite-state.json points at the LATEST runId (default page = round 511); round 510's own
-    // runId has its own sampler file, so ?round=510 must read THAT, not the current runId.
-    fs.writeFileSync(path.join(ws, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", runId: runId511 }));
+    // Strict history: the default page keys the load curve off runs[0] = round 511's own runId; round
+    // 510's runId has its own sampler file, so ?round=510 must read THAT (the selected round), not the
+    // latest. No full-suite-state.json is seeded.
     // gap-tests-round-load-curve-time-window-clip — samples land INSIDE their round's declared window
     // (round 510 = [01:00Z, 01:00Z+500s], round 511 = [02:00Z, 02:00Z+400s]); the round page now clips
     // to that window, so the old 2023-dated samples would be dropped and the heading assertions break.
@@ -1179,6 +1181,173 @@ test("AC2: /tests/file and /tests?round=N both clip through the SAME shared filt
     const roundPage = await get(port, "/tests?round=570");
     const roundPoints = (roundPage.body.match(/class="git-svg-commit"/g) ?? []).length;
     assert.equal(roundPoints, 3, `round page clips to the round window (keeps 3, got ${roundPoints})`);
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-tests-load-curve-time-window-fallback — two-level load resolution (runId exact hit →
+// window fallback). AC1: a broken-key round (runId ≠ the load file's key, the #692 era) still shows
+// its curve via the window fallback. AC2: runId exact hit wins over the fallback (no merge).
+// AC3: no matching load file / a legacy no-durationMs round → no curve, never a 500. ─────────────
+
+test("AC1: a broken-key round (runId ≠ load-file key) still shows its load curve via the time-window fallback", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-fallback-ac1-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const start = Date.parse("2026-08-29T17:28:27.282Z"); // round #692's own startedAt
+    const durationMs = 60000;
+    const brokenRunId = "wk-prod-1788022868"; // the #692-era red-record key (no such load file)
+    createStore(tasksDir).write("FB-A1", { title: "window fallback web tests", status: "todo" });
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 692, startedAt: "2026-08-29T17:28:27.282Z", durationMs, state: "red", runId: brokenRunId, pass: 0, fail: 1, cancelled: 0, tests: 1, failures: [] }),
+    ].join("\n"));
+    // The REAL load file is keyed by the runner UUID / fm-* token (the mismatch this task recovers).
+    // Its samples fall inside round #692's [startedAt, startedAt+durationMs] window.
+    fs.writeFileSync(path.join(ws, ".quay", "suite-load-fm-gap-692-runner-token.jsonl"), [
+      JSON.stringify({ t: start + 10000, loadavg: 1.5, cpu_stall: null, mem_avail: null }),
+      JSON.stringify({ t: start + 20000, loadavg: 3.5, cpu_stall: null, mem_avail: null }),
+      JSON.stringify({ t: start + 30000, loadavg: 5.5, cpu_stall: null, mem_avail: null }),
+    ].join("\n"));
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests?round=692");
+    assert.equal(r.status, 200, "GET /tests?round=692 returns 200");
+    assert.ok(r.body.includes("负载曲线"), "the broken-key round still has a load-curve section");
+    assert.ok(r.body.includes("<polyline"), "the curve is server-rendered SVG");
+    const points = (r.body.match(/class="git-svg-commit"/g) ?? []).length;
+    assert.equal(points, 3, `window fallback recovered all 3 in-window samples (got ${points})`);
+
+    // The default (latest) round shares the SAME resolution path — with one round it is round 692.
+    const defaultPage = await get(port, "/tests");
+    assert.ok(defaultPage.body.includes("<polyline"), "the default (latest) round also recovers via window fallback");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2: runId exact hit wins over the window fallback (priority — no regression, no foreign-file merge)", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-fallback-ac2-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const start = Date.parse("2026-08-30T01:00:00.000Z");
+    const runId = "fm-correct-key-11111111";
+    createStore(tasksDir).write("FB-A2", { title: "runId priority tests", status: "todo" });
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 700, startedAt: "2026-08-30T01:00:00.000Z", durationMs: 60000, state: "green", runId, pass: 1, fail: 0, cancelled: 0, tests: 1, failures: [] }),
+    ].join("\n"));
+    // The exact-hit file carries 2 in-window samples; a FOREIGN file (wrong key) also overlaps the
+    // window with 2 of its own samples. The exact hit must win — 2 points, not 4 (no fallback merge).
+    fs.writeFileSync(path.join(ws, ".quay", `suite-load-${runId}.jsonl`), [
+      JSON.stringify({ t: start + 10000, loadavg: 1.0, cpu_stall: null, mem_avail: null }),
+      JSON.stringify({ t: start + 20000, loadavg: 2.0, cpu_stall: null, mem_avail: null }),
+    ].join("\n"));
+    fs.writeFileSync(path.join(ws, ".quay", "suite-load-fm-other-key.jsonl"), [
+      JSON.stringify({ t: start + 15000, loadavg: 9.0, cpu_stall: null, mem_avail: null }),
+      JSON.stringify({ t: start + 25000, loadavg: 9.5, cpu_stall: null, mem_avail: null }),
+    ].join("\n"));
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests?round=700");
+    assert.equal(r.status, 200, "GET /tests?round=700 returns 200");
+    const points = (r.body.match(/class="git-svg-commit"/g) ?? []).length;
+    assert.equal(points, 2, `exact hit kept its own 2 samples, not merged with the foreign file (got ${points})`);
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC3: a broken-key round with NO matching load file (and a legacy no-durationMs round) shows no curve, never a 500", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-fallback-ac3-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    createStore(tasksDir).write("FB-A3", { title: "window fallback negative tests", status: "todo" });
+    // Two rounds: 710 has a runId that maps to nothing and a window with no overlapping load file;
+    // 711 is a legacy row (no durationMs) with no runId — both must degrade to no-curve, no 500.
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 710, startedAt: "2026-08-30T02:00:00.000Z", durationMs: 60000, state: "red", runId: "wk-prod-no-such-file", pass: 0, fail: 1, cancelled: 0, tests: 1, failures: [] }),
+      JSON.stringify({ round: 711, startedAt: "2026-08-30T02:30:00.000Z", state: "red", pass: 0, fail: 1, cancelled: 0, tests: 1, failures: [] }),
+    ].join("\n"));
+    // A load file whose samples are FAR outside both rounds' windows (must not be matched).
+    fs.writeFileSync(path.join(ws, ".quay", "suite-load-fm-far-away.jsonl"), [
+      JSON.stringify({ t: Date.parse("2026-08-20T00:00:00.000Z") + 10000, loadavg: 9.0, cpu_stall: null, mem_avail: null }),
+    ].join("\n"));
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r710 = await get(port, "/tests?round=710");
+    assert.equal(r710.status, 200, "GET /tests?round=710 returns 200 (no 500)");
+    assert.ok(!r710.body.includes("<polyline"), "no matching load file → no curve");
+    assert.ok(!r710.body.includes("<h2>负载曲线"), "no load-curve section rendered (the focus note mentioning 负载曲线 is not a curve)");
+
+    const r711 = await get(port, "/tests?round=711");
+    assert.equal(r711.status, 200, "GET /tests?round=711 returns 200 (legacy no-durationMs tolerated)");
+    assert.ok(!r711.body.includes("<polyline"), "legacy no-window round → no curve");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1 (file page): /tests/file recovers a broken-key round's load fragment via the SAME window fallback", async () => {
+  const { ws, tasksDir } = makeWorkspace("tests-fallback-file-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    const t0 = Date.parse("2026-08-29T18:00:00.000Z");
+    createStore(tasksDir).write("FB-FILE", { title: "file window fallback tests", status: "todo" });
+    // A broken-key round (runId maps to no load file) whose slow.test.mjs carried BOTH timestamps,
+    // spanning [t0+90000, t0+100000]. The real load file is keyed by an fm-* token.
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
+      JSON.stringify({ round: 693, startedAt: "2026-08-29T18:00:00.000Z", durationMs: 120000, state: "red", runId: "wk-prod-broken-9999", pass: 0, fail: 1, cancelled: 0, tests: 1, failures: [], perFile: [{ file: "packages/quay/test/slow.test.mjs", durationMs: 10000, passed: false, endedAtMs: t0 + 100000, startedAtMs: t0 + 90000 }] }),
+    ].join("\n"));
+    fs.writeFileSync(path.join(ws, ".quay", "suite-load-fm-broken-file-999.jsonl"), [
+      JSON.stringify({ t: t0 + 95000, loadavg: 3.0, cpu_stall: null, mem_avail: null }),
+    ].join("\n"));
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const r = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs");
+    assert.equal(r.status, 200, "GET /tests/file returns 200");
+    assert.ok(r.body.includes("运行期间负载曲线片段"), "the file page renders the load-fragment section");
+    assert.ok(r.body.includes("<polyline"), "the fragment is a server-rendered curve (window fallback hit)");
+    assert.ok(!r.body.includes("该文件起止窗口内无采样点"), "not the empty-fragment note (the fallback found a sample)");
   } finally {
     if (server) {
       server.close();

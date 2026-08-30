@@ -1204,6 +1204,55 @@ test("pool < floor but no qualified candidate ⇒ no promotions", (t) => {
   assert.equal(byId["gap-child"].depsReady, false);
 });
 
+// ── DEPENDS_ON READS DEVELOP REF (gap-ready-pool-depends-on-status-stale-read) ─────────────────────
+// The depends_on/parent statusOf in depsReadyFor used to read the `allTasks` Map — built from the
+// manager working branch's DISK (a stale agent-proxy, 硬规则 4b) — so a dependency already `done` on
+// develop still reported blocking. The fix reads the canonical develop ref via readTaskStatusAtRef.
+// AC1/AC3: dep done on develop + stale disk ⇒ deps-ready (not blocking). AC2: dep genuinely not done
+// on develop ⇒ still blocking (fail-closed unchanged). Needs a REAL git repo (the ref read is
+// `git cat-file --batch`), created inline like the git-history tests above.
+
+test("depends_on statusOf reads develop ref, not the stale disk allTasks (gap-ready-pool-depends-on-status-stale-read AC1/AC2/AC3)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-depref-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+
+  // Deps as they exist ON DEVELOP: gap-dep-done is done; gap-dep-todo is genuinely todo.
+  writeTask(root, "gap-dep-done", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-dep-todo", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+  fs.writeFileSync(path.join(root, ".gitkeep"), "base\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "deps as committed on develop");
+  git("branch", "-q", "develop"); // develop ← the snapshot where gap-dep-done is done
+
+  // The manager working branch's DISK goes STALE: gap-dep-done flips back to todo on disk, while
+  // develop still has it done. (gap-dep-todo stays todo on both — the AC2 negative control.)
+  writeTask(root, "gap-dep-done", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+
+  // Two todo candidates, each depending on one dep (patched in after writeTask — writeTask has no
+  // dependsOn param).
+  for (const [id, dep] of [["gap-cand-done", "gap-dep-done"], ["gap-cand-todo", "gap-dep-todo"]]) {
+    writeTask(root, id, {
+      status: "todo", labels: ["gap"], parent: null, children: [],
+      body: fourArtifactBody({ touches: [`- code/${id}.ts (new)`] }),
+    });
+    const f = path.join(root, "tasks", `${id}.md`);
+    fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace("parent: null", `depends_on:\n  - ${dep}\nparent: null`));
+  }
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  const byId = Object.fromEntries(r.candidates.map((c) => [c.id, c]));
+  assert.equal(byId["gap-cand-done"].depsReady, true,
+    "dep done on develop ⇒ deps-ready even though the disk allTasks view is stale (todo)");
+  assert.equal(byId["gap-cand-todo"].depsReady, false,
+    "dep genuinely not done on develop ⇒ still blocking (fail-closed unchanged)");
+});
+
 // ── COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC2/AC3) ─────────────────────
 // The structural deadlock: a compound parent (`role: compound`, status ready NOT done) is only done
 // once ALL its children are done (parent-done-iff-children, DIR-026), so a child waiting on its
@@ -3779,4 +3828,51 @@ test("dispatch reads task status from the develop ref, not the stale working tre
   // Negative control: WITHOUT the develop read (the old disk read), the stale `ready` WOULD be seen.
   const rDisk = analyzeTasks({ tasksDir, root });
   assert.equal(rDisk.ready.includes("gap-stale-status"), true, "the stale working tree alone would still see it ready (the defect)");
+});
+
+// ── PROMOTION DECISION READS DEVELOP (tasks/gap-dispatch-reads-stale-main-checkout-task-status, AC6) ──
+// The write side (gap-ff-propagate-…, 1e7fb9be4) flips develop to `ready` and RESTORES the manager
+// working tree's disk to the pre-promotion `todo`. `ready-pool-check --apply` must therefore JUDGE
+// candidates from the develop ref — a disk read re-promotes the same task every tick (duplicate
+// same-content commits). This pins the promotion PATH (--apply), not just the dispatch-read path.
+
+test("AC6 — --apply promotion decision reads develop: develop=ready + disk=todo ⇒ no re-promotion", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-ac6-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "develop", "-q", ".");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  // develop: the task is ALREADY promoted (ready) — the write side flipped it there.
+  writeTask(root, "gap-promoted", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "gap-promoted: promoted to ready on develop");
+  // Stale disk: the write side restored the working tree to the pre-promotion status (todo, self-touch).
+  git("checkout", "-q", "-b", "manager-stale");
+  writeTask(root, "gap-promoted", gapTask("gap-promoted"));
+  git("add", ".");
+  git("commit", "-q", "-m", "gap-promoted: restore todo on disk");
+
+  // Falsifiability: develop carries ready; the stale working tree carries todo.
+  assert.equal(readTaskStatusAtRef(root, "develop", "gap-promoted"), "ready", "develop carries ready");
+  assert.match(fs.readFileSync(path.join(root, "tasks", "gap-promoted.md"), "utf8"), /^status:\s*todo/m, "stale disk carries todo");
+
+  // Negative control: the disk-read analysis (no taskReadRef) sees the stale todo as an eligible
+  // candidate — the exact re-promotion defect this AC closes.
+  const rDisk = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.equal(rDisk.promotions.some((p) => p.id === "gap-promoted"), true, "negative control: disk-read sees the stale todo as a candidate (the defect)");
+
+  // The promotion path: --apply must judge from develop ⇒ already-ready ⇒ zero promotions, zero writes.
+  const script = path.resolve(__dirname, "..", "scripts", "ready-pool-check.ts");
+  const out = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--cap", "3", "--floor-mult", "1", "--apply"],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.should_apply, false, "AC6: develop=ready ⇒ no promotion recommended (⛔ 仍读盘上、重复晋升 ⇒ 假)");
+  assert.equal(parsed.applied_promotions.length, 0, "AC6: zero promotions applied");
+  // The disk stays todo — the promotion did NOT re-land.
+  assert.match(fs.readFileSync(path.join(root, "tasks", "gap-promoted.md"), "utf8"), /^status:\s*todo/m, "AC6: disk stays todo (no duplicate promotion)");
 });

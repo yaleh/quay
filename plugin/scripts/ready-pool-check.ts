@@ -1625,7 +1625,7 @@ export function isCompoundTask(task) {
   return readFrontField(task.frontmatterRaw, "role") === "compound";
 }
 
-function depsReadyFor(task, allTasks) {
+function depsReadyFor(task, allTasks, root, develop = "develop") {
   // ALL prerequisites — parent AND every depends_on entry (gap-prerequisite-gates-prose-invisible-
   // to-mechanisms AC2: prereqs live in relation edges and the author→ready gate reads the SAME field
   // the dispatch check reads). Each must be done; a missing file fails closed.
@@ -1645,7 +1645,14 @@ function depsReadyFor(task, allTasks) {
   // AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（单一实现，⛔ 不各写一遍
   // 「逐个查 status !== done」的循环）。statusOf 返回依赖的 status；Parent/dep 文件缺失 ⇒ null ⇒
   // 非 done ⇒ fail closed（conservative, not dispatchable）。
+  // gap-ready-pool-depends-on-status-stale-read：statusOf 原从 allTasks Map 读依赖状态，而 allTasks
+  // 由主检出 disk 构建（硬规则 4b 的陈旧代理量）——依赖已在 develop done 仍报 blocking。改为读
+  // canonical develop ref（readTaskStatusAtRef，与 (乙) gap-dispatch-reads-stale-main-checkout-
+  // task-status 统一 task 自身 status 的读源）。ref 读成功即权威；ref 读不可用（非 git fixture
+  // root / 依赖不在 ref）退回 allTasks 内存 status（既有行为，null ⇒ fail closed）。
   return allDepsDone(deps, (depId) => {
+    const refStatus = root ? readTaskStatusAtRef(root, develop, depId) : null;
+    if (refStatus !== null) return refStatus;
     const p = allTasks.get(depId);
     return p ? p.status : null;
   });
@@ -1690,7 +1697,7 @@ export function maxMutuallyDisjointSubset(parsed, expand) {
   return best;
 }
 
-function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask = new Map(), parentRefCount = new Map(), dependedOnCount = new Map()) {
+function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask = new Map(), parentRefCount = new Map(), dependedOnCount = new Map(), develop = "develop") {
   const kind = classifyKind(id);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
@@ -1699,7 +1706,7 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // but is a silent global dispatch lock while in flight. Gate it AT PROMOTION so the fix-worker
   // narrows it before it ever enters the pool (overbroad → can't land; dir-glob → locks all peers).
   const touchesNarrow = checkTouchesNarrow(task.body);
-  const depsReady = depsReadyFor(task, allTasks);
+  const depsReady = depsReadyFor(task, allTasks, root, develop);
   const four = artifactsComplete(task.body);
   const parsed = parseTouches(task.body);
   // AC1 (gap-ac46-pool-criteria-in-gate): the pool-layer static criteria that slot-refill's step-4
@@ -1813,7 +1820,7 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
  *  target is the outer's selection (the checker carries no stage-goal input, AC3); the checker only
  *  answers "is this task mechanically promotable, and what command promotes it". `task` is
  *  `undefined` when the id is not in the store → found:false. */
-export function buildTargetedPromotion(id, task, root, allTasks) {
+export function buildTargetedPromotion(id, task, root, allTasks, develop = "develop") {
   if (!task) {
     return { id, found: false, eligible: false, floor_independent: true, reason: "task-not-found" };
   }
@@ -1900,7 +1907,7 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
     };
   }
   const four = artifactsComplete(task.body);
-  const depsReady = depsReadyFor(task, allTasks);
+  const depsReady = depsReadyFor(task, allTasks, root, develop);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
   const touchesNarrow = checkTouchesNarrow(task.body);
@@ -2155,7 +2162,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     const st = selfTouchCheck(task.body, id);
     if (!st.ok && !st.compound) reasons.push("self-touch-missing-c8");
     if (checkTaskTouchesResolve(task.body, root).majorityMissing) reasons.push("touches-majority-missing");
-    if (!depsReadyFor(task, allTasks)) reasons.push("deps-not-ready");
+    if (!depsReadyFor(task, allTasks, root, develop)) reasons.push("deps-not-ready");
     const fourR = artifactsComplete(task.body);
     if (!fourR.complete) reasons.push(`four-artifacts-incomplete (${fourR.missing.join(",")})`);
     if (reasons.length > 0) {
@@ -2265,7 +2272,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   for (const [id, t] of allTasks) {
     if (t.status !== TASK_STATUS.TODO) continue;
     if (isFixture(t) || isParked(t)) continue; // never promotion candidates
-    candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount));
+    candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount, develop));
   }
   // AC4: disjointness FIRST (how many pool/in-flight tasks the candidate is pairwise-disjoint
   // from) — the non-negotiable concurrency-safety axis (AC3: priority NEVER overrides it); then
@@ -2328,7 +2335,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     for (const [id, t] of allTasks) {
       if (t.status !== TASK_STATUS.TODO) continue;
       if (isFixture(t) || isParked(t)) continue;
-      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount);
+      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount, develop);
       ranked.push({ id, kind: c.kind, kindOrder: c.kindOrder, relevance: c.relevance, eligible: c.eligible, reason: c.relevance.reason });
     }
     ranked.sort(
@@ -2345,7 +2352,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // targeted op is a SEPARATE operation from the bulk refill. Supplemental only: bulk `promotions`
   // and the rest of the output are computed exactly as before (AC3).
   const targeted_promotion = targetedId
-    ? { ...buildTargetedPromotion(targetedId, allTasks.get(targetedId), root, allTasks), pool, floor, cap }
+    ? { ...buildTargetedPromotion(targetedId, allTasks.get(targetedId), root, allTasks, develop), pool, floor, cap }
     : null;
 
   return {
@@ -2696,9 +2703,14 @@ function main(argv) {
   // legal `ready.back="todo"` transition the task body names. The detector half is always in the JSON;
   // this flag is the write half. Precedence: --revaluate-apply over --apply (a single run either
   // promotes OR revalues, never both mid-flight).
+  // PROMOTION DECISION READS DEVELOP (gap-dispatch-reads-stale-main-checkout-task-status AC6): the
+  // `--apply` write path must JUDGE candidates from the develop ref, not the disk — the write side
+  // (gap-ff-propagate-…, 1e7fb9be4) flips develop and restores the disk to the pre-promotion status,
+  // so a disk-read here would re-promote the same task every tick (duplicate same-content commits).
+  // Same taskReadRef as the dispatch-read arm below: develop is the single source of truth.
   let result;
   if (revaluateApply) result = applyRevaluations(base);
-  else result = apply ? applyPromotions(base) : analyzeTasks({ ...base, taskReadRef: develop });
+  else result = apply ? applyPromotions({ ...base, taskReadRef: develop }) : analyzeTasks({ ...base, taskReadRef: develop });
   if (process.env.CHECKER_COST_SKIP !== "1") {
     recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: result.pool, load: getLoad1() });
   }

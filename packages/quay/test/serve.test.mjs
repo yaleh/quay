@@ -36,6 +36,7 @@ import http from "node:http";
 import { startServer, computeStaleStatus, isStale, processStartMs } from "../src/serve.ts";
 import { composePayload } from "../src/action.ts";
 import { readLive, readJournal } from "../src/observation.ts";
+import { renderLivePage } from "../src/serve-live.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 // gap-web-cannot-show-what-the-loop-is-doing-now (AC2): /live's in-flight list must match
@@ -1885,6 +1886,100 @@ async function main() {
         "AC1: a round-carried task whose on-disk status is done is dropped (stale round snapshot cleared)");
     } finally {
       fs.rmSync(roundRoot, { recursive: true, force: true });
+    }
+  }
+
+  // gap-live-fan-in-execution-phase-two-axis AC1-AC4 — the two-axis split (lifecycle status vs
+  // execution phase) + the fan-in phase derived from the fan-in lock events carrier.
+  {
+    // AC1 (fan-in phase): a fan-in lock acquire WITHOUT a release places the task in phase=fan-in
+    // (NOT implementing), even though the round carrier (pid null, implCompletedAtMs null) would
+    // otherwise read as implementing. The lock events carrier uses the production shape (acquire/
+    // release per hold, written by worker-driver's FAN_IN_LOCK_HOLDER).
+    const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-live-fan-in-lock-"));
+    try {
+      fs.mkdirSync(path.join(lockRoot, ".quay"), { recursive: true });
+      fs.mkdirSync(path.join(lockRoot, "tasks"), { recursive: true });
+      fs.writeFileSync(path.join(lockRoot, "tasks", "gap-fan-in-1.md"), "---\nid: gap-fan-in-1\nstatus: ready\n---\nbody\n");
+      // round carrier names the task (mechanical fan-in window: worker exited, no /proc, no outcome).
+      fs.writeFileSync(path.join(lockRoot, ".quay", "worker-round.jsonl"), JSON.stringify({
+        round: 1, runId: "wk-prod-x", pid: 4242, at: new Date().toISOString(),
+        action: "dispatch", inFlight: 1, pool: 0, stopReason: null,
+        cold_start_inflight: [], in_flight_tasks: ["gap-fan-in-1"],
+      }) + "\n");
+      // fan-in lock events: acquire with NO release ⇒ fan-in in progress.
+      fs.writeFileSync(path.join(lockRoot, ".quay", "fan-in-lock-events.jsonl"), [
+        JSON.stringify({ event: "acquire", ts: "2026-08-30T08:00:00Z", epoch: 1788076800, taskId: "gap-fan-in-1", pid: 111, runId: "wk-prod-x", agentId: null }),
+      ].join("\n") + "\n");
+      // full-suite-state.json: the suite is running for this task.
+      fs.writeFileSync(path.join(lockRoot, ".quay", "full-suite-state.json"), JSON.stringify({
+        state: "running", runner: "outer", scope: "main", startedAt: "2026-08-30T08:00:00Z", finishedAt: null, durationMs: null, laneCount: 16, taskId: "gap-fan-in-1", runId: "wk-prod-x",
+      }));
+
+      const live = readLive(lockRoot, { nowMs: Date.now(), liveWorkers: [] });
+      const t = live.inFlight.find((x) => x.taskId === "gap-fan-in-1");
+      assert(t, "AC1: the round-carried task is in-flight");
+      assert(t.phase === "fan-in", `AC1: fan-in lock acquire-without-release ⇒ phase=fan-in (got ${t.phase}) — ⛔ still implementing ⇒ 假`);
+      assert(t.suite != null && t.suite.state === "running", "AC1: the fan-in task carries the suite state (full-suite-state.json)");
+    } finally {
+      fs.rmSync(lockRoot, { recursive: true, force: true });
+    }
+
+    // AC2 (implementing): a /proc worker process present with NO lock ⇒ phase=implementing, and the
+    // lifecycle status is read from the store (axis 1).
+    {
+      const impRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-live-fan-in-impl-"));
+      try {
+        fs.mkdirSync(path.join(impRoot, "tasks"), { recursive: true });
+        fs.writeFileSync(path.join(impRoot, "tasks", "gap-impl-1.md"), "---\nid: gap-impl-1\nstatus: ready\n---\nbody\n");
+        const nowMs = Date.now();
+        const live = readLive(impRoot, { nowMs, liveWorkers: [{ taskId: "gap-impl-1", pid: "4242", startedAtMs: nowMs - 30_000 }] });
+        const t = live.inFlight.find((x) => x.taskId === "gap-impl-1");
+        assert(t, "AC2: the live worker task is in-flight");
+        assert(t.phase === "implementing", `AC2: /proc worker + no lock ⇒ phase=implementing (got ${t.phase}) — ⛔ fan-in ⇒ 假`);
+        assert(t.status === "ready", `AC2: lifecycle status read from the store (got ${t.status})`);
+      } finally {
+        fs.rmSync(impRoot, { recursive: true, force: true });
+      }
+    }
+
+    // AC3 (landed removal): a task whose on-disk status is done leaves inFlight entirely.
+    {
+      const doneRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-live-fan-in-done-"));
+      try {
+        fs.mkdirSync(path.join(doneRoot, "tasks"), { recursive: true });
+        fs.writeFileSync(path.join(doneRoot, "tasks", "gap-done-1.md"), "---\nid: gap-done-1\nstatus: done\n---\nbody\n");
+        fs.writeFileSync(path.join(doneRoot, "tasks", "gap-done-2.md"), "---\nid: gap-done-2\nstatus: ready\n---\nbody\n");
+        const nowMs = Date.now();
+        const live = readLive(doneRoot, {
+          nowMs,
+          liveWorkers: [
+            { taskId: "gap-done-1", pid: "1001", startedAtMs: nowMs - 10_000 },
+            { taskId: "gap-done-2", pid: "1002", startedAtMs: nowMs - 10_000 },
+          ],
+        });
+        const ids = new Set(live.inFlight.map((x) => x.taskId));
+        assert(!ids.has("gap-done-1"), "AC3: a done task is NOT in-flight (landed ⇒ removed) — ⛔ still in-flight ⇒ 假");
+        assert(ids.has("gap-done-2"), "AC3: a ready task with a live worker IS in-flight (negative control — not over-trimmed)");
+      } finally {
+        fs.rmSync(doneRoot, { recursive: true, force: true });
+      }
+    }
+
+    // AC4 (two-axis render): 状态列 = lifecycle (axis 1), 阶段列 = phase enum (axis 2) — the two
+    // axes are no longer crammed into one label (the old 「已完工待落地」 is gone).
+    {
+      const base = { status: "ok", reason: null, concurrency: 2, cpuPressure: null, liveState: "running", liveExplanation: null, activity: null };
+      const t = (taskId, status, phase) => ({
+        taskId, runId: `worker-${taskId}`, pid: "4242", sessionId: null, startedAtMs: Date.now() - 60_000,
+        implCompletedAtMs: null, status, phase, suite: null, minutes: 1, liveness: "alive", blocks: [], blockedBy: [],
+      });
+      const out = renderLivePage({ ...base, inFlight: [t("gap-live-1", "ready", "implementing"), t("gap-live-2", "done", "fan-in")] });
+      assert(out.includes("<th>状态</th>") && out.includes("<th>阶段</th>"), "AC4: /live table has 状态 and 阶段 columns (two axes)");
+      assert(out.includes("ready"), "AC4: the 状态 column renders the lifecycle status (ready)");
+      assert(out.includes("实现中"), "AC4: the 阶段 column renders the implementing phase label");
+      assert(out.includes("fan-in"), "AC4: the 阶段 column renders the fan-in phase label");
+      assert(!out.includes("已完工待落地"), "AC4: the old conflated 已完工待落地 label is gone");
     }
   }
 

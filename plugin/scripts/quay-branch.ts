@@ -24,7 +24,6 @@ export const MEMBERS: InstrumentSpec[] = [
       : { file: "claim-task.sh", kind: "bash" } },
   { name: "release-task", file: "release-task.sh", kind: "bash", description: "释放任务（合并 + 删分支）" },
   { name: "fork-baseline", file: "fork-baseline.ts", kind: "ts", description: "fork 基线（--develop/--integration）" },
-  { name: "integration-branch-model", file: "integration-branch-model.ts", kind: "ts", description: "集成分支模型（--fork-baseline / 分支判定）" },
   { name: "integration-batch-merge", file: "integration-batch-merge.sh", kind: "bash", description: "集成批合并（--develop/--integration）" },
   { name: "sync-lag-check", file: "sync-lag-check.sh", kind: "bash", description: "同步滞后检查" },
 ];
