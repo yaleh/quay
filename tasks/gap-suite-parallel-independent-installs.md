@@ -1,7 +1,7 @@
 ---
 id: gap-suite-parallel-independent-installs
 title: runtime AC6 与 e2e-A1 的内部两次独立真 install 转 async spawn 并行（Promise.all，2 并发封顶）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -25,10 +25,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制）：AC6 与 A1 内部两次 install 并行启动（helper 记录两 spawn 启动时刻，间隔 < 单次 install 时长）。
-- [ ] AC2（能取假，负控制）：并行后两 install 的 config 仍真不同（AC6）、字节恒等仍成立（A1），断言不回归。
-- [ ] AC3（独立性）：两次 install 的 worktree_root / tmux session / workspace 互不相同（round-161 独立性不变量）。
-- [ ] AC4（测量，AC2 纪律）：同 selected set 前后对照，AC6/A1 墙钟下降且 0-cancelled。
+- [x] AC1（能取假，机制）：AC6 与 A1 内部两次 install 并行启动（helper 记录两 spawn 启动时刻，间隔 < 单次 install 时长）。
+- [x] AC2（能取假，负控制）：并行后两 install 的 config 仍真不同（AC6）、字节恒等仍成立（A1），断言不回归。
+- [x] AC3（独立性）：两次 install 的 worktree_root / tmux session / workspace 互不相同（round-161 独立性不变量）。
+- [ ] AC4（测量，AC2 纪律）：同 selected set 前后对照，AC6/A1 墙钟下降且 0-cancelled。（待外部）
 
 ## Definition of Done
 

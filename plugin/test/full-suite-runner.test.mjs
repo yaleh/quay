@@ -1,5 +1,6 @@
 // @test-group governance
 // @load-sensitive child-spawn
+// @load-sensitive-entry 2026-08-27 child-spawn (spawns real full-suite-runner.ts + fake-suite child; triage 判 other-task defer 而非 isolate-rerun — gap-full-suite-runner-test-poll-timeout-load-flake)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — every test spawns a
 //   real node runner (full-suite-runner.ts) + a real bash fake-suite child; under full-suite concurrency
 //   the runner bootstrap + child spawn is start/schedule-delayed and the wall-clock polls flaked
