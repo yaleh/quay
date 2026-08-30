@@ -65,7 +65,7 @@ extra: {}
 - plugin/scripts/quay-init.sh（task-status.ts laydown 显式清单）
 - plugin/test/abi-task-status-typing.test.mjs (new)（类型守卫 + 非法值 fail-closed 负控制）
 - plugin/test/quay-init-loop-core.test.mjs（laydown 期望集含 task-status.ts）
-- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts= 297 bump）
+- plugin/test/driver-cli.test.mjs（KERNEL_DEPS 补 task-status.ts：driver-filters.ts 迁移后 import ./task-status.ts，hermetic temp root 缺它 ⇒ ERR_MODULE_NOT_FOUND 挡 driver 启动）
 - tasks/gap-abi-status-lifecycle-vocab-scattered-no-named-type.md（自身）
 
 ## Needs-Human

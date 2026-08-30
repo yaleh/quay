@@ -1272,6 +1272,20 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     const t = get(id);
     if (!t) return { id, ok: false, reason: "not found" };
 
+    // gap-abi-status-lifecycle-vocab-scattered-no-named-type: the disk-read
+    // boundary coerces an out-of-vocab on-disk status to `todo` and flags it
+    // `invalid-status` in extra.malformed (fail-closed at the parse boundary).
+    // The gate must NOT treat that coerced `todo` as a genuine todo — otherwise
+    // a stray `status: reddy` would pass author->ready. Recover the original
+    // value for an actionable reason and fail closed with gate:"unknown" (the
+    // pre-coercion contract that task-check/gate-correctness tests pin).
+    const malformed = Array.isArray(t.extra?.malformed) ? (t.extra.malformed as string[]) : [];
+    if (malformed.includes("invalid-status")) {
+      const raw = readRaw(id);
+      const rawStatus = raw !== null ? (parse(raw).frontmatter.status as string | undefined) : undefined;
+      return { id, gate: "unknown", ok: false, reason: `unrecognized status ${rawStatus}` };
+    }
+
     if (t.status === TASK_STATUS.TODO) {
       const gate = "author->ready";
       // Shape dispatch (ADR-001 re-landed; gap-the-dod-gate-encodes-a-retired-
