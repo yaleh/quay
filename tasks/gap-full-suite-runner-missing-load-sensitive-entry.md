@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-runner-missing-load-sensitive-entry
 title: full-suite-runner.test.mjs 缺 @load-sensitive-entry → AC4 分级闸红挡所有 full-suite fan-in（develop 全库 rot）
-status: ready
+status: done
 labels:
   - gap
   - defect
