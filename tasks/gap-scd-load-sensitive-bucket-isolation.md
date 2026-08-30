@@ -23,9 +23,8 @@ SCD 族（`plugin/test/session-liveness-scd-*.test.mjs`，8 文件）是 KNOWN-L
 
 1. **`group_of()` 未定义 → 误判，已证伪**：`group_of` 定义在 `plugin/scripts/runner-grouping.ts:30`（`scripts/test.sh:807` `source` 引入，机械 fan-in 的 merge develop 已带入）。实测三态返回正确：engine → engine、lowconc → lowconc、serial → serial。当时 grep「全无」是只 grep 了 test.sh 本体、漏了 source 进的 `runner-grouping.ts`。AC5 单测已锁定真实 `group_of`（bash source + 调用，非复刻正则）。
 2. **suite 非零退出但 fail 0 → 误判，已证伪**：suite 是**真红**——serial 相 `session-liveness-events.test.mjs:407` AC2 失败（`quay-init --loop` 报 `referenced-not-landed`，见 Issue 3）。当时只看到 main 相 `ℹ fail 0 (5407 pass)` 而漏了 serial 相 `ℹ fail 1 (123 pass)`；退出码 1 **正确反映**该失败，无退出码 bug。AC6 单测锁定 bucket 退出码聚合（bucket_code=0 初值 + 三相非零合并 + `exit "${bucket_code}"`）。
-3. **`referenced-not-landed`（quay-init 落地集漂移）—— develop 级，非本任务 delta，已随 14:55 merge-develop 带入修复**：`quay-init --loop` 报 `referenced ⊆ landed violated`——shipped skills/tick docs 引用了大量文件（round3/4/5 逐轮递减：117 → 118 → 36 个）但不在落地集、也不在 `init/SKILL.md` 声明。**疑 gap-ac154（profile 抽层）破坏 `plugin/skills/init/SKILL.md` 落地集声明，修法=找单点破坏，不是逐个加 120 个文件。** round5（14:11）suite 仍红 36 文件——当时 merge develop（b12e4ab61）**未**带入完整修复；修复由 14:55 的 merge-develop 带入的 develop 内容提供。**当前 worktree 实测**：按 `session-liveness-events.test.mjs:407` 逐字调用 `quay-init --loop` → **exit 0、0 violations**（AC7 实质已绿）。本任务不触碰 `plugin/skills/init/SKILL.md`，Touches 不含它。**本轮（2026-08-29 晚）确定性复核**：非并发单跑 `session-liveness-events.test.mjs` AC2 → **pass 1/fail 0**（8.8s，无 referenced-not-landed）；故 17:40/18:18 两轮 suite 的 referenced-not-landed 红（62 文件）判为并发 torn-read 假阳性（`gap-verify-referenced-landed-concurrency-hardening-insufficient` 已载的已知态），非真实落地集回归——AC7 确定性面绿。
-4. **`reap-wait note` 未发出 —— develop 级，非本任务 delta，已修复**：`tmux-leak-scan.test.mjs` R2 在 16-lane 负载下 reap-wait 默认值过短，`97f0b4f05` 已改为宿主派生 `reap_wait_default`。round5 复核 `tmux-leak-scan.test.mjs` 7/7 绿（含 R2）。本任务不触碰 `plugin/scripts/tmux-leak-scan.sh`，Touches 不含它。
-5. **round 700（21:44Z，commit 7f5e2bc23 = 本分支 HEAD）full-suite red = fail:3，全部 develop 级 load-flake，非本任务 delta**：`verification-round.jsonl` round 700 三条失败——`session-liveness-events.test.mjs` AC2（`quay-init --loop` VERBATIM 落地，×2，29.5s/30.3s）+ `packages/quay-native/test/relation-sync.test.mjs`（×1，`@test-group product` 主并发相）。两者都不在本任务 Touches，且隔离单跑均绿（`relation-sync` 1/1 本轮实测；`session-liveness-events` AC2(:407) 已在 Issue #3 按非并发单跑证绿）。`relation-sync` 有独立任务 `befb4f336`（曾路由 load-sensitive 相后又被 `8d0920765` 移回 product 组）。本任务 `scripts/test.sh` 改动只在 `--buckets` 分支，而 `scripts/test.sh` 是 hub 文件 ⇒ fan-in 走 full `run_selected`、结构上不经过 bucket 分支 ⇒ 不可能影响该 full-suite 红。**⇒ delta 无剩余实现；suite 红为 develop 级并发 load-flake，需 develop 侧修 flake 或重跑后落地。**
+3. **`referenced-not-landed`（quay-init 落地集漂移）—— develop 级，非本任务 delta，已随 14:55 merge-develop 带入修复**：`quay-init --loop` 报 `referenced ⊆ landed violated`——shipped skills/tick docs 引用了大量文件（round3/4/5 逐轮递减：117 → 118 → 36 个）但不在落地集、也不在 `init/SKILL.md` 声明。**疑 gap-ac154（profile 抽层）破坏 `plugin/skills/init/SKILL.md` 落地集声明，修法=找单点破坏，不是逐个加 120 个文件。** round5（14:11）suite 仍红 36 文件——当时 merge develop（b12e4ab61）**未**带入完整修复；修复由 14:55 的 merge-develop 带入的 develop 内容提供。worktree 侧实测：按 `session-liveness-events.test.mjs:407` 逐字调用 `quay-init --loop` → exit 0、0 violations。**⛔ 该状态需一次真实 suite 复核后勾选 AC7。** 本任务不触碰 `plugin/skills/init/SKILL.md`，Touches 不含它。
+4. **`reap-wait note` 未发出 —— develop 级，非本任务 delta，已修复**：`tmux-leak-scan.test.mjs` R2 在 16-lane 负载下 reap-wait 默认值过短，`97f0b4f05` 已改为宿主派生 `reap_wait_default`。round5 复核 `tmux-leak-scan.test.mjs` 7/7 绿（含 R2）。**⛔ 该状态需一次真实 suite 复核后勾选 AC8。** 本任务不触碰 `plugin/scripts/tmux-leak-scan.sh`，Touches 不含它。
 
 ## Acceptance Criteria
 
@@ -34,13 +33,13 @@ SCD 族（`plugin/test/session-liveness-scd-*.test.mjs`，8 文件）是 KNOWN-L
 - [x] AC3（能取假，单测）：新增/扩展单测断言 bucket 路径把 `lowconc`/`serial` 文件路由到独立子相。**证据**：`plugin/test/suite-bucket-load-sensitive-isolation.test.mjs`（AC2/AC3 结构 pin：split 循环 + 三相各自并发 knob + main 相只跑 `bucket_main_files`），绿。
 - [x] AC4（能取假，回归）：`session-liveness-scd-fire.test.mjs` 与 `session-liveness-scd-progress.test.mjs` 在并发 ≥4 下不 flake。**证据**：`--test-concurrency=4` 单趟 pass 2/fail 0（本轮复核）；3×@concurrency4 回归绿见分支 commit `2f47f7e20`。
 - [x] AC5（能取假，group_of 定义）：`group_of` 已定义且正确返回 `@test-group`。**证据**：定义在 `plugin/scripts/runner-grouping.ts:30`（test.sh source 引入，非自造不存在函数）；单测 AC5 直接调真实 `group_of` 断言 engine/lowconc/serial 三态 + 缺声明默认 engine，绿。
-- [x] AC6（能取假，suite 退出码）：bucket 路径测试全绿（fail 0）+ leak-scan clean 时退出码 0。**证据**：bucket 退出码聚合正确（bucket_code=0 + 三相非零合并 + leak-scan 合并 + `exit "${bucket_code}"`），单测 AC6 锁定；main 相 `suite-lpt-runner.mjs` 实测 fail 0 → exit 0。
-- [x] AC7（能取假，referenced ⊆ landed）：`quay-init --loop` 不再报 `referenced ⊆ landed violated`。**证据**：14:55 merge-develop 带入的 develop 内容已修复；当前 worktree 按 `session-liveness-events.test.mjs:407` 逐字调用实测 exit 0、0 violations（36 文件红 → 0）。develop 级修复，非本任务 delta。
-- [x] AC8（能取假，reap-wait note）：`tmux-leak-scan.test.mjs` R2 绿。**证据**：round5 复核 `tmux-leak-scan.test.mjs` 7/7 绿（含 R2）；round5 suite 日志 R1/R6 绿。develop 级修复（`97f0b4f05` 宿主派生 reap_wait_default），非本任务 delta。
+- [ ] AC6（能取假，suite 退出码）：bucket 路径测试全绿（fail 0）+ leak-scan clean 时 `scripts/test.sh --buckets` 退出码 0。
+- [ ] AC7（能取假，referenced ⊆ landed）：`quay-init --loop` 不再报 `referenced ⊆ landed violated`（`session-liveness-events.test.mjs:407` AC2 绿 / `quay-init.test.mjs` AC2 绿）。
+- [ ] AC8（能取假，reap-wait note）：`tmux-leak-scan.test.mjs` R2 绿——match 在 reap-wait 窗口内清除时 note 正常 emit（`/cleared during reap-wait/` 匹配）。
 
 ## Definition of Done
 
-SCD 族重新分类为 `lowconc`，bucket 路径像全量 suite 一样对 load-sensitive 测试降并发隔离，负载下不再 flake/hang；`group_of` 复用现有机制（非自造）；bucket 退出码聚合正确；两个全局红（referenced-not-landed / reap-wait note）已由 develop 侧内容修复并实测验证。合并冲突已解决、worktree 干净后，`scripts/test.sh --buckets <scd>` 全绿 + exit 0，fan-in 成功落地。
+SCD 族重新分类为 `lowconc`，bucket 路径像全量 suite 一样对 load-sensitive 测试降并发隔离，负载下不再 flake/hang；`group_of` 复用现有机制（非自造）；bucket 退出码聚合正确；两个全局红（referenced-not-landed / reap-wait note）经真实 suite 复核确认后，`scripts/test.sh --buckets <scd>` 全绿 + exit 0，fan-in 成功落地。
 
 ## Touches
 
@@ -48,3 +47,8 @@ SCD 族重新分类为 `lowconc`，bucket 路径像全量 suite 一样对 load-s
 - scripts/test.sh（bucket 路径补 `@test-group` 分相）
 - plugin/test/suite-bucket-load-sensitive-isolation.test.mjs（新增，bucket 隔离断言单测）
 - tasks/gap-scd-load-sensitive-bucket-isolation.md（自身）
+## Needs-Human
+
+**执行 2026-08-29T22:47:16.503Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
