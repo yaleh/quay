@@ -2089,7 +2089,9 @@ async function commitTaskStatusChange(
  *  worktree 的 .archguard/ 在机械 fan-in 成功后随 `git worktree remove` 被删 ⇒ 记录必须持久化到
  *  root（主检出）的 .archguard/metrics-history.jsonl，post-landing 才可查（硬规则④推论三：能产出≠已产出）。
  *  archguard-runner 每次跑 append 一条，镜像最后一条（本次新写）；worktree 无记录（测试缝的 fake 命令
- *  不写）⇒ no-op 非失败。镜像失败 fail-closed（记录是「被某判据读」半边，载体写失败 ≠ 静默通过）。 */
+ *  不写）⇒ no-op 非失败。镜像写失败【诚实返回 ok:false】但【不阻塞 fan-in】——调用方把结构判定
+ *  （archguard-structure 步，执行语义，失败仍挡）与 metrics 载体写（观测，须 open）解耦：本函数只
+ *  报告写失败，fail-open 的 WARN + 继续由调用方负责（gap-archguard-metrics-mirror-non-blocking）。 */
 function mirrorArchguardMetrics(worktree: string, root: string): { ok: boolean; reason: string | null } {
   const wtFile = path.join(worktree, ".archguard", "metrics-history.jsonl");
   let wtText: string;
@@ -2282,7 +2284,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     }
     return verdictOf(step, a.status, summary, logFile);
   };
-  // 无裸流的机械步（reason 已结构化：flip-done / archguard-metrics / acquire-fan-in-lock / exception）。
+  // 无裸流的机械步（reason 已结构化：flip-done / acquire-fan-in-lock / exception）。
   const failClean = (step: string, summary: string, exitCode: number | null = null): MechanicalFanInResult =>
     verdictOf(step, exitCode, summary, null);
 
@@ -2360,7 +2362,15 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     a = await step("archguard-structure", archguardCmd, 600_000);
     if (!a.ok) return fail("archguard-structure", a);
     const mirrored = mirrorArchguardMetrics(worktree, root);
-    if (!mirrored.ok) return failClean("archguard-metrics", mirrored.reason ?? "mirror failed");
+    if (!mirrored.ok) {
+      // 观测镜像写失败 fail-open：结构判定已在上一步 archguard-structure 挡（执行语义，失败仍 fail）；
+      // metrics 从 worktree 镜像到生产载体是【观测】，写失败 WARN（stderr + fan-in 日志）不 failClean——
+      // 人 2026-08-30 裁定「观测写不得 gate 落地」；后续重试/修复时镜像可补。
+      // （gap-archguard-metrics-mirror-non-blocking）
+      const mirrorWarn = mirrored.reason ?? "mirror failed";
+      process.stderr.write(`WARN archguard-metrics: ${mirrorWarn}\n`);
+      trace({ step: "archguard-metrics", exit: 1, wall_ms: 0, ok: false, warn: true, reason: mirrorWarn });
+    }
 
     // 6. scoped 门 + doc 检查（必须绿）。
     const scopedCmd = opts.scopedGateCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
