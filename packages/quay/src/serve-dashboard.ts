@@ -186,7 +186,7 @@ export async function handleDashboard(
   ]);
   let tests: TestsResult;
   try { tests = readTests(cfg.workspaceRoot); } catch {
-    tests = { status: "error", reason: "internal", runs: [], currentState: null };
+    tests = { status: "error", reason: "internal", runs: [] };
   }
   let history: GitHistoryResult;
   try { history = readGitHistory(cfg.workspaceRoot); } catch {
