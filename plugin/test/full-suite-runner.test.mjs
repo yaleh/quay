@@ -1,5 +1,6 @@
 // @test-group serial
 // @load-sensitive child-spawn
+// @load-sensitive-entry 2026-08-28 child-spawn (spawns real full-suite-runner.ts + bash fake-suite child); poll-timeout flake under load 11.81/16 lanes (gap-full-suite-runner-test-poll-timeout-load-flake)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — every test spawns a
 //   real node runner (full-suite-runner.ts) + a real bash fake-suite child; under full-suite concurrency
 //   the runner bootstrap + child spawn is start/schedule-delayed and the wall-clock polls flaked

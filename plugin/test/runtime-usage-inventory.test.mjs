@@ -360,17 +360,16 @@ after(() => {
       t.skip("real sessions dir not present");
       return;
     }
+    // Rolling recent window (a fixed historical window rots: its transcripts get compacted and the
+    // positive control's `executed` drops to 0, flipping `scripts/test.sh` from live → ci-only). The
+    // suite runs scripts/test.sh every round, so the trailing 24h always carries live executions.
     const inv = buildInventory(
       REPO_ROOT,
       sessionsDir,
-      "2026-08-02T11:00:00Z",
-      "2026-08-03T02:54:00Z",
+      new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+      new Date().toISOString(),
       72,
-      { innerSessions: new Set([
-        "3bbd3095-de01-467c-8c6e-abb00f342e53",
-        "82ecfb6a-94ba-462d-ac8d-dfa0984e6dbf",
-        "47eb704e-a8a7-4e2f-9ad6-e419f4dc51eb",
-      ]) },
+      {},
     );
     const byRel = new Map(inv.scripts.map((s) => [s.relPath, s]));
     const testSh = byRel.get("scripts/test.sh");
