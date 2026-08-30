@@ -747,6 +747,12 @@ export function effectiveParallelism(cpuTimeS: number | null | undefined, durati
 
 export interface SuiteRoundRecord {
   round: number;
+  // gap-verification-round-record-runid — the suite's canonical runId (the SAME value the state write
+  // carries and the SAME key the load sampler uses for suite-load-<runId>.jsonl / measure-history). The
+  // round record carrying it makes the row self-describing (its OWN load key rides the ledger row).
+  // Absent on legacy rows (红绿 pre-fix records had no runId) — a reader must tolerate its absence
+  // (same absent-field contract as commit/scope).
+  runId?: string;
   startedAt: string;
   durationMs: number;
   laneCount: number;
@@ -2114,6 +2120,9 @@ export async function run(argv: string[]): Promise<number> {
       try {
         appendVerificationRound(stateDir, {
           round: 0, // computed from prior line count inside appendVerificationRound
+          // gap-verification-round-record-runid — the crash-trap row carries the SAME canonical runId
+          // so a crashed round is also self-describing (load-key connectable) like the normal path.
+          runId,
           startedAt,
           durationMs: Date.parse(at) - Date.parse(startedAt),
           laneCount,
@@ -3308,6 +3317,10 @@ export async function run(argv: string[]): Promise<number> {
   // from the authoritative total when available (or null fail-open).
   appendVerificationRound(stateDir, {
     round: 0, // computed from prior line count inside appendVerificationRound
+    // gap-verification-round-record-runid — the round's canonical runId (the SAME value the state
+    // write carries and the SAME key the load sampler uses for suite-load-<runId>.jsonl). The round
+    // record now self-describes (its OWN load key rides the ledger row).
+    runId,
     startedAt,
     durationMs,
     laneCount,
