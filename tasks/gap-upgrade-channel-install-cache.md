@@ -1,7 +1,7 @@
 ---
 id: gap-upgrade-channel-install-cache
 title: upgrade 通道 3 测试的参数化 install 缓存——consumer-config/旧源码内容寻址，245s → ~100s
-status: ready
+status: done
 labels:
   - gap
 parent: null
