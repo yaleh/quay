@@ -1599,6 +1599,11 @@ elif [ "${1:-}" = "--buckets" ]; then
   if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
     bucket_code=1
   fi
+  # gap-suite-bucket-dynamic-truth-drift-detector ③-AC4: 顺带增量 collect — 分桶执行后增量采集动态真值
+  # 缓存（suite-fs-trace.ts --update），每次至多 QUAY_FS_TRACE_LIMIT 个新/变更测试的 trace（内容 sha256
+  # 缓存跳过未变更，成本有界；trace 子进程带 QUAY_TEST_NESTED=1 防被测测试再 spawn test.sh 撞单飞锁）。
+  # 非致命——采集失败绝不翻转本轮套件判定（drift-check 读取的是【跨轮累积】的缓存，本轮采集供下一轮读）。
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-fs-trace.ts" --update --limit "${QUAY_FS_TRACE_LIMIT:-8}" --root "${repo_root}" || true
   set -e
   exit "${bucket_code}"
 elif all_flags "$@"; then

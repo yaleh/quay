@@ -1217,8 +1217,16 @@ test("AC4 — a runner CRASH mid-round writes the phase records via the trap (st
     assert.ok(typeof rec.runId === "string" && rec.runId.length > 0, "the crash-trap round row carries a runId");
     assert.equal(rec.runId, s.runId, "crash-trap record.runId === the state write's runId");
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(dir, { recursive: true, force: true });
+    // gap-full-suite-runner-crash-test-rmSync-enotempty-flaky — the runner spawns a DETACHED
+    // suite-load-sampler that writes <root>/.quay/suite-load-<runId>.jsonl.pid at startup and is never
+    // reaped on the crash path (process.exit). Under load the sampler's delayed .pid write lands
+    // DURING this teardown rmSync — it mkdirs `.quay` back into `root` after rmSync already rmdir'd it,
+    // so `rmdir(root)` fails ENOTEMPTY. (A detached child's cwd does NOT block rmdir; the cause is the
+    // .pid write, not the orphan suite child — leftover evidence: /tmp/fsr-crash-* each hold exactly
+    // one suite-load-*.jsonl.pid.) maxRetries/retryDelay re-list and delete the recreated `.quay` + .pid;
+    // the sampler exits on its first state check (state=red), so the .pid write is one-shot.
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
 
@@ -4910,8 +4918,16 @@ test("AC6 — a runner that dies mid-run from an uncaughtException writes state=
     assert.ok(s.finishedAt !== null && s.finishedAt !== undefined, "crashed state has a finishedAt (terminal, not early)");
     assert.equal(typeof s.durationMs, "number", "crashed state has a durationMs");
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(dir, { recursive: true, force: true });
+    // gap-full-suite-runner-crash-test-rmSync-enotempty-flaky — the runner spawns a DETACHED
+    // suite-load-sampler that writes <root>/.quay/suite-load-<runId>.jsonl.pid at startup and is never
+    // reaped on the crash path (process.exit). Under load the sampler's delayed .pid write lands
+    // DURING this teardown rmSync — it mkdirs `.quay` back into `root` after rmSync already rmdir'd it,
+    // so `rmdir(root)` fails ENOTEMPTY. (A detached child's cwd does NOT block rmdir; the cause is the
+    // .pid write, not the orphan suite child — leftover evidence: /tmp/fsr-crash-* each hold exactly
+    // one suite-load-*.jsonl.pid.) maxRetries/retryDelay re-list and delete the recreated `.quay` + .pid;
+    // the sampler exits on its first state check (state=red), so the .pid write is one-shot.
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
 

@@ -10,7 +10,6 @@
 {"file":"plugin/test/ac36-sortkey-criterion-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/ac56-recommended-deordered-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/ac61-staleness-disposition-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/ac66-a22-agent-id-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/ac69-slot-queue-gap-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/accounting-emit.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/adr016-screen-use-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
@@ -51,12 +50,10 @@
 {"file":"plugin/test/execute-suite-fix-scope-gate.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["--for-task"]}
 {"file":"plugin/test/execution-policy.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/fan-in-execute-paths.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["__GROUP__","--for-task","--static-checks","runner-grouping","lane","concurrency"]}
-{"file":"plugin/test/fan-in-ff-executor-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task","lane"]}
 {"file":"plugin/test/fan-in-ff-protocol-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/fan-in-materialize-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/fan-in-runid-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/fan-in-ts-typecheck-gate.test.mjs","judgment":"M","mechanism":"P+S+M","signal":[]}
-{"file":"plugin/test/fan-in-workflow-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/fast-mode-loop-tick-dedup.test.mjs","judgment":"S","mechanism":"S","signal":["concurrency"]}
 {"file":"plugin/test/fast-mode-telemetry-gitignore.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/fast-mode-telemetry-halt.test.mjs","judgment":"S","mechanism":"S","signal":["--group"]}
@@ -65,7 +62,6 @@
 {"file":"plugin/test/full-suite-runner.test.mjs","judgment":"S","mechanism":"S+M","signal":["__GROUP__","--test-concurrency","lane","concurrency"]}
 {"file":"plugin/test/gate-dispatch-coverage.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/gitignore.test.mjs","judgment":"M","mechanism":"S","signal":[]}
-{"file":"plugin/test/halt-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/inner-blocked-signal.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/inner-exec-mode-report.test.mjs","judgment":"M","mechanism":"P+S+M","signal":[]}
 {"file":"plugin/test/inner-forensics.test.mjs","judgment":"M","mechanism":"S","signal":[]}
@@ -75,7 +71,6 @@
 {"file":"plugin/test/inner-wakeup-heartbeat-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/inner-wakeup-heartbeat.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/instrument-failure-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/integration-branch-model.test.mjs","judgment":"S","mechanism":"S+M","signal":["--group"]}
 {"file":"plugin/test/judgment-consumer-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/known-load-sensitive.test.mjs","judgment":"S","mechanism":"S+M","signal":["runner-grouping","lane"]}
 {"file":"plugin/test/l1-delivery-surface-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["--group"]}
@@ -172,7 +167,6 @@
 {"file":"plugin/test/session-liveness-sweep.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/session-liveness-target.test.mjs","judgment":"S","mechanism":"S","signal":["concurrency"]}
 {"file":"plugin/test/session-topology.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task","concurrency"]}
-{"file":"plugin/test/slot-free-trigger.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/slot-refill-heartbeat.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/slot-refill.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["--for-task","runner-grouping","lane","concurrency"]}
 {"file":"plugin/test/slot-visibility.test.mjs","judgment":"S","mechanism":"S","signal":["concurrency"]}
@@ -214,7 +208,6 @@
 {"file":"plugin/test/touches-one-entry-one-path-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/touches-parser-parity.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["concurrency"]}
 {"file":"plugin/test/trend-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task","lane"]}
-{"file":"plugin/test/unverified-integration-task-ids.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/verification-round.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/verify-deliver-coldstart.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/verify-delivery-surface.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
