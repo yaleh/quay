@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTests, readTaskStatusAtRef } from "../src/observation.ts";
+import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef } from "../src/observation.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
 import { taskRunsBlock } from "../src/serve-task.ts";
 
@@ -1129,43 +1129,6 @@ test("readTranscriptTail surfaces queue-operation as an external preview entry",
     assert.equal(r.messages[0].role, "external");
     assert.ok(r.messages[0].text.includes("外部消息被吸收进当前回合"), "list preview carries the label");
     assert.ok(r.messages[0].text.includes("hello absorbed"), "list preview carries the content");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-// gap-web-tests-current-state-green-wash — /tests 头部「当前 suite-state」曾只读 full-suite-state.json，
-// 而机械 fan-in 的 D7 镜像只写绿（mirror-full-suite-state.ts「green — the only state the fan-in
-// mirrors」），红桶轮次只入 verification-round.jsonl ⇒ 红跑被绿洗成绿。readTests 现按双载体完成时刻
-// 取较新者：round 账本有更新完成的终态轮 ⇒ 显示它。
-test("readTests currentState merges full-suite-state + verification-round by completion time (green-wash)", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tests-cs-"));
-  try {
-    const quay = path.join(dir, ".quay");
-    fs.mkdirSync(quay, { recursive: true });
-    const rounds = path.join(quay, "verification-round.jsonl");
-    const state = path.join(quay, "full-suite-state.json");
-    // 红轮在 01:47 完成；full-suite-state 的绿在 01:30 完成（旧于红轮）——绿洗 case。
-    fs.writeFileSync(rounds, `${JSON.stringify({
-      round: 707, startedAt: "2026-08-30T01:32:50.000Z", durationMs: 851563, state: "red",
-    })}\n`);
-    fs.writeFileSync(state, JSON.stringify({
-      state: "green", startedAt: "2026-08-30T01:23:46.000Z",
-      finishedAt: Math.floor(Date.parse("2026-08-30T01:30:42.000Z") / 1000), durationMs: 415679,
-    }));
-    assert.equal(readTests(dir).currentState, "red", "red round completed later ⇒ headline red (not green-washed)");
-    // 反向：full-suite-state 的绿比 round 新 ⇒ 保留绿。
-    fs.writeFileSync(state, JSON.stringify({
-      state: "green", startedAt: "2026-08-30T01:50:00.000Z",
-      finishedAt: Math.floor(Date.parse("2026-08-30T01:52:00.000Z") / 1000), durationMs: 120000,
-    }));
-    assert.equal(readTests(dir).currentState, "green", "green completed later ⇒ headline green");
-    // running 透传：正在跑的 suite 压过任何已完成的轮次。
-    fs.writeFileSync(state, JSON.stringify({ state: "running", startedAt: "2026-08-30T02:00:00.000Z" }));
-    assert.equal(readTests(dir).currentState, "running", "running state passes through");
-    // full-suite-state 缺失 ⇒ 退化到 round 账本最新轮。
-    fs.rmSync(state);
-    assert.equal(readTests(dir).currentState, "red", "no full-suite-state ⇒ latest round's state");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

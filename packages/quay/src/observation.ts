@@ -2602,7 +2602,7 @@ export async function readManager(root: string): Promise<ManagerResult> {
   };
 }
 
-// ── Tests view (verification-round.jsonl + full-suite-state.json) ──────────────────────────────────
+// ── Tests view (verification-round.jsonl) ─────────────────────────────────────────────────────────
 
 export interface TestRunRecord {
   round: number | null;
@@ -2645,8 +2645,8 @@ export interface TestRunRecord {
   perFile?: { file: string; durationMs: number; passed: boolean; endedAtMs?: number; startedAtMs?: number }[] | null;
   // gap-web-tests-three-sections-round-drift — the round's suite runId (written by the fan-in thin
   // writer, `pre-verified-round-record`). Absent on legacy/full-suite-runner rows → undefined (never a
-  // fabricated ""), the same absent-field contract as buckets/perFile. Lets the /tests page map the
-  // load curve's current runId (full-suite-state.json) back to its round number + startedAt.
+  // fabricated ""), the same absent-field contract as buckets/perFile. Lets the /tests page key the
+  // load curve's suite-load-<runId>.jsonl directly off the ledger row (no full-suite-state.json read).
   runId?: string | null;
 }
 
@@ -2654,12 +2654,9 @@ export interface TestsResult {
   status: ObservationStatus;
   reason: string | null;
   runs: TestRunRecord[];
-  /** Current `.quay/full-suite-state.json` `state` (running|green|red|absent), null when absent. */
-  currentState: string | null;
 }
 
 export const VERIFICATION_ROUND_REL = "../../../.quay/verification-round.jsonl";
-export const FULL_SUITE_STATE_REL = "../../../.quay/full-suite-state.json";
 
 /** Parse one verification-round.jsonl line into a TestRunRecord. Malformed → null (never throw). */
 export function parseVerificationRound(line: string): TestRunRecord | null {
@@ -2768,41 +2765,9 @@ export function readTests(root: string): TestsResult {
     reason = `verification-round.jsonl 读失败：${err instanceof Error ? err.message : String(err)}`;
   }
 
-  // ── 当前 suite-state（绿洗修复，纯显示）──────────────────────────────────────────────
-  // full-suite-state.json 是机械 fan-in 的 D7 镜像写的，只写绿（mirror-full-suite-state.ts：
-  // 「green — the only state the fan-in mirrors」）；红桶轮次只入 verification-round.jsonl。
-  // 两个载体单看都不完整——full-suite-state 带最近绿、round 账本带最近红。按完成时刻取较新者，
-  // 让 /tests 页头部反映真实最近一次 suite 轮次（红跑不再被绿洗成绿）。
-  let currentState: string | null = null;
-  try {
-    const statePath = path.join(root, ".quay", "full-suite-state.json");
-    const j = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : null;
-    currentState = j && typeof j.state === "string" ? j.state : null;
-    // running = 有 suite 正在跑，直接显示（round 账本只有终态轮次）；终态才做双载体合并。
-    if (currentState !== "running") {
-      const latestRound = runs[0] ?? null;
-      // full-suite-state 的 finishedAt 是 epoch 秒（mirror/build 写）；缺时由 startedAt+durationMs 推导。
-      const fsDoneMs =
-        typeof j?.finishedAt === "number" && Number.isFinite(j.finishedAt)
-          ? j.finishedAt * 1000
-          : j && typeof j.startedAt === "string" && typeof j.durationMs === "number"
-            ? Date.parse(j.startedAt) + j.durationMs
-            : null;
-      let roundDoneMs: number | null = null;
-      if (latestRound && latestRound.startedAt && latestRound.durationMs != null) {
-        const s = Date.parse(latestRound.startedAt);
-        if (!Number.isNaN(s)) roundDoneMs = s + latestRound.durationMs;
-      }
-      if (roundDoneMs != null && (fsDoneMs == null || roundDoneMs > fsDoneMs)) {
-        currentState = latestRound.state ?? currentState;
-      }
-    }
-  } catch {
-    // full-suite-state 读失败 → 退化为 round 账本的最新轮（runs 在上方 try 已解析）。
-    currentState = runs[0]?.state ?? null;
-  }
-
-  return { status: statePathStatus, reason, runs, currentState };
+  // /tests 页是历史/可观测性面，只读数据面载体 verification-round.jsonl（红绿都入账）；控制面
+  // 单状态文件 full-suite-state.json（gate 信号、D7 镜像只写绿、scope 标注）不进入显示层。
+  return { status: statePathStatus, reason, runs };
 }
 
 // ── Sessions view (session-liveness + resolved transcript tails) ───────────────────────────────────
