@@ -1,7 +1,7 @@
 ---
 id: gap-ff-propagate-structurally-broken-filing-must-target-develop
 title: ff-propagate 结构不可用——立案落 main/manager-doc 靠 ff 到 develop 永远分叉；立案必须直接落 develop
-status: todo
+status: ready
 labels:
   - gap
 parent: null
