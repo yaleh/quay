@@ -1,7 +1,7 @@
 ---
 id: gap-continue-cycle-misses-ff-not-fast-forward-redispatch
 title: continue-cycle 漏 ff-not-fast-forward 续做识别——RECOMMENDED 的 ff-failed 任务 2h 不重派
-status: todo
+status: ready
 labels:
   - gap
   - defect
