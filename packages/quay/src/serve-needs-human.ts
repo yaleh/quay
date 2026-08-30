@@ -27,6 +27,7 @@ import type { ProviderClient } from "./provider-client.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, relativeTime, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
 import { readNeedsHumanLedger } from "./observation.ts";
+import { TASK_STATUS } from "./abi.ts";
 
 /** Extract the `阻碍原因：` line from a task body's `## Needs-Human` section (written by
  *  promotion-driver.markNeedsHuman). Returns null when the section/line is absent — a needs-human
@@ -103,7 +104,7 @@ export async function handleNeedsHuman(
   //    body round-trip is not the cost it is on /tasks (which strips bodies).
   let active: ActiveRow[] = [];
   try {
-    const r = await client.taskList({ status: "needs-human" });
+    const r = await client.taskList({ status: TASK_STATUS.NEEDS_HUMAN });
     active = (r.tasks ?? [])
       .filter((t): t is typeof t & { id: string } => typeof t.id === "string" && t.id.length > 0)
       .map((t) => ({

@@ -123,6 +123,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { TASK_STATUS } from "./task-status.ts";
 // AC150-3：资源门判定 + 控制态 + 身份闸 + MCP 控制面，抽到 driver-shared.ts 供 promotion-driver 复用
 // （函数级复用，⛔ 非复制粘贴）。本文件仍 re-export 保持旧 import 面（worker-driver.test.mjs 等）。
 import {
@@ -694,7 +695,7 @@ export function cleanupOrphanWorktree(
 
 /** verified 态的证据载体：status 已读为 "done"、worktree 已确认无残留。 */
 export interface LandingEvidence {
-  status: "done";
+  status: typeof TASK_STATUS.DONE;
   worktreePresent: false;
 }
 
@@ -755,7 +756,7 @@ export function computeLandingState(root: string, taskId: string, landedSha: str
   const status = readTaskStatus(root, taskId);
   return verifyIndependently(
     {
-      value: { status: "done", worktreePresent: false },
+      value: { status: TASK_STATUS.DONE, worktreePresent: false },
       verifiedBy: "task status=done ∧ no leftover worktree (independent task-side read)",
       failedReason: landingFailedReason(status, worktreePresent, taskId),
       notEvaluatedReason:
@@ -765,10 +766,10 @@ export function computeLandingState(root: string, taskId: string, landedSha: str
     },
     () => {
       // 证伪优先：任一独立量可读且证伪 ⇒ failed（⛔ 不等另一量）。
-      if (status !== null && status !== "done") return false; // status 可读且 ≠ done
+      if (status !== null && status !== TASK_STATUS.DONE) return false; // status 可读且 ≠ done
       if (worktreePresent === true) return false; // 残留 worktree
       // 证真：status=done ∧ 确认无残留。
-      if (status === "done" && worktreePresent === false) return true;
+      if (status === TASK_STATUS.DONE && worktreePresent === false) return true;
       // 读不到（status 或 worktree 读不到，且未证伪）⇒ not-evaluated（⛔ 不伪造成 failed）。
       return null;
     },
@@ -778,7 +779,7 @@ export function computeLandingState(root: string, taskId: string, landedSha: str
 /** 证伪理由（独立判据证伪落地时用：status≠done 或 残留 worktree，逐条拼）。 */
 function landingFailedReason(status: string | null, worktreePresent: boolean | null, taskId: string): string {
   const parts: string[] = [];
-  if (status !== null && status !== "done") parts.push(`task status=${status} (not done)`);
+  if (status !== null && status !== TASK_STATUS.DONE) parts.push(`task status=${status} (not done)`);
   else if (status === null) parts.push("task status unreadable");
   if (worktreePresent === true) parts.push(`leftover worktree task/${taskId} still present`);
   return parts.join(" and ");

@@ -13,6 +13,7 @@ import {
   workerDriverActive,
 } from "./observation.ts";
 import type { LiveWorker, WorkerOutcomeRecord } from "./observation.ts";
+import { TASK_STATUSES } from "./abi.ts";
 
 export async function handleTaskList(
   req: IncomingMessage,
@@ -215,7 +216,7 @@ export async function handleTaskList(
     .join("\n");
   // QW-003: filter navigation links — All, todo, ready, done, needs-human, superseded.
   // Active filter is shown as plain text; others as links.
-  const statuses = ["todo", "ready", "done", "needs-human", "superseded"];
+  const statuses = TASK_STATUSES;
   // QX-004: prefix navigation links — All + each distinct task-id prefix.
   // A "prefix" is the part of a task id before the first `-` (e.g. "QX" from "QX-001").
   // Only rendered when 2+ distinct prefixes exist across ALL tasks (single-experiment

@@ -86,6 +86,24 @@ export function classifyPath(s: string): Bucket | null {
 }
 
 /**
+ * Classify a set of repo-relative paths (a dynamic-truth trace's reads+writes) into the bucket set
+ * they land in — the SAME classifyPath classifier, applied to RUNTIME-observed paths rather than
+ * statically-extracted references. Exported for suite-bucket-drift-check.ts (the dynamic half of the
+ * static-vs-truth comparison): the checker unions this with the static `bucketSetOf` and flags a
+ * bucket present here but absent there as a `static-vs-truth-drift`.
+ * @param {readonly string[]} paths — repo-relative paths (already normalized).
+ * @returns {Set<Bucket>}
+ */
+export function bucketsFromPaths(paths: readonly string[]): Set<Bucket> {
+  const out = new Set<Bucket>();
+  for (const p of paths ?? []) {
+    const b = classifyPath(p);
+    if (b) out.add(b);
+  }
+  return out;
+}
+
+/**
  * Resolve a relative specifier (`./x`, `../x`) against a test file's repo-relative path to an
  * absolute repo-relative path.
  * @param {string} fileRel — the test file's repo-relative path (e.g. `plugin/test/foo.test.mjs`).

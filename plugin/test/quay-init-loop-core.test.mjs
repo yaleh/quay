@@ -98,7 +98,7 @@ test('AC3 — a real --loop run lays down the full two-layer mechanism set', () 
       'it0-split-or-commit-check.ts', 'pipe-exit-code-check.sh',
       // transitive deps of the checkers (the laid-down mechanism must be functional)
       'gate-script-base.ts', 'workflow-event-schema.mjs', 'task-schema.ts', 'touches-parser.ts',
-      'wiring-coverage-check.ts',
+      'task-status.ts', 'wiring-coverage-check.ts',
       // precommit-guard.ts's ESM `./` import — INVISIBLE to the ${SCRIPT_DIR} dependency-closure
       // scan (gap-quay-init-laydown-missing-touches-checker: without this, a consumer workspace
       // laid down precommit-guard.ts without its imported checker → ERR_MODULE_NOT_FOUND on the

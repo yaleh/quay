@@ -3,6 +3,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
 import { readLive, readSystem, readManagerLight, readTests, readGitHistory, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult } from "./observation.ts";
+import { TASK_STATUS } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
 import { awaitingLandMs, formatAwaitingDuration } from "./serve-live.ts";
@@ -56,15 +57,15 @@ function renderDashboardPage(d: {
     const s = typeof t.status === "string" ? t.status : "unknown";
     counts.set(s, (counts.get(s) ?? 0) + 1);
   }
-  const statuses = ["done", "ready", "todo", "needs-human", "superseded"];
+  const statuses = [TASK_STATUS.DONE, TASK_STATUS.READY, TASK_STATUS.TODO, TASK_STATUS.NEEDS_HUMAN, TASK_STATUS.SUPERSEDED];
   const total = d.tasks.length;
   const bar = (s: string): string => {
     const c = counts.get(s) ?? 0;
     const pct = total > 0 ? (c / total) * 100 : 0;
-    return html`<div style="width:${pct.toFixed(1)}%;background:${s === "done" ? "var(--color-text)" : s === "needs-human" ? "var(--color-accent)" : "var(--color-neutral-400)"}" title="${escapeHtml(s)} ${c}"></div>`;
+    return html`<div style="width:${pct.toFixed(1)}%;background:${s === TASK_STATUS.DONE ? "var(--color-text)" : s === TASK_STATUS.NEEDS_HUMAN ? "var(--color-accent)" : "var(--color-neutral-400)"}" title="${escapeHtml(s)} ${c}"></div>`;
   };
   const recentActive = d.tasks
-    .filter((t) => (t.status ?? "") !== "done" && typeof (t as { updatedAt?: unknown }).updatedAt === "number")
+    .filter((t) => (t.status ?? "") !== TASK_STATUS.DONE && typeof (t as { updatedAt?: unknown }).updatedAt === "number")
     .sort((a, b) => ((b as { updatedAt?: unknown }).updatedAt as number) - ((a as { updatedAt?: unknown }).updatedAt as number))
     .slice(0, 5);
 

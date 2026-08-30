@@ -41,6 +41,10 @@ const KERNEL_DEPS = [
   "driver-shared.ts",
   "driver-result.ts",
   "driver-filters.ts",
+  // gap-abi-status-lifecycle-vocab-scattered-no-named-type: driver-filters.ts now
+  // imports ./task-status.ts (the plugin tree's self-contained status-vocab copy),
+  // so the hermetic temp root must carry it too or the copied kernel's import fails.
+  "task-status.ts",
   "gate-script-base.ts",
   "profile-policy.ts",
   "routine-scheduler.ts",

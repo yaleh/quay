@@ -57,6 +57,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { TASK_STATUS } from "./task-status.ts";
 
 // ── 判据1 markers (position: the slot-refill.ts canonical comment block) ──────────────────────────────
 /** The canonical comment names the measured object: 被计量对象 = 并发 subagent (the task's exact
@@ -318,7 +319,7 @@ export function judgeLiveVsTaskStatus(liveRunningIds, taskStatusById) {
   const statuses = taskStatusById ?? {};
   const misreported = ids.filter((id) => {
     const st = statuses[id];
-    return st == null || st === "done" || st === "needs-human";
+    return st == null || st === TASK_STATUS.DONE || st === TASK_STATUS.NEEDS_HUMAN;
   });
   if (misreported.length > 0) {
     return { ok: false, evaluated: true, reason: `live-misreports-done-as-running (${misreported.join(",")})`, misreported };

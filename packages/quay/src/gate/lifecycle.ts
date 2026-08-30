@@ -17,7 +17,7 @@
 import { randomUUID } from "node:crypto";
 import { runGate } from "./engine.ts";
 import { appendGateEvent, type GateEvent } from "./gate-event-store.ts";
-import type { Task } from "../abi.ts";
+import { TASK_STATUS, type Task } from "../abi.ts";
 
 interface ProviderClient {
   taskGet: (id: string) => Promise<Task | null>;
@@ -34,14 +34,14 @@ interface ProviderClient {
  * for a fresh attempt.
  */
 export const TRANSITIONS: Record<string, { forward: string | null; back: string | null }> = {
-  todo: { forward: "ready", back: null },
-  ready: { forward: "done", back: "todo" },
-  done: { forward: null, back: "ready" },
-  "needs-human": { forward: null, back: "todo" },
+  [TASK_STATUS.TODO]: { forward: TASK_STATUS.READY, back: null },
+  [TASK_STATUS.READY]: { forward: TASK_STATUS.DONE, back: TASK_STATUS.TODO },
+  [TASK_STATUS.DONE]: { forward: null, back: TASK_STATUS.READY },
+  [TASK_STATUS.NEEDS_HUMAN]: { forward: null, back: TASK_STATUS.TODO },
   // `superseded` is a HARD terminal (outer ruling 2026-08-12): the task's
   // premise was deleted/voided and must not be revived — no forward edge, no
   // back edge. Resurrection requires a human re-filing a fresh task.
-  superseded: { forward: null, back: null },
+  [TASK_STATUS.SUPERSEDED]: { forward: null, back: null },
 };
 
 /** next status, or null if terminal/unknown */
@@ -132,7 +132,7 @@ export interface RetreatResult {
 export async function runComplete({ client, id, logPath, actor = "quay-cli", workspaceRoot }: LifecycleArgs): Promise<LifecycleResult> {
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
-  if (task.status !== "ready") {
+  if (task.status !== TASK_STATUS.READY) {
     const reason = `illegal transition: ${task.status} cannot complete (must be ready)`;
     console.log(reason);
     // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should
@@ -150,10 +150,10 @@ export async function runComplete({ client, id, logPath, actor = "quay-cli", wor
     return { ok: false, reason, exitCode: 1 };
   }
 
-  await client.taskWrite({ id, status: "done", expectedStatus: "ready" });
+  await client.taskWrite({ id, status: TASK_STATUS.DONE, expectedStatus: TASK_STATUS.READY });
   appendGateEvent(
     logPath,
-    mkLifecycleEvent({ id, gate: "complete", actor, verdict: "pass", payload: { from: "ready", to: "done" } })
+    mkLifecycleEvent({ id, gate: "complete", actor, verdict: "pass", payload: { from: TASK_STATUS.READY, to: TASK_STATUS.DONE } })
   );
   console.log("PASS — status=done");
   return { ok: true, reason, exitCode: 0 };
@@ -187,7 +187,7 @@ export interface LoopCompleteArgs extends LifecycleArgs {
 export async function runCompleteLoop({ client, id, logPath, actor = "quay-loop", workspaceRoot, verifiedBy }: LoopCompleteArgs): Promise<LifecycleResult> {
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
-  if (task.status !== "ready") {
+  if (task.status !== TASK_STATUS.READY) {
     const reason = `illegal transition: ${task.status} cannot complete (must be ready)`;
     console.log(reason);
     // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should
@@ -211,7 +211,7 @@ export async function runCompleteLoop({ client, id, logPath, actor = "quay-loop"
     }
   }
 
-  await client.taskWrite({ id, status: "done", expectedStatus: "ready" });
+  await client.taskWrite({ id, status: TASK_STATUS.DONE, expectedStatus: TASK_STATUS.READY });
   appendGateEvent(
     logPath,
     mkLifecycleEvent({
@@ -219,7 +219,7 @@ export async function runCompleteLoop({ client, id, logPath, actor = "quay-loop"
       gate: "complete",
       actor,
       verdict: "pass",
-      payload: { from: "ready", to: "done", ...(verifiedBy ? { verifiedBy } : {}) },
+      payload: { from: TASK_STATUS.READY, to: TASK_STATUS.DONE, ...(verifiedBy ? { verifiedBy } : {}) },
     })
   );
   console.log("PASS — status=done (loop)");
@@ -261,9 +261,9 @@ export async function runPromote({ client, id, logPath, actor = "quay-cli", work
   assertTransition(task.status, "forward");
   const next = legalForward(task.status);
 
-  if (task.status === "ready") {
+  if (task.status === TASK_STATUS.READY) {
     const r = await runComplete({ client, id, logPath, actor, workspaceRoot });
-    return { ...r, to: r.ok ? "done" : null };
+    return { ...r, to: r.ok ? TASK_STATUS.DONE : null };
   }
 
   // todo→ready: the author gate.
@@ -378,7 +378,7 @@ export async function runRetreat({ client, id, reason, logPath, actor = "quay-cl
   assertTransition(task.status, "back");
   const prev = legalBack(task.status);
 
-  const baseBody = task.status === "done" ? uncheckAcBoxes(task.body) : task.body;
+  const baseBody = task.status === TASK_STATUS.DONE ? uncheckAcBoxes(task.body) : task.body;
   // RETREATED WRITE SIDE (tasks/gap-wiring-C-retreat-write-side): the done→ready retreat writes the
   // `**RETREATED` / 搁置 marker (gap-retreated-state-not-mechanized) — the mechanical signal the
   // detection side (ready-pool-check `isRetreated` / slot-refill step-4 defer "retreated") reads.
@@ -389,7 +389,7 @@ export async function runRetreat({ client, id, reason, logPath, actor = "quay-cl
   // todo (NOT a dispatch candidate) so they write NO marker and NO body patch — retreat body
   // mutations stay edge-scoped (retreat-ac-uncheck.test.mjs pins ready→todo as a no-body-patch
   // edge; a non-shelved re-triage must be dispatchable again once re-promoted to ready).
-  const body = task.status === "done" ? addRetreatedMarker(baseBody, reason) : baseBody;
+  const body = task.status === TASK_STATUS.DONE ? addRetreatedMarker(baseBody, reason) : baseBody;
   await client.taskWrite({
     id,
     status: prev!,
