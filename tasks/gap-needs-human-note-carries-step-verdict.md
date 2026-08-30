@@ -1,7 +1,7 @@
 ---
 id: gap-needs-human-note-carries-step-verdict
 title: needs-human 注记携带实际失败步+判词——不再写模板「连续 3 次 exited-not-landed」压扁真因
-status: ready
+status: done
 labels:
   - gap
   - defect
