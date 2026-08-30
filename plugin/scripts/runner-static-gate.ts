@@ -256,6 +256,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ scripts/ plugin/scripts/suite-slot-ssot-check.ts plugin/scripts/suite-lock-slots.ts plugin/scripts/suite-slot-lib.sh plugin/test/suite-slot-ssot-check.test.mjs
   run_checker "suite-slot-ssot-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-slot-ssot-check.ts" --gate --root "${repo_root}"
+  echo "== suite-bucket static-vs-truth drift check (gap-suite-bucket-dynamic-truth-drift-detector, ③-AC1/③-AC2) =="
+  # 桶归因静态闭包是代理——变量 path.join 构造的 subject 对静态不可见 (worktree-root-fs-check 静态归 S、
+  # 运行时触达 plugin/scripts/quay-init.sh 归 M)。本检查把「漏选」变响: 静态非空且动态真值触达静态未覆盖
+  # 的桶 ⇒ RED (static-vs-truth-drift)。动态真值来自 trace 缓存 (.quay/suite-fs-trace.jsonl, suite-fs-trace.ts
+  # 采集); 缓存缺失 ⇒ NOT-EVALUATED (exit 0 但可区分输出, 硬规则 3b——永不与「0 drift」同形)。每条能取假
+  # (mutation case: 静态 S + 动态 M 必红; 恢复必绿)。
+  # @static-tier change
+  # @static-object plugin/scripts/ plugin/test/ scripts/test.sh
+  run_checker "suite-bucket-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-bucket-drift-check.ts" --gate --root "${repo_root}"
   echo "== landing-target branch-consistency check (gap-landing-target-branch-consistency-check, AC1-AC4) =="
   # 任务落地目标分支必须 == 当前前锋分支（develop..integration=0 不变式；机制家族第 4 次——「落地路径」
   # 字段与当前分支模型的一致性没有消费者）。前锋分支由 git 关系读宿主推出（integration ⊆ develop ⇒
