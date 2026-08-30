@@ -1,7 +1,7 @@
 ---
 id: gap-upgrade-channel-install-cache
 title: upgrade 通道 3 测试的参数化 install 缓存——consumer-config/旧源码内容寻址，245s → ~100s
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -24,10 +24,10 @@ install-config-driven-e2e-upgrade.test.mjs（245s/轮，product 组，main 相�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，读生产载体）：A3 / AC6 / AC1 / AC2 完成时，参数化 fixture 缓存命中（`/var/tmp/quay-install-fixture-*` 对应键存在 `.fixture-ready`），真 install 计数下降。
-- [ ] AC2（能取假，负控制）：config-preserving 升级后整个 loop 段逐字不变（AC6/AC1 断言不回归）；backup/rollback 仍是真行为（AC2 断言不回归）。
-- [ ] AC3（能取假，机制）：fixture 键含 consumer-config / 旧源码哈希；与 `gap-suite-extend-shared-install-cache` 的 fixture 机件共用（plugin/test/helpers/）。
-- [ ] AC4（测量）：同 selected set 前后对照，upgrade 文件墙钟 245s → ~100s，0-cancelled。
+- [x] AC1（能取假，读生产载体）：A3 / AC6 / AC1 / AC2 完成时，参数化 fixture 缓存命中（`/var/tmp/quay-install-fixture-*` 对应键存在 `.fixture-ready`），真 install 计数下降。
+- [x] AC2（能取假，负控制）：config-preserving 升级后整个 loop 段逐字不变（AC6/AC1 断言不回归）；backup/rollback 仍是真行为（AC2 断言不回归）。
+- [x] AC3（能取假，机制）：fixture 键含 consumer-config / 旧源码哈希；与 `gap-suite-extend-shared-install-cache` 的 fixture 机件共用（plugin/test/helpers/）。
+- [ ] AC4（测量）：同 selected set 前后对照，upgrade 文件墙钟 245s → ~100s，0-cancelled。（待外部）
 
 ## Definition of Done
 
@@ -35,6 +35,7 @@ A3 / AC6 / AC1 / AC2 的 baseline/旧安装半段通过参数化 fixture 复用�
 
 ## Touches
 
-- plugin/test/quay-init-loop-helpers.mjs（或 plugin/test/helpers/quay-init-install-fixture.mjs——fixture 键参数化）
+- plugin/test/quay-init-loop-helpers.mjs（变薄再导出 sharedFixtureVariant / laydownVariantWorkspace）
+- plugin/test/helpers/quay-init-install-fixture.mjs（fixture 键参数化）
 - packages/quay/test/install-config-driven-e2e-upgrade.test.mjs（A3 / AC6 / AC1 / AC2 接参数化 fixture）
 - tasks/gap-upgrade-channel-install-cache.md（自身）

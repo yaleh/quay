@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-reduce-real-install-count
 title: 8 个 real-install 测试文件 ~40 次真安装——torn-read 族可 source 直调函数免安装
-status: todo
+status: ready
 labels:
   - gap
 parent: null

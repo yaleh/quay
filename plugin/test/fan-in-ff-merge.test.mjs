@@ -615,6 +615,83 @@ test("AC1 gate — capture suite_head != 待 ff HEAD ⇒ exit 2 (证书必须钉
   }
 });
 
+// ── gap-write-suite-capture-non-blocking AC2 ──────────────────────────────────────────────────────────
+// capture 缺失/不可读时，ff 闸回退读权威源 full-suite-state.json（mirrorMechanicalFanInSuiteState 写的
+// state=green + commit=suite_head + taskId）。真实绿 suite 不得因观测 capture 写失败被误拒；⛔ 不伪造
+// full-green——只认 taskId 匹配本任务的 state=green，full-run（无 taskId）/别的任务/red/stale 都拒。
+
+test("AC2 (gap-write-suite-capture-non-blocking) — capture MISSING + authoritative source green (taskId match, commit=suite_head) ⇒ ff proceeds (NOT exit 2)", () => {
+  const dir = makeTmp("capfallback");
+  const st = stateDir("capfallback");
+  try {
+    initRepo(dir);
+    const tip = makeTaskBranch(dir, "ac62-fallback");
+    // 权威源：full-suite-state.json 写 state=green + taskId + commit(=suite_head=tip)。⛔ 不传 capture。
+    const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "worktree", runner: "inner", taskId: "ac62-fallback", commit: tip });
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const r = runMerge(["--task", "ac62-fallback", "--root", dir, "--suite-state", suite, "--lock-events", events, "--retry-record", retries]);
+    assert.equal(r.status, 0, `missing capture + authoritative green must ff (⛔ not mis-reject):\n${r.stdout}${r.stderr}`);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop fast-forwarded to the task tip");
+    assert.ok(!fs.existsSync(retries), "no retry record");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("AC2 negative (gap-write-suite-capture-non-blocking) — capture MISSING + authoritative source NOT this task's green (red / wrong taskId / full-run no taskId) ⇒ exit 2", () => {
+  const dir = makeTmp("capfallbackneg");
+  const st = stateDir("capfallbackneg");
+  try {
+    initRepo(dir);
+    const tip = makeTaskBranch(dir, "ac62-fbneg");
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+
+    // ① red state ⇒ 拒（suite 未绿）。
+    const redSuite = writeSuiteState(st, { state: "red", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "worktree", runner: "inner", taskId: "ac62-fbneg", commit: tip, reason: "fail" });
+    const r1 = runMerge(["--task", "ac62-fbneg", "--root", dir, "--suite-state", redSuite, "--lock-events", events, "--retry-record", retries]);
+    assert.equal(r1.status, 2, "a red authoritative state must refuse (exit 2)");
+
+    // ② wrong taskId ⇒ 拒（别的任务的 bucket green 不冒充本任务）。
+    const wrongSuite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "worktree", runner: "inner", taskId: "some-other-task", commit: tip });
+    const r2 = runMerge(["--task", "ac62-fbneg", "--root", dir, "--suite-state", wrongSuite, "--lock-events", events, "--retry-record", retries]);
+    assert.equal(r2.status, 2, "a green state for a DIFFERENT taskId must refuse (exit 2)");
+
+    // ③ no taskId（full-run 的 green，scope=main）⇒ 拒（⛔ 不伪造 full-green）。
+    const fullRunSuite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
+    const r3 = runMerge(["--task", "ac62-fbneg", "--root", dir, "--suite-state", fullRunSuite, "--lock-events", events, "--retry-record", retries]);
+    assert.equal(r3.status, 2, "a full-run green (no taskId) must refuse (exit 2)");
+
+    assert.ok(!fs.existsSync(events), "no lock events on any of the three refused paths");
+    assert.ok(!fs.existsSync(retries), "no retry record");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("AC2 negative (gap-write-suite-capture-non-blocking) — capture MISSING + authoritative commit NOT an ancestor (stale suite head) ⇒ exit 2", () => {
+  const dir = makeTmp("capfallbackstale");
+  const st = stateDir("capfallbackstale");
+  try {
+    initRepo(dir);
+    makeTaskBranch(dir, "ac62-fbstale");
+    // commit 是 40-hex 但非任务 tip 祖先（陈旧的 suite head）⇒ 回退拿到 suite_head 后仍被祖先检查拒。
+    const staleSuite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "worktree", runner: "inner", taskId: "ac62-fbstale", commit: "0".repeat(40) });
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const r = runMerge(["--task", "ac62-fbstale", "--root", dir, "--suite-state", staleSuite, "--lock-events", events, "--retry-record", retries]);
+    assert.equal(r.status, 2, "a stale authoritative commit (not an ancestor of the tip) must refuse (exit 2)");
+    assert.ok(!fs.existsSync(events), "no lock events");
+    assert.ok(!fs.existsSync(retries), "no retry record");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
 test("stale suite-lock reclaim restored — blocked path (missing certificate) runs the reaper and REAPS a REAL stale holder (gap-wiring-D-worktree-remove-orphans-reclaim-restore)", () => {
   // gap-wiring-D-worktree-remove-orphans-reclaim-restore (硬规则 5b): 9645a4ff silently replaced the
   // reaper's stale-lock reclaim (989ec472's gap-worktree-remove-orphans-probes wiring) with the narrow

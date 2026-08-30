@@ -1,9 +1,7 @@
 ---
 id: gap-worker-driver-governance-self-skip-missing
-title: 5 个重 governance 文件改标
-  lowconc（gap-retire-governance-group-merge-into-bucket 的 AC2 子集）——主池不再裸跑 ~1080s
-  lane-time；不加守卫、不建机械检查
-status: ready
+title: 5 个重 governance 文件改标 lowconc（gap-retire-governance-group-merge-into-bucket 的 AC2 子集）——主池不再裸跑 ~1080s lane-time；不加守卫、不建机械检查
+status: done
 labels:
   - gap
 parent: null
@@ -39,10 +37,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：5 文件 `@test-group` 从 governance 改为 lowconc（逐文件 grep 核 5 文件）；（⛔ 仍标 governance ⇒ 假）。
-- [ ] AC2（能取假，负控制）：`--group lowconc` 或显式文件列表调用时 5 文件仍全跑（改标不挡显式请求）。
-- [ ] AC3（能取假，无守卫/无机械检查）：5 文件**不新增** QUAY_TEST_GROUPS 自跳守卫；无新增「governance 必带守卫」机械检查（grep runner-grouping.ts / checker 无 governance 守卫强制）；（⛔ 仍有守卫或新检查 ⇒ 假）。
-- [ ] AC4（测量，AC2 纪律）：同 selected set 前后对照——修后 main_phase_ms 下降（396s 文件离开 main 关键路径）、lowconc_phase_ms 相应上升、0-cancelled。
+- [x] AC1（能取假）：5 文件 `@test-group` 从 governance 改为 lowconc（逐文件 grep 核 5 文件）；（⛔ 仍标 governance ⇒ 假）。
+- [x] AC2（能取假，负控制）：`--group lowconc` 或显式文件列表调用时 5 文件仍全跑（改标不挡显式请求）。
+- [x] AC3（能取假，无守卫/无机械检查）：5 文件**不新增** QUAY_TEST_GROUPS 自跳守卫；无新增「governance 必带守卫」机械检查（grep runner-grouping.ts / checker 无 governance 守卫强制）；（⛔ 仍有守卫或新检查 ⇒ 假）。
+- [ ] AC4（测量，AC2 纪律）：同 selected set 前后对照——修后 main_phase_ms 下降（396s 文件离开 main 关键路径）、lowconc_phase_ms 相应上升、0-cancelled。（待外部）
 
 ## Definition of Done
 

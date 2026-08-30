@@ -1,7 +1,7 @@
 ---
 id: gap-writestate-atomicity-liveness-assertion-flaky
 title: writestate-atomicity-split liveness 断言 flaky——seen.has("B")&&seen.has("C") 负载下漏采样，挡全量 fan-in
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -23,9 +23,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，主修）：断言放宽后 `torn == 0` 仍挡原子性回归（writeJsonAtomic 改 in-place ⇒ torn > 0 ⇒ 红），且不再因漏采 B/C 误红；（⛔ 改 in-place 仍绿 ⇒ 假）。
-- [ ] AC2（能取假，负对照保留）：test 2 in-place 写仍 `torn > 0`（证读者能咬）；（⛔ 删负对照 ⇒ 假）。
-- [ ] AC3（能取假，负载）：16-lane 满负载下 liveness 不再 flaky（放宽后不漏采误红）。
+- [x] AC1（能取假，主修）：断言放宽后 `torn == 0` 仍挡原子性回归（writeJsonAtomic 改 in-place ⇒ torn > 0 ⇒ 红），且不再因漏采 B/C 误红；（⛔ 改 in-place 仍绿 ⇒ 假）。（`torn == 0` :98 未动；负对照实测：test 1 临时改 `runConcurrentRead("nonatomic")` ⇒ 红 `AssertionError: an atomic write must never expose a torn file`；改回 atomic + 放宽断言 ⇒ 绿 pass 2/fail 0）
+- [x] AC2（能取假，负对照保留）：test 2 in-place 写仍 `torn > 0`（证读者能咬）；（⛔ 删负对照 ⇒ 假）。（test 2 未动，:105-110 保留 `assert.ok(torn > 0)`；单文件实测 pass 2 含 negative control 绿）
+- [x] AC3（能取假，负载）：16-lane 满负载下 liveness 不再 flaky（放宽后不漏采误红）。（结构性根修：liveness 放宽为 `seen.has("B") || seen.has("C")` 只要求一个非初始 marker，去除「必须采到两个交替 marker」的采样赌注——round 719 "saw A,C" 漏 B 的 flaky 模式现被容忍；因不再保留强 liveness，无需按 load-sensitive 预声明）
 
 ## Definition of Done
 

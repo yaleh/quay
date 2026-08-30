@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group lowconc
 // worker-driver.test.mjs — SPEC-worker-driven-inner-2026-08-16 §5 阶段 2（AC116）+ 阶段 3（AC117）: the
 // mechanical worker driver spawns claude -p workers with N-concurrency (in-flight = the driver's OWN spawned
 // child-process count, 硬规则 4b), a wall-clock timeout that SIGTERMs the worker (preserving the
@@ -113,6 +113,7 @@ import {
   fanInLogFileName,
   appendFanInTrace,
   defaultMechanicalSuiteCommand,
+  newMechanicalSuiteRunId,
   extractFailureSummary,
   combinedOutput,
   mirrorMechanicalFanInSuiteState,
@@ -624,6 +625,7 @@ test("AC2 — the mechanical fan-in default suite command is full-suite-runner.t
     worktree: "/tmp/wt",
     root: "/tmp/root",
     suiteLogFile: "/tmp/fan-in-suite-gap-mech-red-bucket.log",
+    runId: "mfi-gap-mech-red-bucket-1788022868-abc123",
   });
   assert.ok(cmd.some((a) => a.endsWith("full-suite-runner.ts")), "the default suite command must be full-suite-runner.ts");
   assert.ok(cmd.includes("--buckets") && cmd.includes("gap-mech-red-bucket"), "must pass --buckets <task>");
@@ -631,7 +633,18 @@ test("AC2 — the mechanical fan-in default suite command is full-suite-runner.t
   assert.ok(cmd.includes("--state-dir") && cmd.includes("/tmp/root/.quay"), "must pass --state-dir <root>/.quay (the shared checkout ledger)");
   assert.ok(cmd.includes("--runner") && cmd.includes("inner"), "must pass --runner inner (explicit layer identity)");
   assert.ok(cmd.includes("--log-file") && cmd.includes("/tmp/fan-in-suite-gap-mech-red-bucket.log"), "must pass --log-file <suiteLogFile> (the silence-watchdog tee)");
+  // gap-mechanical-fan-in-per-suite-runid-unified — the per-suite runId is passed to the runner so the
+  // suite-load-<runId>.jsonl key + full-suite-state runId + verification-round record runId share ONE key.
+  assert.ok(cmd.includes("--run-id") && cmd.includes("mfi-gap-mech-red-bucket-1788022868-abc123"), "must pass --run-id <per-suite runId> to the runner");
   assert.ok(!cmd.some((a) => a.includes("scripts/test.sh")), "must NOT run a parallel `bash scripts/test.sh` harness");
+});
+
+test("gap-mechanical-fan-in-per-suite-runid-unified AC2 — newMechanicalSuiteRunId is per-suite unique (two tasks ⇒ two ids, one per fan-in)", () => {
+  const a = newMechanicalSuiteRunId("gap-task-a");
+  const b = newMechanicalSuiteRunId("gap-task-b");
+  assert.notEqual(a, b, "two different tasks produce two DIFFERENT per-suite runIds");
+  assert.ok(a.startsWith("mfi-gap-task-a-") && b.startsWith("mfi-gap-task-b-"), "the id carries the mfi-<task>- prefix (suite identity, not the shared wk-prod round id)");
+  assert.ok(!a.startsWith("wk-prod"), "the per-suite id is NOT the shared wk-prod driver round id");
 });
 
 test("AC1 — the mechanical fan-in default suite command, run against a red bucket suite, records state=red into verification-round.jsonl", async () => {
@@ -653,7 +666,8 @@ test("AC1 — the mechanical fan-in default suite command, run against a red buc
     // symlinkRuntimeTrees — untracked ⇒ never in any delta).
     fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(root, "plugin"), "dir");
     const suiteLog = path.join(root, "fan-in-suite.log");
-    const cmd = defaultMechanicalSuiteCommand({ task: "gap-mech-red-bucket", worktree: root, root, suiteLogFile: suiteLog });
+    const perSuiteRunId = "mfi-gap-mech-red-bucket-1788022868-abc123";
+    const cmd = defaultMechanicalSuiteCommand({ task: "gap-mech-red-bucket", worktree: root, root, suiteLogFile: suiteLog, runId: perSuiteRunId });
     // Hermetic seams (same family as full-suite-runner.test.mjs runRunner): skip the REAL resource gate
     // + single-flight + systemd scope so a temp-repo fake suite is deterministic.
     const child = spawn(cmd[0], cmd.slice(1), {
@@ -667,12 +681,19 @@ test("AC1 — the mechanical fan-in default suite command, run against a red buc
     assert.equal(code, 1, `the runner exits 1 on a red bucket round, got ${code} (stderr tail: ${stderr.slice(-400)})`);
     const vrf = path.join(root, ".quay", "verification-round.jsonl");
     assert.ok(fs.existsSync(vrf), "verification-round.jsonl written into --state-dir");
-    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    const lines = fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim());
+    // gap-verification-round-single-writer AC1 — 恰一条记录（⛔ 无 writeRedSuiteRecord 平行双写 ⇒ round 号虚增）。
+    assert.equal(lines.length, 1, "a red mechanical bucket round lands EXACTLY ONE record (no parallel red double-write)");
+    const rec = JSON.parse(lines[0]);
     assert.equal(rec.state, "red", "a red mechanical bucket round records state=red (not green, not absent)");
     assert.equal(rec.fail, 2, "the fail count rides the record");
     assert.equal(rec.buckets, "M", "the __BUCKETS__ marker is parsed into the buckets field");
     assert.equal(rec.bucket_files, 3, "the __BUCKETS__ file count rides the record");
     assert.equal(rec.runner, "inner", "explicit --runner inner is recorded");
+    assert.equal(rec.preverified, undefined, "the runner-shape record carries NO preverified field (single writer)");
+    // gap-mechanical-fan-in-per-suite-runid-unified AC1 — the record runId == the --run-id passed to the
+    // runner (the SAME key the suite-load-<runId>.jsonl file + full-suite-state carry).
+    assert.equal(rec.runId, perSuiteRunId, "the verification-round record carries the per-suite runId (record ↔ telemetry join key)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -2205,6 +2226,46 @@ test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-co
   assert.match(p, /git commit --no-edit/, "AC3: complete the merge with git commit --no-edit");
 });
 
+// ── gap-fan-in-continue-resolution-dual-copy-and-ff-not-fast-forward ──────────────────────────────
+// 冲突消解协议（gap-continue-prompt-conflict-resolution-protocol）只教 outline/code 两型；三型新暴露
+// （硬规则 5b：修好一个 ≠ 没有别的）——dual-copy 文件冲突（.claude/workflows/* ↔ plugin/workflows/*
+// 须字节一致，⛔ 语义并集会发散两副本）、ff-not-fast-forward（suite 长跑期间 develop 又进新落地 ⇒
+// 任务分支落后 develop）、modify/delete（一侧删一侧改）。AC1/AC2/AC4 钉住 prompt 里三型消解指令，
+// 删掉任一条 ⇒ 测试红（AC3 能取假）。
+
+test("gap-fan-in-continue-resolution-dual-copy-and-ff-not-fast-forward — AC1/AC2/AC3/AC4 (能取假): buildContinueWorkerPrompt teaches dual-copy byte-identical sync / ff re-merge / modify-delete deletion-side", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "mechanical fan-in red at step=ff: CONFLICT (content): Merge conflict in .claude/workflows/fan-in-execute.js",
+  });
+  // AC1 (dual-copy): 冲突时两副本同步字节一致，⛔ 不语义并集（并集让两副本发散）。
+  assert.match(p, /dual-copy/, "AC1: prompt names the dual-copy file type (.claude/workflows/* ↔ plugin/workflows/*)");
+  assert.match(p, /byte-identical/, "AC1: dual-copy conflict ⇒ re-sync BOTH copies byte-identical");
+  assert.match(p, /do NOT take a semantic union/, "AC1: dual-copy conflict ⇒ ⛔ not semantic union (would diverge the two copies)");
+  // AC2 (ff): ff-not-fast-forward 时先 merge develop 再 ff，⛔ 不重实现。
+  assert.match(p, /not fast-forward/, "AC2: prompt names the ff-not-fast-forward failure");
+  assert.match(p, /merge develop again/, "AC2: ff-not-fast-forward ⇒ merge develop again before the driver re-runs ff");
+  assert.match(p, /do NOT re-implement/, "AC2: ff-not-fast-forward ⇒ ⛔ no re-implementation (branch-lag, not a code defect)");
+  // AC4 (modify/delete): 判删除侧——分支删（有替代实现）⇒ 接受删除 git rm；develop 删 ⇒ 接受删除 git rm。
+  assert.match(p, /modify\/delete/, "AC4: prompt names the modify/delete conflict type");
+  assert.match(p, /judge WHICH side deleted/, "AC4: modify/delete ⇒ judge which side deleted");
+  assert.match(p, /git rm/, "AC4: modify/delete ⇒ accept the deletion with git rm");
+  assert.match(p, /never silently restore the deleted file/, "AC4: ⛔ never revive the deleted file");
+});
+
+test("gap-fan-in-continue-resolution-dual-copy-and-ff-not-fast-forward — 结构面 (能取假): worker-driver.ts 三型消解指令无残留/无遗漏", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  // 三型各自的关键指令都在（改掉任一 ⇒ 红）。
+  assert.match(src, /byte-identical/, "dual-copy sync instruction present in source");
+  assert.match(src, /not fast-forward/, "ff-not-fast-forward instruction present in source");
+  assert.match(src, /modify\/delete/, "modify/delete instruction present in source");
+  assert.match(src, /judge WHICH side deleted/, "modify/delete deletion-side judgment present in source");
+});
+
 // ── gap-fan-in-merge-develop-derived-recompute-and-reason（B；A 已退役）─────────────────────────────
 // 机械 fan-in step 2 `git merge develop` 冲突的【具体文件】没传回下一轮 worker——CONTINUE prompt 的 reason
 // 读通用 failure_reason（「task status=ready not done」），⛔ 不含冲突文件 ⇒ worker 无从精准 resolve。
@@ -2544,6 +2605,49 @@ test("AC1 (gap-archguard-structural-gate-in-fan-in-driver) — runMechanicalFanI
   assert.match(src, /archguardCommand\?/, "the archguardCommand test seam is declared on MechanicalFanInOptions");
   assert.match(src, /fail\("archguard-structure"/, "dependency-cycle red returns step=archguard-structure");
   assert.match(src, /archguard-runner\.ts/, "the default archguard command references archguard-runner.ts");
+});
+
+// ── gap-archguard-metrics-mirror-non-blocking：metrics 镜像写 fail-open（观测不 gate 落地）──────
+// 结构判定（archguard-structure 步，执行语义）与 metrics 镜像写（观测）解耦：镜像写失败 WARN + 继续，
+// 不 failClean("archguard-metrics")——人 2026-08-30 裁定「观测写不得 gate 落地」（审计实锤 2）。
+
+test("AC1/AC2 (gap-archguard-metrics-mirror-non-blocking) — 源面：镜像写失败 fail-open（⛔ 不再 return failClean('archguard-metrics')），结构判定仍 fail('archguard-structure') 挡", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  // 负控制（AC1）：镜像失败不再 failClean 返回——fail-open 的 WARN（stderr + trace）替代。
+  assert.doesNotMatch(src, /return failClean\("archguard-metrics"/, "mirror write failure must NOT return failClean (fail-open)");
+  assert.match(src, /process\.stderr\.write\(`WARN archguard-metrics: /, "mirror failure must WARN to stderr");
+  assert.match(src, /step: "archguard-metrics", exit: 1, wall_ms: 0, ok: false, warn: true/, "mirror failure must be traced (warn:true, ok:false — honest ⛔ not silently green)");
+  // 正控制（AC2）：结构判定不回归——依赖环仍 fail("archguard-structure") 挡。
+  assert.match(src, /fail\("archguard-structure"/, "dependency-cycle red must still fail at archguard-structure (execution semantics unchanged)");
+});
+
+test("AC1 (gap-archguard-metrics-mirror-non-blocking) — 结构闸绿 + metrics 镜像写失败（mock）⇒ fan-in 继续到 scoped-gate 并 landed", async (t) => {
+  const m = makeMechRepo("mirror-open-ac1");
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const runId = "mf-run-mirror-open";
+  // 结构闸绿（exit 0）且 archguard 往 worktree/.archguard 写一条结构信号（镜像有东西可镜）；
+  // 把 root/.archguard 建成普通文件 ⇒ 镜像的 mkdirSync/appendFileSync 抛错 ⇒ 镜像写失败。
+  const record = '{"tool":"archguard-runner","verdict":"pass"}';
+  const archguardCmd = ["bash", "-c", `mkdir -p "${m.worktree}/.archguard"; printf '%s\\n' '${record}' >> "${m.worktree}/.archguard/metrics-history.jsonl"`];
+  fs.writeFileSync(path.join(m.repo, ".archguard"), "not-a-dir", "utf8");
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { archguardCommand: archguardCmd }));
+  assert.equal(r.outcome, "landed", `mirror write failure must NOT block fan-in (step=${r.step} reason=${r.reason})`);
+  assert.notEqual(r.step, "archguard-metrics", "fan-in must not fail at archguard-metrics (fail-open)");
+  // 过程日志留 WARN 行（ok=false、warn=true）：镜像失败可见但未阻塞。
+  const log = path.join(m.repo, ".quay", `fan-in-gap-mfh-${runId}.log`);
+  const lines = fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const warnLine = lines.find((l) => l.step === "archguard-metrics");
+  assert.ok(warnLine, "mirror failure must be traced as an archguard-metrics step");
+  assert.equal(warnLine.ok, false, "mirror failure traced ok=false (honest, ⛔ not silently green)");
+  assert.equal(warnLine.warn, true, "mirror failure traced warn:true (fail-open WARN)");
+});
+
+test("AC2 (gap-archguard-metrics-mirror-non-blocking) — 结构闸红（依赖环）⇒ 仍 failClean（执行语义不回归），不因镜像 open 而放宽", async (t) => {
+  const m = makeMechRepo("mirror-open-ac2");
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn(mechOpts(m, "mf-run-structure-red", { archguardCommand: ["bash", "-c", "echo dependency cycle; exit 3"] }));
+  assert.equal(r.outcome, "red", "dependency cycle must still fail fan-in");
+  assert.equal(r.step, "archguard-structure", "structure judgment still blocks at archguard-structure (execution semantics preserved)");
 });
 
 // ── gap-worker-driver-stopreason-latch-permanent-stop ──────────────────────────────────────────────
@@ -3407,4 +3511,24 @@ test("AC4 (gap-fan-in-subprocess-hang-timeout-recovery) — 任一 fan-in 子进
   // 锁在 finally 释放：事件文件里恰一对 acquire→release（⛔ 挂起残留锁阻塞全仓 fan-in）。
   const lock = readFanInLockHold(m.repo, "gap-mfh", runId);
   assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "hang ⇒ lock released (finally) — clean acquire+release pair");
+});
+
+// ── gap-write-suite-capture-non-blocking AC1 ──────────────────────────────────────────────────────────
+// writeSuiteCapture 写失败（观测写）不得弄死 fan-in（人 2026-08-30「观测不得阻塞主执行」）。capture 是
+// suite 结果的派生观测载体；写失败 fail-open（WARN 不抛），ff 闸回退读权威源 full-suite-state.json
+// （同一轮 mirrorMechanicalFanInSuiteState 已写 state=green + commit=suite_head + taskId）⇒ 绿 suite 落地。
+
+test("AC1 (gap-write-suite-capture-non-blocking) — capture 写失败（父目录是文件）⇒ fan-in fail-open 落地（⛔ 不因观测写失败弄红）", async (t) => {
+  const m = makeMechRepo("capfail");
+  const runId = "mf-run-capfail";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  // capture 路径的父目录是一个【文件】⇒ writeSuiteCapture 的 mkdirSync 失败（真实构造，非 mock）。
+  // ⛔ fan-in 不得因此 fail：capture 缺失 ⇒ ff 闸回退读权威源 full-suite-state.json。
+  const blocker = path.join(m.base, "capture-blocker");
+  fs.writeFileSync(blocker, "not a dir", "utf8");
+  const badCapture = path.join(blocker, "suite.env");
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { suiteCapture: badCapture }));
+  assert.equal(r.outcome, "landed", `capture write failure must fail-open (fan-in lands, ⛔ not red) — step=${r.step} reason=${r.reason}`);
+  assert.equal(r.suiteOutcome, "done", "the suite itself must still be green");
+  assert.ok(!fs.existsSync(badCapture), "the capture path is genuinely unwritable (no capture file written)");
 });

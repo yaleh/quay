@@ -2,7 +2,7 @@
 id: gap-fan-in-continue-resolution-dual-copy-and-ff-not-fast-forward
 title: fan-in CONTINUE 冲突消解协议缺口——dual-copy 文件冲突 + ff-not-fast-forward +
   modify/delete 三型，worker 反复 ENL 无解
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -33,10 +33,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，dual-copy）：dual-copy 文件冲突时，note 教「两副本同步字节一致」而非「语义并集」；（⛔ 仍教语义并集 ⇒ 假）。
-- [ ] AC2（能取假，ff）：ff-not-fast-forward 时，note/机械教「先 merge develop 再 ff」；（⛔ 无此指令 ⇒ 假）。
-- [ ] AC3（能取假，单测）：worker-driver.test.mjs 断言 note 含 dual-copy 同步 + ff 重 merge + modify/delete 三型，改掉任一 ⇒ 红。
-- [ ] AC4（能取假，modify/delete）：modify/delete 冲突时，note 教「判删除侧：分支删且分支上有替代实现 ⇒ 接受删除（git rm）；develop 删 ⇒ 接受 develop 删除」；（⛔ 仍只教取 develop 版 / 语义并集 / 不教判删除侧 ⇒ 假）。
+- [x] AC1（能取假，dual-copy）：dual-copy 文件冲突时，note 教「两副本同步字节一致」而非「语义并集」；（⛔ 仍教语义并集 ⇒ 假）。
+- [x] AC2（能取假，ff）：ff-not-fast-forward 时，note/机械教「先 merge develop 再 ff」；（⛔ 无此指令 ⇒ 假）。
+- [x] AC3（能取假，单测）：worker-driver.test.mjs 断言 note 含 dual-copy 同步 + ff 重 merge + modify/delete 三型，改掉任一 ⇒ 红。
+- [x] AC4（能取假，modify/delete）：modify/delete 冲突时，note 教「判删除侧：分支删且分支上有替代实现 ⇒ 接受删除（git rm）；develop 删 ⇒ 接受 develop 删除」；（⛔ 仍只教取 develop 版 / 语义并集 / 不教判删除侧 ⇒ 假）。
 
 ## Definition of Done
 

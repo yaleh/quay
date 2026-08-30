@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group lowconc
 // verify-deliver-coldstart.test.mjs — AC88 三步交付验证机制 (gap-ac88-verification-mechanism-extend-deliver).
 //
 // Tests for plugin/scripts/verify-deliver-coldstart.sh — the repeatable mechanism that upgrades

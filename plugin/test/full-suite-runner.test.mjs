@@ -1,5 +1,6 @@
-// @test-group governance
+// @test-group lowconc
 // @load-sensitive child-spawn
+// @load-sensitive-entry 2026-08-27 child-spawn (spawns real full-suite-runner.ts + fake-suite child; triage 判 other-task defer 而非 isolate-rerun — gap-full-suite-runner-test-poll-timeout-load-flake)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — every test spawns a
 //   real node runner (full-suite-runner.ts) + a real bash fake-suite child; under full-suite concurrency
 //   the runner bootstrap + child spawn is start/schedule-delayed and the wall-clock polls flaked
@@ -152,7 +153,7 @@ function fakeSuite(scriptBody) {
 }
 
 /** Spawn the runner against a temp root with a fake command. */
-function runRunner({ root, command, laneCount, stateDir, runner, buckets, env = {}, serialConcurrency, lowconcConcurrency }) {
+function runRunner({ root, command, laneCount, stateDir, runner, buckets, env = {}, serialConcurrency, lowconcConcurrency, runId }) {
   const args = ["--no-warnings", "--experimental-strip-types", RUNNER, "--root", root];
   if (stateDir) args.push("--state-dir", stateDir);
   if (command) args.push("--command", command);
@@ -161,6 +162,9 @@ function runRunner({ root, command, laneCount, stateDir, runner, buckets, env = 
   if (buckets !== undefined && buckets !== null) args.push("--buckets", String(buckets));
   if (serialConcurrency !== undefined) args.push("--serial-concurrency", String(serialConcurrency));
   if (lowconcConcurrency !== undefined) args.push("--lowconc-concurrency", String(lowconcConcurrency));
+  // gap-mechanical-fan-in-per-suite-runid-unified — pass an explicit --run-id (the mechanical fan-in
+  // driver's per-suite id) so tests can assert the runner honors it as its canonical runId.
+  if (runId !== undefined && runId !== null) args.push("--run-id", String(runId));
   const mergedEnv = { ...process.env, ...env };
   // AC3 seam — hermetic tests skip the REAL resource gate by default; the AC3 tests override it
   // (QUAY_TEST_SKIP_RESOURCE_GATE != "1") and force GO/WAIT via the gate's RESOURCE_GATE_TEST_* seams.
@@ -550,12 +554,16 @@ test("AC1 — full-suite-runner.ts --buckets records a RED bucket round (state=r
     assert.equal(code, 1, `runner exits 1 on a red bucket round, got ${code}`);
     const vrf = path.join(root, ".quay", "verification-round.jsonl");
     assert.ok(fs.existsSync(vrf), "verification-round.jsonl written");
-    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    const lines = fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim());
+    // gap-verification-round-single-writer AC1 — 恰一条记录（⛔ 无 writeRedSuiteRecord 平行双写 ⇒ round 号虚增）。
+    assert.equal(lines.length, 1, "a red bucket round lands EXACTLY ONE record (no parallel red double-write)");
+    const rec = JSON.parse(lines[0]);
     assert.equal(rec.state, "red", "a red bucket round records state=red (not green, not absent)");
     assert.equal(rec.fail, 2, "the fail count rides the record");
     assert.equal(rec.buckets, "M", "the __BUCKETS__ marker is parsed into the buckets field");
     assert.equal(rec.bucket_files, 3, "the __BUCKETS__ file count rides the record");
     assert.equal(rec.runner, "inner", "explicit --runner inner is recorded");
+    assert.equal(rec.preverified, undefined, "the runner-shape record carries NO preverified field (single writer)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -576,13 +584,61 @@ test("AC1 green contrast — full-suite-runner.ts --buckets records a GREEN buck
     const { code } = await waitExit(child);
     assert.equal(code, 0, `runner exits 0 on a green bucket round, got ${code}`);
     const vrf = path.join(root, ".quay", "verification-round.jsonl");
-    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    const lines = fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim());
+    // gap-verification-round-single-writer AC2 — 绿轮与红轮同 writer 同 shape：恰一条、无 preverified 字段。
+    assert.equal(lines.length, 1, "a green bucket round lands EXACTLY ONE record (same single writer as red)");
+    const rec = JSON.parse(lines[0]);
     assert.equal(rec.state, "green", "a green bucket round records state=green");
     assert.equal(rec.fail, 0, "the fail count is 0 on green");
     assert.equal(rec.buckets, "P", "the __BUCKETS__ marker is parsed into the buckets field");
     assert.equal(rec.bucket_files, 2, "the __BUCKETS__ file count rides the record");
+    assert.equal(rec.preverified, undefined, "the runner-shape record carries NO preverified field (symmetric with red)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── gap-verification-round-record-runid: AC1/AC3 (runId on the round record) ─────────────────────────
+// The round record must carry the suite's canonical runId (the SAME value the state write carries and
+// the SAME key the load sampler uses for suite-load-<runId>.jsonl) so /tests can key the load curve
+// off record.runId (its OWN load key rides the ledger row). Red AND green rows both carry it.
+
+test("AC1/AC3 — a GREEN round record carries runId = the state's runId (gap-verification-round-record-runid)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-runid-green-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const s = readState(root);
+    assert.ok(s && s.runId, "the state write carries a runId generation token");
+    const vr = lastRoundRecord(root);
+    assert.ok(vr, "a verification-round row was appended");
+    assert.ok(typeof vr.runId === "string" && vr.runId.length > 0, "the green round record carries a runId");
+    assert.equal(vr.runId, s.runId, "record.runId === the state write's runId (one canonical value)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — a RED round record carries runId = the state's runId (gap-verification-round-record-runid)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-runid-red-"));
+  const red = 'echo "# tests 5"\necho "# pass 3"\necho "# fail 2"\necho "# cancelled 0"\nexit 1';
+  const { f, dir } = fakeSuite(red);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, `runner exits 1 on red, got ${code}`);
+    const s = readState(root);
+    assert.ok(s && s.runId, "the state write carries a runId generation token");
+    const vr = lastRoundRecord(root);
+    assert.ok(vr, "a verification-round row was appended");
+    assert.ok(typeof vr.runId === "string" && vr.runId.length > 0, "the red round record carries a runId");
+    assert.equal(vr.runId, s.runId, "record.runId === the state write's runId (one canonical value)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -1156,6 +1212,10 @@ test("AC4 — a runner CRASH mid-round writes the phase records via the trap (st
     assert.ok(rec && rec.phases && rec.phases.length >= 1, "crash path appends a phase-carrying round row");
     assert.equal(rec.state, "red");
     assert.equal(rec.reason, "crashed");
+    // gap-verification-round-record-runid — the crash-trap row is ALSO self-describing (carries the
+    // same canonical runId the state write carries), same as the normal red/green path.
+    assert.ok(typeof rec.runId === "string" && rec.runId.length > 0, "the crash-trap round row carries a runId");
+    assert.equal(rec.runId, s.runId, "crash-trap record.runId === the state write's runId");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -5345,6 +5405,59 @@ test("gap-test-detail-load-timeseries — the runner spawns a load sampler that 
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("gap-mechanical-fan-in-per-suite-runid-unified AC3 — --run-id is honored verbatim; default falls back to a fresh randomUUID", async () => {
+  // OVERRIDE: an explicit --run-id (the mechanical fan-in per-suite id) becomes the canonical runId
+  // in BOTH the state and the round record (the record ↔ suite-load-<runId>.jsonl join key). The fake
+  // suite also captures the QUAY_RUN_ID env the runner delivers, to pin the shortRunId truncation
+  // (a LONG --run-id must still deliver a ≤8-char short id — the tmux socket sun_path length constraint).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-runid-override-"));
+  const { f, dir } = fakeSuite(
+    'printf "%s" "$QUAY_RUN_ID" > quay-run-id.txt\n' +
+      'echo "# tests 1"\n' +
+      'echo "# pass 1"\n' +
+      'echo "# fail 0"\n' +
+      'echo "# cancelled 0"\n' +
+      "exit 0",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 2, runId: "mfi-gap-test-1788022868-abc123" });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on a green suite");
+    const s = readState(root);
+    assert.equal(s.runId, "mfi-gap-test-1788022868-abc123", "--run-id is used verbatim as the state runId (not a fresh randomUUID)");
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.runId, "mfi-gap-test-1788022868-abc123", "the round record carries the SAME canonical runId (record ↔ telemetry join key)");
+    // shortRunId length constraint: the runner derives its per-run namespace id by truncating the runId
+    // to 8 chars — a LONG --run-id must not leak a long id into QUAY_RUN_ID (tmux socket sun_path bound).
+    const delivered = fs.readFileSync(path.join(root, "quay-run-id.txt"), "utf8");
+    assert.equal(delivered, "mfigapte", `the child received the 8-char truncated short id (got ${JSON.stringify(delivered)})`);
+    assert.ok(delivered.length <= 8, "the delivered QUAY_RUN_ID is ≤8 chars (tmux socket sun_path length constraint)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // DEFAULT: no --run-id ⇒ a fresh randomUUID (an independent run stays self-naming — no regression).
+  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-runid-default-"));
+  const faked = fakeSuite(
+    'echo "# tests 1"\n' +
+      'echo "# pass 1"\n' +
+      'echo "# fail 0"\n' +
+      'echo "# cancelled 0"\n' +
+      "exit 0",
+  );
+  try {
+    const child = runRunner({ root: root2, command: `bash ${faked.f}`, laneCount: 2 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on a green suite");
+    const s = readState(root2);
+    assert.ok(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.runId), `default runId is a randomUUID (got ${s.runId})`);
+  } finally {
+    fs.rmSync(root2, { recursive: true, force: true });
+    fs.rmSync(faked.dir, { recursive: true, force: true });
   }
 });
 

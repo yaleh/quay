@@ -815,25 +815,54 @@ full_suite_lock_release() {
 # the dispatch path below keeps calling them by name; behavior is byte-identical.
 source "${repo_root}/plugin/scripts/runner-grouping.ts"
 
+# ── in-process metadata cache (gap-suite-metadata-query-subprocess-spawn) ────────────────────────
+# build_deduped_files populates these ONCE via plugin/scripts/runner-grouping-metadata.mjs (a single
+# node spawn doing realpath dedup + @test-group read, replacing the ~1100-1600 per-file `realpath` /
+# `grep|awk` subprocess spawns the metadata modes --list-files/--list-groups previously paid).
+# group_of / check_group_declarations (sourced runner-grouping.ts) read _RG_GROUP at call time and
+# guard on _RG_CACHE_READY, so a STANDALONE sourcing (no cache, no repo_root) still falls back to
+# the old grep (suite-bucket-load-sensitive-isolation AC5 sources runner-grouping.ts alone).
+declare -a _RG_FILES=()
+declare -A _RG_GROUP=()
+_RG_CACHE_READY=""
+
 # build_deduped_files — echo the union glob, deduped by realpath (AC3). One file per line.
 # DELIBERATELY KEPT HERE (not moved to runner-grouping.ts): its canonical test-glob declaration line
 # is the ADR-004 SINGLE-SOURCE that FOUR checkers parse from scripts/test.sh
 # (test-framework-policy-check.ts / test-coverage-check.ts / test-impl-census-check.ts /
 # test-group-downgrade-check.ts) — moving it would break their glob derivation (0 files). The moved
 # functions call it by NAME (bash resolves at call time, so this later definition is fine).
+# gap-suite-metadata-query-subprocess-spawn: the glob is expanded by bash (free, byte-identical
+# order) and handed to ONE in-process node pass that realpath-dedups AND reads each file's
+# @test-group. The result is cached (_RG_FILES/_RG_GROUP) so the metadata modes' repeated
+# check_group_declarations + select_files/list_groups loops reuse it instead of re-spawning.
 build_deduped_files() {
+  if [ -n "${_RG_CACHE_READY:-}" ]; then
+    printf '%s\n' "${_RG_FILES[@]}"
+    return 0
+  fi
   shopt -s nullglob
   local glob=(packages/*/test/*.test.mjs plugin/test/*.test.mjs experiments/quay-perpetual-stream/test/*.test.mjs)
   shopt -u nullglob
-  declare -A seen=()
-  local f rp
-  for f in "${glob[@]}"; do
-    rp="$(realpath "$f")"
-    if [ -z "${seen[$rp]:-}" ]; then
-      seen[$rp]=1
-      printf '%s\n' "$rp"
-    fi
-  done
+  local meta rc=0
+  # if/else rc-capture (NOT `! cmd; rc=$?` — the `!` negates $?, capturing 0 instead of the helper's
+  # fail-closed 3 — and NOT `|| rc=$?`, which instrument-failure-check FAMILY-3 flags).
+  if meta="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping-metadata.mjs" "${glob[@]}")"; then
+    :
+  else
+    rc=$?
+    exit "$rc"
+  fi
+  _RG_CACHE_READY=1
+  _RG_FILES=()
+  _RG_GROUP=()
+  local f g
+  while IFS=$'\t' read -r f g; do
+    [ -n "${f}" ] || continue
+    _RG_FILES+=("$f")
+    _RG_GROUP["$f"]="$g"
+  done <<< "${meta}"
+  printf '%s\n' "${_RG_FILES[@]}"
 }
 
 # build_dist_once — build dist/quay.js ONCE per invocation, before any test runs

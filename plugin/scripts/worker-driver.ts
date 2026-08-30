@@ -1101,17 +1101,23 @@ export async function continueStateForTaskAsync(root: string, taskId: string): P
   };
 }
 
-/** 冲突消解协议（gap-continue-prompt-conflict-resolution-protocol）：机械 fan-in 的 merge develop 步
- *  在 CONTINUE 轮撞冲突时，旧 prompt 只带失败原因、不含消解指令 ⇒ 消冲突靠 worker 自行发挥（运气）。
- *  本段按文件类型分派消解动作：outline 冲突取 develop 版（⛔ 不手并计数）、code 文件取语义并集、然后
- *  `git commit --no-edit` 完成 merge——⛔ 禁止带着 unmerged paths（UU）退出，否则下一轮 fan-in 的
- *  merge step 再失败。 */
+/** 冲突消解协议（gap-continue-prompt-conflict-resolution-protocol + gap-fan-in-continue-resolution-
+ *  dual-copy-and-ff-not-fast-forward）：机械 fan-in 的 merge develop 步在 CONTINUE 轮撞冲突时，旧
+ *  prompt 只带失败原因、不含消解指令 ⇒ 消冲突靠 worker 自行发挥（运气）。本段按文件类型分派消解动作：
+ *  outline 冲突取 develop 版（⛔ 不手并计数）、code 文件取语义并集、dual-copy 文件两副本同步字节一致、
+ *  非 outline 非 code 的 tick doc 取 develop 版、modify/delete 判删除侧、ff-not-fast-forward 重 merge
+ *  develop 再 ff，然后 `git commit --no-edit` 完成 merge——⛔ 禁止带着 unmerged paths（UU）退出，
+ *  否则下一轮 fan-in 的 merge step 再失败。 */
 function continueConflictResolutionNote(): string {
   return [
     `CONFLICT RESOLUTION — if the prior mechanical fan-in left the worktree with unmerged paths (UU in \`git status\`), or \`git merge develop\` reports CONFLICT, resolve it BEFORE continuing implementation; ⛔ never exit while unmerged paths remain (the next fan-in merge step would fail again).`,
     `(1) outline doc (docs/proposals/quay-product-outline.md — its §6 DELIVERY-INVENTORY counts are computed at check-time, no snapshot to recompute): take the develop version (\`git checkout develop -- docs/proposals/quay-product-outline.md\`); ⛔ do NOT hand-merge the counts.`,
     `(2) code files (e.g. worker-driver.ts): read both sides of the diff and take the semantic union of the two changes (keep both changes where they do not conflict).`,
-    `(3) \`git add <resolved files>\` then \`git commit --no-edit\` to complete the merge.`,
+    `(3) dual-copy files (a workflow script that lives in BOTH \`.claude/workflows/*\` AND its \`plugin/workflows/*\` mirror): take the develop version, then re-sync BOTH copies byte-identical (\`git checkout develop -- .claude/workflows/<file> plugin/workflows/<file>\`); ⛔ do NOT take a semantic union — a union would make the two copies diverge and the dual-copy drift check would go red.`,
+    `(4) tick doc (orchestration/*-tick-core.md, e.g. orchestration/fast-mode-tick-core.md — not outline, not code): take the develop version (\`git checkout develop -- <file>\`); ⛔ do NOT hand-merge.`,
+    `(5) modify/delete CONFLICT (one side deleted the file, the other modified it): first judge WHICH side deleted — if YOUR task branch deleted it intentionally (a replacement implementation lives on the branch, e.g. a TS reincarnation of a deleted shell script) accept the deletion (\`git rm <file>\`); if develop deleted it, accept develop's deletion (\`git rm <file>\`). ⛔ never silently restore the deleted file (reviving a retired implementation), and never treat your branch's intentional deletion as "take the develop version".`,
+    `(6) \`git add <resolved files>\` then \`git commit --no-edit\` to complete the merge.`,
+    `FF NOT FAST-FORWARD — if the prior failure was \`step=ff: ... not fast-forward\` (NOT a merge CONFLICT; develop advanced during the long suite so the task branch fell behind): merge develop again (\`git merge develop\`, resolving any conflict per the rules above), \`git commit --no-edit\`, then re-exit — the driver re-runs fan-in and the ff will then succeed. ⛔ do NOT re-implement; this failure is branch-lag, not a code defect.`,
   ].join(" ");
 }
 
@@ -1711,6 +1717,11 @@ export interface MechanicalFanInOptions {
   worktree: string;
   root: string;
   runId: string;
+  /** per-suite runId 覆盖（测试缝）。缺省 = newMechanicalSuiteRunId(task)（`mfi-<task>-<epoch-ms>-<rand>`，
+   *  每次 fan-in 唯一）。它是【suite 身份】——传给 runner --run-id 并贯穿 full-suite-state /
+   *  suite-load-<runId>.jsonl / verification-round 记录，⛔ 不是 runId（那个是 fan-in 过程身份，锁/日志/ff
+   *  用它）。gap-mechanical-fan-in-per-suite-runid-unified。 */
+  perSuiteRunId?: string;
   mergeTarget?: string;
   /** suite 命令（测试缝）；缺省 = node full-suite-runner.ts --buckets <task>（--root <worktree>
    *  --state-dir <root>/.quay --runner inner --log-file <suiteLogFile>）。gap-fan-in-red-bucket-run-
@@ -2032,11 +2043,19 @@ export function acquireFanInLock(opts: {
 }
 
 /** 写 suite capture（ff 闸 fan-in-ff-merge.sh 的证书——读 suite_exit + suite_head 判「本任务 suite 已
- *  绿且 suite_head 是待 ff tip 的祖先」）。写失败抛错（调用方 catch → red）。 */
+ *  绿且 suite_head 是待 ff tip 的祖先」）。fail-open（gap-write-suite-capture-non-blocking AC1）：
+ *  capture 是 suite 结果的派生观测载体，写失败（磁盘/权限）只 WARN 到 stderr、⛔ 不抛——ff 闸在 capture
+ *  缺失/不可读时回退读权威源 full-suite-state.json（同一轮 mirrorMechanicalFanInSuiteState 已写
+ *  state=green + commit=suite_head + taskId），观测写失败不得弄死一个真实绿 suite 的落地
+ *  （人 2026-08-30 裁定「观测不得阻塞主执行」）。 */
 function writeSuiteCapture(captureFile: string, fields: Record<string, string>): void {
-  const lines = Object.entries(fields).map(([k, v]) => `${k}=${v}`);
-  fs.mkdirSync(path.dirname(captureFile), { recursive: true });
-  fs.writeFileSync(captureFile, lines.join("\n") + "\n", "utf8");
+  try {
+    const lines = Object.entries(fields).map(([k, v]) => `${k}=${v}`);
+    fs.mkdirSync(path.dirname(captureFile), { recursive: true });
+    fs.writeFileSync(captureFile, lines.join("\n") + "\n", "utf8");
+  } catch (e) {
+    console.error(`worker-driver: writeSuiteCapture failed (fail-open — fan-in continues, ff gate falls back to the authoritative source): ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** 读 `<ref>:tasks/<task>.md` 的 status frontmatter（git show；ref 不存在 / 文件缺失 / 读不懂 ⇒ null）。 */
@@ -2070,7 +2089,9 @@ async function commitTaskStatusChange(
  *  worktree 的 .archguard/ 在机械 fan-in 成功后随 `git worktree remove` 被删 ⇒ 记录必须持久化到
  *  root（主检出）的 .archguard/metrics-history.jsonl，post-landing 才可查（硬规则④推论三：能产出≠已产出）。
  *  archguard-runner 每次跑 append 一条，镜像最后一条（本次新写）；worktree 无记录（测试缝的 fake 命令
- *  不写）⇒ no-op 非失败。镜像失败 fail-closed（记录是「被某判据读」半边，载体写失败 ≠ 静默通过）。 */
+ *  不写）⇒ no-op 非失败。镜像写失败【诚实返回 ok:false】但【不阻塞 fan-in】——调用方把结构判定
+ *  （archguard-structure 步，执行语义，失败仍挡）与 metrics 载体写（观测，须 open）解耦：本函数只
+ *  报告写失败，fail-open 的 WARN + 继续由调用方负责（gap-archguard-metrics-mirror-non-blocking）。 */
 function mirrorArchguardMetrics(worktree: string, root: string): { ok: boolean; reason: string | null } {
   const wtFile = path.join(worktree, ".archguard", "metrics-history.jsonl");
   let wtText: string;
@@ -2144,6 +2165,15 @@ async function flipTaskDone(
   return { ok: false, reason: `expected exactly 1 'status: ready' line, got ${readyCount}` };
 }
 
+/** gap-mechanical-fan-in-per-suite-runid-unified — 生成一次机械 fan-in 的 per-suite runId
+ *  （`mfi-<task>-<epoch-ms>-<rand>`）。⛔ 不用共享的 wk-prod（那是 driver 轮次号，一 driver 轮次内多个
+ *  suite 共用，不能当 suite 身份）；也⛔ 不把 runId（fan-in 过程身份，锁/日志/ff 用它）当 suite 身份——
+ *  suite 身份必须每次 fan-in 唯一（epoch-ms + rand 双重唯一）——AC2「同一 driver 轮次两个不同任务的
+ *  per-suite runId 不同」。独立成函数供测试直接调用（⛔ 不内联 randomUUID 让「每次新」无处可验）。 */
+export function newMechanicalSuiteRunId(task: string): string {
+  return `mfi-${task}-${Date.now()}-${randomUUID().slice(0, 6)}`;
+}
+
 /** gap-fan-in-red-bucket-run-not-recorded — 机械 fan-in 的 suite 步缺省命令：经 full-suite-runner.ts
  *  --buckets 跑（正确的 runner，green+red 桶轮次都在 suite 退出时入 verification-round.jsonl），⛔ 不是
  *  平行 `bash scripts/test.sh --buckets`（绕开唯一 writer，红桶轮次零记录——硬规则 3b「没跑过」与
@@ -2151,12 +2181,16 @@ async function flipTaskDone(
  *  把 state/verification-round/measure-history/suite-load 落进共享主检出（/tests 的读取处）；--runner inner
  *  显式标注层身份；--log-file <suiteLogFile> 让 runner 把 suite 流 tee 进 fan-in 的 /tmp 日志
  *  （spawnSuiteAndWait 的静默看门狗盯其 mtime——runner 不写 stdout，须经此缝让看门狗看到进度）。
+ *  --run-id <runId> 把 per-suite 身份传给 runner（gap-mechanical-fan-in-per-suite-runid-unified：
+ *  runner 用它当 runId，贯穿 full-suite-state / generation guard / suite-load-<runId>.jsonl / 记录，
+ *  使 /tests 按记录 runId 查得到负载曲线）。
  *  抽成纯函数便于 worker-driver.test.mjs 断言缺省命令是 runner 而非 test.sh harness（AC2）。 */
 export function defaultMechanicalSuiteCommand(opts: {
   task: string;
   worktree: string;
   root: string;
   suiteLogFile: string;
+  runId: string;
 }): string[] {
   return [
     "node", "--no-warnings", "--experimental-strip-types",
@@ -2166,6 +2200,7 @@ export function defaultMechanicalSuiteCommand(opts: {
     "--state-dir", path.join(opts.root, ".quay"),
     "--runner", "inner",
     "--log-file", opts.suiteLogFile,
+    "--run-id", opts.runId,
   ];
 }
 
@@ -2196,6 +2231,10 @@ export function appendFanInTrace(file: string, entry: Record<string, unknown>): 
  */
 export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<MechanicalFanInResult> {
   const { task, worktree, root, runId } = opts;
+  // gap-mechanical-fan-in-per-suite-runid-unified — the per-suite runId (suite 身份，非 runId 的过程身份)。
+  // Generated ONCE per fan-in (each fan-in = one suite) so the runner's full-suite-state / suite-load-
+  // <runId>.jsonl / verification-round record all carry the SAME key the /tests page joins on.
+  const perSuiteRunId = opts.perSuiteRunId ?? newMechanicalSuiteRunId(task);
   const mergeTarget = opts.mergeTarget ?? "develop";
   const slotBase = opts.slotBase ?? suiteLockBase(root);
   const slotLib = opts.slotLib ?? path.join(root, "plugin", "scripts", "suite-slot-lib.sh");
@@ -2245,7 +2284,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     }
     return verdictOf(step, a.status, summary, logFile);
   };
-  // 无裸流的机械步（reason 已结构化：flip-done / archguard-metrics / acquire-fan-in-lock / exception）。
+  // 无裸流的机械步（reason 已结构化：flip-done / acquire-fan-in-lock / exception）。
   const failClean = (step: string, summary: string, exitCode: number | null = null): MechanicalFanInResult =>
     verdictOf(step, exitCode, summary, null);
 
@@ -2323,7 +2362,15 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     a = await step("archguard-structure", archguardCmd, 600_000);
     if (!a.ok) return fail("archguard-structure", a);
     const mirrored = mirrorArchguardMetrics(worktree, root);
-    if (!mirrored.ok) return failClean("archguard-metrics", mirrored.reason ?? "mirror failed");
+    if (!mirrored.ok) {
+      // 观测镜像写失败 fail-open：结构判定已在上一步 archguard-structure 挡（执行语义，失败仍 fail）；
+      // metrics 从 worktree 镜像到生产载体是【观测】，写失败 WARN（stderr + fan-in 日志）不 failClean——
+      // 人 2026-08-30 裁定「观测写不得 gate 落地」；后续重试/修复时镜像可补。
+      // （gap-archguard-metrics-mirror-non-blocking）
+      const mirrorWarn = mirrored.reason ?? "mirror failed";
+      process.stderr.write(`WARN archguard-metrics: ${mirrorWarn}\n`);
+      trace({ step: "archguard-metrics", exit: 1, wall_ms: 0, ok: false, warn: true, reason: mirrorWarn });
+    }
 
     // 6. scoped 门 + doc 检查（必须绿）。
     const scopedCmd = opts.scopedGateCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
@@ -2337,7 +2384,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
     if (needSuite) {
       trace({ step: "suite-start", exit: 0, wall_ms: 0, ok: true });
-      const suiteCmd = opts.suiteCommand ?? defaultMechanicalSuiteCommand({ task, worktree, root, suiteLogFile });
+      const suiteCmd = opts.suiteCommand ?? defaultMechanicalSuiteCommand({ task, worktree, root, suiteLogFile, runId: perSuiteRunId });
       const sr: SuiteRunResult = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: suiteCmd, logFile: suiteLogFile, silenceMs: opts.silenceMs });
       suiteOutcome = sr.outcome;
       suiteFinishedEpoch = Math.floor(new Date(sr.finishedAt).getTime() / 1000);
@@ -2346,8 +2393,8 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       if (sr.outcome !== "done") {
         // 红 suite 记录由 full-suite-runner.ts --buckets 在 suite 退出时写入（gap-fan-in-red-bucket-run-
         // not-recorded：runner 是 verification-round.jsonl 的唯一 writer，green+red 都入账，静态闸红亦由
-        // runner 的 staticCheckDetected → gate=static-check 记录）。⛔ 不再由 writeRedSuiteRecord 平行补写
-        // —— runner 已记 + 再补写 = 同一红 suite 两条记录、round 号虚增（与「两套平行机制收敛为一」相悖）。
+        // runner 的 staticCheckDetected → gate=static-check 记录）。⛔ 不平行补写——runner 已记 + 再补写
+        // = 同一红 suite 两条记录、round 号虚增（与「两套平行机制收敛为一」相悖）。
         return failClean("suite", `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
       }
       writeSuiteCapture(suiteCapture, {
@@ -2356,8 +2403,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       });
       // D7：把本轮 bucket suite 状态镜像到权威载体 full-suite-state.json（scope=worktree + taskId 区分
       // bucket-run 与 full-run，⛔ 不伪造 full-green；finishedAt 与 mfi.suiteFinishedEpoch 同源 ⇒ 不陈旧）。
+      // ⛔ runId 用 perSuiteRunId（非过程 runId）——runner 已用 perSuiteRunId 写 full-suite-state，镜像
+      // 必须同键，否则 AC1「state/load/记录三者同键」被镜像最后一写破坏（gap-mechanical-fan-in-per-suite-runid-unified）。
       mirrorMechanicalFanInSuiteState({
-        task, runId, commit: suiteHead,
+        task, runId: perSuiteRunId, commit: suiteHead,
         startedAt: sr.startedAt, finishedAt: sr.finishedAt, durationMs: sr.durationMs,
         stateFile: suiteStateFile,
       });

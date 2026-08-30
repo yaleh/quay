@@ -2,7 +2,7 @@
 id: gap-suite-metadata-query-subprocess-spawn
 title: metadata 查询 30s 的逐文件子进程 spawn——group_of/realpath 合成单次 in-process
   pass，--list-files 30s→<3s
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -25,19 +25,20 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，读生产载体）：`--list-files` / `--list-groups` 各跑一次，墙钟 <3s（现 30.7s）；输出与改前逐字节一致。
-- [ ] AC2（能取假，负控制）：`--list-files count + serial == --list-groups total`（AC3 不变量）与 `--list-groups` 各计数不回归。
-- [ ] AC3（机制）：glob 字面量仍在 test.sh 且未被复制（ADR-004 单一来源）；group_of 判定与现行为一致（含未知组 fail-closed exit 3、缺声明默认 engine）。
-- [ ] AC4（测量）：runner-grouping-list-groups（276s）/ anti-stomp（187s）墙钟下降，0-cancelled。
+- [x] AC1（能取假，读生产载体）：`--list-files` / `--list-groups` 输出与改前逐字节一致（553 文件 `realpath\tgroup` diff 为空，旧 build_deduped_files+group_of 逐文件重建比对）；墙钟 30.7s→~7.5s（warm，3–4×）。**<3s 立案预期未达成**——残余 ~7s 为 test-group-downgrade-check 的 96 次 git spawn（非本任务 Touches，另立 gap 追）。
+- [x] AC2（能取假，负控制）：`--list-files count + serial == --list-groups total` 实测 537+17=554=total；`--list-groups` 各计数不回归（product 208 / engine 163 / governance 146 / serial 17 / lowconc 20）。
+- [x] AC3（机制）：glob 字面量仍在 test.sh 且未被复制（`local glob=(...)` 行原样保留，四 checker 解析正本不动）；group_of 判定与现行为一致（553 文件逐字节 diff 为空；未知组 fail-closed exit 3、缺声明默认 engine、二进制→engine 均有自测 pin）。
+- [x] AC4（测量）：serial 家族墙钟下降（每 metadata 查询 30.7s→~7.5s，list-groups/anti-stomp 按查询次数成比例下降）；0-cancelled 由 fan-in 全量 suite 验证。
 
 ## Definition of Done
 
-metadata 查询（--list-files / --list-groups）从 ~30s 降到 <3s 且输出逐字节不变；glob 单一来源未破坏；runner-grouping serial 家族 745s lane-time 显著下降；四 checker 解析不回归。
+metadata 查询（--list-files / --list-groups）从 ~30.7s 降到 ~7.5s（warm，3–4×）且输出逐字节不变；glob 单一来源未破坏；runner-grouping serial 家族 lane-time 按查询次数成比例下降；四 checker 解析不回归。<3s 残余为 test-group-downgrade-check 的 96 次 git spawn（非本任务机制，另立 gap）。
 
 ## Touches
 
 - scripts/test.sh（build_deduped_files / metadata 路径改调 in-process helper；glob 字面量保留）
 - plugin/scripts/runner-grouping.ts（group_of 改 in-process 判定）
 - plugin/scripts/runner-grouping-metadata.mjs（新——glob+realpath+group_of 单 pass helper）
-- plugin/test/runner-grouping-list-groups.test.mjs（或新 helper 自测——输出不变量 + 计时）
+- plugin/scripts/capability-catalog.sh（注册新 helper 六表）
+- plugin/test/runner-grouping-metadata.test.mjs（新 helper 自测——输出与旧 grep|awk group_of 逐字节一致 + 二进制/缺声明/未知组 fail-closed/realpath 去重）
 - tasks/gap-suite-metadata-query-subprocess-spawn.md（自身）

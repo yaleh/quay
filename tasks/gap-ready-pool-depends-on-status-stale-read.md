@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-depends-on-status-stale-read
 title: ready-pool-check 的 depends_on 依赖状态读 stale（依赖已 done 仍报 blocking Y）——statusOf 读 allTasks 磁盘 Map，非 develop
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -23,9 +23,9 @@ depends_on 的 statusOf 改读 develop ref（复用 `readTaskStatusAtRef(root, "
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：依赖在 develop=done、主检出 stale 时，depends_on 判定不再报 blocking（读 develop 判 done）；（⛔ 仍 blocking ⇒ 假）。
-- [ ] AC2（能取假，回归）：依赖真未 done（develop 非 done）时，depends_on 仍 blocking（fail-closed 不变）。
-- [ ] AC3（能取假，单测）：ready-pool-check.test.mjs 断言「dep develop=done 主检出 stale → depsSatisfied=true」，改掉任一 ⇒ 红。
+- [x] AC1（能取假）：依赖在 develop=done、主检出 stale 时，depends_on 判定不再报 blocking（读 develop 判 done）；（⛔ 仍 blocking ⇒ 假）。
+- [x] AC2（能取假，回归）：依赖真未 done（develop 非 done）时，depends_on 仍 blocking（fail-closed 不变）。
+- [x] AC3（能取假，单测）：ready-pool-check.test.mjs 断言「dep develop=done 主检出 stale → depsSatisfied=true」，改掉任一 ⇒ 红。
 
 ## Definition of Done
 
