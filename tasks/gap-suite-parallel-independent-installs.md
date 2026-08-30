@@ -1,7 +1,7 @@
 ---
 id: gap-suite-parallel-independent-installs
 title: runtime AC6 与 e2e-A1 的内部两次独立真 install 转 async spawn 并行（Promise.all，2 并发封顶）
-status: ready
+status: done
 labels:
   - gap
 parent: null
