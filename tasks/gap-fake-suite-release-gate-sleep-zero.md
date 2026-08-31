@@ -1,7 +1,7 @@
 ---
 id: gap-fake-suite-release-gate-sleep-zero
 title: full-suite-runner.test.mjs 固定 sleep 换释放闸——fake suite 阻塞在「测试触碰释放文件」上，墙钟归零（Tier 1）
-status: ready
+status: done
 labels:
   - gap
   - test-wall-clock
