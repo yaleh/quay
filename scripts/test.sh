@@ -594,8 +594,10 @@ PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"
 # QUERY_MAIN_TAIL_OVERLAP=<lanes> (default 0 = current behavior). When >0, the MAIN phase starts
 # EARLY — before the serial+lowconc window fully closes — at concurrency <lanes>, overlapping with the
 # window's latency-bound tail (the ~130s near-idle tail the director's load curve measured: 23/48
-# samples stall<3% while the remaining wall-clock-wait / real-install tests hold their processes at
-# ~zero CPU). The start trigger is LOAD-DRIVEN (⛔ not a fixed delay): a watcher polls cpu_stall
+# samples stall<3%; healthy idle tails dip to ~4-6% — round 773/795/798 measured 4.3-5.8% — hence the
+# default $MAIN_TAIL_STALL_PCT=6 below). The remaining wall-clock-wait / real-install tests hold their
+# processes at ~zero CPU. The start trigger is LOAD-DRIVEN (⛔ not a fixed delay): a watcher polls
+# cpu_stall
 # (/proc/pressure/cpu `some avg10`) and fires once it has stayed ≤ $MAIN_TAIL_STALL_PCT for
 # $MAIN_TAIL_HOLD_S consecutive seconds — i.e. the window's CPU work has drained — then launches main
 # at the knob's lanes. Total CPU load during the overlap = main lanes + the near-zero latency-bound
@@ -609,7 +611,7 @@ MAIN_TAIL_OVERLAP="${QUERY_MAIN_TAIL_OVERLAP:-0}"
 if ! awk -v v="${MAIN_TAIL_OVERLAP}" 'BEGIN { exit !(v ~ /^[0-9]+$/) }'; then
   MAIN_TAIL_OVERLAP=0
 fi
-MAIN_TAIL_STALL_PCT="${QUAY_MAIN_TAIL_STALL_PCT:-3}"
+MAIN_TAIL_STALL_PCT="${QUAY_MAIN_TAIL_STALL_PCT:-6}"
 MAIN_TAIL_HOLD_S="${QUAY_MAIN_TAIL_HOLD_S:-5}"
 MAIN_TAIL_POLL_S="${QUAY_MAIN_TAIL_POLL_S:-1}"
 MAIN_TAIL_WAIT_MAX_S="${QUAY_MAIN_TAIL_WAIT_MAX_S:-300}"
