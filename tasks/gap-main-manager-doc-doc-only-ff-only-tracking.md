@@ -29,7 +29,7 @@ extra: {}
 - [x] AC1（能取假，ff-only）：develop→doc 同步不再 merge-fallback——grep 无 `git merge develop` 兜底；非 ff 时报「无法 ff-only 同步」（独立取值）；（⛔ 仍静默 catch ⇒ 假）。
 - [x] AC2（能取假，guard）：main/manager-doc 与 develop 分叉即报红——造一次分叉验证 guard 报红；（⛔ 分叉不报 ⇒ 假）。
 - [x] AC3（能取假，负控制）：一次真实 develop→doc 同步后 `git rev-parse main/manager-doc develop` 两 ref 相等（同一次 commit）；（⛔ 仍分叉 ⇒ 假）。
-- [ ] AC4（能取假，生产载体，硬规则 3c）：syncDevelopToDoc 有 ≥1 非测试调用者（promotion-driver 每轮启动前 syncDevelopToDoc(root)）+ 成功同步（synced）亦落痕 `doc-develop-sync-ff-synced` 到 `.quay/doc-develop-sync.jsonl`——读生产载体有落地后时间窗的记录；（⛔ 生产载体无记录 / 仅测试调用 ⇒ 假）。
+- [ ] AC4（能取假，生产载体，硬规则 3c）：syncDevelopToDoc 有 ≥1 非测试调用者（promotion-driver 每轮启动前 syncDevelopToDoc(root)）+ 成功同步（synced）亦落痕 `doc-develop-sync-ff-synced` 到 `.quay/doc-develop-sync.jsonl`——读生产载体有落地后时间窗的记录；（⛔ 生产载体无记录 / 仅测试调用 ⇒ 假）。机制已落地（非测试调用者 promotion-driver.ts:670 每轮启动前 + synced 落痕 driver-filters.ts:502 + driver-filters.test.mjs 33/33 绿含 AC4 两条），落地后时间窗的生产记录待外部验证（生产 driver 重启后读 .quay/doc-develop-sync.jsonl）。（待外部）
 
 ## Definition of Done
 
