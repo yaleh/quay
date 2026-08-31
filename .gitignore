@@ -273,6 +273,12 @@ orchestration/inner-idle-log.jsonl
 # fan-in-retries.jsonl / gate-events.jsonl; never committed (untracked would dirty `git status
 # --porcelain` and trip fan-in-ff-merge.sh's own clean-tree check at exit 2).
 **/.quay/fan-in-ff-escalations.jsonl
+# doc↔develop sync event record (gap-doc-develop-sync-semantic-conflict-resolution): runtime
+# telemetry written by driver-filters.ts propagateDocBranchToDevelop / semanticSyncDocToDevelop on
+# mechanical ff-only failure + semantic-fallback outcome; never committed (same family as
+# worker-outcome.jsonl / fan-in-ff-escalations.jsonl — an untracked file would dirty `git status
+# --porcelain` and make the failure observable only as a dirty tree, not as a distinct event).
+**/.quay/doc-develop-sync.jsonl
 # AC72 cert retire (gap-ac72-cert-mechanism-retire): the per-task suite record is runtime state in
 # the SHARED checkout (written by per-task-suite-record.ts from a task worktree, read by
 # per-task-suite-record-check.ts); never committed (same family as full-suite-state.json).
