@@ -1,15 +1,18 @@
 ---
 id: gap-ff-propagate-structurally-broken-filing-must-target-develop
 title: ff-propagate 结构不可用——立案落 main/manager-doc 靠 ff 到 develop 永远分叉；立案必须直接落 develop
-status: needs-human
+status: superseded
 labels:
   - gap
 parent: null
-children:
-  - gap-main-manager-doc-doc-only-ff-only-tracking
+children: []
 extra: {}
 ---
 **type:** execution
+## Superseded
+
+**人 2026-08-31 裁定反转**：「ref-level 直落 develop」写侧方向弃用——写面保留 main/manager-doc（在 main/manager-doc 修改任务状态是常见的，最典型 needs-human→其他状态）。可接受分叉、可接受同步损失 main/manager-doc 的变更，但必须有持续同步机制且必须同步成功。本任务的残余价值（同步可靠化 = propagate 返回 boolean + 失败落痕，消除静默失败）并入 `gap-doc-develop-sync-semantic-conflict-resolution`（升为核心）。
+
 ## Proposal
 `propagateDocBranchToDevelop`（driver-filters.ts:207，ff push main/manager-doc → develop）结构上不可用：fan-in 落 develop 的「done」提交（driver 机械翻 done + merge commit）与立案落 main/manager-doc 的「ready」提交各自产生对方没有的提交 ⇒ 两分支永远分叉 ⇒ ff 永远 non-fast-forward。实证 2026-08-30：分叉 develop-only 39 / main/manager-doc-only 13，全是这个模式。正确机制：**立案直接落 develop**（与 `gap-dispatch-reads-stale-main-checkout-task-status` 读 develop 配对）。
 
