@@ -73,7 +73,7 @@ export { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./
 import { resourceGateCheck, isHalted, PROMOTION_CONTROL_STATE_REL } from "./driver-shared.ts";
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。promotion 的 fix pass 经
 // applyTaskFilters 消费 retryCapNotExhausted / notNeedsHuman（⛔ 不各写一遍 retryState.needsHuman 判定）。
-import { applyTaskFilters, makeFilterContext, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, type RetryState } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, syncDevelopToDoc, type RetryState } from "./driver-filters.ts";
 // AC155：并发 cap / 轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量）。
 import { defaultDriverConfig, loadDriverConfig, driverCap } from "./driver-config.ts";
 // AC153：核心不变式单一实现（「⛔ 不信执行者自述，用独立量复核」）。AC133 重闸验证（computeReverifyOutcome）
@@ -661,6 +661,13 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
       if (json) process.stdout.write(`${JSON.stringify({ event: "halted", round })}\n`);
       break;
     }
+    // gap-main-manager-doc-doc-only-ff-only-tracking AC4：每轮启动前把主检出（main/manager-doc）快进到
+    // develop（机械 ff-only，⛔ 静默 merge-fallback）。主检出落后 develop 时生产跑旧代码（promotion-driver
+    // 常驻从主检出工作树加载）——syncDevelopToDoc 是 develop→doc 方向的机械同步单一真相源
+    // （driver-filters.ts）：非 ff 报「not-ff」落痕（分叉 guard）、成功亦写 doc-develop-sync-ff-synced
+    // 事件（生产载体）。返回值仅供观测（synced/already/not-ff/not-doc/error），不阻断本轮——同步失败
+    // ≠ 停摆，分叉消解升级语义兜底归父任务（gap-doc-develop-sync-semantic-conflict-resolution）。
+    syncDevelopToDoc(root);
     // liveness 检查（gap-resident-driver-stable-carrier-liveness Finding 的接线）：每轮顺手调一次
     // launch 脚本的 liveness 子命令。supervisor 死后 driver 成孤儿仍在跑 ⇒ 下一轮即检出 supervisor_dead
     // 并让子命令写 DEATH 告警（⛔ 载体停更 ≠ 一切正常）。checked=false（脚本缺失/失败）≠ 健康（硬规则 3b）。
