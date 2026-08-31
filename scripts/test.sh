@@ -1286,7 +1286,7 @@ run_selected() {
       rm -f "$main_early_code_file"
       if [ -n "$_tail_verdict" ] && [ "$_tail_verdict" != "fallthrough" ] && [ "$_tail_verdict" != "pending" ]; then
         mcode="$_tail_verdict"
-        [ "$mcode" -eq 0 ] || code="$mcode"
+        if [ "$mcode" -ne 0 ]; then code="$mcode"; fi
         _tail_skip_main=1
       fi
     fi
