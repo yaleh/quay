@@ -43,5 +43,4 @@ extra: {}
 - plugin/test/worker-driver.test.mjs（拆：48 test 保留）
 - plugin/test/worker-driver-resident.test.mjs（新，@test-group lowconc，34 test）
 - plugin/test/worker-driver-fan-in.test.mjs（新，@test-group lowconc，51 test）
-- 拆分产物的 @test-group 注册 + ratchet/baseline 同步（若触发）
 - tasks/gap-suite-file-split-two-longest.md（自身）
