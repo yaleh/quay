@@ -10,7 +10,7 @@
 //   other-task (defer anti-livelock).
 
 // full-suite-runner.test.mjs — runner verdict / state machine / red detection / reason axis / kill-hang / control. Split from gap-suite-file-split-two-longest; harness shared via ./helpers/full-suite-runner-harness.mjs.
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync, execSync } from "node:child_process";
 import fs from "node:fs";
@@ -94,6 +94,48 @@ function fakeTestShRecordingArgs(root) {
   return { argsLog };
 }
 
+// ── gap-shape-assert-share-round: shared GREEN shape round (Tier-2 wall-clock) ────────────────
+// Four GREEN-suite tests below each used to pay a FULL runner spawn to assert a SINGLE field of the
+// same terminal green round (the exact suite-state shape / the green full-suite.log summary / the
+// generation-guard read-back / the runner PID). They now share ONE runner round: a lazily-cached
+// promise runs the runner once and exposes the state + log + child to every consumer. The
+// assertions are unchanged (AC2: no test is deleted for time) — only the spawn is shared
+// (AC1: 4 runRunner spawns → 1).
+let _sharedGreenShapePromise = null;
+async function sharedGreenShape() {
+  if (!_sharedGreenShapePromise) {
+    _sharedGreenShapePromise = (async () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-shared-green-"));
+      const { f, dir } = fakeSuite(GREEN_SUITE);
+      const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+      const { code } = await waitExit(child);
+      assert.equal(code, 0, "shared green run exits 0");
+      return {
+        root,
+        dir,
+        child,
+        s: readState(root),
+        log: fs.readFileSync(path.join(root, ".quay", "full-suite.log"), "utf8"),
+      };
+    })();
+  }
+  return _sharedGreenShapePromise;
+}
+
+// Clean up the shared round's temp root + fake-suite dir once, after all tests (the shared round
+// may never have run if a `--test-name-pattern` filtered out every consumer — guard on the promise).
+after(async () => {
+  if (_sharedGreenShapePromise) {
+    try {
+      const g = await _sharedGreenShapePromise;
+      fs.rmSync(g.root, { recursive: true, force: true });
+      fs.rmSync(g.dir, { recursive: true, force: true });
+    } catch {
+      // the shared run failed; its temp dirs are best-effort
+    }
+  }
+});
+
 test("negative control — waitExit resolves bounded when the child ALREADY exited before the listener is mounted (exit event is NOT replayed)", async () => {
   // The load race (gap-full-suite-runner-test-waitExit-load-race): under load 15-25 a spawned child
   // can exit during an `await` gap BEFORE waitExit mounts its 'exit' listener. Node child_process
@@ -111,45 +153,37 @@ test("negative control — waitExit resolves bounded when the child ALREADY exit
 });
 
 test("AC1 — a green run writes the exact suite-state shape to .quay/full-suite-state.json", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-root-"));
-  const { f, dir } = fakeSuite(GREEN_SUITE);
-  try {
-    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
-
-    const s = readState(root);
-    assert.ok(s, "state file written");
-    assert.deepEqual(
-      Object.keys(s).sort(),
-      [
-        "durationMs",
-        "finishedAt",
-        "laneCount",
-        "pid",
-        "runId",
-        "runner",
-        "scope",
-        "startedAt",
-        "state",
-      ],
-      "exact suite-state shape (AC1 + gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1 scope + gap-full-suite-state-race-last-write-wins-no-generation-guard runId + gap-full-suite-state-red-no-failure-detail-static-check-invisible AC6 pid)",
-    );
-    assert.equal(s.state, "green");
-    assert.equal(s.runner, "outer");
-    assert.equal(s.laneCount, 8);
-    assert.ok(s.runId && typeof s.runId === "string", "every state write carries a runId generation token");
-    assert.ok(!Number.isNaN(Date.parse(s.startedAt)), "startedAt is ISO");
-    // gap-batch-merge-gate-reads-stale-green: finishedAt is EPOCH SECONDS (the batch-merge freshness
-    // gate's Contract measure `int(time.time() - finishedAt)` needs epoch, not ISO).
-    assert.equal(typeof s.finishedAt, "number", "finishedAt is epoch seconds (suite_freshness measure)");
-    assert.ok(s.finishedAt > 0, "finishedAt epoch seconds is positive");
-    assert.equal(typeof s.durationMs, "number", "durationMs is the AC5 measurement hook");
-    assert.ok(s.durationMs >= 0);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  // gap-shape-assert-share-round: shares ONE runner round with the green-log / generation-guard /
+  // pid shape tests below (4 spawns → 1) — it asserts only the state SHAPE, not a distinct verdict,
+  // so the shared green round satisfies it identically.
+  const { s } = await sharedGreenShape();
+  assert.ok(s, "state file written");
+  assert.deepEqual(
+    Object.keys(s).sort(),
+    [
+      "durationMs",
+      "finishedAt",
+      "laneCount",
+      "pid",
+      "runId",
+      "runner",
+      "scope",
+      "startedAt",
+      "state",
+    ],
+    "exact suite-state shape (AC1 + gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1 scope + gap-full-suite-state-race-last-write-wins-no-generation-guard runId + gap-full-suite-state-red-no-failure-detail-static-check-invisible AC6 pid)",
+  );
+  assert.equal(s.state, "green");
+  assert.equal(s.runner, "outer");
+  assert.equal(s.laneCount, 8);
+  assert.ok(s.runId && typeof s.runId === "string", "every state write carries a runId generation token");
+  assert.ok(!Number.isNaN(Date.parse(s.startedAt)), "startedAt is ISO");
+  // gap-batch-merge-gate-reads-stale-green: finishedAt is EPOCH SECONDS (the batch-merge freshness
+  // gate's Contract measure `int(time.time() - finishedAt)` needs epoch, not ISO).
+  assert.equal(typeof s.finishedAt, "number", "finishedAt is epoch seconds (suite_freshness measure)");
+  assert.ok(s.finishedAt > 0, "finishedAt epoch seconds is positive");
+  assert.equal(typeof s.durationMs, "number", "durationMs is the AC5 measurement hook");
+  assert.ok(s.durationMs >= 0);
 });
 
 test("AC1 — an explicit --runner inner is recorded in BOTH the state and the verification-round (gap-runner-field-hardcoded-outer-not-measurement)", async () => {
@@ -1082,19 +1116,11 @@ test("AC3 — a red suite's full-suite.log ends with a `# fail` summary line (ga
 });
 
 test("AC1/AC3 e2e — a GREEN suite's full-suite.log ends with a `# fail 0` summary (summary is verdict-accurate)", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-logsumpgreen-"));
-  const { f, dir } = fakeSuite(GREEN_SUITE);
-  try {
-    const child = runRunner({ root, command: `bash ${f}` });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, "runner exits 0 on green");
-    const log = fs.readFileSync(path.join(root, ".quay", "full-suite.log"), "utf8");
-    assert.match(log, /^# fail 0$/m, `a green run logs '# fail 0'; got:\n${log}`);
-    assert.match(log, /^# suite green$/m, "green summary names the green verdict");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  // gap-shape-assert-share-round: shares ONE runner round with the state-shape / generation-guard /
+  // pid shape tests (4 spawns → 1). The green log summary is written on the shared green run.
+  const { log } = await sharedGreenShape();
+  assert.match(log, /^# fail 0$/m, `a green run logs '# fail 0'; got:\n${log}`);
+  assert.match(log, /^# suite green$/m, "green summary names the green verdict");
 });
 
 test("AC1 — a passing vitest-style suite logging a bare-X console line stays GREEN (no false early-red)", async () => {
@@ -1919,22 +1945,15 @@ test("AC2 — the read side can tell 'is this red/green the current round' by it
 });
 
 test("AC4 — negative control: a single runner's normal writes are unaffected by the guard", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac4-"));
-  const { f, dir } = fakeSuite(GREEN_SUITE);
-  try {
-    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, "single runner still exits 0 on green");
-    const s = readState(root);
-    assert.equal(s.state, "green", "single-runner terminal write lands normally (AC4)");
-    const runId = s.runId;
-    assert.ok(runId, "runId present on the single-runner state");
-    // read-side consistency: the state's runId matches the current round (nothing was rejected)
-    assert.equal(readStateRunId(statePath(root)), runId, "read-side sees the same single generation");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  // gap-shape-assert-share-round: shares ONE runner round with the state-shape / green-log / pid
+  // shape tests (4 spawns → 1). It asserts only the read-side generation-guard consistency, so the
+  // shared green round satisfies it identically.
+  const { root, s } = await sharedGreenShape();
+  assert.equal(s.state, "green", "single-runner terminal write lands normally (AC4)");
+  const runId = s.runId;
+  assert.ok(runId, "runId present on the single-runner state");
+  // read-side consistency: the state's runId matches the current round (nothing was rejected)
+  assert.equal(readStateRunId(statePath(root)), runId, "read-side sees the same single generation");
 });
 
 test("AC4 — a write over a legacy state (no runId on disk) is NOT blocked (fail-open, no conflict)", () => {
@@ -1976,21 +1995,14 @@ test("AC4 — a write over a legacy state (no runId on disk) is NOT blocked (fai
 // ── AC6: runner-died terminal state (gap-full-suite-state-red-no-failure-detail-static-check-invisible) ──
 
 test("AC6 — every state write carries the runner PID (the crash-watchdog's liveness anchor)", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-pid-"));
-  const { f, dir } = fakeSuite(GREEN_SUITE);
-  try {
-    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, "runner exits 0 on green");
-    const s = readState(root);
-    assert.equal(s.state, "green");
-    assert.equal(typeof s.pid, "number", "the state carries the runner PID (AC6)");
-    assert.ok(Number.isInteger(s.pid) && s.pid > 0, "pid is a positive integer");
-    assert.equal(s.pid, child.pid, "pid is the RUNNER process's pid — the watchdog's liveness anchor");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  // gap-shape-assert-share-round: shares ONE runner round with the state-shape / green-log /
+  // generation-guard shape tests (4 spawns → 1). It asserts only the pid field (and pid === the
+  // shared round's runner child), so the shared green round satisfies it identically.
+  const { s, child } = await sharedGreenShape();
+  assert.equal(s.state, "green");
+  assert.equal(typeof s.pid, "number", "the state carries the runner PID (AC6)");
+  assert.ok(Number.isInteger(s.pid) && s.pid > 0, "pid is a positive integer");
+  assert.equal(s.pid, child.pid, "pid is the RUNNER process's pid — the watchdog's liveness anchor");
 });
 
 test("AC6 — a runner that dies mid-run from an uncaughtException writes state=red reason=crashed (never stuck at running)", async () => {

@@ -246,7 +246,7 @@ export const REGISTRY: RedReadingEntry[] = [
     id: "a6_fixed_cap",
     kind: "a-reading",
     behavior: "A6 占用率固定 cap=5（动态 cap 作废）— `ready-pool-check` 一律 `--cap 5`；floor=20",
-    redReading: "`ready-pool-check` 不带 `--cap 5` ⇒ 回退 `CONCURRENCY_CAP_DEFAULT=3` ⇒ floor=12 是假读数（≠ 真值 floor=20）",
+    redReading: "`ready-pool-check` 不带 `--cap 5` ⇒ 回退 `CONCURRENCY_CAP_DEFAULT`（= defaultDriverConfig().worker.cap = 5，单一真相源）⇒ floor=20 与真值一致（旧 `=3` ⇒ floor=12 假读数已随 dispatch 单一真相源消除）",
     verify: (root) => {
       const t = tickCore(root);
       const ok = has(t, "ready-pool-check --cap 5") && has(t, "固定 `cap=5`");
