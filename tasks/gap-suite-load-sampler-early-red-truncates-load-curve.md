@@ -29,9 +29,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：`isSuiteRunning` 按 `finishedAt` 判定——grep 判据含 `finishedAt`（非仅 `state !== "running"`）；（⛔ 仍只判 state ⇒ 假）。
-- [ ] AC2（能取假，红轮覆盖）：实现落地后时间窗内，红轮的负载曲线覆盖 = 套件实跑窗口（非截断在首败）——造一次 early-red 轮验证采样持续到 finishedAt 写；（⛔ 曲线仍截断 ⇒ 假）。
-- [ ] AC3（能取假，无回归）：绿轮行为不变（覆盖=1.00 不回退）、「结束即停/不常驻空跑」不变式仍成立（采样器在 finishedAt 后退出，不空跑）。
+- [x] AC1（能取假，机制级）：`isSuiteRunning` 按 `finishedAt` 判定——grep 判据含 `finishedAt`（非仅 `state !== "running"`）；（⛔ 仍只判 state ⇒ 假）。
+- [x] AC2（能取假，红轮覆盖）：实现落地后时间窗内，红轮的负载曲线覆盖 = 套件实跑窗口（非截断在首败）——造一次 early-red 轮验证采样持续到 finishedAt 写；（⛔ 曲线仍截断 ⇒ 假）。
+- [x] AC3（能取假，无回归）：绿轮行为不变（覆盖=1.00 不回退）、「结束即停/不常驻空跑」不变式仍成立（采样器在 finishedAt 后退出，不空跑）。
 
 ## Definition of Done
 
@@ -40,4 +40,5 @@ extra:
 ## Touches
 
 - plugin/scripts/suite-load-sampler.ts（isSuiteRunning 按 finishedAt 判定）
+- plugin/test/full-suite-runner.test.mjs（AC2/AC3 单测：early-red 续采 + finishedAt 停）
 - tasks/gap-suite-load-sampler-early-red-truncates-load-curve.md（自身）
