@@ -1,7 +1,7 @@
 ---
 id: gap-retrystate-needshuman-no-reconcile-with-disk-ready
 title: worker-driver 内存 retryState.needsHuman 与磁盘 ready 翻转对账缺失——人重派被静默忽略；stop_reason backoff 字面量在候选被谓词滤空时误报
-status: ready
+status: done
 labels:
   - gap
   - defect
