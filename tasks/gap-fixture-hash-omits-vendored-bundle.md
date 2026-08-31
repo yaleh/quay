@@ -1,7 +1,7 @@
 ---
 id: gap-fixture-hash-omits-vendored-bundle
 title: quay-init-install-fixture _fixtureHash 漏 plugin/vendor/quay-native/dist/quay-native.js——vendored bundle 变更不重建 fixture，runtime 陈旧致 stale-runtime 恒红
-status: todo
+status: ready
 labels:
   - gap
   - defect
