@@ -1,7 +1,7 @@
 ---
 id: gap-adr-gate-test-fixture-isolation-live-task-store
 title: adr-gate.test.mjs 把一次性 fixture 写进 live tasks/ 与 store 全量 scan 竞态 ENOENT——test-isolation 缺陷
-status: ready
+status: done
 labels:
   - gap
   - defect
