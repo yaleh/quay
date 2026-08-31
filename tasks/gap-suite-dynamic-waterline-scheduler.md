@@ -1,7 +1,7 @@
 ---
 id: gap-suite-dynamic-waterline-scheduler
 title: suite/bucket 统一调度器——组预算 + 单调水位 + main 用剩余容量（替代静态分相 + A watcher，模拟省 21%）
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null
@@ -66,3 +66,8 @@ extra:
 
 - 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
 - 失败步/判词：step=suite: suite red
+
+**重派指引（2026-08-31 driver development progress 诊断，聚焦修）**：
+- 聚焦修 `--list-files` 分组分类一致性——runner-grouping-list-groups AC6（`--group product,engine ∪ --group lowconc = no-args` 字节一致）被破坏，违反本任务 AC3 pass/fail-neutral（只改调度、不改测试集/断言）。
+- 定位对照：`QUAY_SUITE_SCHEDULER=0` 回退 legacy 跑 AC6——legacy 过 / scheduler 红 ⇒ bug 在 suite-scheduler.ts 的 `__GROUP__`/分类逻辑；legacy 也红 ⇒ 更早的 --list-files 改动，需另归因。
+- worktree 72c91ba31 可救（HEAD 已修过一次「__GROUP__ capped 字段误写为 st.failed」）；AC 0/5 待勾，修完勾 AC。
