@@ -6,9 +6,9 @@
 // PARKED), reporting dispatchable_disjoint (the largest mutually-disjoint pool subset via
 // checkTouchesPair) as the CRITERION, and recommending todo→ready promotions in a DEFINED order
 // (touch-disjointness FIRST vs the pool + in-flight, then gap-* > DIR-*, then touches-resolve
-// first) when pool < floor (= cap × 4, default 12).
+// first) when pool < floor (= cap × 4, default 20 — dispatch single source).
 //
-// AC1 floor = cap × 4 (12 at cap 3, configurable) · AC2 dispatchable_disjoint via checkTouchesPair
+// AC1 floor = cap × 4 (20 at cap 5, configurable) · AC2 dispatchable_disjoint via checkTouchesPair
 // AC3 pool-big-but-all-colliding self-report + no-false-report-on-criterion-met · AC4 disjointness
 //   ranks before kind, incl. in-flight · AC5 touchesResolve guard kept · AC6 cost asymmetry doc
 // AC7 real use · AC8 node:test + @test-group engine
@@ -1064,12 +1064,12 @@ test("artifactsComplete recognizes finding-shape draft AC/DoD headings (gap-todo
   assert.ok(rNoAc.missing.includes("ac"), `missing should include ac, got ${rNoAc.missing}`);
 });
 
-// ── AC1: floor = cap × 4 (12 at cap 3) — single source, no hardcoded 3 ────────────────────────────
+// ── AC1: floor = cap × 4 (20 at cap 5) — single source, no hardcoded literal ──────────────────────
 
-test("POOL_FLOOR = cap × 4 (12 at cap 3) — single source, no hardcoded 3 (AC1)", () => {
-  assert.equal(CONCURRENCY_CAP_DEFAULT, 3);
+test("POOL_FLOOR = cap × 4 (20 at cap 5) — single source from defaultDriverConfig().worker.cap (AC1)", () => {
+  assert.equal(CONCURRENCY_CAP_DEFAULT, 5);
   assert.equal(POOL_FLOOR_MULT_DEFAULT, 4);
-  assert.equal(POOL_FLOOR, 12, "default floor = 3 × 4");
+  assert.equal(POOL_FLOOR, 20, "default floor = 5 × 4 (dispatch single source)");
   assert.equal(computePoolFloor(3, 4), 12);
   assert.equal(computePoolFloor(3), 12, "floorMult defaults to 4");
   assert.equal(computePoolFloor(2, 4), 8);
@@ -1553,7 +1553,7 @@ test("CLI smoke: --root produces JSON with pool/dispatchable_disjoint/floor (exi
   const parsed = JSON.parse(out);
   assert.equal(typeof parsed.pool, "number");
   assert.equal(parsed.pool, 1);
-  assert.equal(parsed.floor, 12, "default floor = cap×4 = 12");
+  assert.equal(parsed.floor, 20, "default floor = cap×4 = 20 (dispatch single source)");
   assert.equal(typeof parsed.dispatchable_disjoint, "number");
   assert.equal(typeof parsed.criterion_met, "boolean");
   assert.equal(typeof parsed.scanned, "number");

@@ -147,11 +147,12 @@
 //                          targeted remains the outer's stage-goal pick (selection = outer).
 //   --json                 accepted for Contract parity; output is always JSON
 //
-// ADAPTIVE CAP (gap-adaptive-concurrency-cap-tied-to-resource-gate): at dispatch time the tick calls
-// cap-from-gate.sh to get `effective_cap` and passes it as `--cap` — so the floor (cap × 4) follows
-// the resource-adaptive cap (GO=5 ⇒ floor 20; WAIT=2 ⇒ floor 8; EXTREME=1 ⇒ floor 4). The bare
-// CONCURRENCY_CAP_DEFAULT=3 below is the CONSERVATIVE FALLBACK when no --cap is passed (manual runs),
-// not a fixed production cap.
+// FIXED CAP (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic/adaptive cap
+// is retired — the tick passes the fixed cap 5 (via cap-from-gate's FIXED_EFFECTIVE_CAP, now derived
+// from driver-config's defaultDriverConfig().worker.cap, AC155). The bare CONCURRENCY_CAP_DEFAULT below
+// is that SAME single source when no --cap is passed (manual runs) — ⛔ NOT a parallel `= 3` literal
+// (gap-execution-loop-p4-dispatch-productization AC1 folds the old floor-12 false reading into the
+// dispatch single source).
 //
 // The pure functions are exported and unit-tested; `main()` is a thin CLI over them.
 
@@ -193,6 +194,13 @@ import { expandDeclaredTouches, INFLIGHT_WORKTREE_STALE_MS } from "./concurrent-
 import { enumerateProcs, cwdUnder } from "./worktree-process-reaper.ts";
 import { isDirectEntry, helpExit } from "./gate-script-base.ts";
 import { TASK_STATUS, isTaskStatus } from "./task-status.ts";
+// DISPATCH-CAP SINGLE SOURCE (tasks/gap-execution-loop-p4-dispatch-productization AC1): the dispatch
+// concurrency cap derives from driver-config's defaultDriverConfig().worker.cap — the SAME single
+// source cap-from-gate.ts (FIXED_EFFECTIVE_CAP) / promotion-driver.ts (CAP_DEFAULT) / worker-driver.ts
+// (driverCap) consume (AC155). ready-pool-check's floor must not carry a parallel literal (the fixed-
+// cap-5 ruling retired the dynamic cap; the old CONCURRENCY_CAP_DEFAULT=3 ⇒ floor=12 was a false
+// reading vs the true dispatch floor 5×4=20 — red-on-omission-audit a6_fixed_cap.redReading).
+import { defaultDriverConfig } from "./driver-config.ts";
 // Reused "work has landed on master" signal (AC6: reuse, never a parallel copy) — the same
 // symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
 // buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-
@@ -228,13 +236,13 @@ import { listWorktrees, worktreeExists } from "./fast-mode-telemetry.ts";
 // second Touches parser).
 import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
 
-/** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
- *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
- *  (gap-adaptive-concurrency-cap-tied-to-resource-gate); the floor is DERIVED from the cap passed.
- *  concurrency-default-fallback: manual-run conservative fallback (declared per
- *  gap-concurrency-literal-only-at-definition-points — a justified default, not a silent literal;
- *  the single source is QUAY_MAX_TASK_SUBAGENTS once gap-single-flight-lock-2-slot-concurrent-suites lands). */
-export const CONCURRENCY_CAP_DEFAULT = 3;
+/** Default concurrency cap (max in-flight subagents) — derived from driver-config's
+ *  defaultDriverConfig().worker.cap (the DISPATCH single source, AC155), NOT a parallel literal.
+ *  The old CONCURRENCY_CAP_DEFAULT=3 (⇒ floor 12) was a FALSE reading vs the fixed-cap-5 ruling's
+ *  true dispatch floor (5×4=20) — gap-execution-loop-p4-dispatch-productization AC1 folds it into
+ *  the single source, so `analyzeTasks` with no --cap and `slot-refill` no longer diverge (3 vs 5).
+ *  An explicit --cap still overrides (manual/test runs); only the DEFAULT is the single source. */
+export const CONCURRENCY_CAP_DEFAULT = defaultDriverConfig().worker.cap;
 
 /** Default floor multiplier: floor = cap × this. 4× leaves one notch of headroom, far below the old
  *  10× (historical 08-02→08-04 stable pool of 11 = 9 real/3 cap = 3.0× proven; 4× is not the floor
@@ -242,7 +250,7 @@ export const CONCURRENCY_CAP_DEFAULT = 3;
 export const POOL_FLOOR_MULT_DEFAULT = 4;
 
 /** The healthy ready-pool floor: pool must be ≥ this before promotion pressure releases.
- *  floor = cap × 4 (cap=3 ⇒ 12). SINGLE SOURCE — no hardcoded 3 anywhere.
+ *  floor = cap × 4 (cap=5 ⇒ 20 — derived from the dispatch single source, not a hardcoded literal).
  *  RETIRED GATE (AC48): this is now a REPORTED signal only — it no longer GATES bulk promotion
  *  (the pool<floor condition was cancelled; the promotion-driver promotes every eligible candidate, 合格即晋). */
 export const POOL_FLOOR = CONCURRENCY_CAP_DEFAULT * POOL_FLOOR_MULT_DEFAULT;
