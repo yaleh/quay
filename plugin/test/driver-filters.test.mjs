@@ -23,6 +23,7 @@ import {
   allDepsDone,
   readTaskStatus,
   markNeedsHuman,
+  reconcileNeedsHumanWithDisk,
   WORKER_OUTCOME_REL,
 } from "../scripts/driver-filters.ts";
 import { readTaskStatus as workerReadTaskStatus } from "../scripts/worker-driver.ts";
@@ -161,6 +162,38 @@ test("notNeedsHuman — filters needs-human status; unreadable ⇒ fail-closed",
   assert.equal(pred("gap-ready"), true, "ready status ⇒ not needs-human");
   assert.equal(pred("gap-nh"), false, "needs-human status ⇒ filtered");
   assert.equal(pred("gap-missing"), false, "unreadable ⇒ fail-closed (读不懂 ≠ 合格)");
+});
+
+// ── reconcileNeedsHumanWithDisk（gap-retrystate-needshuman-no-reconcile-with-disk-ready）──────────
+
+test("AC1 (能取假) — reconcileNeedsHumanWithDisk：磁盘翻回 ready ⇒ 内存清除 + 计数清零，下一轮重新可派（⛔ 仍在集合 ⇒ 假）", (t) => {
+  const root = makeRoot("reconcile");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: needs-human\n---");
+  writeTask(root, "gap-still-nh", "---\nid: gap-still-nh\nstatus: needs-human\n---");
+
+  // 两个 id 都已进内存 needsHuman 集合 + counts 已累计（模拟 advanceRetryCap 达上限后的状态）。
+  const state = { counts: new Map([["gap-nh", 3], ["gap-still-nh", 3]]), needsHuman: new Set(["gap-nh", "gap-still-nh"]) };
+
+  // 人把 gap-nh 翻回 ready（磁盘），gap-still-nh 仍 needs-human。
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
+
+  const cleared = reconcileNeedsHumanWithDisk(state, root);
+  assert.deepEqual(cleared, ["gap-nh"], "只有翻回 ready 的 id 被清除");
+  assert.equal(state.needsHuman.has("gap-nh"), false, "gap-nh 出集合 ⇒ 下一轮重新可派（⛔ 仍在 ⇒ 假）");
+  assert.equal(state.needsHuman.has("gap-still-nh"), true, "仍 needs-human 的 id 不清除");
+  assert.equal(state.counts.has("gap-nh"), false, "counts 清零 ⇒ 人干预后给全新重试预算（⛔ 只清 needsHuman 不清 counts ⇒ 假）");
+  assert.equal(state.counts.get("gap-still-nh"), 3, "未清除的 id 计数不动");
+});
+
+test("AC1 (负控制) — reconcileNeedsHumanWithDisk：读不懂（status null）⇒ 保留（fail-closed，缺值 = 未查）", (t) => {
+  const root = makeRoot("reconcile-null");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const state = { counts: new Map([["gap-missing", 3]]), needsHuman: new Set(["gap-missing"]) };
+  // gap-missing 无任务文件 ⇒ readTaskStatus ⇒ null。
+  const cleared = reconcileNeedsHumanWithDisk(state, root);
+  assert.deepEqual(cleared, [], "读不懂不清除（⛔ 伪装成「人已翻回」⇒ 假）");
+  assert.equal(state.needsHuman.has("gap-missing"), true, "fail-closed 保留（缺值 = 未查）");
 });
 
 // ── applyTaskFilters ────────────────────────────────────────────────────────────────────────────
