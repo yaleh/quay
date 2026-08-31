@@ -36,9 +36,12 @@ extra: {}
 ## Touches
 
 - plugin/test/helpers/full-suite-runner-harness.mjs（新，harness 单一来源）
-- plugin/test/full-suite-runner.test.mjs（拆：~60 test 保留）
-- plugin/test/full-suite-runner-phases.test.mjs（新，@test-group lowconc）
-- plugin/test/full-suite-runner-cgroup.test.mjs（新，@test-group lowconc）
-- plugin/test/worker-driver.test.mjs（拆 2–3 份）
+- plugin/test/full-suite-runner.test.mjs（拆：73 test 保留）
+- plugin/test/full-suite-runner-phases.test.mjs（新，@test-group lowconc，72 test）
+- plugin/test/full-suite-runner-cgroup.test.mjs（新，@test-group lowconc，32 test）
+- plugin/test/helpers/worker-driver-harness.mjs（新，harness 单一来源）
+- plugin/test/worker-driver.test.mjs（拆：48 test 保留）
+- plugin/test/worker-driver-resident.test.mjs（新，@test-group lowconc，34 test）
+- plugin/test/worker-driver-fan-in.test.mjs（新，@test-group lowconc，51 test）
 - 拆分产物的 @test-group 注册 + ratchet/baseline 同步（若触发）
 - tasks/gap-suite-file-split-two-longest.md（自身）
