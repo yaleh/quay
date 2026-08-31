@@ -1,7 +1,7 @@
 ---
 id: gap-suite-install-family-reduce-runinit
 title: 减少「真 quay-init 运行」——install 家族 runInit 17→15（断言迁移到 laydownWorkspace）
-status: ready
+status: done
 labels:
   - gap
 parent: null
