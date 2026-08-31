@@ -386,12 +386,15 @@ test("D5 — computeLandingState(root, task, landedSha) derives landing from ff 
   runGit(root, ["add", "tasks/gap-d5.md"]);
   runGit(root, ["commit", "-q", "-m", "doc-only stale ready"]);
 
-  // 前置：读主检出 status = ready ⇒ 旧判据据此判 exited-not-landed（这正是 D5 的假负例）。
-  assert.equal(readTaskStatus(root, "gap-d5"), "ready", "precondition: main checkout (doc-only) still stale ready");
-  const old = computeLandingState(root, "gap-d5");
-  assert.equal(old.state, "failed", "precondition: without landedSha, the stale status ⇒ failed (the D5 bug)");
+  // 前置：主检出 doc-only 盘上 status 仍 ready（合法滞后 develop）——但 status 读源已是 develop
+  // （gap-driver-filters-readtaskstatus-stale-main-checkout：readTaskStatus 读 develop 非主检出，
+  // 同 D5 的「⛔ 不再读主检出 stale status」，只是把 readTaskStatus 自身也改到 develop 侧）。
+  assert.match(fs.readFileSync(path.join(root, "tasks", "gap-d5.md"), "utf8"), /^status:\s*ready/m, "precondition: main checkout (doc-only) disk still stale ready");
+  assert.equal(readTaskStatus(root, "gap-d5"), "done", "readTaskStatus reads develop (done), not the stale disk");
+  const noSha = computeLandingState(root, "gap-d5");
+  assert.equal(noSha.state, "verified", "without landedSha, the develop-read fallback still lands (status=done from develop)");
 
-  // 修后：传 landedSha（develop tip）⇒ 从 ff 结果派生，⛔ 不再读主检出 stale status ⇒ verified。
+  // 修后：传 landedSha（develop tip）⇒ 从 ff 结果派生（⛔ 不依赖 status 读，verifiedBy 点名 landedSha）⇒ verified。
   const derived = computeLandingState(root, "gap-d5", landedSha);
   assert.equal(derived.state, "verified", "D5: landedSha is develop tip + no leftover worktree ⇒ verified (⛔ not exited-not-landed)");
   assert.match(derived.verifiedBy, /landedSha/, "D5: verified reason names the ff-result-derived judge");
@@ -1860,7 +1863,7 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, 60000);
+  await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, 30000);
   const rounds = readRoundLines(root);
   const livenessCount = fs.existsSync(livenessCnt) ? Number(fs.readFileSync(livenessCnt, "utf8")) : 0;
   // liveness 在每轮【开头】跑（writeRound 之前），结果写进每轮 round 记录。接线证明取两个直接量：
@@ -3042,21 +3045,21 @@ test("AC2 (gap-worker-driver-retry-cap-not-wired) — 反复 exited-not-landed �
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // N=2 次 exited-not-landed（exit 0 但 status=ready 未落地）。
-  // ⛔ 满载下 2 次 worker spawn + 落地判定的等待窗放宽到 60s（同 5045b9ab9 的 liveness 窗）——
+  // ⛔ 满载下 2 次 worker spawn + 落地判定的等待窗放宽到 30s（60s→30s 收紧，同 5045b9ab9 的 liveness 窗）——
   // 全量 suite concurrency=16 时驱动冷启动 + node spawn 可 >8s，8s 窗把「慢而正确」误判为「只派 1 次」。
-  await waitFor(() => readOutcomeLines(root).length >= 2, 60000);
+  await waitFor(() => readOutcomeLines(root).length >= 2, 30000);
   const records = readOutcomeLines(root);
   assert.deepEqual(records.map((r) => r.final_state), ["exited-not-landed", "exited-not-landed"],
     "AC2: both attempts exited-not-landed (exit 0 but status=ready not done)");
 
   // 达上限 ⇒ 标 needs-human（ready→needs-human）+ ## Needs-Human 审计记录。
-  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 60000);
+  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 30000);
   assert.equal(readTaskStatus(root, "gap-cap"), "needs-human", "AC2: task marked needs-human after N exited-not-landed");
   const body = fs.readFileSync(path.join(root, "tasks", "gap-cap.md"), "utf8");
   assert.ok(body.includes("## Needs-Human"), "AC2: ## Needs-Human audit record written");
 
   // 负控制：给驱动一个「可能第 3 次派发」的窗口，再断言仍只有 N=2 次派发（⛔ 无限重派）。
-  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 60000);
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 30000);
   await new Promise((r) => setTimeout(r, 400));
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   assert.equal(picks.length, 2, "AC2: exactly N=2 dispatches — the capped task is not re-dispatched (⛔ 无限重派)");
@@ -3169,7 +3172,7 @@ test("AC1 (integration) — worker 快速死亡后 driver 退避：不立即重�
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // 第一次派发 → 快速死亡 → worker-backoff 事件（退避生效的直接量）。
-  await waitFor(() => drv.events().filter((e) => e.event === "worker-backoff").length >= 1, 60000);
+  await waitFor(() => drv.events().filter((e) => e.event === "worker-backoff").length >= 1, 30000);
   const backoffs = drv.events().filter((e) => e.event === "worker-backoff");
   assert.equal(backoffs[0].task, "gap-qd");
   assert.equal(backoffs[0].backed_off, true, "AC1: quick death ⇒ backed_off=true（退避，⛔ 立即重派）");
@@ -3206,7 +3209,7 @@ test("AC2 (integration) — 一个任务退避时其它任务照常派发（退�
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // gap-a 派发 → 快速死亡 → 退避。gap-a 退避期间 gap-b 仍被派发（退避不拖垮全局）。
-  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").map((e) => e.task).includes("gap-b"), 60000);
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").map((e) => e.task).includes("gap-b"), 30000);
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   assert.deepEqual(picks.map((p) => p.task).slice(0, 2), ["gap-a", "gap-b"],
     "AC2: gap-a 退避期间 gap-b 仍照常派发（退避按 task，⛔ 不全局）");
@@ -3229,7 +3232,7 @@ test("AC3 (integration) — 退避到上限转 markNeedsHuman（⛔ 不无限退
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // 2 次快速死亡（每次之间隔 100ms 退避）⇒ 标 needs-human。
-  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 60000);
+  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 30000);
   assert.equal(readTaskStatus(root, "gap-cap"), "needs-human", "AC3: 退避到上限（max-retries=2）⇒ needs-human");
   const body = fs.readFileSync(path.join(root, "tasks", "gap-cap.md"), "utf8");
   assert.ok(body.includes("## Needs-Human"), "AC3: ## Needs-Human audit record written");
@@ -3431,6 +3434,10 @@ test("AC2 (gap-fan-in-spawn-stale-worktree-executor-missing-argv) — stale work
 // AC3 suite 看门狗显式 resolve 不依赖 close（等槽锁零输出也 kill）、AC4 挂起 ⇒ 锁必释放（finally）。
 
 const SLOT_LIB = path.join(REPO_ROOT, "plugin", "scripts", "suite-slot-lib.sh");
+// P2 (gap-execution-loop-productization-p2-p4): the ff 持锁段 is a TS module now — the hermetic
+// makeMechRepo worktree has no packages/, so pin the seam to the REAL repo copy (a plain path;
+// worker-driver pathToFileURL()s it). Same pin as fan-in-driver-mechanical-orchestration.test.mjs.
+const FF_MERGE_MODULE = path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts");
 
 /** 建一个 hermetic git repo + task worktree（机械 fan-in 的输入，与 fan-in-driver-mechanical-
  *  orchestration.test.mjs 的 makeRepoWithWorktree 同形——develop 上 ready 任务、task/<id> 分支上
@@ -3498,6 +3505,7 @@ function mechOpts(m, runId, overrides = {}) {
     slotBase: m.slotBase,
     slotLib: SLOT_LIB,
     silenceMs: 500,
+    ffMergeModule: FF_MERGE_MODULE,
     suiteCapture: m.capture,
     suiteLogFile: path.join(m.base, "suite.log"),
     suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
@@ -3533,11 +3541,14 @@ test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery) — appendFanInStepTrace
 test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery / gap-mech-fan-in-log-webui-visible-clickable) — runMechanicalFanIn 每步都有 begin/end（挂起定位）+ A1 过程日志 trace", () => {
   const src = fs.readFileSync(DRIVER, "utf8");
   // mechSh 步经 step() 包层——包层内 appendFanInStepTrace begin/end（挂起 = begin 无 end）+ A1 一行。
-  for (const step of ["merge-develop", "anti-drift", "typecheck", "archguard-structure", "scoped-gate", "doc-check", "anti-drift-land", "ac-gate", "ff"]) {
+  // ⛔ ff 不在其中：P2 (gap-execution-loop-productization-p2-p4) 把 ff 持锁段 TS 模块化（worker-driver
+  // import packages/quay/src/fan-in/ff-merge.ts，⛔ 不再 shell-out 到 bash fan-in-ff-merge.sh）——ff 是
+  // 直接函数调用非 mechSh 子进程，改走「自定义步 A1 trace」路径（下方第二循环）。
+  for (const step of ["merge-develop", "anti-drift", "typecheck", "archguard-structure", "scoped-gate", "doc-check", "anti-drift-land", "ac-gate"]) {
     assert.ok(src.includes(`step("${step}"`), `step ${step} must go through the step() wrapper (begin/end + A1 trace)`);
   }
-  // 自定义步（delta / suite 起止 / flip-done / cleanup）写 A1 过程日志 trace。
-  for (const step of ["delta", "suite-start", "suite-end", "flip-done", "cleanup"]) {
+  // 自定义步（delta / suite 起止 / flip-done / cleanup / ff）写 A1 过程日志 trace。
+  for (const step of ["delta", "suite-start", "suite-end", "flip-done", "cleanup", "ff"]) {
     assert.ok(src.includes(`step: "${step}"`), `custom step ${step} must write an A1 trace`);
   }
   // step() 包层内 begin/end 两路都写（挂起定位：begin 无 end 可区分）。
