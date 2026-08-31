@@ -1,7 +1,7 @@
 ---
 id: gap-sync-trigger-divergence-detection-bidirectional
 title: driver 同步触发点改「检测两分支不同步即触发 + 双向」——不依赖翻转，池空也同步
-status: ready
+status: done
 labels:
   - gap
 parent: null
