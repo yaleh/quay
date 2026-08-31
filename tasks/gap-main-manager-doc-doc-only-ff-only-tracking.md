@@ -1,7 +1,7 @@
 ---
 id: gap-main-manager-doc-doc-only-ff-only-tracking
 title: main/manager-doc 写面 + 机械同步 ff-only（不静默 merge）+ 分叉 guard——写面保留、可靠同步
-status: todo
+status: ready
 labels:
   - gap
 parent: gap-doc-develop-sync-semantic-conflict-resolution
