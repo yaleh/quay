@@ -1,7 +1,7 @@
 ---
 id: gap-suite-dynamic-waterline-scheduler
 title: suite/bucket 统一调度器——组预算 + 单调水位 + main 用剩余容量（替代静态分相 + A watcher，模拟省 21%）
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -59,3 +59,10 @@ extra:
 - plugin/scripts/suite-params.ts（组预算 config 键复用 suite: 节）
 - tasks/gap-suite-main-overlaps-load-sensitive-tail-experiment.md（A watcher 退役标注，如适用）
 - tasks/gap-suite-dynamic-waterline-scheduler.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-31T18:24:17.923Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
