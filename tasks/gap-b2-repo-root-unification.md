@@ -2,7 +2,7 @@
 id: gap-b2-repo-root-unification
 title: B2·repo-root 合一——findRepoRoot(14)+findWorkspaceRoot(4) 三策略并存，18 处 →
   1（bash+TS 成对）
-status: ready
+status: done
 labels:
   - gap
   - feature
