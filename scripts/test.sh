@@ -168,43 +168,15 @@ unset FORCE_COLOR
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-# gap-gitignored-carriers-absent-in-verify-worktree — the MAIN CHECKOUT path, for checkers that audit
-# the main repo's gitignored .quay/ runtime carriers (fan-in-workflow-check / fan-in-ff-protocol-check
-# / direct-to-develop-bypass-check). full-suite-runner.ts sets QUAY_MAIN_CHECKOUT to the main checkout
-# (the one-shot verify worktree lacks the gitignored carriers — .quay/fan-in-merge-lock-events.jsonl
-# etc. — so those checkers were constant-green NOT-EVALUATED every round while their input did not
-# exist). On a main-checkout run QUAY_MAIN_CHECKOUT is unset ⇒ main_root == repo_root and behavior is
-# unchanged; on a one-shot round main_root = the real main checkout ⇒ the worktree round's checkers
-# read the SAME data as a main run ⇒ verdicts are identical (AC3).
-main_root="${QUAY_MAIN_CHECKOUT:-$repo_root}"
-
-# gap-fan-in-worktree-quay-provisioning — the fan-in DIRECT path runs test.sh in the linked task
-# worktree WITHOUT QUAY_MAIN_CHECKOUT (only full-suite-runner.ts sets it for the one-shot path).
-# Derive the main checkout from git so the carriers checkers (fan-in-workflow-check etc., which read
-# `main_root/.quay/*`) resolve the MAIN's live runtime carriers AND its session-dir hash — the
-# worktree's gitignored .quay is absent (or a snapshot) and its session-dir hash differs ⇒ agentId
-# resolution fails ⇒ a false "fan-in-without-workflow" RED. On a main-checkout run the git-derived
-# first worktree == repo_root ⇒ main_root is unchanged.
-#
-# ⚠️ The git-derived first worktree is ALWAYS preferred (even when QUAY_MAIN_CHECKOUT is set):
-# full-suite-runner.ts launches with `--root <worktree>` in the execute-suite-fix shape, so its
-# `mainRoot = root` = the WORKTREE and QUAY_MAIN_CHECKOUT points at the worktree — whose project-dir
-# slug has no session transcripts ⇒ fan-in-workflow-check agent IDs unresolvable ⇒ a false
-# "fan-in-without-workflow" RED (round 214, 2026-08-16). `git worktree list --porcelain`'s FIRST
-# entry is the git primary (main) checkout, which is authoritative and always correct.
-# `|| _derived_main=""` guards the command substitution under `set -euo pipefail` (a non-git /
-# non-worktree cwd must NOT abort the suite — it just keeps main_root == repo_root).
-# ⚠️ 2026-08-28 实测修复（manager，gap-loop-shipping suite 系统性红的根因）：不能用
-# `awk '/^worktree /{print $2; exit}'` 早退——awk 关读端后 git 的下一次 write 立即 EPIPE/SIGPIPE
-# （`git worktree list` 输出 >2 个 worktree 时必发生），pipefail 下管道 exit=141 ⇒ `|| _derived_main=""`
-# 把【已捕获的主检出路径】清空 ⇒ main_root 退回 repo_root=worktree ⇒ checker 扫 worktree slug
-# （无 subagent transcripts）⇒ agentId 不可解析 ⇒ 假红。新 driver（runMechanicalFanIn 直接在
-# worktree 跑 suite，不经 full-suite-runner 设 QUAY_MAIN_CHECKOUT）下所有 fan-in 必中。修法：awk
-# 读完整流、用 f 标志只取首条（不早退 ⇒ 无 SIGPIPE），`|| _derived_main=""` 只在真失败时兜底。
-_derived_main="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{if (!f) {print $2; f=1}}')" || _derived_main=""
-if [ -n "${_derived_main}" ] && [ "${_derived_main}" != "${repo_root}" ]; then
-  main_root="${_derived_main}"
-fi
+# main_root derivation → plugin/scripts/runner-concurrency.ts deriveMainRoot() (SPEC P4 套件入口收进 TS).
+# QUAY_MAIN_CHECKOUT (empty-as-unset) → repo_root; then the git-derived FIRST worktree is ALWAYS
+# preferred when it differs from repo_root (full-suite-runner.ts launches with `--root <worktree>` and
+# sets QUAY_MAIN_CHECKOUT to the WORKTREE — whose project-dir slug has no session transcripts ⇒ a false
+# "fan-in-without-workflow" RED; the git primary checkout is authoritative). The TS reader consumes the
+# FULL porcelain stream (no early-exit awk ⇒ no EPIPE/SIGPIPE) and fails open to repo_root on a non-git
+# cwd — behavior byte-identical to the removed bash (gap-gitignored-carriers-absent-in-verify-worktree +
+# gap-fan-in-worktree-quay-provisioning; the 2026-08-28 awk-SIGPIPE fix is subsumed by the full-stream read).
+main_root="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --derive-main-root "${repo_root}")"
 
 # ── gap-fan-in-worktree-quay-provisioning — the worktree suite must read the MAIN's .quay ─────────
 # `.quay/` is gitignored ⇒ `git worktree add` copies NONE of it. The fan-in full suite runs DIRECTLY
@@ -476,14 +448,13 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 # An EXPLICIT --test-concurrency=N on the command line ALWAYS overrides (node --test is
 # last-flag-wins, and the user's flag is passed AFTER the default in the exec line).
 #
-# Test seams (unit test in plugin/test/resource-gate.test.mjs): RESOURCE_GATE_NPROC /
-# RESOURCE_GATE_CONCURRENT_SUITES / RESOURCE_GATE_OVERSUBSCRIPTION override the derivation inputs
-# deterministically (S read via suite_slot_count, oversub = 旋钮③ — env-read, never literals).
-# S single source (gap-suite-concurrency-S-two-source-divergence): default_concurrency_formula and
-# serial_lowconc_host_default read S via suite_slot_count — the SAME bash canonical the single-flight
-# lock uses (seam RESOURCE_GATE_CONCURRENT_SUITES → `<base>.concurrency` file →
-# QUAY_MAX_CONCURRENT_SUITES → 1). Sourced HERE (before the derivation functions below) so both can
-# call it; the lock section further down reuses this same canonical for its slot paths.
+# Test seams (unit test in plugin/test/resource-gate.test.mjs + plugin/test/runner-concurrency.test.mjs):
+# RESOURCE_GATE_NPROC / RESOURCE_GATE_CONCURRENT_SUITES / RESOURCE_GATE_OVERSUBSCRIPTION override the
+# derivation inputs deterministically (S read via concurrentSuiteSlots → suiteLockSlotCount, oversub =
+# 旋钮③ — env-read, never literals). The derivation functions below THIN-FORWARD to
+# plugin/scripts/runner-concurrency.ts (SPEC P4); suite-slot-lib.sh is STILL sourced for the single-flight
+# LOCK section further down (suite_slot_paths / spawn_suite_lock_hold_watchdog — the SAME bash S canonical
+# the TS suiteLockSlotCount is dual-checked against by suite-slot-ssot-check.ts I4, so the two cannot drift).
 source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
 
 # ── gap-suite-knobs-config-file-priority: config < env < CLI ──────────────────────────────────────
@@ -498,36 +469,14 @@ if ! suite_cfg="$(node --no-warnings --experimental-strip-types "${repo_root}/pl
 fi
 eval "${suite_cfg}"
 
+# default_concurrency_formula / default_test_concurrency — MAIN-phase concurrency
+# max(1, floor(nproc × oversub / S)) (gap-suite-budget-oversubscribe pure computation, S=旋钮② single
+# source, oversub=旋钮③). THIN FORWARDER → plugin/scripts/runner-concurrency.ts defaultTestConcurrency()
+# (SPEC P4 套件入口收进 TS); the derivation rationale lives there + full-suite-runner.ts defaultLaneCount.
+# The exec-line spelling `--test-concurrency="$(default_test_concurrency)"` is UNCHANGED (resource-gate
+# AC5 pins exactly 5 sites) — only the body moved from bash awk to TS.
 default_concurrency_formula() {
-  local total_budget oversub slots
-  # MAIN-PHASE CONCURRENCY (gap-suite-budget-oversubscribe; human 14:4xZ 修正方向 — (b) 认领制 /
-  # (c) 锁发配额 均被否，纯计算零新增运行时状态): default = max(1, floor(nproc × oversub / S)).
-  #   nproc   ← 宿主（nproc --all，⛔ 不写字面量 — CLAUDE.md 硬规则 4 推论二）
-  #   oversub ← 旋钮③ QUAY_MAX_OVERSUBSCRIPTION（现 1，现状非建议值）
-  #   S       ← 旋钮② QUAY_MAX_CONCURRENT_SUITES（现 1）
-  # 之前 AC74 的 `nproc − in_use`（读运行时 in_use，不读 S）固有超用：每条 lane 只减它启动那一刻
-  # 已在用的 in_use、没人减将来会来的 ⇒ 先起读≈0 拿满 nproc、后起读≈in_use 拿 nproc−in_use，
-  # 两并发 suite 合计 16+8=24 > 16（load 29.23，2026-08-14 14:39Z）。纯计算下 S 个 suite 各拿
-  # nproc×oversub/S ⇒ Σ lane ≤ nproc×oversub 结构上不可能超。单 suite 只拿 nproc/S（本机 8）是
-  # 纯计算方案的已知代价（判据4），非缺陷；要单 suite 拿满由旋钮③ oversub 表达（⛔ 不动态放大）。
-  # 阶段间并发（gap-lane-formula-ignores-phase-overlap-concurrency）：QUAY_PHASE_OVERLAP=1 时
-  # serial+lowconc 并行（重叠窗口 Σ lane = serial+lowconc），serial_lowconc_host_default 的分母因此
-  # 再乘并发阶段数 P ⇒ S×P ⇒ 重叠窗口 Σ lane ≤ nproc×oversub 同样结构上不可能超（不变式恢复可守）。
-  total_budget="${RESOURCE_GATE_NPROC:-}"
-  oversub="${RESOURCE_GATE_OVERSUBSCRIPTION:-${QUAY_MAX_OVERSUBSCRIPTION:-1}}"
-  # S single source: suite_slot_count reads seam → `<base>.concurrency` file → 旋钮② → 1 (the SAME
-  # precedence + validation as the single-flight lock). The old
-  # `RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}` read SKIPPED the `.concurrency`
-  # file — so `printf '2' > .concurrency` changed the lock slots but NOT this formula (the divergence).
-  slots="$(suite_slot_count)"
-  if [ -z "${total_budget}" ]; then
-    total_budget="$(nproc 2>/dev/null || echo 1)"
-  fi
-  if ! awk -v o="${oversub}" 'BEGIN { exit !(o ~ /^[0-9]+(\.[0-9]+)?$/ && o > 0) }'; then
-    oversub=1
-  fi
-  awk -v n="${total_budget}" -v o="${oversub}" -v s="${slots}" \
-    'BEGIN { c = int(n * o / s); if (c < 1) c = 1; print c }'
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --default-test-concurrency
 }
 
 default_test_concurrency() {
@@ -536,41 +485,13 @@ default_test_concurrency() {
 
 # ── load-sensitive phase concurrency knobs (gap-load-sensitive-serial-phase-unbounded-growth-
 # measure-first AC2/AC3 + gap-ac74-serial-lowconc-literal-direct-path AC44 直调读宿主) ─────────────
-# The serial phase (KNOWN-LOAD-SENSITIVE A/B-class + real-install family) and the lowconc phase
-# (hermetic-but-load-sensitive session-observation family) default to the HOST derivation
-# max(1, floor(hostParallelism ÷ concurrentSuiteSlots)) — the SAME expression as full-suite-runner.ts's
-# DEFAULT_SERIAL_CONCURRENCY / DEFAULT_LOWCONC_CONCURRENCY. AC44 (gap-ac44-concurrent-phases-read-
-# host-parallelism) fixed the runner side; the DIRECT `bash scripts/test.sh` path previously fell back
-# to 2/3 literals, so the two paths read DIFFERENT values (判据4: direct must equal runner = H÷S).
-# Both remain env-overridable (QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY) so a future
-# controlled experiment can re-measure before the next bump — the measure-first rule
-# (gap-suite-cost-model-is-wrong-optimizations-buy-nothing: 墙钟差异落 17-63s 噪声带).
-# EXPERIMENT (2026-08-10, task body): A/B-class load-sensitive serial 子集 6 文件
-#   cc=1 WALL_MS=455613 (0 cancelled) vs cc=2 WALL_MS=289579 (0 cancelled) — c2 快 36% 且 0-cancelled;
-#   real-install e2e 双文件 c2 实测 0-cancelled (147s)。⇒ 默认上调至 2 (后经 AC44/AC74 改读宿主)。
-# serial_lowconc_host_default — the host-derived fallback shared by BOTH phase knobs: reads
-# RESOURCE_GATE_NPROC (test seam) → nproc, S via suite_slot_count (seam →
-# `<base>.concurrency` file → QUAY_MAX_CONCURRENT_SUITES → 1, the single source), and
-# QUAY_PHASE_OVERLAP (default 1) → the concurrent-PHASE count P (2 = serial+lowconc parallel,
-# 1 = sequential). max(1, floor(nproc ÷ (S×P))).
-# gap-lane-formula-ignores-phase-overlap-concurrency: QUAY_PHASE_OVERLAP=1 runs serial + lowconc in
-# PARALLEL, so the overlap window carries 2 concurrent phases each at its own budget — the denominator
-# must count the concurrent PHASES too (S×P), else each suite's overlap window runs serial+lowconc at
-# 2×nproc/S and S suites reach S×2×nproc/S = 2×nproc > nproc×oversub (16+16=32 > 16 on this host).
-# QUAY_PHASE_OVERLAP=0 = sequential ⇒ P = 1 (the pre-overlap H÷S budget, unchanged — AC3 negative
-# control). This keeps the direct-path default byte-identical to the runner's
-# DEFAULT_SERIAL_CONCURRENCY / DEFAULT_LOWCONC_CONCURRENCY.
+# serial_lowconc_host_default — the host-derived fallback shared by BOTH phase knobs: max(1, floor(nproc
+# ÷ (S×P))), P = the concurrent-phase count (2 = overlap ON, 1 = sequential). THIN FORWARDER →
+# plugin/scripts/runner-concurrency.ts defaultPhaseConcurrencyDirect() (SPEC P4 套件入口收进 TS);
+# rationale lives there + full-suite-runner.ts defaultPhaseConcurrency (the runner twin — resource-gate
+# 判据4 cross-checks the two stay equal). The env-fallback spellings below are UNCHANGED.
 serial_lowconc_host_default() {
-  local ncpu slots phases
-  ncpu="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
-  # S single source: suite_slot_count (seam → `<base>.concurrency` file → 旋钮② → 1) — the SAME read
-  # as default_concurrency_formula and the single-flight lock (gap-suite-concurrency-S-two-source-divergence).
-  slots="$(suite_slot_count)"
-  phases=1
-  if [ "${QUAY_PHASE_OVERLAP:-1}" != "0" ]; then
-    phases=2
-  fi
-  awk -v n="${ncpu}" -v s="${slots}" -v p="${phases}" 'BEGIN { c = int(n / (s * p)); if (c < 1) c = 1; print c }'
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --phase-concurrency
 }
 # The full-suite-runner sets these env vars when --serial-concurrency / --lowconc-concurrency are passed.
 SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-$(serial_lowconc_host_default)}"
@@ -594,8 +515,10 @@ PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"
 # QUERY_MAIN_TAIL_OVERLAP=<lanes> (default 0 = current behavior). When >0, the MAIN phase starts
 # EARLY — before the serial+lowconc window fully closes — at concurrency <lanes>, overlapping with the
 # window's latency-bound tail (the ~130s near-idle tail the director's load curve measured: 23/48
-# samples stall<3% while the remaining wall-clock-wait / real-install tests hold their processes at
-# ~zero CPU). The start trigger is LOAD-DRIVEN (⛔ not a fixed delay): a watcher polls cpu_stall
+# samples stall<3%; healthy idle tails dip to ~4-6% — round 773/795/798 measured 4.3-5.8% — hence the
+# default $MAIN_TAIL_STALL_PCT=6 below). The remaining wall-clock-wait / real-install tests hold their
+# processes at ~zero CPU. The start trigger is LOAD-DRIVEN (⛔ not a fixed delay): a watcher polls
+# cpu_stall
 # (/proc/pressure/cpu `some avg10`) and fires once it has stayed ≤ $MAIN_TAIL_STALL_PCT for
 # $MAIN_TAIL_HOLD_S consecutive seconds — i.e. the window's CPU work has drained — then launches main
 # at the knob's lanes. Total CPU load during the overlap = main lanes + the near-zero latency-bound
@@ -609,7 +532,7 @@ MAIN_TAIL_OVERLAP="${QUERY_MAIN_TAIL_OVERLAP:-0}"
 if ! awk -v v="${MAIN_TAIL_OVERLAP}" 'BEGIN { exit !(v ~ /^[0-9]+$/) }'; then
   MAIN_TAIL_OVERLAP=0
 fi
-MAIN_TAIL_STALL_PCT="${QUAY_MAIN_TAIL_STALL_PCT:-3}"
+MAIN_TAIL_STALL_PCT="${QUAY_MAIN_TAIL_STALL_PCT:-6}"
 MAIN_TAIL_HOLD_S="${QUAY_MAIN_TAIL_HOLD_S:-5}"
 MAIN_TAIL_POLL_S="${QUAY_MAIN_TAIL_POLL_S:-1}"
 MAIN_TAIL_WAIT_MAX_S="${QUAY_MAIN_TAIL_WAIT_MAX_S:-300}"
@@ -655,47 +578,21 @@ main_tail_overlap_wait() {
   return 1
 }
 
-# has_explicit_concurrency <args...> — whether the args already carry a --test-concurrency flag
-# (either the `=` spelling with a numeric value, or the SPACE spelling with a numeric value). When it
-# does, the derived default MUST NOT be prepended: an explicit flag is the SINGLE concurrency source.
-# This is what makes the full-suite-runner's REPLACE splice produce EXACTLY ONE --test-concurrency on
-# the node --test process (gap-full-suite-runner-concurrency-default-and-gate AC2; the ps-level
-# Contract measure `grep -o -- '--test-concurrency=[0-9]*' | wc -l` must read 1). Without this, the
-# runner's spliced value and test.sh's own default would coexist as TWO flags — the ABORT #5 shape.
+# has_explicit_concurrency <args...> — whether the args already carry a --test-concurrency flag (the
+# `=` spelling, or the bare space-form marker). An explicit flag is the SINGLE concurrency source, so
+# the derived default MUST NOT be prepended (gap-full-suite-runner-concurrency-default-and-gate AC2:
+# the runner's REPLACE splice must leave EXACTLY ONE --test-concurrency on the node --test process).
+# THIN FORWARDER → plugin/scripts/runner-concurrency.ts hasExplicitConcurrency() (SPEC P4).
 has_explicit_concurrency() {
-  local prev="" a
-  for a in "$@"; do
-    case "$a" in
-      --test-concurrency=*|--test-concurrency) return 0 ;;
-    esac
-    if [ "$prev" = "--test-concurrency" ]; then return 0; fi
-    prev="$a"
-  done
-  return 1
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --has-explicit-concurrency "$@"
 }
 
-# bucket_test_concurrency <args...> — the EFFECTIVE concurrency for the --buckets run({files})
-# runner (suite-lpt-runner.mjs). An explicit --test-concurrency=N in args wins (single source, the
-# SAME precedence as has_explicit_concurrency); otherwise the derived default. Returns the VALUE —
-# the runner needs a number in execArgv (`node --test-concurrency=N`), not the boolean
-# has_explicit_concurrency answers. The runner reads that SAME execArgv value for run()'s
-# concurrency, and measure-suite-reporter.mjs reads it too ⇒ one source, no drift.
+# bucket_test_concurrency <args...> — the EFFECTIVE concurrency for the --buckets run({files}) runner
+# (suite-lpt-runner.mjs). An explicit --test-concurrency=N in args wins (single source, the SAME
+# precedence as has_explicit_concurrency); otherwise the derived default. Returns the VALUE — the runner
+# needs a number in execArgv. THIN FORWARDER → runner-concurrency.ts bucketTestConcurrency() (SPEC P4).
 bucket_test_concurrency() {
-  local a
-  while [ "$#" -gt 0 ]; do
-    a="$1"; shift
-    case "$a" in
-      --test-concurrency=*)
-        a="${a#--test-concurrency=}"
-        if [[ "$a" =~ ^[0-9]+$ ]] && [ "$a" -ge 1 ]; then printf '%s' "$a"; return 0; fi
-        ;;
-      --test-concurrency)
-        if [ "$#" -gt 0 ] && [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ]; then printf '%s' "$1"; return 0; fi
-        shift
-        ;;
-    esac
-  done
-  default_test_concurrency
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --bucket-test-concurrency "$@"
 }
 
 # resource_gate_check — extracted to plugin/scripts/runner-static-gate.ts (gap-ac128-hub-split-harness-concerns),
@@ -1422,16 +1319,10 @@ run_selected() {
 # all_flags "$@" — return 0 iff EVERY argument starts with '-'. Detects the flags-only invocation
 # form (gap-test-sh-flags-only-form-silently-runs-a-different-suite): when nothing but node --test
 # flags remain after subcommand handling, treat them as extra flags + the selected glob rather than
-# as file paths. An empty "$@" returns 0, but every caller checks $# -eq 0 first.
+# as file paths. An empty "$@" returns 0, but every caller checks $# -eq 0 first. THIN FORWARDER →
+# plugin/scripts/runner-concurrency.ts allFlags() (SPEC P4 套件入口收进 TS).
 all_flags() {
-  local a
-  for a in "$@"; do
-    case "$a" in
-      -*) ;;
-      *) return 1 ;;
-    esac
-  done
-  return 0
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --all-flags "$@"
 }
 
 groups=""
