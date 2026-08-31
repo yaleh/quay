@@ -1,7 +1,7 @@
 ---
 id: gap-suite-main-tail-overlap-bucket-subset
 title: main-tail-overlap 接到 bucket 子集路径（--buckets P/M 分支）——lowconc 相尾部提前启动 main
-status: todo
+status: ready
 labels:
   - gap
 parent: null
