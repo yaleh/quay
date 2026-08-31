@@ -6,13 +6,17 @@
 // `<state-dir>/suite-load-<runId>.jsonl`. The Test 详情 page pulls that timeseries to render a
 // server-side load curve.
 //
-// STOP IS STATE-DRIVEN (⛔ the "结束即停 / 不常驻空跑" invariant): the sampler polls
-// full-suite-state.json every iteration and exits the moment the state leaves "running" (or a
-// NEWER run owns the generation). Every terminal path — green, red, aborted, signal-aborted,
-// crash-trap, watchdog-written — writes a terminal state, so sampling can never outlive the suite
-// by construction. This is NOT a resident idle-spin process: no suite ⇒ no sampler.
+// STOP IS FINISHEDAT-DRIVEN (⛔ the "结束即停 / 不常驻空跑" invariant), NOT state-driven
+// (gap-suite-load-sampler-early-red-truncates-load-curve): full-suite-runner.ts writes an EARLY-RED
+// state (`state="red"` + `finishedAt: null`) on the FIRST failure line, but the suite keeps running
+// to its natural end — only the terminal write sets `finishedAt`. So `state !== "running"` is NOT a
+// stop signal; the sampler keeps sampling while `finishedAt` is null (running OR temporary
+// early-red/aborted) and stops only once `finishedAt` is set, the state file is missing/unreadable
+// (fail-closed), or a NEWER run owns the generation. Every terminal path — green, red, aborted,
+// signal-aborted, crash-trap, watchdog-written — writes `finishedAt`, so sampling can never outlive
+// the suite by construction. This is NOT a resident idle-spin process: no suite ⇒ no sampler.
 //
-// STOP IS ALSO HOST-DEATH-DRIVEN (gap-suite-load-sampler-orphan-process): the state-driven stop
+// STOP IS ALSO HOST-DEATH-DRIVEN (gap-suite-load-sampler-orphan-process): the finishedAt-driven stop
 // only fires when SOMEONE writes a terminal state / removes the state file. A host that dies
 // UNCLEANLY — SIGKILL (uncatchable), a worker mid-exit exception, the fan-in detached wrapper
 // killed before its `rm -f` of the per-task state file — leaves the state file stuck at "running",
@@ -63,19 +67,24 @@ function readMemAvailMb(): number | null {
 }
 
 /**
- * True while THIS run's suite is still running. Fail-closed on an unreadable/missing state file
- * (stop rather than sample an unverified run); fail-open on a missing/empty runId (legacy state has
- * no generation to protect — matching the runner's writeState generation guard).
+ * True while THIS run's suite is still running. The stop signal is `finishedAt`, NOT `state`
+ * (gap-suite-load-sampler-early-red-truncates-load-curve): full-suite-runner.ts writes an early-red
+ * `state="red"` + `finishedAt: null` on the first failure line while the suite keeps running to its
+ * natural end, so `state !== "running"` would truncate a red round's load curve at first-failure.
+ * Keep sampling while `finishedAt` is null/absent (running OR temporary early-red/aborted); stop
+ * once `finishedAt` is set (terminal write). Fail-closed on an unreadable/missing state file (stop
+ * rather than sample an unverified run); fail-open on a missing/empty runId (legacy state has no
+ * generation to protect — matching the runner's writeState generation guard).
  */
 function isSuiteRunning(stateFile: string, runId: string): boolean {
-  let parsed: { state?: unknown; runId?: unknown } | null = null;
+  let parsed: { state?: unknown; runId?: unknown; finishedAt?: unknown } | null = null;
   try {
     parsed = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   } catch {
     parsed = null;
   }
   if (!parsed || typeof parsed !== "object") return false;
-  if (parsed.state !== "running") return false;
+  if (parsed.finishedAt != null) return false;
   if (typeof parsed.runId === "string" && parsed.runId && parsed.runId !== runId) return false;
   return true;
 }
