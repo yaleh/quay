@@ -13,6 +13,12 @@
 // blocks (main-first again), the positions flip and this test goes red — the exact regression the
 // task's AC2/AC3 guard against.
 //
+// gap-suite-dynamic-waterline-scheduler: the DEFAULT path is now the unified scheduler (a single
+// loop that dispatches serial → lowconc → main and exits EARLY, before the legacy phased blocks).
+// The phased-order pins below therefore target the RETIRED legacy fallback (QUAY_SUITE_SCHEDULER=0):
+// `mainRun` is the legacy suite-lpt-runner.mjs main phase, and the order it preserves must still
+// hold against the legacy path's OWN final exit (which sits AFTER the scheduler block's exit).
+//
 // Run: scripts/test.sh plugin/test/test-phases-order.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -44,10 +50,10 @@ const lowconcSelect = markerAt(
 );
 const mainRun = markerAt(
   'node --test-concurrency="$(bucket_test_concurrency "$@")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "$@" "${files[@]}"',
-  "main phase node --test (suite-lpt-runner.mjs)",
+  "legacy fallback main phase node --test (suite-lpt-runner.mjs)",
 );
 
-test("AC2 — serial and lowconc phases run BEFORE the main concurrency-N body in the full-suite default path", () => {
+test("AC2 — serial and lowconc phases run BEFORE the main concurrency-N body in the legacy fallback (QUAY_SUITE_SCHEDULER=0)", () => {
   // The FULL-SUITE default branch executes its blocks in textual order, so the source position of
   // each phase's invocation IS its execution order. serial/lowconc must precede the main body —
   // otherwise a serial/lowconc failure would pay the whole main phase first (the 16 long-reds all
@@ -91,14 +97,18 @@ test("AC3/AC6 — code aggregation: each phase's exit merges into the run verdic
   assert.ok(mainRun < mainMerge, "main's merge must follow the main phase run");
 });
 
-test("AC4 — green-run invariant: the reorder does not skip any phase (all three still run)", () => {
-  // The reorder must NOT have added an early-exit that skips later phases — a green run still pays
-  // all three phases (serial, lowconc, main). Pin the phase invocations and the final exit: if a
-  // phase were conditionally skipped, the set of invocations before the exit would change.
-  const exitLine = markerAt('exit "$code"', "final exit");
-  assert.ok(mainRun < exitLine, "the main phase must complete before the final exit");
+test("AC4 — green-run invariant: the scheduler (default) exits before the legacy phased path, and the legacy fallback still runs all three phases", () => {
+  // The scheduler is the DEFAULT: its block must sit BEFORE the legacy main phase (main runs IN the
+  // scheduler, not in the suite-lpt-runner.mjs main phase), and the legacy fallback must still run
+  // all three phases (serial, lowconc, main) before ITS OWN final exit — a fallback edit that skips
+  // a phase must still go red.
+  const schedulerBlock = markerAt('if [ "${QUAY_SUITE_SCHEDULER:-1}" = "1" ]; then', "scheduler (default) block");
+  assert.ok(schedulerBlock < mainRun, "the scheduler block (default) must precede the legacy main phase");
+  const legacyExit = SRC.indexOf('exit "$code"', mainRun);
+  assert.ok(legacyExit >= 0, "the legacy full-suite path must have a final exit after its main phase");
+  assert.ok(mainRun < legacyExit, "the legacy main phase must complete before the legacy final exit");
   assert.ok(
-    serialSelect < exitLine && lowconcSelect < exitLine,
-    "serial/lowconc must also complete before the final exit",
+    serialSelect < legacyExit && lowconcSelect < legacyExit,
+    "legacy serial/lowconc must also complete before the legacy final exit",
   );
 });

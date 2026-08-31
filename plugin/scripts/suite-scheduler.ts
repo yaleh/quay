@@ -309,7 +309,7 @@ function emitGroup(group: SuiteGroup, concurrency: number, st: GroupStats): void
   const longestMs = Math.max(...st.durs);
   const floorMs = Math.max(sumMs / Math.max(concurrency, 1), longestMs);
   process.stderr.write(
-    `__GROUP__ concurrency=${concurrency} files=${st.durs.length} sum_ms=${sumMs} floor_ms=${floorMs} capped=${st.failed}\n`,
+    `__GROUP__ concurrency=${concurrency} files=${st.durs.length} sum_ms=${sumMs} floor_ms=${floorMs} capped=0\n`,
   );
   process.stderr.write(`__OVERHEAD__ ${group}_phase_ms=${st.endMs - st.startMs}\n`);
 }

@@ -57,6 +57,8 @@ extra:
 - plugin/scripts/suite-scheduler.ts（新，调度器：组预算队列 + 事件驱动 + 单调水位）
 - plugin/test/suite-scheduler.test.mjs（新，fixture 测试：水位语义/单调性/pass-fail-neutral）
 - plugin/scripts/suite-params.ts（组预算 config 键复用 suite: 节）
+- plugin/test/suite-params.test.mjs（SUITE_KNOBS 断言 7→8 键，加 suite_scheduler）
+- plugin/test/test-phases-order.test.mjs（分相顺序结构 pin 改指 legacy fallback：scheduler 默认早退）
 - plugin/scripts/capability-catalog.sh（新脚本注册六表：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）
 - tasks/gap-suite-main-overlaps-load-sensitive-tail-experiment.md（A watcher 退役标注，如适用）
 - tasks/gap-suite-dynamic-waterline-scheduler.md（自身）
