@@ -37,5 +37,6 @@ develop→doc 同步改 ff-only（不静默 merge）；分叉 guard 接线；AC1
 ## Touches
 
 - plugin/scripts/driver-filters.ts（propagateDocBranchToDevelop 改 ff-only + 分叉 guard）
+- plugin/test/driver-filters.test.mjs（ff-only + guard 负控制测试）
 - CLAUDE.md（分支同步纪律：写面保留 main/manager-doc + ff-only）
 - tasks/gap-main-manager-doc-doc-only-ff-only-tracking.md（自身）
