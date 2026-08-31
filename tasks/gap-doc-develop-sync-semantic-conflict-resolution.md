@@ -1,7 +1,7 @@
 ---
 id: gap-doc-develop-sync-semantic-conflict-resolution
 title: main/manager-doc↔develop 可靠同步 + 语义兜底（核心）——机械同步失败升级 Claude Code 语义同步，develop 权威
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -32,11 +32,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，可靠化）：propagate 返回 boolean + 失败落痕——grep propagate 返回类型非 void、失败写事件；（⛔ 仍 void / 静默 ⇒ 假，硬规则 3b）。
-- [ ] AC2（能取假，确定性规则）：tasks 状态分叉（develop done / doc todo）消解为 done，该路径无 LLM 调用；（⛔ 状态进 LLM / 取 todo ⇒ 假）。
-- [ ] AC3（能取假，语义兜底）：机械 ff-only 失败后升级 Claude Code 语义同步（merge + ref-level ff develop + 事件记录）；（⛔ 仍静默 merge-fallback ⇒ 假）。
-- [ ] AC4（能取假，develop 权威）：消解不丢失 develop 独有提交——develop-only 提交消解后仍在 `git log develop`；（⛔ doc 覆盖 develop 独有 ⇒ 假）。
-- [ ] AC5（能取假，双驱动接线）：promotion-driver 与 worker-driver 的 sync 调用点都走「机械 ff-only + 语义兜底」（grep 两处）；（⛔ 任一处仍走旧 propagate ⇒ 假）。
+- [x] AC1（能取假，可靠化）：propagate 返回 boolean + 失败落痕——grep propagate 返回类型非 void、失败写事件；（⛔ 仍 void / 静默 ⇒ 假，硬规则 3b）。
+- [x] AC2（能取假，确定性规则）：tasks 状态分叉（develop done / doc todo）消解为 done，该路径无 LLM 调用；（⛔ 状态进 LLM / 取 todo ⇒ 假）。
+- [x] AC3（能取假，语义兜底）：机械 ff-only 失败后升级 Claude Code 语义同步（merge + ref-level ff develop + 事件记录）；（⛔ 仍静默 merge-fallback ⇒ 假）。
+- [x] AC4（能取假，develop 权威）：消解不丢失 develop 独有提交——develop-only 提交消解后仍在 `git log develop`；（⛔ doc 覆盖 develop 独有 ⇒ 假）。
+- [x] AC5（能取假，双驱动接线）：promotion-driver 与 worker-driver 的 sync 调用点都走「机械 ff-only + 语义兜底」（grep 两处）；（⛔ 任一处仍走旧 propagate ⇒ 假）。
 
 ## Definition of Done
 
@@ -44,7 +44,8 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/driver-filters.ts（propagateDocBranchToDevelop 返回 boolean + 失败落痕 + 升级语义兜底）
-- plugin/scripts/promotion-driver.ts（sync 调用点走机械 + 语义兜底）
-- plugin/scripts/worker-driver.ts（sync 调用点走机械 + 语义兜底）
+- plugin/scripts/driver-filters.ts（propagateDocBranchToDevelop 返回 boolean + 失败落痕 + 升级语义兜底；sync 调用点 centralized 于此——两 driver 经 markNeedsHuman（needs-human 翻转）与 commitTaskStatus（promotion todo→ready）复用同一 propagate）
+- plugin/test/driver-filters.test.mjs（新增：resolveStatusPriority 确定性 / propagate boolean / semanticSync 分叉负控制测试）
+- plugin/test/ready-pool-check.test.mjs（non-ff 测试改 semantic sync + 排除 .quay 遥测）
+- .gitignore（新增 .quay/doc-develop-sync.jsonl 运行时遥测条目）
 - tasks/gap-doc-develop-sync-semantic-conflict-resolution.md（自身）
