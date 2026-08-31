@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // task-contract-check.test.mjs — the consumer-side checker for the `## Contract` block + `## Dispatch
 // review` section (tasks/gap-dispatch-gate-has-no-checklist-and-no-trace). The dispatch gate's five
 // verbal questions become a machine-readable Contract; this test pins the parser (shared with
@@ -10,11 +10,11 @@
 // changed from VERBATIM string to the command's EXECUTABLE ENTRY PATH (placeholders like <ISO> make
 // verbatim matching impossible by construction; 6 of the 7 prior findings were false positives). The
 // checker itself is now wired into scripts/test.sh's run_static_checks (AC4) so the ratchet CANNOT
-// grow unnoticed. AC8: this file declares `// @test-group governance`.
+// grow unnoticed. AC8: this file declares `// @test-group engine`.
 //
 // AC1 six-key syntax (task-schema) · AC2 five consumer judgments read content · AC3 Dispatch review
 // format + missing-section report · AC5 synthetic violation demo (AC-threshold-no-measure-ref,
-// measure-no-command) · AC6 ratchet data file · AC8 @test-group governance.
+// measure-no-command) · AC6 ratchet data file · AC8 @test-group engine.
 //
 // Run: scripts/test.sh plugin/test/task-contract-check.test.mjs
 
@@ -69,14 +69,9 @@ function taskBody({ labels = [], status = "todo", contract, dispatchReview, ac, 
   return fm({ list: labels, status }, `extra:\n  schema: "v1"`) + parts.join("");
 }
 
-// ── Governance self-skip (AC8 @test-group governance) ─────────────────────────────────────────────
+// ── Governance self-skip (AC8 @test-group engine) ─────────────────────────────────────────────
 // In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
 // precedent) — the checker itself is enforced unconditionally via scripts/test.sh's
-// run_static_checks, and the file runs in full when invoked explicitly (QUAY_TEST_GROUPS unset) or
-// with `--group governance`.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 // ── parseContract ───────────────────────────────────────────────────────────────────────────────────
 
@@ -933,4 +928,3 @@ test("AC6 real-store: backfilled case tasks + this task are violation-free", { s
   }
 });
 
-} // end governance group

@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // promotion-driver.test.mjs — AC130 + AC131 + AC132 + AC134 (tasks/gap-ac130-promotion-driver-resident-loop,
 // tasks/gap-ac131-promotion-mechanical-no-llm, tasks/gap-ac132-fix-worker-structured-input,
 // tasks/gap-ac134-promotion-outcome-ledger): the resident

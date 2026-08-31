@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // ac69-slot-queue-gap-check.test.mjs — AC69 槽满排队「先量再改」测量记录检查器测试
 // (tasks/gap-ac69-suite-slot-full-should-queue-not-wait, AC1 + DoD).
 //

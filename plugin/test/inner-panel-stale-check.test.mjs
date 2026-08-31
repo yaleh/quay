@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // inner-panel-stale-check.test.mjs — 面板观测机制（状态转换表达）
 // (tasks/gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close).
 //

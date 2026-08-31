@@ -69,6 +69,8 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createStore } from "../../quay-native/src/store.ts";
+import { laydownWorkspace } from "../../../plugin/test/helpers/quay-init-install-fixture.mjs";
+import { spawnAsync, spawnTimings, assertParallelLaunches } from "../../../plugin/test/helpers/async-spawn.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -144,17 +146,44 @@ function makeWorkspace(prefix = "install-e2e-") {
 // `worktreeRoot` option: undefined → a fresh unique disk root per call; a string → that root;
 // null → pass NO --worktree-root (the config-preserving upgrade path: quay-init keeps the
 // consumer's recorded loop.worktree_root — the AC6/AC1 + AC2 "entire loop section unchanged" path).
-function runInit(ws, { pluginRoot = PLUGIN_ROOT, repoRoot = "/srv/target", project = "proj", tmux, testCommand, worktreeRoot, addArgs = [] } = {}) {
+function runInitArgs(ws, { pluginRoot = PLUGIN_ROOT, repoRoot = "/srv/target", project = "proj", tmux, testCommand, worktreeRoot, addArgs = [] } = {}) {
   const session = tmux ?? `p-${path.basename(ws).slice(-12)}-0:0.0`;
   const args = ["--loop", "--root", ws, "--project", project, "--tmux-session", session, "--repo-root", repoRoot];
   if (worktreeRoot !== null) args.push("--worktree-root", worktreeRoot ?? diskWorktreeRoot());
   if (testCommand) args.push("--test-command", testCommand);
   args.push(...addArgs);
+  return { pluginRoot, args };
+}
+
+function runInit(ws, opts = {}) {
+  const { pluginRoot, args } = runInitArgs(ws, opts);
   return spawnSync("bash", [path.join(pluginRoot, "scripts", "quay-init.sh"), ...args], {
     cwd: ws,
     encoding: "utf8",
     env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
   });
+}
+
+// runInitAsync — the async-spawn variant (gap-suite-parallel-independent-installs). Two INDEPENDENT
+// installs in one test are run via Promise.all: spawnSync blocks the event loop, so the sync runInit
+// can never overlap; this returns a promise resolving to the same {status, stdout, stderr} shape.
+function runInitAsync(ws, opts = {}) {
+  const { pluginRoot, args } = runInitArgs(ws, opts);
+  return spawnAsync("bash", [path.join(pluginRoot, "scripts", "quay-init.sh"), ...args], {
+    cwd: ws,
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
+  });
+}
+
+// The landed loop.worktree_root, extracted from the installed .quay/config.yml — the AC3 independence
+// invariant's load-bearing field (two parallel installs sharing a worktree root would race on git
+// worktree operations). Returns null when the line is absent.
+function landedWorktreeRoot(ws) {
+  const cfg = path.join(ws, ".quay", "config.yml");
+  if (!fs.existsSync(cfg)) return null;
+  const m = /worktree_root:\s*(\S+)/.exec(fs.readFileSync(cfg, "utf8"));
+  return m ? m[1] : null;
 }
 
 function extractDetectedCommand(stdout) {
@@ -268,7 +297,7 @@ function snapshotProductFiles(ws) {
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 // A1 — cross-workspace byte-identity
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
-test("A1 — two workspaces with genuinely different derived test commands lay down byte-identical product files (only the config differs)", () => {
+test("A1 — two workspaces with genuinely different derived test commands lay down byte-identical product files (only the config differs)", async () => {
   const ws1 = makeWorkspace();
   const ws2 = makeWorkspace();
   // ws1: package.json with a scripts.test entry → derives "npm test" (archguard rung).
@@ -294,10 +323,25 @@ test("A1 — two workspaces with genuinely different derived test commands lay d
   const frozenPlugin = makeWorkspace("install-e2e-frozenplugin-");
   fs.cpSync(PLUGIN_ROOT, frozenPlugin, { recursive: true });
 
-  const r1 = runInit(ws1, { pluginRoot: frozenPlugin });
-  const r2 = runInit(ws2, { pluginRoot: frozenPlugin });
+  // The two installs are INDEPENDENT (distinct workspace / worktree root / tmux session; the frozen
+  // plugin copy is a read-only input — its source tree is absent so quay-init never rebuilds into it).
+  // Run them in parallel (gap-suite-parallel-independent-installs): spawnSync blocks the event loop,
+  // so the sync form can never overlap; Promise.all over two async spawns is the one place intra-test
+  // concurrency actually takes effect.
+  const t0 = spawnTimings.length;
+  const [r1, r2] = await Promise.all([runInitAsync(ws1, { pluginRoot: frozenPlugin }), runInitAsync(ws2, { pluginRoot: frozenPlugin })]);
   assert.equal(r1.status, 0, `ws1 install failed:\n${r1.stderr}`);
   assert.equal(r2.status, 0, `ws2 install failed:\n${r2.stderr}`);
+  assertParallelLaunches(t0, "A1");
+
+  // AC3 (independence invariant, round-161): the two parallel installs landed DISTINCT worktree
+  // roots. Workspace and tmux session are distinct by construction (makeWorkspace + a session
+  // derived from each workspace's own basename); the worktree root is the load-bearing field under
+  // parallelism — a shared root would race on git worktree operations.
+  const wt1 = landedWorktreeRoot(ws1);
+  const wt2 = landedWorktreeRoot(ws2);
+  assert.ok(wt1 && wt2, `AC3: both installs must land a worktree_root (got ${JSON.stringify(wt1)} / ${JSON.stringify(wt2)})`);
+  assert.notEqual(wt1, wt2, "AC3: the two parallel installs must land distinct worktree roots");
 
   // AC7: the two derived test commands genuinely differ (verbatim evidence below).
   const cmd1 = extractDetectedCommand(r1.stdout);
@@ -340,10 +384,9 @@ test("A1 — two workspaces with genuinely different derived test commands lay d
 // A2 — byte-identical to product artifacts + idempotent re-install
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 test("A2 — laid-down files are byte-identical to the product artifacts, and a second install changes ZERO product files", () => {
-  const ws = makeWorkspace();
+  const { ws, install: r1 } = laydownWorkspace();
   fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2));
 
-  const r1 = runInit(ws);
   assert.equal(r1.status, 0, `install failed:\n${r1.stderr}`);
 
   // Artifact identity: every laid-down product file equals the plugin source.
@@ -351,7 +394,7 @@ test("A2 — laid-down files are byte-identical to the product artifacts, and a 
   assert.deepEqual(diffs, [],
     `A2: every laid-down file must be byte-identical to the product artifact; differing=${JSON.stringify(diffs)}`);
 
-  // Idempotency: a second install changes ZERO product files.
+  // Idempotency: ONE real install on the fixture copy changes ZERO product files.
   const before = snapshotProductFiles(ws);
   const r2 = runInit(ws);
   assert.equal(r2.status, 0, `second install failed:\n${r2.stderr}`);

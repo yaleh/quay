@@ -9,9 +9,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import type { Task } from '../../quay/src/abi.ts';
+import { TASK_STATUSES, TASK_STATUS, isTaskStatus, type Task, type TaskStatus } from '../../quay/src/abi.ts';
 
-export const VALID_STATUSES = ["todo", "ready", "done", "needs-human", "superseded"];
+export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
 
 /**
  * SHAPE_REGISTRY (AC1, single source of truth): the one place the task-shape →
@@ -340,7 +340,7 @@ function validateWrittenYaml(filePath: string, id: string, frontmatter?: Record<
  *   single-source — this is the ONE place the creation default is resolved).
  */
 export function createStore(tasksDir: string, opts?: { defaultStatus?: string }) {
-  const storeDefaultStatus = opts?.defaultStatus ?? "todo";
+  const storeDefaultStatus = opts?.defaultStatus ?? TASK_STATUS.TODO;
   fs.mkdirSync(tasksDir, { recursive: true });
 
   // M26-adversarial-eval finding ADV-004 (highest-severity real finding of
@@ -792,10 +792,22 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       const existing = Array.isArray(existingExtra.malformed) ? (existingExtra.malformed as string[]) : [];
       extra.malformed = [...new Set([...existing, "missing-id"])];
     }
+    // gap-abi-status-lifecycle-vocab-scattered-no-named-type: the disk-read status
+    // boundary. A status frontmatter value outside the five-word lifecycle vocab is
+    // REJECTED (fail-closed — hard rule 3b: an unreadable value must not look valid):
+    // it is coerced to the canonical `todo` and flagged `invalid-status` in
+    // `extra.malformed`, so a stray `status: reddy` can never silently surface as a
+    // legal-looking `Task.status` string downstream.
+    const rawStatus = frontmatter.status;
+    const status: TaskStatus | null = isTaskStatus(rawStatus) ? rawStatus : null;
+    if (status === null && rawStatus !== undefined) {
+      const existing = Array.isArray(existingExtra.malformed) ? (existingExtra.malformed as string[]) : [];
+      extra.malformed = [...new Set([...existing, "invalid-status"])];
+    }
     const vm: Task & { updatedAt?: number } = {
       id: resolvedId,
       title: frontmatter.title as string,
-      status: frontmatter.status as Task['status'],
+      status: status ?? TASK_STATUS.TODO,
       labels: (frontmatter.labels as string[] | undefined) ?? [],
       parent: (frontmatter.parent as string | null | undefined) ?? null,
       children,
@@ -855,8 +867,8 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       if (!child) return { id: childId, status: "missing" };
       if (child.role === "compound") {
         const grandkids = childrenStatus(child, nextVisited);
-        const subtreeOk = grandkids.every((g) => g.status === "done");
-        const status = child.status === "done" && !subtreeOk ? "stale-done" : child.status;
+        const subtreeOk = grandkids.every((g) => g.status === TASK_STATUS.DONE);
+        const status = child.status === TASK_STATUS.DONE && !subtreeOk ? "stale-done" : child.status;
         return { id: childId, status, childrenStatus: grandkids };
       }
       return { id: childId, status: child.status };
@@ -1260,7 +1272,21 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     const t = get(id);
     if (!t) return { id, ok: false, reason: "not found" };
 
-    if (t.status === "todo") {
+    // gap-abi-status-lifecycle-vocab-scattered-no-named-type: the disk-read
+    // boundary coerces an out-of-vocab on-disk status to `todo` and flags it
+    // `invalid-status` in extra.malformed (fail-closed at the parse boundary).
+    // The gate must NOT treat that coerced `todo` as a genuine todo — otherwise
+    // a stray `status: reddy` would pass author->ready. Recover the original
+    // value for an actionable reason and fail closed with gate:"unknown" (the
+    // pre-coercion contract that task-check/gate-correctness tests pin).
+    const malformed = Array.isArray(t.extra?.malformed) ? (t.extra.malformed as string[]) : [];
+    if (malformed.includes("invalid-status")) {
+      const raw = readRaw(id);
+      const rawStatus = raw !== null ? (parse(raw).frontmatter.status as string | undefined) : undefined;
+      return { id, gate: "unknown", ok: false, reason: `unrecognized status ${rawStatus}` };
+    }
+
+    if (t.status === TASK_STATUS.TODO) {
       const gate = "author->ready";
       // Shape dispatch (ADR-001 re-landed; gap-the-dod-gate-encodes-a-retired-
       // task-shape): the required sections depend on the task's registered
@@ -1365,7 +1391,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
               .join(", "),
       };
     }
-    if (t.status === "ready") {
+    if (t.status === TASK_STATUS.READY) {
       // execute->done gate (gap-both-gates-read-one-signal-so-done-costs-
       // nothing, AC7b): reads the DoD CHECKED-STATE as the completion
       // evidence. The two gates now read DIFFERENT evidence — author->ready
@@ -1402,9 +1428,9 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       // (children.length === 0) are unaffected: childrenStatus is `[]` and
       // `.every(...)` over an empty array is vacuously true.
       const kids = childrenStatus(t);
-      const childrenOk = kids.every((c) => c.status === "done");
+      const childrenOk = kids.every((c) => c.status === TASK_STATUS.DONE);
       const ok = acOk && dodOk && childrenOk;
-      const badChildren = kids.filter((c) => c.status !== "done");
+      const badChildren = kids.filter((c) => c.status !== TASK_STATUS.DONE);
       let reason;
       if (!acOk) {
         reason = `${acChecked.length}/${acCheckboxes.length} AC checkboxes checked`;
@@ -1430,7 +1456,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       if (t.role === "compound") result.childrenStatus = kids;
       return result;
     }
-    if (t.status === "done") {
+    if (t.status === TASK_STATUS.DONE) {
       // QN-012: a `done` compound (epic) task's gate check must actually
       // re-verify that its children are still `done`, rather than
       // unconditionally rubber-stamping `ok: true` — closing the gap named
@@ -1441,9 +1467,9 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       // and `.every(...)` over an empty array is vacuously true, so this
       // branch degrades to the original unconditional behavior for leaves.
       const kids = childrenStatus(t);
-      const childrenOk = kids.every((c) => c.status === "done");
+      const childrenOk = kids.every((c) => c.status === TASK_STATUS.DONE);
       if (t.role === "compound" && !childrenOk) {
-        const badChildren = kids.filter((c) => c.status !== "done");
+        const badChildren = kids.filter((c) => c.status !== TASK_STATUS.DONE);
         return {
           id,
           gate: "none",
@@ -1458,7 +1484,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       if (t.role === "compound") result.childrenStatus = kids;
       return result;
     }
-    if (t.status === "needs-human") {
+    if (t.status === TASK_STATUS.NEEDS_HUMAN) {
       return { id, gate: "none", ok: false, reason: "soft stop; human action required" };
     }
     return { id, gate: "unknown", ok: false, reason: `unrecognized status ${t.status}` };

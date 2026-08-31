@@ -192,8 +192,9 @@ test("AC5 — --loop --manager lays all three cores (cold-start readable); quay-
 // non-empty passes are accepted. A stable corpus derives deterministically, so real drift is never
 // masked (a genuinely-absent script is absent from EVERY pass and the downstream gate fail-closes).
 //
-// These tests exercise the REAL quay-init.sh --loop install path with a fake `grep` injected first on
-// PATH. The fake passes through every invocation to the real grep EXCEPT the (a) corpus scan — the
+// These tests SOURCE the REAL quay-init.sh and call derive_loop_scripts directly (免完整安装 —
+// gap-quay-init-reduce-real-install-count), with a fake `grep` injected first on PATH. The fake
+// passes through every invocation to the real grep EXCEPT the (a) corpus scan — the
 // grep whose pattern starts with `plugin/scripts/` (the ONLY such grep in the derivation;
 // verify_referenced_landed's reference-scan pattern starts with `(` and is unaffected). On a torn
 // policy it truncates that one grep's output to the first KEEP lines, simulating a grep killed
@@ -260,19 +261,28 @@ function realGrepPath() {
   return "/usr/bin/grep";
 }
 
-// Like the helpers' runInit, but with an extra env layer (the fake-grep PATH + policy) so a real
-// --loop install runs with the torn-read seam in place.
-function runInitEnv(workspace, args, extraEnv, pluginRoot = pluginDir) {
-  const loop = args.includes("--loop");
-  const argv = ["bash", path.join(pluginRoot, "scripts", "quay-init.sh")];
-  if (loop && !args.some((a) => a === "--worktree-root")) {
-    argv.push("--worktree-root", diskWorktreeRoot());
-  }
-  argv.push(...args);
-  return spawnSync(argv[0], argv.slice(1), {
-    cwd: workspace,
+// runSourced(fnLine, { env, args, cwd }) — SOURCE quay-init.sh and invoke ONE of its top-level
+// derivation/stability functions DIRECTLY (no full install), with the fake-grep seam (env) in place.
+// gap-quay-init-reduce-real-install-count: the torn-read family previously ran a full `--loop` install
+// (~33s) per test just to exercise one stability check; quay-init.sh is now sourceable (its
+// library-mode guard stops before the install flow), so the test calls the function itself. fnLine is
+// the LAST command of a `bash -c`, so the child's exit code IS the function's return code and stderr
+// carries any FAIL line (e.g. referenced-not-landed).
+function runSourced(fnLine, { env = {}, args = [], cwd } = {}) {
+  // Capture the positional args into _fargs and CLEAR $@ BEFORE sourcing: quay-init.sh parses $@ at
+  // the top level (its arg parser rejects an unknown positional with "unknown argument"), and
+  // sourcing would otherwise feed it the fnLine's args (e.g. the workspace path). fnLine reads them
+  // back via ${_fargs[0]}.
+  const script = '_fargs=("$@")\nset --\nsource "$QUAY_INIT_SCRIPT"\n' + fnLine;
+  return spawnSync("bash", ["-c", script, "quay-init-sourced", ...args], {
+    cwd: cwd || pluginDir,
     encoding: "utf8",
-    env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot, ...extraEnv },
+    env: {
+      ...process.env,
+      CLAUDE_PLUGIN_ROOT: pluginDir,
+      QUAY_INIT_SCRIPT: path.join(pluginDir, "scripts", "quay-init.sh"),
+      ...env,
+    },
   });
 }
 
@@ -327,16 +337,13 @@ function readCorpusLog(logPath) {
 // return the full set — the first pass is torn, the second is full, so the two passes disagree and
 // the check retries to two agreeing full passes. A pre-fix (unwrapped) derivation would lay the torn
 // set and fail referenced-not-landed on ~100 missing scripts.
-test("torn-read stability — a torn corpus derivation (grep truncated) is retried; a real --loop install still passes", () => {
+test("torn-read stability — a torn corpus derivation (grep truncated) is retried; derive_loop_scripts still returns a stable set", () => {
   const binDir = makeTmp("torn-grep-");
   const env = tornEnv(binDir, { policy: "torn", tornUntil: 1, keep: 5 });
-  const ws = makeTmp("torn-ws-");
   try {
-    const r = runInitEnv(ws, INIT_ARGS(ws), env);
+    const r = runSourced("derive_loop_scripts", { env });
     assert.equal(r.status, 0,
-      `a torn corpus read must NOT fail the install (the stability check retries to a clean pass):\n${r.stdout}${r.stderr}`);
-    assert.match(r.stdout, /verify-referenced-landed: OK/,
-      "the referenced ⊆ landed gate must pass once the derivation stabilizes");
+      `a torn corpus read must NOT fail the derivation (the stability check retries to a clean pass):\n${r.stdout}${r.stderr}`);
 
     // The fake-grep log proves the tear really fired and that the check read PAST it (a full read
     // followed the torn one). A torn read that never happened would make this test vacuous; a full
@@ -350,19 +357,16 @@ test("torn-read stability — a torn corpus derivation (grep truncated) is retri
       `the stability check must read past the torn pass (≥3 corpus reads; 2-pass agreement requires a retry), got ${log.length}`);
     assert.ok(log.some((e) => e.torn === "no"),
       "a complete (non-torn) corpus read must follow the torn one — the retry moved past it");
-  } finally { cleanup(ws); cleanup(binDir); }
+  } finally { cleanup(binDir); }
 });
 
 test("torn-read control — the pass-through seam preserves the happy path: consistent reads exit 0", () => {
   const binDir = makeTmp("torn-grep-");
   const env = tornEnv(binDir, { policy: "pass" });
-  const ws = makeTmp("torn-ws-");
   try {
-    const r = runInitEnv(ws, INIT_ARGS(ws), env);
-    assert.equal(r.status, 0, `the pass-through seam must not change a clean install verdict:\n${r.stdout}${r.stderr}`);
-    assert.match(r.stdout, /verify-referenced-landed: OK/,
-      "the referenced ⊆ landed gate must pass on consistent reads");
-  } finally { cleanup(ws); cleanup(binDir); }
+    const r = runSourced("derive_loop_scripts", { env });
+    assert.equal(r.status, 0, `the pass-through seam must not change a clean derivation verdict:\n${r.stdout}${r.stderr}`);
+  } finally { cleanup(binDir); }
 });
 
 // ── concurrency negative control (gap-quay-init-torn-read-derive-loop-scripts AC2) ──────────────────

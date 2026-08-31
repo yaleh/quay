@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // outer-driver.test.mjs — AC143 (tasks/gap-ac143-observability-ledger-closing-driver): the outer's
 // PURE-MECHANICAL A/B segments absorbed into a routine-type driver (Layer 0 + 1b, ⛔ not 1a).
 //

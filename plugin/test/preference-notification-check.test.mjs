@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // preference-notification-check.test.mjs — AC57 通知面检查器测试
 // (tasks/gap-ac57-preference-change-notification).
 //

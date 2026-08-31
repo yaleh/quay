@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // trend-check.test.mjs — tasks/gap-quality-criteria-are-point-in-time-no-trend-criteria.
 //
 // PROBLEM UNDER TEST: every existing quality criterion is point-in-time ("was it green this
@@ -18,7 +18,7 @@
 //   AC4 — REVIEW-cadence.md gained the "比上次更贵了吗 / 离目标更近了吗" trend check item.
 //   AC5 — passive: trend-check only reads, never writes/triggers a run.
 //   AC6 — manager-layer task cross-annotates the trend criterion.
-//   AC7 — this file uses node:test and declares // @test-group governance.
+//   AC7 — this file uses node:test and declares // @test-group engine.
 //
 // Run:
 //   scripts/test.sh --for-task gap-quality-criteria-are-point-in-time-no-trend-criteria

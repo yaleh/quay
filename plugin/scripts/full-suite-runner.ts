@@ -154,6 +154,7 @@ import type { PerFileRecord } from "./measure-trend-check.ts";
 // countHeldSuiteLocks read it so concurrentSuitesRunning follows S (S=3 ⇒ .0/.1/.2 probed, never a
 // fixed two-slot destructure).
 import { suiteLockSlotPaths, suiteLockBase } from "./suite-lock-slots.ts";
+import { readSuiteParams, suiteParamsToEnv } from "./suite-params.ts";
 
 // ── gap-ac128-hub-split-harness-concerns — harness-critical families extracted to focused files ──
 // The red/failure parsing, concurrency/lane, tested-tree state, and state-write families were each
@@ -747,6 +748,12 @@ export function effectiveParallelism(cpuTimeS: number | null | undefined, durati
 
 export interface SuiteRoundRecord {
   round: number;
+  // gap-verification-round-record-runid — the suite's canonical runId (the SAME value the state write
+  // carries and the SAME key the load sampler uses for suite-load-<runId>.jsonl / measure-history). The
+  // round record carrying it makes the row self-describing (its OWN load key rides the ledger row).
+  // Absent on legacy rows (红绿 pre-fix records had no runId) — a reader must tolerate its absence
+  // (same absent-field contract as commit/scope).
+  runId?: string;
   startedAt: string;
   durationMs: number;
   laneCount: number;
@@ -1258,8 +1265,25 @@ export function concurrentPhaseCount(): number {
  * window runs serial+lowconc in parallel (Σ lane = SERIAL + LOWCONC), so each phase gets
  * hostParallelism ÷ (S × 2) — the same S×P denominator test.sh's serial_lowconc_host_default reads.
  */
-export const DEFAULT_SERIAL_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
-export const DEFAULT_LOWCONC_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
+// gap-suite-knobs-config-file-priority: this is now a RUNTIME function (was two import-time `export
+// const DEFAULT_SERIAL_CONCURRENCY / DEFAULT_LOWCONC_CONCURRENCY`). The config-file default is promoted
+// into process.env at the top of run() — AFTER this module's import-time — so an import-time const would
+// bake in the pre-config S / P and ignore suite.max_concurrent_suites / suite.phase_overlap. Reading S
+// (concurrentSuiteSlots) and P (concurrentPhaseCount) at call time makes the host-derived fallback
+// honor the config-promoted env (config < env < CLI, hard rule 4 推论二: read-host, never a literal).
+export function defaultPhaseConcurrency(): number {
+  return Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
+}
+
+/** Read a positive-integer env var the way the runner's own knob reads do: an EMPTY string counts as
+ *  unset (the bash :- convention suite-lock-slots.ts's envValOrUndefined mirrors). Returns undefined
+ *  when unset/empty/invalid — the caller falls through to the host-derived default. */
+function positiveIntFromEnv(name: string): number | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : undefined;
+}
 
 /** Parse a positive-integer arg (e.g. --serial-concurrency 2); NaN/<1 → null (caller errors). */
 function parsePositiveIntArg(argv: string[], name: string): number | null {
@@ -1635,6 +1659,19 @@ export async function run(argv: string[]): Promise<number> {
   // root === REPO_ROOT condition).
   let root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
   const mainRoot = root; // the main repo: fork source + state/log write target when one-shot
+  // gap-suite-knobs-config-file-priority: config < env < CLI. Read the suite: section (the LOWEST-
+  // priority default) and promote each present value into process.env ONLY where env is unset/empty
+  // (env wins over config; empty-string counts as unset — the bash :- convention). CLI flags stay
+  // above env (the existing --lane-count / --serial-concurrency / --lowconc-concurrency parsing is
+  // untouched). A malformed suite: section throws FAIL-CLOSED here — the suite must not silently
+  // degrade to env-only defaults (DIR-050 discipline, AC5). Must run BEFORE defaultLaneCount() and
+  // the phase-concurrency defaults below so they read the config-promoted env.
+  const suiteParams = readSuiteParams(root);
+  for (const [envKey, value] of Object.entries(suiteParamsToEnv(suiteParams))) {
+    const cur = process.env[envKey];
+    if (cur === undefined || cur === "") process.env[envKey] = value;
+  }
+
   const oneShot = argv.includes("--one-shot-worktree") || path.resolve(root) === REPO_ROOT;
   let oneShotWorktreePath: string | null = null;
   const explicitCommand = parseArg(argv, "--command");
@@ -1650,10 +1687,10 @@ export async function run(argv: string[]): Promise<number> {
   // load-sensitive phase concurrency overrides. An explicit --serial-concurrency / --lowconc-
   // concurrency is passed to test.sh as QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY so the
   // controlled experiment can run the serial phase at a higher concurrency and measure wall-clock +
-  // cancelled BEFORE the default is bumped. Defaults are host-read (DEFAULT_SERIAL_CONCURRENCY /
-  // DEFAULT_LOWCONC_CONCURRENCY = os.availableParallelism() ÷ (slots × concurrentPhaseCount()),
-  // gap-ac44-concurrent-phases-read-host-parallelism + gap-lane-formula-ignores-phase-overlap-
-  // concurrency) — an explicit flag always wins over the host default (AC2).
+  // cancelled BEFORE the default is bumped. Defaults are host-read (defaultPhaseConcurrency() =
+  // os.availableParallelism() ÷ (slots × concurrentPhaseCount()), gap-ac44-concurrent-phases-read-
+  // host-parallelism + gap-lane-formula-ignores-phase-overlap-concurrency) — an explicit flag always
+  // wins over env/config and the host default (AC2).
   const serialConcurrencyArg = parsePositiveIntArg(argv, "--serial-concurrency");
   const lowconcConcurrencyArg = parsePositiveIntArg(argv, "--lowconc-concurrency");
   if (serialConcurrencyArg === null && parseArg(argv, "--serial-concurrency") !== undefined) {
@@ -1664,8 +1701,11 @@ export async function run(argv: string[]): Promise<number> {
     process.stderr.write(`full-suite-runner: invalid --lowconc-concurrency (must be a positive integer)\n`);
     return 1;
   }
-  const serialConcurrency = serialConcurrencyArg ?? DEFAULT_SERIAL_CONCURRENCY;
-  const lowconcConcurrency = lowconcConcurrencyArg ?? DEFAULT_LOWCONC_CONCURRENCY;
+  // gap-suite-knobs-config-file-priority: config < env < CLI. The config value (if any) was promoted
+  // into process.env above; read env here so env-wins-over-config holds, then fall back to the
+  // host-derived default (now runtime-read, so it honors a config-promoted S / P too).
+  const serialConcurrency = serialConcurrencyArg ?? positiveIntFromEnv("QUAY_SERIAL_CONCURRENCY") ?? defaultPhaseConcurrency();
+  const lowconcConcurrency = lowconcConcurrencyArg ?? positiveIntFromEnv("QUAY_LOWCONC_CONCURRENCY") ?? defaultPhaseConcurrency();
   // The phase-concurrency env the child test.sh reads. Always set explicitly so the runner is the
   // single source of truth for both phase knobs (test.sh defaults match these values by construction).
   const phaseConcurrencyEnv = {
@@ -1778,7 +1818,12 @@ export async function run(argv: string[]): Promise<number> {
   // write establishes it (the newest runner owns the file from then on); every later write must
   // still own the generation or it is dropped (gap-full-suite-state-race-last-write-wins-no-
   // generation-guard AC1/AC4).
-  const runId = randomUUID();
+  // gap-mechanical-fan-in-per-suite-runid-unified — an explicit --run-id (from the mechanical fan-in
+  // driver) is honored VERBATIM as the canonical run id, so it flows through full-suite-state /
+  // generation guard / suite-load-<runId>.jsonl / the verification-round record as ONE key (the
+  // record ↔ telemetry join the /tests page keys the load curve on). Default (no --run-id) =
+  // randomUUID() — an independent run keeps self-naming.
+  const runId = parseArg(argv, "--run-id") ?? randomUUID();
   // gap-leak-residue-per-run-namespace-isolation AC1 — the per-run NAMESPACE id delivered to the
   // child (and hence to every node --test probe via session-liveness-helpers.mjs's QUAY_RUN_ID):
   // a SHORT id (8 hex chars from the state-file UUID) so the tmux socket sun_path (~107 bytes —
@@ -2114,6 +2159,9 @@ export async function run(argv: string[]): Promise<number> {
       try {
         appendVerificationRound(stateDir, {
           round: 0, // computed from prior line count inside appendVerificationRound
+          // gap-verification-round-record-runid — the crash-trap row carries the SAME canonical runId
+          // so a crashed round is also self-describing (load-key connectable) like the normal path.
+          runId,
           startedAt,
           durationMs: Date.parse(at) - Date.parse(startedAt),
           laneCount,
@@ -2494,6 +2542,15 @@ export async function run(argv: string[]): Promise<number> {
   // the runner's own process.env.QUAY_PHASE_OVERLAP, which the production chain (fan-in-execute.js)
   // never sets (the env knob defaults to 1 only INSIDE test.sh, invisible to this parent process).
   let phaseOverlapRan = false;
+  // gap-suite-main-overlaps-load-sensitive-tail-experiment — main-tail-overlap observability. LATCHED
+  // from test.sh's `main-tail-overlap: lanes=N [load=X]` stream marker (emitted by the tail-overlap
+  // watcher when it actually fires main early), NOT from process.env.QUERY_MAIN_TAIL_OVERLAP — the
+  // same false-negative lesson as phaseOverlapRan: the production chain never sets the env on this
+  // parent process (the knob default 0 lives only inside test.sh). null on a baseline/sequential
+  // round (knob 0, or trigger never fired) — the reader tolerates absence (same absent-field
+  // contract as phase_overlap).
+  let mainTailOverlapLanes: number | null = null;
+  let mainTailOverlapLoad: number | null = null;
   let mainClosed = false; // the main→end boundary already fired
   // gap-verification-round-phases-overlap-merged — on the overlap path test.sh emits
   // `__OVERHEAD__ overlap_<phase>_done=1` right after EACH parallel phase's `wait`. The window
@@ -2510,6 +2567,12 @@ export async function run(argv: string[]): Promise<number> {
   const phaseOverlapSerialDone = /^__OVERHEAD__\s+overlap_serial_done=1/;
   const phaseOverlapLowconcDone = /^__OVERHEAD__\s+overlap_lowconc_done=1/;
   const phaseOverlapDone = /^__OVERHEAD__\s+overlap_(?:serial|lowconc)_done=1/;
+  // gap-suite-main-overlaps-load-sensitive-tail-experiment — test.sh's tail-overlap watcher announces
+  // its fire on the stream. Distinct from the __OVERHEAD__ family (which the phase boundary machine
+  // treats as the end-of-round burst) so a mid-window fire can never prematurely close the overlap
+  // window. lanes = the early-start concurrency (the knob value); load = /proc/loadavg 1-min at fire
+  // time (the observed total load during the overlap), absent when unreadable.
+  const mainTailOverlapRe = /^main-tail-overlap:\s+lanes=(\d+)(?:\s+load=(\S+))?/;
 
   // gap-verification-round-observability-holes AC1 — `lock_wait_ms` = the flock-wait the suite paid
   // before it acquired one of the S single-flight slots. The runner does NOT take the lock itself (it
@@ -2687,6 +2750,18 @@ export async function run(argv: string[]): Promise<number> {
     // line fell through to failures[] as a false red, round 137 __OVERHEAD__ build_dist_ms=479).
     const overheadM = line.match(/^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial=1)?$/);
     if (overheadM) phaseMs[overheadM[1]] = Number(overheadM[2]);
+    // gap-suite-main-overlaps-load-sensitive-tail-experiment — first marker wins (test.sh's watcher
+    // fires at most once). Pure addition: it cannot flip the verdict, and a missed marker only omits
+    // the two observability fields (缺键, never a fabricated 0 — the same absent-field contract as
+    // phase_overlap). load is explicit-absent (stays null) when the marker carried no readable load.
+    const tailOverlapM = line.match(mainTailOverlapRe);
+    if (tailOverlapM) {
+      mainTailOverlapLanes = Number(tailOverlapM[1]);
+      if (tailOverlapM[2] !== undefined && tailOverlapM[2] !== "") {
+        const parsedLoad = Number(tailOverlapM[2]);
+        mainTailOverlapLoad = Number.isFinite(parsedLoad) ? parsedLoad : null;
+      }
+    }
     // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC2 — parse the reporter's
     // `__CEILING__ <path> duration_ms=<dur> floor_ms=<floor> 封顶者/该拆` line (^ anchored — the
     // ^__PERFILE__ self-match family: a PASSING test whose NAME quotes the shape is ✔-prefixed and
@@ -3308,6 +3383,10 @@ export async function run(argv: string[]): Promise<number> {
   // from the authoritative total when available (or null fail-open).
   appendVerificationRound(stateDir, {
     round: 0, // computed from prior line count inside appendVerificationRound
+    // gap-verification-round-record-runid — the round's canonical runId (the SAME value the state
+    // write carries and the SAME key the load sampler uses for suite-load-<runId>.jsonl). The round
+    // record now self-describes (its OWN load key rides the ledger row).
+    runId,
     startedAt,
     durationMs,
     laneCount,
@@ -3413,6 +3492,15 @@ export async function run(argv: string[]): Promise<number> {
     // 241 records, phase_overlap:true only 3×, all manual exploration rounds. The `overlap: running`
     // stream marker is test.sh's ground-truth signal that the parallel branch ACTUALLY ran.
     ...(phaseOverlapRan ? { phase_overlap: true } : {}),
+    // gap-suite-main-overlaps-load-sensitive-tail-experiment AC1/AC3 — the tail-overlap observability.
+    // Present only when test.sh's watcher ACTUALLY fired main early (knob >0 AND the load trigger
+    // fired). main_tail_overlap_lanes = the early-start concurrency (the knob value / experiment's
+    // lane level); main_tail_overlap_load = /proc/loadavg 1-min at fire time (the observed total load
+    // during the overlap). Absent on a baseline/sequential round (knob 0, or trigger never fired) —
+    // the same absent-field contract as phase_overlap. Feeds AC3's "档位 → 总负载 → flake 率 →
+    // wall-clock" table (load is the observed host value, never a literal — hard rule 4 推论二).
+    ...(mainTailOverlapLanes !== null ? { main_tail_overlap_lanes: mainTailOverlapLanes } : {}),
+    ...(mainTailOverlapLoad !== null ? { main_tail_overlap_load: mainTailOverlapLoad } : {}),
     // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC3 — the reporter's per-group
     // floors (各相) + capped-file list. Both appear together (every __CEILING__ line carries a
     // floor_ms, so floorMsSeen non-empty ⟺ ceilingFiles non-empty), and BOTH are omitted on a

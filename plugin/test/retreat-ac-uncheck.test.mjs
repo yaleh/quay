@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // plugin/test/retreat-ac-uncheck.test.mjs — gap-not-yet-flipped-blocks-retreated-ac83-class.
 //
 // AC83: `retreat` (done→ready) only flipped `status`, leaving the task's `## Acceptance Criteria`

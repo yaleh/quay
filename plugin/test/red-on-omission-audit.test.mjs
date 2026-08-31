@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // red-on-omission-audit.test.mjs — 每条固化行为必须能指出「不做时哪个读数会变红」
 // (tasks/gap-ac41-red-on-omission-artifact, AC41 判据 3)
 //

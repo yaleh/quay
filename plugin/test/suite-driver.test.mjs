@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // suite-driver.test.mjs — gap-suite-lifecycle-driver-kind (SPEC-suite-lifecycle-and-failure-semantics §3):
 // per-task suite 生命周期收进一个常驻 driver kind——进程级父子 wait + 定时兜底静默检测，单飞锁回归纯
 // 资源限制器。本文件验证 suite-driver.ts 的四条 AC（fake suite 命令缝，不真跑 19+min 全量套件）。
@@ -87,6 +87,31 @@ test("AC1: DRIVER_KINDS.suite 落地且复用五运维动词 + Layer 0（不新�
   // 取假（AC1 判据）：suite-driver.ts 不另写 respawn 循环（respawn 只在 driver-runtime.runSupervisor 一份）。
   assert.doesNotMatch(src, /runSupervisor\s*\(/, "must NOT re-implement supervisor respawn");
   assert.doesNotMatch(src, /function\s+respawn/i, "must NOT carry a second respawn loop");
+});
+
+// ── gap-verification-round-single-writer AC3 — 红平行写已删（runner 是唯一 writer）─────────────────
+// writeRedSuiteRecord（suite-driver.ts 曾并行补写红 verification-round，红绿双 writer 混写）已删除：
+// runner 的 appendVerificationRound 是机械路径唯一 writer（green+red 都记）。静态判据：suite-driver.ts
+// 无 writeRedSuiteRecord 定义、plugin 源码树无残留调用点。
+
+test("AC3 — writeRedSuiteRecord 已从 suite-driver.ts 删除，且 plugin 源码树无残留调用点", () => {
+  const src = fs.readFileSync(SUITE_DRIVER_SRC, "utf8");
+  assert.doesNotMatch(src, /writeRedSuiteRecord/, "writeRedSuiteRecord 定义不得存在于 suite-driver.ts");
+  // 无残留调用点：plugin/scripts + plugin/workflows 的 .ts/.js/.mjs（非测试）文件均不得引用。
+  const walk = (rel) => {
+    const abs = path.join(REPO_ROOT, rel);
+    for (const ent of fs.readdirSync(abs, { withFileTypes: true })) {
+      const p = path.join(rel, ent.name);
+      if (ent.isDirectory()) {
+        walk(p);
+      } else if (/\.(ts|js|mjs)$/.test(ent.name) && !/\.test\.(mjs|ts)$/.test(ent.name)) {
+        const text = fs.readFileSync(path.join(REPO_ROOT, p), "utf8");
+        assert.ok(!text.includes("writeRedSuiteRecord"), `${p} 不得残留 writeRedSuiteRecord 调用点`);
+      }
+    }
+  };
+  walk("plugin/scripts");
+  walk("plugin/workflows");
 });
 
 // ── AC2 — 进程级父子 + 三态 outcome（hung 可区分）─────────────────────────────────────────

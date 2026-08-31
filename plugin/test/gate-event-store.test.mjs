@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // plugin/test/gate-event-store.test.mjs — gap-loop-completion-path-produces-zero-gateevents.
 //
 // Pins the loop's completion path writing GateEvents through the SAME gate engine the CLI

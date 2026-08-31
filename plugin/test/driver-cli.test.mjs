@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // driver-cli.test.mjs — AC1-4 (tasks/gap-ac139-unified-driver-subcommand):
 // the two drivers' launch surface converges onto ONE `quay driver <verb> --kind <promotion|worker>`
 // subcommand + a single generalized supervisor. AC151 ports that supervisor from bash
@@ -41,6 +41,10 @@ const KERNEL_DEPS = [
   "driver-shared.ts",
   "driver-result.ts",
   "driver-filters.ts",
+  // gap-abi-status-lifecycle-vocab-scattered-no-named-type: driver-filters.ts now
+  // imports ./task-status.ts (the plugin tree's self-contained status-vocab copy),
+  // so the hermetic temp root must carry it too or the copied kernel's import fails.
+  "task-status.ts",
   "gate-script-base.ts",
   "profile-policy.ts",
   "routine-scheduler.ts",

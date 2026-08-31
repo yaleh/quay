@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // outer-loop-tick-split.test.mjs — tasks/gap-ac38-outer-doc-split
 // (AC2-AC4 切分一致性：外层双份文档按 manager 先例同形切分后，plugin=产品行为正本 / orchestration=本层实例状态)
 //
@@ -88,7 +88,6 @@ test("plugin 产品模板保留关键脚本引用（laydown set 覆盖不塌缩�
   const outerOnlyCritical = [
     "plugin/scripts/full-suite-runner.ts",
     "plugin/scripts/suite-state-trigger.ts",
-    "plugin/scripts/slot-free-trigger.ts",
     "plugin/scripts/inner-session-check.sh",
     "plugin/scripts/loop-driver-check.sh",
     "plugin/scripts/session-liveness-mount.sh",

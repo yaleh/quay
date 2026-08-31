@@ -3,9 +3,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
 import { readLive, readSystem, readManagerLight, readTests, readGitHistory, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult } from "./observation.ts";
+import { TASK_STATUS } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
-import { awaitingLandMs, formatAwaitingDuration } from "./serve-live.ts";
+import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -23,10 +24,23 @@ function renderDashboardPage(d: {
   // it renders a mini list of the first 3 in-flight tasks with a per-task state tag, so a task that
   // finished implementing but is stuck awaiting-land is visible at a glance (待落地 + duration in
   // the warning color), instead of hiding inside a "在飞 N" number.
-  const liveMiniList = live.inFlight.slice(0, 3).map((t) => html`<div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.78rem;line-height:1.4">
+  // gap-live-fan-in-execution-phase-two-axis: the liveCard's per-task tag now keys on the execution
+  // PHASE (not the impl-complete boundary), so a fan-in task (worker exited, suite running) reads
+  // 「fan-in · suite <state>」 instead of a misleading 「实现中」.
+  const liveMiniList = live.inFlight.slice(0, 3).map((t) => {
+    const tag = t.phase === "awaiting-land"
+      ? `待落地 ${formatAwaitingDuration(awaitingLandMs(t))}`
+      : t.phase === "fan-in"
+        ? `fan-in${suiteSuffix(t.suite)}`
+        : t.phase === "landed"
+          ? "已落地"
+          : "实现中";
+    const emphasis = t.phase === "awaiting-land" || t.phase === "fan-in" || t.phase === "landed";
+    return html`<div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.78rem;line-height:1.4">
       <a href="/task/${encodeURIComponent(t.taskId)}" style="color:var(--color-text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.taskId)}</a>
-      <span style="flex:none;${t.implCompletedAtMs == null ? "color:var(--color-neutral-700)" : "color:var(--color-accent-700);font-weight:700"}">${t.implCompletedAtMs == null ? "实现中" : `待落地 ${formatAwaitingDuration(awaitingLandMs(t))}`}</span>
-    </div>`).join("");
+      <span style="flex:none;${emphasis ? "color:var(--color-accent-700);font-weight:700" : "color:var(--color-neutral-700)"}">${escapeHtml(tag)}</span>
+    </div>`;
+  }).join("");
   const liveCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">循环脉搏</div>
     <div style="font-weight:800">${escapeHtml(liveStateText)}</div>
@@ -56,15 +70,15 @@ function renderDashboardPage(d: {
     const s = typeof t.status === "string" ? t.status : "unknown";
     counts.set(s, (counts.get(s) ?? 0) + 1);
   }
-  const statuses = ["done", "ready", "todo", "needs-human", "superseded"];
+  const statuses = [TASK_STATUS.DONE, TASK_STATUS.READY, TASK_STATUS.TODO, TASK_STATUS.NEEDS_HUMAN, TASK_STATUS.SUPERSEDED];
   const total = d.tasks.length;
   const bar = (s: string): string => {
     const c = counts.get(s) ?? 0;
     const pct = total > 0 ? (c / total) * 100 : 0;
-    return html`<div style="width:${pct.toFixed(1)}%;background:${s === "done" ? "var(--color-text)" : s === "needs-human" ? "var(--color-accent)" : "var(--color-neutral-400)"}" title="${escapeHtml(s)} ${c}"></div>`;
+    return html`<div style="width:${pct.toFixed(1)}%;background:${s === TASK_STATUS.DONE ? "var(--color-text)" : s === TASK_STATUS.NEEDS_HUMAN ? "var(--color-accent)" : "var(--color-neutral-400)"}" title="${escapeHtml(s)} ${c}"></div>`;
   };
   const recentActive = d.tasks
-    .filter((t) => (t.status ?? "") !== "done" && typeof (t as { updatedAt?: unknown }).updatedAt === "number")
+    .filter((t) => (t.status ?? "") !== TASK_STATUS.DONE && typeof (t as { updatedAt?: unknown }).updatedAt === "number")
     .sort((a, b) => ((b as { updatedAt?: unknown }).updatedAt as number) - ((a as { updatedAt?: unknown }).updatedAt as number))
     .slice(0, 5);
 
@@ -185,7 +199,7 @@ export async function handleDashboard(
   ]);
   let tests: TestsResult;
   try { tests = readTests(cfg.workspaceRoot); } catch {
-    tests = { status: "error", reason: "internal", runs: [], currentState: null };
+    tests = { status: "error", reason: "internal", runs: [] };
   }
   let history: GitHistoryResult;
   try { history = readGitHistory(cfg.workspaceRoot); } catch {

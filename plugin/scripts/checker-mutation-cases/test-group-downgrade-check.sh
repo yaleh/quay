@@ -4,7 +4,7 @@
 # declaring `// @test-group engine`. The enforcement baseline = the commit that adds the engine test.
 # Demonstrates BOTH the RED and GREEN states with REAL git operations:
 #   GREEN — no downgrade (clean) → the checker exits 0.
-#   INJECT (uncommitted) — working-tree engine→governance, not committed → the checker MUST go RED
+#   INJECT (uncommitted) — working-tree engine→serial, not committed → the checker MUST go RED
 #     (no commit message can carry the reason yet).
 #   INJECT (committed) — commit the same downgrade WITHOUT the marker → the checker MUST go RED.
 #   LEGIT (fresh fixture) — commit the downgrade WITH the `@test-group-downgrade` marker → GREEN.
@@ -56,10 +56,10 @@ if checker_cmd "${fixture_dir}"; then :; else
   exit 4
 fi
 
-# INJECT 1 (uncommitted): working-tree engine→governance → MUST go RED.
-src governance > plugin/test/fixture.test.mjs
+# INJECT 1 (uncommitted): working-tree engine→serial → MUST go RED.
+src serial > plugin/test/fixture.test.mjs
 if checker_cmd "${fixture_dir}"; then
-  echo "STAYED-GREEN — an uncommitted engine→governance downgrade did not redden the checker" >&2
+  echo "STAYED-GREEN — an uncommitted engine→serial downgrade did not redden the checker" >&2
   exit 3
 fi
 
@@ -71,11 +71,11 @@ if checker_cmd "${fixture_dir}"; then :; else
 fi
 
 # INJECT 2 (committed, no marker): commit the downgrade without the reason marker → MUST go RED.
-src governance > plugin/test/fixture.test.mjs
+src serial > plugin/test/fixture.test.mjs
 git add plugin/test/fixture.test.mjs
-git commit -qm "move to governance"
+git commit -qm "move to serial"
 if checker_cmd "${fixture_dir}"; then
-  echo "STAYED-GREEN — a committed engine→governance downgrade without the marker did not redden the checker" >&2
+  echo "STAYED-GREEN — a committed engine→serial downgrade without the marker did not redden the checker" >&2
   exit 3
 fi
 rm -rf "${fixture_dir}"
@@ -84,18 +84,18 @@ rm -rf "${fixture_dir}"
 make_fixture
 
 # LEGIT (committed, with marker): downgrade WITH the `@test-group-downgrade` marker → GREEN.
-src governance > plugin/test/fixture.test.mjs
+src serial > plugin/test/fixture.test.mjs
 git add plugin/test/fixture.test.mjs
-git commit -qm "test: @test-group-downgrade move flaky fixture to governance"
+git commit -qm "test: @test-group-downgrade move flaky fixture to serial"
 if checker_cmd "${fixture_dir}"; then :; else
   echo "LEGIT-RED — a marked (sanctioned) downgrade still reddens the checker" >&2
   exit 4
 fi
 
 # NEW-FILE: a file CREATED with a target group is not a downgrade → GREEN.
-src governance > plugin/test/new-gov.test.mjs
-git add plugin/test/new-gov.test.mjs
-git commit -qm "add new governance test"
+src serial > plugin/test/new-serial.test.mjs
+git add plugin/test/new-serial.test.mjs
+git commit -qm "add new serial test"
 if checker_cmd "${fixture_dir}"; then :; else
   echo "NEW-FILE-RED — a new file declared directly in a target group reddens the checker (false positive)" >&2
   exit 4

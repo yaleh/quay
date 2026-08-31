@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // needs-human-recheck.test.mjs — tasks/gap-needs-human-black-hole-human-dependency-unmeasurable:
 // the needs-human measurement/aliveness axis (time axis + survival axis).
 //
@@ -15,7 +15,7 @@
 //         dead task (Touches reference retired scripts) is deadRetired.
 //   AC4 — the real repo's needs-human pool is classified dead/alive (asserted against the real
 //         store so the human-dependency count has a truth value; full output pasted in the task body).
-//   AC5 — this file uses node:test and declares // @test-group governance.
+//   AC5 — this file uses node:test and declares // @test-group engine.
 //
 // No global counts are hardcoded where the assertion is about a FIXTURE (the fixture is authored in
 // the test). The real-repo assertion (AC4) is relative: it only requires the deadRetired set to be

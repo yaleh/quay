@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // prod-data-audit.test.mjs — tests for plugin/scripts/prod-data-audit.ts
 // (tasks/gap-prod-data-accounting-audit, 人 2026-08-14 14:5xZ 令 outer 安排的「生产数据入账审计」)。
 //

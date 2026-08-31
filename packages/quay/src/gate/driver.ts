@@ -16,7 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { runComplete } from "./lifecycle.ts";
-import type { Task } from "../abi.ts";
+import { TASK_STATUS, type Task } from "../abi.ts";
 
 interface DriverClient {
   taskList: (filter: { status: string }) => Promise<{ tasks: Task[]; malformed: Array<{ file: string; error: string }> }>;
@@ -69,7 +69,7 @@ export interface RunLoopResult {
  * (never selected, never mutated) — the first anti-spin layer.
  */
 export function isActionable(task: Task): boolean {
-  return task?.status === "ready"
+  return task?.status === TASK_STATUS.READY
     && typeof (task?.extra as Record<string, unknown>)?.acceptance === "string"
     && ((task.extra as Record<string, unknown>).acceptance as string).trim() !== "";
 }
@@ -84,7 +84,7 @@ export function isActionable(task: Task): boolean {
  * most once per run and the scan drains to `[]` → clean fixpoint.
  */
 export async function scanActionable(client: DriverClient, seen: Set<string> = new Set()): Promise<string[]> {
-  const { tasks } = await client.taskList({ status: "ready" });
+  const { tasks } = await client.taskList({ status: TASK_STATUS.READY });
   return tasks
     .filter(isActionable)
     .map((t) => t.id)

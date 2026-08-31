@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // driver-result.test.mjs — AC153 (tasks/gap-ac153-core-invariant-single-impl-not-evaluated-vocab): the
 // core invariant「⛔ 不信执行者自述，用独立于执行者的量复核」is implemented ONCE (verifyIndependently)
 // and shared by both task-processing drivers (worker computeLandingState / promotion AC133 reverify);

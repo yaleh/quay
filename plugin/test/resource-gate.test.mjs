@@ -1010,7 +1010,7 @@ test("gap-suite-lock-starvation AC3 (negative control) — WITHOUT the watchdog 
 });
 
 // ── gap-full-suite-lock-hold-watchdog-threshold-shorter-than-fan-in: dead-holder-only mode ────────────
-// AC2 (能取假): the fan-in workflow lock's hold = merge→suite→ff legitimately EXCEEDS any fixed timer.
+// AC2 (能取假): the fan-in lock's hold = merge→suite→ff legitimately EXCEEDS any fixed timer.
 //   Reusing the suite lock's FULL_SUITE_LOCK_HOLD_MAX_S (1800s) cut the lock at 30min mid-suite ⇒ the ff
 //   ran lock-less (ff-race re-exposed). The fix: `timer-cut=0` disables path (c) (the timer yield) while
 //   path (b) (crash-autorelease) stays. This behavioral test proves a LIVE holder is NEVER cut in dead-

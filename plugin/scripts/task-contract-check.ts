@@ -55,6 +55,7 @@ import {
 // The ONE Touches parser (single-source) — the bare-dir + uncertain-annotation flag it exposes is the
 // mechanical rule from tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool (AC1).
 import { extractTouchesSection, flagBareDirUncertainTouches } from "./touches-parser.ts";
+import { TASK_STATUS } from "./task-status.ts";
 // The wiring/reachability-declaration → real-input-probe check (gap-wiring-claim-ac-requires-real-input-
 // probe). Reuses wiring-coverage-check.ts's backtick-identifier extraction + the (calibrated)
 // `N 条`+verb declaration heuristic — NOT a second, independently-buggy parser.
@@ -154,7 +155,7 @@ function checkInvoke(entries, body, contractSectionText, status) {
       continue;
     }
     const cmd = (e.value.match(/`([^`]*)`/) || [])[1] || "";
-    if (status !== "done" || !cmd) continue;
+    if (status !== TASK_STATUS.DONE || !cmd) continue;
     const entryPath = invokeEntryPath(cmd);
     if (!bodyOutside.includes(entryPath)) {
       findings.push({ code: "invoke-evidence-missing", what: `invoke command's entry path \`${entryPath}\` does not appear in the task body (outside ## Contract) — a done task must show the executable entry path it ran` });

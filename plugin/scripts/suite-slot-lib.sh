@@ -111,13 +111,13 @@ suite_slot_paths() {
 # the inherited FD shares the same open-file-description lock), or (c) after <hold-max-s> seconds of the
 # holder STILL holding, releases the slot + emits a fail-loud `lock_hold_exceeded=1` marker (never
 # silent). Path (c) is the long-validation YIELD and fires ONLY when `timer-cut` is "1" (the default,
-# used by the SUITE lock — its cap is the 5.2h validation run). Pass `timer-cut=0` for the FAN-IN
-# workflow lock (gap-full-suite-lock-hold-watchdog-threshold-shorter-than-fan-in): its hold =
-# merge→suite→ff, which legitimately exceeds any fixed timer, so path (c) must never cut it —
-# dead-holder release (b) is the only guard (a crash closes the flock fd; a hung suite is SIGKILL'd by
-# the runner's silence watchdog, which ends the fan-in ⇒ the lock is released). The cap yields the SLOT
-# — the long suite keeps running; it accepts the contention risk of a (S+1)-th suite joining rather
-# than serializing the whole repo behind its re-check.
+# used by the SUITE lock — its cap is the 5.2h validation run). Pass `timer-cut=0` for the fan-in
+# lock (gap-full-suite-lock-hold-watchdog-threshold-shorter-than-fan-in): its hold = merge→suite→ff,
+# which legitimately exceeds any fixed timer, so path (c) must never cut it — dead-holder release (b) is
+# the only guard (a crash closes the flock fd; a hung suite is SIGKILL'd by the runner's silence
+# watchdog, which ends the fan-in ⇒ the lock is released). The cap yields the SLOT — the long suite keeps
+# running; it accepts the contention risk of a (S+1)-th suite joining rather than serializing the whole
+# repo behind its re-check.
 # gap-suite-lane-budget-structural-guarantee-broken-buckets-no-lock (漏口②): the cap must ALSO yield
 # the LANE, not just the slot — when <slot-path> is given, the watchdog writes `<slot-path>.yielded`
 # (content = <main-pid>) so the joining suite's lane formula counts this still-running-but-slot-less
@@ -129,7 +129,7 @@ spawn_suite_lock_hold_watchdog() {
   local _fd="$1" _flag="$2" _main_pid="$3" _max_s="$4" _timer_cut="${5:-1}" _slot_path="${6:-}"
   (
     if [ "${_timer_cut}" != "1" ]; then
-      # Dead-holder-only mode (fan-in workflow lock): poll for (a) normal release or (b) crash, but
+      # Dead-holder-only mode (fan-in lock): poll for (a) normal release or (b) crash, but
       # NEVER time a live holder out — path (c) is disabled (the fan-in hold = merge→suite→ff outlives
       # any fixed timer; cutting it mid-suite makes the ff run lock-less, re-exposing ff-race).
       while :; do

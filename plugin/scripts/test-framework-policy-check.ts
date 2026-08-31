@@ -29,7 +29,7 @@
 //             nudge: relation-sync's harness is the first intended application.
 //     C2d     an entry that names a file OUTSIDE the canonical glob is meaningless → fail.
 //   C3 (AC5)  a NEW file (in the glob, not on the exemption list, and not present in the baseline
-//             file set at git HEAD) MUST carry a `// @test-group <product|engine|governance|serial|lowconc>`
+//             file set at git HEAD) MUST carry a `// @test-group <product|engine|serial|lowconc>`
 //             declaration. Existing files (in the list, or already at HEAD) may omit it and
 //             default to `engine` (存量缺省 engine — a missed declaration on a legacy/existing
 //             file never silently vanishes from the default run). Scope note: "new" is classified
@@ -130,13 +130,14 @@ export function hasNodeTestImport(source: string): boolean {
   return false;
 }
 
-/** Regex that matches a valid `// @test-group <product|engine|governance|serial|lowconc>` declaration.
+/** Regex that matches a valid `// @test-group <product|engine|serial|lowconc>` declaration.
  * `serial` is the KNOWN-LOAD-SENSITIVE family's group
  * (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests); `lowconc` is the
  * hermetic-but-load-sensitive family's group (gap-lowconc-group-concurrency-3-for-hermetic-load-
- * sensitive) — a NEW file may declare either. */
+ * sensitive) — a NEW file may declare either. `governance` is RETIRED
+ * (gap-retire-governance-group-merge-into-bucket) and no longer a valid group. */
 export function groupDeclRE(): RegExp {
-  return /@test-group\s+(product|engine|governance|serial|lowconc)/;
+  return /@test-group\s+(product|engine|serial|lowconc)/;
 }
 
 /** Parse the exemption data file: one repo-relative path per line, '#' comments and blanks
@@ -273,7 +274,7 @@ export function runPolicyChecks(i: PolicyCheckInput): string[] {
     if (i.baselineTestFiles.has(f.rel)) continue; // existing: default engine
     if (!groupDeclRE().test(f.source)) {
       failures.push(
-        `AC5: ${f.rel} is a NEW test file (not on the exemption list, not in the committed tree) and has no VALID "// @test-group <product|engine|governance|serial|lowconc>" declaration (missing, or not product|engine|governance|serial|lowconc) — add one.`
+        `AC5: ${f.rel} is a NEW test file (not on the exemption list, not in the committed tree) and has no VALID "// @test-group <product|engine|serial|lowconc>" declaration (missing, or not product|engine|serial|lowconc) — add one.`
       );
     }
   }
@@ -509,7 +510,7 @@ export function runSelftest(): boolean {
   failures = pc({ files: c3Files, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles });
   check("C3 RED: new file without @test-group fails", failures.some((f) => f.includes("brand-new") && f.includes("AC5")), JSON.stringify(failures));
 
-  // C3 RED: new file with an INVALID group also fails (must be product|engine|governance).
+  // C3 RED: new file with an INVALID group also fails (must be product|engine|serial|lowconc).
   const c3bFiles = [...files, { rel: "packages/quay/test/brand-new-bad.test.mjs", source: newBadGroup }];
   failures = pc({ files: c3bFiles, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles });
   check("C3 RED: new file with invalid @test-group fails", failures.some((f) => f.includes("brand-new-bad") && f.includes("AC5")), JSON.stringify(failures));

@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // outer-retirement-precondition-check.test.mjs — 退役前置检查测试
 // (tasks/gap-b0-retirement-precondition-checker-call-surface, SPEC §2.3b B0).
 //

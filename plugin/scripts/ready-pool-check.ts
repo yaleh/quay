@@ -147,11 +147,12 @@
 //                          targeted remains the outer's stage-goal pick (selection = outer).
 //   --json                 accepted for Contract parity; output is always JSON
 //
-// ADAPTIVE CAP (gap-adaptive-concurrency-cap-tied-to-resource-gate): at dispatch time the tick calls
-// cap-from-gate.sh to get `effective_cap` and passes it as `--cap` — so the floor (cap × 4) follows
-// the resource-adaptive cap (GO=5 ⇒ floor 20; WAIT=2 ⇒ floor 8; EXTREME=1 ⇒ floor 4). The bare
-// CONCURRENCY_CAP_DEFAULT=3 below is the CONSERVATIVE FALLBACK when no --cap is passed (manual runs),
-// not a fixed production cap.
+// FIXED CAP (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic/adaptive cap
+// is retired — the tick passes the fixed cap 5 (via cap-from-gate's FIXED_EFFECTIVE_CAP, now derived
+// from driver-config's defaultDriverConfig().worker.cap, AC155). The bare CONCURRENCY_CAP_DEFAULT below
+// is that SAME single source when no --cap is passed (manual runs) — ⛔ NOT a parallel `= 3` literal
+// (gap-execution-loop-p4-dispatch-productization AC1 folds the old floor-12 false reading into the
+// dispatch single source).
 //
 // The pure functions are exported and unit-tested; `main()` is a thin CLI over them.
 
@@ -162,7 +163,7 @@ import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
 // AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（depsSatisfied 谓词同一份实现，
 // ⛔ 不各写一遍「逐个查 status !== done」的循环）。
-import { allDepsDone, commitTaskFile, propagateDocBranchToDevelop } from "./driver-filters.ts";
+import { allDepsDone, commitTaskFile, syncDocDevelopBidirectional } from "./driver-filters.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
 // criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
@@ -192,6 +193,14 @@ import { expandDeclaredTouches, INFLIGHT_WORKTREE_STALE_MS } from "./concurrent-
 // this enumerator give the merge-surface path the SAME liveness judgment as the task-worktree path.
 import { enumerateProcs, cwdUnder } from "./worktree-process-reaper.ts";
 import { isDirectEntry, helpExit } from "./gate-script-base.ts";
+import { TASK_STATUS, isTaskStatus } from "./task-status.ts";
+// DISPATCH-CAP SINGLE SOURCE (tasks/gap-execution-loop-p4-dispatch-productization AC1): the dispatch
+// concurrency cap derives from driver-config's defaultDriverConfig().worker.cap — the SAME single
+// source cap-from-gate.ts (FIXED_EFFECTIVE_CAP) / promotion-driver.ts (CAP_DEFAULT) / worker-driver.ts
+// (driverCap) consume (AC155). ready-pool-check's floor must not carry a parallel literal (the fixed-
+// cap-5 ruling retired the dynamic cap; the old CONCURRENCY_CAP_DEFAULT=3 ⇒ floor=12 was a false
+// reading vs the true dispatch floor 5×4=20 — red-on-omission-audit a6_fixed_cap.redReading).
+import { defaultDriverConfig } from "./driver-config.ts";
 // Reused "work has landed on master" signal (AC6: reuse, never a parallel copy) — the same
 // symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
 // buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-
@@ -227,13 +236,13 @@ import { listWorktrees, worktreeExists } from "./fast-mode-telemetry.ts";
 // second Touches parser).
 import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
 
-/** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
- *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
- *  (gap-adaptive-concurrency-cap-tied-to-resource-gate); the floor is DERIVED from the cap passed.
- *  concurrency-default-fallback: manual-run conservative fallback (declared per
- *  gap-concurrency-literal-only-at-definition-points — a justified default, not a silent literal;
- *  the single source is QUAY_MAX_TASK_SUBAGENTS once gap-single-flight-lock-2-slot-concurrent-suites lands). */
-export const CONCURRENCY_CAP_DEFAULT = 3;
+/** Default concurrency cap (max in-flight subagents) — derived from driver-config's
+ *  defaultDriverConfig().worker.cap (the DISPATCH single source, AC155), NOT a parallel literal.
+ *  The old CONCURRENCY_CAP_DEFAULT=3 (⇒ floor 12) was a FALSE reading vs the fixed-cap-5 ruling's
+ *  true dispatch floor (5×4=20) — gap-execution-loop-p4-dispatch-productization AC1 folds it into
+ *  the single source, so `analyzeTasks` with no --cap and `slot-refill` no longer diverge (3 vs 5).
+ *  An explicit --cap still overrides (manual/test runs); only the DEFAULT is the single source. */
+export const CONCURRENCY_CAP_DEFAULT = defaultDriverConfig().worker.cap;
 
 /** Default floor multiplier: floor = cap × this. 4× leaves one notch of headroom, far below the old
  *  10× (historical 08-02→08-04 stable pool of 11 = 9 real/3 cap = 3.0× proven; 4× is not the floor
@@ -241,7 +250,7 @@ export const CONCURRENCY_CAP_DEFAULT = 3;
 export const POOL_FLOOR_MULT_DEFAULT = 4;
 
 /** The healthy ready-pool floor: pool must be ≥ this before promotion pressure releases.
- *  floor = cap × 4 (cap=3 ⇒ 12). SINGLE SOURCE — no hardcoded 3 anywhere.
+ *  floor = cap × 4 (cap=5 ⇒ 20 — derived from the dispatch single source, not a hardcoded literal).
  *  RETIRED GATE (AC48): this is now a REPORTED signal only — it no longer GATES bulk promotion
  *  (the pool<floor condition was cancelled; the promotion-driver promotes every eligible candidate, 合格即晋). */
 export const POOL_FLOOR = CONCURRENCY_CAP_DEFAULT * POOL_FLOOR_MULT_DEFAULT;
@@ -936,7 +945,7 @@ export function isPendingImplementationItem(text) {
  *  analyzeTasks caller): `ref` names the landing ref (default: landingRef's integration→develop→master
  *  resolution). */
 export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
-  if (task.status !== "ready") return false;
+  if (task.status !== TASK_STATUS.READY) return false;
   // opts is EITHER the legacy commit-subject array OR an options bag { ref, commitTraceSubjects }.
   const commitTraceSubjects = Array.isArray(opts) ? opts : (opts ? opts.commitTraceSubjects : null);
   const o = { taskId: task.id };
@@ -1587,7 +1596,7 @@ export function computeSuiteBlocking({ rounds, stateFailures, stateUnattributed 
   const unattributedCount = countUnattributedFailures(realRounds, stateFailures, stateUnattributed, consecutiveRed, stateStartedAt);
   const ids = new Set();
   for (const [id, task] of tasks) {
-    if (task.status !== "ready" && task.status !== "todo") continue;
+    if (task.status !== TASK_STATUS.READY && task.status !== TASK_STATUS.TODO) continue;
     const parsed = parseTouches(task.body);
     if (!parsed.hasSection || parsed.globs.length === 0) continue;
     // gap-suite-blocking-directory-glob-overbroad AC2 — a DIRECTORY glob (a bare directory like
@@ -1624,7 +1633,7 @@ export function isCompoundTask(task) {
   return readFrontField(task.frontmatterRaw, "role") === "compound";
 }
 
-function depsReadyFor(task, allTasks) {
+function depsReadyFor(task, allTasks, root, develop = "develop") {
   // ALL prerequisites — parent AND every depends_on entry (gap-prerequisite-gates-prose-invisible-
   // to-mechanisms AC2: prereqs live in relation edges and the author→ready gate reads the SAME field
   // the dispatch check reads). Each must be done; a missing file fails closed.
@@ -1644,7 +1653,14 @@ function depsReadyFor(task, allTasks) {
   // AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（单一实现，⛔ 不各写一遍
   // 「逐个查 status !== done」的循环）。statusOf 返回依赖的 status；Parent/dep 文件缺失 ⇒ null ⇒
   // 非 done ⇒ fail closed（conservative, not dispatchable）。
+  // gap-ready-pool-depends-on-status-stale-read：statusOf 原从 allTasks Map 读依赖状态，而 allTasks
+  // 由主检出 disk 构建（硬规则 4b 的陈旧代理量）——依赖已在 develop done 仍报 blocking。改为读
+  // canonical develop ref（readTaskStatusAtRef，与 (乙) gap-dispatch-reads-stale-main-checkout-
+  // task-status 统一 task 自身 status 的读源）。ref 读成功即权威；ref 读不可用（非 git fixture
+  // root / 依赖不在 ref）退回 allTasks 内存 status（既有行为，null ⇒ fail closed）。
   return allDepsDone(deps, (depId) => {
+    const refStatus = root ? readTaskStatusAtRef(root, develop, depId) : null;
+    if (refStatus !== null) return refStatus;
     const p = allTasks.get(depId);
     return p ? p.status : null;
   });
@@ -1689,7 +1705,7 @@ export function maxMutuallyDisjointSubset(parsed, expand) {
   return best;
 }
 
-function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask = new Map(), parentRefCount = new Map(), dependedOnCount = new Map()) {
+function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask = new Map(), parentRefCount = new Map(), dependedOnCount = new Map(), develop = "develop") {
   const kind = classifyKind(id);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
@@ -1698,7 +1714,7 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // but is a silent global dispatch lock while in flight. Gate it AT PROMOTION so the fix-worker
   // narrows it before it ever enters the pool (overbroad → can't land; dir-glob → locks all peers).
   const touchesNarrow = checkTouchesNarrow(task.body);
-  const depsReady = depsReadyFor(task, allTasks);
+  const depsReady = depsReadyFor(task, allTasks, root, develop);
   const four = artifactsComplete(task.body);
   const parsed = parseTouches(task.body);
   // AC1 (gap-ac46-pool-criteria-in-gate): the pool-layer static criteria that slot-refill's step-4
@@ -1812,11 +1828,11 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
  *  target is the outer's selection (the checker carries no stage-goal input, AC3); the checker only
  *  answers "is this task mechanically promotable, and what command promotes it". `task` is
  *  `undefined` when the id is not in the store → found:false. */
-export function buildTargetedPromotion(id, task, root, allTasks) {
+export function buildTargetedPromotion(id, task, root, allTasks, develop = "develop") {
   if (!task) {
     return { id, found: false, eligible: false, floor_independent: true, reason: "task-not-found" };
   }
-  if (task.status !== "todo") {
+  if (task.status !== TASK_STATUS.TODO) {
     return {
       id,
       found: true,
@@ -1899,7 +1915,7 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
     };
   }
   const four = artifactsComplete(task.body);
-  const depsReady = depsReadyFor(task, allTasks);
+  const depsReady = depsReadyFor(task, allTasks, root, develop);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
   const touchesNarrow = checkTouchesNarrow(task.body);
@@ -2043,7 +2059,8 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
       : fs.readFileSync(path.join(tasksDir, f), "utf8");
     const task = parseTask(raw);
     task.id = id;
-    task.status = readFrontField(task.frontmatterRaw, "status") || "";
+    const rawStatus = readFrontField(task.frontmatterRaw, "status");
+    task.status = isTaskStatus(rawStatus) ? rawStatus : "";
     task.parent = readFrontField(task.frontmatterRaw, "parent");
     allTasks.set(id, task);
   }
@@ -2070,7 +2087,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // BATCHED git-history (gap-ready-pool-check-times-out-after-git-history-signal): build the
   // master-history path→commit index ONCE for the whole pool scan — ONE `git log` pass instead of
   // ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
-  const readyCount = [...allTasks.values()].filter((t) => t.status === "ready").length;
+  const readyCount = [...allTasks.values()].filter((t) => t.status === TASK_STATUS.READY).length;
   // Landing ref for the git-history signal (gap-git-history-landed-master-stale-under-two-line-model):
   // follow the two-line model's working line — the CONFIGURED integration/develop/master refs
   // (--integration/--develop/--master) resolved to the first that exists, so a stale master no longer
@@ -2089,7 +2106,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   let nyfContradictionCount = 0; // 乙 — not-yet-flipped AND an open box that is this task's OWN implementation/evidence (judged landed but NOT done — criterion misfire)
   let awaitingVerificationCount = 0; // awaiting-verification — not-yet-flipped AND every open box is annotated （待外部） (work done, legitimately waiting for suite green / outer verification)
   for (const [id, t] of allTasks) {
-    if (t.status !== "ready") continue;
+    if (t.status !== TASK_STATUS.READY) continue;
     const reasons = [];
     if (isFixture(t)) reasons.push("fixture");
     if (isParked(t)) reasons.push("parked");
@@ -2153,11 +2170,11 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     const st = selfTouchCheck(task.body, id);
     if (!st.ok && !st.compound) reasons.push("self-touch-missing-c8");
     if (checkTaskTouchesResolve(task.body, root).majorityMissing) reasons.push("touches-majority-missing");
-    if (!depsReadyFor(task, allTasks)) reasons.push("deps-not-ready");
+    if (!depsReadyFor(task, allTasks, root, develop)) reasons.push("deps-not-ready");
     const fourR = artifactsComplete(task.body);
     if (!fourR.complete) reasons.push(`four-artifacts-incomplete (${fourR.missing.join(",")})`);
     if (reasons.length > 0) {
-      revaluation.push({ id, reasons, destination: "todo" });
+      revaluation.push({ id, reasons, destination: TASK_STATUS.TODO });
     }
   }
 
@@ -2191,7 +2208,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // untouched (AC4).
   const relevanceOf = (id) => computeRelevance(id, allTasks.get(id), childrenByTask, parentRefCount, suiteBlocking.ids, dependedOnCount);
   const todoRelevance = [...allTasks.values()]
-    .filter((t) => t.status === "todo" && !isFixture(t) && !isParked(t))
+    .filter((t) => t.status === TASK_STATUS.TODO && !isFixture(t) && !isParked(t))
     .map((t) => relevanceOf(t.id))
     .sort((a, b) => b.value - a.value || a.id.localeCompare(b.id));
   // ready_relevance ranks the ready pool by value — the "who to dispatch next" answer. In-flight ids
@@ -2261,9 +2278,9 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   const promotions = [];
   const intercepted = [];
   for (const [id, t] of allTasks) {
-    if (t.status !== "todo") continue;
+    if (t.status !== TASK_STATUS.TODO) continue;
     if (isFixture(t) || isParked(t)) continue; // never promotion candidates
-    candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount));
+    candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount, develop));
   }
   // AC4: disjointness FIRST (how many pool/in-flight tasks the candidate is pairwise-disjoint
   // from) — the non-negotiable concurrency-safety axis (AC3: priority NEVER overrides it); then
@@ -2324,9 +2341,9 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   if (topN > 0) {
     const ranked = [];
     for (const [id, t] of allTasks) {
-      if (t.status !== "todo") continue;
+      if (t.status !== TASK_STATUS.TODO) continue;
       if (isFixture(t) || isParked(t)) continue;
-      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount);
+      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount, develop);
       ranked.push({ id, kind: c.kind, kindOrder: c.kindOrder, relevance: c.relevance, eligible: c.eligible, reason: c.relevance.reason });
     }
     ranked.sort(
@@ -2343,7 +2360,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // targeted op is a SEPARATE operation from the bulk refill. Supplemental only: bulk `promotions`
   // and the rest of the output are computed exactly as before (AC3).
   const targeted_promotion = targetedId
-    ? { ...buildTargetedPromotion(targetedId, allTasks.get(targetedId), root, allTasks), pool, floor, cap }
+    ? { ...buildTargetedPromotion(targetedId, allTasks.get(targetedId), root, allTasks, develop), pool, floor, cap }
     : null;
 
   return {
@@ -2485,7 +2502,7 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
     deliveryCritical = ensured.deliveryCritical;
   }
   fs.writeFileSync(file, `${open}${newFm}${close}${raw.slice(m[0].length)}`);
-  return { id, ok: true, from: "todo", to: newStatus, deliveryCritical };
+  return { id, ok: true, from: TASK_STATUS.TODO, to: newStatus, deliveryCritical };
 }
 
 /** COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a todo→ready status write must be
@@ -2510,7 +2527,6 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
 function commitTaskStatus(root, id, from, to) {
   const rel = path.join("tasks", `${id}.md`);
   const committed = commitTaskFile(root, rel, `tasks: ${id} ${from}→${to}（promotion-driver 机械晋升）`);
-  if (committed) propagateDocBranchToDevelop(root);
   return committed;
 }
 
@@ -2553,13 +2569,13 @@ export function applyPromotions(opts) {
       const touchesBlock = checkTaskOneEntryOnePath(body, rel, baseline);
       if (touchesBlock.length > 0) {
         applied.push({
-          id: p.id, ok: false, from: "todo", to: null, deliveryCritical, committed: false,
+          id: p.id, ok: false, from: TASK_STATUS.TODO, to: null, deliveryCritical, committed: false,
           reason: "touches-multi-path-bullet",
           detail: touchesBlock.map((v) => v.what).join(" · "),
         });
         continue;
       }
-      const out = setTaskStatus(opts.root, p.id, "ready", { ensureDeliveryCritical: deliveryCritical });
+      const out = setTaskStatus(opts.root, p.id, TASK_STATUS.READY, { ensureDeliveryCritical: deliveryCritical });
       // COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a landed status write is
       // committed immediately so the main checkout stays clean (a dirty tree blocks every fan-in at
       // fan-in-ff-merge.sh BEFORE the bypass check runs). `committed` is surfaced on the applied
@@ -2568,6 +2584,11 @@ export function applyPromotions(opts) {
       applied.push({ ...out, deliveryCritical, committed });
     }
   }
+  // 分歧检测双向同步（gap-sync-trigger-divergence-detection-bidirectional）：每轮无条件触发——读两 ref
+  // （main/manager-doc ↔ develop）不同即双向同步，⛔ 不依赖 shouldApply/翻转落地（池空无翻转也要同步，
+  // 缺口 2026-08-31 主检出落后 10 提交）。syncDocDevelopBidirectional 内部按分歧门控，无分歧/非 git
+  // no-op。
+  syncDocDevelopBidirectional(opts.root);
   return { ...result, should_apply: shouldApply, applied_promotions: applied };
 }
 
@@ -2592,7 +2613,7 @@ export function retreatReadyToTodo(root, id, reasons = []) {
     `\n## Revaluation\n\n**执行 ${new Date().toISOString()} — 静态条件变质，ready.back="todo"**\n\n` +
     `- 去向：ready → todo\n- 阻碍原因：${reasons.join(", ")}\n`;
   fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
-  return { id, ok: true, from: "ready", to: "todo", reasons, record };
+  return { id, ok: true, from: TASK_STATUS.READY, to: TASK_STATUS.TODO, reasons, record };
 }
 
 /** REVALUATION EXECUTOR (AC46 判据3 / AC2 — gap-ac46-pool-criteria-in-gate-plus-revaluation-executor):
@@ -2694,9 +2715,14 @@ function main(argv) {
   // legal `ready.back="todo"` transition the task body names. The detector half is always in the JSON;
   // this flag is the write half. Precedence: --revaluate-apply over --apply (a single run either
   // promotes OR revalues, never both mid-flight).
+  // PROMOTION DECISION READS DEVELOP (gap-dispatch-reads-stale-main-checkout-task-status AC6): the
+  // `--apply` write path must JUDGE candidates from the develop ref, not the disk — the write side
+  // (gap-ff-propagate-…, 1e7fb9be4) flips develop and restores the disk to the pre-promotion status,
+  // so a disk-read here would re-promote the same task every tick (duplicate same-content commits).
+  // Same taskReadRef as the dispatch-read arm below: develop is the single source of truth.
   let result;
   if (revaluateApply) result = applyRevaluations(base);
-  else result = apply ? applyPromotions(base) : analyzeTasks({ ...base, taskReadRef: develop });
+  else result = apply ? applyPromotions({ ...base, taskReadRef: develop }) : analyzeTasks({ ...base, taskReadRef: develop });
   if (process.env.CHECKER_COST_SKIP !== "1") {
     recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: result.pool, load: getLoad1() });
   }

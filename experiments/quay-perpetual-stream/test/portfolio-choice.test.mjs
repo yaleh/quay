@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // portfolio-choice.test.mjs — sibling test for portfolio-choice.ts (ADR-001 Decision clause 2:
 // load-bearing method-infra, imported by select-preflight.ts, MUST carry a `<name>.test.mjs`
 // sibling — loadbearing-test-gate.sh enforces this by exact filename match).
@@ -7,9 +7,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 const { choosePortfolio, assertPortfolioDisjoint, findUnmetDependency, selftest } = await import("../scripts/portfolio-choice.ts");
 
 function mkC(id, taskIds, score, resourceUse = 10) {
@@ -163,4 +160,3 @@ test("choosePortfolio: omitting the dependency constraint entirely selects norma
   assert.equal(p.selected.length, 1);
 });
 
-}

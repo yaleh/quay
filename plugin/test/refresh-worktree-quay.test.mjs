@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // refresh-worktree-quay.test.mjs — tasks/gap-fan-in-worktree-quay-provisioning:
 // the fan-in full suite runs DIRECTLY in a linked task worktree (`cd ${worktree} && bash
 // scripts/test.sh`), where `.quay/` is gitignored ⇒ `git worktree add` copies NONE of it ⇒

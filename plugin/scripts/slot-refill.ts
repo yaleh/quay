@@ -141,15 +141,20 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // ⛔ never a parallel `git worktree list` parse). A residual worktree is the "already isolated" half of
 // the continue-task exemption (the other half is worker-outcome final_state=exited-not-landed).
 import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
+// DISPATCH-CAP SINGLE SOURCE (tasks/gap-execution-loop-p4-dispatch-productization AC1): the dispatch
+// cap derives from driver-config's defaultDriverConfig().worker.cap — the SAME single source
+// cap-from-gate.ts (FIXED_EFFECTIVE_CAP) / promotion-driver.ts (CAP_DEFAULT) / worker-driver.ts
+// (driverCap) consume (AC155). No parallel `= 5` literal in slot-refill.
+import { defaultDriverConfig } from "./driver-config.ts";
 
 /** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
- *  adaptive cap is retired. `--cap` defaults to this constant — 5 — so slot-refill and its derived
+ *  adaptive cap is retired. `--cap` defaults to this value — 5 — so slot-refill and its derived
  *  floor (5 × floor_mult = 20) are stable regardless of load/suite state. (The caller may still pass
  *  an explicit `--cap`; the DEFAULT is fixed at 5.)
- *  concurrency-default-fallback: human-ruled fixed cap (declared per
- *  gap-concurrency-literal-only-at-definition-points; the single source is QUAY_MAX_TASK_SUBAGENTS
- *  once gap-single-flight-lock-2-slot-concurrent-suites lands). */
-export const FIXED_DISPATCH_CAP = 5;
+ *  gap-execution-loop-p4-dispatch-productization AC1: the value derives from driver-config's
+ *  defaultDriverConfig().worker.cap (the dispatch single source, AC155) — ⛔ NOT a parallel `= 5`
+ *  literal (the old literal was a second source of truth for the same dispatch cap). */
+export const FIXED_DISPATCH_CAP = defaultDriverConfig().worker.cap;
 
 /** B3 ①/④ ARBITRATION (gap-red-window-cap-trigger-backlog-not-suite-red): B3's five inequalities were
  *  written as five INDEPENDENT mandates, but ④ (integration ahead + suite green ⇒ batch-merge) is a

@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // dead-loop-check.test.mjs — L2 持续健康判据：循环在转（不只是装了）
 // (tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed, AC1-AC4, AC6).
 //
@@ -19,7 +19,7 @@
 //   transcript user msg + old commit => dead); the real-world invoke output is pasted in the task
 //   body (meta-cc dead / archguard alive, 2026-08-05).
 // AC5 AC10 accounting — recorded in the task body (manager pre-friction +1); not asserted here.
-// AC6 this file uses node:test and declares `// @test-group governance`.
+// AC6 this file uses node:test and declares `// @test-group engine`.
 //
 // Run:
 //   scripts/test.sh plugin/test/dead-loop-check.test.mjs

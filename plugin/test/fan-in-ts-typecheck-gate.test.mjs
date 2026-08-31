@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // fan-in-ts-typecheck-gate.test.mjs — RED/GREEN tests for the fan-in ts-typecheck admission
 // pre-check (plugin/scripts/fan-in-ts-typecheck-gate.ts, gap-ts-touching-fan-in-needs-typecheck-gate).
 //

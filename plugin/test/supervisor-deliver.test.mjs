@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // supervisor-deliver.test.mjs — the supervisor base layer's DELIVERY interface
 // (tasks/gap-supervisor-base-layer-outside-sessions-architecture, AC5/AC5b/AC7).
 //
@@ -14,7 +14,7 @@
 //          a content-matching REAL user message in the target transcript.
 //   AC5b — the interface is by intent: the CLI contract (deliver a payload, learn delivered|failed)
 //          is stable across the TUI→`claude -p` migration (only the adapter's inside changes).
-//   AC7  — node:test + // @test-group governance.
+//   AC7  — node:test + // @test-group engine.
 //   AC2  — delegation, not invention: the adapter delegates to send-keys-reliable.sh +
 //          transcript-delivery-check.ts (grep-asserted); it contains no whole-pane hash.
 //
@@ -39,10 +39,6 @@ const SCRIPT = path.resolve(__dirname, "..", "scripts", "supervisor-deliver.sh")
 const RELIABLE = path.resolve(__dirname, "..", "scripts", "send-keys-reliable.sh");
 const CHECKER = path.resolve(__dirname, "..", "scripts", "transcript-delivery-check.ts");
 
-// ── Governance self-skip (AC7 @test-group governance) ─────────────────────────────────────────────
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 function userStringLine(content) {
   return JSON.stringify({
@@ -590,4 +586,3 @@ test("AC2/AC3 --root cross-host: re-spawn discovery finds the NEW remote transcr
   }
 });
 
-} // end governance group

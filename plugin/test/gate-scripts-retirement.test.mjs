@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // plugin/test/gate-scripts-retirement.test.mjs — gap-gate-scripts-laid-down-but-dead-and-
 // not-mutation-checked. Pins the RETIREMENT of the plugin/gate-scripts/ distribution category:
 //

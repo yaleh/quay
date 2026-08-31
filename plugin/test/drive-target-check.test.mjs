@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // drive-target-check.test.mjs — fail-closed pre-flight gate for tmux drive/observe targets
 // (tasks/gap-drive-sent-to-manager-pane-not-inner — the three disciplines).
 //
@@ -19,7 +19,7 @@
 //     the `claude` manager window) fails closed; a NON-existent window NAME (a typo like `innr` —
 //     tmux's display-message silently resolves it to the session's ACTIVE window with rc=0, so
 //     list-windows membership is required) fails closed too.
-//   AC5 — node:test + // @test-group governance; the real-TUI carve-out uses hermetic sessions
+//   AC5 — node:test + // @test-group engine; the real-TUI carve-out uses hermetic sessions
 //     only (newHermeticTmux — never the loop's own sessions, never kill-server).
 //
 // Run: scripts/test.sh plugin/test/drive-target-check.test.mjs
@@ -36,10 +36,6 @@ import { newHermeticTmux } from "./helpers/hermetic-tmux.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GATE = path.resolve(__dirname, "..", "scripts", "drive-target-check.sh");
 
-// ── Governance self-skip (AC5 @test-group governance) ─────────────────────────────────────────────
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 function uniqueName(prefix) {
   return `${prefix}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -207,4 +203,3 @@ test("② nonexistent target (bare session and session:window) fails closed", { 
   }
 });
 
-} // end governance group

@@ -1664,10 +1664,11 @@ export function readSubagentsInFlight() {
 // "empty" (0 in flight).
 //
 // cap is an INPUT (--cap, the effective_cap from cap-from-gate.sh at the dispatch decision point).
-// The default mirrors ready-pool-check.ts CONCURRENCY_CAP_DEFAULT=3 and is only a degraded fallback
-// for a caller that does not pass one.
+// The default is a degraded fallback for a caller that does not pass one — a separate slot-status
+// quantity, NOT the dispatch cap (which now derives from driver-config's single source).
 
-/** Degraded fallback cap for --slot-status when no --cap is passed (mirrors ready-pool-check).
+/** Degraded fallback cap for --slot-status when no --cap is passed (a separate slot-status fallback,
+ *  ⛔ NOT the dispatch cap — that derives from driver-config's defaultDriverConfig().worker.cap).
  *  concurrency-default-fallback: degraded fallback (declared per
  *  gap-concurrency-literal-only-at-definition-points; the single source is QUAY_MAX_TASK_SUBAGENTS
  *  once gap-single-flight-lock-2-slot-concurrent-suites lands). */

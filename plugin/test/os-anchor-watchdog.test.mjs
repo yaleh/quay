@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // os-anchor-watchdog.test.mjs — tasks/gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash, AC7.
 //
 // The watchdog (plugin/scripts/os-anchor-watchdog.sh) is the OS-level anchor that outlives any
@@ -8,7 +8,7 @@
 // exercised by the real-run AC2 verification (crash simulation in a throwaway tmux session).
 //
 // Coverage map (task ACs):
-//   AC7 — node:test + // @test-group governance.
+//   AC7 — node:test + // @test-group engine.
 //   AC1 — install seam: OS_ANCHOR_SKIP_SYSTEMCTL=1 writes timer/service/config idempotently.
 //   AC2/decide — the decision matrix that drives auto-recovery.
 

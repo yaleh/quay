@@ -322,7 +322,7 @@ export function readDoneTasks(root) {
     let text;
     try { text = fs.readFileSync(full, "utf8"); } catch { continue; }
     const status = text.match(/^status:\s*(\S+)/m);
-    if (status && status[1] === "done") {
+    if (status && status[1] === TASK_STATUS.DONE) {
       const id = f.replace(/\.md$/, "");
       out.push({ id, file: full, text });
     }
@@ -756,6 +756,7 @@ export async function main(argv = process.argv) {
 
 // 直接入口（isDirectEntry 同形——被 import 时不跑 CLI）。
 import { isDirectEntry } from "./gate-script-base.ts";
+import { TASK_STATUS } from "./task-status.ts";
 if (isDirectEntry(import.meta, undefined, "prod-data-audit")) {
   main(process.argv).then((code) => process.exit(code));
 }

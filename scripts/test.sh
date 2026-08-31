@@ -18,7 +18,7 @@
 # the test-framework-policy static check below (AC6): every file in the glob must either import
 # node:test or be on the legacy exemption list (`plugin/test-framework-policy-exemptions.txt`,
 # currently 34 files — the shrink-only ratchet of AC4, it can only get shorter, never longer).
-# NEW files must also carry a `// @test-group <product|engine|governance|serial|lowconc>`
+# NEW files must also carry a `// @test-group <product|engine|serial|lowconc>`
 # declaration (AC5); existing files may omit it and default to `engine`. `serial` is the
 # load-sensitive family routed to its own concurrency-1 phase — nested-suite-spawn + real-wall-
 # clock-wait + the real-install install/quay-init family, the latter admitted at round 162 after
@@ -41,7 +41,7 @@
 #
 # Usage:
 #   scripts/test.sh                                  # default groups product,engine; runs the full
-#                                                    # deduped glob (governance files self-skip)
+#                                                    # deduped glob
 #   scripts/test.sh --group <name[,name]>            # run only the given group(s); sets QUAY_TEST_GROUPS
 #   scripts/test.sh --group <name[,name]> <file...>  # run explicit files with QUAY_TEST_GROUPS set
 #   scripts/test.sh --list-groups                    # report per-group file counts (deduped by realpath)
@@ -68,9 +68,10 @@
 #
 # Layer grouping (gap-test-suite-has-no-layer-grouping):
 #   Every test file declares its layer at the very top: `// @test-group <name>` where name is
-#   one of product / engine / governance / serial / lowconc (AC1). The DEFAULT for an undeclared
+#   one of product / engine / serial / lowconc (AC1). The DEFAULT for an undeclared
 #   file is `engine` (AC7) — the current work surface, so a missed declaration never silently
-#   vanishes.
+#   vanishes. (`governance` is RETIRED — gap-retire-governance-group-merge-into-bucket — its
+#   files re-tagged to their real phase; a file still declaring it now fails closed.)
 #
 #   - product     packages/*/test/ — Core CLI, Provider ABI, gate engine, web UI; plus
 #                 plugin/test/plugin-packaging.test.mjs — plugin-packaging (incl. M136's
@@ -78,8 +79,6 @@
 #                 (AC8 of gap-sync-vendor-drift-mislabelled-as-task-schema).
 #   - engine      methodology EXECUTION path (the rest of plugin/test + the execution-path
 #                 tests under experiments/quay-perpetual-stream/test/)
-#   - governance  exp5 metering (PARKED but not deleted — exp6 phase-2 needs it; the in-file
-#                 skip block makes it visible as `skipped` in default runs instead of absent)
 #   - serial      KNOWN-LOAD-SENSITIVE A/B-class family (nested-suite-spawn, real-wall-clock-wait)
 #                 + the REAL-INSTALL install/quay-init family, routed OUT of the concurrency-N body
 #                 into its own phase at concurrency 1. The serial admission criterion
@@ -100,8 +99,8 @@
 #   The glob now ALSO includes experiments/quay-perpetual-stream/test/*.test.mjs (AC2), so the
 #   44 previously-invisible files always appear in the output. Symlinks under that dir that
 #   point back into plugin/test/ are deduped by realpath (AC3) so they never run twice.
-#   Non-default-group files self-skip BEFORE their heavy imports (AC8), so `--group product`
-#   does not pay the governance load cost. Default (no --group) = product,engine (AC4).
+#   Default (no --group) = product,engine (AC4). `--group product` runs only the product group —
+#   the load-sensitive serial/lowconc files route to their own phases, never the default body.
 #
 # --test-concurrency default is now DERIVED (gap-no-resource-awareness-heavy-ops-run-blind, AC5):
 #   default = max(1, floor(nproc / AMPLIFICATION))   with AMPLIFICATION = 1.0 (see
@@ -486,6 +485,19 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 # QUAY_MAX_CONCURRENT_SUITES → 1). Sourced HERE (before the derivation functions below) so both can
 # call it; the lock section further down reuses this same canonical for its slot paths.
 source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
+
+# ── gap-suite-knobs-config-file-priority: config < env < CLI ──────────────────────────────────────
+# The suite: section in .quay/config.yml is the LOWEST-priority default for the 6 suite knobs. Read it
+# once and promote each present value into its env var via the `VAR="${VAR:-config}"` form — env wins
+# over config (an already-set env var is left untouched), and the existing CLI-flag logic stays above
+# env. A malformed suite: section makes the node helper exit non-zero ⇒ FAIL-CLOSED here (a broken
+# config must not silently degrade to env-only defaults — DIR-050 discipline, AC5).
+if ! suite_cfg="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-params.ts" --shell --root "${repo_root}" 2>&1)"; then
+  echo "test.sh: FAIL-CLOSED reading suite: config — ${suite_cfg}" >&2
+  exit 2
+fi
+eval "${suite_cfg}"
+
 default_concurrency_formula() {
   local total_budget oversub slots
   # MAIN-PHASE CONCURRENCY (gap-suite-budget-oversubscribe; human 14:4xZ 修正方向 — (b) 认领制 /
@@ -577,6 +589,71 @@ LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-$(serial_lowconc_host_default)}
 # sequential (415s) ⇒ overlap max(232,183)=232s, saving ~183s/round. Set QUAY_PHASE_OVERLAP=0 for
 # the sequential serial→lowconc→main baseline (ONE-KEY ROLLBACK).
 PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"
+
+# ── main-tail-overlap knob (gap-suite-main-overlaps-load-sensitive-tail-experiment) ────────────────
+# QUERY_MAIN_TAIL_OVERLAP=<lanes> (default 0 = current behavior). When >0, the MAIN phase starts
+# EARLY — before the serial+lowconc window fully closes — at concurrency <lanes>, overlapping with the
+# window's latency-bound tail (the ~130s near-idle tail the director's load curve measured: 23/48
+# samples stall<3% while the remaining wall-clock-wait / real-install tests hold their processes at
+# ~zero CPU). The start trigger is LOAD-DRIVEN (⛔ not a fixed delay): a watcher polls cpu_stall
+# (/proc/pressure/cpu `some avg10`) and fires once it has stayed ≤ $MAIN_TAIL_STALL_PCT for
+# $MAIN_TAIL_HOLD_S consecutive seconds — i.e. the window's CPU work has drained — then launches main
+# at the knob's lanes. Total CPU load during the overlap = main lanes + the near-zero latency-bound
+# tail, so the experiment's lane sweep (0/4/8/12) is the independent variable; the observed load is
+# READ from /proc/loadavg at fire time (host-derived, never a literal — hard rule 4 推论二), and the
+# fire is announced on the stream (`main-tail-overlap: lanes=N load=X`) so full-suite-runner.ts records
+# main_tail_overlap_lanes + main_tail_overlap_load. ONE-KEY ROLLBACK: unset / 0 = the sequential
+# baseline (main runs at window close, unchanged). Only the overlap path (PHASE_OVERLAP=1, the AC2
+# control) launches the watcher; the sequential path is unchanged (the experiment fixes overlap=1).
+MAIN_TAIL_OVERLAP="${QUERY_MAIN_TAIL_OVERLAP:-0}"
+if ! awk -v v="${MAIN_TAIL_OVERLAP}" 'BEGIN { exit !(v ~ /^[0-9]+$/) }'; then
+  MAIN_TAIL_OVERLAP=0
+fi
+MAIN_TAIL_STALL_PCT="${QUAY_MAIN_TAIL_STALL_PCT:-3}"
+MAIN_TAIL_HOLD_S="${QUAY_MAIN_TAIL_HOLD_S:-5}"
+MAIN_TAIL_POLL_S="${QUAY_MAIN_TAIL_POLL_S:-1}"
+MAIN_TAIL_WAIT_MAX_S="${QUAY_MAIN_TAIL_WAIT_MAX_S:-300}"
+
+# main_tail_overlap_wait — block until the machine's CPU work has drained (cpu_stall ≤
+# $MAIN_TAIL_STALL_PCT for $MAIN_TAIL_HOLD_S consecutive polls), or until every TRACKED phase process
+# exits (no tail left to overlap), or until $MAIN_TAIL_WAIT_MAX_S elapses (bounded: the watcher must
+# never outlive the window). Returns 0 = fired (launch main early), 1 = fall through (main runs
+# normally at window close). Reads the caller's $serial_pid / $lowconc_pid to detect window close —
+# the full path sets BOTH (serial+lowconc run in parallel); the bucket-subset path sets only
+# lowconc_pid (serial already finished sequentially before it). Hermetic test seams:
+# QUAY_MAIN_TAIL_STALL_FILE / QUAY_MAIN_TAIL_LOADAVG_FILE override the /proc paths (the resource-gate
+# seam family).
+main_tail_overlap_wait() {
+  local stall_file="${QUAY_MAIN_TAIL_STALL_FILE:-/proc/pressure/cpu}"
+  local -i held=0 elapsed=0 max_s poll_s hold_s
+  max_s="${MAIN_TAIL_WAIT_MAX_S}"
+  poll_s="${MAIN_TAIL_POLL_S}"
+  hold_s="${MAIN_TAIL_HOLD_S}"
+  while [ "$elapsed" -lt "$max_s" ]; do
+    # Window-closed fallback: every TRACKED phase process (serial and/or lowconc) has exited ⇒ no tail
+    # left to overlap ⇒ fall through. A pid is tracked iff non-empty; the window closes iff ≥1 is
+    # tracked AND every tracked pid is dead. The full path tracks both (they run in parallel); the
+    # bucket-subset path tracks only lowconc (serial_pid is empty = "not tracked" there).
+    if { [ -n "${serial_pid:-}" ] || [ -n "${lowconc_pid:-}" ]; } \
+       && { [ -z "${serial_pid:-}" ] || ! kill -0 "${serial_pid}" 2>/dev/null; } \
+       && { [ -z "${lowconc_pid:-}" ] || ! kill -0 "${lowconc_pid}" 2>/dev/null; }; then
+      return 1
+    fi
+    local stall=""
+    stall="$(awk '{ for (i=1;i<=NF;i++) if ($i ~ /^avg10=/) { sub(/^avg10=/,"",$i); print $i; exit } }' "$stall_file" 2>/dev/null)" || stall=""
+    if [ -n "$stall" ] && awk -v s="$stall" -v t="$MAIN_TAIL_STALL_PCT" 'BEGIN{ exit !(s+0 <= t+0) }'; then
+      held=$((held + 1))
+    else
+      held=0
+    fi
+    if [ "$held" -ge "$hold_s" ]; then
+      return 0
+    fi
+    sleep "$poll_s"
+    elapsed=$((elapsed + poll_s))
+  done
+  return 1
+}
 
 # has_explicit_concurrency <args...> — whether the args already carry a --test-concurrency flag
 # (either the `=` spelling with a numeric value, or the SPACE spelling with a numeric value). When it
@@ -815,25 +892,54 @@ full_suite_lock_release() {
 # the dispatch path below keeps calling them by name; behavior is byte-identical.
 source "${repo_root}/plugin/scripts/runner-grouping.ts"
 
+# ── in-process metadata cache (gap-suite-metadata-query-subprocess-spawn) ────────────────────────
+# build_deduped_files populates these ONCE via plugin/scripts/runner-grouping-metadata.mjs (a single
+# node spawn doing realpath dedup + @test-group read, replacing the ~1100-1600 per-file `realpath` /
+# `grep|awk` subprocess spawns the metadata modes --list-files/--list-groups previously paid).
+# group_of / check_group_declarations (sourced runner-grouping.ts) read _RG_GROUP at call time and
+# guard on _RG_CACHE_READY, so a STANDALONE sourcing (no cache, no repo_root) still falls back to
+# the old grep (suite-bucket-load-sensitive-isolation AC5 sources runner-grouping.ts alone).
+declare -a _RG_FILES=()
+declare -A _RG_GROUP=()
+_RG_CACHE_READY=""
+
 # build_deduped_files — echo the union glob, deduped by realpath (AC3). One file per line.
 # DELIBERATELY KEPT HERE (not moved to runner-grouping.ts): its canonical test-glob declaration line
 # is the ADR-004 SINGLE-SOURCE that FOUR checkers parse from scripts/test.sh
 # (test-framework-policy-check.ts / test-coverage-check.ts / test-impl-census-check.ts /
 # test-group-downgrade-check.ts) — moving it would break their glob derivation (0 files). The moved
 # functions call it by NAME (bash resolves at call time, so this later definition is fine).
+# gap-suite-metadata-query-subprocess-spawn: the glob is expanded by bash (free, byte-identical
+# order) and handed to ONE in-process node pass that realpath-dedups AND reads each file's
+# @test-group. The result is cached (_RG_FILES/_RG_GROUP) so the metadata modes' repeated
+# check_group_declarations + select_files/list_groups loops reuse it instead of re-spawning.
 build_deduped_files() {
+  if [ -n "${_RG_CACHE_READY:-}" ]; then
+    printf '%s\n' "${_RG_FILES[@]}"
+    return 0
+  fi
   shopt -s nullglob
   local glob=(packages/*/test/*.test.mjs plugin/test/*.test.mjs experiments/quay-perpetual-stream/test/*.test.mjs)
   shopt -u nullglob
-  declare -A seen=()
-  local f rp
-  for f in "${glob[@]}"; do
-    rp="$(realpath "$f")"
-    if [ -z "${seen[$rp]:-}" ]; then
-      seen[$rp]=1
-      printf '%s\n' "$rp"
-    fi
-  done
+  local meta rc=0
+  # if/else rc-capture (NOT `! cmd; rc=$?` — the `!` negates $?, capturing 0 instead of the helper's
+  # fail-closed 3 — and NOT `|| rc=$?`, which instrument-failure-check FAMILY-3 flags).
+  if meta="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping-metadata.mjs" "${glob[@]}")"; then
+    :
+  else
+    rc=$?
+    exit "$rc"
+  fi
+  _RG_CACHE_READY=1
+  _RG_FILES=()
+  _RG_GROUP=()
+  local f g
+  while IFS=$'\t' read -r f g; do
+    [ -n "${f}" ] || continue
+    _RG_FILES+=("$f")
+    _RG_GROUP["$f"]="$g"
+  done <<< "${meta}"
+  printf '%s\n' "${_RG_FILES[@]}"
 }
 
 # build_dist_once — build dist/quay.js ONCE per invocation, before any test runs
@@ -964,7 +1070,7 @@ run_selected() {
   # degrade to engine — a dropped group cancels the isolation guarantee without going red.
   check_group_declarations
   # The resource gate guards the FULL-SUITE default (product,engine). A non-default --group is a
-  # subset run (e.g. --group governance) — scoped, skip it (QUAY_TEST_SKIP_RESOURCE_GATE=1 is
+  # subset run (e.g. --group serial) — scoped, skip it (QUAY_TEST_SKIP_RESOURCE_GATE=1 is
   # honored inside resource_gate_check for nested runners).
   if is_default_set "$groups"; then
     FULL_SUITE_DEFAULT=1
@@ -1038,6 +1144,11 @@ run_selected() {
     # waste). Phases are independent and serially sequenced (no shared state between phase runs),
     # so the reorder changes wall-clock latency only, never correctness.
     local code=0
+    # main-tail-overlap coordination (gap-suite-main-overlaps-load-sensitive-tail-experiment): the
+    # overlap branch's watcher may launch main early in the background. main_early_pid = the watcher
+    # process; main_early_code_file carries its verdict ("pending" → "fallthrough" → <exit-code>).
+    # Empty on the sequential / knob-0 path (main runs synchronously, unchanged).
+    local main_early_pid="" main_early_code_file=""
     # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
     # the A/B-class KNOWN-LOAD-SENSITIVE family (nested-suite-spawn + real-wall-clock-wait) PLUS
     # the REAL-INSTALL install/quay-init family is routed OUT of the concurrency-N main body into
@@ -1069,6 +1180,14 @@ run_selected() {
     # identical between this and the pre-change sequential scheduling.
     local lowconc_files=() lf lowconc_code
     while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
+    # LPT order for the serial/lowconc phases (gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered):
+    # these were the last bare `node --test` dispatch points on the full path — node --test re-sorts
+    # positional args alphabetically, so a longest-known-first order is discarded (the serial/lowconc
+    # tail waited ≈38% of the round). Reorder IN PLACE before EITHER branch (overlap/sequential) so
+    # both get the LPT order, then hand to suite-lpt-runner.mjs run({files}) — the ONLY path that
+    # preserves argv order. Same invariant as the main phase (membership unchanged, order only).
+    lpt_reorder_files serial_files
+    lpt_reorder_files lowconc_files
     # PHASE OVERLAP (gap-phase-overlap-two-phase-parallel-exploration AC1, default-ON since AC101):
     # when QUAY_PHASE_OVERLAP=1 (the default) AND both phases are non-empty, run serial + lowconc in
     # PARALLEL (each at its OWN concurrency, $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY — scheduling-
@@ -1088,9 +1207,33 @@ run_selected() {
       # contributions stay distinguishable (the fixed-overhead serial_phase_ms stays the combined
       # window — the analyst's serial+lowconc sum == the window, unchanged for the before/after metric).
       overlap_s_start=$(_oh_mark)
-      node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${serial_files[@]}" & serial_pid=$!
+      node --test-concurrency="$SERIAL_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${serial_files[@]}" & serial_pid=$!
       overlap_l_start=$(_oh_mark)
-      node --test --test-concurrency="$LOWCONC_CONCURRENCY" $(suite_reporter_flags) "${lowconc_files[@]}" & lowconc_pid=$!
+      node --test-concurrency="$LOWCONC_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${lowconc_files[@]}" & lowconc_pid=$!
+      # main-tail-overlap (gap-suite-main-overlaps-load-sensitive-tail-experiment): when the knob is
+      # >0, launch a WATCHER that fires the MAIN phase EARLY (at the knob's lanes) once the window's
+      # CPU work drains — overlapping main with the latency-bound tail. The watcher LPT-reorders
+      # `files` (the SAME order the normal main phase uses) and writes its verdict to
+      # $main_early_code_file ("fallthrough" = trigger never fired ⇒ main runs normally at window
+      # close; a number = main's exit code). The main phase below adopts it (no double-run). The
+      # subshell inherits `set +e` (the enclosing full-suite block), so a red early main still writes
+      # its exit code before the watcher exits.
+      if [ "$MAIN_TAIL_OVERLAP" -gt 0 ]; then
+        lpt_reorder_files files
+        main_early_code_file="$(mktemp "${TMPDIR:-/tmp}/main-tail-overlap.XXXXXX")"
+        printf '%s' "pending" > "$main_early_code_file"
+        (
+          if main_tail_overlap_wait; then
+            _tail_load="$(awk '{print $1}' "${QUAY_MAIN_TAIL_LOADAVG_FILE:-/proc/loadavg}" 2>/dev/null || true)"
+            echo "main-tail-overlap: lanes=${MAIN_TAIL_OVERLAP}${_tail_load:+ load=${_tail_load}}" >&2
+            node --test-concurrency="$MAIN_TAIL_OVERLAP" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "$@" "${files[@]}"
+            printf '%s' "$?" > "$main_early_code_file"
+          else
+            printf '%s' "fallthrough" > "$main_early_code_file"
+          fi
+        ) &
+        main_early_pid=$!
+      fi
       wait "$serial_pid"; serial_code=$?
       overlap_s_end=$(_oh_mark)
       echo "__OVERHEAD__ overlap_serial_ms=$((overlap_s_end - overlap_s_start))" >&2
@@ -1112,7 +1255,7 @@ run_selected() {
       [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
       if [ "${#serial_files[@]}" -gt 0 ]; then
         echo "selected ${#serial_files[@]} files (groups=serial)"
-        node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${serial_files[@]}"
+        node --test-concurrency="$SERIAL_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${serial_files[@]}"
         serial_code=$?
         [ "$serial_code" -eq 0 ] || code="$serial_code"
       fi
@@ -1130,7 +1273,7 @@ run_selected() {
       [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
       if [ "${#lowconc_files[@]}" -gt 0 ]; then
         echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
-        node --test --test-concurrency="$LOWCONC_CONCURRENCY" $(suite_reporter_flags) "${lowconc_files[@]}"
+        node --test-concurrency="$LOWCONC_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${lowconc_files[@]}"
         local lcode=$?
         [ "$lcode" -eq 0 ] || code="$lcode"
       fi
@@ -1148,10 +1291,30 @@ run_selected() {
     # runner composes spec→stdout + measure-suite-reporter→stderr (the suite_reporter_flags
     # equivalents), so the per-file attribution + LPT input carrier stay intact.
     local mcode=0
+    # main-tail-overlap (gap-suite-main-overlaps-load-sensitive-tail-experiment): adopt the watcher's
+    # early-main verdict when it fired (a numeric exit code) and skip the normal main phase; otherwise
+    # run the normal main phase. ⚠️ The `if`/`fi` below sit at the SAME indent as their body so the two
+    # pinned main-phase lines keep their original `lpt_reorder_files files` + `node --test-concurrency=
+    # "$(bucket_test_concurrency "$@")"` adjacency — suite-lpt-order.test.mjs AC1 pins that exact
+    # adjacency (do NOT re-indent those two lines, and do NOT insert a line between them).
+    local _tail_skip_main=0
+    if [ -n "$main_early_pid" ]; then
+      wait "$main_early_pid" 2>/dev/null || true
+      local _tail_verdict=""
+      _tail_verdict="$(cat "$main_early_code_file" 2>/dev/null || true)"
+      rm -f "$main_early_code_file"
+      if [ -n "$_tail_verdict" ] && [ "$_tail_verdict" != "fallthrough" ] && [ "$_tail_verdict" != "pending" ]; then
+        mcode="$_tail_verdict"
+        if [ "$mcode" -ne 0 ]; then code="$mcode"; fi
+        _tail_skip_main=1
+      fi
+    fi
+    if [ "$_tail_skip_main" != "1" ]; then
     lpt_reorder_files files
     node --test-concurrency="$(bucket_test_concurrency "$@")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "$@" "${files[@]}"
     mcode=$?
     [ "$mcode" -eq 0 ] || code="$mcode"
+    fi
     [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
     # Fixed-overhead breakdown (gap-suite-fixed-overhead-decomposition AC2): emit the deterministic
     # serial-segment durations. Each is a DIRECT measurement of one sequential step — decidable,
@@ -1275,7 +1438,7 @@ groups=""
 if [ "${1:-}" = "--group" ]; then
   groups="${2:-}"
   if [ -z "${groups}" ]; then
-    echo "scripts/test.sh: --group requires a group name (product|engine|governance|serial|lowconc, comma-separated)" >&2
+    echo "scripts/test.sh: --group requires a group name (product|engine|serial|lowconc, comma-separated)" >&2
     exit 2
   fi
   shift 2
@@ -1289,10 +1452,10 @@ if [ "${1:-}" = "--list-groups" ]; then
   exit 0
 elif [ "${1:-}" = "--list-files" ]; then
   # Metadata mode (test support / AC6) — print the selected file list, one per line. Respects
-  # --group if given; else the DEFAULT RUN's full selection = the product,engine body (with
-  # governance self-skip passthrough) PLUS the lowconc phase files — a default `bash
-  # scripts/test.sh` executes BOTH (the concurrent body, then the serial phase, then the lowconc
-  # phase), so no-args --list-files reports the full reachable surface and keeps the
+  # --group if given; else the DEFAULT RUN's full selection = the product,engine body PLUS the
+  # lowconc phase files — a default `bash scripts/test.sh` executes BOTH (the concurrent body,
+  # then the serial phase, then the lowconc phase), so no-args --list-files reports the full
+  # reachable surface and keeps the
   # runner-grouping AC3 invariant (`--list-files count + serial == --list-groups total`) and the
   # test-coverage-check AC5 canonical-coverage invariant. A serial/lowconc file is NOT in the
   # default GROUP SET; it is in the default RUN (its own phase) — hence
@@ -1312,7 +1475,7 @@ elif [ -n "${groups}" ]; then
     run_selected "$groups"
   elif all_flags "$@"; then
     # gap-test-sh-flags-only-...: bare node --test flags + the group's glob (e.g.
-    # `--group governance --test-concurrency=4`). Previously this fell to the explicit-file branch
+    # `--group serial --test-concurrency=4`). Previously this fell to the explicit-file branch
     # with an EMPTY file list → node --test auto-discovered a 3.7x-larger, different suite.
     run_selected "$groups" "$@"
   else
@@ -1332,9 +1495,7 @@ elif [ -n "${groups}" ]; then
 fi
 
 if [ "$#" -eq 0 ]; then
-  # Default: product,engine (AC4). Governance files are passed through too — they self-skip,
-  # so they report `skipped`, not absent (ADR-019 decision #1 precedent). run_selected runs
-  # the split-or-commit whole-store scan.
+  # Default: product,engine (AC4). run_selected runs the split-or-commit whole-store scan.
   run_selected "$(effective_groups)"
 elif [ "${1:-}" = "--static-checks" ]; then
   # Gate-only mode (gap-scoped-runs-pay-full-static-check-overhead, AC2 proof): run the COMPLETE
@@ -1519,17 +1680,97 @@ elif [ "${1:-}" = "--buckets" ]; then
   bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
   mark_nested
   set +e
-  # Per-file attribution + LPT-preserving run (gap-fix-scope-perfile-buckets-parser +
-  # gap-m-bucket-long-tail-lpt-scheduling): hand the LPT-ordered file list to suite-lpt-runner.mjs,
-  # which calls node:test run({files}) — the ONLY path that preserves argv order (the node --test
-  # CLI re-sorts positional globs alphabetically). The runner composes BOTH reporters via
-  # stream.compose: spec → stdout (判绿 markers) and measure-suite-reporter → stderr
-  # (__PERFILE__ duration_ms=<d> <path> passed=<bool> — the fix-scope gate's per-file attribution
-  # AND the LPT ordering's own input carrier; if this breaks the per-file duration data goes dark
-  # and LPT has no input ⇒ self-defeating). Concurrency rides in execArgv (--test-concurrency=N)
-  # so the reporter's readConcurrency() sees the SAME value (single source, no drift).
-  node --test-concurrency="$(bucket_test_concurrency "${rest_args[@]}")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${rest_args[@]}" "${files[@]}"
-  bucket_code=$?
+  # ── bucket load-sensitive isolation (gap-scd-load-sensitive-bucket-isolation) ──
+  # The full-suite default path routes serial/lowconc files to their OWN phases (serial at
+  # $SERIAL_CONCURRENCY, lowconc at $LOWCONC_CONCURRENCY) BEFORE the main concurrency-N body; the
+  # bucket path previously handed the WHOLE selected list to suite-lpt-runner.mjs at
+  # bucket_test_concurrency, so load-sensitive files (the SCD session-observation family) ran under
+  # the full concurrent load and flaked/hung. Split the bucket list by @test-group and run the SAME
+  # three-phase order (serial → lowconc → main) with the SAME per-phase concurrency knobs, keeping
+  # the LPT-reordered main body order-preserving via suite-lpt-runner.mjs run({files}).
+  bucket_serial_files=()
+  bucket_lowconc_files=()
+  bucket_main_files=()
+  for bf in "${files[@]}"; do
+    case "$(group_of "$bf")" in
+      serial) bucket_serial_files+=("$bf") ;;
+      lowconc) bucket_lowconc_files+=("$bf") ;;
+      *) bucket_main_files+=("$bf") ;;
+    esac
+  done
+  # LPT order for the bucket serial/lowconc sub-phases (gap-suite-lpt-serial-lowconc-phases-not-lpt-
+  # ordered): same as the full path — bare `node --test` re-sorts alphabetically and discards the LPT
+  # order, so these two sub-phases were the last bare dispatch points on the --buckets path. Reorder
+  # IN PLACE then hand to suite-lpt-runner.mjs run({files}) (order-preserving). Membership unchanged.
+  lpt_reorder_files bucket_serial_files
+  lpt_reorder_files bucket_lowconc_files
+  bucket_code=0
+  if [ "${#bucket_serial_files[@]}" -gt 0 ]; then
+    echo "selected ${#bucket_serial_files[@]} files (groups=serial)"
+    node --test-concurrency="$SERIAL_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${bucket_serial_files[@]}"
+    _bscode=$?
+    [ "$_bscode" -eq 0 ] || bucket_code="$_bscode"
+  fi
+  # main-tail-overlap coordination (gap-suite-main-tail-overlap-bucket-subset): the bucket path has NO
+  # serial+lowconc overlap window — serial runs sequentially BEFORE lowconc — so the trigger simplifies
+  # to the LOWCONC tail (the latency-bound segment the director's round-774 curve measured: 106s lowconc
+  # at ~zero CPU). bucket_lowconc runs in the BACKGROUND so its pid can be watched; when QUERY_MAIN_TAIL_
+  # OVERLAP>0, a watcher polls cpu_stall (main_tail_overlap_wait) and fires MAIN early at the knob's
+  # lanes once the lowconc tail's CPU work drains; lowconc exit / $MAIN_TAIL_WAIT_MAX_S ⇒ fallthrough
+  # (main runs normally after lowconc). Same knob / watcher / stream marker as the full path (A).
+  bucket_lowconc_pid=""
+  bucket_main_early_pid=""
+  bucket_main_early_code_file=""
+  if [ "${#bucket_lowconc_files[@]}" -gt 0 ]; then
+    echo "selected ${#bucket_lowconc_files[@]} files (groups=lowconc)"
+    node --test-concurrency="$LOWCONC_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${bucket_lowconc_files[@]}" &
+    bucket_lowconc_pid=$!
+    if [ "$MAIN_TAIL_OVERLAP" -gt 0 ] && [ "${#bucket_main_files[@]}" -gt 0 ]; then
+      bucket_main_early_code_file="$(mktemp "${TMPDIR:-/tmp}/main-tail-overlap.XXXXXX")"
+      printf '%s' "pending" > "$bucket_main_early_code_file"
+      (
+        serial_pid=""
+        lowconc_pid="$bucket_lowconc_pid"
+        if main_tail_overlap_wait; then
+          _tail_load="$(awk '{print $1}' "${QUAY_MAIN_TAIL_LOADAVG_FILE:-/proc/loadavg}" 2>/dev/null || true)"
+          echo "main-tail-overlap: lanes=${MAIN_TAIL_OVERLAP}${_tail_load:+ load=${_tail_load}}" >&2
+          node --test-concurrency="$MAIN_TAIL_OVERLAP" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${rest_args[@]}" "${bucket_main_files[@]}"
+          printf '%s' "$?" > "$bucket_main_early_code_file"
+        else
+          printf '%s' "fallthrough" > "$bucket_main_early_code_file"
+        fi
+      ) &
+      bucket_main_early_pid=$!
+    fi
+    wait "$bucket_lowconc_pid"
+    _blcode=$?
+    [ "$_blcode" -eq 0 ] || bucket_code="$_blcode"
+  fi
+  # MAIN phase — the remaining files at bucket_test_concurrency, LPT-ordered, order-preserving via
+  # suite-lpt-runner.mjs run({files}) (gap-m-bucket-long-tail-lpt-scheduling + per-file attribution
+  # gap-fix-scope-perfile-buckets-parser). The runner composes BOTH reporters via stream.compose:
+  # spec → stdout (判绿 markers) and measure-suite-reporter → stderr (__PERFILE__ duration_ms=<d>
+  # <path> passed=<bool> — the fix-scope gate's per-file attribution AND the LPT ordering's own
+  # input carrier; if this breaks the per-file duration data goes dark and LPT has no input ⇒
+  # self-defeating). Concurrency rides in execArgv (--test-concurrency=N) so the reporter's
+  # readConcurrency() sees the SAME value (single source, no drift). When the watcher fired, adopt its
+  # early-main exit code and skip the normal run; otherwise run the normal bucket main (unchanged).
+  bucket_tail_skip_main=0
+  if [ -n "$bucket_main_early_pid" ]; then
+    wait "$bucket_main_early_pid" 2>/dev/null || true
+    bucket_tail_verdict="$(cat "$bucket_main_early_code_file" 2>/dev/null || true)"
+    rm -f "$bucket_main_early_code_file"
+    if [ -n "$bucket_tail_verdict" ] && [ "$bucket_tail_verdict" != "fallthrough" ] && [ "$bucket_tail_verdict" != "pending" ]; then
+      _bmcode="$bucket_tail_verdict"
+      [ "$_bmcode" -eq 0 ] || bucket_code="$_bmcode"
+      bucket_tail_skip_main=1
+    fi
+  fi
+  if [ "$bucket_tail_skip_main" != "1" ] && [ "${#bucket_main_files[@]}" -gt 0 ]; then
+    node --test-concurrency="$(bucket_test_concurrency "${rest_args[@]}")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${rest_args[@]}" "${bucket_main_files[@]}"
+    _bmcode=$?
+    [ "$_bmcode" -eq 0 ] || bucket_code="$_bmcode"
+  fi
   # Same suite-AFTER tail as the full default path: session-liveness-sweep-kill is the best-effort
   # TRUE-CATCH-ALL registry kill (exit 0 always); the --check assertion is the leak verdict and
   # merges into the exit code so a bucket-round leak still reports `tmux-leak-scan: FAIL`.
@@ -1537,6 +1778,11 @@ elif [ "${1:-}" = "--buckets" ]; then
   if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
     bucket_code=1
   fi
+  # gap-suite-bucket-dynamic-truth-drift-detector ③-AC4: 顺带增量 collect — 分桶执行后增量采集动态真值
+  # 缓存（suite-fs-trace.ts --update），每次至多 QUAY_FS_TRACE_LIMIT 个新/变更测试的 trace（内容 sha256
+  # 缓存跳过未变更，成本有界；trace 子进程带 QUAY_TEST_NESTED=1 防被测测试再 spawn test.sh 撞单飞锁）。
+  # 非致命——采集失败绝不翻转本轮套件判定（drift-check 读取的是【跨轮累积】的缓存，本轮采集供下一轮读）。
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-fs-trace.ts" --update --limit "${QUAY_FS_TRACE_LIMIT:-8}" --root "${repo_root}" || true
   set -e
   exit "${bucket_code}"
 elif all_flags "$@"; then
@@ -1549,8 +1795,8 @@ elif all_flags "$@"; then
 else
   build_dist_once
   run_static_checks
-  # Explicit file list (no --group): QUAY_TEST_GROUPS stays unset, so in-file skips do not
-  # trigger and the named files run in full.
+  # Explicit file list (no --group): QUAY_TEST_GROUPS stays unset, so the named files run in
+  # full (the bucket path uses exactly this explicit-file form).
   mark_nested
   # has_explicit_concurrency: explicit flag wins as the single concurrency source (AC2).
   if has_explicit_concurrency "$@"; then

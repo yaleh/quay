@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // concurrent-batch-scheduler.test.mjs — parseCandidate label exposure
 // (gap-ac36-delivery-critical-priority-axis AC2): parseCandidate must read the candidate's
 // frontmatter `labels` — via task-schema.ts's parseTask, the ONE lenient frontmatter parse

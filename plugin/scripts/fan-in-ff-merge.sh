@@ -60,7 +60,7 @@
 # --agent-id is OPTIONAL for backward compat with pre-AC67 callers; when absent the fields are null
 # (which is exactly the absence the checker flags — the field is only "real" when the subagent sets it).
 #
-# AC78 (gap-ac78-fan-in-workflow-a6-check, 判据2(c)): --agent-id is now FAIL-CLOSED self-validated —
+# AC78 (判据2(c)): --agent-id is now FAIL-CLOSED self-validated —
 # if it resolves to a TOP-LEVEL session id (a `<project>/<id>.jsonl` or `<project>/<id>/` exists),
 # the ff is being executed by the MAIN SESSION (AC72/AC73's defect) ⇒ exit 2 before any lock event /
 # retry record is written. The fan-in must be executed by a subagent, whose own id resolves to
@@ -156,10 +156,10 @@ if [ -z "${lock_events}" ]; then lock_events="${root}/.quay/fan-in-merge-lock-ev
 if [ -z "${retry_record}" ]; then retry_record="${root}/.quay/fan-in-retries.jsonl"; fi
 if [ -z "${escalations}" ]; then escalations="${root}/.quay/fan-in-ff-escalations.jsonl"; fi
 
-# fan-in workflow lock（fan-in-workflow.lock）已收进 driver（ADR-034, gap-adr034-fan-in-lock-holder-
-# supervised）：worker-driver.ts 的 acquireFanInWorkflowLock 经非分离直接子进程持锁、随 driver 死自动
-# 释放。本脚本的 --acquire/--release-workflow-lock 分离 holder + flag 释放协议已废除——锁事件仍写
-# .quay/fan-in-workflow-lock-events.jsonl（由 driver 的 holder 写），fan-in-ff-protocol-check 判据4 读它。
+# fan-in lock（fan-in.lock）已收进 driver（ADR-034, gap-adr034-fan-in-lock-holder-
+# supervised）：worker-driver.ts 的 acquireFanInLock 经非分离直接子进程持锁、随 driver 死自动
+# 释放。本脚本的 --acquire/--release-fan-in-lock 分离 holder + flag 释放协议已废除——锁事件仍写
+# .quay/fan-in-lock-events.jsonl（由 driver 的 holder 写），fan-in-ff-protocol-check 判据4 读它。
 
 # ── inert-delta classifier (gap-fan-in-ff-retry-reruns-suite-on-inert-increment) ────────────────────
 # The "惰性" (doc-only) judgment — used by BOTH the suite-certificate gate (AC3) and the in-lock
@@ -340,36 +340,52 @@ fi
 # suite ran on — which IS the commit to be ff'd). The gate asks "本任务的 suite 是否已终结、且 suite_head
 # == 待 ff 的 HEAD" — a per-task DIRECT quantity, no global lock needed.
 #
-# `--suite-state` and the `suite_state` default are kept ONLY for arg-compat (full-suite-state.json is
-# RETIRED as a gate input since AC84); it is not read here.
+# `--suite-state` (full-suite-state.json) 现在是 capture 缺失/失效时的【回退权威源】
+# （gap-write-suite-capture-non-blocking AC2）：mirrorMechanicalFanInSuiteState 在 suite 绿后写
+# state=green + commit=suite_head + taskId（与 capture 同源，同一 suiteHead）⇒ capture 写失败
+# （观测写 fail-open）时 ff 闸仍能从权威源判 suite 真实绿，⛔ 不误拒一个真实绿 suite。⛔ 不伪造
+# full-green：只认 taskId 匹配本任务的 state=green；full-run 的 green（无 taskId）或别的任务的
+# bucket green（taskId 别异）都不得冒充本任务的证书。
 #
-# FAIL-CLOSED: missing capture / non-green suite_exit / suite_head ≠ 待 ff tip ⇒ environment error
-# (exit 2, NO retry record — this is not an ff failure). A doc-only fan-in (full_suite_ran=false) still
-# writes a capture with suite_exit=0 + suite_head, so it passes the gate — the certificate pins the
-# HEAD, not the phase.
+# FAIL-CLOSED: 无证书（capture 缺失且权威源也不可用/不匹配）/ 非绿 / suite_head ≠ 待 ff tip（或惰性祖先）⇒
+# environment error (exit 2, NO retry record — this is not an ff failure). A doc-only fan-in
+# (full_suite_ran=false) still writes a capture with suite_exit=0 + suite_head, so it passes the gate —
+# the certificate pins the HEAD, not the phase.
 suite_cert_ok=0
+suite_tip="$(git -C "${root}" rev-parse "refs/heads/task/${task_id}" 2>/dev/null || true)"
+suite_exit=""
+suite_head=""
 if [ -f "${suite_capture}" ]; then
   # shellcheck disable=SC1090
   . "${suite_capture}"
-  suite_tip="$(git -C "${root}" rev-parse "refs/heads/task/${task_id}" 2>/dev/null || true)"
-  # Certificate semantics (fixed 2026-08-18, gap-suite-concurrency-ff-gate-and-slot-ssot self-test):
-  # the suite runs on the branch tip at suite time (suite_head); the fan-in's 持锁段 flip step THEN
-  # commits the task-file status flip (ready→done) on top, pushing the tip past suite_head. So the
-  # gate must accept suite_head as an ANCESTOR of the tip. AC3 (gap-fan-in-ff-retry-reruns-suite-on-
-  # inert-increment) 精确弱化 the "tip diff" restriction: `suite_head == tip` OR (`suite_head` is a
-  # `tip` ancestor AND delta(suite_head, tip) is classified inert) — the suite_head..tip diff is
-  # normally just the flip (tasks/<id>.md, inert); an in-lock develop merge adds further INERT commits.
-  # A `@static-object`-covered path in the diff ⇒ code ⇒ refuse (falsifiable, fail-closed). The diff
-  # restriction is the COMPUTED classifier (--classify-delta), never a hand-written path grep.
-  if [ "${suite_exit:-}" = "0" ] && [ -n "${suite_head:-}" ] && [ -n "${suite_tip}" ] \
-     && git -C "${root}" merge-base --is-ancestor "${suite_head}" "${suite_tip}" 2>/dev/null; then
-    gate_delta="$(git -C "${root}" diff --name-only "${suite_head}" "${suite_tip}" 2>/dev/null || true)"
-    gate_code="$(node --experimental-strip-types "${classify_script}" --classify-delta --root "${classify_root}" ${gate_delta} 2>/dev/null)" || gate_code="__CLASSIFY_FAILED__"
-    if [ "${gate_code}" = "__CLASSIFY_FAILED__" ]; then
-      suite_cert_ok=0
-    elif [ -z "${gate_code}" ]; then
-      suite_cert_ok=1
-    fi
+else
+  # 回退（gap-write-suite-capture-non-blocking AC2）：capture 缺失/不可读 ⇒ 读权威源 full-suite-state.json
+  # 的 suite 终态（mirrorMechanicalFanInSuiteState 在 suite 绿后写 state=green + commit=suite_head +
+  # taskId，与 capture 同源）。⛔ 不伪造 full-green：taskId 必须匹配本任务 + state=green + commit 40-hex
+  # ——full-run 的 green（scope=main 无 taskId）与别的任务的 bucket green（taskId 别异）不得冒充。
+  _state_commit="$(node -e 'const fs=require("node:fs");try{const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(s&&s.state==="green"&&s.taskId===process.argv[2]&&typeof s.commit==="string"&&/^[0-9a-f]{40}$/i.test(s.commit))process.stdout.write(s.commit)}catch(e){}' "${suite_state}" "${task_id}")" || _state_commit=""
+  if [ -n "${_state_commit}" ]; then
+    suite_exit="0"
+    suite_head="${_state_commit}"
+  fi
+fi
+# Certificate semantics (fixed 2026-08-18, gap-suite-concurrency-ff-gate-and-slot-ssot self-test):
+# the suite runs on the branch tip at suite time (suite_head); the fan-in's 持锁段 flip step THEN
+# commits the task-file status flip (ready→done) on top, pushing the tip past suite_head. So the
+# gate must accept suite_head as an ANCESTOR of the tip. AC3 (gap-fan-in-ff-retry-reruns-suite-on-
+# inert-increment) 精确弱化 the "tip diff" restriction: `suite_head == tip` OR (`suite_head` is a
+# `tip` ancestor AND delta(suite_head, tip) is classified inert) — the suite_head..tip diff is
+# normally just the flip (tasks/<id>.md, inert); an in-lock develop merge adds further INERT commits.
+# A `@static-object`-covered path in the diff ⇒ code ⇒ refuse (falsifiable, fail-closed). The diff
+# restriction is the COMPUTED classifier (--classify-delta), never a hand-written path grep.
+if [ "${suite_exit:-}" = "0" ] && [ -n "${suite_head:-}" ] && [ -n "${suite_tip}" ] \
+   && git -C "${root}" merge-base --is-ancestor "${suite_head}" "${suite_tip}" 2>/dev/null; then
+  gate_delta="$(git -C "${root}" diff --name-only "${suite_head}" "${suite_tip}" 2>/dev/null || true)"
+  gate_code="$(node --experimental-strip-types "${classify_script}" --classify-delta --root "${classify_root}" ${gate_delta} 2>/dev/null)" || gate_code="__CLASSIFY_FAILED__"
+  if [ "${gate_code}" = "__CLASSIFY_FAILED__" ]; then
+    suite_cert_ok=0
+  elif [ -z "${gate_code}" ]; then
+    suite_cert_ok=1
   fi
 fi
 if [ "${suite_cert_ok}" != "1" ]; then

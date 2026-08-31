@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // checker-mutation-check.test.mjs — tasks/gap-checkers-have-never-been-shown-to-fail (AC1-AC7):
 // mutation-testing the CHECKERS themselves. The manifest (which checkers are registered) is
 // parsed from scripts/test.sh's run_static_checks + CI workflows, never hand-written (AC1);
@@ -26,13 +26,6 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 const SCRIPT = path.join(REPO_ROOT, "plugin/scripts/checker-mutation-check.sh");
 const CASES_DIR = path.join(REPO_ROOT, "plugin/scripts/checker-mutation-cases");
 
-// ── Governance self-skip (AC7 @test-group governance) ─────────────────────────────────────────────
-// In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
-// precedent). It runs in full when invoked explicitly (QUAY_TEST_GROUPS unset) or with
-// `--group governance`.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -257,12 +250,11 @@ test("AC5 #10: decideLiveState covers activity-present + telemetry-empty ⇒ run
   assert.equal(rr.json.results["regression-live-telemetry-empty-activity"], "pass");
 });
 
-// ── AC7: node:test + @test-group governance ───────────────────────────────────────────────────────
+// ── AC7: node:test + @test-group engine ───────────────────────────────────────────────────────
 
-test("AC7: this file declares @test-group governance and imports node:test", () => {
+test("AC7: this file declares @test-group engine and imports node:test", () => {
   const src = fs.readFileSync(__filename, "utf8");
-  assert.match(src, /\/\/ @test-group governance/);
+  assert.match(src, /\/\/ @test-group engine/);
   assert.match(src, /import \{[^}]*test[^}]*\} from "node:test"/);
 });
 
-} // end governance self-skip else-branch

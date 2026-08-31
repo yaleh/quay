@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // cap-from-gate-cli.test.mjs — gap-fixed-cap-5-dynamic-cap-retired. The DYNAMIC adaptive concurrency
 // cap is RETIRED (human ruling 2026-08-09): effective_cap is the FIXED constant 5, regardless of cpu
 // pressure / suite state / process budget. The band + hysteresis + budget logic still RUNS as PURE
@@ -10,7 +10,7 @@
 // MECHANISM-SURFACE tests: the AC1/AC7 wrapper, AC8 cross-references, the CLI smoke, and the
 // FIXED-CAP retirement matrix (the 8-sample FIXED-CAP run is the file's dominant cost; the
 // resource-gate report-line + dead-zone tests moved to cap-from-gate-config-budget.test.mjs to
-// keep every file under the 50s band with margin). The `@test-group governance` declaration is
+// keep every file under the 50s band with margin). The `@test-group engine` declaration is
 // preserved so the main-phase membership stays byte-identical.
 //
 // History (retired mechanism, kept for the observation semantics): the adaptive cap read cpu

@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // ready-pool-check.test.mjs — the ready-pool maintenance mechanism
 // (tasks/gap-promotion-cadence-is-role-volition-not-product-mechanism). Promotion cadence used to
 // live in an outer's VOLUNTARY AC-queue (role volition, lost on session/model change); this test
@@ -6,12 +6,12 @@
 // PARKED), reporting dispatchable_disjoint (the largest mutually-disjoint pool subset via
 // checkTouchesPair) as the CRITERION, and recommending todo→ready promotions in a DEFINED order
 // (touch-disjointness FIRST vs the pool + in-flight, then gap-* > DIR-*, then touches-resolve
-// first) when pool < floor (= cap × 4, default 12).
+// first) when pool < floor (= cap × 4, default 20 — dispatch single source).
 //
-// AC1 floor = cap × 4 (12 at cap 3, configurable) · AC2 dispatchable_disjoint via checkTouchesPair
+// AC1 floor = cap × 4 (20 at cap 5, configurable) · AC2 dispatchable_disjoint via checkTouchesPair
 // AC3 pool-big-but-all-colliding self-report + no-false-report-on-criterion-met · AC4 disjointness
 //   ranks before kind, incl. in-flight · AC5 touchesResolve guard kept · AC6 cost asymmetry doc
-// AC7 real use · AC8 node:test + @test-group governance
+// AC7 real use · AC8 node:test + @test-group engine
 //
 // Run: scripts/test.sh plugin/test/ready-pool-check.test.mjs
 
@@ -1064,12 +1064,12 @@ test("artifactsComplete recognizes finding-shape draft AC/DoD headings (gap-todo
   assert.ok(rNoAc.missing.includes("ac"), `missing should include ac, got ${rNoAc.missing}`);
 });
 
-// ── AC1: floor = cap × 4 (12 at cap 3) — single source, no hardcoded 3 ────────────────────────────
+// ── AC1: floor = cap × 4 (20 at cap 5) — single source, no hardcoded literal ──────────────────────
 
-test("POOL_FLOOR = cap × 4 (12 at cap 3) — single source, no hardcoded 3 (AC1)", () => {
-  assert.equal(CONCURRENCY_CAP_DEFAULT, 3);
+test("POOL_FLOOR = cap × 4 (20 at cap 5) — single source from defaultDriverConfig().worker.cap (AC1)", () => {
+  assert.equal(CONCURRENCY_CAP_DEFAULT, 5);
   assert.equal(POOL_FLOOR_MULT_DEFAULT, 4);
-  assert.equal(POOL_FLOOR, 12, "default floor = 3 × 4");
+  assert.equal(POOL_FLOOR, 20, "default floor = 5 × 4 (dispatch single source)");
   assert.equal(computePoolFloor(3, 4), 12);
   assert.equal(computePoolFloor(3), 12, "floorMult defaults to 4");
   assert.equal(computePoolFloor(2, 4), 8);
@@ -1202,6 +1202,55 @@ test("pool < floor but no qualified candidate ⇒ no promotions", (t) => {
   assert.equal(byId["gap-no-dod"].missingArtifacts.includes("dod"), true);
   assert.equal(byId["gap-child"].eligible, false);
   assert.equal(byId["gap-child"].depsReady, false);
+});
+
+// ── DEPENDS_ON READS DEVELOP REF (gap-ready-pool-depends-on-status-stale-read) ─────────────────────
+// The depends_on/parent statusOf in depsReadyFor used to read the `allTasks` Map — built from the
+// manager working branch's DISK (a stale agent-proxy, 硬规则 4b) — so a dependency already `done` on
+// develop still reported blocking. The fix reads the canonical develop ref via readTaskStatusAtRef.
+// AC1/AC3: dep done on develop + stale disk ⇒ deps-ready (not blocking). AC2: dep genuinely not done
+// on develop ⇒ still blocking (fail-closed unchanged). Needs a REAL git repo (the ref read is
+// `git cat-file --batch`), created inline like the git-history tests above.
+
+test("depends_on statusOf reads develop ref, not the stale disk allTasks (gap-ready-pool-depends-on-status-stale-read AC1/AC2/AC3)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-depref-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+
+  // Deps as they exist ON DEVELOP: gap-dep-done is done; gap-dep-todo is genuinely todo.
+  writeTask(root, "gap-dep-done", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-dep-todo", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+  fs.writeFileSync(path.join(root, ".gitkeep"), "base\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "deps as committed on develop");
+  git("branch", "-q", "develop"); // develop ← the snapshot where gap-dep-done is done
+
+  // The manager working branch's DISK goes STALE: gap-dep-done flips back to todo on disk, while
+  // develop still has it done. (gap-dep-todo stays todo on both — the AC2 negative control.)
+  writeTask(root, "gap-dep-done", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+
+  // Two todo candidates, each depending on one dep (patched in after writeTask — writeTask has no
+  // dependsOn param).
+  for (const [id, dep] of [["gap-cand-done", "gap-dep-done"], ["gap-cand-todo", "gap-dep-todo"]]) {
+    writeTask(root, id, {
+      status: "todo", labels: ["gap"], parent: null, children: [],
+      body: fourArtifactBody({ touches: [`- code/${id}.ts (new)`] }),
+    });
+    const f = path.join(root, "tasks", `${id}.md`);
+    fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace("parent: null", `depends_on:\n  - ${dep}\nparent: null`));
+  }
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  const byId = Object.fromEntries(r.candidates.map((c) => [c.id, c]));
+  assert.equal(byId["gap-cand-done"].depsReady, true,
+    "dep done on develop ⇒ deps-ready even though the disk allTasks view is stale (todo)");
+  assert.equal(byId["gap-cand-todo"].depsReady, false,
+    "dep genuinely not done on develop ⇒ still blocking (fail-closed unchanged)");
 });
 
 // ── COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC2/AC3) ─────────────────────
@@ -1504,7 +1553,7 @@ test("CLI smoke: --root produces JSON with pool/dispatchable_disjoint/floor (exi
   const parsed = JSON.parse(out);
   assert.equal(typeof parsed.pool, "number");
   assert.equal(parsed.pool, 1);
-  assert.equal(parsed.floor, 12, "default floor = cap×4 = 12");
+  assert.equal(parsed.floor, 20, "default floor = cap×4 = 20 (dispatch single source)");
   assert.equal(typeof parsed.dispatchable_disjoint, "number");
   assert.equal(typeof parsed.criterion_met, "boolean");
   assert.equal(typeof parsed.scanned, "number");
@@ -2361,12 +2410,12 @@ test("applyPromotions commits the status write — git status clean + committed 
   assert.equal(subject, "tasks: gap-candidate todo→ready（promotion-driver 机械晋升）", "the commit subject names the task and transition");
 });
 
-// ── DETACH PROPAGATION (gap-fan-in-ff-ref-update-detach-develop AC6) ─────────────────────────
+// ── DETACH PROPAGATION (gap-fan-in-ff-ref-update-detach-develop AC6 → gap-doc-develop-sync-…-resolution) ──
 // The main checkout sits on a doc-only work branch (main/manager-doc) while develop is bare (the
 // detach). A promotion flip committed on the doc branch must reach develop — fast-forward push —
 // so task worktrees branching from develop see the new status (otherwise dispatch reads ready on the
 // doc branch while the worktree base still has the old status). Non-ff (develop advanced independently)
-// ⇒ merge develop first, then push.
+// ⇒ mechanical ff-only 失败 ⇒ 升级语义兜底（semanticSyncDocToDevelop：merge -X theirs + ff，develop 权威）。
 
 test("propagateDocBranchToDevelop: doc-branch flip fast-forwards to develop (AC6)", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `propagate-ff-${Date.now()}-`));
@@ -2394,7 +2443,7 @@ test("propagateDocBranchToDevelop: doc-branch flip fast-forwards to develop (AC6
     "AC6: develop fast-forwarded to the doc branch head — the flip is visible to task worktrees");
 });
 
-test("propagateDocBranchToDevelop: develop advanced independently ⇒ merge then push (non-ff reconcile)", (t) => {
+test("propagateDocBranchToDevelop: develop advanced independently ⇒ semantic sync reconcile (non-ff)", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `propagate-nonff-${Date.now()}-`));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
@@ -2420,10 +2469,17 @@ test("propagateDocBranchToDevelop: develop advanced independently ⇒ merge then
 
   propagateDocBranchToDevelop(root);
 
-  assert.notEqual(git("rev-parse", "develop"), developHead, "develop advanced (reconcile merge landed)");
-  assert.equal(git("status", "--porcelain"), "", "reconcile merge left the doc branch clean");
+  assert.notEqual(git("rev-parse", "develop"), developHead, "develop advanced (semantic sync landed)");
+  // 语义兜底把 ff 失败/结果写进 .quay/doc-develop-sync.jsonl（gitignored 运行时遥测，非合并残留）——
+  // 干净态判据 = 无 unmerged 路径 + 无 tracked 改动（⛔ 把 untracked .quay 遥测误判成脏树）。
+  assert.equal(git("ls-files", "-u"), "", "semantic sync left no unmerged paths");
+  assert.equal(
+    git("status", "--porcelain").split("\n").filter((l) => l.trim() && !l.includes(".quay/")).join("\n"),
+    "",
+    "semantic sync left no tracked residue (excluding untracked .quay/ telemetry)",
+  );
   assert.match(git("show", "develop:tasks/gap-flip.md"), /^status: ready$/m,
-    "the doc-branch flip is visible on develop after reconcile");
+    "the doc-branch flip is visible on develop after semantic sync");
 });
 
 test("applyPromotions in a repo-less root still lands the write (committed=false, no throw)", (t) => {
@@ -2438,6 +2494,37 @@ test("applyPromotions in a repo-less root still lands the write (committed=false
   assert.equal(r.applied_promotions[0].committed, false, "repo-less root ⇒ the commit is a no-op, surfaced as committed=false");
   const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8"));
   assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "the status write still lands on disk");
+});
+
+test("applyPromotions 每轮无条件双向同步——池空无翻转也同步（⛔ 仍只翻转触发 ⇒ 假，缺口 2026-08-31）", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-pool-empty-sync-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-q", "-b", "develop", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  // 一个已 done 的任务（非 todo ⇒ 非晋升候选 ⇒ 池空无翻转）。
+  writeTask(root, "gap-done", { status: "done", labels: ["gap"], body: fourArtifactBody({ checkedAc: 4 }) });
+  git("add", ".");
+  git("commit", "-q", "-m", "init with done task");
+  git("checkout", "-q", "-b", "main/manager-doc");
+  // develop 前进（模拟 fan-in 落地），doc 落后 develop——池空无翻转也必须同步。
+  git("checkout", "-q", "develop");
+  writeTask(root, "gap-landed", { status: "done", labels: ["gap"], body: fourArtifactBody({ checkedAc: 4 }) });
+  git("add", ".");
+  git("commit", "-q", "-m", "develop-only: gap-landed done (fan-in)");
+  git("checkout", "-q", "main/manager-doc");
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+  const r = applyPromotions(opts);
+  assert.equal(r.should_apply, false, "无合格候选 ⇒ 池空无翻转（缺口的前提）");
+  assert.equal(
+    git("rev-parse", "main/manager-doc"),
+    git("rev-parse", "develop"),
+    "池空无翻转 ⇒ applyPromotions 仍双向同步（doc 追上 develop）",
+  );
 });
 
 // ── MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard) ──────────
@@ -3779,4 +3866,51 @@ test("dispatch reads task status from the develop ref, not the stale working tre
   // Negative control: WITHOUT the develop read (the old disk read), the stale `ready` WOULD be seen.
   const rDisk = analyzeTasks({ tasksDir, root });
   assert.equal(rDisk.ready.includes("gap-stale-status"), true, "the stale working tree alone would still see it ready (the defect)");
+});
+
+// ── PROMOTION DECISION READS DEVELOP (tasks/gap-dispatch-reads-stale-main-checkout-task-status, AC6) ──
+// The write side (gap-ff-propagate-…, 1e7fb9be4) flips develop to `ready` and RESTORES the manager
+// working tree's disk to the pre-promotion `todo`. `ready-pool-check --apply` must therefore JUDGE
+// candidates from the develop ref — a disk read re-promotes the same task every tick (duplicate
+// same-content commits). This pins the promotion PATH (--apply), not just the dispatch-read path.
+
+test("AC6 — --apply promotion decision reads develop: develop=ready + disk=todo ⇒ no re-promotion", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-ac6-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "develop", "-q", ".");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  // develop: the task is ALREADY promoted (ready) — the write side flipped it there.
+  writeTask(root, "gap-promoted", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "gap-promoted: promoted to ready on develop");
+  // Stale disk: the write side restored the working tree to the pre-promotion status (todo, self-touch).
+  git("checkout", "-q", "-b", "manager-stale");
+  writeTask(root, "gap-promoted", gapTask("gap-promoted"));
+  git("add", ".");
+  git("commit", "-q", "-m", "gap-promoted: restore todo on disk");
+
+  // Falsifiability: develop carries ready; the stale working tree carries todo.
+  assert.equal(readTaskStatusAtRef(root, "develop", "gap-promoted"), "ready", "develop carries ready");
+  assert.match(fs.readFileSync(path.join(root, "tasks", "gap-promoted.md"), "utf8"), /^status:\s*todo/m, "stale disk carries todo");
+
+  // Negative control: the disk-read analysis (no taskReadRef) sees the stale todo as an eligible
+  // candidate — the exact re-promotion defect this AC closes.
+  const rDisk = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.equal(rDisk.promotions.some((p) => p.id === "gap-promoted"), true, "negative control: disk-read sees the stale todo as a candidate (the defect)");
+
+  // The promotion path: --apply must judge from develop ⇒ already-ready ⇒ zero promotions, zero writes.
+  const script = path.resolve(__dirname, "..", "scripts", "ready-pool-check.ts");
+  const out = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--cap", "3", "--floor-mult", "1", "--apply"],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.should_apply, false, "AC6: develop=ready ⇒ no promotion recommended (⛔ 仍读盘上、重复晋升 ⇒ 假)");
+  assert.equal(parsed.applied_promotions.length, 0, "AC6: zero promotions applied");
+  // The disk stays todo — the promotion did NOT re-land.
+  assert.match(fs.readFileSync(path.join(root, "tasks", "gap-promoted.md"), "utf8"), /^status:\s*todo/m, "AC6: disk stays todo (no duplicate promotion)");
 });

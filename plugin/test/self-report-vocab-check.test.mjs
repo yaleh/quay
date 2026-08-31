@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // self-report-vocab-check.test.mjs — tasks/gap-reanchor-must-converge-inner-self-reported-vocabulary
 // (AC1/AC2/AC4/AC5): the inner self-reported-vocabulary audit + semantic-convergence criterion.
 //
@@ -18,7 +18,7 @@
 //     this `converged`, not by "re-anchor happened" (invariant reanchor_effectiveness_is_convergence).
 //   - AC1/AC3: the outer tick doc (orchestrator-loop-tick.md 1c) wires the audit invocation and the
 //     convergence criterion, and cross-annotates the doc-side pairing.
-//   - AC5: this file uses node:test and declares // @test-group governance.
+//   - AC5: this file uses node:test and declares // @test-group engine.
 //
 // Run:
 //   scripts/test.sh plugin/test/self-report-vocab-check.test.mjs
@@ -198,10 +198,10 @@ test("AC3 — the outer tick cross-annotates the doc-side pairing (both alone ca
   assert.match(tick, /单独做任一条都解决不了/, "cross-annotation: neither side alone solves the problem");
 });
 
-// ── AC5: this file uses node:test + @test-group governance ────────────────────────────────────────
+// ── AC5: this file uses node:test + @test-group engine ────────────────────────────────────────
 
-test("AC5 — this file declares node:test and // @test-group governance", () => {
+test("AC5 — this file declares node:test and // @test-group engine", () => {
   const src = fs.readFileSync(new URL(import.meta.url), "utf8");
   assert.match(src, /import \{ test \} from "node:test"/);
-  assert.match(src, /\/\/ @test-group governance/);
+  assert.match(src, /\/\/ @test-group engine/);
 });

@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // cap-from-gate-hysteresis.test.mjs — gap-fixed-cap-5-dynamic-cap-retired. The DYNAMIC adaptive
 // concurrency cap is RETIRED (human ruling 2026-08-09): effective_cap is the FIXED constant 5,
 // regardless of cpu pressure / suite state / process budget. The band + hysteresis + budget logic
@@ -10,7 +10,7 @@
 // HYSTERESIS tests (AC3 negative control + AC3b stall convergence — the 223-min stall fix). The
 // AC3b stale-divergence test lives in cap-from-gate-stale-budget.test.mjs (its 8-sample run is the
 // file's dominant cost; splitting it out keeps every cap-from-gate file under the 50s band with
-// margin). The `@test-group governance` declaration is preserved so the main-phase membership stays
+// margin). The `@test-group engine` declaration is preserved so the main-phase membership stays
 // byte-identical.
 //
 // History (retired mechanism, kept for the observation semantics): the adaptive cap read cpu

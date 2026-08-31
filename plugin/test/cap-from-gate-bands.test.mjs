@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // cap-from-gate-bands.test.mjs — gap-fixed-cap-5-dynamic-cap-retired. The DYNAMIC adaptive concurrency
 // cap is RETIRED (human ruling 2026-08-09): effective_cap is the FIXED constant 5, regardless of cpu
 // pressure / suite state / process budget. The band + hysteresis + budget logic still RUNS as PURE
@@ -8,7 +8,7 @@
 // SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FIVE files split from the
 // original cap-from-gate.test.mjs (166s main-phase floor) by test concern — this file holds the
 // SIGNAL→BAND decision tests (AC2 avg10-vs-avg300 + AC5/AC6 GO/WAIT/EXTREME resource tracking).
-// The `@test-group governance` declaration is preserved so the main-phase membership stays
+// The `@test-group engine` declaration is preserved so the main-phase membership stays
 // byte-identical.
 //
 // History (retired mechanism, kept for the observation semantics):

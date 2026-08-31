@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // release-freshness-check.test.mjs — unit tests for the release freshness check
 // (gap-release-freshness-no-recut-mechanism, AC2/AC3).
 //
@@ -37,16 +37,8 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const CHECK = path.join(REPO_ROOT, "plugin", "scripts", "release-freshness-check.sh");
 const VERIFY_TS = path.join(REPO_ROOT, "plugin", "scripts", "verify-delivery-surface.ts");
 
-// Governance self-skip (AC7 @test-group governance, ADR-019 decision #1): in a DEFAULT
-// (product,engine) run this file reports `skipped`, not absent — QUAY_TEST_GROUPS is set to
-// product,engine on the default path, so the real tests run only with `--group governance`
-// or in the explicit-file form (QUAY_TEST_GROUPS unset).
-const GOV_SKIP_REASON =
-  process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")
-    ? "set QUAY_TEST_GROUPS=governance to run"
-    : false;
 function t(name, fn) {
-  test(name, GOV_SKIP_REASON ? { skip: GOV_SKIP_REASON } : {}, fn);
+  test(name, fn);
 }
 
 function git(cwd, ...args) {

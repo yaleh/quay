@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // inner-session-check.test.mjs — gap-outer-self-checks-and-creates-inner-session, AC1–AC6.
 //
 // Pins the outer cold-start step 3 self-check: the three-state determination of the inner

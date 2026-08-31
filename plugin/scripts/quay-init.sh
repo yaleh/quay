@@ -328,13 +328,16 @@ _dst_sha256() {
 copy_one() {
   local src="$1" dst="$2" mode="${3:-preserve}"
   local fname
-  fname="$(basename "$dst")"
+  # ${dst##*/} is the bash builtin for basename (no subprocess) — same for ${dst%/*} (dirname).
+  # All callers pass an absolute dst, so ${dst%/*} is always the parent dir (gap-quay-init-install-
+  # wall-clock-slow: per-file basename/dirname subprocess spawns in the copy loop).
+  fname="${dst##*/}"
 
   if [ ! -f "$dst" ]; then
     if [ "$DRY_RUN" = true ]; then
       echo "  would-copy: $dst"
     else
-      mkdir -p "$(dirname "$dst")"
+      mkdir -p "${dst%/*}"
       cp "$src" "$dst"
       echo "  copied: $dst"
     fi
@@ -357,7 +360,7 @@ copy_one() {
       local backup_dir="$WORKSPACE_ROOT/.quay/quay-init-backups/$BACKUP_TS"
       mkdir -p "$backup_dir"
       cp "$dst" "$backup_dir/$fname"
-      mkdir -p "$(dirname "$dst")"
+      mkdir -p "${dst%/*}"
       cp "$src" "$dst"
       echo "  cleaned-residue: $dst"
       echo "    backup: $backup_dir/$fname"
@@ -379,7 +382,7 @@ copy_one() {
         local backup_dir="$WORKSPACE_ROOT/.quay/quay-init-backups/$BACKUP_TS"
         mkdir -p "$backup_dir"
         cp "$dst" "$backup_dir/$fname"
-        mkdir -p "$(dirname "$dst")"
+        mkdir -p "${dst%/*}"
         cp "$src" "$dst"
         echo "  replaced-stale-install: $dst"
         echo "    backup: $backup_dir/$fname"
@@ -389,7 +392,7 @@ copy_one() {
       if [ "$DRY_RUN" = true ]; then
         echo "  would-overwrite (conflict, --force): $dst"
       else
-        mkdir -p "$(dirname "$dst")"
+        mkdir -p "${dst%/*}"
         cp "$dst" "$dst.bak.$(date +%s)"
         cp "$src" "$dst"
         echo "  overwritten (backed up): $dst"
@@ -409,7 +412,7 @@ copy_one() {
       if [ "$DRY_RUN" = true ]; then
         echo "  would-overwrite (conflict, --force): $dst"
       else
-        mkdir -p "$(dirname "$dst")"
+        mkdir -p "${dst%/*}"
         cp "$dst" "$dst.bak.$(date +%s)"
         cp "$src" "$dst"
         echo "  overwritten (backed up): $dst"
@@ -448,7 +451,7 @@ copy_dir() {
   for f in "$src_dir"/*; do
     [ -f "$f" ] || continue
     found=1
-    printf '%s\t%s\n' "$f" "$dst_dir/$(basename "$f")" >> "$manifest"
+    printf '%s\t%s\n' "$f" "$dst_dir/${f##*/}" >> "$manifest"
   done
   if [ "$found" = 0 ]; then
     rm -f "$manifest"
@@ -459,7 +462,7 @@ copy_dir() {
   rm -f "$manifest"
   for f in "$src_dir"/*; do
     [ -f "$f" ] || continue
-    copy_one "$f" "$dst_dir/$(basename "$f")"
+    copy_one "$f" "$dst_dir/${f##*/}"
   done
 }
 
@@ -1002,7 +1005,7 @@ _derive_loop_scripts_once() {
   #   tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
   #   inner-idle-log.ts, it0-split-or-commit-check.ts, pipe-exit-code-check.sh;
   #   transitive deps of the checkers (imported by them, not doc-referenced): gate-script-base.ts,
-  #   workflow-event-schema.mjs, task-schema.ts, touches-parser.ts, wiring-coverage-check.ts;
+  #   workflow-event-schema.mjs, task-schema.ts, touches-parser.ts, task-status.ts, wiring-coverage-check.ts;
   #   capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers): ships with
   #   the loop so an installed project can see what each laid-down check answers. Deliberate
   #   explicit addition (no doc references it by path — the catalog is self-describing).
@@ -1079,12 +1082,17 @@ _derive_loop_scripts_once() {
   #   sibling references in shell scripts), so without this explicit entry a cold-started consumer
   #   lays down test-framework-policy-check.ts without its imported lib and the check dies with
   #   ERR_MODULE_NOT_FOUND. Same class as touches-one-entry-one-path-check.ts above.
+  #   suite-params.ts (gap-suite-knobs-config-file-priority): full-suite-runner.ts is laid down via
+  #   plugin/workflows/fan-in-execute.js (rule (a)) and imports suite-params.ts via ESM `./suite-params.ts`
+  #   — an ESM relative `./` import is INVISIBLE to closure step (d) (same class as canonical-test-files.ts
+  #   above), so without this explicit entry a cold-started consumer lays down full-suite-runner.ts
+  #   without its suite-knob config reader and the runner dies with ERR_MODULE_NOT_FOUND.
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
-    gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
+    gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \
-    repo-root.sh repo-root.ts checker-io.ts driver-result.ts canonical-test-files.ts >> "$out"
+    repo-root.sh repo-root.ts checker-io.ts driver-result.ts canonical-test-files.ts suite-params.ts >> "$out"
   # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
   #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
   #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the
@@ -1106,30 +1114,58 @@ _derive_loop_scripts_once() {
     printf '%s\n' "$f" >> "$out"
   done
   sort -u "$out" -o "$out"
-  # (d) dependency closure — repeat until fixpoint
-  changed=1; round=0
-  while [ "$changed" -eq 1 ] && [ "$round" -lt 20 ]; do
-    changed=0; round=$((round + 1))
-    for s in $(cat "$out"); do
-      [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
-      # gap-delivery-laydown-dist-closure-gap: the closure regex must tolerate the PACKAGED
-      # two-segment form `${SCRIPT_DIR}/dist/X.js` (package.sh rewrites .ts refs to dist/X.js;
-      # the single-segment `[a-zA-Z0-9._-]*` truncated it to `dist` and the sed basename-strip
-      # then dropped the dist/ prefix — the bundle never entered the laydown set). Allow `/` in
-      # the matched path and strip ONLY the ${SCRIPT_DIR}/ or $SCRIPT_DIR/ prefix (NOT the
-      # basename-strip `s#.*/##`, which truncates `dist/X.js` to `X.js`) so the scripts/-relative
-      # path `dist/X.js` (or the source-tree single-segment `X.ts`) resolves under scripts/.
-      for dep in $(grep -oE '\$\{SCRIPT_DIR\}/[a-zA-Z0-9][a-zA-Z0-9._/-]*|\$SCRIPT_DIR/[a-zA-Z0-9][a-zA-Z0-9._/-]*' "$PLUGIN_ROOT/scripts/$s" 2>/dev/null | sed -E 's#^\$\{SCRIPT_DIR\}/##; s#^\$SCRIPT_DIR/##' | sort -u || true); do
-        [ -n "$dep" ] || continue
-        case " $NEVER_LAYDOWN " in *" $dep "*) continue ;; esac
-        [ -f "$PLUGIN_ROOT/scripts/$dep" ] || continue
-        if ! grep -qxF "$dep" "$out"; then
-          printf '%s\n' "$dep" >> "$out"
-          changed=1
-        fi
-      done
-    done
-  done
+  # (d) dependency closure — repeat until fixpoint. ONE python3 pass replaces the retired per-script
+  # `grep -oE … | sed … | sort -u` triple + per-dep `grep -qxF` (the per-script subprocess spawns were
+  # the dominant wall-clock cost of derive_loop_scripts; gap-quay-init-install-wall-clock-slow AC1/AC3
+  # batched ~1000 fork/execve per pass into ONE). The closure regex keeps the PACKAGED two-segment
+  # form `${SCRIPT_DIR}/dist/X.js` (gap-delivery-laydown-dist-closure-gap: package.sh rewrites .ts refs
+  # to dist/X.js; a single-segment `[a-zA-Z0-9._-]*` truncated it to `dist` and the sed basename-strip
+  # then dropped the dist/ prefix — the bundle never entered the laydown set). Allow `/` in the matched
+  # path and strip ONLY the ${SCRIPT_DIR}/ or $SCRIPT_DIR/ prefix (NOT a basename-strip) so the
+  # scripts/-relative path `dist/X.js` resolves under scripts/. The python pass mirrors the retired
+  # loop EXACTLY: iterate the round-start snapshot (`for s in $(cat "$out")`), append new deps (picked
+  # up next round), membership = the LIVE set (`grep -qxF "$dep" "$out"`), same filters (non-empty →
+  # not NEVER_LAYDOWN → exists under scripts/), same round<20 bound, same sorted-unique output.
+  python3 - "$out" "$PLUGIN_ROOT" "$NEVER_LAYDOWN" <<'PYEOF'
+import sys, os, re
+out_path, root, never = sys.argv[1], sys.argv[2], set(sys.argv[3].split())
+pat = re.compile(r'(?:\$\{SCRIPT_DIR\}/|\$SCRIPT_DIR/)([a-zA-Z0-9][a-zA-Z0-9._/-]*)')
+def read(p):
+    try:
+        with open(p, "rb") as fh:
+            return fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+names = []
+with open(out_path, "r", encoding="utf-8") as fh:
+    for ln in fh:
+        ln = ln.strip("\n")
+        if ln:
+            names.append(ln)
+seen = set(names)
+changed, rnd = True, 0
+while changed and rnd < 20:
+    changed = False
+    rnd += 1
+    for s in names[:]:                        # the round-start snapshot ($(cat "$out"))
+        script = os.path.join(root, "scripts", s)
+        if not os.path.isfile(script):        # [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
+            continue
+        for dep in pat.findall(read(script)):
+            if not dep:                       # [ -n "$dep" ] || continue
+                continue
+            if dep in never:                  # case " $NEVER_LAYDOWN " in *" $dep "*
+                continue
+            if not os.path.isfile(os.path.join(root, "scripts", dep)):  # [ -f …/$dep ]
+                continue
+            if dep not in seen:               # ! grep -qxF "$dep" "$out"
+                names.append(dep)
+                seen.add(dep)
+                changed = True
+with open(out_path, "w", encoding="utf-8") as fh:
+    for x in sorted(set(names)):              # sort -u "$out"
+        fh.write(x + "\n")
+PYEOF
   sort -u "$out"
   rm -f "$out"
 }
@@ -1297,6 +1333,42 @@ _read_references() {
   return 0
 }
 
+# _read_declarations — stability-checked declaration reads (self-create + reference-doc), EXTRACTED
+# from verify_referenced_landed (gap-quay-init-reduce-real-install-count) so a torn-read test can
+# SOURCE quay-init.sh and call it directly (免完整安装) instead of running a full --loop install.
+# Reads the machine-readable `<!-- self-create: … -->` / `<!-- reference-doc: … -->` declarations in
+# plugin/skills/init/SKILL.md with the SAME multi-attempt stability check the gate has always used:
+# two independent reads must agree AND the always-present sentinel lines must be in the agreed
+# snapshot. On success it sets the globals QUAY_INIT_SELFCREATE / QUAY_INIT_REFDOC (newline-separated
+# sets) and returns 0; on exhaustion (all attempts torn/inconsistent) it sets them to the LAST
+# snapshot and returns 1. verify_referenced_landed consumes the globals; a direct caller uses the
+# return code.
+_read_declarations() {
+  local attempt=1 s r s2 r2
+  for attempt in 1 2 3; do
+    s="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
+    r="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
+    # Stability check: a SECOND, independent read must return the SAME sets. A transiently
+    # incomplete read (that kept the old 2-line sentinel but dropped a later declaration) will
+    # differ from a full read here, so this is strictly stronger than the retired sentinel.
+    s2="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
+    r2="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
+    # The original 2-line sentinel is kept as a cheap additional guard on top of stability:
+    # the always-present sentinel lines must be in the agreed snapshot too (a read torn before
+    # them is caught even if both reads agree on the torn set). A genuinely-missing declaration
+    # file never passes either guard.
+    if [ "$s" = "$s2" ] && [ "$r" = "$r2" ] \
+      && printf '%s\n' "$s" | grep -qxF 'orchestration/tick-log.md' \
+      && printf '%s\n' "$r" | grep -qxF 'orchestration/manager-tick-log.md'; then
+      QUAY_INIT_SELFCREATE="$s"; QUAY_INIT_REFDOC="$r"; return 0
+    fi
+    [ "$attempt" -lt 3 ] && sleep 0.2
+  done
+  # All 3 reads incomplete or mutually inconsistent — keep the LAST snapshot; the per-reference
+  # loop in verify_referenced_landed will fail on a genuine miss (real drift is never masked).
+  QUAY_INIT_SELFCREATE="$s"; QUAY_INIT_REFDOC="$r"; return 1
+}
+
 verify_referenced_landed() {
   local ws="$1" missing=0 closure_missing=0 r sd script
   local refs selfcreate refdoc
@@ -1321,33 +1393,9 @@ verify_referenced_landed() {
   # nondeterministic point) differs from a full read, so it retries; only two agreeing reads are
   # accepted as complete. A genuinely-undeclared ref is absent from every read, so real drift
   # still fails (negative control unchanged).
-  _read_declarations() {
-    local attempt=1 s r s2 r2
-    for attempt in 1 2 3; do
-      s="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
-      r="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
-      # Stability check: a SECOND, independent read must return the SAME sets. A transiently
-      # incomplete read (that kept the old 2-line sentinel but dropped a later declaration) will
-      # differ from a full read here, so this is strictly stronger than the retired sentinel.
-      s2="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
-      r2="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
-      # The original 2-line sentinel is kept as a cheap additional guard on top of stability:
-      # the always-present sentinel lines must be in the agreed snapshot too (a read torn before
-      # them is caught even if both reads agree on the torn set). A genuinely-missing declaration
-      # file never passes either guard.
-      if [ "$s" = "$s2" ] && [ "$r" = "$r2" ] \
-        && printf '%s\n' "$s" | grep -qxF 'orchestration/tick-log.md' \
-        && printf '%s\n' "$r" | grep -qxF 'orchestration/manager-tick-log.md'; then
-        selfcreate="$s"; refdoc="$r"; return 0
-      fi
-      [ "$attempt" -lt 3 ] && sleep 0.2
-    done
-    # All 3 reads incomplete or mutually inconsistent — keep the LAST snapshot; the per-reference
-    # loop below will fail on a genuine miss (real drift is never masked by retries).
-    selfcreate="$s"; refdoc="$r"; return 1
-  }
-  selfcreate="" refdoc=""
   _read_declarations
+  selfcreate="$QUAY_INIT_SELFCREATE"
+  refdoc="$QUAY_INIT_REFDOC"
   # The reference set is derived once, STABILITY-CHECKED (two agreeing passes — _read_references),
   # so the landed-scan below runs against a deterministic snapshot (gap-verify-referenced-landed-
   # concurrency-hardening-insufficient: the reference-scan grep was the last single-pass "裸 grep"
@@ -1755,6 +1803,18 @@ if [ "$DO_CHECK_DEPENDENCY_CLOSURE" = true ]; then
   exit $?
 fi
 
+# ── library mode (gap-quay-init-reduce-real-install-count) ────────────────────────────────────────────
+# When SOURCED (not executed as $0), stop here — the caller wants to invoke a derivation/stability
+# function directly (derive_loop_scripts / _read_declarations / _read_references /
+# verify_referenced_landed) without running a full install. Every function + its deps
+# (mechanism_corpus / bare_resolved_scripts / consolidated_member_files) and the PLUGIN_ROOT /
+# NEVER_LAYDOWN environment are defined ABOVE this guard; the install flow below must not run.
+# The torn-read family (quay-init.test.mjs + quay-init-loop-consumer-doc-refs.test.mjs) sources this
+# script and calls the function it exercises, so a stability-check test no longer pays a ~33s install.
+if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
+  return 0
+fi
+
 # ── categories ─────────────────────────────────────────────────────────────────────────────────────
 echo "quay-init (plugin v${PLUGIN_VERSION})"
 
@@ -2094,7 +2154,7 @@ PYEOF
     mkdir -p "$WORKSPACE_ROOT/plugin/probes"
     for pprobe in "$PLUGIN_ROOT"/probes/*; do
       [ -f "$pprobe" ] || continue
-      copy_one "$pprobe" "$WORKSPACE_ROOT/plugin/probes/$(basename "$pprobe")" clean
+      copy_one "$pprobe" "$WORKSPACE_ROOT/plugin/probes/${pprobe##*/}" clean
     done
     echo "  probes: copied from plugin/probes/ (routine-track probe specs — DIR-056)"
   else

@@ -1,7 +1,7 @@
 // serve-tests.ts — /tests + /tests/file route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import path from "node:path";
 import { readTests, type TestsResult, type TestRunRecord } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote } from "./serve-render.ts";
@@ -59,30 +59,141 @@ export function clipSuiteLoadSamplesToWindow(samples: SuiteLoadSample[], startMs
   return samples.filter((s) => s.t >= startMs && s.t <= endMs);
 }
 
+// ── gap-tests-load-curve-time-window-fallback — two-level load resolution ─────────────────────
+//
+// The /tests load lookup used to key ONLY off record.runId (suite-load-<runId>.jsonl). The
+// mechanical fan-in path broke that key for a stretch of rounds (#692+): red records carry the
+// literal runId "wk-prod-*", green records carry NO runId, while the load file is keyed by the
+// runner UUID / fm-* token. gap-mechanical-fan-in-per-suite-runid-unified fixed NEW rounds; this
+// fallback recovers the HISTORICAL broken-key rounds by matching on the round's declared
+// [startedAt, startedAt+durationMs] time window instead of the (unreliable) id. Two levels:
+//   ① runId exact hit — the post-fix rounds, and every pre-#692 round, keep keying directly.
+//   ② window fallback — when the runId is absent or maps to no samples, find the load file whose
+//      samples fall INSIDE the round's window (matching on sample TIME, not the writer's id).
+// The page no longer depends on the writer's id convention — the same principle as the strict-
+// history surface (the display reads the data-plane ledger, not the control-plane's internal id).
+
 /**
- * The current `.quay/full-suite-state.json` run identity (runId + startedAt + state) — the load
- * curve's data source. Absent/unparseable file ⇒ all-null (never throw). `runId` maps back to a
- * verification-round record's `round`/`startedAt` (gap-web-tests-three-sections-round-drift AC1).
+ * Read a suite-load file's first + last sample timestamp (epoch ms) WITHOUT a full-file read — the
+ * per-file min/max index the window fallback matches on (the proposal's 「首末样本时间小索引」, so
+ * ~200 files are matched without parsing them all). The sampler appends in monotonically increasing
+ * `t` (append-only, one sample per interval), so the first valid line is the min and the last valid
+ * line is the max. A torn trailing line (partial write) is skipped by scanning backward. null bounds
+ * mean the file has no parseable sample timestamp (empty / all-malformed) and can never match.
  */
-interface CurrentSuiteState {
-  runId: string | null;
-  startedAt: string | null;
-  state: string | null;
-}
-
-function readCurrentSuiteState(root: string): CurrentSuiteState {
+function readFileSampleTBounds(file: string): { min: number | null; max: number | null } {
+  let size: number;
   try {
-    const j = JSON.parse(readFileSync(path.join(root, ".quay", "full-suite-state.json"), "utf8"));
-    return {
-      runId: typeof j?.runId === "string" && j.runId ? j.runId : null,
-      startedAt: typeof j?.startedAt === "string" && j.startedAt ? j.startedAt : null,
-      state: typeof j?.state === "string" && j.state ? j.state : null,
-    };
+    size = statSync(file).size;
   } catch {
-    return { runId: null, startedAt: null, state: null };
+    return { min: null, max: null };
   }
+  if (size === 0) return { min: null, max: null };
+
+  const parseT = (line: string): number | null => {
+    const s = line.trim();
+    if (!s) return null;
+    try {
+      const o = JSON.parse(s);
+      const t = o && typeof o === "object" ? (o as { t?: unknown }).t : undefined;
+      return typeof t === "number" && Number.isFinite(t) ? t : null;
+    } catch {
+      return null;
+    }
+  };
+
+  // A bounded head/tail chunk read (a sample line is a short single JSON line, so the first line is
+  // fully inside the head chunk and the last complete line is fully inside the tail chunk) — never a
+  // whole-file read, which is the full-scan this index exists to avoid.
+  const readChunk = (position: number, length: number): string => {
+    let fd: number | null = null;
+    try {
+      fd = openSync(file, "r");
+      const buf = Buffer.alloc(length);
+      const n = readSync(fd, buf, 0, length, position);
+      return buf.toString("utf8", 0, Math.max(0, n));
+    } catch {
+      return "";
+    } finally {
+      if (fd != null) {
+        try { closeSync(fd); } catch { /* ignore */ }
+      }
+    }
+  };
+
+  const headLen = Math.min(size, 4096);
+  let min: number | null = null;
+  for (const line of readChunk(0, headLen).split(/\r?\n/)) {
+    const t = parseT(line);
+    if (t != null) { min = t; break; }
+  }
+
+  const tailLen = Math.min(size, 16384);
+  let max: number | null = null;
+  const tailLines = readChunk(size - tailLen, tailLen).split(/\r?\n/);
+  for (let i = tailLines.length - 1; i >= 0; i--) {
+    const t = parseT(tailLines[i]);
+    if (t != null) { max = t; break; }
+  }
+
+  return { min, max };
 }
 
+/**
+ * Window fallback (level ②): find every `.quay/suite-load-*.jsonl` whose sample-time range
+ * [minT, maxT] overlaps [startMs, endMs] and return its samples clipped to the window. The overlap
+ * test uses the per-file first/last-sample index (readFileSampleTBounds — no full-file read), so
+ * only the (typically zero-or-one) matching file is fully parsed. A matching file with no in-window
+ * samples contributes nothing. Returns [] when nothing matches or the directory is unreadable — a
+ * no-match and a read-failure both degrade to no-curve (never a 500), the same as the exact-hit path.
+ */
+function readSuiteLoadSamplesByWindow(root: string, startMs: number, endMs: number): SuiteLoadSample[] {
+  const dir = path.join(root, ".quay");
+  let files: string[];
+  try {
+    files = readdirSync(dir).filter((f) => f.startsWith("suite-load-") && f.endsWith(".jsonl")).sort();
+  } catch {
+    return [];
+  }
+  const out: SuiteLoadSample[] = [];
+  for (const f of files) {
+    const { min, max } = readFileSampleTBounds(path.join(dir, f));
+    if (min == null || max == null) continue;
+    if (max < startMs || min > endMs) continue; // the file's samples fall entirely outside the window
+    const runId = f.slice("suite-load-".length, f.length - ".jsonl".length);
+    out.push(...clipSuiteLoadSamplesToWindow(readSuiteLoadSamples(root, runId), startMs, endMs));
+  }
+  return out;
+}
+
+/**
+ * Two-level load resolution (the fallback task's core): ① record.runId exact hit (post-fix rounds);
+ * ② window fallback (historical broken-key rounds) when the runId is absent or maps to no samples.
+ * `window` is the round's (or file's) declared [start, end] in epoch ms; when null (legacy: no
+ * durationMs) only the exact-hit path runs — the fallback has no window to match on.
+ */
+function resolveSuiteLoadSamples(
+  root: string,
+  runId: string | null | undefined,
+  window: { start: number; end: number } | null,
+): SuiteLoadSample[] {
+  // ① exact hit (priority): the ledger's own runId — post-fix rounds key here and win over any
+  //    window overlap (AC2: 「runId 精确命中的轮照常出曲线（优先于窗口回退）」).
+  if (runId) {
+    const raw = readSuiteLoadSamples(root, runId);
+    if (raw.length > 0) return window ? clipSuiteLoadSamplesToWindow(raw, window.start, window.end) : raw;
+  }
+  // ② window fallback: only meaningful when a window is computable (a round/file without durationMs
+  //    has no window to match on — AC3's legacy tolerance).
+  if (window) return readSuiteLoadSamplesByWindow(root, window.start, window.end);
+  return [];
+}
+
+// The /tests page is a HISTORY surface: it reads ONLY the data-plane ledger (verification-round.jsonl)
+// + per-runId telemetry (suite-load-<runId>.jsonl, keyed by the ledger's own runId). The control-plane
+// single-state file full-suite-state.json (gate signal; the D7 mirror writes only green; scope-annotated)
+// is deliberately NOT read here — a worktree red must not flip the main signal, and a history page must
+// not show a live/current state it cannot source from the record.
 function isPlottableSample(s: SuiteLoadSample): s is SuiteLoadSample & { loadavg: number } {
   return s.loadavg != null && Number.isFinite(s.loadavg);
 }
@@ -413,7 +524,6 @@ function renderTestsPage(
   tests: TestsResult,
   root: string,
   samples: SuiteLoadSample[] = [],
-  current: CurrentSuiteState = { runId: null, startedAt: null, state: null },
   selected: TestRunRecord | null = null,
   roundRequested: number | null = null,
 ): string {
@@ -422,19 +532,11 @@ function renderTestsPage(
   // names one (null on the default page, which keeps the pre-existing latest-run focus). The banner,
   // load-curve label, and timeline/table then all reference THAT round instead of the newest.
   const focus = selected;
-  // gap-web-tests-three-sections-round-drift AC1 — map the load curve's current runId
-  // (full-suite-state.json) back to its verification-round record so the three sections each name
-  // the round they reference (instead of all three claiming 「最近一轮」 while plotting different
-  // rounds). null when the current run is still running (no round record yet) or the record lacks
-  // runId (standalone full-suite-runner rows) — then the label falls back to the state's startedAt.
-  const currentRun = current.runId ? tests.runs.find((r) => r.runId === current.runId) ?? null : null;
-  const loadLabel = focus
-    ? roundLabel(focus)
-    : currentRun
-      ? roundLabel(currentRun)
-      : current.startedAt
-        ? `${shortUtcTime(current.startedAt)}${current.state === "running" ? " · 运行中" : ""}`
-        : "";
+  // gap-web-tests-three-sections-round-drift — the load curve keys off the LATEST ledger round's own
+  // runId (tests.runs[0]), so the three sections each name the round they reference and stay trivially
+  // consistent (no full-suite-state.json mapping). A still-running round has no ledger record yet, so
+  // the default page shows the newest COMPLETED round and never a live "运行中" label.
+  const loadLabel = focus ? roundLabel(focus) : roundLabel(latest);
   const bannerRun = focus ?? latest;
   const latestBanner = bannerRun
     ? html`<div style="border:1px solid var(--color-divider);background:var(--color-surface);padding:1rem;margin-bottom:1.5rem">
@@ -505,7 +607,7 @@ function renderTestsPage(
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>Tests — 验证轮记录</title></head>
     <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
       <h1>Tests — 验证轮记录</h1>
-      <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（suite-state 机制写入）${tests.currentState ? html` · 当前 suite-state: <strong>${escapeHtml(tests.currentState)}</strong>` : ""}</p>
+      <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（每轮 suite 完成时追加，红绿皆入账）</p>
       ${obsNote(tests.status, tests.reason)}
       ${focusNote}
       ${notFoundNote}
@@ -532,9 +634,8 @@ export async function handleTests(
   try {
     tests = readTests(cfg.workspaceRoot);
   } catch (err) {
-    tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [], currentState: null };
+    tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [] };
   }
-  const current = readCurrentSuiteState(cfg.workspaceRoot);
   // gap-webui-round-detail-page AC1 — /tests?round=N names a specific round; its OWN runId feeds the
   // load curve (absent runId → no curve, the same data-source degradation as the default page). A
   // non-numeric / non-matching round is treated as "not requested" / "not found" (never fabricated).
@@ -543,25 +644,19 @@ export async function handleTests(
   const selected = roundNum != null ? tests.runs.find((r) => r.round === roundNum) ?? null : null;
   // gap-tests-round-load-curve-time-window-clip — clip the load curve to the focused round's declared
   // [startedAt, startedAt+durationMs] window (the SAME helper as /tests/file). An uncomputable window
-  // (legacy row without durationMs; still-running current run with no round record) keeps the samples
-  // unclipped rather than fabricate a window or drop the curve.
+  // (a latest/selected round without durationMs — legacy/standalone rows) keeps the samples unclipped
+  // rather than fabricate a window or drop the curve.
   const samples = ((): SuiteLoadSample[] => {
+    // gap-tests-load-curve-time-window-fallback — two-level resolution (runId exact hit → window
+    // fallback), applied to BOTH the selected round and the default latest round.
     if (selected) {
-      if (!selected.runId) return [];
-      const raw = readSuiteLoadSamples(cfg.workspaceRoot, selected.runId);
-      const w = roundTimeWindowMs(selected);
-      return w ? clipSuiteLoadSamplesToWindow(raw, w.start, w.end) : raw;
+      return resolveSuiteLoadSamples(cfg.workspaceRoot, selected.runId, roundTimeWindowMs(selected));
     }
-    if (current.runId) {
-      const currentRun = tests.runs.find((r) => r.runId === current.runId) ?? null;
-      const raw = readSuiteLoadSamples(cfg.workspaceRoot, current.runId);
-      const w = roundTimeWindowMs(currentRun);
-      return w ? clipSuiteLoadSamplesToWindow(raw, w.start, w.end) : raw;
-    }
-    return [];
+    const latest = tests.runs[0] ?? null;
+    return resolveSuiteLoadSamples(cfg.workspaceRoot, latest?.runId, roundTimeWindowMs(latest));
   })();
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderTestsPage(tests, cfg.workspaceRoot, samples, current, selected, roundNum));
+  res.end(renderTestsPage(tests, cfg.workspaceRoot, samples, selected, roundNum));
 }
 
 // ── /tests/file — single-file cross-round detail page (gap-webui-test-file-detail-page) ──────────
@@ -687,13 +782,16 @@ function fileLoadFragment(
   filePath: string,
 ): { samples: SuiteLoadSample[]; label: string } | null {
   for (const r of runs) {
-    if (!r.runId || !r.perFile) continue;
+    if (!r.perFile) continue;
     const entry = r.perFile.find((f) => f.file === filePath);
     if (!entry) continue;
     const start = entry.startedAtMs;
     const end = entry.endedAtMs;
     if (typeof start !== "number" || typeof end !== "number") continue;
-    const samples = clipSuiteLoadSamplesToWindow(readSuiteLoadSamples(root, r.runId), start, end);
+    // gap-tests-load-curve-time-window-fallback — the file page reuses the SAME two-level resolution
+    // (runId exact hit → window fallback) with the file's [startedAtMs, endedAtMs] window, so a
+    // broken-key round (no/wrong runId) whose load file overlaps the file's run window still renders.
+    const samples = resolveSuiteLoadSamples(root, r.runId, { start, end });
     return { samples, label: roundLabel(r) };
   }
   return null;
@@ -748,7 +846,7 @@ export async function handleTestsFile(
   try {
     tests = readTests(cfg.workspaceRoot);
   } catch (err) {
-    tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [], currentState: null };
+    tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [] };
   }
   const fragment = fileLoadFragment(cfg.workspaceRoot, tests.runs, filePath);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
