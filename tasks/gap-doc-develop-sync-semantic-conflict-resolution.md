@@ -1,7 +1,7 @@
 ---
 id: gap-doc-develop-sync-semantic-conflict-resolution
 title: main/manager-doc↔develop 同步的语义冲突消解——替代 git merge 回退（develop 权威）
-status: todo
+status: ready
 labels:
   - gap
 parent: gap-main-manager-doc-doc-only-ff-only-tracking
