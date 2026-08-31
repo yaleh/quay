@@ -1,7 +1,7 @@
 ---
 id: gap-driver-filters-readtaskstatus-stale-main-checkout
 title: driver-filters.ts readTaskStatus 读主检出陈旧 status——(乙) taskReadRef:develop 漏网实例，notNeedsHuman 滤掉真 ready 任务
-status: todo
+status: ready
 labels:
   - gap
   - defect
