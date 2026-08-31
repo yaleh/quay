@@ -1,7 +1,7 @@
 ---
 id: gap-suite-load-sampler-early-red-truncates-load-curve
 title: suite-load-sampler 把 early-red 当套件结束——红轮 /tests 负载曲线截断在首败时刻（isSuiteRunning 判据未对齐 finishedAt 语义）
-status: ready
+status: done
 labels:
   - gap
   - defect
