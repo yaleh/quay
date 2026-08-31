@@ -129,6 +129,12 @@ test("bucketTestConcurrency — explicit --test-concurrency=N (both spellings) w
 
 test("deriveMainRoot — env override wins and non-git cwd fails open to repoRoot (never aborts the suite)", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rc-root-"));
+  // The full suite sets QUAY_MAIN_CHECKOUT in the ambient env (full-suite-runner.ts suiteEnv), which
+  // would leak into the "no env" assertion below and turn it into "env is the main checkout" — a false
+  // red. Unset it explicitly so "no env" truly means QUAY_MAIN_CHECKOUT absent (withSeams can't express
+  // "unset": it would write the string "undefined"). Save/restore so an ambient value (if any) survives.
+  const savedMain = process.env.QUAY_MAIN_CHECKOUT;
+  delete process.env.QUAY_MAIN_CHECKOUT;
   try {
     assert.equal(
       withSeams({ QUAY_MAIN_CHECKOUT: "/override/root" }, () => deriveMainRoot(tmp)),
@@ -137,6 +143,8 @@ test("deriveMainRoot — env override wins and non-git cwd fails open to repoRoo
     );
     assert.equal(deriveMainRoot(tmp), tmp, "no env + non-git cwd → repoRoot passthrough");
   } finally {
+    if (savedMain === undefined) delete process.env.QUAY_MAIN_CHECKOUT;
+    else process.env.QUAY_MAIN_CHECKOUT = savedMain;
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
