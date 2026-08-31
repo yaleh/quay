@@ -1,7 +1,7 @@
 ---
 id: gap-fixture-hash-omits-vendored-bundle
 title: quay-init-install-fixture _fixtureHash 漏 plugin/vendor/quay-native/dist/quay-native.js——vendored bundle 变更不重建 fixture，runtime 陈旧致 stale-runtime 恒红
-status: ready
+status: superseded
 labels:
   - gap
   - defect
@@ -9,6 +9,7 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded_by: gap-fixture-hash-omits-shipped-files
 ---
 **type:** execution
 
