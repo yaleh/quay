@@ -24,9 +24,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：两触发点分歧检测——grep 不再 `if (committed)` 单触发，改读两 ref 分歧；（⛔ 仍只翻转触发 ⇒ 假）。
-- [ ] AC2（能取假，双向）：doc→develop 与 develop→doc 双向都有生产调用者（grep 两方向各 ≥1）；（⛔ 仍单向 ⇒ 假）。
-- [ ] AC3（能取假，生产载体，硬规则 3c）：真实分歧触发后事件日志有记录 + 双向计数归 0——且只计实现落地之后的时间窗；（⛔ 落地后仍无事件/计数不归 0 ⇒ 假）。
+- [x] AC1（能取假，机制级）：两触发点分歧检测——grep 不再 `if (committed)` 单触发，改读两 ref 分歧；（⛔ 仍只翻转触发 ⇒ 假）。
+- [x] AC2（能取假，双向）：doc→develop 与 develop→doc 双向都有生产调用者（grep 两方向各 ≥1）；（⛔ 仍单向 ⇒ 假）。
+- [ ] AC3（能取假，生产载体，硬规则 3c）：真实分歧触发后事件日志有记录 + 双向计数归 0——且只计实现落地之后的时间窗；（⛔ 落地后仍无事件/计数不归 0 ⇒ 假）。机制已落地（syncDocDevelopBidirectional 双向分歧检测 + doc-develop-sync-bidirectional 落痕 driver-filters.ts + driver-filters.test.mjs AC1/AC2/AC3 双向/负控制 6 条绿），落地后时间窗的生产载体记录待外部验证（生产 driver 重启后读 .quay/doc-develop-sync.jsonl 有 doc-develop-sync-bidirectional 事件 + rev-list 两向计数归 0）。（待外部）
 
 ## Definition of Done
 
@@ -36,4 +36,6 @@ extra:
 
 - plugin/scripts/ready-pool-check.ts（触发点改分歧检测）
 - plugin/scripts/driver-filters.ts（触发点改分歧检测 + syncDevelopToDoc 双向）
+- plugin/test/driver-filters.test.mjs（AC1/AC2/AC3 双向分歧检测同步测试）
+- plugin/test/ready-pool-check.test.mjs（applyPromotions 每轮无条件双向同步——池空无翻转也同步测试）
 - tasks/gap-sync-trigger-divergence-detection-bidirectional.md（自身）

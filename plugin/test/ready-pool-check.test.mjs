@@ -2496,6 +2496,37 @@ test("applyPromotions in a repo-less root still lands the write (committed=false
   assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "the status write still lands on disk");
 });
 
+test("applyPromotions 每轮无条件双向同步——池空无翻转也同步（⛔ 仍只翻转触发 ⇒ 假，缺口 2026-08-31）", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-pool-empty-sync-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-q", "-b", "develop", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  // 一个已 done 的任务（非 todo ⇒ 非晋升候选 ⇒ 池空无翻转）。
+  writeTask(root, "gap-done", { status: "done", labels: ["gap"], body: fourArtifactBody({ checkedAc: 4 }) });
+  git("add", ".");
+  git("commit", "-q", "-m", "init with done task");
+  git("checkout", "-q", "-b", "main/manager-doc");
+  // develop 前进（模拟 fan-in 落地），doc 落后 develop——池空无翻转也必须同步。
+  git("checkout", "-q", "develop");
+  writeTask(root, "gap-landed", { status: "done", labels: ["gap"], body: fourArtifactBody({ checkedAc: 4 }) });
+  git("add", ".");
+  git("commit", "-q", "-m", "develop-only: gap-landed done (fan-in)");
+  git("checkout", "-q", "main/manager-doc");
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+  const r = applyPromotions(opts);
+  assert.equal(r.should_apply, false, "无合格候选 ⇒ 池空无翻转（缺口的前提）");
+  assert.equal(
+    git("rev-parse", "main/manager-doc"),
+    git("rev-parse", "develop"),
+    "池空无翻转 ⇒ applyPromotions 仍双向同步（doc 追上 develop）",
+  );
+});
+
 // ── MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard) ──────────
 // The promotion commit path runs `git commit --no-verify`, so the pre-commit hook's Touches detector
 // never fires there (production: e7be44a0 landed a `serve-handlers.ts + serve.ts` bullet). The guard

@@ -33,6 +33,7 @@ import {
   syncDevelopToDoc,
   docBranchForkedFromDevelop,
   DOC_BRANCH,
+  syncDocDevelopBidirectional,
 } from "../scripts/driver-filters.ts";
 import { readTaskStatus as workerReadTaskStatus } from "../scripts/worker-driver.ts";
 
@@ -626,4 +627,93 @@ test("AC4 — 成功 ff 同步写生产载体事件（doc-develop-sync-ff-synced
     events.some((e) => e.event === "doc-develop-sync-ff-synced"),
     "成功同步落痕生产载体（⛔ 无记录 ⇒ 生产载体恒空，硬规则 3c 假）",
   );
+});
+
+// ── 双向分歧检测同步（gap-sync-trigger-divergence-detection-bidirectional）──────────────────────
+
+test("AC1 — 两触发点改分歧检测：markNeedsHuman 与 applyPromotions 不再 if(committed) 单触发 propagate", () => {
+  const df = fs.readFileSync(path.join(__dirname, "../scripts/driver-filters.ts"), "utf8");
+  const rpc = fs.readFileSync(path.join(__dirname, "../scripts/ready-pool-check.ts"), "utf8");
+  // 旧单触发形态（code 语句）不得再出现——⛔ 仍只翻转触发 ⇒ 假。
+  assert.doesNotMatch(df, /if\s*\(\s*committed\s*\)\s*propagateDocBranchToDevelop/, "driver-filters 不再 if(committed) 单触发 propagate");
+  assert.doesNotMatch(rpc, /if\s*\(\s*committed\s*\)\s*propagateDocBranchToDevelop/, "ready-pool-check 不再 if(committed) 单触发 propagate");
+  // 两触发点都改走分歧检测双向同步（读两 ref，不依赖翻转）。
+  assert.match(df, /syncDocDevelopBidirectional\s*\(\s*root\s*\)/, "markNeedsHuman 触发点改 syncDocDevelopBidirectional");
+  assert.match(rpc, /syncDocDevelopBidirectional\s*\(\s*opts\.root\s*\)/, "applyPromotions 触发点改 syncDocDevelopBidirectional（每轮无条件）");
+});
+
+test("AC2 — 双向：syncDocDevelopBidirectional 函数体同时调用 develop→doc 与 doc→develop 两方向", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../scripts/driver-filters.ts"), "utf8");
+  const fn = src.match(/export function syncDocDevelopBidirectional[\s\S]*?\n}/)?.[0] ?? "";
+  assert.match(fn, /syncDevelopToDoc\s*\(\s*root\s*\)/, "develop→doc 方向调用 syncDevelopToDoc");
+  assert.match(fn, /propagateDocBranchToDevelop\s*\(\s*root\s*\)/, "doc→develop 方向调用 propagateDocBranchToDevelop");
+});
+
+test("AC3 — 真实分歧（develop 前进）⇒ 双向同步后两向 rev-list 计数归 0 + 落痕事件", (t) => {
+  const root = makeGitRoot("bi-dev-ahead");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", DOC_BRANCH);
+
+  // develop 前进（纯 ff），doc 落后 develop。
+  git(root, "checkout", "-q", "develop");
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: done\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "develop: gap-a done");
+  git(root, "checkout", "-q", DOC_BRANCH);
+
+  const res = syncDocDevelopBidirectional(root);
+  assert.equal(res, "synced", "分歧 ⇒ 双向同步执行（synced）");
+  assert.equal(git(root, "rev-list", "--count", `develop..${DOC_BRANCH}`).trim(), "0", "doc 无 develop 未含提交");
+  assert.equal(git(root, "rev-list", "--count", `${DOC_BRANCH}..develop`).trim(), "0", "develop 无 doc 未含提交");
+  const events = fs.readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.ok(events.some((e) => e.event === "doc-develop-sync-bidirectional"), "分歧触发落痕 bidirectional 事件");
+});
+
+test("AC3 (doc 前进 ff) — doc→develop 的 ff 成功路径亦落痕 bidirectional 事件（⛔ propagate ff 静默 ⇒ 无记录 ⇒ 假）", (t) => {
+  const root = makeGitRoot("bi-doc-ahead");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", DOC_BRANCH);
+
+  // doc 前进（翻转），develop 停在 baseline。
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: done\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "doc: gap-a done");
+
+  const res = syncDocDevelopBidirectional(root);
+  assert.equal(res, "synced");
+  assert.equal(git(root, "rev-parse", "develop").trim(), git(root, "rev-parse", DOC_BRANCH).trim(), "develop 快进到 doc（ff push 成功）");
+  const events = fs.readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.ok(events.some((e) => e.event === "doc-develop-sync-bidirectional"), "doc 前进 ff 亦落痕 bidirectional 事件");
+});
+
+test("负控制 — 两 ref 相同 ⇒ already（no-op，不写事件）", (t) => {
+  const root = makeGitRoot("bi-already");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", DOC_BRANCH);
+
+  assert.equal(syncDocDevelopBidirectional(root), "already", "两 ref 同 commit ⇒ 无分歧");
+  assert.equal(fs.existsSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL)), false, "无分歧 ⇒ 不写事件（no-op）");
+});
+
+test("负控制 — 双分支未建 ⇒ no-refs（可区分取值，⛔ 与「无分歧 already」同形 ⇒ 假）", (t) => {
+  const root = makeGitRoot("bi-norefs");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-b", "---\nid: gap-b\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-b.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  assert.equal(syncDocDevelopBidirectional(root), "no-refs", "读 ref 失败 ⇒ no-refs（非「无分歧」）");
 });

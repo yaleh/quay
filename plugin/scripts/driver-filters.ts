@@ -507,6 +507,53 @@ export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): 
   }
 }
 
+// ── 双向分歧检测同步（gap-sync-trigger-divergence-detection-bidirectional）─────────────────────────
+// 两 driver 同步触发点原为「committed 翻转才触发」的单向 propagate——只在有翻转落地时触发且仅
+// doc→develop 单向。缺口 2026-08-31：池空无翻转时同步一次不跑，develop 靠 fan-in 前进 ⇒ 主检出
+// 落后 10 提交。本函数改【分歧检测】：读两 ref（main/manager-doc ↔ develop）不同即双向同步，⛔ 不依赖
+// 翻转落地。方向：
+//   - develop→doc = syncDevelopToDoc（机械 ff-only，develop 前进时把主检出快进）
+//   - doc→develop = propagateDocBranchToDevelop（ff-only + 语义兜底，主检出翻转/立案到达 develop）
+// 两 ref 相同 ⇒ 无分歧 ⇒ no-op（不写事件——每轮写会刷日志）。ref 读失败 / 分支未建（非 git / bare
+// test repo）⇒ 返回 "no-refs"（可区分取值，⛔ 与「无分歧 already」同形，硬规则 3b/6），不写事件
+// （写 .quay/ 会污染 repo-less/bare 单测临时目录的 clean-tree 断言）。分歧 ⇒ 双向同步 + 落痕
+// "doc-develop-sync-bidirectional"——doc→develop 的 ff 成功路径本身不写事件，本落痕是 AC3 生产载体的
+// 记录来源（「真实分歧触发后事件日志有记录」在 doc 前进的 ff 形态下仍取得到）。
+
+/** 读 ref 的 commit SHA（`git rev-parse <ref>`）。ref 不存在 / git 出错 ⇒ null（读不懂 ≠ 相等）。 */
+function revParse(root: string, ref: string): string | null {
+  try {
+    const out = execFileSync("git", ["-C", root, "rev-parse", ref], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+/** 双向分歧检测同步（gap-sync-trigger-divergence-detection-bidirectional）：读两 ref 不同即触发双向
+ *  同步（develop→doc 后 doc→develop）。返回独立取值：
+ *   - "no-refs" — 读 ref 失败 / 双分支未建（非 git / bare test repo）⇒ 无同步对象（⛔ 非「无分歧」）
+ *   - "already" — 两 ref 相同 ⇒ 无分歧（no-op，不写事件）
+ *   - "synced"  — 分歧 ⇒ 双向同步已执行 + 落痕 doc-develop-sync-bidirectional 事件 */
+export function syncDocDevelopBidirectional(root: string): string {
+  const docSha = revParse(root, DOC_BRANCH);
+  const developSha = revParse(root, "develop");
+  if (docSha === null || developSha === null) return "no-refs";
+  if (docSha === developSha) return "already";
+  const developToDoc = syncDevelopToDoc(root);
+  const docToDevelop = propagateDocBranchToDevelop(root);
+  writeDocDevelopSyncEvent(root, {
+    event: "doc-develop-sync-bidirectional",
+    phase: "done",
+    developToDoc,
+    docToDevelop: String(docToDevelop),
+  });
+  return "synced";
+}
+
 // ── needs-human 注记携带实际失败步（gap-needs-human-note-carries-step-verdict）───────────────────────
 // 原 worker-driver.ts 的「上次 exited-not-landed 失败原因」读法上收到本文件（与 readTaskStatus 同族：
 // 读 task/outcome 状态的单一真相源，⛔ worker-driver 不各写一份）。markNeedsHuman 与 worker 的续做
@@ -587,7 +634,7 @@ export function markNeedsHuman(root: string, id: string, reason: string): { id: 
   fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
   const rel = path.join("tasks", `${id}.md`);
   const committed = commitTaskFile(root, rel, `tasks: ${id} ${fromMatch[1]}→needs-human（重试上限机械翻转）`);
-  if (committed) propagateDocBranchToDevelop(root);
+  syncDocDevelopBidirectional(root); // 分歧检测双向同步（⛔ 不依赖 committed 翻转）
   return { id, ok: true, reason, committed };
 }
 

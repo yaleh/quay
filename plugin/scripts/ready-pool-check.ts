@@ -161,7 +161,7 @@ import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
 // AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（depsSatisfied 谓词同一份实现，
 // ⛔ 不各写一遍「逐个查 status !== done」的循环）。
-import { allDepsDone, commitTaskFile, propagateDocBranchToDevelop } from "./driver-filters.ts";
+import { allDepsDone, commitTaskFile, syncDocDevelopBidirectional } from "./driver-filters.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
 // criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
@@ -2519,7 +2519,6 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
 function commitTaskStatus(root, id, from, to) {
   const rel = path.join("tasks", `${id}.md`);
   const committed = commitTaskFile(root, rel, `tasks: ${id} ${from}→${to}（promotion-driver 机械晋升）`);
-  if (committed) propagateDocBranchToDevelop(root);
   return committed;
 }
 
@@ -2577,6 +2576,11 @@ export function applyPromotions(opts) {
       applied.push({ ...out, deliveryCritical, committed });
     }
   }
+  // 分歧检测双向同步（gap-sync-trigger-divergence-detection-bidirectional）：每轮无条件触发——读两 ref
+  // （main/manager-doc ↔ develop）不同即双向同步，⛔ 不依赖 shouldApply/翻转落地（池空无翻转也要同步，
+  // 缺口 2026-08-31 主检出落后 10 提交）。syncDocDevelopBidirectional 内部按分歧门控，无分歧/非 git
+  // no-op。
+  syncDocDevelopBidirectional(opts.root);
   return { ...result, should_apply: shouldApply, applied_promotions: applied };
 }
 
