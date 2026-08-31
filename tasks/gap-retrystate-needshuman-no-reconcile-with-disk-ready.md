@@ -1,7 +1,7 @@
 ---
 id: gap-retrystate-needshuman-no-reconcile-with-disk-ready
 title: worker-driver 内存 retryState.needsHuman 与磁盘 ready 翻转对账缺失——人重派被静默忽略；stop_reason backoff 字面量在候选被谓词滤空时误报
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -25,8 +25,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，对账）：人对已标 needs-human 的任务翻回 ready 后，下一轮驱动即重新可派（不重启即可恢复派发）；（⛔ 仍需重启 ⇒ 假）。
-- [ ] AC2（能取假，stop_reason 区分）：候选被谓词滤空与真快速死亡退避的 stop_reason 取值可区分（grep 两处独立字面量）；（⛔ 同字面量 ⇒ 假）。
+- [x] AC1（能取假，对账）：人对已标 needs-human 的任务翻回 ready 后，下一轮驱动即重新可派（不重启即可恢复派发）；（⛔ 仍需重启 ⇒ 假）。
+- [x] AC2（能取假，stop_reason 区分）：候选被谓词滤空与真快速死亡退避的 stop_reason 取值可区分（grep 两处独立字面量）；（⛔ 同字面量 ⇒ 假）。
 
 ## Definition of Done
 
