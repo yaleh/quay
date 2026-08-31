@@ -6,6 +6,11 @@ labels: [gap]
 type: execution
 ---
 
+> **退役标注（gap-suite-dynamic-waterline-scheduler，2026-08-31）**：本实验的独立 watcher
+> （`QUERY_MAIN_TAIL_OVERLAP` / `main_tail_overlap_wait` stall 检测）已被统一调度器吸收——调度器的
+> 单调水位（main 用剩余容量）**结构性**实现「main 提前」，无需 stall watcher。test.sh 的
+> main-tail-overlap 分支保留为 `QUAY_SUITE_SCHEDULER=0` 的 legacy fallback（标退役，非活跃路径）。
+
 ## Proposal
 
 **现象（director 2026-08-30 负载曲线实测）**：全量轮顺序 `static → serial+lowconc(重叠窗口) → main → end`，serial+lowconc 窗口有 **~130s 近空转尾部**。round 748 实测：窗口 48 采样中 23 个 stall<3%、loadavg 掉回 ~4（窗口地板由 full-suite-runner.test.mjs 211s + quay-init 安装族卡住，是 latency-bound 等待非 CPU 活）；整轮 613s 中 ~150s（24%）stall≈0。此时机器全空而 main 的 CPU 活在排队等窗口关。

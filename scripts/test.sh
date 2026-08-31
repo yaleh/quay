@@ -1085,6 +1085,50 @@ run_selected() {
     # preserves argv order. Same invariant as the main phase (membership unchanged, order only).
     lpt_reorder_files serial_files
     lpt_reorder_files lowconc_files
+    # ── unified scheduler (gap-suite-dynamic-waterline-scheduler) ─────────────────────────────────
+    # Replaces the phased execution BELOW (static→serial→lowconc→main + PHASE_OVERLAP + the A
+    # main-tail-overlap watcher) with ONE event-driven loop. Each file keeps its group; serial ≤
+    # $SERIAL_CONCURRENCY and lowconc ≤ $LOWCONC_CONCURRENCY run in PARALLEL (independent budgets);
+    # main fills the remaining capacity (main budget − active low-group slots), rising monotonically
+    # toward the main budget as the low groups drain. No CPU-load detection — the waterline is a
+    # STRUCTURAL guarantee that absorbs the A watcher's stall-polling. The group lists are LPT-ordered
+    # by the lpt_reorder_files calls above; the scheduler trusts the input order. ONE-KEY ROLLBACK:
+    # QUAY_SUITE_SCHEDULER=0 falls through to the legacy phased path below (RETIRED — kept only as
+    # the fallback; the A watcher's QUERY_MAIN_TAIL_OVERLAP knob is likewise retired by the scheduler).
+    if [ "${QUAY_SUITE_SCHEDULER:-1}" = "1" ]; then
+      [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
+      echo "scheduler: unified group-budget scheduler (serial≤$SERIAL_CONCURRENCY lowconc≤$LOWCONC_CONCURRENCY main≤$(bucket_test_concurrency "$@"))"
+      {
+        for _schf in "${serial_files[@]}"; do printf 'serial\t%s\n' "$_schf"; done
+        for _schf in "${lowconc_files[@]}"; do printf 'lowconc\t%s\n' "$_schf"; done
+        for _schf in "${files[@]}"; do printf 'main\t%s\n' "$_schf"; done
+      } | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-scheduler.ts" \
+          --root "${repo_root}" \
+          --serial-concurrency "$SERIAL_CONCURRENCY" \
+          --lowconc-concurrency "$LOWCONC_CONCURRENCY" \
+          --main-concurrency "$(bucket_test_concurrency "$@")" \
+          "$@"
+      code=$?
+      [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
+      # Fixed-overhead segments; the phase timings (serial/lowconc/main_phase_ms) are emitted by the
+      # scheduler itself at each group's close (__OVERHEAD__ <group>_phase_ms) — no test.sh
+      # phase-segment emit here (the phased marks oh_t5b/oh_t6/oh_t6b have no scheduler meaning).
+      [ "$oh_full" -eq 1 ] && {
+        _oh_emit "lock_overhead"      "$oh_t0" "$oh_t1"
+        _oh_emit "resource_gate"      "$oh_t1" "$oh_t2"
+        _oh_emit "build_dist"         "$oh_t2" "$oh_t3"
+        _oh_emit "run_static_checks"  "$oh_t3" "$oh_t4"
+        _oh_done=1
+      }
+      # Shared suite-tail (same as the legacy path below): the tmux-leak-scan is a PER-ROUND checker,
+      # and the single-flight slot must release before exit.
+      node --experimental-strip-types "${repo_root}/plugin/scripts/session-liveness-sweep-kill.mjs" || true
+      if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
+        code=1
+      fi
+      full_suite_lock_release
+      exit "$code"
+    fi
     # PHASE OVERLAP (gap-phase-overlap-two-phase-parallel-exploration AC1, default-ON since AC101):
     # when QUAY_PHASE_OVERLAP=1 (the default) AND both phases are non-empty, run serial + lowconc in
     # PARALLEL (each at its OWN concurrency, $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY — scheduling-
@@ -1595,6 +1639,31 @@ elif [ "${1:-}" = "--buckets" ]; then
   # IN PLACE then hand to suite-lpt-runner.mjs run({files}) (order-preserving). Membership unchanged.
   lpt_reorder_files bucket_serial_files
   lpt_reorder_files bucket_lowconc_files
+  # ── unified scheduler (gap-suite-dynamic-waterline-scheduler, bucket path) ─────────────────────
+  # Same group-budget waterline as the full-suite path; the bucket subset benefits identically
+  # (serial/lowconc keep their own budgets, main fills the remainder). ONE-KEY ROLLBACK: the same
+  # QUAY_SUITE_SCHEDULER=0 falls through to the legacy phased bucket path below (RETIRED).
+  if [ "${QUAY_SUITE_SCHEDULER:-1}" = "1" ]; then
+    echo "scheduler: unified group-budget scheduler (bucket path: serial≤$SERIAL_CONCURRENCY lowconc≤$LOWCONC_CONCURRENCY main≤$(bucket_test_concurrency "${rest_args[@]}"))"
+    {
+      for _bchf in "${bucket_serial_files[@]}"; do printf 'serial\t%s\n' "$_bchf"; done
+      for _bchf in "${bucket_lowconc_files[@]}"; do printf 'lowconc\t%s\n' "$_bchf"; done
+      for _bchf in "${bucket_main_files[@]}"; do printf 'main\t%s\n' "$_bchf"; done
+    } | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-scheduler.ts" \
+        --root "${repo_root}" \
+        --serial-concurrency "$SERIAL_CONCURRENCY" \
+        --lowconc-concurrency "$LOWCONC_CONCURRENCY" \
+        --main-concurrency "$(bucket_test_concurrency "${rest_args[@]}")" \
+        "${rest_args[@]}"
+    bucket_code=$?
+    # Same suite-AFTER tail as the legacy bucket path below (leak scan + fs-trace collect).
+    node --experimental-strip-types "${repo_root}/plugin/scripts/session-liveness-sweep-kill.mjs" || true
+    if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
+      bucket_code=1
+    fi
+    node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-fs-trace.ts" --update --limit "${QUAY_FS_TRACE_LIMIT:-8}" --root "${repo_root}" || true
+    exit "${bucket_code}"
+  fi
   bucket_code=0
   if [ "${#bucket_serial_files[@]}" -gt 0 ]; then
     echo "selected ${#bucket_serial_files[@]} files (groups=serial)"

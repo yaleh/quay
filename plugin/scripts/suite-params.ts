@@ -36,9 +36,14 @@ import path from "node:path";
 import YAML from "yaml";
 import { isDirectEntry } from "./gate-script-base.ts";
 
-/** The 7 suite knobs: config key → env key (the 6 from the task's Proposal table + the
- *  main-tail-overlap trigger threshold main_tail_stall_pct, config-first per the same policy). */
+/** The 8 suite knobs: config key → env key (config-first per the same policy). `suite_scheduler`
+ *  (gap-suite-dynamic-waterline-scheduler) turns the unified group-budget scheduler ON (default) /
+ *  OFF (ONE-KEY ROLLBACK to the legacy phased path). `phase_overlap` / `main_tail_overlap_lanes` /
+ *  `main_tail_stall_pct` are RETIRED-BY-SCHEDULER: they stay in the CLOSED schema so an existing
+ *  config that still sets them (the production config carries main_tail_overlap_lanes: 16) keeps
+ *  validating — but they only take effect on the QUAY_SUITE_SCHEDULER=0 legacy fallback path. */
 export const SUITE_KNOBS = {
+  suite_scheduler: "QUAY_SUITE_SCHEDULER",
   phase_overlap: "QUAY_PHASE_OVERLAP",
   serial_concurrency: "QUAY_SERIAL_CONCURRENCY",
   lowconc_concurrency: "QUAY_LOWCONC_CONCURRENCY",
@@ -53,6 +58,7 @@ export type SuiteKnobKey = keyof typeof SUITE_KNOBS;
 /** The typed config-file values. Every field is OPTIONAL — absent = "no config default for this
  *  knob" (the consumer falls through to its existing host-derived / literal default). */
 export interface SuiteParams {
+  suite_scheduler?: number;
   phase_overlap?: number;
   serial_concurrency?: number;
   lowconc_concurrency?: number;
@@ -64,6 +70,7 @@ export interface SuiteParams {
 
 /** Per-knob schema: validator + a human-readable "must be …" clause for the FAIL-CLOSED message. */
 const KNOB_SPEC: Record<SuiteKnobKey, { ok: (v: unknown) => boolean; must: string }> = {
+  suite_scheduler: { ok: (v) => v === 0 || v === 1, must: "0 (legacy phased fallback) or 1 (unified scheduler)" },
   phase_overlap: { ok: (v) => v === 0 || v === 1, must: "0 (sequential) or 1 (overlap)" },
   serial_concurrency: { ok: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1, must: "an integer >= 1" },
   lowconc_concurrency: { ok: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1, must: "an integer >= 1" },
