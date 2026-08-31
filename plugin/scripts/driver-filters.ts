@@ -66,8 +66,35 @@ export function allDepsDone(depIds: string[], statusOf: (depId: string) => strin
   return true;
 }
 
-/** 读任务 status frontmatter（`<root>/tasks/<id>.md`）。缺失/读失败 ⇒ null。 */
+/** 读 `<ref>:tasks/<taskId>.md` 的 status frontmatter（git show；ref 不存在 / 文件缺失 / 读不懂 ⇒ null）。
+ *  canonical source = develop ref——主检出（main/manager-doc）盘上 status 是陈旧快照（硬规则 4b 的
+ *  代理量），派发谓词读它会把已 done/ready 的任务按陈旧 needs-human 滤掉
+ *  （gap-driver-filters-readtaskstatus-stale-main-checkout）。与 ready-pool-check.ts 的
+ *  readTaskStatusAtRef（batch 读，dispatch 整池）同判词；本文件取单任务 `git show` 形态——调用点是
+ *  逐 id 的（notNeedsHuman 逐候选、depsSatisfied 逐依赖），⛔ 不上 batch（读一条却 batch 是浪费）。 */
+export function readTaskStatusAtRef(root: string, ref: string, taskId: string): string | null {
+  let raw: string;
+  try {
+    raw = execFileSync("git", ["-C", root, "show", `${ref}:tasks/${taskId}.md`], {
+      timeout: 30_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).toString("utf8");
+  } catch {
+    return null;
+  }
+  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!m) return null;
+  const statusLine = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
+  return statusLine ? (statusLine.slice("status:".length).trim() || null) : null;
+}
+
+/** 读任务 status frontmatter。canonical source = develop ref（readTaskStatusAtRef）；ref 读不可用
+ *  （非 git root / 任务尚未入 develop）⇒ 退回盘上 `<root>/tasks/<id>.md`（既有行为——单测临时目录、
+ *  repo-less root 的 no-op 回退）。⛔ develop 可用时不得读主检出盘上 status（陈旧快照）。缺失/读失败
+ *  ⇒ null。 */
 export function readTaskStatus(root: string, taskId: string): string | null {
+  const refStatus = readTaskStatusAtRef(root, "develop", taskId);
+  if (refStatus !== null) return refStatus;
   try {
     const fm = readFrontmatter(path.join(root, "tasks", `${taskId}.md`));
     return fm?.status ?? null;
@@ -163,6 +190,26 @@ export function advanceRetryCap(
     }
   }
   return newly;
+}
+
+/** 对账（gap-retrystate-needshuman-no-reconcile-with-disk-ready）：内存 needsHuman 集合随磁盘 status
+ *  翻转对账——人对已标 needs-human 的任务翻回 ready/todo（或任务在他处被落地/关闭）后，磁盘 status
+ *  已离开 needs-human ⇒ 从内存集合清除，下一轮即重新可派（⛔ 不重启——重启 = 把恢复外包给 supervisor
+ *  才得以恢复，正是本缺陷的根）。同时清零该 id 的连续失败计数（counts）——人干预后给【全新】重试
+ *  预算（⛔ 只清 needsHuman 不清 counts ⇒ 下一次失败 n=旧值+1 立即再标 needs-human，人干预被一次性
+ *  消耗）。读不懂（status === null）⇒ 保留（缺值 = 未查，⛔ 不伪装成「人已翻回」——同 notNeedsHuman
+ *  的 fail-closed）。返回本轮清除的 id（供观测/单测；非空 = 有对账发生，可观测非静默）。 */
+export function reconcileNeedsHumanWithDisk(state: RetryState, root: string): string[] {
+  const cleared: string[] = [];
+  for (const id of [...state.needsHuman]) {
+    const status = readTaskStatus(root, id);
+    if (status !== null && status !== TASK_STATUS.NEEDS_HUMAN) {
+      state.needsHuman.delete(id);
+      state.counts.delete(id);
+      cleared.push(id);
+    }
+  }
+  return cleared;
 }
 
 // ── commit-after-write（主检出 status 翻转写盘即提交；单一真相源，⛔ 不各写一份） ───────────────────

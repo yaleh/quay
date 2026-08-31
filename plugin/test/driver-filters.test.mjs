@@ -22,7 +22,9 @@ import {
   makeFilterContext,
   allDepsDone,
   readTaskStatus,
+  readTaskStatusAtRef,
   markNeedsHuman,
+  reconcileNeedsHumanWithDisk,
   WORKER_OUTCOME_REL,
   propagateDocBranchToDevelop,
   resolveStatusPriority,
@@ -167,6 +169,38 @@ test("notNeedsHuman — filters needs-human status; unreadable ⇒ fail-closed",
   assert.equal(pred("gap-missing"), false, "unreadable ⇒ fail-closed (读不懂 ≠ 合格)");
 });
 
+// ── reconcileNeedsHumanWithDisk（gap-retrystate-needshuman-no-reconcile-with-disk-ready）──────────
+
+test("AC1 (能取假) — reconcileNeedsHumanWithDisk：磁盘翻回 ready ⇒ 内存清除 + 计数清零，下一轮重新可派（⛔ 仍在集合 ⇒ 假）", (t) => {
+  const root = makeRoot("reconcile");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: needs-human\n---");
+  writeTask(root, "gap-still-nh", "---\nid: gap-still-nh\nstatus: needs-human\n---");
+
+  // 两个 id 都已进内存 needsHuman 集合 + counts 已累计（模拟 advanceRetryCap 达上限后的状态）。
+  const state = { counts: new Map([["gap-nh", 3], ["gap-still-nh", 3]]), needsHuman: new Set(["gap-nh", "gap-still-nh"]) };
+
+  // 人把 gap-nh 翻回 ready（磁盘），gap-still-nh 仍 needs-human。
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
+
+  const cleared = reconcileNeedsHumanWithDisk(state, root);
+  assert.deepEqual(cleared, ["gap-nh"], "只有翻回 ready 的 id 被清除");
+  assert.equal(state.needsHuman.has("gap-nh"), false, "gap-nh 出集合 ⇒ 下一轮重新可派（⛔ 仍在 ⇒ 假）");
+  assert.equal(state.needsHuman.has("gap-still-nh"), true, "仍 needs-human 的 id 不清除");
+  assert.equal(state.counts.has("gap-nh"), false, "counts 清零 ⇒ 人干预后给全新重试预算（⛔ 只清 needsHuman 不清 counts ⇒ 假）");
+  assert.equal(state.counts.get("gap-still-nh"), 3, "未清除的 id 计数不动");
+});
+
+test("AC1 (负控制) — reconcileNeedsHumanWithDisk：读不懂（status null）⇒ 保留（fail-closed，缺值 = 未查）", (t) => {
+  const root = makeRoot("reconcile-null");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const state = { counts: new Map([["gap-missing", 3]]), needsHuman: new Set(["gap-missing"]) };
+  // gap-missing 无任务文件 ⇒ readTaskStatus ⇒ null。
+  const cleared = reconcileNeedsHumanWithDisk(state, root);
+  assert.deepEqual(cleared, [], "读不懂不清除（⛔ 伪装成「人已翻回」⇒ 假）");
+  assert.equal(state.needsHuman.has("gap-missing"), true, "fail-closed 保留（缺值 = 未查）");
+});
+
 // ── applyTaskFilters ────────────────────────────────────────────────────────────────────────────
 
 test("applyTaskFilters — full list: a candidate failing ANY predicate is filtered; passing all is kept", (t) => {
@@ -219,6 +253,36 @@ test("readTaskStatus — reads status; missing/unreadable ⇒ null", (t) => {
   writeTask(root, "gap-done", "---\nid: gap-done\nstatus: done\n---");
   assert.equal(readTaskStatus(root, "gap-done"), "done");
   assert.equal(readTaskStatus(root, "gap-missing"), null);
+});
+
+// ── readTaskStatus reads develop, not the stale main checkout (gap-driver-filters-readtaskstatus-stale-main-checkout) ──
+// A task's status on the main checkout (main/manager-doc) disk lags develop (4-8 commits behind). notNeedsHuman
+// read the stale disk and filtered a task that develop carries as `ready` (硬规则 4b 的陈旧代理量). The read
+// must come from the develop REF, not the stale working tree. Asserted directly: readTaskStatusAtRef reads
+// develop (ready) while fs.readFileSync on disk reads the stale needs-human.
+
+test("AC2 — notNeedsHuman reads develop: disk=needs-human + develop=ready ⇒ task passes (⛔ 读陈旧 needs-human 滤掉 ⇒ 假)", (t) => {
+  const root = makeGitRoot("stale");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  git(root, "branch", "-M", "develop");
+  // develop: the task is ready (the canonical source of truth).
+  writeTask(root, "gap-stale-ready", "---\nid: gap-stale-ready\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-stale-ready.md");
+  git(root, "commit", "-q", "-m", "gap-stale-ready: ready on develop");
+  // Stale manager branch: rewrite the SAME task to needs-human and STAY on it (disk=needs-human, develop=ready).
+  git(root, "checkout", "-q", "-b", "manager-stale");
+  writeTask(root, "gap-stale-ready", "---\nid: gap-stale-ready\nstatus: needs-human\n---");
+  git(root, "add", "--", "tasks/gap-stale-ready.md");
+  git(root, "commit", "-q", "-m", "gap-stale-ready: stale needs-human on disk");
+
+  // Falsifiability: develop carries ready; the stale working tree carries needs-human (the defect's input).
+  assert.equal(readTaskStatusAtRef(root, "develop", "gap-stale-ready"), "ready", "readTaskStatusAtRef reads develop → ready");
+  assert.match(fs.readFileSync(path.join(root, "tasks", "gap-stale-ready.md"), "utf8"), /^status:\s*needs-human/m, "stale disk carries needs-human (negative control: the old disk read would filter)");
+
+  // AC2: notNeedsHuman must LET the task through (develop says ready, not needs-human).
+  const pred = TASK_FILTERS[4].predicate(ctx(root));
+  assert.equal(pred("gap-stale-ready"), true, "notNeedsHuman passes: develop=ready");
+  assert.equal(readTaskStatus(root, "gap-stale-ready"), "ready", "readTaskStatus prefers the develop ref over the stale disk");
 });
 
 // ── markNeedsHuman commit-after-write（gap-mark-needs-human-commit-after-write）────────────────────
