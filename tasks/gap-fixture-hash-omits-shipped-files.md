@@ -1,7 +1,7 @@
 ---
 id: gap-fixture-hash-omits-shipped-files
 title: _fixtureHash 计入所有 shipped 文件类（完整化 sweep）——vendored/workflows/skills 声明逐类验证 hash 覆盖，防第 4/5 缺口
-status: ready
+status: done
 labels:
   - gap
   - defect
