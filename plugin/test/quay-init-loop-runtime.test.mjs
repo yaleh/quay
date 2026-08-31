@@ -129,12 +129,18 @@ test('AC7b — --loop writes a .quay/config.yml whose provider mcp_entry is proj
   } finally { cleanup(ws); }
 });
 
-// ── Vendor-runtime mechanism tests (AC1/AC7b/AC3/AC4): BEHAVIOR tests, NOT install-as-setup. Each
-// builds a temp COPY of the plugin with a MODIFIED runtime state (bundles removed / stubbed
-// sync-vendor / fake bundles / pre-existing config), then runs a real install against it. They
-// cannot use the shared prebuilt fixture (a single fixed-config already-installed tree built from
-// the REAL plugin) — the vendor-runtime mechanism under test needs a modified plugin source. These
-// keep their real installs (and their fs.cpSync of pluginDir) by design.
+// ── Vendor-runtime mechanism tests: BEHAVIOR tests, NOT install-as-setup. The real installs that
+// remain here are the ones whose BEHAVIOR is the object under test — AC1 (no-bundle FAILS CLOSED),
+// AC2 (auto-build via sync-vendor), AC3 (referenced-existence FAILS CLOSED on a dangling mcp_entry),
+// AC4 (upgrade-channel config migration). Each builds a temp COPY of the plugin with a MODIFIED
+// runtime state (bundles removed / stubbed sync-vendor / pre-existing config), then runs a real
+// install against it. They cannot use the shared prebuilt fixture (a single fixed-config
+// already-installed tree built from the REAL plugin) — the behavior under test needs a modified
+// plugin source. These keep their real installs (and their fs.cpSync of pluginDir) by design.
+// The two laid-down-STATE assertions that used to live here (AC7b byte-identical bundles + the AC3
+// existence-OK positive direction) migrated to laydownWorkspace under
+// gap-suite-install-family-reduce-runinit — the shared fixture's laid-down tree + captured install
+// output carry the same assertion surface.
 test('AC1 — when the plugin has no built runtime bundles and auto-build cannot produce them, --loop FAILS CLOSED (exit non-zero, no complete)', () => {
   // Construct the no-bundle scenario deterministically: a temp COPY of the plugin with the Core
   // and native provider bundles removed (fresh-clone state — dist/ is gitignored). The real
@@ -169,42 +175,37 @@ test('AC1 — when the plugin has no built runtime bundles and auto-build cannot
 });
 
 test('AC7b — a plugin source WITH built runtimes lays them into the target (project-local copies, config points at the native bundle)', () => {
-  // Use a temp COPY of the plugin + fake built bundles, so the real worktree is never polluted.
-  const src = makeTmp();
+  // gap-suite-install-family-reduce-runinit AC1: this is an install-as-setup / laid-down-state
+  // assertion (byte-identical bundles + config mcp_entry), migrated from a fresh real install to the
+  // shared prebuilt fixture. The fixture is content-addressed on the vendored dist bundles +
+  // provider.yml (_pluginSurfaceHash), so the fixture's laid-down runtime is byte-identical to the
+  // CURRENT plugin source's vendor files by construction — the byte-identical-copy assertion surface
+  // is preserved without a second real install (a copy-corrupting laydown would still make the
+  // laid-file ≠ source-file comparison fail).
+  const { ws, install: r } = laydownWorkspace();
   try {
-    fs.cpSync(pluginDir, src, { recursive: true });
-    const fakeDist = path.join(src, 'vendor', 'quay', 'dist', 'quay.js');
-    fs.mkdirSync(path.dirname(fakeDist), { recursive: true });
-    fs.writeFileSync(fakeDist, '// fake built quay.js bundle\n', 'utf8');
-    const fakeNativeDist = path.join(src, 'vendor', 'quay-native', 'dist', 'quay-native.js');
-    fs.mkdirSync(path.dirname(fakeNativeDist), { recursive: true });
-    fs.writeFileSync(fakeNativeDist, '// fake built quay-native.js bundle\n', 'utf8');
-    const fakeProviderYml = path.join(src, 'vendor', 'quay-native', 'provider.yml');
-    fs.writeFileSync(fakeProviderYml, 'id: native\nname: "quay-native"\n', 'utf8');
-    const ws = makeTmp();
-    try {
-      const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
-        '--tmux-session', 'proj-0:0.0', '--plugin-root', src]);
-      assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-      assert.match(r.stdout, /\.quay\/runtime\/bin\/quay\.js/, 'must report the Core runtime lay-down');
-      assert.match(r.stdout, /\.quay\/runtime\/bin\/quay-native\.js/, 'must report the native provider runtime lay-down');
-      const laid = path.join(ws, '.quay', 'runtime', 'bin', 'quay.js');
-      assert.ok(fs.existsSync(laid), 'the Core runtime must be laid into the target project');
-      assert.equal(fs.readFileSync(laid, 'utf8'), '// fake built quay.js bundle\n',
-        'the laid-down Core runtime must be byte-identical to the plugin source');
-      const laidNative = path.join(ws, '.quay', 'runtime', 'bin', 'quay-native.js');
-      assert.ok(fs.existsSync(laidNative), 'the native provider runtime must be laid into the target project');
-      assert.equal(fs.readFileSync(laidNative, 'utf8'), '// fake built quay-native.js bundle\n',
-        'the laid-down native runtime must be byte-identical to the plugin source');
-      const laidProviderYml = path.join(ws, '.quay', 'runtime', 'provider.yml');
-      assert.ok(fs.existsSync(laidProviderYml), 'provider.yml must be laid into the target project');
-      assert.equal(fs.readFileSync(laidProviderYml, 'utf8'), 'id: native\nname: "quay-native"\n',
-        'the laid-down provider.yml must be byte-identical to the plugin source');
-      const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
-      assert.match(cfg, /mcp_entry: \["node", "\/[^"]*\/\.quay\/runtime\/bin\/quay-native\.js", "mcp"\]/,
-        'config must point the provider mcp_entry at the laid-down self-contained native bundle');
-    } finally { cleanup(ws); }
-  } finally { cleanup(src); }
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /\.quay\/runtime\/bin\/quay\.js/, 'must report the Core runtime lay-down');
+    assert.match(r.stdout, /\.quay\/runtime\/bin\/quay-native\.js/, 'must report the native provider runtime lay-down');
+    const laid = path.join(ws, '.quay', 'runtime', 'bin', 'quay.js');
+    assert.ok(fs.existsSync(laid), 'the Core runtime must be laid into the target project');
+    assert.equal(fs.readFileSync(laid, 'utf8'),
+      fs.readFileSync(path.join(pluginDir, 'vendor', 'quay', 'dist', 'quay.js'), 'utf8'),
+      'the laid-down Core runtime must be byte-identical to the plugin source');
+    const laidNative = path.join(ws, '.quay', 'runtime', 'bin', 'quay-native.js');
+    assert.ok(fs.existsSync(laidNative), 'the native provider runtime must be laid into the target project');
+    assert.equal(fs.readFileSync(laidNative, 'utf8'),
+      fs.readFileSync(path.join(pluginDir, 'vendor', 'quay-native', 'dist', 'quay-native.js'), 'utf8'),
+      'the laid-down native runtime must be byte-identical to the plugin source');
+    const laidProviderYml = path.join(ws, '.quay', 'runtime', 'provider.yml');
+    assert.ok(fs.existsSync(laidProviderYml), 'provider.yml must be laid into the target project');
+    assert.equal(fs.readFileSync(laidProviderYml, 'utf8'),
+      fs.readFileSync(path.join(pluginDir, 'vendor', 'quay-native', 'provider.yml'), 'utf8'),
+      'the laid-down provider.yml must be byte-identical to the plugin source');
+    const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
+    assert.match(cfg, /mcp_entry: \["node", "\/[^"]*\/\.quay\/runtime\/bin\/quay-native\.js", "mcp"\]/,
+      'config must point the provider mcp_entry at the laid-down self-contained native bundle');
+  } finally { cleanup(ws); }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -326,24 +327,17 @@ echo "[stub sync-vendor] built"
 });
 
 test('AC3 — after a successful lay-down, the referenced-existence verify reports OK (the mcp_entry target exists in the target)', () => {
-  const src = makeTmp();
+  // gap-suite-install-family-reduce-runinit AC1: the "successful install reports the referenced-
+  // existence verify OK" assertion is carried by the shared fixture's CAPTURED install output — a
+  // successful lay-down ALWAYS reports verify-provider-runtime-existence: OK (the verify is part of
+  // the install flow, so a fixture install that reached completion reported it). Migrated from a
+  // fresh real install (fake-bundle plugin copy) to laydownWorkspace; the FAIL direction of this
+  // verify is still pinned by the AC3 negative control below (a real install that fails closed).
+  const { ws, install: r } = laydownWorkspace();
   try {
-    fs.cpSync(pluginDir, src, { recursive: true });
-    const fakeDist = path.join(src, 'vendor', 'quay', 'dist', 'quay.js');
-    fs.mkdirSync(path.dirname(fakeDist), { recursive: true });
-    fs.writeFileSync(fakeDist, '// fake built quay.js bundle\n', 'utf8');
-    const fakeNativeDist = path.join(src, 'vendor', 'quay-native', 'dist', 'quay-native.js');
-    fs.mkdirSync(path.dirname(fakeNativeDist), { recursive: true });
-    fs.writeFileSync(fakeNativeDist, '// fake built quay-native.js bundle\n', 'utf8');
-    fs.writeFileSync(path.join(src, 'vendor', 'quay-native', 'provider.yml'), 'id: native\nname: "quay-native"\n', 'utf8');
-    const ws = makeTmp();
-    try {
-      const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
-        '--tmux-session', 'proj-0:0.0', '--plugin-root', src]);
-      assert.equal(r.status, 0, `init must succeed:\n${r.stderr}`);
-      assert.match(r.stdout, /verify-provider-runtime-existence: OK/, 'the referenced-existence verify must report OK when the mcp_entry target exists (AC3)');
-    } finally { cleanup(ws); }
-  } finally { cleanup(src); }
+    assert.equal(r.status, 0, `init must succeed:\n${r.stderr}`);
+    assert.match(r.stdout, /verify-provider-runtime-existence: OK/, 'the referenced-existence verify must report OK when the mcp_entry target exists (AC3)');
+  } finally { cleanup(ws); }
 });
 
 test('AC3 — verify FAILS CLOSED when the provider mcp_entry references a runtime that does not exist in the target (referenced-existence negative control)', () => {
