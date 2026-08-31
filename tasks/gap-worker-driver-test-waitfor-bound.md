@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-test-waitfor-bound
 title: worker-driver.test.mjs waitFor 上限收紧（5s×17 / 60s×7 → 3s / 30s）——只降慢机最坏情况（Tier 1）
-status: todo
+status: ready
 labels:
   - gap
   - test-wall-clock
