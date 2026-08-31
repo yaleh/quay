@@ -472,7 +472,9 @@ export function docBranchForkedFromDevelop(root: string, docBranch: string = DOC
  *   - "not-ff"  — 分叉：doc 有 develop 未含的提交 ⇒ 无法 ff-only 同步（guard 报红，升级语义兜底）
  *   - "not-doc" — 当前分支非 doc 分支（本函数只在主检出的 doc 分支上适用）
  *   - "error"   — git 出错 / 读分支失败（非静默）
- *  失败（not-ff / error）落痕到 DOC_DEVELOP_SYNC_EVENT_REL（⛔ 静默）。 */
+ *  失败（not-ff / error）与成功（synced）都落痕到 DOC_DEVELOP_SYNC_EVENT_REL（⛔ 静默）——synced 也写
+ *  事件是 AC4 生产载体（硬规则 3c）：成功同步若不留痕，「生产载体有记录」结构上不可满足（恒假）。
+ *  already 不写（no-op，每轮写会刷日志）。 */
 export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): string {
   const cur = currentBranchName(root);
   if (cur === null) {
@@ -497,6 +499,7 @@ export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): 
   if (behind === 0) return "already";
   try {
     execFileSync("git", ["-C", root, "merge", "--ff-only", "develop"], { stdio: "ignore" });
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-synced", phase: "synced", branch: cur });
     return "synced";
   } catch {
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "merge" });

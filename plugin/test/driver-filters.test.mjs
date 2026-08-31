@@ -597,3 +597,33 @@ test("AC3 (补) — syncDevelopToDoc 在 develop 分支 / 非 doc 分支 ⇒ not
   git(root, "checkout", "-q", "-b", DOC_BRANCH);
   assert.equal(syncDevelopToDoc(root), "already", "doc 已与 develop 同 commit ⇒ already");
 });
+
+test("AC4 — syncDevelopToDoc 有 ≥1 非测试调用者（promotion-driver 每轮启动前）", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../scripts/promotion-driver.ts"), "utf8");
+  assert.match(src, /syncDevelopToDoc\s*\(\s*root\s*\)/, "promotion-driver.ts 生产路径调用 syncDevelopToDoc（⛔ 仅测试调用 ⇒ 假）");
+});
+
+test("AC4 — 成功 ff 同步写生产载体事件（doc-develop-sync-ff-synced）", (t) => {
+  const root = makeGitRoot("doc-ff-event");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", DOC_BRANCH);
+
+  // develop 前进（纯 ff），doc 落后 develop。
+  git(root, "checkout", "-q", "develop");
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: done\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "develop: gap-a done");
+  git(root, "checkout", "-q", DOC_BRANCH);
+
+  assert.equal(syncDevelopToDoc(root), "synced", "ff-only 同步成功");
+  const events = fs.readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.ok(
+    events.some((e) => e.event === "doc-develop-sync-ff-synced"),
+    "成功同步落痕生产载体（⛔ 无记录 ⇒ 生产载体恒空，硬规则 3c 假）",
+  );
+});
