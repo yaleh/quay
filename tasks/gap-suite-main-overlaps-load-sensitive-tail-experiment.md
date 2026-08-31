@@ -30,6 +30,9 @@ type: execution
 3. 跑对照轮：档位 0/4/8/12 × QUAY_PHASE_OVERLAP=1 固定，每档 ≥2 轮（同任务同 worktree）。**代价估算：每轮 ~10min，4 档 ×2 轮 ≈ 8 轮 ≈ 90min 套件时间（且受 fan-in 单飞锁串行）——实现前先确认时间窗。**
 4. 数 AC3 读数、落 AC4 结论。
 
+> **实现状态（worker 落地 2026-08-31，对照实验未跑）**：`QUERY_MAIN_TAIL_OVERLAP` 旋钮已实现——scripts/test.sh 负载触发（cpu_stall ≤3% 持续 5s 即提前启动 main，档位=该并发；0/unset=现状基线；窗口关闭或 300s 上限自动回落正常 main）；full-suite-runner.ts 读 test.sh 的 `main-tail-overlap: lanes=N load=X` 流标记，落 `main_tail_overlap_lanes`/`main_tail_overlap_load` 进 verification-round。hermetic 已验：`bash -n`、`suite-lpt-order.test.mjs` AC1 pin 19/19、wait 函数 seam（fire/fallthrough 双向）、tail-overlap 记录测试 + 基线负控制、overlap 回归 6/6 绿。
+> **待跑对照（AC1 实测一档 + AC2/AC3/AC4）**：`QUERY_MAIN_TAIL_OVERLAP=<0|4|8|12> QUAY_PHASE_OVERLAP=1 bash scripts/test.sh`，每档 ≥2 轮；从 verification-round.jsonl + measure-history.jsonl 数 flake 率与 wall-clock 中位数；结论写回 AC4。AC 均未勾（等对照轮数据）。
+
 ## Acceptance Criteria
 
 - [ ] AC1（能取假，接线）：`QUERY_MAIN_TAIL_OVERLAP` 旋钮存在且生效——设 >0 时 main 在窗口关闭前以指定并发提前启动（grep scripts/test.sh 可见实现；实测一档证明 main 与 serial+lowconc 时间窗重叠）；设 0 时行为与现状一致。
@@ -45,4 +48,5 @@ type: execution
 
 - scripts/test.sh（`QUERY_MAIN_TAIL_OVERLAP` 旋钮 + main 提前启动/限流）
 - plugin/scripts/full-suite-runner.ts（verification-round 记录重叠档位/负载字段）
+- plugin/test/full-suite-runner.test.mjs（main_tail_overlap_lanes/load 记录路径 + 基线负控制）
 - tasks/gap-suite-main-overlaps-load-sensitive-tail-experiment.md（自身）

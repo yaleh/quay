@@ -914,6 +914,51 @@ test("gap-phase-overlap-field-always-false-negative — a SEQUENTIAL round does 
   }
 });
 
+test("gap-suite-main-overlaps-load-sensitive-tail-experiment — the tail-overlap fire is recorded as main_tail_overlap_lanes + main_tail_overlap_load, and ABSENT on a baseline round", async () => {
+  // test.sh's tail-overlap watcher announces its fire on the stream: `main-tail-overlap: lanes=N
+  // [load=X]` (test.sh emits it to stderr; the runner's errRl → onLine). The round record must carry
+  // the lanes (the knob value / experiment's lane level) and the observed /proc/loadavg 1-min at fire
+  // time — and a baseline round (no marker) must OMIT both (缺键, never a fabricated 0 — the same
+  // absent-field contract as phase_overlap).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-mto-"));
+  const suite = [
+    'echo "main-tail-overlap: lanes=4 load=0.15"',
+    'echo "# tests 5"',
+    'echo "# pass 5"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "round record written");
+    assert.equal(rec.main_tail_overlap_lanes, 4, "main_tail_overlap_lanes = the knob lanes from the stream marker");
+    assert.equal(rec.main_tail_overlap_load, 0.15, "main_tail_overlap_load = the observed loadavg at fire time");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  // Negative control: a baseline round (no marker) omits both fields.
+  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-mto-baseline-"));
+  const { f: f2, dir: dir2 } = fakeSuite(GREEN_SUITE);
+  try {
+    const child2 = runRunner({ root: root2, command: `bash ${f2}`, laneCount: 8 });
+    const { code: code2 } = await waitExit(child2);
+    assert.equal(code2, 0, "baseline runner exits 0");
+    const rec2 = lastRoundRecord(root2);
+    assert.ok(rec2, "baseline round record written");
+    assert.equal(rec2.main_tail_overlap_lanes, undefined, "baseline round omits main_tail_overlap_lanes");
+    assert.equal(rec2.main_tail_overlap_load, undefined, "baseline round omits main_tail_overlap_load");
+  } finally {
+    fs.rmSync(root2, { recursive: true, force: true });
+    fs.rmSync(dir2, { recursive: true, force: true });
+  }
+});
+
 test("AC2 — the derived quantities (相利用率/相饱和度/等待占比) are directly computable from the records + the round's nproc", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phd2-"));
   const { f, dir } = fakeSuite(PHASE_SUITE);
