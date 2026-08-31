@@ -33,7 +33,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry, helpExit } from "./gate-script-base.ts";
-import { bucketSetOf, findRepoRoot } from "./suite-bucket-attribution.ts";
+import { bucketSetOf } from "./suite-bucket-attribution.ts";
+import { repoRoot } from "./repo-root.ts";
 import { listSuiteFiles, loadReattribution } from "./suite-bucket-select.ts";
 
 // The AC121 reattribution record path (shared with suite-bucket-select.ts).
@@ -93,7 +94,7 @@ export function main(argv: string[]): number {
   const args = argv.slice(2);
   // --help is the shared checker contract: usage FIRST, exit 0, NO side effect — before root resolution.
   if (args.includes("--help") || args.includes("-h")) helpExit(usage);
-  const root = path.resolve(getArgValue(args, "--root") ?? findRepoRoot());
+  const root = path.resolve(getArgValue(args, "--root") ?? repoRoot());
   const asJson = args.includes("--json");
   const gate = args.includes("--gate");
   const scan = args.includes("--scan");

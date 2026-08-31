@@ -39,9 +39,9 @@ import {
   bucketSetOf,
   canonicalBuckets,
   bucketsFromPaths,
-  findRepoRoot,
   type Bucket,
 } from "./suite-bucket-attribution.ts";
+import { repoRoot } from "./repo-root.ts";
 import { loadTraceCache } from "./suite-fs-trace.ts";
 import { listSuiteFiles, selectBucketsForTouches } from "./suite-bucket-select.ts";
 import { taskTouchEntries } from "./suite-bucket-hub-list.ts";
@@ -166,7 +166,7 @@ export function main(argv: string[]): number {
   // --help is the shared checker contract (gap-help-contract-incompatible-behaviors): usage FIRST,
   // exit 0, NO side effect — evaluated BEFORE root resolution, never as a usage error (exit 2).
   if (args.includes("--help") || args.includes("-h")) helpExit(usage);
-  const root = path.resolve(getArgValue(args, "--root") ?? findRepoRoot());
+  const root = path.resolve(getArgValue(args, "--root") ?? repoRoot());
   const asJson = args.includes("--json");
   const gate = args.includes("--gate") || args.includes("--touches") || args.includes("--task");
   const scan = args.includes("--scan");

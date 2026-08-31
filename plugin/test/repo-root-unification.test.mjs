@@ -50,11 +50,16 @@ const FORMER_DEFINERS = [
   "fan-in-ts-typecheck-gate.ts", "suite-bucket-attribution.ts", "fast-mode-telemetry.ts",
   "task-contract-check.ts", "inner-exec-mode-report.ts", "trend-check.ts", "suite-bucket-hub-list.ts",
 ];
-// The 10 files that previously cross-imported findRepoRoot from another checker module.
+// The 13 files that previously cross-imported findRepoRoot from another checker module.
+// (suite-fs-trace / suite-bucket-drift-check / suite-bucket-reattr-ratchet-check arrived via
+// `git merge develop` mid-round — gap-suite-bucket-dynamic-truth-drift-detector landed on develop
+// AFTER this task enumerated its 33 consumers, so these three importers were missed and their
+// `findRepoRoot` import from suite-bucket-attribution.ts broke once that export was removed.)
 const FORMER_IMPORTERS = [
   "red-window-triage.ts", "fan-in-runid-check.ts", "derive-touches-heuristic.ts",
   "self-report-vocab-audit.ts", "slot-refill.ts", "supervisor-preempt-candidates.ts",
   "suite-bucket-select.ts", "concurrent-batch-scheduler.ts", "ready-pool-check.ts", "inner-blocked-signal.ts",
+  "suite-fs-trace.ts", "suite-bucket-drift-check.ts", "suite-bucket-reattr-ratchet-check.ts",
 ];
 const ALL_CONSUMERS = [...FORMER_DEFINERS, ...FORMER_IMPORTERS];
 
