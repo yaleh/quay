@@ -71,6 +71,7 @@ import {
   redPayload,
   lastRoundRecord,
   fakeSuite,
+  releaseGate,
   runRunner,
   waitExit,
   poll,
@@ -393,11 +394,12 @@ test("AC6 — this task cross-annotates the shared stop-dispatch family (gap-red
 
 test("AC1 — while the suite runs, state=running (or early-red) with finishedAt/durationMs null", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-root-"));
-  // gap-suite-load-sampler-orphan-process load-hardening: the 5s poll / 2s running window flaked
-  // RED under 16-way contention (runner node bootstrap > 5s ⇒ `poll timeout after 5000ms`). Widen
-  // the running window + poll timeout so "in-flight" is judged on the state file (wall-clock), not
-  // on a runner-bootstrap race. Same shape as the AC2 early-red fixes below.
-  const { f, dir } = fakeSuite('echo "started"\nsleep 10\necho "# fail 0"\nexit 0');
+  // gap-fake-suite-release-gate-sleep-zero — the fixed 10s in-flight window is a release gate: the
+  // suite blocks until the test touches `gate.release` (after observing the in-flight state), zeroing
+  // the runner's hard wait. The 20s poll timeout stays (runner node bootstrap under load can exceed
+  // seconds — in-flight is judged on the state file, not on a fixed sleep window).
+  const gate = releaseGate(root, "inflight");
+  const { f, dir } = fakeSuite(`echo "started"\n${gate.wait}\necho "# fail 0"\nexit 0`);
   try {
     const child = runRunner({ root, command: `bash ${f}` });
     // gap-streaming-red-cascade-amplifies-failures-array AC1 — the assertion is "the round is IN
@@ -413,6 +415,7 @@ test("AC1 — while the suite runs, state=running (or early-red) with finishedAt
     assert.equal(inFlight.runner, "outer");
     assert.equal(inFlight.finishedAt, null, "finishedAt null while the round is in flight");
     assert.equal(inFlight.durationMs, null, "durationMs null while the round is in flight");
+    fs.writeFileSync(gate.release, "go", "utf8"); // release the suite — the in-flight window is closed
     const { code } = await waitExit(child);
     assert.equal(code, 0);
     assert.equal(readState(root).state, "green");
@@ -425,16 +428,15 @@ test("AC1 — while the suite runs, state=running (or early-red) with finishedAt
 test("AC2 — RED is marked on first failure detection, before the run completes (marker-file proof)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-root-"));
   const marker = path.join(root, "post-failure-marker");
-  const { f, dir } = fakeSuite(`echo "not ok 1 - boom"\nsleep 10\necho done > "${marker}"\nexit 1`);
+  const gate = releaseGate(root, "earlyred");
+  const { f, dir } = fakeSuite(`echo "not ok 1 - boom"\n${gate.wait}\necho done > "${marker}"\nexit 1`);
   try {
     const child = runRunner({ root, command: `bash ${f}` });
-    // The failure line is printed immediately; the suite's post-failure step (writing the
-    // marker) happens only after `sleep 10`. If state=red is observed BEFORE the marker
-    // exists, red was written on detection, not after the run completed (AC2).
-    // gap-suite-load-sampler-orphan-process load-hardening: the 5s poll / 2s marker window
-    // flaked RED under 16-way contention (runner node bootstrap > 5s ⇒ `poll timeout after
-    // 5000ms`). Widen the marker window + poll timeout so "early-red" is judged on the
-    // marker (wall-clock), not on a runner-bootstrap race.
+    // The failure line is printed immediately; the suite's post-failure step (writing the marker)
+    // happens only after the test touches `gate.release`. If state=red is observed BEFORE the marker
+    // exists, red was written on detection, not after the run completed (AC2). The 20s poll timeout
+    // stays (runner node bootstrap under load can exceed seconds — early-red is judged on the marker,
+    // not on a fixed sleep window; gap-fake-suite-release-gate-sleep-zero).
     const redObserved = await poll(() => {
       const s = readState(root);
       return s && s.state === "red" ? s : null;
@@ -443,6 +445,7 @@ test("AC2 — RED is marked on first failure detection, before the run completes
     assert.equal(redObserved.state, "red");
     assert.ok(!fs.existsSync(marker), "red appeared before the suite's post-failure step completed");
 
+    fs.writeFileSync(gate.release, "go", "utf8"); // release — the post-failure step (marker) runs now
     const { code } = await waitExit(child);
     assert.equal(code, 1, "runner exits 1 on red");
     assert.ok(fs.existsSync(marker), "suite finished its post-failure step after red was marked");
@@ -1120,18 +1123,21 @@ test("AC2 — a vitest structured failure line flips red EARLY, before the run c
   const marker = path.join(root, "post-failure-marker");
   // A real failing vitest run prints the structured per-file line (`❯ <file> (N tests | M failed)`)
   // BEFORE its summary and exit. Red must be marked on that line, not at exit — the same early-red
-  // property node:test/TAP gets from `not ok` (AC2 preserved for vitest projects).
+  // property node:test/TAP gets from `not ok` (AC2 preserved for vitest projects). The suite blocks on
+  // a release gate after the failure line; the test touches it after observing the early red
+  // (gap-fake-suite-release-gate-sleep-zero — the fixed 10s marker window is zeroed).
+  const gate = releaseGate(root, "earlyred-vitest");
   const { f, dir } = fakeSuite(
-    'echo " ❯ test/foo.test.ts (3 tests | 1 failed) 12ms"\nsleep 10\necho done > "' +
+    'echo " ❯ test/foo.test.ts (3 tests | 1 failed) 12ms"\n' +
+      gate.wait +
+      '\necho done > "' +
       marker +
       '"\nexit 1',
   );
   try {
     const child = runRunner({ root, command: `bash ${f}` });
-    // gap-suite-load-sampler-orphan-process load-hardening: 5s poll / 2s marker window flaked
-    // RED under 16-way contention (runner node bootstrap > 5s ⇒ `poll timeout after 5000ms`).
-    // Widen the marker window + poll timeout so early-red is judged on the marker (wall-clock),
-    // not on a runner-bootstrap race.
+    // The 20s poll timeout stays (runner node bootstrap under load can exceed seconds — early-red is
+    // judged on the marker, not on a runner-bootstrap race).
     const redObserved = await poll(() => {
       const s = readState(root);
       return s && s.state === "red" ? s : null;
@@ -1140,6 +1146,7 @@ test("AC2 — a vitest structured failure line flips red EARLY, before the run c
     assert.equal(redObserved.reason, "failed", "a structured vitest failure is a REAL failure (stop-dispatch signal)");
     assert.equal(redObserved.finishedAt, null, "red written while the run is still in progress (AC2 early-red)");
     assert.ok(!fs.existsSync(marker), "red appeared before the suite's post-failure step completed");
+    fs.writeFileSync(gate.release, "go", "utf8"); // release — the post-failure step (marker) runs now
     const { code } = await waitExit(child);
     assert.equal(code, 1, "runner exits 1 on red");
   } finally {
@@ -1831,8 +1838,12 @@ test("AC1 — real two-runner race: a stale runner finishing red does NOT overwr
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-race-"));
   const staleStarted = path.join(root, "stale-started");
   // Runner A is the one that will be SUPERSEDED: it runs a slow suite that turns red at the end.
+  // gap-fake-suite-release-gate-sleep-zero — A's fixed 3s in-flight window is a release gate: A blocks
+  // after touching `staleStarted` until the test releases it (after B has taken over), zeroing the
+  // runner's hard wait while keeping A "in flight" during B's takeover.
+  const gate = releaseGate(root, "stale");
   const { f: staleF, dir: staleDir } = fakeSuite(
-    `touch "${staleStarted}"; sleep 3; echo "not ok 1 - stale red (superseded runner)"; exit 1`,
+    `touch "${staleStarted}"; ${gate.wait}; echo "not ok 1 - stale red (superseded runner)"; exit 1`,
   );
   // Runner B is the CURRENT runner: a fast green suite.
   const { f: freshF, dir: freshDir } = fakeSuite(GREEN_SUITE);
@@ -1853,7 +1864,9 @@ test("AC1 — real two-runner race: a stale runner finishing red does NOT overwr
     assert.ok(afterB.runId && afterB.runId !== runIdA, "B is a NEW generation (different runId)");
     const runIdB = afterB.runId;
 
-    // A finishes RED — its stale red write must be dropped by the guard.
+    // A finishes RED — its stale red write must be dropped by the guard. Release A's suite now that B
+    // has established its generation (A was held in flight the whole time).
+    fs.writeFileSync(gate.release, "go", "utf8");
     const { code: codeA } = await waitExit(childA);
     assert.equal(codeA, 1, "the stale runner exits 1 (its suite was red)");
 
@@ -2020,8 +2033,12 @@ test("AC6 — a runner that dies mid-run from an uncaughtException writes state=
 
 test("gap-test-detail-load-timeseries — the runner spawns a load sampler that writes a per-run timeseries and stops when the suite ends", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-load-"));
+  // gap-fake-suite-release-gate-sleep-zero — the fixed 1.5s sampler window is a release gate: the
+  // suite blocks until the test has observed the sampler's first sample, then the test releases it.
+  const gate = releaseGate(root, "loadsampler");
   const { f, dir } = fakeSuite(
-    'sleep 1.5\n' +
+    gate.wait +
+      '\n' +
       'echo "# tests 1"\n' +
       'echo "# pass 1"\n' +
       'echo "# fail 0"\n' +
@@ -2069,6 +2086,7 @@ test("gap-test-detail-load-timeseries — the runner spawns a load sampler that 
     assert.equal(name, `suite-load-${s.runId}.jsonl`, "timeseries file name = suite-load-<runId>.jsonl");
 
     // Suite ends → the runner writes a terminal state → the detached sampler stops (never resident).
+    fs.writeFileSync(gate.release, "go", "utf8"); // release — the sampler has already logged its first sample
     await waitExit(child);
     const pidFile = path.join(loadDir, `${name}.pid`);
     assert.ok(fs.existsSync(pidFile), "sampler wrote its pid sidecar");

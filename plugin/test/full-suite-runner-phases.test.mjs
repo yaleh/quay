@@ -1178,14 +1178,15 @@ test("AC5 — a git-repo round where a CONCURRENT commit lands MID-ROUND is VOID
   fs.writeFileSync(path.join(root, "a.txt"), "a\n", "utf8");
   execSync("git add -A && git commit -q -m base", { cwd: root });
   const startHead = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
-  // The fake suite: after a short delay (the suite is "running"), a CONCURRENT WRITER commits to the
-  // shared tree (round-53 class) — then the suite itself PASSES. The tree was MUTATED under the run,
+  // The fake suite: a CONCURRENT WRITER commits to the shared tree (round-53 class) — then the suite
+  // itself PASSES. The commit is mid-round BY CONSTRUCTION (the runner captures start HEAD before it
+  // spawns the suite, so any suite-side commit lands between the START and TERMINAL reads — no fixed
+  // `sleep` needed; gap-fake-suite-release-gate-sleep-zero). The tree was MUTATED under the run,
   // so the would-be green is a FALSE CERTIFICATE: gap-verifiedcommit-dirty-tree-false-certificate
   // AC5 demotes it to state=red reason=infra-error void:true (the tests passed; the certificate is
   // void — SUITE-GREEN / SUITE-MERGE-PENDING must not fire for a tree that was never pinned).
   const { f, dir } = fakeSuite(
-    'sleep 1\n' +
-      'git commit --allow-empty -q -m "concurrent writer mid-round"\n' +
+    'git commit --allow-empty -q -m "concurrent writer mid-round"\n' +
       'echo "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
   );
   try {
@@ -1225,8 +1226,7 @@ test("AC1/AC3 — a RED round with a mid-round concurrent commit carries treeMut
   // A concurrent writer commits mid-round AND the suite ALSO fails — the red carries the
   // concurrent-write FP-candidate annotation (a signal, not a blanket discard: reason stays failed).
   const { f, dir } = fakeSuite(
-    'sleep 1\n' +
-      'git commit --allow-empty -q -m "concurrent writer mid-round"\n' +
+    'git commit --allow-empty -q -m "concurrent writer mid-round"\n' +
       'echo "not ok 1 - boom"\nexit 1',
   );
   try {
@@ -1399,11 +1399,12 @@ test("AC1/AC2 — a mid-round EDIT to an assertion-surface file in the TESTED tr
   fs.mkdirSync(path.join(root, "tasks"));
   fs.writeFileSync(path.join(root, "tasks", "surface.txt"), "v1\n", "utf8");
   execSync("git add -A && git commit -q -m base", { cwd: root });
-  // The fake suite: after a short delay (the suite is "running"), it REWRITES an assertion-surface
-  // file mid-round — the round-84 SAVE-time pollution shape (uncommitted, in the tested tree) — then passes.
+  // The fake suite REWRITES an assertion-surface file mid-round — the round-84 SAVE-time pollution
+  // shape (uncommitted, in the tested tree) — then passes. The edit is mid-round BY CONSTRUCTION (the
+  // runner snapshots the assertion surface before it spawns the suite — no fixed `sleep` needed,
+  // gap-fake-suite-release-gate-sleep-zero).
   const { f, dir } = fakeSuite(
-    'sleep 1\n' +
-      'echo "v2-uncommitted" > tasks/surface.txt\n' +
+    'echo "v2-uncommitted" > tasks/surface.txt\n' +
       'echo "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
   );
   try {
@@ -1433,8 +1434,7 @@ test("AC1/AC2 — a RED round with a mid-round assertion-surface edit carries as
   // The suite edits an assertion-surface file mid-round AND ALSO fails — the red carries the
   // mixed-state FP-candidate annotation (a signal, not a blanket discard: reason stays failed).
   const { f, dir } = fakeSuite(
-    'sleep 1\n' +
-      'echo "v2-uncommitted" > tasks/surface.txt\n' +
+    'echo "v2-uncommitted" > tasks/surface.txt\n' +
       'echo "not ok 1 - boom"\nexit 1',
   );
   try {

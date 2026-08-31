@@ -80,6 +80,20 @@ export function fakeSuite(scriptBody) {
   return { dir, f };
 }
 
+/** gap-fake-suite-release-gate-sleep-zero — a RELEASE GATE replaces a fake suite's fixed `sleep N`
+ *  in-flight window: `wait` is a bash snippet that blocks (polling) until the file `release` exists,
+ *  and the test touches `release` the moment it has observed the intermediate state — so the runner
+ *  never waits out a fixed N seconds. Returns { release, wait }; embed `wait` in the suite script where
+ *  `sleep N` used to be, and `fs.writeFileSync(release, "go")` to let the suite proceed. The loop is
+ *  bounded (~30s) so a suite leaked by a failed/killed runner exits instead of blocking forever.
+ *  (`base` is a temp dir the test already owns/cleans — e.g. `root` — same pattern as the existing
+ *  post-failure `marker` file.) */
+export function releaseGate(base, tag) {
+  const release = path.join(base, `release-${tag}`);
+  const wait = `for _i in $(seq 1 600); do [ -e '${release}' ] && break; sleep 0.05; done`;
+  return { release, wait };
+}
+
 /** Spawn the runner against a temp root with a fake command. */
 export function runRunner({ root, command, laneCount, stateDir, runner, buckets, env = {}, serialConcurrency, lowconcConcurrency, runId }) {
   const args = ["--no-warnings", "--experimental-strip-types", RUNNER, "--root", root];
@@ -107,6 +121,14 @@ export function runRunner({ root, command, laneCount, stateDir, runner, buckets,
   // 200% the runner uses when the override is absent. Unless a test explicitly provides its own
   // limits, drop the inherited override so the child uses the runner's DEFAULT_SYSTEMD_RUN_LIMITS.
   if (!("QUAY_TEST_SYSTEMD_RUN_LIMITS" in env)) delete mergedEnv.QUAY_TEST_SYSTEMD_RUN_LIMITS;
+  // gap-suite-knobs-config-file-priority: hermetic phase-concurrency knobs. The real suite launch
+  // (full-suite-runner → test.sh) passes QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY into the
+  // test-file process env; those leak into the nested runner child via `...process.env` and mask the
+  // HOST-READ default the AC1/AC3 "default run" test asserts (the runner now reads these env vars
+  // directly — config < env < CLI — where the old import-time consts ignored env). Unless a test
+  // explicitly provides its own, drop the inherited values so the default-path test stays hermetic.
+  if (!("QUAY_SERIAL_CONCURRENCY" in env)) delete mergedEnv.QUAY_SERIAL_CONCURRENCY;
+  if (!("QUAY_LOWCONC_CONCURRENCY" in env)) delete mergedEnv.QUAY_LOWCONC_CONCURRENCY;
   // gap-verification-round-observability-holes AC3 — hermetic tests pin the independent
   // concurrentSuitesRunning read to a lone round (QUAY_TEST_RUNNER_PROCS=1) by default. Two reasons:
   // (a) the unseamed pgrep path would count the PRODUCTION full-suite-runner.ts that launches this
