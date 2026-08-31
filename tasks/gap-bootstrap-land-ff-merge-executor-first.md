@@ -1,7 +1,7 @@
 ---
 id: gap-bootstrap-land-ff-merge-executor-first
 title: 落地 fan-in ff 步 executor-first（ff-merge.ts + worker-driver.ts ff 步 import，⛔ 不删 bash）——解 gap-execution-loop bootstrap 死锁
-status: ready
+status: done
 labels:
   - gap
   - defect
