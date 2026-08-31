@@ -1,7 +1,7 @@
 ---
 id: gap-suite-file-split-two-longest
 title: 机械拆分 full-suite-runner.test.mjs + worker-driver.test.mjs 各 2–3 份——让任何 shard ≤139s（Tier 2）
-status: ready
+status: done
 labels:
   - gap
   - test-wall-clock
