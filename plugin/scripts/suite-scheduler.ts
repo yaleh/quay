@@ -24,24 +24,28 @@
 //   1. PURE scheduling core (mainCapacity / nextDispatch / simulateSchedule / simulateMinLock) — no
 //      process spawning, unit-tested by plugin/test/suite-scheduler.test.mjs for the waterline
 //      semantics, monotonicity, pass/fail-neutrality, and the min-lock control.
-//   2. The execution entry (runScheduler + CLI) — spawns one `node --test <file>` per dispatched file
-//      with spec→stdout (the outer runner's 判绿 markers) and emits the SAME per-file/group markers
-//      the downstream accounting reads (`__PERFILE__` / `__GROUP__` / `__OVERHEAD__ <phase>_ms`).
+//   2. The execution entry (runScheduler + CLI) — runs each dispatched file through node:test's
+//      run({files:[file], isolation:"process"}) with dropRawDiagnostics→spec→stdout (the outer
+//      runner's 判绿 markers) and emits the SAME per-file/group markers the downstream accounting
+//      reads (`__PERFILE__` / `__GROUP__` / `__OVERHEAD__ <phase>_ms`).
 //
 // Pass/fail-neutral (AC3): the scheduler changes SCHEDULING ONLY — every input file is run exactly
 // once, the same assertions execute, and the exit code is non-zero iff ≥1 file failed/cancelled
-// (node --test's own per-file exit code, accumulated). A scheduling bug can never DROP a test.
+// (node:test's own per-file summary tally, accumulated). A scheduling bug can never DROP a test.
 //
 // Usage (group\tpath lines on stdin, already LPT-ordered by scripts/test.sh's lpt_reorder_files):
 //   { printf 'serial\t%s\n' ...; printf 'lowconc\t%s\n' ...; printf 'main\t%s\n' ...; } \
 //     | node --experimental-strip-types suite-scheduler.ts \
 //         --root <repo> --serial-concurrency <S> --lowconc-concurrency <L> --main-concurrency <M> \
-//         [<extra node --test flags...>]
+//         [--test-name-pattern=<pat> ...]
 //
-// The extra flags (e.g. --test-name-pattern=X) are forwarded to every per-file `node --test` spawn;
-// any --test-concurrency[=N] flag is STRIPPED (the scheduler owns concurrency — one source, no drift).
+// The only forwarded node --test flag is --test-name-pattern[=X] (mapped to run()'s testNamePatterns,
+// the same parse as suite-lpt-runner.mjs); any --test-concurrency[=N] flag is STRIPPED (the scheduler
+// owns concurrency — one source, no drift).
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { run } from "node:test";
+import { spec } from "node:test/reporters";
+import { Transform } from "node:stream";
 import { isDirectEntry } from "./gate-script-base.ts";
 
 export type SuiteGroup = "serial" | "lowconc" | "main";
@@ -200,23 +204,48 @@ export interface RunResult {
   failedFiles: string[];
 }
 
+/** A stream.Transform that drops `test:stdout` / `test:stderr` events before the spec reporter —
+ *  the SAME raw-diagnostic filter suite-lpt-runner.mjs wires (its dropRawDiagnostics): a test file
+ *  that leaks a literal `not ok` / `✖` line from one of its OWN subprocesses (stdio inherited) must
+ *  not pollute the stream the outer runner greps for 判绿/红. Red/green is carried entirely by the
+ *  structured events (test:fail / test:summary) the spec reporter renders as `✖ <name> (Nms)` /
+ *  `ℹ fail N`; the raw child streams are diagnostics only. */
+function dropRawDiagnostics() {
+  return new Transform({
+    objectMode: true,
+    transform(chunk, _encoding, callback) {
+      let obj = chunk;
+      if (Buffer.isBuffer(obj)) obj = JSON.parse(obj.toString());
+      if (typeof obj === "string") obj = JSON.parse(obj);
+      if (obj && typeof obj === "object" && (obj.type === "test:stdout" || obj.type === "test:stderr")) {
+        return callback(); // drop the raw child output
+      }
+      callback(null, chunk);
+    },
+  });
+}
+
 /**
- * Run the suite through the event-driven scheduler. Spawns one `node --test --test-reporter=spec
- * <flags> <file>` per dispatched file (spec→stdout: the outer runner's 判绿 markers), inheriting
- * stdout/stderr so the per-file spec summaries flow straight to the suite stream. Emits:
+ * Run the suite through the event-driven scheduler. Each dispatched file runs through node:test's
+ * `run({files:[file], isolation:"process"})` (the SAME in-process runner suite-lpt-runner.mjs uses)
+ * with `dropRawDiagnostics → spec → stdout` composed (spec: the outer runner's 判绿 markers, raw
+ * diagnostics dropped) and the per-file verdict read from the ROOT test:summary counts (single
+ * source, no driftable exit-code counter). Emits:
  *   __PERFILE__ duration_ms=<d> <path> passed=<bool> end_ms=<epoch>   per file (the LPT input carrier)
  *   __GROUP__ concurrency=<budget> files=<n> sum_ms=<sum> floor_ms=<floor> capped=<m>   per group close
  *   __OVERHEAD__ <serial|lowconc|main>_phase_ms=<n>   per group wall  (the AC4/AC5 cost carriers)
  *   __OVERHEAD__ scheduler_ms=<n>                     total wall
  * Returns the failed-file count (exit code = failed>0 ? 1 : 0 — the SAME tally semantics as
- * suite-lpt-runner.mjs's failed+cancelled).
+ * suite-lpt-runner.mjs's failed+cancelled). The scheduler is ALWAYS a top-level CLI (test.sh's
+ * child, never under `node --test`), so `run()`'s isolation children never inherit
+ * NODE_TEST_CONTEXT (a nested marker that would make them skip their files and report green).
  */
 export function runScheduler(opts: {
   budgets: SchedulerBudgets;
   groups: GroupQueues;
-  nodeArgs: string[];
+  testNamePatterns: string[];
 }): Promise<RunResult> {
-  const { budgets, groups, nodeArgs } = opts;
+  const { budgets, groups, testNamePatterns } = opts;
   const queues: GroupQueues = { serial: [...groups.serial], lowconc: [...groups.lowconc], main: [...groups.main] };
   const active: ActiveCounts = { serial: 0, lowconc: 0, main: 0 };
   const stats: Record<SuiteGroup, GroupStats> = {
@@ -225,18 +254,19 @@ export function runScheduler(opts: {
     main: { durs: [], failed: 0, startMs: null, endMs: null },
   };
   let nextId = 1;
-  const running = new Map<number, { child: ChildProcess; file: string; group: SuiteGroup; startMs: number }>();
+  const running = new Map<number, { file: string; group: SuiteGroup; startMs: number }>();
   const failedFiles: string[] = [];
   const schedulerStartMs = Date.now();
 
   return new Promise<RunResult>((resolve) => {
-    const finishFile = (id: number, passed: boolean) => {
+    const finishFile = (id: number, failedCount: number) => {
       const rec = running.get(id);
       if (!rec) return;
       running.delete(id);
       active[rec.group]--;
       const dur = Math.max(0, Date.now() - rec.startMs);
       const st = stats[rec.group];
+      const passed = failedCount === 0;
       st.durs.push(dur);
       if (!passed) {
         st.failed++;
@@ -253,27 +283,43 @@ export function runScheduler(opts: {
       tick(); // re-dispatch on the freed capacity (event-driven — "推进到最早完成")
     };
 
+    // Run ONE file through node:test run({files:[file]}) and resolve its failed+cancelled tally
+    // (read from the ROOT test:summary — data.file === undefined — the single source, same as the
+    // legacy runner). A stream "error" (e.g. a missing file) is fail-loud: resolve non-zero so the
+    // file is never silently dropped.
+    const driveFile = (file: string): Promise<number> =>
+      new Promise<number>((resolveFile) => {
+        const stream = run({
+          files: [file],
+          concurrency: 1,
+          isolation: "process",
+          ...(testNamePatterns.length > 0 ? { testNamePatterns } : {}),
+        });
+        stream.compose(dropRawDiagnostics()).compose(spec).pipe(process.stdout);
+        let failed = 0;
+        stream.on("data", (chunk) => {
+          let obj = chunk;
+          if (Buffer.isBuffer(obj)) obj = JSON.parse(obj.toString());
+          if (typeof obj === "string") obj = JSON.parse(obj);
+          if (obj && typeof obj === "object" && obj.type === "test:summary") {
+            const data = obj.data;
+            if (data && data.file === undefined && data.counts) {
+              failed = (data.counts.failed ?? 0) + (data.counts.cancelled ?? 0);
+            }
+          }
+        });
+        stream.on("end", () => resolveFile(failed));
+        stream.on("error", () => resolveFile(failed + 1));
+      });
+
     const tick = () => {
       const started = nextDispatch(budgets, queues, active);
       for (const s of started) {
         const st = stats[s.group];
         if (st.startMs === null) st.startMs = Date.now();
-        // Strip the nested-test-runner markers (NODE_TEST_CONTEXT / NODE_TEST_WORKER_ID): when the
-        // scheduler itself runs under `node --test` (a nested suite spawn, or this module's own test),
-        // the inherited marker makes a per-file `node --test` child exit 0 EVEN ON FAILURE (the child
-        // thinks it is a worker inside the parent run). A top-level child (markers absent) exits
-        // non-zero on a red file — the exit-code aggregate this scheduler's pass/fail verdict depends on.
-        const childEnv = { ...process.env };
-        delete childEnv.NODE_TEST_CONTEXT;
-        delete childEnv.NODE_TEST_WORKER_ID;
-        const child = spawn(process.execPath, ["--test", "--test-reporter=spec", ...nodeArgs, s.file], {
-          stdio: ["ignore", "inherit", "inherit"],
-          env: childEnv,
-        });
         const id = nextId++;
-        running.set(id, { child, file: s.file, group: s.group, startMs: Date.now() });
-        child.on("error", () => finishFile(id, false)); // spawn failure ⇒ fail-loud, never a dropped test
-        child.on("exit", (code, signal) => finishFile(id, code === 0 && signal === null));
+        running.set(id, { file: s.file, group: s.group, startMs: Date.now() });
+        driveFile(s.file).then((failedCount) => finishFile(id, failedCount));
       }
       if (running.size === 0 && queues.serial.length === 0 && queues.lowconc.length === 0 && queues.main.length === 0) {
         process.stderr.write(`__OVERHEAD__ scheduler_ms=${Date.now() - schedulerStartMs}\n`);
@@ -281,22 +327,9 @@ export function runScheduler(opts: {
       }
     };
 
-    // Fail-open on a termination signal: propagate to the per-file node --test children so a
-    // kill-on-red reaches the whole tree (this scheduler is test.sh's child; its children would
-    // otherwise orphan). Exit non-zero (the suite was cut, not green).
-    const onSignal = () => {
-      for (const rec of running.values()) {
-        try {
-          rec.child.kill("SIGTERM");
-        } catch {
-          /* already gone */
-        }
-      }
-      resolve({ failed: failedFiles.length + 1, failedFiles });
-    };
-    process.on("SIGTERM", onSignal);
-    process.on("SIGINT", onSignal);
-
+    // No custom signal handler: on SIGTERM/SIGINT the default disposition terminates this process
+    // (the whole process group — including the isolation children — is killed by the outer runner's
+    // tree kill). Matches suite-lpt-runner.mjs, which likewise relies on default signal termination.
     tick();
   });
 }
@@ -316,9 +349,9 @@ function emitGroup(group: SuiteGroup, concurrency: number, st: GroupStats): void
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 
-function parseArgs(argv: string[]): { budgets: SchedulerBudgets; nodeArgs: string[] } {
+function parseArgs(argv: string[]): { budgets: SchedulerBudgets; testNamePatterns: string[] } {
   const budgets: SchedulerBudgets = { serial: 1, lowconc: 1, main: 1 };
-  const nodeArgs: string[] = [];
+  const testNamePatterns: string[] = [];
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--serial-concurrency" && i + 1 < argv.length) {
@@ -333,11 +366,15 @@ function parseArgs(argv: string[]): { budgets: SchedulerBudgets; nodeArgs: strin
       if (i + 1 < argv.length) i++; // strip the space-spelling value (the scheduler owns concurrency)
     } else if (a.startsWith("--test-concurrency=")) {
       // strip — the scheduler owns concurrency (one source, no drift)
+    } else if (a === "--test-name-pattern" && i + 1 < argv.length) {
+      testNamePatterns.push(argv[++i]); // map to run()'s testNamePatterns (same parse as suite-lpt-runner.mjs)
+    } else if (a.startsWith("--test-name-pattern=")) {
+      testNamePatterns.push(a.slice("--test-name-pattern=".length));
     } else if (a.startsWith("-")) {
-      nodeArgs.push(a); // forward every other node --test flag verbatim
+      // unknown pass-through flag — skip (no run() equivalent), same as suite-lpt-runner.mjs parseRunnerArgs
     }
   }
-  return { budgets, nodeArgs };
+  return { budgets, testNamePatterns };
 }
 
 /** Read `group\tpath` lines from stdin (already LPT-ordered by scripts/test.sh). */
@@ -368,7 +405,7 @@ async function main(argv: string[]): Promise<number> {
     );
     return 0;
   }
-  const { budgets, nodeArgs } = parseArgs(argv);
+  const { budgets, testNamePatterns } = parseArgs(argv);
   const groups = await readManifest();
   const total = groups.serial.length + groups.lowconc.length + groups.main.length;
   if (total === 0) {
@@ -378,7 +415,7 @@ async function main(argv: string[]): Promise<number> {
   process.stderr.write(
     `scheduler: serial=${groups.serial.length}≤${budgets.serial} lowconc=${groups.lowconc.length}≤${budgets.lowconc} main=${groups.main.length}≤${budgets.main} (waterline: main uses remaining capacity)\n`,
   );
-  const result = await runScheduler({ budgets, groups, nodeArgs });
+  const result = await runScheduler({ budgets, groups, testNamePatterns });
   return result.failed > 0 ? 1 : 0;
 }
 

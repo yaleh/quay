@@ -24,13 +24,17 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   mainCapacity,
   nextDispatch,
   simulateSchedule,
   simulateMinLock,
-  runScheduler,
 } from "../scripts/suite-scheduler.ts";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SCHEDULER_CLI = path.join(__dirname, "..", "scripts", "suite-scheduler.ts");
 
 const empty = () => ({ serial: 0, lowconc: 0, main: 0 });
 
@@ -140,21 +144,36 @@ test("AC2 control — waterline makespan < min-lock makespan (serial∥lowconc o
   assert.ok(waterline < minLock, `waterline ${waterline} must beat min-lock ${minLock}`);
 });
 
-test("runScheduler — pass/fail-neutral execution: exit aggregate = failed-file count (one red, one green)", async (t) => {
+test("runScheduler — pass/fail-neutral execution: exit aggregate = failed-file count (one red, one green)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-probe-"));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const okFile = path.join(dir, "ok.test.mjs");
-  const badFile = path.join(dir, "bad.test.mjs");
-  fs.writeFileSync(okFile, 'import { test } from "node:test";\ntest("passes", () => {});\n');
-  fs.writeFileSync(badFile, 'import { test } from "node:test";\ntest("fails", () => { throw new Error("boom"); });\n');
+  try {
+    const okFile = path.join(dir, "ok.test.mjs");
+    const badFile = path.join(dir, "bad.test.mjs");
+    fs.writeFileSync(okFile, 'import { test } from "node:test";\ntest("passes", () => {});\n');
+    fs.writeFileSync(badFile, 'import { test } from "node:test";\ntest("fails", () => { throw new Error("boom"); });\n');
 
-  const result = await runScheduler({
-    budgets: { serial: 1, lowconc: 1, main: 2 },
-    groups: { serial: [], lowconc: [], main: [okFile, badFile] },
-    nodeArgs: [],
-  });
-
-  assert.equal(result.failed, 1, "exactly one file fails");
-  assert.ok(result.failedFiles.includes(badFile), "the failing file is the red one");
-  assert.ok(!result.failedFiles.includes(okFile), "the passing file is not flagged");
+    // The CLI runs as a SUBPROCESS, never in-process: runScheduler composes spec→stdout, and an
+    // in-process call would leak the red probe's `✖ fails` + `Error: boom` into THIS file's stdout
+    // (the outer full-suite grep would then count a phantom red — the exact leak that reddened the
+    // prior fan-in run's `ℹ fail 1` on a `/tmp/sched-probe-*/bad.test.mjs`). A subprocess captures
+    // that spec output in `r.stdout`/`r.stderr` where it cannot pollute the outer stream.
+    // NODE_TEST_* is stripped so the CLI's run({isolation:"process"}) children are not mistaken for
+    // nested test workers (which would skip their files and report a false green).
+    const childEnv = { ...process.env };
+    for (const k of Object.keys(childEnv)) {
+      if (k.startsWith("NODE_TEST_")) delete childEnv[k];
+    }
+    const manifest = `main\t${okFile}\nmain\t${badFile}\n`;
+    const r = spawnSync(
+      process.execPath,
+      ["--no-warnings", "--experimental-strip-types", SCHEDULER_CLI,
+        "--serial-concurrency", "1", "--lowconc-concurrency", "1", "--main-concurrency", "2"],
+      { input: manifest, encoding: "utf8", env: childEnv },
+    );
+    assert.equal(r.status, 1, `one failing file ⇒ exit 1 (stderr: ${r.stderr})`);
+    assert.match(r.stderr, new RegExp(`__PERFILE__ .* ${badFile} passed=false`), "the failing file is flagged passed=false");
+    assert.match(r.stderr, new RegExp(`__PERFILE__ .* ${okFile} passed=true`), "the passing file is flagged passed=true");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
