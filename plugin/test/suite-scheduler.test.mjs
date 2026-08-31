@@ -140,8 +140,9 @@ test("AC2 control — waterline makespan < min-lock makespan (serial∥lowconc o
   assert.ok(waterline < minLock, `waterline ${waterline} must beat min-lock ${minLock}`);
 });
 
-test("runScheduler — pass/fail-neutral execution: exit aggregate = failed-file count (one red, one green)", async () => {
+test("runScheduler — pass/fail-neutral execution: exit aggregate = failed-file count (one red, one green)", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-probe-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const okFile = path.join(dir, "ok.test.mjs");
   const badFile = path.join(dir, "bad.test.mjs");
   fs.writeFileSync(okFile, 'import { test } from "node:test";\ntest("passes", () => {});\n');
