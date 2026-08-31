@@ -1,13 +1,14 @@
 ---
 id: gap-suite-split-full-suite-runner-lowconc-floor
 title: lowconc 相单文件地板 211s（full-suite-runner.test.mjs）——拆 3 文件打破地板（每轮省 ~60-90s）
-status: ready
+status: superseded
 labels:
   - gap
 parent: null
 children: []
 extra:
   schema: execution
+  superseded_by: gap-suite-file-split-two-longest
 ---
 **type:** execution
 

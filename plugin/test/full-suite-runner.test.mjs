@@ -91,6 +91,8 @@ import {
   countHeldSuiteLocks,
   defaultLaneCount,
   yieldedSuiteSlotCount,
+  spliceConcurrency,
+  stripConcurrencyFlags,
 } from "../scripts/full-suite-runner.ts";
 import { runOnce, classifyFailure, routeRed, shouldStopDispatch, shouldDispatchOnRed } from "../scripts/suite-state-trigger.ts";
 
@@ -2159,32 +2161,54 @@ test("AC16 — --lane-count N propagates --test-concurrency=N into the spawned t
   }
 });
 
-// ── gap-full-suite-runner-concurrency-default-and-gate: AC1/AC2/AC3/AC4 ─────────────────────────────
+// ── gap-splice-unit-direct-test: spliceConcurrency 直测（4 个 spawn e2e → 纯函数） ──────────────────
+// The splice (REPLACE of --test-concurrency) was exercised only via 4 full-runner spawns that each read
+// the spliced args from a fake test.sh. spliceConcurrency is a pure function — import it directly.
+// AC16 above is the single wiring keeper (the runner really splices N into the spawn command); the
+// REPLACE/append/dedupe assertions below run with ZERO runner spawns.
 
-test("AC1 — default laneCount is NPROC-derived (max(1, floor(nproc × oversub / S)); nproc=4, oversub=1 → 4/2/1 by slot count); spawned command carries ONE --test-concurrency", async () => {
-  // gap-suite-budget-oversubscribe (human 14:4xZ 修正方向) — the MAIN lane budget is
-  // max(1, floor(nproc × oversub / S)): PURE computation over host nproc + 旋钮③ oversub + 旋钮② S.
-  // defaultLaneCount() reads QUAY_MAX_CONCURRENT_SUITES (via concurrentSuiteSlots) and
-  // QUAY_MAX_OVERSUBSCRIPTION. RESOURCE_GATE_NPROC is the deterministic host seam (env on the
-  // spawned runner); QUAY_MAX_CONCURRENT_SUITES is pinned to prove the divisor is live: 4 cores →
-  // lane 4 at 1 slot, 2 at 2 slots, 1 at 3 slots.
-  for (const [slots, expected] of [["1", 4], ["2", 2], ["3", 1]]) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1-"));
-    const { argsLog } = fakeTestShRecordingArgs(root);
-    try {
-      // NO --lane-count, NO --command → default path; RESOURCE_GATE_NPROC=4 forces the derivation.
-      // oversub not set → QUAY_MAX_OVERSUBSCRIPTION default 1.
-      const child = runRunner({ root, env: { RESOURCE_GATE_NPROC: "4", QUAY_MAX_CONCURRENT_SUITES: slots } });
-      const { code } = await waitExit(child);
-      assert.equal(code, 0, `runner exits 0 on green (slots=${slots}), got ${code}`);
-      const s = readState(root);
-      assert.equal(s.laneCount, expected, `derived default laneCount = max(1, floor(4×1/${slots})) = ${expected} (slots=${slots}), got ${s.laneCount}`);
-      await poll(() => fs.existsSync(argsLog));
-      const args = fs.readFileSync(argsLog, "utf8").trim();
-      assert.equal(args, `--test-concurrency=${expected}`, `exactly ONE --test-concurrency=<derived> spliced (slots=${slots}), got: ${args}`);
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
+test("spliceConcurrency (unit) — append when absent, REPLACE when present (= and space spellings), exactly ONE flag", () => {
+  // AC1 splice (default-derived value appended when the command carries no --test-concurrency) + AC16.
+  assert.equal(spliceConcurrency("bash scripts/test.sh", 2), "bash scripts/test.sh --test-concurrency=2");
+  assert.equal(spliceConcurrency("bash scripts/test.sh", 4), "bash scripts/test.sh --test-concurrency=4");
+  // AC2 splice REPLACE — an existing --test-concurrency=8 (= and space spellings) is stripped and replaced.
+  assert.equal(spliceConcurrency("bash scripts/test.sh --test-concurrency=8", 4), "bash scripts/test.sh --test-concurrency=4");
+  assert.equal(spliceConcurrency("bash scripts/test.sh --test-concurrency 8", 4), "bash scripts/test.sh --test-concurrency=4");
+  // AC4 negative control — explicit 8 + existing =8 ⇒ exactly ONE =8 (replace, not two).
+  assert.equal(spliceConcurrency("bash scripts/test.sh --test-concurrency=8", 8), "bash scripts/test.sh --test-concurrency=8");
+});
+
+test("stripConcurrencyFlags (unit) — strips both the = and space spellings, leaves a flag-less command unchanged", () => {
+  assert.equal(stripConcurrencyFlags("bash test.sh --test-concurrency=8 --flag"), "bash test.sh --flag");
+  assert.equal(stripConcurrencyFlags("bash test.sh --test-concurrency 8 --flag"), "bash test.sh --flag");
+  assert.equal(stripConcurrencyFlags("bash test.sh"), "bash test.sh");
+});
+
+test("defaultLaneCount (unit) — the base formula divides by S (nproc=4, oversub=1 ⇒ 4/2/1 by slot count)", () => {
+  // AC1's s.laneCount derivation assertion (max(1, floor(4×1/S)) = 4/2/1), now a direct pure-function
+  // read instead of 3 full-runner spawns. Sibling of the yielded-slot formula test below.
+  const prevNproc = process.env.RESOURCE_GATE_NPROC;
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  const prevKnob = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  const prevOversub = process.env.QUAY_MAX_OVERSUBSCRIPTION;
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  const pinTmp = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lane-base-"));
+  process.env.FULL_SUITE_LOCK_FILE = path.join(pinTmp, "full-suite.lock");
+  process.env.RESOURCE_GATE_NPROC = "4";
+  process.env.QUAY_MAX_OVERSUBSCRIPTION = "1";
+  delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  try {
+    for (const [slots, expected] of [["1", 4], ["2", 2], ["3", 1]]) {
+      process.env.QUAY_MAX_CONCURRENT_SUITES = slots;
+      assert.equal(defaultLaneCount(), expected, `max(1, floor(4×1/${slots})) = ${expected}`);
     }
+  } finally {
+    if (prevNproc === undefined) delete process.env.RESOURCE_GATE_NPROC; else process.env.RESOURCE_GATE_NPROC = prevNproc;
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES; else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevKnob === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES; else process.env.QUAY_MAX_CONCURRENT_SUITES = prevKnob;
+    if (prevOversub === undefined) delete process.env.QUAY_MAX_OVERSUBSCRIPTION; else process.env.QUAY_MAX_OVERSUBSCRIPTION = prevOversub;
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE; else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    fs.rmSync(pinTmp, { recursive: true, force: true });
   }
 });
 
@@ -2460,33 +2484,6 @@ test("AC3 unit — the production read (pgrep, no seam) counts real marker proce
   }
 });
 
-test("AC2 — the splice is REPLACE: an existing --test-concurrency=8 (= and space spellings) is stripped and replaced by the derived value", async () => {
-  for (const existing of ["--test-concurrency=8", "--test-concurrency 8"]) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac2-"));
-    const { argsLog } = fakeTestShRecordingArgs(root);
-    try {
-      // slots=1 pins the derived default to nproc (4) so the REPLACE assertion targets the splice
-      // (single flag), not the ÷ slots derivation (covered by the AC1 test above).
-      const child = runRunner({
-        root,
-        command: `bash scripts/test.sh ${existing}`,
-        env: { RESOURCE_GATE_NPROC: "4", QUAY_MAX_CONCURRENT_SUITES: "1" },
-      });
-      const { code } = await waitExit(child);
-      assert.equal(code, 0, `runner exits 0 on green (existing '${existing}'), got ${code}`);
-      await poll(() => fs.existsSync(argsLog));
-      const args = fs.readFileSync(argsLog, "utf8").trim();
-      assert.equal(
-        args,
-        "--test-concurrency=4",
-        `existing '${existing}' must be REPLACED by the derived value (single flag), got: ${args}`,
-      );
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  }
-});
-
 test("AC3 — resource gate WAIT ⇒ the runner does NOT start and leaves the state file untouched", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac3-"));
   const { argsLog } = fakeTestShRecordingArgs(root);
@@ -2598,26 +2595,6 @@ test("AC2 — lightweight controls (--fail-fast-check) skip the in-flight check"
     // --fail-fast-check runs its own hermetic sub-suite and exits 0 when the chain works — it must
     // NOT be blocked by the in-flight check.
     assert.equal(code, 0, "--fail-fast-check must skip the in-flight check");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("AC4 — negative control: explicit --lane-count 8 + command already has =8 ⇒ exactly ONE =8 (replace, not two)", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac4-"));
-  const { argsLog } = fakeTestShRecordingArgs(root);
-  try {
-    const child = runRunner({ root, command: "bash scripts/test.sh --test-concurrency=8", laneCount: 8 });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
-    await poll(() => fs.existsSync(argsLog));
-    const args = fs.readFileSync(argsLog, "utf8").trim();
-    assert.equal(
-      args,
-      "--test-concurrency=8",
-      `existing =8 stripped + explicit 8 spliced ⇒ ONE =8 total (ABORT #5 was two 8s), got: ${args}`,
-    );
-    assert.equal(readState(root).laneCount, 8, "explicit --lane-count 8 wins and is recorded");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
