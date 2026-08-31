@@ -62,3 +62,15 @@ extra:
 - plugin/scripts/capability-catalog.sh（新脚本注册六表：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）
 - tasks/gap-suite-main-overlaps-load-sensitive-tail-experiment.md（A watcher 退役标注，如适用）
 - tasks/gap-suite-dynamic-waterline-scheduler.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-31T18:24:17.923Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+
+**重派指引（2026-08-31 driver development progress 诊断，聚焦修）**：
+- 聚焦修 `--list-files` 分组分类一致性——runner-grouping-list-groups AC6（`--group product,engine ∪ --group lowconc = no-args` 字节一致）被破坏，违反本任务 AC3 pass/fail-neutral（只改调度、不改测试集/断言）。
+- 定位对照：`QUAY_SUITE_SCHEDULER=0` 回退 legacy 跑 AC6——legacy 过 / scheduler 红 ⇒ bug 在 suite-scheduler.ts 的 `__GROUP__`/分类逻辑；legacy 也红 ⇒ 更早的 --list-files 改动，需另归因。
+- worktree 72c91ba31 可救（HEAD 已修过一次「__GROUP__ capped 字段误写为 st.failed」）；AC 0/5 待勾，修完勾 AC。

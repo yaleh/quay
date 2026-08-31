@@ -1,13 +1,15 @@
 ---
 id: gap-suite-concurrent-session-liveness-cross-contamination
 title: 并发套件（全量+scoped）共享 session-liveness-sig-* 前缀 ⇒ leak-scan 跨套件误报假红
-status: ready
+status: superseded
 labels:
   - gap
   - defect
 parent: null
 children: []
-extra: {}
+extra:
+  superseded_by: gap-suite-serial-lowconc-classification-recheck
+  superseded_reason: 根因（--buckets 绕过 run_selected ⇒ 锁/分相失效）已由 gap-suite-serial-lowconc-classification-recheck（done）统一收口；本任务 ② 前缀隔离（QUAY_RUN_ID）是 defense-in-depth，实现已丢失（develop QUAY_RUN_ID=0），根因收口后冗余。AC 勾选残留是 fail-open（勾掉的 AC ≠ 已实现的 AC，硬规则 3b）。
 ---
 **type:** execution
 
