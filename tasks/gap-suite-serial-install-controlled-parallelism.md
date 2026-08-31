@@ -1,7 +1,7 @@
 ---
 id: gap-suite-serial-install-controlled-parallelism
 title: 串行 install 家族受控并行——serial_concurrency 1→2-4 作对照实验（预期 2-4× 墙降）
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null

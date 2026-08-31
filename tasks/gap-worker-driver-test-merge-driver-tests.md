@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-test-merge-driver-tests
 title: worker-driver 合并同形 driver 测试——spawn 33→~17（复用已启动 driver 多断言）（Tier 2）
-status: needs-human
+status: ready
 labels:
   - gap
   - test-wall-clock
