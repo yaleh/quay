@@ -422,6 +422,13 @@ run_static_checks() {
   # （outer-anchor-check.ts 带标记）。whole-store 引用扫描 ⇒ full（scoped 模式推迟到 full-suite 门）。
   # @static-tier full
   run_checker "outer-retirement-precondition-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/outer-retirement-precondition-check.ts" --root "${repo_root}"
+  echo "== fan-in-workflow-retirement check (gap-fan-in-workflow-retirement-guard, L3 退役防回归) =="
+  # fan-in-execute.js workflow 退役防回归：①双副本路径不存在 + 引用面归零（归档白名单除外）——
+  # 双副本仍在 ⇒ NOT-EVALUATED (exit 3，P3 未删，才可判)；删净后引用未清零 ⇒ RED (exit 1)。②lock-events
+  # 非 wk-prod- 前缀 acquire 计数=0（窗口从 L1 落地起）——出现即 RED (exit 3 是文件缺失，非通过)。
+  # 负控制由单测钉住。whole-store 引用扫描 ⇒ full（scoped 模式推迟到 full-suite 门）。
+  # @static-tier full
+  run_checker "fan-in-workflow-retirement-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-workflow-retirement-check.ts" --root "${repo_root}"
   echo "== ac61-staleness-disposition check (tasks/gap-ac61-staleness-list-item-disposition, AC61 判据1-3 + DoD 负控制) =="
   # AC61 清单逐条处置 enforcement: the task file's `## AC61 处置记录` section must carry a record for
   # EVERY A-1..A-7 / B-1..B-4 item (迁出带落点映射 或 经核实仍有效+读数). CHECK-A (判据1/DoD 负控):
