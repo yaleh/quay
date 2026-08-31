@@ -25,18 +25,19 @@
 // its env var ONLY when that env var is unset/empty (env wins), and their existing CLI-flag logic
 // stays above env. That keeps ONE precedence chain, read at the single definition point.
 //
-// The 4 knobs with a FIXED default (phase_overlap / max_concurrent_suites / max_oversubscription /
-// main_tail_overlap_lanes) are listed in the shipped `.quay/config.yml`. serial_concurrency /
-// lowconc_concurrency default to a HOST-DERIVED value (os.availableParallelism() ÷ (S × P)), so they
-// are CONFIGURABLE here but intentionally ABSENT from the shipped config — a literal would be a
-// machine-spec-dependent literal (CLAUDE.md 硬规则 4 推论二).
+// The 5 knobs with a FIXED default (phase_overlap / max_concurrent_suites / max_oversubscription /
+// main_tail_overlap_lanes / main_tail_stall_pct) are listed in the shipped `.quay/config.yml`.
+// serial_concurrency / lowconc_concurrency default to a HOST-DERIVED value
+// (os.availableParallelism() ÷ (S × P)), so they are CONFIGURABLE here but intentionally ABSENT from
+// the shipped config — a literal would be a machine-spec-dependent literal (CLAUDE.md 硬规则 4 推论二).
 
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { isDirectEntry } from "./gate-script-base.ts";
 
-/** The 6 suite knobs: config key → env key (the mapping from the task's Proposal table). */
+/** The 7 suite knobs: config key → env key (the 6 from the task's Proposal table + the
+ *  main-tail-overlap trigger threshold main_tail_stall_pct, config-first per the same policy). */
 export const SUITE_KNOBS = {
   phase_overlap: "QUAY_PHASE_OVERLAP",
   serial_concurrency: "QUAY_SERIAL_CONCURRENCY",
@@ -44,6 +45,7 @@ export const SUITE_KNOBS = {
   max_concurrent_suites: "QUAY_MAX_CONCURRENT_SUITES",
   max_oversubscription: "QUAY_MAX_OVERSUBSCRIPTION",
   main_tail_overlap_lanes: "QUERY_MAIN_TAIL_OVERLAP",
+  main_tail_stall_pct: "QUAY_MAIN_TAIL_STALL_PCT",
 } as const;
 
 export type SuiteKnobKey = keyof typeof SUITE_KNOBS;
@@ -57,6 +59,7 @@ export interface SuiteParams {
   max_concurrent_suites?: number;
   max_oversubscription?: number;
   main_tail_overlap_lanes?: number;
+  main_tail_stall_pct?: number;
 }
 
 /** Per-knob schema: validator + a human-readable "must be …" clause for the FAIL-CLOSED message. */
@@ -67,6 +70,7 @@ const KNOB_SPEC: Record<SuiteKnobKey, { ok: (v: unknown) => boolean; must: strin
   max_concurrent_suites: { ok: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1, must: "an integer >= 1" },
   max_oversubscription: { ok: (v) => typeof v === "number" && Number.isFinite(v) && v > 0, must: "a positive number" },
   main_tail_overlap_lanes: { ok: (v) => typeof v === "number" && Number.isInteger(v) && v >= 0, must: "an integer >= 0" },
+  main_tail_stall_pct: { ok: (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100, must: "a number in [0, 100] (PSI stall %)" },
 };
 
 /** Read and validate the suite: section. Throws Error("FAIL-CLOSED: …") on a malformed/mistyped
