@@ -2410,12 +2410,12 @@ test("applyPromotions commits the status write — git status clean + committed 
   assert.equal(subject, "tasks: gap-candidate todo→ready（promotion-driver 机械晋升）", "the commit subject names the task and transition");
 });
 
-// ── DETACH PROPAGATION (gap-fan-in-ff-ref-update-detach-develop AC6) ─────────────────────────
+// ── DETACH PROPAGATION (gap-fan-in-ff-ref-update-detach-develop AC6 → gap-doc-develop-sync-…-resolution) ──
 // The main checkout sits on a doc-only work branch (main/manager-doc) while develop is bare (the
 // detach). A promotion flip committed on the doc branch must reach develop — fast-forward push —
 // so task worktrees branching from develop see the new status (otherwise dispatch reads ready on the
 // doc branch while the worktree base still has the old status). Non-ff (develop advanced independently)
-// ⇒ merge develop first, then push.
+// ⇒ mechanical ff-only 失败 ⇒ 升级语义兜底（semanticSyncDocToDevelop：merge -X theirs + ff，develop 权威）。
 
 test("propagateDocBranchToDevelop: doc-branch flip fast-forwards to develop (AC6)", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `propagate-ff-${Date.now()}-`));
@@ -2443,7 +2443,7 @@ test("propagateDocBranchToDevelop: doc-branch flip fast-forwards to develop (AC6
     "AC6: develop fast-forwarded to the doc branch head — the flip is visible to task worktrees");
 });
 
-test("propagateDocBranchToDevelop: develop advanced independently ⇒ merge then push (non-ff reconcile)", (t) => {
+test("propagateDocBranchToDevelop: develop advanced independently ⇒ semantic sync reconcile (non-ff)", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `propagate-nonff-${Date.now()}-`));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
@@ -2469,10 +2469,17 @@ test("propagateDocBranchToDevelop: develop advanced independently ⇒ merge then
 
   propagateDocBranchToDevelop(root);
 
-  assert.notEqual(git("rev-parse", "develop"), developHead, "develop advanced (reconcile merge landed)");
-  assert.equal(git("status", "--porcelain"), "", "reconcile merge left the doc branch clean");
+  assert.notEqual(git("rev-parse", "develop"), developHead, "develop advanced (semantic sync landed)");
+  // 语义兜底把 ff 失败/结果写进 .quay/doc-develop-sync.jsonl（gitignored 运行时遥测，非合并残留）——
+  // 干净态判据 = 无 unmerged 路径 + 无 tracked 改动（⛔ 把 untracked .quay 遥测误判成脏树）。
+  assert.equal(git("ls-files", "-u"), "", "semantic sync left no unmerged paths");
+  assert.equal(
+    git("status", "--porcelain").split("\n").filter((l) => l.trim() && !l.includes(".quay/")).join("\n"),
+    "",
+    "semantic sync left no tracked residue (excluding untracked .quay/ telemetry)",
+  );
   assert.match(git("show", "develop:tasks/gap-flip.md"), /^status: ready$/m,
-    "the doc-branch flip is visible on develop after reconcile");
+    "the doc-branch flip is visible on develop after semantic sync");
 });
 
 test("applyPromotions in a repo-less root still lands the write (committed=false, no throw)", (t) => {

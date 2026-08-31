@@ -198,24 +198,191 @@ export function commitTaskFile(root: string, rel: string, message: string): bool
   }
 }
 
-/** Propagate the doc branch to develop (gap-fan-in-ff-ref-update-detach-develop): the main checkout
- *  sits on the doc-only work branch (main/manager-doc). A flip committed THERE must reach develop so
- *  task worktrees (branching from develop) see the new status — otherwise dispatch reads the new status
- *  on main/manager-doc while the worktree base (develop) still has the old one. Fast-forward push; if
- *  develop advanced (non-ff), merge develop first then push. Best-effort: a conflict leaves the flip on
- *  the doc branch and the next landing's merge-develop reconciles. */
-export function propagateDocBranchToDevelop(root: string): void {
+// ── main/manager-doc ↔ develop 同步（gap-doc-develop-sync-semantic-conflict-resolution）──────────────
+// 人 2026-08-31 裁定反转：写面保留 main/manager-doc，但状态/任务文件变更必须以 develop 为终点。同步 =
+// 机械 ff-only + 语义兜底（机械失败升级确定性语义同步，develop 权威 wins），⛔ 静默 catch。
+// 原实现（gap-fan-in-ff-ref-update-detach-develop）是 `: void` + `catch(_){}` 全吞 + `git merge develop`
+// 静默 merge-fallback——实证 2026-08-31 一次 propagate 静默失败 ⇒ 4 任务状态分叉 + 主检出落后 develop
+// 53 提交无痕（硬规则 3b 的镜像：同步失败 ⇒ 伪装成同步成功）。
+
+/** doc↔develop 同步事件的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。
+ *  失败落痕：机械 ff-only 失败 / 语义兜底结果都写到这里，让「同步失败」在记录上可区分（⛔ 静默）。 */
+export const DOC_DEVELOP_SYNC_EVENT_REL = ".quay/doc-develop-sync.jsonl";
+
+/** 任务状态确定性优先级（develop 权威 wins 的机械表达）：done > needs-human > ready > todo。
+ *  分叉消解取更「前进」的一侧，永不交 LLM（AC2）。 */
+export const STATUS_PRIORITY: readonly string[] = ["todo", "ready", "needs-human", "done"];
+
+/** 追加一条 doc↔develop 同步事件（create dir/file as needed）。纯 I/O。 */
+export function writeDocDevelopSyncEvent(root: string, record: Record<string, unknown>): string {
+  const file = path.join(root, DOC_DEVELOP_SYNC_EVENT_REL);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...record }) + "\n", "utf8");
+  return file;
+}
+
+/** 确定性状态消解（AC2）：两状态分叉取优先级更高者（done>needs-human>ready>todo）。任一读不懂
+ *  （非四态）⇒ 用另一侧；都读不懂 ⇒ null。纯函数，无 LLM、无 I/O。 */
+export function resolveStatusPriority(a: string | null | undefined, b: string | null | undefined): string | null {
+  const candidates = [a, b].filter(
+    (s): s is string => typeof s === "string" && STATUS_PRIORITY.includes(s),
+  );
+  if (candidates.length === 0) return null;
+  const byPriority = (x: string, y: string) => STATUS_PRIORITY.indexOf(y) - STATUS_PRIORITY.indexOf(x);
+  return [...candidates].sort(byPriority)[0];
+}
+
+/** 读当前分支名（`git branch --show-current`）。git 出错 ⇒ null（调用方以事件落痕，⛔ 静默）。 */
+function currentBranchName(root: string): string | null {
   try {
-    const cur = execFileSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).trim();
-    if (!cur || cur === "develop") return;
+    return execFileSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** 机械 ff-only push：把 `src` 快进到 develop（`git push . src:develop`）。ff 不成立 / git 出错 ⇒ false。 */
+function ffPushToDevelop(root: string, src: string): boolean {
+  try {
+    execFileSync("git", ["-C", root, "push", ".", `${src}:develop`], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 语义兜底（机械 ff-only 失败后，AC3/AC4）：机械同步失败（ff 不成立）升级到确定性语义同步——
+ *  ① `git merge develop -X theirs`（develop 权威 wins：冲突取 develop 侧；develop-only 提交与 doc-only
+ *  提交都进历史，⛔ 不 reset/checkout 丢提交，AC4）；② 分叉任务状态按确定性优先级对齐（AC2，永不 LLM）；
+ *  ③ ff push develop + 事件落痕。合并冲突（code/docs 语义冲突，机械不能消解）⇒ `git merge --abort`
+ *  保树干净 + 事件升级（Claude Code 语义合并接手），返回 false。 */
+export function semanticSyncDocToDevelop(root: string, cur: string): boolean {
+  writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic", phase: "begin", branch: cur });
+
+  // ② 分叉任务状态确定性对齐（AC2）：merge -X theirs 把冲突侧统一取 develop，可能丢掉 doc 侧更
+  // 「前进」的状态（doc=done vs develop=ready）⇒ 合并前先记录优先级胜出者，合并后按它回写。
+  const alignments = collectStatusAlignments(root, cur);
+
+  // ① merge develop（-X theirs = 冲突取 develop 侧，develop 权威 wins；⛔ 非静默 merge-fallback——
+  // 这里不是「push 失败就吞掉」，而是显式升级语义兜底 + 落痕）。
+  try {
+    execFileSync("git", ["-C", root, "merge", "develop", "--no-edit", "-X", "theirs"], { stdio: "ignore" });
+  } catch {
+    try { execFileSync("git", ["-C", root, "merge", "--abort"], { stdio: "ignore" }); } catch { /* 无 merge 可 abort */ }
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-conflict", phase: "merge", branch: cur });
+    return false;
+  }
+
+  // 回写优先级胜出的任务状态（仅当 doc 侧更前进时；否则 -X theirs 的 develop 侧已是正确值）。
+  if (!applyStatusAlignments(root, alignments)) {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-align-failed", phase: "align", branch: cur });
+    return false;
+  }
+
+  // ③ ff push develop + 落痕。
+  if (!ffPushToDevelop(root, cur)) {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-ff-failed", phase: "push", branch: cur });
+    return false;
+  }
+  writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-resolved", phase: "done", branch: cur });
+  return true;
+}
+
+/** 收集分叉任务状态对齐：对每个 tasks/*.md，读 develop 与 cur 的 status，若分叉且优先级胜者是 doc 侧
+ *  （即 cur 侧比 develop 更前进）⇒ 记录 { rel → 胜者 status }（合并后回写用）。纯读取，无 LLM。 */
+function collectStatusAlignments(root: string, cur: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const rel of listTaskFiles(root, cur)) {
+    const developStatus = statusAtRef(root, "develop", rel);
+    const curStatus = statusAtRef(root, cur, rel);
+    if (developStatus === curStatus) continue;
+    const resolved = resolveStatusPriority(developStatus, curStatus);
+    // 只回写「doc 侧更前进」的情形（resolved ≠ develop 侧）；develop 侧更前进由 -X theirs 已保证。
+    if (resolved !== null && resolved !== developStatus) out.set(rel, resolved);
+  }
+  return out;
+}
+
+/** 列出 cur 分支 tasks/ 下的任务文件相对路径（`git ls-tree`）。读失败 ⇒ 空表（fail-open：对齐是
+ *  「更前进」的增强，非必须；读不到 ⇒ 不增强，⛔ 不伪装成已对齐）。 */
+function listTaskFiles(root: string, cur: string): string[] {
+  try {
+    const out = execFileSync("git", ["-C", root, "ls-tree", "-r", "--name-only", cur, "--", "tasks/"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.split("\n").map((l) => l.trim()).filter((l) => l.endsWith(".md"));
+  } catch {
+    return [];
+  }
+}
+
+/** 读 `<ref>:<rel>` 的 status frontmatter（`git show`）。ref/文件缺失 / 读不懂 ⇒ null。 */
+function statusAtRef(root: string, ref: string, rel: string): string | null {
+  let text: string;
+  try {
+    text = execFileSync("git", ["-C", root, "show", `${ref}:${rel}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return null;
+  }
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!m) return null;
+  const line = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
+  return line ? line.slice("status:".length).trim() || null : null;
+}
+
+/** 回写任务状态对齐（合并后）：对每个 {rel → status}，把工作树文件的 status 行改写为胜者（已对齐
+ *  则跳过），`git add` 后一次性 `git commit --no-verify`（路径限定到改写过的文件，⛔ 裸 commit 扫共享
+ *  索引）。无改写 ⇒ true（no-op）。写/提交失败 ⇒ false（事件落痕由调用方）。 */
+function applyStatusAlignments(root: string, alignments: Map<string, string>): boolean {
+  const changed: string[] = [];
+  for (const [rel, status] of alignments) {
+    const file = path.join(root, rel);
+    let raw: string;
     try {
-      execFileSync("git", ["-C", root, "push", ".", `${cur}:develop`], { stdio: "ignore" });
-    } catch (_) {
-      // Develop advanced past the doc branch — merge it in, then push (fast-forward now).
-      execFileSync("git", ["-C", root, "merge", "develop", "--no-edit"], { stdio: "ignore" });
-      execFileSync("git", ["-C", root, "push", ".", `${cur}:develop`], { stdio: "ignore" });
+      raw = fs.readFileSync(file, "utf8");
+    } catch {
+      return false;
     }
-  } catch (_) { /* best-effort — next landing's merge-develop reconciles */ }
+    const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
+    if (!m) return false;
+    const [, open, fm, close] = m;
+    const statusLine = /^status:\s*\S+\s*$/m.exec(fm);
+    if (!statusLine) return false;
+    if (statusLine[0].replace(/^status:\s*/, "").trim() === status) continue; // 已对齐（merge 已保留 doc 侧胜者）
+    const newFm = fm.replace(statusLine[0], `status: ${status}`);
+    fs.writeFileSync(file, `${open}${newFm}${close}${raw.slice(m[0].length)}`, "utf8");
+    changed.push(rel);
+  }
+  if (changed.length === 0) return true;
+  for (const rel of changed) {
+    try { execFileSync("git", ["-C", root, "add", "--", rel], { stdio: "ignore" }); } catch { return false; }
+  }
+  try {
+    execFileSync(
+      "git",
+      ["-C", root, "commit", "--no-verify", "-m", "sync: 确定性 status 对齐（develop 权威 + done>needs-human>ready>todo）", "--", ...changed],
+      { stdio: "ignore" },
+    );
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/** Propagate the doc branch to develop（gap-doc-develop-sync-semantic-conflict-resolution）：主检出在
+ *  doc-only 工作分支（main/manager-doc），翻转提交到那里必须到 develop，任务 worktree（从 develop 分支）
+ *  才看得到新 status。同步 = 机械 ff-only + 语义兜底：ff 快进成功 ⇒ true；ff 不成立 ⇒ 升级语义兜底
+ *  （semanticSyncDocToDevelop）。⛔ 静默 catch 已消除——每一步失败都写事件（DOC_DEVELOP_SYNC_EVENT_REL）
+ *  并返回 boolean（false = 未同步，可观测非静默）。 */
+export function propagateDocBranchToDevelop(root: string): boolean {
+  const cur = currentBranchName(root);
+  if (cur === null) {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-error", phase: "read-branch" });
+    return false;
+  }
+  if (cur === "develop") return true; // 已在 develop ⇒ 无需同步（非失败）
+  if (ffPushToDevelop(root, cur)) return true; // 机械 ff-only 成功
+  return semanticSyncDocToDevelop(root, cur); // 机械失败 ⇒ 升级语义兜底
 }
 
 // ── needs-human 注记携带实际失败步（gap-needs-human-note-carries-step-verdict）───────────────────────
