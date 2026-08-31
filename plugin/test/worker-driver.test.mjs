@@ -3431,6 +3431,10 @@ test("AC2 (gap-fan-in-spawn-stale-worktree-executor-missing-argv) — stale work
 // AC3 suite 看门狗显式 resolve 不依赖 close（等槽锁零输出也 kill）、AC4 挂起 ⇒ 锁必释放（finally）。
 
 const SLOT_LIB = path.join(REPO_ROOT, "plugin", "scripts", "suite-slot-lib.sh");
+// P2 (gap-execution-loop-productization-p2-p4): the ff 持锁段 is a TS module now — the hermetic
+// makeMechRepo worktree has no packages/, so pin the seam to the REAL repo copy (a plain path;
+// worker-driver pathToFileURL()s it). Same pin as fan-in-driver-mechanical-orchestration.test.mjs.
+const FF_MERGE_MODULE = path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts");
 
 /** 建一个 hermetic git repo + task worktree（机械 fan-in 的输入，与 fan-in-driver-mechanical-
  *  orchestration.test.mjs 的 makeRepoWithWorktree 同形——develop 上 ready 任务、task/<id> 分支上
@@ -3498,6 +3502,7 @@ function mechOpts(m, runId, overrides = {}) {
     slotBase: m.slotBase,
     slotLib: SLOT_LIB,
     silenceMs: 500,
+    ffMergeModule: FF_MERGE_MODULE,
     suiteCapture: m.capture,
     suiteLogFile: path.join(m.base, "suite.log"),
     suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
@@ -3533,11 +3538,14 @@ test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery) — appendFanInStepTrace
 test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery / gap-mech-fan-in-log-webui-visible-clickable) — runMechanicalFanIn 每步都有 begin/end（挂起定位）+ A1 过程日志 trace", () => {
   const src = fs.readFileSync(DRIVER, "utf8");
   // mechSh 步经 step() 包层——包层内 appendFanInStepTrace begin/end（挂起 = begin 无 end）+ A1 一行。
-  for (const step of ["merge-develop", "anti-drift", "typecheck", "archguard-structure", "scoped-gate", "doc-check", "anti-drift-land", "ac-gate", "ff"]) {
+  // ⛔ ff 不在其中：P2 (gap-execution-loop-productization-p2-p4) 把 ff 持锁段 TS 模块化（worker-driver
+  // import packages/quay/src/fan-in/ff-merge.ts，⛔ 不再 shell-out 到 bash fan-in-ff-merge.sh）——ff 是
+  // 直接函数调用非 mechSh 子进程，改走「自定义步 A1 trace」路径（下方第二循环）。
+  for (const step of ["merge-develop", "anti-drift", "typecheck", "archguard-structure", "scoped-gate", "doc-check", "anti-drift-land", "ac-gate"]) {
     assert.ok(src.includes(`step("${step}"`), `step ${step} must go through the step() wrapper (begin/end + A1 trace)`);
   }
-  // 自定义步（delta / suite 起止 / flip-done / cleanup）写 A1 过程日志 trace。
-  for (const step of ["delta", "suite-start", "suite-end", "flip-done", "cleanup"]) {
+  // 自定义步（delta / suite 起止 / flip-done / cleanup / ff）写 A1 过程日志 trace。
+  for (const step of ["delta", "suite-start", "suite-end", "flip-done", "cleanup", "ff"]) {
     assert.ok(src.includes(`step: "${step}"`), `custom step ${step} must write an A1 trace`);
   }
   // step() 包层内 begin/end 两路都写（挂起定位：begin 无 end 可区分）。
