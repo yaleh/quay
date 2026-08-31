@@ -23,9 +23,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，逐类负控制）：对每类 shipped 文件，「touch 该类任一文件 → fixture hash 必变 → 重建；不 touch → hash 不变」（一命令可验）；（⛔ 某类 touch 后 hash 不变 ⇒ 假）。
-- [ ] AC2（能取假，全类覆盖）：grep 全仓 shipped 文件类（vendored/workflows/skills/derived），每类都在 `_fixtureHash` 计入列表内，无漏网，命中数贴提交；（⛔ 还有漏网 ⇒ 假）。
-- [ ] AC3（能取假）：真实一轮全量 suite 绿。
+- [x] AC1（能取假，逐类负控制）：对每类 shipped 文件，「touch 该类任一文件 → fixture hash 必变 → 重建；不 touch → hash 不变」（一命令可验）；（⛔ 某类 touch 后 hash 不变 ⇒ 假）。
+- [x] AC2（能取假，全类覆盖）：grep 全仓 shipped 文件类（vendored/workflows/skills/derived），每类都在 `_fixtureHash` 计入列表内，无漏网，命中数贴提交；（⛔ 还有漏网 ⇒ 假）。
+- [ ] AC3（能取假）：真实一轮全量 suite 绿。（待外部）
 
 ## Definition of Done
 
@@ -34,4 +34,5 @@ extra:
 ## Touches
 
 - plugin/test/helpers/quay-init-install-fixture.mjs（_fixtureHash 全类 shipped 文件）
+- plugin/test/quay-init-loop-fixture-hash-shipped.test.mjs（新增：逐类负控制 + 负控制 + 真实覆盖断言）
 - tasks/gap-fixture-hash-omits-shipped-files.md（自身）
