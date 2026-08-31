@@ -289,9 +289,11 @@ export function runScheduler(opts: {
     // file is never silently dropped.
     const driveFile = (file: string): Promise<number> =>
       new Promise<number>((resolveFile) => {
+        // One file per run() call, so the run-wide `concurrency` knob is irrelevant (node:test's
+        // default is host-derived but the queue holds exactly one file) — the GROUP concurrency is
+        // owned by nextDispatch above, not by node:test's file-level scheduler.
         const stream = run({
           files: [file],
-          concurrency: 1,
           isolation: "process",
           ...(testNamePatterns.length > 0 ? { testNamePatterns } : {}),
         });
