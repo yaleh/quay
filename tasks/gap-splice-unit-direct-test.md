@@ -22,12 +22,12 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：splice 逻辑由 `spliceConcurrency` 纯函数单测覆盖（4 个 e2e 的断言 → 纯函数单测）；（⛔ 纯函数未测 ⇒ 假）。
-- [ ] AC2（能取假，wiring）：至少 1 个 e2e 保「runner 真把 N 拼进 spawn 命令」；（⛔ 无 e2e wiring 保 ⇒ 假）。
+- [x] AC1（能取假）：splice 逻辑由 `spliceConcurrency` 纯函数单测覆盖（4 个 e2e 的断言 → 纯函数单测）；（⛔ 纯函数未测 ⇒ 假）。
+- [x] AC2（能取假，wiring）：至少 1 个 e2e 保「runner 真把 N 拼进 spawn 命令」；（⛔ 无 e2e wiring 保 ⇒ 假）。
 
 ## Definition of Done
 
-splice 直测落地；AC1-AC2 全勾；scoped 全绿；墙钟下降（贴前后读数）。
+splice 直测落地；AC1-AC2 全勾；scoped 全绿；墙钟下降（前 12.46s/7 spawn → 后 1.97s/1 spawn，4 个 splice 测试的 wall-clock 直读）。
 
 ## Touches
 
