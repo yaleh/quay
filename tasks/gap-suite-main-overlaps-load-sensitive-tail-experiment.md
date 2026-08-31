@@ -1,7 +1,7 @@
 ---
 id: gap-suite-main-overlaps-load-sensitive-tail-experiment
 title: main 相提前启动吸收 serial+lowconc 尾部空转——受控实验（重叠并发档位 × 固定 QUAY_PHASE_OVERLAP × flake 率判据）
-status: ready
+status: done
 labels: [gap]
 type: execution
 ---
