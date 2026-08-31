@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-workflow-retirement-guard
 title: fan-in workflow 退役防回归——retirement checker + lock-events 非 wk-prod- 前缀红灯（L3）
-status: todo
+status: ready
 labels:
   - gap
   - defect
