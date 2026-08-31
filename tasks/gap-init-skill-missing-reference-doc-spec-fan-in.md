@@ -1,7 +1,7 @@
 ---
 id: gap-init-skill-missing-reference-doc-spec-fan-in
 title: plugin/skills/init/SKILL.md 缺 reference-doc 机器声明——SPEC-fan-in-driver 被引用但无 <!-- reference-doc -->，referenced-⊆-landed 恒红
-status: todo
+status: ready
 labels:
   - gap
   - defect
