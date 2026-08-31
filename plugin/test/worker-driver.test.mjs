@@ -1860,7 +1860,7 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, 60000);
+  await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, 30000);
   const rounds = readRoundLines(root);
   const livenessCount = fs.existsSync(livenessCnt) ? Number(fs.readFileSync(livenessCnt, "utf8")) : 0;
   // liveness 在每轮【开头】跑（writeRound 之前），结果写进每轮 round 记录。接线证明取两个直接量：
@@ -3042,21 +3042,21 @@ test("AC2 (gap-worker-driver-retry-cap-not-wired) — 反复 exited-not-landed �
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // N=2 次 exited-not-landed（exit 0 但 status=ready 未落地）。
-  // ⛔ 满载下 2 次 worker spawn + 落地判定的等待窗放宽到 60s（同 5045b9ab9 的 liveness 窗）——
+  // ⛔ 满载下 2 次 worker spawn + 落地判定的等待窗放宽到 30s（60s→30s 收紧，同 5045b9ab9 的 liveness 窗）——
   // 全量 suite concurrency=16 时驱动冷启动 + node spawn 可 >8s，8s 窗把「慢而正确」误判为「只派 1 次」。
-  await waitFor(() => readOutcomeLines(root).length >= 2, 60000);
+  await waitFor(() => readOutcomeLines(root).length >= 2, 30000);
   const records = readOutcomeLines(root);
   assert.deepEqual(records.map((r) => r.final_state), ["exited-not-landed", "exited-not-landed"],
     "AC2: both attempts exited-not-landed (exit 0 but status=ready not done)");
 
   // 达上限 ⇒ 标 needs-human（ready→needs-human）+ ## Needs-Human 审计记录。
-  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 60000);
+  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 30000);
   assert.equal(readTaskStatus(root, "gap-cap"), "needs-human", "AC2: task marked needs-human after N exited-not-landed");
   const body = fs.readFileSync(path.join(root, "tasks", "gap-cap.md"), "utf8");
   assert.ok(body.includes("## Needs-Human"), "AC2: ## Needs-Human audit record written");
 
   // 负控制：给驱动一个「可能第 3 次派发」的窗口，再断言仍只有 N=2 次派发（⛔ 无限重派）。
-  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 60000);
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 30000);
   await new Promise((r) => setTimeout(r, 400));
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   assert.equal(picks.length, 2, "AC2: exactly N=2 dispatches — the capped task is not re-dispatched (⛔ 无限重派)");
@@ -3169,7 +3169,7 @@ test("AC1 (integration) — worker 快速死亡后 driver 退避：不立即重�
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // 第一次派发 → 快速死亡 → worker-backoff 事件（退避生效的直接量）。
-  await waitFor(() => drv.events().filter((e) => e.event === "worker-backoff").length >= 1, 60000);
+  await waitFor(() => drv.events().filter((e) => e.event === "worker-backoff").length >= 1, 30000);
   const backoffs = drv.events().filter((e) => e.event === "worker-backoff");
   assert.equal(backoffs[0].task, "gap-qd");
   assert.equal(backoffs[0].backed_off, true, "AC1: quick death ⇒ backed_off=true（退避，⛔ 立即重派）");
@@ -3206,7 +3206,7 @@ test("AC2 (integration) — 一个任务退避时其它任务照常派发（退�
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // gap-a 派发 → 快速死亡 → 退避。gap-a 退避期间 gap-b 仍被派发（退避不拖垮全局）。
-  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").map((e) => e.task).includes("gap-b"), 60000);
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").map((e) => e.task).includes("gap-b"), 30000);
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   assert.deepEqual(picks.map((p) => p.task).slice(0, 2), ["gap-a", "gap-b"],
     "AC2: gap-a 退避期间 gap-b 仍照常派发（退避按 task，⛔ 不全局）");
@@ -3229,7 +3229,7 @@ test("AC3 (integration) — 退避到上限转 markNeedsHuman（⛔ 不无限退
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // 2 次快速死亡（每次之间隔 100ms 退避）⇒ 标 needs-human。
-  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 60000);
+  await waitFor(() => readTaskStatus(root, "gap-cap") === "needs-human", 30000);
   assert.equal(readTaskStatus(root, "gap-cap"), "needs-human", "AC3: 退避到上限（max-retries=2）⇒ needs-human");
   const body = fs.readFileSync(path.join(root, "tasks", "gap-cap.md"), "utf8");
   assert.ok(body.includes("## Needs-Human"), "AC3: ## Needs-Human audit record written");
