@@ -2230,3 +2230,74 @@ test("gap-suite-load-sampler-orphan-process AC2 — an UNCLEAN host exit (SIGKIL
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("gap-suite-load-sampler-early-red-truncates-load-curve AC2/AC3 — the sampler keeps sampling through an EARLY-RED state (finishedAt null) and stops only once finishedAt is written", async () => {
+  // The finishedAt-driven stop (gap-suite-load-sampler-early-red-truncates-load-curve): the runner
+  // writes state="red" + finishedAt:null on the FIRST failure line while the suite keeps running to
+  // its natural end. The old state-driven stop (`state !== "running"`) truncated a red round's load
+  // curve at first-failure. This test drives that branch directly: a state file stuck at early-red
+  // (state="red", finishedAt:null) must NOT stop the sampler — it keeps sampling (AC2, the fix) —
+  // and stops cleanly once finishedAt is written (AC3, 结束即停 / no idle-spin, green-round parity).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-load-earlyred-"));
+  const stateFile = path.join(root, "sampler.state.json");
+  const outFile = path.join(root, "suite-load-earlyred.jsonl");
+  const samplerPath = path.join(REPO_ROOT, "plugin", "scripts", "suite-load-sampler.ts");
+  // Early-red: state=red but finishedAt=null — the suite is still running to its natural end.
+  fs.writeFileSync(
+    stateFile,
+    JSON.stringify({ state: "red", reason: "failed", runId: "early-red-test", finishedAt: null }),
+    "utf8",
+  );
+  // Host = a bash wrapper that backgrounds the sampler then sleeps, modeling the suite host.
+  const host = spawn(
+    "bash",
+    [
+      "-c",
+      `node --no-warnings --experimental-strip-types "${samplerPath}" --state-file "${stateFile}" --out-file "${outFile}" --run-id "early-red-test" --interval 0.2 & sleep 60`,
+    ],
+    { stdio: "ignore", detached: true },
+  );
+  host.unref();
+  const pidFile = `${outFile}.pid`;
+  try {
+    // AC2 — the sampler must KEEP sampling while finishedAt is null even though state=red (the
+    // early-red continuation). Wait (bounded) for >=2 samples: the old state-driven stop would exit
+    // on first sight of the red state and write ZERO samples, so this assertion is the regression
+    // fence (it fails on the pre-fix code, passes on the fix).
+    let samplerPid = 0;
+    let lines = [];
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      try { lines = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean); } catch { lines = []; }
+      try { samplerPid = Number(fs.readFileSync(pidFile, "utf8").trim()); } catch { samplerPid = 0; }
+      if (lines.length >= 2 && samplerPid > 0) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(samplerPid > 0, "the sampler wrote its pid sidecar");
+    assert.ok(lines.length >= 2, "the sampler kept sampling through the early-red state (finishedAt null, state=red)");
+
+    // AC3 — the terminal write sets finishedAt; the sampler must then stop (结束即停 / no idle-spin).
+    fs.writeFileSync(
+      stateFile,
+      JSON.stringify({ state: "red", reason: "failed", runId: "early-red-test", finishedAt: Date.now() / 1000 }),
+      "utf8",
+    );
+
+    let stopped = false;
+    const stopDeadline = Date.now() + 10_000;
+    while (Date.now() < stopDeadline) {
+      try { process.kill(samplerPid, 0); } catch { stopped = true; break; }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(stopped, "the sampler exited after finishedAt was written (terminal stop, no idle-spin)");
+
+    // No post-terminal samples: the timeseries stops growing once finishedAt is set.
+    const countAfter = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean).length;
+    await new Promise((r) => setTimeout(r, 500));
+    const countLater = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean).length;
+    assert.equal(countLater, countAfter, "the timeseries stops growing once finishedAt is set");
+  } finally {
+    try { process.kill(host.pid, "SIGKILL"); } catch { /* already gone */ }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
