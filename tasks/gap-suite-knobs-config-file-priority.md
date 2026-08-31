@@ -1,7 +1,7 @@
 ---
 id: gap-suite-knobs-config-file-priority
 title: suite 级旋钮配置化——config.yml `suite:` 节承载（config 优先、env 备用、driver 重启不丢）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
