@@ -1,7 +1,7 @@
 ---
 id: gap-suite-knobs-config-file-priority
 title: suite 级旋钮配置化——config.yml `suite:` 节承载（config 优先、env 备用、driver 重启不丢）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -40,11 +40,11 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，接线）：config.yml `suite:` 节存在且被 test.sh 与 full-suite-runner 读取——设配置值（无 env）行为与设同名 env 相同（grep 读取逻辑可见；实测一档）。
-- [ ] AC2（能取假，优先级）：env 覆盖 config——同键 env 与 config 设不同值，生效的是 env（实测）；CLI 覆盖 env（test.sh --test-concurrency 等现有 CLI 优先逻辑不回归）。
-- [ ] AC3（能取假，持久，硬规则 4 推论三）：实现落地后时间窗内，**driver 重启后** suite 轮仍用 config 值（不依赖 env）——实测：driver stop/start 后跑一轮，verification-round/日志显示 config 值生效（N 只计落地后轮次）。
-- [ ] AC4（能取假，无回归）：6 旋钮配置化后默认行为（无 config 无 env）与现状一致（pass/fail-neutral）；`--test-concurrency` 等 CLI 显式值仍优先。
-- [ ] AC5（能取假，schema 封闭）：suite 节非法键/类型被 loader 拒绝（fixture 测试），与 DIR-050 providers/gates 同 schema 纪律。
+- [x] AC1（能取假，接线）：config.yml `suite:` 节存在且被 test.sh 与 full-suite-runner 读取——设配置值（无 env）行为与设同名 env 相同（grep 读取逻辑可见；实测一档）。
+- [x] AC2（能取假，优先级）：env 覆盖 config——同键 env 与 config 设不同值，生效的是 env（实测）；CLI 覆盖 env（test.sh --test-concurrency 等现有 CLI 优先逻辑不回归）。
+- [ ] AC3（能取假，持久，硬规则 4 推论三）：实现落地后时间窗内，**driver 重启后** suite 轮仍用 config 值（不依赖 env）——实测：driver stop/start 后跑一轮，verification-round/日志显示 config 值生效（N 只计落地后轮次）（待外部）
+- [x] AC4（能取假，无回归）：6 旋钮配置化后默认行为（无 config 无 env）与现状一致（pass/fail-neutral）；`--test-concurrency` 等 CLI 显式值仍优先。
+- [x] AC5（能取假，schema 封闭）：suite 节非法键/类型被 loader 拒绝（fixture 测试），与 DIR-050 providers/gates 同 schema 纪律。
 
 ## Definition of Done
 
@@ -53,8 +53,11 @@ config.yml `suite:` 节 + loader + test.sh/full-suite-runner 接线；AC1-AC5 �
 ## Touches
 
 - .quay/config.yml（加 `suite:` 节）
-- plugin/scripts/suite-params.ts（新，loader + schema，复用 loop-params.ts 模式）
+- plugin/scripts/suite-params.ts（新，loader + schema，closed schema fail-closed）
+- plugin/test/suite-params.test.mjs（新，fixture 测试）
+- plugin/test/full-suite-runner.test.mjs（runRunner hermeticity：清 QUAY_SERIAL/LOWCONC_CONCURRENCY 防 ambient env 泄漏掩盖 host-read 默认）
 - scripts/test.sh（读 suite 节设默认值 + env 覆盖）
-- plugin/scripts/full-suite-runner.ts（读 suite 节注入 suiteEnv）
-- packages/quay/src/loop-params.ts（如有共享 schema 模式则复用）
+- plugin/scripts/full-suite-runner.ts（读 suite 节注入 suiteEnv + runner 侧派生）
+- plugin/scripts/capability-catalog.sh（suite-params.ts 六表注册）
+- plugin/scripts/quay-init.sh（suite-params.ts 显式 laydown 条目）
 - tasks/gap-suite-knobs-config-file-priority.md（自身）

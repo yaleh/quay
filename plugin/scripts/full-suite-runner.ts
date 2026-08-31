@@ -154,6 +154,7 @@ import type { PerFileRecord } from "./measure-trend-check.ts";
 // countHeldSuiteLocks read it so concurrentSuitesRunning follows S (S=3 ⇒ .0/.1/.2 probed, never a
 // fixed two-slot destructure).
 import { suiteLockSlotPaths, suiteLockBase } from "./suite-lock-slots.ts";
+import { readSuiteParams, suiteParamsToEnv } from "./suite-params.ts";
 
 // ── gap-ac128-hub-split-harness-concerns — harness-critical families extracted to focused files ──
 // The red/failure parsing, concurrency/lane, tested-tree state, and state-write families were each
@@ -1264,8 +1265,25 @@ export function concurrentPhaseCount(): number {
  * window runs serial+lowconc in parallel (Σ lane = SERIAL + LOWCONC), so each phase gets
  * hostParallelism ÷ (S × 2) — the same S×P denominator test.sh's serial_lowconc_host_default reads.
  */
-export const DEFAULT_SERIAL_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
-export const DEFAULT_LOWCONC_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
+// gap-suite-knobs-config-file-priority: this is now a RUNTIME function (was two import-time `export
+// const DEFAULT_SERIAL_CONCURRENCY / DEFAULT_LOWCONC_CONCURRENCY`). The config-file default is promoted
+// into process.env at the top of run() — AFTER this module's import-time — so an import-time const would
+// bake in the pre-config S / P and ignore suite.max_concurrent_suites / suite.phase_overlap. Reading S
+// (concurrentSuiteSlots) and P (concurrentPhaseCount) at call time makes the host-derived fallback
+// honor the config-promoted env (config < env < CLI, hard rule 4 推论二: read-host, never a literal).
+export function defaultPhaseConcurrency(): number {
+  return Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
+}
+
+/** Read a positive-integer env var the way the runner's own knob reads do: an EMPTY string counts as
+ *  unset (the bash :- convention suite-lock-slots.ts's envValOrUndefined mirrors). Returns undefined
+ *  when unset/empty/invalid — the caller falls through to the host-derived default. */
+function positiveIntFromEnv(name: string): number | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : undefined;
+}
 
 /** Parse a positive-integer arg (e.g. --serial-concurrency 2); NaN/<1 → null (caller errors). */
 function parsePositiveIntArg(argv: string[], name: string): number | null {
@@ -1641,6 +1659,19 @@ export async function run(argv: string[]): Promise<number> {
   // root === REPO_ROOT condition).
   let root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
   const mainRoot = root; // the main repo: fork source + state/log write target when one-shot
+  // gap-suite-knobs-config-file-priority: config < env < CLI. Read the suite: section (the LOWEST-
+  // priority default) and promote each present value into process.env ONLY where env is unset/empty
+  // (env wins over config; empty-string counts as unset — the bash :- convention). CLI flags stay
+  // above env (the existing --lane-count / --serial-concurrency / --lowconc-concurrency parsing is
+  // untouched). A malformed suite: section throws FAIL-CLOSED here — the suite must not silently
+  // degrade to env-only defaults (DIR-050 discipline, AC5). Must run BEFORE defaultLaneCount() and
+  // the phase-concurrency defaults below so they read the config-promoted env.
+  const suiteParams = readSuiteParams(root);
+  for (const [envKey, value] of Object.entries(suiteParamsToEnv(suiteParams))) {
+    const cur = process.env[envKey];
+    if (cur === undefined || cur === "") process.env[envKey] = value;
+  }
+
   const oneShot = argv.includes("--one-shot-worktree") || path.resolve(root) === REPO_ROOT;
   let oneShotWorktreePath: string | null = null;
   const explicitCommand = parseArg(argv, "--command");
@@ -1656,10 +1687,10 @@ export async function run(argv: string[]): Promise<number> {
   // load-sensitive phase concurrency overrides. An explicit --serial-concurrency / --lowconc-
   // concurrency is passed to test.sh as QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY so the
   // controlled experiment can run the serial phase at a higher concurrency and measure wall-clock +
-  // cancelled BEFORE the default is bumped. Defaults are host-read (DEFAULT_SERIAL_CONCURRENCY /
-  // DEFAULT_LOWCONC_CONCURRENCY = os.availableParallelism() ÷ (slots × concurrentPhaseCount()),
-  // gap-ac44-concurrent-phases-read-host-parallelism + gap-lane-formula-ignores-phase-overlap-
-  // concurrency) — an explicit flag always wins over the host default (AC2).
+  // cancelled BEFORE the default is bumped. Defaults are host-read (defaultPhaseConcurrency() =
+  // os.availableParallelism() ÷ (slots × concurrentPhaseCount()), gap-ac44-concurrent-phases-read-
+  // host-parallelism + gap-lane-formula-ignores-phase-overlap-concurrency) — an explicit flag always
+  // wins over env/config and the host default (AC2).
   const serialConcurrencyArg = parsePositiveIntArg(argv, "--serial-concurrency");
   const lowconcConcurrencyArg = parsePositiveIntArg(argv, "--lowconc-concurrency");
   if (serialConcurrencyArg === null && parseArg(argv, "--serial-concurrency") !== undefined) {
@@ -1670,8 +1701,11 @@ export async function run(argv: string[]): Promise<number> {
     process.stderr.write(`full-suite-runner: invalid --lowconc-concurrency (must be a positive integer)\n`);
     return 1;
   }
-  const serialConcurrency = serialConcurrencyArg ?? DEFAULT_SERIAL_CONCURRENCY;
-  const lowconcConcurrency = lowconcConcurrencyArg ?? DEFAULT_LOWCONC_CONCURRENCY;
+  // gap-suite-knobs-config-file-priority: config < env < CLI. The config value (if any) was promoted
+  // into process.env above; read env here so env-wins-over-config holds, then fall back to the
+  // host-derived default (now runtime-read, so it honors a config-promoted S / P too).
+  const serialConcurrency = serialConcurrencyArg ?? positiveIntFromEnv("QUAY_SERIAL_CONCURRENCY") ?? defaultPhaseConcurrency();
+  const lowconcConcurrency = lowconcConcurrencyArg ?? positiveIntFromEnv("QUAY_LOWCONC_CONCURRENCY") ?? defaultPhaseConcurrency();
   // The phase-concurrency env the child test.sh reads. Always set explicitly so the runner is the
   // single source of truth for both phase knobs (test.sh defaults match these values by construction).
   const phaseConcurrencyEnv = {
