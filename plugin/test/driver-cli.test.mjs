@@ -48,6 +48,10 @@ const KERNEL_DEPS = [
   "touches-orthogonality-check.ts",
   "touches-parser.ts",
   "concurrent-batch-scheduler.ts",
+  // gap-b2-repo-root-unification: gate-script-base / touches-orthogonality-check /
+  // concurrent-batch-scheduler / derive-touches-heuristic / fast-mode-telemetry now import the
+  // shared repo-root.ts — the hermetic temp root must carry it or the copied kernel's import fails.
+  "repo-root.ts",
   // gap-compute-inflight-worktree-touches-no-liveness-check: concurrent-batch-scheduler.ts now
   // imports worktree-process-reaper.ts (→ suite-lock-slots.ts) for the in-flight-worktree liveness
   // check — the hermetic temp root must carry both or the copied kernel's import fails.
