@@ -27,12 +27,15 @@ extra:
 2. 触发时 main 以 `QUERY_MAIN_TAIL_OVERLAP` lanes 提前启动（suite-lpt-runner 保序）；fallthrough 走正常 bucket_main。
 3. 验证：--buckets 子集轮触发（verification-round `main_tail_overlap_lanes`）+ 全量轮不回归。
 
+> **实现状态（worker 落地 2026-08-31）**：bucket 子集路径已接 main-tail-overlap——`bucket_lowconc` 后台运行记 pid；`main_tail_overlap_wait` 窗口关闭判据泛化为「每个被跟踪 pid（serial 和/或 lowconc）退出即窗口关」，bucket 路径只跟踪 lowconc（serial 已顺序跑完）⇒ lowconc 退出即回落而非空等到 300s 超时；watcher 在 lowconc 尾部（cpu_stall≤3% 持续 5s）提前以 `QUERY_MAIN_TAIL_OVERLAP` lanes 启动 main（复用同一 LPT 序）；main 相采纳 watcher 退出码（fire 则跳过正常 run，fallthrough 则跑正常 bucket_main）。hermetic 已验：`bash -n`、`suite-bucket-load-sensitive-isolation.test.mjs`（bucket 结构 pin）、`full-suite-runner.test.mjs` main-tail-overlap 流标记记录测试、`main_tail_overlap_wait` seam 双向（fire/fallthrough；全量 both-dead/one-alive 语义不变）。
+> **待实测（AC1 实测一档 + AC2 触发记录 + AC3 pass/fail-neutral + AC4 全量无回归）**：`QUERY_MAIN_TAIL_OVERLAP>0 bash scripts/test.sh --buckets <task>` 跑一档子集轮，从 verification-round.jsonl 读 `main_tail_overlap_lanes`/`main_tail_overlap_load`。AC 均未勾、逐项标注「（待外部）」——旋钮默认 0=inert（落地即现状，pass/fail-neutral 按构造），实测是落地后的外层验证（同 A 实验 gap-suite-main-overlaps-load-sensitive-tail-experiment 的「待跑对照」形）。
+
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，接线）：`QUERY_MAIN_TAIL_OVERLAP`>0 时，bucket 子集路径（--buckets P/M 非 full）的 main 相在 lowconc 相尾部（stall≤3% 持续 5s）提前启动（grep test.sh bucket_main 处可见实现；实测一档 --buckets 子集轮证明 main 与 lowconc 尾部时间窗重叠）；0/unset 行为与现状一致。
-- [ ] AC2（能取假，触发记录）：bucket 子集轮触发后 verification-round 出现 `main_tail_overlap_lanes`/`main_tail_overlap_load`（流标记 `main-tail-overlap` 落字段）。
-- [ ] AC3（能取假，pass/fail-neutral）：接 A 前后 bucket 子集轮的 pass/fail 结果一致（不改变测试集/断言，只改 main 启动时机）。
-- [ ] AC4（能取假，无回归）：全量路径（run_selected）的 main-tail-overlap 行为不变（`QUERY_MAIN_TAIL_OVERLAP` 同值下全量轮仍触发；bucket_full=1 走 run_selected 不受影响）。
+- [ ] AC1（能取假，接线）：`QUERY_MAIN_TAIL_OVERLAP`>0 时，bucket 子集路径（--buckets P/M 非 full）的 main 相在 lowconc 相尾部（stall≤3% 持续 5s）提前启动（grep test.sh bucket_main 处可见实现；实测一档 --buckets 子集轮证明 main 与 lowconc 尾部时间窗重叠）；0/unset 行为与现状一致。 （待外部）
+- [ ] AC2（能取假，触发记录）：bucket 子集轮触发后 verification-round 出现 `main_tail_overlap_lanes`/`main_tail_overlap_load`（流标记 `main-tail-overlap` 落字段）。 （待外部）
+- [ ] AC3（能取假，pass/fail-neutral）：接 A 前后 bucket 子集轮的 pass/fail 结果一致（不改变测试集/断言，只改 main 启动时机）。 （待外部）
+- [ ] AC4（能取假，无回归）：全量路径（run_selected）的 main-tail-overlap 行为不变（`QUERY_MAIN_TAIL_OVERLAP` 同值下全量轮仍触发；bucket_full=1 走 run_selected 不受影响）。 （待外部）
 
 ## Definition of Done
 
