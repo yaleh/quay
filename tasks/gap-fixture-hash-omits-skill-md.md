@@ -1,7 +1,7 @@
 ---
 id: gap-fixture-hash-omits-skill-md
 title: quay-init-install-fixture _fixtureHash 漏 plugin/skills/init/SKILL.md——reference-doc 声明变更不重建 fixture，陈旧复用致 install-config-driven-e2e-upgrade 恒红
-status: todo
+status: ready
 labels:
   - gap
   - defect
