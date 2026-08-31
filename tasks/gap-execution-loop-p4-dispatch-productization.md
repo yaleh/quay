@@ -1,7 +1,7 @@
 ---
 id: gap-execution-loop-p4-dispatch-productization
 title: P4 残余②③——dispatch 侧产品化（ready-pool-check + slot-refill 单一真相源）
-status: needs-human
+status: ready
 labels:
   - gap
   - productization

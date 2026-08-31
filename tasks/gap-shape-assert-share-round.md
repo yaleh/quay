@@ -1,7 +1,7 @@
 ---
 id: gap-shape-assert-share-round
 title: full-suite-runner 形状断言并轮——一个 fake suite 吐所有 marker 的共享 runner 轮覆盖多条 AC（Tier 2）
-status: needs-human
+status: ready
 labels:
   - gap
   - test-wall-clock
