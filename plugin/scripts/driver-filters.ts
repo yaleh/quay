@@ -192,6 +192,26 @@ export function advanceRetryCap(
   return newly;
 }
 
+/** 对账（gap-retrystate-needshuman-no-reconcile-with-disk-ready）：内存 needsHuman 集合随磁盘 status
+ *  翻转对账——人对已标 needs-human 的任务翻回 ready/todo（或任务在他处被落地/关闭）后，磁盘 status
+ *  已离开 needs-human ⇒ 从内存集合清除，下一轮即重新可派（⛔ 不重启——重启 = 把恢复外包给 supervisor
+ *  才得以恢复，正是本缺陷的根）。同时清零该 id 的连续失败计数（counts）——人干预后给【全新】重试
+ *  预算（⛔ 只清 needsHuman 不清 counts ⇒ 下一次失败 n=旧值+1 立即再标 needs-human，人干预被一次性
+ *  消耗）。读不懂（status === null）⇒ 保留（缺值 = 未查，⛔ 不伪装成「人已翻回」——同 notNeedsHuman
+ *  的 fail-closed）。返回本轮清除的 id（供观测/单测；非空 = 有对账发生，可观测非静默）。 */
+export function reconcileNeedsHumanWithDisk(state: RetryState, root: string): string[] {
+  const cleared: string[] = [];
+  for (const id of [...state.needsHuman]) {
+    const status = readTaskStatus(root, id);
+    if (status !== null && status !== TASK_STATUS.NEEDS_HUMAN) {
+      state.needsHuman.delete(id);
+      state.counts.delete(id);
+      cleared.push(id);
+    }
+  }
+  return cleared;
+}
+
 // ── commit-after-write（主检出 status 翻转写盘即提交；单一真相源，⛔ 不各写一份） ───────────────────
 
 /** True when `root` is inside a git work tree (production root = the main checkout). False when git
