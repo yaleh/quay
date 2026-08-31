@@ -1,7 +1,7 @@
 ---
 id: gap-bootstrap-land-ff-merge-executor-first
 title: 落地 fan-in ff 步 executor-first（ff-merge.ts + worker-driver.ts ff 步 import，⛔ 不删 bash）——解 gap-execution-loop bootstrap 死锁
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -29,9 +29,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：develop 上 worker-driver.ts ff 步不再 shell `bash fan-in-ff-merge.sh`——grep 主检出 worker-driver.ts 无 `ffMerge = .*fan-in-ff-merge\.sh` 的 ff 步调用，改为 ff-merge.ts 模块；（⛔ 仍 shell bash ⇒ 假）。
-- [ ] AC2（能取假，bash 保留）：fan-in-ff-merge.sh 仍在 develop（未删）——`git show develop:plugin/scripts/fan-in-ff-merge.sh` 存在；（⛔ 已删 ⇒ 假）。
-- [ ] AC3（能取假，自举验证）：一次真实 fan-in 经新 ff 步（ff-merge.ts）落地本任务自身；（⛔ 仍需旧 bash ⇒ 假）。
+- [ ] AC1（能取假，机制级）：develop 上 worker-driver.ts ff 步不再 shell `bash fan-in-ff-merge.sh`——grep 主检出 worker-driver.ts 无 `ffMerge = .*fan-in-ff-merge\.sh` 的 ff 步调用，改为 ff-merge.ts 模块；（⛔ 仍 shell bash ⇒ 假）。（待外部）
+- [ ] AC2（能取假，bash 保留）：fan-in-ff-merge.sh 仍在 develop（未删）——`git show develop:plugin/scripts/fan-in-ff-merge.sh` 存在；（⛔ 已删 ⇒ 假）。（待外部）
+- [ ] AC3（能取假，自举验证）：一次真实 fan-in 经新 ff 步（ff-merge.ts）落地本任务自身；（⛔ 仍需旧 bash ⇒ 假）。（待外部）
 
 ## Definition of Done
 
@@ -42,4 +42,6 @@ executor-first 落地 develop（ff 步走 ff-merge.ts、bash 保留）；AC1-AC3
 - packages/quay/src/fan-in/ff-merge.ts（从 gap-execution-loop 分支取，executor-first 落）
 - plugin/scripts/worker-driver.ts（ff 步 import ff-merge.ts，⛔ 不删 bash）
 - plugin/test/fan-in-ff-merge.test.mjs（从 gap-execution-loop 分支取）
+- plugin/test/worker-driver.test.mjs（ff 步测试伴生：ffMergeModule 缝 + AC1 step 断言，从 gap-execution-loop 分支取）
+- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（ff 步测试伴生：ffMergeModule 缝，从 gap-execution-loop 分支取）
 - tasks/gap-bootstrap-land-ff-merge-executor-first.md（自身）
