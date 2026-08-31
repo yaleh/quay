@@ -1,7 +1,7 @@
 ---
 id: gap-execution-loop-p4-suite-entry-ts-ization
 title: P4 残余①——scripts/test.sh suite 入口 TS 化收尾（决策逻辑抽 TS 纯函数）
-status: ready
+status: done
 labels:
   - gap
   - productization
