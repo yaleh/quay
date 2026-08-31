@@ -485,6 +485,19 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 # QUAY_MAX_CONCURRENT_SUITES → 1). Sourced HERE (before the derivation functions below) so both can
 # call it; the lock section further down reuses this same canonical for its slot paths.
 source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
+
+# ── gap-suite-knobs-config-file-priority: config < env < CLI ──────────────────────────────────────
+# The suite: section in .quay/config.yml is the LOWEST-priority default for the 6 suite knobs. Read it
+# once and promote each present value into its env var via the `VAR="${VAR:-config}"` form — env wins
+# over config (an already-set env var is left untouched), and the existing CLI-flag logic stays above
+# env. A malformed suite: section makes the node helper exit non-zero ⇒ FAIL-CLOSED here (a broken
+# config must not silently degrade to env-only defaults — DIR-050 discipline, AC5).
+if ! suite_cfg="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-params.ts" --shell --root "${repo_root}" 2>&1)"; then
+  echo "test.sh: FAIL-CLOSED reading suite: config — ${suite_cfg}" >&2
+  exit 2
+fi
+eval "${suite_cfg}"
+
 default_concurrency_formula() {
   local total_budget oversub slots
   # MAIN-PHASE CONCURRENCY (gap-suite-budget-oversubscribe; human 14:4xZ 修正方向 — (b) 认领制 /
