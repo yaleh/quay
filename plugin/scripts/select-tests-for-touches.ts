@@ -51,6 +51,7 @@
 //   node --experimental-strip-types select-tests-for-touches.ts --task <id> [--root <dir>] [--json] [--paths-only] [--allow-thin]
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -173,28 +174,6 @@ export function applyCrosscut(touches, index) {
 
 // ── Repo-root detection ──────────────────────────────────────────────────────────────────────────────
 
-/**
- * Find the workspace root by walking up from `startDir` (`.quay/config.yml` marker), with a git
- * top-level fallback (mirrors fast-mode-telemetry.ts's findRepoRoot).
- * @param {string} [startDir]
- * @returns {string}
- */
-export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
 
 // ── Path helpers ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -433,7 +412,7 @@ export function main(argv) {
     process.stderr.write(`${usage}\n`);
     return 2;
   }
-  const root = path.resolve(rootArg ?? findRepoRoot());
+  const root = path.resolve(rootArg ?? repoRoot());
   const taskFile = path.join(root, "tasks", `${taskId}.md`);
   if (!fs.existsSync(taskFile)) {
     process.stderr.write(`select-tests-for-touches: task file not found: ${taskFile}\n`);

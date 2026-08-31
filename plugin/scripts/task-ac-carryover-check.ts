@@ -58,6 +58,7 @@
 // keeps the shrink-only ratchet blocking behavior (maintenance / mutation tests).
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
@@ -65,17 +66,6 @@ import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 import { recordNoBlockLedger } from "./task-contract-check.ts";
 import { TASK_STATUS } from "./task-status.ts";
 
-// ── Workspace-root discovery (same walk as task-contract-check) ────────────────────────────────────
-export function findWorkspaceRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 12; i++) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
-}
 
 // ── AC box parsing ─────────────────────────────────────────────────────────────────────────────────
 // One `- [x]/[ ] AC<n>: ...` line → { id, checked }. `AC<n>` ids are the only ids a `## Carries`
@@ -355,7 +345,7 @@ export function runCli(argv) {
     console.error("task-ac-carryover-check: --reset-baseline requires --write-ratchet");
     process.exit(2);
   }
-  const wsRoot = root ? path.resolve(root) : findWorkspaceRoot();
+  const wsRoot = root ? path.resolve(root) : repoRoot();
   const tasksDir = path.join(wsRoot, "tasks");
   const subset = files.length > 0;
   const scanFiles = files.map((f) => path.resolve(wsRoot, f));

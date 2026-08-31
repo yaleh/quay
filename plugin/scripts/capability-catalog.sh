@@ -73,6 +73,8 @@ set -euo pipefail
 # installed target project (the laid-down copy at <workspace>/plugin/scripts/).
 SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 SELF_DIR="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd || true)"
+# Single bash root resolution (SPEC §2.4 B2 repo-root pair — repo-root.sh mirrors repo-root.ts).
+. "${SELF_DIR}/repo-root.sh"
 
 # ── AC5 gate (no command substitution in data values) — fail-fast BEFORE any array ──
 # assignment: a backtick or $( inside a double-quoted data value is EXECUTED by bash during
@@ -302,6 +304,8 @@ declare -A QUESTION=(
   [routine-scheduler.ts]="Which routine probes are due to run now?"
   [run-identity.ts]="What is this run's canonical identity (reproducible handle)?"
   [refresh-worktree-quay.sh]="When a full suite runs in a linked task/verify worktree, is the worktree's .quay/ (config/gates/runtime carriers) a current snapshot of the main checkout's — so suite tests read the SAME gitignored data as a main run instead of a stale/absent .quay (gap-fan-in-worktree-quay-provisioning)?"
+  [repo-root.sh]="Does every bash script resolve the repository root through ONE shared resolver — repo-root.sh (bundle→consumer→plain-git marker upward walk + git rev-parse --show-toplevel + cwd fallback, mirroring repo-root.ts) — so root-finding is a single source instead of per-script findRepoRoot/findWorkspaceRoot redefinitions (SPEC §2.4 B2)?"
+  [repo-root.ts]="Does every TypeScript script resolve the repository root through ONE shared resolver — repo-root.ts (bundle→consumer→plain-git marker upward walk + git rev-parse --show-toplevel + cwd fallback, mirrored by repo-root.sh) — so root-finding is a single source instead of per-script findRepoRoot/findWorkspaceRoot redefinitions (SPEC §2.4 B2)?"
   [rhythm-consumer-check.ts]="Is the rhythm column's consumer contract met — a non-按需 mechanism has a call site in test.sh / an execution core (or wired elsewhere, or baselined), a 按需 mechanism declares WHO presses it under WHAT conditions, and a --no-block checker declares WHO reads its output and acts (判据1/2/3, else red)?"
   [runtime-usage-inventory.ts]="What does the two-layer mode actually run, and is any of it unaccounted?"
   [select-static-checks-for-touches.ts]="Which static checks should a scoped run execute for this change's touched files (change-relevant tier)?"
@@ -614,6 +618,8 @@ declare -A CADENCE=(
   [routine-scheduler.ts]="每里程碑"
   [run-identity.ts]="每里程碑"
   [refresh-worktree-quay.sh]="每轮"
+  [repo-root.sh]="按需"
+  [repo-root.ts]="按需"
   [rhythm-consumer-check.ts]="每轮"
   [runtime-usage-inventory.ts]="每轮"
   [select-static-checks-for-touches.ts]="按需"
@@ -925,6 +931,8 @@ declare -A INVALIDATION=(
   [routine-scheduler.ts]="无可测前提，靠周期复核"
   [run-identity.ts]="无可测前提，靠周期复核"
   [refresh-worktree-quay.sh]="失效前提：suite 仍需在 linked worktree 里读 .quay/（_findRepoRoot 以 config.yml 判根 + 运行时载体）；若 suite 改为直接从主检出解析 .quay（symlink/QUAY_MAIN_CHECKOUT 全量接线），本条退休"
+  [repo-root.sh]="失效前提：仍以 marker 向上走 + git rev-parse --show-toplevel + cwd 兜底判仓库根；若 repo 布局改（plugin/ 不再是真实子目录、或根判定换非 git 载体），本条退休"
+  [repo-root.ts]="失效前提：仍以 marker 向上走 + git rev-parse --show-toplevel + cwd 兜底判仓库根；若 repo 布局改（plugin/ 不再是真实子目录、或根判定换非 git 载体），本条退休"
   [rhythm-consumer-check.ts]="失效前提：catalog 仍以节奏栏声明 cadence/consumer（若节奏字段被移除或改由他处声明，本条判据失去机械读面，退休）"
   [runtime-usage-inventory.ts]="无可测前提，靠周期复核"
   [select-static-checks-for-touches.ts]="无可测前提，靠周期复核"
@@ -1236,6 +1244,8 @@ declare -A LAST_REAFFIRMED=(
   [routine-scheduler.ts]="2026-08-10"
   [run-identity.ts]="2026-08-10"
   [refresh-worktree-quay.sh]="2026-08-15"
+  [repo-root.sh]="2026-08-28"
+  [repo-root.ts]="2026-08-28"
   [rhythm-consumer-check.ts]="2026-08-14"
   [runtime-usage-inventory.ts]="2026-08-10"
   [select-static-checks-for-touches.ts]="2026-08-10"
@@ -1547,6 +1557,8 @@ declare -A MATCHING=(
   [routine-scheduler.ts]="keyword"
   [run-identity.ts]="n/a"
   [refresh-worktree-quay.sh]="enumerative"
+  [repo-root.sh]="n/a"
+  [repo-root.ts]="n/a"
   [rhythm-consumer-check.ts]="position"
   [runtime-usage-inventory.ts]="keyword"
   [select-static-checks-for-touches.ts]="keyword"
@@ -1748,6 +1760,8 @@ declare -A CONSUMER=(
   [quay-session.ts]="谁按：quay CLI session/topology 命令按；条件=要会话/拓扑操作"
   [quay-suite.ts]="谁按：quay CLI suite/gate 命令按；条件=要跑套件/闸"
   [release-task.sh]="谁按：认领机在任务完成后按；条件=要释放任务/分支认领"
+  [repo-root.sh]="谁按：capability-catalog.sh 及其它 plugin/scripts/*.sh source repo-root.sh 以解析仓库根；条件=任何 bash 脚本需要 repo root 时调用"
+  [repo-root.ts]="谁按：plugin/scripts/*.ts 全体需要仓库根的消费点 import repo-root.ts；条件=任何 TS 脚本需要 repo root 时调用"
   [select-static-checks-for-touches.ts]="谁按：test.sh scoped tier 按；条件=scoped run 要为变更选静态检查"
   [select-tests-for-touches.ts]="谁按：test.sh scoped tier 按；条件=scoped run 要为 Touches 选测试"
   [semantic-face-dispatch-record.ts]="谁按：manager 在派语义面 subagent（任务撰写/需求分析/升级判断/学习/AC65快修/B16-C/B18/跨层纠错）时按；条件=每类语义职责须留可查派发记录（AC145 AC2）"
@@ -1915,7 +1929,7 @@ esac
 # deleted superseded implementation can never silently regrow. Exit 0 = every superseded
 # capability is gone and untaught; 1 = at least one still exists / is still taught.
 if [ "$MODE" = "superseded-check" ]; then
-  REPO_ROOT="$(cd "${SELF_DIR}/../.." 2>/dev/null && pwd || true)"
+  REPO_ROOT="$(repoRoot "${SELF_DIR}")"
   viol=""
   for b in "${!SUPERSEDED[@]}"; do
     stem="${b%.*}"

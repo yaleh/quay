@@ -63,6 +63,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // Touches「一条目一路径」judgment — the SAME judgment the static checker uses (no second parser).
 import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
+import { repoRoot } from "./repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -86,19 +87,6 @@ export interface Verdict {
 }
 
 // ── 小工具 ───────────────────────────────────────────────────────────────────────────────────────────
-
-function repoRoot(cwd: string): string {
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      cwd,
-      encoding: "utf8",
-      timeout: 10_000,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return cwd;
-  }
-}
 
 function gitDir(cwd: string): string {
   try {

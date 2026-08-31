@@ -133,6 +133,7 @@
 // gate-events.jsonl); `.quay/blocked-signals/<target>.json` for any other target.
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -142,7 +143,6 @@ import { SCHEMA_VERSION, validateEvent, emitEvent } from "./workflow-event-schem
 import {
   FAST_MODE_STAGE,
   FAST_MODE_AGENT_LABEL,
-  findRepoRoot,
   getBaseCommit,
   readAllEvents,
   aggregate,
@@ -304,7 +304,7 @@ export function isBlockStale(rec, nowMs = Date.now(), thresholdMs = DEFAULT_BLOC
  * @returns {string}
  */
 export function findSharedRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  const local = findRepoRoot(startDir);
+  const local = repoRoot(startDir);
   const gitEntry = path.join(local, ".git");
   // A linked worktree's `.git` is a regular FILE ("gitdir: <main>/.git/worktrees/<name>").
   if (fs.existsSync(gitEntry) && fs.statSync(gitEntry).isFile()) {

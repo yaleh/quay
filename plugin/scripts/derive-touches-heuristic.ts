@@ -32,9 +32,10 @@
 // while the actual assertions live in a real node:test file for coverage measurability).
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isOverbroadDeclaration, normalizePath, findRepoRoot } from "./touches-orthogonality-check.ts";
+import { isOverbroadDeclaration, normalizePath } from "./touches-orthogonality-check.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 
 // Recognized file extensions for a BARE token (no "/") to be considered path-shaped at all.
@@ -174,8 +175,8 @@ export function main(argv: string[]): number {
     console.error(`ERROR: cannot read ${files[0]}: ${e.message}`);
     return 2;
   }
-  const repoRoot = root || findRepoRoot(path.resolve(path.dirname(files[0])));
-  const { globs, unresolved } = deriveTouches(text, repoRoot);
+  const resolvedRoot = root || repoRoot(path.resolve(path.dirname(files[0])));
+  const { globs, unresolved } = deriveTouches(text, resolvedRoot);
   process.stdout.write(renderTouchesSection(globs));
   if (unresolved.length > 0) {
     console.error(`UNRESOLVED (dropped, ambiguous or not found on disk): ${unresolved.join(", ")}`);

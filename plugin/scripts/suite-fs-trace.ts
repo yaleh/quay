@@ -39,7 +39,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { findRepoRoot } from "./suite-bucket-attribution.ts";
+import { repoRoot } from "./repo-root.ts";
 import { listSuiteFiles } from "./suite-bucket-select.ts";
 
 const PRELOAD_REL = "plugin/scripts/suite-fs-trace-preload.cjs";
@@ -86,7 +86,7 @@ export function preloadAbs(_root?: string): string {
  * @param {string} [root]
  * @param {number} [timeoutMs] — per-test subprocess timeout (default 120_000).
  */
-export function traceOne(testFileRel: string, root = findRepoRoot(), timeoutMs = 120_000): TraceResult {
+export function traceOne(testFileRel: string, root = repoRoot(), timeoutMs = 120_000): TraceResult {
   const abs = path.join(root, testFileRel);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "suite-fs-trace-"));
   const out = path.join(tmp, "trace.json");
@@ -130,7 +130,7 @@ export function traceOne(testFileRel: string, root = findRepoRoot(), timeoutMs =
 }
 
 /** Load the trace cache (absent/unreadable ⇒ empty map — a missing cache is a NOT-EVALUATED input, not a crash). */
-export function loadTraceCache(root = findRepoRoot()): Map<string, TraceCacheEntry> {
+export function loadTraceCache(root = repoRoot()): Map<string, TraceCacheEntry> {
   const map = new Map<string, TraceCacheEntry>();
   const file = path.join(root, CACHE_REL);
   let text: string;
@@ -230,7 +230,7 @@ function getArgValue(args: string[], name: string): string | undefined {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
-  const root = path.resolve(getArgValue(args, "--root") ?? findRepoRoot());
+  const root = path.resolve(getArgValue(args, "--root") ?? repoRoot());
   const asJson = args.includes("--json");
 
   if (args.includes("--collect")) {

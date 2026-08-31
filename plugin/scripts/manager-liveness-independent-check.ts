@@ -40,6 +40,7 @@
 //       record was produced) · 2 = usage error.
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -210,10 +211,6 @@ function flagVal(args, name, def) {
   return i !== -1 ? args[i + 1] : def;
 }
 
-function repoRoot(importMetaUrl) {
-  return path.resolve(path.dirname(fileURLToPath(importMetaUrl)), "..", "..");
-}
-
 /** Best-effort process-liveness probe: `tmux has-session -t <session>`. Returns true/false, or null when
  *  tmux is unavailable (unknown — the failure-mode classification falls back to heartbeat-stopped). */
 export function probeProcessAlive(session, env = process.env) {
@@ -250,7 +247,7 @@ Exit: 0 ALIVE · 1 DISABLED (stale/missing/malformed — notification produced) 
 export function main(argv, importMetaUrl = import.meta.url, env = process.env) {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) { usage(); return 0; }
-  const root = path.resolve(flagVal(args, "--root", repoRoot(importMetaUrl)));
+  const root = path.resolve(flagVal(args, "--root", repoRoot(path.dirname(fileURLToPath(importMetaUrl)))));
   const heartbeatFile = flagVal(args, "--heartbeat-file", path.join(root, DEFAULT_HEARTBEAT_REL));
   const lastTsFlag = flagVal(args, "--last-heartbeat-ts");
   const maxAge = Number(flagVal(args, "--max-age-secs", String(DEFAULT_MAX_AGE_SECS)));

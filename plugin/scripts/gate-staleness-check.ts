@@ -28,6 +28,7 @@
 //   2  usage / environment error
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,16 +55,6 @@ function parseArgs(argv: string[]) {
   return out;
 }
 
-function findWorkspaceRoot(startDir: string): string {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 12; i++) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
-}
 
 export function readGateLedger(root: string): { lastTs: string | null; count: number; ageSeconds: number | null } {
   const ledger = path.join(root, ".quay", "gate-events.jsonl");
@@ -105,7 +96,7 @@ export function main(argv: string[]): number {
     );
     return 0;
   }
-  const root = opts.root ?? findWorkspaceRoot(SCRIPT_DIR);
+  const root = opts.root ?? repoRoot(SCRIPT_DIR);
   if (!fs.existsSync(path.join(root, ".quay"))) {
     if (opts.json) {
       console.log(JSON.stringify({ last_gate_event_at: null, gate_event_count: 0, age_seconds: null, timeout: opts.timeout ?? DEFAULT_TIMEOUT, gate_never_ran: true, gate_stale: true, signal: true }));

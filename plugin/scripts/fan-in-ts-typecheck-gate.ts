@@ -29,23 +29,13 @@
 // serial-fanin-absorb.ts's shape).
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { parseTouchEntriesWithTags, extractTouchesSection } from "./touches-parser.ts";
 
-// ── Repo-root detection (mirrors malformed-task-check.ts) ────────────────────────────────────────────
-export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 12; i++) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
-}
 
 // ── Pure: parse `## Touches` from a task body → bare repo-relative path list ─────────────────────────
 export function parseTouches(taskBody) {
@@ -95,7 +85,7 @@ export const CANONICAL_TYPECHECK_CMD = 'for d in packages/*/; do npx tsc --noEmi
  *  falls back). `moduleRoot` is where the `packages/` tree lives (defaults to the repo root of
  *  configRoot) — the loader module import resolves from moduleRoot while the config TEXT is read
  *  from configRoot, so a bare worktree without the packages tree still resolves correctly. */
-export async function resolveTypecheckCommand(configRoot, moduleRoot = findRepoRoot(configRoot)) {
+export async function resolveTypecheckCommand(configRoot, moduleRoot = repoRoot(configRoot)) {
   try {
     const { readGatesConfig } = await import(
       pathToFileURL(path.join(moduleRoot, "packages/quay/src/gate/config/loader.ts")).href
@@ -177,7 +167,7 @@ export async function main(argv) {
     return 2;
   }
 
-  const repoRoot = findRepoRoot(worktree);
+  const root = repoRoot(worktree);
   const taskPath = path.join(worktree, "tasks", `${taskId}.md`);
   if (!fs.existsSync(taskPath)) {
     process.stderr.write(`fan-in-ts-typecheck-gate: task file not found: ${taskPath}\n`);
@@ -262,7 +252,7 @@ export async function main(argv) {
   }
 
   // 3. The task changes the type graph in its Touches → run the ts-typecheck gate (before fan-in).
-  const typecheck = await runTypecheckGate(worktree, repoRoot, { fakeGate });
+  const typecheck = await runTypecheckGate(worktree, root, { fakeGate });
   const admitted = typecheck.ok;
 
   if (asJson) {

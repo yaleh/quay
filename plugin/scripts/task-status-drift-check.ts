@@ -29,6 +29,7 @@
 //   node --experimental-strip-types plugin/scripts/task-status-drift-check.ts [--json] [--stranded]
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection } from "./task-schema.ts";
@@ -82,15 +83,6 @@ export function isCodeTouchEntry(entry) {
   return !isBookkeepingTouchEntry(entry);
 }
 
-export function findRepoRoot(startDir) {
-  let dir = startDir;
-  for (;;) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) throw new Error("task-status-drift-check: no '.git' ancestor found starting from " + startDir);
-    dir = parent;
-  }
-}
 
 // Backticked identifiers in an AC section that look like NEW-code symbols. Only DISTINCTIVE names
 // count: internal-camelCase / underscore / SCREAMING_SNAKE tokens (e.g. `planCheckNextAction`,
@@ -1094,22 +1086,22 @@ export function main(argv) {
   const closedOnly = args.includes("--closed-direction");
   const checkIdx = args.indexOf("--check");
   const checkId = checkIdx >= 0 && checkIdx + 1 < args.length ? args[checkIdx + 1] : null;
-  let repoRoot;
-  try { repoRoot = findRepoRoot(process.cwd()); } catch (e) {
+  let root;
+  try { root = repoRoot(process.cwd()); } catch (e) {
     process.stderr.write(`ERROR: ${e.message}\n`);
     return 0;
   }
   if (checkId) {
     // `--check <task-id>`: print landed=true/false for ONE task (taskWorkLanded, all three signals).
     // The Contract's landed_signals measure surface (task-status-drift-check.ts --check web-board).
-    const file = path.join(repoRoot, "tasks", `${checkId}.md`);
+    const file = path.join(root, "tasks", `${checkId}.md`);
     if (!fs.existsSync(file)) { process.stdout.write("landed=false\n"); return 0; }
     const raw = fs.readFileSync(file, "utf8");
-    process.stdout.write(`landed=${taskWorkLanded(raw, repoRoot, { taskId: checkId })}\n`);
+    process.stdout.write(`landed=${taskWorkLanded(raw, root, { taskId: checkId })}\n`);
     return 0;
   }
-  const stranded = strandedBranches(repoRoot);
-  const landing = landingRef(repoRoot);
+  const stranded = strandedBranches(root);
+  const landing = landingRef(root);
   if (strandedOnly) {
     // Fast branch-only path (restart-readiness-check.sh and the outer tick consume this): no task
     // store scan, just the stranded-branch report. Still exits 0 — report-only, never a gate.
@@ -1118,7 +1110,7 @@ export function main(argv) {
       : formatStrandedText(stranded));
     return 0;
   }
-  const { suspects, reverse, closedWithoutWork, strandedTasks, scanned } = scanTasks({ repoRoot, strandedBranches: stranded, landing });
+  const { suspects, reverse, closedWithoutWork, strandedTasks, scanned } = scanTasks({ repoRoot: root, strandedBranches: stranded, landing });
   if (json) {
     if (closedOnly) {
       // `--closed-direction --json` emits a bare ARRAY of closed-without-work entries so

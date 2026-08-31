@@ -37,6 +37,7 @@
 // Test: plugin/test/supervisor-preempt-candidates.test.mjs
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
@@ -46,7 +47,6 @@ import {
   reconcileInFlight,
   buildEndEvent,
   writeEvent,
-  findRepoRoot,
 } from "./fast-mode-telemetry.ts";
 import {
   TASK_OVER_90M_MS,
@@ -285,7 +285,7 @@ function getArgValue(args, name) {
  */
 export async function main(argv) {
   const args = argv.slice(2);
-  const root = getArgValue(args, "--root") ?? findRepoRoot();
+  const root = getArgValue(args, "--root") ?? repoRoot();
   const dryRun = args.includes("--dry-run");
 
   if (args.includes("--list") || args.includes("--list-preemptible") || args.includes("list-preemptible")) {
