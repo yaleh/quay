@@ -19,8 +19,9 @@ extra: {}
 
 ## Plan
 
-1. 两文件各拆 2–3 份（按测试主题/机制分组，⛔ 不改变任何测试断言）。
-2. 拆分产物补 `@test-group` + Touches 注册；ratchet/baseline 同步（若拆改 @test-group 触发）。
+1. 抽 harness（fakeSuite / runRunner / waitExit / poll / readState / GREEN_SUITE / PHASE_SUITE / _runnerLockDirs 清理，~90 行）到 `plugin/test/helpers/full-suite-runner-harness.mjs`（单一来源防 drift，⛔ 多份拆分文件各复制一份）。
+2. 两文件各拆 2–3 份（按测试主题/机制分组，⛔ 不改变任何测试断言）。full-suite-runner 按区段拆：`full-suite-runner.test.mjs`（~60 test）+ `full-suite-runner-phases.test.mjs` + `full-suite-runner-cgroup.test.mjs`。
+3. 拆分产物补 `@test-group` + Touches 注册；ratchet/baseline 同步（若拆改 @test-group 触发）。
 
 ## Acceptance Criteria
 
@@ -34,7 +35,10 @@ extra: {}
 
 ## Touches
 
-- plugin/test/full-suite-runner.test.mjs（拆 2–3 份）
+- plugin/test/helpers/full-suite-runner-harness.mjs（新，harness 单一来源）
+- plugin/test/full-suite-runner.test.mjs（拆：~60 test 保留）
+- plugin/test/full-suite-runner-phases.test.mjs（新，@test-group lowconc）
+- plugin/test/full-suite-runner-cgroup.test.mjs（新，@test-group lowconc）
 - plugin/test/worker-driver.test.mjs（拆 2–3 份）
 - 拆分产物的 @test-group 注册 + ratchet/baseline 同步（若触发）
 - tasks/gap-suite-file-split-two-longest.md（自身）

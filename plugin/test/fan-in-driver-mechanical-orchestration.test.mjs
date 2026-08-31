@@ -24,13 +24,17 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { runMechanicalFanIn, readFanInLockHold, acquireFanInLock, readTaskStatus } from "../scripts/worker-driver.ts";
+import { runMechanicalFanIn, readFanInLockHold, acquireFanInLock } from "../scripts/worker-driver.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { runAsync } from "../scripts/driver-runtime.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const SCRIPTS_DIR = path.join(REPO_ROOT, "plugin", "scripts");
+// P2 (gap-execution-loop-productization-p2-p4): the ff 持锁段 is a TS module; the hermetic temp
+// worktree has no packages/, so pin the seam (a plain path — worker-driver pathToFileURL()s it) to
+// the real repo's copy.
+const FF_MERGE_MODULE = path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts");
 const SLOT_LIB = path.join(SCRIPTS_DIR, "suite-slot-lib.sh");
 const DRIVER_SRC = path.join(SCRIPTS_DIR, "worker-driver.ts");
 const RUNTIME_SRC = path.join(SCRIPTS_DIR, "driver-runtime.ts");
@@ -114,7 +118,7 @@ function runHappyPath(opts = {}) {
     runId,
     mergeTarget: "develop",
     forceSuite: true,
-    scriptsDir: SCRIPTS_DIR,
+    scriptsDir: SCRIPTS_DIR, ffMergeModule: FF_MERGE_MODULE,
     slotBase,
     slotLib: SLOT_LIB,
     silenceMs: 5000,
@@ -202,7 +206,7 @@ test("suite 红 ⇒ 机械 fan-in red（step=suite），不落地、锁仍 relea
       runId,
       mergeTarget: "develop",
       forceSuite: true,
-      scriptsDir: SCRIPTS_DIR,
+      scriptsDir: SCRIPTS_DIR, ffMergeModule: FF_MERGE_MODULE,
       slotBase,
       slotLib: SLOT_LIB,
       silenceMs: 5000,
@@ -248,7 +252,7 @@ test("merge develop 冲突 ⇒ 机械 fan-in red（step=merge-develop），锁�
       runId,
       mergeTarget: "develop",
       forceSuite: true,
-      scriptsDir: SCRIPTS_DIR,
+      scriptsDir: SCRIPTS_DIR, ffMergeModule: FF_MERGE_MODULE,
       slotBase,
       slotLib: SLOT_LIB,
       silenceMs: 5000,
@@ -279,6 +283,7 @@ test("archguard 结构闸在机械 fan-in 里真跑（seam）——fake 命令�
       suiteCommand: ["bash", "-c", "exit 0"],
       scopedGateCommand: ["true"], docCheckCommand: ["true"],
       archguardCommand: ["bash", "-c", `echo ran > "${marker}"`],
+      ffMergeModule: FF_MERGE_MODULE,
     });
     assert.equal(r.outcome, "landed", `mechanical fan-in must land (step=${r.step} reason=${r.reason})`);
     assert.equal(fs.existsSync(marker), true, "archguard step must run (fake command wrote its marker)");
@@ -298,6 +303,7 @@ test("archguard 依赖环 red ⇒ 机械 fan-in red（step=archguard-structure�
       suiteCommand: ["bash", "-c", "exit 0"],
       scopedGateCommand: ["true"], docCheckCommand: ["true"],
       archguardCommand: ["bash", "-c", "echo dependency cycle; exit 3"],
+      ffMergeModule: FF_MERGE_MODULE,
     });
     assert.equal(r.outcome, "red");
     assert.equal(r.step, "archguard-structure");
@@ -323,6 +329,7 @@ test("archguard 结构信号镜像到主检出载体（AC2 机制）——worktr
       suiteCommand: ["bash", "-c", "exit 0"],
       scopedGateCommand: ["true"], docCheckCommand: ["true"],
       archguardCommand: fake,
+      ffMergeModule: FF_MERGE_MODULE,
     });
     assert.equal(r.outcome, "landed", `mirror path must land (step=${r.step} reason=${r.reason})`);
     const mainMetrics = fs.readFileSync(path.join(repo, ".archguard", "metrics-history.jsonl"), "utf8");
@@ -374,7 +381,7 @@ test("AC2 机制 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics) — 排�
     // 本测试证明机制端到端通（排队→等→落地，不 red at step 1、不 exit null）。
     const pending = runMechanicalFanIn({
       task: TASK, worktree, root: repo, runId, mergeTarget: "develop", forceSuite: true,
-      scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
+      scriptsDir: SCRIPTS_DIR, ffMergeModule: FF_MERGE_MODULE, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
       suiteCapture: capture, suiteLogFile: suiteLog,
       suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
       scopedGateCommand: ["true"], docCheckCommand: ["true"], archguardCommand: ["true"],
@@ -522,6 +529,9 @@ function mechRun(base, repo, worktree, slotBase, capture, runId) {
     // （step 5.5）；本组测试的临时 repo 不是真 packages/quay/src，真实 archguard-runner 会红——fake 成
     // ["true"] 跳过（与同文件其它测试同形），flip-done 收敛逻辑才是被测对象。
     archguardCommand: ["true"],
+    // P2 (gap-execution-loop-productization-p2-p4)：ff 持锁段已 TS 模块化（worker-driver import
+    // packages/quay/src/fan-in/ff-merge.ts）；临时 repo 无该模块 ⇒ pin 真仓库副本（与同文件其它 call site 同形）。
+    ffMergeModule: FF_MERGE_MODULE,
   });
 }
 
@@ -532,7 +542,9 @@ test("gap-fan-in-flip-done-already-done-not-landed AC1+AC3 — done-not-landed �
   const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
   try {
     flipWorktreeToDone(worktree);
-    assert.equal(readTaskStatus(worktree, TASK), "done", "precondition: worktree task file already done (prior flip)");
+    // ⛔ readTaskStatus 现读 develop（gap-driver-filters-readtaskstatus-stale-main-checkout），不读 worktree
+    // 本地盘上状态——本前置要断言的是「worktree 本地分支已 flip done」，读 worktree 的 HEAD（task/<id>）。
+    assert.equal(readStatusAtRef(worktree, "HEAD"), "done", "precondition: worktree task file already done (prior flip)");
     assert.equal(readStatusAtRef(repo, "develop"), "ready", "precondition: develop task file still ready (not landed)");
 
     const r = await mechRun(base, repo, worktree, slotBase, capture, "mf-run-flipdone-retry");

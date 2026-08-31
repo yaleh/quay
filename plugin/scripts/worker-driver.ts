@@ -120,6 +120,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
@@ -1726,6 +1727,9 @@ export interface MechanicalFanInOptions {
   archguardCommand?: string[];
   /** fan-in 编排脚本目录（测试缝）；缺省 = <worktree>/plugin/scripts（自举：本分支的编排脚本自验）。 */
   scriptsDir?: string;
+  /** ff-merge TS 模块路径（测试缝）；缺省 = <worktree>/packages/quay/src/fan-in/ff-merge.ts
+   *  （自举：本分支的 ff-merge 模块自验，P2 —— fan-in-ff-merge.sh 的 TS 化产物）。 */
+  ffMergeModule?: string;
   /** 权威 suite 状态载体 full-suite-state.json 的路径（D7 测试缝）；缺省 = <root>/.quay/full-suite-state.json。 */
   suiteStateFile?: string;
 }
@@ -2229,7 +2233,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     opts.suiteLogFile ?? path.join(root, ".quay", `fan-in-suite-${task}-${runIdSafe}.log`);
   const suiteStateFile = opts.suiteStateFile ?? path.join(root, ".quay", "full-suite-state.json");
   const scriptsDir = opts.scriptsDir ?? path.join(worktree, "plugin", "scripts");
-  const ffMerge = path.join(scriptsDir, "fan-in-ff-merge.sh");
+  // P2 (gap-execution-loop-productization-p2-p4): the ff 持锁段 is now a TS module (packages/quay/
+  // fan-in/ff-merge.ts), IMPORTED — ⛔ no shell-out to the retired bash fan-in-ff-merge.sh.
+  const ffMergeModule =
+    opts.ffMergeModule ?? path.join(worktree, "packages", "quay", "src", "fan-in", "ff-merge.ts");
   const antiDrift = path.join(scriptsDir, "anti-drift-touches-check.ts");
   const classify = path.join(scriptsDir, "select-static-checks-for-touches.ts");
   const typecheck = path.join(scriptsDir, "fan-in-ts-typecheck-gate.ts");
@@ -2432,9 +2439,21 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     trace({ step: "flip-done", exit: flip.ok ? 0 : 1, wall_ms: Date.now() - flipT0, ok: flip.ok, ...(flip.ok ? {} : { reason: flip.reason ?? "flip failed" }) });
     if (!flip.ok) return failClean("flip-done", flip.reason ?? "flip failed");
 
-    // 9. ff（fan-in-ff-merge.sh 读 suite capture 证书；成功 fall through，失败 red）。
-    a = await step("ff", ["bash", ffMerge, "--task", task, "--run-id", runId, "--root", root, "--merge-target", mergeTarget, "--worktree", worktree, "--suite-capture", suiteCapture, "--lock-wait", "30"], 120_000);
-    if (!a.ok) return fail("ff", a);
+    // 9. ff（fan-in/ff-merge.ts 读 suite capture 证书 + L1 token 闸；成功 fall through，失败 red）。
+    //    P2：⛔ 不再 shell-out 到 bash fan-in-ff-merge.sh —— 持锁段业务已 TS 模块化被 import。
+    const ffT0 = Date.now();
+    appendFanInStepTrace(root, task, runId, "ff", "begin");
+    const ffToken = randomUUID();
+    const { ffMerge: ffMergeFn } = await import(
+      /* @vite-ignore */ pathToFileURL(ffMergeModule).href
+    ) as { ffMerge: (o: { task: string; root: string; mergeTarget: string; runId: string; worktree: string; suiteCapture: string; suiteState: string; lockWaitSecs: number; token: string; scriptsDir: string }) => Promise<{ code: number; stdout: string; stderr: string; landedSha: string | null }> };
+    const ff = await ffMergeFn({
+      task, root, mergeTarget, runId, worktree, suiteCapture, suiteState: suiteStateFile,
+      lockWaitSecs: 30, token: ffToken, scriptsDir,
+    });
+    appendFanInStepTrace(root, task, runId, "ff", "end", { ok: ff.code === 0 });
+    trace({ step: "ff", exit: ff.code, wall_ms: Date.now() - ffT0, ok: ff.code === 0, ...(ff.code === 0 ? {} : { reason: (ff.stderr || ff.stdout || "").trim() || `exit ${ff.code}` }) });
+    if (ff.code !== 0) return fail("ff", { ok: false, status: ff.code, stdout: ff.stdout, stderr: ff.stderr, error: null });
 
     // 9.5 清理 worktree + 删 task 分支（ff 成功后——landed 判据 = status done ∧ 无残留 worktree）。
     // best-effort：移除失败不致命，landing 判定（computeLandingState）会据残留 worktree 诚实判未落地。

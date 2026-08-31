@@ -32,7 +32,9 @@ import { spawnSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
-const MERGE_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "fan-in-ff-merge.sh");
+// P2 (gap-execution-loop-productization-p2-p4): the 持锁段 is a TS module now — fan-in-ff-merge.sh
+// is retired; drive packages/quay/src/fan-in/ff-merge.ts directly.
+const MERGE_SCRIPT = path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts");
 const SUITE_LOCK_0 = "full-suite.lock.0";
 const MERGE_LOCK = "fan-in-merge.lock";
 
@@ -105,8 +107,11 @@ function flipStatusOnDisk(dir, taskId, to) {
   fs.writeFileSync(p, flipped, "utf8");
 }
 
-function runMerge(args) {
-  return spawnSync("bash", [MERGE_SCRIPT, ...args], { encoding: "utf8" });
+function runMerge(args, opts = {}) {
+  // P2: the ff ENTRY requires the driver-injected token (L1 token gate) — inject one by default so the
+  // pre-existing behavior tests exercise the ff, not the token gate. token: false ⇒ omit it (token gate).
+  const argv = opts.token === false ? args : [...args, "--token", "test-token"];
+  return spawnSync("node", ["--experimental-strip-types", MERGE_SCRIPT, ...argv], { encoding: "utf8" });
 }
 
 function stateDir(prefix) {
@@ -727,7 +732,7 @@ test("stale suite-lock reclaim restored — blocked path (missing certificate) r
     const inner =
       `(cd "${holderDir}" && exec 9>"${slot0}" && flock -n 9 && sleep 30) & holder=$!; ` +
       `sleep 0.3; rm -rf "${holderDir}"; ` +
-      `bash ${MERGE_SCRIPT} ${mergeArgs.map((a) => JSON.stringify(a)).join(" ")}; rc=$?; ` +
+      `node --experimental-strip-types ${MERGE_SCRIPT} ${mergeArgs.map((a) => JSON.stringify(a)).join(" ")} --token test-token; rc=$?; ` +
       `if (flock -n 9 2>/dev/null) 9>"${slot0}"; then echo REAPED > "${lockMark}"; else echo STILL_HELD > "${lockMark}"; fi; ` +
       `kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null; exit $rc`;
     const r = spawnSync("bash", ["-c", inner], { encoding: "utf8" });
@@ -771,7 +776,7 @@ test("AC5 — contradiction B FIXED: BOTH global suite-lock slots held (S=2, two
     const inner =
       `exec 8>"${slot1}"; flock -n 8 || exit 8; ` +
       `exec 9>"${slot0}"; flock -n 9 || exit 9; ` +
-      `bash ${MERGE_SCRIPT} ${["--task", "ac5-a", "--root", dir, ...capArgsA, "--lock-events", events, "--retry-record", retries].map((a) => JSON.stringify(a)).join(" ")}; rc=$?; ` +
+      `node --experimental-strip-types ${MERGE_SCRIPT} ${["--task", "ac5-a", "--root", dir, ...capArgsA, "--lock-events", events, "--retry-record", retries].map((a) => JSON.stringify(a)).join(" ")} --token test-token; rc=$?; ` +
       `flock -u 8 2>/dev/null; flock -u 9 2>/dev/null; exec 8>&- 2>/dev/null; exec 9>&- 2>/dev/null; exit $rc`;
     const r = spawnSync("bash", ["-c", inner], { encoding: "utf8" });
     // Two suites are "running" (BOTH slots held) yet A's ff MUST land — no mutual REFUSE.
@@ -1072,6 +1077,32 @@ test("--help exits 0 with usage on stdout (gap-scripts-sprawl convention)", () =
   assert.match(r.stdout, /fan-in-ff-merge/);
 });
 
+// ── L1 token gate (gap-fan-in-ff-merge-token-gate-fail-closed, P2 AC1) ────────────────────────────
+// The ff ENTRY requires a driver-injected token. A direct/untokenized ff is fail-closed with a
+// DISTINGUISHABLE refusal (exit 2 + "missing fan-in token" — ⛔ never the retry exit 1, ⛔ never the
+// bare env exit 2). ADR-034 abolished --acquire-workflow-lock; this gate is its mechanical successor.
+
+test("L1 token gate — no token ⇒ exit 2, distinguishable refusal, NO lock events", () => {
+  const dir = makeTmp("token");
+  const st = stateDir("token");
+  try {
+    initRepo(dir);
+    const tip = makeTaskBranch(dir, "ac62-tok");
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const capArgs = captureArgs(st, "ac62-tok", tip);
+    const r = runMerge(["--task", "ac62-tok", "--root", dir, ...capArgs, "--lock-events", events, "--retry-record", retries], { token: false });
+    assert.equal(r.status, 2, `untokenized ff must fail-closed (exit 2): ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /missing fan-in token/, "the refusal is the distinguishable token-gate message");
+    assert.doesNotMatch(r.stderr, /FF FAILED/, "⛔ not the retry exit-1 form");
+    assert.ok(!fs.existsSync(events), "no lock events — the token gate fired before the lock");
+    assert.ok(!fs.existsSync(retries), "no retry record");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
 // ── AC78 判据2(c): --agent-id self-validation (fail-closed against top-level session ids) ───────────
 
 test("AC78 判据2(c) — --agent-id resolving to a TOP-LEVEL session id ⇒ exit 2, NO lock events written", () => {
@@ -1091,7 +1122,7 @@ test("AC78 判据2(c) — --agent-id resolving to a TOP-LEVEL session id ⇒ exi
     const events = path.join(st, "events.jsonl");
     const suite = writeSuiteState(st, { state: "green" });
 
-    const r = spawnSync("bash", [MERGE_SCRIPT, "--task", "ac62-ac78", "--root", dir, "--suite-state", suite, "--lock-events", events, "--agent-id", sessId], { encoding: "utf8", env: { ...process.env, HOME: home } });
+    const r = spawnSync("node", ["--experimental-strip-types", MERGE_SCRIPT, "--task", "ac62-ac78", "--root", dir, "--suite-state", suite, "--lock-events", events, "--agent-id", sessId, "--token", "test-token"], { encoding: "utf8", env: { ...process.env, HOME: home } });
     assert.equal(r.status, 2, `top-level session id must be rejected: ${r.stdout}${r.stderr}`);
     assert.match(r.stderr, /TOP-LEVEL session id/, "the rejection names the top-level-session cause");
     assert.ok(!fs.existsSync(events), "NO lock events written for a rejected agent-id");
@@ -1118,7 +1149,7 @@ test("AC78 判据2(c) — --agent-id resolving to a REAL subagent (subagents/age
     const events = path.join(st, "events.jsonl");
     const suite = writeSuiteState(st, { state: "green" });
 
-    const r = spawnSync("bash", [MERGE_SCRIPT, "--task", "ac62-ac78b", "--root", dir, "--suite-state", suite, "--lock-events", events, "--agent-id", subId], { encoding: "utf8", env: { ...process.env, HOME: home } });
+    const r = spawnSync("node", ["--experimental-strip-types", MERGE_SCRIPT, "--task", "ac62-ac78b", "--root", dir, "--suite-state", suite, "--lock-events", events, "--agent-id", subId, "--token", "test-token"], { encoding: "utf8", env: { ...process.env, HOME: home } });
     // NOT rejected by the agent-id gate — it proceeds and fails only on the missing task branch.
     assert.doesNotMatch(r.stderr, /TOP-LEVEL session id/, "a real subagent id must pass the agent-id gate");
     assert.equal(r.status, 2, "still exit 2 for the missing task branch (no ff attempted)");
