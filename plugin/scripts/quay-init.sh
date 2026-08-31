@@ -1074,12 +1074,17 @@ _derive_loop_scripts_once() {
   #   sibling references in shell scripts), so without this explicit entry a cold-started consumer
   #   lays down test-framework-policy-check.ts without its imported lib and the check dies with
   #   ERR_MODULE_NOT_FOUND. Same class as touches-one-entry-one-path-check.ts above.
+  #   suite-params.ts (gap-suite-knobs-config-file-priority): full-suite-runner.ts is laid down via
+  #   plugin/workflows/fan-in-execute.js (rule (a)) and imports suite-params.ts via ESM `./suite-params.ts`
+  #   — an ESM relative `./` import is INVISIBLE to closure step (d) (same class as canonical-test-files.ts
+  #   above), so without this explicit entry a cold-started consumer lays down full-suite-runner.ts
+  #   without its suite-knob config reader and the runner dies with ERR_MODULE_NOT_FOUND.
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \
-    checker-io.ts driver-result.ts canonical-test-files.ts >> "$out"
+    checker-io.ts driver-result.ts canonical-test-files.ts suite-params.ts >> "$out"
   # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
   #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
   #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the
