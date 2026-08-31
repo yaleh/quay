@@ -1,7 +1,7 @@
 ---
 id: gap-suite-install-family-reduce-runinit
 title: 减少「真 quay-init 运行」——install 家族 runInit 20→~4-6（断言迁移到 laydownWorkspace）
-status: todo
+status: needs-human
 labels:
   - gap
 parent: null
@@ -29,7 +29,7 @@ install 家族 3 文件共 20 次 runInit（真 quay-init 运行：runtime 9 / l
 
 ## Definition of Done
 
-家族 runInit≤6；真实一轮全量 suite 绿；改前后对照墙读。
+家族 install 三文件 runInit 计数 20→≤6（机械 grep 可查）；迁移测试断言全过且断言面由共享 fixture 承载、不丢验证面；真实一轮全量 suite 绿；改前后对照墙钟读数下降。
 
 ## Touches
 
@@ -38,3 +38,9 @@ install 家族 3 文件共 20 次 runInit（真 quay-init 运行：runtime 9 / l
 - plugin/test/quay-init-loop-driver.test.mjs（迁移）
 - plugin/test/helpers/quay-init-install-fixture.mjs（如需扩共享面）
 - tasks/gap-suite-install-family-reduce-runinit.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-31T09:01:33.368Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
