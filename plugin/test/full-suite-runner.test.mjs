@@ -181,6 +181,14 @@ function runRunner({ root, command, laneCount, stateDir, runner, buckets, env = 
   // 200% the runner uses when the override is absent. Unless a test explicitly provides its own
   // limits, drop the inherited override so the child uses the runner's DEFAULT_SYSTEMD_RUN_LIMITS.
   if (!("QUAY_TEST_SYSTEMD_RUN_LIMITS" in env)) delete mergedEnv.QUAY_TEST_SYSTEMD_RUN_LIMITS;
+  // gap-suite-knobs-config-file-priority: hermetic phase-concurrency knobs. The real suite launch
+  // (full-suite-runner → test.sh) passes QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY into the
+  // test-file process env; those leak into the nested runner child via `...process.env` and mask the
+  // HOST-READ default the AC1/AC3 "default run" test asserts (the runner now reads these env vars
+  // directly — config < env < CLI — where the old import-time consts ignored env). Unless a test
+  // explicitly provides its own, drop the inherited values so the default-path test stays hermetic.
+  if (!("QUAY_SERIAL_CONCURRENCY" in env)) delete mergedEnv.QUAY_SERIAL_CONCURRENCY;
+  if (!("QUAY_LOWCONC_CONCURRENCY" in env)) delete mergedEnv.QUAY_LOWCONC_CONCURRENCY;
   // gap-verification-round-observability-holes AC3 — hermetic tests pin the independent
   // concurrentSuitesRunning read to a lone round (QUAY_TEST_RUNNER_PROCS=1) by default. Two reasons:
   // (a) the unseamed pgrep path would count the PRODUCTION full-suite-runner.ts that launches this

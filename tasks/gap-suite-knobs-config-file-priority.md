@@ -55,6 +55,7 @@ config.yml `suite:` 节 + loader + test.sh/full-suite-runner 接线；AC1-AC5 �
 - .quay/config.yml（加 `suite:` 节）
 - plugin/scripts/suite-params.ts（新，loader + schema，closed schema fail-closed）
 - plugin/test/suite-params.test.mjs（新，fixture 测试）
+- plugin/test/full-suite-runner.test.mjs（runRunner hermeticity：清 QUAY_SERIAL/LOWCONC_CONCURRENCY 防 ambient env 泄漏掩盖 host-read 默认）
 - scripts/test.sh（读 suite 节设默认值 + env 覆盖）
 - plugin/scripts/full-suite-runner.ts（读 suite 节注入 suiteEnv + runner 侧派生）
 - plugin/scripts/capability-catalog.sh（suite-params.ts 六表注册）
