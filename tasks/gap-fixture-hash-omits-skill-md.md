@@ -25,8 +25,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：`_fixtureHash` 计入 SKILL.md——grep 其计入文件列表含 `plugin/skills/init/SKILL.md`；改 SKILL.md 的 reference-doc 声明 → hash 变 → fixture 重建；（⛔ 声明变 hash 不变 ⇒ 假）。
-- [ ] AC2（能取假，全族）：grep 全仓 fixture hash 漏计入的 shipped 声明文件，仅剩已计入/豁免者，命中数贴提交；（⛔ 还有漏网 ⇒ 假）。
+- [x] AC1（能取假，机制级）：`_fixtureHash` 计入 SKILL.md——grep 其计入文件列表含 `plugin/skills/init/SKILL.md`；改 SKILL.md 的 reference-doc 声明 → hash 变 → fixture 重建；（⛔ 声明变 hash 不变 ⇒ 假）。
+- [x] AC2（能取假，全族）：grep 全仓 fixture hash 漏计入的 shipped 声明文件，仅剩已计入/豁免者，命中数贴提交；（⛔ 还有漏网 ⇒ 假）。
 
 ## Definition of Done
 
@@ -34,5 +34,7 @@ _fixtureHash 计入 SKILL.md；AC1-AC2 全勾；一次声明变更验证 hash �
 
 ## Touches
 
-- plugin/test/helpers/quay-init-install-fixture.mjs（_fixtureHash 计入 SKILL.md）
+- plugin/test/helpers/quay-init-install-fixture.mjs（_fixtureHash 计入全部 skills/*/SKILL.md）
+- plugin/test/quay-init-loop-helpers.mjs（re-export _pluginSurfaceHash）
+- plugin/test/quay-init-loop-fixture-hash-skill.test.mjs（新增：钉住 skill 覆盖）
 - tasks/gap-fixture-hash-omits-skill-md.md（自身）

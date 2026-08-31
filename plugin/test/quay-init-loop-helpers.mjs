@@ -25,6 +25,7 @@ export {
   pluginDir,
   _hashOfRoots,
   _fixtureHash,
+  _pluginSurfaceHash,
   sharedFixture,
   laydownTemplate,
   laydownWorkspace,

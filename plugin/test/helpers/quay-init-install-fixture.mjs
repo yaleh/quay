@@ -166,16 +166,16 @@ export function _hashOfRoots(roots, base = pluginDir) {
 }
 
 // _pluginSurfaceHash(pluginRoot): content-addressed sha1 over the installed-plugin surface the
-// fixture addresses — scripts + loop + skills/init + shipped workflows + the vendored dist bundles
-// + package.json. Parameterized by pluginRoot so the PARAMETERIZED fixture (sharedFixtureVariant)
-// can hash an OLD-plugin copy (A3's legacy-marked source) the same way the base fixture hashes the
-// live plugin. Adding a root here means a change to any file under it yields a FRESH fixture (never
-// a stale reuse).
-function _pluginSurfaceHash(pluginRoot) {
+// fixture addresses — scripts + loop + every shipped skill's SKILL.md + shipped workflows + the
+// vendored dist bundles + package.json. Parameterized by pluginRoot so the PARAMETERIZED fixture
+// (sharedFixtureVariant) can hash an OLD-plugin copy (A3's legacy-marked source) the same way the
+// base fixture hashes the live plugin. Adding a root here means a change to any file under it
+// yields a FRESH fixture (never a stale reuse). Exported (not just a private helper) so the
+// skill-coverage test can hash a TEMP plugin-shaped root directly.
+export function _pluginSurfaceHash(pluginRoot) {
   const roots = [
     path.join(pluginRoot, "scripts"),
     path.join(pluginRoot, "loop"),
-    path.join(pluginRoot, "skills", "init"),
     // Shipped workflows (plugin/workflows/* → <workspace>/.claude/workflows/ on install) AND the
     // live repo-root copy (.claude/workflows/* — the dual-copy source of the shipped bundle,
     // gap-fixture-hash-omits-workflows-dirs). A fan-in-execute.js edit changes BOTH; either alone
@@ -187,6 +187,20 @@ function _pluginSurfaceHash(pluginRoot) {
     path.join(pluginRoot, "workflows"),
     path.join(pluginRoot, "..", ".claude", "workflows"),
   ];
+  // Shipped skill declaration files — every skills/*/SKILL.md, NOT just init. The install reads the
+  // full glob skills/*/SKILL.md (script-laydown derivation + the referenced ⊆ landed check), so a
+  // declaration/reference change in ANY shipped skill must invalidate the fixture
+  // (gap-fixture-hash-omits-skill-md: init was hashed alone before, its 12 sibling skills were not —
+  // a manager-SKILL.md SPEC-index change reused a stale fixture). Each SKILL.md is a FILE root, not
+  // the whole skills/ dir: the reference/ and prompts/ subdirs are not read by the install, so they
+  // are deliberately out of scope (the same precision as the workflow roots above).
+  let skillDirs = [];
+  try { skillDirs = fs.readdirSync(path.join(pluginRoot, "skills"), { withFileTypes: true }); } catch { /* no skills dir */ }
+  for (const d of skillDirs) {
+    if (!d.isDirectory()) continue;
+    const skill = path.join(pluginRoot, "skills", d.name, "SKILL.md");
+    if (fs.existsSync(skill)) roots.push(skill);
+  }
   // The vendored dist bundles are gitignored generated artifacts the install lays verbatim into the
   // target's .quay/runtime/ — include them when present so a rebuilt bundle yields a fresh fixture.
   for (const b of ["vendor/quay/dist/quay.js", "vendor/quay-native/dist/quay-native.js"]) {
