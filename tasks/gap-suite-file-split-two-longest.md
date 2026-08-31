@@ -40,5 +40,4 @@ extra: {}
 - plugin/test/full-suite-runner-phases.test.mjs（新，@test-group lowconc）
 - plugin/test/full-suite-runner-cgroup.test.mjs（新，@test-group lowconc）
 - plugin/test/worker-driver.test.mjs（拆 2–3 份）
-- 拆分产物的 @test-group 注册 + ratchet/baseline 同步（若触发）
 - tasks/gap-suite-file-split-two-longest.md（自身）
