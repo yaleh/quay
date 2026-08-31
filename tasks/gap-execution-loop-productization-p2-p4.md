@@ -2,7 +2,7 @@
 id: gap-execution-loop-productization-p2-p4
 title: 执行环产品化 P2–P4——runMechanicalFanIn→quay task fan-in + workflow 兜底降级 +
   suite/dispatch 产品化
-status: ready
+status: needs-human
 labels:
   - gap
   - productization
@@ -44,3 +44,9 @@ P2 落地；AC1 全勾；fan-in-ff-merge.sh 删除零引用；L1 token 闸在 TS
 - plugin/scripts/worker-driver.ts
 - plugin/scripts/fan-in-ff-merge.sh（P2 删除）
 - tasks/gap-execution-loop-productization-p2-p4.md（自身）
+## Needs-Human
+
+**执行 2026-08-31T00:04:01.660Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=ff: bash: /home/yale/work/quay-worktrees/gap-execution-loop-productization-p2-p4/plugin/scripts/fan-in-ff-merge.sh: No such file or directory
