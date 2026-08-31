@@ -1,7 +1,7 @@
 ---
 id: gap-shape-assert-share-round
 title: full-suite-runner 形状断言并轮——一个 fake suite 吐所有 marker 的共享 runner 轮覆盖多条 AC（Tier 2）
-status: todo
+status: needs-human
 labels:
   - gap
   - test-wall-clock
@@ -27,9 +27,15 @@ extra: {}
 
 ## Definition of Done
 
-形状断言共享轮落地；AC1-AC2 全勾；scoped 全绿 + 墙钟下降。
+形状断言共享轮落地：一个 fake suite 同轮吐全部 marker，把 ~40 次 spawn 并为少数几轮；AC1（spawn 数较基线下降）与 AC2（并轮后各断言仍绿）全勾；scoped 全绿且墙钟较基线下降。
 
 ## Touches
 
 - plugin/test/full-suite-runner.test.mjs（形状测试并轮）
 - tasks/gap-shape-assert-share-round.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-31T03:05:14.459Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）

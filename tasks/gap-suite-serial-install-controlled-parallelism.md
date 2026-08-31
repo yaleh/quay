@@ -1,7 +1,7 @@
 ---
 id: gap-suite-serial-install-controlled-parallelism
 title: 串行 install 家族受控并行——serial_concurrency 1→2-4 作对照实验（预期 2-4× 墙降）
-status: todo
+status: needs-human
 labels:
   - gap
 parent: null
@@ -30,7 +30,7 @@ extra:
 
 ## Definition of Done
 
-选定值落 config；对照墙降 + flake 门读数；真实一轮全量 suite 绿。
+选定值落 config（serial_concurrency=2 在 develop 上可见）；对照轮墙降读数与 flake 门读数已记录；真实一轮全量 suite 绿。
 
 ## Touches
 
@@ -38,3 +38,9 @@ extra:
 - plugin/scripts/suite-params.ts（如需 A2 收窄）
 - plugin/scripts/known-load-sensitive.ts（如需收窄作用域）
 - tasks/gap-suite-serial-install-controlled-parallelism.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-31T09:01:33.370Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）

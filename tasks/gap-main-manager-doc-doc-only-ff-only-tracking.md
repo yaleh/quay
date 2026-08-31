@@ -1,7 +1,7 @@
 ---
 id: gap-main-manager-doc-doc-only-ff-only-tracking
 title: main/manager-doc 写面 + 机械同步 ff-only（不静默 merge）+ 分叉 guard——写面保留、可靠同步
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -26,9 +26,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，ff-only）：develop→doc 同步不再 merge-fallback——grep 无 `git merge develop` 兜底；非 ff 时报「无法 ff-only 同步」（独立取值）；（⛔ 仍静默 catch ⇒ 假）。
-- [ ] AC2（能取假，guard）：main/manager-doc 与 develop 分叉即报红——造一次分叉验证 guard 报红；（⛔ 分叉不报 ⇒ 假）。
-- [ ] AC3（能取假，负控制）：一次真实 develop→doc 同步后 `git rev-parse main/manager-doc develop` 两 ref 相等（同一次 commit）；（⛔ 仍分叉 ⇒ 假）。
+- [x] AC1（能取假，ff-only）：develop→doc 同步不再 merge-fallback——grep 无 `git merge develop` 兜底；非 ff 时报「无法 ff-only 同步」（独立取值）；（⛔ 仍静默 catch ⇒ 假）。
+- [x] AC2（能取假，guard）：main/manager-doc 与 develop 分叉即报红——造一次分叉验证 guard 报红；（⛔ 分叉不报 ⇒ 假）。
+- [x] AC3（能取假，负控制）：一次真实 develop→doc 同步后 `git rev-parse main/manager-doc develop` 两 ref 相等（同一次 commit）；（⛔ 仍分叉 ⇒ 假）。
 
 ## Definition of Done
 
@@ -36,7 +36,7 @@ develop→doc 同步改 ff-only（不静默 merge）；分叉 guard 接线；AC1
 
 ## Touches
 
-- plugin/scripts/driver-filters.ts（propagateDocBranchToDevelop 改 ff-only + 分叉 guard）
-- plugin/test/driver-filters.test.mjs（ff-only + guard 负控制测试）
-- CLAUDE.md（分支同步纪律：写面保留 main/manager-doc + ff-only）
+- plugin/scripts/driver-filters.ts（加 syncDevelopToDoc 机械 ff-only + docBranchForkedFromDevelop 分叉 guard）
+- plugin/test/driver-filters.test.mjs（AC1/AC2/AC3 负控制测试）
+- CLAUDE.md（分支同步纪律：写面保留 main/manager-doc + 机械 ff-only）
 - tasks/gap-main-manager-doc-doc-only-ff-only-tracking.md（自身）

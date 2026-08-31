@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-test-merge-driver-tests
 title: worker-driver 合并同形 driver 测试——spawn 33→~17（复用已启动 driver 多断言）（Tier 2）
-status: todo
+status: needs-human
 labels:
   - gap
   - test-wall-clock
@@ -27,9 +27,15 @@ extra: {}
 
 ## Definition of Done
 
-同形 driver 测试合并落地；AC1-AC2 全勾；scoped 全绿 + 墙钟下降。
+同形 driver 测试合并落地；AC1-AC2 全勾；scoped 全绿 + 墙钟下降且无断言丢失。
 
 ## Touches
 
 - plugin/test/worker-driver.test.mjs（同形 driver 测试合并）
 - tasks/gap-worker-driver-test-merge-driver-tests.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-31T03:05:14.457Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）

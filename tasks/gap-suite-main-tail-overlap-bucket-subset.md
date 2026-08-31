@@ -45,3 +45,10 @@ bucket 子集路径接 main-tail-overlap；AC1-AC4 全勾；--buckets 子集轮�
 
 - scripts/test.sh（bucket 子集分支：bucket_lowconc pid + bucket_main 处 watcher）
 - tasks/gap-suite-main-tail-overlap-bucket-subset.md（自身）
+
+## Needs-Human
+
+**执行 2026-08-31T09:02:11.389Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red

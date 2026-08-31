@@ -167,11 +167,13 @@ export function _hashOfRoots(roots, base = pluginDir) {
 
 // _pluginSurfaceHash(pluginRoot): content-addressed sha1 over the installed-plugin surface the
 // fixture addresses — scripts + loop + every shipped skill's SKILL.md + shipped workflows + the
-// vendored dist bundles + package.json. Parameterized by pluginRoot so the PARAMETERIZED fixture
-// (sharedFixtureVariant) can hash an OLD-plugin copy (A3's legacy-marked source) the same way the
-// base fixture hashes the live plugin. Adding a root here means a change to any file under it
-// yields a FRESH fixture (never a stale reuse). Exported (not just a private helper) so the
-// skill-coverage test can hash a TEMP plugin-shaped root directly.
+// shipped probes + the vendored dist bundles + the vendored provider.yml + the plugin's shipped
+// config/declaration files (plugin.json / launch.settings.json / profiles.yml) + package.json.
+// Parameterized by pluginRoot so the PARAMETERIZED fixture (sharedFixtureVariant) can hash an
+// OLD-plugin copy (A3's legacy-marked source) the same way the base fixture hashes the live plugin.
+// Adding a root here means a change to any file under it yields a FRESH fixture (never a stale
+// reuse). Exported (not just a private helper) so the skill-coverage test can hash a TEMP
+// plugin-shaped root directly.
 export function _pluginSurfaceHash(pluginRoot) {
   const roots = [
     path.join(pluginRoot, "scripts"),
@@ -186,6 +188,12 @@ export function _pluginSurfaceHash(pluginRoot) {
     // plugin/workflows, fully captured above).
     path.join(pluginRoot, "workflows"),
     path.join(pluginRoot, "..", ".claude", "workflows"),
+    // Shipped probes (plugin/probes/* → <workspace>/plugin/probes/ on install, quay-init.sh:2145) —
+    // the routine-track probe specs (DIR-056) are a DELIVERABLE laid verbatim, so a probe-spec
+    // change must invalidate the fixture (gap-fixture-hash-omits-shipped-files: probes were the
+    // "derived" shipped class the complete sweep found un-hashed). _hashOfRoots skips the dir when
+    // a temp plugin-shaped fixture has no probes/, the same as loop/workflows.
+    path.join(pluginRoot, "probes"),
   ];
   // Shipped skill declaration files — every skills/*/SKILL.md, NOT just init. The install reads the
   // full glob skills/*/SKILL.md (script-laydown derivation + the referenced ⊆ landed check), so a
@@ -203,8 +211,38 @@ export function _pluginSurfaceHash(pluginRoot) {
   }
   // The vendored dist bundles are gitignored generated artifacts the install lays verbatim into the
   // target's .quay/runtime/ — include them when present so a rebuilt bundle yields a fresh fixture.
-  for (const b of ["vendor/quay/dist/quay.js", "vendor/quay-native/dist/quay-native.js"]) {
+  // The vendored provider.yml (plugin/vendor/quay-native/provider.yml, TRACKED — not gitignored) is
+  // laid alongside the native bundle (quay-init.sh:2248 → .quay/runtime/provider.yml) because the
+  // bundle resolves `../provider.yml` relative to its own location — a provider.yml change must
+  // invalidate the fixture too (gap-fixture-hash-omits-shipped-files: the vendored class's second
+  // shipped member, distinct from the gitignored dist).
+  for (const b of [
+    "vendor/quay/dist/quay.js",
+    "vendor/quay-native/dist/quay-native.js",
+    "vendor/quay-native/provider.yml",
+  ]) {
     const p = path.join(pluginRoot, b);
+    if (fs.existsSync(p)) roots.push(p);
+  }
+  // The plugin's own shipped config/declaration files the --loop install READS or LAYS VERBATIM
+  // (gap-fixture-hash-omits-shipped-files, the complete-sweep gap classes):
+  //   .claude-plugin/plugin.json   — READ for the plugin version (quay-init.sh:199/205), recorded
+  //                                  in .quay/quay-init-state.json pluginVersion + the auto-commit
+  //                                  message + the upgrade-detection line → a version bump changes
+  //                                  the captured install output, so it must invalidate the fixture.
+  //   .claude/launch.settings.json — LAID verbatim (quay-init.sh:2205) as the per-role launch
+  //                                  template; a template change must invalidate the fixture.
+  //   .quay/profiles.yml           — LAID verbatim (quay-init.sh:2214) as the profile carrier; a
+  //                                  profile change must invalidate the fixture.
+  // Each is a FILE root (not the whole .claude/ or .claude-plugin/ dir) for the same precision as
+  // skills/*/SKILL.md. NOTE (scope): plugin/agents/ is deliberately OUT — the fixture installs with
+  // STANDARD_INIT_ARGS = --loop, which does NOT lay --agents (a separate install category).
+  for (const f of [
+    ".claude-plugin/plugin.json",
+    ".claude/launch.settings.json",
+    ".quay/profiles.yml",
+  ]) {
+    const p = path.join(pluginRoot, f);
     if (fs.existsSync(p)) roots.push(p);
   }
   const pkg = path.join(pluginRoot, "package.json");
