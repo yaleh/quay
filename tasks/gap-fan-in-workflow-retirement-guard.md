@@ -42,5 +42,6 @@ fan-in workflow 退役后的防回归（人裁定迁移序 L3）：
 - plugin/scripts/fan-in-workflow-retirement-check.ts（retirement checker，gate-scripts-retirement 同模式，断言两路径不存在 + 引用归零）
 - plugin/scripts/capability-catalog.sh（新增机件六表注册面）
 - plugin/scripts/runner-static-gate.ts（套件红灯接线——@static-tier full，AC3「非 wk-prod- 前缀 acquire ⇒ 套件红」的 run_static_checks 注册）
+- plugin/scripts/checker-mutation-cases/fan-in-workflow-retirement-check.sh（retirement checker 的 mutation case——checker-mutation-check AC1b「新 checker 必须有 mutation case」）
 - plugin/test/fan-in-workflow-retirement-check.test.mjs（retirement checker 测试 + 非 wk-prod- 前缀红灯负控制）
 - tasks/gap-fan-in-workflow-retirement-guard.md（自身）
