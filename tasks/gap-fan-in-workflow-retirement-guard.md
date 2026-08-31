@@ -29,9 +29,9 @@ fan-in workflow 退役后的防回归（人裁定迁移序 L3）：
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，生产载体）：lock-events 非 `wk-prod-` 前缀 acquire 计数=0，窗口从 L1 落地起（⛔ 非 wk-prod- acquire ⇒ 假；⛔ fixture-only ⇒ 假——fixture 满足的判据不是测量，硬规则 4 推论三）。
-- [ ] AC2（能取假，退役彻底）：两 fan-in-execute.js 路径不存在 + 引用面归零（归档白名单除外）；（⛔ 路径仍存在/引用未清零 ⇒ 假）。
-- [ ] AC3（能取假，防复活）：出现非 `wk-prod-` 前缀 acquire ⇒ 套件红（⛔ 不红 ⇒ 假）。
+- [x] AC1（能取假，生产载体）：lock-events 非 `wk-prod-` 前缀 acquire 计数=0，窗口从 L1 落地起（⛔ 非 wk-prod- acquire ⇒ 假；⛔ fixture-only ⇒ 假——fixture 满足的判据不是测量，硬规则 4 推论三）。
+- [ ] AC2（能取假，退役彻底）：两 fan-in-execute.js 路径不存在 + 引用面归零（归档白名单除外）；（⛔ 路径仍存在/引用未清零 ⇒ 假）。（待外部）
+- [x] AC3（能取假，防复活）：出现非 `wk-prod-` 前缀 acquire ⇒ 套件红（⛔ 不红 ⇒ 假）。
 
 ## Definition of Done
 
