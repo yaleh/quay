@@ -24,7 +24,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { runMechanicalFanIn, readFanInLockHold, acquireFanInLock, readTaskStatus } from "../scripts/worker-driver.ts";
+import { runMechanicalFanIn, readFanInLockHold, acquireFanInLock } from "../scripts/worker-driver.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { runAsync } from "../scripts/driver-runtime.ts";
 
@@ -532,7 +532,9 @@ test("gap-fan-in-flip-done-already-done-not-landed AC1+AC3 — done-not-landed �
   const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
   try {
     flipWorktreeToDone(worktree);
-    assert.equal(readTaskStatus(worktree, TASK), "done", "precondition: worktree task file already done (prior flip)");
+    // ⛔ readTaskStatus 现读 develop（gap-driver-filters-readtaskstatus-stale-main-checkout），不读 worktree
+    // 本地盘上状态——本前置要断言的是「worktree 本地分支已 flip done」，读 worktree 的 HEAD（task/<id>）。
+    assert.equal(readStatusAtRef(worktree, "HEAD"), "done", "precondition: worktree task file already done (prior flip)");
     assert.equal(readStatusAtRef(repo, "develop"), "ready", "precondition: develop task file still ready (not landed)");
 
     const r = await mechRun(base, repo, worktree, slotBase, capture, "mf-run-flipdone-retry");

@@ -386,12 +386,15 @@ test("D5 — computeLandingState(root, task, landedSha) derives landing from ff 
   runGit(root, ["add", "tasks/gap-d5.md"]);
   runGit(root, ["commit", "-q", "-m", "doc-only stale ready"]);
 
-  // 前置：读主检出 status = ready ⇒ 旧判据据此判 exited-not-landed（这正是 D5 的假负例）。
-  assert.equal(readTaskStatus(root, "gap-d5"), "ready", "precondition: main checkout (doc-only) still stale ready");
-  const old = computeLandingState(root, "gap-d5");
-  assert.equal(old.state, "failed", "precondition: without landedSha, the stale status ⇒ failed (the D5 bug)");
+  // 前置：主检出 doc-only 盘上 status 仍 ready（合法滞后 develop）——但 status 读源已是 develop
+  // （gap-driver-filters-readtaskstatus-stale-main-checkout：readTaskStatus 读 develop 非主检出，
+  // 同 D5 的「⛔ 不再读主检出 stale status」，只是把 readTaskStatus 自身也改到 develop 侧）。
+  assert.match(fs.readFileSync(path.join(root, "tasks", "gap-d5.md"), "utf8"), /^status:\s*ready/m, "precondition: main checkout (doc-only) disk still stale ready");
+  assert.equal(readTaskStatus(root, "gap-d5"), "done", "readTaskStatus reads develop (done), not the stale disk");
+  const noSha = computeLandingState(root, "gap-d5");
+  assert.equal(noSha.state, "verified", "without landedSha, the develop-read fallback still lands (status=done from develop)");
 
-  // 修后：传 landedSha（develop tip）⇒ 从 ff 结果派生，⛔ 不再读主检出 stale status ⇒ verified。
+  // 修后：传 landedSha（develop tip）⇒ 从 ff 结果派生（⛔ 不依赖 status 读，verifiedBy 点名 landedSha）⇒ verified。
   const derived = computeLandingState(root, "gap-d5", landedSha);
   assert.equal(derived.state, "verified", "D5: landedSha is develop tip + no leftover worktree ⇒ verified (⛔ not exited-not-landed)");
   assert.match(derived.verifiedBy, /landedSha/, "D5: verified reason names the ff-result-derived judge");

@@ -25,9 +25,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：driver-filters.ts `readTaskStatus` 读 develop 非主检出——grep 无 `readTaskStatus(ctx.root` 的候选/依赖 status 读，改为 taskReadRef: develop；（⛔ 仍读主检出 ⇒ 假）。
-- [ ] AC2（能取假，复现）：主检出 status=needs-human、develop status=ready 时，notNeedsHuman 放行该任务（不复现「滤掉真 ready」）；（⛔ 仍滤 ⇒ 假）。
-- [ ] AC3（能取假，全族）：grep 全仓读主检出 tasks status 的派发/晋升谓词，仅剩已迁移/豁免者，命中数贴提交；（⛔ 还有漏网 ⇒ 假）。
+- [x] AC1（能取假，机制级）：driver-filters.ts `readTaskStatus` 读 develop 非主检出——grep 无 `readTaskStatus(ctx.root` 的候选/依赖 status 读，改为 taskReadRef: develop；（⛔ 仍读主检出 ⇒ 假）。
+- [x] AC2（能取假，复现）：主检出 status=needs-human、develop status=ready 时，notNeedsHuman 放行该任务（不复现「滤掉真 ready」）；（⛔ 仍滤 ⇒ 假）。
+- [x] AC3（能取假，全族）：grep 全仓读主检出 tasks status 的派发/晋升谓词，仅剩已迁移/豁免者，命中数贴提交；（⛔ 还有漏网 ⇒ 假）。
 
 ## Definition of Done
 
@@ -37,4 +37,6 @@ driver-filters.ts readTaskStatus 读 develop；notNeedsHuman/depsSatisfied 不�
 
 - plugin/scripts/driver-filters.ts（readTaskStatus 读 develop + notNeedsHuman/depsSatisfied 消费面）
 - plugin/test/driver-filters.test.mjs（AC2 复现单测）
+- plugin/test/worker-driver.test.mjs（D5 前置：readTaskStatus 现读 develop ⇒ 更新前置断言）
+- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（readTaskStatus 现读 develop ⇒ worktree 本地读改 readStatusAtRef(worktree,"HEAD")）
 - tasks/gap-driver-filters-readtaskstatus-stale-main-checkout.md（自身）
