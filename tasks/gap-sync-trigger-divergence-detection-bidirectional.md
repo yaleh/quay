@@ -30,7 +30,7 @@ extra:
 
 ## Definition of Done
 
-分歧检测 + 双向同步接线；AC1-AC3 全勾；真实分歧触发后双向归 0。
+两触发点改分歧检测（读两 ref 分歧，不依赖 committed 翻转）；doc→develop 与 develop→doc 双向接线；AC1-AC3 全勾；真实分歧触发后双向计数归 0。
 
 ## Touches
 
