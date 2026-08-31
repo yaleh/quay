@@ -1,7 +1,7 @@
 ---
 id: gap-doc-develop-sync-semantic-conflict-resolution
 title: main/manager-doc↔develop 可靠同步 + 语义兜底（核心）——机械同步失败升级 Claude Code 语义同步，develop 权威
-status: ready
+status: done
 labels:
   - gap
 parent: null
