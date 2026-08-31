@@ -1,7 +1,7 @@
 ---
 id: gap-splice-unit-direct-test
 title: splice 测试改直测 spliceConcurrency 纯函数——4 个 e2e 各 spawn 一次全量 runner 换 import 直测（Tier 1）
-status: done
+status: ready
 labels:
   - gap
   - test-wall-clock
