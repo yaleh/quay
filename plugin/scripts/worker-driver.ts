@@ -361,6 +361,29 @@ export function computeOutcome({
   };
 }
 
+// ── ff-not-fast-forward 续做识别（gap-continue-cycle-misses-ff-not-fast-forward-redispatch）───────────
+// 机械 fan-in 的 ff 步失败「not a fast-forward」= develop 在长 suite 窗口期间前进、task 分支落后——
+// ⛔ 非代码缺陷（分支滞后），重派（CONTINUE：merge develop 再 ff）即可自愈，continueConflictResolutionNote
+// 已教该消解。但旧 continue-cycle 把这条 exited-not-landed 与「真缺陷」（suite red / merge-develop 冲突 /
+// anti-drift 违反）同形计数进重试上限 ⇒ 3 次（含 2 次 ff 滞后）撞 cap ⇒ 误标 needs-human ⇒ 静置不派、
+// 需人手动救回（2026-08-30 实况：gap-retire-governance-group-merge-into-bucket 两次 ff 撞重试上限，
+// 人翻转 needs-human→ready 才恢复）。本判定把它与真缺陷区分开，使 continue-cycle 把它识别为 transient
+// 续做态（不计重试上限、继续重派），⛔ 不改变「真缺陷达上限标 needs-human」的既有行为。
+
+/** 该 exited-not-landed outcome 是否由 ff-not-fast-forward（develop 前进、分支滞后）造成。识别依据 =
+ *  mechanical_fan_in.step === "ff" 且 reason 含 "not a fast-forward"（⛔ 不匹配 ff 步的其它失败——
+ *  post-check FAILED / 防活锁 escalation（attempt ≥ 3，exit 3）仍是真缺陷，照常计上限）。mechanical_fan_in
+ *  缺（非机械 fan-in 失败）/ 读不懂 ⇒ false（fail-closed 朝「计入上限」——宁可多标 needs-human，不把一个
+ *  真缺陷漏判成 transient）。纯谓词，可单测（AC2）。 */
+export function isFfNotFastForwardFailure(outcome: unknown): boolean {
+  if (!outcome || typeof outcome !== "object") return false;
+  const m = (outcome as { mechanical_fan_in?: unknown }).mechanical_fan_in;
+  if (!m || typeof m !== "object") return false;
+  if ((m as { step?: unknown }).step !== "ff") return false;
+  const reason = (m as { reason?: unknown }).reason;
+  return typeof reason === "string" && /not a fast-forward/i.test(reason);
+}
+
 // ── suite 锁指标（gap-suite-lock-starvation-long-validation-hold AC2）────────────────────────────
 // worker（claude -p）是黑盒，driver 不直接看到 suite 日志；但 worker 跑 fan-in 时，verification-round.jsonl
 // （<root>/.quay/，经 git common-dir 解析到主检出）会落一条带 runId 的记录，其 lock_wait_ms/lock_hold_ms
@@ -2673,7 +2696,13 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 计数 + 达上限标 needs-human（ready→needs-human）。needsHuman 集合进 retryCapNotExhausted 过滤 ⇒
       // 下一轮不再重派（与 markNeedsHuman 的 status 翻转双保险——即使磁盘写失败，内存过滤也挡重派）。
       if (r.outcome.final_state === "exited-not-landed") {
-        const newly = advanceRetryCap(retryState, [r.taskId], maxRetries);
+        // ff-not-fast-forward（分支滞后，非代码缺陷）不计重试上限——continue-cycle 识别为 transient
+        // 续做态，继续 CONTINUE 重派（merge develop 再 ff 自愈），⛔ 不把 3 次 branch-lag 误判成真缺陷
+        // 标 needs-human（那会静置 RECOMMENDED 不派，需人手动救回）。真缺陷（suite red / merge-develop
+        // 冲突 / anti-drift 违反 / ff 步的其它失败）仍照常计数达上限标 needs-human。
+        const newly = isFfNotFastForwardFailure(r.outcome)
+          ? []
+          : advanceRetryCap(retryState, [r.taskId], maxRetries);
         for (const id of newly) {
           // gap-mark-needs-human-commit-after-write：markNeedsHuman 写盘即提交，返回
           // { id, ok, reason, committed }——⛔ 不再丢弃 {ok,reason}；结果经 writeRound 落进 round 记录

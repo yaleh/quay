@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // self-report-vocab-audit.test.mjs — gap-reanchor-must-converge-inner-self-reported-vocabulary.
 //
 // The re-anchor mechanism proved "re-anchor happens + deviations corrected" but NOT "the inner's
@@ -19,7 +19,7 @@
 //         (concurrent-batch-scheduler.ts, gap-closure-sync-is-the-true-batch-boundary,
 //         gap-split-batch-vocabulary, batch-free) are NOT flagged; layer-meta commits quoting the
 //         phenomenon are caller-excluded via --exclude-prefix.
-//   AC5 — this file uses `import { test } from "node:test"` + `// @test-group governance`.
+//   AC5 — this file uses `import { test } from "node:test"` + `// @test-group engine`.
 //
 // Run:
 //   scripts/test.sh plugin/test/self-report-vocab-audit.test.mjs

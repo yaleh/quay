@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // judgment-consumer-check.test.mjs — tasks/gap-judgment-computed-not-wired-to-action (AC2/AC3).
 //
 // Coverage map (task ACs):

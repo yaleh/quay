@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // @load-sensitive wall-clock
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族")
 // supervisor-preempt-candidates.test.mjs — the supervisor base layer's TIMEOUT PREEMPTION
@@ -39,9 +39,6 @@ const SCRIPT = path.resolve(__dirname, "..", "scripts", "supervisor-preempt.sh")
 const CANDIDATES = path.resolve(__dirname, "..", "scripts", "supervisor-preempt-candidates.ts");
 const TELEMETRY = path.resolve(__dirname, "..", "scripts", "fast-mode-telemetry.ts");
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 function makeRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "preempt-cand-root-"));
@@ -344,4 +341,3 @@ test("preempt-task --dry-run does not kill, does not write, does not record", as
   }
 });
 
-}

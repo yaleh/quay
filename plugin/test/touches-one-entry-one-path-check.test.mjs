@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // touches-one-entry-one-path-check.test.mjs — the Touches「一条目一路径」shape rule
 // (tasks/gap-touches-one-entry-one-path, 判据1/判据3). A Touches bullet must declare EXACTLY ONE
 // path/glob entry; a bullet containing a path-separating delimiter — " / " (multi-path, e.g. AC66's

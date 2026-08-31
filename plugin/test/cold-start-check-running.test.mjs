@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // cold-start-check-running.test.mjs — cold-start 已停转分支：六键测「装没装好」不测「在不在转」
 // (tasks/gap-cold-start-six-keys-measure-installed-not-running, AC1-AC4).
 //

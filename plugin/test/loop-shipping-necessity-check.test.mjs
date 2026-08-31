@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // loop-shipping-necessity-check.test.mjs — gap-exclusion-lists-have-no-necessity-check.
 //
 // The AC1b exclusion table (plugin/scripts/loop-shipping-exclusion-data.mjs) only ever grows, and

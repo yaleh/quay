@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // tick-vocabulary.test.mjs — gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round.
 //
 // The dispatch vocabulary conflated two things under one word "batch":
@@ -28,7 +28,7 @@
 //   AC2/AC5 — the verification cadence is named `verification-round-N` with an explicit
 //         "不是分派门控" annotation; both tick docs carry the normative statement
 //         (分派是滚动的 / verification-round-N).
-//   AC6 — this file uses `import { test } from "node:test"` + `// @test-group governance`.
+//   AC6 — this file uses `import { test } from "node:test"` + `// @test-group engine`.
 //
 // Run:
 //   scripts/test.sh plugin/test/tick-vocabulary.test.mjs
@@ -165,8 +165,8 @@ test("AC2/AC5 — verification cadence is named verification-round-N with an exp
   }
 });
 
-test("AC6 — this file is node:test + // @test-group governance", () => {
+test("AC6 — this file is node:test + // @test-group engine", () => {
   const src = fs.readFileSync(new URL(import.meta.url), "utf8");
   assert.match(src, /import \{ test \} from "node:test"/);
-  assert.match(src, /\/\/ @test-group governance/);
+  assert.match(src, /\/\/ @test-group engine/);
 });

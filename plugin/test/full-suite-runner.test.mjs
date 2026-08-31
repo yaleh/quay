@@ -27,7 +27,7 @@
 //   AC5 — the >=3min/<3min threshold rule + durationMs measurement hook are in both loop docs.
 //   AC7 — the three batch-eliminating blocks (a/b/c) are cross-annotated in the closure-sync
 //         task file and the loop docs reference the (c) closure-decomposition task id.
-//   AC8 — this file uses node:test and declares // @test-group governance.
+//   AC8 — this file uses node:test and declares // @test-group lowconc.
 //
 // Task: gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red
 //   AC1 — FAILURE_PATTERNS no longer matches the bare ✖ glyph; a vitest-style suite whose
@@ -752,7 +752,7 @@ test("AC2 — PHASE_OVERLAP round: the overlap window closes at the second done-
   // window — only the two `overlap_<phase>_done=1` markers close it.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ovl-"));
   const suite = [
-    'echo "selected 30 files (groups=product,engine,governance,serial,lowconc)"',
+    'echo "selected 30 files (groups=product,engine,serial,lowconc)"',
     'echo "overlap: running 5 serial + 8 lowconc files in parallel (serial conc=2, lowconc conc=3)"',
     // serial finishes first (its __GROUP__ + sub-time + done-marker)
     'echo "__GROUP__ concurrency=2 files=5 sum_ms=1000 floor_ms=700 capped=0"',
@@ -911,6 +911,51 @@ test("gap-phase-overlap-field-always-false-negative — a SEQUENTIAL round does 
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("gap-suite-main-overlaps-load-sensitive-tail-experiment — the tail-overlap fire is recorded as main_tail_overlap_lanes + main_tail_overlap_load, and ABSENT on a baseline round", async () => {
+  // test.sh's tail-overlap watcher announces its fire on the stream: `main-tail-overlap: lanes=N
+  // [load=X]` (test.sh emits it to stderr; the runner's errRl → onLine). The round record must carry
+  // the lanes (the knob value / experiment's lane level) and the observed /proc/loadavg 1-min at fire
+  // time — and a baseline round (no marker) must OMIT both (缺键, never a fabricated 0 — the same
+  // absent-field contract as phase_overlap).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-mto-"));
+  const suite = [
+    'echo "main-tail-overlap: lanes=4 load=0.15"',
+    'echo "# tests 5"',
+    'echo "# pass 5"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "round record written");
+    assert.equal(rec.main_tail_overlap_lanes, 4, "main_tail_overlap_lanes = the knob lanes from the stream marker");
+    assert.equal(rec.main_tail_overlap_load, 0.15, "main_tail_overlap_load = the observed loadavg at fire time");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  // Negative control: a baseline round (no marker) omits both fields.
+  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-mto-baseline-"));
+  const { f: f2, dir: dir2 } = fakeSuite(GREEN_SUITE);
+  try {
+    const child2 = runRunner({ root: root2, command: `bash ${f2}`, laneCount: 8 });
+    const { code: code2 } = await waitExit(child2);
+    assert.equal(code2, 0, "baseline runner exits 0");
+    const rec2 = lastRoundRecord(root2);
+    assert.ok(rec2, "baseline round record written");
+    assert.equal(rec2.main_tail_overlap_lanes, undefined, "baseline round omits main_tail_overlap_lanes");
+    assert.equal(rec2.main_tail_overlap_load, undefined, "baseline round omits main_tail_overlap_load");
+  } finally {
+    fs.rmSync(root2, { recursive: true, force: true });
+    fs.rmSync(dir2, { recursive: true, force: true });
   }
 });
 

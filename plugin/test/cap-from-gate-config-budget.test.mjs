@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // cap-from-gate-config-budget.test.mjs — gap-fixed-cap-5-dynamic-cap-retired. The DYNAMIC adaptive
 // concurrency cap is RETIRED (human ruling 2026-08-09): effective_cap is the FIXED constant 5,
 // regardless of cpu pressure / suite state / process budget. The band + hysteresis + budget logic
@@ -9,7 +9,7 @@
 // original cap-from-gate.test.mjs (166s main-phase floor) by test concern — this file holds the
 // CROSS-LAYER BUDGET-observation, the SEAM-hermeticity (round-5 red, cluster B), the AC4
 // configurable-bands tests, and the two resource-gate report-surface tests (avg10/avg300 lines +
-// cross-gate dead-zone alignment). The `@test-group governance` declaration is preserved so the
+// cross-gate dead-zone alignment). The `@test-group engine` declaration is preserved so the
 // main-phase membership stays byte-identical.
 //
 // History (retired mechanism, kept for the observation semantics): the B face (dispatch slot cap)

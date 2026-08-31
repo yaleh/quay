@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // relative-baseline.test.mjs — gap-global-count-assertions-fragile-relative-baseline.
 // B3-2 fixture: a hardcoded global-count SNAPSHOT (`EXPECTED_ENGINE = 58`-style) goes red the
 // moment a concurrent merge adds a test file; the RELATIVE-BASELINE criterion (fork-baseline
@@ -12,7 +12,7 @@
 //   AC3  — the B3-2 fixture: a worktree built before a concurrent merge (B3-1 adds a test file
 //          13 min later) keeps the relative-baseline assertion GREEN, while the equivalent
 //          snapshot `== N` assertion provably goes red.
-//   AC5  — this file declares `// @test-group governance` and uses node:test.
+//   AC5  — this file declares `// @test-group engine` and uses node:test.
 //
 // Run:
 //   scripts/test.sh plugin/test/relative-baseline.test.mjs
@@ -28,13 +28,6 @@ import {
   expectedCount,
 } from "../scripts/test-file-baseline.ts";
 
-// ── Governance self-skip (AC5 @test-group governance) ──────────────────────────────────────────────
-// In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
-// precedent). It runs in full when invoked explicitly (QUAY_TEST_GROUPS unset) or with
-// `--group governance`.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 test("AC2: snapshotTestFiles dedupes and sorts — a snapshot is a stable set, not a count", () => {
   const snap = snapshotTestFiles(["engine/b.test.mjs", "engine/a.test.mjs", "engine/b.test.mjs", "  ", "product/c.test.mjs"]);
@@ -100,8 +93,7 @@ test("AC1: a baseline file that disappears is a violation (⊇ direction), regar
 test("AC1: relativeBaselineViolations does NOT reject unrelated concurrent additions (the B3-2 fix core)", () => {
   const baseline = snapshotTestFiles(["engine/a.test.mjs"]);
   // Two unrelated files merged concurrently by other tasks — NOT this task's additions.
-  const current = ["engine/a.test.mjs", "product/x.test.mjs", "governance/y.test.mjs"];
+  const current = ["engine/a.test.mjs", "product/x.test.mjs", "serial/y.test.mjs"];
   assert.deepEqual(relativeBaselineViolations(current, baseline, []), []);
 });
 
-} // end governance self-skip else-branch

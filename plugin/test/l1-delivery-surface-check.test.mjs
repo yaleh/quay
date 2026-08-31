@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // l1-delivery-surface-check.test.mjs — gap-complete-delivery-surface-spec-and-l1-verification.
 // Tests for plugin/scripts/l1-delivery-surface-check.ts — the SIX-category L1 delivery-completeness
 // check.
@@ -16,7 +16,7 @@
 //         laydown beside verify_referenced_landed (runnable before AND after install).
 //   AC3 — the three L2 continuous-health categories (语义一致 / 升级正确性 / 三层完整性) are
 //         carried by gap-quality-criteria-are-point-in-time-no-trend-criteria (cross-annotation).
-//   AC7 — this file is node:test + // @test-group governance.
+//   AC7 — this file is node:test + // @test-group engine.
 //
 // Run:
 //   scripts/test.sh plugin/test/l1-delivery-surface-check.test.mjs
@@ -38,12 +38,6 @@ const CLI = path.join(SCRIPTS_DIR, "l1-delivery-surface-check.ts");
 const SPEC = path.join(REPO_ROOT, "orchestration", "SPEC-complete-delivery-surface-2026-08-05.md");
 const SPEC_BASENAME = "SPEC-complete-delivery-surface-2026-08-05.md";
 
-// Governance self-skip (AC7 @test-group governance, ADR-019 decision #1 precedent): in a default
-// (product,engine) run this file reports `skipped`, not absent; it runs in full when invoked
-// explicitly (QUAY_TEST_GROUPS unset) or with `--group governance`.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(',').includes('governance')) {
-  test('governance group skipped', { skip: 'set QUAY_TEST_GROUPS=governance to run' }, () => {});
-} else {
 
 function runCli(root, spec) {
   const args = ["--no-warnings", "--experimental-strip-types", CLI, "--surface", "--root", root];
@@ -197,4 +191,3 @@ function escapeRe(s) {
   return new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
 
-} // end governance self-skip

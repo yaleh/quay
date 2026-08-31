@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // cold-start-oneliner-e2e.test.mjs — gap-cold-start-...-eight-steps, phase 3 (AC1 measure).
 //
 // Pins the Contract's `input_commands` measure: the cold start is ≤4 human-input commands, each

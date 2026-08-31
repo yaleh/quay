@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // candidate-contracts.test.mjs — sibling test for candidate-contracts.ts (ADR-001 Decision clause 2:
 // load-bearing method-infra, imported by coupling-graph.ts/candidate-synthesis.ts/
 // select-preflight.ts, MUST carry a `<name>.test.mjs` sibling — loadbearing-test-gate.sh enforces
@@ -8,9 +8,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 const { CONTRACT_VERSION, PROHIBITING_KINDS, SUPPORTING_KINDS, isProhibiting, isSupporting, isExploreTask, makeSingletonCandidate, normalizeLegacyCall, selftest, } = await import("../scripts/candidate-contracts.ts");
 
 test("candidate-contracts.ts embedded selftest() suite passes", () => {
@@ -88,4 +85,3 @@ test("isExploreTask: false for an ordinary task with no explore signal", () => {
   assert.equal(isExploreTask({ id: "DIR-119-A", labels: ["milestone-candidate"] }), false);
 });
 
-}

@@ -12,7 +12,7 @@
 //   capped at slots_free and production-disjoint (assembleBatch) · AC4 negative control: no
 //   dispatchable candidate ⇒ should_refill=false; the helper never writes/dispatches (pure) ·
 //   AC5 cap semantics: in-flight ≥ cap ⇒ should_refill=false; cap is an input, never hardcoded ·
-//   AC7 idempotent: same inputs ⇒ identical output · AC8 node:test + @test-group governance
+//   AC7 idempotent: same inputs ⇒ identical output · AC8 node:test + @test-group lowconc
 // B9 FORCE-DISPATCH (tasks/gap-outer-tick-core-b9-coverage-blind-spot): the outer tick-core B9 branch
 //   consumes should_refill + recommended as the two independently-readable preconditions of
 //   "空槽强制派发" — should_refill=true AND recommended non-empty ⇒ the tick MUST dispatch 1-2, even when

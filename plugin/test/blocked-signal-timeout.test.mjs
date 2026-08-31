@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // blocked-signal-timeout.test.mjs — gap-blocked-signal-timeout-auto-escalation.
 // A blocked signal (`.quay/inner-blocked.json`) that nobody consumes must NOT let inner wait
 // forever (tonight's 92-minute false-block class: fake OVER90 / red-window leftover brackets wrote

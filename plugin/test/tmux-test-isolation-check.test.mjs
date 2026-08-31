@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // tmux-test-isolation-check.test.mjs — unit tests for the tmux-isolation static checker
 // (tasks/gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe, STAGE 2 / AC3-AC4).
 //
@@ -17,10 +17,6 @@ import assert from "node:assert/strict";
 
 import { scanFileText } from "../scripts/tmux-test-isolation-check.ts";
 
-// ── Governance self-skip (AC3 @test-group governance; ADR-019 decision #1 precedent) ───────────
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 // ── AC4 negative control: the bare unqualified shape MUST be red ────────────────────────────────
 
@@ -102,4 +98,3 @@ test("a `tmux -V` version probe alone is GREEN (no server is started)", () => {
   assert.equal(res.isolated, true, "a pure -V availability probe starts no server");
 });
 
-} // end governance self-skip else

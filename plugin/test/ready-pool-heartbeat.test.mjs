@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // ready-pool-heartbeat.test.mjs — the tick heartbeat MUST unconditionally run ready-pool-check and
 // apply the pool<floor promotions (tasks/gap-ready-pool-promotion-same-class-as-slot-refill).
 //
@@ -18,7 +18,7 @@
 //
 // This is a DOC-CONTRACT test (the behavior is the doc the inner mechanically follows), not a
 // ready-pool-check.ts logic test — the apply-mode logic is covered by
-// plugin/test/ready-pool-check.test.mjs (node:test + @test-group governance).
+// plugin/test/ready-pool-check.test.mjs (node:test + @test-group engine).
 //
 // Run: scripts/test.sh plugin/test/ready-pool-heartbeat.test.mjs
 

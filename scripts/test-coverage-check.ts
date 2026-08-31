@@ -381,9 +381,9 @@ function runSelftest(): number {
       );
       // serial + lowconc (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests /
       // gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive): the default --list-files
-      // (product,engine + governance passthrough + the lowconc phase) EXCLUDES the serial group,
-      // so the canonical-set comparison must enumerate ALL FIVE groups to stay single-source.
-      const listOut = spawnSync("bash", ["scripts/test.sh", "--group", "product,engine,governance,serial,lowconc", "--list-files"], { cwd: REPO_ROOT, encoding: "utf8" });
+      // (product,engine + the lowconc phase) EXCLUDES the serial group,
+      // so the canonical-set comparison must enumerate ALL FOUR groups to stay single-source.
+      const listOut = spawnSync("bash", ["scripts/test.sh", "--group", "product,engine,serial,lowconc", "--list-files"], { cwd: REPO_ROOT, encoding: "utf8" });
       const listSet = new Set(listOut.status === 0 ? listOut.stdout.trim().split("\n").filter(Boolean) : []);
       ac5 =
         listOut.status === 0 && canonReal.size === listSet.size && [...canonReal].every((f) => listSet.has(f));

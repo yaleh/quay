@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // loop-driver-check.test.mjs — gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes.
 //
 // The outer measured the defect end-to-end (not by reading code): loop-driver-check.sh reads a

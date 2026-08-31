@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // adr016-screen-use-check.test.mjs — ADR-016 Amendment 2026-08-04 whole-screen-hash gate
 // (tasks/gap-adr-016-carve-out-permits-the-whole-screen-hash-it-was-meant-to-forbid).
 //
@@ -8,7 +8,7 @@
 // INSTRUCTION blocks of the shipped/live tick docs) — a .md naming the pattern in PROSE must never
 // self-match, and a comment mentioning it must not satisfy the detector · AC4 band 0..1 (one active
 // legacy observer tolerated; a second goes RED) · AC5 negative control both directions · AC7
-// @test-group governance.
+// @test-group engine.
 //
 // path→content (gap-b5-input-shape-path-to-content): the JUDGMENT logic is tested as PURE functions
 // over string content (detectFileViolations / detectTickDocViolations / stripShellComments /

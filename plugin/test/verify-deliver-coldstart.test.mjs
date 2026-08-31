@@ -20,7 +20,7 @@
 //   AC3/AC4 — the script's fresh-install shape (isolated npm --prefix + clean project root) is
 //         argued in the script header and exercised by --help/arg-validation; the real install is
 //         load-sensitive and belongs to the AC88 cross-host drive, not this hermetic file.
-//   This file uses node:test and declares // @test-group governance (AC5 of the mechanism task).
+//   This file uses node:test and declares // @test-group lowconc (AC5 of the mechanism task).
 //
 // Run:
 //   scripts/test.sh plugin/test/verify-deliver-coldstart.test.mjs

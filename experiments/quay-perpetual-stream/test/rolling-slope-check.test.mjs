@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // Golden-replay + unit tests for rolling-slope-check.mjs — DIR-038-A. The frozen oracle is the honest
 // number the stream ALREADY hand-computed (dashboard.md §341(d): m29–m35 ≈ 0.64 per 5; m41–m49 ≈ 0)
 // and cp-65's qualifying-only artifact (22.82/6 = 3.80 /qualifying-milestone). The re-based rolling
@@ -10,9 +10,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 const { windowSlope, windowSlopePer5, qualifyingSlope, honestNotInflated, haltVerdict, HALT_THRESHOLD, main, } = await import("../scripts/rolling-slope-check.ts");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -88,4 +85,3 @@ test("main: missing file → exit 2; bad --k → exit 2", async () => {
   assert.equal(await main(["node", "s", "--k", "0", fx("m29-m35.json")]), 2);
 });
 
-}

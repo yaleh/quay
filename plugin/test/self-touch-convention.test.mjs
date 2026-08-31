@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // self-touch-convention.test.mjs — gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence
 // (c) block of the three-block batch elimination: grant each task its own `tasks/<id>.md` in
 // `## Touches` so the executing agent self-checks AC boxes + pastes invoke evidence at completion,
@@ -12,7 +12,7 @@
 //   AC5  self-file WITHOUT `(new)` — `taskWorkLanded`'s touch signal does NOT fire (ready pool not
 //        misjudged empty); the same self-file WITH `(new)` DOES fire (the regression the convention
 //        prevents).
-//   AC7  node:test + `// @test-group governance` (this header).
+//   AC7  node:test + `// @test-group engine` (this header).
 //
 // Run: scripts/test.sh plugin/test/self-touch-convention.test.mjs
 
@@ -297,9 +297,9 @@ test("AC1: --self-touch-scan CLI exits 1 when any ready task is missing its self
   }
 });
 
-// ── AC7 / policy: node:test + @test-group governance is declared in the header ────────────────────
-test("AC7: this file imports node:test and declares @test-group governance (policy enforced separately)", () => {
+// ── AC7 / policy: node:test + @test-group engine is declared in the header ────────────────────
+test("AC7: this file imports node:test and declares @test-group engine (policy enforced separately)", () => {
   const src = fs.readFileSync(new URL(import.meta.url), "utf8");
   assert.match(src, /import \{ test \} from "node:test"/, "node:test import present");
-  assert.match(src, /@test-group governance/, "governance group declared");
+  assert.match(src, /@test-group engine/, "engine group declared");
 });

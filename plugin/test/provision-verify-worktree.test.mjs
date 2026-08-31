@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // provision-verify-worktree.test.mjs — tasks/gap-provision-verify-worktree-step
 // (the shared "create a runnable verify worktree" step; manager 2026-08-10 family finding —
 //   fresh verify worktrees failed tonight from missing gitignored runtime files that task

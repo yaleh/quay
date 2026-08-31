@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // fast-mode-telemetry.test.mjs — gap-fast-mode-no-telemetry: RED/GREEN tests for the fast-mode
 // metering CLI (fast-mode-telemetry.ts, byte-identical mirrors). Covers AC2–AC5 and AC10 (DoD),
 // plus the --report write-split regression (gap-telemetry-report-writes-and-deadlocks-readiness):
@@ -113,14 +113,11 @@ async function importSchema() {
   return import(SCHEMA);
 }
 
-// ── Governance self-skip (AC6 @test-group governance) ─────────────────────────────────────────────
+// ── Governance self-skip (AC6 @test-group engine) ─────────────────────────────────────────────
 // In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
 // precedent). It runs in full when invoked explicitly (QUAY_TEST_GROUPS unset) or with
 // `--group governance`. The fast-mode telemetry is the metering/measurement layer — governance,
 // not engine.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 // ── AC2: --task-start ────────────────────────────────────────────────────────────────────────────────
 
@@ -828,9 +825,9 @@ test("Byte-identity — workflow-event-schema mirrors still byte-identical", () 
 // gone (branch merged / worktree gone / process gone — never wall-clock age), and never closes a
 // record whose executor is still present (AC3 negative control). The ACs are pinned below.
 
-test("AC6 — this file declares // @test-group governance (metering/measurement layer)", () => {
+test("AC6 — this file declares // @test-group engine (metering/measurement layer)", () => {
   const src = fs.readFileSync(new URL(import.meta.url), "utf8");
-  assert.match(src, /\/\/ @test-group governance/, "must declare @test-group governance");
+  assert.match(src, /\/\/ @test-group engine/, "must declare @test-group engine");
 });
 
 test("RECONCILE — a branch-merged phantom is closed with an observable reason; a live executor is kept (AC2/AC3/AC4)", async () => {
@@ -1979,7 +1976,6 @@ test("WORKTREE-LEAK CLI — real git: merged worktree reads as a leak; removal c
   }
 });
 
-} // ── end governance self-skip (AC6) ──
 
 // ── FAN-IN RUNID BRIDGE (gap-task-telemetry-6-percent-join) ──────────────────────────────────────────
 // The 6% join-rate defect: git fan-in commits and telemetry records barely intersected. The bridge:

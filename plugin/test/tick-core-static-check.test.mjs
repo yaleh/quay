@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // tick-core-static-check.test.mjs — tasks/gap-tick-core-zero-static-coverage
 // (AC2-AC8 — the execution-core static coverage checker's mechanical realization of the
 // four gates the 2026-08-10 incidents were all hand-found against: AC30(a) ≤80 lines,

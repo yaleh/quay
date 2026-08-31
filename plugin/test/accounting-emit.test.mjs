@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // accounting-emit.test.mjs — the UNIFIED FOUR-TUPLE emitter
 // (orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md §2.5,
 //  task gap-spec-p2-quad-tuple-unified-emitter).

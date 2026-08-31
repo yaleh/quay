@@ -147,23 +147,25 @@ test("AC1 — the full-suite default path LPT-reorders its main body and runs it
   );
 });
 
-test("AC2 — LPT lands on the main body only; serial/lowconc phases keep their own concurrency and are NOT cross-mixed", () => {
+test("AC2 — serial/lowconc phases are LPT-reordered and run order-preserving via suite-lpt-runner.mjs at their own concurrency", () => {
   const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
-  // Phase compatibility: the LPT reorder must land on the MAIN body's `files` array ONLY — never on
-  // serial_files / lowconc_files, which run at their OWN SERIAL_CONCURRENCY / LOWCONC_CONCURRENCY.
-  // Cross-mixing the three concurrency groups would break the phase isolation guarantee.
-  assert.doesNotMatch(testSh, /lpt_reorder_files serial_files/, "serial phase must NOT be LPT-reordered");
-  assert.doesNotMatch(testSh, /lpt_reorder_files lowconc_files/, "lowconc phase must NOT be LPT-reordered");
-  // The serial/lowconc phases still run via node --test at their own concurrency (unchanged).
+  // gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered: the serial/lowconc phases were the last
+  // bare `node --test` dispatch points on the full path — node --test re-sorts positional args
+  // alphabetically, discarding any LPT order (the serial/lowconc tail waited ≈38% of the round).
+  // Each phase is now LPT-reordered IN PLACE and handed to suite-lpt-runner.mjs run({files}) (the
+  // ONLY order-preserving path), at its OWN SERIAL_CONCURRENCY / LOWCONC_CONCURRENCY — concurrency
+  // rides in execArgv exactly like the main body, so the phase isolation guarantee is unchanged.
+  assert.match(testSh, /lpt_reorder_files serial_files/, "serial phase must be LPT-reordered");
+  assert.match(testSh, /lpt_reorder_files lowconc_files/, "lowconc phase must be LPT-reordered");
   assert.match(
     testSh,
-    /node --test --test-concurrency="\$SERIAL_CONCURRENCY"( \$\(suite_reporter_flags\))? "\$\{serial_files\[@\]\}"/,
-    "serial phase must keep node --test at SERIAL_CONCURRENCY",
+    /node --test-concurrency="\$SERIAL_CONCURRENCY" "\$\{repo_root\}\/plugin\/scripts\/suite-lpt-runner\.mjs" "\$\{serial_files\[@\]\}"/,
+    "serial phase must run suite-lpt-runner.mjs at SERIAL_CONCURRENCY",
   );
   assert.match(
     testSh,
-    /node --test --test-concurrency="\$LOWCONC_CONCURRENCY"( \$\(suite_reporter_flags\))? "\$\{lowconc_files\[@\]\}"/,
-    "lowconc phase must keep node --test at LOWCONC_CONCURRENCY",
+    /node --test-concurrency="\$LOWCONC_CONCURRENCY" "\$\{repo_root\}\/plugin\/scripts\/suite-lpt-runner\.mjs" "\$\{lowconc_files\[@\]\}"/,
+    "lowconc phase must run suite-lpt-runner.mjs at LOWCONC_CONCURRENCY",
   );
 });
 

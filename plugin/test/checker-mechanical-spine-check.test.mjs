@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // checker-mechanical-spine-check.test.mjs — B1 机械脊柱检查器测试
 // (tasks/gap-b1-mechanical-spine-doc-checker).
 //

@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // manager-layer-skill.test.mjs — gap-productize-the-manager-layer, AC7.
 // Pins the shipped manager layer (the THIRD layer) + the cold-start AC8c dead-key fix:
 //   AC1 — plugin/skills/manager/SKILL.md exists and is registered in plugin.json commands[]

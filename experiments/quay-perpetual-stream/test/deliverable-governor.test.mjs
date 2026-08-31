@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // Unit + golden-oracle tests for deliverable-governor.ts — DIR-066. The governor is SOFT: it biases only
 // the Round-1 shortlist composition and NEVER halts. RED-first (ADR-001 / DIR-019).
 // Run: node --test experiments/quay-perpetual-stream/test/deliverable-governor.test.mjs
@@ -8,9 +8,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 const { floor, nextStreak, composeShortlist, replayFloors, K, CAP, DEFAULT_SMAX, main, } = await import("../scripts/deliverable-governor.ts");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -144,4 +141,3 @@ test("main() replay emits no HALT-RECOMMENDED (pure-soft)", async () => {
   assert.equal(chunks.join("").includes("HALT-RECOMMENDED"), false);
 });
 
-}

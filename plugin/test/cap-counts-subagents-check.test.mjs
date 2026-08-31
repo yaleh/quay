@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // cap-counts-subagents-check.test.mjs — AC76 in-flight = CONCURRENT SUBAGENTS checker tests
 // (tasks/gap-ac76-cap-counts-subagents-not-worktrees, 人 2026-08-14 07:3xZ/09:1xZ 裁定).
 // plugin/scripts/cap-counts-subagents-check.ts.

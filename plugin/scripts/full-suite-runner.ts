@@ -2508,6 +2508,15 @@ export async function run(argv: string[]): Promise<number> {
   // the runner's own process.env.QUAY_PHASE_OVERLAP, which the production chain (fan-in-execute.js)
   // never sets (the env knob defaults to 1 only INSIDE test.sh, invisible to this parent process).
   let phaseOverlapRan = false;
+  // gap-suite-main-overlaps-load-sensitive-tail-experiment — main-tail-overlap observability. LATCHED
+  // from test.sh's `main-tail-overlap: lanes=N [load=X]` stream marker (emitted by the tail-overlap
+  // watcher when it actually fires main early), NOT from process.env.QUERY_MAIN_TAIL_OVERLAP — the
+  // same false-negative lesson as phaseOverlapRan: the production chain never sets the env on this
+  // parent process (the knob default 0 lives only inside test.sh). null on a baseline/sequential
+  // round (knob 0, or trigger never fired) — the reader tolerates absence (same absent-field
+  // contract as phase_overlap).
+  let mainTailOverlapLanes: number | null = null;
+  let mainTailOverlapLoad: number | null = null;
   let mainClosed = false; // the main→end boundary already fired
   // gap-verification-round-phases-overlap-merged — on the overlap path test.sh emits
   // `__OVERHEAD__ overlap_<phase>_done=1` right after EACH parallel phase's `wait`. The window
@@ -2524,6 +2533,12 @@ export async function run(argv: string[]): Promise<number> {
   const phaseOverlapSerialDone = /^__OVERHEAD__\s+overlap_serial_done=1/;
   const phaseOverlapLowconcDone = /^__OVERHEAD__\s+overlap_lowconc_done=1/;
   const phaseOverlapDone = /^__OVERHEAD__\s+overlap_(?:serial|lowconc)_done=1/;
+  // gap-suite-main-overlaps-load-sensitive-tail-experiment — test.sh's tail-overlap watcher announces
+  // its fire on the stream. Distinct from the __OVERHEAD__ family (which the phase boundary machine
+  // treats as the end-of-round burst) so a mid-window fire can never prematurely close the overlap
+  // window. lanes = the early-start concurrency (the knob value); load = /proc/loadavg 1-min at fire
+  // time (the observed total load during the overlap), absent when unreadable.
+  const mainTailOverlapRe = /^main-tail-overlap:\s+lanes=(\d+)(?:\s+load=(\S+))?/;
 
   // gap-verification-round-observability-holes AC1 — `lock_wait_ms` = the flock-wait the suite paid
   // before it acquired one of the S single-flight slots. The runner does NOT take the lock itself (it
@@ -2701,6 +2716,18 @@ export async function run(argv: string[]): Promise<number> {
     // line fell through to failures[] as a false red, round 137 __OVERHEAD__ build_dist_ms=479).
     const overheadM = line.match(/^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial=1)?$/);
     if (overheadM) phaseMs[overheadM[1]] = Number(overheadM[2]);
+    // gap-suite-main-overlaps-load-sensitive-tail-experiment — first marker wins (test.sh's watcher
+    // fires at most once). Pure addition: it cannot flip the verdict, and a missed marker only omits
+    // the two observability fields (缺键, never a fabricated 0 — the same absent-field contract as
+    // phase_overlap). load is explicit-absent (stays null) when the marker carried no readable load.
+    const tailOverlapM = line.match(mainTailOverlapRe);
+    if (tailOverlapM) {
+      mainTailOverlapLanes = Number(tailOverlapM[1]);
+      if (tailOverlapM[2] !== undefined && tailOverlapM[2] !== "") {
+        const parsedLoad = Number(tailOverlapM[2]);
+        mainTailOverlapLoad = Number.isFinite(parsedLoad) ? parsedLoad : null;
+      }
+    }
     // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC2 — parse the reporter's
     // `__CEILING__ <path> duration_ms=<dur> floor_ms=<floor> 封顶者/该拆` line (^ anchored — the
     // ^__PERFILE__ self-match family: a PASSING test whose NAME quotes the shape is ✔-prefixed and
@@ -3431,6 +3458,15 @@ export async function run(argv: string[]): Promise<number> {
     // 241 records, phase_overlap:true only 3×, all manual exploration rounds. The `overlap: running`
     // stream marker is test.sh's ground-truth signal that the parallel branch ACTUALLY ran.
     ...(phaseOverlapRan ? { phase_overlap: true } : {}),
+    // gap-suite-main-overlaps-load-sensitive-tail-experiment AC1/AC3 — the tail-overlap observability.
+    // Present only when test.sh's watcher ACTUALLY fired main early (knob >0 AND the load trigger
+    // fired). main_tail_overlap_lanes = the early-start concurrency (the knob value / experiment's
+    // lane level); main_tail_overlap_load = /proc/loadavg 1-min at fire time (the observed total load
+    // during the overlap). Absent on a baseline/sequential round (knob 0, or trigger never fired) —
+    // the same absent-field contract as phase_overlap. Feeds AC3's "档位 → 总负载 → flake 率 →
+    // wall-clock" table (load is the observed host value, never a literal — hard rule 4 推论二).
+    ...(mainTailOverlapLanes !== null ? { main_tail_overlap_lanes: mainTailOverlapLanes } : {}),
+    ...(mainTailOverlapLoad !== null ? { main_tail_overlap_load: mainTailOverlapLoad } : {}),
     // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC3 — the reporter's per-group
     // floors (各相) + capped-file list. Both appear together (every __CEILING__ line carries a
     // floor_ms, so floorMsSeen non-empty ⟺ ceilingFiles non-empty), and BOTH are omitted on a

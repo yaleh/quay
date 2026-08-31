@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // dispatch-worktree-setup.test.mjs — tasks/gap-worktree-node-modules-inconsistent-self-verify
 // (a dispatched task worktree's ability to self-verify was AGENT-REMEMBERING, not mechanism:
 //  tasklist created the node_modules symlink and could self-verify, tokenwait didn't and fell back
@@ -21,7 +21,7 @@
 //   AC4 — worktree-node-modules-check.sh: report-only (exit 0) on MISSING by default; --fail
 //         exits 1; --json emits the machine-readable array. Wired into run_static_checks
 //         (scripts/test.sh) — asserted by the checker-wiring test.
-//   AC5 — this file uses node:test + `// @test-group governance`.
+//   AC5 — this file uses node:test + `// @test-group engine`.
 //
 // Run:
 //   scripts/test.sh plugin/test/dispatch-worktree-setup.test.mjs
@@ -39,16 +39,8 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 const SETUP = path.join(REPO_ROOT, "plugin/scripts/dispatch-worktree-setup.sh");
 const CHECK = path.join(REPO_ROOT, "plugin/scripts/worktree-node-modules-check.sh");
 
-// Governance self-skip (AC7 @test-group governance, ADR-019 decision #1): in a DEFAULT
-// (product,engine) run this file reports `skipped`, not absent — QUAY_TEST_GROUPS is set to
-// product,engine on the default path, so the real tests run only with `--group governance`
-// or in the explicit-file form (QUAY_TEST_GROUPS unset).
-const GOV_SKIP_REASON =
-  process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")
-    ? "set QUAY_TEST_GROUPS=governance to run"
-    : false;
 function t(name, fn) {
-  test(name, GOV_SKIP_REASON ? { skip: GOV_SKIP_REASON } : {}, fn);
+  test(name, fn);
 }
 
 function bash(script, args, opts = {}) {
