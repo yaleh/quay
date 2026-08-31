@@ -30,6 +30,9 @@ import {
   resolveStatusPriority,
   DOC_DEVELOP_SYNC_EVENT_REL,
   STATUS_PRIORITY,
+  syncDevelopToDoc,
+  docBranchForkedFromDevelop,
+  DOC_BRANCH,
 } from "../scripts/driver-filters.ts";
 import { readTaskStatus as workerReadTaskStatus } from "../scripts/worker-driver.ts";
 
@@ -517,4 +520,80 @@ test("AC2 — 同一任务状态冲突（develop=needs-human / doc=done）⇒ �
   const events = fs.readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8")
     .trim().split("\n").map((l) => JSON.parse(l));
   assert.ok(events.some((e) => e.event === "doc-develop-sync-semantic-resolved"), "语义兜底完成落痕 resolved");
+});
+
+// ── develop→doc 机械同步（ff-only + 分叉 guard，gap-main-manager-doc-doc-only-ff-only-tracking）──────
+
+test("AC1 — develop→doc 同步用 `git merge --ff-only develop`，⛔ 无裸 `git merge develop` 兜底", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../scripts/driver-filters.ts"), "utf8");
+  assert.match(src, /"merge",\s*"--ff-only",\s*"develop"/, "develop→doc 同步走 --ff-only（非 merge-fallback）");
+  // 裸 `git merge develop`（既非 --ff-only 也非 -X theirs 的静默兜底）不存在——分叉时同步函数只返回 not-ff。
+  assert.doesNotMatch(src, /"merge",\s*"develop"\s*\]/, "无裸 merge develop 兜底（-X theirs 语义兜底归父任务）");
+});
+
+test("AC2 — 分叉 guard：doc 有 develop 未含提交 ⇒ 报红（forked=true）；ff-only 不 merge-fallback（not-ff）", (t) => {
+  const root = makeGitRoot("doc-fork");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", DOC_BRANCH);
+
+  // doc 有 develop 没有的提交（分叉）——develop 停在 baseline。
+  writeTask(root, "gap-b", "---\nid: gap-b\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-b.md");
+  git(root, "commit", "-q", "-m", "doc-only: gap-b filed");
+
+  assert.equal(docBranchForkedFromDevelop(root), true, "分叉 guard 报红（⛔ 分叉不报 ⇒ 假）");
+
+  const developTip = git(root, "rev-parse", "develop").trim();
+  const docTip = git(root, "rev-parse", DOC_BRANCH).trim();
+  const res = syncDevelopToDoc(root);
+  assert.equal(res, "not-ff", "非 ff 报「无法 ff-only 同步」独立取值（⛔ 静默 merge-fallback ⇒ 假）");
+  // ff-only 不 merge-fallback：develop 与 doc 都不动（无 merge commit 产生）。
+  assert.equal(git(root, "rev-parse", "develop").trim(), developTip, "develop 未被静默 merge");
+  assert.equal(git(root, "rev-parse", DOC_BRANCH).trim(), docTip, "doc 未被静默 merge");
+});
+
+test("AC3 — 负控制：develop 前进（纯 ff）⇒ syncDevelopToDoc 后两 ref 相等（⛔ 仍分叉 ⇒ 假）", (t) => {
+  const root = makeGitRoot("doc-ff");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", DOC_BRANCH);
+
+  // develop 前进（纯 ff：doc 无 develop 未含的提交）。
+  git(root, "checkout", "-q", "develop");
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: done\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "develop: gap-a done");
+  git(root, "checkout", "-q", DOC_BRANCH);
+
+  assert.equal(docBranchForkedFromDevelop(root), false, "纯 ff 无分叉（guard 不报红）");
+  const res = syncDevelopToDoc(root);
+  assert.equal(res, "synced", "ff-only 同步成功");
+  assert.equal(
+    git(root, "rev-parse", DOC_BRANCH).trim(),
+    git(root, "rev-parse", "develop").trim(),
+    "一次真实同步后 rev-parse main/manager-doc develop 两 ref 相等（⛔ 仍分叉 ⇒ 假）",
+  );
+});
+
+test("AC3 (补) — syncDevelopToDoc 在 develop 分支 / 非 doc 分支 ⇒ not-doc；无变化 ⇒ already", (t) => {
+  const root = makeGitRoot("doc-already");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+
+  // 已在 develop 分支 ⇒ 不适用。
+  assert.equal(syncDevelopToDoc(root), "not-doc", "develop 分支 ⇒ not-doc");
+
+  // 切到 doc 分支且与 develop 同 commit ⇒ already。
+  git(root, "checkout", "-q", "-b", DOC_BRANCH);
+  assert.equal(syncDevelopToDoc(root), "already", "doc 已与 develop 同 commit ⇒ already");
 });

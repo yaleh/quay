@@ -432,6 +432,78 @@ export function propagateDocBranchToDevelop(root: string): boolean {
   return semanticSyncDocToDevelop(root, cur); // 机械失败 ⇒ 升级语义兜底
 }
 
+// ── develop→doc 机械同步（ff-only + 分叉 guard，gap-main-manager-doc-doc-only-ff-only-tracking）───────
+// 主检出（main/manager-doc）落后 develop 时生产跑的是旧代码（promotion-driver 常驻从主检出工作树加载，
+// CLAUDE.md 分支同步纪律「需定期 merge develop 追上」）。旧实现是静默 merge-fallback——`git merge develop`
+// 每次冲突，近 30 天 1795 次 "Merge branch 'develop' into main/manager-doc" 全由其产生。机械半边 =
+// `git merge --ff-only develop`（纯快进；⛔ 分叉即拒绝，不静默 merge）；分叉即 guard 报红（独立取值，
+// ⛔ 非「同步成功」同形，硬规则 3b）。语义兜底（分叉后怎么融）归父任务 gap-doc-develop-sync-semantic-
+// conflict-resolution 的 semanticSyncDocToDevelop。
+
+/** doc 工作分支名（主检出所在；develop = 权威基线）。 */
+export const DOC_BRANCH = "main/manager-doc";
+
+/** `git rev-list --count <from>..<to>` 的提交数（to 独有、from 未含）。git 出错 / 非数 ⇒ null
+ *  （读不懂 ≠ 0，⛔ 硬规则 6 不把读失败伪装成「无分叉」）。 */
+function revCountAhead(root: string, from: string, to: string): number | null {
+  try {
+    const out = execFileSync("git", ["-C", root, "rev-list", "--count", `${from}..${to}`], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const n = Number(out.trim());
+    return Number.isInteger(n) && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 分叉 guard：doc 分支有 develop 未含的提交（`git rev-list --count develop..<docBranch>` > 0）⇒ 分叉
+ *  （ff-only 无法同步 ⇒ 报红，返回 true）。读失败 ⇒ null（读不懂 ≠ 无分叉）。 */
+export function docBranchForkedFromDevelop(root: string, docBranch: string = DOC_BRANCH): boolean | null {
+  const ahead = revCountAhead(root, "develop", docBranch);
+  return ahead === null ? null : ahead > 0;
+}
+
+/** 机械 develop→doc 同步（ff-only）：把 doc 分支快进到 develop（`git merge --ff-only develop`）。
+ *  返回独立取值（⛔ 非「同步成功」同形，硬规则 3b）：
+ *   - "synced"  — ff 成功，doc 已到 develop（`rev-parse <docBranch> develop` 相等）
+ *   - "already" — doc 已与 develop 同 commit（无需同步，非失败）
+ *   - "not-ff"  — 分叉：doc 有 develop 未含的提交 ⇒ 无法 ff-only 同步（guard 报红，升级语义兜底）
+ *   - "not-doc" — 当前分支非 doc 分支（本函数只在主检出的 doc 分支上适用）
+ *   - "error"   — git 出错 / 读分支失败（非静默）
+ *  失败（not-ff / error）落痕到 DOC_DEVELOP_SYNC_EVENT_REL（⛔ 静默）。 */
+export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): string {
+  const cur = currentBranchName(root);
+  if (cur === null) {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "read-branch" });
+    return "error";
+  }
+  if (cur !== docBranch) return "not-doc";
+  const forked = docBranchForkedFromDevelop(root, docBranch);
+  if (forked === null) {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "rev-count" });
+    return "error";
+  }
+  if (forked) {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-not-ff", phase: "forked", branch: cur });
+    return "not-ff";
+  }
+  const behind = revCountAhead(root, docBranch, "develop");
+  if (behind === null) {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "rev-count" });
+    return "error";
+  }
+  if (behind === 0) return "already";
+  try {
+    execFileSync("git", ["-C", root, "merge", "--ff-only", "develop"], { stdio: "ignore" });
+    return "synced";
+  } catch {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "merge" });
+    return "error";
+  }
+}
+
 // ── needs-human 注记携带实际失败步（gap-needs-human-note-carries-step-verdict）───────────────────────
 // 原 worker-driver.ts 的「上次 exited-not-landed 失败原因」读法上收到本文件（与 readTaskStatus 同族：
 // 读 task/outcome 状态的单一真相源，⛔ worker-driver 不各写一份）。markNeedsHuman 与 worker 的续做
