@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-gate-chain-parallel-after-merge
 title: fan-in 非测试 gate 链并行化——merge 先行后 {typecheck ∥ doc-check} 并行 + 合并进程（doc-check 提前到 scoped 前）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -28,10 +28,10 @@ merge 必须先行（改变 delta）；merge+anti-drift 之后 typecheck 与 doc
 
 ## Acceptance Criteria
 
-- [ ] AC1 merge-develop 仍是 gate 链第一步（step-trace 首 step）
-- [ ] AC2 typecheck 与 doc-check 时间重叠，非测试 gate 墙钟 < 30s（基线 41s）
-- [ ] AC3 并行后 typecheck/doc-check 判定与串行一致（各 N 次对照）
-- [ ] AC4 doc-check 在 scoped-gate 之前（step-trace 顺序）
+- [x] AC1 merge-develop 仍是 gate 链第一步（step-trace 首 step）
+- [x] AC2 typecheck 与 doc-check 时间重叠，非测试 gate 墙钟 < 30s（基线 41s）
+- [x] AC3 并行后 typecheck/doc-check 判定与串行一致（各 N 次对照）
+- [x] AC4 doc-check 在 scoped-gate 之前（step-trace 顺序）
 
 ## Definition of Done
 
