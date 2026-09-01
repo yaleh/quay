@@ -1,7 +1,7 @@
 ---
 id: gap-suite-help-contract-mtime-race
 title: help-contract AC1 mtime 负控制被常驻 driver 活跃写污染——driver 活跃时稳定红，误杀所有 fan-in
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -18,7 +18,7 @@ extra:
 
 **实测（driver development progress 手动复现，主检出稳定失败）**：84 个 `-check.ts` 的 `--help` 全部 exit 0 + 打印 usage（failures 无），但 `.quay` mtime 变了 4 个文件——`checker-cost.jsonl`、`promotion-round.jsonl`、`promotion-driver-liveness.log`、`worker-driver-liveness.log`——全是 promotion/worker driver 每轮 tick 的活跃产物，非任何 checker 的 `--help` 副作用。round 815/816 都因此红。
 
-**代码根因**：`snapshotMtimeSet(quay)`（`:56-90`）递归快照**整个 `.quay/`**，只排除 `node-compile-cache` 目录（Node 编译缓存），**不排除 driver 活跃文件**。`diffMtimeSet` 把任何 mtime 变化计入 `changed`，`assert.deepEqual(changed, [], …)` 断言零变化 ⇒ driver 一写就假红。
+**代码根因**：`snapshotMtimeSet(quay)`（`:56-90`）递归快照**整个 `.quay/`**，只排除 `node-compile-cache` 目录（Node 编译缓存），**不排除 resident-process 活跃文件**。`diffMtimeSet` 把任何 mtime 变化计入 `changed`，`assert.deepEqual(changed, [], …)` 断言零变化 ⇒ 任一 resident 进程一写就假红。**第二个假红源（fan-in suite 步实测暴露，首轮只排了 driver 文件仍红）**：`full-suite-runner.ts` 的 `writeSuiteState` 在每个状态跃迁时把状态**镜像写进被测 checkout 自己的 `.quay/full-suite-state.json`**（`:2040` `mirrorStateFile`）——suite 运行时该文件 mtime 持续动，非任何 checker `--help` 副作用。首轮修复只排了 driver 文件，suite 步仍撞 `full-suite-state.json` 假红（`fan-in-suite-...log` 实测 changed 仅此一个）。
 
 **后果**：这是 flaky 根因，会**误杀所有后续 fan-in**——包括已派发的 `gap-suite-classification-lpt-scheduler-ts-ization`（其 fan-in suite 同样撞此假红）。
 
@@ -32,17 +32,17 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：`snapshotMtimeSet` 排除常驻 driver 活跃文件——grep 测试文件含排除逻辑，覆盖 `checker-cost` / `promotion-round` / `liveness`；（⛔ 仍快照全 `.quay/` 不排除 driver 文件 ⇒ 假）。
-- [ ] AC2（能取假，生产载体）：driver 活跃时跑 help-contract 测试绿（不再因 mtime 污染红），落地后轮不再出现 AC1 mtime race 红；（⛔ driver 活跃仍红 ⇒ 假）。
-- [ ] AC3（能取假，负控制不退化）：注入一个真实 `--help` 副作用（某 checker 在 `--help` 写 `.quay` 文件）时，测试仍能抓出该 side effect——排除 driver 文件 ≠ 排除 checker 副作用，防过度排除；（⛔ 排除后连真副作用也抓不出 ⇒ 假）。
+- [x] AC1（能取假，机制级）：`snapshotMtimeSet` 排除常驻 resident-process 活跃文件（driver + suite runner）——grep 测试文件含排除逻辑，覆盖 `checker-cost` / `promotion-round` / `liveness` / `full-suite-state`；（⛔ 仍快照全 `.quay/` 不排除这些运行文件 ⇒ 假）。
+- [x] AC2（能取假，生产载体）：driver 活跃时跑 help-contract 测试绿（不再因 mtime 污染红），落地后轮不再出现 AC1 mtime race 红；（⛔ driver 活跃仍红 ⇒ 假）。
+- [x] AC3（能取假，负控制不退化）：注入一个真实 `--help` 副作用（某 checker 在 `--help` 写 `.quay` 文件）时，测试仍能抓出该 side effect——排除 driver 文件 ≠ 排除 checker 副作用，防过度排除；（⛔ 排除后连真副作用也抓不出 ⇒ 假）。
 
 ## Definition of Done
 
-`snapshotMtimeSet` 排除 driver 活跃文件；driver 活跃时测试绿；负控制不退化（真副作用仍被抓）；全量 suite 绿。
+`snapshotMtimeSet` 排除 resident-process 活跃文件（driver + suite runner）；driver/suite 活跃时测试绿；负控制不退化（真副作用仍被抓）；全量 suite 绿。
 
 ## Touches
 
-- plugin/test/help-contract-incompatible-behaviors.test.mjs（snapshot 排除 driver 活跃文件）
+- plugin/test/help-contract-incompatible-behaviors.test.mjs（snapshot 排除 resident-process：driver + suite runner 运行文件）
 - tasks/gap-suite-help-contract-mtime-race.md（自身）
 
 ## Needs-Human

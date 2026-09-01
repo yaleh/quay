@@ -2051,6 +2051,34 @@ function writeSuiteCapture(captureFile: string, fields: Record<string, string>):
   }
 }
 
+/** 取本任务上一轮 green bucket suite 的 verified commit（suite_head）——权威源 full-suite-state.json 的
+ *  mirror 记录（mirrorMechanicalFanInSuiteState 写 state=green + commit=suite_head + taskId；与 ff 闸
+ *  readGreenMirrorCommit 同形同一份 shape，⛔ 不另造字段）。⛔ 该 commit 是【历史指针】非实时态：读回后
+ *  由调用方用 `git merge-base --is-ancestor` 对工作树 HEAD 做祖先校验（距今一致性），不据此断当前在跑。
+ *  取不到 / 非本任务 / 非 green / commit 非法（非 40-hex）⇒ null（缺值 = 未查，⛔ 不是「可复用」——
+ *  硬规则 3b：读不懂 ≠ 上一轮绿）。gap-fan-in-continue-doc-only-advance-reuse-suite AC4 输入。 */
+export function readPreviousGreenSuiteCommit(stateFile: string, task: string): string | null {
+  let text = "";
+  try {
+    text = fs.readFileSync(stateFile, "utf8");
+  } catch {
+    return null;
+  }
+  let rec: Record<string, unknown>;
+  try {
+    rec = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!rec || typeof rec !== "object" || Array.isArray(rec)) return null;
+  if (rec.state !== "green") return null;
+  if (rec.taskId !== task) return null;
+  const commit = rec.commit;
+  if (typeof commit !== "string") return null;
+  const sha = commit.trim();
+  return /^[0-9a-f]{40}$/i.test(sha) ? sha : null;
+}
+
 /** 读 `<ref>:tasks/<task>.md` 的 status frontmatter（git show；ref 不存在 / 文件缺失 / 读不懂 ⇒ null）。 */
 async function readTaskStatusAtRef(worktree: string, ref: string, task: string): Promise<string | null> {
   const r = await mechSh(["git", "-C", worktree, "show", `${ref}:tasks/${task}.md`], 30_000);
@@ -2312,8 +2340,26 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       const cd = await mechSh(["node", "--experimental-strip-types", classify, "--classify-delta", "--root", worktree, ...deltaList], 120_000);
       codeDelta = cd.ok ? (cd.stdout || "").trim() : "__CLASSIFY_FAILED__";
     }
-    const needSuite = opts.forceSuite === true || codeDelta === "__CLASSIFY_FAILED__" || codeDelta !== "";
-    trace({ step: "delta", exit: 0, wall_ms: Date.now() - deltaT0, ok: true, reason: needSuite ? (codeDelta === "__CLASSIFY_FAILED__" ? "classify failed → run suite (fail-closed)" : `code delta (${codeDelta || "forced"}) → run suite`) : "doc-only delta → skip suite" });
+    // 4b. develop 前进面复用（gap-fan-in-continue-doc-only-advance-reuse-suite）：任务自身 delta 是 code
+    // 时，若上一轮 green bucket suite（full-suite-state.json 的 mirror 记录，taskId=本任务）之后、
+    // 当前 HEAD 只触及 doc/inert 面（develop 在长 suite 期间被 doc/inert 前进 ⇒ ff not-fast-forward ⇒
+    // CONTINUE 重跑，重跑时任务 delta 仍是 code），则复用上一 green 判定、不重跑 suite。判不出
+    // （无上一 green / 非祖先 / classify 失败）⇒ fail-closed 照常跑 suite（硬规则 3b）。
+    let reuseSkip = false;
+    if (codeDelta !== "" && codeDelta !== "__CLASSIFY_FAILED__") {
+      const prevCommit = readPreviousGreenSuiteCommit(suiteStateFile, task);
+      if (prevCommit) {
+        const anc = await mechSh(["git", "-C", worktree, "merge-base", "--is-ancestor", prevCommit, "HEAD"], 30_000);
+        if (anc.ok) {
+          const sincePrev = await mechSh(["git", "-C", worktree, "diff", "--name-only", prevCommit, "HEAD"], 30_000);
+          const sinceList = (sincePrev.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
+          const adv = await mechSh(["node", "--experimental-strip-types", classify, "--classify-delta", "--root", worktree, ...sinceList], 120_000);
+          reuseSkip = adv.ok && (adv.stdout || "").trim() === ""; // 前进面全 doc/inert ⇒ 复用上一 green
+        }
+      }
+    }
+    const needSuite = opts.forceSuite === true || codeDelta === "__CLASSIFY_FAILED__" || (codeDelta !== "" && !reuseSkip);
+    trace({ step: "delta", exit: 0, wall_ms: Date.now() - deltaT0, ok: true, reason: needSuite ? (codeDelta === "__CLASSIFY_FAILED__" ? "classify failed → run suite (fail-closed)" : `code delta (${codeDelta || "forced"}) → run suite`) : (reuseSkip ? "code delta + doc/inert-only develop advance → reuse prev green (skip suite)" : "doc-only delta → skip suite") });
 
     // 5. ts-typecheck 闸（非零 ⇒ red → 语义会话兜底）。
     a = await step("typecheck", ["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
@@ -2390,8 +2436,8 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         stateFile: suiteStateFile,
       });
     } else {
-      writeSuiteCapture(suiteCapture, { full_suite_ran: "false", skip_reason: "doc-only-delta", suite_exit: "0", suite_head: suiteHead });
-      trace({ step: "suite-skip", exit: 0, wall_ms: 0, ok: true, reason: "doc-only-delta" });
+      writeSuiteCapture(suiteCapture, { full_suite_ran: "false", skip_reason: reuseSkip ? "develop-advance-doc-only-reuse" : "doc-only-delta", suite_exit: "0", suite_head: suiteHead });
+      trace({ step: "suite-skip", exit: 0, wall_ms: 0, ok: true, reason: reuseSkip ? "develop-advance-doc-only-reuse" : "doc-only-delta" });
     }
 
     // 8. land 前 anti-drift 重跑 + AC 完成闸 + flip done（先 flip 后 ff，人 2026-08-14 裁定）。
