@@ -80,3 +80,10 @@ ts-ization 方向已定（`gap-execution-loop-p4-suite-entry-ts-ization` done：
 3. **A 类增加超时**：其余时序敏感测试（worker-driver resident/fan-in、writestate-atomicity、md-deletion-token、full-suite-runner、inner-session-check）增加超时；**补一条**：`plugin/test/quay-init.test.mjs:376`「concurrent --loop installs … no torn-read false positive (negative control)」（2 !== 0——verify_referenced_landed 把已声明 reference-doc 的 `orchestration/SPEC-typed-axes-and-standing-dynamics.md` 误判未落地，属已知 torn-read 类 flaky，同族 done：gap-quay-init-verify-referenced-landed-torn-read / gap-quay-init-torn-read-derive-loop-scripts / gap-verify-referenced-landed-concurrency-hardening-insufficient）。
 
 4. **merge 冲突处置（worker 续做时执行）**：worktree 卡在未完成 merge（MERGE_HEAD=d5462994c，`plugin/test/worker-driver-resident.test.mjs` 两处 waitFor 超时冲突：HEAD 侧 15000ms（无注释）vs develop 侧 10000ms（带「满载16核 full-suite 并发下 >5s 是已知 flake」注释））。resolve：**两处都取 15000ms，保留 develop 那条解释注释**（来源改成两者共同根因），`git add` 后 `commit --no-edit` 继续 merge。
+
+## Needs-Human
+
+**执行 2026-09-01T09:01:52.467Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=anti-drift: ANTI-DRIFT HARD FAIL: task gap-suite-classification-lpt-scheduler-ts-ization — 5 violation(s)
