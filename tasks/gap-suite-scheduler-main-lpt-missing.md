@@ -1,7 +1,7 @@
 ---
 id: gap-suite-scheduler-main-lpt-missing
 title: suite LPT+dispatch 3 套复制粘贴重构成 1 套循环+组表——main 组漏 LPT 致长文件晚启动长尾
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -61,3 +61,10 @@ LPT+dispatch 3 套重构为 1 套循环+组表（full-suite + bucket 各一）�
 
 - scripts/test.sh（LPT+dispatch 重构 1 套循环+组表；legacy 冗余 `lpt_reorder_files files` 删除）
 - tasks/gap-suite-scheduler-main-lpt-missing.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T02:46:42.926Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
