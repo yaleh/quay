@@ -2,7 +2,7 @@
 id: gap-scoped-gate-lpt-order
 title: scoped-gate（--for-task）路径复用 suite-lpt-order + suite-lpt-runner.mjs（LPT +
   run({files}) 保序）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
