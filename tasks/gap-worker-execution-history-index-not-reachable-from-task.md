@@ -1,7 +1,7 @@
 ---
 id: gap-worker-execution-history-index-not-reachable-from-task
 title: 任务执行历史索引不可从任务体/续做 prompt 到达——suite 日志路径零记录、续做只带一句 reason、Needs-Human 无 run_id
-status: ready
+status: done
 labels:
   - gap
   - defect
