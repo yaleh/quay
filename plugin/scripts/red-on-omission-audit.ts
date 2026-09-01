@@ -424,7 +424,7 @@ const A_AUDIT: { id: string; behavior: string; redReading: string | null }[] = [
   { id: "A4", behavior: "观察块：capture-pane / git log / git status / telemetry / drift / batch2-queue", redReading: null },
   { id: "A5", behavior: "ls .quay/manager-inbox/（列目录本身，不依赖 unread 计数器）", redReading: "目录非空且无 consumed 回执 ⇒ 逐条进决策/报" },
   { id: "A6", behavior: "占用率固定 cap=5（动态 cap 作废）；ready-pool-check --cap 5", redReading: "不带 --cap 5 ⇒ floor=12 假读数（≠ floor=20）" },
-  { id: "A7", behavior: "inner-blocked-signal.ts --detect-stop --target inner", redReading: "连续 3 次 waiting-input/permission-prompt 才写块；pane 快照陈旧改读活 capture-pane" },
+  { id: "A7", behavior: "~~inner-blocked-signal.ts --detect-stop --target inner~~（已退役 2026-09-01：--target inner 死指令，gap-retire-inner-hygiene-delete-session-face）", redReading: null },
   { id: "A8", behavior: "层间 tick 间隔检查（inner transcript mtime age，阈值 30min）", redReading: "mtime age > 阈值 ⇒ 报" },
   { id: "A9", behavior: "ready-pool-check.ts --root --cap 5 --json → excluded[] 的 not-yet-flipped", redReading: "not-yet-flipped ≥ floor/2 ⇒ 逐个核 AC（≥10 报 done-flip 积压）" },
   { id: "A10", behavior: "closure-lag-check.sh（退出非 0 ⇒ 报 WARN）", redReading: "退出非 0 ⇒ 报 WARN 进 tick-log" },

@@ -249,6 +249,7 @@ plugin/test/ac69-slot-queue-gap-check.test.mjs
 plugin/test/accounting-emit-layer-map.test.mjs
 plugin/test/accounting-emit.test.mjs
 plugin/test/adr016-screen-use-check.test.mjs
+plugin/test/agent-panel-classify.test.mjs
 plugin/test/archguard-structural-gate-fan-in.test.mjs
 plugin/test/axis-generator.test.mjs
 plugin/test/bare-dir-touches-check.test.mjs
@@ -322,10 +323,8 @@ plugin/test/gate-scripts-retirement.test.mjs
 plugin/test/gate-staleness-check.test.mjs
 plugin/test/gitignore.test.mjs
 plugin/test/inner-blocked-signal.test.mjs
-plugin/test/inner-exec-mode-report.test.mjs
 plugin/test/inner-forensics.test.mjs
 plugin/test/inner-idle-log.test.mjs
-plugin/test/inner-panel-stale-check.test.mjs
 plugin/test/inner-wakeup-heartbeat-check.test.mjs
 plugin/test/inner-wakeup-heartbeat.test.mjs
 plugin/test/instrument-failure-check.test.mjs

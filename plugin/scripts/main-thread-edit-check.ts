@@ -33,12 +33,13 @@
 //   --since <ISO>      只数 timestamp >= 该时刻之后的工具调用（一轮 tick 报「本轮」）。
 //   --root <dir>       覆盖仓库根（产品文件分类的基准；别名 --repo-root；默认向上找 .quay/config.yml / git root）。
 //   --json             输出 JSON 对象（Contract invoke 的读取形态）。
-//   缺省 --session     显式身份优先（pane pid → session 反查，经 resolveIdentity 注入的
-//                      discovery-pid 结构解析），启发式（~/.claude/projects/ 下最新 .jsonl）仅
-//                      fallback 且报 WARN —— 不再静默命中「最新」会话（多会话拓扑下会命中
-//                      manager/outer 自己；gap-session-identity-index-vs-explicit，同根：
+//   缺省 --session     启发式（~/.claude/projects/ 下最新 .jsonl）兜底且报 WARN —— 不再静默命中
+//                      「最新」会话（多会话拓扑下会命中 manager/outer 自己；
+//                      gap-session-identity-index-vs-explicit，同根：
 //                      gap-drive-sent-to-manager-pane-not-inner 错读 b8dc91a6）。
-//                      session_source ∈ pane-pid|config|arg|heuristic|none。测试接缝：
+//                      原「pane pid → session 显式身份优先」反查（resolveViaInnerSessionCheck）
+//                      已于 step2 删除——死回退分支，见 gap-retire-inner-hygiene-delete-session-face。
+//                      session_source ∈ config|arg|heuristic|none。测试接缝：
 //                      INNER_EXEC_MODE_PROJECTS_DIR 覆盖 projects 目录。
 
 import fs from "node:fs";
@@ -227,31 +228,24 @@ export function detectSession(repoRoot, projectsDir = defaultProjectsDir(), { se
   return top.length > 0 ? top[0].abs : null;
 }
 
+// ── 会话解析（缺省 --session 时的启发式兜底）──────────────────────────────────────────────────────────
+// 原「pane pid → session 显式身份优先」反查（resolveViaInnerSessionCheck，复用已退役的内层三态检查器
+// 的 discovery-pid 结构解析）是死回退分支——该检查器判一个永不存在的 "inner" 窗口，
+// 已随 step2 删除（gap-retire-inner-hygiene-delete-session-face）。缺省 --session 只剩启发式兜底 + WARN。
+
 /** 启发式 fallback 的 WARN 文案（显式身份缺失时，多会话拓扑下可能命中错误对象）。 */
 export function heuristicWarning(sessionPath) {
-  return `未指定 --session，且无 pane pid → session 显式身份；退到启发式命中 ${sessionPath}（多会话拓扑下可能命中错误对象）。显式传 --session <path> 指定身份。`;
+  return `未指定 --session；退到启发式命中 ${sessionPath}（多会话拓扑下可能命中错误对象）。显式传 --session <path> 指定身份。`;
 }
 
 /**
- * 缺省会话解析：显式身份优先（resolveIdentity 注入的 pane pid → session），启发式仅 fallback 且报 WARN。
+ * 缺省会话解析：启发式兜底并报 WARN（显式身份优先的 pane pid → session 反查已退役删除）。
  * @param {string} repoRoot
  * @param {string} [projectsDir]
- * @param {{resolveIdentity?: (root: string) => {transcript: string, source: string} | null,
- *          selfSessionId?: string}} [opts]  —— resolveIdentity 可注入（测试接缝），未注入时
- *   退到 detectSession 启发式。
- * @returns {{path: string|null, source: 'pane-pid'|'config'|'arg'|'heuristic'|'none', warning: string|null}}
+ * @param {{selfSessionId?: string}} [opts]
+ * @returns {{path: string|null, source: 'config'|'arg'|'heuristic'|'none', warning: string|null}}
  */
 export function resolveSessionPath(repoRoot, projectsDir = defaultProjectsDir(), opts = {}) {
-  const identity = opts.resolveIdentity ? opts.resolveIdentity(repoRoot) : null;
-  if (identity && identity.transcript) {
-    if (identity.source === "discovery") {
-      // discovery 启发式（TR_SOURCE=discovery）——视为启发式 fallback + WARN（同根纪律：
-      // 索引替代身份不得静默）。
-      return { path: identity.transcript, source: "heuristic", warning: heuristicWarning(identity.transcript) };
-    }
-    const src = identity.source === "discovery-pid" ? "pane-pid" : identity.source;
-    return { path: identity.transcript, source: src, warning: null };
-  }
   const detected = detectSession(repoRoot, projectsDir, { selfSessionId: opts.selfSessionId });
   if (detected) return { path: detected, source: "heuristic", warning: heuristicWarning(detected) };
   return { path: null, source: "none", warning: null };
@@ -265,7 +259,7 @@ Usage:
   node --no-warnings --experimental-strip-types plugin/scripts/main-thread-edit-check.ts [--session <path>] [--since <ISO>] [--root <dir>] [--json]
 
 Options:
-  --session <path>   transcript JSONL 文件（缺省显式身份优先：pane pid → session；启发式仅 fallback 且报 WARN）
+  --session <path>   transcript JSONL 文件（缺省启发式兜底且报 WARN——pane pid 显式身份反查已退役）
   --since <ISO>      只数该时刻之后的工具调用
   --root <dir>       仓库根（产品文件分类基准；别名 --repo-root；缺省自动检测）
   --json             输出 JSON`;

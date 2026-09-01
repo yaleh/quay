@@ -38,7 +38,6 @@ VERIFY_SET=(
   "slot-refill|js|dist/slot-refill.js|--root @WS@ --cap 5"
   "pool-quality-judge|js|dist/pool-quality-judge.js|--root @WS@"
   "suite-execution-form-counter|js|dist/suite-execution-form-counter.js|--root @WS@"
-  "inner-exec-mode-report|js|dist/inner-exec-mode-report.js|--root @WS@"
   "fast-mode-telemetry|js|dist/fast-mode-telemetry.js|--root @WS@"
 )
 
