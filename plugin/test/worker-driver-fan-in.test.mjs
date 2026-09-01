@@ -1545,3 +1545,30 @@ test("AC2 (gap-fan-in-continue-doc-only-advance-reuse-suite) — develop code �
   assert.equal(r.suiteOutcome, "done", "suite must RUN (code advance ⇒ no reuse)");
   assert.equal(fs.existsSync(marker), true, "suite command must execute (code develop advance ⇒ re-run)");
 });
+
+// ── gap-worker-execution-history-index-not-reachable-from-task（A：suiteLog 记录）──────────────────
+// A 缺口的病根：机械 fan-in 的 suite 步失败时 verdict.logFile 一路 null（183KB 真因文件只能靠命名约定猜，
+// 硬规则 4c「穿不过中间层的量」）。修法：suite 红 ⇒ mechanical_fan_in.suiteLog（basename）+ verdict.logFile
+// 指向 .quay/fan-in-suite-*.log 绝对路径；非 suite 红 ⇒ suiteLog null（负控制）。
+
+test("A (能取假) — suite 红 ⇒ suiteLog 非 null + verdict.logFile 指向 suite 日志（⛔ 仍 null ⇒ 假）", async (t) => {
+  const m = makeMechRepo("suite-log");
+  const runId = "mf-run-suitelog";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { suiteCommand: ["bash", "-c", "echo suite-failing; exit 1"] }));
+  assert.equal(r.outcome, "red");
+  assert.equal(r.step, "suite");
+  assert.equal(r.suiteLog, "suite.log", "suite 红 ⇒ suiteLog 落 basename（⛔ null ⇒ 假）");
+  assert.equal(r.verdict.logFile, path.join(m.base, "suite.log"), "verdict.logFile 指向 suite 日志绝对路径（⛔ null ⇒ 假）");
+  assert.ok(fs.existsSync(path.join(m.base, "suite.log")), "suite 日志文件在盘上（续做/needs-human 可到达）");
+});
+
+test("A (负控制) — 非 suite 红（scoped-gate）⇒ suiteLog null（⛔ 别的步误设 suiteLog ⇒ 假）", async (t) => {
+  const m = makeMechRepo("suite-log-neg");
+  const runId = "mf-run-suitelog-neg";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { scopedGateCommand: ["false"] }));
+  assert.equal(r.outcome, "red");
+  assert.equal(r.step, "scoped-gate");
+  assert.equal(r.suiteLog, null, "非 suite 红 ⇒ suiteLog null（只有 suite 步记 suite 真因日志）");
+});

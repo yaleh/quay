@@ -35,9 +35,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（A，能取假，落地后窗）：落地后窗口内 `outcome=red ∧ step=suite` 的 outcome 记录，suiteLog 非 null 计数 = 全部；suite 步 `verdict.logFile` 指向 `.quay/fan-in-suite-*.log`；（⛔ 仍 null ⇒ 假）。
-- [ ] AC2（B，能取假）：续做 prompt 文本含前 N 次尝试的 (ts, step, reason) 清单 ∧ 含 `.quay/fan-in-suite-` 字面绝对路径 ∧ 该路径在盘上存在（`continueStateForTask` 收集全部 exited-not-landed，⛔ 只含一句 reason ⇒ 假）。
-- [ ] AC3（C，能取假）：新写的 `## Needs-Human` 注记行含 run_id ∧ 含 `.quay/fan-in-` 路径 ∧ 含 session_id（`markNeedsHuman` 复用已读 outcome，⛔ 不新增 reader）。
+- [x] AC1（A，能取假，落地后窗）：落地后窗口内 `outcome=red ∧ step=suite` 的 outcome 记录，suiteLog 非 null 计数 = 全部；suite 步 `verdict.logFile` 指向 `.quay/fan-in-suite-*.log`；（⛔ 仍 null ⇒ 假）。
+- [x] AC2（B，能取假）：续做 prompt 文本含前 N 次尝试的 (ts, step, reason) 清单 ∧ 含 `.quay/fan-in-suite-` 字面绝对路径 ∧ 该路径在盘上存在（`continueStateForTask` 收集全部 exited-not-landed，⛔ 只含一句 reason ⇒ 假）。
+- [x] AC3（C，能取假）：新写的 `## Needs-Human` 注记行含 run_id ∧ 含 `.quay/fan-in-` 路径 ∧ 含 session_id（`markNeedsHuman` 复用已读 outcome，⛔ 不新增 reader）。
 
 ## Definition of Done
 

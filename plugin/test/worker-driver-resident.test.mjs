@@ -73,6 +73,7 @@ import {
   countBranchCommits,
   branchHeadSubject,
   lastExitedNotLandedReason,
+  exitedNotLandedAttempts,
   isFfNotFastForwardFailure,
   worktreePresentForTaskAsync,
   worktreePathsForTaskAsync,
@@ -1003,5 +1004,56 @@ test("B (能取假, 结构面) — reason 读 mechanical_fan_in（已上收 driv
   assert.doesNotMatch(wsrc, /OUTLINE_DOC_REL/, "A retired: no OUTLINE_DOC_REL import");
   assert.doesNotMatch(wsrc, /resolveDerivedMergeConflict/, "A retired: no derived-recompute resolver");
   assert.doesNotMatch(wsrc, /DERIVED_CONFLICT_FILES/, "A retired: no derived file set");
+});
+
+// ── gap-worker-execution-history-index-not-reachable-from-task（B：续做历史 + suite 日志路径）──────
+// B 缺口的病根：续做 prompt 只带一句 reason（lastExitedNotLandedReason 只取最后一条）⇒ 重跑 worker 看不到
+// 前两次栽在哪、也看不到日志路径。修法：exitedNotLandedAttempts 收集全部尝试；buildContinueWorkerPrompt
+// 带前 N 次 (ts,step,reason) 清单 + .quay/fan-in-suite- 绝对路径。
+
+test("B (能取假) — exitedNotLandedAttempts 收集全部尝试（⛔ 只取最后一条 ⇒ 假）", () => {
+  const root = makeRoot("history-b");
+  const suiteLogName = "fan-in-suite-gap-hb-run2.log";
+  fs.writeFileSync(path.join(root, ".quay", suiteLogName), "suite true-cause\n", "utf8");
+  fs.appendFileSync(path.join(root, WORKER_OUTCOME_REL), [
+    JSON.stringify({ ts: "2026-09-01T03:44:00.000Z", task: "gap-hb", final_state: "exited-not-landed", run_id: "wk-prod-1788218643", session_id: "sess-1", mechanical_fan_in: { outcome: "red", step: "anti-drift", reason: "8 violations", fanInLog: "fan-in-gap-hb-run2.log" } }),
+    JSON.stringify({ ts: "2026-09-01T04:21:00.000Z", task: "gap-hb", final_state: "exited-not-landed", run_id: "wk-prod-1788218643", session_id: "sess-2", mechanical_fan_in: { outcome: "red", step: "ac-precheck", reason: "0/3 fail-fast", fanInLog: "fan-in-gap-hb-run2.log" } }),
+    JSON.stringify({ ts: "2026-09-01T04:57:00.000Z", task: "gap-hb", final_state: "exited-not-landed", run_id: "wk-prod-1788218643", session_id: "sess-3", mechanical_fan_in: { outcome: "red", step: "suite", reason: "suite red", fanInLog: "fan-in-gap-hb-run2.log", suiteLog: suiteLogName } }),
+  ].join("\n") + "\n", "utf8");
+
+  const attempts = exitedNotLandedAttempts(root, "gap-hb");
+  assert.equal(attempts.length, 3, "全部 3 次 exited-not-landed 都在清单里（⛔ 只取最后一条 ⇒ 假）");
+  assert.deepEqual(attempts.map((a) => a.step), ["anti-drift", "ac-precheck", "suite"], "三次的失败步都在");
+  assert.equal(attempts[2].suiteLog, path.join(root, ".quay", suiteLogName), "suite 日志还原成绝对路径");
+  assert.equal(attempts[2].runId, "wk-prod-1788218643", "run_id 读数");
+  assert.equal(attempts[2].sessionId, "sess-3", "session_id 读数");
+  assert.ok(attempts.slice(0, 2).every((a) => a.suiteLog === null), "非 suite 步 suiteLog null（⛔ 误设 ⇒ 假）");
+  assert.equal(attempts[0].fanInLog, path.join(root, ".quay", "fan-in-gap-hb-run2.log"), "fan-in 日志还原成绝对路径");
+});
+
+test("B (能取假) — buildContinueWorkerPrompt 带前 N 次 (ts,step,reason) 清单 + .quay/fan-in-suite- 绝对路径（在盘）", () => {
+  const root = makeRoot("history-prompt");
+  const suiteLogName = "fan-in-suite-gap-hp-r9.log";
+  fs.writeFileSync(path.join(root, ".quay", suiteLogName), "true cause\n", "utf8");
+  const suiteAbs = path.join(root, ".quay", suiteLogName);
+  const attempts = [
+    { ts: "2026-09-01T03:44:00.000Z", runId: "r", sessionId: "s1", step: "anti-drift", reason: "step=anti-drift: 8 violations", fanInLog: null, suiteLog: null },
+    { ts: "2026-09-01T04:57:00.000Z", runId: "r", sessionId: "s2", step: "suite", reason: "step=suite: suite red", fanInLog: null, suiteLog: suiteAbs },
+  ];
+  const p = buildContinueWorkerPrompt("gap-hp", root, {
+    worktreePath: "/wt",
+    branchCommits: 1,
+    branchHeadSubject: null,
+    acChecked: 0,
+    acTotal: 3,
+    failureReason: "step=suite: suite red",
+    attempts,
+  });
+  assert.match(p, /step=anti-drift: 8 violations/, "清单含第 1 次 (step,reason)（剥掉重复 step= 前缀）");
+  assert.match(p, /step=suite: suite red/, "清单含第 2 次 (step,reason)");
+  assert.doesNotMatch(p, /step=anti-drift: step=anti-drift/, "⛔ 清单不重复 step= 前缀");
+  assert.match(p, /\.quay\/fan-in-suite-/, "含 .quay/fan-in-suite- 字面路径");
+  assert.ok(p.includes(suiteAbs), `含 suite 日志绝对路径 ${suiteAbs}`);
+  assert.ok(fs.existsSync(suiteAbs), "该路径在盘上存在（AC2 判据）");
 });
 

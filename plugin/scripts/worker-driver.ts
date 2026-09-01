@@ -155,8 +155,8 @@ export {
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
-import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, WORKER_OUTCOME_REL, type RetryState } from "./driver-filters.ts";
-export { readTaskStatus, lastExitedNotLandedReason, WORKER_OUTCOME_REL } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, WORKER_OUTCOME_REL, type RetryState, type ExitedNotLandedAttempt } from "./driver-filters.ts";
+export { readTaskStatus, lastExitedNotLandedReason, exitedNotLandedAttempts, WORKER_OUTCOME_REL } from "./driver-filters.ts";
 // AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
 // ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
 import { defaultDriverConfig, loadDriverConfig, driverCap } from "./driver-config.ts";
@@ -1000,6 +1000,9 @@ export interface ContinueWorkerState {
   acTotal: number | null;
   /** 上次 exited-not-landed 的失败原因（worker-outcome.jsonl 该 task 最近一条）。null = 无记录 / 读不懂。 */
   failureReason: string | null;
+  /** 全部 exited-not-landed 尝试（时间序）——B：续做 prompt 带前 N 次 (ts, step, reason) 清单 + suite
+   *  日志绝对路径，⛔ 只带最后一条 reason 会让重跑 worker 看不到前两次栽在哪（病根）。空 = 无记录 / 读不懂。 */
+  attempts: ExitedNotLandedAttempt[];
 }
 
 /** AC 勾选状态（AC2）：读任务文件的 Acceptance Criteria 段，数 `- [x]`（勾）与 `- [ ]`（未勾）。
@@ -1086,13 +1089,15 @@ export function continueStateForTask(root: string, taskId: string): ContinueWork
   if (worktreePresentForTask(root, taskId) !== true) return null;
   const paths = worktreePathsForTask(root, taskId);
   const ac = readAcCheckState(root, taskId);
+  const attempts = exitedNotLandedAttempts(root, taskId);
   return {
     worktreePath: paths[0] ?? null,
     branchCommits: countBranchCommits(root, taskId),
     branchHeadSubject: branchHeadSubject(root, taskId),
     acChecked: ac.checked,
     acTotal: ac.total,
-    failureReason: lastExitedNotLandedReason(root, taskId),
+    failureReason: attempts.length > 0 ? attempts[attempts.length - 1].reason : null,
+    attempts,
   };
 }
 
@@ -1103,13 +1108,15 @@ export async function continueStateForTaskAsync(root: string, taskId: string): P
   if ((await worktreePresentForTaskAsync(root, taskId)) !== true) return null;
   const paths = await worktreePathsForTaskAsync(root, taskId);
   const ac = readAcCheckState(root, taskId);
+  const attempts = exitedNotLandedAttempts(root, taskId);
   return {
     worktreePath: paths[0] ?? null,
     branchCommits: await countBranchCommitsAsync(root, taskId),
     branchHeadSubject: await branchHeadSubjectAsync(root, taskId),
     acChecked: ac.checked,
     acTotal: ac.total,
-    failureReason: lastExitedNotLandedReason(root, taskId),
+    failureReason: attempts.length > 0 ? attempts[attempts.length - 1].reason : null,
+    attempts,
   };
 }
 
@@ -1133,9 +1140,42 @@ function continueConflictResolutionNote(): string {
   ].join(" ");
 }
 
+/** 续做 prompt 前 N 次尝试清单的上限（B）。N=3 = 重试上限默认（RETRY_CAP_DEFAULT）——⛔ 不写更大的
+ *  字面值让 prompt 无限长（任务体⛔ 不 copy 逐轮历史——历史仍在 worker-outcome.jsonl 单一真相源）。 */
+const CONTINUE_ATTEMPT_LIST_MAX = 3;
+
+/** B（gap-worker-execution-history-index-not-reachable-from-task）：续做 prompt 的前 N 次尝试清单。
+ *  只带最后一条 reason（旧）⇒ 重跑 worker 看不到前两次栽在哪；本段把最近 N 次 exited-not-landed 尝试的
+ *  (ts, step, reason) 拼进 prompt（⛔ 只取最后一条是病根）。 */
+function continueAttemptsNote(attempts: ExitedNotLandedAttempt[]): string {
+  if (attempts.length === 0) return "no prior exited-not-landed attempts on record.";
+  const recent = attempts.slice(-CONTINUE_ATTEMPT_LIST_MAX);
+  const lines = recent.map((a) => {
+    const ts = a.ts ? a.ts.slice(0, 19) : "unknown-ts";
+    const step = a.step ?? "unknown-step";
+    const raw = a.reason ?? "(unknown)";
+    // formatExitedNotLandedReason 已把 step 拼进 reason（"step=<step>: …"）；清单再写一次 step= 会重复——
+    // 剥掉前缀让清单干净（⛔ 不回退 formatExitedNotLandedReason 本身——markNeedsHuman 仍要那个带 step 的判词）。
+    const reason = raw.startsWith(`step=${step}: `) ? raw.slice(`step=${step}: `.length) : raw;
+    return `[${ts}] step=${step}: ${reason}`;
+  });
+  return `prior exited-not-landed attempts (latest last, up to ${CONTINUE_ATTEMPT_LIST_MAX}): ${lines.join(" | ")}.`;
+}
+
+/** B：续做 prompt 的 suite 真因日志绝对路径（⛔ 只靠命名约定猜不出的 .quay/fan-in-suite-*.log——硬规则
+ *  4c 穿不过中间层的量）。取最近一条带 suiteLog 的尝试；无 suite 红 ⇒ 空串（不伪造）。 */
+function continueSuiteLogNote(attempts: ExitedNotLandedAttempt[]): string {
+  for (let i = attempts.length - 1; i >= 0; i -= 1) {
+    if (attempts[i].suiteLog) {
+      return `the true-cause suite log from the last suite-red attempt is at ${attempts[i].suiteLog} — read it before re-implementing.`;
+    }
+  }
+  return "";
+}
+
 /** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
- *  状态（分支提交 / AC 勾选 / 失败原因）供 worker 从保留 worktree 继续。⛔ 不含 "create an isolated
- *  git worktree"（AC1 取假判据——旧 prompt 逐字说 create 是撞死根因）。
+ *  状态（分支提交 / AC 勾选 / 失败原因 / 前 N 次尝试清单 + suite 日志路径）供 worker 从保留 worktree
+ *  继续。⛔ 不含 "create an isolated git worktree"（AC1 取假判据——旧 prompt 逐字说 create 是撞死根因）。
  *  gap-fan-in-continue-prompt-not-migrated-to-mechanical：续做同样用 driverFanInNote()（worker 实现后
  *  退出、driver 接手机械跑 fan-in），⛔ 不再写 fanInSignature（旧 workflow 兜底签名——worker 永不自己
  *  调 fan-in-execute workflow；语义兜底是 driver 按机械 red step 的决定，不再写进下一轮 worker 的 prompt）。 */
@@ -1145,6 +1185,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
   const head = state.branchHeadSubject ? ` (head: "${state.branchHeadSubject}")` : "";
   const ac = state.acChecked == null || state.acTotal == null ? "?" : `${state.acChecked}/${state.acTotal}`;
   const reason = state.failureReason ?? "(unknown)";
+  const attempts = state.attempts ?? [];
   return [
     `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2).`,
     `Task: ${task}. Repo root: ${root}.`,
@@ -1153,6 +1194,8 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `(it would fail: the path/branch already exists). Prior round state: branch task/${task} already has`,
     `${commits} commits${head}; Acceptance Criteria currently checked ${ac};`,
     `the last round exited-not-landed because: ${reason}.`,
+    `${continueAttemptsNote(attempts)}`,
+    `${continueSuiteLogNote(attempts)}`,
     `${continueConflictResolutionNote()}`,
     `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
@@ -1803,6 +1846,10 @@ export interface MechanicalFanInResult {
   /** fan-in 过程日志文件名（`.quay/fan-in-<task>-<runId>.log` 的 basename——web 链接据此构造，
    *  ⛔ 不重算 sanitize，单一真相源）。red/landed 两态都非 null。 */
   fanInLog: string | null;
+  /** suite 日志文件名（`.quay/fan-in-suite-<task>-<runId>.log` 的 basename——web 链接 / 续做 prompt /
+   *  needs-human 注记据此构造绝对路径，⛔ 不靠命名约定猜）。red ∧ step=suite 时非 null（suite 真因落
+   *  该文件——183KB 真因只能靠命名约定猜的病根）；其它步骤 / landed 时 null。 */
+  suiteLog: string | null;
 }
 
 /** runAsync 的结果收窄为「成/败 + 输出」，机械 fan-in 各步骤的共用判定（⛔ 不各写一遍 status!==0）。 */
@@ -2281,6 +2328,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     step, reason: summary,
     lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
     suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+    suiteLog: null,
     fanInLog: path.basename(fanInLog),
   });
   const stepLogFile = (step: string): string =>
@@ -2342,6 +2390,19 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   let suiteOutcome: SuiteOutcome | null = null;
   let suiteFinishedEpoch: number | null = null;
   let suitePid: number | null = null;
+
+  // A（gap-worker-execution-history-index-not-reachable-from-task）：suite 红时 verdict.logFile 指向
+  // .quay/fan-in-suite-*.log（真因文件，⛔ 不再 null——旧一路 logFile:null 让 183KB 真因只能靠命名约定
+  // 猜）+ suiteLog 落 mechanical_fan_in（与 fanInLog 同形的 basename，web/续做/needs-human 据此构造绝对路径）。
+  const failSuite = (summary: string, exitCode: number | null): MechanicalFanInResult => ({
+    outcome: "red",
+    verdict: { step: "suite", verdict: "failed", exitCode, summary, logFile: suiteLogFile },
+    step: "suite", reason: summary,
+    lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
+    suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+    suiteLog: path.basename(suiteLogFile),
+    fanInLog: path.basename(fanInLog),
+  });
 
   try {
     // 2. merge develop（冲突 ⇒ red → 语义会话兜底）。
@@ -2442,7 +2503,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         // not-recorded：runner 是 verification-round.jsonl 的唯一 writer，green+red 都入账，静态闸红亦由
         // runner 的 staticCheckDetected → gate=static-check 记录）。⛔ 不平行补写——runner 已记 + 再补写
         // = 同一红 suite 两条记录、round 号虚增（与「两套平行机制收敛为一」相悖）。
-        return failClean("suite", `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
+        return failSuite(`suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
       }
       writeSuiteCapture(suiteCapture, {
         full_suite_ran: "true", skip_reason: "", suite_exit: "0",
@@ -2509,6 +2570,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   return {
     outcome: "landed", verdict: null, step: null, reason: null,
     ...lock, suiteFinishedEpoch, suiteOutcome, suitePid, landedSha,
+    suiteLog: null,
     fanInLog: path.basename(fanInLog),
   };
 }
@@ -2546,6 +2608,7 @@ export async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promis
     step, reason,
     lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
     suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+    suiteLog: null,
   });
   if (r.status === null) {
     return red("spawn-mechanical-fan-in", r.error?.message ?? `fresh mechanical fan-in process failed: ${r.stderr || "no output"}`);
