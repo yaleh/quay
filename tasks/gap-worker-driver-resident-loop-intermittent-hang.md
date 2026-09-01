@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-resident-loop-intermittent-hang
 title: worker-driver 驻留环间歇挂起——liveness 后停在派发环前，round/outcome 不写（worker-driver-fan-in 测试 flaky 根因）
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -48,3 +48,10 @@ extra:
 - plugin/scripts/worker-driver.ts（驻留环挂点修复）
 - plugin/test/worker-driver-fan-in.test.mjs（如测试侧需加固时序）
 - tasks/gap-worker-driver-resident-loop-intermittent-hang.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T06:40:36.123Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red

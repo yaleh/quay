@@ -127,7 +127,6 @@ function runHappyPath(opts = {}) {
     suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
     scopedGateCommand: ["true"],
     docCheckCommand: ["true"],
-    archguardCommand: ["true"],
   }).then((r) => ({ r, repo, worktree, base, capture }));
 }
 
@@ -215,7 +214,6 @@ test("suite 红 ⇒ 机械 fan-in red（step=suite），不落地、锁仍 relea
       suiteCommand: ["bash", "-c", "echo failing; exit 3"],
       scopedGateCommand: ["true"],
       docCheckCommand: ["true"],
-      archguardCommand: ["true"],
     });
     assert.equal(r.outcome, "red");
     assert.equal(r.step, "suite");
@@ -261,7 +259,6 @@ test("merge develop 冲突 ⇒ 机械 fan-in red（step=merge-develop），锁�
       suiteCommand: ["bash", "-c", "exit 0"],
       scopedGateCommand: ["true"],
       docCheckCommand: ["true"],
-      archguardCommand: ["true"],
     });
     assert.equal(r.outcome, "red");
     assert.equal(r.step, "merge-develop");
@@ -270,74 +267,9 @@ test("merge develop 冲突 ⇒ 机械 fan-in red（step=merge-develop），锁�
   }
 });
 
-// ── archguard 结构闸（gap-archguard-structural-gate-in-fan-in-driver）：typecheck 后 scoped门 前 ──
-
-test("archguard 结构闸在机械 fan-in 里真跑（seam）——fake 命令执行 + 落地", async () => {
-  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
-  const marker = path.join(base, "archguard-ran.txt");
-  try {
-    const r = await runMechanicalFanIn({
-      task: TASK, worktree, root: repo, runId: "mf-run-archguard", mergeTarget: "develop",
-      forceSuite: true, scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
-      suiteCapture: capture, suiteLogFile: path.join(base, "suite.log"),
-      suiteCommand: ["bash", "-c", "exit 0"],
-      scopedGateCommand: ["true"], docCheckCommand: ["true"],
-      archguardCommand: ["bash", "-c", `echo ran > "${marker}"`],
-      ffMergeModule: FF_MERGE_MODULE,
-    });
-    assert.equal(r.outcome, "landed", `mechanical fan-in must land (step=${r.step} reason=${r.reason})`);
-    assert.equal(fs.existsSync(marker), true, "archguard step must run (fake command wrote its marker)");
-  } finally {
-    fs.rmSync(base, { recursive: true, force: true });
-  }
-});
-
-test("archguard 依赖环 red ⇒ 机械 fan-in red（step=archguard-structure），不落地、锁仍 release", async () => {
-  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
-  const runId = "mf-run-archguard-red";
-  try {
-    const r = await runMechanicalFanIn({
-      task: TASK, worktree, root: repo, runId, mergeTarget: "develop",
-      forceSuite: true, scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
-      suiteCapture: capture, suiteLogFile: path.join(base, "suite.log"),
-      suiteCommand: ["bash", "-c", "exit 0"],
-      scopedGateCommand: ["true"], docCheckCommand: ["true"],
-      archguardCommand: ["bash", "-c", "echo dependency cycle; exit 3"],
-      ffMergeModule: FF_MERGE_MODULE,
-    });
-    assert.equal(r.outcome, "red");
-    assert.equal(r.step, "archguard-structure");
-    assert.equal(git(repo, "worktree", "list", "--porcelain").stdout.includes(`task/${TASK}`), true, "red path must NOT remove the worktree");
-    const lock = readFanInLockHold(repo, TASK, runId);
-    assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "red path must release the lock (finally)");
-  } finally {
-    fs.rmSync(base, { recursive: true, force: true });
-  }
-});
-
-test("archguard 结构信号镜像到主检出载体（AC2 机制）——worktree 记录 append 进 root 的 metrics-history.jsonl", async () => {
-  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
-  try {
-    const record = '{"tool":"archguard-runner","verdict":"pass"}';
-    // fake archguard 写一条结构信号记录进 worktree 的 .archguard/metrics-history.jsonl（真实
-    // archguard-runner 会 append 这条）；镜像步骤应把它复制到主检出（root）的同一载体。
-    const fake = ["bash", "-c", `mkdir -p "${worktree}/.archguard"; printf '%s\\n' '${record}' >> "${worktree}/.archguard/metrics-history.jsonl"`];
-    const r = await runMechanicalFanIn({
-      task: TASK, worktree, root: repo, runId: "mf-run-archguard-mirror", mergeTarget: "develop",
-      forceSuite: true, scriptsDir: SCRIPTS_DIR, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
-      suiteCapture: capture, suiteLogFile: path.join(base, "suite.log"),
-      suiteCommand: ["bash", "-c", "exit 0"],
-      scopedGateCommand: ["true"], docCheckCommand: ["true"],
-      archguardCommand: fake,
-      ffMergeModule: FF_MERGE_MODULE,
-    });
-    assert.equal(r.outcome, "landed", `mirror path must land (step=${r.step} reason=${r.reason})`);
-    const mainMetrics = fs.readFileSync(path.join(repo, ".archguard", "metrics-history.jsonl"), "utf8");
-    assert.match(mainMetrics, /archguard-runner/, "root's metrics-history.jsonl must carry the mirrored archguard record");
-  } finally {
-    fs.rmSync(base, { recursive: true, force: true });
-  }
-});
+// ── gap-fan-in-remove-archguard-gate：archguard 结构闸已从机械 fan-in 移除（降级为按需命令）──────
+// 原「archguard 结构闸真跑 / 依赖环 red / metrics 镜像」三测试随 step 移除一并退役——fan-in gate 链
+// 不再含 archguard-structure（源面负控制见 archguard-structural-gate-fan-in.test.mjs，engine 组）。
 
 // ── gap-mech-fan-in-acquire-lock-timeout-queue-semantics：acquire 步 120s 超时去掉（排队语义）─────
 // fan-in 锁是正确性锁（fan-in-ff-merge.sh:203 unbounded `flock -x`），排队等待正是它存在的意义；
@@ -384,7 +316,7 @@ test("AC2 机制 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics) — 排�
       scriptsDir: SCRIPTS_DIR, ffMergeModule: FF_MERGE_MODULE, slotBase, slotLib: SLOT_LIB, silenceMs: 5000,
       suiteCapture: capture, suiteLogFile: suiteLog,
       suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
-      scopedGateCommand: ["true"], docCheckCommand: ["true"], archguardCommand: ["true"],
+      scopedGateCommand: ["true"], docCheckCommand: ["true"],
     });
 
     // 让机械 fan-in 的 acquire 先进入排队（此刻 blocked 在 flock 上，未落地）。
@@ -525,10 +457,6 @@ function mechRun(base, repo, worktree, slotBase, capture, runId) {
     suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
     scopedGateCommand: ["true"],
     docCheckCommand: ["true"],
-    // gap-archguard-structural-gate-in-fan-in-driver 给 runMechanicalFanIn 加了 archguard 结构闸
-    // （step 5.5）；本组测试的临时 repo 不是真 packages/quay/src，真实 archguard-runner 会红——fake 成
-    // ["true"] 跳过（与同文件其它测试同形），flip-done 收敛逻辑才是被测对象。
-    archguardCommand: ["true"],
     // P2 (gap-execution-loop-productization-p2-p4)：ff 持锁段已 TS 模块化（worker-driver import
     // packages/quay/src/fan-in/ff-merge.ts）；临时 repo 无该模块 ⇒ pin 真仓库副本（与同文件其它 call site 同形）。
     ffMergeModule: FF_MERGE_MODULE,

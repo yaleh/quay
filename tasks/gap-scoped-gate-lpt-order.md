@@ -1,13 +1,15 @@
 ---
 id: gap-scoped-gate-lpt-order
-title: scoped-gate（--for-task）路径复用 suite-lpt-order + suite-lpt-runner.mjs（LPT + run({files}) 保序）
-status: todo
+title: scoped-gate（--for-task）路径复用 suite-lpt-order + suite-lpt-runner.mjs（LPT +
+  run({files}) 保序）
+status: superseded
 labels:
   - gap
 parent: null
 children: []
 extra:
   schema: execution
+  superseded_reason: 撤回（人 2026-09-01 经 peer 转述「不作通用优化」）——实测：scoped 并发 = default_test_concurrency = 16（nproc 宿主派生），scoped 集抽样 19/20 任务 ≤16 文件 ⇒ 全文件同时起跑、墙钟 = 集里最长文件、无长尾可消 ⇒ LPT 对 scoped 是空操作（node --test 多文件并发 + 字母序重排也不影响，反正全并发）。scoped 118s 均值的真实主导是「集里最长文件」，真正速度杠杆是拆长文件（gap-suite-split-long-multi-test-files 已在做）。唯一条件化规则（集 >16 文件时才用 run({files}) 保序）暂不立案。
 ---
 **type:** execution
 
@@ -33,5 +35,11 @@ scoped-gate 路径 LPT + run({files}) 保序；AC1-3 勾；scoped 长文件 offs
 
 ## Touches
 
-- plugin/scripts/（scoped-gate 派发路径——LPT + run({files})）
+- scripts/test.sh（scoped-gate --for-task 派发路径——LPT + run({files})）
 - tasks/gap-scoped-gate-lpt-order.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T04:40:29.926Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）

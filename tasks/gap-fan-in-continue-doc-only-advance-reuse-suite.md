@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-continue-doc-only-advance-reuse-suite
 title: develop 在 suite 期间被 doc/inert 前进时，CONTINUE 重跑复用上一 green 判定（按测试影响面键控 suite）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -31,9 +31,15 @@ extra:
 
 ## Definition of Done
 
-复用机制落地 develop；AC1-4 勾。
+复用机制落地 develop：CONTINUE 在 develop 仅 doc/inert 前进时复用上一 green suite 判定、不重跑全量 suite，code 前进仍照常重跑（不削弱合并验证）；AC1-4 全部勾选。
 
 ## Touches
 
 - plugin/scripts/worker-driver.ts（CONTINUE/重跑路径 + delta 分类器扩展）
 - tasks/gap-fan-in-continue-doc-only-advance-reuse-suite.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T04:40:29.349Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）

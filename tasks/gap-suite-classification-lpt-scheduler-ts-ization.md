@@ -49,3 +49,18 @@ ts-ization 方向已定（`gap-execution-loop-p4-suite-entry-ts-ization` done：
 - plugin/scripts/runner-grouping.ts（bash 函数 ts-ize 为真 TS，或并入 suite-scheduler.ts 后删除 bash 版）
 - scripts/test.sh（薄转发：删 lpt_reorder_files + runner-grouping source + 3 套 dispatch）
 - tasks/gap-suite-classification-lpt-scheduler-ts-ization.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T04:57:10.836Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+
+## 补充处置（人裁定 2026-09-01）
+
+除 TS 化外，一并处理 suite 测试层三类意见：
+
+1. **C 应修（真回归，非 flaky）**：`scripts/test.sh --list-groups` 计数、`quay-init-loop-consumer-doc-refs` AC37（plugin/loop/ 引用）、`quay-init-loop-driver` AC3（双向控制）——waterline-scheduler/ts-ization 改 test.sh 引入的回归，应修（非加超时/重试能掩盖）。
+2. **inner 测试退役**：inner 是已退役机制，session-liveness 家族测「inner 停摆报 IDLE」的测试应退役（删除），非加超时。
+3. **A 类增加超时**：其余时序敏感测试（worker-driver resident/fan-in、writestate-atomicity、md-deletion-token、full-suite-runner、inner-session-check）增加超时。
