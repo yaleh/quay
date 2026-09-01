@@ -51,3 +51,7 @@ extra:
 
 - 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
 - 失败步/判词：step=suite: suite red
+
+## 补充处置（人裁定 2026-09-01）
+
+- **增加重试**：除 Plan ①②（排除 driver 文件 / 白名单）外，可考虑 ③ 增加重试——help-contract 测试失败时重试 N 次（flaky 容忍）。最简但治标；①② 除根、③ 兜底，推荐 ①+③ 组合。
