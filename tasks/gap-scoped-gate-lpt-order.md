@@ -1,7 +1,7 @@
 ---
 id: gap-scoped-gate-lpt-order
 title: scoped-gate（--for-task）路径复用 suite-lpt-order + suite-lpt-runner.mjs（LPT + run({files}) 保序）
-status: todo
+status: needs-human
 labels:
   - gap
 parent: null
@@ -33,5 +33,11 @@ scoped-gate 路径 LPT + run({files}) 保序；AC1-3 勾；scoped 长文件 offs
 
 ## Touches
 
-- plugin/scripts/（scoped-gate 派发路径——LPT + run({files})）
+- scripts/test.sh（scoped-gate --for-task 派发路径——LPT + run({files})）
 - tasks/gap-scoped-gate-lpt-order.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T04:40:29.926Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
