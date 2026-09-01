@@ -61,3 +61,14 @@ dashboard 的任务卡片信息密度不够，用户巡检时绕过它直奔 `/t
 - packages/quay/src/serve-dashboard.ts
 - packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs
 - tasks/gap-dashboard-taskcard-multistatus-minitable.md
+
+## Needs-Human
+
+**执行 2026-09-01T16:22:42.312Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1788275557
+- session_id：1de27f75-2fe7-4870-9d39-35bc0f475782
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-dashboard-taskcard-multistatus-minitable-wk-prod-1788275557.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-dashboard-taskcard-multistatus-minitable-wk-prod-1788275557.log
