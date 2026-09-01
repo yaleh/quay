@@ -132,7 +132,7 @@ transcript 有没有真实 user 消息（被驱动过）。四态判定与处理
 | **降级（degraded）** | transcript 由**发现路径**启发式获得（`transcriptSource==discovery`），非显式结构解析——无法确认是当前 inner 会话 | **fail-closed**：不得按 healthy 放行、按 degraded 处理——stderr 报警（discovery/degraded/WARNING），驱动前先核对所选 transcript 确是当前 inner 会话（如 inner claude 进程启动时刻之后的），确认不了就驱动——驱动不重建，代价有界 |
 
 ```bash
-bash plugin/scripts/inner-session-check.sh --json   # 四态自检：{state: healthy|empty-shell|missing|degraded, window, process, transcript, transcriptSource, transcriptFresh}
+bash plugin/scripts/outer-session-check.sh --json   # 四态自检：{state: healthy|empty-shell|missing|degraded, window, process, transcript, transcriptSource, transcriptFresh}
 ```
 
 按 `state` 分派：
@@ -152,7 +152,7 @@ bash plugin/scripts/inner-session-check.sh --json   # 四态自检：{state: hea
   transcript 出现真实 user 消息（send-keys-reliable 的 `transcript-delivery-check.ts` 判据），不假设成功。
   **工厂失败/验证不过 ⇒ 升级给人**，不静默继续。
 
-**transcript 路径解析**（inner-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
+**transcript 路径解析**（outer-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
 > `orchestration/session-liveness.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
 且不是外层自己的 jsonl）。`transcriptSource` 记录来源：显式/配置 = 结构来源，发现路径 = `discovery`。
 找不到 transcript = fresh = 空壳判据（驱动不重建）。

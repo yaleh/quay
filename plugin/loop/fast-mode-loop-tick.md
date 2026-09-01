@@ -578,7 +578,7 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-panel-stale-c
 ```
 
 exit 1 = 面板仍有「已结束/冻结」agent 行（括号已关但行未清）⇒ 检出该误导窗口；exit 0 = 干净。
-（`inner-session-check.sh` 判的是会话四态，本观测器判的是面板行状态——两件事，不混。）
+（`outer-session-check.sh` 判的是会话四态，本观测器判的是面板行状态——两件事，不混。）
 
 它做什么（gap-the-blocked-channel-has-a-writer-nobody-calls——触发是**后果**，不是「记得再跑一条命令」）：
 

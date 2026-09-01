@@ -12,9 +12,9 @@
 // spellings (path-prefixed AND bare filename) PLUS the laid-down scripts' TRANSITIVE SIBLING
 // DEPENDENCIES — so the laid-down mechanism is functional and reference-spelling-independent.
 // This pins:
-//   AC1 (b, dependency closure) — send-keys-reliable.sh:41 / inner-session-check.sh:43 reference
+//   AC1 (b, dependency closure) — send-keys-reliable.sh:41 references
 //       `transcript-delivery-check.ts` via ${SCRIPT_DIR}/, and cap-from-gate.sh:13 references
-//       cap-from-gate.ts. All three siblings must be laid down (铺了消费者必然铺依赖).
+//       cap-from-gate.ts. Both siblings must be laid down (铺了消费者必然铺依赖).
 //   AC1/AC3 negative — removing transcript-delivery-check.ts from the plugin ⇒ the install FAILS
 //       with dependency-not-landed (the bare-referenced script is now in the verification surface;
 //       checker and checked share the same spelling-independent derivation — no shared blind spot).
@@ -99,7 +99,7 @@ test('AC1 — dependency closure: transcript-delivery-check.ts + cap-from-gate.t
   try {
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     // The consumers ARE laid down (prefix-derived / explicit).
-    for (const s of ['send-keys-reliable.sh', 'inner-session-check.sh', 'cap-from-gate.sh']) {
+    for (const s of ['send-keys-reliable.sh', 'cap-from-gate.sh']) {
       assert.ok(fs.existsSync(path.join(ws, 'plugin', 'scripts', s)), `consumer must be laid down: plugin/scripts/${s}`);
     }
     // Their ${SCRIPT_DIR} siblings must be laid down too (铺了消费者必然铺依赖).

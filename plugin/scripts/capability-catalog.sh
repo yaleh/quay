@@ -244,7 +244,6 @@ declare -A QUESTION=(
   [inner-forensics.mjs]="Did the inner layer run a given command, at second-granularity, with zero CPU interference?"
   [inner-idle-log.ts]="Why was the inner layer idle (append-only reason log)?"
   [inner-panel-stale-check.ts]="Is an agent line still on the panel after its bracket closed (ended-vs-running state transition, frozen-timer detection)?"
-  [inner-session-check.sh]="Is the inner session healthy / empty-shell / missing (three-state cold-start self-check)?"
   [instrument-failure-check.ts]="Which of the manager's five documented instrument-failure families does each shell command in the tick docs exhibit (grep self-match, zero-hit-as-absent, pipe-then-exit-status, ...)?"
   [prod-data-audit.ts]="Which production carrier cited by done-task ACs is in which three-state (① has-data / ② zero-data / ③ not-evaluated), aggregated by carrier with type pre-classification + predicate self-check (gap-prod-data-accounting-audit)?"
 [retired-clause-check.ts]="Has every AC58-registered retired clause been deleted from its source file (正文词条已从源文件删除, 落点映射完整)?"
@@ -543,7 +542,6 @@ declare -A CADENCE=(
   [inner-forensics.mjs]="每轮"
   [inner-idle-log.ts]="每轮"
   [inner-panel-stale-check.ts]="每轮"
-  [inner-session-check.sh]="每轮"
   [inner-wakeup-heartbeat-check.ts]="每轮"
   [inner-wakeup-heartbeat.ts]="每轮"
 
@@ -862,7 +860,6 @@ declare -A INVALIDATION=(
   [inner-forensics.mjs]="无可测前提，靠周期复核"
   [inner-idle-log.ts]="无可测前提，靠周期复核"
   [inner-panel-stale-check.ts]="无可测前提，靠周期复核"
-  [inner-session-check.sh]="无可测前提，靠周期复核"
   [inner-wakeup-heartbeat-check.ts]="失效前提：inner 自排程仍写心跳文件；若改由 harness 直接上报，本条退休"
   [inner-wakeup-heartbeat.ts]="失效前提：inner 自排程仍以脚本写心跳文件；若改由 harness 直接上报，本条退休"
 
@@ -1181,7 +1178,6 @@ declare -A LAST_REAFFIRMED=(
   [inner-forensics.mjs]="2026-08-10"
   [inner-idle-log.ts]="2026-08-10"
   [inner-panel-stale-check.ts]="2026-08-10"
-  [inner-session-check.sh]="2026-08-10"
   [inner-wakeup-heartbeat-check.ts]="2026-08-10"
   [inner-wakeup-heartbeat.ts]="2026-08-11"
 
@@ -1500,7 +1496,6 @@ declare -A MATCHING=(
   [inner-forensics.mjs]="keyword"
   [inner-idle-log.ts]="keyword"
   [inner-panel-stale-check.ts]="keyword"
-  [inner-session-check.sh]="keyword"
   [inner-wakeup-heartbeat-check.ts]="n/a"
   [inner-wakeup-heartbeat.ts]="n/a"
 
@@ -1886,7 +1881,6 @@ declare -A PUBLIC_ENTRYPOINTS=(
   [dispatch-worktree-setup.sh]="consumer-facing: the mandatory post-worktree-add setup for every dispatched task worktree (node_modules symlink-or-install + config.yml via worktree-include.sh) documented in the fast-mode dispatch prompt (gap-worktree-node-modules-inconsistent-self-verify)"
   [drive-target-check.sh]="consumer-facing: the fail-closed drive/observe target pre-flight gate (window name, never a numeric index) — the outer verifies quay-0:inner before any capture-pane/send-keys (C16, gap-drive-sent-to-manager-pane-not-inner)"
   [gate-staleness-check.sh]="consumer-facing: the gate-ledger freshness signal (last GateEvent vs claimed period) invoked by the goal-store Contract"
-  [inner-session-check.sh]="consumer-facing: the three-state cold-start self-check invoked by the loop docs"
   [fan-in-ff-merge.sh]="consumer-facing: the AC62 持锁段 command invoked by the A6 fan-in docs — merge lock wrapping ONLY the ff (a pure ref update git push . task/<id> → develop; gap-ac67: called BY the task subagent with --agent-id, not the inner main thread)"
   [integration-batch-merge.sh]="consumer-facing: the integration→develop batch-merge command in the branch-model docs"
   [laydown-set-check.sh]="consumer-facing: the cold-start lay-what-you-verify gate invoked by the cold-start skill"

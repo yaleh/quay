@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # outer-session-check.sh — manager-adopt 的三态自检（判定 outer 会话，单窗口拓扑）
-# (gap-manager-adopt-outer-role-check-broken：manager-adopt.sh 曾复用 inner-session-check.sh，
-#  该脚本把窗口角色硬编码为 "inner"，而 manager-adopt 要启动的是 outer —— 本脚本把角色换成
-#  "outer"，状态机形状（window_exists / has_claude_child / transcript_fresh）与 inner-session-check.sh
+# (gap-manager-adopt-outer-role-check-broken：manager-adopt.sh 曾复用一个把窗口角色硬编码为
+#  "inner" 的三态检查器，而 manager-adopt 要启动的是 outer —— 本脚本把角色换成
+#  "outer"，状态机形状（window_exists / has_claude_child / transcript_fresh）与该旧检查器
 #  完全一致)。
 #
 # 判定 outer 会话四态：

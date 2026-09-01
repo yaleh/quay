@@ -33,7 +33,7 @@
 //   --since <ISO>      只数 timestamp >= 该时刻之后的工具调用（一轮 tick 报「本轮」）。
 //   --root <dir>       覆盖仓库根（产品文件分类的基准；别名 --repo-root；默认向上找 .quay/config.yml / git root）。
 //   --json             输出 JSON 对象（Contract invoke 的读取形态）。
-//   缺省 --session     显式身份优先（pane pid → session 反查，复用 inner-session-check.sh 的
+//   缺省 --session     显式身份优先（pane pid → session 反查，经 resolveIdentity 注入的
 //                      discovery-pid 结构解析），启发式（~/.claude/projects/ 下最新 .jsonl）仅
 //                      fallback 且报 WARN —— 不再静默命中「最新」会话（多会话拓扑下会命中
 //                      manager/outer 自己；gap-session-identity-index-vs-explicit，同根：
@@ -45,7 +45,6 @@ import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 
@@ -165,7 +164,7 @@ export function loadTranscript(sessionPath) {
  *   +1  记录 cwd 以 repoRoot 开头（cwd 探测，只看每个候选的前 CWD_PROBE_LINES 行）
  * 同分取 mtime 最新。
  * 自排除：selfSessionId（缺省 CLAUDE_CODE_SESSION_ID —— 调用方自己的会话）的
- * <id>.jsonl 不参与评分 —— 启发式不得命中「自己」（与 inner-session-check.sh 的
+ * <id>.jsonl 不参与评分 —— 启发式不得命中「自己」（与 outer-session-check.sh 的
  * discovery fallback 同纪律；gap-session-identity-index-vs-explicit）。
  */
 export function detectSession(repoRoot, projectsDir = defaultProjectsDir(), { selfSessionId = process.env.CLAUDE_CODE_SESSION_ID } = {}) {
@@ -228,56 +227,26 @@ export function detectSession(repoRoot, projectsDir = defaultProjectsDir(), { se
   return top.length > 0 ? top[0].abs : null;
 }
 
-// ── 显式身份优先：pane pid → session 反查（复用 inner-session-check.sh 机件）────────────────────────
-
-/**
- * 调用 inner-session-check.sh --json，取其结构性 transcript 解析：pane pid → claude pid →
- * /proc environ 的 CLAUDE_CODE_SESSION_ID → transcript 文件名（进程↔会话 1:1，唯一不会认错
- * 的显式身份映射；与 inner-session-check.sh 的 discovery-pid 同源）。
- * @param {string} repoRoot
- * @param {{checkerPath?: string, env?: Record<string,string|undefined>}} [opts]  —— checkerPath 可注入
- *   （测试接缝）；env 覆盖子进程环境。
- * @returns {{transcript: string, source: string} | null}
- *   source 继承 inner-session-check 的 transcriptSource：discovery-pid（结构性，可信）/
- *   config / arg / discovery（启发式退化）。脚本不可用 / 非零退出 / 无 transcript ⇒ null。
- */
-export function resolveViaInnerSessionCheck(repoRoot, { checkerPath, env } = {}) {
-  const script = checkerPath || path.join(repoRoot, "plugin", "scripts", "inner-session-check.sh");
-  if (!fs.existsSync(script)) return null;
-  const r = spawnSync("bash", [script, "--json"], {
-    encoding: "utf8",
-    env: { ...process.env, ...env },
-    timeout: 10_000,
-  });
-  if (r.status !== 0) return null;
-  let j;
-  try { j = JSON.parse(r.stdout); } catch { return null; }
-  if (!j || typeof j !== "object" || !j.transcript) return null;
-  return { transcript: String(j.transcript), source: String(j.transcriptSource || "discovery-pid") };
-}
-
 /** 启发式 fallback 的 WARN 文案（显式身份缺失时，多会话拓扑下可能命中错误对象）。 */
 export function heuristicWarning(sessionPath) {
   return `未指定 --session，且无 pane pid → session 显式身份；退到启发式命中 ${sessionPath}（多会话拓扑下可能命中错误对象）。显式传 --session <path> 指定身份。`;
 }
 
 /**
- * 缺省会话解析：显式身份优先（pane pid → session），启发式仅 fallback 且报 WARN。
+ * 缺省会话解析：显式身份优先（resolveIdentity 注入的 pane pid → session），启发式仅 fallback 且报 WARN。
  * @param {string} repoRoot
  * @param {string} [projectsDir]
  * @param {{resolveIdentity?: (root: string) => {transcript: string, source: string} | null,
- *          selfSessionId?: string}} [opts]  —— resolveIdentity 可注入（测试接缝），缺省走
- *   resolveViaInnerSessionCheck（真实 pane pid → session 机件）。
+ *          selfSessionId?: string}} [opts]  —— resolveIdentity 可注入（测试接缝），未注入时
+ *   退到 detectSession 启发式。
  * @returns {{path: string|null, source: 'pane-pid'|'config'|'arg'|'heuristic'|'none', warning: string|null}}
  */
 export function resolveSessionPath(repoRoot, projectsDir = defaultProjectsDir(), opts = {}) {
-  const identity = opts.resolveIdentity
-    ? opts.resolveIdentity(repoRoot)
-    : resolveViaInnerSessionCheck(repoRoot);
+  const identity = opts.resolveIdentity ? opts.resolveIdentity(repoRoot) : null;
   if (identity && identity.transcript) {
     if (identity.source === "discovery") {
-      // inner-session-check 自己也退到 discovery 启发式（TR_SOURCE=discovery）——视为启发式
-      // fallback + WARN（同根纪律：索引替代身份不得静默）。
+      // discovery 启发式（TR_SOURCE=discovery）——视为启发式 fallback + WARN（同根纪律：
+      // 索引替代身份不得静默）。
       return { path: identity.transcript, source: "heuristic", warning: heuristicWarning(identity.transcript) };
     }
     const src = identity.source === "discovery-pid" ? "pane-pid" : identity.source;
