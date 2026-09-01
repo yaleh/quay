@@ -1867,25 +1867,72 @@ async function main() {
         path.join(roundRoot, "tasks", "gap-live-fan-in-done.md"),
         "---\nid: gap-live-fan-in-done\nstatus: done\n---\nbody\n"
       );
+      // gap-live-fan-in-window-elapsed-zero AC1: the round carrier now ALSO carries the per-task
+      // dispatch start (`in_flight_task_starts`) — writer → carrier → reader chain.
+      const nowMs = Date.now();
+      const startedMs = nowMs - 120_000; // 2 minutes ago — a real dispatch start, not nowMs.
       const roundRec = computeWorkerRoundRecord({
         round: 4, runId: "wk-prod-x", pid: 4242, at: new Date().toISOString(),
         action: "dispatch", inFlight: 2, pool: 0, stopReason: null,
         coldStartInflight: [],
         inFlightTasks: ["gap-live-fan-in-1", "gap-live-fan-in-done"],
+        inFlightTaskStarts: { "gap-live-fan-in-1": new Date(startedMs).toISOString() },
       });
       assert(Array.isArray(roundRec.in_flight_tasks) && roundRec.in_flight_tasks.includes("gap-live-fan-in-1"),
         "AC1: computeWorkerRoundRecord carries in_flight_tasks (production round writer names the task)");
+      assert(
+        roundRec.in_flight_task_starts && roundRec.in_flight_task_starts["gap-live-fan-in-1"] != null,
+        "AC1: computeWorkerRoundRecord carries in_flight_task_starts (per-task dispatch start)");
       fs.writeFileSync(path.join(roundRoot, ".quay", "worker-round.jsonl"), JSON.stringify(roundRec) + "\n");
 
-      const nowMs = Date.now();
       const live = readLive(roundRoot, { nowMs, liveWorkers: [] });
       const ids = new Set(live.inFlight.map((t) => t.taskId));
       assert(ids.has("gap-live-fan-in-1"),
         "AC1: a round-carried in_flight_tasks task is in-flight (⛔ mechanical fan-in window task invisible ⇒ 假)");
       assert(!ids.has("gap-live-fan-in-done"),
         "AC1: a round-carried task whose on-disk status is done is dropped (stale round snapshot cleared)");
+      // gap-live-fan-in-window-elapsed-zero AC1 (reader): the round-carried task reads its TRUE start
+      // (not the nowMs fallback), so the fan-in window shows a real elapsed, not a perpetual "0.0 分钟".
+      const t1 = live.inFlight.find((t) => t.taskId === "gap-live-fan-in-1");
+      assert(t1, "AC1: round-carried task present for elapsed assertion");
+      assert(t1.startedAtMs === startedMs,
+        `AC1: round-carried startedAtMs = true dispatch start (got ${t1.startedAtMs}, want ${startedMs}) — ⛔ still nowMs ⇒ 假`);
+      assert(t1.minutes === 2,
+        `AC1: round-carried minutes = (nowMs − start)/60000 = 2 (got ${t1.minutes}) — ⛔ still 0 ⇒ 假`);
     } finally {
       fs.rmSync(roundRoot, { recursive: true, force: true });
+    }
+  }
+
+  // gap-live-fan-in-window-elapsed-zero AC3 (negative control): a round record whose
+  // `in_flight_tasks` names a task but carries NO `in_flight_task_starts` entry for it must fall
+  // back to nowMs — honest "just now" (minutes 0), NEVER a fabricated long elapsed.
+  {
+    const noStartRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-live-round-nostart-"));
+    try {
+      fs.mkdirSync(path.join(noStartRoot, ".quay"), { recursive: true });
+      fs.mkdirSync(path.join(noStartRoot, "tasks"), { recursive: true });
+      fs.writeFileSync(
+        path.join(noStartRoot, "tasks", "gap-fan-in-nostart.md"),
+        "---\nid: gap-fan-in-nostart\nstatus: ready\n---\nbody\n"
+      );
+      const nowMs = Date.now();
+      fs.writeFileSync(path.join(noStartRoot, ".quay", "worker-round.jsonl"), JSON.stringify({
+        round: 1, runId: "wk-prod-x", pid: 4242, at: new Date().toISOString(),
+        action: "dispatch", inFlight: 1, pool: 0, stopReason: null,
+        cold_start_inflight: [], in_flight_tasks: ["gap-fan-in-nostart"],
+        // no in_flight_task_starts — the round carries the task id but no per-task start.
+      }) + "\n");
+
+      const live = readLive(noStartRoot, { nowMs, liveWorkers: [] });
+      const t = live.inFlight.find((x) => x.taskId === "gap-fan-in-nostart");
+      assert(t, "AC3: the round-carried task without a start is still in-flight (visible, not dropped)");
+      assert(t.startedAtMs === nowMs,
+        `AC3: no start on the carrier ⇒ startedAtMs falls back to nowMs (got ${t.startedAtMs}, want ${nowMs})`);
+      assert(t.minutes === 0,
+        `AC3: no start on the carrier ⇒ minutes 0 ("just now"), never a fabricated long elapsed (got ${t.minutes})`);
+    } finally {
+      fs.rmSync(noStartRoot, { recursive: true, force: true });
     }
   }
 

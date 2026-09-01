@@ -35,9 +35,9 @@ web live 页对「机械 fan-in 窗口」的在飞任务，elapsed 恒显「3s a
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：`readLive` round-carrier 分支读真起点优先——grep `observation.ts` 含「读 `started_at` / step 起始 ts」优先逻辑，缺失才回退 `nowMs`；（⛔ 仍无条件 `startedAtMs: nowMs` ⇒ 假）。
-- [ ] AC2（能取假，生产载体，硬规则 4 推论三）：落地后时间窗内，fan-in 窗口 live 页 elapsed 与真起点一致（对照 `worker-outcome.started_at` / `fan-in-step-trace.ts`，N 只计落地后轮）；（⛔ 用落地前轮冒充 / 仍恒 0 ⇒ 假）。
-- [ ] AC3（能取假，诚实兜底不退化）：无起点载体时仍回退 `nowMs`（「刚起步」，不伪造长时长）——负控制：剥离起点后 readLive 报 0 而非猜测长值；（⛔ 回退路径伪造长 elapsed ⇒ 假）。
+- [x] AC1（能取假，机制级）：`readLive` round-carrier 分支读真起点优先——grep `observation.ts` 含「读 `started_at` / step 起始 ts」优先逻辑，缺失才回退 `nowMs`；（⛔ 仍无条件 `startedAtMs: nowMs` ⇒ 假）。
+- [ ] AC2（能取假，生产载体，硬规则 4 推论三）：落地后时间窗内，fan-in 窗口 live 页 elapsed 与真起点一致（对照 `worker-outcome.started_at` / `fan-in-step-trace.ts`，N 只计落地后轮）；（⛔ 用落地前轮冒充 / 仍恒 0 ⇒ 假）。（待外部）
+- [x] AC3（能取假，诚实兜底不退化）：无起点载体时仍回退 `nowMs`（「刚起步」，不伪造长时长）——负控制：剥离起点后 readLive 报 0 而非猜测长值；（⛔ 回退路径伪造长 elapsed ⇒ 假）。
 
 ## Definition of Done
 
@@ -47,5 +47,5 @@ round 载体 / fan-in step trace 带每任务起始时间戳；readLive 读真�
 
 - packages/quay/src/observation.ts（readLive round-carrier 分支读真起点优先、缺失回退 nowMs）
 - plugin/scripts/worker-driver.ts（round 载体 in_flight_tasks / fan-in-step-trace 带每任务起始时间戳）
-- packages/quay/test/live-state.test.mjs（或 serve-handlers/serve——readLive 断言更新）
+- packages/quay/test/serve.test.mjs（readLive round-carrier 断言更新：AC1 真起点 / AC3 负控制）
 - tasks/gap-live-fan-in-window-elapsed-zero.md（自身）

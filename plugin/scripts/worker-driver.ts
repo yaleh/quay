@@ -846,6 +846,11 @@ export function computeWorkerRoundRecord(opts: {
    *  观测过且无（⛔ 与「没观测」可区分）。gap-live-mechanical-fan-in-inflight-invisible：机械 fan-in
    *  窗口 worker 已 exit、无 outcome、无 workflow-events，round 的 task id 是 Live 页唯一可见载体。 */
   inFlightTasks?: string[];
+  /** 每任务派发时刻（task id → ISO 起始时间戳，= inFlightTaskStarts() 的返回值）。gap-live-fan-in-
+   *  window-elapsed-zero：round 载体此前只带 task id 不带起点，readLive 只能回退 nowMs ⇒ fan-in 窗口
+   *  elapsed 恒 0。冷启动在飞 task 无内存起点（从 worktree 枚举，非本驱动派发）⇒ 不入此图，readLive
+   *  对缺起点 task 仍回退 nowMs（诚实「刚起步」，⛔ 不伪造长时长）。 */
+  inFlightTaskStarts?: Record<string, string>;
   /** 本轮 markNeedsHuman 翻转的结果（含 committed——gap-mark-needs-human-commit-after-write：翻转写盘
    *  即提交，committed=false 表示 repo-less no-op / 提交失败，可观测非静默）。缺省 = 本轮无翻转。 */
   needsHuman?: Array<{ id: string; ok: boolean; committed: boolean; reason: string }>;
@@ -866,6 +871,7 @@ export function computeWorkerRoundRecord(opts: {
     liveness: opts.liveness ?? null,
     cold_start_inflight: opts.coldStartInflight,
     in_flight_tasks: opts.inFlightTasks ?? [],
+    in_flight_task_starts: opts.inFlightTaskStarts ?? {},
     needs_human: (opts.needsHuman ?? []).map((n) => n.id),
     needs_human_committed: (opts.needsHuman ?? []).map((n) => ({ id: n.id, committed: n.committed })),
     reconciled_needs_human: opts.reconciledNeedsHuman ?? [],
@@ -2574,6 +2580,9 @@ export function mirrorMechanicalFanInSuiteState(opts: {
 interface RunningWorker {
   task: string;
   done: boolean;
+  /** 派发时刻（epoch ms）——round 载体 in_flight_task_starts 的数据源（gap-live-fan-in-window-
+   *  elapsed-zero：Live 页 fan-in 窗口 elapsed 需真起点，driver 派发时已知）。 */
+  startedAtMs: number;
   promise: Promise<WorkerRunResult>;
 }
 
@@ -2660,6 +2669,14 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // ready-pool 减项 / active 过滤 / Touches 互斥，⛔ 不阻塞其它 task 的派发。
   let coldInflight = new Set<string>();
   const inFlightTasks = (): string[] => running.map((r) => r.task).concat([...coldInflight]);
+  // gap-live-fan-in-window-elapsed-zero：每任务派发时刻（task id → ISO 起始）。只覆盖内存 running
+  // （driver 派发时已知 startedAtMs）；冷启动在飞 task 无起点 ⇒ 不入图（readLive 对缺起点回退 nowMs，
+  // 诚实「刚起步」而非伪造长时长）。
+  const inFlightTaskStarts = (): Record<string, string> => {
+    const map: Record<string, string> = {};
+    for (const r of running) map[r.task] = new Date(r.startedAtMs).toISOString();
+    return map;
+  };
 
   // round 心跳（AC138-3）：worker-outcome 只在任务真完成时写，池空时 outcome 停更会被 supervisor
   // status 的 last_record_ts（读全载体 max）误读为「死亡」；round 每轮循环无条件写一条作 liveness 直接量。
@@ -2679,6 +2696,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // gap-live-mechanical-fan-in-inflight-invisible：round 带上具体 task id（含机械 fan-in 窗口——
       // worker 已 exit、无 outcome、无 workflow-events，Live 页据此仍可见该任务）。
       inFlightTasks: inFlightTasks(),
+      // gap-live-fan-in-window-elapsed-zero：round 同带每任务派发时刻（真起点），readLive 据此算
+      // elapsed 而非恒回退 nowMs。
+      inFlightTaskStarts: inFlightTaskStarts(),
       needsHuman: needsHumanResults.splice(0),
       // gap-retrystate-needshuman-no-reconcile-with-disk-ready：本轮内存 needsHuman 与磁盘 status
       // 对账清除的 id（人翻回 ready ⇒ 下一轮重新可派），进 round 记录作生产可观测载体。
@@ -2704,6 +2724,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     const rw = {} as RunningWorker;
     rw.task = sel.task;
     rw.done = false;
+    // gap-live-fan-in-window-elapsed-zero：派发时刻（driver 决定 spawn 该 task 的此刻）——round 载体
+    // in_flight_task_starts 的真起点，readLive 据此算 fan-in 窗口 elapsed（⛔ 恒 nowMs 的旧行为）。
+    rw.startedAtMs = Date.now();
     rw.promise = runOneWorker({
       taskId: sel.task,
       selectorReason: sel.reason,
