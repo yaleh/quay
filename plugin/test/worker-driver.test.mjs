@@ -705,6 +705,28 @@ test("AC2 (能取假，负控制) — prompt no longer leaves bootstrap to agent
   assert.doesNotMatch(cont, /cp config\.yml/, "AC2: continue prompt must not instruct a hand-rolled config.yml copy");
 });
 
+test("AC_A1 (能取假) — buildWorkerPrompt 含「逐条验证 AC → 任务体勾选 - [x] → 与实现一并提交」指令字面 (gap-worker-dispatch-prompt-ac-check-instruction)", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  // 按位置判定（prompt 字面含勾 AC 指令，非注释里提到）：点名 AC 段 + 勾选复选框 + 逐条验证 + 与实现一并提交。
+  assert.match(prompt, /## Acceptance Criteria/, "names the task body AC section");
+  assert.match(prompt, /- \[x\]/, "instructs checking off the checkbox (- [x])");
+  assert.match(prompt, /one-by-one/, "instructs per-criterion (逐条) verification");
+  assert.match(prompt, /committing these AC checkbox updates together with your implementation/, "AC 勾选与实现一并提交");
+});
+
+test("gap-worker-dispatch-prompt-ac-check-instruction — buildContinueWorkerPrompt 同 seam 也带勾 AC 指令 (续做轮同样勾选，否则 ac-precheck 0/3 再烧一轮)", () => {
+  const cont = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "x",
+    acChecked: 0,
+    acTotal: 3,
+    failureReason: "ac-precheck 0/3",
+  });
+  assert.match(cont, /- \[x\]/, "continue prompt instructs checking off - [x]");
+  assert.match(cont, /## Acceptance Criteria/, "continue prompt names the AC section");
+});
+
 test("stashIfDirty — non-git ⇒ no-op; clean ⇒ files=[]; dirty ⇒ observe but NEVER stash others' changes (归属区分)", () => {
   // non-git dir (the phase-1 makeRoot shape) ⇒ graceful no-op.
   const nonGit = makeRoot("nogit");

@@ -24,7 +24,7 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC_A1（机制级，能取假）：派发 prompt 含「勾选任务体 AC 复选框」指令字面（按位置判定，非 grep 注释）；（⛔ prompt 无该指令 ⇒ 假）。
+- [x] AC_A1（机制级，能取假）：派发 prompt 含「勾选任务体 AC 复选框」指令字面（按位置判定，非 grep 注释）；（⛔ prompt 无该指令 ⇒ 假）。
 
 ## Definition of Done
 
