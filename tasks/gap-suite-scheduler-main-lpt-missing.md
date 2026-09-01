@@ -1,7 +1,7 @@
 ---
 id: gap-suite-scheduler-main-lpt-missing
 title: 统一调度器漏 main 组 LPT 排序——main 组长文件晚启动长尾（waterline-scheduler 落地后回归）
-status: todo
+status: ready
 labels:
   - gap
   - defect
