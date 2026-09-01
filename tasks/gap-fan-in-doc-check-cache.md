@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-doc-check-cache
 title: doc-check 产物按 (docs 状态) 键控缓存——docs 未变时 0 秒
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null
