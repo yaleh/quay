@@ -129,8 +129,8 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
   //   - list_groups counts serial (the 4th group in the partition).
   const src = readFileSync(testSh, "utf8");
   const grouping = readFileSync(runnerGrouping, "utf8");
-  assert.match(grouping, /product\|engine\|serial\|lowconc\) echo "\$g" ;;/,
-    "group_of must route serial AND lowconc as real groups (not fall back to engine)");
+  assert.match(grouping, /RECOGNIZED_GROUPS: readonly DeclaredGroup\[\] = \["product", "engine", "serial", "lowconc"\]/,
+    "classification must route serial AND lowconc as real groups (not fall back to engine)");
   assert.match(src, /local serial_files=\(\) sf serial_code/,
     "the FULL-SUITE-DEFAULT branch must declare a serial phase");
   assert.match(src, /selected \$\{#serial_files\[@\]\} files \(groups=serial\)/,
@@ -141,8 +141,8 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
     "the serial concurrency must default to the HOST derivation (H÷S — the AC2 experiment raised 1→2, AC44 read the host, AC74 wired the same derivation into the DIRECT path; gap-ac74-serial-lowconc-literal-direct-path)");
   assert.match(src, /in_group "serial" "\$groups"/,
     "the non-default path must detect the serial group");
-  assert.match(grouping, /printf 'serial:\s+%d\\n' "\$\{counts\[serial\]:-0\}"/,
-    "list_groups must count the serial group");
+  assert.match(grouping, /for \(const g of RECOGNIZED_GROUPS\) counts\.set\(g, 0\)/,
+    "listGroups must initialize every recognized group (incl. serial) so it is always counted");
   // Behavioral: --group serial --list-files returns exactly the serial members and nothing else;
   // the default --list-files EXCLUDES them (the concurrency-8 main body no longer pays their load).
   const serialList = runTestSh("--group", "serial", "--list-files").trim().split("\n").filter(Boolean);
@@ -167,8 +167,8 @@ test("AC0c (anti-stomp): group_of recognizes ALL FOUR groups in one case arm —
   // lowconc silently folded into the concurrency-N engine body and the isolation guarantee was
   // cancelled WITHOUT going red. This pin fails the moment ANY of the four groups is dropped.
   const grouping = readFileSync(runnerGrouping, "utf8");
-  assert.match(grouping, /product\|engine\|serial\|lowconc\) echo "\$g" ;;/,
-    "group_of must recognize ALL FOUR groups (product|engine|serial|lowconc) in one case arm");
+  assert.match(grouping, /RECOGNIZED_GROUPS: readonly DeclaredGroup\[\] = \["product", "engine", "serial", "lowconc"\]/,
+    "classification must recognize ALL FOUR groups (product|engine|serial|lowconc) in one place");
   // Behavioral double-check: all four counts are non-zero, and an unknown-group declaration is
   // FAIL-CLOSED (not silently degraded to engine — AC0b).
   const g = parseGroups(runTestShCached("--list-groups"));

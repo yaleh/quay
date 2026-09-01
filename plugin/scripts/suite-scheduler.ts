@@ -33,11 +33,22 @@
 // once, the same assertions execute, and the exit code is non-zero iff ≥1 file failed/cancelled
 // (node:test's own per-file summary tally, accumulated). A scheduling bug can never DROP a test.
 //
-// Usage (group\tpath lines on stdin, already LPT-ordered by scripts/test.sh's lpt_reorder_files):
-//   { printf 'serial\t%s\n' ...; printf 'lowconc\t%s\n' ...; printf 'main\t%s\n' ...; } \
+// Usage (RAW file paths on stdin, one per line — classification + LPT now live IN this module,
+// gap-suite-classification-lpt-scheduler-ts-ization; test.sh no longer pre-classifies or pre-LPTs):
+//   printf '%s\n' <file>... \
 //     | node --experimental-strip-types suite-scheduler.ts \
-//         --root <repo> --serial-concurrency <S> --lowconc-concurrency <L> --main-concurrency <M> \
-//         [--test-name-pattern=<pat> ...]
+//         --root <repo> --main-root <main-checkout> \
+//         --serial-concurrency <S> --lowconc-concurrency <L> --main-concurrency <M> \
+//         [--groups <product,engine,serial,lowconc>] [--rounds <N>] [--test-name-pattern=<pat> ...]
+//
+// The INPUT CONTRACT is now the raw deduped file list (build_deduped_files' realpaths). This module:
+//   1. CLASSIFIES each file (classifyFile from runner-grouping.ts — product+engine → main, serial →
+//      serial, lowconc → lowconc), then applies the optional --groups filter (default = all four).
+//   2. LPT-ORDERS each group (suite-lpt-order.ts loadDurationAverages + orderByLpt, off
+//      --main-root/.quay/verification-round.jsonl — the EXISTING carrier, no new measurer). LPT is
+//      scheduling-only (every file emitted exactly once) and FAIL-OPEN (no history ⇒ unchanged);
+//      QUAY_TEST_LPT_ORDER=0 is the one-key rollback.
+//   3. SCHEDULES via the waterline (runScheduler below).
 //
 // The only forwarded node --test flag is --test-name-pattern[=X] (mapped to run()'s testNamePatterns,
 // the same parse as suite-lpt-runner.mjs); any --test-concurrency[=N] flag is STRIPPED (the scheduler
@@ -46,7 +57,10 @@
 import { run } from "node:test";
 import { spec } from "node:test/reporters";
 import { Transform } from "node:stream";
+import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { classifyFile, type DeclaredGroup } from "./runner-grouping.ts";
+import { loadDurationAverages, orderByLpt } from "./suite-lpt-order.ts";
 
 export type SuiteGroup = "serial" | "lowconc" | "main";
 export const SUITE_GROUPS: SuiteGroup[] = ["serial", "lowconc", "main"];
@@ -187,6 +201,66 @@ export function simulateMinLock(budgets: SchedulerBudgets, groups: GroupQueues, 
     for (const [f, end] of [...running]) if (end === t) running.delete(f);
   }
   return t;
+}
+
+// ── classification + LPT layer (gap-suite-classification-lpt-scheduler-ts-ization) ────────────────
+// The scheduler's input is now the RAW deduped file list. This layer classifies each file into its
+// suite bucket (product+engine → main, serial → serial, lowconc → lowconc), applies the optional
+// --groups filter, and LPT-orders each bucket off the EXISTING verification-round carrier. The
+// classification semantics are byte-identical to runner-grouping-metadata.mjs (the metadata modes'
+// single-pass classifier) — classifyFile here is that same groupOf + binary-detect + fail-closed.
+
+/** Map a declared test group to its three-bucket suite group (product/engine collapse to main). */
+export function toSuiteGroup(g: DeclaredGroup): SuiteGroup {
+  if (g === "serial") return "serial";
+  if (g === "lowconc") return "lowconc";
+  return "main";
+}
+
+/** Parse a `--groups` csv (product,engine,serial,lowconc) into the set of suite buckets it selects.
+ *  product/engine → main; an unrecognized token matches nothing (a bogus --group selects no files —
+ *  the same "no test files matched" behavior as the old select_files over an unknown group). */
+export function groupsArgToSuiteGroups(csv: string): Set<SuiteGroup> {
+  const set = new Set<SuiteGroup>();
+  for (const tok of csv.split(",")) {
+    const t = tok.trim();
+    if (t === "serial") set.add("serial");
+    else if (t === "lowconc") set.add("lowconc");
+    else if (t === "product" || t === "engine") set.add("main");
+  }
+  return set;
+}
+
+export interface ClassifyOptions {
+  /** The LPT carrier root (the MAIN checkout — where .quay/verification-round.jsonl lives) and the
+   *  key-normalization root for orderByLpt. */
+  root: string;
+  rounds: number;
+  lptEnabled: boolean;
+  /** Optional `--groups` csv; undefined = all four groups (product,engine,serial,lowconc). */
+  groups?: string;
+}
+
+/** classify + filter + LPT-order the raw file list into the three per-bucket queues. Scheduling-only:
+ *  every retained file appears in exactly one bucket exactly once — a bug here can drop a file only by
+ *  the explicit --groups filter (which is the SELECTION, not a scheduling accident). LPT FAIL-OPEN: an
+ *  absent/unreadable carrier yields an empty average map and orderByLpt returns the input unchanged. */
+export function classifyAndOrder(files: string[], opts: ClassifyOptions): GroupQueues {
+  const queues: GroupQueues = { serial: [], lowconc: [], main: [] };
+  const include = opts.groups ? groupsArgToSuiteGroups(opts.groups) : undefined;
+  for (const f of files) {
+    const sg = toSuiteGroup(classifyFile(f));
+    if (include && !include.has(sg)) continue;
+    queues[sg].push(f);
+  }
+  if (opts.lptEnabled) {
+    const carrier = path.join(opts.root, ".quay", "verification-round.jsonl");
+    const avg = loadDurationAverages(carrier, opts.root, opts.rounds);
+    queues.serial = orderByLpt(queues.serial, avg, opts.root);
+    queues.lowconc = orderByLpt(queues.lowconc, avg, opts.root);
+    queues.main = orderByLpt(queues.main, avg, opts.root);
+  }
+  return queues;
 }
 
 // ── execution layer ──────────────────────────────────────────────────────────────────────────────
@@ -351,9 +425,21 @@ function emitGroup(group: SuiteGroup, concurrency: number, st: GroupStats): void
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 
-function parseArgs(argv: string[]): { budgets: SchedulerBudgets; testNamePatterns: string[] } {
+function parseArgs(argv: string[]): {
+  budgets: SchedulerBudgets;
+  testNamePatterns: string[];
+  root: string;
+  mainRoot: string;
+  groups?: string;
+  rounds: number;
+} {
   const budgets: SchedulerBudgets = { serial: 1, lowconc: 1, main: 1 };
   const testNamePatterns: string[] = [];
+  let root = process.cwd();
+  let mainRoot = "";
+  let groups: string | undefined;
+  let rounds = Number(process.env.QUAY_TEST_LPT_ROUNDS);
+  if (!Number.isInteger(rounds) || rounds < 1) rounds = 3;
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--serial-concurrency" && i + 1 < argv.length) {
@@ -363,7 +449,23 @@ function parseArgs(argv: string[]): { budgets: SchedulerBudgets; testNamePattern
     } else if (a === "--main-concurrency" && i + 1 < argv.length) {
       budgets.main = Math.max(1, Number(argv[++i]) || 1);
     } else if (a === "--root" && i + 1 < argv.length) {
-      i++; // consumed (cwd-independent; the scheduler does not read the carrier)
+      root = argv[++i];
+    } else if (a.startsWith("--root=")) {
+      root = a.slice("--root=".length);
+    } else if (a === "--main-root" && i + 1 < argv.length) {
+      mainRoot = argv[++i]; // the LPT carrier root (main checkout's .quay/verification-round.jsonl)
+    } else if (a.startsWith("--main-root=")) {
+      mainRoot = a.slice("--main-root=".length);
+    } else if (a === "--groups" && i + 1 < argv.length) {
+      groups = argv[++i];
+    } else if (a.startsWith("--groups=")) {
+      groups = a.slice("--groups=".length);
+    } else if (a === "--rounds" && i + 1 < argv.length) {
+      const n = Number(argv[++i]);
+      if (Number.isInteger(n) && n >= 1) rounds = n;
+    } else if (a.startsWith("--rounds=")) {
+      const n = Number(a.slice("--rounds=".length));
+      if (Number.isInteger(n) && n >= 1) rounds = n;
     } else if (a === "--test-concurrency") {
       if (i + 1 < argv.length) i++; // strip the space-spelling value (the scheduler owns concurrency)
     } else if (a.startsWith("--test-concurrency=")) {
@@ -376,42 +478,45 @@ function parseArgs(argv: string[]): { budgets: SchedulerBudgets; testNamePattern
       // unknown pass-through flag — skip (no run() equivalent), same as suite-lpt-runner.mjs parseRunnerArgs
     }
   }
-  return { budgets, testNamePatterns };
+  return { budgets, testNamePatterns, root, mainRoot: mainRoot || root, groups, rounds };
 }
 
-/** Read `group\tpath` lines from stdin (already LPT-ordered by scripts/test.sh). */
-async function readManifest(): Promise<GroupQueues> {
+/** Read the RAW deduped file list from stdin (one path per line — build_deduped_files' realpaths). */
+async function readFiles(): Promise<string[]> {
   const raw = await new Promise<string>((resolve) => {
     const chunks: Buffer[] = [];
     process.stdin.on("data", (c) => chunks.push(Buffer.from(c)));
     process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
   });
-  const groups: GroupQueues = { serial: [], lowconc: [], main: [] };
-  for (const line of raw.split("\n")) {
-    const idx = line.indexOf("\t");
-    if (idx <= 0) continue;
-    const group = line.slice(0, idx) as SuiteGroup;
-    const file = line.slice(idx + 1).trim();
-    if (!file || !SUITE_GROUPS.includes(group)) continue;
-    groups[group].push(file);
-  }
-  return groups;
+  return raw.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
 }
 
 async function main(argv: string[]): Promise<number> {
   if (argv.includes("--help") || argv.includes("-h")) {
     process.stderr.write(
       "suite-scheduler.ts — unified group-budget suite scheduler (gap-suite-dynamic-waterline-scheduler)\n" +
-        "usage: <group\\tpath lines on stdin> | node suite-scheduler.ts --root <repo> \\\n" +
-        "         --serial-concurrency <S> --lowconc-concurrency <L> --main-concurrency <M> [<node --test flags...>]\n",
+        "usage: <raw file paths on stdin, one per line> | node suite-scheduler.ts \\\n" +
+        "         --root <repo> --main-root <main-checkout> \\\n" +
+        "         --serial-concurrency <S> --lowconc-concurrency <L> --main-concurrency <M> \\\n" +
+        "         [--groups <csv>] [--rounds <N>] [<node --test flags...>]\n",
     );
     return 0;
   }
-  const { budgets, testNamePatterns } = parseArgs(argv);
-  const groups = await readManifest();
+  const { budgets, testNamePatterns, mainRoot, groups: groupsArg, rounds } = parseArgs(argv);
+  const files = await readFiles();
+  if (files.length === 0) {
+    process.stderr.write("suite-scheduler: no test files on stdin\n");
+    return 2;
+  }
+  const groups = classifyAndOrder(files, {
+    root: mainRoot,
+    rounds,
+    lptEnabled: process.env.QUAY_TEST_LPT_ORDER !== "0",
+    groups: groupsArg,
+  });
   const total = groups.serial.length + groups.lowconc.length + groups.main.length;
   if (total === 0) {
-    process.stderr.write("suite-scheduler: no test files on stdin\n");
+    process.stderr.write(`suite-scheduler: no test files matched --groups '${groupsArg ?? "all"}' on stdin\n`);
     return 2;
   }
   process.stderr.write(

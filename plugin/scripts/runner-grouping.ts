@@ -1,174 +1,192 @@
-# runner-grouping.ts — the --group / __GROUP__ grouping mechanism, extracted from scripts/test.sh
-# (gap-suite-hub-file-responsibility-strip).
-#
-# WHY A SEPARATE FILE: these functions decide WHICH test files run for a given --group — harness-critical,
-# so this file IS a hub (suite-bucket-hub-list.ts HUB_FILES glob `plugin/scripts/runner-grouping*` matches
-# it; a change here still forces the full suite). Extracting them out of scripts/test.sh shrinks that
-# monolith WITHOUT weakening the hub rule. NOTE: this file is SOURCED by scripts/test.sh — bash does not
-# care about the extension, and the `.ts` name is what makes the previously-dead `runner-grouping*` glob
-# in HUB_FILES finally match a real file.
-#
-# Moved verbatim from scripts/test.sh lines 1292-1416: group_of / check_group_declarations /
-# effective_groups / in_group / is_default_set / select_files / list_groups. build_deduped_files
-# deliberately STAYS in scripts/test.sh (its `local glob=(...)` line is the ADR-004 single-source
-# canonical test glob parsed by four checkers). check_group_declarations still invokes
-# plugin/scripts/test-group-downgrade-check.ts.
+#!/usr/bin/env node
+// runner-grouping.ts — the --group / __GROUP__ grouping mechanism, NOW a real TypeScript module
+// (gap-suite-classification-lpt-scheduler-ts-ization).
+//
+// This file USED to be bash-under-a-.ts-name: scripts/test.sh `source`d it (bash does not care about
+// the extension) to get the classification/selection functions that decide WHICH test files run for a
+// given --group. The ts-ization task moved those functions OUT of bash and INTO real TypeScript, so:
+//   - scripts/test.sh no longer `source`s this file — it calls the CLI (below) as a thin forwarder, and
+//     the pure functions are IMPORTED by suite-scheduler.ts (which now does classification → LPT →
+//     scheduling internally, off a RAW file list).
+//   - the `.ts` name is no longer a "make the HUB glob match a real file" trick — it is a real module.
+//
+// WHY A HUB FILE: these functions decide WHICH tests run, so this file is harness-critical — a change
+// still forces the full suite (suite-bucket-hub-list.ts HUB_FILES glob `plugin/scripts/runner-grouping*`
+// matches it).
+//
+// CLASSIFICATION SEMANTICS ARE BYTE-IDENTICAL to the OLD grep|awk (and to
+// plugin/scripts/runner-grouping-metadata.mjs, which is the one-pass realpath-dedup + @test-group reader
+// test.sh still uses for the metadata modes — that helper's groupOf is THIS module's groupOf):
+//   - groupOf(content) — the first `@test-group` + inline whitespace + a lowercase word; awk's 2nd field.
+//     A MISSING declaration defaults to engine (AC7). An UNRECOGNIZED name is FAIL-CLOSED (exit 3) in
+//     classifyFile — never silently degraded to engine (the r10 dropped-group regression must stay hard).
+//   - A file that is BINARY (a NUL byte in its first 32 KiB) is classified engine, never its
+//     (unreachable) declaration — the byte-identical mirror of GNU grep's binary detection
+//     (observation.test.mjs is the one real case: 8 NUL bytes inside a `@test-group product` file).
+//
+// TWO layers:
+//   1. PURE functions (groupOf / classifyFile / effectiveGroups / inGroup / isDefaultSet / selectFiles /
+//      listGroups) — imported by suite-scheduler.ts and unit-tested.
+//   2. The CLI — test.sh's thin-forward surface for the metadata modes (--list-groups / --list-files)
+//      and the retired legacy fallback's bucket split. It consumes the `path<TAB>group` metadata that
+//      build_deduped_files produces (via runner-grouping-metadata.mjs), so it never re-reads a file —
+//      classification stays a single in-process pass.
 
-# ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
+import fs from "node:fs";
+import { isDirectEntry } from "./gate-script-base.ts";
 
-# group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
-# Valid groups: product|engine (the default-run body) + serial (the load-sensitive
-# concurrency-1 phase — nested-suite-spawn + real-wall-clock-wait + the real-install
-# install/quay-init family, gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests +
-# gap-install-family-tests-rotate-flakes-under-full-suite) + lowconc (the hermetic-but-load-sensitive
-# concurrency-3 phase, gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). A MISSING
-# declaration defaults to
-# engine (AC7). An UNRECOGNIZED group name is FAIL-CLOSED, never silently degraded to engine:
-# the r10 regression (four commits b209f4fd→174badc0→e92c54d8→c7176a37 each dropping one group
-# from this case, so serial/lowconc silently folded into the concurrency-N body and the isolation
-# guarantee was cancelled WITHOUT going red) must be a hard failure, not a silent pass.
-# `governance` is RETIRED (gap-retire-governance-group-merge-into-bucket): it is no longer a
-# recognized group — a file still declaring it now hits the FAIL-CLOSED branch.
-group_of() {
-  local f="$1" g=""
-  # gap-suite-metadata-query-subprocess-spawn: prefer the in-process cache populated by
-  # build_deduped_files (scripts/test.sh) — the metadata modes + full-suite path already warm it, so
-  # this is a bash associative-array lookup instead of a per-file `grep|awk` spawn. The guard on
-  # _RG_CACHE_READY keeps a STANDALONE sourcing (no cache — suite-bucket-load-sensitive-isolation
-  # AC5 sources this file alone) on the grep fallback; the `-z` re-check also covers a cache miss
-  # (a file outside the canonical glob, e.g. the --buckets path).
-  if [ -n "${_RG_CACHE_READY:-}" ]; then
-    g="${_RG_GROUP["$f"]:-}"
-  fi
-  if [ -z "${g:-}" ]; then
-    g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
-  fi
-  case "${g:-}" in
-    product|engine|serial|lowconc) echo "$g" ;;
-    "")
-      # No declaration at all — intentional default to engine (AC7). The undeclared → engine path
-      # is a real rule, distinct from an unknown-group typo.
-      echo "engine" ;;
-    *)
-      echo "scripts/test.sh: group_of: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|serial|lowconc); refusing to silently degrade it to engine" >&2
-      exit 3
-      ;;
-  esac
+/** A test file's declared group (the four recognized groups; product+engine collapse to "main" in the
+ *  scheduler's three-bucket view, serial/lowconc map 1:1). */
+export type DeclaredGroup = "product" | "engine" | "serial" | "lowconc";
+export const RECOGNIZED_GROUPS: readonly DeclaredGroup[] = ["product", "engine", "serial", "lowconc"];
+const RECOGNIZED = new Set<string>(RECOGNIZED_GROUPS);
+
+export function isRecognizedGroup(g: string): g is DeclaredGroup {
+  return RECOGNIZED.has(g);
 }
 
-# check_group_declarations — pre-flight fail-closed guard (gap-verify-round-9-failures-from-recent-
-# changes-fix-batch, AC0b): every test file's declared `// @test-group` must be one of the five
-# recognized groups. A file declaring an UNKNOWN group is a dropped/mis-typed group — the r10
-# regression (b209f4fd→174badc0→e92c54d8→c7176a37 each dropping one group from group_of's case)
-# silently folded serial/lowconc into the concurrency-N engine body and cancelled the isolation
-# guarantee WITHOUT going red. That must be a HARD failure, not a silent pass. group_of's own
-# `*)` branch is defense-in-depth (it runs inside a command substitution, so its exit cannot abort
-# the parent); this check runs directly in the dispatch path and exits the script.
-check_group_declarations() {
-  # gap-suite-metadata-query-subprocess-spawn: warm the in-process cache ONCE in the PARENT shell
-  # (build_deduped_files runs the single node pass that realpath-dedups AND validates every file's
-  # @test-group, fail-closing on an unknown group). The loop below then reads the cached group per
-  # file instead of re-spawning `grep|awk` — and because the helper already fail-closed, the `*)`
-  # branch here is defense-in-depth, mirroring group_of's own.
-  build_deduped_files > /dev/null
-  local f g
-  while IFS= read -r f; do
-    g="${_RG_GROUP["$f"]:-}"
-    case "${g:-}" in
-      ""|product|engine|serial|lowconc) ;;
-      *)
-        echo "scripts/test.sh: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|serial|lowconc); refusing to silently degrade it to engine" >&2
-        exit 3
-        ;;
-    esac
-  done < <(build_deduped_files)
-  # gap-test-group-downgrade-no-guard (AC1): a LEGAL-but-degrading re-tag
-  # (product/engine → serial/lowconc) silently removes a test from the default set —
-  # check_group_declarations now ALSO runs the downgrade detector
-  # (plugin/scripts/test-group-downgrade-check.ts), which requires a commit-message reason marker
-  # ("@test-group-downgrade") for any default-set escape after the enforcement baseline.
-  # stdout is redirected to stderr: this function also runs in the metadata modes
-  # (--list-groups/--list-files) whose stdout IS the data (file list / group counts) — a checker
-  # line leaking into it would be miscounted as a test file (test-coverage-check AC5 423 vs 421).
-  # Exit-code split (2026-08-28, list-files=0 CI root cause): the guard's 1 = downgrade found →
-  # HARD block; 2 = NOT-EVALUATED (enforcement baseline missing in a shallow/partial checkout) →
-  # warn-but-continue. Conflating the two (the old bare `|| exit`) made a shallow clone kill
-  # --list-files/--list-groups with EMPTY output, which broke test-coverage-check --selftest AC5
-  # (canonical=540 list-files=0) — and more importantly hid the guard's own can't-evaluate state
-  # behind a generic non-zero exit instead of the visible NOT-EVALUATED message (硬规则 3b).
-  # ⛔ errexit-safe: test.sh runs `set -euo pipefail`, so the guard call MUST capture its exit
-  # code without letting a non-zero result abort the script (a bare call would exit the script on
-  # the guard's exit 2 before the rc check runs). ⛔ NOT the pipe-ampersand rc-capture spelling
-  # (instrument-failure-check FAMILY-3 fires on it); the if/else form below is both errexit-safe
-  # and FAMILY-3-clean.
-  local dg_rc=0
-  if node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-group-downgrade-check.ts" --root "${repo_root}" >&2; then
-    :
-  else
-    dg_rc=$?
-  fi
-  if [ "$dg_rc" -eq 1 ]; then exit 1; fi
+/** groupOf(content) — mirror of the OLD grep|awk and of runner-grouping-metadata.mjs groupOf:
+ *     grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" | awk '{print $2}'
+ *  The first `@test-group` + inline whitespace + a lowercase word; awk's 2nd whitespace field is the
+ *  group name. POSIX [[:space:]] within a grep line == [ \t\v\f\r]. An absent declaration → "engine"
+ *  (AC7); an UNRECOGNIZED name is returned as-is so the caller can FAIL-CLOSED (never silently degrade). */
+export function groupOf(content: string): string {
+  const m = content.match(/@test-group[ \t\v\f\r]+[a-z]+/);
+  if (!m) return "engine";
+  const g = m[0].split(/[ \t]+/)[1];
+  return g ?? "engine";
 }
 
-# build_deduped_files — deliberately STAYS in scripts/test.sh (NOT moved here): its `local glob=(...)`
-# line is the SINGLE-SOURCE (ADR-004) canonical test glob that FOUR checkers mechanically parse from
-# scripts/test.sh (test-framework-policy-check.ts / test-coverage-check.ts / test-impl-census-check.ts /
-# test-group-downgrade-check.ts). Moving it here would break those checkers' glob derivation (0 files).
-# The functions below (check_group_declarations / select_files / list_groups) call build_deduped_files
-# by NAME — bash resolves it at CALL time, so it is available even though it is defined in test.sh.
-
-# effective_groups — echo the groups a given run should include (default product,engine, AC4).
-effective_groups() {
-  echo "product,engine"
+function failClosed(file: string, g: string): never {
+  const msg =
+    `scripts/test.sh: FAIL-CLOSED: '${file}' declares unknown @test-group '${g}' — a group was dropped or mis-typed (recognized: product|engine|serial|lowconc); refusing to silently degrade it to engine`;
+  process.stderr.write(msg + "\n");
+  process.exit(3);
 }
 
-# in_group <group> <csv> — return 0 iff group is in the comma-separated list.
-in_group() {
-  local g="$1" csv="$2"
-  [[ ",${csv}," == *",${g},"* ]]
+/** classifyFile(file) — read a file, binary-detect (NUL in first 32KiB → engine, byte-identical to GNU
+ *  grep), then groupOf; an UNKNOWN name FAIL-CLOSES (exit 3). This is the per-file classification
+ *  suite-scheduler.ts runs over its RAW file list (the scheduler is the new canonical classifier). */
+export function classifyFile(file: string): DeclaredGroup {
+  let buf: Buffer;
+  try {
+    buf = fs.readFileSync(file);
+  } catch {
+    buf = Buffer.alloc(0); // unreadable → undeclared (grep 2>/dev/null → empty → engine)
+  }
+  if (buf.subarray(0, 32768).includes(0)) return "engine";
+  const g = groupOf(buf.toString("utf8"));
+  if (!isRecognizedGroup(g)) failClosed(file, g);
+  return g;
 }
 
-# is_default_set <csv> — return 0 iff csv is exactly the default set {product,engine} (AC6).
-is_default_set() {
-  [ "${1:-}" = "product,engine" ]
+/** effectiveGroups() — the default run's group set (AC4): the product+engine body. `serial`/`lowconc`
+ *  are their own phases, never the default body. */
+export function effectiveGroups(): string {
+  return "product,engine";
 }
 
-# select_files <groups-csv> — echo the files to run for the given groups (AC4/AC6).
-# `governance` passthrough removed (gap-retire-governance-group-merge-into-bucket): governance is no
-# longer a select/skip group, so the only selection semantics here are exact group membership.
-select_files() {
-  # gap-suite-metadata-query-subprocess-spawn: warm the in-process cache in the PARENT shell (a
-  # no-op when already warm) so the loop reads the cached group directly instead of forking a
-  # `$(group_of ...)` command substitution per file (~550 forks/call). check_group_declarations
-  # already warms it on every real path; this defensive warm keeps a direct standalone call correct.
-  build_deduped_files > /dev/null
-  local groups="$1" f g
-  while IFS= read -r f; do
-    g="${_RG_GROUP["$f"]:-}"
-    if in_group "$g" "$groups"; then
-      printf '%s\n' "$f"
-    fi
-  done < <(build_deduped_files)
+/** inGroup(group, csv) — true iff group ∈ the comma-separated list. */
+export function inGroup(group: string, csv: string): boolean {
+  return `,${csv},`.includes(`,${group},`);
 }
 
-# list_groups — per-group counts over the full deduped glob (AC10). `serial` and `lowconc` are real
-# groups (the load-sensitive families routed to their own phases), so the default-set partition
-# product+engine no longer equals total — serial and lowconc are the 3rd and 4th parts.
-list_groups() {
-  # gap-suite-metadata-query-subprocess-spawn: warm the in-process cache in the PARENT shell (no-op
-  # when already warm) so the loop reads the cached group directly, not via a per-file
-  # `$(group_of ...)` fork. check_group_declarations already warms it on every real path.
-  build_deduped_files > /dev/null
-  declare -A counts=([product]=0 [engine]=0 [serial]=0 [lowconc]=0)
-  local f g
-  while IFS= read -r f; do
-    g="${_RG_GROUP["$f"]:-}"
-    counts[$g]=$(( ${counts[$g]:-0} + 1 ))
-  done < <(build_deduped_files)
-  printf 'product:    %d\n' "${counts[product]:-0}"
-  printf 'engine:     %d\n' "${counts[engine]:-0}"
-  printf 'serial:     %d\n' "${counts[serial]:-0}"
-  printf 'lowconc:    %d\n' "${counts[lowconc]:-0}"
-  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[serial]:-0} + ${counts[lowconc]:-0} ))
-  printf 'total:      %d (deduped by realpath)\n' "$total"
+/** isDefaultSet(csv) — true iff csv is exactly the default set {product,engine} (AC6). */
+export function isDefaultSet(csv: string): boolean {
+  return csv === "product,engine";
+}
+
+/** A `[path, group]` entry — the shape of build_deduped_files' metadata (runner-grouping-metadata.mjs
+ *  outputs `realpath<TAB>group` per deduped file). */
+export type GroupEntry = [string, string];
+
+/** selectFiles(entries, csv) — the files whose group ∈ csv, in input order (AC4/AC6). */
+export function selectFiles(entries: GroupEntry[], csv: string): string[] {
+  const out: string[] = [];
+  for (const [file, g] of entries) if (inGroup(g, csv)) out.push(file);
+  return out;
+}
+
+/** listGroups(entries) — per-group counts over the deduped glob (AC10). */
+export function listGroups(entries: GroupEntry[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const g of RECOGNIZED_GROUPS) counts.set(g, 0);
+  for (const [, g] of entries) counts.set(g, (counts.get(g) ?? 0) + 1);
+  return counts;
+}
+
+// ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
+
+function readStdin(): Promise<string> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    process.stdin.on("data", (c) => chunks.push(Buffer.from(c)));
+    process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+  });
+}
+
+/** Parse `path<TAB>group` lines (the runner-grouping-metadata.mjs output). */
+function parseEntries(raw: string): GroupEntry[] {
+  const entries: GroupEntry[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line) continue;
+    const idx = line.indexOf("\t");
+    if (idx <= 0) continue;
+    const file = line.slice(0, idx);
+    const g = line.slice(idx + 1);
+    if (!file || !g) continue;
+    entries.push([file, g]);
+  }
+  return entries;
+}
+
+async function main(argv: string[]): Promise<number> {
+  const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) {
+    process.stderr.write(
+      "runner-grouping.ts — the --group classification/selection mechanism (TS, gap-suite-classification-lpt-scheduler-ts-ization)\n" +
+        "usage:\n" +
+        "  <path\\tgroup lines on stdin> | node runner-grouping.ts --list-groups\n" +
+        "  <path\\tgroup lines on stdin> | node runner-grouping.ts --select <group[,group...]>\n" +
+        "  <raw paths on stdin>         | node runner-grouping.ts --classify\n" +
+        "  node runner-grouping.ts --effective-groups\n",
+    );
+    return 0;
+  }
+  if (args[0] === "--effective-groups") {
+    process.stdout.write(effectiveGroups() + "\n");
+    return 0;
+  }
+  const raw = await readStdin();
+  if (args[0] === "--list-groups") {
+    const entries = parseEntries(raw);
+    const counts = listGroups(entries);
+    let total = 0;
+    for (const g of RECOGNIZED_GROUPS) {
+      const n = counts.get(g) ?? 0;
+      total += n;
+      process.stdout.write(`${g}:    ${n}\n`);
+    }
+    process.stdout.write(`total:      ${total} (deduped by realpath)\n`);
+    return 0;
+  }
+  if (args[0] === "--select" && args.length >= 2) {
+    const csv = args[1];
+    const entries = parseEntries(raw);
+    for (const file of selectFiles(entries, csv)) process.stdout.write(file + "\n");
+    return 0;
+  }
+  if (args[0] === "--classify") {
+    // RAW paths in, `path<TAB>group` out — the retired legacy bucket split's classification source
+    // (fail-closed on an unknown group, same as the old group_of).
+    const paths = raw.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+    for (const p of paths) process.stdout.write(`${p}\t${classifyFile(p)}\n`);
+    return 0;
+  }
+  process.stderr.write("runner-grouping.ts: unknown/missing subcommand (see --help)\n");
+  return 2;
+}
+
+if (isDirectEntry(import.meta, undefined, "runner-grouping")) {
+  main(process.argv).then((code) => process.exit(code));
 }

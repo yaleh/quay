@@ -781,38 +781,55 @@ full_suite_lock_release() {
   FULL_SUITE_LOCK_FDS=()
 }
 
-# ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
-# group_of / check_group_declarations / effective_groups / in_group / is_default_set / select_files /
-# list_groups extracted to plugin/scripts/runner-grouping.ts (gap-suite-hub-file-responsibility-strip):
-# the grouping mechanism decides WHICH tests run, so it is a HUB file (a change still forces the full
-# suite — the `runner-grouping*` glob in suite-bucket-hub-list.ts HUB_FILES matches it). Sourced here so
-# the dispatch path below keeps calling them by name; behavior is byte-identical.
-source "${repo_root}/plugin/scripts/runner-grouping.ts"
+# ── group resolution (gap-test-suite-has-no-layer-grouping) ───────────────────────────────────────
+# Classification MOVED to TS (gap-suite-classification-lpt-scheduler-ts-ization): group_of /
+# check_group_declarations / effective_groups / in_group / is_default_set / select_files / list_groups
+# previously lived in plugin/scripts/runner-grouping.ts as a bash `source`d library; that file is now a
+# REAL TypeScript module (suite-scheduler.ts imports its classifyFile; the metadata modes + legacy
+# fallback call its CLI). scripts/test.sh keeps ONLY the trivial flag helpers inline below —
+# effective_groups / in_group / is_default_set are STRING tests on the user's --group flag, never
+# per-file classification — and the classification (which file declares which @test-group) lives in TS
+# (runner-grouping-metadata.mjs for the one-pass dedup+classify, suite-scheduler.ts's classifyFile for
+# the scheduler's raw list). The grouping mechanism stays a HUB (suite-bucket-hub-list.ts's
+# `runner-grouping*` glob still matches the real module).
+
+# effective_groups — the default run's group set (product,engine, AC4). serial/lowconc run in their own
+# phases, never the default body.
+effective_groups() {
+  echo "product,engine"
+}
+
+# in_group <group> <csv> — return 0 iff group is in the comma-separated list.
+in_group() {
+  local g="$1" csv="$2"
+  [[ ",${csv}," == *",${g},"* ]]
+}
+
+# is_default_set <csv> — return 0 iff csv is exactly the default set {product,engine} (AC6).
+is_default_set() {
+  [ "${1:-}" = "product,engine" ]
+}
 
 # ── in-process metadata cache (gap-suite-metadata-query-subprocess-spawn) ────────────────────────
-# build_deduped_files populates these ONCE via plugin/scripts/runner-grouping-metadata.mjs (a single
-# node spawn doing realpath dedup + @test-group read, replacing the ~1100-1600 per-file `realpath` /
-# `grep|awk` subprocess spawns the metadata modes --list-files/--list-groups previously paid).
-# group_of / check_group_declarations (sourced runner-grouping.ts) read _RG_GROUP at call time and
-# guard on _RG_CACHE_READY, so a STANDALONE sourcing (no cache, no repo_root) still falls back to
-# the old grep (suite-bucket-load-sensitive-isolation AC5 sources runner-grouping.ts alone).
+# build_deduped_files populates _RG_META ONCE via plugin/scripts/runner-grouping-metadata.mjs (a single
+# node spawn doing realpath dedup + @test-group read + FAIL-CLOSED on unknown, replacing the
+# ~1100-1600 per-file `realpath` / `grep|awk` subprocess spawns the metadata modes previously paid).
+# _RG_META is `realpath<TAB>group` per deduped file; the runner-grouping.ts CLI (--list-groups / --select)
+# and the retired legacy fallback consume it, so a metadata query never re-spawns the node pass.
 declare -a _RG_FILES=()
-declare -A _RG_GROUP=()
-_RG_CACHE_READY=""
+_RG_META=""
+_RG_META_READY=""
 
-# build_deduped_files — echo the union glob, deduped by realpath (AC3). One file per line.
+# build_deduped_files — echo the union glob, deduped by realpath (AC3), as `realpath<TAB>group` per line.
 # DELIBERATELY KEPT HERE (not moved to runner-grouping.ts): its canonical test-glob declaration line
 # is the ADR-004 SINGLE-SOURCE that FOUR checkers parse from scripts/test.sh
 # (test-framework-policy-check.ts / test-coverage-check.ts / test-impl-census-check.ts /
-# test-group-downgrade-check.ts) — moving it would break their glob derivation (0 files). The moved
-# functions call it by NAME (bash resolves at call time, so this later definition is fine).
-# gap-suite-metadata-query-subprocess-spawn: the glob is expanded by bash (free, byte-identical
-# order) and handed to ONE in-process node pass that realpath-dedups AND reads each file's
-# @test-group. The result is cached (_RG_FILES/_RG_GROUP) so the metadata modes' repeated
-# check_group_declarations + select_files/list_groups loops reuse it instead of re-spawning.
+# test-group-downgrade-check.ts) — moving it would break their glob derivation (0 files).
+# gap-suite-metadata-query-subprocess-spawn: the glob is expanded by bash (free, byte-identical order)
+# and handed to ONE in-process node pass that realpath-dedups AND reads each file's @test-group.
 build_deduped_files() {
-  if [ -n "${_RG_CACHE_READY:-}" ]; then
-    printf '%s\n' "${_RG_FILES[@]}"
+  if [ -n "${_RG_META_READY:-}" ]; then
+    printf '%s\n' "${_RG_META}"
     return 0
   fi
   shopt -s nullglob
@@ -827,16 +844,32 @@ build_deduped_files() {
     rc=$?
     exit "$rc"
   fi
-  _RG_CACHE_READY=1
+  _RG_META="${meta}"
+  _RG_META_READY=1
   _RG_FILES=()
-  _RG_GROUP=()
-  local f g
-  while IFS=$'\t' read -r f g; do
+  local f
+  while IFS=$'\t' read -r f _; do
     [ -n "${f}" ] || continue
     _RG_FILES+=("$f")
-    _RG_GROUP["$f"]="$g"
   done <<< "${meta}"
-  printf '%s\n' "${_RG_FILES[@]}"
+  printf '%s\n' "${_RG_META}"
+}
+
+# check_group_declarations — pre-flight fail-closed guard (AC0b). The UNKNOWN-group half is now
+# fail-closed inside build_deduped_files (runner-grouping-metadata.mjs exits 3 on an unknown
+# @test-group); the downgrade half still runs test-group-downgrade-check.ts. ⛔ errexit-safe: test.sh
+# runs `set -euo pipefail`, so the guard MUST capture its exit code without a non-zero result aborting
+# the script (the if/else form is both errexit-safe and FAMILY-3-clean). Exit-code split: 1 = downgrade
+# found → HARD block; 2 = NOT-EVALUATED (baseline missing) → warn-but-continue.
+check_group_declarations() {
+  build_deduped_files > /dev/null
+  local dg_rc=0
+  if node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-group-downgrade-check.ts" --root "${repo_root}" >&2; then
+    :
+  else
+    dg_rc=$?
+  fi
+  if [ "$dg_rc" -eq 1 ]; then exit 1; fi
 }
 
 # build_dist_once — build dist/quay.js ONCE per invocation, before any test runs
@@ -924,17 +957,15 @@ mark_nested() {
   export QUAY_TEST_NESTED_ROOT="$repo_root"
 }
 
-# lpt_reorder_files <name-ref> — LPT-reorder the named array IN PLACE (longest-KNOWN first)
-# (gap-m-bucket-long-tail-lpt-scheduling + gap-suite-lpt-full-bucket-run-selected). Shared by the
-# --buckets M-bucket path AND the run_selected full-suite default path (bucket_full=1 + the no-args
-# full entry), so the LPT ordering has ONE definition point — never two inline copies that drift.
-# Durations come from the EXISTING carrier .quay/verification-round.jsonl perFile[].durationMs
-# (rolling average of the last QUAY_TEST_LPT_ROUNDS rounds) — no new measurer. Scheduling-only:
-# every file is emitted exactly once, so a bug can never drop a test (pass/fail-neutral). FAIL-OPEN:
-# no history / helper failure / a short result ⇒ keep the original order. QUAY_TEST_LPT_ORDER=0 is
-# the one-key rollback. Callers hand the array NAME (nameref) so the reorder lands back in the
-# caller's own array (mapfile on the nameref writes through to the referenced variable).
-lpt_reorder_files() {
+# lpt_order_files <name-ref> — THIN FORWARDER to plugin/scripts/suite-lpt-order.ts (the TS LPT engine,
+# gap-suite-classification-lpt-scheduler-ts-ization): reorder the named array IN PLACE, longest-KNOWN
+# first. The DEFAULT path (the unified scheduler) now LPTs internally via suite-scheduler.ts's
+# classifyAndOrder — this helper is used ONLY by the retired legacy fallback (QUAY_SUITE_SCHEDULER=0),
+# which still runs the phased serial→lowconc→main execution. Durations come from the EXISTING carrier
+# .quay/verification-round.jsonl perFile[].durationMs (rolling average of the last QUAY_TEST_LPT_ROUNDS
+# rounds) — no new measurer. Scheduling-only (every file emitted exactly once) + FAIL-OPEN (no history /
+# helper failure / short result ⇒ original order). QUAY_TEST_LPT_ORDER=0 is the one-key rollback.
+lpt_order_files() {
   local -n _lpt_arr="$1"
   if [ "${QUAY_TEST_LPT_ORDER:-1}" = "1" ] && [ "${#_lpt_arr[@]}" -gt 1 ]; then
     local _lpt_out
@@ -993,7 +1024,7 @@ run_selected() {
   oh_t4=$(_oh_mark)
   export QUAY_TEST_GROUPS="$groups"
   local files=() f
-  while IFS= read -r f; do files+=("$f"); done < <(select_files "$groups")
+  while IFS= read -r f; do files+=("$f"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "$groups")
   if [ "${#files[@]}" -eq 0 ]; then
     echo "scripts/test.sh: no test files matched groups '$groups' (packages/*/test/*.test.mjs, plugin/test/*.test.mjs, experiments/quay-perpetual-stream/test/*.test.mjs)" >&2
     exit 1
@@ -1068,7 +1099,7 @@ run_selected() {
     # must not leave the serial files' verdict unknown (gap-post-merge-verification-failure-batch
     # AC3: round 95 skipped serial when main was red, so serial failures were invisible).
     local serial_files=() sf serial_code
-    while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
+    while IFS= read -r sf; do serial_files+=("$sf"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "serial")
     # LOWCONC selection hoisted BEFORE the serial run so the overlap branch can launch both phases in
     # parallel. In the SEQUENTIAL branch the lowconc selection used to run right before the lowconc
     # phase; hoisting it here shifts that selection time into gap_ms_pre_to_serial (a diagnostic gap,
@@ -1076,37 +1107,39 @@ run_selected() {
     # before/after comparison metric (serial_phase_ms + lowconc_phase_ms, task constraint 3) is byte-
     # identical between this and the pre-change sequential scheduling.
     local lowconc_files=() lf lowconc_code
-    while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
+    while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "lowconc")
     # LPT order for the serial/lowconc phases (gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered):
     # these were the last bare `node --test` dispatch points on the full path — node --test re-sorts
     # positional args alphabetically, so a longest-known-first order is discarded (the serial/lowconc
     # tail waited ≈38% of the round). Reorder IN PLACE before EITHER branch (overlap/sequential) so
     # both get the LPT order, then hand to suite-lpt-runner.mjs run({files}) — the ONLY path that
     # preserves argv order. Same invariant as the main phase (membership unchanged, order only).
-    lpt_reorder_files serial_files
-    lpt_reorder_files lowconc_files
+    lpt_order_files serial_files
+    lpt_order_files lowconc_files
     # ── unified scheduler (gap-suite-dynamic-waterline-scheduler) ─────────────────────────────────
     # Replaces the phased execution BELOW (static→serial→lowconc→main + PHASE_OVERLAP + the A
-    # main-tail-overlap watcher) with ONE event-driven loop. Each file keeps its group; serial ≤
-    # $SERIAL_CONCURRENCY and lowconc ≤ $LOWCONC_CONCURRENCY run in PARALLEL (independent budgets);
-    # main fills the remaining capacity (main budget − active low-group slots), rising monotonically
-    # toward the main budget as the low groups drain. No CPU-load detection — the waterline is a
-    # STRUCTURAL guarantee that absorbs the A watcher's stall-polling. The group lists are LPT-ordered
-    # by the lpt_reorder_files calls above; the scheduler trusts the input order. ONE-KEY ROLLBACK:
-    # QUAY_SUITE_SCHEDULER=0 falls through to the legacy phased path below (RETIRED — kept only as
-    # the fallback; the A watcher's QUERY_MAIN_TAIL_OVERLAP knob is likewise retired by the scheduler).
+    # main-tail-overlap watcher) with ONE event-driven loop. Since gap-suite-classification-lpt-
+    # scheduler-ts-ization the scheduler receives the RAW deduped file list (no pre-classification, no
+    # pre-LPT): it classifies each file (product+engine → main, serial → serial, lowconc → lowconc),
+    # LPT-orders each bucket, and schedules via the waterline — serial ≤ $SERIAL_CONCURRENCY and
+    # lowconc ≤ $LOWCONC_CONCURRENCY run in PARALLEL (independent budgets), main filling the remaining
+    # capacity (main budget − active low-group slots), rising monotonically as the low groups drain. No
+    # CPU-load detection — the waterline is a STRUCTURAL guarantee that absorbs the A watcher's
+    # stall-polling. The full-suite default includes all four groups (serial/lowconc run in their own
+    # buckets); a scoped --group is the filter. ONE-KEY ROLLBACK: QUAY_SUITE_SCHEDULER=0 falls through
+    # to the legacy phased path below (RETIRED — kept only as the fallback).
     if [ "${QUAY_SUITE_SCHEDULER:-1}" = "1" ]; then
       [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
+      local sched_groups="$groups"
+      if is_default_set "$groups"; then sched_groups="product,engine,serial,lowconc"; fi
       echo "scheduler: unified group-budget scheduler (serial≤$SERIAL_CONCURRENCY lowconc≤$LOWCONC_CONCURRENCY main≤$(bucket_test_concurrency "$@"))"
-      {
-        for _schf in "${serial_files[@]}"; do printf 'serial\t%s\n' "$_schf"; done
-        for _schf in "${lowconc_files[@]}"; do printf 'lowconc\t%s\n' "$_schf"; done
-        for _schf in "${files[@]}"; do printf 'main\t%s\n' "$_schf"; done
-      } | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-scheduler.ts" \
+      printf '%s\n' "${_RG_FILES[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-scheduler.ts" \
           --root "${repo_root}" \
+          --main-root "${main_root}" \
           --serial-concurrency "$SERIAL_CONCURRENCY" \
           --lowconc-concurrency "$LOWCONC_CONCURRENCY" \
           --main-concurrency "$(bucket_test_concurrency "$@")" \
+          --groups "$sched_groups" \
           "$@"
       code=$?
       [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
@@ -1160,7 +1193,7 @@ run_selected() {
       # subshell inherits `set +e` (the enclosing full-suite block), so a red early main still writes
       # its exit code before the watcher exits.
       if [ "$MAIN_TAIL_OVERLAP" -gt 0 ]; then
-        lpt_reorder_files files
+        lpt_order_files files
         main_early_code_file="$(mktemp "${TMPDIR:-/tmp}/main-tail-overlap.XXXXXX")"
         printf '%s' "pending" > "$main_early_code_file"
         (
@@ -1235,7 +1268,7 @@ run_selected() {
     # main-tail-overlap (gap-suite-main-overlaps-load-sensitive-tail-experiment): adopt the watcher's
     # early-main verdict when it fired (a numeric exit code) and skip the normal main phase; otherwise
     # run the normal main phase. ⚠️ The `if`/`fi` below sit at the SAME indent as their body so the two
-    # pinned main-phase lines keep their original `lpt_reorder_files files` + `node --test-concurrency=
+    # pinned main-phase lines keep their original `lpt_order_files files` + `node --test-concurrency=
     # "$(bucket_test_concurrency "$@")"` adjacency — suite-lpt-order.test.mjs AC1 pins that exact
     # adjacency (do NOT re-indent those two lines, and do NOT insert a line between them).
     local _tail_skip_main=0
@@ -1251,7 +1284,7 @@ run_selected() {
       fi
     fi
     if [ "$_tail_skip_main" != "1" ]; then
-    lpt_reorder_files files
+    lpt_order_files files
     node --test-concurrency="$(bucket_test_concurrency "$@")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "$@" "${files[@]}"
     mcode=$?
     [ "$mcode" -eq 0 ] || code="$mcode"
@@ -1383,7 +1416,7 @@ if [ "${1:-}" = "--list-groups" ]; then
   # Metadata mode (AC10) — no test run, no split-or-commit scan. Always reports the FULL
   # deduped glob's per-group counts, independent of any --group.
   check_group_declarations
-  list_groups
+  build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --list-groups
   exit 0
 elif [ "${1:-}" = "--list-files" ]; then
   # Metadata mode (test support / AC6) — print the selected file list, one per line. Respects
@@ -1398,10 +1431,10 @@ elif [ "${1:-}" = "--list-files" ]; then
   # (runner-grouping AC6 pins `--group product,engine,lowconc --list-files == no-args --list-files`).
   check_group_declarations
   if [ -n "${groups}" ]; then
-    select_files "$groups"
+    build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "$groups"
   else
-    select_files "$(effective_groups)"
-    select_files "lowconc"
+    build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "$(effective_groups)"
+    build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "lowconc"
   fi
   exit 0
 elif [ -n "${groups}" ]; then
@@ -1588,9 +1621,9 @@ elif [ "${1:-}" = "--buckets" ]; then
   fi
   mapfile -t files <<< "${bucket_sel_out}"
   # LPT order (gap-m-bucket-long-tail-lpt-scheduling): reorder the M-bucket file list longest-known-
-  # first — the mechanism lives in lpt_reorder_files() (single definition point, shared with the
+  # first — the mechanism lives in lpt_order_files() (single definition point, shared with the
   # run_selected full-suite default path via gap-suite-lpt-full-bucket-run-selected).
-  lpt_reorder_files files
+  lpt_order_files files
   # AC3 (gap-suite-serial-lowconc-classification-recheck 单飞锁侧): the bucket SUCCESS path
   # (non-hub, non-zero selection) structurally bypasses run_selected() — where
   # full_suite_lock_acquire() lives — so QUAY_MAX_CONCURRENT_SUITES=1 never applied to bucket runs
@@ -1626,34 +1659,32 @@ elif [ "${1:-}" = "--buckets" ]; then
   bucket_serial_files=()
   bucket_lowconc_files=()
   bucket_main_files=()
-  for bf in "${files[@]}"; do
-    case "$(group_of "$bf")" in
+  while IFS=$'\t' read -r bf bg; do
+    case "$bg" in
       serial) bucket_serial_files+=("$bf") ;;
       lowconc) bucket_lowconc_files+=("$bf") ;;
       *) bucket_main_files+=("$bf") ;;
     esac
-  done
+  done < <(printf '%s\n' "${files[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --classify)
   # LPT order for the bucket serial/lowconc sub-phases (gap-suite-lpt-serial-lowconc-phases-not-lpt-
   # ordered): same as the full path — bare `node --test` re-sorts alphabetically and discards the LPT
   # order, so these two sub-phases were the last bare dispatch points on the --buckets path. Reorder
   # IN PLACE then hand to suite-lpt-runner.mjs run({files}) (order-preserving). Membership unchanged.
-  lpt_reorder_files bucket_serial_files
-  lpt_reorder_files bucket_lowconc_files
+  lpt_order_files bucket_serial_files
+  lpt_order_files bucket_lowconc_files
   # ── unified scheduler (gap-suite-dynamic-waterline-scheduler, bucket path) ─────────────────────
   # Same group-budget waterline as the full-suite path; the bucket subset benefits identically
   # (serial/lowconc keep their own budgets, main fills the remainder). ONE-KEY ROLLBACK: the same
   # QUAY_SUITE_SCHEDULER=0 falls through to the legacy phased bucket path below (RETIRED).
   if [ "${QUAY_SUITE_SCHEDULER:-1}" = "1" ]; then
     echo "scheduler: unified group-budget scheduler (bucket path: serial≤$SERIAL_CONCURRENCY lowconc≤$LOWCONC_CONCURRENCY main≤$(bucket_test_concurrency "${rest_args[@]}"))"
-    {
-      for _bchf in "${bucket_serial_files[@]}"; do printf 'serial\t%s\n' "$_bchf"; done
-      for _bchf in "${bucket_lowconc_files[@]}"; do printf 'lowconc\t%s\n' "$_bchf"; done
-      for _bchf in "${bucket_main_files[@]}"; do printf 'main\t%s\n' "$_bchf"; done
-    } | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-scheduler.ts" \
+    printf '%s\n' "${files[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-scheduler.ts" \
         --root "${repo_root}" \
+        --main-root "${main_root}" \
         --serial-concurrency "$SERIAL_CONCURRENCY" \
         --lowconc-concurrency "$LOWCONC_CONCURRENCY" \
         --main-concurrency "$(bucket_test_concurrency "${rest_args[@]}")" \
+        --groups "product,engine,serial,lowconc" \
         "${rest_args[@]}"
     bucket_code=$?
     # Same suite-AFTER tail as the legacy bucket path below (leak scan + fs-trace collect).

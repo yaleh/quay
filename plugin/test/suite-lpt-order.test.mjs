@@ -115,58 +115,50 @@ function runProbe(probeFiles, { concurrency, logFile }) {
 
 // ══ ordering-helper tests (suite-lpt-order.ts) ════════════════════════════════════════════════════
 
-test("ordering — LPT wiring lives in lpt_reorder_files (suite-lpt-order.ts behind QUAY_TEST_LPT_ORDER), called by the --buckets branch", () => {
+test("ordering — LPT is TS-side (suite-lpt-order.ts + suite-scheduler.ts classifyAndOrder), not a bash lpt_reorder_files", () => {
   const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
-  const branch = bucketsBranchSrc(testSh);
-  // The --buckets branch hands its selected file list to the SHARED helper (single definition
-  // point with the full-suite default path — gap-suite-lpt-full-bucket-run-selected), never an
-  // inline copy that can drift.
-  assert.match(branch, /lpt_reorder_files files/, "the --buckets branch must call lpt_reorder_files");
-  // The helper itself wires suite-lpt-order.ts behind the QUAY_TEST_LPT_ORDER rollback gate.
-  assert.match(testSh, /lpt_reorder_files\(\)\s*\{/, "scripts/test.sh must define lpt_reorder_files()");
-  assert.match(testSh, /suite-lpt-order\.ts/, "the helper must invoke suite-lpt-order.ts");
+  const scheduler = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "suite-scheduler.ts"), "utf8");
+  // gap-suite-classification-lpt-scheduler-ts-ization AC1: the bash `lpt_reorder_files` definition and
+  // its call sites are GONE from scripts/test.sh — classification + LPT moved INTO the TS scheduler.
+  assert.doesNotMatch(testSh, /lpt_reorder_files/, "scripts/test.sh must no longer define/call lpt_reorder_files");
+  // The DEFAULT path's LPT now lives inside the scheduler: classifyAndOrder calls suite-lpt-order.ts's
+  // loadDurationAverages + orderByLpt (the TS pure functions the ordering-helper tests above cover).
+  assert.match(scheduler, /loadDurationAverages\(carrier, opts\.root, opts\.rounds\)/, "suite-scheduler.ts must call loadDurationAverages (LPT in TS)");
+  assert.match(scheduler, /orderByLpt\(queues\.main, avg, opts\.root\)/, "suite-scheduler.ts must LPT-order the main bucket");
+  // The retired legacy fallback keeps a thin forwarder that wraps suite-lpt-order.ts behind the
+  // QUAY_TEST_LPT_ORDER rollback gate (LPT logic is in TS; the forwarder is just the call).
+  assert.match(testSh, /lpt_order_files\(\)\s*\{/, "the retired legacy fallback keeps a thin lpt_order_files forwarder");
+  assert.match(testSh, /suite-lpt-order\.ts/, "the forwarder must invoke suite-lpt-order.ts");
   assert.match(testSh, /QUAY_TEST_LPT_ORDER/, "the wiring must sit behind the QUAY_TEST_LPT_ORDER rollback gate");
 });
 
-// ══ full-suite-default-path LPT wiring (gap-suite-lpt-full-bucket-run-selected) ════════════════════
-// The full-suite DEFAULT path (no --buckets, and --buckets bucket_full=1) previously ran its MAIN
-// body through `node --test "${files[@]}"` — the node --test CLI re-sorts positional globs
-// alphabetically, so the longest-known files serialized at the tail (round #557: full-suite-runner.
-// test.mjs at 242.6s sat OUTSIDE the first 10 files). The fix routes the main body through
-// lpt_reorder_files + suite-lpt-runner.mjs (run({files}) preserves argv order).
+// ══ full-suite-default-path LPT wiring (gap-suite-classification-lpt-scheduler-ts-ization) ════════
+// The full-suite DEFAULT path previously LPT-reordered via the bash lpt_reorder_files helper, which was
+// one of THREE copy-paste dispatch loops (serial/lowconc/main) — the main group's loop was the one that
+// lost its LPT (gap-suite-scheduler-main-lpt-missing). The ts-ization moves classification + LPT INTO
+// suite-scheduler.ts so there is exactly ONE place, no bucket can be missed, and test.sh just pipes the
+// RAW deduped list.
 
-test("AC1 — the full-suite default path LPT-reorders its main body and runs it order-preserving via run({files})", () => {
+test("AC1 — the full-suite default path feeds the RAW deduped list to suite-scheduler.ts (classification + LPT inside the scheduler)", () => {
   const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
-  // The full path's MAIN phase must LPT-reorder `files` (longest-known-first, NOT alphabetical) and
-  // hand it to suite-lpt-runner.mjs. The `bucket_test_concurrency "$@"` spelling (vs the --buckets
-  // branch's `"${rest_args[@]}"`) is what pins THIS as the full-suite default path's main phase.
-  assert.match(
-    testSh,
-    /lpt_reorder_files files\n    node --test-concurrency="\$\(bucket_test_concurrency "\$@"\)" "\$\{repo_root\}\/plugin\/scripts\/suite-lpt-runner\.mjs"/,
-    "the full-suite main phase must LPT-reorder then run suite-lpt-runner.mjs (order-preserving)",
-  );
+  // The 3 manifest printf loops (`for serial/lowconc/main; printf 'group\tpath'`) are GONE — they were
+  // the copy-paste that let main-group LPT go missing. The raw deduped paths go straight to the
+  // scheduler with --groups + --main-root, and the scheduler classifies + LPTs + schedules.
+  assert.doesNotMatch(testSh, /printf 'serial\\t/, "no serial manifest loop may remain");
+  assert.doesNotMatch(testSh, /printf 'main\\t/, "no main manifest loop may remain");
+  assert.ok(testSh.includes('printf \'%s\\n\' "${_RG_FILES[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-scheduler.ts"'), "the default path must pipe the raw deduped list to suite-scheduler.ts");
+  assert.ok(testSh.includes('--main-root "${main_root}"'), "the scheduler must receive the LPT carrier root (main checkout)");
+  assert.ok(testSh.includes('--groups "$sched_groups"'), "the scheduler must receive the --groups filter");
 });
 
-test("AC2 — serial/lowconc phases are LPT-reordered and run order-preserving via suite-lpt-runner.mjs at their own concurrency", () => {
-  const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
-  // gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered: the serial/lowconc phases were the last
-  // bare `node --test` dispatch points on the full path — node --test re-sorts positional args
-  // alphabetically, discarding any LPT order (the serial/lowconc tail waited ≈38% of the round).
-  // Each phase is now LPT-reordered IN PLACE and handed to suite-lpt-runner.mjs run({files}) (the
-  // ONLY order-preserving path), at its OWN SERIAL_CONCURRENCY / LOWCONC_CONCURRENCY — concurrency
-  // rides in execArgv exactly like the main body, so the phase isolation guarantee is unchanged.
-  assert.match(testSh, /lpt_reorder_files serial_files/, "serial phase must be LPT-reordered");
-  assert.match(testSh, /lpt_reorder_files lowconc_files/, "lowconc phase must be LPT-reordered");
-  assert.match(
-    testSh,
-    /node --test-concurrency="\$SERIAL_CONCURRENCY" "\$\{repo_root\}\/plugin\/scripts\/suite-lpt-runner\.mjs" "\$\{serial_files\[@\]\}"/,
-    "serial phase must run suite-lpt-runner.mjs at SERIAL_CONCURRENCY",
-  );
-  assert.match(
-    testSh,
-    /node --test-concurrency="\$LOWCONC_CONCURRENCY" "\$\{repo_root\}\/plugin\/scripts\/suite-lpt-runner\.mjs" "\$\{lowconc_files\[@\]\}"/,
-    "lowconc phase must run suite-lpt-runner.mjs at LOWCONC_CONCURRENCY",
-  );
+test("AC2 — the scheduler LPT-orders ALL THREE buckets (serial/lowconc/main) from ONE place, so no bucket can miss LPT", () => {
+  const scheduler = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "suite-scheduler.ts"), "utf8");
+  // The main-lpt-missing regression was the 3-copy-paste manifest where the main group's loop lost its
+  // LPT. The single classifyAndOrder now LPTs serial AND lowconc AND main together — a dropped bucket is
+  // structurally impossible (the three orderByLpt lines sit adjacent in classifyAndOrder).
+  assert.match(scheduler, /orderByLpt\(queues\.serial, avg, opts\.root\)/, "serial must be LPT-ordered");
+  assert.match(scheduler, /orderByLpt\(queues\.lowconc, avg, opts\.root\)/, "lowconc must be LPT-ordered");
+  assert.match(scheduler, /orderByLpt\(queues\.main, avg, opts\.root\)/, "main must be LPT-ordered");
 });
 
 test("ordering — orderByLpt sorts longest-known-first and keeps unknowns at the END in original order", () => {
