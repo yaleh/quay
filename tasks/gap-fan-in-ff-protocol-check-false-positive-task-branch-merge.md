@@ -31,8 +31,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`58eaaa2d0`（Merge task 分支进 main/manager-doc）不再触发判据2a——check ok:true；（⛔ 仍 RED ⇒ 假）。
-- [ ] AC2（能取假，负控制）：构造真非-ff fan-in（merge task 分支进 develop）仍触发判据2a；（⛔ 误放行 ⇒ 假）。
+- [x] AC1（能取假）：`58eaaa2d0`（Merge task 分支进 main/manager-doc）不再触发判据2a——check ok:true；（⛔ 仍 RED ⇒ 假）。
+- [x] AC2（能取假，负控制）：构造真非-ff fan-in（merge task 分支进 develop）仍触发判据2a；（⛔ 误放行 ⇒ 假）。
 
 ## Definition of Done
 
