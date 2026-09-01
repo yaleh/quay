@@ -32,9 +32,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：`snapshotMtimeSet` 排除常驻 driver 活跃文件——grep 测试文件含排除逻辑，覆盖 `checker-cost` / `promotion-round` / `liveness`；（⛔ 仍快照全 `.quay/` 不排除 driver 文件 ⇒ 假）。
-- [ ] AC2（能取假，生产载体）：driver 活跃时跑 help-contract 测试绿（不再因 mtime 污染红），落地后轮不再出现 AC1 mtime race 红；（⛔ driver 活跃仍红 ⇒ 假）。
-- [ ] AC3（能取假，负控制不退化）：注入一个真实 `--help` 副作用（某 checker 在 `--help` 写 `.quay` 文件）时，测试仍能抓出该 side effect——排除 driver 文件 ≠ 排除 checker 副作用，防过度排除；（⛔ 排除后连真副作用也抓不出 ⇒ 假）。
+- [x] AC1（能取假，机制级）：`snapshotMtimeSet` 排除常驻 driver 活跃文件——grep 测试文件含排除逻辑，覆盖 `checker-cost` / `promotion-round` / `liveness`；（⛔ 仍快照全 `.quay/` 不排除 driver 文件 ⇒ 假）。
+- [x] AC2（能取假，生产载体）：driver 活跃时跑 help-contract 测试绿（不再因 mtime 污染红），落地后轮不再出现 AC1 mtime race 红；（⛔ driver 活跃仍红 ⇒ 假）。
+- [x] AC3（能取假，负控制不退化）：注入一个真实 `--help` 副作用（某 checker 在 `--help` 写 `.quay` 文件）时，测试仍能抓出该 side effect——排除 driver 文件 ≠ 排除 checker 副作用，防过度排除；（⛔ 排除后连真副作用也抓不出 ⇒ 假）。
 
 ## Definition of Done
 
