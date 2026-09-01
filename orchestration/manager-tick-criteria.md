@@ -596,5 +596,5 @@ cpu_time_s 缺失 / null / ≤ 0 的条数 == 0
 **任务撰写/立案 · 需求分析 · 升级判断（B11）· 学习（B10）· AC65 快修判断 · B16-C 类冲突意图 · B18 止损 · 跨层纠错（单列）**。
 机器正本 = `plugin/scripts/semantic-face-dispatch-record.ts` 的 `SEMANTIC_DUTY_KINDS`（closed enum）。
 
-- **AC1（能取假，后台 subagent）**：上述职责由 manager 派后台 subagent 执行，非主线程直接做；取假 = `node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --session <本会话> --json` 的 `main_thread_edits > 0`（同 inner A24 判据形态）。
+- **AC1（能取假，后台 subagent）**：上述职责由 manager 派后台 subagent 执行，非主线程直接做；取假 = `node --no-warnings --experimental-strip-types plugin/scripts/main-thread-edit-check.ts --session <本会话> --json` 的 `main_thread_edits > 0`（同 inner A24 判据形态）。
 - **AC2（能取假，可查派发记录）**：每类职责有可查派发记录；取假 = 一次语义产出而无对应 `semantic-face-dispatch-record.jsonl` 行（`semantic-face-dispatch-record.ts --list --kind <kind>` 得 0）。

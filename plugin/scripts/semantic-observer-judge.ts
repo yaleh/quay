@@ -39,8 +39,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { isDirectEntry } from "./gate-script-base.ts";
-// AC3 触发启发式正本在 inner-wakeup-heartbeat-check.ts（该文件读 heartbeat 产物）
-import { semanticTriggerHeuristic, freeTextHash, evaluateTrigger } from "./inner-wakeup-heartbeat-check.ts";
+// AC3 触发启发式正本在 semantic-trigger.ts（迁出 inner-wakeup-heartbeat-check.ts，非 inner 名）
+import { semanticTriggerHeuristic, freeTextHash, evaluateTrigger } from "./semantic-trigger.ts";
 
 // ── Free-text stop/await signals ────────────────────────────────────────────────────────────────────
 

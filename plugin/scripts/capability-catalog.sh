@@ -423,6 +423,9 @@ declare -A QUESTION=(
   [session-retirement-check.ts]="Has each retired session's (outer/inner) execution-core doc been marked retired (删除线 + 指针 + 边界条件 banner) with no stale live claim (并行对照期 / 每轮必跑) left un-retired (AC149-1 真停 — the B9 drift shape)?"
   [outer-retirement-precondition-check.ts]="Before retiring the outer layer, does every checker the outer execution core (orchestrator-tick-core.md) directly references — the plugin/scripts/*-check.{ts,sh} set — have a surviving call surface (static-gate registry, or an external executable carrier referencing it at a code position, transitive closure), so a checker referenced ONLY by the retiring layer is flagged unless its file carries the explicit RETIRED-WITH-RETIRING-LAYER disposition (SPEC §2.3b B0, gap-b0-retirement-precondition-checker-call-surface)?"
   [write-json-atomic.ts]="Is every state file write atomic — a single writeJsonAtomic (tmp + renameSync) so a concurrent reader never observes a torn, half-written JSON, replacing the split of 6 state writers into 2 atomic + 4 non-atomic (tasks/gap-writestate-atomicity-split)?"
+  [over90-task-gate.ts]="Does a task's own status frontmatter allow the over-90m timeout to fire (taskStatusAllowsOver90m), and is an over-budget bracket closed only on positive merge evidence (makeOver90ExecutorGone)?"
+  [semantic-trigger.ts]="Should the semantic observer judge run this round — fires when the free text changed (hash) or carries the harness's own spawn-limit error string (AC77 判据1)?"
+  [main-thread-edit-check.ts]="How many main-thread product-file Edits did the manager make this round, versus how many Agent dispatches (manager exec-mode check — AC145 主线程不编辑产品文件判据)?"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
@@ -738,6 +741,9 @@ declare -A CADENCE=(
   [dual-source-check.ts]="按需"
   [land-capacity-monitor.ts]="按需"
   [session-retirement-check.ts]="按需"
+  [over90-task-gate.ts]="按需"
+  [semantic-trigger.ts]="按需"
+  [main-thread-edit-check.ts]="每轮"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
@@ -1053,6 +1059,9 @@ declare -A INVALIDATION=(
   [dual-source-check.ts]="失效前提：职责→driver 的退役仍以文档标注为唯一真相源；若退役改为机制强制（cron 删除即无锚），本条按 ④ 失效"
   [land-capacity-monitor.ts]="失效前提：land 仍以 develop 上的 fan-in 合并提交为载体（git log develop）；若 land 载体改换（产品化后 fan-in 写结构化记录而非 commit），本条失效"
   [session-retirement-check.ts]="失效前提：会话退役仍以文档标注为唯一真相源；若退役改为机制强制（cron 删除即无锚），本条按 ④ 失效"
+  [over90-task-gate.ts]="失效前提：supervisor 抢占判定（supervisor-preempt-candidates.ts）与 --detect-stop 的 over-90m 检测（inner-blocked-signal.ts detectTaskOver90m）仍以本模块为唯一 TASK_OVER_90M_MS/taskStatusAllowsOver90m/makeOver90ExecutorGone 实现；若这两个消费者退役，本条退休"
+  [semantic-trigger.ts]="失效前提：semantic-observer-judge.ts 仍以本模块为唯一 AC3 触发启发式（semanticTriggerHeuristic/freeTextHash/evaluateTrigger）实现；若 judge 退役，本条退休"
+  [main-thread-edit-check.ts]="无可测前提，靠周期复核"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
@@ -1368,6 +1377,9 @@ declare -A LAST_REAFFIRMED=(
   [dual-source-check.ts]="2026-08-28"
   [land-capacity-monitor.ts]="2026-08-28"
   [session-retirement-check.ts]="2026-08-28"
+  [over90-task-gate.ts]="2026-09-01"
+  [semantic-trigger.ts]="2026-09-01"
+  [main-thread-edit-check.ts]="2026-09-01"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
@@ -1682,6 +1694,9 @@ declare -A MATCHING=(
   [session-retirement-check.ts]="position"
   [outer-retirement-precondition-check.ts]="enumerative"
   [write-json-atomic.ts]="n/a"
+  [over90-task-gate.ts]="n/a"
+  [semantic-trigger.ts]="n/a"
+  [main-thread-edit-check.ts]="keyword"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1800,6 +1815,8 @@ declare -A CONSUMER=(
   [session-retirement-check.ts]="谁按：manager 在 AC149-1 真停判定时按；条件=要判定 outer/inner 会话的 cron 锚/tick-log/执行核文档是否按同一套写法标退役"
   [outer-retirement-precondition-check.ts]="谁按：run_static_checks 每轮自动按（runner-static-gate.ts @static-tier full，全量套件 code-class gate）；条件=退役 outer 前必须跑（前置检查是退役的必须步骤，SPEC §2.3b B0）——全量套件接线保证不靠会话意志"
   [write-json-atomic.ts]="谁按：driver-shared / inner-blocked-signal / mirror-full-suite-state / red-window-triage / runner-state-write / suite-state-trigger / proposal-convergence 在写各自 state 文件时 import；条件=这些 writer 须共用同一份 writeJsonAtomic 实现（函数级复用，⛔ 非复制粘贴）"
+  [over90-task-gate.ts]="谁按：supervisor-preempt-candidates.ts（preemption 判据）· inner-blocked-signal.ts detectTaskOver90m（--detect-stop face）；条件=这两个消费者须 import 同一份三 helper 实现（函数级复用，⛔ 非复制粘贴）"
+  [semantic-trigger.ts]="谁按：semantic-observer-judge.ts（AC3 触发，hash 变化或 spawn-limit 串出现时）；条件=judge import 同一份触发函数实现（函数级复用，⛔ 非复制粘贴）"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the

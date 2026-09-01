@@ -7,7 +7,7 @@
 //
 //   * duration      → fast-mode-telemetry.ts's aggregate()/readAllEvents() (the telemetry bracket's
 //                     startedAtMs is the authoritative "when did this task start" fact)
-//   * no-progress   → inner-blocked-signal.ts's taskStatusAllowsOver90m() — the task's OWN status
+//   * no-progress   → over90-task-gate.ts's taskStatusAllowsOver90m() — the task's OWN status
 //                     frontmatter is still `in-progress` (or the file is missing): "ledger 确认无
 //                    真实推进" — the same gate gap-over-90m crystallized
 //   * slot/landed   → reconcileInFlight() with makeOver90ExecutorGone() — a task whose work LANDED
@@ -52,7 +52,7 @@ import {
   TASK_OVER_90M_MS,
   taskStatusAllowsOver90m,
   makeOver90ExecutorGone,
-} from "./inner-blocked-signal.ts";
+} from "./over90-task-gate.ts";
 
 /** Fixed filename of the preemption ledger (sibling of the bus ledger, same gitignored `.quay/`). */
 export const PREEMPT_LEDGER_FILENAME = "supervisor-preempt-ledger.jsonl";

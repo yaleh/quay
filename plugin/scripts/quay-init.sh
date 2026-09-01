@@ -1087,12 +1087,21 @@ _derive_loop_scripts_once() {
   #   — an ESM relative `./` import is INVISIBLE to closure step (d) (same class as canonical-test-files.ts
   #   above), so without this explicit entry a cold-started consumer lays down full-suite-runner.ts
   #   without its suite-knob config reader and the runner dies with ERR_MODULE_NOT_FOUND.
+  #   over90-task-gate.ts + semantic-trigger.ts + main-thread-edit-check.ts (gap-retire-inner-hygiene-
+  #   migrate-helper): the three ①类 live helpers migrated OUT of inner-blocked-signal.ts /
+  #   inner-wakeup-heartbeat-check.ts / inner-exec-mode-report.ts into non-inner names. Their consumers
+  #   (inner-blocked-signal.ts — already in the (c) list — supervisor-preempt-candidates.ts, semantic-
+  #   observer-judge.ts, inner-exec-mode-report.ts shim) import them via ESM `./x.ts`, which is INVISIBLE
+  #   to closure step (d) (same class as repo-root.ts / checker-io.ts / canonical-test-files.ts above) —
+  #   without explicit entries a laid-down inner-blocked-signal.ts / judge / shim dies with
+  #   ERR_MODULE_NOT_FOUND.
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \
-    repo-root.sh repo-root.ts checker-io.ts driver-result.ts canonical-test-files.ts suite-params.ts >> "$out"
+    repo-root.sh repo-root.ts checker-io.ts driver-result.ts canonical-test-files.ts suite-params.ts \
+    over90-task-gate.ts semantic-trigger.ts main-thread-edit-check.ts >> "$out"
   # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
   #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
   #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the
