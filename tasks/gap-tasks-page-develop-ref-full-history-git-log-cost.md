@@ -2,7 +2,7 @@
 id: gap-tasks-page-develop-ref-full-history-git-log-cost
 title: web /tasks·/task/&lt;id&gt; 的 develop-ref 读面阻塞：readTaskCommitTimesAtRef
   全历史 git log 遍历 + 详情页单任务读无缓存，冷请求 ~8.8s 同步阻塞整个 serve 进程
-status: todo
+status: ready
 labels:
   - gap
   - defect
