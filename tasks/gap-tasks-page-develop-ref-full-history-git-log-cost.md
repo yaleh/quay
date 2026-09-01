@@ -2,7 +2,7 @@
 id: gap-tasks-page-develop-ref-full-history-git-log-cost
 title: web /tasks·/task/&lt;id&gt; 的 develop-ref 读面阻塞：readTaskCommitTimesAtRef
   全历史 git log 遍历 + 详情页单任务读无缓存，冷请求 ~8.8s 同步阻塞整个 serve 进程
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -47,12 +47,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，主修，硬数字）：在合成的大规模 fixture（≥1500 个任务、≥10000 次触碰 `tasks/` 的提交，脚本生成而非真实仓库）上，`/tasks` 冷缓存首次请求（无预热、直接打）**< 1.5s**；预热后（后台刷新已跑过至少一轮）请求 **< 200ms**。（⛔ 冷请求 ≥1.5s 或预热后 ≥200ms ⇒ 假。）
-- [ ] AC2（能取假）：构造 develop 在两次后台刷新之间新增 N 个提交（N=5）的场景，第二次刷新耗时与 N 成正比而非与仓库总提交数成正比（断言：仓库提交数从 10000 加到 20000，若为增量实现，同样 N=5 的刷新耗时不随之显著增长；若仍是全量重放，耗时会随总提交数线性增长——用这个对照区分真做了增量还是只是包了层缓存）。
-- [ ] AC3（能取假）：`/task/<id>` 详情页在后台缓存已覆盖该任务时，不再对该任务单独 spawn `git show`/`git log`（断言：mock/spy `execFileSync` 调用次数，缓存命中路径下详情页请求触发 0 次新 git 子进程）；缓存未覆盖（任务只存在于磁盘、develop 无该文件）时仍正确退化为单任务读（现有语义不变）。
-- [ ] AC4（能取假，fail-open 回归）：后台刷新在 git 不可用（临时改 `PATH`/mock 报错）时不抛出未捕获异常、不使 serve 进程退出；下一次成功刷新后自动恢复正常缓存内容。
-- [ ] AC5（回归）：`gap-dispatch-reads-stale-main-checkout-task-status` 的 AC1-AC4/AC6（develop 覆盖 status/title/updated、disk≠develop 分歧标记、无 `git checkout develop`、晋升路径读 develop）全部继续通过，不因本次缓存改造而退化。
-- [ ] AC6（回归）：`packages/quay/test/observation.test.mjs`、`packages/quay/test/serve-task.test.mjs`、`packages/quay/test/serve-board.test.mjs` 全绿；`scripts/test.sh` 全量套件绿。
+- [x] AC1（能取假，主修，硬数字）：在合成的大规模 fixture（≥1500 个任务、≥10000 次触碰 `tasks/` 的提交，脚本生成而非真实仓库）上，`/tasks` 冷缓存首次请求（无预热、直接打）**< 1.5s**；预热后（后台刷新已跑过至少一轮）请求 **< 200ms**。（⛔ 冷请求 ≥1.5s 或预热后 ≥200ms ⇒ 假。）
+- [x] AC2（能取假）：构造 develop 在两次后台刷新之间新增 N 个提交（N=5）的场景，第二次刷新耗时与 N 成正比而非与仓库总提交数成正比（断言：仓库提交数从 10000 加到 20000，若为增量实现，同样 N=5 的刷新耗时不随之显著增长；若仍是全量重放，耗时会随总提交数线性增长——用这个对照区分真做了增量还是只是包了层缓存）。
+- [x] AC3（能取假）：`/task/<id>` 详情页在后台缓存已覆盖该任务时，不再对该任务单独 spawn `git show`/`git log`（断言：mock/spy `execFileSync` 调用次数，缓存命中路径下详情页请求触发 0 次新 git 子进程）；缓存未覆盖（任务只存在于磁盘、develop 无该文件）时仍正确退化为单任务读（现有语义不变）。
+- [x] AC4（能取假，fail-open 回归）：后台刷新在 git 不可用（临时改 `PATH`/mock 报错）时不抛出未捕获异常、不使 serve 进程退出；下一次成功刷新后自动恢复正常缓存内容。
+- [x] AC5（回归）：`gap-dispatch-reads-stale-main-checkout-task-status` 的 AC1-AC4/AC6（develop 覆盖 status/title/updated、disk≠develop 分歧标记、无 `git checkout develop`、晋升路径读 develop）全部继续通过，不因本次缓存改造而退化。
+- [x] AC6（回归）：`packages/quay/test/observation.test.mjs`、`packages/quay/test/serve-task.test.mjs`、`packages/quay/test/serve-board.test.mjs` 全绿；`scripts/test.sh` 全量套件绿。
 
 ## Definition of Done
 
