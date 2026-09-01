@@ -1,7 +1,7 @@
 ---
 id: gap-observation-ac1-perf-threshold-relax
 title: observation.test.mjs AC1 性能阈值在并发 suite 负载下不稳定——放宽到「仍区分 8.8s 全遍历 vs 亚秒增量」量级
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -26,9 +26,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，阈值仍能区分量级）：放宽后的冷请求阈值 <8.8s（全历史遍历量级）且 > 优化后实测冷耗时——即「没做优化（全遍历）」仍会 fail，阈值不是恒真；（⛔ 放宽到 ≥8.8s 或容纳任意负载 ⇒ 假）。
-- [ ] AC2（能取假，预热量级）：预热后阈值亚秒级（<500ms），仍与冷请求分属两个量级；（⛔ 预热阈值升到秒级 ⇒ 假）。
-- [ ] AC3（能取假，负载稳定）：并发 fan-in + 真实负载下 observation.test.mjs 稳定绿（不再因负载波动误杀）；（⛔ 仍反复红 ⇒ 假）。
+- [x] AC1（能取假，阈值仍能区分量级）：放宽后的冷请求阈值 <8.8s（全历史遍历量级）且 > 优化后实测冷耗时——即「没做优化（全遍历）」仍会 fail，阈值不是恒真；（⛔ 放宽到 ≥8.8s 或容纳任意负载 ⇒ 假）。
+- [x] AC2（能取假，预热量级）：预热后阈值亚秒级（<500ms），仍与冷请求分属两个量级；（⛔ 预热阈值升到秒级 ⇒ 假）。
+- [x] AC3（能取假，负载稳定）：并发 fan-in + 真实负载下 observation.test.mjs 稳定绿（不再因负载波动误杀）；（⛔ 仍反复红 ⇒ 假）。
 
 ## Definition of Done
 
