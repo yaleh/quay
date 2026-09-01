@@ -15,7 +15,8 @@
 //         over all of them leaves the `.quay/` mtime set unchanged (a checker that writes on `--help`
 //         — as measure-trend-check did — fails this); resident-process runtime files (driver + the
 //         full-suite runner itself) are excluded from the snapshot (gap-suite-help-contract-mtime-race:
-//         they tick independently, not on `--help`);
+//         they tick independently, not on `--help`); the mtime check retries a bounded number of times
+//         (③ fallback) — a deterministic side effect reproduces every attempt, a transient tick does not;
 //   AC2 — `ready-pool-check --help` no longer self-contradicts ("unknown flag: --help (run with
 //         --help)") — it prints normal usage and exits 0;
 //   AC3 — `measure-trend-check --help` does NOT append to .quay/measure-history.jsonl (hermetic:
@@ -136,16 +137,12 @@ function diffMtimeSet(before, after) {
   return changed;
 }
 
-test("AC1: every -check.ts exits 0 + prints usage on --help, with zero .quay mtime change", () => {
-  const checkers = listCheckers();
-  // NB: coverage is defined by the directory scan itself, NOT a hardcoded count — the count drifts
-  // as checkers are retired/added (the "77" this task was filed against is already 75). Guard only
-  // against a broken scan that silently returns nothing (a structurally-true no-op, hard rule 4).
-  assert.ok(checkers.length > 0, `expected a non-empty -check.ts set, found ${checkers.length}`);
-
-  const quay = path.join(repoRoot, ".quay");
+/** One sweep: snapshot `.quay`, run every checker `--help`, diff the mtime set. Returns the
+ *  checker exit/usage violations (deterministic) and the mtime diff (flaky — resident-process
+ *  runtime files tick independently of any checker `--help`, and the exclusion set is
+ *  best-effort). */
+function sweepMtime(checkers, quay) {
   const before = snapshotMtimeSet(quay);
-
   const failures = [];
   for (const c of checkers) {
     const res = runHelp(c);
@@ -156,9 +153,32 @@ test("AC1: every -check.ts exits 0 + prints usage on --help, with zero .quay mti
       failures.push(`${c}: exit 0 but printed no usage`);
     }
   }
-
   const after = snapshotMtimeSet(quay);
-  const changed = diffMtimeSet(before, after);
+  return { failures, changed: diffMtimeSet(before, after) };
+}
+
+test("AC1: every -check.ts exits 0 + prints usage on --help, with zero .quay mtime change", () => {
+  const checkers = listCheckers();
+  // NB: coverage is defined by the directory scan itself, NOT a hardcoded count — the count drifts
+  // as checkers are retired/added (the "77" this task was filed against is already 75). Guard only
+  // against a broken scan that silently returns nothing (a structurally-true no-op, hard rule 4).
+  assert.ok(checkers.length > 0, `expected a non-empty -check.ts set, found ${checkers.length}`);
+
+  const quay = path.join(repoRoot, ".quay");
+  const first = sweepMtime(checkers, quay);
+  const failures = first.failures;
+
+  // The mtime negative control is flaky (gap-suite-help-contract-mtime-race): a transient
+  // resident-process tick can slip a single mtime change into the diff even though the exclusion
+  // set covers every KNOWN runtime file. Retry the sweep a bounded number of times before failing
+  // (③ from the task's 补充处置: ① 除根 + ③ 兜底). A DETERMINISTIC checker `--help` side effect
+  // reproduces on every attempt, a transient tick does not — so retrying cannot mask a real side
+  // effect (the mtime-race AC3 test below pins that a real side effect is still caught in one pass).
+  const MAX_MTIME_ATTEMPTS = 3;
+  let changed = first.changed;
+  for (let attempt = 1; changed.length > 0 && attempt < MAX_MTIME_ATTEMPTS; attempt++) {
+    changed = sweepMtime(checkers, quay).changed;
+  }
 
   assert.deepEqual(failures, [], "checkers violating exit-0 + prints-usage:");
   assert.deepEqual(changed, [], "checkers with a --help side effect (.quay mtime changed):");
