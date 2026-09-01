@@ -1,7 +1,7 @@
 ---
 id: gap-worker-ac-check-shortcircuit
 title: worker exit 0 后 fan-in 前短路查 AC 未全勾——漏勾 AC 不再烧整条 fan-in + 锁排队（机制兜底）
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
