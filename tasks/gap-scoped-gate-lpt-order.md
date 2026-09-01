@@ -1,0 +1,37 @@
+---
+id: gap-scoped-gate-lpt-order
+title: scoped-gate（--for-task）路径复用 suite-lpt-order + suite-lpt-runner.mjs（LPT + run({files}) 保序）
+status: todo
+labels:
+  - gap
+parent: null
+children: []
+extra:
+  schema: execution
+---
+**type:** execution
+
+## Proposal
+
+scoped-gate（`--for-task`，均值 118.5s、177 次/周=5.83h）有并发（`default_test_concurrency`）但不取 full-suite 锁；**未应用 LPT / `run({files})`**——裸 `node --test ${files}`，selector 输出顺序被 CLI 字母序重排（`gap-m-bucket` 同一教训：最长文件晚启动长尾）。复用 `suite-lpt-order.ts` + `suite-lpt-runner.mjs`（LPT + `run({files})` 保序），与 full-suite 主路径同构，消除 scoped 路径的长尾。
+
+## Plan
+
+1. scoped-gate 派发改为 LPT 排序（复用 `suite-lpt-order.ts` 读 verification-round 历史）。
+2. 用 `suite-lpt-runner.mjs run({files})` 保序执行（替代裸 `node --test ${files}` 的字母序重排）。
+3. 验证：scoped 路径最长文件启动 offset 回 0 附近；pass/fail-neutral。
+
+## Acceptance Criteria
+
+- [ ] AC1（能取假，机制级）：scoped-gate 路径经 `suite-lpt-runner.mjs run({files})` 保序（grep 无裸 `node --test ${files}` 字母序派发；见 LPT + run({files})）；（⛔ 仍裸 node --test ⇒ 假）。
+- [ ] AC2（能取假，生产载体，硬规则 4 推论三）：落地后 scoped 轮最长文件启动 offset 回 0 附近（N 只计落地后）；（⛔ 用落地前轮冒充 ⇒ 假）。
+- [ ] AC3（能取假，无回归）：同文件集同断言 pass/fail 结果一致（只改调度表达，不改测试集/断言）。
+
+## Definition of Done
+
+scoped-gate 路径 LPT + run({files}) 保序；AC1-3 勾；scoped 长文件 offset 回 0 实测。
+
+## Touches
+
+- plugin/scripts/（scoped-gate 派发路径——LPT + run({files})）
+- tasks/gap-scoped-gate-lpt-order.md（自身）
