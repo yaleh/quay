@@ -1,7 +1,7 @@
 ---
 id: gap-promotion-commit-message-misleading-on-first-track
 title: promotion-driver 机械提交消息未区分"状态翻转"与"文件首次入 git"
-status: ready
+status: done
 labels:
   - gap
   - defect
