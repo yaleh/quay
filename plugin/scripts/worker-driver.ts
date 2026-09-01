@@ -216,6 +216,7 @@ export {
   makeStopCondition,
   type LivenessResult,
 } from "./driver-runtime.ts";
+import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache } from "./doc-check-cache.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1734,6 +1735,9 @@ export interface MechanicalFanInOptions {
   scopedGateCommand?: string[];
   /** doc 检查命令（测试缝）；缺省 = bash <worktree>/scripts/test.sh --static-checks-doc。 */
   docCheckCommand?: string[];
+  /** doc-check 缓存文件（测试缝）；缺省 = <root>/.quay/doc-check-cache.json（gitignored 运行时缓存，
+   *  gap-fan-in-doc-check-cache）。doc 面未变时命中缓存跳过 doc-check（~0s），变化失效重跑。 */
+  docCheckCacheFile?: string;
   /** fan-in 编排脚本目录（测试缝）；缺省 = <worktree>/plugin/scripts（自举：本分支的编排脚本自验）。 */
   scriptsDir?: string;
   /** ff-merge TS 模块路径（测试缝）；缺省 = <worktree>/packages/quay/src/fan-in/ff-merge.ts
@@ -2329,8 +2333,20 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     a = await step("scoped-gate", scopedCmd, 600_000);
     if (!a.ok) return fail("scoped-gate", a);
     const docCmd = opts.docCheckCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--static-checks-doc"];
-    a = await step("doc-check", docCmd, 300_000);
-    if (!a.ok) return fail("doc-check", a);
+    // doc-check 缓存（gap-fan-in-doc-check-cache）：doc 面 = run_doc_checks 读的全部输入（@static-object
+    // 判定对象 + plugin/scripts 检查器/仪器面 + scripts/test.sh + .gitignore + 全树文件结构）。面未变 ⇒
+    // 命中上次绿 verdict（~0s，reason=cache-hit）；面变 ⇒ 失效重跑。⛔ 只缓存绿、⛔ 键算不出 ⇒ 照跑（fail-closed）。
+    const docCacheFile = opts.docCheckCacheFile ?? path.join(root, ".quay", "doc-check-cache.json");
+    const docCacheT0 = Date.now();
+    const docKey = computeDocCheckFaceKey(worktree);
+    const cachedDocOk = docKey === null ? null : readDocCheckCache(docCacheFile, docKey);
+    if (cachedDocOk === true) {
+      trace({ step: "doc-check", exit: 0, wall_ms: Date.now() - docCacheT0, ok: true, reason: "cache-hit" });
+    } else {
+      a = await step("doc-check", docCmd, 300_000);
+      if (docKey !== null && a.ok) writeDocCheckCache(docCacheFile, docKey);
+      if (!a.ok) return fail("doc-check", a);
+    }
 
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();

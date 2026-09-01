@@ -24,9 +24,9 @@ doc-check（11.6s，165 次/周=0.53h）是 (docs 相关文件集→verdict) 的
 
 ## Acceptance Criteria
 
-- [ ] AC1 docs 未变时 doc-check 墙钟 ~0（step-trace reason=cache-hit）
-- [ ] AC2 docs 变化时失效重跑，判定与无缓存一致（对照 N 次）
-- [ ] AC3 缓存键只含 docs 面（非 doc 文件变化不触发重跑，反之亦然）
+- [x] AC1 docs 未变时 doc-check 墙钟 ~0（step-trace reason=cache-hit）
+- [x] AC2 docs 变化时失效重跑，判定与无缓存一致（对照 N 次）
+- [x] AC3 缓存键只含 docs 面（非 doc 文件变化不触发重跑，反之亦然）
 
 ## Definition of Done
 
@@ -36,10 +36,6 @@ doc-check（11.6s，165 次/周=0.53h）是 (docs 相关文件集→verdict) 的
 
 - plugin/scripts/worker-driver.ts（doc-check 步骤缓存逻辑）
 - plugin/scripts/doc-check-cache.ts（缓存实现模块）
+- plugin/scripts/capability-catalog.sh（doc-check-cache 六表登记）
+- plugin/test/doc-check-cache.test.mjs（缓存模块单测）
 - tasks/gap-fan-in-doc-check-cache.md（自身）
-
-## Needs-Human
-
-**执行 2026-09-01T04:40:29.692Z — 连续修满重试上限仍不合格（标 needs-human）**
-
-- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
