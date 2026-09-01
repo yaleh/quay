@@ -1367,6 +1367,54 @@ test("AC1 (gap-write-suite-capture-non-blocking) — capture 写失败（父目�
   assert.ok(!fs.existsSync(badCapture), "the capture path is genuinely unwritable (no capture file written)");
 });
 
+// ── gap-worker-driver-resident-loop-intermittent-hang：驻留环错误边界 ────────────────────────────────
+// 根因：runResidentLoop 循环体无 try/catch——任何一步瞬时抛错（负载下偶发 fs/git/spawn 异常）⇒ 未处理
+// rejection ⇒ 驱动静默死掉，.quay/ 只剩 liveness log、round/outcome 停写（与「一切正常」同形，硬规则
+// 3b/4b）。修法：循环体每步记 step + try/catch，抛错 ⇒ 写 action=error 的 round 记录（error_step +
+// stop_reason 指到步骤，AC1 定位）+ resident-error 事件 + sleep 后继续（瞬时错误自愈，⛔ 不静默停摆）。
+// AC3 生产 round 无停写窗口 = error round 仍写 worker-round.jsonl（与正常 round 同载体）。
+
+test("computeWorkerRoundRecord action=error carries error/error_step（AC1 定位 + 记录形状，⛔ 与「无错」混淆）", () => {
+  const rec = computeWorkerRoundRecord({
+    round: 7,
+    runId: "r",
+    pid: 123,
+    at: "2026-09-01T00:00:00.000Z",
+    action: "error",
+    inFlight: 0,
+    pool: 1,
+    stopReason: "error (step=ready-pool): boom",
+    error: "boom",
+    errorStep: "ready-pool",
+    liveness: { checked: true, deaths: null, running: true },
+    coldStartInflight: [],
+  });
+  assert.equal(rec.action, "error");
+  assert.equal(rec.error, "boom");
+  assert.equal(rec.error_step, "ready-pool");
+  assert.match(rec.stop_reason, /step=ready-pool/);
+  // 正常 round 无 error 字段 ⇒ null（⛔ 缺键与 null 可区分——error round 有该字段且非 null）。
+  const normal = computeWorkerRoundRecord({
+    round: 8, runId: "r", pid: 123, at: "t",
+    action: "idle", inFlight: 0, pool: 0, stopReason: null, coldStartInflight: [],
+  });
+  assert.equal(normal.action, "idle");
+  assert.equal(normal.error, null);
+  assert.equal(normal.error_step, null);
+});
+
+test("AC1 (能取假) — 驻留环错误边界在源：循环体有 step-trace + try/catch + writeErrorRound（⛔ 无边界 ⇒ 抛错静默死）", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  // 错误边界：catch 写 error round + resident-error 事件。
+  assert.match(src, /catch \(err\)\s*\{/, "the loop body has a catch boundary");
+  assert.match(src, /writeErrorRound\(round, step, message, stack, liveness, poolSeen, running\.length\)/, "the catch writes an error round");
+  assert.match(src, /event: "resident-error"/, "the catch emits a resident-error JSON event");
+  // step-trace：每步记 step（AC1 定位——error_step 指到具体步骤，⛔ 只报「挂起」不指位置 ⇒ 假）。
+  for (const step of ["cold-start-inflight", "liveness", "reap", "reconcile", "dispatch-loop", "ready-pool", "apply-filters", "selector", "spawn-worker", "write-round", "sleep", "wait-in-flight"]) {
+    assert.match(src, new RegExp(`step = "${step}"`), `step-trace marks ${step}`);
+  }
+});
+
 // ── gap-fan-in-continue-doc-only-advance-reuse-suite ───────────────────────────────────────────────
 // develop 在长 suite 期间被 doc/inert 前进 ⇒ ff not-fast-forward ⇒ CONTINUE 重跑。suite 是
 // (develop HEAD × delta) 的纯函数；若上一轮 green bucket suite（full-suite-state.json 的 mirror 记录）
