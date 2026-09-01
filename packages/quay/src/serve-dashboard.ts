@@ -10,7 +10,7 @@ import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-liv
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
 
-function renderDashboardPage(d: {
+export function renderDashboardPage(d: {
   live: LiveResult;
   sys: SystemResult;
   mgr: ManagerResult;
@@ -77,10 +77,28 @@ function renderDashboardPage(d: {
     const pct = total > 0 ? (c / total) * 100 : 0;
     return html`<div style="width:${pct.toFixed(1)}%;background:${s === TASK_STATUS.DONE ? "var(--color-text)" : s === TASK_STATUS.NEEDS_HUMAN ? "var(--color-accent)" : "var(--color-neutral-400)"}" title="${escapeHtml(s)} ${c}"></div>`;
   };
-  const recentActive = d.tasks
-    .filter((t) => (t.status ?? "") !== TASK_STATUS.DONE && typeof (t as { updatedAt?: unknown }).updatedAt === "number")
-    .sort((a, b) => ((b as { updatedAt?: unknown }).updatedAt as number) - ((a as { updatedAt?: unknown }).updatedAt as number))
-    .slice(0, 5);
+  // gap-dashboard-taskcard-multistatus-minitable: the taskCard's single mixed "最近更新（非 done）"
+  // list could not answer "what is currently needs-human?" without a full /tasks?status=… round-trip
+  // (48h access log: 78 cross-status /tasks hits in one hour). Replace it with per-status mini lists
+  // for the three NON-terminal states (ready/todo/needs-human); done/superseded stay pure counts to
+  // avoid board explosion. N=3, updatedAt descending, still /task/<id> links — grouped in-memory from
+  // the already-fetched task-summary array (no new provider read, no new network round-trip).
+  const MINI_LIST_N = 3;
+  const miniStatuses: readonly string[] = [TASK_STATUS.READY, TASK_STATUS.TODO, TASK_STATUS.NEEDS_HUMAN];
+  const miniList = (s: string): string => {
+    const rows = d.tasks
+      .filter((t) => t.status === s && typeof (t as { updatedAt?: unknown }).updatedAt === "number")
+      .sort((a, b) => ((b as { updatedAt?: unknown }).updatedAt as number) - ((a as { updatedAt?: unknown }).updatedAt as number))
+      .slice(0, MINI_LIST_N);
+    if (rows.length === 0) return "";
+    return html`<div style="border-top:1px solid var(--color-divider);margin-top:2px;padding-top:8px;display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:0.7rem;color:var(--color-neutral-700)">${escapeHtml(s)}（最近 ${MINI_LIST_N} 条）</div>
+      ${rows.map((t) => html`<a href="/task/${encodeURIComponent(String(t.id))}" style="display:flex;justify-content:space-between;gap:8px;text-decoration:none;color:var(--color-text);font-size:0.75rem">
+        <span style="font-weight:600;color:var(--color-accent)">${escapeHtml(String(t.id))}</span>
+        <span style="flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(String(t.title ?? ""))}</span>
+      </a>`).join("")}
+    </div>`;
+  };
 
   const latestRun = d.tests.runs[0] ?? null;
   const testsCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
@@ -103,13 +121,7 @@ function renderDashboardPage(d: {
     <div style="display:flex;gap:0.75rem;font-size:0.75rem;flex-wrap:wrap;color:var(--color-neutral-700)">
       ${statuses.map((s) => html`<span><b>${counts.get(s) ?? 0}</b> ${escapeHtml(s)}</span>`).join("")}
     </div>
-    ${recentActive.length > 0 ? html`<div style="border-top:1px solid var(--color-divider);margin-top:2px;padding-top:8px;display:flex;flex-direction:column;gap:4px">
-      <div style="font-size:0.7rem;color:var(--color-neutral-700)">最近更新（非 done）</div>
-      ${recentActive.map((t) => html`<a href="/task/${encodeURIComponent(String(t.id))}" style="display:flex;justify-content:space-between;gap:8px;text-decoration:none;color:var(--color-text);font-size:0.75rem">
-        <span style="font-weight:600;color:var(--color-accent)">${escapeHtml(String(t.id))}</span>
-        <span style="flex:none">${escapeHtml(String(t.status ?? ""))}</span>
-      </a>`).join("")}
-    </div>` : ""}
+    ${miniStatuses.map(miniList).join("")}
     <a href="/tasks" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看任务列表 →</a>
   </div>`;
 
