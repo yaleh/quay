@@ -1,7 +1,7 @@
 ---
 id: gap-worker-ac-check-shortcircuit
 title: worker exit 0 后 fan-in 前短路查 AC 未全勾——漏勾 AC 不再烧整条 fan-in + 锁排队（机制兜底）
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -32,5 +32,11 @@ extra:
 ## Touches
 
 - plugin/scripts/worker-driver.ts（finishAsync 短路）
-- plugin/test/（worker-driver fan-in 相关测试）
+- plugin/test/worker-driver-fan-in.test.mjs（worker-driver fan-in 相关测试）
 - tasks/gap-worker-ac-check-shortcircuit.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T07:17:13.111Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
