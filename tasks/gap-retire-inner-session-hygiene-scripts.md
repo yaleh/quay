@@ -1,7 +1,7 @@
 ---
 id: gap-retire-inner-session-hygiene-scripts
 title: B/C 组 inner 会话卫生脚本退役——先迁活 helper 再删 --detect-stop/--pane/tmux-Monitor 挂载/落盘/main_thread_edits/wakeup-heartbeat 面，同步 catalog/测试
-status: todo
+status: ready
 labels:
   - gap
   - defect
