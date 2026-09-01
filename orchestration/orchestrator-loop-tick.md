@@ -737,7 +737,7 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --
 内层/外层/管理者各是**一次调用**，不新写代码。`--target inner` 保持旧路径 `.quay/inner-blocked.json`；
 其它 target 写 `.quay/blocked-signals/<target>.json`。
 
-外层盯内层（主路径，显式 `--target inner`）：
+~~外层盯内层（主路径，显式 `--target inner`）~~（**已退役** 2026-09-01：喂 inner 自己 pane 死指令，`gap-retire-inner-hygiene-delete-session-face`；下段 `--target outer` 仍活）：
 
 ```bash
 tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \

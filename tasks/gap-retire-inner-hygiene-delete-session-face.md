@@ -36,11 +36,16 @@ step1（`gap-retire-inner-hygiene-migrate-helper`，done）已把三个活 helpe
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，真正②类面清）：`inner-panel-stale-check.ts` 的 CLI 壳与 `inner-exec-mode-report.ts` 死壳均已删除；纯函数在 `agent-panel-classify.ts` 里可直接 import 且行为不变（迁移测试绿）；`main-thread-edit-check.ts` 里的 `resolveViaInnerSessionCheck` 死回退已删除。⛔ 任一仍在原文件/原路径可 import ⇒ 假。
-- [ ] AC2（能取假，wakeup-heartbeat 写方核实后处置，二选一记录）：若核实写方无活调用者 ⇒ CLI 面已删；若核实仍有活调用者 ⇒ 任务体记录该发现、代码不改、注明后续观测任务 id。⛔ 未做核实直接删或直接跳过不判定 ⇒ 假。
-- [ ] AC3（能取假，doc-marking 完整且不误伤）：上述 6 份文档（含双副本）里"捕获/喂 inner 自己 pane"的具体调用行均已删除或标注退役；`red-on-omission-audit.ts:427` A7 条目同步。⛔ 任一份文档仍原样引用该具体调用且未标注 ⇒ 假；⛔ 误删了 `--target outer`/`--target manager` 部分 ⇒ 假（`orchestrator-loop-tick.md:751` 一行必须原样保留，作为负控制核对点）。
-- [ ] AC4（能取假，未越界）：`git diff` 对 `plugin/scripts/monitor-mount-check.sh` 与 `plugin/scripts/inner-blocked-signal.ts` 均为空——本任务未改动这两个文件。⛔ 任一文件有 diff ⇒ 假。
-- [ ] AC5（能取假，无回归）：typecheck + 相关测试绿。
+- [x] AC1（能取假，真正②类面清）：`inner-panel-stale-check.ts` 的 CLI 壳与 `inner-exec-mode-report.ts` 死壳均已删除；纯函数在 `agent-panel-classify.ts` 里可直接 import 且行为不变（迁移测试绿）；`main-thread-edit-check.ts` 里的 `resolveViaInnerSessionCheck` 死回退已删除。⛔ 任一仍在原文件/原路径可 import ⇒ 假。
+  - 实测：4 文件 D（inner-panel-stale-check.ts / inner-exec-mode-report.ts / inner-exec-mode-report.test.mjs / inner-panel-stale-check.test.mjs）；新 `agent-panel-classify.ts`（纯函数迁移）+ `agent-panel-classify.test.mjs`；`node --test plugin/test/agent-panel-classify.test.mjs` 9/9 绿；`main-thread-edit-check.ts` 的 `resolveViaInnerSessionCheck` 已删（`--help` exit 0）；全仓 `git grep` 无功能性 import/实调（仅注释/历史记录）。
+- [x] AC2（能取假，wakeup-heartbeat 写方核实后处置，二选一记录）：核实结论=**写方仍有活调用者 ⇒ 代码不改，记录发现**。⛔ 未做核实直接删或直接跳过不判定 ⇒ 假。
+  - 实测：写方 `inner-wakeup-heartbeat.ts` 仍被 inner 执行核 `fast-mode-tick-core.md` B3（重新排程）每轮文档化调用（`--blocked '...' --run-ids '...' ...`，双副本 :66-67）；外层读方 `inner-wakeup-heartbeat-check.ts` 仍活（manager A3 / orchestrator A13 + `slot-refill.test.mjs` import `judgeEndInvariant` + `semantic-observer-judge.test.mjs` import）。失效前提「若改由 harness 直接上报，本条退休」未满足（无 harness 直接上报证据；`.quay/inner-wakeup-heartbeat.json` 停在 08-24 是 inner 停摆而非机制退役）。⇒ 本任务【不删】wakeup-heartbeat 两文件；后续观测任务【待立】：判定「inner 自排程是否已退役、心跳写方是否可随之外移」。
+- [x] AC3（能取假，doc-marking 完整且不误伤）：上述 6 份文档（含双副本）里"捕获/喂 inner 自己 pane"的具体调用行均已删除或标注退役；`red-on-omission-audit.ts:427` A7 条目同步。⛔ 任一份文档仍原样引用该具体调用且未标注 ⇒ 假；⛔ 误删了 `--target outer`/`--target manager` 部分 ⇒ 假（`orchestrator-loop-tick.md:751` 一行必须原样保留，作为负控制核对点）。
+  - 实测：fast-mode-tick-core.md（双副本）A7/A8 标注「已退役」；orchestrator-tick-core.md（双副本）A7 标注「已退役」；orchestrator-loop-tick.md（双副本）「外层盯内层 --target inner」块标注「已退役」；red-on-omission-audit.ts A7 redReading=null + behavior 标注「已退役」。负控制：`--target outer` 一行（`inner-blocked-signal.ts --detect-stop --target outer --pane .quay/last-outer-pane.txt`）原样保留。`tick-core-static-check --check-drift` 4/4 一致。
+- [x] AC4（能取假，未越界）：`git diff` 对 `plugin/scripts/monitor-mount-check.sh` 与 `plugin/scripts/inner-blocked-signal.ts` 均为空——本任务未改动这两个文件。⛔ 任一文件有 diff ⇒ 假。
+  - 实测：`git diff --stat -- plugin/scripts/monitor-mount-check.sh plugin/scripts/inner-blocked-signal.ts` 输出为空。
+- [x] AC5（能取假，无回归）：typecheck + 相关测试绿。
+  - 实测：catalog `--summary` 310 declared / 0 unclassified / exit 0；tick-core-static-check（AC3 覆盖率 56/56+43/43+46/46 + drift 4/4）PASS；rhythm-consumer-check / mechanism-vitality-check exit 0；相关测试 9+10+7+10+22 全绿（agent-panel-classify / repo-root-unification / gap-b3-readfilesafe / suite-bucket-attribution / verify-delivery-surface）。typecheck 面（packages/*/）未触及。
 
 ## Definition of Done
 
@@ -51,18 +56,29 @@ step1（`gap-retire-inner-hygiene-migrate-helper`，done）已把三个活 helpe
 - plugin/scripts/inner-panel-stale-check.ts（删 CLI 壳）
 - plugin/scripts/agent-panel-classify.ts（新：纯函数分类器）
 - plugin/test/inner-panel-stale-check.test.mjs（拆：纯函数测试随新文件改名，CLI 测试删）
-- plugin/scripts/inner-wakeup-heartbeat.ts（写方活性核实后处置）
-- plugin/scripts/inner-wakeup-heartbeat-check.ts（随上者联动）
+- plugin/test/agent-panel-classify.test.mjs（新：纯函数迁移测试）
+- plugin/scripts/inner-wakeup-heartbeat.ts（写方活性核实后处置——结论：仍活，不改，仅记录）
+- plugin/scripts/inner-wakeup-heartbeat-check.ts（随上者联动——结论：不改）
 - plugin/scripts/inner-exec-mode-report.ts（删死壳）
 - plugin/test/inner-exec-mode-report.test.mjs（删）
 - plugin/scripts/main-thread-edit-check.ts（删继承来的 resolveViaInnerSessionCheck 死回退）
-- plugin/test/repo-root-unification.test.mjs（FORMER_DEFINERS 名单同步，若列了待删文件）
-- plugin/scripts/capability-catalog.sh（新文件六表注册；退役条目标记）
-- plugin/loop/fast-mode-tick-core.md（A7/A8 doc-marking）
-- orchestration/fast-mode-tick-core.md（A7/A8 doc-marking）
+- plugin/test/repo-root-unification.test.mjs（FORMER_DEFINERS 名单同步）
+- plugin/test/gap-b3-readfilesafe-normalizerel-unification.test.mjs（NORMALIZE_REL_CONSUMERS 去 inner-exec-mode-report）
+- plugin/test/suite-bucket-attribution.test.mjs（GROUP_B 去 inner-exec-mode-report，23→22）
+- plugin/test/verify-delivery-surface.test.mjs（shipped 去 inner-exec-mode-report）
+- plugin/scripts/deliver-verify-usage.sh（VERIFY_SET 去 inner-exec-mode-report）
+- plugin/scripts/capability-catalog.sh（删 inner-panel-stale-check/inner-exec-mode-report 六表条目 + agent-panel-classify 六表注册）
+- plugin/loop/fast-mode-tick-core.md（A7/A8 doc-marking + A24/B2 exec-mode→main-thread）
+- orchestration/fast-mode-tick-core.md（同上）
 - plugin/loop/orchestrator-tick-core.md（A7 行 doc-marking，只删 target=inner 部分）
 - orchestration/orchestrator-tick-core.md（同上）
 - plugin/loop/orchestrator-loop-tick.md（捕获 inner pane 指令段 doc-marking，保留 target=outer 示例）
 - orchestration/orchestrator-loop-tick.md（同上）
+- plugin/loop/fast-mode-loop-tick.md（inner-panel-stale-check 退役标注 + exec-mode→main-thread）
+- plugin/skills/loop-driver/SKILL.md（inner-panel-stale-check 退役标注）
+- orchestration/manager-loop-tick.md（exec-mode→main-thread）
+- orchestration/manager-tick-core.md（exec-mode→main-thread）
 - plugin/scripts/red-on-omission-audit.ts（A7 条目同步）
+- docs/analysis/test-file-baseline.txt（去 inner-exec-mode-report + inner-panel-stale-check→agent-panel-classify）
+- .quay/suite-bucket-reattribution.jsonl（去 inner-exec-mode-report 条目 + inner-panel-stale-check→agent-panel-classify）
 - tasks/gap-retire-inner-hygiene-delete-session-face.md（自身）

@@ -1,47 +1,29 @@
 // @test-group engine
-// inner-panel-stale-check.test.mjs — 面板观测机制（状态转换表达）
-// (tasks/gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close).
+// agent-panel-classify.test.mjs — 面板行分类纯函数迁移测试
+// (tasks/gap-retire-inner-hygiene-delete-session-face).
 //
-// The inner Claude TUI panel shows a FROZEN stale agent line after the bracket closed — a
-// MISLEADING WINDOW before the panel self-cleans. In that window the frozen dead line is visually
-// INDISTINGUISHABLE from a live agent without cross-time sampling (timer advance), so anyone
-// glancing reads "agent ran 3h unfinished". Same family as the recurring "instrument can't
-// distinguish opposite states" (stuck-vs-running → ended-vs-running).
+// 原 inner-panel-stale-check.ts 的 CLI 壳（--pane/--target/tmux capture 读盘）是②类会话卫生面，
+// step2 已删。纯函数迁到 plugin/scripts/agent-panel-classify.ts，本文件钉住「迁移后行为不变」——
+// 只保留原测试里的纯函数用例，CLI 壳用例（AC3 exit 码 / --json / fail-closed）与 SKILL.md 引用
+// 用例（AC4 wiring）随壳一并删除。
 //
-// This file pins the mechanical observer (plugin/scripts/inner-panel-stale-check.ts) that expresses
-// the state transition:
-//   AC1 — bracket cross-reference: a line whose task is NOT in telemetry `inProgress` (bracket
-//         closed) but still present ⇒ ENDED (marked, no longer identical to a live line).
-//   AC2 — frozen-timer: two pane samples; a line whose timer did NOT advance ⇒ FROZEN (no human
-//         cross-time sampling — the script does the two samples).
-//   AC3 — negative control: construct "bracket closed, panel line remains" ⇒ the observer MUST
-//         report the line as ended/frozen (exit 1), and a live advancing line must NOT be stale.
-//   AC4 — the observer is wired as the panel observation mechanism (state-transition expression).
+//   AC1 — bracket cross-reference: 括号已关任务的面板行标记 ENDED（不与 live 行视觉相同）。
+//   AC2 — frozen-timer: 两次采样计时未推进 ⇒ FROZEN（脚本做两次采样，无需人跨时间采样）。
 //
 // Run:
-//   scripts/test.sh plugin/test/inner-panel-stale-check.test.mjs
-//   node --test plugin/test/inner-panel-stale-check.test.mjs
+//   scripts/test.sh plugin/test/agent-panel-classify.test.mjs
+//   node --test plugin/test/agent-panel-classify.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 
 import {
   parseTimerSec,
   extractAgentLines,
   matchTaskIds,
-  classifyLines,
-  detectFrozen,
   runStaleCheck,
   collectKnownTaskIds,
-} from "../scripts/inner-panel-stale-check.ts";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.join(__dirname, "..", "scripts", "inner-panel-stale-check.ts");
+} from "../scripts/agent-panel-classify.ts";
 
 // The exact defect shape from the task: observer-registry ran 3h5m32s, bracket closed at 03:22
 // (needs-human, d3fb2839), but the panel line is still present with a frozen timer.
@@ -63,26 +45,6 @@ const REPORT = {
   unreliable: [],
   reconcilable: [],
 };
-
-function runCli(pane, after, report, extra = []) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ipsc-"));
-  try {
-    const panePath = path.join(tmp, "pane.txt");
-    fs.writeFileSync(panePath, pane, "utf8");
-    const reportPath = path.join(tmp, "report.json");
-    fs.writeFileSync(reportPath, JSON.stringify(report), "utf8");
-    const args = ["--no-warnings", "--experimental-strip-types", CLI, "--pane", panePath];
-    if (after != null) {
-      const afterPath = path.join(tmp, "after.txt");
-      fs.writeFileSync(afterPath, after, "utf8");
-      args.push("--after", afterPath);
-    }
-    args.push("--report", reportPath, ...extra);
-    return spawnSync("node", args, { encoding: "utf8" });
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-}
 
 // ── parsing helpers (pure) ──────────────────────────────────────────────────────────────────────────
 
@@ -163,48 +125,7 @@ test("AC2 — a no-timer line is not falsely frozen", () => {
   assert.equal(v.frozen.length, 0, "no-timer line has no timer to compare → not frozen");
 });
 
-// ── AC3 — negative control: construct "bracket closed, panel line remains" ⇒ mechanically detected ──
-
-test("AC3 — CLI exit 1 when the frozen/ended line is present (single sample)", () => {
-  const r = runCli(FROZEN_PANE, null, REPORT);
-  assert.equal(r.status, 1, `bracket-closed line must make the check exit 1:\n${r.stdout}\n${r.stderr}`);
-  assert.match(r.stdout, /observer-registry/, "the stale line must be named");
-  assert.match(r.stdout, /STALE/, "the verdict must be STALE");
-});
-
-test("AC3 — CLI exit 0 for a clean panel (all live, advancing)", () => {
-  const before = "  Execute live-task task 1h 6m 3s\n";
-  const after = "  Execute live-task task 1h 6m 37s\n";
-  const r = runCli(before, after, REPORT);
-  assert.equal(r.status, 0, `clean panel must exit 0:\n${r.stdout}\n${r.stderr}`);
-  assert.match(r.stdout, /CLEAN/, "the verdict must be CLEAN");
-});
-
-test("AC3 — CLI JSON output carries the per-line state machine (live/ended/frozen/stale)", () => {
-  const r = runCli(FROZEN_PANE, FROZEN_PANE_AFTER, REPORT, ["--json"]);
-  assert.equal(r.status, 1, r.stderr);
-  const j = JSON.parse(r.stdout);
-  assert.equal(j.verdict, "STALE");
-  assert.ok(j.ended.includes("Committing observer-registry task work 3h 5m 32s"));
-  assert.ok(j.frozen.includes("Committing observer-registry task work 3h 5m 32s"));
-  assert.ok(j.live.includes("Execute live-task task 1h 6m 3s"));
-  const ob = j.agentLines.find((l) => l.taskId === "observer-registry");
-  assert.equal(ob.state, "ended");
-});
-
-test("AC3 — fail-closed on bad inputs (no pane, no report)", () => {
-  const r = spawnSync("node", ["--no-warnings", "--experimental-strip-types", CLI], { encoding: "utf8" });
-  assert.equal(r.status, 2, "no pane/report must exit 2 (usage)");
-});
-
-// ── AC4 — wiring: the observer is the panel observation mechanism (state-transition expression) ────
-
-test("AC4 — the stale-check observer is referenced as the panel observation mechanism", () => {
-  const skill = fs.readFileSync(path.join(__dirname, "..", "skills", "loop-driver", "SKILL.md"), "utf8");
-  assert.match(skill, /inner-panel-stale-check|面板观测机制|状态转换/, "the loop-driver skill must reference the panel observation mechanism");
-});
-
-test("AC4 — collectKnownTaskIds unions every lifecycle section", () => {
+test("collectKnownTaskIds — unions every lifecycle section", () => {
   const report = {
     tasks: [{ taskId: "a" }],
     inProgress: [{ taskId: "b" }],

@@ -68,7 +68,7 @@ const GROUP_A = [
   "serve.test.mjs",
 ];
 
-// (b) 23 `plugin/test/*` files that touch `packages/*/src|bin|dist` → cross-bucket (contain P).
+// (b) 22 `plugin/test/*` files that touch `packages/*/src|bin|dist` → cross-bucket (contain P).
 const GROUP_B = [
   "branch-model.test.mjs",
   "build-evidence-manifest.test.mjs",
@@ -79,7 +79,6 @@ const GROUP_B = [
   "execute-suite-fix-scope-gate.test.mjs",
   "fan-in-execute-paths.test.mjs",
   "fan-in-ts-typecheck-gate.test.mjs",
-  "inner-exec-mode-report.test.mjs",
   "needs-human-recheck.test.mjs",
   "prepare-admission-check.test.mjs",
   "provision-verify-worktree.test.mjs",
@@ -133,8 +132,8 @@ test("AC2(a): the 11 packages/quay/test files touching plugin/scripts are cross-
 
 // ── AC2(b) ───────────────────────────────────────────────────────────────────────────────────────────
 
-test("AC2(b): the 23 plugin/test files touching packages src are cross-bucket (contain P)", () => {
-  assert.equal(GROUP_B.length, 23, "group (b) must be exactly 23 files");
+test("AC2(b): the 22 plugin/test files touching packages src are cross-bucket (contain P)", () => {
+  assert.equal(GROUP_B.length, 22, "group (b) must be exactly 22 files");
   for (const f of GROUP_B) {
     const rel = `plugin/test/${f}`;
     const buckets = bucketSetOf(rel, ROOT);

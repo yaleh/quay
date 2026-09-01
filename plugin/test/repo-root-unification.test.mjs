@@ -40,7 +40,7 @@ function sourceOf(rel) {
   return fs.readFileSync(path.join(SCRIPTS_DIR, rel), "utf8");
 }
 
-// The 22 files that previously each carried a local findRepoRoot/findWorkspaceRoot definition.
+// The 21 files that previously each carried a local findRepoRoot/findWorkspaceRoot definition.
 const FORMER_DEFINERS = [
   "verify-delivery-surface.ts", "threshold-scope-check.ts", "cap-from-gate.ts",
   "check-set-after-change-check.ts", "prod-data-audit.ts", "task-status-drift-check.ts",
@@ -48,7 +48,7 @@ const FORMER_DEFINERS = [
   "task-ac-carryover-check.ts", "known-load-sensitive.ts", "axis-generator.ts",
   "select-static-checks-for-touches.ts", "gate-dispatch-coverage.ts", "malformed-task-check.ts",
   "fan-in-ts-typecheck-gate.ts", "suite-bucket-attribution.ts", "fast-mode-telemetry.ts",
-  "task-contract-check.ts", "inner-exec-mode-report.ts", "trend-check.ts", "suite-bucket-hub-list.ts",
+  "task-contract-check.ts", "trend-check.ts", "suite-bucket-hub-list.ts",
 ];
 // The 13 files that previously cross-imported findRepoRoot from another checker module.
 // (suite-fs-trace / suite-bucket-drift-check / suite-bucket-reattr-ratchet-check arrived via
@@ -83,7 +83,7 @@ test("AC1 — no findRepoRoot / findWorkspaceRoot definition survives in any .ts
 
 // ── AC2: negative control (删共享 ⇒ 调用点红) ──────────────────────────────────────────────────────
 
-test("AC2 — the 22 former local copies are gone (no hidden redefinition survives)", () => {
+test("AC2 — the 21 former local copies are gone (no hidden redefinition survives)", () => {
   for (const f of FORMER_DEFINERS) {
     assert.doesNotMatch(
       sourceOf(f),
