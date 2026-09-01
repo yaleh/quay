@@ -63,4 +63,6 @@ ts-ization 方向已定（`gap-execution-loop-p4-suite-entry-ts-ization` done：
 
 1. **C 应修（真回归，非 flaky）**：`scripts/test.sh --list-groups` 计数、`quay-init-loop-consumer-doc-refs` AC37（plugin/loop/ 引用）、`quay-init-loop-driver` AC3（双向控制）——waterline-scheduler/ts-ization 改 test.sh 引入的回归，应修（非加超时/重试能掩盖）。
 2. **inner 测试退役**：inner 是已退役机制，session-liveness 家族测「inner 停摆报 IDLE」的测试应退役（删除），非加超时。
-3. **A 类增加超时**：其余时序敏感测试（worker-driver resident/fan-in、writestate-atomicity、md-deletion-token、full-suite-runner、inner-session-check）增加超时。
+3. **A 类增加超时**：其余时序敏感测试（worker-driver resident/fan-in、writestate-atomicity、md-deletion-token、full-suite-runner、inner-session-check）增加超时；**补一条**：`plugin/test/quay-init.test.mjs:376`「concurrent --loop installs … no torn-read false positive (negative control)」（2 !== 0——verify_referenced_landed 把已声明 reference-doc 的 `orchestration/SPEC-typed-axes-and-standing-dynamics.md` 误判未落地，属已知 torn-read 类 flaky，同族 done：gap-quay-init-verify-referenced-landed-torn-read / gap-quay-init-torn-read-derive-loop-scripts / gap-verify-referenced-landed-concurrency-hardening-insufficient）。
+
+4. **merge 冲突处置（worker 续做时执行）**：worktree 卡在未完成 merge（MERGE_HEAD=d5462994c，`plugin/test/worker-driver-resident.test.mjs` 两处 waitFor 超时冲突：HEAD 侧 15000ms（无注释）vs develop 侧 10000ms（带「满载16核 full-suite 并发下 >5s 是已知 flake」注释））。resolve：**两处都取 15000ms，保留 develop 那条解释注释**（来源改成两者共同根因），`git add` 后 `commit --no-edit` 继续 merge。
