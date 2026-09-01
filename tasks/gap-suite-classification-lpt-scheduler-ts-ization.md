@@ -1,7 +1,7 @@
 ---
 id: gap-suite-classification-lpt-scheduler-ts-ization
 title: suite 分类+LPT 移 TS——suite-scheduler.ts 收原始文件列表（分类→LPT→调度一体），test.sh 薄转发
-status: todo
+status: ready
 labels:
   - gap
   - defect
