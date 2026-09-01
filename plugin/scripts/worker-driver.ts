@@ -912,6 +912,19 @@ function driverFanInNote(): string {
   ].join(" ");
 }
 
+/** AC 勾选指令（gap-worker-dispatch-prompt-ac-check-instruction）：worker 实现后逐条验证 AC、在 worktree
+ *  任务体 `## Acceptance Criteria` 勾选 `- [x]`、与实现一并提交——否则 fan-in 的 ac-precheck（suite 前
+ *  fail-fast，读 `checked===total`）会因未全勾拒翻、烧掉整条 fan-in（实测 5 次全 0/3：流程里根本没有
+ *  「勾 AC」动作）。创建 prompt 与续做 prompt 共用。 */
+function acCheckNote(): string {
+  return [
+    `after implementing, go through each Acceptance Criterion one-by-one and verify it is satisfied by your work;`,
+    `then in the worktree task body \`## Acceptance Criteria\` check off every satisfied criterion as \`- [x]\``,
+    `(turn \`- [ ]\` into \`- [x]\`), committing these AC checkbox updates together with your implementation in the same commit —`,
+    `an AC left unchecked fails fan-in's ac-precheck and burns the whole fan-in run.`,
+  ].join(" ");
+}
+
 /** dispatch-worktree-setup.sh 调用签名（gap-dispatch-worktree-setup-zero-production-callers）：每个
  *  被派发的 worktree 创建后【必须】跑一次（node_modules symlink-or-install + config.yml 经
  *  worktree-include.sh），机制接管 bootstrap——worker 不再手工 `ln -s`/`cp config.yml`（正是该脚本被
@@ -933,7 +946,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `Run the implementation chain: (1) create an isolated git worktree for ${task}, then immediately`,
     `provision it by running \`${dispatchSetupSignature(root, "<the worktree path you created in step 1>")}\``,
     `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
-    `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch;`,
+    `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch; ${acCheckNote()}`,
     `(3) ${driverFanInNote()}`,
     `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree.`,
     `You own your worktree fully; apart from the final merge (done by the driver) do not touch develop.`,
@@ -1143,7 +1156,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `${continueConflictResolutionNote()}`,
     `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
-    `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch),`,
+    `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch); ${acCheckNote()}`,
     `(2) ${driverFanInNote()}.`,
     `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
