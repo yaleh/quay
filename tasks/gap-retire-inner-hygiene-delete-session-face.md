@@ -66,3 +66,10 @@ step1（`gap-retire-inner-hygiene-migrate-helper`，done）已把三个活 helpe
 - orchestration/orchestrator-loop-tick.md（同上）
 - plugin/scripts/red-on-omission-audit.ts（A7 条目同步）
 - tasks/gap-retire-inner-hygiene-delete-session-face.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T14:55:46.918Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red

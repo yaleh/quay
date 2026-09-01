@@ -85,6 +85,12 @@ test("PURE checkNonFfFanIn — a fan-in merge subject (convention or git auto) i
   assert.equal(v2.ok, false);
   assert.ok(FAN_IN_MERGE_SUBJECT_RE.test("merge: fan-in task/x"), "convention subject matches");
   assert.ok(FAN_IN_MERGE_SUBJECT_RE.test("Merge branch 'task/y'"), "git auto subject matches");
+  assert.ok(FAN_IN_MERGE_SUBJECT_RE.test("Merge branch 'task/y' into develop"), "git auto subject into develop matches");
+  // gap-fan-in-ff-protocol-check-false-positive-task-branch-merge: the git auto subject must
+  // distinguish the TARGET branch — a feature merge into main/manager-doc (doc branch) or into
+  // integration is NOT a fan-in into develop, and must not match (the false-positive fix).
+  assert.ok(!FAN_IN_MERGE_SUBJECT_RE.test("Merge branch 'task/quay-file-task-skill' into main/manager-doc"), "doc-branch feature merge does not match");
+  assert.ok(!FAN_IN_MERGE_SUBJECT_RE.test("Merge branch 'task/y' into integration"), "integration-era merge does not match");
   assert.ok(!FAN_IN_MERGE_SUBJECT_RE.test("chore: unrelated"), "unrelated subject does not match");
 });
 
@@ -190,6 +196,59 @@ test("判据2a negative control — a repo with NO fan-in merge after the baseli
     const nonFf = jsonOut(r).checks.find((c) => c.check === "non-ff-fan-in");
     assert.equal(nonFf.ok, true);
     assert.equal(nonFf.evaluated, true);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("判据2a false-positive fix — a task-branch merge INTO main/manager-doc after the baseline ⇒ PASS (exit 0)", () => {
+  // gap-fan-in-ff-protocol-check-false-positive-task-branch-merge: a feature/skill merge into the
+  // DOC branch (main/manager-doc) carries the same `branch 'task/` subject prefix as a fan-in but a
+  // DIFFERENT target — it is ff-carried to develop by the doc→develop sync and must NOT be a
+  // non-ff-fan-in violation (58eaaa2d0 real case).
+  const dir = makeTmp("a2docbranch");
+  try {
+    initRepo(dir);
+    const base = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    gitCmd(dir, "checkout", "-q", "-b", "task/skill");
+    fs.writeFileSync(path.join(dir, "skill.txt"), "skill\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "skill work");
+    gitCmd(dir, "checkout", "-q", "master");
+    const merge = gitCmd(dir, "merge", "-q", "--no-ff", "task/skill", "-m", "Merge branch 'task/skill' into main/manager-doc");
+    assert.equal(merge.status, 0, "seed the doc-branch feature merge");
+
+    const r = runChecker(["--root", dir, "--baseline", base, "--develop", "master"]);
+    assert.equal(r.status, 0, `doc-branch feature merge must NOT be a violation: ${r.stdout}${r.stderr}`);
+    const nonFf = jsonOut(r).checks.find((c) => c.check === "non-ff-fan-in");
+    assert.equal(nonFf.ok, true);
+    assert.equal(nonFf.evaluated, true);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("判据2a — a git-auto task-branch merge INTO develop after the baseline ⇒ RED (exit 1)", () => {
+  // Negative control for the target-branch tightening: a genuine non-ff fan-in — a task branch
+  // merged INTO develop with git's own auto subject — must STILL be flagged (误放行 ⇒ 假).
+  const dir = makeTmp("a2intodev");
+  try {
+    initRepo(dir);
+    const base = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    gitCmd(dir, "checkout", "-q", "-b", "task/violation");
+    fs.writeFileSync(path.join(dir, "work.txt"), "work\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "task work");
+    gitCmd(dir, "checkout", "-q", "master");
+    const merge = gitCmd(dir, "merge", "-q", "--no-ff", "task/violation", "-m", "Merge branch 'task/violation' into develop");
+    assert.equal(merge.status, 0, "seed the non-ff fan-in into develop");
+
+    const r = runChecker(["--root", dir, "--baseline", base, "--develop", "master"]);
+    assert.equal(r.status, 1, `git-auto into-develop merge must be RED: ${r.stdout}${r.stderr}`);
+    const nonFf = jsonOut(r).checks.find((c) => c.check === "non-ff-fan-in");
+    assert.equal(nonFf.ok, false);
+    assert.equal(nonFf.evaluated, true);
+    assert.ok(nonFf.violations.length >= 1, "names the violating merge commit");
   } finally {
     cleanup(dir);
   }

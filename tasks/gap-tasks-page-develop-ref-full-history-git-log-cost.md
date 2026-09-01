@@ -66,3 +66,10 @@ extra:
 - packages/quay/test/observation.test.mjs（AC1/AC2/AC4 单测：合成大规模 fixture、增量刷新耗时对照、fail-open）
 - packages/quay/test/serve-task.test.mjs（AC3 单测：详情页零新增 git 子进程）
 - tasks/gap-tasks-page-develop-ref-full-history-git-log-cost.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T14:46:51.533Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
