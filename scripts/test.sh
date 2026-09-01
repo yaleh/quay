@@ -1019,8 +1019,8 @@ run_selected() {
   build_dist_once
   oh_t3=$(_oh_mark)
   run_static_checks
-  # archguard 结构闸已迁入 fan-in driver 机械步骤（runMechanicalFanIn 第 5.5 步，typecheck 后 scoped门 前，
-  # gap-archguard-structural-gate-in-fan-in-driver）——⛔ test.sh 不再触发（两个真相源）。
+  # archguard 结构闸已从 fan-in gate 链移除（gap-fan-in-remove-archguard-gate），降级为【按需命令】
+  # （按需入口保留在 plugin/scripts/ 的结构分析脚本头注释，不进 suite 也不进 fan-in gate 链）——⛔ test.sh 不再触发。
   oh_t4=$(_oh_mark)
   export QUAY_TEST_GROUPS="$groups"
   local files=() f

@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-doc-check-cache
 title: doc-check 产物按 (docs 状态) 键控缓存——docs 未变时 0 秒
-status: todo
+status: needs-human
 labels:
   - gap
 parent: null
@@ -30,10 +30,16 @@ doc-check（11.6s，165 次/周=0.53h）是 (docs 相关文件集→verdict) 的
 
 ## Definition of Done
 
-缓存落地 develop；AC1-3 勾；生产出 cache-hit 且无假命中。
+缓存模块落地 develop 并被 worker-driver.ts doc-check 步骤调用；AC1-3 全勾；生产载体验证 docs 未变时出现 cache-hit 且无假命中。
 
 ## Touches
 
 - plugin/scripts/worker-driver.ts（doc-check 步骤缓存逻辑）
-- plugin/scripts/（缓存实现模块）
+- plugin/scripts/doc-check-cache.ts（缓存实现模块）
 - tasks/gap-fan-in-doc-check-cache.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T04:40:29.692Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
