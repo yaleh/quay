@@ -1,7 +1,7 @@
 ---
 id: gap-suite-scheduler-main-lpt-missing
 title: suite LPT+dispatch 3 套复制粘贴重构成 1 套循环+组表——main 组漏 LPT 致长文件晚启动长尾
-status: needs-human
+status: superseded
 labels:
   - gap
   - defect
@@ -9,6 +9,8 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded_by: gap-suite-classification-lpt-scheduler-ts-ization
+  superseded_reason: bash 中间态（declare -A + declare -n 组表循环）被 TS 终态 gap-suite-classification-lpt-scheduler-ts-ization（分类+LPT+调度整体移 TS，worker 已派发）承接；needs-human 是「被误杀」非「LPT 重构真回归」——3 连 ENL 中 merge 冲突是任务体 mid-flight 双写、suite red 属 help-contract AC1 mtime race 一族 flaky 污染（gap-suite-help-contract-mtime-race），非本任务 LPT 重构缺陷。不 re-triage，由 TS 版终态直接收口。
 ---
 **type:** execution
 
