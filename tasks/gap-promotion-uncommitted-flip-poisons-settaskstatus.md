@@ -28,8 +28,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：构造「翻转 ready 但提交失败」的脏工作树 ⇒ 下一轮 promotion 判 develop 为 todo 并重新提交（develop 收敛 ready），⛔ 仍判 not-todo 跳过 ⇒ 假。
-- [ ] AC2（能取假，负控制）：工作树已 commit 的 ready（develop 已 ready）⇒ setTaskStatus 仍判 not-todo 跳过（不重复翻转）；（⛔ 已 ready 仍重翻 ⇒ 假）。
+- [x] AC1（能取假）：构造「翻转 ready 但提交失败」的脏工作树 ⇒ 下一轮 promotion 判 develop 为 todo 并重新提交（develop 收敛 ready），⛔ 仍判 not-todo 跳过 ⇒ 假。
+- [x] AC2（能取假，负控制）：工作树已 commit 的 ready（develop 已 ready）⇒ setTaskStatus 仍判 not-todo 跳过（不重复翻转）；（⛔ 已 ready 仍重翻 ⇒ 假）。
 
 ## Definition of Done
 
