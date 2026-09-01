@@ -1,7 +1,7 @@
 ---
 id: gap-worker-dispatch-prompt-ac-check-instruction
 title: worker 派发 prompt 补「逐条验证 AC 并勾选任务体复选框」指令——漏勾 AC 烧整条 fan-in 的根因
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -33,5 +33,11 @@ extra:
 ## Touches
 
 - plugin/scripts/worker-driver.ts（buildWorkerPrompt step 2）
-- plugin/test/（worker-driver prompt 相关测试）
+- plugin/test/worker-driver.test.mjs（buildWorkerPrompt prompt 断言测试）
 - tasks/gap-worker-dispatch-prompt-ac-check-instruction.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T07:17:13.409Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
