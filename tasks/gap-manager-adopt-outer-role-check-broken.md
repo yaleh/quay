@@ -30,9 +30,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，识别正确窗口）：新检查器对一个真实存在的 `"outer"` 窗口（hermetic tmux fixture）返回 `healthy`/`empty-shell` 中的正确一态（非 `missing`）；对不存在的窗口返回 `missing`。⛔ 对着存在的 outer 窗口仍返回 `missing` ⇒ 假——这正是当前缺陷的复现判据，必须先能复现再验证修复。
-- [ ] AC2（能取假，manager-adopt 消费新检查器）：`manager-adopt.sh` 走新检查器（grep 确认 `CHECKER` 指向新文件名，不再指向 `inner-session-check.sh`）；对着一个真实存在 outer 窗口的场景跑 `quay manager adopt <root> --dry-run` 得 `state != missing`。
-- [ ] AC3（能取假，回归覆盖补齐）：`manager-productization.test.mjs` 新增至少一条 healthy-branch（或 empty-shell-branch）测试并绿；⛔ 只有 missing 分支覆盖 ⇒ 假（与修复前的盲区同形）。
+- [x] AC1（能取假，识别正确窗口）：新检查器对一个真实存在的 `"outer"` 窗口（hermetic tmux fixture）返回 `healthy`/`empty-shell` 中的正确一态（非 `missing`）；对不存在的窗口返回 `missing`。⛔ 对着存在的 outer 窗口仍返回 `missing` ⇒ 假——这正是当前缺陷的复现判据，必须先能复现再验证修复。
+- [x] AC2（能取假，manager-adopt 消费新检查器）：`manager-adopt.sh` 走新检查器（grep 确认 `CHECKER` 指向新文件名，不再指向 `inner-session-check.sh`）；对着一个真实存在 outer 窗口的场景跑 `quay manager adopt <root> --dry-run` 得 `state != missing`。
+- [x] AC3（能取假，回归覆盖补齐）：`manager-productization.test.mjs` 新增至少一条 healthy-branch（或 empty-shell-branch）测试并绿；⛔ 只有 missing 分支覆盖 ⇒ 假（与修复前的盲区同形）。
 
 ## Definition of Done
 
