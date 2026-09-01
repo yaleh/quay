@@ -109,6 +109,7 @@ import {
   spawnMechanicalFanIn,
   readFanInLockHold,
   readPreviousGreenSuiteCommit,
+  acShortCircuitVerdict,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
@@ -1345,6 +1346,81 @@ test("AC3 (gap-fan-in-ac-precheck-before-suite) — AC 全勾 ⇒ 预检不误�
   const pre = lines.find((l) => l.step === "ac-precheck");
   assert.ok(pre, "ac-precheck pass must be traced");
   assert.equal(pre.ok, true);
+});
+
+// ── gap-worker-ac-check-shortcircuit ─────────────────────────────────────────────────────────────
+// worker exit 0 后、finishAsync spawn 机械 fan-in 前，查 worktree 任务体 AC/DoD 是否全勾（flip 闸同源
+// flipAcGateVerdict）。未全勾 ⇒ 短路：不 spawn fan-in（spawn 计数 0）、outcome 原因含「AC 未全勾」。
+// AC_B1 取假（未全勾 ⇒ shortCircuit:true + 原因含「AC 未全勾」）；AC_B2 负控制（全勾 ⇒
+// shortCircuit:false，照常 spawn——⛔ 全勾也被短路 ⇒ 假）。
+
+/** 写一个带指定 AC/DoD 复选框的任务体到 worktree 的 tasks/<id>.md（自足，非 harness writeTaskFile——
+ *  那个只写 Proposal 无 AC 段且固定 status，不适配本判定）。 */
+function writeAcTaskBody(worktree, taskId, acLines, dodLines = ["- [x] landed"]) {
+  fs.mkdirSync(path.join(worktree, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(worktree, "tasks", `${taskId}.md`), [
+    "---", `id: ${taskId}`, "title: ac-shortcircuit", "status: ready", "labels: []", "extra: {}", "---",
+    "## Proposal", "prose", "## Plan", "plan",
+    "## Touches", "- docs/feature.md",
+    "## Acceptance Criteria", ...acLines,
+    "## Definition of Done", ...dodLines, "",
+  ].join("\n"), "utf8");
+}
+
+test("AC_B1 (gap-worker-ac-check-shortcircuit) — AC 未全勾 ⇒ shortCircuit:true + 原因含「AC 未全勾」（⛔ 仍 spawn fan-in ⇒ 假）", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "acsc-b1-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const wt = path.join(base, "wt");
+  writeAcTaskBody(wt, "gap-x", ["- [x] AC1 done", "- [ ] AC2 todo"]);
+  const v = acShortCircuitVerdict(wt, "gap-x");
+  assert.equal(v.shortCircuit, true, "unchecked impl item must short-circuit (⛔ spawn fan-in ⇒ false)");
+  assert.match(v.reason, /AC 未全勾/);
+  assert.match(v.reason, /2\/3/, "reason carries checked/total (2/3 = AC1✓ + DoD✓ / AC2✗)");
+});
+
+test("AC_B1b (gap-worker-ac-check-shortcircuit) — AC/DoD 段缺失 ⇒ fail-closed shortCircuit:true（硬规则 3b 无法评估 ≠ 合格）", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "acsc-b1b-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const wt = path.join(base, "wt");
+  fs.mkdirSync(path.join(wt, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(wt, "tasks", "gap-x.md"), "---\nid: gap-x\nstatus: ready\n---\n\n## Proposal\n\nbody\n", "utf8");
+  const v = acShortCircuitVerdict(wt, "gap-x");
+  assert.equal(v.shortCircuit, true, "missing AC/DoD section must fail-closed short-circuit (⛔ 无法评估当合格 ⇒ 假)");
+  assert.match(v.reason, /AC 未全勾/);
+});
+
+test("AC_B2 (gap-worker-ac-check-shortcircuit) — AC 全勾 ⇒ shortCircuit:false 照常 spawn fan-in（负控制，⛔ 全勾也被短路 ⇒ 假）", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "acsc-b2-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const wt = path.join(base, "wt");
+  writeAcTaskBody(wt, "gap-x", ["- [x] AC1 done", "- [x] AC2 done"]);
+  const v = acShortCircuitVerdict(wt, "gap-x");
+  assert.equal(v.shortCircuit, false, "all checked must NOT short-circuit (⛔ false block ⇒ 假)");
+  assert.equal(v.reason, null);
+});
+
+test("AC_B2b (gap-worker-ac-check-shortcircuit) — 剩余未勾均为（待外部）⇒ shortCircuit:false（awaiting-verification 形态，⛔ 误挡 ⇒ 假）", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "acsc-b2b-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const wt = path.join(base, "wt");
+  // 剩余唯一未勾项标注（待外部）= 合法交给 fan-in 外部验证（suite 绿等），worker 退出手法正确——
+  // ⛔ 与「漏勾」区分：漏勾是非待外部项，这才短路。
+  writeAcTaskBody(wt, "gap-x", ["- [x] AC1 done", "- [ ] AC2 全量套件绿（待外部）"]);
+  const v = acShortCircuitVerdict(wt, "gap-x");
+  assert.equal(v.shortCircuit, false, "all-remaining-（待外部）must NOT short-circuit (⛔ 误挡 external-verification 形态 ⇒ 假)");
+  assert.equal(v.reason, null);
+});
+
+test("AC_B1 接线 (gap-worker-ac-check-shortcircuit) — finishAsync 在 spawn 前查 acShortCircuitVerdict，短路时不 spawn fan-in（spawn 计数 0）", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  // 短路判定在 spawnMechanicalFanIn 之前调用，短路 ⇒ 走 shortCircuitReason 分支（不 spawn）。
+  assert.match(src, /const sc = acShortCircuitVerdict\(paths\[0\], taskId\);/, "finishAsync calls acShortCircuitVerdict before spawning fan-in");
+  assert.match(src, /if \(sc\.shortCircuit\) \{\s*\n\s*shortCircuitReason = sc\.reason;/, "short-circuit sets shortCircuitReason instead of spawning");
+  // spawnMechanicalFanIn 只在 else 分支（shortCircuit:false）调用 ⇒ 短路时 spawn 计数 0。
+  assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "fan-in spawns only when not short-circuited");
+  // 短路原因线程进 finish → computeOutcome（landed:false + landReason 含「AC 未全勾」）。
+  assert.match(src, /landed: shortCircuitReason != null \? false/, "short-circuit forces landed=false (exited-not-landed)");
+  assert.match(src, /landReason: shortCircuitReason != null \? shortCircuitReason/, "short-circuit reason is threaded as landReason (failure_reason)");
 });
 
 // ── gap-write-suite-capture-non-blocking AC1 ──────────────────────────────────────────────────────────

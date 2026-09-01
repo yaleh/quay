@@ -200,6 +200,10 @@ import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentS
 // D7：laneCount 取 full-suite-runner.ts 的 defaultLaneCount（nproc-derived 单一真相源，读宿主 + QUAY_MAX_*
 // 定义点，⛔ 不写字面量 1——concurrency-literal-check P4 会把 `laneCount: 1` 判为未声明并发字面量违规）。
 import { defaultLaneCount } from "./full-suite-runner.ts";
+// gap-worker-ac-check-shortcircuit：finishAsync 在 spawn 机械 fan-in 前查 worktree 任务体 AC/DoD 全勾。
+// ⛔ 不新造计数函数——复用 flip 闸 fan-in-ac-completion-gate.ts 的 flipAcGateVerdict（与机械 fan-in
+// step 6.5 ac-precheck / step 8 ac-gate 同源，countCompletionCheckboxes / isLandedCodeComplete 单一真相源）。
+import { flipAcGateVerdict } from "./fan-in-ac-completion-gate.ts";
 export {
   splitArgs,
   launchArgv,
@@ -1553,6 +1557,34 @@ export function newSessionId(): string {
   return randomUUID();
 }
 
+// ── AC 未全勾短路（gap-worker-ac-check-shortcircuit）────────────────────────────────────────────
+// worker exit 0 后、finishAsync spawn 机械 fan-in 前，查 worktree 任务体 AC/DoD 是否全勾（用 flip 闸
+// 同源谓词 flipAcGateVerdict——⛔ 不新造计数函数，与机械 fan-in step 6.5 ac-precheck / step 8 ac-gate
+// 同一判定）。未全勾 ⇒ 短路：不 spawn fan-in（省整条 fan-in + 锁排队），直接 exited-not-landed +
+// 原因「AC 未全勾」。三态（硬规则 3b：判定词表含「未评估」）：
+//   shortCircuit:false  AC 全勾（或 total=0 落地即收尾 / 剩余全（待外部））——照常 spawn fan-in
+//   shortCircuit:true   AC 未全勾（含非待外部剩余项 / 段缺失 fail-closed 无法评估）——不 spawn
+// 与 gap-worker-dispatch-prompt-ac-check-instruction 互补：A 打根因（prompt 教勾），B 兜底（任何残留
+// 漏勾早发现、低代价——不烧整条 fan-in + 锁排队）。
+export function acShortCircuitVerdict(worktree: string, taskId: string): { shortCircuit: boolean; reason: string | null } {
+  let body: string;
+  try {
+    body = fs.readFileSync(path.join(worktree, "tasks", `${taskId}.md`), "utf8");
+  } catch {
+    // 任务体读不懂 ⇒ fail-closed 短路（无法评估 ≠ 合格，硬规则 3b）。
+    return { shortCircuit: true, reason: `AC 未全勾（任务体读不懂：tasks/${taskId}.md 缺失或不可读）——续做需补齐并勾选 AC` };
+  }
+  const v = flipAcGateVerdict(body);
+  if (v.ok) return { shortCircuit: false, reason: null };
+  return {
+    shortCircuit: true,
+    reason:
+      v.status === "not-evaluated"
+        ? "AC 未全勾（AC/DoD 段缺失或无法识别，无法评估 ≠ 合格）——续做需补齐并勾选 AC"
+        : `AC 未全勾（checked ${v.checked}/${v.total}，剩余未勾 ${v.unchecked}）——续做只需验证并勾选 AC`,
+  };
+}
+
 /**
  * spawn 一个 worker 并等待其终态（含超时 SIGTERM）。超时 ⇒ kill("SIGTERM")，close 事件带 signal=SIGTERM，
  * timedOut 标记落 outcome final_state=timed-out（worktree_preserved=true，⛔ 不清理——SPEC §1 设计点3
@@ -1609,7 +1641,7 @@ function runOneWorker({
     let timer: ReturnType<typeof setTimeout> | null = null;
     let finished = false;
 
-    const finish = (code: number | null, signal: string | null, spawnErr: string | null, mechResult: MechanicalFanInResult | null = null) => {
+    const finish = (code: number | null, signal: string | null, spawnErr: string | null, mechResult: MechanicalFanInResult | null = null, shortCircuitReason: string | null = null) => {
       if (finished) return;
       finished = true;
       if (timer) clearTimeout(timer);
@@ -1635,8 +1667,11 @@ function runOneWorker({
         // AC153：DriverResult → computeOutcome 的 landed 三态。verified ⇒ landed=true；failed ⇒
         // landed=false + 证伪 reason；not-evaluated ⇒ landed=null（读不懂，computeOutcome 的 landed
         // 缺省分支即「未评估」措辞，⛔ 与「证伪」区分）。
-        landed: landing.state === "verified" ? true : landing.state === "failed" ? false : null,
-        landReason: landing.state === "verified" ? null : landing.reason,
+        // gap-worker-ac-check-shortcircuit：AC 未全勾短路（未 spawn fan-in）⇒ 强制 landed=false +
+        // 原因含「AC 未全勾」。⛔ 走 computeLandingState 会读主检出 status=ready 报「task status=ready
+        // (not done)」——丢失「AC 未全勾」这个真因，续做 prompt 看不到该勾选什么。
+        landed: shortCircuitReason != null ? false : landing.state === "verified" ? true : landing.state === "failed" ? false : null,
+        landReason: shortCircuitReason != null ? shortCircuitReason : landing.state === "verified" ? null : landing.reason,
         sessionId,
         lockWaitMs: lockMetrics.lockWaitMs,
         lockHoldMs: lockMetrics.lockHoldMs,
@@ -1695,30 +1730,40 @@ function runOneWorker({
     const finishAsync = async (code: number | null, signal: string | null, spawnErr: string | null): Promise<void> => {
       if (finished) return;
       let mechResult: MechanicalFanInResult | null = null;
+      let shortCircuitReason: string | null = null;
       if (code === 0 && !spawnErr) {
         const paths = worktreePathsForTask(rootDir, taskId);
         if (paths.length > 0 && paths[0]) {
-          const startMechMs = Date.now();
-          // 每任务新进程（gap-fan-in-token-gate-version-mismatch-self-lock）：机械 fan-in 不再在本守护
-          // 进程 in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），
-          // 改为 spawn 一个 fresh node 进程加载【主检出】的 worker-driver.ts --mechanical-fan-in——
-          // 执行器（entry）跟 driver 同版（⛔ 不用 worktree 的：stale worktree 缺新 argv ⇒ unknown
-          // argument ⇒ parse-mechanical-fan-in red，gap-fan-in-spawn-stale-worktree-executor-missing-argv）；
-          // 锁半（acquireFanInLock）与编排半（fan-in-ff-merge.sh）同源（都在 worktree），改了
-          // worker-driver.ts 的任务 fan-in 不再用旧锁/旧编排。⛔ 不是 token 闸一例，是「fan-in 脚本从
-          // worktree 加载、发起者从主检出旧进程运行」的架构错位整个类。
-          mechResult = await spawnMechanicalFanIn({ task: taskId, worktree: paths[0], root: rootDir, runId });
-          if (json) {
-            process.stdout.write(
-              `${JSON.stringify({ event: "mechanical-fan-in", task: taskId, wall_clock_ms: Date.now() - startMechMs, ...mechResult })}\n`,
-            );
+          // gap-worker-ac-check-shortcircuit：spawn 机械 fan-in【前】先查 worktree 任务体 AC/DoD 全勾
+          // ——未全勾（含段缺失 fail-closed）⇒ 不 spawn fan-in（省整条 fan-in + 锁排队），直接
+          // exited-not-landed + 原因「AC 未全勾」。与 step 6.5 ac-precheck 互补：那是 suite 前（已烧了
+          // merge/delta/typecheck/scoped），这是 fan-in 进程都不起（连锁都不排）。
+          const sc = acShortCircuitVerdict(paths[0], taskId);
+          if (sc.shortCircuit) {
+            shortCircuitReason = sc.reason;
+          } else {
+            const startMechMs = Date.now();
+            // 每任务新进程（gap-fan-in-token-gate-version-mismatch-self-lock）：机械 fan-in 不再在本守护
+            // 进程 in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），
+            // 改为 spawn 一个 fresh node 进程加载【主检出】的 worker-driver.ts --mechanical-fan-in——
+            // 执行器（entry）跟 driver 同版（⛔ 不用 worktree 的：stale worktree 缺新 argv ⇒ unknown
+            // argument ⇒ parse-mechanical-fan-in red，gap-fan-in-spawn-stale-worktree-executor-missing-argv）；
+            // 锁半（acquireFanInLock）与编排半（fan-in-ff-merge.sh）同源（都在 worktree），改了
+            // worker-driver.ts 的任务 fan-in 不再用旧锁/旧编排。⛔ 不是 token 闸一例，是「fan-in 脚本从
+            // worktree 加载、发起者从主检出旧进程运行」的架构错位整个类。
+            mechResult = await spawnMechanicalFanIn({ task: taskId, worktree: paths[0], root: rootDir, runId });
+            if (json) {
+              process.stdout.write(
+                `${JSON.stringify({ event: "mechanical-fan-in", task: taskId, wall_clock_ms: Date.now() - startMechMs, ...mechResult })}\n`,
+              );
+            }
           }
           // D5：落地判定改从 ff 结果（mechResult.landedSha）派生 ⇒ 不再需要 syncDocBranchToDevelop
           // 把 develop merge 进 doc-only 工作分支（那是一个 best-effort + 静默 catch 的补丁，冲突即假
           // exited-not-landed）——该补丁随 D5 退役，finish() 里 computeLandingState 直接读 landedSha。
         }
       }
-      finish(code, signal, spawnErr, mechResult);
+      finish(code, signal, spawnErr, mechResult, shortCircuitReason);
     };
 
     // spawn 同步抛错（罕见，如非法 options）：无 ChildProcess ⇒ 直接终态。

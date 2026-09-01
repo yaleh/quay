@@ -22,8 +22,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC_B1（机制级，能取假）：构造 AC 未全勾的 worker 退出 ⇒ 不 spawn fan-in（spawn 计数 0）、outcome 原因含「AC 未全勾」；（⛔ 仍 spawn fan-in ⇒ 假）。发生率窗：判据只计本任务落地后的事件（硬规则 4 推论三）。
-- [ ] AC_B2（能取假，无回归）：AC 全勾时行为不变（fan-in 照常 spawn、跑通）；（⛔ 全勾也被短路 ⇒ 假）。
+- [x] AC_B1（机制级，能取假）：构造 AC 未全勾的 worker 退出 ⇒ 不 spawn fan-in（spawn 计数 0）、outcome 原因含「AC 未全勾」；（⛔ 仍 spawn fan-in ⇒ 假）。发生率窗：判据只计本任务落地后的事件（硬规则 4 推论三）。
+- [x] AC_B2（能取假，无回归）：AC 全勾时行为不变（fan-in 照常 spawn、跑通）；（⛔ 全勾也被短路 ⇒ 假）。
 
 ## Definition of Done
 
