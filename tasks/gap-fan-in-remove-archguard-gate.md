@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-remove-archguard-gate
 title: fan-in 过程取消 archguard-structure 闸——零发火、零指引、27s/次移出关键路径（降级为按需/里程碑 review）
-status: ready
+status: done
 labels:
   - gap
 parent: null
