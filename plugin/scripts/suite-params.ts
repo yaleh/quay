@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // suite-params.ts — read + validate the `.quay/config.yml` `suite:` section (the suite-level knobs'
-// config-file default). The SINGLE definition point for "what the 6 suite knobs default to from config".
+// config-file default). The SINGLE definition point for "what the 8 suite knobs default to from config".
 //
 // Task: gap-suite-knobs-config-file-priority (config < env < CLI).
 //
@@ -15,7 +15,7 @@
 //   - No `.quay/config.yml` → returns {} (empty). The `suite:` section is OPTIONAL — a workspace
 //     without one keeps its host-derived / env-only behavior (AC4 pass/fail-neutral).
 //   - `.quay/config.yml` present but no `suite:` key → returns {} (same neutrality).
-//   - `.quay/config.yml` present with a `suite:` key → CLOSED schema: the only valid keys are the 6
+//   - `.quay/config.yml` present with a `suite:` key → CLOSED schema: the only valid keys are the 8
 //     below; an UNKNOWN key, a WRONG-TYPED value, or an OUT-OF-RANGE value throws FAIL-CLOSED
 //     (DIR-050 discipline — a malformed config must not silently degrade to env defaults; AC5).
 //   - `.quay/config.yml` present but malformed YAML → throws FAIL-CLOSED (same as loop-params.ts).
@@ -25,8 +25,10 @@
 // its env var ONLY when that env var is unset/empty (env wins), and their existing CLI-flag logic
 // stays above env. That keeps ONE precedence chain, read at the single definition point.
 //
-// The 5 knobs with a FIXED default (phase_overlap / max_concurrent_suites / max_oversubscription /
-// main_tail_overlap_lanes / main_tail_stall_pct) are listed in the shipped `.quay/config.yml`.
+// The 6 knobs with a FIXED default (suite_scheduler / phase_overlap / max_concurrent_suites /
+// max_oversubscription / main_tail_overlap_lanes / main_tail_stall_pct) are listed in the shipped
+// `.quay/config.yml` — suite_scheduler defaults ON via test.sh's `${QUAY_SUITE_SCHEDULER:-1}`
+// fallback rather than a shipped literal (a `suite_scheduler: 1` line would be redundant).
 // serial_concurrency / lowconc_concurrency default to a HOST-DERIVED value
 // (os.availableParallelism() ÷ (S × P)), so they are CONFIGURABLE here but intentionally ABSENT from
 // the shipped config — a literal would be a machine-spec-dependent literal (CLAUDE.md 硬规则 4 推论二).
@@ -36,9 +38,14 @@ import path from "node:path";
 import YAML from "yaml";
 import { isDirectEntry } from "./gate-script-base.ts";
 
-/** The 7 suite knobs: config key → env key (the 6 from the task's Proposal table + the
- *  main-tail-overlap trigger threshold main_tail_stall_pct, config-first per the same policy). */
+/** The 8 suite knobs: config key → env key (config-first per the same policy). `suite_scheduler`
+ *  (gap-suite-dynamic-waterline-scheduler) turns the unified group-budget scheduler ON (default) /
+ *  OFF (ONE-KEY ROLLBACK to the legacy phased path). `phase_overlap` / `main_tail_overlap_lanes` /
+ *  `main_tail_stall_pct` are RETIRED-BY-SCHEDULER: they stay in the CLOSED schema so an existing
+ *  config that still sets them (the production config carries main_tail_overlap_lanes: 16) keeps
+ *  validating — but they only take effect on the QUAY_SUITE_SCHEDULER=0 legacy fallback path. */
 export const SUITE_KNOBS = {
+  suite_scheduler: "QUAY_SUITE_SCHEDULER",
   phase_overlap: "QUAY_PHASE_OVERLAP",
   serial_concurrency: "QUAY_SERIAL_CONCURRENCY",
   lowconc_concurrency: "QUAY_LOWCONC_CONCURRENCY",
@@ -53,6 +60,7 @@ export type SuiteKnobKey = keyof typeof SUITE_KNOBS;
 /** The typed config-file values. Every field is OPTIONAL — absent = "no config default for this
  *  knob" (the consumer falls through to its existing host-derived / literal default). */
 export interface SuiteParams {
+  suite_scheduler?: number;
   phase_overlap?: number;
   serial_concurrency?: number;
   lowconc_concurrency?: number;
@@ -64,6 +72,7 @@ export interface SuiteParams {
 
 /** Per-knob schema: validator + a human-readable "must be …" clause for the FAIL-CLOSED message. */
 const KNOB_SPEC: Record<SuiteKnobKey, { ok: (v: unknown) => boolean; must: string }> = {
+  suite_scheduler: { ok: (v) => v === 0 || v === 1, must: "0 (legacy phased fallback) or 1 (unified scheduler)" },
   phase_overlap: { ok: (v) => v === 0 || v === 1, must: "0 (sequential) or 1 (overlap)" },
   serial_concurrency: { ok: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1, must: "an integer >= 1" },
   lowconc_concurrency: { ok: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1, must: "an integer >= 1" },
@@ -141,7 +150,7 @@ Usage:
       print shell assignment lines, one per PRESENT knob, of the form
         QUAY_X="\${QUAY_X:-<value>}"
       (env wins over config — the :- form leaves an already-set env var untouched). Safe to \`eval\`:
-      var names are the fixed 6-knob whitelist and values are schema-validated numbers.
+      var names are the fixed 8-knob whitelist and values are schema-validated numbers.
 
 Exit codes: 0 ok; 1 FAIL-CLOSED (malformed suite: section — the suite must not silently degrade).`;
 
