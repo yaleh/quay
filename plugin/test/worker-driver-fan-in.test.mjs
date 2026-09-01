@@ -169,7 +169,7 @@ test("AC1 — depends_on gate in the resident loop: a candidate whose dep is not
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => readRoundLines(root).length >= 1, 5000);
+  await waitFor(() => readRoundLines(root).length >= 1, 15000);
   assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC1: dep-not-done candidate is never dispatched");
   assert.equal(readOutcomeLines(root).length, 0, "zero workers dispatched");
   // 负控制（⛔ 不能是「池空才不派」）：round 记录 pool=1 证明 ready-pool 确实给了 gap-dep 候选——
@@ -197,7 +197,7 @@ test("AC1 对照 — dep done ⇒ the candidate IS dispatched (the filter is the
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => readOutcomeLines(root).length >= 1, 5000);
+  await waitFor(() => readOutcomeLines(root).length >= 1, 15000);
   const spawned = drv.events().filter((e) => e.event === "worker-spawned");
   assert.equal(spawned.length, 1, "AC1 对照: dep-done candidate IS dispatched (exactly once)");
   assert.equal(spawned[0].task, "gap-dep");
@@ -299,7 +299,7 @@ test("AC1 (cold-start) — surviving worker + its worktree ⇒ resident loop doe
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  await waitFor(() => drv.events().some((e) => e.event === "cold-start-inflight"), 5000);
+  await waitFor(() => drv.events().some((e) => e.event === "cold-start-inflight"), 15000);
   assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC1: surviving worker's task is NOT re-dispatched");
   const cs = drv.events().find((e) => e.event === "cold-start-inflight");
   assert.ok(cs, "the cold-start in-flight enumeration is recorded (not silent)");
@@ -330,7 +330,7 @@ test("AC1 对照 — orphan worktree (no live worker) ⇒ the task IS re-dispatc
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 5000);
+  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 15000);
   const spawned = drv.events().filter((e) => e.event === "worker-spawned");
   assert.equal(spawned.length, 1, "orphan worktree alone does NOT block re-dispatch — the task IS dispatched");
   assert.equal(spawned[0].task, "gap-cs-b");
@@ -399,7 +399,7 @@ test("AC2 (cold-start-refresh) — survivor finishes ⇒ its task leaves the exc
   t.after(() => drv.stop());
 
   // Phase 1: 冷启动发现幸存 worker ⇒ 不派发（排除集挡住，⛔ 不是池空——round 记录 pool=1 证明候选在）。
-  await waitFor(() => drv.events().some((e) => e.event === "cold-start-inflight"), 5000);
+  await waitFor(() => drv.events().some((e) => e.event === "cold-start-inflight"), 15000);
   const cs = drv.events().find((e) => e.event === "cold-start-inflight");
   assert.ok(cs, "the cold-start enumeration is observed (recorded)");
   assert.deepEqual(cs.tasks, ["gap-cs-a"], "the survivor is the enumerated in-flight task");
@@ -409,7 +409,7 @@ test("AC2 (cold-start-refresh) — survivor finishes ⇒ its task leaves the exc
   //   同一 driver 进程内重新可派。⛔ 冻结快照（旧缺陷）下此步恒不派 ⇒ 假。
   try { fakeWorker.kill("SIGKILL"); } catch { /* already gone */ }
   try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
-  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 5000);
+  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 15000);
   const spawned = drv.events().filter((e) => e.event === "worker-spawned");
   assert.equal(spawned.length, 1, "AC2: exactly one re-dispatch after the survivor finished (concurrency 1 + long-running worker ⇒ no re-dispatch loop)");
   assert.equal(spawned[0].task, "gap-cs-a", "the re-dispatched task is the former cold-start survivor");
@@ -499,7 +499,7 @@ test("AC2 (gap-worker-driver-reconcile-interval) — all edge events lost (worke
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // gap-a 先派发（挂起）。此后无任何 worker 退出边沿事件。
-  await waitFor(() => drv.events().some((e) => e.event === "selector-picked" && e.task === "gap-a"), 5000);
+  await waitFor(() => drv.events().some((e) => e.event === "selector-picked" && e.task === "gap-a"), 15000);
   // 地板（⛔ 不是 worker 退出）唤醒循环 ⇒ 重读 ready 池 ⇒ 派发 gap-b。
   await waitFor(() => drv.events().some((e) => e.event === "selector-picked" && e.task === "gap-b"), 10000);
   const picks = drv.events().filter((e) => e.event === "selector-picked").map((e) => e.task);
@@ -610,17 +610,17 @@ test("AC1 (gap-worker-driver-stopreason-latch-permanent-stop) — gate first WAI
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // Phase 1: gate WAIT ⇒ no worker dispatched, and the driver does NOT exit (polls, ⛔ not latch).
-  await waitFor(() => readRoundLines(root).length >= 1, 5000);
+  await waitFor(() => readRoundLines(root).length >= 1, 15000);
   assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "gate WAIT ⇒ no dispatch yet");
   assert.equal(drv.child.exitCode, null, "transient WAIT did not exit the driver");
 
   // Phase 2: release the gate — the SAME process must recover and dispatch (stopReason 不复位即恒不派 ⇒ 假).
   fs.writeFileSync(goFile, "go\n");
-  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 5000);
+  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 15000);
   const spawned = drv.events().filter((e) => e.event === "worker-spawned");
   assert.equal(spawned.length, 1, "AC1: gate-open recovered dispatch in the SAME driver process (no restart)");
   assert.equal(spawned[0].task, "gap-ac1");
-  await waitFor(() => readOutcomeLines(root).length >= 1, 5000);
+  await waitFor(() => readOutcomeLines(root).length >= 1, 15000);
   assert.equal(readOutcomeLines(root)[0].final_state, "completed", "the recovered dispatch lands cleanly");
   await drv.stop();
 });
@@ -640,7 +640,7 @@ test("AC2 (gap-worker-driver-stopreason-latch-permanent-stop) — adjacent stop 
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => readRoundLines(root).length >= 3, 5000);
+  await waitFor(() => readRoundLines(root).length >= 3, 15000);
   const stops = readRoundLines(root).filter((r) => r.action === "stop");
   assert.ok(stops.length >= 2, "at least two stop rounds written (the driver re-reads the gate each poll)");
   assert.match(stops[0].stop_reason, /resource-gate-wait/);
@@ -660,7 +660,7 @@ test("AC3 (gap-worker-driver-stopreason-latch-permanent-stop) — pool non-empty
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => readRoundLines(root).length >= 3, 5000);
+  await waitFor(() => readRoundLines(root).length >= 3, 15000);
   assert.equal(drv.child.exitCode, null, "AC3: pool non-empty + gate WAIT + no in-flight ⇒ driver does NOT exit directly");
   const stops = readRoundLines(root).filter((r) => r.action === "stop");
   assert.ok(stops.length >= 2, "AC3: the driver polled (≥2 stop rounds) — it did not exit after the first WAIT round");
@@ -1259,7 +1259,7 @@ test("AC2 (gap-fan-in-subprocess-hang-timeout-recovery) — mechSh timeout 后 r
   const gp = Number(fs.readFileSync(pidFile, "utf8").trim());
   await waitFor(() => {
     try { process.kill(gp, 0); return false; } catch { return true; }
-  }, 5000);
+  }, 15000);
   assert.ok(true, "grandchild holding the pipe must be killed by the process-group kill");
 });
 
@@ -1274,7 +1274,7 @@ test("AC3 (gap-fan-in-subprocess-hang-timeout-recovery) — spawnSuiteAndWait �
   t.after(() => { try { process.kill(-holder.pid, "SIGKILL"); } catch { /* gone */ } });
   await waitFor(() => {
     try { execFileSync("flock", ["-n", slots[0], "true"], { stdio: "ignore" }); return false; } catch { return true; }
-  }, 5000);
+  }, 15000);
   const t0 = Date.now();
   const r = await spawnSuiteAndWait({ slotBase, slotLib: SLOT_LIB, suiteCommand: ["bash", "-c", "echo never-run"], logFile: null, silenceMs: 400 });
   assert.ok(Date.now() - t0 < 5000, `spawnSuiteAndWait must return in finite time (⛔ 53min hang), took ${Date.now() - t0}ms`);

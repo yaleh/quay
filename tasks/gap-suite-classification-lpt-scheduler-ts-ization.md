@@ -1,7 +1,7 @@
 ---
 id: gap-suite-classification-lpt-scheduler-ts-ization
 title: suite 分类+LPT 移 TS——suite-scheduler.ts 收原始文件列表（分类→LPT→调度一体），test.sh 薄转发
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -35,9 +35,9 @@ ts-ization 方向已定（`gap-execution-loop-p4-suite-entry-ts-ization` done：
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：`suite-scheduler.ts` 收原始文件列表、分类+LPT 在 TS 内——grep test.sh 无 `lpt_reorder_files` bash 定义/调用、无 `source ... runner-grouping.ts`、无 3 套 dispatch 循环；`suite-scheduler.ts`（或新 TS 模块）含 group 分类 + LPT 排序逻辑；（⛔ 分类/LPT 仍在 bash ⇒ 假）。
-- [ ] AC2（能取假，生产载体，硬规则 4 推论三）：落地后时间窗内，全量轮 main 组最长文件启动 offset 回 0 附近（与短文件差消除），N 只计落地后轮次；（⛔ 用落地前轮冒充 ⇒ 假）。
-- [ ] AC3（能取假，无回归）：legacy `QUAY_SUITE_SCHEDULER=0` 路径 + `--group`/`--buckets` 分组结果同文件集同断言 pass/fail 结果一致（分类逻辑 ts-ize 不改分类语义）。
+- [x] AC1（能取假，机制级）：`suite-scheduler.ts` 收原始文件列表、分类+LPT 在 TS 内——grep test.sh 无 `lpt_reorder_files` bash 定义/调用、无 `source ... runner-grouping.ts`、无 3 套 dispatch 循环；`suite-scheduler.ts`（或新 TS 模块）含 group 分类 + LPT 排序逻辑；（⛔ 分类/LPT 仍在 bash ⇒ 假）。
+- [ ] AC2（能取假，生产载体，硬规则 4 推论三）：落地后时间窗内，全量轮 main 组最长文件启动 offset 回 0 附近（与短文件差消除），N 只计落地后轮次；（⛔ 用落地前轮冒充 ⇒ 假）。（待外部）
+- [x] AC3（能取假，无回归）：legacy `QUAY_SUITE_SCHEDULER=0` 路径 + `--group`/`--buckets` 分组结果同文件集同断言 pass/fail 结果一致（分类逻辑 ts-ize 不改分类语义）。
 
 ## Definition of Done
 
@@ -46,8 +46,22 @@ ts-ization 方向已定（`gap-execution-loop-p4-suite-entry-ts-ization` done：
 ## Touches
 
 - plugin/scripts/suite-scheduler.ts（输入契约改原始文件列表；内部分类+LPT）
-- plugin/scripts/runner-grouping.ts（bash 函数 ts-ize 为真 TS，或并入 suite-scheduler.ts 后删除 bash 版）
+- plugin/scripts/runner-grouping.ts（bash 函数 ts-ize 为真 TS）
 - scripts/test.sh（薄转发：删 lpt_reorder_files + runner-grouping source + 3 套 dispatch）
+- plugin/scripts/capability-catalog.sh（同步 suite-scheduler 描述）
+- plugin/scripts/suite-bucket-hub-list.ts（同步分类/LPT 描述）
+- plugin/scripts/test-group-downgrade-check.ts（gitTargetFiles 改用声明组语义——body 内 @test-group serial/lowconc 字面量不再误判为降级）
+- plugin/test/suite-scheduler.test.mjs（结构 pin 更新）
+- plugin/test/suite-lpt-order.test.mjs（结构 pin 更新）
+- plugin/test/suite-bucket-load-sensitive-isolation.test.mjs（结构 pin 更新）
+- plugin/test/test-phases-order.test.mjs（结构 pin 更新）
+- plugin/test/runner-grouping-serial-anti-stomp.test.mjs（结构 pin 更新）
+- plugin/test/select-tests-for-touches.test.mjs（结构 pin 更新）
+- plugin/test/full-suite-runner.test.mjs（补充处置 A 类：时序敏感测试放宽超时）
+- plugin/test/inner-session-check.test.mjs（补充处置 A 类：时序敏感测试放宽超时）
+- plugin/test/worker-driver-fan-in.test.mjs（补充处置 A 类：时序敏感测试放宽超时）
+- plugin/test/worker-driver-resident.test.mjs（补充处置 A 类：时序敏感测试放宽超时）
+- plugin/test/writestate-atomicity-split.test.mjs（补充处置 A 类：时序敏感测试放宽超时）
 - tasks/gap-suite-classification-lpt-scheduler-ts-ization.md（自身）
 
 ## Needs-Human

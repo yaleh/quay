@@ -70,35 +70,35 @@ test("AC1 — all 8 session-liveness-scd-*.test.mjs files declare @test-group lo
   );
 });
 
-test("AC2/AC3 — the --buckets branch splits its list by @test-group into serial/lowconc/main sub-phases", () => {
+test("AC2/AC3 — the --buckets branch routes load-sensitive files to their own buckets (scheduler classification; legacy --classify split)", () => {
   const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
   const branch = bucketsBranchSrc(testSh);
-  // The split loop classifies each selected file via group_of into three arrays.
-  assert.match(branch, /for bf in "\$\{files\[@\]\}"/, "must iterate the selected bucket files");
-  assert.match(branch, /case "\$\(group_of "\$bf"\)"/, "must classify each file via group_of");
+  // The DEFAULT bucket path pipes the RAW selected list to suite-scheduler.ts with --groups all four —
+  // the scheduler classifies each file (serial → serial bucket, lowconc → lowconc bucket, else main) and
+  // runs each bucket at its own concurrency. No bash-side group_of split on the scheduler path.
+  assert.match(
+    branch,
+    /printf '%s\\n' "\$\{files\[@\]\}" \| node --no-warnings --experimental-strip-types "\$\{repo_root\}\/plugin\/scripts\/suite-scheduler\.ts"/,
+    "the bucket scheduler path must pipe the raw list to suite-scheduler.ts",
+  );
+  assert.match(branch, /--groups "product,engine,serial,lowconc"/, "the bucket scheduler must classify all four groups");
+  // The RETIRED legacy bucket fallback still splits its list by @test-group — now via the TS
+  // runner-grouping.ts --classify (replacing the sourced group_of) — into serial/lowconc/main sub-phases.
+  assert.match(branch, /runner-grouping\.ts" --classify/, "the legacy bucket fallback must classify via the TS runner-grouping.ts --classify");
   assert.match(branch, /serial\)\s+bucket_serial_files\+=\("\$bf"\)/, "serial files route to bucket_serial_files");
   assert.match(branch, /lowconc\)\s+bucket_lowconc_files\+=\("\$bf"\)/, "lowconc files route to bucket_lowconc_files");
   assert.match(branch, /\*\)\s+bucket_main_files\+=\("\$bf"\)/, "everything else routes to bucket_main_files");
-  // Serial sub-phase at its own concurrency knob, LPT-reordered then order-preserving via
-  // suite-lpt-runner.mjs run({files}) (gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered).
-  assert.match(branch, /lpt_reorder_files bucket_serial_files/, "serial sub-phase must be LPT-reordered");
+  // The legacy fallback runs each sub-phase at its own concurrency, order-preserving via
+  // suite-lpt-runner.mjs run({files}).
   assert.match(
     branch,
     /node --test-concurrency="\$SERIAL_CONCURRENCY" "\$\{repo_root\}\/plugin\/scripts\/suite-lpt-runner\.mjs" "\$\{bucket_serial_files\[@\]\}"/,
     "serial sub-phase must run at SERIAL_CONCURRENCY",
   );
-  // Lowconc sub-phase at its own concurrency knob (≤3, not the main body's concurrency), LPT-ordered.
-  assert.match(branch, /lpt_reorder_files bucket_lowconc_files/, "lowconc sub-phase must be LPT-reordered");
   assert.match(
     branch,
     /node --test-concurrency="\$LOWCONC_CONCURRENCY" "\$\{repo_root\}\/plugin\/scripts\/suite-lpt-runner\.mjs" "\$\{bucket_lowconc_files\[@\]\}"/,
     "lowconc sub-phase must run at LOWCONC_CONCURRENCY",
-  );
-  // Main sub-phase = suite-lpt-runner.mjs over bucket_main_files at bucket_test_concurrency.
-  assert.match(
-    branch,
-    /node --test-concurrency="\$\(bucket_test_concurrency "\$\{rest_args\[@\]\}"\)" "\$\{repo_root\}\/plugin\/scripts\/suite-lpt-runner\.mjs" "\$\{rest_args\[@\]\}" "\$\{bucket_main_files\[@\]\}"/,
-    "main sub-phase must run suite-lpt-runner.mjs over bucket_main_files at bucket_test_concurrency",
   );
   // Take-false: the main runner must NOT be handed the whole files[] list (that is the pre-fix
   // behavior that ran lowconc/serial under the main concurrency).
@@ -109,32 +109,34 @@ test("AC2/AC3 — the --buckets branch splits its list by @test-group into seria
   );
 });
 
-/** Run the REAL `group_of` bash function (sourced from runner-grouping.ts, which scripts/test.sh
- *  sources) against a repo-relative test file, returning its stdout trimmed. This pins the ACTUAL
- *  mechanism, not a re-implemented regex — the regression AC5 guards against is "group_of is
- *  referenced but undefined/empty", which silently folds every file into the main phase. */
-function groupOf(fileRel) {
-  const script =
-    `source "${path.join(REPO_ROOT, "plugin", "scripts", "runner-grouping.ts")}" >/dev/null 2>&1; ` +
-    `group_of "${path.join(REPO_ROOT, fileRel)}"`;
-  return execFileSync("bash", ["-c", script], { encoding: "utf8" }).trim();
+/** Classify a repo-relative test file via the TS classifier (runner-grouping.ts --classify — the SAME
+ *  classification suite-scheduler.ts runs over its raw list), returning the group name. This pins the
+ *  ACTUAL mechanism, not a re-implemented regex — the regression AC5 guards against is "classification
+ *  is referenced but undefined/empty", which silently folds every file into the main phase. */
+function classifyGroup(fileRel) {
+  const out = execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", path.join(REPO_ROOT, "plugin", "scripts", "runner-grouping.ts"), "--classify"],
+    { input: `${path.join(REPO_ROOT, fileRel)}\n`, encoding: "utf8" },
+  ).trim();
+  return out.split("\t")[1];
 }
 
-test("AC5 — group_of is defined and returns the correct @test-group for engine/lowconc/serial", () => {
+test("AC5 — the TS classifier returns the correct @test-group for engine/lowconc/serial", () => {
   // engine: this very file (declared @test-group engine at the top).
-  assert.equal(groupOf("plugin/test/suite-bucket-load-sensitive-isolation.test.mjs"), "engine");
+  assert.equal(classifyGroup("plugin/test/suite-bucket-load-sensitive-isolation.test.mjs"), "engine");
   // lowconc: an SCD file (reclassified by this task, AC1).
-  assert.equal(groupOf("plugin/test/session-liveness-scd-fire.test.mjs"), "lowconc");
+  assert.equal(classifyGroup("plugin/test/session-liveness-scd-fire.test.mjs"), "lowconc");
   // serial: the real-install quay-init family.
-  assert.equal(groupOf("plugin/test/quay-init.test.mjs"), "serial");
-  // Take-false: a missing declaration must default to engine (group_of's AC7 default), NOT an
-  // empty string — an empty group_of is what the Discovered Issue #1 misdiagnosed as "undefined".
-  // (The fixture text must NOT contain the literal "@test-group <word>" — group_of FAIL-CLOSES on
+  assert.equal(classifyGroup("plugin/test/quay-init.test.mjs"), "serial");
+  // Take-false: a missing declaration must default to engine (classifyFile's AC7 default), NOT an
+  // empty string — an empty group is what the Discovered Issue #1 misdiagnosed as "undefined".
+  // (The fixture text must NOT contain the literal "@test-group <word>" — classification FAIL-CLOSES on
   // an unrecognized group, which is itself the guarantee AC5 pins.)
   const tmp = path.join(REPO_ROOT, "plugin", "test", "__no-group-fixture__.test.mjs");
   fs.writeFileSync(tmp, "// no grouping annotation in this fixture\n");
   try {
-    assert.equal(groupOf("plugin/test/__no-group-fixture__.test.mjs"), "engine");
+    assert.equal(classifyGroup("plugin/test/__no-group-fixture__.test.mjs"), "engine");
   } finally {
     fs.rmSync(tmp, { force: true });
   }
