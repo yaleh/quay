@@ -1,7 +1,7 @@
 ---
 id: gap-suite-help-contract-mtime-race
 title: help-contract AC1 mtime 负控制被常驻 driver 活跃写污染——driver 活跃时稳定红，误杀所有 fan-in
-status: todo
+status: ready
 labels:
   - gap
   - defect
