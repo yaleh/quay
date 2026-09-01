@@ -1,7 +1,7 @@
 ---
 id: gap-suite-classification-lpt-scheduler-ts-ization
 title: suite 分类+LPT 移 TS——suite-scheduler.ts 收原始文件列表（分类→LPT→调度一体），test.sh 薄转发
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -49,3 +49,10 @@ ts-ization 方向已定（`gap-execution-loop-p4-suite-entry-ts-ization` done：
 - plugin/scripts/runner-grouping.ts（bash 函数 ts-ize 为真 TS，或并入 suite-scheduler.ts 后删除 bash 版）
 - scripts/test.sh（薄转发：删 lpt_reorder_files + runner-grouping source + 3 套 dispatch）
 - tasks/gap-suite-classification-lpt-scheduler-ts-ization.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T04:57:10.836Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
