@@ -422,16 +422,16 @@ test("a NEW plugin/scripts touch selects capability-catalog but NOT the retired 
     `delivery-inventory must NOT be selected (retired): ${selected.map((s) => s.name)}`);
 });
 
-test("AC5 — the five historical drift scripts exist and --inventory computes the current bundle", async () => {
-  // The 5 prior drift instances each added a plugin/scripts file without regenerating the outline §6
+test("AC5 — the historical drift scripts exist and --inventory computes the current bundle", async () => {
+  // The prior drift instances each added a plugin/scripts file without regenerating the outline §6
   // snapshot (halt-check/spec-goal/accounting-emit/DIR-043/inner-exec-mode). The snapshot is now gone,
   // but these shipped surfaces must stay put (regression guard against a future edit silently dropping
-  // them); halt-check.sh was retired 2026-08-29 (gap-retire-halt-file-driver-based) and so dropped from
-  // the shipped-surface guard. --inventory must still compute the current bundle.
+  // them); halt-check.sh was retired 2026-08-29 (gap-retire-halt-file-driver-based) and
+  // inner-exec-mode-report.ts was deleted 2026-09-01 (gap-retire-inner-hygiene-delete-session-face), so
+  // both dropped from the shipped-surface guard. --inventory must still compute the current bundle.
   const shipped = [
     "plugin/scripts/accounting-emit.ts",
     "plugin/scripts/external-dogfooding-check.ts",
-    "plugin/scripts/inner-exec-mode-report.ts",
     "plugin/scripts/tmp-leak-pairing-check.sh",
     "plugin/scripts/tmp-leak-pairing-check.ts",
     "plugin/scripts/stale-ready-audit.ts",

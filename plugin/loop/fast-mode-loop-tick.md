@@ -568,17 +568,7 @@ tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \
 node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --pane .quay/last-pane.txt
 ```
 
-**面板冻结行观测（`gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close`）**：同一
-`last-pane.txt` 再喂给 `inner-panel-stale-check.ts`（面板观测机制，状态转换表达）——括号关闭
-（`--task-end`）后该任务的 agent 行若仍残留且计时冻结，必须被机械检出（不是等人跨时间采样猜）：
-
-```bash
-node --no-warnings --experimental-strip-types plugin/scripts/inner-panel-stale-check.ts \
-  --pane .quay/last-pane.txt --root "$REPO_ROOT" --json
-```
-
-exit 1 = 面板仍有「已结束/冻结」agent 行（括号已关但行未清）⇒ 检出该误导窗口；exit 0 = 干净。
-（`inner-session-check.sh` 判的是会话四态，本观测器判的是面板行状态——两件事，不混。）
+~~**面板冻结行观测（`gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close`）**~~（**已退役** 2026-09-01：`inner-panel-stale-check.ts` CLI 壳已删，纯函数迁 `plugin/scripts/agent-panel-classify.ts`——`gap-retire-inner-hygiene-delete-session-face`）。原「喂 `last-pane.txt` 给 `inner-panel-stale-check.ts --pane`」指令已随 CLI 壳删除。
 
 它做什么（gap-the-blocked-channel-has-a-writer-nobody-calls——触发是**后果**，不是「记得再跑一条命令」）：
 
@@ -1404,7 +1394,7 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
   `windowHours`——2026-08-03 起口径由 `60/均耗时` 修正，旧量更名为 `serialEquivalentPerHour`，与并发
   无关；`--task-end` 由外层异步写，见 `orchestrator-loop-tick.md` 步骤 1b）
 - **执行模式两数（`gap-inner-serial-main-thread-not-dispatch`）**：`node --no-warnings
-  --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --json` 的
+  --experimental-strip-types plugin/scripts/main-thread-edit-check.ts --json` 的
   `main_thread_edits` / `agent_dispatches`（主线程 Edit 产品文件数 : Agent 派发数；`--since` 可
   窗口化到本 tick 起始时刻）。**常规轮次判据：`agent_dispatches ≥ 1`（或非红窗时 `main_thread_edits`
   不大幅 > `agent_dispatches`）**；主线程 Edit 产品文件数远大于 Agent 派发数、且当轮非红窗 ⇒
@@ -1441,7 +1431,7 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 每 tick 报两数：
 
 ```bash
-node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --since <本 tick 起点> --json
+node --no-warnings --experimental-strip-types plugin/scripts/main-thread-edit-check.ts --since <本 tick 起点> --json
 # { main_thread_edits, agent_dispatches, total_edits, edits_no_file_path, session, ... }
 ```
 
