@@ -2,7 +2,7 @@
 id: gap-dashboard-testscard-livecard-auto-refresh
 title: dashboard testsCard/liveCard 加轻量自动刷新（依据48h访问日志：/tests /live
   手动低频轮询，间隔1.4s~9h无自动刷新机制）
-status: ready
+status: done
 labels:
   - gap
   - webui
