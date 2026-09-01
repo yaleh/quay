@@ -2,7 +2,7 @@
 id: gap-manager-adopt-outer-role-check-broken
 title: manager-adopt.sh 三态自检查错窗口角色——硬编码 inner-session-check.sh
   检查「inner」，该窗口已随拓扑收敛永不存在，healthy/empty-shell 分支结构性不可达
-status: ready
+status: done
 labels:
   - gap
   - defect
