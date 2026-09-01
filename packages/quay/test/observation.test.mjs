@@ -1394,6 +1394,7 @@ test("AC4 — the background refresh is fail-open: git unavailable never throws,
       assert.doesNotThrow(() => refreshDevelopRefCaches(root, "develop"), "AC4: refresh with git unavailable does not throw");
     } finally {
       process.env.PATH = origPath;
+      fs.rmSync(emptyBin, { recursive: true, force: true });
     }
 
     // Next successful refresh restores the cache.
