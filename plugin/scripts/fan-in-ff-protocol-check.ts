@@ -63,8 +63,19 @@ import { isDirectEntry } from "./gate-script-base.ts";
  *  id contains "fan-in" (e.g. task/gap-ac78-fan-in-workflow-a6-check), reddening the gate on the
  *  protocol's OWN designed flow (SPEC §3: step 1 produces a merge commit that ff carries onto develop).
  *  Tightened to the two actual fan-in conventions: the `merge: fan-in ` prefix (the explicit non-ff
- *  fan-in subject) and git's `Merge branch 'task/<id>'` (a --no-ff merge of a task branch). */
-export const FAN_IN_MERGE_SUBJECT_RE = /\bmerge: fan-in |Merge (remote-tracking )?branch 'task\//i;
+ *  fan-in subject) and git's `Merge branch 'task/<id>'` (a --no-ff merge of a task branch).
+ *
+ *  ⚠️ 2026-09-01 fix (gap-fan-in-ff-protocol-check-false-positive-task-branch-merge): the git auto
+ *  alternative `Merge branch 'task/` matched ANY task-branch merge WITHOUT distinguishing the TARGET
+ *  branch. The protocol constrains DEVELOP history only (fan-in's ff target is develop), but a
+ *  legitimate feature/skill merge into main/manager-doc (doc branch) — e.g. 58eaaa2d0 `Merge branch
+ *  'task/quay-file-task-skill' into main/manager-doc` — carries the SAME `branch 'task/` prefix and
+ *  is ff-carried to develop by the doc→develop sync, so it false-reddened 判据2a (deterministically
+ *  blocked every fan-in from 14:15Z). Tightened to match only "merge into develop": the git auto
+ *  subject must end there (`( into develop)?$` — a plain `Merge branch 'task/<id>'` with no `into`
+ *  clause is a plain `git merge --no-ff task/<id>` ON develop and still counts), NOT `into
+ *  main/manager-doc` / `into integration` / any other non-develop target. */
+export const FAN_IN_MERGE_SUBJECT_RE = /\bmerge: fan-in |Merge (remote-tracking )?branch 'task\/[^']*'( into develop)?$/i;
 
 /** A valid retry-record entry: taskId (string), attempt (int ≥ 1), developHead (40-hex), ts (ISO
  *  `YYYY-MM-DDTHH:MM:SSZ`). Missing/extra fields are allowed but these four must be well-formed. */

@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-ff-protocol-check-false-positive-task-branch-merge
 title: fan-in-ff-protocol-check 判据2a 误判 task/ 特性分支 merge 进 main/manager-doc 为非-ff fan-in（regex 不区分目标分支）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -31,8 +31,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`58eaaa2d0`（Merge task 分支进 main/manager-doc）不再触发判据2a——check ok:true；（⛔ 仍 RED ⇒ 假）。
-- [ ] AC2（能取假，负控制）：构造真非-ff fan-in（merge task 分支进 develop）仍触发判据2a；（⛔ 误放行 ⇒ 假）。
+- [x] AC1（能取假）：`58eaaa2d0`（Merge task 分支进 main/manager-doc）不再触发判据2a——check ok:true；（⛔ 仍 RED ⇒ 假）。
+- [x] AC2（能取假，负控制）：构造真非-ff fan-in（merge task 分支进 develop）仍触发判据2a；（⛔ 误放行 ⇒ 假）。
 
 ## Definition of Done
 

@@ -62,7 +62,10 @@ export async function handleTaskList(
   // carried per-task as `_dev*`/`_disk*` fields so the row renderer can emit the divergence marker.
   const devStatus = readTaskStatusMapAtRef(cfg.workspaceRoot, "develop");
   const devTitle = readTaskTitleMapAtRef(cfg.workspaceRoot, "develop");
-  const devTimes = readTaskCommitTimesAtRef(cfg.workspaceRoot, "develop");
+  // gap-tasks-page-develop-ref-full-history-git-log-cost: the commit-time read face is cache-only on the
+  // request path — the full history walk lives in the background refresh (at startup), never here. A cold
+  // cache returns empty and the row falls back to the disk mtime (fail-open).
+  const devTimes = readTaskCommitTimesAtRef(cfg.workspaceRoot, "develop", { cacheOnly: true });
   const devRead = devStatus.size > 0 || devTitle.size > 0 || devTimes.size > 0;
   const allTasks = !devRead
     ? rawTasks
