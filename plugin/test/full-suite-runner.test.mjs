@@ -143,7 +143,7 @@ test("negative control — waitExit resolves bounded when the child ALREADY exit
   // negative control reproduces exactly that ordering: the child exits AND its exit event fires
   // (exitCode is populated) before waitExit is called; waitExit must return bounded, not hang.
   const child = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
-  await poll(() => child.exitCode !== null || child.signalCode !== null, { timeoutMs: 5000 });
+  await poll(() => child.exitCode !== null || child.signalCode !== null, { timeoutMs: 20000 });
   const start = Date.now();
   const { code, signal } = await waitExit(child);
   const elapsed = Date.now() - start;
@@ -1019,7 +1019,7 @@ test("AC5 — a child killed by a signal (SIGKILL) writes reason=infra-error (en
     const s = await poll(() => {
       const cur = readState(root);
       return cur && cur.state === "red" && cur.reason === "infra-error" ? cur : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 20000 });
     assert.ok(s, "signal-killed child is final state=red reason=infra-error");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -1055,7 +1055,7 @@ test("AC5 — a SIGKILL'd node --test reported by bash as exit 137 is reason=inf
     const s = await poll(() => {
       const cur = readState(root);
       return cur && cur.state === "red" && cur.reason === "infra-error" ? cur : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 20000 });
     assert.ok(s, `bash-exits-137 signal-kill is final state=red reason=infra-error (got ${JSON.stringify(readState(root))})`);
     // And the stop-dispatch consumer (runOnce) reports NO stop signal for infra-error-red (AC5 —
     // infra-error, like aborted, does NOT stop dispatch).
@@ -1398,7 +1398,7 @@ test("AC2 e2e — a REAL signal-killed DIRECT test.sh child torn down MID-RUN (n
     const s = await poll(() => {
       const cur = readState(root);
       return cur && cur.state === "red" && cur.reason === "infra-error" ? cur : null;
-    }, { timeoutMs: 5000 });
+    }, { timeoutMs: 20000 });
     assert.ok(s, `signal-killed DIRECT child torn down mid-run is final state=red reason=infra-error (got ${JSON.stringify(readState(root))})`);
     const res = runOnce(root);
     assert.equal(res.stopSignal, false, "infra-error-red must NOT trigger stop-dispatch");

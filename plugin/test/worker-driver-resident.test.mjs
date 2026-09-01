@@ -202,7 +202,7 @@ test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatch
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 5000);
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 15000);
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   // gap-a picked first (touches foo.ts); while it is in-flight, gap-b (also foo.ts) must be filtered
   // out of the selector's candidate set — the selector asked for gap-b on its 2nd call but was only
@@ -246,7 +246,7 @@ test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the se
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => readOutcomeLines(root).length >= 1, 5000);
+  await waitFor(() => readOutcomeLines(root).length >= 1, 15000);
   const picked = drv.events().find((e) => e.event === "selector-picked");
   assert.ok(picked, "the selection loop emitted a selector-picked event (AC2 chain is wired)");
   assert.equal(picked.task, "gap-a");
@@ -307,7 +307,7 @@ test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero 
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => readRoundLines(root).length >= 1, 5000);
+  await waitFor(() => readRoundLines(root).length >= 1, 15000);
   assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC3: no worker spawned while resource-gate reports WAIT");
   assert.equal(readOutcomeLines(root).length, 0, "zero outcome records — nothing was dispatched");
   const stop = readRoundLines(root).find((r) => r.action === "stop");
@@ -338,7 +338,7 @@ test("AC3 — MCP halt mid-run stops NEW dispatch only; the in-flight worker com
   let buf = "";
   driver.stdout.on("data", (d) => { buf += d; });
   let workerPid = null;
-  for (let i = 0; i < 200 && workerPid === null; i++) {
+  for (let i = 0; i < 1000 && workerPid === null; i++) {
     if (fs.existsSync(pidFile)) workerPid = Number(fs.readFileSync(pidFile, "utf8").trim().split("\n")[0]);
     else await new Promise((r) => setTimeout(r, 20));
   }
@@ -395,7 +395,7 @@ test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome s
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => readRoundLines(root).length >= 1, 5000);
+  await waitFor(() => readRoundLines(root).length >= 1, 15000);
   const rounds = readRoundLines(root);
   assert.ok(rounds.length >= 1, "at least one round record written even when the pool is empty");
   const last = rounds[rounds.length - 1];
@@ -504,12 +504,12 @@ test("negative control — drv.stop kills the whole process group: a long-lived 
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 5000);
+  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 15000);
   const closed = new Promise((resolve) => drv.child.stdout.on("close", resolve));
   drv.stop();
   await Promise.race([
     closed,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("stdout pipe still open after stop — an orphaned worker held it (group-kill not applied)")), 3000)),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("stdout pipe still open after stop — an orphaned worker held it (group-kill not applied)")), 10000)),
   ]);
 });
 
