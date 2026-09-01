@@ -137,3 +137,11 @@ AC2 要求「全仓 grep ②类 inner 拓扑/窗口/会话引用 = 0，①类 + 
 **执行 2026-08-28T17:28:16.643Z — 连续修满重试上限仍不合格（标 needs-human）**
 
 - 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+
+## Needs-Human
+
+**执行 2026-09-01T08:52:54.656Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=ac-gate: fan-in-ac-completion-gate: AC 未全勾（checked 3/4，剩余未勾 1 含非待外部项）——未翻 done
+fan-in-ac-completion-gate: FAIL (exit 1) — flip refused
