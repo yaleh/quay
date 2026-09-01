@@ -13,7 +13,10 @@
 // This file pins three things, each able to take a false value:
 //   AC1 — every `-check.ts` exits 0 AND prints usage on `--help`; NEGATIVE CONTROL: running `--help`
 //         over all of them leaves the `.quay/` mtime set unchanged (a checker that writes on `--help`
-//         — as measure-trend-check did — fails this);
+//         — as measure-trend-check did — fails this); resident-process runtime files (driver + the
+//         full-suite runner itself) are excluded from the snapshot (gap-suite-help-contract-mtime-race:
+//         they tick independently, not on `--help`); the mtime check retries a bounded number of times
+//         (③ fallback) — a deterministic side effect reproduces every attempt, a transient tick does not;
 //   AC2 — `ready-pool-check --help` no longer self-contradicts ("unknown flag: --help (run with
 //         --help)") — it prints normal usage and exits 0;
 //   AC3 — `measure-trend-check --help` does NOT append to .quay/measure-history.jsonl (hermetic:
@@ -53,7 +56,50 @@ function runHelp(checkerRel, extraArgs = []) {
   );
 }
 
-/** Map of rel-path → `${mtimeMs}:${size}` for every FILE under `dir` (symlinks not followed). */
+// Resident-process runtime files (gap-suite-help-contract-mtime-race) — written independently of any
+// checker's `--help`, so the AC1 negative control must not count their mtime movement (else driver/
+// suite active ⇒ stable false red, killing every fan-in). Two writers:
+//   (a) the resident promotion/worker drivers — round/outcome heartbeats, the per-checker cost ledger,
+//       control files, plus supervisor/driver/liveness logs and pid files (driver-runtime.ts DRIVER_KINDS
+//       `prefix`/`carriers`/`controlFile`);
+//   (b) the full-suite runner itself — its state file is MIRRORED into the tested checkout's own
+//       `.quay/full-suite-state.json` on every state transition (full-suite-runner.ts writeSuiteState),
+//       and its log/load-sampler/verification-round carriers land in the gate `.quay/`.
+// ⛔ measure-history.jsonl is deliberately NOT excluded — measure-trend-check appending it on `--help`
+// is the EXACT side effect this test exists to catch (AC3 must not degrade).
+const RESIDENT_DRIVER_FILES = new Set([
+  "checker-cost.jsonl",       // per-checker/gate cost ledger (checker-cost.ts, appended by driver ticks)
+  "promotion-round.jsonl",    // promotion-driver unconditional round heartbeat
+  "promotion-outcome.jsonl",  // promotion-driver outcome ledger
+  "worker-round.jsonl",       // worker-driver unconditional round heartbeat
+  "worker-outcome.jsonl",     // worker-driver outcome ledger
+  "promotion-control.json",   // promotion-driver drain/resume control state
+  "worker-control.json",      // worker-driver drain/resume control state
+]);
+
+/** Suite-runner runtime files — written by full-suite-runner.ts, never by a checker `--help`. */
+const SUITE_RUNNER_FILES = new Set([
+  "full-suite-state.json",    // runner state, MIRRORED into the tested checkout on every transition
+  "full-suite.log",           // runner stdout/stderr tee
+  "verification-round.jsonl", // round duration ledger, appended on suite completion
+]);
+
+/** True when `relPath` is a resident-process runtime file (never a checker `--help` side effect). */
+function isNonCheckerRuntimeFile(relPath) {
+  const base = path.basename(relPath);
+  if (RESIDENT_DRIVER_FILES.has(base) || SUITE_RUNNER_FILES.has(base)) return true;
+  // (a) driver supervisor/driver/liveness log + pid files (driver-runtime.ts prefix ∈ {promotion-driver,
+  // worker-driver}): <prefix>.(log|pid), <prefix>-supervisor.(log|pid), <prefix>-liveness.log,
+  // <prefix>-inflight.pid.
+  // (b) suite load sampler: suite-load-<runId>.jsonl (full-suite-runner.ts startLoadSampler).
+  return (
+    /^(promotion|worker)-driver(-(supervisor|liveness|inflight))?\.(log|pid)$/.test(base) ||
+    /^suite-load-.*\.jsonl$/.test(base)
+  );
+}
+
+/** Map of rel-path → `${mtimeMs}:${size}` for every FILE under `dir` (symlinks not followed),
+ *  excluding resident-process runtime files (which move independently of any checker `--help`). */
 function snapshotMtimeSet(dir) {
   const out = new Map();
   const walk = (d) => {
@@ -73,8 +119,10 @@ function snapshotMtimeSet(dir) {
         if (e.name === "node-compile-cache") continue;
         walk(p);
       } else if (e.isFile()) {
+        const rel = path.relative(dir, p);
+        if (isNonCheckerRuntimeFile(rel)) continue; // resident-process bookkeeping, not a checker side effect
         const st = fs.statSync(p);
-        out.set(path.relative(dir, p), `${st.mtimeMs}:${st.size}`);
+        out.set(rel, `${st.mtimeMs}:${st.size}`);
       }
     }
   };
@@ -89,16 +137,12 @@ function diffMtimeSet(before, after) {
   return changed;
 }
 
-test("AC1: every -check.ts exits 0 + prints usage on --help, with zero .quay mtime change", () => {
-  const checkers = listCheckers();
-  // NB: coverage is defined by the directory scan itself, NOT a hardcoded count — the count drifts
-  // as checkers are retired/added (the "77" this task was filed against is already 75). Guard only
-  // against a broken scan that silently returns nothing (a structurally-true no-op, hard rule 4).
-  assert.ok(checkers.length > 0, `expected a non-empty -check.ts set, found ${checkers.length}`);
-
-  const quay = path.join(repoRoot, ".quay");
+/** One sweep: snapshot `.quay`, run every checker `--help`, diff the mtime set. Returns the
+ *  checker exit/usage violations (deterministic) and the mtime diff (flaky — resident-process
+ *  runtime files tick independently of any checker `--help`, and the exclusion set is
+ *  best-effort). */
+function sweepMtime(checkers, quay) {
   const before = snapshotMtimeSet(quay);
-
   const failures = [];
   for (const c of checkers) {
     const res = runHelp(c);
@@ -109,9 +153,32 @@ test("AC1: every -check.ts exits 0 + prints usage on --help, with zero .quay mti
       failures.push(`${c}: exit 0 but printed no usage`);
     }
   }
-
   const after = snapshotMtimeSet(quay);
-  const changed = diffMtimeSet(before, after);
+  return { failures, changed: diffMtimeSet(before, after) };
+}
+
+test("AC1: every -check.ts exits 0 + prints usage on --help, with zero .quay mtime change", () => {
+  const checkers = listCheckers();
+  // NB: coverage is defined by the directory scan itself, NOT a hardcoded count — the count drifts
+  // as checkers are retired/added (the "77" this task was filed against is already 75). Guard only
+  // against a broken scan that silently returns nothing (a structurally-true no-op, hard rule 4).
+  assert.ok(checkers.length > 0, `expected a non-empty -check.ts set, found ${checkers.length}`);
+
+  const quay = path.join(repoRoot, ".quay");
+  const first = sweepMtime(checkers, quay);
+  const failures = first.failures;
+
+  // The mtime negative control is flaky (gap-suite-help-contract-mtime-race): a transient
+  // resident-process tick can slip a single mtime change into the diff even though the exclusion
+  // set covers every KNOWN runtime file. Retry the sweep a bounded number of times before failing
+  // (③ from the task's 补充处置: ① 除根 + ③ 兜底). A DETERMINISTIC checker `--help` side effect
+  // reproduces on every attempt, a transient tick does not — so retrying cannot mask a real side
+  // effect (the mtime-race AC3 test below pins that a real side effect is still caught in one pass).
+  const MAX_MTIME_ATTEMPTS = 3;
+  let changed = first.changed;
+  for (let attempt = 1; changed.length > 0 && attempt < MAX_MTIME_ATTEMPTS; attempt++) {
+    changed = sweepMtime(checkers, quay).changed;
+  }
 
   assert.deepEqual(failures, [], "checkers violating exit-0 + prints-usage:");
   assert.deepEqual(changed, [], "checkers with a --help side effect (.quay mtime changed):");
@@ -135,4 +202,35 @@ test("AC3: measure-trend-check --help does not append to measure-history.jsonl",
   assert.equal(res.status, 0, `measure-trend-check --help exit ${res.status}`);
   assert.ok(!fs.existsSync(hist), "measure-trend-check --help must not create measure-history.jsonl");
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("mtime-race AC3 (negative control not degraded): resident-process file exclusion still catches a real side effect", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "help-contract-mtime-"));
+  try {
+    // A .quay/-shaped dir holding resident-process files (driver + suite runner) AND a business file.
+    // The business file is what a real checker `--help` side effect would touch (e.g. measure-history.jsonl
+    // — deliberately NOT excluded).
+    fs.writeFileSync(path.join(tmp, "checker-cost.jsonl"), "x\n");
+    fs.writeFileSync(path.join(tmp, "promotion-round.jsonl"), "x\n");
+    fs.writeFileSync(path.join(tmp, "worker-driver-liveness.log"), "x\n");
+    fs.writeFileSync(path.join(tmp, "full-suite-state.json"), "x\n");
+    fs.writeFileSync(path.join(tmp, "suite-load-mfi-x-123-abc.jsonl"), "x\n");
+    fs.writeFileSync(path.join(tmp, "measure-history.jsonl"), "x\n");
+    const before = snapshotMtimeSet(tmp);
+
+    // A resident-process tick appends to its own files — must be invisible to the diff (excluded).
+    fs.appendFileSync(path.join(tmp, "checker-cost.jsonl"), "y\n");
+    fs.appendFileSync(path.join(tmp, "promotion-round.jsonl"), "y\n");
+    fs.appendFileSync(path.join(tmp, "worker-driver-liveness.log"), "y\n");
+    fs.appendFileSync(path.join(tmp, "full-suite-state.json"), "y\n");
+    fs.appendFileSync(path.join(tmp, "suite-load-mfi-x-123-abc.jsonl"), "y\n");
+    assert.deepEqual(diffMtimeSet(before, snapshotMtimeSet(tmp)), [], "resident-process tick mtime changes must be excluded");
+
+    // A real `--help` side effect (a non-runtime file) must still be caught — exclusion is not over-broad.
+    fs.appendFileSync(path.join(tmp, "measure-history.jsonl"), "y\n");
+    const changed = diffMtimeSet(before, snapshotMtimeSet(tmp));
+    assert.ok(changed.some((c) => c.startsWith("measure-history.jsonl")), "checker side effect must still be caught");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

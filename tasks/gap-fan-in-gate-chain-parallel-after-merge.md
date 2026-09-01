@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-gate-chain-parallel-after-merge
 title: fan-in 非测试 gate 链并行化——merge 先行后 {typecheck ∥ doc-check} 并行 + 合并进程（doc-check 提前到 scoped 前）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
