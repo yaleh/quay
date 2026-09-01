@@ -28,10 +28,10 @@ merge 必须先行（改变 delta）；merge+anti-drift 之后 typecheck 与 doc
 
 ## Acceptance Criteria
 
-- [ ] AC1 merge-develop 仍是 gate 链第一步（step-trace 首 step）
-- [ ] AC2 typecheck 与 doc-check 时间重叠，非测试 gate 墙钟 < 30s（基线 41s）
-- [ ] AC3 并行后 typecheck/doc-check 判定与串行一致（各 N 次对照）
-- [ ] AC4 doc-check 在 scoped-gate 之前（step-trace 顺序）
+- [x] AC1 merge-develop 仍是 gate 链第一步（step-trace 首 step）
+- [x] AC2 typecheck 与 doc-check 时间重叠，非测试 gate 墙钟 < 30s（基线 41s）
+- [x] AC3 并行后 typecheck/doc-check 判定与串行一致（各 N 次对照）
+- [x] AC4 doc-check 在 scoped-gate 之前（step-trace 顺序）
 
 ## Definition of Done
 
