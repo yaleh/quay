@@ -19,10 +19,10 @@ import {
   deriveTouches,
   renderTouchesSection,
 } from "./derive-touches-heuristic.ts";
-import { findRepoRoot } from "./touches-orthogonality-check.ts";
+import { repoRoot } from "./repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = findRepoRoot(__dirname);
+const rootDir = repoRoot(__dirname);
 const scriptPath = path.join(__dirname, "derive-touches-heuristic.ts");
 
 // ── looksLikePath ────────────────────────────────────────────────────────────────────────────────
@@ -237,7 +237,7 @@ const M173_CHARTER_LANDED_TOUCHES = [
 ];
 
 test("DIR-113 AC1: DIR-109 pre-charter body extraction is a superset of the M173-landed Touches", () => {
-  const { globs, unresolved } = deriveTouches(DIR_109_PRE_CHARTER_BODY, repoRoot);
+  const { globs, unresolved } = deriveTouches(DIR_109_PRE_CHARTER_BODY, rootDir);
   const missing = M173_CHARTER_LANDED_TOUCHES.filter((t) => !globs.includes(t));
   assert.deepEqual(missing, [], `derived globs=${JSON.stringify(globs)} unresolved=${JSON.stringify(unresolved)} missing=${JSON.stringify(missing)}`);
 });
@@ -255,7 +255,7 @@ test("CLI: derive-touches-heuristic.ts on a real fixture file prints a ## Touche
     );
     const out = execFileSync(
       "node",
-      ["--experimental-strip-types", scriptPath, taskFile, "--root", repoRoot],
+      ["--experimental-strip-types", scriptPath, taskFile, "--root", rootDir],
       { encoding: "utf8" },
     );
     assert.match(out, /^## Touches/);

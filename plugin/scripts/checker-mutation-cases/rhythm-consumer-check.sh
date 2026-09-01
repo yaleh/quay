@@ -13,7 +13,11 @@ checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "${workdir}/plugin/scripts" "${workdir}/scripts"
 
 # The catalog is the ONE shipped non-按需 mechanism in this fixture; it self-locates via readlink -f.
+# capability-catalog.sh now sources repo-root.sh (SPEC §2.4 B2 pair) — copy the dependency too, or
+# the catalog's --json run dies at the source line (set -e) and loadCatalogDecls parses zero rows,
+# making 判据1 vacuously green (the STAYED-GREEN failure this mutation is designed to catch).
 cp "${checker_dir}/capability-catalog.sh" "${workdir}/plugin/scripts/capability-catalog.sh"
+cp "${checker_dir}/repo-root.sh" "${workdir}/plugin/scripts/repo-root.sh"
 
 write_test_sh() { # <body...>
   printf '%s\n' "$@" > "${workdir}/scripts/test.sh"

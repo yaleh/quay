@@ -2,7 +2,7 @@
 id: gap-execution-loop-productization-p2-p4
 title: 执行环产品化 P2–P4——runMechanicalFanIn→quay task fan-in + workflow 兜底降级 +
   suite/dispatch 产品化
-status: needs-human
+status: superseded
 labels:
   - gap
   - productization
@@ -12,6 +12,8 @@ extra:
   schema: execution
   depends_on:
     - gap-adr034-fan-in-lock-holder-supervised
+  superseded_by: gap-bootstrap-land-ff-merge-executor-first
+  superseded_reason: 人 2026-08-31 建议：P4 残余由子任务（gap-execution-loop-p4-suite-entry-ts-ization / p4-dispatch-productization，均 done）落地、P2 ff 死锁由 gap-bootstrap-land-ff-merge-executor-first（done）单独立案——原任务无独立工作。
 ---
 **type:** execution
 

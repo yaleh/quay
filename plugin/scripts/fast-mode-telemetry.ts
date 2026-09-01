@@ -104,6 +104,7 @@
 // per-task-duration history, so it stays git-tracked (gap-telemetry-report-writes-and-deadlocks-readiness).
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -128,27 +129,6 @@ export const FAST_MODE_AGENT_LABEL = "fast-mode";
 
 // ── Repo-root detection ──────────────────────────────────────────────────────────────────────────────
 
-/**
- * Find the workspace root by walking up from the script location (or CWD fallback via git).
- * @param {string} [startDir]
- * @returns {string}
- */
-export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
 
 /**
  * Best-effort current commit for provenance; null when not a git repo (fail-soft).
@@ -2095,7 +2075,7 @@ async function loadSlotsFast(root) {
 export async function main(argv) {
   const args = argv.slice(2);
   const rootArg = getArgValue(args, "--root");
-  const root = rootArg ?? findRepoRoot();
+  const root = rootArg ?? repoRoot();
 
   // --task-start
   if (args.includes("--task-start")) {

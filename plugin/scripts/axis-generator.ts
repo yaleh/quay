@@ -46,6 +46,7 @@
 // is the loop's job (systematic discovery, not friction-driven).
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -120,16 +121,6 @@ export function classifyRange(criterion) {
 
 // ── Repository standing-criteria enumeration (AC1: systematic, not hand-listed) ────────────────────
 
-export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 12; i++) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
-}
 
 function readFile(p) {
   try {
@@ -246,7 +237,7 @@ export function enumerateStaticCheckers(root) {
 }
 
 /** All standing criteria: gates + static checkers. */
-export function enumerateCriteria(root = findRepoRoot()) {
+export function enumerateCriteria(root = repoRoot()) {
   const gates = enumerateGates(root).map((g) => {
     const scriptPath = g.script ? path.resolve(root, g.script.replace(/^\.\//, "")) : null;
     return { ...g, description: scriptPath ? readHeaderComment(scriptPath) : "" };

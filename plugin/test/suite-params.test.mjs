@@ -47,12 +47,13 @@ test("GREEN: config.yml without a suite: key → {} (providers/loop only)", () =
   assert.deepEqual(readSuiteParams(ws), {});
 });
 
-test("GREEN: a full valid suite: section returns all 7 typed values", () => {
+test("GREEN: a full valid suite: section returns all 8 typed values", () => {
   const ws = tmpWs();
   writeConfig(
     ws,
     [
       "suite:",
+      "  suite_scheduler: 1",
       "  phase_overlap: 1",
       "  serial_concurrency: 4",
       "  lowconc_concurrency: 3",
@@ -64,6 +65,7 @@ test("GREEN: a full valid suite: section returns all 7 typed values", () => {
     ].join("\n"),
   );
   assert.deepEqual(readSuiteParams(ws), {
+    suite_scheduler: 1,
     phase_overlap: 1,
     serial_concurrency: 4,
     lowconc_concurrency: 3,
@@ -155,8 +157,9 @@ test("suiteParamsToEnv maps present knobs to their env vars (absent → omitted)
   );
 });
 
-test("SUITE_KNOBS declares exactly the 7 config→env mappings (the 6 from the Proposal + main_tail_stall_pct)", () => {
+test("SUITE_KNOBS declares exactly the 8 config→env mappings (the 7 from the Proposal + main_tail_stall_pct + suite_scheduler)", () => {
   assert.deepEqual(SUITE_KNOBS, {
+    suite_scheduler: "QUAY_SUITE_SCHEDULER",
     phase_overlap: "QUAY_PHASE_OVERLAP",
     serial_concurrency: "QUAY_SERIAL_CONCURRENCY",
     lowconc_concurrency: "QUAY_LOWCONC_CONCURRENCY",

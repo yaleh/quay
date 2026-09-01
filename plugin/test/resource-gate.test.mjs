@@ -42,6 +42,11 @@ import { WAIT_THRESHOLD } from "../scripts/cap-from-gate.ts";
 // overlap-concurrency). Imported as FUNCTIONS (not the module-level DEFAULT_* consts) so the env
 // seams below are read at call time, not import time.
 import { defaultLaneCount, hostParallelism, concurrentSuiteSlots, concurrentPhaseCount } from "../scripts/full-suite-runner.ts";
+// gap-execution-loop-p4-suite-entry-ts-ization (SPEC P4 套件入口收进 TS): the DIRECT-path concurrency
+// decision functions moved from scripts/test.sh bash to runner-concurrency.ts (test.sh thin-forwards to
+// them). Imported as FUNCTIONS so the env seams below are read at call time, not import time — the
+// DIRECT path now shares the TS canonical the RUNNER path (defaultLaneCount/hostParallelism/…) uses.
+import { defaultTestConcurrency, defaultPhaseConcurrencyDirect } from "../scripts/runner-concurrency.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -87,64 +92,59 @@ function defaultCpuLimit() {
   return Number(m[1]);
 }
 
-/** Extract the REAL default_concurrency_formula from scripts/test.sh and run it with seams.
- *  `slots` (default 2 = QUAY_MAX_CONCURRENT_SUITES current value) is the RESOURCE_GATE_CONCURRENT_SUITES
- *  seam; `oversub` (default 1 = QUAY_MAX_OVERSUBSCRIPTION current value) is the
- *  RESOURCE_GATE_OVERSUBSCRIPTION seam. The MAIN formula is PURE computation
- *  (max(1, floor(nproc × oversub / S)) — gap-suite-budget-oversubscribe): no runtime `in_use`
- *  subtraction, no AMPLIFICATION divisor. The serial/lowconc PHASE defaults
- *  (serial_lowconc_host_default) ARE H÷S — tested separately. */
+/** Run a function with a set of env seams set (save/restore; unset-on-absent). The DIRECT-path
+ *  concurrency functions live in runner-concurrency.ts (SPEC P4) and read their seams from
+ *  process.env — this replaces the old bash-extraction subshells (which sourced suite-slot-lib.sh and
+ *  extracted default_concurrency_formula / serial_lowconc_host_default from test.sh). The seams are the
+ *  SAME names the bash functions read, so every assertion below is unchanged in meaning. */
+function withSeams(seams, fn) {
+  const saved = {};
+  for (const k of Object.keys(seams)) {
+    saved[k] = process.env[k];
+    process.env[k] = seams[k];
+  }
+  try {
+    return fn();
+  } finally {
+    for (const k of Object.keys(seams)) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+}
+
+/** defaultTestConcurrency (the TS direct-path main formula) with seams. `slots` is the
+ *  RESOURCE_GATE_CONCURRENT_SUITES seam; `oversub` is the RESOURCE_GATE_OVERSUBSCRIPTION seam. The MAIN
+ *  formula is PURE computation (max(1, floor(nproc × oversub / S)) — gap-suite-budget-oversubscribe):
+ *  no runtime `in_use` subtraction, no AMPLIFICATION divisor. */
 function derivedConcurrency(nproc, slots = 2, oversub = 1) {
-  const src = fs.readFileSync(TEST_SH, "utf8");
-  // The formula lives in default_concurrency_formula; default_test_concurrency CALLS it (the
-  // 2026-08-03 TEMPORARY pin to 8 was reverted by
-  // gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived).
-  const fnMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
-  assert.ok(fnMatch, "scripts/test.sh must define default_concurrency_formula()");
-  const script = `. "${SUITE_SLOT_LIB}"\n${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_CONCURRENT_SUITES=${slots}\nRESOURCE_GATE_OVERSUBSCRIPTION=${oversub}\nprintf '%s' "$(default_concurrency_formula)"\n`;
-  const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
-  assert.equal(res.status, 0, `derivedConcurrency subshell failed: ${res.stderr}`);
-  return Number(res.stdout.trim());
+  return withSeams(
+    { RESOURCE_GATE_NPROC: String(nproc), RESOURCE_GATE_CONCURRENT_SUITES: String(slots), RESOURCE_GATE_OVERSUBSCRIPTION: String(oversub) },
+    () => defaultTestConcurrency(),
+  );
 }
 
-/** Directly EXECUTE default_test_concurrency (the real effective default) and return its value.
- *  This is the AC1/AC3 "test the real value, not the spelling" seam: it runs the actual function
- *  the exec lines call, so a function that returns a constant instead of the derived formula is
- *  caught HERE, not by a call-site-spelling assertion. Runs on the REAL host (nproc, S=2, oversub=1)
- *  — the idle-host default ⇒ max(1, floor(nproc × 1 / 2)) = nproc/2 (gap-suite-budget-oversubscribe
- *  pure computation). */
+/** defaultTestConcurrency on the REAL host (no seams) — the effective default the exec lines call
+ *  through test.sh's thin forwarder. A function that returned a constant instead of the derived formula
+ *  is caught by the real-host assertion (AC5), which compares against an inline-derived expected value. */
 function currentDefaultConcurrency() {
-  const src = fs.readFileSync(TEST_SH, "utf8");
-  const fnMatch = src.match(/default_test_concurrency\(\) \{[^]*?\n\}/);
-  assert.ok(fnMatch, "scripts/test.sh must define default_test_concurrency()");
-  // default_test_concurrency calls default_concurrency_formula — extract BOTH functions so the
-  // isolated subshell is self-contained (matches the ## Contract effective_concurrency measure).
-  const formulaMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
-  assert.ok(formulaMatch, "scripts/test.sh must define default_concurrency_formula()");
-  const script = `. "${SUITE_SLOT_LIB}"\n${formulaMatch[0]}\n${fnMatch[0]}\nprintf '%s' "$(default_test_concurrency)"\n`;
-  const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
-  assert.equal(res.status, 0, `currentDefaultConcurrency subshell failed: ${res.stderr}`);
-  return Number(res.stdout.trim());
+  return defaultTestConcurrency();
 }
 
-/** Extract the REAL serial_lowconc_host_default (the shared serial/lowconc fallback) from
- *  scripts/test.sh and run it with deterministic seams. This is the DIRECT-path value of the two
- *  phase knobs (no QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY env) — the AC74 fix makes it
- *  host-derived (H÷(S×P)) instead of the old 2/3 literals; `overlap` (default "1" = the
- *  QUAY_PHASE_OVERLAP default) selects the concurrent-phase count P = 2 (on) / 1 (off). */
+/** defaultPhaseConcurrencyDirect (the TS direct-path serial/lowconc fallback) with seams. `overlap`
+ *  (default "1" = the QUAY_PHASE_OVERLAP default) selects the concurrent-phase count P = 2 (on) / 1
+ *  (off) — host-derived H÷(S×P) instead of the old 2/3 literals (gap-ac74-serial-lowconc-literal-direct-path). */
 function phaseConcurrencyDefault(nproc, slots, overlap = "1") {
-  const src = fs.readFileSync(TEST_SH, "utf8");
-  const fnMatch = src.match(/serial_lowconc_host_default\(\) \{[^]*?\n\}/);
-  assert.ok(fnMatch, "scripts/test.sh must define serial_lowconc_host_default()");
-  const script = `. "${SUITE_SLOT_LIB}"\n${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_CONCURRENT_SUITES=${slots}\nQUAY_PHASE_OVERLAP=${overlap}\nprintf '%s' "$(serial_lowconc_host_default)"\n`;
-  const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
-  assert.equal(res.status, 0, `phaseConcurrencyDefault subshell failed: ${res.stderr}`);
-  return Number(res.stdout.trim());
+  return withSeams(
+    { RESOURCE_GATE_NPROC: String(nproc), RESOURCE_GATE_CONCURRENT_SUITES: String(slots), QUAY_PHASE_OVERLAP: overlap },
+    () => defaultPhaseConcurrencyDirect(),
+  );
 }
 
 /** The bash canonical slot count S in a subshell with the AMBIENT env (FULL_SUITE_LOCK_FILE /
  *  `.concurrency` file honored, NO seam) — the direct reader for the AC2 file-wins negative control
- *  (gap-suite-concurrency-S-two-source-divergence). */
+ *  (gap-suite-concurrency-S-two-source-divergence). The bash canonical (suite-slot-lib.sh) is UNTOUCHED
+ *  by P4: it still owns the single-flight lock slot paths + the SSoT cross-check. */
 function bashSlotCount() {
   const script = `. "${SUITE_SLOT_LIB}"\nsuite_slot_count\n`;
   const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
@@ -152,28 +152,22 @@ function bashSlotCount() {
   return Number(res.stdout.trim());
 }
 
-/** default_concurrency_formula with NO slots seam — S comes from the AMBIENT `.concurrency` file /
- *  knob (the AC2 file-wins negative control: env knob left stale, the file must be authoritative). */
+/** defaultTestConcurrency with NO slots seam — S comes from the AMBIENT `.concurrency` file / knob
+ *  (the AC2 file-wins negative control: env knob left stale, the file must be authoritative). */
 function derivedConcurrencyNoSeam(nproc, oversub = 1) {
-  const src = fs.readFileSync(TEST_SH, "utf8");
-  const fnMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
-  assert.ok(fnMatch, "scripts/test.sh must define default_concurrency_formula()");
-  const script = `. "${SUITE_SLOT_LIB}"\n${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_OVERSUBSCRIPTION=${oversub}\nprintf '%s' "$(default_concurrency_formula)"\n`;
-  const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
-  assert.equal(res.status, 0, `derivedConcurrencyNoSeam subshell failed: ${res.stderr}`);
-  return Number(res.stdout.trim());
+  return withSeams(
+    { RESOURCE_GATE_NPROC: String(nproc), RESOURCE_GATE_OVERSUBSCRIPTION: String(oversub) },
+    () => defaultTestConcurrency(),
+  );
 }
 
-/** serial_lowconc_host_default with NO slots seam (same file-wins negative control as
+/** defaultPhaseConcurrencyDirect with NO slots seam (same file-wins negative control as
  *  derivedConcurrencyNoSeam). */
 function phaseConcurrencyDefaultNoSeam(nproc, overlap = "1") {
-  const src = fs.readFileSync(TEST_SH, "utf8");
-  const fnMatch = src.match(/serial_lowconc_host_default\(\) \{[^]*?\n\}/);
-  assert.ok(fnMatch, "scripts/test.sh must define serial_lowconc_host_default()");
-  const script = `. "${SUITE_SLOT_LIB}"\n${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nQUAY_PHASE_OVERLAP=${overlap}\nprintf '%s' "$(serial_lowconc_host_default)"\n`;
-  const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
-  assert.equal(res.status, 0, `phaseConcurrencyDefaultNoSeam subshell failed: ${res.stderr}`);
-  return Number(res.stdout.trim());
+  return withSeams(
+    { RESOURCE_GATE_NPROC: String(nproc), QUAY_PHASE_OVERLAP: overlap },
+    () => defaultPhaseConcurrencyDirect(),
+  );
 }
 
 // ── AC2: the gate reads /proc/pressure/cpu some avg10 as PRIMARY; load average is SUPPLEMENTARY ─────
@@ -431,7 +425,7 @@ test("AC5 — formula derives max(1, floor(nproc × oversub / S)); the DEFAULT e
   // code returned a constant). This assertion directly executes the real function, so a future
   // constant-return regression goes RED here (the Contract's control clause). Idle host ⇒
   // max(1, floor(nproc × 1 / 2)) = nproc/2 (pure computation known cost).
-  const realNproc = Number(execSync("nproc").toString().trim());
+  const realNproc = hostParallelism(); // the TS canonical nproc (read-host) — defaultTestConcurrency reads the SAME source
   // Adaptive to the configured slot count (gap-suite-lock-slot-seam-asymmetry AC2): under
   // QUAY_MAX_CONCURRENT_SUITES=1 the effective default is nproc (single slot = whole host), not nproc/2 —
   // the assertion must not hardcode S=2.
@@ -527,34 +521,39 @@ test("AC2 (判据2) — two-suite real sample (16+8>16, load 29.23) replays as N
 
 test("AC3 (判据3) — all three lane derivations read QUAY_MAX_CONCURRENT_SUITES (grep -L on any derivation file ⇒ not landed)", () => {
   // 判据3: serial_lowconc / default_concurrency_formula / defaultLaneCount 全部读旋钮② — the reverse
-  // half of concurrency-literal-check (definition point exists but a derivation does not read it).
+  // half of concurrency-literal-check (definition point exists but a derivation does not read it). The
+  // DIRECT-path derivations moved from scripts/test.sh bash to runner-concurrency.ts
+  // (defaultTestConcurrency / defaultPhaseConcurrencyDirect) under SPEC P4 — test.sh now thin-forwards.
   const testSh = fs.readFileSync(TEST_SH, "utf8");
+  const rc = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "runner-concurrency.ts"), "utf8");
   const runnerTs = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "full-suite-runner.ts"), "utf8");
-  // serial_lowconc_host_default reads the knob directly.
-  assert.match(testSh, /serial_lowconc_host_default\(\) \{[^]*QUAY_MAX_CONCURRENT_SUITES/, "serial_lowconc_host_default must read QUAY_MAX_CONCURRENT_SUITES");
-  // default_concurrency_formula reads the knob (via the RESOURCE_GATE_CONCURRENT_SUITES seam fallback).
-  assert.match(testSh, /default_concurrency_formula\(\) \{[^]*QUAY_MAX_CONCURRENT_SUITES/, "default_concurrency_formula must read QUAY_MAX_CONCURRENT_SUITES");
-  // defaultLaneCount reads the knob through concurrentSuiteSlots() (the single definition point).
+  // The DIRECT-path derivations read the slot knob through concurrentSuiteSlots() (the single definition
+  // point) — test.sh only thin-forwards to them (no more in-bash S read).
+  assert.match(rc, /defaultTestConcurrency\(\): number \{[^]*concurrentSuiteSlots\(\)/, "defaultTestConcurrency must read the slot knob (concurrentSuiteSlots())");
+  assert.match(rc, /defaultPhaseConcurrencyDirect\(\): number \{[^]*concurrentSuiteSlots\(\)/, "defaultPhaseConcurrencyDirect must read the slot knob (concurrentSuiteSlots())");
+  assert.match(testSh, /default_concurrency_formula\(\) \{\n  node --no-warnings --experimental-strip-types "\$\{repo_root\}\/plugin\/scripts\/runner-concurrency\.ts" --default-test-concurrency/, "default_concurrency_formula must thin-forward to runner-concurrency.ts (no in-bash computation)");
+  assert.match(testSh, /serial_lowconc_host_default\(\) \{\n  node --no-warnings --experimental-strip-types "\$\{repo_root\}\/plugin\/scripts\/runner-concurrency\.ts" --phase-concurrency/, "serial_lowconc_host_default must thin-forward to runner-concurrency.ts");
+  // defaultLaneCount (runner path) reads the knob through concurrentSuiteSlots() (the single definition point).
   assert.match(runnerTs, /defaultLaneCount\(\): number \{[^]*concurrentSuiteSlots\(\)/, "defaultLaneCount must read the slot knob (concurrentSuiteSlots())");
   // Each derivation also reads the oversub knob ③ (or its seam).
-  assert.match(testSh, /default_concurrency_formula\(\) \{[^]*QUAY_MAX_OVERSUBSCRIPTION/, "default_concurrency_formula must read QUAY_MAX_OVERSUBSCRIPTION");
+  assert.match(rc, /defaultTestConcurrency\(\): number \{[^]*QUAY_MAX_OVERSUBSCRIPTION/, "defaultTestConcurrency must read QUAY_MAX_OVERSUBSCRIPTION");
   assert.match(runnerTs, /defaultLaneCount\(\): number \{[^]*QUAY_MAX_OVERSUBSCRIPTION/, "defaultLaneCount must read QUAY_MAX_OVERSUBSCRIPTION");
 });
 
-test("AC1 — S single source: default_concurrency_formula + serial_lowconc_host_default delegate S to suite_slot_count (the .concurrency-file-reading canonical)", () => {
-  // gap-suite-concurrency-S-two-source-divergence: the lock's slot count (suite_slot_count) read
-  // seam → `<base>.concurrency` file → QUAY_MAX_CONCURRENT_SUITES → 2, while the lane formulas read
-  // seam → knob → 2 (SKIPPING the file). So `printf '2' > .concurrency` changed the lock but not the
-  // lanes. The fix: BOTH lane derivations now CALL suite_slot_count — one S reader, the divergence is
-  // structurally impossible (改一个文件同时改锁槽数 + lane 公式). By-position (the function body, not a
-  // file-wide greedy match), so a formula that stopped delegating goes RED here.
-  const testSh = fs.readFileSync(TEST_SH, "utf8");
-  const formulaBody = testSh.match(/default_concurrency_formula\(\) \{[^]*?\n\}/)?.[0] ?? "";
-  const phaseBody = testSh.match(/serial_lowconc_host_default\(\) \{[^]*?\n\}/)?.[0] ?? "";
-  assert.ok(formulaBody, "default_concurrency_formula must exist");
-  assert.ok(phaseBody, "serial_lowconc_host_default must exist");
-  assert.match(formulaBody, /slots="\$\(suite_slot_count\)"/, "default_concurrency_formula must delegate S to suite_slot_count");
-  assert.match(phaseBody, /slots="\$\(suite_slot_count\)"/, "serial_lowconc_host_default must delegate S to suite_slot_count");
+test("AC1 — S single source: defaultTestConcurrency + defaultPhaseConcurrencyDirect delegate S to concurrentSuiteSlots() (the .concurrency-file-reading canonical)", () => {
+  // gap-suite-concurrency-S-two-source-divergence: the lock's slot count (suite_slot_count / the TS
+  // suiteLockSlotCount) reads seam → `<base>.concurrency` file → QUAY_MAX_CONCURRENT_SUITES, and the lane
+  // formulas must read the SAME chain. The fix (one S reader, divergence structurally impossible) is now
+  // structural in TS: BOTH direct-path derivations CALL concurrentSuiteSlots() — the TS single definition
+  // point (which delegates to suiteLockSlotCount). By-position (the function body), so a derivation that
+  // stopped delegating goes RED here.
+  const rc = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "runner-concurrency.ts"), "utf8");
+  const mainBody = rc.match(/defaultTestConcurrency\(\): number \{[^]*?\n\}/)?.[0] ?? "";
+  const phaseBody = rc.match(/defaultPhaseConcurrencyDirect\(\): number \{[^]*?\n\}/)?.[0] ?? "";
+  assert.ok(mainBody, "defaultTestConcurrency must exist");
+  assert.ok(phaseBody, "defaultPhaseConcurrencyDirect must exist");
+  assert.match(mainBody, /concurrentSuiteSlots\(\)/, "defaultTestConcurrency must delegate S to concurrentSuiteSlots()");
+  assert.match(phaseBody, /concurrentSuiteSlots\(\)/, "defaultPhaseConcurrencyDirect must delegate S to concurrentSuiteSlots()");
 });
 
 test("AC2 — file-wins negative control: writing ONLY the `.concurrency` file (env knob left stale at 1) halves laneCount AND sets the slot count (no more divergence)", () => {
@@ -604,12 +603,13 @@ test("AC4 (判据4) — single suite gets nproc/S (pure computation known cost, 
   assert.equal(derivedConcurrency(16, 2, 1), 8, "single suite = nproc/S = 8 (not 16) — known cost");
   assert.equal(derivedConcurrency(16, 2, 2), 16, "oversub=2 → single suite = 16 (the trade-off knob)");
   // The formula does NOT read any runtime "running suite count" — S is a static knob. Strip the
-  // shell comments first (by-position — the historical `nproc − in_use` explanation is prose, not
-  // code) and assert the CODE neither reads in_use nor shells out to process-budget.
-  const src = fs.readFileSync(TEST_SH, "utf8");
-  const fnMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
-  assert.ok(fnMatch, "default_concurrency_formula must exist");
-  const codeLines = fnMatch[0].split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+  // comments first (by-position — the historical `nproc − in_use` explanation is prose, not code) and
+  // assert the CODE neither reads in_use nor shells out to process-budget. The formula now lives in
+  // runner-concurrency.ts defaultTestConcurrency (SPEC P4), not in test.sh bash.
+  const rc = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "runner-concurrency.ts"), "utf8");
+  const fnMatch = rc.match(/defaultTestConcurrency\(\): number \{[^]*?\n\}/);
+  assert.ok(fnMatch, "defaultTestConcurrency must exist");
+  const codeLines = fnMatch[0].split("\n").filter((l) => !/^\s*\/\//.test(l) && !/^\s*\/\*\*?/.test(l)).join("\n");
   assert.doesNotMatch(codeLines, /in_use|RESOURCE_GATE_TEST_NODE_PROCS|process-budget\.sh|concurrentSuitesRunning/, "the main formula must NOT read runtime running-suite/in_use counts");
 });
 
@@ -890,7 +890,12 @@ test("AC5 — scripts/test.sh uses the derived default in its exec lines (no har
   assert.equal(allSites.length, 5, `expected 5 derived-concurrency node --test sites, got ${allSites.length}`);
   // The --buckets runner derives its concurrency from the SAME default (no hardcoded literal).
   assert.match(src, /node --test-concurrency="\$\(bucket_test_concurrency/, "the --buckets runner must derive concurrency via bucket_test_concurrency");
-  assert.match(src, /default_test_concurrency\n}/, "bucket_test_concurrency must fall back to default_test_concurrency");
+  // bucket_test_concurrency thin-forwards to runner-concurrency.ts bucketTestConcurrency, whose fallback
+  // is defaultTestConcurrency (SPEC P4 — the derivation moved out of bash, so the fallback is now
+  // asserted structurally on the TS source, not a bash `default_test_concurrency\n}` line).
+  assert.match(src, /bucket_test_concurrency\(\) \{\n  node --no-warnings --experimental-strip-types "\$\{repo_root\}\/plugin\/scripts\/runner-concurrency\.ts" --bucket-test-concurrency "\$@"/, "bucket_test_concurrency must thin-forward to runner-concurrency.ts");
+  const rc = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "runner-concurrency.ts"), "utf8");
+  assert.match(rc, /return defaultTestConcurrency\(\);/, "bucketTestConcurrency must fall back to defaultTestConcurrency");
   assert.doesNotMatch(src, /--test-concurrency=8/, "no hardcoded 8 may remain in test.sh");
 });
 

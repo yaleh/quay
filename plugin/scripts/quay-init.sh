@@ -1059,6 +1059,14 @@ _derive_loop_scripts_once() {
   #   precommit-guard.ts without its imported checker and the guard's `--install-hook` step dies with
   #   ERR_MODULE_NOT_FOUND (the delta-scope unverified-landing the touches fan-in's skipped full suite
   #   let through). Same class as the other checker transitive deps listed above.
+  #   repo-root.sh + repo-root.ts (gap-b2-repo-root-unification): capability-catalog.sh sources
+  #   repo-root.sh via `${SELF_DIR}/repo-root.sh` (NOT `${SCRIPT_DIR}/` — the closure step (d)
+  #   below only scans `${SCRIPT_DIR}/` shell sibling refs, so the SELF_DIR form is INVISIBLE to
+  #   it), and the migrated scripts import repo-root.ts via ESM `./repo-root.ts` (also invisible to
+  #   (d)). Without an explicit entry a laid-down catalog/precommit-guard sources/imports a missing
+  #   repo-root and dies with "No such file or directory" / ERR_MODULE_NOT_FOUND. Same class as
+  #   touches-one-entry-one-path-check.ts above — the single repo-root resolver must land with
+  #   every consumer.
   #   checker-io.ts + driver-result.ts (gap-b4-checker-reuse-driver-result): the laid-down checkers
   #   outer-anchor-check.ts (derived via (a)) and adr016-screen-use-check.ts (via (b)) import
   #   checker-io.ts via ESM `./checker-io.ts`, which re-exports driver-result.ts at runtime — an ESM
@@ -1084,7 +1092,7 @@ _derive_loop_scripts_once() {
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \
-    checker-io.ts driver-result.ts canonical-test-files.ts suite-params.ts >> "$out"
+    repo-root.sh repo-root.ts checker-io.ts driver-result.ts canonical-test-files.ts suite-params.ts >> "$out"
   # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
   #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
   #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the

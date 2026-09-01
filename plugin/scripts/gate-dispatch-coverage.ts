@@ -27,25 +27,12 @@
 //     mismatches:   [{ gate, registeredScript, liveScript, refs, kind }] }
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // ── Workspace-root discovery ─────────────────────────────────────────────────────────────────────────
 
-/**
- * Resolve the workspace root. The script's own real location is <root>/plugin/scripts/, so walking
- * up two levels finds the `.quay/config.yml`. `--root` overrides this. Never throws.
- */
-export function findWorkspaceRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 12; i++) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
-}
 
 // ── Config parsing (.quay/config.yml `gates:` section) ────────────────────────────────────────────────
 
@@ -438,7 +425,7 @@ export function main(argv = process.argv.slice(2)) {
   // EPIPE error lets main() return 0 instead of the process dying with a non-zero status.
   process.stdout.on("error", () => {});
 
-  const workspaceRoot = root ? path.resolve(root) : findWorkspaceRoot();
+  const workspaceRoot = root ? path.resolve(root) : repoRoot();
   let report;
   try {
     const configPath = path.join(workspaceRoot, ".quay", "config.yml");

@@ -20,7 +20,6 @@ import {
   expandGlobs,
   filesDisjoint,
   checkTouchesPair,
-  findRepoRoot,
   isOverbroadDeclaration,
   main,
   touchExists,
@@ -29,6 +28,7 @@ import {
   checkBenignRuntimeDirty,
   checkTouchesNarrow,
 } from "../scripts/touches-orthogonality-check.ts";
+import { repoRoot } from "../scripts/repo-root.ts";
 import { parseTouchEntriesWithTags } from "../scripts/touches-parser.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -303,8 +303,8 @@ test("fixture charters carry the touches sections the selfcheck relies on", () =
 });
 
 // ── findRepoRoot ─────────────────────────────────────────────────────────────────────────────────
-test("findRepoRoot: walks up to the dir containing .git", () => {
-  assert.equal(findRepoRoot(__dirname), REPO_ROOT);
+test("repoRoot: walks up to the dir containing .git", () => {
+  assert.equal(repoRoot(__dirname), REPO_ROOT);
 });
 
 // ── main() end-to-end, in-process (covers the CLI orchestration) ──────────────────────────────────
@@ -328,7 +328,7 @@ test("main: missing charter file → exit 2", async () => {
   assert.equal(await main(["node", "s", "--root", REPO_ROOT, fx("disjoint-a.md"), fx("does-not-exist.md")]), 2);
 });
 
-test("main: no --root falls back to findRepoRoot (real repo expansion)", async () => {
+test("main: no --root falls back to repoRoot (real repo expansion)", async () => {
   assert.equal(await main(["node", "s", fx("disjoint-a.md"), fx("disjoint-b.md")]), 0);
 });
 

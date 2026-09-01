@@ -27,6 +27,7 @@
 //   node --experimental-strip-types suite-bucket-select.ts <path>... [--root <dir>] [--json|--paths-only|--summary]
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
@@ -36,7 +37,6 @@ import {
   bucketSetOf,
   extractRelativeSpecifiers,
   resolveRelative,
-  findRepoRoot,
   type Bucket,
 } from "./suite-bucket-attribution.ts";
 import { hubDecision, taskTouchEntries } from "./suite-bucket-hub-list.ts";
@@ -304,7 +304,7 @@ export function writeBucketAttribution(root: string, attribution: Map<string, Ef
  * @param {string} [root]
  * @returns {BucketSelection}
  */
-export function selectBucketsForTouches(touchedPaths: readonly string[], root = findRepoRoot()): BucketSelection {
+export function selectBucketsForTouches(touchedPaths: readonly string[], root = repoRoot()): BucketSelection {
   const files = listSuiteFiles(root);
   const reattr = loadReattribution(root);
   const hub = hubDecision(touchedPaths ?? []);
@@ -365,7 +365,7 @@ export function selectBucketsForTouches(touchedPaths: readonly string[], root = 
 }
 
 /** Select for one task's `## Touches` (reads tasks/<id>.md; [] when absent). */
-export function selectBucketsForTask(taskId: string, root = findRepoRoot()): BucketSelection {
+export function selectBucketsForTask(taskId: string, root = repoRoot()): BucketSelection {
   return selectBucketsForTouches(taskTouchEntries(taskId, root), root);
 }
 
@@ -394,7 +394,7 @@ function getArgValue(args: string[], name: string): string | undefined {
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   const rootArg = getArgValue(args, "--root");
-  const root = path.resolve(rootArg ?? findRepoRoot());
+  const root = path.resolve(rootArg ?? repoRoot());
   const taskId = getArgValue(args, "--task");
   const asJson = args.includes("--json");
   const pathsOnly = args.includes("--paths-only");

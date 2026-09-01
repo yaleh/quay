@@ -29,6 +29,7 @@
 //   --json        打印机器可读 JSON 摘要（三态计数+清单）
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -70,22 +71,11 @@ const RETIRED_CHECK_FILES = [
   "plugin/scripts/loop-shipping-exclusion-data.mjs",
 ];
 
-// ── 仓库根解析 ──────────────────────────────────────────────────────────────────────────────────────────
-export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 16; i++) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
-}
 
 // 生产数据在【主检出】里（gitignored 运行态），不在 worktree。若给定根是 linked worktree（.git 是文件），
 // 沿 `git rev-parse --git-common-dir` 追到主检出——审计必须读生产载体（判据3）。
 export function resolveProductionRoot(startDir) {
-  const root = findRepoRoot(startDir);
+  const root = repoRoot(startDir);
   if (!root) return startDir;
   const gitDot = path.join(root, ".git");
   if (fs.existsSync(gitDot) && fs.statSync(gitDot).isFile()) {
@@ -634,7 +624,7 @@ export function buildWriterIndex(root, basenames) {
 
 // ── 聚合审计 ────────────────────────────────────────────────────────────────────────────────────────────
 export function buildAudit(startDir, { root = null } = {}) {
-  const repoRoot = root ?? findRepoRoot(startDir);
+  const resolvedRoot = root ?? repoRoot(startDir);
   const prodRoot = resolveProductionRoot(startDir);
   const gitRoot = prodRoot; // git 操作都在主检出跑（生产数据 + 任务文件同源）
   const doneTasks = readDoneTasks(gitRoot);
@@ -685,7 +675,7 @@ export function buildAudit(startDir, { root = null } = {}) {
 
   return {
     generatedAt: new Date().toISOString(),
-    repoRoot,
+    repoRoot: resolvedRoot,
     prodRoot,
     doneTaskCount: doneTasks.length,
     discoveredCarrierCount: discovered.length,
@@ -754,7 +744,7 @@ export async function main(argv = process.argv) {
   const rootIdx = args.indexOf("--root");
   const root = rootIdx >= 0 && args[rootIdx + 1] ? path.resolve(args[rootIdx + 1]) : null;
   const asJson = args.includes("--json");
-  const startDir = root ?? findRepoRoot();
+  const startDir = root ?? repoRoot();
   const audit = buildAudit(startDir, { root });
   if (asJson) {
     process.stdout.write(JSON.stringify(audit, null, 2) + "\n");

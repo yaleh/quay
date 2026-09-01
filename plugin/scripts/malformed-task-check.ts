@@ -42,6 +42,7 @@
 //       assertion failure (mutation-case surface, checker-mutation-check.sh).
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -49,16 +50,6 @@ import { helpExit } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function findRepoRoot(startDir = __dirname) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 12; i++) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
-}
 
 // Dynamic imports of product modules (the plugin bundle build stages plugin/scripts
 // WITHOUT the packages/ tree — the same pathToFileURL pattern config-wiring-check.ts
@@ -100,7 +91,7 @@ export async function scanMalformed(tasksDir, repoRoot) {
 }
 
 // ── checkRoot: the CLI-facing check over a workspace ───────────────────────────────────────────────
-// The store IMPLEMENTATION comes from the checker's OWN repo (findRepoRoot), while the tasks dir
+// The store IMPLEMENTATION comes from the checker's OWN repo (repoRoot), while the tasks dir
 // comes from --root: the tool reads whatever workspace it is pointed at with its own parser —
 // the two only coincide when --root IS the checker's repo (the full-suite / scoped-gate case).
 export async function checkRoot(root) {
@@ -110,7 +101,7 @@ export async function checkRoot(root) {
     // error, never a silent "0 malformed" (the empty = healthy shape is the defect class).
     throw new Error(`malformed-task-check: no tasks dir at ${tasksDir} (root ${root})`);
   }
-  const malformed = await scanMalformed(tasksDir, findRepoRoot(__dirname));
+  const malformed = await scanMalformed(tasksDir, repoRoot(__dirname));
   return { tasksDir, malformed };
 }
 
@@ -120,7 +111,7 @@ export async function checkRoot(root) {
 //   RED    — the live-sample shape (`title: [封存] …`, the exact 2026-08-13 sample) IS.
 // The mutation case (plugin/scripts/checker-mutation-cases/malformed-task-check.sh)
 // runs this; checker-mutation-check.sh treats non-zero as a case failure.
-export async function selfTestMain(repoRoot = findRepoRoot(__dirname)) {
+export async function selfTestMain(root = repoRoot(__dirname)) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "malformed-task-check-selftest-"));
   let failures = 0;
   try {
@@ -137,7 +128,7 @@ export async function selfTestMain(repoRoot = findRepoRoot(__dirname)) {
       "---\nid: BAD-1\ntitle: [封存] bare-dir thing\n---\nbody\n",
     );
 
-    const malformed = await scanMalformed(tasksDir, repoRoot);
+    const malformed = await scanMalformed(tasksDir, root);
     const badFiles = malformed.map((m) => m.file);
     if (!badFiles.includes("BAD-1.md")) {
       console.error("SELFTEST RED-LEAK: the live-sample malformed shape was NOT reported malformed");
@@ -189,7 +180,7 @@ export async function main(argv) {
     usage();
     return 2;
   }
-  if (selfTest) return selfTestMain(findRepoRoot(__dirname));
+  if (selfTest) return selfTestMain(repoRoot(__dirname));
   try {
     const { tasksDir, malformed } = await checkRoot(root);
     if (malformed.length === 0) return 0;

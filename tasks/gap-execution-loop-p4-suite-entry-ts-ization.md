@@ -1,7 +1,7 @@
 ---
 id: gap-execution-loop-p4-suite-entry-ts-ization
 title: P4 残余①——scripts/test.sh suite 入口 TS 化收尾（决策逻辑抽 TS 纯函数）
-status: ready
+status: done
 labels:
   - gap
   - productization
@@ -23,7 +23,7 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，suite 入口 TS 化）：`scripts/test.sh` 决策逻辑抽 TS 纯函数带单测，test.sh 收窄为薄转发或并入 full-suite-runner.ts，全量 suite 不回归；（⛔ test.sh 仍持决策逻辑 / suite 回归 ⇒ 假）。
+- [x] AC1（能取假，suite 入口 TS 化）：`scripts/test.sh` 决策逻辑抽 TS 纯函数带单测，test.sh 收窄为薄转发或并入 full-suite-runner.ts，全量 suite 不回归；（⛔ test.sh 仍持决策逻辑 / suite 回归 ⇒ 假）。
 
 ## Definition of Done
 
@@ -33,7 +33,8 @@ test.sh 决策逻辑抽 TS 纯函数带单测、test.sh 收窄为薄转发或并
 
 - scripts/test.sh（收窄为薄转发）
 - plugin/scripts/runner-concurrency.ts（决策逻辑纯函数）
-- plugin/scripts/full-suite-runner.ts（并入目标）
+- plugin/test/resource-gate.test.mjs（决策逻辑跨实现对照单测）
+- plugin/test/runner-concurrency.test.mjs（纯函数单测）
 - tasks/gap-execution-loop-p4-suite-entry-ts-ization.md（自身）
 
 ## Needs-Human

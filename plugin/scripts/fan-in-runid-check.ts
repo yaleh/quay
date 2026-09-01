@@ -28,11 +28,12 @@
 // Pure read — never writes a file, never moves a ref.
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { extractRunIdFromCommitSubject, findFanInCommitSha, findRepoRoot } from "./fast-mode-telemetry.ts";
+import { extractRunIdFromCommitSubject, findFanInCommitSha } from "./fast-mode-telemetry.ts";
 
 /** A subject that identifies a fan-in merge commit (the `merge: fan-in task/<id> …` family). */
 export const FAN_IN_SUBJECT_RE = /fan-in/i;
@@ -45,7 +46,7 @@ const RUN_ID_SAFE_RE = /^[A-Za-z0-9._-]+$/;
 
 function resolveRoot(rootArg) {
   if (rootArg) return path.resolve(rootArg);
-  return findRepoRoot(path.dirname(fileURLToPath(import.meta.url)));
+  return repoRoot(path.dirname(fileURLToPath(import.meta.url)));
 }
 
 // ── Fan-in commit discovery ──────────────────────────────────────────────────────────────────────────

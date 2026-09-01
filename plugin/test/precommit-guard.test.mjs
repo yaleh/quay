@@ -312,7 +312,7 @@ test("AC63 — ff-only merge fires ZERO guard hooks (no pre-commit, no pre-merge
 
 /** Copy the guard + its Touches-parser deps into a scratch repo so --install-hook's shim resolves. */
 function copyGuardScripts(root) {
-  for (const f of ["precommit-guard.ts", "touches-one-entry-one-path-check.ts", "touches-parser.ts", "gate-script-base.ts"]) {
+  for (const f of ["precommit-guard.ts", "touches-one-entry-one-path-check.ts", "touches-parser.ts", "gate-script-base.ts", "repo-root.ts"]) {
     fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", f), path.join(root, "plugin", "scripts", f));
   }
 }

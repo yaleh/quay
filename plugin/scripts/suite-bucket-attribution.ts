@@ -45,6 +45,7 @@
 //   node --experimental-strip-types suite-bucket-attribution.ts <test-file> [--root <dir>] [--json]
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -268,28 +269,6 @@ export function extractPathJoinSpecifiers(text: string): string[] {
   return out;
 }
 
-/**
- * Find the workspace root by walking up from `startDir` (`.quay/config.yml` marker), with a git
- * top-level fallback — the same convention as `select-tests-for-touches.ts` / fast-mode-telemetry.ts.
- * @param {string} [startDir]
- * @returns {string}
- */
-export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))): string {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
 
 /**
  * Coerce a file reference (repo-relative or absolute) to a repo-relative path.
@@ -308,10 +287,10 @@ export function toRepoRel(fileRef: string, root: string): string {
  * unlocatable (the caller maps that to UNRESOLVED — never a silent default bucket).
  *
  * @param {string} fileRef — repo-relative (e.g. `plugin/test/foo.test.mjs`) or absolute path.
- * @param {string} [root] — repo root; defaults to `findRepoRoot()`.
+ * @param {string} [root] — repo root; defaults to `repoRoot()`.
  * @returns {Set<Bucket>}
  */
-export function bucketSetOf(fileRef: string, root = findRepoRoot()): Set<Bucket> {
+export function bucketSetOf(fileRef: string, root = repoRoot()): Set<Bucket> {
   const fileRel = toRepoRel(fileRef, root);
   const text = fs.readFileSync(path.join(root, fileRel), "utf8");
   const buckets = new Set<Bucket>();
@@ -380,7 +359,7 @@ export function canonicalBuckets(buckets: Set<Bucket>): string {
  * @param {string} [root]
  * @returns {string}
  */
-export function attributeBuckets(fileRef: string, root = findRepoRoot()): string {
+export function attributeBuckets(fileRef: string, root = repoRoot()): string {
   return canonicalBuckets(bucketSetOf(fileRef, root));
 }
 
@@ -408,7 +387,7 @@ export function main(argv: string[]): number {
     process.stderr.write(`${usage}\n`);
     return 2;
   }
-  const root = path.resolve(rootArg ?? findRepoRoot());
+  const root = path.resolve(rootArg ?? repoRoot());
   const abs = path.isAbsolute(fileRef) ? fileRef : path.join(root, fileRef);
   if (!fs.existsSync(abs)) {
     process.stderr.write(`suite-bucket-attribution: file not found: ${abs}\n`);

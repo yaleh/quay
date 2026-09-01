@@ -57,6 +57,7 @@
 // Exit: 0 ok; 1 a `--check` invariant violation; 2 usage/env error.
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -88,22 +89,6 @@ export const TEST_GLOB_PARTS = ["packages/*/test/*.test.mjs", "plugin/test/*.tes
 
 // ── Repo-root detection (mirrors select-tests-for-touches.ts) ───────────────────────────────────────
 
-export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
 
 // ── Annotation parsing (reuses the select-static-checks-for-touches `@static-tier` pattern) ──────────
 
@@ -460,7 +445,7 @@ export function main(argv) {
   const checkMode = args.includes("--check");
   const listEntryMode = args.includes("--list-entry");
   const checkExitMode = args.includes("--check-exit");
-  const root = path.resolve(getArgValue(args, "--root") ?? findRepoRoot());
+  const root = path.resolve(getArgValue(args, "--root") ?? repoRoot());
 
   if (listMode) {
     for (const m of scanFamily(root)) {
