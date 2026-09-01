@@ -41,10 +41,11 @@ extra:
 
 ## Definition of Done
 
-挂点定位（无声死亡 = 无错误边界）+ 修复（step-trace + try/catch + error round）；AC1-3 勾；worker-driver-fan-in 20 连跑绿；生产 round 无停写窗口（机制落地）。
+挂点定位（无声死亡 = 无错误边界）+ 修复（step-trace + try/catch + error round）+ 时序加固（resident AC2/AC3 5000→10000，suite 满载 16 核下派发含 git landing 读可 >5s 的 load-flake，与同文件 AC1 10000ms 约定同源）；AC1-3 勾；worker-driver-fan-in 20 连跑绿；生产 round 无停写窗口（机制落地）。
 
 ## Touches
 
 - plugin/scripts/worker-driver.ts（驻留环挂点修复）
-- plugin/test/worker-driver-fan-in.test.mjs（如测试侧需加固时序）
+- plugin/test/worker-driver-fan-in.test.mjs（新 2 测：error round 形状 + 源结构面）
+- plugin/test/worker-driver-resident.test.mjs（AC2/AC3 时序加固 5000→10000——suite 满载 16 核下 5s 超时 flake）
 - tasks/gap-worker-driver-resident-loop-intermittent-hang.md（自身）
