@@ -3,7 +3,7 @@ id: gap-retire-inner-hygiene-delete-session-face
 title: inner 会话卫生退役 step2——删 inner-panel-stale-check --pane CLI +
   wakeup-heartbeat CLI（写方待核）+ inner-exec-mode-report 死壳 + AC149
   doc-marking（09-01 收窄：monitor-mount-check.sh/inner-blocked-signal.ts 移出 scope）
-status: ready
+status: done
 labels:
   - gap
 parent: null
