@@ -22,7 +22,7 @@ import { handleSystem, handleManager } from "./serve-system.ts";
 import { handleTests, handleTestsFile } from "./serve-tests.ts";
 import { handleSessions, handleSession, handleSessionEarlier, handleSessionDownload, handleDriverLifecycle, handleNewSession, handleResumeSession, handleFanInLogView, handleFanInLogDownload } from "./serve-sessions.ts";
 import { handleArchitecture } from "./serve-architecture.ts";
-import { handleDashboard } from "./serve-dashboard.ts";
+import { handleDashboard, handleDashboardCards } from "./serve-dashboard.ts";
 import { handleSend } from "./serve-send.ts";
 import { handleNeedsHuman } from "./serve-needs-human.ts";
 
@@ -95,6 +95,13 @@ export async function handleAllRoutes(
   // the rest read workspace observation via observation.ts (mechanism scripts / git / suite-state).
   if (url.pathname === "/dashboard") {
     await handleDashboard(req, res, client, manifest, cfg);
+    return;
+  }
+
+  // gap-dashboard-testscard-livecard-auto-refresh — the JSON data endpoint the dashboard liveCard/
+  // testsCard auto-refresh script polls. Re-renders ONLY those two cards (no sys/mgr/tasks probes).
+  if (url.pathname === "/dashboard/cards") {
+    await handleDashboardCards(req, res, cfg);
     return;
   }
 
