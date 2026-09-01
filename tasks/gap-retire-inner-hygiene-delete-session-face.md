@@ -1,7 +1,7 @@
 ---
 id: gap-retire-inner-hygiene-delete-session-face
 title: inner 会话卫生退役 step2——删②类面（--detect-stop/--pane/tmux-Monitor/main_thread_edits/wakeup-heartbeat CLI）+ AC149 doc-marking
-status: todo
+status: ready
 labels:
   - gap
 parent: null
