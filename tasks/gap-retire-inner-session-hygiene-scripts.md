@@ -1,7 +1,7 @@
 ---
 id: gap-retire-inner-session-hygiene-scripts
 title: B/C 组 inner 会话卫生脚本退役——先迁活 helper 再删 --detect-stop/--pane/tmux-Monitor 挂载/落盘/main_thread_edits/wakeup-heartbeat 面，同步 catalog/测试
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -56,3 +56,10 @@ B/C 组②类会话卫生面全部退役或迁移，活 helper 有非 inner 名�
 - plugin/test/inner-idle-log.test.mjs
 - plugin/test/inner-forensics.test.mjs
 - tasks/gap-retire-inner-session-hygiene-scripts.md
+
+## Needs-Human
+
+**执行 2026-09-01T11:04:48.975Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
