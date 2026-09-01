@@ -65,10 +65,8 @@ promotion-driver 下一次 tick（~40s 周期）抢先扫到该文件并判定�
 
 ## Touches
 
-- `plugin/scripts/ready-pool-check.ts`（`commitTaskStatus` 函数体及其调用点，约 2537-2540 行附近）
-- `plugin/scripts/driver-filters.ts`（needs-human 机械翻转提交点，约 690 行附近；`commitTaskFile`
-  本身不改，仅其两个调用方改）
-- `plugin/test/ready-pool-check.test.mjs`（或等价测试文件——新增"未跟踪文件晋升"与"已跟踪文件真实
-  翻转"两个用例；若该测试文件不存在，需新建并按现有测试文件命名/分层约定接入 `scripts/test.sh`）
-- `plugin/test/driver-filters.test.mjs`（或等价测试文件——needs-human 翻转点的对应用例）
-- `tasks/gap-promotion-commit-message-misleading-on-first-track.md`（本任务自身，self-touch）
+- `plugin/scripts/ready-pool-check.ts`（commitTaskStatus 函数体及其调用点）
+- `plugin/scripts/driver-filters.ts`（needs-human 机械翻转提交点）
+- `plugin/test/ready-pool-check.test.mjs`（新增未跟踪/已跟踪两用例）
+- `plugin/test/driver-filters.test.mjs`（needs-human 翻转点对应用例）
+- `tasks/gap-promotion-commit-message-misleading-on-first-track.md`（本任务自身）
