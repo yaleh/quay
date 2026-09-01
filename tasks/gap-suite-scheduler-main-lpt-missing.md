@@ -1,6 +1,6 @@
 ---
 id: gap-suite-scheduler-main-lpt-missing
-title: 统一调度器漏 main 组 LPT 排序——main 组长文件晚启动长尾（waterline-scheduler 落地后回归）
+title: suite LPT+dispatch 3 套复制粘贴重构成 1 套循环+组表——main 组漏 LPT 致长文件晚启动长尾
 status: ready
 labels:
   - gap
@@ -14,33 +14,50 @@ extra:
 
 ## Proposal
 
-waterline-scheduler（`gap-suite-dynamic-waterline-scheduler`，done）统一调度器只对 serial/lowconc 组调 `lpt_reorder_files`，**漏了 main 组**：
+waterline-scheduler（`gap-suite-dynamic-waterline-scheduler`，done）落地后，main 组长文件晚启动长尾回归。**根因不是「漏一行 main LPT」，是 LPT 排序 + 传 scheduler 两处各复制粘贴 3 套（serial/lowconc/main），3 套独立演化 ⇒ main 组有机会漏。**
 
-- **full-suite 路径**（`scripts/test.sh:1086-1087`）：只 `lpt_reorder_files serial_files` + `lpt_reorder_files lowconc_files`，main 组（`${files[@]}`，调度循环 `for _schf in "${files[@]}"` :1105）未 LPT 排序；
-- **bucket 路径**（`scripts/test.sh:1640-1641`）：只 `lpt_reorder_files bucket_serial_files` + `lpt_reorder_files bucket_lowconc_files`，main 组（`${bucket_main_files[@]}` :1646）未 LPT 排序；
-- **legacy fallback**（:1163）原经 `lpt_reorder_files files` 对 main 排序——被调度器替换时丢失（该调用在 `MAIN_TAIL_OVERLAP>0` 分支内，调度器早退后不再执行）。
-- **误导注释**（:1094）：「The group lists are LPT-ordered by the lpt_reorder_files calls above」——「group lists」含 main，但实际只排了 serial/lowconc，注释声称的范围比实现广。
+**现状（逐行核实）**：
+- **full-suite**：LPT 只排 serial/lowconc（`:1086-1087` `lpt_reorder_files serial_files` / `lowconc_files`），dispatch 3 套独立循环（`:1102-1104` `for _schf in "${serial_files[@]}"` / `lowconc_files` / `files`）——main 组既没 LPT、又靠第 3 套循环传参。
+- **bucket**：同构，LPT 只排 `bucket_serial_files` / `bucket_lowconc_files`（`:1640-1641`），dispatch 3 套（`:1649-1651`）——`bucket_main_files` 漏 LPT。
+- **legacy fallback**：`lpt_reorder_files files` 出现在 `:1163`（MAIN_TAIL_OVERLAP 分支）与 `:1254`（main phase）——两处都是「if 前该统一排却漏了」后打的补丁，重构统一后变冗余。
 
-**数据证据（driver development progress 实测）**：scheduler 落地后首轮，main 组最长文件 `checker-mutation-check.test.mjs` 实际启动 offset ≈ 240.2s，短文件 offset = 0s——长文件晚 240s 先跑短文件 ⇒ main 组 LPT 未生效，违反原任务 AC1「组预算队列相内 LPT」，主相长尾回归。
+**数据证据（driver development progress 实测）**：落地后首轮 main 组最长文件 `checker-mutation-check.test.mjs` 启动 offset ≈ 240.2s、短文件 0s——长文件晚 240s 先跑短文件，违反原任务 AC1「组预算队列相内 LPT」。
 
-**根因**：调度器引入时只迁移了 serial/lowconc 两组的 LPT 调用，main 组的 LPT（legacy 的 `lpt_reorder_files files`）未迁移到调度器早退分支之前。
+**正确机制（人裁定）**：3 套复制粘贴重构成 1 套循环 + 组定义表——组表一次性声明 serial/lowconc/main 三组，LPT 与 dispatch 各一个循环遍历组表，main 组从此结构上不可能再漏。bash 先例已具备：`declare -A` @`:800`、`local -n` nameref @`:938`（`lpt_reorder_files` 本身就是 nameref），无新特性。
 
 ## Plan
 
-1. full-suite 路径（:1087 后）加 `lpt_reorder_files files`（main 组 LPT，在调度器早退分支 `QUAY_SUITE_SCHEDULER=1` 之前）。
-2. bucket 路径（:1641 后）加 `lpt_reorder_files bucket_main_files`。
-3. 修 :1094 注释——「group lists」改为「serial/lowconc/main 三组」（或明确点名三组均已 LPT，不含混的「above」泛指）。
+full-suite 与 bucket 两路径各把 LPT + dispatch 3 套合并成 1 套：
+
+```bash
+declare -A _group_arr=([serial]=serial_files [lowconc]=lowconc_files [main]=files)
+for _g in serial lowconc main; do
+  declare -n _arr="${_group_arr[$_g]}"
+  lpt_reorder_files _arr
+  for _f in "${_arr[@]}"; do printf '%s\t%s\n' "$_g" "$_f"; done
+  declare +n _arr
+done
+```
+
+1. **full-suite**：替代 `:1086-1087`（LPT）+ `:1102-1104`（dispatch）。
+2. **bucket**：替代 `:1640-1641`（LPT）+ `:1649-1651`（dispatch），组表用 `bucket_serial_files` / `bucket_lowconc_files` / `bucket_main_files`。
+3. **关键约束**：LPT 排序保持「`if [ QUAY_SUITE_SCHEDULER ]` 之前」（legacy fallback 分支共享 serial/lowconc LPT 语义），dispatch 在 if 内。
+4. **冗余清理**：重构后 main LPT 自动补齐，legacy `:1163`（MAIN_TAIL_OVERLAP 分支）+ `:1254`（main phase）的 `lpt_reorder_files files` 变冗余（if 前已统一）——删。
+5. **不在范围**：`select_files`（收集）有时机差异（lowconc 提前 hoist 为 overlap 并行），非纯复制粘贴，不动。
+6. **验证**：跑全量 suite——main 相长文件（checker-mutation-check 等）offset 回 0 附近；legacy `QUAY_SUITE_SCHEDULER=0` 路径行为不变（pass/fail-neutral）。
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：full-suite 与 bucket 两路径均对 main 组 LPT 排序——grep `lpt_reorder_files files`（full-suite main）与 `lpt_reorder_files bucket_main_files`（bucket main）各出现且位于对应调度器 `QUAY_SUITE_SCHEDULER` 分支之前；（⛔ 缺 main 排序 ⇒ 假；⛔ 只排 serial/lowconc ⇒ 假）。
-- [ ] AC2（能取假，生产载体，硬规则 4 推论三）：实现落地后时间窗内，全量轮 main 组最长文件启动 offset 回 0 附近（与短文件 offset 差消除，不再 240s 量级长尾），N 只计落地后轮次；（⛔ 用落地前轮冒充 ⇒ 假）。
+- [ ] AC1（能取假，机制级）：full-suite 与 bucket 两路径 LPT+dispatch 各重构为 1 套循环 + 组定义表，组表覆盖 serial/lowconc/main 三组——grep 无 3 处独立 `for _*f in "${..._files[@]}" ... printf ... done` dispatch 块，而见 `declare -A _group_arr` 组表 + 单循环遍历；（⛔ 仍 3 处复制粘贴 ⇒ 假）。
+- [ ] AC2（能取假，冗余清理）：legacy `:1163` + `:1254` 的 `lpt_reorder_files files` 删除（if 前已统一 LPT）；（⛔ 残留冗余调用 ⇒ 假）。
+- [ ] AC3（能取假，生产载体，硬规则 4 推论三）：落地后时间窗内，全量轮 main 组最长文件启动 offset 回 0 附近（与短文件差消除，不再 240s 量级），N 只计落地后轮次；（⛔ 用落地前轮冒充 ⇒ 假）。
+- [ ] AC4（能取假，无回归）：legacy `QUAY_SUITE_SCHEDULER=0` 路径同文件集同断言 pass/fail 结果一致（重构只改调度表达，不改测试集/断言）。
 
 ## Definition of Done
 
-main 组 LPT 补齐（full-suite + bucket 两路径）；注释修正；AC1-AC2 全勾；全量 suite 绿；main 组长文件 offset 回 0 附近实测（落地后轮）。
+LPT+dispatch 3 套重构为 1 套循环+组表（full-suite + bucket 各一）；legacy 冗余 `lpt_reorder_files files` 清理；AC1-AC4 全勾；全量 suite 绿；main 长文件 offset 回 0 附近实测；legacy 路径 pass/fail-neutral。
 
 ## Touches
 
-- scripts/test.sh（main 组 LPT 补齐：`lpt_reorder_files files` + `lpt_reorder_files bucket_main_files`；注释修正）
+- scripts/test.sh（LPT+dispatch 重构 1 套循环+组表；legacy 冗余 `lpt_reorder_files files` 删除）
 - tasks/gap-suite-scheduler-main-lpt-missing.md（自身）
