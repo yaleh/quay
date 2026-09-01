@@ -24,10 +24,10 @@ archguard-runner 只输出布尔闸（sccCount==0），不枚举环/不给文件
 
 ## Acceptance Criteria
 
-- [ ] AC1 机械 fan-in 步骤不再含 archguard-structure（生产 step-trace 无该 step）
-- [ ] AC2 移除后非测试 gate 链墙钟下降
-- [ ] AC3 archguard-runner 仍可直接调用并产出 metrics（按需保留）
-- [ ] AC4 结构检查有新的落点（milestone-review 检查面或文档化按需命令）
+- [x] AC1 机械 fan-in 步骤不再含 archguard-structure（生产 step-trace 无该 step）
+- [ ] AC2 移除后非测试 gate 链墙钟下降（待外部）
+- [x] AC3 archguard-runner 仍可直接调用并产出 metrics（按需保留）
+- [x] AC4 结构检查有新的落点（milestone-review 检查面或文档化按需命令）
 
 ## Definition of Done
 
@@ -35,5 +35,9 @@ fan-in 无 archguard step 且 archguard-runner 保留；AC1-4 勾。
 
 ## Touches
 
-- plugin/scripts/worker-driver.ts（删 archguard-structure 步）
+- plugin/scripts/worker-driver.ts（删 archguard-structure 步 + archguardCommand 缝 + mirrorArchguardMetrics）
+- scripts/test.sh（archguard 结构闸注释改为「已移除/按需命令」）
+- plugin/test/archguard-structural-gate-fan-in.test.mjs（负控制改为「无 step」+ 按需命令文档断言）
+- plugin/test/worker-driver-fan-in.test.mjs（删 archguard step/镜像测试 + mechOpts/step 列表去 archguard）
+- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（删 archguard 三测试 + 各 call site 去 seam）
 - tasks/gap-fan-in-remove-archguard-gate.md（自身）
