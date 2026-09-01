@@ -2492,8 +2492,16 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
   const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
   if (!m) return { id, ok: false, reason: "no-frontmatter" };
   const [, open, fm, close] = m;
-  const statusLine = /^status:\s*todo\s*$/m.exec(fm);
-  if (!statusLine) return { id, ok: false, reason: "not-todo" };
+  // 判「当前是否 todo」读 develop ref（canonical），⛔ 读工作树盘上 status——上一轮 commitTaskStatus
+  // 提交失败会残留【未提交的 ready】，把后续轮毒化成 not-todo 永不重提交（develop 永远 todo；
+  // gap-promotion-uncommitted-flip-poisons-settaskstatus，硬规则 4b 代理量）。develop 不可用
+  // （非 git root / 任务尚未入 develop）退回盘上（既有行为）。develop 仍 todo 而盘上残留 ready 时，
+  // 下面的 replace 是 no-op（盘上无 `todo` 可替换），写回即把残留 ready 重新提交 → develop 收敛。
+  const developStatus = readTaskStatusAtRef(root, "develop", id);
+  const currentIsTodo = developStatus !== null
+    ? developStatus === TASK_STATUS.TODO
+    : /^status:\s*todo\s*$/m.test(fm);
+  if (!currentIsTodo) return { id, ok: false, reason: "not-todo" };
   let newFm = fm.replace(/^status:\s*todo\s*$/m, `status: ${newStatus}`);
   let deliveryCritical = opts.ensureDeliveryCritical === true;
   if (deliveryCritical) {
