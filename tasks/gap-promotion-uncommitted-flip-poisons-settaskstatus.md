@@ -1,7 +1,7 @@
 ---
 id: gap-promotion-uncommitted-flip-poisons-settaskstatus
 title: promotion 未提交翻转毒化 setTaskStatus——工作树残留 ready 使后续轮判 not-todo 永不重提交
-status: ready
+status: done
 labels:
   - gap
   - defect
