@@ -13,9 +13,9 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, clearTaskStatusRefCache } from "../src/observation.ts";
+import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache } from "../src/observation.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
-import { taskRunsBlock } from "../src/serve-task.ts";
+import { taskRunsBlock, handleTaskList } from "../src/serve-task.ts";
 
 /** Commit helper with a fixed clock (committer date = author date = `t`), per-branch file. */
 function commitAt(ws, msg, t, file = "log.txt") {
@@ -1237,6 +1237,169 @@ test("readTaskTitleMapAtRef / readTaskAtRefMeta — develop title is the diverge
     const meta = readTaskAtRefMeta(root, "develop", "gap-a");
     assert.equal(meta.title, "develop title a", "single-task meta read returns the develop title");
     assert.equal(meta.status, "ready", "single-task meta read returns the develop status");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── gap-tasks-page-develop-ref-full-history-git-log-cost (AC1/AC2/AC4) ────────────────────────────
+// The develop-ref read face previously re-walked the whole `tasks/` history on every cache miss
+// (~8.8s cold on a production-scale repo), and the detail-page single-task reads had no cache. This
+// task: incremental commit-times (AC2), a background refresh (AC1/AC4), and cache-first detail reads
+// (AC3, in serve-task.test.mjs).
+
+/** Build a synthetic large repo (tasks task files, commits commits touching tasks/) via `git
+ *  fast-import` — the script-generated fixture AC1/AC2 require (a real repo at this scale is too slow
+ *  to build in a test). Each commit rewrites one task file with CONTENT that changes (so git's history
+ *  simplification does not collapse the walk — the `updated` cost is proportional to real commits).
+ *  Returns { root }. */
+function buildLargeRepo(prefix, { tasks = 1500, commits = 10000 } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+  execFileSync("git", ["init", "-q", "-b", "develop", "."], { cwd: root });
+  execFileSync("git", ["-C", root, "config", "user.email", "t@t"]);
+  execFileSync("git", ["-C", root, "config", "user.name", "t"]);
+  const out = [];
+  const dataBlock = (content) => {
+    const b = Buffer.from(content, "utf8");
+    out.push(`data ${b.length}`, content);
+  };
+  const body = (id, extra) => `---\nid: ${id}\ntitle: title ${id}\nstatus: ready\n---\n## Proposal\nbody ${extra}\n`;
+  const commit = (ts, msg, prev, mark, ids) => {
+    out.push("commit refs/heads/develop", `mark :${mark}`, `author t <t@t> ${ts} +0000`, `committer t <t@t> ${ts} +0000`);
+    dataBlock(msg);
+    if (prev != null) out.push(`from :${prev}`);
+    for (const id of ids) {
+      out.push(`M 100644 inline tasks/${id}.md`);
+      dataBlock(body(id, msg));
+    }
+  };
+  commit(1000000000, "init", null, 1, Array.from({ length: tasks }, (_, i) => `t-${i}`));
+  let prev = 1;
+  for (let c = 1; c <= commits; c++) {
+    commit(1000000000 + c, `c${c}`, prev, c + 1, [`t-${c % tasks}`]);
+    prev = c + 1;
+  }
+  execFileSync("git", ["fast-import", "--quiet"], { cwd: root, input: out.join("\n") + "\n" });
+  return { root };
+}
+
+/** Append commits to develop (one `git fast-import` stream, no working-tree checkout needed — fast-import
+ *  leaves the working tree empty). Each entry is { ts, msg, id }; the task file is rewritten with
+ *  `status: done` and the msg in the body. */
+function appendCommits(root, list) {
+  const out = [];
+  const dataBlock = (content) => {
+    const b = Buffer.from(content, "utf8");
+    out.push(`data ${b.length}`, content);
+  };
+  const fromSha = execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
+  let prev = fromSha;
+  let mark = 1;
+  for (const { ts, msg, id } of list) {
+    out.push("commit refs/heads/develop", `mark :${mark}`, `author t <t@t> ${ts} +0000`, `committer t <t@t> ${ts} +0000`);
+    dataBlock(msg);
+    out.push(`from ${prev}`);
+    out.push(`M 100644 inline tasks/${id}.md`);
+    dataBlock(`---\nid: ${id}\ntitle: title ${id}\nstatus: done\n---\n## Proposal\nbody ${msg}\n`);
+    prev = `:${mark}`;
+    mark++;
+  }
+  execFileSync("git", ["fast-import", "--quiet"], { cwd: root, input: out.join("\n") + "\n" });
+}
+
+test("AC1 — /tasks cold first request < 1.5s and warmed request < 200ms on a ≥1500-task/≥10000-commit fixture", async () => {
+  const { root } = buildLargeRepo("large-ac1-", { tasks: 1500, commits: 10000 });
+  try {
+    const ids = Array.from({ length: 1500 }, (_, i) => `t-${i}`);
+    const tasks = ids.map((id) => ({ id, title: `title ${id}`, status: "ready", role: "primitive", labels: [], parent: null, children: [], body: "## Proposal\nbody\n", extra: {} }));
+    const client = { taskList: async () => ({ tasks, malformed: [] }) };
+    const render = async () => {
+      let body = "";
+      const res = { writeHead: () => {}, end: (chunk) => { body = chunk; } };
+      await handleTaskList({}, res, new URL("http://localhost/tasks"), client, { name: "test", id: "native" }, { workspaceRoot: root });
+      return body;
+    };
+    // Cold: no warmup — the request computes the cheap status/title faces and reads commit-times
+    // cache-only (empty). It must NOT pay the full history walk (~4.5s on this fixture).
+    clearTaskStatusRefCache();
+    const t0 = process.hrtime.bigint();
+    await render();
+    const coldMs = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.ok(coldMs < 1500, `AC1: cold request ${coldMs.toFixed(0)}ms < 1500ms (⛔ ≥1.5s ⇒ 假)`);
+
+    // Warm: the background refresh has run ≥1 round (the full history walk happens here, off the
+    // request path), then the request reads cache only.
+    refreshDevelopRefCaches(root, "develop");
+    const t1 = process.hrtime.bigint();
+    await render();
+    const warmMs = Number(process.hrtime.bigint() - t1) / 1e6;
+    assert.ok(warmMs < 200, `AC1: warmed request ${warmMs.toFixed(0)}ms < 200ms (⛔ ≥200ms ⇒ 假)`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — the commit-time refresh is incremental (O(new commits), not O(total history))", () => {
+  const { root } = buildLargeRepo("large-ac2-", { tasks: 1500, commits: 10000 });
+  try {
+    // Cold full build (the whole 10000-commit history).
+    clearTaskStatusRefCache();
+    const t0 = process.hrtime.bigint();
+    const before = readTaskCommitTimesAtRef(root, "develop");
+    const fullMs = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.equal(before.size, 1500, "full build returns all 1500 task commit times");
+
+    // N=5 new commits, then an incremental refresh.
+    appendCommits(root, [1, 2, 3, 4, 5].map((c) => ({ ts: 2000000000 + c, msg: `new${c}`, id: `t-${c}` })));
+    const t1 = process.hrtime.bigint();
+    const after = readTaskCommitTimesAtRef(root, "develop", { force: true });
+    const incrMs = Number(process.hrtime.bigint() - t1) / 1e6;
+
+    // Correctness of the merge: the touched tasks move to their new times; an untouched task keeps its prior time.
+    assert.equal(after.get("t-1"), 2000000001 * 1000, "incremental merge moves t-1 to its new commit time");
+    assert.equal(after.get("t-5"), 2000000005 * 1000, "incremental merge moves t-5 to its new commit time");
+    assert.equal(after.get("t-6"), before.get("t-6"), "an untouched task keeps its prior time");
+
+    // The contrast (AC2): incremental (5 commits) is far cheaper than the full history walk — if the
+    // implementation still replayed all 10000 commits, incrMs ≈ fullMs and `incrMs * 5 < fullMs` fails.
+    assert.ok(incrMs * 5 < fullMs, `AC2: incremental ${incrMs.toFixed(1)}ms is O(5), not the full ${fullMs.toFixed(0)}ms history (⛔ ${incrMs.toFixed(1)}ms×5 ≥ ${fullMs.toFixed(0)}ms ⇒ 全量重放)`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — the background refresh is fail-open: git unavailable never throws, and the next success restores the cache", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "large-ac4-"));
+  try {
+    const tasksDir = path.join(root, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    git("init", "-b", "develop", "-q", ".");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    fs.writeFileSync(path.join(tasksDir, "gap-a.md"), "---\nid: gap-a\ntitle: title a\nstatus: done\n---\n## Proposal\nbody\n");
+    fs.writeFileSync(path.join(tasksDir, "gap-b.md"), "---\nid: gap-b\ntitle: title b\nstatus: ready\n---\n## Proposal\nbody\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "develop state");
+    clearTaskStatusRefCache();
+
+    refreshDevelopRefCaches(root, "develop");
+    assert.equal(readTaskStatusMapAtRef(root, "develop").get("gap-a"), "done", "refresh built the develop status cache");
+
+    // Make git unavailable by pointing PATH at an empty dir (execFileSync resolves `git` via PATH).
+    const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), "no-git-"));
+    const origPath = process.env.PATH;
+    process.env.PATH = emptyBin;
+    try {
+      assert.doesNotThrow(() => refreshDevelopRefCaches(root, "develop"), "AC4: refresh with git unavailable does not throw");
+    } finally {
+      process.env.PATH = origPath;
+      fs.rmSync(emptyBin, { recursive: true, force: true });
+    }
+
+    // Next successful refresh restores the cache.
+    refreshDevelopRefCaches(root, "develop");
+    assert.equal(readTaskStatusMapAtRef(root, "develop").get("gap-a"), "done", "AC4: the next successful refresh restores the cache content");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

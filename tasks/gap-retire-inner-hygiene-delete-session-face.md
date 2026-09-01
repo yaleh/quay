@@ -82,3 +82,10 @@ step1（`gap-retire-inner-hygiene-migrate-helper`，done）已把三个活 helpe
 - docs/analysis/test-file-baseline.txt（去 inner-exec-mode-report + inner-panel-stale-check→agent-panel-classify）
 - .quay/suite-bucket-reattribution.jsonl（去 inner-exec-mode-report 条目 + inner-panel-stale-check→agent-panel-classify）
 - tasks/gap-retire-inner-hygiene-delete-session-face.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T14:55:46.918Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red

@@ -17,6 +17,7 @@ import { loadConfig, activeProvider } from "./config.ts";
 import { connectProvider, type ProviderClient } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
 import { handleAllRoutes } from "./serve-handlers.ts";
+import { startDevelopRefBackgroundRefresh } from "./observation.ts";
 
 // Re-export rendering helpers so external consumers (tests, etc.) can still
 // import them from serve.ts if needed. These now live in serve-handlers.ts.
@@ -274,5 +275,12 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // addition (a new property on the returned object) — no existing caller's
   // behavior changes, since nothing previously read `server.client`.
   (server as Server & { client: ProviderClient }).client = client;
+
+  // gap-tasks-page-develop-ref-full-history-git-log-cost (AC1): mount a background refresh tick that
+  // keeps the develop-ref read caches warm OFF the request path. The cold full build runs here (at
+  // startup), so the request path reads cache in the common case instead of re-walking git history.
+  // unref'd — it never keeps the process alive; a non-git workspace fails the refresh silently.
+  startDevelopRefBackgroundRefresh(cfg.workspaceRoot, "develop");
+
   return server as Server & { client: ProviderClient };
 }
