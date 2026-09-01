@@ -3,8 +3,8 @@
 # (gap-manager-productization-five-constraints AC1/AC7)
 #
 # 规格：SPEC-manager-productization-2026-08-05 §4.2。manager 的「启动项目」与「启动自己」分开。
-# 三态语义与 inner-session-check.sh 完全一致（healthy / empty-shell / missing）——本脚本复用
-# inner-session-check.sh 的判定，不写第二份：
+# 三态语义与 outer-session-check.sh 完全一致（healthy / empty-shell / missing）——本脚本复用
+# outer-session-check.sh 的判定，不写第二份：
 #   - healthy     ⇒ noop（可能是别人建的，不要动）
 #   - empty-shell ⇒ 驱动，不重建（不丢潜在上下文）
 #   - missing     ⇒ 调 quay-topology.sh 建单窗口（outer）
@@ -23,7 +23,7 @@
 #     --json           JSON 输出
 #     --home <dir>     manager 家目录（默认 $QUAY_GLOBAL_DIR/manager/）
 #
-# 测试接缝：复用 inner-session-check.sh 的全部测试接缝（--session / --transcript / hermetic tmux）。
+# 测试接缝：复用 outer-session-check.sh 的全部测试接缝（--session / --transcript / hermetic tmux）。
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
@@ -34,7 +34,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-CHECKER="${SCRIPT_DIR}/inner-session-check.sh"
+CHECKER="${SCRIPT_DIR}/outer-session-check.sh"
 TOPOLOGY="${SCRIPT_DIR}/quay-topology.sh"
 
 ROOT=""
@@ -88,7 +88,7 @@ if [ -z "$SESSION" ]; then
   exit 2
 fi
 
-# ── 三态判定：复用 inner-session-check.sh（不写第二份）──────────────────────────────────────
+# ── 三态判定：复用 outer-session-check.sh（不写第二份）──────────────────────────────────────
 CHECK_JSON="$(bash "$CHECKER" --session "$SESSION" --json 2>/dev/null)"
 STATE=""
 if [ -n "$CHECK_JSON" ]; then
@@ -102,7 +102,7 @@ fi
 if [ "$DRY_RUN" = 1 ]; then
   case "$STATE" in
     healthy) echo "would-adopt: $ROOT (state=healthy → noop, register only)" ;;
-    empty-shell) echo "would-adopt: $ROOT (state=empty-shell → drive inner, do not rebuild)" ;;
+    empty-shell) echo "would-adopt: $ROOT (state=empty-shell → drive outer, do not rebuild)" ;;
     missing) echo "would-adopt: $ROOT (state=missing → call quay-topology.sh to build outer)" ;;
   esac
   exit 0
