@@ -2,13 +2,14 @@
 id: gap-scoped-gate-lpt-order
 title: scoped-gate（--for-task）路径复用 suite-lpt-order + suite-lpt-runner.mjs（LPT +
   run({files}) 保序）
-status: ready
+status: superseded
 labels:
   - gap
 parent: null
 children: []
 extra:
   schema: execution
+  superseded_reason: 撤回（人 2026-09-01 经 peer 转述「不作通用优化」）——实测：scoped 并发 = default_test_concurrency = 16（nproc 宿主派生），scoped 集抽样 19/20 任务 ≤16 文件 ⇒ 全文件同时起跑、墙钟 = 集里最长文件、无长尾可消 ⇒ LPT 对 scoped 是空操作（node --test 多文件并发 + 字母序重排也不影响，反正全并发）。scoped 118s 均值的真实主导是「集里最长文件」，真正速度杠杆是拆长文件（gap-suite-split-long-multi-test-files 已在做）。唯一条件化规则（集 >16 文件时才用 run({files}) 保序）暂不立案。
 ---
 **type:** execution
 
