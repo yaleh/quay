@@ -3,7 +3,7 @@ id: gap-retire-inner-session-check-script
 title: 退役 inner-session-check.sh——manager-adopt.sh 已切换新检查器后删旧脚本 +
   全部消费点/测试同步（quay-session/outer-loop-tick-split/quay-init-laydown-closure/orchestrator-loop-tick
   step3）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -40,9 +40,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，脚本已删且无死引用）：`plugin/scripts/inner-session-check.sh` 不存在；全仓 `grep -rn inner-session-check --include=*.ts --include=*.sh --include=*.md plugin/ orchestration/` 排除历史归档/SPEC 文档后为 0。⛔ 任何非豁免类活文件仍引用该文件名 ⇒ 假。
-- [ ] AC2（能取假，5 个消费点全部同步）：`quay-session.test.mjs`（成员列表+计数）、`outer-loop-tick-split.test.mjs`（list 条目）、`quay-init-laydown-closure.test.mjs`（数组+docstring）、`quay-init.sh`（铺设集）、`orchestrator-loop-tick.md`（双副本 step 3 措辞）均已改动且各自测试绿；⛔ 任一项未同步（原样断言旧文件名）⇒ 假。
-- [ ] AC3（能取假，无回归）：typecheck + 相关测试绿。
+- [x] AC1（能取假，脚本已删且无死引用）：`plugin/scripts/inner-session-check.sh` 不存在；全仓 `grep -rn inner-session-check --include=*.ts --include=*.sh --include=*.md plugin/ orchestration/` 排除历史归档/SPEC 文档后为 0。⛔ 任何非豁免类活文件仍引用该文件名 ⇒ 假。
+- [x] AC2（能取假，5 个消费点全部同步）：`quay-session.test.mjs`（成员列表+计数）、`outer-loop-tick-split.test.mjs`（list 条目）、`quay-init-laydown-closure.test.mjs`（数组+docstring）、`quay-init.sh`（铺设集）、`orchestrator-loop-tick.md`（双副本 step 3 措辞）均已改动且各自测试绿；⛔ 任一项未同步（原样断言旧文件名）⇒ 假。
+- [x] AC3（能取假，无回归）：typecheck + 相关测试绿。
 
 ## Definition of Done
 
@@ -59,4 +59,12 @@ extra:
 - plugin/scripts/quay-init.sh
 - plugin/loop/orchestrator-loop-tick.md
 - orchestration/orchestrator-loop-tick.md
+- plugin/loop/fast-mode-loop-tick.md
+- plugin/scripts/capability-catalog.sh
+- plugin/scripts/main-thread-edit-check.ts
+- plugin/scripts/outer-session-check.sh
+- plugin/scripts/session-liveness.sh
+- plugin/scripts/tmux-leak-scan.sh
+- docs/analysis/test-file-baseline.txt
+- .quay/suite-bucket-reattribution.jsonl
 - tasks/gap-retire-inner-session-check-script.md（自身）

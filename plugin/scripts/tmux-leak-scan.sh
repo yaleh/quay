@@ -180,7 +180,7 @@ fi
 if [ "$mode" = "sweep" ]; then
   # --sweep (gap-tmux-leak-scan-sweep-orphaned-servers): the CURE for the orphan class --check can
   # only DETECT. A SIGKILL'd/panicked suite leaves hermetic tmux servers on their private sockets
-  # (/tmp/quay-isc-* etc. — inner-session-check's os.tmpdir()-direct mkdtemp) with no teardown left
+  # (/tmp/quay-isc-* etc. — os.tmpdir()-direct mkdtemp) with no teardown left
   # to reap them (2026-08-29: pid 1406623 leaked 1h23m). Reuses scan_matches + prefixes (single
   # source of truth — sweep and scan never drift), but forces the LEGACY prefix scope: the run
   # namespace (/tmp/quay-run-<id>/) is empty at suite start (the runner's sweepRunNamespaces already

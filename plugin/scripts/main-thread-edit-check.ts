@@ -37,9 +37,8 @@
 //                      「最新」会话（多会话拓扑下会命中 manager/outer 自己；
 //                      gap-session-identity-index-vs-explicit，同根：
 //                      gap-drive-sent-to-manager-pane-not-inner 错读 b8dc91a6）。
-//                      原「pane pid → session 显式身份优先」反查（resolveViaInnerSessionCheck，
-//                      复用 inner-session-check.sh）已于 step2 删除——死回退分支，见
-//                      gap-retire-inner-hygiene-delete-session-face。
+//                      原「pane pid → session 显式身份优先」反查（resolveViaInnerSessionCheck）
+//                      已于 step2 删除——死回退分支，见 gap-retire-inner-hygiene-delete-session-face。
 //                      session_source ∈ config|arg|heuristic|none。测试接缝：
 //                      INNER_EXEC_MODE_PROJECTS_DIR 覆盖 projects 目录。
 
@@ -47,7 +46,6 @@ import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 
@@ -167,7 +165,7 @@ export function loadTranscript(sessionPath) {
  *   +1  记录 cwd 以 repoRoot 开头（cwd 探测，只看每个候选的前 CWD_PROBE_LINES 行）
  * 同分取 mtime 最新。
  * 自排除：selfSessionId（缺省 CLAUDE_CODE_SESSION_ID —— 调用方自己的会话）的
- * <id>.jsonl 不参与评分 —— 启发式不得命中「自己」（与 inner-session-check.sh 的
+ * <id>.jsonl 不参与评分 —— 启发式不得命中「自己」（与 outer-session-check.sh 的
  * discovery fallback 同纪律；gap-session-identity-index-vs-explicit）。
  */
 export function detectSession(repoRoot, projectsDir = defaultProjectsDir(), { selfSessionId = process.env.CLAUDE_CODE_SESSION_ID } = {}) {
@@ -231,10 +229,9 @@ export function detectSession(repoRoot, projectsDir = defaultProjectsDir(), { se
 }
 
 // ── 会话解析（缺省 --session 时的启发式兜底）──────────────────────────────────────────────────────────
-// 原「pane pid → session 显式身份优先」反查（resolveViaInnerSessionCheck，复用 inner-session-check.sh
-// 的 discovery-pid 结构解析）是死回退分支——inner-session-check.sh 判一个永不存在的 "inner" 窗口，
-// 已随 step2 删除（gap-retire-inner-hygiene-delete-session-face；脚本退役本身见
-// gap-retire-inner-session-check-script）。缺省 --session 只剩启发式兜底 + WARN。
+// 原「pane pid → session 显式身份优先」反查（resolveViaInnerSessionCheck，复用已退役的内层三态检查器
+// 的 discovery-pid 结构解析）是死回退分支——该检查器判一个永不存在的 "inner" 窗口，
+// 已随 step2 删除（gap-retire-inner-hygiene-delete-session-face）。缺省 --session 只剩启发式兜底 + WARN。
 
 /** 启发式 fallback 的 WARN 文案（显式身份缺失时，多会话拓扑下可能命中错误对象）。 */
 export function heuristicWarning(sessionPath) {
@@ -242,8 +239,7 @@ export function heuristicWarning(sessionPath) {
 }
 
 /**
- * 缺省会话解析：启发式兜底并报 WARN（显式身份优先的 pane pid → session 反查已随
- * inner-session-check.sh 退役删除）。
+ * 缺省会话解析：启发式兜底并报 WARN（显式身份优先的 pane pid → session 反查已退役删除）。
  * @param {string} repoRoot
  * @param {string} [projectsDir]
  * @param {{selfSessionId?: string}} [opts]

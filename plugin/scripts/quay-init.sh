@@ -935,8 +935,8 @@ validate_worktree_root() {
 #   (d) closure        — every script in the set that calls a SIBLING in the same dir
 #       (`${SCRIPT_DIR}/<name>` / `$SCRIPT_DIR/<name>`) pulls that sibling in, repeated to fixpoint.
 #       This is the dependency-closure invariant (铺了消费者必然铺依赖): send-keys-reliable.sh:41
-#       `CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"` and inner-session-check.sh:43 are the
-#       regression controls — before this, the laid-down delivery-verification was broken from first use.
+#       `CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"` is the
+#       regression control — before this, the laid-down delivery-verification was broken from first use.
 # Scripts that must NEVER auto-lay-down (the installer itself — it is the script doing the
 # laying down; send-keys-verified.sh was DELETED by gap-retired-script-still-callable, so it is
 # no longer an entry here — a superseded implementation must not exist, not merely not be laid):
@@ -1440,7 +1440,7 @@ verify_referenced_landed() {
   done
   # dependency-closure check (AC1/AC3): every LAID-DOWN script's same-dir sibling reference must be
   # laid down too — a script calling `${SCRIPT_DIR}/<sibling>` with the sibling absent is a broken
-  # mechanism (send-keys-reliable.sh:41 / inner-session-check.sh:43 → transcript-delivery-check.ts).
+  # mechanism (send-keys-reliable.sh:41 → transcript-delivery-check.ts).
   if [ -d "$ws/plugin/scripts" ]; then
     for script in "$ws"/plugin/scripts/*.sh; do
       [ -f "$script" ] || continue

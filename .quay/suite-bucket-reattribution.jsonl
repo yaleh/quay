@@ -66,7 +66,6 @@
 {"file":"plugin/test/inner-forensics.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/inner-idle-log.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/agent-panel-classify.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/inner-session-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/inner-wakeup-heartbeat-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/inner-wakeup-heartbeat.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/instrument-failure-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
