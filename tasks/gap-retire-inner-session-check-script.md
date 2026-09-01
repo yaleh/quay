@@ -3,7 +3,7 @@ id: gap-retire-inner-session-check-script
 title: 退役 inner-session-check.sh——manager-adopt.sh 已切换新检查器后删旧脚本 +
   全部消费点/测试同步（quay-session/outer-loop-tick-split/quay-init-laydown-closure/orchestrator-loop-tick
   step3）
-status: ready
+status: done
 labels:
   - gap
 parent: null
