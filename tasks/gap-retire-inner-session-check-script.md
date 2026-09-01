@@ -66,4 +66,5 @@ extra:
 - plugin/scripts/session-liveness.sh
 - plugin/scripts/tmux-leak-scan.sh
 - docs/analysis/test-file-baseline.txt
+- .quay/suite-bucket-reattribution.jsonl
 - tasks/gap-retire-inner-session-check-script.md（自身）
