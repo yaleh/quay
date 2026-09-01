@@ -1,7 +1,7 @@
 ---
 id: gap-observation-ac1-perf-threshold-relax
 title: observation.test.mjs AC1 性能阈值在并发 suite 负载下不稳定——放宽到「仍区分 8.8s 全遍历 vs 亚秒增量」量级
-status: todo
+status: ready
 labels:
   - gap
   - defect
