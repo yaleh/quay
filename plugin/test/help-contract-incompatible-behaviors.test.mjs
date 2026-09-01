@@ -13,8 +13,9 @@
 // This file pins three things, each able to take a false value:
 //   AC1 — every `-check.ts` exits 0 AND prints usage on `--help`; NEGATIVE CONTROL: running `--help`
 //         over all of them leaves the `.quay/` mtime set unchanged (a checker that writes on `--help`
-//         — as measure-trend-check did — fails this); resident-driver runtime files are excluded from
-//         the snapshot (gap-suite-help-contract-mtime-race: they tick independently, not on `--help`);
+//         — as measure-trend-check did — fails this); resident-process runtime files (driver + the
+//         full-suite runner itself) are excluded from the snapshot (gap-suite-help-contract-mtime-race:
+//         they tick independently, not on `--help`);
 //   AC2 — `ready-pool-check --help` no longer self-contradicts ("unknown flag: --help (run with
 //         --help)") — it prints normal usage and exits 0;
 //   AC3 — `measure-trend-check --help` does NOT append to .quay/measure-history.jsonl (hermetic:
@@ -54,13 +55,17 @@ function runHelp(checkerRel, extraArgs = []) {
   );
 }
 
-// Resident-driver runtime files (gap-suite-help-contract-mtime-race): promotion-driver / worker-driver
-// write these every tick — round/outcome heartbeats, the per-checker cost ledger, and control files —
-// plus supervisor/driver/liveness logs and pid files (driver-runtime.ts DRIVER_KINDS `prefix`/`carriers`/
-// `controlFile`). Their mtime moving during the sweep is resident-driver bookkeeping, NOT a checker's
-// `--help` side effect, so the AC1 negative control must not count it (driver active ⇒ stable false red,
-// killing every fan-in). ⛔ measure-history.jsonl is deliberately NOT excluded — measure-trend-check
-// appending it on `--help` is the EXACT side effect this test exists to catch (AC3 must not degrade).
+// Resident-process runtime files (gap-suite-help-contract-mtime-race) — written independently of any
+// checker's `--help`, so the AC1 negative control must not count their mtime movement (else driver/
+// suite active ⇒ stable false red, killing every fan-in). Two writers:
+//   (a) the resident promotion/worker drivers — round/outcome heartbeats, the per-checker cost ledger,
+//       control files, plus supervisor/driver/liveness logs and pid files (driver-runtime.ts DRIVER_KINDS
+//       `prefix`/`carriers`/`controlFile`);
+//   (b) the full-suite runner itself — its state file is MIRRORED into the tested checkout's own
+//       `.quay/full-suite-state.json` on every state transition (full-suite-runner.ts writeSuiteState),
+//       and its log/load-sampler/verification-round carriers land in the gate `.quay/`.
+// ⛔ measure-history.jsonl is deliberately NOT excluded — measure-trend-check appending it on `--help`
+// is the EXACT side effect this test exists to catch (AC3 must not degrade).
 const RESIDENT_DRIVER_FILES = new Set([
   "checker-cost.jsonl",       // per-checker/gate cost ledger (checker-cost.ts, appended by driver ticks)
   "promotion-round.jsonl",    // promotion-driver unconditional round heartbeat
@@ -71,18 +76,29 @@ const RESIDENT_DRIVER_FILES = new Set([
   "worker-control.json",      // worker-driver drain/resume control state
 ]);
 
-/** True when `relPath` is a resident-driver runtime file (never a checker `--help` side effect). */
-function isResidentDriverFile(relPath) {
+/** Suite-runner runtime files — written by full-suite-runner.ts, never by a checker `--help`. */
+const SUITE_RUNNER_FILES = new Set([
+  "full-suite-state.json",    // runner state, MIRRORED into the tested checkout on every transition
+  "full-suite.log",           // runner stdout/stderr tee
+  "verification-round.jsonl", // round duration ledger, appended on suite completion
+]);
+
+/** True when `relPath` is a resident-process runtime file (never a checker `--help` side effect). */
+function isNonCheckerRuntimeFile(relPath) {
   const base = path.basename(relPath);
-  if (RESIDENT_DRIVER_FILES.has(base)) return true;
-  // supervisor/driver/liveness log + pid files (driver-runtime.ts prefix ∈ {promotion-driver,
+  if (RESIDENT_DRIVER_FILES.has(base) || SUITE_RUNNER_FILES.has(base)) return true;
+  // (a) driver supervisor/driver/liveness log + pid files (driver-runtime.ts prefix ∈ {promotion-driver,
   // worker-driver}): <prefix>.(log|pid), <prefix>-supervisor.(log|pid), <prefix>-liveness.log,
   // <prefix>-inflight.pid.
-  return /^(promotion|worker)-driver(-(supervisor|liveness|inflight))?\.(log|pid)$/.test(base);
+  // (b) suite load sampler: suite-load-<runId>.jsonl (full-suite-runner.ts startLoadSampler).
+  return (
+    /^(promotion|worker)-driver(-(supervisor|liveness|inflight))?\.(log|pid)$/.test(base) ||
+    /^suite-load-.*\.jsonl$/.test(base)
+  );
 }
 
 /** Map of rel-path → `${mtimeMs}:${size}` for every FILE under `dir` (symlinks not followed),
- *  excluding resident-driver runtime files (which move independently of any checker `--help`). */
+ *  excluding resident-process runtime files (which move independently of any checker `--help`). */
 function snapshotMtimeSet(dir) {
   const out = new Map();
   const walk = (d) => {
@@ -103,7 +119,7 @@ function snapshotMtimeSet(dir) {
         walk(p);
       } else if (e.isFile()) {
         const rel = path.relative(dir, p);
-        if (isResidentDriverFile(rel)) continue; // resident-driver bookkeeping, not a checker side effect
+        if (isNonCheckerRuntimeFile(rel)) continue; // resident-process bookkeeping, not a checker side effect
         const st = fs.statSync(p);
         out.set(rel, `${st.mtimeMs}:${st.size}`);
       }
@@ -168,24 +184,29 @@ test("AC3: measure-trend-check --help does not append to measure-history.jsonl",
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test("mtime-race AC3 (negative control not degraded): driver-file exclusion still catches a real side effect", () => {
+test("mtime-race AC3 (negative control not degraded): resident-process file exclusion still catches a real side effect", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "help-contract-mtime-"));
   try {
-    // A .quay/-shaped dir holding resident-driver files AND a business file. The business file is what a
-    // real checker `--help` side effect would touch (e.g. measure-history.jsonl — deliberately NOT excluded).
+    // A .quay/-shaped dir holding resident-process files (driver + suite runner) AND a business file.
+    // The business file is what a real checker `--help` side effect would touch (e.g. measure-history.jsonl
+    // — deliberately NOT excluded).
     fs.writeFileSync(path.join(tmp, "checker-cost.jsonl"), "x\n");
     fs.writeFileSync(path.join(tmp, "promotion-round.jsonl"), "x\n");
     fs.writeFileSync(path.join(tmp, "worker-driver-liveness.log"), "x\n");
+    fs.writeFileSync(path.join(tmp, "full-suite-state.json"), "x\n");
+    fs.writeFileSync(path.join(tmp, "suite-load-mfi-x-123-abc.jsonl"), "x\n");
     fs.writeFileSync(path.join(tmp, "measure-history.jsonl"), "x\n");
     const before = snapshotMtimeSet(tmp);
 
-    // A resident-driver tick appends to its own files — must be invisible to the diff (excluded).
+    // A resident-process tick appends to its own files — must be invisible to the diff (excluded).
     fs.appendFileSync(path.join(tmp, "checker-cost.jsonl"), "y\n");
     fs.appendFileSync(path.join(tmp, "promotion-round.jsonl"), "y\n");
     fs.appendFileSync(path.join(tmp, "worker-driver-liveness.log"), "y\n");
-    assert.deepEqual(diffMtimeSet(before, snapshotMtimeSet(tmp)), [], "driver-tick mtime changes must be excluded");
+    fs.appendFileSync(path.join(tmp, "full-suite-state.json"), "y\n");
+    fs.appendFileSync(path.join(tmp, "suite-load-mfi-x-123-abc.jsonl"), "y\n");
+    assert.deepEqual(diffMtimeSet(before, snapshotMtimeSet(tmp)), [], "resident-process tick mtime changes must be excluded");
 
-    // A real `--help` side effect (a non-driver file) must still be caught — exclusion is not over-broad.
+    // A real `--help` side effect (a non-runtime file) must still be caught — exclusion is not over-broad.
     fs.appendFileSync(path.join(tmp, "measure-history.jsonl"), "y\n");
     const changed = diffMtimeSet(before, snapshotMtimeSet(tmp));
     assert.ok(changed.some((c) => c.startsWith("measure-history.jsonl")), "checker side effect must still be caught");
