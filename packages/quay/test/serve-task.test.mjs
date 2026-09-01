@@ -16,7 +16,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { handleTaskList, handleTaskDetail } from "../src/serve-task.ts";
-import { readTaskStatusMapAtRef, readTaskStatusAtRef, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, clearTaskStatusRefCache } from "../src/observation.ts";
+import { readTaskStatusMapAtRef, readTaskStatusAtRef, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, refreshDevelopRefCaches, resetSingleTaskGitSpawnCount, getSingleTaskGitSpawnCount, clearTaskStatusRefCache } from "../src/observation.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC_DIR = path.join(__dirname, "..", "src");
@@ -253,6 +253,47 @@ test("AC3 — divergence marker renders when disk ≠ develop (status or title),
     assert.match(detail, /data-divergence="status"> ⚠ disk:ready/, "AC3: detail status marker names the disk value");
     assert.match(detail, /data-divergence="title"> ⚠ develop:develop title a/, "AC3: detail title marker names the develop value");
     assert.doesNotMatch(detail, /\[ready\]/, "AC3: detail displayed status is develop done, the stale ready is only the marker");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── gap-tasks-page-develop-ref-full-history-git-log-cost (AC3) ─────────────────────────────────────
+// The detail page's single-task reads (readTaskAtRefMeta / readTaskCommitTimeAtRef) must reuse the
+// batch cache maintained by the list page / background refresh: a cache hit spawns ZERO git
+// subprocesses; a task not yet in the cache (fresh on disk, never committed to develop) still degrades
+// to the single-task git read (existing semantics unchanged).
+
+test("AC3 — /task/<id> detail reuses the batch cache: cache hit spawns 0 git; uncovered task degrades to a single-task read", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "detail-cache-"));
+  try {
+    const tasksDir = path.join(root, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    git("init", "-b", "develop", "-q", ".");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    fs.writeFileSync(path.join(tasksDir, "gap-stale.md"), "---\nid: gap-stale\ntitle: develop title\nstatus: done\n---\n## Proposal\nbody\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "develop state");
+
+    // Warm the batch caches (the background refresh path).
+    clearTaskStatusRefCache();
+    refreshDevelopRefCaches(root, "develop");
+
+    // Cache hit: gap-stale is in all three caches → the detail page reads them with ZERO git spawns.
+    resetSingleTaskGitSpawnCount();
+    const body = await renderDetail(root, "gap-stale", task("gap-stale", "ready"));
+    assert.equal(getSingleTaskGitSpawnCount(), 0, "AC3: cache-covered detail page spawns 0 new git subprocesses");
+    assert.match(body, /\[done/, "AC3: cache-covered detail page still renders the develop status (from cache, not git)");
+
+    // Cache miss: gap-disk-only exists only on disk (never committed to develop) → the detail page
+    // falls back to the single-task git read (git show / git log -1 both miss → disk fallback).
+    fs.writeFileSync(path.join(tasksDir, "gap-disk-only.md"), "---\nid: gap-disk-only\nstatus: ready\n---\n## Proposal\nbody\n");
+    resetSingleTaskGitSpawnCount();
+    const diskOnly = await renderDetail(root, "gap-disk-only", task("gap-disk-only", "ready"));
+    assert.ok(getSingleTaskGitSpawnCount() >= 1, "AC3: an uncovered task still spawns the single-task git read (existing semantics unchanged)");
+    assert.match(diskOnly, /\[ready/, "AC3: an uncovered task renders its disk status (fail-open, not dropped)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
