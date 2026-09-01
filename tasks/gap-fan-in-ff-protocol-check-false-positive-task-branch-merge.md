@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-ff-protocol-check-false-positive-task-branch-merge
 title: fan-in-ff-protocol-check 判据2a 误判 task/ 特性分支 merge 进 main/manager-doc 为非-ff fan-in（regex 不区分目标分支）
-status: todo
+status: ready
 labels:
   - gap
   - defect
