@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-taskcard-multistatus-minitable
 title: dashboard taskCard 升级为按状态分栏的可展开迷你表（依据48h访问日志：/tasks 单小时78次跨状态整页巡检）
-status: ready
+status: done
 labels:
   - gap
   - webui
