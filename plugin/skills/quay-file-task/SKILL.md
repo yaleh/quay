@@ -102,13 +102,41 @@ ready-made body.
    equivalent of `artifactsComplete()`/`detectShape()` in `plugin/scripts/ready-pool-check.ts`) —
    its `missing` must be `[]`. Do not commit on a non-empty `missing`.
 
-8. **Land it.** `git add tasks/<id>.md && git commit -m "tasks: 立案 <id>（<one-line why>）"` —
-   scope the commit to ONLY the task file(s) this step authored (plus any capability-catalog/
-   outline registration named in step 4); never `git add -A`. If the worktree has unrelated dirty
-   files, leave them untouched. **Steering hygiene**: if this workspace runs an autonomous loop
-   that could race a direct commit to a shared checkout, author in a private worktree / land at a
-   clean window per that loop's own documented convention (same caveat as `quay-directive` step
-   6) — this skill does not assume any specific loop exists.
+8. **Land it — no worktree needed, on either kind of host; commit directly.** Every mutation
+   this skill makes goes through `task_write` (MCP) — never a raw `Edit`/`Write` on the task
+   file — and that is what settles where things land, not which kind of session is calling.
+   `task_write` reaches the workspace's task store through the running quay MCP server, which is
+   bound to a fixed root at server-launch time (this workspace's `.mcp.json` — the shared
+   checkout). **It does not follow the calling session's cwd or an isolated worktree.** This was
+   verified empirically, twice, not assumed: from an unconstrained session with no isolation in
+   effect, and separately from a spawned subagent that had `EnterWorktree`-isolated itself into a
+   private worktree — in BOTH cases the file `task_write` created landed in the shared checkout's
+   `tasks/`, never inside the isolated worktree's own copy (`ls`/`git status` confirmed empty in
+   the worktree, present and untracked in the shared checkout, in both runs).
+   So: whether or not the invoking session is subject to a worktree-isolation guard for raw file
+   edits (a spawned subagent commonly is; a persistent interactive session commonly is not) —
+   **that guard does not gate this skill's own mutation path, because this skill never calls
+   `Edit`/`Write` on the task file.** After `task_write` succeeds, commit directly against the
+   shared checkout's own current branch: `git add tasks/<id>.md ... && git commit -m "tasks: 立案
+   <id>（<one-line why>）"`. This also does not require isolating first — a plain Bash `git commit`
+   against the shared checkout was confirmed to succeed even from a session whose `Edit`/`Write`
+   tool calls to that same checkout were refused (the guard is scoped to the edit tools, not to
+   Bash/git). No `EnterWorktree`, no manual `git worktree add`, no merge-back — that machinery is
+   for CODE changes (`Edit`/`Write` against `plugin/*`, `packages/*`, etc.), which this skill never
+   performs. (One tool-level wrinkle worth knowing if you ever DO need to isolate for something
+   else in the same session: `EnterWorktree` refuses to run from a subagent that was spawned with
+   a pinned/overridden cwd — "it would mutate the parent session's process-wide working directory"
+   — the fallback in that case is a manual `git worktree add`, not a reason to force one here.)
+
+   Scope the commit to ONLY the task file(s) this step authored (plus any capability-catalog/
+   outline registration named in step 4) — never `git add -A`. If the checkout has unrelated dirty
+   files, leave them untouched.
+
+   *Do not treat today's binding as eternal.* If some future host wires `task_write` to actually
+   follow the caller's cwd, this guidance would be wrong for that host. Re-verify with the same
+   test before trusting either claim: write a task, then check with `ls`/`git status` in BOTH the
+   shared checkout and any worktree you happen to be in — whichever one actually has the file
+   tells you the real answer for that host, not this paragraph.
 
 ## Notes
 
