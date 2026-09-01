@@ -1,7 +1,7 @@
 ---
 id: gap-retire-inner-session-hygiene-scripts
 title: B/C 组 inner 会话卫生脚本退役——先迁活 helper 再删 --detect-stop/--pane/tmux-Monitor 挂载/落盘/main_thread_edits/wakeup-heartbeat 面，同步 catalog/测试
-status: needs-human
+status: superseded
 labels:
   - gap
   - defect
@@ -9,6 +9,8 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded_by: gap-retire-inner-hygiene-migrate-helper
+  superseded_reason: 3 连 ENL 失败面各异（anti-drift 漏 doc-marking/shipped-doc 同步 → scoped-gate test-isolation 漏 fixed-path-write 清理 → suite red 漏 suite-bucket-reattr-ratchet + blocked-signal 测试涟漪），Touches 20 文件 + 6 消费点 + 5 面同步，复杂度超单 worker。人 2026-09-01 裁定 A：拆 3 个依赖子任务（gap-retire-inner-hygiene-migrate-helper → gap-retire-inner-hygiene-delete-session-face → gap-retire-inner-hygiene-catalog-tests），每单面 scope 小。
 ---
 
 ## Proposal
