@@ -46,6 +46,15 @@ ts-ization 方向已定（`gap-execution-loop-p4-suite-entry-ts-ization` done：
 ## Touches
 
 - plugin/scripts/suite-scheduler.ts（输入契约改原始文件列表；内部分类+LPT）
-- plugin/scripts/runner-grouping.ts（bash 函数 ts-ize 为真 TS，或并入 suite-scheduler.ts 后删除 bash 版）
+- plugin/scripts/runner-grouping.ts（bash 函数 ts-ize 为真 TS）
 - scripts/test.sh（薄转发：删 lpt_reorder_files + runner-grouping source + 3 套 dispatch）
+- plugin/scripts/capability-catalog.sh（同步 suite-scheduler 描述）
+- plugin/scripts/suite-bucket-hub-list.ts（同步分类/LPT 描述）
+- plugin/scripts/test-group-downgrade-check.ts（gitTargetFiles 改用声明组语义——body 内 @test-group serial/lowconc 字面量不再误判为降级）
+- plugin/test/suite-scheduler.test.mjs（结构 pin 更新）
+- plugin/test/suite-lpt-order.test.mjs（结构 pin 更新）
+- plugin/test/suite-bucket-load-sensitive-isolation.test.mjs（结构 pin 更新）
+- plugin/test/test-phases-order.test.mjs（结构 pin 更新）
+- plugin/test/runner-grouping-serial-anti-stomp.test.mjs（结构 pin 更新）
+- plugin/test/select-tests-for-touches.test.mjs（结构 pin 更新）
 - tasks/gap-suite-classification-lpt-scheduler-ts-ization.md（自身）
