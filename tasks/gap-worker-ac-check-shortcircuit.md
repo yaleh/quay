@@ -33,6 +33,7 @@ extra:
 
 - plugin/scripts/worker-driver.ts（finishAsync 短路）
 - plugin/test/worker-driver-fan-in.test.mjs（worker-driver fan-in 相关测试）
+- plugin/test/worker-driver.test.mjs（AC1 exit-0-not-landed 测试回归：gap-wt 任务体补全勾 AC/DoD）
 - tasks/gap-worker-ac-check-shortcircuit.md（自身）
 
 ## Needs-Human
