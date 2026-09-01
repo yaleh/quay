@@ -1,7 +1,7 @@
 ---
 id: gap-retire-inner-hygiene-migrate-helper
 title: inner 会话卫生退役 step1——迁活 helper 到非 inner 名（纯迁移不删），6 消费点 import 改指向
-status: ready
+status: done
 labels:
   - gap
 parent: null
