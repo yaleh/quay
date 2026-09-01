@@ -1,7 +1,8 @@
 ---
 id: gap-worker-driver-resident-loop-intermittent-hang
-title: worker-driver 驻留环间歇挂起——liveness 后停在派发环前，round/outcome 不写（worker-driver-fan-in 测试 flaky 根因）
-status: needs-human
+title: worker-driver 驻留环间歇挂起——liveness 后停在派发环前，round/outcome
+  不写（worker-driver-fan-in 测试 flaky 根因）
+status: ready
 labels:
   - gap
   - defect
@@ -55,3 +56,19 @@ extra:
 
 - 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
 - 失败步/判词：step=suite: suite red
+
+## 补充处置（人裁定 2026-09-01）
+
+三次「suite red」逐一核实（三个 worker session transcript + worktree 内保留的原始 suite log 交叉核对）：
+
+1. **尝试 1**：原始 log 被同 `.quay/` 路径下尝试 2 覆盖，未能复原具体失败点。
+2. **尝试 2**：仅 1 个失败，`writestate-atomicity-split.test.mjs:111` 负控制断言——已知的、load-sensitive 负控制 flake，是另一条已 done 姊妹任务（`gap-writestate-atomicity-liveness-assertion-flaky`）的同类问题，完全在本任务 `## Touches` 之外。
+3. **尝试 3**：11 个互不相关的失败（`.quay` mtime race——另一条 `needs-human` 任务 `gap-suite-help-contract-mtime-race` 的已知问题、多处 "inner claude child must be alive"、`spawnSync ETIMEDOUT`、又一次 torn-write 负控制），全是典型的 CPU 耗尽下进程活性/时序断言崩坏。
+
+三次负载采样：loadavg 均值 18–24（16 核机），PSI `cpu_stall` 均值 35–44%、峰值 64–73%；尝试 3 期间另有 `gap-scoped-gate-lpt-order` 同时在跑同样的全量 16-lane suite，两个全量 suite 抢同一台机的 CPU。
+
+**本任务自身改动从未红过**：三次 worker 各自把 `## Touches` 内文件在隔离环境跑绿（尝试 1：49/49 + 之前 flaky 那对连跑 20 次 0 失败；尝试 2：49/34/46 全绿 + flaky 测试单独隔离跑 5/5）；`worker-driver-fan-in.test.mjs`（本任务要修的目标）三次「suite red」判词里一次都没出现。
+
+**结论**：三次 needs-human 翻转是重试上限误伤——机制正确执行（连续 3 次不合格触发），但三次不合格的成因是宿主资源争用下的既有 flaky 点，与本任务改动无关、代码层面已正确落地。**needs-human → ready 重派**，非代码缺陷、无需人工改代码介入。worktree（`c94693487`，已含 AC2/AC3 时序加固提交）保留复用。
+
+若要根治，「同时段多任务并发跑全量 suite 互相拖累」是一个值得单独立案的资源争用问题（未在本任务范围内处理）。

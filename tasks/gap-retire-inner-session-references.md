@@ -2,7 +2,7 @@
 id: gap-retire-inner-session-references
 title: inner 会话（tmux 窗口）已由 *-driver 取代——全量清 inner 拓扑引用 + profiles.yml
   roles.inner（quay-topology.sh:72 只是表象）
-status: done
+status: ready
 labels:
   - gap
   - defect
@@ -11,6 +11,8 @@ children: []
 extra:
   schema: execution
 ---
+> **RETREATED / 搁置（②类豁免清单第 1 条过度宽：把 B 组（inner 会话卫生：monitor-mount/--pane/--detect-stop/exec-mode/wakeup-heartbeat）混进「①类 inner 层」，与 AC148 判②矛盾；裁决以 AC148 为准（②），B/C 组测试退役补入 scope）**
+
 **type:** execution
 
 ## Proposal
@@ -37,14 +39,14 @@ inner 层已由 `*-driver`（worker-driver 等后台常驻进程）取代，不�
 
 ## Acceptance Criteria
 
-- [x] AC1（能取假，工厂只建 outer）：`quay-topology.sh --dry-run` 只产生 outer 窗口，不产生 inner 窗口。
+- [ ] AC1（能取假，工厂只建 outer）：`quay-topology.sh --dry-run` 只产生 outer 窗口，不产生 inner 窗口。
   - 实测：`bash plugin/scripts/quay-topology.sh --session ac1-test --dry-run` → `would-create-session … -n outer` + `would-create (first window): ac1-test:outer` + `topology done: ac1-test (outer )`，输出无 `inner`。
-- [x] AC2（能取假，②类引用清零）：全仓 grep ②类 inner 拓扑/窗口/会话引用 = 0（①类 inner 层引用与历史归档/SPEC 文档豁免，实现方列豁免清单留理由）——⛔ 非「改 :72 一处」。
+- [ ] AC2（能取假，②类引用清零）：全仓 grep ②类 inner 拓扑/窗口/会话引用 = 0（①类 inner 层引用与历史归档/SPEC 文档豁免，实现方列豁免清单留理由）——⛔ 非「改 :72 一处」。
   - ②类已清：quay-topology.sh / topology-check.sh / session-bootstrap.sh / manager-adopt.sh / quay-launch.sh / verify-deliver-coldstart.sh / verify-delivery-surface.ts / capability-catalog.sh / checker-mutation-cases/no-manager-tick-doc-check.sh / no-manager-tick-doc-check.ts / supervisor-bus.sh / productization-verification-record.ts / 两份 profiles.yml / 9 个测试（session-topology / session-bootstrap / manager-layer-shipping / profile-policy / launch-settings / inner-session-check / quay-init / no-manager-tick-doc-check / verify-deliver-coldstart——quay-init 是 roles.inner 删除的涟漪「断言 quay-inner 存在→不存在」；其余是「双层窗口 pane」等注释/夹具的兄弟②类，同硬规则 5b）。
   - 豁免清单见文末「## ②类豁免清单（AC2）」。⛔ 注意：`plugin/scripts` 下仍大量「inner」命中，**全部是 ①类 inner 层引用**（inner-blocked-signal / inner-exec-mode-report / inner-wakeup-heartbeat / slot-refill / session-liveness / cap-from-gate 等——inner 层 = *-driver 仍存在），非 inner 窗口/拓扑/会话。
-- [x] AC3（能取假，校验不漂移）：`topology-check.sh` 对单窗口 outer 拓扑校验通过（不再因缺 inner 窗口而红）。
+- [ ] AC3（能取假，校验不漂移）：`topology-check.sh` 对单窗口 outer 拓扑校验通过（不再因缺 inner 窗口而红）。
   - 实测：单窗口 outer+claude ⇒ `{"ok":true,"windows":{"outer":"ok"}}` exit 0；无 outer 窗口 ⇒ `{"ok":false,"windows":{"outer":"missing"}}` exit 1。ROLES 已与工厂一致（均 `"outer"`）。
-- [x] AC4（能取假，profiles 清干净）：`.quay/profiles.yml` 与 `plugin/.quay/profiles.yml` 均无 `roles.inner`；`quay-launch.sh inner` 无活调用点（或调用点已同步删）。
+- [ ] AC4（能取假，profiles 清干净）：`.quay/profiles.yml` 与 `plugin/.quay/profiles.yml` 均无 `roles.inner`；`quay-launch.sh inner` 无活调用点（或调用点已同步删）。
   - 实测：两份 profiles.yml 均无 `roles.inner`（`grep -n inner` 仅剩「SPEC-worker-driven-inner §4④」这个 SPEC 文档名引用，①类）。`quay-launch.sh inner --dry-run` ⇒ `ERROR: role 'inner' not defined … available roles: fix-worker, manager, outer, pool-judge, selector, task-worker`。`quay-launch.sh inner` 的活调用点仅剩 SKILL/loop 文档（豁免类）。
 
 ## Definition of Done
@@ -64,6 +66,20 @@ AC2 要求「全仓 grep ②类 inner 拓扑/窗口/会话引用 = 0，①类 + 
 4. **tmux-drive 保留机制（豁免，理由=CLAUDE.md 明示「旧机件保留可用但非默认路径」）**：`drive-target-check.sh` / `supervisor-deliver.sh` / `send-keys-reliable.sh` / `inner-panel-stale-check.ts` / `manager-observation-runtime-check.ts` 里的 `quay-0:inner` —— 是「驱动/观测一个命名窗口」的纪律示例（控制面通道），不是拓扑定义。
 
 **deferred 且未改动、仍在 Touches 清单内的文件**：`plugin/scripts/inner-session-check.sh`（保留）、`plugin/scripts/quay-session.ts`（其 `inner-session-check` member 随脚本保留，无②改动）。
+
+## 裁决（2026-09-01 补——①/② 分类矛盾）
+
+本条 ②类豁免清单第 1 条把 `inner-blocked-signal.ts` / `inner-exec-mode-report.ts` / `inner-panel-stale-check.ts` / `inner-wakeup-heartbeat{,-check}.ts` / `inner-forensics.mjs` / `inner-idle-log.ts` 判「①类 inner 层引用，豁免不动」，与 AC148（`orchestration/AC148-inner-core-itemized-attribution.md`，done）对同一批的判定**直接相反**——AC148 判 ②随会话消失：A2（monitor-mount-check.sh）、A7（tmux capture-pane → inner-blocked-signal --detect-stop）、A8（inner-panel-stale-check --pane）、A24（inner-exec-mode-report main_thread_edits/agent_dispatches）、B3（inner-wakeup-heartbeat{,-check}）。
+
+**裁决：以 AC148 为准（②）**。①「inner 层 = *-driver 仍存在」只对【被 *-driver 实际消费】的机件成立（slot-refill / cap-from-gate / session-liveness 等）；B 组这批是【inner 会话/窗口/pane 的会话卫生】，inner 会话已退役（人 2026-09-01 裁定「inner 已退役机制，应退役其测试」），--pane/--detect-stop/main_thread_edits/wakeup-heartbeat 无对象。本条 line 58 把「会话卫生」和「inner 层」两类不同机件压进一个词 = 过度宽豁免。
+
+**随裁决补入 scope（②类，本应清未清）**：
+- B 组：monitor-mount-check.sh、inner-blocked-signal.ts --detect-stop、inner-panel-stale-check.ts --pane、inner-exec-mode-report.ts、inner-wakeup-heartbeat{,-check}.ts（+ 各自测试）。
+- C 组（连锁，保留理由建立在 B 组①前提上）：inner-session-check.sh（保留理由「被 inner-exec-mode-report.ts 复用」随后者判②而失效）、inner-idle-log.test.mjs、inner-forensics.test.mjs。
+
+**附带**：capability-catalog.sh 里这批脚本 CADENCE 仍标「每轮」、LAST_REAFFIRMED 停 2026-08-10（早于 AC148/149）——裁定从未同步进唯一清单，退役时须同步 catalog 六表。
+
+⛔ **范围限定**：人 2026-09-01 另裁定「outer 暂不退役」——这只推翻 AC149 的 outer 半边，**不推翻 inner 退役**。本条 B/C 组②类裁决只涉及 inner 会话/窗口/测试，不受 outer 裁定影响。
 
 ## Touches
 
