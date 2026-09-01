@@ -319,6 +319,37 @@ test("AC1 — markNeedsHuman commits the flipped task file (⛔ 翻转后 git st
   assert.match(git(root, "log", "--oneline", "-1"), /needs-human/, "the flip is a commit in the log");
 });
 
+// ── 首次登记判定（gap-promotion-commit-message-misleading-on-first-track）────────────────────────────
+
+test("markNeedsHuman never-committed file → 首次登记 message, not 机械翻转 (AC3)", (t) => {
+  const root = makeGitRoot("nh-firstreg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 文件写盘但【不提交】——本次 needs-human 提交就是它在 git 里的诞生提交，谈不上「翻转」。
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: todo\n---");
+
+  const res = markNeedsHuman(root, "gap-nh", "worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）");
+  assert.equal(res.ok, true);
+  assert.equal(res.committed, true, "commit lands even though the file was never tracked");
+  const subject = git(root, "log", "-1", "--format=%s").trim();
+  assert.match(subject, /首次登记/, "first-registration wording for a never-committed file");
+  assert.doesNotMatch(subject, /机械翻转|翻转/, "⛔ must not claim a flip that never happened");
+  assert.match(subject, /status=needs-human/, "records the status it landed with");
+});
+
+test("markNeedsHuman already-committed file → keeps 重试上限机械翻转 (AC3 negative control)", (t) => {
+  const root = makeGitRoot("nh-realtracked");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: todo\n---");
+  git(root, "add", "--", "tasks/gap-nh.md");
+  git(root, "commit", "-q", "-m", "baseline");
+
+  const res = markNeedsHuman(root, "gap-nh", "reason");
+  assert.equal(res.committed, true);
+  const subject = git(root, "log", "-1", "--format=%s").trim();
+  assert.match(subject, /重试上限机械翻转/, "real flip keeps the original wording (negative control)");
+  assert.doesNotMatch(subject, /首次登记/, "tracked file is not labeled first-registration");
+});
+
 test("AC2 — commit is pathspec-limited: a pre-staged unrelated file stays staged (⛔ 裸 commit 扫共享索引 ⇒ 假)", (t) => {
   const root = makeGitRoot("ac2");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

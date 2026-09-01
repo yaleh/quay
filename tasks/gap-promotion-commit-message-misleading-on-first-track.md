@@ -43,16 +43,16 @@ promotion-driver 下一次 tick（~40s 周期）抢先扫到该文件并判定�
 
 ## AC
 
-- [ ] `commitTaskStatus`（`ready-pool-check.ts`）在拼接 commit message 前，对目标 `tasks/<id>.md`
+- [x] `commitTaskStatus`（`ready-pool-check.ts`）在拼接 commit message 前，对目标 `tasks/<id>.md`
       执行一次"此前是否已有 git 提交历史"的判断（如 `git log -1 --format=%H -- <rel>` 空输出即未
       跟踪），且该判断的返回值真实驱动两种不同文案的选择——静态读代码可见分支，非事后描述。
-- [ ] `driver-filters.ts:690` 附近的 needs-human 机械翻转提交同样加上同款判断，不得只修
+- [x] `driver-filters.ts:690` 附近的 needs-human 机械翻转提交同样加上同款判断，不得只修
       `commitTaskStatus` 一处遗漏这里（硬规则 5b，本任务在立案时就已在同一份 Finding 里指名两处）。
-- [ ] 新增/扩展单测：构造一个"文件从未提交过、直接调用 commitTaskStatus 落 ready"的场景，断言产出
+- [x] 新增/扩展单测：构造一个"文件从未提交过、直接调用 commitTaskStatus 落 ready"的场景，断言产出
       的 commit message 不含"机械晋升"/"翻转"字样，改为"首次登记"一类如实措辞；另构造一个"文件此前
       已有提交、真实 todo→ready"的场景，断言仍沿用原有"机械晋升"文案（负控制，防止修复矫枉过正把
       真实翻转也误标）。
-- [ ] `scripts/test.sh` 全量绿（含新增用例）。
+- [ ] `scripts/test.sh` 全量绿（含新增用例）（待外部）
 
 ## DoD
 

@@ -2410,6 +2410,38 @@ test("applyPromotions commits the status write — git status clean + committed 
   assert.equal(subject, "tasks: gap-candidate todo→ready（promotion-driver 机械晋升）", "the commit subject names the task and transition");
 });
 
+test("applyPromotions never-committed file → 首次登记 message, not 机械晋升 (AC3, gap-promotion-commit-message-misleading-on-first-track)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-firstreg-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  // Baseline: only the ready tasks are committed. The todo candidate is written AFTER the baseline,
+  // so it sits on disk but is never tracked by git — its promotion commit is the file's BIRTH commit
+  // (the exact case the Proposal names: 会话先写盘未提交, driver 抢先扫到并晋升 ⇒ 诞生提交被误标「机械晋升」).
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "init");
+  assert.equal(git("log", "--oneline", "--", "tasks/gap-candidate.md").trim(), "", "candidate is not yet tracked (birth commit has not happened)");
+  writeTask(root, "gap-candidate", gapTask("gap-candidate")); // untracked todo
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+  const r = applyPromotions(opts);
+  assert.equal(r.should_apply, true);
+  assert.equal(r.applied_promotions.length, 1);
+  assert.equal(r.applied_promotions[0].id, "gap-candidate");
+  assert.equal(r.applied_promotions[0].committed, true, "the birth commit lands");
+
+  const subject = git("log", "-1", "--format=%s");
+  assert.doesNotMatch(subject, /机械晋升|翻转/, "⛔ must not claim a todo→ready flip that never happened");
+  assert.match(subject, /首次登记/, "first-registration wording for a never-committed file");
+  assert.match(subject, /status=ready/, "records the status it landed with");
+});
+
 // ── DETACH PROPAGATION (gap-fan-in-ff-ref-update-detach-develop AC6 → gap-doc-develop-sync-…-resolution) ──
 // The main checkout sits on a doc-only work branch (main/manager-doc) while develop is bare (the
 // detach). A promotion flip committed on the doc branch must reach develop — fast-forward push —

@@ -163,7 +163,7 @@ import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
 // AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（depsSatisfied 谓词同一份实现，
 // ⛔ 不各写一遍「逐个查 status !== done」的循环）。
-import { allDepsDone, commitTaskFile, syncDocDevelopBidirectional } from "./driver-filters.ts";
+import { allDepsDone, commitTaskFile, hasPriorCommit, syncDocDevelopBidirectional } from "./driver-filters.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
 // criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
@@ -2534,7 +2534,13 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
  */
 function commitTaskStatus(root, id, from, to) {
   const rel = path.join("tasks", `${id}.md`);
-  const committed = commitTaskFile(root, rel, `tasks: ${id} ${from}→${to}（promotion-driver 机械晋升）`);
+  // FIRST-REGISTRATION JUDGMENT (gap-promotion-commit-message-misleading-on-first-track)：目标文件此前
+  // 从未提交（本次提交是其 git 诞生提交，谈不上 todo→ready「翻转」）⇒ 如实标「首次登记」，不得沿用
+  // 暗示翻转发生过的「机械晋升」措辞。已有提交历史 ⇒ 真实翻转，沿用原有文案。
+  const message = hasPriorCommit(root, rel)
+    ? `tasks: ${id} ${from}→${to}（promotion-driver 机械晋升）`
+    : `tasks: ${id} 首次登记（status=${to}，promotion-driver 机械落盘）`;
+  const committed = commitTaskFile(root, rel, message);
   return committed;
 }
 
