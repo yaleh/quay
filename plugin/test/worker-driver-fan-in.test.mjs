@@ -108,6 +108,7 @@ import {
   appendFanInStepTrace,
   spawnMechanicalFanIn,
   readFanInLockHold,
+  readPreviousGreenSuiteCommit,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
@@ -1364,4 +1365,183 @@ test("AC1 (gap-write-suite-capture-non-blocking) — capture 写失败（父目�
   assert.equal(r.outcome, "landed", `capture write failure must fail-open (fan-in lands, ⛔ not red) — step=${r.step} reason=${r.reason}`);
   assert.equal(r.suiteOutcome, "done", "the suite itself must still be green");
   assert.ok(!fs.existsSync(badCapture), "the capture path is genuinely unwritable (no capture file written)");
+});
+
+// ── gap-worker-driver-resident-loop-intermittent-hang：驻留环错误边界 ────────────────────────────────
+// 根因：runResidentLoop 循环体无 try/catch——任何一步瞬时抛错（负载下偶发 fs/git/spawn 异常）⇒ 未处理
+// rejection ⇒ 驱动静默死掉，.quay/ 只剩 liveness log、round/outcome 停写（与「一切正常」同形，硬规则
+// 3b/4b）。修法：循环体每步记 step + try/catch，抛错 ⇒ 写 action=error 的 round 记录（error_step +
+// stop_reason 指到步骤，AC1 定位）+ resident-error 事件 + sleep 后继续（瞬时错误自愈，⛔ 不静默停摆）。
+// AC3 生产 round 无停写窗口 = error round 仍写 worker-round.jsonl（与正常 round 同载体）。
+
+test("computeWorkerRoundRecord action=error carries error/error_step（AC1 定位 + 记录形状，⛔ 与「无错」混淆）", () => {
+  const rec = computeWorkerRoundRecord({
+    round: 7,
+    runId: "r",
+    pid: 123,
+    at: "2026-09-01T00:00:00.000Z",
+    action: "error",
+    inFlight: 0,
+    pool: 1,
+    stopReason: "error (step=ready-pool): boom",
+    error: "boom",
+    errorStep: "ready-pool",
+    liveness: { checked: true, deaths: null, running: true },
+    coldStartInflight: [],
+  });
+  assert.equal(rec.action, "error");
+  assert.equal(rec.error, "boom");
+  assert.equal(rec.error_step, "ready-pool");
+  assert.match(rec.stop_reason, /step=ready-pool/);
+  // 正常 round 无 error 字段 ⇒ null（⛔ 缺键与 null 可区分——error round 有该字段且非 null）。
+  const normal = computeWorkerRoundRecord({
+    round: 8, runId: "r", pid: 123, at: "t",
+    action: "idle", inFlight: 0, pool: 0, stopReason: null, coldStartInflight: [],
+  });
+  assert.equal(normal.action, "idle");
+  assert.equal(normal.error, null);
+  assert.equal(normal.error_step, null);
+});
+
+test("AC1 (能取假) — 驻留环错误边界在源：循环体有 step-trace + try/catch + writeErrorRound（⛔ 无边界 ⇒ 抛错静默死）", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  // 错误边界：catch 写 error round + resident-error 事件。
+  assert.match(src, /catch \(err\)\s*\{/, "the loop body has a catch boundary");
+  assert.match(src, /writeErrorRound\(round, step, message, stack, liveness, poolSeen, running\.length\)/, "the catch writes an error round");
+  assert.match(src, /event: "resident-error"/, "the catch emits a resident-error JSON event");
+  // step-trace：每步记 step（AC1 定位——error_step 指到具体步骤，⛔ 只报「挂起」不指位置 ⇒ 假）。
+  for (const step of ["cold-start-inflight", "liveness", "reap", "reconcile", "dispatch-loop", "ready-pool", "apply-filters", "selector", "spawn-worker", "write-round", "sleep", "wait-in-flight"]) {
+    assert.match(src, new RegExp(`step = "${step}"`), `step-trace marks ${step}`);
+  }
+});
+
+// ── gap-fan-in-continue-doc-only-advance-reuse-suite ───────────────────────────────────────────────
+// develop 在长 suite 期间被 doc/inert 前进 ⇒ ff not-fast-forward ⇒ CONTINUE 重跑。suite 是
+// (develop HEAD × delta) 的纯函数；若上一轮 green bucket suite（full-suite-state.json 的 mirror 记录）
+// 之后、当前 HEAD 只触及 doc/inert 面（develop 前进面），则复用上一 green 判定、不重跑 suite。AC1 取假
+// （doc/inert-only 前进 ⇒ 无 suite 运行记录）；AC2 负控制（code 前进 ⇒ 照常重跑）；AC4 单测钉死读面。
+
+/** 建一个「上一轮 green suite 后 develop 被 doc 或 code 前进」的 hermetic repo：develop 上 base 提交 +
+ *  tasks/gap-reuse.md（Touches 声明 code 文件 + AC 全勾），task/gap-reuse 分支上一个 code 提交
+ *  （plugin/scripts/foo.mjs）⇒ merge develop 成 M1（上一轮 green 的 suite_head，seed 进 full-suite-state.json）
+ *  ⇒ develop 再前进一个 doc 或 code 提交。fan-in 重跑时 step 2 merge 前进面、step 4 判复用。
+ *  advanceKind: 'doc' | 'code'。返回 { base, repo, worktree, slotBase, capture, m1 }。 */
+function makeReuseRepo(tag, advanceKind) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), `fanin-reuse-${tag}-`));
+  const repo = path.join(base, "repo");
+  const worktree = path.join(base, "wt");
+  fs.mkdirSync(repo, { recursive: true });
+  runGit(repo, ["init", "-q"]);
+  runGit(repo, ["config", "user.name", "fanin-reuse-test"]);
+  runGit(repo, ["config", "user.email", "reuse@example.com"]);
+  runGit(repo, ["branch", "-M", "develop"]);
+  fs.mkdirSync(path.join(repo, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+  // classify-delta 读 registry 的单一真相源 plugin/scripts/runner-static-gate.ts（空 registry ⇒ doc 面才判
+  // doc、其余 fail-closed 到 code）。⛔ 无此文件 classify 直接 exit 2 ⇒ codeDelta=__CLASSIFY_FAILED__。
+  fs.mkdirSync(path.join(repo, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "plugin", "scripts", "runner-static-gate.ts"), "// hermetic registry stub — empty registry\n", "utf8");
+  fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "tasks", "gap-reuse.md"), [
+    "---", "id: gap-reuse", "title: develop advance suite reuse test", "status: ready",
+    "labels: []", "extra: {}", "---",
+    "## Proposal", "test", "## Plan", "test",
+    "## Touches", "- plugin/scripts/foo.mjs",
+    "## Acceptance Criteria", "- [x] AC1 landed",
+    "## Definition of Done", "- [x] landed", "",
+  ].join("\n"), "utf8");
+  runGit(repo, ["add", "-A"]);
+  runGit(repo, ["commit", "-q", "-m", "base"]);
+  runGit(repo, ["worktree", "add", "-q", worktree, "-b", "task/gap-reuse"]);
+  // develop 脱离主检出（同 makeMechRepo：ff 退化纯 ref 更新，⛔ 不撞 checked-out branch）。
+  runGit(repo, ["checkout", "-q", "-b", "develop-work"]);
+  // task 分支上的 code 提交（任务自身 delta = code ⇒ 正常 needSuite）。
+  fs.mkdirSync(path.join(worktree, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(worktree, "plugin", "scripts", "foo.mjs"), "export const foo = 1;\n", "utf8");
+  runGit(worktree, ["add", "-A"]);
+  runGit(worktree, ["commit", "-q", "-m", "implement code change"]);
+  // develop 前进一个 doc 提交（上一轮 suite 会 merge 的 develop HEAD）。
+  runGit(repo, ["checkout", "-q", "develop"]);
+  fs.mkdirSync(path.join(repo, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "docs", "adv1.md"), "# advance 1\n", "utf8");
+  runGit(repo, ["add", "-A"]);
+  runGit(repo, ["commit", "-q", "-m", "develop advance 1 (doc)"]);
+  runGit(repo, ["checkout", "-q", "develop-work"]);
+  // task 分支 merge develop ⇒ M1（上一轮 green suite 的 suite_head）。
+  runGit(worktree, ["merge", "-q", "--no-edit", "develop"]);
+  const m1 = runGit(worktree, ["rev-parse", "HEAD"]).trim();
+  // develop 再前进（doc 或 code）——这一轮 fan-in 的 step 2 把它 merge 进 M1 成 M2。
+  runGit(repo, ["checkout", "-q", "develop"]);
+  if (advanceKind === "code") {
+    fs.mkdirSync(path.join(repo, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "plugin", "scripts", "bar.mjs"), "export const bar = 2;\n", "utf8");
+  } else {
+    fs.writeFileSync(path.join(repo, "docs", "adv2.md"), "# advance 2\n", "utf8");
+  }
+  runGit(repo, ["add", "-A"]);
+  runGit(repo, ["commit", "-q", "-m", `develop advance 2 (${advanceKind})`]);
+  runGit(repo, ["checkout", "-q", "develop-work"]);
+  // seed 权威源 full-suite-state.json（mirror 记录：state=green + taskId=gap-reuse + commit=m1）。⛔ 必须在
+  // 最后一次 git checkout 之后写——hermetic repo 无 .gitignore，先写再 `git add -A`+`checkout` 会把
+  // .quay/ 提交进 develop 再被 checkout develop-work 删除（ENOENT ⇒ 读不到 ⇒ 假 no-reuse）。
+  fs.mkdirSync(path.join(repo, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(repo, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", taskId: "gap-reuse", commit: m1 }), "utf8");
+  const slotBase = path.join(base, "full-suite.lock");
+  const capture = path.join(base, "suite.env");
+  return { base, repo, worktree, slotBase, capture, m1 };
+}
+
+test("AC4 (gap-fan-in-continue-doc-only-advance-reuse-suite) — readPreviousGreenSuiteCommit：green+taskId+40-hex commit ⇒ sha；red / 异 task / 非法 commit / 缺文件 ⇒ null", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "reuse-read-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const f = path.join(base, "full-suite-state.json");
+  const sha = "a".repeat(40);
+  fs.writeFileSync(f, JSON.stringify({ state: "green", taskId: "gap-t", commit: sha }), "utf8");
+  assert.equal(readPreviousGreenSuiteCommit(f, "gap-t"), sha, "green + taskId + 40-hex commit ⇒ the sha");
+  fs.writeFileSync(f, JSON.stringify({ state: "red", taskId: "gap-t", commit: sha }), "utf8");
+  assert.equal(readPreviousGreenSuiteCommit(f, "gap-t"), null, "red ⇒ null (no green cert)");
+  fs.writeFileSync(f, JSON.stringify({ state: "green", taskId: "gap-other", commit: sha }), "utf8");
+  assert.equal(readPreviousGreenSuiteCommit(f, "gap-t"), null, "different task ⇒ null (⛔ 不冒名)");
+  fs.writeFileSync(f, JSON.stringify({ state: "green", taskId: "gap-t", commit: "not-a-sha" }), "utf8");
+  assert.equal(readPreviousGreenSuiteCommit(f, "gap-t"), null, "non-40-hex commit ⇒ null (读不懂 ≠ 绿)");
+  assert.equal(readPreviousGreenSuiteCommit(path.join(base, "missing.json"), "gap-t"), null, "missing file ⇒ null (缺值 = 未查)");
+});
+
+test("AC1 (gap-fan-in-continue-doc-only-advance-reuse-suite) — develop 仅 doc 前进 ⇒ 复用上一 green、不重跑 suite（无 suite step + skip_reason=reuse + landed）", async (t) => {
+  const m = makeReuseRepo("doc", "doc");
+  const runId = "mf-run-reuse-doc";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const marker = path.join(m.base, "suite-ran.marker");
+  const r = await runMechanicalFanIn(mechOpts(m, runId, {
+    task: "gap-reuse",
+    forceSuite: false,
+    suiteCommand: ["bash", "-c", `echo ran > "${marker}"; exit 0`],
+  }));
+  assert.equal(r.outcome, "landed", `doc-only develop advance must reuse prev green and land (step=${r.step} reason=${r.reason})`);
+  assert.equal(r.suiteOutcome, null, "suite must NOT run (reused prev green — ⛔ 仍跑 suite 再判则假)");
+  assert.equal(fs.existsSync(marker), false, "suite command must NOT execute (doc-only develop advance ⇒ reuse)");
+  const capture = fs.readFileSync(m.capture, "utf8");
+  assert.match(capture, /full_suite_ran=false/);
+  assert.match(capture, /skip_reason=develop-advance-doc-only-reuse/);
+  // 过程日志：无 suite-start/suite-end，只有 suite-skip（reuse reason）——AC1「该轮无 suite step」。
+  const log = path.join(m.repo, ".quay", `fan-in-gap-reuse-${runId}.log`);
+  const lines = fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(lines.some((l) => l.step === "suite-start" || l.step === "suite-end"), false, "no suite step in the trace (AC1)");
+  const skip = lines.find((l) => l.step === "suite-skip");
+  assert.ok(skip && /develop-advance-doc-only-reuse/.test(skip.reason ?? ""), "suite-skip trace carries the reuse reason");
+});
+
+test("AC2 (gap-fan-in-continue-doc-only-advance-reuse-suite) — develop code 前进 ⇒ 照常重跑 suite（不削弱合并验证）", async (t) => {
+  const m = makeReuseRepo("code", "code");
+  const runId = "mf-run-reuse-code";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const marker = path.join(m.base, "suite-ran.marker");
+  const r = await runMechanicalFanIn(mechOpts(m, runId, {
+    task: "gap-reuse",
+    forceSuite: false,
+    suiteCommand: ["bash", "-c", `echo ran > "${marker}"; exit 0`],
+  }));
+  assert.equal(r.outcome, "landed", `code develop advance must re-run suite and land (step=${r.step} reason=${r.reason})`);
+  assert.equal(r.suiteOutcome, "done", "suite must RUN (code advance ⇒ no reuse)");
+  assert.equal(fs.existsSync(marker), true, "suite command must execute (code develop advance ⇒ re-run)");
 });

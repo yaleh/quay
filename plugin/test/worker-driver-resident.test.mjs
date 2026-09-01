@@ -202,6 +202,10 @@ test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatch
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 5000 → 15000：两次完整派发（ready-pool/selector/worker 各 spawn 一个 node 子进程 + 每次派发后
+  // 等在飞 worker 落地含 git landing 读）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时
+  // flake、picks=1，与同文件 AC1「第二次派发」10000ms 约定同源——gap-worker-driver-resident-loop-intermittent-hang；
+  // 补充处置 A 类在 develop 10000 基础上再放宽至 15000）。
   await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 15000);
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   // gap-a picked first (touches foo.ts); while it is in-flight, gap-b (also foo.ts) must be filtered
@@ -246,6 +250,10 @@ test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the se
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 5000 → 15000：一次完整派发（ready-pool/selector/worker 各 spawn 一个 node 子进程 + worker 落地含
+  // git landing 读）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时 flake、outcomes=0，与同文件
+  // AC1 10000ms 约定同源——gap-worker-driver-resident-loop-intermittent-hang；
+  // 补充处置 A 类在 develop 10000 基础上再放宽至 15000）。
   await waitFor(() => readOutcomeLines(root).length >= 1, 15000);
   const picked = drv.events().find((e) => e.event === "selector-picked");
   assert.ok(picked, "the selection loop emitted a selector-picked event (AC2 chain is wired)");
