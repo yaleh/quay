@@ -1,7 +1,7 @@
 ---
 id: gap-retire-inner-hygiene-catalog-tests
 title: inner 会话卫生退役 step3——同步 capability-catalog 六表 + 测试去留（无「无测试的活脚本」/「无脚本的活测试」）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
