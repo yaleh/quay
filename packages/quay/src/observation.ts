@@ -1050,6 +1050,34 @@ function readFullSuiteStateRaw(root: string): Record<string, unknown> | null {
   }
 }
 
+/** Dashboard testsCard reading of `.quay/full-suite-state.json` — "is a suite running right now",
+ *  a DIFFERENT question from readFullSuiteState's "which in-flight fan-in task does this suite belong
+ *  to". full-suite-runner.ts's `base` object (the shape written on every state transition) never
+ *  carries a `taskId` field, so readFullSuiteState's `j.taskId` requirement makes it return null on
+ *  every real run — unusable for a dashboard-level running/idle read. This reader has no such
+ *  requirement; null only when the state file itself is absent/unreadable (honest degrade, gap-
+ *  webui-dashboard-tests-card-latest-round-no-live-signal). */
+export interface CurrentSuiteRun {
+  state: string | null;
+  runner: string | null;
+  startedAt: string | null;
+  runId: string | null;
+  scope: string | null;
+}
+
+export function readCurrentSuiteRun(root: string): CurrentSuiteRun | null {
+  const j = readFullSuiteStateRaw(root);
+  if (j == null) return null;
+  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  return {
+    state: str(j.state),
+    runner: str(j.runner),
+    startedAt: str(j.startedAt),
+    runId: str(j.runId),
+    scope: str(j.scope),
+  };
+}
+
 /**
  * The suite state carried on a fan-in task (gap-live-fan-in-execution-phase-two-axis): the task the
  * suite is currently running for (`.quay/full-suite-state.json` `taskId`) plus a display slice of the

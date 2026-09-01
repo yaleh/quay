@@ -2,7 +2,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readSystem, readManagerLight, readTests, readGitHistory, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult } from "./observation.ts";
+import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun } from "./observation.ts";
 import { TASK_STATUS } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
@@ -10,11 +10,28 @@ import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-liv
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
 
+// gap-webui-dashboard-tests-card-latest-round-no-live-signal: elapsed-time formatter for a suite
+// that is currently running (startedAt ISO → nowMs), pulled out as a pure function so it is testable
+// without a live clock. null input/unparseable ISO → null (never a fabricated "0s").
+export function formatSuiteElapsed(startedAt: string | null, nowMs: number): string | null {
+  if (startedAt == null) return null;
+  const t = Date.parse(startedAt);
+  if (!Number.isFinite(t)) return null;
+  const totalSec = Math.max(0, Math.round((nowMs - t) / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h${m}m`;
+  if (m > 0) return `${m}m${s}s`;
+  return `${s}s`;
+}
+
 export function renderDashboardPage(d: {
   live: LiveResult;
   sys: SystemResult;
   mgr: ManagerResult;
   tests: TestsResult;
+  suiteRun: CurrentSuiteRun | null;
   history: GitHistoryResult;
   tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
 }): string {
@@ -100,11 +117,48 @@ export function renderDashboardPage(d: {
     </div>`;
   };
 
+  // gap-webui-dashboard-tests-card-latest-round-no-live-signal: the card previously showed ONLY
+  // tests.runs[0] — the ledger's latest COMPLETED round. Two failure modes on the real deployment:
+  // (a) a suite genuinely running right now (`.quay/full-suite-state.json` state=running) has no
+  //     ledger row yet, so the card silently showed a stale round instead of "运行中";
+  // (b) a static-check gate failure round (fan-in's pre-test gate rejects before any test file runs)
+  //     legitimately carries pass=0/tests=0 — true for THAT round, but rendered as bare "pass 0/0"
+  //     it reads as "the whole suite has zero tests", which is false and unlike what /tests shows
+  //     (the full history table gives that same round visible context: neighboring green rounds with
+  //     thousands of tests). Now: prefer the LIVE running signal when present, label a gate-blocked
+  //     round for what it is instead of a bare 0/0, and add a 近N轮 strip so the single latest row is
+  //     never the only signal (硬规则4b: a single point is a proxy, not the actual health picture).
   const latestRun = d.tests.runs[0] ?? null;
+  const suiteRunning = d.suiteRun && d.suiteRun.state === "running" ? d.suiteRun : null;
+  const gateBlocked = latestRun != null && latestRun.tests === 0 && latestRun.pass === 0 && (latestRun.reason === "gate-failed" || latestRun.gate != null);
+  const statusLine = suiteRunning
+    ? html`<span style="color:var(--color-accent-700)">运行中</span>`
+    : escapeHtml(latestRun ? (latestRun.state ?? "—") : "未接入");
+  const elapsed = suiteRunning ? formatSuiteElapsed(suiteRunning.startedAt, Date.now()) : null;
+  const detailLine = suiteRunning
+    ? `已运行 ${elapsed ?? "—"}${suiteRunning.runner ? ` · runner ${escapeHtml(suiteRunning.runner)}` : ""}${suiteRunning.scope ? ` · scope ${escapeHtml(suiteRunning.scope)}` : ""}`
+    : latestRun
+      ? (gateBlocked
+        ? `gate 未过${latestRun.gate ? `（${escapeHtml(latestRun.gate)}）` : ""}，未执行测试`
+        : `pass ${latestRun.pass ?? "—"}/${latestRun.tests ?? "—"}`)
+      : (d.tests.reason ? escapeHtml(d.tests.reason) : "无验证轮记录");
+  const recentRuns = d.tests.runs.slice(0, 5);
+  const recentStrip = recentRuns.length > 0
+    ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">
+        <div style="font-size:0.7rem;color:var(--color-neutral-700)">近${recentRuns.length}轮（新→旧）</div>
+        <div style="display:flex;gap:3px">${recentRuns.map((r) => {
+          const color = r.state === "green" ? "var(--color-accent-700)" : r.state === "red" ? "var(--color-accent-800)" : "var(--color-neutral-400)";
+          const rGateBlocked = r.tests === 0 && r.pass === 0 && (r.reason === "gate-failed" || r.gate != null);
+          const title = `#${r.round ?? "?"} ${r.state ?? "—"}${rGateBlocked ? `（gate:${r.gate ?? "?"} 未执行测试）` : ` pass ${r.pass ?? "—"}/${r.tests ?? "—"}`}`;
+          return html`<span title="${escapeHtml(title)}" style="width:11px;height:11px;border-radius:2px;background:${color};display:inline-block"></span>`;
+        }).join("")}</div>
+      </div>`
+    : "";
   const testsCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">测试</div>
-    <div style="font-weight:800">${latestRun ? `${escapeHtml(latestRun.state ?? "—")}` : "未接入"}</div>
-    <p style="margin:0;font-size:0.8rem;opacity:0.8">${latestRun ? `pass ${latestRun.pass ?? "—"}/${latestRun.tests ?? "—"}` : d.tests.reason ? escapeHtml(d.tests.reason) : "无验证轮记录"}</p>
+    <div style="font-weight:800">${statusLine}</div>
+    <p style="margin:0;font-size:0.8rem;opacity:0.8">${detailLine}</p>
+    ${recentStrip}
     <a href="/tests" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Tests →</a>
   </div>`;
 
@@ -213,10 +267,12 @@ export async function handleDashboard(
   try { tests = readTests(cfg.workspaceRoot); } catch {
     tests = { status: "error", reason: "internal", runs: [] };
   }
+  let suiteRun: CurrentSuiteRun | null;
+  try { suiteRun = readCurrentSuiteRun(cfg.workspaceRoot); } catch { suiteRun = null; }
   let history: GitHistoryResult;
   try { history = readGitHistory(cfg.workspaceRoot); } catch {
     history = { status: "error", reason: "internal", commits: [], head: null, heads: {} };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderDashboardPage({ live, sys, mgr, tests, history, tasks }));
+  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks }));
 }
