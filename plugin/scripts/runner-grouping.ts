@@ -188,5 +188,13 @@ async function main(argv: string[]): Promise<number> {
 }
 
 if (isDirectEntry(import.meta, undefined, "runner-grouping")) {
-  main(process.argv).then((code) => process.exit(code));
+  // ⛔ process.exit(code) here TRUNCATES stdout: --select/--classify write ~561 lines via the async
+  // process.stdout stream, and process.exit() terminates before the queued pipe writes drain (the
+  // await readStdin() above makes the writes async-queued). Flaky truncation (171/448/514 of 561) is
+  // exactly what turned test-coverage-check AC5 red (canonical=561 list-files=171). Setting
+  // process.exitCode lets the event loop drain stdout and exit naturally — the same idiom as
+  // driver-runtime.ts / suite-driver.ts (gap-suite-classification-lpt-scheduler-ts-ization).
+  main(process.argv).then((code) => {
+    process.exitCode = code;
+  });
 }
