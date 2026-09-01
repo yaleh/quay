@@ -17,10 +17,11 @@
 //   plugin/scripts/runner-grouping*              — the --group / __GROUP__ grouping mechanism (glob).
 //   plugin/scripts/select-tests-for-touches.ts   — the file-level scoped selector.
 //
-// `runner-grouping*` is a GLOB (not a concrete path): the grouping mechanism (group_of / select_files /
-// list_groups / ...) was extracted from scripts/test.sh to plugin/scripts/runner-grouping.ts
-// (gap-suite-hub-file-responsibility-strip) — the glob now matches a real file, and the grouping stays
-// a hub (it decides WHICH tests run, so its change still forces the full suite).
+// `runner-grouping*` is a GLOB (not a concrete path): the grouping mechanism (groupOf / classifyFile /
+// selectFiles / listGroups / ...) lives in plugin/scripts/runner-grouping.ts — a REAL TypeScript module
+// since gap-suite-classification-lpt-scheduler-ts-ization (previously a bash `source`d library under a
+// .ts name) — the glob matches a real file, and the grouping stays a hub (it decides WHICH tests run,
+// so its change still forces the full suite).
 //
 // NON-hubs (deliberately NOT listed, gap-suite-hub-file-responsibility-strip AC4): the accounting
 // family extracted to plugin/scripts/suite-accounting.ts and the overhead-timing family extracted to

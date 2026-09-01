@@ -39,13 +39,16 @@ function markerAt(pattern, label) {
   return i;
 }
 
-// Phase markers — each is unique to its FULL-SUITE-default-block invocation.
+// Phase markers — each is unique to its FULL-SUITE-default-block invocation. Since
+// gap-suite-classification-lpt-scheduler-ts-ization the selection reads the deduped metadata via the TS
+// runner-grouping.ts --select (the retired legacy fallback's phase selection; the DEFAULT scheduler
+// classifies internally).
 const serialSelect = markerAt(
-  'while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")',
+  'while IFS= read -r sf; do serial_files+=("$sf"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "serial")',
   "serial select",
 );
 const lowconcSelect = markerAt(
-  'while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")',
+  'while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "lowconc")',
   "lowconc select",
 );
 const mainRun = markerAt(

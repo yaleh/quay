@@ -102,18 +102,29 @@ function gitFilesAtRev(root: string, rev: string, files: string[]): Set<string> 
   return new Set(r.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
 }
 
-/** The subset of `files` whose content at `rev` declares a target group (git grep — ONE command). */
+/** The subset of `files` whose DECLARED group at `rev` is a target (serial|lowconc). The git grep is
+ *  a pre-filter (any occurrence of a target token — ONE command over the whole set); each candidate is
+ *  then VERIFIED via `groupAt` (the first `@test-group` occurrence — the same semantics as
+ *  `groupOfSource`). The grep alone over-matches: an origin-declared file whose BODY writes an
+ *  "@test-group serial" fixture literal (gap-suite-classification-lpt-scheduler-ts-ization's
+ *  suite-scheduler.test.mjs) was falsely judged a downgrade ("engine → engine") because its DECLARED
+ *  group is engine, not a target. */
 function gitTargetFiles(root: string, rev: string, files: string[]): Set<string> {
   if (files.length === 0) return new Set();
   const r = git(root, ["grep", "-l", "-E", "@test-group[[:space:]]+(serial|lowconc)", rev, "--", ...files], true);
   if (r.status !== 0) return new Set(); // exit 1 = no matches → empty set
-  const out = new Set<string>();
+  const candidates = new Set<string>();
   for (const line of r.stdout.split(/\r?\n/)) {
     const t = line.trim();
     if (!t) continue;
     // `git grep -l <rev>` prefixes each line with `<rev>:`.
     const idx = t.indexOf(":");
-    out.add(idx === -1 ? t : t.slice(idx + 1));
+    candidates.add(idx === -1 ? t : t.slice(idx + 1));
+  }
+  const out = new Set<string>();
+  for (const f of candidates) {
+    const g = groupAt(root, f, rev);
+    if (g !== null && (TARGET_GROUPS as readonly string[]).includes(g)) out.add(f);
   }
   return out;
 }
@@ -372,6 +383,22 @@ export function runSelftest(): boolean {
         fx.run(["commit", "-qm", "add new serial test"]);
         const res = detectDowngrades(fx.dir, fx.baseline);
         check("GREEN: new file with target group passes", res.violations.length === 0, JSON.stringify(res.violations));
+      } finally {
+        cleanup(fx.dir);
+      }
+    }
+
+    // GREEN: an origin-declared file whose BODY mentions a target token is NOT a downgrade —
+    // gitTargetFiles must read the DECLARED group (first `@test-group`), not grep any occurrence.
+    // gap-suite-classification-lpt-scheduler-ts-ization's suite-scheduler.test.mjs writes
+    // "@test-group serial"/"@test-group lowconc" fixture files and was falsely flagged engine → engine.
+    {
+      const fx = makeFixture();
+      try {
+        fs.appendFileSync(path.join(fx.dir, fx.testFile), "\n// fixture writer emits: @test-group serial\n");
+        fx.run(["commit", "-aqm", "add body target-token literal (not a downgrade)"]);
+        const res = detectDowngrades(fx.dir, fx.baseline);
+        check("GREEN: body target-token mention on an engine file is not a downgrade", res.violations.length === 0, JSON.stringify(res.violations));
       } finally {
         cleanup(fx.dir);
       }

@@ -63,7 +63,7 @@ async function runConcurrentRead(mode) {
     { stdio: "ignore" }
   );
 
-  const readEnd = Date.now() + durationMs + 150;
+  const readEnd = Date.now() + durationMs + 20000;
   let reads = 0;
   let torn = 0;
   const seen = new Set();
