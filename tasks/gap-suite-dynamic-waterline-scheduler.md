@@ -1,7 +1,7 @@
 ---
 id: gap-suite-dynamic-waterline-scheduler
 title: suite/bucket 统一调度器——组预算 + 单调水位 + main 用剩余容量（替代静态分相 + A watcher，模拟省 21%）
-status: ready
+status: done
 labels:
   - gap
 parent: null
