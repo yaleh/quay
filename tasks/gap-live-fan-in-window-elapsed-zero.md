@@ -1,7 +1,7 @@
 ---
 id: gap-live-fan-in-window-elapsed-zero
 title: web live 页机械 fan-in 窗口 elapsed 恒 0——round 载体无每任务起始时间戳，readLive fail-closed 到 nowMs
-status: ready
+status: done
 labels:
   - gap
   - defect
