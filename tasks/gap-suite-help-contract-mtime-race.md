@@ -1,7 +1,7 @@
 ---
 id: gap-suite-help-contract-mtime-race
 title: help-contract AC1 mtime 负控制被常驻 driver 活跃写污染——driver 活跃时稳定红，误杀所有 fan-in
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -44,3 +44,10 @@ extra:
 
 - plugin/test/help-contract-incompatible-behaviors.test.mjs（snapshot 排除 driver 活跃文件）
 - tasks/gap-suite-help-contract-mtime-race.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-01T04:37:34.442Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
