@@ -2,7 +2,7 @@
 id: gap-worker-driver-resident-loop-intermittent-hang
 title: worker-driver 驻留环间歇挂起——liveness 后停在派发环前，round/outcome
   不写（worker-driver-fan-in 测试 flaky 根因）
-status: ready
+status: done
 labels:
   - gap
   - defect
