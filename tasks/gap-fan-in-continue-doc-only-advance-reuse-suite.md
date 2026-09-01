@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-continue-doc-only-advance-reuse-suite
 title: develop 在 suite 期间被 doc/inert 前进时，CONTINUE 重跑复用上一 green 判定（按测试影响面键控 suite）
-status: needs-human
+status: todo
 labels:
   - gap
 parent: null
