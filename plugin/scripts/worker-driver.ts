@@ -835,10 +835,17 @@ export function computeWorkerRoundRecord(opts: {
   runId: string;
   pid: number;
   at: string;
-  action: "start" | "dispatch" | "idle" | "stop";
+  action: "start" | "dispatch" | "idle" | "stop" | "error";
   inFlight: number;
   pool: number | null;
   stopReason: string | null;
+  /** 驻留环错误边界（gap-worker-driver-resident-loop-intermittent-hang）：本轮循环体抛错时的原始
+   *  message（⛔ 无错 ⇒ null）。 */
+  error?: string | null;
+  /** 抛错时循环体所在的步骤（step-trace：cold-start-inflight / liveness / reap / reconcile /
+   *  dispatch-loop / ready-pool / apply-filters / selector / spawn-worker / write-round / sleep /
+   *  wait-in-flight）。AC1 定位：error_step 指到具体步骤。 */
+  errorStep?: string | null;
   liveness?: LivenessResult | null;
   /** 本轮现观测到的冷启动在飞 task id（排序后）。空数组 = 观测过且无（⛔ 与「没观测」可区分）。 */
   coldStartInflight: string[];
@@ -868,6 +875,8 @@ export function computeWorkerRoundRecord(opts: {
     in_flight: opts.inFlight,
     pool: opts.pool,
     stop_reason: opts.stopReason,
+    error: opts.error ?? null,
+    error_step: opts.errorStep ?? null,
     liveness: opts.liveness ?? null,
     cold_start_inflight: opts.coldStartInflight,
     in_flight_tasks: opts.inFlightTasks ?? [],
@@ -2662,6 +2671,35 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
   };
 
+  /** 错误边界（gap-worker-driver-resident-loop-intermittent-hang）：循环体抛错时写一条 action=error 的
+   *  round 记录——与正常 round 同载体（worker-round.jsonl）⇒ supervisor status 的 last_record_ts 不会因
+   *  一轮抛错而判「死亡」（AC3：生产 round 无停写窗口），且 error/error_step/stop_reason 指到具体步骤
+   *  （AC1 定位）。⛔ 写失败不致命（运行时日志）。 */
+  const writeErrorRound = (round: number, step: string, message: string, stack: string, liveness: LivenessResult | null, pool: number | null, inFlight: number): void => {
+    const record = computeWorkerRoundRecord({
+      round,
+      runId: runId ?? runPrefix,
+      pid: process.pid,
+      at: new Date().toISOString(),
+      action: "error",
+      inFlight,
+      pool,
+      stopReason: `error (step=${step}): ${message}`,
+      error: message,
+      errorStep: step,
+      liveness,
+      coldStartInflight: [...coldInflight].sort(),
+      inFlightTasks: inFlightTasks(),
+      inFlightTaskStarts: inFlightTaskStarts(),
+      needsHuman: [],
+      reconciledNeedsHuman: [],
+    });
+    try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
+    if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
+    // stack 单独落一条 stderr——stdout 是 JSON 事件通道，⛔ 不把多行 stack 塞进单行 JSON（会破坏解析）。
+    if (stack) process.stderr.write(`worker-driver resident-loop error (round=${round} step=${step}): ${message}\n${stack}\n`);
+  };
+
   /** 判停（AC3）：起新 worker 前逐轮读。halt 优先（终态，latch）；其次 resource-gate WAIT（瞬时，
    *  ⛔ 不 latch——gap-worker-driver-stopreason-latch-permanent-stop：WAIT 名字含 WAIT，负载高恰因在飞
    *  worker 在跑、worker 结束负载降但闸再没被读 = 自我锁死反馈环）。瞬时 WAIT 只让本轮不派、
@@ -2763,108 +2801,142 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     round += 1;
     const passStartMs = Date.now();
 
-    // 冷启动在飞【现观测】（每趟 pass，SPEC §5.2 actual=observe()）：worker 退出 / worktree 消失任一
-    // 发生 ⇒ task 即离开排除集、下一轮重新可派（⛔ 循环外一次性 const 快照 = 假在飞不可派，已修）。
-    // 每轮重扫 task worktree + /proc 存活 worker 交叉核对；该结果同时写进本轮 round 记录（生产载体）。
-    // 异步版（gap-worker-driver-async-selector-readypool）：git worktree list 不再 spawnSync 阻塞地板。
-    coldInflight = await enumerateColdStartInflightAsync(rootDir);
-    if (json && coldInflight.size > 0) {
-      process.stdout.write(
-        `${JSON.stringify({ event: "cold-start-inflight", tasks: [...coldInflight].sort() })}\n`,
-      );
-    }
-
-    // liveness 检查（gap-resident-driver-stable-carrier-liveness Finding 的接线）：每轮顺手调一次
-    // launch 脚本的 liveness 子命令。supervisor 死后 driver 成孤儿仍在跑 ⇒ 下一轮即检出 supervisor_dead
-    // 并让子命令写 DEATH 告警（⛔ 载体停更 ≠ 一切正常）。checked=false（脚本缺失/失败）≠ 健康（硬规则 3b）。
-    const liveness = await runLivenessCheckAsync(rootDir, "worker", livenessCmd);
-
-    // 1. reap 已完成的 worker（减在飞集）。
-    for (let i = running.length - 1; i >= 0; i--) {
-      if (running[i].done) running.splice(i, 1);
-    }
-
-    // 1b. 对账（gap-retrystate-needshuman-no-reconcile-with-disk-ready）：内存 needsHuman 集合随磁盘
-    //   status 翻转对账——人把已标 needs-human 的任务翻回 ready/todo 后，磁盘 status 离开 needs-human
-    //   ⇒ 本轮从内存集合清除、下一轮重新可派（⛔ 不重启——重启 = 把恢复外包给 supervisor 才得以恢复，
-    //   正是本缺陷的根）。读不懂（status null）⇒ 保留（fail-closed，缺值 = 未查）。每轮（含池空/判停轮）
-    //   都对账一次 ⇒ 人翻回后不依赖任何边沿事件即被下一轮拾起。清除结果进本轮 round 记录。
-    const reconciled = reconcileNeedsHumanWithDisk(retryState, rootDir);
-
-    // 2. 池非空且未达 cap 且未判停 ⇒ 走选择环起下一个。
-    //    ⛔ stopReason 是【终态 latch】（仅 mcp-halt）；瞬时闸拒绝只记本轮 waitReason，下一轮重读
-    //    stopCondition（gap-worker-driver-stopreason-latch-permanent-stop：stopReason 一旦赋值永不复位 ⇒
-    //    瞬时拒被永久 latch ⇒ 1h48m 零派发）。
+    // 驻留环错误边界（gap-worker-driver-resident-loop-intermittent-hang）：循环体任何一步抛错（瞬时 fs/
+    // git/spawn 异常，负载下偶发）此前会变成未处理 rejection ⇒ 驱动静默死掉——.quay/ 只剩 liveness log、
+    // round/outcome 停写，与「一切正常」同形（硬规则 3b/4b）。现每步记 step + try/catch：抛错 ⇒ 写一条
+    // action=error 的 round 记录（error_step + stop_reason 指到具体步骤，AC1 定位）+ resident-error 事件，
+    // 然后 sleep intervalMs 继续下一轮（瞬时错误自愈，⛔ 不再静默停摆——AC3 生产 round 无停写窗口）。
+    // 变量先于 try 声明 ⇒ catch 内可见，error round 可带上已读到的 liveness/pool 读数。
+    let liveness: LivenessResult | null = null;
+    let reconciled: string[] = [];
     let poolSeen: number | null = null;
     let waitReason: string | null = null;
-    while (running.length < cap && !stopReason) {
-      const sc = stopCondition();
-      if (sc.stop) {
-        if (sc.terminal) stopReason = sc.reason;
-        else waitReason = sc.reason;
-        break;
+    let step = "start";
+    try {
+      // 冷启动在飞【现观测】（每趟 pass，SPEC §5.2 actual=observe()）：worker 退出 / worktree 消失任一
+      // 发生 ⇒ task 即离开排除集、下一轮重新可派（⛔ 循环外一次性 const 快照 = 假在飞不可派，已修）。
+      // 每轮重扫 task worktree + /proc 存活 worker 交叉核对；该结果同时写进本轮 round 记录（生产载体）。
+      // 异步版（gap-worker-driver-async-selector-readypool）：git worktree list 不再 spawnSync 阻塞地板。
+      step = "cold-start-inflight";
+      coldInflight = await enumerateColdStartInflightAsync(rootDir);
+      if (json && coldInflight.size > 0) {
+        process.stdout.write(
+          `${JSON.stringify({ event: "cold-start-inflight", tasks: [...coldInflight].sort() })}\n`,
+        );
       }
-      const pool = await readyPoolCheck(rootDir, readyPoolArgv, inFlightTasks(), cap);
-      poolSeen = pool.pool;
-      const shuffled = shuffle(pool.ready);
-      // AC152：派发前过滤消费 driver-filters.ts 的【可组合谓词列表】（notInFlight / depsSatisfied /
-      // touchesDisjoint / retryCapNotExhausted / notNeedsHuman，⛔ 不各写一遍）。冷启动在飞 task 一并参与
-      // （它们的 Touches 是真实冲突面）。原「active 过滤 + filterTouchesDisjoint + depsReadyForDispatch」
-      // 三个散点已收进 applyTaskFilters 一次判完。
-      // 重试上限（gap-worker-driver-retry-cap-not-wired）：retryExhausted = 本循环已标 needs-human 的
-      // 任务集合（exited-not-landed 达上限派生）——retryCapNotExhausted 谓词据此滤掉不再重派。
-      // gap-retrystate-needshuman-no-reconcile-with-disk-ready（AC2）：分两步过滤，把「候选被谓词滤空」
-      // 与「真快速死亡退避」区分成两个独立 stop_reason 字面量——⛔ 共用 backoff 字面量会把「3 任务全进
-      // needsHuman 集、无一次 <60s 快速死亡」误报成退避（硬规则 3b 同形：成因错归则下游改错）。
-      const afterTaskFilters = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks(), retryExhausted: retryState.needsHuman }));
-      const candidates = afterTaskFilters
-        // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff，AC2）：退避中的 task（backoffUntil
-        // 未到）本轮不派——⛔ 只滤掉退避的 task，不滤掉别的候选（退避按 task 记，不全局）。now 每候选
-        // 取一次现时刻（⛔ 循环外一次 now 快照会把「退避刚到期」的 task 误滤一整轮）。
-        .filter((id) => !isBackedOff(backoffState, id, Date.now()));
-      if (candidates.length === 0) {
-        // 真池空（ready 减在飞后无候选）⇒ 瞬时 WAIT：记 pool-empty，下一轮重读（⛔ 不再 latch）。
-        //   池非空但全与在飞 Touches/deps 重叠 ⇒ 同为瞬时 WAIT：不设 stopReason（在飞 worker 结束释放
-        //   Touches 或依赖由别的任务落地后重进选择环重新 filter）。两者都不退出——等 intervalMs 重读。
-        if (shuffled.length === 0) waitReason = "pool-empty (no dispatchable candidate in the ready pool)";
-        else if (afterTaskFilters.length === 0) waitReason = "filtered-empty (all dispatchable candidates filtered by predicates)";
-        else waitReason = "backoff (all dispatchable candidates are in quick-death backoff)";
-        break;
-      }
-      const sel = await runSelectorWorker(candidates, selectorArgv, rootDir);
-      if (!sel) {
-        // 候选非空但 selector 未能给出任何选择（理论上 parseSelectorOutput 必回退首个，不会 null）。
-        waitReason = "pool-empty (selector returned no candidate)";
-        break;
-      }
-      await spawnSelected(sel);
-    }
 
-    // AC138-3 无条件心跳：每轮循环写一条（⛔ 池空/判停轮也写——outcome 在这些轮不写）。
-    //   终态 stopReason 与瞬时 waitReason 都记 action=stop（观测面保留 stop_reason 读数，AC2）。
-    writeRound(round, running.length, poolSeen, stopReason ?? waitReason, liveness, reconciled);
+      // liveness 检查（gap-resident-driver-stable-carrier-liveness Finding 的接线）：每轮顺手调一次
+      // launch 脚本的 liveness 子命令。supervisor 死后 driver 成孤儿仍在跑 ⇒ 下一轮即检出 supervisor_dead
+      // 并让子命令写 DEATH 告警（⛔ 载体停更 ≠ 一切正常）。checked=false（脚本缺失/失败）≠ 健康（硬规则 3b）。
+      step = "liveness";
+      liveness = await runLivenessCheckAsync(rootDir, "worker", livenessCmd);
 
-    // 3. 无在飞 ⇒ 终态 halt（stopReason latch）才退出；瞬时 WAIT（池可能再补 / 闸可能已放行）⇒
-    //    等 intervalMs 重读，⛔ 不退出（gap-worker-driver-stopreason-latch-permanent-stop AC3）。
-    if (running.length === 0) {
-      if (stopReason) break;
+      // 1. reap 已完成的 worker（减在飞集）。
+      step = "reap";
+      for (let i = running.length - 1; i >= 0; i--) {
+        if (running[i].done) running.splice(i, 1);
+      }
+
+      // 1b. 对账（gap-retrystate-needshuman-no-reconcile-with-disk-ready）：内存 needsHuman 集合随磁盘
+      //   status 翻转对账——人把已标 needs-human 的任务翻回 ready/todo 后，磁盘 status 离开 needs-human
+      //   ⇒ 本轮从内存集合清除、下一轮重新可派（⛔ 不重启——重启 = 把恢复外包给 supervisor 才得以恢复，
+      //   正是本缺陷的根）。读不懂（status null）⇒ 保留（fail-closed，缺值 = 未查）。每轮（含池空/判停轮）
+      //   都对账一次 ⇒ 人翻回后不依赖任何边沿事件即被下一轮拾起。清除结果进本轮 round 记录。
+      step = "reconcile";
+      reconciled = reconcileNeedsHumanWithDisk(retryState, rootDir);
+
+      // 2. 池非空且未达 cap 且未判停 ⇒ 走选择环起下一个。
+      //    ⛔ stopReason 是【终态 latch】（仅 mcp-halt）；瞬时闸拒绝只记本轮 waitReason，下一轮重读
+      //    stopCondition（gap-worker-driver-stopreason-latch-permanent-stop：stopReason 一旦赋值永不复位 ⇒
+      //    瞬时拒被永久 latch ⇒ 1h48m 零派发）。
+      step = "dispatch-loop";
+      while (running.length < cap && !stopReason) {
+        const sc = stopCondition();
+        if (sc.stop) {
+          if (sc.terminal) stopReason = sc.reason;
+          else waitReason = sc.reason;
+          break;
+        }
+        step = "ready-pool";
+        const pool = await readyPoolCheck(rootDir, readyPoolArgv, inFlightTasks(), cap);
+        poolSeen = pool.pool;
+        const shuffled = shuffle(pool.ready);
+        // AC152：派发前过滤消费 driver-filters.ts 的【可组合谓词列表】（notInFlight / depsSatisfied /
+        // touchesDisjoint / retryCapNotExhausted / notNeedsHuman，⛔ 不各写一遍）。冷启动在飞 task 一并参与
+        // （它们的 Touches 是真实冲突面）。原「active 过滤 + filterTouchesDisjoint + depsReadyForDispatch」
+        // 三个散点已收进 applyTaskFilters 一次判完。
+        // 重试上限（gap-worker-driver-retry-cap-not-wired）：retryExhausted = 本循环已标 needs-human 的
+        // 任务集合（exited-not-landed 达上限派生）——retryCapNotExhausted 谓词据此滤掉不再重派。
+        // gap-retrystate-needshuman-no-reconcile-with-disk-ready（AC2）：分两步过滤，把「候选被谓词滤空」
+        // 与「真快速死亡退避」区分成两个独立 stop_reason 字面量——⛔ 共用 backoff 字面量会把「3 任务全进
+        // needsHuman 集、无一次 <60s 快速死亡」误报成退避（硬规则 3b 同形：成因错归则下游改错）。
+        step = "apply-filters";
+        const afterTaskFilters = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks(), retryExhausted: retryState.needsHuman }));
+        const candidates = afterTaskFilters
+          // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff，AC2）：退避中的 task（backoffUntil
+          // 未到）本轮不派——⛔ 只滤掉退避的 task，不滤掉别的候选（退避按 task 记，不全局）。now 每候选
+          // 取一次现时刻（⛔ 循环外一次 now 快照会把「退避刚到期」的 task 误滤一整轮）。
+          .filter((id) => !isBackedOff(backoffState, id, Date.now()));
+        if (candidates.length === 0) {
+          // 真池空（ready 减在飞后无候选）⇒ 瞬时 WAIT：记 pool-empty，下一轮重读（⛔ 不再 latch）。
+          //   池非空但全与在飞 Touches/deps 重叠 ⇒ 同为瞬时 WAIT：不设 stopReason（在飞 worker 结束释放
+          //   Touches 或依赖由别的任务落地后重进选择环重新 filter）。两者都不退出——等 intervalMs 重读。
+          if (shuffled.length === 0) waitReason = "pool-empty (no dispatchable candidate in the ready pool)";
+          else if (afterTaskFilters.length === 0) waitReason = "filtered-empty (all dispatchable candidates filtered by predicates)";
+          else waitReason = "backoff (all dispatchable candidates are in quick-death backoff)";
+          break;
+        }
+        step = "selector";
+        const sel = await runSelectorWorker(candidates, selectorArgv, rootDir);
+        if (!sel) {
+          // 候选非空但 selector 未能给出任何选择（理论上 parseSelectorOutput 必回退首个，不会 null）。
+          waitReason = "pool-empty (selector returned no candidate)";
+          break;
+        }
+        step = "spawn-worker";
+        await spawnSelected(sel);
+      }
+
+      // AC138-3 无条件心跳：每轮循环写一条（⛔ 池空/判停轮也写——outcome 在这些轮不写）。
+      //   终态 stopReason 与瞬时 waitReason 都记 action=stop（观测面保留 stop_reason 读数，AC2）。
+      step = "write-round";
+      writeRound(round, running.length, poolSeen, stopReason ?? waitReason, liveness, reconciled);
+
+      // 3. 无在飞 ⇒ 终态 halt（stopReason latch）才退出；瞬时 WAIT（池可能再补 / 闸可能已放行）⇒
+      //    等 intervalMs 重读，⛔ 不退出（gap-worker-driver-stopreason-latch-permanent-stop AC3）。
+      if (running.length === 0) {
+        if (stopReason) break;
+        step = "sleep";
+        await sleep(intervalMs);
+        continue;
+      }
+
+      // 4. 等在飞 worker 结束（至少一个），再回环 reap + 补位。⛔ 从不主动杀在飞。
+      //    协调地板（gap-worker-driver-reconcile-interval，SPEC §5.5）：至少每 reconcileMs 协调一次——
+      //    边沿事件（worker 退出）全丢也降级「慢但正确」而非「静默停摆」。复用 routine-scheduler.isDue
+      //    的 interval 判定（⛔ 不新造定时器/判定）：isDue 的 interval 单位是分钟 ⇒ minutes = reconcileMs/60000。
+      step = "wait-in-flight";
+      if (reconcileMs > 0) {
+        const nowMs = Date.now();
+        const floorElapsed = isDue({ kind: "interval", minutes: reconcileMs / 60_000 }, { now: nowMs, lastRun: passStartMs });
+        const floorMs = floorElapsed ? 0 : Math.max(0, passStartMs + reconcileMs - nowMs);
+        // ⛔ 地板定时器必须在 race 结束时 clearTimeout：worker 先退出时，未触发的 setTimeout 仍挂起会让
+        // 驱动进程在循环 break 后多活 reconcileMs 秒（默认 300s）——halt 后 driver 不退出、测试/生产停摆。
+        await raceWithFloor(running, floorMs);
+      } else {
+        await Promise.race(running.map((r) => r.promise));
+      }
+    } catch (err) {
+      // 错误边界：写 error round + resident-error 事件，sleep 后继续（⛔ 不静默死、不 hot-loop 烧 CPU）。
+      const message = err && typeof err === "object" && "message" in err ? String((err as Error).message) : String(err);
+      const stack = err && typeof err === "object" && "stack" in err ? String((err as Error).stack) : "";
+      writeErrorRound(round, step, message, stack, liveness, poolSeen, running.length);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ event: "resident-error", round, step, error: message })}\n`,
+        );
+      }
       await sleep(intervalMs);
-      continue;
-    }
-
-    // 4. 等在飞 worker 结束（至少一个），再回环 reap + 补位。⛔ 从不主动杀在飞。
-    //    协调地板（gap-worker-driver-reconcile-interval，SPEC §5.5）：至少每 reconcileMs 协调一次——
-    //    边沿事件（worker 退出）全丢也降级「慢但正确」而非「静默停摆」。复用 routine-scheduler.isDue
-    //    的 interval 判定（⛔ 不新造定时器/判定）：isDue 的 interval 单位是分钟 ⇒ minutes = reconcileMs/60000。
-    if (reconcileMs > 0) {
-      const nowMs = Date.now();
-      const floorElapsed = isDue({ kind: "interval", minutes: reconcileMs / 60_000 }, { now: nowMs, lastRun: passStartMs });
-      const floorMs = floorElapsed ? 0 : Math.max(0, passStartMs + reconcileMs - nowMs);
-      // ⛔ 地板定时器必须在 race 结束时 clearTimeout：worker 先退出时，未触发的 setTimeout 仍挂起会让
-      // 驱动进程在循环 break 后多活 reconcileMs 秒（默认 300s）——halt 后 driver 不退出、测试/生产停摆。
-      await raceWithFloor(running, floorMs);
-    } else {
-      await Promise.race(running.map((r) => r.promise));
     }
   }
 
