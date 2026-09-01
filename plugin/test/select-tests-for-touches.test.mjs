@@ -564,13 +564,13 @@ test("AC11 — scripts/test.sh no-args branch is the grouped default (structural
   // The glob now spans ALL three test dirs (AC2); no-args routes through the grouped default
   // (product,engine, AC4); the exec line derives the default concurrency (gap-no-resource-awareness-
   // heavy-ops-run-blind AC5) and (gap-test-sh-flags-only-...) PREPENDS extra flags-only args before
-  // the file list so a user --test-concurrency=N wins (node last-flag-wins). effective_groups' BODY
-  // lives in the extracted runner-grouping.ts (gap-suite-hub-file-responsibility-strip), while the
+  // the file list so a user --test-concurrency=N wins (node last-flag-wins). effectiveGroups' BODY now
+  // lives in the TS module runner-grouping.ts (gap-suite-classification-lpt-scheduler-ts-ization), while the
   // build_deduped_files glob STAYS in test.sh (its `glob=(...)` line is the ADR-004 single-source
   // canonical test glob parsed by four checkers); the CALL-SITE pins stay on test.sh.
   assert.match(src, /local glob=\(packages\/\*\/test\/\*\.test\.mjs plugin\/test\/\*\.test\.mjs experiments\/quay-perpetual-stream\/test\/\*\.test\.mjs\)/);
   assert.match(src, /run_selected "\$\(effective_groups\)"/);
-  assert.match(grouping, /effective_groups\(\) \{\n  echo "product,engine"/);
+  assert.match(grouping, /export function effectiveGroups\(\): string \{\n  return "product,engine";/);
   assert.match(src, /exec node --test --test-concurrency="\$\(default_test_concurrency\)" "\$@" "\$\{files\[@\]\}"/);
   // The explicit-file branch still runs through the same exec line.
   assert.match(src, /exec node --test --test-concurrency="\$\(default_test_concurrency\)" "\$@"/);

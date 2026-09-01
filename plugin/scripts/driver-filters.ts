@@ -578,30 +578,75 @@ export function formatExitedNotLandedReason(failureReason: unknown, mechanicalFa
   return typeof failureReason === "string" ? failureReason : null;
 }
 
-/** 该 task 最近一条 exited-not-landed 的失败原因（AC2「上次失败原因」，读 worker-outcome.jsonl）。
- *  无记录 / 读失败 ⇒ null（读不懂 ≠ 无失败——但续做 prompt 以 "(unknown)" 呈现，不伪装成「没有失败」）。 */
-export function lastExitedNotLandedReason(root: string, taskId: string): string | null {
+/** 一条 exited-not-landed 尝试的机械读数（gap-worker-execution-history-index-not-reachable-from-task
+ *  B/C）：worker-outcome.jsonl 该 task 的全部 exited-not-landed 记录，每条投影出 (ts, run_id, session_id,
+ *  step, reason, fanInLog/suiteLog 绝对路径)。索引主键 = ts+step（⛔ 非 runId——runId 是 driver 轮次级、
+ *  非 per-attempt，本例 3 次同 runId）。suiteLog = suite 红时真因文件（.quay/fan-in-suite-*.log）的绝对
+ *  路径；fanInLog = 机械 fan-in 过程日志（.quay/fan-in-*.log）绝对路径。 */
+export interface ExitedNotLandedAttempt {
+  ts: string | null;
+  runId: string | null;
+  sessionId: string | null;
+  /** mechanical_fan_in.step（非机械 fan-in 失败 / 读不懂 ⇒ null）。 */
+  step: string | null;
+  /** 格式化失败原因（formatExitedNotLandedReason：优先 step=…: reason，回退 failure_reason）。 */
+  reason: string | null;
+  /** fan-in 过程日志绝对路径（mechanical_fan_in.fanInLog 存在时非 null）。 */
+  fanInLog: string | null;
+  /** suite 真因日志绝对路径（mechanical_fan_in.suiteLog 存在时非 null——suite 红）。 */
+  suiteLog: string | null;
+}
+
+/** 把 mechanical_fan_in 的日志 basename 还原成绝对路径（⛔ 记录只存 basename——与 fanInLog 同形，硬规则
+ *  4c：不靠命名约定猜，也不把绝对路径写进 durable 索引）。basename 缺 / 非字符串 ⇒ null。 */
+function outcomeLogPath(root: string, basename: unknown): string | null {
+  return typeof basename === "string" && basename ? path.join(root, ".quay", basename) : null;
+}
+
+/** 该 task 全部 exited-not-landed 尝试（时间序 = 文件行序）。⛔ 只取最后一条是 B 的病根——重跑 worker
+ *  看不到前两次栽在哪、也看不到日志路径。无记录 / 读失败 ⇒ []（读不懂 ≠ 无失败——空清单与「无记录」同形，
+ *  续做 prompt 以 "(no prior attempts)" 呈现）。主键 ts+step（runId 非 per-attempt）。 */
+export function exitedNotLandedAttempts(root: string, taskId: string): ExitedNotLandedAttempt[] {
   let text: string;
   try {
     text = fs.readFileSync(path.join(root, WORKER_OUTCOME_REL), "utf8");
   } catch {
-    return null;
+    return [];
   }
-  let last: string | null = null;
+  const attempts: ExitedNotLandedAttempt[] = [];
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    let rec: { task?: unknown; final_state?: unknown; failure_reason?: unknown; mechanical_fan_in?: unknown };
+    let rec: {
+      task?: unknown; final_state?: unknown; failure_reason?: unknown; mechanical_fan_in?: unknown;
+      ts?: unknown; run_id?: unknown; session_id?: unknown;
+    };
     try {
       rec = JSON.parse(trimmed);
     } catch {
       continue;
     }
-    if (rec.task === taskId && rec.final_state === "exited-not-landed") {
-      last = formatExitedNotLandedReason(rec.failure_reason, rec.mechanical_fan_in);
-    }
+    if (rec.task !== taskId || rec.final_state !== "exited-not-landed") continue;
+    const mfi = rec.mechanical_fan_in as { step?: unknown; fanInLog?: unknown; suiteLog?: unknown } | undefined;
+    attempts.push({
+      ts: typeof rec.ts === "string" ? rec.ts : null,
+      runId: typeof rec.run_id === "string" ? rec.run_id : null,
+      sessionId: typeof rec.session_id === "string" ? rec.session_id : null,
+      step: mfi && typeof mfi.step === "string" && mfi.step ? mfi.step : null,
+      reason: formatExitedNotLandedReason(rec.failure_reason, rec.mechanical_fan_in),
+      fanInLog: mfi ? outcomeLogPath(root, mfi.fanInLog) : null,
+      suiteLog: mfi ? outcomeLogPath(root, mfi.suiteLog) : null,
+    });
   }
-  return last;
+  return attempts;
+}
+
+/** 该 task 最近一条 exited-not-landed 的失败原因（AC2「上次失败原因」，读 worker-outcome.jsonl）。
+ *  无记录 / 读失败 ⇒ null（读不懂 ≠ 无失败——但续做 prompt 以 "(unknown)" 呈现，不伪装成「没有失败」）。
+ *  ⛔ 单 reader：委托 exitedNotLandedAttempts（与 markNeedsHuman / 续做 prompt 共用同一读法，⛔ 各读一遍）。 */
+export function lastExitedNotLandedReason(root: string, taskId: string): string | null {
+  const attempts = exitedNotLandedAttempts(root, taskId);
+  return attempts.length > 0 ? attempts[attempts.length - 1].reason : null;
 }
 
 /** 把修满/派满上限仍不合格的任务标 needs-human（status todo/ready → needs-human）+ 追加一条
@@ -626,11 +671,20 @@ export function markNeedsHuman(root: string, id: string, reason: string): { id: 
   // gap-needs-human-note-carries-step-verdict：注记携带最近 exited-not-landed 的实际失败步+判词
   // （⛔ 只写模板句会把 merge 冲突 / suite 红 / ac-gate 未勾等完全不同真因压扁成同一句——读注记无法区分）。
   // 无记录 / 读不懂 ⇒ 不追加该行（与旧行为同形，⛔ 不伪造成「有失败步」）。
-  const stepVerdict = lastExitedNotLandedReason(root, id);
+  // gap-worker-execution-history-index-not-reachable-from-task C：注记补 run_id / 日志路径 / session_id
+  // （复用同一 reader 已读的 outcome，⛔ 不新增 reader——exitedNotLandedAttempts 一次读文件，步判词与
+  // 指针同源）。无对应字段 ⇒ 缺省该行（⛔ 不伪造）。
+  const attempts = exitedNotLandedAttempts(root, id);
+  const lastAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+  const stepVerdict = lastAttempt ? lastAttempt.reason : null;
   const record =
     `\n## Needs-Human\n\n**执行 ${new Date().toISOString()} — 连续修满重试上限仍不合格（标 needs-human）**\n\n` +
     `- 阻碍原因：${reason}\n` +
-    (stepVerdict ? `- 失败步/判词：${stepVerdict}\n` : "");
+    (stepVerdict ? `- 失败步/判词：${stepVerdict}\n` : "") +
+    (lastAttempt?.runId ? `- run_id：${lastAttempt.runId}\n` : "") +
+    (lastAttempt?.sessionId ? `- session_id：${lastAttempt.sessionId}\n` : "") +
+    (lastAttempt?.suiteLog ? `- suite 日志：${lastAttempt.suiteLog}\n` : "") +
+    (lastAttempt?.fanInLog ? `- fan-in 日志：${lastAttempt.fanInLog}\n` : "");
   fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
   const rel = path.join("tasks", `${id}.md`);
   const committed = commitTaskFile(root, rel, `tasks: ${id} ${fromMatch[1]}→needs-human（重试上限机械翻转）`);

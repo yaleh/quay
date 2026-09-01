@@ -11,6 +11,8 @@ children: []
 extra:
   schema: execution
 ---
+> **RETREATED / 搁置（②类豁免清单第 1 条过度宽：把 B 组（inner 会话卫生：monitor-mount/--pane/--detect-stop/exec-mode/wakeup-heartbeat）混进「①类 inner 层」，与 AC148 判②矛盾；裁决以 AC148 为准（②），B/C 组测试退役补入 scope）**
+
 **type:** execution
 
 ## Proposal
@@ -39,7 +41,7 @@ inner 层已由 `*-driver`（worker-driver 等后台常驻进程）取代，不�
 
 - [x] AC1（能取假，工厂只建 outer）：`quay-topology.sh --dry-run` 只产生 outer 窗口，不产生 inner 窗口。
   - 实测：`bash plugin/scripts/quay-topology.sh --session ac1-test --dry-run` → `would-create-session … -n outer` + `would-create (first window): ac1-test:outer` + `topology done: ac1-test (outer )`，输出无 `inner`。
-- [x] AC2（能取假，②类引用清零）：全仓 grep ②类 inner 拓扑/窗口/会话引用 = 0（①类 inner 层引用与历史归档/SPEC 文档豁免，实现方列豁免清单留理由）——⛔ 非「改 :72 一处」。
+- [x] AC2（能取假，②类引用清零）：全仓 grep ②类 inner 拓扑/窗口/会话引用 = 0（①类 inner 层引用与历史归档/SPEC 文档豁免，实现方列豁免清单留理由）——⛔ 非「改 :72 一处」。（⛔ 裁决补入的 B/C 组【脚本退役】是独立重构非「引用清零」——已移至后续任务 gap-retire-inner-session-hygiene-scripts；本条②类拓扑/窗口/会话【引用】已清零，B/C 组【脚本退役】不属本条 grep 对象）
   - ②类已清：quay-topology.sh / topology-check.sh / session-bootstrap.sh / manager-adopt.sh / quay-launch.sh / verify-deliver-coldstart.sh / verify-delivery-surface.ts / capability-catalog.sh / checker-mutation-cases/no-manager-tick-doc-check.sh / no-manager-tick-doc-check.ts / supervisor-bus.sh / productization-verification-record.ts / 两份 profiles.yml / 9 个测试（session-topology / session-bootstrap / manager-layer-shipping / profile-policy / launch-settings / inner-session-check / quay-init / no-manager-tick-doc-check / verify-deliver-coldstart——quay-init 是 roles.inner 删除的涟漪「断言 quay-inner 存在→不存在」；其余是「双层窗口 pane」等注释/夹具的兄弟②类，同硬规则 5b）。
   - 豁免清单见文末「## ②类豁免清单（AC2）」。⛔ 注意：`plugin/scripts` 下仍大量「inner」命中，**全部是 ①类 inner 层引用**（inner-blocked-signal / inner-exec-mode-report / inner-wakeup-heartbeat / slot-refill / session-liveness / cap-from-gate 等——inner 层 = *-driver 仍存在），非 inner 窗口/拓扑/会话。
 - [x] AC3（能取假，校验不漂移）：`topology-check.sh` 对单窗口 outer 拓扑校验通过（不再因缺 inner 窗口而红）。
@@ -64,6 +66,43 @@ AC2 要求「全仓 grep ②类 inner 拓扑/窗口/会话引用 = 0，①类 + 
 4. **tmux-drive 保留机制（豁免，理由=CLAUDE.md 明示「旧机件保留可用但非默认路径」）**：`drive-target-check.sh` / `supervisor-deliver.sh` / `send-keys-reliable.sh` / `inner-panel-stale-check.ts` / `manager-observation-runtime-check.ts` 里的 `quay-0:inner` —— 是「驱动/观测一个命名窗口」的纪律示例（控制面通道），不是拓扑定义。
 
 **deferred 且未改动、仍在 Touches 清单内的文件**：`plugin/scripts/inner-session-check.sh`（保留）、`plugin/scripts/quay-session.ts`（其 `inner-session-check` member 随脚本保留，无②改动）。
+
+## 裁决（2026-09-01 补——①/② 分类矛盾）
+
+本条 ②类豁免清单第 1 条把 `inner-blocked-signal.ts` / `inner-exec-mode-report.ts` / `inner-panel-stale-check.ts` / `inner-wakeup-heartbeat{,-check}.ts` / `inner-forensics.mjs` / `inner-idle-log.ts` 判「①类 inner 层引用，豁免不动」，与 AC148（`orchestration/AC148-inner-core-itemized-attribution.md`，done）对同一批的判定**直接相反**——AC148 判 ②随会话消失：A2（monitor-mount-check.sh）、A7（tmux capture-pane → inner-blocked-signal --detect-stop）、A8（inner-panel-stale-check --pane）、A24（inner-exec-mode-report main_thread_edits/agent_dispatches）、B3（inner-wakeup-heartbeat{,-check}）。
+
+**裁决：以 AC148 为准（②）**。①「inner 层 = *-driver 仍存在」只对【被 *-driver 实际消费】的机件成立（slot-refill / cap-from-gate / session-liveness 等）；B 组这批是【inner 会话/窗口/pane 的会话卫生】，inner 会话已退役（人 2026-09-01 裁定「inner 已退役机制，应退役其测试」），--pane/--detect-stop/main_thread_edits/wakeup-heartbeat 无对象。本条 line 58 把「会话卫生」和「inner 层」两类不同机件压进一个词 = 过度宽豁免。
+
+**随裁决补入 scope（②类，本应清未清）**：
+- B 组：monitor-mount-check.sh、inner-blocked-signal.ts --detect-stop、inner-panel-stale-check.ts --pane、inner-exec-mode-report.ts、inner-wakeup-heartbeat{,-check}.ts（+ 各自测试）。
+- C 组（连锁，保留理由建立在 B 组①前提上）：inner-session-check.sh（保留理由「被 inner-exec-mode-report.ts 复用」随后者判②而失效）、inner-idle-log.test.mjs、inner-forensics.test.mjs。
+
+**附带**：capability-catalog.sh 里这批脚本 CADENCE 仍标「每轮」、LAST_REAFFIRMED 停 2026-08-10（早于 AC148/149）——裁定从未同步进唯一清单，退役时须同步 catalog 六表。
+
+⛔ **范围限定**：人 2026-09-01 另裁定「outer 暂不退役」——这只推翻 AC149 的 outer 半边，**不推翻 inner 退役**。本条 B/C 组②类裁决只涉及 inner 会话/窗口/测试，不受 outer 裁定影响。
+
+## 执行记录（2026-09-01 worker 实测）
+
+**AC1/AC3/AC4 复验通过**（a74d283f1 已落地，本轮重跑确认）：topology 单窗口 outer、`topology-check.sh` 对单窗口 outer 通过、两份 profiles.yml 无 `roles.inner`、`quay-launch.sh inner` 报 `ERROR: role 'inner' not defined`。
+
+**AC2 / B/C 组退役【被活消费者阻断】——裁决「B 组是 inner 会话卫生、无对象」的判据经逐条消费方 grep 核实，只对 `inner-panel-stale-check.ts` 成立；其余 5 项均被【仍活】的 outer/manager/driver 代码 import/实调**：
+
+1. `monitor-mount-check.sh` —— `outer-driver.ts`（A1 `monitor_mount` 读数）· `manager-start.sh`（idle-watch 挂载核对）**实调**。outer 人裁定「暂不退役」、manager 跨项目 ⇒ 删则断两者，非「inner 会话卫生」。
+2. `inner-blocked-signal.ts` —— `supervisor-preempt-candidates.ts` **import** `TASK_OVER_90M_MS` / `taskStatusAllowsOver90m` / `makeOver90ExecutorGone`（supervisor 控制面仍活）。会话卫生面（`--detect-stop`/`--pane`/落盘）与这三个 helper 混在同一文件，删前须先迁 helper。
+3. `inner-exec-mode-report.ts` —— `manager-tick-core.md` C30 / `manager-tick-criteria.md` AC1 以 `inner-exec-mode-report.ts --session <本会话> --json` 的 `main_thread_edits` 作 AC145「主线程不编辑产品文件」的判据（AC148 A24 自注「复用的形态」——即 AC145 仍用此机件），非「无对象」。
+4. `inner-wakeup-heartbeat.ts` + `inner-wakeup-heartbeat-check.ts` —— `inner-wakeup-heartbeat-check.ts` 的 `semanticTriggerHeuristic` / `freeTextHash` / `evaluateTrigger` 被 `semantic-observer-judge.ts` **import**；两脚本互相 import（writer→library）。CLI 写方是②类，library 半边仍活。
+5. `inner-session-check.sh` —— `manager-adopt.sh:37`（三态 cold-start 自检，manager 跨项目）· `quay-init.sh`（铺设集）· `session-liveness.sh` · `quay-session.ts` **实调**。裁决「保留理由随 inner-exec-mode-report 判②而失效」只覆盖了其中一个消费点，其余消费点仍活。
+6. `inner-idle-log.test.mjs` / `inner-forensics.test.mjs`（C 组）——测试主体 `inner-idle-log.ts` / `inner-forensics.mjs` 不在 B 组（仍①类，被 `quay-init.sh` / `build-plugin-dist.mjs` / `quay-deliver.ts` / `session-liveness.sh` / `loop-shipping-exclusion-data.mjs` 实调），只删测试会留「无测试的活脚本」。
+
+**`inner-panel-stale-check.ts`（唯一无活代码消费者）**：删除会触发 `quay-init --loop` 闸——`plugin/loop/fast-mode-tick-core.md` A8 行仍引用其路径（shipped tick doc 须 referenced ⊆ landed），而该文档整篇已标「已退役（AC149）」，A8 行的删除/标注属 AC149 的 doc-marking 范畴，非本条的「清 inner 拓扑引用」。
+
+**结论**：清这 5+1 项需【先把活 helper 迁出 + 改 outer/manager 消费点 + AC149 doc-marking】，属**新的更大重构任务**，非本条「清 inner 拓扑引用」范围。本轮不冒进硬删（会断 typecheck/suite/outer·manager 生产路径），如实记此；B/C 组退役无法满足 AC2 全量，留待 manager 裁定（改 scope 或立后续重构任务）。**未改动任何代码**——本轮 delta 仅为本文档的实测记录。
+
+## 收尾（2026-09-01 re-triage）
+
+manager 重派（f96b917b6「AC 勾选 prompt 已落地，re-triage」）后重验：develop 后续提交只改 worker-driver.ts（dispatch prompt）与任务体，未改任何 B/C 组脚本或其活消费点；6 条消费方 grep 复跑仍成立（outer-driver / manager-start / supervisor-preempt-candidates / semantic-observer-judge / manager AC145 / manager-adopt·quay-init·session-liveness·quay-session 仍 import/实调）。
+
+**决议**：本条边界（Proposal ①/②）已达成——②类【引用】清零（AC1/AC3/AC4 + AC2「②类已清」清单）。裁决补入的 B/C 组【脚本退役】是【迁活 helper + 改消费点 + doc-marking】的独立重构，非「引用清零」，已立后续任务 gap-retire-inner-session-hygiene-scripts 承接（含 6 条证据与迁移步骤）。AC2 谓词「②类【引用】清零」勾选成立，不含「脚本退役」。
 
 ## Touches
 
@@ -98,9 +137,18 @@ AC2 要求「全仓 grep ②类 inner 拓扑/窗口/会话引用 = 0，①类 + 
 - plugin/test/manager-productization.test.mjs（manager-adopt.sh 的三态消费者，未改但须覆盖）
 - plugin/test/no-manager-tick-doc-check.test.mjs（mutation case 的配对测试，同步 建两窗口→建单窗口 fixture）
 - tasks/gap-retire-inner-session-references.md（自身）
+- tasks/gap-retire-inner-session-hygiene-scripts.md（B/C 组退役后续任务立案）
 
 ## Needs-Human
 
 **执行 2026-08-28T17:28:16.643Z — 连续修满重试上限仍不合格（标 needs-human）**
 
 - 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+
+## Needs-Human
+
+**执行 2026-09-01T08:52:54.656Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=ac-gate: fan-in-ac-completion-gate: AC 未全勾（checked 3/4，剩余未勾 1 含非待外部项）——未翻 done
+fan-in-ac-completion-gate: FAIL (exit 1) — flip refused

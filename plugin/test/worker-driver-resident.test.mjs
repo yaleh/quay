@@ -73,6 +73,7 @@ import {
   countBranchCommits,
   branchHeadSubject,
   lastExitedNotLandedReason,
+  exitedNotLandedAttempts,
   isFfNotFastForwardFailure,
   worktreePresentForTaskAsync,
   worktreePathsForTaskAsync,
@@ -202,7 +203,11 @@ test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatch
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 5000);
+  // 5000 → 15000：两次完整派发（ready-pool/selector/worker 各 spawn 一个 node 子进程 + 每次派发后
+  // 等在飞 worker 落地含 git landing 读）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时
+  // flake、picks=1，与同文件 AC1「第二次派发」10000ms 约定同源——gap-worker-driver-resident-loop-intermittent-hang；
+  // 补充处置 A 类在 develop 10000 基础上再放宽至 15000）。
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 15000);
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   // gap-a picked first (touches foo.ts); while it is in-flight, gap-b (also foo.ts) must be filtered
   // out of the selector's candidate set — the selector asked for gap-b on its 2nd call but was only
@@ -246,7 +251,11 @@ test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the se
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => readOutcomeLines(root).length >= 1, 5000);
+  // 5000 → 15000：一次完整派发（ready-pool/selector/worker 各 spawn 一个 node 子进程 + worker 落地含
+  // git landing 读）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时 flake、outcomes=0，与同文件
+  // AC1 10000ms 约定同源——gap-worker-driver-resident-loop-intermittent-hang；
+  // 补充处置 A 类在 develop 10000 基础上再放宽至 15000）。
+  await waitFor(() => readOutcomeLines(root).length >= 1, 15000);
   const picked = drv.events().find((e) => e.event === "selector-picked");
   assert.ok(picked, "the selection loop emitted a selector-picked event (AC2 chain is wired)");
   assert.equal(picked.task, "gap-a");
@@ -307,7 +316,7 @@ test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero 
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => readRoundLines(root).length >= 1, 5000);
+  await waitFor(() => readRoundLines(root).length >= 1, 15000);
   assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC3: no worker spawned while resource-gate reports WAIT");
   assert.equal(readOutcomeLines(root).length, 0, "zero outcome records — nothing was dispatched");
   const stop = readRoundLines(root).find((r) => r.action === "stop");
@@ -338,7 +347,7 @@ test("AC3 — MCP halt mid-run stops NEW dispatch only; the in-flight worker com
   let buf = "";
   driver.stdout.on("data", (d) => { buf += d; });
   let workerPid = null;
-  for (let i = 0; i < 200 && workerPid === null; i++) {
+  for (let i = 0; i < 1000 && workerPid === null; i++) {
     if (fs.existsSync(pidFile)) workerPid = Number(fs.readFileSync(pidFile, "utf8").trim().split("\n")[0]);
     else await new Promise((r) => setTimeout(r, 20));
   }
@@ -395,7 +404,7 @@ test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome s
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => readRoundLines(root).length >= 1, 5000);
+  await waitFor(() => readRoundLines(root).length >= 1, 15000);
   const rounds = readRoundLines(root);
   assert.ok(rounds.length >= 1, "at least one round record written even when the pool is empty");
   const last = rounds[rounds.length - 1];
@@ -504,12 +513,12 @@ test("negative control — drv.stop kills the whole process group: a long-lived 
   ]);
   t.after(() => drv.stop());
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 5000);
+  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 15000);
   const closed = new Promise((resolve) => drv.child.stdout.on("close", resolve));
   drv.stop();
   await Promise.race([
     closed,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("stdout pipe still open after stop — an orphaned worker held it (group-kill not applied)")), 3000)),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("stdout pipe still open after stop — an orphaned worker held it (group-kill not applied)")), 10000)),
   ]);
 });
 
@@ -997,5 +1006,56 @@ test("B (能取假, 结构面) — reason 读 mechanical_fan_in（已上收 driv
   assert.doesNotMatch(wsrc, /OUTLINE_DOC_REL/, "A retired: no OUTLINE_DOC_REL import");
   assert.doesNotMatch(wsrc, /resolveDerivedMergeConflict/, "A retired: no derived-recompute resolver");
   assert.doesNotMatch(wsrc, /DERIVED_CONFLICT_FILES/, "A retired: no derived file set");
+});
+
+// ── gap-worker-execution-history-index-not-reachable-from-task（B：续做历史 + suite 日志路径）──────
+// B 缺口的病根：续做 prompt 只带一句 reason（lastExitedNotLandedReason 只取最后一条）⇒ 重跑 worker 看不到
+// 前两次栽在哪、也看不到日志路径。修法：exitedNotLandedAttempts 收集全部尝试；buildContinueWorkerPrompt
+// 带前 N 次 (ts,step,reason) 清单 + .quay/fan-in-suite- 绝对路径。
+
+test("B (能取假) — exitedNotLandedAttempts 收集全部尝试（⛔ 只取最后一条 ⇒ 假）", () => {
+  const root = makeRoot("history-b");
+  const suiteLogName = "fan-in-suite-gap-hb-run2.log";
+  fs.writeFileSync(path.join(root, ".quay", suiteLogName), "suite true-cause\n", "utf8");
+  fs.appendFileSync(path.join(root, WORKER_OUTCOME_REL), [
+    JSON.stringify({ ts: "2026-09-01T03:44:00.000Z", task: "gap-hb", final_state: "exited-not-landed", run_id: "wk-prod-1788218643", session_id: "sess-1", mechanical_fan_in: { outcome: "red", step: "anti-drift", reason: "8 violations", fanInLog: "fan-in-gap-hb-run2.log" } }),
+    JSON.stringify({ ts: "2026-09-01T04:21:00.000Z", task: "gap-hb", final_state: "exited-not-landed", run_id: "wk-prod-1788218643", session_id: "sess-2", mechanical_fan_in: { outcome: "red", step: "ac-precheck", reason: "0/3 fail-fast", fanInLog: "fan-in-gap-hb-run2.log" } }),
+    JSON.stringify({ ts: "2026-09-01T04:57:00.000Z", task: "gap-hb", final_state: "exited-not-landed", run_id: "wk-prod-1788218643", session_id: "sess-3", mechanical_fan_in: { outcome: "red", step: "suite", reason: "suite red", fanInLog: "fan-in-gap-hb-run2.log", suiteLog: suiteLogName } }),
+  ].join("\n") + "\n", "utf8");
+
+  const attempts = exitedNotLandedAttempts(root, "gap-hb");
+  assert.equal(attempts.length, 3, "全部 3 次 exited-not-landed 都在清单里（⛔ 只取最后一条 ⇒ 假）");
+  assert.deepEqual(attempts.map((a) => a.step), ["anti-drift", "ac-precheck", "suite"], "三次的失败步都在");
+  assert.equal(attempts[2].suiteLog, path.join(root, ".quay", suiteLogName), "suite 日志还原成绝对路径");
+  assert.equal(attempts[2].runId, "wk-prod-1788218643", "run_id 读数");
+  assert.equal(attempts[2].sessionId, "sess-3", "session_id 读数");
+  assert.ok(attempts.slice(0, 2).every((a) => a.suiteLog === null), "非 suite 步 suiteLog null（⛔ 误设 ⇒ 假）");
+  assert.equal(attempts[0].fanInLog, path.join(root, ".quay", "fan-in-gap-hb-run2.log"), "fan-in 日志还原成绝对路径");
+});
+
+test("B (能取假) — buildContinueWorkerPrompt 带前 N 次 (ts,step,reason) 清单 + .quay/fan-in-suite- 绝对路径（在盘）", () => {
+  const root = makeRoot("history-prompt");
+  const suiteLogName = "fan-in-suite-gap-hp-r9.log";
+  fs.writeFileSync(path.join(root, ".quay", suiteLogName), "true cause\n", "utf8");
+  const suiteAbs = path.join(root, ".quay", suiteLogName);
+  const attempts = [
+    { ts: "2026-09-01T03:44:00.000Z", runId: "r", sessionId: "s1", step: "anti-drift", reason: "step=anti-drift: 8 violations", fanInLog: null, suiteLog: null },
+    { ts: "2026-09-01T04:57:00.000Z", runId: "r", sessionId: "s2", step: "suite", reason: "step=suite: suite red", fanInLog: null, suiteLog: suiteAbs },
+  ];
+  const p = buildContinueWorkerPrompt("gap-hp", root, {
+    worktreePath: "/wt",
+    branchCommits: 1,
+    branchHeadSubject: null,
+    acChecked: 0,
+    acTotal: 3,
+    failureReason: "step=suite: suite red",
+    attempts,
+  });
+  assert.match(p, /step=anti-drift: 8 violations/, "清单含第 1 次 (step,reason)（剥掉重复 step= 前缀）");
+  assert.match(p, /step=suite: suite red/, "清单含第 2 次 (step,reason)");
+  assert.doesNotMatch(p, /step=anti-drift: step=anti-drift/, "⛔ 清单不重复 step= 前缀");
+  assert.match(p, /\.quay\/fan-in-suite-/, "含 .quay/fan-in-suite- 字面路径");
+  assert.ok(p.includes(suiteAbs), `含 suite 日志绝对路径 ${suiteAbs}`);
+  assert.ok(fs.existsSync(suiteAbs), "该路径在盘上存在（AC2 判据）");
 });
 

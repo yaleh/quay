@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-continue-doc-only-advance-reuse-suite
 title: develop 在 suite 期间被 doc/inert 前进时，CONTINUE 重跑复用上一 green 判定（按测试影响面键控 suite）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -24,10 +24,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 doc/inert-only 前进触发的 CONTINUE 不重跑全量 suite（生产 step-trace 该轮无 suite step）
-- [ ] AC2 code 前进触发 CONTINUE 时照常重跑 suite（不削弱合并验证）
-- [ ] AC3 doc-only 前进后复用判定与重跑一致（对照 N 次，无翻转）
-- [ ] AC4 测试影响面判定可机械读（delta 分类器扩展到 develop 前进面，不靠人工）
+- [x] AC1 doc/inert-only 前进触发的 CONTINUE 不重跑全量 suite（生产 step-trace 该轮无 suite step）
+- [x] AC2 code 前进触发 CONTINUE 时照常重跑 suite（不削弱合并验证）
+- [x] AC3 doc-only 前进后复用判定与重跑一致（对照 N 次，无翻转）
+- [x] AC4 测试影响面判定可机械读（delta 分类器扩展到 develop 前进面，不靠人工）
 
 ## Definition of Done
 
@@ -36,6 +36,7 @@ extra:
 ## Touches
 
 - plugin/scripts/worker-driver.ts（CONTINUE/重跑路径 + delta 分类器扩展）
+- plugin/test/worker-driver-fan-in.test.mjs（reuse 判定测试 AC1/AC2/AC4）
 - tasks/gap-fan-in-continue-doc-only-advance-reuse-suite.md（自身）
 
 ## Needs-Human

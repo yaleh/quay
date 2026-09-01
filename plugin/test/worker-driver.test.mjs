@@ -705,6 +705,28 @@ test("AC2 (能取假，负控制) — prompt no longer leaves bootstrap to agent
   assert.doesNotMatch(cont, /cp config\.yml/, "AC2: continue prompt must not instruct a hand-rolled config.yml copy");
 });
 
+test("AC_A1 (能取假) — buildWorkerPrompt 含「逐条验证 AC → 任务体勾选 - [x] → 与实现一并提交」指令字面 (gap-worker-dispatch-prompt-ac-check-instruction)", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  // 按位置判定（prompt 字面含勾 AC 指令，非注释里提到）：点名 AC 段 + 勾选复选框 + 逐条验证 + 与实现一并提交。
+  assert.match(prompt, /## Acceptance Criteria/, "names the task body AC section");
+  assert.match(prompt, /- \[x\]/, "instructs checking off the checkbox (- [x])");
+  assert.match(prompt, /one-by-one/, "instructs per-criterion (逐条) verification");
+  assert.match(prompt, /committing these AC checkbox updates together with your implementation/, "AC 勾选与实现一并提交");
+});
+
+test("gap-worker-dispatch-prompt-ac-check-instruction — buildContinueWorkerPrompt 同 seam 也带勾 AC 指令 (续做轮同样勾选，否则 ac-precheck 0/3 再烧一轮)", () => {
+  const cont = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "x",
+    acChecked: 0,
+    acTotal: 3,
+    failureReason: "ac-precheck 0/3",
+  });
+  assert.match(cont, /- \[x\]/, "continue prompt instructs checking off - [x]");
+  assert.match(cont, /## Acceptance Criteria/, "continue prompt names the AC section");
+});
+
 test("stashIfDirty — non-git ⇒ no-op; clean ⇒ files=[]; dirty ⇒ observe but NEVER stash others' changes (归属区分)", () => {
   // non-git dir (the phase-1 makeRoot shape) ⇒ graceful no-op.
   const nonGit = makeRoot("nogit");
@@ -830,7 +852,18 @@ test("AC1 — worker exit 0 but not landed (status=ready / leftover worktree) �
   // 折叠进一次 driver——① status=ready（gap-nl，无 worktree）② status=done + 残留 worktree（gap-wt）。
   // 2 次真 spawn → 1 次，⛔ 不删断言换时间。
   writeTaskFile(root, "gap-nl", "ready"); // ready ⇒ 证伪落地（无 worktree）
-  writeTaskFile(root, "gap-wt", "done"); // done + 残留 worktree ⇒ 证伪落地
+  // gap-wt: status=done + 残留 worktree ⇒ 证伪落地。⛔ 任务体须带全勾 AC/DoD——gap-worker-ac-check-
+  // shortcircuit 后 finishAsync 在 spawn 机械 fan-in 前查 AC；缺段（writeTaskFile 只写 Proposal）⇒ 短路
+  // exited-not-landed（「AC 未全勾」），到不了残留 worktree 落地判定。全勾 ⇒ 不短路，落地判定照常证伪
+  // 「leftover worktree」。⛔ 不改 writeTaskFile（共享 helper，其契约是「最小任务体 + 给定 status」）。
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "tasks", "gap-wt.md"),
+    "---\nid: gap-wt\nstatus: done\n---\n\n## Proposal\n\nbody\n\n## Acceptance Criteria\n\n- [x] AC1 landed\n\n## Definition of Done\n\n- [x] DoD1 landed\n",
+    "utf8",
+  );
+  runGit(root, ["add", "tasks/gap-wt.md"]);
+  runGit(root, ["commit", "-q", "-m", "task gap-wt done"]);
   runGit(root, ["worktree", "add", "-q", "-b", "task/gap-wt", wtPath]);
   let code = 0;
   try {

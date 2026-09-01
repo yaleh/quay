@@ -717,3 +717,40 @@ test("负控制 — 双分支未建 ⇒ no-refs（可区分取值，⛔ 与「�
   git(root, "commit", "-q", "-m", "baseline");
   assert.equal(syncDocDevelopBidirectional(root), "no-refs", "读 ref 失败 ⇒ no-refs（非「无分歧」）");
 });
+
+// ── gap-worker-execution-history-index-not-reachable-from-task（C：Needs-Human 指针）──────────────
+// C 缺口的病根：## Needs-Human 注记只写时间戳+原因+失败步，无 run_id / 日志路径 / session_id ⇒ 人无法从
+// 任务体直接到达该次尝试的 transcript 与真因日志。修法：注记补 run_id / 日志路径 / session_id（复用同一
+// reader 已读的 outcome，⛔ 不新增 reader）。
+
+test("C (能取假) — needs-human 注记含 run_id ∧ .quay/fan-in- 路径 ∧ session_id（⛔ 缺任一 ⇒ 假）", (t) => {
+  const root = makeRoot("nh-pointer");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, WORKER_OUTCOME_REL), JSON.stringify({
+    ts: "2026-09-01T04:57:00.000Z", task: "gap-nh", final_state: "exited-not-landed",
+    run_id: "wk-prod-1788218643", session_id: "sess-3",
+    mechanical_fan_in: { outcome: "red", step: "suite", reason: "suite red", suiteLog: "fan-in-suite-gap-nh-run.log", fanInLog: "fan-in-gap-nh-run.log" },
+  }) + "\n", "utf8");
+
+  const res = markNeedsHuman(root, "gap-nh", "worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）");
+  assert.equal(res.ok, true);
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-nh.md"), "utf8");
+  assert.match(body, /run_id：wk-prod-1788218643/, "C: 注记含 run_id");
+  assert.match(body, /session_id：sess-3/, "C: 注记含 session_id");
+  assert.match(body, /suite 日志：/, "C: 注记含 suite 日志行");
+  assert.match(body, /\.quay\/fan-in-suite-gap-nh-run\.log/, "C: suite 日志路径含 .quay/fan-in-（绝对路径）");
+  assert.match(body, /fan-in 日志：/, "C: 注记含 fan-in 日志行");
+});
+
+test("C (负控制) — 无 exited-not-landed 记录 ⇒ 不追加 run_id/日志/session_id 行（与旧行为同形，⛔ 不伪造）", (t) => {
+  const root = makeRoot("nh-nopointer");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
+  const res = markNeedsHuman(root, "gap-nh", "worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）");
+  assert.equal(res.ok, true);
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-nh.md"), "utf8");
+  assert.doesNotMatch(body, /run_id：/, "C 负控制: no run_id line when no outcome record");
+  assert.doesNotMatch(body, /session_id：/, "C 负控制: no session_id line when no outcome record");
+});

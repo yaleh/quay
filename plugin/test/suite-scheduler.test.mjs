@@ -31,6 +31,9 @@ import {
   nextDispatch,
   simulateSchedule,
   simulateMinLock,
+  classifyAndOrder,
+  toSuiteGroup,
+  groupsArgToSuiteGroups,
 } from "../scripts/suite-scheduler.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -144,6 +147,51 @@ test("AC2 control — waterline makespan < min-lock makespan (serial∥lowconc o
   assert.ok(waterline < minLock, `waterline ${waterline} must beat min-lock ${minLock}`);
 });
 
+// ── classification + LPT layer (gap-suite-classification-lpt-scheduler-ts-ization) ────────────────
+// The scheduler's input contract is now the RAW deduped file list; classification (product+engine → main,
+// serial → serial, lowconc → lowconc) and LPT ordering live inside classifyAndOrder. These tests prove
+// the bucket mapping, the --groups filter, and that classification is byte-consistent with the metadata
+// modes' single-pass classifier.
+
+test("toSuiteGroup — product/engine collapse to main; serial/lowconc map 1:1", () => {
+  assert.equal(toSuiteGroup("product"), "main");
+  assert.equal(toSuiteGroup("engine"), "main");
+  assert.equal(toSuiteGroup("serial"), "serial");
+  assert.equal(toSuiteGroup("lowconc"), "lowconc");
+});
+
+test("groupsArgToSuiteGroups — product/engine → main, serial/lowconc 1:1, an unknown token matches nothing", () => {
+  assert.deepEqual([...groupsArgToSuiteGroups("product,engine,serial,lowconc")].sort(), ["lowconc", "main", "serial"]);
+  assert.deepEqual([...groupsArgToSuiteGroups("product,engine")], ["main"]);
+  assert.deepEqual([...groupsArgToSuiteGroups("serial")], ["serial"]);
+  assert.deepEqual([...groupsArgToSuiteGroups("bogus")], [], "a bogus --group selects no files (same as the old select_files over an unknown group)");
+});
+
+test("classifyAndOrder — raw files classify into buckets, --groups filters, LPT fails open on an absent carrier", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-classify-"));
+  try {
+    const serial = path.join(dir, "s.test.mjs");
+    const low = path.join(dir, "l.test.mjs");
+    const main1 = path.join(dir, "m1.test.mjs");
+    fs.writeFileSync(serial, "// @test-group serial\nimport { test } from 'node:test';\ntest('s', () => {});\n");
+    fs.writeFileSync(low, "// @test-group lowconc\nimport { test } from 'node:test';\ntest('l', () => {});\n");
+    fs.writeFileSync(main1, "import { test } from 'node:test';\ntest('m', () => {});\n");
+    const all = classifyAndOrder([serial, low, main1], { root: dir, rounds: 3, lptEnabled: true });
+    assert.deepEqual(all.serial, [serial]);
+    assert.deepEqual(all.lowconc, [low]);
+    assert.deepEqual(all.main, [main1]);
+    const mainOnly = classifyAndOrder([serial, low, main1], { root: dir, rounds: 3, lptEnabled: true, groups: "product,engine" });
+    assert.deepEqual(mainOnly.serial, [], "--groups product,engine excludes serial");
+    assert.deepEqual(mainOnly.lowconc, [], "--groups product,engine excludes lowconc");
+    assert.deepEqual(mainOnly.main, [main1]);
+    // lptEnabled=false keeps the classification but skips the carrier read (scheduling-only, unchanged).
+    const noLpt = classifyAndOrder([serial, low, main1], { root: dir, rounds: 3, lptEnabled: false });
+    assert.deepEqual(noLpt.main, [main1]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runScheduler — pass/fail-neutral execution: exit aggregate = failed-file count (one red, one green)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-probe-"));
   try {
@@ -163,11 +211,15 @@ test("runScheduler — pass/fail-neutral execution: exit aggregate = failed-file
     for (const k of Object.keys(childEnv)) {
       if (k.startsWith("NODE_TEST_")) delete childEnv[k];
     }
-    const manifest = `main\t${okFile}\nmain\t${badFile}\n`;
+    // The scheduler now takes a RAW file list (one path per line) — classification + LPT live inside
+    // (gap-suite-classification-lpt-scheduler-ts-ization). Both files are undeclared ⇒ engine ⇒ main.
+    const manifest = `${okFile}\n${badFile}\n`;
     const r = spawnSync(
       process.execPath,
       ["--no-warnings", "--experimental-strip-types", SCHEDULER_CLI,
-        "--serial-concurrency", "1", "--lowconc-concurrency", "1", "--main-concurrency", "2"],
+        "--root", dir, "--main-root", dir,
+        "--serial-concurrency", "1", "--lowconc-concurrency", "1", "--main-concurrency", "2",
+        "--groups", "product,engine"],
       { input: manifest, encoding: "utf8", env: childEnv },
     );
     assert.equal(r.status, 1, `one failing file ⇒ exit 1 (stderr: ${r.stderr})`);

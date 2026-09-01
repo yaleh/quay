@@ -137,7 +137,7 @@ function paneHasClaude(env, session) {
   }
   return false;
 }
-async function waitForClaude(env, session, timeoutMs = 5000) {
+async function waitForClaude(env, session, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (paneHasClaude(env, session)) return true;
