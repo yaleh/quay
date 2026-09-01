@@ -35,9 +35,9 @@ ts-ization 方向已定（`gap-execution-loop-p4-suite-entry-ts-ization` done：
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：`suite-scheduler.ts` 收原始文件列表、分类+LPT 在 TS 内——grep test.sh 无 `lpt_reorder_files` bash 定义/调用、无 `source ... runner-grouping.ts`、无 3 套 dispatch 循环；`suite-scheduler.ts`（或新 TS 模块）含 group 分类 + LPT 排序逻辑；（⛔ 分类/LPT 仍在 bash ⇒ 假）。
-- [ ] AC2（能取假，生产载体，硬规则 4 推论三）：落地后时间窗内，全量轮 main 组最长文件启动 offset 回 0 附近（与短文件差消除），N 只计落地后轮次；（⛔ 用落地前轮冒充 ⇒ 假）。
-- [ ] AC3（能取假，无回归）：legacy `QUAY_SUITE_SCHEDULER=0` 路径 + `--group`/`--buckets` 分组结果同文件集同断言 pass/fail 结果一致（分类逻辑 ts-ize 不改分类语义）。
+- [x] AC1（能取假，机制级）：`suite-scheduler.ts` 收原始文件列表、分类+LPT 在 TS 内——grep test.sh 无 `lpt_reorder_files` bash 定义/调用、无 `source ... runner-grouping.ts`、无 3 套 dispatch 循环；`suite-scheduler.ts`（或新 TS 模块）含 group 分类 + LPT 排序逻辑；（⛔ 分类/LPT 仍在 bash ⇒ 假）。
+- [ ] AC2（能取假，生产载体，硬规则 4 推论三）：落地后时间窗内，全量轮 main 组最长文件启动 offset 回 0 附近（与短文件差消除），N 只计落地后轮次；（⛔ 用落地前轮冒充 ⇒ 假）。（待外部）
+- [x] AC3（能取假，无回归）：legacy `QUAY_SUITE_SCHEDULER=0` 路径 + `--group`/`--buckets` 分组结果同文件集同断言 pass/fail 结果一致（分类逻辑 ts-ize 不改分类语义）。
 
 ## Definition of Done
 
