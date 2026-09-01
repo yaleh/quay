@@ -102,13 +102,37 @@ ready-made body.
    equivalent of `artifactsComplete()`/`detectShape()` in `plugin/scripts/ready-pool-check.ts`) —
    its `missing` must be `[]`. Do not commit on a non-empty `missing`.
 
-8. **Land it.** `git add tasks/<id>.md && git commit -m "tasks: 立案 <id>（<one-line why>）"` —
-   scope the commit to ONLY the task file(s) this step authored (plus any capability-catalog/
-   outline registration named in step 4); never `git add -A`. If the worktree has unrelated dirty
-   files, leave them untouched. **Steering hygiene**: if this workspace runs an autonomous loop
-   that could race a direct commit to a shared checkout, author in a private worktree / land at a
-   clean window per that loop's own documented convention (same caveat as `quay-directive` step
-   6) — this skill does not assume any specific loop exists.
+8. **Land it — pick the host-appropriate path; both are real, don't default to one without
+   checking.** How this skill is actually landed depends on how the invoking session is running,
+   not on this workspace's layout — determine which of the two you are BEFORE writing anything:
+
+   - **Isolated background session** (a spawned subagent, a `claude --bg` session, or any host
+     that enforces a worktree-isolation guard — a direct `Edit`/`Write`/commit against the shared
+     checkout is refused until you isolate). Isolate first: this host's own isolation tool if it
+     has one, or a manual `git worktree add <path> -b <branch> <authoritative-branch>`. **Verify
+     the base is actually fresh before trusting it — do not skip this.** A tool's default base can
+     silently resolve to a stale ref (observed in practice: a default-base worktree landed 7837
+     commits behind the workspace's authoritative branch). Confirm freshness explicitly —
+     `git rev-list --count <base>..<authoritative-branch>` should be `0` (or you know why it
+     isn't) — before doing any work in it; branch off the workspace's own authoritative branch by
+     name (this store's `tasks_dir` resolution from step 1 tells you which branch that is) rather
+     than accepting an unverified default. Do steps 1-7 in that isolated worktree, then merge the
+     resulting commit back into the shared checkout's working branch (dry-run first —
+     `git merge-tree <merge-base> <working-branch> <your-branch>` — to confirm no conflict, then
+     `git merge --no-edit <your-branch>`), following whatever doc-branch↔authoritative-branch sync
+     convention this workspace documents (if any) so the change reaches the real task store, not
+     an orphaned local branch nobody reads.
+   - **Unconstrained foreground/interactive session** whose working directory already IS the
+     shared checkout, with no isolation guard in effect (a persistent driving session with direct
+     write access to the working tree — this is how this workspace's own task-filing history
+     actually lands this class of work: every sampled instance was a single-parent commit straight
+     onto the checkout's current branch, with zero worktree or branch detours). Just commit
+     directly there — no worktree needed, and forcing one adds ceremony a direct commit doesn't.
+
+   Either way: scope the commit to ONLY the task file(s) this step authored (plus any
+   capability-catalog/outline registration named in step 4) — `git add tasks/<id>.md ... && git
+   commit -m "tasks: 立案 <id>（<one-line why>）"`, never `git add -A`. If the checkout/worktree has
+   unrelated dirty files, leave them untouched.
 
 ## Notes
 
