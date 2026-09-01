@@ -1,7 +1,7 @@
 ---
 id: gap-worker-dispatch-prompt-ac-check-instruction
 title: worker 派发 prompt 补「逐条验证 AC 并勾选任务体复选框」指令——漏勾 AC 烧整条 fan-in 的根因
-status: ready
+status: done
 labels:
   - gap
   - defect
