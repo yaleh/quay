@@ -1889,6 +1889,7 @@ declare -A PUBLIC_ENTRYPOINTS=(
   [manager-start.sh]="consumer-facing: the bare-metal manager cold-start vector (quay manager start after npm i -g; gap-manager-layer-no-verified-install-vector AC2) documented in the manager skill"
   [manager-adopt.sh]="consumer-facing: the manager's per-project adopt command (quay manager adopt <root>) documented in the manager skill (C5: start 与 adopt 分开)"
   [manager-tick-log-check.sh]="consumer-facing: the manager's last-tick-did-log detector in the manager tick docs"
+  [outer-session-check.sh]="consumer-facing: the four-state cold-start self-check (outer session: healthy|empty-shell|missing|degraded) invoked by the orchestrator-loop-tick docs"
   [outer-tick-log-check.sh]="consumer-facing: the outer's no-action-must-carry-all-five-false-evidence detector (B8/B13) in the orchestrator tick docs"
   [monitor-mount-check.sh]="consumer-facing: the loop-monitor mount/aim check in the tick docs"
   [observer-registry.sh]="consumer-facing: the single observer-registry heartbeat (--audit) invoked unconditionally every tick in the loop docs (fast-mode 4c / orchestrator 3d)"
