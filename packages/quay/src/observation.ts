@@ -942,27 +942,56 @@ export function workerDriverOnlineMs(root: string): number | null {
   return onlineMs;
 }
 
+/** A task the worker-driver's round carrier names in-flight, with its dispatch start (when known). */
+interface RoundInFlightTask {
+  taskId: string;
+  /** Dispatch wall-clock ms, read from `in_flight_task_starts`. null when the round carries no start
+   *  for this task (unknown ⇒ the caller falls back to the observation instant — never a fabricated
+   *  long elapsed). */
+  startedAtMs: number | null;
+}
+
 /**
- * The task ids the worker-driver's LATEST round record considers in-flight (`in_flight_tasks`:
- * implementing + mechanical-fan-in + cold-start-inflight). This is the ONLY carrier that names the
- * specific task during the mechanical fan-in window — the worker process has exited (no /proc), no
- * outcome record yet (written at `finish()`, AFTER `runMechanicalFanIn`), and the driver never writes
- * workflow-events task-start. gap-live-mechanical-fan-in-inflight-invisible. Absent/unreadable round
- * file, or a round record predating the field, ⇒ [] (degrade, never throw — a real "none", not a
- * fabricated empty). Iterates every line and keeps the LAST `in_flight_tasks` array (append-order ⇒
- * newest wins, so a stale earlier snapshot is superseded).
+ * The tasks the worker-driver's LATEST round record considers in-flight (`in_flight_tasks`:
+ * implementing + mechanical-fan-in + cold-start-inflight), each with its dispatch start when the
+ * round carries one (`in_flight_task_starts` — gap-live-fan-in-window-elapsed-zero: the round carrier
+ * previously named only the task id, no per-task start, so readLive fell back to nowMs and the
+ * fan-in window read as elapsed 0). This is the ONLY carrier that names the specific task during the
+ * mechanical fan-in window — the worker process has exited (no /proc), no outcome record yet (written
+ * at `finish()`, AFTER `runMechanicalFanIn`), and the driver never writes workflow-events task-start.
+ * gap-live-mechanical-fan-in-inflight-invisible. Absent/unreadable round file, or a round record
+ * predating the field, ⇒ [] (degrade, never throw — a real "none", not a fabricated empty). Iterates
+ * every line and keeps the LAST `in_flight_tasks` array (append-order ⇒ newest wins, so a stale earlier
+ * snapshot is superseded). A missing/ill-formed start for a task ⇒ startedAtMs null (honest unknown,
+ * not a fabricated value).
  */
-function readWorkerRoundInFlightTasks(root: string): string[] {
+function readWorkerRoundInFlightTasks(root: string): RoundInFlightTask[] {
   try {
     const roundText = fs.readFileSync(path.join(root, WORKER_ROUND_REL), "utf8");
-    let tasks: string[] = [];
+    let tasks: RoundInFlightTask[] = [];
     for (const line of String(roundText).split("\n")) {
       const s = line.trim();
       if (!s) continue;
       let j: Record<string, unknown>;
       try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
       const arr = j.in_flight_tasks;
-      if (Array.isArray(arr)) tasks = arr.filter((v): v is string => typeof v === "string" && v.length > 0);
+      if (!Array.isArray(arr)) continue;
+      const starts = j.in_flight_task_starts;
+      tasks = arr
+        .filter((v): v is string => typeof v === "string" && v.length > 0)
+        .map((taskId) => {
+          let startedAtMs: number | null = null;
+          if (starts != null && typeof starts === "object" && !Array.isArray(starts)) {
+            const raw = (starts as Record<string, unknown>)[taskId];
+            if (typeof raw === "number" && Number.isFinite(raw)) {
+              startedAtMs = raw;
+            } else if (typeof raw === "string") {
+              const parsed = Date.parse(raw);
+              if (Number.isFinite(parsed)) startedAtMs = parsed;
+            }
+          }
+          return { taskId, startedAtMs };
+        });
     }
     return tasks;
   } catch {
@@ -1462,18 +1491,22 @@ export function readLive(
   // Surface each round-carried task id as in-flight with pid null (the worker process is gone). The
   // /proc loop BELOW appends after this, so an implementing task keeps its pid/sessionId join (the
   // merge Map's later-wins semantics let the /proc entry overwrite this round entry).
-  for (const taskId of readWorkerRoundInFlightTasks(root)) {
+  // gap-live-fan-in-window-elapsed-zero: read the TRUE dispatch start (`in_flight_task_starts`) first;
+  // only when the round carries no start for the task do we fall back to nowMs ("just now", never a
+  // fabricated long elapsed — honest ③b).
+  for (const { taskId, startedAtMs } of readWorkerRoundInFlightTasks(root)) {
+    const started = startedAtMs ?? nowMs;
     workerInFlight.push({
       taskId,
       runId: `worker-${taskId}`,
       pid: null, // round-carrier task: worker process has exited (mechanical fan-in window)
       sessionId: null, // no live process ⇒ no live session join
-      startedAtMs: nowMs, // no per-task start on the round carrier — "just now", never a fabricated long elapsed
+      startedAtMs: started,
       implCompletedAtMs: null,
       status: null,
       phase: "implementing", // round-carrier fallback — readLive re-derives (fan-in lock wins for the fan-in window)
       suite: null,
-      minutes: 0,
+      minutes: Math.max(0, (nowMs - started) / 60_000),
       liveness: "unknown",
       blocks: [],
       blockedBy: [],
