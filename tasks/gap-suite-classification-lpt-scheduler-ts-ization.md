@@ -57,6 +57,11 @@ ts-ization 方向已定（`gap-execution-loop-p4-suite-entry-ts-ization` done：
 - plugin/test/test-phases-order.test.mjs（结构 pin 更新）
 - plugin/test/runner-grouping-serial-anti-stomp.test.mjs（结构 pin 更新）
 - plugin/test/select-tests-for-touches.test.mjs（结构 pin 更新）
+- plugin/test/full-suite-runner.test.mjs（补充处置 A 类：时序敏感测试放宽超时）
+- plugin/test/inner-session-check.test.mjs（补充处置 A 类：时序敏感测试放宽超时）
+- plugin/test/worker-driver-fan-in.test.mjs（补充处置 A 类：时序敏感测试放宽超时）
+- plugin/test/worker-driver-resident.test.mjs（补充处置 A 类：时序敏感测试放宽超时）
+- plugin/test/writestate-atomicity-split.test.mjs（补充处置 A 类：时序敏感测试放宽超时）
 - tasks/gap-suite-classification-lpt-scheduler-ts-ization.md（自身）
 
 ## Needs-Human
