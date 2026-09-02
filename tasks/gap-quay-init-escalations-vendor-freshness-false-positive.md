@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-escalations-vendor-freshness-false-positive
 title: quay-init vendor-freshness 误判 orchestration/escalations.md referenced-not-landed——self-create 声明已存在但 check 读不到
-status: ready
+status: done
 labels:
   - gap
   - defect
