@@ -47,4 +47,5 @@ vendored bundle 同步 / `_read_declarations` 补 self-create 解析；AC1/AC2 �
 - plugin/scripts/quay-init.sh（_read_declarations / fresh-read 对 self-create 的 declared 计数）
 - plugin/skills/init/SKILL.md（如 vendored bundle 需同步）
 - plugin/test/quay-init-loop-vendor-freshness-passes.test.mjs（对应断言/负控制）
+- plugin/test/quay-init.test.mjs（torn 声明读回归测试）
 - tasks/gap-quay-init-escalations-vendor-freshness-false-positive.md（自身）
