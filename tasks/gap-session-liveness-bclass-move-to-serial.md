@@ -34,7 +34,7 @@ probe 饿死（`probe must be alive first` / SESSION-BACK 超时）的修法**�
 
 ## Definition of Done
 
-session-liveness 族 B 类等待测试移到 serial 相；AC1/AC2 勾；饱和下 probe 稳定建立；main 长尾不回退；全量 suite 绿。
+session-liveness 族 B 类等待测试移到 serial 相；AC1/AC2 勾；饱和下 probe 稳定建立；main 长尾不回退；全量 suite 绿。**若移 serial 后 probe 仍不稳（AC2 仍红），下一步 = 修测试本身以提高可靠性（人 2026-09-02 裁定），不再改相/并发。**
 
 ## Touches
 
