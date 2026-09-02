@@ -930,6 +930,39 @@ function acCheckNote(): string {
   ].join(" ");
 }
 
+/** 机械 fan-in 的 scoped 门缺省命令（gap-worker-premerge-scoped-gate-cache 抽成单一真相源）：
+ *  bash <worktree>/scripts/test.sh --for-task <task> --allow-thin。fan-in 侧（runMechanicalFanIn 的
+ *  scopedCmd）与 worker prompt 侧（preMergeNote 的「跑与 fan-in 相同的 scoped 门」）共用——⛔ 两处不得
+ *  出现两套标准。 */
+export function scopedGateCommandFor(task: string, worktree: string): string[] {
+  return ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
+}
+
+/** worker 侧 scoped-gate 缓存写入 CLI 签名（gap-worker-premerge-scoped-gate-cache 阶段 a）：worker 在
+ *  退出前跑绿 scoped 门后，用这条命令机械写入 (task, developSha, pass) 缓存（⛔ 不靠 agent 手写 JSON）。
+ *  developSha 用 `git -C <worktree> rev-parse develop`（worker 已 merge develop ⇒ develop 即其验证过的 tip）。 */
+function scopedGateCacheWriteSignature(task: string, root: string, worktree: string): string {
+  const entry = path.join(root, "plugin", "scripts", "worker-driver.ts");
+  return `node --experimental-strip-types ${entry} --write-scoped-gate-cache --task ${task} --develop-sha "$(git -C ${worktree} rev-parse develop)" --root ${root}`;
+}
+
+/** worker 退出前 pre-merge + scoped test 步骤（gap-worker-premerge-scoped-gate-cache 阶段 a）：worker
+ *  （agent，非纯脚本）实现+提交+勾 AC 之后、driverFanInNote 退出之前，先自己 merge develop 到 worktree、
+ *  跑与 fan-in 完全相同的 scoped 门命令；冲突/红则用 agent 判断力修到绿；绿后机械写 scoped-gate 缓存
+ *  （供 driver 锁内 merge 到同一 develop tip 时跳过冗余 scoped-gate）；再提交退出。之所以放在 agent 回合
+ *  而非纯机械脚本：收益不只是「更早发现问题」，而是「很大一部分冲突在此被直接解决掉，根本不再进入
+ *  fan-in 失败路径」。创建 prompt 与续做 prompt 共用（worktree 路径由调用方填）。 */
+function preMergeNote(task: string, root: string, worktree: string): string {
+  return [
+    `before exiting, do the pre-merge + scoped-gate step in your worktree:`,
+    `(i) merge develop into your worktree (\`git -C ${worktree} merge --no-edit develop\`) — resolve any conflict with the Edit tool, do NOT skip;`,
+    `(ii) run the SAME scoped gate the driver's fan-in runs: \`${scopedGateCommandFor(task, worktree).join(" ")}\`;`,
+    `(iii) if red, fix and rerun until green;`,
+    `(iv) once green, record the scoped-gate cache so fan-in skips the now-redundant scoped gate: \`${scopedGateCacheWriteSignature(task, root, worktree)}\`;`,
+    `(v) commit and exit.`,
+  ].join(" ");
+}
+
 /** dispatch-worktree-setup.sh 调用签名（gap-dispatch-worktree-setup-zero-production-callers）：每个
  *  被派发的 worktree 创建后【必须】跑一次（node_modules symlink-or-install + config.yml 经
  *  worktree-include.sh），机制接管 bootstrap——worker 不再手工 `ln -s`/`cp config.yml`（正是该脚本被
@@ -952,6 +985,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `provision it by running \`${dispatchSetupSignature(root, "<the worktree path you created in step 1>")}\``,
     `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch; ${acCheckNote()}`,
+    `(2b) ${preMergeNote(task, root, "<the worktree path you created in step 1>")}`,
     `(3) ${driverFanInNote()}`,
     `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree.`,
     `You own your worktree fully; apart from the final merge (done by the driver) do not touch develop.`,
@@ -1205,6 +1239,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch); ${acCheckNote()}`,
+    `(1b) ${preMergeNote(task, root, wt)}`,
     `(2) ${driverFanInNote()}.`,
     `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
@@ -1848,6 +1883,10 @@ export interface MechanicalFanInOptions {
   /** doc-check 缓存文件（测试缝）；缺省 = <root>/.quay/doc-check-cache.json（gitignored 运行时缓存，
    *  gap-fan-in-doc-check-cache）。doc 面未变时命中缓存跳过 doc-check（~0s），变化失效重跑。 */
   docCheckCacheFile?: string;
+  /** scoped-gate 缓存文件（测试缝）；缺省 = <root>/.quay/scoped-gate-cache.json（运行时缓存，
+   *  gap-worker-premerge-scoped-gate-cache）。worker 退出前写 (task, developSha, pass)；锁内 merge 到的
+   *  develop tip 与之一致时跳过 scoped-gate（可证明冗余），否则照跑（fail-closed）。 */
+  scopedGateCacheFile?: string;
   /** fan-in 编排脚本目录（测试缝）；缺省 = <worktree>/plugin/scripts（自举：本分支的编排脚本自验）。 */
   scriptsDir?: string;
   /** ff-merge TS 模块路径（测试缝）；缺省 = <worktree>/packages/quay/src/fan-in/ff-merge.ts
@@ -2333,6 +2372,57 @@ export function appendFanInTrace(file: string, entry: Record<string, unknown>): 
   } catch { /* best-effort runtime log */ }
 }
 
+// ── scoped-gate cache（gap-worker-premerge-scoped-gate-cache）──────────────────────────────────────
+// worker 退出前 agent-mediated pre-merge + scoped test 后，机械记录 (task, developSha, verdict=pass)
+// 到 .quay/scoped-gate-cache.json（仿 .quay/doc-check-cache.json 的既有模式）。driver 锁内
+// merge-develop 之后、scoped-gate 之前查这份缓存：当且仅当锁内合并到的 develop tip 与 worker 记录的
+// developSha 完全一致才跳过 scoped-gate（可证明冗余——worker 已对着这个确切状态验证过绿）；develop
+// 前进 / 缓存缺失 / 读不懂 ⇒ 照跑（fail-closed，与 docCheckLeg 的「面未变才命中、算不出就照跑」同一条
+// 纪律）。只缓存绿、⛔ 键算不出 ⇒ 照跑。
+
+/** 缓存键 = `${task}\t${developSha}`（task id 不含 \t；developSha 是 develop tip 的完整 sha）。
+ *  (task, developSha) 二元组唯一确定键——develop 前进一个提交即失配（未命中照跑）。 */
+export function scopedGateKey(task: string, developSha: string): string {
+  return `${task}\t${developSha}`;
+}
+
+/** 缓存条目形：最后一个 GREEN scoped-gate verdict，键 = scopedGateKey(task, developSha)。 */
+export interface ScopedGateCacheEntry {
+  key: string;
+  ok: true;
+  ts: string;
+}
+
+/** 读键为 `key` 的缓存绿 verdict。命中（key 完全一致 + ok:true）⇒ true；未命中/缺失/损坏/非绿 ⇒
+ *  null（fail-closed——null 永不是命中）。签名与 readDocCheckCache 对齐。 */
+export function readScopedGateCache(cacheFile: string, key: string): boolean | null {
+  try {
+    if (!fs.existsSync(cacheFile)) return null;
+    const raw: unknown = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const entry = raw as ScopedGateCacheEntry;
+    if (entry.key !== key) return null;
+    if (entry.ok !== true) return null; // only GREEN verdicts are cacheable
+    return true;
+  } catch {
+    return null;
+  }
+}
+
+/** 写 GREEN verdict（原子替换；只有绿才被缓存——worker 仅在 scoped 门跑绿后调用）。best-effort：
+ *  写失败 ≠ fan-in 失败。签名与 writeDocCheckCache 对齐。 */
+export function writeScopedGateCache(cacheFile: string, key: string): void {
+  try {
+    fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+    const entry: ScopedGateCacheEntry = { key, ok: true, ts: new Date().toISOString() };
+    const tmp = `${cacheFile}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(entry) + "\n", "utf8");
+    fs.renameSync(tmp, cacheFile);
+  } catch {
+    // best-effort runtime cache — never let a cache write fail the fan-in
+  }
+}
+
 /**
  * driver 机械跑通一次无失败 fan-in 的 happy path（锁/merge/delta/typecheck/scoped门/suite/ff）。
  * ⛔ 语义失败点（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / suite 红 / ff 失败）一律返回
@@ -2525,10 +2615,21 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     //   node --experimental-strip-types plugin/scripts/archguard-runner.ts --root <repo-root>
     // 产物 append 进 <repo-root>/.archguard/metrics-history.jsonl（按需产出，不进 fan-in 关键路径）。
 
-    // 6. scoped 门（必须绿）。
-    const scopedCmd = opts.scopedGateCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
-    a = await step("scoped-gate", scopedCmd, 600_000);
-    if (!a.ok) return fail("scoped-gate", a);
+    // 6. scoped 门（必须绿）。worker 已在退出前对着同一 develop tip 跑绿并写缓存（gap-worker-premerge-
+    //    scoped-gate-cache）⇒ 锁内 merge 到的 develop tip 与 worker 记录的 developSha 完全一致时跳过
+    //    （可证明冗余——worker 已对着这个确切状态验证过绿）；develop 前进 / 缓存缺失 / 读不懂 ⇒ 照跑
+    //    （fail-closed，同 docCheckLeg 的「面未变才命中、算不出就照跑」纪律）。
+    const scopedCmd = opts.scopedGateCommand ?? scopedGateCommandFor(task, worktree);
+    const scopedCacheFile = opts.scopedGateCacheFile ?? path.join(root, ".quay", "scoped-gate-cache.json");
+    const scopedT0 = Date.now();
+    const scopedDevelopSha = (await mechSh(["git", "-C", worktree, "rev-parse", mergeTarget], 30_000)).stdout.trim();
+    const scopedCacheHit = scopedDevelopSha !== "" && readScopedGateCache(scopedCacheFile, scopedGateKey(task, scopedDevelopSha)) === true;
+    if (scopedCacheHit) {
+      trace({ step: "scoped-gate", exit: 0, wall_ms: Date.now() - scopedT0, ok: true, reason: "cache-hit(worker-premerge)" });
+    } else {
+      a = await step("scoped-gate", scopedCmd, 600_000);
+      if (!a.ok) return fail("scoped-gate", a);
+    }
 
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
@@ -3170,6 +3271,8 @@ export async function main(argv: string[]): Promise<number> {
   let mechanicalFanIn = false;
   let mechWorktree: string | undefined;
   let mechMergeTarget: string | undefined;
+  let writeScopedGateCacheFlag = false;
+  let scopedGateCacheDevelopSha: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -3201,6 +3304,8 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--mechanical-fan-in") mechanicalFanIn = true;
     else if (a === "--worktree") mechWorktree = args[++i];
     else if (a === "--merge-target") mechMergeTarget = args[++i];
+    else if (a === "--write-scoped-gate-cache") writeScopedGateCacheFlag = true;
+    else if (a === "--develop-sha") scopedGateCacheDevelopSha = args[++i];
     else if (a === "--help" || a === "-h") {
       console.log(
         "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + ⛔ 不 stash 主检出 + MCP 控制面 + 常驻选择环）\n" +
@@ -3216,6 +3321,7 @@ export async function main(argv: string[]): Promise<number> {
           "  [--backoff-base-ms <ms>]  第一次退避等待 ms（指数底数，缺省 30000）\n" +
           "  [--backoff-max-ms <ms>]  退避等待上限 ms（指数增长封顶，缺省 300000）\n" +
           "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
+          "  --write-scoped-gate-cache --task <id> --develop-sha <sha>  写 scoped-gate 缓存（worker 退出前跑绿后调用；stdout 单行 JSON）\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -3247,6 +3353,21 @@ export async function main(argv: string[]): Promise<number> {
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result.outcome === "landed" ? 0 : 2;
+  }
+
+  // --write-scoped-gate-cache：worker 退出前跑绿 scoped 门后，机械写 (task, developSha, pass) 到
+  // <root>/.quay/scoped-gate-cache.json（gap-worker-premerge-scoped-gate-cache 阶段 a 的机械写侧——
+  // ⛔ 不靠 agent 手写 JSON）。stdout 单行 JSON，exit 0 = 已写 / 2 = 缺参（fail-closed）。
+  if (writeScopedGateCacheFlag) {
+    const task = tasks[0];
+    if (!task || !scopedGateCacheDevelopSha) {
+      console.error("worker-driver: --write-scoped-gate-cache requires --task <id> and --develop-sha <sha>");
+      return 2;
+    }
+    const cacheFile = path.join(rootDir, ".quay", "scoped-gate-cache.json");
+    writeScopedGateCache(cacheFile, scopedGateKey(task, scopedGateCacheDevelopSha));
+    process.stdout.write(`${JSON.stringify({ event: "scoped-gate-cache-written", task, developSha: scopedGateCacheDevelopSha, cacheFile })}\n`);
+    return 0;
   }
 
   // --serve：起 MCP 控制面（常驻）。listening socket 保持事件循环存活 ⇒ 进程不退出，直到 SIGINT/SIGTERM。
