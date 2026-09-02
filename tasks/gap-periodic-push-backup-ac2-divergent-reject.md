@@ -1,7 +1,7 @@
 ---
 id: gap-periodic-push-backup-ac2-divergent-reject
 title: periodic-push-backup.test.mjs AC2 control 断言失败——divergent push 未被 REJECTED（expected exit 1 不成立）
-status: todo
+status: ready
 labels:
   - gap
   - defect
