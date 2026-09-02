@@ -2,7 +2,7 @@
 id: gap-dashboard-minilist-row-layout
 title: dashboard taskCard miniList 单行排版修复：flex:none 使 ellipsis
   失效导致长标题撑爆卡片，且更新时间未渲染（方案B）
-status: todo
+status: ready
 labels:
   - gap
   - webui
