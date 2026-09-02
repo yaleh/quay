@@ -1,7 +1,7 @@
 ---
 id: gap-outer-session-check-waitforclaude-timeout-flaky
 title: outer-session-check.test.mjs waitForClaude 5s 超时在并发 suite 下不够——A 类时序敏感 flaky
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -36,3 +36,14 @@ extra:
 
 - plugin/test/outer-session-check.test.mjs（waitForClaude 超时/retry 加长）
 - tasks/gap-outer-session-check-waitforclaude-timeout-flaky.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-02T08:00:18.299Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1788285192
+- session_id：2815e62a-1e16-45a3-8d40-d8a95aa342b4
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-outer-session-check-waitforclaude-timeout-flaky-wk-prod-1788285192.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-outer-session-check-waitforclaude-timeout-flaky-wk-prod-1788285192.log
