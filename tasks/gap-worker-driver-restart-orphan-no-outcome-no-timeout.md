@@ -2,7 +2,7 @@
 id: gap-worker-driver-restart-orphan-no-outcome-no-timeout
 title: driver 重启孤儿化在飞 worker——零终态记录 + 零超时监管（区别于 cold-start-inflight 排除集正确性与
   no-record-on-abnormal-death 的活体观测）
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -56,3 +56,14 @@ driver 重启导致的孤儿在飞 worker，下一个 driver 实例的 reconcile
 - plugin/scripts/worker-driver.ts（appendWorkerPid 扩展为结构化持久记录 + reconcile 步骤新增 adopt/finalize 分支）
 - plugin/test/worker-driver.test.mjs（AC1-3 对应夹具测试）
 - tasks/gap-worker-driver-restart-orphan-no-outcome-no-timeout.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-02T07:21:31.658Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1788285192
+- session_id：9472ea1b-5fe6-421b-a63b-7514e943790e
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-worker-driver-restart-orphan-no-outcome-no-timeout-wk-prod-1788285192.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-worker-driver-restart-orphan-no-outcome-no-timeout-wk-prod-1788285192.log

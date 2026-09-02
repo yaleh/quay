@@ -34,8 +34,8 @@
 | **workflows** | `workflows/*.js` | `quay:<name>` | ✅ **已在用，见 3b** |
 | MCP server | `.mcp.json` | `mcp__plugin_quay_quay__*` | ✅ 已用 |
 | hooks | `hooks/hooks.json` | — | ❌ 未用（`plugin/hooks/` 不存在） |
-| scripts | `scripts/` | — | ✅ 309 个（调用方式见 §9 待测 T1） |
-| **bin** | `bin/` → **进 Bash 的 PATH** | — | ❌ 未用（`plugin/bin/` 不存在） |
+| scripts | `scripts/` | — | ✅ 309 个；**T1 已实测：`${CLAUDE_PLUGIN_ROOT}/scripts/x` 在 skill 载入时展开为绝对路径 ⇒ 零复制直调成立**（§9） |
+| **bin** | `bin/` → **进 Bash 的 PATH** | — | **T4 已实测：PATH 中已存在 `<plugin-root>/bin`（该目录尚不存在也照样在）** ⇒ 建目录即可让 CLI 免 npm 全局安装 |
 | settings | `settings.json` | 仅 `agent`/`subagentStatusLine` 两键 | 未用 |
 
 **送不到的只有三样**（必须落在消费项目自己的配置里）：
@@ -53,6 +53,13 @@ plugin/.claude-plugin/plugin.json   无 workflows 键
 ⇒ **`plugin/workflows/*.js` 按约定自动发现并以 `quay:` 暴露，无需声明**；
 ⇒ **而 `.claude/workflows/` 的那 5 份副本构成第三处双注册**（前两处：MCP 工具名、skills）。
 ⇒ **「复制 workflows」这件事从未提供任何能力，只提供了一份会漂移的副本。**
+
+**⚠️ 证据来源的一处限定（2026-09-02 补，避免被误引）**：本条的证据是**会话自身的 skill 列表**
+（5 个 `quay:` 前缀项与 `plugin/workflows/` 的 5 个文件精确对应；6 个裸名项与 `.claude/workflows/`
+的 6 个精确对应）。**`claude plugin details quay` 的组件账本里没有 workflows 这一行**
+（它只列 Skills/Agents/Hooks/MCP servers/LSP servers）⇒ **不要引用该账本来支持本条**。
+同一账本还报 `Agents (0)`，而 `plugin.json` 声明了 `baime-iteration-executor`
+且该 agent 类型在会话中可见——**账本与实际可用面存在已知出入，只可作旁证不可作正本。**
 
 ### 3c. `allowed-tools` 语义（查证结论，决定 §7 的一条改造）
 
@@ -106,6 +113,16 @@ plugin/                     唯一扩展载体（git 跟踪，一棵树）
 tasks/                   任务数据（是数据不是扩展代码）
 .gitignore               若干条目
 ```
+
+**⚠️ 闭集之外必须有一个显式安装步骤（T3 实测结论，2026-09-02）**：
+**settings 里的 `enabledPlugins` 只能启用/停用一个【已安装】的插件，不会去安装它**
+（差分对照见 §9-T3）；且**未信任目录下项目 `.claude/settings.json` 整份不被读取**
+（`hasTrustDialogAccepted` 门，`--dangerously-skip-permissions` 不解此门）。
+⇒ **「把配置提交进仓库，clone 的人就自动装上」是不成立的**
+⇒ 交付流程必须显式包含 `claude plugin marketplace add` + `claude plugin install`
+（或 npm 全局安装路径的 `register-plugin.mjs`，它正是这么做的：写 settings **并** shell 出去装），
+且首次进入该目录的人**必须先接受信任对话**，配置才开始生效。
+**⛔ 不得把这一步写成「配置即生效」——那会退回本仓库最贵的那类失败：存在≠生效。**
 **⛔ 不再写入**：`.claude/workflows/`、`.claude/agents/`、`plugin/scripts/` 副本、
 `orchestration/` tick 文档、`docs/analysis/`——**以及随之退役的 managed/conflict/stale 整套机器。**
 
@@ -138,16 +155,22 @@ tasks/                   任务数据（是数据不是扩展代码）
 - **AC4（反例判据）**：三条 AC 都不得只靠 fixture 满足——AC1/AC2 读仓库真实文件，
   AC3 读一次真实 laydown 的产物清单（硬规则 4 推论三：读生产载体，不读注入数据）。
 
-## 9. 落地前置：四项待实测（未测不得动手）
+## 9. 四项实测：已全部完成（2026-09-02）
 
-| # | 待测 | 决定什么 | 成本 |
-|---|---|---|---|
-| T1 | `${CLAUDE_PLUGIN_ROOT}` 在 plugin skill 触发的 Bash 里是否可展开 | 309 个 scripts 是**零复制直调**、走 `bin/` PATH、还是需要裁定 3 的那条「克制的文件指针」 | 一次 skill 调用 |
-| T2 | 改动 `plugin/` 下文件后是否需要 `/reload-plugins` 或重启 | 「用插件机制消费自己」的开发体感代价 | 改一行试一次 |
-| T3 | 项目级 `enabledPlugins` 在 teammate clone 后是否自动安装 | `quay-init` 要不要提示手动装（文档未覆盖） | 一次干净 clone |
-| T4 | `plugin/bin/` 上 PATH 的实际行为 | CLI 分发是否还需要 npm 全局安装 | 建 `bin/` 试 |
+| # | 结论 | 证据（实测，非文档推断） |
+|---|---|---|
+| **T1** `${CLAUDE_PLUGIN_ROOT}` | ✅ **可用，skill 载入时文本级展开为绝对路径** | 磁盘 `quay-task-operator/SKILL.md:71` 写 `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-schema-check.ts"`；载入会话后收到的是 `node "/home/yale/work/quay/plugin/scripts/task-schema-check.ts"`。连传入的 ARGUMENTS 串一并被替换 |
+| **T2** 改动是否热生效 | ❌ **需重启会话**（**未在活会话直接实测**，见下方限定） | `claude plugin update` 帮助文本「**restart required to apply**」；`claude plugin init`「**auto-loads next session**」；`claude plugin` 子命令表**无 reload** |
+| **T3** clone 者是否自动装上 | ❌ **不会**。①**启用 ≠ 安装** ②**未信任目录下项目 settings 整份不读** | ①差分：`--settings '{"enabledPlugins":{"quay@quay":false}}'` ⇒ `quay:author` **NO**；无旗标 ⇒ **YES**（证明 settings 路径确实生效）；而声明了 marketplace+enabledPlugins 的探针插件全程 NOT-AVAILABLE ⇒ 差异只能归于「没装」。②探针项目的 `env` 键同样不生效，且该项目不在 `~/.claude.json` `projects` 表中（`hasTrustDialogAccepted` 键存在于该表）；`--dangerously-skip-permissions` 不解此门 |
+| **T4** `bin/` 上 PATH | ✅ **成立** | 本会话 PATH 含 `/home/yale/work/quay/plugin/bin`——**而该目录并不存在**；meta-cc/archguard 的 `bin` 同形在列 ⇒ Claude Code 对每个启用插件无条件加入该路径 |
 
-**T1 是承重的**：它决定 §6 闭集是否需要多一条 plugin-root 指针。
+**T1 的后果**：§6 闭集**不需要**裁定 3 允许的那条 plugin-root 文件指针——那条退路用不上。
+**T3 的后果**：§6 闭集**必须**外挂一个显式安装步骤（已写入 §6）。**两条方向相反，都改变了闭集。**
+
+**T2 的限定（诚实记录，勿当已验证）**：该结论由 CLI 帮助文本推得，**没有做活会话热改实验**——
+做那个实验必须改动线上 `plugin/` 树，而该树正被自主循环的 worker 会话实时消费、
+且主检出的脏文件会影响 fan-in 的 clean-tree 判定。**判定为不值当，记为「CLI 自述，未活体验证」。**
+若后续需要硬证据，正确做法是拿一个**独立的临时插件**做（本轮 T3 已跑通该手法）。
 
 ## 10. 影响面（会波及的既有机件/文档，落地时须同步）
 
@@ -160,4 +183,9 @@ tasks/                   任务数据（是数据不是扩展代码）
 
 ---
 
-**状态**：规格已裁定；§9 四项实测为落地前置；§7 退役清单待拆条执行。
+**状态**：规格已裁定；**§9 四项实测已全部完成（T2 为 CLI 自述、未活体验证）**；§7 退役清单待拆条执行。
+
+**退役清单的可量化收益（2026-09-02 实测，`claude plugin details quay`）**：
+14 个 skill **每会话常驻 ~2,706 tok**；其中 `quay-native-methodology`(~210) 与
+`quay-webui-bootstrap-methodology`(~230) 经实测为**当前两层执行核零引用**
+⇒ 仅这两项即 **~440 tok × 每一个会话**。**退役理由第一次有了读数，不再是「感觉冗余」。**
