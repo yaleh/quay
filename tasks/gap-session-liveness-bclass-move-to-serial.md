@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-bclass-move-to-serial
 title: session-liveness B 类等待型测试从 lowconc 移到 serial——serial 相 ALONE 先跑，不被 main 饿死
-status: todo
+status: ready
 labels:
   - gap
   - defect
