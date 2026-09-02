@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-escalations-vendor-freshness-false-positive
 title: quay-init vendor-freshness 误判 orchestration/escalations.md referenced-not-landed——self-create 声明已存在但 check 读不到
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -35,8 +35,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`plugin/skills/init/SKILL.md:143` 已有 self-create 声明时，vendor-freshness 对 `orchestration/escalations.md` 不判 referenced-not-landed（check 过）；（⛔ 仍红 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：真 undeclared + not-landed 的引用文件仍判 referenced-not-landed（fail-closed 不退化）；（⛔ 误放行 ⇒ 假）。
+- [x] AC1（能取假）：`plugin/skills/init/SKILL.md:143` 已有 self-create 声明时，vendor-freshness 对 `orchestration/escalations.md` 不判 referenced-not-landed（check 过）；（⛔ 仍红 ⇒ 假）。
+- [x] AC2（能取假，负控制）：真 undeclared + not-landed 的引用文件仍判 referenced-not-landed（fail-closed 不退化）；（⛔ 误放行 ⇒ 假）。
 
 ## Definition of Done
 
