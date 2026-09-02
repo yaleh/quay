@@ -1,5 +1,6 @@
-// @test-group lowconc
+// @test-group serial
 // @load-sensitive wall-clock
+// @load-sensitive-entry 2026-09-02 wall-clock (real tmux + claude-probe waiting probes starved by main core-fill in lowconc); GROUP=serial deliberately
 // session-liveness-heartbeat.test.mjs — transcript + multi-source heartbeat, OVERDUE drivers, idle noise-gating, LOOP_MIN
 //
 // PART OF THE session-liveness test family (gap-session-liveness-tail-capped-split, 2026-08-07).
@@ -19,10 +20,10 @@
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this family uses
 // real processes + tmux timing; it passes isolated under low load but may fail under concurrent-suite
 // load (gap-load-sensitive-session-family-confounds-step-three, 2026-08-04). GROUP NOTE
-// (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive): routed to the `lowconc` group — the
-// hermetic-but-load-sensitive phase at concurrency 3.
+// (gap-session-liveness-bclass-move-to-serial): routed to the `serial` group — the ALONE-before-main
+// phase at $SERIAL_CONCURRENCY, so the B-class waiting probes are not starved by main's core-fill.
 //
-// Run: scripts/test.sh session-liveness-heartbeat.test.mjs   /   node --test session-liveness-heartbeat.test.mjs   /   scripts/test.sh --group lowconc
+// Run: scripts/test.sh session-liveness-heartbeat.test.mjs   /   node --test session-liveness-heartbeat.test.mjs   /   scripts/test.sh --group serial
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";

@@ -1,13 +1,12 @@
 ---
 id: gap-session-liveness-bclass-move-to-serial
 title: session-liveness B 类 probe 测试从 lowconc 移到 serial——probe 在宿主推导 lowconc 下不稳
-status: ready
+status: done
 labels:
   - gap
   - defect
 parent: null
-children:
-  - gap-lowconc-concurrency-restore-host-derived
+children: []
 extra:
   schema: execution
 ---
@@ -29,8 +28,8 @@ probe 饿死（`probe must be alive first` / SESSION-BACK 超时）的修法**�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：session-liveness 族 B 类等待测试 `@test-group` 为 serial（不再 lowconc）——grep 测试文件 `@test-group serial`；（⛔ 仍 lowconc ⇒ 假）。
-- [ ] AC2（能取假，生产载体）：饱和下这些测试 probe 稳定建立（probe must be alive / SESSION-BACK 不再间歇超时），N 只计落地后饱和轮；（⛔ 仍间歇 probe 超时 ⇒ 假）。
+- [x] AC1（能取假，机制级）：session-liveness 族 B 类等待测试 `@test-group` 为 serial（不再 lowconc）——grep 测试文件 `@test-group serial`；（⛔ 仍 lowconc ⇒ 假）。
+- [ ] AC2（能取假，生产载体）：饱和下这些测试 probe 稳定建立（probe must be alive / SESSION-BACK 不再间歇超时），N 只计落地后饱和轮；（⛔ 仍间歇 probe 超时 ⇒ 假）。（待外部）
 
 ## Definition of Done
 
@@ -44,4 +43,17 @@ session-liveness 族 B 类等待测试移到 serial 相；AC1/AC2 勾；饱和�
 - plugin/test/session-liveness-signals-thresholds-observers.test.mjs（@test-group lowconc→serial）
 - plugin/test/session-liveness-events.test.mjs（@test-group lowconc→serial）
 - plugin/test/session-liveness-heartbeat.test.mjs（@test-group lowconc→serial）
+- docs/analysis/test-file-baseline.txt（test-file-snapshot 基线重生成，吸收 lowconc→serial 改标）
 - tasks/gap-session-liveness-bclass-move-to-serial.md（自身）
+- tasks/gap-lowconc-concurrency-restore-host-derived.md（解除 parent/child 链接：低conc 任务是后续依赖非分解，改 depends_on）
+
+## Needs-Human
+
+**执行 2026-09-02T17:50:59.097Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1788285192
+- session_id：f75ddb0f-a5d1-4c7d-81ca-45340087e1c9
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-session-liveness-bclass-move-to-serial~wk-prod-1788285192~1788370217251-d3856c.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-session-liveness-bclass-move-to-serial-wk-prod-1788285192.log

@@ -29,11 +29,10 @@
 // max_oversubscription / main_tail_overlap_lanes / main_tail_stall_pct) are listed in the shipped
 // `.quay/config.yml` — suite_scheduler defaults ON via test.sh's `${QUAY_SUITE_SCHEDULER:-1}`
 // fallback rather than a shipped literal (a `suite_scheduler: 1` line would be redundant).
-// serial_concurrency defaults to a HOST-DERIVED value (os.availableParallelism() ÷ (S × P));
-// lowconc_concurrency defaults to the FIXED human-adjudicated semantic value 3
-// (gap-lowconc-concurrency-8-starves-bclass-waiting). Both are CONFIGURABLE here but intentionally
-// ABSENT from the shipped config — for serial a literal would be a machine-spec-dependent literal
-// (CLAUDE.md 硬规则 4 推论二); lowconc's 3 is a semantic value, not a machine-spec literal.
+// serial_concurrency and lowconc_concurrency both default to the SAME HOST-DERIVED value
+// (os.availableParallelism() ÷ (S × P)) — gap-lowconc-concurrency-restore-host-derived reverted the
+// lowconc=3 fixed-value split. Both are CONFIGURABLE here but intentionally ABSENT from the shipped
+// config — a literal would be a machine-spec-dependent literal (CLAUDE.md 硬规则 4 推论二).
 
 import fs from "node:fs";
 import path from "node:path";

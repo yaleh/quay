@@ -1,14 +1,16 @@
 ---
 id: gap-lowconc-concurrency-restore-host-derived
 title: lowconc 并发回退宿主推导——用户 2026-09-02 反转 lowconc=3 硬编码裁定
-status: todo
+status: done
 labels:
   - gap
   - defect
-parent: gap-session-liveness-bclass-move-to-serial
+parent: null
 children: []
 extra:
   schema: execution
+depends_on:
+  - gap-session-liveness-bclass-move-to-serial
 ---
 **type:** execution
 
@@ -27,8 +29,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：lowconc 并发默认 = 宿主推导（`serial_lowconc_host_default`），非硬编码 3——grep `defaultLowconcConcurrency` 与 `scripts/test.sh` lowconc 默认行，均宿主推导；（⛔ 仍硬编码 3 ⇒ 假）。
-- [ ] AC2（能取假，无回归）：lowconc 与 serial 默认值一致（都 `max(1, floor(nproc/(S×P)))`），本机 16 核 = 8；（⛔ lowconc≠serial 默认 ⇒ 假）。
+- [x] AC1（能取假）：lowconc 并发默认 = 宿主推导（`serial_lowconc_host_default`），非硬编码 3——grep `defaultLowconcConcurrency` 与 `scripts/test.sh` lowconc 默认行，均宿主推导；（⛔ 仍硬编码 3 ⇒ 假）。
+- [x] AC2（能取假，无回归）：lowconc 与 serial 默认值一致（都 `max(1, floor(nproc/(S×P)))`），本机 16 核 = 8；（⛔ lowconc≠serial 默认 ⇒ 假）。
 
 ## Definition of Done
 

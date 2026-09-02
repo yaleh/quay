@@ -98,9 +98,10 @@
 //                                    #   os.availableParallelism(), gap-ac44-concurrent-phases-
 //                                    #   read-host-parallelism; explicit flag always wins)
 //     [--lowconc-concurrency <n>]    # lowconc-phase internal concurrency, passed as
-//                                    #   QUAY_LOWCONC_CONCURRENCY (default: the fixed human-adjudicated
-//                                    #   semantic value 3 — gap-lowconc-concurrency-8-starves-bclass-
-//                                    #   waiting; explicit flag always wins)
+//                                    #   QUAY_LOWCONC_CONCURRENCY (default: host-derived
+//                                    #   max(1, floor(nproc/(S×P))), = serial —
+//                                    #   gap-lowconc-concurrency-restore-host-derived; explicit flag
+//                                    #   always wins)
 //     [--runner <outer|inner>]       # gap-runner-field-hardcoded-outer-not-measurement: the layer
 //                                    #   identity this round records (outer/inner). Default: derived
 //                                    #   from the SAME source the state path uses (scope —
@@ -1279,9 +1280,8 @@ export function concurrentPhaseCount(): number {
 // bake in the pre-config S / P and ignore suite.max_concurrent_suites / suite.phase_overlap. Reading S
 // (concurrentSuiteSlots) and P (concurrentPhaseCount) at call time makes the host-derived fallback
 // honor the config-promoted env (config < env < CLI, hard rule 4 推论二: read-host, never a literal).
-// gap-lowconc-concurrency-8-starves-bclass-waiting: SERIAL-only now — the lowconc phase reads the fixed
-// semantic value 3 via defaultLowconcConcurrency() (imported from runner-concurrency.ts), NOT this
-// host-derived function; only serial's default is host-derived.
+// gap-lowconc-concurrency-restore-host-derived: SERIAL and LOWCONC now share this host-derived default —
+// defaultLowconcConcurrency() (imported from runner-concurrency.ts) returns the SAME max(1, floor(nproc/(S×P))).
 export function defaultPhaseConcurrency(): number {
   return Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
 }
@@ -1701,9 +1701,8 @@ export async function run(argv: string[]): Promise<number> {
   // cancelled BEFORE the default is bumped. The SERIAL default is host-read (defaultPhaseConcurrency()
   // = os.availableParallelism() ÷ (slots × concurrentPhaseCount()), gap-ac44-concurrent-phases-read-
   // host-parallelism + gap-lane-formula-ignores-phase-overlap-concurrency); the LOWCONC default is the
-  // FIXED human-adjudicated semantic value 3 (defaultLowconcConcurrency — gap-lowconc-concurrency-8-
-  // starves-bclass-waiting: independent of serial, NOT host-derived). An explicit flag always wins over
-  // env/config and the default (AC2).
+  // SAME host-derived value (defaultLowconcConcurrency — gap-lowconc-concurrency-restore-host-derived:
+  // = serial, NOT a fixed 3). An explicit flag always wins over env/config and the default (AC2).
   const serialConcurrencyArg = parsePositiveIntArg(argv, "--serial-concurrency");
   const lowconcConcurrencyArg = parsePositiveIntArg(argv, "--lowconc-concurrency");
   if (serialConcurrencyArg === null && parseArg(argv, "--serial-concurrency") !== undefined) {
@@ -1716,7 +1715,7 @@ export async function run(argv: string[]): Promise<number> {
   }
   // gap-suite-knobs-config-file-priority: config < env < CLI. The config value (if any) was promoted
   // into process.env above; read env here so env-wins-over-config holds, then fall back to the default
-  // (serial = host-derived, runtime-read so it honors a config-promoted S / P; lowconc = fixed 3).
+  // (serial and lowconc are both host-derived, runtime-read so they honor a config-promoted S / P).
   const serialConcurrency = serialConcurrencyArg ?? positiveIntFromEnv("QUAY_SERIAL_CONCURRENCY") ?? defaultPhaseConcurrency();
   const lowconcConcurrency = lowconcConcurrencyArg ?? positiveIntFromEnv("QUAY_LOWCONC_CONCURRENCY") ?? defaultLowconcConcurrency();
   // The phase-concurrency env the child test.sh reads. Always set explicitly so the runner is the

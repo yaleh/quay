@@ -123,6 +123,7 @@ packages/quay/test/flags.test.mjs
 packages/quay/test/frontmatter-store-base.test.mjs
 packages/quay/test/gap-ac136-web-truth-source.test.mjs
 packages/quay/test/gap-cli-gate-enforcement.test.mjs
+packages/quay/test/gap-dashboard-minilist-row-layout.test.mjs
 packages/quay/test/gap-dashboard-parallelize.test.mjs
 packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs
 packages/quay/test/gap-dashboard-testscard-livecard-auto-refresh.test.mjs
@@ -454,9 +455,7 @@ plugin/test/semantic-observer-judge.test.mjs
 plugin/test/send-keys-reliable.test.mjs
 plugin/test/session-bootstrap.test.mjs
 plugin/test/session-liveness-decision-import.test.mjs
-plugin/test/session-liveness-events.test.mjs
 plugin/test/session-liveness-hangguard.test.mjs
-plugin/test/session-liveness-heartbeat.test.mjs
 plugin/test/session-liveness-restart.test.mjs
 plugin/test/session-liveness-scd-busy.test.mjs
 plugin/test/session-liveness-scd-config-gates.test.mjs
@@ -466,11 +465,7 @@ plugin/test/session-liveness-scd-inflight-changing.test.mjs
 plugin/test/session-liveness-scd-multitask.test.mjs
 plugin/test/session-liveness-scd-progress.test.mjs
 plugin/test/session-liveness-scd-unsaturated.test.mjs
-plugin/test/session-liveness-signals-integration.test.mjs
-plugin/test/session-liveness-signals-kinds.test.mjs
 plugin/test/session-liveness-signals-thresholds-edge.test.mjs
-plugin/test/session-liveness-signals-thresholds-observers.test.mjs
-plugin/test/session-liveness-signals-thresholds.test.mjs
 plugin/test/session-liveness-target.test.mjs
 plugin/test/session-retirement-check.test.mjs
 plugin/test/session-topology.test.mjs
