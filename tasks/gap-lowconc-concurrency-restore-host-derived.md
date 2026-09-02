@@ -1,7 +1,7 @@
 ---
 id: gap-lowconc-concurrency-restore-host-derived
 title: lowconc 并发回退宿主推导——用户 2026-09-02 反转 lowconc=3 硬编码裁定
-status: todo
+status: ready
 labels:
   - gap
   - defect
