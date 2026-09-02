@@ -2,7 +2,7 @@
 id: gap-fan-in-suite-log-same-runid-overwrite
 title: 机械 fan-in suite 日志按 (task, runId) 命名、无尝试序号——同 runId 内多次触发 suite
   时后一次覆盖前一次，历史败因不可回溯
-status: todo
+status: ready
 labels:
   - gap
   - observability
