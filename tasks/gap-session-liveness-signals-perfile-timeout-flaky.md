@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-signals-perfile-timeout-flaky
-title: session-liveness-signals integration/thresholds 超 perfile-timeout（260s/254s）——A 类超时 flaky
-status: ready
+title: session-liveness-signals integration/thresholds 真实失败（passed=false 非超时）——排查真 assertion 根因
+status: superseded
 labels:
   - gap
   - defect
@@ -9,6 +9,7 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded_reason: 原「超 perfile-timeout 超时」前提是 gate 名误称导致的系统性误诊——perfile-timeout 匹配的 passed=false 来自 node test runner details.passed =「该文件有真实失败测试」，非「超时」；60s 阈值不存在（driver 271s/vendor 425s 都 passed=true）。260s/254s 是总墙钟非超时触发点。真根因 = session-liveness 真实 assertion 失败，需重查（gate 名已由 gap-suite-perfile-timeout-global-widening 更正为 perfile-failure，但那是改名不修失败）。
 ---
 **type:** execution
 
