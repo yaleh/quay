@@ -1,5 +1,3 @@
-> ⚠️ **外层/内层会话已退役（AC149，2026-08-28）**：本文件中引用 outer/inner 会话的收尾面已随会话退役；manager 会话本身的收尾（哨兵核实 + 写 tick-log）保留。→ `orchestration/manager-phase-goal.md` ### AC149。
-
 **收尾（两件，顺序已在 2026-08-07 修正——见下）**
 
 **⚠️ 顺序修正**：原顺序是「写日志 → 提交 → 哨兵清扫」，于是**哨兵清扫永远发生在日志提交之后，
@@ -175,8 +173,8 @@ orchestration/SPEC-*.md（新增/删除）     → **两个断言者，缺一即
                                           ② plugin/test/capability-catalog.test.mjs（referenced-not-landed：被 manager SKILL
                                              引用的 SPEC 必须在 plugin/skills/init/SKILL.md 声明 reference-doc）
                                           ⚠️ ② 的落点 `plugin/skills/init/SKILL.md` **不在 manager 豁免面**
-                                          ⇒ 新增 SPEC 必然产生一条【跨面债】：我改 ①，② 必须投给 inner/outer 落
-                                          （先例 7e64a86b 即 inner 落的同类一行声明；init/SKILL.md:130 逐字写着这条契约）
+                                          ⇒ 新增 SPEC 必然产生一条【跨面债】：我改 ①，② 必须投给 outer 落
+                                          （先例 7e64a86b 即由此路径落的同类一行声明；init/SKILL.md:130 逐字写着这条契约）
                                           ⇒ **新增 SPEC 时必须同轮投出 ②，⛔ 不得只做 ① 就当完成**
 .claude/workflows/manager-tick-core.js  → 实跑一次 Workflow(scriptPath)（该文件自述 node --check 会假绿）
 ```
