@@ -1,7 +1,7 @@
 ---
 id: gap-wiring-claim-ac-misflags-position-grep
 title: wiring-claim-ac 误报 position-based grep AC——grep 真文件是位置判定的真探针，非 no-probe
-status: ready
+status: done
 labels:
   - gap
   - defect
