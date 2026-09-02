@@ -35,7 +35,7 @@ extra:
 - [x] AC1（能取假）：lowconc 并发默认 = 3（非宿主推导 8）——`scripts/test.sh` grep lowconc 默认值回 3，或独立默认函数返回 3；（⛔ 仍宿主推导 8 ⇒ 假）。
 - [ ] AC2（能取假，生产载体）：落地后 session-liveness-signals 系列在并发 suite 下稳定绿（探针进程建立/存活，不再 SESSION-GONE），N 只计落地后轮；（⛔ 仍饥饿失败 ⇒ 假）。（待外部）
 
-**落地后归因（2026-09-02，fan-in suite 红）**：AC1 落地正确（`--lowconc-concurrency` 回 3）。落地轮 suite 仍红——`session-liveness-signals-kinds.test.mjs` "probe must be alive"（278s）。该失败【非 lowconc 值决定】：全历史 fan-in-suite 日志里同一失败在 lowconc≤8 下亦现（gap-scoped-gate-lpt-order、gap-test-file-snapshot-worktree-drops-realinstall ×2 等，47 轮约 3 次），lowconc≤3 下 1/2 轮。负载源是 `gap-suite-dynamic-waterline-scheduler`（08-31）水位调度：main 用剩余容量把 16 核占满——lowconc 值只改 main 头寸（lowconc=8→main 0、lowconc=3→main 5），不改总负载 16/16。AC2「稳定绿」须在水位调度器（`plugin/scripts/suite-scheduler.ts`，非本任务 Touches）为 lowconc 预留 CPU 头寸，或重裁「并发取 3」在水位语境下的语义——本任务 lowconc 回 3（AC1）正确且必要，但不足以单独达成 AC2，故 AC2 留（待外部）。
+**落地后归因（2026-09-02，fan-in suite 红）**：AC1 落地正确（`--lowconc-concurrency` 回 3）。落地轮 suite 仍红——`session-liveness-signals-kinds.test.mjs:139` "probe must be alive"（探针建立超时 ≈192s=HANG_GUARD_MS，非 marker-stale 断言）。**lowconc=8 假说被证伪**：该失败在 lowconc≤8 下亦现（gap-scoped-gate-lpt-order、gap-test-file-snapshot-worktree-drops-realinstall ×2 等，47 轮约 3 次），lowconc≤3 下 1/2 轮——非 lowconc 值决定。develop 已立案 `gap-session-liveness-marker-stale-fires-on-tick-log`（「lowconc=8 假说证伪」，并指出 6 次历史失败类型多样 probe/SESSION-GONE/CANT-SEND/marker-stale，非单一饿死）。本任务 lowconc 回 3（AC1）正确且必要，但 AC2「稳定绿」的真根因在 session-liveness 家族自身的多样成因（probe 建立 / marker-stale gating 等）、非并发值——留（待外部），由后续根因任务收敛。
 
 ## Definition of Done
 
