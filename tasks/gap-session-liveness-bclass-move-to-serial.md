@@ -43,4 +43,5 @@ session-liveness 族 B 类等待测试移到 serial 相；AC1/AC2 勾；饱和�
 - plugin/test/session-liveness-signals-thresholds-observers.test.mjs（@test-group lowconc→serial）
 - plugin/test/session-liveness-events.test.mjs（@test-group lowconc→serial）
 - plugin/test/session-liveness-heartbeat.test.mjs（@test-group lowconc→serial）
+- docs/analysis/test-file-baseline.txt（test-file-snapshot 基线重生成，吸收 lowconc→serial 改标）
 - tasks/gap-session-liveness-bclass-move-to-serial.md（自身）
