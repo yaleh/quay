@@ -51,13 +51,15 @@ const FAILURE_PATTERNS: RegExp[] = [
 ];
 // gap-verification-round-reason-self-contradiction — GATE/SCAN failure lines that flip red while the
 // TAP test counters stay fail=0 (they are per-file / residual reports, NOT node:test tallies): a
-// measure-suite per-file timeout (`__PERFILE__ ... passed=false`) and the suite-tail leak-scan residual
+// measure-suite per-file FAILURE (`__PERFILE__ ... passed=false` — a test file with a genuinely
+// failing test, NOT a timeout: measure-suite-reporter passes through node's `details.passed`;
+// see memory perfile-timeout-gate-name-misleads) and the suite-tail leak-scan residual
 // (`tmux-leak-scan: FAIL`). These are SUBSET patterns of FAILURE_PATTERNS above — a line matching one
-// of these ALSO flips redDetected via isFailureLine (a leak/per-file-timeout IS a real red). The gate
+// of these ALSO flips redDetected via isFailureLine (a leak/per-file failure IS a real red). The gate
 // identity lets the round record name WHICH gate/scan failed (reason='gate-failed' + `gate`) so a red
 // round with fail=0 (all tests passed) is never mislabelled reason='failed'.
 const GATE_SCAN_FAILURE_LINES: { gate: string; re: RegExp }[] = [
-  { gate: "perfile-timeout", re: /^__PERFILE__\s+duration_ms=.*\s+passed=false\b/ },
+  { gate: "perfile-failure", re: /^__PERFILE__\s+duration_ms=.*\s+passed=false\b/ },
   { gate: "tmux-leak-scan", re: TMUX_LEAK_FAIL_RE },
 ];
 

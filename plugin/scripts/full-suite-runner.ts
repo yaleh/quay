@@ -201,7 +201,7 @@ export type SuiteStateReason = "failed" | "aborted" | "infra-error" | "static-ch
 // fail counter); the ROUND RECORD's reason is recomputed at the COUNTER level so a red round with
 // fail=0 (all tests passed) is never labelled reason='failed' — that combination is self-contradictory
 // (a reader must dig into failures[] to interpret). "gate-failed" = the red came from a GATE/SCAN
-// failure (static-check / perfile-timeout / tmux-leak-scan), carried with a `gate` identity naming
+// failure (static-check / perfile-failure / tmux-leak-scan), carried with a `gate` identity naming
 // WHICH gate/scan failed. The lifecycle reasons (infra-error/aborted/timeout/hung/crashed) keep their
 // existing values — they are already distinct from "failed" and never claim a test failure.
 export type SuiteRoundReason = SuiteStateReason | "gate-failed";
@@ -838,8 +838,9 @@ export interface SuiteRoundRecord {
   /**
    * gap-verification-round-reason-self-contradiction — on a reason='gate-failed' round, WHICH
    * gate/scan failed: 'static-check' (a run_static_checks checker — task-contract /
-   * test-framework-policy / test-isolation ratchet), 'perfile-timeout' (a __PERFILE__ ... passed=false
-   * measure-suite per-file failure), or 'tmux-leak-scan' (the suite-tail leak-scan residual). Absent
+   * test-framework-policy / test-isolation ratchet), 'perfile-failure' (a __PERFILE__ ... passed=false
+   * measure-suite per-file failure — a real test failure, NOT a timeout), or 'tmux-leak-scan' (the
+   * suite-tail leak-scan residual). Absent
    * on every other round. Carries the gate identity so a reader never has to dig into failures[] to
    * interpret a fail=0 red.
    */
