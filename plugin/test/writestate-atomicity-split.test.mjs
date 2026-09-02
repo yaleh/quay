@@ -5,7 +5,7 @@
 // AC2: for one of the three pre-migration non-atomic writers, construct a CONCURRENT read that
 // pre-migration could observe a torn (half-written) state file and post-migration cannot — the
 // tmp+rename atomicity guarantee. The two writers exercised here are the exact two shapes the task
-// split: an in-place `fs.writeFileSync` of a large JSON value (the pre-migration non-atomic shape)
+// split: an in-place same-fd write of a large JSON value (the pre-migration non-atomic shape)
 // vs `writeJsonAtomic` (tmp + renameSync, the post-migration shape).
 //
 // Two tests:
@@ -13,7 +13,7 @@
 //      overwrites a large state file. rename(2) atomicity makes this a HARD guarantee (not a
 //      timing bet); it goes RED if writeJsonAtomic regresses to an in-place write.
 //   2. negative control — the SAME reader DOES observe a torn file against an in-place
-//      fs.writeFileSync, proving the reader can bite (the pre-migration premise). Without this,
+//      same-fd write, proving the reader can bite (the pre-migration premise). Without this,
 //      test 1's zero-torn assertion would be vacuous (it could pass only because the reader cannot
 //      detect tearing at all).
 
@@ -30,9 +30,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MOD = path.resolve(__dirname, "..", "scripts", "write-json-atomic.ts");
 
 // Child writer: overwrites `file` in a tight loop for `durationMs` with a large, alternating value.
-// mode "atomic" uses writeJsonAtomic (tmp + rename); mode "nonatomic" uses a plain in-place
-// fs.writeFileSync (the pre-migration shape). The large payload makes an in-place write observably
-// torn to a concurrent reader, which is exactly the split the task eliminates.
+// mode "atomic" uses writeJsonAtomic (tmp + rename); mode "nonatomic" uses an in-place same-fd
+// write (the pre-migration shape). The non-atomic branch truncates the file, then writes the JSON
+// in small chunks over the same fd, so a concurrent reader observes a partial JSON prefix (a torn
+// state) for a wide window — unlike a single fs.writeFileSync, whose only torn window is the narrow
+// truncate→write gap that a fast machine can hide (the source of this negative control's flakiness).
 const WRITER = `
 import fs from "node:fs";
 import { writeJsonAtomic } from ${JSON.stringify(MOD)};
@@ -43,7 +45,15 @@ let i = 0;
 while (Date.now() < end) {
   const v = { marker: i % 2 ? "B" : "C", payload, n: i };
   if (mode === "atomic") writeJsonAtomic(file, v);
-  else fs.writeFileSync(file, JSON.stringify(v) + "\\n", "utf8");
+  else {
+    const buf = Buffer.from(JSON.stringify(v) + "\\n", "utf8");
+    const fd = fs.openSync(file, "w");
+    const CHUNK = 64 * 1024;
+    for (let off = 0; off < buf.length; off += CHUNK) {
+      fs.writeSync(fd, buf, off, Math.min(CHUNK, buf.length - off), off);
+    }
+    fs.closeSync(fd);
+  }
   i++;
 }
 `;

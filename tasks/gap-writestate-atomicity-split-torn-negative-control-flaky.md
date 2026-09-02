@@ -1,7 +1,7 @@
 ---
 id: gap-writestate-atomicity-split-torn-negative-control-flaky
 title: writestate-atomicity-split「撕裂」负控制断言时序敏感——低负载下撕裂不可观察致断言失败（pre-existing 8 次）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -29,8 +29,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：低负载/快机器下「撕裂」负控制不再误失败（断言稳定绿）；（⛔ 仍时序失败 ⇒ 假）。
-- [ ] AC2（能取假，负控制不退化）：原验证目标（reader 能 bite / 不崩于 torn state）仍被验证——修复不把「撕裂负控制」弱化成恒真；（⛔ 负控制被删成恒过 ⇒ 假）。
+- [x] AC1（能取假）：低负载/快机器下「撕裂」负控制不再误失败（断言稳定绿）；（⛔ 仍时序失败 ⇒ 假）。
+- [x] AC2（能取假，负控制不退化）：原验证目标（reader 能 bite / 不崩于 torn state）仍被验证——修复不把「撕裂负控制」弱化成恒真；（⛔ 负控制被删成恒过 ⇒ 假）。
 
 ## Definition of Done
 
