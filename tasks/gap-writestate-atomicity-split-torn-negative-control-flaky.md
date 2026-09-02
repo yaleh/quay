@@ -1,7 +1,7 @@
 ---
 id: gap-writestate-atomicity-split-torn-negative-control-flaky
 title: writestate-atomicity-split「撕裂」负控制断言时序敏感——低负载下撕裂不可观察致断言失败（pre-existing 8 次）
-status: todo
+status: ready
 labels:
   - gap
   - defect
