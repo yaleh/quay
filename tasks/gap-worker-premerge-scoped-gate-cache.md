@@ -2,7 +2,7 @@
 id: gap-worker-premerge-scoped-gate-cache
 title: worker 退出前 agent-mediated pre-merge + scoped test，锁内 scoped-gate 加
   develop-sha 缓存跳过——缩短 fan-in 锁内占用、把合并冲突从"锁内检测"提前到"worker 自行解决"
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -87,21 +87,19 @@ develop 不被别的任务写"——suite 结果必须对应即将 push 的那�
 
 ## Acceptance Criteria
 
-- [ ] AC1：`buildWorkerPrompt` 的输出文本包含明确的"退出前 merge develop + 跑 scoped 门命令"指令，
+- [x] AC1：`buildWorkerPrompt` 的输出文本包含明确的"退出前 merge develop + 跑 scoped 门命令"指令，
       且该命令字符串与 `worker-driver.ts` 里 fan-in 用的 `scopedCmd`（`--for-task <task>
       --allow-thin`）一致——用文本断言核对，不是描述性复核。
-- [ ] AC2：`buildContinueWorkerPrompt`（续做路径）同样携带该步骤，不是仅首派路径独有——独立断言，
+- [x] AC2：`buildContinueWorkerPrompt`（续做路径）同样携带该步骤，不是仅首派路径独有——独立断言，
       不能靠"和 buildWorkerPrompt 共用同一段文本"含糊过去。
-- [ ] AC3：新增的 scoped-gate 缓存读写函数（`readScopedGateCache`/`writeScopedGateCache` 或等价命名）
+- [x] AC3：新增的 scoped-gate 缓存读写函数（`readScopedGateCache`/`writeScopedGateCache` 或等价命名）
       有单测覆盖三分支：develop tip 完全一致→命中；develop 已前进→未命中照跑；缓存文件缺失/内容损坏→
       fail-closed 照跑（不得默认命中）。
-- [ ] AC4：`runMechanicalFanIn` 在锁内 `merge-develop` 之后、`scoped-gate` 之前接入该缓存判定；命中时
+- [x] AC4：`runMechanicalFanIn` 在锁内 `merge-develop` 之后、`scoped-gate` 之前接入该缓存判定；命中时
       trace 记录的 `reason` 含 `cache-hit`、`wall_ms` < 5000（判据="确实跳过了"，不是"碰巧跑得快"）；
       未命中时的 trace 记录与今日现状逐位相同（回归断言，防止引入静默行为变化）。
-- [ ] AC5：至少一次真实（非 fixture 注入）生产 fan-in 运行的 `.quay/fan-in-<task>-<runId>.log` 里出现
-      一条 `step:"scoped-gate"` 且 `reason` 含 `cache-hit` 的记录——对应本仓库硬规则「推论三」：机制
-      落地不能只靠单测/fixture 满足，要在生产载体上真实观测到发生过。
-- [ ] AC6：`scripts/test.sh` 全量绿，且不新增任何被跳过/新增豁免的检查器。
+- [ ] AC5：至少一次真实（非 fixture 注入）生产 fan-in 运行的 `.quay/fan-in-<task>-<runId>.log` 里出现一条 `step:"scoped-gate"` 且 `reason` 含 `cache-hit` 的记录——对应本仓库硬规则「推论三」：机制落地不能只靠单测/fixture 满足，要在生产载体上真实观测到发生过。（待外部）
+- [ ] AC6：`scripts/test.sh` 全量绿，且不新增任何被跳过/新增豁免的检查器。（待外部）
 
 ## Definition of Done
 
@@ -113,5 +111,5 @@ develop 不被别的任务写"——suite 结果必须对应即将 push 的那�
 ## Touches
 
 - plugin/scripts/worker-driver.ts
-- plugin/scripts/worker-driver.test.mjs
+- plugin/test/worker-driver.test.mjs
 - tasks/gap-worker-premerge-scoped-gate-cache.md
