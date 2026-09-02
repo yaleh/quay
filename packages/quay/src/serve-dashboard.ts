@@ -5,7 +5,7 @@ import type { ProviderClient } from "./provider-client.ts";
 import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun } from "./observation.ts";
 import { TASK_STATUS } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime } from "./serve-render.ts";
 import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
@@ -199,12 +199,17 @@ export function renderDashboardPage(d: {
       .sort((a, b) => ((b as { updatedAt?: unknown }).updatedAt as number) - ((a as { updatedAt?: unknown }).updatedAt as number))
       .slice(0, MINI_LIST_N);
     if (rows.length === 0) return "";
-    return html`<div style="border-top:1px solid var(--color-divider);margin-top:2px;padding-top:8px;display:flex;flex-direction:column;gap:4px">
+    return html`<div style="border-top:1px solid var(--color-divider);margin-top:2px;padding-top:8px;display:flex;flex-direction:column;gap:6px">
       <div style="font-size:0.7rem;color:var(--color-neutral-700)">${escapeHtml(s)}（最近 ${MINI_LIST_N} 条）</div>
-      ${rows.map((t) => html`<a href="/task/${encodeURIComponent(String(t.id))}" style="display:flex;justify-content:space-between;gap:8px;text-decoration:none;color:var(--color-text);font-size:0.75rem">
-        <span style="font-weight:600;color:var(--color-accent)">${escapeHtml(String(t.id))}</span>
-        <span style="flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(String(t.title ?? ""))}</span>
-      </a>`).join("")}
+      ${rows.map((t, i) => {
+        const sep = i > 0 ? "border-top:1px solid var(--color-divider);padding-top:6px;" : "";
+        const updatedAt = (t as { updatedAt?: unknown }).updatedAt as number;
+        return html`<div style="${sep}display:flex;flex-direction:column;gap:2px">
+        <a href="/task/${encodeURIComponent(String(t.id))}" style="color:var(--color-accent);text-decoration:none;font-size:0.75rem;font-weight:600">${escapeHtml(String(t.id))}</a>
+        <div style="color:var(--color-text);font-size:0.75rem">${escapeHtml(String(t.title ?? ""))}</div>
+        <div style="color:var(--color-neutral-700);font-size:0.7rem">${relativeTime(updatedAt)}</div>
+      </div>`;
+      }).join("")}
     </div>`;
   };
 

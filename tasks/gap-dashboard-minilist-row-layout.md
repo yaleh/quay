@@ -50,25 +50,25 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] `packages/quay/src/serve-dashboard.ts` 顶部对 `./serve-render.ts` 的 import 列表新增
+- [x] `packages/quay/src/serve-dashboard.ts` 顶部对 `./serve-render.ts` 的 import 列表新增
       `relativeTime`（`grep -n 'relativeTime' packages/quay/src/serve-dashboard.ts` 命中 ≥2 处：
       import 语句 + `miniList` 内的调用处）。
-- [ ] `miniList` 单条任务行渲染 id、title、`relativeTime(updatedAt)` 三个独立文本节点——可用测试
+- [x] `miniList` 单条任务行渲染 id、title、`relativeTime(updatedAt)` 三个独立文本节点——可用测试
       断言渲染出的 HTML 中，同一条任务的 id 之后依次能找到该任务的 title 全文与一个由
       `relativeTime` 产出的时间字符串，而不是仅 id+title 两项。
-- [ ] title 对应的 `<span>`/标签样式不再包含 `flex:none`、`overflow:hidden`、`text-overflow:ellipsis`
+- [x] title 对应的 `<span>`/标签样式不再包含 `flex:none`、`overflow:hidden`、`text-overflow:ellipsis`
       或 `white-space:nowrap`（对 `miniList` 函数体源码 `grep` 核实这四个 token 均不出现在 title 所在
       的标签属性上）。
-- [ ] 迷你列表条目间渲染分隔线：同一状态块内 ≥2 条任务时，第 2 条及以后的行样式含 `border-top`；
+- [x] 迷你列表条目间渲染分隔线：同一状态块内 ≥2 条任务时，第 2 条及以后的行样式含 `border-top`；
       且原有"该状态下任务数为 0 时不渲染该区块"行为不回归。
-- [ ] `node --test packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs` 既有
+- [x] `node --test packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs` 既有
       测试 exit 0 不回归（该测试只断言 id 链接与分组标题存在、未锚定旧的两栏 flex 结构，用于验证
       本次改动不破坏既有断言）。
-- [ ] 新增 `packages/quay/test/gap-dashboard-minilist-row-layout.test.mjs`，覆盖：短标题正常渲染；
+- [x] 新增 `packages/quay/test/gap-dashboard-minilist-row-layout.test.mjs`，覆盖：短标题正常渲染；
       长标题（如 60+ 字符）不再被截断为省略号（输出 HTML 中不含 `text-overflow:ellipsis` 且该长标题
       原文全文出现在输出中）；每行渲染出 `relativeTime` 格式的时间文本（可用一个已知 `updatedAt` 差值
       构造可预期的输出片段断言）。测试 exit 0。
-- [ ] `scripts/test.sh --for-task gap-dashboard-minilist-row-layout` scoped 静态检查通过，exit 0。
+- [x] `scripts/test.sh --for-task gap-dashboard-minilist-row-layout` scoped 静态检查通过，exit 0。
 
 ## Definition of Done
 
