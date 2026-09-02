@@ -32,8 +32,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：lowconc 并发默认 = 3（非宿主推导 8）——`scripts/test.sh` grep lowconc 默认值回 3，或独立默认函数返回 3；（⛔ 仍宿主推导 8 ⇒ 假）。
-- [ ] AC2（能取假，生产载体）：落地后 session-liveness-signals 系列在并发 suite 下稳定绿（探针进程建立/存活，不再 SESSION-GONE），N 只计落地后轮；（⛔ 仍饥饿失败 ⇒ 假）。
+- [x] AC1（能取假）：lowconc 并发默认 = 3（非宿主推导 8）——`scripts/test.sh` grep lowconc 默认值回 3，或独立默认函数返回 3；（⛔ 仍宿主推导 8 ⇒ 假）。
+- [ ] AC2（能取假，生产载体）：落地后 session-liveness-signals 系列在并发 suite 下稳定绿（探针进程建立/存活，不再 SESSION-GONE），N 只计落地后轮；（⛔ 仍饥饿失败 ⇒ 假）。（待外部）
 
 ## Definition of Done
 
@@ -41,5 +41,11 @@ lowconc 并发回人裁定 3（或独立默认函数）；:1241 注释同步；A
 
 ## Touches
 
-- scripts/test.sh（lowconc 默认 8→3 + :1241 注释同步 + 独立默认函数）
+- scripts/test.sh（lowconc 默认 8→3 独立默认函数 + :1241 注释同步）
+- plugin/scripts/runner-concurrency.ts（LOWCONC_CONCURRENCY_DEFAULT=3 + defaultLowconcConcurrency + --lowconc-concurrency）
+- plugin/scripts/full-suite-runner.ts（lowconc 默认回 3 + 注释同步）
+- plugin/scripts/suite-params.ts（注释同步）
+- plugin/test/resource-gate.test.mjs（判据2/判据4 lowconc 断言更新）
+- plugin/test/runner-concurrency.test.mjs（defaultLowconcConcurrency 测试）
+- plugin/test/full-suite-runner-cgroup.test.mjs（默认 lowconc=3 表更新）
 - tasks/gap-lowconc-concurrency-8-starves-bclass-waiting.md（自身）

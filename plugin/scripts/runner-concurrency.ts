@@ -64,8 +64,9 @@ export function spliceConcurrency(cmd: string, laneCount: number): string {
 // These are the pure DECISION functions scripts/test.sh used to compute inline in bash. Extracted here
 // so test.sh narrows to THIN FORWARDING (gap-execution-loop-p4-suite-entry-ts-ization): the bash
 // functions default_concurrency_formula / default_test_concurrency / serial_lowconc_host_default /
-// has_explicit_concurrency / bucket_test_concurrency / all_flags, and the main_root derivation, now
-// shell out to `node runner-concurrency.ts --<flag>` instead of holding the computation. The RUNNER-side
+// lowconc_concurrency_default / has_explicit_concurrency / bucket_test_concurrency / all_flags, and the
+// main_root derivation, now shell out to `node runner-concurrency.ts --<flag>` instead of holding the
+// computation. The RUNNER-side
 // twins live in full-suite-runner.ts (defaultLaneCount / defaultPhaseConcurrency) — deliberately NOT
 // merged: the runner's defaultLaneCount carries the yielded-slot term (漏口②) and reads
 // QUAY_MAX_OVERSUBSCRIPTION directly, while the DIRECT path reads the RESOURCE_GATE_OVERSUBSCRIPTION
@@ -98,19 +99,47 @@ export function defaultTestConcurrency(): number {
 }
 
 /**
- * defaultPhaseConcurrencyDirect — the DIRECT-path (scripts/test.sh) serial/lowconc PHASE concurrency:
+ * defaultPhaseConcurrencyDirect — the DIRECT-path (scripts/test.sh) SERIAL PHASE concurrency:
  * max(1, floor(nproc / (S × P))). The EXACT semantics of the bash serial_lowconc_host_default
  * (gap-ac74-serial-lowconc-literal-direct-path + gap-lane-formula-ignores-phase-overlap-concurrency):
  * P = the concurrent-phase count (2 when QUAY_PHASE_OVERLAP ≠ "0" — the default — else 1). Identical in
  * value to full-suite-runner.ts's defaultPhaseConcurrency (the runner twin); kept separate so the direct
  * path's forwarder has a self-contained import (runner-concurrency.ts cannot import full-suite-runner.ts
  * — that direction would be a cycle). resource-gate.test.mjs 判据4 cross-checks the two stay equal.
+ * gap-lowconc-concurrency-8-starves-bclass-waiting: SERIAL-only now — the lowconc phase split to its own
+ * default (defaultLowconcConcurrency, the fixed human-adjudicated semantic value 3), so the shared
+ * serial_lowconc_host_default no longer binds two semantically-different concurrency values.
  */
 export function defaultPhaseConcurrencyDirect(): number {
   const ncpu = hostParallelism();
   const slots = concurrentSuiteSlots();
   const phases = envValOr("QUAY_PHASE_OVERLAP", "1") === "0" ? 1 : 2;
   return Math.max(1, Math.floor(ncpu / (slots * phases)));
+}
+
+/**
+ * LOWCONC_CONCURRENCY_DEFAULT — the lowconc phase's fixed concurrency default: 3, a HUMAN-ADJUDICATED
+ * SEMANTIC value, NOT a machine-spec literal (CLAUDE.md 硬规则 4 推论二 does NOT apply to it).
+ * gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive 人裁定原文:「并发取 3 不取 8：B 类是等待型
+ * 需要被及时调度，并发太高会让它们又开始饿——那正是它们当初被踢出主体的原因。」The lowconc phase holds
+ * the hermetic-but-load-sensitive B-class session-observation family (session-liveness-signals-* etc.),
+ * which needs timely scheduling of its real tmux + claude-probe child probes; host-deriving it to 8
+ * (16-core ÷ (S×P)) starved those probes — gap-lowconc-concurrency-8-starves-bclass-waiting reverts
+ * AC74's over-broad "read the host" refactor, which wrongly read-host'd this semantic value along with
+ * the machine-spec serial default. Unlike a machine-spec literal, 3 stays 3 on any host.
+ *
+ * concurrency-default-fallback: LOWCONC_CONCURRENCY_DEFAULT=3 is the declared, justified default the
+ * concurrency-literal-check discipline permits (禁「悄悄写死」，不禁「有理由的默认值」) — a human-ruled
+ * semantic value, not a scattered machine-spec-dependent literal.
+ */
+export const LOWCONC_CONCURRENCY_DEFAULT = 3;
+
+/** defaultLowconcConcurrency — the lowconc-phase concurrency default: the fixed human-adjudicated
+ *  semantic value 3 (LOWCONC_CONCURRENCY_DEFAULT), INDEPENDENT of the serial phase's host-derived
+ *  default. Exported for full-suite-runner.ts (the runner twin must read the SAME value) and test.sh's
+ *  thin forwarder (--lowconc-concurrency). */
+export function defaultLowconcConcurrency(): number {
+  return LOWCONC_CONCURRENCY_DEFAULT;
 }
 
 /**
@@ -188,6 +217,7 @@ const _runnerConcurrencyUsage = [
   "Flags (one per invocation; the direct-path bash functions thin-forward to these):",
   "  --default-test-concurrency   print max(1, floor(nproc × oversub / S))   (bash default_concurrency_formula)",
   "  --phase-concurrency          print max(1, floor(nproc / (S × P)))       (bash serial_lowconc_host_default)",
+  "  --lowconc-concurrency        print 3 (the fixed lowconc semantic default) (bash lowconc_concurrency_default)",
   "  --bucket-test-concurrency    print the --buckets effective concurrency   (bash bucket_test_concurrency)",
   "  --derive-main-root <repo>    print the main checkout path               (bash main_root derivation)",
   "  --has-explicit-concurrency   exit 0 iff any arg is a --test-concurrency flag (bash has_explicit_concurrency)",
@@ -210,6 +240,9 @@ function main(argv: string[]): number {
       return 0;
     case "--phase-concurrency":
       process.stdout.write(`${defaultPhaseConcurrencyDirect()}\n`);
+      return 0;
+    case "--lowconc-concurrency":
+      process.stdout.write(`${defaultLowconcConcurrency()}\n`);
       return 0;
     case "--bucket-test-concurrency":
       process.stdout.write(`${bucketTestConcurrency(rest)}\n`);

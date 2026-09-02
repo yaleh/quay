@@ -20,6 +20,7 @@ import {
   hostParallelism,
   defaultTestConcurrency,
   defaultPhaseConcurrencyDirect,
+  defaultLowconcConcurrency,
   hasExplicitConcurrency,
   allFlags,
   bucketTestConcurrency,
@@ -99,7 +100,7 @@ test("defaultTestConcurrency — oversub empty-string-as-unset falls to the knob
   );
 });
 
-// ── defaultPhaseConcurrencyDirect (the serial/lowconc direct-path formula: max(1, floor(nproc/(S×P)))) ─
+// ── defaultPhaseConcurrencyDirect (the SERIAL direct-path formula: max(1, floor(nproc/(S×P)))) ─
 
 test("defaultPhaseConcurrencyDirect — max(1, floor(nproc/(S×P))), P=2 overlap ON / 1 overlap OFF", () => {
   const c = (nproc, slots, overlap) =>
@@ -112,6 +113,24 @@ test("defaultPhaseConcurrencyDirect — max(1, floor(nproc/(S×P))), P=2 overlap
   assert.equal(c(4, 1, "1"), 2, "1 slot / overlap ON → floor(4/(1×2))=2");
   assert.equal(c(16, 2, "0"), 8, "overlap OFF → floor(16/2)=8 (pre-overlap H÷S budget)");
   assert.equal(c(4, 1, "0"), 4, "1 slot / overlap OFF → nproc");
+});
+
+// ── defaultLowconcConcurrency (the LOWCONC direct-path default: the fixed semantic value 3) ─
+
+test("defaultLowconcConcurrency — the fixed human-adjudicated semantic value 3, HOST-INDEPENDENT (gap-lowconc-concurrency-8-starves-bclass-waiting)", () => {
+  // NOT the host-derived H÷(S×P): 3 stays 3 on any core/slot/overlap combination (the B-class wait-type
+  // tests need timely scheduling, never 8 — the AC74 host-derivation that starved them is reverted).
+  assert.equal(defaultLowconcConcurrency(), 3, "default must be 3 (no seams)");
+  assert.equal(
+    withSeams({ RESOURCE_GATE_NPROC: "16", RESOURCE_GATE_CONCURRENT_SUITES: "2", QUAY_PHASE_OVERLAP: "1" }, () => defaultLowconcConcurrency()),
+    3,
+    "16 cores / 2 slots / overlap ON → still 3 (NOT floor(16/(2×2))=4)",
+  );
+  assert.equal(
+    withSeams({ RESOURCE_GATE_NPROC: "4", RESOURCE_GATE_CONCURRENT_SUITES: "1", QUAY_PHASE_OVERLAP: "0" }, () => defaultLowconcConcurrency()),
+    3,
+    "4 cores / 1 slot / overlap OFF → still 3 (NOT floor(4/1)=4)",
+  );
 });
 
 // ── bucketTestConcurrency (the --buckets effective concurrency: explicit wins, else derived default) ─
