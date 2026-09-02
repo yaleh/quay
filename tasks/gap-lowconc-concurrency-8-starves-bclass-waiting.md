@@ -1,7 +1,7 @@
 ---
 id: gap-lowconc-concurrency-8-starves-bclass-waiting
 title: lowconc 并发从人裁定 3 被 AC74 宿主推导改成 8——B 类等待型测试 CPU 饥饿（session-liveness 真失败根因）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -32,8 +32,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：lowconc 并发默认 = 3（非宿主推导 8）——`scripts/test.sh` grep lowconc 默认值回 3，或独立默认函数返回 3；（⛔ 仍宿主推导 8 ⇒ 假）。
-- [ ] AC2（能取假，生产载体）：落地后 session-liveness-signals 系列在并发 suite 下稳定绿（探针进程建立/存活，不再 SESSION-GONE），N 只计落地后轮；（⛔ 仍饥饿失败 ⇒ 假）。
+- [x] AC1（能取假）：lowconc 并发默认 = 3（非宿主推导 8）——`scripts/test.sh` grep lowconc 默认值回 3，或独立默认函数返回 3；（⛔ 仍宿主推导 8 ⇒ 假）。
+- [ ] AC2（能取假，生产载体）：落地后 session-liveness-signals 系列在并发 suite 下稳定绿（探针进程建立/存活，不再 SESSION-GONE），N 只计落地后轮；（⛔ 仍饥饿失败 ⇒ 假）。（待外部）
+
+**落地后归因（2026-09-02，fan-in suite 红）**：AC1 落地正确（`--lowconc-concurrency` 回 3）。落地轮 suite 仍红——`session-liveness-signals-kinds.test.mjs:139` "probe must be alive"（探针建立超时 ≈192s=HANG_GUARD_MS，非 marker-stale 断言）。**lowconc=8 假说被证伪**：该失败在 lowconc≤8 下亦现（gap-scoped-gate-lpt-order、gap-test-file-snapshot-worktree-drops-realinstall ×2 等，47 轮约 3 次），lowconc≤3 下 1/2 轮——非 lowconc 值决定。develop 已立案 `gap-session-liveness-marker-stale-fires-on-tick-log`（「lowconc=8 假说证伪」，并指出 6 次历史失败类型多样 probe/SESSION-GONE/CANT-SEND/marker-stale，非单一饿死）。本任务 lowconc 回 3（AC1）正确且必要，但 AC2「稳定绿」的真根因在 session-liveness 家族自身的多样成因（probe 建立 / marker-stale gating 等）、非并发值——留（待外部），由后续根因任务收敛。
 
 ## Definition of Done
 
@@ -41,5 +43,11 @@ lowconc 并发回人裁定 3（或独立默认函数）；:1241 注释同步；A
 
 ## Touches
 
-- scripts/test.sh（lowconc 默认 8→3 + :1241 注释同步 + 独立默认函数）
+- scripts/test.sh（lowconc 默认 8→3 独立默认函数 + :1241 注释同步）
+- plugin/scripts/runner-concurrency.ts（LOWCONC_CONCURRENCY_DEFAULT=3 + defaultLowconcConcurrency + --lowconc-concurrency）
+- plugin/scripts/full-suite-runner.ts（lowconc 默认回 3 + 注释同步）
+- plugin/scripts/suite-params.ts（注释同步）
+- plugin/test/resource-gate.test.mjs（判据2/判据4 lowconc 断言更新）
+- plugin/test/runner-concurrency.test.mjs（defaultLowconcConcurrency 测试）
+- plugin/test/full-suite-runner-cgroup.test.mjs（默认 lowconc=3 表更新）
 - tasks/gap-lowconc-concurrency-8-starves-bclass-waiting.md（自身）

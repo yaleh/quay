@@ -64,8 +64,9 @@ export function spliceConcurrency(cmd: string, laneCount: number): string {
 // These are the pure DECISION functions scripts/test.sh used to compute inline in bash. Extracted here
 // so test.sh narrows to THIN FORWARDING (gap-execution-loop-p4-suite-entry-ts-ization): the bash
 // functions default_concurrency_formula / default_test_concurrency / serial_lowconc_host_default /
-// has_explicit_concurrency / bucket_test_concurrency / all_flags, and the main_root derivation, now
-// shell out to `node runner-concurrency.ts --<flag>` instead of holding the computation. The RUNNER-side
+// lowconc_concurrency_default / has_explicit_concurrency / bucket_test_concurrency / all_flags, and the
+// main_root derivation, now shell out to `node runner-concurrency.ts --<flag>` instead of holding the
+// computation. The RUNNER-side
 // twins live in full-suite-runner.ts (defaultLaneCount / defaultPhaseConcurrency) — deliberately NOT
 // merged: the runner's defaultLaneCount carries the yielded-slot term (漏口②) and reads
 // QUAY_MAX_OVERSUBSCRIPTION directly, while the DIRECT path reads the RESOURCE_GATE_OVERSUBSCRIPTION
@@ -98,19 +99,36 @@ export function defaultTestConcurrency(): number {
 }
 
 /**
- * defaultPhaseConcurrencyDirect — the DIRECT-path (scripts/test.sh) serial/lowconc PHASE concurrency:
+ * defaultPhaseConcurrencyDirect — the DIRECT-path (scripts/test.sh) SERIAL PHASE concurrency:
  * max(1, floor(nproc / (S × P))). The EXACT semantics of the bash serial_lowconc_host_default
  * (gap-ac74-serial-lowconc-literal-direct-path + gap-lane-formula-ignores-phase-overlap-concurrency):
  * P = the concurrent-phase count (2 when QUAY_PHASE_OVERLAP ≠ "0" — the default — else 1). Identical in
  * value to full-suite-runner.ts's defaultPhaseConcurrency (the runner twin); kept separate so the direct
  * path's forwarder has a self-contained import (runner-concurrency.ts cannot import full-suite-runner.ts
  * — that direction would be a cycle). resource-gate.test.mjs 判据4 cross-checks the two stay equal.
+ * gap-lowconc-concurrency-restore-host-derived: SERIAL and LOWCONC now SHARE this host-derived default —
+ * defaultLowconcConcurrency returns the SAME max(1, floor(nproc/(S×P))), so serial_lowconc_host_default
+ * binds both phases again (the lowconc=3 fixed-value split was wrong — see defaultLowconcConcurrency).
  */
 export function defaultPhaseConcurrencyDirect(): number {
   const ncpu = hostParallelism();
   const slots = concurrentSuiteSlots();
   const phases = envValOr("QUAY_PHASE_OVERLAP", "1") === "0" ? 1 : 2;
   return Math.max(1, Math.floor(ncpu / (slots * phases)));
+}
+
+/** defaultLowconcConcurrency — the lowconc-phase concurrency default: HOST-DERIVED
+ *  max(1, floor(nproc / (S × P))), IDENTICAL to the serial phase's default
+ *  (defaultPhaseConcurrencyDirect). gap-lowconc-concurrency-restore-host-derived (用户 2026-09-02 反转):
+ *  the prior fixed 3 (gap-lowconc-concurrency-8-starves-bclass-waiting) was WRONG — 人裁定
+ *  「lowconc 从 8 降回 3 是错的」「lowconc 和 serial lane 数现在都是计算出来的吧？应当持这一根据当前系统
+ *  环境计算的机制」, and the lowconc=8 starvation hypothesis was falsified by its own post-landing
+ *  attribution (the probe-starvation root cause is the session-liveness family's own multi-cause, NOT the
+ *  concurrency value). lowconc therefore returns to serial's host-derived default. Exported for
+ *  full-suite-runner.ts (the runner twin must read the SAME value) and test.sh's thin forwarder
+ *  (--lowconc-concurrency). */
+export function defaultLowconcConcurrency(): number {
+  return defaultPhaseConcurrencyDirect();
 }
 
 /**
@@ -188,6 +206,7 @@ const _runnerConcurrencyUsage = [
   "Flags (one per invocation; the direct-path bash functions thin-forward to these):",
   "  --default-test-concurrency   print max(1, floor(nproc × oversub / S))   (bash default_concurrency_formula)",
   "  --phase-concurrency          print max(1, floor(nproc / (S × P)))       (bash serial_lowconc_host_default)",
+  "  --lowconc-concurrency        print max(1, floor(nproc / (S × P))) (bash lowconc_concurrency_default, = serial_lowconc_host_default)",
   "  --bucket-test-concurrency    print the --buckets effective concurrency   (bash bucket_test_concurrency)",
   "  --derive-main-root <repo>    print the main checkout path               (bash main_root derivation)",
   "  --has-explicit-concurrency   exit 0 iff any arg is a --test-concurrency flag (bash has_explicit_concurrency)",
@@ -210,6 +229,9 @@ function main(argv: string[]): number {
       return 0;
     case "--phase-concurrency":
       process.stdout.write(`${defaultPhaseConcurrencyDirect()}\n`);
+      return 0;
+    case "--lowconc-concurrency":
+      process.stdout.write(`${defaultLowconcConcurrency()}\n`);
       return 0;
     case "--bucket-test-concurrency":
       process.stdout.write(`${bucketTestConcurrency(rest)}\n`);

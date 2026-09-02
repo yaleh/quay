@@ -20,6 +20,7 @@ import {
   hostParallelism,
   defaultTestConcurrency,
   defaultPhaseConcurrencyDirect,
+  defaultLowconcConcurrency,
   hasExplicitConcurrency,
   allFlags,
   bucketTestConcurrency,
@@ -28,16 +29,38 @@ import {
 
 /** Run a function with env seams set (save/restore; unset-on-absent) — the same convention
  *  resource-gate.test.mjs uses. */
+const CONCURRENCY_ENV = [
+  "RESOURCE_GATE_NPROC",
+  "RESOURCE_GATE_CONCURRENT_SUITES",
+  "RESOURCE_GATE_OVERSUBSCRIPTION",
+  "QUAY_MAX_OVERSUBSCRIPTION",
+  "QUAY_MAX_CONCURRENT_SUITES",
+  "QUAY_PHASE_OVERLAP",
+];
 function withSeams(seams, fn) {
   const saved = {};
+  const touched = [];
   for (const k of Object.keys(seams)) {
     saved[k] = process.env[k];
     process.env[k] = seams[k];
+    touched.push(k);
+  }
+  // Hermetic: any concurrency-knob env NOT explicitly provided is cleared for the call (restored
+  // after), so an ambient value — e.g. a caller exporting QUAY_MAX_OVERSUBSCRIPTION — can never
+  // perturb a fixture asserting the oversub=1 baseline (2026-09-02: an ov15 run red
+  // runner-concurrency + resource-gate self-tests because the exported oversub leaked into fixtures
+  // expecting 16×1/2=8). Same hermetic-input discipline as the outer-cron-registry host guard.
+  for (const k of CONCURRENCY_ENV) {
+    if (!(k in seams)) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+      touched.push(k);
+    }
   }
   try {
     return fn();
   } finally {
-    for (const k of Object.keys(seams)) {
+    for (const k of touched) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
@@ -99,7 +122,7 @@ test("defaultTestConcurrency — oversub empty-string-as-unset falls to the knob
   );
 });
 
-// ── defaultPhaseConcurrencyDirect (the serial/lowconc direct-path formula: max(1, floor(nproc/(S×P)))) ─
+// ── defaultPhaseConcurrencyDirect (the SERIAL direct-path formula: max(1, floor(nproc/(S×P)))) ─
 
 test("defaultPhaseConcurrencyDirect — max(1, floor(nproc/(S×P))), P=2 overlap ON / 1 overlap OFF", () => {
   const c = (nproc, slots, overlap) =>
@@ -112,6 +135,24 @@ test("defaultPhaseConcurrencyDirect — max(1, floor(nproc/(S×P))), P=2 overlap
   assert.equal(c(4, 1, "1"), 2, "1 slot / overlap ON → floor(4/(1×2))=2");
   assert.equal(c(16, 2, "0"), 8, "overlap OFF → floor(16/2)=8 (pre-overlap H÷S budget)");
   assert.equal(c(4, 1, "0"), 4, "1 slot / overlap OFF → nproc");
+});
+
+// ── defaultLowconcConcurrency (the LOWCONC direct-path default: HOST-DERIVED, = serial) ─
+
+test("defaultLowconcConcurrency — HOST-DERIVED max(1, floor(nproc/(S×P))), IDENTICAL to serial (gap-lowconc-concurrency-restore-host-derived)", () => {
+  // NOT a fixed 3: lowconc returns serial's host-derived default (the lowconc=3 fixed-value split was
+  // wrong — 用户 2026-09-02 反转「并发取 3 不取 8」).
+  assert.equal(defaultLowconcConcurrency(), defaultPhaseConcurrencyDirect(), "lowconc default == serial host-derived default (no seams)");
+  assert.equal(
+    withSeams({ RESOURCE_GATE_NPROC: "16", RESOURCE_GATE_CONCURRENT_SUITES: "2", QUAY_PHASE_OVERLAP: "1" }, () => defaultLowconcConcurrency()),
+    4,
+    "16 cores / 2 slots / overlap ON → floor(16/(2×2))=4",
+  );
+  assert.equal(
+    withSeams({ RESOURCE_GATE_NPROC: "4", RESOURCE_GATE_CONCURRENT_SUITES: "1", QUAY_PHASE_OVERLAP: "0" }, () => defaultLowconcConcurrency()),
+    4,
+    "4 cores / 1 slot / overlap OFF → floor(4/1)=4",
+  );
 });
 
 // ── bucketTestConcurrency (the --buckets effective concurrency: explicit wins, else derived default) ─
