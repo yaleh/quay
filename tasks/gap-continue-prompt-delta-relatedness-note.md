@@ -2,7 +2,7 @@
 id: gap-continue-prompt-delta-relatedness-note
 title: 续做 prompt 缺"这次 suite 失败与本任务改动是否相关"的机械信号——加两条结构性提示（delta 相关性 + 既有
   load-sensitive 注册表），不做自动跳过判断
-status: ready
+status: done
 labels:
   - gap
   - feature
