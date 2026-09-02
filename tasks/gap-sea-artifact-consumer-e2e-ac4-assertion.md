@@ -1,7 +1,7 @@
 ---
 id: gap-sea-artifact-consumer-e2e-ac4-assertion
 title: sea-artifact-consumer-e2e.test.mjs AC4 断言失败——release artifact plugin init --loop 机制未落（expected:0 不成立）
-status: ready
+status: done
 labels:
   - gap
   - defect
