@@ -1,7 +1,7 @@
 ---
 id: gap-continue-conflict-rule-missing-task-files
 title: CONTINUE 冲突消解协议缺任务文件规则——6 条规则无一点名 tasks/*.md，相邻 3 条教「取 develop 版」⇒ 静默抹掉本轮 AC 勾选
-status: ready
+status: done
 labels:
   - gap
   - defect
