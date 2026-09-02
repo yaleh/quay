@@ -2,7 +2,7 @@
 id: gap-mechanical-fan-in-writes-no-complete-gateevent
 title: 机械 fan-in 不写 complete GateEvent——delivery-critical AC2「loop 完成路径写
   GateEvent」经 08-27 新路径回归，唯一发现它的仪器被当噪声
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -61,4 +61,15 @@ extra:
 - run_id：wk-prod-1788285192
 - session_id：dbd0b0a4-45fd-46d5-8ec1-3488cb6b2fef
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-mechanical-fan-in-writes-no-complete-gateevent~wk-prod-1788285192~1788352862327-c35643.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-mechanical-fan-in-writes-no-complete-gateevent-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-02T23:08:16.544Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1788285192
+- session_id：1f5362a3-96dd-4457-934c-140d527f9eba
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-mechanical-fan-in-writes-no-complete-gateevent~wk-prod-1788285192~1788390078441-bf466e.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-mechanical-fan-in-writes-no-complete-gateevent-wk-prod-1788285192.log
