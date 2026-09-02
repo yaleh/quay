@@ -1249,6 +1249,18 @@ _sl_configured_transcript_like() {
   return 1
 }
 
+# _sl_heartbeat_is_transcript —— 该目标「心跳源」是否就是 transcript（MARKER-STALE 交叉正控制的
+# 适用面，gap-session-liveness-marker-stale-fires-on-tick-log）。与 _sl_configured_transcript_like
+# 同判据（SESSION_TRANSCRIPTS 优先，其次 *.jsonl 的 SESSION_HEARTBEATS；默认 tick-log / 自定义
+# 非 jsonl 心跳都不是 transcript）。marker-stale 只对「心跳是 transcript」的目标成立——tick 日志
+# 是 loop 写的，不是会话活动的证据。返回 0 = 心跳源是 transcript；1 = 不是（或无法判定，fail-closed
+# 不 fire marker-stale）。
+_sl_heartbeat_is_transcript() {
+  local name=$1 root=$2 cfg
+  cfg=$(_sl_configured_transcript_like "$name" "$root" || true)
+  [ -n "$cfg" ]
+}
+
 # _sl_effective_transcript —— 每轮生效的 transcript 路径（observer-blind-fix 的优先级落点）。
 # 只对「配置了 transcript 形心跳」的目标做动态覆盖；输出到全局 _sl_eff_transcript，并把动态解析的
 # 置信度/候选路径存 _sl_dyn_conf / _sl_dyn_path 供诊断。
@@ -1636,14 +1648,16 @@ while true; do
           fi
         fi
         # AC2（交叉正控制）：transcript 刚写过（会话确定在动）而【屏幕】判空闲 ⇒ 屏幕标志可能失效。
-        # 只对「心跳是 transcript」的目标成立——tick 日志是 loop 写的，不是会话活动的证据。
+        # 只对「心跳是 transcript」的目标成立——tick 日志是 loop 写的，不是会话活动的证据；gating
+        # 用 _sl_heartbeat_is_transcript 显式判「心跳源是 transcript」，而非仅 tr_path 非空（tr_path
+        # 非空是代理量，心跳源是 transcript 才是正判据，gap-session-liveness-marker-stale-fires-on-tick-log）。
         # 假→真沿报一次；不一致率基线由观察者从事件流里数（全忙会话同时报 = TUI 文案变了）。
         # 判据用 pane_idle（屏幕判定）——transcript 侧确定忙时不该报「屏幕判空闲」。
         # work_in_flight 抑制（gap-pane-classify-needs-two-orthogonal-dimensions 根因）：屏幕空闲 +
         # 后台 agent 在跑 + transcript 在动是【自洽组合】（输入空闲 ≠ 会话死了，agent 还在跑）——
         # 这正是单枚举装不下的 {input空闲+agents在跑} 形态；有 work_in_flight 时 MARKER-STALE 是
         # 误报，不发出。
-        if [ "$pane_idle" = "1" ] && [ "$halted" = "0" ] && [ "${_sl_pane_work_in_flight:-0}" != "1" ] && [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
+        if [ "$pane_idle" = "1" ] && [ "$halted" = "0" ] && [ "${_sl_pane_work_in_flight:-0}" != "1" ] && _sl_heartbeat_is_transcript "$name" "$root" && [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
           hmod2=$(heartbeat_mtime "$tr_path")
           if [ "$hmod2" != "0" ]; then
             age=$(( $(date +%s) - hmod2 ))

@@ -30,8 +30,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：fresh tick log（tick-log 心跳源）+ idle pane 不 fire marker-stale——测试 AC2 绿；（⛔ 仍 fire ⇒ 假）。
-- [ ] AC2（能取假，正控制不退化）：fresh transcript（transcript 心跳源）+ idle pane 仍 fire marker-stale——测试 AC2 正控制仍绿；（⛔ 误放行 transcript 侧 ⇒ 假）。
+- [x] AC1（能取假）：fresh tick log（tick-log 心跳源）+ idle pane 不 fire marker-stale——测试 AC2 绿；（⛔ 仍 fire ⇒ 假）。
+- [x] AC2（能取假，正控制不退化）：fresh transcript（transcript 心跳源）+ idle pane 仍 fire marker-stale——测试 AC2 正控制仍绿；（⛔ 误放行 transcript 侧 ⇒ 假）。
 
 ## Definition of Done
 
