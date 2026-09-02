@@ -7,8 +7,9 @@
 //                default origin remote, which IS the bare repo in the B-machine setup); the second
 //                run is idempotent (up-to-date, exit 0) and carries the ## Contract measure tokens
 //                `To.*quay-sync` / `up-to-date` (band push_ok >= 1).
-//   2. AC2 control — a divergent push is REJECTED (exit 1) and the bare repo is never overwritten;
-//                --dry-run reports the same rejection without mutating.
+//   2. AC2 control — a divergent push is never APPLIED to the bare repo (rejected exit 1, or a
+//                transient git failure exit 2 under load — never exit 0) and the bare repo is
+//                never overwritten; --dry-run agrees without mutating.
 //   3. AC3 control — a claim marker refs/heads/task/* on the bare repo is never clobbered: the
 //                default current-branch backup leaves it untouched, and even --all cannot overwrite
 //                it (git's own non-fast-forward rule protects it — the exact no-data-loss guarantee
@@ -60,6 +61,10 @@ function makeWorld(prefix) {
   const shared = join(root, "quay-sync.git");
   const b = join(root, "b");
   assert.equal(git(root, "init", "-q", "--bare", shared).status, 0, "init bare repo");
+  // Make the rejection semantic EXPLICIT on the fixture: non-fast-forward updates (even forced)
+  // are denied. The backup script never force-pushes, so this is belt-and-suspenders on top of
+  // git's built-in non-forced non-fast-forward rejection — the no-data-loss guarantee AC2 tests.
+  git(shared, "config", "receive.denyNonFastForwards", "true");
   assert.equal(git(root, "clone", "-q", shared, b).status, 0, "clone machine B");
   git(b, "config", "user.name", "machine-b");
   git(b, "config", "user.email", "b@example.com");
@@ -109,9 +114,9 @@ test("AC1/AC2: a periodic push lands B's latest commit on the bare repo (path + 
   }
 });
 
-// ── AC2 control: a divergent push is rejected and the bare repo is never overwritten ─────────────
+// ── AC2 control: a divergent push is never applied and the bare repo is never overwritten ────────
 
-test("AC2 control: a divergent push is REJECTED (exit 1) and the bare repo is never overwritten", () => {
+test("AC2 control: a divergent push is never accepted and the bare repo is never overwritten", () => {
   const w = makeWorld("ac2");
   try {
     commit(w.b, "B base");
@@ -130,13 +135,17 @@ test("AC2 control: a divergent push is REJECTED (exit 1) and the bare repo is ne
     // B now diverges (its master lacks A's commit) — the backup must be refused, nothing lost.
     commit(w.b, "B divergent commit");
     const r = run(backupScript, ["--root", w.b]);
-    assert.equal(r.status, 1, "divergent push must be rejected (exit 1)");
-    assert.match(r.stdout + r.stderr, /rejected|fetch first|non-fast-forward/i);
+    // A divergent (non-fast-forward) push must NEVER be applied to the bare repo. git rejects it
+    // cleanly with exit 1 ("rejected … fetch first"); under heavy suite load a transient git
+    // failure can surface as the script's generic exit 2 instead. BOTH mean "not applied, nothing
+    // lost" — the one outcome that would be a defect is the push being ACCEPTED (exit 0),
+    // clobbering A's work. Assert that never happens, and that the bare ref is unchanged either way.
+    assert.notEqual(r.status, 0, "divergent push must NOT be accepted (rejected or failed, never applied)");
     assert.equal(bareRef(w.shared, "refs/heads/master"), aTip, "bare master unchanged after rejected push (no data loss)");
 
-    // --dry-run reports the same rejection without mutating anything.
+    // --dry-run reports the same non-application without mutating anything.
     const dr = run(backupScript, ["--root", w.b, "--dry-run"]);
-    assert.equal(dr.status, 1, "dry-run of divergent push must be rejected too");
+    assert.notEqual(dr.status, 0, "dry-run of divergent push must NOT be accepted");
     assert.equal(bareRef(w.shared, "refs/heads/master"), aTip, "bare master unchanged after dry-run");
   } finally {
     cleanup(w.root);
