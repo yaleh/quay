@@ -5,10 +5,12 @@ status: todo
 labels:
   - gap
   - defect
-parent: gap-session-liveness-bclass-move-to-serial
+parent: null
 children: []
 extra:
   schema: execution
+depends_on:
+  - gap-session-liveness-bclass-move-to-serial
 ---
 **type:** execution
 

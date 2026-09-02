@@ -6,8 +6,7 @@ labels:
   - gap
   - defect
 parent: null
-children:
-  - gap-lowconc-concurrency-restore-host-derived
+children: []
 extra:
   schema: execution
 ---
@@ -46,3 +45,4 @@ session-liveness 族 B 类等待测试移到 serial 相；AC1/AC2 勾；饱和�
 - plugin/test/session-liveness-heartbeat.test.mjs（@test-group lowconc→serial）
 - docs/analysis/test-file-baseline.txt（test-file-snapshot 基线重生成，吸收 lowconc→serial 改标）
 - tasks/gap-session-liveness-bclass-move-to-serial.md（自身）
+- tasks/gap-lowconc-concurrency-restore-host-derived.md（解除 parent/child 链接：低conc 任务是后续依赖非分解，改 depends_on）
