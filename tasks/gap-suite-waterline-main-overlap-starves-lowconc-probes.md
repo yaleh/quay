@@ -1,7 +1,7 @@
 ---
 id: gap-suite-waterline-main-overlap-starves-lowconc-probes
 title: waterline 调度器 main 与 lowconc 并发占满核——B 类等待型探针在 lowconc 窗口被饿死（probe 饿死真根因）
-status: todo
+status: ready
 labels:
   - gap
   - defect
