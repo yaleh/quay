@@ -488,6 +488,16 @@ export function checkWiringCoverage(sourceSectionText, acSectionText) {
 export const WIRING_REACHABILITY_DECL_RE =
   /\d+\s*条[\s\S]*?(读到|读取|样本|现成)|(读到|读取|样本|现成)[\s\S]*?\d+\s*条/;
 export const REAL_INPUT_PROBE_RE = /(真实|生产|主检出|正本|实读|实跑|回放|真机|argv|\/proc\/|curl|现网|生产环境)/;
+// A `grep <pattern> <real-file>` command IS a real input probe (硬规则② 按位置判定): the real file
+// named in the grep is the real input being read — grepping it by position (line/hit count) is exactly
+// what "按位置判定" prescribes, NOT a string-literal/fixture/mkdtemp synthetic stub (that defect family
+// names no grep read). Narrow: the bullet must name BOTH a `grep` verb AND a `/`-separated real file
+// path with a source/artifact extension — so a string-literal direct call (readDependsOn("...")), a
+// self-built fixture, or an mkdtemp sample (no grep verb) is NOT exempted (gap-wiring-claim-ac-
+// misflags-position-grep: DIR-130 AC4's `grep -n "DIR-130" orchestration/manager-tick-core.md` was
+// wrongly flagged no-probe because the file it greps IS the real input).
+export const GREP_REAL_FILE_PROBE_RE =
+  /\bgrep\b[^\n]{0,160}?[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.(?:md|mjs|js|ts|tsx|mts|cts|json|jsonl|yml|yaml|sh|css|html|py|txt|lock|toml)\b/;
 
 /** Scan an `## Acceptance Criteria` section's checklist bullets (continuation lines joined — same
  *  `bulletsOf` the coverage check uses) and return one finding per bullet that declares a quantified
@@ -502,6 +512,7 @@ export function checkWiringClaimAcProbe(acSectionText) {
     if (identifiers.length === 0) continue; // no named component — not a wiring/reachability claim
     if (!WIRING_REACHABILITY_DECL_RE.test(bullet)) continue; // no `N 条` + read/exist verb — not a claim
     if (REAL_INPUT_PROBE_RE.test(bullet)) continue; // names a real input probe — requirement satisfied
+    if (GREP_REAL_FILE_PROBE_RE.test(bullet)) continue; // `grep <real file>` = position-based probe (按位置判定)
     findings.push({
       code: "wiring-claim-ac-no-probe",
       identifiers,

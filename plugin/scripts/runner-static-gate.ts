@@ -2,9 +2,10 @@
 # (gap-ac128-hub-split-harness-concerns).
 #
 # WHY A SEPARATE FILE: scripts/test.sh is a HUB file (any change forces the full suite). The static-gate
-# family (run_static_checks — the repo-wide CODE-CLASS checker registry — and resource_gate_check — the
-# pre-suite resource-gate consultation) is HARNESS-CRITICAL, so this file is ALSO a hub (listed in
-# suite-bucket-hub-list.ts HUB_FILES). Extracting the two functions out of the monolith shrinks it WITHOUT
+# family (run_static_checks — the CODE-CLASS checker registry; run_operational_checks — the
+# OPERATIONAL-CLASS runtime-state checker registry; and resource_gate_check — the pre-suite
+# resource-gate consultation) is HARNESS-CRITICAL, so this file is ALSO a hub (listed in
+# suite-bucket-hub-list.ts HUB_FILES). Extracting the three functions out of the monolith shrinks it WITHOUT
 # weakening the hub rule (a change here still forces the full suite, which is correct: the static gate
 # must be fully verified).
 #
@@ -16,11 +17,11 @@
 # annotations. run_checker / run_checker_parallel_wait resolve from checker-cost-lib.sh (sourced by
 # test.sh before this file); repo_root / main_root resolve from test.sh's globals at call time.
 
-# run_static_checks — the repo-wide CODE-CLASS invariants that run on EVERY FULL-SUITE-mode
-# test-running invocation (the default, --group, flags-only, explicit files) AND on
-# `--static-checks`. independent of which test files were requested (fast; the metadata modes
-# --list-groups/--list-files skip them). CI inherits them because its only test step is
-# `bash scripts/test.sh`.
+# run_static_checks — the repo-wide CODE-CLASS invariants (35 checkers — machine-independent, valid
+# in ANY checkout) that run on EVERY FULL-SUITE-mode test-running invocation (the default, --group,
+# flags-only, explicit files) AND on `--static-checks`, independent of which test files were
+# requested (fast; the metadata modes --list-groups/--list-files skip them). CI inherits them
+# because its only test step is `bash scripts/test.sh`.
 #
 # DOC-CLASS SPLIT (AC51 断言面拆分, gap-ac51-assertion-surface-split, SPEC §13): the doc-consistency
 # checkers (strategic-doc-staleness / drive-contract / threshold-scope / state-worded-clause /
@@ -31,6 +32,19 @@
 # errors surface in seconds at commit time instead of after an 8-minute round. run_static_checks
 # here is the CODE-class gate only.
 #
+# OPERATIONAL-CLASS SPLIT (2026-09-02 passive-machine ruling — 执行 suite 测试不应依赖本项目运行态,
+# manager/outer/inner/driver 全算): the 11 runtime-state checkers (outer-tick-log / worktree-node-modules /
+# suite-bucket-drift / obligation-ledger / fan-in-workflow-retirement / dispatch-record-fingerprint-reason /
+# per-task-suite-record / fan-in-ff-protocol / fan-in-materialize / direct-to-develop-bypass /
+# suite-duration-exceed) read the loop's LIVE runtime state (tick telemetry, runtime ledgers, live
+# task worktrees, develop reflog, SDK-materialized workflow records). They have MOVED OUT of this
+# function into run_operational_checks() below — home is the explicit opt-in
+# `scripts/test.sh --static-checks-operational` on the ACTIVE host, NOT the full-suite gate: a passive
+# checkout must go green on code alone. NOT re-wired into any automatic cadence (outer retiring; drift
+# of these checks accepted). They REMAIN in the mutation manifest (checker-mutation-check.sh parses
+# run_operational_checks) so the L_S instrument is not weakened — same shape as the DOC-class split
+# above. Each operational block carries `# @static-class operational`.
+#
 # SCOPED TIER (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC2/AC6): TASK-scoped runs
 # (`--for-task <id>` / `--scoped <id>`) do NOT pay this full set every time — they run the
 # change-relevant subset (run_scoped_static_checks_sel below): checkers whose object intersects
@@ -39,8 +53,9 @@
 # unchanged by the tier (AC2 — the full-suite gate is NOT weakened); a scoped skip is DEFERRED to
 # the full-suite gate, never dropped (AC4-ii: scoped = fast feedback on the change; full = complete
 # gate). Each checker carries a `# @static-tier <always|change|full>` + `# @static-object <glob>…`
-# annotation that select-static-checks-for-touches.ts parses (the SAME single source
-# checker-mutation-check.sh parses — never a hand-maintained list, AC3).
+# annotation (and an optional `# @static-class <doc|operational>` class marker) that
+# select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
+# parses — never a hand-maintained list, AC3).
 run_static_checks() {
   # QUAY_TEST_NESTED — set by mark_nested() right before the outer suite's node --test. A nested
   # invocation (a test that spawns scripts/test.sh) inherits it and skips the whole-store checks
@@ -61,7 +76,8 @@ run_static_checks() {
     return 0
   fi
   # Parallel execution (gap-run-static-checks-zero-concurrency-can-parallelize): the CODE-class
-  # checkers below (15; the 7 DOC-class checkers moved to run_doc_checks under AC51 —
+  # checkers below (35; the 11 OPERATIONAL-class checkers moved to run_operational_checks under the
+  # 2026-09-02 passive-machine ruling; the 7 DOC-class moved to run_doc_checks under AC51 —
   # gap-ac51-assertion-surface-split) are independent, read-only, and share no state — the
   # sequential run was structural zero-concurrency. RUN_CHECKER_PARALLEL=1 makes run_checker launch
   # each checker in the BACKGROUND,
@@ -126,17 +142,6 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
   run_checker "test-impl-census-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-impl-census-check.ts" --root "${repo_root}"
-  echo "== worktree node_modules readiness (gap-worktree-node-modules-inconsistent-self-verify) =="
-  # Mechanized invariant "every dispatched task worktree can self-verify": a task worktree whose
-  # node_modules is absent fails closed at the build phase (Cannot find package esbuild) and its
-  # verification silently falls back to the shared checkout where mutations land — the exact
-  # inconsistency this gap task closes. REPORT-ONLY (exit 0) by default: a peer task's worktree
-  # mid-setup is a transient state, so a hard-fail here would red the suite for the wrong reason;
-  # the "missing ⇒ report" output makes the invariant observable on every full-suite run. --fail
-  # (manual) flips it to fail-closed. dispatch-worktree-setup.sh is the mechanism that prevents
-  # the missing state; this checker makes the prevention observable.
-  # @static-tier full  (whole-store observability — deferred to the full-suite gate in scoped mode)
-  run_checker "worktree-node-modules-check" bash "${repo_root}/plugin/scripts/worktree-node-modules-check.sh" --root "${repo_root}"
   echo "== ## Contract consumer check (gap-dispatch-gate-has-no-checklist-and-no-trace, AC6) =="
   # gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed: this checker had NO runner — its
   # shrink-only ratchet list (docs/analysis/contract-violations.md) grew 1 -> 12 unnoticed because
@@ -209,15 +214,6 @@ run_static_checks() {
   # @static-tier change
   # @static-object **/*.sh **/*.bash plugin/loop/*-loop-tick.md orchestration/*-loop-tick.md plugin/scripts/adr016-screen-use-check.ts plugin/test/adr016-screen-use-check.test.mjs
   run_checker "adr016-screen-use-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/adr016-screen-use-check.ts" --root "${repo_root}"
-  echo "== outer tick-log no-action evidence check (gap-no-action-requires-evidence-mechanical-check, manager 2026-08-09) =="
-  # The outer's `no-action` verdict must CARRY the five-inequality evidence (B13), re-measured by the
-  # checker itself (never trusts the line's numbers). Wired per its own 约束② ("必须接 run_static_checks
-  # 不依赖会话意志") — built 2026-08-09, never wired until 2026-08-13. 2026-08-13 manager cut:
-  # step-1 anchor follows the REAL tick-log bullet form (`- \`HH:MMZ\``, not ###); the five-inequality
-  # EVIDENCE fields are structured (step 2, queued after AC47) — so this step-1 wiring finds the recent
-  # tick section and self-checks it, but does NOT yet enforce the structured evidence rows.
-  # @static-tier change
-  run_checker "outer-tick-log-check" bash "${repo_root}/plugin/scripts/outer-tick-log-check.sh" --root "${repo_root}"
   # AC66 A22 agent-id check RETIRED (AC135, 2026-08-22): A22 供给侧心跳已退役，晋升由 promotion-driver
   # 承接；其「tick-log A22 读数行带 agent 标识」判据失去对象 → checker + test + mutation case 一并移除。
   echo "== superseded-capability check (gap-retired-script-still-callable, AC5) =="
@@ -256,15 +252,6 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ scripts/ plugin/scripts/suite-slot-ssot-check.ts plugin/scripts/suite-lock-slots.ts plugin/scripts/suite-slot-lib.sh plugin/test/suite-slot-ssot-check.test.mjs
   run_checker "suite-slot-ssot-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-slot-ssot-check.ts" --gate --root "${repo_root}"
-  echo "== suite-bucket static-vs-truth drift check (gap-suite-bucket-dynamic-truth-drift-detector, ③-AC1/③-AC2) =="
-  # 桶归因静态闭包是代理——变量 path.join 构造的 subject 对静态不可见 (worktree-root-fs-check 静态归 S、
-  # 运行时触达 plugin/scripts/quay-init.sh 归 M)。本检查把「漏选」变响: 静态非空且动态真值触达静态未覆盖
-  # 的桶 ⇒ RED (static-vs-truth-drift)。动态真值来自 trace 缓存 (.quay/suite-fs-trace.jsonl, suite-fs-trace.ts
-  # 采集); 缓存缺失 ⇒ NOT-EVALUATED (exit 0 但可区分输出, 硬规则 3b——永不与「0 drift」同形)。每条能取假
-  # (mutation case: 静态 S + 动态 M 必红; 恢复必绿)。
-  # @static-tier change
-  # @static-object plugin/scripts/ plugin/test/ scripts/test.sh
-  run_checker "suite-bucket-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-bucket-drift-check.ts" --gate --root "${repo_root}"
   echo "== suite-bucket reattribution ratchet (gap-suite-bucket-dynamic-truth-drift-detector, ③-AC6/③-AC7) =="
   # AC121 把 230 个调 test.sh 的测试逐条重归属为 S|M（.quay/suite-bucket-reattribution.jsonl），但覆盖保证是
   # 一次性人工声称（"重扫=0"），非机械 ratchet。本检查让「漏判」变响：新增一个静态纯 S（bucketSetOf={S}，
@@ -331,18 +318,6 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/slot-refill.ts plugin/scripts/fast-mode-telemetry.ts plugin/scripts/inner-wakeup-heartbeat-check.ts plugin/scripts/cap-counts-subagents-check.ts plugin/test/cap-counts-subagents-check.test.mjs
   run_checker "cap-counts-subagents-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/cap-counts-subagents-check.ts" --root "${repo_root}"
-  echo "== obligation-ledger check (gap-obligation-ledger-mechanization, AC2-AC5 top-level audit) =="
-  # The obligation-ledger integrity audit — the top-level audit the known weakness demands ("台账由
-  # 本层写、上层审；顶层审计 = 人 + 接进套件静态检查的机械核对"). Mechanically verifies on the
-  # checked ledger: (1) obligation_set_derived=1 — every obligation id equals the deterministic
-  # derivation of its generator key (a hand-written id is the "作者写义务集" shape); (2) band — age
-  # is monotonic across consecutive live rounds (never drops, never jumps); (3)
-  # round_cannot_close_with_undischarged=1 — a round recorded canClose:true while a live+undischarged
-  # obligation exists is the 强行闭轮 shape and red-lights the commit. Fail-open on an ABSENT ledger
-  # (mechanism not yet adopted); fail-closed on a present one.
-  # @static-tier change
-  # @static-object plugin/scripts/obligation-ledger.ts plugin/scripts/obligation-ledger-check.ts plugin/scripts/obligation-discharge-agent.ts plugin/test/obligation-ledger.test.mjs plugin/test/obligation-ledger-check.test.mjs
-  run_checker "obligation-ledger-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/obligation-ledger-check.ts" --root "${repo_root}"
   echo "== delivery-inventory drift gate (gap-drift-gate-covers-only-plugin-scripts-not-workflows, AC2) =="
   # The file-set change gate on the plugin/workflows mirror: `--diff-filter=AD` on .claude/workflows/
   # — git committed range + working-tree staged/unstaged/untracked — is the ONLY trigger; when it
@@ -422,13 +397,6 @@ run_static_checks() {
   # （outer-anchor-check.ts 带标记）。whole-store 引用扫描 ⇒ full（scoped 模式推迟到 full-suite 门）。
   # @static-tier full
   run_checker "outer-retirement-precondition-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/outer-retirement-precondition-check.ts" --root "${repo_root}"
-  echo "== fan-in-workflow-retirement check (gap-fan-in-workflow-retirement-guard, L3 退役防回归) =="
-  # fan-in-execute.js workflow 退役防回归：①双副本路径不存在 + 引用面归零（归档白名单除外）——
-  # 双副本仍在 ⇒ NOT-EVALUATED (exit 3，P3 未删，才可判)；删净后引用未清零 ⇒ RED (exit 1)。②lock-events
-  # 非 wk-prod- 前缀 acquire 计数=0（窗口从 L1 落地起）——出现即 RED (exit 3 是文件缺失，非通过)。
-  # 负控制由单测钉住。whole-store 引用扫描 ⇒ full（scoped 模式推迟到 full-suite 门）。
-  # @static-tier full
-  run_checker "fan-in-workflow-retirement-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-workflow-retirement-check.ts" --root "${repo_root}"
   echo "== ac61-staleness-disposition check (tasks/gap-ac61-staleness-list-item-disposition, AC61 判据1-3 + DoD 负控制) =="
   # AC61 清单逐条处置 enforcement: the task file's `## AC61 处置记录` section must carry a record for
   # EVERY A-1..A-7 / B-1..B-4 item (迁出带落点映射 或 经核实仍有效+读数). CHECK-A (判据1/DoD 负控):
@@ -440,19 +408,6 @@ run_static_checks() {
   # @static-tier change
   # @static-object tasks/gap-ac61-staleness-list-item-disposition.md plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-tick-core.md orchestration/fast-mode-tick-core.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/ac61-staleness-disposition-check.ts plugin/scripts/checker-mutation-cases/ac61-staleness-disposition-check.sh plugin/test/ac61-staleness-disposition-check.test.mjs
   run_checker "ac61-staleness-disposition-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/ac61-staleness-disposition-check.ts" --root "${repo_root}"
-  echo "== dispatch-record fingerprint+reason check (tasks/gap-ac55-dispatch-record-fingerprint-reason, AC55 判据1/判据3) =="
-  # AC55 判据1: EVERY dispatch record must carry ① the dispatch-preference file's content fingerprint
-  # (git blob hash — "用的是哪一版") AND ② a one-sentence "为什么选它" ("按倾向选还是随便选") — the
-  # SPEC §4.3 产物, the 承重 part (C17): without it "读了没读" is indistinguishable in records and the
-  # design relies on willpower (SPEC §4.2 empirical: manager's `A0b⑤(b)` skipped 4 rounds). AC55
-  # 判据3 (falsifiable): a REAL dispatch record missing fingerprint OR missing reason MUST go RED —
-  # pinned by plugin/test/dispatch-record-fingerprint-reason-check.test.mjs (real-record negative
-  # controls) + the mutation case. The writer (dispatch-record.ts) is fail-closed on a missing/thin
-  # reason; this checker independently judges every record in the runtime log
-  # (orchestration/dispatch-record.jsonl, gitignored). Absent file = nothing dispatched = PASS.
-  # @static-tier change
-  # @static-object orchestration/dispatch-record.jsonl orchestration/dispatch-preference.md plugin/scripts/dispatch-record.ts plugin/scripts/dispatch-record-fingerprint-reason-check.ts plugin/test/dispatch-record-fingerprint-reason-check.test.mjs
-  run_checker "dispatch-record-fingerprint-reason-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dispatch-record-fingerprint-reason-check.ts" --root "${repo_root}"
   echo "== recommended de-order check (tasks/gap-ac56-recommended-deordered, AC56 判据1/判据2/判据3) =="
   # AC56 去锚: the dispatch-facing `recommended` array must NOT carry a meaningful priority order (an
   # inner reading "the mechanism's first pick" gets anchored — SPEC §5). 判据1: a length>1 `recommended`
@@ -476,18 +431,6 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/preference-notification-log.md orchestration/dispatch-preference.md plugin/scripts/preference-notification-check.ts
   run_checker "preference-notification-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/preference-notification-check.ts" --root "${repo_root}"
-  echo "== per-task-suite-record check (tasks/gap-ac72-cert-mechanism-retire, AC72 判据2/判据3) =="
-  # AC72 判据2: every per-task FULL-suite run must land ONE third-party-readable record
-  # (taskId/runId/state/laneCount/durationMs/failed-files/起止时刻) in the SHARED checkout's
-  # .quay/per-task-suite-records.jsonl — NOT the worktree's fork-inherited full-suite-state copy.
-  # 判据2 shape: a record that EXISTS but is malformed/partial ⇒ RED (硬规则 3b: 读不懂 ≠ 合格); absent
-  # file ⇒ NOT-EVALUATED (nothing recorded yet — never conflated with green). 判据3 能取假: the AC57 7
-  # real cert rounds replayed against the (empty) record set must go RED — pinned by
-  # plugin/test/per-task-suite-record-check.test.mjs (real-sample replay + malformed-shape negative
-  # controls). Default live run = shape check only; --replay-real-samples is the explicit audit.
-  # @static-tier change
-  # @static-object .quay/per-task-suite-records.jsonl plugin/scripts/per-task-suite-record.ts plugin/scripts/per-task-suite-record-check.ts
-  run_checker "per-task-suite-record-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/per-task-suite-record-check.ts" --root "${repo_root}"
   echo "== ac69-slot-queue-gap check (tasks/gap-ac69-suite-slot-full-should-queue-not-wait, AC1 + DoD) =="
   # AC69 先量再改 enforcement: the「槽释放→下次派发差值」measurement record
   # (docs/analysis/ac69-slot-release-vs-dispatch-gap.json) must be LANDED and structurally complete
@@ -501,60 +444,6 @@ run_static_checks() {
   # @static-tier change
   # @static-object docs/analysis/ac69-slot-release-vs-dispatch-gap.json plugin/scripts/ac69-slot-queue-gap-check.ts plugin/scripts/checker-mutation-cases/ac69-slot-queue-gap-check.sh plugin/test/ac69-slot-queue-gap-check.test.mjs
   run_checker "ac69-slot-queue-gap-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/ac69-slot-queue-gap-check.ts" --root "${repo_root}"
-  echo "== fan-in-ff-protocol-check (AC62 判据2/判据3 — zero-wiring family, gap-ac73) =="
-  # AC62's protocol checker was delivered with ZERO callers (test.sh=0, tick-cores=0) while the
-  # catalog declared it 「按需」 — for a protocol checker 「按需」==「从不」, nobody runs it at the
-  # moment of violation, so 判据2 (non-ff fan-in merge on develop) was structurally unable to go red
-  # (gap-ac73-catalog-rhythm-consumer-check). Wired here as a code-class 每轮 gate: it scans
-  # <baseline>..<develop> for non-ff fan-in merges, checks the lock-hold intervals never overlap a
-  # suite run, and validates ff-retry-record shape. Baseline advanced 2026-08-16 09:2xZ to 19fea6f0
-  # (develop HEAD then) — the A15 ④ execute-suite-fix workflow's sanctioned non-ff fan-in merge
-  # 679ac913 + the AC85/90/93 + drift fan-in merges since cd4f49b4 are all legitimate (verified: 127
-  # merges in range are fan-in/resolve subjects, no bypasses); a NEW non-ff fan-in merge AFTER
-  # 19fea6f0 is RED (AC62 判据2 mechanically checkable). Prior baseline cd4f49b4 was the develop HEAD
-  # at enforcement (gap-ac73); the 7 pre-adoption non-ff fan-ins are documented debt (AC64/AC68/…).
-  # @static-tier change
-  # @static-object orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md plugin/scripts/fan-in-ff-protocol-check.ts plugin/scripts/fan-in-ff-merge.sh plugin/test/fan-in-ff-protocol-check.test.mjs
-  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the lock-events/suite-state/
-  # retry-record carriers it reads are MAIN-checkout gitignored runtime state, absent from the one-shot
-  # verify worktree. Pointing --root at the main checkout makes the worktree round read the SAME data
-  # as a main run ⇒ verdicts identical (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
-  run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${main_root}" --baseline 19fea6f0 --json
-  echo "== fan-in-materialize-check (gap-workflow-scriptpath-materialize-falls-back-main — workflow scriptPath 静默回退主检出版) =="
-  # Detects the M176-family materialization fallback: a bootstrap-HIT fan-in dispatched with
-  # scriptPath=<worktree>/.claude/workflows/fan-in-execute.js must run the WORKTREE version (so the
-  # task's own fix to the pipeline is verified by its own fan-in), but the SDK sometimes silently
-  # materializes the MAIN checkout version. This checker reads the PRODUCTION CARRIER — the SDK-written
-  # ~/.claude/projects/<slug>/<session>/workflows/wf_*.json records (which carry BOTH the passed
-  # scriptPath AND the materialized script content) — and verifies the materialized script matches the
-  # worktree version. DECISIVE when the worktree file is on disk (in-flight / just-fan-in'd); for GONE
-  # worktrees it reconstructs the worktree states from .workflow-events + git and is conservative
-  # (intermediate/partial ⇒ NOT-EVALUATED, never RED — 硬规则 3b). RED on a proven fallback (the
-  # materialized script equals the pre-task base while the task's own commits touched the workflow).
-  # @static-tier change
-  # @static-object plugin/scripts/fan-in-materialize-check.ts plugin/scripts/select-static-checks-for-touches.ts .claude/workflows/fan-in-execute.js plugin/test/fan-in-materialize-check.test.mjs
-  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the wf_*.json records +
-  # .workflow-events + task Touches this checker audits are MAIN-checkout state, absent from the
-  # one-shot verify worktree. Pointing --root at the main checkout makes the worktree round read the
-  # SAME data as a main run ⇒ verdicts identical; on a main run main_root == repo_root ⇒ unchanged.
-  run_checker "fan-in-materialize-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-materialize-check.ts" --root "${main_root}" --json
-  echo "== direct-to-develop-bypass-check (gap-direct-to-develop-bypasses-fan-in-gates — 直接提交 develop 绕过 fan-in 机件) =="
-  # 直接提交 develop（reflog action = commit，区别于 fan-in 的 merge … Fast-forward）∧ 触及代码/断言面
-  # ∧ 不在 ff-lock 时间窗内 ⇒ RED（11b/C17 写所有权/越权直改面）。排除集（denominator 谓词）与
-  # 25 vs 30 的差异记录在任务体 + 检测器头注释：设计内 = 记账/转向/遥测面 + manager 独占（.claude/、
-  # CLAUDE.md）+ 基础设施（.gitignore/.github/）+ 热修 fan-in 机件本身（plugin/scripts|test/fan-in-*）；
-  # 代码面含 plugin/skills/**/*.md（SKILL.md 是产品交付面，7e64a86b 因此报红）。基线 = b11ce720
-  # （AC65 声明形态落地点，enforcement 落点 develop HEAD）——pre-form 历史欠账（含 9f57e336/102cbf31/
-  # 02b2b2fc 的 outer 直提，当时一条命令验证过）已文档化不重扫，只扫基线后的新直接提交；form 后提交
-  # 必须带 `AC65:` + `AC65-Verified:`（同 fan-in-ff-protocol-check --baseline cd4f49b4 模式）。锁事件
-  # 缺失 = 可读空（full-suite worktree 无 .quay/ 运行时态），malformed/unpaired = NOT-EVALUATED（硬规则 3b）。
-  # @static-tier change
-  # @static-object plugin/scripts/direct-to-develop-bypass-check.ts plugin/test/direct-to-develop-bypass-check.test.mjs
-  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): develop reflog + lock events
-  # are MAIN-checkout state, absent from the one-shot verify worktree. Pointing --root at the main
-  # checkout gives the worktree round the SAME reflog + lock-events as a main run ⇒ verdicts identical
-  # (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
-  run_checker "direct-to-develop-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/direct-to-develop-bypass-check.ts" --root "${main_root}" --baseline b11ce7202b46406d5d5bc82ef7b4c030c4aed05b --json
   echo "== workflows-dual-copy-drift-check (gap-workflows-dual-copy-drift-unchecked — .claude/workflows/ vs plugin/workflows/ 双副本漂移) =="
   # The five dual-copy workflow files (drain-directives / fan-in-execute / run-routines /
   # execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped
@@ -595,6 +484,161 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/ scripts/test.sh plugin/scripts/test-file-snapshot.sh
   run_checker "test-file-snapshot-check" bash "${repo_root}/plugin/scripts/test-file-snapshot.sh" --repo-relative check "${repo_root}/docs/analysis/test-file-baseline.txt"
+  # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
+  # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
+  run_checker_parallel_wait
+}
+# run_operational_checks — the OPERATIONAL-CLASS (runtime-state) checker registry: the checks
+# that read the autonomous loop's LIVE runtime state (tick telemetry, runtime ledgers, live
+# dispatched task worktrees, develop reflog, SDK-materialized workflow records). They have NO
+# meaning on a machine where the loop is not running — a passive checkout (CI / dev / replica /
+# fresh worktree) must go green on code alone. MOVED OUT of run_static_checks under the 2026-09-02
+# passive-machine ruling (执行 suite 测试不应依赖本项目运行态 — manager/outer/inner/driver 全算): home is
+# the explicit opt-in `scripts/test.sh --static-checks-operational` on the ACTIVE host, NOT the
+# full-suite gate. NOT re-wired into any automatic cadence (outer retiring; drift of these checks
+# accepted). They REMAIN in the mutation manifest (checker-mutation-check.sh parses
+# run_operational_checks) so the L_S instrument is not weakened — same shape as the DOC-class split
+# under AC51.
+run_operational_checks() {
+  RUN_CHECKER_PARALLEL=1
+  echo "== operational-class static checks (explicit opt-in — scripts/test.sh --static-checks-operational; NOT part of the full-suite gate) =="
+  echo "== worktree node_modules readiness (gap-worktree-node-modules-inconsistent-self-verify) =="
+  # Mechanized invariant "every dispatched task worktree can self-verify": a task worktree whose
+  # node_modules is absent fails closed at the build phase (Cannot find package esbuild) and its
+  # verification silently falls back to the shared checkout where mutations land — the exact
+  # inconsistency this gap task closes. REPORT-ONLY (exit 0) by default: a peer task's worktree
+  # mid-setup is a transient state, so a hard-fail here would red the suite for the wrong reason;
+  # the "missing ⇒ report" output makes the invariant observable on every full-suite run. --fail
+  # (manual) flips it to fail-closed. dispatch-worktree-setup.sh is the mechanism that prevents
+  # the missing state; this checker makes the prevention observable.
+  # @static-tier full  (whole-store observability — deferred to the full-suite gate in scoped mode)
+  # @static-class operational
+  run_checker "worktree-node-modules-check" bash "${repo_root}/plugin/scripts/worktree-node-modules-check.sh" --root "${repo_root}"
+  echo "== outer tick-log no-action evidence check (gap-no-action-requires-evidence-mechanical-check, manager 2026-08-09) =="
+  # The outer's `no-action` verdict must CARRY the five-inequality evidence (B13), re-measured by the
+  # checker itself (never trusts the line's numbers). Wired per its own 约束② ("必须接 run_static_checks
+  # 不依赖会话意志") — built 2026-08-09, never wired until 2026-08-13. 2026-08-13 manager cut:
+  # step-1 anchor follows the REAL tick-log bullet form (`- \`HH:MMZ\``, not ###); the five-inequality
+  # EVIDENCE fields are structured (step 2, queued after AC47) — so this step-1 wiring finds the recent
+  # tick section and self-checks it, but does NOT yet enforce the structured evidence rows.
+  # @static-tier change
+  # @static-class operational
+  run_checker "outer-tick-log-check" bash "${repo_root}/plugin/scripts/outer-tick-log-check.sh" --root "${repo_root}"
+  echo "== suite-bucket static-vs-truth drift check (gap-suite-bucket-dynamic-truth-drift-detector, ③-AC1/③-AC2) =="
+  # 桶归因静态闭包是代理——变量 path.join 构造的 subject 对静态不可见 (worktree-root-fs-check 静态归 S、
+  # 运行时触达 plugin/scripts/quay-init.sh 归 M)。本检查把「漏选」变响: 静态非空且动态真值触达静态未覆盖
+  # 的桶 ⇒ RED (static-vs-truth-drift)。动态真值来自 trace 缓存 (.quay/suite-fs-trace.jsonl, suite-fs-trace.ts
+  # 采集); 缓存缺失 ⇒ NOT-EVALUATED (exit 0 但可区分输出, 硬规则 3b——永不与「0 drift」同形)。每条能取假
+  # (mutation case: 静态 S + 动态 M 必红; 恢复必绿)。
+  # @static-tier change
+  # @static-class operational
+  # @static-object plugin/scripts/ plugin/test/ scripts/test.sh
+  run_checker "suite-bucket-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-bucket-drift-check.ts" --gate --root "${repo_root}"
+  echo "== obligation-ledger check (gap-obligation-ledger-mechanization, AC2-AC5 top-level audit) =="
+  # The obligation-ledger integrity audit — the top-level audit the known weakness demands ("台账由
+  # 本层写、上层审；顶层审计 = 人 + 接进套件静态检查的机械核对"). Mechanically verifies on the
+  # checked ledger: (1) obligation_set_derived=1 — every obligation id equals the deterministic
+  # derivation of its generator key (a hand-written id is the "作者写义务集" shape); (2) band — age
+  # is monotonic across consecutive live rounds (never drops, never jumps); (3)
+  # round_cannot_close_with_undischarged=1 — a round recorded canClose:true while a live+undischarged
+  # obligation exists is the 强行闭轮 shape and red-lights the commit. Fail-open on an ABSENT ledger
+  # (mechanism not yet adopted); fail-closed on a present one.
+  # @static-tier change
+  # @static-class operational
+  # @static-object plugin/scripts/obligation-ledger.ts plugin/scripts/obligation-ledger-check.ts plugin/scripts/obligation-discharge-agent.ts plugin/test/obligation-ledger.test.mjs plugin/test/obligation-ledger-check.test.mjs
+  run_checker "obligation-ledger-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/obligation-ledger-check.ts" --root "${repo_root}"
+  echo "== fan-in-workflow-retirement check (gap-fan-in-workflow-retirement-guard, L3 退役防回归) =="
+  # fan-in-execute.js workflow 退役防回归：①双副本路径不存在 + 引用面归零（归档白名单除外）——
+  # 双副本仍在 ⇒ NOT-EVALUATED (exit 3，P3 未删，才可判)；删净后引用未清零 ⇒ RED (exit 1)。②lock-events
+  # 非 wk-prod- 前缀 acquire 计数=0（窗口从 L1 落地起）——出现即 RED (exit 3 是文件缺失，非通过)。
+  # 负控制由单测钉住。whole-store 引用扫描 ⇒ full（scoped 模式推迟到 full-suite 门）。
+  # @static-tier full
+  # @static-class operational
+  run_checker "fan-in-workflow-retirement-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-workflow-retirement-check.ts" --root "${repo_root}"
+  echo "== dispatch-record fingerprint+reason check (tasks/gap-ac55-dispatch-record-fingerprint-reason, AC55 判据1/判据3) =="
+  # AC55 判据1: EVERY dispatch record must carry ① the dispatch-preference file's content fingerprint
+  # (git blob hash — "用的是哪一版") AND ② a one-sentence "为什么选它" ("按倾向选还是随便选") — the
+  # SPEC §4.3 产物, the 承重 part (C17): without it "读了没读" is indistinguishable in records and the
+  # design relies on willpower (SPEC §4.2 empirical: manager's `A0b⑤(b)` skipped 4 rounds). AC55
+  # 判据3 (falsifiable): a REAL dispatch record missing fingerprint OR missing reason MUST go RED —
+  # pinned by plugin/test/dispatch-record-fingerprint-reason-check.test.mjs (real-record negative
+  # controls) + the mutation case. The writer (dispatch-record.ts) is fail-closed on a missing/thin
+  # reason; this checker independently judges every record in the runtime log
+  # (orchestration/dispatch-record.jsonl, gitignored). Absent file = nothing dispatched = PASS.
+  # @static-tier change
+  # @static-class operational
+  # @static-object orchestration/dispatch-record.jsonl orchestration/dispatch-preference.md plugin/scripts/dispatch-record.ts plugin/scripts/dispatch-record-fingerprint-reason-check.ts plugin/test/dispatch-record-fingerprint-reason-check.test.mjs
+  run_checker "dispatch-record-fingerprint-reason-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dispatch-record-fingerprint-reason-check.ts" --root "${repo_root}"
+  echo "== per-task-suite-record check (tasks/gap-ac72-cert-mechanism-retire, AC72 判据2/判据3) =="
+  # AC72 判据2: every per-task FULL-suite run must land ONE third-party-readable record
+  # (taskId/runId/state/laneCount/durationMs/failed-files/起止时刻) in the SHARED checkout's
+  # .quay/per-task-suite-records.jsonl — NOT the worktree's fork-inherited full-suite-state copy.
+  # 判据2 shape: a record that EXISTS but is malformed/partial ⇒ RED (硬规则 3b: 读不懂 ≠ 合格); absent
+  # file ⇒ NOT-EVALUATED (nothing recorded yet — never conflated with green). 判据3 能取假: the AC57 7
+  # real cert rounds replayed against the (empty) record set must go RED — pinned by
+  # plugin/test/per-task-suite-record-check.test.mjs (real-sample replay + malformed-shape negative
+  # controls). Default live run = shape check only; --replay-real-samples is the explicit audit.
+  # @static-tier change
+  # @static-class operational
+  # @static-object .quay/per-task-suite-records.jsonl plugin/scripts/per-task-suite-record.ts plugin/scripts/per-task-suite-record-check.ts
+  run_checker "per-task-suite-record-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/per-task-suite-record-check.ts" --root "${repo_root}"
+  echo "== fan-in-ff-protocol-check (AC62 判据2/判据3 — zero-wiring family, gap-ac73) =="
+  # AC62's protocol checker was delivered with ZERO callers (test.sh=0, tick-cores=0) while the
+  # catalog declared it 「按需」 — for a protocol checker 「按需」==「从不」, nobody runs it at the
+  # moment of violation, so 判据2 (non-ff fan-in merge on develop) was structurally unable to go red
+  # (gap-ac73-catalog-rhythm-consumer-check). Wired here as a code-class 每轮 gate: it scans
+  # <baseline>..<develop> for non-ff fan-in merges, checks the lock-hold intervals never overlap a
+  # suite run, and validates ff-retry-record shape. Baseline advanced 2026-08-16 09:2xZ to 19fea6f0
+  # (develop HEAD then) — the A15 ④ execute-suite-fix workflow's sanctioned non-ff fan-in merge
+  # 679ac913 + the AC85/90/93 + drift fan-in merges since cd4f49b4 are all legitimate (verified: 127
+  # merges in range are fan-in/resolve subjects, no bypasses); a NEW non-ff fan-in merge AFTER
+  # 19fea6f0 is RED (AC62 判据2 mechanically checkable). Prior baseline cd4f49b4 was the develop HEAD
+  # at enforcement (gap-ac73); the 7 pre-adoption non-ff fan-ins are documented debt (AC64/AC68/…).
+  # @static-tier change
+  # @static-class operational
+  # @static-object orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md plugin/scripts/fan-in-ff-protocol-check.ts plugin/scripts/fan-in-ff-merge.sh plugin/test/fan-in-ff-protocol-check.test.mjs
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the lock-events/suite-state/
+  # retry-record carriers it reads are MAIN-checkout gitignored runtime state, absent from the one-shot
+  # verify worktree. Pointing --root at the main checkout makes the worktree round read the SAME data
+  # as a main run ⇒ verdicts identical (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
+  run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${main_root}" --baseline 19fea6f0 --json
+  echo "== fan-in-materialize-check (gap-workflow-scriptpath-materialize-falls-back-main — workflow scriptPath 静默回退主检出版) =="
+  # Detects the M176-family materialization fallback: a bootstrap-HIT fan-in dispatched with
+  # scriptPath=<worktree>/.claude/workflows/fan-in-execute.js must run the WORKTREE version (so the
+  # task's own fix to the pipeline is verified by its own fan-in), but the SDK sometimes silently
+  # materializes the MAIN checkout version. This checker reads the PRODUCTION CARRIER — the SDK-written
+  # ~/.claude/projects/<slug>/<session>/workflows/wf_*.json records (which carry BOTH the passed
+  # scriptPath AND the materialized script content) — and verifies the materialized script matches the
+  # worktree version. DECISIVE when the worktree file is on disk (in-flight / just-fan-in'd); for GONE
+  # worktrees it reconstructs the worktree states from .workflow-events + git and is conservative
+  # (intermediate/partial ⇒ NOT-EVALUATED, never RED — 硬规则 3b). RED on a proven fallback (the
+  # materialized script equals the pre-task base while the task's own commits touched the workflow).
+  # @static-tier change
+  # @static-class operational
+  # @static-object plugin/scripts/fan-in-materialize-check.ts plugin/scripts/select-static-checks-for-touches.ts .claude/workflows/fan-in-execute.js plugin/test/fan-in-materialize-check.test.mjs
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the wf_*.json records +
+  # .workflow-events + task Touches this checker audits are MAIN-checkout state, absent from the
+  # one-shot verify worktree. Pointing --root at the main checkout makes the worktree round read the
+  # SAME data as a main run ⇒ verdicts identical; on a main run main_root == repo_root ⇒ unchanged.
+  run_checker "fan-in-materialize-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-materialize-check.ts" --root "${main_root}" --json
+  echo "== direct-to-develop-bypass-check (gap-direct-to-develop-bypasses-fan-in-gates — 直接提交 develop 绕过 fan-in 机件) =="
+  # 直接提交 develop（reflog action = commit，区别于 fan-in 的 merge … Fast-forward）∧ 触及代码/断言面
+  # ∧ 不在 ff-lock 时间窗内 ⇒ RED（11b/C17 写所有权/越权直改面）。排除集（denominator 谓词）与
+  # 25 vs 30 的差异记录在任务体 + 检测器头注释：设计内 = 记账/转向/遥测面 + manager 独占（.claude/、
+  # CLAUDE.md）+ 基础设施（.gitignore/.github/）+ 热修 fan-in 机件本身（plugin/scripts|test/fan-in-*）；
+  # 代码面含 plugin/skills/**/*.md（SKILL.md 是产品交付面，7e64a86b 因此报红）。基线 = b11ce720
+  # （AC65 声明形态落地点，enforcement 落点 develop HEAD）——pre-form 历史欠账（含 9f57e336/102cbf31/
+  # 02b2b2fc 的 outer 直提，当时一条命令验证过）已文档化不重扫，只扫基线后的新直接提交；form 后提交
+  # 必须带 `AC65:` + `AC65-Verified:`（同 fan-in-ff-protocol-check --baseline cd4f49b4 模式）。锁事件
+  # 缺失 = 可读空（full-suite worktree 无 .quay/ 运行时态），malformed/unpaired = NOT-EVALUATED（硬规则 3b）。
+  # @static-tier change
+  # @static-class operational
+  # @static-object plugin/scripts/direct-to-develop-bypass-check.ts plugin/test/direct-to-develop-bypass-check.test.mjs
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): develop reflog + lock events
+  # are MAIN-checkout state, absent from the one-shot verify worktree. Pointing --root at the main
+  # checkout gives the worktree round the SAME reflog + lock-events as a main run ⇒ verdicts identical
+  # (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
+  run_checker "direct-to-develop-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/direct-to-develop-bypass-check.ts" --root "${main_root}" --baseline b11ce7202b46406d5d5bc82ef7b4c030c4aed05b --json
   echo "== suite-duration-exceed check (gap-suite-duration-exceed-check-not-wired, AC4 independent signal) =="
   # AC101's 600s target had two de-facto sentinels (the 10min foreground cap + the duration ledger)
   # that the pre-verified-suite path bypassed — round227 ran 936.5s with NO alert. This checker reads
@@ -607,13 +651,14 @@ run_static_checks() {
   # (no --no-block) stays fail-closed for the AC2 negative control / on-demand diagnosis. CI inherits
   # it for free (its only test step is `bash scripts/test.sh`).
   # @static-tier full  (whole-store observability — deferred to the full-suite gate in scoped mode)
+  # @static-class operational
   # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the verification-round.jsonl
   # ledger is MAIN-checkout gitignored runtime state, absent from the one-shot verify worktree.
   # Pointing --root at the main checkout makes the worktree round read the SAME ledger as a main run
   # (verdicts identical); on a main run main_root == repo_root ⇒ unchanged.
   run_checker "suite-duration-exceed-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-duration-exceed-check.ts" --root "${main_root}" --no-block
-  # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
-  # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
+  # Wait for all parallelized checkers and fail closed if any failed (same barrier as
+  # run_static_checks — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
 }
 

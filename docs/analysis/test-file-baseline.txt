@@ -124,6 +124,7 @@ packages/quay/test/flags.test.mjs
 packages/quay/test/frontmatter-store-base.test.mjs
 packages/quay/test/gap-ac136-web-truth-source.test.mjs
 packages/quay/test/gap-cli-gate-enforcement.test.mjs
+packages/quay/test/gap-dashboard-minilist-row-layout.test.mjs
 packages/quay/test/gap-dashboard-parallelize.test.mjs
 packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs
 packages/quay/test/gap-dashboard-testscard-livecard-auto-refresh.test.mjs

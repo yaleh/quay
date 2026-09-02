@@ -110,6 +110,17 @@ function realRegistry() {
   return loadRegistry(REPO_ROOT);
 }
 
+// 2026-09-02 宿主完备性修正（硬规则 5 来源完备性贯彻到「层」，非仅「文件」）：realRegistry() 只证明
+// 注册表文件存在，不保证所需层齐——被动副本/CI 可能只有 outer 无 inner（本机实证：~/.quay-global 里
+// 只有 2026-08-20 复制来的 outer 收据，inner 从未写入）。需要活 inner/outer 记录的 REAL 测试，
+// 目标层缺失 = 来源不完备 ⇒ skip（同文件头纪律；active 宿主两层俱在 ⇒ 守卫不触发，REAL 验证照跑）。
+// worktree 归一化测试同理：主检出直跑（REPO_ROOT==MAIN_ROOT）无「worktree→主检出」对象可验 ⇒ skip。
+const inWorktree = REPO_ROOT !== MAIN_ROOT;
+const liveLayer = (layer) => {
+  const r = loadRegistry(REPO_ROOT);
+  return (r && r.layers && r.layers[layer]) || null;
+};
+
 /** 确定性 fixture 收据（不依赖真实注册表——负控制可机器无关地取假）。sha256 与真实正本一致。
  *  createdAt/verifiedAt 取「相对 now 的固定偏移」而非硬编码日期：硬编码日期会随时间老化——
  *  08-14 固死于 2026-08-20 ~15:17Z 越过 24h 线（剩余 23h < 判据5 的 24h ⇒ CRITICAL ⇒ exit 1），
@@ -236,7 +247,8 @@ test("repoSlug: 绝对路径的 '/' 全替换成 '-'（抄 session-liveness.sh:1
   assert.equal(repoSlug("quay"), "quay");
 });
 
-test("canonicalRepoRoot: worktree 经 --git-common-dir 归一化到主检出根（AC2 非 fork 快照的前提）", () => {
+test("canonicalRepoRoot: worktree 经 --git-common-dir 归一化到主检出根（AC2 非 fork 快照的前提）", (t) => {
+  if (!inWorktree) { t.skip("非 worktree 直跑（REPO_ROOT == 主检出）——无 worktree→主检出 归一化对象可验；active 宿主以 worktree suite 跑本测试才验（2026-09-02）"); return; }
   // REPO_ROOT 是本仓库的一个 git worktree（fork 早于主检出）；主检出由 --git-common-dir 解析。
   assert.notEqual(REPO_ROOT, MAIN_ROOT, "本测试在 worktree 里跑（REPO_ROOT ≠ 主检出）");
   assert.equal(canonicalRepoRoot(REPO_ROOT), MAIN_ROOT);
@@ -275,7 +287,7 @@ test("parseRegistryText / serializeRegistryText: key=value 往返（loop-registr
 
 test("loadRegistry: 全局 per-layer 注册表（AC2——任何 worktree 读当前真值，非 fork 快照）", (t) => {
   const reg = loadRegistry(REPO_ROOT);
-  if (!reg) { t.skip("全局注册表缺失（本机未迁移 / CI 无全局状态）——来源不完备不判存在（硬规则 5）"); return; }
+  if (!reg || !reg.layers.inner || !reg.layers.outer) { t.skip("活注册表不完整（inner+outer 层需俱在——本机/CI 可能只复制到 outer，来源不完备不判存在，硬规则 5）"); return; }
   assert.ok(reg.layers.inner, "inner 层存在");
   assert.ok(reg.layers.outer, "outer 层存在");
   // 与当前正本逐字节同权威（判据④ 对账主判据）
@@ -285,7 +297,7 @@ test("loadRegistry: 全局 per-layer 注册表（AC2——任何 worktree 读当
 
 test("AC2: worktree 路径与主检出解析到同一全局注册表（非 fork 快照、同一 cronId）", (t) => {
   const mainReg = loadRegistry(MAIN_ROOT);
-  if (!mainReg) { t.skip("全局注册表缺失"); return; }
+  if (!inWorktree || !mainReg || !mainReg.layers.inner) { t.skip("非 worktree 或活 inner 注册表缺失——worktree≠主检出 归一化无可验对象（2026-09-02）"); return; }
   const worktreeReg = loadRegistry(REPO_ROOT); // REPO_ROOT 是 fork 早的 worktree
   assert.ok(worktreeReg, "worktree 读得到注册表（非 fork 快照死值）");
   assert.equal(worktreeReg.layers.inner.cronId, mainReg.layers.inner.cronId, "inner cronId 与主检出一致");
@@ -295,7 +307,7 @@ test("AC2: worktree 路径与主检出解析到同一全局注册表（非 fork 
 
 test("REAL cross-consistency: live doc AC80 canonical == 全局注册表 inner promptSha256（两检查器同权威）", (t) => {
   const reg = loadRegistry(REPO_ROOT);
-  if (!reg) { t.skip("全局注册表缺失"); return; }
+  if (!reg || !reg.layers.inner) { t.skip("活 inner 注册表缺失（来源不完备，硬规则 5）"); return; }
   const doc = path.join(REPO_ROOT, "plugin", "loop", "fast-mode-loop-tick.md");
   const canon = extractCanonical(fs.readFileSync(doc, "utf8"), "inner");
   assert.ok(canon !== null, "live doc 必须含 AC80-INNER-ANCHOR 段");
@@ -374,7 +386,7 @@ test("CLI --record: 写全局收据 + 审计线，随后 --verify 全真（收�
 
 test("REAL inner anchor: 四判据全真 + 剩余寿命正常 ⇒ PASS (exit 0)", (t) => {
   const real = realRegistry();
-  if (!real) { t.skip("全局注册表缺失"); return; }
+  if (!real || !real.layers.inner) { t.skip("活 inner 注册表缺失（来源不完备，硬规则 5）"); return; }
   const base = makeFixtureBase({ inner: { cronId: real.layers.inner.cronId } });
   const { dir, p } = tmpFile("md");
   try {
@@ -448,14 +460,14 @@ test("(a) 判据② 能取假: 注册表 id ≠ CronList id ⇒ VIOLATED (exit 1
 
 test("(b) 判据④ 能取假: 正本一字符漂移 ⇒ 注册表 sha256 ≠ 正本 ⇒ VIOLATED (exit 1)", (t) => {
   const real = realRegistry();
-  const base = makeFixtureBase({ inner: { cronId: real ? real.layers.inner.cronId : "x" } });
+  const base = makeFixtureBase({ inner: { cronId: (real?.layers?.inner?.cronId) ?? "x" } });
   const { dir, p } = tmpFile("md");
   try {
     const drifted = INNER_PROMPT.slice(0, -1) + "。x"; // 一字符漂移
     writeInnerSection(p, drifted);
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: real ? real.layers.inner.cronId : "x" }]),
+      "--cron-list", JSON.stringify([{ id: (real?.layers?.inner?.cronId) ?? "x" }]),
       "--canonical-file", p,
       "--registry-base", base,
     ]);
@@ -549,13 +561,13 @@ test("判据③ 能取假: verifiedAt 过期（>stale）⇒ registry-not-verifie
 
 test("cron-expr-mismatch: 真漂移（`*/20`={0,20,40} vs 注册表 inner `7,27,47`）⇒ 仍 VIOLATED (exit 1)", (t) => {
   const real = realRegistry();
-  const base = makeFixtureBase({ inner: { cronId: real ? real.layers.inner.cronId : "x" } });
+  const base = makeFixtureBase({ inner: { cronId: (real?.layers?.inner?.cronId) ?? "x" } });
   const { dir, p } = tmpFile("md");
   try {
     writeInnerSection(p, INNER_PROMPT);
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: real ? real.layers.inner.cronId : "x", schedule: "*/20 * * * *" }]),
+      "--cron-list", JSON.stringify([{ id: (real?.layers?.inner?.cronId) ?? "x", schedule: "*/20 * * * *" }]),
       "--canonical-file", p,
       "--registry-base", base,
     ]);
@@ -614,7 +626,7 @@ test("worktree 上下文默认路径正本查找（round172 回归）：AC80 段
   // 默认路径（无 --canonical-file，root=cwd=本 worktree）：2eedf16c 已落地
   // plugin/loop/fast-mode-loop-tick.md 的 AC80-INNER-ANCHOR 段 ⇒ 正本可解析，判据④ 被评估。
   const real = realRegistry();
-  if (!real) { t.skip("全局注册表缺失"); return; }
+  if (!real || !real.layers.inner) { t.skip("活 inner 注册表缺失（来源不完备，硬规则 5）"); return; }
   const base = makeFixtureBase({ inner: { cronId: real.layers.inner.cronId } });
   try {
     const r = runReg([
@@ -632,12 +644,12 @@ test("worktree 上下文默认路径正本查找（round172 回归）：AC80 段
 
 test("NOT-EVALUATED: 内层正本缺失（--root 指向无 AC80 段的目录）⇒ exit 2（①-③ 真但 ④ 无法评估）", (t) => {
   const real = realRegistry();
-  const base = makeFixtureBase({ inner: { cronId: real ? real.layers.inner.cronId : "x" } });
+  const base = makeFixtureBase({ inner: { cronId: (real?.layers?.inner?.cronId) ?? "x" } });
   const { dir } = tmpFile("md");
   try {
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: real ? real.layers.inner.cronId : "x" }]),
+      "--cron-list", JSON.stringify([{ id: (real?.layers?.inner?.cronId) ?? "x" }]),
       "--registry-base", base,
       "--root", dir,
     ]);
@@ -673,7 +685,7 @@ test("NOT-EVALUATED: 注册表缺失/层缺失 ⇒ exit 2", (t) => {
 
 test("checkVerify: 四判据全真 + 剩余正常 ⇒ ok:true (exit 0)", (t) => {
   const real = realRegistry();
-  if (!real) { t.skip("全局注册表缺失"); return; }
+  if (!real || !real.layers.inner) { t.skip("活 inner 注册表缺失（来源不完备，硬规则 5）"); return; }
   // 判据③ fresh 要求 now ≥ verifiedAt：固定墙钟会随真实锚重建（verifiedAt 前移）落到过去 ⇒ 判据③ 恒假。
   // 从 live 注册表的 verifiedAt 派生 nowMs（+1s），保证 now ∈ [verifiedAt, verifiedAt+7d] 恒成立（重锚不再破）。
   const nowMs = Date.parse(real.layers.inner.verifiedAt) + 1000;
@@ -695,7 +707,7 @@ test("checkVerify: 四判据全真 + 剩余正常 ⇒ ok:true (exit 0)", (t) => 
 
 test("checkVerify: id 不匹配 ⇒ ok:false (exit 1)，findings 含判据②", (t) => {
   const real = realRegistry();
-  if (!real) { t.skip("全局注册表缺失"); return; }
+  if (!real || !real.layers.inner) { t.skip("活 inner 注册表缺失（来源不完备，硬规则 5）"); return; }
   const res = checkVerify({
     layer: "inner",
     registry: real,

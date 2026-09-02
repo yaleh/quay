@@ -106,9 +106,9 @@ export function defaultTestConcurrency(): number {
  * value to full-suite-runner.ts's defaultPhaseConcurrency (the runner twin); kept separate so the direct
  * path's forwarder has a self-contained import (runner-concurrency.ts cannot import full-suite-runner.ts
  * — that direction would be a cycle). resource-gate.test.mjs 判据4 cross-checks the two stay equal.
- * gap-lowconc-concurrency-8-starves-bclass-waiting: SERIAL-only now — the lowconc phase split to its own
- * default (defaultLowconcConcurrency, the fixed human-adjudicated semantic value 3), so the shared
- * serial_lowconc_host_default no longer binds two semantically-different concurrency values.
+ * gap-lowconc-concurrency-restore-host-derived: SERIAL and LOWCONC now SHARE this host-derived default —
+ * defaultLowconcConcurrency returns the SAME max(1, floor(nproc/(S×P))), so serial_lowconc_host_default
+ * binds both phases again (the lowconc=3 fixed-value split was wrong — see defaultLowconcConcurrency).
  */
 export function defaultPhaseConcurrencyDirect(): number {
   const ncpu = hostParallelism();
@@ -117,29 +117,18 @@ export function defaultPhaseConcurrencyDirect(): number {
   return Math.max(1, Math.floor(ncpu / (slots * phases)));
 }
 
-/**
- * LOWCONC_CONCURRENCY_DEFAULT — the lowconc phase's fixed concurrency default: 3, a HUMAN-ADJUDICATED
- * SEMANTIC value, NOT a machine-spec literal (CLAUDE.md 硬规则 4 推论二 does NOT apply to it).
- * gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive 人裁定原文:「并发取 3 不取 8：B 类是等待型
- * 需要被及时调度，并发太高会让它们又开始饿——那正是它们当初被踢出主体的原因。」The lowconc phase holds
- * the hermetic-but-load-sensitive B-class session-observation family (session-liveness-signals-* etc.),
- * which needs timely scheduling of its real tmux + claude-probe child probes; host-deriving it to 8
- * (16-core ÷ (S×P)) starved those probes — gap-lowconc-concurrency-8-starves-bclass-waiting reverts
- * AC74's over-broad "read the host" refactor, which wrongly read-host'd this semantic value along with
- * the machine-spec serial default. Unlike a machine-spec literal, 3 stays 3 on any host.
- *
- * concurrency-default-fallback: LOWCONC_CONCURRENCY_DEFAULT=3 is the declared, justified default the
- * concurrency-literal-check discipline permits (禁「悄悄写死」，不禁「有理由的默认值」) — a human-ruled
- * semantic value, not a scattered machine-spec-dependent literal.
- */
-export const LOWCONC_CONCURRENCY_DEFAULT = 3;
-
-/** defaultLowconcConcurrency — the lowconc-phase concurrency default: the fixed human-adjudicated
- *  semantic value 3 (LOWCONC_CONCURRENCY_DEFAULT), INDEPENDENT of the serial phase's host-derived
- *  default. Exported for full-suite-runner.ts (the runner twin must read the SAME value) and test.sh's
- *  thin forwarder (--lowconc-concurrency). */
+/** defaultLowconcConcurrency — the lowconc-phase concurrency default: HOST-DERIVED
+ *  max(1, floor(nproc / (S × P))), IDENTICAL to the serial phase's default
+ *  (defaultPhaseConcurrencyDirect). gap-lowconc-concurrency-restore-host-derived (用户 2026-09-02 反转):
+ *  the prior fixed 3 (gap-lowconc-concurrency-8-starves-bclass-waiting) was WRONG — 人裁定
+ *  「lowconc 从 8 降回 3 是错的」「lowconc 和 serial lane 数现在都是计算出来的吧？应当持这一根据当前系统
+ *  环境计算的机制」, and the lowconc=8 starvation hypothesis was falsified by its own post-landing
+ *  attribution (the probe-starvation root cause is the session-liveness family's own multi-cause, NOT the
+ *  concurrency value). lowconc therefore returns to serial's host-derived default. Exported for
+ *  full-suite-runner.ts (the runner twin must read the SAME value) and test.sh's thin forwarder
+ *  (--lowconc-concurrency). */
 export function defaultLowconcConcurrency(): number {
-  return LOWCONC_CONCURRENCY_DEFAULT;
+  return defaultPhaseConcurrencyDirect();
 }
 
 /**
@@ -217,7 +206,7 @@ const _runnerConcurrencyUsage = [
   "Flags (one per invocation; the direct-path bash functions thin-forward to these):",
   "  --default-test-concurrency   print max(1, floor(nproc × oversub / S))   (bash default_concurrency_formula)",
   "  --phase-concurrency          print max(1, floor(nproc / (S × P)))       (bash serial_lowconc_host_default)",
-  "  --lowconc-concurrency        print 3 (the fixed lowconc semantic default) (bash lowconc_concurrency_default)",
+  "  --lowconc-concurrency        print max(1, floor(nproc / (S × P))) (bash lowconc_concurrency_default, = serial_lowconc_host_default)",
   "  --bucket-test-concurrency    print the --buckets effective concurrency   (bash bucket_test_concurrency)",
   "  --derive-main-root <repo>    print the main checkout path               (bash main_root derivation)",
   "  --has-explicit-concurrency   exit 0 iff any arg is a --test-concurrency flag (bash has_explicit_concurrency)",

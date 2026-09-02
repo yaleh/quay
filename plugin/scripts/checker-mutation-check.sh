@@ -11,8 +11,10 @@
 # the day's real failures this task exists to make impossible.
 #
 # THE MANIFEST IS NEVER HAND-WRITTEN (AC1b). Registered checkers are parsed out of
-# scripts/test.sh's run_static_checks function and the CI workflows (.github/workflows/*.yml):
-#   - run_static_checks: every invocation of `plugin/scripts/<name>.(sh|ts)`
+# scripts/test.sh's run_static_checks / run_doc_checks functions, runner-static-gate.ts's
+# run_operational_checks, and the CI workflows (.github/workflows/*.yml):
+#   - run_static_checks / run_operational_checks: every invocation of `plugin/scripts/<name>.(sh|ts)`
+#   - run_doc_checks: the doc-class checkers (moved out of the suite under AC51, still manifest-covered)
 #   - CI: every `node --experimental-strip-types scripts/<name>.ts` gate step
 # A checker added to either surface appears in the manifest automatically; if it has no
 # mutation case in plugin/scripts/checker-mutation-cases/ it is reported UNCOVERED and the
@@ -61,19 +63,24 @@ WORKFLOWS_GLOB="${repo_root}/.github/workflows/*.yml"
 # ── arg defaults ───────────────────────────────────────────────────────────────────────────────────
 meta_inject=""
 
-# ── manifest parsing (AC1: from run_static_checks + run_doc_checks + CI, never hand-written) ──────
+# ── manifest parsing (AC1: run_static_checks + run_operational_checks + run_doc_checks + CI, never hand-written) ──
 
-# Parse the run_static_checks() body (now in runner-static-gate.ts, gap-ac128-hub-split-harness-concerns)
-# AND run_doc_checks() (still in scripts/test.sh) for plugin/scripts/<name>.(sh|ts). The doc-class
-# checkers MOVED to run_doc_checks under AC51 (gap-ac51-assertion-surface-split — they now run at
-# pre-commit, not in the full suite), but their mutation cases MUST stay in this manifest — the L_S
-# instrument is not weakened by the split. run_static_checks itself moved OUT of test.sh into
-# runner-static-gate.ts; the awk is unchanged per file (from the `run_static_checks() {` /
-# `run_doc_checks() {` line to the next `}`).
+# Parse the run_static_checks() and run_operational_checks() bodies (both in runner-static-gate.ts,
+# gap-ac128-hub-split-harness-concerns) AND run_doc_checks() (still in scripts/test.sh) for
+# plugin/scripts/<name>.(sh|ts). The doc-class checkers MOVED to run_doc_checks under AC51
+# (gap-ac51-assertion-surface-split — they now run at pre-commit, not in the full suite) and the
+# OPERATIONAL-class (runtime-state) checkers MOVED to run_operational_checks under the 2026-09-02
+# passive-machine ruling (run only via `scripts/test.sh --static-checks-operational` on the ACTIVE
+# host, NOT the full-suite gate) — but BOTH families' mutation cases MUST stay in this manifest —
+# the L_S instrument is not weakened by either split. The awk is anchored per function name (from
+# the `run_static_checks() {` / `run_operational_checks() {` / `run_doc_checks() {` line to its own
+# closing `}`).
 list_run_static_checks_checkers() {
   local body=""
   if [ -f "$STATIC_GATE" ]; then
     body="$(awk '/^run_static_checks\(\)/{f=1;next} f && /^}/{f=0} f' "$STATIC_GATE")"
+    body="${body}
+$(awk '/^run_operational_checks\(\)/{f=1;next} f && /^}/{f=0} f' "$STATIC_GATE")"
   fi
   if [ -f "$TEST_SH" ]; then
     body="${body}
@@ -150,7 +157,7 @@ list_plain() {
   local name total covered
   total="$(registered_count)"
   covered="$(covered_count)"
-  echo "checkers_total: ${total} (parsed from run_static_checks + CI, never hand-written)"
+  echo "checkers_total: ${total} (parsed from run_static_checks + run_operational_checks + run_doc_checks + CI, never hand-written)"
   echo "checkers_with_mutation: ${covered}"
   if [ "$covered" -eq "$total" ]; then
     echo "uncovered: none"

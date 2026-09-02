@@ -374,6 +374,10 @@ t("AC2 — every run_static_checks checker checker-mutation-check sees is in the
   // AC51 (gap-ac51-assertion-surface-split): the DOC-CLASS checkers moved to run_doc_checks
   // (pre-commit), so they are NOT in the tier registry (which parses run_static_checks only) —
   // but the mutation manifest still lists them (checker-mutation-check.sh parses BOTH functions).
+  // 2026-09-02 passive-machine ruling: the OPERATIONAL-CLASS (runtime-state) checkers likewise moved
+  // OUT of run_static_checks into run_operational_checks (only `--static-checks-operational` on the
+  // ACTIVE host), so they are NOT in the tier registry either — but their mutation cases stay in the
+  // manifest (checker-mutation-check.sh now also parses run_operational_checks).
   const DOC_CLASS = new Set([
     "strategic-doc-staleness-check",
     "drive-contract-check",
@@ -383,17 +387,31 @@ t("AC2 — every run_static_checks checker checker-mutation-check sees is in the
     "tick-core-static-check",
     "instrument-failure-check",
   ]);
+  const OPERATIONAL_CLASS = new Set([
+    "worktree-node-modules-check",
+    "outer-tick-log-check",
+    "suite-bucket-drift-check",
+    "obligation-ledger-check",
+    "fan-in-workflow-retirement-check",
+    "dispatch-record-fingerprint-reason-check",
+    "per-task-suite-record-check",
+    "fan-in-ff-protocol-check",
+    "fan-in-materialize-check",
+    "direct-to-develop-bypass-check",
+    "suite-duration-exceed-check",
+  ]);
   // checker-mutation-check.sh's own manifest parser (list_run_static_checks_checkers) extracts the
-  // same invocation set from run_static_checks + run_doc_checks — the tier registry must cover the
-  // CODE-class subset, and must EXCLUDE the doc-class (pre-commit) subset.
+  // same invocation set from run_static_checks + run_operational_checks + run_doc_checks — the tier
+  // registry must cover the CODE-class subset, and must EXCLUDE the doc-class (pre-commit) and
+  // operational-class (active-host-only) subsets.
   const list = spawnSync("bash", [path.join(REPO_ROOT, "plugin", "scripts", "checker-mutation-check.sh"), "--list"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
   });
   assert.equal(list.status, 0, list.stderr);
   for (const m of list.stdout.matchAll(/^(\S+)\s+yes\s+run_static_checks$/gm)) {
-    if (DOC_CLASS.has(m[1])) {
-      assert.ok(!tierNames.has(m[1]), `doc-class ${m[1]} must NOT be in the tier registry (moved to pre-commit run_doc_checks)`);
+    if (DOC_CLASS.has(m[1]) || OPERATIONAL_CLASS.has(m[1])) {
+      assert.ok(!tierNames.has(m[1]), `out-of-tier ${m[1]} must NOT be in the tier registry (moved out of run_static_checks)`);
     } else {
       assert.ok(tierNames.has(m[1]), `checker ${m[1]} must be in the tier registry`);
     }
