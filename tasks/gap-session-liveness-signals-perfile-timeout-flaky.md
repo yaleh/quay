@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-signals-perfile-timeout-flaky
 title: session-liveness-signals integration/thresholds 超 perfile-timeout（260s/254s）——A 类超时 flaky
-status: todo
+status: ready
 labels:
   - gap
   - defect
