@@ -111,6 +111,19 @@ import {
   appendFanInStepTrace,
   spawnMechanicalFanIn,
   readFanInLockHold,
+  dispatchStoreFile,
+  readDispatchStore,
+  writeDispatchStore,
+  upsertDispatchRecord,
+  removeDispatchRecord,
+  readPidCmdline,
+  classifyOrphanDispatch,
+  orphanDispatchCandidates,
+  computeOrphanFinalizedOutcome,
+  computeAdoptedOutcome,
+  finalizeOrphanDispatch,
+  adoptOrphanWorker,
+  WORKER_DISPATCH_REL,
   scopedGateCommandFor,
   scopedGateKey,
   readScopedGateCache,
@@ -1621,3 +1634,124 @@ test("AC3 (HTTP) — control-plane call without identity ⇒ rejected; with call
   assert.equal(state.halted_by, "manager");
 });
 
+
+// ── gap-worker-driver-restart-orphan-no-outcome-no-timeout：driver 重启孤儿化在飞 worker ─────────────
+// 旧 driver 把 spawn 的 dispatch 元数据持久化到 .quay/worker-dispatch.json，在终态被正常计算时清除。
+// driver 重启死掉 ⇒ 内存 running 整体丢失，但持久影子存活 ⇒ 新 driver 的 reconcile 读到后 adopt（纳入
+// 超时监管、沿用原始 timeoutDeadlineMs）或 finalize（已死补终态 + 清 orphan worktree）。AC1（持久化写/清）
+// + AC2（pid 已死 finalize）+ AC3（pid 存活 adopt 且超时不重置）逐条取假。
+
+test("AC1 (能取假) — dispatch 持久记录：spawn 后即写、worker 正常结束即清（含 runId/workerPid/selectorReason/startedAtMs/timeoutDeadlineMs）", async (t) => {
+  const root = makeGitRoot("orphan-ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const taskId = "gap-orphan-ac1";
+  writeTaskFile(root, taskId, "done"); // 落地判定 status=done ⇒ exit-0 worker 记 completed
+
+  const child = spawn(process.execPath, [
+    "--no-warnings", "--experimental-strip-types", DRIVER,
+    "--root", root, "--task", taskId, "--reason", "ac1 selector reason",
+    "--worker-cmd-exact", "node -e setTimeout(()=>process.exit(0),3000)",
+    "--run-id", "fm-ac1", "--timeout", "5000",
+  ], { stdio: ["ignore", "ignore", "ignore"], detached: true });
+  t.after(() => { try { process.kill(-child.pid, "SIGKILL"); } catch { /* gone */ } });
+  const exited = new Promise((r) => child.once("exit", r));
+
+  // Phase A: spawn 后 record 已写（worker 仍活，3s 窗口内断言）。
+  await waitFor(() => readDispatchStore(dispatchStoreFile(root))[taskId] != null, 15000);
+  const rec = readDispatchStore(dispatchStoreFile(root))[taskId];
+  assert.ok(rec, "spawn 后持久化文件里存在该 task 的记录（⛔ 缺失 ⇒ 假）");
+  for (const k of ["runId", "workerPid", "selectorReason", "startedAtMs", "timeoutDeadlineMs"]) {
+    assert.ok(k in rec, `record field ${k} present`);
+  }
+  assert.equal(rec.taskId, taskId);
+  assert.equal(rec.runId, "fm-ac1");
+  assert.equal(rec.selectorReason, "ac1 selector reason");
+  assert.equal(rec.timeoutDeadlineMs, rec.startedAtMs + 5000, "timeoutDeadlineMs = startedAtMs + timeoutMs（原始超时截止时刻）");
+  assert.equal(rec.cmdlineFingerprint, "node -e setTimeout(()=>process.exit(0),3000)", "cmdlineFingerprint = spawn 归一化 cmdline");
+
+  // Phase B: worker 正常结束 ⇒ 记录被清 + completed 终态。
+  await exited;
+  await waitFor(() => readDispatchStore(dispatchStoreFile(root))[taskId] == null, 15000);
+  assert.equal(readDispatchStore(dispatchStoreFile(root))[taskId], undefined, "worker 正常结束后该记录被清除（⛔ 残留 ⇒ 假）");
+  const outcomes = readOutcomeLines(root);
+  assert.ok(outcomes.some((o) => o.task === taskId && o.final_state === "completed"), "exit-0 + status=done ⇒ completed（对照：不是 killed/failed）");
+});
+
+test("AC2 (能取假) — reconcile 对 pid 已死的孤儿：立刻补终态（非 completed、reason 可区分）+ 清 orphan worktree", (t) => {
+  const root = makeGitRoot("orphan-ac2");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-ac2`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  const taskId = "gap-orphan-ac2";
+  writeTaskFile(root, taskId, "ready");
+  runGit(root, ["branch", "develop"]); // taskBranchHasCommits 的 git log develop..task/<id> 判产出需 develop 存在
+  runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath]);
+  assert.equal(worktreePresentForTask(root, taskId), true, "precondition: orphan worktree present");
+
+  const record = {
+    taskId, runId: "fm-ac2", workerPid: 999999999, selectorReason: "ac2 selector reason",
+    startedAtMs: Date.now() - 60000, timeoutDeadlineMs: Date.now() - 1000,
+    cmdlineFingerprint: "claude -n quay-task-worker -p '... Task: gap-orphan-ac2 ...'",
+  };
+  upsertDispatchRecord(dispatchStoreFile(root), record);
+  assert.equal(classifyOrphanDispatch(record), "finalize", "pid 已死（/proc 读不到）⇒ finalize");
+
+  const { outcome, cleanup } = finalizeOrphanDispatch({ root, outcomeFile: path.join(root, WORKER_OUTCOME_REL), record });
+
+  assert.notEqual(outcome.final_state, "completed", "final_state ≠ completed");
+  assert.equal(outcome.final_state, "failed");
+  assert.match(outcome.failure_reason, /orphaned worker finalized by reconcile/, "reason 点名「driver 重启期间孤儿化、reconcile 发现已退出」");
+  assert.doesNotMatch(outcome.failure_reason, /exited with code|killed by/, "⛔ 与存活 driver 亲眼观察到的异常死亡（exited with code N / killed by SIGx）不同形");
+  assert.equal(outcome.exit_code, null, "exit code 不可观测 ⇒ 诚实 null");
+
+  const outcomes = readOutcomeLines(root);
+  assert.equal(outcomes.filter((o) => o.task === taskId).length, 1, "worker-outcome.jsonl 新增一条该 task 的记录");
+  assert.equal(readDispatchStore(dispatchStoreFile(root))[taskId], undefined, "finalize 后 dispatch 记录被清");
+  assert.equal(cleanup.removed, true, "orphan worktree cleaned（复用 no-record-on-abnormal-death 归宿）");
+  assert.equal(worktreePresentForTask(root, taskId), false, "orphan worktree removed");
+});
+
+test("AC3 (能取假) — reconcile 对 pid 存活的孤儿（原始截止已过期）：SIGTERM 且终态 timed-out（⛔ 靠 adopt 重置新窗口）", async (t) => {
+  const root = makeRoot("orphan-ac3");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const taskId = "gap-orphan-ac3";
+
+  // 一个「仍在跑」的孤儿 worker（存活、cmdline 含 quay-task-worker + task id——hasLiveWorkerForTask 命中）。
+  const orphan = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, taskId], { stdio: "ignore" });
+  t.after(() => { try { orphan.kill("SIGKILL"); } catch { /* gone */ } });
+  await new Promise((r) => setTimeout(r, 100)); // 让 /proc/<pid>/cmdline 可读
+
+  const record = {
+    taskId, runId: "fm-ac3", workerPid: orphan.pid, selectorReason: "ac3 selector reason",
+    startedAtMs: Date.now() - 60000, timeoutDeadlineMs: Date.now() - 500, // 已过期（adopt 发生前）
+    cmdlineFingerprint: readPidCmdline(orphan.pid) ?? "",
+  };
+  assert.equal(classifyOrphanDispatch(record), "adopt", "pid 存活且 cmdline 吻合 ⇒ adopt");
+
+  const exitedSignal = new Promise((r) => orphan.once("exit", (code, signal) => r(signal)));
+  const r = await adoptOrphanWorker({ taskId, rootDir: root, outcomeFile: path.join(root, WORKER_OUTCOME_REL), record, inFlightCount: 1 });
+
+  assert.equal(r.outcome.final_state, "timed-out", "已过期的原始截止时刻 ⇒ timed-out（⛔ 不是靠 adopt 重置新窗口）");
+  assert.equal(r.outcome.timed_out, true);
+  assert.equal(r.outcome.worker_pid, orphan.pid);
+  assert.equal(await exitedSignal, "SIGTERM", "孤儿 pid 被 SIGTERM（⛔ 自然退出 / SIGKILL）");
+
+  assert.equal(readDispatchStore(dispatchStoreFile(root))[taskId], undefined, "adopt 终态后 dispatch 记录被清");
+  const outcomes = readOutcomeLines(root);
+  assert.ok(outcomes.some((o) => o.task === taskId && o.final_state === "timed-out"), "worker-outcome.jsonl 新增 timed-out 记录");
+});
+
+test("④ (记录缺失不越权) — orphanDispatchCandidates：无记录 ⇒ 不纳入（手工起的 worker 不被接管）；running 中的在飞 ⇒ 跳过", () => {
+  const rec = { taskId: "gap-x", runId: "r", workerPid: 1, selectorReason: "s", startedAtMs: 0, timeoutDeadlineMs: 0, cmdlineFingerprint: "c" };
+  // 记录缺失（空 store / 无该 task 记录）⇒ 无待处理项——即使该 task 有 worktree + 活 worker（手工起的），
+  // reconcile 只读 dispatch store，⛔ 不越权接管非本机制派发的进程。
+  assert.deepEqual(orphanDispatchCandidates({}, []), []);
+  assert.deepEqual(orphanDispatchCandidates({}, ["gap-x"]), [], "记录缺失 ⇒ 不越权（有 running task 也无记录可处理）");
+  // 有记录且不在 running ⇒ 待处理（adopt/finalize 的输入）。
+  assert.deepEqual(orphanDispatchCandidates({ "gap-x": rec }, []), [{ taskId: "gap-x", record: rec }]);
+  // 有记录但在 running（本驱动自己的在飞 dispatch）⇒ 跳过（runOneWorker 管理，⛔ 不重复 adopt/finalize）。
+  assert.deepEqual(orphanDispatchCandidates({ "gap-x": rec }, ["gap-x"]), []);
+});
