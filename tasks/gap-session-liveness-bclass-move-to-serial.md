@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-bclass-move-to-serial
 title: session-liveness B 类 probe 测试从 lowconc 移到 serial——probe 在宿主推导 lowconc 下不稳
-status: ready
+status: done
 labels:
   - gap
   - defect
