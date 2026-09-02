@@ -2,7 +2,7 @@
 id: gap-fan-in-suite-log-same-runid-overwrite
 title: 机械 fan-in suite 日志按 (task, runId) 命名、无尝试序号——同 runId 内多次触发 suite
   时后一次覆盖前一次，历史败因不可回溯
-status: ready
+status: done
 labels:
   - gap
   - observability
@@ -35,10 +35,10 @@ const suiteLogFile = opts.suiteLogFile ?? path.join(root, ".quay", `fan-in-suite
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，按尝试区分）：suite 日志路径包含尝试序号/时间戳（如 epoch 或从1开始的 attempt 计数），同一 runId 内连续两次触发 suite 时两份日志文件各自独立、互不覆盖；（⛔ 第二次仍覆盖第一次 ⇒ 假）。
-- [ ] AC2（能取假，下游指针可回溯）：`worker-outcome.jsonl` 里 `mechanical_fan_in.verdict.logFile`/`suiteLog` 等指针指向的是【本次尝试自己的】日志文件，而非可能已被后续尝试覆盖的共享路径；（⛔ 指针在后续尝试后失效或指向被覆盖内容 ⇒ 假）。
-- [ ] AC3（能取假，不引入无限增长）：需要有轮转/清理策略（如任务落地后清理该任务名下的历史 attempt 日志、或只保留最近 N 份），不能让 `.quay/` 无限堆积孤儿日志文件；（⛔ 长期运行后 `.quay/fan-in-suite-*.log` 文件数只增不减 ⇒ 假）。
-- [ ] AC4（能取假，真实回放负控制）：用一个真实发生过的多次-suite-red runId（如上面 `gap-dashboard-taskcard-multistatus-minitable` 的 `wk-prod-1788275557`）模拟同 runId 两次触发 suite，验证两份日志各自独立、都可读；（⛔ 只在合成 fixture 上验证、无真实数据回放 ⇒ 假，同硬规则3b）。
+- [x] AC1（能取假，按尝试区分）：suite 日志路径包含尝试序号/时间戳（如 epoch 或从1开始的 attempt 计数），同一 runId 内连续两次触发 suite 时两份日志文件各自独立、互不覆盖；（⛔ 第二次仍覆盖第一次 ⇒ 假）。
+- [x] AC2（能取假，下游指针可回溯）：`worker-outcome.jsonl` 里 `mechanical_fan_in.verdict.logFile`/`suiteLog` 等指针指向的是【本次尝试自己的】日志文件，而非可能已被后续尝试覆盖的共享路径；（⛔ 指针在后续尝试后失效或指向被覆盖内容 ⇒ 假）。
+- [x] AC3（能取假，不引入无限增长）：需要有轮转/清理策略（如任务落地后清理该任务名下的历史 attempt 日志、或只保留最近 N 份），不能让 `.quay/` 无限堆积孤儿日志文件；（⛔ 长期运行后 `.quay/fan-in-suite-*.log` 文件数只增不减 ⇒ 假）。
+- [x] AC4（能取假，真实回放负控制）：用一个真实发生过的多次-suite-red runId（如上面 `gap-dashboard-taskcard-multistatus-minitable` 的 `wk-prod-1788275557`）模拟同 runId 两次触发 suite，验证两份日志各自独立、都可读；（⛔ 只在合成 fixture 上验证、无真实数据回放 ⇒ 假，同硬规则3b）。
 
 ## Definition of Done
 
@@ -47,5 +47,6 @@ const suiteLogFile = opts.suiteLogFile ?? path.join(root, ".quay", `fan-in-suite
 ## Touches
 
 - plugin/scripts/worker-driver.ts（`suiteLogFile` 路径生成逻辑，`:2359-2360` 附近；`step()`/`spawnSuiteAndWait`/`defaultMechanicalSuiteCommand` 调用点；轮转/清理逻辑）
-- plugin/test/worker-driver.test.mjs（同 runId 多次触发 suite → 日志不覆盖 + 下游 `verdict.logFile`/`suiteLog` 指针正确性测试；轮转/清理负控制）
+- plugin/test/worker-driver.test.mjs（suiteLogFileName/newSuiteLogAttemptSuffix/pruneTaskSuiteLogs 单元测试）
+- plugin/test/worker-driver-fan-in.test.mjs（同 runId 多次触发 suite → 日志不覆盖 + 下游 verdict.logFile/suiteLog 指针正确性 + landed 后轮转/清理 + 真实 runId 回放）
 - tasks/gap-fan-in-suite-log-same-runid-overwrite.md（自身）

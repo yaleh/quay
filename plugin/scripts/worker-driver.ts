@@ -2192,7 +2192,8 @@ export interface MechanicalFanInOptions {
   slotLib?: string;
   /** 静默看门狗阈值（测试缝）。 */
   silenceMs?: number;
-  /** suite 日志（静默看门狗盯的）；缺省 .quay/fan-in-suite-<task>-<runId>.log（durable，⛔ 不再 /tmp）。 */
+  /** suite 日志（静默看门狗盯的）；缺省 .quay/fan-in-suite-<task>~<runId>~<attempt>.log（durable，⛔ 不再
+   *  /tmp；attempt 唯一后缀 ⇒ 同一 runId 内多次 suite 互不覆盖，gap-fan-in-suite-log-same-runid-overwrite）。 */
   suiteLogFile?: string | null;
   /** suite capture（ff 闸读的证书）；缺省 /tmp/fan-in-suite-<task>.env。 */
   suiteCapture?: string;
@@ -2256,9 +2257,9 @@ export interface MechanicalFanInResult {
   /** fan-in 过程日志文件名（`.quay/fan-in-<task>-<runId>.log` 的 basename——web 链接据此构造，
    *  ⛔ 不重算 sanitize，单一真相源）。red/landed 两态都非 null。 */
   fanInLog: string | null;
-  /** suite 日志文件名（`.quay/fan-in-suite-<task>-<runId>.log` 的 basename——web 链接 / 续做 prompt /
-   *  needs-human 注记据此构造绝对路径，⛔ 不靠命名约定猜）。red ∧ step=suite 时非 null（suite 真因落
-   *  该文件——183KB 真因只能靠命名约定猜的病根）；其它步骤 / landed 时 null。 */
+  /** suite 日志文件名（`.quay/fan-in-suite-<task>~<runId>~<attempt>.log` 的 basename——web 链接 / 续做
+   *  prompt / needs-human 注记据此构造绝对路径，⛔ 不靠命名约定猜）。red ∧ step=suite 时非 null（suite
+   *  真因落该文件——183KB 真因只能靠命名约定猜的病根）；其它步骤 / landed 时 null。 */
   suiteLog: string | null;
 }
 
@@ -2684,6 +2685,52 @@ export function fanInLogFileName(task: string, runId: string): string {
   return `fan-in-${task}-${runIdSafe}.log`;
 }
 
+/** gap-fan-in-suite-log-same-runid-overwrite — suite 日志文件名的【任务边界】分隔符。⛔ 不能用 `-`：
+ *  任务 id 本身 kebab-case（实测 DIR-035 / DIR-035-A、exp5-M-CRYST / exp5-M-CRYST-A2 等前缀碰撞 300+ 对），
+ *  用 `-` 分隔 ⇒ 轮转按 `fan-in-suite-<task>-` 前缀匹配会把兄弟任务（`<task>-<suffix>`）的日志一并删掉
+ *  （硬规则 5b：修一个别漏一簇）。`~` 不在 task/runId 的 sanitize 字符集 `[A-Za-z0-9_.-]` 内 ⇒ 它只能
+ *  是分隔符本身，前缀 `fan-in-suite-<task>~` 对任意 task id 都无歧义。 */
+const SUITE_LOG_DELIM = "~";
+
+/** suite 日志文件名（`.quay/fan-in-suite-<task>~<runId>~<attempt>.log` 的 basename）。runId 唯一后缀 ⇒
+ *  跨 relaunch 不复用（同 gap-fan-in-suite-log-cross-relaunch-reuse 防护——旧轮内容不残留）；attempt
+ *  唯一后缀（epoch-ms + rand 双唯一）⇒ 同一 runId 内多次独立 suite 运行互不覆盖
+ *  （gap-fan-in-suite-log-same-runid-overwrite AC1）。task/runId 都先 sanitize 到 `[A-Za-z0-9_.-]`
+ *  （⛔ 不把未净化的 id 当路径段；也保证 `~` 分隔符在 id 内部永不出现 ⇒ 轮转前缀匹配无歧义）。 */
+export function suiteLogFileName(task: string, runId: string, attempt: string): string {
+  const taskSafe = task.replace(/[^A-Za-z0-9_.-]/g, "_");
+  const runIdSafe = runId.replace(/[^A-Za-z0-9_.-]/g, "_");
+  return `fan-in-suite-${taskSafe}${SUITE_LOG_DELIM}${runIdSafe}${SUITE_LOG_DELIM}${attempt}.log`;
+}
+
+/** 生成一次 suite 日志的 attempt 后缀（epoch-ms + rand 双唯一——同一 runId 内多次 suite 不覆盖）。
+ *  独立成函数供测试直接调用（⛔ 不内联 randomUUID 让「每次新」无处可验；同 newMechanicalSuiteRunId 形态）。 */
+export function newSuiteLogAttemptSuffix(): string {
+  return `${Date.now()}-${randomUUID().slice(0, 6)}`;
+}
+
+/** 轮转：删除某任务名下全部历史 suite attempt 日志（landed 后调用——任务落地，红 attempt 日志不再
+ *  需要回溯，⛔ 长期运行 .quay/ 无限堆积孤儿 fan-in-suite-*.log；gap-fan-in-suite-log-same-runid-
+ *  overwrite AC3）。用 `<task>~` 前缀精确匹配（⛔ 裸 `<task>-` 会误删兄弟任务 `<task>-<suffix>` 的日志）。
+ *  best-effort：删除失败不致命（landing 判定不依赖它）。返回删除的文件数（供 trace）。 */
+export function pruneTaskSuiteLogs(root: string, task: string): number {
+  const dir = path.join(root, ".quay");
+  const taskSafe = task.replace(/[^A-Za-z0-9_.-]/g, "_");
+  const prefix = `fan-in-suite-${taskSafe}${SUITE_LOG_DELIM}`;
+  let removed = 0;
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      if (name.startsWith(prefix) && name.endsWith(".log")) {
+        try {
+          fs.rmSync(path.join(dir, name), { force: true });
+          removed += 1;
+        } catch { /* best-effort — 单文件删除失败不阻断轮转 */ }
+      }
+    }
+  } catch { /* best-effort — 目录缺失/不可读 ⇒ 无可轮转 */ }
+  return removed;
+}
+
 /** 追加一行 fan-in 过程 trace（JSONL，一行一 JSON；首字段 ts）。写失败不致命（运行时日志，
  *  ⛔ 不因日志写失败炸 fan-in——trace 是观测面不是正确性闸）。 */
 export function appendFanInTrace(file: string, entry: Record<string, unknown>): void {
@@ -2766,10 +2813,11 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   // 过程日志（A1，gitignored 运行时日志）：.quay/fan-in-<task>-<runId>.log，逐步骤 trace。
   const fanInLog = path.join(root, ".quay", `fan-in-${task}-${runIdSafe}.log`);
   // 套件日志（A2）：从 /tmp 迁到 .quay/（durable——/tmp 系统清理实证见 3389 个测试遗留目录）。文件名带
-  // runId——⛔ 不再复用 /tmp/fan-in-suite-${task}.log（跨 relaunch 残留旧轮内容，
-  // gap-fan-in-suite-log-cross-relaunch-reuse；本次「每次测试独立日志文件」指令）。
+  // runId + attempt——⛔ 不再复用 /tmp/fan-in-suite-${task}.log（跨 relaunch 残留旧轮内容，
+  // gap-fan-in-suite-log-cross-relaunch-reuse）；attempt 唯一后缀 ⇒ 同一 runId 内多次 suite 互不覆盖
+  // （gap-fan-in-suite-log-same-runid-overwrite AC1）。
   const suiteLogFile =
-    opts.suiteLogFile ?? path.join(root, ".quay", `fan-in-suite-${task}-${runIdSafe}.log`);
+    opts.suiteLogFile ?? path.join(root, ".quay", suiteLogFileName(task, runId, newSuiteLogAttemptSuffix()));
   const suiteStateFile = opts.suiteStateFile ?? path.join(root, ".quay", "full-suite-state.json");
   const scriptsDir = opts.scriptsDir ?? path.join(worktree, "plugin", "scripts");
   // P2 (gap-execution-loop-productization-p2-p4): the ff 持锁段 is now a TS module (packages/quay/
@@ -3047,7 +3095,15 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const wr = await mechSh(["git", "-C", root, "worktree", "remove", "--force", worktree], 60_000);
     const bd = await mechSh(["git", "-C", root, "branch", "-D", `task/${task}`], 60_000);
     const cleanupOk = wr.ok && bd.ok;
-    trace({ step: "cleanup", exit: cleanupOk ? 0 : 1, wall_ms: Date.now() - cleanupT0, ok: cleanupOk, ...(cleanupOk ? {} : { reason: "worktree remove / branch delete best-effort (non-fatal)" }) });
+    // 轮转：landed ⇒ 清掉该任务名下全部历史 suite attempt 日志（⛔ 长期 .quay/ 无限堆积孤儿
+    // fan-in-suite-*.log；gap-fan-in-suite-log-same-runid-overwrite AC3）。best-effort，非 landing 判据。
+    const prunedSuiteLogs = pruneTaskSuiteLogs(root, task);
+    trace({
+      step: "cleanup", exit: cleanupOk ? 0 : 1, wall_ms: Date.now() - cleanupT0, ok: cleanupOk,
+      ...(cleanupOk
+        ? (prunedSuiteLogs > 0 ? { reason: `pruned ${prunedSuiteLogs} suite attempt log(s)` } : {})
+        : { reason: "worktree remove / branch delete best-effort (non-fatal)" }),
+    });
   } catch (e) {
     return failClean("exception", (e as Error)?.message ?? String(e));
   } finally {

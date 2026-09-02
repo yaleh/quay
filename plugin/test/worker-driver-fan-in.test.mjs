@@ -101,6 +101,8 @@ import {
   appendFanInTrace,
   defaultMechanicalSuiteCommand,
   newMechanicalSuiteRunId,
+  suiteLogFileName,
+  pruneTaskSuiteLogs,
   extractFailureSummary,
   combinedOutput,
   mirrorMechanicalFanInSuiteState,
@@ -1647,4 +1649,87 @@ test("A (负控制) — 非 suite 红（scoped-gate）⇒ suiteLog null（⛔ �
   assert.equal(r.outcome, "red");
   assert.equal(r.step, "scoped-gate");
   assert.equal(r.suiteLog, null, "非 suite 红 ⇒ suiteLog null（只有 suite 步记 suite 真因日志）");
+});
+
+// ── gap-fan-in-suite-log-same-runid-overwrite（AC1/AC2/AC4）───────────────────────────────────
+// 病根：suite 日志只按 (task, runId) 命名、无 attempt 后缀 ⇒ 同一 runId 内多次 suite 后一次覆盖前一次。
+// 修法：缺省命名带 attempt 唯一后缀（epoch-ms+rand）；verdict.logFile/suiteLog 指向本次尝试自己的文件。
+
+/** 轮询读日志直到含 needle（suite 子进程 stdout 经 WriteStream 落盘有微小异步，⛔ 不等即读会 flaky）。 */
+async function readSuiteLogUntil(file, needle, timeoutMs = 3000) {
+  const t0 = Date.now();
+  for (;;) {
+    try {
+      const txt = fs.readFileSync(file, "utf8");
+      if (txt.includes(needle)) return txt;
+    } catch { /* not yet written */ }
+    if (Date.now() - t0 > timeoutMs) return null;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+test("AC1/AC2 — 同一 runId 连续两次 suite 红 ⇒ 两份日志各自独立、互不覆盖 + verdict.logFile/suiteLog 指向各自本次", async (t) => {
+  const m = makeMechRepo("same-runid-suite");
+  const runId = "wk-prod-same-runid";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  // ⛔ 不注入 suiteLogFile（走缺省命名——被测的 attempt 唯一后缀逻辑）；两次不同 marker 命令以区分内容。
+  const opts = (marker) => mechOpts(m, runId, {
+    suiteLogFile: null,
+    suiteCommand: ["bash", "-c", `echo attempt-${marker}; exit 1`],
+  });
+  const r1 = await runMechanicalFanIn(opts("one"));
+  const r2 = await runMechanicalFanIn(opts("two"));
+  assert.equal(r1.outcome, "red"); assert.equal(r1.step, "suite");
+  assert.equal(r2.outcome, "red"); assert.equal(r2.step, "suite");
+  assert.ok(r1.suiteLog && r2.suiteLog, "both red suite attempts carry a suiteLog basename");
+  assert.notEqual(r1.suiteLog, r2.suiteLog, "two attempts ⇒ two DISTINCT suiteLog basenames（⛔ 相同 ⇒ 假）");
+  const f1 = path.join(m.repo, ".quay", r1.suiteLog);
+  const f2 = path.join(m.repo, ".quay", r2.suiteLog);
+  assert.notEqual(f1, f2, "two distinct absolute paths（同一路径 ⇒ 后写覆盖先写 = 假）");
+  assert.ok(fs.existsSync(f1) && fs.existsSync(f2), "both logs on disk");
+  // 指针正确性（AC2）：verdict.logFile 指向本次尝试自己的文件（⛔ 指向共享/被覆盖路径 ⇒ 假）。
+  assert.equal(r1.verdict.logFile, f1, "attempt-1 verdict.logFile points at its own file");
+  assert.equal(r2.verdict.logFile, f2, "attempt-2 verdict.logFile points at its own file");
+  // 内容独立（AC1 互不覆盖）：第一份仍可读到自己的 marker，第二份只有自己的 marker。
+  assert.match(await readSuiteLogUntil(f1, "attempt-one") ?? "", /attempt-one/, "attempt-1 log readable with its own content");
+  assert.doesNotMatch(await readSuiteLogUntil(f2, "attempt-two") ?? "", /attempt-one/, "attempt-2 log NOT polluted by attempt-1 content");
+});
+
+test("AC4 — 真实多次-suite-red runId 回放（gap-dashboard-taskcard-multistatus-minitable / wk-prod-1788275557）⇒ 两份日志各自独立、都可读", async (t) => {
+  const m = makeMechRepo("ac4-real-replay", "gap-dashboard-taskcard-multistatus-minitable");
+  const runId = "wk-prod-1788275557"; // 实测同 runId 下 2 次独立 suite red 的真实 runId。
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const opts = (marker) => mechOpts(m, runId, {
+    task: "gap-dashboard-taskcard-multistatus-minitable",
+    suiteLogFile: null,
+    suiteCommand: ["bash", "-c", `echo red-attempt-${marker}; exit 1`],
+  });
+  const r1 = await runMechanicalFanIn(opts("first"));
+  const r2 = await runMechanicalFanIn(opts("second"));
+  assert.equal(r1.outcome, "red"); assert.equal(r1.step, "suite");
+  assert.equal(r2.outcome, "red"); assert.equal(r2.step, "suite");
+  assert.notEqual(r1.suiteLog, r2.suiteLog, "same runId, two suite attempts ⇒ two distinct logs（⛔ 仍共享 ⇒ 假）");
+  const f1 = path.join(m.repo, ".quay", r1.suiteLog);
+  const f2 = path.join(m.repo, ".quay", r2.suiteLog);
+  assert.match(await readSuiteLogUntil(f1, "red-attempt-first") ?? "", /red-attempt-first/, "first attempt readable");
+  assert.match(await readSuiteLogUntil(f2, "red-attempt-second") ?? "", /red-attempt-second/, "second attempt readable (its own content, ⛔ 被覆盖则读不到)");
+});
+
+test("AC3 — landed 后清理该任务名下全部历史 attempt 日志；兄弟任务 `<task>-<suffix>` 日志保留（⛔ 只增不减/误删 ⇒ 假）", async (t) => {
+  const m = makeMechRepo("prune-on-land");
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const q = path.join(m.repo, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  // 预埋：本任务 gap-mfh 两份历史红 attempt 日志（跨 runId）+ 兄弟任务 gap-mfh-A 一份（⛔ 不得被误删）。
+  const h1 = suiteLogFileName("gap-mfh", "wk-prod-old-1", "1");
+  const h2 = suiteLogFileName("gap-mfh", "wk-prod-old-2", "1");
+  const sibling = suiteLogFileName("gap-mfh-A", "wk-prod-old-1", "1");
+  fs.writeFileSync(path.join(q, h1), "old-red-1", "utf8");
+  fs.writeFileSync(path.join(q, h2), "old-red-2", "utf8");
+  fs.writeFileSync(path.join(q, sibling), "sibling", "utf8");
+  // 落地一次（mechOpts 缺省 suite 绿 ⇒ landed → cleanup 触发 prune）。
+  const r = await runMechanicalFanIn(mechOpts(m, "wk-prod-land"));
+  assert.equal(r.outcome, "landed", `must land (step=${r.step} reason=${r.reason})`);
+  assert.ok(!fs.existsSync(path.join(q, h1)) && !fs.existsSync(path.join(q, h2)), "historical attempt logs pruned after landing");
+  assert.ok(fs.existsSync(path.join(q, sibling)), "sibling task log retained（⛔ `-` boundary 误删 ⇒ 假）");
 });
