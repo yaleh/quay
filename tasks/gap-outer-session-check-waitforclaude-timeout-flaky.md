@@ -1,7 +1,7 @@
 ---
 id: gap-outer-session-check-waitforclaude-timeout-flaky
 title: outer-session-check.test.mjs waitForClaude 5s 超时在并发 suite 下不够——A 类时序敏感 flaky
-status: done
+status: ready
 labels:
   - gap
   - defect
