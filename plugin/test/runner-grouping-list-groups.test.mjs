@@ -38,9 +38,25 @@ function runTestSh(...args) {
   for (const k of Object.keys(cleanEnv)) {
     if (k.startsWith("NODE_TEST_")) delete cleanEnv[k];
   }
-  const r = spawnSync("bash", [testSh, ...args], { cwd: repoRoot, encoding: "utf8", timeout: 120000, env: cleanEnv });
-  assert.equal(r.status, 0, `scripts/test.sh ${args.join(" ")} exited ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
-  return r.stdout;
+  // gap-runner-grouping-list-groups-perfile-timeout-flaky — the "perfile-timeout" red was NOT a
+  // timeout: `__PERFILE__ passed=false` is a REAL test failure (measure-suite-reporter passes through
+  // node's `details.passed`; see perfile-timeout-gate-name-misleads). The real failure is a transient
+  // cross-file race: this file runs CONCURRENTLY with runner-grouping-serial-anti-stomp (both serial,
+  // host-derived concurrency), whose AC0c briefly writes zz-unknown-group-anti-stomp.test.mjs with
+  // `@test-group bogus` in the SHARED plugin/test dir. While that fixture is alive (the sibling's
+  // own fail-closed `--list-groups` query — ~1.5s), scripts/test.sh FAIL-CLOSES (exit 3) on the
+  // unknown group, so a metadata query (`--list-files`/`--list-groups`) started in that window exits 3.
+  // That is a transient-window error, not a partition break:
+  // re-read a bounded number of times so a GENUINE fail-closed (a committed bogus declaration) still
+  // surfaces (it fails every re-read) while the transient fixture clears. Any OTHER non-zero exit is
+  // a real failure and surfaces immediately.
+  for (let attempt = 0; ; attempt++) {
+    const r = spawnSync("bash", [testSh, ...args], { cwd: repoRoot, encoding: "utf8", timeout: 120000, env: cleanEnv });
+    if (r.status === 0) return r.stdout;
+    if (r.status !== 3 || attempt >= 3) {
+      assert.equal(r.status, 0, `scripts/test.sh ${args.join(" ")} exited ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    }
+  }
 }
 
 // 文件内去重 (gap-runner-grouping-dedupe-metadata-query): each --list-files/--list-groups re-spawns
