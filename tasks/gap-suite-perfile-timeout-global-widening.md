@@ -1,7 +1,7 @@
 ---
 id: gap-suite-perfile-timeout-global-widening
 title: 并发 16 核下 perfile-timeout 60s 系统性偏紧——统一放宽 + slow-test 异常守卫（防掩盖真回归）
-status: todo
+status: ready
 labels:
   - gap
   - defect
