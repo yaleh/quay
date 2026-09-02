@@ -191,9 +191,13 @@ tasks/                   任务目录（数据，不是扩展代码）
 | 9 | `~/.claude/settings.json` 的 `enabledPlugins["quay@quay"]=true` → 迁到项目级 | **裁定 5**：实测该条目把 quay 扩展面注入本机每个项目（`/home/yale` 会话 PATH 含 `<quay>/plugin/bin` ×2）。**迁移须按 §4b 的顺序**（先确认已装 → 项目级置 true → 最后撤用户级），反序会把自己锁在门外 |
 | 10 | `register-plugin.mjs` 写**用户级启用**的行为 | 同上：它是污染的产生点。**安装可以全局，启用不该全局**——改为只注册 marketplace 源 + 安装，启用交给目标项目 |
 
+**⚠️ 本表所有「退役」一律指 §12 的 archive（`git mv` + INDEX 行），不是 `rm`。**
+**⊢ 且 #4（root `.mcp.json`）必须按 §11a-① 的迁移顺序做**：先接后撤，不得先撤后接——
+它承载着 3 天 178 次的生产流量。
+
 **改造（非退役）**：
 - **7-2**：全部 `plugin/skills/*/SKILL.md` 的 `allowed-tools` 统一为 `mcp__plugin_quay_quay__*`
-  （当前 `loop-driver`、`routines` 两处违反，§3c）。
+  （当前 `loop-driver`、`routines` 两处违反，§3c）。**它是 #4 迁移的前置**，不是独立改造项。
 - **7-4**：`plugin/README.md:3` 散文仍写 v0.4.0（实际 0.6.1）——它**不在受检 8 文件内**，故未被闸捕获。
 
 ## 8. 不变式（可机械判定，且能取假）
@@ -240,9 +244,105 @@ tasks/                   任务目录（数据，不是扩展代码）
 - `plugin/test/quay-init*.test.mjs`（≥7 个测试）断言的是旧铺设契约，随 §6 一并改写。
 - CLAUDE.md「Architecture — the methodology layer」中关于 quay-init 铺设的描述须更新为新契约。
 
+## 11. 三天使用实测（2026-09-02，覆盖全部三层 transcript）
+
+**方法**：窗口 = 近 3 天内被修改的 731 个 transcript（全库 11,205），**含 `subagents/workflows/` 那一层**；
+**按 JSON 键 / Bash 命令位置匹配，不按关键词**（第一版 workflow 计数因匹配到散文提及而作废重做）。
+**文件级时间窗会高估** ⇒ **零可信，非零是上界**。
+正控制三个：本轮自己打的 `quay:quay-task-operator` 出现在直方图里（skill 谓词有效）；
+盲区层文件含 918 次 Bash（该层可见）；`subagent_type` 直方图含本轮自己的派发。
+
+| 种群 | 读数 |
+|---|---|
+| `.claude/skills/` 5 个 | **全部 0** |
+| `plugin/skills/` 14 个 | **12 个 0**；唯一真实使用 `quay-file-task` 4 次；`quay-task-operator` 1 次是本轮探针 |
+| `.claude/workflows/` 6 个 | 仅 `manager-tick-core.js` **608 次**；其余 5 个 **0** |
+| `plugin/workflows/` 5 个 | **全部 0** |
+| `plugin/agents/` 1 个 | `quay:iteration-executor` **0**（派发的全是内建：general-purpose 38 / claude-code-guide 6 / Explore 2） |
+| quay MCP 21 工具 | 裸 `mcp__quay__*` **178** 次 vs 插件 `mcp__plugin_quay_quay__*` **6** 次；21 个里只有 11 个被用过 |
+| `plugin/scripts/` 309 个 | **有执行 178 / 零执行 131**；零执行中**无生产调用者 89**、有调用者 42；89 个里 **54 个自带测试** |
+
+### 11a. 三条改变本规格判断的读数
+
+**① 生产流量 97% 在本规格计划退役的命名空间上（178 : 6）。**
+⇒ 退掉 root `.mcp.json` **不是清理，是主干路径搬家**。必须按迁移办：
+**先让 `mcp__plugin_quay_quay__*` 承接（含 §7-2 的 `allowed-tools` 改造），再撤裸命名空间**，
+且迁移期内两者并存。**⛔ 不得先撤后接。**
+
+**② 唯一活着的 workflow 恰好是本规格要迁的那个（608 次/3 天）。**
+`.claude/workflows/manager-tick-core.js` 608 次，`plugin/workflows/` 那 5 份全 0
+⇒ §7-3（退双副本）+ §7-8（manager-tick-core 迁入 plugin）合起来会让**608 次/3 天的调用路径换文件**，
+是整份规格里风险最集中的一步，需单独的迁移判据（迁后首个窗口内 `quay:manager-tick-core` 调用数 > 0）。
+
+**③ skill 面近乎空转，scripts 面在扛活。** 盲区层 3 天内 918 次 Bash、**仅 1 次 Skill 调用**；
+14 个 skill 每会话常驻 ~2,706 tok 换来 3 天 4 次调用。
+**⚠️ 但本条不支持按零使用一刀切**：`cold-start`/`init`/`manager` 是**人触发、低频但关键**的能力，
+**低频 ≠ 无用**。本读数支持的是「审视哪些必须常驻」，**不是**退役依据。
+被本读数**加强**的退役项只有三处：`.claude/skills` 5 个（零使用 ∧ 执行核零引用）、
+`plugin/agents` 1 个（零派发 ∧ 服务已退役循环）、`plugin/workflows` 双副本（零调用 ∧ 与 `.claude/` 版重复）。
+
+### 11b. 已定位的仪器缺陷：`runtime-usage-inventory.ts` 有枚举盲区
+
+**它的 `readTranscripts` 从不枚举 `<session>/subagents/workflows/<run>/agent-*.jsonl`**——
+而那正是 workflow agent 干活的地方。实证：`monitor-mount-check.sh` 被它判 `unaccounted`（executed=0），
+实际 3 天执行 **86** 次（其中 51 次在盲区层）；`quay-session.ts` 被判 `library`（executed=0），
+实际 **68** 次（52 次在盲区层）。去掉 mtime 预筛数字不变 ⇒ **是目录枚举盲区，不是时间窗腐烂。**
+**⇒ 它自报的 live=112 与本规格实测的 178 相差约 66 个脚本。**
+**⛔ 它的 `unaccounted` 清单不得作为退役依据**（会删掉每天被调用几十次的脚本）。
+**⊢ 与 CLAUDE.md 记载的 meta-cc `include_subagents` 坑同形**——只是这次犯在本仓库自己的普查器上。
+
+## 12. 统一 archive 机制（裁定：零调用先退役，需要时再恢复）
+
+**人 2026-09-02**：「**对零调用的工具，先退役（archive），后续发现需要了再恢复。**」
+⇒ archive 是**默认动作**，不是例外；**举证责任反转**：留下要理由，退役不需要。
+
+### 12a. 落点与形状
+
+```
+archive/<YYYY-MM-DD>-<slug>/<保持原始相对路径>     例：archive/2026-09-02-zero-call-scripts/plugin/scripts/fork-baseline.ts
+archive/INDEX.tsv                                  一行一个对象，机读
+```
+**⛔ archive 必须在 `plugin/` 之外**——`packages/quay/package.json` 的 `files` 含 `"plugin"`，
+archive 放进去会**随每次发布交付一堆死物**；且 `capability-catalog.sh` 按目录列举 `plugin/scripts`，
+子目录形式的 archive 会污染它的清单。
+**⊢ 保持原始相对路径是为了让恢复是机械的**：`git mv archive/<批次>/plugin/scripts/x.ts plugin/scripts/x.ts`。
+
+`archive/INDEX.tsv` 每行字段（缺一不可）：
+`original_path · archive_path · date · reason_code · evidence · restore_cmd · commit`
+其中 **`evidence` 必须是可复核的读数**（如 `exec_3d=0 callers=0 own_test=yes`），不是形容词。
+
+### 12b. 纪律
+
+1. **`git mv` + 写 INDEX 行必须在同一个提交里**（硬规则 7：要求记录某动作，就不能把记录排在动作之后）。
+2. **脚本与它自己的测试同批移动**（`plugin/test/<stem>.test.mjs`）——否则留下孤儿测试或红套件。
+3. **恢复协议**：`git mv` 回原路径 + 删 INDEX 行 + **重新登记它需要的那几个面**
+   （capability-catalog 声明、测试 glob、Touches）。**恢复不是只把文件放回去。**
+4. **不设过期**：archive 长期保留；INDEX 的 `reason_code` + `evidence` 就是未来判断的依据。
+
+### 12c. 必须一并接线的排除面（不接线就会红）
+
+`archive/**` 须被以下排除：`capability-catalog.sh`、`runtime-usage-inventory.ts`、
+`scripts/test.sh` 的测试 glob、laydown/交付面闭包检查、`version-consistency-check.ts`。
+npm 侧无需处理（`files` 是白名单，`archive/` 天然不在内）。
+
+### 12d. 退役判据（本次实测已产出可执行清单）
+
+**ARCHIVE-CANDIDATE ≡ 三天零执行（全三层） ∧ 无生产调用者。**
+「生产调用者」= 非测试代码中的 import 或调用点（其它脚本 / skill / workflow / 执行核文档 / CI）。
+**⛔ 明确不算生产调用者的两类**：
+① **它自己的测试**——测试只证明它能工作，**不证明有人调它**（本次 89 个候选中 **54 个**正是这一类：
+「造好了、测试绿了、从没接进生产」，与 CLAUDE.md 硬规则 4 推论三同形）；
+② **注释 / 文档散文里的提及**（按位置判定，不按关键词）。
+
+**当前候选：`plugin/scripts/` 89 个**（清单与逐项证据见落地任务，不在本规格复制——会漂移）。
+**⚠️ 89 是下界，不是精确值**：一级调用分析里，部分「有生产调用者」的调用者本身也零执行
+（死簇，如 `build-evidence-manifest.ts` 的两个调用者都在候选名单内），
+**尚未做传递闭包** ⇒ 真实死集只会更大。**落地前须补一次传递闭包，且结果只增不减。**
+
 ---
 
-**状态**：规格已裁定；**§9 四项实测已全部完成（T2 为 CLI 自述、未活体验证）**；§7 退役清单待拆条执行。
+**状态**：规格已裁定；**§9 四项实测已全部完成（T2 为 CLI 自述、未活体验证）**；
+**§11 三天使用实测已完成**；§7 退役清单 + §12d 的 89 个脚本候选待拆条执行。
 
 **退役清单的可量化收益（2026-09-02 实测，`claude plugin details quay`）**：
 14 个 skill **每会话常驻 ~2,706 tok**；其中 `quay-native-methodology`(~210) 与
