@@ -1,7 +1,7 @@
 ---
 id: gap-webui-accent-palette-no-success-color
 title: web UI 配色令牌无独立"成功/绿色"色相——pass/alive/GO 与 fail/dead 只靠红橙色系深浅区分，普通链接也复用同一色相
-status: todo
+status: ready
 labels:
   - gap
   - webui
