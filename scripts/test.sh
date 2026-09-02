@@ -485,17 +485,27 @@ default_test_concurrency() {
 
 # ── load-sensitive phase concurrency knobs (gap-load-sensitive-serial-phase-unbounded-growth-
 # measure-first AC2/AC3 + gap-ac74-serial-lowconc-literal-direct-path AC44 直调读宿主) ─────────────
-# serial_lowconc_host_default — the host-derived fallback shared by BOTH phase knobs: max(1, floor(nproc
-# ÷ (S×P))), P = the concurrent-phase count (2 = overlap ON, 1 = sequential). THIN FORWARDER →
+# serial_lowconc_host_default — the host-derived SERIAL-phase fallback: max(1, floor(nproc ÷ (S×P))),
+# P = the concurrent-phase count (2 = overlap ON, 1 = sequential). THIN FORWARDER →
 # plugin/scripts/runner-concurrency.ts defaultPhaseConcurrencyDirect() (SPEC P4 套件入口收进 TS);
 # rationale lives there + full-suite-runner.ts defaultPhaseConcurrency (the runner twin — resource-gate
 # 判据4 cross-checks the two stay equal). The env-fallback spellings below are UNCHANGED.
+# gap-lowconc-concurrency-8-starves-bclass-waiting: SERIAL-only now — lowconc split to its own default
+# (lowconc_concurrency_default below); the two semantically-different concurrency values must NOT share
+# one host-derived default (the AC74 "read the host" refactor wrongly bound them together).
 serial_lowconc_host_default() {
   node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --phase-concurrency
 }
+# lowconc_concurrency_default — the lowconc-phase fallback: the FIXED human-adjudicated semantic value 3
+# (NOT host-derived), independent of serial. THIN FORWARDER → runner-concurrency.ts
+# defaultLowconcConcurrency() (--lowconc-concurrency). 人裁定「并发取 3 不取 8」— B 类等待型需要被及时
+# 调度；host-deriving it to 8 (16 核 ÷ (S×P)) starved the session-liveness tmux+claude-probe probes.
+lowconc_concurrency_default() {
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --lowconc-concurrency
+}
 # The full-suite-runner sets these env vars when --serial-concurrency / --lowconc-concurrency are passed.
 SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-$(serial_lowconc_host_default)}"
-LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-$(serial_lowconc_host_default)}"
+LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-$(lowconc_concurrency_default)}"
 
 # ── phase-overlap knob (gap-phase-overlap-two-phase-parallel-exploration, AC1 + AC101 default-ON) ──
 # QUAY_PHASE_OVERLAP=1 runs the serial and lowconc phases in PARALLEL on the FULL-SUITE path (each at
@@ -1238,12 +1248,13 @@ run_selected() {
       # hermetic-but-load-sensitive files (B-class session-observation family, each private socket /
       # wall-clock wait — the install/quay-init family LEFT this group for serial in round 162,
       # gap-install-family-tests-rotate-flakes-under-full-suite) run in their OWN phase at
-      # `--test-concurrency=$LOWCONC_CONCURRENCY` (default 3) — not the derived default and not 8 — so
+      # `--test-concurrency=$LOWCONC_CONCURRENCY` (default 3 — the independent lowconc_concurrency_default,
+      # NOT the serial host-derived default and NOT 8; gap-lowconc-concurrency-8-starves-bclass-waiting) — so
       # wait-type tests get timely scheduling. The phase runs even if another phase failed (report all
       # failures); its exit code merges into `code`. Runs BEFORE the main body so a lowconc failure is
       # judged red at the phase boundary (gap-phase-order-serial-lowconc-before-main). The default 3 is
-      # deliberate (AC4) and does NOT add a derived-concurrency literal site (resource-gate AC5 pins
-      # exactly 5 `--test-concurrency="$(default_test_concurrency)"` sites).
+      # deliberate (人裁定: B 类等待型需要被及时调度) and does NOT add a derived-concurrency literal site
+      # (resource-gate AC5 pins exactly 5 `--test-concurrency="$(default_test_concurrency)"` sites).
       [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
       if [ "${#lowconc_files[@]}" -gt 0 ]; then
         echo "selected ${#lowconc_files[@]} files (groups=lowconc)"

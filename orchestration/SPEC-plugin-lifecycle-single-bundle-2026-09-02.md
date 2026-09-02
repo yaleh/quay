@@ -330,19 +330,129 @@ npm 侧无需处理（`files` 是白名单，`archive/` 天然不在内）。
 **ARCHIVE-CANDIDATE ≡ 三天零执行（全三层） ∧ 无生产调用者。**
 「生产调用者」= 非测试代码中的 import 或调用点（其它脚本 / skill / workflow / 执行核文档 / CI）。
 **⛔ 明确不算生产调用者的两类**：
-① **它自己的测试**——测试只证明它能工作，**不证明有人调它**（本次 89 个候选中 **54 个**正是这一类：
-「造好了、测试绿了、从没接进生产」，与 CLAUDE.md 硬规则 4 推论三同形）；
-② **注释 / 文档散文里的提及**（按位置判定，不按关键词）。
+① **它自己的测试**——测试只证明它能工作，**不证明有人调它**
+（闭包后 94 个死集中 **56 个**正是这一类：「造好了、测试绿了、从没接进生产」，
+与 CLAUDE.md 硬规则 4 推论三同形）；
+② **注释 / 散文里的提及**（按位置判定，不按关键词）。
+**⊢ 但要区分两种文档出现**：执行核 / skill / workflow 里**指示执行的命令行**算生产调用者；
+**纯散文提及**不算——**只被后者「保住」的脚本归 §12e 的待裁桶**，不自动保留也不自动 archive。
 
-**当前候选：`plugin/scripts/` 89 个**（清单与逐项证据见落地任务，不在本规格复制——会漂移）。
-**⚠️ 89 是下界，不是精确值**：一级调用分析里，部分「有生产调用者」的调用者本身也零执行
-（死簇，如 `build-evidence-manifest.ts` 的两个调用者都在候选名单内），
-**尚未做传递闭包** ⇒ 真实死集只会更大。**落地前须补一次传递闭包，且结果只增不减。**
+### 12e. 传递闭包后的死集（2026-09-02 算毕，本节即清单正本）
+
+**算法**：**根** = 三天内有执行（178 个）**∨** 被非脚本交付面引用；
+**边** = 脚本 C 以 import 形式或调用形式引用脚本 S；
+**KEEP** = 根沿边传播到不动点（C 被保留且 C 调用 S ⇒ S 被保留）；**DEAD = 全集 − KEEP**。
+两个交付面口径各算一遍：
+**严格**（shipped skills/workflows + 三个活执行核 + CI + 产品代码）**KEEP=212 / DEAD=97**；
+**宽松**（再加任何 `orchestration/*.md` 与 `CLAUDE.md` 的引用）**KEEP=215 / DEAD=94**。
+**取两者交集为安全核 = 94。**
+**⊕ 人 2026-09-02 裁定后：那 3 个差集也 archive ⇒ 最终死集 = 97 = 严格口径的 DEAD。**
+**⊢ 即：裁定选定的是严格口径——「指示执行」算活，「散文提及」不算。**（详见本节末尾与 §12f。）
+
+**负控制通过**：`ready-pool-check.ts` / `worker-driver.ts` / `capability-catalog.sh` /
+`monitor-mount-check.sh` / `quay-session.ts` 五个已知活跃脚本**无一落入死集**
+（后两个正是仪器盲区受害者，闭包把它们判活 ⇒ 说明本算法读的是修正后的执行数据）。
+
+**⚠️ 更正上一版的一句话**：上一版写「89 是下界，只增不减」——**「只增不减」是错的**。
+闭包**加了 8 个**（调用者本身是死的：`build-evidence-manifest.ts`、`candidate-contracts.ts`、
+`checker-cost.sh`、`coupling-graph.ts`、`drivable-workspace-check.sh`、`execution-policy.ts`、
+`stage-receipt.ts`、`test-framework-policy-check.sh`），但也**移出了 3 个**
+（`gate-staleness-check.sh`、`semantic-face-dispatch-record.ts`、`trend-check.ts`）——
+它们被 `CLAUDE.md`/`orchestration` 引用而一级分析没搜那两处。
+**其中 `semantic-face-dispatch-record.ts` 是 CLAUDE.md 明文规定的 manager 语义派发记录接口**
+⇒ **archive 它会打断一条写在案的规程**。89 − 3 + 8 = 94。**⊢ 教训：扩大搜索面既会加也会减，
+「下界」这个词把一个双向的修正说成了单向的。**
+
+**⚠️ 本清单是【带测量日期的快照】，不是活文档。** 判据（§12d）是耐久的，名单会随代码演化过期；
+**执行 archive 前须按 §12d 重算一次**，以重算结果为准。
+
+#### 安全核 94 个（`plugin/scripts/` 下，两口径下均判死；56 个自带测试须同批移动）
+
+```
+ac36-sortkey-criterion-check.ts          ac56-recommended-deordered-check.ts
+ac61-staleness-disposition-check.ts      ac69-slot-queue-gap-check.ts
+adr016-screen-use-check.ts               anti-gaming-guard.sh
+anti-gaming-guard.ts                     assert-clean-tree.sh
+audit-independence-check.sh              audit-independence-check.ts
+axis-generator.ts                        build-evidence-collector.ts
+build-evidence-gate.ts                   build-evidence-manifest.ts
+candidate-contracts.ts                   candidate-synthesis.ts
+check-set-after-change-check.ts          checker-cost.sh
+checker-driver-result-ratchet-check.ts   claim-task.ts
+codex-stage1-live-proof-check.ts         codex-stage1-selfcheck.sh
+coupling-graph.ts                        cross-machine-verify.sh
+develop-deliver-tgz.sh                   dispatch-record-fingerprint-reason-check.ts
+drivable-workspace-check.sh              dual-source-check.ts
+execution-policy.ts                      fan-in-runid-check.ts
+finding-backpropagate.ts                 fork-baseline.ts
+gate-dispatch-coverage.ts                gate-script-lib.sh
+gate-staleness-check.ts                  git-lens-l-d-code-doc-ratio.ts
+git-lens-l-s-behavior-variance.ts        inner-idle-log.ts
+it0-enforcement-with-design-check.sh     it0-enforcement-with-design-check.ts
+it0-impl-row-check.sh                    land-capacity-monitor.ts
+live-repo-literal-assert-check.ts        load-sensitive-release-check.ts
+loadbearing-test-gate.sh                 loadbearing-test-gate.ts
+md-deletion-token-evaporation-check.sh   mirror-measure-history.ts
+needs-human-recheck.ts                   obligation-ledger-check.ts
+orphan-session-check.ts                  os-anchor-install.sh
+outer-tick-log-check.sh                  overhead-instrument.sh
+pipe-exit-code-check.sh                  portfolio-choice.ts
+preference-notification-check.ts         prefriction-count.sh
+preparation-feedback.ts                  prod-data-audit.ts
+productization-verification-record-check.ts  provision-verify-worktree.sh
+quay-dispatch.ts                         quay-suite.ts
+red-window-triage.ts                     release-freshness-check.sh
+run-identity.ts                          self-report-vocab-check.ts
+session-liveness-sweep-kill.mjs          session-retirement-check.ts
+stage-receipt.ts                         stale-ready-audit.ts
+state-worded-clause-check.ts             suite-cutoff-verdict.mjs
+suite-duration-exceed-check.ts           supervisor-health.sh
+supervisor-observe.sh                    supervisor-preempt.sh
+task-ac-carryover-check.ts               task-schema-check.sh
+test-framework-policy-check.sh           tmp-leak-pairing-check.sh
+tmp-leak-pairing-check.ts                tmux-isolated.sh
+tmux-test-isolation-check.ts             tree-hygiene-check.sh
+vmeta-lag-check.sh                       vmeta-lag-check.ts
+workflow-baseline-metrics.ts             workflow-invariant-ownership.mjs
+workflow-journal.ts                      workflow-metadata-conformance.mjs
+workflow-replay.ts                       worktree-branch-hygiene-check.sh
+```
+
+#### 曾待裁的 3 个 → 人 2026-09-02 裁定：**取 (a)，连同那条文档提及一起 archive**
+
+原为「严格口径判死、宽松口径判活，唯一活因是一条文档提及」的三个：
+`gate-staleness-check.sh` · `supervisor-bus-identity.sh` · `trend-check.ts`。
+**人的裁定原话**：「**连同那条文档提及一起 archive（承认该规程已不执行）**」。
+⇒ **死集 94 + 3 = 97**，**恰好等于严格口径的 DEAD=97**
+⇒ **该裁定在效果上就是「采用严格口径」：只有【指示执行】才算活，散文提及不算。**
+（未被选中的另一条出路记录在案：保留并接进真正会跑的地方。**被明确排除的第三种**是
+留文件、留文档、不接线——即硬规则 9「守与不守在记录上无法区分」。）
+
+**⚠️ 这三个各自带一串连带清理，缺一就会留下悬空引用或直接弄红检查：**
+
+| 脚本 | 必须同批处理的文档提及 | 其它耦合（不处理会红/悬空） |
+|---|---|---|
+| `gate-staleness-check.sh` | `orchestration/SPEC-goal-store-2026-08-09.md:240`（AC7 行规定每轮跑它） | `capability-catalog.sh:236`（声明）+`:534`（节奏「每轮」）；`rhythm-consumer-check.ts:93` 已自注「legacy，且 `.ts` 同胞也未接线」——**两个同胞一并入死集** |
+| `supervisor-bus-identity.sh` | `orchestration/SPEC-integration-architecture-2026-08-05.md:174`、`orchestration/manager-loop-tick.md:270` | `capability-catalog.sh:351/:673`；**`plugin/scripts/quay-deliver.ts:19` 的交付清单含它**；**既有任务 `gap-inbox-message-bus-teardown` 已把「本脚本失效子命令退役」列为剩余面 ⇒ 必须并案，不得两头各做一半** |
+| `trend-check.ts` | `orchestration/REVIEW-cadence.md:83`（规定的命令行） | **`SPEC-complete-delivery-surface-2026-08-05.md:240` 的机读行 `<!-- l1-category: 6 … deliverable: plugin/scripts/trend-check.ts …-->` + 表格 `:197`**——**不同步就会让 `l1-delivery-surface-check.ts --surface` 报第 6 类交付物缺失**（§10 已预告的活文档同步义务，这里是它的第一个具体实例） |
+
+#### 12f. 闭包的一个已知检测缺口（由上表跟进时发现，对 97 个全体适用）
+
+`quay-deliver.ts:19` 以 **`file: "supervisor-bus-identity.sh"` 这种裸文件名清单项**引用脚本；
+而 §12e 的闭包只识别**两种形式**：import 说明符、`node|bash|sh|tsx … plugin/scripts/<name>` 调用行
+⇒ **注册表/清单里的裸文件名引用检测不到。**
+**⇒ 执行 archive 之前必须补一趟裸文件名扫描**（对象：`quay-deliver.ts` 这类清单、
+`*.json` 清单、其它以数组/映射登记脚本的地方），把命中的从死集里摘出来单独判。
+**⛔ 唯一不算引用的登记处是 `capability-catalog.sh`**——它是**对种群的描述**，不是使用；
+把 catalog 条目当引用会让所有脚本永远活着（那正是硬规则 4「结构上不可能取假的量」）。
+**⊢ 本缺口的发现方式值得记**：不是靠重读代码，是靠**执行一条裁定时去找它的连带面**——
+裁定落地的动作本身就是对判据的一次负控制。
 
 ---
 
 **状态**：规格已裁定；**§9 四项实测已全部完成（T2 为 CLI 自述、未活体验证）**；
-**§11 三天使用实测已完成**；§7 退役清单 + §12d 的 89 个脚本候选待拆条执行。
+**§11 三天使用实测已完成**；**§12e 传递闭包已算毕，人裁定后死集 = 97**（94 安全核 + 3 个原待裁）；
+**§12f 的裸文件名扫描是执行 archive 的前置**；§7 退役清单 + §12e/§12f 待拆条执行。
 
 **退役清单的可量化收益（2026-09-02 实测，`claude plugin details quay`）**：
 14 个 skill **每会话常驻 ~2,706 tok**；其中 `quay-native-methodology`(~210) 与

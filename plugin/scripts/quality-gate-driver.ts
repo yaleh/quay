@@ -43,7 +43,17 @@ import {
 } from "./driver-runtime.ts";
 // B15 判词聚合的单一实现（ADR-033：判定用 agent、聚合用 JS 算术）。⛔ 不复制一份平行版本——
 // should-remove → remove-or-rescope 的路由表只有一个（pool-quality-judge.ts actionFor）。
-import { aggregateVerdicts, type VerdictRecord } from "./pool-quality-judge.ts";
+// 判词载体的写端也在此单一真相源（appendQualityRound / buildQualityRoundRecord）——driver 与
+// workflow（--record-round 子命令）都经同一函数写，⛔ 不各写一份（双 writer 同形）。
+import {
+  aggregateVerdicts,
+  appendQualityRound,
+  buildQualityRoundRecord,
+  qualityRoundVerdicts,
+  readCurrentRound,
+  type VerdictRecord,
+  type QualityRoundRecord,
+} from "./pool-quality-judge.ts";
 // AC155：轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量——同
 // outer-driver / promotion-driver 的接法）。quality 段由此前的「字面量 60_000」改为从
 // loadDriverConfig(root).quality.intervalMs 派生（缺省 30000，与 outer 例程型 kind 对齐）。
@@ -229,14 +239,35 @@ export interface PoolQualityFactValue {
   lastJudgeRecorded: number | null;
 }
 
+/** 判词载体写失败不致命（运行时日志，⛔ 不因日志炸循环）。 */
+function appendQualityRoundSafe(root: string, record: QualityRoundRecord): void {
+  try { appendQualityRound(root, record); } catch { /* 载体写失败不致命 */ }
+}
+
+/** 构造一条 failed 判词载体记录（AC3：判词解析/执行失败 ⇒ state=failed，⛔ 与 judged 不同形）。 */
+function failedQualityRoundRecord(root: string, reasons: string[], reason: string): QualityRoundRecord {
+  return buildQualityRoundRecord({
+    round: readCurrentRound(root),
+    judgedAt: new Date().toISOString(),
+    state: "failed",
+    triggerReasons: reasons,
+    distribution: null,
+    shouldRemoveIds: [],
+    verdicts: [],
+    reason,
+  });
+}
+
 /** B15 例程：机械触发（--plan）→ 命中则 LLM judge → JS 聚合（aggregateVerdicts 单一实现）→
- *  写端（--record-last-round）。读不懂 --plan ⇒ not-evaluated（硬规则 3b）；judge 失败 ⇒ failed；
- *  未命中 ⇒ verified（查过且无需 judge——fired=false 是真实测量，非「读不懂装合格」）。 */
+ *  写端（--record-last-round + 判词载体 .quay/quality-round.jsonl）。读不懂 --plan ⇒ not-evaluated
+ *  （硬规则 3b）；judge 失败 ⇒ failed（落 failed 载体记录）；未命中 ⇒ verified（查过且无需 judge——
+ *  fired=false 是真实测量，非「读不懂装合格」）。 */
 export function runPoolQualityJudge(
   root: string,
   planCmd: string[] | null,
   judgeArgv: string[] | null,
   resourceGateArgv: string[] | null = null,
+  recordVerdicts: boolean = true,
 ): Fact<PoolQualityFactValue | null> {
   const planArgv = planCmd ?? defaultPoolQualityPlanArgv(root);
   let planR: ReturnType<typeof spawnSync>;
@@ -260,6 +291,10 @@ export function runPoolQualityJudge(
     shouldRemoveIds: [],
     lastJudgeRecorded: null,
   };
+  // 判词载体写端开关（AC6 负控制缝）：recordVerdicts=false ⇒ 判词/失败记录均不落盘，载体不增长。
+  const writeRecord = (record: QualityRoundRecord): void => {
+    if (recordVerdicts) appendQualityRoundSafe(root, record);
+  };
   if (!plan.triggers.fired) {
     return { name: "pool-quality-judge", value: base, state: "verified", reason: `not-triggered (${plan.triggers.reasons.length} reasons: ${plan.triggers.reasons.join(",") || "none"})` };
   }
@@ -274,21 +309,39 @@ export function runPoolQualityJudge(
   try {
     judgeR = spawnSync(argv[0], argv.slice(1), { encoding: "utf8", timeout: ROUTINE_TIMEOUT_MS });
   } catch (e) {
+    writeRecord(failedQualityRoundRecord(root, plan.triggers.reasons, `judge spawn failed: ${(e as Error).message}`));
     return { name: "pool-quality-judge", value: base, state: "failed", reason: `judge spawn failed: ${(e as Error).message}` };
   }
   if (judgeR.error || judgeR.status !== 0) {
-    return { name: "pool-quality-judge", value: base, state: "failed", reason: `judge exited ${judgeR.status ?? "null"}: ${judgeR.error?.message ?? String(judgeR.stderr ?? "").slice(0, 200)}` };
+    const reason = `judge exited ${judgeR.status ?? "null"}: ${judgeR.error?.message ?? String(judgeR.stderr ?? "").slice(0, 200)}`;
+    writeRecord(failedQualityRoundRecord(root, plan.triggers.reasons, reason));
+    return { name: "pool-quality-judge", value: base, state: "failed", reason };
   }
   let verdicts: VerdictRecord[];
   try {
     const parsed = JSON.parse(String(judgeR.stdout ?? "").trim());
     verdicts = Array.isArray(parsed) ? parsed : [];
   } catch {
+    writeRecord(failedQualityRoundRecord(root, plan.triggers.reasons, "judge output not a JSON array"));
     return { name: "pool-quality-judge", value: base, state: "failed", reason: "judge output not a JSON array" };
   }
   // JS 聚合（单一实现 aggregateVerdicts——should-remove → remove-or-rescope 路由）。
   const agg = aggregateVerdicts(verdicts);
   const recorded = recordLastJudgeRound(root);
+  // 判词载体写端（AC1）：判过且有结果 ⇒ 追加一条 judged 记录；判词为空 ⇒ 不写空记录（AC1）。
+  const judgedAt = new Date().toISOString();
+  const round = recorded.lastRound ?? 0;
+  if (verdicts.length > 0) {
+    writeRecord(buildQualityRoundRecord({
+      round,
+      judgedAt,
+      state: "judged",
+      triggerReasons: plan.triggers.reasons,
+      distribution: agg.distribution,
+      shouldRemoveIds: agg.shouldRemoveIds,
+      verdicts: qualityRoundVerdicts(verdicts, agg.actions, judgedAt, round),
+    }));
+  }
   return {
     name: "pool-quality-judge",
     value: {

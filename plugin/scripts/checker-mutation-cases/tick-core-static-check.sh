@@ -75,25 +75,19 @@ write orchestration/orchestrator-loop-tick.md \
   '**外层不直接改代码**——它下指令，内层执行。理由：保持单一写入者。'
 
 # The shipped tick-doc surface for the --check-drift baseline:
-#   - orchestrator/fast-mode tick-core copies are byte-identical to the orchestration cores above
-#     (gap-tick-core-drift-check-not-in-suite AC3 — a REAL copy must match its source);
-#   - the manager tick docs are POINTERS (one line → orchestration/ 正本) — NOT copies
-#     (gap-plugin-loop-manager-drifted-copies-pointerize AC2/AC3 — "该路径无内容可维护").
-# The manager 正本s are the orchestration/ files written above (manager-tick-core) plus the
-# manager-loop-tick 正本 written below; the shipped manager files are small pointers that
-# reference them.
+#   - fast-mode tick-core copy is a normalized-byte "real copy" of the orchestration core above
+#     (gap-tick-core-drift-check-not-in-suite AC3 — a REAL copy must match its source, modulo the
+#     documented header-role normalization, AC90);
+#   - the manager AND orchestrator tick docs are POINTERS (one line → orchestration/ 正本) — NOT
+#     copies (gap-plugin-loop-manager-drifted-copies-pointerize AC2/AC3 — "该路径无内容可维护";
+#     orchestrator joined the same pointer treatment, gap-inner-content-cleanup 2026-09-02).
+# The manager/orchestrator 正本s are the orchestration/ files written above (manager-tick-core,
+# orchestrator-tick-core) plus the manager-loop-tick 正本 written below; the shipped manager and
+# orchestrator files are small pointers that reference them.
 write plugin/loop/manager-tick-core.md \
   '> 正本: orchestration/manager-tick-core.md — 本文件只应存在这一行指针；执行核内容一律读正本。'
 write plugin/loop/orchestrator-tick-core.md \
-  '# outer tick — 执行核' \
-  '## A. 读数' \
-  '| A1 | 读 `.quay/full-suite-state.json` | green⇒suiteGreen (src:1) |' \
-  '## B. 产出' \
-  '- **B1** 收尾 pass (src:1)。' \
-  '## C. 约束' \
-  '| C1 | 约束一 (src:1) |' \
-  '## D. 边界' \
-  '**可以**:写 `orchestration/`。'
+  '> 正本: orchestration/orchestrator-tick-core.md — 本文件只应存在这一行指针；执行核内容一律读正本。'
 write plugin/loop/fast-mode-tick-core.md \
   '# inner (fast-mode) tick — 执行核' \
   '## A. 每轮必跑' \
@@ -211,42 +205,34 @@ if checker_cmd; then :; else
   exit 4
 fi
 
-# INJECT #4 (gap-tick-core-drift-check-not-in-suite): the DRIFT mode. The plugin/loop/ shipped
-# copies are byte-identical to orchestration/ → --check-drift GREEN baseline; a single edited
-# shipped copy MUST redden the drift gate.
+# INJECT #4 (gap-inner-content-cleanup 2026-09-02, extends gap-plugin-loop-manager-drifted-copies-
+# pointerize AC2 to orchestrator): the DRIFT mode. The plugin/loop/ pointer surface (manager AND
+# orchestrator) is a GREEN baseline; a REINTRODUCED orchestrator copy — a large shipped file that
+# is not a small pointer — MUST redden the drift gate, same as the manager pointer criterion.
 if drift_cmd; then :; else
   echo "baseline RED on matching shipped copies (drift check always-red?)" >&2
   exit 4
 fi
-# Modify ONE shipped copy (add a line the orchestration/ core lacks) → the pair drifts → RED.
+# Reintroduce a large orchestrator copy (not a pointer) → the pointer criterion reddens.
 write plugin/loop/orchestrator-tick-core.md \
-  '# outer tick — 执行核' \
+  '# outer tick — 执行核（重新复制的旧副本）' \
   '## A. 读数' \
-  '| A1 | 读 `.quay/full-suite-state.json` | green⇒suiteGreen (src:1) |' \
-  '| A2 | 读 `.quay/loop-state.json` | 状态必读 (src:1) |' \
+  '| A1 | 读 `.quay/full-suite-state.json` | green⇒suiteGreen |' \
   '## B. 产出' \
-  '- **B1** 收尾 pass (src:1)。' \
+  '- **B1** 收尾 pass。' \
   '## C. 约束' \
-  '| C1 | 约束一 (src:1) |' \
+  '| C1 | 约束一 |' \
   '## D. 边界' \
   '**可以**:写 `orchestration/`。'
 if drift_cmd; then
-  echo "STAYED-GREEN — a drifted shipped copy did not redden the drift check" >&2
+  echo "STAYED-GREEN — a reintroduced orchestrator copy did not redden the pointer drift check" >&2
   exit 3
 fi
-# RESTORE #3 → drift GREEN again.
+# RESTORE #3 → drift GREEN again (the pointer).
 write plugin/loop/orchestrator-tick-core.md \
-  '# outer tick — 执行核' \
-  '## A. 读数' \
-  '| A1 | 读 `.quay/full-suite-state.json` | green⇒suiteGreen (src:1) |' \
-  '## B. 产出' \
-  '- **B1** 收尾 pass (src:1)。' \
-  '## C. 约束' \
-  '| C1 | 约束一 (src:1) |' \
-  '## D. 边界' \
-  '**可以**:写 `orchestration/`。'
+  '> 正本: orchestration/orchestrator-tick-core.md — 本文件只应存在这一行指针；执行核内容一律读正本。'
 if drift_cmd; then :; else
-  echo "ALWAYS-RED — restored (matching) shipped copy still reddens the drift check" >&2
+  echo "ALWAYS-RED — restored orchestrator pointer still reddens the drift check" >&2
   exit 4
 fi
 

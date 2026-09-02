@@ -43,6 +43,10 @@ import {
   readLastJudgeRoundState,
   writeLastJudgeRound,
   recordLastJudgeRound,
+  qualityRoundPath,
+  buildQualityRoundRecord,
+  qualityRoundVerdicts,
+  appendQualityRound,
 } from "../scripts/pool-quality-judge.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -358,5 +362,112 @@ test("AC3 — orchestrator-tick-core.md carries the numbered 调用 pool-quality
   // mechanical triggers must be named in the step (AC3)
   for (const t of ["pool > 25", "48h", "10 轮"]) {
     assert.ok(src.includes(t), `执行核触发条件必须含「${t}」`);
+  }
+});
+
+// ── 判词载体（gap-pool-quality-verdicts-never-persisted：.quay/quality-round.jsonl 写端）────────────
+
+test("qualityRound — buildQualityRoundRecord three-state (judged/failed/not-triggered) 取值不同（硬规则 3b）", () => {
+  const judgedAt = "2026-09-02T00:00:00.000Z";
+  const judged = buildQualityRoundRecord({
+    round: 5, judgedAt, state: "judged", triggerReasons: ["every-10-rounds"],
+    distribution: { ready: 1, "needs-work": 0, "should-remove": 0, uncertain: 0 },
+    shouldRemoveIds: [],
+    verdicts: [{ taskId: "a", verdict: "ready", action: "dispatchable", evidence: "e", judgedAt, round: 5 }],
+  });
+  assert.equal(judged.state, "judged");
+  assert.equal(judged.verdicts.length, 1);
+  const failed = buildQualityRoundRecord({
+    round: 5, judgedAt, state: "failed", triggerReasons: [], distribution: null, shouldRemoveIds: [], verdicts: [],
+    reason: "judge output not a JSON array",
+  });
+  assert.equal(failed.state, "failed");
+  assert.equal(failed.verdicts.length, 0);
+  assert.match(failed.reason, /not a JSON array/);
+  const notTriggered = buildQualityRoundRecord({
+    round: 5, judgedAt, state: "not-triggered", triggerReasons: [], distribution: null, shouldRemoveIds: [], verdicts: [],
+  });
+  assert.equal(notTriggered.state, "not-triggered");
+  // 三态取值不同（读不懂 failed ≠ 没问题 judged ≠ 未触发 not-triggered）。
+  assert.notEqual(judged.state, failed.state);
+  assert.notEqual(judged.state, notTriggered.state);
+  assert.notEqual(failed.state, notTriggered.state);
+});
+
+test("qualityRound — qualityRoundVerdicts maps each verdict to {taskId, verdict, action, evidence, judgedAt, round}", () => {
+  const verdicts = [
+    { id: "gap-a", verdict: "should-remove", acCompleteness: "partial", premiseSound: false, evidence: "premise falsified" },
+    { id: "gap-b", verdict: "ready", acCompleteness: "all-checked", premiseSound: true, evidence: "landed" },
+  ];
+  const agg = aggregateVerdicts(verdicts);
+  const out = qualityRoundVerdicts(verdicts, agg.actions, "2026-09-02T00:00:00.000Z", 7);
+  assert.equal(out.length, 2);
+  const a = out.find((v) => v.taskId === "gap-a");
+  assert.equal(a.verdict, "should-remove");
+  assert.equal(a.action, "remove-or-rescope");
+  assert.equal(a.evidence, "premise falsified");
+  assert.equal(a.judgedAt, "2026-09-02T00:00:00.000Z");
+  assert.equal(a.round, 7);
+});
+
+test("qualityRound — appendQualityRound appends one line to .quay/quality-round.jsonl; refuses empty judged (AC1)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pqj-qr-"));
+  try {
+    const judgedAt = new Date().toISOString();
+    const rec = buildQualityRoundRecord({
+      round: 1, judgedAt, state: "judged", triggerReasons: ["pool>25"],
+      distribution: { ready: 1, "needs-work": 0, "should-remove": 0, uncertain: 0 },
+      shouldRemoveIds: [],
+      verdicts: [{ taskId: "gap-a", verdict: "ready", action: "dispatchable", evidence: "e", judgedAt, round: 1 }],
+    });
+    const p = appendQualityRound(tmp, rec);
+    assert.equal(p, path.join(tmp, ".quay", "quality-round.jsonl"));
+    assert.equal(qualityRoundPath(tmp), p);
+    const lines = fs.readFileSync(p, "utf8").split("\n").filter((l) => l.trim());
+    assert.equal(lines.length, 1);
+    const got = JSON.parse(lines[0]);
+    assert.equal(got.state, "judged");
+    assert.equal(got.verdicts[0].taskId, "gap-a");
+    // 空 judged 记录拒写（AC1：判词为空不写空记录）。
+    assert.throws(() => appendQualityRound(tmp, buildQualityRoundRecord({
+      round: 1, judgedAt, state: "judged", triggerReasons: [], distribution: null, shouldRemoveIds: [], verdicts: [],
+    })), /empty judged/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("CLI — --record-round writes a judged record to .quay/quality-round.jsonl; empty refused", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pqj-rr-"));
+  try {
+    const file = path.join(tmp, "verdicts.json");
+    fs.writeFileSync(file, JSON.stringify([
+      { id: "gap-x", verdict: "should-remove", acCompleteness: "none", premiseSound: false, evidence: "premise gone" },
+      { id: "gap-y", verdict: "ready", acCompleteness: "all-checked", premiseSound: true, evidence: "landed" },
+    ]));
+    const r = runCli(["--record-round", file], tmp);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.recorded, true);
+    assert.equal(out.state, "judged");
+    const carrier = path.join(tmp, ".quay", "quality-round.jsonl");
+    assert.ok(fs.existsSync(carrier), "carrier must exist after --record-round");
+    const rec = JSON.parse(fs.readFileSync(carrier, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "judged");
+    assert.equal(rec.verdicts.length, 2);
+    assert.ok(rec.verdicts.some((v) => v.verdict === "should-remove" && v.action === "remove-or-rescope"));
+    for (const v of rec.verdicts) {
+      for (const k of ["taskId", "verdict", "action", "evidence", "judgedAt", "round"]) {
+        assert.ok(k in v, `verdict entry must carry key ${k} (AC1 五键以上)`);
+      }
+    }
+    // 空判词文件拒写（AC1）。
+    const empty = path.join(tmp, "empty.json");
+    fs.writeFileSync(empty, "[]");
+    const r2 = runCli(["--record-round", empty], tmp);
+    assert.equal(r2.status, 2, "empty verdicts must refuse (exit 2)");
+    assert.match(r2.stderr, /empty judged record/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });

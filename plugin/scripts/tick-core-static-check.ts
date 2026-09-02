@@ -584,9 +584,11 @@ export function runChecks(root: string, only?: string): CheckResult {
 // + a diff summary (AC2 — not a "drift/consistent" boolean).
 //
 // THREE criteria (gap-plugin-loop-manager-drifted-copies-pointerize AC2, manager 22:1xZ 裁定;
-// gap-ac90-delivery-copy-drift-gate AC90 — fast-mode 副本语义修正):
-//   - `byte-identical` — the ORCHESTRATOR tick-core copy is a REAL copy (quay-init lays it down
-//     byte-for-byte, init/SKILL.md:70); a copy that differs from its orchestration source reddens.
+// gap-ac90-delivery-copy-drift-gate AC90 — fast-mode 副本语义修正;
+// gap-inner-content-cleanup 2026-09-02 — orchestrator pointerized alongside manager):
+//   - `byte-identical` — no tick-core copy currently uses this mode (manager and orchestrator are
+//     both `pointer`, fast-mode is `normalized-byte`); kept as a DriftMode variant in case a future
+//     shipped copy needs a real byte-for-byte template again.
 //   - `normalized-byte` — the FAST-MODE tick-core copy is a SEMANTIC LANDING, NOT a byte copy
 //     (init/SKILL.md:71 明示「非 byte-identical」: the shipped copy is quay-init --loop's template
 //     referencing the target's docs/analysis/ source, the 正本 references this workspace's
@@ -596,8 +598,8 @@ export function runChecks(root: string, only?: string): CheckResult {
 //     difference; the role-specific HEADER (切分声明/落地副本 annotation + the path refs) is
 //     excluded. A one-sided edit of a behavioral row (改正本而副本不落地, AC90) reddens — the
 //     AC90 负控制 (edit the 正本 one line, leave the copy) is mutation-tested.
-//   - `pointer` — the manager tick docs' shipped copies are POINTERS (one line → orchestration/
-//     正本), NOT copies ("该路径无内容可维护"). A shipped manager file must be a SMALL pointer
+//   - `pointer` — the manager and orchestrator tick docs' shipped copies are POINTERS (one line →
+//     orchestration/ 正本), NOT copies ("该路径无内容可维护"). A shipped file must be a SMALL pointer
 //     referencing its orchestration 正本; a reintroduced large copy reddens regardless of
 //     byte-identity. The old pair-drift paired only the tick-CORE copies, so manager-loop-tick's
 //     2321-line drift was structurally invisible; the pointer criterion inverts both failure
@@ -606,6 +608,10 @@ export function runChecks(root: string, only?: string): CheckResult {
 export const MANAGER_POINTER_PAIRS = [
   { core: "orchestration/manager-tick-core.md", shipped: "plugin/loop/manager-tick-core.md" },
   { core: "orchestration/manager-loop-tick.md", shipped: "plugin/loop/manager-loop-tick.md" },
+  // orchestrator-tick-core.md pointerized alongside manager's (gap-inner-content-cleanup,
+  // 2026-09-02): the shipped copy no longer carries outer's tick-core content byte-for-byte —
+  // same "该路径无内容可维护" rationale as the manager pair above.
+  { core: "orchestration/orchestrator-tick-core.md", shipped: "plugin/loop/orchestrator-tick-core.md" },
 ] as const;
 
 /** A shipped manager tick doc is a POINTER iff it is ≤ this many lines (the 正本 path + a short
@@ -617,11 +623,11 @@ export type DriftMode = "byte-identical" | "normalized-byte" | "pointer";
 
 export const DRIFT_PAIRS: { core: string; shipped: string; mode: DriftMode }[] = [
   ...CORES
-    .filter((rel) => rel !== "orchestration/manager-tick-core.md")
+    .filter((rel) => !MANAGER_POINTER_PAIRS.some((p) => p.core === rel))
     .map((rel) => {
-      const base = rel.split("/").pop()!; // e.g. "orchestrator-tick-core.md"
+      const base = rel.split("/").pop()!; // e.g. "fast-mode-tick-core.md"
       // The fast-mode shipped copy is a SEMANTIC LANDING, not a byte copy (init/SKILL.md:71 —
-      // "非 byte-identical"); the orchestrator copy is a real byte copy (init/SKILL.md:70).
+      // "非 byte-identical").
       const mode: DriftMode = base === "fast-mode-tick-core.md" ? "normalized-byte" : "byte-identical";
       return { core: rel, shipped: `plugin/loop/${base}`, mode };
     }),
@@ -805,7 +811,7 @@ export function main(argv: string[]): CliResult {
       // Explicit alias for the default full-surface check (the ## Contract `invoke` form).
     } else if (a === "--help" || a === "-h") {
       process.stdout.write(
-        "tick-core-static-check.ts — are the three execution cores statically covered (AC3/AC4/AC5/AC6/AC8), and (--check-drift) each plugin/loop/ copy consistent with its orchestration source — orchestrator byte-identical, fast-mode normalized-byte (behavioral body, AC90 semantic-landing), manager tick docs a small pointer (AC2)?\n",
+        "tick-core-static-check.ts — are the three execution cores statically covered (AC3/AC4/AC5/AC6/AC8), and (--check-drift) each plugin/loop/ copy consistent with its orchestration source — fast-mode normalized-byte (behavioral body, AC90 semantic-landing), manager and orchestrator tick docs a small pointer (AC2)?\n",
       );
       return { code: 0, json: { help: true } };
     } else {
