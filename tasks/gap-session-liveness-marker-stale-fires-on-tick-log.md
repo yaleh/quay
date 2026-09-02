@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-marker-stale-fires-on-tick-log
 title: session-liveness marker-stale 误判 fresh tick log 为 session-activity——gating 用 tr_path 非空而非「心跳源是 transcript」
-status: ready
+status: done
 labels:
   - gap
   - defect
