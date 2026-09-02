@@ -28,9 +28,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：DIR-130 AC2/AC4 不再报 `wiring-claim-ac-no-probe`（grep 真文件被判合法探针）——`task-contract-check --json` 对 DIR-130 0 违规；（⛔ 仍报 ⇒ 假）。
-- [ ] AC2（能取假，无回归）：两条历史坏例（`gap-readdepends-on-indented-extra-depends_on` / `gap-ac146-human-interface-explicit-owner`）仍报红；（⛔ 误放行 ⇒ 假）。
-- [ ] AC3（能取假，负控制）：字符串直调 / fixture / mkdtemp 合成样本的接线声明仍报红——不因「grep 真文件」豁免连带放行合成桩。
+- [x] AC1（能取假）：DIR-130 AC2/AC4 不再报 `wiring-claim-ac-no-probe`（grep 真文件被判合法探针）——`task-contract-check --json` 对 DIR-130 0 违规；（⛔ 仍报 ⇒ 假）。
+- [x] AC2（能取假，无回归）：两条历史坏例（`gap-readdepends-on-indented-extra-depends_on` / `gap-ac146-human-interface-explicit-owner`）仍报红；（⛔ 误放行 ⇒ 假）。
+- [x] AC3（能取假，负控制）：字符串直调 / fixture / mkdtemp 合成样本的接线声明仍报红——不因「grep 真文件」豁免连带放行合成桩。
 
 ## Definition of Done
 

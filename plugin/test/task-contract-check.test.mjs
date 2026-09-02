@@ -865,6 +865,34 @@ test("AC3 boundary: a pure-function AC with no quantified reachability/existence
   }
 });
 
+test("grep-real-file is a position-based probe → NOT flagged (gap-wiring-claim-ac-misflags-position-grep)", () => {
+  // DIR-130 AC2/AC4: `grep -n "DIR-130" <real file>` IS the real input probe — the real file is the
+  // real input being read by position (硬规则② 按位置判定). These must NOT be flagged no-probe.
+  const acs = [
+    "- [x] AC2: **skill 授权模型已改（按位置判定）**——`grep -n \"DIR-130\" plugin/skills/quay-task-operator/SKILL.md` 命中 ≥1 且位于授权契约小节内（打印命中行与其上下 5 行），证明凭据引用写在授权定义处而非注释/示例里（实测：`:10` authorize 契约行 + `:26` standing-authorization 段）",
+    "- [x] AC4: **manager 执行核可读到指针**——`grep -n \"DIR-130\" orchestration/manager-tick-core.md` 命中 ≥1 且与 permission-laundering 条款同段（打印命中行与上下文）（实测：`:78` C10 条款 permission-laundering 同段）",
+    "- [x] AC1（能取假）：`grep -n \"DIR-130\" plugin/skills/quay-task-operator/SKILL.md` 读到 3 条命中行（打印命中行与上下文），证明引用在正确位置",
+  ];
+  for (const ac of acs) {
+    assert.deepEqual(checkWiringClaimAcProbe(ac), [], ac.slice(0, 60));
+  }
+});
+
+test("grep exemption does NOT leak to synthetic stubs (string literal / fixture / mkdtemp) → still flagged", () => {
+  // AC3 negative control: a bullet that mentions `grep` but reads a synthetic stub (no real `/`-separated
+  // file path) is STILL a no-probe declaration — the exemption is anchored on grep + a real file.
+  const acs = [
+    "- [x] AC1（能取假，缩进形态可读）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。",
+    "- [x] AC2（能取假，负控制）：造一条 needs-human（`.quay/promotion-outcome.jsonl` 已有 3 条现成样本），该界面须显示它；（⛔ 不显示 ⇒ 假）。",
+    "- [x] AC1: `readDependsOn` 认到缩进形态、10 条命中任务都能被读到（测试用 grep 在 fixture 字符串里查，非真文件）",
+  ];
+  for (const ac of acs) {
+    const findings = checkWiringClaimAcProbe(ac);
+    assert.equal(findings.length, 1, `${ac.slice(0, 60)} → ${JSON.stringify(findings)}`);
+    assert.equal(findings[0].code, "wiring-claim-ac-no-probe");
+  }
+});
+
 test("checkWiringClaimAcProbeGated: grandfathered file → [] ; a non-grandfathered file → violation", () => {
   const ac = "- [x] AC1（能取假）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。";
   const body = taskBody({ status: "done", ac });
