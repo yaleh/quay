@@ -22,6 +22,8 @@ extra:
 
 **真根因方向**：`test.sh --list-files` 主检出**含**该文件（`grep -c`=1），worktree **漏列**它——`--list-files` 是 `select_files` 分组结果（非 find/git ls-files），该文件标注 `@test-group product` + `@load-sensitive real-install` + `@load-sensitive-entry`，在 worktree 环境下被 `select_files` 分组漏掉（主检出不漏）。是 worktree-specific 的 `--list-files`/`select_files` 行为，非该任务删文件。
 
+**实现核实（纠正上段「worktree-specific」假设，非 worktree 特例）**：实测该文件当前标注 `@test-group serial`（`gap-sea-artifact-consumer-e2e-ac4-assertion` 的 `b24cbe0d9` 把它从 product 迁到 serial），而 no-args `test.sh --list-files` 只输出 `product,engine` + `lowconc`（共 549），**漏掉 serial 群（16 个）**——主检出与 worktree **同样**漏列（`--list-groups total`=565）。真根因：no-args `--list-files` 不是完整 canonical 集合，它漏了 serial 群，于是任何 `@test-group` 从默认群迁入 serial 的 tracked 文件都会被 `test-file-snapshot` 读成 REMOVED（且 serial 文件从不受真删保护）。修法：no-args `--list-files` 补 serial 群，使 565 == `--list-groups total`；baseline 重快照到 565。
+
 ## Plan
 
 1. 复现：worktree 与主检出各跑 `test.sh --list-files`，diff 出 sea-artifact 是否仅 worktree 漏列；追踪 `select_files` 对该文件的分组路径。
@@ -30,8 +32,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：worktree 与主检出 `test.sh --list-files` 对同一 tracked 测试文件集合一致（sea-artifact 不再仅 worktree 漏列）；（⛔ worktree 仍漏列 ⇒ 假）。
-- [ ] AC2（能取假，无回归）：真删测试文件仍报 REMOVED（baseline 计数回归保护不退化）；（⛔ 误放行真删 ⇒ 假）。
+- [x] AC1（能取假）：worktree 与主检出 `test.sh --list-files` 对同一 tracked 测试文件集合一致（sea-artifact 不再仅 worktree 漏列）；（⛔ worktree 仍漏列 ⇒ 假）。
+- [x] AC2（能取假，无回归）：真删测试文件仍报 REMOVED（baseline 计数回归保护不退化）；（⛔ 误放行真删 ⇒ 假）。
 
 ## Definition of Done
 
@@ -39,6 +41,10 @@ worktree 与主检出 `--list-files` 一致；AC1/AC2 勾；test-file-snapshot �
 
 ## Touches
 
-- scripts/test.sh（--list-files / select_files 的 worktree 一致性）
-- plugin/scripts/test-file-snapshot.sh（如快照机制需对 real-install tier 处理）
+- scripts/test.sh（no-args --list-files 补 serial 群，全群=--list-groups total）
+- plugin/test/runner-grouping-list-groups.test.mjs（AC3/AC6 断言随全群语义更新）
+- plugin/test/runner-grouping-serial-anti-stomp.test.mjs（默认 --list-files 由「排除 serial」改为「含 serial」断言）
+- docs/analysis/test-file-baseline.txt（重快照 565 全群，含 serial）
+- scripts/test-coverage-check.ts（AC5 注释随全群语义更新）
+- plugin/test/test-coverage-check.test.mjs（AC5 注释随全群语义更新）
 - tasks/gap-test-file-snapshot-worktree-drops-realinstall.md（自身）
