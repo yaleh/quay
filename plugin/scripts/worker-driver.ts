@@ -227,6 +227,10 @@ import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache } from ".
 /** round 记录（无条件心跳）的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
 
+/** dispatch 持久记录（gap-worker-driver-restart-orphan-no-outcome-no-timeout）的仓库相对路径——
+ *  gitignored 运行时状态（worker-outcome.jsonl / worker-round.jsonl 同族），按 taskId 索引的单文件 map。 */
+export const WORKER_DISPATCH_REL = ".quay/worker-dispatch.json";
+
 /** 终态枚举：completed（退出码 0 且落地）/ exited-not-landed（退出码 0 但没落地）/ failed（非零退出）/
  *  killed（被信号杀）/ timed-out（超时 SIGTERM）/ spawn-failed（起不来）/ not-dispatched（halt 未派）。 */
 export const FINAL_STATES = ["completed", "exited-not-landed", "failed", "killed", "timed-out", "spawn-failed", "not-dispatched"] as const;
@@ -1584,6 +1588,307 @@ function appendWorkerPid(pidFile: string, workerPid: number): void {
   }
 }
 
+// ── dispatch 持久记录（gap-worker-driver-restart-orphan-no-outcome-no-timeout）────────────────────
+// driver 重启孤儿化在飞 worker 的元数据持久化：旧 driver 把 spawn 的 dispatch 元数据（selector 理由 /
+// runId / 原始派发时刻 / 原始超时截止时刻 / spawn cmdline）原子写进 <root>/.quay/worker-dispatch.json
+// （按 taskId 索引的单文件 map），在终态被正常计算时清除对应条目。旧 driver 死 ⇒ 内存 running 整体丢失，
+// 但这份持久影子存活 ⇒ 新 driver 的 reconcile 能读到「这个 task 为什么在飞、是哪次 dispatch、跑了多久、
+// 原定超时预算是多少」，据此 adopt（纳入超时监管）或 finalize（已死补终态），⛔ 不再是「排除集之外一片黑箱」。
+
+/** 一条 dispatch 持久记录（spawn 后写、终态后清；driver 重启遗留的条目 = 孤儿在飞）。 */
+export interface DispatchRecord {
+  taskId: string;
+  runId: string;
+  workerPid: number;
+  selectorReason: string;
+  /** 派发时刻（epoch ms）。 */
+  startedAtMs: number;
+  /** 原始超时截止时刻（epoch ms）；0 = 无超时（与 timeoutMs>0 对齐）。adopt 沿用此值，⛔ 不重置。 */
+  timeoutDeadlineMs: number;
+  /** spawn 时的归一化 cmdline（argv 空格 join）——观测抓手 + adopt 时 hasLiveWorkerForTask 复核的参照
+   *  （⛔ 不裸信 pid 数字，避免 pid 复用误判）。 */
+  cmdlineFingerprint: string;
+}
+
+/** dispatch 记录文件的绝对路径。 */
+export function dispatchStoreFile(root: string): string {
+  return path.join(root, WORKER_DISPATCH_REL);
+}
+
+/** 读整份 dispatch store（taskId → record）；文件缺失 / 解析失败 ⇒ {}（fail-soft，硬规则 3b：读不懂
+ *  ≠ 无记录，但方向是「少 adopt ⇒ 维持现状」，⛔ 不是 fail-closed 到「全部孤儿」——那会误接管手工起的 worker）。 */
+export function readDispatchStore(file: string): Record<string, DispatchRecord> {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, DispatchRecord>;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+/** 原子写整份 dispatch store（tmp + rename，外部读者绝不读到半截——与 appendWorkerPid 同手法）。 */
+export function writeDispatchStore(file: string, store: Record<string, DispatchRecord>): void {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    fs.writeFileSync(tmp, JSON.stringify(store, null, 2), "utf8");
+    fs.renameSync(tmp, file);
+  } catch {
+    /* dispatch store 是观测抓手 + 孤儿 adopt/finalize 的输入，写失败不改变主流程（同 appendWorkerPid） */
+  }
+}
+
+/** upsert 一条 dispatch 记录（读-改-写，原子）。 */
+export function upsertDispatchRecord(file: string, record: DispatchRecord): void {
+  const store = readDispatchStore(file);
+  store[record.taskId] = record;
+  writeDispatchStore(file, store);
+}
+
+/** 移除一条 dispatch 记录（终态已算 ⇒ dispatch 已了结）。记录本不存在 ⇒ no-op（⛔ 不写 spurious 空文件）。 */
+export function removeDispatchRecord(file: string, taskId: string): void {
+  const store = readDispatchStore(file);
+  if (!(taskId in store)) return;
+  delete store[taskId];
+  writeDispatchStore(file, store);
+}
+
+/** 读某 pid 的 /proc/<pid>/cmdline（归一化：NUL → 空格、trim）；pid 不存在 / 无权限 ⇒ null
+ *  （硬规则 3b：读不懂 ≠ 无存活，但调用方按 falsy 判「已死」——方向是「少 adopt」，⛔ 不误信 pid）。 */
+export function readPidCmdline(pid: number, procDir: string = "/proc"): string | null {
+  try {
+    return fs.readFileSync(path.join(procDir, String(pid), "cmdline")).toString("utf8").replace(/\0/g, " ").trim();
+  } catch {
+    return null;
+  }
+}
+
+/** 孤儿 dispatch 分类（纯函数）：adopt（pid 存活且 cmdline 仍是本任务的 worker）/ finalize（pid 已死 /
+ *  被复用）。复核用 hasLiveWorkerForTask 的词边界 cmdline 匹配（同 cold-start-inflight 交叉核对），⛔ 不
+ *  裸信 pid 数字——pid 复用后指向别的进程，cmdline 不再含 quay-task-worker + task id ⇒ 判 finalize。
+ *  空 cmdline（僵尸已退未收尸）与读不到（null）同判「已死」。 */
+export function classifyOrphanDispatch(record: DispatchRecord, procDir: string = "/proc"): "adopt" | "finalize" {
+  const cmdline = readPidCmdline(record.workerPid, procDir);
+  if (!cmdline) return "finalize";
+  return hasLiveWorkerForTask(record.taskId, [cmdline]) ? "adopt" : "finalize";
+}
+
+/** reconcile 该处理的孤儿 dispatch 清单：store 里、但不在本驱动内存 running 的条目。⛔ 记录缺失（driver
+ *  从未见过，如手工起的 worker）⇒ 不在 store ⇒ 天然跳过、不越权接管；running 中的本驱动在飞 dispatch ⇒
+ *  由 runOneWorker 管理（spawn 写、终态清），⛔ 不重复 adopt/finalize。纯函数，可单测。 */
+export function orphanDispatchCandidates(
+  store: Record<string, DispatchRecord>,
+  runningTasks: string[],
+): Array<{ taskId: string; record: DispatchRecord }> {
+  const out: Array<{ taskId: string; record: DispatchRecord }> = [];
+  for (const [taskId, record] of Object.entries(store)) {
+    if (runningTasks.includes(taskId)) continue;
+    out.push({ taskId, record });
+  }
+  return out;
+}
+
+/** 孤儿 finalize 终态 outcome（pid 已死 / 被复用）。final_state=failed（非 completed），failure_reason
+ *  点名「driver 重启期间孤儿化、reconcile 发现已退出」——与存活 driver 亲眼观察到的异常死亡
+ *  （"worker exited with code N" / "worker killed by SIGx"）在 reason 上可区分（AC2）。exit_code 诚实
+ *  记 null（读不懂，⛔ 不伪造）。 */
+export function computeOrphanFinalizedOutcome(opts: {
+  task: string;
+  selectorReason: string;
+  runId: string;
+  workerPid: number;
+  startedAtMs: number;
+  endedAtMs: number;
+}): ReturnType<typeof computeOutcome> {
+  return {
+    ts: new Date(opts.endedAtMs).toISOString(),
+    task: opts.task,
+    selector_reason: opts.selectorReason,
+    exit_code: null,
+    signal: null,
+    wall_clock_ms: opts.endedAtMs - opts.startedAtMs,
+    final_state: "failed",
+    failure_reason: `orphaned worker finalized by reconcile: driver restarted mid-flight and worker pid ${opts.workerPid} already exited (or was recycled) before a new instance could adopt it`,
+    started_at: new Date(opts.startedAtMs).toISOString(),
+    ended_at: new Date(opts.endedAtMs).toISOString(),
+    worker_pid: opts.workerPid,
+    run_id: opts.runId,
+    in_flight_count: 0,
+    timed_out: false,
+    session_id: null,
+  };
+}
+
+/** adopt 后 worker 退出（含超时）的终态 outcome。⛔ 不直调 computeOutcome：adopted 孤儿非本驱动子进程、
+ *  exit code 不可观测，computeOutcome 的 `exitCode !== 0` 分支会对 null 误判 "exited with code null"。
+ *  三态：timed-out（沿用原始截止时刻到期 SIGTERM）/ completed（落地判定 verified）/ exited-not-landed
+ *  （未落地，worktree 保留供续做）。exit_code 诚实记 null。 */
+export function computeAdoptedOutcome(opts: {
+  task: string;
+  selectorReason: string;
+  runId: string;
+  workerPid: number;
+  startedAtMs: number;
+  endedAtMs: number;
+  inFlightCount: number;
+  timedOut: boolean;
+  landing: DriverResult<LandingEvidence>;
+}): ReturnType<typeof computeOutcome> {
+  let finalState: string;
+  let failureReason: string | null;
+  if (opts.timedOut) {
+    finalState = "timed-out";
+    failureReason = `worker timed out and was SIGTERM'd (worktree preserved)`;
+  } else if (opts.landing.state === "verified") {
+    finalState = "completed";
+    failureReason = null;
+  } else {
+    finalState = "exited-not-landed";
+    failureReason = `adopted orphan worker exited (exit code unobservable) — ${opts.landing.reason ?? "task did not land"}`;
+  }
+  return {
+    ts: new Date(opts.endedAtMs).toISOString(),
+    task: opts.task,
+    selector_reason: opts.selectorReason,
+    exit_code: null,
+    signal: null,
+    wall_clock_ms: opts.endedAtMs - opts.startedAtMs,
+    final_state: finalState,
+    failure_reason: failureReason,
+    started_at: new Date(opts.startedAtMs).toISOString(),
+    ended_at: new Date(opts.endedAtMs).toISOString(),
+    worker_pid: opts.workerPid,
+    run_id: opts.runId,
+    in_flight_count: opts.inFlightCount,
+    timed_out: opts.timedOut,
+    session_id: null,
+  };
+}
+
+/** 孤儿 finalize（pid 已死 / 被复用）：立刻补一条可区分的非 completed 终态 + 复用 no-record-on-abnormal-
+ *  death 的 orphan worktree 清理（cleanupOrphanWorktree）+ 清 dispatch 记录。同步、幂等。返回 outcome 供
+ *  观测（resident loop 打 json 事件）。 */
+export function finalizeOrphanDispatch(opts: {
+  root: string;
+  outcomeFile: string;
+  record: DispatchRecord;
+}): { outcome: ReturnType<typeof computeOutcome>; cleanup: OrphanCleanupResult | null } {
+  const { root, outcomeFile, record } = opts;
+  const base = computeOrphanFinalizedOutcome({
+    task: record.taskId,
+    selectorReason: record.selectorReason,
+    runId: record.runId,
+    workerPid: record.workerPid,
+    startedAtMs: record.startedAtMs,
+    endedAtMs: Date.now(),
+  });
+  const cleanup = cleanupOrphanWorktree(root, record.taskId, null, { finalState: "failed", exitCode: null });
+  const outcome = cleanup
+    ? {
+        ...base,
+        worktree_cleaned: cleanup.removed,
+        worktree_cleanup_error: cleanup.error,
+        worktree_cleanup_skipped_live: cleanup.skippedLiveWorker,
+        worktree_cleanup_has_commits: cleanup.hasCommits,
+        worktree_cleanup_preserved_commits: cleanup.preservedForCommits,
+        worktree_cleanup_sigterm_external: cleanup.sigtermExternal,
+      }
+    : base;
+  appendOutcomeToFile(outcomeFile, outcome);
+  removeDispatchRecord(dispatchStoreFile(root), record.taskId);
+  return { outcome, cleanup };
+}
+
+/** adopt 一个孤儿 worker（pid 存活且 cmdline 吻合）：纳入超时监管——轮询 pid 存活性（代替 child_process
+ *  close 事件，非本驱动子进程无 close），沿用记录里的 timeoutDeadlineMs（⛔ 不重置，防「每次重启续命」
+ *  无限占位），到期 SIGTERM（grace 后 SIGKILL 兜底），退出后 computeAdoptedOutcome 算终态 + 清 dispatch
+ *  记录。返回 Promise<WorkerRunResult>（调用方纳入 running，退出后照常走重试/退避记账）。 */
+export function adoptOrphanWorker(opts: {
+  taskId: string;
+  rootDir: string;
+  outcomeFile: string;
+  record: DispatchRecord;
+  inFlightCount?: number;
+  procDir?: string;
+  /** 轮询间隔（测试缝）。 */
+  pollMs?: number;
+  /** SIGTERM → SIGKILL 升级 grace（测试缝）。 */
+  sigkillGraceMs?: number;
+}): Promise<WorkerRunResult> {
+  const {
+    taskId, rootDir, outcomeFile, record, procDir = "/proc",
+    inFlightCount = 1, pollMs = 100, sigkillGraceMs = 5000,
+  } = opts;
+  return new Promise((resolve) => {
+    let timedOut = false;
+    let sigtermSentAt: number | null = null;
+    let sigkillSent = false;
+    let finished = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (): void => {
+      if (finished) return;
+      finished = true;
+      if (timer) clearTimeout(timer);
+      const endedAtMs = Date.now();
+      const landing = computeLandingState(rootDir, taskId, null);
+      const lock = readLockMetricsForRun(rootDir, record.runId, taskId);
+      const base = computeAdoptedOutcome({
+        task: taskId,
+        selectorReason: record.selectorReason,
+        runId: record.runId,
+        workerPid: record.workerPid,
+        startedAtMs: record.startedAtMs,
+        endedAtMs,
+        inFlightCount,
+        timedOut,
+        landing,
+      });
+      const outcome = {
+        ...(base.final_state === "timed-out" ? { ...base, worktree_preserved: true } : base),
+        ...(lock.lockWaitMs !== null && lock.lockWaitMs !== undefined ? { lock_wait_ms: lock.lockWaitMs } : {}),
+        ...(lock.lockHoldMs !== null && lock.lockHoldMs !== undefined ? { lock_hold_ms: lock.lockHoldMs } : {}),
+      };
+      appendOutcomeToFile(outcomeFile, outcome);
+      removeDispatchRecord(dispatchStoreFile(rootDir), taskId);
+      let exitCode = 0;
+      if (outcome.final_state === "timed-out") exitCode = 128 + signalExitCode("SIGTERM");
+      else if (outcome.final_state === "exited-not-landed") exitCode = EXITED_NOT_LANDED_EXIT;
+      resolve({ taskId, outcome, exitCode });
+    };
+
+    const tick = (): void => {
+      if (finished) return;
+      const now = Date.now();
+      // 原始超时截止到期（adopt 前已过期 / 轮询中到期）⇒ SIGTERM 一次（沿用原始截止，⛔ 不重置）。
+      if (!timedOut && record.timeoutDeadlineMs > 0 && now >= record.timeoutDeadlineMs) {
+        timedOut = true;
+        sigtermSentAt = now;
+        try { process.kill(record.workerPid, "SIGTERM"); } catch { /* already gone */ }
+      }
+      // SIGTERM 后 grace 内仍存活 ⇒ SIGKILL 兜底（⛔ 无限占位）。
+      if (timedOut && sigtermSentAt !== null && !sigkillSent && now - sigtermSentAt >= sigkillGraceMs) {
+        sigkillSent = true;
+        try { process.kill(record.workerPid, "SIGKILL"); } catch { /* already gone */ }
+      }
+      // pid 已死（/proc 读不到或空 cmdline 僵尸）⇒ 算终态。
+      if (!readPidCmdline(record.workerPid, procDir)) {
+        finish();
+        return;
+      }
+      timer = setTimeout(tick, pollMs);
+    };
+    tick();
+  });
+}
+
 /**
  * 生成一个 transcript session id（UUID v4）。gap-worker-task-transcript-access-webui AC1：每次派发
  * （每尝试非每任务）生成【新】UUID——同任务重派 N 次有 N 个不同 session_id ⇒ 每次尝试的 transcript
@@ -1747,6 +2052,9 @@ function runOneWorker({
           ? { ...baseOutcome, worktree_preserved: true }
           : baseOutcome;
       appendOutcomeToFile(outcomeFile, finalOutcome);
+      // 终态已算 ⇒ dispatch 已了结，清持久记录（gap-worker-driver-restart-orphan-no-outcome-no-timeout）。
+      // 记录本不存在（spawn-failed / not-dispatched 未写）时 removeDispatchRecord 是 no-op。
+      removeDispatchRecord(dispatchStoreFile(rootDir), taskId);
       if (json) process.stdout.write(`${JSON.stringify({ event: "worker-done", task: taskId, ...finalOutcome })}\n`);
       let exitCode: number;
       if (finalOutcome.final_state === "completed") exitCode = 0;
@@ -1825,6 +2133,20 @@ function runOneWorker({
     }
     if (pidFile && workerPid) {
       appendWorkerPid(pidFile, workerPid);
+    }
+    // gap-worker-driver-restart-orphan-no-outcome-no-timeout：spawn 后立刻把 dispatch 元数据持久化
+    // （driver 重启死掉后内存 running 整体丢失，这份影子供下一个实例 adopt/finalize）。⛔ workerPid
+    // 为 null（spawn 失败）不写——没有可被孤儿的进程。finish() 里清对应条目。
+    if (workerPid) {
+      upsertDispatchRecord(dispatchStoreFile(rootDir), {
+        taskId,
+        runId,
+        workerPid,
+        selectorReason,
+        startedAtMs,
+        timeoutDeadlineMs: timeoutMs > 0 ? startedAtMs + timeoutMs : 0,
+        cmdlineFingerprint: argv.join(" "),
+      });
     }
 
     if (timeoutMs > 0) {
@@ -3055,6 +3377,51 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
    *  单一实现），不各写一遍。 */
   const stopCondition = makeStopCondition(rootDir, "worker", resourceGateArgv);
 
+  /** worker 终态记账（spawnSelected 与 adoptOrphanWorker 共用，⛔ 不各写一遍）：结果入 results + 重试上限
+   *  （exited-not-landed 达上限标 needs-human）+ 快速死亡退避。spawnSelected 与 adopt 的 worker 退出后
+   *  走同一归宿。 */
+  const onWorkerFinished = (rw: RunningWorker, r: WorkerRunResult): WorkerRunResult => {
+    rw.done = true;
+    results.push(r);
+    // 重试上限（gap-worker-driver-retry-cap-not-wired）：worker 结束若 exited-not-landed ⇒ 连续失败
+    // 计数 + 达上限标 needs-human（ready→needs-human）。needsHuman 集合进 retryCapNotExhausted 过滤 ⇒
+    // 下一轮不再重派（与 markNeedsHuman 的 status 翻转双保险——即使磁盘写失败，内存过滤也挡重派）。
+    if (r.outcome.final_state === "exited-not-landed") {
+      // ff-not-fast-forward（分支滞后，非代码缺陷）不计重试上限——continue-cycle 识别为 transient
+      // 续做态，继续 CONTINUE 重派（merge develop 再 ff 自愈），⛔ 不把 3 次 branch-lag 误判成真缺陷
+      // 标 needs-human（那会静置 RECOMMENDED 不派，需人手动救回）。真缺陷（suite red / merge-develop
+      // 冲突 / anti-drift 违反 / ff 步的其它失败）仍照常计数达上限标 needs-human。
+      const newly = isFfNotFastForwardFailure(r.outcome)
+        ? []
+        : advanceRetryCap(retryState, [r.taskId], maxRetries);
+      for (const id of newly) {
+        // gap-mark-needs-human-commit-after-write：markNeedsHuman 写盘即提交，返回
+        // { id, ok, reason, committed }——⛔ 不再丢弃 {ok,reason}；结果经 writeRound 落进 round 记录
+        // （生产载体），json 事件供测试/手动观测。
+        const nh = markNeedsHuman(rootDir, id, `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`);
+        needsHumanResults.push(nh);
+        if (json) process.stdout.write(`${JSON.stringify({ event: "needs-human", ...nh })}\n`);
+      }
+    }
+    // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff）：worker 快速死亡（<quickDeathMs）
+    // ⇒ 对该 task 退避（backoffUntil，⛔ 不立即重派）；退避到上限（maxRetries）⇒ markNeedsHuman（复用
+    // 现有重试上限机制，⛔ 不无限退避）。needsHuman 集合与 markNeedsHuman 的 status 翻转双保险——
+    // 即使磁盘写失败，内存过滤（retryCapNotExhausted/notNeedsHuman）也挡重派。
+    const backoff = recordQuickDeathBackoff(
+      backoffState, r.taskId, r.outcome.final_state, r.outcome.wall_clock_ms, Date.now(), maxRetries, backoffCfg,
+    );
+    if (backoff.newlyNeedsHuman) {
+      retryState.needsHuman.add(r.taskId);
+      markNeedsHuman(rootDir, r.taskId, `worker-driver 连续 ${maxRetries} 次 <${backoffCfg.quickDeathMs}ms 快速死亡（退避上限）`);
+    }
+    if (backoff.quickDeath && json) {
+      process.stdout.write(
+        `${JSON.stringify({ event: "worker-backoff", task: r.taskId, consecutive_quick_deaths: backoffState.counts.get(r.taskId), backed_off: backoff.backedOff, needs_human: backoff.newlyNeedsHuman, wall_clock_ms: r.outcome.wall_clock_ms })}\n`,
+      );
+    }
+    return r;
+  };
+
   /** spawn 一个选中的 worker，并把 selector 的真实理由带进 outcome（AC2）。 */
   const spawnSelected = async (sel: { task: string; reason: string }): Promise<void> => {
     const runIdForTask = runId ?? `${runPrefix}-${sel.task}`;
@@ -3079,47 +3446,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       json,
       pidFile,
       injectSessionId: workerCmdOpts.exact == null,
-    }).then((r) => {
-      rw.done = true;
-      results.push(r);
-      // 重试上限（gap-worker-driver-retry-cap-not-wired）：worker 结束若 exited-not-landed ⇒ 连续失败
-      // 计数 + 达上限标 needs-human（ready→needs-human）。needsHuman 集合进 retryCapNotExhausted 过滤 ⇒
-      // 下一轮不再重派（与 markNeedsHuman 的 status 翻转双保险——即使磁盘写失败，内存过滤也挡重派）。
-      if (r.outcome.final_state === "exited-not-landed") {
-        // ff-not-fast-forward（分支滞后，非代码缺陷）不计重试上限——continue-cycle 识别为 transient
-        // 续做态，继续 CONTINUE 重派（merge develop 再 ff 自愈），⛔ 不把 3 次 branch-lag 误判成真缺陷
-        // 标 needs-human（那会静置 RECOMMENDED 不派，需人手动救回）。真缺陷（suite red / merge-develop
-        // 冲突 / anti-drift 违反 / ff 步的其它失败）仍照常计数达上限标 needs-human。
-        const newly = isFfNotFastForwardFailure(r.outcome)
-          ? []
-          : advanceRetryCap(retryState, [r.taskId], maxRetries);
-        for (const id of newly) {
-          // gap-mark-needs-human-commit-after-write：markNeedsHuman 写盘即提交，返回
-          // { id, ok, reason, committed }——⛔ 不再丢弃 {ok,reason}；结果经 writeRound 落进 round 记录
-          // （生产载体），json 事件供测试/手动观测。
-          const nh = markNeedsHuman(rootDir, id, `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`);
-          needsHumanResults.push(nh);
-          if (json) process.stdout.write(`${JSON.stringify({ event: "needs-human", ...nh })}\n`);
-        }
-      }
-      // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff）：worker 快速死亡（<quickDeathMs）
-      // ⇒ 对该 task 退避（backoffUntil，⛔ 不立即重派）；退避到上限（maxRetries）⇒ markNeedsHuman（复用
-      // 现有重试上限机制，⛔ 不无限退避）。needsHuman 集合与 markNeedsHuman 的 status 翻转双保险——
-      // 即使磁盘写失败，内存过滤（retryCapNotExhausted/notNeedsHuman）也挡重派。
-      const backoff = recordQuickDeathBackoff(
-        backoffState, r.taskId, r.outcome.final_state, r.outcome.wall_clock_ms, Date.now(), maxRetries, backoffCfg,
-      );
-      if (backoff.newlyNeedsHuman) {
-        retryState.needsHuman.add(r.taskId);
-        markNeedsHuman(rootDir, r.taskId, `worker-driver 连续 ${maxRetries} 次 <${backoffCfg.quickDeathMs}ms 快速死亡（退避上限）`);
-      }
-      if (backoff.quickDeath && json) {
-        process.stdout.write(
-          `${JSON.stringify({ event: "worker-backoff", task: r.taskId, consecutive_quick_deaths: backoffState.counts.get(r.taskId), backed_off: backoff.backedOff, needs_human: backoff.newlyNeedsHuman, wall_clock_ms: r.outcome.wall_clock_ms })}\n`,
-        );
-      }
-      return r;
-    });
+    }).then((r) => onWorkerFinished(rw, r));
     running.push(rw);
     if (json) {
       process.stdout.write(
@@ -3142,6 +3469,35 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     return Promise.race([...runningWorkers.map((r) => r.promise), floor]).finally(() => {
       if (timer) clearTimeout(timer);
     });
+  };
+
+  // gap-worker-driver-restart-orphan-no-outcome-no-timeout：reconcile 步处理 dispatch 持久记录里、但不在
+  // 内存 running 的条目（旧 driver 死时遗留的在飞 dispatch）。逐条按 pid 存活性 + cmdline 复核分流：
+  //   - pid 存活且仍是本任务的 worker ⇒ adopt 纳入 running（轮询 + 沿用原始 timeoutDeadlineMs，⛔ 不
+  //     重置——防「每次重启续命」无限占位）；adopt 后从 coldInflight 剔除（⛔ 双计在飞）。
+  //   - pid 已死 / 被复用 ⇒ finalizeOrphanDispatch 立刻补终态 + 清 orphan worktree + 清记录。
+  //   - 记录缺失（driver 从未见过，如手工起的 worker）⇒ 不越权接管，维持现状（只靠 coldInflight 排除）。
+  const reconcileOrphanDispatches = (): void => {
+    const store = readDispatchStore(dispatchStoreFile(rootDir));
+    for (const { taskId, record } of orphanDispatchCandidates(store, running.map((r) => r.task))) {
+      const cls = classifyOrphanDispatch(record);
+      if (cls === "finalize") {
+        const res = finalizeOrphanDispatch({ root: rootDir, outcomeFile, record });
+        coldInflight.delete(taskId);
+        if (json) process.stdout.write(`${JSON.stringify({ event: "orphan-finalized", task: taskId, ...res.outcome })}\n`);
+      } else {
+        const rw = {} as RunningWorker;
+        rw.task = taskId;
+        rw.done = false;
+        rw.startedAtMs = record.startedAtMs; // 原始派发时刻（⛔ 不是 adopt 时刻——fan-in 窗口 elapsed 真起点）
+        rw.promise = adoptOrphanWorker({
+          taskId, rootDir, outcomeFile, record, inFlightCount: running.length + 1,
+        }).then((r) => onWorkerFinished(rw, r));
+        running.push(rw);
+        coldInflight.delete(taskId);
+        if (json) process.stdout.write(`${JSON.stringify({ event: "orphan-adopted", task: taskId, worker_pid: record.workerPid, run_id: record.runId })}\n`);
+      }
+    }
   };
 
   let round = 0;
@@ -3192,6 +3548,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       //   都对账一次 ⇒ 人翻回后不依赖任何边沿事件即被下一轮拾起。清除结果进本轮 round 记录。
       step = "reconcile";
       reconciled = reconcileNeedsHumanWithDisk(retryState, rootDir);
+      // 孤儿 dispatch adopt/finalize（gap-worker-driver-restart-orphan-no-outcome-no-timeout）：driver 重启
+      // 遗留的在飞 worker 有据可查、有归宿可判，⛔ 不再「排除集之外一片黑箱、只能等它自己消失」。
+      reconcileOrphanDispatches();
 
       // 2. 池非空且未达 cap 且未判停 ⇒ 走选择环起下一个。
       //    ⛔ stopReason 是【终态 latch】（仅 mcp-halt）；瞬时闸拒绝只记本轮 waitReason，下一轮重读
