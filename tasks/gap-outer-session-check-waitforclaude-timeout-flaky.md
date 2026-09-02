@@ -25,8 +25,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：并发 load 下 outer-session-check 稳定绿（waitForClaude 超时/retry 足够）；（⛔ 仍偶发红 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：真 dead child（进程未启动/已死）仍 assert 失败——超时加长不掩盖真失败；（⛔ 误放行 ⇒ 假）。
+- [x] AC1（能取假）：并发 load 下 outer-session-check 稳定绿（waitForClaude 超时/retry 足够）；（⛔ 仍偶发红 ⇒ 假）。
+- [x] AC2（能取假，负控制）：真 dead child（进程未启动/已死）仍 assert 失败——超时加长不掩盖真失败；（⛔ 误放行 ⇒ 假）。
 
 ## Definition of Done
 
