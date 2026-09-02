@@ -45,4 +45,5 @@ AC4 断言与 single-bundle 形态同步（或 load 豁免）；AC1/AC2 勾；se
 ## Touches
 
 - packages/quay/test/sea-artifact-consumer-e2e.test.mjs（AC4 断言同步 / load 豁免）
+- docs/analysis/test-file-baseline.txt（test-file-snapshot 结构性 co-touch：sea-artifact-consumer-e2e 迁 serial 群后离开 --list-files 默认集；snapshot 再生成一并吸收 develop 并发新增测试文件）
 - tasks/gap-sea-artifact-consumer-e2e-ac4-assertion.md（自身）
