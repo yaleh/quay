@@ -155,7 +155,44 @@ Return the parsed JSON verbatim: { recorded, lastRound, path }.`,
   },
 )
 
-log(`pool=${POOL.length} ready=${counted.ready} needs-work=${counted.needsWork} should-remove=${counted.shouldRemove} uncertain=${counted.uncertain}`)
+// ── Phase: RecordVerdicts (write end — 判词载体, gap-pool-quality-verdicts-never-persisted) ──
+// The judge COMPLETED with per-task verdicts. Persist them to .quay/quality-round.jsonl (the
+// verdict carrier — until now verdicts lived only in this workflow's transcript, so accuracy was
+// unmeasurable and the known 2/3 should-remove misjudgment rate had no auditable trace). Single
+// writer = the deterministic script's --record-round; the workflow only invokes it here at the
+// completion path. should-remove only PRODUCES a recommendation here — it does NOT mutate status
+// (AC4: this task's hard scope boundary). Empty pool ⇒ no record (AC1: 判词为空不写空记录).
+phase('RecordVerdicts')
+
+const verdictRecord = results.length
+  ? await agent(
+      `Persist the completed judge's per-task verdicts to .quay/quality-round.jsonl (gap-pool-quality-verdicts-never-persisted).
+
+Run this exact command (it writes the verdicts JSON and appends one quality-round record in one step):
+
+cat > /tmp/pqj-verdicts.json <<'EOF'
+${JSON.stringify(results)}
+EOF
+node --no-warnings --experimental-strip-types plugin/scripts/pool-quality-judge.ts --root ${root} --record-round /tmp/pqj-verdicts.json
+
+Return the parsed JSON verbatim: { recorded, round, path, state }.`,
+      {
+        phase: 'RecordVerdicts',
+        schema: {
+          type: 'object',
+          required: ['recorded', 'round', 'path', 'state'],
+          properties: {
+            recorded: { type: 'boolean' },
+            round: { type: 'number' },
+            path: { type: 'string' },
+            state: { type: 'string' },
+          },
+        },
+      },
+    )
+  : { recorded: false, round: null, path: null, state: 'skipped' }
+
+log(`pool=${POOL.length} ready=${counted.ready} needs-work=${counted.needsWork} should-remove=${counted.shouldRemove} uncertain=${counted.uncertain} verdictRecorded=${verdictRecord.recorded}`)
 return {
   outcome: 'judged',
   distribution: counted,
@@ -164,4 +201,5 @@ return {
   results,
   triggers: plan.triggers,
   lastJudgeRecorded: (recorded && recorded.recorded) ? recorded.lastRound : null,
+  verdictsRecorded: verdictRecord.recorded,
 }
