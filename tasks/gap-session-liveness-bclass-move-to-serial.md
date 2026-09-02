@@ -28,8 +28,8 @@ probe 饿死（`probe must be alive first` / SESSION-BACK 超时）的修法**�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：session-liveness 族 B 类等待测试 `@test-group` 为 serial（不再 lowconc）——grep 测试文件 `@test-group serial`；（⛔ 仍 lowconc ⇒ 假）。
-- [ ] AC2（能取假，生产载体）：饱和下这些测试 probe 稳定建立（probe must be alive / SESSION-BACK 不再间歇超时），N 只计落地后饱和轮；（⛔ 仍间歇 probe 超时 ⇒ 假）。
+- [x] AC1（能取假，机制级）：session-liveness 族 B 类等待测试 `@test-group` 为 serial（不再 lowconc）——grep 测试文件 `@test-group serial`；（⛔ 仍 lowconc ⇒ 假）。
+- [ ] AC2（能取假，生产载体）：饱和下这些测试 probe 稳定建立（probe must be alive / SESSION-BACK 不再间歇超时），N 只计落地后饱和轮；（⛔ 仍间歇 probe 超时 ⇒ 假）。（待外部）
 
 ## Definition of Done
 
