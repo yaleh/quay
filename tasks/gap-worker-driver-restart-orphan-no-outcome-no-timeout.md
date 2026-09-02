@@ -42,10 +42,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，持久化）：直接调 spawn 路径后，检查持久化文件里存在该 task 的 `{runId, workerPid, selectorReason, startedAtMs, timeoutDeadlineMs}` 记录；worker 正常结束后该记录被清除。⛔ spawn 后记录缺失，或结束后记录仍残留 ⇒ 假。
-- [ ] AC2（能取假，pid 已死的 finalize）：构造一个"有 task worktree、持久记录存在、但记录里的 pid 已不存活"的夹具，跑一轮 reconcile，断言 `worker-outcome.jsonl` 新增一条该 task 的记录且 `final_state !== "completed"`，且该记录能与"存活 driver 亲眼观察到的异常死亡"记录通过 reason 字段区分。⛔ 无新记录，或 reason 与正常死亡路径同形 ⇒ 假。
-- [ ] AC3（能取假，pid 存活的 adopt 且超时不重置）：构造一个"记录里的 `timeoutDeadlineMs` 已经过期（在 adopt 发生前）"的夹具，跑一轮 reconcile，断言该孤儿 pid 被 `SIGTERM`、且落盘终态为 `timed-out`（不是靠 adopt 重新给了一个未过期的新窗口才活下来）。⛔ 用一个已过期的原始截止时刻却没被判超时 ⇒ 假。
-- [ ] AC4（能取假，无回归）：`node plugin/scripts/task-schema-check.ts tasks/gap-worker-driver-restart-orphan-no-outcome-no-timeout.md` 与相关 scoped 测试（`--for-task` 覆盖 `worker-driver.ts`）均为 exit 0。
+- [x] AC1（能取假，持久化）：直接调 spawn 路径后，检查持久化文件里存在该 task 的 `{runId, workerPid, selectorReason, startedAtMs, timeoutDeadlineMs}` 记录；worker 正常结束后该记录被清除。⛔ spawn 后记录缺失，或结束后记录仍残留 ⇒ 假。
+- [x] AC2（能取假，pid 已死的 finalize）：构造一个"有 task worktree、持久记录存在、但记录里的 pid 已不存活"的夹具，跑一轮 reconcile，断言 `worker-outcome.jsonl` 新增一条该 task 的记录且 `final_state !== "completed"`，且该记录能与"存活 driver 亲眼观察到的异常死亡"记录通过 reason 字段区分。⛔ 无新记录，或 reason 与正常死亡路径同形 ⇒ 假。
+- [x] AC3（能取假，pid 存活的 adopt 且超时不重置）：构造一个"记录里的 `timeoutDeadlineMs` 已经过期（在 adopt 发生前）"的夹具，跑一轮 reconcile，断言该孤儿 pid 被 `SIGTERM`、且落盘终态为 `timed-out`（不是靠 adopt 重新给了一个未过期的新窗口才活下来）。⛔ 用一个已过期的原始截止时刻却没被判超时 ⇒ 假。
+- [x] AC4（能取假，无回归）：`node plugin/scripts/task-schema-check.ts tasks/gap-worker-driver-restart-orphan-no-outcome-no-timeout.md` 与相关 scoped 测试（`--for-task` 覆盖 `worker-driver.ts`）均为 exit 0。
 
 ## Definition of Done
 
