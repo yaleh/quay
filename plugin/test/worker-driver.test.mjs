@@ -101,6 +101,9 @@ import {
   appendFanInTrace,
   defaultMechanicalSuiteCommand,
   newMechanicalSuiteRunId,
+  suiteLogFileName,
+  newSuiteLogAttemptSuffix,
+  pruneTaskSuiteLogs,
   extractFailureSummary,
   combinedOutput,
   mirrorMechanicalFanInSuiteState,
@@ -108,6 +111,33 @@ import {
   appendFanInStepTrace,
   spawnMechanicalFanIn,
   readFanInLockHold,
+  dispatchStoreFile,
+  readDispatchStore,
+  writeDispatchStore,
+  upsertDispatchRecord,
+  removeDispatchRecord,
+  readPidCmdline,
+  classifyOrphanDispatch,
+  orphanDispatchCandidates,
+  computeOrphanFinalizedOutcome,
+  computeAdoptedOutcome,
+  finalizeOrphanDispatch,
+  adoptOrphanWorker,
+  WORKER_DISPATCH_REL,
+  scopedGateCommandFor,
+  scopedGateKey,
+  readScopedGateCache,
+  writeScopedGateCache,
+  continueRelatednessNote,
+  failingTestFilesFromSuiteLog,
+  taskTouches,
+  taskDeltaFiles,
+  computeDeltaPaths,
+  directImportRels,
+  classifyDeltaRelatedness,
+  classifyLoadSensitive,
+  relatednessSignalsFor,
+  formatRelatednessNote,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
@@ -557,6 +587,63 @@ test("gap-mechanical-fan-in-per-suite-runid-unified AC2 — newMechanicalSuiteRu
   assert.ok(!a.startsWith("wk-prod"), "the per-suite id is NOT the shared wk-prod driver round id");
 });
 
+// ── gap-fan-in-suite-log-same-runid-overwrite（AC1/AC3 单元面）────────────────────────────────
+// suite 日志文件名带 attempt 唯一后缀（同一 runId 内多次 suite 不覆盖）+ 轮转前缀用 `~` 分隔符
+// （任务 id kebab-case 前缀碰撞 300+ 对——裸 `-` 分隔会误删兄弟任务日志）。
+
+test("suiteLogFileName — 同一 runId 不同 attempt ⇒ 两个不同 basename（⛔ 相同 ⇒ 假）", () => {
+  const a = suiteLogFileName("gap-dashboard-taskcard-multistatus-minitable", "wk-prod-1788275557", "1756700000000-abc123");
+  const b = suiteLogFileName("gap-dashboard-taskcard-multistatus-minitable", "wk-prod-1788275557", "1756700000001-def456");
+  assert.notEqual(a, b, "different attempt suffixes ⇒ different basenames");
+  assert.ok(a.includes("wk-prod-1788275557") && a.includes("1756700000000-abc123"), "basename carries runId + attempt");
+  // task/runId sanitize + `~` 分隔符：非法字符 → _，`~` 只作分隔符。
+  assert.equal(
+    suiteLogFileName("gap/a", "wk/prod 123", "1"),
+    "fan-in-suite-gap_a~wk_prod_123~1.log",
+    "task + runId sanitized to [A-Za-z0-9_.-]; `~` is the reserved delimiter",
+  );
+});
+
+test("newSuiteLogAttemptSuffix — 每次新（epoch-ms + rand 双唯一）", () => {
+  const a = newSuiteLogAttemptSuffix();
+  const b = newSuiteLogAttemptSuffix();
+  assert.notEqual(a, b, "two calls ⇒ two different suffixes");
+  assert.match(a, /^\d+-[0-9a-f]{6}$/, "shape = <epoch-ms>-<6 hex rand>");
+});
+
+test("pruneTaskSuiteLogs — 只删本任务（`~` 边界），兄弟任务 `<task>-<suffix>` 日志保留（⛔ 误删 ⇒ 假）", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "suite-prune-"));
+  try {
+    const q = path.join(root, ".quay");
+    fs.mkdirSync(q, { recursive: true });
+    const write = (name) => fs.writeFileSync(path.join(q, name), "x", "utf8");
+    // 本任务 DIR-035 的 3 份历史 attempt + 1 份兄弟任务 DIR-035-A + 1 份无关文件。
+    write(suiteLogFileName("DIR-035", "run-1", "1"));
+    write(suiteLogFileName("DIR-035", "run-1", "2"));
+    write(suiteLogFileName("DIR-035", "run-2", "3"));
+    write(suiteLogFileName("DIR-035-A", "run-1", "1"));
+    write("fan-in-suite-unrelated.log");
+    const removed = pruneTaskSuiteLogs(root, "DIR-035");
+    assert.equal(removed, 3, "removed exactly the 3 DIR-035 attempt logs");
+    assert.ok(!fs.existsSync(path.join(q, suiteLogFileName("DIR-035", "run-1", "1"))), "DIR-035 attempt removed");
+    assert.ok(fs.existsSync(path.join(q, suiteLogFileName("DIR-035-A", "run-1", "1"))), "sibling DIR-035-A log retained (⛔ `-` boundary would误删)");
+    assert.ok(fs.existsSync(path.join(q, "fan-in-suite-unrelated.log")), "unrelated file retained");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("pruneTaskSuiteLogs — 无 .quay 目录 / 无匹配 ⇒ 返回 0 不抛（best-effort）", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "suite-prune-empty-"));
+  try {
+    assert.equal(pruneTaskSuiteLogs(root, "gap-none"), 0, "no .quay dir ⇒ 0 removed, no throw");
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    assert.equal(pruneTaskSuiteLogs(root, "gap-none"), 0, "no matching files ⇒ 0 removed, no throw");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC1 — the mechanical fan-in default suite command, run against a red bucket suite, records state=red into verification-round.jsonl", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "wd-mech-red-bucket-"));
   try {
@@ -725,6 +812,268 @@ test("gap-worker-dispatch-prompt-ac-check-instruction — buildContinueWorkerPro
   });
   assert.match(cont, /- \[x\]/, "continue prompt instructs checking off - [x]");
   assert.match(cont, /## Acceptance Criteria/, "continue prompt names the AC section");
+});
+
+// ── gap-continue-prompt-delta-relatedness-note — 续做 prompt 两条结构性信号 ─────────────────────────
+
+// 写一个带 ## Touches 的任务文件（非 git makeRoot，delta = Touches）。
+function writeRelatednessTask(root, task, touches) {
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  const bullets = touches.map((t) => `- ${t}`).join("\n");
+  fs.writeFileSync(path.join(root, "tasks", `${task}.md`),
+    `---\nid: ${task}\nstatus: ready\n---\n\n## Proposal\n\nprose\n\n## Touches\n\n${bullets}\n`, "utf8");
+}
+
+// 写一个测试文件（可选 @load-sensitive 头）。
+function writeRelatednessTest(root, rel, { loadSensitive = false } = {}) {
+  const abs = path.join(root, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  const header = loadSensitive ? "// @load-sensitive wall-clock\n" : "// @test-group product\n";
+  fs.writeFileSync(abs, `${header}import { test } from "node:test";\n`, "utf8");
+}
+
+test("AC1 (能取假) — classifyDeltaRelatedness 区分「失败测试在 delta 内=related」与「不在且一跳导入不相交=unrelated」", () => {
+  const inDelta = classifyDeltaRelatedness("packages/quay/test/foo.test.mjs",
+    ["packages/quay/test/foo.test.mjs"], []);
+  assert.equal(inDelta.verdict, "related", "failing test itself in delta ⇒ related");
+
+  const viaImport = classifyDeltaRelatedness("packages/quay/test/obs.test.mjs",
+    ["packages/quay/src/observation.ts"],
+    ["packages/quay/src/observation.ts", "packages/quay/src/serve-handlers.ts"]);
+  assert.equal(viaImport.verdict, "related", "one-hop import intersects delta ⇒ related");
+
+  const unrelated = classifyDeltaRelatedness("packages/quay/test/obs.test.mjs",
+    ["packages/quay/src/serve-dashboard.ts"],
+    ["packages/quay/src/observation.ts", "packages/quay/src/serve-handlers.ts"]);
+  assert.equal(unrelated.verdict, "unrelated", "not in delta + one-hop imports disjoint ⇒ unrelated");
+
+  // 两个判断能互相区分（⛔ 恒定输出同一结论 ⇒ 假）。
+  assert.notEqual(inDelta.verdict, unrelated.verdict, "related vs unrelated distinguishable");
+});
+
+test("AC2 (能取假) — classifyLoadSensitive 命中真实 @load-sensitive 标注、未标注不命中", (t) => {
+  const root = makeRoot("rel-ls");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeRelatednessTest(root, "plugin/test/annotated.test.mjs", { loadSensitive: true });
+  writeRelatednessTest(root, "plugin/test/plain.test.mjs", { loadSensitive: false });
+  assert.equal(classifyLoadSensitive(root, "plugin/test/annotated.test.mjs"), "load-sensitive", "annotated ⇒ hit");
+  assert.equal(classifyLoadSensitive(root, "plugin/test/plain.test.mjs"), "not-annotated", "unannotated ⇒ miss");
+});
+
+test("AC3 (能取假) — 读不懂有独立取值 unknown，不与 unrelated/not-annotated 同形", (t) => {
+  const root = makeRoot("rel-unknown");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // Touches 解析失败（delta null）⇒ signal1 unknown。
+  const noDelta = classifyDeltaRelatedness("packages/quay/test/foo.test.mjs", null, []);
+  assert.equal(noDelta.verdict, "unknown", "delta null ⇒ unknown (Touches unreadable)");
+  assert.notEqual(noDelta.verdict, "unrelated", "unknown ≠ unrelated");
+
+  // 依赖查询失败（import 解析 null 且不在 delta）⇒ signal1 unknown。
+  const noImports = classifyDeltaRelatedness("packages/quay/test/foo.test.mjs", ["packages/quay/src/a.ts"], null);
+  assert.equal(noImports.verdict, "unknown", "imports null (dependency query failed) ⇒ unknown");
+  assert.notEqual(noImports.verdict, "unrelated", "unknown ≠ unrelated");
+
+  // 注册表读取失败（文件缺失）⇒ signal2 unknown。
+  assert.equal(classifyLoadSensitive(root, "plugin/test/missing.test.mjs"), "unknown", "missing file ⇒ unknown");
+  assert.notEqual(classifyLoadSensitive(root, "plugin/test/missing.test.mjs"), "not-annotated", "unknown ≠ not-annotated");
+});
+
+test("AC4 (能取假) — 措辞含「不是结论/重跑验证」，⛔ 不含可误读为自动放行的「跳过/无需检查」", () => {
+  const note = formatRelatednessNote([{
+    signal: "delta-relatedness", failingTest: "packages/quay/test/obs.test.mjs", verdict: "unrelated", reason: "r",
+  }]);
+  assert.match(note, /not a verdict|not a conclusion/, "names 'not a verdict/conclusion'");
+  assert.match(note, /[Rr]e-run the suite once to verify/, "instructs re-run to verify");
+  assert.doesNotMatch(note, /\bskip\b|无需检查|可以跳过/, "no auto-skip wording (skip / 无需检查 / 可以跳过)");
+});
+
+test("AC5 (能取假) — buildContinueWorkerPrompt 在 suite 红时拼入 continueRelatednessNote 输出", (t) => {
+  const root = makeRoot("rel-wired");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeRelatednessTask(root, "gap-x", ["packages/quay/src/serve-dashboard.ts"]);
+  writeRelatednessTest(root, "packages/quay/test/obs.test.mjs", { loadSensitive: false });
+  const suiteLog = path.join(root, ".quay", "fan-in-suite-gap-x.log");
+  fs.mkdirSync(path.dirname(suiteLog), { recursive: true });
+  fs.writeFileSync(suiteLog, "__PERFILE__ duration_ms=10 packages/quay/test/obs.test.mjs passed=false end_ms=1\n", "utf8");
+
+  const withRed = buildContinueWorkerPrompt("gap-x", root, {
+    worktreePath: "/wt", branchCommits: 1, branchHeadSubject: "x", acChecked: 1, acTotal: 2,
+    failureReason: "suite red",
+    attempts: [{ ts: "2026-09-01T00:00:00.000Z", runId: "r", sessionId: "s", step: "suite", reason: "suite red", fanInLog: null, suiteLog }],
+  });
+  assert.match(withRed, /delta-relatedness check/, "suite-red continue prompt carries the relatedness note");
+  assert.match(withRed, /packages\/quay\/test\/obs\.test\.mjs/, "note names the failing test");
+
+  // 负控制：无 suite 红（attempts 无 suiteLog）⇒ 不注入。
+  const withoutRed = buildContinueWorkerPrompt("gap-x", root, {
+    worktreePath: "/wt", branchCommits: 1, branchHeadSubject: "x", acChecked: 1, acTotal: 2, failureReason: "r",
+    attempts: [],
+  });
+  assert.doesNotMatch(withoutRed, /delta-relatedness check/, "no suite-red ⇒ no relatedness note");
+});
+
+test("AC6 (能取假) — 真实案例回放：observation.test.mjs 判 unrelated + 未标注（⛔ 只在合成 fixture 上验证 ⇒ 假）", () => {
+  // 用真实仓库文件（REPO_ROOT）：真实任务 Touches + 真实 observation.test.mjs 的 import 结构。
+  const failing = "packages/quay/test/observation.test.mjs";
+  const delta = computeDeltaPaths(REPO_ROOT, "gap-dashboard-taskcard-multistatus-minitable");
+  const imports = directImportRels(REPO_ROOT, failing);
+  const d = classifyDeltaRelatedness(failing, delta, imports);
+  assert.equal(d.verdict, "unrelated", "real observation.test.mjs is not in the minitable task's delta and its one-hop imports don't intersect it");
+  assert.equal(classifyLoadSensitive(REPO_ROOT, failing), "not-annotated", "real observation.test.mjs is @test-group product, not @load-sensitive — must say not-annotated (not a false hit)");
+
+  // 回放 suite 日志的失败提取（真实 __PERFILE__ passed=false 行形）。
+  const extracted = failingTestFilesFromSuiteLog("__PERFILE__ duration_ms=93810 packages/quay/test/observation.test.mjs passed=false end_ms=1788282318478\n");
+  assert.deepEqual(extracted, [failing], "real __PERFILE__ passed=false line extracts the real failing test");
+});
+
+// ── gap-worker-premerge-scoped-gate-cache — worker 退出前 pre-merge + scoped-gate 缓存 ─────────────
+
+test("AC1 (gap-worker-premerge-scoped-gate-cache) — buildWorkerPrompt 含「退出前 merge develop + 跑 scoped 门」指令，且命令与 scopedGateCommandFor 单一真相源一致", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  const scopedCmd = scopedGateCommandFor("gap-x", "<the worktree path you created in step 1>").join(" ");
+  assert.ok(prompt.includes(scopedCmd), "prompt carries the exact scopedGateCommandFor command string (single source, ⛔ 两套标准)");
+  assert.match(prompt, /--for-task gap-x --allow-thin/, "command tail matches the fan-in scopedCmd form");
+  assert.match(prompt, /merge --no-edit develop/, "instructs the pre-merge of develop");
+  assert.match(prompt, /--write-scoped-gate-cache/, "instructs the mechanical cache write");
+});
+
+test("AC2 (gap-worker-premerge-scoped-gate-cache) — buildContinueWorkerPrompt 同样携带该步骤（独立断言，⛔ 不靠共用文本含糊）", () => {
+  const cont = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt", branchCommits: 3, branchHeadSubject: "x", acChecked: 2, acTotal: 5, failureReason: "r",
+  });
+  const scopedCmd = scopedGateCommandFor("gap-x", "/wt").join(" ");
+  assert.ok(cont.includes(scopedCmd), "continue prompt carries the exact scopedGateCommandFor command (real worktree path)");
+  assert.match(cont, /merge --no-edit develop/, "continue prompt instructs the pre-merge");
+  assert.match(cont, /--write-scoped-gate-cache/, "continue prompt instructs the cache write");
+});
+
+test("AC3 (gap-worker-premerge-scoped-gate-cache) — scoped-gate 缓存读写三分支：tip 一致命中；develop 前进未命中；缺失/损坏 fail-closed", (t) => {
+  const root = makeRoot("scg-cache");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const cacheFile = path.join(root, ".quay", "scoped-gate-cache.json");
+  const k1 = scopedGateKey("gap-x", "sha-1");
+  const k2 = scopedGateKey("gap-x", "sha-2"); // develop 前进 ⇒ 不同键
+
+  assert.equal(readScopedGateCache(cacheFile, k1), null, "absent cache ⇒ null (fail-closed, 不得默认命中)");
+  writeScopedGateCache(cacheFile, k1);
+  assert.equal(readScopedGateCache(cacheFile, k1), true, "develop tip 完全一致 ⇒ 命中");
+  assert.equal(readScopedGateCache(cacheFile, k2), null, "develop 已前进 ⇒ 未命中照跑");
+
+  fs.writeFileSync(cacheFile, "{not json");
+  assert.equal(readScopedGateCache(cacheFile, k1), null, "内容损坏 ⇒ null (fail-closed)");
+
+  fs.writeFileSync(cacheFile, JSON.stringify({ key: k1, ok: false }));
+  assert.equal(readScopedGateCache(cacheFile, k1), null, "非绿 (ok!=true) 永不命中");
+});
+
+// AC4 — runMechanicalFanIn 锁内 merge-develop 之后、scoped-gate 之前接入缓存判定（命中跳过，未命中照跑）。
+const SCRIPTS_DIR = path.dirname(DRIVER);
+const FF_MERGE_MODULE = path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts");
+const SLOT_LIB = path.join(SCRIPTS_DIR, "suite-slot-lib.sh");
+const SCG_TASK = "gap-scg-cache";
+
+function scgTaskBody() {
+  return [
+    "---",
+    `id: ${SCG_TASK}`,
+    "title: scoped-gate cache test",
+    "status: ready",
+    "labels: []",
+    "extra: {}",
+    "---",
+    "## Proposal",
+    "test",
+    "## Plan",
+    "test",
+    "## Touches",
+    "- docs/feature.md",
+    `- tasks/${SCG_TASK}.md`,
+    "## Acceptance Criteria",
+    "- [x] AC1 landed",
+    "## Definition of Done",
+    "- [x] landed",
+    "",
+  ].join("\n");
+}
+
+/** hermetic 仓库 + task worktree（同 fan-in-driver-mechanical-orchestration.test.mjs 的 makeRepoWithWorktree）：
+ *  develop 上有 task 文件（Touches + AC 全勾），worktree 分支 task/<id> 上一个 docs-only 实现提交。 */
+function makeScopedCacheRepo() {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "wd-scg-"));
+  const repo = path.join(base, "repo");
+  const worktree = path.join(base, "wt");
+  fs.mkdirSync(repo, { recursive: true });
+  runGit(repo, ["init", "-q"]);
+  runGit(repo, ["config", "user.name", "scg-test"]);
+  runGit(repo, ["config", "user.email", "scg@example.com"]);
+  runGit(repo, ["branch", "-M", "develop"]);
+  fs.mkdirSync(path.join(repo, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+  fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "tasks", `${SCG_TASK}.md`), scgTaskBody(), "utf8");
+  runGit(repo, ["add", "-A"]);
+  runGit(repo, ["commit", "-q", "-m", "base"]);
+  runGit(repo, ["worktree", "add", worktree, "-b", `task/${SCG_TASK}`]);
+  // develop 脱离主检出 ⇒ ff 退化为纯 ref 更新（git push . HEAD:develop）。
+  runGit(repo, ["checkout", "-q", "-b", "develop-work"]);
+  fs.mkdirSync(path.join(worktree, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(worktree, "docs", "feature.md"), "# feature\n", "utf8");
+  runGit(worktree, ["add", "-A"]);
+  runGit(worktree, ["commit", "-q", "-m", "implement feature"]);
+  return { base, repo, worktree };
+}
+
+function scgFanInArgs({ repo, worktree, base, runId, scopedGateCommand }) {
+  return {
+    task: SCG_TASK, worktree, root: repo, runId, mergeTarget: "develop", forceSuite: true,
+    scriptsDir: SCRIPTS_DIR, ffMergeModule: FF_MERGE_MODULE,
+    slotBase: path.join(base, "full-suite.lock"), slotLib: SLOT_LIB,
+    silenceMs: 5000, suiteCapture: path.join(base, "suite.env"),
+    suiteLogFile: path.join(base, "suite.log"),
+    suiteCommand: ["bash", "-c", "exit 0"],
+    scopedGateCommand,
+    docCheckCommand: ["true"],
+  };
+}
+
+function readScopedGateTraceLine(repo, runId) {
+  const fanInLog = path.join(repo, ".quay", `fan-in-${SCG_TASK}-${runId}.log`);
+  const lines = fs.readFileSync(fanInLog, "utf8").split("\n").map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
+  return lines.find((e) => e.step === "scoped-gate") ?? null;
+}
+
+test("AC4 (gap-worker-premerge-scoped-gate-cache) — 缓存命中 ⇒ 跳过 scoped-gate（marker 未写 + reason=cache-hit + wall_ms<5000）", async (t) => {
+  const { base, repo, worktree } = makeScopedCacheRepo();
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const developSha = runGit(repo, ["rev-parse", "develop"]).trim();
+  writeScopedGateCache(path.join(repo, ".quay", "scoped-gate-cache.json"), scopedGateKey(SCG_TASK, developSha));
+  const marker = path.join(base, "scoped-ran");
+  const r = await runMechanicalFanIn(scgFanInArgs({
+    repo, worktree, base, runId: "scg-hit-1",
+    scopedGateCommand: ["bash", "-c", `touch ${marker}; exit 0`],
+  }));
+  assert.equal(r.outcome, "landed", `cache-hit fan-in must land, got ${r.outcome} step=${r.step} reason=${r.reason}`);
+  assert.equal(fs.existsSync(marker), false, "cache-hit must SKIP the scoped gate (marker never written)");
+  const line = readScopedGateTraceLine(repo, "scg-hit-1");
+  assert.ok(line, "scoped-gate trace line present");
+  assert.match(line.reason ?? "", /cache-hit/, "hit trace reason contains cache-hit");
+  assert.ok(line.wall_ms < 5000, `hit wall_ms < 5000 (got ${line.wall_ms})`);
+});
+
+test("AC4 (gap-worker-premerge-scoped-gate-cache) — 缓存未命中 ⇒ 照跑 scoped-gate（marker 写入 + trace 无 reason，回归）", async (t) => {
+  const { base, repo, worktree } = makeScopedCacheRepo();
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const marker = path.join(base, "scoped-ran");
+  const r = await runMechanicalFanIn(scgFanInArgs({
+    repo, worktree, base, runId: "scg-miss-1",
+    scopedGateCommand: ["bash", "-c", `touch ${marker}; exit 0`],
+  }));
+  assert.equal(r.outcome, "landed", `cache-miss fan-in must land, got ${r.outcome} step=${r.step} reason=${r.reason}`);
+  assert.equal(fs.existsSync(marker), true, "miss must RUN the scoped gate (marker written)");
+  const line = readScopedGateTraceLine(repo, "scg-miss-1");
+  assert.ok(line, "scoped-gate trace line present");
+  assert.equal(line.reason, undefined, "miss trace has NO reason (byte-identical to today's step() trace)");
 });
 
 test("stashIfDirty — non-git ⇒ no-op; clean ⇒ files=[]; dirty ⇒ observe but NEVER stash others' changes (归属区分)", () => {
@@ -1408,3 +1757,124 @@ test("AC3 (HTTP) — control-plane call without identity ⇒ rejected; with call
   assert.equal(state.halted_by, "manager");
 });
 
+
+// ── gap-worker-driver-restart-orphan-no-outcome-no-timeout：driver 重启孤儿化在飞 worker ─────────────
+// 旧 driver 把 spawn 的 dispatch 元数据持久化到 .quay/worker-dispatch.json，在终态被正常计算时清除。
+// driver 重启死掉 ⇒ 内存 running 整体丢失，但持久影子存活 ⇒ 新 driver 的 reconcile 读到后 adopt（纳入
+// 超时监管、沿用原始 timeoutDeadlineMs）或 finalize（已死补终态 + 清 orphan worktree）。AC1（持久化写/清）
+// + AC2（pid 已死 finalize）+ AC3（pid 存活 adopt 且超时不重置）逐条取假。
+
+test("AC1 (能取假) — dispatch 持久记录：spawn 后即写、worker 正常结束即清（含 runId/workerPid/selectorReason/startedAtMs/timeoutDeadlineMs）", async (t) => {
+  const root = makeGitRoot("orphan-ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const taskId = "gap-orphan-ac1";
+  writeTaskFile(root, taskId, "done"); // 落地判定 status=done ⇒ exit-0 worker 记 completed
+
+  const child = spawn(process.execPath, [
+    "--no-warnings", "--experimental-strip-types", DRIVER,
+    "--root", root, "--task", taskId, "--reason", "ac1 selector reason",
+    "--worker-cmd-exact", "node -e setTimeout(()=>process.exit(0),3000)",
+    "--run-id", "fm-ac1", "--timeout", "5000",
+  ], { stdio: ["ignore", "ignore", "ignore"], detached: true });
+  t.after(() => { try { process.kill(-child.pid, "SIGKILL"); } catch { /* gone */ } });
+  const exited = new Promise((r) => child.once("exit", r));
+
+  // Phase A: spawn 后 record 已写（worker 仍活，3s 窗口内断言）。
+  await waitFor(() => readDispatchStore(dispatchStoreFile(root))[taskId] != null, 15000);
+  const rec = readDispatchStore(dispatchStoreFile(root))[taskId];
+  assert.ok(rec, "spawn 后持久化文件里存在该 task 的记录（⛔ 缺失 ⇒ 假）");
+  for (const k of ["runId", "workerPid", "selectorReason", "startedAtMs", "timeoutDeadlineMs"]) {
+    assert.ok(k in rec, `record field ${k} present`);
+  }
+  assert.equal(rec.taskId, taskId);
+  assert.equal(rec.runId, "fm-ac1");
+  assert.equal(rec.selectorReason, "ac1 selector reason");
+  assert.equal(rec.timeoutDeadlineMs, rec.startedAtMs + 5000, "timeoutDeadlineMs = startedAtMs + timeoutMs（原始超时截止时刻）");
+  assert.equal(rec.cmdlineFingerprint, "node -e setTimeout(()=>process.exit(0),3000)", "cmdlineFingerprint = spawn 归一化 cmdline");
+
+  // Phase B: worker 正常结束 ⇒ 记录被清 + completed 终态。
+  await exited;
+  await waitFor(() => readDispatchStore(dispatchStoreFile(root))[taskId] == null, 15000);
+  assert.equal(readDispatchStore(dispatchStoreFile(root))[taskId], undefined, "worker 正常结束后该记录被清除（⛔ 残留 ⇒ 假）");
+  const outcomes = readOutcomeLines(root);
+  assert.ok(outcomes.some((o) => o.task === taskId && o.final_state === "completed"), "exit-0 + status=done ⇒ completed（对照：不是 killed/failed）");
+});
+
+test("AC2 (能取假) — reconcile 对 pid 已死的孤儿：立刻补终态（非 completed、reason 可区分）+ 清 orphan worktree", (t) => {
+  const root = makeGitRoot("orphan-ac2");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-ac2`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  const taskId = "gap-orphan-ac2";
+  writeTaskFile(root, taskId, "ready");
+  runGit(root, ["branch", "develop"]); // taskBranchHasCommits 的 git log develop..task/<id> 判产出需 develop 存在
+  runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath]);
+  assert.equal(worktreePresentForTask(root, taskId), true, "precondition: orphan worktree present");
+
+  const record = {
+    taskId, runId: "fm-ac2", workerPid: 999999999, selectorReason: "ac2 selector reason",
+    startedAtMs: Date.now() - 60000, timeoutDeadlineMs: Date.now() - 1000,
+    cmdlineFingerprint: "claude -n quay-task-worker -p '... Task: gap-orphan-ac2 ...'",
+  };
+  upsertDispatchRecord(dispatchStoreFile(root), record);
+  assert.equal(classifyOrphanDispatch(record), "finalize", "pid 已死（/proc 读不到）⇒ finalize");
+
+  const { outcome, cleanup } = finalizeOrphanDispatch({ root, outcomeFile: path.join(root, WORKER_OUTCOME_REL), record });
+
+  assert.notEqual(outcome.final_state, "completed", "final_state ≠ completed");
+  assert.equal(outcome.final_state, "failed");
+  assert.match(outcome.failure_reason, /orphaned worker finalized by reconcile/, "reason 点名「driver 重启期间孤儿化、reconcile 发现已退出」");
+  assert.doesNotMatch(outcome.failure_reason, /exited with code|killed by/, "⛔ 与存活 driver 亲眼观察到的异常死亡（exited with code N / killed by SIGx）不同形");
+  assert.equal(outcome.exit_code, null, "exit code 不可观测 ⇒ 诚实 null");
+
+  const outcomes = readOutcomeLines(root);
+  assert.equal(outcomes.filter((o) => o.task === taskId).length, 1, "worker-outcome.jsonl 新增一条该 task 的记录");
+  assert.equal(readDispatchStore(dispatchStoreFile(root))[taskId], undefined, "finalize 后 dispatch 记录被清");
+  assert.equal(cleanup.removed, true, "orphan worktree cleaned（复用 no-record-on-abnormal-death 归宿）");
+  assert.equal(worktreePresentForTask(root, taskId), false, "orphan worktree removed");
+});
+
+test("AC3 (能取假) — reconcile 对 pid 存活的孤儿（原始截止已过期）：SIGTERM 且终态 timed-out（⛔ 靠 adopt 重置新窗口）", async (t) => {
+  const root = makeRoot("orphan-ac3");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const taskId = "gap-orphan-ac3";
+
+  // 一个「仍在跑」的孤儿 worker（存活、cmdline 含 quay-task-worker + task id——hasLiveWorkerForTask 命中）。
+  const orphan = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, taskId], { stdio: "ignore" });
+  t.after(() => { try { orphan.kill("SIGKILL"); } catch { /* gone */ } });
+  await new Promise((r) => setTimeout(r, 100)); // 让 /proc/<pid>/cmdline 可读
+
+  const record = {
+    taskId, runId: "fm-ac3", workerPid: orphan.pid, selectorReason: "ac3 selector reason",
+    startedAtMs: Date.now() - 60000, timeoutDeadlineMs: Date.now() - 500, // 已过期（adopt 发生前）
+    cmdlineFingerprint: readPidCmdline(orphan.pid) ?? "",
+  };
+  assert.equal(classifyOrphanDispatch(record), "adopt", "pid 存活且 cmdline 吻合 ⇒ adopt");
+
+  const exitedSignal = new Promise((r) => orphan.once("exit", (code, signal) => r(signal)));
+  const r = await adoptOrphanWorker({ taskId, rootDir: root, outcomeFile: path.join(root, WORKER_OUTCOME_REL), record, inFlightCount: 1 });
+
+  assert.equal(r.outcome.final_state, "timed-out", "已过期的原始截止时刻 ⇒ timed-out（⛔ 不是靠 adopt 重置新窗口）");
+  assert.equal(r.outcome.timed_out, true);
+  assert.equal(r.outcome.worker_pid, orphan.pid);
+  assert.equal(await exitedSignal, "SIGTERM", "孤儿 pid 被 SIGTERM（⛔ 自然退出 / SIGKILL）");
+
+  assert.equal(readDispatchStore(dispatchStoreFile(root))[taskId], undefined, "adopt 终态后 dispatch 记录被清");
+  const outcomes = readOutcomeLines(root);
+  assert.ok(outcomes.some((o) => o.task === taskId && o.final_state === "timed-out"), "worker-outcome.jsonl 新增 timed-out 记录");
+});
+
+test("④ (记录缺失不越权) — orphanDispatchCandidates：无记录 ⇒ 不纳入（手工起的 worker 不被接管）；running 中的在飞 ⇒ 跳过", () => {
+  const rec = { taskId: "gap-x", runId: "r", workerPid: 1, selectorReason: "s", startedAtMs: 0, timeoutDeadlineMs: 0, cmdlineFingerprint: "c" };
+  // 记录缺失（空 store / 无该 task 记录）⇒ 无待处理项——即使该 task 有 worktree + 活 worker（手工起的），
+  // reconcile 只读 dispatch store，⛔ 不越权接管非本机制派发的进程。
+  assert.deepEqual(orphanDispatchCandidates({}, []), []);
+  assert.deepEqual(orphanDispatchCandidates({}, ["gap-x"]), [], "记录缺失 ⇒ 不越权（有 running task 也无记录可处理）");
+  // 有记录且不在 running ⇒ 待处理（adopt/finalize 的输入）。
+  assert.deepEqual(orphanDispatchCandidates({ "gap-x": rec }, []), [{ taskId: "gap-x", record: rec }]);
+  // 有记录但在 running（本驱动自己的在飞 dispatch）⇒ 跳过（runOneWorker 管理，⛔ 不重复 adopt/finalize）。
+  assert.deepEqual(orphanDispatchCandidates({ "gap-x": rec }, ["gap-x"]), []);
+});

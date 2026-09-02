@@ -41,6 +41,11 @@
   --color-accent-2-800: #71261b;
   --color-accent-2-900: #471d16;
 
+  /* Positive (success) semantic hue — a distinct green separate from the red-orange accent
+     family, so pass/alive/GO reads as a different hue, not a deeper shade of warning. */
+  --color-positive-700: #157a45;
+  --color-positive-800: #0c5933;
+
   --font-heading: "Archivo", system-ui, sans-serif;
   --font-heading-weight: 800;
   --font-body: "Archivo", system-ui, sans-serif;

@@ -1,11 +1,12 @@
-// @test-group product
+// @test-group serial
 // @load-sensitive real-install
-// @load-sensitive-entry 2026-08-09 real-install e2e (quay-init --loop against release artifact); install family flake rotation
+// @load-sensitive-entry 2026-09-02 re-admitted to serial after a referenced-not-landed flake under full-suite load (gap-sea-artifact-consumer-e2e-ac4-assertion)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
 // this test spawns a real quay-init.sh --loop subprocess tree against the RELEASE ARTIFACT's plugin
-// sidecar. The install/quay-init family rotated flakes across groups under full-suite load, so the
-// whole family (this file included) is consolidated into the concurrency-1 serial phase
-// (gap-install-family-tests-rotate-flakes-under-full-suite).
+// sidecar. It was moved to @test-group product on 2026-08-25 (8d0920765, fail=0 22-60 high-load reps),
+// but re-flaked under full-suite load: quay-init --loop exited 2 on a referenced-not-landed false
+// positive (a declared reference-doc read as absent — verify_referenced_landed's declaration read torn
+// under 16-lane + phase-overlap concurrency). Re-admitted to the concurrency-1 serial phase.
 // sea-artifact-consumer-e2e.test.mjs — gap-release-artifact-missing-plugin-ac16 (AC4 升级通道通).
 //
 // The v0.4.0 SEA release archive shipped WITHOUT plugin/ — a consumer who downloaded it could not

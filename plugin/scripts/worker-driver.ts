@@ -123,8 +123,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 import { TASK_STATUS } from "./task-status.ts";
+import { extractSection } from "./task-schema.ts";
+import { parseTouchEntriesWithTags } from "./touches-parser.ts";
+import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
 // AC150-3：资源门判定 + 控制态 + 身份闸 + MCP 控制面，抽到 driver-shared.ts 供 promotion-driver 复用
 // （函数级复用，⛔ 非复制粘贴）。本文件仍 re-export 保持旧 import 面（worker-driver.test.mjs 等）。
 import {
@@ -226,6 +229,10 @@ import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache } from ".
 
 /** round 记录（无条件心跳）的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
+
+/** dispatch 持久记录（gap-worker-driver-restart-orphan-no-outcome-no-timeout）的仓库相对路径——
+ *  gitignored 运行时状态（worker-outcome.jsonl / worker-round.jsonl 同族），按 taskId 索引的单文件 map。 */
+export const WORKER_DISPATCH_REL = ".quay/worker-dispatch.json";
 
 /** 终态枚举：completed（退出码 0 且落地）/ exited-not-landed（退出码 0 但没落地）/ failed（非零退出）/
  *  killed（被信号杀）/ timed-out（超时 SIGTERM）/ spawn-failed（起不来）/ not-dispatched（halt 未派）。 */
@@ -930,6 +937,39 @@ function acCheckNote(): string {
   ].join(" ");
 }
 
+/** 机械 fan-in 的 scoped 门缺省命令（gap-worker-premerge-scoped-gate-cache 抽成单一真相源）：
+ *  bash <worktree>/scripts/test.sh --for-task <task> --allow-thin。fan-in 侧（runMechanicalFanIn 的
+ *  scopedCmd）与 worker prompt 侧（preMergeNote 的「跑与 fan-in 相同的 scoped 门」）共用——⛔ 两处不得
+ *  出现两套标准。 */
+export function scopedGateCommandFor(task: string, worktree: string): string[] {
+  return ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
+}
+
+/** worker 侧 scoped-gate 缓存写入 CLI 签名（gap-worker-premerge-scoped-gate-cache 阶段 a）：worker 在
+ *  退出前跑绿 scoped 门后，用这条命令机械写入 (task, developSha, pass) 缓存（⛔ 不靠 agent 手写 JSON）。
+ *  developSha 用 `git -C <worktree> rev-parse develop`（worker 已 merge develop ⇒ develop 即其验证过的 tip）。 */
+function scopedGateCacheWriteSignature(task: string, root: string, worktree: string): string {
+  const entry = path.join(root, "plugin", "scripts", "worker-driver.ts");
+  return `node --experimental-strip-types ${entry} --write-scoped-gate-cache --task ${task} --develop-sha "$(git -C ${worktree} rev-parse develop)" --root ${root}`;
+}
+
+/** worker 退出前 pre-merge + scoped test 步骤（gap-worker-premerge-scoped-gate-cache 阶段 a）：worker
+ *  （agent，非纯脚本）实现+提交+勾 AC 之后、driverFanInNote 退出之前，先自己 merge develop 到 worktree、
+ *  跑与 fan-in 完全相同的 scoped 门命令；冲突/红则用 agent 判断力修到绿；绿后机械写 scoped-gate 缓存
+ *  （供 driver 锁内 merge 到同一 develop tip 时跳过冗余 scoped-gate）；再提交退出。之所以放在 agent 回合
+ *  而非纯机械脚本：收益不只是「更早发现问题」，而是「很大一部分冲突在此被直接解决掉，根本不再进入
+ *  fan-in 失败路径」。创建 prompt 与续做 prompt 共用（worktree 路径由调用方填）。 */
+function preMergeNote(task: string, root: string, worktree: string): string {
+  return [
+    `before exiting, do the pre-merge + scoped-gate step in your worktree:`,
+    `(i) merge develop into your worktree (\`git -C ${worktree} merge --no-edit develop\`) — resolve any conflict with the Edit tool, do NOT skip;`,
+    `(ii) run the SAME scoped gate the driver's fan-in runs: \`${scopedGateCommandFor(task, worktree).join(" ")}\`;`,
+    `(iii) if red, fix and rerun until green;`,
+    `(iv) once green, record the scoped-gate cache so fan-in skips the now-redundant scoped gate: \`${scopedGateCacheWriteSignature(task, root, worktree)}\`;`,
+    `(v) commit and exit.`,
+  ].join(" ");
+}
+
 /** dispatch-worktree-setup.sh 调用签名（gap-dispatch-worktree-setup-zero-production-callers）：每个
  *  被派发的 worktree 创建后【必须】跑一次（node_modules symlink-or-install + config.yml 经
  *  worktree-include.sh），机制接管 bootstrap——worker 不再手工 `ln -s`/`cp config.yml`（正是该脚本被
@@ -952,6 +992,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `provision it by running \`${dispatchSetupSignature(root, "<the worktree path you created in step 1>")}\``,
     `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch; ${acCheckNote()}`,
+    `(2b) ${preMergeNote(task, root, "<the worktree path you created in step 1>")}`,
     `(3) ${driverFanInNote()}`,
     `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree.`,
     `You own your worktree fully; apart from the final merge (done by the driver) do not touch develop.`,
@@ -1178,6 +1219,213 @@ function continueSuiteLogNote(attempts: ExitedNotLandedAttempt[]): string {
   return "";
 }
 
+// ── 续做 prompt delta-relatedness 信号 (gap-continue-prompt-delta-relatedness-note) ──────────────────
+//
+// 续做 prompt 已带前 N 次尝试清单 + suite 日志路径 + 冲突消解协议，唯独缺「这次 suite 失败的测试与
+// 本任务改动是否相关」这条机械信号——worker 每次续做都要从零判断「这次红是不是我的问题」。本段补两条
+// 【纯结构性计算、不调 LLM】的信号：
+//   信号1 delta 相关性：失败测试文件本身是否在本任务 `## Touches` / 实际 diff 里；不在，再查一跳导入
+//   （失败测试直接 import 的源文件）是否与本任务改动文件相交。
+//   信号2 load-sensitive 注册表命中：失败测试文件是否已 `@load-sensitive` 标注（复用 known-load-
+//   sensitive.ts 的注解解析，⛔ 不新造分类）。这是一条【事前存在、独立于本次失败】的证据。
+// ⛔ 边界（不做什么）：只产提示不产「跳过」判断；读不懂 ⇒ "unknown"，不与「无关/未标注」同形（硬规则 3b）。
+
+/** 信号 verdict 词表：related / unrelated（信号1 正常结论）、load-sensitive / not-annotated（信号2 正常
+ *  结论）、unknown（读不懂的独立取值，⛔ 与任何正常结论共用措辞）。 */
+export type RelatednessVerdict = "related" | "unrelated" | "load-sensitive" | "not-annotated" | "unknown";
+
+/** 一条 delta-relatedness 信号。可扩展输出结构（信号3「同一 runId 连续失败同一测试」落地时追加条目，
+ *  ⛔ 不重写 note 函数）。 */
+export interface RelatednessSignal {
+  signal: "delta-relatedness" | "load-sensitive";
+  failingTest: string | null;
+  verdict: RelatednessVerdict;
+  reason: string;
+}
+
+/** 从 suite 日志文本提取失败测试文件（repo-relative）。node:test 每文件一行
+ *  `__PERFILE__ duration_ms=… <rel> passed=false end_ms=…`——passed=false 即该文件红。读不出 ⇒ []
+ *  （不伪造；空列表与「读懂了但无失败」同形，调用方据 continueSuiteLogNote 的有无判定是否 suite 红）。 */
+export function failingTestFilesFromSuiteLog(logText: string): string[] {
+  const out: string[] = [];
+  for (const raw of String(logText ?? "").split("\n")) {
+    const line = raw.trim();
+    if (!line.includes("passed=false")) continue;
+    const m = /(?:^|\s)((?:packages|plugin|experiments)\/[^\s]+\.test\.mjs)\s+passed=false\b/.exec(line);
+    if (m && !out.includes(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
+/** 读任务 `## Touches`（repo-relative 路径列表，normalizeRel）。任务文件缺失 / 无 Touches 段 ⇒ null
+ *  （读不懂 ≠ 空 Touches——硬规则 3b；「查过且为空」与「没查成」分开）。 */
+export function taskTouches(root: string, task: string): string[] | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, "tasks", `${task}.md`), "utf8");
+  } catch {
+    return null;
+  }
+  const sec = extractSection(text, "Touches");
+  if (!sec) return null;
+  return parseTouchEntriesWithTags(sec)
+    .map((e) => e.path)
+    .filter(Boolean)
+    .map((p) => normalizeRel(String(p)));
+}
+
+/** 读任务分支的实际 diff（`git diff --name-only HEAD...task/<id>`——三点差 = 该分支【自己】相对 merge-base
+ *  的净变更，⛔ 不含 develop 侧推进）。git 失败 / 分支不存在 ⇒ null（读不懂 ≠ 空 diff）。 */
+export function taskDeltaFiles(root: string, task: string): string[] | null {
+  const r = spawnSync("git", ["-C", root, "diff", "--name-only", `HEAD...task/${task}`], { encoding: "utf8" });
+  if (r.status !== 0 || r.error) return null;
+  return String(r.stdout ?? "").split("\n").map((s) => s.trim()).filter(Boolean).map(normalizeRel);
+}
+
+/** 信号1 的 delta 并集：Touches（必需，读不懂 ⇒ null ⇒ unknown）+ 实际 diff（best-effort，git 失败只用
+ *  Touches——单测 makeRoot 非 git 根也照常判定）。 */
+export function computeDeltaPaths(root: string, task: string): string[] | null {
+  const touches = taskTouches(root, task);
+  if (touches === null) return null;
+  const diff = taskDeltaFiles(root, task);
+  const set = new Set(touches);
+  for (const p of diff ?? []) set.add(p);
+  return [...set];
+}
+
+/** 解析一个测试文件的【直接 import】为 repo-relative 源文件路径（一跳）。只解析相对说明符
+ *  （`./x` / `../x`）；裸说明符（node_modules / `node:` / 绝对）跳过。读文件失败 ⇒ null（读不懂 ≠ 空 import）。 */
+export function directImportRels(root: string, testFileRel: string): string[] | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, testFileRel), "utf8");
+  } catch {
+    return null;
+  }
+  const dir = path.posix.dirname(normalizeRel(testFileRel));
+  const rels = new Set<string>();
+  // `import … from "spec"` / `import "spec"` / `export … from "spec"`——相对说明符才是一跳源文件。
+  const re = /(?:^|\n)[ \t]*(?:import|export)[ \t]+(?:[^'"`\n]*?[ \t]+from[ \t]+)?["']([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const spec = m[1];
+    if (!spec.startsWith(".")) continue;
+    const resolved = normalizeRel(path.posix.join(dir, spec));
+    if (resolved) rels.add(resolved);
+  }
+  return [...rels];
+}
+
+/** 一条 import 是否命中 delta 任一文件：精确相等；无扩展名补 `.ts/.mjs/.js/.tsx/.jsx`；`.js(.x)` 补
+ *  `.ts(.x)` 变体（TS-ESM 里 `from "./x.js"` 映射到 `x.ts`）。 */
+function importHitsDelta(importRel: string, deltaSet: Set<string>): boolean {
+  const base = normalizeRel(importRel);
+  const ext = path.posix.extname(base);
+  const candidates = [base];
+  if (!ext) {
+    for (const e of [".ts", ".mjs", ".js", ".tsx", ".jsx"]) candidates.push(base + e);
+  } else if (ext === ".js" || ext === ".jsx") {
+    candidates.push(base.slice(0, -ext.length) + (ext === ".js" ? ".ts" : ".tsx"));
+  }
+  return candidates.some((c) => deltaSet.has(c));
+}
+
+/** 信号1 纯判定：失败测试文件是否在本任务 delta 里；不在，再查一跳导入是否与本任务改动文件相交。
+ *  delta 读不懂 ⇒ unknown；测试文件读不懂（import 解析失败）且不在 delta ⇒ unknown（⛔ 与「无关」同形）。 */
+export function classifyDeltaRelatedness(
+  failingTestRel: string | null,
+  deltaPaths: string[] | null,
+  importRels: string[] | null,
+): { verdict: RelatednessVerdict; reason: string } {
+  if (deltaPaths === null) {
+    return { verdict: "unknown", reason: "unable to determine this task's Touches/diff (delta unreadable)" };
+  }
+  const rel = failingTestRel ? normalizeRel(String(failingTestRel)) : null;
+  if (!rel) {
+    return { verdict: "unknown", reason: "no failing test file resolved" };
+  }
+  const deltaSet = new Set(deltaPaths.map(normalizeRel));
+  if (deltaSet.has(rel)) {
+    return { verdict: "related", reason: "the failing test file itself is in this task's Touches/diff" };
+  }
+  if (importRels === null) {
+    return { verdict: "unknown", reason: "unable to read the failing test's direct imports (one-hop check unavailable)" };
+  }
+  if (importRels.some((imp) => importHitsDelta(imp, deltaSet))) {
+    return { verdict: "related", reason: "the failing test directly imports a file this task's delta touches (one-hop)" };
+  }
+  return { verdict: "unrelated", reason: "the failing test file is not in this task's Touches/diff, and its direct imports do not intersect this task's delta (one-hop check)" };
+}
+
+/** 信号2 纯判定：失败测试文件是否 `@load-sensitive` 标注（复用 known-load-sensitive.ts 的注解解析）。
+ *  读文件失败 ⇒ unknown（⛔ 与「未标注」同形）。 */
+export function classifyLoadSensitive(root: string, failingTestRel: string): RelatednessVerdict {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, failingTestRel), "utf8");
+  } catch {
+    return "unknown";
+  }
+  return parseLoadSensitiveAnnotation(text) !== null ? "load-sensitive" : "not-annotated";
+}
+
+/** 对一个失败测试文件产出两条信号（delta 相关性 + load-sensitive 注册表命中）。 */
+export function relatednessSignalsFor(root: string, task: string, failingTestRels: string[]): RelatednessSignal[] {
+  const delta = computeDeltaPaths(root, task);
+  const signals: RelatednessSignal[] = [];
+  for (const rel of failingTestRels) {
+    const d = classifyDeltaRelatedness(rel, delta, delta === null ? null : directImportRels(root, rel));
+    signals.push({ signal: "delta-relatedness", failingTest: rel, verdict: d.verdict, reason: d.reason });
+    const l = classifyLoadSensitive(root, rel);
+    signals.push({
+      signal: "load-sensitive",
+      failingTest: rel,
+      verdict: l,
+      reason: l === "load-sensitive" ? "declared @load-sensitive" : l === "not-annotated" ? "no @load-sensitive declaration" : "unable to read the test file",
+    });
+  }
+  return signals;
+}
+
+/** 把信号列表拼成续做提示文本。措辞明确「这不是结论，是提示，请重跑验证」，⛔ 不含「跳过/无需检查」等
+ *  可被误读为自动放行的措辞（AC4）。 */
+export function formatRelatednessNote(signals: RelatednessSignal[]): string {
+  if (signals.length === 0) return "";
+  const lines = signals.map((s) => {
+    if (s.signal === "delta-relatedness") {
+      const v = s.verdict === "related" ? "RELATED" : s.verdict === "unrelated" ? "UNRELATED" : "UNKNOWN";
+      return `  - ${s.failingTest}: delta-relatedness = ${v} (${s.reason})`;
+    }
+    const v = s.verdict === "load-sensitive" ? "registered @load-sensitive" : s.verdict === "not-annotated" ? "not @load-sensitive-annotated" : "UNKNOWN";
+    return `  - ${s.failingTest}: load-sensitive registry = ${v}`;
+  });
+  return [
+    "delta-relatedness check (mechanical, not a verdict — verify before acting):",
+    ...lines,
+    "This is a hint, not a conclusion: it does not prove the failure is unrelated to this task. Re-run the suite once to verify before assuming it is environmental; if it reproduces, treat it as a real finding regardless of this note.",
+  ].join("\n");
+}
+
+/** 续做 prompt 的 delta-relatedness 提示（只在 suite 红时触发，放 continueSuiteLogNote 旁）。取最近一条
+ *  带 suiteLog 的尝试，读其 suite 日志提取失败测试，对每个失败测试产出两条信号。无 suite 红 / 读不出
+ *  失败测试 ⇒ 空串（不伪造——与 continueSuiteLogNote 同向）。 */
+export function continueRelatednessNote(root: string, task: string, attempts: ExitedNotLandedAttempt[]): string {
+  let suiteLogPath: string | null = null;
+  for (let i = (attempts ?? []).length - 1; i >= 0; i -= 1) {
+    if (attempts[i].suiteLog) { suiteLogPath = attempts[i].suiteLog; break; }
+  }
+  if (!suiteLogPath) return "";
+  let logText: string;
+  try {
+    logText = fs.readFileSync(suiteLogPath, "utf8");
+  } catch {
+    return "";
+  }
+  const failing = failingTestFilesFromSuiteLog(logText);
+  if (failing.length === 0) return "";
+  return formatRelatednessNote(relatednessSignalsFor(root, task, failing));
+}
+
 /** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
  *  状态（分支提交 / AC 勾选 / 失败原因 / 前 N 次尝试清单 + suite 日志路径）供 worker 从保留 worktree
  *  继续。⛔ 不含 "create an isolated git worktree"（AC1 取假判据——旧 prompt 逐字说 create 是撞死根因）。
@@ -1201,10 +1449,12 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `the last round exited-not-landed because: ${reason}.`,
     `${continueAttemptsNote(attempts)}`,
     `${continueSuiteLogNote(attempts)}`,
+    `${continueRelatednessNote(root, task, attempts)}`,
     `${continueConflictResolutionNote()}`,
     `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch); ${acCheckNote()}`,
+    `(1b) ${preMergeNote(task, root, wt)}`,
     `(2) ${driverFanInNote()}.`,
     `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
@@ -1549,6 +1799,307 @@ function appendWorkerPid(pidFile: string, workerPid: number): void {
   }
 }
 
+// ── dispatch 持久记录（gap-worker-driver-restart-orphan-no-outcome-no-timeout）────────────────────
+// driver 重启孤儿化在飞 worker 的元数据持久化：旧 driver 把 spawn 的 dispatch 元数据（selector 理由 /
+// runId / 原始派发时刻 / 原始超时截止时刻 / spawn cmdline）原子写进 <root>/.quay/worker-dispatch.json
+// （按 taskId 索引的单文件 map），在终态被正常计算时清除对应条目。旧 driver 死 ⇒ 内存 running 整体丢失，
+// 但这份持久影子存活 ⇒ 新 driver 的 reconcile 能读到「这个 task 为什么在飞、是哪次 dispatch、跑了多久、
+// 原定超时预算是多少」，据此 adopt（纳入超时监管）或 finalize（已死补终态），⛔ 不再是「排除集之外一片黑箱」。
+
+/** 一条 dispatch 持久记录（spawn 后写、终态后清；driver 重启遗留的条目 = 孤儿在飞）。 */
+export interface DispatchRecord {
+  taskId: string;
+  runId: string;
+  workerPid: number;
+  selectorReason: string;
+  /** 派发时刻（epoch ms）。 */
+  startedAtMs: number;
+  /** 原始超时截止时刻（epoch ms）；0 = 无超时（与 timeoutMs>0 对齐）。adopt 沿用此值，⛔ 不重置。 */
+  timeoutDeadlineMs: number;
+  /** spawn 时的归一化 cmdline（argv 空格 join）——观测抓手 + adopt 时 hasLiveWorkerForTask 复核的参照
+   *  （⛔ 不裸信 pid 数字，避免 pid 复用误判）。 */
+  cmdlineFingerprint: string;
+}
+
+/** dispatch 记录文件的绝对路径。 */
+export function dispatchStoreFile(root: string): string {
+  return path.join(root, WORKER_DISPATCH_REL);
+}
+
+/** 读整份 dispatch store（taskId → record）；文件缺失 / 解析失败 ⇒ {}（fail-soft，硬规则 3b：读不懂
+ *  ≠ 无记录，但方向是「少 adopt ⇒ 维持现状」，⛔ 不是 fail-closed 到「全部孤儿」——那会误接管手工起的 worker）。 */
+export function readDispatchStore(file: string): Record<string, DispatchRecord> {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, DispatchRecord>;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+/** 原子写整份 dispatch store（tmp + rename，外部读者绝不读到半截——与 appendWorkerPid 同手法）。 */
+export function writeDispatchStore(file: string, store: Record<string, DispatchRecord>): void {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    fs.writeFileSync(tmp, JSON.stringify(store, null, 2), "utf8");
+    fs.renameSync(tmp, file);
+  } catch {
+    /* dispatch store 是观测抓手 + 孤儿 adopt/finalize 的输入，写失败不改变主流程（同 appendWorkerPid） */
+  }
+}
+
+/** upsert 一条 dispatch 记录（读-改-写，原子）。 */
+export function upsertDispatchRecord(file: string, record: DispatchRecord): void {
+  const store = readDispatchStore(file);
+  store[record.taskId] = record;
+  writeDispatchStore(file, store);
+}
+
+/** 移除一条 dispatch 记录（终态已算 ⇒ dispatch 已了结）。记录本不存在 ⇒ no-op（⛔ 不写 spurious 空文件）。 */
+export function removeDispatchRecord(file: string, taskId: string): void {
+  const store = readDispatchStore(file);
+  if (!(taskId in store)) return;
+  delete store[taskId];
+  writeDispatchStore(file, store);
+}
+
+/** 读某 pid 的 /proc/<pid>/cmdline（归一化：NUL → 空格、trim）；pid 不存在 / 无权限 ⇒ null
+ *  （硬规则 3b：读不懂 ≠ 无存活，但调用方按 falsy 判「已死」——方向是「少 adopt」，⛔ 不误信 pid）。 */
+export function readPidCmdline(pid: number, procDir: string = "/proc"): string | null {
+  try {
+    return fs.readFileSync(path.join(procDir, String(pid), "cmdline")).toString("utf8").replace(/\0/g, " ").trim();
+  } catch {
+    return null;
+  }
+}
+
+/** 孤儿 dispatch 分类（纯函数）：adopt（pid 存活且 cmdline 仍是本任务的 worker）/ finalize（pid 已死 /
+ *  被复用）。复核用 hasLiveWorkerForTask 的词边界 cmdline 匹配（同 cold-start-inflight 交叉核对），⛔ 不
+ *  裸信 pid 数字——pid 复用后指向别的进程，cmdline 不再含 quay-task-worker + task id ⇒ 判 finalize。
+ *  空 cmdline（僵尸已退未收尸）与读不到（null）同判「已死」。 */
+export function classifyOrphanDispatch(record: DispatchRecord, procDir: string = "/proc"): "adopt" | "finalize" {
+  const cmdline = readPidCmdline(record.workerPid, procDir);
+  if (!cmdline) return "finalize";
+  return hasLiveWorkerForTask(record.taskId, [cmdline]) ? "adopt" : "finalize";
+}
+
+/** reconcile 该处理的孤儿 dispatch 清单：store 里、但不在本驱动内存 running 的条目。⛔ 记录缺失（driver
+ *  从未见过，如手工起的 worker）⇒ 不在 store ⇒ 天然跳过、不越权接管；running 中的本驱动在飞 dispatch ⇒
+ *  由 runOneWorker 管理（spawn 写、终态清），⛔ 不重复 adopt/finalize。纯函数，可单测。 */
+export function orphanDispatchCandidates(
+  store: Record<string, DispatchRecord>,
+  runningTasks: string[],
+): Array<{ taskId: string; record: DispatchRecord }> {
+  const out: Array<{ taskId: string; record: DispatchRecord }> = [];
+  for (const [taskId, record] of Object.entries(store)) {
+    if (runningTasks.includes(taskId)) continue;
+    out.push({ taskId, record });
+  }
+  return out;
+}
+
+/** 孤儿 finalize 终态 outcome（pid 已死 / 被复用）。final_state=failed（非 completed），failure_reason
+ *  点名「driver 重启期间孤儿化、reconcile 发现已退出」——与存活 driver 亲眼观察到的异常死亡
+ *  （"worker exited with code N" / "worker killed by SIGx"）在 reason 上可区分（AC2）。exit_code 诚实
+ *  记 null（读不懂，⛔ 不伪造）。 */
+export function computeOrphanFinalizedOutcome(opts: {
+  task: string;
+  selectorReason: string;
+  runId: string;
+  workerPid: number;
+  startedAtMs: number;
+  endedAtMs: number;
+}): ReturnType<typeof computeOutcome> {
+  return {
+    ts: new Date(opts.endedAtMs).toISOString(),
+    task: opts.task,
+    selector_reason: opts.selectorReason,
+    exit_code: null,
+    signal: null,
+    wall_clock_ms: opts.endedAtMs - opts.startedAtMs,
+    final_state: "failed",
+    failure_reason: `orphaned worker finalized by reconcile: driver restarted mid-flight and worker pid ${opts.workerPid} already exited (or was recycled) before a new instance could adopt it`,
+    started_at: new Date(opts.startedAtMs).toISOString(),
+    ended_at: new Date(opts.endedAtMs).toISOString(),
+    worker_pid: opts.workerPid,
+    run_id: opts.runId,
+    in_flight_count: 0,
+    timed_out: false,
+    session_id: null,
+  };
+}
+
+/** adopt 后 worker 退出（含超时）的终态 outcome。⛔ 不直调 computeOutcome：adopted 孤儿非本驱动子进程、
+ *  exit code 不可观测，computeOutcome 的 `exitCode !== 0` 分支会对 null 误判 "exited with code null"。
+ *  三态：timed-out（沿用原始截止时刻到期 SIGTERM）/ completed（落地判定 verified）/ exited-not-landed
+ *  （未落地，worktree 保留供续做）。exit_code 诚实记 null。 */
+export function computeAdoptedOutcome(opts: {
+  task: string;
+  selectorReason: string;
+  runId: string;
+  workerPid: number;
+  startedAtMs: number;
+  endedAtMs: number;
+  inFlightCount: number;
+  timedOut: boolean;
+  landing: DriverResult<LandingEvidence>;
+}): ReturnType<typeof computeOutcome> {
+  let finalState: string;
+  let failureReason: string | null;
+  if (opts.timedOut) {
+    finalState = "timed-out";
+    failureReason = `worker timed out and was SIGTERM'd (worktree preserved)`;
+  } else if (opts.landing.state === "verified") {
+    finalState = "completed";
+    failureReason = null;
+  } else {
+    finalState = "exited-not-landed";
+    failureReason = `adopted orphan worker exited (exit code unobservable) — ${opts.landing.reason ?? "task did not land"}`;
+  }
+  return {
+    ts: new Date(opts.endedAtMs).toISOString(),
+    task: opts.task,
+    selector_reason: opts.selectorReason,
+    exit_code: null,
+    signal: null,
+    wall_clock_ms: opts.endedAtMs - opts.startedAtMs,
+    final_state: finalState,
+    failure_reason: failureReason,
+    started_at: new Date(opts.startedAtMs).toISOString(),
+    ended_at: new Date(opts.endedAtMs).toISOString(),
+    worker_pid: opts.workerPid,
+    run_id: opts.runId,
+    in_flight_count: opts.inFlightCount,
+    timed_out: opts.timedOut,
+    session_id: null,
+  };
+}
+
+/** 孤儿 finalize（pid 已死 / 被复用）：立刻补一条可区分的非 completed 终态 + 复用 no-record-on-abnormal-
+ *  death 的 orphan worktree 清理（cleanupOrphanWorktree）+ 清 dispatch 记录。同步、幂等。返回 outcome 供
+ *  观测（resident loop 打 json 事件）。 */
+export function finalizeOrphanDispatch(opts: {
+  root: string;
+  outcomeFile: string;
+  record: DispatchRecord;
+}): { outcome: ReturnType<typeof computeOutcome>; cleanup: OrphanCleanupResult | null } {
+  const { root, outcomeFile, record } = opts;
+  const base = computeOrphanFinalizedOutcome({
+    task: record.taskId,
+    selectorReason: record.selectorReason,
+    runId: record.runId,
+    workerPid: record.workerPid,
+    startedAtMs: record.startedAtMs,
+    endedAtMs: Date.now(),
+  });
+  const cleanup = cleanupOrphanWorktree(root, record.taskId, null, { finalState: "failed", exitCode: null });
+  const outcome = cleanup
+    ? {
+        ...base,
+        worktree_cleaned: cleanup.removed,
+        worktree_cleanup_error: cleanup.error,
+        worktree_cleanup_skipped_live: cleanup.skippedLiveWorker,
+        worktree_cleanup_has_commits: cleanup.hasCommits,
+        worktree_cleanup_preserved_commits: cleanup.preservedForCommits,
+        worktree_cleanup_sigterm_external: cleanup.sigtermExternal,
+      }
+    : base;
+  appendOutcomeToFile(outcomeFile, outcome);
+  removeDispatchRecord(dispatchStoreFile(root), record.taskId);
+  return { outcome, cleanup };
+}
+
+/** adopt 一个孤儿 worker（pid 存活且 cmdline 吻合）：纳入超时监管——轮询 pid 存活性（代替 child_process
+ *  close 事件，非本驱动子进程无 close），沿用记录里的 timeoutDeadlineMs（⛔ 不重置，防「每次重启续命」
+ *  无限占位），到期 SIGTERM（grace 后 SIGKILL 兜底），退出后 computeAdoptedOutcome 算终态 + 清 dispatch
+ *  记录。返回 Promise<WorkerRunResult>（调用方纳入 running，退出后照常走重试/退避记账）。 */
+export function adoptOrphanWorker(opts: {
+  taskId: string;
+  rootDir: string;
+  outcomeFile: string;
+  record: DispatchRecord;
+  inFlightCount?: number;
+  procDir?: string;
+  /** 轮询间隔（测试缝）。 */
+  pollMs?: number;
+  /** SIGTERM → SIGKILL 升级 grace（测试缝）。 */
+  sigkillGraceMs?: number;
+}): Promise<WorkerRunResult> {
+  const {
+    taskId, rootDir, outcomeFile, record, procDir = "/proc",
+    inFlightCount = 1, pollMs = 100, sigkillGraceMs = 5000,
+  } = opts;
+  return new Promise((resolve) => {
+    let timedOut = false;
+    let sigtermSentAt: number | null = null;
+    let sigkillSent = false;
+    let finished = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (): void => {
+      if (finished) return;
+      finished = true;
+      if (timer) clearTimeout(timer);
+      const endedAtMs = Date.now();
+      const landing = computeLandingState(rootDir, taskId, null);
+      const lock = readLockMetricsForRun(rootDir, record.runId, taskId);
+      const base = computeAdoptedOutcome({
+        task: taskId,
+        selectorReason: record.selectorReason,
+        runId: record.runId,
+        workerPid: record.workerPid,
+        startedAtMs: record.startedAtMs,
+        endedAtMs,
+        inFlightCount,
+        timedOut,
+        landing,
+      });
+      const outcome = {
+        ...(base.final_state === "timed-out" ? { ...base, worktree_preserved: true } : base),
+        ...(lock.lockWaitMs !== null && lock.lockWaitMs !== undefined ? { lock_wait_ms: lock.lockWaitMs } : {}),
+        ...(lock.lockHoldMs !== null && lock.lockHoldMs !== undefined ? { lock_hold_ms: lock.lockHoldMs } : {}),
+      };
+      appendOutcomeToFile(outcomeFile, outcome);
+      removeDispatchRecord(dispatchStoreFile(rootDir), taskId);
+      let exitCode = 0;
+      if (outcome.final_state === "timed-out") exitCode = 128 + signalExitCode("SIGTERM");
+      else if (outcome.final_state === "exited-not-landed") exitCode = EXITED_NOT_LANDED_EXIT;
+      resolve({ taskId, outcome, exitCode });
+    };
+
+    const tick = (): void => {
+      if (finished) return;
+      const now = Date.now();
+      // 原始超时截止到期（adopt 前已过期 / 轮询中到期）⇒ SIGTERM 一次（沿用原始截止，⛔ 不重置）。
+      if (!timedOut && record.timeoutDeadlineMs > 0 && now >= record.timeoutDeadlineMs) {
+        timedOut = true;
+        sigtermSentAt = now;
+        try { process.kill(record.workerPid, "SIGTERM"); } catch { /* already gone */ }
+      }
+      // SIGTERM 后 grace 内仍存活 ⇒ SIGKILL 兜底（⛔ 无限占位）。
+      if (timedOut && sigtermSentAt !== null && !sigkillSent && now - sigtermSentAt >= sigkillGraceMs) {
+        sigkillSent = true;
+        try { process.kill(record.workerPid, "SIGKILL"); } catch { /* already gone */ }
+      }
+      // pid 已死（/proc 读不到或空 cmdline 僵尸）⇒ 算终态。
+      if (!readPidCmdline(record.workerPid, procDir)) {
+        finish();
+        return;
+      }
+      timer = setTimeout(tick, pollMs);
+    };
+    tick();
+  });
+}
+
 /**
  * 生成一个 transcript session id（UUID v4）。gap-worker-task-transcript-access-webui AC1：每次派发
  * （每尝试非每任务）生成【新】UUID——同任务重派 N 次有 N 个不同 session_id ⇒ 每次尝试的 transcript
@@ -1712,6 +2263,9 @@ function runOneWorker({
           ? { ...baseOutcome, worktree_preserved: true }
           : baseOutcome;
       appendOutcomeToFile(outcomeFile, finalOutcome);
+      // 终态已算 ⇒ dispatch 已了结，清持久记录（gap-worker-driver-restart-orphan-no-outcome-no-timeout）。
+      // 记录本不存在（spawn-failed / not-dispatched 未写）时 removeDispatchRecord 是 no-op。
+      removeDispatchRecord(dispatchStoreFile(rootDir), taskId);
       if (json) process.stdout.write(`${JSON.stringify({ event: "worker-done", task: taskId, ...finalOutcome })}\n`);
       let exitCode: number;
       if (finalOutcome.final_state === "completed") exitCode = 0;
@@ -1791,6 +2345,20 @@ function runOneWorker({
     if (pidFile && workerPid) {
       appendWorkerPid(pidFile, workerPid);
     }
+    // gap-worker-driver-restart-orphan-no-outcome-no-timeout：spawn 后立刻把 dispatch 元数据持久化
+    // （driver 重启死掉后内存 running 整体丢失，这份影子供下一个实例 adopt/finalize）。⛔ workerPid
+    // 为 null（spawn 失败）不写——没有可被孤儿的进程。finish() 里清对应条目。
+    if (workerPid) {
+      upsertDispatchRecord(dispatchStoreFile(rootDir), {
+        taskId,
+        runId,
+        workerPid,
+        selectorReason,
+        startedAtMs,
+        timeoutDeadlineMs: timeoutMs > 0 ? startedAtMs + timeoutMs : 0,
+        cmdlineFingerprint: argv.join(" "),
+      });
+    }
 
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
@@ -1835,7 +2403,8 @@ export interface MechanicalFanInOptions {
   slotLib?: string;
   /** 静默看门狗阈值（测试缝）。 */
   silenceMs?: number;
-  /** suite 日志（静默看门狗盯的）；缺省 .quay/fan-in-suite-<task>-<runId>.log（durable，⛔ 不再 /tmp）。 */
+  /** suite 日志（静默看门狗盯的）；缺省 .quay/fan-in-suite-<task>~<runId>~<attempt>.log（durable，⛔ 不再
+   *  /tmp；attempt 唯一后缀 ⇒ 同一 runId 内多次 suite 互不覆盖，gap-fan-in-suite-log-same-runid-overwrite）。 */
   suiteLogFile?: string | null;
   /** suite capture（ff 闸读的证书）；缺省 /tmp/fan-in-suite-<task>.env。 */
   suiteCapture?: string;
@@ -1848,6 +2417,10 @@ export interface MechanicalFanInOptions {
   /** doc-check 缓存文件（测试缝）；缺省 = <root>/.quay/doc-check-cache.json（gitignored 运行时缓存，
    *  gap-fan-in-doc-check-cache）。doc 面未变时命中缓存跳过 doc-check（~0s），变化失效重跑。 */
   docCheckCacheFile?: string;
+  /** scoped-gate 缓存文件（测试缝）；缺省 = <root>/.quay/scoped-gate-cache.json（运行时缓存，
+   *  gap-worker-premerge-scoped-gate-cache）。worker 退出前写 (task, developSha, pass)；锁内 merge 到的
+   *  develop tip 与之一致时跳过 scoped-gate（可证明冗余），否则照跑（fail-closed）。 */
+  scopedGateCacheFile?: string;
   /** fan-in 编排脚本目录（测试缝）；缺省 = <worktree>/plugin/scripts（自举：本分支的编排脚本自验）。 */
   scriptsDir?: string;
   /** ff-merge TS 模块路径（测试缝）；缺省 = <worktree>/packages/quay/src/fan-in/ff-merge.ts
@@ -1895,9 +2468,9 @@ export interface MechanicalFanInResult {
   /** fan-in 过程日志文件名（`.quay/fan-in-<task>-<runId>.log` 的 basename——web 链接据此构造，
    *  ⛔ 不重算 sanitize，单一真相源）。red/landed 两态都非 null。 */
   fanInLog: string | null;
-  /** suite 日志文件名（`.quay/fan-in-suite-<task>-<runId>.log` 的 basename——web 链接 / 续做 prompt /
-   *  needs-human 注记据此构造绝对路径，⛔ 不靠命名约定猜）。red ∧ step=suite 时非 null（suite 真因落
-   *  该文件——183KB 真因只能靠命名约定猜的病根）；其它步骤 / landed 时 null。 */
+  /** suite 日志文件名（`.quay/fan-in-suite-<task>~<runId>~<attempt>.log` 的 basename——web 链接 / 续做
+   *  prompt / needs-human 注记据此构造绝对路径，⛔ 不靠命名约定猜）。red ∧ step=suite 时非 null（suite
+   *  真因落该文件——183KB 真因只能靠命名约定猜的病根）；其它步骤 / landed 时 null。 */
   suiteLog: string | null;
 }
 
@@ -2323,6 +2896,52 @@ export function fanInLogFileName(task: string, runId: string): string {
   return `fan-in-${task}-${runIdSafe}.log`;
 }
 
+/** gap-fan-in-suite-log-same-runid-overwrite — suite 日志文件名的【任务边界】分隔符。⛔ 不能用 `-`：
+ *  任务 id 本身 kebab-case（实测 DIR-035 / DIR-035-A、exp5-M-CRYST / exp5-M-CRYST-A2 等前缀碰撞 300+ 对），
+ *  用 `-` 分隔 ⇒ 轮转按 `fan-in-suite-<task>-` 前缀匹配会把兄弟任务（`<task>-<suffix>`）的日志一并删掉
+ *  （硬规则 5b：修一个别漏一簇）。`~` 不在 task/runId 的 sanitize 字符集 `[A-Za-z0-9_.-]` 内 ⇒ 它只能
+ *  是分隔符本身，前缀 `fan-in-suite-<task>~` 对任意 task id 都无歧义。 */
+const SUITE_LOG_DELIM = "~";
+
+/** suite 日志文件名（`.quay/fan-in-suite-<task>~<runId>~<attempt>.log` 的 basename）。runId 唯一后缀 ⇒
+ *  跨 relaunch 不复用（同 gap-fan-in-suite-log-cross-relaunch-reuse 防护——旧轮内容不残留）；attempt
+ *  唯一后缀（epoch-ms + rand 双唯一）⇒ 同一 runId 内多次独立 suite 运行互不覆盖
+ *  （gap-fan-in-suite-log-same-runid-overwrite AC1）。task/runId 都先 sanitize 到 `[A-Za-z0-9_.-]`
+ *  （⛔ 不把未净化的 id 当路径段；也保证 `~` 分隔符在 id 内部永不出现 ⇒ 轮转前缀匹配无歧义）。 */
+export function suiteLogFileName(task: string, runId: string, attempt: string): string {
+  const taskSafe = task.replace(/[^A-Za-z0-9_.-]/g, "_");
+  const runIdSafe = runId.replace(/[^A-Za-z0-9_.-]/g, "_");
+  return `fan-in-suite-${taskSafe}${SUITE_LOG_DELIM}${runIdSafe}${SUITE_LOG_DELIM}${attempt}.log`;
+}
+
+/** 生成一次 suite 日志的 attempt 后缀（epoch-ms + rand 双唯一——同一 runId 内多次 suite 不覆盖）。
+ *  独立成函数供测试直接调用（⛔ 不内联 randomUUID 让「每次新」无处可验；同 newMechanicalSuiteRunId 形态）。 */
+export function newSuiteLogAttemptSuffix(): string {
+  return `${Date.now()}-${randomUUID().slice(0, 6)}`;
+}
+
+/** 轮转：删除某任务名下全部历史 suite attempt 日志（landed 后调用——任务落地，红 attempt 日志不再
+ *  需要回溯，⛔ 长期运行 .quay/ 无限堆积孤儿 fan-in-suite-*.log；gap-fan-in-suite-log-same-runid-
+ *  overwrite AC3）。用 `<task>~` 前缀精确匹配（⛔ 裸 `<task>-` 会误删兄弟任务 `<task>-<suffix>` 的日志）。
+ *  best-effort：删除失败不致命（landing 判定不依赖它）。返回删除的文件数（供 trace）。 */
+export function pruneTaskSuiteLogs(root: string, task: string): number {
+  const dir = path.join(root, ".quay");
+  const taskSafe = task.replace(/[^A-Za-z0-9_.-]/g, "_");
+  const prefix = `fan-in-suite-${taskSafe}${SUITE_LOG_DELIM}`;
+  let removed = 0;
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      if (name.startsWith(prefix) && name.endsWith(".log")) {
+        try {
+          fs.rmSync(path.join(dir, name), { force: true });
+          removed += 1;
+        } catch { /* best-effort — 单文件删除失败不阻断轮转 */ }
+      }
+    }
+  } catch { /* best-effort — 目录缺失/不可读 ⇒ 无可轮转 */ }
+  return removed;
+}
+
 /** 追加一行 fan-in 过程 trace（JSONL，一行一 JSON；首字段 ts）。写失败不致命（运行时日志，
  *  ⛔ 不因日志写失败炸 fan-in——trace 是观测面不是正确性闸）。 */
 export function appendFanInTrace(file: string, entry: Record<string, unknown>): void {
@@ -2331,6 +2950,57 @@ export function appendFanInTrace(file: string, entry: Record<string, unknown>): 
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.appendFileSync(file, JSON.stringify(rec) + "\n", "utf8");
   } catch { /* best-effort runtime log */ }
+}
+
+// ── scoped-gate cache（gap-worker-premerge-scoped-gate-cache）──────────────────────────────────────
+// worker 退出前 agent-mediated pre-merge + scoped test 后，机械记录 (task, developSha, verdict=pass)
+// 到 .quay/scoped-gate-cache.json（仿 .quay/doc-check-cache.json 的既有模式）。driver 锁内
+// merge-develop 之后、scoped-gate 之前查这份缓存：当且仅当锁内合并到的 develop tip 与 worker 记录的
+// developSha 完全一致才跳过 scoped-gate（可证明冗余——worker 已对着这个确切状态验证过绿）；develop
+// 前进 / 缓存缺失 / 读不懂 ⇒ 照跑（fail-closed，与 docCheckLeg 的「面未变才命中、算不出就照跑」同一条
+// 纪律）。只缓存绿、⛔ 键算不出 ⇒ 照跑。
+
+/** 缓存键 = `${task}\t${developSha}`（task id 不含 \t；developSha 是 develop tip 的完整 sha）。
+ *  (task, developSha) 二元组唯一确定键——develop 前进一个提交即失配（未命中照跑）。 */
+export function scopedGateKey(task: string, developSha: string): string {
+  return `${task}\t${developSha}`;
+}
+
+/** 缓存条目形：最后一个 GREEN scoped-gate verdict，键 = scopedGateKey(task, developSha)。 */
+export interface ScopedGateCacheEntry {
+  key: string;
+  ok: true;
+  ts: string;
+}
+
+/** 读键为 `key` 的缓存绿 verdict。命中（key 完全一致 + ok:true）⇒ true；未命中/缺失/损坏/非绿 ⇒
+ *  null（fail-closed——null 永不是命中）。签名与 readDocCheckCache 对齐。 */
+export function readScopedGateCache(cacheFile: string, key: string): boolean | null {
+  try {
+    if (!fs.existsSync(cacheFile)) return null;
+    const raw: unknown = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const entry = raw as ScopedGateCacheEntry;
+    if (entry.key !== key) return null;
+    if (entry.ok !== true) return null; // only GREEN verdicts are cacheable
+    return true;
+  } catch {
+    return null;
+  }
+}
+
+/** 写 GREEN verdict（原子替换；只有绿才被缓存——worker 仅在 scoped 门跑绿后调用）。best-effort：
+ *  写失败 ≠ fan-in 失败。签名与 writeDocCheckCache 对齐。 */
+export function writeScopedGateCache(cacheFile: string, key: string): void {
+  try {
+    fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+    const entry: ScopedGateCacheEntry = { key, ok: true, ts: new Date().toISOString() };
+    const tmp = `${cacheFile}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(entry) + "\n", "utf8");
+    fs.renameSync(tmp, cacheFile);
+  } catch {
+    // best-effort runtime cache — never let a cache write fail the fan-in
+  }
 }
 
 /**
@@ -2354,10 +3024,11 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   // 过程日志（A1，gitignored 运行时日志）：.quay/fan-in-<task>-<runId>.log，逐步骤 trace。
   const fanInLog = path.join(root, ".quay", `fan-in-${task}-${runIdSafe}.log`);
   // 套件日志（A2）：从 /tmp 迁到 .quay/（durable——/tmp 系统清理实证见 3389 个测试遗留目录）。文件名带
-  // runId——⛔ 不再复用 /tmp/fan-in-suite-${task}.log（跨 relaunch 残留旧轮内容，
-  // gap-fan-in-suite-log-cross-relaunch-reuse；本次「每次测试独立日志文件」指令）。
+  // runId + attempt——⛔ 不再复用 /tmp/fan-in-suite-${task}.log（跨 relaunch 残留旧轮内容，
+  // gap-fan-in-suite-log-cross-relaunch-reuse）；attempt 唯一后缀 ⇒ 同一 runId 内多次 suite 互不覆盖
+  // （gap-fan-in-suite-log-same-runid-overwrite AC1）。
   const suiteLogFile =
-    opts.suiteLogFile ?? path.join(root, ".quay", `fan-in-suite-${task}-${runIdSafe}.log`);
+    opts.suiteLogFile ?? path.join(root, ".quay", suiteLogFileName(task, runId, newSuiteLogAttemptSuffix()));
   const suiteStateFile = opts.suiteStateFile ?? path.join(root, ".quay", "full-suite-state.json");
   const scriptsDir = opts.scriptsDir ?? path.join(worktree, "plugin", "scripts");
   // P2 (gap-execution-loop-productization-p2-p4): the ff 持锁段 is now a TS module (packages/quay/
@@ -2525,10 +3196,21 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     //   node --experimental-strip-types plugin/scripts/archguard-runner.ts --root <repo-root>
     // 产物 append 进 <repo-root>/.archguard/metrics-history.jsonl（按需产出，不进 fan-in 关键路径）。
 
-    // 6. scoped 门（必须绿）。
-    const scopedCmd = opts.scopedGateCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
-    a = await step("scoped-gate", scopedCmd, 600_000);
-    if (!a.ok) return fail("scoped-gate", a);
+    // 6. scoped 门（必须绿）。worker 已在退出前对着同一 develop tip 跑绿并写缓存（gap-worker-premerge-
+    //    scoped-gate-cache）⇒ 锁内 merge 到的 develop tip 与 worker 记录的 developSha 完全一致时跳过
+    //    （可证明冗余——worker 已对着这个确切状态验证过绿）；develop 前进 / 缓存缺失 / 读不懂 ⇒ 照跑
+    //    （fail-closed，同 docCheckLeg 的「面未变才命中、算不出就照跑」纪律）。
+    const scopedCmd = opts.scopedGateCommand ?? scopedGateCommandFor(task, worktree);
+    const scopedCacheFile = opts.scopedGateCacheFile ?? path.join(root, ".quay", "scoped-gate-cache.json");
+    const scopedT0 = Date.now();
+    const scopedDevelopSha = (await mechSh(["git", "-C", worktree, "rev-parse", mergeTarget], 30_000)).stdout.trim();
+    const scopedCacheHit = scopedDevelopSha !== "" && readScopedGateCache(scopedCacheFile, scopedGateKey(task, scopedDevelopSha)) === true;
+    if (scopedCacheHit) {
+      trace({ step: "scoped-gate", exit: 0, wall_ms: Date.now() - scopedT0, ok: true, reason: "cache-hit(worker-premerge)" });
+    } else {
+      a = await step("scoped-gate", scopedCmd, 600_000);
+      if (!a.ok) return fail("scoped-gate", a);
+    }
 
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
@@ -2624,7 +3306,15 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const wr = await mechSh(["git", "-C", root, "worktree", "remove", "--force", worktree], 60_000);
     const bd = await mechSh(["git", "-C", root, "branch", "-D", `task/${task}`], 60_000);
     const cleanupOk = wr.ok && bd.ok;
-    trace({ step: "cleanup", exit: cleanupOk ? 0 : 1, wall_ms: Date.now() - cleanupT0, ok: cleanupOk, ...(cleanupOk ? {} : { reason: "worktree remove / branch delete best-effort (non-fatal)" }) });
+    // 轮转：landed ⇒ 清掉该任务名下全部历史 suite attempt 日志（⛔ 长期 .quay/ 无限堆积孤儿
+    // fan-in-suite-*.log；gap-fan-in-suite-log-same-runid-overwrite AC3）。best-effort，非 landing 判据。
+    const prunedSuiteLogs = pruneTaskSuiteLogs(root, task);
+    trace({
+      step: "cleanup", exit: cleanupOk ? 0 : 1, wall_ms: Date.now() - cleanupT0, ok: cleanupOk,
+      ...(cleanupOk
+        ? (prunedSuiteLogs > 0 ? { reason: `pruned ${prunedSuiteLogs} suite attempt log(s)` } : {})
+        : { reason: "worktree remove / branch delete best-effort (non-fatal)" }),
+    });
   } catch (e) {
     return failClean("exception", (e as Error)?.message ?? String(e));
   } finally {
@@ -2898,6 +3588,51 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
    *  单一实现），不各写一遍。 */
   const stopCondition = makeStopCondition(rootDir, "worker", resourceGateArgv);
 
+  /** worker 终态记账（spawnSelected 与 adoptOrphanWorker 共用，⛔ 不各写一遍）：结果入 results + 重试上限
+   *  （exited-not-landed 达上限标 needs-human）+ 快速死亡退避。spawnSelected 与 adopt 的 worker 退出后
+   *  走同一归宿。 */
+  const onWorkerFinished = (rw: RunningWorker, r: WorkerRunResult): WorkerRunResult => {
+    rw.done = true;
+    results.push(r);
+    // 重试上限（gap-worker-driver-retry-cap-not-wired）：worker 结束若 exited-not-landed ⇒ 连续失败
+    // 计数 + 达上限标 needs-human（ready→needs-human）。needsHuman 集合进 retryCapNotExhausted 过滤 ⇒
+    // 下一轮不再重派（与 markNeedsHuman 的 status 翻转双保险——即使磁盘写失败，内存过滤也挡重派）。
+    if (r.outcome.final_state === "exited-not-landed") {
+      // ff-not-fast-forward（分支滞后，非代码缺陷）不计重试上限——continue-cycle 识别为 transient
+      // 续做态，继续 CONTINUE 重派（merge develop 再 ff 自愈），⛔ 不把 3 次 branch-lag 误判成真缺陷
+      // 标 needs-human（那会静置 RECOMMENDED 不派，需人手动救回）。真缺陷（suite red / merge-develop
+      // 冲突 / anti-drift 违反 / ff 步的其它失败）仍照常计数达上限标 needs-human。
+      const newly = isFfNotFastForwardFailure(r.outcome)
+        ? []
+        : advanceRetryCap(retryState, [r.taskId], maxRetries);
+      for (const id of newly) {
+        // gap-mark-needs-human-commit-after-write：markNeedsHuman 写盘即提交，返回
+        // { id, ok, reason, committed }——⛔ 不再丢弃 {ok,reason}；结果经 writeRound 落进 round 记录
+        // （生产载体），json 事件供测试/手动观测。
+        const nh = markNeedsHuman(rootDir, id, `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`);
+        needsHumanResults.push(nh);
+        if (json) process.stdout.write(`${JSON.stringify({ event: "needs-human", ...nh })}\n`);
+      }
+    }
+    // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff）：worker 快速死亡（<quickDeathMs）
+    // ⇒ 对该 task 退避（backoffUntil，⛔ 不立即重派）；退避到上限（maxRetries）⇒ markNeedsHuman（复用
+    // 现有重试上限机制，⛔ 不无限退避）。needsHuman 集合与 markNeedsHuman 的 status 翻转双保险——
+    // 即使磁盘写失败，内存过滤（retryCapNotExhausted/notNeedsHuman）也挡重派。
+    const backoff = recordQuickDeathBackoff(
+      backoffState, r.taskId, r.outcome.final_state, r.outcome.wall_clock_ms, Date.now(), maxRetries, backoffCfg,
+    );
+    if (backoff.newlyNeedsHuman) {
+      retryState.needsHuman.add(r.taskId);
+      markNeedsHuman(rootDir, r.taskId, `worker-driver 连续 ${maxRetries} 次 <${backoffCfg.quickDeathMs}ms 快速死亡（退避上限）`);
+    }
+    if (backoff.quickDeath && json) {
+      process.stdout.write(
+        `${JSON.stringify({ event: "worker-backoff", task: r.taskId, consecutive_quick_deaths: backoffState.counts.get(r.taskId), backed_off: backoff.backedOff, needs_human: backoff.newlyNeedsHuman, wall_clock_ms: r.outcome.wall_clock_ms })}\n`,
+      );
+    }
+    return r;
+  };
+
   /** spawn 一个选中的 worker，并把 selector 的真实理由带进 outcome（AC2）。 */
   const spawnSelected = async (sel: { task: string; reason: string }): Promise<void> => {
     const runIdForTask = runId ?? `${runPrefix}-${sel.task}`;
@@ -2922,47 +3657,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       json,
       pidFile,
       injectSessionId: workerCmdOpts.exact == null,
-    }).then((r) => {
-      rw.done = true;
-      results.push(r);
-      // 重试上限（gap-worker-driver-retry-cap-not-wired）：worker 结束若 exited-not-landed ⇒ 连续失败
-      // 计数 + 达上限标 needs-human（ready→needs-human）。needsHuman 集合进 retryCapNotExhausted 过滤 ⇒
-      // 下一轮不再重派（与 markNeedsHuman 的 status 翻转双保险——即使磁盘写失败，内存过滤也挡重派）。
-      if (r.outcome.final_state === "exited-not-landed") {
-        // ff-not-fast-forward（分支滞后，非代码缺陷）不计重试上限——continue-cycle 识别为 transient
-        // 续做态，继续 CONTINUE 重派（merge develop 再 ff 自愈），⛔ 不把 3 次 branch-lag 误判成真缺陷
-        // 标 needs-human（那会静置 RECOMMENDED 不派，需人手动救回）。真缺陷（suite red / merge-develop
-        // 冲突 / anti-drift 违反 / ff 步的其它失败）仍照常计数达上限标 needs-human。
-        const newly = isFfNotFastForwardFailure(r.outcome)
-          ? []
-          : advanceRetryCap(retryState, [r.taskId], maxRetries);
-        for (const id of newly) {
-          // gap-mark-needs-human-commit-after-write：markNeedsHuman 写盘即提交，返回
-          // { id, ok, reason, committed }——⛔ 不再丢弃 {ok,reason}；结果经 writeRound 落进 round 记录
-          // （生产载体），json 事件供测试/手动观测。
-          const nh = markNeedsHuman(rootDir, id, `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`);
-          needsHumanResults.push(nh);
-          if (json) process.stdout.write(`${JSON.stringify({ event: "needs-human", ...nh })}\n`);
-        }
-      }
-      // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff）：worker 快速死亡（<quickDeathMs）
-      // ⇒ 对该 task 退避（backoffUntil，⛔ 不立即重派）；退避到上限（maxRetries）⇒ markNeedsHuman（复用
-      // 现有重试上限机制，⛔ 不无限退避）。needsHuman 集合与 markNeedsHuman 的 status 翻转双保险——
-      // 即使磁盘写失败，内存过滤（retryCapNotExhausted/notNeedsHuman）也挡重派。
-      const backoff = recordQuickDeathBackoff(
-        backoffState, r.taskId, r.outcome.final_state, r.outcome.wall_clock_ms, Date.now(), maxRetries, backoffCfg,
-      );
-      if (backoff.newlyNeedsHuman) {
-        retryState.needsHuman.add(r.taskId);
-        markNeedsHuman(rootDir, r.taskId, `worker-driver 连续 ${maxRetries} 次 <${backoffCfg.quickDeathMs}ms 快速死亡（退避上限）`);
-      }
-      if (backoff.quickDeath && json) {
-        process.stdout.write(
-          `${JSON.stringify({ event: "worker-backoff", task: r.taskId, consecutive_quick_deaths: backoffState.counts.get(r.taskId), backed_off: backoff.backedOff, needs_human: backoff.newlyNeedsHuman, wall_clock_ms: r.outcome.wall_clock_ms })}\n`,
-        );
-      }
-      return r;
-    });
+    }).then((r) => onWorkerFinished(rw, r));
     running.push(rw);
     if (json) {
       process.stdout.write(
@@ -2985,6 +3680,35 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     return Promise.race([...runningWorkers.map((r) => r.promise), floor]).finally(() => {
       if (timer) clearTimeout(timer);
     });
+  };
+
+  // gap-worker-driver-restart-orphan-no-outcome-no-timeout：reconcile 步处理 dispatch 持久记录里、但不在
+  // 内存 running 的条目（旧 driver 死时遗留的在飞 dispatch）。逐条按 pid 存活性 + cmdline 复核分流：
+  //   - pid 存活且仍是本任务的 worker ⇒ adopt 纳入 running（轮询 + 沿用原始 timeoutDeadlineMs，⛔ 不
+  //     重置——防「每次重启续命」无限占位）；adopt 后从 coldInflight 剔除（⛔ 双计在飞）。
+  //   - pid 已死 / 被复用 ⇒ finalizeOrphanDispatch 立刻补终态 + 清 orphan worktree + 清记录。
+  //   - 记录缺失（driver 从未见过，如手工起的 worker）⇒ 不越权接管，维持现状（只靠 coldInflight 排除）。
+  const reconcileOrphanDispatches = (): void => {
+    const store = readDispatchStore(dispatchStoreFile(rootDir));
+    for (const { taskId, record } of orphanDispatchCandidates(store, running.map((r) => r.task))) {
+      const cls = classifyOrphanDispatch(record);
+      if (cls === "finalize") {
+        const res = finalizeOrphanDispatch({ root: rootDir, outcomeFile, record });
+        coldInflight.delete(taskId);
+        if (json) process.stdout.write(`${JSON.stringify({ event: "orphan-finalized", task: taskId, ...res.outcome })}\n`);
+      } else {
+        const rw = {} as RunningWorker;
+        rw.task = taskId;
+        rw.done = false;
+        rw.startedAtMs = record.startedAtMs; // 原始派发时刻（⛔ 不是 adopt 时刻——fan-in 窗口 elapsed 真起点）
+        rw.promise = adoptOrphanWorker({
+          taskId, rootDir, outcomeFile, record, inFlightCount: running.length + 1,
+        }).then((r) => onWorkerFinished(rw, r));
+        running.push(rw);
+        coldInflight.delete(taskId);
+        if (json) process.stdout.write(`${JSON.stringify({ event: "orphan-adopted", task: taskId, worker_pid: record.workerPid, run_id: record.runId })}\n`);
+      }
+    }
   };
 
   let round = 0;
@@ -3035,6 +3759,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       //   都对账一次 ⇒ 人翻回后不依赖任何边沿事件即被下一轮拾起。清除结果进本轮 round 记录。
       step = "reconcile";
       reconciled = reconcileNeedsHumanWithDisk(retryState, rootDir);
+      // 孤儿 dispatch adopt/finalize（gap-worker-driver-restart-orphan-no-outcome-no-timeout）：driver 重启
+      // 遗留的在飞 worker 有据可查、有归宿可判，⛔ 不再「排除集之外一片黑箱、只能等它自己消失」。
+      reconcileOrphanDispatches();
 
       // 2. 池非空且未达 cap 且未判停 ⇒ 走选择环起下一个。
       //    ⛔ stopReason 是【终态 latch】（仅 mcp-halt）；瞬时闸拒绝只记本轮 waitReason，下一轮重读
@@ -3170,6 +3897,8 @@ export async function main(argv: string[]): Promise<number> {
   let mechanicalFanIn = false;
   let mechWorktree: string | undefined;
   let mechMergeTarget: string | undefined;
+  let writeScopedGateCacheFlag = false;
+  let scopedGateCacheDevelopSha: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -3201,6 +3930,8 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--mechanical-fan-in") mechanicalFanIn = true;
     else if (a === "--worktree") mechWorktree = args[++i];
     else if (a === "--merge-target") mechMergeTarget = args[++i];
+    else if (a === "--write-scoped-gate-cache") writeScopedGateCacheFlag = true;
+    else if (a === "--develop-sha") scopedGateCacheDevelopSha = args[++i];
     else if (a === "--help" || a === "-h") {
       console.log(
         "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + ⛔ 不 stash 主检出 + MCP 控制面 + 常驻选择环）\n" +
@@ -3216,6 +3947,7 @@ export async function main(argv: string[]): Promise<number> {
           "  [--backoff-base-ms <ms>]  第一次退避等待 ms（指数底数，缺省 30000）\n" +
           "  [--backoff-max-ms <ms>]  退避等待上限 ms（指数增长封顶，缺省 300000）\n" +
           "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
+          "  --write-scoped-gate-cache --task <id> --develop-sha <sha>  写 scoped-gate 缓存（worker 退出前跑绿后调用；stdout 单行 JSON）\n" +
           "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
       );
       return 0;
@@ -3247,6 +3979,21 @@ export async function main(argv: string[]): Promise<number> {
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result.outcome === "landed" ? 0 : 2;
+  }
+
+  // --write-scoped-gate-cache：worker 退出前跑绿 scoped 门后，机械写 (task, developSha, pass) 到
+  // <root>/.quay/scoped-gate-cache.json（gap-worker-premerge-scoped-gate-cache 阶段 a 的机械写侧——
+  // ⛔ 不靠 agent 手写 JSON）。stdout 单行 JSON，exit 0 = 已写 / 2 = 缺参（fail-closed）。
+  if (writeScopedGateCacheFlag) {
+    const task = tasks[0];
+    if (!task || !scopedGateCacheDevelopSha) {
+      console.error("worker-driver: --write-scoped-gate-cache requires --task <id> and --develop-sha <sha>");
+      return 2;
+    }
+    const cacheFile = path.join(rootDir, ".quay", "scoped-gate-cache.json");
+    writeScopedGateCache(cacheFile, scopedGateKey(task, scopedGateCacheDevelopSha));
+    process.stdout.write(`${JSON.stringify({ event: "scoped-gate-cache-written", task, developSha: scopedGateCacheDevelopSha, cacheFile })}\n`);
+    return 0;
   }
 
   // --serve：起 MCP 控制面（常驻）。listening socket 保持事件循环存活 ⇒ 进程不退出，直到 SIGINT/SIGTERM。

@@ -405,3 +405,63 @@ test("concurrent --loop installs derive a stable loop set — no torn-read false
     }
   } finally { wss.forEach(cleanup); }
 });
+
+// ── torn declaration-read regression (gap-quay-init-escalations-vendor-freshness-false-positive) ──────
+// verify_referenced_landed's declaration read (self-create / reference-doc) is the SAME torn-read class
+// as derive_loop_scripts: under concurrent --loop load a grep in a command substitution can be killed
+// mid-stream (the pipeline's `|| true` masks the death), returning a PARTIAL declaration set. A torn
+// self-create read that drops `orchestration/escalations.md` (declared at init/SKILL.md:143) would
+// false-positive it as referenced-not-landed — the gap's subject. The stability check (two agreeing
+// passes + sentinel) must absorb a torn pass and recover the FULL declaration set. This fake grep tears
+// the self-create declaration scan to its FIRST line (tick-log.md — the sentinel) for the first N reads,
+// then passes through; a torn pass therefore differs from a full pass and the stability check retries.
+const SELFCREATE_TORN_GREP = String.raw`#!/usr/bin/env bash
+# Torn-read simulation grep (declaration-read stability regression test only).
+# Passes through to the real grep EXCEPT the self-create declaration scan (pattern starting with
+# '<!-- self-create:'), which it truncates to the first line for the first FAKE_GREP_TORN_UNTIL reads.
+set -u
+real_grep="$REAL_GREP"
+is_selfcreate=no
+for a in "$@"; do
+  case "$a" in
+    '<!-- self-create:'*) is_selfcreate=yes ;;
+  esac
+done
+if [ "$is_selfcreate" = "yes" ]; then
+  n=0
+  if [ -f "$FAKE_GREP_COUNTER" ]; then n="$(cat "$FAKE_GREP_COUNTER" 2>/dev/null || echo 0)"; fi
+  n=$((n + 1)); printf '%s' "$n" > "$FAKE_GREP_COUNTER"
+  if [ "$n" -le "$FAKE_GREP_TORN_UNTIL" ]; then
+    "$real_grep" "$@" 2>/dev/null | head -n 1 || true
+    exit 0
+  fi
+fi
+exec "$real_grep" "$@"
+`;
+
+function selfcreateTornEnv(binDir, opts) {
+  const fakeGrep = path.join(binDir, "grep");
+  fs.writeFileSync(fakeGrep, SELFCREATE_TORN_GREP);
+  fs.chmodSync(fakeGrep, 0o755);
+  return {
+    PATH: `${binDir}:${process.env.PATH || ""}`,
+    REAL_GREP: realGrepPath(),
+    FAKE_GREP_COUNTER: path.join(binDir, "counter"),
+    FAKE_GREP_TORN_UNTIL: String(opts.tornUntil ?? 0),
+  };
+}
+
+test("torn self-create declaration read is retried — a declared self-create (escalations.md) is recovered", () => {
+  const binDir = makeTmp("torn-decl-");
+  const env = selfcreateTornEnv(binDir, { tornUntil: 1 });
+  try {
+    // Tear ONLY the first self-create read (to the sentinel tick-log.md); the second read is full, so
+    // the two reads disagree and the stability check retries to two agreeing FULL passes.
+    const r = runSourced('_read_declarations; echo "SC=$QUAY_INIT_SELFCREATE"', { env });
+    assert.equal(r.status, 0, `sourcing must succeed:\n${r.stderr}`);
+    assert.match(r.stdout, /orchestration\/escalations\.md/,
+      "the stability-checked declaration read must recover the declared self-create orchestration/escalations.md (the gap's false-positive victim)");
+    assert.match(r.stdout, /orchestration\/tick-log\.md/,
+      "the sentinel self-create orchestration/tick-log.md must also be present in the recovered set");
+  } finally { cleanup(binDir); }
+});

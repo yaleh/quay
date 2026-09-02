@@ -1402,7 +1402,12 @@ verify_referenced_landed() {
   # nondeterministic point) differs from a full read, so it retries; only two agreeing reads are
   # accepted as complete. A genuinely-undeclared ref is absent from every read, so real drift
   # still fails (negative control unchanged).
-  _read_declarations
+  # Read the declaration sets once with the multi-level stability retry. The verdict is captured via
+  # `if` (NOT a bare call — a bare `_read_declarations` returning 1 under `set -e` would abort the
+  # whole check with no verdict). A torn up-front read is re-stabilized per-reference below, never
+  # trusted blindly: a declared self-create (e.g. orchestration/escalations.md) read as absent is
+  # exactly the false positive this gate must not emit.
+  if _read_declarations; then :; fi
   selfcreate="$QUAY_INIT_SELFCREATE"
   refdoc="$QUAY_INIT_REFDOC"
   # The reference set is derived once, STABILITY-CHECKED (two agreeing passes — _read_references),
@@ -1417,14 +1422,25 @@ verify_referenced_landed() {
       continue   # declared self-create or reference-doc — not a defect
     fi
     if [ ! -e "$ws/$r" ]; then
-      # last line of defense: re-read ONCE more (the up-front read already retried 3x; a single
-      # extra read covers the rare case where the whole snapshot was taken mid-write). A genuinely-
-      # undeclared ref fails here too, so drift is never masked.
-      local fresh_selfcreate fresh_refdoc
-      fresh_selfcreate="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
-      fresh_refdoc="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
-      if printf '%s\n' "$fresh_selfcreate" "$fresh_refdoc" | grep -qxF "$r"; then
-        continue   # fresh read confirms the declaration exists — the snapshot was transiently incomplete
+      # last line of defense: re-read the declarations with the SAME stability check the up-front read
+      # uses (two agreeing passes + sentinel), NOT a single-pass grep. The retired single-pass
+      # fresh-read could itself be torn under concurrent --loop load and false-positive a DECLARED
+      # self-create/reference-doc (observed: orchestration/escalations.md — declared at
+      # init/SKILL.md:143 but read as absent). A stability-checked re-read retries a torn pass; a
+      # genuinely-undeclared ref is absent from every stable pass, so fail-closed is unchanged.
+      local fresh_stable=0
+      if _read_declarations; then fresh_stable=0; else fresh_stable=1; fi
+      if printf '%s\n' "$QUAY_INIT_SELFCREATE" "$QUAY_INIT_REFDOC" | grep -qxF "$r"; then
+        continue   # stability-checked re-read confirms the declaration — the up-front snapshot was torn
+      fi
+      if [ "$fresh_stable" != 0 ]; then
+        # The declaration file could not be stabilized across retries (torn under load). Do NOT emit
+        # "referenced-not-landed" from an unreliable read — that would false-positive a declared file
+        # (硬规则 3b mirror: an unreadable input must not masquerade as a definitive miss). Report a
+        # DISTINGUISHABLE failure instead and fail closed.
+        echo "  FAIL (declaration-read-unstable): $r — init/SKILL.md declarations could not be read reliably (torn under load); re-run quay-init" >&2
+        missing=1
+        continue
       fi
       # last line of defense for the LANDED set (same torn-read class, opposite face): a concurrent
       # --loop install's write can transiently make a just-laid file invisible to the `-e` scan (the

@@ -91,7 +91,7 @@ export function renderTestsCard(tests: TestsResult, suiteRun: CurrentSuiteRun | 
     ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">
         <div style="font-size:0.7rem;color:var(--color-neutral-700)">近${recentRuns.length}轮（新→旧）</div>
         <div style="display:flex;gap:3px">${recentRuns.map((r) => {
-          const color = r.state === "green" ? "var(--color-accent-700)" : r.state === "red" ? "var(--color-accent-800)" : "var(--color-neutral-400)";
+          const color = r.state === "green" ? "var(--color-positive-700)" : r.state === "red" ? "var(--color-accent-800)" : "var(--color-neutral-400)";
           const rGateBlocked = r.tests === 0 && r.pass === 0 && (r.reason === "gate-failed" || r.gate != null);
           const title = `#${r.round ?? "?"} ${r.state ?? "—"}${rGateBlocked ? `（gate:${r.gate ?? "?"} 未执行测试）` : ` pass ${r.pass ?? "—"}/${r.tests ?? "—"}`}`;
           return html`<span title="${escapeHtml(title)}" style="width:11px;height:11px;border-radius:2px;background:${color};display:inline-block"></span>`;
@@ -162,7 +162,7 @@ export function renderDashboardPage(d: {
   const sysCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">系统资源</div>
     <p style="margin:0;font-size:0.8rem;line-height:1.5">cpu_stall ${d.sys.resourceGate.cpuStallAvg10 != null ? escapeHtml(String(d.sys.resourceGate.cpuStallAvg10)) : "—"} · loadavg ${d.sys.resourceGate.loadAvg != null ? escapeHtml(String(d.sys.resourceGate.loadAvg)) : "—"}</p>
-    <div style="font-weight:800;color:${sysGo ? "var(--color-accent-700)" : "var(--color-accent-800)"}">⇒ ${sysGo ? "GO" : d.sys.resourceGate.status === "ok" ? "WAIT" : "未接入"}</div>
+    <div style="font-weight:800;color:${sysGo ? "var(--color-positive-700)" : "var(--color-accent-800)"}">⇒ ${sysGo ? "GO" : d.sys.resourceGate.status === "ok" ? "WAIT" : "未接入"}</div>
     <a href="/system" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看系统状态 →</a>
   </div>`;
 

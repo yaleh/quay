@@ -2265,7 +2265,7 @@ test("AC1 — fail=0 + tmux-leak-scan ⇒ round-record reason='gate-failed' + ga
   }
 });
 
-test("AC1 — fail=0 + __PERFILE__ passed=false ⇒ round-record reason='gate-failed' + gate='perfile-timeout'", async () => {
+test("AC1 — fail=0 + __PERFILE__ passed=false ⇒ round-record reason='gate-failed' + gate='perfile-failure'", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-reason-pf-"));
   const { f, dir } = fakeSuite(
     'echo "__PERFILE__ duration_ms=3580.991183 packages/quay/test/verify-delivery-surface.test.mjs passed=false"\n' +
@@ -2278,8 +2278,8 @@ test("AC1 — fail=0 + __PERFILE__ passed=false ⇒ round-record reason='gate-fa
     const rec = lastRoundRecord(root);
     assert.ok(rec, "a verification-round record is appended");
     assert.equal(rec.fail, 0, "all tests passed (fail=0)");
-    assert.equal(rec.reason, "gate-failed", "a per-file timeout red with fail=0 is reason=gate-failed");
-    assert.equal(rec.gate, "perfile-timeout", "the round record names the per-file timeout gate");
+    assert.equal(rec.reason, "gate-failed", "a per-file failure red with fail=0 is reason=gate-failed");
+    assert.equal(rec.gate, "perfile-failure", "the round record names the per-file failure gate");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });

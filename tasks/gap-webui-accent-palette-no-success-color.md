@@ -1,7 +1,7 @@
 ---
 id: gap-webui-accent-palette-no-success-color
 title: web UI 配色令牌无独立"成功/绿色"色相——pass/alive/GO 与 fail/dead 只靠红橙色系深浅区分，普通链接也复用同一色相
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -39,14 +39,14 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] `grep -c 'color-positive\|color-success' docs/design/quay-webui-improved-2026-08-16/_ds/modernist-40217566-87fa-42b1-9cc0-36027903691f/styles.css` 与对 `packages/quay/src/webui-modernist.css` 的同一 grep 结果**都 ≥ 1 且相等**（新令牌两侧同步落地）。
-- [ ] `node --test packages/quay/test/webui-modernist-sync.test.mjs` 全绿（AC100(a) 字节级一致性未破坏）。
-- [ ] 新令牌的十六进制色相与 `--color-accent`（`#ec3013`）的色相角（HSL hue）差异 ≥ 60°（机械可算：脚本读两个 hex，转 HSL，比较 hue 差），证明确实是"不同色相"而不是又一级红橙深浅。
-- [ ] `serve-render.ts` 里两处 `.verdict-pass` 定义均改用新令牌，`grep -c "verdict-pass.*color-accent-700" packages/quay/src/serve-render.ts` 结果为 0。
-- [ ] `serve-dashboard.ts` 的 `state === "green"` 分支与 `sysGo` 为真分支均不再引用 `--color-accent-700`（grep 验证），改用新令牌。
-- [ ] `serve-sessions.ts` 的 `alive` 为真分支不再引用 `--color-accent-700`。
-- [ ] 新增测试文件 `packages/quay/test/gap-webui-accent-palette-no-success-color.test.mjs`：起一个真实 server（复用 `webui-modernist-sync.test.mjs` 的 `startServer` 方式），构造一组 fixture 让 `/dashboard` 渲染出 `state:"green"` 的一轮和一个 `sysGo:true` 场景，断言响应体里这两处样式引用的十六进制/变量名**不等于** `--color-accent-700` 对应值，且等于新令牌。
-- [ ] `scripts/test.sh` 全量绿（不引入新的失败）。
+- [x] `grep -c 'color-positive\|color-success' docs/design/quay-webui-improved-2026-08-16/_ds/modernist-40217566-87fa-42b1-9cc0-36027903691f/styles.css` 与对 `packages/quay/src/webui-modernist.css` 的同一 grep 结果**都 ≥ 1 且相等**（新令牌两侧同步落地）。
+- [x] `node --test packages/quay/test/webui-modernist-sync.test.mjs` 全绿（AC100(a) 字节级一致性未破坏）。
+- [x] 新令牌的十六进制色相与 `--color-accent`（`#ec3013`）的色相角（HSL hue）差异 ≥ 60°（机械可算：脚本读两个 hex，转 HSL，比较 hue 差），证明确实是"不同色相"而不是又一级红橙深浅。
+- [x] `serve-render.ts` 里两处 `.verdict-pass` 定义均改用新令牌，`grep -c "verdict-pass.*color-accent-700" packages/quay/src/serve-render.ts` 结果为 0。
+- [x] `serve-dashboard.ts` 的 `state === "green"` 分支与 `sysGo` 为真分支均不再引用 `--color-accent-700`（grep 验证），改用新令牌。
+- [x] `serve-sessions.ts` 的 `alive` 为真分支不再引用 `--color-accent-700`。
+- [x] 新增测试文件 `packages/quay/test/gap-webui-accent-palette-no-success-color.test.mjs`：起一个真实 server（复用 `webui-modernist-sync.test.mjs` 的 `startServer` 方式），构造一组 fixture 让 `/dashboard` 渲染出 `state:"green"` 的一轮和一个 `sysGo:true` 场景，断言响应体里这两处样式引用的十六进制/变量名**不等于** `--color-accent-700` 对应值，且等于新令牌。
+- [x] `scripts/test.sh` 全量绿（不引入新的失败）。
 
 ## Definition of Done
 
