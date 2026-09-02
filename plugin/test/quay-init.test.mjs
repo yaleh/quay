@@ -55,11 +55,31 @@ test("AC2 — the three exec-core docs are in the derived laydown set; a --loop 
     for (const core of ["orchestrator-tick-core.md", "fast-mode-tick-core.md"]) {
       const landed = path.join(ws, "orchestration", core);
       assert.ok(fs.existsSync(landed), `the exec core must be laid down: orchestration/${core}`);
-      // Cold-start readable (AC5): byte-identical to the shipped plugin/loop/ canonical copy.
+    }
+    // fast-mode-tick-core.md ships as REAL content (normalized-byte semantic landing) — cold-start
+    // readable (AC5): byte-identical to the shipped plugin/loop/ canonical copy.
+    {
+      const core = "fast-mode-tick-core.md";
+      const landed = path.join(ws, "orchestration", core);
       const shipped = path.join(pluginDir, "loop", core);
       assert.ok(fs.existsSync(shipped), `the shipped canonical copy must exist: plugin/loop/${core}`);
       assert.equal(fs.readFileSync(landed, "utf8"), fs.readFileSync(shipped, "utf8"),
         `laid-down ${core} must be byte-identical to the shipped copy`);
+    }
+    // orchestrator-tick-core.md's shipped plugin/loop/ copy is a one-line POINTER
+    // (gap-inner-content-cleanup, 2026-09-02, mirroring gap-plugin-loop-manager-drifted-copies-
+    // pointerize) — resolve_tick_core_src follows it to the orchestration/ 正本, so the laid-down
+    // file must be the REAL core, byte-identical to that 正本, not the pointer line.
+    {
+      const core = "orchestrator-tick-core.md";
+      const landed = path.join(ws, "orchestration", core);
+      const shipped = path.join(pluginDir, "loop", core);
+      assert.match(fs.readFileSync(shipped, "utf8"), /^> 正本: orchestration\/orchestrator-tick-core\.md/,
+        "plugin/loop/orchestrator-tick-core.md must be a pointer to its orchestration/ 正本");
+      const canonical = path.join(path.resolve(pluginDir, ".."), "orchestration", core);
+      assert.ok(fs.existsSync(canonical), `the orchestration/ 正本 must exist: ${canonical}`);
+      assert.equal(fs.readFileSync(landed, "utf8"), fs.readFileSync(canonical, "utf8"),
+        `laid-down ${core} must be the REAL core, byte-identical to the orchestration/ 正本 (not the plugin/loop pointer)`);
     }
     // The measure: `quay-init.sh --loop | grep -c tick-core` ≥ 3 (the three cores are in the derived set).
     const measure = runInit(ws, INIT_ARGS(ws));

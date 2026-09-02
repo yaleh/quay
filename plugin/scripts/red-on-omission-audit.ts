@@ -194,24 +194,6 @@ export const REGISTRY: RedReadingEntry[] = [
     },
   },
   {
-    id: "a16_observe_inner_failure",
-    kind: "a-reading",
-    behavior:
-      "A16 上层观察下层失能（替代 subagent 计数）— inner 宣称派发但 in-flight 恒 0 / 宣称合并但 diverge 不降 / 宣称修红但轮次不转绿 ⇒ 报「inner 失能」并升级",
-    redReading:
-      "inner 宣称 vs 观测矛盾 ⇒ tick-log 升级行（不做即静默——读 tick-log 升级列是否出现「inner 失能」）",
-    verify: (root) => {
-      const t = tickCore(root);
-      const ok = has(t, "宣称要做的事") && has(t, "宣称派发") && has(t, "宣称合并");
-      return {
-        ok,
-        detail: ok
-          ? "执行核 A16 声明「宣称 vs 观测矛盾 ⇒ 报 inner 失能」判据"
-          : "执行核 A16 未声明 inner 失能判据",
-      };
-    },
-  },
-  {
     id: "a14_closure_pass",
     kind: "a-reading",
     behavior:
@@ -412,7 +394,7 @@ const C_AUDIT: { id: string; behavior: string; redReading: string | null }[] = [
   { id: "C10", behavior: "写任何时刻前先跑 date -u，不许估", redReading: null },
   { id: "C11", behavior: "停摆分类不要靠输入框内容猜（ghost suggestion）；看最后一段 ⏺ 问了什么", redReading: null },
   { id: "C12", behavior: "人机对话期间 cron 不 fire；每次对话结束前手动补一次 tick", redReading: null },
-  { id: "C13", behavior: "写 tasks/ 前先确认没有在飞任务把 tasks/ 列进它的 ## Touches；撞上就改为记队列状态 + 指示内层建", redReading: null },
+  { id: "C13", behavior: "写 tasks/ 前先确认没有在飞任务把 tasks/ 列进它的 ## Touches；撞上就改为记队列状态文件补建", redReading: null },
   { id: "C14", behavior: "派发前读候选的 ## Contract 六键并跑 task-contract-check.ts；介入后把改了什么写进 ## Dispatch review", redReading: "task-contract-check exit 1（@static-tier always）" },
   { id: "C15", behavior: "收编到 serial 相仅应在证明相应失败是并发造成后执行（isolated-rerun 贴证据）；not-in-family 不得按负载敏感处理", redReading: null },
 ];
@@ -424,16 +406,12 @@ const A_AUDIT: { id: string; behavior: string; redReading: string | null }[] = [
   { id: "A4", behavior: "观察块：capture-pane / git log / git status / telemetry / drift / batch2-queue", redReading: null },
   { id: "A5", behavior: "ls .quay/manager-inbox/（列目录本身，不依赖 unread 计数器）", redReading: "目录非空且无 consumed 回执 ⇒ 逐条进决策/报" },
   { id: "A6", behavior: "占用率固定 cap=5（动态 cap 作废）；ready-pool-check --cap 5", redReading: "不带 --cap 5 ⇒ floor=12 假读数（≠ floor=20）" },
-  { id: "A7", behavior: "inner-blocked-signal.ts --detect-stop --target inner", redReading: "连续 3 次 waiting-input/permission-prompt 才写块；pane 快照陈旧改读活 capture-pane" },
-  { id: "A8", behavior: "层间 tick 间隔检查（inner transcript mtime age，阈值 30min）", redReading: "mtime age > 阈值 ⇒ 报" },
   { id: "A9", behavior: "ready-pool-check.ts --root --cap 5 --json → excluded[] 的 not-yet-flipped", redReading: "not-yet-flipped ≥ floor/2 ⇒ 逐个核 AC（≥10 报 done-flip 积压）" },
   { id: "A10", behavior: "closure-lag-check.sh（退出非 0 ⇒ 报 WARN）", redReading: "退出非 0 ⇒ 报 WARN 进 tick-log" },
   { id: "A11", behavior: "读 .quay/full-suite-state.json 的 state/reason/durationMs", redReading: "red ⇒ 停派；缺文件 ⇒ true；aborted 不触发停派" },
-  { id: "A12", behavior: "独立核实内层至少一项声称（inner-forensics / self-report-vocab-audit）", redReading: "self-report vocab 连续 3 轮无 batch 自述 = 收敛" },
   { id: "A14", behavior: "账本·closure-pass 是否被调用（meta-cc query tool_name=closure-lag-check）", redReading: "心跳缺失 >3 tick ⇒ 写三选一" },
   { id: "A15", behavior: "suite-health（workflow+subagent 双侧+执行体）——每 tick 写 suite-health-last-run.json + 裁定5 执行保障", redReading: "suite-health-last-run.json mtime 陈旧 / ruling5_status 缺失 ⇒ 红" },
-  { id: "A16", behavior: "上层观察下层失能（宣称 vs 观测矛盾 ⇒ 升级）", redReading: "宣称派发但 in-flight 恒 0 / 宣称合并但 diverge 不降 / 宣称修红但轮次不转绿 ⇒ 报 inner 失能" },
-  { id: "A17", behavior: "语义观测器 judge（读自由文本判 stopped/awaiting）", redReading: "stopped:true 无升级 ⇒ redOnOmission exit 1" },
+  { id: "A17", behavior: "语义观测器 judge（读观测对象自由文本判 stopped/awaiting）", redReading: "stopped:true 无升级 ⇒ redOnOmission exit 1" },
 ];
 
 /** 组 audit 行：registry 的行从 registry 取（机械核对 + redReading 非空）；其余标 covered。 */
