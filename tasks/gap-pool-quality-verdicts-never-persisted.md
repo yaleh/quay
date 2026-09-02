@@ -2,7 +2,7 @@
 id: gap-pool-quality-verdicts-never-persisted
 title: pool-quality-judge 判词从无载体——8 次判过的结果只活在 transcript，无法算准确率；已知 should-remove
   误判率 2/3 却无人可查
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -42,13 +42,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **载体写入（driver 路径）**——`quality-gate-driver.ts` 每轮 judge 完成后向 `.quay/quality-round.jsonl` 追加一条记录，含逐任务 `{taskId, verdict, action, evidence, judgedAt, round}` 五键以上；判词为空时不写空记录
-- [ ] AC2: **载体写入（workflow 路径）**——`plugin/workflows/pool-quality-judge.js` 与 `.claude/workflows/pool-quality-judge.js` **两副本**同样落盘且**字节一致**（`diff` exit 0）；单边编辑会被 drift-check 报红
-- [ ] AC3: **三态可区分（硬规则 3b）**——judge 未触发 / 判词解析失败 / 判过且有结果，三者在载体记录里取值不同，「读不懂」不得与「没问题」同形
-- [ ] AC4: **不改 status（本条的范围硬边界）**——实现后 `grep` 确认 quality 路径无任何 `status:` 写入、无 `superseded` 写入；`should-remove` 只落进载体记录与建议输出
-- [ ] AC5: **真实生产载体验证（非 fixture）**——实现落地**之后**跑一次真实 judge，`.quay/quality-round.jsonl` 中出现 ≥1 条含逐任务判词的记录，且 `judgedAt` 晚于实现落地时刻（硬规则 4 推论三：只计落地后的时间窗）
-- [ ] AC6: **负控制（能取假）**——关掉写入那一步后重跑，载体不增长；恢复后增长。两次读数都贴出来
-- [ ] AC7: **既有不回归**——`--for-task` scoped 门 + 全量 suite 绿；`.quay/pool-quality-judge-state.json` 的既有触发器语义不变
+- [x] AC1: **载体写入（driver 路径）**——`quality-gate-driver.ts` 每轮 judge 完成后向 `.quay/quality-round.jsonl` 追加一条记录，含逐任务 `{taskId, verdict, action, evidence, judgedAt, round}` 五键以上；判词为空时不写空记录
+- [x] AC2: **载体写入（workflow 路径）**——`plugin/workflows/pool-quality-judge.js` 与 `.claude/workflows/pool-quality-judge.js` **两副本**同样落盘且**字节一致**（`diff` exit 0）；单边编辑会被 drift-check 报红
+- [x] AC3: **三态可区分（硬规则 3b）**——judge 未触发 / 判词解析失败 / 判过且有结果，三者在载体记录里取值不同，「读不懂」不得与「没问题」同形
+- [x] AC4: **不改 status（本条的范围硬边界）**——实现后 `grep` 确认 quality 路径无任何 `status:` 写入、无 `superseded` 写入；`should-remove` 只落进载体记录与建议输出
+- [x] AC5: **真实生产载体验证（非 fixture）**——实现落地**之后**跑一次真实 judge，`.quay/quality-round.jsonl` 中出现 ≥1 条含逐任务判词的记录，且 `judgedAt` 晚于实现落地时刻（硬规则 4 推论三：只计落地后的时间窗）
+- [x] AC6: **负控制（能取假）**——关掉写入那一步后重跑，载体不增长；恢复后增长。两次读数都贴出来
+- [x] AC7: **既有不回归**——`--for-task` scoped 门 + 全量 suite 绿；`.quay/pool-quality-judge-state.json` 的既有触发器语义不变
 
 ## Definition of Done
 

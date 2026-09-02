@@ -269,6 +269,103 @@ export function recordLastJudgeRound(root: string): number {
   return currentRound;
 }
 
+// ── 判词载体（.quay/quality-round.jsonl — 逐任务判词的持久化载体）──────────────────────────────────
+// gap-pool-quality-verdicts-never-persisted: 判词从来没有可查载体（8 次 judged 只活在 workflow
+// transcript，meta-cc 对 subagents/workflows/ 不递归）。本文件 = 判词载体写端的单一真相源——
+// driver（in-process import）与 workflow（--record-round 子命令）都经同一函数写，⛔ 不各写一份
+// （双 writer 同形，参照 verification-round 的既有教训：新字段两边加）。
+//
+// 三态（AC3，硬规则 3b）:judged = 判过且有结果；failed = 判词解析/执行失败；not-triggered = 机械
+// 触发未命中。⛔ 读不懂（failed）不得与「没问题」（judged）同形——两者在载体记录里 state 取值不同。
+// should-remove 只产出建议（action=remove-or-rescope 落进载体 + 建议输出），⛔ 不改任何 status
+// （本条范围硬边界 AC4：quality 路径零 status 写入）。
+
+export const QUALITY_ROUND_REL = path.join(".quay", "quality-round.jsonl");
+
+/** 判词载体文件路径。gitignored 运行时态（与 pool-quality-judge-state.json / gate-events.jsonl 同族）。 */
+export function qualityRoundPath(root: string): string {
+  return path.join(root, QUALITY_ROUND_REL);
+}
+
+/** 载体记录三态（AC3）。 */
+export type QualityRoundState = "judged" | "failed" | "not-triggered";
+
+/** 载体记录里的一条逐任务判词（{taskId, verdict, action, evidence, judgedAt, round} 六键）。 */
+export interface QualityRoundVerdict {
+  taskId: string;
+  verdict: Verdict;
+  action: string;
+  evidence: string;
+  judgedAt: string;
+  round: number;
+}
+
+/** 载体记录（一行 = 一次 judge 完成/失败/未触发的三态）。 */
+export interface QualityRoundRecord {
+  round: number;
+  judgedAt: string;
+  state: QualityRoundState;
+  triggerReasons: string[];
+  distribution: Record<Verdict, number> | null;
+  shouldRemoveIds: string[];
+  verdicts: QualityRoundVerdict[];
+  reason?: string;
+}
+
+/** 构造载体记录（单一真相源——driver 与 workflow 共用）。PURE。 */
+export function buildQualityRoundRecord(args: {
+  round: number;
+  judgedAt: string;
+  state: QualityRoundState;
+  triggerReasons: string[];
+  distribution: Record<Verdict, number> | null;
+  shouldRemoveIds: string[];
+  verdicts: QualityRoundVerdict[];
+  reason?: string;
+}): QualityRoundRecord {
+  const rec: QualityRoundRecord = {
+    round: args.round,
+    judgedAt: args.judgedAt,
+    state: args.state,
+    triggerReasons: args.triggerReasons,
+    distribution: args.distribution,
+    shouldRemoveIds: args.shouldRemoveIds,
+    verdicts: args.verdicts,
+  };
+  if (args.reason !== undefined) rec.reason = args.reason;
+  return rec;
+}
+
+/** 从判词数组 + 聚合动作构造逐任务判词（driver 与 workflow 共用同一构造）。 */
+export function qualityRoundVerdicts(
+  verdicts: VerdictRecord[],
+  actions: Action[],
+  judgedAt: string,
+  round: number,
+): QualityRoundVerdict[] {
+  const actionById = new Map(actions.map((a) => [a.id, a.action]));
+  return verdicts.map((v) => ({
+    taskId: v.id,
+    verdict: v.verdict,
+    action: actionById.get(v.id) ?? actionFor(v.verdict),
+    evidence: v.evidence,
+    judgedAt,
+    round,
+  }));
+}
+
+/** 追加写一条载体记录（mkdir -p + append，一行一 JSON，⛔ 不截断）。state=judged 且判词为空时拒写
+ *  （AC1：判词为空不写空记录）。返回落盘路径。 */
+export function appendQualityRound(root: string, record: QualityRoundRecord): string {
+  if (record.state === "judged" && record.verdicts.length === 0) {
+    throw new Error("refusing to write an empty judged quality-round record (AC1: 判词为空不写空记录)");
+  }
+  const p = qualityRoundPath(root);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.appendFileSync(p, JSON.stringify(record) + "\n", "utf8");
+  return p;
+}
+
 /** 池枚举 + 最久未复核年龄。复用 ready-pool-check.analyzeTasks（单源）。 */
 export function readPoolPlan(root: string): { pool: string[]; poolCount: number; oldestUnreviewedAgeMs: number; oldestTaskId: string | null } {
   // concurrency-default-fallback: fixed cap 5 (declared per gap-concurrency-literal-only-at-definition-points;
@@ -307,6 +404,8 @@ Usage:
   --rounds-since <N>    覆盖「每 10 轮」读数（测试/手动评估用）
   --json                同 --plan（显式）
   --record-last-round   写端（B15）:把当前 verification-round 持久化为 lastRound（judge 完成路径单写者）
+  --record-round <file> 写端（判词载体）:把 agent 判词 JSON 数组聚合后追加到 .quay/quality-round.jsonl
+                        （judge 完成路径单写者；空判词拒写）
 
 Exit: 0 = planned/judged · 2 = usage error`);
 }
@@ -380,6 +479,43 @@ export function main(argv: string[]): number {
   if (args.includes("--record-last-round")) {
     const lastRound = recordLastJudgeRound(root);
     console.log(JSON.stringify({ recorded: true, lastRound, path: judgeStatePath(root) }, null, 2));
+    return 0;
+  }
+  if (args.includes("--record-round")) {
+    const file = flagVal("--record-round");
+    if (!file) {
+      console.error("pool-quality-judge: --record-round requires a verdicts JSON file path");
+      return 2;
+    }
+    let verdicts: VerdictRecord[];
+    try {
+      verdicts = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch (e) {
+      console.error(`pool-quality-judge: cannot read verdicts file ${file}: ${(e as Error).message}`);
+      return 2;
+    }
+    if (!Array.isArray(verdicts)) {
+      console.error("pool-quality-judge: verdicts file must be a JSON array");
+      return 2;
+    }
+    if (verdicts.length === 0) {
+      console.error("pool-quality-judge: --record-round refuses to write an empty judged record (AC1)");
+      return 2;
+    }
+    const round = readCurrentRound(root);
+    const judgedAt = new Date().toISOString();
+    const agg = aggregateVerdicts(verdicts);
+    const record = buildQualityRoundRecord({
+      round,
+      judgedAt,
+      state: "judged",
+      triggerReasons: [],
+      distribution: agg.distribution,
+      shouldRemoveIds: agg.shouldRemoveIds,
+      verdicts: qualityRoundVerdicts(verdicts, agg.actions, judgedAt, round),
+    });
+    const p = appendQualityRound(root, record);
+    console.log(JSON.stringify({ recorded: true, round, path: p, state: "judged" }, null, 2));
     return 0;
   }
   const mode = args.includes("--demo") ? "demo" : args.includes("--aggregate") ? "aggregate" : "plan";
