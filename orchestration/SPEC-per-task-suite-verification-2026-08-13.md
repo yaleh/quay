@@ -94,14 +94,13 @@ serial 相 6、lowconc 相 6 保持不动 ⇒ 两实例最坏 2×6=12 / 2×6=12�
 内存：2 × 1.8 GB ≈ 3.6 GB，远低于 available
 ```
 
-**⚠️ 当前实际生效值的正本（易错，manager 自己踩过一次）**：
+**⚠️ 当前实际生效值的正本（易错，manager 自己踩过一次；2026-09-02 再更正——`DEFAULT_*_CONCURRENCY` const 已删）**：
 ```
-plugin/scripts/full-suite-runner.ts:908-909  DEFAULT_SERIAL_CONCURRENCY = 6 / DEFAULT_LOWCONC_CONCURRENCY = 6   ← 生效值
-scripts/test.sh:654-655                      SERIAL=${QUAY_SERIAL_CONCURRENCY:-2} / LOWCONC=${...:-3}          ← 仅裸跑兜底
-scripts/test.sh:654-655 与 full-suite-runner.ts:1204-1206 的【注释】仍写 2/3 —— 注释漂移，与代码矛盾
-main 相 laneCount：nproc 派生（defaultLaneCount()），本机 = 16
+plugin/scripts/full-suite-runner.ts:1714  serialConcurrency  = … ?? defaultPhaseConcurrency()            ← 宿主派生 max(1,⌊nproc/(S×P)⌋)，无固定 const
+plugin/scripts/full-suite-runner.ts:1715  lowconcConcurrency = … ?? defaultLowconcConcurrency() = 3      ← 固定语义值 3（gap-lowconc-concurrency-8-starves-bclass-waiting）
+main 相 laneCount：nproc 派生（hostParallelism()），本机 = 16
 ```
-**⇒ 引用这两个数时必须读 `full-suite-runner.ts` 的常量，不能读 `test.sh` 的注释。**
+**⇒ 引用这两个数时必须读 `full-suite-runner.ts` 的 `defaultPhaseConcurrency()` / `defaultLowconcConcurrency()`，不能读 `test.sh` 的注释；`DEFAULT_SERIAL_CONCURRENCY` / `DEFAULT_LOWCONC_CONCURRENCY` 常量已不存在。**
 
 ### 4.3 cgroup 限制：必须读宿主，禁止字面量（硬规则 4 推论二）
 
