@@ -26,24 +26,19 @@ export function formatSuiteElapsed(startedAt: string | null, nowMs: number): str
   return `${s}s`;
 }
 
-function renderDashboardPage(d: {
-  live: LiveResult;
-  sys: SystemResult;
-  mgr: ManagerResult;
-  tests: TestsResult;
-  suiteRun: CurrentSuiteRun | null;
-  history: GitHistoryResult;
-  tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
-}): string {
-  const live = d.live;
+// ── liveCard / testsCard (extracted so the auto-refresh endpoint re-renders just these two) ──────
+//
+// gap-webui-live-implcomplete-state-render: the liveCard is no longer a bare count line — it renders
+// a mini list of the first 3 in-flight tasks with a per-task state tag (待落地 + duration in the
+// warning colour), so a task stuck awaiting-land is visible at a glance.
+// gap-live-fan-in-execution-phase-two-axis: the per-task tag keys on the execution PHASE (not the
+// impl-complete boundary), so a fan-in task reads 「fan-in · suite <state>」 not a misleading 「实现中」.
+
+/** The dashboard liveCard — a self-contained render of the loop pulse (state + in-flight mini list),
+ *  factored out so the auto-refresh JSON endpoint can re-render this ONE card without the rest of the
+ *  dashboard. `id="live-card"` is the DOM node the auto-refresh script swaps. */
+export function renderLiveCard(live: LiveResult): string {
   const liveStateText = live.status === "error" ? "读失败" : live.liveState === "running" ? "running" : live.liveState === "running-unwired" ? "在跑但未接遥测" : live.liveState === "not-running" ? "未在运行" : "—";
-  // gap-webui-live-implcomplete-state-render (AC2): the liveCard is no longer a bare count line —
-  // it renders a mini list of the first 3 in-flight tasks with a per-task state tag, so a task that
-  // finished implementing but is stuck awaiting-land is visible at a glance (待落地 + duration in
-  // the warning color), instead of hiding inside a "在飞 N" number.
-  // gap-live-fan-in-execution-phase-two-axis: the liveCard's per-task tag now keys on the execution
-  // PHASE (not the impl-complete boundary), so a fan-in task (worker exited, suite running) reads
-  // 「fan-in · suite <state>」 instead of a misleading 「实现中」.
   const liveMiniList = live.inFlight.slice(0, 3).map((t) => {
     const tag = t.phase === "awaiting-land"
       ? `待落地 ${formatAwaitingDuration(awaitingLandMs(t))}`
@@ -58,13 +53,109 @@ function renderDashboardPage(d: {
       <span style="flex:none;${emphasis ? "color:var(--color-accent-700);font-weight:700" : "color:var(--color-neutral-700)"}">${escapeHtml(tag)}</span>
     </div>`;
   }).join("");
-  const liveCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+  return html`<div id="live-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">循环脉搏</div>
     <div style="font-weight:800">${escapeHtml(liveStateText)}</div>
     <p style="margin:0;font-size:0.8rem;opacity:0.8">在飞 ${live.inFlight.length} · 并发 ${live.concurrency}</p>
     ${live.status === "ok" && live.inFlight.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">${liveMiniList}</div>` : ""}
     <a href="/live" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Live →</a>
   </div>`;
+}
+
+// gap-webui-dashboard-tests-card-latest-round-no-live-signal: the card prefers the LIVE running signal
+// (full-suite-state.json state=running, no ledger row yet) over tests.runs[0] (the latest COMPLETED
+// round); labels a gate-blocked round (pass=0/tests=0 by construction) for what it is instead of a bare
+// "pass 0/0"; and adds a 近N轮 strip so the single latest row is never the only signal (硬规则4b: a
+// single point is a proxy, not the actual health picture).
+
+/** The dashboard testsCard — a self-contained render of the suite state (live-running signal / latest
+ *  completed round / recent-rounds strip), factored out for the auto-refresh endpoint. `id="tests-card"`
+ *  is the DOM node the auto-refresh script swaps. */
+export function renderTestsCard(tests: TestsResult, suiteRun: CurrentSuiteRun | null): string {
+  const latestRun = tests.runs[0] ?? null;
+  const suiteRunning = suiteRun && suiteRun.state === "running" ? suiteRun : null;
+  const gateBlocked = latestRun != null && latestRun.tests === 0 && latestRun.pass === 0 && (latestRun.reason === "gate-failed" || latestRun.gate != null);
+  const statusLine = suiteRunning
+    ? html`<span style="color:var(--color-accent-700)">运行中</span>`
+    : escapeHtml(latestRun ? (latestRun.state ?? "—") : "未接入");
+  const elapsed = suiteRunning ? formatSuiteElapsed(suiteRunning.startedAt, Date.now()) : null;
+  const detailLine = suiteRunning
+    ? `已运行 ${elapsed ?? "—"}${suiteRunning.runner ? ` · runner ${escapeHtml(suiteRunning.runner)}` : ""}${suiteRunning.scope ? ` · scope ${escapeHtml(suiteRunning.scope)}` : ""}`
+    : latestRun
+      ? (gateBlocked
+        ? `gate 未过${latestRun.gate ? `（${escapeHtml(latestRun.gate)}）` : ""}，未执行测试`
+        : `pass ${latestRun.pass ?? "—"}/${latestRun.tests ?? "—"}`)
+      : (tests.reason ? escapeHtml(tests.reason) : "无验证轮记录");
+  const recentRuns = tests.runs.slice(0, 5);
+  const recentStrip = recentRuns.length > 0
+    ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">
+        <div style="font-size:0.7rem;color:var(--color-neutral-700)">近${recentRuns.length}轮（新→旧）</div>
+        <div style="display:flex;gap:3px">${recentRuns.map((r) => {
+          const color = r.state === "green" ? "var(--color-accent-700)" : r.state === "red" ? "var(--color-accent-800)" : "var(--color-neutral-400)";
+          const rGateBlocked = r.tests === 0 && r.pass === 0 && (r.reason === "gate-failed" || r.gate != null);
+          const title = `#${r.round ?? "?"} ${r.state ?? "—"}${rGateBlocked ? `（gate:${r.gate ?? "?"} 未执行测试）` : ` pass ${r.pass ?? "—"}/${r.tests ?? "—"}`}`;
+          return html`<span title="${escapeHtml(title)}" style="width:11px;height:11px;border-radius:2px;background:${color};display:inline-block"></span>`;
+        }).join("")}</div>
+      </div>`
+    : "";
+  return html`<div id="tests-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">测试</div>
+    <div style="font-weight:800">${statusLine}</div>
+    <p style="margin:0;font-size:0.8rem;opacity:0.8">${detailLine}</p>
+    ${recentStrip}
+    <a href="/tests" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Tests →</a>
+  </div>`;
+}
+
+// ── liveCard/testsCard auto-refresh (gap-dashboard-testscard-livecard-auto-refresh) ─────────────────
+//
+// The two cards above are a request-time snapshot; a tab left open shows stale state until a manual
+// reload. This adds a light, LOCAL auto-refresh: an inline script polls the /dashboard/cards JSON
+// endpoint (which re-renders ONLY those two cards) and swaps each card's own DOM node — never
+// location.reload. The period is aligned with TASK_SUMMARY_CACHE_TTL_MS (30s) so the client does not
+// poll faster than the backend's own freshness; polling pauses while the tab is hidden.
+
+/** Auto-refresh period for the dashboard liveCard/testsCard (ms). Configurable here; the test pins the
+ *  value domain [30s, 60s] (AC2). Aligned with TASK_SUMMARY_CACHE_TTL_MS so the client never polls
+ *  faster than the backend refresh. */
+export const DASHBOARD_CARD_REFRESH_MS = 30_000;
+
+/** The inline auto-refresh <script> injected into the dashboard page. Pure — returns a string, so a
+ *  unit test can grep it for setInterval/fetch/visibilityState and prove no location.reload (AC1/AC3). */
+export function renderDashboardCardRefreshScript(): string {
+  return `<script>
+(function () {
+  var REFRESH_MS = ${DASHBOARD_CARD_REFRESH_MS};
+  var refresh = function () {
+    if (document.visibilityState !== "visible") { return; }
+    fetch("/dashboard/cards", { headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (d) {
+        var live = document.getElementById("live-card");
+        if (live && typeof d.liveCard === "string") { live.innerHTML = d.liveCard; }
+        var tests = document.getElementById("tests-card");
+        if (tests && typeof d.testsCard === "string") { tests.innerHTML = d.testsCard; }
+      })
+      .catch(function () { /* fetch failed — skip this round, retry next */ });
+  };
+  setInterval(refresh, REFRESH_MS);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") { refresh(); }
+  });
+})();
+</script>`;
+}
+
+export function renderDashboardPage(d: {
+  live: LiveResult;
+  sys: SystemResult;
+  mgr: ManagerResult;
+  tests: TestsResult;
+  suiteRun: CurrentSuiteRun | null;
+  history: GitHistoryResult;
+  tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
+}): string {
+  const liveCard = renderLiveCard(d.live);
 
   const sysGo = d.sys.resourceGate.status === "ok" && d.sys.processBudget.status === "ok" &&
     d.sys.resourceGate.verdict === "GO" && d.sys.processBudget.verdict === "GO";
@@ -94,55 +185,30 @@ function renderDashboardPage(d: {
     const pct = total > 0 ? (c / total) * 100 : 0;
     return html`<div style="width:${pct.toFixed(1)}%;background:${s === TASK_STATUS.DONE ? "var(--color-text)" : s === TASK_STATUS.NEEDS_HUMAN ? "var(--color-accent)" : "var(--color-neutral-400)"}" title="${escapeHtml(s)} ${c}"></div>`;
   };
-  const recentActive = d.tasks
-    .filter((t) => (t.status ?? "") !== TASK_STATUS.DONE && typeof (t as { updatedAt?: unknown }).updatedAt === "number")
-    .sort((a, b) => ((b as { updatedAt?: unknown }).updatedAt as number) - ((a as { updatedAt?: unknown }).updatedAt as number))
-    .slice(0, 5);
+  // gap-dashboard-taskcard-multistatus-minitable: the taskCard's single mixed "最近更新（非 done）"
+  // list could not answer "what is currently needs-human?" without a full /tasks?status=… round-trip
+  // (48h access log: 78 cross-status /tasks hits in one hour). Replace it with per-status mini lists
+  // for the three NON-terminal states (ready/todo/needs-human); done/superseded stay pure counts to
+  // avoid board explosion. N=3, updatedAt descending, still /task/<id> links — grouped in-memory from
+  // the already-fetched task-summary array (no new provider read, no new network round-trip).
+  const MINI_LIST_N = 3;
+  const miniStatuses: readonly string[] = [TASK_STATUS.READY, TASK_STATUS.TODO, TASK_STATUS.NEEDS_HUMAN];
+  const miniList = (s: string): string => {
+    const rows = d.tasks
+      .filter((t) => t.status === s && typeof (t as { updatedAt?: unknown }).updatedAt === "number")
+      .sort((a, b) => ((b as { updatedAt?: unknown }).updatedAt as number) - ((a as { updatedAt?: unknown }).updatedAt as number))
+      .slice(0, MINI_LIST_N);
+    if (rows.length === 0) return "";
+    return html`<div style="border-top:1px solid var(--color-divider);margin-top:2px;padding-top:8px;display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:0.7rem;color:var(--color-neutral-700)">${escapeHtml(s)}（最近 ${MINI_LIST_N} 条）</div>
+      ${rows.map((t) => html`<a href="/task/${encodeURIComponent(String(t.id))}" style="display:flex;justify-content:space-between;gap:8px;text-decoration:none;color:var(--color-text);font-size:0.75rem">
+        <span style="font-weight:600;color:var(--color-accent)">${escapeHtml(String(t.id))}</span>
+        <span style="flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(String(t.title ?? ""))}</span>
+      </a>`).join("")}
+    </div>`;
+  };
 
-  // gap-webui-dashboard-tests-card-latest-round-no-live-signal: the card previously showed ONLY
-  // tests.runs[0] — the ledger's latest COMPLETED round. Two failure modes on the real deployment:
-  // (a) a suite genuinely running right now (`.quay/full-suite-state.json` state=running) has no
-  //     ledger row yet, so the card silently showed a stale round instead of "运行中";
-  // (b) a static-check gate failure round (fan-in's pre-test gate rejects before any test file runs)
-  //     legitimately carries pass=0/tests=0 — true for THAT round, but rendered as bare "pass 0/0"
-  //     it reads as "the whole suite has zero tests", which is false and unlike what /tests shows
-  //     (the full history table gives that same round visible context: neighboring green rounds with
-  //     thousands of tests). Now: prefer the LIVE running signal when present, label a gate-blocked
-  //     round for what it is instead of a bare 0/0, and add a 近N轮 strip so the single latest row is
-  //     never the only signal (硬规则4b: a single point is a proxy, not the actual health picture).
-  const latestRun = d.tests.runs[0] ?? null;
-  const suiteRunning = d.suiteRun && d.suiteRun.state === "running" ? d.suiteRun : null;
-  const gateBlocked = latestRun != null && latestRun.tests === 0 && latestRun.pass === 0 && (latestRun.reason === "gate-failed" || latestRun.gate != null);
-  const statusLine = suiteRunning
-    ? html`<span style="color:var(--color-accent-700)">运行中</span>`
-    : escapeHtml(latestRun ? (latestRun.state ?? "—") : "未接入");
-  const elapsed = suiteRunning ? formatSuiteElapsed(suiteRunning.startedAt, Date.now()) : null;
-  const detailLine = suiteRunning
-    ? `已运行 ${elapsed ?? "—"}${suiteRunning.runner ? ` · runner ${escapeHtml(suiteRunning.runner)}` : ""}${suiteRunning.scope ? ` · scope ${escapeHtml(suiteRunning.scope)}` : ""}`
-    : latestRun
-      ? (gateBlocked
-        ? `gate 未过${latestRun.gate ? `（${escapeHtml(latestRun.gate)}）` : ""}，未执行测试`
-        : `pass ${latestRun.pass ?? "—"}/${latestRun.tests ?? "—"}`)
-      : (d.tests.reason ? escapeHtml(d.tests.reason) : "无验证轮记录");
-  const recentRuns = d.tests.runs.slice(0, 5);
-  const recentStrip = recentRuns.length > 0
-    ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">
-        <div style="font-size:0.7rem;color:var(--color-neutral-700)">近${recentRuns.length}轮（新→旧）</div>
-        <div style="display:flex;gap:3px">${recentRuns.map((r) => {
-          const color = r.state === "green" ? "var(--color-accent-700)" : r.state === "red" ? "var(--color-accent-800)" : "var(--color-neutral-400)";
-          const rGateBlocked = r.tests === 0 && r.pass === 0 && (r.reason === "gate-failed" || r.gate != null);
-          const title = `#${r.round ?? "?"} ${r.state ?? "—"}${rGateBlocked ? `（gate:${r.gate ?? "?"} 未执行测试）` : ` pass ${r.pass ?? "—"}/${r.tests ?? "—"}`}`;
-          return html`<span title="${escapeHtml(title)}" style="width:11px;height:11px;border-radius:2px;background:${color};display:inline-block"></span>`;
-        }).join("")}</div>
-      </div>`
-    : "";
-  const testsCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">测试</div>
-    <div style="font-weight:800">${statusLine}</div>
-    <p style="margin:0;font-size:0.8rem;opacity:0.8">${detailLine}</p>
-    ${recentStrip}
-    <a href="/tests" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Tests →</a>
-  </div>`;
+  const testsCard = renderTestsCard(d.tests, d.suiteRun);
 
   const recentCommits = d.history.status === "ok" ? d.history.commits.slice(0, 3).map((c) => `${c.hash.slice(0, 7)} ${c.subject}`).join("<br>") : (d.history.status === "empty" ? "无提交" : "读失败");
   const commitsCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
@@ -157,13 +223,7 @@ function renderDashboardPage(d: {
     <div style="display:flex;gap:0.75rem;font-size:0.75rem;flex-wrap:wrap;color:var(--color-neutral-700)">
       ${statuses.map((s) => html`<span><b>${counts.get(s) ?? 0}</b> ${escapeHtml(s)}</span>`).join("")}
     </div>
-    ${recentActive.length > 0 ? html`<div style="border-top:1px solid var(--color-divider);margin-top:2px;padding-top:8px;display:flex;flex-direction:column;gap:4px">
-      <div style="font-size:0.7rem;color:var(--color-neutral-700)">最近更新（非 done）</div>
-      ${recentActive.map((t) => html`<a href="/task/${encodeURIComponent(String(t.id))}" style="display:flex;justify-content:space-between;gap:8px;text-decoration:none;color:var(--color-text);font-size:0.75rem">
-        <span style="font-weight:600;color:var(--color-accent)">${escapeHtml(String(t.id))}</span>
-        <span style="flex:none">${escapeHtml(String(t.status ?? ""))}</span>
-      </a>`).join("")}
-    </div>` : ""}
+    ${miniStatuses.map(miniList).join("")}
     <a href="/tasks" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看任务列表 →</a>
   </div>`;
 
@@ -181,7 +241,7 @@ function renderDashboardPage(d: {
         <p style="margin:0;font-size:0.8rem">提交纵向时间轴（develop 主干 + task 分支，第三方库客户端渲染）。</p>
         <a href="/git-history" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Git History →</a>
       </div>`}</div>
-    </main></body></html>`;
+    </main>${renderDashboardCardRefreshScript()}</body></html>`;
 }
 
 // ── Task-summary short-TTL cache (dashboard display surface only) ────────────────────────────────
@@ -263,4 +323,33 @@ export async function handleDashboard(
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks }));
+}
+
+/** /dashboard/cards — the JSON data endpoint the liveCard/testsCard auto-refresh script polls
+ *  (gap-dashboard-testscard-livecard-auto-refresh). Re-renders ONLY those two cards and returns them
+ *  as HTML fragments; the client swaps each card's own DOM node (never the whole page). `no-store` so
+ *  the browser never serves a cached snapshot — a stale live card is exactly what this endpoint exists
+ *  to fix. Reads the same observation sources the dashboard page reads, but none of the non-card
+ *  probes (sys/mgr/tasks/history), so a poll is lighter than a full /dashboard load. */
+export async function handleDashboardCards(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let live: LiveResult;
+  try { live = readLive(cfg.workspaceRoot); } catch {
+    live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
+  }
+  let tests: TestsResult;
+  try { tests = readTests(cfg.workspaceRoot); } catch {
+    tests = { status: "error", reason: "internal", runs: [] };
+  }
+  let suiteRun: CurrentSuiteRun | null;
+  try { suiteRun = readCurrentSuiteRun(cfg.workspaceRoot); } catch { suiteRun = null; }
+  const payload = JSON.stringify({
+    liveCard: renderLiveCard(live),
+    testsCard: renderTestsCard(tests, suiteRun),
+  });
+  res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(payload);
 }

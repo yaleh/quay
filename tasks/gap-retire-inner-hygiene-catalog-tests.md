@@ -1,7 +1,7 @@
 ---
 id: gap-retire-inner-hygiene-catalog-tests
 title: inner 会话卫生退役 step3——同步 capability-catalog 六表 + 测试去留（无「无测试的活脚本」/「无脚本的活测试」）
-status: todo
+status: done
 labels:
   - gap
 parent: null
@@ -29,8 +29,10 @@ step2（收窄后，见其任务体"范围收窄说明"）落地后，同步 `ca
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，catalog 同步）：catalog 六表里退役脚本 CADENCE 标退役、LAST_REAFFIRMED 更新到 2026-09-01 后；⛔ 仍标"每轮"/旧日期 ⇒ 假。
-- [ ] AC2（能取假，全链最终扫描，非"去留判断"）：全仓脚本↔测试一一对应扫描，无孤儿残留；⛔ 存在孤儿 ⇒ 假。**本条判据只在 `gap-retire-inner-session-check-script` 也已落地后才可判定**（它是全链的最后一环）。
+- [x] AC1（能取假，catalog 同步）：catalog 六表里退役脚本 CADENCE 标退役、LAST_REAFFIRMED 更新到 2026-09-01 后；⛔ 仍标"每轮"/旧日期 ⇒ 假。
+  - 实测：3 个退役（已删）脚本 `inner-panel-stale-check.ts` / `inner-exec-mode-report.ts` / `inner-session-check.sh` 的 catalog 六表条目数均为 0（CADENCE「每轮」随条目删除 = 标退役，grep -c 全为 0）；6 个复核后仍活的脚本 LAST_REAFFIRMED 2026-08-10/11 → 2026-09-01（`monitor-mount-check.sh` / `inner-blocked-signal.ts` / `inner-forensics.mjs` / `inner-idle-log.ts` / `inner-wakeup-heartbeat.ts` / `inner-wakeup-heartbeat-check.ts`）。`capability-catalog.sh --summary` = 309 scripts / 309 declared / 0 unclassified / exit 0；`capability-catalog.test.mjs` 16/16 绿；`--superseded-check` PASS。
+- [x] AC2（能取假，全链最终扫描，非"去留判断"）：全仓脚本↔测试一一对应扫描，无孤儿残留；⛔ 存在孤儿 ⇒ 假。**本条判据只在 `gap-retire-inner-session-check-script` 也已落地后才可判定**（它是全链的最后一环）。
+  - 实测（前置 `gap-retire-inner-session-check-script` 已 done）：`test-impl-census-check` = 562 test files / impl-deleted 0（test→impl 方向无孤儿）；6 个仍活脚本 ↔ 测试一一对应（`inner-blocked-signal` / `inner-forensics` / `inner-idle-log` / `inner-wakeup-heartbeat` / `inner-wakeup-heartbeat-check` / `monitor-mount-check` 的 `.test.mjs` 均在）；3 个已删脚本 ↔ 测试同删（`inner-panel-stale-check` / `inner-exec-mode-report` / `inner-session-check` 的 `.test.mjs` 均 gone）；`plugin/test/` 内对已删脚本的引用仅剩注释（无功能性 import）。
 
 ## Definition of Done
 

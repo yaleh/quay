@@ -1127,7 +1127,7 @@ session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane 本体或�
   # pane_pid 自身就是 claude（claude-as-pane-process：3 窗格拓扑里 pane 前台进程就是 claude）——
   # 旧实现只查子进程，inner/outer 恒 alive=0（SESSION-GONE 永不触发，监视器永久沉默）。
   if _is_claude_pid "$ppid"; then echo "$ppid"; return; fi
-  # 后代遍历（与 inner-session-check.sh 的 has_claude_child 同遍历）：找第一个 claude 后代。
+  # 后代遍历（与 topology-check.sh 的 has_claude_child 同遍历）：找第一个 claude 后代。
   for cpid in $(pgrep -P "$ppid" 2>/dev/null); do
     if _is_claude_pid "$cpid"; then echo "$cpid"; return; fi
   done

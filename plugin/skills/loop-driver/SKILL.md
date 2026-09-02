@@ -130,21 +130,7 @@ record :: Diff × Gate → Evidence    ⊨ real-object (DIR-026) ≠ fixture
 ```
 Capture the gate output and any real diff/artefact. Evidence must be a real operated object (a real test run, a real diff), not a synthetic fixture.
 
-**Panel observation mechanism (state-transition expression).** When a panel shows agent lines
-(inner/outer subagent status like `Committing <task> task work 3h 5m 32s`), the observation view must
-distinguish an ENDED line (bracket closed — `--task-end` written — but the panel line still present)
-from a LIVE line (bracket open). A frozen dead line is visually indistinguishable from a live one
-without cross-time sampling; the mechanical observer `plugin/scripts/inner-panel-stale-check.ts`
-expresses the state transition by cross-referencing telemetry `inProgress` (bracket state) and by
-frozen-timer detection across two pane samples. Run it after a `--task-end` to confirm the line was
-cleared or marked:
-```bash
-tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \
-node --no-warnings --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/inner-panel-stale-check.ts" \
-  --pane .quay/last-pane.txt --root <workspaceRoot>
-```
-Exit 1 = a stale/ended/frozen agent line remains (the misleading window is mechanically caught, not
-left to a human glance).
+~~**Panel observation mechanism (state-transition expression)**~~（**已退役** 2026-09-01：`inner-panel-stale-check.ts` CLI 壳已删，纯函数迁 `plugin/scripts/agent-panel-classify.ts`——`gap-retire-inner-hygiene-delete-session-face`）。The pure classification logic (parseTimerSec/classifyLines/detectFrozen/runStaleCheck) lives in `agent-panel-classify.ts`.
 
 ### 6b. Adversarial Audit
 ```

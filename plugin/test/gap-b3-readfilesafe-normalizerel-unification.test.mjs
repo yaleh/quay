@@ -38,7 +38,7 @@ function sourceOf(rel) {
   return fs.readFileSync(path.join(SCRIPTS_DIR, rel), "utf8");
 }
 
-// The 8 files that previously each carried a byte-identical local copy (4 readFileSafe + 4 normalizeRel).
+// The 7 files that previously each carried a byte-identical local copy (4 readFileSafe + 3 normalizeRel).
 const READ_FILE_SAFE_CONSUMERS = [
   "test-framework-policy-check.ts",
   "test-impl-census-check.ts",
@@ -49,7 +49,6 @@ const NORMALIZE_REL_CONSUMERS = [
   "select-static-checks-for-touches.ts",
   "select-tests-for-touches.ts",
   "suite-bucket-attribution.ts",
-  "inner-exec-mode-report.ts",
 ];
 const ALL_CONSUMERS = [...READ_FILE_SAFE_CONSUMERS, ...NORMALIZE_REL_CONSUMERS];
 

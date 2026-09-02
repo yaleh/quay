@@ -245,6 +245,27 @@ export function commitTaskFile(root: string, rel: string, message: string): bool
   }
 }
 
+/** FIRST-REGISTRATION JUDGMENT (gap-promotion-commit-message-misleading-on-first-track): true when
+ *  `rel` already has a commit in git history (`git log -1 --format=%H -- <rel>` non-empty). A file on
+ *  disk but never committed — the case where a promotion/needs-human flip is actually the file's BIRTH
+ *  commit, not a status transition — returns false, so callers can label it "首次登记" instead of
+ *  claiming a flip that never happened. Repo-less root ⇒ false (same no-op shape as commitTaskFile;
+ *  there is no history to consult). ⛔ 不改 commitTaskFile 签名：它只负责执行提交，本判断由调用方在
+ *  组装 message 前自行调用（两个调用点：ready-pool-check.ts commitTaskStatus 与 driver-filters.ts
+ *  markNeedsHuman）。 */
+export function hasPriorCommit(root: string, rel: string): boolean {
+  if (!isInsideGitWorkTree(root)) return false;
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "-1", "--format=%H", "--", rel], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 // ── main/manager-doc ↔ develop 同步（gap-doc-develop-sync-semantic-conflict-resolution）──────────────
 // 人 2026-08-31 裁定反转：写面保留 main/manager-doc，但状态/任务文件变更必须以 develop 为终点。同步 =
 // 机械 ff-only + 语义兜底（机械失败升级确定性语义同步，develop 权威 wins），⛔ 静默 catch。
@@ -687,7 +708,13 @@ export function markNeedsHuman(root: string, id: string, reason: string): { id: 
     (lastAttempt?.fanInLog ? `- fan-in 日志：${lastAttempt.fanInLog}\n` : "");
   fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
   const rel = path.join("tasks", `${id}.md`);
-  const committed = commitTaskFile(root, rel, `tasks: ${id} ${fromMatch[1]}→needs-human（重试上限机械翻转）`);
+  // FIRST-REGISTRATION JUDGMENT (gap-promotion-commit-message-misleading-on-first-track)：目标文件此前
+  // 从未提交（本次提交是其 git 诞生提交，谈不上 todo→needs-human「翻转」）⇒ 如实标「首次登记」，不得
+  // 沿用暗示翻转发生的「重试上限机械翻转」措辞。已有提交历史 ⇒ 真实翻转，沿用原有文案。
+  const message = hasPriorCommit(root, rel)
+    ? `tasks: ${id} ${fromMatch[1]}→needs-human（重试上限机械翻转）`
+    : `tasks: ${id} 首次登记（status=needs-human，重试上限机械落盘）`;
+  const committed = commitTaskFile(root, rel, message);
   syncDocDevelopBidirectional(root); // 分歧检测双向同步（⛔ 不依赖 committed 翻转）
   return { id, ok: true, reason, committed };
 }

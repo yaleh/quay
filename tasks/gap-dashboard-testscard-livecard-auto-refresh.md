@@ -2,7 +2,7 @@
 id: gap-dashboard-testscard-livecard-auto-refresh
 title: dashboard testsCard/liveCard 加轻量自动刷新（依据48h访问日志：/tests /live
   手动低频轮询，间隔1.4s~9h无自动刷新机制）
-status: todo
+status: done
 labels:
   - gap
   - webui
@@ -33,19 +33,19 @@ reload），失败时静默跳过本轮、下一轮重试。刷新周期建议�
 
 ## Acceptance Criteria
 
-- [ ] `liveCard`、`testsCard` 渲染的 HTML 中包含一段自动刷新脚本（可 grep 生成的 HTML 断言其中含
+- [x] `liveCard`、`testsCard` 渲染的 HTML 中包含一段自动刷新脚本（可 grep 生成的 HTML 断言其中含
       `setInterval` 或等效的定时 `fetch` 调用，且刷新目标限定在卡片自身的 DOM 节点，不触发整页
       `location.reload`）。
-- [ ] 刷新周期可配置且默认落在 30-60 秒区间（写一个常量，测试里断言该常量的值域）。
-- [ ] `document.visibilityState !== 'visible'` 时暂停轮询、恢复可见时继续（用一段单元测试或
+- [x] 刷新周期可配置且默认落在 30-60 秒区间（写一个常量，测试里断言该常量的值域）。
+- [x] `document.visibilityState !== 'visible'` 时暂停轮询、恢复可见时继续（用一段单元测试或
       DOM 断言验证脚本里存在该判断逻辑，而不仅凭注释宣称）。
-- [ ] 新增测试 `node --test packages/quay/test/gap-dashboard-testscard-livecard-auto-refresh.test.mjs`
+- [x] 新增测试 `node --test packages/quay/test/gap-dashboard-testscard-livecard-auto-refresh.test.mjs`
       exit 0，覆盖：渲染出的自动刷新脚本存在、周期常量在预期范围、visibilitychange 判断存在。
-- [ ] 既有 dashboard/live/tests 相关测试不因本改动回归：
+- [x] 既有 dashboard/live/tests 相关测试不因本改动回归：
       `node --test packages/quay/test/gap-dashboard-parallelize.test.mjs
       packages/quay/test/serve-live-implcomplete.test.mjs
       packages/quay/test/live-state.test.mjs` exit 0。
-- [ ] `scripts/test.sh --for-task gap-dashboard-testscard-livecard-auto-refresh` scoped 静态检查通过，
+- [x] `scripts/test.sh --for-task gap-dashboard-testscard-livecard-auto-refresh` scoped 静态检查通过，
       exit 0。
 
 ## Definition of Done
@@ -58,7 +58,6 @@ chrome-devtools/playwright MCP）打开 `/dashboard`，实测 Network 面板里�
 ## Touches
 
 - packages/quay/src/serve-dashboard.ts
-- packages/quay/src/serve-live.ts
-- packages/quay/src/serve-tests.ts
+- packages/quay/src/serve-handlers.ts
 - packages/quay/test/gap-dashboard-testscard-livecard-auto-refresh.test.mjs
 - tasks/gap-dashboard-testscard-livecard-auto-refresh.md

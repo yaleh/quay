@@ -63,11 +63,9 @@
 {"file":"plugin/test/gate-dispatch-coverage.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/gitignore.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/inner-blocked-signal.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
-{"file":"plugin/test/inner-exec-mode-report.test.mjs","judgment":"M","mechanism":"P+S+M","signal":[]}
 {"file":"plugin/test/inner-forensics.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/inner-idle-log.test.mjs","judgment":"M","mechanism":"S","signal":[]}
-{"file":"plugin/test/inner-panel-stale-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/inner-session-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
+{"file":"plugin/test/agent-panel-classify.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/inner-wakeup-heartbeat-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/inner-wakeup-heartbeat.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/instrument-failure-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}

@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-taskcard-multistatus-minitable
 title: dashboard taskCard 升级为按状态分栏的可展开迷你表（依据48h访问日志：/tasks 单小时78次跨状态整页巡检）
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -32,20 +32,20 @@ dashboard 的任务卡片信息密度不够，用户巡检时绕过它直奔 `/t
 
 ## Acceptance Criteria
 
-- [ ] `renderDashboardPage` 对 `ready`、`todo`、`needs-human` 三个状态，各自渲染一个独立的"最近 N 条"
+- [x] `renderDashboardPage` 对 `ready`、`todo`、`needs-human` 三个状态，各自渲染一个独立的"最近 N 条"
       迷你列表区块（N=3，按 `updatedAt` 降序），可用测试断言生成的 HTML 中三个状态各自的区块标题 +
       对应 task id 链接均存在。
-- [ ] 每个状态迷你列表在该状态下任务数为 0 时，该区块不渲染任务行（不显示空列表占位噪音），但计数条
+- [x] 每个状态迷你列表在该状态下任务数为 0 时，该区块不渲染任务行（不显示空列表占位噪音），但计数条
       仍照常显示该状态的 0。
-- [ ] 不新增 provider 调用：改动前后 `client.taskList`（进而 `readTaskSummary`）在一次 `/dashboard`
+- [x] 不新增 provider 调用：改动前后 `client.taskList`（进而 `readTaskSummary`）在一次 `/dashboard`
       请求里的调用次数不变（沿用 `gap-webui-dashboard-load-time-optimization` AC3 的"零额外调用"判据，
       写一个 mock/spy 断言调用次数）。
-- [ ] `node --test packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs` 新增测试
+- [x] `node --test packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs` 新增测试
       exit 0，覆盖：四态混合 fixture 下三个分栏各自列出正确的任务 id；`done`/`superseded` 不展开明细。
-- [ ] 既有 dashboard 相关测试不因本改动回归：
+- [x] 既有 dashboard 相关测试不因本改动回归：
       `node --test packages/quay/test/gap-dashboard-parallelize.test.mjs
       packages/quay/test/gap-webui-root-should-show-dashboard.test.mjs` exit 0。
-- [ ] `scripts/test.sh --for-task gap-dashboard-taskcard-multistatus-minitable` scoped 静态检查通过
+- [x] `scripts/test.sh --for-task gap-dashboard-taskcard-multistatus-minitable` scoped 静态检查通过
       （或等效的本仓库任务级 scoped 门），exit 0。
 
 ## Definition of Done
@@ -61,3 +61,25 @@ dashboard 的任务卡片信息密度不够，用户巡检时绕过它直奔 `/t
 - packages/quay/src/serve-dashboard.ts
 - packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs
 - tasks/gap-dashboard-taskcard-multistatus-minitable.md
+
+## Needs-Human
+
+**执行 2026-09-01T16:22:42.312Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1788275557
+- session_id：1de27f75-2fe7-4870-9d39-35bc0f475782
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-dashboard-taskcard-multistatus-minitable-wk-prod-1788275557.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-dashboard-taskcard-multistatus-minitable-wk-prod-1788275557.log
+
+## Needs-Human
+
+**执行 2026-09-01T17:07:12.736Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1788280091
+- session_id：bb20b966-f9d2-4ea8-8c8e-f30fb1db5d7c
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-dashboard-taskcard-multistatus-minitable-wk-prod-1788280091.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-dashboard-taskcard-multistatus-minitable-wk-prod-1788280091.log

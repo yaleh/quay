@@ -2410,6 +2410,38 @@ test("applyPromotions commits the status write — git status clean + committed 
   assert.equal(subject, "tasks: gap-candidate todo→ready（promotion-driver 机械晋升）", "the commit subject names the task and transition");
 });
 
+test("applyPromotions never-committed file → 首次登记 message, not 机械晋升 (AC3, gap-promotion-commit-message-misleading-on-first-track)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-firstreg-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  // Baseline: only the ready tasks are committed. The todo candidate is written AFTER the baseline,
+  // so it sits on disk but is never tracked by git — its promotion commit is the file's BIRTH commit
+  // (the exact case the Proposal names: 会话先写盘未提交, driver 抢先扫到并晋升 ⇒ 诞生提交被误标「机械晋升」).
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "init");
+  assert.equal(git("log", "--oneline", "--", "tasks/gap-candidate.md").trim(), "", "candidate is not yet tracked (birth commit has not happened)");
+  writeTask(root, "gap-candidate", gapTask("gap-candidate")); // untracked todo
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+  const r = applyPromotions(opts);
+  assert.equal(r.should_apply, true);
+  assert.equal(r.applied_promotions.length, 1);
+  assert.equal(r.applied_promotions[0].id, "gap-candidate");
+  assert.equal(r.applied_promotions[0].committed, true, "the birth commit lands");
+
+  const subject = git("log", "-1", "--format=%s");
+  assert.doesNotMatch(subject, /机械晋升|翻转/, "⛔ must not claim a todo→ready flip that never happened");
+  assert.match(subject, /首次登记/, "first-registration wording for a never-committed file");
+  assert.match(subject, /status=ready/, "records the status it landed with");
+});
+
 // ── DETACH PROPAGATION (gap-fan-in-ff-ref-update-detach-develop AC6 → gap-doc-develop-sync-…-resolution) ──
 // The main checkout sits on a doc-only work branch (main/manager-doc) while develop is bare (the
 // detach). A promotion flip committed on the doc branch must reach develop — fast-forward push —
@@ -2595,6 +2627,66 @@ test("setTaskStatus no-ops on non-todo and on missing files (no clobber / idempo
 
   assert.match(fs.readFileSync(path.join(root, "tasks", "gap-ready.md"), "utf8"), /^status:\s*ready$/m);
   assert.match(fs.readFileSync(path.join(root, "tasks", "gap-done.md"), "utf8"), /^status:\s*done$/m);
+});
+
+// ── UNCOMMITTED-FLIP POISONING (gap-promotion-uncommitted-flip-poisons-settaskstatus) ─────────────
+// `setTaskStatus` used to read the WORKTREE file to decide "is it todo". A flip that landed (ready)
+// but whose commit failed leaves an UNCOMMITTED ready on disk while develop is still todo — the next
+// promotion round (which JUDGES candidates from the develop ref via taskReadRef) read that leftover
+// ready and returned `not-todo` (skip), so the commit never re-ran and develop stayed todo forever
+// (worker-driver reads develop ⇒ pool=0 ⇒ no dispatch, ~20 min stall; memory
+// uncommitted-promotion-blocks-fan-in-clean-tree). The fix: judge "is todo" from the develop ref
+// (canonical, 硬规则 4b 代理量); a develop-todo + disk-ready leftover is re-committed (the disk
+// `ready` is already the target, so the `status: todo` replace is a no-op and the commit reconciles).
+
+test("setTaskStatus judges todo from develop — a dirty ready leftover re-commits, develop converges (AC1 能取假)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-poison-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-q", "-b", "develop", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  writeTask(root, "gap-candidate", gapTask("gap-candidate"));
+  git("add", ".");
+  git("commit", "-q", "-m", "init todo");
+  git("checkout", "-q", "-b", "main/manager-doc");
+  // The poison: the flip landed on disk (ready) but the commit failed — develop/HEAD stay todo.
+  writeTask(root, "gap-candidate", { ...gapTask("gap-candidate"), status: "ready" });
+  assert.match(git("show", "develop:tasks/gap-candidate.md"), /^status:\s*todo$/m,
+    "precondition: develop still todo (the poison)");
+  assert.match(git("status", "--porcelain"), /M tasks\/gap-candidate\.md/,
+    "precondition: worktree dirty — ready uncommitted");
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, taskReadRef: "develop" };
+  const r = applyPromotions(opts);
+  assert.equal(r.should_apply, true);
+  assert.equal(r.applied_promotions.length, 1);
+  assert.equal(r.applied_promotions[0].id, "gap-candidate");
+  assert.equal(r.applied_promotions[0].ok, true, "AC1: develop-todo ⇒ re-flip, ⛔ not a not-todo skip");
+  assert.equal(r.applied_promotions[0].committed, true, "AC1: the leftover ready is re-committed");
+  assert.match(git("show", "develop:tasks/gap-candidate.md"), /^status:\s*ready$/m,
+    "AC1: develop converges to ready");
+});
+
+test("setTaskStatus still no-ops when develop is already ready — no duplicate flip (AC2 负控制)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-poison-neg-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-q", "-b", "develop", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  writeTask(root, "gap-ready", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  git("add", ".");
+  git("commit", "-q", "-m", "init ready");
+  git("checkout", "-q", "-b", "main/manager-doc");
+
+  const out = setTaskStatus(root, "gap-ready", "ready");
+  assert.equal(out.ok, false, "AC2: develop already ready ⇒ no duplicate flip");
+  assert.equal(out.reason, "not-todo");
+  assert.equal(git("status", "--porcelain"), "", "AC2: no write, tree stays clean");
 });
 
 test("default analyzeTasks never writes tasks/ (pure detector preserved — no --apply = byte-unchanged)", (t) => {

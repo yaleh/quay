@@ -90,7 +90,7 @@ transcript 有没有真实 user 消息（被驱动过）。三态判定与处理
 | **缺失** | inner 窗口不存在 **或** 无 claude 进程 | 调 `quay-topology.sh` 创建**两窗口**拓扑（outer+inner，manager 跨项目不属于项目拓扑）+ 起 inner claude（checked-in launch 命令），然后驱动 inner |
 
 ```bash
-bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: healthy|empty-shell|missing, window, process, transcript, transcriptFresh}
+bash plugin/scripts/outer-session-check.sh --json   # 三态自检：{state: healthy|empty-shell|missing, window, process, transcript, transcriptFresh}
 ```
 
 > **⚠️ 2026-08-24「缺失 ⇒ 重建」改为条件性（人裁定停 inner，AC141 收窄 inner 执行面）**：
@@ -118,7 +118,7 @@ bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: hea
   transcript 出现真实 user 消息（send-keys-reliable 的 `transcript-delivery-check.ts` 判据），不假设成功。
   **工厂失败/验证不过 ⇒ 升级给人**（step 5），不静默继续——建不出来就进不了正常驱动流程。
 
-**transcript 路径解析**（inner-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
+**transcript 路径解析**（outer-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
 > `orchestration/session-liveness.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
 且不是外层自己的 jsonl，标 `source=discovery`）。找不到 transcript = fresh = 空壳判据（驱动不重建）。
 **发现路径是启发式**：`healthy` 判定若来自 `source=discovery`，先确认所选 transcript 确实是**当前**
@@ -737,7 +737,7 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --
 内层/外层/管理者各是**一次调用**，不新写代码。`--target inner` 保持旧路径 `.quay/inner-blocked.json`；
 其它 target 写 `.quay/blocked-signals/<target>.json`。
 
-外层盯内层（主路径，显式 `--target inner`）：
+~~外层盯内层（主路径，显式 `--target inner`）~~（**已退役** 2026-09-01：喂 inner 自己 pane 死指令，`gap-retire-inner-hygiene-delete-session-face`；下段 `--target outer` 仍活）：
 
 ```bash
 tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \
