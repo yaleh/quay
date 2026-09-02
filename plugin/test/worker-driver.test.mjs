@@ -121,6 +121,10 @@ import {
   finalizeOrphanDispatch,
   adoptOrphanWorker,
   WORKER_DISPATCH_REL,
+  scopedGateCommandFor,
+  scopedGateKey,
+  readScopedGateCache,
+  writeScopedGateCache,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
@@ -738,6 +742,155 @@ test("gap-worker-dispatch-prompt-ac-check-instruction — buildContinueWorkerPro
   });
   assert.match(cont, /- \[x\]/, "continue prompt instructs checking off - [x]");
   assert.match(cont, /## Acceptance Criteria/, "continue prompt names the AC section");
+});
+
+// ── gap-worker-premerge-scoped-gate-cache — worker 退出前 pre-merge + scoped-gate 缓存 ─────────────
+
+test("AC1 (gap-worker-premerge-scoped-gate-cache) — buildWorkerPrompt 含「退出前 merge develop + 跑 scoped 门」指令，且命令与 scopedGateCommandFor 单一真相源一致", () => {
+  const prompt = buildWorkerPrompt("gap-x", "/r");
+  const scopedCmd = scopedGateCommandFor("gap-x", "<the worktree path you created in step 1>").join(" ");
+  assert.ok(prompt.includes(scopedCmd), "prompt carries the exact scopedGateCommandFor command string (single source, ⛔ 两套标准)");
+  assert.match(prompt, /--for-task gap-x --allow-thin/, "command tail matches the fan-in scopedCmd form");
+  assert.match(prompt, /merge --no-edit develop/, "instructs the pre-merge of develop");
+  assert.match(prompt, /--write-scoped-gate-cache/, "instructs the mechanical cache write");
+});
+
+test("AC2 (gap-worker-premerge-scoped-gate-cache) — buildContinueWorkerPrompt 同样携带该步骤（独立断言，⛔ 不靠共用文本含糊）", () => {
+  const cont = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt", branchCommits: 3, branchHeadSubject: "x", acChecked: 2, acTotal: 5, failureReason: "r",
+  });
+  const scopedCmd = scopedGateCommandFor("gap-x", "/wt").join(" ");
+  assert.ok(cont.includes(scopedCmd), "continue prompt carries the exact scopedGateCommandFor command (real worktree path)");
+  assert.match(cont, /merge --no-edit develop/, "continue prompt instructs the pre-merge");
+  assert.match(cont, /--write-scoped-gate-cache/, "continue prompt instructs the cache write");
+});
+
+test("AC3 (gap-worker-premerge-scoped-gate-cache) — scoped-gate 缓存读写三分支：tip 一致命中；develop 前进未命中；缺失/损坏 fail-closed", (t) => {
+  const root = makeRoot("scg-cache");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const cacheFile = path.join(root, ".quay", "scoped-gate-cache.json");
+  const k1 = scopedGateKey("gap-x", "sha-1");
+  const k2 = scopedGateKey("gap-x", "sha-2"); // develop 前进 ⇒ 不同键
+
+  assert.equal(readScopedGateCache(cacheFile, k1), null, "absent cache ⇒ null (fail-closed, 不得默认命中)");
+  writeScopedGateCache(cacheFile, k1);
+  assert.equal(readScopedGateCache(cacheFile, k1), true, "develop tip 完全一致 ⇒ 命中");
+  assert.equal(readScopedGateCache(cacheFile, k2), null, "develop 已前进 ⇒ 未命中照跑");
+
+  fs.writeFileSync(cacheFile, "{not json");
+  assert.equal(readScopedGateCache(cacheFile, k1), null, "内容损坏 ⇒ null (fail-closed)");
+
+  fs.writeFileSync(cacheFile, JSON.stringify({ key: k1, ok: false }));
+  assert.equal(readScopedGateCache(cacheFile, k1), null, "非绿 (ok!=true) 永不命中");
+});
+
+// AC4 — runMechanicalFanIn 锁内 merge-develop 之后、scoped-gate 之前接入缓存判定（命中跳过，未命中照跑）。
+const SCRIPTS_DIR = path.dirname(DRIVER);
+const FF_MERGE_MODULE = path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts");
+const SLOT_LIB = path.join(SCRIPTS_DIR, "suite-slot-lib.sh");
+const SCG_TASK = "gap-scg-cache";
+
+function scgTaskBody() {
+  return [
+    "---",
+    `id: ${SCG_TASK}`,
+    "title: scoped-gate cache test",
+    "status: ready",
+    "labels: []",
+    "extra: {}",
+    "---",
+    "## Proposal",
+    "test",
+    "## Plan",
+    "test",
+    "## Touches",
+    "- docs/feature.md",
+    `- tasks/${SCG_TASK}.md`,
+    "## Acceptance Criteria",
+    "- [x] AC1 landed",
+    "## Definition of Done",
+    "- [x] landed",
+    "",
+  ].join("\n");
+}
+
+/** hermetic 仓库 + task worktree（同 fan-in-driver-mechanical-orchestration.test.mjs 的 makeRepoWithWorktree）：
+ *  develop 上有 task 文件（Touches + AC 全勾），worktree 分支 task/<id> 上一个 docs-only 实现提交。 */
+function makeScopedCacheRepo() {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "wd-scg-"));
+  const repo = path.join(base, "repo");
+  const worktree = path.join(base, "wt");
+  fs.mkdirSync(repo, { recursive: true });
+  runGit(repo, ["init", "-q"]);
+  runGit(repo, ["config", "user.name", "scg-test"]);
+  runGit(repo, ["config", "user.email", "scg@example.com"]);
+  runGit(repo, ["branch", "-M", "develop"]);
+  fs.mkdirSync(path.join(repo, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+  fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "tasks", `${SCG_TASK}.md`), scgTaskBody(), "utf8");
+  runGit(repo, ["add", "-A"]);
+  runGit(repo, ["commit", "-q", "-m", "base"]);
+  runGit(repo, ["worktree", "add", worktree, "-b", `task/${SCG_TASK}`]);
+  // develop 脱离主检出 ⇒ ff 退化为纯 ref 更新（git push . HEAD:develop）。
+  runGit(repo, ["checkout", "-q", "-b", "develop-work"]);
+  fs.mkdirSync(path.join(worktree, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(worktree, "docs", "feature.md"), "# feature\n", "utf8");
+  runGit(worktree, ["add", "-A"]);
+  runGit(worktree, ["commit", "-q", "-m", "implement feature"]);
+  return { base, repo, worktree };
+}
+
+function scgFanInArgs({ repo, worktree, base, runId, scopedGateCommand }) {
+  return {
+    task: SCG_TASK, worktree, root: repo, runId, mergeTarget: "develop", forceSuite: true,
+    scriptsDir: SCRIPTS_DIR, ffMergeModule: FF_MERGE_MODULE,
+    slotBase: path.join(base, "full-suite.lock"), slotLib: SLOT_LIB,
+    silenceMs: 5000, suiteCapture: path.join(base, "suite.env"),
+    suiteLogFile: path.join(base, "suite.log"),
+    suiteCommand: ["bash", "-c", "exit 0"],
+    scopedGateCommand,
+    docCheckCommand: ["true"],
+  };
+}
+
+function readScopedGateTraceLine(repo, runId) {
+  const fanInLog = path.join(repo, ".quay", `fan-in-${SCG_TASK}-${runId}.log`);
+  const lines = fs.readFileSync(fanInLog, "utf8").split("\n").map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
+  return lines.find((e) => e.step === "scoped-gate") ?? null;
+}
+
+test("AC4 (gap-worker-premerge-scoped-gate-cache) — 缓存命中 ⇒ 跳过 scoped-gate（marker 未写 + reason=cache-hit + wall_ms<5000）", async (t) => {
+  const { base, repo, worktree } = makeScopedCacheRepo();
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const developSha = runGit(repo, ["rev-parse", "develop"]).trim();
+  writeScopedGateCache(path.join(repo, ".quay", "scoped-gate-cache.json"), scopedGateKey(SCG_TASK, developSha));
+  const marker = path.join(base, "scoped-ran");
+  const r = await runMechanicalFanIn(scgFanInArgs({
+    repo, worktree, base, runId: "scg-hit-1",
+    scopedGateCommand: ["bash", "-c", `touch ${marker}; exit 0`],
+  }));
+  assert.equal(r.outcome, "landed", `cache-hit fan-in must land, got ${r.outcome} step=${r.step} reason=${r.reason}`);
+  assert.equal(fs.existsSync(marker), false, "cache-hit must SKIP the scoped gate (marker never written)");
+  const line = readScopedGateTraceLine(repo, "scg-hit-1");
+  assert.ok(line, "scoped-gate trace line present");
+  assert.match(line.reason ?? "", /cache-hit/, "hit trace reason contains cache-hit");
+  assert.ok(line.wall_ms < 5000, `hit wall_ms < 5000 (got ${line.wall_ms})`);
+});
+
+test("AC4 (gap-worker-premerge-scoped-gate-cache) — 缓存未命中 ⇒ 照跑 scoped-gate（marker 写入 + trace 无 reason，回归）", async (t) => {
+  const { base, repo, worktree } = makeScopedCacheRepo();
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const marker = path.join(base, "scoped-ran");
+  const r = await runMechanicalFanIn(scgFanInArgs({
+    repo, worktree, base, runId: "scg-miss-1",
+    scopedGateCommand: ["bash", "-c", `touch ${marker}; exit 0`],
+  }));
+  assert.equal(r.outcome, "landed", `cache-miss fan-in must land, got ${r.outcome} step=${r.step} reason=${r.reason}`);
+  assert.equal(fs.existsSync(marker), true, "miss must RUN the scoped gate (marker written)");
+  const line = readScopedGateTraceLine(repo, "scg-miss-1");
+  assert.ok(line, "scoped-gate trace line present");
+  assert.equal(line.reason, undefined, "miss trace has NO reason (byte-identical to today's step() trace)");
 });
 
 test("stashIfDirty — non-git ⇒ no-op; clean ⇒ files=[]; dirty ⇒ observe but NEVER stash others' changes (归属区分)", () => {
