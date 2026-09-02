@@ -200,14 +200,16 @@ test("truth-selection — a dynamic-truth-covering test that the bucket selectio
 
 // ── ③-AC3 — wired into run_static_checks ─────────────────────────────────────────────────────────────
 
-test("③-AC3 — the checker is registered in run_static_checks (the static-gate registry, not a prose claim)", () => {
+test("③-AC3 — the checker is registered in run_operational_checks (the operational-class gate — --static-checks-operational, not a prose claim)", () => {
   const gate = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "runner-static-gate.ts"), "utf8");
-  const body = gate.slice(gate.indexOf("run_static_checks()"), gate.indexOf("run_static_checks()") === -1 ? gate.length : gate.indexOf("\n}\n", gate.indexOf("run_static_checks()")));
+  const anchor = "run_operational_checks() {";
+  const body = gate.slice(gate.indexOf(anchor), gate.indexOf(anchor) === -1 ? gate.length : gate.indexOf("\n}\n", gate.indexOf(anchor)));
   assert.ok(
     /suite-bucket-drift-check\.ts/.test(body),
-    "run_static_checks must invoke suite-bucket-drift-check.ts (the drift check is wired into the static-gate chain)",
+    "run_operational_checks must invoke suite-bucket-drift-check.ts (the drift check is wired into the operational-class gate)",
   );
   assert.ok(/# @static-tier (always|change|full)/.test(body), "the checker must carry a @static-tier annotation");
+  assert.ok(/# @static-class operational/.test(body), "the checker must carry a @static-class operational marker");
 });
 
 // ── ③-AC4 — production trigger (the --buckets path collects the trace cache from real runs) ─────────

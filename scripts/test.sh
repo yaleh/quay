@@ -55,7 +55,11 @@
 #                                                  #   task's ## Touches-selected test set (scoped tier)
 #   scripts/test.sh --scoped <id>                  # same as --for-task (the scoped measure surface)
 #   scripts/test.sh --scoped <file...>             # scoped tier keyed to the given files as touches
-#   scripts/test.sh --static-checks                # gate-only: run the COMPLETE static-check set, no tests
+#   scripts/test.sh --static-checks-operational    # OPERATIONAL-class (runtime-state) checkers only — explicit
+#                                                  #   opt-in, no tests. The 11 checks that read the loop's LIVE runtime
+#                                                  #   state; home = the ACTIVE host, NOT the full-suite gate (passive
+#                                                  #   checkouts must go green on code alone — 2026-09-02 ruling).
+#   scripts/test.sh --static-checks                # gate-only: run the CODE-class static-check set, no tests
 #
 # SCOPED STATIC-CHECK TIER (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC2/AC6):
 #   A task-scoped run (`--for-task` / `--scoped`) runs the change-relevant static-check subset —
@@ -255,10 +259,11 @@ suite_reporter_flags() {
     "--test-reporter-destination=stderr"
 }
 
-# run_static_checks — the repo-wide CODE-CLASS invariants (checker registry + @static-tier/@static-object
-# annotations) — extracted to plugin/scripts/runner-static-gate.ts (gap-ac128-hub-split-harness-concerns).
-# Sourced here so the suite's dispatch paths call the SAME function body; select-static-checks-for-touches.ts
-# and checker-mutation-check.sh now parse the registry from that file (the single source, never a
+# run_static_checks (CODE-class) + run_operational_checks (OPERATIONAL-class runtime-state registry) —
+# the checker registries (@static-tier/@static-object/@static-class annotations) — extracted to
+# plugin/scripts/runner-static-gate.ts (gap-ac128-hub-split-harness-concerns). Sourced here so the
+# suite's dispatch paths call the SAME function bodies; select-static-checks-for-touches.ts and
+# checker-mutation-check.sh now parse the registries from that file (the single source, never a
 # hand-maintained list). runner-static-gate.ts is a HUB file (suite-bucket-hub-list.ts) — harness-critical.
 source "${repo_root}/plugin/scripts/runner-static-gate.ts"
 # run_doc_checks — the DOC-CLASS static checks (AC51 断言面拆分, gap-ac51-assertion-surface-split,
@@ -1477,8 +1482,19 @@ elif [ "${1:-}" = "--static-checks-doc" ]; then
   # DOC-ONLY checkers (run_doc_checks) with NO test run. This is the pre-commit home of the doc
   # consistency checks — wired into plugin/scripts/precommit-guard.ts (the pre-commit hook invokes
   # `bash scripts/test.sh --static-checks-doc` at commit time). It is NOT part of the full-suite
-  # gate; the full suite runs run_static_checks (code-class only).
+  # gate; the full suite runs run_static_checks (code-class only; the operational-class runtime-state
+  # checks are `--static-checks-operational`, the branch below).
   run_doc_checks
+  exit 0
+elif [ "${1:-}" = "--static-checks-operational" ]; then
+  # OPERATIONAL-class (runtime-state) static checks only (2026-09-02 passive-machine ruling — 执行
+  # suite 测试不应依赖本项目运行态): run the 11 runtime-state checkers (run_operational_checks) with NO
+  # test run. Home = this explicit opt-in on the ACTIVE host, NOT the full-suite gate (the default
+  # suite must be machine-independent — a passive checkout goes green on code alone). NOT wired into
+  # any automatic cadence (outer retiring; drift accepted). They REMAIN in the mutation manifest
+  # (checker-mutation-check.sh parses run_operational_checks) so the L_S instrument is not weakened.
+  # run_operational_checks is defined in runner-static-gate.ts (sourced above).
+  run_operational_checks
   exit 0
 elif [ "${1:-}" = "--for-task" ] || [ "${1:-}" = "--scoped" ]; then
   # gap-test-selection-not-scoped-to-touches: mechanical per-task test selection. `scripts/test.sh
