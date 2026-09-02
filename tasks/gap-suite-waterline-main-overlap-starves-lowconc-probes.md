@@ -1,7 +1,7 @@
 ---
 id: gap-suite-waterline-main-overlap-starves-lowconc-probes
 title: waterline 调度器 main 与 lowconc 并发占满核——B 类等待型探针在 lowconc 窗口被饿死（probe 饿死真根因）
-status: ready
+status: superseded
 labels:
   - gap
   - defect
@@ -9,6 +9,8 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded_by: gap-session-liveness-bclass-move-to-serial
+  superseded_reason: 人裁定反对改 waterline——水位设计正确（serial 相 ALONE 先跑于 main 之前，lowconc/main 并行；main 填剩余容量是省墙钟的意图）。probe 饿死不是 waterline 缺陷，是 B 类等待型测试被放在 lowconc 相（与 main 并行被饿死）——正确修法是把这些测试从 lowconc 移到 serial（serial 相 ALONE 先跑，不被 main 饿死）。
 ---
 **type:** execution
 
