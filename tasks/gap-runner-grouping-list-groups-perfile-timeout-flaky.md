@@ -1,7 +1,7 @@
 ---
 id: gap-runner-grouping-list-groups-perfile-timeout-flaky
 title: runner-grouping-list-groups.test.mjs perfile-timeout 78s 超阈值——A 类时序敏感（内部全绿，文件级超时），pre-existing 6 次
-status: todo
+status: ready
 labels:
   - gap
   - defect
