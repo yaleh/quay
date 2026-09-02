@@ -128,6 +128,16 @@ import {
   scopedGateKey,
   readScopedGateCache,
   writeScopedGateCache,
+  continueRelatednessNote,
+  failingTestFilesFromSuiteLog,
+  taskTouches,
+  taskDeltaFiles,
+  computeDeltaPaths,
+  directImportRels,
+  classifyDeltaRelatedness,
+  classifyLoadSensitive,
+  relatednessSignalsFor,
+  formatRelatednessNote,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
@@ -802,6 +812,119 @@ test("gap-worker-dispatch-prompt-ac-check-instruction — buildContinueWorkerPro
   });
   assert.match(cont, /- \[x\]/, "continue prompt instructs checking off - [x]");
   assert.match(cont, /## Acceptance Criteria/, "continue prompt names the AC section");
+});
+
+// ── gap-continue-prompt-delta-relatedness-note — 续做 prompt 两条结构性信号 ─────────────────────────
+
+// 写一个带 ## Touches 的任务文件（非 git makeRoot，delta = Touches）。
+function writeRelatednessTask(root, task, touches) {
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  const bullets = touches.map((t) => `- ${t}`).join("\n");
+  fs.writeFileSync(path.join(root, "tasks", `${task}.md`),
+    `---\nid: ${task}\nstatus: ready\n---\n\n## Proposal\n\nprose\n\n## Touches\n\n${bullets}\n`, "utf8");
+}
+
+// 写一个测试文件（可选 @load-sensitive 头）。
+function writeRelatednessTest(root, rel, { loadSensitive = false } = {}) {
+  const abs = path.join(root, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  const header = loadSensitive ? "// @load-sensitive wall-clock\n" : "// @test-group product\n";
+  fs.writeFileSync(abs, `${header}import { test } from "node:test";\n`, "utf8");
+}
+
+test("AC1 (能取假) — classifyDeltaRelatedness 区分「失败测试在 delta 内=related」与「不在且一跳导入不相交=unrelated」", () => {
+  const inDelta = classifyDeltaRelatedness("packages/quay/test/foo.test.mjs",
+    ["packages/quay/test/foo.test.mjs"], []);
+  assert.equal(inDelta.verdict, "related", "failing test itself in delta ⇒ related");
+
+  const viaImport = classifyDeltaRelatedness("packages/quay/test/obs.test.mjs",
+    ["packages/quay/src/observation.ts"],
+    ["packages/quay/src/observation.ts", "packages/quay/src/serve-handlers.ts"]);
+  assert.equal(viaImport.verdict, "related", "one-hop import intersects delta ⇒ related");
+
+  const unrelated = classifyDeltaRelatedness("packages/quay/test/obs.test.mjs",
+    ["packages/quay/src/serve-dashboard.ts"],
+    ["packages/quay/src/observation.ts", "packages/quay/src/serve-handlers.ts"]);
+  assert.equal(unrelated.verdict, "unrelated", "not in delta + one-hop imports disjoint ⇒ unrelated");
+
+  // 两个判断能互相区分（⛔ 恒定输出同一结论 ⇒ 假）。
+  assert.notEqual(inDelta.verdict, unrelated.verdict, "related vs unrelated distinguishable");
+});
+
+test("AC2 (能取假) — classifyLoadSensitive 命中真实 @load-sensitive 标注、未标注不命中", (t) => {
+  const root = makeRoot("rel-ls");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeRelatednessTest(root, "plugin/test/annotated.test.mjs", { loadSensitive: true });
+  writeRelatednessTest(root, "plugin/test/plain.test.mjs", { loadSensitive: false });
+  assert.equal(classifyLoadSensitive(root, "plugin/test/annotated.test.mjs"), "load-sensitive", "annotated ⇒ hit");
+  assert.equal(classifyLoadSensitive(root, "plugin/test/plain.test.mjs"), "not-annotated", "unannotated ⇒ miss");
+});
+
+test("AC3 (能取假) — 读不懂有独立取值 unknown，不与 unrelated/not-annotated 同形", (t) => {
+  const root = makeRoot("rel-unknown");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // Touches 解析失败（delta null）⇒ signal1 unknown。
+  const noDelta = classifyDeltaRelatedness("packages/quay/test/foo.test.mjs", null, []);
+  assert.equal(noDelta.verdict, "unknown", "delta null ⇒ unknown (Touches unreadable)");
+  assert.notEqual(noDelta.verdict, "unrelated", "unknown ≠ unrelated");
+
+  // 依赖查询失败（import 解析 null 且不在 delta）⇒ signal1 unknown。
+  const noImports = classifyDeltaRelatedness("packages/quay/test/foo.test.mjs", ["packages/quay/src/a.ts"], null);
+  assert.equal(noImports.verdict, "unknown", "imports null (dependency query failed) ⇒ unknown");
+  assert.notEqual(noImports.verdict, "unrelated", "unknown ≠ unrelated");
+
+  // 注册表读取失败（文件缺失）⇒ signal2 unknown。
+  assert.equal(classifyLoadSensitive(root, "plugin/test/missing.test.mjs"), "unknown", "missing file ⇒ unknown");
+  assert.notEqual(classifyLoadSensitive(root, "plugin/test/missing.test.mjs"), "not-annotated", "unknown ≠ not-annotated");
+});
+
+test("AC4 (能取假) — 措辞含「不是结论/重跑验证」，⛔ 不含可误读为自动放行的「跳过/无需检查」", () => {
+  const note = formatRelatednessNote([{
+    signal: "delta-relatedness", failingTest: "packages/quay/test/obs.test.mjs", verdict: "unrelated", reason: "r",
+  }]);
+  assert.match(note, /not a verdict|not a conclusion/, "names 'not a verdict/conclusion'");
+  assert.match(note, /[Rr]e-run the suite once to verify/, "instructs re-run to verify");
+  assert.doesNotMatch(note, /\bskip\b|无需检查|可以跳过/, "no auto-skip wording (skip / 无需检查 / 可以跳过)");
+});
+
+test("AC5 (能取假) — buildContinueWorkerPrompt 在 suite 红时拼入 continueRelatednessNote 输出", (t) => {
+  const root = makeRoot("rel-wired");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeRelatednessTask(root, "gap-x", ["packages/quay/src/serve-dashboard.ts"]);
+  writeRelatednessTest(root, "packages/quay/test/obs.test.mjs", { loadSensitive: false });
+  const suiteLog = path.join(root, ".quay", "fan-in-suite-gap-x.log");
+  fs.mkdirSync(path.dirname(suiteLog), { recursive: true });
+  fs.writeFileSync(suiteLog, "__PERFILE__ duration_ms=10 packages/quay/test/obs.test.mjs passed=false end_ms=1\n", "utf8");
+
+  const withRed = buildContinueWorkerPrompt("gap-x", root, {
+    worktreePath: "/wt", branchCommits: 1, branchHeadSubject: "x", acChecked: 1, acTotal: 2,
+    failureReason: "suite red",
+    attempts: [{ ts: "2026-09-01T00:00:00.000Z", runId: "r", sessionId: "s", step: "suite", reason: "suite red", fanInLog: null, suiteLog }],
+  });
+  assert.match(withRed, /delta-relatedness check/, "suite-red continue prompt carries the relatedness note");
+  assert.match(withRed, /packages\/quay\/test\/obs\.test\.mjs/, "note names the failing test");
+
+  // 负控制：无 suite 红（attempts 无 suiteLog）⇒ 不注入。
+  const withoutRed = buildContinueWorkerPrompt("gap-x", root, {
+    worktreePath: "/wt", branchCommits: 1, branchHeadSubject: "x", acChecked: 1, acTotal: 2, failureReason: "r",
+    attempts: [],
+  });
+  assert.doesNotMatch(withoutRed, /delta-relatedness check/, "no suite-red ⇒ no relatedness note");
+});
+
+test("AC6 (能取假) — 真实案例回放：observation.test.mjs 判 unrelated + 未标注（⛔ 只在合成 fixture 上验证 ⇒ 假）", () => {
+  // 用真实仓库文件（REPO_ROOT）：真实任务 Touches + 真实 observation.test.mjs 的 import 结构。
+  const failing = "packages/quay/test/observation.test.mjs";
+  const delta = computeDeltaPaths(REPO_ROOT, "gap-dashboard-taskcard-multistatus-minitable");
+  const imports = directImportRels(REPO_ROOT, failing);
+  const d = classifyDeltaRelatedness(failing, delta, imports);
+  assert.equal(d.verdict, "unrelated", "real observation.test.mjs is not in the minitable task's delta and its one-hop imports don't intersect it");
+  assert.equal(classifyLoadSensitive(REPO_ROOT, failing), "not-annotated", "real observation.test.mjs is @test-group product, not @load-sensitive — must say not-annotated (not a false hit)");
+
+  // 回放 suite 日志的失败提取（真实 __PERFILE__ passed=false 行形）。
+  const extracted = failingTestFilesFromSuiteLog("__PERFILE__ duration_ms=93810 packages/quay/test/observation.test.mjs passed=false end_ms=1788282318478\n");
+  assert.deepEqual(extracted, [failing], "real __PERFILE__ passed=false line extracts the real failing test");
 });
 
 // ── gap-worker-premerge-scoped-gate-cache — worker 退出前 pre-merge + scoped-gate 缓存 ─────────────
