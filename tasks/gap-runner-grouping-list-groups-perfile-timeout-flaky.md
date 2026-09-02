@@ -14,30 +14,28 @@ extra:
 
 ## Proposal
 
-`plugin/test/runner-grouping-list-groups.test.mjs` 在并发 suite 下文件级 perfile-timeout 超时：`__PERFILE__ duration_ms=77891 passed=false`（78s > 阈值），但测试内部 `pass 3 / fail 0`（3 用例全过）——**用例绿，是文件整体慢超 perfile-timeout 阈值判 failed**，非 assertion 失败。
+`plugin/test/runner-grouping-list-groups.test.mjs` 在并发 suite 下间歇性 `__PERFILE__ ... passed=false`（历史 8 轮：32/756/758/810/819/824/858/879）。
 
-**pre-existing 高频 flaky**：verification-round 历史失败 6 次（比 vendor-freshness 1、suite-driver 2、outer-session-check 2 都高）。是 flaky 集群第 5 组（vendor-freshness✓ → suite-driver → outer-session-check✓ → spec-declaration✓ → 本条）。A 类时序敏感（文件整体慢、并发 16 核下超 60s perfile-timeout）。
+**修案更正（根因非超时）**：`passed=false` 不是 perfile-timeout，而是**真实测试失败**——每轮的具体失败行都是 `✖ AC6: --group product,engine ∪ --group lowconc selects the same files as no-args`。`measure-suite-reporter.mjs` 透传 node test runner 的 `details.passed`（gate 名 `perfile-timeout` 是误称，见 memory `perfile-timeout-gate-name-misleads`）。真实根因是 **transient 跨文件竞态**：本文件与 `runner-grouping-serial-anti-stomp.test.mjs` 同为 serial 组、主机推导并发下并发运行，后者的 AC0c 在共享 `plugin/test/` 写 `zz-unknown-group-anti-stomp.test.mjs`（`@test-group bogus`），存活约 1.5s 期间 `scripts/test.sh` 的元数据查询（`--list-files`/`--list-groups`）对未知 group FAIL-CLOSED（exit 3）→ `runTestSh` 的 `assert.equal(r.status, 0)` 抛异常，且 `readStable` 不捕异常 ⇒ AC6 判 failed。
 
 ## Plan
 
-三选一（或组合）：
-1. **加长 perfile-timeout 阈值**：`full-suite-runner.ts` 的 per-file 阈值对该文件（或整体）放宽。
-2. **拆分慢用例**到 serial/lowconc 组（`@test-group` 标注），让慢用例在低并发组跑不被主组并发拖慢。
-3. **perfile-timeout 白名单**：该文件加入白名单（已知慢、内部绿）。
+原三选一（加长 perfile-timeout 阈值 / 拆分慢用例 / perfile-timeout 白名单）全部基于「perfile-timeout」误诊而作废——白名单/加阈值会造一个「恒绿检查」掩盖真实失败（硬规则 3b）。实际修法：
 
-验证：并发 suite 下该文件不再 perfile-timeout 判 failed；内部 pass/fail 不变（pass 3）。
+`runTestSh` 对 FAIL-CLOSED（exit 3）做**有界重读**（4 次）：exit 3 只来自 sibling 的 transient bogus fixture（存活 ~1.5s，fail-closed 快至 ~1.4s）；真实 fail-closed（已提交的 bogus 声明）每次重读都失败 ⇒ 越过界仍浮出，transient fixture 清除则恢复。不改断言、不改测试集（仍 3 用例）。
+
+验证：并发 suite 下该文件不再 `passed=false` 判 failed；内部 pass/fail 不变（pass 3）。
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：并发 load 下 runner-grouping-list-groups.test.mjs 不再 perfile-timeout 判 failed（duration 不超阈值或白名单豁免）；（⛔ 仍 perfile-timeout failed ⇒ 假）。
-- [ ] AC2（能取假，无回归）：该文件内部 pass/fail 不变（3 用例仍全绿，只改超时/分组，不改断言）；（⛔ 改断言/改测试集 ⇒ 假）。
+- [x] AC1（能取假）：并发 load 下 runner-grouping-list-groups.test.mjs 不再 `passed=false` 判 failed——transient bogus fixture 的 FAIL-CLOSED（exit 3）被有界重读吸收，真实 fail-closed 仍浮出；（⛔ 仍因该文件 `passed=false` 判 failed ⇒ 假）。
+- [x] AC2（能取假，无回归）：该文件内部 pass/fail 不变（3 用例仍全绿，不改断言、不改测试集）；（⛔ 改断言/改测试集 ⇒ 假）。
 
 ## Definition of Done
 
-perfile-timeout 阈值/分组/白名单处置落地；AC1/AC2 勾；runner-grouping-list-groups 并发下稳定绿；内部 pass/fail 不变；全量 suite 绿。
+`runTestSh` 对 exit 3 的有界重读落地；AC1/AC2 勾；runner-grouping-list-groups 并发下稳定绿；内部 pass/fail 不变（pass 3）；全量 suite 绿。
 
 ## Touches
 
-- plugin/scripts/full-suite-runner.ts（perfile-timeout 阈值 / 白名单）
-- plugin/test/runner-grouping-list-groups.test.mjs（如拆分慢用例到 serial/lowconc）
+- plugin/test/runner-grouping-list-groups.test.mjs（runTestSh 对 FAIL-CLOSED exit 3 有界重读）
 - tasks/gap-runner-grouping-list-groups-perfile-timeout-flaky.md（自身）
