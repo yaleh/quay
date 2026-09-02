@@ -97,16 +97,37 @@ function defaultCpuLimit() {
  *  process.env — this replaces the old bash-extraction subshells (which sourced suite-slot-lib.sh and
  *  extracted default_concurrency_formula / serial_lowconc_host_default from test.sh). The seams are the
  *  SAME names the bash functions read, so every assertion below is unchanged in meaning. */
+// Concurrency-knob env the derivation/resource-gate read. withSeams is hermetic over these: any NOT
+// explicitly provided is cleared for the call (restored after) so ambient leakage — e.g. a caller
+// exporting QUAY_MAX_OVERSUBSCRIPTION — can never perturb a fixture asserting the oversub=1 baseline
+// (2026-09-02 ov15 run: exported oversub red 2 self-tests expecting 16×1/2=8).
+const CONCURRENCY_ENV = [
+  "RESOURCE_GATE_NPROC",
+  "RESOURCE_GATE_CONCURRENT_SUITES",
+  "RESOURCE_GATE_OVERSUBSCRIPTION",
+  "QUAY_MAX_OVERSUBSCRIPTION",
+  "QUAY_MAX_CONCURRENT_SUITES",
+  "QUAY_PHASE_OVERLAP",
+];
 function withSeams(seams, fn) {
   const saved = {};
+  const touched = [];
   for (const k of Object.keys(seams)) {
     saved[k] = process.env[k];
     process.env[k] = seams[k];
+    touched.push(k);
+  }
+  for (const k of CONCURRENCY_ENV) {
+    if (!(k in seams)) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+      touched.push(k);
+    }
   }
   try {
     return fn();
   } finally {
-    for (const k of Object.keys(seams)) {
+    for (const k of touched) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
@@ -438,6 +459,14 @@ test("AC5 — formula derives max(1, floor(nproc × oversub / S)); the DEFAULT e
   const prevLock = process.env.FULL_SUITE_LOCK_FILE;
   const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   const prevKnob = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  // Oversub must ALSO be hermetic here (this real-host assertion does not go through withSeams): it
+  // compares currentDefaultConcurrency() against the oversub=1 baseline (derivedConcurrency(...,1)) —
+  // an ambient QUAY_MAX_OVERSUBSCRIPTION / RESOURCE_GATE_OVERSUBSCRIPTION (e.g. an oversub suite run)
+  // would perturb the effective default and red it (2026-09-02 ov15 run).
+  const prevOversub = process.env.QUAY_MAX_OVERSUBSCRIPTION;
+  const prevRGOver = process.env.RESOURCE_GATE_OVERSUBSCRIPTION;
+  delete process.env.QUAY_MAX_OVERSUBSCRIPTION;
+  delete process.env.RESOURCE_GATE_OVERSUBSCRIPTION;
   const pinTmp = fs.mkdtempSync(path.join(os.tmpdir(), "rg-pin5-"));
   const pinBase = path.join(pinTmp, "full-suite.lock");
   fs.writeFileSync(`${pinBase}.concurrency`, "2", "utf8");
@@ -459,6 +488,10 @@ test("AC5 — formula derives max(1, floor(nproc × oversub / S)); the DEFAULT e
     else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
     if (prevKnob === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prevKnob;
+    if (prevOversub === undefined) delete process.env.QUAY_MAX_OVERSUBSCRIPTION;
+    else process.env.QUAY_MAX_OVERSUBSCRIPTION = prevOversub;
+    if (prevRGOver === undefined) delete process.env.RESOURCE_GATE_OVERSUBSCRIPTION;
+    else process.env.RESOURCE_GATE_OVERSUBSCRIPTION = prevRGOver;
     fs.rmSync(pinTmp, { recursive: true, force: true });
   }
 });
