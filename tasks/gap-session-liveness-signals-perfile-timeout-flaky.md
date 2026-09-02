@@ -9,7 +9,8 @@ parent: null
 children: []
 extra:
   schema: execution
-  superseded_reason: 原「超 perfile-timeout 超时」前提是 gate 名误称导致的系统性误诊——perfile-timeout 匹配的 passed=false 来自 node test runner details.passed =「该文件有真实失败测试」，非「超时」；60s 阈值不存在（driver 271s/vendor 425s 都 passed=true）。260s/254s 是总墙钟非超时触发点。真根因 = session-liveness 真实 assertion 失败，需重查（gate 名已由 gap-suite-perfile-timeout-global-widening 更正为 perfile-failure，但那是改名不修失败）。
+  superseded_by: gap-lowconc-concurrency-8-starves-bclass-waiting
+  superseded_reason: 原「超 perfile-timeout 超时」前提是 gate 名误称导致的系统性误诊——perfile-timeout 匹配的 passed=false 来自 node test runner details.passed =「该文件有真实失败测试」，非「超时」；60s 阈值不存在（driver 271s/vendor 425s 都 passed=true）。260s/254s 是总墙钟非超时触发点。真根因已定位 = AC74 回归把 lowconc 从人裁定 3 改成宿主推导 8、B 类等待型探针被饿死（见 superseded_by 任务）——本「超时」误诊任务由它承接。
 ---
 **type:** execution
 

@@ -1,11 +1,9 @@
-> ⚠️ **本文件已退役（AC149，2026-08-28）**：outer/inner 会话停止，「给 outer / inner 发消息」不再有投递目标——机制由 driver 的派发/收尾面承接；manager 会话保留但不再向退役会话投递。→ `orchestration/manager-phase-goal.md` ### AC149。
-
-**给 outer / inner 发消息 —— 默认走原生跨会话消息（人 2026-08-12 裁定「实际应用 SendMessage，替换本项目原先使用的信道」）**
+**给 outer 发消息 —— 默认走原生跨会话消息（人 2026-08-12 裁定「实际应用 SendMessage，替换本项目原先使用的信道」）**
 
 ## 默认路径（原生，零脚本）
 
 1. **`ListAgents`** 找目标 —— 输出每行是 `name [ref]`，**名字就是地址**，无独立地址语法。
-   本仓库常见目标：`quay-outer [f87c4a]` / `quay-inner [6d89d2]`（ref 会变，**每次现读，不要背**）。
+   本仓库常见目标：`quay-outer [f87c4a]`（ref 会变，**每次现读，不要背**）。
 2. **`SendMessage {to: "<name>", message: "…", summary: "…"}`**。
    **首次用裸名若报 `not an agent`，按错误提示补 ` [ref]` 重发**（实测一次即过，错误信息会给出确切写法）。
 3. **目标 busy 无需等待**——文档「no "busy" state; messages enqueue and drain at the receiver's next tool round」，

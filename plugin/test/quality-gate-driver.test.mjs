@@ -38,6 +38,7 @@ import {
   qualityGateRoutines,
   computeRoundRecord,
 } from "../scripts/quality-gate-driver.ts";
+import { qualityRoundPath } from "../scripts/pool-quality-judge.ts";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
@@ -233,4 +234,52 @@ test("resident loop --once writes a round record with facts (spawn real process)
   assert.equal(rec.facts.length, 2, "first round ⇒ both routines due (never-ran ⇒ interval due)");
   const names = rec.facts.map((f) => f.name).sort();
   assert.deepEqual(names, ["judgment-consumer-check", "pool-quality-judge"]);
+});
+
+// ── 判词载体写端（gap-pool-quality-verdicts-never-persisted：AC1 driver 路径 + AC6 负控制）───────
+
+test("AC1 — runPoolQualityJudge fired writes a judged record to .quay/quality-round.jsonl", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-qr-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const planCmd = ["node", fakePlanScript(tmp, true)];
+  const judgeArgv = ["node", fakeJudgeScript(tmp)];
+  const gateArgv = ["node", fakeGateGoScript(tmp)];
+  const fact = runPoolQualityJudge(tmp, planCmd, judgeArgv, gateArgv);
+  assert.equal(fact.state, "verified");
+  const carrier = qualityRoundPath(tmp);
+  assert.ok(fs.existsSync(carrier), "carrier must exist after a fired judge");
+  const lines = fs.readFileSync(carrier, "utf8").split("\n").filter((l) => l.trim());
+  assert.equal(lines.length, 1, "one judged record");
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.state, "judged");
+  assert.equal(rec.verdicts.length, 2);
+  assert.deepEqual(rec.shouldRemoveIds, ["gap-demo-should-remove"]);
+  for (const v of rec.verdicts) {
+    for (const k of ["taskId", "verdict", "action", "evidence", "judgedAt", "round"]) {
+      assert.ok(k in v, `verdict entry must carry ${k} (AC1 五键以上)`);
+    }
+  }
+});
+
+test("AC6 — recordVerdicts=false ⇒ carrier does not grow; restore ⇒ grows (负控制, 能取假)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-nc-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const planCmd = ["node", fakePlanScript(tmp, true)];
+  const judgeArgv = ["node", fakeJudgeScript(tmp)];
+  const gateArgv = ["node", fakeGateGoScript(tmp)];
+  const carrier = qualityRoundPath(tmp);
+  const count = () => (fs.existsSync(carrier) ? fs.readFileSync(carrier, "utf8").split("\n").filter((l) => l.trim()).length : 0);
+  // 写入开启 ⇒ 1 条。
+  const on = runPoolQualityJudge(tmp, planCmd, judgeArgv, gateArgv, true);
+  assert.equal(on.state, "verified");
+  const afterOn = count();
+  assert.equal(afterOn, 1, "write on ⇒ carrier grows to 1");
+  // 关掉写入 ⇒ 不增长（仍 1 条）。
+  const off = runPoolQualityJudge(tmp, planCmd, judgeArgv, gateArgv, false);
+  assert.equal(off.state, "verified");
+  assert.equal(count(), afterOn, "write off ⇒ carrier does NOT grow");
+  // 恢复写入 ⇒ 增长到 2 条。
+  const on2 = runPoolQualityJudge(tmp, planCmd, judgeArgv, gateArgv, true);
+  assert.equal(on2.state, "verified");
+  assert.equal(count(), 2, "write restored ⇒ carrier grows to 2");
 });

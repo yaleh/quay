@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|
 | 有哪些机件、各自回答什么问题 | `bash plugin/scripts/capability-catalog.sh`（**唯一清单**；声明数看它自报——`summary: N scripts`，不要硬记数字，会随脚本增删漂移） |
 | 驱动/投递到别的 Claude 会话 | **默认：`ListAgents` → `SendMessage`**（人 2026-08-12 裁定「实际应用 SendMessage」；需 Claude Code 2.1.224 或更新,本机 2.1.228）。**实测**：目标 busy 直投即达（无 can-receive 闸门）；到达形态 `<cross-session-message from=… from-name=… from-mode=…>`,**身份由平台标注而非发送方自称**；平台强制 peer 不能代替人许可/改配置/**执行斜杠命令**。**旧机件保留可用但非默认路径**（人 2026-08-12 裁定「还保留原实现和测试,但尽量减少对其使用」）：`supervisor-deliver.sh` / `send-keys-reliable.sh` / `drive-target-check.sh` / `transcript-delivery-check.ts`。（`message-bus.ts` / `inbox-reader.sh` 随 inbox 机制删除——人 2026-08-20 裁定范围A。）**保留的两个不可替代用途**：①**控制面**——`/clear` 等斜杠命令原生通道办不到（文档明确 "Commands don't run"）,只能走 tmux 输入；②**下游交付面**——Claude Code 低于 2.1.224 者 / Bedrock·AWS·GCP·Foundry / native Windows。**手工拼 tmux send-keys 仍禁止。** |
-| 三层每轮该做什么 | `orchestration/{manager,orchestrator,fast-mode}-tick-core.md`（执行路径；**强制判据是 `tick-core-static-check.ts` 的 (src:N) 覆盖率=100%，不是行数**；「各 ≤80 行」判据退役说明 → `orchestration/archive/AC58-retired-clauses.md#R17`） |
+| 三层每轮该做什么 | `orchestration/{manager,orchestrator,fast-mode}-tick-core.md`（执行路径；**强制判据是 `tick-core-static-check.ts` 的 (src:N) 覆盖率=100%，不是行数**；「各 ≤80 行」判据退役说明 → `orchestration/archive/AC58-retired-clauses.md#R17`）。**inner(fast-mode) 已退役,outer 未退役(人 2026-09-01 裁定,推翻早前 AC149 对 outer 的标注)——读三份正本前先查这条状态,不要照单全收文件自己的横幅。** |
 | 判准 / 收尾 / 发消息形态 | `orchestration/manager-tick-{criteria,closing,sending}.md`（466 行；**停调 workflow 19 小时 ⇒ 这些全部缺席 ⇒ 8 条违规**） |
 | pane 状态 | `plugin/scripts/pane-state-classify.ts`（底部区域 + 枚举态，**不是整屏哈希**）。**⚠️ 它是【被 import 的判定库】，不是每轮直接调的命令**——真实消费者是 `session-liveness.sh`（`classifyPaneVerdict` 等）与 `inner-blocked-signal.ts:151`（outer A7 / inner A7-A8 经它间接用）。**manager 直接调用那一条（旧 A4）已于 2026-08-14 退役**（人令清理；实测从未执行）→ `orchestration/archive/AC58-retired-clauses.md#R28`。**pane 忙闲是代理量**：pane 进程存在 ≠ 会话在处理（实证：inner 的 pane 一直在而 tick 停 21 分钟）；**判层活性的正本是直接量**（`git log` 提交时刻 / worktree 内活进程）。 |
 | **诊断「空槽 + 池里有货 + 就是不派」** | **先查 subagent 预算,不要先怀疑机制** —— harness 有**会话级累计** spawn 上限，触顶后**静默降级为主线程串行**，三层执行核都不写它。识别：目标会话 transcript 里搜 `Subagent spawn limit reached`；实测燃烧率 ~60 次/天 ⇒ 默认额度约 **3 天**寿命，**任何长于 3 天的自主运行必然撞它**。数值、环境变量名、`/clear` 是否重置、两个易混旋钮（会话累计 vs 并发）——**正本在 `tasks/gap-inner-subagent-budget-invisible.md`，不在此处复制**（数值随 Claude Code 版本变）。**代价实证 2026-08-10：三层 + 人共花数小时反复误诊为「outer 不派发」「inner 自锁」「唤醒链断」，全错。** **第二种成因（2026-08-13 实测补）**：inner 长时间占用回合做【主线程编辑】（红窗快修等），期间既不产生完成事件、也不触发心跳重评估 ⇒ 同样表现为空槽+有货+不派，但 subagent 预算完全正常（实测 21/200）。**识别：查 slot-refill 调用间隔**（实测一夜有 4 段 54–149 分钟空档、合计占窗口 52%），不是查预算。 |
@@ -272,7 +272,7 @@ Key cross-cutting facts (require reading several files to see):
 
 - **RETIRED (ADR-022, 2026-08-03): classic milestone loop 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R18`.** The **two-layer fast mode is the sole development mode**（fast-mode telemetry under `milestones/fast-mode-telemetry/<date>.json`；`## Contract` 六键 + `task-contract-check.ts` 取代 ProposalReview/PlanCheck，subagent REFUTE 轮取代 Audit phase；`OUTER-LOOP.md` 曾是经典循环驱动文档，见 `experiments/quay-perpetual-stream/`）
 - **`experiments/quay-perpetual-stream/`** is the active BAIME experiment (exp5): an autonomous outer loop that builds quay one milestone at a time. **`OUTER-LOOP.md` was the classic-loop driver document** (retired under ADR-022 — see the notice above); `inherited-core.md` is the pinned methodology; `dashboard.md` is mutable outer state; `scripts/it0-*.{sh,mjs}` are the mechanical gates (notably `it0-dod-check.sh` — the **DoD meta-enforcer**, Clauses 0-9, fixture-pinned by `dod-fixture-selfcheck.sh`).
-- **Two-layer per-task worktree isolation（取代 RETIRED classic-loop 工作树机制，后者历史细节 → `orchestration/archive/AC58-retired-clauses.md#R19`）**: 两层模式用 plain `git worktree add` 按任务直接隔离（无 `milestone-worktree.ts`）。**path 约定 `/home/yale/work/quay-worktrees/<task-id>`，不在 `/tmp`**（`/tmp` 会被系统清理、且本机已实测 积压 3389 个测试遗留目录/1.1G；正本 `orchestration/inner-brief-2026-08-04-restart.md:103`）。**在飞任务数读法 = `git worktree list | grep -c quay-worktrees`**（`ls` 任一 `/tmp` 路径恒返回 0，会把工作中的 inner 伪装成空闲）。
+- **Two-layer per-task worktree isolation（取代 RETIRED classic-loop 工作树机制，后者历史细节 → `orchestration/archive/AC58-retired-clauses.md#R19`）**: 两层模式用 plain `git worktree add` 按任务直接隔离（无 `milestone-worktree.ts`）。**path 约定 `/home/yale/work/quay-worktrees/<task-id>`，不在 `/tmp`**（`/tmp` 会被系统清理、且本机已实测 积压 3389 个测试遗留目录/1.1G；正本 `orchestration/inner-brief-2026-08-04-restart.md:103`）。**在飞任务数读法 = `git worktree list | grep -c quay-worktrees`**（`ls` 任一 `/tmp` 路径恒返回 0，会把在跑的任务伪装成空闲）。
   **🔴 2026-08-16 23:2xZ 更正：这条原写作「唯一正确读法」，而它在【两个方向上都高估】，实测如下——**
   **①它把非任务 worktree 也数进去**：验证轮自己的 `verify-round-<ts>-<hash>` 也在该目录下
   ⇒ 裸 `grep -c` 得 **4** 而真实任务 worktree = **3**；**`slot-refill` 自己是过滤掉它的**（两种传法都报 `in_flight=3`）
@@ -321,7 +321,7 @@ Key cross-cutting facts (require reading several files to see):
    **同一个容器里若装着两类 population,只用覆盖其中一类的工具去判空,会把非空读成空**（当时：收件箱读工具只认 JSON 记录、看不见手写 `.md`；64 封信被读成零）。
    **这个教训的一般形态见硬规则 5「来源完备性」,不再需要专门的收件箱条目。**
 3. pane 状态：`pane-state-classify.ts`，不是整屏哈希（ADR-016 禁）。
-4. outer→inner 驱动文本契约：`drive-contract-check.ts`。
+4. 驱动文本契约：`drive-contract-check.ts`。
 
 ## Process
 

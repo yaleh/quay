@@ -1,7 +1,7 @@
 ---
 id: gap-lowconc-concurrency-8-starves-bclass-waiting
 title: lowconc 并发从人裁定 3 被 AC74 宿主推导改成 8——B 类等待型测试 CPU 饥饿（session-liveness 真失败根因）
-status: todo
+status: ready
 labels:
   - gap
   - defect
