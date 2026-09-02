@@ -246,8 +246,9 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
   padding: 2px 5px;
 }
 /* AC100/AC102: verdict colouring is token-defined on BOTH the list pages (this sheet)
-   and the detail pages (detailStyles()) — the two sheets agree on the accent family. */
-.verdict-pass { color: var(--color-accent-700); }
+   and the detail pages (detailStyles()) — pass uses the positive (green) hue, fail stays
+   in the accent (red-orange) family. */
+.verdict-pass { color: var(--color-positive-700); }
 .verdict-fail { color: var(--color-accent-800); }
 /* AC102: git-history SVG mark colours — token-derived so the client-rendered chart carries
    no hardcoded hex. The hex values live only in webui-modernist.css. */
@@ -436,7 +437,7 @@ export function detailStyles(): string {
   padding: var(--space-2); border-bottom: 2px solid var(--color-divider);
 }
 .detail-page td { padding: var(--space-2); border-bottom: 1px solid var(--color-divider); }
-.verdict-pass { color: var(--color-accent-700); }
+.verdict-pass { color: var(--color-positive-700); }
 .verdict-fail { color: var(--color-accent-800); }
 @media (max-width: 600px) {
   .detail-page main { padding: var(--space-4) var(--space-3); }

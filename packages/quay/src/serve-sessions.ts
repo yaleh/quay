@@ -29,7 +29,7 @@ export function renderSessionsPage(sessions: SessionsResult): string {
     return html`<a href="/session/${escapeHtml(s.sessionId)}" style="text-decoration:none;color:inherit;background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:0.5rem;min-height:180px">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <b>${escapeHtml(s.name)}</b>
-        <span style="font-size:0.75rem;font-weight:700;color:${s.alive ? "var(--color-accent-700)" : "var(--color-accent-800)"}">${s.alive ? "LIVE" : "GONE"}</span>
+        <span style="font-size:0.75rem;font-weight:700;color:${s.alive ? "var(--color-positive-700)" : "var(--color-accent-800)"}">${s.alive ? "LIVE" : "GONE"}</span>
       </div>
       <div style="font-size:0.75rem;color:var(--color-neutral-700)">${s.halted ? "halted" : s.pid != null ? `pid ${s.pid}` : "—"}</div>
       ${msgHtml}
