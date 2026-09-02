@@ -2,7 +2,7 @@
 id: gap-pool-quality-verdicts-never-persisted
 title: pool-quality-judge 判词从无载体——8 次判过的结果只活在 transcript，无法算准确率；已知 should-remove
   误判率 2/3 却无人可查
-status: ready
+status: done
 labels:
   - gap
   - mechanism
