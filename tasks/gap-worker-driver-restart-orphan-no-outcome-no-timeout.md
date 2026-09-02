@@ -2,7 +2,7 @@
 id: gap-worker-driver-restart-orphan-no-outcome-no-timeout
 title: driver 重启孤儿化在飞 worker——零终态记录 + 零超时监管（区别于 cold-start-inflight 排除集正确性与
   no-record-on-abnormal-death 的活体观测）
-status: ready
+status: done
 labels:
   - gap
 parent: null
