@@ -1,7 +1,7 @@
 ---
 id: gap-suite-perfile-timeout-global-widening
 title: perfile-timeout gate 名误称（passed=false 是真实失败非超时）——全局更正为 perfile-failure，止住「超时类」系统性误诊
-status: ready
+status: done
 labels:
   - gap
   - defect
