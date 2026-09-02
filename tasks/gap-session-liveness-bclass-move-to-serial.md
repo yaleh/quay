@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-bclass-move-to-serial
 title: session-liveness B 类 probe 测试从 lowconc 移到 serial——probe 在宿主推导 lowconc 下不稳
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -45,3 +45,14 @@ session-liveness 族 B 类等待测试移到 serial 相；AC1/AC2 勾；饱和�
 - plugin/test/session-liveness-events.test.mjs（@test-group lowconc→serial）
 - plugin/test/session-liveness-heartbeat.test.mjs（@test-group lowconc→serial）
 - tasks/gap-session-liveness-bclass-move-to-serial.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-02T17:50:59.097Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1788285192
+- session_id：f75ddb0f-a5d1-4c7d-81ca-45340087e1c9
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-session-liveness-bclass-move-to-serial~wk-prod-1788285192~1788370217251-d3856c.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-session-liveness-bclass-move-to-serial-wk-prod-1788285192.log
