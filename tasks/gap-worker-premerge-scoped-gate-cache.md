@@ -2,7 +2,7 @@
 id: gap-worker-premerge-scoped-gate-cache
 title: worker 退出前 agent-mediated pre-merge + scoped test，锁内 scoped-gate 加
   develop-sha 缓存跳过——缩短 fan-in 锁内占用、把合并冲突从"锁内检测"提前到"worker 自行解决"
-status: todo
+status: ready
 labels:
   - gap
 parent: null
