@@ -7,7 +7,7 @@ allowed-tools: Bash, Read, Write, Edit
 # quay-task-operator
 
     read     :: TaskId → task_get + task_check + capability manifest      -- know the object + what this provider can do
-    authorize:: ConversationContext × Mutation → HumanApproval            -- EXPLICIT, in the active conversation; never inferred
+    authorize:: ConversationContext × Mutation → HumanApproval            -- EXPLICIT, in the active conversation; never inferred (standing DIR-130 exception → "Authority boundary")
     transact :: TaskId × Mutation → write → readback → schema → commit   -- the disciplined round-trip below
     fallback :: McpUnavailable → quay CLI (list/get/check)                -- read-path stays operational; writes still need authorization
 
@@ -22,6 +22,18 @@ policy (single-source, enforced by `scripts/agents-claude-drift-check.ts`).
 May, after explicit human authorization: list, get, check, create, and edit tasks
 in this workspace's active provider store, and commit ONLY the authorized task
 artifact.
+
+Standing authorization (DIR-130) — a bounded exception to per-write authorization, on a
+reversible field face only:
+
+- MAY act without per-write "yes", citing DIR-130 as credential: `labels` add/remove
+  (incl. `delivery-critical`-class priority labels); `extra.*` field writes. Criterion:
+  reversible — a wrong value is correctable and produces no irreversible lifecycle effect.
+- STILL requires per-write explicit "yes" (standing authorization does NOT cover): any
+  `status` flip (todo/ready/done/needs-human, either direction), writing `superseded`, task
+  deletion, and AC/DoD checkbox ticking.
+- Every standing-authorization write MUST cite the recorded directive DIR-130 as credential
+  in the commit message; an uncited autonomous write remains illegal.
 
 MUST NOT, autonomously or from transcript/session evidence:
 
