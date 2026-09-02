@@ -42,12 +42,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，信号1 命中判断可区分）：对一个"失败测试文件在本任务 Touches 内"的样本，信号1 判定为"相关"；对一个"失败测试文件不在 Touches 且一跳导入不相交"的样本（如 `gap-dashboard-taskcard-multistatus-minitable` 撞见的 `observation.test.mjs` 案例），信号1 判定为"无关"；两个判断能互相区分（⛔ 恒定输出同一结论 ⇒ 假）。
-- [ ] AC2（能取假，信号2 命中真实注册表）：对一个已 `@load-sensitive` 标注的测试文件，信号2 命中；对一个未标注的测试文件，信号2 不命中（⛔ 恒真或恒假 ⇒ 假）。
-- [ ] AC3（能取假，读不懂有独立取值）：Touches 解析失败 / 依赖查询失败 / 注册表读取失败时，对应信号输出 "unknown"，不与"无关"或"相关"的正常结论共用同一措辞（⛔ 读不懂时输出与"无关"外观相同的文本 ⇒ 假）。
-- [ ] AC4（能取假，措辞不构成自动放行）：两条信号的输出文本明确包含"这不是结论/请重跑验证"一类表述，⛔ 不得出现"可以跳过""无需检查"这类会被误读为自动放行的措辞（人工读文本核对）。
-- [ ] AC5（能取假，接入续做 prompt）：`buildContinueWorkerPrompt` 在 suite 红时实际拼入 `continueRelatednessNote()` 的输出（⛔ 函数写了但没接入调用点 ⇒ 假）。
-- [ ] AC6（能取假，真实回放）：用一个真实发生过的案例（`gap-dashboard-taskcard-multistatus-minitable` 的 `wk-prod-1788275557`/`wk-prod-1788280091`，失败测试 `observation.test.mjs` AC1 性能断言）回放，验证信号1 正确判定为"无关"、信号2 正确命中 `@load-sensitive`（若该测试确已标注；若未标注则验证信号2 正确输出"未标注"而非误判）；（⛔ 只在合成 fixture 上验证 ⇒ 假，同硬规则3b）。
+- [x] AC1（能取假，信号1 命中判断可区分）：对一个"失败测试文件在本任务 Touches 内"的样本，信号1 判定为"相关"；对一个"失败测试文件不在 Touches 且一跳导入不相交"的样本（如 `gap-dashboard-taskcard-multistatus-minitable` 撞见的 `observation.test.mjs` 案例），信号1 判定为"无关"；两个判断能互相区分（⛔ 恒定输出同一结论 ⇒ 假）。
+- [x] AC2（能取假，信号2 命中真实注册表）：对一个已 `@load-sensitive` 标注的测试文件，信号2 命中；对一个未标注的测试文件，信号2 不命中（⛔ 恒真或恒假 ⇒ 假）。
+- [x] AC3（能取假，读不懂有独立取值）：Touches 解析失败 / 依赖查询失败 / 注册表读取失败时，对应信号输出 "unknown"，不与"无关"或"相关"的正常结论共用同一措辞（⛔ 读不懂时输出与"无关"外观相同的文本 ⇒ 假）。
+- [x] AC4（能取假，措辞不构成自动放行）：两条信号的输出文本明确包含"这不是结论/请重跑验证"一类表述，⛔ 不得出现"可以跳过""无需检查"这类会被误读为自动放行的措辞（人工读文本核对）。
+- [x] AC5（能取假，接入续做 prompt）：`buildContinueWorkerPrompt` 在 suite 红时实际拼入 `continueRelatednessNote()` 的输出（⛔ 函数写了但没接入调用点 ⇒ 假）。
+- [x] AC6（能取假，真实回放）：用一个真实发生过的案例（`gap-dashboard-taskcard-multistatus-minitable` 的 `wk-prod-1788275557`/`wk-prod-1788280091`，失败测试 `observation.test.mjs` AC1 性能断言）回放，验证信号1 正确判定为"无关"、信号2 正确命中 `@load-sensitive`（若该测试确已标注；若未标注则验证信号2 正确输出"未标注"而非误判）；（⛔ 只在合成 fixture 上验证 ⇒ 假，同硬规则3b）。
 
 ## Definition of Done
 

@@ -123,8 +123,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 import { TASK_STATUS } from "./task-status.ts";
+import { extractSection } from "./task-schema.ts";
+import { parseTouchEntriesWithTags } from "./touches-parser.ts";
+import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
 // AC150-3：资源门判定 + 控制态 + 身份闸 + MCP 控制面，抽到 driver-shared.ts 供 promotion-driver 复用
 // （函数级复用，⛔ 非复制粘贴）。本文件仍 re-export 保持旧 import 面（worker-driver.test.mjs 等）。
 import {
@@ -1216,6 +1219,213 @@ function continueSuiteLogNote(attempts: ExitedNotLandedAttempt[]): string {
   return "";
 }
 
+// ── 续做 prompt delta-relatedness 信号 (gap-continue-prompt-delta-relatedness-note) ──────────────────
+//
+// 续做 prompt 已带前 N 次尝试清单 + suite 日志路径 + 冲突消解协议，唯独缺「这次 suite 失败的测试与
+// 本任务改动是否相关」这条机械信号——worker 每次续做都要从零判断「这次红是不是我的问题」。本段补两条
+// 【纯结构性计算、不调 LLM】的信号：
+//   信号1 delta 相关性：失败测试文件本身是否在本任务 `## Touches` / 实际 diff 里；不在，再查一跳导入
+//   （失败测试直接 import 的源文件）是否与本任务改动文件相交。
+//   信号2 load-sensitive 注册表命中：失败测试文件是否已 `@load-sensitive` 标注（复用 known-load-
+//   sensitive.ts 的注解解析，⛔ 不新造分类）。这是一条【事前存在、独立于本次失败】的证据。
+// ⛔ 边界（不做什么）：只产提示不产「跳过」判断；读不懂 ⇒ "unknown"，不与「无关/未标注」同形（硬规则 3b）。
+
+/** 信号 verdict 词表：related / unrelated（信号1 正常结论）、load-sensitive / not-annotated（信号2 正常
+ *  结论）、unknown（读不懂的独立取值，⛔ 与任何正常结论共用措辞）。 */
+export type RelatednessVerdict = "related" | "unrelated" | "load-sensitive" | "not-annotated" | "unknown";
+
+/** 一条 delta-relatedness 信号。可扩展输出结构（信号3「同一 runId 连续失败同一测试」落地时追加条目，
+ *  ⛔ 不重写 note 函数）。 */
+export interface RelatednessSignal {
+  signal: "delta-relatedness" | "load-sensitive";
+  failingTest: string | null;
+  verdict: RelatednessVerdict;
+  reason: string;
+}
+
+/** 从 suite 日志文本提取失败测试文件（repo-relative）。node:test 每文件一行
+ *  `__PERFILE__ duration_ms=… <rel> passed=false end_ms=…`——passed=false 即该文件红。读不出 ⇒ []
+ *  （不伪造；空列表与「读懂了但无失败」同形，调用方据 continueSuiteLogNote 的有无判定是否 suite 红）。 */
+export function failingTestFilesFromSuiteLog(logText: string): string[] {
+  const out: string[] = [];
+  for (const raw of String(logText ?? "").split("\n")) {
+    const line = raw.trim();
+    if (!line.includes("passed=false")) continue;
+    const m = /(?:^|\s)((?:packages|plugin|experiments)\/[^\s]+\.test\.mjs)\s+passed=false\b/.exec(line);
+    if (m && !out.includes(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
+/** 读任务 `## Touches`（repo-relative 路径列表，normalizeRel）。任务文件缺失 / 无 Touches 段 ⇒ null
+ *  （读不懂 ≠ 空 Touches——硬规则 3b；「查过且为空」与「没查成」分开）。 */
+export function taskTouches(root: string, task: string): string[] | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, "tasks", `${task}.md`), "utf8");
+  } catch {
+    return null;
+  }
+  const sec = extractSection(text, "Touches");
+  if (!sec) return null;
+  return parseTouchEntriesWithTags(sec)
+    .map((e) => e.path)
+    .filter(Boolean)
+    .map((p) => normalizeRel(String(p)));
+}
+
+/** 读任务分支的实际 diff（`git diff --name-only HEAD...task/<id>`——三点差 = 该分支【自己】相对 merge-base
+ *  的净变更，⛔ 不含 develop 侧推进）。git 失败 / 分支不存在 ⇒ null（读不懂 ≠ 空 diff）。 */
+export function taskDeltaFiles(root: string, task: string): string[] | null {
+  const r = spawnSync("git", ["-C", root, "diff", "--name-only", `HEAD...task/${task}`], { encoding: "utf8" });
+  if (r.status !== 0 || r.error) return null;
+  return String(r.stdout ?? "").split("\n").map((s) => s.trim()).filter(Boolean).map(normalizeRel);
+}
+
+/** 信号1 的 delta 并集：Touches（必需，读不懂 ⇒ null ⇒ unknown）+ 实际 diff（best-effort，git 失败只用
+ *  Touches——单测 makeRoot 非 git 根也照常判定）。 */
+export function computeDeltaPaths(root: string, task: string): string[] | null {
+  const touches = taskTouches(root, task);
+  if (touches === null) return null;
+  const diff = taskDeltaFiles(root, task);
+  const set = new Set(touches);
+  for (const p of diff ?? []) set.add(p);
+  return [...set];
+}
+
+/** 解析一个测试文件的【直接 import】为 repo-relative 源文件路径（一跳）。只解析相对说明符
+ *  （`./x` / `../x`）；裸说明符（node_modules / `node:` / 绝对）跳过。读文件失败 ⇒ null（读不懂 ≠ 空 import）。 */
+export function directImportRels(root: string, testFileRel: string): string[] | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, testFileRel), "utf8");
+  } catch {
+    return null;
+  }
+  const dir = path.posix.dirname(normalizeRel(testFileRel));
+  const rels = new Set<string>();
+  // `import … from "spec"` / `import "spec"` / `export … from "spec"`——相对说明符才是一跳源文件。
+  const re = /(?:^|\n)[ \t]*(?:import|export)[ \t]+(?:[^'"`\n]*?[ \t]+from[ \t]+)?["']([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const spec = m[1];
+    if (!spec.startsWith(".")) continue;
+    const resolved = normalizeRel(path.posix.join(dir, spec));
+    if (resolved) rels.add(resolved);
+  }
+  return [...rels];
+}
+
+/** 一条 import 是否命中 delta 任一文件：精确相等；无扩展名补 `.ts/.mjs/.js/.tsx/.jsx`；`.js(.x)` 补
+ *  `.ts(.x)` 变体（TS-ESM 里 `from "./x.js"` 映射到 `x.ts`）。 */
+function importHitsDelta(importRel: string, deltaSet: Set<string>): boolean {
+  const base = normalizeRel(importRel);
+  const ext = path.posix.extname(base);
+  const candidates = [base];
+  if (!ext) {
+    for (const e of [".ts", ".mjs", ".js", ".tsx", ".jsx"]) candidates.push(base + e);
+  } else if (ext === ".js" || ext === ".jsx") {
+    candidates.push(base.slice(0, -ext.length) + (ext === ".js" ? ".ts" : ".tsx"));
+  }
+  return candidates.some((c) => deltaSet.has(c));
+}
+
+/** 信号1 纯判定：失败测试文件是否在本任务 delta 里；不在，再查一跳导入是否与本任务改动文件相交。
+ *  delta 读不懂 ⇒ unknown；测试文件读不懂（import 解析失败）且不在 delta ⇒ unknown（⛔ 与「无关」同形）。 */
+export function classifyDeltaRelatedness(
+  failingTestRel: string | null,
+  deltaPaths: string[] | null,
+  importRels: string[] | null,
+): { verdict: RelatednessVerdict; reason: string } {
+  if (deltaPaths === null) {
+    return { verdict: "unknown", reason: "unable to determine this task's Touches/diff (delta unreadable)" };
+  }
+  const rel = failingTestRel ? normalizeRel(String(failingTestRel)) : null;
+  if (!rel) {
+    return { verdict: "unknown", reason: "no failing test file resolved" };
+  }
+  const deltaSet = new Set(deltaPaths.map(normalizeRel));
+  if (deltaSet.has(rel)) {
+    return { verdict: "related", reason: "the failing test file itself is in this task's Touches/diff" };
+  }
+  if (importRels === null) {
+    return { verdict: "unknown", reason: "unable to read the failing test's direct imports (one-hop check unavailable)" };
+  }
+  if (importRels.some((imp) => importHitsDelta(imp, deltaSet))) {
+    return { verdict: "related", reason: "the failing test directly imports a file this task's delta touches (one-hop)" };
+  }
+  return { verdict: "unrelated", reason: "the failing test file is not in this task's Touches/diff, and its direct imports do not intersect this task's delta (one-hop check)" };
+}
+
+/** 信号2 纯判定：失败测试文件是否 `@load-sensitive` 标注（复用 known-load-sensitive.ts 的注解解析）。
+ *  读文件失败 ⇒ unknown（⛔ 与「未标注」同形）。 */
+export function classifyLoadSensitive(root: string, failingTestRel: string): RelatednessVerdict {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, failingTestRel), "utf8");
+  } catch {
+    return "unknown";
+  }
+  return parseLoadSensitiveAnnotation(text) !== null ? "load-sensitive" : "not-annotated";
+}
+
+/** 对一个失败测试文件产出两条信号（delta 相关性 + load-sensitive 注册表命中）。 */
+export function relatednessSignalsFor(root: string, task: string, failingTestRels: string[]): RelatednessSignal[] {
+  const delta = computeDeltaPaths(root, task);
+  const signals: RelatednessSignal[] = [];
+  for (const rel of failingTestRels) {
+    const d = classifyDeltaRelatedness(rel, delta, delta === null ? null : directImportRels(root, rel));
+    signals.push({ signal: "delta-relatedness", failingTest: rel, verdict: d.verdict, reason: d.reason });
+    const l = classifyLoadSensitive(root, rel);
+    signals.push({
+      signal: "load-sensitive",
+      failingTest: rel,
+      verdict: l,
+      reason: l === "load-sensitive" ? "declared @load-sensitive" : l === "not-annotated" ? "no @load-sensitive declaration" : "unable to read the test file",
+    });
+  }
+  return signals;
+}
+
+/** 把信号列表拼成续做提示文本。措辞明确「这不是结论，是提示，请重跑验证」，⛔ 不含「跳过/无需检查」等
+ *  可被误读为自动放行的措辞（AC4）。 */
+export function formatRelatednessNote(signals: RelatednessSignal[]): string {
+  if (signals.length === 0) return "";
+  const lines = signals.map((s) => {
+    if (s.signal === "delta-relatedness") {
+      const v = s.verdict === "related" ? "RELATED" : s.verdict === "unrelated" ? "UNRELATED" : "UNKNOWN";
+      return `  - ${s.failingTest}: delta-relatedness = ${v} (${s.reason})`;
+    }
+    const v = s.verdict === "load-sensitive" ? "registered @load-sensitive" : s.verdict === "not-annotated" ? "not @load-sensitive-annotated" : "UNKNOWN";
+    return `  - ${s.failingTest}: load-sensitive registry = ${v}`;
+  });
+  return [
+    "delta-relatedness check (mechanical, not a verdict — verify before acting):",
+    ...lines,
+    "This is a hint, not a conclusion: it does not prove the failure is unrelated to this task. Re-run the suite once to verify before assuming it is environmental; if it reproduces, treat it as a real finding regardless of this note.",
+  ].join("\n");
+}
+
+/** 续做 prompt 的 delta-relatedness 提示（只在 suite 红时触发，放 continueSuiteLogNote 旁）。取最近一条
+ *  带 suiteLog 的尝试，读其 suite 日志提取失败测试，对每个失败测试产出两条信号。无 suite 红 / 读不出
+ *  失败测试 ⇒ 空串（不伪造——与 continueSuiteLogNote 同向）。 */
+export function continueRelatednessNote(root: string, task: string, attempts: ExitedNotLandedAttempt[]): string {
+  let suiteLogPath: string | null = null;
+  for (let i = (attempts ?? []).length - 1; i >= 0; i -= 1) {
+    if (attempts[i].suiteLog) { suiteLogPath = attempts[i].suiteLog; break; }
+  }
+  if (!suiteLogPath) return "";
+  let logText: string;
+  try {
+    logText = fs.readFileSync(suiteLogPath, "utf8");
+  } catch {
+    return "";
+  }
+  const failing = failingTestFilesFromSuiteLog(logText);
+  if (failing.length === 0) return "";
+  return formatRelatednessNote(relatednessSignalsFor(root, task, failing));
+}
+
 /** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
  *  状态（分支提交 / AC 勾选 / 失败原因 / 前 N 次尝试清单 + suite 日志路径）供 worker 从保留 worktree
  *  继续。⛔ 不含 "create an isolated git worktree"（AC1 取假判据——旧 prompt 逐字说 create 是撞死根因）。
@@ -1239,6 +1449,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `the last round exited-not-landed because: ${reason}.`,
     `${continueAttemptsNote(attempts)}`,
     `${continueSuiteLogNote(attempts)}`,
+    `${continueRelatednessNote(root, task, attempts)}`,
     `${continueConflictResolutionNote()}`,
     `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
