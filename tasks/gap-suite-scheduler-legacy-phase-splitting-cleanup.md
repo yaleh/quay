@@ -1,7 +1,8 @@
 ---
 id: gap-suite-scheduler-legacy-phase-splitting-cleanup
-title: 统一清理测试调度 legacy 分相——PHASE_OVERLAP + A watcher + run_selected fallback + 「serial ALONE」误导注释
-status: needs-human
+title: 统一清理测试调度 legacy 分相——PHASE_OVERLAP + A watcher + run_selected fallback +
+  「serial ALONE」误导注释
+status: ready
 labels:
   - gap
   - defect
