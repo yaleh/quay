@@ -55,7 +55,7 @@ extra:
 
 ## Touches
 
-- plugin/scripts/worker-driver.ts（新增 `continueRelatednessNote()`，接入 `buildContinueWorkerPrompt` 调用点，`:1172` `continueSuiteLogNote` 附近）
+- plugin/scripts/worker-driver.ts（添加 `continueRelatednessNote()` 函数，接入 `buildContinueWorkerPrompt` 调用点，`:1172` `continueSuiteLogNote` 附近）
 - plugin/scripts/select-static-checks-for-touches.ts（复用其 delta-classify / 依赖判定逻辑，若需要导出新接口）
 - plugin/test/worker-driver.test.mjs（信号1/信号2 命中与不命中、读不懂独立取值、真实案例回放测试）
 - tasks/gap-continue-prompt-delta-relatedness-note.md（自身）
