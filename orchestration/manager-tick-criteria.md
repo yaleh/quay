@@ -1,5 +1,3 @@
-> ⚠️ **外层/内层会话已退役（AC149，2026-08-28）**：本文件中引用 outer/inner 会话的判准已随会话退役（会话停止，机制由 promotion-driver / worker-driver / manager-kind 例程承接）；manager 会话本身保留。→ `orchestration/manager-phase-goal.md` ### AC149。
-
 **判准（逐条应用，并把结论写进 tick-log 行——自审会检查你是否真做了）**
 
 ① **PC 有效性**：`PC` 必须远大于 0。为 0 ⇒ 查询本身坏了，**后续所有时间窗读数不可信**。
