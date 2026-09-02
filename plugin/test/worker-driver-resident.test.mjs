@@ -967,6 +967,43 @@ test("gap-fan-in-continue-resolution-dual-copy-and-ff-not-fast-forward — 结�
   assert.match(src, /judge WHICH side deleted/, "modify/delete deletion-side judgment present in source");
 });
 
+// ── gap-continue-conflict-rule-missing-task-files ─────────────────────────────────────────────
+// 冲突消解协议 6 条 + 1 FF 段无一点名 tasks/*.md，相邻 3 条（outline / dual-copy / tick doc）逐字教
+// 「取 develop 版」——worker 把任务文件类比成 doc 会静默抹掉自己这一轮勾上的 - [x] AC 与 ## Evidence，
+// 且抹掉后与正确解同形（下一轮 ac-precheck 才红，理由误导为「AC 未勾」而非「合并把它抹了」）。
+// 修法：新增 (2b) 任务文件规则——per-hunk 取并集（保留 develop 侧 Touches/Needs-Human/status: +
+// 分支侧 AC 勾选/Evidence），⛔ 不取 develop 版、⛔ 不手写 status: frontmatter（status: 冲突取 develop
+// 值）。删掉该规则 ⇒ 测试红（AC5 能取假）。
+
+test("gap-continue-conflict-rule-missing-task-files — AC1/AC2/AC3 (能取假): buildContinueWorkerPrompt teaches per-hunk union for tasks/<id>.md (⛔ not take-develop, ⛔ not write status:)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "mechanical fan-in red at merge develop (CONFLICT in tasks/gap-x.md)",
+  });
+  // AC1 (规则落地): prompt 点名任务文件类。
+  assert.match(p, /tasks\/<id>\.md/, "AC1: prompt names the task-file type (tasks/<id>.md)");
+  // AC2 (并集 + 保留 AC/Evidence + 禁取 develop 版)。
+  assert.match(p, /per-hunk union/, "AC2: task-file conflict ⇒ per-hunk union of both sides");
+  assert.match(p, /keep your branch's edits/, "AC2: keep the branch's edits (its - [x] AC ticks + ## Evidence additions)");
+  assert.match(p, /## Evidence/, "AC2: keep the branch's ## Evidence additions");
+  assert.match(p, /do NOT "take the develop version"/, "AC2: ⛔ explicitly forbids take the develop version");
+  // AC3 (status: 例外 + 写所有权一致)。
+  assert.match(p, /frontmatter yourself/, "AC3: ⛔ do not write status: frontmatter (worker doesn't own frontmatter)");
+  assert.match(p, /take develop's value verbatim/, "AC3: status: conflict ⇒ take develop's value (write-ownership separation)");
+});
+
+test("gap-continue-conflict-rule-missing-task-files — 结构面 (能取假): worker-driver.ts 任务文件规则无残留/无遗漏", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  assert.match(src, /tasks\/<id>\.md/, "task-file rule present in source (grep tasks/ in function body)");
+  assert.match(src, /per-hunk union/, "per-hunk union instruction present in source");
+  assert.match(src, /frontmatter yourself/, "status: write-ownership exception present in source");
+  assert.match(src, /take develop's value verbatim/, "status: take-develop-value exception present in source");
+});
+
 // ── gap-fan-in-merge-develop-derived-recompute-and-reason（B；A 已退役）─────────────────────────────
 // 机械 fan-in step 2 `git merge develop` 冲突的【具体文件】没传回下一轮 worker——CONTINUE prompt 的 reason
 // 读通用 failure_reason（「task status=ready not done」），⛔ 不含冲突文件 ⇒ worker 无从精准 resolve。

@@ -32,12 +32,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **规则落地（按位置判定，非关键词）**——在 `continueConflictResolutionNote()` **函数体行范围内** grep `tasks/` 命中 ≥1；引用该计数时打印命中的实际行内容（硬规则 2）
-- [ ] AC2: **语义为并集且禁取 develop 版**——该规则文本同时含并集指示（`union` 或「并集」）与对 `- [x]` / `## Evidence` 的保留指示，且含对「take the develop version」的显式禁止
-- [ ] AC3: **status: 例外与写所有权一致**——规则明确 `status:` 冲突取 develop 值、worker 不写 frontmatter；与 `orchestrator-tick-core.md:74` AC3「写所有权分离」不矛盾
-- [ ] AC4: **测试钉住**——`plugin/test/worker-driver-resident.test.mjs` 新增覆盖任务文件规则的断言（现有断言只钉 outline/code/dual-copy 三条）；`node --test plugin/test/worker-driver-resident.test.mjs` exit 0，贴输出
-- [ ] AC5: **负控制（能取假）**——把新规则文本从函数体删除后重跑 AC4 的测试**必须红**，恢复后必须绿；两次输出都贴出来
-- [ ] AC6: **生产路径可见（非 fixture）**——对一个**真实存在的** task id 调用 `buildContinueWorkerPrompt()` 生产路径，grep 其返回的 prompt 文本命中该规则；不得以 fixture/注入数据满足本条（硬规则 4 推论三）
+- [x] AC1: **规则落地（按位置判定，非关键词）**——在 `continueConflictResolutionNote()` **函数体行范围内** grep `tasks/` 命中 ≥1；引用该计数时打印命中的实际行内容（硬规则 2）
+- [x] AC2: **语义为并集且禁取 develop 版**——该规则文本同时含并集指示（`union` 或「并集」）与对 `- [x]` / `## Evidence` 的保留指示，且含对「take the develop version」的显式禁止
+- [x] AC3: **status: 例外与写所有权一致**——规则明确 `status:` 冲突取 develop 值、worker 不写 frontmatter；与 `orchestrator-tick-core.md:74` AC3「写所有权分离」不矛盾
+- [x] AC4: **测试钉住**——`plugin/test/worker-driver-resident.test.mjs` 新增覆盖任务文件规则的断言（现有断言只钉 outline/code/dual-copy 三条）；`node --test plugin/test/worker-driver-resident.test.mjs` exit 0，贴输出
+- [x] AC5: **负控制（能取假）**——把新规则文本从函数体删除后重跑 AC4 的测试**必须红**，恢复后必须绿；两次输出都贴出来
+- [x] AC6: **生产路径可见（非 fixture）**——对一个**真实存在的** task id 调用 `buildContinueWorkerPrompt()` 生产路径，grep 其返回的 prompt 文本命中该规则；不得以 fixture/注入数据满足本条（硬规则 4 推论三）
 
 ## Definition of Done
 
