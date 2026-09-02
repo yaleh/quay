@@ -101,6 +101,9 @@ import {
   appendFanInTrace,
   defaultMechanicalSuiteCommand,
   newMechanicalSuiteRunId,
+  suiteLogFileName,
+  newSuiteLogAttemptSuffix,
+  pruneTaskSuiteLogs,
   extractFailureSummary,
   combinedOutput,
   mirrorMechanicalFanInSuiteState,
@@ -559,6 +562,63 @@ test("gap-mechanical-fan-in-per-suite-runid-unified AC2 — newMechanicalSuiteRu
   assert.notEqual(a, b, "two different tasks produce two DIFFERENT per-suite runIds");
   assert.ok(a.startsWith("mfi-gap-task-a-") && b.startsWith("mfi-gap-task-b-"), "the id carries the mfi-<task>- prefix (suite identity, not the shared wk-prod round id)");
   assert.ok(!a.startsWith("wk-prod"), "the per-suite id is NOT the shared wk-prod driver round id");
+});
+
+// ── gap-fan-in-suite-log-same-runid-overwrite（AC1/AC3 单元面）────────────────────────────────
+// suite 日志文件名带 attempt 唯一后缀（同一 runId 内多次 suite 不覆盖）+ 轮转前缀用 `~` 分隔符
+// （任务 id kebab-case 前缀碰撞 300+ 对——裸 `-` 分隔会误删兄弟任务日志）。
+
+test("suiteLogFileName — 同一 runId 不同 attempt ⇒ 两个不同 basename（⛔ 相同 ⇒ 假）", () => {
+  const a = suiteLogFileName("gap-dashboard-taskcard-multistatus-minitable", "wk-prod-1788275557", "1756700000000-abc123");
+  const b = suiteLogFileName("gap-dashboard-taskcard-multistatus-minitable", "wk-prod-1788275557", "1756700000001-def456");
+  assert.notEqual(a, b, "different attempt suffixes ⇒ different basenames");
+  assert.ok(a.includes("wk-prod-1788275557") && a.includes("1756700000000-abc123"), "basename carries runId + attempt");
+  // task/runId sanitize + `~` 分隔符：非法字符 → _，`~` 只作分隔符。
+  assert.equal(
+    suiteLogFileName("gap/a", "wk/prod 123", "1"),
+    "fan-in-suite-gap_a~wk_prod_123~1.log",
+    "task + runId sanitized to [A-Za-z0-9_.-]; `~` is the reserved delimiter",
+  );
+});
+
+test("newSuiteLogAttemptSuffix — 每次新（epoch-ms + rand 双唯一）", () => {
+  const a = newSuiteLogAttemptSuffix();
+  const b = newSuiteLogAttemptSuffix();
+  assert.notEqual(a, b, "two calls ⇒ two different suffixes");
+  assert.match(a, /^\d+-[0-9a-f]{6}$/, "shape = <epoch-ms>-<6 hex rand>");
+});
+
+test("pruneTaskSuiteLogs — 只删本任务（`~` 边界），兄弟任务 `<task>-<suffix>` 日志保留（⛔ 误删 ⇒ 假）", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "suite-prune-"));
+  try {
+    const q = path.join(root, ".quay");
+    fs.mkdirSync(q, { recursive: true });
+    const write = (name) => fs.writeFileSync(path.join(q, name), "x", "utf8");
+    // 本任务 DIR-035 的 3 份历史 attempt + 1 份兄弟任务 DIR-035-A + 1 份无关文件。
+    write(suiteLogFileName("DIR-035", "run-1", "1"));
+    write(suiteLogFileName("DIR-035", "run-1", "2"));
+    write(suiteLogFileName("DIR-035", "run-2", "3"));
+    write(suiteLogFileName("DIR-035-A", "run-1", "1"));
+    write("fan-in-suite-unrelated.log");
+    const removed = pruneTaskSuiteLogs(root, "DIR-035");
+    assert.equal(removed, 3, "removed exactly the 3 DIR-035 attempt logs");
+    assert.ok(!fs.existsSync(path.join(q, suiteLogFileName("DIR-035", "run-1", "1"))), "DIR-035 attempt removed");
+    assert.ok(fs.existsSync(path.join(q, suiteLogFileName("DIR-035-A", "run-1", "1"))), "sibling DIR-035-A log retained (⛔ `-` boundary would误删)");
+    assert.ok(fs.existsSync(path.join(q, "fan-in-suite-unrelated.log")), "unrelated file retained");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("pruneTaskSuiteLogs — 无 .quay 目录 / 无匹配 ⇒ 返回 0 不抛（best-effort）", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "suite-prune-empty-"));
+  try {
+    assert.equal(pruneTaskSuiteLogs(root, "gap-none"), 0, "no .quay dir ⇒ 0 removed, no throw");
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    assert.equal(pruneTaskSuiteLogs(root, "gap-none"), 0, "no matching files ⇒ 0 removed, no throw");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("AC1 — the mechanical fan-in default suite command, run against a red bucket suite, records state=red into verification-round.jsonl", async () => {
