@@ -25,7 +25,7 @@
 # rotating flakes across groups under full-suite load
 # (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests +
 # gap-install-family-tests-rotate-flakes-under-full-suite); `lowconc` is the hermetic-but-load-
-# sensitive session-observation family routed to its own concurrency-3 phase
+# sensitive session-observation family routed to its own low-concurrency phase
 # (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). The check does NOT migrate the 34
 # legacy hand-rolled-harness files — it stops the 35th and turns each existing file's eventual
 # conversion (e.g. relation-sync's harness) into the ratchet.
@@ -94,8 +94,8 @@
 #                 concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
 #                 (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests).
 #   - lowconc     hermetic-but-load-sensitive B-class session-observation family (each private
-#                 socket / wall-clock wait) — its own phase at concurrency 3. The install/quay-init
-#                 family LEFT this group for serial in round 162
+#                 socket / wall-clock wait) — its own phase at host-derived concurrency (= serial).
+#                 The install/quay-init family LEFT this group for serial in round 162
 #                 (gap-install-family-tests-rotate-flakes-under-full-suite); only the session-
 #                 observation wall-clock files remain.
 #                 (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive).
@@ -495,16 +495,16 @@ default_test_concurrency() {
 # plugin/scripts/runner-concurrency.ts defaultPhaseConcurrencyDirect() (SPEC P4 套件入口收进 TS);
 # rationale lives there + full-suite-runner.ts defaultPhaseConcurrency (the runner twin — resource-gate
 # 判据4 cross-checks the two stay equal). The env-fallback spellings below are UNCHANGED.
-# gap-lowconc-concurrency-8-starves-bclass-waiting: SERIAL-only now — lowconc split to its own default
-# (lowconc_concurrency_default below); the two semantically-different concurrency values must NOT share
-# one host-derived default (the AC74 "read the host" refactor wrongly bound them together).
+# gap-lowconc-concurrency-restore-host-derived: SERIAL and LOWCONC now SHARE this host-derived default —
+# lowconc_concurrency_default (below) returns the SAME max(1, floor(nproc ÷ (S×P))); the lowconc=3
+# fixed-value split (gap-lowconc-concurrency-8-starves-bclass-waiting) was wrong and is reverted.
 serial_lowconc_host_default() {
   node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --phase-concurrency
 }
-# lowconc_concurrency_default — the lowconc-phase fallback: the FIXED human-adjudicated semantic value 3
-# (NOT host-derived), independent of serial. THIN FORWARDER → runner-concurrency.ts
-# defaultLowconcConcurrency() (--lowconc-concurrency). 人裁定「并发取 3 不取 8」— B 类等待型需要被及时
-# 调度；host-deriving it to 8 (16 核 ÷ (S×P)) starved the session-liveness tmux+claude-probe probes.
+# lowconc_concurrency_default — the lowconc-phase fallback: HOST-DERIVED max(1, floor(nproc ÷ (S×P))),
+# IDENTICAL to serial. THIN FORWARDER → runner-concurrency.ts defaultLowconcConcurrency()
+# (--lowconc-concurrency, = serial_lowconc_host_default). 用户 2026-09-02 反转「并发取 3 不取 8」——
+# lowconc 回退宿主推导，与 serial 一致。
 lowconc_concurrency_default() {
   node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --lowconc-concurrency
 }
@@ -1253,12 +1253,12 @@ run_selected() {
       # hermetic-but-load-sensitive files (B-class session-observation family, each private socket /
       # wall-clock wait — the install/quay-init family LEFT this group for serial in round 162,
       # gap-install-family-tests-rotate-flakes-under-full-suite) run in their OWN phase at
-      # `--test-concurrency=$LOWCONC_CONCURRENCY` (default 3 — the independent lowconc_concurrency_default,
-      # NOT the serial host-derived default and NOT 8; gap-lowconc-concurrency-8-starves-bclass-waiting) — so
+      # `--test-concurrency=$LOWCONC_CONCURRENCY` (default = the host-derived lowconc_concurrency_default,
+      # the SAME max(1, floor(nproc/(S×P))) as serial; gap-lowconc-concurrency-restore-host-derived) — so
       # wait-type tests get timely scheduling. The phase runs even if another phase failed (report all
       # failures); its exit code merges into `code`. Runs BEFORE the main body so a lowconc failure is
-      # judged red at the phase boundary (gap-phase-order-serial-lowconc-before-main). The default 3 is
-      # deliberate (人裁定: B 类等待型需要被及时调度) and does NOT add a derived-concurrency literal site
+      # judged red at the phase boundary (gap-phase-order-serial-lowconc-before-main). The default is
+      # host-derived (not a literal) and does NOT add a derived-concurrency literal site
       # (resource-gate AC5 pins exactly 5 `--test-concurrency="$(default_test_concurrency)"` sites).
       [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
       if [ "${#lowconc_files[@]}" -gt 0 ]; then
@@ -1390,8 +1390,8 @@ run_selected() {
   fi
   # LOWCONC group run (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4):
   # `--group lowconc` runs the hermetic-but-load-sensitive phase ALONE at its own concurrency
-  # $LOWCONC_CONCURRENCY — not the derived default. An explicit user --test-concurrency flag still
-  # wins (single concurrency source, AC2). The default 3 adds no derived-concurrency literal site.
+  # $LOWCONC_CONCURRENCY (host-derived, = serial). An explicit user --test-concurrency flag still
+  # wins (single concurrency source, AC2). The default adds no derived-concurrency literal site.
   local lowconc_force=""
   if in_group "lowconc" "$groups"; then
     lowconc_force="--test-concurrency=$LOWCONC_CONCURRENCY"

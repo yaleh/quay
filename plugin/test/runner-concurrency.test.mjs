@@ -137,21 +137,21 @@ test("defaultPhaseConcurrencyDirect — max(1, floor(nproc/(S×P))), P=2 overlap
   assert.equal(c(4, 1, "0"), 4, "1 slot / overlap OFF → nproc");
 });
 
-// ── defaultLowconcConcurrency (the LOWCONC direct-path default: the fixed semantic value 3) ─
+// ── defaultLowconcConcurrency (the LOWCONC direct-path default: HOST-DERIVED, = serial) ─
 
-test("defaultLowconcConcurrency — the fixed human-adjudicated semantic value 3, HOST-INDEPENDENT (gap-lowconc-concurrency-8-starves-bclass-waiting)", () => {
-  // NOT the host-derived H÷(S×P): 3 stays 3 on any core/slot/overlap combination (the B-class wait-type
-  // tests need timely scheduling, never 8 — the AC74 host-derivation that starved them is reverted).
-  assert.equal(defaultLowconcConcurrency(), 3, "default must be 3 (no seams)");
+test("defaultLowconcConcurrency — HOST-DERIVED max(1, floor(nproc/(S×P))), IDENTICAL to serial (gap-lowconc-concurrency-restore-host-derived)", () => {
+  // NOT a fixed 3: lowconc returns serial's host-derived default (the lowconc=3 fixed-value split was
+  // wrong — 用户 2026-09-02 反转「并发取 3 不取 8」).
+  assert.equal(defaultLowconcConcurrency(), defaultPhaseConcurrencyDirect(), "lowconc default == serial host-derived default (no seams)");
   assert.equal(
     withSeams({ RESOURCE_GATE_NPROC: "16", RESOURCE_GATE_CONCURRENT_SUITES: "2", QUAY_PHASE_OVERLAP: "1" }, () => defaultLowconcConcurrency()),
-    3,
-    "16 cores / 2 slots / overlap ON → still 3 (NOT floor(16/(2×2))=4)",
+    4,
+    "16 cores / 2 slots / overlap ON → floor(16/(2×2))=4",
   );
   assert.equal(
     withSeams({ RESOURCE_GATE_NPROC: "4", RESOURCE_GATE_CONCURRENT_SUITES: "1", QUAY_PHASE_OVERLAP: "0" }, () => defaultLowconcConcurrency()),
-    3,
-    "4 cores / 1 slot / overlap OFF → still 3 (NOT floor(4/1)=4)",
+    4,
+    "4 cores / 1 slot / overlap OFF → floor(4/1)=4",
   );
 });
 

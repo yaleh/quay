@@ -563,20 +563,20 @@ function fakeTestShRecordingPhaseEnv(root) {
   return { envLog };
 }
 
-test("AC1/AC3 — the default run passes HOST-READ SERIAL + fixed-3 LOWCONC phase concurrency to the child test.sh", async () => {
+test("AC1/AC3 — the default run passes HOST-READ SERIAL + HOST-READ LOWCONC phase concurrency to the child test.sh", async () => {
   // gap-ac44-concurrent-phases-read-host-parallelism AC1/AC3 + gap-single-flight-lock-2-slot-concurrent-
   // suites AC2 + gap-lane-formula-ignores-phase-overlap-concurrency AC1/AC3: the SERIAL phase default is
   // host-read (os.availableParallelism()) DIVIDED by the concurrent-suite slot count S AND by the
   // concurrent-PHASE count P (2 when QUAY_PHASE_OVERLAP is on — serial+lowconc run in parallel — 1 when
-  // off = sequential, the pre-overlap budget); the LOWCONC default is the FIXED human-adjudicated
-  // semantic value 3 (gap-lowconc-concurrency-8-starves-bclass-waiting, independent of serial/host).
+  // off = sequential, the pre-overlap budget); the LOWCONC default is the SAME host-derived value
+  // (gap-lowconc-concurrency-restore-host-derived: lowconc = serial, NOT a fixed 3).
   // RESOURCE_GATE_NPROC / QUAY_MAX_CONCURRENT_SUITES / QUAY_PHASE_OVERLAP are the deterministic seams:
-  // nproc=7 ⇒ SERIAL overlap ON floor(7/(S×2)), OFF floor(7/S); LOWCONC = 3 in every row.
+  // nproc=7 ⇒ SERIAL/LOWCONC overlap ON floor(7/(S×2)), OFF floor(7/S); LOWCONC == SERIAL in every row.
   for (const [overlap, slots, serial, lowconc] of [
-    ["1", "1", "3", "3"], // SERIAL overlap ON ⇒ P=2: floor(7/(1×2))=3; LOWCONC fixed 3
-    ["1", "2", "1", "3"], // SERIAL floor(7/(2×2))=1; LOWCONC fixed 3
-    ["0", "1", "7", "3"], // SERIAL overlap OFF ⇒ P=1: floor(7/1)=7; LOWCONC fixed 3
-    ["0", "2", "3", "3"], // SERIAL floor(7/2)=3; LOWCONC fixed 3
+    ["1", "1", "3", "3"], // overlap ON ⇒ P=2: floor(7/(1×2))=3; LOWCONC = serial = 3
+    ["1", "2", "1", "1"], // floor(7/(2×2))=1; LOWCONC = serial = 1
+    ["0", "1", "7", "7"], // overlap OFF ⇒ P=1: floor(7/1)=7; LOWCONC = serial = 7
+    ["0", "2", "3", "3"], // floor(7/2)=3; LOWCONC = serial = 3
   ]) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phaseenv-default-"));
     const { envLog } = fakeTestShRecordingPhaseEnv(root);
@@ -586,7 +586,7 @@ test("AC1/AC3 — the default run passes HOST-READ SERIAL + fixed-3 LOWCONC phas
       assert.equal(code, 0, `runner exits 0 on green (slots=${slots}, overlap=${overlap}), got ${code}`);
       await poll(() => fs.existsSync(envLog));
       const line = fs.readFileSync(envLog, "utf8").trim();
-      assert.equal(line, `SERIAL=${serial} LOWCONC=${lowconc}`, `serial host-read ÷ slots ÷ phases, lowconc fixed 3 (nproc=7, slots=${slots}, overlap=${overlap} → ${serial}/${lowconc}), got: ${line}`);
+      assert.equal(line, `SERIAL=${serial} LOWCONC=${lowconc}`, `serial and lowconc both host-read ÷ slots ÷ phases (nproc=7, slots=${slots}, overlap=${overlap} → ${serial}/${lowconc}), got: ${line}`);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
