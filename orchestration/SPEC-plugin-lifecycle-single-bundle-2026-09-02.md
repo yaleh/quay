@@ -9,6 +9,9 @@
 2. 「对于同一功能，**本项目自己使用的扩展应当与产品交付的是同一个**。不应有所谓『简化版用于产品交付』的情况。」
 3. 「可以使用**配置文件**或（**非常克制的**）**文件指针**提供项目配置。」
 4. （对本规格第 8 节遗留问题的裁定）「**manager 是产品一部分。**」
+5. 「**本项目的开发环境不应污染本机其它项目**」——「**仅允许 User Scope 以本项目目录为 plugin marketplace 源**」（详见 §4b）。
+6. 「**quay-init 过程应进一步简化。其主要操作应当是创建符合 quay 要求的项目文件（任务目录、quay 配置等），
+   而不应该复制这些 Claude Code 扩展或脚本。**」（详见 §6）
 
 ## 2. 这不是新方向，是同一条线的下一步
 
@@ -88,6 +91,44 @@ plugin/                     唯一扩展载体（git 跟踪，一棵树）
 ⇒ **两边看到的 skill 名、工具名完全同形** ⇒ 裁定 2 由机制保证，不靠纪律维持
 ⇒ 且 `allowed-tools` 只剩一种正确写法（§7-2）。
 
+## 4b. 作用域：开发环境不得污染本机其它项目（裁定 5）
+
+**实测的污染（2026-09-02，非推断）**：在 `/home/yale`（**不是** quay 项目）起一个会话，
+其 `PATH` 中含 **`/home/yale/work/quay/plugin/bin`，且出现两次**。
+⇒ **本仓库的插件面正被注入到本机每一个项目的每一个会话**：`bin/` 进 PATH、14 个 skill 常驻
+（实测 ~2,706 tok/会话）、MCP server 起进程。**开发一个项目的代价被摊到了所有项目头上。**
+
+**机制根因**：`~/.claude/settings.json` 的 `enabledPlugins["quay@quay"] = true` 是**用户级启用**，
+对本机所有项目无条件生效。（该条目由 npm 全局安装的 `register-plugin.mjs` postinstall 自动写入，
+或手工 `claude plugin install` 写入——**不是有意为之的全局化，是安装路径的默认副作用**。）
+
+**裁定形态（人 2026-09-02）——两件事必须分开放**：
+
+| 放什么 | 放哪 | 为什么必须是这一层 |
+|---|---|---|
+| **marketplace 源**（`extraKnownMarketplaces.quay` → directory `/home/yale/work/quay/plugin`） | **User Scope**（`~/.claude/settings.json`） | 它是**机器特定的绝对路径**，不可提交进仓库；且必须先"可见"才谈得上安装 |
+| **启用**（`enabledPlugins["quay@quay"]`） | **项目级**（`<quay repo>/.claude/settings.json`，提交） | 它是**项目意愿**，对任何在本仓库工作的人都成立，且**不应外溢到别的项目** |
+
+```
+~/.claude/settings.json          extraKnownMarketplaces.quay = directory → <本仓库>/plugin   ✅ 允许（唯一允许项）
+                                 enabledPlugins["quay@quay"] = true                          ⛔ 禁止（删除或置 false）
+<quay repo>/.claude/settings.json  enabledPlugins["quay@quay"] = true                        ✅ 在这里启用
+<本机其它项目>                    不启用 ⇒ 不注入 skills / 不进 PATH / 不起 MCP 进程            ✅ 目标态
+```
+
+**⊢ 这恰好是裁定 3「配置文件」边界在本问题上的具体落法**：机器特定的东西（源路径）留在用户级、
+不进仓库；项目意愿（启用）进仓库、随 clone 传播。**两者本来就该分层，此前是被安装脚本合并了。**
+
+**AC5（能取假）**：在任一**非** quay 项目起会话 ⇒ `PATH` 不含 `<quay>/plugin/bin`
+**且** `quay:author` NOT-AVAILABLE。*取假方式*：把用户级启用改回 `true` 即红——**当前状态就是红**。
+
+**⚠️ 与 T3 的相互作用（落地时必须一并处理，否则会把自己锁在门外）**：
+项目级启用要求 ①插件**已安装**（启用 ≠ 安装，§9-T3）②该目录**已被信任**（未信任 ⇒ 项目 settings 整份不读）。
+⇒ 迁移动作的正确顺序是：**先确认已安装 → 再在项目级置 true → 最后才撤掉用户级启用**；
+反序执行会得到"哪里都没有 quay"的状态。
+**⇒ 且 `register-plugin.mjs` 的行为要跟着改**：它现在写的是用户级启用，那正是污染源
+（安装可以是全局的，启用不该是）。
+
 ## 5. 五阶段
 
 | 阶段 | 机制（正本指针） | 本规格的改动 |
@@ -105,14 +146,23 @@ plugin/                     唯一扩展载体（git 跟踪，一棵树）
 
 ## 6. 安装写入闭集（`quay-init` 新契约）
 
+**裁定 6 定性**：`quay-init` 的**主要操作 = 创建符合 quay 要求的项目文件**（任务目录、quay 配置），
+**⛔ 不复制任何 Claude Code 扩展或脚本**。它是一个**项目初始化器，不是一个安装器**。
+
 ```
-.claude/settings.json    enabledPlugins + extraKnownMarketplaces
-                         + permissions.allow: ["mcp__plugin_quay_quay__*"]
+【quay 自己的项目文件——这才是 quay-init 的本职】
 .quay/config.yml         provider map + loop 参数
 .quay/profiles.yml       launcher/model
-tasks/                   任务数据（是数据不是扩展代码）
+tasks/                   任务目录（数据，不是扩展代码）
 .gitignore               若干条目
+
+【Claude Code 侧——只写配置，不写扩展】
+.claude/settings.json    enabledPlugins（本项目启用，裁定 5）
+                         + permissions.allow: ["mcp__plugin_quay_quay__*"]
 ```
+**⊢ 两组的区别是本质的**：上组是 **quay 这个产品要求的项目结构**（换个宿主也需要）；
+下组是**让宿主 Claude Code 知道去哪找已装好的插件**（一次性、幂等、纯配置）。
+**⛔ `extraKnownMarketplaces` 不进项目 settings**——它是机器特定绝对路径，属 User Scope（§4b）。
 
 **⚠️ 闭集之外必须有一个显式安装步骤（T3 实测结论，2026-09-02）**：
 **settings 里的 `enabledPlugins` 只能启用/停用一个【已安装】的插件，不会去安装它**
@@ -138,6 +188,8 @@ tasks/                   任务数据（是数据不是扩展代码）
 | 6 | `workflows-dual-copy-drift-check.ts` | 双副本消失 ⇒ 检查器失去对象 |
 | 7 | `plugin/skills/{quay-native,quay-webui-bootstrap}-methodology` 的「精简版」身份 | 裁定 2；与 `.claude/` 版合并为唯一一份 |
 | 8 | `manager-tick-core.js` 迁入 `plugin/workflows/` | **裁定 4：manager 是产品一部分** ⇒ 交付了 manager skill 却不交付它依赖的 workflow，正是裁定 2 禁的病 |
+| 9 | `~/.claude/settings.json` 的 `enabledPlugins["quay@quay"]=true` → 迁到项目级 | **裁定 5**：实测该条目把 quay 扩展面注入本机每个项目（`/home/yale` 会话 PATH 含 `<quay>/plugin/bin` ×2）。**迁移须按 §4b 的顺序**（先确认已装 → 项目级置 true → 最后撤用户级），反序会把自己锁在门外 |
+| 10 | `register-plugin.mjs` 写**用户级启用**的行为 | 同上：它是污染的产生点。**安装可以全局，启用不该全局**——改为只注册 marketplace 源 + 安装，启用交给目标项目 |
 
 **改造（非退役）**：
 - **7-2**：全部 `plugin/skills/*/SKILL.md` 的 `allowed-tools` 统一为 `mcp__plugin_quay_quay__*`
@@ -150,8 +202,15 @@ tasks/                   任务数据（是数据不是扩展代码）
   *能取假*：放回任一副本即红。
 - **AC2 命名空间一致**：`plugin/skills/*/SKILL.md` 中出现的 `mcp__` 工具名全部为 `mcp__plugin_quay_quay__*` 形式。
   *能取假*：当前状态即红（`loop-driver`/`routines`）——**先红后绿，不是恒绿**。
-- **AC3 安装写入闭集**：`quay-init` 写入目标的路径集 ⊆ §6 闭集。
+- **AC3 安装写入闭集**：`quay-init` 写入目标的路径集 ⊆ §6 闭集，
+  且**不含任何 `.claude/{skills,workflows,agents}` 或脚本副本**（裁定 6）。
   *能取假*：恢复任一类铺设即红。
+- **AC5 作用域不外溢**（裁定 5，判据全文见 §4b）：非 quay 项目的会话中
+  `PATH` 不含 `<quay>/plugin/bin` **且** `quay:author` NOT-AVAILABLE。
+  *能取假*：**当前状态即红**（实测 `/home/yale` 会话 PATH 含该路径两次）——先红后绿。
+- **AC6 用户级只承载源**：`~/.claude/settings.json` 中与 quay 相关的键
+  **只有** `extraKnownMarketplaces.quay`，**没有** `enabledPlugins["quay@quay"]`。
+  *能取假*：写回该启用键即红。
 - **AC4（反例判据）**：三条 AC 都不得只靠 fixture 满足——AC1/AC2 读仓库真实文件，
   AC3 读一次真实 laydown 的产物清单（硬规则 4 推论三：读生产载体，不读注入数据）。
 
