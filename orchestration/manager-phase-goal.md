@@ -171,6 +171,118 @@ checker-call-surface`（status: ready）是 AC149-1/-3 的一个具体子条件�
 
 ---
 
+## 📋 下一阶段（**已创建，未启动** —— 人 2026-09-02 裁定「根据该 SPEC 创建一个新的阶段，稍后我们将执行这一阶段」）：插件面收敛 —— 单一 bundle、原生交付、死物归档（AC156–AC169）
+
+**⛔ 本节不是当前阶段。** 上方「三层塌缩（AC143–AC149）」仍是当前阶段；本节**未切换、未启动**，
+**不得据此派发**。切换需人明令（与本文件既有惯例一致）。
+
+**正本**：`orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md`（460 行，6 个提交）。
+**本节只放【阶段化的 AC 与顺序】，⛔ 不复制 SPEC 的论证与清单**——97 个死集名单、archive 机制细节、
+四项实测、三天使用读数全部在 SPEC 里，两处都写就是制造漂移（本文件开头那条纪律）。
+
+**⚠️ 对仪器的已知副作用（先记账，免得日后误读）**：`manager-tick-readings.ts:501` 的
+`goal.phase_ac_checked` 数的是**本文件全部复选框**（未勾与已勾两种 markdown 形式），不区分阶段。
+⇒ 本节新增 14 个未勾 AC 会**立即拉低**该比值，**这不是退步**，是分母变大。
+**⊢ 判本阶段进度请只数 AC156–AC169，不要用那个全局比值。**
+**⛔ 本节正文一律不写复选框字面量**——写了就会被上述谓词计入，把解释仪器的句子变成污染仪器的输入
+（memory「正文写复选框字面量被数成已勾 AC」的同款；本节初稿就犯过一次，自检时逮到）。
+
+**人的四条裁定（逐字，2026-09-02，均已在 SPEC 展开）**：
+```
+① quay-init 复制 Claude Code 的各种扩展文件的行为应当废弃，这是非常糟糕的实践
+② 同一功能，本项目自己使用的扩展应当与产品交付的是同一个；不应有「简化版用于产品交付」
+③ 本项目的开发环境不应污染本机其它项目；仅允许 User Scope 以本项目目录为 plugin marketplace 源
+④ 对零调用的工具，先退役（archive），后续发现需要了再恢复
+```
+
+**⚡ 顺序是硬的，不是建议**——三处颠倒即破坏：
+```
+AC156 裸文件名扫描  ──►  AC158 执行 archive        扫描前 archive = 按已知有缺口的清单删东西
+AC163 allowed-tools ──►  AC164 承接 ──► AC165 撤裸  先撤后接 = 断掉 3 天 178 次的生产流量
+AC157 排除面接线    ──►  AC158 执行 archive        不接线就 archive = 当场弄红 catalog / 测试 glob
+```
+
+### 甲、地基（archive 机制本身）
+
+- [ ] **AC156（AC158 的前置）**：按 SPEC §12f 对 97 个死集跑一趟**注册表/清单裸文件名扫描**
+      （对象：`quay-deliver.ts` 这类以数组/映射登记脚本的地方、`*.json` 清单；
+      ⛔ `capability-catalog.sh` 不算引用——它是对种群的描述不是使用）。
+      命中的逐个判、从死集摘出，**扫描后死集数写回 SPEC §12e**。
+      *能取假*：SPEC 里没有 before/after 两个数字 ⇒ 未做。
+- [ ] **AC157（AC158 的前置）**：archive 机制落地——`archive/<日期>-<slug>/<保持原始相对路径>`
+      + `archive/INDEX.tsv`（SPEC §12a 的七字段）+ **五个排除面接线**
+      （`capability-catalog.sh` / `runtime-usage-inventory.ts` / `scripts/test.sh` 测试 glob /
+      laydown 交付面闭包 / `version-consistency-check.ts`）。
+      *能取假*：随便 archive 一个文件后跑全量 suite——**不接线必红**；接线后应绿。
+- [ ] **AC158**：执行批次一——扫描后死集全部 `git mv` 进 archive，**自带测试同批移动**，
+      `git mv` 与 INDEX 行**同一提交**（硬规则 7）。
+      *能取假*：`plugin/scripts` 计数未下降 / INDEX 行数 ≠ 移动文件数 / suite 红。
+- [ ] **AC159**：三个连带文档提及同步清理（SPEC §12e 表格逐行点名的落点）。
+      *判据*：`l1-delivery-surface-check.ts --surface` 仍报 **6/6**。
+      *能取假*：漏改 `SPEC-complete-delivery-surface:240` 的机读行 ⇒ 第 6 类交付物缺失 ⇒ 5/6。
+
+### 乙、把仪器修对（否则下一次普查还是错的）
+
+- [ ] **AC160**：修 `runtime-usage-inventory.ts` 的枚举盲区——`readTranscripts` 须枚举
+      `<session>/subagents/workflows/<run>/agent-*.jsonl`。
+      *判据（双向）*：修复后对 `monitor-mount-check.sh` 报 `executed > 0`（**当前报 0**），
+      且新增一个 fixture 测试**在未修版本上必红**。
+      *能取假*：不改 ⇒ 仍报 0；只加测试不改实现 ⇒ 测试红。
+
+### 丙、作用域不外溢（裁定 ③）
+
+- [ ] **AC161**：用户级只留 marketplace 源，启用迁项目级（SPEC §4b）。
+      **迁移顺序**：确认已安装 → 项目级置 true → **最后**撤用户级（反序会把自己锁在门外）。
+      *判据*：SPEC AC5 —— 在**非 quay 项目**起会话，`PATH` 不含 `<quay>/plugin/bin`
+      **且** `quay:author` NOT-AVAILABLE。*能取假*：当前状态即红（实测 PATH 含该路径两次）。
+- [ ] **AC162**：`register-plugin.mjs` 不再写用户级 `enabledPlugins`（安装可以全局，启用不该全局）。
+      *能取假*：跑一次全局安装后 `grep enabledPlugins ~/.claude/settings.json` 仍出现 quay ⇒ 未改。
+
+### 丁、命名空间迁移（顺序不可颠倒——它承载 3 天 178 次生产流量）
+
+- [ ] **AC163**：全部 `plugin/skills/*/SKILL.md` 的 `allowed-tools` 改为 `mcp__plugin_quay_quay__*`
+      + 一个静态检查器（SPEC AC2）。*能取假*：当前 `loop-driver`/`routines` 即红——先红后绿。
+- [ ] **AC164**：插件命名空间**承接**生产流量。
+      *判据*：迁移后一个观测窗口内 `mcp__plugin_quay_quay__*` 调用数 **>** `mcp__quay__*`
+      （当前是 6 : 178，方向相反）。*能取假*：不迁就不会翻转。
+- [ ] **AC165（AC164 满足后才做）**：撤 root `.mcp.json` 的 quay 条目 +
+      `.claude/settings.local.json` 的 `enabledMcpjsonServers:["quay"]`；
+      permission allowlist 同步改插件前缀名。
+
+### 戊、第二副本退役（裁定 ②）
+
+- [ ] **AC166**：`.claude/skills/` 5 个 + `.claude/workflows/` 双副本 archive；
+      `manager-tick-core.js` 迁入 `plugin/workflows/`（裁定 4：manager 是产品一部分）。
+      *判据*：迁后首个窗口 `quay:manager-tick-core` 调用数 **> 0**
+      （该路径当前承载 608 次/3 天，换文件后必须仍在跑）。*能取假*：迁错路径 ⇒ 恒 0。
+- [ ] **AC167**：`plugin/agents/baime-iteration-executor.md` 从 `plugin.json` 摘除并 archive；
+      `workflows-dual-copy-drift-check.ts` 随双副本消失一并 archive（失去判定对象）。
+
+### 己、quay-init 瘦身与交付面同步（裁定 ①）
+
+- [ ] **AC168**：`quay-init` 收缩到 SPEC §6 闭集（只建 quay 项目文件 + 写 Claude Code 侧配置），
+      **并显式包含安装步骤**（T3：启用 ≠ 安装；未信任目录整份不读项目 settings）。
+      `plugin/test/quay-init*.test.mjs` 随之改写。
+      *判据*：SPEC AC3 —— 一次**真实 laydown** 的产物清单 ⊆ 闭集（⛔ 不接受 fixture 自证）。
+- [ ] **AC169**：交付面与文档同步——`SPEC-complete-delivery-surface` 活文档六类清单、
+      `CLAUDE.md` 中 quay-init 铺设的描述、`plugin/README.md:3` 仍写 v0.4.0 的散文（实际 0.6.1）。
+
+### 切换与完成判据
+
+**切换判据**（何时本节从 📋 变 🆕）：**人明令**。⛔ 不设自动切换——当前阶段（三层塌缩）
+的 AC143–AC149 未达成，本阶段与其**无依赖关系**，可并行也可后置，由人定。
+
+**完成判据**：AC156–AC169 **14/14 全勾**，且**三条方向性读数同时成立**：
+```
+① mcp__plugin_quay_quay__* 调用数  >  mcp__quay__*        （当前 6 : 178，须翻转）
+② 非 quay 项目会话 PATH 不含 <quay>/plugin/bin            （当前含，且出现两次）
+③ plugin/scripts 计数下降 ≥ 扫描后死集数，且全量 suite 绿  （当前 309）
+```
+**⊢ 三条都是【方向会翻转】的量，不是「存在某文件」式的自证**——照硬规则 4，
+「结构上不可能取假的量不是测量」。
+
+---
+
 ## ✅ 已达成阶段（**2026-08-21 16:5xZ 起 – 2026-08-22 15:3xZ 全部达成 8/8 + AC124 窗口判据满足**）：按变更选择性执行 —— suite 三桶划分
 
 **⊕ 2026-08-22 15:3xZ 达成核算（manager 直读 `.quay/verification-round.jsonl`，锚 `2026-08-21T23:04:39Z` 后）**：

@@ -53,6 +53,7 @@ function runDrift(root, ...args) {
 /** The pointerized manager shipped copies (gap-plugin-loop-manager-drifted-copies-pointerize AC3). */
 const MGR_CORE_POINTER = "> 正本: orchestration/manager-tick-core.md — 本文件只应存在这一行指针；执行核内容一律读正本。\n";
 const MGR_LOOP_POINTER = "> 正本: orchestration/manager-loop-tick.md — 本文件只应存在这一行指针；内容一律读正本。\n";
+const ORCH_CORE_POINTER = "> 正本: orchestration/orchestrator-tick-core.md — 本文件只应存在这一行指针；执行核内容一律读正本。\n";
 
 /** Write a file (creating parent dirs) inside `root`. */
 function write(root, rel, content) {
@@ -115,13 +116,14 @@ function buildBaselineRoot() {
   return dir;
 }
 
-/** Build a drift-GREEN root: byte-identical orchestrator/fast-mode copies + pointerized manager
- *  shipped docs (the state after gap-plugin-loop-manager-drifted-copies-pointerize). */
+/** Build a drift-GREEN root: normalized-byte fast-mode copy + pointerized manager AND orchestrator
+ *  shipped docs (the state after gap-plugin-loop-manager-drifted-copies-pointerize /
+ *  gap-inner-content-cleanup 2026-09-02 extended the same treatment to orchestrator). */
 function buildDriftRoot() {
   const dir = buildBaselineRoot();
   write(dir, "orchestration/manager-loop-tick.md", "# manager loop tick 正本\n| A1 | 读 `.quay/manager-inbox/` | (src:1) |\n");
   write(dir, "plugin/loop/manager-tick-core.md", MGR_CORE_POINTER);
-  write(dir, "plugin/loop/orchestrator-tick-core.md", ORCH_CORE);
+  write(dir, "plugin/loop/orchestrator-tick-core.md", ORCH_CORE_POINTER);
   write(dir, "plugin/loop/fast-mode-tick-core.md", FAST_CORE);
   write(dir, "plugin/loop/manager-loop-tick.md", MGR_LOOP_POINTER);
   return dir;
@@ -451,18 +453,18 @@ test("AC8: the real repo passes, three-layer exclusion notation (manager remaini
 
 // ── AC2 — the drift/pointer criterion (gap-plugin-loop-manager-drifted-copies-pointerize) ───────────
 
-test("AC2 drift baseline: byte-identical orchestrator/fast-mode copies + pointerized manager docs are green", () => {
+test("AC2 drift baseline: pointerized manager/orchestrator docs + normalized-byte fast-mode copy are green", () => {
   const dir = buildDriftRoot();
   try {
     const res = runDrift(dir, "--json");
     assert.equal(res.status, 0, `drift baseline reddened: ${res.stdout} ${res.stderr}`);
     const out = JSON.parse(res.stdout);
     assert.equal(out.ok, true);
-    // All four pairs present, and the two manager pairs are POINTER-mode consistent.
+    // All four pairs present, and the three manager+orchestrator pairs are POINTER-mode consistent.
     const modes = Object.fromEntries(out.pairs.map((p) => [p.shipped, p.mode]));
     assert.equal(modes["plugin/loop/manager-tick-core.md"], "pointer");
     assert.equal(modes["plugin/loop/manager-loop-tick.md"], "pointer");
-    assert.equal(modes["plugin/loop/orchestrator-tick-core.md"], "byte-identical");
+    assert.equal(modes["plugin/loop/orchestrator-tick-core.md"], "pointer");
     // The fast-mode shipped copy is a SEMANTIC LANDING, not a byte copy (init/SKILL.md:71 —
     // "非 byte-identical"): normalized-byte compares the behavioral body from `## A.`.
     assert.equal(modes["plugin/loop/fast-mode-tick-core.md"], "normalized-byte");

@@ -346,6 +346,8 @@ npm 侧无需处理（`files` 是白名单，`archive/` 天然不在内）。
 **严格**（shipped skills/workflows + 三个活执行核 + CI + 产品代码）**KEEP=212 / DEAD=97**；
 **宽松**（再加任何 `orchestration/*.md` 与 `CLAUDE.md` 的引用）**KEEP=215 / DEAD=94**。
 **取两者交集为安全核 = 94。**
+**⊕ 人 2026-09-02 裁定后：那 3 个差集也 archive ⇒ 最终死集 = 97 = 严格口径的 DEAD。**
+**⊢ 即：裁定选定的是严格口径——「指示执行」算活，「散文提及」不算。**（详见本节末尾与 §12f。）
 
 **负控制通过**：`ready-pool-check.ts` / `worker-driver.ts` / `capability-catalog.sh` /
 `monitor-mount-check.sh` / `quay-session.ts` 五个已知活跃脚本**无一落入死集**
@@ -416,20 +418,41 @@ workflow-journal.ts                      workflow-metadata-conformance.mjs
 workflow-replay.ts                       worktree-branch-hygiene-check.sh
 ```
 
-#### 需人裁的 3 个（严格口径判死、宽松口径判活——唯一的活因是一条文档提及）
+#### 曾待裁的 3 个 → 人 2026-09-02 裁定：**取 (a)，连同那条文档提及一起 archive**
 
-`gate-staleness-check.sh` · `supervisor-bus-identity.sh` · `trend-check.ts`
+原为「严格口径判死、宽松口径判活，唯一活因是一条文档提及」的三个：
+`gate-staleness-check.sh` · `supervisor-bus-identity.sh` · `trend-check.ts`。
+**人的裁定原话**：「**连同那条文档提及一起 archive（承认该规程已不执行）**」。
+⇒ **死集 94 + 3 = 97**，**恰好等于严格口径的 DEAD=97**
+⇒ **该裁定在效果上就是「采用严格口径」：只有【指示执行】才算活，散文提及不算。**
+（未被选中的另一条出路记录在案：保留并接进真正会跑的地方。**被明确排除的第三种**是
+留文件、留文档、不接线——即硬规则 9「守与不守在记录上无法区分」。）
 
-**两条出路，选一**：**(a)** 连同那条文档提及一起 archive（承认那条规程已不执行）；
-**(b)** 保留并**把它接进真正会跑的地方**（否则它就是一条只写在文档里、从不执行的义务——
-即 CLAUDE.md 硬规则 9 说的「守与不守在记录上无法区分」）。
-**⛔ 不允许第三种：留着文件、留着文档、也不接线。**
+**⚠️ 这三个各自带一串连带清理，缺一就会留下悬空引用或直接弄红检查：**
+
+| 脚本 | 必须同批处理的文档提及 | 其它耦合（不处理会红/悬空） |
+|---|---|---|
+| `gate-staleness-check.sh` | `orchestration/SPEC-goal-store-2026-08-09.md:240`（AC7 行规定每轮跑它） | `capability-catalog.sh:236`（声明）+`:534`（节奏「每轮」）；`rhythm-consumer-check.ts:93` 已自注「legacy，且 `.ts` 同胞也未接线」——**两个同胞一并入死集** |
+| `supervisor-bus-identity.sh` | `orchestration/SPEC-integration-architecture-2026-08-05.md:174`、`orchestration/manager-loop-tick.md:270` | `capability-catalog.sh:351/:673`；**`plugin/scripts/quay-deliver.ts:19` 的交付清单含它**；**既有任务 `gap-inbox-message-bus-teardown` 已把「本脚本失效子命令退役」列为剩余面 ⇒ 必须并案，不得两头各做一半** |
+| `trend-check.ts` | `orchestration/REVIEW-cadence.md:83`（规定的命令行） | **`SPEC-complete-delivery-surface-2026-08-05.md:240` 的机读行 `<!-- l1-category: 6 … deliverable: plugin/scripts/trend-check.ts …-->` + 表格 `:197`**——**不同步就会让 `l1-delivery-surface-check.ts --surface` 报第 6 类交付物缺失**（§10 已预告的活文档同步义务，这里是它的第一个具体实例） |
+
+#### 12f. 闭包的一个已知检测缺口（由上表跟进时发现，对 97 个全体适用）
+
+`quay-deliver.ts:19` 以 **`file: "supervisor-bus-identity.sh"` 这种裸文件名清单项**引用脚本；
+而 §12e 的闭包只识别**两种形式**：import 说明符、`node|bash|sh|tsx … plugin/scripts/<name>` 调用行
+⇒ **注册表/清单里的裸文件名引用检测不到。**
+**⇒ 执行 archive 之前必须补一趟裸文件名扫描**（对象：`quay-deliver.ts` 这类清单、
+`*.json` 清单、其它以数组/映射登记脚本的地方），把命中的从死集里摘出来单独判。
+**⛔ 唯一不算引用的登记处是 `capability-catalog.sh`**——它是**对种群的描述**，不是使用；
+把 catalog 条目当引用会让所有脚本永远活着（那正是硬规则 4「结构上不可能取假的量」）。
+**⊢ 本缺口的发现方式值得记**：不是靠重读代码，是靠**执行一条裁定时去找它的连带面**——
+裁定落地的动作本身就是对判据的一次负控制。
 
 ---
 
 **状态**：规格已裁定；**§9 四项实测已全部完成（T2 为 CLI 自述、未活体验证）**；
-**§11 三天使用实测已完成**；**§12e 传递闭包已算毕（安全核 94 + 待裁 3）**；
-§7 退役清单 + §12e 清单待拆条执行。
+**§11 三天使用实测已完成**；**§12e 传递闭包已算毕，人裁定后死集 = 97**（94 安全核 + 3 个原待裁）；
+**§12f 的裸文件名扫描是执行 archive 的前置**；§7 退役清单 + §12e/§12f 待拆条执行。
 
 **退役清单的可量化收益（2026-09-02 实测，`claude plugin details quay`）**：
 14 个 skill **每会话常驻 ~2,706 tok**；其中 `quay-native-methodology`(~210) 与

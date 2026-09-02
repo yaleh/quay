@@ -46,8 +46,8 @@
 ## 2. AC44：defect 已精确定位，且修法的样板就在同一文件里
 
 ```
-full-suite-runner.ts:992  export const DEFAULT_SERIAL_CONCURRENCY = 6
-full-suite-runner.ts:993  export const DEFAULT_LOWCONC_CONCURRENCY = 6
+full-suite-runner.ts:992  export const DEFAULT_SERIAL_CONCURRENCY = 6   ←（已删：serial 现宿主派生 defaultPhaseConcurrency()）
+full-suite-runner.ts:993  export const DEFAULT_LOWCONC_CONCURRENCY = 6   ←（已删：lowconc 现固定语义值 3 defaultLowconcConcurrency()）
 对照 :972-973                os.availableParallelism() / os.cpus().length   ← main 相已经读宿主
 ```
 

@@ -40,8 +40,18 @@ const repoRoot = path.resolve(pluginDir, '..');
 // plugin-staging-<pid>-{0,1}/ orphans that carry a full plugin/ copy — their tick-doc old-path strings
 // + scripts/*.ts false-red AC1b/AC2 (gap-orphan-staging-dirs-pollute-walkcorpus).
 function walkCorpus(dir, { excluded = [], includeWorktrees = false } = {}) {
-  const containers = includeWorktrees ? new Set() : worktreeContainerPaths(repoRoot);
-  const isContainer = (p) => [...containers].some((c) => p === c || p.startsWith(c + path.sep));
+  // gap-loop-shipping-nested-worktree-container-false-exclude: worktreeContainerPaths(repoRoot)
+  // includes EVERY worktree `git worktree list` reports, including ones that are ANCESTORS of
+  // `dir` (e.g. the main checkout, when this suite runs from a nested `.claude/worktrees/<name>/`
+  // worktree — the harness's EnterWorktree layout). A container `c` that is an ancestor of `dir`
+  // makes `p.startsWith(c + path.sep)` true for EVERY `p` under `dir` (since `dir` itself is under
+  // `c`), so isContainer() matched everything and the walk starved to just `dir`'s own top-level
+  // files ("only 8 files scanned"). A container can only ever be REACHED by walking `dir`'s own
+  // subtree, so containers outside that subtree are never relevant — filter to descendants of (or
+  // equal to) `dir` before checking.
+  const rawContainers = includeWorktrees ? new Set() : worktreeContainerPaths(repoRoot);
+  const containers = [...rawContainers].filter((c) => c === dir || c.startsWith(dir + path.sep));
+  const isContainer = (p) => containers.some((c) => p === c || p.startsWith(c + path.sep));
   const scanned = [];
   const walk = (d) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
