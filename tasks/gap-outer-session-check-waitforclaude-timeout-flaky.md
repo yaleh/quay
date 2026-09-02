@@ -1,7 +1,7 @@
 ---
 id: gap-outer-session-check-waitforclaude-timeout-flaky
 title: outer-session-check.test.mjs waitForClaude 5s 超时在并发 suite 下不够——A 类时序敏感 flaky
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -25,8 +25,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：并发 load 下 outer-session-check 稳定绿（waitForClaude 超时/retry 足够）；（⛔ 仍偶发红 ⇒ 假）。
-- [ ] AC2（能取假，负控制）：真 dead child（进程未启动/已死）仍 assert 失败——超时加长不掩盖真失败；（⛔ 误放行 ⇒ 假）。
+- [x] AC1（能取假）：并发 load 下 outer-session-check 稳定绿（waitForClaude 超时/retry 足够）；（⛔ 仍偶发红 ⇒ 假）。
+- [x] AC2（能取假，负控制）：真 dead child（进程未启动/已死）仍 assert 失败——超时加长不掩盖真失败；（⛔ 误放行 ⇒ 假）。
 
 ## Definition of Done
 

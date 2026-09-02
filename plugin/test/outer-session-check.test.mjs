@@ -106,7 +106,14 @@ function paneHasClaude(env, session) {
   }
   return false;
 }
-async function waitForClaude(env, session, timeoutMs = 15000) {
+// Under concurrent suite load (16-core parallel), tmux send-keys + a spawned claude-probe child
+// can take longer than the original 5s window to become visible (A-class timing-sensitive flaky).
+// The happy path resolves in well under a second; this bound only caps how long a genuinely-dead
+// child is allowed to keep failing before waitForClaude reports false — it never reports a dead
+// child as alive (see the negative-control test below).
+const CLAUDE_START_TIMEOUT_MS = 30000;
+
+async function waitForClaude(env, session, timeoutMs = CLAUDE_START_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (paneHasClaude(env, session)) return true;
@@ -135,7 +142,7 @@ test("state machine — healthy: outer window + claude child + transcript WITH a
     h.newSession("osc-h", "bash");
     h.newWindow("osc-h", "outer", "bash");
     h.send("osc-h:outer", "exec -a claude-probe sleep 10000 &");
-    assert.ok(await waitForClaude(h.env, "osc-h:outer", 5000), "outer claude child must be alive");
+    assert.ok(await waitForClaude(h.env, "osc-h:outer", CLAUDE_START_TIMEOUT_MS), "outer claude child must be alive");
     const tr = path.join(h.tmp, "outer.jsonl");
     fs.writeFileSync(tr, USER_MSG, "utf8");
     const r = runCheck(h.env, ["--session", "osc-h", "--json", "--transcript", tr]);
@@ -157,7 +164,7 @@ test("state machine — empty-shell: outer window + claude child, transcript WIT
     h.newSession("osc-es", "bash");
     h.newWindow("osc-es", "outer", "bash");
     h.send("osc-es:outer", "exec -a claude-probe sleep 10000 &");
-    assert.ok(await waitForClaude(h.env, "osc-es:outer", 5000), "outer claude child must be alive");
+    assert.ok(await waitForClaude(h.env, "osc-es:outer", CLAUDE_START_TIMEOUT_MS), "outer claude child must be alive");
     // (a) transcript exists but holds no real user message (system-only).
     const trSys = path.join(h.tmp, "outer-sys.jsonl");
     fs.writeFileSync(trSys, SYSTEM_ONLY, "utf8");
@@ -199,6 +206,19 @@ test("state machine — missing: outer window absent OR no claude child ⇒ miss
   } finally { h.cleanup(); }
 });
 
+test("negative control — a truly dead claude child is NOT masked by the longer wait", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const h = newHermetic();
+  try {
+    h.newSession("osc-nc", "bash");
+    h.newWindow("osc-nc", "outer", "bash");
+    // No claude-probe child is ever planted. waitForClaude's verdict is paneHasClaude(...) —
+    // the timeout only bounds how long it polls, it never flips a dead child into "alive".
+    // A short window here is enough to exercise the poll loop and pin the false return.
+    const alive = await waitForClaude(h.env, "osc-nc:outer", 1500);
+    assert.equal(alive, false, "bare bash window (no claude child) must not be reported alive");
+  } finally { h.cleanup(); }
+});
+
 test("state machine — fail-closed: no session config ⇒ exit 1 (never guess a session name)", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-osc-failclosed-"));
   try {
@@ -226,7 +246,7 @@ test("TR_SOURCE=discovery alarms on stderr and marks state=degraded (never silen
     h.newSession("osc-d1", "bash");
     h.newWindow("osc-d1", "outer", "bash");
     h.send("osc-d1:outer", "exec -a claude-probe sleep 10000 &");
-    assert.ok(await waitForClaude(h.env, "osc-d1:outer", 5000), "outer claude child must be alive");
+    assert.ok(await waitForClaude(h.env, "osc-d1:outer", CLAUDE_START_TIMEOUT_MS), "outer claude child must be alive");
 
     const fakeScripts = path.join(tmp, "plugin", "scripts");
     fs.mkdirSync(fakeScripts, { recursive: true });
@@ -265,7 +285,7 @@ test("a discovery-sourced USER_MSG transcript (would-be-healthy shape) yields de
     h.newSession("osc-d2", "bash");
     h.newWindow("osc-d2", "outer", "bash");
     h.send("osc-d2:outer", "exec -a claude-probe sleep 10000 &");
-    assert.ok(await waitForClaude(h.env, "osc-d2:outer", 5000), "outer claude child must be alive");
+    assert.ok(await waitForClaude(h.env, "osc-d2:outer", CLAUDE_START_TIMEOUT_MS), "outer claude child must be alive");
 
     const fakeScripts = path.join(tmp, "plugin", "scripts");
     fs.mkdirSync(fakeScripts, { recursive: true });
