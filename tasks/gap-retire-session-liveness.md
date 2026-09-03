@@ -31,12 +31,19 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 1. 枚举 session-liveness 的全部消费方（147 个文件：orchestration 文档 / packages 代码 / plugin/loop 文档 / plugin/scripts / plugin/test / skills / workflows / scripts/test.sh），确认哪些是「可删」、哪些是「需改判」。
 2. 删：session-liveness.sh + session-liveness-mount.sh + session-liveness-sweep*.mjs（重命名 run-namespace-sweep*）+ 22 个测试 + monitor-mount-check.sh + monitor-mount-check.test.mjs。
 3. 删 idle-watch 接缝（方案 B）：manager-start.sh 的 `--check-idle-watch` / `--ensure-mount-intent` 参数 + `IDLE_WATCH_MOUNT_ENTRY` / `IDLE_WATCH_DELIVERY_SEAM` + `idle-watch.env` / `idle-watch-mount.txt` 工件 + checklist 7 键删 2 键（IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）；packages/quay/src/cli/manager.ts 的 `--check-idle-watch` CLI 参数。
-4. 清引用：逐个移除 session-liveness 引用；下游「因缺 session-liveness 而恒红」的分支一并退役或改判。
+4. 清引用（⛔ 活跃引用清单，逐个清/改判，不靠 fan-in 逐轮暴露）：
+   - plugin/loop/（3）：fast-mode-loop-tick.md、fast-mode-tick-core.md、orchestrator-loop-tick.md
+   - plugin/scripts/（19）：full-suite-runner.ts、inner-blocked-signal.ts、loop-shipping-exclusion-data.mjs、manager-observation-runtime-check.ts、manager-start.sh、manager-tick-readings.ts、observer-registry-check.sh、observer-registry.sh、os-anchor-install.sh、os-anchor-watchdog.sh、outer-driver.ts、pane-state-classify.ts、quay-init.sh、quay-session.ts、red-on-omission-audit.ts、run-namespace-sweep-kill.mjs、run-namespace-sweep.mjs、tmux-test-isolation-check.ts、verify-delivery-surface.ts
+   - plugin/skills/（2）：cold-start/SKILL.md、manager/SKILL.md
+   - plugin/test/（16）：blocked-signal-parameterized、cold-start-skill、help-contract-incompatible-behaviors、laydown-set-check、loop-shipping、manager-cold-start、manager-start、manager-tick-core、observer-registry、pane-state-classify、quay-init-loop-core、quay-init-loop-driver、quay-init-loop-runtime、quay-init-tmux-detection、session-bootstrap、suite-bucket-load-sensitive-isolation（各 .test.mjs）
+   - packages/scripts/（2）：packages/quay/src/observation.ts、scripts/test.sh
+   - orchestration/（活跃 loop 文档 + conf，7）：fast-mode-tick-core.md、manager-loop-tick.md、manager-tick-core.md、manager-tick-criteria.md、orchestrator-loop-tick.md、orchestrator-tick-core.md、observer-registry.conf
+   - ⛔ orchestration/ 历史文档（SPEC-*/RUNBOOK-*/ANALYSIS-*/FINDING-*/PROPOSAL-*/RESEARCH-*/archive/*/escalations/inner-brief-*/manager-obligation-ledger.jsonl/*-phase-goal*/*-rulings-*/recovery-*/session-launch-recipes/tools-log/session-liveness.env）是历史记录，保留不清。
 5. 全量 suite 绿（删测试后 ratchet/baseline + bucket 归因同步更新）。
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`grep -rE "session-liveness|hermetic-tmux\.sh|hermetic-tmux-mount-check\.sh" plugin/ scripts/ packages/ orchestration/` 命中数归零（或仅剩「退役说明」注释），打印命中行；`hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh` 是前几轮误引入的重命名悬空引用，一并删除（`plugin/test/helpers/hermetic-tmux.mjs` 不在本范围）。
+- [ ] AC1（能取假）：Plan 第 4 步「活跃引用清单」内文件，`grep -E "session-liveness|hermetic-tmux\.sh|hermetic-tmux-mount-check\.sh"` 命中归零，打印命中行；`hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh` 是误引入的重命名悬空引用，一并删除（`plugin/test/helpers/hermetic-tmux.mjs` 不在本范围）；orchestration/ 历史文档（SPEC/RUNBOOK/ANALYSIS/archive 等）保留历史，不在归零范围。
 - [ ] AC2（连带退役）：`monitor-mount-check.sh` / `monitor-mount-check.test.mjs` 一并删除（无对象可查）。
 - [ ] AC3（无悬空引用）：凡引用 SESSION-* 事件 / session-liveness 输出的下游脚本，不得出现「因缺 session-liveness 而恒红/报未挂载」的分支。
 - [ ] AC4（既有不回归）：全量 suite 绿（删测试后 @test-group ratchet / baseline / suite-bucket-reattribution 同步更新）。
@@ -54,6 +61,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - orchestration/manager-loop-tick.md
 - orchestration/manager-tick-core.md
 - orchestration/manager-tick-criteria.md
+- orchestration/observer-registry.conf
 - orchestration/orchestrator-loop-tick.md
 - orchestration/orchestrator-tick-core.md
 - packages/quay/src/cli/manager.ts
@@ -88,6 +96,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/scripts/laydown-set-check.sh
 - plugin/scripts/loop-driver-check.sh
 - plugin/scripts/loop-shipping-exclusion-data.mjs
+- plugin/scripts/manager-observation-runtime-check.ts
 - plugin/scripts/manager-start.sh
 - plugin/scripts/manager-tick-readings.ts
 - plugin/scripts/monitor-mount-check.sh
@@ -105,6 +114,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/scripts/quay-init.sh
 - plugin/scripts/quay-session.ts
 - plugin/scripts/quay-topology.sh
+- plugin/scripts/red-on-omission-audit.ts
 - plugin/scripts/run-namespace-sweep-kill.mjs
 - plugin/scripts/run-namespace-sweep.mjs
 - plugin/scripts/runner-concurrency.ts
@@ -166,6 +176,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/test/ready-pool-check.test.mjs
 - plugin/test/red-window-triage.test.mjs
 - plugin/test/send-keys-reliable.test.mjs
+- plugin/test/session-bootstrap.test.mjs
 - plugin/test/session-liveness-decision-import.test.mjs
 - plugin/test/session-liveness-events.test.mjs
 - plugin/test/session-liveness-hangguard.test.mjs
