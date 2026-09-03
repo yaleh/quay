@@ -1,6 +1,6 @@
 # SPEC：tmux 退役 —— 先退 tmux 机制本身，outer 会话留待之后
 
-**作者**：manager｜**日期**：2026-09-03｜**状态**：proposal，待人裁定排期
+**作者**：manager｜**日期**：2026-09-03｜**状态**：**裁定已齐，待拆解为任务执行**
 **来源**：人 2026-09-03 明确裁定策略顺序——**先退役 tmux，再退役 outer**（推翻此前"outer 职能
 subagent 化 → tmux 依赖自然消失"这一隐含顺序）；本 SPEC 是该裁定的具体展开。
 **前置澄清（同日，已向人核实并更正两次误判）**：
@@ -9,6 +9,18 @@ subagent 化 → tmux 依赖自然消失"这一隐含顺序）；本 SPEC 是该
    `experiments/quay-perpetual-stream/VT-MECHANISM-RETROSPECTIVE.md`（同日已归档）。
 2. 本 SPEC 针对的是**三层架构（manager/orchestrator/fast-mode）里真正的 tmux 依赖**——
    `orchestrator-tick-core.md`（标题即"outer tick"）+ 全仓库实际调用 tmux 命令的生产脚本。
+
+**人 2026-09-03 第二批裁定（五条，回答了 §5 全部开放问题,原文照录）**：
+1. manager 也应删除 tmux 依赖。实际上，虽然人现在的确在用 tmux 访问 Claude Code，但 manager
+   已经是一个 Claude Code 后台会话，不依赖 tmux。
+2. outer 继续 CronCreate/ScheduleWakeup 持有自己的锚。
+3. outer 长驻会话通常由手工退出。不要搞复杂，只要能稳定启动即可。
+4. 取消 `session-liveness.sh`。
+5. 不要碰当前的 tmux 会话。那是人工启动的。
+
+**这五条的直接后果**：原 §5 的 5 个开放问题全部解决（见下方更新后的对应章节）；Layer 3 的实施
+范围明确包含 manager + outer 两个角色；Layer 2（观测）的范围从"改造 `session-liveness.sh`"
+变为"取消它,枚举其真实生产调用者并各自迁移"——这是本次更新新增的最大一块工作。
 
 ---
 
@@ -73,6 +85,12 @@ wait'`，cwd 指向一个具体 task worktree）——即当前那个按常规�
 **这一节的更正意味着**：Layer 3 的改造范围不能只覆盖 outer,还需要覆盖 manager 自身的常规启动
 路径（`manager-start.sh`）——manager 用 `claude --bg` 启动"技术上可行",与"`manager-start.sh`
 已经支持这样做"是两回事,后者从未被改造。
+
+**人 2026-09-03 裁定（第二批 #1）：manager 也应删除 tmux 依赖，确认纳入本 SPEC 范围。** 人明确
+指出当前用 tmux **访问** Claude Code（人自己 attach 进某个 pane 查看/交互）与 manager **本身**
+是否依赖 tmux 是两件事——manager 已经是一个 background job，不依赖 tmux 运行；`manager-start.sh`
+仍建 tmux 会话是该脚本本身滞后于事实，需要改造以匹配已经成立的事实，而不是"要不要迁移"这个问题。
+Layer 3 因此明确覆盖 manager + outer 两个角色（原 §5 开放问题 #1 已解决）。
 
 ---
 
@@ -217,14 +235,62 @@ job 启动**，完整生命周期命令齐全，不需要任何自建机制：
    直接给出会话是否存活、id、cwd，比现有的四态判定（healthy/empty-shell/missing/degraded）里
    三态（window_exists/has_claude_child/transcript_fresh）的判定基础更直接可靠，可能只剩
    "是否已被真正驱动过（有真实 user 消息）"这一层判据需要保留
-3. **`session-liveness.sh` 的 `SESSION-GONE`/`SESSION-BACK`（进程存在性）与 `SESSION-IDLE`/
-   `SESSION-RESUMED`（忙闲判定）改用 `claude agents --json` 的存活状态字段 + `claude logs <id>`**
-   ——这两组判据是 §2.3② 核实出的"仍 100% 依赖 tmux pane 操作"的部分，是 Layer 2（观测）与
-   Layer 3（生命周期）真正的交汇点：一旦驱动对象改用 `claude --bg`，这里的 `tmux list-panes`/
-   `capture-pane` 调用天然失去观测对象，必须同步换成 `claude agents`/`logs`。
-4. **outer/manager 的 CronCreate/ScheduleWakeup 复用 manager 现有模式**——manager 自己的
-   `~/.quay-global/manager/loop-registry.txt` + `manager-arm-loop.sh` 一套武装/验证机制，是
-   现成的可直接复用的参照（不是全新设计，manager 自己已经实测跑了 5 天）。
+3. **outer 继续 CronCreate/ScheduleWakeup 持有自己的锚**（人 2026-09-03 裁定，原 §5 开放问题
+   #2 已解决）——不是本 SPEC 早期草稿设想的"manager 代持/按 tick 派发"，outer 保留自主的锚点
+   管理，复用 manager 自己的 `~/.quay-global/<role>/loop-registry.txt` + `*-arm-loop.sh` 一套
+   武装/验证机制（manager 自己已实测跑了 5 天，是现成可复用的参照，不是全新设计），只是把家目录
+   从 `manager` 换成 `outer`（或类似的 role 专属子目录）。
+4. **`claude --bg` 长驻会话的退出语义 = 手工**（人 2026-09-03 裁定，原 §5 开放问题 #3 已解决，
+   明确"不要搞复杂，只要能稳定启动即可"）——不设计自动失败恢复/自动重启/watchdog 强制回收；outer
+   长驻到人用 `claude stop <id>`/`claude kill <id>` 手工结束为止。这大幅简化了 Layer 3 的实施
+   范围：不需要为 outer 设计"崩溃检测→自动重启"这类机制,`claude agents --json` 能否看到这个会话
+   即是它是否还在跑的唯一判据,不在跑就是人还没手工重新启动。
+
+### Layer 2b：取消 `session-liveness.sh`（人 2026-09-03 裁定，原 §5 开放问题 #4 已解决——
+不是"改造它使其等价"，是直接废弃，本节是这条裁定的落实范围）
+
+**这条裁定把本 SPEC 原设想的"验证 `claude agents`/`logs` 与现有分类器语义等价"这个开放问题
+（原 §5 #4）直接消解了**——不需要验证等价性，因为不迁移语义，直接废弃这个脚本和它承载的整套
+四态/五态活性推断逻辑（`SESSION-GONE`/`BACK`/`IDLE`/`RESUMED`/`OVERDUE`/`STALL` 等）。
+
+**影响面盘点（2026-09-03 实测，按位置判定,非关键词）**：
+- 全仓库引用 `session-liveness.sh` 的文件 **约 140+**，但绝大多数是：
+  - `tasks/gap-session-liveness-*.md` 这一批（约 25+ 个）——**抽样确认全部 `status: done`**，
+    是历史修复记录的归档，不是活跃依赖，不需要处理
+  - `.md` 文档提及（CLAUDE.md/README/各种 SPEC/ADR/skill 文档）——需要更新措辞，但不是代码
+    迁移，可以随对应生产代码调用点一起顺手改
+- **真正的生产代码调用者（.ts/.sh，排除测试）约 31 个文件**，需要逐一处理：
+  ```
+  packages/quay/src/observation.ts          plugin/scripts/adr016-screen-use-check.ts
+  plugin/scripts/capability-catalog.sh      plugin/scripts/dead-loop-check.sh
+  plugin/scripts/inner-blocked-signal.ts    plugin/scripts/laydown-set-check.sh
+  plugin/scripts/loop-driver-check.sh       plugin/scripts/manager-start.sh
+  plugin/scripts/manager-tick-readings.ts   plugin/scripts/monitor-mount-check.sh
+  plugin/scripts/observer-registry*.sh      plugin/scripts/os-anchor-install.sh
+  plugin/scripts/os-anchor-watchdog.sh      plugin/scripts/outer-cron-registry.ts
+  plugin/scripts/outer-session-check.sh     plugin/scripts/pane-state-classify.ts
+  plugin/scripts/process-budget.sh          plugin/scripts/quay-entry-base.ts
+  plugin/scripts/quay-init.sh               plugin/scripts/quay-session.ts
+  plugin/scripts/quay-topology.sh           plugin/scripts/runner-static-gate.ts
+  plugin/scripts/session-bootstrap.sh       plugin/scripts/session-liveness-mount.sh
+  plugin/scripts/supervisor-health.sh       plugin/scripts/tmux-isolated.sh
+  plugin/scripts/topology-check.sh          plugin/scripts/verify-deliver-coldstart.sh
+  plugin/scripts/verify-delivery-surface.ts plugin/scripts/verify-installed-executables.sh
+  test/cold-start-e2e.sh                    test/cold-start-oneliner-e2e.sh
+  ```
+- **这 31 个文件不是本 SPEC 现在要逐一改完的清单**——这是一个大范围清理工作，规模上应该拆解为
+  多个具体任务分批执行（见 §7），本节只负责准确圈定范围,不在 SPEC 阶段展开每个文件的改法。
+
+**替代方案的方向（不是逐文件设计，供任务拆解时参照）**：
+- 判断一个会话是否存活/在做什么 → `claude agents --json [--cwd <path>]` + `claude logs <id>`
+- 判断仓库是否停滞（`REPO-STALL`）→ 已经是 `git log`，不受本次裁定影响，只是脱离
+  `session-liveness.sh` 这个壳，逻辑本身可以原样保留或下沉到调用方
+- 判断心跳新鲜度（`SESSION-OVERDUE`）→ 已经是 transcript mtime，同上，逻辑可保留，只是不再
+  经过这个脚本
+- **进程存在性/忙闲判定这两组真正依赖 tmux 的判据（`SESSION-GONE`/`IDLE` 等）——不是被"等价替代"，
+  是随着人 2026-09-03 裁定 #3（长驻会话手工退出，不设计自动检测/恢复）一起变得不再需要**：
+  没有自动重启/自动恢复的需求，就不需要精细的忙闲/存活状态机，`claude agents --json` 里会话
+  存不存在这个布尔值就够用
 
 ### Layer 4：发现/枚举（D 类）—— 已有替代（`ListAgents`），无需额外工作
 
@@ -257,30 +323,29 @@ tmux server）还会起真实 tmux，`tmux-leak-scan.sh` 就是必需的兜底�
 - **不改 C 类投递链的现状**（`send-keys-reliable.sh`/`supervisor-deliver.sh`/`supervisor-bus.sh`）
   ——已是 2026-08-12 裁定的 FALLBACK-ONLY，本 SPEC 不推进它们的进一步退役（那需要先确认"两个不可
   替代场景"——控制面斜杠命令、下游不支持原生通道的环境——是否已经消失，这超出本 SPEC 范围）。
+- **不碰当前的 tmux 会话**（人 2026-09-03 裁定 #5）——当前活跃、人工正在使用的 tmux 会话
+  （`quay-0` 等，人用它访问 Claude Code）与本 SPEC 处理的"生产驱动机制依赖 tmux"是两回事，
+  不在退役/迁移范围内，Layer 3 的改造只影响*未来*新启动的 manager/outer 会话，不影响已经在跑、
+  人在用的会话。**区分一点**：§1.3 提到的 `quay-manager` 会话被测试遗留孤儿进程
+  （`claude-probe`）占据，那**不是**人工正在使用的会话，是一个独立的、无关本次裁定的泄漏
+  缺陷（同族 `gap-suite-load-sampler-orphan-process-blocked-suite-interruption`）——是否清理
+  由人另行决定，不因"不碰当前 tmux 会话"这条裁定而自动排除。
 
 ---
 
-## 5. 开放问题（需要人确认，Layer 3 落地前必须回答）
+## 5. 原开放问题的解决记录（人 2026-09-03 第二批裁定，全部已解决）
 
-1. **manager 自己是否也要走 Layer 3 改造，还是维持现状（tmux + 本次个例用 `--bg` 手动启动）？**
-   （本 SPEC §1.3 已更正：manager 常规启动路径 `manager-start.sh` 仍是 tmux，本会话是个例，不是
-   已完成的迁移。若人认为"manager 已经用 `--bg` 跑得很好，不需要改脚本"，那么 Layer 3 的范围
-   收窄回只覆盖 outer；若认为 manager-start.sh 也该正式支持 `--bg`，则范围不变，两个角色一起改）
-2. **outer 是否需要 CronCreate 持有自己的锚，还是完全被 manager 按 tick 节奏派发？**
-   （类比 manager 自己的 A19 模式 vs 之前提案里"outer 不需要独立锚"的设计——两种都可行，取决于
-   人希望 outer 保留多少自主性）
-3. **`claude --bg` 长驻会话的收尾/退出语义是什么？**（worker 用的是一次性 `-p` 调用，跑完即退出；
-   outer/manager 若持续存在，退出条件、失败恢复、`claude logs`/transcript 落盘位置需要明确
-   定义——`driver-runtime.ts` 的 `launchArgv()` 只提供了参数解析范本，不提供长驻会话的生命周期
-   语义，这部分是真正的新设计，不是照抄现成代码）
-4. **`session-liveness.sh` 的 `SESSION-GONE`/`SESSION-IDLE` 判据换成 `claude agents`/`logs`
-   后，语义是否完全等价？**（`tmux capture-pane` 能看到的是终端渲染内容，`claude logs <id>` 给的
-   是"recent terminal output"——字面上相似，但需要现场核实两者对同一会话状态的分类结果是否一致，
-   不能假设官方 API 的输出格式与现有 `classifyPaneState` 分类器兼容，可能需要重写分类逻辑而不是
-   直接接线）
-5. **`quay-manager` tmux 会话本身（当前被测试遗留进程占据的那个空壳）是否可以直接清理？**
-   这是一个独立于本 SPEC 主线的小清理项（真实缺陷，同族 `gap-suite-load-sampler-orphan-process-
-   blocked-suite-interruption`），但顺手指出，供人决定是否单独立案。
+全部 5 条已由人 2026-09-03 裁定解决（原文见文档顶部"第二批裁定"），逐条对应关系：
+
+| 原开放问题 | 裁定 | 落实位置 |
+|---|---|---|
+| #1 manager 是否也要走 Layer 3 改造 | **是**——manager 已是 background job，`manager-start.sh` 需要匹配这个事实 | §1.3 |
+| #2 outer 的 CronCreate 归属 | **outer 自己持有**，不由 manager 代持/派发 | Layer 3 item 3 |
+| #3 长驻会话退出语义 | **手工退出，不设计自动检测/恢复** | Layer 3 item 4 |
+| #4 `session-liveness.sh` 判据等价性 | **不迁移语义，直接取消**——问题本身消解 | Layer 2b |
+| #5 `quay-manager` 空壳会话清理 | 与"不碰当前 tmux 会话"裁定分离处理（该空壳非人工使用） | §4 非目标 |
+
+**没有遗留的开放问题——SPEC 到此为止判据齐全，可以进入任务拆解阶段（见 §7）。**
 
 ---
 
@@ -297,9 +362,44 @@ tmux server）还会起真实 tmux，`tmux-leak-scan.sh` 就是必需的兜底�
 - `plugin/scripts/driver-runtime.ts` `launchArgv()`/`runAsync()` — 已存在的纯 background job
   启动先例（覆盖一次性 worker 派发，`-p` 模式），Layer 3 的参数解析可复用其设计但需换成
   `--bg` 长驻语义
-- `plugin/scripts/quay-topology.sh`/`manager-start.sh`/`session-liveness.sh`/
-  `outer-session-check.sh` — 本 SPEC Layer 3 实际要改造的四个核心脚本（agent 逐行核实定位）
+- `plugin/scripts/quay-topology.sh`/`manager-start.sh`/`outer-session-check.sh` — 本 SPEC
+  Layer 3 实际要改造的核心脚本（agent 逐行核实定位）；`session-liveness.sh` 及其 31 个生产
+  调用者（Layer 2b 清单）—— 取消，不是改造
 - `experiments/quay-perpetual-stream/VT-MECHANISM-RETROSPECTIVE.md` — 与本 SPEC 无关的另一套
   已停摆机制的归档（避免混淆，交叉引用仅供区分）
 - `.quay/profiles.yml` — 当前 outer/worker 共用 `worker-default` profile、manager 用
   `manager-local` profile 的配置来源
+
+---
+
+## 7. 任务拆解计划（回答"是否可以开始创建任务和执行"）
+
+**结论：可以开始。** 五条裁定已解决全部设计层面的开放问题，剩下的是纯粹的实施工作。建议拆成
+以下几个独立任务（`role: primitive` 或 `compound`，具体由立案时定），**按依赖顺序排列**——
+前面的任务是后面任务的地基，不建议打乱顺序并行：
+
+1. **`quay-launch.sh` 新增仅打印参数模式**（不 `exec`，只输出翻译好的 argv）——Layer 3 item 1
+   的地基，manager/outer 两条改造路径都要用它。**最小、无风险，建议第一个做。**
+2. **`quay-topology.sh` 新增 `claude --bg` 分支（outer 角色）**——依赖任务 1；outer 长驻会话
+   退出语义按裁定 #3（手工），不做自动恢复。
+3. **`manager-start.sh` 新增 `claude --bg` 分支（manager 角色）**——依赖任务 1；与任务 2 可并行
+   （两者除了都依赖任务 1 之外互不相干）。**风险提示**：这条改的是 manager 自己的启动路径，
+   落地后若有问题会影响 manager 自身的可用性，建议先在 outer 上验证 `claude --bg` 方案可行后
+   再动 manager，或至少两者的验证顺序上 outer 先行。
+4. **outer 的 CronCreate/ScheduleWakeup 锚点武装**——复用 manager 的 `*-arm-loop.sh` 模式，
+   新增 outer 专属家目录（`~/.quay-global/outer/`）。可与任务 2 并行，但建议在任务 2 验证通过
+   （outer 能用 `--bg` 稳定启动）之后再做,避免同时调试两个新机制。
+5. **`outer-session-check.sh`/`topology-check.sh` 改用 `claude agents --json`**——依赖任务 2
+   已经产出真实的 `--bg` outer 会话可供验证。
+6. **`session-liveness.sh` 取消 + 31 个生产调用者迁移**——这是规模最大的一块，**建议进一步拆分
+   为多个子任务**（例如按调用者的职责分组：冷启动相关 `quay-init.sh`/`session-bootstrap.sh` 一组，
+   observer/health 相关 `observer-registry*.sh`/`supervisor-health.sh` 一组，manager tick 读数
+   相关 `manager-tick-readings.ts`/`inner-blocked-signal.ts` 一组），不建议一个任务吞下全部 31
+   个文件（Touches 过宽会撞 `TOUCHES-DIR-GLOB-HINT` 类闸门，且审阅/fan-in 风险高）。**这一块的
+   具体子任务划分建议留到立案时现场看这 31 个文件的实际耦合关系再定**，本 SPEC 不预先拍板。
+7. **文档更新**（CLAUDE.md/README/相关 SPEC/ADR/skill 文档里对 tmux 依赖的描述）——收尾工作，
+   等 1-6 全部落地后再做，避免文档先于代码改导致新的漂移（同 CLAUDE.md 开篇警告的"指针复制正本
+   然后各自漂移"）。
+
+**不建议现在做的**：AC149 的验证/修复（§4 非目标）、C 类投递链的进一步退役（§4 非目标）、
+测试基础设施 tmux 用量的任何改动（§4 非目标）。
