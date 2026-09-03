@@ -37,8 +37,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
@@ -98,8 +98,11 @@ test("(c) failure path: a nonexistent QUAY_BUILD_DIST_ENTRY makes buildDist() re
   const prev = process.env.QUAY_BUILD_DIST_ENTRY;
   process.env.QUAY_BUILD_DIST_ENTRY = path.join(os.tmpdir(), "quay-m120-does-not-exist.ts");
   try {
+    // logLevel:"silent" — the rejection is the assertion; esbuild's `✘ [ERROR] Could not resolve`
+    // stderr is a BENIGN side effect that would pollute worker-driver's extractFailureSummary
+    // (gap-scoped-gate-m120-negative-control-false-positive). Suppress it at the source.
     await assert.rejects(
-      () => buildDist({ outfile: out }),
+      () => buildDist({ outfile: out, logLevel: "silent" }),
       /./,
       "buildDist() must reject when the entrypoint cannot be resolved"
     );
@@ -264,6 +267,32 @@ test("(f) webui CSS self-contained: the dist bundle inlines webui-modernist.css 
     fs.rmSync(wsRoot, { recursive: true, force: true });
   } finally {
     if (serveProc && serveProc.exitCode === null) serveProc.kill("SIGTERM");
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// gap-scoped-gate-m120-negative-control-false-positive: the negative-control (c) used to let
+// esbuild's `✘ [ERROR] Could not resolve "/tmp/quay-m120-does-not-exist.ts"` reach the real
+// process stderr. That benign noise is line-content-indistinguishable from a REAL esbuild build
+// failure, so worker-driver's extractFailureSummary (isFailureSignalLine) picked it up as a
+// failure-signal line — polluting a scoped-gate red's reason and hiding the real failing line
+// (two recorded misdiagnoses: the real red was task-schema.ts drift, masked by this noise).
+// Pin the fix end-to-end: a subprocess running the failure-path build with logLevel:"silent"
+// must emit NO `Could not resolve` / `[ERROR]` to stderr.
+test("(g) failure-path build is stderr-silent — no esbuild `Could not resolve` noise leaks", async () => {
+  const { root, out } = tempTree("silent");
+  try {
+    const entry = path.join(os.tmpdir(), "quay-m120-does-not-exist.ts");
+    const buildDistUrl = pathToFileURL(path.join(pkgDir, "scripts", "build-dist.mjs")).href;
+    const script = [
+      `import { buildDist } from ${JSON.stringify(buildDistUrl)};`,
+      `try { await buildDist({ entry: ${JSON.stringify(entry)}, outfile: ${JSON.stringify(out)}, logLevel: "silent" }); } catch {}`,
+    ].join("\n");
+    const r = spawnSync("node", ["--input-type=module", "-e", script], { encoding: "utf8" });
+    assert.equal(r.error, undefined, `failure-path subprocess must spawn cleanly: ${r.error?.message}`);
+    assert.equal(r.status, 0, `failure-path subprocess must exit 0 (rejection swallowed); stderr: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr ?? "", /Could not resolve|\[ERROR\]/, "failure-path build must not leak esbuild error noise to stderr");
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

@@ -58,6 +58,33 @@ scoped-gate（`scripts/test.sh --for-task <task> --allow-thin`，`worker-driver.
 
 ---
 
+## Result（实施者现场核查，2026-09-03）
+
+**判定点核查（DoD #1）**：scoped-gate 的 pass/fail 判据是 `mechSh` 的 `ok: status === 0`
+（真实 exit code），不是「非空摘要」。`extractFailureSummary` / `extractFirstFailureLine` 的
+全部调用点（`worker-driver.ts` 的 `fail()` / `step()` trace reason / `failSuite`）都在**已知失败
+之后**才调用（`!a.ok` / `!r.ok` / `sr.outcome !== "done"`），无一反向参与判定 ⇒ **判定侧无
+「摘要函数结果被当判据」的误用**（原 Finding 假设 3 证伪）。
+
+**两次红的真实原因（证伪「m120 误判」假设）**：`worker-outcome.jsonl` 两条 scoped-gate red
+记录的 `exitCode=1`，真实失败是 `plugin-packaging.test.mjs` 的
+`shipped schema-check modules are byte-identical …`（`task-schema.ts` 与 canonical 漂移），
+不是 build-dist 负控制测试。该漂移已由 `dd1a9fda5` / `eb9db3c42` 修复——当前 scoped-gate
+`--for-task gap-task-write-schema-depends-on-documentation` 实测 118/118 绿、exit 0。
+
+**m120 噪声的真实角色**：`✘ [ERROR] Could not resolve "/tmp/quay-m120-does-not-exist.ts"` 是
+负控制测试 (c) 通过时的**良性 stderr**，但 `isFailureSignalLine` 把 `Could not resolve`/`[ERROR]`
+当失败信号词（姊妹缺陷 gap-scoped-gate-reason-stderr-drops-stdout 引入），于是它在 scoped-gate
+**真红时**污染 `extractFailureSummary` 的 reason、把真实失败行挤出 4000 字符窗口——正是这条噪声
+让两次误诊把「task-schema 漂移」读成了「m120 是失败原因」。
+
+**修复（源头侧，Plan Step 2 的 (b)）**：`build-dist.mjs` 的 `buildDist()` 新增 `logLevel` 透传
+（默认 `"info"` 保持原行为）+ catch 块 `console.error` 仅在非 silent 时发射；负控制测试 (c)
+传 `logLevel: "silent"`，从源头消除这行噪声（esbuild `logLevel:"silent"` 仍 throw ⇒
+`assert.rejects` 断言语义不变）。
+
+---
+
 ## Plan
 
 ### Step 1：定位真实判定点
@@ -80,21 +107,35 @@ scoped-gate（`scripts/test.sh --for-task <task> --allow-thin`，`worker-driver.
 
 ---
 
+## Acceptance Criteria
+
+- [x] AC1（能取假·源头抑制）：`buildDist()` 失败路径（entry 不存在）+ `logLevel: "silent"` 时，
+  进程 stderr 不含 `Could not resolve` / `[ERROR]`；`node --test packages/quay/test/build-dist.test.mjs`
+  的输出零 `Could not resolve`（⛔ 移除 `logLevel` 透传或 `console.error` 守卫 ⇒ 测试 (g) 红）。
+- [x] AC2（能取假·回归单测钉死）：`build-dist.test.mjs` 新增测试 (g) 用子进程跑失败路径构建并
+  断言 `stderr` 不匹配 `/Could not resolve|\[ERROR\]/`；该文件 7/7 绿（⛔ 删掉 (g) 的
+  `doesNotMatch` 断言 ⇒ 红）。
+- [x] AC3（真实生产载体）：`bash scripts/test.sh --for-task gap-task-write-schema-depends-on-documentation
+  --allow-thin` 的合并 stdout+stderr 不含 `Could not resolve "/tmp/quay-m120-does-not-exist.ts"`
+  （两次误诊实例的载体都含这行；修复后消失）且 exit 0（119/119 绿，修复前 118，多出的 1 条即回归测试 (g)）。
+
+---
+
 ## Definition of Done
 
-- [ ] 根因定位到具体的判定点（哪一层把非空摘要误当失败）
-- [ ] 修复落地（判定侧和/或源头侧）
-- [ ] `gap-task-write-schema-depends-on-documentation` 的 fan-in 可以继续推进
-- [ ] 回归测试补充,防止同型缺陷再次发生
-- [ ] （若判定侧修复）审计是否还有其它 checker/gate 有同类「摘要函数结果被当判据」的误用
+- [x] 根因定位到具体的判定点（哪一层把非空摘要误当失败）——见 `## Result`：判定侧无「非空摘要当失败」误用，真实失败是 task-schema.ts 漂移。
+- [x] 修复落地（判定侧和/或源头侧）——源头侧：`buildDist()` 透传 `logLevel` + 守卫 `console.error`，负控制测试 (c) 传 `logLevel: "silent"`。
+- [x] `gap-task-write-schema-depends-on-documentation` 的 fan-in 可以继续推进——其 scoped-gate 实测 118/118 绿、exit 0（漂移已由 dd1a9fda5 修复），不再被红挡。
+- [x] 回归测试补充,防止同型缺陷再次发生——`build-dist.test.mjs` 测试 (g) 子进程断言 stderr 无 `Could not resolve`/`[ERROR]`。
+- [x] （若判定侧修复）审计是否还有其它 checker/gate 有同类「摘要函数结果被当判据」的误用——已审计 `extractFailureSummary`/`extractFirstFailureLine` 全部调用点：无一反向参与判定（均 exit-code 之后才调用）。
 
 ---
 
 ## Touches
 
-- `plugin/scripts/worker-driver.ts`（`isFailureSignalLine`/`extractFailureSummary` 及其调用点）
-- `packages/quay/test/build-dist.test.mjs`（若采用源头侧修复）
-- `plugin/test/worker-driver.test.mjs`（回归测试）
+- `packages/quay/scripts/build-dist.mjs`（`buildDist()` 透传 `logLevel` + 守卫 `console.error`）
+- `packages/quay/test/build-dist.test.mjs`（负控制测试 (c) 传 `logLevel: "silent"` + 回归测试 (g)）
+- `tasks/gap-scoped-gate-m120-negative-control-false-positive.md` (self)
 
 ---
 
