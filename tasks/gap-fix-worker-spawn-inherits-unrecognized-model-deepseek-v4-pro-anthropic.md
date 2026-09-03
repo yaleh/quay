@@ -2,7 +2,7 @@
 id: gap-fix-worker-spawn-inherits-unrecognized-model-deepseek-v4-pro-anthropic
 title: promotion-driver fix-worker 直接 spawn 携带 profiles.yml --model
   deepseek-v4-pro-anthropic——Claude Code CLI 不识别，近期约 85% fix 尝试超时空转
-status: todo
+status: ready
 labels:
   - gap
   - defect
