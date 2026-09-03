@@ -153,7 +153,7 @@ bash plugin/scripts/outer-session-check.sh --json   # 四态自检：{state: hea
   **工厂失败/验证不过 ⇒ 升级给人**，不静默继续。
 
 **transcript 路径解析**（outer-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
-> `orchestration/session-config.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
+> `orchestration/session-liveness.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
 且不是外层自己的 jsonl）。`transcriptSource` 记录来源：显式/配置 = 结构来源，发现路径 = `discovery`。
 找不到 transcript = fresh = 空壳判据（驱动不重建）。
 **发现路径是启发式（fail-closed）**：`transcriptSource==discovery` 时自检报 **`degraded`**——**不得按 healthy

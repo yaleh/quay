@@ -20,7 +20,7 @@
 //
 // 注册表位置（2026-08-17 人裁定方案②——全局 per-layer 路径、不进 git）：
 //   ~/.quay-global/<repo-root-slug>/{outer,inner}/loop-registry.txt
-//   <repo-root-slug> = repo 根绝对路径把 '/' 全替换成 '-'（现成算法抄 session-observation.sh:1162：
+//   <repo-root-slug> = repo 根绝对路径把 '/' 全替换成 '-'（现成算法抄 session-liveness.sh:1162：
 //   slug=$(printf '%s' "$root" | tr '/' '-')；本项目 root=/home/yale/work/quay ⇒ -home-yale-work-quay）。
 //   覆盖：QUAY_GLOBAL_DIR 环境变量改全局目录（镜像 manager 的 QUAY_GLOBAL_DIR，默认 $HOME/.quay-global）。
 //   为何全局而非 git：git 版随 worktree fork 携带 fork 那刻的陈旧快照（死 cronId，JSON 合法但与合格同形，
@@ -98,7 +98,7 @@ export function globalDir(env?: string): string {
   return env ?? process.env.QUAY_GLOBAL_DIR ?? path.join(os.homedir(), ".quay-global");
 }
 
-/** repo 根 → 分片 slug（把绝对路径的 '/' 全替换成 '-'；抄 session-observation.sh:1162 的分片算法）。 */
+/** repo 根 → 分片 slug（把绝对路径的 '/' 全替换成 '-'；抄 session-liveness.sh:1162 的分片算法）。 */
 export function repoSlug(root: string): string {
   return String(root).replace(/\//g, "-");
 }

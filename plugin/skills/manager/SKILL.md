@@ -81,7 +81,7 @@ perspective exists only at the manager layer). Mechanisms:
 
 ### 3. Trend watching (看趋势) — "what is happening across the network"
 
-Cross-project liveness and trend observation. 2026-09-03: the session-observation mechanism（Monitor
+Cross-project liveness and trend observation. 2026-09-03: the session-liveness mechanism（Monitor
 挂载 + SESSION-* 事件）随 tmux 一并退役——manager 的「定时/行为保持」观测能力未来由 driver 机制替代
 （本次只退役旧机制）。当前 manager 跨项目看趋势主要靠：各项目 `orchestration/escalations.md` 聚合、
 `git log` 提交时刻、`cpu some avg10`（AC4 判据 = 连续两次 tick 超 80）。The manager

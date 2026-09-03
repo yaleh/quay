@@ -17,7 +17,7 @@
 #   ② 初始化 — 在干净空项目目录里跑【安装包里 shipped 的】quay-init.sh --all --loop
 #               （安装源 = 本机 .tgz 产物内的插件包，非 dev 树），验证双层机制铺到位 (L1)：
 #               outer tick doc (orchestration/orchestrator-loop-tick.md) + inner tick doc
-#               (docs/analysis/fast-mode-loop-tick.md) + loop 脚本 (session-observation.sh) +
+#               (docs/analysis/fast-mode-loop-tick.md) + loop 脚本 (session-liveness.sh) +
 #               .quay/config.yml + 项目本地 runtime (.quay/runtime/bin/quay.js)。
 #   ③ 冷启动 — 活性验证（outer 窗口 + inner 层），判据是【直接量】(AC2 / CLAUDE.md 硬规则 4b)：
 #               · git 提交时间戳     —— loop 产出过提交（外部可核：git 对象）
@@ -170,8 +170,8 @@ L2_DEAD_LOOP_STATE="unknown"
 # proc_ok 撑起，git_recent/wt_recent 均为 0（AC107 任务体取假条件 (c)「⛔不得用『进程存在』代理量」被
 # 自己的实现违反）。本探针复用 pane-state-classify.ts 的 permission-prompt 分类器
 # （pane-state-classify.ts:101 PERMISSION_PROMPT_RE，特征串 Quick safety check / trust this folder /
-# Enter to confirm …；session-observation.sh 已把该弹窗归类为 SESSION-INTERVENTION-REQUIRED，
-# busy=0 intervention=1），经 --pane-verdict 接缝（与 session-observation.sh 的 _sl_pane_verdict 同一
+# Enter to confirm …；session-liveness.sh 已把该弹窗归类为 SESSION-INTERVENTION-REQUIRED，
+# busy=0 intervention=1），经 --pane-verdict 接缝（与 session-liveness.sh 的 _sl_pane_verdict 同一
 # 判定源）分类 outer 窗口 pane：
 #   outer 窗口 pane 分类为 permission-prompt ⇒ L2_STARTUP_PROMPT=1（进程卡在启动弹窗）。
 # 捕获不到 pane（无 tmux / 会话未建 / 窗口缺失）⇒ L2_STARTUP_PROMPT=0 —— 无法观测弹窗，不据此推翻
@@ -180,19 +180,19 @@ probe_startup_prompt() {
   local root="$1" sess cap verdict socket role
   L2_STARTUP_PROMPT=0
   # 会话名解析（与 session-bootstrap.sh / quay-topology.sh 同源——绝不猜会话名）：
-  #   显式 --tmux-session > SESSION_TMUX_SESSION env > session-config.env（quay-init 写入的每项目
+  #   显式 --tmux-session > SESSION_TMUX_SESSION env > session-liveness.env（quay-init 写入的每项目
   #   权威配置）> 默认 `${PROJECT}-0:0.0` 的会话部分（猜测，仅 full 模式兜底）。
-  #   ⚠️ 默认 `${PROJECT}-0:0.0` 是猜测：quay-init --loop 写进 session-config.env 的才是真实会话名，
+  #   ⚠️ 默认 `${PROJECT}-0:0.0` 是猜测：quay-init --loop 写进 session-liveness.env 的才是真实会话名，
   #   B/C 验证时若默认猜测与真实会话不符，探针会盯错 pane（miss 掉弹窗）——所以非显式时优先读 env 文件。
   sess=""
   if [ "$TMUX_SESSION_EXPLICIT" = 1 ]; then sess="${TMUX_SESSION%%:*}"; fi
   if [ -z "$sess" ]; then sess="${SESSION_TMUX_SESSION:-}"; fi
-  if [ -z "$sess" ] && [ -f "$root/orchestration/session-config.env" ]; then
-    sess="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$root/orchestration/session-config.env" 2>/dev/null | head -1)"
+  if [ -z "$sess" ] && [ -f "$root/orchestration/session-liveness.env" ]; then
+    sess="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$root/orchestration/session-liveness.env" 2>/dev/null | head -1)"
   fi
   if [ -z "$sess" ]; then sess="${TMUX_SESSION%%:*}"; fi
   [ -n "$sess" ] || return 0   # 无会话名（冷启动未建拓扑）⇒ 无法观测弹窗，不推翻 proc_ok
-  # tmux 控制套接字解析（同 session-observation.sh 的 SL_TMUX_SOCKET；VC_TMUX_SOCKET 为测试接缝）。
+  # tmux 控制套接字解析（同 session-liveness.sh 的 SL_TMUX_SOCKET；VC_TMUX_SOCKET 为测试接缝）。
   socket="${VC_TMUX_SOCKET:-}"
   if [ -z "$socket" ] && [ -n "${TMUX_TMPDIR:-}" ]; then socket="${TMUX_TMPDIR}/tmux-$(id -u)/default"; fi
   if [ -z "$socket" ]; then socket="${TMPDIR:-/tmp}/tmux-$(id -u)/default"; fi
@@ -412,7 +412,7 @@ probe_l1() {
   L1_OUTER_TICK=0; L1_INNER_TICK=0; L1_LOOP_SCRIPTS=0; L1_CONFIG=0; L1_RUNTIME=0
   [ -f "$root/orchestration/orchestrator-loop-tick.md" ] && L1_OUTER_TICK=1
   [ -f "$root/docs/analysis/fast-mode-loop-tick.md" ] && L1_INNER_TICK=1
-  [ -f "$root/plugin/scripts/session-observation.sh" ] && L1_LOOP_SCRIPTS=1
+  [ -f "$root/plugin/scripts/session-liveness.sh" ] && L1_LOOP_SCRIPTS=1
   [ -f "$root/.quay/config.yml" ] && L1_CONFIG=1
   [ -f "$root/.quay/runtime/bin/quay.js" ] && L1_RUNTIME=1
   # 函数始终返回 0：L1 缺件是【数据】（L1_OK=0），不是控制流失败（set -e 不得因 L1 缺件中断）
@@ -530,7 +530,7 @@ selfcheck() {
            "$dead_ws/.quay/runtime/bin" "$dead_ws/tasks"
   printf '# outer\n' > "$dead_ws/orchestration/orchestrator-loop-tick.md"
   printf '# inner\n' > "$dead_ws/docs/analysis/fast-mode-loop-tick.md"
-  printf '#!/bin/bash\n' > "$dead_ws/plugin/scripts/session-observation.sh"
+  printf '#!/bin/bash\n' > "$dead_ws/plugin/scripts/session-liveness.sh"
   printf 'providers: {}\n' > "$dead_ws/.quay/config.yml"
   printf '//x\n' > "$dead_ws/.quay/runtime/bin/quay.js"
   git -C "$dead_ws" init -q -b main >/dev/null 2>&1
@@ -551,7 +551,7 @@ selfcheck() {
            "$alive_ws/.quay/runtime/bin" "$alive_ws/tasks"
   printf '# outer\n' > "$alive_ws/orchestration/orchestrator-loop-tick.md"
   printf '# inner\n' > "$alive_ws/docs/analysis/fast-mode-loop-tick.md"
-  printf '#!/bin/bash\n' > "$alive_ws/plugin/scripts/session-observation.sh"
+  printf '#!/bin/bash\n' > "$alive_ws/plugin/scripts/session-liveness.sh"
   printf 'providers: {}\n' > "$alive_ws/.quay/config.yml"
   printf '//x\n' > "$alive_ws/.quay/runtime/bin/quay.js"
   git -C "$alive_ws" init -q -b main >/dev/null 2>&1
@@ -598,7 +598,7 @@ selfcheck() {
 
   # control 8 (复用 wiring —— AC1「复用 pane-state-classify 的 permission-prompt 识别，不新造」):
   # 真实信任弹窗 fixture 经 probe_startup_prompt 同一条 --pane-verdict 接缝必须判 intervention=1
-  # （同一判定源：session-observation.sh 的 _sl_pane_verdict / classifyPaneVerdict）。
+  # （同一判定源：session-liveness.sh 的 _sl_pane_verdict / classifyPaneVerdict）。
   local pv_fix pv_out p5
   pv_fix="Quick safety check: Is this a project you created or one you trust?
 ❯ 1. Yes, I trust this folder ✔

@@ -3,7 +3,7 @@
 //
 // Pins the manager-start.sh cold-start falsifiable checklist:
 //   AC2  — manager-start.sh writes <home>/cold-start-checklist.md (5 observable-consequence keys).
-//          The idle-watch observation seam was retired 2026-09-03 with the session-observation
+//          The idle-watch observation seam was retired 2026-09-03 with the session-liveness
 //          mechanism (7 keys → 5 keys; IDLE-WATCH-MOUNTED / MONITORS-DELIVERING dropped).
 //   AC5  — existing behavior unregressed: dry-run plans home/identity/session/arm plus the checklist
 //          write; a real start still creates identity + loop-registry + the checklist.

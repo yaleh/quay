@@ -3,7 +3,7 @@
 //
 // Pins the execution core against a retired observation mechanism:
 //   no_false_instrument = 1 — the LIVE execution core orchestration/manager-tick-core.md never
-//       targets a non-existent script as a check instrument (defect 2). The session-observation
+//       targets a non-existent script as a check instrument (defect 2). The session-liveness
 //       mechanism (session-liveness.sh / monitor-mount-check.sh / idle-watch) was retired 2026-09-03,
 //       so the core must no longer reference any of those deleted scripts. The shipped
 //       plugin/loop/manager-tick-core.md is a one-line POINTER to this 正本

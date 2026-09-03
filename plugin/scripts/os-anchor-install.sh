@@ -11,7 +11,7 @@
 # session (session-scoped CronCreate/ScheduleWakeup) and died with it. This installer
 # creates a systemd USER timer (does NOT die with any Claude session) that fires
 # os-anchor-watchdog.sh periodically. The watchdog reuses ONLY validated capabilities
-# (session-observation.sh / send-keys-reliable.sh + transcript-delivery-check.ts + the
+# (session-liveness.sh / send-keys-reliable.sh + transcript-delivery-check.ts + the
 # validated cold-start drive text) to check each project's session liveness + anchor
 # presence and re-spawn a dead session automatically.
 #
@@ -81,7 +81,7 @@ default_projects() {
 
   # quay (the invoking repo)
   name="$(basename "$root")"
-  session=$(awk -F= '/^SESSION_TMUX_SESSION=/{print $2; exit}' "$root/orchestration/session-config.env" 2>/dev/null || true)
+  session=$(awk -F= '/^SESSION_TMUX_SESSION=/{print $2; exit}' "$root/orchestration/session-liveness.env" 2>/dev/null || true)
   [ -n "$session" ] || session="${name}-0"
   launch="$LAUNCH_CMD"
   if [ -f "$root/plugin/loop/orchestrator-loop-tick.md" ]; then
@@ -93,7 +93,7 @@ default_projects() {
 
   # siblings (meta-cc, archguard) — quay-init'd targets with the tick doc in orchestration/
   for sibling in "$HOME/work/meta-cc" "$HOME/work/archguard"; do
-    if [ -d "$sibling/plugin/scripts" ] && [ -f "$sibling/orchestration/session-config.env" ]; then
+    if [ -d "$sibling/plugin/scripts" ] && [ -f "$sibling/orchestration/session-liveness.env" ]; then
       name="$(basename "$sibling")"
       # observer-registry (gap-observer-registry-target-decommission-and-criterion-invalidation):
       # a sibling explicitly decommissioned (registered offline) must NOT be re-added to the
@@ -105,7 +105,7 @@ default_projects() {
         echo "os-anchor-install: skip $name — registered offline in observer-registry (decommissioned)" >&2
         continue
       fi
-      session=$(awk -F= '/^SESSION_TMUX_SESSION=/{print $2; exit}' "$sibling/orchestration/session-config.env" 2>/dev/null || true)
+      session=$(awk -F= '/^SESSION_TMUX_SESSION=/{print $2; exit}' "$sibling/orchestration/session-liveness.env" 2>/dev/null || true)
       [ -n "$session" ] || session="${name}-0"
       if [ -f "$sibling/orchestration/orchestrator-loop-tick.md" ]; then
         drive="执行 $sibling/orchestration/orchestrator-loop-tick.md 中的 tick 指令"
@@ -280,7 +280,7 @@ if [ -n "${ADD_PROJECT:-}" ]; then
   mkdir -p "$INSTALL_DIR"
   if [ -d "$ADD_PROJECT/plugin/scripts" ]; then
     local_name="$(basename "$ADD_PROJECT")"
-    local_session=$(awk -F= '/^SESSION_TMUX_SESSION=/{print $2; exit}' "$ADD_PROJECT/orchestration/session-config.env" 2>/dev/null || true)
+    local_session=$(awk -F= '/^SESSION_TMUX_SESSION=/{print $2; exit}' "$ADD_PROJECT/orchestration/session-liveness.env" 2>/dev/null || true)
     [ -n "$local_session" ] || local_session="${local_name}-0"
     local_drive="执行 $ADD_PROJECT/orchestration/orchestrator-loop-tick.md 中的 tick 指令"
     local_line="${local_name}|${ADD_PROJECT}|${local_session}|outer|${LAUNCH_CMD}|${local_drive}|"

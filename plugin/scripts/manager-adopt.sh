@@ -17,7 +17,7 @@
 # 用法：
 #   manager-adopt.sh <root> [--session <sess>] [--dry-run] [--json] [--home <dir>]
 #     <root>        项目根（必填）
-#     --session <sess>  覆盖该项目 tmux 会话（默认：读 <root>/orchestration/session-config.env
+#     --session <sess>  覆盖该项目 tmux 会话（默认：读 <root>/orchestration/session-liveness.env
 #                       → 绝不猜会话名）
 #     --dry-run        只打印将执行的三态处置，不改任何东西
 #     --json           JSON 输出
@@ -75,15 +75,15 @@ fi
 QUAY_GLOBAL_DIR="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}"
 HOME_DIR="${HOME_DIR:-${QUAY_GLOBAL_DIR}/manager}"
 
-# ── 会话解析：显式 > 环境 > <root>/orchestration/session-config.env > fail-closed ────────
+# ── 会话解析：显式 > 环境 > <root>/orchestration/session-liveness.env > fail-closed ────────
 if [ -z "$SESSION" ]; then
   SESSION="${SESSION_TMUX_SESSION:-}"
 fi
-if [ -z "$SESSION" ] && [ -f "$ROOT/orchestration/session-config.env" ]; then
-  SESSION="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$ROOT/orchestration/session-config.env" 2>/dev/null | head -1)"
+if [ -z "$SESSION" ] && [ -f "$ROOT/orchestration/session-liveness.env" ]; then
+  SESSION="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$ROOT/orchestration/session-liveness.env" 2>/dev/null | head -1)"
 fi
 if [ -z "$SESSION" ]; then
-  echo "ERROR: manager-adopt: no tmux session for $ROOT — pass --session <sess> or set SESSION_TMUX_SESSION in $ROOT/orchestration/session-config.env" >&2
+  echo "ERROR: manager-adopt: no tmux session for $ROOT — pass --session <sess> or set SESSION_TMUX_SESSION in $ROOT/orchestration/session-liveness.env" >&2
   echo "       manager-adopt never guesses a session name (gap-init-guesses-the-tmux-session 同源)." >&2
   exit 2
 fi

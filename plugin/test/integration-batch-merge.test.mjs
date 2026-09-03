@@ -24,7 +24,7 @@
 //      develop-authoritative (stays deleted), merge still succeeds.
 //   8. REVERSE EDGE (gap-batch-merge-authoritative-direction-hardcoded-develop) — the conflict
 //      resolution direction is NOT a fixed "develop always wins". A runtime-config file declared via
-//      --integration-authoritative (e.g. orchestration/session-config.env, which tasks edit on
+//      --integration-authoritative (e.g. orchestration/session-liveness.env, which tasks edit on
 //      INTEGRATION) resolves to the INTEGRATION side on conflict, driven by a CONTENT criterion
 //      (--reverse-edge-criterion, "the SESSION_TRANSCRIPTS name must be in the SESSION_TARGETS
 //      table"): develop's defective "inner" side loses to integration's fixed "quay" side. Negative
@@ -157,8 +157,8 @@ function developCodeRepo(prefix, { pureMd = false } = {}) {
   return dir;
 }
 
-// Build a diverged repo with the REVERSE-EDGE (session-config.env) shape: BOTH sides modify
-// orchestration/session-config.env (a runtime-config file tasks edit on INTEGRATION) PLUS the usual
+// Build a diverged repo with the REVERSE-EDGE (session-liveness.env) shape: BOTH sides modify
+// orchestration/session-liveness.env (a runtime-config file tasks edit on INTEGRATION) PLUS the usual
 // shared-file conflicts. develop's side is the DEFECTIVE version (SESSION_TRANSCRIPTS name "inner" NOT
 // in the SESSION_TARGETS table — the transcript is silently ignored); integration's side is the FIXED
 // version (name "quay" IN the table). `.env` is a real non-shared file, so WITHOUT a reverse-edge
@@ -171,7 +171,7 @@ function reverseEdgeRepo(prefix, { integrationDefective = false } = {}) {
   mkdirSync(join(dir, "orchestration"), { recursive: true });
   mkdirSync(join(dir, "tasks"), { recursive: true });
   const envBase = 'SESSION_TARGETS="quay /home/yale/work/quay quay-0:inner"\n';
-  writeFileSync(join(dir, "orchestration", "session-config.env"), envBase, "utf8");
+  writeFileSync(join(dir, "orchestration", "session-liveness.env"), envBase, "utf8");
   writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick line 1\n", "utf8");
   writeFileSync(join(dir, "tasks", "one.md"), "task 1\n", "utf8");
   commitAll(dir, "base");
@@ -181,7 +181,7 @@ function reverseEdgeRepo(prefix, { integrationDefective = false } = {}) {
 
   // develop advances with the DEFECTIVE env + shared-file drift.
   gitCmd(dir, "checkout", "-q", "develop");
-  writeFileSync(join(dir, "orchestration", "session-config.env"),
+  writeFileSync(join(dir, "orchestration", "session-liveness.env"),
     envBase + 'SESSION_TRANSCRIPTS="inner /home/yale/.claude/projects/x.jsonl"\n', "utf8");
   writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick dev\n", "utf8");
   writeFileSync(join(dir, "tasks", "one.md"), "task dev\n", "utf8");
@@ -192,7 +192,7 @@ function reverseEdgeRepo(prefix, { integrationDefective = false } = {}) {
   const intTranscript = integrationDefective
     ? 'SESSION_TRANSCRIPTS="archguard /home/yale/.claude/projects/y.jsonl"\n'
     : 'SESSION_TRANSCRIPTS="quay /home/yale/.claude/projects/y.jsonl"\n';
-  writeFileSync(join(dir, "orchestration", "session-config.env"), envBase + intTranscript, "utf8");
+  writeFileSync(join(dir, "orchestration", "session-liveness.env"), envBase + intTranscript, "utf8");
   writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick int\n", "utf8");
   writeFileSync(join(dir, "tasks", "one.md"), "task int\n", "utf8");
   writeFileSync(join(dir, "int-only.txt"), "int only\n", "utf8");
@@ -213,7 +213,7 @@ function writeSessionCriterion(dir) {
   writeFileSync(path, [
     "#!/usr/bin/env bash",
     "set -u",
-    "# stdin = integration-side session-config.env; read ONCE (stdin is a single stream).",
+    "# stdin = integration-side session-liveness.env; read ONCE (stdin is a single stream).",
     'input="$(cat)"',
     'tr_line="$(printf \'%s\\n\' "$input" | grep \'^SESSION_TRANSCRIPTS=\' | head -1)"',
     'tgt_line="$(printf \'%s\\n\' "$input" | grep \'^SESSION_TARGETS=\' | head -1)"',
@@ -666,7 +666,7 @@ test("OBJECT GATE: dry-run reports the would-block measure and the offending fil
 //
 // The conflict resolution direction is NOT a fixed "develop always wins". Runtime-config files (env/
 // config) that tasks edit on INTEGRATION can have develop's copy be the STALE/DEFECTIVE one. The
-// empirical anchor (2026-08-08 14:1xZ): orchestration/session-config.env — develop has
+// empirical anchor (2026-08-08 14:1xZ): orchestration/session-liveness.env — develop has
 // SESSION_TRANSCRIPTS="inner /path" (name NOT in the SESSION_TARGETS table ⇒ defective), integration
 // has "quay /path" (name IN the table ⇒ fixed). The correct resolution is integration-authoritative,
 // driven by the CONTENT criterion "the transcript name must be in the target table", not a fixed
@@ -674,22 +674,22 @@ test("OBJECT GATE: dry-run reports the would-block measure and the offending fil
 // <script>` gates it on the integration side's content (taken only when the criterion passes, else
 // fail-closed — never blind-choose).
 
-test("REVERSE-EDGE AC2: --integration-authoritative + content criterion resolves session-config.env integration-side (develop defective, integration fixed)", () => {
+test("REVERSE-EDGE AC2: --integration-authoritative + content criterion resolves session-liveness.env integration-side (develop defective, integration fixed)", () => {
   const dir = reverseEdgeRepo("re1");
   try {
     const criterion = writeSessionCriterion(dir);
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
     const integ = gitCmd(dir, "rev-parse", "integration").stdout.trim();
     const r = runMerge(["--root", dir, "--merge",
-      "--integration-authoritative", "orchestration/session-config.env",
+      "--integration-authoritative", "orchestration/session-liveness.env",
       "--reverse-edge-criterion", criterion]);
     assert.equal(r.status, 0, `reverse-edge merge should succeed: ${r.stdout}${r.stderr}`);
     // The env resolved INTEGRATION-authoritative: the fixed "quay" version (not develop's "inner").
-    const env = gitCmd(dir, "show", "develop:orchestration/session-config.env").stdout;
+    const env = gitCmd(dir, "show", "develop:orchestration/session-liveness.env").stdout;
     assert.match(env, /^SESSION_TRANSCRIPTS="quay /m, "develop must carry the integration (fixed) env");
     assert.ok(!/^SESSION_TRANSCRIPTS="inner /.test(env), "develop's defective 'inner' must NOT win");
     // The criterion gate was applied and satisfied.
-    assert.match(r.stdout, /content criterion satisfied for orchestration\/session-config.env/);
+    assert.match(r.stdout, /content criterion satisfied for orchestration\/session-liveness.env/);
     assert.match(r.stdout, /resolving integration-authoritative conflicts \(integration side, 1\)/);
     // AC3: the unlisted SHARED files still resolve develop-authoritative in the SAME merge (mixed
     // direction — the reverse edge is per-file, not a global direction flip).
@@ -713,9 +713,9 @@ test("REVERSE-EDGE AC2 (fixed-direction form): --integration-authoritative WITHO
   const dir = reverseEdgeRepo("re2");
   try {
     const r = runMerge(["--root", dir, "--merge",
-      "--integration-authoritative", "orchestration/session-config.env"]);
+      "--integration-authoritative", "orchestration/session-liveness.env"]);
     assert.equal(r.status, 0, `fixed-direction reverse-edge merge should succeed: ${r.stdout}${r.stderr}`);
-    const env = gitCmd(dir, "show", "develop:orchestration/session-config.env").stdout;
+    const env = gitCmd(dir, "show", "develop:orchestration/session-liveness.env").stdout;
     assert.match(env, /^SESSION_TRANSCRIPTS="quay /m);
     assert.equal(gitCmd(dir, "show", "develop:orchestration/tick-log.md").stdout, "tick dev\n");
     assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
@@ -736,14 +736,14 @@ test("REVERSE-EDGE AC4 (negative control): WITHOUT a reverse-edge declaration, t
     assert.match(r.stdout, /measure unmerged_develop_files=0/, "object gate must NOT be the blocker (.env)");
     assert.match(r.stderr, /REAL-MERGE FAIL-CLOSED/);
     assert.match(r.stderr, /code conflict files:/);
-    assert.match(r.stderr, /orchestration\/session-config.env/);
+    assert.match(r.stderr, /orchestration\/session-liveness.env/);
     // Shared files are reported as blocked (not silently resolved either).
     assert.match(r.stderr, /would auto-resolve develop-authoritative/);
     assert.match(r.stderr, /orchestration\/tick-log\.md/);
     // Nothing moved; develop's defective env is intact (never blindly resolved).
     assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), before);
     assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
-    assert.equal(gitCmd(dir, "show", "develop:orchestration/session-config.env").stdout,
+    assert.equal(gitCmd(dir, "show", "develop:orchestration/session-liveness.env").stdout,
       'SESSION_TARGETS="quay /home/yale/work/quay quay-0:inner"\nSESSION_TRANSCRIPTS="inner /home/yale/.claude/projects/x.jsonl"\n');
   } finally {
     cleanup(dir);
@@ -760,35 +760,35 @@ test("REVERSE-EDGE AC4 (negative control): declared reverse-edge but the integra
     const criterion = writeSessionCriterion(dir);
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
     const r = runMerge(["--root", dir, "--merge",
-      "--integration-authoritative", "orchestration/session-config.env",
+      "--integration-authoritative", "orchestration/session-liveness.env",
       "--reverse-edge-criterion", criterion]);
     assert.notEqual(r.status, 0, "a criterion-failing reverse-edge candidate must fail closed");
-    assert.match(r.stderr, /content criterion NOT satisfied for orchestration\/session-config.env/);
+    assert.match(r.stderr, /content criterion NOT satisfied for orchestration\/session-liveness.env/);
     assert.match(r.stderr, /REAL-MERGE FAIL-CLOSED/);
-    assert.match(r.stderr, /orchestration\/session-config.env/);
+    assert.match(r.stderr, /orchestration\/session-liveness.env/);
     // Nothing moved — neither side was blindly chosen.
     assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), before);
     assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
-    assert.equal(gitCmd(dir, "show", "develop:orchestration/session-config.env").stdout,
+    assert.equal(gitCmd(dir, "show", "develop:orchestration/session-liveness.env").stdout,
       'SESSION_TARGETS="quay /home/yale/work/quay quay-0:inner"\nSESSION_TRANSCRIPTS="inner /home/yale/.claude/projects/x.jsonl"\n');
   } finally {
     cleanup(dir);
   }
 });
 
-test("REVERSE-EDGE contract measure: --merge --integration-authoritative 'orchestration/session-config.env' --dry-run reports the env as integration-authoritative (resolvable, integration side) without moving any ref", () => {
+test("REVERSE-EDGE contract measure: --merge --integration-authoritative 'orchestration/session-liveness.env' --dry-run reports the env as integration-authoritative (resolvable, integration side) without moving any ref", () => {
   const dir = reverseEdgeRepo("re5");
   try {
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
     const r = runMerge(["--root", dir, "--merge", "--dry-run",
-      "--integration-authoritative", "orchestration/session-config.env"]);
+      "--integration-authoritative", "orchestration/session-liveness.env"]);
     assert.notEqual(r.status, 0, "dry-run on divergence exits non-zero (NOT a clean FF)");
     assert.match(r.stdout, /DIVERGENCE/);
     assert.match(r.stdout, /conflict classification:/);
     // The env file is classified in the integration-authoritative (reverse-edge) bucket — the tool
     // can now EXPRESS the correct resolution direction (integration side), unlike pre-fix.
     assert.match(r.stdout, /integration-authoritative \(reverse-edge, integration side\):\s+1/);
-    assert.match(r.stdout, /orchestration\/session-config.env/);
+    assert.match(r.stdout, /orchestration\/session-liveness.env/);
     // It is NOT in the code (fail-closed) bucket; shared files remain develop-authoritative.
     assert.match(r.stdout, /shared \(auto-resolve develop-authoritative\):\s+2/);
     assert.match(r.stdout, /code \(fail-closed, needs human\):\s+0/);

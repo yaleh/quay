@@ -80,7 +80,7 @@ skill handles the launch itself. Each layer's launch command is materialized fro
 skill's OWN inner implementation, not a user-facing deliverable).
 
 1. **Resolve root / project / session.** `root = $(pwd)`, `project = basename "$root"`,
-   `session =` the `SESSION_TMUX_SESSION=` value in `<root>/orchestration/session-config.env`
+   `session =` the `SESSION_TMUX_SESSION=` value in `<root>/orchestration/session-liveness.env`
    (default `<project>-0:0.0`).
 2. **Bare-metal entry.** If no session exists yet, bootstrap it first:
    `bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer` — this creates each

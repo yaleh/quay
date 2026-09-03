@@ -91,7 +91,7 @@ fi
 #   * a test-file path argument (…test.mjs / …test.js / …test.ts / …_test.mjs / …_test.js) — a
 #     direct run of a test file without --test.
 # Everything else is infrastructure — `… mcp`, `… serve --host --port`, `… suite-state-trigger.ts
-# --monitor`, `… session-observation.sh` — and returns 1 (NOT counted against the test budget).
+# --monitor`, `… session-liveness.sh` — and returns 1 (NOT counted against the test budget).
 is_test_cmdline() {
   local cmdline="${1:-}"
   [ -n "${cmdline}" ] || return 1

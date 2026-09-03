@@ -8,7 +8,7 @@
 // 契约：
 //   - tmux 纯只读：只用 `list-panes`（含 -a 全量枚举）；零破坏性 tmux 子命令（kill 族一律不用）。AC2。
 //   - 身份判据：`pane_pid` + `pane_current_command`（cmd=claude 才算认出会话）；不用 pgrep 的 `-P` 子进程寻址。AC4。
-//   - 监视器实例枚举按 argv[0..1]（argv[1] basename == session-observation.sh），不 grep 整条 cmdline
+//   - 监视器实例枚举按 argv[0..1]（argv[1] basename == session-liveness.sh），不 grep 整条 cmdline
 //     （§1.4c 自匹配教训；monitor-mount-check.sh 同一谓词）；再加 root 过滤——解析后的脚本路径须落在
 //     主检出 repoRoot 下，worktree 测试进程（quay-worktrees/）不误计（硬规则 4b）。
 //   - 输出固定结构、逐行带标签：人为跳过一项 ⇒ 该标签行缺失，可被机械检出，不是静默少几行。AC3。
@@ -21,7 +21,7 @@
 //   MTR_PROJECTS           项目表 name=dir 空格分隔（默认 quay/archguard/meta-cc 于 /home/yale/work）
 //   MTR_TMUX_LIST_PANES    直接给定 `list-panes -a` 输出（tmux 只读接缝，测试用）
 //   MTR_ENTRY_LAST_COMMIT  直接给定 quay-session.ts 最后改动 epoch（git 接缝，测试用）
-//   TMUX_TMPDIR            tmux socket 覆盖（同 session-observation.sh 的测试机制）
+//   TMUX_TMPDIR            tmux socket 覆盖（同 session-liveness.sh 的测试机制）
 
 import fs from "node:fs";
 import path from "node:path";
@@ -102,7 +102,7 @@ export function parsePanes(raw: string): PaneInfo[] {
   });
 }
 
-/** 只读 tmux：`env -u TMUX tmux -S <socket> list-panes -a`（读真实默认服务端，同 session-observation.sh AC3）。 */
+/** 只读 tmux：`env -u TMUX tmux -S <socket> list-panes -a`（读真实默认服务端，同 session-liveness.sh AC3）。 */
 export function tmuxListPanes(socket: string, env: NodeJS.ProcessEnv = process.env): PaneInfo[] {
   const seam = env[TMUX_LIST_PANES_SEAM];
   const raw = seam !== undefined ? seam : runTmuxListPanes(socket, env);
@@ -424,7 +424,7 @@ export function readCwd(pid: number, procRoot = "/proc"): string {
 }
 
 /** 把 argv[1] 解析为绝对脚本路径：绝对 → normpath；相对 → 按进程 cwd 解析再 normpath
- *  （挂载常以 `bash plugin/scripts/session-observation.sh` 形式启动，cwd = 项目根；
+ *  （挂载常以 `bash plugin/scripts/session-liveness.sh` 形式启动，cwd = 项目根；
  *   monitor-mount-check.sh 的 resolve_script_path 同构）。 */
 export function resolveScriptPath(pid: number, argvScript: string, procRoot = "/proc"): string {
   if (path.isAbsolute(argvScript)) return path.normalize(argvScript);
@@ -441,7 +441,7 @@ export function isMainCheckoutScript(resolved: string, repoRoot: string): boolea
   return resolved === root || resolved.startsWith(root + path.sep);
 }
 
-/** 枚举 session-observation 监视器实例：argv[0]=bash 且 argv[1] basename == session-observation.sh，
+/** 枚举 session-liveness 监视器实例：argv[0]=bash 且 argv[1] basename == session-liveness.sh，
  *  且解析后的脚本路径落在主检出 repoRoot 下（root 过滤——worktree 测试进程不误计，硬规则 4b）。 */
 export function monitorInstances(entryLastCommit: number, repoRoot: string, procRoot = "/proc"): MonitorInstance[] {
   const out: MonitorInstance[] = [];
@@ -456,7 +456,7 @@ export function monitorInstances(entryLastCommit: number, repoRoot: string, proc
     const pid = Number(d);
     const argv = readCmdline(pid, procRoot);
     if (argv.length < 2 || argv[0] !== "bash") continue;
-    if (path.basename(argv[1]) !== "session-observation.sh") continue;
+    if (path.basename(argv[1]) !== "session-liveness.sh") continue;
     if (!isMainCheckoutScript(resolveScriptPath(pid, argv[1], procRoot), repoRoot)) continue;
     const { ppid, startEpoch } = readStat(pid, procRoot);
     out.push({

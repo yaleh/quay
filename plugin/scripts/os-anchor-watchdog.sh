@@ -24,7 +24,7 @@
 #
 # REUSE-ONLY (AC3 — zero new invention; every signal path is an already-validated
 # capability):
-#   * liveness      → session-observation.sh --once   (PSI/pane dual signal, validated)
+#   * liveness      → session-liveness.sh --once   (PSI/pane dual signal, validated)
 #   * delivery      → send-keys-reliable.sh + transcript-delivery-check.ts
 #                     (the 6 failure modes crystallized; transcript is the only
 #                     trusted delivery signal)
@@ -110,7 +110,7 @@ os_anchor_decide() {
 
 # ── tmux helpers ────────────────────────────────────────────────────────────────
 # Use the real default server explicitly (env -u TMUX tmux -S ...), same as
-# session-observation.sh L0 — never inherit a caller's $TMUX.
+# session-liveness.sh L0 — never inherit a caller's $TMUX.
 _os_tmux_socket="${OS_ANCHOR_TMUX_SOCKET:-}"
 if [ -z "$_os_tmux_socket" ]; then
   _os_tmux_socket="${TMPDIR:-/tmp}/tmux-$(id -u)/default"
@@ -148,13 +148,13 @@ wait_for_prompt() {
   return 1
 }
 
-# ── liveness via the VALIDATED capability (session-observation.sh --once) ──────────
+# ── liveness via the VALIDATED capability (session-liveness.sh --once) ──────────
 # Returns: 1 (alive) / 0 (dead) / "unknown" (could not measure — helper missing or
 # no SESSION-STATUS line). Never re-spawn on "unknown" (fail-safe against a broken
 # measurement double-spawning a live session).
 outer_liveness() {
   local name="$1" root="$2" session="$3" outer="$4"
-  local sl="$root/plugin/scripts/session-observation.sh"
+  local sl="$root/plugin/scripts/session-liveness.sh"
   [ -x "$sl" ] || { echo "unknown"; return 0; }
   local out line
   out=$(SESSION_TARGETS="${name} ${root} ${session}:${outer}" \
@@ -319,7 +319,7 @@ watch_project() {
       echo "STATUS $name halted"
       return 0 ;;
     skip-unverifiable)
-      echo "STATUS $name skip-unverifiable (session-observation returned no verdict)"
+      echo "STATUS $name skip-unverifiable (session-liveness returned no verdict)"
       log "$name: unverifiable — skipping (never double-spawn on a broken measurement)"
       return 0 ;;
     recreate-session)

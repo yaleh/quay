@@ -55,7 +55,7 @@ const assert = new Proxy(_assert, {
   },
 });
 
-// AC1/AC2 — the per-project session is CONFIG, generated into orchestration/session-config.env;
+// AC1/AC2 — the per-project session is CONFIG, generated into orchestration/session-liveness.env;
 // the retired observer (session-liveness.sh) is NOT laid down.
 test('AC1/AC2 — the session is generated config, not a script rewrite; the retired observer is not laid down', () => {
   // AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles) + the SHARED
@@ -72,7 +72,7 @@ test('AC1/AC2 — the session is generated config, not a script rewrite; the ret
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'session-liveness.sh')),
       'session-liveness.sh must NOT be laid down (retired 2026-09-03)');
-    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-config.env'), 'utf8');
+    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-liveness.env'), 'utf8');
     assert.match(envFile, /SESSION_TMUX_SESSION=proj-0:0\.0/, 'the --tmux-session value must be written to the generated config');
   } finally { cleanup(ws); }
 });

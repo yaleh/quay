@@ -7,12 +7,12 @@
 # 用法：
 #   session-bootstrap.sh [<root>] [<layout>] [--session <sess>] [--dry-run] [--wait <s>]
 #                        [--socket <path>] [--help]
-#     <root>   项目根（默认 $(pwd)）。用于读 orchestration/session-config.env 的会话名，
+#     <root>   项目根（默认 $(pwd)）。用于读 orchestration/session-liveness.env 的会话名，
 #             以及定位 plugin/scripts/quay-launch.sh。
 #     <layout> 命名窗口集：`manager/outer`（默认 outer）。
 #             每个 token 必须是 manager|outer，按给定顺序创建（窗口按名寻址，顺序不影响正确性）。
 #     --session <sess>  覆盖会话名（默认：SESSION_BOOTSTRAP_SESSION → SESSION_TMUX_SESSION →
-#                       <root>/orchestration/session-config.env → fail-closed，绝不猜会话名）。
+#                       <root>/orchestration/session-liveness.env → fail-closed，绝不猜会话名）。
 #     --dry-run         只打印将执行的命令，不实际改动（校验用）。
 #     --wait <s>        每窗进程存活等待上限秒数（默认 20）。
 #     --socket <path>   显式 tmux 控制套接字路径（等价 SESSION_BOOTSTRAP_TMUX_SOCKET）。
@@ -21,7 +21,7 @@
 #
 # 幂等（AC2）：窗口已存在且 claude 进程在位 ⇒ 不动；窗口缺失 ⇒ 建；窗口在但无 claude ⇒ 重拉。
 # 存活验证（AC1/AC3）：每个窗口启动后必须确认 claude 进程真实存活——不是「命令已发出」。
-#   判据复用 session-observation.sh 的 session_pid / quay-topology.sh 的 has_claude_child：
+#   判据复用 session-liveness.sh 的 session_pid / quay-topology.sh 的 has_claude_child：
 #   找 pane 进程（#\{pane_pid\}）或其任一子进程的 /proc/<pid>/cmdline 是否含 claude 特征
 #   （SESSION_BOOTSTRAP_CLAUDE_PATTERN 覆盖，默认 claude）。任一窗口无法确认存活 ⇒ 逐名报
 #   FAILED 并退出非零（fail-closed，与本仓其它引导步骤一致）。「不静默留半成品」：所有窗口
@@ -106,16 +106,16 @@ if [ "${#LAYOUT_ROLES[@]}" -lt 1 ]; then
   exit 2
 fi
 
-# ── 会话解析：显式 > 环境 > session-config.env > fail-closed（绝不猜会话名）──────────────
+# ── 会话解析：显式 > 环境 > session-liveness.env > fail-closed（绝不猜会话名）──────────────
 if [ -z "$SESSION" ]; then
   SESSION="${SESSION_TMUX_SESSION:-}"
 fi
-if [ -z "$SESSION" ] && [ -f "$ROOT/orchestration/session-config.env" ]; then
-  _v="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$ROOT/orchestration/session-config.env" 2>/dev/null | head -1)"
+if [ -z "$SESSION" ] && [ -f "$ROOT/orchestration/session-liveness.env" ]; then
+  _v="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$ROOT/orchestration/session-liveness.env" 2>/dev/null | head -1)"
   [ -n "$_v" ] && SESSION="$_v"
 fi
 if [ -z "$SESSION" ]; then
-  echo "ERROR: no tmux session given — pass --session <sess>, set SESSION_TMUX_SESSION, or set SESSION_TMUX_SESSION= in <root>/orchestration/session-config.env." >&2
+  echo "ERROR: no tmux session given — pass --session <sess>, set SESSION_TMUX_SESSION, or set SESSION_TMUX_SESSION= in <root>/orchestration/session-liveness.env." >&2
   echo "       session-bootstrap never guesses a session name (gap-init-guesses-the-tmux-session 同源)." >&2
   exit 2
 fi
@@ -148,7 +148,7 @@ window_exists() {
   _tmux list-windows -t "$1" -F '#{window_name}' 2>/dev/null | grep -qx "$2"
 }
 
-# pane 进程或其任一子进程的 cmdline 是否含 claude 特征（与 session-observation.sh 的 session_pid /
+# pane 进程或其任一子进程的 cmdline 是否含 claude 特征（与 session-liveness.sh 的 session_pid /
 # quay-topology.sh 的 has_claude_child 同判据：只认 claude 进程，避免把 shell 当成会话本体；
 # 遍历全部子进程而非只取第一个——新起的子进程在 exec 前是瞬时 shell，只取第一个会误判）。
 has_live_process() {

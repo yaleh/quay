@@ -36,7 +36,7 @@
 
 **唯一例外**：跨项目的共享机件（三项目 `.halt` 约定、tmux 布局约定）——那些没有别的主人。
 （`heavy-op-token.sh` 已于 2026-08-06 退休：人裁定「彻底删掉」，见
-gap-session-observation-remove-shared-events-and-lock。）
+gap-session-liveness-remove-shared-events-and-lock。）
 
 **第二例外（2026-08-21 人裁定，追认 2026-08-20T09:35–10:11Z 执行，见
 `orchestration/manager-tick-log.md:28327` 的升级记录）**：条款2「不跑验证」与条款4
@@ -173,8 +173,8 @@ Agent 2）显示工作根本不在 subagent 里（41 次 Edit 全在主线程改
 被验证过  ← 要看【信号真的来了】
 ```
 
-**实例**：outer `62b10877`（11:33:15Z）修好了「session-observation 盯自己不盯 inner」，
-把 inner 的 transcript 显式写进 `orchestration/session-config.env`，0b3 检查也加了 pid 断言。
+**实例**：outer `62b10877`（11:33:15Z）修好了「session-liveness 盯自己不盯 inner」，
+把 inner 的 transcript 显式写进 `orchestration/session-liveness.env`，0b3 检查也加了 pid 断言。
 **但两个运行中的实例都早于修复启动**（644390 早 33 小时、522110 早 85 分钟）
 ⇒ **修了没生效**，`SESSION-IDLE = 0 次` 就是直接证据。
 **这与今晚那两条 false-done 任务同形**：`62b10877` 会以「已修复」的形态存活很久而 inner 依旧无人观测。
@@ -188,7 +188,7 @@ Agent 2）显示工作根本不在 subagent 里（41 次 Edit 全在主线程改
 **但 manager 的实例该盯 outer**。若直接重启会继承 inner 当目标，**反而不再盯 outer**。
 env 注释自己写着「管理者挂载时**显式传** `SESSION_TARGETS`（显式环境变量优先于本文件）」。
 ⇒ **manager 重挂时必须显式传自己的目标**：
-`SESSION_TRANSCRIPTS="outer <outer 会话 transcript 绝对路径>" LOOP_MIN=0 bash …/session-observation-mount.sh`
+`SESSION_TRANSCRIPTS="outer <outer 会话 transcript 绝对路径>" LOOP_MIN=0 bash …/session-liveness-mount.sh`
 **并在重挂后立刻取证**：`/proc/<pid>/environ` 里的 `SESSION_TRANSCRIPTS` 指向 outer 的会话 id。
 
 ⇒ **一般形态：共享配置文件被上一层按【它的】用途改对之后，对【我的】用途可能正好改错。
@@ -352,7 +352,7 @@ git log --since='<禁令时刻>' --format='%h %s' | grep -v '^.\{8\} manager:'  
 > 外层 14:25 批量合 `integration→develop`（`c7903a43`）。**批量合是 REF-LEVEL + `--reconcile`
 > （`--mixed` 只刷 index、不碰工作区）⇒ 合完那一刻主检出的工作区文件是【旧 develop 内容】。**
 > 随后一次 `git add <单个文件> && git commit`（正是本条要求的「立刻提交」）**把 stale 工作区
-> 当成变更提交了**——`f96473f1` 删掉 `session-observation-target.test.mjs`、回退约 **1000 行**
+> 当成变更提交了**——`f96473f1` 删掉 `session-liveness-target.test.mjs`、回退约 **1000 行**
 > fan-in 工作（对象闸门 / 会话监视器 / D5）。已恢复（该提交移出历史，`develop` 回到
 > `93481c82`，我独立核实：测试文件在、`IDLE_REPORTED=9`、脏树 0、工作区与 HEAD 一致）。
 >
@@ -518,7 +518,7 @@ echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk 
 报三类事件——消失 / 恢复 / 活着但超 45 分钟不推进」。**三处错，逐条实测**：
 
 1. **`outer-liveness.sh` 这个文件不存在**——它在 `d6af0112` 被**改名**为
-   `session-observation.sh`（纯改名，0 行改动）。判据指向了一个已不存在的对象，
+   `session-liveness.sh`（纯改名，0 行改动）。判据指向了一个已不存在的对象，
    而**写死路径的读法不会报错，只会安静地返回「看起来没问题」**（同 §1.b 的 grep 教训）。
 2. **「已覆盖」对管理者为假**。全机只有一个实例 pid=644390，其
    `CLAUDE_CODE_SESSION_ID=3cc1c0b9…` = **quay 外层**；管理者自己**零个实例**。
@@ -528,8 +528,8 @@ echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk 
 
 | 要覆盖的 | 机制 | 归属 | 现状 |
 |---|---|---|---|
-| quay outer/inner **转闲**（调度信号） | manager 侧 `Monitor` idle-watch（2026-08-08 挂）——**真机制 = `session-observation-mount.sh` + Monitor 事件，不是 `idle-watch.sh`** | **管理者** | 已挂，阈值 6 分钟 |
-| quay 外层**进程消失/恢复** | `plugin/scripts/session-observation.sh` | **quay 外层**（非管理者） | 运行中 pid=644390 |
+| quay outer/inner **转闲**（调度信号） | manager 侧 `Monitor` idle-watch（2026-08-08 挂）——**真机制 = `session-liveness-mount.sh` + Monitor 事件，不是 `idle-watch.sh`** | **管理者** | 已挂，阈值 6 分钟 |
+| quay 外层**进程消失/恢复** | `plugin/scripts/session-liveness.sh` | **quay 外层**（非管理者） | 运行中 pid=644390 |
 | archguard / meta-cc 外层存活 | **无监视器** | —— | **只靠下面这段 tick 巡检**——这是唯一机制，不能省 |
 
 **每轮必查：矩阵里那两个机制【现在还活着吗】**（这是第三类失效「该响的时候不响」的唯一防线——
@@ -539,18 +539,18 @@ echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk 
 # ① manager 自己的 idle-watch：查【Monitor 工具任务 + 事件流】，不查进程，不查 TaskList
 #    ⚠️ 换错仪器史（gap-manager-cold-start-no-falsifiable-checklist 缺陷 2，同位置第三次）：
 #      TaskList（待办清单工具，不是后台监视器清单，实跑 "No tasks found"）→
-#      进程级 pgrep（指向一个全库不存在的脚本）→ 现在。真机制 = session-observation-mount.sh +
+#      进程级 pgrep（指向一个全库不存在的脚本）→ 现在。真机制 = session-liveness-mount.sh +
 #      Monitor 工具任务（非独立进程）。判据：
 bash plugin/scripts/monitor-mount-check.sh --json   # mounted=true 且 targetOk=true（两条都要）
-bash plugin/scripts/session-observation.sh --once      # 至少一行 SESSION-STATUS（投递证明）
+bash plugin/scripts/session-liveness.sh --once      # 至少一行 SESSION-STATUS（投递证明）
 #      （--once 是确定性接缝：稳态会话可能不发射转换事件，等 ~90s 等不来是正常的——F6，
 #       cold-start/SKILL.md 步骤 4；--once 才是快而稳的送达证明。）
-#      常驻挂载命令：Monitor({command: "<quay>/plugin/scripts/session-observation-mount.sh", ...})
+#      常驻挂载命令：Monitor({command: "<quay>/plugin/scripts/session-liveness-mount.sh", ...})
 #   一条不满足 ⇒ 监视器未挂/不响，当轮重挂。
-# ② quay 外层的 session-observation：进程在不在，且【属主是不是外层】
-pgrep -af 'plugin/scripts/session-observation\.sh' | while read -r pid _; do
+# ② quay 外层的 session-liveness：进程在不在，且【属主是不是外层】
+pgrep -af 'plugin/scripts/session-liveness\.sh' | while read -r pid _; do
   sid=$(tr '\0' '\n' < /proc/$pid/environ 2>/dev/null | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p')
-  echo "session-observation pid=$pid session=${sid:0:8}"     # 3cc1c0b9=外层，b8dc91a6=管理者
+  echo "session-liveness pid=$pid session=${sid:0:8}"     # 3cc1c0b9=外层，b8dc91a6=管理者
 done
 ```
 **判读**：② 一个实例都没有 ⇒ §2「外层进程消失要立即报」重新回到无机制状态，**当轮升级**，
@@ -743,7 +743,7 @@ rm <repo>/.halt                                                  # 恢复
 ```
 
 跨项目重活（全量套件等）的串行化 **已退休**——`heavy-op-token.sh`（「一次只跑一个重测试」令牌）
-于 2026-08-06 被整删（人裁定，gap-session-observation-remove-shared-events-and-lock）。资源压力改由
+于 2026-08-06 被整删（人裁定，gap-session-liveness-remove-shared-events-and-lock）。资源压力改由
 `plugin/scripts/resource-gate.sh` 按单次运行负载门控（`scripts/test.sh` 全量路径仍 consult 它）。
 
 （旧的「令牌状态在哪看」一段随令牌退休而删除——`$QUAY_GLOBAL_DIR/heavy-op/token` 不再存在。）
@@ -758,7 +758,7 @@ rm <repo>/.halt                                                  # 恢复
 
 ```bash
 S=$(ps -o lstart= -p <监视器pid> | xargs -I{} date -d "{}" +%s)   # 我的实例启动时刻
-git log -1 --format=%ct -- plugin/scripts/session-observation.sh     # 该文件最后一次改动
+git log -1 --format=%ct -- plugin/scripts/session-liveness.sh     # 该文件最后一次改动
 # 后者 > 前者 且已在 master ⇒ 我跑的是旧版，必须重挂
 ```
 
@@ -770,7 +770,7 @@ git log -1 --format=%ct -- plugin/scripts/session-observation.sh     # 该文件
 
 ## §1.4e 临时 `Monitor` 工具挂的监视器不在上面任何一条的覆盖范围内（2026-08-07，人问出来的）
 
-**§1.4/§1.4b/§1.4c/§1.4d 检查的对象全部是 `session-observation.sh`**——共享、纳入 git 版本控制的
+**§1.4/§1.4b/§1.4c/§1.4d 检查的对象全部是 `session-liveness.sh`**——共享、纳入 git 版本控制的
 常驻脚本。**本会话里用 `Monitor` 工具临时挂的监视器（如盯 outer/inner pane 忙闲转换）是完全不同
 的机制，没有任何一条现有自查覆盖它。**
 
@@ -779,7 +779,7 @@ git log -1 --format=%ct -- plugin/scripts/session-observation.sh     # 该文件
 发现的，是人问出来的**（"可能是你挂晚了"）。与 §1.4b 同型：**结论不可验证，不是结论错**——
 监视器"没报"和"没什么可报"从外部看不出区别。
 
-**判据修正**：每个 tick，若本会话当前挂着任何临时 `Monitor`（非 session-observation.sh 一类），
+**判据修正**：每个 tick，若本会话当前挂着任何临时 `Monitor`（非 session-liveness.sh 一类），
 用 `ps -eo pid,etime,args | grep <该监视器命令片段>` 核实进程仍存活、`etime` 与轮询间隔量级相符
 （长期 0 秒或异常久未变都可疑）；**若监视器的目的是"通知我某状态转换"，不要只信挂载成功，
 要能独立核实一次"如果转换真发生了，它是不是真报得出来"**——挂载晚于目标事件、轮询间隔粗于
@@ -1120,14 +1120,14 @@ meta-cc 的 MCP 服务器进程，不是 outer 会话。** 报错的不是"活�
 **更根本的一层**：这个判据实际问的是「窗格进程有没有至少一个子进程」。
 只要任何一个 MCP 服务器还挂着，它就为真——**即使 claude 已经卡死接不了输入**。
 ⇒ 它**不能**区分「活着且在干活」与「活着但接不了输入」，而后者正是人 2026-08-06
-明确保留在范围内的失效模式（`gap-session-observation-cannot-see-context-saturation-alive-but-cannot-take-input`，status: ready）。
+明确保留在范围内的失效模式（`gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-take-input`，status: ready）。
 
 **判据修正（本轮起执行）**：身份报 `pane_pid` 并同时报 `pane_current_command`，
 `cmd=claude` 才算认出会话；**忙闲另测**（状态行 `esc to interrupt`，见 §1.4c）。
 不再用 `pgrep -P … | head -1` 作为身份来源。
 
 **二、§1.4 的 `break` 只看第一个实例，而实例是会累积的。**
-实测同时有 **8 个** `session-observation` 进程，**5 个是旧版**；`break` 抓到最老的那个，
+实测同时有 **8 个** `session-liveness` 进程，**5 个是旧版**；`break` 抓到最老的那个，
 「须重挂」的结论碰巧对，**推理是错的**——真实问题不是版本旧，是**没人清理旧实例**。
 且亲缘显示 **三层各挂各的**：quay 外层（ppid 966759）、archguard 外层（ppid 2388387）、
 我（ppid 120373），外加一个孤儿（ppid 1）。**谁也不知道别人挂了。**
@@ -1139,8 +1139,8 @@ meta-cc 的 MCP 服务器进程，不是 outer 会话。** 报错的不是"活�
 
 ### §1.4c 我的枚举方法一直是错的(2026-08-04,今晚第三次自我匹配)
 
-我用 `case "$(tr '\0' ' ' < /proc/<pid>/cmdline)" in *session-observation*)` 枚举监视器,
-**而我自己那条命令的文本里就含 `session-observation`**,于是命令自己被算成一个监视器进程。
+我用 `case "$(tr '\0' ' ' < /proc/<pid>/cmdline)" in *session-liveness*)` 枚举监视器,
+**而我自己那条命令的文本里就含 `session-liveness`**,于是命令自己被算成一个监视器进程。
 今晚这类自匹配发生了**三次,三种形状**:`pgrep -f` 杀掉自己的 shell、
 数 `node --test` 数到自己、枚举监视器枚举到自己。
 
@@ -1148,7 +1148,7 @@ meta-cc 的 MCP 服务器进程，不是 outer 会话。** 报错的不是"活�
 
 ```bash
 a0=$(tr '\0' '\n' < /proc/$pid/cmdline 2>/dev/null | head -1)   # argv[0] 而非全文
-case "$a0" in */session-observation.sh) ... ;; esac
+case "$a0" in */session-liveness.sh) ... ;; esac
 ```
 
 **更一般的形态**:**用「文本里出现某字符串」判断「进程是某程序」,永远会把谈论它的人算进去。**
@@ -1165,7 +1165,7 @@ case "$a0" in */session-observation.sh) ... ;; esac
 期间外层其实落了 41 个提交——**我知道那些是靠 `git log`,不是靠监视器。**
 
 > **RETIRED (2026-08-06)**：下面这段是 2026-08-04 的 OOM 复盘，其机制（AC20 单飞挂载 + 共享
-> events.jsonl + HEARTBEAT 订阅判据）已被人裁定整体移除（gap-session-observation-remove-shared-events-
+> events.jsonl + HEARTBEAT 订阅判据）已被人裁定整体移除（gap-session-liveness-remove-shared-events-
 > and-lock：观测是树、只读不排他、共享文件严格劣于独立流）。保留为历史记录——「谁在看我」现在由
 > **挂载方自己的 Monitor 事件流**直接回答（谁挂的谁拥有），不再有共享文件可订阅。
 
@@ -1175,10 +1175,10 @@ case "$a0" in */session-observation.sh) ... ;; esac
 我去挂只会得到一句「已有活持有者,空操作」,**数进程也数不出我自己有没有在看**。
 
 **正确的检查是订阅侧,不是挂载侧**:共享事件文件里每轮有一条 `HEARTBEAT`
-(`session-observation.sh:708`,原话「订阅方据此判定看门的不在了」)。
+(`session-liveness.sh:708`,原话「订阅方据此判定看门的不在了」)。
 
 ```bash
-F="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}/session-observation/events.jsonl"
+F="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}/session-liveness/events.jsonl"
 last=$(grep '"HEARTBEAT"' "$F" | tail -1 | grep -oE '"ts":[0-9]+' | cut -d: -f2)
 age=$(( ($(date +%s) - last/1000) ))
 [ "$age" -gt 180 ] && echo "看门的不在了(心跳 ${age}s 前)——去挂"
@@ -1203,7 +1203,7 @@ for x in /proc/[0-9]*; do
   [ -r "$x/cmdline" ] || continue
   a0=$(tr '\0' '\n' < "$x/cmdline" 2>/dev/null | head -1)
   a1=$(tr '\0' '\n' < "$x/cmdline" 2>/dev/null | sed -n 2p)
-  case "$a0$a1" in */session-observation.sh*) n=$((n+1));; esac
+  case "$a0$a1" in */session-liveness.sh*) n=$((n+1));; esac
 done
 [ "$n" = 0 ] && echo "监视器数量为 0 —— 立即重挂"     # ← 先问这个
 
@@ -2076,7 +2076,7 @@ C18 防**「用默认节奏替代对代价的判断」**（该立刻做却推迟
 
 ### §A4-migrated（原文逐字）
 
-| A4 | **【已退役 2026-08-14 07:5xZ，人令「清理 pane-state-classify / manager A4 / phase_ac_checked」】**——**这条我从未执行**：整天的两层忙闲读数全部来自 A0 的 `outer.liveness`，不是本条写的 `capture-pane | pane-state-classify --classify`；三层执行核里只有本条引用该读法，outer/inner 各 0。**正身 + 落点映射 + 那条不可丢的 2026-08-12 实测（subagent 状态行渲染在状态栏【下面】、标志被顶出末 3 行）** → `orchestration/archive/AC58-retired-clauses.md#R28`。**工具 `pane-state-classify.ts` 不退役**（`session-observation.sh` 与 `inner-blocked-signal.ts` 仍在用）。**不计入覆盖率分母。** | **替代读数**：A0 `outer.liveness`——**但它是代理量**（pane 进程存在 ≠ 会话在处理；2026-08-14 实证 inner 的 pane 一直在而 tick 停 21 分钟）；**判层活性的正本是直接量**（`git log` 提交时刻 / worktree 内活进程，outer A21 / inner A25 已是这条路线） (src:1738 "§C21 处理问题必须同时覆盖") |
+| A4 | **【已退役 2026-08-14 07:5xZ，人令「清理 pane-state-classify / manager A4 / phase_ac_checked」】**——**这条我从未执行**：整天的两层忙闲读数全部来自 A0 的 `outer.liveness`，不是本条写的 `capture-pane | pane-state-classify --classify`；三层执行核里只有本条引用该读法，outer/inner 各 0。**正身 + 落点映射 + 那条不可丢的 2026-08-12 实测（subagent 状态行渲染在状态栏【下面】、标志被顶出末 3 行）** → `orchestration/archive/AC58-retired-clauses.md#R28`。**工具 `pane-state-classify.ts` 不退役**（`session-liveness.sh` 与 `inner-blocked-signal.ts` 仍在用）。**不计入覆盖率分母。** | **替代读数**：A0 `outer.liveness`——**但它是代理量**（pane 进程存在 ≠ 会话在处理；2026-08-14 实证 inner 的 pane 一直在而 tick 停 21 分钟）；**判层活性的正本是直接量**（`git log` 提交时刻 / worktree 内活进程，outer A21 / inner A25 已是这条路线） (src:1738 "§C21 处理问题必须同时覆盖") |
 
 ### §A6-migrated（原文逐字）
 
@@ -2110,7 +2110,7 @@ C18 防**「用默认节奏替代对代价的判断」**（该立刻做却推迟
 
 ### §A10-migrated（原文逐字）
 
-| A10 | **仪器存活 + manager 自己的 idle-watch（核判据指向真机制，gap-manager-cold-start-no-falsifiable-checklist AC3）**:①我跑的 `session-observation` 是不是旧版(逐行 `ps` 看进程与其脚本路径,C1) ②**idle-watch 查法 = `plugin/scripts/monitor-mount-check.sh --json`（`mounted=true` + `targetOk=true`）+ `session-observation.sh --once` 至少一行 `SESSION-STATUS` + Monitor 事件流**——**不是进程级 pgrep（idle-watch 不是独立脚本；真机制是 `session-observation-mount.sh` + Monitor 工具任务）**;**别再 pgrep 一个不存在的脚本**（档案 §1.b 那次"判据指向不存在的 outer-liveness.sh"同型,第二次） | 版本落后 = 观测的是未修版;**本轮发过事件即为 Monitor 存活证据**(档案 §1.4/§1.4e) (src:527 "manager 自己的 idle-watch",506 "报三类事件") |
+| A10 | **仪器存活 + manager 自己的 idle-watch（核判据指向真机制，gap-manager-cold-start-no-falsifiable-checklist AC3）**:①我跑的 `session-liveness` 是不是旧版(逐行 `ps` 看进程与其脚本路径,C1) ②**idle-watch 查法 = `plugin/scripts/monitor-mount-check.sh --json`（`mounted=true` + `targetOk=true`）+ `session-liveness.sh --once` 至少一行 `SESSION-STATUS` + Monitor 事件流**——**不是进程级 pgrep（idle-watch 不是独立脚本；真机制是 `session-liveness-mount.sh` + Monitor 工具任务）**;**别再 pgrep 一个不存在的脚本**（档案 §1.b 那次"判据指向不存在的 outer-liveness.sh"同型,第二次） | 版本落后 = 观测的是未修版;**本轮发过事件即为 Monitor 存活证据**(档案 §1.4/§1.4e) (src:527 "manager 自己的 idle-watch",506 "报三类事件") |
 
 ### §A12b-migrated（原文逐字）
 
@@ -2166,7 +2166,7 @@ C18 防**「用默认节奏替代对代价的判断」**（该立刻做却推迟
 
 ### §C18-migrated（原文逐字）
 
-| C18 | **凡写下「下轮再…」,必须同时写出【推迟到那时的代价】;写不出代价就不许推迟。** 2026-08-11 一小时内三次实例,判断依据都是「保持节奏/不打扰外层」,而三次的正确答案都是**立刻做**:①07:00 打算推迟「写所有权重叠」报告——**当时 inner 0 在飞、6 个任务卡住**;②07:29 打算「下轮再查 CPUQuota 落点」——**我一分钟能查完且不占 outer 资源**（实查得 `QUAY_TEST_SYSTEMD_RUN_LIMITS` **零生产调用者**）;③07:33 打算「下轮再发排序建议」——**`worktree-leak` 的 subagent 正在飞,8 分钟后实现可能已带缺陷落地**。**tick 的 20 分钟节奏是「无事发生时的兜底默认值」,不是纪律**——与 C17 同族但方向相反:C17 防「规则守不住」,本条防**用一个看似合理的默认值替代对代价的判断**;正因为它合理,才能反复替代真正的判断而不触发任何警觉 (src:533 "session-observation.sh --once") |
+| C18 | **凡写下「下轮再…」,必须同时写出【推迟到那时的代价】;写不出代价就不许推迟。** 2026-08-11 一小时内三次实例,判断依据都是「保持节奏/不打扰外层」,而三次的正确答案都是**立刻做**:①07:00 打算推迟「写所有权重叠」报告——**当时 inner 0 在飞、6 个任务卡住**;②07:29 打算「下轮再查 CPUQuota 落点」——**我一分钟能查完且不占 outer 资源**（实查得 `QUAY_TEST_SYSTEMD_RUN_LIMITS` **零生产调用者**）;③07:33 打算「下轮再发排序建议」——**`worktree-leak` 的 subagent 正在飞,8 分钟后实现可能已带缺陷落地**。**tick 的 20 分钟节奏是「无事发生时的兜底默认值」,不是纪律**——与 C17 同族但方向相反:C17 防「规则守不住」,本条防**用一个看似合理的默认值替代对代价的判断**;正因为它合理,才能反复替代真正的判断而不触发任何警觉 (src:533 "session-liveness.sh --once") |
 
 ### §C19-migrated（原文逐字）
 

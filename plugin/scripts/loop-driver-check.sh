@@ -16,7 +16,7 @@
 # 记录——那是过去式日志，死会话的 transcript 还躺着一份，grep 它会把「曾经建过」误读成「现在
 # 活着」）。「注册表有一行、但那个驱动早已随会话而死」与「驱动活着」在行数上完全同形。
 # 第二层把 LIVE 判据改为：注册表恰一行 cron **且** 该驱动有新鲜的可观测 last-alive 证据。
-# 可观测证据 = 驱动每次 tick 会写的东西（session-observation.sh 的外层多源心跳同族）：
+# 可观测证据 = 驱动每次 tick 会写的东西（session-liveness.sh 的外层多源心跳同族）：
 #   git HEAD commit 时间、orchestration/tick-log.md mtime、.quay/verification-round.jsonl mtime、
 #   docs/analysis/*.md 最新 mtime。任一在 LOOP_DRIVER_LIVENESS_MIN 分钟内 ⇒ 驱动活（LIVE）。
 # 冷启动接缝：注册表 mtime = 最近一次安装时刻。刚写完注册表（< 窗口）但首 tick 还没到 ⇒ 仍报
@@ -62,7 +62,7 @@ REG="$ROOT/.quay/loop-driver.jsonl"
 LIVENESS_MIN="${LOOP_DRIVER_LIVENESS_MIN:-60}"
 
 # observable_last_alive —— 可观测 last-alive 证据的 max mtime（epoch）。0 = 无任何源。
-# 与 session-observation.sh 的外层多源心跳（_outer_heartbeat_max_mtime）同族：驱动每次 tick 会写
+# 与 session-liveness.sh 的外层多源心跳（_outer_heartbeat_max_mtime）同族：驱动每次 tick 会写
 # 这些文件 / 产生提交，任一新鲜即活。bash 检查器看不到会话内 CronList，但看得到这些文件 mtime。
 observable_last_alive() {
   local root=$1 max=0 ts f

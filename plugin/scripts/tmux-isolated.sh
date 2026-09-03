@@ -21,7 +21,7 @@
 #     override the socket with their own `-S`/`-L`, this script ERRORS (exit 3) rather than silently
 #     falling back to the default server.
 #
-# Real-server scripts (session-observation.sh's read-only pane probes, quay-init.sh's session detection)
+# Real-server scripts (session-liveness.sh's read-only pane probes, quay-init.sh's session detection)
 # MUST NOT go through this helper — they need the DEFAULT server's real sessions. They use the
 # equivalent explicit-socket form `env -u TMUX tmux -S "${TMPDIR:-/tmp}/tmux-$(id -u)/default" ...`
 # and declare it in their header (AC3: 迁移或明示).

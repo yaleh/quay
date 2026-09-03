@@ -145,7 +145,7 @@ export const MANIFEST: DeliveryCategory[] = [
 // The SOURCE manifest above checks quay's OWN repo layout (plugin/scripts/…, plugin/loop/…). A quay-init
 // --loop CONSUMER is laid out differently: tick docs land in orchestration/ + docs/analysis/, the
 // installer (quay-init.sh) and dev-tree tools (sync-vendor.sh) are NOT laid, the vendor runtime lands in
-// .quay/runtime/, and the observer is session-observation.sh + its generated orchestration/session-config.env.
+// .quay/runtime/, and the observer is session-liveness.sh + its generated orchestration/session-liveness.env.
 // Checking a consumer against the SOURCE manifest is structurally impossible (0/6 for EVERY consumer — the
 // parent-defect this task kills: "the check that validates delivery completeness CANNOT see the layout it
 // validates"). LAID_MANIFEST is the SAME six-category surface, expressed at the CONSUMER's laid paths.
@@ -190,10 +190,10 @@ export const LAID_MANIFEST: DeliveryCategory[] = [
     id: 4,
     name: "session-topology",
     label: "会话拓扑（laid）",
-    deliverables: ["plugin/scripts/session-observation.sh", "orchestration/session-config.env"],
+    deliverables: ["plugin/scripts/session-liveness.sh", "orchestration/session-liveness.env"],
     attribution: ["gap-tmux-session-topology-no-factory-definition"],
     criterion:
-      "session-observation 监控（唯一 observer）铺入 plugin/scripts/ + 生成 orchestration/session-config.env（laid 会话拓扑）",
+      "session-liveness 监控（唯一 observer）铺入 plugin/scripts/ + 生成 orchestration/session-liveness.env（laid 会话拓扑）",
   },
   {
     id: 5,

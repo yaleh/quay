@@ -27,7 +27,7 @@ All must hold before starting; if any fails, STOP and report which precondition 
 | tick docs laid down | `<root>/orchestration/orchestrator-loop-tick.md` and `<root>/docs/analysis/fast-mode-loop-tick.md` exist |
 | launch config laid down | `<root>/.claude/launch.settings.json` exists (quay-init `--loop` lays the default template; the consumer edits model/env per project) |
 | **sessions launched via the laid-down launcher** | outer and inner windows were started by **`bash <root>/plugin/scripts/quay-launch.sh <role>`** (or `bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer`), which carries `--settings` + the role-convention name (`quay-outer`/`quay-inner`) — **never** a hand-typed bare `claude` one-liner, **never** a non-role window name like `inner` |
-| inner session reachable | tmux session from `<root>/orchestration/session-config.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
+| inner session reachable | tmux session from `<root>/orchestration/session-liveness.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
 | derived laydown set green | the plugin's DERIVED laydown set is green — `bash <quay-source>/plugin/scripts/laydown-set-check.sh` reports `laydown_set_green: green`. **Gate = the derived set (lay what you verify), NOT the whole suite** — an unrelated suite failure must NOT block the cold start (`gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`; cross: `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`, same scope axis, different mechanism) |
 
 **Launch config is checked-in, not remembered** (background: `orchestration/orchestrator-loop-tick.md`
@@ -225,7 +225,7 @@ findings — never "complete".
 
 - `root = $(pwd)` (this skill runs inside the target project's outer session).
 - `project = basename "$root"`.
-- `session =` value of `SESSION_TMUX_SESSION=` in `<root>/orchestration/session-config.env`, else `${project}-0:0.0`.
+- `session =` value of `SESSION_TMUX_SESSION=` in `<root>/orchestration/session-liveness.env`, else `${project}-0:0.0`.
 
 ### 1b. Gate the derived laydown set — lay what you verify, not the whole suite (fail-closed)
 

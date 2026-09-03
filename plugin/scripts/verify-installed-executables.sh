@@ -3,13 +3,13 @@
 #
 # 原则（写进任务体，2026-08-03）：可执行文件一律原样复制，只生成配置；散文可以本地化，代码不行。
 # quay-init --loop 铺出的【可执行文件】必须与其 plugin 源逐字节相同（cmp -s）——历史缺陷正是
-# session-observation.sh 走了 render_substitutions 改写路径，导致安装副本与源永远无法 diff（升级时
+# session-liveness.sh 走了 render_substitutions 改写路径，导致安装副本与源永远无法 diff（升级时
 # 无法区分「生成的差异」与「用户改过的差异」）。本检查把那条原则做成机械断言。
 #
 # 配置类文件【显式列为例外】，理由是它们属于「可以生成」的一类：
 #   - plugin/loop/orchestrator-loop-tick.md、plugin/loop/fast-mode-loop-tick.md —— tick 文档
 #     是散文，placeholder 替换（本地化）是对的（AC8 用负控制钉住，不许改这条路径）；
-#   - orchestration/session-config.env —— quay-init --loop 生成的每项目配置（SESSION_TMUX_SESSION）。
+#   - orchestration/session-liveness.env —— quay-init --loop 生成的每项目配置（SESSION_TMUX_SESSION）。
 # 本检查只看 <workspace>/plugin/scripts/ 下的已铺文件：每个与 <plugin-src>/scripts/ 里同名源文件
 # 做 cmp。目标项目自己放进 plugin/scripts/ 的、源里没有的文件（quay 资产之外）不在本检查范围。
 #

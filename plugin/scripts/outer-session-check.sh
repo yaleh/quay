@@ -20,7 +20,7 @@
 # transcript 解析优先级（可靠 > 启发式；全程不猜会话名）：
 #   1. --transcript <path>                显式给出（测试接缝 / 调用方已从配置知道 outer transcript）
 #   2. SESSION_TRANSCRIPTS env            每行 "<名字> <会话id|绝对路径>"，取 outer 项
-#   3. orchestration/session-config.env 同格式（source 该文件）
+#   3. orchestration/session-liveness.env 同格式（source 该文件）
 #   4. 发现（启发式，标 source=discovery）：$HOME/.claude/projects/<root-slug>/ 里最晚修改、
 #      且不是自己（CLAUDE_CODE_SESSION_ID）的 *.jsonl。退化路径：TR_SOURCE=discovery 必须不静默——
 #      stderr 报警 + state=degraded（fail-closed），绝不报 healthy
@@ -28,7 +28,7 @@
 #
 # 用法：
 #   outer-session-check.sh [--session <sess>] [--transcript <path>] [--json]
-#     --session <sess>  目标 tmux 会话（默认：SESSION_TMUX_SESSION → orchestration/session-config.env）
+#     --session <sess>  目标 tmux 会话（默认：SESSION_TMUX_SESSION → orchestration/session-liveness.env）
 #     --transcript <p>  outer transcript.jsonl 路径（覆盖解析）
 #     --json            JSON 输出（机器消费）；默认人读表格 + 退出码
 #   TOPOLOGY_CLAUDE_PATTERN —— 覆盖「claude 进程」匹配串（测试用 exec -a claude-probe sleep 造进程）
@@ -73,12 +73,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# 会话解析（与 topology-check.sh / quay-topology.sh 同源）：显式 > 环境 > session-config.env > fail-closed。
+# 会话解析（与 topology-check.sh / quay-topology.sh 同源）：显式 > 环境 > session-liveness.env > fail-closed。
 if [ -z "$SESSION" ]; then
   SESSION="${SESSION_TMUX_SESSION:-}"
 fi
-if [ -z "$SESSION" ] && [ -f "$REPO_ROOT/orchestration/session-config.env" ]; then
-  _v="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$REPO_ROOT/orchestration/session-config.env" 2>/dev/null | head -1)"
+if [ -z "$SESSION" ] && [ -f "$REPO_ROOT/orchestration/session-liveness.env" ]; then
+  _v="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$REPO_ROOT/orchestration/session-liveness.env" 2>/dev/null | head -1)"
   [ -n "$_v" ] && SESSION="$_v"
 fi
 if [ -z "$SESSION" ]; then
@@ -124,7 +124,7 @@ outer_claude_pid() {
 }
 
 # transcript 解析。返回值经全局 TR_PATH/TR_SOURCE 传递。
-# 优先级：--transcript > SESSION_TRANSCRIPTS env > session-config.env > 发现（启发式）> none。
+# 优先级：--transcript > SESSION_TRANSCRIPTS env > session-liveness.env > 发现（启发式）> none。
 TR_PATH=""
 TR_SOURCE="none"
 resolve_transcript() {
@@ -133,7 +133,7 @@ resolve_transcript() {
     TR_PATH="$TRANSCRIPT"; TR_SOURCE="arg"; return 0
   fi
   # SESSION_TRANSCRIPTS env：每行 "<名字> <会话id|绝对路径>"，绝对路径直接用，会话 id 解析为
-  # $HOME/.claude/projects/<root-slug>/<id>.jsonl（与 session-observation.sh 的 transcript_for 同规则）。
+  # $HOME/.claude/projects/<root-slug>/<id>.jsonl（与 session-liveness.sh 的 transcript_for 同规则）。
   if [ -n "${SESSION_TRANSCRIPTS:-}" ]; then
     while read -r n v; do
       [ -n "${n:-}" ] || continue
@@ -145,8 +145,8 @@ resolve_transcript() {
       fi
     done <<< "$SESSION_TRANSCRIPTS"
   fi
-  # orchestration/session-config.env 里可能也有 SESSION_TRANSCRIPTS（管理者/项目配置）。
-  if [ -f "$REPO_ROOT/orchestration/session-config.env" ]; then
+  # orchestration/session-liveness.env 里可能也有 SESSION_TRANSCRIPTS（管理者/项目配置）。
+  if [ -f "$REPO_ROOT/orchestration/session-liveness.env" ]; then
     while read -r n v; do
       [ -n "${n:-}" ] || continue
       if [ "$n" = "outer" ]; then
@@ -155,7 +155,7 @@ resolve_transcript() {
           *) TR_PATH="$HOME/.claude/projects/$(printf '%s' "$REPO_ROOT" | tr '/' '-')/$v.jsonl"; TR_SOURCE="config"; return 0 ;;
         esac
       fi
-    done <<< "$(sed -n 's/^SESSION_TRANSCRIPTS=//p' "$REPO_ROOT/orchestration/session-config.env" 2>/dev/null)"
+    done <<< "$(sed -n 's/^SESSION_TRANSCRIPTS=//p' "$REPO_ROOT/orchestration/session-liveness.env" 2>/dev/null)"
   fi
   # 发现（结构性）：outer 窗口 claude 进程 PID → environ 的 CLAUDE_CODE_SESSION_ID → transcript
   # 文件名（进程↔会话 1:1，唯一不会认错的映射）。旧启发式「最晚 jsonl 排除 CLAUDE_CODE_SESSION_ID」

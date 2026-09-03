@@ -29,7 +29,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";export interface InstrumentSpec {
   /** subcommand name (bare — no extension) as used by the docs / entry-point CLI. */
   name: string;
-  /** file name under plugin/scripts (e.g. "session-observation.sh"). */
+  /** file name under plugin/scripts (e.g. "session-liveness.sh"). */
   file: string;
   kind: "bash" | "ts" | "mjs";
   /** what question does this instrument answer (the directory's admission contract, SPEC AC4). */

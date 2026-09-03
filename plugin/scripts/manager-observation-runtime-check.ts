@@ -53,7 +53,7 @@
 //                              derive the projects dir from <repo>, scan the <id> session
 //   --self [--root <repo>]     auto-pick the caller's own session: the most-recently-modified
 //                              jsonl in the projects dir that is NOT the inner (per
-//                              orchestration/session-config.env SESSION_TRANSCRIPTS) and NOT the
+//                              orchestration/session-liveness.env SESSION_TRANSCRIPTS) and NOT the
 //                              manager (per config managerSessionIds). Prints the picked session.
 //   --config <path>            JSON config override (managerTargets / managerTickLogs /
 //                              managerSessionIds / analysisVerbs)
@@ -314,10 +314,10 @@ function projectsDirForRepo(root: string): string {
   return path.join(os.homedir(), ".claude", "projects", abs.replace(/[\\/]+/g, "-"));
 }
 
-/** Inner session id from orchestration/session-config.env SESSION_TRANSCRIPTS, if present. */
+/** Inner session id from orchestration/session-liveness.env SESSION_TRANSCRIPTS, if present. */
 function innerSessionIdFromEnv(root: string): string | null {
   try {
-    const text = fs.readFileSync(path.join(root, "orchestration", "session-config.env"), "utf8");
+    const text = fs.readFileSync(path.join(root, "orchestration", "session-liveness.env"), "utf8");
     const m = text.match(/^SESSION_TRANSCRIPTS=.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/m);
     return m ? m[1] : null;
   } catch { return null; }

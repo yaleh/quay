@@ -22,7 +22,7 @@ import { execFileSync } from 'node:child_process';
  * The 5 formerly-plugin-external mechanism files' OLD paths (pre-move). Single source: the AC1
  * existence check asserts none of these exist on disk; the AC1b patterns derive from them.
  * (`scripts/heavy-op-token.sh` was removed 2026-08-06 — the heavy-op token was RETIRED entirely
- * by human ruling, see tasks/gap-session-observation-remove-shared-events-and-lock.)
+ * by human ruling, see tasks/gap-session-liveness-remove-shared-events-and-lock.)
  */
 export const oldPaths = [
   'orchestration/orchestrator-loop-tick.md',

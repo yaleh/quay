@@ -14,7 +14,7 @@
 // quay-init-tmux-detection.test.mjs — gap-init-guesses-the-tmux-session.
 //
 // The installer once guessed "<project>-0:0.0" as the tmux session (no detection) and wrote the
-// guess into orchestration/session-config.env (the monitor config). A monitor aimed at a
+// guess into orchestration/session-liveness.env (the monitor config). A monitor aimed at a
 // nonexistent session reports a LIVE inner as GONE — the false-negative the monitor must never
 // emit. The invariant: 检测不到真实会话时必须 fail-closed；绝不把猜测值写进监视器配置.
 //
@@ -167,9 +167,9 @@ test('AC1 — a UNIQUE matching tmux session is detected and written (no --tmux-
       `must report the detected session for the human to confirm:\n${r.stdout}`);
 
     // The detected session — NOT a guess — is written to the monitor config and the loop config.
-    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-config.env'), 'utf8');
+    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-liveness.env'), 'utf8');
     assert.match(envFile, /SESSION_TMUX_SESSION=ac1proj-0/,
-      'the DETECTED session must be written to orchestration/session-config.env');
+      'the DETECTED session must be written to orchestration/session-liveness.env');
     const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
     assert.match(cfg, /tmux_session:\s*ac1proj-0/,
       'the detected session must be written to .quay/config.yml loop.tmux_session');
@@ -201,7 +201,7 @@ test('AC2 — NO matching tmux session: fail-closed (exit 2), refuses to write, 
     assert.match(r.stderr, /--tmux-session/, 'must tell the human to pass --tmux-session explicitly');
     assert.match(r.stderr, /no universal default/, 'must state no default is guessed');
     // The negative control that defines the task: the guess must NOT be written.
-    assert.ok(!fs.existsSync(path.join(ws, 'orchestration', 'session-config.env')),
+    assert.ok(!fs.existsSync(path.join(ws, 'orchestration', 'session-liveness.env')),
       'AC2: must NOT write a guessed value into the monitor config');
     assert.ok(!fs.existsSync(path.join(ws, '.quay', 'config.yml')),
       'AC2: must NOT write the loop config with a guessed session');
@@ -228,14 +228,14 @@ test('AC3 — MULTIPLE matching sessions: require explicit --tmux-session (never
     assert.match(r.stderr, /ac3proj-0/, 'must list the matching sessions');
     assert.match(r.stderr, /ac3proj-1/, 'must list the matching sessions');
     assert.match(r.stderr, /--tmux-session/, 'must tell the human to pass --tmux-session');
-    assert.ok(!fs.existsSync(path.join(ws, 'orchestration', 'session-config.env')),
+    assert.ok(!fs.existsSync(path.join(ws, 'orchestration', 'session-liveness.env')),
       'AC3: must NOT pick one and write it (no guess, no first-match)');
 
     // With an explicit --tmux-session the install proceeds and writes the explicit value.
     const r2 = runInit(ws, ['--loop', '--root', ws, '--project', 'ac3proj', '--tmux-session', 'ac3proj-1'], env);
     assert.equal(r2.status, 0, `explicit --tmux-session must succeed:\n${r2.stderr}`);
     assert.match(r2.stdout, /using explicit --tmux-session: ac3proj-1/, 'must report the explicit session');
-    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-config.env'), 'utf8');
+    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-liveness.env'), 'utf8');
     assert.match(envFile, /SESSION_TMUX_SESSION=ac3proj-1/, 'the explicit value must be written');
     assert.equal(tmux(['has-session', '-t', 'ac3proj-1'], env).status, 0, 'AC5: the written value must resolve');
   } finally {
@@ -263,7 +263,7 @@ test('explicit --tmux-session takes priority over detection (the fallback the hu
       'the explicit value must be used, not the detected one');
     assert.ok(!/detected tmux session/.test(r.stdout),
       'an explicit --tmux-session must suppress detection');
-    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-config.env'), 'utf8');
+    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-liveness.env'), 'utf8');
     assert.match(envFile, /SESSION_TMUX_SESSION=myexplicit/, 'the explicit value must be written');
   } finally {
     // AC2b: kill-session per created session (never kill-server — see socketPathFor comment).

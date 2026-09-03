@@ -159,11 +159,11 @@ test("AC1/AC7 — `quay manager adopt` requires a project root and is dry-runnab
   assert.equal(noRoot.status, 1, `adopt without root must fail:\n${noRoot.stdout}\n${noRoot.stderr}`);
   assert.match(noRoot.stderr, /missing required <root>/);
 
-  // A real (tmp) root with a session-config.env → three-state dry-run disposition.
+  // A real (tmp) root with a session-liveness.env → three-state dry-run disposition.
   const tmp = makeTmp();
   try {
     fs.mkdirSync(path.join(tmp, "orchestration"), { recursive: true });
-    fs.writeFileSync(path.join(tmp, "orchestration", "session-config.env"), "SESSION_TMUX_SESSION=proj-0\n", "utf8");
+    fs.writeFileSync(path.join(tmp, "orchestration", "session-liveness.env"), "SESSION_TMUX_SESSION=proj-0\n", "utf8");
     const r = spawnSync("node", ["--experimental-strip-types", QUAY_CLI, "manager", "adopt", tmp, "--dry-run"], { encoding: "utf8" });
     assert.equal(r.status, 0, `adopt --dry-run must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /would-adopt/, "must print the would-adopt disposition");
@@ -208,10 +208,10 @@ test("AC3 — `quay manager adopt --dry-run` against a REAL outer window yields 
     const tr = path.join(tmp, "outer.jsonl");
     fs.writeFileSync(tr, '{"type":"user","message":{"role":"user","content":"adopt me"}}\n', "utf8");
 
-    // the project root to adopt, with its session-config.env pointing at the hermetic session.
+    // the project root to adopt, with its session-liveness.env pointing at the hermetic session.
     const root = path.join(tmp, "proj");
     fs.mkdirSync(path.join(root, "orchestration"), { recursive: true });
-    fs.writeFileSync(path.join(root, "orchestration", "session-config.env"), "SESSION_TMUX_SESSION=mgr-adopt-h\n", "utf8");
+    fs.writeFileSync(path.join(root, "orchestration", "session-liveness.env"), "SESSION_TMUX_SESSION=mgr-adopt-h\n", "utf8");
 
     // SESSION_TRANSCRIPTS: name "outer" → hermetic transcript (the checker's config source, avoiding
     // the discovery heuristic and its fail-closed degraded state).

@@ -27,7 +27,7 @@
 # 用法：
 #   bash plugin/scripts/dead-loop-check.sh [--root <dir>] [--window <N 分钟>] [--json]
 #     --root            目标项目根（git 仓库；默认 = 本仓库）
-#     --window          时间窗分钟数（默认 30；与 session-observation.sh OVERDUE_MIN 同量级；
+#     --window          时间窗分钟数（默认 30；与 session-liveness.sh OVERDUE_MIN 同量级；
 #                       周期锚点 20 分钟 ⇒ 30 分钟窗内健康循环必然至少落一次驱动或提交）
 #     --transcript-dir  显式 transcript 目录（测试接缝；默认 $HOME/.claude/projects/<slug>）
 #     --json            输出 JSON（逐字段归因，供机械消费）
@@ -85,7 +85,7 @@ esac
 if [ -z "$root" ]; then
   root="$(cd "${_dlc_script_dir}/../.." && pwd)"
 fi
-# 默认 transcript 目录 = $HOME/.claude/projects/<slug>（slug = 根路径 / -> -，同 session-observation.sh）。
+# 默认 transcript 目录 = $HOME/.claude/projects/<slug>（slug = 根路径 / -> -，同 session-liveness.sh）。
 if [ -z "$transcript_dir" ]; then
   transcript_dir="${HOME}/.claude/projects/$(printf '%s' "$root" | tr '/' '-')"
 fi
@@ -94,9 +94,9 @@ fi
 
 # dl_latest_user_msg_epoch <transcript> —— 该 transcript 最近一条顶层 type=user 记录的时间戳转
 # epoch；输出空 = 取不到（无记录/解析失败）。模式 `"type":"user"` 只命中顶层：content 块的类型是
-# text/thinking/tool_use/tool_result，message 对象的类型是 message——与 session-observation.sh 同源。
+# text/thinking/tool_use/tool_result，message 对象的类型是 message——与 session-liveness.sh 同源。
 # 性能：先只扫文件尾 500 行（最近一条 user 消息在活跃会话里必然近文件尾；tail 界 500 与
-# session-observation.sh 的 transcript_last_message_type 同约定），无匹配再全扫兜底。
+# session-liveness.sh 的 transcript_last_message_type 同约定），无匹配再全扫兜底。
 dl_latest_user_msg_epoch() {
   local t=$1 line ts
   line=$(tail -n 500 "$t" 2>/dev/null | grep '"type":"user"' | tail -1)
@@ -274,7 +274,7 @@ fi
 #   — INDEPENDENT of backlog emptiness: queue-empty (healthy idle) vs nobody-driving (dead-loop)
 #   are TWO STATES that every existing criterion confounds. This check keeps them separate.
 #
-# The two signals are the SAME family the session-observation monitor / /live observation already
+# The two signals are the SAME family the session-liveness monitor / /live observation already
 # use (transcript user-message timestamps + git commit time), but THIS criterion combines them
 # into a standing L2 check that ships with the loop.
 #
@@ -311,7 +311,7 @@ fi
 
 set -uo pipefail
 
-# ── Self-locate (same BASH_SOURCE convention as session-observation.sh / inner-state.sh) ─────────
+# ── Self-locate (same BASH_SOURCE convention as session-liveness.sh / inner-state.sh) ─────────
 REPO_ROOT="${DEAD_LOOP_ROOT:-}"
 if [ -z "$REPO_ROOT" ]; then
   _dl_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -321,7 +321,7 @@ fi
 WINDOW_MIN="${DEAD_LOOP_WINDOW_MIN:-30}"
 
 # ── transcript_last_user_epoch — 目标 transcript 里最近一条 type=user 记录的时间戳转 epoch ───
-# 「最近的 user 消息」= 最近一条顶层 `"type":"user"` 记录的 timestamp。与 session-observation.sh 的
+# 「最近的 user 消息」= 最近一条顶层 `"type":"user"` 记录的 timestamp。与 session-liveness.sh 的
 # last_user_input_epoch 同源（Claude Code 的工具回执也是 type=user 记录，活跃循环在推进）。
 # 输出空 = 取不到（transcript 不存在 / 无 user 记录 / 解析失败）——该 transcript 不算 alive 信号。
 transcript_last_user_epoch() {

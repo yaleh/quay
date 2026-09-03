@@ -2503,7 +2503,7 @@ export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, nowMs 
 // ── AC95: six new views (dashboard · system · manager · tests · sessions · architecture) ───────────
 // Each new view reads the MECHANISM that produces its numbers (AC2):
 //   system       → resource-gate.sh + process-budget.sh (text output)
-//   manager      → loop-driver-check.sh + session-observation.sh + observer-registry.conf + ready-pool-check.ts
+//   manager      → loop-driver-check.sh + session-liveness.sh + observer-registry.conf + ready-pool-check.ts
 //   tests        → .quay/verification-round.jsonl + .quay/full-suite-state.json (the suite-state writer)
 //   sessions     → claude agents --json (running) + transcript-dir scan (ended) + transcript tails
 //   architecture → git log per packages/* path + git worktree list (filesystem/git facts)
@@ -2530,7 +2530,7 @@ function resolvePluginScript(rel: string): string | null {
 
 /**
  * Run a plugin script with a HARD deadline and a process-group kill — the robust path for bash
- * scripts that may fork background children (session-observation.sh spawns `sleep` children and defers
+ * scripts that may fork background children (session-liveness.sh spawns `sleep` children and defers
  * SIGTERM while they run; a plain execFileSync timeout would block the serve event loop for the
  * child's whole sleep). Spawns detached (own process group), redirects stdout to a temp file so a
  * grandchild inheriting the stdout fd can never hold 'close' open, and on timeout SIGKILLs the
@@ -2726,7 +2726,7 @@ export interface ManagerResult {
 }
 
 export const LOOP_DRIVER_CHECK_REL = "../../../plugin/scripts/loop-driver-check.sh";
-export const SESSION_LIVENESS_REL = "../../../plugin/scripts/session-observation.sh";
+export const SESSION_LIVENESS_REL = "../../../plugin/scripts/session-liveness.sh";
 export const OBSERVER_REGISTRY_CONF = "../../../orchestration/observer-registry.conf";
 
 /** Parse loop-driver-check.sh --json's single JSON document into structured fields. Pure. */
@@ -2741,7 +2741,7 @@ export function parseLoopDriverJson(text: string): Omit<LoopDriverReading, "stat
   };
 }
 
-/** Parse session-observation.sh --once --json's { sessions: [...] } document into rows. Pure.
+/** Parse session-liveness.sh --once --json's { sessions: [...] } document into rows. Pure.
  *  (AC99 — the Manager view's machine-readable interface.) */
 export function parseSessionLivenessJson(text: string): Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> {
   const out: Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> = [];
@@ -2761,7 +2761,7 @@ export function parseSessionLivenessJson(text: string): Array<{ name: string; al
 }
 
 /**
- * Parse session-observation.sh --once's `SESSION-STATUS <name> alive=… [pid=…] halted=…` rows. Pure.
+ * Parse session-liveness.sh --once's `SESSION-STATUS <name> alive=… [pid=…] halted=…` rows. Pure.
  *
  * pid is OPTIONAL: the seam emits `alive=0 halted=0` (no `pid=` field) when the target's session
  * is gone — a dead layer must still surface as a GONE card, never be silently dropped.
@@ -2801,12 +2801,12 @@ export function parseObserverRegistry(text: string): ObserverRow[] {
 }
 
 /**
- * Build explicit SESSION_TARGETS for the manager page's session-observation probe: two named targets
+ * Build explicit SESSION_TARGETS for the manager page's session-liveness probe: two named targets
  * (`outer → <session>:outer`, `inner → <session>:inner`) derived from the workspace's
- * orchestration/session-config.env SESSION_TMUX_SESSION.
+ * orchestration/session-liveness.env SESSION_TMUX_SESSION.
  *
  * The env override is scoped to THIS probe (readManager) — it never mutates the shared
- * orchestration/session-config.env, so the outer/inner liveness mounts that source that file
+ * orchestration/session-liveness.env, so the outer/inner liveness mounts that source that file
  * keep their existing single target (AC3: existing mounts must not be disturbed).
  *
  * Returns null when the session name is unavailable (no env file / no SESSION_TMUX_SESSION) — the
@@ -2817,7 +2817,7 @@ export function parseObserverRegistry(text: string): ObserverRow[] {
 export function buildManagerSessionTargets(root: string): string | null {
   let text: string;
   try {
-    text = fs.readFileSync(path.join(root, "orchestration", "session-config.env"), "utf8");
+    text = fs.readFileSync(path.join(root, "orchestration", "session-liveness.env"), "utf8");
   } catch {
     return null;
   }
@@ -2843,9 +2843,9 @@ async function runLoopDriverProbe(root: string): Promise<LoopDriverReading> {
   return { status: "ok", reason: null, ...parseLoopDriverJson(r.stdout) };
 }
 
-/** session-observation.sh --once --json → per-target liveness rows (--once is REQUIRED: without it
+/** session-liveness.sh --once --json → per-target liveness rows (--once is REQUIRED: without it
  *  the script MOUNTS and polls forever — the serve path must never block the event loop on it).
- *  The manager page is three-layer (Outer / Inner); the shared orchestration/session-config.env
+ *  The manager page is three-layer (Outer / Inner); the shared orchestration/session-liveness.env
  *  only carries the OUTER's single inner target (管理者多目标配置已外移到 ~/.quay-global), so we
  *  pass an explicit SESSION_TARGETS override registering outer + inner — scoped to this probe,
  *  never mutating the env file the outer/inner mounts source (AC3). AC99: the --json output is
@@ -2855,7 +2855,7 @@ async function runLivenessProbe(root: string, targets: string | null): Promise<S
   const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000, targets ? { SESSION_TARGETS: targets } : undefined);
   const rows = r.stdout == null ? [] : parseSessionLivenessJson(r.stdout);
   if (r.stdout == null) return { status: "empty", reason: r.reason, sessions: [] };
-  if (rows.length === 0) return { status: "empty", reason: "session-observation 无 SESSION-STATUS 行（无观测目标）", sessions: [] };
+  if (rows.length === 0) return { status: "empty", reason: "session-liveness 无 SESSION-STATUS 行（无观测目标）", sessions: [] };
   return { status: "ok", reason: null, sessions: rows };
 }
 
@@ -3002,7 +3002,7 @@ async function readDevelopLead(root: string): Promise<number | null> {
 
 /**
  * Manager view — LIGHT path for the dashboard display surface (gap-webui-dashboard-load-time-
- * optimization AC1): loop-driver + session-observation ONLY, WITHOUT the pool probe.
+ * optimization AC1): loop-driver + session-liveness ONLY, WITHOUT the pool probe.
  *
  * The dashboard's mgrCard (serve-handlers.ts renderDashboardPage) shows only loopDriver.verdict +
  * the alive-session count — it never renders pool/floor/deficit/cap. readPoolMetrics (AC136) now
@@ -3038,7 +3038,7 @@ export async function readManagerLight(root: string): Promise<ManagerResult> {
   };
 }
 
-/** Manager view: loop-driver + session-observation + observer registry + promotion-driver pool metrics. */
+/** Manager view: loop-driver + session-liveness + observer registry + promotion-driver pool metrics. */
 export async function readManager(root: string): Promise<ManagerResult> {
   // AC1 (gap-webui-dashboard-manager-slow-parallelize): the four async probes are independent — run
   // them CONCURRENTLY. readPoolMetrics (AC136) reads the promotion-driver's round carrier — a small
@@ -3257,7 +3257,7 @@ export function readTests(root: string): TestsResult {
   return { status: statePathStatus, reason, runs };
 }
 
-// ── Sessions view (session-observation + resolved transcript tails) ───────────────────────────────────
+// ── Sessions view (session-liveness + resolved transcript tails) ───────────────────────────────────
 
 export interface SessionMessage {
   time: string;
@@ -3373,7 +3373,7 @@ export function readTranscriptTail(transcriptPath: string, maxMsgs = SESSIONS_TR
 
 // ── `claude agents --json` discovery (gap-webui-session-discovery-claude-agents-json) ───────────────
 // The official CLI session registry replaces the old three-role tmux-guessing discovery
-// (buildManagerSessionTargets → session-observation.sh). It lists EVERY running session — interactive
+// (buildManagerSessionTargets → session-liveness.sh). It lists EVERY running session — interactive
 // AND `-p`/headless alike (SPEC §2.2 更正段) — but only RUNNING ones: ended sessions are absent from
 // the registry (SPEC §2.4) and are discovered separately by scanning the transcript directory.
 
@@ -3539,7 +3539,7 @@ export function isValidSessionId(sessionId: string): boolean {
   return SESSION_ID_RE.test(sessionId);
 }
 
-/** The per-project transcript directory slug — the same `tr '/' '-'` transform session-observation.sh
+/** The per-project transcript directory slug — the same `tr '/' '-'` transform session-liveness.sh
  *  uses (`_sl_dynamic_transcript`), so `/home/yale/work/quay` → `-home-yale-work-quay`. */
 export function projectSlug(root: string): string {
   return root.split("/").join("-");

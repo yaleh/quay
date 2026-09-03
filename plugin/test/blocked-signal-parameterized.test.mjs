@@ -448,7 +448,7 @@ test("Contract measure — a --target outer invocation greps the 'blocked-signal
 // fallback is exercised hermetically; the seam is the exact function `capturePaneLive` wraps.
 
 // Reusable env-clearing helper: with these set to empty strings the CLI child cannot resolve any
-// tmux target (env override empty, no orchestration/session-config.env in the tmp workspace), so a
+// tmux target (env override empty, no orchestration/session-liveness.env in the tmp workspace), so a
 // live capture is guaranteed unavailable — hermetic regardless of whether the test runner itself runs
 // inside tmux.
 function blankTmuxEnv() {
@@ -565,7 +565,7 @@ test("candidate B — no panePath and no resolvable tmux target ⇒ unobserved n
   const cli = await import(CLI);
   const tmp = makeTmpWorkspace();
   try {
-    // Blank every tmux/session env and use a tmp workspace with NO orchestration/session-config.env
+    // Blank every tmux/session env and use a tmp workspace with NO orchestration/session-liveness.env
     // ⇒ resolveTmuxTarget returns null ⇒ the live fallback is a no-op, never a guessed session.
     const saved = {};
     for (const k of ["SESSION_TMUX_SESSION", "SESSION_TMUX_SOCKET", "SESSION_TMUX_TARGET", "INNER_BLOCKED_TMUX_TARGET"]) {
@@ -656,7 +656,7 @@ test("candidate B — CLI: a STALE --pane file with live unavailable ⇒ unreada
   }
 });
 
-test("candidate B — resolveTmuxTarget precedence: explicit env > session env > session-config.env > null (never a guess)", async () => {
+test("candidate B — resolveTmuxTarget precedence: explicit env > session env > session-liveness.env > null (never a guess)", async () => {
   const cli = await import(CLI);
   const tmp = makeTmpWorkspace();
   const saved = {};
@@ -681,11 +681,11 @@ test("candidate B — resolveTmuxTarget precedence: explicit env > session env >
     process.env.INNER_BLOCKED_TMUX_TARGET = "explicit-sess:win";
     assert.equal(cli.resolveTmuxTarget(tmp, "inner"), "explicit-sess:win");
 
-    // 5) No env ⇒ the <root>/orchestration/session-config.env file is the fallback.
+    // 5) No env ⇒ the <root>/orchestration/session-liveness.env file is the fallback.
     delete process.env.SESSION_TMUX_SESSION;
     delete process.env.SESSION_TMUX_TARGET;
     delete process.env.INNER_BLOCKED_TMUX_TARGET;
-    const envFile = path.join(tmp, "orchestration", "session-config.env");
+    const envFile = path.join(tmp, "orchestration", "session-liveness.env");
     fs.mkdirSync(path.dirname(envFile), { recursive: true });
     fs.writeFileSync(envFile, 'SESSION_TMUX_SESSION="from-file"\n', "utf8");
     assert.equal(cli.resolveTmuxTarget(tmp, "inner"), "from-file:inner");

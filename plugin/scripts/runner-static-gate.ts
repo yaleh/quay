@@ -162,7 +162,7 @@ run_static_checks() {
   # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
   # A done task may leave ACs unchecked ONLY if a successor `## Carries` section names them — the
   # gate on the gates: nothing previously noticed a done task closing with half its ACs unchecked and
-  # no carrier (measured 2026-08-03: session-observation closed done with 8/16 unchecked, stage-2
+  # no carrier (measured 2026-08-03: session-liveness closed done with 8/16 unchecked, stage-2
   # existed only because the outer happened to look). Wired here (same site as task-contract-check)
   # so CI — whose only test step is `bash scripts/test.sh` — inherits it for free. The legacy
   # baseline (docs/analysis/task-ac-carryover-baseline.md) is shrink-only: exit 1 on a NEW unowned
@@ -207,7 +207,7 @@ run_static_checks() {
   # ADR-016 Amendment 2026-08-04 boundary (c): whole-screen equality/hash of capture-pane is
   # forbidden. Code-position detection (a capture-pane result flowing into md5sum/sha1sum/cksum in
   # a shell script OR a fenced ```bash instruction block of a shipped/live tick doc), band 0..1
-  # (the ONE active legacy observer — session-observation.sh — is carried by the sibling task; a NEW
+  # (the ONE active legacy observer — session-liveness.sh — is carried by the sibling task; a NEW
   # active violation red-lights the commit). Tick docs are scanned for their bash blocks because
   # shipped .md instruction blocks are same-weight as .sh (gap-adr016-md5-ban-violated-in-shipped-
   # md-and-checker-scope-gap AC3).

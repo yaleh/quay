@@ -15,7 +15,7 @@
 # 用法：
 #   quay-topology.sh [--session <sess>] [--dry-run]
 #     --session <sess>  目标 tmux 会话（默认：TOPOLOGY_SESSION → SESSION_TMUX_SESSION →
-#                       orchestration/session-config.env 的 SESSION_TMUX_SESSION）
+#                       orchestration/session-liveness.env 的 SESSION_TMUX_SESSION）
 #     --dry-run          只打印将执行的命令，不实际改动（校验用）
 #
 # 测试接缝：
@@ -54,13 +54,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# 会话解析：--session / TOPOLOGY_SESSION → 环境 → session-config.env → fail-closed。
+# 会话解析：--session / TOPOLOGY_SESSION → 环境 → session-liveness.env → fail-closed。
 # 绝不猜一个会话名（gap-init-guesses-the-tmux-session 同源）。
 if [ -z "$SESSION" ]; then
   SESSION="${SESSION_TMUX_SESSION:-}"
 fi
-if [ -z "$SESSION" ] && [ -f "$REPO_ROOT/orchestration/session-config.env" ]; then
-  _v="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$REPO_ROOT/orchestration/session-config.env" 2>/dev/null | head -1)"
+if [ -z "$SESSION" ] && [ -f "$REPO_ROOT/orchestration/session-liveness.env" ]; then
+  _v="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$REPO_ROOT/orchestration/session-liveness.env" 2>/dev/null | head -1)"
   [ -n "$_v" ] && SESSION="$_v"
 fi
 if [ -z "$SESSION" ]; then
@@ -87,7 +87,7 @@ window_exists() {
   tmux list-windows -t "$1" -F '#{window_name}' 2>/dev/null | grep -qx "$2"
 }
 
-# pane 本体或其任一子进程是 claude（与 session-observation.sh 的 session_pid 同判据，但遍历全部
+# pane 本体或其任一子进程是 claude（与 session-liveness.sh 的 session_pid 同判据，但遍历全部
 # 子进程而非只取第一个——新起的子进程在 exec 前是瞬时 shell，只取第一个会误判 no-claude）。
 has_claude_child() {
   local sess="$1" role="$2" ppid cpid cmd

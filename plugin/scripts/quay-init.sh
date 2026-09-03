@@ -50,7 +50,7 @@
 #   --repo-root <path>     the target project root, recorded in .quay/config.yml loop.repo_root
 #                          (default: --root)
 #   --tmux-session <sess>  tmux session, recorded in .quay/config.yml loop.tmux_session and
-#                          orchestration/session-config.env (default: DETECTED from
+#                          orchestration/session-liveness.env (default: DETECTED from
 #                          `tmux list-sessions` by project name; when nothing unique is detected
 #                          the install FAILS CLOSED — never a guessed "<project>-0:0.0", see
 #                          detect_tmux_session / gap-init-guesses-the-tmux-session)
@@ -871,7 +871,7 @@ PYEOF
   rm -f "$laid_rel_file"
 }
 
-# write_session_env: generate/update orchestration/session-config.env with the per-project
+# write_session_env: generate/update orchestration/session-liveness.env with the per-project
 # default-target session (gap-quay-init-rewrites-an-executable-instead-of-generating-config AC1/AC2).
 # Principle: 可执行文件一律原样复制，只生成配置 — the per-project session is CONFIG (可以生成的一类),
 # so quay-init writes it here and the script (copied verbatim) reads it. A pre-existing file's other
@@ -879,10 +879,10 @@ PYEOF
 # only the SESSION_TMUX_SESSION line is added/updated. This file is per-project state, never packaged.
 write_session_env() {
   if [ "$DRY_RUN" = true ]; then
-    echo "  would-write: orchestration/session-config.env (SESSION_TMUX_SESSION=$TMUX_SESSION)"
+    echo "  would-write: orchestration/session-liveness.env (SESSION_TMUX_SESSION=$TMUX_SESSION)"
     return
   fi
-  local env_file="$WORKSPACE_ROOT/orchestration/session-config.env"
+  local env_file="$WORKSPACE_ROOT/orchestration/session-liveness.env"
   local tmp
   tmp="$(mktemp)"
   if [ -f "$env_file" ]; then
@@ -894,7 +894,7 @@ write_session_env() {
   printf 'SESSION_TMUX_SESSION=%s\n' "$TMUX_SESSION" >> "$tmp"
   cp "$tmp" "$env_file"
   rm -f "$tmp"
-  echo "  wrote: orchestration/session-config.env (SESSION_TMUX_SESSION=$TMUX_SESSION)"
+  echo "  wrote: orchestration/session-liveness.env (SESSION_TMUX_SESSION=$TMUX_SESSION)"
 }
 
 # validate_worktree_root (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs):
@@ -2207,7 +2207,7 @@ PYEOF
     copy_one "$src" "$dst" managed
   done
 
-  # Per-project session config (SESSION_TMUX_SESSION): written to orchestration/session-config.env
+  # Per-project session config (SESSION_TMUX_SESSION): written to orchestration/session-liveness.env
   # so the session topology/check scripts (quay-topology.sh / topology-check.sh / session-bootstrap.sh)
   # resolve the real session name without a guessed default. The observer that previously consumed
   # this config was retired 2026-09-03; the session-name config itself is still needed by topology.
@@ -2282,7 +2282,7 @@ PYEOF
   # AC6/AC7 (gap-quay-init-rewrites-an-executable-instead-of-generating-config): after the lay-down,
   # assert EVERY installed executable under plugin/scripts/ is byte-identical to its plugin source.
   # Config-class files are explicit exceptions (tick docs — prose, laid verbatim but still localizable
-  # via the `managed` mode; orchestration/session-config.env — 生成配置). Fail-closed: a future
+  # via the `managed` mode; orchestration/session-liveness.env — 生成配置). Fail-closed: a future
   # regression that re-introduces install-time rewriting of an executable stops the install here.
   # The executor is every quay-init --loop run (incl. cold-start-e2e in CI).
   if [ "$DRY_RUN" != true ] && [ -f "$PLUGIN_ROOT/scripts/verify-installed-executables.sh" ]; then
