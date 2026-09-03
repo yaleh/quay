@@ -8,6 +8,8 @@ labels:
 parent: null
 children: []
 extra:
+  depends_on:
+    - gap-retire-session-liveness
   schema: execution
 ---
 ## Proposal
