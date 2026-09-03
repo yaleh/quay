@@ -1860,6 +1860,22 @@ test("extractFirstFailureLine — 取第一条真实失败信号行；无信号/
   );
 });
 
+test("extractFirstFailureLine — 标题行/静态检查良性判词/✔通过测试排在真实失败前 ⇒ 取真实断言（⛔ 归因错位到 split-or-commit 标题）", () => {
+  const log = [
+    "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) ==",
+    "checker-mechanical-spine-check — 115 checker(s), 0 violation(s), 0 exempted",
+    "PASS: 1711 task(s) checked — no split-or-commit violations",
+    "✔ assertionSignaturesFromSuiteLog — 提取并归一化 AssertionError 签名（[ERR_ASSERTION] 变体）",
+    "✖ AC3 负控制 — 饱和且静默但在飞变 ⇒ 不发 (in-flight worktree set changes every round)",
+    "  AssertionError [ERR_ASSERTION]: worktree add wt-2 failed: cannot change to session-liveness repo",
+    "__PERFILE__ duration_ms=18921 plugin/test/session-liveness-scd-inflight-changing.test.mjs passed=false end_ms=1",
+  ].join("\n");
+  const line = extractFirstFailureLine(log);
+  assert.match(line, /AssertionError \[ERR_ASSERTION\]: worktree add wt-2 failed/, "取真实断言原文");
+  assert.doesNotMatch(line, /split-or-commit whole-store check/, "⛔ 标题行被当失败摘要");
+  assert.doesNotMatch(line, /0 violation\(s\)/, "⛔ 静态检查良性判词被当失败摘要");
+});
+
 test("AC1 (能取假) — suite 红 needs-human 记录「失败步/判词」含真实 AssertionError 原文（⛔ 恒定 suite red ⇒ 假）", async (t) => {
   const m = makeMechRepo("nh-real-error");
   const runId = "wk-prod-nh-real-error";
@@ -1886,6 +1902,21 @@ test("AC1 (能取假) — suite 红 needs-human 记录「失败步/判词」含�
   assert.doesNotMatch(body, /失败步\/判词：[^\n]*suite red/, "注记不再是恒定的 suite red");
 });
 
+test("AC1（真实形）— suite 日志含标题行/静态检查良性判词 + 真实 AssertionError ⇒ reason 取真实断言，⛔ 标题行", async (t) => {
+  const m = makeMechRepo("nh-real-error-shaped");
+  const runId = "wk-prod-nh-real-error-shaped";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn(mechOpts(m, runId, {
+    suiteCommand: ["bash", "-c",
+      "echo '== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =='; " +
+      "echo 'checker-mechanical-spine-check — 115 checker(s), 0 violation(s), 0 exempted'; " +
+      "echo 'AssertionError [ERR_ASSERTION]: probe must be alive'; exit 1"],
+  }));
+  assert.equal(r.outcome, "red");
+  assert.match(r.reason ?? "", /probe must be alive/, "reason 携带真实断言原文（⛔ 标题行）");
+  assert.doesNotMatch(r.reason ?? "", /split-or-commit whole-store check/, "reason ⛔ 标题行");
+});
+
 test("AC2 (负控制) — suite 输出无可提取信号 ⇒ reason 回退通用文案「suite red」（⛔ 伪造/截断出误导内容 ⇒ 假）", async (t) => {
   // ① 零输出、仅非零退出码。
   const m = makeMechRepo("nh-no-signal");
@@ -1901,6 +1932,21 @@ test("AC2 (负控制) — suite 输出无可提取信号 ⇒ reason 回退通用
   const r2 = await runMechanicalFanIn(mechOpts(m2, runId, { suiteCommand: ["bash", "-c", "echo 'refresh-worktree-quay: copied 499 file(s)'; exit 1"] }));
   assert.equal(r2.outcome, "red");
   assert.equal(r2.reason, "suite red", "benign non-signal output ⇒ fallback (⛔ not the benign line)");
+});
+
+test("AC3 (负控制) — split-or-commit 真失败 ⇒ reason 仍携带其真实 violation（⛔ 改提取逻辑后丢真失败）", async (t) => {
+  const m = makeMechRepo("nh-soc-real-fail");
+  const runId = "wk-prod-nh-soc-real-fail";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn(mechOpts(m, runId, {
+    suiteCommand: ["bash", "-c",
+      "echo '== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =='; " +
+      "echo 'FAIL: 2 split-or-commit violation(s) found:'; " +
+      "echo 'violation: PARENT-DONE-IFF-CHILDREN: task \"parent\" is done but has 1 non-done child'; exit 1"],
+  }));
+  assert.equal(r.outcome, "red");
+  assert.match(r.reason ?? "", /split-or-commit violation/, "负控制：真 split-or-commit 失败仍携带其真实 violation");
+  assert.doesNotMatch(r.reason ?? "", /^== split-or-commit whole-store check/, "reason ⛔ 标题行");
 });
 
 test("AC3 — landed 后清理该任务名下全部历史 attempt 日志；兄弟任务 `<task>-<suffix>` 日志保留（⛔ 只增不减/误删 ⇒ 假）", async (t) => {

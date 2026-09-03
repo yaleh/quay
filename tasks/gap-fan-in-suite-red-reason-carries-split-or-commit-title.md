@@ -28,10 +28,10 @@ fan-in suite red 时，`worker-outcome.jsonl` 的 `mechanical_fan_in.reason` / `
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：grep 一条真实 fan-in suite red 的 `worker-outcome` 记录，`mechanical_fan_in.reason` 含真实失败摘要（session-liveness / AssertionError 原文），不再是 `== split-or-commit ... ==` 标题。
-- [ ] AC2（既有测试转绿）：`plugin/test/worker-driver-fan-in.test.mjs` 的 AC1「suite red reason carries the real assertion text」通过。
-- [ ] AC3（负控制）：一个真 split-or-commit 检查失败的样本，reason 仍携带 split-or-commit 的真实失败（不因改提取逻辑而丢真失败）。
-- [ ] AC4（既有不回归）：全量 suite 绿。
+- [x] AC1（能取假）：grep 一条真实 fan-in suite red 的 `worker-outcome` 记录，`mechanical_fan_in.reason` 含真实失败摘要（session-liveness / AssertionError 原文），不再是 `== split-or-commit ... ==` 标题。
+- [x] AC2（既有测试转绿）：`plugin/test/worker-driver-fan-in.test.mjs` 的 AC1「suite red reason carries the real assertion text」通过。
+- [x] AC3（负控制）：一个真 split-or-commit 检查失败的样本，reason 仍携带 split-or-commit 的真实失败（不因改提取逻辑而丢真失败）。
+- [ ] AC4（既有不回归）：全量 suite 绿。（待外部）
 
 ## Definition of Done
 
