@@ -2,7 +2,7 @@
 id: gap-suite-scheduler-legacy-phase-splitting-cleanup
 title: 统一清理测试调度 legacy 分相——PHASE_OVERLAP + A watcher + run_selected fallback +
   「serial ALONE」误导注释
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -32,8 +32,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`scripts/test.sh:1093`「serial ALONE」注释不再误导——标明 legacy fallback（或 legacy 全删），统一调度器语义（serial∥lowconc∥main 并发）在注释里可见；（⛔ 仍有无标 legacy 的「ALONE/先跑」注释 ⇒ 假——复查补三处同形：`scripts/test.sh:1717`「serial runs sequentially BEFORE lowconc」bucket 路径、`scripts/test.sh:1387`「ALONE at its own concurrency」scoped `--group lowconc`、及 `:1093` 本体）。
-- [ ] AC2（能取假，一致性）：PHASE_OVERLAP / MAIN_TAIL_OVERLAP / run_selected 要么全删、要么全标 legacy——无「半退役半活」的中间态；（⛔ 残留未标 legacy 的分相引用 ⇒ 假）。
+- [x] AC1（能取假）：`scripts/test.sh:1093`「serial ALONE」注释不再误导——标明 legacy fallback（或 legacy 全删），统一调度器语义（serial∥lowconc∥main 并发）在注释里可见；（⛔ 仍有无标 legacy 的「ALONE/先跑」注释 ⇒ 假——复查补三处同形：`scripts/test.sh:1717`「serial runs sequentially BEFORE lowconc」bucket 路径、`scripts/test.sh:1387`「ALONE at its own concurrency」scoped `--group lowconc`、及 `:1093` 本体）。
+- [x] AC2（能取假，一致性）：PHASE_OVERLAP / MAIN_TAIL_OVERLAP / run_selected 要么全删、要么全标 legacy——无「半退役半活」的中间态；（⛔ 残留未标 legacy 的分相引用 ⇒ 假）。
 
 ## Definition of Done
 
