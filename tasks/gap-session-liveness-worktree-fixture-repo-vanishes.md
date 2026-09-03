@@ -2,7 +2,7 @@
 id: gap-session-liveness-worktree-fixture-repo-vanishes
 title: session-liveness worktree fixture repo 目录在测试运行中被清理——makeRepoWithDevelop 后
   repo 消失，git worktree add 报 No such file or directory
-status: ready
+status: done
 labels:
   - gap
   - defect
