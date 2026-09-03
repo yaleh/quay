@@ -14,6 +14,12 @@
 // serial (SERIAL_CONCURRENCY) / lowconc (LOWCONC_CONCURRENCY) / main (bucket_test_concurrency)
 // sub-phases, mirroring the full-suite default path's phase isolation.
 //
+// 2026-09-03 (gap-session-liveness-scd-target-move-to-serial): probe 在 lowconc 并发下仍持续 flaky
+// （probe 建立不稳 / 饿死，误杀 mechanical-fan-in / test-file-snapshot 的 fan-in suite），人裁定移 serial
+// —— 8 SCD + target + signals-thresholds-edge 共 10 个 @test-group 改 serial。本文件的 AC1（8 SCD 全
+// lowconc）与 AC5（scd-fire=lowconc）随改标翻转：AC1 断言 serial，AC5 的 lowconc 例子换成仍 lowconc 的
+// worker-driver.test.mjs、并补 scd-fire=serial 断言。
+//
 // This is a STRUCTURAL pin over scripts/test.sh (same technique as test-phases-order.test.mjs and
 // suite-lpt-order.test.mjs): the bucket branch's source must contain the split loop + three
 // sub-phase invocations at their OWN concurrency knobs, and the main sub-phase must run
@@ -50,7 +56,7 @@ function scdFiles() {
     .sort();
 }
 
-test("AC1 — all 8 session-liveness-scd-*.test.mjs files declare @test-group lowconc (none engine)", () => {
+test("AC1 — all 8 session-liveness-scd-*.test.mjs files declare @test-group serial (none engine)", () => {
   const files = scdFiles();
   assert.equal(files.length, 8, `expected exactly 8 SCD files, got ${files.length}: ${files.join(", ")}`);
   const byGroup = new Map();
@@ -61,7 +67,7 @@ test("AC1 — all 8 session-liveness-scd-*.test.mjs files declare @test-group lo
     byGroup.set(f, g);
   }
   for (const [f, g] of byGroup) {
-    assert.equal(g, "lowconc", `${f} must be @test-group lowconc (got ${g})`);
+    assert.equal(g, "serial", `${f} must be @test-group serial (got ${g})`);
   }
   assert.equal(
     [...byGroup.values()].filter((g) => g === "engine").length,
@@ -125,10 +131,12 @@ function classifyGroup(fileRel) {
 test("AC5 — the TS classifier returns the correct @test-group for engine/lowconc/serial", () => {
   // engine: this very file (declared @test-group engine at the top).
   assert.equal(classifyGroup("plugin/test/suite-bucket-load-sensitive-isolation.test.mjs"), "engine");
-  // lowconc: an SCD file (reclassified by this task, AC1).
-  assert.equal(classifyGroup("plugin/test/session-liveness-scd-fire.test.mjs"), "lowconc");
-  // serial: the real-install quay-init family.
+  // lowconc: a still-lowconc file (worker-driver.test.mjs — the worker lifecycle family).
+  assert.equal(classifyGroup("plugin/test/worker-driver.test.mjs"), "lowconc");
+  // serial: the real-install quay-init family AND the SCD family (reclassified lowconc→serial by
+  // gap-session-liveness-scd-target-move-to-serial, AC1).
   assert.equal(classifyGroup("plugin/test/quay-init.test.mjs"), "serial");
+  assert.equal(classifyGroup("plugin/test/session-liveness-scd-fire.test.mjs"), "serial");
   // Take-false: a missing declaration must default to engine (classifyFile's AC7 default), NOT an
   // empty string — an empty group is what the Discovered Issue #1 misdiagnosed as "undefined".
   // (The fixture text must NOT contain the literal "@test-group <word>" — classification FAIL-CLOSES on

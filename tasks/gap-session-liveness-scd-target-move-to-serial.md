@@ -24,7 +24,8 @@ session-liveness 的 scd-* 全家 8 个 + `target` + `signals-thresholds-edge` �
 ## Plan
 
 1. 把 10 个测试文件的 `@test-group lowconc` 改为 `@test-group serial`（复用 bclass 移 signals-* 的做法，不改并发旋钮、不改 waterline）。
-2. 移后验证：mechanical-fan-in + test-file-snapshot 重派不再因 scd-busy/target flaky 而 suite red。
+2. 同步翻转 fixture pin：`suite-bucket-load-sensitive-isolation.test.mjs` 的 AC1（8 SCD 全 lowconc）与 AC5（scd-fire=lowconc）改断言 serial（lowconc 例子换成仍 lowconc 的 worker-driver.test.mjs）——否则改标后被 fixture 误报红。
+3. 移后验证：mechanical-fan-in + test-file-snapshot 重派不再因 scd-busy/target flaky 而 suite red。
 
 ## Acceptance Criteria
 
@@ -48,5 +49,6 @@ scd-* 全家 + target + signals-thresholds-edge 的 `@test-group` 为 serial；m
 - plugin/test/session-liveness-scd-unsaturated.test.mjs（@test-group lowconc→serial）
 - plugin/test/session-liveness-target.test.mjs（@test-group lowconc→serial）
 - plugin/test/session-liveness-signals-thresholds-edge.test.mjs（@test-group lowconc→serial）
+- plugin/test/suite-bucket-load-sensitive-isolation.test.mjs（fixture pin AC1/AC5 随改标翻转：scd-* lowconc→serial）
 - docs/analysis/test-file-baseline.txt（test-file-snapshot 基线重生成，吸收 lowconc→serial 改标）
 - tasks/gap-session-liveness-scd-target-move-to-serial.md（自身）
