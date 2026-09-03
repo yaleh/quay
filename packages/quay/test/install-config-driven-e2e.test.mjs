@@ -78,12 +78,12 @@ const PLUGIN_ROOT = path.resolve(REPO_ROOT, "plugin");
 
 // Config-class files: per-project state/config that legitimately differs across
 // workspaces (absolute paths in config.yml, the laidAt timestamp in the state
-// record, the per-project session in session-liveness.env). The PRODUCT files
+// record, the per-project session in session-config.env). The PRODUCT files
 // (mechanism scripts + tick docs) are what must be byte-identical.
 const CONFIG_CLASS = new Set([
   ".quay/config.yml",
   ".quay/quay-init-state.json",
-  "orchestration/session-liveness.env",
+  "orchestration/session-config.env",
   // .gitignore — quay-init writes (or appends) the `.quay/runtime/` entry itself
   // (gap-the-runtime-has-nowhere-safe-to-land AC10); it is install-generated config, not a
   // product artifact. Deterministic content across workspaces, so A1's byte-identity holds.

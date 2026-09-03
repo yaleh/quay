@@ -14,9 +14,9 @@
 //   inner:   ready-pool-check --apply / slot-refill / fast-mode-telemetry --task-start / cap-from-gate
 //            (cap-from-gate + slot-refill are INNER's mechanisms — the effective_cap the inner
 //            dispatch decision reads and the refill it performs)
-//   manager: manager-tick-log / Workflow / session-liveness  (its OWN trace mechanisms; NOT
+//   manager: manager-tick-log / Workflow / session-observation  (its OWN trace mechanisms; NOT
 //            cap-from-gate/slot-refill — those are inner's; Workflow = the meta-cc tool it drives
-//            outer with; session-liveness = its monitor instrumentation, manager-tick-core A10).
+//            outer with; session-observation = its monitor instrumentation, manager-tick-core A10).
 //
 // Single source: accounting-emit.ts imports MECHANISMS from here (never a second copy of the map).
 // The layer's claimed mechanisms with a real on-disk trace carry `trace`; everything else is
@@ -76,8 +76,8 @@ export const MECHANISM_DEFS: Record<string, MechanismDef> = {
   // The manager's meta-cc heartbeat — the `Workflow` tool it drives outer with
   // (orchestration/manager-loop-tick.md:1007: meta-cc `tool_name=Workflow` → last(timestamp)).
   Workflow: { name: "Workflow", periodHours: 0.33 },
-  // The manager's session-liveness monitor instrumentation (manager-tick-core A10).
-  "session-liveness": { name: "session-liveness", periodHours: 0.33 },
+  // The manager's session-observation monitor instrumentation (manager-tick-core A10).
+  "session-observation": { name: "session-observation", periodHours: 0.33 },
 };
 
 // The layer → mechanisms mapping (THE table AC39 builds). Each layer emits exactly its own
@@ -85,7 +85,7 @@ export const MECHANISM_DEFS: Record<string, MechanismDef> = {
 export const LAYER_MECHANISMS: Record<string, string[]> = {
   inner: ["cap-from-gate", "slot-refill", "ready-pool-check --apply", "fast-mode-telemetry --task-start"],
   outer: ["closure-lag-check", "verification-round", "full-suite-runner"],
-  manager: ["manager-tick-log", "Workflow", "session-liveness"],
+  manager: ["manager-tick-log", "Workflow", "session-observation"],
 };
 
 /**

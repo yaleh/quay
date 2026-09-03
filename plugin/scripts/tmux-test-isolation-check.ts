@@ -23,7 +23,7 @@
 //   - plugin/scripts/tmux-session.ts        (the .ts library, AC6 — the primary consumer seam)
 //   - plugin/scripts/tmux-isolated.sh        (the .sh L0 guard)
 //   - plugin/test/helpers/hermetic-tmux.mjs  (the shared hermetic fixture helper)
-//   - plugin/test/session-liveness-helpers.mjs (the session-liveness family helper, routed through
+//   - plugin/test/session-observation-helpers.mjs (the session-observation family helper, routed through
 //     the library)
 //
 // The two mandatory conditions, recognized by their CODE-POSITION idioms (a comment mention does
@@ -61,7 +61,7 @@ const NEW_SESSION_CALL_RE = /tmux\(\s*["']new-session["']/;
 const VERSION_PROBE_RE = /spawnSync\(\s*["']tmux["']\s*,\s*\[["']-V["']\]/;
 
 /** Isolation mechanism references. A file using any of these is presumed structurally isolated. */
-const MECHANISM_RE = /tmux-session|tmux-isolated|hermetic-tmux|session-liveness-helpers/;
+const MECHANISM_RE = /tmux-session|tmux-isolated|hermetic-tmux|session-observation-helpers/;
 /** The env-strip condition, by code idiom. */
 const ENV_STRIP_RE = /env -u TMUX|TMUX:\s*undefined|delete env\.TMUX/;
 /** The explicit `-S` argv condition (quoted). Only -S overrides $TMUX. */

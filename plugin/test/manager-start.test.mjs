@@ -2,12 +2,11 @@
 // manager-start.test.mjs — gap-manager-cold-start-no-falsifiable-checklist (AC2/AC4/AC5).
 //
 // Pins the manager-start.sh cold-start falsifiable checklist:
-//   AC2  — manager-start.sh writes <home>/cold-start-checklist.md (7 observable-consequence keys,
-//          aligned with outer's 7) + <home>/idle-watch.env (the manager's own idle-watch observation
-//          config — defect-1 fix: the deterministic anchor the first tick mounts via
-//          session-liveness-mount.sh + Monitor, never a non-existent standalone script).
-//   AC5  — existing behavior unregressed: dry-run plans home/identity/session/arm plus the two new
-//          checklist writes; a real start still creates identity + loop-registry + the checklist.
+//   AC2  — manager-start.sh writes <home>/cold-start-checklist.md (5 observable-consequence keys).
+//          The idle-watch observation seam was retired 2026-09-03 with the session-observation
+//          mechanism (7 keys → 5 keys; IDLE-WATCH-MOUNTED / MONITORS-DELIVERING dropped).
+//   AC5  — existing behavior unregressed: dry-run plans home/identity/session/arm plus the checklist
+//          write; a real start still creates identity + loop-registry + the checklist.
 //
 // Hermetic tmux only where a real start is exercised (TMUX_TMPDIR, never the machine's sessions);
 // the dry-run test needs no tmux.
@@ -33,32 +32,29 @@ const tmuxAvailable = (() => {
   try { return spawnSync("tmux", ["-V"], { encoding: "utf8" }).status === 0; } catch { return false; }
 })();
 
-/** The 7 observable-consequence keys the cold-start checklist must carry (aligned with outer's 7). */
-const SEVEN_KEYS = [
+/** The 5 observable-consequence keys the cold-start checklist must carry. */
+const FIVE_KEYS = [
   "SESSION-CREATED",
   "HOME-CREATED",
   "LOOP-ARMED",
   "CRON-EVIDENCED",
-  "IDLE-WATCH-MOUNTED",
-  "MONITORS-DELIVERING",
   "CHECKLIST-REPORTED",
 ];
 
-// ── AC2 — dry-run plans the two new falsifiable artifacts (no tmux needed) ──────────────────────────
+// ── AC2 — dry-run plans the falsifiable checklist artifact (no tmux needed) ────────────────────────
 
-test("AC2 — manager-start --dry-run plans the cold-start checklist + idle-watch config", () => {
+test("AC2 — manager-start --dry-run plans the cold-start checklist", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mgr-start-"));
   try {
     const r = spawnSync("bash", [MANAGER_START, "--dry-run", "--home", path.join(tmp, "home")], { encoding: "utf8" });
     assert.equal(r.status, 0, `dry-run must exit 0:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stdout, /would-write-checklist/, "must plan writing <home>/cold-start-checklist.md");
-    assert.match(r.stdout, /would-write-idlewatch-config/, "must plan writing <home>/idle-watch.env");
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
-// ── AC2/AC5 — a real start writes the checklist (7 keys) + idle-watch config, unregressed ──────────
+// ── AC2/AC5 — a real start writes the checklist (5 keys), unregressed ─────────────────────────────
 
-test("AC2/AC5 — a real manager-start writes cold-start-checklist.md (7 keys) + idle-watch.env and still creates identity + loop-registry",
+test("AC2/AC5 — a real manager-start writes cold-start-checklist.md (5 keys) and still creates identity + loop-registry",
   { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mgr-start-"));
   try {
@@ -74,19 +70,16 @@ test("AC2/AC5 — a real manager-start writes cold-start-checklist.md (7 keys) +
     });
     assert.equal(r.status, 0, `manager start must exit 0:\n${r.stdout}\n${r.stderr}`);
 
-    // AC2 — the cold-start checklist carries all 7 falsifiable keys.
+    // AC2 — the cold-start checklist carries all 5 falsifiable keys.
     const checklist = path.join(home, "cold-start-checklist.md");
     assert.ok(fs.existsSync(checklist), "must write <home>/cold-start-checklist.md");
     const content = fs.readFileSync(checklist, "utf8");
-    for (const key of SEVEN_KEYS) {
+    for (const key of FIVE_KEYS) {
       assert.match(content, new RegExp(key), `checklist must carry key ${key}`);
     }
-    // The idle-watch config names the REAL mechanism (session-liveness-mount.sh + threshold).
-    const iwPath = path.join(home, "idle-watch.env");
-    assert.ok(fs.existsSync(iwPath), "must write <home>/idle-watch.env");
-    const iw = fs.readFileSync(iwPath, "utf8");
-    assert.match(iw, /session-liveness-mount\.sh/, "idle-watch config must name the real mount mechanism");
-    assert.match(iw, /IDLE_WATCH_THRESHOLD_MIN=6/, "idle-watch config must carry the 6-minute threshold");
+    // AC5 — the retired idle-watch seam is gone: no idle-watch.env, no idle-watch-mount.txt.
+    assert.ok(!fs.existsSync(path.join(home, "idle-watch.env")), "must NOT write idle-watch.env (retired)");
+    assert.ok(!fs.existsSync(path.join(home, "idle-watch-mount.txt")), "must NOT write idle-watch-mount.txt (retired)");
 
     // AC5 — existing behavior unregressed.
     assert.ok(fs.existsSync(path.join(home, "identity")), "must still create identity");
@@ -96,44 +89,5 @@ test("AC2/AC5 — a real manager-start writes cold-start-checklist.md (7 keys) +
     const identity = fs.readFileSync(path.join(home, "identity"), "utf8");
     const sess = (identity.match(/session=(\S+)/) || [])[1] || "quay-manager";
     isolatedTmux(["kill-session", "-t", sess], { socket: path.join(socketBase, "default"), env });
-  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
-});
-
-// ── gap-idle-watch-intent-anchor-restore — --ensure-mount-intent restores the mount-intent anchor ──
-// The idle-watch cold-start anchor (`idle-watch-mount.txt`) was observed absent while another check's
-// green masked it (manager 2026-08-14 09:1xZ, gap-idle-watch-intent-anchor-restore). Root cause ①:
-// the main path last ran before the anchor-write code existed, and manager-start.sh has no cadence
-// caller — the anchor was never written. `--ensure-mount-intent` is the safe cadence path (no
-// tmux/arm/launch side effects) that re-creates the cold-start artifacts idempotently; it must NOT
-// create identity (that is the main path's home marker) nor launch a session.
-
-test("gap-idle-watch-intent-anchor-restore — --ensure-mount-intent writes the mount-intent anchor without tmux/arm/launch side effects", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mgr-intent-"));
-  try {
-    const home = path.join(tmp, "home");
-    const r = spawnSync("bash", [MANAGER_START, "--ensure-mount-intent", "--home", home], { encoding: "utf8" });
-    assert.equal(r.status, 0, `--ensure-mount-intent must exit 0:\n${r.stdout}\n${r.stderr}`);
-    assert.match(r.stdout, /intent-written/, "must report intent-written");
-
-    // The anchor is written and names the real mechanism + the two verify seams.
-    const intent = path.join(home, "idle-watch-mount.txt");
-    assert.ok(fs.existsSync(intent), "must write <home>/idle-watch-mount.txt");
-    const content = fs.readFileSync(intent, "utf8");
-    assert.match(content, /session-liveness-mount\.sh/, "intent must name the real mount mechanism");
-    assert.match(content, /monitor-mount-check\.sh --json/, "intent must carry verify seam ①");
-    assert.match(content, /session-liveness\.sh --once/, "intent must carry verify seam ②");
-
-    // The same cold-start artifact set the main path writes (checklist + env) is restored too.
-    assert.ok(fs.existsSync(path.join(home, "cold-start-checklist.md")), "must re-create cold-start-checklist.md");
-    assert.ok(fs.existsSync(path.join(home, "idle-watch.env")), "must re-create idle-watch.env");
-
-    // No main-path side effects: identity must NOT be created (no home marker), no loop registry.
-    assert.ok(!fs.existsSync(path.join(home, "identity")), "--ensure-mount-intent must not create identity");
-    assert.ok(!fs.existsSync(path.join(home, "loop-registry.txt")), "--ensure-mount-intent must not arm the loop");
-
-    // Idempotent: a second call still exits 0 and leaves the anchor present.
-    const r2 = spawnSync("bash", [MANAGER_START, "--ensure-mount-intent", "--home", home], { encoding: "utf8" });
-    assert.equal(r2.status, 0, `second --ensure-mount-intent must still exit 0:\n${r2.stdout}\n${r2.stderr}`);
-    assert.ok(fs.existsSync(intent), "anchor still present after second call");
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });

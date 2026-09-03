@@ -18,7 +18,7 @@
 # 用法：
 #   topology-check.sh [--session <sess>] [--json]
 #     --session <sess>  目标 tmux 会话（默认：TOPOLOGY_SESSION → SESSION_TMUX_SESSION →
-#                       orchestration/session-liveness.env 的 SESSION_TMUX_SESSION）
+#                       orchestration/session-config.env 的 SESSION_TMUX_SESSION）
 #     --json            JSON 输出（机器消费）
 #
 # 测试接缝：
@@ -59,12 +59,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# 会话解析（与 quay-topology.sh 同源）：显式 > 环境 > session-liveness.env > fail-closed。
+# 会话解析（与 quay-topology.sh 同源）：显式 > 环境 > session-config.env > fail-closed。
 if [ -z "$SESSION" ]; then
   SESSION="${SESSION_TMUX_SESSION:-}"
 fi
-if [ -z "$SESSION" ] && [ -f "$REPO_ROOT/orchestration/session-liveness.env" ]; then
-  _v="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$REPO_ROOT/orchestration/session-liveness.env" 2>/dev/null | head -1)"
+if [ -z "$SESSION" ] && [ -f "$REPO_ROOT/orchestration/session-config.env" ]; then
+  _v="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$REPO_ROOT/orchestration/session-config.env" 2>/dev/null | head -1)"
   [ -n "$_v" ] && SESSION="$_v"
 fi
 if [ -z "$SESSION" ]; then
@@ -95,7 +95,7 @@ window_exists() {
   tmux list-windows -t "$1" -F '#{window_name}' 2>/dev/null | grep -qx "$2"
 }
 
-# pane 本体或其任一子进程的 cmdline 是否含 claude 特征（与 session-liveness.sh 的 session_pid
+# pane 本体或其任一子进程的 cmdline 是否含 claude 特征（与 session-observation.sh 的 session_pid
 # 同判据：只认 claude 进程，避免把 shell 当成会话本体；遍历全部子进程而非只取第一个——新起的
 # 子进程在 exec 前是瞬时 shell，只取第一个会误判 no-claude）。
 has_claude_child() {

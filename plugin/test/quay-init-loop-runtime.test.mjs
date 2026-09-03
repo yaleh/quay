@@ -55,9 +55,9 @@ const assert = new Proxy(_assert, {
   },
 });
 
-// AC1/AC2 — session-liveness.sh is laid down VERBATIM (cp, not render_substitutions); the
-// per-project session is CONFIG, generated into orchestration/session-liveness.env.
-test('AC1/AC2 — session-liveness.sh is copied verbatim; the session is generated config, not a script rewrite', () => {
+// AC1/AC2 — the per-project session is CONFIG, generated into orchestration/session-config.env;
+// the retired observer (session-liveness.sh) is NOT laid down.
+test('AC1/AC2 — the session is generated config, not a script rewrite; the retired observer is not laid down', () => {
   // AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles) + the SHARED
   // prebuilt fixture (gap-quay-init-loop-tests-not-wired-to-shared-fixture AC1): this file's
   // install-as-setup tests copy from the SHARED content-addressed fixture — ONE real quay-init
@@ -70,26 +70,18 @@ test('AC1/AC2 — session-liveness.sh is copied verbatim; the session is generat
   const { ws, install: r } = laydownWorkspace();
   try {
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    const src = fs.readFileSync(path.join(pluginDir, 'scripts', 'session-liveness.sh'), 'utf8');
-    const installed = fs.readFileSync(path.join(ws, 'plugin', 'scripts', 'session-liveness.sh'), 'utf8');
-    assert.equal(installed, src, 'installed session-liveness.sh must be byte-identical to its source (cp, not render)');
-    assert.ok(!installed.includes('__QUAY_TMUX_SESSION__'), 'the placeholder must not exist (AC1)');
-    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-liveness.env'), 'utf8');
+    assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'session-liveness.sh')),
+      'session-liveness.sh must NOT be laid down (retired 2026-09-03)');
+    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-config.env'), 'utf8');
     assert.match(envFile, /SESSION_TMUX_SESSION=proj-0:0\.0/, 'the --tmux-session value must be written to the generated config');
-    assert.ok(!installed.includes('proj-0'), 'the script itself must NOT carry the target session (config, not code)');
   } finally { cleanup(ws); }
 });
 
-// AC2 — no render_substitutions call in quay-init.sh acts on an executable: grep shows the script
-// is only ever passed to copy_one. (The two remaining render_substitutions calls are tick docs.)
-test('AC2 — quay-init.sh has no render_substitutions call targeting session-liveness.sh', () => {
+// AC2 — quay-init.sh no longer lays down the retired observer script.
+test('AC2 — quay-init.sh no longer lays down session-liveness.sh (retired 2026-09-03)', () => {
   const initSrc = fs.readFileSync(path.join(pluginDir, 'scripts', 'quay-init.sh'), 'utf8');
-  // The render_substitutions call sites must not reference the executable.
-  assert.ok(!initSrc.includes('render_substitutions "$sl_src"'),
-    'quay-init.sh must not render the session-liveness.sh executable');
-  // The executable path is only ever copied verbatim.
-  assert.ok(initSrc.includes('copy_one "$sl_src" "$sl_dst"'),
-    'quay-init.sh must copy session-liveness.sh via copy_one (cp)');
+  assert.ok(!initSrc.includes('session-liveness.sh'),
+    'quay-init.sh must not lay down session-liveness.sh (retired)');
 });
 
 // AC6 — the mechanical check runs as part of quay-init --loop and passes on a clean install.
@@ -112,7 +104,7 @@ test('AC4 — the check fails when an installed executable drifts by one byte, a
   const { ws, install: r } = laydownWorkspace();
   try {
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    const installed = path.join(ws, 'plugin', 'scripts', 'session-liveness.sh');
+    const installed = path.join(ws, 'plugin', 'scripts', 'fast-mode-telemetry.ts');
     // fail direction: simulate a future render path rewriting the installed executable by one byte.
     const buf = fs.readFileSync(installed);
     buf[0] ^= 0x01;
@@ -120,7 +112,7 @@ test('AC4 — the check fails when an installed executable drifts by one byte, a
     const v = spawnSync('bash', [path.join(pluginDir, 'scripts', 'verify-installed-executables.sh'), pluginDir, ws],
       { encoding: 'utf8' });
     assert.notEqual(v.status, 0, 'verify must FAIL when an installed executable drifts by one byte');
-    assert.match(v.stderr, /session-liveness\.sh/, 'the failure must name the drifted file');
+    assert.match(v.stderr, /fast-mode-telemetry\.ts/, 'the failure must name the drifted file');
     // restore direction.
     buf[0] ^= 0x01;
     fs.writeFileSync(installed, buf);

@@ -149,8 +149,8 @@ fi
 # Before ANY keystroke the target must be RECEIVABLE — otherwise text lands in the input box but is
 # never committed (the measured 2026-08-06 defect: sending to a busy/thinking target made the one-shot
 # send→verify fail every time). The judgment is pane-state-classify's `--can-receive-wait` probe — the
-# SAME shape classifier session-liveness uses for its busy/idle verdict, never a duplicated idle
-# heuristic (the fix direction's 与 session-liveness 的 idle 判定同源). waiting-input is the ONLY
+# SAME shape classifier session-observation uses for its busy/idle verdict, never a duplicated idle
+# heuristic (the fix direction's 与 session-observation 的 idle 判定同源). waiting-input is the ONLY
 # receivable state. A non-receivable target is WAITED on (bounded, re-judge each round) instead of
 # failing immediately; only when the bound expires do we fail loud (needs human). The wait loop lives
 # in the probe (--wait/--poll, single-sourced — supervisor-deliver.sh's fresh path calls the same

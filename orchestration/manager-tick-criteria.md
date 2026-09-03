@@ -292,7 +292,7 @@
 
 ### ⑨ **动 monitor 前必须先读本节（2026-08-10 人裁定：「你在这个 monitor 上已经出过不止一次这样的问题了。记录这些错误，并在相应的文件增加信息，要求未来动这个 monitor 必须先检查曾发生的这些错误操作的记录。」）**
 
-**硬闸**：**任何对 `session-liveness` monitor 的动作**——挂载 / 停止（`TaskStop`）/ 换实现 / 改判据 /
+**硬闸**：**任何对 `session-observation` monitor 的动作**——挂载 / 停止（`TaskStop`）/ 换实现 / 改判据 /
 **改「怎么处置它发来的事件」的策略**——**动手前必须逐条读完下表，并在当轮 tick-log 写明
 「已读 ⑨ + 本次动作不属于其中哪一类（或属第 N 类，已规避）」**。
 未写 ⇒ 视为未读。**这一条本身就是它的产物：tick-log 里有没有那句话，是可查的。**
@@ -374,9 +374,9 @@ violations 列**——只写进规则文本不算记账。理由是机械的：*
 
 | 类 | 形态 | 2026-08-08 当晚实例 |
 |---|---|---|
-| **A** | 引用的对象**不存在** | `outer-liveness.sh`（已改名 `session-liveness.sh`）／`heavy-op-token.sh`（`2f9d4575` 已删）／`quay-0:tools`（会话不存在）／`TaskList`（错的仪器：待办清单≠监视器清单） |
+| **A** | 引用的对象**不存在** | `outer-liveness.sh`（已改名 `session-observation.sh`）／`heavy-op-token.sh`（`2f9d4575` 已删）／`quay-0:tools`（会话不存在）／`TaskList`（错的仪器：待办清单≠监视器清单） |
 | **B** | 对象存在，**但不是引用者以为的内容** | LOOP_MIN 那条裁定裁的是**作用域**不是**数值**（被扩读成「20 不可动」）／AC19 判别式把 `merge-base` 不等这个**必要条件当成充要条件**（「已合入 integration」同样满足它）／AC4 的 `EXTREME` 档在 `resource-gate.sh` 里出现 **0 次**，正本在 `cap-from-gate.ts:14` |
-| **C** | 对象**存在得好好的，我没搜就自己造/自己推** | 手搓 `idle-watch.sh`，而 `session-liveness.sh` 第 121 行明写「manager 观 outer 的观察者可 `LOOP_MIN=0`」／从采样别名现象重推「该用 avg300 不用 avg10」，而 `cap-from-gate.ts:21` 早就写着同一论证 |
+| **C** | 对象**存在得好好的，我没搜就自己造/自己推** | 手搓 `idle-watch.sh`，而 `session-observation.sh` 第 121 行明写「manager 观 outer 的观察者可 `LOOP_MIN=0`」／从采样别名现象重推「该用 avg300 不用 avg10」，而 `cap-from-gate.ts:21` 早就写着同一论证 |
 | **D** | 判据自身的**「其它情况」没穷举** | §0.55 写「①无 tmux 投递 且 ②文件未动 ⇒ 失联」，漏了 **git 通道** —— 首次应用就差点变成一次假阳性指控 |
 | **E** | **对象在、也确实被调用了，但传入的参数让它恒为假** —— **调用记录看起来完全正常** | `--fork-baseline` 每次派发都调用了，但 `--overlaps-unverified ""` 是空串 ⇒ `integration-branch-model.ts:47` 两条判定路径里的一条**被调用而永远不生效**（2026-08-08 09:3xZ，是我【新提的判据】第一次实测就撞上的） |
 | **F** | **我【手动调用】一个生产工具，没传生产调用点传的参数 ⇒ 拿到【回退默认值】，却当成实况报出** | `ready-pool-check.ts` 不传 `--cap` 时回退 `CONCURRENCY_CAP_DEFAULT=3`（注释 :66 原文「CONSERVATIVE FALLBACK … **manual runs**」），而生产由 `cap-from-gate.sh` 传 `--cap 5` ⇒ 我连报数轮 `cap=3 / floor=12`，实际是 `cap=5 / floor=20`；**inner 自己的报告一直是对的，我的是错的**（2026-08-08 11:4xZ） |
@@ -399,7 +399,7 @@ violations 列**——只写进规则文本不算记账。理由是机械的：*
   今晚两次都是「造完才发现现成的更好，而且早就参数化了我这个场景」。
 - **F**：**挂载/调用一个生产工具之前，把它的「本角色推荐参数」原样抄一遍**——
   不要凭「不传就是默认配置」。**正确的读法是「不传 = 我没有配置它」。**
-  > **2026-08-08 16:2xZ 第三次实例（最贵的一次）**：我用 pane-only 挂 `session-liveness.sh`
+  > **2026-08-08 16:2xZ 第三次实例（最贵的一次）**：我用 pane-only 挂 `session-observation.sh`
   > **没传 `LOOP_MIN=0`** ⇒ 心跳恒新鲜（每个 tick 都在追加）⇒ `hmin < LOOP_MIN=20`
   > ⇒ **`SESSION-IDLE` 被噪声闸门静默吞掉**，而 `RESUMED` 不受该闸限制
   > ⇒ 签名「RESUMED 发得出 / IDLE 从不发」。**我据此追了 3 小时、发了 5 轮消息、
@@ -407,7 +407,7 @@ violations 列**——只写进规则文本不算记账。理由是机械的：*
   >
   > **三条互相独立的现成证据都指着它，我一条都没读到**：
   > ① 我自己的 `manager-loop-tick.md:153` 写的挂载命令里**就有 `LOOP_MIN=0`**；
-  > ② `session-liveness.sh` **文件头 :119/:121/:151-158** 把这条边界写得很完整；
+  > ② `session-observation.sh` **文件头 :119/:121/:151-158** 把这条边界写得很完整；
   > ③ **本表行 B 与行 C 的例子里各出现过一次 `LOOP_MIN`**——行 C 引的正是 `:121` 那一行。
   > ⇒ **一个量在我自己的错误分类表里出现两次之后，我第三次仍然踩它。**
   > **这说明「写进文档」对我不构成防护**——ADR-004「hard checks over prose」在我这一层同样成立。
@@ -449,7 +449,7 @@ violations 列**——只写进规则文本不算记账。理由是机械的：*
 **硬规则 1 已经写着「动作前先查 catalog」，但它没有产物 ⇒ 只能靠当场想起来 ⇒ 四次都没想起来。**
 **本条把它变成记录上可区分的**：一条没有判据出处的读数，在 tick-log 里是肉眼可见的缺失。
 
-**正例（本次）**：`session-liveness.sh` 的心跳源选择（transcript 而非工作产出）——
+**正例（本次）**：`session-observation.sh` 的心跳源选择（transcript 而非工作产出）——
 其源码 `:29-33` 逐字写明理由「长任务中『正在干活』与『中途死掉』同形」。
 **⇒ 系统是对的，容差也是对的；错的是我用了一个不承载该语义的文件。**
 
@@ -458,7 +458,7 @@ violations 列**——只写进规则文本不算记账。理由是机械的：*
 **⑦ 让我去用声明机件，这一步是对的且当轮就翻出真故障（观察者②失明）。
 但同一次里它还给了我一个【假阳性】，而我把它当确认事实升级了。**
 
-**实例**：`observer-registry-check.sh` 报 `DEAD .quay/session-liveness.1564238.json`，
+**实例**：`observer-registry-check.sh` 报 `DEAD .quay/session-observation.1564238.json`，
 我据此向 outer 升级「观察者①已死，无人发现」。**独立复核：进程活着（`/proc/1564238` 存在，已运行 7h05m）。**
 **真根因**：该注册文件 `targets` 字段含**裸换行**（写入方未转义）⇒ `JSONDecodeError: Invalid control character at column 134`
 ⇒ 检查器取不到 pid ⇒ 判死。**是写入方的转义缺陷，不是观察者死亡。**

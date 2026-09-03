@@ -136,14 +136,14 @@ import { resolveAssertionSurface } from "./precommit-guard.ts";
 import { getLoad1 } from "./checker-cost.ts";
 import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
 // gap-leak-residue-per-run-namespace-isolation — the runner-level unified cleanup REUSES the
-// owner-liveness criterion (dirHasLiveOwner) already implemented in the session-liveness helpers
+// owner-liveness criterion (dirHasLiveOwner) already implemented in the run-namespace sweep helpers
 // (the 2026-08-08 two-layer-blind invariant: cleanup is PATH-OWNERSHIP + OWNER-LIVENESS based,
 // never a name-based batch kill). `sweepRunNamespaces` = pre-suite orphan sweeper over ALL
 // /tmp/quay-run-* dirs; `sweepRunNamespace(id)` = post-suite clean of THIS run's own subtree.
-// These are RUNTIME fs-only sweepers — they live in plugin/scripts/session-liveness-sweep.mjs
+// These are RUNTIME fs-only sweepers — they live in plugin/scripts/run-namespace-sweep.mjs
 // (a PRODUCTION module, shipped in the npm-pack bundle), NOT the test helper: package.sh excludes
 // plugin/test/ from the bundle, so importing from there breaks build-plugin-dist (round 123/124).
-import { sweepRunNamespaces, sweepRunNamespace, killRegisteredServers } from "./session-liveness-sweep.mjs";
+import { sweepRunNamespaces, sweepRunNamespace, killRegisteredServers } from "./run-namespace-sweep.mjs";
 // gap-single-file-test-duration-trend-unwatched AC1/AC2 (fan-in 9edf2cb9, hand-merged into the
 // develop→integration convergence 2026-08-09): land the suite's per-file __PERFILE__ duration
 // history + compare against the last round (the trend dimension — per-file durations WATCHED round
@@ -1837,7 +1837,7 @@ export async function run(argv: string[]): Promise<number> {
   // randomUUID() — an independent run keeps self-naming.
   const runId = parseArg(argv, "--run-id") ?? randomUUID();
   // gap-leak-residue-per-run-namespace-isolation AC1 — the per-run NAMESPACE id delivered to the
-  // child (and hence to every node --test probe via session-liveness-helpers.mjs's QUAY_RUN_ID):
+  // child (and hence to every node --test probe via the sweep helpers' QUAY_RUN_ID):
   // a SHORT id (8 hex chars from the state-file UUID) so the tmux socket sun_path (~107 bytes —
   // the current probe socket path ≈52 chars, one short layer keeps it well under) never blows the
   // bound. Every producer inherits it from the child env, INCLUDING worktree runs (the same env
@@ -1864,7 +1864,7 @@ export async function run(argv: string[]): Promise<number> {
   } catch (e) {
     process.stderr.write(`full-suite-runner: pre-suite cleanup failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
   }
-  // TRUE-CATCH-ALL (gap-session-liveness-teardown-ol-scd-cf-leak): kill still-alive registered
+  // TRUE-CATCH-ALL (teardown-ol-scd-cf-leak): kill still-alive registered
   // servers whose OWNING TEST PROCESS is dead (a prior run's crashed-process residue — the durable
   // registry survives the crash, the in-memory Set did not). sweepRunNamespaces above skips live-owner
   // dirs by design, so THIS registry-driven kill (PID-targeted SIGKILL of servers the tests
@@ -1905,7 +1905,7 @@ export async function run(argv: string[]): Promise<number> {
     }
   }
   // Ensure this run's namespace exists so the suite-tail leak-scan's before-run snapshot has a
-  // stable subtree to scan (empty at start; the session-liveness probes create under it).
+  // stable subtree to scan (empty at start; the probes create under it).
   try {
     fs.mkdirSync(path.join(os.tmpdir(), `quay-run-${shortRunId}`), { recursive: true });
   } catch { /* best-effort */ }
@@ -3336,7 +3336,7 @@ export async function run(argv: string[]): Promise<number> {
   } catch (e) {
     process.stderr.write(`full-suite-runner: post-suite cleanup failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
   }
-  // TRUE-CATCH-ALL (gap-session-liveness-teardown-ol-scd-cf-leak): kill THIS run's still-alive
+  // TRUE-CATCH-ALL (teardown-ol-scd-cf-leak): kill THIS run's still-alive
   // registered servers (safety net after the suite-tail scan-kill — e.g. a process whose server
   // leaked after the scan, or a run where QUAY_RUN_ID never reached test.sh). Registry-driven
   // (PID-targeted SIGKILL of servers the tests self-built — invariant no_pkill_by_name_on_live = 1),

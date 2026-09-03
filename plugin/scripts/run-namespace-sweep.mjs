@@ -1,10 +1,10 @@
-// plugin/scripts/session-liveness-sweep.mjs — RUNTIME per-run namespace sweep functions.
+// plugin/scripts/run-namespace-sweep.mjs — RUNTIME per-run namespace sweep functions.
 //
-// Extracted from plugin/test/session-liveness-helpers.mjs (2026-08-13,
+// Extracted from a test helper (2026-08-13,
 // gap-leak-residue-per-run-namespace-isolation): the full-suite-runner imports these DIRECTLY at
 // runtime, but they lived in a TEST helper — and package.sh EXCLUDES plugin/test/ from the shipped
 // bundle ("quay's own suite — not a user-facing deliverable"), so build-plugin-dist failed to
-// resolve `../test/session-liveness-helpers.mjs` and the npm-pack tarball never built (round 123/124
+// resolve the test-helper path and the npm-pack tarball never built (round 123/124
 // real regression, verifiedCommit 776632e9; round 122 pre-#1/#2 was green).
 //
 // These are the fs-only runtime sweepers the runner calls before/after the suite:
@@ -15,7 +15,7 @@
 // no_pkill_by_name_on_live = 1, the 2026-08-08 two-layer-blind incident). A namespace dir whose
 // tmux server is STILL alive (a genuinely leaked, still-running probe) is SKIPPED — it is in-use,
 // not residue. Both sweepers are fs-only (no spawn, no pkill), matching the executable-body
-// contract the session-liveness-sweep test pins. Returns { cleaned, dirs } so the runner can record
+// contract the run-namespace-sweep test pins. Returns { cleaned, dirs } so the runner can record
 // the count + WHICH dirs into the verification-round record (the leak is an observable metric).
 
 import fs from "node:fs";
@@ -36,17 +36,17 @@ export function runNamespaceRoot(id = runIdOf()) {
 }
 
 // ── dirHasLiveOwner — OWNER-LIVENESS criterion (gap-sweeptmp-pkill-kills-live-observers-two-layer-blind) ──
-// 2026-08-08 incident: a cleanup ran a process-name batch kill of the session-liveness monitor
+// 2026-08-08 incident: a cleanup ran a process-name batch kill of the tmux observer monitor
 // processes (outer + manager) and killed them all — the two layers went blind simultaneously and
 // the observers' own deaths had no observer. Root cause: the cleanup distinguished "leak residue"
 // from "in-use instance" by PROCESS-NAME/PATH matching instead of OWNER-SESSION LIVENESS. A
-// session-liveness process whose owner session is alive is IN-USE, not residue; name-based batch
+// monitor process whose owner session is alive is IN-USE, not residue; name-based batch
 // kills necessarily kill live monitors.
 //
-// THE RULES ENFORCED HERE (pinned by the AC2/AC4 sweep tests in session-liveness-sweep.test.mjs):
+// THE RULES ENFORCED HERE (pinned by the AC2/AC4 sweep tests in namespace-sweep tests):
 //   * sweepTmp/sweepers NEVER kill processes — they only remove /tmp DIRECTORIES under the caller's
 //     own test prefixes, and only those with NO live owner.
-//   * A name-based batch kill of the session-liveness monitor (process-name `pkill` / `killall`)
+//   * A name-based batch kill of the tmux observer monitor (process-name `pkill` / `killall`)
 //     is FORBIDDEN in the cleanup path (invariant no_pkill_by_name_on_live = 1).
 //   * The residue-vs-in-use criterion is OWNER LIVENESS (dirHasLiveOwner), NOT name/path prefix.
 
@@ -56,7 +56,7 @@ export function runNamespaceRoot(id = runIdOf()) {
  * socket but is STILL ALIVE: `serverPidOf`'s socket-inode mapping is gone the instant the socket
  * closes, so a server that closed its socket and then hangs in its graceful-exit path (blocked on a
  * pty close under suite load) is invisible to it and orphans forever — the leak this task closes
- * (gap-session-liveness-teardown-ol-scd-d-residual: the teardown killed the pane children but not
+ * (the teardown killed the pane children but not
  * the self-built SESSION/server). The orphaned pane children keep the server pid in their inherited
  * TMUX environ, which SURVIVES the socket close, so the pid stays recoverable. fs-only (reads
  * /proc/<pid>/environ + /proc/<pid>/cmdline; the KILL is the CALLER's PID-targeted SIGKILL, never a
@@ -96,7 +96,7 @@ export function serverPidViaPaneEnv(dir) {
 // then hangs in its graceful-exit path (under suite load) is invisible to the socket-table lookup —
 // and its SIGHUP'd pane children may already be gone too — so the pane-env fallback alone cannot
 // always recover its pid. The CACHED pid, captured while the socket was open, is the last-resort
-// that still lets the teardown hard-kill SIGKILL it (gap-session-liveness-teardown-ol-scd-d-residual:
+// that still lets the teardown hard-kill SIGKILL it (teardown-ol-scd-d-residual:
 // the teardown killed the pane children but not the self-built SESSION/server). Keyed by the
 // mkdtemp-unique dir, so a dir is never reused and a cached pid can never be mistaken for another
 // probe's server.
@@ -164,13 +164,13 @@ export function dirHasLiveOwner(dir) {
 /** dirContainsGitRepo(dir, maxDepth) — does `dir` contain a git repository or a linked worktree?
  * A git repo carries a `.git` DIRECTORY; a linked worktree carries a `.git` FILE pointing back at the
  * main repo's `.git/worktrees/<branch>`. Either marks the subtree IN-USE by a live test: the
- * session-liveness SCD family nests its `repo` + `worktree`s INSIDE the hermetic probe dir, so the
+ * SCD test family nests its `repo` + `worktree`s INSIDE the hermetic probe dir, so the
  * repo's liveness is INHERITED from the probe's tmux socket — but the socket is only a PROXY for "the
  * test is still here" (CLAUDE.md 硬规则 4b: prefer the direct signal). This is the git-twin of that
  * socket signal: a probe dir whose socket is momentarily gone (server killed mid-test under suite
  * load) must STILL not be swept while it holds an active git repo — deleting the repo is the
  * `worktree add … No such file or directory` failure this task closes
- * (gap-session-liveness-worktree-fixture-repo-vanishes). fs-only, best-effort, bounded depth. */
+ * (worktree-fixture-repo-vanishes). fs-only, best-effort, bounded depth. */
 export function dirContainsGitRepo(dir, maxDepth = 2) {
   let entries;
   try { entries = fs.readdirSync(dir); } catch { return false; }
@@ -189,7 +189,7 @@ export function dirContainsGitRepo(dir, maxDepth = 2) {
  * (the tmux SERVER daemon a hermetic probe started), or null when no such socket is live.
  * The server daemon is detached (PPID=1 after its `tmux new-session` client exits), so a graceful
  * `kill-server` that races/fails under suite load leaves it ORPHANED and unreachable by any parent
- * reap — the teardown hard-kill fallback (gap-session-liveness-fixture-tmux-not-killed) needs its
+ * reap — the teardown hard-kill fallback (fixture-tmux-not-killed) needs its
  * PID. Resolved by mapping the socket INODE from /proc/net/unix to the process holding it via
  * /proc/<pid>/fd/* (a PID-targeted lookup, fs-only — NOT a name-based batch kill; invariant
  * no_pkill_by_name_on_live = 1 is preserved). Only the LISTENING socket matches (<dir>/sock/...),
@@ -231,7 +231,7 @@ export function serverPidOf(dir) {
       }
     }
   } catch { /* /proc unreadable */ }
-  // FALLBACK (gap-session-liveness-teardown-ol-scd-d-residual): the socket inode is gone (the
+  // FALLBACK (teardown-ol-scd-d-residual): the socket inode is gone (the
   // server closed its listening socket) but the server PROCESS may STILL be alive — hanging in its
   // graceful-exit path under load. Resolve its pid via the pane children's inherited TMUX environ,
   // which survives the socket close, so the teardown hard-kill can still SIGKILL it.
@@ -271,7 +271,7 @@ export function panePidsOf(dir) {
 
 /** serverPidsOfByCmdline(dir) — PIDs of LIVE tmux SERVER processes whose cmdline still references
  * the probe's socket path under `dir`. This is the LAST-RESORT discovery that closes the
- * socket-closed-but-alive leak (gap-session-liveness-teardown-unified-kill-servers): a tmux server
+ * socket-closed-but-alive leak (teardown-unified-kill-servers): a tmux server
  * that closed its listening socket, whose pane children are already SIGHUP'd dead, and whose pid was
  * never cached is INVISIBLE to dirHasLiveOwner/serverPidOf (both proven false/null while the server
  * is STILL ALIVE — after the socket dir is removed, /proc/net/unix no longer lists it). Its CMDLINE
@@ -306,15 +306,15 @@ export function serverPidsOfByCmdline(dir) {
   return pids;
 }
 
-// ── TRUE CATCH-ALL SERVER REGISTRY (gap-session-liveness-teardown-ol-scd-cf-leak) ────────────────
-// The session-liveness test family's teardown is registry-driven: every self-built tmux SERVER is
+// ── TRUE CATCH-ALL SERVER REGISTRY (teardown-ol-scd-cf-leak) ────────────────
+// The test family's teardown is registry-driven: every self-built tmux SERVER is
 // registered DURABLY (a disk-backed JSONL registry) the moment it is created, and every cleanup
 // pass — the test process's after() hook, the suite-tail scan-kill in test.sh, the runner's
 // pre/post-suite sweeps — kills by iterating that registry. No path/prefix enumeration, no
 // name-based batch kill (invariant no_pkill_by_name_on_live = 1): each kill is a PID/socket-targeted
 // SIGKILL of a server the tests verifiably self-built. This is the TRUE catch-all that closes the 5b
 // recurrence (ol-scd-d point fix → unified after() → still ol-scd-c/f): a NEW teardown path leaks
-// only if it creates a server OUTSIDE the registration seam (the session-liveness tmux() helper /
+// only if it creates a server OUTSIDE the registration seam (the tmux() helper /
 // probe constructors — every hermetic server goes through them). And because the registry is DURABLE
 // (not process-local), a test process that CRASHES before its after() hook cannot orphan its
 // servers: the suite-tail scan-kill and the next run's pre-suite sweep still find and kill them.
@@ -354,7 +354,7 @@ export function isProcAlive(pid) {
 }
 
 /** registerServer(dir) — append a durable record for a self-built tmux server. Called from the
- * registration seam (the session-liveness tmux() helper) the moment `new-session` succeeds, when
+ * registration seam (the tmux() helper) the moment `new-session` succeeds, when
  * the socket is bound and serverPidOf resolves the daemon pid (captured so a later socket close can
  * never lose it). Best-effort: a failed registry write must never break a test. */
 export function registerServer(dir) {
@@ -510,7 +510,7 @@ export function sweepRunNamespace(id) {
     try { isDir = fs.statSync(abs).isDirectory(); } catch { continue; }
     if (!isDir) continue;
     if (dirHasLiveOwner(abs)) continue;
-    // gap-session-liveness-worktree-fixture-repo-vanishes: a dir holding an active git repo (the SCD
+    // worktree-fixture-repo-vanishes: a dir holding an active git repo (the SCD
     // worktree fixture nests `repo` + `worktree`s inside the probe dir) is IN-USE even when its tmux
     // socket is gone — never sweep an active repo dir.
     if (dirContainsGitRepo(abs)) continue;

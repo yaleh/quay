@@ -1,6 +1,6 @@
 ---
 name: quay-cold-start
-description: "Cold-start the two-layer loop in a project quay-init has already prepared: mount the loop monitor (session-liveness.sh) via the Monitor tool, re-create the 20-minute outer cron, EXPLICITLY drive the inner session to start fast mode and dispatch the first task, then PROVE the loop is live by reading a real --task-start telemetry record in .workflow-events/. One slash command; the inner start is DRIVEN here, never assumed as a side effect. Events must be DELIVERED to this session (Monitor tool), never via nohup."
+description: "Cold-start the two-layer loop in a project quay-init has already prepared: re-create the 20-minute outer cron, EXPLICITLY drive the inner session to start fast mode and dispatch the first task, then PROVE the loop is live by reading a real --task-start telemetry record in .workflow-events/. One slash command; the inner start is DRIVEN here, never assumed as a side effect."
 allowed-tools: Bash, Read, Monitor, CronCreate, CronList
 ---
 
@@ -23,11 +23,11 @@ All must hold before starting; if any fails, STOP and report which precondition 
 
 | Precondition | Path (root = the current working directory) |
 |---|---|
-| loop mechanism laid down | `<root>/plugin/scripts/session-liveness.sh`, `<root>/plugin/scripts/fast-mode-telemetry.ts` exist |
+| loop mechanism laid down | `<root>/plugin/scripts/fast-mode-telemetry.ts` exists |
 | tick docs laid down | `<root>/orchestration/orchestrator-loop-tick.md` and `<root>/docs/analysis/fast-mode-loop-tick.md` exist |
 | launch config laid down | `<root>/.claude/launch.settings.json` exists (quay-init `--loop` lays the default template; the consumer edits model/env per project) |
 | **sessions launched via the laid-down launcher** | outer and inner windows were started by **`bash <root>/plugin/scripts/quay-launch.sh <role>`** (or `bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer`), which carries `--settings` + the role-convention name (`quay-outer`/`quay-inner`) — **never** a hand-typed bare `claude` one-liner, **never** a non-role window name like `inner` |
-| inner session reachable | tmux session from `<root>/orchestration/session-liveness.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
+| inner session reachable | tmux session from `<root>/orchestration/session-config.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
 | derived laydown set green | the plugin's DERIVED laydown set is green — `bash <quay-source>/plugin/scripts/laydown-set-check.sh` reports `laydown_set_green: green`. **Gate = the derived set (lay what you verify), NOT the whole suite** — an unrelated suite failure must NOT block the cold start (`gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`; cross: `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`, same scope axis, different mechanism) |
 
 **Launch config is checked-in, not remembered** (background: `orchestration/orchestrator-loop-tick.md`
@@ -67,31 +67,28 @@ has drifted from the REQUIRED cold-start contract — STOP and fix the settings 
 ## Observable consequences (AC8c) — the falsifiable checklist every cold-start MUST produce
 
 "The same skill command produces the same observable consequences on any model" is only meaningful
-if the consequences are a concrete, checkable list. After this skill completes, **all seven** must be
+if the consequences are a concrete, checkable list. After this skill completes, **all five** must be
 true. Report each as `<KEY>: true|false` plus the one-line evidence; `false` on any key = the cold
 start did NOT complete.
 
 | # | Key | Checkable definition | Evidence |
 |---|---|---|---|
-| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the observer — session observation has exactly ONE tool, SPEC-one-observer-two-surfaces.md; the retired per-parameter observer was removed by gap-retire-inner-state-one-observer-targets-by-parameter); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true` (2026-08-06: `delivered` retired with the shared events file — the mount check is mounted + targetOk) | the `--json` output (two criteria) |
-| 2 | `MONITORS-DELIVERING` | **The observer provably produces an event line** — EITHER a transition event from the mounted monitor delivered to THIS session (a `SESSION-GONE`, a `SESSION-BACK`, a `SESSION-IDLE`, a `SESSION-OVERDUE`, etc. — each observer owns its own stdout stream, 2026-08-06), OR (deterministic, preferred) the `bash <root>/plugin/scripts/session-liveness.sh --once` `SESSION-STATUS` line(s). **The resident mount emits ONLY on state TRANSITIONS — a stable session legitimately emits NOTHING, so do NOT wait ~90s for a transition event that may never come (F6, measured 2026-08-11: ad-arm1 outer burned 15min/120.6k token diagnosing this non-problem)**; the `--once` seam is the fast delivery proof. A running process is NOT evidence; a nohup log file is NOT evidence | the `--once` `SESSION-STATUS` line(s) verbatim, or the delivered transition event line(s) |
-| 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `bash <root>/plugin/scripts/loop-driver-check.sh <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
+| 1 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `bash <root>/plugin/scripts/loop-driver-check.sh <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
 <!-- gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure (AC2/AC3): this
      bare-name reference to transcript-delivery-check.ts (no plugin/scripts/ prefix) is INTENTIONAL
      and mechanically caught — the dependency-closure pass reads send-keys-reliable.sh:41
      `${SCRIPT_DIR}/transcript-delivery-check.ts` (content-level, spelling-independent), and the
      verify check resolves tick-doc bare names. Do NOT "fix" it to a prefixed form. -->
-| 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts` — a BARE-FILENAME reference, resolved by quay-init's laydown derivation under plugin/scripts/, gap-laydown-derivation-is-sensitive-to-reference-spelling; Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
-| 5 | `TELEMETRY-RECORD` | `<root>/.workflow-events/` contains at least one `.jsonl` file carrying a `--task-start`-written record (the runId from the first `fast-mode-telemetry.ts --task-start --taskId <id> --root <root>`) | `ls <root>/.workflow-events/` + grep for the task-start record |
-| 6 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
-| 7 | `TOPOLOGY-IN-PLACE` | The two-window session topology is in place per the factory definition — `bash <root>/plugin/scripts/topology-check.sh --session <session> --json` reports `ok: true` (each of `<session>:outer/:inner` exists AND has a claude process, not a bare bash window). manager is cross-project and NOT part of this topology. A single-bash-window session (the meta-cc-3/archguard-4 failure shape) MUST report `ok: false` | the `--json` output (`ok: true` + both windows `ok`) |
+| 2 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts` — a BARE-FILENAME reference, resolved by quay-init's laydown derivation under plugin/scripts/, gap-laydown-derivation-is-sensitive-to-reference-spelling; Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
+| 3 | `TELEMETRY-RECORD` | `<root>/.workflow-events/` contains at least one `.jsonl` file carrying a `--task-start`-written record (the runId from the first `fast-mode-telemetry.ts --task-start --taskId <id> --root <root>`) | `ls <root>/.workflow-events/` + grep for the task-start record |
+| 4 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
+| 5 | `TOPOLOGY-IN-PLACE` | The two-window session topology is in place per the factory definition — `bash <root>/plugin/scripts/topology-check.sh --session <session> --json` reports `ok: true` (each of `<session>:outer/:inner` exists AND has a claude process, not a bare bash window). manager is cross-project and NOT part of this topology. A single-bash-window session (the meta-cc-3/archguard-4 failure shape) MUST report `ok: false` | the `--json` output (`ok: true` + both windows `ok`) |
 
 **Manager cold start is NOT this checklist** — a project cold start never starts the manager
-(delivery ≠ startup, AC8). The manager layer has its OWN seven-key falsifiable checklist
-(`HOME-IN-PLACE` / `IDLE-WATCH-MOUNTED` / `IDLE-WATCH-DELIVERING` / `CRON-CREATED` /
-`REGISTRY-MATCHES` / `FIRST-TICK-LANDED` / `NOT-STARTED-BY-PROJECT`), documented in
-`plugin/skills/manager/SKILL.md` §6.5, executed by `quay manager start` (+ its
-`idle-watch-mount.txt` intent + `manager-arm-loop.sh --verify`). When a network needs its manager
+(delivery ≠ startup, AC8). The manager layer has its OWN five-key falsifiable checklist
+(`HOME-IN-PLACE` / `CRON-CREATED` / `REGISTRY-MATCHES` / `FIRST-TICK-LANDED` / `NOT-STARTED-BY-PROJECT`),
+documented in `plugin/skills/manager/SKILL.md` §6.5, executed by `quay manager start` (+
+`manager-arm-loop.sh --verify`). When a network needs its manager
 started, the operator runs that checklist in the manager's own session — a project outer running
 this skill must NOT create/drive/check the manager (C3; `no-manager-tick-doc-check.ts`).
 
@@ -99,7 +96,7 @@ this skill must NOT create/drive/check the manager (C3; `no-manager-tick-doc-che
 
 ### 0. Running-state branch — installed-and-RUNNING vs installed-but-STOPPED (the 已停转 branch)
 
-The seven-key checklist measures **"was the instrument laid down" (L1)** — NONE of the keys answers
+The five-key checklist measures **"was the instrument laid down" (L1)** — NONE of the keys answers
 **"is the loop actually RUNNING right now" (L2 continuous health)**. A cold-start that previously
 succeeded can leave the loop installed-but-stopped, and a re-run then reports "complete" while the loop
 sits idle (measured 2026-08-06: archguard 11:40 cold-start → 8.5h autonomous → #102 stopped at its
@@ -119,7 +116,7 @@ This prints `cold_start_state=running|stopped` and, when stopped, `stopped_reaso
 
 | `cold_start_state` | `stopped_reason` | `next_step` | action |
 |---|---|---|---|
-| `running` | none | `none` | loop is live — skip the full cold-start; verify the seven keys are still true and report `ALREADY-RUNNING`. |
+| `running` | none | `none` | loop is live — skip the full cold-start; verify the five keys are still true and report `ALREADY-RUNNING`. |
 | `stopped` | `never-started` | `restart` | installed but never started — proceed with the full cold-start below (a first start, not a resume). |
 | `stopped` | `queue-empty` | `backlog-empty` | started before but the backlog is bottom — do NOT report "complete"; tell the human: add new direction/tasks, then restart. |
 | `stopped` | `waiting-human` | `human-needed` | started before but blocked on human — do NOT report "complete"; tell the human: resolve the needs-human items / give direction, then restart. |
@@ -220,7 +217,7 @@ only an all-clean re-run converges forward:**
 Once the re-run of all three checks is clean — ONLY when all three come back clean — the recovery
 branch CONVERGES into the SAME AC8c checklist and steps 1-9 the fresh-start branch uses — there is
 no second acceptance framework (AC3).
-The report is the same seven-key AC8c output; a recovery that converges is reported `COMPLETE`, one
+The report is the same five-key AC8c output; a recovery that converges is reported `COMPLETE`, one
 that cannot make all three checks clean is reported "installed but unrecovered" with the remaining
 findings — never "complete".
 
@@ -228,7 +225,7 @@ findings — never "complete".
 
 - `root = $(pwd)` (this skill runs inside the target project's outer session).
 - `project = basename "$root"`.
-- `session =` value of `SESSION_TMUX_SESSION=` in `<root>/orchestration/session-liveness.env`, else `${project}-0:0.0`.
+- `session =` value of `SESSION_TMUX_SESSION=` in `<root>/orchestration/session-config.env`, else `${project}-0:0.0`.
 
 ### 1b. Gate the derived laydown set — lay what you verify, not the whole suite (fail-closed)
 
@@ -246,7 +243,7 @@ the laid-down scripts, not the tests):
 ```bash
 bash <quay-source>/plugin/scripts/laydown-set-check.sh
 # laydown_set_green: green → proceed; red → STOP (a derived-set script's test is failing; laying it
-# would ship the regression — e.g. session-liveness.sh's test IS in the set, so the M3 wait was correct)
+# would ship the regression)
 ```
 
 **Do NOT wait for the whole suite (`scripts/test.sh` no-args / the full-suite run / 「全量」) to be
@@ -301,55 +298,6 @@ bash <root>/plugin/scripts/topology-check.sh --session <session> --json # verify
 Require the check to report `ok: true`. A single-bash-window session (the meta-cc-3 / archguard-4
 failure shape) reports `ok: false` — STOP; a cold start in a hand-built single-bash-window session
 would start the loop in a session that is visibly not the shipped topology.
-
-### 3. Mount the monitor via the Monitor tool (AC5 — events to THIS session)
-
-Observation has exactly ONE tool (`session-liveness.sh`, SPEC-one-observer-two-surfaces.md), mounted
-through a mount entry that execs it (who mounts owns its own stdout event stream — the "single-flight"
-mutual-exclusion semantics were retired 2026-08-06; parallel mounts of the same target are naturally
-conflict-free). **Never use nohup** — a `nohup bash …session-liveness.sh > log &` process is
-`ps`-identical to a Monitor-tool process but writes to a file and **nobody is notified**; if you find
-yourself writing `nohup` or `&` to background a monitor, **STOP — that is the anti-pattern this skill exists to prevent.** Mount `session-liveness-mount.sh` (the mount entry, which execs
-`session-liveness.sh`):
-
-```
-Monitor({command: "<root>/plugin/scripts/session-liveness-mount.sh",
-         description: "session alive/active (SESSION-GONE/BACK/IDLE/RESUMED/REPO-STALL/OVERDUE/HEARTBEAT)",
-         persistent: true, timeout_ms: 3600000})
-```
-
-`persistent: true` — it must outlive the current turn. The command is the ABSOLUTE laid-down path in
-the target project (it self-locates, so it works from the laid-down copy).
-
-### 4. Verify mount AND delivery — do not assume "looks mounted"
-
-```bash
-bash <root>/plugin/scripts/monitor-mount-check.sh --json
-```
-
-Require `mounted=true` AND `targetOk=true` — the two criteria are two
-different ways to be wrong (not mounted / mounted on the wrong project). 2026-08-06
-(gap-session-liveness-remove-shared-events-and-lock): the old `delivered` criterion (shared events
-file freshness) is GONE — the shared file was removed; observation is a tree, each observer owns its
-own stdout stream, and delivery is verified by THIS session's own Monitor stream (criterion 2 below),
-not by a cross-observer file.
-
-**Delivery is proven by the deterministic `--once` seam, not by waiting for a resident event.**
-The resident mount emits ONLY on state TRANSITIONS (SESSION-GONE/BACK/IDLE/RESUMED/OVERDUE/…) — a
-stable session legitimately emits NOTHING, so "no event within ~90s" is NORMAL, not a monitor defect.
-**(F6, measured 2026-08-11: ad-arm1 outer cold start burned 15min/120.6k token diagnosing exactly
-this non-problem — the monitor was fine; it had no state change to report.)** Do NOT wait for a
-transition event that may never come. Instead, get the deterministic delivery proof in seconds:
-
-```bash
-bash <root>/plugin/scripts/session-liveness.sh --once   # SESSION-STATUS <name> alive=... per target
-```
-
-Require `--once` to emit at least one `SESSION-STATUS` line — that line IS the delivered-event
-evidence (criterion 2's `SESSION-STATUS` form). The mount check (mounted+targetOk) proves the
-resident observer is attached; the `--once` line proves the observer can produce events; a later
-real state change will arrive on the Monitor stream. Only a mount-check failure OR an empty `--once`
-output is `MONITORS-DELIVERING: false` — **STOP and report**; do not proceed to pretend the loop is up.
 
 ### 5. Re-create the 20-minute cron — THE single loop driver (session-scoped: dies when the session PROCESS exits)
 
@@ -448,12 +396,12 @@ and STOP.** The record must be in the TARGET project (`.workflow-events/`), not 
 
 ### 9. Report the observable-consequences checklist
 
-Print all seven keys (`MONITORS-MOUNTED`, `MONITORS-DELIVERING`, `CRON-CREATED`, `INNER-DRIVEN`,
+Print all five keys (`CRON-CREATED`, `INNER-DRIVEN`,
 `TELEMETRY-RECORD`, `FIRST-TASK`, `TOPOLOGY-IN-PLACE`) with `true|false` and the one-line evidence
 each. This is the deliverable — the user's whole cold start is this command, and this list is how
 they (and a future model) know it actually took.
 
-**The seven keys alone are NOT a "complete" verdict** — they measure installed (L1), not running (L2).
+**The five keys alone are NOT a "complete" verdict** — they measure installed (L1), not running (L2).
 Re-run the step-0 check and include it in the report:
 
 ```bash

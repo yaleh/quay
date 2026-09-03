@@ -37,7 +37,7 @@ const PLUGIN_ROOT = path.resolve(REPO_ROOT, "plugin");
 const CONFIG_CLASS = new Set([
   ".quay/config.yml",
   ".quay/quay-init-state.json",
-  "orchestration/session-liveness.env",
+  "orchestration/session-config.env",
   ".gitignore",
 ]);
 

@@ -5,7 +5,7 @@
 // The 已知负载敏感族 rule was DOC-ONLY: fast-mode-loop-tick.md prose + per-file KNOWN-LOAD-SENSITIVE
 // header comments, with ZERO code hits (`grep plugin/scripts/*.ts` = 0). Red-window triage relied on
 // a human/agent remembering to do isolated reruns, the SAME marker conflated two root causes
-// (session-liveness wall-clock vs runner-grouping nested-spawn), and a non-family cross-file race
+// (session-observation wall-clock vs runner-grouping nested-spawn), and a non-family cross-file race
 // (test-file-snapshot baseline REMOVED vs runner-grouping AC7 zz- fixture) got swept into the
 // 'environmental' bucket.
 //
@@ -16,7 +16,7 @@
 // emits the family list: {file, kind} pairs. One root cause = one kind; different root causes =
 // different kinds (判读不得混用):
 //
-//   wall-clock    — real processes + tmux/session timing (session-liveness family, cold-start-skill;
+//   wall-clock    — real processes + tmux/session timing (session-observation family, cold-start-skill;
 //                   delivery-standalone-smoke-gate — real-wall-clock-wait smoke gates)
 //   nested-spawn  — spawns nested node --test / full-suite sub-suites (runner-grouping,
 //                   quay-init-loop-core, select-tests-for-touches)
@@ -195,7 +195,7 @@ export function isKnownKind(kind) {
 // ── Family scanning (canonical glob → manifest) ─────────────────────────────────────────────────────
 
 export interface FamilyMember {
-  /** Repo-relative test file path, e.g. `plugin/test/session-liveness-events.test.mjs`. */
+  /** Repo-relative test file path, e.g. `plugin/test/session-observation-events.test.mjs`. */
   rel: string;
   /** The declared kind (wall-clock | nested-spawn | heavy | ...). */
   kind: string;

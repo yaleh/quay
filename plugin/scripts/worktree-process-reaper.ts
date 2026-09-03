@@ -3,7 +3,7 @@
 // plugin/scripts/worktree-process-reaper.ts — gap-worktree-remove-orphans-probes.
 //
 // Two failure shapes (same root: test/runner child processes nobody reaps):
-//   1. `exec -a claude-probe sleep 10000` test fixtures (session-liveness/session-topology/
+//   1. `exec -a claude-probe sleep 10000` test fixtures (session-observation/session-topology/
 //      orphan-session-check families, 15+ files reuse them) are orphaned when fan-in runs
 //      `git worktree remove` while the probe is still alive — the probe's cwd was the worktree,
 //      and after removal it becomes "<worktree> (deleted)". Measured 133-136 live, 100% pointing
@@ -33,10 +33,10 @@
 //      touch deleted-cwd residue).
 //
 // Safety envelope (the 2026-08-08 two-layer-blind incident's rule, same invariant the
-// session-liveness sweepers pin): a name-based batch kill of LIVE processes is forbidden. This
+// session-observation sweepers pin): a name-based batch kill of LIVE processes is forbidden. This
 // reaper NEVER kills by process name — it kills by ORPHAN STATE: cwd under a worktree being
 // removed, or cwd pointing at a DELETED directory (a deleted dir has no owner). A live observer
-// (session-liveness monitor) has cwd = the live repo root, never a task worktree / deleted dir.
+// (session-observation monitor) has cwd = the live repo root, never a task worktree / deleted dir.
 //
 // Modes:
 //   worktree-process-reaper.ts --worktree <path> [--root <repo>] [--list|--dry-run] [--json]

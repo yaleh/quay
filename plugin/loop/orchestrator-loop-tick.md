@@ -153,7 +153,7 @@ bash plugin/scripts/outer-session-check.sh --json   # 四态自检：{state: hea
   **工厂失败/验证不过 ⇒ 升级给人**，不静默继续。
 
 **transcript 路径解析**（outer-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
-> `orchestration/session-liveness.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
+> `orchestration/session-config.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
 且不是外层自己的 jsonl）。`transcriptSource` 记录来源：显式/配置 = 结构来源，发现路径 = `discovery`。
 找不到 transcript = fresh = 空壳判据（驱动不重建）。
 **发现路径是启发式（fail-closed）**：`transcriptSource==discovery` 时自检报 **`degraded`**——**不得按 healthy
@@ -254,14 +254,9 @@ bash plugin/scripts/loop-driver-check.sh
 
 **4b. 重挂 Monitor —— 和 cron 一样是会话内的**
 
-`Monitor` 与 `CronCreate` 同样活不过会话。新会话必须重挂，否则外层退回纯 20 分钟轮询。
-观测只有一个工具：`session-liveness.sh`（经 `session-liveness-mount.sh` 单飞挂载入口挂上）：
-
-```
-Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
-         description: "会话存活/活跃（SESSION-GONE/BACK/IDLE/RESUMED/REPO-STALL/OVERDUE/HEARTBEAT）",
-         persistent: true, timeout_ms: 3600000})
-```
+`Monitor` 与 `CronCreate` 同样活不过会话。会话观测机制（Monitor 挂载 + SESSION-* 事件）2026-09-03
+随 tmux 一并退役——无对象可挂、无可查。外层退回纯 20 分钟轮询；停摆检测由 driver 现读 ready 池 /
+suite state 承接（SPEC §5.5）。
 
 **4b2/4b3. 已退役：不再挂 `suite-state-trigger` / `slot-free-trigger` 两个 Monitor（`gap-retire-outer-monitors-after-reconciler`）**
 
@@ -271,18 +266,9 @@ SPEC §5.5）落地后，两场景由 driver 现读接管，trigger 从正确性
 脚本本体 `plugin/scripts/suite-state-trigger.ts` 保留为共享库
 （被 `full-suite-runner.ts` import——crash-watchdog / 起跑闸；空槽条件判定）；`slot-free-trigger.ts` 已删除
 （gap-retired-mechanisms-cleanup-corpses-stale-refs，2026-08-30，零运行时消费者）。只是不再由外层
-Monitor 挂载。4c 的挂载验证现只覆盖 session-liveness。
+Monitor 挂载。
 
-**4c. 重挂后立即验证挂上了 —— 两判据自检**
-
-重挂 Monitor 后立刻跑一次检查器，不靠「看起来挂上了」：
-
-```bash
-bash plugin/scripts/monitor-mount-check.sh --json
-```
-
-两判据缺一不可：`mounted=true`（挂上了）、`targetRoot` 等于本仓根（挂对了，`targetOk=true`）。
-任何一条不满足都按冷启动失败处理，不要直接进 tick。挂没挂/挂哪个仓库两条判据是**一条不是一条**——
+**4c. 重挂后验证 —— 已退役**（2026-09-03：monitor-mount-check 与观测者脚本随 tmux 一并删除，无对象可查）：
 只查第一条会漏掉「进程活着、目标错」那次。
 
 **5. 核对前置条件**
@@ -397,20 +383,10 @@ tmux capture-pane -p -t "$TMUX_SESSION" | tail -3 | grep -q 'esc to interrupt' &
 没发生，没有任何东西报错）；更上层**挂了 18 小时挂在错的目标上**。**一个盯错东西的 monitor 和一个
 正确的 monitor，从外面看一模一样。**
 
-所以每个 tick 用一条命令自检，不靠人判断：
+### 0b. 事件式监测（Monitor）——已退役（2026-09-03）
 
-```bash
-bash plugin/scripts/monitor-mount-check.sh --json
-```
-
-两判据：`mounted`（挂没挂）/ `targetRoot` 是否等于本仓根（挂的哪个仓库副本，`targetOk`）。
-挂载判据是 argv 前两 token 精确等于 `bash <绝对路径>`，**不是子串**——`pgrep -f` 会匹配到发起
-查询的命令自己。
-
-### 0b. 事件式监测（Monitor）——补 tick 之间的盲区
-
-20 分钟 tick 的盲区是**内层停摆后的等待时间**。观测只有一个工具：`session-liveness.sh`。挂成
-`persistent` Monitor，事件经观察者自己的 stdout 流送达挂载方：
+会话观测机制随 tmux 一并退役；tick 之间的停摆盲区由 driver 现读（ready 池 / suite state）承接。
+历史事件表（供查阅，不再产生）：
 
 | 事件 | 含义 |
 |---|---|
@@ -452,22 +428,12 @@ bash plugin/scripts/monitor-mount-check.sh --json
 的 `--detect-stop --pane` 屏幕观察者现在能从 pane 形状直接看到 `waiting-input` / `permission-prompt`
 （3 采样一致），不再只靠遥测缺席推断。
 
-### 0b2. 会话存活监视（`plugin/scripts/session-liveness.sh`）——看会话本身还在不在
+### 0b2. 会话存活监视——已退役（2026-09-03）
 
-**看的是【会话】本身**（进程消失 / 恢复 / 活着但不推进 / 转入空闲），对**任何 Claude Code 会话**
-成立，外层与内层通用。随 `quay-init --loop` 铺下，会话名在安装时被替换；默认零配置看本项目自己的会话。
-（旧 `inner-state.sh` 已退役——它只看工作产出、不看会话；观测只有一个工具 `session-liveness.sh`。）
-
-| 事件 | 触发 | 信号源 |
-|---|---|---|
-| `SESSION-GONE` / `SESSION-BACK` | 会话进程消失 / 恢复 | 会话面 |
-| `REPO-STALL` | 活着但仓库 ≥`STALL_MIN` 分钟无新提交（未暂停的项目） | **仓库信号，不是会话面** |
-| `SESSION-OVERDUE` | 心跳源 mtime ≥`OVERDUE_MIN`（未暂停的项目）——会话可能已死 | 会话面（心跳源=transcript） |
-| `SESSION-IDLE` / `SESSION-RESUMED` | 相邻两轮 pane 状态相同=空闲；**在转换后一个轮询周期内报出** | 会话面 |
-
-**外层挂一个监视器——它答「会话还在不在」：** `session-liveness.sh` 看【会话】本身：进程活/死、忙/闲、
-心跳逾期没有。**内层的心跳是它的会话 transcript**。经 `SESSION_TRANSCRIPTS`（会话 id 或绝对路径）或
-`SESSION_HEARTBEATS` 配置；外层心跳是 tick 日志。**解除停机（删 `.halt`）那一刻重置陈旧度基线**。
+会话进程存活/忙闲/心跳观测随 tmux 一并退役，无对象可查。停摆检测改由直接量活性承接：
+`git log -1 --format=%ci` 提交时刻 / `git worktree list` 活 worktree / worktree 内活进程 / 盘上任务
+`status:` 枚举。工作产出信号直接读 `fast-mode-telemetry --report`，仓库告警直接看 `git log`。
+**解除停机（删 `.halt`）那一刻重置陈旧度基线**。
 
 **四个阈值（含义与默认值在这里，不只活在脚本注释里）：**
 
@@ -762,7 +728,7 @@ tick-log 与 commit message 沿用同一词汇：派发写「滚动派发」，�
    每个 tick（含轻触）**无条件**跑一次 `bash plugin/scripts/observer-registry.sh --audit --json`——
    它问「有没有被登记下线的目标，且所有观测者是否都正确报『已下线』」。被下线的目标写一次在
    `orchestration/observer-registry.conf`（人/管理者显式 `--register-offline`，观测者从不自行猜），
-   所有观测者（os-anchor-watchdog / session-liveness 的 git-staleness、coverage 读面 / topology-check）
+   所有观测者（os-anchor-watchdog / topology-check）
    从同一处读。`--audit` 是 AC3 负控制：对每个 offline 目标重建 4 个消费者读面，任一仍报旧状态
    （REPO-STALL / NOT-WATCHED / GONE / 陈旧拓扑 / watchdog 复活）即 `stale`、退出 1；
    **`stale_observer_reports` 必须恒为 0（band）**。无新系统 crontab：观测者保留各自既有触发，
@@ -1087,7 +1053,7 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-sta
 - 异步收尾例程（步骤 1b）：本轮收尾几条、`.quay/full-suite-state.json` 最新 `state`（green/red/running）
   与 `durationMs`、本轮全量 suite 是否在跑/绿/红。
 - 累计动作类型分布（退化判据）。
-- Monitor 两判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` / `targetRoot`）。
+- ~~Monitor 两判据~~（已退役 2026-09-03：monitor-mount-check 已删除）。
 - 自述措辞审计（步骤 1c）：本轮 inner 自述 `count`（batch 式汇报数）与 `converged`（重锚收敛判据）。
 - `external-dogfooding` 例行（4c）：契约四项是否绿、是否 DUE、本窗口是否产了新 `label:directive` 发现。
 

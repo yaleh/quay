@@ -119,7 +119,7 @@ bash plugin/scripts/outer-session-check.sh --json   # 三态自检：{state: hea
   **工厂失败/验证不过 ⇒ 升级给人**（step 5），不静默继续——建不出来就进不了正常驱动流程。
 
 **transcript 路径解析**（outer-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
-> `orchestration/session-liveness.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
+> `orchestration/session-config.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
 且不是外层自己的 jsonl，标 `source=discovery`）。找不到 transcript = fresh = 空壳判据（驱动不重建）。
 **发现路径是启发式**：`healthy` 判定若来自 `source=discovery`，先确认所选 transcript 确实是**当前**
 inner 会话的（例如 inner claude 进程启动时刻之后的），否则按空壳驱动——驱动不重建，代价有界。
@@ -194,11 +194,11 @@ bash plugin/scripts/loop-driver-check.sh
 **4b. 重挂 Monitor —— 和 cron 一样是会话内的**
 
 `Monitor` 与 `CronCreate` 同样活不过会话。新会话必须重挂，否则外层退回纯 20 分钟轮询。
-观测只有一个工具（SPEC-one-observer-two-surfaces.md）：`session-liveness.sh`（经
-`session-liveness-mount.sh` 挂载入口挂上——2026-08-06 起无锁，谁挂的谁拥有自己的 stdout 事件流）：
+观测只有一个工具（SPEC-one-observer-two-surfaces.md）：`session-observation.sh`（经
+`session-observation-mount.sh` 挂载入口挂上——2026-08-06 起无锁，谁挂的谁拥有自己的 stdout 事件流）：
 
 ```
-Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
+Monitor({command: "$REPO_ROOT/plugin/scripts/session-observation-mount.sh",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
          description: "会话存活/活跃（SESSION-GONE/BACK/IDLE/RESUMED/REPO-STALL/OVERDUE/HEARTBEAT）",
          persistent: true, timeout_ms: 3600000})
 ```
@@ -211,7 +211,7 @@ Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",   # REP
 本层红窗分诊本身已随 AC84 退役（→ `orchestration/archive/AC58-retired-clauses.md#R33`），SUITE-RED 的
 外层消费者已不存在。脚本本体 `plugin/scripts/suite-state-trigger.ts` 保留为共享库（被
 `full-suite-runner.ts` import——crash-watchdog / 起跑闸 / 红链自检），只是不再由外层 Monitor 挂载。
-4c 的挂载验证现只覆盖 session-liveness。
+4c 的挂载验证现只覆盖 session-observation。
 
 **4c. 重挂后立即验证挂上了 —— 两判据自检**
 
@@ -250,7 +250,7 @@ Monitor 事件流承担（谁挂的谁拥有），不是检查器能读的跨观
 
 ### nohup 为什么不行（Monitor tool 判据）
 
-A `nohup bash …session-liveness.sh > log &` process and a Monitor-tool process look **identical in
+A `nohup bash …session-observation.sh > log &` process and a Monitor-tool process look **identical in
 `ps`** (same argv). The difference is where stdout goes: the nohup process writes to a file and
 **nobody is notified**; a Monitor-tool process has every stdout line turned into a **session
 notification**. The criterion for "the loop is up" is therefore **"an event was delivered to this
@@ -265,8 +265,8 @@ cold-start skill exists to prevent.**
 "the whole quay suite is green" (`scripts/test.sh` full-suite / 全量). A cold start only lays down the
 derived laydown set (the `plugin/scripts/*` the shipped skill + loop docs reference), so a suite
 failure UNRELATED to that set must NOT block it (与铺设集无关的失败不再无限期阻塞冷启动); a failure
-INSIDE the set MUST block (铺什么验什么). The 2026-08-05 wait was correct: `session-liveness.sh` +
-`session-liveness-mount.sh` are both derived members, so laying then would have shipped the M3
+INSIDE the set MUST block (铺什么验什么). The 2026-08-05 wait was correct: `session-observation.sh` +
+`session-observation-mount.sh` are both derived members, so laying then would have shipped the M3
 busy/idle regression into the target project.
 
 **Mechanical derivation (no new mechanism).** The set is derived by grepping the shipped docs — the
@@ -305,7 +305,7 @@ bash <root>/plugin/scripts/session-bootstrap.sh <root> manager/inner/outer # ful
 It creates each named window (idempotent — re-runs leave live windows alone), launches each role's
 Claude Code process via the checked-in launcher `quay-launch.sh` (the skill's internal
 implementation, never a user-facing invocation), verifies each process is actually alive (the same
-`/proc` process-detection `session-liveness.sh` uses), and exits non-zero naming the failing window
+`/proc` process-detection `session-observation.sh` uses), and exits non-zero naming the failing window
 if any window cannot be confirmed live (fail-closed). After it returns, the cold-start skill's
 "inner session reachable" precondition is already satisfied — the same command a cold start used to
 follow ("hand-build the session, then one command") is now truly one command.
@@ -453,7 +453,7 @@ bash plugin/scripts/monitor-mount-check.sh --json
 
 ### 0b. 事件式监测（Monitor）——补 tick 之间的盲区
 
-20 分钟 tick 的盲区是**内层停摆后的等待时间**。观测只有一个工具：`session-liveness.sh`
+20 分钟 tick 的盲区是**内层停摆后的等待时间**。观测只有一个工具：`session-observation.sh`
 （SPEC-one-observer-two-surfaces.md，gap-retire-inner-state-one-observer-targets-by-parameter；
 `inner-state.sh` 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R02`）。挂成
 `persistent` Monitor，事件经观察者自己的 stdout 流送达挂载方（2026-08-06 起共享事件文件已移除；
@@ -559,7 +559,7 @@ cut -d' ' -f1 /proc/loadavg                    # 负载是独立且不会说谎�
 trigger-is-dead-code-never-wired-into-any-tick）：步骤 1 的 `--detect-stop --pane` 屏幕观察者现在能
 从 pane 形状直接看到 `waiting-input` / `permission-prompt`（3 采样一致），不再只靠遥测缺席推断。
 
-### 0b2. 会话存活监视（`session-liveness.sh`）——看会话本身还在不在
+### 0b2. 会话存活监视（`session-observation.sh`）——看会话本身还在不在
 
 **看的是【会话】本身**（进程消失 / 恢复 / 活着但不推进 / 转入空闲），对**任何 Claude Code 会话**
 成立，外层与内层通用（原 `outer-liveness.sh`，AC10 泛化改名——名字取窄了，这套逻辑与「外层」
@@ -574,7 +574,7 @@ trigger-is-dead-code-never-wired-into-any-tick）：步骤 1 的 `--detect-stop 
 
 **外层挂一个监视器（AC12 收口说明 → `orchestration/archive/AC58-retired-clauses.md#R03`）——它答「会话还在不在」：**
 
-`session-liveness.sh` 看【会话】本身：进程活/死、忙/闲、心跳逾期没有。**内层的心跳是它的会话
+`session-observation.sh` 看【会话】本身：进程活/死、忙/闲、心跳逾期没有。**内层的心跳是它的会话
 transcript**（AC1/AC16，2026-08-03 实测选定）——`.workflow-events/` 每任务只写 1-2 行、任务
 进行中完全冻结，不是有效心跳源；transcript 每次工具调用都写（含 subagents 目录）。经
 `SESSION_TRANSCRIPTS`（会话 id 或绝对路径）或 `SESSION_HEARTBEATS` 配置；外层心跳是 tick 日志。
@@ -617,7 +617,7 @@ manager 查 outer（manager 侧已落地 b8d7746e）；**outer 查 inner（本�
 # ⚠️ 目标解析必须验【pid 匹配 inner pane】，不是发现启发式（2026-08-08 11:4x 管理者上游定位：
 #    默认目标解析看的是 outer 自己 2989418；发现启发式会挑到 b8dc91a6（manager 会话）——
 #    两个都不是 inner 728a4610）。SESSION_TRANSCRIPTS 必须显式写 inner 的 transcript 路径。
-INNER_TX=$(grep '^SESSION_TRANSCRIPTS' orchestration/session-liveness.env | head -1 | cut -d= -f2- | tr -d '"' | awk '{print $2}')
+INNER_TX=$(grep '^SESSION_TRANSCRIPTS' orchestration/session-config.env | head -1 | cut -d= -f2- | tr -d '"' | awk '{print $2}')
 [ -z "$INNER_TX" ] && INNER_TX="/home/yale/.claude/projects/-home-yale-work-quay/728a4610-46b5-4c4a-84ea-6ed01667c433.jsonl"
 # 取证必须含 pid 断言：该 transcript 的会话 == quay-0:inner 的 pane_pid（不是 alive=1 就算）
 INNER_PANE=$(tmux list-panes -t "quay-0:inner" -F '#{pane_pid}' 2>/dev/null)
@@ -926,7 +926,7 @@ tick 做一次收尾 pass。
 
 **触发者是执行者，不是新调度源（AC2/AC4）**：它只做「状态变化 → 事件」的翻译与通知，不做任何分诊/
 派发决策；分诊 = 本文件下方既有「红窗分诊」，派发 = inner 出厂文档既有 §4 规则。节奏仍唯一（步骤 4
-的 `*/20` cron）；Monitor 是事件监测（同 session-liveness），不驱动任何 tick。事件日志只记事实，
+的 `*/20` cron）；Monitor 是事件监测（同 session-observation），不驱动任何 tick。事件日志只记事实，
 处置逻辑在文档/既有实现里——触发者不引入第二条决策链。冷启动即红（外层 `/clear` 后套件仍红）也触发
 `SUITE-RED`（第一眼即红），正是本轮「红着无人处置」形态的兜底。**触发链自检**（Contract invoke）：
 `node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check`

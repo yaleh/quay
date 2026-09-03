@@ -102,7 +102,7 @@
 // `task-over-90m` already carries as an age proxy, now explicit for this condition too: it does not
 // read the actual question (no mechanical trace for the question's CONTENT exists), it recognizes
 // the STOPPED shape. `--transcript <path>` is required, explicit, never inferred (same principle as
-// `session-liveness.sh`'s `SESSION_TRANSCRIPTS` — a pid/session→file mapping is not safe to guess);
+// `session-observation.sh`'s `SESSION_TRANSCRIPTS` — a pid/session→file mapping is not safe to guess);
 // omitting it leaves this detector a no-op, so the pre-existing two conditions are byte-for-behavior
 // unchanged (AC5).
 //
@@ -123,9 +123,9 @@
 // consecutive=0/3`), so the inner could sit on a permission dialog and the outer never saw it. The
 // SCREEN OBSERVER now treats a STALE (mtime > PANE_STALENESS_MS / 300s) or ABSENT --pane snapshot as
 // UNTRUSTED and reads a LIVE `tmux capture-pane -p -t <tmux-target>` instead (the same read-only
-// primitive session-liveness.sh uses), eliminating the dead-snapshot class. Live capture is EXPLICIT
+// primitive session-observation.sh uses), eliminating the dead-snapshot class. Live capture is EXPLICIT
 // config (--tmux-target > env INNER_BLOCKED_TMUX_TARGET / SESSION_TMUX_TARGET > SESSION_TMUX_SESSION
-// env or <root>/orchestration/session-liveness.env resolved as `<session>:<target>`), never a guess;
+// env or <root>/orchestration/session-config.env resolved as `<session>:<target>`), never a guess;
 // when neither a fresh file nor a live source is available the observation is "unreadable" (counter
 // resets — no false positive on stale data). The pane_decision line now carries `source=file|live`.
 //
@@ -660,7 +660,7 @@ export function detectMergeConflict(root) {
 }
 
 /**
- * Ruling-required stall threshold (ms). Reuses `session-liveness.sh`'s OVERDUE_MIN=30 calibration
+ * Ruling-required stall threshold (ms). Reuses `session-observation.sh`'s OVERDUE_MIN=30 calibration
  * verbatim rather than inventing a new number: that file's own comment records the ONE empirically
  * measured real-work quiet spell during a genuinely long, non-blocked task as 20.5 minutes ("阶段一
  * 实测 transcript 长任务最大间隙 20.5min"), and picked 30 minutes to keep ~9.5min margin above it.
@@ -687,7 +687,7 @@ export const RULING_REQUIRED_PANE_SAMPLES = 3;
 
 /**
  * mtime (ms epoch) of a transcript heartbeat source: the transcript file itself, OR — if fresher —
- * any file under its sibling `<id>/subagents/` directory. Same technique as `session-liveness.sh`'s
+ * any file under its sibling `<id>/subagents/` directory. Same technique as `session-observation.sh`'s
  * `heartbeat_mtime` / `inner-forensics.mjs`'s `transcriptSet`: the inner's own transcript goes quiet
  * while it has delegated work to a subagent, whose activity lands in that directory, not the main
  * transcript file — reading only the main file would misread "busy delegating" as "frozen".
@@ -945,7 +945,7 @@ function envNonNegMs(name, fallback) {
 }
 
 /**
- * Resolve the tmux control socket — the SAME resolution session-liveness.sh uses (lines 296-305):
+ * Resolve the tmux control socket — the SAME resolution session-observation.sh uses (lines 296-305):
  * SESSION_TMUX_SOCKET explicit override → TMUX_TMPDIR/tmux-<uid>/default → ${TMPDIR:-/tmp}/tmux-<uid>/default.
  */
 export function resolveTmuxSocket() {
@@ -956,7 +956,7 @@ export function resolveTmuxSocket() {
 }
 
 /**
- * Minimal KEY=VALUE parse of a session-liveness.env file (the shell file session-liveness.sh sources).
+ * Minimal KEY=VALUE parse of a session-config.env file (the shell file session-observation.sh sources).
  * Values are unquoted or double-quoted (double-quoted may contain spaces). Comments/blank lines skipped.
  * @param {string} filePath
  * @returns {Record<string,string>}
@@ -973,12 +973,12 @@ export function parseEnvFileVars(filePath) {
 
 /**
  * Resolve the tmux target (`<session>[:<window>]`) for a LIVE capture of the observed layer.
- * Precedence — EXPLICIT CONFIG, never a guess (same discipline as session-liveness.sh's
+ * Precedence — EXPLICIT CONFIG, never a guess (same discipline as session-observation.sh's
  * "NO guess" rule):
  *   1. INNER_BLOCKED_TMUX_TARGET env  (test/ops explicit override)
- *   2. SESSION_TMUX_TARGET env        (session-liveness explicit target override)
+ *   2. SESSION_TMUX_TARGET env        (session-observation explicit target override)
  *   3. SESSION_TMUX_SESSION env       → `<session>:<target>` role window
- *   4. <root>/orchestration/session-liveness.env SESSION_TMUX_SESSION → `<session>:<target>`
+ *   4. <root>/orchestration/session-config.env SESSION_TMUX_SESSION → `<session>:<target>`
  * Returns null when nothing is configured ⇒ live capture unavailable; the observer fails toward
  * "unreadable" (counter reset), NEVER toward trusting a stale snapshot.
  * @param {string} root
@@ -990,13 +990,13 @@ export function resolveTmuxTarget(root, target = DEFAULT_TARGET) {
   const explicit = (process.env.INNER_BLOCKED_TMUX_TARGET || process.env.SESSION_TMUX_TARGET || "").trim();
   if (explicit) return explicit;
   const session = (process.env.SESSION_TMUX_SESSION || "").trim()
-    || parseEnvFileVars(path.join(root, "orchestration", "session-liveness.env")).SESSION_TMUX_SESSION || "";
+    || parseEnvFileVars(path.join(root, "orchestration", "session-config.env")).SESSION_TMUX_SESSION || "";
   return session.trim() ? `${session.trim()}:${t}` : null;
 }
 
 /**
  * Live pane capture via `tmux -S <socket> capture-pane -p -t <target>` — the same READ-ONLY
- * primitive session-liveness.sh uses (line 1113). Returns the captured text, or null when tmux is
+ * primitive session-observation.sh uses (line 1113). Returns the captured text, or null when tmux is
  * absent / the socket is unreachable / the target pane does not exist.
  * @param {string} tmuxTarget
  * @param {{socket?: string}} [opts]
@@ -1237,7 +1237,7 @@ config, never inferred.
 reads a live 'tmux capture-pane -p -t <target>' on the LIVE pane instead of the stale bytes,
 eliminating the dead-snapshot class. Precedence (explicit config, never a guess): --tmux-target > env
 INNER_BLOCKED_TMUX_TARGET / SESSION_TMUX_TARGET > SESSION_TMUX_SESSION (env or
-<root>/orchestration/session-liveness.env) resolved as <session>:<target>. When neither a fresh
+<root>/orchestration/session-config.env) resolved as <session>:<target>. When neither a fresh
 file nor a live source is available the observation is "unreadable" (counter resets — no false
 positive on stale data).
 --transcript <path> (or env INNER_BLOCKED_TRANSCRIPT) additionally enables the "ruling-required"

@@ -16,7 +16,7 @@
 #                          stays a health check, not a functional classifier test: machinery and
 #                          behavior are not health-checked here, the behavior gate is the
 #                          pane-state-classify.test.mjs suite)
-#   session liveness     — session-liveness.sh (the per-project monitor)
+#   session liveness     — session-observation.sh (the per-project monitor)
 #
 # "alive" here is the Contract band: the base layer process does not die with an agent session.
 # The os-anchor timer's presence is the direct evidence (a systemd unit is not owned by any
@@ -95,7 +95,7 @@ fi
 probe "deliver_adapter" "$REPO_ROOT/plugin/scripts/supervisor-deliver.sh"
 probe "delivery_checker" "$REPO_ROOT/plugin/scripts/transcript-delivery-check.ts"
 probe "observe_adapter" "$REPO_ROOT/plugin/scripts/pane-state-classify.ts"
-probe "session_liveness" "$REPO_ROOT/plugin/scripts/session-liveness.sh"
+probe "session_liveness" "$REPO_ROOT/plugin/scripts/session-observation.sh"
 
 # ── emit (Contract measure: the `alive` field on stdout) ─────────────────────────────────────────
 if [ "$alive" = "1" ]; then

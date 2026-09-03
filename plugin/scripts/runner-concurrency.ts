@@ -129,7 +129,7 @@ export function defaultPhaseConcurrencyDirect(): number {
  *  the prior fixed 3 (gap-lowconc-concurrency-8-starves-bclass-waiting) was WRONG — 人裁定
  *  「lowconc 从 8 降回 3 是错的」「lowconc 和 serial lane 数现在都是计算出来的吧？应当持这一根据当前系统
  *  环境计算的机制」, and the lowconc=8 starvation hypothesis was falsified by its own post-landing
- *  attribution (the probe-starvation root cause is the session-liveness family's own multi-cause, NOT the
+ *  attribution (the probe-starvation root cause is the session-observation family's own multi-cause, NOT the
  *  concurrency value). lowconc therefore returns to serial's host-derived default. Exported for
  *  full-suite-runner.ts (the runner twin must read the SAME value) and test.sh's thin forwarder
  *  (--lowconc-concurrency). */

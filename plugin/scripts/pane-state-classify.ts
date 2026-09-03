@@ -120,14 +120,14 @@ const PERMISSION_PROMPT_RE = new RegExp(
 const DISMISSABLE_PROMPT_RE = /\(optional\)|Dismiss|How is Claude doing this session/i;
 
 /** Active processing: the definitive "esc to interrupt" status flag (the SAME signal
- * session-liveness.sh already uses to mean busy). It lives in the STATUS LINE (the last one or two
+ * session-observation.sh already uses to mean busy). It lives in the STATUS LINE (the last one or two
  * lines of the bottom region), NOT in scrolled content — the manager's analysis text has been
  * observed QUOTING the phrase "esc to interrupt" inside the bottom 10 lines while the session was
  * actually idle (real capture waiting-input-manager-3). Restricting the match to the last two
  * lines makes a quoted mention in content unable to fake a busy verdict.
  *
  * WHY esc-in-status-area ALONE means busy is CORRECT (no bypass-mode exception — do NOT re-add one):
- * tasks/gap-session-liveness-busy-mask-idle-with-subagents proposed a "constant bypass-mode esc"
+ * tasks/gap-session-observation-busy-mask-idle-with-subagents proposed a "constant bypass-mode esc"
  * distinction (an `esc to interrupt` in the status line with NO co-occurring active-processing
  * signal should read as idle). The manager FALSIFIED the premise 2026-08-08 15:2x (commit
  * 32c85b20 on develop): (1) a 13:05 idle capture of the real outer pane showed NO `esc to
@@ -314,9 +314,9 @@ export function classifyPaneStateOrthogonal(paneText: string, opts: { lines?: nu
 // supervisor-deliver.sh / send-keys-reliable.sh used to send to a busy/thinking target — text
 // entered the input box but was never committed, so the one-shot send→verify failed every time
 // (measured 2026-08-06). The delivery path now runs this can-receive judgment BEFORE any keystroke.
-// It is the SAME shape classifier session-liveness uses for its busy/idle verdict — the repo's idle
+// It is the SAME shape classifier session-observation uses for its busy/idle verdict — the repo's idle
 // judgment is single-sourced here, never duplicated in a consumer (the fix direction's
-// "与 session-liveness 的 idle 判定同源").
+// "与 session-observation 的 idle 判定同源").
 export const DEFAULT_CAN_RECEIVE_WAIT_S = 30;
 export const DEFAULT_CAN_RECEIVE_POLL_S = 2;
 
@@ -329,14 +329,14 @@ export function canReceiveInput(paneText: string, opts: { lines?: number } = {})
   return classifyPaneStateOrthogonal(paneText, opts).input_state === "waiting-input";
 }
 
-// ── transcript decisions (gap-session-liveness-decision-import-refactor, 2026-08-13) ──────────────
-// The session-liveness monitor's TRANSCRIPT-derived judgments — "last message type", "trailing API
+// ── transcript decisions (gap-session-observation-decision-import-refactor, 2026-08-13) ──────────────
+// The session-observation monitor's TRANSCRIPT-derived judgments — "last message type", "trailing API
 // error count", "context saturation", "last user input" — were bash grep/tail functions inside
-// session-liveness.sh, coverable only by spawning the script (and, inside the loop, real tmux).
+// session-observation.sh, coverable only by spawning the script (and, inside the loop, real tmux).
 // They are PURE decisions over transcript content (JSONL lines), so they live HERE, importable by
 // tests (zero real time, load-immune — AC1), while the shell keeps a thin subprocess seam
 // (--transcript). Each function mirrors the bash original's line-scan semantics EXACTLY (same
-// patterns, same stop conditions) — see session-liveness.sh's transcript_last_message_type /
+// patterns, same stop conditions) — see session-observation.sh's transcript_last_message_type /
 // transcript_api_error_count / transcript_cache_read_tokens / transcript_context_saturation /
 // last_user_input_epoch. The shell contract (the seams and the loop wiring) is unchanged; only the
 // decision layer moved here.
@@ -357,7 +357,7 @@ function isMessageRecord(line: string): boolean {
  *   assistant w/ tool_use block → pending-tool-use (round in progress: busy);
  *   assistant w/o  → pure-text (candidate idle);
  *   none found     → unknown.
- * Mirrors session-liveness.sh transcript_last_message_type (tail-500 + full-scan fallback are
+ * Mirrors session-observation.sh transcript_last_message_type (tail-500 + full-scan fallback are
  * together equivalent to scanning all lines from the end). */
 export function transcriptLastMessageType(lines: string[]): TranscriptMessageType {
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -434,7 +434,7 @@ export function lastUserInputEpoch(lines: string[]): number | null {
   return null;
 }
 
-// ── monitor verdict + event decisions (moved from session-liveness.sh) ────────────────────────────
+// ── monitor verdict + event decisions (moved from session-observation.sh) ────────────────────────────
 
 /** Transcript side of the fused busy (stage-3 AC1): pending-tool-use / user-input ⇒ busy (zero
  * idle-miss is the hard upper bound — a pending tool_use must never report idle). */
@@ -502,7 +502,7 @@ export interface PaneVerdict {
   region_empty: boolean;
 }
 
-/** The monitor's pane verdict in ONE decision (mirrors session-liveness.sh _sl_pane_verdict):
+/** The monitor's pane verdict in ONE decision (mirrors session-observation.sh _sl_pane_verdict):
  *   empty capture ⇒ busy=1 (AC5 anti-filter: nothing to judge is never silently idle);
  *   input_state busy|error-banner ⇒ busy=1 (real work / error);
  *   permission-prompt ⇒ busy=0 intervention=1 (needs human/upper-layer — NOT busy);
@@ -810,7 +810,7 @@ export function runCanReceiveWait(argv: string[]): number {
   return 1;
 }
 
-// ── session-liveness decision seams (gap-session-liveness-decision-import-refactor) ────────────────
+// ── session-observation decision seams (gap-session-observation-decision-import-refactor) ────────────────
 // The shell's per-round transcript judgments moved here as pure functions; these three run* entry
 // points are the shell's subprocess seams (the "shell contract" — the pure functions stay importable
 // for decision tests, the shell keeps byte-compatible output).
@@ -1180,13 +1180,13 @@ if (isDirect) {
   const args = process.argv.slice(2);
   // THREE-WAY exclusive entry (ad-arm1 gate #1: the old fall-through ran selfcheck()+exit() after
   // --classify's stdin.resume(), exiting before stdin was consumed — the classifier never ran for
-  // shell consumers, explaining the session-liveness busy/idle failures; --check-residue was
+  // shell consumers, explaining the session-observation busy/idle failures; --check-residue was
   // unreachable outside the else).
   if (args[0] === "--classify") {
-    // Shell-consumer seam (session-liveness.sh): read the pane text on stdin, print the
+    // Shell-consumer seam (session-observation.sh): read the pane text on stdin, print the
     // classification as PLAIN TEXT — line 1 = state, line 2 = the bottom region (real newlines).
     // Pure — no tmux, no file reads, no writes beyond stdout. The busy/idle judgment in
-    // session-liveness.sh consumes THIS instead of a whole-pane hash (ADR-016 Amendment 2026-08-04,
+    // session-observation.sh consumes THIS instead of a whole-pane hash (ADR-016 Amendment 2026-08-04,
     // ruling D): the verdict is a SHAPE of the bottom region, so volatile chrome (token counter /
     // spinner / ✻ residue) can never flip it. Plain text (not JSON) keeps the bash consumer to ONE
     // subprocess per round (fewer transient shells → less load on the mount-count tests).
@@ -1195,7 +1195,7 @@ if (isDirect) {
     process.stdin.on("data", (d) => { input += d; });
     process.stdin.on("end", () => {
       // --orthogonal (gap-pane-classify-needs-two-orthogonal-dimensions): line 1 = input_state,
-      // line 2 = work_in_flight (0|1), line 3+ = the bottom region. session-liveness.sh reads this
+      // line 2 = work_in_flight (0|1), line 3+ = the bottom region. session-observation.sh reads this
       // shape to feed its MARKER-STALE suppression (work_in_flight ⇒ transcript-fresh + idle is
       // self-consistent, not an anomaly).
       if (args.includes("--orthogonal")) {

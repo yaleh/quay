@@ -23,7 +23,7 @@ for the project (0 = first, e.g. `quay-0`, `meta-cc-4`).
 
 | Window | Role | Launched by | Drives | Is driven by | Mounts |
 |---|---|---|---|---|---|
-| `<project>-N:outer` | loop driver | skill-internal launcher `quay-launch.sh` (`claude-deepseek`/`deepseek-v4-flash`, settings-crystallized) | `inner` via send-keys | — | loop monitor (`session-liveness.sh`), 20-min cron, re-anchor, outer tick (`orchestrator-loop-tick.md`) |
+| `<project>-N:outer` | loop driver | skill-internal launcher `quay-launch.sh` (`claude-deepseek`/`deepseek-v4-flash`, settings-crystallized) | `inner` via send-keys | — | 20-min cron, re-anchor, outer tick (`orchestrator-loop-tick.md`) |
 | `<project>-N:inner` | implementation session | skill-internal launcher `quay-launch.sh` (`claude-deepseek`/`deepseek-v4-flash`, settings-crystallized) | — | `outer` (send-keys drive) | its own work product (`.workflow-events/` telemetry), inner tick (`fast-mode-loop-tick.md`) |
 
 Window order: `outer` (window 0), `inner` (1) — matching the live `quay-0` layout.
@@ -80,7 +80,7 @@ skill handles the launch itself. Each layer's launch command is materialized fro
 skill's OWN inner implementation, not a user-facing deliverable).
 
 1. **Resolve root / project / session.** `root = $(pwd)`, `project = basename "$root"`,
-   `session =` the `SESSION_TMUX_SESSION=` value in `<root>/orchestration/session-liveness.env`
+   `session =` the `SESSION_TMUX_SESSION=` value in `<root>/orchestration/session-config.env`
    (default `<project>-0:0.0`).
 2. **Bare-metal entry.** If no session exists yet, bootstrap it first:
    `bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer` — this creates each

@@ -124,7 +124,7 @@ FAILURES are ALL recorded in state.json's failures[] (MAX_RECORDED_FAILURES=200)
 // ── fix-scope gate（fix 前判定红是否本任务 Touches 内回归，gap-suite-fix-workflow-no-load-
 //    sensitive-branch）──────────────────────────────────────────────────────────────────────
 // suite-fix 曾是「红 ⇒ fix ALL failures + rerunning」的无分支路径，见啥修啥、越界到非 Touches
-// 文件（4 次：inner-blocked-signal / outer-cron-registry / session-liveness+tmux-leak-scan
+// 文件（4 次：inner-blocked-signal / outer-cron-registry / session-observation+tmux-leak-scan
 // （load-sensitive 族）/ fan-in-ff-protocol-check（checker 跨任务误报））。本 gate 在 fix 前把
 // failures[] 机械分诊为 inScope（本任务 Touches 内回归，修）vs outOfScope（越界红，defer）：
 //   in_family    ⇒ load-sensitive ⇒ 释放（隔离重跑），不修；

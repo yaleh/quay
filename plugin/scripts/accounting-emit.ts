@@ -77,7 +77,7 @@ const LAYERS = ["outer", "inner", "manager"];
 // ── per-layer mechanism registry (the layer's CLAIMED mechanisms; auto-traces where real) ──────────────
 // The layer → mechanisms mapping lives in accounting-emit-layer-map.ts (AC39): each layer emits its
 // OWN mechanisms — cap-from-gate/slot-refill 归 inner, closure-lag-check 归 outer, and manager emits
-// its own (manager-tick-log / Workflow / session-liveness). This builder resolves the map + per-name
+// its own (manager-tick-log / Workflow / session-observation). This builder resolves the map + per-name
 // defs (period + trace). `trace` is present ONLY for mechanisms with a real, defined on-disk trace
 // in a live workspace; everything else is injected by the layer via `--mechanism` (its meta-cc-
 // gathered times). periodHours is the mechanism's claimed period (SPEC 2.5: compare last real exec

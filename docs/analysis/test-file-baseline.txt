@@ -370,7 +370,6 @@ plugin/test/mechanism-count.test.mjs
 plugin/test/mechanism-vitality-check.test.mjs
 plugin/test/mirror-full-suite-state.test.mjs
 plugin/test/mirror-measure-history.test.mjs
-plugin/test/monitor-mount-check.test.mjs
 plugin/test/needs-human-recheck.test.mjs
 plugin/test/no-manager-tick-doc-check.test.mjs
 plugin/test/obligation-discharge-agent.test.mjs
@@ -454,9 +453,6 @@ plugin/test/semantic-face-dispatch-record.test.mjs
 plugin/test/semantic-observer-judge.test.mjs
 plugin/test/send-keys-reliable.test.mjs
 plugin/test/session-bootstrap.test.mjs
-plugin/test/session-liveness-decision-import.test.mjs
-plugin/test/session-liveness-hangguard.test.mjs
-plugin/test/session-liveness-restart.test.mjs
 plugin/test/session-retirement-check.test.mjs
 plugin/test/session-topology.test.mjs
 plugin/test/slot-refill-heartbeat.test.mjs

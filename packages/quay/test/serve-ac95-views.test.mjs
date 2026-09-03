@@ -188,7 +188,7 @@ test("AC1: buildManagerSessionTargets builds outer+inner SESSION_TARGETS from th
   const ws = makeWorkspace("ac95-mgr-targets-");
   try {
     fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
-    fs.writeFileSync(path.join(ws, "orchestration", "session-liveness.env"), [
+    fs.writeFileSync(path.join(ws, "orchestration", "session-config.env"), [
       "# comment",
       "SESSION_TMUX_SESSION=quay-0",
       'SESSION_TARGETS="quay /home/yale/work/quay quay-0:inner"',
@@ -203,7 +203,7 @@ test("AC1: buildManagerSessionTargets strips quotes and window suffixes", () => 
   const ws = makeWorkspace("ac95-mgr-targets2-");
   try {
     fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
-    fs.writeFileSync(path.join(ws, "orchestration", "session-liveness.env"), 'SESSION_TMUX_SESSION="quay-0:inner"\n');
+    fs.writeFileSync(path.join(ws, "orchestration", "session-config.env"), 'SESSION_TMUX_SESSION="quay-0:inner"\n');
     assert.equal(buildManagerSessionTargets(ws), `outer ${ws} quay-0:outer\ninner ${ws} quay-0:inner`);
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
@@ -213,20 +213,20 @@ test("AC1: buildManagerSessionTargets strips quotes and window suffixes", () => 
 test("AC1: buildManagerSessionTargets returns null without a session name (fail-closed, no invented target)", () => {
   const ws = makeWorkspace("ac95-mgr-targets3-");
   try {
-    assert.equal(buildManagerSessionTargets(ws), null); // no orchestration/session-liveness.env
+    assert.equal(buildManagerSessionTargets(ws), null); // no orchestration/session-config.env
     fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
-    fs.writeFileSync(path.join(ws, "orchestration", "session-liveness.env"), 'SESSION_TARGETS="quay /home/yale/work/quay quay-0:inner"\n');
+    fs.writeFileSync(path.join(ws, "orchestration", "session-config.env"), 'SESSION_TARGETS="quay /home/yale/work/quay quay-0:inner"\n');
     assert.equal(buildManagerSessionTargets(ws), null); // SESSION_TMUX_SESSION absent
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });
 
-test("AC1: readManager registers outer+inner targets (≥2 SESSION-STATUS rows) when the workspace has a session-liveness.env", async () => {
+test("AC1: readManager registers outer+inner targets (≥2 SESSION-STATUS rows) when the workspace has a session-config.env", async () => {
   const ws = makeWorkspace("ac95-mgr-read-");
   try {
     fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
-    fs.writeFileSync(path.join(ws, "orchestration", "session-liveness.env"), "SESSION_TMUX_SESSION=quay-0\n");
+    fs.writeFileSync(path.join(ws, "orchestration", "session-config.env"), "SESSION_TMUX_SESSION=quay-0\n");
     const mgr = await readManager(ws);
     assert.equal(mgr.liveness.status, "ok");
     assert(mgr.liveness.sessions.length >= 2, `≥2 SESSION-STATUS rows (got ${mgr.liveness.sessions.length})`);
@@ -567,7 +567,7 @@ test("AC99 — loop-driver-check.sh --json is valid production JSON with a recog
 test("AC2: /manager renders ≥2 layer cards (Outer + Inner) when the workspace registers both targets", async () => {
   const ws = makeWorkspace("ac95-mgr-page-");
   fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
-  fs.writeFileSync(path.join(ws, "orchestration", "session-liveness.env"), "SESSION_TMUX_SESSION=quay-0\n");
+  fs.writeFileSync(path.join(ws, "orchestration", "session-config.env"), "SESSION_TMUX_SESSION=quay-0\n");
   fs.mkdirSync(path.join(ws, "packages", "quay"), { recursive: true });
   fs.mkdirSync(path.join(ws, "packages", "quay-native"), { recursive: true });
   fs.mkdirSync(path.join(ws, "packages", "quay-github"), { recursive: true });

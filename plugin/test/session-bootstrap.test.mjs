@@ -13,7 +13,7 @@
 //         and the other window is still named too (nothing silently half-built).
 //   AC4 — quay:cold-start's own precondition check ("outer window reachable",
 //         `tmux list-panes -t <session>`) can run immediately after, with the session name read
-//         from <root>/orchestration/session-liveness.env (no extra manual step).
+//         from <root>/orchestration/session-config.env (no extra manual step).
 //   AC5 — this file is node:test + `// @test-group product`; and cold-start/SKILL.md cross-
 //         references session-bootstrap.sh (the wiring).
 // Plus: layout validation (unknown role → exit 2) and --dry-run (plan, no changes).
@@ -98,12 +98,12 @@ function newHermetic(prefix = "quay-sb-") {
   };
 }
 
-// fakeRoot — a project root quay-init's layout would accept: session-liveness.env naming the
+// fakeRoot — a project root quay-init's layout would accept: session-config.env naming the
 // session (what AC4 reads through, no --session passed).
 function fakeRoot(sess) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-sb-root-"));
   fs.mkdirSync(path.join(dir, "orchestration"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "orchestration", "session-liveness.env"), `SESSION_TMUX_SESSION=${sess}\n`, "utf8");
+  fs.writeFileSync(path.join(dir, "orchestration", "session-config.env"), `SESSION_TMUX_SESSION=${sess}\n`, "utf8");
   return dir;
 }
 
@@ -207,11 +207,11 @@ test("AC3 — a window whose process fails to start is reported by name; script 
 
 // ── AC4 — cold-start's precondition ("inner session reachable") runs immediately after ─────────────
 
-test("AC4 — cold-start's outer-window-reachable precondition passes right after, session name from session-liveness.env", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
+test("AC4 — cold-start's outer-window-reachable precondition passes right after, session name from session-config.env", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
   const h = newHermetic();
   const root = fakeRoot("sb-ac4");
   try {
-    // NO --session: the script must read the session name from <root>/orchestration/session-liveness.env.
+    // NO --session: the script must read the session name from <root>/orchestration/session-config.env.
     const r = runBootstrap(root, "outer", ["--socket", h.sockPath], {
       SESSION_BOOTSTRAP_LAUNCH_CMD: LIVE_CMD,
     });

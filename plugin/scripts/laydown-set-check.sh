@@ -4,8 +4,8 @@
 #
 # GATE = "all scripts in the DERIVED laydown set are green" (铺什么验什么), NOT "the whole quay
 # suite is green". A suite failure UNRELATED to the laydown set must NOT block a cold start; a
-# failure INSIDE the set (e.g. the M3 session-liveness busy/idle regression — session-liveness.sh /
-# session-liveness-mount.sh are both derived members, so cold-start would have shipped the M3 bug
+# failure INSIDE the set (e.g. the M3 session-observation busy/idle regression — session-observation.sh /
+# session-observation-mount.sh are both derived members, so cold-start would have shipped the M3 bug
 # into the target project) MUST block.
 #
 # The set is MECHANICALLY derived, no new mechanism (AC2): the SAME grep quay-init.sh's
@@ -141,7 +141,7 @@ resolve_tests() {
       fi
     done
     # Split-prefix fallback (gap-laydown-set-check-ac4-stale-after-split): when a script's direct test
-    # was SPLIT into <script>-<suffix>.test.mjs files (session-liveness.sh → events/heartbeat/signals),
+    # was SPLIT into <script>-<suffix>.test.mjs files (session-observation.sh → events/heartbeat/signals),
     # the exact basename-pair is gone but the M3 regression must stay gate-visible. Resolve every
     # `<stem>-*.test.mjs` in the test dirs. Exact-pair hits are NOT re-emitted (dedup via sort -u at
     # the call site); a split script resolves to all its fragments, not zero.

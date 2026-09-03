@@ -285,7 +285,7 @@ printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"
 // 上一版 fix-scope gate（gap-suite-fix-workflow-no-load-sensitive-branch）落在 execute-suite-fix.js
 // （standalone 死工作流）零效果——生产 suite-fix 是本文件内联 subagent（:391 prompt），它直接修根因、
 // 不经 execute-suite-fix.js。越界修已复发第 8+ 例（b0aa31c2 修 quay-init.sh / eb77b17e 修
-// supervisor-observe.test.mjs / 43153e58 修 session-liveness-helpers.mjs——全不在各自任务 Touches）。
+// supervisor-observe.test.mjs / 43153e58 修 session-observation-helpers.mjs——全不在各自任务 Touches）。
 // 本 gate 把判定落到内联 prompt：fix 前把 suite 日志里 __PERFILE__ passed=false 的失败文件机械分诊为
 // inScope（本任务 Touches 内回归，修）vs outOfScope（越界红，defer/release）：load-sensitive
 // （known-load-sensitive.ts 的 in_family）⇒ 释放不修；file ∉ ## Touches ⇒ 别任务 bug defer 不修；

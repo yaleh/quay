@@ -32,7 +32,7 @@
 #
 # REVERSE EDGE (gap-batch-merge-authoritative-direction-hardcoded-develop, 2026-08-08):
 #   The conflict resolution direction is NOT a fixed "develop always wins". Empirical anchor
-#   (2026-08-08 14:1xZ, integration→develop real merge): orchestration/session-liveness.env was a
+#   (2026-08-08 14:1xZ, integration→develop real merge): orchestration/session-config.env was a
 #   genuine code conflict (not shared). The two sides:
 #     develop     SESSION_TRANSCRIPTS="inner /path"   DEFECTIVE — name NOT in SESSION_TARGETS table
 #                                                      (transcript silently ignored, monitor blind)
@@ -100,7 +100,7 @@
 #                 add a path glob treated as a REVERSE-EDGE file: on conflict the path resolves to the
 #                 INTEGRATION side (`checkout --theirs`). Repeatable. This is the escape hatch for
 #                 RUNTIME CONFIG files (env/config) that tasks edit on INTEGRATION, where develop's copy
-#                 can be the STALE/DEFECTIVE one (2026-08-08 session-liveness.env: develop "inner"
+#                 can be the STALE/DEFECTIVE one (2026-08-08 session-config.env: develop "inner"
 #                 name-not-in-table vs integration "quay" name-in-table). The direction SHOULD be backed
 #                 by a content criterion (--reverse-edge-criterion): the integration side is then taken
 #                 only when IT satisfies the criterion; otherwise the file fails closed (never
@@ -277,7 +277,7 @@ tmp_wt=""
 # are stale — on conflict, develop is authoritative. Matched against conflicted paths via bash case.
 shared_patterns=('*tick-log.md' 'tasks/*.md' '*queue-state*')
 # REVERSE-EDGE (integration-authoritative) files: RUNTIME CONFIG files (env/config) that tasks edit
-# on INTEGRATION — develop's copy lags and can be the DEFECTIVE one (2026-08-08 session-liveness.env:
+# on INTEGRATION — develop's copy lags and can be the DEFECTIVE one (2026-08-08 session-config.env:
 # develop "inner" name-not-in-table vs integration "quay" name-in-table). On conflict these resolve to
 # the INTEGRATION side (`checkout --theirs`) instead of develop. Checked BEFORE shared_patterns (an
 # explicit reverse-edge declaration overrides the develop-authoritative default for that path).

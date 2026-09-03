@@ -20,7 +20,7 @@
 //         照常派发（池有可派即派，不待轮）。
 //   AC2/AC4 — 触发者是既有处置逻辑的执行者，不是新决策者：本脚本只做「状态变化 → 事件」的翻译与通知，
 //         不做任何分诊/派发决策；分诊 = 外层既有「红窗分诊」（orchestrator-loop-tick.md 步骤 1b），
-//         派发 = 内层既有 §4 规则。不引入新调度源——本脚本是 Monitor 事件监测（同 session-liveness），
+//         派发 = 内层既有 §4 规则。不引入新调度源——本脚本是 Monitor 事件监测（同 session-observation），
 //         节奏仍唯一（外层 `*/20` cron）。
 //
 // 状态文件（输入，well-known 位置）：<root>/.quay/full-suite-state.json
@@ -984,7 +984,7 @@ function writeCrashState(root: string, crashed: SuiteState): void {
  * 记录一条转变事件到 append-only 日志（measure 钩子）。无转变 = 不写，返回 null。
  * 写日志不是「决策」——它是状态变化的事实记录，处置决策由外层既有逻辑做（AC2/AC4）。
  * 写失败只回落到「事件仍返回给调用方（可打印）但不落盘」，绝不 crash——触发者是通知者，
- * 不是闸（同 session-liveness `sl_emit_shared` 的 fail-open 原则：调度角色不是安全检查）。
+ * 不是闸（同 session-observation `sl_emit_shared` 的 fail-open 原则：调度角色不是安全检查）。
  */
 export function recordTransition(
   root: string,

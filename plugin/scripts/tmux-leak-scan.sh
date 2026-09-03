@@ -3,7 +3,7 @@
 # gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause).
 #
 # After a test run, NO tmux server process and NO /tmp dir carrying a test characteristic prefix
-# (skv- / session-liveness- / ol-tok- / enter-repro- / quay-init-tmux- / quay-isc- / repro-rmsync-)
+# (skv- / session-observation- / ol-tok- / enter-repro- / quay-init-tmux- / quay-isc- / repro-rmsync-)
 # may remain. The last three are the private-socket mkdtemp prefixes
 # (gap-tmux-stale-not-honored-comment-private-socket-leak-scan) — `repro-rmsync-` is used over the
 # bare `repro-` the AC named because `repro-` also matches ~25 human scratch files in /tmp (not
@@ -36,10 +36,10 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 set -uo pipefail
 
-prefixes='skv-|session-liveness-|ol-tok-|enter-repro-|quay-init-tmux-|quay-isc-|repro-rmsync-'
+prefixes='skv-|session-observation-|ol-tok-|enter-repro-|quay-init-tmux-|quay-isc-|repro-rmsync-'
 
 # gap-leak-residue-per-run-namespace-isolation (2026-08-13): when the runner delivered QUAY_RUN_ID,
-# the suite's probe tmp root is the PER-RUN namespace /tmp/quay-run-<runId>/ (session-liveness-
+# the suite's probe tmp root is the PER-RUN namespace /tmp/quay-run-<runId>/ (session-observation-
 # helpers.mjs probeRoot). This scan then covers ONLY that subtree — "本轮创建的东西 = 一棵子树" — so
 # residue from a DIFFERENT run (a previous round, a concurrent worktree) is never attributed to this
 # run (AC4 negative control), and the runner's unified cleanup has a PATH-OWNERSHIP + OWNER-LIVENESS
@@ -100,7 +100,7 @@ scan_matches() {
   if [ -n "$run_root" ]; then
     leaked_dirs="$(ls -d "${run_root}"/* 2>/dev/null || true)"
   else
-    leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* /tmp/quay-init-tmux-* /tmp/quay-isc-* /tmp/repro-rmsync-* 2>/dev/null || true)"
+    leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-observation-* /tmp/ol-tok-* /tmp/enter-repro-* /tmp/quay-init-tmux-* /tmp/quay-isc-* /tmp/repro-rmsync-* 2>/dev/null || true)"
   fi
   {
     [ -n "$leaked_procs" ] && printf '%s\n' "$leaked_procs"
@@ -138,7 +138,7 @@ if [ "$mode" = "check" ]; then
   fi
   before="$(cat "$snapshot")"
   # BOUNDED REAP-WAIT (gap-leak-scan-reap-race-false-red): the suite's test-spawned tmux servers
-  # (session-liveness-* hermetic probes, skv-/ol-tok-/enter-repro- families) are torn down at test
+  # (session-observation-* hermetic probes, skv-/ol-tok-/enter-repro- families) are torn down at test
   # teardown by kill-session, but the server PROCESS exits and its /tmp socket dir is removed
   # ASYNCHRONOUSLY. Under load that exit can lag the run-end --check, so a still-exiting server was
   # swept as "NEW residual" → a false red (round 95: tests=4150 all pass, only the leak gate red;
@@ -240,7 +240,7 @@ fi
 if [ -n "$run_root" ]; then
   leaked_dirs="$(ls -d "${run_root}"/* 2>/dev/null || true)"
 else
-  leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* /tmp/quay-init-tmux-* /tmp/quay-isc-* /tmp/repro-rmsync-* 2>/dev/null || true)"
+  leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-observation-* /tmp/ol-tok-* /tmp/enter-repro-* /tmp/quay-init-tmux-* /tmp/quay-isc-* /tmp/repro-rmsync-* 2>/dev/null || true)"
 fi
 
 if [ -n "${leaked_procs}" ] || [ -n "${leaked_dirs}" ]; then

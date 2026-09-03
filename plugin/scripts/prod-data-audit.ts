@@ -209,7 +209,7 @@ export function countWriters(root, basename, { codeDirs = null, testDirs = null 
   return { nonTest: count(nonTestDirs), test: count(tDirs) };
 }
 
-// 载体被引用在【仓库外】（如 $QUAY_GLOBAL_DIR/session-liveness/events.jsonl）——审计定位不到是「不在仓内」而非「零写入」。
+// 载体被引用在【仓库外】（如 $QUAY_GLOBAL_DIR/session-observation/events.jsonl）——审计定位不到是「不在仓内」而非「零写入」。
 export function hasGlobalDirReference(root, base) {
   const dirs = ["plugin/scripts", "plugin/loop", "orchestration", "packages"];
   for (const d of dirs) {
