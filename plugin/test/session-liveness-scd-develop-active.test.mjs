@@ -1,5 +1,6 @@
-// @test-group lowconc
+// @test-group serial
 // @load-sensitive wall-clock
+// @load-sensitive-entry 2026-09-03 wall-clock (real tmux server + claude-probe probes flaky in lowconc — probe establish unstable / starved, reds unrelated fan-in suites); GROUP=serial deliberately
 // KNOWN-LOAD-SENSITIVE (session-liveness SCD family — wall-clock tmux probe + session-liveness.sh
 // per-round waits; the adaptive HANG_GUARD_MS floor absorbs load).
 // session-liveness-scd-develop-active.test.mjs — split out of session-liveness.test.mjs

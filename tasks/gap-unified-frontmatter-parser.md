@@ -1,7 +1,7 @@
 ---
 id: gap-unified-frontmatter-parser
 title: "Unify task frontmatter parsing: single schema source"
-status: ready
+status: done
 labels: []
 parent: null
 children: []
@@ -24,27 +24,28 @@ Result: New users can't discover supported fields because no single canonical sc
 N/A — simple scope permits direct implementation from Proposal
 ## Acceptance Criteria
 
-- [ ] Single-source `parseFrontmatterCompletely()` function implemented
-- [ ] Canonical schema documented as TypeScript interface (in task-schema.ts comments)
-- [ ] parseTask, readDependsOn, store.parse all delegate to parseFrontmatterCompletely
-- [ ] task_write MCP schema explicitly lists depends_on (not just via extra escape hatch)
-- [ ] Schema documentation example in docs/references/
-- [ ] All existing consumers unchanged; behavioral equivalence tests pass
-- [ ] Round-trip test: task_write(depends_on) → store → all three readers ✓
+- [x] Single-source `parseFrontmatterCompletely()` function implemented
+- [x] Canonical schema documented as TypeScript interface (in task-schema.ts comments)
+- [x] parseTask, readDependsOn, store.parse all delegate to parseFrontmatterCompletely
+- [x] task_write MCP schema explicitly lists depends_on (not just via extra escape hatch)
+- [x] Schema documentation example in docs/references/
+- [x] All existing consumers unchanged; behavioral equivalence tests pass
+- [x] Round-trip test: task_write(depends_on) → store → all three readers ✓
 
 ## Definition of Done
 
 Standard clauses (architecture + code + tests):
-- [ ] Architecture design reviewed by domain expert
-- [ ] All refactored consumers work unchanged
-- [ ] Full test coverage of all three paths through parseFrontmatterCompletely
-- [ ] Schema documentation readable by both humans and code-analysis tools
-- [ ] No behavioral changes observable to end users or existing clients
+- [x] Architecture design reviewed by domain expert
+- [x] All refactored consumers work unchanged
+- [x] Full test coverage of all three paths through parseFrontmatterCompletely
+- [x] Schema documentation readable by both humans and code-analysis tools
+- [x] No behavioral changes observable to end users or existing clients
 
 ## Touches
 
 - `plugin/scripts/task-schema.ts` (major refactor + new parseFrontmatterCompletely)
-- `packages/quay-native/src/store.ts` (validate parse() aligns with schema)
+- `experiments/quay-perpetual-stream/scripts/task-schema.ts` (canonical source — dual-copy sync with the plugin/scripts copy)
+- `packages/quay-native/src/store.ts` (validate parse aligns with schema)
 - `packages/quay-native/src/mcp-server.ts` (update task_write schema)
 - `docs/references/task-schema-canonical.md` (new canonical schema doc)
 - `tasks/gap-unified-frontmatter-parser.md` (self)
