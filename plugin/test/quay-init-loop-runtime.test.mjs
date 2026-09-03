@@ -18,12 +18,42 @@
 // exhaustion threshold. Shared helpers live in quay-init-loop-helpers.mjs.
 // gap-quay-init-laydown-dominant-red-suite-blocker root-cause verdict 2026-08-07.
 import { test } from "node:test";
-import assert from "node:assert/strict";
+import _assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTmp, cleanup, diskWorktreeRoot, runInit, pluginDir, laydownTemplate, laydownWorkspace } from "./helpers/quay-init-install-fixture.mjs";
 import { extractRefs, declaredSet } from "./quay-init-loop-helpers.mjs";
+
+// AC3 (gap-slow-test-shared-fixture-and-group-recheck): env-gated assertion-gap timing — the
+// gap-suite-cost-model-is-wrong-optimizations-buy-nothing AC1b technique (cli/serve/mcp-server),
+// zero assertion change. When QUAY_TEST_ASSERT_TIMING=1, every assert.* call records the gap since
+// the previous assert and prints gaps ≥1000ms with the current assertion's message, so the file's
+// own structure (asserts interleaved with the expensive setup — fs.cpSync(pluginDir) / runInit /
+// laydownWorkspace) becomes a timing trace. Off by default: no assertion body is touched and the
+// Proxy is inert when the env var is unset.
+let _lastAssertMs = 0;
+const assert = new Proxy(_assert, {
+  get(target, prop, receiver) {
+    const value = Reflect.get(target, prop, receiver);
+    if (typeof value !== "function") return value;
+    return (...args) => {
+      if (process.env.QUAY_TEST_ASSERT_TIMING) {
+        const now = Date.now();
+        if (_lastAssertMs) {
+          const gap = now - _lastAssertMs;
+          if (gap >= 1000) {
+            const last = args[args.length - 1];
+            const msg = typeof last === "string" ? last : String(last);
+            console.error(`[timing] +${Math.round(gap)}ms: ${msg.slice(0, 80)}`);
+          }
+        }
+        _lastAssertMs = now;
+      }
+      return Reflect.apply(value, target, args);
+    };
+  },
+});
 
 // AC1/AC2 — session-liveness.sh is laid down VERBATIM (cp, not render_substitutions); the
 // per-project session is CONFIG, generated into orchestration/session-liveness.env.

@@ -1232,7 +1232,13 @@ export function countRunnerProcesses(): number {
  */
 /**
  * gap-lane-formula-ignores-phase-overlap-concurrency — the number of load-sensitive phases that run
- * CONCURRENTLY in the overlap window. QUAY_PHASE_OVERLAP=1 (the default, matching test.sh's
+ * CONCURRENTLY in the overlap window. LEGACY (gap-suite-scheduler-legacy-phase-splitting-cleanup):
+ * QUAY_PHASE_OVERLAP's overlap-vs-sequential scheduling role is RETIRED — the unified scheduler always
+ * runs serial∥lowconc∥main CONCURRENTLY and never reads it for scheduling; only the P=2/1 DIVISOR
+ * survives (it feeds the phase budgets on BOTH paths). Under the unified scheduler serial+lowconc always
+ * run in parallel ⇒ P=2 is the effective value; QUAY_PHASE_OVERLAP=0 (P=1) corresponds to the
+ * QUAY_SUITE_SCHEDULER=0 legacy sequential fallback.
+ * QUAY_PHASE_OVERLAP=1 (the default, matching test.sh's
  * `PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"`) runs serial + lowconc in PARALLEL ⇒ 2 concurrent
  * phases, each at its own concurrency — the overlap window's Σ lane = SERIAL + LOWCONC, so the
  * per-phase budget must divide the host by S × P (P = the concurrent-phase count) to keep
@@ -2531,8 +2537,9 @@ export async function run(argv: string[]): Promise<number> {
   //   - measure-suite-reporter `__GROUP__ …` (ONE per node --test run, AT ITS END) ⇒ that phase's
   //     node --test finished: serial→gap_serial_to_lowconc, lowconc→main, main→end
   //   - `__OVERHEAD__` burst (right after main) ⇒ main→end FALLBACK (a no-__GROUP__ reporter variant)
-  //   - PHASE_OVERLAP (gap-verification-round-phases-overlap-merged): serial+lowconc run in
-  //     PARALLEL, so their __GROUP__ lines interleave and cannot be attributed to one or the other.
+  //   - PHASE_OVERLAP (gap-verification-round-phases-overlap-merged; LEGACY FALLBACK
+  //     QUAY_SUITE_SCHEDULER=0 only): serial+lowconc run in PARALLEL, so their __GROUP__ lines
+  //     interleave and cannot be attributed to one or the other.
   //     test.sh emits `__OVERHEAD__ overlap_<phase>_done=1` right after EACH `wait`; the combined
   //     window closes (→main) only when BOTH have fired, and `overlap_<phase>_ms=N` sub-times ride
   //     the window record as overlap_sub_ms. Sequence: static → serial(window) → main → end.
@@ -2541,6 +2548,10 @@ export async function run(argv: string[]): Promise<number> {
   // phase ⇒ every spawned round gets ≥1 phase record (AC4 coverage 100%, incl. red/abort rounds).
   let phaseNodeActive = false; // a phase's node --test is the current stream producer (its __GROUP__ closes it)
   let overlapPhaseActive = false; // the QUAY_PHASE_OVERLAP combined serial+lowconc window is active
+  // gap-suite-scheduler-legacy-phase-splitting-cleanup: overlapPhaseActive / phaseOverlapRan /
+  // mainTailOverlap* below are LEGACY-FALLBACK observability — they read `overlap: running` /
+  // `overlap_<phase>_done=1` / `main-tail-overlap:` markers that ONLY the QUAY_SUITE_SCHEDULER=0
+  // phased path emits; under the unified scheduler these stay false/null (the fields stay absent).
   // gap-phase-overlap-field-always-false-negative — LATCHED (never reset): the suite ACTUALLY ran
   // the overlap scheduling. Unlike overlapPhaseActive (a transient window state that resets to false
   // when the window closes), this latches true the moment test.sh emits `overlap: running` and stays

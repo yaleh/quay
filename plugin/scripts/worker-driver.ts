@@ -878,6 +878,10 @@ export function computeWorkerRoundRecord(opts: {
    *  with-disk-ready：人把 needs-human 翻回 ready 后，内存集合据此清除、下一轮重新可派）。非空 =
    *  有对账发生（可观测非静默）；缺省/空 = 本轮无对账（⛔ 与「没观测」可区分——恒有该字段）。 */
   reconciledNeedsHuman?: string[];
+  /** 本轮重试上限豁免判定的三态结果（gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky）。
+   *  verdict ∈ unrelated-flaky-exempt / own-defect-counted / insufficient-data-fallback——三态在记录里可
+   *  区分（AC5，硬规则 3b：判不出 ≠ 判为无关）。缺省/空 = 本轮无豁免判定。 */
+  retryExemptions?: Array<{ task: string; verdict: string; reason: string; failingTestFiles: string[]; recurredTasks: string[] }>;
 }) {
   return {
     ts: opts.at,
@@ -897,6 +901,7 @@ export function computeWorkerRoundRecord(opts: {
     needs_human: (opts.needsHuman ?? []).map((n) => n.id),
     needs_human_committed: (opts.needsHuman ?? []).map((n) => ({ id: n.id, committed: n.committed })),
     reconciled_needs_human: opts.reconciledNeedsHuman ?? [],
+    retry_exemptions: opts.retryExemptions ?? [],
   };
 }
 
@@ -1254,7 +1259,12 @@ export function failingTestFilesFromSuiteLog(logText: string): string[] {
   for (const raw of String(logText ?? "").split("\n")) {
     const line = raw.trim();
     if (!line.includes("passed=false")) continue;
-    const m = /(?:^|\s)((?:packages|plugin|experiments)\/[^\s]+\.test\.mjs)\s+passed=false\b/.exec(line);
+    // `__PERFILE__ duration_ms=… <path> passed=false …` 的 <path> 有两种实况形态（同一 runner，不同 cwd/
+    // 传参路径）：repo-relative（`plugin/test/x.test.mjs`）与 worktree 绝对路径（`/…/quay-worktrees/<task>/
+    // plugin/test/x.test.mjs`）。只取 repo-relative 的 `(packages|plugin|experiments)/…` 后缀，其前可接
+    // 行首 / 空白 / 路径分隔符——⛔ 只匹配 `(?:^|\s)` 会漏掉绝对路径形态（`/plugin/…` 前是 `/` 非空白），
+    // 使续做提示与豁免判定的失败测试集对绝对路径日志恒空（恒假，硬规则 4b）。
+    const m = /(?:^|\s|\/)((?:packages|plugin|experiments)\/[^\s]+\.test\.mjs)\s+passed=false\b/.exec(line);
     if (m && !out.includes(m[1])) out.push(m[1]);
   }
   return out;
@@ -1427,6 +1437,190 @@ export function continueRelatednessNote(root: string, task: string, attempts: Ex
   const failing = failingTestFilesFromSuiteLog(logText);
   if (failing.length === 0) return "";
   return formatRelatednessNote(relatednessSignalsFor(root, task, failing));
+}
+
+// ── 重试上限豁免判定（gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky）─────────────────
+// 根因：driver-filters.ts RETRY_CAP_DEFAULT=3 的 markNeedsHuman 机械翻转不看 suite red 命中的失败测试
+// 文件是否落在该任务 `## Touches` 声明范围内——任务自身改动引入的真缺陷、与任务无关的既有测试基础设施
+// flaky，消耗同一份 3 次重试预算（48h 复盘：26 次 needs-human 里 ~8-9 次真实断言是同一条 probe 饿死，
+// 与各自任务改动无关）。本段补一条【纯结构性判定、不调 LLM】的归因，在 onWorkerFinished 决定「本次
+// exited-not-landed 是否计入该任务自身重试计数」：
+//   ① 失败测试文件集合（suite log 提取）与该任务 Touches/diff 做交集——任一命中 ⇒ 任务自身缺陷，照常计数。
+//   ② 断言签名（suite log 的 `AssertionError …: msg` 归一化）跨任务复发——近期窗口内 ≥2 个不同任务命中
+//     同一签名 ⇒ 已知反复出现的既有 flaky。
+//   ③ ①全无关 ∧ ②复发 ⇒ 本次不计入重试计数（继续重派，⛔ 不是无条件豁免）；否则照常计数。
+// 三态可区分（硬规则 3b/AC5）：unrelated-flaky-exempt / own-defect-counted / insufficient-data-fallback
+// ——「判不出」与「判为无关」绝不共用同一取值。⛔ 只减重试计数，不改 markNeedsHuman 的止损语义：任务
+// 自身缺陷照旧在第 3 次翻转 needs-human（AC2 负控制）。
+
+/** 重试豁免三态 verdict。own-defect-counted 与 insufficient-data-fallback 都【照常计数】，但后者表示
+ *  「读不懂/数据不足」而非「判定为任务自身缺陷」——两态在记录里必须可区分（硬规则 3b）。 */
+export type RetryExemptionVerdict = "unrelated-flaky-exempt" | "own-defect-counted" | "insufficient-data-fallback";
+
+/** 一次 exited-not-landed 的重试豁免判定结果（可扩展输出，⛔ 不重写接线）。 */
+export interface RetryExemptionJudgment {
+  verdict: RetryExemptionVerdict;
+  reason: string;
+  /** 本次 suite red 的失败测试文件（repo-relative）。 */
+  failingTestFiles: string[];
+  /** 本次 suite log 提取的归一化断言签名。 */
+  signatures: string[];
+  /** 窗口内命中同一签名的【其它】不同任务 id（豁免时非空；非豁免 = []）。 */
+  recurredTasks: string[];
+}
+
+/** 近期窗口缺省：48h（与提案 48h needs-human 复盘同窗）。非新设数值阈值——只是「近期」的操作化，与
+ *  flaky 复发语义一致（两周前的 flaky 不算「已知反复出现」）；测试缝可覆盖。 */
+export const RETRY_EXEMPTION_WINDOW_MS_DEFAULT = 48 * 3600 * 1000;
+
+/** 从 suite 日志提取归一化断言签名（`AssertionError [ERR_ASSERTION]: msg` / `AssertionError: msg`）。
+ *  归一化 = trim + 折叠内部空白（同一断言换行/缩进差异折叠成同一签名）。读不出 ⇒ []（不伪造；动态
+ *  路径断言每次不同 ⇒ 归一化后仍不同 ⇒ 不匹配，fail-closed 朝「不复返、照常计数」，硬规则 3b）。 */
+export function assertionSignaturesFromSuiteLog(logText: string): string[] {
+  const out: string[] = [];
+  for (const raw of String(logText ?? "").split("\n")) {
+    const m = /AssertionError(?:\s*\[[^\]]*\])?:\s*(.+)$/.exec(raw);
+    if (!m) continue;
+    const sig = m[1].trim().replace(/\s+/g, " ");
+    if (sig && !out.includes(sig)) out.push(sig);
+  }
+  return out;
+}
+
+/** 窗口内全部 suite-red exited-not-landed 尝试（跨任务，⛔ 非 per-task）。读 WORKER_OUTCOME_REL 一次，
+ *  对每条 final_state=exited-not-landed ∧ mechanical_fan_in.step=suite ∧ ts 落在 [nowMs-windowMs, nowMs]
+ *  的记录，投影出 (taskId, ts, suiteLog 绝对路径)。读失败 / 无记录 ⇒ []（读不懂 ≠ 无失败——空清单与
+ *  「无记录」同形，豁免判定据此保守回退，⛔ 不伪造成「无复发」）。 */
+export function suiteRedAttemptsInWindow(
+  root: string,
+  windowMs: number,
+  nowMs: number = Date.now(),
+): Array<{ taskId: string; ts: string; suiteLog: string | null }> {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, WORKER_OUTCOME_REL), "utf8");
+  } catch {
+    return [];
+  }
+  const floor = nowMs - windowMs;
+  const out: Array<{ taskId: string; ts: string; suiteLog: string | null }> = [];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let rec: { task?: unknown; final_state?: unknown; ts?: unknown; mechanical_fan_in?: unknown };
+    try {
+      rec = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (rec.final_state !== "exited-not-landed") continue;
+    if (typeof rec.ts !== "string" || typeof rec.task !== "string") continue;
+    const tsMs = Date.parse(rec.ts);
+    if (!Number.isFinite(tsMs) || tsMs < floor || tsMs > nowMs) continue;
+    const mfi = rec.mechanical_fan_in as { step?: unknown; suiteLog?: unknown } | undefined;
+    if (!mfi || mfi.step !== "suite") continue;
+    const suiteLog = typeof mfi.suiteLog === "string" && mfi.suiteLog
+      ? path.join(root, ".quay", mfi.suiteLog)
+      : null;
+    out.push({ taskId: rec.task, ts: rec.ts, suiteLog });
+  }
+  return out;
+}
+
+/** 签名跨任务复发：窗口内命中 `signatures` 任一签名的【其它】不同任务 id 并集（⛔ 不含当前任务自身——
+ *  「≥2 个不同任务命中同一签名」= 当前任务 + ≥1 其它任务）。其它任务的 suite log 读失败 ⇒ 跳过（该任务
+ *  不贡献复发证据，fail-closed 朝「不复发」，⛔ 不伪造命中）。 */
+function recurringSignatureTasks(
+  root: string,
+  signatures: string[],
+  currentTaskId: string,
+  windowMs: number,
+  nowMs: number,
+): string[] {
+  const sigTasks = new Map<string, Set<string>>();
+  for (const a of suiteRedAttemptsInWindow(root, windowMs, nowMs)) {
+    if (a.taskId === currentTaskId || !a.suiteLog) continue;
+    let logText: string;
+    try {
+      logText = fs.readFileSync(a.suiteLog, "utf8");
+    } catch {
+      continue;
+    }
+    for (const sig of assertionSignaturesFromSuiteLog(logText)) {
+      if (!signatures.includes(sig)) continue;
+      if (!sigTasks.has(sig)) sigTasks.set(sig, new Set());
+      sigTasks.get(sig)!.add(a.taskId);
+    }
+  }
+  const tasks = new Set<string>();
+  for (const sig of signatures) {
+    const set = sigTasks.get(sig);
+    if (set) for (const t of set) tasks.add(t);
+  }
+  return [...tasks];
+}
+
+/** 重试豁免判定（纯结构性、不调 LLM、不写盘）。对一次 exited-not-landed 判定「本次是否计入该任务自身
+ *  重试计数」。⛔ 只判 suite-red（非 suite red = merge 冲突 / typecheck / scoped-gate / ac-gate 等，天然
+ *  是任务自身缺陷候选，无「不相关 flaky」可豁免）。读不懂的每一步都回退 insufficient-data-fallback
+ *  （照常计数），绝不与 unrelated-flaky-exempt 同形（硬规则 3b）。 */
+export function judgeRetryExemption(
+  root: string,
+  taskId: string,
+  outcome: unknown,
+  opts: { windowMs?: number; nowMs?: number } = {},
+): RetryExemptionJudgment {
+  const windowMs = opts.windowMs ?? RETRY_EXEMPTION_WINDOW_MS_DEFAULT;
+  const nowMs = opts.nowMs ?? Date.now();
+  const mfi = (outcome && typeof outcome === "object")
+    ? (outcome as { mechanical_fan_in?: unknown }).mechanical_fan_in
+    : undefined;
+  if (!mfi || typeof mfi !== "object") {
+    return { verdict: "insufficient-data-fallback", reason: "no mechanical fan-in result on the outcome (cannot attribute)", failingTestFiles: [], signatures: [], recurredTasks: [] };
+  }
+  const step = (mfi as { step?: unknown }).step;
+  if (step !== "suite") {
+    return { verdict: "own-defect-counted", reason: `failure is not a suite red (step=${typeof step === "string" ? step : "?"}) — not an unrelated-flaky candidate`, failingTestFiles: [], signatures: [], recurredTasks: [] };
+  }
+  const suiteLogBasename = (mfi as { suiteLog?: unknown }).suiteLog;
+  if (typeof suiteLogBasename !== "string" || !suiteLogBasename) {
+    return { verdict: "insufficient-data-fallback", reason: "no suite log recorded on the mechanical fan-in result", failingTestFiles: [], signatures: [], recurredTasks: [] };
+  }
+  const suiteLogPath = path.join(root, ".quay", suiteLogBasename);
+  let logText: string;
+  try {
+    logText = fs.readFileSync(suiteLogPath, "utf8");
+  } catch {
+    return { verdict: "insufficient-data-fallback", reason: `unable to read suite log ${suiteLogPath}`, failingTestFiles: [], signatures: [], recurredTasks: [] };
+  }
+  const failingTestFiles = failingTestFilesFromSuiteLog(logText);
+  if (failingTestFiles.length === 0) {
+    return { verdict: "insufficient-data-fallback", reason: "no failing test file extracted from the suite log", failingTestFiles: [], signatures: [], recurredTasks: [] };
+  }
+  const signatures = assertionSignaturesFromSuiteLog(logText);
+  if (signatures.length === 0) {
+    return { verdict: "insufficient-data-fallback", reason: "no assertion signature extracted from the suite log", failingTestFiles, signatures: [], recurredTasks: [] };
+  }
+  // ① 失败测试文件与任务 Touches/diff 交集——任一命中 ⇒ 任务自身缺陷，照常计数（AC2 防滥用负控制）。
+  const delta = computeDeltaPaths(root, taskId);
+  if (delta === null) {
+    return { verdict: "insufficient-data-fallback", reason: "unable to read this task's Touches/diff (delta unreadable)", failingTestFiles, signatures, recurredTasks: [] };
+  }
+  for (const rel of failingTestFiles) {
+    const d = classifyDeltaRelatedness(rel, delta, directImportRels(root, rel));
+    if (d.verdict === "related") {
+      return { verdict: "own-defect-counted", reason: `failing test ${rel} is in this task's Touches/diff (own defect)`, failingTestFiles, signatures, recurredTasks: [] };
+    }
+    if (d.verdict === "unknown") {
+      return { verdict: "insufficient-data-fallback", reason: `unable to determine relatedness of failing test ${rel}`, failingTestFiles, signatures, recurredTasks: [] };
+    }
+  }
+  // ② 全部失败测试文件与本任务无关 ⇒ 查签名跨任务复发。
+  const recurredTasks = recurringSignatureTasks(root, signatures, taskId, windowMs, nowMs);
+  if (recurredTasks.length >= 1) {
+    return { verdict: "unrelated-flaky-exempt", reason: `signature(s) ${signatures.join("; ")} recurred across ≥2 distinct tasks in window (other: ${recurredTasks.join(", ")})`, failingTestFiles, signatures, recurredTasks };
+  }
+  return { verdict: "own-defect-counted", reason: "failing tests unrelated to this task's delta, but the assertion signature did not recur across ≥2 distinct tasks in the window (fail-closed count)", failingTestFiles, signatures, recurredTasks: [] };
 }
 
 /** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
@@ -2568,6 +2762,26 @@ export function combinedOutput(stdout: string, stderr: string): string {
   return [stdout, stderr].filter((s) => s && s.trim() !== "").join("\n");
 }
 
+/** 无害噪声行（MODULE_TYPELESS 等）——⛔ 污染失败摘要/判词。extractFailureSummary 与
+ *  extractFirstFailureLine 共用（⛔ 两处各写一份正则 = 漂移，硬规则 5b）。 */
+function isNoiseLine(l: string): boolean {
+  return (
+    l.includes("MODULE_TYPELESS_PACKAGE_JSON") ||
+    l.includes("Reparsing as ES module") ||
+    l.includes("This incurs a performance overhead") ||
+    l.includes("To eliminate this warning") ||
+    l.includes('add "type": "module"') ||
+    l.includes("--trace-warnings")
+  );
+}
+
+/** 失败信号行（node:test 的 not ok / ✖ / # fail、断言 expected/actual、anti-drift HARD FAIL、esbuild 的
+ *  Could not resolve / [ERROR] 构建失败、ac-gate/anti-drift 的 checked/violation 判词）。extractFailureSummary
+ *  与 extractFirstFailureLine 共用（⛔ 不复制正则）。 */
+function isFailureSignalLine(l: string): boolean {
+  return /^\s*not ok\b|^\s*✖|\bFAIL\b|# fail\b|HARD FAIL|AssertionError|\bexpected:|\bactual:|\bfail \d+\b|\bexit=\d+|Could not resolve|\[ERROR\]|\bchecked\b|\bviolation\b/i.test(l);
+}
+
 /** D6：从某步的 stdout+stderr 合并流里提取【可读失败摘要】——⛔ 裸流（MODULE_TYPELESS 噪声占满、
  *  ⛔ 丢真正测试结果）。去噪 + 保留失败信号行（node:test 的 not ok / ✖ / # fail、断言 expected/actual、
  *  anti-drift HARD FAIL、esbuild 的 Could not resolve / [ERROR] 构建失败），有界（最后 N 行 + 4000 字符）。
@@ -2578,19 +2792,22 @@ export function combinedOutput(stdout: string, stderr: string): string {
  *  gap-step-trace-reason-captures-gate-stdout：ac-gate/anti-drift 的 stdout 判词（checked X/Y / violation）
  *  加入 isSignal——⛔ ac-gate 的 FAIL 行与「checked X/Y」并存时后者被 signals-first 丢弃，真判词不进 reason。 */
 export function extractFailureSummary(combined: string): string {
-  const isNoise = (l: string): boolean =>
-    l.includes("MODULE_TYPELESS_PACKAGE_JSON") ||
-    l.includes("Reparsing as ES module") ||
-    l.includes("This incurs a performance overhead") ||
-    l.includes("To eliminate this warning") ||
-    l.includes('add "type": "module"') ||
-    l.includes("--trace-warnings");
-  const meaningful = combined.split("\n").filter((l) => l.trim() !== "" && !isNoise(l));
-  const isSignal = (l: string): boolean =>
-    /^\s*not ok\b|^\s*✖|\bFAIL\b|# fail\b|HARD FAIL|AssertionError|\bexpected:|\bactual:|\bfail \d+\b|\bexit=\d+|Could not resolve|\[ERROR\]|\bchecked\b|\bviolation\b/i.test(l);
-  const signals = meaningful.filter(isSignal);
+  const meaningful = combined.split("\n").filter((l) => l.trim() !== "" && !isNoiseLine(l));
+  const signals = meaningful.filter(isFailureSignalLine);
   const chosen = signals.length > 0 ? signals : meaningful;
   return chosen.slice(-60).join("\n").trim().slice(0, 4000);
+}
+
+/** 从合并流里取【第一条】真实失败信号行（同 extractFailureSummary 的 isNoiseLine/isFailureSignalLine，
+ *  ⛔ 不复制正则）。suite 红 needs-human 用：把 suite 日志摘要出「第一条真实断言/报错行」塞进
+ *  mechanical_fan_in.reason——⛔ extractFailureSummary 的 tail-60 多行 blob 塞进单行 markdown bullet 会断行，
+ *  且它无信号时回退 meaningful 会违反「无匹配行 ⇒ 回退通用文案」（硬规则 3b 三态可分）。
+ *  无信号 ⇒ 空串（调用方回退 `suite <outcome>` 通用文案，⛔ 不伪造/截断出误导内容）。 */
+export function extractFirstFailureLine(combined: string): string {
+  const line = String(combined ?? "")
+    .split("\n")
+    .find((l) => l.trim() !== "" && !isNoiseLine(l) && isFailureSignalLine(l));
+  return line ? line.trim() : "";
 }
 
 /** 读 fan-in 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。 */
@@ -3292,7 +3509,15 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         // not-recorded：runner 是 verification-round.jsonl 的唯一 writer，green+red 都入账，静态闸红亦由
         // runner 的 staticCheckDetected → gate=static-check 记录）。⛔ 不平行补写——runner 已记 + 再补写
         // = 同一红 suite 两条记录、round 号虚增（与「两套平行机制收敛为一」相悖）。
-        return failSuite(`suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
+        // gap-needs-human-note-missing-real-error-line：suite 红 needs-human 的「失败步/判词」不再恒为
+        // 「suite red」——把 suite 日志（stdout 落进 suiteLogFile）摘要出第一条真实断言/报错行塞进 reason。
+        // 无信号 / 日志缺失 ⇒ 回退通用文案（硬规则 3b 三态可分，⛔ 不伪造/截断出误导内容）。
+        let suiteLogText = "";
+        try {
+          suiteLogText = fs.readFileSync(suiteLogFile, "utf8");
+        } catch { /* 日志缺失 ⇒ fallback 通用文案 */ }
+        const firstFailure = extractFirstFailureLine(suiteLogText);
+        return failSuite(firstFailure || `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
       }
       writeSuiteCapture(suiteCapture, {
         full_suite_ran: "true", skip_reason: "", suite_exit: "0",
@@ -3542,6 +3767,10 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // 每轮 round 记录（生产载体——生产 driver argv 无 --json ⇒ json 事件不可观测，同 cold-start-inflight）。
   // splice(0) 快照并清空 ⇒ 每轮只报【本轮新】的翻转，⛔ 不累积跨轮。
   const needsHumanResults: Array<{ id: string; ok: boolean; committed: boolean; reason: string }> = [];
+  // 重试上限豁免判定（gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky）：每轮【新】的三态
+  // 判定结果（splice(0) 快照清空，⛔ 不跨轮累积）。生产载体 = round 记录（生产 driver argv 无 --json ⇒
+  // json 事件不可观测，同 markNeedsHuman 的 needsHumanResults）。三态在 round 记录里可区分（AC5）。
+  const retryExemptions: Array<{ task: string; verdict: RetryExemptionVerdict; reason: string; failingTestFiles: string[]; recurredTasks: string[] }> = [];
 
   // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff）：worker <quickDeathMs 快速死亡连续
   // ≥backoffThreshold 次 ⇒ 对该 task 设 backoffUntil（指数退避，⛔ 不立即重派）；退避到上限（maxRetries）
@@ -3596,6 +3825,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // gap-retrystate-needshuman-no-reconcile-with-disk-ready：本轮内存 needsHuman 与磁盘 status
       // 对账清除的 id（人翻回 ready ⇒ 下一轮重新可派），进 round 记录作生产可观测载体。
       reconciledNeedsHuman: reconciled,
+      // gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky：本轮重试豁免三态判定（splice(0)
+      // 快照清空，⛔ 不跨轮累积）。三态在 round 记录里可区分（AC5 生产载体）。
+      retryExemptions: retryExemptions.splice(0),
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -3623,6 +3855,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       inFlightTaskStarts: inFlightTaskStarts(),
       needsHuman: [],
       reconciledNeedsHuman: [],
+      retryExemptions: [],
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -3651,9 +3884,19 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 续做态，继续 CONTINUE 重派（merge develop 再 ff 自愈），⛔ 不把 3 次 branch-lag 误判成真缺陷
       // 标 needs-human（那会静置 RECOMMENDED 不派，需人手动救回）。真缺陷（suite red / merge-develop
       // 冲突 / anti-drift 违反 / ff 步的其它失败）仍照常计数达上限标 needs-human。
-      const newly = isFfNotFastForwardFailure(r.outcome)
-        ? []
-        : advanceRetryCap(retryState, [r.taskId], maxRetries);
+      let newly: string[] = [];
+      if (!isFfNotFastForwardFailure(r.outcome)) {
+        // 重试上限豁免（gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky）：suite red 的失败
+        // 测试文件与任务 Touches/diff 无关 ∧ 断言签名跨任务复发（≥2 不同任务）⇒ 不计入该任务自身重试
+        // 计数（继续重派，⛔ 不是无条件豁免）。三态判定结果经 writeRound 落 round 记录（AC5 生产载体），
+        // json 事件供测试/手动观测。判不出 ⇒ insufficient-data-fallback，照常计数（fail-closed）。
+        const exemption = judgeRetryExemption(rootDir, r.taskId, r.outcome);
+        retryExemptions.push({ task: r.taskId, verdict: exemption.verdict, reason: exemption.reason, failingTestFiles: exemption.failingTestFiles, recurredTasks: exemption.recurredTasks });
+        if (json) process.stdout.write(`${JSON.stringify({ event: "retry-exemption", task: r.taskId, ...exemption })}\n`);
+        if (exemption.verdict !== "unrelated-flaky-exempt") {
+          newly = advanceRetryCap(retryState, [r.taskId], maxRetries);
+        }
+      }
       for (const id of newly) {
         // gap-mark-needs-human-commit-after-write：markNeedsHuman 写盘即提交，返回
         // { id, ok, reason, committed }——⛔ 不再丢弃 {ok,reason}；结果经 writeRound 落进 round 记录

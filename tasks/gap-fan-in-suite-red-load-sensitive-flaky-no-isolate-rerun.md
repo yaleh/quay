@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-suite-red-load-sensitive-flaky-no-isolate-rerun
 title: 机械 fan-in suite red 未隔离重跑 KNOWN-LOAD-SENSITIVE flaky，直接误杀任务
-status: ready
+status: superseded
 labels:
   - gap
   - defect
@@ -9,6 +9,11 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded: true
+  superseded_at: 2026-09-03
+  superseded_reason: 人 2026-09-03 裁定取消：本任务要求 worker-driver（产品层）了解过多项目信息（如
+    KNOWN-LOAD-SENSITIVE 实验层概念），不妥——负载敏感分诊/隔离重跑属方法论层职责，不该耦合进 provider-agnostic 的
+    worker-driver 产品代码
 ---
 ## Proposal
 
@@ -17,7 +22,7 @@ extra:
 ## Plan
 
 1. 核实 fan-in suite red 路径（worker-driver 的 mechanical-fan-in step 7）在 suite red 后**是否读** full-suite-runner 写的 KNOWN-LOAD-SENSITIVE partition、是否做隔离重跑——用 grep 确认对 `red-window-triage` / `isolate-rerun` / partition 的引用现状（预期 0）。
-2. 接入：suite red 且**失败全在** KNOWN-LOAD-SENSITIVE 族 ⇒ 隔离重跑该族（复用 red-window-triage 的 isolate-rerun 语义）；隔离重跑绿 ⇒ 判「load-sensitive flaky 非真回归」，不 exited-not-landed（放行 fan-in 或标记为 flaky 重试）；隔离重跑仍红 ⇒ 真回归，维持现状 exited-not-landed。**三态不得压平**（硬规则 3b：真回归 / flaky / 未评估三分，勿与「真回归」同形）。
+2. 接入：suite red 且**失败全在** KNOWN-LOAD-SENSITIVE 族 ⇒ 隔离重跑该族（复用 red-window-triage 的 isolate-rerun 语义）；隔离重跑绿 ⇒ 判「load-sensitive flaky 非真回归」，不 exited-not-landed（放行 fan-in 或标记为 flaky 重试）；隔离重跑仍红 ⇒ 真回归，维持现状 exited-not-landed。**三态不得压平**（硬规则 3b：真回归 / flaky / 未评估三分，勿与「真回归」同形），且 worker-outcome 的 `mechanical_fan_in.reason` / `failure_reason` **携带成因区分**（不再裸「suite red」，见 AC6）。
 3. 负控制：一个非 load-sensitive 的真回归失败仍判 exited-not-landed（关闭隔离重跑分支后重跑必须仍报出）；一个 load-sensitive flaky（隔离重跑绿）不再误杀。数字是止血非结论（硬规则 4 推论），落笔当轮取真实读数（硬规则 4c）。
 
 ## Acceptance Criteria
@@ -27,6 +32,7 @@ extra:
 - [ ] AC3（负控制，能取假）：关闭隔离重跑分支后重跑同一 load-sensitive flaky 样本，必须重新报出 exited-not-landed；且一个非 load-sensitive 的真回归失败仍判 exited-not-landed。
 - [ ] AC4（三态）：suite red 判定输出能区分「真回归」「load-sensitive flaky（隔离重跑绿）」「读不到 partition ⇒ NOT-EVALUATED」三态，不得让「读不到」与「flaky」或「真回归」同形。
 - [ ] AC5（既有不回归）：`--for-task` scoped 门 + 全量 suite 绿；fan-in 的既有路径（真回归仍 exited-not-landed）不退化。
+- [ ] AC6（成因区分，能取假）：fan-in suite red 时 `worker-outcome` 的 `mechanical_fan_in.reason` / `failure_reason` 携带成因，不再把「真回归」「load-sensitive flaky（隔离重跑绿）」「silence watchdog」压平成同一个裸「suite red」标签（cause-carrier 有损投影，硬规则 3b）；判据：一条真实 fan-in suite red 样本的 reason/failure_reason 含成因词（如「load-sensitive flaky」/「真回归」），grep 该记录能区分成因。
 
 ## Definition of Done
 
@@ -34,8 +40,8 @@ fan-in suite red 的判定能区分「真产品回归」与「KNOWN-LOAD-SENSITI
 
 ## Touches
 
-- plugin/scripts/worker-driver.ts（fan-in suite red 路径接隔离重跑判定）
+- plugin/scripts/worker-driver.ts（fan-in suite red 路径接隔离重跑判定 + reason/failure_reason 携带成因）
 - plugin/scripts/red-window-triage.ts（复用 isolate-rerun 语义，如扩展）
 - plugin/scripts/full-suite-runner.ts（KNOWN-LOAD-SENSITIVE partition 写入侧，如需扩展）
-- plugin/test/worker-driver-fan-in.test.mjs（隔离重跑不误杀断言 + 负控制 + 三态）
+- plugin/test/worker-driver-fan-in.test.mjs（隔离重跑不误杀断言 + 负控制 + 三态 + 成因区分）
 - tasks/gap-fan-in-suite-red-load-sensitive-flaky-no-isolate-rerun.md（自身）
