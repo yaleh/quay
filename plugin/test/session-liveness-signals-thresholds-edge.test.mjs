@@ -1,5 +1,6 @@
-// @test-group lowconc
+// @test-group serial
 // @load-sensitive wall-clock
+// @load-sensitive-entry 2026-09-03 wall-clock (real tmux server + claude-probe probes flaky in lowconc — probe establish unstable / starved, reds unrelated fan-in suites); GROUP=serial deliberately
 // session-liveness-signals-thresholds-edge.test.mjs — 阈值行为 · 沿/warmup — per-spell 沿 / mount 停滞 / 首轮 warmup
 //
 // PART OF THE session-liveness test family (split from session-liveness-signals.test.mjs by
@@ -19,10 +20,10 @@
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this family uses
 // real processes + tmux timing; it passes isolated under low load but may fail under concurrent-suite
 // load (gap-load-sensitive-session-family-confounds-step-three, 2026-08-04). GROUP NOTE
-// (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive): routed to the `lowconc` group — the
-// hermetic-but-load-sensitive phase at concurrency 3.
+// (gap-session-liveness-scd-target-move-to-serial): routed to the `serial` group — the
+// ALONE-before-main phase at $SERIAL_CONCURRENCY.
 //
-// Run: node --test session-liveness-signals-thresholds-edge.test.mjs   /   scripts/test.sh --group lowconc
+// Run: node --test session-liveness-signals-thresholds-edge.test.mjs   /   scripts/test.sh --group serial
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";

@@ -129,6 +129,12 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
         labels: z.array(z.string()).optional(),
         parent: z.string().nullable().optional(),
         children: z.array(z.string()).optional(),
+        // gap-unified-frontmatter-parser: `depends_on` is a first-class relation edge (prerequisite
+        // task ids), explicitly listed here so users can discover it WITHOUT the `extra` escape hatch.
+        // It is stored top-level (mirroring `children`), and read back by readDependsOn()/parseTask()/
+        // store.parse() through the single frontmatter parser. Legacy `extra: { depends_on: [...] }`
+        // remains readable for backward compatibility.
+        depends_on: z.array(z.string()).optional(),
         body: z.string().optional(),
         // QN-007: `extra` (design §7.1's "escape hatch for backend-specific
         // fields") was missing from this schema entirely — the MCP SDK's

@@ -10,6 +10,12 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { TASK_STATUSES, TASK_STATUS, isTaskStatus, type Task, type TaskStatus } from '../../quay/src/abi.ts';
+// gap-unified-frontmatter-parser: the ONE complete frontmatter parser lives in plugin/scripts/
+// task-schema.ts (the schema authority). This store READS through it rather than re-deriving a
+// private YAML.parse — parseTask/readDependsOn/store.parse all delegate to the same function, so the
+// schema can never drift across the three readers. The write-side serialize()/validateWrittenYaml()
+// keep their own YAML.stringify/YAML.parse: serialization correctness is the store's, not the schema's.
+import { parseFrontmatterCompletely } from "../../../plugin/scripts/task-schema.ts";
 
 export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
 
@@ -503,7 +509,9 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     if (!m) {
       throw new Error("malformed task file: missing YAML frontmatter block");
     }
-    const frontmatter = YAML.parse(m[1]) ?? {};
+    // gap-unified-frontmatter-parser: delegate to the single complete frontmatter parser (shared with
+    // task-schema.ts's parseTask/readDependsOn) — full YAML.parse semantics, one schema source.
+    const frontmatter = parseFrontmatterCompletely(m[1]);
     const body = m[2] ?? "";
     return { frontmatter, body };
   }
@@ -1060,7 +1068,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * only ordinary last-writer-wins sequencing (identical to every other
    * field this store already handles).
    */
-  function write(id: string, { title, status, labels, parent, children, extra, body, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; expectedStatus?: string }): (Task & { updatedAt?: number }) | null {
+  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; expectedStatus?: string }): (Task & { updatedAt?: number }) | null {
     if (status && !VALID_STATUSES.includes(status)) {
       throw new Error(
         `invalid status "${status}" — must be one of ${VALID_STATUSES.join(", ")}`
@@ -1102,6 +1110,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         if (children !== undefined) frontmatter.children = children;
         if (parent !== undefined) frontmatter.parent = parent;
         if (extra !== undefined) frontmatter.extra = extra;
+        if (depends_on !== undefined) frontmatter.depends_on = depends_on;
       } else {
         // No existing file: there is no "current status" to compare against,
         // so any expectedStatus is by definition a mismatch (there is
@@ -1110,6 +1119,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
           throw new ConflictError(id, expectedStatus, null);
         }
         frontmatter.extra = extra ?? {};
+        if (depends_on !== undefined) frontmatter.depends_on = depends_on;
         // DIR-047 (ADR-004 single-source): apply the configured creation
         // default when creating a NEW task with no explicit status.
         // storeDefaultStatus is the per-provider default_task_status from

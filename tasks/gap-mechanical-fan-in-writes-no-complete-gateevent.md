@@ -131,3 +131,14 @@ extra:
 - session_id：17a6cba7-680b-4058-a4f9-38da5a508940
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-mechanical-fan-in-writes-no-complete-gateevent~wk-prod-1788285192~1788400494179-d8c07e.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-mechanical-fan-in-writes-no-complete-gateevent-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-03T04:32:53.267Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: == split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) ==
+- run_id：wk-prod-1788285192
+- session_id：466bb915-bb3b-4806-92cd-31413ccccdd5
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-mechanical-fan-in-writes-no-complete-gateevent~wk-prod-1788285192~1788409531337-d01132.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-mechanical-fan-in-writes-no-complete-gateevent-wk-prod-1788285192.log
