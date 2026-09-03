@@ -24,7 +24,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeTmp, cleanup, runInit } from "./quay-init-loop-helpers.mjs";
+import { makeTmp, cleanup, runInit, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
 
 // ── local helpers ────────────────────────────────────────────────────────────────────────────────────
 
@@ -175,10 +175,14 @@ test('AC3 — pre-existing uncommitted changes: quay-init detects + prompts; non
 });
 
 // ── non-git workspace: auto-commit is a no-op; the laydown still succeeds ────────────────────────────
+// (gap-slow-test-shared-fixture-and-group-recheck AC2): this is the ONE test in the file that is
+// install-as-setup (a non-git laydown whose captured output + laid-down tree are reusable), so it now
+// copies from the SHARED prebuilt fixture (laydownWorkspace) instead of running a fresh install. The
+// auto-commit tests above/below are install-as-behavior (the git auto-commit is the object under test)
+// and keep their real installs on fresh git workspaces — the non-git fixture cannot serve them.
 test('AC1/control — a non-git workspace skips auto-commit but still lays the mechanisms down (exit 0)', () => {
-  const ws = makeTmp();
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const r = runInit(ws, INIT_ARGS(ws));
     assert.equal(r.status, 0, `non-git laydown must still exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /auto-commit: SKIP \(not a git repository/, 'must skip auto-commit in a non-git workspace');
     assert.ok(fs.existsSync(path.join(ws, "plugin", "scripts", "resource-gate.sh")), 'mechanism files are still laid down');

@@ -1,9 +1,12 @@
 // @test-group product
 // @load-sensitive wall-clock
-// @load-sensitive-entry 2026-08-12 real standalone smoke gates with real waits (163s); moved product→serial 2026-08-12 (7/7 isolated, timed out under 8-lane — gap-suite-tiering-kind-heavy-not-a-mechanism 补缺省 kind)
+// @load-sensitive-entry 2026-08-12 real standalone smoke gates with real waits (163s); moved product→serial 2026-08-12 (7/7 isolated, timed out under 8-lane — gap-suite-tiering-kind-heavy-not-a-mechanism 补缺省 kind), then serial→product 2026-08-25 (gap-suite-move-27-evidenced-files-out-serial-lowconc — passed 22-60× high-load verification, reverted to the default product group)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-wall-clock-wait smoke gates (delivery-standalone-smoke.sh: pack + fresh-workspace install)
 // (2026-08-12 outer: product → serial — real standalone smoke gates with real waits, 163s in the
 // 8-lane suite timed out but 7/7 pass isolated ⇒ load-sensitive real-wall-clock-wait family.
+// 2026-08-25: serial → product again (gap-suite-move-27-evidenced-files-out-serial-lowconc) — the
+// @test-group reverted to the default product group while the @load-sensitive / KNOWN-LOAD-SENSITIVE
+// markers are retained (the independent load-sensitive family mechanism, not the de-concurrency list).
 // DIR-035-D (M52) — `delivery-standalone-smoke` wired as a named gate declared in the
 // workspace's gates config (DIR-120: `.quay/config.yml`'s own `gates:` section for THIS repo;
 // a legacy `.quay/gates.yml` only for a workspace with no `config.yml`).
