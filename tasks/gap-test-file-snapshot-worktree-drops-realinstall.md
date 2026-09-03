@@ -2,7 +2,7 @@
 id: gap-test-file-snapshot-worktree-drops-realinstall
 title: test-file-snapshot 在 worktree 报 sea-artifact-consumer-e2e.test.mjs
   REMOVED——文件在盘+tracked，worktree --list-files 却漏列
-status: todo
+status: ready
 labels:
   - gap
   - defect
