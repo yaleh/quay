@@ -208,6 +208,12 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/workflows/execute-suite-fix.js
 - plugin/workflows/fan-in-execute.js
 - scripts/test.sh
+- .claude/workflows/execute-suite-fix.js
+- .claude/workflows/fan-in-execute.js
+- orchestration/session-config.env
+- plugin/scripts/integration-batch-merge.sh
+- plugin/scripts/manager-adopt.sh
+- plugin/test/manager-productization.test.mjs
 - tasks/gap-retire-session-liveness.md（自身）
 
 ## Needs-Human
