@@ -85,6 +85,8 @@ extra:
 
 **合并 develop 后（本 worker 实测）**：本分支已 `git merge develop` 并解决 `worker-driver-fan-in.test.mjs` 的 import 列表冲突（语义并集：本案 `appendCompleteGateEvent` ∪ develop `judgeRetryExemption`/`extractFirstFailureLine` 等）。合并后全文件顺序跑，develop 侧新增集成测试「AC1 (能取假) — suite 红 needs-human 记录含真实 AssertionError 原文」（`extractFirstFailureLine` 接线）**全顺序红（actual `'suite red'`）、`--test-name-pattern` 单独跑绿** ⇒ order-dependent 隔离缺陷，属 develop 侧新增测试（`05b980b89`），非本案代码；根因未深究（develop 侧缺陷，不在本案 Touches）。本案自身 2 条新增单测与 `stale-ready-audit` 5 条均绿。
 
+**Fan-in 阻塞（2026-09-03 03:48 第五次 suite-red；needs-human 判词显示 split-or-commit 属误报）**：`extractFirstFailureLine` 的失败信号正则 `\bchecked\b` 误匹配 check 头部 task-id `gap-split-or-commit-not-continuously-checked`（"continuously-checked" 里的 "-checked" 被当「checked 判词」）⇒ needs-human「失败步/判词」显示 `== split-or-commit whole-store check ==`，而 split-or-commit 实为 **PASS**（1711 任务零违规，03:48 日志 line 208）。真实失败仍是 session-liveness probe 饿死（restart/scd-busy）+ quay-native `cas-write`/`create-validation`/`edit-validation` 三例（与既往同族）。本 worker 实跑核验：split-or-commit 对 worktree 与主检出均 PASS；`stale-ready-audit` 5/5、`worker-driver-fan-in` 74/74 单测绿。正则缺陷属 develop 侧 `05b980b89`（gap-needs-human-note-missing-real-error-line），非本案改动，建议另行立案。
+
 ## Definition of Done
 
 真实运行的机械 fan-in 在 `.quay/gate-events.jsonl` 里留下了 `complete` pass 事件（取①），或 `bypassComplete` 判据已被显式退役且退役裁定写进脚本头注释与本任务体（取②）——**判据落在生产载体上，不是落在测试或 fixture 上**；AC4 的负控制输出已贴出，证明该判据能取假；`gap-loop-completion-path-produces-zero-gateevents` 的 AC2 在新路径上重新成立（取①）或被显式撤销（取②），两条任务之间不再互相矛盾；改动经 fan-in 落到 develop 并可 `git show develop:` 核验。
