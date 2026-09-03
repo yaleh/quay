@@ -28,7 +28,9 @@ created: 2026-09-03T02:30Z
 **人 2026-09-03 裁定**（详见下方 Resolved Decisions 段，全文已据此更新）：
 频率保持原 outer cadence；`/quay-directive` 退役（SendMessage+task 代替）；outer 单次运行
 一次性完整跑完再提交；outer 不需要独立 CronCreate 锚；**不保留 VT 机制**；**不保留
-"milestone"这个编排颗粒度**（第二次追加裁定，回应并解决 Open Question #2）。
+"milestone"这个编排颗粒度**（第二次追加裁定，回应并解决 Open Question #2）；**原则上，
+一切依赖 VT 的机制都取消**（第三次追加裁定，见下方 §依赖 VT 的机制清单——过去 7 天核查
+确认全部零真实输出）；**`waiting-for-human` 状态取消**（同批第三次裁定，状态机定稿两态）。
 
 **⚠️ 架构定性变化（milestone 去掉后）**：原提案（含更早版本）假设 outer job = "选一个
 milestone → 编排它的执行（build/audit/land）→ 等完成"。**milestone 去掉后，outer 不再编排
@@ -66,8 +68,9 @@ tmux 会话内**没有独立的 outer 窗口**存在。最近 3 天涉及 `exper
   人 2026-09-03 两次裁定移除；VT 已核实停摆 32 天，milestone 编排颗粒度合并入两层 fast-mode
   的 `gap-*` 任务）
 - 背景 job 无会话级内存，需显式序列化到磁盘
-- 需定义清晰的状态机：`idle → running → idle`（进一步简化，见 Phase 0——milestone 去掉后
-  甚至不再确定是否需要 `waiting-for-human` 这个第三态，取决于发现/立案逻辑是否可能卡住等人）
+- 需定义清晰的状态机：`idle → running → idle`（人 2026-09-03 第三次裁定：`waiting-for-human`
+  第三态取消，定案为纯两态；发现逻辑若产生需要人判断的候选，走**立案任务**这个既有出口，
+  不需要 outer job 自身挂起等待）
 
 ### 3. 跨层协调
 - 当前：manager 定期读 outer 的文件产物，通过 tmux 投递行动
@@ -143,9 +146,9 @@ land"这种语义（那已是两层 fast-mode 的职责），outer job 单次运
 ```typescript
 type OuterState = {
   version: "1.0";
-  jobStatus: 'idle' | 'running';  // 两态——milestone 去掉后不再有需要跨 tick 持续的编排，
-                                    // 'waiting-for-human' 是否仍需要待 Open Question #3 确认
-                                    // （取决于发现逻辑本身是否可能卡住等人输入）
+  jobStatus: 'idle' | 'running';  // 定案两态（人 2026-09-03 第三次裁定，取消
+                                    // 'waiting-for-human'）——需要人判断的候选走既有的
+                                    // 立案出口，outer job 自身不挂起等待
   currentRun?: {
     startedAt: timestamp;
   };  // 只在 running 时有值；job 失败 = 未提交，状态直接回落 idle（无残留部分产物需清理）
@@ -175,7 +178,8 @@ Persist to: `.quay/outer-state.json` (git-ignored, ephemeral)
       不是遗漏——避免下一个读者以为忘了加
 - [ ] 状态机文档需注明：无 milestone 相关字段是设计决策（人 2026-09-03 第二次裁定，编排
       颗粒度已合并入两层 fast-mode 的 gap 任务），不是遗漏
-- [ ] `waiting-for-human` 第三态是否需要，需先解决 Open Question #3（见下）再定稿 schema
+- [ ] 状态机文档需注明：两态（无 `waiting-for-human`）是人 2026-09-03 第三次裁定的
+      明确取消，不是遗漏
 
 ### Phase 1: Outer Background Job Executor (Core)
 
@@ -384,6 +388,27 @@ Add to `manager-tick-core.md` (new section in A: checks):
    `runDiscovery`/`shouldFile` 取代）。**"outer 具体该扫描什么、立案门槛是什么"未经人
    确认**，见下方 Open Questions #1/#2（新增，取代原 VT-only 的 Open Questions #1）。
 
+7. **原则上，一切依赖 VT 的机制都取消**（2026-09-03 第三次追加裁定）。逐一核实（按位置
+   判定,非关键词匹配）出 15 个纯 VT/milestone-only 脚本（`outward-vt-check.ts`、
+   `rolling-slope-check.ts`、`termination-delta-v-check.ts`、`chart-headroom.ts`、
+   `chart2-s1/s2/s3-*.ts`、`deliverable-governor.ts`、`governance-product-ratio-check.ts`、
+   `explore-exploit-cadence.ts`、`milestones-since-transition.ts`、
+   `experiments/.../it0-dod-check.ts`、`experiments/.../concurrent-batch-scheduler.ts`
+   milestone-only 原版、`serial-fanin-absorb.ts`、`golden-replay-dir044.ts`），全部纳入
+   停用范围——过去 7 天（2026-08-27~09-03）git 提交历史核实全部为 0（除一次与 VT 执行无关
+   的技术性维护）。**同时核实排除了 5 个因名称/历史渊源被最初 grep 命中、但已独立于 VT
+   服务两层 fast-mode 的脚本**（`concurrent-batch-scheduler.ts`/`it0-split-or-commit-
+   check.ts`/`vmeta-lag-check.ts` 的 `plugin/scripts/` 独立副本、`loadbearing-test-gate.ts`、
+   `workflow-baseline-metrics.ts`）——它们继续保留，不受本次裁定影响。**完整清单、每个
+   脚本的调用点核实、过去 7 天证据表格，见新建的独立文档**
+   `experiments/quay-perpetual-stream/VT-MECHANISM-RETROSPECTIVE.md`（同时是 VT 机制的
+   完整历史归档 + 给未来可能新建的探索机制的设计参考）。
+
+8. **`waiting-for-human` 状态取消**（2026-09-03 第三次追加裁定，同批）。Outer job 状态机
+   定案为纯 `idle`/`running` 两态（不再是"待人裁定的开放问题"）。需要人判断的候选走既有的
+   "立案任务"出口，不由 outer job 自身挂起等待——这与决策 6 的"outer 不编排执行"是同一个
+   简化方向的延伸。
+
 ---
 
 ## Open Questions（VT + milestone 双重移除后新产生，需人裁定，Phase 1 实施前必须解决）
@@ -406,10 +431,9 @@ Add to `manager-tick-core.md` (new section in A: checks):
    与两层 fast-mode 现有立案节奏（人工/其它 gap 发现渠道）的资源竞争——若无节制,outer
    自主发现可能持续制造任务淹没现有 backlog（参考硬规则 12 的"净增 32 条条件"实证）。
 
-3. **`waiting-for-human` 第三态是否需要？** 取决于 #1 的答案——若发现逻辑纯只读（扫描+
-   立案，不做需要人判断的中间步骤），两态（`idle`/`running`）可能已经够用；若发现逻辑
-   本身可能产生"需要人确认才能继续"的中间态（例如"发现了但不确定该不该立案，需要人过一眼"），
-   则需要第三态。**Phase 0 状态机定稿前必须先回答 #1，才能回答这一条。**
+~~3. `waiting-for-human` 第三态是否需要~~ —— **已由人 2026-09-03 第三次裁定解决：取消**。
+   需要人判断的候选走既有的"立案任务，交由人/两层 fast-mode 后续处理"这个出口，不由
+   outer job 自身挂起等待。
 
 ---
 
@@ -454,7 +478,7 @@ Add to `manager-tick-core.md` (new section in A: checks):
 
 - [ ] Open Questions #1（`runDiscovery()` 扫描范围）与 #2（`shouldFile()` 立案门槛）已由
       人裁定，且落地为实际实现——**这是 Phase 1 的硬前置，不满足则 Phase 1 不得开工**
-- [ ] Open Questions #3（`waiting-for-human` 第三态是否需要）已解决，Phase 0 状态机据此定稿
+- [x] `waiting-for-human` 第三态：已由人 2026-09-03 第三次裁定取消,状态机定稿为两态
 - [ ] All 4 phases complete + merged to develop
 - [ ] No known tmux dependencies for outer loop
 - [ ] Outer job successfully completed at least one full discovery-and-file cycle
@@ -471,6 +495,9 @@ Add to `manager-tick-core.md` (new section in A: checks):
 
 ## Touches
 
+- `experiments/quay-perpetual-stream/VT-MECHANISM-RETROSPECTIVE.md` — **new file, already
+  landed as part of this proposal's investigation**（VT 机制归档 + 依赖清单 + 停摆证据 +
+  未来探索机制设计参考）
 - `.claude/workflows/outer-job-executor.js` — new file
 - `.quay/outer-state.json` — new ephemeral state file (git-ignored)
 - `plugin/scripts/outer-*-check.sh` — new safety-net scripts
@@ -480,6 +507,8 @@ Add to `manager-tick-core.md` (new section in A: checks):
   prepare/dispatch/land 章节随 milestone 编排移除而整体删除或标记历史
 - `experiments/quay-perpetual-stream/{dashboard.md,checkpoints/,milestones/}` — 评估归档/
   停用横幅（Phase 4 Step 5，不在 DoD 强制范围）
+- **A 类 15 个纯 VT/milestone-only 脚本**（完整清单见
+  `VT-MECHANISM-RETROSPECTIVE.md` §2.1）— 评估归档/停用横幅，同 Phase 4 Step 5
 - `plugin/test/outer-*.test.mjs` — new unit tests
 - `adr/ADR-*.md` — new ADR documenting the change（含 VT + milestone 双重移除的说明）
 
@@ -487,6 +516,10 @@ Add to `manager-tick-core.md` (new section in A: checks):
 
 ## References
 
+- **`experiments/quay-perpetual-stream/VT-MECHANISM-RETROSPECTIVE.md`**（新建,本次调查产物）：
+  VT 机制完整历史归档 + 依赖 VT 的机制完整清单（A 类停用/B 类保留的核实分类）+ 过去 7 天
+  停摆证据表格 + 给未来探索机制的设计参考。**Resolved Decision #7 的详细依据在此文档，
+  不在本提案重复**。
 - **CLAUDE.md**: A19 (CronCreate lifecycle), C10 (SendMessage defaults)
 - **manager-tick-core.md**: Architecture + state observation patterns
 - **OUTER-LOOP.md**: Current (retired) outer driver logic；`:379` human_steer 语义；`:314-317` halt 语义
