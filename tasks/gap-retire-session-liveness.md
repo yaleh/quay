@@ -24,12 +24,15 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 
 **⛔ 方向（人 2026-09-03 裁决「彻底删，而非重命名」）**：前几轮 worker 误把 session-liveness 引用**重命名**为不存在的 `hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh`（`plugin/skills/{init,manager}/SKILL.md`、`plugin/test/quay-init-*.test.mjs`、`cold-start-skill.test.mjs` 等），这是方向错误。正确做法是**删除**这些引用（改判或删分支），**不得**引入任何 `hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh` 新脚本引用。repo 已有的 `plugin/test/helpers/hermetic-tmux.mjs` 测试 helper 与本次退役无关，保持原样不动。
 
+**方案 B（人 2026-09-03 裁定：idle-watch 随 session-liveness 一起退役）**：`idle-watch` 不是独立机制，它就是 session-liveness 的 manager 实例——`manager-start.sh` 里 `IDLE_WATCH_MOUNT_ENTRY = session-liveness-mount.sh`、`IDLE_WATCH_DELIVERY_SEAM = session-liveness.sh --once`，全库无独立 idle-watch 脚本。退役 session-liveness 连带 idle-watch：删 `--check-idle-watch` / `--ensure-mount-intent` 参数、`idle-watch.env` / `idle-watch-mount.txt` 工件、checklist 的 `IDLE-WATCH-MOUNTED` / `MONITORS-DELIVERING` 两键（7 键变 5 键）。**manager 自我观测的「定时/行为保持」能力，未来用 driver 机制替代**（本次不实现，只退役旧机制）。
+
 ## Plan
 
 1. 枚举 session-liveness 的全部消费方（147 个文件：orchestration 文档 / packages 代码 / plugin/loop 文档 / plugin/scripts / plugin/test / skills / workflows / scripts/test.sh），确认哪些是「可删」、哪些是「需改判」。
 2. 删：session-liveness.sh + session-liveness-mount.sh + session-liveness-sweep*.mjs（重命名 run-namespace-sweep*）+ 22 个测试 + monitor-mount-check.sh + monitor-mount-check.test.mjs。
-3. 清引用：逐个移除 session-liveness 引用；下游「因缺 session-liveness 而恒红」的分支一并退役或改判。
-4. 全量 suite 绿（删测试后 ratchet/baseline + bucket 归因同步更新）。
+3. 删 idle-watch 接缝（方案 B）：manager-start.sh 的 `--check-idle-watch` / `--ensure-mount-intent` 参数 + `IDLE_WATCH_MOUNT_ENTRY` / `IDLE_WATCH_DELIVERY_SEAM` + `idle-watch.env` / `idle-watch-mount.txt` 工件 + checklist 7 键删 2 键（IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）；packages/quay/src/cli/manager.ts 的 `--check-idle-watch` CLI 参数。
+4. 清引用：逐个移除 session-liveness 引用；下游「因缺 session-liveness 而恒红」的分支一并退役或改判。
+5. 全量 suite 绿（删测试后 ratchet/baseline + bucket 归因同步更新）。
 
 ## Acceptance Criteria
 
@@ -37,6 +40,7 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 - [ ] AC2（连带退役）：`monitor-mount-check.sh` / `monitor-mount-check.test.mjs` 一并删除（无对象可查）。
 - [ ] AC3（无悬空引用）：凡引用 SESSION-* 事件 / session-liveness 输出的下游脚本，不得出现「因缺 session-liveness 而恒红/报未挂载」的分支。
 - [ ] AC4（既有不回归）：全量 suite 绿（删测试后 @test-group ratchet / baseline / suite-bucket-reattribution 同步更新）。
+- [ ] AC5（idle-watch 随退役）：`grep -rn "idle-watch\|IDLE_WATCH\|--check-idle-watch\|--ensure-mount-intent" plugin/ packages/ orchestration/` 命中数归零（或仅剩「退役说明/未来 driver 替代」注释）；manager 冷启动 checklist 7 键变 5 键（无 IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）。
 
 ## Definition of Done
 
@@ -49,8 +53,10 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - orchestration/fast-mode-tick-core.md
 - orchestration/manager-loop-tick.md
 - orchestration/manager-tick-core.md
+- orchestration/manager-tick-criteria.md
 - orchestration/orchestrator-loop-tick.md
 - orchestration/orchestrator-tick-core.md
+- packages/quay/src/cli/manager.ts
 - packages/quay/src/init.ts
 - packages/quay/src/observation.ts
 - packages/quay/src/serve-dashboard.ts
@@ -126,6 +132,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/test/adr016-screen-use-check.test.mjs
 - plugin/test/blocked-signal-parameterized.test.mjs
 - plugin/test/cold-start-skill.test.mjs
+- plugin/test/direct-to-develop-bypass-check.test.mjs
 - plugin/test/execute-suite-fix-scope-gate.test.mjs
 - plugin/test/fan-in-execute-paths.test.mjs
 - plugin/test/full-suite-runner-phases.test.mjs
