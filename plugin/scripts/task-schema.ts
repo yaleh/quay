@@ -204,6 +204,9 @@ export function appendBodySection(fullText, heading, content) {
 // Splits on the first two `---` fences, then reads the COMPLETE frontmatter via the single parser and
 // projects the { labels, extra } view the schema checks consume. (parseTask only ever READS frontmatter;
 // the write-ownership separation above is unchanged — the outer layer owns frontmatter writes.)
+// Supported `extra` structures: scalar values AND nested lists/maps (e.g. `extra.depends_on: [a, b]`,
+// `extra.meta: { k: v }`). Nested structures round-trip faithfully as arrays/objects — never flattened
+// to scalar strings (gap-parseTask-nested-extra-support).
 export function parseTask(fullText) {
   const fmMatch = fullText.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!fmMatch) {
