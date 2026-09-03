@@ -14,8 +14,10 @@
 //   AC1 — every `-check.ts` exits 0 AND prints usage on `--help`; NEGATIVE CONTROL: running `--help`
 //         over all of them leaves the `.quay/` mtime set unchanged (a checker that writes on `--help`
 //         — as measure-trend-check did — fails this); resident-process runtime files (driver + the
-//         full-suite runner itself) are excluded from the snapshot (gap-suite-help-contract-mtime-race:
-//         they tick independently, not on `--help`); the mtime check retries a bounded number of times
+//         full-suite runner itself + the cap-observation chain + the session-liveness observer registry)
+//         are excluded from the snapshot (gap-suite-help-contract-mtime-race +
+//         gap-concurrency-cap-state-help-contract-mtime-race: they tick independently, not on `--help`);
+//         the mtime check retries a bounded number of times
 //         (③ fallback) — a deterministic side effect reproduces every attempt, a transient tick does not;
 //   AC2 — `ready-pool-check --help` no longer self-contradicts ("unknown flag: --help (run with
 //         --help)") — it prints normal usage and exits 0;
@@ -84,17 +86,35 @@ const SUITE_RUNNER_FILES = new Set([
   "verification-round.jsonl", // round duration ledger, appended on suite completion
 ]);
 
+// Cap-observation runtime file (gap-concurrency-cap-state-help-contract-mtime-race): the layer-tick
+// cap-observation chain (accounting-emit.ts autoOccupancy → cap-from-gate.sh → cap-from-gate.ts
+// computeEffectiveCap → saveState) writes .quay/concurrency-cap-state.json on every invocation — a
+// resident-process runtime carrier, NOT a checker `--help` side effect (no -check.ts imports or
+// spawns cap-from-gate; verified by per-checker bisect). refresh-worktree-quay.sh copies it into the
+// worktree at suite startup, and a concurrent layer tick / test spawning accounting-emit against the
+// worktree bumps its mtime mid-sweep (the observed false red). Excluded like the driver + suite-runner
+// carriers above; the mtime-race AC3 negative control below still pins that a REAL `--help` side effect
+// (measure-history.jsonl) is caught.
+const CAP_OBSERVATION_FILES = new Set([
+  "concurrency-cap-state.json", // cap-from-gate.ts STATE_FILE_NAME, written by computeEffectiveCap
+]);
+
 /** True when `relPath` is a resident-process runtime file (never a checker `--help` side effect). */
 function isNonCheckerRuntimeFile(relPath) {
   const base = path.basename(relPath);
-  if (RESIDENT_DRIVER_FILES.has(base) || SUITE_RUNNER_FILES.has(base)) return true;
+  if (RESIDENT_DRIVER_FILES.has(base) || SUITE_RUNNER_FILES.has(base) || CAP_OBSERVATION_FILES.has(base)) return true;
   // (a) driver supervisor/driver/liveness log + pid files (driver-runtime.ts prefix ∈ {promotion-driver,
   // worker-driver}): <prefix>.(log|pid), <prefix>-supervisor.(log|pid), <prefix>-liveness.log,
   // <prefix>-inflight.pid.
   // (b) suite load sampler: suite-load-<runId>.jsonl (full-suite-runner.ts startLoadSampler).
+  // (c) session-liveness observer registry: session-liveness.<pid>.json — session-liveness.sh writes it on
+  //     STARTUP (unless SL_NO_REGISTER=1) and removes it on EXIT; a resident monitor / manager / OS anchor
+  //     that (re)starts mid-sweep CREATES a new file, a resident-process carrier — never a checker `--help`
+  //     side effect (fan-in suite 实测暴露, gap-concurrency-cap-state-help-contract-mtime-race).
   return (
     /^(promotion|worker)-driver(-(supervisor|liveness|inflight))?\.(log|pid)$/.test(base) ||
-    /^suite-load-.*\.jsonl$/.test(base)
+    /^suite-load-.*\.jsonl$/.test(base) ||
+    /^session-liveness\.[0-9]+\.json$/.test(base)
   );
 }
 
@@ -215,6 +235,8 @@ test("mtime-race AC3 (negative control not degraded): resident-process file excl
     fs.writeFileSync(path.join(tmp, "worker-driver-liveness.log"), "x\n");
     fs.writeFileSync(path.join(tmp, "full-suite-state.json"), "x\n");
     fs.writeFileSync(path.join(tmp, "suite-load-mfi-x-123-abc.jsonl"), "x\n");
+    fs.writeFileSync(path.join(tmp, "concurrency-cap-state.json"), "x\n");
+    fs.writeFileSync(path.join(tmp, "session-liveness.305362.json"), "x\n");
     fs.writeFileSync(path.join(tmp, "measure-history.jsonl"), "x\n");
     const before = snapshotMtimeSet(tmp);
 
@@ -224,6 +246,8 @@ test("mtime-race AC3 (negative control not degraded): resident-process file excl
     fs.appendFileSync(path.join(tmp, "worker-driver-liveness.log"), "y\n");
     fs.appendFileSync(path.join(tmp, "full-suite-state.json"), "y\n");
     fs.appendFileSync(path.join(tmp, "suite-load-mfi-x-123-abc.jsonl"), "y\n");
+    fs.appendFileSync(path.join(tmp, "concurrency-cap-state.json"), "y\n");
+    fs.appendFileSync(path.join(tmp, "session-liveness.305362.json"), "y\n");
     assert.deepEqual(diffMtimeSet(before, snapshotMtimeSet(tmp)), [], "resident-process tick mtime changes must be excluded");
 
     // A real `--help` side effect (a non-runtime file) must still be caught — exclusion is not over-broad.
