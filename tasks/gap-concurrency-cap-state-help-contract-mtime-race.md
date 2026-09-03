@@ -1,7 +1,7 @@
 ---
 id: gap-concurrency-cap-state-help-contract-mtime-race
 title: 修缺：concurrency-cap-state.json 的 --help 副作用 mtime race
-status: ready
+status: done
 role: primitive
 labels:
   - help-contract
