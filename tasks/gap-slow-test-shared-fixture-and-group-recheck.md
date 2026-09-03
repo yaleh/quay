@@ -20,7 +20,7 @@ extra:
 了这 4 个文件的当前状态**——距那次分析已 3 周，期间 `gap-suite-extend-shared-install-cache`（done,
 2026-08-30）等任务已经落地，前提发生了实质变化：
 
-| 文件 | 08-12 分析 | 09-03 实测 | 现状 |
+| 文件 | 08-12 分析 | 09-03 单轮实测 | 现状 |
 |---|---|---|---|
 | delivery-standalone-smoke-gate.test.mjs | 261s | **57s**（-78%） | 已不在套件 Top20；文件头注释声称"2026-08-12 moved product→serial"但 `@test-group` 行仍是 `product`——**文档与代码不一致**，需要核实原委，不需要再做 npm 基线共享（已有 amortize baseline，见文件第 44-50 行） |
 | cli.test.mjs | 157s | **92.6s**（-41%） | 已不在套件 Top20 |
@@ -48,6 +48,45 @@ Top20 第 14 名，已接 `sharedFixture` 但仍慢——说明缓存命中之�
 那样，声称移动了却未必真的落地（现状 tag 仍是 product，需要先搞清楚那次改动是被 revert 了还是
 从未真正提交）。
 
+## 12 小时窗口核实（2026-09-03 追加，`.quay/measure-history.jsonl` 2026-09-02T15:03Z ~
+2026-09-03T02:45Z，29 轮套件、13815 条 per-file 记录，round 652-680）
+
+单轮快照容易撞上偶然波动，这里用 12 小时内 29 轮的聚合总耗时（Σ durationMs，含失败轮）重新核实上面
+的判断方向是否稳固——**结论：方向不变，本任务的两个目标文件依然是持续、稳定的高耗时贡献者，不是
+偶然**：
+
+| 文件 | 12h 内出现轮次 | 均值 | 12h 内总贡献 | 失败次数 |
+|---|---|---|---|---|
+| quay-init-loop-runtime.test.mjs | 29/29 | 103.9s | **3012s**（Top20 第 6） | 0 |
+| quay-init-loop.test.mjs | 29/29 | 97.4s | **2825s**（Top20 第 7） | 0 |
+| quay-init-loop-core.test.mjs | 20/20 | 133.4s | 2669s（Top20 第 9） | 0 |
+
+三个文件在窗口内**全部通过、耗时稳定**（均值与单点实测接近，无异常离群），支持"这是稳定的慢，不是
+一次性抖动"的判断，AC2/AC3/AC4 的目标不变。
+
+**同一窗口里还有几个总贡献更高、但本任务未纳入范围的持续慢文件**（供后续参考，不在本任务
+Touches 内，机制未核实，不得未经分解就假设"也缺 fixture"）：`full-suite-runner-phases.test.mjs`
+（29/29 全过，3862s，Top20 第 1）、`worker-driver-fan-in.test.mjs`（29/29 全过，3433s，第 2）、
+`checker-mutation-check.test.mjs`（20/20 全过，3027s，第 4）、`verify-deliver-coldstart.test.mjs`
+（29/29 全过，3018s，第 5）、`runner-grouping-list-groups.test.mjs`（2697s）、
+`slot-refill.test.mjs`（2511s）、`full-suite-runner.test.mjs`（2503s）。这些文件不含失败，
+mechanism 未核实（可能是真实多子进程 spawn 而非缺 fixture），**留给另一任务按同样的"先分解再动手"
+方法学处理，本任务范围不扩大**。
+
+**范围外发现——session-liveness 家族高失败率（如实记录，人已裁定不立案）**：同一窗口暴露的最大
+瓶颈其实不是"慢"，而是**不稳定**——`session-liveness-*` 家族 29 轮里只有 7 轮（24%）全绿，18 个
+不同文件在窗口内出现过失败，其中 5 个文件失败率 ≥15%（`session-liveness-scd-inflight-changing
+.test.mjs` 7/29=24%、`session-liveness-scd-busy.test.mjs` 7/29=24%、`session-liveness-restart
+.test.mjs` 6/29=21%、`session-liveness-signals-kinds.test.mjs` 4/20=20%、`session-liveness-target
+.test.mjs` 3/20=15%）。已核实相关历史任务链（`gap-lowconc-concurrency-8-starves-bclass-waiting`
+done/AC2 待外部 → `gap-session-liveness-marker-stale-fires-on-tick-log` done/只修一种签名 →
+`gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky` done/范围是重试预算判定非根治），
+**未发现任何 open 任务专门追踪此问题**。
+
+**人 2026-09-03 裁定：不为此立案**——outer 即将退役，随后 tmux 相关功能（session-liveness 依赖的
+tmux + claude-probe 探针机制）也将退役，根治这个 flaky 的修复价值归零。**后续若再次分析套件数据
+撞见同一发现，直接引用本节，不必重新调查或重新提出立案。**
+
 ## Plan
 
 1. **核实 delivery-standalone-smoke-gate 的 product/serial 不一致**：`git log -p --follow -S
@@ -60,7 +99,7 @@ Top20 第 14 名，已接 `sharedFixture` 但仍慢——说明缓存命中之�
    `sharedFixtureVariant`），把该文件里重复的 `makeTmp` + 全新 install 换成 fixture 副本，不改变
    任何断言语义。
 3. **分解 quay-init-loop-runtime.test.mjs 仍慢的原因**：它已经用了 `sharedFixture`（第 34-37 行
-   注释自称 AC1 已接），却仍是 Top20 第 14 名（124s）——先用现有的断言汇聚点计时手法（同
+   注释自称 AC1 已接），却仍是 12h 窗口总贡献第 6 名——先用现有的断言汇聚点计时手法（同
    `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` AC1b 对 cli/serve/mcp-server 的做法，
    env-gated、零断言改动）定位耗时集中在 fixture 命中前的一次性构建，还是命中后仍有的其他真实
    I/O，再决定要不要继续动它——**不假设"缓存已加=问题已解"**。
@@ -68,7 +107,8 @@ Top20 第 14 名，已接 `sharedFixture` 但仍慢——说明缓存命中之�
    步骤 1-3 完成后仍有余量，再评估是否合并前几个非 GitHub 测试的工作区初始化（GitHub 相关测试
    需要独立 QUAY_GITHUB_REPO，不能合并）。不作为本任务的强制交付项。
 5. **前后对照**：同一 commit 上，改动前后各跑一次相关文件的隔离墙钟（`node --test <file>`）与一次
-   全量套件（记录 Σ duration_ms 和总墙钟），两组数字都贴进 Measured。
+   全量套件（记录 Σ duration_ms 和总墙钟），两组数字都贴进 Measured；优先使用 12h 窗口聚合均值
+   （3012s / 2825s 总贡献，103.9s / 97.4s 均值）作为改动前基线，比单点快照更抗噪声。
 
 ## Acceptance Criteria
 
@@ -79,12 +119,13 @@ Top20 第 14 名，已接 `sharedFixture` 但仍慢——说明缓存命中之�
       后，该文件全部测试通过（隔离跑 `node --test plugin/test/quay-init-loop.test.mjs`），且不依赖
       测试执行顺序（任意顺序重跑仍通过）。
 - [ ] AC3（能取假，测量）：`quay-init-loop-runtime.test.mjs` 的耗时用断言汇聚点计时法分解，输出
-      ≥1000ms 间隔的分布（同 AC1b 手法），贴入任务体；据此明确回答「fixture 命中后剩余的 124s
+      ≥1000ms 间隔的分布（同 AC1b 手法），贴入任务体；据此明确回答「fixture 命中后剩余的耗时
       主要花在哪」，而不是停在"已经接了 sharedFixture"这句话上。
 - [ ] AC4（能取假，前后对照，AC2 纪律 0-cancelled）：AC2 改动前后，`quay-init-loop.test.mjs` 的
-      隔离墙钟对比（改动前基线 122s，见 09-03 实测）+ 全量套件的 Σ duration_ms 与总墙钟前后对比，
-      都贴进 Measured；若 AC3 发现 runtime 文件仍有可动空间，同法测它。**不写"预期节省 Xs"，只写
-      实测到的差值**。
+      隔离墙钟对比（改动前基线：单点 122s / 12h 窗口均值 97.4s，两者都记）+ 全量套件的
+      Σ duration_ms 与总墙钟前后对比，都贴进 Measured；若 AC3 发现 runtime 文件仍有可动空间，
+      同法测它（改动前基线：单点 124s / 12h 窗口均值 103.9s）。**不写"预期节省 Xs"，只写实测到
+      的差值**。
 - [ ] AC5（能取假，可选，仅在 AC1 判定需要真正降级时触发）：任何 `@test-group` 从
       `product|engine` 到 `serial|lowconc` 的改动，其提交信息含字面量 `@test-group-downgrade`，
       `node plugin/scripts/test-group-downgrade-check.ts` 通过（exit 0）。
@@ -95,7 +136,9 @@ Top20 第 14 名，已接 `sharedFixture` 但仍慢——说明缓存命中之�
 `quay-init-loop.test.mjs` 接入共享 fixture 且隔离/套件内耗时的前后实测都在任务体里（不是预测）；
 `quay-init-loop-runtime.test.mjs` 的剩余耗时来源已被分解定位（不是停留在"已接 fixture"）；
 delivery-standalone-smoke-gate 的文档/tag 不一致已被核实并处理；全量套件保持 0 failed / 0
-cancelled；本任务未凭空设立任何未经测量的墙钟目标数字。
+cancelled；本任务未凭空设立任何未经测量的墙钟目标数字。12 小时窗口聚合数据（29 轮）已确认本任务
+两个目标文件是稳定贡献者而非偶然波动；session-liveness 家族的高失败率作为范围外发现已交叉引用，
+人已裁定不立案（outer/tmux 即将退役），不在本任务 Touches 内处理。
 
 ## Touches
 
