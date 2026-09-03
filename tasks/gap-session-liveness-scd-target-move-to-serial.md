@@ -28,9 +28,9 @@ session-liveness 的 scd-* 全家 8 个 + `target` + `signals-thresholds-edge` �
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：grep 这 10 个测试文件 `@test-group serial`（不再 lowconc）；（⛔ 仍 lowconc ⇒ 假）。
-- [ ] AC2（生产载体）：移 serial 之后，mechanical-fan-in + test-file-snapshot 的 fan-in suite 不再因 session-liveness 失败而 red；N 只计移 serial 之后的时间窗（硬规则 4 推论三）。
-- [ ] AC3（既有不回归）：全量 suite 绿；serial 相不因新增 10 个测试而超时。
+- [x] AC1（能取假，机制级）：grep 这 10 个测试文件 `@test-group serial`（不再 lowconc）；（⛔ 仍 lowconc ⇒ 假）。
+- [ ] AC2（生产载体）：移 serial 之后，mechanical-fan-in + test-file-snapshot 的 fan-in suite 不再因 session-liveness 失败而 red；N 只计移 serial 之后的时间窗（硬规则 4 推论三）。（待外部）
+- [ ] AC3（既有不回归）：全量 suite 绿；serial 相不因新增 10 个测试而超时。（待外部）
 
 ## Definition of Done
 
@@ -48,4 +48,5 @@ scd-* 全家 + target + signals-thresholds-edge 的 `@test-group` 为 serial；m
 - plugin/test/session-liveness-scd-unsaturated.test.mjs（@test-group lowconc→serial）
 - plugin/test/session-liveness-target.test.mjs（@test-group lowconc→serial）
 - plugin/test/session-liveness-signals-thresholds-edge.test.mjs（@test-group lowconc→serial）
+- docs/analysis/test-file-baseline.txt（test-file-snapshot 基线重生成，吸收 lowconc→serial 改标）
 - tasks/gap-session-liveness-scd-target-move-to-serial.md（自身）

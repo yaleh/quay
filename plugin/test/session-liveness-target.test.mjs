@@ -1,5 +1,6 @@
-// @test-group lowconc
+// @test-group serial
 // @load-sensitive wall-clock
+// @load-sensitive-entry 2026-09-03 wall-clock (real tmux server + claude-probe probes flaky in lowconc — probe establish unstable / starved, reds unrelated fan-in suites); GROUP=serial deliberately
 // session-liveness-target.test.mjs — the monitor watches the CONFIGURED target (the inner role
 // window), not ITSELF (the outer pane that hosts it) — gap-session-liveness-monitor-watches-self-not-inner.
 //
@@ -19,8 +20,8 @@
 // "session-liveness-tgt-", sweeps ONLY it — never a sibling file's active probe dir).
 //
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real processes
-// + tmux timing; passes isolated under low load. Routed to the `lowconc` group (the hermetic-but-
-// load-sensitive phase at concurrency 3).
+// + tmux timing; passes isolated under low load. Routed to the `serial` group (the ALONE-before-main
+// phase at $SERIAL_CONCURRENCY — gap-session-liveness-scd-target-move-to-serial).
 //
 // Run: scripts/test.sh session-liveness-target.test.mjs   /   node --test session-liveness-target.test.mjs
 
