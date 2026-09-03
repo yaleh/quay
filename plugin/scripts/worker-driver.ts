@@ -2761,6 +2761,26 @@ export function combinedOutput(stdout: string, stderr: string): string {
   return [stdout, stderr].filter((s) => s && s.trim() !== "").join("\n");
 }
 
+/** 无害噪声行（MODULE_TYPELESS 等）——⛔ 污染失败摘要/判词。extractFailureSummary 与
+ *  extractFirstFailureLine 共用（⛔ 两处各写一份正则 = 漂移，硬规则 5b）。 */
+function isNoiseLine(l: string): boolean {
+  return (
+    l.includes("MODULE_TYPELESS_PACKAGE_JSON") ||
+    l.includes("Reparsing as ES module") ||
+    l.includes("This incurs a performance overhead") ||
+    l.includes("To eliminate this warning") ||
+    l.includes('add "type": "module"') ||
+    l.includes("--trace-warnings")
+  );
+}
+
+/** 失败信号行（node:test 的 not ok / ✖ / # fail、断言 expected/actual、anti-drift HARD FAIL、esbuild 的
+ *  Could not resolve / [ERROR] 构建失败、ac-gate/anti-drift 的 checked/violation 判词）。extractFailureSummary
+ *  与 extractFirstFailureLine 共用（⛔ 不复制正则）。 */
+function isFailureSignalLine(l: string): boolean {
+  return /^\s*not ok\b|^\s*✖|\bFAIL\b|# fail\b|HARD FAIL|AssertionError|\bexpected:|\bactual:|\bfail \d+\b|\bexit=\d+|Could not resolve|\[ERROR\]|\bchecked\b|\bviolation\b/i.test(l);
+}
+
 /** D6：从某步的 stdout+stderr 合并流里提取【可读失败摘要】——⛔ 裸流（MODULE_TYPELESS 噪声占满、
  *  ⛔ 丢真正测试结果）。去噪 + 保留失败信号行（node:test 的 not ok / ✖ / # fail、断言 expected/actual、
  *  anti-drift HARD FAIL、esbuild 的 Could not resolve / [ERROR] 构建失败），有界（最后 N 行 + 4000 字符）。
@@ -2771,19 +2791,22 @@ export function combinedOutput(stdout: string, stderr: string): string {
  *  gap-step-trace-reason-captures-gate-stdout：ac-gate/anti-drift 的 stdout 判词（checked X/Y / violation）
  *  加入 isSignal——⛔ ac-gate 的 FAIL 行与「checked X/Y」并存时后者被 signals-first 丢弃，真判词不进 reason。 */
 export function extractFailureSummary(combined: string): string {
-  const isNoise = (l: string): boolean =>
-    l.includes("MODULE_TYPELESS_PACKAGE_JSON") ||
-    l.includes("Reparsing as ES module") ||
-    l.includes("This incurs a performance overhead") ||
-    l.includes("To eliminate this warning") ||
-    l.includes('add "type": "module"') ||
-    l.includes("--trace-warnings");
-  const meaningful = combined.split("\n").filter((l) => l.trim() !== "" && !isNoise(l));
-  const isSignal = (l: string): boolean =>
-    /^\s*not ok\b|^\s*✖|\bFAIL\b|# fail\b|HARD FAIL|AssertionError|\bexpected:|\bactual:|\bfail \d+\b|\bexit=\d+|Could not resolve|\[ERROR\]|\bchecked\b|\bviolation\b/i.test(l);
-  const signals = meaningful.filter(isSignal);
+  const meaningful = combined.split("\n").filter((l) => l.trim() !== "" && !isNoiseLine(l));
+  const signals = meaningful.filter(isFailureSignalLine);
   const chosen = signals.length > 0 ? signals : meaningful;
   return chosen.slice(-60).join("\n").trim().slice(0, 4000);
+}
+
+/** 从合并流里取【第一条】真实失败信号行（同 extractFailureSummary 的 isNoiseLine/isFailureSignalLine，
+ *  ⛔ 不复制正则）。suite 红 needs-human 用：把 suite 日志摘要出「第一条真实断言/报错行」塞进
+ *  mechanical_fan_in.reason——⛔ extractFailureSummary 的 tail-60 多行 blob 塞进单行 markdown bullet 会断行，
+ *  且它无信号时回退 meaningful 会违反「无匹配行 ⇒ 回退通用文案」（硬规则 3b 三态可分）。
+ *  无信号 ⇒ 空串（调用方回退 `suite <outcome>` 通用文案，⛔ 不伪造/截断出误导内容）。 */
+export function extractFirstFailureLine(combined: string): string {
+  const line = String(combined ?? "")
+    .split("\n")
+    .find((l) => l.trim() !== "" && !isNoiseLine(l) && isFailureSignalLine(l));
+  return line ? line.trim() : "";
 }
 
 /** 读 fan-in 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。 */
@@ -3450,7 +3473,15 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         // not-recorded：runner 是 verification-round.jsonl 的唯一 writer，green+red 都入账，静态闸红亦由
         // runner 的 staticCheckDetected → gate=static-check 记录）。⛔ 不平行补写——runner 已记 + 再补写
         // = 同一红 suite 两条记录、round 号虚增（与「两套平行机制收敛为一」相悖）。
-        return failSuite(`suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
+        // gap-needs-human-note-missing-real-error-line：suite 红 needs-human 的「失败步/判词」不再恒为
+        // 「suite red」——把 suite 日志（stdout 落进 suiteLogFile）摘要出第一条真实断言/报错行塞进 reason。
+        // 无信号 / 日志缺失 ⇒ 回退通用文案（硬规则 3b 三态可分，⛔ 不伪造/截断出误导内容）。
+        let suiteLogText = "";
+        try {
+          suiteLogText = fs.readFileSync(suiteLogFile, "utf8");
+        } catch { /* 日志缺失 ⇒ fallback 通用文案 */ }
+        const firstFailure = extractFirstFailureLine(suiteLogText);
+        return failSuite(firstFailure || `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
       }
       writeSuiteCapture(suiteCapture, {
         full_suite_ran: "true", skip_reason: "", suite_exit: "0",
