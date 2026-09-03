@@ -44,6 +44,7 @@ Standard clauses (architecture + code + tests):
 ## Touches
 
 - `plugin/scripts/task-schema.ts` (major refactor + new parseFrontmatterCompletely)
+- `experiments/quay-perpetual-stream/scripts/task-schema.ts` (canonical source — dual-copy sync with the plugin/scripts copy)
 - `packages/quay-native/src/store.ts` (validate parse aligns with schema)
 - `packages/quay-native/src/mcp-server.ts` (update task_write schema)
 - `docs/references/task-schema-canonical.md` (new canonical schema doc)

@@ -93,10 +93,63 @@ export function extractSection(fullText, heading) {
   return stopMatch ? rest.slice(0, stopMatch.index) : rest;
 }
 
-// ── parseTask — lenient YAML frontmatter parse (enough to read labels[] + extra.{schema,dirFile}). ─
-// Splits on the first two `---` fences. Returns { labels, extra, frontmatterRaw, body }. Does NOT
-// pull in a YAML dependency (the store's frontmatter is simple block-scalar/flow); parses labels as
-// either a `- item` block list or a `[a, b]` flow list, and reads the `extra:` block's scalar keys.
+// ── parseFrontmatterCompletely — the ONE complete frontmatter parser (gap-unified-frontmatter-parser). ─
+// Single source of truth for reading a task file's YAML frontmatter. parseTask, readDependsOn, and the
+// native store's parse() ALL delegate here — there is no second frontmatter reader to drift out of sync.
+//
+// Canonical schema (the TypeScript interface this parser realizes — the complete field set a task
+// frontmatter MAY carry; unknown keys are preserved, never dropped):
+//
+//   interface TaskFrontmatter {
+//     id?: string;                 // task id (the storage key; the store falls back to the filename)
+//     title?: string;              // human title
+//     status?: string;             // todo | ready | done | needs-human | superseded
+//     labels?: string[];           // flow `[a, b]` or block `- a`
+//     parent?: string | null;      // parent task id (relation edge)
+//     children?: string[];         // child task ids (relation edge)
+//     depends_on?: string[];       // prerequisite task ids (relation edge; top-level OR legacy extra)
+//     extra?: {
+//       schema?: string;           // "v1" — the schema marker (the grandfather boundary)
+//       dirFile?: string;          // projection-scaffolding field (forbidden by assertion A6)
+//       dirStatus?: string;        // directive disposition
+//       depends_on?: string[];     // legacy home — task_write used to nest it under extra
+//       malformed?: string[];      // store-injected diagnosis markers
+//       [key: string]: unknown;
+//     };
+//     [key: string]: unknown;      // forward-compatible: unknown fields survive the round-trip
+//   }
+//
+// Full YAML semantics (quoting, escapes, nested maps/lists) come from the `yaml` package — the SAME
+// parser the native store uses to serialize/validate — so a frontmatter written by store.serialize()
+// round-trips byte-identically through every reader. This REPLACES the old lenient hand-parse (scalars
+// only) that silently dropped nested extra structures (e.g. `extra.depends_on` read back as "").
+import { parse as parseYaml } from "yaml";
+
+export function parseFrontmatterCompletely(frontmatterRaw) {
+  return (parseYaml(frontmatterRaw) ?? {});
+}
+
+// ── Projections — the ONE normalization the three readers share (they never re-parse the raw text). ──
+function asStringArray(v) {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => String(x)).filter(Boolean);
+}
+
+export function frontmatterLabels(fm) {
+  return asStringArray(fm.labels);
+}
+
+export function frontmatterExtra(fm) {
+  const e = fm.extra;
+  return e && typeof e === "object" && !Array.isArray(e) ? e : {};
+}
+
+// depends_on may sit at top level OR nested under extra (gap-readdepends-on-indented-extra-depends-on);
+// top level wins when both are present (the canonical home, exposed by task_write's `depends_on` param).
+export function frontmatterDependsOn(fm) {
+  const nested = fm.extra && typeof fm.extra === "object" && !Array.isArray(fm.extra) ? fm.extra.depends_on : undefined;
+  return asStringArray(Array.isArray(fm.depends_on) ? fm.depends_on : nested);
+}
 //
 // ── WRITE-OWNERSHIP SEPARATION (gap-task-file-develop-integration-drift-fan-in-conflicts, AC3) ────
 // The frontmatter (which carries `status:`) is owned EXCLUSIVELY by the outer layer (status flips /
@@ -148,6 +201,10 @@ export function appendBodySection(fullText, heading, content) {
   return { ok: true, fullText: out, frontmatterUnchanged: true };
 }
 
+// ── parseTask — delegate to parseFrontmatterCompletely. ──────────────────────────────────────────
+// Splits on the first two `---` fences, then reads the COMPLETE frontmatter via the single parser and
+// projects the { labels, extra } view the schema checks consume. (parseTask only ever READS frontmatter;
+// the write-ownership separation above is unchanged — the outer layer owns frontmatter writes.)
 export function parseTask(fullText) {
   const fmMatch = fullText.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!fmMatch) {
@@ -155,76 +212,20 @@ export function parseTask(fullText) {
   }
   const frontmatterRaw = fmMatch[1];
   const body = fmMatch[2];
-
-  // labels: block list (`labels:\n  - a\n  - b`) OR flow list (`labels: [a, b]`).
-  const labels = [];
-  const flowMatch = frontmatterRaw.match(/^labels:\s*\[([^\]]*)\]\s*$/m);
-  if (flowMatch) {
-    for (const raw of flowMatch[1].split(",")) {
-      const v = raw.trim().replace(/^["']|["']$/g, "");
-      if (v) labels.push(v);
-    }
-  } else {
-    const lines = frontmatterRaw.split(/\r?\n/);
-    const idx = lines.findIndex((l) => /^labels:\s*$/.test(l));
-    if (idx >= 0) {
-      for (let i = idx + 1; i < lines.length; i++) {
-        const m = lines[i].match(/^\s+-\s+(.+?)\s*$/);
-        if (m) labels.push(m[1].replace(/^["']|["']$/g, ""));
-        else if (/^\S/.test(lines[i])) break; // next top-level key ends the list
-      }
-    }
-  }
-
-  // extra: block — read its indented scalar keys (`  key: value`). Enough for schema/dirFile/dirStatus.
-  const extra = {};
-  const eLines = frontmatterRaw.split(/\r?\n/);
-  const eIdx = eLines.findIndex((l) => /^extra:\s*$/.test(l));
-  if (eIdx >= 0) {
-    for (let i = eIdx + 1; i < eLines.length; i++) {
-      if (/^\S/.test(eLines[i])) break; // dedent → end of extra block
-      const m = eLines[i].match(/^\s+([A-Za-z0-9_]+):\s*(.*)$/);
-      if (m) {
-        let v = m[2].trim().replace(/^["']|["']$/g, "");
-        extra[m[1]] = v;
-      }
-    }
-  } else {
-    // inline flow: `extra: { schema: "v1", ... }`
-    const inline = frontmatterRaw.match(/^extra:\s*\{([^}]*)\}\s*$/m);
-    if (inline) {
-      for (const pair of inline[1].split(",")) {
-        const m = pair.match(/\s*([A-Za-z0-9_]+)\s*:\s*(.+?)\s*$/);
-        if (m) extra[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
-      }
-    }
-  }
-
-  return { labels, extra, frontmatterRaw, body };
+  const complete = parseFrontmatterCompletely(frontmatterRaw);
+  return { labels: frontmatterLabels(complete), extra: frontmatterExtra(complete), frontmatterRaw, body };
 }
 
-// ── readDependsOn — parse the `depends_on:` frontmatter list (the relation edge for prerequisites,
-//    tasks/gap-prerequisite-gates-prose-invisible-to-mechanisms). Mirrors the `children:` list shape:
-//    flow `depends_on: [a, b]` OR block `depends_on:\n  - a`; either form may sit at column 0 or be
-//    indented under `extra:` (gap-readdepends-on-indented-extra-depends-on). A prerequisite expressed
-//    ONLY as prose (a `[[task-id]]` wikilink in a "Do not dispatch until … lands / 前置" paragraph) is
-//    invisible to the mechanism paths that read relation edges — this field is the machine-readable
-//    home for it. Lenient (no YAML dep), same family as parseTask's labels parser.
+// ── readDependsOn — delegate to parseFrontmatterCompletely. ──────────────────────────────────────
+// The `depends_on:` relation edge for prerequisites (tasks/gap-prerequisite-gates-prose-invisible-to-
+// mechanisms). Mirrors the `children:` list shape: flow `depends_on: [a, b]` OR block `depends_on:\n
+// - a`; either form may sit at column 0 OR indented under `extra:` (gap-readdepends-on-indented-extra-
+// depends-on). A prerequisite expressed ONLY as prose (a `[[task-id]]` wikilink in a "Do not dispatch
+// until … lands / 前置" paragraph) is invisible to the mechanism paths — this field is the
+// machine-readable home for it. Delegates to the single parser (frontmatterDependsOn reads top-level
+// first, then the legacy extra-nested form).
 export function readDependsOn(frontmatterRaw) {
-  const flow = frontmatterRaw.match(/^[ \t]*depends_on:\s*\[([^\]]*)\]\s*$/m);
-  if (flow) {
-    return flow[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-  }
-  const lines = frontmatterRaw.split(/\r?\n/);
-  const idx = lines.findIndex((l) => /^[ \t]*depends_on:\s*$/.test(l));
-  if (idx < 0) return [];
-  const out = [];
-  for (let i = idx + 1; i < lines.length; i++) {
-    const m = lines[i].match(/^\s+-\s+(.+?)\s*$/);
-    if (m) out.push(m[1].replace(/^["']|["']$/g, "").trim());
-    else if (/^\S/.test(lines[i])) break; // next top-level key ends the list
-  }
-  return out;
+  return frontmatterDependsOn(parseFrontmatterCompletely(frontmatterRaw));
 }
 
 // ── Marker read (canonical grandfather boundary). ─────────────────────────────────────────────────
