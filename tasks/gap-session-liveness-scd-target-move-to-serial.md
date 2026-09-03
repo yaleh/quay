@@ -24,17 +24,19 @@ session-liveness 的 scd-* 全家 8 个 + `target` + `signals-thresholds-edge` �
 ## Plan
 
 1. 把 10 个测试文件的 `@test-group lowconc` 改为 `@test-group serial`（复用 bclass 移 signals-* 的做法，不改并发旋钮、不改 waterline）。
-2. 移后验证：mechanical-fan-in + test-file-snapshot 重派不再因 scd-busy/target flaky 而 suite red。
+2. 同步更新「硬编码 scd-* = lowconc」的 fixture（`suite-bucket-load-sensitive-isolation.test.mjs` 的 AC1/AC5 断言），否则改 @test-group 后 classifier 测试必红（见 AC4）。
+3. 移后验证：mechanical-fan-in + test-file-snapshot 重派不再因 scd-busy/target flaky 而 suite red。
 
 ## Acceptance Criteria
 
 - [ ] AC1（能取假，机制级）：grep 这 10 个测试文件 `@test-group serial`（不再 lowconc）；（⛔ 仍 lowconc ⇒ 假）。
 - [ ] AC2（生产载体）：移 serial 之后，mechanical-fan-in + test-file-snapshot 的 fan-in suite 不再因 session-liveness 失败而 red；N 只计移 serial 之后的时间窗（硬规则 4 推论三）。
 - [ ] AC3（既有不回归）：全量 suite 绿；serial 相不因新增 10 个测试而超时。
+- [ ] AC4（同步更新 fixture，能取假）：`plugin/test/suite-bucket-load-sensitive-isolation.test.mjs` 中硬编码「scd-* = lowconc」的断言（AC1「all 8 session-liveness-scd-* 是 lowconc」、AC5「TS classifier 对 scd-* 返回 lowconc」）同步改为 serial；（⛔ 仍断言 lowconc ⇒ 假，改 @test-group 后 classifier 测试必红）。
 
 ## Definition of Done
 
-scd-* 全家 + target + signals-thresholds-edge 的 `@test-group` 为 serial；mechanical-fan-in + test-file-snapshot 不再因 session-liveness flaky 误杀（fan-in suite red 里的 session-liveness 失败归零）；全量 suite 绿。
+scd-* 全家 + target + signals-thresholds-edge 的 `@test-group` 为 serial；`suite-bucket-load-sensitive-isolation.test.mjs` 的 scd 分类断言同步为 serial；mechanical-fan-in + test-file-snapshot 不再因 session-liveness flaky 误杀（fan-in suite red 里的 session-liveness 失败归零）；全量 suite 绿。
 
 ## Touches
 
@@ -48,4 +50,5 @@ scd-* 全家 + target + signals-thresholds-edge 的 `@test-group` 为 serial；m
 - plugin/test/session-liveness-scd-unsaturated.test.mjs（@test-group lowconc→serial）
 - plugin/test/session-liveness-target.test.mjs（@test-group lowconc→serial）
 - plugin/test/session-liveness-signals-thresholds-edge.test.mjs（@test-group lowconc→serial）
+- plugin/test/suite-bucket-load-sensitive-isolation.test.mjs（scd-* 分类断言 lowconc→serial）
 - tasks/gap-session-liveness-scd-target-move-to-serial.md（自身）
