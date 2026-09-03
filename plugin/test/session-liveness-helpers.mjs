@@ -41,9 +41,9 @@ import { tmux as isolatedTmux } from "../scripts/tmux-session.ts";
 import {
   runIdOf, runNamespaceRoot, dirHasLiveOwner, serverPidOf, panePidsOf,
   sweepRunNamespaces, sweepRunNamespace, serverPidsOfByCmdline,
-  registerServer, killRegisteredServers, readServerRegistry,
+  registerServer, killRegisteredServers, readServerRegistry, dirContainsGitRepo,
 } from "../scripts/session-liveness-sweep.mjs";
-export { runIdOf, runNamespaceRoot, dirHasLiveOwner, serverPidOf, panePidsOf, sweepRunNamespaces, sweepRunNamespace, serverPidsOfByCmdline, registerServer, killRegisteredServers, readServerRegistry };
+export { runIdOf, runNamespaceRoot, dirHasLiveOwner, serverPidOf, panePidsOf, sweepRunNamespaces, sweepRunNamespace, serverPidsOfByCmdline, registerServer, killRegisteredServers, readServerRegistry, dirContainsGitRepo };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SCRIPT = path.resolve(__dirname, "..", "scripts", "session-liveness.sh");
@@ -119,6 +119,10 @@ export function sweepTmp(...prefixes) {
     let isDir = false;
     try { isDir = fs.statSync(abs).isDirectory(); } catch { continue; }
     if (isDir && dirHasLiveOwner(abs)) continue; // owner session ALIVE → in-use, never clean
+    // gap-session-liveness-worktree-fixture-repo-vanishes: a dir holding an active git repo (the SCD
+    // worktree fixture nests `repo` + `worktree`s inside the probe dir) is IN-USE even when its tmux
+    // socket is gone — never sweep an active repo dir.
+    if (isDir && dirContainsGitRepo(abs)) continue;
     try { fs.rmSync(abs, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
 }
