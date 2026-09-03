@@ -1,7 +1,7 @@
 ---
 id: gap-needs-human-note-missing-real-error-line
 title: "## Needs-Human 记录「失败步/判词」suite red 时恒为「suite red」——缺真实报错首行，人工每次要开日志 grep"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -29,10 +29,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：构造一个 suite 输出含明确 `AssertionError`（或等价失败标记）的 fixture，`markNeedsHuman` 写入的 `## Needs-Human` 记录「失败步/判词」行包含该错误原文（而非泛化的 `suite red`）。
-- [ ] AC2（能取假，负控制）：suite 输出不含可提取的具体错误（仅非零退出码、日志缺失或无匹配行）时，仍回退到现有的通用文案，不得伪造/截断出误导性内容。
-- [ ] AC3（真实生产载体验证，非 fixture）：实现落地之后，一次真实 worker-driver suite red 触发的 needs-human 写入，任务体 `## Needs-Human` 记录的「失败步/判词」行包含真实断言文本——贴出该行原文。
-- [ ] AC4：`--for-task` scoped 门 + 全量 suite 绿；`formatExitedNotLandedReason`/`failSuite` 既有单测不回归。
+- [x] AC1（能取假）：构造一个 suite 输出含明确 `AssertionError`（或等价失败标记）的 fixture，`markNeedsHuman` 写入的 `## Needs-Human` 记录「失败步/判词」行包含该错误原文（而非泛化的 `suite red`）。
+- [x] AC2（能取假，负控制）：suite 输出不含可提取的具体错误（仅非零退出码、日志缺失或无匹配行）时，仍回退到现有的通用文案，不得伪造/截断出误导性内容。
+- [ ] AC3（真实生产载体验证，非 fixture）：实现落地之后，一次真实 worker-driver suite red 触发的 needs-human 写入，任务体 `## Needs-Human` 记录的「失败步/判词」行包含真实断言文本——贴出该行原文。（待外部）
+- [ ] AC4：`--for-task` scoped 门 + 全量 suite 绿；`formatExitedNotLandedReason`/`failSuite` 既有单测不回归。（待外部）
 
 ## Definition of Done
 

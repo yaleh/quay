@@ -104,6 +104,7 @@ import {
   suiteLogFileName,
   pruneTaskSuiteLogs,
   extractFailureSummary,
+  extractFirstFailureLine,
   combinedOutput,
   mirrorMechanicalFanInSuiteState,
   mechSh,
@@ -1834,6 +1835,72 @@ test("AC4 — 真实多次-suite-red runId 回放（gap-dashboard-taskcard-multi
   const f2 = path.join(m.repo, ".quay", r2.suiteLog);
   assert.match(await readSuiteLogUntil(f1, "red-attempt-first") ?? "", /red-attempt-first/, "first attempt readable");
   assert.match(await readSuiteLogUntil(f2, "red-attempt-second") ?? "", /red-attempt-second/, "second attempt readable (its own content, ⛔ 被覆盖则读不到)");
+});
+
+// ── gap-needs-human-note-missing-real-error-line ────────────────────────────────────────────────
+// suite 红 needs-human 的「失败步/判词」恒为 step=suite: suite red（failSuite 只拼 sr.error，而 sr.error 对
+// red 恒 null）⇒ 人每次要开 500KB-1MB 的 suite log 手动 grep 才拿得到真实报错行。修法：suite 判红处复用
+// extractFailureSummary 同源信号正则（extractFirstFailureLine），把 suite 日志第一条真实断言/报错行塞进
+// mechanical_fan_in.reason。AC1 取假（记录含真实错误原文）；AC2 负控制（无信号 ⇒ 回退通用文案）。
+
+test("extractFirstFailureLine — 取第一条真实失败信号行；无信号/纯噪声 ⇒ 空串（⛔ 不回退 meaningful）", () => {
+  assert.equal(extractFirstFailureLine(""), "");
+  assert.equal(
+    extractFirstFailureLine("benign line\nAssertionError [ERR_ASSERTION]: probe must be alive\nmore noise"),
+    "AssertionError [ERR_ASSERTION]: probe must be alive",
+    "returns the first real assertion line",
+  );
+  // 无信号 ⇒ 空串（extractFailureSummary 会回退 meaningful，本函数必须仍为空——AC2「无匹配行 ⇒ 回退通用文案」）。
+  assert.equal(extractFirstFailureLine("benign line only\nanother benign"), "");
+  // 噪声行被跳过，取第一个真实信号。
+  assert.equal(
+    extractFirstFailureLine("(node:1) [MODULE_TYPELESS_PACKAGE_JSON] Warning: x\nnot ok 1 - my-test"),
+    "not ok 1 - my-test",
+    "MODULE_TYPELESS noise is skipped, first real signal is returned",
+  );
+});
+
+test("AC1 (能取假) — suite 红 needs-human 记录「失败步/判词」含真实 AssertionError 原文（⛔ 恒定 suite red ⇒ 假）", async (t) => {
+  const m = makeMechRepo("nh-real-error");
+  const runId = "wk-prod-nh-real-error";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn(mechOpts(m, runId, {
+    suiteCommand: ["bash", "-c", "echo 'AssertionError [ERR_ASSERTION]: probe must be alive'; exit 1"],
+  }));
+  assert.equal(r.outcome, "red");
+  assert.equal(r.step, "suite");
+  // 核心：reason 携带真实断言原文，⛔ 恒定的「suite red」。
+  assert.match(r.reason ?? "", /probe must be alive/, "suite red reason carries the real assertion text");
+  assert.doesNotMatch(r.reason ?? "", /^suite red$/, "reason is no longer the constant 'suite red'");
+  // 全链：机械 fan-in 的 reason → worker-outcome.jsonl → markNeedsHuman 注记「失败步/判词」行。
+  fs.mkdirSync(path.join(m.repo, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(m.repo, ".quay", "worker-outcome.jsonl"), JSON.stringify({
+    ts: "2026-09-03T00:00:00.000Z", task: "gap-mfh", final_state: "exited-not-landed",
+    run_id: runId, session_id: "sess-nh",
+    mechanical_fan_in: { outcome: "red", step: "suite", reason: r.reason, suiteLog: r.suiteLog, fanInLog: r.fanInLog },
+  }) + "\n", "utf8");
+  const nh = markNeedsHuman(m.repo, "gap-mfh", "worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）");
+  assert.equal(nh.ok, true);
+  const body = fs.readFileSync(path.join(m.repo, "tasks", "gap-mfh.md"), "utf8");
+  assert.match(body, /失败步\/判词：[^\n]*AssertionError[^\n]*probe must be alive/, "needs-human 注记「失败步/判词」行含真实断言原文");
+  assert.doesNotMatch(body, /失败步\/判词：[^\n]*suite red/, "注记不再是恒定的 suite red");
+});
+
+test("AC2 (负控制) — suite 输出无可提取信号 ⇒ reason 回退通用文案「suite red」（⛔ 伪造/截断出误导内容 ⇒ 假）", async (t) => {
+  // ① 零输出、仅非零退出码。
+  const m = makeMechRepo("nh-no-signal");
+  const runId = "wk-prod-nh-no-signal";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r1 = await runMechanicalFanIn(mechOpts(m, runId, { suiteCommand: ["bash", "-c", "exit 1"] }));
+  assert.equal(r1.outcome, "red");
+  assert.equal(r1.reason, "suite red", "zero output ⇒ fallback to generic 'suite red'");
+
+  // ② 有输出但无信号行（benign 非断言行）——⛔ extractFailureSummary 会回退 meaningful，本路径必须仍回退通用文案。
+  const m2 = makeMechRepo("nh-benign");
+  t.after(() => fs.rmSync(m2.base, { recursive: true, force: true }));
+  const r2 = await runMechanicalFanIn(mechOpts(m2, runId, { suiteCommand: ["bash", "-c", "echo 'refresh-worktree-quay: copied 499 file(s)'; exit 1"] }));
+  assert.equal(r2.outcome, "red");
+  assert.equal(r2.reason, "suite red", "benign non-signal output ⇒ fallback (⛔ not the benign line)");
 });
 
 test("AC3 — landed 后清理该任务名下全部历史 attempt 日志；兄弟任务 `<task>-<suffix>` 日志保留（⛔ 只增不减/误删 ⇒ 假）", async (t) => {
