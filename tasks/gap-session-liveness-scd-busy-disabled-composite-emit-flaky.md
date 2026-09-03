@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-scd-busy-disabled-composite-emit-flaky
 title: 修 scd-busy 鲁棒性：disabled composite emit 时序断言在 serial+降并发下仍 flaky，挡退役 tmux 任务
-status: todo
+status: ready
 labels:
   - gap
   - defect
