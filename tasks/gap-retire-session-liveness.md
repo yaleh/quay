@@ -1,7 +1,7 @@
 ---
 id: gap-retire-session-liveness
 title: 退役 session-liveness（含 mount + 22 个测试 + monitor-mount-check + 引用清理），随 tmux 退役
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -200,4 +200,43 @@ CONFLICT (content): Merge conflict in tasks/gap-retire-session-liveness.md
 Automatic merge failed; fix conflicts and then commit the result.
 - run_id：wk-prod-1788285192
 - session_id：dff30fd4-bc1b-4ce7-a507-cb6fd599cd98
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-03T11:36:29.287Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=scoped-gate: FAIL (referenced-not-landed): plugin/scripts/session-liveness-mount — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    actual: 2,
+    expected: 0,
+✖ explicit --tmux-session takes priority over detection (the fallback the human controls) (8181.979173ms)
+  AssertionError [ERR_ASSERTION]: init must exit 0:
+    FAIL (referenced-not-landed): plugin/scripts/hermetic-tmux-mount-check.sh — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/hermetic-tmux.sh — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/monitor-mount-check — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/session-liveness — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/session-liveness-mount — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    actual: 2,
+    expected: 0,
+✖ AC2 — the three exec-core docs are in the derived laydown set; a --loop install lays them to orchestration/ (23712.467886ms)
+    FAIL (referenced-not-landed): plugin/scripts/hermetic-tmux-mount-check.sh — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/hermetic-tmux.sh — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/monitor-mount-check — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/session-liveness — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/session-liveness-mount — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+✖ AC2-launch — --loop lays down .claude/launch.settings.json + .quay/profiles.yml; the laid-down quay-launch.sh materializes --settings + role names (21180.243017ms)
+    FAIL (referenced-not-landed): plugin/scripts/hermetic-tmux-mount-check.sh — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/hermetic-tmux.sh — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/monitor-mount-check — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/session-liveness — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/session-liveness-mount — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+✖ AC3 — manager-tick-core.md is OPT-IN: absent in a default --loop, present with --manager (20769.393704ms)
+    FAIL (referenced-not-landed): plugin/scripts/hermetic-tmux-mount-check.sh — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/hermetic-tmux.sh — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/monitor-mount-check — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/session-liveness — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md
+    FAIL (referenced-not-landed): plugin/scripts/session-liveness-mount — referenced by a shipped skill/tick doc but 
+- run_id：wk-prod-1788285192
+- session_id：07da2d54-9229-40b3-9909-8c4cd2e5342c
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
