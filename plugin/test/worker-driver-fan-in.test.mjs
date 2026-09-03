@@ -112,6 +112,10 @@ import {
   readFanInLockHold,
   readPreviousGreenSuiteCommit,
   acShortCircuitVerdict,
+  failingTestFilesFromSuiteLog,
+  assertionSignaturesFromSuiteLog,
+  judgeRetryExemption,
+  RETRY_EXEMPTION_WINDOW_MS_DEFAULT,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
@@ -761,6 +765,123 @@ test("AC3 (gap-worker-driver-retry-cap-not-wired) — promotion 不回归：同�
   assert.equal(advanceRetryCap, promoAdvanceRetryCap, "AC3: promotion re-exports the SAME advanceRetryCap (⛔ 非平行副本)");
   assert.equal(markNeedsHuman, promoMarkNeedsHuman, "AC3: promotion re-exports the SAME markNeedsHuman (⛔ 非平行副本)");
   assert.equal(MAX_FIX_RETRIES_DEFAULT, RETRY_CAP_DEFAULT, "AC3: promotion --max-fix-retries 缺省 = 共享 RETRY_CAP_DEFAULT（单一真相源）");
+});
+
+// ── gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky：重试上限豁免判定 ────────────────────
+// 根因：RETRY_CAP_DEFAULT=3 的 markNeedsHuman 机械翻转不看 suite red 命中失败测试文件是否落在任务
+// `## Touches` 范围——任务自身缺陷与无关既有 flaky 消耗同一份重试预算。本段测 judgeRetryExemption 的
+// 三态纯判定（unrelated-flaky-exempt / own-defect-counted / insufficient-data-fallback）。
+
+const EXEMPT_TEST = "plugin/test/obs.test.mjs";
+
+// 写一个含 ## Touches 的任务体（⛔ 不 git 提交——taskDeltaFiles 在非 git 根返回 null，delta=Touches）。
+function writeExemptionTask(root, taskId, touches) {
+  const bullets = touches.map((t) => `- ${t}`).join("\n");
+  fs.writeFileSync(path.join(root, "tasks", `${taskId}.md`),
+    `---\nid: ${taskId}\nstatus: ready\n---\n\n## Proposal\n\nprose\n\n## Touches\n\n${bullets}\n`, "utf8");
+}
+
+// 写一个失败测试文件（无相对 import ⇒ directImportRels=[] ⇒ 不在 delta 即 unrelated）。
+function writeFailingTest(root, rel) {
+  fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+  fs.writeFileSync(path.join(root, rel), 'import { test } from "node:test";\n', "utf8");
+}
+
+// 写一条 suite 日志（相对路径 __PERFILE__ passed=false + 一条 AssertionError 断言签名）。
+function writeSuiteRedLog(root, basename, failingRel, assertion) {
+  const p = path.join(root, ".quay", basename);
+  fs.writeFileSync(p, `__PERFILE__ duration_ms=10 ${failingRel} passed=false end_ms=1\n  AssertionError [ERR_ASSERTION]: ${assertion}\n`, "utf8");
+  return p;
+}
+
+// 追加一条【其它】任务的 suite-red outcome（worker-outcome.jsonl，供跨任务签名复发扫描）。
+function appendOtherSuiteRed(root, taskId, ts, suiteLogBasename) {
+  fs.appendFileSync(path.join(root, ".quay", "worker-outcome.jsonl"),
+    JSON.stringify({ ts, task: taskId, final_state: "exited-not-landed", run_id: "r", session_id: "s", mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: suiteLogBasename } }) + "\n", "utf8");
+}
+
+test("AC1 (能取假) — judgeRetryExemption：失败测试文件不在 Touches ∧ 断言签名跨 ≥2 不同任务复发 ⇒ unrelated-flaky-exempt（第 3 次不计入重试）", (t) => {
+  const root = makeRoot("exempt-ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]); // 与失败测试无关
+  writeFailingTest(root, EXEMPT_TEST);
+  writeSuiteRedLog(root, "fan-in-suite-gap-a.log", EXEMPT_TEST, "probe must be alive");
+  const nowMs = Date.parse("2026-09-03T00:00:00.000Z");
+  // 两个其它任务在窗口内命中同一签名（≥2 不同任务 ⇒ 复发）。
+  writeSuiteRedLog(root, "fan-in-suite-gap-b.log", EXEMPT_TEST, "probe must be alive");
+  writeSuiteRedLog(root, "fan-in-suite-gap-c.log", EXEMPT_TEST, "probe must be alive");
+  appendOtherSuiteRed(root, "gap-b", new Date(nowMs - 3600_000).toISOString(), "fan-in-suite-gap-b.log");
+  appendOtherSuiteRed(root, "gap-c", new Date(nowMs - 7200_000).toISOString(), "fan-in-suite-gap-c.log");
+
+  const j = judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs });
+  assert.equal(j.verdict, "unrelated-flaky-exempt", "unrelated failing test + recurring signature ⇒ exempt");
+  assert.deepEqual(j.failingTestFiles, [EXEMPT_TEST], "failing test file extracted");
+  assert.ok(j.recurredTasks.includes("gap-b") && j.recurredTasks.includes("gap-c"), "other distinct tasks that recurred the signature are named");
+});
+
+test("AC1 负控制 — 签名只在本任务出现（未达 ≥2 不同任务阈值）⇒ own-defect-counted（照常机械翻转）", (t) => {
+  const root = makeRoot("exempt-ac1-neg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeFailingTest(root, EXEMPT_TEST);
+  writeSuiteRedLog(root, "fan-in-suite-gap-a.log", EXEMPT_TEST, "probe must be alive");
+  const nowMs = Date.parse("2026-09-03T00:00:00.000Z");
+  // 无其它任务命中该签名（窗口内只有 gap-a 自己 ⇒ 复发计数 = 1 任务 < 2）。
+  const j = judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs });
+  assert.equal(j.verdict, "own-defect-counted", "signature appeared only once ⇒ NOT exempt (count normally)");
+  assert.deepEqual(j.recurredTasks, [], "no other task recurred the signature");
+});
+
+test("AC2 (防滥用负控制) — 失败测试文件落在任务自身 Touches ⇒ own-defect-counted（即便签名此前已复发）", (t) => {
+  const root = makeRoot("exempt-ac2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeExemptionTask(root, "gap-a", [EXEMPT_TEST]); // 失败测试文件自身在 Touches 内
+  writeFailingTest(root, EXEMPT_TEST);
+  writeSuiteRedLog(root, "fan-in-suite-gap-a.log", EXEMPT_TEST, "probe must be alive");
+  const nowMs = Date.parse("2026-09-03T00:00:00.000Z");
+  writeSuiteRedLog(root, "fan-in-suite-gap-b.log", EXEMPT_TEST, "probe must be alive");
+  appendOtherSuiteRed(root, "gap-b", new Date(nowMs - 3600_000).toISOString(), "fan-in-suite-gap-b.log");
+
+  const j = judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs });
+  assert.equal(j.verdict, "own-defect-counted", "failing test in own Touches ⇒ count regardless of signature recurrence");
+  assert.match(j.reason, /in this task's Touches\/diff/, "reason names the own-defect attribution");
+});
+
+test("AC5 (三态可区分) — insufficient-data-fallback ≠ unrelated-flaky-exempt；round 记录三态载体（⛔ 只在 json 事件里 ⇒ 假）", (t) => {
+  const root = makeRoot("exempt-ac5");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // ③ insufficient-data-fallback：无 mechanical_fan_in。
+  const noMfi = judgeRetryExemption(root, "gap-a", { final_state: "exited-not-landed" });
+  assert.equal(noMfi.verdict, "insufficient-data-fallback", "no mechanical_fan_in ⇒ insufficient-data-fallback");
+  assert.notEqual(noMfi.verdict, "unrelated-flaky-exempt", "判不出 ≠ 判为无关");
+  // ③b：suite log 缺失 ⇒ insufficient-data-fallback。
+  const noSuiteLog = judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: null } });
+  assert.equal(noSuiteLog.verdict, "insufficient-data-fallback", "no suite log ⇒ insufficient-data-fallback");
+  assert.notEqual(noSuiteLog.verdict, "own-defect-counted", "判不出 ≠ 判为自身缺陷");
+
+  // round 记录携带三态 verdict（生产载体，⛔ 只在 json 事件里 ⇒ 假）。
+  const rec = computeWorkerRoundRecord({
+    round: 1, runId: "r", pid: 1, at: "t", action: "idle", inFlight: 0, pool: 0, stopReason: null, coldStartInflight: [],
+    retryExemptions: [{ task: "gap-a", verdict: "unrelated-flaky-exempt", reason: "r", failingTestFiles: [EXEMPT_TEST], recurredTasks: ["gap-b"] }],
+  });
+  assert.equal(rec.retry_exemptions[0].verdict, "unrelated-flaky-exempt", "round record carries the three-state verdict (production carrier)");
+  assert.deepEqual(rec.retry_exemptions[0].recurredTasks, ["gap-b"], "round record carries the recurred tasks");
+});
+
+test("failingTestFilesFromSuiteLog — 绝对路径 __PERFILE__ 行也提取 repo-relative 失败测试（⛔ 只匹配相对路径 ⇒ 恒空）", () => {
+  const abs = failingTestFilesFromSuiteLog("__PERFILE__ duration_ms=10 /home/yale/work/quay-worktrees/gap-x/plugin/test/obs.test.mjs passed=false end_ms=1\n");
+  assert.deepEqual(abs, [EXEMPT_TEST], "absolute-path __PERFILE__ line extracts the repo-relative path");
+  const rel = failingTestFilesFromSuiteLog("__PERFILE__ duration_ms=10 plugin/test/obs.test.mjs passed=false end_ms=1\n");
+  assert.deepEqual(rel, [EXEMPT_TEST], "relative __PERFILE__ line still extracts (no regression)");
+});
+
+test("assertionSignaturesFromSuiteLog — 提取并归一化 AssertionError 签名（[ERR_ASSERTION] 变体 + 空白折叠去重）", () => {
+  const sigs = assertionSignaturesFromSuiteLog("  AssertionError [ERR_ASSERTION]: probe must be alive\n  AssertionError: probe   must   be   alive\n");
+  assert.deepEqual(sigs, ["probe must be alive"], "normalized assertion signature extracted + deduped");
+});
+
+test("RETRY_EXEMPTION_WINDOW_MS_DEFAULT — 48h 窗口缺省（与提案 48h 复盘同窗）", () => {
+  assert.equal(RETRY_EXEMPTION_WINDOW_MS_DEFAULT, 48 * 3600 * 1000, "48h default window");
 });
 
 // ── gap-worker-driver-selector-api-error-no-backoff：selector API 错误/快速死亡无退避 ───────────────

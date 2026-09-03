@@ -513,6 +513,12 @@ SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-$(serial_lowconc_host_default)}"
 LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-$(lowconc_concurrency_default)}"
 
 # ── phase-overlap knob (gap-phase-overlap-two-phase-parallel-exploration, AC1 + AC101 default-ON) ──
+# LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0) ONLY: the unified scheduler (default) always runs
+# serial∥lowconc∥main CONCURRENTLY via the waterline and does NOT read PHASE_OVERLAP for scheduling —
+# the overlap-vs-sequential decision below is RETIRED, kept only for the legacy phased path's
+# ONE-KEY ROLLBACK. (Note: the P=2/1 divisor this knob feeds into $SERIAL_CONCURRENCY via
+# runner-concurrency.ts --phase-concurrency is still READ on both paths; under the unified scheduler
+# serial+lowconc always run in parallel, so P=2 is the effective value.)
 # QUAY_PHASE_OVERLAP=1 runs the serial and lowconc phases in PARALLEL on the FULL-SUITE path (each at
 # its OWN $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY) instead of sequentially — the two-phase-overlap
 # exploration (serial+lowconc 并行, 预期 −154s/轮: the 331s sequential window 177+154 becomes
@@ -527,6 +533,9 @@ LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-$(lowconc_concurrency_default)}
 PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"
 
 # ── main-tail-overlap knob (gap-suite-main-overlaps-load-sensitive-tail-experiment) ────────────────
+# LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0) ONLY: the A watcher below only launches on the legacy
+# phased path (the unified scheduler absorbs the stall-polling via its structural waterline). RETIRED,
+# kept only for the ONE-KEY ROLLBACK fallback.
 # QUERY_MAIN_TAIL_OVERLAP=<lanes> (default 0 = current behavior). When >0, the MAIN phase starts
 # EARLY — before the serial+lowconc window fully closes — at concurrency <lanes>, overlapping with the
 # window's latency-bound tail (the ~130s near-idle tail the director's load curve measured: 23/48
@@ -558,7 +567,7 @@ MAIN_TAIL_WAIT_MAX_S="${QUAY_MAIN_TAIL_WAIT_MAX_S:-300}"
 # never outlive the window). Returns 0 = fired (launch main early), 1 = fall through (main runs
 # normally at window close). Reads the caller's $serial_pid / $lowconc_pid to detect window close —
 # the full path sets BOTH (serial+lowconc run in parallel); the bucket-subset path sets only
-# lowconc_pid (serial already finished sequentially before it). Hermetic test seams:
+# lowconc_pid (serial already finished sequentially before it — legacy phased path only). Hermetic test seams:
 # QUAY_MAIN_TAIL_STALL_FILE / QUAY_MAIN_TAIL_LOADAVG_FILE override the /proc paths (the resource-gate
 # seam family).
 main_tail_overlap_wait() {
@@ -1079,9 +1088,13 @@ run_selected() {
     bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --sweep "${repo_root}" || true
     bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
     set +e
-    # Phase order (gap-phase-order-serial-lowconc-before-main): serial and lowconc phases run
-    # BEFORE the main concurrency-N body so a failure in a serial/lowconc file is judged red at
-    # the phase boundary (minutes) instead of AFTER the entire main phase's cost has been paid —
+    # Phase order (gap-phase-order-serial-lowconc-before-main): LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0)
+    # only — under the unified scheduler serial/lowconc/main are scheduled CONCURRENTLY by the
+    # waterline, not as serially-sequenced phases. The "run BEFORE the main body" ordering below is
+    # the RETIRED phased-path rationale, kept only as the fallback.
+    # (Legacy-path rationale:) serial and lowconc phases run BEFORE the main concurrency-N body so a
+    # failure in a serial/lowconc file is judged red at the phase boundary (minutes) instead of AFTER
+    # the entire main phase's cost has been paid —
     # the 16 long-reds were all judged red exactly total−30s=RED_GRACE_MS because their failures
     # lived in the LAST phases (serial/lowconc) and paid the whole main phase first (2.37h pure
     # waste). Phases are independent and serially sequenced (no shared state between phase runs),
@@ -1093,9 +1106,13 @@ run_selected() {
     # Empty on the sequential / knob-0 path (main runs synchronously, unchanged).
     local main_early_pid="" main_early_code_file=""
     # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
+    # ⚠️ LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0) ONLY — under the unified scheduler (the default,
+    # gap-suite-dynamic-waterline-scheduler) serial∥lowconc∥main run CONCURRENTLY via the group-budget
+    # waterline; there is NO "serial runs ALONE before main" ordering there. The "BEFORE it, ALONE"
+    # description below is the RETIRED phased-path model, kept only as the ONE-KEY ROLLBACK fallback.
     # the A/B-class KNOWN-LOAD-SENSITIVE family (nested-suite-spawn + real-wall-clock-wait) PLUS
     # the REAL-INSTALL install/quay-init family is routed OUT of the concurrency-N main body into
-    # a `serial` group that runs BEFORE it, ALONE, at concurrency $SERIAL_CONCURRENCY (default 2 —
+    # a `serial` group that runs BEFORE it, ALONE (legacy phased path only), at concurrency $SERIAL_CONCURRENCY (default 2 —
     # raised from 1 by the AC2 controlled experiment, gap-load-sensitive-serial-phase-unbounded-
     # growth-measure-first) —
     # the mechanical isolation that keeps real-wall-clock-wait, nested-suite-spawn, and real-install
@@ -1115,6 +1132,8 @@ run_selected() {
     # AC3: round 95 skipped serial when main was red, so serial failures were invisible).
     local serial_files=() sf serial_code
     while IFS= read -r sf; do serial_files+=("$sf"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "serial")
+    # LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0): the serial_files/lowconc_files selection below feeds
+    # ONLY the legacy phased path — the unified scheduler re-classifies from the raw file list itself.
     # LOWCONC selection hoisted BEFORE the serial run so the overlap branch can launch both phases in
     # parallel. In the SEQUENTIAL branch the lowconc selection used to run right before the lowconc
     # phase; hoisting it here shifts that selection time into gap_ms_pre_to_serial (a diagnostic gap,
@@ -1177,6 +1196,13 @@ run_selected() {
       full_suite_lock_release
       exit "$code"
     fi
+    # ════════════════════════════════════════════════════════════════════════════════════════════
+    # LEGACY PHASED PATH (RETIRED — reached ONLY when QUAY_SUITE_SCHEDULER=0, the ONE-KEY ROLLBACK):
+    # everything below (PHASE_OVERLAP serial+lowconc overlap, MAIN_TAIL_OVERLAP A watcher, the
+    # sequential serial→lowconc→main baseline, and the "main runs LAST" phase order) is the RETIRED
+    # static phase-splitting model. The unified scheduler above replaces it with one concurrent
+    # waterline loop (serial∥lowconc∥main). Kept solely as the fallback safety net.
+    # ════════════════════════════════════════════════════════════════════════════════════════════
     # PHASE OVERLAP (gap-phase-overlap-two-phase-parallel-exploration AC1, default-ON since AC101):
     # when QUAY_PHASE_OVERLAP=1 (the default) AND both phases are non-empty, run serial + lowconc in
     # PARALLEL (each at its OWN concurrency, $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY — scheduling-
@@ -1389,6 +1415,9 @@ run_selected() {
     exec node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${filtered[@]}" "${files[@]}"
   fi
   # LOWCONC group run (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4):
+  # (Scoped single-group run, NOT the full-suite phased path — a `--group lowconc` invocation runs
+  # ONLY the lowconc files; under the unified scheduler the full suite runs serial∥lowconc∥main
+  # CONCURRENTLY, never "lowconc ALONE before main".)
   # `--group lowconc` runs the hermetic-but-load-sensitive phase ALONE at its own concurrency
   # $LOWCONC_CONCURRENCY (host-derived, = serial). An explicit user --test-concurrency flag still
   # wins (single concurrency source, AC2). The default adds no derived-concurrency literal site.
@@ -1682,6 +1711,9 @@ elif [ "${1:-}" = "--buckets" ]; then
   mark_nested
   set +e
   # ── bucket load-sensitive isolation (gap-scd-load-sensitive-bucket-isolation) ──
+  # LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0): the "three-phase order (serial→lowconc→main)" below is
+  # the RETIRED static phase-splitting model — the unified scheduler bucket path above replaces it
+  # with one concurrent waterline loop. Kept solely as the ONE-KEY ROLLBACK fallback.
   # The full-suite default path routes serial/lowconc files to their OWN phases (serial at
   # $SERIAL_CONCURRENCY, lowconc at $LOWCONC_CONCURRENCY) BEFORE the main concurrency-N body; the
   # bucket path previously handed the WHOLE selected list to suite-lpt-runner.mjs at
@@ -1728,6 +1760,9 @@ elif [ "${1:-}" = "--buckets" ]; then
     node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-fs-trace.ts" --update --limit "${QUAY_FS_TRACE_LIMIT:-8}" --root "${repo_root}" || true
     exit "${bucket_code}"
   fi
+  # LEGACY PHASED BUCKET PATH (RETIRED — reached ONLY when QUAY_SUITE_SCHEDULER=0): serial→lowconc→main
+  # static phases + the MAIN_TAIL_OVERLAP A watcher below are the RETIRED model; the unified scheduler
+  # bucket path above replaces it. Kept solely as the ONE-KEY ROLLBACK fallback.
   bucket_code=0
   if [ "${#bucket_serial_files[@]}" -gt 0 ]; then
     echo "selected ${#bucket_serial_files[@]} files (groups=serial)"
@@ -1736,7 +1771,7 @@ elif [ "${1:-}" = "--buckets" ]; then
     [ "$_bscode" -eq 0 ] || bucket_code="$_bscode"
   fi
   # main-tail-overlap coordination (gap-suite-main-tail-overlap-bucket-subset): the bucket path has NO
-  # serial+lowconc overlap window — serial runs sequentially BEFORE lowconc — so the trigger simplifies
+  # serial+lowconc overlap window — serial runs sequentially BEFORE lowconc (legacy phased path only) — so the trigger simplifies
   # to the LOWCONC tail (the latency-bound segment the director's round-774 curve measured: 106s lowconc
   # at ~zero CPU). bucket_lowconc runs in the BACKGROUND so its pid can be watched; when QUERY_MAIN_TAIL_
   # OVERLAP>0, a watcher polls cpu_stall (main_tail_overlap_wait) and fires MAIN early at the knob's

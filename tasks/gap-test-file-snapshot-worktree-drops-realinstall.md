@@ -10,6 +10,8 @@ parent: null
 children: []
 extra:
   schema: execution
+  depends_on:
+    - gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky
 ---
 **type:** execution
 
@@ -81,4 +83,15 @@ worktree 与主检出 `--list-files` 一致；AC1/AC2 勾；test-file-snapshot �
 - run_id：wk-prod-1788285192
 - session_id：bbd5aa77-3fcd-4591-97ba-aa15cb4175f6
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-test-file-snapshot-worktree-drops-realinstall~wk-prod-1788285192~1788390916676-40f67e.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-test-file-snapshot-worktree-drops-realinstall-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-03T01:42:50.585Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1788285192
+- session_id：00980cfb-f250-425c-ba00-13e7e42db2da
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-test-file-snapshot-worktree-drops-realinstall~wk-prod-1788285192~1788399213130-ff6a6a.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-test-file-snapshot-worktree-drops-realinstall-wk-prod-1788285192.log

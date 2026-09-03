@@ -10,6 +10,8 @@ parent: null
 children: []
 extra:
   schema: execution
+  depends_on:
+    - gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky
 ---
 **type:** execution
 
@@ -72,4 +74,15 @@ extra:
 - run_id：wk-prod-1788285192
 - session_id：1f5362a3-96dd-4457-934c-140d527f9eba
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-mechanical-fan-in-writes-no-complete-gateevent~wk-prod-1788285192~1788390078441-bf466e.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-mechanical-fan-in-writes-no-complete-gateevent-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-03T02:02:45.840Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1788285192
+- session_id：17a6cba7-680b-4058-a4f9-38da5a508940
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-mechanical-fan-in-writes-no-complete-gateevent~wk-prod-1788285192~1788400494179-d8c07e.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-mechanical-fan-in-writes-no-complete-gateevent-wk-prod-1788285192.log

@@ -102,7 +102,13 @@ export function defaultTestConcurrency(): number {
  * defaultPhaseConcurrencyDirect — the DIRECT-path (scripts/test.sh) SERIAL PHASE concurrency:
  * max(1, floor(nproc / (S × P))). The EXACT semantics of the bash serial_lowconc_host_default
  * (gap-ac74-serial-lowconc-literal-direct-path + gap-lane-formula-ignores-phase-overlap-concurrency):
- * P = the concurrent-phase count (2 when QUAY_PHASE_OVERLAP ≠ "0" — the default — else 1). Identical in
+ * P = the concurrent-phase count (2 when QUAY_PHASE_OVERLAP ≠ "0" — the default — else 1). LEGACY
+ * (gap-suite-scheduler-legacy-phase-splitting-cleanup): QUAY_PHASE_OVERLAP's overlap-vs-sequential
+ * scheduling role is RETIRED — the unified scheduler always runs serial∥lowconc∥main CONCURRENTLY and
+ * never reads this knob for scheduling; only the P=2/1 DIVISOR survives (it feeds $SERIAL_CONCURRENCY on
+ * BOTH paths). Under the unified scheduler serial+lowconc always run in parallel ⇒ P=2 is the effective
+ * value; QUAY_PHASE_OVERLAP=0 (P=1) corresponds to the QUAY_SUITE_SCHEDULER=0 legacy sequential fallback.
+ * Identical in
  * value to full-suite-runner.ts's defaultPhaseConcurrency (the runner twin); kept separate so the direct
  * path's forwarder has a self-contained import (runner-concurrency.ts cannot import full-suite-runner.ts
  * — that direction would be a cycle). resource-gate.test.mjs 判据4 cross-checks the two stay equal.
