@@ -2,7 +2,7 @@
 id: gap-suite-scheduler-legacy-phase-splitting-cleanup
 title: 统一清理测试调度 legacy 分相——PHASE_OVERLAP + A watcher + run_selected fallback +
   「serial ALONE」误导注释
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -68,4 +68,15 @@ legacy 分相面（代码 + 注释 + 测试）统一清理或统一标 legacy；
 - run_id：wk-prod-1788285192
 - session_id：00debe21-0353-4bb1-8181-fd43e4c483e0
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-suite-scheduler-legacy-phase-splitting-cleanup~wk-prod-1788285192~1788369050329-c35f2f.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-suite-scheduler-legacy-phase-splitting-cleanup-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-03T00:21:08.550Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1788285192
+- session_id：b198c7df-6a5b-4856-ae61-3f243828bdd5
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-suite-scheduler-legacy-phase-splitting-cleanup~wk-prod-1788285192~1788394404735-bf8dba.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-suite-scheduler-legacy-phase-splitting-cleanup-wk-prod-1788285192.log
