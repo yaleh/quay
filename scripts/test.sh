@@ -567,7 +567,7 @@ MAIN_TAIL_WAIT_MAX_S="${QUAY_MAIN_TAIL_WAIT_MAX_S:-300}"
 # never outlive the window). Returns 0 = fired (launch main early), 1 = fall through (main runs
 # normally at window close). Reads the caller's $serial_pid / $lowconc_pid to detect window close —
 # the full path sets BOTH (serial+lowconc run in parallel); the bucket-subset path sets only
-# lowconc_pid (serial already finished sequentially before it). Hermetic test seams:
+# lowconc_pid (serial already finished sequentially before it — legacy phased path only). Hermetic test seams:
 # QUAY_MAIN_TAIL_STALL_FILE / QUAY_MAIN_TAIL_LOADAVG_FILE override the /proc paths (the resource-gate
 # seam family).
 main_tail_overlap_wait() {
@@ -1765,7 +1765,7 @@ elif [ "${1:-}" = "--buckets" ]; then
     [ "$_bscode" -eq 0 ] || bucket_code="$_bscode"
   fi
   # main-tail-overlap coordination (gap-suite-main-tail-overlap-bucket-subset): the bucket path has NO
-  # serial+lowconc overlap window — serial runs sequentially BEFORE lowconc — so the trigger simplifies
+  # serial+lowconc overlap window — serial runs sequentially BEFORE lowconc (legacy phased path only) — so the trigger simplifies
   # to the LOWCONC tail (the latency-bound segment the director's round-774 curve measured: 106s lowconc
   # at ~zero CPU). bucket_lowconc runs in the BACKGROUND so its pid can be watched; when QUERY_MAIN_TAIL_
   # OVERLAP>0, a watcher polls cpu_stall (main_tail_overlap_wait) and fires MAIN early at the knob's
