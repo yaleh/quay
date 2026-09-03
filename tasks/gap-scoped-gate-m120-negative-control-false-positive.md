@@ -1,7 +1,7 @@
 ---
 id: gap-scoped-gate-m120-negative-control-false-positive
 title: 修缺：scoped-gate 把 build-dist.test.mjs 的 m120 负控制 stderr 误判为真实失败
-status: ready
+status: needs-human
 role: primitive
 labels:
   - scoped-gate
@@ -106,3 +106,14 @@ scoped-gate（`scripts/test.sh --for-task <task> --allow-thin`，`worker-driver.
   对 `Could not resolve`/`[ERROR]` 的匹配,本缺陷是其镜像反例）
 - **Related**：gap-step-trace-reason-captures-gate-stdout（同一函数的另一次调整历史）
 
+
+## Needs-Human
+
+**执行 2026-09-03T07:50:44.249Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: == split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) ==
+- run_id：wk-prod-1788285192
+- session_id：78fee4bd-96e9-4cbe-93d7-9addb564315f
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-scoped-gate-m120-negative-control-false-positive~wk-prod-1788285192~1788421366597-8d597f.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-scoped-gate-m120-negative-control-false-positive-wk-prod-1788285192.log
