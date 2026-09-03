@@ -65,19 +65,29 @@ grep -r "concurrency-cap-state.json" plugin/scripts/*.ts | grep -v test | grep -
 
 ---
 
+## Acceptance Criteria
+
+- [x] 溯源成立：没有任何 `-check.ts` 在 `--help` 时写 `concurrency-cap-state.json`——唯一写入方是 `cap-from-gate.ts` `computeEffectiveCap`→`saveState`（`STATE_FILE_NAME`），经 `accounting-emit.ts` `autoOccupancy`→`cap-from-gate.sh` 的层-tick 链调用，属 resident-process 运行时载体，不是 checker `--help` 副作用
+- [x] `help-contract-incompatible-behaviors.test.mjs` 的快照排除集新增 `CAP_OBSERVATION_FILES`（含 `concurrency-cap-state.json`），AC1 mtime 负控制不再把并发层-tick 写入误报为 `--help` 副作用
+- [x] 负控制未退化：`mtime-race AC3` 单测把 `concurrency-cap-state.json` 加入 resident fixture（写入+追加期望被排除），真实副作用 `measure-history.jsonl` 仍被抓
+- [x] 全局扫描无遗漏：`cap-from-gate`/`accounting-emit` 链唯一写出的硬编码状态文件是 `concurrency-cap-state.json`；同族其余 resident 载体（driver round/outcome/control/logs/pid、full-suite-state/log、verification-round、suite-load）已由 gap-suite-help-contract-mtime-race 排除
+- [x] help-contract test 全绿（4/4）：AC1 无 mtime 变化、AC2/AC3 不退化、负控制仍抓真实副作用
+
+---
+
 ## Definition of Done
 
-- [ ] concurrency-cap-state.json 的 --help 副作用消除
-- [ ] help-contract test 无新的 mtime 变化报告
-- [ ] gap-unified-frontmatter-parser fan-in 可以继续推进
-- [ ] 全局扫描确认无其它同族硬编码文件被遗漏（补充 AC）
+- [x] concurrency-cap-state.json 的 --help 副作用消除
+- [x] help-contract test 无新的 mtime 变化报告
+- [x] gap-unified-frontmatter-parser fan-in 可以继续推进
+- [x] 全局扫描确认无其它同族硬编码文件被遗漏（补充 AC）
 
 ---
 
 ## Touches
 
-- `plugin/scripts/concurrency-cap-state.ts` 或 caller（待定位）
-- `plugin/test/help-contract-incompatible-behaviors.test.mjs`（可能需要文档更新）
+- `plugin/test/help-contract-incompatible-behaviors.test.mjs`
+- `tasks/gap-concurrency-cap-state-help-contract-mtime-race.md` (self)
 
 ---
 
