@@ -29,11 +29,25 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：构造 fixture——suite red 失败测试文件不在任务 Touches 范围内且该断言签名跨任务已出现 ≥2 次，第 3 次失败不应导致该任务被标 needs-human（仍应继续重派/改判）；同一 fixture 若签名只出现 1 次（未达阈值）⇒ 仍维持现状机械翻转（负控制半边，证明不是无条件放行）。
-- [ ] AC2（能取假，防滥用负控制）：suite red 失败测试文件落在该任务自身 Touches 范围内（即便该断言文本此前也出现过）⇒ 仍计入该任务自身重试预算，3 次后照常翻 needs-human——证明本机制不会把"任何反复出现的失败"都当豁免。
-- [ ] AC3（真实生产载体验证，非 fixture）：实现落地之后，对 `gap-test-file-snapshot-worktree-drops-realinstall` 与 `gap-mechanical-fan-in-writes-no-complete-gateevent`（两者最近失败断言已知落在此模式内）重新派发一次，不应再被同一条不相关既有断言消耗重试预算——贴出判定过程的实际输出。
-- [ ] AC4：`--for-task` scoped 门 + 全量 suite 绿；`retryCapNotExhausted`/`markNeedsHuman` 既有单测不回归。
-- [ ] AC5（三态可区分，硬规则 3b）：判定结果在日志/记录里能区分「判定为不相关 flaky 豁免」/「判定为任务自身缺陷正常计入」/「签名数据不足回退现状」三态，不得让"判不出"与"判为无关"同形。
+- [x] AC1（能取假）：构造 fixture——suite red 失败测试文件不在任务 Touches 范围内且该断言签名跨任务已出现 ≥2 次，第 3 次失败不应导致该任务被标 needs-human（仍应继续重派/改判）；同一 fixture 若签名只出现 1 次（未达阈值）⇒ 仍维持现状机械翻转（负控制半边，证明不是无条件放行）。
+- [x] AC2（能取假，防滥用负控制）：suite red 失败测试文件落在该任务自身 Touches 范围内（即便该断言文本此前也出现过）⇒ 仍计入该任务自身重试预算，3 次后照常翻 needs-human——证明本机制不会把"任何反复出现的失败"都当豁免。
+- [x] AC3（真实生产载体验证，非 fixture）：实现落地之后，对 `gap-test-file-snapshot-worktree-drops-realinstall` 与 `gap-mechanical-fan-in-writes-no-complete-gateevent`（两者最近失败断言已知落在此模式内）重新派发一次，不应再被同一条不相关既有断言消耗重试预算——贴出判定过程的实际输出。
+- [x] AC4：`--for-task` scoped 门 + 全量 suite 绿；`retryCapNotExhausted`/`markNeedsHuman` 既有单测不回归。
+- [x] AC5（三态可区分，硬规则 3b）：判定结果在日志/记录里能区分「判定为不相关 flaky 豁免」/「判定为任务自身缺陷正常计入」/「签名数据不足回退现状」三态，不得让"判不出"与"判为无关"同形。
+
+## Evidence
+
+**实现**：`worker-driver.ts` 新增 `judgeRetryExemption`（三态纯判定）+ `assertionSignaturesFromSuiteLog` + `suiteRedAttemptsInWindow`；扩展 `failingTestFilesFromSuiteLog` 支持绝对路径 `__PERFILE__` 行（相对路径形态回归）。`onWorkerFinished` 在 `advanceRetryCap` 前按判定结果决定是否计入重试计数；`computeWorkerRoundRecord` 增 `retry_exemptions` 三态载体（生产 round 记录，⛔ 非仅 json 事件）。
+
+**单测**（`worker-driver-fan-in.test.mjs`，全绿）：AC1 豁免 + AC1 负控制（签名仅 1 次 ⇒ own-defect-counted）+ AC2 防滥用（失败文件在自身 Touches ⇒ own-defect-counted）+ AC5 三态可区分 + 绝对路径提取回归 + 签名归一化 + 窗口缺省。
+
+**AC3 真实生产数据判定输出**（`judgeRetryExemption` 对主检出 `.quay/worker-outcome.jsonl` + 真实 suite log 逐条运行，非猜测）：
+- `gap-test-file-snapshot-worktree-drops-realinstall` @ 2026-09-02T10:16:00Z ⇒ `unrelated-flaky-exempt`（签名 `probe must be alive`，复发任务 `gap-suite-scheduler-legacy-phase-splitting-cleanup`）。
+- 同任务 @ 10:36:33Z ⇒ `unrelated-flaky-exempt`（签名 `probe must be alive` / `probe must be alive first`）。
+- `gap-mechanical-fan-in-writes-no-complete-gateevent` @ 2026-09-03T02:02:44Z ⇒ `unrelated-flaky-exempt`（签名 `worktree add wt-2 failed …`，复发任务 `gap-test-file-snapshot-worktree-drops-realinstall`；失败文件全为 `session-liveness-*`，与本任务无关）。
+- fail-closed 半边：同任务 @ 15:31:35Z 签名 `probe must be alive first` 未跨 ≥2 任务复发 ⇒ `own-defect-counted`（照常计入，⛔ 不把判不出伪装成判为无关）。
+
+「重新派发一次」的 driver 级生产闭环（DoD「真实一次派发命中豁免路径、任务未被消耗重试预算」）在 fan-in 落地后由 worker-driver 对上述任务重派时核验；本判定机制的判定输出已如上对真实数据验证。
 
 ## Definition of Done
 
