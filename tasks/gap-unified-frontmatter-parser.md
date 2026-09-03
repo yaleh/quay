@@ -1,7 +1,7 @@
 ---
 id: gap-unified-frontmatter-parser
 title: "Unify task frontmatter parsing: single schema source"
-status: ready
+status: done
 labels: []
 parent: null
 children: []
