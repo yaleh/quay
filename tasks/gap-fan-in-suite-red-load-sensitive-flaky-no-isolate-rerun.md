@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-suite-red-load-sensitive-flaky-no-isolate-rerun
 title: 机械 fan-in suite red 未隔离重跑 KNOWN-LOAD-SENSITIVE flaky，直接误杀任务
-status: ready
+status: superseded
 labels:
   - gap
   - defect
@@ -9,6 +9,11 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded: true
+  superseded_at: 2026-09-03
+  superseded_reason: 人 2026-09-03 裁定取消：本任务要求 worker-driver（产品层）了解过多项目信息（如
+    KNOWN-LOAD-SENSITIVE 实验层概念），不妥——负载敏感分诊/隔离重跑属方法论层职责，不该耦合进 provider-agnostic 的
+    worker-driver 产品代码
 ---
 ## Proposal
 
