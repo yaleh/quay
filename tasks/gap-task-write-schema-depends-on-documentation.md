@@ -6,7 +6,9 @@ labels: []
 parent: null
 children: []
 extra:
-  schema: v1
+  depends_on:
+    - gap-scoped-gate-m120-negative-control-false-positive
+  schema: execution
 ---
 ## Proposal
 

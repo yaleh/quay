@@ -9,6 +9,10 @@ labels:
   - fan-in-blocker
   - cross-suite-violation
 created: 2026-09-03T03:10Z
+extra:
+  depends_on:
+    - gap-retire-session-liveness
+  schema: execution
 ---
 
 ## Finding
