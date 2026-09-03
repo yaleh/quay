@@ -2,7 +2,7 @@
 id: gap-session-liveness-worktree-fixture-repo-vanishes
 title: session-liveness worktree fixture repo 目录在测试运行中被清理——makeRepoWithDevelop 后
   repo 消失，git worktree add 报 No such file or directory
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -30,9 +30,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：定位并修「repo 目录在测试运行中被清理」的确切清理者——grep 命中具体清理函数 + 其误删活跃 repo 的路径，静态读代码可见修复（非事后描述）
-- [ ] AC2（能取假，生产载体）：并发 suite 下 `session-liveness-scd-*` 系列不再报 `worktree add ... No such file or directory`；落地后轮次该 assertion 出现次数 = 0（只计落地后时间窗，硬规则 4 推论三）
-- [ ] AC3（能取假，无回归）：`session-liveness-sweep.test.mjs` 的 OWNER-LIVENESS 负控制仍绿（活跃 owner 目录仍不被清、owner-dead 残留仍被清）
+- [x] AC1（能取假，机制级）：定位并修「repo 目录在测试运行中被清理」的确切清理者——grep 命中具体清理函数 + 其误删活跃 repo 的路径，静态读代码可见修复（非事后描述）
+- [ ] AC2（能取假，生产载体）：并发 suite 下 `session-liveness-scd-*` 系列不再报 `worktree add ... No such file or directory`；落地后轮次该 assertion 出现次数 = 0（只计落地后时间窗，硬规则 4 推论三）（待外部）
+- [x] AC3（能取假，无回归）：`session-liveness-sweep.test.mjs` 的 OWNER-LIVENESS 负控制仍绿（活跃 owner 目录仍不被清、owner-dead 残留仍被清）
 
 ## Definition of Done
 
