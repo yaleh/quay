@@ -246,6 +246,77 @@ job 启动**，完整生命周期命令齐全，不需要任何自建机制：
    范围：不需要为 outer 设计"崩溃检测→自动重启"这类机制,`claude agents --json` 能否看到这个会话
    即是它是否还在跑的唯一判据,不在跑就是人还没手工重新启动。
 
+### Layer 2a：`session-liveness.sh` 的完整功能盘点 + 退役论证（回答"在 outer/inner 退役的大背景下
+它是否确实不再需要"——不是重复裁定，是逐项核实）
+
+**规模**：1858 行（`plugin/scripts/session-liveness.sh`），是本仓库里单一脚本承载最多边缘情况
+处理的观测机制之一。头部注释自述"看【任意一个 Claude Code 会话】（外层或内层）活不活、闲不闲、
+心跳逾期没有"——2026-08-03 从 `outer-liveness.sh` 泛化改名而来，设计上服务任意会话，不专属 outer
+或 inner。
+
+**它产生的事件（每个事件的信号源 + 是否依赖 tmux）**：
+
+| 事件 | 信号源 | 依赖 tmux？ |
+|---|---|---|
+| `SESSION-GONE`/`SESSION-BACK` | tmux pane 里 claude 进程的存在性 | **是** |
+| `SESSION-IDLE`/`SESSION-RESUMED` | `classifyPaneState`（pane 底部区域形状分类，五态：waiting-input/permission-prompt/busy/error-banner/unknown） | **是** |
+| `SESSION-MARKER-STALE` | 屏幕判空闲但 transcript 刚写过的交叉正控制 | **是**（混合信号，一半靠 tmux） |
+| `SESSION-IDLE-CANT-SEND` | transcript 结构字段 `isApiErrorMessage`（区分"没活干"与"API 被拒发不出请求"） | 否（读 transcript,但只在忙闲判定已依赖 tmux 的前提下才有意义） |
+| `REPO-STALL` | 仓库 ≥N 分钟无新提交（`git log`） | **否** |
+| `SESSION-OVERDUE` | 心跳源（transcript / tick-log 等）mtime 陈旧（多源 max，防红窗处置期间假阳性） | **否** |
+| `SESSION-STATUS` | `--once` 汇总接缝，逐目标一行 | 依赖上述判据 |
+
+**为什么这么复杂（这不是过度设计，是真实踩坑积累）**：文件内大量注释记录了具体的假阳性/假阴性
+事故——token 计数被误判为活动、TUI chrome 抖动、权限提示与"在干活"需要区分（`intervention` vs
+`busy`）、`.halt` 解除后的心跳基线重置、红窗处置期间外层不写 tick-log 但仍在干活的多源心跳修正
+等。**这些复杂度几乎全部是为了在 tmux TUI 这个观测介质上可靠工作**——corpus 本身就是"如何在一个
+为人类设计的终端界面上,让程序可靠地推断出会话状态"这个问题的解法。
+
+**消费者与用途（实测，非猜测）**：
+- `manager-tick-readings.ts` 的 `outer.liveness` 字段——**直接读 tmux pane_pid / window-missing**
+  （`:547-596`），是 manager 每轮 A0 读数的一部分,判 outer 这个 tmux 窗口是否存在、进程是否在。
+- `inner-blocked-signal.ts`——**不是调用这个脚本，是复用它的技术手法**（socket 解析、live
+  capture-pane 读取），用于 inner 层报告"我卡住了"（AskUserQuestion 等 stop-and-wait 条件）,
+  outer 的 Monitor 工具监视对应文件。
+- `outer-session-check.sh`/`topology-check.sh`——用它的 tmux 判定逻辑做会话三态/在位检查。
+
+**退役论证（分两部分，不是笼统地说"不需要了"）**：
+
+**① Inner 一侧——已有正式判定，本 SPEC 只是延续，不是新发明。** `orchestration/AC148-inner-core-
+itemized-attribution.md`（已完成的正式归属清单，非本次讨论产物）明确写道：
+```
+A7（tmux capture-pane → inner-blocked-signal --detect-stop）→ ②随会话消失：
+  tmux pane 是会话卫生，无 inner 会话即无 pane。
+B4（阻塞信号落盘 inner-blocked-signal）→ ②随会话消失：
+  inner 阻塞态落盘随 inner 消失；needs-human 的显式承接面由 AC146（人机接口）承接。
+```
+即：inner 已退役（worker-driver.ts headless 派发取代），`inner-blocked-signal.ts` 的 tmux 观测
+半部分已经被判定为死代码，只是脚本本身还没物理清理。**这不是本 SPEC 的新论断,是与既有共识的
+延续。**
+
+**② Outer 一侧——观测对象随迁移消失,且残留价值不足以保留整个脚本。**
+- `SESSION-GONE`/`BACK`/`IDLE`/`RESUMED`/`MARKER-STALE` 这五个事件的观测对象是 tmux pane——
+  outer 改用 `claude --bg` 后,这个观测对象结构性不存在了,不是判据本身错了,是它问的问题
+  （"这个 tmux 窗口的忙闲状态"）不再有意义,同 outer 硬约束 6/16 的退役理由完全同构。
+- **`REPO-STALL`/`SESSION-OVERDUE` 这两个不依赖 tmux 的判据,理论上仍然回答着一个独立于 tmux
+  的真实问题**（"这个会话/项目是否还在推进"）,**但有限的残留价值不构成保留整个脚本的理由**：
+  1. 人 2026-09-03 裁定 #3（长驻会话手工退出,不要搞复杂）意味着"自动判断该不该重启/该不该报警"
+     这类需求本身被裁定不做——人会主动监督,不需要一个自动化系统持续判断"心跳是否陈旧"。
+  2. 即便未来需要判断"项目是否停滞",`git log`/文件 mtime 检查只需要几行代码,不需要为它保留
+     一个 1858 行的、大部分逻辑专为 tmux TUI 噪声过滤而生的脚本——按硬规则①"用机件不手搓"的
+     反面同样成立：不该为了两个简单判据背负一整套不再适配的复杂机制。
+  3. `manager-tick-readings.ts` 的 `outer.liveness` 字段本身就要因为 outer 改用 `claude --bg`
+     而重写（读 tmux pane_pid 这件事本身失去对象）,不管 `session-liveness.sh` 存废,这处调用点
+     都要改——所以"保留脚本、只切掉 tmux 判据"并不能省下这处必须改动的工作量。
+
+**结论：确认——在 outer 改用 `claude --bg`、inner 已被 worker-driver 取代的背景下,
+`session-liveness.sh` 承载的核心能力（可靠推断 tmux TUI 会话状态）确实不再需要。** 两个不依赖
+tmux 的判据（`REPO-STALL`/`SESSION-OVERDUE`）有真实但有限的独立价值,若未来需要,建议在具体调用点
+用几行代码重新实现,不建议保留整个脚本"只为了这两个判据"——这也是人裁定 #4"取消"（而非"精简保留
+非 tmux 部分"）在技术上站得住脚的理由。
+
+---
+
 ### Layer 2b：取消 `session-liveness.sh`（人 2026-09-03 裁定，原 §5 开放问题 #4 已解决——
 不是"改造它使其等价"，是直接废弃，本节是这条裁定的落实范围）
 
@@ -253,44 +324,76 @@ job 启动**，完整生命周期命令齐全，不需要任何自建机制：
 （原 §5 #4）直接消解了**——不需要验证等价性，因为不迁移语义，直接废弃这个脚本和它承载的整套
 四态/五态活性推断逻辑（`SESSION-GONE`/`BACK`/`IDLE`/`RESUMED`/`OVERDUE`/`STALL` 等）。
 
-**影响面盘点（2026-09-03 实测，按位置判定,非关键词）**：
-- 全仓库引用 `session-liveness.sh` 的文件 **约 140+**，但绝大多数是：
-  - `tasks/gap-session-liveness-*.md` 这一批（约 25+ 个）——**抽样确认全部 `status: done`**，
-    是历史修复记录的归档，不是活跃依赖，不需要处理
-  - `.md` 文档提及（CLAUDE.md/README/各种 SPEC/ADR/skill 文档）——需要更新措辞，但不是代码
-    迁移，可以随对应生产代码调用点一起顺手改
-- **真正的生产代码调用者（.ts/.sh，排除测试）约 31 个文件**，需要逐一处理：
-  ```
-  packages/quay/src/observation.ts          plugin/scripts/adr016-screen-use-check.ts
-  plugin/scripts/capability-catalog.sh      plugin/scripts/dead-loop-check.sh
-  plugin/scripts/inner-blocked-signal.ts    plugin/scripts/laydown-set-check.sh
-  plugin/scripts/loop-driver-check.sh       plugin/scripts/manager-start.sh
-  plugin/scripts/manager-tick-readings.ts   plugin/scripts/monitor-mount-check.sh
-  plugin/scripts/observer-registry*.sh      plugin/scripts/os-anchor-install.sh
-  plugin/scripts/os-anchor-watchdog.sh      plugin/scripts/outer-cron-registry.ts
-  plugin/scripts/outer-session-check.sh     plugin/scripts/pane-state-classify.ts
-  plugin/scripts/process-budget.sh          plugin/scripts/quay-entry-base.ts
-  plugin/scripts/quay-init.sh               plugin/scripts/quay-session.ts
-  plugin/scripts/quay-topology.sh           plugin/scripts/runner-static-gate.ts
-  plugin/scripts/session-bootstrap.sh       plugin/scripts/session-liveness-mount.sh
-  plugin/scripts/supervisor-health.sh       plugin/scripts/tmux-isolated.sh
-  plugin/scripts/topology-check.sh          plugin/scripts/verify-deliver-coldstart.sh
-  plugin/scripts/verify-delivery-surface.ts plugin/scripts/verify-installed-executables.sh
-  test/cold-start-e2e.sh                    test/cold-start-oneliner-e2e.sh
-  ```
-- **这 31 个文件不是本 SPEC 现在要逐一改完的清单**——这是一个大范围清理工作，规模上应该拆解为
-  多个具体任务分批执行（见 §7），本节只负责准确圈定范围,不在 SPEC 阶段展开每个文件的改法。
+**影响面盘点（2026-09-03 实测，按位置判定,非关键词）**：全仓库引用 `session-liveness.sh` 的
+文件 **约 140+**，但绝大多数是 `tasks/gap-session-liveness-*.md`（约 25+ 个，**抽样确认全部
+`status: done`**，历史修复归档，不需要处理）和 `.md` 文档提及（随对应代码调用点顺手更新措辞）。
+
+#### 2b.1 确定删除的实现文件
+
+```
+plugin/scripts/session-liveness.sh              （+ packages/quay/plugin/scripts/ 镜像副本）
+plugin/scripts/session-liveness-sweep.mjs
+plugin/scripts/session-liveness-sweep-kill.mjs
+plugin/scripts/session-liveness-mount.sh
+orchestration/session-liveness.env               （配置文件）
+```
+
+#### 2b.2 确定删除的测试文件（21 个 + 1 个 helper——本仓库单一机制体量最大的一批测试资产）
+
+```
+session-liveness-scd-progress.test.mjs        session-liveness-decision-import.test.mjs
+session-liveness-scd-fire.test.mjs            session-liveness-signals-thresholds-edge.test.mjs
+session-liveness-restart.test.mjs             session-liveness-heartbeat.test.mjs
+session-liveness-events.test.mjs              session-liveness-signals-integration.test.mjs
+session-liveness-signals-kinds.test.mjs       session-liveness-scd-unsaturated.test.mjs
+session-liveness-sweep.test.mjs               session-liveness-signals-thresholds-observers.test.mjs
+session-liveness-scd-config-gates.test.mjs    session-liveness-scd-develop-active.test.mjs
+session-liveness-target.test.mjs              session-liveness-hangguard.test.mjs
+session-liveness-scd-inflight-changing.test.mjs   session-liveness-scd-multitask.test.mjs
+session-liveness-scd-busy.test.mjs            session-liveness-signals-thresholds.test.mjs
+session-liveness-helpers.mjs（测试 helper，非 .test.mjs，仅服务上述测试）
+```
+（全部在 `plugin/test/`，删除前逐一确认无其它测试文件 import 这个 helper）
+
+#### 2b.3 待核实（SPEC 早期判定可能已过期，删除前需重新 grep）
+
+```
+plugin/scripts/tmux-isolated.sh   + plugin/test/tmux-isolated.test.mjs
+plugin/scripts/tmux-session.ts    + plugin/test/tmux-session.test.mjs
+```
+本 SPEC §2.1 曾判定这两个"生产零消费者，可直接删除"，但已发现一个已完成任务
+`gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe`（`status: done`，2026-08-06）
+专门处理过"`tmux-isolated.sh` 零消费者"问题并落地了 STAGE 1-3——**删除前必须重新 grep 一次
+确认当前真实消费者清单，不能直接沿用 2026-09-03 那次调查的结论**（即便只隔几天，这类"零消费者"
+判定容易被后续任务悄悄改变，同硬规则⑤"来源完备性"）。
+
+#### 2b.4 仅移除依赖，文件本身保留（容易被误解为"要删"的部分）
+
+- **`pane-state-classify.ts`**（+ `pane-state-classify.test.mjs`）——**不删除**。同时服务 C 类
+  投递链（`send-keys-reliable.sh`/`supervisor-deliver.sh`/`supervisor-health.sh`），SPEC §4
+  非目标明确"不改 C 类投递链现状"，只移除 `session-liveness.sh` 对它的一处调用。
+- **`outer-session-check.sh`**（318 行测试 `outer-session-check.test.mjs`）/`topology-check.sh`
+  ——文件保留，内部 tmux 判定逻辑重写为 `claude agents --json`，测试内容要跟着重写（不是删测试，
+  是换断言对象）。
+- **`inner-blocked-signal.ts`**（+ 其测试）——不删除；只是它复用 `session-liveness.sh` 技术手法
+  的那部分逻辑已经是死代码（见 Layer 2a① AC148 判定），随 inner 相关清理一并处理,不因本次裁定单独
+  触发。
+- **其余约 29 个生产调用者**（`manager-tick-readings.ts`/`quay-init.sh`/`observer-registry*.sh`
+  等——完整清单见文档修订历史,不在此重复罗列）——同理，移除对 `session-liveness.sh` 的调用/
+  fallback 分支，文件和各自的测试保留，具体改法留到各自任务拆解时现场核实。
 
 **替代方案的方向（不是逐文件设计，供任务拆解时参照）**：
 - 判断一个会话是否存活/在做什么 → `claude agents --json [--cwd <path>]` + `claude logs <id>`
-- 判断仓库是否停滞（`REPO-STALL`）→ 已经是 `git log`，不受本次裁定影响，只是脱离
-  `session-liveness.sh` 这个壳，逻辑本身可以原样保留或下沉到调用方
-- 判断心跳新鲜度（`SESSION-OVERDUE`）→ 已经是 transcript mtime，同上，逻辑可保留，只是不再
-  经过这个脚本
-- **进程存在性/忙闲判定这两组真正依赖 tmux 的判据（`SESSION-GONE`/`IDLE` 等）——不是被"等价替代"，
-  是随着人 2026-09-03 裁定 #3（长驻会话手工退出，不设计自动检测/恢复）一起变得不再需要**：
-  没有自动重启/自动恢复的需求，就不需要精细的忙闲/存活状态机，`claude agents --json` 里会话
+- `REPO-STALL`/`SESSION-OVERDUE` 这两个不依赖 tmux 的判据 → Layer 2a② 已论证：有限独立价值，
+  不建议保留脚本，需要时在具体调用点用几行代码重新实现（`git log`/文件 mtime）
+- `SESSION-GONE`/`IDLE`/`RESUMED`/`MARKER-STALE` 这些依赖 tmux 的判据 → 不是被"等价替代"，
+  是随人 2026-09-03 裁定 #3（长驻会话手工退出，不设计自动检测/恢复）一起变得不再需要：没有
+  自动重启/自动恢复的需求，就不需要精细的忙闲/存活状态机，`claude agents --json` 里会话
   存不存在这个布尔值就够用
+
+**一个测试覆盖缺口（不是删除,是新增需求）**：`quay-topology.sh` 目前**没有专属测试文件**——
+Layer 3 给它新增 `claude --bg` 分支这个改动，落地时需要新写测试，不是"删测试"，是补一个此前
+没有的覆盖。
 
 ### Layer 4：发现/枚举（D 类）—— 已有替代（`ListAgents`），无需额外工作
 
@@ -391,12 +494,14 @@ tmux server）还会起真实 tmux，`tmux-leak-scan.sh` 就是必需的兜底�
    （outer 能用 `--bg` 稳定启动）之后再做,避免同时调试两个新机制。
 5. **`outer-session-check.sh`/`topology-check.sh` 改用 `claude agents --json`**——依赖任务 2
    已经产出真实的 `--bg` outer 会话可供验证。
-6. **`session-liveness.sh` 取消 + 31 个生产调用者迁移**——这是规模最大的一块，**建议进一步拆分
-   为多个子任务**（例如按调用者的职责分组：冷启动相关 `quay-init.sh`/`session-bootstrap.sh` 一组，
-   observer/health 相关 `observer-registry*.sh`/`supervisor-health.sh` 一组，manager tick 读数
-   相关 `manager-tick-readings.ts`/`inner-blocked-signal.ts` 一组），不建议一个任务吞下全部 31
-   个文件（Touches 过宽会撞 `TOUCHES-DIR-GLOB-HINT` 类闸门，且审阅/fan-in 风险高）。**这一块的
-   具体子任务划分建议留到立案时现场看这 31 个文件的实际耦合关系再定**，本 SPEC 不预先拍板。
+6. **`session-liveness.sh` 取消 + 31 个生产调用者迁移**——这是规模最大的一块（含 21 个专属测试
+   文件,§2b.2；2 个待核实的孤儿候选,§2b.3），**建议进一步拆分为多个子任务**（例如按调用者的
+   职责分组：冷启动相关 `quay-init.sh`/`session-bootstrap.sh` 一组，observer/health 相关
+   `observer-registry*.sh`/`supervisor-health.sh` 一组，manager tick 读数相关
+   `manager-tick-readings.ts`/`inner-blocked-signal.ts` 一组），不建议一个任务吞下全部 31
+   个文件（Touches 过宽会撞 `TOUCHES-DIR-GLOB-HINT` 类闸门，且审阅/fan-in 风险高）。**§2b.4
+   列出的"仅移除依赖、文件保留"清单是划分子任务时的具体依据，这一块的子任务划分建议留到立案时
+   现场看这 31 个文件的实际耦合关系再定**，本 SPEC 不预先拍板。
 7. **文档更新**（CLAUDE.md/README/相关 SPEC/ADR/skill 文档里对 tmux 依赖的描述）——收尾工作，
    等 1-6 全部落地后再做，避免文档先于代码改导致新的漂移（同 CLAUDE.md 开篇警告的"指针复制正本
    然后各自漂移"）。
