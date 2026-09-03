@@ -21,24 +21,25 @@ Example: task_write writes `extra: { depends_on: [dep1, dep2] }` → YAML serial
 N/A — simple scope permits direct implementation from Proposal
 ## Acceptance Criteria
 
-- [ ] `parseTask()` or `parseTaskCompletely()` successfully reads nested extra structures
-- [ ] Unit test: task_write with depends_on array → round-trip → parseTask returns array (not empty string)
-- [ ] Backward compatibility verified: existing scalar-only extra still works
-- [ ] Test coverage includes nested lists and nested objects in extra
-- [ ] Function documentation updated to specify supported structures
-- [ ] Existing consumers (ready-pool-check, driver-filters) work unchanged
+- [x] `parseTask()` or `parseTaskCompletely()` successfully reads nested extra structures
+- [x] Unit test: task_write with depends_on array → round-trip → parseTask returns array (not empty string)
+- [x] Backward compatibility verified: existing scalar-only extra still works
+- [x] Test coverage includes nested lists and nested objects in extra
+- [x] Function documentation updated to specify supported structures
+- [x] Existing consumers (ready-pool-check, driver-filters) work unchanged
 
 ## Definition of Done
 
 Standard clauses (code + tests):
-- [ ] Code reviewed
-- [ ] All tests pass (new and existing)
-- [ ] Real-world task files tested for compatibility
-- [ ] Commits reference related gap-task-write-schema-depends-on-documentation
-- [ ] No debug code or experimental branches left
+- [x] Code reviewed
+- [x] All tests pass (new and existing)
+- [x] Real-world task files tested for compatibility
+- [x] Commits reference related gap-task-write-schema-depends-on-documentation
+- [x] No debug code or experimental branches left
 
 ## Touches
 
 - `plugin/scripts/task-schema.ts`
-- `plugin/scripts/task-schema.test.ts` (create if needed, or existing test file)
+- `experiments/quay-perpetual-stream/scripts/task-schema.ts` (sync-vendor source copy)
+- `experiments/quay-perpetual-stream/test/task-schema.test.mjs` (existing test file)
 - `tasks/gap-parseTask-nested-extra-support.md` (self)
