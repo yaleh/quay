@@ -73,25 +73,19 @@ Touches 内，机制未核实，不得未经分解就假设"也缺 fixture"）�
 mechanism 未核实（可能是真实多子进程 spawn 而非缺 fixture），**留给另一任务按同样的"先分解再动手"
 方法学处理，本任务范围不扩大**。
 
-**⚠️ 范围外的重大发现（不纳入本任务，如实记录+交叉引用）**：同一窗口暴露的最大瓶颈其实不是"慢"，
-而是**不稳定**——`session-liveness-*` 家族 29 轮里只有 7 轮（24%）全绿，18 个不同文件在窗口内
-出现过失败，其中 5 个文件失败率 ≥15%（`session-liveness-scd-inflight-changing.test.mjs`
-7/29=24%、`session-liveness-scd-busy.test.mjs` 7/29=24%、`session-liveness-restart.test.mjs`
-6/29=21%、`session-liveness-signals-kinds.test.mjs` 4/20=20%、`session-liveness-target.test.mjs`
-3/20=15%），部分文件单次峰值远高于均值（`session-liveness-heartbeat.test.mjs` 均值 113.7s 但峰值
-**450.2s**）。lanes=28 时段（round 658 起）session-liveness 失败率 8%，明显高于 lanes=16 时段
-（round 652-657）的 4%，与并发/负载相关但非唯一成因。
+**范围外发现——session-liveness 家族高失败率（如实记录，人已裁定不立案）**：同一窗口暴露的最大
+瓶颈其实不是"慢"，而是**不稳定**——`session-liveness-*` 家族 29 轮里只有 7 轮（24%）全绿，18 个
+不同文件在窗口内出现过失败，其中 5 个文件失败率 ≥15%（`session-liveness-scd-inflight-changing
+.test.mjs` 7/29=24%、`session-liveness-scd-busy.test.mjs` 7/29=24%、`session-liveness-restart
+.test.mjs` 6/29=21%、`session-liveness-signals-kinds.test.mjs` 4/20=20%、`session-liveness-target
+.test.mjs` 3/20=15%）。已核实相关历史任务链（`gap-lowconc-concurrency-8-starves-bclass-waiting`
+done/AC2 待外部 → `gap-session-liveness-marker-stale-fires-on-tick-log` done/只修一种签名 →
+`gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky` done/范围是重试预算判定非根治），
+**未发现任何 open 任务专门追踪此问题**。
 
-**这与本任务 mechanism 不同**（本任务是"稳定但慢，缺共享 fixture"；这个发现是"不稳定，探针/信号
-类失败"），不应塞进同一任务（硬规则「载体多成因合一=有损投影」、dedup-by-mechanism）。**已核实
-现有任务线**：`gap-lowconc-concurrency-8-starves-bclass-waiting`（done，AC1 落地正确但 AC2"稳定绿"
-留白——任务体自述"lowconc=8 假说被证伪...真根因在多样成因，留（待外部）"）→
-`gap-session-liveness-marker-stale-fires-on-tick-log`（done，但只修了 marker-stale 一种失败签名，
-不覆盖 probe-must-be-alive / SESSION-GONE / CANT-SEND 等其余签名）→ `gap-retry-cap-flip-
-conflates-own-defect-with-unrelated-flaky`（**唯一 open，status: ready**，但范围明确是"重试预算
-判定机制"，其 Proposal 原文写明"这不是要求先解决 probe 饿死本身"）。**结论：当前没有任何 open
-任务专门追踪"session-liveness 家族在当前生产配置下仍有 20-24% 失败率"这一新鲜事实**——历史任务线
-都已 done/superseded，但问题显然没有真正根治。本任务不处理它，仅如实记录 + 建议另立任务。
+**人 2026-09-03 裁定：不为此立案**——outer 即将退役，随后 tmux 相关功能（session-liveness 依赖的
+tmux + claude-probe 探针机制）也将退役，根治这个 flaky 的修复价值归零。**后续若再次分析套件数据
+撞见同一发现，直接引用本节，不必重新调查或重新提出立案。**
 
 ## Plan
 
@@ -144,7 +138,7 @@ conflates-own-defect-with-unrelated-flaky`（**唯一 open，status: ready**，�
 delivery-standalone-smoke-gate 的文档/tag 不一致已被核实并处理；全量套件保持 0 failed / 0
 cancelled；本任务未凭空设立任何未经测量的墙钟目标数字。12 小时窗口聚合数据（29 轮）已确认本任务
 两个目标文件是稳定贡献者而非偶然波动；session-liveness 家族的高失败率作为范围外发现已交叉引用，
-不在本任务 Touches 内处理。
+人已裁定不立案（outer/tmux 即将退役），不在本任务 Touches 内处理。
 
 ## Touches
 
