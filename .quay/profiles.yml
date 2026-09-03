@@ -27,6 +27,18 @@ profiles:
     model: deepseek-v4-pro-anthropic
     bare: false
     auth: token            # claude-fjdac 只提供 ANTHROPIC_AUTH_TOKEN（并置空 ANTHROPIC_API_KEY）
+    # gap-fix-worker-spawn-inherits-unrecognized-model-deepseek-v4-pro-anthropic：
+    #   claude-fjdac 包装脚本 export 的 ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL 是 deepseek-v4-pro
+    #   （不带 -anthropic 后缀，与 model 不一致）⇒ CLI 收到 --model deepseek-v4-pro-anthropic 时在 SDK
+    #   已知模型表里找不到（既非真实 Anthropic id，也不匹配包装脚本 env 里那个不带后缀的值）⇒
+    #   unrecognized_model（query_source=sdk，非致命警告）⇒ 回退到 wrapper 的 deepseek-v4-pro（无后缀）
+    #   到达 litellm。此处把三个 DEFAULT_*_MODEL 对齐到带后缀值（方案①，经 --settings env 落地）。
+    #   ⚠️ 实测 --settings env 对该键【不覆盖】wrapper 的 shell export（transcript message.model 仍
+    #   deepseek-v4-pro）⇒ 完整生效还须同步改仓库外 ~/.local/bin/claude-fjdac（见任务体执行记录）。
+    env:
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-v4-pro-anthropic
+      ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-v4-pro-anthropic
+      ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-v4-pro-anthropic
     # fallbackModel 缺省留空：当前无已知不可用的主 model。主备回退是 policy 能力（AC1），
     # 由 profile-policy.test.mjs 用合成配置验证（model=glm-5.3 + fallbackModel=deepseek-v4-pro）。
   # manager 用原生 claude + 默认模型，显式取消继承 917k 三件套（unset 显式化旧的空串约定）。
