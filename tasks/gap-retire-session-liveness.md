@@ -1,7 +1,7 @@
 ---
 id: gap-retire-session-liveness
 title: 退役 session-liveness（含 mount + 22 个测试 + monitor-mount-check + 引用清理），随 tmux 退役
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -291,4 +291,46 @@ Automatic merge failed; fix conflicts and then commit the result.
 ✖ plugin/test/oute
 - run_id：wk-prod-1788285192
 - session_id：f980bf4c-7460-4644-a994-9e4db5c627a1
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-03T17:25:39.981Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=scoped-gate: ✔ REVERSE-EDGE AC4 (negative control): declared reverse-edge but the integration side FAILS the content criterion → FAIL-CLOSED (never blind-choose) (1022.059265ms)
+✔ FRESHNESS GATE (scope axis legacy): an ABSENT scope field (pre-scope state) ⇒ treated as main ⇒ ALLOWED (fail-open legacy semantics) (753.162995ms)
+✔ AC1 — no secrets checked in (deepseek key / anthropic token / sk- pattern) (1.318226ms)
+✔ AC4 — deepseek roles reference the checked-in settings file; manager's effective env excludes 917k (via unset) (800.367577ms)
+✔ adversarial — 0 test files resolved ⇒ fail-closed red, NEVER a whole-suite fallback (155.435326ms)
+✔ usage — a bad --root fails with exit 2 (fail-closed on misuse, not a silent green) (16.799741ms)
+✔ AC3 — cold-start-e2e.sh asserts the build-required files, fail-named (inner-state.sh retired, not required) (0.921564ms)
+✔ AC4 — the launch-config trio is checked-in: claude-fjdac + deepseek-v4-pro-anthropic (profiles.yml) + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 (settings env) (1.6124ms)
+✔ AC4 — the launch config 三件套 (deepseek-v4-pro-anthropic + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000) is checked in (147.206265ms)
+✔ AC2 — CLI: a transcript with a manager observation exits 1 and reports the violation (159.099896ms)
+✔ AC2 — CLI: --report appends a JSONL record for a persistent violation log (144.336961ms)
+✔ AC5b — tick-log check: fresh row PASS; skipped round (stale mtime) FAIL; no row FAIL (209.555513ms)
+✖ AC3 — `quay manager adopt --dry-run` against a REAL outer window yields healthy (not missing) via outer-session-check.sh (1680.332175ms)
+✔ manager-tick-readings: goalReading counts checked/total ACs in manager-phase-goal.md (1.81148ms)
+✖ audit exit 1 + stale flags when a consumer cannot reach the registry (stale detection path) (472.923418ms)
+✖ referencedScripts filters script basenames by presence in the tick-core text (4.881691ms)
+✖ real repo is GREEN — orphan-checker N=0 (outer-anchor-check.ts explicitly retired) (3961.593266ms)
+✔ state machine — fail-closed: no session config ⇒ exit 1 (never guess a session name) (37.928709ms)
+✔ AC7: hash-regression negative control — a busy fixture relabeled as waiting-input must FAIL (the test asserts semantics, not that the code ran) (0.838786ms)
+✔ AC2: the fault-6 criterion is mechanized in the pure verdict — C-u cleared ⇒ real; byte-identical ⇒ ghost; bounded + fail-loud (2.394482ms)
+✔ AC2 — NO matching tmux session: fail-closed (exit 2), refuses to write, names --tmux-session; the monitor config is never written (283.79378ms)
+✔ buildCommitTraceIndex: fail-closed on a non-git root (empty, never throws) (28.574054ms)
+✔ no-AC-section fallback (AC4, AC47-corrected): present-but-boxless landed no-AC task is a done-flip; ABSENT AC section is fail-closed (75.476246ms)
+✔ >50% checked but a remaining implementation box ⇒ NOT landed (stays in the dispatchable pool) (11.660797ms)
+✔ AC all checked but DoD has unchecked IMPLEMENTATION boxes ⇒ NOT landed (cli-import shape, human ruling) (11.177807ms)
+✔ priorityLevel maps p1/p2/none to ascending sort ranks (p1=1, p2=2, none=Infinity; unknown level fail-open) (0.879245ms)
+✔ detectLandingBlocked is fail-safe on a non-git root (no false report, no throw) (21.316466ms)
+✔ todo candidate with prose prereq and NO edge ⇒ ineligible for promotion (author→ready fail-closed) (111.452606ms)
+✔ AC2: applyRevaluations writes ready→todo + a grep-able ## Revaluation body record; retreatReadyToTodo is fail-closed (150.710364ms)
+✔ CLI measure: no matching evidence → stdout state: unknown, exit 3 (three-state contract — NOT a bare FAIL) (159.319681ms)
+✔ CLI measure: missing transcript file → exit 2 (fail loud, never a silent false) (132.978296ms)
+✔ AC4: a MISSING checker exits 1 at startup (fail-loud), never a silent broken delivery (gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure) (31.510151ms)
+✔ AC3 fail-closed: a target whose window name != expected (default inner) is REJECTED before any send — nothing lands in the t
+- run_id：wk-prod-1788285192
+- session_id：e9a8c26e-a5d1-4755-b419-0142e8db39ee
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
