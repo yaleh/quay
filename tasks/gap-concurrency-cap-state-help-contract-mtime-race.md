@@ -33,7 +33,7 @@ concurrency-cap-state.json: 1788004193808 -> 1788410556739
 
 ### 影响
 - ⛔ 挡住 gap-unified-frontmatter-parser 的 fan-in 收敛（该任务 blocked）
-- ⚠️ 可能还有其它类似文件受同样问题影响（需全局 grep）
+- ⚠️ 可能还有其它类似文件受同样问题影响（需全局 grep）——**已确认一例**：fan-in suite 实测暴露 `session-liveness.<pid>.json`（observer registry，session-liveness.sh 常驻启动注册表，非 checker `--help` 副作用），已补入排除集（AC6）
 
 ---
 
@@ -70,8 +70,9 @@ grep -r "concurrency-cap-state.json" plugin/scripts/*.ts | grep -v test | grep -
 - [x] 溯源成立：没有任何 `-check.ts` 在 `--help` 时写 `concurrency-cap-state.json`——唯一写入方是 `cap-from-gate.ts` `computeEffectiveCap`→`saveState`（`STATE_FILE_NAME`），经 `accounting-emit.ts` `autoOccupancy`→`cap-from-gate.sh` 的层-tick 链调用，属 resident-process 运行时载体，不是 checker `--help` 副作用
 - [x] `help-contract-incompatible-behaviors.test.mjs` 的快照排除集新增 `CAP_OBSERVATION_FILES`（含 `concurrency-cap-state.json`），AC1 mtime 负控制不再把并发层-tick 写入误报为 `--help` 副作用
 - [x] 负控制未退化：`mtime-race AC3` 单测把 `concurrency-cap-state.json` 加入 resident fixture（写入+追加期望被排除），真实副作用 `measure-history.jsonl` 仍被抓
-- [x] 全局扫描无遗漏：`cap-from-gate`/`accounting-emit` 链唯一写出的硬编码状态文件是 `concurrency-cap-state.json`；同族其余 resident 载体（driver round/outcome/control/logs/pid、full-suite-state/log、verification-round、suite-load）已由 gap-suite-help-contract-mtime-race 排除
+- [x] 全局扫描无遗漏：`cap-from-gate`/`accounting-emit` 链唯一写出的硬编码状态文件是 `concurrency-cap-state.json`；同族其余 resident 载体（driver round/outcome/control/logs/pid、full-suite-state/log、verification-round、suite-load、observer registry `session-liveness.<pid>.json`）已排除（`session-liveness` 见 AC6）
 - [x] help-contract test 全绿（4/4）：AC1 无 mtime 变化、AC2/AC3 不退化、负控制仍抓真实副作用
+- [x] `session-liveness.<pid>.json` 排除（CONTINUE 轮补，suite 实测暴露）：`isNonCheckerRuntimeFile` 新增 `/^session-liveness\.[0-9]+\.json$/`（session-liveness.sh 常驻启动注册表；`SL_NO_REGISTER=1` 只关测试污染、生产 monitor 仍写）；mtime-race AC3 负控制 fixture 同步加入 `session-liveness.305362.json` resident 样本，真实副作用 `measure-history.jsonl` 仍被抓
 
 ---
 

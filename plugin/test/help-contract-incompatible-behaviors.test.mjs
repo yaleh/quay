@@ -14,9 +14,10 @@
 //   AC1 — every `-check.ts` exits 0 AND prints usage on `--help`; NEGATIVE CONTROL: running `--help`
 //         over all of them leaves the `.quay/` mtime set unchanged (a checker that writes on `--help`
 //         — as measure-trend-check did — fails this); resident-process runtime files (driver + the
-//         full-suite runner itself + the cap-observation chain) are excluded from the snapshot
-//         (gap-suite-help-contract-mtime-race + gap-concurrency-cap-state-help-contract-mtime-race:
-//         they tick independently, not on `--help`); the mtime check retries a bounded number of times
+//         full-suite runner itself + the cap-observation chain + the session-liveness observer registry)
+//         are excluded from the snapshot (gap-suite-help-contract-mtime-race +
+//         gap-concurrency-cap-state-help-contract-mtime-race: they tick independently, not on `--help`);
+//         the mtime check retries a bounded number of times
 //         (③ fallback) — a deterministic side effect reproduces every attempt, a transient tick does not;
 //   AC2 — `ready-pool-check --help` no longer self-contradicts ("unknown flag: --help (run with
 //         --help)") — it prints normal usage and exits 0;
@@ -106,9 +107,14 @@ function isNonCheckerRuntimeFile(relPath) {
   // worker-driver}): <prefix>.(log|pid), <prefix>-supervisor.(log|pid), <prefix>-liveness.log,
   // <prefix>-inflight.pid.
   // (b) suite load sampler: suite-load-<runId>.jsonl (full-suite-runner.ts startLoadSampler).
+  // (c) session-liveness observer registry: session-liveness.<pid>.json — session-liveness.sh writes it on
+  //     STARTUP (unless SL_NO_REGISTER=1) and removes it on EXIT; a resident monitor / manager / OS anchor
+  //     that (re)starts mid-sweep CREATES a new file, a resident-process carrier — never a checker `--help`
+  //     side effect (fan-in suite 实测暴露, gap-concurrency-cap-state-help-contract-mtime-race).
   return (
     /^(promotion|worker)-driver(-(supervisor|liveness|inflight))?\.(log|pid)$/.test(base) ||
-    /^suite-load-.*\.jsonl$/.test(base)
+    /^suite-load-.*\.jsonl$/.test(base) ||
+    /^session-liveness\.[0-9]+\.json$/.test(base)
   );
 }
 
@@ -230,6 +236,7 @@ test("mtime-race AC3 (negative control not degraded): resident-process file excl
     fs.writeFileSync(path.join(tmp, "full-suite-state.json"), "x\n");
     fs.writeFileSync(path.join(tmp, "suite-load-mfi-x-123-abc.jsonl"), "x\n");
     fs.writeFileSync(path.join(tmp, "concurrency-cap-state.json"), "x\n");
+    fs.writeFileSync(path.join(tmp, "session-liveness.305362.json"), "x\n");
     fs.writeFileSync(path.join(tmp, "measure-history.jsonl"), "x\n");
     const before = snapshotMtimeSet(tmp);
 
@@ -240,6 +247,7 @@ test("mtime-race AC3 (negative control not degraded): resident-process file excl
     fs.appendFileSync(path.join(tmp, "full-suite-state.json"), "y\n");
     fs.appendFileSync(path.join(tmp, "suite-load-mfi-x-123-abc.jsonl"), "y\n");
     fs.appendFileSync(path.join(tmp, "concurrency-cap-state.json"), "y\n");
+    fs.appendFileSync(path.join(tmp, "session-liveness.305362.json"), "y\n");
     assert.deepEqual(diffMtimeSet(before, snapshotMtimeSet(tmp)), [], "resident-process tick mtime changes must be excluded");
 
     // A real `--help` side effect (a non-runtime file) must still be caught — exclusion is not over-broad.
