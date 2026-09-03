@@ -1,7 +1,7 @@
 ---
 id: gap-task-write-schema-depends-on-documentation
 title: Document task_write MCP depends_on field usage
-status: todo
+status: ready
 labels: []
 parent: null
 children: []
