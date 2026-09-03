@@ -1,7 +1,7 @@
 ---
 id: gap-retire-session-liveness
 title: 退役 session-liveness（含 mount + 22 个测试 + monitor-mount-check + 引用清理），随 tmux 退役
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -241,4 +241,47 @@ Automatic merge failed; fix conflicts and then commit the result.
     FAIL (referenced-not-landed): plugin/scripts/session-liveness-mount — referenced by a shipped skill/tick doc but 
 - run_id：wk-prod-1788285192
 - session_id：07da2d54-9229-40b3-9909-8c4cd2e5342c
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-03T13:55:42.318Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=scoped-gate: ✖ AC4 — both manifests carry six categories; auto-detection maps bundle→source and consumer→laid (2.875056ms)
+✖ Contract control — removing one laid category's deliverables makes laid mode report it MISSING (145.402451ms)
+✔ killProcs — already-exited pid counts as killed (fail-open); empty list is a no-op (2.717604ms)
+ℹ fail 14
+✖ failing tests:
+✖ AC3 — manager-start.sh writes the idle-watch mount intent and dry-runs it (179.480275ms)
+  AssertionError [ERR_ASSERTION]: dry-run must plan the idle-watch mount step
+    actual: 'would-create-home: mkdir -p /home/yale/.quay-global/manager\nwould-write-identity: /home/yale/.quay-global/manager/identity\nwould-write-checklist: /home/yale/.quay-global/manager/cold-start-checklist.md\nwould-launch-session: tmux new-session -d -s quay-manager -n manager "bash /home/yale/work/quay-worktrees/gap-retire-session-liveness/plugin/scripts/quay-launch.sh manager"\nwould-arm-loop: /home/yale/work/quay-worktrees/gap-retire-session-liveness/plugin/scripts/manager-arm-loop.sh --home /home/yale/.quay-global/manager\n',
+    expected: /would-mount-idle-watch/,
+✖ AC3 — manager-start.sh --check-idle-watch is mechanically executable (two criteria + ok) (30.169075ms)
+  AssertionError [ERR_ASSERTION]: check-idle-watch with no mounted monitor must exit 1 (fail-closed)
+    actual: 2,
+    expected: 1,
+✖ AC1/AC7 — `quay manager adopt` requires a project root and is dry-runnable (three-state via outer-session-check) (1682.146537ms)
+  AssertionError [ERR_ASSERTION]: adopt --dry-run must exit 0:
+    actual: 2,
+    expected: 0,
+✖ AC3 — `quay manager adopt --dry-run` against a REAL outer window yields healthy (not missing) via outer-session-check.sh (2207.267586ms)
+  AssertionError [ERR_ASSERTION]: adopt --dry-run must exit 0:
+    actual: 2,
+    expected: 0,
+✖ AC2 — manager-start --dry-run plans the cold-start checklist + idle-watch config (154.471026ms)
+  AssertionError [ERR_ASSERTION]: must plan writing <home>/idle-watch.env
+    actual: 'would-create-home: mkdir -p /tmp/quay-mgr-start-8LlUXA/home\nwould-write-identity: /tmp/quay-mgr-start-8LlUXA/home/identity\nwould-write-checklist: /tmp/quay-mgr-start-8LlUXA/home/cold-start-checklist.md\nwould-launch-session: tmux new-session -d -s quay-manager -n manager "bash /home/yale/work/quay-worktrees/gap-retire-session-liveness/plugin/scripts/quay-launch.sh manager"\nwould-arm-loop: /home/yale/work/quay-worktrees/gap-retire-session-liveness/plugin/scripts/manager-arm-loop.sh --home /tmp/quay-mgr-start-8LlUXA/home\n',
+    expected: /would-write-idlewatch-config/,
+✖ AC2/AC5 — a real manager-start writes cold-start-checklist.md (7 keys) + idle-watch.env and still creates identity + loop-registry (336.300612ms)
+  AssertionError [ERR_ASSERTION]: checklist must carry key IDLE-WATCH-MOUNTED
+    actual: '# manager cold-start — observable consequences（falsifiable checklist）\n\n冷启动完成判据 = 下列 5 条可证伪项**全部为真**。\n一条为假 ⇒ manager 冷启动未完成。每键给出可检查判据与证据。\n\n| # | Key | 可检查判据 | 证据 |\n|---|---|---|---|\n| 1 | SESSION-CREATED | `tmux has-session -t <SESSION>` 且 pane 有 claude 进程（非裸 bash） | 启动时已建会话（manager-start.sh） |\n| 2 | HOME-CREATED | `<home>/identity` 存在，含 `role=manager` | 启动时已写（manager-start.sh） |\n| 3 | LOOP-ARMED | `manager-arm-loop.sh --home <home> --validate` 退出 0，且 `<home>/loop-registry.txt` 恰一条 `[manager-tick]` | 启动时已武装（manager-arm-loop.sh；失败时 manager-start 非零退出） |\n| 4 | CRON-EVIDENCED | `manager-arm-loop.sh --home <home> --verify-cron` 退出 0（注册表↔真 CronCreate/CronList 证据一致且新鲜） | 首 tick 填（manager-tick-core.md B4 记 `<home>/cron-evidence.jsonl`） |\n| 5 | CHECKLIST-REPORTED | 本文件五键全为 true 且各有证据 | 全部填完后为 true |\n\n启动态预期满足：#1 #2 #3（arm 失败时 manager-start 非零退出）。待首 tick：#4 #5。全 true 才可报 COMPLETE。\n',
+    expected: /IDLE-WATCH-MOUNTED/,
+✖ gap-idle-watch-intent-anchor-restore — --ensure-mount-intent writes the mount-intent anchor without tmux/arm/launch side effects (22.63419ms)
+  AssertionError [ERR_ASSERTION]: --ensure-mount-intent must exit 0:
+    actual: 2,
+    expected: 0,
+✖ plugin/test/oute
+- run_id：wk-prod-1788285192
+- session_id：f980bf4c-7460-4644-a994-9e4db5c627a1
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
