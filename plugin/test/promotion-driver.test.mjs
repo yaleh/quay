@@ -539,6 +539,24 @@ test("buildFixWorkerArgv — default policy-resolved fix-worker; override prefix
   assert.ok(over[over.length - 1].includes("fourArtifacts=false missing=[dod]"), "override keeps the prompt as the last arg");
 });
 
+test("gap-fix-worker-spawn-inherits-unrecognized-model — fix-worker argv aligns ANTHROPIC_DEFAULT_*_MODEL with --model (AC1 结构保证)", () => {
+  const def = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], REPO_ROOT);
+  const si = def.indexOf("--settings");
+  assert.notEqual(si, -1, "fix-worker argv must carry --settings");
+  const settingsRaw = def[si + 1];
+  assert.ok(settingsRaw.startsWith("{"), `worker-default profile env must make --settings JSON (carries aligned env), got: ${String(settingsRaw).slice(0, 48)}`);
+  const settings = JSON.parse(settingsRaw);
+  const mi = def.indexOf("--model");
+  const model = def[mi + 1];
+  // AC1/AC4 结构保证：SDK 只在 --model 命中 ANTHROPIC_DEFAULT_*_MODEL 时才认自定义 model id（否则
+  // unrecognized_model sdk、回退到 wrapper 的无后缀值）；且 -anthropic 后缀必须保留到 litellm（fallback
+  // group，AC4 不回归）。
+  assert.equal(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, model, "HAIKU default must match --model (else unrecognized_model)");
+  assert.equal(settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL, model, "SONNET default must match --model (else unrecognized_model)");
+  assert.equal(settings.env.ANTHROPIC_DEFAULT_OPUS_MODEL, model, "OPUS default must match --model (else unrecognized_model)");
+  assert.equal(model, "deepseek-v4-pro-anthropic", "the model must keep the -anthropic suffix (litellm fallback group)");
+});
+
 test("runFixPass — fixable spawns (exit 0), unfixable records reason without spawning", (t) => {
   const root = makeRoot("fixpass");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
