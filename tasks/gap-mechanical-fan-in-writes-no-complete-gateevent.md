@@ -83,6 +83,8 @@ extra:
 
 **Fan-in 阻塞（最新 suite-red，2026-09-03 02:02，d8c07e）**：本次 3 个失败是 `packages/quay-native/test/` 的 `cas-write`/`create-validation`/`edit-validation`——**三者逐一 solo 均 EXIT=0 绿**（本 worker 实跑核验）⇒ 与「第四次」的 session-liveness probe 签名不同，但同属**负载诱发 flaky**（`@load-sensitive` probe 占槽 ~215s 饿死 quay-native 子进程测试，与 `9f0d69ca9` 人裁定「不为 session-liveness 家族立案」同一家族）。`--for-task` scoped 门与 `worker-driver-fan-in` 64 条、`stale-ready-audit` 5 条单测均绿；suite 红与本案改动无关。
 
+**合并 develop 后（本 worker 实测）**：本分支已 `git merge develop` 并解决 `worker-driver-fan-in.test.mjs` 的 import 列表冲突（语义并集：本案 `appendCompleteGateEvent` ∪ develop `judgeRetryExemption`/`extractFirstFailureLine` 等）。合并后全文件顺序跑，develop 侧新增集成测试「AC1 (能取假) — suite 红 needs-human 记录含真实 AssertionError 原文」（`extractFirstFailureLine` 接线）**全顺序红（actual `'suite red'`）、`--test-name-pattern` 单独跑绿** ⇒ order-dependent 隔离缺陷，属 develop 侧新增测试（`05b980b89`），非本案代码；根因未深究（develop 侧缺陷，不在本案 Touches）。本案自身 2 条新增单测与 `stale-ready-audit` 5 条均绿。
+
 ## Definition of Done
 
 真实运行的机械 fan-in 在 `.quay/gate-events.jsonl` 里留下了 `complete` pass 事件（取①），或 `bypassComplete` 判据已被显式退役且退役裁定写进脚本头注释与本任务体（取②）——**判据落在生产载体上，不是落在测试或 fixture 上**；AC4 的负控制输出已贴出，证明该判据能取假；`gap-loop-completion-path-produces-zero-gateevents` 的 AC2 在新路径上重新成立（取①）或被显式撤销（取②），两条任务之间不再互相矛盾；改动经 fan-in 落到 develop 并可 `git show develop:` 核验。
