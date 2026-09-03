@@ -1,7 +1,7 @@
 ---
 id: gap-slow-test-shared-fixture-and-group-recheck
 title: quay-init-loop / cli / delivery-smoke 慢测试——共享 fixture 化 + 分组复核（按实测前后对照，不按预测数字）
-status: ready
+status: done
 labels:
   - gap
 parent: null
