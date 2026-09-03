@@ -77,6 +77,8 @@ extra:
 
 **测试**：`stale-ready-audit.test.mjs` 5/5、`worker-driver-fan-in.test.mjs` 64/64 绿（含 2 条新增）。
 
+**Fan-in 阻塞（第四次 suite-red，2026-09-03）**：全量 suite 红与本案改动无关——3 个 `@load-sensitive` session-liveness probe 测试确定性失败（连续多轮同签名）：① `session-liveness-scd-inflight-changing`（lowconc）`worktree add wt-2 … No such file or directory`＝`gap-session-liveness-worktree-fixture-repo-vanishes` 残留（`dirContainsGitRepo` 未覆盖实际删除路径）；② `session-liveness-restart`（engine，~211s）与 ③ `session-liveness-scd-busy`（lowconc，~212s）＝probe 饿死超时。re-triage `01374fbad` 声称「probe 饿死 + worktree add 失败两类根因全根治」但零代码改动（仅 3 个 task 状态翻转）⇒ 根治不成立，独立缺陷需另行立案。本案 `--for-task` scoped 门已绿（历轮均至 step=suite 才红）。
+
 ## Definition of Done
 
 真实运行的机械 fan-in 在 `.quay/gate-events.jsonl` 里留下了 `complete` pass 事件（取①），或 `bypassComplete` 判据已被显式退役且退役裁定写进脚本头注释与本任务体（取②）——**判据落在生产载体上，不是落在测试或 fixture 上**；AC4 的负控制输出已贴出，证明该判据能取假；`gap-loop-completion-path-produces-zero-gateevents` 的 AC2 在新路径上重新成立（取①）或被显式撤销（取②），两条任务之间不再互相矛盾；改动经 fan-in 落到 develop 并可 `git show develop:` 核验。
