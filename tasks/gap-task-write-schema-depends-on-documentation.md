@@ -43,5 +43,6 @@ Standard clauses (inherited; this is docs-only, no new shipped code):
 
 - `packages/quay-native/src/mcp-server.ts`
 - `plugin/scripts/task-schema.ts`
+- `experiments/quay-perpetual-stream/scripts/task-schema.ts` (canonical source; dual-copy mirror of the above)
 - `CLAUDE.md`
 - `tasks/gap-task-write-schema-depends-on-documentation.md` (self)
