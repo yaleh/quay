@@ -1,7 +1,7 @@
 ---
 id: gap-needs-human-note-missing-real-error-line
 title: "## Needs-Human 记录「失败步/判词」suite red 时恒为「suite red」——缺真实报错首行，人工每次要开日志 grep"
-status: ready
+status: done
 labels:
   - gap
   - defect
