@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-scd-target-move-to-serial
 title: session-liveness scd-* 全家 + target 移 serial（probe 在 lowconc 持续 flaky 误杀无关任务）
-status: ready
+status: done
 labels:
   - gap
   - defect
