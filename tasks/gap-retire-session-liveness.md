@@ -1,7 +1,7 @@
 ---
 id: gap-retire-session-liveness
 title: 退役 session-liveness（含 mount + 22 个测试 + monitor-mount-check + 引用清理），随 tmux 退役
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
