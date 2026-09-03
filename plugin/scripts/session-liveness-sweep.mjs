@@ -161,6 +161,30 @@ export function dirHasLiveOwner(dir) {
   return false;
 }
 
+/** dirContainsGitRepo(dir, maxDepth) — does `dir` contain a git repository or a linked worktree?
+ * A git repo carries a `.git` DIRECTORY; a linked worktree carries a `.git` FILE pointing back at the
+ * main repo's `.git/worktrees/<branch>`. Either marks the subtree IN-USE by a live test: the
+ * session-liveness SCD family nests its `repo` + `worktree`s INSIDE the hermetic probe dir, so the
+ * repo's liveness is INHERITED from the probe's tmux socket — but the socket is only a PROXY for "the
+ * test is still here" (CLAUDE.md 硬规则 4b: prefer the direct signal). This is the git-twin of that
+ * socket signal: a probe dir whose socket is momentarily gone (server killed mid-test under suite
+ * load) must STILL not be swept while it holds an active git repo — deleting the repo is the
+ * `worktree add … No such file or directory` failure this task closes
+ * (gap-session-liveness-worktree-fixture-repo-vanishes). fs-only, best-effort, bounded depth. */
+export function dirContainsGitRepo(dir, maxDepth = 2) {
+  let entries;
+  try { entries = fs.readdirSync(dir); } catch { return false; }
+  for (const name of entries) {
+    if (name === ".git") return true; // dir IS a repo (or a linked worktree's .git file)
+    if (maxDepth <= 0) continue;
+    const abs = path.join(dir, name);
+    let st;
+    try { st = fs.statSync(abs); } catch { continue; }
+    if (st.isDirectory() && dirContainsGitRepo(abs, maxDepth - 1)) return true;
+  }
+  return false;
+}
+
 /** serverPidOf(dir) — the PID of the LIVE process holding a listening socket under `dir`
  * (the tmux SERVER daemon a hermetic probe started), or null when no such socket is live.
  * The server daemon is detached (PPID=1 after its `tmux new-session` client exits), so a graceful
@@ -486,6 +510,10 @@ export function sweepRunNamespace(id) {
     try { isDir = fs.statSync(abs).isDirectory(); } catch { continue; }
     if (!isDir) continue;
     if (dirHasLiveOwner(abs)) continue;
+    // gap-session-liveness-worktree-fixture-repo-vanishes: a dir holding an active git repo (the SCD
+    // worktree fixture nests `repo` + `worktree`s inside the probe dir) is IN-USE even when its tmux
+    // socket is gone — never sweep an active repo dir.
+    if (dirContainsGitRepo(abs)) continue;
     try { fs.rmSync(abs, { recursive: true, force: true }); } catch { /* best-effort */ continue; }
     cleaned.push(abs);
   }

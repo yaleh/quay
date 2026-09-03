@@ -39,7 +39,7 @@ import {
   tmuxAvailable,
   setProbeTmpPrefix, sessionLivenessAfter, sweepTmp, reapLiveOwners, dirHasLiveOwner, probeRoot, serverPidOf,
   makeHermeticProbe, spawnMonitor, waitForRounds, startTouchLoop, reapSpawnedChildren, serverPidsOfByCmdline,
-  teardownProbe, killRegisteredServers, readServerRegistry,
+  teardownProbe, killRegisteredServers, readServerRegistry, dirContainsGitRepo, makeRepoWithDevelop,
 } from "./session-liveness-helpers.mjs";
 // serverPidViaPaneEnv is the socket-close-surviving fallback added by
 // gap-session-liveness-teardown-ol-scd-d-residual; session-liveness-helpers.mjs does not re-export
@@ -79,6 +79,31 @@ test("AC4/AC3 — sweepTmp keeps a LIVE probe (owner session alive) and cleans o
   } finally {
     p.cleanup();
     try { fs.rmSync(residue, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+
+test("AC3 — sweepTmp keeps a dir holding an ACTIVE git repo even with NO live tmux socket (repo liveness, not socket liveness)", () => {
+  // gap-session-liveness-worktree-fixture-repo-vanishes: the SCD worktree fixture nests `repo` +
+  // linked `worktree`s INSIDE the hermetic probe dir. The probe dir's owner-liveness is the tmux
+  // socket; the repo's liveness is its git object. When the socket is gone (server killed mid-test
+  // under suite load) but the repo is still there, sweepTmp must NOT delete it — deleting the repo
+  // is the `worktree add … No such file or directory` failure this task closes. This proves the
+  // git-repo signal is an INDEPENDENT "in-use" criterion: a residue dir with a real git repo but no
+  // live tmux owner SURVIVES sweepTmp, while (per AC4 above) a residue dir with no repo and no owner
+  // is cleaned.
+  const parent = fs.mkdtempSync(path.join(probeRoot(), "session-liveness-swp-"));
+  const repo = path.join(parent, "repo");
+  try {
+    makeRepoWithDevelop(repo, { backdateMin: 0 }); // real git repo: parent/repo/.git
+    assert.ok(dirContainsGitRepo(parent),
+      "the residue dir must report containing a git repo (repo/.git nested one level)");
+    assert.ok(!dirHasLiveOwner(parent),
+      "the residue dir must report NO live tmux owner (no socket under it)");
+    sweepTmp("session-liveness-swp-");
+    assert.ok(fs.existsSync(repo),
+      "a dir holding a git repo must NOT be swept even with no live tmux socket (repo is in-use)");
+  } finally {
+    try { fs.rmSync(parent, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
 });
 
