@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  extractSection, parseTask, hasSchemaMarker, classifyKind,
+  extractSection, parseTask, parseFrontmatterCompletely, hasSchemaMarker, classifyKind,
   readDependsOn,
   checkProposal, checkPlan, checkAcceptanceChecklist, checkDodChecklist,
   checkResolution, checkNoScaffolding,
@@ -45,6 +45,36 @@ test("parseTask: no frontmatter → empty labels/extra, whole text as body", () 
   const t = parseTask("just body");
   assert.deepEqual(t.labels, []);
   assert.equal(t.body, "just body");
+});
+
+// ── nested extra structures (gap-parseTask-nested-extra-support) ─────────────────────────────
+// parseTask must read NESTED `extra` structures (lists and maps) faithfully via the single YAML
+// parser — the task_write serialization shape (`extra: { depends_on: [a, b] }`) round-trips as an
+// array, never the empty-string scalar the old lenient hand-parse silently returned.
+test("parseTask: nested extra.depends_on array round-trips (task_write shape, not empty string)", () => {
+  const t = parseTask(`---\nid: T\ntitle: t\nstatus: todo\nlabels: [gap]\nextra:\n  schema: "v1"\n  depends_on: [dep1, dep2]\n---\nbody`);
+  assert.deepEqual(t.extra.depends_on, ["dep1", "dep2"]);
+  assert.equal(t.extra.schema, "v1");
+});
+test("parseTask: nested lists in extra are preserved as arrays (incl. list-of-lists)", () => {
+  const t = parseTask(`---\nid: T\nextra:\n  schema: "v1"\n  tags: [a, b, c]\n  matrix: [[1, 2], [3, 4]]\n---\nb`);
+  assert.deepEqual(t.extra.tags, ["a", "b", "c"]);
+  assert.deepEqual(t.extra.matrix, [[1, 2], [3, 4]]);
+});
+test("parseTask: nested objects in extra are preserved as maps (incl. nested map)", () => {
+  const t = parseTask(`---\nid: T\nextra:\n  schema: "v1"\n  meta:\n    owner: alice\n    flags:\n      urgent: true\n---\nb`);
+  assert.deepEqual(t.extra.meta, { owner: "alice", flags: { urgent: true } });
+});
+test("parseTask: scalar-only extra still works, and coexists with nested keys (backward compat)", () => {
+  const t = parseTask(`---\nid: T\nextra:\n  schema: "v1"\n  dirStatus: applied\n  depends_on: [a]\n---\nb`);
+  assert.equal(t.extra.schema, "v1");
+  assert.equal(t.extra.dirStatus, "applied");
+  assert.deepEqual(t.extra.depends_on, ["a"]);
+});
+test("parseFrontmatterCompletely: nested extra survives the complete parser", () => {
+  const fm = parseFrontmatterCompletely(`extra:\n  schema: "v1"\n  depends_on: [dep1, dep2]\n  nested:\n    k: v\n`);
+  assert.deepEqual(fm.extra.depends_on, ["dep1", "dep2"]);
+  assert.deepEqual(fm.extra.nested, { k: "v" });
 });
 
 // ── readDependsOn ────────────────────────────────────────────────────────────────────────────────
