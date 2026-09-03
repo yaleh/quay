@@ -1,7 +1,7 @@
 ---
 id: gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky
 title: 机械 needs-human 翻转不区分「任务自身缺陷」与「与本任务改动无关的既有 flaky」——两者共用同一份 3 次重试预算
-status: ready
+status: done
 labels:
   - gap
   - defect
