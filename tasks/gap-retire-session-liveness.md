@@ -1,7 +1,7 @@
 ---
 id: gap-retire-session-liveness
 title: 退役 session-liveness（含 mount + 22 个测试 + monitor-mount-check + 引用清理），随 tmux 退役
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -189,3 +189,15 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/workflows/fan-in-execute.js
 - scripts/test.sh
 - tasks/gap-retire-session-liveness.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-03T11:00:21.670Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=merge-develop: Auto-merging tasks/gap-retire-session-liveness.md
+CONFLICT (content): Merge conflict in tasks/gap-retire-session-liveness.md
+Automatic merge failed; fix conflicts and then commit the result.
+- run_id：wk-prod-1788285192
+- session_id：dff30fd4-bc1b-4ce7-a507-cb6fd599cd98
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
