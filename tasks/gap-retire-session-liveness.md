@@ -22,6 +22,8 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 
 **关键约束**：退役是「删 + 清引用」，不是「改判据」——凡依赖 session-liveness 输出（SESSION-* 事件 / monitor 挂载）的下游，要么一并退役该下游分支，要么改成不再依赖它（硬规则 5 来源完备性：删完 grep 命中数归零，不得留悬空引用）。
 
+**⛔ 方向（人 2026-09-03 裁决「彻底删，而非重命名」）**：前几轮 worker 误把 session-liveness 引用**重命名**为不存在的 `hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh`（`plugin/skills/{init,manager}/SKILL.md`、`plugin/test/quay-init-*.test.mjs`、`cold-start-skill.test.mjs` 等），这是方向错误。正确做法是**删除**这些引用（改判或删分支），**不得**引入任何 `hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh` 新脚本引用。repo 已有的 `plugin/test/helpers/hermetic-tmux.mjs` 测试 helper 与本次退役无关，保持原样不动。
+
 ## Plan
 
 1. 枚举 session-liveness 的全部消费方（147 个文件：orchestration 文档 / packages 代码 / plugin/loop 文档 / plugin/scripts / plugin/test / skills / workflows / scripts/test.sh），确认哪些是「可删」、哪些是「需改判」。
@@ -31,7 +33,7 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`grep -r "session-liveness" plugin/ scripts/ packages/ orchestration/` 命中数归零（或仅剩「退役说明」注释），打印命中行。
+- [ ] AC1（能取假）：`grep -rE "session-liveness|hermetic-tmux\.sh|hermetic-tmux-mount-check\.sh" plugin/ scripts/ packages/ orchestration/` 命中数归零（或仅剩「退役说明」注释），打印命中行；`hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh` 是前几轮误引入的重命名悬空引用，一并删除（`plugin/test/helpers/hermetic-tmux.mjs` 不在本范围）。
 - [ ] AC2（连带退役）：`monitor-mount-check.sh` / `monitor-mount-check.test.mjs` 一并删除（无对象可查）。
 - [ ] AC3（无悬空引用）：凡引用 SESSION-* 事件 / session-liveness 输出的下游脚本，不得出现「因缺 session-liveness 而恒红/报未挂载」的分支。
 - [ ] AC4（既有不回归）：全量 suite 绿（删测试后 @test-group ratchet / baseline / suite-bucket-reattribution 同步更新）。
