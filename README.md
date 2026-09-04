@@ -443,7 +443,7 @@ invented examples.
 unrecognized/missing subcommand):
 
 ```
-usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|action list|serve|mcp|manager start|manager adopt> ...
+usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|action list|serve|mcp|manager start|manager arm> ...
 Run `quay --help` for full usage documentation.
 ```
 

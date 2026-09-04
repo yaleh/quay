@@ -26,7 +26,7 @@ All must hold before starting; if any fails, STOP and report which precondition 
 | loop mechanism laid down | `<root>/plugin/scripts/fast-mode-telemetry.ts` exists |
 | tick docs laid down | `<root>/orchestration/orchestrator-loop-tick.md` and `<root>/docs/analysis/fast-mode-loop-tick.md` exist |
 | launch config laid down | `<root>/.claude/launch.settings.json` exists (quay-init `--loop` lays the default template; the consumer edits model/env per project) |
-| **sessions launched via the laid-down launcher** | outer and inner windows were started by **`bash <root>/plugin/scripts/quay-launch.sh <role>`** (or `bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer`), which carries `--settings` + the role-convention name (`quay-outer`/`quay-inner`) — **never** a hand-typed bare `claude` one-liner, **never** a non-role window name like `inner` |
+| **sessions launched via the laid-down launcher** | sessions were started by **`bash <root>/plugin/scripts/quay-launch.sh <role>`**, which carries `--settings` + the role-convention name (`quay-outer`/`quay-inner`) — **never** a hand-typed bare `claude` one-liner, **never** a non-role window name like `inner` |
 | inner session reachable | tmux session from `<root>/orchestration/session-liveness.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
 | derived laydown set green | the plugin's DERIVED laydown set is green — `bash <quay-source>/plugin/scripts/laydown-set-check.sh` reports `laydown_set_green: green`. **Gate = the derived set (lay what you verify), NOT the whole suite** — an unrelated suite failure must NOT block the cold start (`gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`; cross: `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`, same scope axis, different mechanism) |
 
@@ -41,8 +41,7 @@ Level3 首跑):** the two sessions were hand-started (outer process with NO `--s
 named `inner` instead of the role-convention `quay-inner`), so the laid-down `quay-launch.sh` was
 never used. A session is cold-start-eligible ONLY when it was started by the launcher: outer via
 `bash <root>/plugin/scripts/quay-launch.sh outer` (window name `quay-outer`, carries `--settings`),
-inner via `bash <root>/plugin/scripts/quay-launch.sh inner` (window name `quay-inner`), from bare
-metal via `bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer`. If a window exists
+inner via `bash <root>/plugin/scripts/quay-launch.sh inner` (window name `quay-inner`). If a window exists
 but was NOT started by the launcher (no `--settings` / wrong name), restart it through the launcher
 before proceeding — a cold start in hand-started windows repeats the F4 defect. `quay-launch.sh
 --dry-run` prints the exact command each role would get.
@@ -82,7 +81,7 @@ start did NOT complete.
 | 2 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts` — a BARE-FILENAME reference, resolved by quay-init's laydown derivation under plugin/scripts/, gap-laydown-derivation-is-sensitive-to-reference-spelling; Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
 | 3 | `TELEMETRY-RECORD` | `<root>/.workflow-events/` contains at least one `.jsonl` file carrying a `--task-start`-written record (the runId from the first `fast-mode-telemetry.ts --task-start --taskId <id> --root <root>`) | `ls <root>/.workflow-events/` + grep for the task-start record |
 | 4 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
-| 5 | `TOPOLOGY-IN-PLACE` | The two-window session topology is in place per the factory definition — `bash <root>/plugin/scripts/topology-check.sh --session <session> --json` reports `ok: true` (each of `<session>:outer/:inner` exists AND has a claude process, not a bare bash window). manager is cross-project and NOT part of this topology. A single-bash-window session (the meta-cc-3/archguard-4 failure shape) MUST report `ok: false` | the `--json` output (`ok: true` + both windows `ok`) |
+| 5 | `TOPOLOGY-IN-PLACE` | The two-window outer/inner session topology was retired with the outer tmux session (`gap-retire-outer-tmux-window-logic`) — this key is vacuous (no session topology remains to verify). manager is cross-project and NOT part of any project topology | n/a — retired |
 
 **Manager cold start is NOT this checklist** — a project cold start never starts the manager
 (delivery ≠ startup, AC8). The manager layer has its OWN five-key falsifiable checklist
@@ -271,33 +270,13 @@ ls -l <root>/.git/hooks/pre-commit   # verify — present and executable
 Require exit 0 AND the hook file present. Non-git workspaces (no `.git/hooks`) skip — there is no
 commit surface to guard.
 
-### 2. Build and verify the two-window session topology (AC4 — the other half of 装得上)
+### 2. Session topology — retired (AC4 — the other half of 装得上)
 
-The session the loop lives in is built **by definition**, never hand-assembled
-(`gap-tmux-session-topology-no-factory-definition`; two-window correction
-`gap-manager-baked-into-project-topology-factory` — manager is cross-project, not part of the
-project topology). The definition ships in the `quay-session-topology` skill; this step applies
-it. **Bare-metal entry (`gap-no-formalized-bare-metal-session-bootstrap`):** if the session does
-NOT exist yet (nothing to build on), first run
-`bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer` — the formalized
-from-bare-metal step that produces a session with live claude windows, after which this topology
-factory/check applies idempotently. **Cross-annotation
-(`gap-outer-self-checks-and-creates-inner-session`):** this step is the
-build-by-definition half; the OUTER's own cold-start path
-(`orchestration/orchestrator-loop-tick.md` step 3) independently SELF-CHECKS inner in four
-states — healthy (window+process+user message) ⇒ untouched, empty-shell (window+process, no user
-message) ⇒ driven not rebuilt, missing (no window or process) ⇒ calls this same factory; a
-discovery-sourced transcript (`transcriptSource==discovery`) is **degraded** (fail-closed — stderr
-alarm, never silently healthy/empty-shell).
-
-```bash
-bash <root>/plugin/scripts/quay-topology.sh --session <session>        # build: outer/inner per definition (idempotent; manager is cross-project, not built here)
-bash <root>/plugin/scripts/topology-check.sh --session <session> --json # verify: each window exists AND has a claude process
-```
-
-Require the check to report `ok: true`. A single-bash-window session (the meta-cc-3 / archguard-4
-failure shape) reports `ok: false` — STOP; a cold start in a hand-built single-bash-window session
-would start the loop in a session that is visibly not the shipped topology.
+The two-window session topology (outer/inner) was retired with the outer tmux session
+(`gap-retire-outer-tmux-window-logic`) — the outer session role was absorbed into the manager's
+direct subagent dispatch, and the inner session was already replaced by the worker-driver. There is
+no session topology factory/check to build or verify anymore; the `TOPOLOGY-IN-PLACE` key above is
+vacuous. manager is cross-project and NOT part of any project topology.
 
 ### 5. Re-create the 20-minute cron — THE single loop driver (session-scoped: dies when the session PROCESS exits)
 

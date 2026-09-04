@@ -25,8 +25,8 @@ any quay install can bring up a manager; it is not a quay-local artifact in `orc
 
 **manager is above outer, below the human.** It is started by the human (or an OS anchor), never by
 a project's outer, and never by a project's cold start. A project cold-start skill
-(`plugin/skills/cold-start/SKILL.md`) must NOT start it — `quay-topology.sh` builds `outer`+`inner`
-only, and the cold-start's `TOPOLOGY-IN-PLACE` key excludes manager.
+(`plugin/skills/cold-start/SKILL.md`) must NOT start it — the manager is cross-project and NOT part
+of any project's session topology (one network = one manager).
 
 ## Cadence — the daily review (mechanism, not memory)
 
@@ -140,9 +140,9 @@ human/agent never types it directly. The per-role launch command lives in the ch
 `.claude/launch.settings.json` (`_launchSpec.roles.*`, settings-schema keys + `_launchSpec`
 extension); the manager role runs the Anthropic default model — the deepseek 917k
 context/compaction vars are outer/inner-only by `_launchSpec` design. To start the manager,
-invoke the skill that owns launching (the `quay-session-topology` skill's Method, or the session
-bootstrap) — never hand-type a shell one-liner from memory. The launch script is the skill's
-internal pipe, not a user-facing deliverable.
+start the manager via `quay manager start` (the manager's own launch script) — never hand-type a
+shell one-liner from memory. The launch script is the skill's internal pipe, not a user-facing
+deliverable.
 
 ## Delivery ≠ startup (AC8)
 
@@ -309,7 +309,7 @@ allowed-tools: Bash, Read, Monitor
 
 启动参数**只存在于检查进仓库的** `.claude/launch.settings.json`（settings-schema 键 + `_launchSpec`
 扩展），由本 skill 的内部启动器物化为真实命令——**永不手打一行 shell**；启动脚本是 skill 背后的
-内部实现，不是用户/agent 直接调用面（启动走 `quay-session-topology` skill 的 Method）。
+内部实现，不是用户/agent 直接调用面（启动走 `quay manager start`）。
 
 - **outer / inner**：`claude-deepseek --model deepseek-v4-flash` + `CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000`
   （launcher 统一追加 `--prompt-suggestions false`——**REQUIRED**，ghost-suggestion 故障 6 从源头消除，
@@ -334,9 +334,9 @@ dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份�
 同样需要跨项目协调；**不交付 = 人人重发明**。
 
 **启动**：项目的 cold-start（`plugin/skills/cold-start/SKILL.md`）**不得启动** manager——manager 不属
-项目冷启动范围，**一个 network 一个 manager 就够**。项目拓扑工厂 `plugin/scripts/quay-topology.sh`
-只建 `outer inner` 两窗口（`ROLES="outer inner"`）；cold-start 的 `TOPOLOGY-IN-PLACE` 键明示
-「manager is cross-project and NOT part of this topology」。机械复制 quay 三窗口到 meta-cc/archguard
+项目冷启动范围，**一个 network 一个 manager 就够**。会话拓扑工厂已随 outer tmux 会话退役
+（`gap-retire-outer-tmux-window-logic`）；cold-start 明示「manager is cross-project and NOT part of
+this topology」。机械复制 quay 会话拓扑到 meta-cc/archguard
 已犯过（管理者自陈 + 自查改回 bash/outer/inner）——**交付物里有 manager 不意味着冷启动要启动它。**
 
 ---
@@ -354,7 +354,7 @@ dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份�
 | 2 | `CRON-CREATED` | `CronList` 恰一 `[manager-tick]`（agent 在会话内确认；bash 看不到） | `CronList` 输出 |
 | 3 | `REGISTRY-MATCHES` | 注册表 ↔ 真 cron 可核实：`bash <quay>/plugin/scripts/manager-arm-loop.sh --verify --home <home>` 报 `registry-verified`（恰一哨兵 + 新鲜 CronCreate 收据；`registry-only` = 注册表说武装了但没核实 = 缺陷） | `--verify` 输出 |
 | 4 | `FIRST-TICK-LANDED` | 首轮 tick 落行：`bash <quay>/plugin/scripts/manager-tick-log-check.sh --log <home>/manager-tick-log.md` PASS | check 输出 |
-| 5 | `NOT-STARTED-BY-PROJECT` | manager 是跨项目第三层，**不属于任何项目的 `outer`+`inner` 拓扑**——`topology-check.sh --session <proj>` 只报两窗口，`quay manager start` 拒收项目参数（start/adopt 分离，C5） | topology `--json` + start 拒绝输出 |
+| 5 | `NOT-STARTED-BY-PROJECT` | manager 是跨项目第三层，**不属于任何项目的会话拓扑**——`quay manager start` 拒收项目参数（C5） | start 拒绝输出 |
 
 判据能机械回答的四问：**cron 存在?（#2/#3）首轮 tick 留痕?（#4）家目录三件套齐?（#1）**——
 没有一条是「agent 说完成了」。

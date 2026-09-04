@@ -23,9 +23,9 @@
 //             (index only, no batch crystallization) — every on-disk SPEC is listed.
 //   AC7     — this file is node:test + // @test-group engine.
 //   AC8     — delivery vs startup independence: the plugin SHIPS the manager layer (the file above),
-//             but the project cold-start does NOT start it — quay-topology.sh builds only
-//             `outer`, and the cold-start TOPOLOGY-IN-PLACE key states manager is NOT part of
-//             the project topology (one network = one manager).
+//             but the project cold-start does NOT start it — the cold-start states manager is NOT
+//             part of the project topology (one network = one manager). (The outer session topology
+//             factory was retired with the outer tmux session — gap-retire-outer-tmux-window-logic.)
 //
 // Run:
 //   scripts/test.sh plugin/test/manager-layer-shipping.test.mjs
@@ -45,7 +45,6 @@ const MANAGER_SKILL = path.join(pluginDir, 'skills', 'manager', 'SKILL.md');
 const COLD_START_SKILL = path.join(pluginDir, 'skills', 'cold-start', 'SKILL.md');
 const LAUNCH_SETTINGS = path.join(repoRoot, '.claude', 'launch.settings.json');
 const PROFILES = path.join(repoRoot, '.quay', 'profiles.yml');
-const TOPOLOGY_FACTORY = path.join(pluginDir, 'scripts', 'quay-topology.sh');
 const PORTABILITY_DOC = path.join(repoRoot, 'docs', 'proposals', 'fast-mode-cross-project-portability.md');
 const SPEC_DIR = path.join(repoRoot, 'orchestration');
 
@@ -117,20 +116,14 @@ test('AC6 — the manager SKILL indexes every on-disk orchestration/SPEC-*.md (i
 });
 
 // ── AC8: delivery vs startup independence — the plugin ships the manager, the cold-start does NOT start it ──
-test('AC8 — cold-start must NOT start the manager (one network = one manager); the topology factory builds only outer', () => {
+test('AC8 — cold-start must NOT start the manager (one network = one manager)', () => {
   const cold = fs.readFileSync(COLD_START_SKILL, 'utf8');
-  // The TOPOLOGY-IN-PLACE key must state manager is NOT part of the project topology.
+  // The cold-start must state manager is NOT part of the project topology.
   assert.match(cold, /manager is cross-project and NOT part of this topology|manager 跨项目|manager is cross-project/,
-    'cold-start TOPOLOGY-IN-PLACE must state manager is NOT part of the project topology (AC8)');
+    'cold-start must state manager is NOT part of the project topology (AC8)');
   // The cold-start must NOT instruct creating/driving a manager window.
   const managerStartHits = cold.split('\n').filter((l) => /manager/i.test(l) && /(quay-launch\.sh manager|:manager|manager 窗口|manager window)/i.test(l));
   assert.deepEqual(managerStartHits, [], 'cold-start must not instruct starting a manager window (AC8)');
-
-  // The topology factory builds outer only (the manager and the retired inner are not project-topology windows).
-  assert.ok(fs.existsSync(TOPOLOGY_FACTORY), 'plugin/scripts/quay-topology.sh must exist');
-  const topo = fs.readFileSync(TOPOLOGY_FACTORY, 'utf8');
-  assert.match(topo, /ROLES="outer"/, 'quay-topology.sh must build ONLY the outer window (AC8)');
-  assert.ok(!/ROLES=.*manager/.test(topo), 'quay-topology.sh must NOT include manager in the project-topology roles (AC8)');
 });
 
 // ── Contract measure guard: the shipping scan must not be starved ───────────────────────────────────

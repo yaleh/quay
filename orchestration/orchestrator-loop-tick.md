@@ -77,52 +77,12 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report -
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 ```
 
-**3. 自检内层会话（三态处理，gap-outer-self-checks-and-creates-inner-session）——不是「找到」，是「确保」**
+**3. 自检内层会话**——已退役（`gap-retire-outer-tmux-window-logic`）
 
-内层不再是「找到就行」——冷启动第 3 步改为**自检**：inner 窗口在不在、claude 进程活不活、
-transcript 有没有真实 user 消息（被驱动过）。三态判定与处理（判据用可信的：窗口按名寻址、
-进程看 `/proc` cmdline、user 消息看 transcript——不用 pane 哈希假阳、不用 heartbeat 冻结假警）：
-
-| 状态 | 判定 | 处理 |
-|---|---|---|
-| **健康** | inner 窗口存在 **且** claude 进程存在 **且** transcript 有真实 user 消息 | **什么都不做**（权限边界——已存在的 inner 可能是 manager 建的，外层无权判断/重建/改参数），直接进入正常驱动流程 |
-| **空壳** | inner 窗口存在 **且** claude 进程存在 **但** transcript 无真实 user 消息（被拉起但未驱动，11:40 watchdog 形态） | **驱动而非重建**——不丢可能已有的上下文，接手 manager 预建的会话 |
-| **缺失** | inner 窗口不存在 **或** 无 claude 进程 | 调 `quay-topology.sh` 创建**两窗口**拓扑（outer+inner，manager 跨项目不属于项目拓扑）+ 起 inner claude（checked-in launch 命令），然后驱动 inner |
-
-```bash
-bash plugin/scripts/outer-session-check.sh --json   # 三态自检：{state: healthy|empty-shell|missing, window, process, transcript, transcriptFresh}
-```
-
-> **⚠️ 2026-08-24「缺失 ⇒ 重建」改为条件性（人裁定停 inner，AC141 收窄 inner 执行面）**：
-> AC141 把 inner 的执行面收窄为「默认 defer 给 worker-driver」（worker-driven 模型），
-> manager 核实 inner 冷启动后 57min 零真实任务执行；人 2026-08-24 明确裁定**把 inner 停掉**。
-> ⇒ **本步「缺失 ⇒ 无条件重建」不再适用**——inner 缺失时**不自动重建**（重建前先确认
-> inner 在 worker-driven 模型下是否仍有必须存在的职责；若仅剩自检/锚点价值，可保持停止）。
-> 实证代价：2026-08-24 外层冷启动/恢复各无条件重建了一次 inner，被 manager 按人裁定叫停
-> （两次都多建了一个被停掉的会话）。
-
-按 `state` 分派：
-
-- **`healthy`** ⇒ 什么都不做——不重建、不重启、不改启动参数（权限边界，负控制：健康 inner 不被动）。
-  继续步骤 4（重建 cron）。
-- **`empty-shell`** ⇒ **驱动** inner（**默认原生 SendMessage：ListAgents 寻址 inner、busy 直投、身份平台标注**；原生不可用时回退 send-keys-reliable，transcript 验证送达，不假设成功）：
-  ```bash
-  bash plugin/scripts/send-keys-reliable.sh "$TMUX_SESSION:inner" "执行 $REPO_ROOT/docs/analysis/fast-mode-loop-tick.md 中的 tick 指令" <inner-transcript>
-  ```
-- **`missing`** ⇒ 调**两窗口**工厂创建拓扑，验证在位，然后同样驱动 inner：
-  ```bash
-  bash plugin/scripts/quay-topology.sh --session "$TMUX_SESSION"          # 两窗口工厂（outer+inner，幂等；manager 跨项目，不建）
-  bash plugin/scripts/topology-check.sh --session "$TMUX_SESSION" --json   # 验证：ok:true = 两窗口各有 claude 进程
-  ```
-  创建后 **INNER-DRIVEN 验证送达**：原生 SendMessage 通道以 send 结果/回执确认；回退通道看
-  transcript 出现真实 user 消息（send-keys-reliable 的 `transcript-delivery-check.ts` 判据），不假设成功。
-  **工厂失败/验证不过 ⇒ 升级给人**（step 5），不静默继续——建不出来就进不了正常驱动流程。
-
-**transcript 路径解析**（outer-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
-> `orchestration/session-liveness.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
-且不是外层自己的 jsonl，标 `source=discovery`）。找不到 transcript = fresh = 空壳判据（驱动不重建）。
-**发现路径是启发式**：`healthy` 判定若来自 `source=discovery`，先确认所选 transcript 确实是**当前**
-inner 会话的（例如 inner claude 进程启动时刻之后的），否则按空壳驱动——驱动不重建，代价有界。
+内层会话已由 worker-driver 派发取代（`gap-retire-inner-session-references`），外层独立 tmux 会话角色
+也已撤销——本步的三态 tmux 窗口自检与两窗口拓扑工厂/检查一并退役。内层的存活与驱动不再经本层
+tmux 窗口检查，改由 driver 机制承担。跨会话投递仍**默认原生 SendMessage**（C1 硬约束，ListAgents 寻址、
+身份平台标注；回退 send-keys-reliable 仅限原生不可用环境）——该纪律不随本步退役。
 
 **4. 重建 cron —— 唯一的循环驱动，这一步最容易漏**
 
@@ -292,23 +252,9 @@ from the derived set it fails closed (red) — a silent "nothing checked" green 
 
 ### bare-metal 会话引导背景
 
-**From bare metal to a session is ONE command (`gap-no-formalized-bare-metal-session-bootstrap`).**
-The cold-start skill runs inside an already-existing outer session — the step BEFORE that (bare
-metal → a tmux window layout with a Claude Code process live in each pane) is the formalized product
-`plugin/scripts/session-bootstrap.sh <root> <layout>`:
-
-```bash
-bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer        # project topology
-bash <root>/plugin/scripts/session-bootstrap.sh <root> manager/inner/outer # full quay-0-shaped layout
-```
-
-It creates each named window (idempotent — re-runs leave live windows alone), launches each role's
-Claude Code process via the checked-in launcher `quay-launch.sh` (the skill's internal
-implementation, never a user-facing invocation), verifies each process is actually alive (the same
-`/proc` process-detection `session-liveness.sh` uses), and exits non-zero naming the failing window
-if any window cannot be confirmed live (fail-closed). After it returns, the cold-start skill's
-"inner session reachable" precondition is already satisfied — the same command a cold start used to
-follow ("hand-build the session, then one command") is now truly one command.
+**From bare metal to a session is ONE command** —— 该形态（`session-bootstrap.sh` 裸机会话引导）已随
+外层 tmux 会话退役（`gap-retire-outer-tmux-window-logic`）。外层独立会话角色已撤销、内层已由
+worker-driver 派发取代，不再有「裸机 → tmux 窗口布局」这一步需要引导。
 
 ### launch config 与 ghost-suggestion 背景
 

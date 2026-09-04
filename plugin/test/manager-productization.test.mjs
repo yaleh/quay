@@ -3,9 +3,9 @@
 //
 // Pins the productization mechanics:
 //
-//   AC1/AC2/AC7 — `quay manager start` (no project args; independent session + $QUAY_GLOBAL_DIR/
-//                 manager/ home) + `quay manager adopt <root>` (three-state reuse of
-//                 outer-session-check.sh). Adopt registers only — actionCountAfter = 0 (AC12b).
+//   AC1/AC2 — `quay manager start` (no project args; independent session + $QUAY_GLOBAL_DIR/
+//             manager/ home). `quay manager adopt <root>` was retired with the outer tmux session
+//             (gap-retire-outer-tmux-window-logic) — its three-state outer check no longer exists.
 //   AC5/AC5c   — the manager loop anchor arm is sentinel-idempotent: arm twice without knowing any
 //                 cron ID ⇒ exactly ONE `[manager-tick]` entry (criteria ①); the negative control
 //                 (two duplicates pre-seeded ⇒ converge to one) is criteria ②. The arm validates
@@ -41,10 +41,8 @@ const pluginDir = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(pluginDir, "..");
 
 const MANAGER_START = path.join(pluginDir, "scripts", "manager-start.sh");
-const MANAGER_ADOPT = path.join(pluginDir, "scripts", "manager-adopt.sh");
 const MANAGER_ARM = path.join(pluginDir, "scripts", "manager-arm-loop.sh");
 const TICK_LOG_CHECK = path.join(pluginDir, "scripts", "manager-tick-log-check.sh");
-const OUTER_CHECK = path.join(pluginDir, "scripts", "outer-session-check.sh");
 const TICK_DOC = path.join(pluginDir, "loop", "manager-loop-tick.md");
 const QUAY_CLI = path.join(repoRoot, "packages", "quay", "bin", "quay.ts");
 
@@ -151,82 +149,6 @@ test("AC1/C5 — `quay manager start --dry-run` refuses a project arg (start ≠
   const r = spawnSync("node", ["--experimental-strip-types", QUAY_CLI, "manager", "start", "--dry-run", "/some/project"], { encoding: "utf8" });
   assert.equal(r.status, 1, `manager start must refuse project args:\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stderr, /NO project args|manager start|Unknown argument/, "must refuse with a C5-separation message");
-});
-
-test("AC1/AC7 — `quay manager adopt` requires a project root and is dry-runnable (three-state via outer-session-check)", () => {
-  // No root → usage error.
-  const noRoot = spawnSync("node", ["--experimental-strip-types", QUAY_CLI, "manager", "adopt", "--dry-run"], { encoding: "utf8" });
-  assert.equal(noRoot.status, 1, `adopt without root must fail:\n${noRoot.stdout}\n${noRoot.stderr}`);
-  assert.match(noRoot.stderr, /missing required <root>/);
-
-  // A real (tmp) root with a session-liveness.env → three-state dry-run disposition.
-  const tmp = makeTmp();
-  try {
-    fs.mkdirSync(path.join(tmp, "orchestration"), { recursive: true });
-    fs.writeFileSync(path.join(tmp, "orchestration", "session-liveness.env"), "SESSION_TMUX_SESSION=proj-0\n", "utf8");
-    const r = spawnSync("node", ["--experimental-strip-types", QUAY_CLI, "manager", "adopt", tmp, "--dry-run"], { encoding: "utf8" });
-    assert.equal(r.status, 0, `adopt --dry-run must exit 0:\n${r.stderr}`);
-    assert.match(r.stdout, /would-adopt/, "must print the would-adopt disposition");
-    assert.match(r.stdout, /missing|empty-shell|healthy/, "must print a three-state disposition");
-  } finally { cleanup(tmp); }
-});
-
-test("AC3 — `quay manager adopt --dry-run` against a REAL outer window yields healthy (not missing) via outer-session-check.sh", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  assert.ok(fs.existsSync(OUTER_CHECK), "outer-session-check.sh must exist (the checker manager-adopt now uses)");
-  const tmp = makeTmp();
-  try {
-    // hermetic tmux socket (private TMUX_TMPDIR) + an "outer" window with a claude child.
-    const sockDir = path.join(tmp, "sock");
-    const socketBase = path.join(sockDir, `tmux-${process.getuid()}`);
-    fs.mkdirSync(socketBase, { recursive: true, mode: 0o700 });
-    const sockPath = path.join(socketBase, "default");
-    const env = { ...process.env, TMUX_TMPDIR: sockDir };
-    delete env.TMUX;
-    env.HISTFILE = "/dev/null";
-
-    const tm = (args) => isolatedTmux(args, { socket: sockPath, env });
-    tm(["new-session", "-d", "-s", "mgr-adopt-h", "bash"]);
-    tm(["new-window", "-t", "mgr-adopt-h", "-n", "outer", "bash"]);
-    tm(["send-keys", "-t", "mgr-adopt-h:outer", "exec -a claude-probe sleep 10000 &", "Enter"]);
-
-    // wait for the claude child (the checker's process-liveness criterion).
-    const deadline = Date.now() + 15000;
-    let claudeAlive = false;
-    while (Date.now() < deadline) {
-      const panes = spawnSync("tmux", ["list-panes", "-t", "mgr-adopt-h:outer", "-F", "#{pane_pid}"], { encoding: "utf8", env });
-      const ppid = (panes.stdout ?? "").trim().split("\n")[0];
-      const kids = spawnSync("pgrep", ["-P", ppid], { encoding: "utf8" });
-      claudeAlive = (kids.stdout ?? "").split("\n").filter(Boolean).some((pid) => {
-        try { return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ").includes("claude"); } catch { return false; }
-      });
-      if (claudeAlive) break;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    assert.ok(claudeAlive, "outer claude child must be alive for the healthy branch");
-
-    // hermetic transcript with a real user message → healthy (window + process + user msg).
-    const tr = path.join(tmp, "outer.jsonl");
-    fs.writeFileSync(tr, '{"type":"user","message":{"role":"user","content":"adopt me"}}\n', "utf8");
-
-    // the project root to adopt, with its session-liveness.env pointing at the hermetic session.
-    const root = path.join(tmp, "proj");
-    fs.mkdirSync(path.join(root, "orchestration"), { recursive: true });
-    fs.writeFileSync(path.join(root, "orchestration", "session-liveness.env"), "SESSION_TMUX_SESSION=mgr-adopt-h\n", "utf8");
-
-    // SESSION_TRANSCRIPTS: name "outer" → hermetic transcript (the checker's config source, avoiding
-    // the discovery heuristic and its fail-closed degraded state).
-    const r = spawnSync("node", ["--experimental-strip-types", QUAY_CLI, "manager", "adopt", root, "--dry-run"], {
-      encoding: "utf8",
-      env: { ...env, SESSION_TRANSCRIPTS: `outer ${tr}` },
-    });
-    assert.equal(r.status, 0, `adopt --dry-run must exit 0:\n${r.stdout}\n${r.stderr}`);
-    assert.match(r.stdout, /would-adopt/, "must print the would-adopt disposition");
-    assert.match(r.stdout, /state=healthy/, "a REAL outer window with a claude child + user message must be healthy, not missing");
-    assert.doesNotMatch(r.stdout, /state=missing/, "the pre-fix defect (real outer misread as missing) must be gone");
-
-    // cleanup the hermetic session.
-    isolatedTmux(["kill-session", "-t", "mgr-adopt-h"], { socket: sockPath, env });
-  } finally { cleanup(tmp); }
 });
 
 test("AC2/C2 — manager home/identity is $QUAY_GLOBAL_DIR/manager (out of any project)", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {

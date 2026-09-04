@@ -93,7 +93,6 @@ export const KNOWN_UNWIRED: Record<string, string> = {
   "gate-staleness-check.sh": "legacy staleness check — superseded by gate-staleness-check.ts sibling (also unwired)",
   "live-repo-literal-assert-check.ts": "live-repo literal-assertion linter — maintenance tool, not yet suite-wired",
   "load-sensitive-release-check.ts": "release-time load-sensitivity triage — ad hoc, cadence aspirational",
-  "manager-adopt.sh": "manager adoption bootstrap — invoked manually at adoption, not every round",
   "measure-suite.mjs": "suite cost-measurement runner — invoked by measure-suite-reporter.mjs's sibling flow, not a gate",
   "mechanism-vitality-check.ts": "crystallization ①②③④ triage — invoked ad hoc (--check/--selftest), cadence aspirational",
   "needs-human-recheck.ts": "needs-human pool recheck scheduler — invoked by the needs-human path, not every round",
