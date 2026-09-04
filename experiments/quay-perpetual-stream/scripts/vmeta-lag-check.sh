@@ -1,8 +1,35 @@
 #!/usr/bin/env bash
-# vmeta-lag-check.sh — V_meta consolidation-lag check (exp5-M-CRYST-D3 increment R5, Axis-2').
-# Thin wrapper delegating to vmeta-lag-check.ts.
-# Usage: vmeta-lag-check.sh [--counter <N>] [--threshold <K>] <v-meta-ledger.md>
-# Exit: 0 = PASS or N/A; 1 = ALARM; 2 = usage/environment error.
+# vmeta-lag-check.sh — V_meta consolidation-lag check (M-CRYST-D3 increment R5, Axis-2′). Thin
+# wrapper delegating to vmeta-lag-check.mjs — mirrors task-schema-check.sh's exact wrapper shape
+# (usage/arg check, node availability check, delegate, propagate exit code), the same `*-check.sh`
+# wraps `*-check.mjs` convention as every existing pair in `scripts/`. A future
+# `quay gate --gate vmeta-lag` WRAPS the same vmeta-lag-check.mjs module (M39 registry precedent) —
+# it must NEVER reimplement the arithmetic; this wrapper and that gate are two invocation surfaces
+# over ONE single-source module.
+#
+# Usage:
+#   vmeta-lag-check.sh [--counter <N>] <v-meta-ledger.md>
+#
+# Exit codes: 0 = PASS or N/A (explicit, printed); 1 = ALARM (a confirmed-unconsolidated row past
+# K=2 with no dated carry-forward); 2 = usage/environment error.
 
-source "$(dirname "$0")/gate-script-lib.sh"
-gate_delegate_ts "vmeta-lag-check.ts" 1 "[--counter <N>] [--threshold <K>] <v-meta-ledger.md>" "$@"
+# ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
+  if [ -f "$_gap_help_lib" ]; then . "$_gap_help_lib"; tool_help "$0"; else echo "用法: bash $(basename "$0") [参数…]"; fi
+  exit 0
+fi
+set -u
+
+if [ "$#" -lt 1 ]; then
+  echo "Usage: $0 [--counter <N>] [--threshold <K>] <v-meta-ledger.md>" >&2
+  exit 2
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "ERROR: node required" >&2
+  exit 2
+fi
+
+node "$(dirname "$0")/vmeta-lag-check.ts" "$@"
+exit $?
