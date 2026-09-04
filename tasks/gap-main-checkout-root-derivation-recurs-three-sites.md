@@ -134,6 +134,7 @@ ALL THREE PATHS = CORRECT? YES — 收敛
 ## Touches
 
 - plugin/scripts/repo-root.ts（新增 mainCheckoutRoot 导出）
+- plugin/scripts/repo-root.sh（新增 mainCheckoutRoot bash 镜像，AC2）
 - plugin/scripts/runner-concurrency.ts（删私有实现 + 订正注释）
 - plugin/scripts/driver-runtime.ts（删私有实现）
 - plugin/scripts/dispatch-worktree-setup.sh（改调用 + 订正注释）
