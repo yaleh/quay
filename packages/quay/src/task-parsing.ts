@@ -4,8 +4,13 @@
 // mechanism layer (its task-schema.ts / task-status-drift-check.ts). This reverses the ONE
 // product-layer → mechanism-layer src-level hard import: the native store (packages/quay-native/src/
 // store.ts) used to import parseFrontmatterCompletely from the mechanism layer. The product layer is
-// now the SOURCE, and the mechanism layer RE-EXPORTS through it (forward dependency) so the ~20
-// existing consumers keep their import site and behavior unchanged.
+// now the SOURCE for the PRODUCT (store.ts consumes from here). The mechanism layer keeps its own
+// copies — it CANNOT statically import this module (build-plugin-dist stages plugin/ → packages/quay/
+// plugin/ and bundles each entry WITHOUT the packages/ tree, the same reason loop-complete-task.ts and
+// config-wiring-check.ts use DYNAMIC pathToFileURL imports for `../../packages/...`). The two copies
+// are pinned BEHAVIORALLY identical by plugin/test/task-parsing-parity.test.mjs — a divergence there
+// means the two frontmatter/section readers silently disagree (the drift class this promotion exists
+// to end).
 //
 //   extractSection             — depth-aware `## Heading` → body slicing (moved from task-schema.ts).
 //   parseFrontmatterCompletely — the ONE complete task-frontmatter YAML parser (moved from task-schema.ts).

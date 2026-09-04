@@ -108,15 +108,32 @@ export function isDistinctiveName(id) {
     || /[A-Z]{2,}/.test(id);   // SCREAMING_SNAKE constants
 }
 
-// Count GFM checkbox boxes in an AC section (`- [ ]`, `- [x]`, `- [X]`, `- [~]`) — PROMOTED to the
-// product layer (gap-abi-promote-section-parsing-flip-store-reverse-import): the authoritative
-// implementation now lives in packages/quay/src/task-parsing.ts (next to abi.ts). This module RE-EXPORTS
-// it so slot-refill.ts / ready-pool-check.ts (and their tests) keep their import site and behavior
-// unchanged, including the fail-closed absent-section shape (gap-ac47-completion-predicate-consumer-
-// fail-closed: `sectionFound:false` + `total: NaN` so OLD destructuring read-patterns cannot obtain a
-// pass on an ABSENT/UNREADABLE section). The full rationale for that shape moved with the function.
-import { countAcCheckboxes } from "../../packages/quay/src/task-parsing.ts";
-export { countAcCheckboxes };
+// Count GFM checkbox boxes in an AC section (`- [ ]`, `- [x]`, `- [X]`, `- [~]`). The acceptance gate
+// reads `- [x]` boxes (only a checked box passes), so a `done` task with boxes but ZERO checked could
+// NOT have passed the gate as written — status was written directly (the DANGEROUS drift direction,
+// gap-drift-check-only-looks-at-the-harmless-direction). `[~]` (partial) counts as unchecked, matching
+// the gate semantics. This is the decisive closed-without-work signal: it uses the gate's own language
+// (checkboxes), not fragile symbol resolution.
+export function countAcCheckboxes(acSection) {
+  if (acSection == null) {
+    // FAIL-CLOSED (gap-ac47-completion-predicate-consumer-fail-closed, AC1): an ABSENT / UNREADABLE
+    // section (extractSectionByShape returned null — e.g. an UNREGISTERED suffixed heading like
+    // `## Acceptance Criteria (runnable — …)`) must NOT read as `{ unchecked: 0 }`. That conflation
+    // made the completion predicate judge a task "complete" whose AC/DoD it never saw (live: DIR-014
+    // has 5 unchecked boxes under a suffixed heading, yet countCompletionCheckboxes reported
+    // {total:0, checked:0, unchecked:0} → judged passing; hard rule 3 — a boolean conflated "the
+    // object is gone" with "checked, zero unchecked"). `sectionFound:false` is the distinguishable
+    // state for readers that check it; `total: NaN` is the STRUCTURAL guarantee that OLD
+    // destructuring read-patterns (`const { total, checked } = …`) cannot obtain a pass:
+    // `total === 0` and `checked === total` are both FALSE for NaN, so every pre-existing consumer
+    // fails CLOSED without being edited (the "not rely on remembering each consumer" closure, C17).
+    return { total: NaN, checked: NaN, unchecked: NaN, sectionFound: false };
+  }
+  const boxes = acSection.match(/^\s*-\s+\[(.)\]/gm) ?? [];
+  let checked = 0;
+  for (const b of boxes) if (/\[[xX]\]/.test(b)) checked++;
+  return { total: boxes.length, checked, unchecked: boxes.length - checked, sectionFound: true };
+}
 
 // Word-boundary symbol search across the code roots (grep -w; vendored/milestone/build trees are
 // excluded). A symbol "resolves" only if it appears in a SMALL number of files (default ≤ 8) — a

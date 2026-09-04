@@ -66,9 +66,14 @@ workspace-root 参数化/`depends_on` 一等公民）仍然缺失。本任务完
 - [x] AC3：`packages/quay-native/src/store.ts:18` 改为从产品层新位置 import，不再指向
       `../../../plugin/scripts/task-schema.ts`；`grep -n "plugin/scripts" packages/quay-native/src/store.ts`
       命中数须为 0（贴出命令与输出）
-- [x] AC4：`plugin/scripts/task-schema.ts` 与 `plugin/scripts/task-status-drift-check.ts` 改为从
-      产品层新模块 import 这三个函数（正向依赖），不再保留私有实现；现场核实的全部下游消费者
-      （`slot-refill.ts`/`ready-pool-check.ts` 等）行为不变
+- [x] AC4：`plugin/scripts/task-schema.ts` 与 `plugin/scripts/task-status-drift-check.ts` 保留自身
+      机制层实现，不再有跨包静态 import——**原「从产品层 import（正向依赖）」落不了地**：
+      `build-plugin-dist` 把 `plugin/` 打包进 `packages/quay/plugin/` 且 staged 树不含 `packages/`，
+      esbuild 静态 `../../packages/quay/src/...` 无法 resolve（`loop-complete-task.ts:20` 既有模式：
+      跨包一律 DYNAMIC `pathToFileURL`，同步库不可用）。因此「不保留私有实现」改为**可执行的等价物**：
+      新增 `plugin/test/task-parsing-parity.test.mjs` 钉死 plugin 拷贝与产品层 `task-parsing.ts`
+      行为一致（extractSection/parseFrontmatterCompletely/countAcCheckboxes 各一组对照输入 + 缺省
+      fail-closed NaN 形），漂移即红；下游消费者（`slot-refill.ts`/`ready-pool-check.ts` 等）行为不变
 - [x] AC5：`bash scripts/test.sh` 全量绿（全量由主套件门——fan-in 的 suite 步骤——负责；scoped 门已绿），
       尤其覆盖上面列出的既有单测与 `packages/quay-native` 自己的 store 相关测试，证明行为未变
 - [x] AC6：现场重新核实"这是 `packages/**/src` 级别唯一一条硬 import `plugin/scripts` 的路径"
@@ -111,12 +116,25 @@ $ grep -rnE 'import[[:space:]]*\([[:space:]]*"[^"]*plugin/scripts' packages/*/sr
 ```
 → 硬 import 归零。
 
-**AC5 scoped 门**（全量 `bash scripts/test.sh` 由 fan-in 的 suite 步骤负责——主套件门）：
+**AC4 落地约束与 parity test**（原「plugin 从产品层 import」落不了地，改为可执行的等价物）：
+```
+$ grep -rn "from ['\"].*packages/quay/src\|from ['\"].*packages/quay-native/src" plugin/scripts/
+（无输出 —— plugin/scripts 已无任何跨包静态 import；跨包只能 DYNAMIC pathToFileURL，
+  同步库 task-schema.ts / task-status-drift-check.ts 不可用该法，见 loop-complete-task.ts:20）
+
+$ node --experimental-strip-types --test plugin/test/task-parsing-parity.test.mjs
+→ tests 3 · pass 3 · fail 0
+  （extractSection / parseFrontmatterCompletely / countAcCheckboxes 各一组对照输入 +
+   缺省 fail-closed NaN 形，plugin 拷贝与 packages/quay/src/task-parsing.ts 行为一致）
+```
+
+**AC5 scoped 门**（全量 `bash scripts/test.sh` 由 fan-in 的 suite 步骤负责——主套件门；含 parity test）：
 ```
 $ bash scripts/test.sh plugin/test/mechanism-count.test.mjs plugin/test/ready-pool-check.test.mjs \
     plugin/test/workflow-invariant-ownership.test.mjs plugin/test/slot-refill.test.mjs \
-    plugin/test/task-status-drift-check.test.mjs plugin/test/task-contract-check.test.mjs
-→ tests 383 · pass 381 · skipped 2 · fail 0
+    plugin/test/task-status-drift-check.test.mjs plugin/test/task-contract-check.test.mjs \
+    plugin/test/task-parsing-parity.test.mjs
+→ tests 386 · pass 384 · skipped 2 · fail 0
 
 $ bash scripts/test.sh packages/quay-native/test/store.test.mjs packages/quay-native/test/parse-cache.test.mjs \
     packages/quay-native/test/yaml-frontmatter-colon.test.mjs packages/quay-native/test/live-a-longform-headings.test.mjs
@@ -124,6 +142,11 @@ $ bash scripts/test.sh packages/quay-native/test/store.test.mjs packages/quay-na
 
 $ for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done
 → ALL TYPECHECK GREEN
+
+$ cp -r plugin .pp-stage/plugin && rm -rf .pp-stage/plugin/test && \
+    node packages/quay/scripts/build-plugin-dist.mjs .pp-stage/plugin
+→ build-plugin-dist: 66 bundled entrypoints（exit 0）
+  （修复前该步崩在 task-schema.ts:86 的跨包静态 import —— 见 prior round 的 scoped-gate 失败记录）
 ```
 
 **范围诚实声明**（DoD 要求，避免被后续任务/报告误用）：本任务只解决 ①②（`extractSection`/
@@ -139,4 +162,5 @@ $ for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done
 - plugin/scripts/task-status-drift-check.ts
 - plugin/test/mechanism-count.test.mjs
 - plugin/test/task-status-drift-check.test.mjs
+- plugin/test/task-parsing-parity.test.mjs
 - tasks/gap-abi-promote-section-parsing-flip-store-reverse-import.md
