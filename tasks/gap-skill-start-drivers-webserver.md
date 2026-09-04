@@ -1,7 +1,7 @@
 ---
 id: gap-skill-start-drivers-webserver
 title: 新增"启动 drivers + web server"skill——会话内一次调用封装 quay driver start / quay serve
-status: ready
+status: done
 labels:
   - gap
 parent: null
