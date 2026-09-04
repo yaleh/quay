@@ -149,7 +149,7 @@ missing sync: null missing async: null
 
 ## Touches
 
-- plugin/scripts/task-schema.ts（新增两个导出）
+- plugin/scripts/task-schema.ts（补 frontmatterStatus + readTaskStatusAtRef 导出）
 - plugin/scripts/driver-filters.ts（删私有实现，改 import）
 - plugin/scripts/ready-pool-check.ts（同上）
 - plugin/scripts/worker-driver.ts（同上，async 变体）
