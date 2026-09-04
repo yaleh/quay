@@ -2,7 +2,7 @@
 id: gap-checker-cost-jsonl-add-verdict-field
 title: checker-cost.jsonl 缺 verdict 字段——_run_checker_one 已经算出退出码 _rc 但
   checker_cost_append 不接收也不记录它，P4 守卫谱系今天算不出「曾变红比例」的直接原因
-status: ready
+status: done
 labels:
   - gap
 parent: null
