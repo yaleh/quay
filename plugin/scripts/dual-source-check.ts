@@ -17,6 +17,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { emitPass, emitFail } from "./gate-script-base.ts";
 
 interface Responsibility {
   name: string;             // the responsibility that must have a single executor
@@ -85,7 +86,7 @@ export function runCheck(root: string): { ok: boolean; issues: string[] } {
   return { ok: issues.length === 0, issues };
 }
 
-function main() {
+function main(): number {
   const args = process.argv.slice(2);
   let root = process.cwd();
   for (let i = 0; i < args.length; i++) {
@@ -93,14 +94,12 @@ function main() {
   }
   const { ok, issues } = runCheck(root);
   if (ok) {
-    console.log(`dual-source-check: OK — ${REGISTRY.length} responsibility(s) each have a single live executor (driver exists, session path retired)`);
-    process.exit(0);
+    return emitPass(`dual-source-check: OK — ${REGISTRY.length} responsibility(s) each have a single live executor (driver exists, session path retired)`);
   }
-  console.error(`dual-source-check: RED (${issues.length} issue(s))`);
-  for (const i of issues) console.error(`  - ${i}`);
-  process.exit(1);
+  for (const i of issues) process.stderr.write(`  - ${i}\n`);
+  return emitFail(`dual-source-check: ${issues.length} issue(s) — two executors for one responsibility`, { issues });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main();
+  process.exit(main());
 }
