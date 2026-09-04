@@ -31,7 +31,7 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 1. 枚举 session-liveness 的全部消费方（147 个文件：orchestration 文档 / packages 代码 / plugin/loop 文档 / plugin/scripts / plugin/test / skills / workflows / scripts/test.sh），确认哪些是「可删」、哪些是「需改判」。
 2. 删：session-liveness.sh + session-liveness-mount.sh + session-liveness-sweep*.mjs（重命名 run-namespace-sweep*）+ 22 个测试 + monitor-mount-check.sh + monitor-mount-check.test.mjs。
 3. 删 idle-watch 接缝（方案 B）：manager-start.sh 的 `--check-idle-watch` / `--ensure-mount-intent` 参数 + `IDLE_WATCH_MOUNT_ENTRY` / `IDLE_WATCH_DELIVERY_SEAM` + `idle-watch.env` / `idle-watch-mount.txt` 工件 + checklist 7 键删 2 键（IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）；packages/quay/src/cli/manager.ts 的 `--check-idle-watch` CLI 参数。
-4. 清引用（⛔ 活跃引用清单，逐个清/改判，不靠 fan-in 逐轮暴露）：
+4. 清引用（⛔ grep 判据优先，不靠死记清单）：判据 = 先 `grep -n "session-liveness" <文件>` 确认有引用才清；命中 0 一律不碰（前几轮 worker 误删 outer-anchor-check.ts 就是没先 grep）。活跃引用清单（逐个清/改判）：
    - plugin/loop/（3）：fast-mode-loop-tick.md、fast-mode-tick-core.md、orchestrator-loop-tick.md
    - plugin/scripts/（19）：full-suite-runner.ts、inner-blocked-signal.ts、loop-shipping-exclusion-data.mjs、manager-observation-runtime-check.ts、manager-start.sh、manager-tick-readings.ts、observer-registry-check.sh、observer-registry.sh、os-anchor-install.sh、os-anchor-watchdog.sh、outer-driver.ts、pane-state-classify.ts、quay-init.sh、quay-session.ts、red-on-omission-audit.ts、run-namespace-sweep-kill.mjs、run-namespace-sweep.mjs、tmux-test-isolation-check.ts、verify-delivery-surface.ts
    - plugin/skills/（2）：cold-start/SKILL.md、manager/SKILL.md
@@ -39,6 +39,7 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
    - packages/scripts/（2）：packages/quay/src/observation.ts、scripts/test.sh
    - orchestration/（活跃 loop 文档 + conf，7）：fast-mode-tick-core.md、manager-loop-tick.md、manager-tick-core.md、manager-tick-criteria.md、orchestrator-loop-tick.md、orchestrator-tick-core.md、observer-registry.conf
    - ⛔ orchestration/ 历史文档（SPEC-*/RUNBOOK-*/ANALYSIS-*/FINDING-*/PROPOSAL-*/RESEARCH-*/archive/*/escalations/inner-brief-*/manager-obligation-ledger.jsonl/*-phase-goal*/*-rulings-*/recovery-*/session-launch-recipes/tools-log/session-liveness.env）是历史记录，保留不清。
+   【D. ⛔ 不相干机制（不碰）】outer-anchor-check.ts、orphan-checker 等【没有 session-liveness 引用】的机制，一律不删不改——前几轮 worker 误删 outer-anchor-check.ts 就是没先 grep 确认。grep 命中 0 的文件一律不碰。
 5. 全量 suite 绿（删测试后 ratchet/baseline + bucket 归因同步更新）。
 
 ## Acceptance Criteria
