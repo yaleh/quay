@@ -8,7 +8,7 @@
 // ready-pool-check slope 35.8s→91.2s→157.0s in one hour was ONLY visible because the manager
 // hand-timed it twice.
 //
-// THIS FILE: the TS-side writer. Each criterion appends ONE line `{name, ms, n, load, at}` to
+// THIS FILE: the TS-side writer. Each criterion appends ONE line `{name, ms, n, load, at, verdict?}` to
 // `<root>/.quay/checker-cost.jsonl` on exit — PURE APPEND, ZERO JUDGMENT (no thresholds, no
 // flags — that is the trend-criterion's job, gap-quality-criteria-are-point-in-time-no-trend-
 // criteria). The trend grows itself; a reader (a future trend criterion) consumes the history.
@@ -28,7 +28,8 @@
 //
 // Usage (CLI — used by bash wrappers and the AC2 fixture):
 //   node --no-warnings --experimental-strip-types plugin/scripts/checker-cost.ts \
-//     --root <workspace-root> --name <criterion> --ms <millis> [--n <n>] [--load <load>]
+//     --root <workspace-root> --name <criterion> --ms <millis> [--n <n>] [--load <load>] \
+//     [--verdict <pass|fail|not-evaluated>]
 //
 // Env overrides (deterministic test seams):
 //   CHECKER_COST_LOAD_OVERRIDE — a load value to record instead of reading /proc/loadavg
@@ -61,27 +62,34 @@ export function checkerCostFile(root: string): string {
   return process.env.CHECKER_COST_FILE ?? path.join(root, ".quay", CHECKER_COST_FILENAME);
 }
 
+/** Three-state verdict recorded with a cost row (gap-checker-cost-jsonl-add-verdict-field). */
+export type CheckerVerdict = "pass" | "fail" | "not-evaluated";
+
 export interface CheckerCostRecord {
   name: string;
   ms: number;
   n: number;
   load: number;
   at: string;
+  verdict?: CheckerVerdict;
 }
 
 /**
- * Append one `{name, ms, n, load, at}` line to `<root>/.quay/checker-cost.jsonl`.
+ * Append one `{name, ms, n, load, at, verdict?}` line to `<root>/.quay/checker-cost.jsonl`.
  * PURE APPEND — never truncates, never overwrites, never judges (no threshold, no flag).
  * `n` defaults to 1 (one criterion run) when the caller has no real input-size signal.
+ * `verdict` is optional — a caller that knows its own three-state verdict (pass/fail/not-evaluated)
+ * passes it; JSON.stringify drops the key when absent, so old rows stay verdict-less (AC4).
  * Returns the file path written.
  */
-export function recordCheckerCost(opts: { root: string; name: string; ms: number; n?: number; load?: number }): string {
+export function recordCheckerCost(opts: { root: string; name: string; ms: number; n?: number; load?: number; verdict?: CheckerVerdict }): string {
   const rec: CheckerCostRecord = {
     name: opts.name,
     ms: opts.ms,
     n: opts.n ?? 1,
     load: opts.load ?? getLoad1(),
     at: new Date().toISOString(),
+    verdict: opts.verdict,
   };
   const file = checkerCostFile(opts.root);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -111,20 +119,26 @@ function main(argv: string[]): number {
   let ms = 0;
   let n: number | undefined;
   let load: number | undefined;
+  let verdict: CheckerVerdict | undefined;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--root") root = argv[++i];
     else if (argv[i] === "--name") name = argv[++i];
     else if (argv[i] === "--ms") ms = Number(argv[++i]);
     else if (argv[i] === "--n") n = Number(argv[++i]);
     else if (argv[i] === "--load") load = Number(argv[++i]);
+    else if (argv[i] === "--verdict") verdict = argv[++i] as CheckerVerdict;
   }
   if (!root || !name || !Number.isFinite(ms)) {
     process.stderr.write(
-      "usage: checker-cost.ts --root <dir> --name <criterion> --ms <millis> [--n <n>] [--load <load>]\n",
+      "usage: checker-cost.ts --root <dir> --name <criterion> --ms <millis> [--n <n>] [--load <load>] [--verdict <pass|fail|not-evaluated>]\n",
     );
     return 2;
   }
-  recordCheckerCost({ root, name, ms, n, load });
+  if (verdict !== undefined && !["pass", "fail", "not-evaluated"].includes(verdict)) {
+    process.stderr.write("usage: checker-cost.ts --verdict must be one of pass|fail|not-evaluated\n");
+    return 2;
+  }
+  recordCheckerCost({ root, name, ms, n, load, verdict });
   return 0;
 }
 

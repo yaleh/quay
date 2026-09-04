@@ -52,6 +52,8 @@ import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
 import { run } from "../scripts/full-suite-runner.ts";
 import { readLoadAvg, appendVerificationRound } from "../scripts/full-suite-runner.ts";
 import { runAcceptance, gateCostName, recordGateCost } from "../../packages/quay/src/gate/acceptance-runner.ts";
+import { recordCheckerCost, readCheckerCost } from "../scripts/checker-cost.ts";
+import { runGate } from "../../packages/quay/src/gate/engine.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -548,4 +550,81 @@ test("AC2 (negative control) — synchronous run_checker maps exit 3 to a non-fa
   // gap-scoped-static-check-red-no-fail-machine-line AC3 — exit 3 emits NOT_EVALUATED, NEVER the
   // fail-closed line (the third state must not be conflated with a RED).
   assert.doesNotMatch(res.stderr, /STATIC_CHECK_FAILED/, "NOT-EVALUATED never emits STATIC_CHECK_FAILED");
+});
+
+// ── verdict field (gap-checker-cost-jsonl-add-verdict-field) ───────────────────────────────────────
+// The three writers (checker-cost-lib.sh, checker-cost.ts, engine.ts) now append a `verdict` field
+// derived from the ALREADY-computed exit code (bash: 0→pass, 3→not-evaluated, other non-zero→fail;
+// gate: ok→pass/fail) — the axis P4 guard-lineage needs to compute "曾变红比例". AC1 pins the bash
+// mapping; AC2 pins the ts + engine writers; AC3 pins all three verdict values; AC4 pins that
+// old-format (verdict-less) rows still parse.
+
+test("AC1/AC3 — bash checker-cost-lib maps the already-computed exit code to verdict (pass/fail/not-evaluated)", () => {
+  const root = makeTmpDir("cc-verdict-bash-");
+  const res = runLibScript(root, `
+    set -euo pipefail
+    source "${CHECKER_COST_LIB}"
+    run_checker "vd-pass" bash -c "exit 0"
+    run_checker "vd-not-eval" bash -c "exit 3"
+    run_checker "vd-fail" bash -c "exit 1" || true
+  `);
+  assert.equal(res.status, 0, `three sync checkers recorded their rows (got ${res.status}): ${res.stderr}`);
+  const byName = Object.fromEntries(readLedgerRows(root).map((r) => [r.name, r]));
+  assert.equal(byName["vd-pass"].verdict, "pass");
+  assert.equal(byName["vd-not-eval"].verdict, "not-evaluated");
+  assert.equal(byName["vd-fail"].verdict, "fail");
+});
+
+test("AC1 — the parallel path also records verdict (same _run_checker_one mapping site)", () => {
+  const root = makeTmpDir("cc-verdict-bash-par-");
+  runLibScript(root, `
+    set -euo pipefail
+    source "${CHECKER_COST_LIB}"
+    RUN_CHECKER_PARALLEL=1
+    STATIC_CHECK_CONCURRENCY=2
+    run_checker "par-vd-pass" bash -c "exit 0"
+    run_checker "par-vd-fail" bash -c "exit 1"
+    run_checker_parallel_wait || true
+  `);
+  const byName = Object.fromEntries(readLedgerRows(root).map((r) => [r.name, r]));
+  assert.equal(byName["par-vd-pass"].verdict, "pass");
+  assert.equal(byName["par-vd-fail"].verdict, "fail");
+});
+
+test("AC2/AC3 — checker-cost.ts recordCheckerCost writes the verdict field (pass/fail/not-evaluated)", () => {
+  const root = makeTmpDir("cc-verdict-ts-");
+  recordCheckerCost({ root, name: "ts-pass", ms: 1, verdict: "pass" });
+  recordCheckerCost({ root, name: "ts-fail", ms: 2, verdict: "fail" });
+  recordCheckerCost({ root, name: "ts-not-eval", ms: 3, verdict: "not-evaluated" });
+  const file = path.join(root, ".quay", "checker-cost.jsonl");
+  const byName = Object.fromEntries(readCheckerCost(file).map((r) => [r.name, r]));
+  assert.equal(byName["ts-pass"].verdict, "pass");
+  assert.equal(byName["ts-fail"].verdict, "fail");
+  assert.equal(byName["ts-not-eval"].verdict, "not-evaluated");
+});
+
+test("AC2 — engine.ts gate recorder writes the verdict field (pass/fail)", async () => {
+  const root = makeTmpDir("cc-verdict-gate-");
+  const mkClient = (ok) => ({
+    taskGet: async (id) => ({ id, status: "todo" }),
+    taskCheck: async (id) => ({ id, ok, reason: ok ? "eligible" : "missing artifacts" }),
+  });
+  await runGate({ client: mkClient(true), id: "T-1", gate: "dod", logPath: path.join(root, "gate-events.jsonl"), workspaceRoot: root });
+  await runGate({ client: mkClient(false), id: "T-9", gate: "dod", logPath: path.join(root, "gate-events.jsonl"), workspaceRoot: root });
+  const rows = readLedgerRows(root);
+  assert.equal(rows.length, 2, "two gate executions → two cost rows (workspaceRoot set)");
+  assert.equal(rows[0].verdict, "pass");
+  assert.equal(rows[1].verdict, "fail");
+  assert.match(rows[0].name, /^gate:dod:T-1$/);
+});
+
+test("AC4 — old-format rows (no verdict) still parse via readCheckerCost (backward compatible, no migration)", () => {
+  const root = makeTmpDir("cc-verdict-backcompat-");
+  const file = path.join(root, ".quay", "checker-cost.jsonl");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, '{"name":"old-check","ms":5,"n":1,"load":0.5,"at":"2026-01-01T00:00:00Z"}\n');
+  const rows = readCheckerCost(file);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, "old-check");
+  assert.equal(rows[0].verdict, undefined, "verdict is simply absent on an old row — not a parse failure");
 });
