@@ -2,7 +2,7 @@
 id: gap-dispatch-value-has-no-consolidation-axis
 title: 派发价值函数的三条功绩轴（strategic/blocking/suite-blocking）没有一条代表「减法/收敛」——删掉 119
   个重复实现的任务与新增 120 个文件同等计费，只能靠正文碰巧写了 SPEC 才拿得到权重
-status: ready
+status: done
 labels:
   - gap
 parent: null
