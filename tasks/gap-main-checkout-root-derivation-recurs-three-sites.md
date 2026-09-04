@@ -2,7 +2,7 @@
 id: gap-main-checkout-root-derivation-recurs-three-sites
 title: 主检出根推导的 bug 修过一次却在另外 3 处仍在犯——两处注释还把错误当不变量写着「guaranteed first」；收敛为
   repo-root.ts 的第二个导出
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -68,3 +68,14 @@ AC1（三处与正解不一致）与 AC5（收敛后一致）的真实读数对�
 - plugin/scripts/dispatch-worktree-setup.sh（改调用 + 订正注释）
 - plugin/test/repo-root.test.mjs
 - tasks/gap-main-checkout-root-derivation-recurs-three-sites.md
+
+## Needs-Human
+
+**执行 2026-09-04T17:42:05.907Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: AC1: warmed request 612ms < 500ms (⛔ ≥500ms ⇒ 假)
+- run_id：wk-prod-1788285192
+- session_id：c2b906b5-b8dc-416e-8c20-a28bae5bfe4a
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-main-checkout-root-derivation-recurs-three-sites~wk-prod-1788285192~1788542860455-784270.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-main-checkout-root-derivation-recurs-three-sites-wk-prod-1788285192.log
