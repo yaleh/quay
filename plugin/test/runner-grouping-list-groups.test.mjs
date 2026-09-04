@@ -85,11 +85,10 @@ function runTestShRefresh(...args) {
 // (B3-1 merged a new engine test 13 min after B3-2's worktree snapshot). Per the fast-mode tick
 // rule "测试不得硬编码全局计数", all assertions here are RELATIONSHIPS over the live glob:
 //   product + engine + serial + lowconc == total (the deduped realpath partition),
-//   and --list-files count + serial == --list-groups total (the default --list-files EXCLUDES the
-//   serial group, routed to the concurrency-1 phase —
-//   gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests — and INCLUDES the
-//   lowconc phase — gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). New files change
-//   the numbers, not the invariants.
+//   and --list-files count == --list-groups total (no-args --list-files reports the FULL default
+//   run = the product,engine body + the serial phase + the lowconc phase, all four groups —
+//   gap-test-file-snapshot-worktree-drops-realinstall). New files change the numbers, not the
+//   invariants.
 function parseGroups(out) {
   const parse = (label) => {
     const m = out.match(new RegExp(`^${label}:\\s+(\\d+)`, "m"));
@@ -133,7 +132,7 @@ function readStable(read, relationship) {
   return values;
 }
 
-test("AC3: realpath dedup — --list-files count + serial equals --list-groups total (12 symlinks not double-run)", () => {
+test("AC3: realpath dedup — --list-files count equals --list-groups total (12 symlinks not double-run)", () => {
   const { files, g } = readStable(
     (refresh) => {
       // --list-groups reuses AC10's cached result (文件内去重); --list-files is the cache source
@@ -141,39 +140,43 @@ test("AC3: realpath dedup — --list-files count + serial equals --list-groups t
       const query = refresh ? runTestShRefresh : runTestShCached;
       const files = query("--list-files").trim().split("\n").filter(Boolean);
       const g = parseGroups(query("--list-groups"));
-      // The default --list-files EXCLUDES the serial group (routed to the concurrency-1 phase) and
-      // INCLUDES the lowconc phase files (routed to the concurrency-3 phase), so the dedup
-      // relationship is files + serial == total.
+      // no-args --list-files reports the FULL default run (product,engine body + serial + lowconc
+      // phases — gap-test-file-snapshot-worktree-drops-realinstall), so the dedup relationship is
+      // files == total (all four groups, no serial subtraction).
       return { files, g };
     },
-    ({ files, g }) => files.length + g.serial === g.total,
+    ({ files, g }) => files.length === g.total,
   );
-  assert.equal(files.length + g.serial, g.total);
+  assert.equal(files.length, g.total);
   // all paths are already realpaths (no duplicates by construction)
   assert.equal(new Set(files).size, files.length);
 });
 
-test("AC6: --group product,engine ∪ --group lowconc selects the same files as no-args", () => {
+test("AC6: --group product,engine ∪ --group serial ∪ --group lowconc selects the same files as no-args", () => {
   // The default run = the product,engine body PLUS the
-  // lowconc phase (concurrency-3 hermetic-but-load-sensitive files). The no-args selection is the
-  // concatenation of `--group product,engine --list-files` and `--group lowconc --list-files`
-  // (same build_deduped_files order). gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive.
-  // THREE non-atomic glob reads here (wider exposure than AC3's two), and the assertion is
-  // byte-exact concatenation equality — serial-anti-stomp landing in ANY window makes it unequal.
-  // Bounded re-read until the concatenation holds stably, same as AC3 (readStable above).
-  const { noArgs, body, low } = readStable(
+  // serial phase (concurrency-1 load-sensitive files) PLUS the lowconc phase (concurrency-3
+  // hermetic-but-load-sensitive files). The no-args selection is the concatenation of
+  // `--group product,engine --list-files`, `--group serial --list-files`, and
+  // `--group lowconc --list-files` (same build_deduped_files order).
+  // gap-test-file-snapshot-worktree-drops-realinstall. FOUR non-atomic glob reads here (wider
+  // exposure than AC3's two), and the assertion is byte-exact concatenation equality —
+  // serial-anti-stomp landing in ANY window makes it unequal. Bounded re-read until the
+  // concatenation holds stably, same as AC3 (readStable above).
+  const { noArgs, body, serial, low } = readStable(
     (refresh) => {
       // noArgs reuses AC3's cached --list-files (文件内去重); on refresh it re-queries live.
-      // body/low are unique to this test (no redundant twin), so they always query fresh.
+      // body/serial/low are unique to this test (no redundant twin), so they always query fresh.
       const query = refresh ? runTestShRefresh : runTestShCached;
       const noArgs = query("--list-files");
       const body = runTestSh("--group", "product,engine", "--list-files");
+      const serial = runTestSh("--group", "serial", "--list-files");
       const low = runTestSh("--group", "lowconc", "--list-files");
-      // body ends with a trailing newline after its last file; splice body's trailing newline and
-      // append low directly so the concatenation is byte-identical to no-args.
-      return { noArgs, body, low };
+      // each group's output ends with a trailing newline after its last file; splice trailing
+      // newlines so the concatenation is byte-identical to no-args.
+      return { noArgs, body, serial, low };
     },
-    ({ noArgs, body, low }) => body.replace(/\n$/, "") + "\n" + low === noArgs,
+    ({ noArgs, body, serial, low }) =>
+      body.replace(/\n$/, "") + "\n" + serial.replace(/\n$/, "") + "\n" + low === noArgs,
   );
-  assert.equal(body.replace(/\n$/, "") + "\n" + low, noArgs);
+  assert.equal(body.replace(/\n$/, "") + "\n" + serial.replace(/\n$/, "") + "\n" + low, noArgs);
 });
