@@ -1,7 +1,7 @@
 ---
 id: gap-scoped-gate-m120-negative-control-false-positive
 title: 修缺：scoped-gate 把 build-dist.test.mjs 的 m120 负控制 stderr 误判为真实失败
-status: todo
+status: needs-human
 role: primitive
 labels:
   - scoped-gate
@@ -84,6 +84,15 @@ scoped-gate（`scripts/test.sh --for-task <task> --allow-thin`，`worker-driver.
 
 ---
 
+## Acceptance Criteria
+
+- [ ] 判定点已定位：找到（或证明确认不存在）把「非空失败摘要」当作 pass/fail 判据的调用点，写明是哪一层
+- [ ] 修复落地：pass/fail 判据只读真实 exit code（或 TAP 的 `# fail N`/`not ok` 计数），`isFailureSignalLine` 系列仅用于「已知失败」后的摘要展示
+- [ ] `gap-task-write-schema-depends-on-documentation` 的 fan-in 可继续推进（scoped-gate 不再误红）
+- [ ] 回归测试补充：一个只跑 `build-dist.test.mjs` 的 scoped-gate 调用始终报绿
+
+---
+
 ## Definition of Done
 
 - [ ] 根因定位到具体的判定点（哪一层把非空摘要误当失败）
@@ -99,6 +108,7 @@ scoped-gate（`scripts/test.sh --for-task <task> --allow-thin`，`worker-driver.
 - `plugin/scripts/worker-driver.ts`（`isFailureSignalLine`/`extractFailureSummary` 及其调用点）
 - `packages/quay/test/build-dist.test.mjs`（若采用源头侧修复）
 - `plugin/test/worker-driver.test.mjs`（回归测试）
+- `tasks/gap-scoped-gate-m120-negative-control-false-positive.md`
 
 ---
 
@@ -121,3 +131,10 @@ scoped-gate（`scripts/test.sh --for-task <task> --allow-thin`，`worker-driver.
 - session_id：78fee4bd-96e9-4cbe-93d7-9addb564315f
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-scoped-gate-m120-negative-control-false-positive~wk-prod-1788285192~1788421366597-8d597f.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-scoped-gate-m120-negative-control-false-positive-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-04T07:17:43.563Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
+- 失败步/判词：step=suite: == split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) ==
