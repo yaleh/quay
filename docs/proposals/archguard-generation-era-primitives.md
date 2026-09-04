@@ -375,6 +375,54 @@ $ grep -c "USER EDIT LINE MARKER" orchestration/orchestrator-loop-tick.md
 
 R6/R7（§2.8）测的是仓库内部的镜像会静默漂移；本节测的是**同一个缺陷类别在分发边界上的形态**——只是从"两个副本谁改了没人知道"，变成了"目标项目改了自己的落地副本，下次升级会被吃掉，且吃掉的过程不产生任何会被注意到的信号（`conflicted=0`、`replaced-stale-install` 读起来都像正常流程）"。`clean` 模式覆盖了 92% 的落地量且从设计上就不做保护；`managed` 模式的保护经三轮实测确认只维持一轮。这条发现之所以重要，不在于它是又一个 bug，而在于：**验证 quay 自身架构问题的同一套方法（打印命中样本、对已知真样本干跑、多轮复现），照样在它面向用户的分发路径上找到了结构相同的问题**——架构缺陷不会在产品边界处自动止步。
 
+### 2.10 把 archguard 当架构描述生成器用：两个 scope 的交叉验证，与五条工具盲区
+
+前几节把 archguard 当成数值检查器（"0 环""0 异味"）。本节换一种用法——把它的输出当成一份**架构描述**，拿去核对 R1-R10 与前几节的手工发现，同时探它自己的能力边界。
+
+**一个先要更正的疏漏**：`.archguard/query/manifest.json` 里早就有两个 scope，此前所有轮次只查询过默认的那个：
+
+```json
+{
+  "scopes": [
+    { "key": "77856690", "sources": ["packages/quay/src"],   "entityCount": 367,  "relationCount": 758  },
+    { "key": "c045940f", "sources": ["plugin/scripts"],      "entityCount": 2017, "relationCount": 1370 }
+  ]
+}
+```
+
+`plugin/scripts` 早已被索引，只是此前从未被查询过。补查之后，与手工发现逐条对照：
+
+#### 交叉验证表
+
+| 我们的发现 | archguard 独立给出的数字 | 判读 |
+|---|---|---|
+| R1：`plugin/scripts` 314 文件平铺无目录结构 | 包推断算法对 188 个文件**推不出任何子包**，`totalPackageCount: 1` | 独立验证——不是靠 grep 数出来的，是它自己的启发式也分不出层次 |
+| §2.6：`extractSection` 被 23 个文件 import | `extractSection` **22 个依赖者**，消费者清单正是 `ready-pool-check.ts`/`slot-refill.ts`/`task-status-drift-check.ts` 等已知枢纽 | 几乎精确复现 |
+| `analyzeTasks`/`analyzeSlotRefill` 是高扇出主入口 | 出度榜：`analyzeSlotRefill`(15)、`analyzeTasks`(10) | 独立验证 |
+| "什么都不缠结，因为什么都不复用"（§0） | **两个 scope 依赖环都是 0** | 0 环不是"架构干净"的证据，是这条论点预测的**确切信号**——不缠结正是因为不复用 |
+| 继承基本不存在 | 产品层 3/367，机制层 4/2017，**合计 7/2384** | 样本量放大 6.5 倍后结论更稳：纯函数式代码库，两层 OOP 继承均近乎不存在 |
+| `touches-parser.ts` 是共享枢纽 | `parseTouches`/`checkTouchesPair`/`extractTouchesSection` 各 10 个依赖者，`CouplingGraph`/`CouplingEdge` 9-10 个 | 独立验证；另发现 `TaskCandidate`(17)、`WorkflowEvent`(14) 是真正被广泛共享的类型——机制层不是零复用，是复用集中在极少数正确做对的地方 |
+
+#### 五条工具盲区
+
+**① 索引范围只覆盖结构面的一小部分。** 两个 scope 之外，`packages/quay-native`、`packages/quay-github`、`packages/quay-backlog`——三个 provider 实现，恰恰是"Provider ABI 真兑现"这条唯一站得住的抽象的证据本体——**从未被扫描过**；`experiments/` 也没有。archguard 的架构描述从未见过让 ABI 成立的那三份代码，也没见过 R6/R7 镜像漂移对里的另一半。
+
+**② 已扫描范围内仍有真实的实体抽取失败。** `observation.ts`（3813 行，155 个导出，R3 违规的载体，产品层最大文件）——`get_dependents("SESSION_LIVENESS_REL")`、`get_dependents("readFullSuiteState")` 全部返回空。不是"查了没发现违规"，是**这个文件的内容压根没进图**。archguard 那句"0 个依赖环"结构上就不可能覆盖到 R3——不是检查跑过判定合格，是检查对象从未存在于被检查的数据里。
+
+**③ `find_entity`（架构描述的主要导航入口）全局失灵。** 用一个已知存在、且刚在别处返回过的实体名 `handleAllRoutes` 去搜，返回空；`find_entity("ProviderClient")`、`find_entity("observation")` 同样失灵。`get_dependents`/`get_dependencies` 按精确已知名字查询能工作，但发现名字的入口本身是坏的。
+
+**④ 形状异味检测与"身份复制"（P2）是两件不同的事。** 两个 scope 的 literal-dispersion 全部返回 0——但该检测器按定义只抓 **enum/联合类型** 值跨模块分散，而两个 scope 的 `enums` 统计均为 **0**。不是没有字符串复制，是**这个代码库的复制方式（裸字符串字面量、被独立重写的判定逻辑）根本不是这个检测器设计要抓的形状**——P2 抓的正是这个检测器抓不到的那类。
+
+**⑤ 包级结构工具全部要求 Go/Atlas 模式。** `atlas_layer`、`package_fanin`、`package_fanout`、`detect_god_packages`对这个 TypeScript 项目**全部不可用**，是语言覆盖上的硬缺口。另：`get_cochange`/`get_change_context`/`metric_trend`/`architecture_drift` 均要求先跑 `archguard_analyze_git`，而这一步从未执行——archguard 迄今的架构描述是**纯静态快照，零时间维度**，而 §2.8 里价值最高的方法（(d) 共改减依赖）恰恰是时间维度的。
+
+#### 结论：扩大范围不等于解决问题
+
+在 archguard 真能看到的地方，这个代码库是干净的，而且是真干净：两个 scope 零环、继承 7/2384、少数几个真正被广泛复用的工具函数——这些复用是真实的，不是"复用主要靠复制粘贴"论点的反例。**这个项目知道怎么把东西做对，在它做对的地方，做得相当对。**
+
+但 archguard 能看到的地方，只占这个代码库结构面的一小块——2 个索引 scope，对着理应至少 6 个的结构单元（`packages/quay`、`quay-native`、`quay-github`、`quay-backlog`、`plugin/scripts`、`experiments/*/scripts`），且其中一个内部还漏了最大的文件。**前面十几轮找到的全部实质性问题——R1-R10、§2.9 的分发缺陷、被独立重写 9 次的判定、45 对镜像重复——无一例外，全部落在这些盲区里，或落在盲区与可见区的接缝上**（`observation.ts` 是"在可见区、但抽取失败"的接缝；`store.ts:18` 是"可见区反向依赖不可见区"的接缝）。
+
+这不是巧合：一个为 OOP、class、enum、import 语句设计的静态分析工具，遇到一个纯函数式、无枚举、靠字符串字面量和子进程调用做耦合的代码库，它的默认抽取假设和代码的真实惯用法不匹配。**单纯扩大扫描范围不足以解决问题**——`plugin/scripts` 早已被扫描、已有 2017 个实体，但它的耦合病理（身份复制、跨语言子进程调用、字符串路径耦合）仍然对着这套图不可见，因为图的边定义（import/require）本来就不是这类耦合发生的地方。**这正是 P1/P2 要补的那道缝——不是"再扫一遍"，是换一种边的定义。**
+
 ## 3. 五个原语
 
 每个原语给出：定义 → 现有工具为何测不到 → 本仓库实测 → 计算方法 → **验收判据（可证否）** → **反向判据（防止它报假阳性）**。
