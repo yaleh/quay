@@ -1,7 +1,7 @@
 ---
 id: gap-retire-session-liveness
 title: 退役 session-liveness（含 mount + 22 个测试 + monitor-mount-check + 引用清理），随 tmux 退役
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -28,23 +28,37 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 
 ## Plan
 
+0. **复用起点（⛔ 不从零重做）**：git 对象库有之前完整实现 commit `c50044bb7`（77 文件，删脚本 + 22 测试 + monitor-mount-check + 清引用 + 修 ac61 + 补 Touches）。执行 `git cherry-pick c50044bb7` 复用（代码文件干净；`tasks/gap-retire-session-liveness.md` 冲突时取 develop 版），然后只修正：① 撤销误删 `outer-anchor-check.ts`（grep 命中 0 却删了，orphan-checker 会失败）；② 确认 idle-watch 接缝（方案 B）已删；③ 历史文档（docs/analysis/ 等）清不清无所谓（AC1 历史豁免），不撤销。
+
 1. 枚举 session-liveness 的全部消费方（147 个文件：orchestration 文档 / packages 代码 / plugin/loop 文档 / plugin/scripts / plugin/test / skills / workflows / scripts/test.sh），确认哪些是「可删」、哪些是「需改判」。
 2. 删：session-liveness.sh + session-liveness-mount.sh + session-liveness-sweep*.mjs（重命名 run-namespace-sweep*）+ 22 个测试 + monitor-mount-check.sh + monitor-mount-check.test.mjs。
 3. 删 idle-watch 接缝（方案 B）：manager-start.sh 的 `--check-idle-watch` / `--ensure-mount-intent` 参数 + `IDLE_WATCH_MOUNT_ENTRY` / `IDLE_WATCH_DELIVERY_SEAM` + `idle-watch.env` / `idle-watch-mount.txt` 工件 + checklist 7 键删 2 键（IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）；packages/quay/src/cli/manager.ts 的 `--check-idle-watch` CLI 参数。
-4. 清引用：逐个移除 session-liveness 引用；下游「因缺 session-liveness 而恒红」的分支一并退役或改判。
+4. 清引用（⛔ grep 判据优先，不靠死记清单）：判据 = 先 `grep -n "session-liveness" <文件>` 确认有引用才清；命中 0 一律不碰（前几轮 worker 误删 outer-anchor-check.ts 就是没先 grep）。活跃引用清单（逐个清/改判）：
+   - plugin/loop/（3）：fast-mode-loop-tick.md、fast-mode-tick-core.md、orchestrator-loop-tick.md
+   - plugin/scripts/（19）：full-suite-runner.ts、inner-blocked-signal.ts、loop-shipping-exclusion-data.mjs、manager-observation-runtime-check.ts、manager-start.sh、manager-tick-readings.ts、observer-registry-check.sh、observer-registry.sh、os-anchor-install.sh、os-anchor-watchdog.sh、outer-driver.ts、pane-state-classify.ts、quay-init.sh、quay-session.ts、red-on-omission-audit.ts、run-namespace-sweep-kill.mjs、run-namespace-sweep.mjs、tmux-test-isolation-check.ts、verify-delivery-surface.ts
+   - plugin/skills/（2）：cold-start/SKILL.md、manager/SKILL.md
+   - plugin/test/（16）：blocked-signal-parameterized、cold-start-skill、help-contract-incompatible-behaviors、laydown-set-check、loop-shipping、manager-cold-start、manager-start、manager-tick-core、observer-registry、pane-state-classify、quay-init-loop-core、quay-init-loop-driver、quay-init-loop-runtime、quay-init-tmux-detection、session-bootstrap、suite-bucket-load-sensitive-isolation（各 .test.mjs）
+   - packages/scripts/（2）：packages/quay/src/observation.ts、scripts/test.sh
+   - orchestration/（活跃 loop 文档 + conf，7）：fast-mode-tick-core.md、manager-loop-tick.md、manager-tick-core.md、manager-tick-criteria.md、orchestrator-loop-tick.md、orchestrator-tick-core.md、observer-registry.conf
+   - ⛔ orchestration/ 历史文档（SPEC-*/RUNBOOK-*/ANALYSIS-*/FINDING-*/PROPOSAL-*/RESEARCH-*/archive/*/escalations/inner-brief-*/manager-obligation-ledger.jsonl/*-phase-goal*/*-rulings-*/recovery-*/session-launch-recipes/tools-log/session-liveness.env）是历史记录，保留不清。
+   【D. ⛔ 不相干机制（不碰）】outer-anchor-check.ts、orphan-checker 等【没有 session-liveness 引用】的机制，一律不删不改——前几轮 worker 误删 outer-anchor-check.ts 就是没先 grep 确认。grep 命中 0 的文件一律不碰。
 5. 全量 suite 绿（删测试后 ratchet/baseline + bucket 归因同步更新）。
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`grep -rE "session-liveness|hermetic-tmux\.sh|hermetic-tmux-mount-check\.sh" plugin/ scripts/ packages/ orchestration/` 命中数归零（或仅剩「退役说明」注释），打印命中行；`hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh` 是前几轮误引入的重命名悬空引用，一并删除（`plugin/test/helpers/hermetic-tmux.mjs` 不在本范围）。
+- [ ] AC1（能取假）：session-liveness 的【实现/调用/测试】已清理，历史文档字样豁免：
+  - 实现：`session-liveness.sh` / `session-liveness-mount.sh` / `monitor-mount-check.sh` 已删除；
+  - 调用：`plugin/scripts/`、`packages/`、`test/`、`scripts/`、`.claude/workflows/` 里对上述脚本的调用已移除（`grep -rn "session-liveness\.sh\|session-liveness-mount\.sh\|monitor-mount-check" plugin/scripts/ packages/ test/ scripts/ .claude/workflows/` 归零，打印命中行）；`hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh` 误引入的重命名悬空引用一并删除（`plugin/test/helpers/hermetic-tmux.mjs` 不在本范围）；
+  - 测试：22 个 `session-liveness-*.test.mjs` + `monitor-mount-check.test.mjs` 已删除；
+  - 豁免：`orchestration/` 历史文档（SPEC-*/RUNBOOK-*/ANALYSIS-*/archive/*/escalations 等）+ `docs/` + `adr/` + `CLAUDE.md`/`README.md` 里的 session-liveness 字样保留（记录过去，不影响退役），不在归零范围。
 - [ ] AC2（连带退役）：`monitor-mount-check.sh` / `monitor-mount-check.test.mjs` 一并删除（无对象可查）。
 - [ ] AC3（无悬空引用）：凡引用 SESSION-* 事件 / session-liveness 输出的下游脚本，不得出现「因缺 session-liveness 而恒红/报未挂载」的分支。
 - [ ] AC4（既有不回归）：全量 suite 绿（删测试后 @test-group ratchet / baseline / suite-bucket-reattribution 同步更新）。
-- [ ] AC5（idle-watch 随退役）：`grep -rn "idle-watch\|IDLE_WATCH\|--check-idle-watch\|--ensure-mount-intent" plugin/ packages/ orchestration/` 命中数归零（或仅剩「退役说明/未来 driver 替代」注释）；manager 冷启动 checklist 7 键变 5 键（无 IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）。
+- [ ] AC5（idle-watch 随退役）：`grep -rn "idle-watch\|IDLE_WATCH\|--check-idle-watch\|--ensure-mount-intent" plugin/ packages/ test/ scripts/` 命中数归零（或仅剩「退役说明/未来 driver 替代」注释）；manager 冷启动 checklist 7 键变 5 键（无 IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）；orchestration/ + docs/ 历史文档字样豁免。
 
 ## Definition of Done
 
-session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 全部删除；147 个文件里的 session-liveness 引用归零；下游无「因缺 session-liveness 恒红」的悬空分支；全量 suite 绿并可 `git show develop:` 核验删除落地。
+session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 全部删除；活跃引用（plugin/scripts/、packages/、test/、scripts/、.claude/workflows/）里的 session-liveness 调用归零；下游无「因缺 session-liveness 恒红」的悬空分支；全量 suite 绿并可 `git show develop:` 核验删除落地；orchestration/ + docs/ 历史文档字样豁免（不要求归零）。
 
 ## Touches
 
@@ -54,6 +68,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - orchestration/manager-loop-tick.md
 - orchestration/manager-tick-core.md
 - orchestration/manager-tick-criteria.md
+- orchestration/observer-registry.conf
 - orchestration/orchestrator-loop-tick.md
 - orchestration/orchestrator-tick-core.md
 - packages/quay/src/cli/manager.ts
@@ -88,6 +103,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/scripts/laydown-set-check.sh
 - plugin/scripts/loop-driver-check.sh
 - plugin/scripts/loop-shipping-exclusion-data.mjs
+- plugin/scripts/manager-observation-runtime-check.ts
 - plugin/scripts/manager-start.sh
 - plugin/scripts/manager-tick-readings.ts
 - plugin/scripts/monitor-mount-check.sh
@@ -105,6 +121,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/scripts/quay-init.sh
 - plugin/scripts/quay-session.ts
 - plugin/scripts/quay-topology.sh
+- plugin/scripts/red-on-omission-audit.ts
 - plugin/scripts/run-namespace-sweep-kill.mjs
 - plugin/scripts/run-namespace-sweep.mjs
 - plugin/scripts/runner-concurrency.ts
@@ -166,6 +183,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/test/ready-pool-check.test.mjs
 - plugin/test/red-window-triage.test.mjs
 - plugin/test/send-keys-reliable.test.mjs
+- plugin/test/session-bootstrap.test.mjs
 - plugin/test/session-liveness-decision-import.test.mjs
 - plugin/test/session-liveness-events.test.mjs
 - plugin/test/session-liveness-hangguard.test.mjs
@@ -197,6 +215,12 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/workflows/execute-suite-fix.js
 - plugin/workflows/fan-in-execute.js
 - scripts/test.sh
+- .claude/workflows/execute-suite-fix.js
+- .claude/workflows/fan-in-execute.js
+- orchestration/session-config.env
+- plugin/scripts/integration-batch-merge.sh
+- plugin/scripts/manager-adopt.sh
+- plugin/test/manager-productization.test.mjs
 - tasks/gap-retire-session-liveness.md（自身）
 
 ## Needs-Human
@@ -291,4 +315,113 @@ Automatic merge failed; fix conflicts and then commit the result.
 ✖ plugin/test/oute
 - run_id：wk-prod-1788285192
 - session_id：f980bf4c-7460-4644-a994-9e4db5c627a1
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-03T17:25:39.981Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=scoped-gate: ✔ REVERSE-EDGE AC4 (negative control): declared reverse-edge but the integration side FAILS the content criterion → FAIL-CLOSED (never blind-choose) (1022.059265ms)
+✔ FRESHNESS GATE (scope axis legacy): an ABSENT scope field (pre-scope state) ⇒ treated as main ⇒ ALLOWED (fail-open legacy semantics) (753.162995ms)
+✔ AC1 — no secrets checked in (deepseek key / anthropic token / sk- pattern) (1.318226ms)
+✔ AC4 — deepseek roles reference the checked-in settings file; manager's effective env excludes 917k (via unset) (800.367577ms)
+✔ adversarial — 0 test files resolved ⇒ fail-closed red, NEVER a whole-suite fallback (155.435326ms)
+✔ usage — a bad --root fails with exit 2 (fail-closed on misuse, not a silent green) (16.799741ms)
+✔ AC3 — cold-start-e2e.sh asserts the build-required files, fail-named (inner-state.sh retired, not required) (0.921564ms)
+✔ AC4 — the launch-config trio is checked-in: claude-fjdac + deepseek-v4-pro-anthropic (profiles.yml) + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 (settings env) (1.6124ms)
+✔ AC4 — the launch config 三件套 (deepseek-v4-pro-anthropic + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000) is checked in (147.206265ms)
+✔ AC2 — CLI: a transcript with a manager observation exits 1 and reports the violation (159.099896ms)
+✔ AC2 — CLI: --report appends a JSONL record for a persistent violation log (144.336961ms)
+✔ AC5b — tick-log check: fresh row PASS; skipped round (stale mtime) FAIL; no row FAIL (209.555513ms)
+✖ AC3 — `quay manager adopt --dry-run` against a REAL outer window yields healthy (not missing) via outer-session-check.sh (1680.332175ms)
+✔ manager-tick-readings: goalReading counts checked/total ACs in manager-phase-goal.md (1.81148ms)
+✖ audit exit 1 + stale flags when a consumer cannot reach the registry (stale detection path) (472.923418ms)
+✖ referencedScripts filters script basenames by presence in the tick-core text (4.881691ms)
+✖ real repo is GREEN — orphan-checker N=0 (outer-anchor-check.ts explicitly retired) (3961.593266ms)
+✔ state machine — fail-closed: no session config ⇒ exit 1 (never guess a session name) (37.928709ms)
+✔ AC7: hash-regression negative control — a busy fixture relabeled as waiting-input must FAIL (the test asserts semantics, not that the code ran) (0.838786ms)
+✔ AC2: the fault-6 criterion is mechanized in the pure verdict — C-u cleared ⇒ real; byte-identical ⇒ ghost; bounded + fail-loud (2.394482ms)
+✔ AC2 — NO matching tmux session: fail-closed (exit 2), refuses to write, names --tmux-session; the monitor config is never written (283.79378ms)
+✔ buildCommitTraceIndex: fail-closed on a non-git root (empty, never throws) (28.574054ms)
+✔ no-AC-section fallback (AC4, AC47-corrected): present-but-boxless landed no-AC task is a done-flip; ABSENT AC section is fail-closed (75.476246ms)
+✔ >50% checked but a remaining implementation box ⇒ NOT landed (stays in the dispatchable pool) (11.660797ms)
+✔ AC all checked but DoD has unchecked IMPLEMENTATION boxes ⇒ NOT landed (cli-import shape, human ruling) (11.177807ms)
+✔ priorityLevel maps p1/p2/none to ascending sort ranks (p1=1, p2=2, none=Infinity; unknown level fail-open) (0.879245ms)
+✔ detectLandingBlocked is fail-safe on a non-git root (no false report, no throw) (21.316466ms)
+✔ todo candidate with prose prereq and NO edge ⇒ ineligible for promotion (author→ready fail-closed) (111.452606ms)
+✔ AC2: applyRevaluations writes ready→todo + a grep-able ## Revaluation body record; retreatReadyToTodo is fail-closed (150.710364ms)
+✔ CLI measure: no matching evidence → stdout state: unknown, exit 3 (three-state contract — NOT a bare FAIL) (159.319681ms)
+✔ CLI measure: missing transcript file → exit 2 (fail loud, never a silent false) (132.978296ms)
+✔ AC4: a MISSING checker exits 1 at startup (fail-loud), never a silent broken delivery (gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure) (31.510151ms)
+✔ AC3 fail-closed: a target whose window name != expected (default inner) is REJECTED before any send — nothing lands in the t
+- run_id：wk-prod-1788285192
+- session_id：e9a8c26e-a5d1-4755-b419-0142e8db39ee
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-04T00:15:23.006Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=merge-develop: Auto-merging tasks/gap-retire-session-liveness.md
+CONFLICT (content): Merge conflict in tasks/gap-retire-session-liveness.md
+Automatic merge failed; fix conflicts and then commit the result.
+- run_id：wk-prod-1788285192
+- session_id：ef92c5c7-d024-434a-8526-6ddf01c2055c
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-04T02:04:40.290Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=scoped-gate: ✔ AC2 — CLI: --report appends a JSONL record for a persistent violation log (680.136157ms)
+✔ AC5b — tick-log check: fresh row PASS; skipped round (stale mtime) FAIL; no row FAIL (759.267683ms)
+✔ manager-tick-readings: goalReading counts checked/total ACs in manager-phase-goal.md (4.292563ms)
+✖ real repo is GREEN — orphan-checker N=0 (outer-anchor-check.ts explicitly retired) (8587.48985ms)
+✔ state machine — fail-closed: no session config ⇒ exit 1 (never guess a session name) (48.560185ms)
+✔ AC7: hash-regression negative control — a busy fixture relabeled as waiting-input must FAIL (the test asserts semantics, not that the code ran) (0.731821ms)
+✔ AC2: the fault-6 criterion is mechanized in the pure verdict — C-u cleared ⇒ real; byte-identical ⇒ ghost; bounded + fail-loud (1.755153ms)
+✔ AC6 (sibling) — empty/null/0 split args are omitted, never fail-closed, never a fabricated 0 (0.583203ms)
+✔ AC1 fail-closed (sibling) — a REAL split value with a null cpu_time_s is ambiguous ⇒ error (0.78081ms)
+✔ AC6 (sibling) — negative / non-numeric split values fail-closed (0.530223ms)
+✔ gap-suite-cpu-time-capture-intermittent-not-wired — a RUN (fullSuiteRan:true) with `--cpu-time-s 0` ⇒ fail-closed (0 normalizes to null, and a real run must carry a real CPU) (1.042096ms)
+✔ gap-suite-cpu-time-capture-intermittent-not-wired — a RUN (fullSuiteRan:true) with `--cpu-time-s null` ⇒ fail-closed (not-wired shape) (8.30104ms)
+✔ gap-suite-cpu-time-capture-intermittent-not-wired — a RUN (fullSuiteRan:true) with NO --cpu-time-s at all ⇒ fail-closed (field-absent None shape) (7.084ms)
+✔ AC6 — buildRecord fail-closed: a non-zero cpu_time_s with --full-suite-ran false is a semantic contradiction (nothing ran) (19.927402ms)
+✔ 判据2 — buildRecord fail-closed: --skip-reason REQUIRES --full-suite-ran false (ambiguous trace never writes) (2.14196ms)
+✔ 判据2 — buildRecord fail-closed: --full-suite-ran must be true|false (1.393697ms)
+✔ 判据3 — buildRecord fail-closed: malformed --phases / negative cpu / negative load (3.943652ms)
+✔ writer — fail-closed on a missing required field (exit 2, nothing written) (283.415574ms)
+✔ writer — --doc-checked true --doc-check-exit 0 writes the AC63 判据1 doc-check trace (371.831031ms)
+✔ writer — --doc-checked must be true|false (a non-boolean value fails closed, nothing written) (413.923498ms)
+✔ writer — --doc-check-exit requires --doc-checked (fail-closed, nothing written) (305.566326ms)
+✔ checker CLI — --lock-events feeds the AC63 ff-no-doc-check judgment (RED on real ffs, GREEN when every ff'd task has a doc-checked record) (1685.473876ms)
+✔ buildRecord — fail-closed: a missing taskId/runId/state yields an error, never a partial record (0.690218ms)
+✔ AC2 — NO matching tmux session: fail-closed (exit 2), refuses to write, names --tmux-session; the monitor config is never written (1082.061975ms)
+✔ buildCommitTraceIndex: fail-closed on a non-git root (empty, never throws) (59.10909ms)
+✔ no-AC-section fallback (AC4, AC47-corrected): present-but-boxless landed no-AC task is a done-flip; ABSENT AC section is fail-closed (175.580937ms)
+✔ >50% checked but a remaining implementation box ⇒ NOT landed (stays in the dispatchable pool) (21.9658ms)
+✔ AC all checked but DoD has unchecked IMPLEMENTATION boxes ⇒ NOT landed (cli-import shape, human ruling) (41.491952ms)
+✔ priorityLevel maps p1/p2/none to ascending sort ranks (p1=1, p2=2, none=Infinity; unknown level fail-open) (16.420527ms)
+✔ detectLandingBlocked is fail-safe on a non-git root (no false report, no throw) (38.56021ms)
+✔ todo candidate with prose prereq and NO edge ⇒ ineligible for promotion (author→ready fail-closed) (395.075666ms)
+✔ AC2: applyRevaluations writes ready→todo + a grep-able ## Revaluation body record; retreatReadyToTodo is fail-closed (455.411276ms)
+✖ AC2 — the audit list covers the C 段 hard-constraint ids and key A 段 reading ids (33.497769ms)
+✔ CLI measure: no matching evidence → stdout state: unknown, exit 3 (three-state contract — NOT a bare FAIL) (396.651838ms)
+✔ CLI
+- run_id：wk-prod-1788285192
+- session_id：7fc66536-33a2-48d6-8e59-e24c80601d8d
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-04T05:54:50.433Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: == split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) ==
+- run_id：wk-prod-1788285192
+- session_id：de325eef-28fb-42ac-bb6a-19c3d034c43a
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-retire-session-liveness~wk-prod-1788285192~1788500729246-82ca76.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
