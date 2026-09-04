@@ -313,6 +313,13 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "manager/SKILL.md 一行已被 design-internal exclusion set 豁免，init/SKILL.md 一行因豁免正则缺口被误判 code-surface；性质与 99f845d9 完全相同（同为 reference-doc 索引行的止损直写）。" +
       "manager 2026-08-24 裁定 ruled one-off（先例 99f845d9/cddc55e2/f9577da1）。",
   },
+  {
+    sha: "c789d1f49",
+    reason:
+      "用户直接 Manual fan-in（合并 fix/runtime-usage-ac4-host-corpus into develop）——无 task-tracked 分支，" +
+      "针对 runtime-usage-inventory.test.mjs 的 AC4 host-corpus liveness 断言做直接 suite-red 修复。" +
+      "非偷懒绕过 fan-in（性质同 cddc55e2/6c46304b7 类：直接修复而非绕过流程）。用户 2026-09-04 裁定 ruled one-off。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
