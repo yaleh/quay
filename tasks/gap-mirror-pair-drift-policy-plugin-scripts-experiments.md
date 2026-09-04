@@ -106,11 +106,15 @@ mirror-pair-drift-check: PASS — every mirror pair matches or is allow-listed w
 
 ### AC3 逐对处置（14 对 = 12 同步 + 2 allow-list）
 
-同步方向 = **experiments ← plugin**（`plugin/scripts/` 是产品/权威层，experiments 副本滞后）。
+同步方向 = **experiments ← plugin**（`plugin/scripts/` 是产品/权威层，experiments 副本滞后）——
+**唯一例外是 `it0-enforcement-with-design-check.ts`**：那对的漂移在 plugin 侧（plugin 把标题
+`DoD`→`Done`、删掉 functional `clauseN ::` 解析、CLI 默认路径改错到 `<root>/inherited-core.md`），
+experiments 才是正确版本，故那对是**语义合并**（见下表该行），不是单向同步。scoped-gate 首轮红
+（11 个 `parseInheritedCoreClauses`/`runChecks`/CLI 测试失败）正是单向同步把 plugin 的回归复制过来导致。
 
 | 文件 | 差异性质 | 处置 |
 |---|---|---|
-| `it0-enforcement-with-design-check.ts` | "Definition of DoD"→"Definition of Done" + helpExit import + 删死分支 | 同步 |
+| `it0-enforcement-with-design-check.ts` | **plugin 侧漂移（非 experiments 滞后）**：标题 `DoD`→`Done`、删掉 functional `clauseN ::` 解析（真实 `inherited-core.md` 用 `clauseN ::` 记法，`### Clause N` 在真实文件里是 0 命中，删掉即失效）、CLI 默认路径改错到 `<root>/inherited-core.md`（真实在 `experiments/…/inherited-core.md`） | **语义合并**（非单向同步）：恢复 experiments 的 `DoD` 标题 + functional 解析 + 正确 CLI 路径；保留 plugin 的 helpExit/--help 统一契约 |
 | `it0-split-or-commit-check.ts` | 新增 DEP-DONE-IFF-DEPS / DEP-DANGLING + helpExit + dependsOn | 同步 |
 | `task-schema-check.ts` | 头注释去 "exp5 /" | 同步 |
 | `task-schema.ts` | 头注释去 "exp5" 前缀（ABI 函数迁出已在两侧一致——gap-abi-… 已 done，按落地后现状判定为同步） | 同步 |
@@ -156,7 +160,8 @@ AC1 的真实读数、AC2 检查器对当前仓库真实跑出的完整 pass/fai
 - plugin/test/mirror-pair-drift-check.test.mjs（新增）
 - plugin/scripts/runner-static-gate.ts（接线 run_static_checks）
 - plugin/scripts/capability-catalog.sh（登记五表）
-- experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.ts（重新同步）
+- plugin/scripts/it0-enforcement-with-design-check.ts（语义合并修正——恢复 DoD 标题 + functional 解析 + 正确路径，保留 helpExit）
+- experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.ts（重新同步 → 语义合并修正，与 plugin 副本字节一致）
 - experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts（重新同步）
 - experiments/quay-perpetual-stream/scripts/task-schema-check.ts（重新同步）
 - experiments/quay-perpetual-stream/scripts/task-schema.ts（重新同步）
