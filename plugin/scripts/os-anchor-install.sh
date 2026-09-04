@@ -11,7 +11,7 @@
 # session (session-scoped CronCreate/ScheduleWakeup) and died with it. This installer
 # creates a systemd USER timer (does NOT die with any Claude session) that fires
 # os-anchor-watchdog.sh periodically. The watchdog reuses ONLY validated capabilities
-# (session-liveness.sh / send-keys-reliable.sh + transcript-delivery-check.ts + the
+# (the tmux pane check / send-keys-reliable.sh + transcript-delivery-check.ts + the
 # validated cold-start drive text) to check each project's session liveness + anchor
 # presence and re-spawn a dead session automatically.
 #

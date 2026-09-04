@@ -25,6 +25,7 @@ experiments/quay-perpetual-stream/test/loadbearing-test-gate.test.mjs
 experiments/quay-perpetual-stream/test/outward-vt-check.test.mjs
 experiments/quay-perpetual-stream/test/portfolio-choice.test.mjs
 experiments/quay-perpetual-stream/test/preparation-feedback.test.mjs
+experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs
 experiments/quay-perpetual-stream/test/read-probe-spec.test.mjs
 experiments/quay-perpetual-stream/test/rolling-slope-check.test.mjs
 experiments/quay-perpetual-stream/test/routine-file-gate.test.mjs
@@ -215,6 +216,7 @@ packages/quay/test/observation.test.mjs
 packages/quay/test/package-json-bin.test.mjs
 packages/quay/test/provider-abi-conformance.test.mjs
 packages/quay/test/provider-env-symmetry.test.mjs
+packages/quay/test/sea-artifact-consumer-e2e.test.mjs
 packages/quay/test/sea-bundle-plugin-sidecar.test.mjs
 packages/quay/test/serve-ac102-modernist-views.test.mjs
 packages/quay/test/serve-ac95-views.test.mjs
@@ -270,6 +272,7 @@ plugin/test/cap-from-gate-config-budget.test.mjs
 plugin/test/cap-from-gate-hysteresis.test.mjs
 plugin/test/cap-from-gate-stale.test.mjs
 plugin/test/capability-catalog.test.mjs
+plugin/test/checker-cost.test.mjs
 plugin/test/checker-driver-result-ratchet-check.test.mjs
 plugin/test/checker-lib.test.mjs
 plugin/test/checker-mechanical-spine-check.test.mjs
@@ -330,6 +333,7 @@ plugin/test/gate-event-store.test.mjs
 plugin/test/gate-scripts-retirement.test.mjs
 plugin/test/gate-staleness-check.test.mjs
 plugin/test/gitignore.test.mjs
+plugin/test/help-contract-incompatible-behaviors.test.mjs
 plugin/test/inner-blocked-signal.test.mjs
 plugin/test/inner-forensics.test.mjs
 plugin/test/inner-idle-log.test.mjs
@@ -370,7 +374,6 @@ plugin/test/mechanism-count.test.mjs
 plugin/test/mechanism-vitality-check.test.mjs
 plugin/test/mirror-full-suite-state.test.mjs
 plugin/test/mirror-measure-history.test.mjs
-plugin/test/monitor-mount-check.test.mjs
 plugin/test/needs-human-recheck.test.mjs
 plugin/test/no-manager-tick-doc-check.test.mjs
 plugin/test/obligation-discharge-agent.test.mjs
@@ -407,6 +410,11 @@ plugin/test/profile-policy.test.mjs
 plugin/test/promotion-driver.test.mjs
 plugin/test/provision-verify-worktree.test.mjs
 plugin/test/quality-gate-driver.test.mjs
+plugin/test/quay-init-drift-report.test.mjs
+plugin/test/quay-init-laydown-closure.test.mjs
+plugin/test/quay-init-laydown-dist-closure.test.mjs
+plugin/test/quay-init-loop-consumer-doc-refs.test.mjs
+plugin/test/quay-init-loop-core.test.mjs
 plugin/test/quay-init-loop-driver.test.mjs
 plugin/test/quay-init-loop-fixture-hash-shipped.test.mjs
 plugin/test/quay-init-loop-fixture-hash-skill.test.mjs
@@ -421,6 +429,7 @@ plugin/test/quay-init-loop-vendor-user-scope-fresh.test.mjs
 plugin/test/quay-init-loop-vendor-user-scope-stale.test.mjs
 plugin/test/quay-init-loop.test.mjs
 plugin/test/quay-init-tmux-detection.test.mjs
+plugin/test/quay-init.test.mjs
 plugin/test/quay-session.test.mjs
 plugin/test/ready-pool-check.test.mjs
 plugin/test/ready-pool-heartbeat.test.mjs
@@ -442,11 +451,15 @@ plugin/test/roadmap-superseded-check.test.mjs
 plugin/test/ruling-required-wiring.test.mjs
 plugin/test/run-identity.test.mjs
 plugin/test/runner-concurrency.test.mjs
+plugin/test/runner-grouping-flags-only.test.mjs
+plugin/test/runner-grouping-list-groups.test.mjs
 plugin/test/runner-grouping-metadata.test.mjs
+plugin/test/runner-grouping-serial-anti-stomp.test.mjs
 plugin/test/runtime-landing.test.mjs
 plugin/test/runtime-usage-inventory.test.mjs
 plugin/test/scoped-static-checks.test.mjs
 plugin/test/select-static-checks-for-touches.test.mjs
+plugin/test/select-tests-for-touches.test.mjs
 plugin/test/self-report-vocab-audit.test.mjs
 plugin/test/self-report-vocab-check.test.mjs
 plugin/test/self-touch-convention.test.mjs
@@ -454,19 +467,6 @@ plugin/test/semantic-face-dispatch-record.test.mjs
 plugin/test/semantic-observer-judge.test.mjs
 plugin/test/send-keys-reliable.test.mjs
 plugin/test/session-bootstrap.test.mjs
-plugin/test/session-liveness-decision-import.test.mjs
-plugin/test/session-liveness-hangguard.test.mjs
-plugin/test/session-liveness-restart.test.mjs
-plugin/test/session-liveness-scd-busy.test.mjs
-plugin/test/session-liveness-scd-config-gates.test.mjs
-plugin/test/session-liveness-scd-develop-active.test.mjs
-plugin/test/session-liveness-scd-fire.test.mjs
-plugin/test/session-liveness-scd-inflight-changing.test.mjs
-plugin/test/session-liveness-scd-multitask.test.mjs
-plugin/test/session-liveness-scd-progress.test.mjs
-plugin/test/session-liveness-scd-unsaturated.test.mjs
-plugin/test/session-liveness-signals-thresholds-edge.test.mjs
-plugin/test/session-liveness-target.test.mjs
 plugin/test/session-retirement-check.test.mjs
 plugin/test/session-topology.test.mjs
 plugin/test/slot-refill-heartbeat.test.mjs
@@ -513,6 +513,7 @@ plugin/test/test-framework-policy-check.test.mjs
 plugin/test/test-isolation-check.test.mjs
 plugin/test/test-isolation-r6-partial-cleanup.test.mjs
 plugin/test/test-phases-order.test.mjs
+plugin/test/threshold-scope-check.test.mjs
 plugin/test/tick-core-static-check.test.mjs
 plugin/test/tick-vocabulary.test.mjs
 plugin/test/tmp-leak-pairing-check.test.mjs

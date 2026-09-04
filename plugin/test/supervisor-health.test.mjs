@@ -42,7 +42,6 @@ function makeFakeRoot(overrides = {}) {
     "supervisor-deliver.sh",
     "transcript-delivery-check.ts",
     "pane-state-classify.ts",
-    "session-liveness.sh",
   ];
   for (const n of names) {
     const p = path.join(scripts, n);
@@ -81,7 +80,6 @@ test("AC7/Contract: alive:true with all components present (hermetic, skip syste
     assert.match(r.stdout, /^deliver_adapter=present/m);
     assert.match(r.stdout, /^delivery_checker=present/m);
     assert.match(r.stdout, /^observe_adapter=present/m);
-    assert.match(r.stdout, /^session_liveness=present/m);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -100,11 +98,11 @@ test("AC7/Contract: a missing delivery adapter → alive:false, exit 1, names th
 });
 
 test("AC7: a .sh component that is not executable is missing (laid down but not functional)", () => {
-  const { root } = makeFakeRoot({ "session-liveness.sh": "nonexec" });
+  const { root } = makeFakeRoot({ "supervisor-deliver.sh": "nonexec" });
   try {
     const r = runHealth({ root });
     assert.equal(r.status, 1, `nonexec .sh → exit 1, got ${r.status}\n${r.stdout}\n${r.stderr}`);
-    assert.match(r.stdout, /^session_liveness=missing/m);
+    assert.match(r.stdout, /^deliver_adapter=missing/m);
     assert.match(r.stdout, /^alive: false/m);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

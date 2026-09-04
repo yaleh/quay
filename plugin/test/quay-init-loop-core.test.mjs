@@ -89,8 +89,8 @@ test('AC3 — a real --loop run lays down the full two-layer mechanism set', () 
     assert.ok(fs.existsSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md')), 'outer tick doc laid down');
     assert.ok(fs.existsSync(path.join(ws, 'docs', 'analysis', 'fast-mode-loop-tick.md')), 'inner tick doc laid down');
     // mechanism scripts (inner-state.sh is deliberately NOT here — retired,
-    // gap-retire-inner-state-one-observer-targets-by-parameter AC3; observation ships as
-    // session-liveness.sh via the separate session-liveness section below).
+    // gap-retire-inner-state-one-observer-targets-by-parameter AC3; the observer script
+    // session-liveness.sh was retired 2026-09-03 and is likewise NOT laid down).
     const expectedScripts = [
       'fast-mode-telemetry.ts', 'inner-blocked-signal.ts', 'inner-forensics.mjs', 'inner-idle-log.ts',
       'loop-driver-check.sh', 'resource-gate.sh', 'task-contract-check.ts',
@@ -114,8 +114,8 @@ test('AC3 — a real --loop run lays down the full two-layer mechanism set', () 
     // The retired monitor must NOT be laid down into new target projects (AC3).
     assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'inner-state.sh')),
       'inner-state.sh must NOT be laid down into new target projects (retired, AC3)');
-    assert.ok(fs.existsSync(path.join(ws, 'plugin', 'scripts', 'session-liveness.sh')),
-      'session-liveness.sh — the ONE observer — must be laid down');
+    assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'session-liveness.sh')),
+      'session-liveness.sh must NOT be laid down (retired 2026-09-03)');
     // state file records the plugin version (upgrade path seed)
     assert.ok(fs.existsSync(path.join(ws, '.quay', 'quay-init-state.json')), 'state file must be written');
     const state = JSON.parse(fs.readFileSync(path.join(ws, '.quay', 'quay-init-state.json'), 'utf8'));
@@ -167,9 +167,7 @@ test('AC4 — laid-down tick docs are byte-identical to the product and carry NO
     // and the repo-specific `scripts/test.sh` literal must not appear anywhere in the docs.
     const klsLines = all.split('\n').filter((l) => l.includes('KNOWN-LOAD-SENSITIVE'));
     const familyCmdLines = all.split('\n')
-      .filter((l) => l.includes('$TEST_COMMAND')
-        && (l.includes('session-liveness-events.test.mjs') || l.includes('session-liveness.test.mjs'))
-        && l.includes('cold-start-skill.test.mjs'));
+      .filter((l) => l.includes('$TEST_COMMAND') && l.includes('cold-start-skill.test.mjs'));
     assert.ok(klsLines.length > 0,
       'the shipped tick doc must carry the KNOWN-LOAD-SENSITIVE marker (b53f7402)');
     assert.ok(familyCmdLines.length > 0,
@@ -194,9 +192,9 @@ test('AC4 — laid-down tick docs are byte-identical to the product and carry NO
     assert.match(cfg, /merge_target:\s*integration/, 'config.yml loop.merge_target must ship the integration target');
 
     // The mechanism scripts that used to carry quay literals are now self-locating. The retired
-    // inner-state.sh is NOT laid down at all (AC3) — the ONE observer session-liveness.sh is.
-    const liveness = fs.readFileSync(path.join(ws, 'plugin', 'scripts', 'session-liveness.sh'), 'utf8');
-    assert.ok(!liveness.includes('/home/yale/work/quay'), 'session-liveness.sh must not carry a hardcoded quay root');
+    // observer (session-liveness.sh) and inner-state.sh are NOT laid down at all (AC3).
+    assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'session-liveness.sh')),
+      'session-liveness.sh must not be laid down (retired 2026-09-03)');
     assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'inner-state.sh')),
       'inner-state.sh must not be laid down (retired, AC3)');
   } finally { cleanup(ws); }

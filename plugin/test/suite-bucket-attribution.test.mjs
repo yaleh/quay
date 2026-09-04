@@ -96,13 +96,11 @@ const GROUP_B = [
 
 // (c) statically-unlocatable `plugin/test/*` files → UNRESOLVED. Each subject's `plugin` prefix is a
 // computed variable (`pluginDir = path.resolve(__dirname, "..")` — signal ④ joins only the LITERAL
-// arguments, so `path.join(pluginDir, "scripts", …)` → `scripts/…`, no `plugin/` prefix) or lives in a
-// helper module (`session-liveness-helpers.mjs` — outside the suite glob, so its subject is invisible
-// to the file's own text); the mechanism must say so, not guess.
+// arguments, so `path.join(pluginDir, "scripts", …)` → `scripts/…`, no `plugin/` prefix); the
+// mechanism must say so, not guess.
 const GROUP_C = [
   "manager-arm-loop.test.mjs",
   "outer-tick-log-check.test.mjs",
-  "session-liveness-restart.test.mjs",
   "user-scope-reinstall.test.mjs",
 ];
 

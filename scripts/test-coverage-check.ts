@@ -361,11 +361,11 @@ function runSelftest(): number {
 
   // ── AC5: canonical set == scripts/test.sh's OWN default selection (--list-files), both
   // realpath-deduped (matching build_deduped_files). no-args --list-files reports the FULL
-  // reachable surface = the product,engine body + the lowconc phase (the default run executes
-  // both — gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive), so this stays a direct
-  // equality. If the two ever diverge, the check is failing its ADR-004 single-source purpose.
-  // Wrapped so a throw from canonicalTestFiles (broken test.sh) surfaces as a FAIL, not an
-  // uncaught stack trace (REFUTE round-1 MINOR). ──
+  // reachable surface = the product,engine body + the serial phase + the lowconc phase (the
+  // default run executes all four groups — gap-test-file-snapshot-worktree-drops-realinstall), so
+  // this stays a direct equality. If the two ever diverge, the check is failing its ADR-004
+  // single-source purpose. Wrapped so a throw from canonicalTestFiles (broken test.sh) surfaces as
+  // a FAIL, not an uncaught stack trace (REFUTE round-1 MINOR). ──
   {
     let ac5 = false;
     let detail = "";
@@ -379,10 +379,10 @@ function runSelftest(): number {
           }
         })
       );
-      // serial + lowconc (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests /
-      // gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive): the default --list-files
-      // (product,engine + the lowconc phase) EXCLUDES the serial group,
-      // so the canonical-set comparison must enumerate ALL FOUR groups to stay single-source.
+      // no-args --list-files reports all four groups (product,engine + serial + lowconc,
+      // gap-test-file-snapshot-worktree-drops-realinstall) — the same set as the explicit
+      // product,engine,serial,lowconc enumeration below, kept explicit so the single-source
+      // comparison never depends on the no-args default's group composition.
       const listOut = spawnSync("bash", ["scripts/test.sh", "--group", "product,engine,serial,lowconc", "--list-files"], { cwd: REPO_ROOT, encoding: "utf8" });
       const listSet = new Set(listOut.status === 0 ? listOut.stdout.trim().split("\n").filter(Boolean) : []);
       ac5 =

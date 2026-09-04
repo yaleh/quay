@@ -126,6 +126,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 import { TASK_STATUS } from "./task-status.ts";
 import { extractSection } from "./task-schema.ts";
+import { repoRoot } from "./repo-root.ts";
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
 // AC150-3：资源门判定 + 控制态 + 身份闸 + MCP 控制面，抽到 driver-shared.ts 供 promotion-driver 复用
@@ -2764,13 +2765,21 @@ export function combinedOutput(stdout: string, stderr: string): string {
 /** 无害噪声行（MODULE_TYPELESS 等）——⛔ 污染失败摘要/判词。extractFailureSummary 与
  *  extractFirstFailureLine 共用（⛔ 两处各写一份正则 = 漂移，硬规则 5b）。 */
 function isNoiseLine(l: string): boolean {
+  const t = l.trim();
   return (
     l.includes("MODULE_TYPELESS_PACKAGE_JSON") ||
     l.includes("Reparsing as ES module") ||
     l.includes("This incurs a performance overhead") ||
     l.includes("To eliminate this warning") ||
     l.includes('add "type": "module"') ||
-    l.includes("--trace-warnings")
+    l.includes("--trace-warnings") ||
+    // gap-fan-in-suite-red-reason-carries-split-or-commit-title：suite 静态检查阶段的「== … ==」分节
+    // 标题行（runner-static-gate.ts 的 echo）与 node:test 的「✔ 通过测试」行都不是失败信号——但标题含
+    // 「continuously-checked」（\bchecked\b）/「to-fail」（\bFAIL\b）、通过测试名含「AssertionError」/
+    // 「Could not resolve」等词，会撞 isFailureSignalLine 的松散正则 ⇒ 把标题/通过测试当失败摘要（归因
+    // 错位到 split-or-commit 标题）。⛔ 两者都整体当噪声（不进 meaningful 回退、不进 signals）。
+    /^== .* ==$/.test(t) ||
+    /^\s*✔/.test(l)
   );
 }
 
@@ -2803,10 +2812,26 @@ export function extractFailureSummary(combined: string): string {
  *  且它无信号时回退 meaningful 会违反「无匹配行 ⇒ 回退通用文案」（硬规则 3b 三态可分）。
  *  无信号 ⇒ 空串（调用方回退 `suite <outcome>` 通用文案，⛔ 不伪造/截断出误导内容）。 */
 export function extractFirstFailureLine(combined: string): string {
-  const line = String(combined ?? "")
+  const lines = String(combined ?? "")
     .split("\n")
-    .find((l) => l.trim() !== "" && !isNoiseLine(l) && isFailureSignalLine(l));
-  return line ? line.trim() : "";
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && !isNoiseLine(l));
+  // 真实失败优先序（gap-fan-in-suite-red-reason-carries-split-or-commit-title）：真实断言原文
+  // （AssertionError）→ 失败文件（__PERFILE__ passed=false）→ 测试级失败（✖ / not ok / # fail N>0）
+  // → 松散静态检查信号（HARD FAIL / Could not resolve / checked / violation）。
+  // 旧实现取【文档序第一条】松散信号，而 suite 静态检查阶段的良性判词（0 violation(s) / checked 566 /
+  // PASS）排在真实失败之前、且全中松散正则 ⇒ reason 恒为「split-or-commit 标题」而非真实失败（归因
+  // 错位）。改成确定性失败优先，仍保留松散信号作【静态检查真失败】（无测试失败时）的回退。
+  const definitive = [
+    /AssertionError/i,
+    /__PERFILE__ .* passed=false/i,
+    /^\s*✖|^\s*not ok\b|# fail\s+[1-9]\d*\b/i,
+  ];
+  for (const re of definitive) {
+    const hit = lines.find((l) => re.test(l));
+    if (hit) return hit;
+  }
+  return lines.find(isFailureSignalLine) ?? "";
 }
 
 /** 读 fan-in 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。 */
@@ -3066,6 +3091,41 @@ async function flipTaskDone(
     return commitTaskStatusChange(worktree, task, file, flipped, `tasks: 翻 ${task} done（driver 机械 fan-in）`);
   }
   return { ok: false, reason: `expected exactly 1 'status: ready' line, got ${readyCount}` };
+}
+
+/** gap-mechanical-fan-in-writes-no-complete-gateevent — 机械 fan-in 翻 done 后经既有 gate-event-store
+ *  写 `complete` pass GateEvent（恢复 gap-loop-completion-path-produces-zero-gateevents AC2 在新路径上
+ *  成立；⛔ 不手搓 append）。事件写到 <root>/.quay/gate-events.jsonl——与 CLI/loop 同一载体，
+ *  stale-ready-audit.ts 的 bypassComplete 判据据此不再把机械 fan-in 的 done 误报为「绕过 QENG」。
+ *  actor 缺省 "quay-driver"（区别于 CLI "quay-cli" / loop "outer"）。Package import 走动态
+ *  pathToFileURL（同 loop-complete-task.ts：esbuild bundle 不解析 ../../packages/...）。best-effort：
+ *  写失败返回 { ok:false }，不抛——fan-in 已 landed，观测写不得阻塞主执行（同 writeSuiteCapture）。 */
+export async function appendCompleteGateEvent(
+  root: string,
+  task: string,
+  actor = "quay-driver",
+): Promise<{ ok: boolean; reason: string | null }> {
+  try {
+    // Module 经 repo-root.ts 单一真相源解析（⛔ 不用 root：测试里 root 是 scratch 空仓，无 packages/
+    // 树 ⇒ MODULE_NOT_FOUND；也⛔ 手搓 __dirname→../..——bundle 落 scripts/dist 时错一级）。repoRoot()
+    // 从本文件所在目录向上找 bundle/consumer/git 根，源运行（strip-types）与 bundle 运行都正确。
+    const { appendGateEvent } = await import(
+      /* @vite-ignore */ pathToFileURL(path.join(repoRoot(), "packages", "quay", "src", "gate", "gate-event-store.ts")).href
+    ) as { appendGateEvent: (logPath: string, event: unknown) => void };
+    appendGateEvent(path.join(root, ".quay", "gate-events.jsonl"), {
+      id: randomUUID(),
+      item_id: task,
+      pipeline_id: task,
+      gate: "complete",
+      actor,
+      verdict: "pass",
+      timestamp: new Date().toISOString(),
+      payload: { from: "ready", to: "done" },
+    });
+    return { ok: true, reason: null };
+  } catch (e) {
+    return { ok: false, reason: (e as Error)?.message ?? String(e) };
+  }
 }
 
 /** gap-mechanical-fan-in-per-suite-runid-unified — 生成一次机械 fan-in 的 per-suite runId
@@ -3526,6 +3586,17 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     appendFanInStepTrace(root, task, runId, "ff", "end", { ok: ff.code === 0 });
     trace({ step: "ff", exit: ff.code, wall_ms: Date.now() - ffT0, ok: ff.code === 0, ...(ff.code === 0 ? {} : { reason: (ff.stderr || ff.stdout || "").trim() || `exit ${ff.code}` }) });
     if (ff.code !== 0) return fail("ff", { ok: false, status: ff.code, stdout: ff.stdout, stderr: ff.stderr, error: null });
+
+    // 9.4b 写 complete pass GateEvent（gap-mechanical-fan-in-writes-no-complete-gateevent AC2）：机械
+    // fan-in 此前绕过 gate 引擎（runMechanicalFanIn/flipTaskDone 全文零 GateEvent），.quay/gate-events.jsonl
+    // 里 complete 单路缺席——stale-ready-audit 的 bypassComplete 每轮报 9 条真阳性被当噪声。现在经既有
+    // gate-event-store 补写（与 CLI/loop 同一载体，⛔ 不手搓 append）。best-effort：写失败不致命。
+    const gateEventT0 = Date.now();
+    const gateEvent = await appendCompleteGateEvent(root, task);
+    trace({
+      step: "append-complete-gate-event", exit: gateEvent.ok ? 0 : 1, wall_ms: Date.now() - gateEventT0,
+      ok: gateEvent.ok, ...(gateEvent.ok ? {} : { reason: gateEvent.reason ?? "write failed" }),
+    });
 
     // 9.5 清理 worktree + 删 task 分支（ff 成功后——landed 判据 = status done ∧ 无残留 worktree）。
     // best-effort：移除失败不致命，landing 判定（computeLandingState）会据残留 worktree 诚实判未落地。

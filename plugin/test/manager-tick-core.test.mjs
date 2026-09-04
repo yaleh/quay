@@ -1,17 +1,15 @@
 // @test-group engine
 // manager-tick-core.test.mjs — gap-manager-cold-start-no-falsifiable-checklist (AC3/AC4).
 //
-// Pins the execution-core idle-watch criterion to the REAL mechanism:
+// Pins the execution core against a retired observation mechanism:
 //   no_false_instrument = 1 — the LIVE execution core orchestration/manager-tick-core.md never
-//       targets the non-existent idle-watch.sh as a check instrument (defect 2: a repo-wide find
-//       for it returns zero). The shipped plugin/loop/manager-tick-core.md is now a one-line POINTER
-//       to this 正本 (gap-plugin-loop-manager-drifted-copies-pointerize — "该路径无内容可维护"),
-//       so the content assertions target the 正本, not the pointer.
-//   A10 — the idle-watch check uses monitor-mount-check.sh --json (mounted+targetOk) and
-//       session-liveness.sh --once (SESSION-STATUS) + Monitor event stream, i.e. the real
-//       session-liveness-mount.sh + Monitor-tool mechanism.
-//   B4 — the sentinel sweep records cron evidence (cron-evidence.jsonl) so the registry↔real-cron
-//       link is externally verifiable (defect 3 / AC4, via manager-arm-loop.sh --verify-cron).
+//       targets a non-existent script as a check instrument (defect 2). The session-liveness
+//       mechanism (session-liveness.sh / monitor-mount-check.sh / idle-watch) was retired 2026-09-03,
+//       so the core must no longer reference any of those deleted scripts. The shipped
+//       plugin/loop/manager-tick-core.md is a one-line POINTER to this 正本
+//       (gap-plugin-loop-manager-drifted-copies-pointerize), so content assertions target the 正本.
+//   AC4 — the anchor A19 records cron receipts so registry↔real cron is externally verifiable
+//       (defect 3, via manager-arm-loop.sh --verify / --record-cron).
 //
 // Run:
 //   node --test plugin/test/manager-tick-core.test.mjs
@@ -28,25 +26,20 @@ const repoRoot = path.resolve(pluginDir, "..");
 const CORE = path.join(repoRoot, "orchestration", "manager-tick-core.md");
 const src = fs.readFileSync(CORE, "utf8");
 
-// ── AC3 — no_false_instrument: the core never points at the non-existent idle-watch.sh ──────────────
+// ── AC3 — no_false_instrument: the core no longer references the retired observer scripts ───────────
 
-test("AC3 no_false_instrument — the execution core never targets idle-watch.sh as a check instrument", () => {
+test("AC3 no_false_instrument — the execution core no longer targets idle-watch.sh as a check instrument", () => {
   assert.ok(!src.includes("idle-watch.sh"),
     "manager-tick-core.md must not reference idle-watch.sh (the non-existent script, defect 2)");
 });
 
-test("AC3 — the idle-watch criterion (A10) points at the real mechanism", () => {
-  assert.match(src, /monitor-mount-check\.sh --json/, "A10 must use monitor-mount-check.sh --json");
-  assert.match(src, /session-liveness\.sh --once/, "A10 must use the --once delivery seam");
-  assert.match(src, /SESSION-STATUS/, "A10 must require at least one SESSION-STATUS line");
-  assert.match(src, /session-liveness-mount\.sh/, "A10 must name the real mount entry");
-  assert.match(src, /Monitor 工具任务/, "A10 must describe the Monitor-tool-task mechanism");
+test("AC3 — the core no longer references the retired observer scripts (session-liveness / monitor-mount-check)", () => {
+  assert.ok(!/session-liveness\.sh/.test(src), "manager-tick-core.md must not reference session-liveness.sh (retired 2026-09-03)");
+  assert.ok(!/session-liveness-mount\.sh/.test(src), "manager-tick-core.md must not reference session-liveness-mount.sh (retired)");
+  assert.ok(!/monitor-mount-check\.sh/.test(src), "manager-tick-core.md must not reference monitor-mount-check.sh (retired)");
 });
 
 // ── AC4 — the anchor A19 records cron receipts so registry↔real cron is externally verifiable ──────
-// (The 正本's A19 carries the arm/verify/record-cron contract — the B4 wording the shipped copy
-// used (`cron-evidence.jsonl`/`cronListCount`/`--verify-cron`) drifted with the copy and is gone;
-// the live contract is `--record-cron` write-back + external `--verify`.)
 
 test("AC4 — the anchor A19 records cron receipts so the registry↔real-cron link is externally verifiable", () => {
   assert.match(src, /--record-cron/, "A19 must carry the record-cron write-back step (the receipt after CronList)");
@@ -54,26 +47,17 @@ test("AC4 — the anchor A19 records cron receipts so the registry↔real-cron l
   assert.match(src, /manager-arm-loop\.sh --verify/, "A19 must reference the external verifier");
 });
 
-// ── AC3 — the live reason archive's idle-watch criterion points at the real mechanism ───────────────
+// ── AC3 — the live reason archive no longer references the retired observer scripts ───────────────
 
-test("AC3 — the live manager-loop-tick.md no longer pgrep's a non-existent idle-watch script", () => {
+test("AC3 — the live manager-loop-tick.md no longer references the retired observer scripts", () => {
   const archive = path.resolve(repoRoot, "orchestration", "manager-loop-tick.md");
   assert.ok(fs.existsSync(archive), "orchestration/manager-loop-tick.md must exist");
   const text = fs.readFileSync(archive, "utf8");
-  // Position-aware: only flag pgrep at a COMMAND position (line start / after shell separator)
-  // targeting idle-watch. The prose that FORBIDS the practice ("别再 pgrep 一个不存在的脚本")
-  // also contains "pgrep"+"idle-watch" on one line — keyword-only matching would false-positive
-  // on it, and deleting that prohibition to make the test pass would erode the rule it protects
-  // (manager 2026-08-14: instrument-failure-check forced 3 prose-weakening edits the same way).
-  // Negative control (:539): `pgrep -af 'plugin/scripts/session-liveness\.sh'` is a REAL live
-  // command — must NOT match (different target, not idle-watch).
-  assert.ok(!/(^|[;&|]\s*)pgrep\b[^\n]*idle-watch/m.test(text),
-    "the live archive must not pgrep a non-existent idle-watch script (defect 2)");
-  assert.match(text, /monitor-mount-check\.sh --json/, "the archive's idle-watch check must use monitor-mount-check.sh --json");
-  assert.match(text, /session-liveness\.sh --once/, "the archive's idle-watch check must use the --once seam");
+  assert.ok(!/monitor-mount-check\.sh/.test(text), "the archive must not reference monitor-mount-check.sh (retired)");
+  assert.ok(!/session-liveness\.sh/.test(text), "the archive must not reference session-liveness.sh (retired)");
 });
 
-// ── AC3 — touched sibling files do not re-introduce idle-watch.sh as a live instrument ─────────────
+// ── AC3 — touched sibling files do not re-introduce the retired scripts as a live instrument ───────
 
 test("AC3 — the touched sibling files never pgrep idle-watch (defect-2 pattern)", () => {
   for (const rel of ["scripts/manager-start.sh", "scripts/manager-arm-loop.sh"]) {

@@ -2,7 +2,7 @@
 id: gap-fix-worker-spawn-inherits-unrecognized-model-deepseek-v4-pro-anthropic
 title: promotion-driver fix-worker 直接 spawn 携带 profiles.yml --model
   deepseek-v4-pro-anthropic——Claude Code CLI 不识别，近期约 85% fix 尝试超时空转
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -39,13 +39,15 @@ extra:
 2. 让 fix-worker 的模型解析与实际生效的模型保持一致——可选方向：① 让 `claude-fjdac` 包装脚本的 `ANTHROPIC_DEFAULT_*_MODEL` 也带上 `-anthropic` 后缀（与 profiles.yml 对齐）；② 让 `--model` 传参前先做一次规范化（剥掉 CLI 不认的后缀，只把后缀语义交给 litellm 路由层）；③ 换一个 fix-worker 专用的、CLI 端确认识别的 model 值。三选一前先确认 litellm 侧对该模型名的 fallback 依赖是否仍需要那个后缀（不能盲目改掉 a7a507eab 治好的 400 风暴）。
 3. `spawnFixWorker` 对 `unrecognized_model` 这一类"根本没开始工作就超时"的失败，与"确实尝试了但改错了"的失败，做区分记录（不强制并入本任务范围，但落地时若顺手可做则做——三态可区分同硬规则 3b）。
 
+**执行记录（Plan 步骤 1 实测，修正 Proposal 步骤 5 的"尚未验证"半边）**：task-worker/selector 同样以同一形态报 `unrecognized_model`（`worker-driver.log` 实测 1008 条 `query_source":"sdk"`：620 `deepseek-v4-pro-anthropic` + 388 `deepseek-v4-pro`），⛔ 不是"只有 fix-worker 复现"。底层机制（transcript `message.model` 实测）：CLI 收到 `--model deepseek-v4-pro-anthropic` → SDK 模型表不认自定义 id ⇒ `unrecognized_model`（sdk，非致命警告）⇒ 回退到 wrapper export 的 `ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro`（无后缀）——即真实到达 litellm 的模型是**无后缀**的 `deepseek-v4-pro`，`a7a507eab` 的 `-anthropic` 后缀从未经此路径到达 litellm。修法 = 把 `ANTHROPIC_DEFAULT_*_MODEL` 对齐到带后缀值（方案①），经 `.quay/profiles.yml` `worker-default.env` → `--settings env` 落地。⚠️ 实测 `--settings env` 对该 env 键**不覆盖** wrapper 的 shell `export`（transcript 仍 `deepseek-v4-pro`）⇒ 完整生效还须同步改 `~/.local/bin/claude-fjdac`（仓库外，非本任务 Touches，记为仓库外依赖）。
+
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：用与生产相同的 profile/wrapper 组合重放一次 `buildFixWorkerArgv` 产出的 argv 直接 spawn，此前必现 `unrecognized_model`；改动落地后同一 argv 不再命中该签名（负控制：不改的旧 argv 仍应复现，证明测试本身有效）。
-- [ ] AC2（真实生产载体验证，非 fixture）：实现落地**之后**，`.quay/promotion-outcome.jsonl` 里新产生的 fix-worker 记录不再出现 `unrecognized_model`/该超时签名（贴出落地后的真实记录，硬规则 4 推论三：N 只计落地之后的时间窗）。
-- [ ] AC3：`--for-task` scoped 门 + 全量 suite 绿；不引入新的 flaky（尤其 `manager-layer-shipping.test.mjs`/`manager-layer-skill.test.mjs` 的 model pin 断言，这两个文件是 `a7a507eab` 刚同步过的，改动前重读避免二次漂移）。
-- [ ] AC4：litellm 侧 400 风暴的 fallback 路由不回归——`gap-worker-driver-selector-api-error-no-backoff` 已 done 的行为（selector API 400 有 fallback 不再一击即死）在本任务改动后仍然成立。
-- [ ] AC5（三态可区分）：无法在本地复现/无法判定是否修好时，不得伪称已修——按 AC2 的真实生产载体验证为准，不靠本地 fixture 单独收尾。
+- [x] AC1（能取假）：用与生产相同的 profile/wrapper 组合重放一次 `buildFixWorkerArgv` 产出的 argv 直接 spawn，此前必现 `unrecognized_model`；改动落地后同一 argv 不再命中该签名（负控制：不改的旧 argv 仍应复现，证明测试本身有效）。
+- [x] AC2（真实生产载体验证，非 fixture）：实现落地**之后**，`.quay/promotion-outcome.jsonl` 里新产生的 fix-worker 记录不再出现 `unrecognized_model`/该超时签名（贴出落地后的真实记录，硬规则 4 推论三：N 只计落地之后的时间窗）。
+- [x] AC3：`--for-task` scoped 门 + 全量 suite 绿；不引入新的 flaky（尤其 `manager-layer-shipping.test.mjs`/`manager-layer-skill.test.mjs` 的 model pin 断言，这两个文件是 `a7a507eab` 刚同步过的，改动前重读避免二次漂移）。
+- [x] AC4：litellm 侧 400 风暴的 fallback 路由不回归——`gap-worker-driver-selector-api-error-no-backoff` 已 done 的行为（selector API 400 有 fallback 不再一击即死）在本任务改动后仍然成立。
+- [x] AC5（三态可区分）：无法在本地复现/无法判定是否修好时，不得伪称已修——按 AC2 的真实生产载体验证为准，不靠本地 fixture 单独收尾。
 
 ## Definition of Done
 

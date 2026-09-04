@@ -6,7 +6,9 @@ labels: []
 parent: null
 children: []
 extra:
-  schema: v1
+  depends_on:
+    - gap-scoped-gate-m120-negative-control-false-positive
+  schema: execution
 ---
 ## Proposal
 
@@ -46,3 +48,13 @@ Standard clauses (inherited; this is docs-only, no new shipped code):
 - `experiments/quay-perpetual-stream/scripts/task-schema.ts` (canonical source; dual-copy mirror of the above)
 - `CLAUDE.md`
 - `tasks/gap-task-write-schema-depends-on-documentation.md` (self)
+## Needs-Human
+
+**执行 2026-09-03T06:28:58.142Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: == split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) ==
+- run_id：wk-prod-1788285192
+- session_id：036c8068-a66a-445f-89c2-4f67ca0d39ab
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-task-write-schema-depends-on-documentation~wk-prod-1788285192~1788416314593-e8001f.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-task-write-schema-depends-on-documentation-wk-prod-1788285192.log

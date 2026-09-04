@@ -70,10 +70,8 @@ test('AC3 — the cold-start skill has ZERO inner-state.sh / send-keys-verified 
     assert.ok(!coldStartSkill.includes(dead),
       `plugin/skills/cold-start/SKILL.md must not reference the dead key "${dead}" (Contract invoke: 0 hits)`);
   }
-  // The live replacement is present: the single observer session-liveness-mount.sh, and the
-  // reliable-send mechanism (send-keys-reliable.sh) for the INNER-DRIVEN delivery criterion.
-  assert.match(coldStartSkill, /session-liveness-mount\.sh/s,
-    'the cold-start skill must mount the ONE live observer (session-liveness-mount.sh)');
+  // The live replacement is present: the reliable-send mechanism (send-keys-reliable.sh) for the
+  // INNER-DRIVEN delivery criterion.
   assert.match(coldStartSkill, /send-keys-reliable\.sh/s,
     'the cold-start skill must drive inner via the reliable-send mechanism (key4 fix reused)');
 });

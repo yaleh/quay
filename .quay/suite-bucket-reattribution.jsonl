@@ -94,7 +94,6 @@
 {"file":"plugin/test/mechanism-vitality-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/mirror-full-suite-state.test.mjs","judgment":"S","mechanism":"S+M","signal":["lane"]}
 {"file":"plugin/test/mirror-measure-history.test.mjs","judgment":"S","mechanism":"S+M","signal":["lane"]}
-{"file":"plugin/test/monitor-mount-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/needs-human-recheck.test.mjs","judgment":"M","mechanism":"P+S+M","signal":[]}
 {"file":"plugin/test/no-manager-tick-doc-check.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/obligation-discharge-agent.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
@@ -153,15 +152,6 @@
 {"file":"plugin/test/semantic-observer-judge.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/send-keys-reliable.test.mjs","judgment":"S","mechanism":"S+M","signal":["--group"]}
 {"file":"plugin/test/session-bootstrap.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task"]}
-{"file":"plugin/test/session-liveness-events.test.mjs","judgment":"S","mechanism":"S+M","signal":["--group","concurrency"]}
-{"file":"plugin/test/session-liveness-heartbeat.test.mjs","judgment":"S","mechanism":"S","signal":["--group","concurrency"]}
-{"file":"plugin/test/session-liveness-signals-integration.test.mjs","judgment":"S","mechanism":"S","signal":["--group","__GROUP__","concurrency"]}
-{"file":"plugin/test/session-liveness-signals-kinds.test.mjs","judgment":"S","mechanism":"S","signal":["--group","__GROUP__","concurrency"]}
-{"file":"plugin/test/session-liveness-signals-thresholds-edge.test.mjs","judgment":"S","mechanism":"S","signal":["--group","concurrency"]}
-{"file":"plugin/test/session-liveness-signals-thresholds-observers.test.mjs","judgment":"S","mechanism":"S","signal":["--group","concurrency"]}
-{"file":"plugin/test/session-liveness-signals-thresholds.test.mjs","judgment":"S","mechanism":"S","signal":["--group","__GROUP__","concurrency"]}
-{"file":"plugin/test/session-liveness-sweep.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
-{"file":"plugin/test/session-liveness-target.test.mjs","judgment":"S","mechanism":"S","signal":["concurrency"]}
 {"file":"plugin/test/session-topology.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task","concurrency"]}
 {"file":"plugin/test/slot-refill-heartbeat.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/slot-refill.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["--for-task","runner-grouping","lane","concurrency"]}

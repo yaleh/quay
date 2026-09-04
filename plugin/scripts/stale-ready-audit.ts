@@ -88,16 +88,27 @@ for (const f of readdirSync(tasksDir)) {
 }
 
 // (b) bypass-complete: recently-done task WITHOUT a complete-pass GateEvent in .quay/gate-events.jsonl.
+// gap-mechanical-fan-in-writes-no-complete-gateevent AC5（仪器三态）：读不到 gate-events.jsonl 时必须
+// 报 NOT-EVALUATED 且可区分（硬规则 3b），⛔ 不得与「查过且 0 条」同形——否则文件缺失被读成
+// 「全干净」（一个结构上不可能报红的检查）。gateLogReadable 区分「查过」与「读不到」。
 const gateLogPath = join(root, ".quay", "gate-events.jsonl");
-const gateEvents = existsSync(gateLogPath)
-  ? readFileSync(gateLogPath, "utf8").split("\n").filter((l) => l.trim()).map((l) => {
+let gateLogReadable = true;
+let gateEvents: Array<{ gate?: string; verdict?: string; pipeline_id?: string }> = [];
+if (existsSync(gateLogPath)) {
+  try {
+    gateEvents = readFileSync(gateLogPath, "utf8").split("\n").filter((l) => l.trim()).map((l) => {
       try {
         return JSON.parse(l);
       } catch {
         return null;
       }
-    }).filter(Boolean)
-  : [];
+    }).filter(Boolean);
+  } catch {
+    gateLogReadable = false;
+  }
+} else {
+  gateLogReadable = false;
+}
 const completeByPipeline = new Set<string>();
 for (const e of gateEvents) {
   if (e && e.gate === "complete" && e.verdict === "pass" && typeof e.pipeline_id === "string") {
@@ -114,6 +125,7 @@ for (const f of readdirSync(tasksDir)) {
   if (fm["status"] !== TASK_STATUS.DONE) continue;
   const mtimeMs = statSync(file).mtimeMs;
   if (now - mtimeMs > withinMs) continue; // not recently done — the flip predates the audit window
+  if (!gateLogReadable) continue; // NOT-EVALUATED: 读不到 gate log ⇒ 无法判「绕过」，不产出 bypass 候选
   if (completeByPipeline.has(f.replace(/\.md$/, ""))) continue; // went through the QENG gate path
   bypassComplete.push({
     id: f.replace(/\.md$/, ""),
@@ -124,7 +136,7 @@ for (const f of readdirSync(tasksDir)) {
 
 const total = staleReady.length + bypassComplete.length;
 if (asJson) {
-  console.log(JSON.stringify({ staleReady, bypassComplete, count: total }));
+  console.log(JSON.stringify({ staleReady, bypassComplete, count: total, gateLogReadable }));
 } else {
   if (staleReady.length) {
     console.log(`STALE-READY ${staleReady.length}:`);
@@ -135,6 +147,8 @@ if (asJson) {
   if (bypassComplete.length) {
     console.log(`BYPASS-COMPLETE ${bypassComplete.length}: done ≤${doneWithinHours}h with NO complete-pass GateEvent (completion bypassed the QENG gate path):`);
     for (const s of bypassComplete) console.log(`  ${s.id} — ${s.title} (done ${s.doneAt})`);
+  } else if (!gateLogReadable) {
+    console.log(`BYPASS-COMPLETE NOT-EVALUATED — .quay/gate-events.jsonl 读不到（缺失/不可读），bypassComplete 判据未评估（⛔ 非「0 条」）`);
   } else {
     console.log(`BYPASS-COMPLETE 0 — every done task ≤${doneWithinHours}h has a complete-pass GateEvent`);
   }
