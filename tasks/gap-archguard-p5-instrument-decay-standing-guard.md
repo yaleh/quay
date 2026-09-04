@@ -2,7 +2,7 @@
 id: gap-archguard-p5-instrument-decay-standing-guard
 title: 落地 P5 仪器腐烂常驻检测器（instrument-decay-check.ts）——伴生对照而非绝对速率阈值，覆盖全部 jsonl
   载体，须能抓到「写手分裂到另一文件」这类腐烂
-status: ready
+status: done
 labels:
   - gap
 parent: null
