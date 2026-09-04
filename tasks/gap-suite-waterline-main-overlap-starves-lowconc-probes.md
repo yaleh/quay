@@ -47,3 +47,7 @@ waterline 恢复 lowconc 相隔离（main 不并发占满核）；AC1/AC2 勾；
 - plugin/scripts/suite-scheduler.ts（mainCapacity 加 lowconc reserve / gate main 至 lowconc 排空）
 - plugin/test/suite-scheduler.test.mjs（相隔离断言）
 - tasks/gap-suite-waterline-main-overlap-starves-lowconc-probes.md（自身）
+
+## Correction（2026-09-04，superseded 前提已被证伪，方向与 gap-suite-scheduler-reliability-cap-not-speed 一致）
+
+本任务 superseded_reason 的前提「水位设计正确（serial 相 ALONE 先跑于 main 之前）」「main 填剩余容量是省墙钟的意图」已被证伪：`gap-session-liveness-bclass-move-to-serial` 的「已证伪的」一节明确否定「serial 相 ALONE 先跑隔离 main」（那是 QUAY_SUITE_SCHEDULER=0 legacy fallback 注释，非默认统一调度器；统一调度器下 serial∥lowconc∥main 并发）。本任务 Plan 的方向——「lowconc 活跃时给 lowconc 留 reserve，或 gate main 直到 lowconc 排空」——与 `gap-suite-scheduler-reliability-cap-not-speed`（2026-09-04）方向一致：后者把水位线重定义为「三组总并发 ≤ 当前活跃组的最小预算」的可靠性总量约束，从机制上消除 main 并发占满核。本任务原「速度」理由（省墙钟）已被推翻。
