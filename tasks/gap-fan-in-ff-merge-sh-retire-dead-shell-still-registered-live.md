@@ -3,7 +3,7 @@ id: gap-fan-in-ff-merge-sh-retire-dead-shell-still-registered-live
 title: fan-in-ff-merge.sh（581行）已被 fan-in/ff-merge.ts 取代且 worker-driver.ts
   注释自称"retired"，但脚本本体仍在树上、仍在 capability-catalog 注册、仍被 suite-slot-ssot-check.ts
   I1 当活体代码读取——迁移只完成了创建半边
-status: ready
+status: done
 labels:
   - gap
 parent: null
