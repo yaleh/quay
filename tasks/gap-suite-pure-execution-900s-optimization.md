@@ -1,7 +1,7 @@
 ---
 id: gap-suite-pure-execution-900s-optimization
 title: full-bucket 纯执行时间超 900s（人裁触发条件已成立，4/6 轮 998.5–1224.5s）——触发测试优化
-status: todo
+status: ready
 labels:
   - gap
 parent: null
