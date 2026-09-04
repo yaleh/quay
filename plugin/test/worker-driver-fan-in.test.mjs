@@ -113,6 +113,7 @@ import {
   readFanInLockHold,
   readPreviousGreenSuiteCommit,
   acShortCircuitVerdict,
+  appendCompleteGateEvent,
   failingTestFilesFromSuiteLog,
   assertionSignaturesFromSuiteLog,
   judgeRetryExemption,
@@ -1470,6 +1471,42 @@ test("AC3 (gap-fan-in-ac-precheck-before-suite) — AC 全勾 ⇒ 预检不误�
   const pre = lines.find((l) => l.step === "ac-precheck");
   assert.ok(pre, "ac-precheck pass must be traced");
   assert.equal(pre.ok, true);
+});
+
+// ── gap-mechanical-fan-in-writes-no-complete-gateevent ─────────────────────────────────────────────
+// 机械 fan-in 翻 done 此前绕过 gate 引擎、零 complete GateEvent（stale-ready-audit 的 bypassComplete 每轮
+// 报 9 条真阳性被当噪声）。现在 flip→ff 成功后经既有 gate-event-store 补写 complete pass 事件（AC2）。
+// AC2/AC3 取真：landed fan-in ⇒ .quay/gate-events.jsonl 有该 task 的 complete pass 事件。
+
+test("AC2/AC3 (gap-mechanical-fan-in-writes-no-complete-gateevent) — landed mechanical fan-in writes a complete pass GateEvent via the gate-event-store", async (t) => {
+  const m = makeMechRepo("complete-event");
+  const runId = "mf-run-complete-event";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn(mechOpts(m, runId));
+  assert.equal(r.outcome, "landed", `fan-in must land (step=${r.step} reason=${r.reason})`);
+  const gateLog = path.join(m.repo, ".quay", "gate-events.jsonl");
+  assert.ok(fs.existsSync(gateLog), "landed fan-in must create .quay/gate-events.jsonl");
+  const events = fs.readFileSync(gateLog, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const complete = events.filter((e) => e.gate === "complete" && e.verdict === "pass" && e.pipeline_id === "gap-mfh");
+  assert.equal(complete.length, 1, `exactly one complete pass event for the task; got ${events.length} total events`);
+  assert.equal(complete[0].actor, "quay-driver", "mechanical fan-in actor is quay-driver (distinct from quay-cli/outer)");
+  assert.deepEqual(complete[0].payload, { from: "ready", to: "done" }, "payload matches the CLI runComplete shape");
+});
+
+test("AC4 negative control (gap-mechanical-fan-in-writes-no-complete-gateevent) — appendCompleteGateEvent is the sole source; removing the write leaves no event", async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "ge-neg-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const w = await appendCompleteGateEvent(base, "gap-x");
+  assert.equal(w.ok, true, "appendCompleteGateEvent succeeds against a scratch root (module resolves via repo-root.ts)");
+  const gateLog = path.join(base, ".quay", "gate-events.jsonl");
+  const events = fs.readFileSync(gateLog, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(events.length, 1, "exactly one event written");
+  assert.equal(events[0].gate, "complete");
+  assert.equal(events[0].verdict, "pass");
+  assert.equal(events[0].pipeline_id, "gap-x");
+  // 负控制：删掉该事件（= 关闭写事件的那一行）⇒ 载体里再无 complete 事件 ⇒ bypassComplete 可重报。
+  fs.writeFileSync(gateLog, "", "utf8");
+  assert.equal(fs.readFileSync(gateLog, "utf8").trim(), "", "removing the write leaves no complete event (the instrument can re-report)");
 });
 
 // ── gap-worker-ac-check-shortcircuit ─────────────────────────────────────────────────────────────

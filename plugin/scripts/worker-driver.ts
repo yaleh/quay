@@ -126,6 +126,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 import { TASK_STATUS } from "./task-status.ts";
 import { extractSection } from "./task-schema.ts";
+import { repoRoot } from "./repo-root.ts";
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
 // AC150-3：资源门判定 + 控制态 + 身份闸 + MCP 控制面，抽到 driver-shared.ts 供 promotion-driver 复用
@@ -3092,6 +3093,41 @@ async function flipTaskDone(
   return { ok: false, reason: `expected exactly 1 'status: ready' line, got ${readyCount}` };
 }
 
+/** gap-mechanical-fan-in-writes-no-complete-gateevent — 机械 fan-in 翻 done 后经既有 gate-event-store
+ *  写 `complete` pass GateEvent（恢复 gap-loop-completion-path-produces-zero-gateevents AC2 在新路径上
+ *  成立；⛔ 不手搓 append）。事件写到 <root>/.quay/gate-events.jsonl——与 CLI/loop 同一载体，
+ *  stale-ready-audit.ts 的 bypassComplete 判据据此不再把机械 fan-in 的 done 误报为「绕过 QENG」。
+ *  actor 缺省 "quay-driver"（区别于 CLI "quay-cli" / loop "outer"）。Package import 走动态
+ *  pathToFileURL（同 loop-complete-task.ts：esbuild bundle 不解析 ../../packages/...）。best-effort：
+ *  写失败返回 { ok:false }，不抛——fan-in 已 landed，观测写不得阻塞主执行（同 writeSuiteCapture）。 */
+export async function appendCompleteGateEvent(
+  root: string,
+  task: string,
+  actor = "quay-driver",
+): Promise<{ ok: boolean; reason: string | null }> {
+  try {
+    // Module 经 repo-root.ts 单一真相源解析（⛔ 不用 root：测试里 root 是 scratch 空仓，无 packages/
+    // 树 ⇒ MODULE_NOT_FOUND；也⛔ 手搓 __dirname→../..——bundle 落 scripts/dist 时错一级）。repoRoot()
+    // 从本文件所在目录向上找 bundle/consumer/git 根，源运行（strip-types）与 bundle 运行都正确。
+    const { appendGateEvent } = await import(
+      /* @vite-ignore */ pathToFileURL(path.join(repoRoot(), "packages", "quay", "src", "gate", "gate-event-store.ts")).href
+    ) as { appendGateEvent: (logPath: string, event: unknown) => void };
+    appendGateEvent(path.join(root, ".quay", "gate-events.jsonl"), {
+      id: randomUUID(),
+      item_id: task,
+      pipeline_id: task,
+      gate: "complete",
+      actor,
+      verdict: "pass",
+      timestamp: new Date().toISOString(),
+      payload: { from: "ready", to: "done" },
+    });
+    return { ok: true, reason: null };
+  } catch (e) {
+    return { ok: false, reason: (e as Error)?.message ?? String(e) };
+  }
+}
+
 /** gap-mechanical-fan-in-per-suite-runid-unified — 生成一次机械 fan-in 的 per-suite runId
  *  （`mfi-<task>-<epoch-ms>-<rand>`）。⛔ 不用共享的 wk-prod（那是 driver 轮次号，一 driver 轮次内多个
  *  suite 共用，不能当 suite 身份）；也⛔ 不把 runId（fan-in 过程身份，锁/日志/ff 用它）当 suite 身份——
@@ -3550,6 +3586,17 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     appendFanInStepTrace(root, task, runId, "ff", "end", { ok: ff.code === 0 });
     trace({ step: "ff", exit: ff.code, wall_ms: Date.now() - ffT0, ok: ff.code === 0, ...(ff.code === 0 ? {} : { reason: (ff.stderr || ff.stdout || "").trim() || `exit ${ff.code}` }) });
     if (ff.code !== 0) return fail("ff", { ok: false, status: ff.code, stdout: ff.stdout, stderr: ff.stderr, error: null });
+
+    // 9.4b 写 complete pass GateEvent（gap-mechanical-fan-in-writes-no-complete-gateevent AC2）：机械
+    // fan-in 此前绕过 gate 引擎（runMechanicalFanIn/flipTaskDone 全文零 GateEvent），.quay/gate-events.jsonl
+    // 里 complete 单路缺席——stale-ready-audit 的 bypassComplete 每轮报 9 条真阳性被当噪声。现在经既有
+    // gate-event-store 补写（与 CLI/loop 同一载体，⛔ 不手搓 append）。best-effort：写失败不致命。
+    const gateEventT0 = Date.now();
+    const gateEvent = await appendCompleteGateEvent(root, task);
+    trace({
+      step: "append-complete-gate-event", exit: gateEvent.ok ? 0 : 1, wall_ms: Date.now() - gateEventT0,
+      ok: gateEvent.ok, ...(gateEvent.ok ? {} : { reason: gateEvent.reason ?? "write failed" }),
+    });
 
     // 9.5 清理 worktree + 删 task 分支（ff 成功后——landed 判据 = status done ∧ 无残留 worktree）。
     // best-effort：移除失败不致命，landing 判定（computeLandingState）会据残留 worktree 诚实判未落地。

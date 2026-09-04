@@ -181,3 +181,16 @@ reference-doc + `plugin/skills/manager/SKILL.md` SPEC index），并把这两文
 
 - 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
 - 失败步/判词：step=suite: == split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) ==
+
+## Needs-Human
+
+**执行 2026-09-04T08:53:46.681Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=merge-develop: Auto-merging plugin/skills/init/SKILL.md
+Auto-merging plugin/skills/manager/SKILL.md
+CONFLICT (content): Merge conflict in plugin/skills/manager/SKILL.md
+Automatic merge failed; fix conflicts and then commit the result.
+- run_id：wk-prod-1788285192
+- session_id：2f2b3c1b-b371-4162-8a64-b31533f9c6cf
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-scoped-gate-m120-negative-control-false-positive-wk-prod-1788285192.log
