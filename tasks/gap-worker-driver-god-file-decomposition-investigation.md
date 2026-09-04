@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-god-file-decomposition-investigation
 title: worker-driver.ts（4435 行/140 导出，全仓最大杂物袋，仍在长）——先做消费者分组调查、产出可执行拆分方案，不直接动手拆
-status: todo
+status: ready
 labels:
   - gap
 parent: null
