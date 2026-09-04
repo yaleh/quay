@@ -2,7 +2,7 @@
 id: gap-gate-script-base-behavior-contract-unusable
 title: 共享基座的行为契约无人取用（emitPass/emitFail 0 处、parseArgs 5/88），120 个 checker
   各自手搓退出码——先修接口让它装得下真实 checker 形状，再谈迁移
-status: ready
+status: done
 labels:
   - gap
 parent: null
