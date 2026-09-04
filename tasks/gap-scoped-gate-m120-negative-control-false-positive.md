@@ -1,7 +1,7 @@
 ---
 id: gap-scoped-gate-m120-negative-control-false-positive
 title: 修缺：scoped-gate 把 build-dist.test.mjs 的 m120 负控制 stderr 误判为真实失败
-status: ready
+status: done
 role: primitive
 labels:
   - scoped-gate
