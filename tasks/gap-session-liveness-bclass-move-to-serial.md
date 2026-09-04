@@ -57,3 +57,7 @@ session-liveness 族 B 类等待测试移到 serial 相；AC1/AC2 勾；饱和�
 - session_id：f75ddb0f-a5d1-4c7d-81ca-45340087e1c9
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-session-liveness-bclass-move-to-serial~wk-prod-1788285192~1788370217251-d3856c.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-session-liveness-bclass-move-to-serial-wk-prod-1788285192.log
+
+## Re-check note（2026-09-04，机制修复落地后重新核验 AC2）
+
+本任务 AC2（饱和下 probe 稳定建立，`probe must be alive`/SESSION-BACK 不再间歇超时）长期「（待外部）」。本任务「已证伪的」一节指出真根因是统一调度器下 serial∥lowconc∥main 并发占满核（loadavg 22-26 / cpu_stall 37-62%）。`gap-suite-scheduler-reliability-cap-not-speed`（2026-09-04）把水位线重定义为可靠性总量约束（三组总并发 ≤ 当前活跃组的最小预算），从机制上降低饱和负载。该机制修复落地后，本任务 AC2 应重新核验（饱和轮 probe 是否稳定建立）。
