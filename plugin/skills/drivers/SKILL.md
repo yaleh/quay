@@ -8,7 +8,7 @@ allowed-tools: Bash, Read
 
 Bring a quay project's **promotion driver**, **worker driver**, and **web server** into the running
 state with a single in-session call — no hand-typed `quay driver` / `quay serve` CLI commands, no
-tmux. This is step ④ of the quay enablement flow (`orchestration/SPEC-tmux-retirement-2026-09-03.md`
+tmux. This is step ④ of the quay enablement flow (`SPEC-tmux-retirement-2026-09-03.md`
 §1.4/Layer 3b): ① install → ② start a session → ③ `quay-init` → **④ this skill** → ⑤ manager.
 
 The **start logic lives in ONE executable** — `plugin/scripts/start-drivers.ts`
