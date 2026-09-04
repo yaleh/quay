@@ -182,6 +182,21 @@ export { readStateRunId, writeStateGuarded, appendVerificationRound } from "./ru
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
+// gap-perfile-cpu-cost-collection — route (a) 子进程自报 preload seam. The preload module
+// (plugin/scripts/per-file-cpu-report.mjs), loaded into every node process of a measured suite via
+// `NODE_OPTIONS=--require=<this>`, reports each isolated test-file child's OWN process.cpuUsage() into
+// a per-run dir; measure-suite-reporter.mjs reads it back to append `cpu_ms=<n>` to the `__PERFILE__`
+// line. Append (never overwrite) a pre-existing NODE_OPTIONS so a caller-set value survives (NODE_OPTIONS
+// is space-separated flags; the last --require wins in node, but we only ADD ours, never drop theirs).
+export const PER_FILE_CPU_PRELOAD = path.join(REPO_ROOT, "plugin", "scripts", "per-file-cpu-report.mjs");
+
+/** Append the per-file-CPU preload `--require` to an existing NODE_OPTIONS value (or build it fresh). */
+export function withPerFileCpuPreload(existingNodeOptions: string | undefined): string {
+  const requireFlag = `--require=${PER_FILE_CPU_PRELOAD}`;
+  const prior = existingNodeOptions && existingNodeOptions.trim() ? existingNodeOptions.trim() : "";
+  return prior ? `${prior} ${requireFlag}` : requireFlag;
+}
+
 export type SuiteStateValue = "running" | "green" | "red";
 // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC3 — a FOURTH reason value:
 // "static-check" (a run_static_checks checker failed — task-contract / test-framework-policy /
@@ -929,6 +944,10 @@ export interface SuiteRoundRecord {
    * that lands measure-history.jsonl, so the two carriers share one 口径: repo-root-relative `file`
    * keys via normalizePerFileKey, duration>0 filter). Present only when the round actually emitted
    * __PERFILE__ lines (a scoped/legacy run with no reporter omits the field — never a fabricated []).
+   * gap-perfile-cpu-cost-collection — each record ALSO carries `cpuMs` (the file's OWN
+   * process.cpuUsage() in ms, route a 子进程自报) when the reporter's `__PERFILE__` line carried
+   * `cpu_ms=`; absent on legacy lines (缺键 ≠ 0, the same absent-field contract as endedAtMs). This
+   * writer forms perFile from the shared parser, so cpuMs rides the record automatically — 禁止只改一边.
    */
   perFile?: PerFileRecord[];
   /**
@@ -1843,6 +1862,11 @@ export async function run(argv: string[]): Promise<number> {
   // bound. Every producer inherits it from the child env, INCLUDING worktree runs (the same env
   // flow — a worktree full-suite run passes --root <worktree>, not a different spawn path).
   const shortRunId = runId.replace(/-/g, "").slice(0, 8);
+  // gap-perfile-cpu-cost-collection — the per-run directory the preload seam writes each test file's
+  // own process.cpuUsage() into (keyed by sha256(path.resolve(file))[:16]); measure-suite-reporter
+  // reads it back at test:complete to append cpu_ms. Per-run so two concurrent suites never collide
+  // on the same file key; removed post-suite (see the cleanup block).
+  const perFileCpuDir = path.join(stateDir, `per-file-cpu-${shortRunId}`);
 
   // gap-leak-residue-per-run-namespace-isolation AC2/AC3 — RUNNER-LEVEL UNIFIED CLEANUP runs
   // BEFORE the suite starts (and hence before the suite-tail leak-scan — the 次序 constraint):
@@ -2270,6 +2294,12 @@ export async function run(argv: string[]): Promise<number> {
     // (no main regression, AC2); on a one-shot round it is the real main checkout and the worktree
     // round's checkers read the SAME data as a main run ⇒ verdicts are identical (AC3).
     QUAY_MAIN_CHECKOUT: mainRoot,
+    // gap-perfile-cpu-cost-collection — per-file CPU collection (route a 子进程自报). The preload seam
+    // (NODE_OPTIONS=--require) loads into every node process of the suite; each isolated test-file child
+    // reports its own process.cpuUsage() into perFileCpuDir at exit, and measure-suite-reporter reads it
+    // back to append cpu_ms. NODE_OPTIONS is APPENDED (never overwritten) so a caller-set value survives.
+    QUAY_PERFILE_CPU_DIR: perFileCpuDir,
+    NODE_OPTIONS: withPerFileCpuPreload(process.env.NODE_OPTIONS),
   };
   if (useSystemdRun) {
     const sdArgv = buildSystemdRunArgv(command, systemdLimits);
@@ -3335,6 +3365,14 @@ export async function run(argv: string[]): Promise<number> {
     }
   } catch (e) {
     process.stderr.write(`full-suite-runner: post-suite cleanup failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+  // gap-perfile-cpu-cost-collection — remove this run's per-file-CPU report dir (the .cpu files were
+  // written by the now-dead isolated children; the values were already read by the reporter). Best-
+  // effort — a cleanup failure must never change the verdict, and the dir lives in gitignored .quay/.
+  try {
+    fs.rmSync(perFileCpuDir, { recursive: true, force: true });
+  } catch {
+    // best-effort (dir may not exist on a hermetic/no-preload round)
   }
   // TRUE-CATCH-ALL (teardown-ol-scd-cf-leak): kill THIS run's still-alive
   // registered servers (safety net after the suite-tail scan-kill — e.g. a process whose server

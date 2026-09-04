@@ -15,7 +15,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,7 +46,10 @@ function parsePerFile(stderr) {
   const out = new Map();
   for (const line of stderr.split("\n")) {
     // gap-test-detail-timeline — the line now carries an optional trailing `end_ms=<epoch-ms>`.
-    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)(?: end_ms=([0-9]+))?$/);
+    // gap-perfile-cpu-cost-collection — it MAY ALSO carry `cpu_ms=<n>` after end_ms (when the outer
+    // suite wired QUAY_PERFILE_CPU_DIR); tolerate it so a pre-existing test running inside the real
+    // suite (which sets that env) still parses the record.
+    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)(?: end_ms=([0-9]+))?(?: cpu_ms=([0-9.]+))?$/);
     if (m) out.set(m[2], { durationMs: parseFloat(m[1]), passed: m[3] === "true", endedAtMs: m[4] != null ? Number(m[4]) : undefined });
   // key = full path from the reporter
   }
@@ -106,7 +109,9 @@ test("reporter records the file END time (end_ms) so the START back-computes as 
 
     const line = res.stderr.split("\n").find((l) => l.startsWith(`__PERFILE__ `));
     assert.ok(line, `a __PERFILE__ line must be emitted:\n${res.stderr}`);
-    assert.match(line, / end_ms=\d+$/, `the line must carry a trailing end_ms epoch-ms:\n${line}`);
+    // gap-perfile-cpu-cost-collection — end_ms is no longer necessarily the LAST field (cpu_ms may
+    // follow it when the outer suite wired QUAY_PERFILE_CPU_DIR); assert presence, not end-of-line.
+    assert.match(line, / end_ms=\d+/, `the line must carry end_ms epoch-ms:\n${line}`);
 
     const rec = parsePerFile(res.stderr).get(f);
     assert.ok(rec, "timed file captured");
@@ -265,6 +270,145 @@ test("reporter does NOT emit __EXECVE__ when QUAY_TEST_EXECVE_COUNT is unset (op
     const res = runWithReporter([f]); // runWithReporter does NOT set the env
     assert.equal(res.status, 0, `suite should pass; stderr tail: ${res.stderr.slice(-300)}`);
     assert.doesNotMatch(res.stderr, /^__EXECVE__/m, "execve line must be absent by default (zero overhead)");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reporter appends cpu_ms via route (a) 子进程自报 — a REAL per-file CPU, not derived from durationMs (gap-perfile-cpu-cost-collection AC1/AC5)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-cpu-"));
+  const cpuDir = path.join(dir, "cpu");
+  try {
+    // One CPU-heavy file (burns CPU) + one wait-type file (sleeps) — their cpu_ms/duration_ms ratios
+    // must DIFFER, proving cpu_ms is a real process.cpuUsage() measurement, not `durationMs × constant`.
+    const heavy = path.join(dir, "heavy.test.mjs");
+    writeFileSync(
+      heavy,
+      `import { test } from "node:test";\n` +
+        `test("burn", () => { const s = Date.now(); let x = 0; while (Date.now() - s < 250) { x += Math.sqrt(x + 1); } if (x < 0) throw new Error(); });\n`
+    );
+    const wait = path.join(dir, "wait.test.mjs");
+    writeFileSync(
+      wait,
+      `import { test } from "node:test";\n` +
+        `import { setTimeout as sleep } from "node:timers/promises";\n` +
+        `test("w", async () => { await sleep(250); });\n`
+    );
+
+    const env = {
+      ...process.env,
+      QUAY_PERFILE_CPU_DIR: cpuDir,
+      NODE_OPTIONS: `--require=${path.join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs")}`,
+    };
+    delete env.NODE_TEST_CONTEXT;
+    const res = spawnSync(
+      "node",
+      ["--test", "--test-concurrency=2", `--test-reporter=${reporterPath}`, "--test-reporter-destination=stderr", heavy, wait],
+      { encoding: "utf8", env }
+    );
+    assert.equal(res.status, 0, `suite should pass; stderr tail: ${res.stderr.slice(-300)}`);
+
+    const lines = res.stderr.split("\n").filter((l) => l.startsWith("__PERFILE__ "));
+    assert.equal(lines.length, 2, "two __PERFILE__ lines");
+    const cpuByFile = new Map();
+    for (const line of lines) {
+      // AC1 — the real output line carries cpu_ms=<n>.
+      const m = line.match(/__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false) end_ms=([0-9]+) cpu_ms=([0-9.]+)/);
+      assert.ok(m, `__PERFILE__ line must carry cpu_ms (AC1): ${line}`);
+      cpuByFile.set(m[2], { durationMs: Number(m[1]), cpuMs: Number(m[5]) });
+    }
+    const h = cpuByFile.get(heavy);
+    const w = cpuByFile.get(wait);
+    assert.ok(h && w, "both files captured");
+    assert.ok(h.cpuMs > 0 && w.cpuMs > 0, `cpu_ms is a real non-zero reading (heavy=${h.cpuMs} wait=${w.cpuMs})`);
+    // AC5 non-derivation negative control: cpu_ms/duration_ms is NOT a constant. A CPU-burning file
+    // always has a HIGHER CPU-per-wall ratio than a sleeping file — a constant ratio would prove the
+    // value is derived from durationMs (the thing the AC forbids).
+    const ratioH = h.cpuMs / h.durationMs;
+    const ratioW = w.cpuMs / w.durationMs;
+    assert.ok(
+      ratioH > ratioW,
+      `heavy ratio (${ratioH.toFixed(3)}) must exceed wait ratio (${ratioW.toFixed(3)}) — else cpu_ms is duration-derived`
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reporter counts CHILD-process CPU — a spawn-heavy file is not under-reported to look like a waiting file (gap-perfile-cpu-cost-collection)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-cpu-child-"));
+  const cpuDir = path.join(dir, "cpu");
+  try {
+    // A test file whose OWN in-process CPU is negligible (~10ms of execFileSync overhead) but which
+    // spawns a child that burns ~500ms CPU and is REAPED by execFileSync. process.cpuUsage() alone
+    // would report ~10ms; counting the reaped child (cutime+cstime) must push cpu_ms well past 250ms.
+    // This is the exact misclassification the measurement exists to prevent: a spawn-heavy Type-1
+    // file (worker-driver-fan-in.test.mjs et al.) must not be low-reported into looking like a
+    // Type-2 waiting file.
+    const spawner = path.join(dir, "spawner.test.mjs");
+    writeFileSync(
+      spawner,
+      `import { test } from "node:test";\n` +
+        `import { execFileSync } from "node:child_process";\n` +
+        `test("spawner", () => {\n` +
+        `  execFileSync(process.execPath, ["-e", "const e=Date.now()+500; while(Date.now()<e){}"]);\n` +
+        `});\n`
+    );
+
+    const env = {
+      ...process.env,
+      QUAY_PERFILE_CPU_DIR: cpuDir,
+      NODE_OPTIONS: `--require=${path.join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs")}`,
+    };
+    delete env.NODE_TEST_CONTEXT;
+    const res = spawnSync(
+      "node",
+      ["--test", `--test-reporter=${reporterPath}`, "--test-reporter-destination=stderr", spawner],
+      { encoding: "utf8", env }
+    );
+    assert.equal(res.status, 0, `suite should pass; stderr tail: ${res.stderr.slice(-300)}`);
+
+    const line = res.stderr.split("\n").find((l) => l.startsWith("__PERFILE__ "));
+    assert.ok(line, "one __PERFILE__ line");
+    const m = line.match(/__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false) end_ms=([0-9]+) cpu_ms=([0-9.]+)/);
+    assert.ok(m, `__PERFILE__ line must carry cpu_ms: ${line}`);
+    const cpuMs = Number(m[5]);
+    assert.ok(
+      cpuMs > 250,
+      `cpu_ms (${cpuMs.toFixed(1)}) must include the reaped child's ~500ms CPU — own-CPU-only would report ~10ms`
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("seam does NOT report for a non-test node -e probe (guard narrowed to --test-isolation; gap-perfile-cpu-cost-collection)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-guard-"));
+  const cpuDir = path.join(dir, "cpu");
+  try {
+    const env = {
+      ...process.env,
+      QUAY_PERFILE_CPU_DIR: cpuDir,
+      NODE_OPTIONS: `--require=${path.join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs")}`,
+    };
+    delete env.NODE_TEST_CONTEXT;
+    mkdirSync(cpuDir, { recursive: true }); // pre-create so readdirSync below never ENOENTs
+    const res = spawnSync(
+      "node",
+      ["-e", "setTimeout(()=>{}, 30)", "probe-runid-12345"],
+      { encoding: "utf8", env }
+    );
+    assert.equal(res.status, 0);
+    // A `node -e` probe (execArgv = ["-e"], no --test-isolation) must NOT write a per-file CPU
+    // report — the seam is for isolated TEST-FILE children only. This is the regression the guard
+    // narrowing fixes: an unconditional seam injected an exit-time report into every node process,
+    // which delayed non-test subprocess death and flipped serve-board.test.mjs's live-process
+    // liveness fixture under suite load (production carrier: 488 green rounds, 1st red).
+    assert.equal(
+      readdirSync(cpuDir).length,
+      0,
+      "a node -e probe must NOT write a per-file CPU report (guard is --test-isolation, not unconditional)"
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

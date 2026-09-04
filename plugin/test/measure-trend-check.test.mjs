@@ -88,6 +88,21 @@ test("gap-test-detail-timeline AC1 — parsePerFileLines extracts end_ms → end
   assert.equal(fast.startedAtMs, undefined, "legacy line (no end_ms) has no startedAtMs");
 });
 
+test("gap-perfile-cpu-cost-collection AC2 — parsePerFileLines parses cpu_ms (new line) and leaves it ABSENT on legacy lines (absent ≠ 0, 硬规则 3b)", () => {
+  const log =
+    "__PERFILE__ duration_ms=210.5 /repo/slow.test.mjs passed=false end_ms=1724000000123 cpu_ms=45.625\n" +
+    "__PERFILE__ duration_ms=12.25 /repo/fast.test.mjs passed=true\n" +
+    "__PERFILE__ duration_ms=5 /repo/zero.test.mjs passed=true cpu_ms=0\n";
+  const recs = parsePerFileLines(log);
+  assert.equal(recs.length, 3, "all three lines parse");
+  const slow = recs.find((r) => r.file === "/repo/slow.test.mjs");
+  assert.equal(slow.cpuMs, 45.625, "cpu_ms carried verbatim into cpuMs");
+  const fast = recs.find((r) => r.file === "/repo/fast.test.mjs");
+  assert.equal(fast.cpuMs, undefined, "legacy line (no cpu_ms) has NO cpuMs — 'not measured' ≠ 'measured 0'");
+  const zero = recs.find((r) => r.file === "/repo/zero.test.mjs");
+  assert.equal(zero.cpuMs, 0, "a present cpu_ms=0 is carried as 0 (distinct from absent)");
+});
+
 test("gap-fan-in-suite-log-cross-relaunch-reuse — parsePerFileLines slices by the last __FANIN_SUITE_START__ marker (current round only, no stale-old-round read)", () => {
   // A fan-in relaunch rotates the log: old round (marker round=full) then current round (marker round=full).
   // The parser must read ONLY the current (last-marker) round's __PERFILE__ lines — the old round's
