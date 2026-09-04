@@ -1,7 +1,7 @@
 ---
 id: gap-outer-bg-job-migration-proposal
 title: 提案：Outer 迁移到 Claude Code Background Job Session 以消除 tmux 依赖
-status: ready
+status: needs-human
 role: compound
 labels:
   - migration
@@ -10,6 +10,19 @@ labels:
   - tmux-elimination
 created: 2026-09-03T02:30Z
 ---
+
+## Needs-Human
+
+**执行 2026-09-04T08:20Z — manager 发现，标 needs-human（DIR-026 违规，阻塞全局 fan-in）**
+
+- 阻碍原因：`role: compound` 但无 `children`，`it0-split-or-commit-check`（全库扫描，SELECT-SPLIT
+  规则对 `status: todo` 或 `status: ready` 均触发）恒红——正在阻塞**几乎所有其它任务**的
+  scoped-gate/suite（该 checker 是全库静态检查的一部分，不是本任务独有）。
+- 已做：retreat ready→todo 无效（todo 同样触发该规则），改标 needs-human 解除阻塞
+  （needs-human 状态不在 SELECT-SPLIT 的触发范围）。
+- 需要人工：把本提案拆分成具体 children 子任务（这是架构/内容决策，manager 边界不含代为拆分），
+  或若决定暂不推进，显式改判为其它终态。拆分/裁定后 retreat→todo 或直接 promote，split-or-commit
+  即可通过。
 
 ## Proposal
 
