@@ -72,3 +72,14 @@ extra:
 - plugin/test/full-suite-runner.test.mjs（writer 之一带该字段）
 - plugin/test/pre-verified-round-record.test.mjs（writer 之二带该字段）
 - tasks/gap-perfile-cpu-cost-collection.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-04T17:27:10.200Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: the dynamic truth must contain plugin/scripts/quay-init.sh, got reads=[] writes=[]
+- run_id：wk-prod-1788285192
+- session_id：2b162168-0bbc-4caa-bd89-7774e3f95377
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-perfile-cpu-cost-collection~wk-prod-1788285192~1788542260842-364556.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-perfile-cpu-cost-collection-wk-prod-1788285192.log

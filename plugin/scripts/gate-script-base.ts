@@ -2,7 +2,7 @@
 // Import the functions/classes you need from this module.
 //
 // Usage:
-//   import { parseArgs, readFrontmatter, emitPass, emitFail, requireArg, isDirectEntry } from "./gate-script-base.ts";
+//   import { parseArgs, readFrontmatter, emitPass, emitFail, emitNotEvaluated, emitVerdict, requireArg, isDirectEntry } from "./gate-script-base.ts";
 
 import fs from "node:fs";
 import path from "node:path";
@@ -153,14 +153,83 @@ export function normalizeRel(p: string): string {
   return out.join("/");
 }
 
-// ── emitPass / emitFail ─────────────────────────────────────────────────────────────────────────────
-// Standardized PASS / FAIL output lines.
-export function emitPass(message: string): void {
-  console.log(`PASS: ${message}`);
+// ── Verdict emission (the behavior contract) ─────────────────────────────────────────────────────────
+// The three-state verdict output layer shared by checkers: PASS (exit 0) / FAIL (exit 1) /
+// NOT-EVALUATED (exit 3 — the harness-canonical third state per gap-not-evaluated-harness-third-state;
+// the mechanical-spine vocabulary {0,1,2,3} reserves 2 for usage/env error and 3 for NOT-EVALUATED).
+// The three states converge on driver-result.ts's DriverResult<T> (verified↔pass, failed↔fail,
+// not-evaluated↔not-evaluated) — this is the OUTPUT rendering of that same three-state, NOT a new
+// competing vocabulary (SPEC-methodology-layer-architecture §2.3a: reuse, don't design a new contract).
+//
+// Each emit* accepts an optional structured `detail` (violations, counts, exemptions, …) that is
+// merged into the `--json` output, so a checker expresses a violations list / structured verdict
+// without hand-rolling JSON.stringify. `emitVerdict` (and each emit*) RETURNS the exit code — the
+// base owns the verdict→exit-code mapping, not each checker (the behavior contract this module was
+// missing: emitPass/emitFail used to print only and leave the exit code to the caller).
+
+export type VerdictStatus = "pass" | "fail" | "not-evaluated";
+
+export interface Verdict {
+  status: VerdictStatus;
+  message: string;
+  /** Arbitrary structured payload (violations, counts, …) merged into the --json output. */
+  detail?: unknown;
 }
 
-export function emitFail(message: string): void {
-  console.log(`FAIL: ${message}`);
+export interface EmitOptions {
+  /** Emit a structured JSON verdict (single line) instead of a human "PASS: …" line. */
+  json?: boolean;
+  /** Which stream the verdict line goes to (default "stdout"). */
+  stream?: "stdout" | "stderr";
+}
+
+/** Verdict status → exit code (pass→0, fail→1, not-evaluated→3). The single statement of the mapping. */
+export const VERDICT_EXIT_CODE: Readonly<Record<VerdictStatus, number>> = {
+  pass: 0,
+  fail: 1,
+  "not-evaluated": 3,
+};
+
+export function verdictExitCode(status: VerdictStatus): number {
+  return VERDICT_EXIT_CODE[status];
+}
+
+/** Emit a three-state verdict and return its exit code. Human mode prints one
+ *  `PASS:` / `FAIL:` / `NOT-EVALUATED:` line; --json mode prints
+ *  `{ status, ok, message, ...detail }`. */
+export function emitVerdict(verdict: Verdict, opts: EmitOptions = {}): number {
+  const { json = false, stream = "stdout" } = opts;
+  const out = stream === "stderr" ? process.stderr : process.stdout;
+  if (json) {
+    const detail = verdict.detail;
+    const base: Record<string, unknown> =
+      detail !== null && typeof detail === "object" && !Array.isArray(detail)
+        ? { ...(detail as Record<string, unknown>) }
+        : detail === undefined
+          ? {}
+          : { detail };
+    base.status = verdict.status;
+    base.ok = verdict.status === "pass";
+    base.message = verdict.message;
+    out.write(JSON.stringify(base) + "\n");
+  } else {
+    const prefix =
+      verdict.status === "pass" ? "PASS" : verdict.status === "fail" ? "FAIL" : "NOT-EVALUATED";
+    out.write(`${prefix}: ${verdict.message}\n`);
+  }
+  return verdictExitCode(verdict.status);
+}
+
+export function emitPass(message: string, detail?: unknown, opts?: EmitOptions): number {
+  return emitVerdict({ status: "pass", message, detail }, opts);
+}
+
+export function emitFail(message: string, detail?: unknown, opts?: EmitOptions): number {
+  return emitVerdict({ status: "fail", message, detail }, opts);
+}
+
+export function emitNotEvaluated(message: string, detail?: unknown, opts?: EmitOptions): number {
+  return emitVerdict({ status: "not-evaluated", message, detail }, opts);
 }
 
 // ── requireArg ──────────────────────────────────────────────────────────────────────────────────────
