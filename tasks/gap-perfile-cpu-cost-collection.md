@@ -1,7 +1,7 @@
 ---
 id: gap-perfile-cpu-cost-collection
 title: per-file CPU/成本采集进 perFile 记录——动态调相/成本预算准入的前置观测量（纯采集，不改调度）
-status: ready
+status: done
 labels:
   - gap
 parent: null
