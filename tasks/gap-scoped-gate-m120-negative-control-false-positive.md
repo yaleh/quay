@@ -87,6 +87,16 @@ scoped-gate（`scripts/test.sh --for-task <task> --allow-thin`，`worker-driver.
 传 `logLevel: "silent"`，从源头消除这行噪声（esbuild `logLevel:"silent"` 仍 throw ⇒
 `assert.rejects` 断言语义不变）。
 
+### 补充（2026-09-04 CONTINUE 轮）：fan-in 被无关的全局红挡住，本轮一并解
+
+m120 修复本身已完成（3/3 AC 全勾、scoped-gate 实测绿）。但 fan-in 连续 4 轮 `step=suite: # fail 1`
+的真实原因**不是本任务**，而是 develop 侧全局红：`orchestration/SPEC-tmux-retirement-2026-09-03.md`
+由 `bd17daad3` 加入却未在两个 SPEC 声明点登记，`spec-declaration-point-check`（fail-closed）把
+**所有** fan-in 挡在 suite 步。本轮在本任务工作树补登两个声明点（`plugin/skills/init/SKILL.md`
+reference-doc + `plugin/skills/manager/SKILL.md` SPEC index），并把这两文件纳入 `## Touches`
+（否则 anti-drift 越界 HARD FAIL）。这是对既有多起同形修复（`189e9dd17`/`c4dd6899b`/`0a5f20cea`/
+`a71b1524c`）的延续，与本任务 m120 修复正交。
+
 ---
 
 ## Plan
@@ -140,6 +150,8 @@ scoped-gate（`scripts/test.sh --for-task <task> --allow-thin`，`worker-driver.
 - `packages/quay/scripts/build-dist.mjs`（`buildDist()` 透传 `logLevel` + 守卫 `console.error`）
 - `packages/quay/test/build-dist.test.mjs`（负控制测试 (c) 传 `logLevel: "silent"` + 回归测试 (g)）
 - `tasks/gap-scoped-gate-m120-negative-control-false-positive.md` (self)
+- `plugin/skills/init/SKILL.md`（登记 `SPEC-tmux-retirement-2026-09-03.md` reference-doc——解 spec-declaration-point-check 全局红挡 fan-in）
+- `plugin/skills/manager/SKILL.md`（登记 `SPEC-tmux-retirement-2026-09-03.md` SPEC index——解 spec-declaration-point-check 全局红挡 fan-in）
 
 ---
 
