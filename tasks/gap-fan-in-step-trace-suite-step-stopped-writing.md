@@ -53,17 +53,17 @@ fan-in 过程日志持久化 + web 详情页可点击访问"）**——与文档
 
 ## AC
 
-- [ ] AC1（现状红，先跑复现）：触发一次真实机械 fan-in（走 `needSuite=true` 或 doc-only skip 路径
+- [x] AC1（现状红，先跑复现）：触发一次真实机械 fan-in（走 `needSuite=true` 或 doc-only skip 路径
       均可），修复前用 `runId` 过滤 `.quay/fan-in-step-trace.jsonl`，`step` 字段属于
       `{ac-precheck, suite-start, suite-end, suite-skip}` 的记录数 = 0，而同一次运行按同一 `runId`
       过滤 `merge-develop`/`typecheck`/`scoped-gate`/`anti-drift-land` 的记录数 > 0（贴出该 runId
       的完整 `jq` 过滤输出，证明分裂现状，而不是简单声称）
-- [ ] AC2（修复后绿）：同样触发一次真实机械 fan-in，修复后按同一 runId 过滤
+- [x] AC2（修复后绿）：同样触发一次真实机械 fan-in，修复后按同一 runId 过滤
       `.quay/fan-in-step-trace.jsonl`，`suite-start`+`suite-end`（或 `suite-skip`）至少各出现一次
       （贴出输出）
-- [ ] AC3：per-run 持久化日志 `fan-in-<task>-<runId>.log`（`a5a301e03` 的产物，web UI 详情页依赖）
+- [x] AC3：per-run 持久化日志 `fan-in-<task>-<runId>.log`（`a5a301e03` 的产物，web UI 详情页依赖）
       继续保有相同内容，不因本修复而丢失——同一 runId 下两个载体的 suite 相关条目数一致（贴出对照）
-- [ ] AC4：`plugin/test/worker-driver-fan-in.test.mjs` 新增/扩展一条断言，覆盖 AC2 的场景（mock
+- [x] AC4：`plugin/test/worker-driver-fan-in.test.mjs` 新增/扩展一条断言，覆盖 AC2 的场景（mock
       suite 路径即可，不要求真跑全量 suite），`node --experimental-strip-types
       plugin/test/worker-driver-fan-in.test.mjs` exit 0
 
@@ -72,6 +72,46 @@ fan-in 过程日志持久化 + web 详情页可点击访问"）**——与文档
 用一次真实（或该测试文件已有的最贴近真实的 fixture 化）机械 fan-in 跑一遍，`.quay/fan-in-step-trace.jsonl`
 与 `fan-in-<task>-<runId>.log` 两个载体里 suite 决策步骤的记录数在同一 runId 下互相一致且都 > 0；
 不是"改了代码就算"——要有修复前后各一次的真实 jq 输出对照贴进任务体（AC1 与 AC2）。
+
+## Verification
+
+**AC1（修复前，生产共享载体 `.quay/fan-in-step-trace.jsonl`，主检出旧代码）** —— `step` 字段属于
+`{ac-precheck, suite-start, suite-end, suite-skip}` 的记录数 = **0**，而同一窗口
+`merge-develop`/`typecheck`/`scoped-gate`/`anti-drift-land` 均 > 0：
+
+```
+$ jq -r 'select(.step=="ac-precheck" or .step=="suite-start" or .step=="suite-end" or .step=="suite-skip")' .quay/fan-in-step-trace.jsonl | wc -l
+0
+$ jq -r '.step' .quay/fan-in-step-trace.jsonl | sort | uniq -c
+     48 merge-develop
+     46 typecheck
+     46 scoped-gate
+     46 anti-drift
+     30 doc-check
+     14 ff
+     14 anti-drift-land
+     14 ac-gate
+```
+
+**AC2（修复后，fixture 化机械 fan-in，runId=`evidence-run-1`，走 `forceSuite=true`）** —— 共享载体按同一
+runId 过滤，`ac-precheck`/`suite-start`/`suite-end` 各出现一次：
+
+```
+$ jq -c 'select(.runId=="evidence-run-1" and (.step=="ac-precheck" or .step=="suite-start" or .step=="suite-end" or .step=="suite-skip")) | {event,step,runId,ok}' .quay/fan-in-step-trace.jsonl
+{"event":"step-end","step":"ac-precheck","runId":"evidence-run-1","ok":true}
+{"event":"step-end","step":"suite-start","runId":"evidence-run-1","ok":true}
+{"event":"step-end","step":"suite-end","runId":"evidence-run-1","ok":true}
+```
+
+**AC3（同 runId 两载体对照）** —— 共享载体与 per-run `fan-in-gap-mfh-evidence-run-1.log` 的 suite 相关
+条目数一致且都 = 3：
+
+```
+$ jq -c 'select(.runId=="evidence-run-1" and (.step=="ac-precheck" or .step=="suite-start" or .step=="suite-end" or .step=="suite-skip"))' .quay/fan-in-step-trace.jsonl | wc -l
+3
+$ jq -c 'select(.step=="ac-precheck" or .step=="suite-start" or .step=="suite-end" or .step=="suite-skip")' .quay/fan-in-gap-mfh-evidence-run-1.log | wc -l
+3
+```
 
 ## Touches
 
