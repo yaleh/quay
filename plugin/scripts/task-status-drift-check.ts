@@ -32,11 +32,15 @@ import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { parseTask, extractSection } from "./task-schema.ts";
+import { parseTask, extractSection, countAcCheckboxes } from "./task-schema.ts";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
 import { stripTouchAnnotation, parseTouchEntries, parseTouchEntriesWithTags } from "./touches-parser.ts";
 export { stripTouchAnnotation, parseTouchEntries };
+// countAcCheckboxes — SINGLE-SOURCE in task-schema.ts (gap-ac-checkbox-counting-four-counters-drifted),
+// re-exported here for ready-pool-check.ts / slot-refill.ts / the parity + drift tests that import it
+// from this module.
+export { countAcCheckboxes };
 
 // Directories searched for AC-declared symbols (repo-root-relative) — the code surface a landed
 // implementation would touch. Broad on purpose: a detector should over-match, the human decides.
@@ -108,32 +112,9 @@ export function isDistinctiveName(id) {
     || /[A-Z]{2,}/.test(id);   // SCREAMING_SNAKE constants
 }
 
-// Count GFM checkbox boxes in an AC section (`- [ ]`, `- [x]`, `- [X]`, `- [~]`). The acceptance gate
-// reads `- [x]` boxes (only a checked box passes), so a `done` task with boxes but ZERO checked could
-// NOT have passed the gate as written — status was written directly (the DANGEROUS drift direction,
-// gap-drift-check-only-looks-at-the-harmless-direction). `[~]` (partial) counts as unchecked, matching
-// the gate semantics. This is the decisive closed-without-work signal: it uses the gate's own language
-// (checkboxes), not fragile symbol resolution.
-export function countAcCheckboxes(acSection) {
-  if (acSection == null) {
-    // FAIL-CLOSED (gap-ac47-completion-predicate-consumer-fail-closed, AC1): an ABSENT / UNREADABLE
-    // section (extractSectionByShape returned null — e.g. an UNREGISTERED suffixed heading like
-    // `## Acceptance Criteria (runnable — …)`) must NOT read as `{ unchecked: 0 }`. That conflation
-    // made the completion predicate judge a task "complete" whose AC/DoD it never saw (live: DIR-014
-    // has 5 unchecked boxes under a suffixed heading, yet countCompletionCheckboxes reported
-    // {total:0, checked:0, unchecked:0} → judged passing; hard rule 3 — a boolean conflated "the
-    // object is gone" with "checked, zero unchecked"). `sectionFound:false` is the distinguishable
-    // state for readers that check it; `total: NaN` is the STRUCTURAL guarantee that OLD
-    // destructuring read-patterns (`const { total, checked } = …`) cannot obtain a pass:
-    // `total === 0` and `checked === total` are both FALSE for NaN, so every pre-existing consumer
-    // fails CLOSED without being edited (the "not rely on remembering each consumer" closure, C17).
-    return { total: NaN, checked: NaN, unchecked: NaN, sectionFound: false };
-  }
-  const boxes = acSection.match(/^\s*-\s+\[(.)\]/gm) ?? [];
-  let checked = 0;
-  for (const b of boxes) if (/\[[xX]\]/.test(b)) checked++;
-  return { total: boxes.length, checked, unchecked: boxes.length - checked, sectionFound: true };
-}
+// countAcCheckboxes (GFM checkbox counting; `[~]` partial counts in total but as unchecked) has been
+// SINGLE-SOURCED into task-schema.ts (gap-ac-checkbox-counting-four-counters-drifted) and is re-exported
+// from there above. Do NOT re-add a private copy here — that is exactly the 4-way drift this task closes.
 
 // Word-boundary symbol search across the code roots (grep -w; vendored/milestone/build trees are
 // excluded). A symbol "resolves" only if it appears in a SMALL number of files (default ≤ 8) — a

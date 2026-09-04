@@ -21,6 +21,7 @@
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { TASK_STATUS } from "./task-status.ts";
+import { countAcCheckboxes } from "./task-schema.ts";
 
 const root = process.argv[2] ?? process.cwd();
 const asJson = process.argv.includes("--json");
@@ -57,19 +58,20 @@ function evidenceSection(body: string): string {
 
 /** The task's `[x]`-checked AC boxes. Accepts the `## AC` / `## AC（draft）` / `## AC (draft)` /
  *  `## Acceptance Criteria` heading forms — the shape-aware family the author→ready gate recognizes
- *  (a draft-heading AC with a checked box is still a checked AC). Line-scan based (a lookahead `$`
- *  anchor would stop at ANY line end and truncate the section to just the heading). */
+ *  (a draft-heading AC with a checked box is still a checked AC). The heading detection stays local
+ *  (section-finding, not checkbox matching); the box COUNT is delegated to countAcCheckboxes — the
+ *  single checkbox matcher in task-schema.ts (gap-ac-checkbox-counting-four-counters-drifted). */
 function checkedAcCount(body: string): number {
   let inAc = false;
-  let count = 0;
+  const acLines: string[] = [];
   for (const line of body.split("\n")) {
     if (/^##\s/.test(line)) {
       inAc = /^##\s+(?:AC(?:（[^）]*）| \([^)]*\))?|Acceptance Criteria)\s*$/.test(line);
       continue;
     }
-    if (inAc && /^\s*-\s+\[[xX]\]/.test(line)) count++;
+    if (inAc) acLines.push(line);
   }
-  return count;
+  return countAcCheckboxes(acLines.join("\n")).checked;
 }
 
 const staleReady: Array<{ id: string; title: string }> = [];
