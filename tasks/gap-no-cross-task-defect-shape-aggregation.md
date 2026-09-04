@@ -55,16 +55,16 @@ append-only 账本，算趋势、报出"每个点单独看都是绿的，但窗�
 
 ## AC
 
-- [ ] AC1：实现被动聚合器并对本仓库真实历史跑一遍，输出前 5 个簇及其成员任务 id（贴真实输出）
-- [ ] AC2（对已知真样本干跑，硬规则 2b）：聚合器须**独立重新发现**本次会话中人工找到的 3 个簇里的
+- [x] AC1：实现被动聚合器并对本仓库真实历史跑一遍，输出前 5 个簇及其成员任务 id（贴真实输出）
+- [x] AC2（对已知真样本干跑，硬规则 2b）：聚合器须**独立重新发现**本次会话中人工找到的 3 个簇里的
       **至少 2 个**（状态解析重写 / AC 计数器 / 主检出根路径推导），且只使用这些发现被写下来**之前**
       就已存在的数据；重现不出来 ⇒ 说明聚类没有测到它声称在测的东西，必须先修聚类再算通过
-- [ ] AC3（负控制，防假阳性）：不得把"仅仅因为不相干的原因触及同一个文件"的任务群报成一个簇
+- [x] AC3（负控制，防假阳性）：不得把"仅仅因为不相干的原因触及同一个文件"的任务群报成一个簇
       （例：几十条任务都改过 `worker-driver.ts`，但根因各不相同）——贴出一个它**正确地没有**报出的
       真实例子，或给出在一个人工标注样本上的精确率读数
-- [ ] AC4：首版为**被动**——本任务范围内不写任务库、不自动立案；输出是给人/manager 读的报告
+- [x] AC4：首版为**被动**——本任务范围内不写任务库、不自动立案；输出是给人/manager 读的报告
       （范围声明写进任务体，避免下一个实现者顺手加写手）
-- [ ] AC5：接入一个真实节奏（不是"存在但没人调"）——点名调用点，并贴出一次真实运行记录作为证据
+- [x] AC5：接入一个真实节奏（不是"存在但没人调"）——点名调用点，并贴出一次真实运行记录作为证据
 
 ## DoD
 
@@ -72,9 +72,51 @@ AC1 的真实簇输出、AC2 的"重新发现已知簇"的成员清单对照、A
 全部贴进任务体。**AC2 是硬要求**：一个聚合器如果连已知为真的三个簇都重现不出来，它报出的新簇没有
 任何可信度——这正是本仓库硬规则 2b 要求的"把谓词对着已知为真的样本干跑一次"。
 
+**AC1（真实历史 top-5，`node --experimental-strip-types plugin/scripts/defect-shape-aggregate.ts --root . --human --top 5`，读 1192 条 done gap-*、产出 636 簇）**：
+
+```
+CLUSTER root="quay_serial_concurrency" size=10 members=[gap-ac44-concurrent-phases-read-host-parallelism, gap-ac74-serial-lowconc-literal-direct-path, gap-load-sensitive-serial-phase-unbounded-growth-measure-first, gap-lowconc-concurrency-8-starves-bclass-waiting, gap-lowconc-concurrency-restore-host-derived, gap-phase-overlap-field-always-false-negative, gap-phase-overlap-two-phase-parallel-exploration, gap-suite-knobs-config-file-priority, gap-suite-lpt-full-bucket-run-selected, gap-suite-serial-install-controlled-parallelism]
+CLUSTER root="checkers_total" size=10 members=[gap-ac55-dispatch-record-fingerprint-reason, gap-ac56-recommended-deordered, gap-b2-repo-root-unification, gap-checker-mutation-cases-4-checkers, gap-checkers-have-never-been-shown-to-fail, gap-establish-daily-review-cadence-mechanism, gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked, gap-red-on-omission-audit-needs-mutation-case, gap-run-static-checks-zero-concurrency-can-parallelize, gap-worktree-node-modules-inconsistent-self-verify]
+CLUSTER root="ac65authorized" size=9 members=[gap-ac65-direct-fix-vs-bypass-detector-conflict, gap-bypass-ruled-cbbbb766, gap-bypass-ruled-table-self-entry, gap-direct-to-develop-exclude-manager-skill-granularity, gap-direct-to-develop-ruled-historical-99f845d9, gap-direct-to-develop-ruled-historical-cddc55e2, gap-fan-in-ff-executor-check-ruled-historical-99f845d9, gap-readme-design-internal-exclusion, gap-scoped-gate-m120-negative-control-false-positive]
+CLUSTER root="quaybin" size=9 members=[gap-adr-gate-test-fixture-isolation-live-task-store, gap-cli-import-refactor-run-shell-architecture, gap-manager-skill-index-missing-new-specs, gap-plugin-json-duplicate-manager-skill, gap-task-check-test-nativeproviderdir-undefined, gap-tests-spawn-cli-from-ts-source, gap-tests-use-cli-where-module-import-suffices, gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency, gap-tmp-leak-is-live-r6-absolves-a-file-for-one-cleanup-call]
+CLUSTER root="acboxcount" size=9 members=[gap-absorb-entry-clause-disposition-sequencing, gap-build-evidence-manifest-missing, gap-dir126d-deferred-phase-timing-recurrence-tracking, gap-preflight-bare-filename-false-positive, gap-prepare-milestone-epoch-scope-change-grants-full-review, gap-prepare-milestone-no-size-aware-routing-A, gap-prepare-milestone-no-size-aware-routing-B, gap-prepare-milestone-split-decision-no-finality, gap-workflow-name-dispatch-stale-script-cache]
+defect-shape-aggregate: 636 cluster(s) (showing 5), maxDf=8
+```
+
+**AC2（重新发现 3 个已知簇，成员清单对照——只用 `tasks/*.md` + git 历史，未硬编码这三个簇）**：
+
+1. **状态解析重写**（`readtaskstatusatref`，rank=159，size=5）——成员**逐字等于**会话里人工找到的
+   状态解析缺陷群（consolidation 任务 `gap-task-status-parsing-reimplemented-13-sites` + 4 个
+   stale-read 族 sibling，全中、无缺、无多）：
+   ```
+   members: gap-driver-filters-readtaskstatus-stale-main-checkout, gap-promotion-uncommitted-flip-poisons-settaskstatus,
+            gap-ready-pool-depends-on-status-stale-read, gap-task-status-parsing-reimplemented-13-sites,
+            gap-web-task-status-reads-stale-main-checkout
+   sharedFiles: plugin/scripts/driver-filters.ts, plugin/scripts/ready-pool-check.ts, plugin/test/ready-pool-check.test.mjs
+   ```
+2. **AC 计数器**（`countaccheckboxes`，rank=40，size=7）——锚任务 `gap-ac-checkbox-counting-four-counters-drifted`
+   在簇内，另有 ABI 导出任务 `gap-abi-promote-section-parsing-flip-store-reverse-import`（同根）；其余 5 条为
+   「正文里顺带提到 `countAcCheckboxes`」的弱关联（候选报告的可接受噪声，非硬错）。
+3. **主检出根路径推导**（`--git-common-dir`，rank=39，size=7）——两个锚**都在同一簇**：
+   `gap-refresh-worktree-quay-main-derive` + `gap-main-checkout-root-derivation-recurs-three-sites`（+5 条
+   同样涉及 `--git-common-dir`/repo-root 的关联任务）。
+
+**AC3（负控制，`worker-driver.ts`）**——119 条 done gap-* 的 `## Touches` 都触及 `worker-driver.ts`，
+但**没有**任何一个簇以它为绑定机制词（文件重叠不是聚类信号，只作 `sharedFiles` 旁证）：
+```
+done gap-* tasks touching worker-driver.ts in ## Touches: 119
+clusters bound by a worker-driver token: 0
+```
+
+**AC5（调用点 + 真实运行记录）**——调用点 = 管理者复盘节奏 `orchestration/REVIEW-cadence.md` 新增
+`### 3e`（与 §3d 趋势判据并列，「每次复盘跑一次」）。真实运行记录 = 上面 AC1 的同一条命令输出
+（`--root . --human`，读 1192 条 done gap-*、产 636 簇）；`--json` 的 meta 回显
+`"shapeAggregateIsPassive": 1`（AC4 被动不变量：只读、零写、零触发 run）。
+
 ## Touches
 
 - plugin/scripts/defect-shape-aggregate.ts（新增）
 - plugin/test/defect-shape-aggregate.test.mjs（新增）
 - plugin/scripts/capability-catalog.sh（登记新脚本）
+- orchestration/REVIEW-cadence.md（AC5 调用点：§3e）
 - tasks/gap-no-cross-task-defect-shape-aggregation.md

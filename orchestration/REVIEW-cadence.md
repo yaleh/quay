@@ -110,6 +110,27 @@ node --experimental-strip-types plugin/scripts/trend-check.ts --window 5
 - **输出写进汇总**：`trend_flags`（打标数组）+ 每条打标的轴/数值/净变化；exit 1 = 窗口内存在恶化，
   按恶化轴进当日复盘结论（不是一次性，是复盘常项）。
 
+### 3e. 缺陷形状聚合——「最近 N 条已落地缺陷是不是共享同一个根」（跨任务架构债）
+
+3a–3d 的判据都是**单缺陷**视角（这次绿了吗 / 这条契约合规吗 / 比上次贵了吗）。**跨任务聚合是新品类**
+（`gap-no-cross-task-defect-shape-aggregation`）——架构债从不以单次失败的形态出现，而以
+「N 次失败共享同一个根」的形态出现（实证：`readTaskStatusAtRef` 被逐字复制 3 份 / AC 复选框计数有
+4 个独立实现且已分歧 / 主检出根推导的 bug 修过一次又在 3 处仍在犯）；今天没有任何机制做这个聚合，
+聚合只发生在人来问的时候。每次复盘跑一次：
+
+```bash
+# 被动读者：只读 tasks/*.md（frontmatter + body + ## Touches）+ git 历史（只读，取落地时间），
+# 不写任务库、不自动立案、不触发任何 run。按机制词（代码标识符 / CLI flag，⛔ 非文件重叠——
+# 文件重叠会把「几十条任务都改过 worker-driver.ts 但根因各不相同」误报成一个簇）把已落地 gap-*
+# 聚成簇；≥N（默认 3）条同簇 ⇒ 输出一条「这 N 条共享此根」的候选报告。
+node --experimental-strip-types plugin/scripts/defect-shape-aggregate.ts --root . --human
+```
+
+- **输出写进汇总**：前 N 个簇 + 每簇成员任务 id + 绑定机制词（root label）+ 共享触及文件（只作旁证）。
+- **性质**：首版为被动报告（AC4——不写任务库、不自动立案，输出是给人/manager 读的**输入通道**，
+  ⛔ 不是守卫、不 gate 任何东西、不产生红）。一个簇 = 「这 N 条共享此根」的候选信号，交人工判断
+  是否收敛为一条架构候选，不自动往池子里灌任务。
+
 ---
 
 ## 4. 第一次复盘（已执行，见 outer-phase-goal.md 复核记录 2026-08-05）
