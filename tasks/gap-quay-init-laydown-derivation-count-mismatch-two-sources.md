@@ -2,7 +2,7 @@
 id: gap-quay-init-laydown-derivation-count-mismatch-two-sources
 title: 「该落地哪些 plugin/scripts 脚本」有两份互不共享的独立判定——laydown-set-check.sh --list（约62）与
   quay-init.sh derive_loop_scripts()（约119-132）
-status: ready
+status: done
 labels:
   - gap
 parent: null
