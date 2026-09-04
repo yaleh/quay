@@ -414,6 +414,7 @@ declare -A QUESTION=(
   [over90-task-gate.ts]="Does a task's own status frontmatter allow the over-90m timeout to fire (taskStatusAllowsOver90m), and is an over-budget bracket closed only on positive merge evidence (makeOver90ExecutorGone)?"
   [semantic-trigger.ts]="Should the semantic observer judge run this round — fires when the free text changed (hash) or carries the harness's own spawn-limit error string (AC77 判据1)?"
   [main-thread-edit-check.ts]="How many main-thread product-file Edits did the manager make this round, versus how many Agent dispatches (manager exec-mode check — AC145 主线程不编辑产品文件判据)?"
+  [identity-replication-check.ts]="How many code files independently name or judge the SAME runtime entity (P2 identity replication, docs/proposals/archguard-generation-era-primitives.md §3) — literal-replication degree (full-text vs code-position counts side by side, comments/docs excluded by position, import/source single-accessor distinguished from hardcoded string literals), judgment rewrites (read /proc/<pid>/cmdline ∧ name-compare fingerprint), product-source *_REL path-literal constants, plugin/scripts↔experiments/*/scripts byte-identical pairs, and the gate-script-base.ts shared-module negative control (a single-accessor module must NOT be flagged as replicated)?"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
@@ -723,6 +724,7 @@ declare -A CADENCE=(
   [over90-task-gate.ts]="按需"
   [semantic-trigger.ts]="按需"
   [main-thread-edit-check.ts]="每轮"
+  [identity-replication-check.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
@@ -1032,6 +1034,7 @@ declare -A INVALIDATION=(
   [over90-task-gate.ts]="失效前提：supervisor 抢占判定（supervisor-preempt-candidates.ts）与 --detect-stop 的 over-90m 检测（inner-blocked-signal.ts detectTaskOver90m）仍以本模块为唯一 TASK_OVER_90M_MS/taskStatusAllowsOver90m/makeOver90ExecutorGone 实现；若这两个消费者退役，本条退休"
   [semantic-trigger.ts]="失效前提：semantic-observer-judge.ts 仍以本模块为唯一 AC3 触发启发式（semanticTriggerHeuristic/freeTextHash/evaluateTrigger）实现；若 judge 退役，本条退休"
   [main-thread-edit-check.ts]="无可测前提，靠周期复核"
+  [identity-replication-check.ts]="失效前提：本仓库仍以 plugin/scripts ↔ experiments/*/scripts 双副本、产品源码 *_REL 字符串路径耦合、以及 /proc/<pid>/cmdline 进程识别为实现身份复制的发生面；若迁移到单一打包产物或单一 import 访问器（import 图可见），本条的复制度读数归零或语义变更，需同步"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
@@ -1341,6 +1344,7 @@ declare -A LAST_REAFFIRMED=(
   [over90-task-gate.ts]="2026-09-01"
   [semantic-trigger.ts]="2026-09-01"
   [main-thread-edit-check.ts]="2026-09-01"
+  [identity-replication-check.ts]="2026-09-04"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
@@ -1649,6 +1653,7 @@ declare -A MATCHING=(
   [over90-task-gate.ts]="n/a"
   [semantic-trigger.ts]="n/a"
   [main-thread-edit-check.ts]="keyword"
+  [identity-replication-check.ts]="position"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1697,6 +1702,7 @@ declare -A CONSUMER=(
   [git-lens-l-d-code-doc-ratio.ts]="谁按：GIT-lens 用户按；条件=要量 L_D 代码文档比例增量"
   [git-lens-l-g-structural-drift.ts]="谁按：GIT-lens 用户按；条件=要量结构漂移（generative-alignment）"
   [git-lens-l-s-behavior-variance.ts]="谁按：GIT-lens 用户按；条件=要量行为稳定性（轻突变下）"
+  [identity-replication-check.ts]="谁按：架构复核者在做 P2 身份复制体检（archguard 架构复核 / 里程碑 done 前 L_D/L_G 检查）时按；条件=要判定字面量复制度 / 判定重写数 / plugin↔experiments 双副本字节相同对 / *_REL 路径常量是否越阈值（未经单一访问器的硬编码实体）"
   [integration-batch-merge.sh]="谁按：integration 合并者按；条件=要批量 ff 合入 develop"
   [it0-impl-row-check.sh]="谁按：it0 设计里程碑复核者按；条件=要核对实现行是否都被交代"
   [it0-split-or-commit-check.ts]="谁按：it0 任务执行者按；条件=任务要么 split 要么 commit（单源强制）"
