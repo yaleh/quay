@@ -47,7 +47,7 @@ test('M172 (DIR-108): marketplace.json is valid JSON and lists the quay plugin p
   assert.equal(entry.source.ref, 'dist-plugin', 'source must pin the CI-published orphan branch');
 });
 
-test('plugin.json is valid JSON and declares the 13 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology; gap-loop-mechanism-...: +quay-task-operator; cold-start-8: +quay-cold-start; gap-productize-the-manager-layer: +manager; +quay-file-task — new-task filing skill, the step before author)', () => {
+test('plugin.json is valid JSON and declares the 14 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology; gap-loop-mechanism-...: +quay-task-operator; cold-start-8: +quay-cold-start; gap-productize-the-manager-layer: +manager; +quay-file-task — new-task filing skill, the step before author; gap-skill-start-drivers-webserver: +quay-drivers)', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');
   // Cross-check against packages/quay's version rather than a hardcoded literal (which is
@@ -64,6 +64,7 @@ test('plugin.json is valid JSON and declares the 13 bundled skills (M179/DIR-070
     './skills/loop-driver/SKILL.md',
     './skills/init/SKILL.md',
     './skills/cold-start/SKILL.md',
+    './skills/drivers/SKILL.md',
     './skills/quay-task-operator/SKILL.md',
     './skills/quay-task-to-plan/SKILL.md',
     './skills/routines/SKILL.md',

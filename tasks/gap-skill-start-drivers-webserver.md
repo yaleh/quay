@@ -77,7 +77,9 @@ halt with resume first"、"Starting from a git worktree is REJECTED — 必须�
 ## Touches
 
 - plugin/skills/drivers/SKILL.md
+- plugin/.claude-plugin/plugin.json
 - plugin/scripts/start-drivers.ts
 - plugin/scripts/capability-catalog.sh
 - plugin/test/start-drivers.test.mjs
+- plugin/test/plugin-packaging.test.mjs
 - tasks/gap-skill-start-drivers-webserver.md
