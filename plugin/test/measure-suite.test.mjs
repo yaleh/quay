@@ -15,7 +15,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -329,6 +329,85 @@ test("reporter appends cpu_ms via route (a) 子进程自报 — a REAL per-file 
     assert.ok(
       ratioH > ratioW,
       `heavy ratio (${ratioH.toFixed(3)}) must exceed wait ratio (${ratioW.toFixed(3)}) — else cpu_ms is duration-derived`
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reporter counts CHILD-process CPU — a spawn-heavy file is not under-reported to look like a waiting file (gap-perfile-cpu-cost-collection)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-cpu-child-"));
+  const cpuDir = path.join(dir, "cpu");
+  try {
+    // A test file whose OWN in-process CPU is negligible (~10ms of execFileSync overhead) but which
+    // spawns a child that burns ~500ms CPU and is REAPED by execFileSync. process.cpuUsage() alone
+    // would report ~10ms; counting the reaped child (cutime+cstime) must push cpu_ms well past 250ms.
+    // This is the exact misclassification the measurement exists to prevent: a spawn-heavy Type-1
+    // file (worker-driver-fan-in.test.mjs et al.) must not be low-reported into looking like a
+    // Type-2 waiting file.
+    const spawner = path.join(dir, "spawner.test.mjs");
+    writeFileSync(
+      spawner,
+      `import { test } from "node:test";\n` +
+        `import { execFileSync } from "node:child_process";\n` +
+        `test("spawner", () => {\n` +
+        `  execFileSync(process.execPath, ["-e", "const e=Date.now()+500; while(Date.now()<e){}"]);\n` +
+        `});\n`
+    );
+
+    const env = {
+      ...process.env,
+      QUAY_PERFILE_CPU_DIR: cpuDir,
+      NODE_OPTIONS: `--require=${path.join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs")}`,
+    };
+    delete env.NODE_TEST_CONTEXT;
+    const res = spawnSync(
+      "node",
+      ["--test", `--test-reporter=${reporterPath}`, "--test-reporter-destination=stderr", spawner],
+      { encoding: "utf8", env }
+    );
+    assert.equal(res.status, 0, `suite should pass; stderr tail: ${res.stderr.slice(-300)}`);
+
+    const line = res.stderr.split("\n").find((l) => l.startsWith("__PERFILE__ "));
+    assert.ok(line, "one __PERFILE__ line");
+    const m = line.match(/__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false) end_ms=([0-9]+) cpu_ms=([0-9.]+)/);
+    assert.ok(m, `__PERFILE__ line must carry cpu_ms: ${line}`);
+    const cpuMs = Number(m[5]);
+    assert.ok(
+      cpuMs > 250,
+      `cpu_ms (${cpuMs.toFixed(1)}) must include the reaped child's ~500ms CPU — own-CPU-only would report ~10ms`
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("seam does NOT report for a non-test node -e probe (guard narrowed to --test-isolation; gap-perfile-cpu-cost-collection)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-guard-"));
+  const cpuDir = path.join(dir, "cpu");
+  try {
+    const env = {
+      ...process.env,
+      QUAY_PERFILE_CPU_DIR: cpuDir,
+      NODE_OPTIONS: `--require=${path.join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs")}`,
+    };
+    delete env.NODE_TEST_CONTEXT;
+    mkdirSync(cpuDir, { recursive: true }); // pre-create so readdirSync below never ENOENTs
+    const res = spawnSync(
+      "node",
+      ["-e", "setTimeout(()=>{}, 30)", "probe-runid-12345"],
+      { encoding: "utf8", env }
+    );
+    assert.equal(res.status, 0);
+    // A `node -e` probe (execArgv = ["-e"], no --test-isolation) must NOT write a per-file CPU
+    // report — the seam is for isolated TEST-FILE children only. This is the regression the guard
+    // narrowing fixes: an unconditional seam injected an exit-time report into every node process,
+    // which delayed non-test subprocess death and flipped serve-board.test.mjs's live-process
+    // liveness fixture under suite load (production carrier: 488 green rounds, 1st red).
+    assert.equal(
+      readdirSync(cpuDir).length,
+      0,
+      "a node -e probe must NOT write a per-file CPU report (guard is --test-isolation, not unconditional)"
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

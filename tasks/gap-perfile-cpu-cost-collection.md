@@ -37,7 +37,7 @@ extra:
    - **(a) 子进程自报（默认）**：node:test `run({isolation:"process"})` 每文件一个子进程，用 `NODE_OPTIONS=--require` 之类的预载 seam，在子进程 `process.on("exit")` 时报告自己的 `process.cpuUsage()`。精确、无采样误差、不改任何测试文件；需要确认预载 seam 不污染被测行为。
    - **(b) 采样归因（仅在 (a) 被证明不可行时才用，且必须在任务体写明为何不可行）**：复用 `plugin/scripts/suite-load-sampler.ts`，加采 `/proc/<pid>/stat` 的 utime+stime 并用 `/proc/<pid>/cmdline` 把 PID 映射回文件。
    - **⛔ 为什么默认必须是 (a)**：本任务最关心的恰恰是 **Type 2（CPU 极低）**文件——一个 160s 墙钟 / 200ms CPU 的等待型文件，5s 采样极可能**采到 0**，而 0 与"没测到"同形，正好踩中硬规则 3b（读不懂的输入不得返回与合格同形的值）。采样路线对我们最需要分辨的那一类文件恰好最没有分辨力。若最终仍选 (b)，AC7 的分辨力判据必须照样满足。
-   - **实现选型记录（2026-09-04，本实现）**：选 (a)，已实测可行——`NODE_OPTIONS=--require` 会**穿透**进 node:test 的隔离子进程（子进程 execArgv 含 `--require=<preload>`、environ 含 `NODE_OPTIONS`，实测直跑与 LPT 路径 `suite-lpt-runner.mjs` 两条都命中）；子进程 `process.argv[1]` 是 node:test 解析后的**绝对路径**，`process.cpuUsage()` 在 `process.on("exit")` 同步写出、早于父进程 `test:complete` 发射（无竞态）。预载 seam 只 import `node:fs/path/crypto` + 注册一个 exit 钩子，零全局污染、不改任何测试文件、不碰 test.sh（接线收在 `full-suite-runner.ts` 的 suiteEnv，两条 writer 与直接/LPT 路径共用同一 seam）。
+   - **实现选型记录（2026-09-04，本实现）**：选 (a)，已实测可行——`NODE_OPTIONS=--require` 会**穿透**进 node:test 的隔离子进程（子进程 execArgv 含 `--require=<preload>`、environ 含 `NODE_OPTIONS`，实测直跑与 LPT 路径 `suite-lpt-runner.mjs` 两条都命中）；子进程 `process.argv[1]` 是 node:test 解析后的**绝对路径**，`process.cpuUsage()` 在 `process.on("exit")` 同步写出、早于父进程 `test:complete` 发射（无竞态）。预载 seam 只 import `node:fs/path/crypto/child_process` + 注册一个 exit 钩子，零全局污染、不改任何测试文件、不碰 test.sh（接线收在 `full-suite-runner.ts` 的 suiteEnv，两条 writer 与直接/LPT 路径共用同一 seam）。**2026-09-04 续（同一轮实现，修正两处缺陷）**：① **cpu_ms 加入 reaped 子进程 CPU**——`process.cpuUsage()` 只含本进程、不含它 spawn 的子进程，会严重低报 spawn 重文件（实测 1.5s 子进程烧 CPU 时 cpuUsage≈133ms vs own+children≈1730ms，恰把重度 spawn 的 Type 1 误判成 Type 2）；现改为 own `process.cpuUsage()` + `/proc/self/stat` `cutime+cstime`（tick→ms，HZ 读宿主 `getconf CLK_TCK` 不写死）。② **seam 触发收窄**为 execArgv 含 `--test-isolation` 的隔离子进程（不再注入 `node -e` 探针 / MCP provider 等非测试进程——无差别注入曾在 suite 负载下让 serve-board.test.mjs 的活进程判活夹具翻车，生产载体 488 轮首红）。
    - 两条路线共同的硬约束：**必须是真实测量**——⛔ 不得用 `durationMs × 常数` 之类的派生值冒充 CPU 采集（硬规则 4 的"结构上不可能取假的量"）。
 2. **发射端加字段**：`measure-suite-reporter.mjs` 的 `__PERFILE__` 行追加 `cpu_ms=<n>`，格式与既有 `end_ms=` 同款（行尾可选字段）。
 3. **解析端加可选捕获组**：`measure-trend-check.ts` 的 `parsePerFileLines` 正则加 `cpu_ms` 可选组，**向后兼容**——旧日志无该字段时字段缺席（不是 0，不是伪造值），照抄 `end_ms` 的既有处理方式。
@@ -63,7 +63,7 @@ extra:
 
 ## Measured
 
-**测量口径**：路线 (a) 子进程自报——子进程 `process.on("exit")` 时把 `process.cpuUsage()`（user+system，µs→ms）写入 `QUAY_PERFILE_CPU_DIR`，reporter 在 `test:complete` 读回并追加 `cpu_ms=`。理由见 Plan 步骤 1「实现选型记录」：精确、无删失、无归因（性质同 `durationMs`），对 Type 2（CPU 极低、等待型）仍有分辨力——采样路线在此类上会采到 0、与"没测到"同形。
+**测量口径**：路线 (a) 子进程自报——子进程 `process.on("exit")` 时把 **own `process.cpuUsage()`（user+system，µs→ms）+ 已被 wait 回收的子进程 CPU（`/proc/self/stat` 的 `cutime+cstime`，tick→ms，HZ 读宿主 `getconf CLK_TCK` 不写死）** 写入 `QUAY_PERFILE_CPU_DIR`，reporter 在 `test:complete` 读回并追加 `cpu_ms=`。理由见 Plan 步骤 1「实现选型记录」：精确、无删失、无归因（性质同 `durationMs`），对 Type 2（CPU 极低、等待型）仍有分辨力——采样路线在此类上会采到 0、与"没测到"同形。**⚠️ 口径限制**：`cutime/cstime` 只累计已被 wait 回收的子进程，detached 孤儿进程的 CPU 仍漏计——spawn 重文件（`execFileSync`/`spawn`+await 等回收型）全覆盖，孤儿型（`detached`+不 wait）漏计。
 
 **非派生负控制（机制级，非生产轮；实现落地前实测）**：双文件 `--test-concurrency=2`、无窗口负载——
 - `cpu-heavy.test.mjs`（烧 CPU ~300ms）：`duration_ms=645.47, cpu_ms=536.18` ⇒ `cpuMs/durationMs ≈ 0.83`（算多）。
@@ -80,7 +80,7 @@ extra:
 ## Touches
 
 - plugin/scripts/measure-suite-reporter.mjs（`__PERFILE__` 行追加 cpu_ms 字段）
-- plugin/scripts/per-file-cpu-report.mjs（路线 (a) 子进程自报预载 seam：NODE_OPTIONS=--require 加载，子进程 exit 时写 process.cpuUsage()）
+- plugin/scripts/per-file-cpu-report.mjs（路线 (a) 子进程自报预载 seam：NODE_OPTIONS=--require 加载，子进程 exit 时写 own process.cpuUsage + reaped 子进程 cutime/cstime；触发收窄为 `--test-isolation` 隔离子进程）
 - plugin/scripts/measure-trend-check.ts（parsePerFileLines 正则加可选捕获组，照抄 end_ms 先例）
 - plugin/scripts/full-suite-runner.ts（writer 之一：perFile 记录成形面带 cpuMs + suiteEnv 注入 QUAY_PERFILE_CPU_DIR/NODE_OPTIONS）
 - plugin/scripts/pre-verified-round-record.ts（writer 之二：同款字段，禁止只改一边）
