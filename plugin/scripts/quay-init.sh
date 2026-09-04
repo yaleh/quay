@@ -311,6 +311,23 @@ _dst_sha256() {
   fi
 }
 
+# _LAID_TOOK[rel]=1 — the set of workspace-rel paths whose lay-down TOOK EFFECT this round: the
+# installer wrote the product (copied / clean-replaced / managed-replaced / --force overwritten) or
+# found the disk already byte-identical to the product (skipped). write_state_file only recomputes
+# laidFiles hashes for THIS set; every other path — the CONFLICT branches, where a user edit is
+# PRESERVED and the installer wrote nothing — keeps the previous round's record, so a preserved edit
+# is never mis-recorded as "laid" (gap-quay-init-write-state-file-corrupts-hash-after-conflict:
+# unconditionally hashing current disk content made a preserved CONFLICT edit look stale-installed
+# next round, and a zero-change 3rd run silently ate the edit without reporting CONFLICT).
+declare -A _LAID_TOOK=()
+
+# _record_laid_took <dst>: mark an absolute dst path's workspace-rel form as "took effect this round".
+_record_laid_took() {
+  local dst="$1"
+  [ -n "$dst" ] || return
+  _LAID_TOOK["${dst#"$WORKSPACE_ROOT"/}"]=1
+}
+
 # idempotent copy of one file. The 3rd arg MODE ("clean"|"preserve"|"managed", default preserve)
 # distinguishes three conflict classes for a same-name-different-content target:
 #   clean    — PRODUCT-OWNED files (loop mechanism executables: 可执行文件一律原样复制，只生成配置).
@@ -342,8 +359,10 @@ copy_one() {
       echo "  copied: $dst"
     fi
     COPIED=$((COPIED + 1))
+    _record_laid_took "$dst"
   elif _is_identical "$src" "$dst"; then
     SKIPPED=$((SKIPPED + 1))
+    _record_laid_took "$dst"
     if [ "$DRY_RUN" = true ]; then
       echo "  would-skip (identical): $dst"
     else
@@ -366,6 +385,7 @@ copy_one() {
       echo "    backup: $backup_dir/$fname"
     fi
     COPIED=$((COPIED + 1))
+    _record_laid_took "$dst"
   elif [ "$mode" = "managed" ]; then
     # Install-managed localizable file (config-driven install, SPEC AC5/AC6). A target that
     # still equals the previous install's recorded laid-down hash is stale product from an
@@ -388,6 +408,7 @@ copy_one() {
         echo "    backup: $backup_dir/$fname"
       fi
       COPIED=$((COPIED + 1))
+      _record_laid_took "$dst"
     elif [ "$FORCE" = true ]; then
       if [ "$DRY_RUN" = true ]; then
         echo "  would-overwrite (conflict, --force): $dst"
@@ -398,6 +419,7 @@ copy_one() {
         echo "  overwritten (backed up): $dst"
       fi
       COPIED=$((COPIED + 1))
+      _record_laid_took "$dst"
     else
       CONFLICTED=$((CONFLICTED + 1))
       if [ "$DRY_RUN" = true ]; then
@@ -418,6 +440,7 @@ copy_one() {
         echo "  overwritten (backed up): $dst"
       fi
       COPIED=$((COPIED + 1))
+      _record_laid_took "$dst"
     else
       CONFLICTED=$((CONFLICTED + 1))
       if [ "$DRY_RUN" = true ]; then
@@ -806,9 +829,18 @@ write_state_file() {
     # A workspace without .quay/ still gets the state record in a sibling location.
     mkdir -p "$WORKSPACE_ROOT/.quay"
   fi
-  local laid_rel_file root f
+  local laid_rel_file took_rel_file root f rel
   laid_rel_file="$(mktemp)"
   : > "$laid_rel_file"
+  took_rel_file="$(mktemp)"
+  : > "$took_rel_file"
+  # The paths whose lay-down TOOK EFFECT this round (copy_one's _record_laid_took). write_state_file
+  # only recomputes laidFiles hashes for THIS set; every other path keeps the previous round's record
+  # (gap-quay-init-write-state-file-corrupts-hash-after-conflict — a CONFLICT-preserved user edit must
+  # NOT be re-hashed into laidFiles, or a zero-change next run mis-reads it as stale-installed).
+  for rel in "${!_LAID_TOOK[@]}"; do
+    printf '%s\n' "$rel" >> "$took_rel_file"
+  done
   # Every root-relative path quay-init --loop lays/owns. Files listed directly; dirs expand to all
   # files under them (sorted). .quay/quay-init-state.json is included so the record self-tracks.
   for root in \
@@ -824,9 +856,9 @@ write_state_file() {
       done < <(find "$WORKSPACE_ROOT/$root" -type f | sort)
     fi
   done
-  python3 - "$PLUGIN_VERSION" "$WORKSPACE_ROOT/.quay/quay-init-state.json" "$WORKSPACE_ROOT" "$laid_rel_file" <<'PYEOF'
+  python3 - "$PLUGIN_VERSION" "$WORKSPACE_ROOT/.quay/quay-init-state.json" "$WORKSPACE_ROOT" "$laid_rel_file" "$took_rel_file" <<'PYEOF'
 import json, os, sys, time, hashlib
-version, path, workspace_root, rel_file = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+version, path, workspace_root, rel_file, took_file = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 state = {}
 if os.path.exists(path):
     try:
@@ -840,6 +872,8 @@ state["previousPluginVersion"] = prev if prev and prev != version else state.get
 state["laidAt"] = time.time()
 with open(rel_file, encoding="utf-8") as f:
     rels = [line.strip() for line in f if line.strip()]
+with open(took_file, encoding="utf-8") as f:
+    took = {line.strip() for line in f if line.strip()}
 # laidCategories: derive from the laid roots (stable tokens, not just {"loop"}).
 cats = set(state.get("laidCategories", []))
 if any(r.startswith("plugin/scripts") for r in rels): cats.add("scripts")
@@ -856,19 +890,33 @@ state["laidCategories"] = sorted(cats)
 # install makes this distinction possible: every laid-down file is byte-identical to the product,
 # so the ONLY reason a managed file can differ on upgrade is either a stale previous install or a
 # user edit — and the hash tells them apart.
+# gap-quay-init-write-state-file-corrupts-hash-after-conflict: only recompute the hash for a path
+# whose lay-down TOOK EFFECT this round (copy_one wrote the product, or found it already identical).
+# Every other path keeps the previous round's record UNCHANGED — a CONFLICT branch preserved a user
+# edit (the installer wrote nothing), and re-hashing that edit into laidFiles would make the next
+# zero-change run mis-read it as a stale install and silently overwrite it without reporting CONFLICT.
+prev_laid = state.get("laidFiles", {})
 laid = {}
 for rel in rels:
-    p = os.path.join(workspace_root, rel)
-    if os.path.isfile(p):
-        with open(p, "rb") as f:
-            laid[rel] = hashlib.sha256(f.read()).hexdigest()
+    if rel in took:
+        p = os.path.join(workspace_root, rel)
+        if os.path.isfile(p):
+            with open(p, "rb") as f:
+                laid[rel] = hashlib.sha256(f.read()).hexdigest()
+        # a took path that is no longer a file is dropped (the copy wrote it, so this is unexpected)
+    elif rel in prev_laid:
+        # Not written this round (CONFLICT-preserved user edit, or a skipped product that was
+        # already recorded) → keep the previous record byte-for-byte.
+        laid[rel] = prev_laid[rel]
+    # else: not written this round AND no prior record → leave out (honest "unknown", never hashing
+    # a pre-existing file the installer did not lay down).
 state["laidFiles"] = laid
 with open(path, "w", encoding="utf-8") as f:
     json.dump(state, f, indent=2)
     f.write("\n")
 print(f"  state: .quay/quay-init-state.json pluginVersion={version} previous={prev or 'none'} laidFiles={len(laid)} laidCategories={','.join(sorted(cats))}")
 PYEOF
-  rm -f "$laid_rel_file"
+  rm -f "$laid_rel_file" "$took_rel_file"
 }
 
 # write_session_env: generate/update orchestration/session-liveness.env with the per-project
