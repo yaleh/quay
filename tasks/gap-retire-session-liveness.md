@@ -1,7 +1,7 @@
 ---
 id: gap-retire-session-liveness
 title: 退役 session-liveness（含 mount + 22 个测试 + monitor-mount-check + 引用清理），随 tmux 退役
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -28,7 +28,7 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 
 ## Plan
 
-0. **复用起点（⛔ 不从零重做）**：git 对象库有之前完整实现 commit `c50044bb7`（77 文件，删脚本 + 22 测试 + monitor-mount-check + 清引用 + 修 ac61 + 补 Touches）。执行 `git cherry-pick c50044bb7` 复用（代码文件干净；`tasks/gap-retire-session-liveness.md` 冲突时取 develop 版），然后只修正：① 撤销误删 `outer-anchor-check.ts`（grep 命中 0 却删了，orphan-checker 会失败）；② 确认 idle-watch 接缝（方案 B）已删；③ 历史文档（docs/analysis/ 等）清不清无所谓（AC1 历史豁免），不撤销。
+0. **复用起点（⛔ 不从零重做）**：git 对象库有之前完整实现 commit `c50044bb7`（77 文件，删脚本 + 22 测试 + monitor-mount-check + 清引用 + 修 ac61 + 补 Touches）。执行 `git cherry-pick c50044bb7` 复用（代码文件干净；`tasks/gap-retire-session-liveness.md` 冲突时取 develop 版），然后只修正：① 撤销误删 `outer-anchor-check.ts`（grep 命中 0 却删了，orphan-checker 会失败）；② 确认 idle-watch 接缝（方案 B）已删；③ 历史文档（docs/analysis/ 等）清不清无所谓（AC1 历史豁免），不撤销。④ 修 `plugin/test/cold-start-recovery.test.mjs` AC3：`MONITORS-MOUNTED` 从 AC8c 七键数组移除（session-liveness-mount.sh 已删，该 key 已不存在，断言现恒假）。
 
 1. 枚举 session-liveness 的全部消费方（147 个文件：orchestration 文档 / packages 代码 / plugin/loop 文档 / plugin/scripts / plugin/test / skills / workflows / scripts/test.sh），确认哪些是「可删」、哪些是「需改判」。
 2. 删：session-liveness.sh + session-liveness-mount.sh + session-liveness-sweep*.mjs（重命名 run-namespace-sweep*）+ 22 个测试 + monitor-mount-check.sh + monitor-mount-check.test.mjs。
@@ -46,15 +46,15 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：session-liveness 的【实现/调用/测试】已清理，历史文档字样豁免：
+- [x] AC1（能取假）：session-liveness 的【实现/调用/测试】已清理，历史文档字样豁免：
   - 实现：`session-liveness.sh` / `session-liveness-mount.sh` / `monitor-mount-check.sh` 已删除；
   - 调用：`plugin/scripts/`、`packages/`、`test/`、`scripts/`、`.claude/workflows/` 里对上述脚本的调用已移除（`grep -rn "session-liveness\.sh\|session-liveness-mount\.sh\|monitor-mount-check" plugin/scripts/ packages/ test/ scripts/ .claude/workflows/` 归零，打印命中行）；`hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh` 误引入的重命名悬空引用一并删除（`plugin/test/helpers/hermetic-tmux.mjs` 不在本范围）；
   - 测试：22 个 `session-liveness-*.test.mjs` + `monitor-mount-check.test.mjs` 已删除；
   - 豁免：`orchestration/` 历史文档（SPEC-*/RUNBOOK-*/ANALYSIS-*/archive/*/escalations 等）+ `docs/` + `adr/` + `CLAUDE.md`/`README.md` 里的 session-liveness 字样保留（记录过去，不影响退役），不在归零范围。
-- [ ] AC2（连带退役）：`monitor-mount-check.sh` / `monitor-mount-check.test.mjs` 一并删除（无对象可查）。
-- [ ] AC3（无悬空引用）：凡引用 SESSION-* 事件 / session-liveness 输出的下游脚本，不得出现「因缺 session-liveness 而恒红/报未挂载」的分支。
-- [ ] AC4（既有不回归）：全量 suite 绿（删测试后 @test-group ratchet / baseline / suite-bucket-reattribution 同步更新）。
-- [ ] AC5（idle-watch 随退役）：`grep -rn "idle-watch\|IDLE_WATCH\|--check-idle-watch\|--ensure-mount-intent" plugin/ packages/ test/ scripts/` 命中数归零（或仅剩「退役说明/未来 driver 替代」注释）；manager 冷启动 checklist 7 键变 5 键（无 IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）；orchestration/ + docs/ 历史文档字样豁免。
+- [x] AC2（连带退役）：`monitor-mount-check.sh` / `monitor-mount-check.test.mjs` 一并删除（无对象可查）。
+- [x] AC3（无悬空引用）：凡引用 SESSION-* 事件 / session-liveness 输出的下游脚本，不得出现「因缺 session-liveness 而恒红/报未挂载」的分支。
+- [x] AC4（既有不回归）：全量 suite 绿（删测试后 @test-group ratchet / baseline / suite-bucket-reattribution 同步更新）。
+- [x] AC5（idle-watch 随退役）：`grep -rn "idle-watch\|IDLE_WATCH\|--check-idle-watch\|--ensure-mount-intent" plugin/ packages/ test/ scripts/` 命中数归零（或仅剩「退役说明/未来 driver 替代」注释）；manager 冷启动 checklist 7 键变 5 键（无 IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）；orchestration/ + docs/ 历史文档字样豁免。
 
 ## Definition of Done
 
@@ -148,6 +148,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/test/accounting-emit.test.mjs
 - plugin/test/adr016-screen-use-check.test.mjs
 - plugin/test/blocked-signal-parameterized.test.mjs
+- plugin/test/cold-start-recovery.test.mjs
 - plugin/test/cold-start-skill.test.mjs
 - plugin/test/direct-to-develop-bypass-check.test.mjs
 - plugin/test/execute-suite-fix-scope-gate.test.mjs
@@ -171,6 +172,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/test/monitor-mount-check.test.mjs
 - plugin/test/observer-registry.test.mjs
 - plugin/test/outer-cron-registry.test.mjs
+- plugin/test/outer-driver.test.mjs
 - plugin/test/outer-loop-tick-split.test.mjs
 - plugin/test/outer-retirement-precondition-check.test.mjs
 - plugin/test/pane-state-classify.test.mjs
@@ -221,6 +223,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/scripts/integration-batch-merge.sh
 - plugin/scripts/manager-adopt.sh
 - plugin/test/manager-productization.test.mjs
+- tasks/gap-ac61-staleness-list-item-disposition.md
 - tasks/gap-retire-session-liveness.md（自身）
 
 ## Needs-Human

@@ -3,7 +3,7 @@
 //
 // THE CLASS (2026-08-06, four independent consumers hit the same shape in one night):
 //   os-anchor-watchdog revived a decommissioned archguard; a git-staleness Monitor kept reporting
-//   REPO-STALL for it; a session-liveness-coverage Monitor reported NOT-WATCHED for a decommissioned
+//   REPO-STALL for it; a retired session-coverage Monitor reported NOT-WATCHED for a decommissioned
 //   B machine; a session-topology Monitor reported a stale cached value after B's tmux server
 //   terminated. Each consumer kept its own target list and had no way to learn a target had been
 //   decommissioned. This test covers the class-level mechanism: ONE registry
@@ -12,11 +12,10 @@
 //
 // Coverage map (task ACs):
 //   AC1 — registry exists and is readable: --list / --list --json report registered targets + status.
-//   AC2 — the 4 known consumers each read the registry instead of their own hardcoded list:
-//         os-anchor-watchdog / git-staleness (session-liveness REPO-STALL surface) /
-//         session-liveness-coverage (session-liveness SESSION-STATUS surface) /
+//   AC2 — the 2 known consumers each read the registry instead of their own hardcoded list:
+//         os-anchor-watchdog /
 //         session-topology (topology-check).
-//   AC3 (load-bearing negative control) — register a target offline, then run all 4 consumers once:
+//   AC3 (load-bearing negative control) — register a target offline, then run all 2 consumers once:
 //         ALL must report "offline", none stale; --audit --json reports stale_observer_reports=0.
 //   AC5 — registration is an explicit write (--register-offline / --register-active), and the
 //         mechanism creates NO system crontab (the audit rides the existing dual-trigger style).
@@ -35,7 +34,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
 const registry = join(repoRoot, "plugin", "scripts", "observer-registry.sh");
 const watchdog = join(repoRoot, "plugin", "scripts", "os-anchor-watchdog.sh");
-const sessionLiveness = join(repoRoot, "plugin", "scripts", "session-liveness.sh");
 const topologyCheck = join(repoRoot, "plugin", "scripts", "topology-check.sh");
 
 function run(script, args, opts = {}) {
@@ -111,20 +109,7 @@ test("AC3 (load-bearing): register a target offline → run all 4 consumers once
     assert.match(wd.stdout, /test-target decommissioned \(offline per observer-registry/);
     assert.doesNotMatch(wd.stdout, /recreate-session|relaunch-outer/, "a decommissioned target is never re-spawned");
 
-    // Consumers 2 & 3 — the session-liveness surface (git-staleness reads REPO-STALL; the
-    // session-liveness-coverage Monitor reads the SESSION-STATUS watch verdict from the same run).
-    // SL_NO_REGISTER=1 keeps this hermetic: --once must not self-register an observer into the
-    // shared <repo>/.quay/ dir (the transient .quay/session-liveness.<pid>.json write that raced
-    // the real resident monitor's file under the concurrent suite — the AC3 flake source).
-    const sl = run(sessionLiveness, ["--once"], {
-      env: { ...env, SL_NO_REGISTER: "1", SESSION_TARGETS: "test-target /tmp/observer-test-root test-sess:outer" },
-    });
-    assert.equal(sl.status, 0, sl.stderr);
-    assert.match(sl.stdout, /SESSION-STATUS test-target decommissioned \(offline per observer-registry\)/);
-    assert.doesNotMatch(sl.stdout, /REPO-STALL test-target/, "git-staleness must NOT report REPO-STALL for a decommissioned target");
-    assert.doesNotMatch(sl.stdout, /SESSION-GONE test-target/, "no GONE event for an intentionally-decommissioned target");
-
-    // Consumer 4 — session-topology: topology-check must say decommissioned, not stale live state.
+    // Consumer 2 — session-topology: topology-check must say decommissioned, not stale live state.
     const tp = run(topologyCheck, ["--session", "test-sess"], { env });
     assert.equal(tp.status, 0, tp.stderr);
     assert.match(tp.stdout, /test-sess decommissioned \(offline per observer-registry/);
@@ -138,7 +123,7 @@ test("AC3 (load-bearing): register a target offline → run all 4 consumers once
     for (const c of audit.consumers) {
       assert.equal(c.stale, false, `consumer ${c.name} must not be stale for an offline target`);
     }
-    assert.equal(audit.consumers.length, 4, "the 4 known consumers are audited");
+    assert.equal(audit.consumers.length, 2, "the 2 known consumers are audited");
   } finally {
     cleanup(dir);
   }
@@ -153,15 +138,6 @@ test("AC2: an ACTIVE target is NOT reported decommissioned by any consumer (no f
     // --is-offline exits 1 for an active/unknown target (the consumers' if-condition is false).
     const io = run(registry, ["--is-offline", "quay"], { env });
     assert.equal(io.status, 1, "active target is not offline");
-
-    // session-liveness must NOT report decommissioned for an active target (it proceeds to the
-    // normal liveness probe; here the fake target has no session, so it reports alive=0 — but it
-    // must not say "decommissioned").
-    const sl = run(sessionLiveness, ["--once"], {
-      env: { ...env, SL_NO_REGISTER: "1", SESSION_TARGETS: "quay /tmp/observer-active-root quay-0:outer" },
-    });
-    assert.equal(sl.status, 0, sl.stderr);
-    assert.doesNotMatch(sl.stdout, /decommissioned/, "active target must not be reported decommissioned");
 
     // topology-check must NOT report decommissioned for an active session.
     const tp = run(topologyCheck, ["--session", "quay-0"], { env });

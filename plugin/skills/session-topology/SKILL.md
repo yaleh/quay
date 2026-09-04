@@ -23,7 +23,7 @@ for the project (0 = first, e.g. `quay-0`, `meta-cc-4`).
 
 | Window | Role | Launched by | Drives | Is driven by | Mounts |
 |---|---|---|---|---|---|
-| `<project>-N:outer` | loop driver | skill-internal launcher `quay-launch.sh` (`claude-deepseek`/`deepseek-v4-flash`, settings-crystallized) | `inner` via send-keys | — | loop monitor (`session-liveness.sh`), 20-min cron, re-anchor, outer tick (`orchestrator-loop-tick.md`) |
+| `<project>-N:outer` | loop driver | skill-internal launcher `quay-launch.sh` (`claude-deepseek`/`deepseek-v4-flash`, settings-crystallized) | `inner` via send-keys | — | 20-min cron, re-anchor, outer tick (`orchestrator-loop-tick.md`) |
 | `<project>-N:inner` | implementation session | skill-internal launcher `quay-launch.sh` (`claude-deepseek`/`deepseek-v4-flash`, settings-crystallized) | — | `outer` (send-keys drive) | its own work product (`.workflow-events/` telemetry), inner tick (`fast-mode-loop-tick.md`) |
 
 Window order: `outer` (window 0), `inner` (1) — matching the live `quay-0` layout.

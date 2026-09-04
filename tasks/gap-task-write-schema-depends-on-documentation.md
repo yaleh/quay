@@ -1,7 +1,7 @@
 ---
 id: gap-task-write-schema-depends-on-documentation
 title: Document task_write MCP depends_on field usage
-status: todo
+status: done
 labels: []
 parent: null
 children: []
@@ -26,25 +26,26 @@ This blocks new users from writing prerequisite task relations through MCP. Inte
 N/A — simple scope permits direct implementation from Proposal
 ## Acceptance Criteria
 
-- [ ] `packages/quay-native/src/mcp-server.ts` task_write comment includes depends_on example
-- [ ] Example: `extra: { depends_on: [dep1, dep2], schema: "v1" }`
-- [ ] CLAUDE.md or new docs/references/ file documents task_write + depends_on usage
-- [ ] `plugin/scripts/task-schema.ts` parseTask() limitation is documented
-- [ ] Code review confirms all documentation is accurate and discoverable
+- [x] `packages/quay-native/src/mcp-server.ts` task_write comment includes depends_on example
+- [x] Example: `extra: { depends_on: [dep1, dep2], schema: "v1" }`
+- [x] CLAUDE.md or new docs/references/ file documents task_write + depends_on usage
+- [x] `plugin/scripts/task-schema.ts` parseTask() limitation is documented
+- [x] Code review confirms all documentation is accurate and discoverable
 
 ## Definition of Done
 
 Standard clauses (inherited; this is docs-only, no new shipped code):
-- [ ] Documentation reviewed for accuracy and completeness
-- [ ] No conflicts with develop branch
-- [ ] Changes committed with proper attribution
-- [ ] Cross-links updated where applicable
-- [ ] No temporary files or debug code left
+- [x] Documentation reviewed for accuracy and completeness
+- [x] No conflicts with develop branch
+- [x] Changes committed with proper attribution
+- [x] Cross-links updated where applicable
+- [x] No temporary files or debug code left
 
 ## Touches
 
 - `packages/quay-native/src/mcp-server.ts`
 - `plugin/scripts/task-schema.ts`
+- `experiments/quay-perpetual-stream/scripts/task-schema.ts` (canonical source; dual-copy mirror of the above)
 - `CLAUDE.md`
 - `tasks/gap-task-write-schema-depends-on-documentation.md` (self)
 ## Needs-Human

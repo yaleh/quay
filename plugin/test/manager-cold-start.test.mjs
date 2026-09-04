@@ -3,13 +3,9 @@
 //
 // Pins the four defects' fixes:
 //
-//   AC2 — manager cold start has a falsifiable checklist (aligned with outer's 7 keys). The
-//         checklist lives in plugin/skills/manager/SKILL.md §6.5; the ## Contract measure is
-//         `grep -c 'observable\|证伪\|判据' plugin/skills/manager/SKILL.md` >= 7.
-//   AC3 — the core's idle-watch criterion points at the REAL mechanism (session-liveness-mount.sh +
-//         Monitor events), never at a `pgrep -af 'idle-watch\.sh'` on a non-existent script.
-//         plugin/loop/manager-tick-core.md A10 names the real mechanism; manager-start.sh writes the
-//         mount intent and provides `--check-idle-watch` (monitor-mount-check + --once seam).
+//   AC2 — manager cold start has a falsifiable checklist (5 keys; the idle-watch observation seam
+//         was retired 2026-09-03 — IDLE-WATCH-MOUNTED / MONITORS-DELIVERING dropped). The checklist
+//         lives in plugin/skills/manager/SKILL.md §6.5.
 //   AC4 — the loop-registry ↔ real cron is externally verifiable: manager-arm-loop.sh gains
 //         `--record-cron <id>` (agent writes the CronCreate receipt after CronList confirms) and
 //         `--verify` (registry-verified exit 0 / registry-only exit 1). A bare sentinel line is no
@@ -34,8 +30,6 @@ const repoRoot = path.resolve(pluginDir, "..");
 
 const MANAGER_START = path.join(pluginDir, "scripts", "manager-start.sh");
 const MANAGER_ARM = path.join(pluginDir, "scripts", "manager-arm-loop.sh");
-const MONITOR_MOUNT_CHECK = path.join(pluginDir, "scripts", "monitor-mount-check.sh");
-const SESSION_LIVENESS = path.join(pluginDir, "scripts", "session-liveness.sh");
 const MANAGER_SKILL = path.join(pluginDir, "skills", "manager", "SKILL.md");
 // The live execution core is the 正本 orchestration/manager-tick-core.md — the shipped
 // plugin/loop/manager-tick-core.md is now a one-line pointer to it (gap-plugin-loop-manager-
@@ -60,8 +54,6 @@ test("AC2 — plugin/skills/manager/SKILL.md carries >= 7 falsifiable-checklist 
   // The checklist is a real section with mechanically-checkable keys.
   for (const key of [
     "HOME-IN-PLACE",
-    "IDLE-WATCH-MOUNTED",
-    "IDLE-WATCH-DELIVERING",
     "CRON-CREATED",
     "REGISTRY-MATCHES",
     "FIRST-TICK-LANDED",
@@ -69,56 +61,6 @@ test("AC2 — plugin/skills/manager/SKILL.md carries >= 7 falsifiable-checklist 
   ]) {
     assert.match(src, new RegExp(key), `manager SKILL.md must carry the ${key} cold-start key`);
   }
-});
-
-// ── AC3 — the core's idle-watch criterion points at the REAL mechanism ───────────────────────────
-
-test("AC3 — manager tick core names the real idle-watch mechanism (session-liveness-mount.sh + Monitor), not idle-watch.sh", () => {
-  const src = fs.readFileSync(TICK_CORE, "utf8");
-  assert.match(src, /session-liveness-mount\.sh/, "the tick core must name the real mount entry");
-  assert.match(src, /monitor-mount-check\.sh/, "the tick core must name the mounted+targetOk check");
-  assert.match(src, /--once/, "the tick core must name the --once delivery seam");
-  assert.match(src, /不是 `?idle-watch\.sh`?|不存在|别再把判据写回/, "the tick core must explicitly reject pgrep'ing a non-existent idle-watch.sh");
-});
-
-test("AC3 — manager-start.sh writes the idle-watch mount intent and dry-runs it", () => {
-  const dry = spawnSync("bash", [MANAGER_START, "--dry-run"], { encoding: "utf8" });
-  assert.equal(dry.status, 0, `dry-run must exit 0:\n${dry.stderr}`);
-  assert.match(dry.stdout, /would-mount-idle-watch/, "dry-run must plan the idle-watch mount step");
-
-  const tmp = makeTmp();
-  try {
-    const home = path.join(tmp, "home");
-    // Hermetic: no real claude, no real tmux on the machine's default server.
-    const env = { ...process.env, MANAGER_LAUNCH_CMD: "bash -c 'exec -a claude-probe sleep 10000 & wait'" };
-    delete env.TMUX;
-    const r = spawnSync("bash", [MANAGER_START, "--home", home], { encoding: "utf8", env });
-    assert.equal(r.status, 0, `manager start must exit 0:\n${r.stdout}\n${r.stderr}`);
-    const intent = path.join(home, "idle-watch-mount.txt");
-    assert.ok(fs.existsSync(intent), "start must write the idle-watch mount intent");
-    const text = fs.readFileSync(intent, "utf8");
-    assert.match(text, /session-liveness-mount\.sh/, "the intent must name the real mount entry");
-    assert.match(text, /Monitor\(/, "the intent must carry the Monitor invocation");
-    assert.match(text, /monitor-mount-check\.sh/, "the intent must carry the mounted+targetOk verification");
-    assert.match(text, /session-liveness\.sh --once/, "the intent must carry the --once delivery seam");
-  } finally { cleanup(tmp); }
-});
-
-test("AC3 — manager-start.sh --check-idle-watch is mechanically executable (two criteria + ok)", () => {
-  // With no resident monitor mounted, the check must report ok:false (mounted=false) — never a
-  // "looks mounted" green. The --once seam is delivery proof and can emit SESSION-STATUS even
-  // without a resident mount, but mounted+targetOk is the necessary first criterion.
-  // MANAGER_MOUNT_CHECK_CMD seam: mock monitor-mount-check as "no mount" so the test is independent
-  // of whether the host actually has a resident monitor (main checkout has one via A2 — a real
-  // mounted monitor would legitimately report ok:true, which the old environment-dependent
-  // assertion misread as a failure).
-  const r = spawnSync("bash", [MANAGER_START, "--check-idle-watch", "--json"], {
-    encoding: "utf8",
-    env: { ...process.env, MANAGER_MOUNT_CHECK_CMD: "bash -c 'echo {\\\"mounted\\\":false,\\\"targetOk\\\":false}'" },
-  });
-  assert.equal(r.status, 1, "check-idle-watch with no mounted monitor must exit 1 (fail-closed)");
-  assert.match(r.stdout, /"mounted":false/, "mounted must be false when no session-liveness resident process exists");
-  assert.match(r.stdout, /"ok":false/, "ok must be false when the idle-watch is not mounted");
 });
 
 // ── AC4 — registry ↔ real cron externally verifiable ─────────────────────────────────────────────

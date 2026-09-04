@@ -83,12 +83,18 @@ export function readD3MinJs() {
  * sibling of QUAY_BUILD_DIST_ENTRY — lets a test build into its own temp dir
  * instead of the shared packages/quay/dist/quay.js), then dist/quay.js.
  * Throws (loudly, non-zero when run as a script) on any esbuild failure or a
- * reported-success-but-missing outfile.
+ * reported-success-but-missing outfile. `logLevel` (default "info") is forwarded
+ * to esbuild.build(); the failure-path negative-control test passes "silent" so
+ * esbuild's `✘ [ERROR] Could not resolve …` never reaches the process stderr —
+ * that benign noise is line-content-indistinguishable from a REAL build failure
+ * and pollutes worker-driver's extractFailureSummary reason
+ * (gap-scoped-gate-m120-negative-control-false-positive).
  * @returns the absolute path of the written bundle.
  */
 export async function buildDist(opts = {}) {
   const entry = opts.entry ?? process.env.QUAY_BUILD_DIST_ENTRY ?? DEFAULT_ENTRY;
   const outfile = opts.outfile ?? process.env.QUAY_BUILD_DIST_OUTFILE ?? DEFAULT_OUTFILE;
+  const logLevel = opts.logLevel ?? "info";
 
   let result;
   try {
@@ -105,10 +111,13 @@ export async function buildDist(opts = {}) {
       // dist/quay.js is truly self-contained (runs standalone with no package.json beside it).
       loader: { ".json": "json" },
       banner: { js: buildBanner() },
-      logLevel: "info",
+      logLevel,
     });
   } catch (err) {
-    console.error("esbuild.build() threw:", err);
+    // ⛔ "silent" must also silence the catch-block console.error — esbuild's `logLevel:"silent"`
+    // already suppresses its own `✘ [ERROR]` fd-2 write, but this console.error would still leak
+    // the rejection text to stderr (gap-scoped-gate-m120-negative-control-false-positive).
+    if (logLevel !== "silent") console.error("esbuild.build() threw:", err);
     throw err;
   }
 

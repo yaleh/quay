@@ -296,6 +296,7 @@ Key cross-cutting facts (require reading several files to see):
 - `docs/proposals/exp5-crystallization-strategy.md` — the current "molten prose → executable single-source" direction (canonical task schema, formalized prompt-doc style).
 - `adr/ADR-*.md` — first-class decision records (`quay-native adr list`). ADR-004..010 (status: proposed) crystallize the GIT-lens program; read them before extending it.
 - `docs/references/` — the GIT framework (goal-closure `L_T..L_S`, 硬形变/Π_{S→E}, two-phase breathing) AND its limits: the continuous math (Fisher/natural-gradient/intrinsic-dim/ρ) is NOT rigor (ADR-006).
+- `docs/references/task-schema-canonical.md` — canonical task frontmatter schema (readable view of `plugin/scripts/task-schema.ts`): `depends_on` top-level vs legacy `extra: { depends_on: [...] }`, and `task_write` usage.
 
 ## Tools
 

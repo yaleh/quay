@@ -32,7 +32,6 @@
 VERIFY_SET=(
   "capability-catalog-json|sh|capability-catalog.sh|--json"
   "capability-catalog-entry-surface|sh|capability-catalog.sh|--entry-surface"
-  "monitor-mount-check|sh|monitor-mount-check.sh|"
   "closure-lag-check|sh|closure-lag-check.sh|--root @WS@"
   "ready-pool-check|js|dist/ready-pool-check.js|--root @WS@ --cap 5"
   "slot-refill|js|dist/slot-refill.js|--root @WS@ --cap 5"

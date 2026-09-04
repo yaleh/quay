@@ -1189,7 +1189,7 @@ run_selected() {
       }
       # Shared suite-tail (same as the legacy path below): the tmux-leak-scan is a PER-ROUND checker,
       # and the single-flight slot must release before exit.
-      node --experimental-strip-types "${repo_root}/plugin/scripts/session-liveness-sweep-kill.mjs" || true
+      node --experimental-strip-types "${repo_root}/plugin/scripts/run-namespace-sweep-kill.mjs" || true
       if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
         code=1
       fi
@@ -1365,7 +1365,7 @@ run_selected() {
     # TEMPORARILY ABSENT while disabled; the tmux-leak-scan below still catches the tmux leak class.
     # Suite-AFTER assertion, DELTA form (AC1, gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause):
     # a FULL SUITE must leave no test-characteristic tmux server or /tmp dir behind (skv- /
-    # session-liveness- / ol-tok- / enter-repro- prefixes). Delta: only items absent from the
+    # ol-tok- / enter-repro- prefixes). Delta: only items absent from the
     # before-run snapshot are this run's leak. Second line of defense — the teardown fix
     # (kill-session, never kill-server) is primary; this covers the whole leak class at once.
     # Same flip-only-a-passing-run semantics as assert-clean-tree above.
@@ -1381,13 +1381,13 @@ run_selected() {
     # them to clear before declaring a leak, so test-spawned tmux servers still exiting at run end
     # (round 95 false-red: tests=4150 all pass) are not swept as residue. A genuine leak persists
     # past the bound and still fails. A clean run adds zero latency (first scan wins immediately).
-    # TRUE-CATCH-ALL registry kill (gap-session-liveness-teardown-ol-scd-cf-leak): BEFORE the suite-tail
-    # leak scan, kill any STILL-ALIVE server the session-liveness family registered durably. Closes the
+    # TRUE-CATCH-ALL registry kill (teardown-ol-scd-cf-leak): BEFORE the suite-tail
+    # leak scan, kill any STILL-ALIVE server the tests registered durably. Closes the
     # process-crash / cancelled-test hole — a test process that died before its after() hook can never
     # clean its server, but the durable registry (written at server-creation) survives. Registry-driven
     # (PID-targeted SIGKILL of servers the tests self-built), NEVER a name-based batch kill (invariant
     # no_pkill_by_name_on_live = 1). Best-effort (exit 0 always) — the leak-scan is the assertion.
-    node --experimental-strip-types "${repo_root}/plugin/scripts/session-liveness-sweep-kill.mjs" || true
+    node --experimental-strip-types "${repo_root}/plugin/scripts/run-namespace-sweep-kill.mjs" || true
     if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
       code=1
     fi
@@ -1466,19 +1466,25 @@ if [ "${1:-}" = "--list-groups" ]; then
 elif [ "${1:-}" = "--list-files" ]; then
   # Metadata mode (test support / AC6) — print the selected file list, one per line. Respects
   # --group if given; else the DEFAULT RUN's full selection = the product,engine body PLUS the
-  # lowconc phase files — a default `bash scripts/test.sh` executes BOTH (the concurrent body,
-  # then the serial phase, then the lowconc phase), so no-args --list-files reports the full
-  # reachable surface and keeps the
-  # runner-grouping AC3 invariant (`--list-files count + serial == --list-groups total`) and the
+  # serial phase PLUS the lowconc phase files — a default `bash scripts/test.sh` executes ALL THREE
+  # (the concurrent body, then the serial phase, then the lowconc phase), so no-args --list-files
+  # reports the FULL reachable surface (all four groups, == --list-groups total) and keeps the
   # test-coverage-check AC5 canonical-coverage invariant. A serial/lowconc file is NOT in the
-  # default GROUP SET; it is in the default RUN (its own phase) — hence
-  # `--group product,engine --list-files` differs from no-args unless lowconc is named
-  # (runner-grouping AC6 pins `--group product,engine,lowconc --list-files == no-args --list-files`).
+  # default GROUP SET (product,engine); it is in the default RUN (its own phase) — hence
+  # `--group product,engine --list-files` differs from no-args unless serial AND lowconc are named
+  # (runner-grouping AC6 pins `--group product,engine,serial,lowconc --list-files == no-args
+  # --list-files`).
+  # gap-test-file-snapshot-worktree-drops-realinstall: the serial phase was previously OMITTED from
+  # no-args --list-files, so a tracked test file whose @test-group changed product→serial read as
+  # "REMOVED" to test-file-snapshot (its canonical set is this no-args --list-files) — a FALSE
+  # regression, and worse, serial files were never protected from real deletion. no-args --list-files
+  # is the SINGLE canonical test-file set; it must equal the full deduped glob, never a group subset.
   check_group_declarations
   if [ -n "${groups}" ]; then
     build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "$groups"
   else
     build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "$(effective_groups)"
+    build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "serial"
     build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "lowconc"
   fi
   exit 0
@@ -1695,7 +1701,7 @@ elif [ "${1:-}" = "--buckets" ]; then
   run_static_checks
   build_dist_once
   # Suite-tail leak scan on the bucket path (gap-bucket-subset-tmux-leak-scan-missing): the
-  # tmux-leak-scan --snapshot/--check delta pair + session-liveness-sweep-kill is a PER-ROUND
+  # tmux-leak-scan --snapshot/--check delta pair + run-namespace-sweep-kill is a PER-ROUND
   # checker, NOT 全量专属 — a bucket subset that skips it drops the checker from every-round to
   # never-run (降频 violation). Snapshot failure is non-fatal (the absolute --check still runs).
   # --sweep FIRST (gap-tmux-leak-scan-sweep-orphaned-servers): cure historical SIGKILL orphans
@@ -1747,7 +1753,7 @@ elif [ "${1:-}" = "--buckets" ]; then
         "${rest_args[@]}"
     bucket_code=$?
     # Same suite-AFTER tail as the legacy bucket path below (leak scan + fs-trace collect).
-    node --experimental-strip-types "${repo_root}/plugin/scripts/session-liveness-sweep-kill.mjs" || true
+    node --experimental-strip-types "${repo_root}/plugin/scripts/run-namespace-sweep-kill.mjs" || true
     if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
       bucket_code=1
     fi
@@ -1824,10 +1830,10 @@ elif [ "${1:-}" = "--buckets" ]; then
     _bmcode=$?
     [ "$_bmcode" -eq 0 ] || bucket_code="$_bmcode"
   fi
-  # Same suite-AFTER tail as the full default path: session-liveness-sweep-kill is the best-effort
+  # Same suite-AFTER tail as the full default path: run-namespace-sweep-kill is the best-effort
   # TRUE-CATCH-ALL registry kill (exit 0 always); the --check assertion is the leak verdict and
   # merges into the exit code so a bucket-round leak still reports `tmux-leak-scan: FAIL`.
-  node --experimental-strip-types "${repo_root}/plugin/scripts/session-liveness-sweep-kill.mjs" || true
+  node --experimental-strip-types "${repo_root}/plugin/scripts/run-namespace-sweep-kill.mjs" || true
   if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
     bucket_code=1
   fi

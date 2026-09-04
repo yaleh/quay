@@ -207,6 +207,8 @@ export function appendBodySection(fullText, heading, content) {
 // Supported `extra` structures: scalar values AND nested lists/maps (e.g. `extra.depends_on: [a, b]`,
 // `extra.meta: { k: v }`). Nested structures round-trip faithfully as arrays/objects — never flattened
 // to scalar strings (gap-parseTask-nested-extra-support).
+// Limitation: parseTask projects only { labels, extra } — it does NOT expose `depends_on`. Call
+// readDependsOn() (below) for the prerequisite edge; both delegate to the same single parser.
 export function parseTask(fullText) {
   const fmMatch = fullText.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!fmMatch) {

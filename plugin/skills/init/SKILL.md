@@ -74,10 +74,9 @@ mechanically by quay-init's `verify-referenced-landed` (see below).
 | `loop/orchestrator-tick-core.md` | `orchestration/orchestrator-tick-core.md` (byte-identical, no substitution; the ≤80-line outer exec core — `gap-ac37-exec-core-ships-with-package`) |
 | `loop/fast-mode-tick-core.md` | `orchestration/fast-mode-tick-core.md` (以 orchestration/ 本为正本；plugin/loop/ 为 quay-init --loop 铺出模板——引用目标 docs/analysis 源，非 byte-identical，两副本承担不同角色；正本改动后由 inner 按正本语义落地副本) |
 | `loop/manager-tick-core.md` | `orchestration/manager-tick-core.md` — **opt-in**: laid only with `--manager` (human ruling 2026-08-10: the typical path is two-layer, outer + inner), NOT in the default `--loop` set |
-| `scripts/*` referenced by a shipped skill/tick doc (e.g. `fast-mode-telemetry.ts`, `monitor-mount-check.sh`, `send-keys-reliable.sh`, `session-liveness-mount.sh`, `ready-pool-check.ts`, `read-probe-spec.ts`, `task-schema-check.ts`, `quay-launch.sh`, `quay-topology.sh`, `topology-check.sh`, …) | `plugin/scripts/` |
+| `scripts/*` referenced by a shipped skill/tick doc (e.g. `fast-mode-telemetry.ts`, `send-keys-reliable.sh`, `ready-pool-check.ts`, `read-probe-spec.ts`, `task-schema-check.ts`, `quay-launch.sh`, `quay-topology.sh`, `topology-check.sh`, …) | `plugin/scripts/` |
 | `scripts/` bare-name mechanism files the docs call without a `plugin/scripts/` prefix (`inner-idle-log.ts`, `it0-split-or-commit-check.ts`, `pipe-exit-code-check.sh`; `heavy-op-token.sh` was retired 2026-08-06) | `plugin/scripts/` |
 | `scripts/gate-script-base.ts`, `workflow-event-schema.mjs`, `task-schema.ts`, `touches-parser.ts`, `wiring-coverage-check.ts` (transitive deps of the checkers — the laid-down mechanism must be functional) | `plugin/scripts/` |
-| `scripts/session-liveness.sh` (the ONE observer; `inner-state.sh` is retired and NOT laid down) | `plugin/scripts/` |
 | `.claude/launch.settings.json` (default launch template — the consumer edits model/env per project; `quay-launch.sh` materializes it, so a cold-started target's launcher does NOT fail closed; `gap-quay-init-coldstart-usability-launch-not-used-...` F4) | `.claude/launch.settings.json` |
 
 ## Loop install: local-state files (self-create) and quay reference docs
@@ -108,7 +107,7 @@ not count them as missing:
 | `orchestration/escalations.md` | `touch orchestration/escalations.md` (outer tick appends) |
 | `docs/analysis/batch2-queue-state.md` | `touch docs/analysis/batch2-queue-state.md` (inner tick writes queue state) |
 | `docs/analysis/contract-violations.md` | `touch docs/analysis/contract-violations.md` (task-contract-check.ts writes) |
-| `orchestration/session-liveness.env` | `write_session_env` in quay-init `--loop` (SESSION_TMUX_SESSION per project; referenced by the laid orchestrator-loop-tick.md + session-liveness.sh — declared self-create so referenced ⊆ landed holds) |
+| `orchestration/session-liveness.env` | `write_session_env` in quay-init `--loop` (SESSION_TMUX_SESSION per project; referenced by the laid orchestrator-loop-tick.md — declared self-create so referenced ⊆ landed holds) |
 
 **Quay-specific reference docs — referenced by the tick template but not loop deliverables.**
 The shipped tick template is quay-flavored prose and references quay's own experiment/analysis docs
@@ -168,6 +167,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-instruments-behind-one-entry.md -->
 <!-- reference-doc: orchestration/manager-phase-goal.md -->
 <!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
+<!-- reference-doc: orchestration/SPEC-tmux-retirement-2026-09-03.md -->
 <!-- reference-doc: orchestration/SPEC-methodology-layer-architecture-2026-08-25.md -->
 <!-- reference-doc: orchestration/SPEC-checker-mechanical-spine-contract-2026-08-28.md -->
 <!-- reference-doc: orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md -->
@@ -207,6 +207,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md -->
 <!-- reference-doc: orchestration/SPEC-fan-in-workflow-lock-and-S1-2026-08-26.md -->
 <!-- reference-doc: orchestration/SPEC-fan-in-driver-mechanical-orchestration-2026-08-27.md -->
+<!-- reference-doc: orchestration/SPEC-tmux-retirement-2026-09-03.md -->
 
 ## Behavior
 
@@ -290,8 +291,6 @@ This is a WARNING, not a block — the copy proceeds regardless.
 ### 6. Next step: cold start
 
 After `--loop` lays down the mechanism, the workspace is READY for the cold-start skill
-(`/quay:cold-start`): one command that mounts the loop monitor (session-liveness.sh — the ONE
-observer; inner-state.sh is retired, gap-retire-inner-state-one-observer-targets-by-parameter) via
-the Monitor tool, re-creates the 20-minute outer cron, drives the inner session to start fast mode,
-and asserts a real `--task-start` telemetry record in `.workflow-events/`.
+(`/quay:cold-start`): one command that re-creates the 20-minute outer cron, drives the inner session
+to start fast mode, and asserts a real `--task-start` telemetry record in `.workflow-events/`.
 The inner start is DRIVEN there, never assumed as a side effect.

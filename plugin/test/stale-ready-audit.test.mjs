@@ -110,6 +110,9 @@ test("(b) bypassComplete — recently-done task WITHOUT a complete-pass GateEven
 test("(b) bypassComplete — old done mtime (>6h) is NOT flagged; --done-within-hours widens/narrows the window", async () => {
   const root = makeRoot();
   try {
+    // Present-but-empty gate log ⇒ readable (gateLogReadable:true) so the WINDOW behaviour (not the
+    // readability gate) is what this test exercises.
+    fs.writeFileSync(path.join(root, ".quay", "gate-events.jsonl"), "", "utf8");
     writeTask(root, "gap-done-old", { status: "done", extra: "## Evidence\nflipped long ago, before the audit window" });
     const old = path.join(root, "tasks", "gap-done-old.md");
     const tenDaysAgo = new Date(Date.now() - 10 * 24 * 3600 * 1000);
@@ -132,6 +135,37 @@ test("(b) bypassComplete — old done mtime (>6h) is NOT flagged; --done-within-
       ["gap-done-3h"],
       "3h-old at a 24h window IS flagged (window override works)",
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("(b) bypassComplete three-state — unreadable gate log ⇒ gateLogReadable:false + NOT-EVALUATED (never masquerades as clean)", async () => {
+  const root = makeRoot();
+  try {
+    // Recently-done task but NO .quay/gate-events.jsonl ⇒ the bypass check cannot evaluate. It must
+    // NOT fabricate a "0 clean" (硬规则 3b: 读不到 ≠ 无问题).
+    writeTask(root, "gap-done-nogatelog", { status: "done", extra: "## Evidence\ncompleted via direct status write, gate log missing" });
+    const r = await runAudit(root);
+    assert.equal(r.gateLogReadable, false, "absent gate log ⇒ gateLogReadable:false");
+    assert.equal(r.bypassComplete.length, 0, "NOT-EVALUATED must not fabricate bypass candidates");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("(b) bypassComplete three-state — readable gate log distinguishes clean (0) from bypass (N)", async () => {
+  const root = makeRoot();
+  try {
+    writeTask(root, "gap-done-proper", { status: "done", extra: "## Evidence\ncompleted via loop-complete-task" });
+    writeTask(root, "gap-done-bypass", { status: "done", extra: "## Evidence\ncompleted via direct status write" });
+    fs.writeFileSync(
+      path.join(root, ".quay", "gate-events.jsonl"),
+      `{"id":"e1","pipeline_id":"gap-done-proper","gate":"complete","verdict":"pass","timestamp":"2026-08-12T10:00:00Z","payload":{"from":"ready","to":"done"}}\n`,
+    );
+    const r = await runAudit(root);
+    assert.equal(r.gateLogReadable, true, "present gate log ⇒ gateLogReadable:true");
+    assert.deepEqual(r.bypassComplete.map((s) => s.id), ["gap-done-bypass"], "only the done task without a complete event is a bypass candidate");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

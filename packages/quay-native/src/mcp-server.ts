@@ -134,6 +134,8 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
         // It is stored top-level (mirroring `children`), and read back by readDependsOn()/parseTask()/
         // store.parse() through the single frontmatter parser. Legacy `extra: { depends_on: [...] }`
         // remains readable for backward compatibility.
+        //   canonical (new writes):   depends_on: ["dep1", "dep2"]
+        //   legacy (still readable):  extra: { depends_on: [dep1, dep2], schema: "v1" }
         depends_on: z.array(z.string()).optional(),
         body: z.string().optional(),
         // QN-007: `extra` (design §7.1's "escape hatch for backend-specific
