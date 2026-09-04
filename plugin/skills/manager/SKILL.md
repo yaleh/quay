@@ -195,6 +195,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md` — fan-in 改为「无锁段自测 + 锁内 ff-merge」：subagent 在 merge 前把 develop 最新变更 merge 回自己 worktree 并跑 suite，最后 ff merge 回 develop（单独 merge 锁，只包 ff，持锁期间唯一动作是 ff merge，成功/失败即解锁）；AC62–AC64
 - `orchestration/SPEC-fan-in-workflow-lock-and-S1-2026-08-26.md` — fan-in workflow 锁 + S=1：把 merge 锁从毫秒级 ff 扩大到整个 fan-in（merge→suite→ff）使 develop 不前进、ff 结构上不输，S 改 1（fan-in 锁串行化 suite）；修订 AC4 + 两锁固定顺序 + driver 看门狗；与语义 subagent 的 ff-race-loss 二选一（proposal·待 outer 立案、待人裁定排期）
 - `orchestration/SPEC-fan-in-driver-mechanical-orchestration-2026-08-27.md` — fan-in 机械编排：取消 fan-in workflow 子代理、机械部分（锁/merge/判定/typecheck/scoped门/suite/ff）交 driver、语义部分（冲突/红 suite/typecheck 红/anti-drift 越界）单独 Claude 会话；suite 不再 detach、fan-in 锁机械包裹 suite 锁；取代 S=1 workflow 锁的解法（保留其诊断），锁时长从模型 30min 塌缩到机械 ~10min（proposal·待 outer 立案、待人裁定排期）
+- `orchestration/SPEC-tmux-retirement-2026-09-03.md` — tmux 机制退役（先退 tmux 机制本身、outer 会话留待之后；驱动/观测另一 Claude Code 会话从 tmux send-keys/capture-pane 迁移到 background job session 模型）
 
 Cross-references:
 - `orchestration/REVIEW-cadence.md` — the daily-review cadence mechanism (this skill's cadence hook)

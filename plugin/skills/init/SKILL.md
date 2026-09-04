@@ -207,6 +207,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md -->
 <!-- reference-doc: orchestration/SPEC-fan-in-workflow-lock-and-S1-2026-08-26.md -->
 <!-- reference-doc: orchestration/SPEC-fan-in-driver-mechanical-orchestration-2026-08-27.md -->
+<!-- reference-doc: orchestration/SPEC-tmux-retirement-2026-09-03.md -->
 
 ## Behavior
 
