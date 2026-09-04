@@ -1,7 +1,7 @@
 ---
 id: gap-archguard-p4-guard-lineage-declaration-and-registry
 title: 落地 P4 守卫谱系（guard-lineage-check.ts）——头部声明块 + verdict 记录流，165 个守卫中今天 0% 已声明守卫对象
-status: ready
+status: done
 labels:
   - gap
 parent: null
