@@ -44,15 +44,19 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：Plan 第 4 步「活跃引用清单」内文件，`grep -E "session-liveness|hermetic-tmux\.sh|hermetic-tmux-mount-check\.sh"` 命中归零，打印命中行；`hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh` 是误引入的重命名悬空引用，一并删除（`plugin/test/helpers/hermetic-tmux.mjs` 不在本范围）；orchestration/ 历史文档（SPEC/RUNBOOK/ANALYSIS/archive 等）保留历史，不在归零范围。
+- [ ] AC1（能取假）：session-liveness 的【实现/调用/测试】已清理，历史文档字样豁免：
+  - 实现：`session-liveness.sh` / `session-liveness-mount.sh` / `monitor-mount-check.sh` 已删除；
+  - 调用：`plugin/scripts/`、`packages/`、`test/`、`scripts/`、`.claude/workflows/` 里对上述脚本的调用已移除（`grep -rn "session-liveness\.sh\|session-liveness-mount\.sh\|monitor-mount-check" plugin/scripts/ packages/ test/ scripts/ .claude/workflows/` 归零，打印命中行）；`hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh` 误引入的重命名悬空引用一并删除（`plugin/test/helpers/hermetic-tmux.mjs` 不在本范围）；
+  - 测试：22 个 `session-liveness-*.test.mjs` + `monitor-mount-check.test.mjs` 已删除；
+  - 豁免：`orchestration/` 历史文档（SPEC-*/RUNBOOK-*/ANALYSIS-*/archive/*/escalations 等）+ `docs/` + `adr/` + `CLAUDE.md`/`README.md` 里的 session-liveness 字样保留（记录过去，不影响退役），不在归零范围。
 - [ ] AC2（连带退役）：`monitor-mount-check.sh` / `monitor-mount-check.test.mjs` 一并删除（无对象可查）。
 - [ ] AC3（无悬空引用）：凡引用 SESSION-* 事件 / session-liveness 输出的下游脚本，不得出现「因缺 session-liveness 而恒红/报未挂载」的分支。
 - [ ] AC4（既有不回归）：全量 suite 绿（删测试后 @test-group ratchet / baseline / suite-bucket-reattribution 同步更新）。
-- [ ] AC5（idle-watch 随退役）：`grep -rn "idle-watch\|IDLE_WATCH\|--check-idle-watch\|--ensure-mount-intent" plugin/ packages/ orchestration/` 命中数归零（或仅剩「退役说明/未来 driver 替代」注释）；manager 冷启动 checklist 7 键变 5 键（无 IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）。
+- [ ] AC5（idle-watch 随退役）：`grep -rn "idle-watch\|IDLE_WATCH\|--check-idle-watch\|--ensure-mount-intent" plugin/ packages/ test/ scripts/` 命中数归零（或仅剩「退役说明/未来 driver 替代」注释）；manager 冷启动 checklist 7 键变 5 键（无 IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）；orchestration/ + docs/ 历史文档字样豁免。
 
 ## Definition of Done
 
-session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 全部删除；147 个文件里的 session-liveness 引用归零；下游无「因缺 session-liveness 恒红」的悬空分支；全量 suite 绿并可 `git show develop:` 核验删除落地。
+session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 全部删除；活跃引用（plugin/scripts/、packages/、test/、scripts/、.claude/workflows/）里的 session-liveness 调用归零；下游无「因缺 session-liveness 恒红」的悬空分支；全量 suite 绿并可 `git show develop:` 核验删除落地；orchestration/ + docs/ 历史文档字样豁免（不要求归零）。
 
 ## Touches
 
