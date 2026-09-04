@@ -346,11 +346,13 @@ export function parseTestCounts(suiteLog) {
 // full-suite-runner.ts (perFile ← measure-trend-check.parsePerFileLines, the shared parser + the same
 // normalizePerFileKey; ceiling/floor_ms ← the same ^__CEILING__ regex at full-suite-runner.ts:2630).
 
-/** Parse the reporter's `__PERFILE__` lines from the suite log into {file,durationMs,passed}[] — the
- *  SAME parser full-suite-runner uses (measure-trend-check.parsePerFileLines handles the
+/** Parse the reporter's `__PERFILE__` lines from the suite log into {file,durationMs,passed,cpuMs?}[] —
+ *  the SAME parser full-suite-runner uses (measure-trend-check.parsePerFileLines handles the
  *  `__FANIN_SUITE_START__` current-round slice + normalizePerFileKey + duration>0 filter internally, so
- *  the two carriers share one 口径 — no regex re-implemented). Returns [] when the log is
- *  absent/unreadable or carries no per-file lines (never a fabricated array — the field stays ABSENT). */
+ *  the two carriers share one 口径 — no regex re-implemented). Each record carries `cpuMs`
+ *  (gap-perfile-cpu-cost-collection — the file's OWN process.cpuUsage() ms) when the `__PERFILE__` line
+ *  carried `cpu_ms=`, absent on legacy lines (缺键 ≠ 0). Returns [] when the log is absent/unreadable or
+ *  carries no per-file lines (never a fabricated array — the field stays ABSENT). */
 export function parsePerFile(suiteLog) {
   if (!suiteLog) return [];
   let text;

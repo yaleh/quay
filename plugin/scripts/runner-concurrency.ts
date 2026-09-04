@@ -13,9 +13,9 @@
 // unchanged.
 
 import os from "node:os";
-import { execFileSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { suiteLockSlotCount } from "./suite-lock-slots.ts";
+import { mainCheckoutRoot } from "./repo-root.ts";
 
 /**
  * QUAY_MAX_CONCURRENT_SUITES — knob ② (旋钮②) of the 人 2026-08-13 框架: the concurrent full-suite
@@ -178,30 +178,19 @@ export function bucketTestConcurrency(args: string[]): number {
 
 /**
  * deriveMainRoot — the DIRECT-path main_root derivation (gap-gitignored-carriers-absent-in-verify-worktree
- * + gap-fan-in-worktree-quay-provisioning). QUAY_MAIN_CHECKOUT (empty-as-unset) → repoRoot; then the
- * git-derived FIRST `git worktree list --porcelain` worktree is ALWAYS preferred when it differs from
- * repoRoot (full-suite-runner.ts launches with `--root <worktree>` and sets QUAY_MAIN_CHECKOUT to the
- * WORKTREE, whose project-dir slug has no session transcripts ⇒ a false "fan-in-without-workflow" RED —
- * the git primary checkout is authoritative). Reads the FULL porcelain stream (never an early-exit awk)
- * so no SIGPIPE/EPIPE; a non-git / non-worktree cwd keeps repoRoot (fail-open, never aborts the suite).
+ * + gap-fan-in-worktree-quay-provisioning). QUAY_MAIN_CHECKOUT (empty-as-unset) → repoRoot; the
+ * git-derived main checkout is preferred when it differs from repoRoot (full-suite-runner.ts launches
+ * with `--root <worktree>` and sets QUAY_MAIN_CHECKOUT to the WORKTREE, whose project-dir slug has no
+ * session transcripts ⇒ a false "fan-in-without-workflow" RED — the git primary checkout is
+ * authoritative). The derivation is ORDER-INDEPENDENT: shared with the other two sites via
+ * repo-root.ts `mainCheckoutRoot()` (`git rev-parse --git-common-dir`), NOT the first
+ * `git worktree list --porcelain` entry — that list's order does NOT guarantee the main working tree
+ * first. A non-git / non-worktree cwd keeps repoRoot (fail-open, never aborts the suite).
  */
 export function deriveMainRoot(repoRoot: string): string {
-  let mainRoot = envValOr("QUAY_MAIN_CHECKOUT", repoRoot);
-  let derived = "";
-  try {
-    // stdio stderr→ignore matches the bash `git worktree list --porcelain 2>/dev/null` (a non-git cwd
-    // must not print git's "fatal: not a git repository" to the suite stream — it just keeps repoRoot).
-    const out = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    for (const line of out.split("\n")) {
-      if (line.startsWith("worktree ")) {
-        derived = line.slice("worktree ".length);
-        break;
-      }
-    }
-  } catch {
-    derived = "";
-  }
-  if (derived !== "" && derived !== repoRoot) mainRoot = derived;
+  const mainRoot = envValOr("QUAY_MAIN_CHECKOUT", repoRoot);
+  const derived = mainCheckoutRoot(repoRoot);
+  if (derived !== "" && derived !== repoRoot) return derived;
   return mainRoot;
 }
 

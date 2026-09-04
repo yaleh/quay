@@ -46,6 +46,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
+// Layer 0 · 主检出推导（order-independent，gap-main-checkout-root-derivation-recurs-three-sites）。
+import { mainCheckoutRoot } from "./repo-root.ts";
 // Layer 1a · filters（AC152 单一实现：可组合谓词列表，两 driver 共用）。
 import { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTaskStatus } from "./driver-filters.ts";
 // Layer 0 · ResultVocab + verify（AC153 单一实现：核心不变式 + 词表强制含 not-evaluated）。
@@ -266,21 +268,13 @@ export function kernelSelfPath(): string {
 // 常驻 supervisor 不得由生命周期短于它的对象（worktree）承载：若 --root 落在 git worktree 内，把 root
 // 规范化到 primary worktree（主检出）。git 不可用 / 非 git 仓库 / 解析失败 ⇒ 原样返回 root。
 
-/** 把 --root 规范化到主检出（`git worktree list --porcelain` 首个 worktree 行）。 */
+/** 把 --root 规范化到主检出（order-independent：`git rev-parse --git-common-dir` 的父目录，经
+ *  repo-root.ts `mainCheckoutRoot` 共享——⛔ 不用 `git worktree list --porcelain` 首个 worktree 行，
+ *  该列表顺序不保证主检出在前）。 */
 export function resolveMainRoot(root: string): string {
-  try {
-    const r = spawnSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8" });
-    if (r.status !== 0 || r.error) return root;
-    for (const line of String(r.stdout ?? "").split("\n")) {
-      if (line.startsWith("worktree ")) {
-        const p = line.slice("worktree ".length).trim();
-        if (p && fs.existsSync(p)) return p;
-      }
-    }
-    return root;
-  } catch {
-    return root;
-  }
+  const main = mainCheckoutRoot(root);
+  if (main && fs.existsSync(main)) return main;
+  return root;
 }
 
 // ── Layer 0 · 载体观测（carrierStats，AC139-3 / AC138-3）──────────────────────────────────────────
