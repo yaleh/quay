@@ -15,11 +15,11 @@ extra:
 §1.4/Layer 3b）：① user scope 安装 quay ② 手动启动 Claude Code 会话 ③ 会话内调用 skill 初始化
 quay ④ 会话内调用 skill 启动 drivers + web server ⑤ 会话内调用 skill 启动 manager（④⑤可合一）。
 
-第③步已有正例——`plugin/skills/init/SKILL.md`（`quay-init.sh` 委托，会话内调用，幂等）。
-第④步是**纯粹的缺口**：`find plugin/skills -iname "*driver*"` 只命中 `loop-driver`（inner
-tick 循环逻辑文档，不是"启动 driver 进程"的机制），没有任何 skill 会调
-`quay driver start --kind promotion` / `quay driver start --kind worker` / `quay serve`——
-目前唯一入口是人手动敲 CLI 命令。
+第③步已有正例——`plugin/skills/init/SKILL.md`（`quay-init.sh` 委托，会话内调用，幂等），
+本任务不改动它,只作为设计参照。第④步是**纯粹的缺口**：`find plugin/skills -iname "*driver*"`
+只命中 `loop-driver`（inner tick 循环逻辑文档，不是"启动 driver 进程"的机制），没有任何
+skill 会调 `quay driver start --kind promotion` / `quay driver start --kind worker` /
+`quay serve`——目前唯一入口是人手动敲 CLI 命令。
 
 这是本 SPEC Layer 3b 判断的三个 skill 缺口（③已有/④本任务/⑤见另一任务）里**工作量最小的
 一个**：不涉及"变身"这类身份切换语义（不像 manager 那样需要会话开始按一套行为规范持续行事），
@@ -27,6 +27,10 @@ tick 循环逻辑文档，不是"启动 driver 进程"的机制），没有任�
 ["start","stop","drain","resume","status","restart"]`、`packages/quay/bin/quay.ts` 的
 `serve` 分发）包装成一次会话内调用，且要幂等（重复调用不应重复启动/报错，参照 `init` skill
 的幂等设计）。
+
+**新 skill 落点**：`plugin/skills/drivers/SKILL.md`（新目录，与 `init`/`manager`/`execute`
+同级命名风格；确认此前无 `plugin/skills/drivers/` 目录，不与已有的 `loop-driver` 混淆——
+后者是 inner tick 循环的行为文档，不是启动进程的机制）。
 
 **需要覆盖的具体命令（2026-09-04 实测 `quay driver --help`）**：
 ```
@@ -44,10 +48,9 @@ halt with resume first"、"Starting from a git worktree is REJECTED — 必须�
 
 ## AC
 
-- [ ] 新增 skill 文件存在（候选路径 `plugin/skills/<name>/SKILL.md`，具体命名在实现时确定，
-      需与现有 skill 目录命名风格一致，如 `drivers`/`start-drivers` 等，不与 `loop-driver`
-      混淆）——该 skill 在会话内调用后，`quay driver status --kind promotion` 与
-      `quay driver status --kind worker` 均报告 `alive: true`（或已有等价日志证明其已启动）
+- [ ] `plugin/skills/drivers/SKILL.md` 存在——该 skill 在会话内调用后，
+      `quay driver status --kind promotion` 与 `quay driver status --kind worker` 均报告
+      `alive: true`（或已有等价日志证明其已启动）
 - [ ] `quay serve` 已被同一 skill（或该 skill 明确文档化的配套调用）覆盖，调用后可通过
       `curl -sf http://<host>:<port>/` 或等价探针确认 web server 已监听
 - [ ] 幂等性验证：对同一 workspace 连续调用两次该 skill，第二次调用不产生"重复启动"错误，
@@ -55,25 +58,24 @@ halt with resume first"、"Starting from a git worktree is REJECTED — 必须�
 - [ ] 已知失败路径被正确处理/传达：driver halted 时的报错信息引导用户先 `quay driver resume`；
       从非 worktree-root（如任务 worktree）调用 `quay driver start` 时的拒绝行为被正确透传，
       不被 skill 吞掉或误报成别的错误
-- [ ] 新 skill 若新增了 `plugin/scripts/*.ts` 脚本文件（而非纯 SKILL.md 封装），已完成三面
-      注册（outline + capability-catalog + laydown，`plugin/scripts/capability-catalog.sh`
-      头注释）——若实现只是 SKILL.md 内直接调用既有 CLI，无新脚本，此条不适用（在完成时
-      注明"无新脚本，不适用"，不能留空）
+- [ ] 若实现新增了 `plugin/scripts/*.ts` 脚本文件（而非纯 SKILL.md 内直接调用既有 CLI），
+      已完成三面注册（outline + capability-catalog + laydown，
+      `plugin/scripts/capability-catalog.sh` 头注释）——若无新脚本，在完成时注明
+      "无新脚本，不适用"，不能留空
 - [ ] `node scripts/test.sh`（或等价 scoped 调用）全绿，新增至少一个测试文件覆盖该 skill
       的封装脚本/逻辑（若 SKILL.md 是纯文档型 skill 无可测代码,以 skill 自身的
       dry-run/结构检查作为等价覆盖并说明）
 
 ## DoD
 
-人在一个刚初始化过 quay（已跑过 `init` skill）的项目里，只需在会话内调用这一个 skill，
-drivers（promotion + worker）与 web server 就都进入可用状态——不需要人另外手动敲三条独立
-的 `quay driver`/`quay serve` CLI 命令，也不需要任何 tmux 操作。skill 本身对已经在跑的
-driver/server 是安全的（幂等），对已知失败路径（halted / worktree-root 限制）给出可操作的
-错误信息而不是静默失败或吞异常。
+人在一个刚初始化过 quay（已跑过 `init` skill）的项目里，只需在会话内调用
+`plugin/skills/drivers/SKILL.md` 这一个 skill，drivers（promotion + worker）与 web server
+就都进入可用状态——不需要人另外手动敲三条独立的 `quay driver`/`quay serve` CLI 命令，也不
+需要任何 tmux 操作。skill 本身对已经在跑的 driver/server 是安全的（幂等），对已知失败路径
+（halted / worktree-root 限制）给出可操作的错误信息而不是静默失败或吞异常。
 
 ## Touches
 
-- plugin/skills/init/SKILL.md
-- packages/quay/src/cli/driver.ts
-- packages/quay/bin/quay.ts
+- plugin/skills/drivers/SKILL.md
+- plugin/scripts/capability-catalog.sh
 - tasks/gap-skill-start-drivers-webserver.md
