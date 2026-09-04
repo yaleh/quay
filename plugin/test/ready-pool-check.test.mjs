@@ -42,9 +42,11 @@ import {
   readChildren,
   strategicTraceable,
   touchesScale,
+  readConsolidates,
   STRATEGIC_REF_RE,
   STRATEGIC_WEIGHT,
   BLOCKING_WEIGHT,
+  CONSOLIDATION_WEIGHT,
   computeLandingBlocked,
   detectLandingBlocked,
   LANDING_STALENESS_MS_DEFAULT,
@@ -1854,6 +1856,79 @@ test("CLI smoke: --top 5 emits top_relevance value-sorted array with reasons (AC
   assert.ok(parsed.top_relevance.length >= 1, "band: at least one relevance-sorted entry");
   assert.equal(parsed.top_relevance[0].strategic, true, "control: strategic candidate ranks front");
   assert.ok(parsed.top_relevance.every((e) => typeof e.value === "number" && typeof e.reason === "string"));
+});
+
+// ── CONSOLIDATION AXIS (gap-dispatch-value-has-no-consolidation-axis) ──────────────────────────────
+// The three original merit axes (strategic / blocking / suite-blocking) had NO axis for
+// SUBTRACTION/CONSOLIDATION merit — a task that deletes 119 duplicate implementations was billed
+// only by its Touches width (costBenefit 1/120 ≈ 0.008), 40× below a 3-touch guard (1/3), so wide
+// consolidation tasks were structurally starved in the dispatch queue. The fix adds a fourth axis
+// whose value comes from a MECHANICAL frontmatter declaration `extra.consolidates: N` (NOT body
+// prose — the negative control that keeps it from becoming a second STRATEGIC_REF_RE keyword match).
+
+test("readConsolidates: mechanical extra.consolidates declaration; prose-only / absent / non-numeric read 0 (AC2/AC3)", () => {
+  // parseTask's `extra` projection (the single YAML parser readDependsOn uses) carries the number.
+  const declared = parseTask("---\nid: x\nextra:\n  schema: v1\n  consolidates: 119\n---\nbody");
+  assert.equal(readConsolidates(declared), 119, "extra.consolidates: 119 ⇒ 119");
+  assert.equal(readConsolidates({ extra: { consolidates: "12" } }), 12, "string N coerces to number");
+  assert.equal(readConsolidates({ extra: { consolidates: 0 } }), 0, "0 ⇒ not consolidating");
+  assert.equal(readConsolidates({ extra: { consolidates: -3 } }), 0, "negative ⇒ not consolidating");
+  assert.equal(readConsolidates({ extra: {} }), 0, "absent ⇒ not consolidating");
+  assert.equal(readConsolidates({ extra: { consolidates: "not-a-number" } }), 0, "non-numeric ⇒ 0 (fail-open)");
+  // negative control (AC3): a task that only SAYS it consolidates in prose, with NO declaration, reads 0.
+  assert.equal(readConsolidates({ body: "we consolidate 119 duplicate checker implementations into one template" }), 0,
+    "prose-only consolidation claim ⇒ no declaration ⇒ 0");
+});
+
+test("computeRelevance: consolidation axis adds weight from the declaration; prose-only gets nothing (AC2/AC3)", () => {
+  // A WIDE consolidation task (120 touches → costBenefit 1/120) with the mechanical declaration.
+  const wide = computeRelevance("gap-consolidate-checkers", {
+    body: "plain\n## Touches\n" + Array.from({ length: 120 }, (_, i) => `- code/checker${i}.ts`).join("\n"),
+    extra: { consolidates: 119 },
+  });
+  assert.equal(wide.consolidating, true);
+  assert.equal(wide.consolidates, 119);
+  assert.equal(wide.value, Number((CONSOLIDATION_WEIGHT + 1 / 120).toFixed(3)),
+    "value = consolidation(1) + costBenefit(1/120), NOT 1/120");
+  assert.match(wide.reason, /consolidating Y\(119\)/);
+
+  // negative control: prose-only consolidation claim (no extra.consolidates) gets NO weight.
+  const proseOnly = computeRelevance("gap-prose-consolidation", {
+    body: "we consolidate 119 duplicate checker implementations into one template\n## Touches\n- code/a.ts",
+  });
+  assert.equal(proseOnly.consolidating, false);
+  assert.equal(proseOnly.value, 1, "prose-only ⇒ pure costBenefit (1 touch) = 1");
+
+  // the starvation fix: the wide consolidation task outranks a narrow non-consolidation guard.
+  const narrowGuard = computeRelevance("gap-narrow-guard", {
+    body: "plain\n## Touches\n- code/a.ts\n- code/b.ts\n- code/c.ts",
+  });
+  assert.equal(narrowGuard.value, Number((1 / 3).toFixed(3)));
+  assert.ok(wide.value > narrowGuard.value, "wide consolidation task outranks a narrow guard (AC4)");
+});
+
+test("analyzeTasks --top: wide consolidation todo ranks above a narrow guard (AC4 end-to-end)", (t) => {
+  const root = makeWorkspace("consolidate-top");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-narrow-guard", gapTask("gap-narrow-guard", {
+    body: fourArtifactBody({ touches: ["- code/a.ts", "- code/b.ts", "- code/c.ts"] }),
+  }));
+  writeTask(root, "gap-consolidate-checkers", gapTask("gap-consolidate-checkers", {
+    body: fourArtifactBody({ touches: Array.from({ length: 120 }, (_, i) => `- code/checker${i}.ts`) }),
+  }));
+  // Inject the mechanical declaration into the consolidation task's frontmatter `extra` block.
+  const f = path.join(root, "tasks", "gap-consolidate-checkers.md");
+  fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace("  schema: v1\n", "  schema: v1\n  consolidates: 119\n"));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, topN: 2 });
+  assert.equal(r.top_relevance.length, 2, "exactly the two todos");
+  assert.equal(r.top_relevance[0].id, "gap-consolidate-checkers", "consolidation todo ranks first (AC4)");
+  assert.equal(r.top_relevance[0].consolidating, true, "the mechanical declaration flips consolidating");
+  assert.equal(r.top_relevance[0].consolidates, 119);
+  assert.equal(r.top_relevance[1].id, "gap-narrow-guard", "narrow guard ranks second");
+  assert.equal(r.top_relevance[1].consolidating, false, "narrow guard has no declaration ⇒ not consolidating");
+  assert.ok(r.top_relevance[0].value > r.top_relevance[1].value,
+    "consolidation value strictly above the narrow guard (AC4)");
 });
 
 // ── Cross-machine merge regression (AC17 catch-up): computeRelevance arity — blocking must work ──

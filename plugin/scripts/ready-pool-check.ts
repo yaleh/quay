@@ -586,23 +586,37 @@ export function mergeSurfaceBlock(parsed, surfaces, expand) {
 
 // ── Value-prioritization relevance signal (tasks/gap-value-prioritization-has-no-mechanism) ─────────
 // The "which of the N todos matters most" question gets a MECHANICAL answer (no human scoring, AC3).
-// Three signal sources, all mechanical:
-//   strategic — body references a written strategic question: the orchestration/ strategic-doc
-//               naming convention FINDING-* / SYNTHESIS-* / SPEC-* / REVIEW-cadence (grep).
-//   blocking  — dependency reverse edges: the task is a parent (children non-empty) OR is named
-//               as `parent:` by another task OR is listed in another task's `depends_on` (the
-//               depends_on reverse-edge, gap-value-priority-signal-degraded-to-1-over-cost AC1) —
-//               landing it unblocks that dependent.
-//   cost      — declared Touches scale (parseTouches glob count; a MISSING Touches section is
-//               unknown scope, treated as high cost — the same conservative stance the dispatch gate
-//               takes: no usable Touches collides with everything).
-// value = strategic*STRATEGIC_WEIGHT + blocking*BLOCKING_WEIGHT + costBenefit(1/cost capped at 1).
-// The weights make the dominance chain STRICT: strategic (min 4) > non-strategic max (blocking 2 +
-// costBenefit max 1 = 3), and blocking (min 2) > costBenefit max (1). So a traceable task always
-// ranks before an untraceable one, a blocking task before a non-blocking one, and small-cost /
-// high-benefit breaks ties within a class. Sort is value desc (stable by id asc). Output to JSON as
-// `top_relevance` (the --top N todo query) + `ready_relevance` (the ready pool, "who to dispatch
-// next" — AC6). The existing gap-* > DIR-* / disjointness promotion ORDER is untouched (AC4).
+// Four signal sources, all mechanical:
+//   strategic     — body references a written strategic question: the orchestration/ strategic-doc
+//                   naming convention FINDING-* / SYNTHESIS-* / SPEC-* / REVIEW-cadence (grep).
+//   blocking      — dependency reverse edges: the task is a parent (children non-empty) OR is named
+//                   as `parent:` by another task OR is listed in another task's `depends_on` (the
+//                   depends_on reverse-edge, gap-value-priority-signal-degraded-to-1-over-cost AC1) —
+//                   landing it unblocks that dependent.
+//   consolidating — SUBTRACTION/CONSOLIDATION merit (gap-dispatch-value-has-no-consolidation-axis):
+//                   the task declares `extra.consolidates: N` (N = the number of duplicate
+//                   implementations it consolidates away). A MECHANICAL FRONTMATTER declaration, NOT
+//                   body prose — a task that merely SAYS it consolidates in prose gets NO weight (the
+//                   negative control that keeps this axis from becoming a second STRATEGIC_REF_RE
+//                   keyword match). Read via readConsolidates (task.extra).
+//   cost          — declared Touches scale (parseTouches glob count; a MISSING Touches section is
+//                   unknown scope, treated as high cost — the same conservative stance the dispatch
+//                   gate takes: no usable Touches collides with everything).
+// value = strategic*STRATEGIC_WEIGHT + blocking*BLOCKING_WEIGHT + consolidating*CONSOLIDATION_WEIGHT
+//       + costBenefit(1/cost capped at 1).
+// The consolidation axis is BINARY (consolidating = extra.consolidates > 0), not scaled by the
+// declared magnitude N — the magnitude is reported (for post-landing reverse-verification of the
+// net-deleted implementation count) but multiplying value by N would make it unbounded and gameable
+// (a task could claim consolidates: 99999). CONSOLIDATION_WEIGHT = 1 is the MINIMAL weight that makes
+// EVERY consolidating task (however wide — costBenefit → 0) outrank EVERY pure-cost task (however
+// narrow — costBenefit 1), which is exactly the starvation this axis fixes (a 120-touch consolidation
+// read 1/120 = 0.008 and was 40× below a 3-touch guard's 1/3); it is the dominance requirement, not a
+// fabricated magnitude, and AC4 confirms it against real ordering. It sits STRICTLY below blocking
+// (min 2) and strategic (min 4) — consolidation re-ranks WITHIN the non-traceable, non-blocking
+// class instead of displacing the "unblocks a dependent" priority. Sort is value desc (stable by id
+// asc). Output to JSON as `top_relevance` (the --top N todo query) + `ready_relevance` (the ready
+// pool, "who to dispatch next" — AC6). The existing gap-* > DIR-* / disjointness promotion ORDER is
+// untouched (AC4).
 // gap-value-priority-signal-degraded-to-1-over-cost AC1 — the strategic axis取数 bug: the old regex
 // required a literal hyphen after the strategic-doc prefix (`SPEC-`), so a body that references the
 // strategic doc as `SPEC §11 阶段 2` (the pilot's actual reference form — the SPEC doc is cited by
@@ -612,6 +626,11 @@ export function mergeSurfaceBlock(parsed, surfaces, expand) {
 export const STRATEGIC_REF_RE = /\b(?:SPEC|FINDING|SYNTHESIS)\b|REVIEW-cadence/;
 export const STRATEGIC_WEIGHT = 4;
 export const BLOCKING_WEIGHT = 2;
+// gap-dispatch-value-has-no-consolidation-axis — the SUBTRACTION/CONSOLIDATION axis weight. See the
+// value-function comment above for the calibration rationale (minimal weight that lifts a
+// consolidating task above EVERY pure-cost task, keeping the strict chain blocking(2) > consolidation
+// (1) > costBenefit(≤1)). NOT scaled by the declared N — binary (consolidating Y/N).
+export const CONSOLIDATION_WEIGHT = 1;
 
 // ── SUITE-BLOCKING signal (tasks/gap-ready-relevance-blind-to-suite-blocking-signal) ────────────────
 // computeRelevance's `blocking` axis used to read ONLY static parent/children dependency — a defect
@@ -1153,6 +1172,21 @@ export function touchesScale(body) {
   return { hasSection, count: globs.length };
 }
 
+/** The consolidation declaration — `extra.consolidates: N` (N = the number of duplicate
+ *  implementations this task consolidates away). A MECHANICAL frontmatter field (parseTask's `extra`
+ *  projection, the same single YAML parser readDependsOn uses), NOT body prose — a task that only
+ *  SAYS it consolidates in prose has no `extra.consolidates` field and reads 0 here (the negative
+ *  control: this axis must not become a second STRATEGIC_REF_RE keyword match). Returns the declared
+ *  N as a non-negative integer; 0 when the field is absent / non-numeric / ≤0 (fail-open — absence
+ *  means "not consolidating"). The axis weight is BINARY (N>0), not scaled by N: the magnitude is
+ *  reported for post-landing reverse-verification (net-deleted implementation count), but scaling
+ *  value by N would make it unbounded and gameable. */
+export function readConsolidates(task) {
+  const extra = task && task.extra && typeof task.extra === "object" && !Array.isArray(task.extra) ? task.extra : {};
+  const n = Number(extra.consolidates);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
 /** The composite relevance signal for one task. All inputs mechanical (grep / frontmatter fields /
  *  touches count) — no human scoring. `childrenByTask` / `parentRefCount` are precomputed once per
  *  analyzeTasks call (blocking needs to know if ANY other task names this id as its parent).
@@ -1170,10 +1204,15 @@ export function computeRelevance(id, task, childrenByTask = new Map(), parentRef
   // `dependedOnCount` counts how many tasks list this id in their `depends_on`; >0 flips blocking true.
   const dependedOn = (dependedOnCount.get(id) || 0) > 0;
   const blocking = children.length > 0 || (parentRefCount.get(id) || 0) > 0 || dependedOn || suiteBlocking;
+  // gap-dispatch-value-has-no-consolidation-axis — the SUBTRACTION/CONSOLIDATION axis: a mechanical
+  // `extra.consolidates: N` declaration (N = duplicate implementations consolidated away), NOT body
+  // prose. Binary (N>0), weighted CONSOLIDATION_WEIGHT — see the value-function comment for why.
+  const consolidates = readConsolidates(task);
+  const consolidating = consolidates > 0;
   const { hasSection, count } = touchesScale(task.body);
   const cost = hasSection ? count : 0;
   const costBenefit = hasSection && count > 0 ? Math.min(1, 1 / count) : 0;
-  const value = (strategic ? STRATEGIC_WEIGHT : 0) + (blocking ? BLOCKING_WEIGHT : 0) + (suiteBlocking ? SUITE_BLOCKING_WEIGHT : 0) + costBenefit;
+  const value = (strategic ? STRATEGIC_WEIGHT : 0) + (blocking ? BLOCKING_WEIGHT : 0) + (suiteBlocking ? SUITE_BLOCKING_WEIGHT : 0) + (consolidating ? CONSOLIDATION_WEIGHT : 0) + costBenefit;
   const v = Number(value.toFixed(3));
   // reason's blocking clause names the blocking source(s): children / parent-ref / depends-on / suite.
   const blockSources = [];
@@ -1186,12 +1225,15 @@ export function computeRelevance(id, task, childrenByTask = new Map(), parentRef
     strategic,
     blocking,
     blocking_suite: suiteBlocking,
+    consolidating,
+    consolidates,
     cost,
     value: v,
     reason:
       `value ${v} · strategic ${strategic ? "Y" : "N"} · ` +
       `blocking ${blocking ? `Y(${blockSources.join(" · ")})` : "N"} · ` +
       `suite-blocking ${suiteBlocking ? "Y" : "N"} · ` +
+      `consolidating ${consolidating ? `Y(${consolidates})` : "N"} · ` +
       `cost ${cost} touch${cost === 1 ? "" : "es"}`,
   };
 }

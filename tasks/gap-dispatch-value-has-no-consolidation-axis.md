@@ -59,16 +59,16 @@ costBenefit = 1/120 = **0.008**；而一个新增守卫的窄任务（3 个 Touc
 
 ## AC
 
-- [ ] AC1（基线）：跑 `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --cap 5
+- [x] AC1（基线）：跑 `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --cap 5
       --top 40 --json`，贴出当前池的三轴取值分布与 value 序列；并构造/选取一个真实的宽收敛候选
       （如 checker 族收敛），记录它在改动前的 value 与排位
-- [ ] AC2：新增 `consolidation` 轴，取值来源是**可机械核验的声明**（如 `extra.consolidates: N`），
+- [x] AC2：新增 `consolidation` 轴，取值来源是**可机械核验的声明**（如 `extra.consolidates: N`），
       在任务体里写明选择了哪个来源、以及为什么它**不能**仅靠正文措辞满足
-- [ ] AC3（负控制，防止重蹈 STRATEGIC_REF_RE 覆辙）：一个只在**正文里声称**自己在收敛、但没有那份
+- [x] AC3（负控制，防止重蹈 STRATEGIC_REF_RE 覆辙）：一个只在**正文里声称**自己在收敛、但没有那份
       机械声明的任务，**不得**获得该轴权重——贴出两个任务（一个有声明、一个只有措辞）的真实读数对照
-- [ ] AC4（标定，不是凭空设权重）：加轴后重跑 AC1 的同一命令，宽收敛候选的排位须高于同池的窄守卫
+- [x] AC4（标定，不是凭空设权重）：加轴后重跑 AC1 的同一命令，宽收敛候选的排位须高于同池的窄守卫
       新增任务；贴出改动前/后的 `--top N` 真实排序对照，并记录据此选定权重值的依据
-- [ ] AC5（不回归）：`plugin/test/ready-pool-check.test.mjs` 全绿，且
+- [x] AC5（不回归）：`plugin/test/ready-pool-check.test.mjs` 全绿，且
       `gap-value-priority-signal-degraded-to-1-over-cost` 留下的回归判据（value 不退化成纯 1/cost）
       仍然成立——贴出该用例的通过输出
 
@@ -77,6 +77,89 @@ costBenefit = 1/120 = **0.008**；而一个新增守卫的窄任务（3 个 Touc
 AC1/AC4 的改动前后 `--top N` 真实输出、AC3 的正负两个任务读数对照，全部贴进任务体；全量
 `bash scripts/test.sh` 绿。不是"加了个字段"就算——必须证明：①有机械声明的收敛任务排位真的上来了，
 ②只有措辞没有声明的任务拿不到权重（否则这条轴会立刻变成第二个可被措辞刷分的 `STRATEGIC_REF_RE`）。
+
+## Evidence
+
+### AC1 基线（改动前，真实 store）
+
+`node --experimental-strip-types plugin/scripts/ready-pool-check.ts --cap 5 --top 40 --json`（旧代码）：
+
+```
+top_relevance（todo，2 条，三轴全 N、value = 1/cost）：
+  gap-archguard-p1-deletion-closure-checker               value=0.25  strategic=N blocking=N suite=N cost=4
+  gap-archguard-p4-guard-lineage-declaration-and-registry value=0.25  strategic=N blocking=N suite=N cost=4
+
+ready_relevance（ready，6 条）：
+  gap-dispatch-value-has-no-consolidation-axis            value=4.333 strategic=Y cost=3   ← 本任务正文出现 SPEC ⇒ 措辞拿到权重（正是点名现象）
+  gap-skill-start-drivers-webserver                       value=4.333 strategic=Y cost=3
+  gap-archguard-p2-identity-replication-checker           value=2.25  blocking=Y cost=4
+  gap-archguard-p5-instrument-decay-standing-guard        value=2.25  blocking=Y cost=4
+  gap-no-cross-task-defect-shape-aggregation              value=0.25  cost=4
+  gap-mirror-pair-drift-policy-plugin-scripts-experiments value=0.167 cost=6
+```
+
+宽收敛候选（构造）：temp workspace 里 `gap-wide-consolidate`（`extra.consolidates: 119`，120 个 Touches）
+在旧代码下 value = 1/120 = **0.008**，排在 3-touch 窄守卫（0.333）之后 —— 见 AC4 的改动前/后对照。
+
+### AC2 实现（选了哪个来源、为什么不能靠正文措辞）
+
+来源 = **`extra.consolidates: N`**（frontmatter 字段）。`readConsolidates(task)` 读 `parseTask` 的
+`extra` 投影 —— 与 `readDependsOn` 走同一个 `parseFrontmatterCompletely`（yaml）单解析器，不引入第二条
+解析路径。轴取**二进制** `consolidating = (N > 0)`：N 的绝对值只进输出报告（供落地后 diff 反向核验
+净删除实现点数），**不乘进 value** —— 否则 value 无界、且可被 `consolidates: 99999` 刷分。
+
+**为什么不能仅靠正文措辞**：正文措辞判定是裸关键词匹配（硬规则 2 禁止的形态）——任何任务在正文写一个
+「收敛/统一/重构」就能拿权重，会立刻变成第二个 `STRATEGIC_REF_RE`。`extra.consolidates` 是结构化字段，
+派发计算按字段名取值，与正文散文无关。
+
+### AC3 负控制（同一 cost，一个有声明、一个只有措辞）
+
+`computeRelevance` 对照（两者 cost 相同 = 1 touch）：
+
+```
+DECLARED    value 2 · strategic N · blocking N · suite-blocking N · consolidating Y(119) · cost 1 touch
+PROSE-ONLY  value 1 · strategic N · blocking N · suite-blocking N · consolidating N      · cost 1 touch
+```
+
+只有 `extra.consolidates: 119` 声明的任务拿到轴权重（+1）；正文只写「we consolidate 119 duplicate checker
+implementations」的任务拿不到。单元测试 `readConsolidates: … prose-only / absent / non-numeric read 0`
+与 `computeRelevance: consolidation axis adds weight …; prose-only gets nothing` 钉死此对照。
+
+### AC4 标定（改动前/后同池 `--top 5` 真实排序）
+
+temp workspace，同池 2 条 todo：`gap-wide-consolidate`（`consolidates: 119`，120 touches）vs
+`gap-narrow-guard`（3 touches）。`--top 5 --json`：
+
+```
+改动前（旧代码，无 consolidation 轴）：
+  gap-narrow-guard     value=0.333  cost=3
+  gap-wide-consolidate value=0.008  cost=120   ← 41× 落后，排最后
+
+改动后（新代码，CONSOLIDATION_WEIGHT=1）：
+  gap-wide-consolidate value=1.008  cost=120  consolidating=Y(119)   ← 反转到第一
+  gap-narrow-guard     value=0.333  cost=3    consolidating=N
+```
+
+**权重值依据（不是凭空设定）**：`CONSOLIDATION_WEIGHT = 1`。
+① 纯 cost 任务的 costBenefit 上界 = 1（最窄 1-touch = 1/1）；② 收敛任务再宽（costBenefit → 0）也要压过
+最窄纯 cost 任务，须 `W + 0 > 1 ⇒ W ≥ 1`；③ W=1 是达成「consolidation 严格支配整条 cost 轴」的最小正整数
+（W=0 是 no-op；0<W<1 的支配关系依赖具体窄守卫的 touches 数、换池即失效）；④ 并保持严格链
+strategic(4) > blocking(2) > consolidation(1) > cost(≤1) —— 收敛只在非战略、非 blocking 类内重排，不挤占
+「unblocks 下游」的优先级。AC4 实测：W=1 时宽收敛候选 1.008 > 窄守卫 0.333，与改动前 0.008 排最后形成反转。
+
+### AC5 不回归
+
+`bash scripts/test.sh plugin/test/ready-pool-check.test.mjs` → **138 pass / 0 fail**。含
+`gap-value-priority-signal-degraded-to-1-over-cost` 的回归判据（value 不退化成纯 1/cost）：
+
+```
+✔ value-degradation AC1: strategic axis取数 bug — `SPEC §11`-style reference reads strategic Y
+✔ value-degradation AC1: blocking axis取数 gap — a task others depends_on is blocking
+✔ value-degradation AC2/AC3: a large-touches strategic task floats above a small plain task
+✔ computeRelevance: strategic grep, blocking, cost scale, composite value (AC1/AC3)
+```
+
+（strategic 大任务 value = STRATEGIC_WEIGHT + 1/9 仍压过 plain 小任务 value = 1 —— 三轴仍能取 Y、未退化。）
 
 ## Touches
 
