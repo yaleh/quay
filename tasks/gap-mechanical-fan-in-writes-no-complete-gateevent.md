@@ -2,7 +2,7 @@
 id: gap-mechanical-fan-in-writes-no-complete-gateevent
 title: 机械 fan-in 不写 complete GateEvent——delivery-critical AC2「loop 完成路径写
   GateEvent」经 08-27 新路径回归，唯一发现它的仪器被当噪声
-status: ready
+status: done
 labels:
   - gap
   - defect
