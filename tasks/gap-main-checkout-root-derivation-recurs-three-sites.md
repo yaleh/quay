@@ -2,7 +2,7 @@
 id: gap-main-checkout-root-derivation-recurs-three-sites
 title: 主检出根推导的 bug 修过一次却在另外 3 处仍在犯——两处注释还把错误当不变量写着「guaranteed first」；收敛为
   repo-root.ts 的第二个导出
-status: ready
+status: done
 labels:
   - gap
   - defect
