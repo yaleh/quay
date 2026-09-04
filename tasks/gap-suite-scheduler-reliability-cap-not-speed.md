@@ -1,7 +1,7 @@
 ---
 id: gap-suite-scheduler-reliability-cap-not-speed
 title: 水位线调度器重定义为可靠性总量上限——三组总并发不超过当前活跃组的最小预算（速度不是它的 AC）
-status: todo
+status: ready
 labels:
   - gap
   - defect
