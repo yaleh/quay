@@ -1,6 +1,7 @@
 # SPEC：tmux 退役 —— 先退 tmux 机制本身，outer 会话留待之后
 
-**作者**：manager｜**日期**：2026-09-03｜**状态**：**裁定已齐，待拆解为任务执行**
+**作者**：manager｜**日期**：2026-09-03｜**状态**：**执行中——任务 6 已 done，任务 1-5/7 未开始**
+（§7 任务拆解进度见文末）
 **来源**：人 2026-09-03 明确裁定策略顺序——**先退役 tmux，再退役 outer**（推翻此前"outer 职能
 subagent 化 → tmux 依赖自然消失"这一隐含顺序）；本 SPEC 是该裁定的具体展开。
 **前置澄清（同日，已向人核实并更正两次误判）**：
@@ -477,12 +478,12 @@ tmux server）还会起真实 tmux，`tmux-leak-scan.sh` 就是必需的兜底�
 
 ## 7. 任务拆解计划（回答"是否可以开始创建任务和执行"）
 
-**结论：可以开始。** 五条裁定已解决全部设计层面的开放问题，剩下的是纯粹的实施工作。建议拆成
-以下几个独立任务（`role: primitive` 或 `compound`，具体由立案时定），**按依赖顺序排列**——
-前面的任务是后面任务的地基，不建议打乱顺序并行：
+**结论：可以开始。** 五条裁定已解决全部设计层面的开放问题，剩下的是纯粹的实施工作。以下 7 项
+按 SPEC 成文时设想的依赖顺序排列——**实际执行时任务 6 先于 1-5 独立完成**（它不依赖 `claude
+--bg` 机制,只是删除工作,与 1-5 之间没有真实依赖,顺序调整无害）：
 
 1. **`quay-launch.sh` 新增仅打印参数模式**（不 `exec`，只输出翻译好的 argv）——Layer 3 item 1
-   的地基，manager/outer 两条改造路径都要用它。**最小、无风险，建议第一个做。**
+   的地基，manager/outer 两条改造路径都要用它。**最小、无风险，建议下一个做。**
 2. **`quay-topology.sh` 新增 `claude --bg` 分支（outer 角色）**——依赖任务 1；outer 长驻会话
    退出语义按裁定 #3（手工），不做自动恢复。
 3. **`manager-start.sh` 新增 `claude --bg` 分支（manager 角色）**——依赖任务 1；与任务 2 可并行
@@ -494,17 +495,24 @@ tmux server）还会起真实 tmux，`tmux-leak-scan.sh` 就是必需的兜底�
    （outer 能用 `--bg` 稳定启动）之后再做,避免同时调试两个新机制。
 5. **`outer-session-check.sh`/`topology-check.sh` 改用 `claude agents --json`**——依赖任务 2
    已经产出真实的 `--bg` outer 会话可供验证。
-6. **`session-liveness.sh` 取消 + 31 个生产调用者迁移**——这是规模最大的一块（含 21 个专属测试
-   文件,§2b.2；2 个待核实的孤儿候选,§2b.3），**建议进一步拆分为多个子任务**（例如按调用者的
-   职责分组：冷启动相关 `quay-init.sh`/`session-bootstrap.sh` 一组，observer/health 相关
-   `observer-registry*.sh`/`supervisor-health.sh` 一组，manager tick 读数相关
-   `manager-tick-readings.ts`/`inner-blocked-signal.ts` 一组），不建议一个任务吞下全部 31
-   个文件（Touches 过宽会撞 `TOUCHES-DIR-GLOB-HINT` 类闸门，且审阅/fan-in 风险高）。**§2b.4
-   列出的"仅移除依赖、文件保留"清单是划分子任务时的具体依据，这一块的子任务划分建议留到立案时
-   现场看这 31 个文件的实际耦合关系再定**，本 SPEC 不预先拍板。
+6. ✅ **已完成**——`gap-retire-session-liveness`（`status: done`，2026-09-03）。实际范围比本
+   SPEC 原计划更完整：删除 `session-liveness.sh`/`session-liveness-mount.sh`/sweep 脚本/
+   `monitor-mount-check.sh`（连带，无对象可查）/ 22 个测试文件（比 §2b.2 统计的 21 个多 1 个，
+   实施时枚举更彻底）；清理了 147 个消费方文件里的活跃引用（`orchestration`/`packages`/
+   `plugin`/`test`/`skills`/`workflows`，历史文档字样豁免）；**额外发现并一并退役了
+   idle-watch 机制**（本 SPEC 未曾单独提及——它不是独立机制，是 `session-liveness` 的
+   manager 实例，`manager-start.sh` 的 `--check-idle-watch`/`--ensure-mount-intent`
+   参数 + 冷启动 checklist 的 `IDLE-WATCH-MOUNTED`/`MONITORS-DELIVERING` 两键一并删除，
+   manager 自我观测能力标注"未来用 driver 机制替代，本次只退役旧机制"）；全量 suite 绿
+   （AC1-AC5 全部 `[x]`）。§2b.3 的"待核实"提醒（`tmux-isolated.sh`/`tmux-session.ts`）
+   在此次实施中被正确遵循——任务体明确写了"不相干机制不碰，grep 命中 0 一律不动"，避免了
+   误删。
 7. **文档更新**（CLAUDE.md/README/相关 SPEC/ADR/skill 文档里对 tmux 依赖的描述）——收尾工作，
-   等 1-6 全部落地后再做，避免文档先于代码改导致新的漂移（同 CLAUDE.md 开篇警告的"指针复制正本
+   等 1-5 全部落地后再做，避免文档先于代码改导致新的漂移（同 CLAUDE.md 开篇警告的"指针复制正本
    然后各自漂移"）。
 
 **不建议现在做的**：AC149 的验证/修复（§4 非目标）、C 类投递链的进一步退役（§4 非目标）、
 测试基础设施 tmux 用量的任何改动（§4 非目标）。
+
+**当前状态（2026-09-03，本次更新）**：任务 6 done；任务 1-5、7 未开始。**下一步建议：任务 1**
+（`quay-launch.sh` 仅打印参数模式）——它是任务 2/3 的共同地基，最小且无风险，理由见上。
