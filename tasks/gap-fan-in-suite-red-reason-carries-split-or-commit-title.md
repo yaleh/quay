@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-suite-red-reason-carries-split-or-commit-title
 title: fan-in suite red 的 reason 被设成「split-or-commit」标题而非真实失败摘要（归因错位）
-status: ready
+status: done
 labels:
   - gap
   - defect
