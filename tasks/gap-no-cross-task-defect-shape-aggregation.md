@@ -1,7 +1,7 @@
 ---
 id: gap-no-cross-task-defect-shape-aggregation
 title: 没有任何机制回答「最近 N 条已落地缺陷是不是共享同一个根」——架构债只以「N 条同形缺陷」的形态出现，而聚合只发生在人来问的时候
-status: ready
+status: done
 labels:
   - gap
 parent: null
