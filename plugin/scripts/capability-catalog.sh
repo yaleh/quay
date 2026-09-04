@@ -1722,6 +1722,7 @@ declare -A CONSUMER=(
   [git-lens-l-d-code-doc-ratio.ts]="谁按：GIT-lens 用户按；条件=要量 L_D 代码文档比例增量"
   [git-lens-l-g-structural-drift.ts]="谁按：GIT-lens 用户按；条件=要量结构漂移（generative-alignment）"
   [git-lens-l-s-behavior-variance.ts]="谁按：GIT-lens 用户按；条件=要量行为稳定性（轻突变下）"
+  [identity-replication-check.ts]="谁按：架构复核者在做 P2 身份复制体检（archguard 架构复核 / 里程碑 done 前 L_D/L_G 检查）时按；条件=要判定字面量复制度 / 判定重写数 / plugin↔experiments 双副本字节相同对 / *_REL 路径常量是否越阈值（未经单一访问器的硬编码实体）"
   [integration-batch-merge.sh]="谁按：integration 合并者按；条件=要批量 ff 合入 develop"
   [it0-impl-row-check.sh]="谁按：it0 设计里程碑复核者按；条件=要核对实现行是否都被交代"
   [it0-split-or-commit-check.ts]="谁按：it0 任务执行者按；条件=任务要么 split 要么 commit（单源强制）"
