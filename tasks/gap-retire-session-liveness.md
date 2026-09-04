@@ -28,7 +28,7 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 
 ## Plan
 
-0. **复用起点（⛔ 不从零重做）**：git 对象库有之前完整实现 commit `c50044bb7`（77 文件，删脚本 + 22 测试 + monitor-mount-check + 清引用 + 修 ac61 + 补 Touches）。执行 `git cherry-pick c50044bb7` 复用（代码文件干净；`tasks/gap-retire-session-liveness.md` 冲突时取 develop 版），然后只修正：① 撤销误删 `outer-anchor-check.ts`（grep 命中 0 却删了，orphan-checker 会失败）；② 确认 idle-watch 接缝（方案 B）已删；③ 历史文档（docs/analysis/ 等）清不清无所谓（AC1 历史豁免），不撤销。
+0. **复用起点（⛔ 不从零重做）**：git 对象库有之前完整实现 commit `c50044bb7`（77 文件，删脚本 + 22 测试 + monitor-mount-check + 清引用 + 修 ac61 + 补 Touches）。执行 `git cherry-pick c50044bb7` 复用（代码文件干净；`tasks/gap-retire-session-liveness.md` 冲突时取 develop 版），然后只修正：① 撤销误删 `outer-anchor-check.ts`（grep 命中 0 却删了，orphan-checker 会失败）；② 确认 idle-watch 接缝（方案 B）已删；③ 历史文档（docs/analysis/ 等）清不清无所谓（AC1 历史豁免），不撤销。④ 修 `plugin/test/cold-start-recovery.test.mjs` AC3：`MONITORS-MOUNTED` 从 AC8c 七键数组移除（session-liveness-mount.sh 已删，该 key 已不存在，断言现恒假）。
 
 1. 枚举 session-liveness 的全部消费方（147 个文件：orchestration 文档 / packages 代码 / plugin/loop 文档 / plugin/scripts / plugin/test / skills / workflows / scripts/test.sh），确认哪些是「可删」、哪些是「需改判」。
 2. 删：session-liveness.sh + session-liveness-mount.sh + session-liveness-sweep*.mjs（重命名 run-namespace-sweep*）+ 22 个测试 + monitor-mount-check.sh + monitor-mount-check.test.mjs。
@@ -148,6 +148,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/test/accounting-emit.test.mjs
 - plugin/test/adr016-screen-use-check.test.mjs
 - plugin/test/blocked-signal-parameterized.test.mjs
+- plugin/test/cold-start-recovery.test.mjs
 - plugin/test/cold-start-skill.test.mjs
 - plugin/test/direct-to-develop-bypass-check.test.mjs
 - plugin/test/execute-suite-fix-scope-gate.test.mjs
@@ -415,4 +416,15 @@ Automatic merge failed; fix conflicts and then commit the result.
 ✔ CLI
 - run_id：wk-prod-1788285192
 - session_id：7fc66536-33a2-48d6-8e59-e24c80601d8d
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-04T05:54:50.433Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: == split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) ==
+- run_id：wk-prod-1788285192
+- session_id：de325eef-28fb-42ac-bb6a-19c3d034c43a
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-retire-session-liveness~wk-prod-1788285192~1788500729246-82ca76.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
