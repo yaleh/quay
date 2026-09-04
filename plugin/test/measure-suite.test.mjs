@@ -269,3 +269,63 @@ test("reporter does NOT emit __EXECVE__ when QUAY_TEST_EXECVE_COUNT is unset (op
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("reporter appends cpu_ms via route (a) 子进程自报 — a REAL per-file CPU, not derived from durationMs (gap-perfile-cpu-cost-collection AC1/AC5)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-cpu-"));
+  const cpuDir = path.join(dir, "cpu");
+  try {
+    // One CPU-heavy file (burns CPU) + one wait-type file (sleeps) — their cpu_ms/duration_ms ratios
+    // must DIFFER, proving cpu_ms is a real process.cpuUsage() measurement, not `durationMs × constant`.
+    const heavy = path.join(dir, "heavy.test.mjs");
+    writeFileSync(
+      heavy,
+      `import { test } from "node:test";\n` +
+        `test("burn", () => { const s = Date.now(); let x = 0; while (Date.now() - s < 250) { x += Math.sqrt(x + 1); } if (x < 0) throw new Error(); });\n`
+    );
+    const wait = path.join(dir, "wait.test.mjs");
+    writeFileSync(
+      wait,
+      `import { test } from "node:test";\n` +
+        `import { setTimeout as sleep } from "node:timers/promises";\n` +
+        `test("w", async () => { await sleep(250); });\n`
+    );
+
+    const env = {
+      ...process.env,
+      QUAY_PERFILE_CPU_DIR: cpuDir,
+      NODE_OPTIONS: `--require=${path.join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs")}`,
+    };
+    delete env.NODE_TEST_CONTEXT;
+    const res = spawnSync(
+      "node",
+      ["--test", "--test-concurrency=2", `--test-reporter=${reporterPath}`, "--test-reporter-destination=stderr", heavy, wait],
+      { encoding: "utf8", env }
+    );
+    assert.equal(res.status, 0, `suite should pass; stderr tail: ${res.stderr.slice(-300)}`);
+
+    const lines = res.stderr.split("\n").filter((l) => l.startsWith("__PERFILE__ "));
+    assert.equal(lines.length, 2, "two __PERFILE__ lines");
+    const cpuByFile = new Map();
+    for (const line of lines) {
+      // AC1 — the real output line carries cpu_ms=<n>.
+      const m = line.match(/__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false) end_ms=([0-9]+) cpu_ms=([0-9.]+)/);
+      assert.ok(m, `__PERFILE__ line must carry cpu_ms (AC1): ${line}`);
+      cpuByFile.set(m[2], { durationMs: Number(m[1]), cpuMs: Number(m[5]) });
+    }
+    const h = cpuByFile.get(heavy);
+    const w = cpuByFile.get(wait);
+    assert.ok(h && w, "both files captured");
+    assert.ok(h.cpuMs > 0 && w.cpuMs > 0, `cpu_ms is a real non-zero reading (heavy=${h.cpuMs} wait=${w.cpuMs})`);
+    // AC5 non-derivation negative control: cpu_ms/duration_ms is NOT a constant. A CPU-burning file
+    // always has a HIGHER CPU-per-wall ratio than a sleeping file — a constant ratio would prove the
+    // value is derived from durationMs (the thing the AC forbids).
+    const ratioH = h.cpuMs / h.durationMs;
+    const ratioW = w.cpuMs / w.durationMs;
+    assert.ok(
+      ratioH > ratioW,
+      `heavy ratio (${ratioH.toFixed(3)}) must exceed wait ratio (${ratioW.toFixed(3)}) — else cpu_ms is duration-derived`
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

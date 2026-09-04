@@ -51,3 +51,16 @@ test("full-suite-runner.ts (if present) also references the reporter path (wirin
   // runner does not strip a custom --test-reporter= path.
   assert.doesNotMatch(src, /--test-reporter=(?!spec)/, "runner must not splice a bare --test-reporter= that would shadow the custom reporter");
 });
+
+test("full-suite-runner.ts wires per-file CPU collection (route a: QUAY_PERFILE_CPU_DIR + NODE_OPTIONS --require preload)", () => {
+  const runner = join(repoRoot, "plugin", "scripts", "full-suite-runner.ts");
+  if (!existsSync(runner)) return;
+  const src = readFileSync(runner, "utf8");
+  // gap-perfile-cpu-cost-collection AC1 anti-regression: the per-file CPU carrier env (the dir the
+  // preload writes each test file's own process.cpuUsage() into) must be set by the runner, else the
+  // reporter's `cpu_ms` goes dark on every production round. Mirrors the --test-reporter wiring check.
+  assert.match(src, /QUAY_PERFILE_CPU_DIR/, "full-suite-runner.ts must set QUAY_PERFILE_CPU_DIR (the per-file CPU report dir)");
+  assert.match(src, /NODE_OPTIONS/, "full-suite-runner.ts must wire NODE_OPTIONS (the --require preload seam)");
+  const preload = join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs");
+  assert.ok(existsSync(preload), "the route (a) preload module must exist next to the reporter");
+});
