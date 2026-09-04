@@ -207,11 +207,13 @@ register_target() {
 }
 
 # ── --audit: the AC3 negative control, as a command ──────────────────────────────────────────────
-# For EVERY target registered offline, rebuild each of the 2 known consumers' read-surface and
+# For EVERY target registered offline, rebuild the known consumer's read-surface and
 # verify it reports "decommissioned" (not stale live state). A consumer is `stale` if any offline
 # target still yields an old-state report. Emits JSON:
 #   {"consumers":[{"name","stale","detail"},...], "offline_targets":[...], "all_fresh":bool}
 # Exit 1 iff any consumer is stale (the ## Contract band stale_observer_reports = 0 is violated).
+# (The session-topology consumer was retired with the outer tmux session —
+#  gap-retire-outer-tmux-window-logic; os-anchor-watchdog is the remaining consumer.)
 do_audit() {
   local -a offline=()
   local line name status
@@ -221,10 +223,10 @@ do_audit() {
     [ "$status" = "offline" ] && offline+=("$name")
   done < <(print_entries)
 
-  local aw_ok=1 tp_ok=1
-  local aw_det="" tp_det=""
+  local aw_ok=1
+  local aw_det=""
   if [ "${#offline[@]}" -eq 0 ]; then
-    aw_det="no offline targets"; tp_det="no offline targets"
+    aw_det="no offline targets"
   fi
 
   local name entry root sess cfg out
@@ -254,18 +256,6 @@ do_audit() {
     else
       aw_det+="${name}->watchdog-not-installed(skipped); "
     fi
-
-    # consumer 2 — session-topology: topology-check --session must say "decommissioned".
-    if [ -f "$SELF_DIR/topology-check.sh" ]; then
-      out="$(bash "$SELF_DIR/topology-check.sh" --session "$sess" 2>&1)" || true
-      if printf '%s\n' "$out" | grep -q "decommissioned"; then
-        tp_det+="${name}->decommissioned; "
-      else
-        tp_ok=0; tp_det+="${name}->STALE($(printf '%s\n' "$out" | head -1 | tr -d '\n')); "
-      fi
-    else
-      tp_det+="${name}->topology-check-not-installed(skipped); "
-    fi
   done
 
   local offline_json
@@ -274,14 +264,13 @@ do_audit() {
   else
     offline_json="[]"
   fi
-  AW_OK="$aw_ok" AW_DET="$aw_det" TP_OK="$tp_ok" TP_DET="$tp_det" \
+  AW_OK="$aw_ok" AW_DET="$aw_det" \
   OFFLINE_JSON="$offline_json" python3 - <<'PYEOF'
 import json, os
 def c(name, ok, det):
     return {"name": name, "stale": (ok != "1"), "detail": det.strip()}
 consumers = [
     c("os-anchor-watchdog", os.environ["AW_OK"], os.environ["AW_DET"]),
-    c("session-topology", os.environ["TP_OK"], os.environ["TP_DET"]),
 ]
 out = {
     "consumers": consumers,
@@ -290,7 +279,7 @@ out = {
 }
 print(json.dumps(out, ensure_ascii=False))
 PYEOF
-  [ "${aw_ok}" = "1" ] && [ "${tp_ok}" = "1" ]
+  [ "${aw_ok}" = "1" ]
 }
 
 # ── CLI ─────────────────────────────────────────────────────────────────────────────────────────

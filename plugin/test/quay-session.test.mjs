@@ -8,15 +8,14 @@ import assert from "node:assert/strict";
 import { GROUP, MEMBERS, list, has, run, runCli } from "../scripts/quay-session.ts";
 import { scriptsDir, makeFakeExec, assertMembers } from "./quay-entry-test-helpers.mjs";
 
-test("quay-session: GROUP is quay-session and the SPEC AC12 member set is registered", () => {
+test("quay-session: GROUP is quay-session and the member set is registered", () => {
   assert.equal(GROUP, "quay-session");
   const want = [
-    "topology-check",
-    "quay-topology", "session-bootstrap", "quay-launch",
+    "quay-launch",
     "manager-tick-readings",
   ];
   assert.ok(assertMembers(MEMBERS, want), `members=${MEMBERS.map((m) => m.name).join(",")}`);
-  assert.equal(list().length, 5);
+  assert.equal(list().length, 2);
 });
 
 test("quay-session: every member declares what question it answers (admission contract, SPEC AC4)", () => {
@@ -27,7 +26,7 @@ test("quay-session: every member declares what question it answers (admission co
 });
 
 test("quay-session: has() resolves members and rejects unknown names", () => {
-  assert.ok(has("topology-check"));
+  assert.ok(has("quay-launch"));
   assert.ok(has("manager-tick-readings"));
   assert.equal(has("no-such-instrument"), false);
 });
@@ -35,20 +34,20 @@ test("quay-session: has() resolves members and rejects unknown names", () => {
 test("quay-session: run() dispatches a bash member through the injected exec with args forwarded", () => {
   const record = [];
   const exec = makeFakeExec(record);
-  const res = run("topology-check", ["--session", "x"], { scriptDir: scriptsDir(), exec });
+  const res = run("quay-launch", ["--dry-run"], { scriptDir: scriptsDir(), exec });
   assert.equal(res.status, 0);
   assert.equal(res.stdout, "fake-ok");
   assert.equal(record.length, 1);
   assert.equal(record[0].command, "bash");
-  assert.ok(record[0].argv[0].endsWith("topology-check.sh"), `argv0=${record[0].argv[0]}`);
-  assert.deepEqual(record[0].argv.slice(1), ["--session", "x"]);
+  assert.ok(record[0].argv[0].endsWith("quay-launch.sh"), `argv0=${record[0].argv[0]}`);
+  assert.deepEqual(record[0].argv.slice(1), ["--dry-run"]);
 });
 
 test("quay-session: run() on an unknown member returns status 2 with a stderr listing known instruments", () => {
   const res = run("bogus", [], { scriptDir: scriptsDir(), exec: makeFakeExec([]) });
   assert.equal(res.status, 2);
   assert.match(res.stderr, /no such instrument "bogus"/);
-  assert.match(res.stderr, /topology-check/);
+  assert.match(res.stderr, /quay-launch/);
 });
 
 test("quay-session: runCli parses <instrument> [args...] and forwards to the member (fake exec)", () => {
@@ -56,9 +55,9 @@ test("quay-session: runCli parses <instrument> [args...] and forwards to the mem
   const exec = makeFakeExec(record);
   // runCli uses the real defaultExec for production; to inject the seam we route through run().
   // Here we only assert the ARG-PARSE shape: unknown-instrument handling and the list verb.
-  const argv = ["node", "quay-session.ts", "quay-topology", "--json"];
+  const argv = ["node", "quay-session.ts", "quay-launch", "--json"];
   const parsed = argv.slice(2);
-  assert.deepEqual(parsed, ["quay-topology", "--json"]);
+  assert.deepEqual(parsed, ["quay-launch", "--json"]);
   assert.ok(has(parsed[0]));
   // runCli list → exit 0 (we don't runCli with the seam; list is pure)
   assert.equal(runCli(["node", "quay-session.ts", "list"], new URL("../scripts/quay-session.ts", import.meta.url).href), 0);

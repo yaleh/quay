@@ -151,8 +151,6 @@
 {"file":"plugin/test/self-touch-convention.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/semantic-observer-judge.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/send-keys-reliable.test.mjs","judgment":"S","mechanism":"S+M","signal":["--group"]}
-{"file":"plugin/test/session-bootstrap.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task"]}
-{"file":"plugin/test/session-topology.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task","concurrency"]}
 {"file":"plugin/test/slot-refill-heartbeat.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/slot-refill.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["--for-task","runner-grouping","lane","concurrency"]}
 {"file":"plugin/test/slot-visibility.test.mjs","judgment":"S","mechanism":"S","signal":["concurrency"]}

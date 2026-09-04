@@ -91,8 +91,7 @@ cd "$REPO_ROOT"    # REPO_ROOT 见 .quay/config.yml loop.repo_root（或 git rev
 
 **启动方式（F4，measured 2026-08-11）：** 本外层会话必须是用**铺下的
 `bash plugin/scripts/quay-launch.sh outer`** 起的（带 `--settings`、窗口名 `quay-outer`），内层必须是用
-`bash plugin/scripts/quay-launch.sh inner` 起的（窗口名 `quay-inner`）；裸机一步是
-`bash plugin/scripts/session-bootstrap.sh <root> inner/outer`。**不是手敲一行 `claude`。** 冷启动检查的是
+`bash plugin/scripts/quay-launch.sh inner` 起的（窗口名 `quay-inner`）。**不是手敲一行 `claude`。** 冷启动检查的是
 「铺下来的 launch 被用起来」——若你的窗口不是这么起的（无 `--settings`、或窗口名是 `inner` 而非 `quay-inner`），
 先经 launcher 重起再继续；`quay-launch.sh --dry-run` 打印每个角色将得到的命令。launch 配置在
 `<root>/.claude/launch.settings.json`（quay-init `--loop` 铺默认模板，按项目改 model/env）。窗口名
@@ -118,48 +117,9 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report -
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 ```
 
-**3. 自检内层会话**——不是「找到」，是「确保」
+**3. 自检内层会话**——已退役（`gap-retire-outer-tmux-window-logic`）
 
-内层不再是「找到就行」——冷启动第 3 步改为**自检**：inner 窗口在不在、claude 进程活不活、
-transcript 有没有真实 user 消息（被驱动过）。四态判定与处理（判据用可信的：窗口按名寻址、
-进程看 `/proc` cmdline、user 消息看 transcript——不用 pane 哈希假阳、不用 heartbeat 冻结假警）：
-
-| 状态 | 判定 | 处理 |
-|---|---|---|
-| **健康** | inner 窗口存在 **且** claude 进程存在 **且** transcript 有真实 user 消息 | **什么都不做**（权限边界——已存在的 inner 可能是更上层建的，外层无权判断/重建/改参数），直接进入正常驱动流程 |
-| **空壳** | inner 窗口存在 **且** claude 进程存在 **但** transcript 无真实 user 消息（被拉起但未驱动） | **驱动而非重建**——不丢可能已有的上下文，接手预建的会话 |
-| **缺失** | inner 窗口不存在 **或** 无 claude 进程 | 调 `quay-topology.sh` 创建**两窗口**拓扑（outer+inner）+ 起 inner claude（checked-in launch 命令），然后驱动 inner |
-| **降级（degraded）** | transcript 由**发现路径**启发式获得（`transcriptSource==discovery`），非显式结构解析——无法确认是当前 inner 会话 | **fail-closed**：不得按 healthy 放行、按 degraded 处理——stderr 报警（discovery/degraded/WARNING），驱动前先核对所选 transcript 确是当前 inner 会话（如 inner claude 进程启动时刻之后的），确认不了就驱动——驱动不重建，代价有界 |
-
-```bash
-bash plugin/scripts/outer-session-check.sh --json   # 四态自检：{state: healthy|empty-shell|missing|degraded, window, process, transcript, transcriptSource, transcriptFresh}
-```
-
-按 `state` 分派：
-
-- **`healthy`** ⇒ 什么都不做——不重建、不重启、不改启动参数（权限边界，负控制：健康 inner 不被动）。
-  继续步骤 4（重建 cron）。
-- **`empty-shell`** ⇒ **驱动** inner（**原生跨会话 SendMessage 可用则用之：ListAgents 寻址、busy 直投、身份平台标注；否则回退 send-keys-reliable**，transcript 验证送达，不假设成功）：
-  ```bash
-  bash plugin/scripts/send-keys-reliable.sh "$TMUX_SESSION:inner" "执行 $REPO_ROOT/docs/analysis/fast-mode-loop-tick.md 中的 tick 指令" <inner-transcript>
-  ```
-- **`missing`** ⇒ 调**两窗口**工厂创建拓扑，验证在位，然后同样驱动 inner：
-  ```bash
-  bash plugin/scripts/quay-topology.sh --session "$TMUX_SESSION"          # 两窗口工厂（outer+inner，幂等）
-  bash plugin/scripts/topology-check.sh --session "$TMUX_SESSION" --json   # 验证：ok:true = 两窗口各有 claude 进程
-  ```
-  创建后 **INNER-DRIVEN 验证送达**：原生 SendMessage 通道以 send 结果/回执确认；回退通道看
-  transcript 出现真实 user 消息（send-keys-reliable 的 `transcript-delivery-check.ts` 判据），不假设成功。
-  **工厂失败/验证不过 ⇒ 升级给人**，不静默继续。
-
-**transcript 路径解析**（outer-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
-> `orchestration/session-liveness.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
-且不是外层自己的 jsonl）。`transcriptSource` 记录来源：显式/配置 = 结构来源，发现路径 = `discovery`。
-找不到 transcript = fresh = 空壳判据（驱动不重建）。
-**发现路径是启发式（fail-closed）**：`transcriptSource==discovery` 时自检报 **`degraded`**——**不得按 healthy
-放行、按 degraded 处理**（stderr 报警 discovery/degraded/WARNING，绝不自作聪明静默放行）。先确认所选
-transcript 确实是**当前** inner 会话的（例如 inner claude 进程启动时刻之后的），确认不了就驱动——驱动不重建，
-代价有界。
+内层会话已由 worker-driver 派发取代（`gap-retire-inner-session-references`），外层独立 tmux 会话角色也已撤销——本步的三态/四态 tmux 窗口自检（窗口按名寻址 / `/proc` 进程 / transcript user 消息）与两窗口拓扑工厂/检查一并退役。内层的存活与驱动不再经本层 tmux 窗口检查，改由 driver 机制承担。
 
 **4. 重建 cron —— 唯一的循环驱动，这一步最容易漏**
 
@@ -728,9 +688,9 @@ tick-log 与 commit message 沿用同一词汇：派发写「滚动派发」，�
    每个 tick（含轻触）**无条件**跑一次 `bash plugin/scripts/observer-registry.sh --audit --json`——
    它问「有没有被登记下线的目标，且所有观测者是否都正确报『已下线』」。被下线的目标写一次在
    `orchestration/observer-registry.conf`（人/管理者显式 `--register-offline`，观测者从不自行猜），
-   所有观测者（os-anchor-watchdog / topology-check）
-   从同一处读。`--audit` 是 AC3 负控制：对每个 offline 目标重建 4 个消费者读面，任一仍报旧状态
-   （REPO-STALL / NOT-WATCHED / GONE / 陈旧拓扑 / watchdog 复活）即 `stale`、退出 1；
+   所有观测者（os-anchor-watchdog）
+   从同一处读。`--audit` 是 AC3 负控制：对每个 offline 目标重建消费者读面，任一仍报旧状态
+   （REPO-STALL / NOT-WATCHED / GONE / watchdog 复活）即 `stale`、退出 1；
    **`stale_observer_reports` 必须恒为 0（band）**。无新系统 crontab：观测者保留各自既有触发，
    本表只是每次读取时先查；`--audit` 与 `sync-lag-check` 同款双触发源（tick 心跳 + land 后事件驱动）。
 3.5 **批量合回 `$FORK_BASELINE`（两线模型的合并机制，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point` AC3）**：

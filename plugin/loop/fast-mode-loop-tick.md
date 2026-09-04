@@ -1075,9 +1075,9 @@ last-run 文件**，任一先触发即写回，另一个在同一窗口内不会
 **每个 tick（含轻触）无条件跑一次** `bash plugin/scripts/observer-registry.sh --audit --json`——
 它问「有没有被登记下线的目标，且所有观测者是否都正确报『已下线』」。被下线的目标写一次在
 `orchestration/observer-registry.conf`（人/管理者显式 `--register-offline`，观测者从不自行猜），
-所有观测者（os-anchor-watchdog / topology-check）
-从同一处读。`--audit` 是 AC3 负控制：对每个 offline 目标重建 4 个消费者读面，任一仍报旧状态
-（REPO-STALL / NOT-WATCHED / GONE / 陈旧拓扑 / watchdog 复活）即 `stale`、退出 1。
+所有观测者（os-anchor-watchdog）
+从同一处读。`--audit` 是 AC3 负控制：对每个 offline 目标重建消费者读面，任一仍报旧状态
+（REPO-STALL / NOT-WATCHED / GONE / watchdog 复活）即 `stale`、退出 1。
 **`stale_observer_reports` 必须恒为 0（band）**——`--audit --json` 的 `consumers[*].stale` 合计。
 无新系统 crontab：观测者保留各自既有触发，本表只是每次读取时先查；`--audit` 与 `sync-lag-check`
 同款双触发源（tick 心跳 + land 后事件驱动）。

@@ -106,15 +106,14 @@ export const MANIFEST: DeliveryCategory[] = [
   {
     id: 4,
     name: "session-topology",
-    label: "会话拓扑",
-    deliverables: [
-      "plugin/scripts/quay-topology.sh",
-      "plugin/scripts/topology-check.sh",
-      "plugin/skills/session-topology/SKILL.md",
-    ],
-    attribution: ["gap-tmux-session-topology-no-factory-definition"],
+    label: "会话拓扑（已退役）",
+    // outer 独立会话角色已撤销（gap-retire-outer-tmux-window-logic）：会话拓扑工厂/检查/技能
+    // 随 outer 一并删除。deliverables 留空使本类目恒 covered（vacuous——missing.length === 0），
+    // 不再对会话拓扑文件的存在与否作判定；保留类目位（id=4, total 仍为 6）以免影响 6/6 结构断言。
+    deliverables: [],
+    attribution: ["gap-retire-outer-tmux-window-logic"],
     criterion:
-      "单窗口（outer）拓扑出厂定义：quay-topology.sh + topology-check.sh + session-topology skill（每层起什么命令、谁驱动谁；manager 跨项目，不属于项目拓扑）",
+      "outer 独立会话角色已撤销——会话拓扑工厂/检查/技能（quay-topology.sh + topology-check.sh + session-topology skill）随 outer 删除；本类目 deliverables 留空使恒 covered（vacuous）",
   },
   {
     id: 5,
