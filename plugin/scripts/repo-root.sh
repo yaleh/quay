@@ -46,6 +46,32 @@ repoRoot() {
   pwd -P
 }
 
+# mainCheckoutRoot — the order-independent main-checkout derivation (bash mirror of repo-root.ts's
+# mainCheckoutRoot; gap-refresh-worktree-quay-main-derive + gap-main-checkout-root-derivation-
+# recurs-three-sites). The main checkout is the PARENT of the repo's shared .git dir
+# (`git rev-parse --git-common-dir`), NOT the first `git worktree list --porcelain` entry — that
+# list's order does NOT guarantee the main working tree first. Prints the absolute main-checkout
+# path; returns 1 (prints nothing) when the dir is not a git repo / unresolvable (callers apply
+# their own fallback).
+mainCheckoutRoot() {
+  local dir="${1:-$_REPO_ROOT_SCRIPT_DIR}"
+  local common_dir=""
+  common_dir="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  if [ -z "$common_dir" ]; then
+    # git < 2.31 has no --path-format: --git-common-dir may return a path RELATIVE to $dir.
+    common_dir="$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null)"
+    case "$common_dir" in
+      /*) ;;
+      *) [ -n "$common_dir" ] && common_dir="$dir/$common_dir" ;;
+    esac
+  fi
+  [ -n "$common_dir" ] || return 1
+  local main=""
+  main="$(cd "$(dirname "$common_dir")" 2>/dev/null && pwd -P)"
+  [ -n "$main" ] || return 1
+  printf '%s\n' "$main"
+}
+
 # Direct-execution convenience: print the root for `bash repo-root.sh [dir]`.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   repoRoot "${1:-}"

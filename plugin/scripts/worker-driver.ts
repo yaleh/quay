@@ -125,7 +125,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 import { TASK_STATUS } from "./task-status.ts";
-import { extractSection } from "./task-schema.ts";
+import { extractSection, countAcCheckboxes } from "./task-schema.ts";
 import { repoRoot } from "./repo-root.ts";
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
@@ -1059,7 +1059,10 @@ export interface ContinueWorkerState {
 
 /** AC 勾选状态（AC2）：读任务文件的 Acceptance Criteria 段，数 `- [x]`（勾）与 `- [ ]`（未勾）。
  *  段从 `## Acceptance Criteria` / `## AC`（含 `（draft）` / `(draft)` 后缀）标题起，到下一个 `## ` 标题止。
- *  文件缺失 / 无 AC 段 ⇒ {checked:null,total:null}（硬规则 3b：读不懂 ≠ 零——与「读到 0 条」可区分）。 */
+ *  文件缺失 / 无 AC 段 ⇒ {checked:null,total:null}（硬规则 3b：读不懂 ≠ 零——与「读到 0 条」可区分）。
+ *  复选框计数委托给 task-schema.ts 的 countAcCheckboxes（gap-ac-checkbox-counting-four-counters-
+ *  drifted）——`[~]`（部分完成）计入 total、算未勾，与规范实现一致；heading 识别（section-finding）
+ *  仍本地持有。 */
 export function readAcCheckState(root: string, taskId: string): { checked: number | null; total: number | null } {
   let text: string;
   try {
@@ -1070,8 +1073,7 @@ export function readAcCheckState(root: string, taskId: string): { checked: numbe
   const lines = text.split("\n");
   let inAc = false;
   let found = false;
-  let checked = 0;
-  let total = 0;
+  const acLines: string[] = [];
   for (const line of lines) {
     if (/^##\s+/i.test(line)) {
       if (inAc) break; // 下一个标题 ⇒ AC 段结束
@@ -1081,16 +1083,11 @@ export function readAcCheckState(root: string, taskId: string): { checked: numbe
       }
       continue;
     }
-    if (!inAc) continue;
-    if (/^\s*-\s*\[[xX]\]/.test(line)) {
-      checked += 1;
-      total += 1;
-    } else if (/^\s*-\s*\[\s*\]/.test(line)) {
-      total += 1;
-    }
+    if (inAc) acLines.push(line);
   }
   if (!found) return { checked: null, total: null };
-  return { checked, total };
+  const ac = countAcCheckboxes(acLines.join("\n"));
+  return { checked: ac.checked, total: ac.total };
 }
 
 /** task/<id> 分支「自己的」提交数（AC2「分支已有提交」）——`HEAD..task/<id>`：只数前一轮 worker 提交的

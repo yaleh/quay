@@ -92,6 +92,15 @@ test("claimsJson / emitsJsonTs / jsonViolation", () => {
   assert.equal(jsonViolation('--json) JSON=1; shift ;;\nprintf \'{"ok":true}\'', "sh"), false);
 });
 
+test("emitsJsonTs / jsonViolation — a checker delegating --json to the base emit functions emits JSON", () => {
+  // The base's emitVerdict/emitPass/emitFail/emitNotEvaluated own JSON.stringify (AC2 alignment) —
+  // a checker that routes --json through them satisfies the JSON primitive requirement.
+  assert.equal(emitsJsonTs('if (args.includes("--json")) return emitFail("n violations", { violations });'), true);
+  assert.equal(emitsJsonTs('return emitNotEvaluated("no input", { specs });'), true);
+  assert.equal(jsonViolation('args.includes("--json"); return emitPass("ok");', "ts"), false);
+  assert.equal(jsonViolation('args.includes("--json"); return emitFail("bad");', "ts"), false);
+});
+
 // ── checkSpine + ratchet (AC2 棘轮 + AC3 负控制) ────────────────────────────────────────────────────
 
 test("AC3 negative control: a checker with exit code 4 is an UNEXEMPTED violation (RED)", () => {

@@ -26,7 +26,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { deriveObligationId } from "./obligation-discharge-agent.ts";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, emitPass, emitFail } from "./gate-script-base.ts";
 
 interface Obligation {
   id: string;
@@ -135,7 +135,7 @@ export function checkLedger(file: string): LedgerCheckResult {
   return { ok: violations.length === 0, violations, roundCount: rounds.length, notes };
 }
 
-function main(argv: string[]): void {
+function main(argv: string[]): number {
   if (argv.includes("--help") || argv.includes("-h")) helpExit("usage: node obligation-ledger-check.ts [--root <dir>] [--ledger <file>]");
   const rootIdx = argv.indexOf("--root");
   const root = rootIdx >= 0 && argv[rootIdx + 1] ? argv[rootIdx + 1] : process.cwd();
@@ -144,16 +144,18 @@ function main(argv: string[]): void {
 
   if (!fs.existsSync(ledger)) {
     process.stdout.write(`obligation-ledger-check: no ledger at ${ledger} — mechanism not yet adopted (fail-open, exit 0)\n`);
-    return;
+    return 0;
   }
   const result = checkLedger(ledger);
   for (const n of result.notes) process.stdout.write(`obligation-ledger-check: note — ${n}\n`);
   if (!result.ok) {
-    process.stderr.write(`obligation-ledger-check: FAIL — ${result.violations.length} ledger-integrity violation(s):\n`);
     for (const v of result.violations) process.stderr.write(`  ${v}\n`);
-    process.exit(1);
+    return emitFail(`obligation-ledger-check: ${result.violations.length} ledger-integrity violation(s)`, {
+      violations: result.violations,
+      roundCount: result.roundCount,
+    });
   }
-  process.stdout.write(`obligation-ledger-check: PASS — ${result.roundCount} round(s), 0 ledger-integrity violations\n`);
+  return emitPass(`obligation-ledger-check: ${result.roundCount} round(s), 0 ledger-integrity violations`);
 }
 
-main(process.argv.slice(2));
+process.exit(main(process.argv.slice(2)));
