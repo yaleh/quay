@@ -1,7 +1,7 @@
 ---
 id: gap-archguard-p2-identity-replication-checker
 title: 落地 P2 身份复制检测器（identity-replication-check.ts）——字面量复制度 + 判定重写数，按位置区分代码/注释/文档
-status: ready
+status: done
 labels:
   - gap
 parent: null
