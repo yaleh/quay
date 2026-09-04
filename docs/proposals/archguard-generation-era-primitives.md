@@ -281,6 +281,100 @@ packages/quay-native/src/store.ts:18
 
 **结论**：82% 纯度与上表四个指标不矛盾——它们在说同一件事的两面：**这个系统里大部分东西彼此没有关系，少数有关系的地方，关系处理得不好。纯度高恰恰是缺乏抽象的另一种读数，不是它的反证。**
 
+### 2.9 分发边界：`quay init` 把删除闭包 / 身份复制问题带到下游项目
+
+前面几节测的都是仓库**内部**的删除闭包与身份复制。本节是同一类问题在**分发边界**上的实例——用真实的 `quay init` 三轮运行复现，不是读代码推测。
+
+**两条独立路径，互不调用**：`packages/quay/src/cli/init.ts`（`quay init` CLI）只生成 `.quay/config.yml` + 空 `tasks/` + launch 配置；真正"铺方法论层"的是 `plugin/scripts/quay-init.sh`（2399 行），`quay:init` skill 委托的唯一拷贝逻辑，本节的分析对象。CLI 显式拒绝 `--loop` 标志（碰撞守卫，注释提到真实用户曾误用导致"静默吞掉+报成功"事故）。
+
+#### 落地清单（`--all --loop --manager` 全量实跑）
+
+```
+142 个文件 / 7.1 MB
+```
+
+| 类别 | 体量 | 说明 |
+|---|---|---|
+| `plugin/scripts/*`（.ts/.sh/.mjs） | **117–131 个文件，3.49–3.6 MB** | quay 自己开发用的机制层脚本（`worker-driver.ts`、`fan-in-ff-merge.sh`、`dispatch-record.ts`、`outer-driver.ts`……），**逐字节复制** |
+| `.quay/runtime/bin/*.js` | 3.0 MB | quay+quay-native CLI 打包 dist，**`.gitignore` 里唯一被排除的部分** |
+| `.claude/workflows/*.js` | 5 个 | fan-in-execute / execute-suite-fix 等执行核 |
+| `orchestration/*.md` + `docs/analysis/*.md` | 3–4 个 | tick 文档 |
+| `plugin/probes/*.md` | 5 个 | routine probe 规格 |
+| `.claude/agents/*.md` + launch 配置 | 若干 | |
+
+字节级核验（`cmp`/`diff` exit=0）：`worker-driver.ts`、`dispatch-record.ts`、`session-liveness.sh` 与仓库源文件完全相同；脚本自带的 `verify-installed-executables` 报告"117 个可执行文件全部字节相同"。
+
+**内部口径不一致（又一处身份复制，这次复制的是"清单"本身）**：`laydown-set-check.sh --list` 认定应落地 **62** 个 `plugin/scripts` 脚本；`quay-init.sh` 自己的 `derive_loop_scripts()` 实际落地 **119–132** 个。**判定"该落地什么"的两处逻辑不是同一份正本。**
+
+#### 污染程度
+
+`.gitignore` 只排除 3.0MB 的 dist 产物——**117–131 个机制层脚本要被提交进目标项目自己的 git 历史**，会作为"目标项目自己的代码"出现在对方的 `git blame`、IDE 搜索、代码审查里。这不是假设性风险：§2.6 已测过，20 个抽样脚本里只有 **4 个（20%）真正开箱可移植**，其余即便功能通用，头注释里也写死了本仓库的 AC 编号和目录布局。`--loop` 是选择性开启的，但一旦开启，背上的是整套自举机制层的结构问题——god-file、身份复制、以及下面这条新发现的保护性缺陷，一起打包出口给下游项目。
+
+#### 冗余副本
+
+落地文件是**副本**，不是**引用**：升级靠整批重新复制，不是指向同一份共享安装。`.quay/quay-init-state.json` 记录 `pluginVersion` + 每文件 sha256——有版本追踪基础设施，目标项目冻结在安装时刻的插件版本，quay 自身升级后旧副本不会自动追平，须显式重跑 `--loop`。
+
+#### 升级场景：三轮实验，完整复现一个保护性缺陷
+
+`copy_one()` 有两种处理差异的模式，覆盖范围极不对称：
+
+| 模式 | 覆盖范围 | 设计意图 |
+|---|---|---|
+| **`clean`** | `plugin/scripts/*` 全部 117–131 个可执行脚本 + probes + `session-liveness.sh`（**92% 的落地量**） | 不区分陈旧安装与用户编辑，一律备份+覆盖；源码注释的理由是"机制可执行文件必须始终最新，因为 `verify-installed-executables.sh` 会对任何漂移 fail-closed" |
+| **`managed`** | tick 文档、launch 配置（约 6 个文件） | 三方哈希比对（上次安装哈希 vs 当前内容 vs 产品）——理论上能区分"陈旧安装可自动替换"和"用户真编辑需 `--force`" |
+
+脚本头部注释对整个安装机制做了统一承诺：*"the upgrade path replaces install-managed stale files (AC5) while a genuine user edit still raises CONFLICT and is preserved (AC6)"*。三轮实测显示，**两种模式都不能稳定兑现这条承诺**：
+
+**`clean` 模式——零保护，实测即见**：
+```bash
+$ echo "// LOCAL USER EDIT" >> plugin/scripts/claim-task.sh
+$ quay-init.sh --all --loop ...
+  drift: plugin/scripts/claim-task.sh — target differs …
+  cleaned-residue: plugin/scripts/claim-task.sh
+    backup: .quay/quay-init-backups/1788491769/claim-task.sh
+  loop: copied=1 skipped=131 conflicted=0
+
+$ grep -c "LOCAL USER EDIT" plugin/scripts/claim-task.sh
+0   # 编辑被覆盖；conflicted=0 —— 工具自己的计数器认为没有冲突发生
+```
+
+**`managed` 模式——保护只维持一轮，第二轮起悄悄失效**（三轮独立复现，全新环境）：
+
+```bash
+# 第 1 轮：全新安装
+$ quay-init.sh --all --loop --tmux-session probe:0.0 --root t3
+
+# 编辑一个 managed 模式文件
+$ echo "USER EDIT LINE MARKER" >> orchestration/orchestrator-loop-tick.md
+
+# 第 2 轮：期望 CONFLICT
+$ quay-init.sh --all --loop --tmux-session probe:0.0 --root t3
+  CONFLICT: .../orchestration/orchestrator-loop-tick.md (content differs — use --force to overwrite)
+  loop: copied=0 skipped=131 conflicted=1
+$ grep -c "USER EDIT LINE MARKER" orchestration/orchestrator-loop-tick.md
+1   # ✓ 正确保留
+
+# 第 3 轮：零改动重跑
+$ quay-init.sh --all --loop --tmux-session probe:0.0 --root t3
+  replaced-stale-install: .../orchestration/orchestrator-loop-tick.md
+    backup: .quay/quay-init-backups/1788492070/orchestrator-loop-tick.md
+  loop: copied=1 skipped=131 conflicted=0
+$ grep -c "USER EDIT LINE MARKER" orchestration/orchestrator-loop-tick.md
+0   # ✗ 编辑消失，且没有报 CONFLICT、没有要求 --force
+```
+
+**根因**：CONFLICT 触发时（第 2 轮），虽然磁盘上的文件正确保留未被覆盖，但收尾的 `write_state_file()` **无条件**把"磁盘上当前的内容"（此刻是用户的编辑）记成了"已安装版本"的哈希，写入 `laidFiles`。到第 3 轮，`laid_hash`（=用户编辑的哈希，第 2 轮被错记）与 `cur_hash`（=用户编辑的哈希，未变）**相等**，判定逻辑因此得出"这只是陈旧安装，可以自动替换"，走的正是无需 `--force` 的静默覆盖分支。state 文件本该记录"安装器放的是什么"，实际记录的是"这一轮结束时磁盘上有什么"——两者在 CONFLICT 发生时是不同的对象，代码把它们当成了同一个。
+
+**反向判据**：若这不是缺陷，第 3 轮（零其它改动）理应与第 2 轮结果一致——文件继续保留用户编辑，或至少继续报 CONFLICT。实测第 3 轮的判定分支与第 2 轮不同（`replaced-stale-install` vs `CONFLICT`），且触发条件仅仅是"多跑了一轮、什么都没再改"——这正是缺陷而非设计。
+
+#### 卸载路径
+
+`grep -rn "quay uninit\|uninstall"` 命中 0——**没有卸载机制**。清理只能靠手工对照 `.quay/quay-init-state.json` 的 `laidFiles` 键，或重跑 `--check-drift` 看漂移报告；没有专门的删除闭包清单。**这正是 P1 原语要解决的问题，出现在了它自己的分发机制里。**
+
+#### 结论：同一个缺陷，从仓库内部被出口到了下游项目
+
+R6/R7（§2.8）测的是仓库内部的镜像会静默漂移；本节测的是**同一个缺陷类别在分发边界上的形态**——只是从"两个副本谁改了没人知道"，变成了"目标项目改了自己的落地副本，下次升级会被吃掉，且吃掉的过程不产生任何会被注意到的信号（`conflicted=0`、`replaced-stale-install` 读起来都像正常流程）"。`clean` 模式覆盖了 92% 的落地量且从设计上就不做保护；`managed` 模式的保护经三轮实测确认只维持一轮。这条发现之所以重要，不在于它是又一个 bug，而在于：**验证 quay 自身架构问题的同一套方法（打印命中样本、对已知真样本干跑、多轮复现），照样在它面向用户的分发路径上找到了结构相同的问题**——架构缺陷不会在产品边界处自动止步。
+
 ## 3. 五个原语
 
 每个原语给出：定义 → 现有工具为何测不到 → 本仓库实测 → 计算方法 → **验收判据（可证否）** → **反向判据（防止它报假阳性）**。
