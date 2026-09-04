@@ -2,7 +2,7 @@
 id: gap-mirror-pair-drift-policy-plugin-scripts-experiments
 title: plugin/scripts/ ↔ experiments/quay-perpetual-stream/scripts/ 45+5
   对镜像文件无通用漂移检测——现有的只是两个个例 checker（workflows/suite-bucket），泛化成通用机制并修复已漂移的 5 对
-status: ready
+status: done
 labels:
   - gap
 parent: null
