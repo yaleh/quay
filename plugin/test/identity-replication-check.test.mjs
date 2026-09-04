@@ -11,7 +11,7 @@
 // Run:
 //   node --experimental-strip-types plugin/test/identity-replication-check.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -28,9 +28,13 @@ import {
   run,
 } from "../scripts/identity-replication-check.ts";
 
-/** Build a temp dir from a {relPath: content} map. Returns the temp dir (caller cleans up). */
+/** Temp dirs created this run — removed in the top-level `after` hook below (test-isolation R6). */
+const _createdDirs = [];
+
+/** Build a temp dir from a {relPath: content} map. Registered for cleanup in the `after` hook. */
 function mktmp(contents) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "irc-test-"));
+  _createdDirs.push(dir);
   for (const [rel, data] of Object.entries(contents)) {
     const p = path.join(dir, rel);
     fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -157,4 +161,8 @@ test("run — 产出完整 report (各 section 在场)", () => {
   assert.ok(report.literalReplication.sessionLiveness);
   assert.ok(report.sharedModuleControl);
   assert.ok(Array.isArray(report.table));
+});
+
+after(() => {
+  for (const dir of _createdDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
