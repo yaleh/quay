@@ -1724,6 +1724,7 @@ declare -A CONSUMER=(
   [doc-check-cache.ts]="谁按：worker-driver.ts 的 fan-in doc-check 步（step 6）在跑 scripts/test.sh --static-checks-doc 前按；条件=doc 面未变时复用上次绿 verdict、面变失效重跑"
   [deliver-verify-usage.sh]="谁按：develop-deliver-tgz.sh 在每台验证机装完 tgz 后按（AC92 usage-verify 段）；条件=交付验证面要与实际使用面相交"
   [develop-work-ff.sh]="谁按：manager/outer 在 doc-only 工作分支上编辑 .md 后要落地回 develop 时按；条件=develop 已脱离主检出、工作分支 delta 须经 --classify-delta 判 doc-only 才 ref 更新合入（AC2 机械强制）"
+  [defect-shape-aggregate.ts]="谁按：manager 在每日复盘节奏（orchestration/REVIEW-cadence.md §3e，与 §3d 趋势判据并列，每次复盘跑一次）按；条件=要判最近 N 条已落地 gap-* 缺陷是否共享同一根（跨任务架构债聚合——「N 次失败同根」的信号单任务记录里看不出，只有跨任务聚类才可见；输出候选报告供人判断是否收敛为架构候选，⛔ 不写任务库不自动立案）"
   [drivable-workspace-check.sh]="谁按：loop 启动前人工/脚本按；条件=workspace 要交给自动 loop 驱动"
   [driver-config.ts]="谁按：worker-driver.ts（resolveConcurrency/parseIntervalMs/parseReconcileIntervalSecs 经 driverCap/loadDriverConfig 读 cap/interval/reconcile）+ promotion-driver.ts（resolveCap/parseIntervalMs）+ cap-from-gate.ts（computeEffectiveCap 经 driverCap 现读）+ outer-driver.ts（main 经 loadDriverConfig 读 interval）+ quality-gate-driver.ts（main 经 loadDriverConfig 读 interval，AC144 补接线）；条件=并发 cap / 轮询间隔 / 协调地板要一份 git 版本化声明式配置的单一真相源（⛔ 不各写一份字面量/env）"
   [driver-filters.ts]="谁按：worker-driver.ts / promotion-driver.ts 在 spawn 前过滤候选时 import（worker 经 applyTaskFilters 全量、promotion 经 applyTaskFilters 取 retryCapNotExhausted/notNeedsHuman 子集）；条件=两驱动要共用同一份五个谓词的可组合列表（⛔ 非各写一遍）"
