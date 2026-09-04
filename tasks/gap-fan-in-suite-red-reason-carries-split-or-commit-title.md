@@ -25,7 +25,7 @@ fan-in suite red 时，`worker-outcome.jsonl` 的 `mechanical_fan_in.reason` / `
 ## Plan
 
 1. 定位 `extractFailureSummary`/`extractFirstFailureLine` 为什么取到「split-or-commit whole-store check」标题行（grep suite log 里该标题行的位置 + 提取逻辑的行匹配顺序）。
-2. 修：摘要提取改为取「真实失败行」（`__PERFILE__ ... passed=false` 或 `AssertionError` 行），不再是 suite log 里第一个「== ... ==」标题。
+2. 修：摘要提取改为取「真实失败行」（`__PERFILE__ ... passed=false` 或 `AssertionError` 行），不再是 suite log 里第一个「== ... ==」标题。另修同族的 flaky 根因：`spawnSuiteAndWait` 的 `finish()` 在日志流 flush 前就 resolve ⇒ `runMechanicalFanIn` 读 suiteLogFile 可能读到空文件 ⇒ reason 回退「suite red」（与标题归因同形）；改为等 `end(callback)` flush 后再 resolve。
 3. 回归：`worker-driver-fan-in.test.mjs` AC1 通过；一条真实 fan-in suite red 的 reason 含真实断言文本。
 
 ## Acceptance Criteria
@@ -42,5 +42,7 @@ fan-in suite red 的 `reason`/`summary` 携带真实失败摘要（真实失败�
 ## Touches
 
 - plugin/scripts/worker-driver.ts（extractFailureSummary / extractFirstFailureLine 及其调用点）
+- plugin/scripts/suite-driver.ts（spawnSuiteAndWait finish 等日志 flush 后再 resolve，⛔ 空/半截读 ⇒ reason 回退 suite red）
 - plugin/test/worker-driver-fan-in.test.mjs（reason 携带真实断言 + 负控制）
+- plugin/test/suite-driver.test.mjs（resolve 时日志已 flush 的回归测试）
 - tasks/gap-fan-in-suite-red-reason-carries-split-or-commit-title.md（自身）

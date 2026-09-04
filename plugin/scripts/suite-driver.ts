@@ -205,8 +205,14 @@ export async function spawnSuiteAndWait(args: {
       if (settled) return;
       settled = true;
       clearInterval(watchdog);
-      suiteLogStream?.end();
-      resolve(r);
+      // ⛔ 不等到流 flush 就 resolve ⇒ caller（runMechanicalFanIn 读 suiteLogFile）会 readFileSync 到空/
+      // 半截文件 ⇒ suite red reason 回退「suite red」（gap-fan-in-suite-red-reason-carries-split-or-commit-
+      // title 的 flaky：AC1 能取假 在满载套件下读到空文件）。等 'finish'（数据已 flush 到 OS）再 resolve。
+      if (suiteLogStream) {
+        suiteLogStream.end(() => resolve(r));
+      } else {
+        resolve(r);
+      }
     };
 
     // 静默看门狗（定时兜底）：每 SILENCE_POLL_MS 看一眼「输出还在推进吗」。stdout/stderr 与日志 mtime
