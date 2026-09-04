@@ -17,7 +17,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { cleanup, runInit, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
 
-const REL = "orchestration/orchestrator-loop-tick.md";
+// quay-init.sh's write_state_file records laidFiles keys as POSIX rel paths (its python joins with
+// "/"), so this key must stay "/"-joined regardless of host OS — expressed via path.posix.join.
+const REL = path.posix.join("orchestration", "orchestrator-loop-tick.md");
 const MARKER = "<!-- local customisation marker (gap-quay-init-write-state-file-corrupts-hash-after-conflict) -->";
 
 function readLaidHash(ws) {
