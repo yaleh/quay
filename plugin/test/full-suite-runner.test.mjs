@@ -229,6 +229,33 @@ test("gap-verification-round-static-fail-no-record AC3 — --buckets <task-id> r
   }
 });
 
+test("gap-perfile-cpu-cost-collection AC3 — the runner's verification-round perFile[] carries cpuMs (writer 之一)", async () => {
+  // The writer path: a suite that emits __PERFILE__ lines WITH `cpu_ms=` lands perFile records whose
+  // `cpuMs` is parsed (via the shared parsePerFileLines); a legacy line without `cpu_ms` leaves the
+  // field ABSENT (never a fabricated 0). This is the full-suite-runner.ts half of the two-writer
+  // contract (the pre-verified-round-record.ts half lives in its own test file).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-perfile-cpu-"));
+  const { f, dir } = fakeSuite(
+    'echo "__PERFILE__ duration_ms=123.456 /repo/a.test.mjs passed=true end_ms=1724000000123 cpu_ms=45.6"\n' +
+      'echo "__PERFILE__ duration_ms=9 /repo/b.test.mjs passed=true"\n' +
+      'echo "# tests 2"\necho "# pass 2"\necho "# fail 0"\necho "# cancelled 0"\nexit 0'
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec && Array.isArray(rec.perFile), "perFile[] present on the round row");
+    const a = rec.perFile.find((r) => r.file.endsWith("a.test.mjs"));
+    const b = rec.perFile.find((r) => r.file.endsWith("b.test.mjs"));
+    assert.equal(a.cpuMs, 45.6, "cpu_ms is parsed into cpuMs on the runner's writer path");
+    assert.equal(b.cpuMs, undefined, "legacy __PERFILE__ line → cpuMs absent (缺键 ≠ 0)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC1 — an invalid --runner value fails closed (nothing written), not a silent fallback (gap-runner-field-hardcoded-outer-not-measurement)", async () => {
   // 硬规则 3b: an unreadable/unparseable input must NOT return a value identical to a valid one —
   // a garbage --runner must exit non-zero before any state write, never silently record "outer".

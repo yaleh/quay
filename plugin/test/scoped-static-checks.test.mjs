@@ -399,6 +399,7 @@ t("AC2 — every run_static_checks checker checker-mutation-check sees is in the
     "fan-in-materialize-check",
     "direct-to-develop-bypass-check",
     "suite-duration-exceed-check",
+    "instrument-decay-check",
   ]);
   // checker-mutation-check.sh's own manifest parser (list_run_static_checks_checkers) extracts the
   // same invocation set from run_static_checks + run_operational_checks + run_doc_checks — the tier

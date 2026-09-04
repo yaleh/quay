@@ -1143,13 +1143,20 @@ _derive_loop_scripts_once() {
   #   to closure step (d) (same class as repo-root.ts / checker-io.ts / canonical-test-files.ts above) —
   #   without explicit entries a laid-down inner-blocked-signal.ts / judge / shim dies with
   #   ERR_MODULE_NOT_FOUND.
+  #   per-file-cpu-report.mjs (gap-perfile-cpu-cost-collection): full-suite-runner.ts (laid down via
+  #   fan-in-execute.js rule (a)) loads this preload seam at RUNTIME via `NODE_OPTIONS=--require=<abs>`
+  #   built from a path.join STRING constant (PER_FILE_CPU_PRELOAD) — NOT an ESM `./` import, NOT a
+  #   `${SCRIPT_DIR}/` shell sibling ref, NOT a doc `plugin/scripts/` path, so (a)/(b)/(d) all miss it.
+  #   Without this explicit entry a cold-started consumer lays down full-suite-runner.ts and dies at
+  #   suite launch with ERR_MODULE_NOT_FOUND (the --require target is absent). Same class as
+  #   suite-params.ts / repo-root.ts above.
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \
     repo-root.sh repo-root.ts checker-io.ts driver-result.ts canonical-test-files.ts suite-params.ts \
-    over90-task-gate.ts semantic-trigger.ts main-thread-edit-check.ts >> "$out"
+    over90-task-gate.ts semantic-trigger.ts main-thread-edit-check.ts per-file-cpu-report.mjs >> "$out"
   # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
   #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
   #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the

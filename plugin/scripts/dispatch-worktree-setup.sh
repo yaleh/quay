@@ -34,8 +34,9 @@
 #   bash plugin/scripts/dispatch-worktree-setup.sh <worktree-path> [--root <main-repo>] [--dry-run]
 #
 #   <worktree-path>  the task worktree to provision (REQUIRED, positional first arg)
-#   --root <main>    the main checkout (default: git worktree list --porcelain first entry, or
-#                    this script's own repo root)
+#   --root <main>    the main checkout (default: order-independent `git rev-parse
+#                    --git-common-dir` via repo-root.sh mainCheckoutRoot, or this script's own
+#                    repo root)
 #   --dry-run        print what would be done, change nothing
 #   --help           usage, exit 0
 #
@@ -71,13 +72,14 @@ done
 [ -d "${worktree}" ] || { echo "dispatch-worktree-setup: worktree dir not found: ${worktree}" >&2; exit 2; }
 
 # ── resolve the main checkout ────────────────────────────────────────────────────────────────
-# --root override wins (hermetic tests pass a throwaway main). Otherwise derive from the worktree's
-# own git registration: `git worktree list --porcelain` lists the MAIN worktree FIRST (guaranteed),
-# and a task worktree's .git file points at the shared gitdir, so this works from any cwd. Fall
-# back to this script's own repo root (SCRIPT_DIR/../..) when the worktree is not a registered git
-# worktree (plain-dir fixtures).
+# --root override wins (hermetic tests pass a throwaway main). Otherwise derive ORDER-INDEPENDENTLY
+# via repo-root.sh's mainCheckoutRoot: the main checkout is the parent of the repo's shared `.git`
+# dir (`git rev-parse --git-common-dir`), NOT the first `git worktree list --porcelain` entry — that
+# list's order does NOT guarantee the main working tree first. Fall back to this script's own repo
+# root (SCRIPT_DIR/../..) when the worktree is not a registered git worktree (plain-dir fixtures).
+. "${SCRIPT_DIR}/repo-root.sh"
 if [ -z "${root}" ]; then
-  root="$(git -C "${worktree}" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')"
+  root="$(mainCheckoutRoot "${worktree}")"
 fi
 [ -n "${root}" ] || root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 [ -d "${root}" ] || { echo "dispatch-worktree-setup: main repo dir not found: ${root}" >&2; exit 2; }

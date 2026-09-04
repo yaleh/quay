@@ -17,6 +17,9 @@
 //   import { repoRoot } from "./repo-root.ts";
 //   const root = repoRoot();                       // from this file's directory
 //   const root = repoRoot(process.cwd());          // from an arbitrary start dir
+//   import { mainCheckoutRoot } from "./repo-root.ts";
+//   const main = mainCheckoutRoot();               // the MAIN checkout (order-independent)
+//   const main = mainCheckoutRoot(someWorktree);   // from a linked/detached worktree
 
 import fs from "node:fs";
 import path from "node:path";
@@ -56,5 +59,49 @@ export function repoRoot(startDir: string = path.dirname(fileURLToPath(import.me
     }).trim();
   } catch {
     return process.cwd();
+  }
+}
+
+/**
+ * mainCheckoutRoot — the order-independent main-checkout derivation
+ * (gap-refresh-worktree-quay-main-derive + gap-main-checkout-root-derivation-recurs-three-sites).
+ * The main checkout is the PARENT of the repo's shared `.git` dir (`git rev-parse
+ * --git-common-dir`), NOT the first `git worktree list --porcelain` entry — that list's order is
+ * NOT guaranteed to place the main working tree first (a linked/detached worktree can be listed
+ * before it). Returns the absolute main-checkout path, or "" when `startDir` is not a git repo /
+ * unresolvable (callers apply their own fallback — fail-open, never abort).
+ */
+export function mainCheckoutRoot(startDir: string = path.dirname(fileURLToPath(import.meta.url))): string {
+  const dir = path.resolve(startDir);
+  let commonDir = "";
+  try {
+    // git >= 2.31: --path-format=absolute returns an absolute common-dir.
+    commonDir = execFileSync("git", ["-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir"], {
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    commonDir = "";
+  }
+  if (!commonDir) {
+    // Older git has no --path-format: --git-common-dir may return a path RELATIVE to `dir`.
+    try {
+      commonDir = execFileSync("git", ["-C", dir, "rev-parse", "--git-common-dir"], {
+        encoding: "utf8",
+        timeout: 5_000,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    } catch {
+      return "";
+    }
+    if (commonDir && !path.isAbsolute(commonDir)) commonDir = path.resolve(dir, commonDir);
+  }
+  if (!commonDir) return "";
+  const main = path.dirname(commonDir);
+  try {
+    return fs.realpathSync(main);
+  } catch {
+    return main;
   }
 }

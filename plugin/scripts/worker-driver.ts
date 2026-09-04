@@ -125,7 +125,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 import { TASK_STATUS } from "./task-status.ts";
-import { extractSection } from "./task-schema.ts";
+import { extractSection, countAcCheckboxes, fetchTaskStatusAtRef } from "./task-schema.ts";
 import { repoRoot } from "./repo-root.ts";
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
@@ -1059,7 +1059,10 @@ export interface ContinueWorkerState {
 
 /** AC 勾选状态（AC2）：读任务文件的 Acceptance Criteria 段，数 `- [x]`（勾）与 `- [ ]`（未勾）。
  *  段从 `## Acceptance Criteria` / `## AC`（含 `（draft）` / `(draft)` 后缀）标题起，到下一个 `## ` 标题止。
- *  文件缺失 / 无 AC 段 ⇒ {checked:null,total:null}（硬规则 3b：读不懂 ≠ 零——与「读到 0 条」可区分）。 */
+ *  文件缺失 / 无 AC 段 ⇒ {checked:null,total:null}（硬规则 3b：读不懂 ≠ 零——与「读到 0 条」可区分）。
+ *  复选框计数委托给 task-schema.ts 的 countAcCheckboxes（gap-ac-checkbox-counting-four-counters-
+ *  drifted）——`[~]`（部分完成）计入 total、算未勾，与规范实现一致；heading 识别（section-finding）
+ *  仍本地持有。 */
 export function readAcCheckState(root: string, taskId: string): { checked: number | null; total: number | null } {
   let text: string;
   try {
@@ -1070,8 +1073,7 @@ export function readAcCheckState(root: string, taskId: string): { checked: numbe
   const lines = text.split("\n");
   let inAc = false;
   let found = false;
-  let checked = 0;
-  let total = 0;
+  const acLines: string[] = [];
   for (const line of lines) {
     if (/^##\s+/i.test(line)) {
       if (inAc) break; // 下一个标题 ⇒ AC 段结束
@@ -1081,16 +1083,11 @@ export function readAcCheckState(root: string, taskId: string): { checked: numbe
       }
       continue;
     }
-    if (!inAc) continue;
-    if (/^\s*-\s*\[[xX]\]/.test(line)) {
-      checked += 1;
-      total += 1;
-    } else if (/^\s*-\s*\[\s*\]/.test(line)) {
-      total += 1;
-    }
+    if (inAc) acLines.push(line);
   }
   if (!found) return { checked: null, total: null };
-  return { checked, total };
+  const ac = countAcCheckboxes(acLines.join("\n"));
+  return { checked: ac.checked, total: ac.total };
 }
 
 /** task/<id> 分支「自己的」提交数（AC2「分支已有提交」）——`HEAD..task/<id>`：只数前一轮 worker 提交的
@@ -3014,16 +3011,9 @@ export function readPreviousGreenSuiteCommit(stateFile: string, task: string): s
   return /^[0-9a-f]{40}$/i.test(sha) ? sha : null;
 }
 
-/** 读 `<ref>:tasks/<task>.md` 的 status frontmatter（git show；ref 不存在 / 文件缺失 / 读不懂 ⇒ null）。 */
-async function readTaskStatusAtRef(worktree: string, ref: string, task: string): Promise<string | null> {
-  const r = await mechSh(["git", "-C", worktree, "show", `${ref}:tasks/${task}.md`], 30_000);
-  if (!r.ok) return null;
-  const m = (r.stdout ?? "").match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!m) return null;
-  const statusLine = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
-  if (!statusLine) return null;
-  return statusLine.slice("status:".length).trim() || null;
-}
+// readTaskStatusAtRef (async) — SINGLE-SOURCE in task-schema.ts as `fetchTaskStatusAtRef`
+// (gap-task-status-parsing-reimplemented-13-sites); imported above. The resident loop must stay async
+// (AC4 — never block on execFileSync).
 
 /** 写 worktree 任务文件 + 提交（flip / reset 共用的机械步：写盘 → add → commit --no-verify）。 */
 async function commitTaskStatusChange(
@@ -3073,7 +3063,7 @@ async function flipTaskDone(
   const doneCount = lines.filter((l) => l === "status: done").length;
   if (doneCount === 1) {
     // done 已存在：判真落地（mergeTarget 的任务文件是否已 done）。已落地 ⇒ skip；未落地 ⇒ reset→flip。
-    const landed = await readTaskStatusAtRef(worktree, mergeTarget, task);
+    const landed = await fetchTaskStatusAtRef(worktree, mergeTarget, task);
     if (landed === "done") return { ok: true, reason: null };
     const reset = text.replace(/^status: done$/m, "status: ready");
     if (!/^status: ready$/m.test(reset)) {

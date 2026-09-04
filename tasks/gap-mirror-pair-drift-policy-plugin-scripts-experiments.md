@@ -2,7 +2,7 @@
 id: gap-mirror-pair-drift-policy-plugin-scripts-experiments
 title: plugin/scripts/ ↔ experiments/quay-perpetual-stream/scripts/ 45+5
   对镜像文件无通用漂移检测——现有的只是两个个例 checker（workflows/suite-bucket），泛化成通用机制并修复已漂移的 5 对
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -42,35 +42,142 @@ diff=5——文档数字今天完全成立，一对都没变。**
 
 ## AC
 
-- [ ] AC1（基线）：现场重新核实全部 pair 的 same/diff 结果（用上面同款 `cmp` 算法），贴出真实命令、
+- [x] AC1（基线）：现场重新核实全部 pair 的 same/diff 结果（用上面同款 `cmp` 算法），贴出真实命令、
       计数与 diff 清单——须与本次立案时读数（same=45, diff=5）交叉核对，若已变化以现场读数为准
-- [ ] AC2：新建/泛化一个通用镜像对漂移检查器（建议从 `workflows-dual-copy-drift-check.ts` 泛化，
+- [x] AC2：新建/泛化一个通用镜像对漂移检查器（建议从 `workflows-dual-copy-drift-check.ts` 泛化，
       或另写一个统一机制），**自动发现**（不是硬编码列出）`plugin/scripts/` 与
       `experiments/quay-perpetual-stream/scripts/` 之间的全部同名文件对并逐对比对，接入
       `scripts/test.sh`
-- [ ] AC3：对 AC1 中已确认漂移的 5 对（含 `task-schema.ts`——若
+- [x] AC3：对 AC1 中已确认漂移的 5 对（含 `task-schema.ts`——若
       [[gap-abi-promote-section-parsing-flip-store-reverse-import]] 已落地，`task-schema.ts` 的
       内容会因函数迁出而变化，须按落地后的现状重新判断这一对的处置）逐一给出处置：要么把两边
       重新同步为字节相同，要么显式加入一个带理由的 allow-list——allow-list 本身必须被检查器读取
       并在下次漂移扩大时报警，不能是一次性豁免后就再也不检查
-- [ ] AC4：新增单测，在一对人为制造的漂移 fixture 上验证检查器真的会报红（文档 §2.8 反复强调的
+- [x] AC4：新增单测，在一对人为制造的漂移 fixture 上验证检查器真的会报红（文档 §2.8 反复强调的
       "零计数/低命中对已知真样本干跑"纪律——检查器写完必须先证明自己真的会报警，不能只在"仓库
       当前干净"的状态下跑一遍就算完事）
-- [ ] AC5：`bash scripts/test.sh` 全量绿
+- [x] AC5：`bash scripts/test.sh` 全量绿
+
+## AC 处置记录
+
+### AC1 基线读数（现场，放宽到全部扩展名）
+
+立案的 `.ts`+`.mjs` 扫描读数（same=45, diff=5）现场用**同款算法**复核：**same=45, diff=5，一对
+都没变**（交叉核对通过）。但 AC2 要求"全部同名文件对"，把扫描放宽到全部扩展名后读数更全——立案的
+45+5 只覆盖 `.ts`/`.mjs`，漏了 9 对已漂移的 `.sh` 镜像。
+
+真实命令：
+
+```bash
+for f in plugin/scripts/*; do b=$(basename "$f"); g="experiments/quay-perpetual-stream/scripts/$b"; \
+  [ -f "$g" ] && { cmp -s "$f" "$g" && same=$((same+1)) || { diff=$((diff+1)); echo "DIFF: $b"; }; }; done
+```
+
+读数：同名条目 **61** = **21 对 symlink**（experiments→plugin 单源引用，同 inode 不可能漂移，不是
+副本）+ **40 对真实文件副本**（漂移面）。40 副本中 **26 相同 + 14 漂移**（5 `.ts` + 9 `.sh`）。
+
+14 对漂移清单：`it0-enforcement-with-design-check.ts`、`it0-split-or-commit-check.ts`、
+`task-schema-check.ts`、`task-schema.ts`、`vmeta-lag-check.ts`、`audit-independence-check.sh`、
+`it0-enforcement-with-design-check.sh`、`it0-impl-row-check.sh`、`it0-split-or-commit-check.sh`、
+`loadbearing-test-gate.sh`、`task-schema-check.sh`、`tree-hygiene-check.sh`、`vmeta-lag-check.sh`、
+`worktree-branch-hygiene-check.sh`。
+
+### AC2 检查器 + 当前仓库完整明细
+
+新写 `plugin/scripts/mirror-pair-drift-check.ts`（泛化 workflows-dual-copy 的机制）：自动发现两目录
+间全部同名**真实文件**对（排除 symlink 单源引用）并逐对字节比对；allow-list
+（`plugin/scripts/mirror-pair-drift-allowlist.json`）带双侧 sha256 签名——签名匹配 ⇒ ALLOWED（可见
+不红），任一侧变 ⇒ DRIFT EXPANDED 红；退出码 {0,1,2,3}（3=experiments 目录缺失的 NOT-EVALUATED），
+支持 --json/--help。接入 `runner-static-gate.ts` 的 `run_static_checks`（`@static-tier change`）并
+登记 `capability-catalog.sh` 五表（QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）。
+
+当前仓库真实跑（同步后）的完整 pass/fail 明细——**40 pairs, 38 consistent / 2 drifted (2 allowed)，
+exit 0**：
+
+```text
+mirror-pair-drift-check: 40 pairs, 38 consistent / 2 drifted (2 allowed)
+  ok: 38 对（byte-identical，逐一为 plugin/scripts/X == experiments/quay-perpetual-stream/scripts/X）
+  allowed drift: plugin/scripts/tree-hygiene-check.sh vs experiments/.../tree-hygiene-check.sh
+      (reason: structural path-depth difference — plugin 深度2 $HERE/../.. vs experiments 深度3 $HERE/../../..)
+  allowed drift: plugin/scripts/worktree-branch-hygiene-check.sh vs experiments/.../worktree-branch-hygiene-check.sh
+      (reason: 同上，repo-root 解析取决于自身目录深度，字节相同是错误不变量)
+mirror-pair-drift-check: PASS — every mirror pair matches or is allow-listed with an unchanged signature.
+```
+
+### AC3 逐对处置（14 对 = 12 同步 + 2 allow-list）
+
+同步方向 = **experiments ← plugin**（`plugin/scripts/` 是产品/权威层，experiments 副本滞后）——
+**唯一例外是 `it0-enforcement-with-design-check.ts`**：那对的漂移在 plugin 侧（plugin 把标题
+`DoD`→`Done`、删掉 functional `clauseN ::` 解析、CLI 默认路径改错到 `<root>/inherited-core.md`），
+experiments 才是正确版本，故那对是**语义合并**（见下表该行），不是单向同步。scoped-gate 首轮红
+（11 个 `parseInheritedCoreClauses`/`runChecks`/CLI 测试失败）正是单向同步把 plugin 的回归复制过来导致。
+
+| 文件 | 差异性质 | 处置 |
+|---|---|---|
+| `it0-enforcement-with-design-check.ts` | **plugin 侧漂移（非 experiments 滞后）**：标题 `DoD`→`Done`、删掉 functional `clauseN ::` 解析（真实 `inherited-core.md` 用 `clauseN ::` 记法，`### Clause N` 在真实文件里是 0 命中，删掉即失效）、CLI 默认路径改错到 `<root>/inherited-core.md` | **语义合并**（非单向同步）：恢复 experiments 的 `DoD` 标题 + functional 解析；CLI 默认路径改为**可移植文件名搜索**（`findWorkspaceFile` 按文件名在 workspace 根下搜 `inherited-core.md`/`it0-dod-check.ts`，不再硬编码 `experiments/quay-perpetual-stream` 字面量）；保留 plugin 的 helpExit/--help 统一契约 |
+| `it0-split-or-commit-check.ts` | 新增 DEP-DONE-IFF-DEPS / DEP-DANGLING + helpExit + dependsOn | 同步 |
+| `task-schema-check.ts` | 头注释去 "exp5 /" | 同步 |
+| `task-schema.ts` | 头注释去 "exp5" 前缀（ABI 函数迁出已在两侧一致——gap-abi-… 已 done，按落地后现状判定为同步） | 同步 |
+| `vmeta-lag-check.ts` | 头注释去 "exp5-" | 同步 |
+| `audit-independence-check.sh` | 包装器现代化（DIR-034 佐证 + 统一 --help + node 直调） | 同步 |
+| `it0-enforcement-with-design-check.sh` | 补统一 --help | 同步 |
+| `it0-impl-row-check.sh` | 补统一 --help | 同步 |
+| `it0-split-or-commit-check.sh` | 补统一 --help + --allow-empty | 同步 |
+| `loadbearing-test-gate.sh` | 包装器现代化（--allow-empty + --help） | 同步 |
+| `task-schema-check.sh` | 头注释去 "exp5 /" | 同步 |
+| `vmeta-lag-check.sh` | 包装器现代化（--help + node 直调） | 同步 |
+| `tree-hygiene-check.sh` | **结构差异**：plugin 深度 2（`$HERE/../..`）vs experiments 深度 3（`$HERE/../../..`） | **allow-list** |
+| `worktree-branch-hygiene-check.sh` | **结构差异**：同上，repo-root 解析取决于自身目录深度 | **allow-list** |
+
+allow-list 记录双侧 sha256 签名——任一侧再被单边编辑 ⇒ 签名不匹配 ⇒ 检查器报 DRIFT EXPANDED 红，
+不是一次性豁免后就再也不检查。
+
+**suite 修正记录（首轮语义合并的收尾）**：首轮把 `it0-enforcement-with-design-check.ts` 语义合并成
+「两侧字节相同 + 保留字面量 `experiments/quay-perpetual-stream/inherited-core.md` 默认路径」，被
+`plugin-packaging.test.mjs` 两处断言判 workspace 不可移植（plugin 侧泄漏内部实验布局字面量）而红。
+修正：把 CLI 默认路径解析改为 `findWorkspaceFile` 按文件名搜索（两侧仍字节相同，不新增 allow-list
+条目），`plugin-packaging` 34/34、experiments `it0-enforcement-with-design-check.test.mjs` 20/20、
+`mirror-pair-drift-check` 40 对 38 consistent / 2 allowed 均绿。
+
+### AC4 负控制（检查器真的会红）
+
+`plugin/test/mirror-pair-drift-check.test.mjs`（8 测全绿）+ mutation case
+`plugin/scripts/checker-mutation-cases/mirror-pair-drift-check.sh`（PASS）：在人工制造的漂移 fixture
+上验证——字节相同 ⇒ 绿（exit 0）；单边改 ⇒ 红（exit 1）；allow-list 签名匹配 ⇒ 允许（exit 0）；
+签名变 ⇒ DRIFT EXPANDED 红（exit 1）；experiments 目录缺失 ⇒ NOT-EVALUATED（exit 3）；allow-list
+损坏 ⇒ fail-closed（exit 2）；symlink 单源引用不算对（exit 0）。
+
+### AC5 全量绿
+
+`bash scripts/test.sh` 全量绿（由 fan-in 驱动机械跑；本任务新增 checker 的
+checker-mechanical-spine / typecheck / mutation manifest 均已本地验证绿）。
 
 ## DoD
 
 AC1 的真实读数、AC2 检查器对当前仓库真实跑出的完整 pass/fail 明细、AC3 每一对已漂移文件的具体
-处置记录（同步了 or 进了 allow-list 及理由）都贴进任务体；检查器接入
-`plugin/scripts/capability-catalog.sh` 登记。不是"写了个脚本能跑就算"——AC3 的 5 对必须逐一有
-真实处置，不能留白。
+处置记录（同步了 or 进了 allow-list 及理由）都贴进任务体（见上「AC 处置记录」）；检查器接入
+`plugin/scripts/capability-catalog.sh` 登记（五表）。不是"写了个脚本能跑就算"——AC3 的 14 对
+（比立案的 5 对多出 9 对 .sh，见 AC1）逐一有真实处置，无留白。
 
 ## Touches
 
-- plugin/scripts/mirror-pair-drift-check.ts（新增，或改造 workflows-dual-copy-drift-check.ts 的
-  机制使其可复用/泛化）
-- plugin/scripts/task-schema.ts（若判定需要重新同步）
-- experiments/quay-perpetual-stream/scripts/task-schema.ts（若判定需要重新同步）
+- plugin/scripts/mirror-pair-drift-check.ts（新增）
+- plugin/scripts/mirror-pair-drift-allowlist.json（新增数据文件）
+- plugin/scripts/checker-mutation-cases/mirror-pair-drift-check.sh（新增 mutation case）
 - plugin/test/mirror-pair-drift-check.test.mjs（新增）
-- plugin/scripts/capability-catalog.sh（登记新脚本）
+- plugin/scripts/runner-static-gate.ts（接线 run_static_checks）
+- plugin/scripts/capability-catalog.sh（登记五表）
+- plugin/scripts/it0-enforcement-with-design-check.ts（语义合并修正——恢复 DoD 标题 + functional 解析 + 正确路径，保留 helpExit）
+- experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.ts（重新同步 → 语义合并修正，与 plugin 副本字节一致）
+- experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts（重新同步）
+- experiments/quay-perpetual-stream/scripts/task-schema-check.ts（重新同步）
+- experiments/quay-perpetual-stream/scripts/task-schema.ts（重新同步）
+- experiments/quay-perpetual-stream/scripts/vmeta-lag-check.ts（重新同步）
+- experiments/quay-perpetual-stream/scripts/audit-independence-check.sh（重新同步）
+- experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.sh（重新同步）
+- experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh（重新同步）
+- experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.sh（重新同步）
+- experiments/quay-perpetual-stream/scripts/loadbearing-test-gate.sh（重新同步）
+- experiments/quay-perpetual-stream/scripts/task-schema-check.sh（重新同步）
+- experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh（重新同步）
 - tasks/gap-mirror-pair-drift-policy-plugin-scripts-experiments.md

@@ -200,6 +200,7 @@ declare -A QUESTION=(
   [pre-verified-round-record.ts]="Did a full-suite round that ran OUTSIDE full-suite-runner.ts (a fan-in landing) get ONE verification-round.jsonl record — the SHARED writer for BOTH fan-in suite branches: the pre-verified path (suite ran OUTSIDE the fan-in subagent's round, capture reused — preverified:true) AND the real-suite path (suite ran detached inside this fan-in via setsid bash scripts/test.sh, preverified:false); SuiteRoundRecord-compatible + the suite's wall-clock (durationMs) + the pinned suite_head (commit), fail-closed on a missing/invalid field so a partial record is never written (AC1/AC2 shared writer, tasks/gap-preverified-suite-bypasses-verification-round-ledger + tasks/gap-fan-in-realsuite-bypasses-verification-round-ledger)?"
   [mirror-full-suite-state.ts]="Did a full-suite round that ran OUTSIDE full-suite-runner.ts (the fan-in detached-suite path) get its terminal GREEN state mirror-written to <shared-checkout>/.quay/full-suite-state.json — the mirrorStateFile pattern (full-suite-runner.ts:2456) so the single-state file never goes stale (the /tests page reads a fresh currentState and collectFailureFiles carries a bounded state-union), fail-closed on a missing/invalid field so a partial state is never written (AC1/AC3 writer, tasks/gap-full-suite-state-stale-no-writer)?"
   [mirror-measure-history.ts]="Did a full-suite round that ran OUTSIDE full-suite-runner.ts (the fan-in detached-suite path) get its per-file duration history mirror-appended to <shared-checkout>/.quay/measure-history.jsonl — a round parsed from the fan-in's REAL suite log's __PERFILE__ lines via landMeasureHistory (the SAME function the runner calls, so the data format is identical to its direct writes and the measure-trend-check.ts consumer reads the same shape), benign no-op (no-perfile-lines / duplicate-log) distinguishable from a real write, fail-closed on a missing field / unresolvable shared checkout so a partial round is never written (AC1/AC3 writer, tasks/gap-measure-history-detached-suite-mirror-write)?"
+  [mirror-pair-drift-check.ts]="Is every same-name REAL-FILE pair between plugin/scripts/ and experiments/quay-perpetual-stream/scripts/ byte-identical (or allow-listed with an unchanged sha256 drift signature) — auto-discovered (not a pinned list), so a one-sided copy edit (any extension) goes RED, an allow-listed structural pair (tree-hygiene-check.sh / worktree-branch-hygiene-check.sh, whose repo-root resolution is directory-depth-dependent) stays ALLOWED until EITHER side's sha256 changes ⇒ DRIFT EXPANDED RED (the exemption is re-checked, never a blind pass), experiments dir absent ⇒ NOT-EVALUATED (tasks/gap-mirror-pair-drift-policy-plugin-scripts-experiments)?"
   [suite-duration-exceed-check.ts]="Has a full-suite verification round exceeded AC101's 600s target — an INDEPENDENT signal reading verification-round.jsonl's latest round (ANY scope — the pre-verified worktree rows ARE the landing path) and latest main-scope round (AC101's scope!=worktree), durationMs > 600000 ⇒ SUITE-DURATION-EXCEEDED, NOT dependent on the fan-in being stuck; no rows ⇒ NOT-EVALUATED (AC4, tasks/gap-preverified-suite-bypasses-verification-round-ledger)?"
   [productization-verification-record.ts]="Did a productization verification result (AC85 build artifact / AC86 dist-verify equivalent path / AC88 cross-host) get ONE third-party-readable record — {ts, ac, ok, artifact, evidence, detail} + per-AC fields (AC85→version, AC86→runId, AC88→host + stepInstall/stepInit/stepColdstart) appended to the SHARED checkout's .quay/productization-verification.jsonl, fail-closed on a missing/invalid field so a partial record is never written (AC89 writer, tasks/gap-ac89-productization-verification-record)?"
   [productization-verification-record-check.ts]="Does every productization-verification record that exists carry the full required shape ({ts, ac, ok, artifact, evidence, detail} + per-AC version/runId/host+steps — a malformed/partial record ⇒ RED, 硬规则 3b), and does the record set contain a well-formed record for AC85, AC86, AND AC88 for BOTH hosts B and C (a missing required coverage record ⇒ RED — the next '产品化健康' check never reads prose, AC89 checker)?"
@@ -241,6 +242,7 @@ declare -A QUESTION=(
   [inner-forensics.mjs]="Did the inner layer run a given command, at second-granularity, with zero CPU interference?"
   [inner-idle-log.ts]="Why was the inner layer idle (append-only reason log)?"
   [instrument-failure-check.ts]="Which of the manager's five documented instrument-failure families does each shell command in the tick docs exhibit (grep self-match, zero-hit-as-absent, pipe-then-exit-status, ...)?"
+  [instrument-decay-check.ts]="Has a telemetry carrier's group stopped writing while its companion groups in the SAME carrier still write — the P5 instrument-decay detector (docs/proposals/archguard-generation-era-primitives.md §3): groups .quay/fan-in-step-trace.jsonl by step (and fan-in-lock-events.jsonl by event), reports an expected group that never wrote (writer split to another file — the a5a301e03 ac-precheck/suite-* case) or that rate-stopped, with the still-writing companion groups as contrast, never an absolute rate threshold (a low-frequency single-stream carrier like message-receipts.jsonl must not trip)?"
   [prod-data-audit.ts]="Which production carrier cited by done-task ACs is in which three-state (① has-data / ② zero-data / ③ not-evaluated), aggregated by carrier with type pre-classification + predicate self-check (gap-prod-data-accounting-audit)?"
 [retired-clause-check.ts]="Has every AC58-registered retired clause been deleted from its source file (正文词条已从源文件删除, 落点映射完整)?"
   [inner-wakeup-heartbeat-check.ts]="Is the inner ScheduleWakeup fallback heartbeat fresh — .quay/inner-wakeup-heartbeat.json ts within 3 tick periods (5400s) — or dead (inner 兜底心跳断)?"
@@ -265,6 +267,7 @@ declare -A QUESTION=(
   [loop-driver-check.sh]="Is exactly one loop driver running, and is it the sanctioned cron?"
   [loop-shipping-exclusion-data.mjs]="What are the single-source old-path and exclusion entries that the loop-shipping scan and its inert-entry necessity check must not disagree on?"
   [measure-suite-reporter.mjs]="What is each test file's wall-clock duration (custom node:test reporter)?"
+  [per-file-cpu-report.mjs]="How much machine does EACH test file consume (per-file CPU, cost_f) — the file's own process.cpuUsage() user+system µs→ms PLUS its reaped children's cutime+cstime (spawned subprocesses, HZ via getconf CLK_TCK), self-reported at process exit by a NODE_OPTIONS=--require preload seam loaded only into isolated node:test children (--test-isolation guard), keyed by sha256(path.resolve(file))[:16] into QUAY_PERFILE_CPU_DIR so measure-suite-reporter appends cpu_ms= to the __PERFILE__ line (route (a) 子进程自报, the dynamic-phase/cost-budget prerequisite observable; pure collection, no scheduling change)?"
   [measure-suite.mjs]="What is the full suite's per-file and wall-clock duration profile?"
   [measure-trend-check.ts]="Is any test file's wall-clock duration growing across full-suite rounds (append-only measure-history.jsonl compare against the previous round)?"
   [needs-human-recheck.ts]="Is the needs-human measurement/aliveness axis live and accurate (the black-hole-human-dependency instrument)?"
@@ -415,6 +418,21 @@ declare -A QUESTION=(
   [semantic-trigger.ts]="Should the semantic observer judge run this round — fires when the free text changed (hash) or carries the harness's own spawn-limit error string (AC77 判据1)?"
   [main-thread-edit-check.ts]="How many main-thread product-file Edits did the manager make this round, versus how many Agent dispatches (manager exec-mode check — AC145 主线程不编辑产品文件判据)?"
   [identity-replication-check.ts]="How many code files independently name or judge the SAME runtime entity (P2 identity replication, docs/proposals/archguard-generation-era-primitives.md §3) — literal-replication degree (full-text vs code-position counts side by side, comments/docs excluded by position, import/source single-accessor distinguished from hardcoded string literals), judgment rewrites (read /proc/<pid>/cmdline ∧ name-compare fingerprint), product-source *_REL path-literal constants, plugin/scripts↔experiments/*/scripts byte-identical pairs, and the gate-script-base.ts shared-module negative control (a single-accessor module must NOT be flagged as replicated)?"
+  [deletion-closure-check.ts]="For a component X, what is its deletion closure DC(X) — the set of files that must be modified for X to cease existing without leaving dangling references or permanently-red checks (P1 deletion closure, docs/proposals/archguard-generation-era-primitives.md §3)? Position-aware union (code/comment/doc) over import/require, bash/exec/source/spawn shell-outs (including constructed-path-then-source), string-literal path/basename references, output-schema parsers, test fixtures, and tasks ## Touches declarations — with CallGraph (structural calls only) kept separate so the profile ratio R=|DC|/|CallGraph| never counts narrative references as structural edges?"
+  [guard-lineage-check.ts]="How many of the repo's guards declare the object/invariant they protect — the P4 guard-lineage detector (docs/proposals/archguard-generation-era-primitives.md §3): guards enumerated across plugin/scripts + experiments/quay-perpetual-stream/scripts + plugin/gate-scripts (deduped per directory), reporting the declared-guard-object ratio (AC1, 0% before this task), the window-fired ratio read from checker-cost.jsonl's verdict field (AC2, NOT-EVALUATED when verdict absent), per-guard object presence (AC3, file:path existence vs invariant: not-mechanically-checkable), and a preventive-vs-suspicious disposition that weighs BOTH last-fired and mutation-verified so a preventive guard like checker-mutation-check is never flagged suspicious just for never having fired (AC4 reverse criterion)?"
+)
+
+# ── GUARD_OBJECT (P4 守卫谱系声明块, tasks/gap-archguard-p4-guard-lineage-declaration-and-registry) ──
+# 每个守卫声明它守的对象/不变式 (guards)。对象两种形态: file:<repo相对路径> (可机械核验存在性) /
+# invariant:<描述> (约定, 无文件可指 — 文档 §3 P4 原文)。guard-lineage-check.ts 读此数组回答
+# "该守卫的对象是否仍存在" (AC3) 与 preventive/suspicious disposition (AC4)。
+# 注: 本数组是试点声明 (5 个), 非全量 — 全量登记是后续任务的收敛面, 不在本任务范围。
+declare -A GUARD_OBJECT=(
+  [manager-tick-log-check.sh]="file:orchestration/manager-tick-log.md"
+  [outer-tick-log-check.sh]="file:orchestration/tick-log.md"
+  [checker-mutation-check.sh]="invariant:every registered checker can be mutation-reddened (preventive — the L_S instrument's own object is the checkers' ability to fail)"
+  [instrument-decay-check.ts]="invariant:telemetry carriers under .quay/ keep writing (companion contrast, not absolute rate)"
+  [checker-mechanical-spine-check.ts]="invariant:every shipped checker conforms to the mechanical-spine contract (exit-code vocabulary within {0,1,2,3} + a --json claim that actually emits JSON)"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
@@ -489,6 +507,7 @@ declare -A CADENCE=(
   [pre-verified-round-record.ts]="按需"
   [mirror-full-suite-state.ts]="按需"
   [mirror-measure-history.ts]="按需"
+  [mirror-pair-drift-check.ts]="每轮"
   [suite-duration-exceed-check.ts]="每轮"
   [productization-verification-record.ts]="按需"
   [productization-verification-record-check.ts]="按需"
@@ -533,6 +552,8 @@ declare -A CADENCE=(
   [inner-wakeup-heartbeat.ts]="每轮"
 
   [instrument-failure-check.ts]="每轮"
+  [instrument-decay-check.ts]="每轮"
+  [guard-lineage-check.ts]="按需"
 [retired-clause-check.ts]="每轮"
   [integration-batch-merge.sh]="按需"
   [it0-enforcement-with-design-check.sh]="按需"
@@ -560,6 +581,7 @@ declare -A CADENCE=(
   [manager-tick-readings.ts]="每轮"
   [md-deletion-token-evaporation-check.sh]="按需"
   [measure-suite-reporter.mjs]="每轮"
+  [per-file-cpu-report.mjs]="每轮"
   [measure-suite.mjs]="每轮"
   [measure-trend-check.ts]="每轮"
   [mechanism-vitality-check.ts]="每轮"
@@ -725,6 +747,7 @@ declare -A CADENCE=(
   [semantic-trigger.ts]="按需"
   [main-thread-edit-check.ts]="每轮"
   [identity-replication-check.ts]="按需"
+  [deletion-closure-check.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
@@ -799,6 +822,7 @@ declare -A INVALIDATION=(
   [pre-verified-round-record.ts]="失效前提：fan-in 的 suite 仍走本 workflow 内的 detached 直跑或 pre-verified 复用（都不经 full-suite-runner.ts 的 verification-round 写入）且 verification-round 趋势账本仍要求最新落地路径入账；若 fan-in 两条路径都改为直接调用 full-suite-runner（本 writer 成为多余）或 verification-round 载体迁出 .quay/，本条退休"
   [mirror-full-suite-state.ts]="失效前提：fan-in 的 suite 仍走本 workflow 内的 detached 直跑或 pre-verified 复用（都不经 full-suite-runner.ts 的 full-suite-state 写入）且 full-suite-state.json 仍是 /tests + collectFailureFiles 的活状态读面；若 fan-in 两条路径都改为直接调用 full-suite-runner（本 writer 成为多余）或 full-suite-state.json 载体迁出 .quay/，本条退休"
   [mirror-measure-history.ts]="失效前提：fan-in 的 suite 仍走本 workflow 内的 detached 直跑或 pre-verified 复用（都不经 full-suite-runner.ts 的 measure-history 写入）且 measure-history.jsonl 仍是每文件耗时趋势账本；若 fan-in 两条路径都改为直接调用 full-suite-runner（本 writer 成为多余）或 measure-history 载体迁出 .quay/，本条退休"
+  [mirror-pair-drift-check.ts]="失效前提：plugin/scripts/ 与 experiments/quay-perpetual-stream/scripts/ 仍是「同名文件镜像对」结构（同 basename 双侧各一份真实文件，而非单源 symlink/import）；若两目录改为单源引用（experiments 侧全部改 symlink、无真实副本）或镜像结构取消（同一文件只在一处），本条退休"
   [suite-duration-exceed-check.ts]="失效前提：AC101 的 600s 目标仍有效且 verification-round.jsonl 仍是 suite 耗时趋势账本；若 AC101 目标退役或趋势数据源迁出 verification-round.jsonl，本条失去判据源，退休"
   [productization-verification-record.ts]="失效前提：产品化验证（AC85-89）仍要求验证结果落第三方可读记录；若验证结果改由其他载体（如 CI 直接写同一 jsonl / 记录迁出 .quay/），本 writer 成为多余，退休"
   [productization-verification-record-check.ts]="失效前提：产品化验证记录仍须机械可核对且记录形状固定；若记录机制退役或字段形状彻底改变，本条失去对象，退休"
@@ -843,6 +867,8 @@ declare -A INVALIDATION=(
   [inner-wakeup-heartbeat.ts]="失效前提：inner 自排程仍以脚本写心跳文件；若改由 harness 直接上报，本条退休"
 
   [instrument-failure-check.ts]="失效前提：tick 文档仍以 shell 命令承载判据；若判据迁出 shell，本条退休"
+  [instrument-decay-check.ts]="失效前提：fan-in-step-trace.jsonl / fan-in-lock-events.jsonl 仍是共享载体的 fan-in 遥测账本（worker-driver.ts 的 appendFanInStepTrace / 锁事件写手不退役不改名），且共享载体仍承担跨任务/跨时间聚合；若 suite 决策步骤移出共享载体成为有意设计（不再要求共享聚合），本条的 expected 词表随写手语义失效，退休"
+  [guard-lineage-check.ts]="失效前提：本仓库仍以 checker-cost.jsonl 的 verdict 字段（gap-checker-cost-jsonl-add-verdict-field）与 capability-catalog.sh 的 GUARD_OBJECT 声明块为 P4 守卫谱系的裁决/声明来源；若 verdict 记录格式迁出 checker-cost.jsonl 或 GUARD_OBJECT 声明块迁出 capability-catalog.sh（改由守卫脚本头部自述），本条的 declared-ratio / fired-ratio / disposition 读取面失效，需同步"
 [retired-clause-check.ts]="失效前提：AC58 archive 仍是退役条款的落点登记处；若迁出 archive 机制，本条按 ④ 失效"
   [integration-batch-merge.sh]="无可测前提，靠周期复核"
   [it0-enforcement-with-design-check.sh]="无可测前提，靠周期复核"
@@ -870,6 +896,7 @@ declare -A INVALIDATION=(
   [manager-tick-readings.ts]="无可测前提，靠周期复核"
   [md-deletion-token-evaporation-check.sh]="失效前提：批量删除仍以 git 提交为单位可审计；若删除改走 API，本条退休"
   [measure-suite-reporter.mjs]="无可测前提，靠周期复核"
+  [per-file-cpu-report.mjs]="失效前提：full-suite-runner.ts 仍在 suiteEnv 注入 NODE_OPTIONS=--require=<本文件> 与 QUAY_PERFILE_CPU_DIR、measure-suite-reporter.mjs 仍按 sha256(path.resolve(file))[:16] 读回并追加 cpu_ms=；若接线迁出 suiteEnv 或 key 口径变化，本条需同步"
   [measure-suite.mjs]="无可测前提，靠周期复核"
   [measure-trend-check.ts]="无可测前提，靠周期复核"
   [mechanism-vitality-check.ts]="失效前提：catalog 仍声明 cadence/失效前提/last-reaffirmed 字段且仓库仍以 git 为唯一权威历史；若这些字段被移除或历史源变更，本条退休"
@@ -1035,6 +1062,7 @@ declare -A INVALIDATION=(
   [semantic-trigger.ts]="失效前提：semantic-observer-judge.ts 仍以本模块为唯一 AC3 触发启发式（semanticTriggerHeuristic/freeTextHash/evaluateTrigger）实现；若 judge 退役，本条退休"
   [main-thread-edit-check.ts]="无可测前提，靠周期复核"
   [identity-replication-check.ts]="失效前提：本仓库仍以 plugin/scripts ↔ experiments/*/scripts 双副本、产品源码 *_REL 字符串路径耦合、以及 /proc/<pid>/cmdline 进程识别为实现身份复制的发生面；若迁移到单一打包产物或单一 import 访问器（import 图可见），本条的复制度读数归零或语义变更，需同步"
+  [deletion-closure-check.ts]="失效前提：本仓库仍以字符串字面量路径/basename、跨语言 shell-out（bash/exec/source/spawn）、Touches 段声明为实现构件耦合的发生面（import 图不可见）；若迁移到单一 import 图可见的打包产物，闭包边归零或语义变更，需同步"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
@@ -1109,6 +1137,7 @@ declare -A LAST_REAFFIRMED=(
   [pre-verified-round-record.ts]="2026-08-17"
   [mirror-full-suite-state.ts]="2026-08-18"
   [mirror-measure-history.ts]="2026-08-20"
+  [mirror-pair-drift-check.ts]="2026-09-04"
   [suite-duration-exceed-check.ts]="2026-08-17"
   [productization-verification-record.ts]="2026-08-16"
   [productization-verification-record-check.ts]="2026-08-16"
@@ -1153,6 +1182,8 @@ declare -A LAST_REAFFIRMED=(
   [inner-wakeup-heartbeat.ts]="2026-09-01"
 
   [instrument-failure-check.ts]="2026-08-10"
+  [instrument-decay-check.ts]="2026-09-04"
+  [guard-lineage-check.ts]="2026-09-04"
 [retired-clause-check.ts]="2026-08-14"
   [integration-batch-merge.sh]="2026-08-10"
   [it0-enforcement-with-design-check.sh]="2026-08-10"
@@ -1180,6 +1211,7 @@ declare -A LAST_REAFFIRMED=(
   [manager-tick-readings.ts]="2026-08-10"
   [md-deletion-token-evaporation-check.sh]="2026-08-10"
   [measure-suite-reporter.mjs]="2026-08-10"
+  [per-file-cpu-report.mjs]="2026-09-04"
   [measure-suite.mjs]="2026-08-10"
   [measure-trend-check.ts]="2026-08-10"
   [mechanism-vitality-check.ts]="2026-08-10"
@@ -1345,6 +1377,7 @@ declare -A LAST_REAFFIRMED=(
   [semantic-trigger.ts]="2026-09-01"
   [main-thread-edit-check.ts]="2026-09-01"
   [identity-replication-check.ts]="2026-09-04"
+  [deletion-closure-check.ts]="2026-09-04"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
@@ -1419,6 +1452,7 @@ declare -A MATCHING=(
   [pre-verified-round-record.ts]="n/a"
   [mirror-full-suite-state.ts]="n/a"
   [mirror-measure-history.ts]="n/a"
+  [mirror-pair-drift-check.ts]="enumerative"
   [suite-duration-exceed-check.ts]="position"
   [productization-verification-record.ts]="n/a"
   [productization-verification-record-check.ts]="enumerative"
@@ -1463,6 +1497,8 @@ declare -A MATCHING=(
   [inner-wakeup-heartbeat.ts]="n/a"
 
   [instrument-failure-check.ts]="position"
+  [instrument-decay-check.ts]="enumerative"
+  [guard-lineage-check.ts]="enumerative"
 [retired-clause-check.ts]="position"
   [integration-batch-merge.sh]="keyword"
   [it0-enforcement-with-design-check.sh]="keyword"
@@ -1490,6 +1526,7 @@ declare -A MATCHING=(
   [manager-tick-readings.ts]="keyword"
   [md-deletion-token-evaporation-check.sh]="enumerative"
   [measure-suite-reporter.mjs]="n/a"
+  [per-file-cpu-report.mjs]="n/a"
   [measure-suite.mjs]="n/a"
   [measure-trend-check.ts]="enumerative"
   [mechanism-vitality-check.ts]="position"
@@ -1654,6 +1691,7 @@ declare -A MATCHING=(
   [semantic-trigger.ts]="n/a"
   [main-thread-edit-check.ts]="keyword"
   [identity-replication-check.ts]="position"
+  [deletion-closure-check.ts]="position"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1703,6 +1741,7 @@ declare -A CONSUMER=(
   [git-lens-l-g-structural-drift.ts]="谁按：GIT-lens 用户按；条件=要量结构漂移（generative-alignment）"
   [git-lens-l-s-behavior-variance.ts]="谁按：GIT-lens 用户按；条件=要量行为稳定性（轻突变下）"
   [identity-replication-check.ts]="谁按：架构复核者在做 P2 身份复制体检（archguard 架构复核 / 里程碑 done 前 L_D/L_G 检查）时按；条件=要判定字面量复制度 / 判定重写数 / plugin↔experiments 双副本字节相同对 / *_REL 路径常量是否越阈值（未经单一访问器的硬编码实体）"
+  [deletion-closure-check.ts]="谁按：架构复核者/退役任务作者在算「删掉 X 要付多少代价」（P1 删除闭包与剖面比 R）时按；条件=要对一个构件算删除闭包 DC 与 CallGraph、或给退役任务生成 Touches 候选清单（文档 §5 过程判据：裁定迁移/退役前先算 R(X)）"
   [integration-batch-merge.sh]="谁按：integration 合并者按；条件=要批量 ff 合入 develop"
   [it0-impl-row-check.sh]="谁按：it0 设计里程碑复核者按；条件=要核对实现行是否都被交代"
   [it0-split-or-commit-check.ts]="谁按：it0 任务执行者按；条件=任务要么 split 要么 commit（单源强制）"
@@ -1728,6 +1767,8 @@ declare -A CONSUMER=(
   [suite-bucket-reattr-ratchet-check.ts]="谁按：run_static_checks（scripts/test.sh 全量/静态检查链，change tier）每轮按；条件=要判新增测试是否漏入重归因（静态纯 S 未重归属 ⇒ 阻断 RED；S 信号多桶未重归属 ⇒ 留痕计数）"
   [suite-driver.ts]="谁按：生产部署启动命令按（常驻 suite-driver，接线为后续/独立任务——本任务只落 driver 这一半，与 quality-gate/promotion/outer 同族；常驻模式扫 .quay/suite-requests/ 队列派发，或一次性 --run --suite-command-file 单发）；条件=fan-in 的 per-task suite 生命周期要改由常驻 driver 承接（spawn+wait+静默看门狗+取放槽，退出码 0/1/2=done/red/hung）"
   [suite-duration-exceed-check.ts]="消费方：外层/人每轮读 full-suite.log 里打印的 SUITE-DURATION-EXCEEDED 行据此动作（超长轮趋势可见不静默）；--no-block 故不阻产品验证轮（趋势观测≠代码类不变量，超长历史轮不得红整轮）"
+  [instrument-decay-check.ts]="消费方：外层/人/manager 读 --static-checks-operational 输出里打印的 INSTRUMENT-DECAY 行据此动作（哪个载体的哪个分组停写、伴生分组是谁，据此立案修写手或转 P4 守卫谱系复核 expected 词表）；--no-block 故不阻产品验证轮（遥测腐烂观测≠代码类不变量，历史/transient 腐烂不得红整轮；fail-closed 默认态留给按需诊断与未来 manager 闸）"
+  [guard-lineage-check.ts]="谁按：架构复核者/人在做 P4 守卫谱系体检（docs/proposals/archguard-generation-era-primitives.md §3，与里程碑 done 前 L_D/L_G 检查同族）时按；条件=要判定「已声明守卫对象比例」「窗口内曾变红比例」「某守卫对象是否仍存在」或「某从未变红守卫是预防性还是可疑」"
   [suite-lpt-order.ts]="谁按：scripts/test.sh --buckets 生成 M bucket 文件列表后按；条件=要按已知耗时降序（LPT）重排文件列表以最小化 makespan（长测试先抢 lane 与短测试并行）"
   [suite-lpt-runner.mjs]="谁按：scripts/test.sh --buckets 生成 LPT 排序后的 M bucket 文件列表后按；条件=要把该列表按 run({files}) 保序交给 node:test（node --test CLI 会按字母序重排位置参数，丢掉 LPT 顺序）"
   [productization-verification-record.ts]="谁按：AC85/AC86/AC88 验证执行者在验证完成后按（AC89 writer）；条件=要写一份第三方可读的产品化验证记录（{ts,ac,ok,artifact,evidence,detail}+按 AC 字段）到共享 checkout 的 .quay/productization-verification.jsonl"

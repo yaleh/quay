@@ -1013,6 +1013,17 @@ test("parsePerFile — drops duration_ms=0 lines (duration>0 filter, same 口径
   assert.deepEqual(parsePerFile(noLines), [], "a log with no __PERFILE__ lines → []");
 });
 
+test("parsePerFile — carries cpuMs on new __PERFILE__ lines, absent on legacy lines (gap-perfile-cpu-cost-collection AC3, writer 之二)", () => {
+  const log = writeSuiteLog(null, [
+    "__PERFILE__ duration_ms=123.456 /home/yale/work/quay-worktrees/gap-foo/plugin/test/foo.test.mjs passed=true cpu_ms=45.6",
+    "__PERFILE__ duration_ms=999.0 /home/yale/work/quay-worktrees/gap-foo/plugin/test/bar.test.mjs passed=false",
+  ]);
+  const perFile = parsePerFile(log);
+  assert.equal(perFile.length, 2, "both __PERFILE__ lines parse");
+  assert.equal(perFile[0].cpuMs, 45.6, "cpu_ms is parsed into cpuMs on this writer's path (writer 之二)");
+  assert.equal(perFile[1].cpuMs, undefined, "legacy line → cpuMs absent (缺键 ≠ 0)");
+});
+
 test("parseCeilingFloor — parses __CEILING__ lines into ceiling (stream order) + floor_ms (DISTINCT floors)", () => {
   const log = writeSuiteLog(null, [
     "__CEILING__ /home/yale/work/quay-worktrees/gap-foo/plugin/test/slow.test.mjs duration_ms=500 floor_ms=123.4 封顶者/该拆",
