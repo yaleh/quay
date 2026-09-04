@@ -87,4 +87,5 @@ INSTRUMENT-DECAY: .quay/fan-in-step-trace.jsonl — 4 group(s) stopped writing
 - plugin/test/instrument-decay-check.test.mjs（新增）
 - plugin/scripts/capability-catalog.sh（登记新脚本）
 - plugin/scripts/runner-static-gate.ts（AC4 接线：run_operational_checks 挂入）
+- plugin/scripts/checker-mutation-cases/instrument-decay-check.sh（instrument-decay-check 的 mutation case——checker-mutation-check AC1b「新 checker 必须有 mutation case」）
 - tasks/gap-archguard-p5-instrument-decay-standing-guard.md
