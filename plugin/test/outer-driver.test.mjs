@@ -24,7 +24,6 @@ import {
   ROUND_LOG_REL,
   OUTER_CONTROL_STATE_REL,
   EVERY_ROUND,
-  parseMonitorMount,
   parseNotYetFlipped,
   parseSlotRefill,
   parseJudgmentConsumer,
@@ -33,7 +32,6 @@ import {
   computeOuterRoundRecord,
   outerRoutines,
   runResidentOuterLoop,
-  monitorMountRoutine,
   notYetFlippedRoutine,
   judgmentConsumerRoutine,
 } from "../scripts/outer-driver.ts";
@@ -62,11 +60,6 @@ test("AC3: outer kind is registered in DRIVER_KINDS (single registry table)", ()
 });
 
 // ── 纯函数（可单测） ────────────────────────────────────────────────────────────────────────────
-
-test("parseMonitorMount: parses mounted/targetOk; malformed ⇒ null", () => {
-  assert.deepEqual(parseMonitorMount('{"mounted":true,"targetOk":true}'), { mounted: true, targetOk: true });
-  assert.equal(parseMonitorMount("not json"), null);
-});
 
 test("parseNotYetFlipped: counts excluded[] not-yet-flipped entries", () => {
   const text = JSON.stringify({
@@ -116,14 +109,6 @@ test("parseClosureTerminal: extracts scanned + closed count", () => {
 
 // ── AC153（Layer 1b form）：读不到输入 ⇒ not-evaluated，⛔ 不是 verified ───────────────────────
 
-test("monitorMountRoutine: unreadable command ⇒ not-evaluated (not verified)", () => {
-  const routine = monitorMountRoutine(makeRoot("mm"), ["false"]);
-  const facts = routine();
-  assert.equal(facts.length, 1);
-  assert.equal(facts[0].name, "monitor_mount");
-  assert.equal(facts[0].state, "not-evaluated");
-});
-
 test("judgmentConsumerRoutine: unreadable command ⇒ not-evaluated (not verified)", () => {
   const routine = judgmentConsumerRoutine(makeRoot("jc"), ["false"]);
   const facts = routine();
@@ -138,15 +123,16 @@ test("notYetFlippedRoutine: unreadable ready-pool ⇒ not-evaluated (not verifie
 
 // ── 例程表 ────────────────────────────────────────────────────────────────────────────────────────
 
-test("outerRoutines: assembles the 10 mechanical routines (each every-round)", () => {
-  // 10 routines — the former A3 halt_status routine was retired with gap-retire-halt-file-driver-based
+test("outerRoutines: assembles the 9 mechanical routines (each every-round)", () => {
+  // 9 routines — the former A3 halt_status routine was retired with gap-retire-halt-file-driver-based
   // (the .halt read moved to the driver control-state; A21 liveness_direct carries the driver-liveness
-  // stall read). B12 自身停止条件是跨轮有状态的计数（counter 跨轮），住在循环体里，⛔ 不是无状态例程。
+  // stall read), and A1 monitor_mount retired with session-liveness 2026-09-03. B12 自身停止条件是跨轮
+  // 有状态的计数（counter 跨轮），住在循环体里，⛔ 不是无状态例程。
   const routines = outerRoutines(makeRoot("tbl"));
-  assert.equal(routines.length, 10);
+  assert.equal(routines.length, 9);
   const names = routines.map((r) => r.name);
   for (const expected of [
-    "monitor_mount", "occupancy", "not_yet_flipped", "closure_lag", "slot_refill",
+    "occupancy", "not_yet_flipped", "closure_lag", "slot_refill",
     "liveness_direct", "closure_pass", "closure_record", "telemetry_snapshot", "judgment_consumer",
   ]) {
     assert.ok(names.includes(expected), `routine table should include ${expected}`);

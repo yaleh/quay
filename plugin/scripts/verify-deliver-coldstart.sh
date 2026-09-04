@@ -412,7 +412,7 @@ probe_l1() {
   L1_OUTER_TICK=0; L1_INNER_TICK=0; L1_LOOP_SCRIPTS=0; L1_CONFIG=0; L1_RUNTIME=0
   [ -f "$root/orchestration/orchestrator-loop-tick.md" ] && L1_OUTER_TICK=1
   [ -f "$root/docs/analysis/fast-mode-loop-tick.md" ] && L1_INNER_TICK=1
-  [ -f "$root/plugin/scripts/session-liveness.sh" ] && L1_LOOP_SCRIPTS=1
+  [ -f "$root/plugin/scripts/loop-driver-check.sh" ] && L1_LOOP_SCRIPTS=1
   [ -f "$root/.quay/config.yml" ] && L1_CONFIG=1
   [ -f "$root/.quay/runtime/bin/quay.js" ] && L1_RUNTIME=1
   # 函数始终返回 0：L1 缺件是【数据】（L1_OK=0），不是控制流失败（set -e 不得因 L1 缺件中断）
@@ -530,7 +530,7 @@ selfcheck() {
            "$dead_ws/.quay/runtime/bin" "$dead_ws/tasks"
   printf '# outer\n' > "$dead_ws/orchestration/orchestrator-loop-tick.md"
   printf '# inner\n' > "$dead_ws/docs/analysis/fast-mode-loop-tick.md"
-  printf '#!/bin/bash\n' > "$dead_ws/plugin/scripts/session-liveness.sh"
+  printf '#!/bin/bash\n' > "$dead_ws/plugin/scripts/loop-driver-check.sh"
   printf 'providers: {}\n' > "$dead_ws/.quay/config.yml"
   printf '//x\n' > "$dead_ws/.quay/runtime/bin/quay.js"
   git -C "$dead_ws" init -q -b main >/dev/null 2>&1
@@ -551,7 +551,7 @@ selfcheck() {
            "$alive_ws/.quay/runtime/bin" "$alive_ws/tasks"
   printf '# outer\n' > "$alive_ws/orchestration/orchestrator-loop-tick.md"
   printf '# inner\n' > "$alive_ws/docs/analysis/fast-mode-loop-tick.md"
-  printf '#!/bin/bash\n' > "$alive_ws/plugin/scripts/session-liveness.sh"
+  printf '#!/bin/bash\n' > "$alive_ws/plugin/scripts/loop-driver-check.sh"
   printf 'providers: {}\n' > "$alive_ws/.quay/config.yml"
   printf '//x\n' > "$alive_ws/.quay/runtime/bin/quay.js"
   git -C "$alive_ws" init -q -b main >/dev/null 2>&1

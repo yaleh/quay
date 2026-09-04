@@ -82,23 +82,17 @@ test('AC2 — the helper derives the laydown set by the SAME grep as quay-init.s
     'helper derived set must EQUAL quay-init DERIVED_SCRIPTS (same grep, no second list)');
 });
 
-test('AC4 — session-liveness.sh and session-liveness-mount.sh ARE in the derived set (the M3 wait was correct)', () => {
+test('AC4 — the retired observer scripts are NOT in the derived set (deleted, no referenced-not-landed)', () => {
   const list = runHelper(['--list', '--json']);
   assert.equal(list.status, 0);
   const parsed = JSON.parse(list.stdout);
   const all = [...parsed.scripts];
-  assert.ok(all.includes('session-liveness.sh'),
-    'session-liveness.sh must be in the derived laydown set (M3 regression would ship with it)');
-  assert.ok(all.includes('session-liveness-mount.sh'),
-    'session-liveness-mount.sh must be in the derived laydown set');
-  // session-liveness.sh's tests resolve via the SPLIT-prefix pairing (session-liveness.sh →
-  // session-liveness-events/heartbeat/signals.test.mjs — the basename-pair convention generalized to
-  // split products, gap-laydown-set-check-ac4-stale-after-split). The M3 regression IS gate-visible:
-  // at least one of the split fragments resolves. NOT the deleted pre-split single file.
-  const hasSplitTest = parsed.test_files.some((tf) =>
-    /plugin\/test\/session-liveness-(events|heartbeat|signals)\.test\.mjs$/.test(tf));
-  assert.ok(hasSplitTest,
-    'session-liveness.sh must resolve to its split test files (events/heartbeat/signals) — the gate can catch the M3 shape');
+  assert.ok(!all.includes('session-liveness.sh'),
+    'session-liveness.sh must NOT be in the derived laydown set (retired 2026-09-03)');
+  assert.ok(!all.includes('session-liveness-mount.sh'),
+    'session-liveness-mount.sh must NOT be in the derived laydown set (retired)');
+  assert.ok(!all.includes('monitor-mount-check.sh'),
+    'monitor-mount-check.sh must NOT be in the derived laydown set (retired)');
 });
 
 // ── AC1/AC4: 铺设集内全绿 ⇒ green（可铺）；铺设集内失败 ⇒ red（阻塞）────────────────────────────

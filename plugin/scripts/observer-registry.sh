@@ -7,7 +7,7 @@
 #   learn a target had been decommissioned:
 #     1. os-anchor-watchdog (systemd timer) revived a deliberately-decommissioned archguard
 #     2. a manager git-staleness Monitor kept reporting growing REPO-STALL for that archguard
-#     3. a session-liveness-coverage Monitor reported NOT-WATCHED for a decommissioned B machine
+#     3. (a retired session-coverage Monitor once reported NOT-WATCHED for a decommissioned B machine)
 #     4. a session-topology Monitor reported a stale cached value after B's tmux server terminated
 #   The pre-existing diagnosis (gap-os-anchor-watchdog-lease-model-instead-of-absence-inference)
 #   covers only consumer #1. THIS FILE is the class-level mechanism.
@@ -207,7 +207,7 @@ register_target() {
 }
 
 # ── --audit: the AC3 negative control, as a command ──────────────────────────────────────────────
-# For EVERY target registered offline, rebuild each of the 4 known consumers' read-surface and
+# For EVERY target registered offline, rebuild each of the 2 known consumers' read-surface and
 # verify it reports "decommissioned" (not stale live state). A consumer is `stale` if any offline
 # target still yields an old-state report. Emits JSON:
 #   {"consumers":[{"name","stale","detail"},...], "offline_targets":[...], "all_fresh":bool}
@@ -221,11 +221,10 @@ do_audit() {
     [ "$status" = "offline" ] && offline+=("$name")
   done < <(print_entries)
 
-  local aw_ok=1 gs_ok=1 slc_ok=1 tp_ok=1
-  local aw_det="" gs_det="" slc_det="" tp_det=""
+  local aw_ok=1 tp_ok=1
+  local aw_det="" tp_det=""
   if [ "${#offline[@]}" -eq 0 ]; then
-    aw_det="no offline targets"; gs_det="no offline targets"
-    slc_det="no offline targets"; tp_det="no offline targets"
+    aw_det="no offline targets"; tp_det="no offline targets"
   fi
 
   local name entry root sess cfg out
@@ -256,34 +255,7 @@ do_audit() {
       aw_det+="${name}->watchdog-not-installed(skipped); "
     fi
 
-    # consumers 2 & 3 — session-liveness surface (git-staleness reads REPO-STALL from it;
-    # session-liveness-coverage reads the SESSION-STATUS watch verdict from it).
-    # SL_NO_REGISTER=1: the audit is a READ-type check of each consumer's read-surface — it must
-    # not self-register an observer into the shared <root>/.quay/ dir (session-liveness.sh writes
-    # .quay/session-liveness.<pid>.json on startup unless SL_NO_REGISTER=1). Under the concurrent
-    # suite those transient writes race with the real resident monitor's registration file in the
-    # same dir — the shared report-landing that flaked AC3 (gap-observer-registry-audit-flaky-test).
-    if [ -f "$SELF_DIR/session-liveness.sh" ]; then
-      out="$(SL_NO_REGISTER=1 SESSION_TARGETS="$name $root $sess:outer" bash "$SELF_DIR/session-liveness.sh" --once 2>&1)" || true
-      if printf '%s\n' "$out" | grep -q "SESSION-STATUS $name decommissioned"; then
-        gs_det+="${name}->decommissioned(no REPO-STALL); "
-        slc_det+="${name}->decommissioned; "
-      else
-        gs_ok=0; slc_ok=0
-        gs_det+="${name}->STALE; "
-        slc_det+="${name}->STALE; "
-      fi
-      # git-staleness negative sub-check: REPO-STALL for an offline target is precisely the stale
-      # report the class is about (case 2).
-      if printf '%s\n' "$out" | grep -q "REPO-STALL $name"; then
-        gs_ok=0; gs_det+="${name}->REPO-STALL-FIRED; "
-      fi
-    else
-      gs_det+="${name}->session-liveness-not-installed(skipped); "
-      slc_det+="${name}->session-liveness-not-installed(skipped); "
-    fi
-
-    # consumer 4 — session-topology: topology-check --session must say "decommissioned".
+    # consumer 2 — session-topology: topology-check --session must say "decommissioned".
     if [ -f "$SELF_DIR/topology-check.sh" ]; then
       out="$(bash "$SELF_DIR/topology-check.sh" --session "$sess" 2>&1)" || true
       if printf '%s\n' "$out" | grep -q "decommissioned"; then
@@ -302,16 +274,13 @@ do_audit() {
   else
     offline_json="[]"
   fi
-  AW_OK="$aw_ok" AW_DET="$aw_det" GS_OK="$gs_ok" GS_DET="$gs_det" \
-  SLC_OK="$slc_ok" SLC_DET="$slc_det" TP_OK="$tp_ok" TP_DET="$tp_det" \
+  AW_OK="$aw_ok" AW_DET="$aw_det" TP_OK="$tp_ok" TP_DET="$tp_det" \
   OFFLINE_JSON="$offline_json" python3 - <<'PYEOF'
 import json, os
 def c(name, ok, det):
     return {"name": name, "stale": (ok != "1"), "detail": det.strip()}
 consumers = [
     c("os-anchor-watchdog", os.environ["AW_OK"], os.environ["AW_DET"]),
-    c("git-staleness", os.environ["GS_OK"], os.environ["GS_DET"]),
-    c("session-liveness-coverage", os.environ["SLC_OK"], os.environ["SLC_DET"]),
     c("session-topology", os.environ["TP_OK"], os.environ["TP_DET"]),
 ]
 out = {
@@ -321,7 +290,7 @@ out = {
 }
 print(json.dumps(out, ensure_ascii=False))
 PYEOF
-  [ "${aw_ok}" = "1" ] && [ "${gs_ok}" = "1" ] && [ "${slc_ok}" = "1" ] && [ "${tp_ok}" = "1" ]
+  [ "${aw_ok}" = "1" ] && [ "${tp_ok}" = "1" ]
 }
 
 # ── CLI ─────────────────────────────────────────────────────────────────────────────────────────

@@ -2503,7 +2503,7 @@ export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, nowMs 
 // ── AC95: six new views (dashboard · system · manager · tests · sessions · architecture) ───────────
 // Each new view reads the MECHANISM that produces its numbers (AC2):
 //   system       → resource-gate.sh + process-budget.sh (text output)
-//   manager      → loop-driver-check.sh + session-liveness.sh + observer-registry.conf + ready-pool-check.ts
+//   manager      → loop-driver-check.sh + observer-registry.conf + ready-pool-check.ts
 //   tests        → .quay/verification-round.jsonl + .quay/full-suite-state.json (the suite-state writer)
 //   sessions     → claude agents --json (running) + transcript-dir scan (ended) + transcript tails
 //   architecture → git log per packages/* path + git worktree list (filesystem/git facts)
@@ -2530,7 +2530,7 @@ function resolvePluginScript(rel: string): string | null {
 
 /**
  * Run a plugin script with a HARD deadline and a process-group kill — the robust path for bash
- * scripts that may fork background children (session-liveness.sh spawns `sleep` children and defers
+ * scripts that may fork background children (some scripts spawn `sleep` children and defer
  * SIGTERM while they run; a plain execFileSync timeout would block the serve event loop for the
  * child's whole sleep). Spawns detached (own process group), redirects stdout to a temp file so a
  * grandchild inheriting the stdout fd can never hold 'close' open, and on timeout SIGKILLs the
@@ -2726,7 +2726,6 @@ export interface ManagerResult {
 }
 
 export const LOOP_DRIVER_CHECK_REL = "../../../plugin/scripts/loop-driver-check.sh";
-export const SESSION_LIVENESS_REL = "../../../plugin/scripts/session-liveness.sh";
 export const OBSERVER_REGISTRY_CONF = "../../../orchestration/observer-registry.conf";
 
 /** Parse loop-driver-check.sh --json's single JSON document into structured fields. Pure. */
@@ -2739,47 +2738,6 @@ export function parseLoopDriverJson(text: string): Omit<LoopDriverReading, "stat
     exitCode: jsonNum(j, "exit_code"),
     detail: typeof j.detail === "string" && j.detail.length > 0 ? j.detail : null,
   };
-}
-
-/** Parse session-liveness.sh --once --json's { sessions: [...] } document into rows. Pure.
- *  (AC99 — the Manager view's machine-readable interface.) */
-export function parseSessionLivenessJson(text: string): Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> {
-  const out: Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> = [];
-  let j: { sessions?: Array<{ name?: unknown; alive?: unknown; pid?: unknown; halted?: unknown }> } = {};
-  try { j = JSON.parse(text) as typeof j; } catch { /* invalid JSON → no rows */ }
-  for (const s of j.sessions ?? []) {
-    const name = typeof s?.name === "string" ? s.name : "";
-    if (!name) continue;
-    out.push({
-      name,
-      alive: s.alive === true,
-      pid: typeof s.pid === "number" && Number.isFinite(s.pid) ? s.pid : null,
-      halted: s.halted === true,
-    });
-  }
-  return out;
-}
-
-/**
- * Parse session-liveness.sh --once's `SESSION-STATUS <name> alive=… [pid=…] halted=…` rows. Pure.
- *
- * pid is OPTIONAL: the seam emits `alive=0 halted=0` (no `pid=` field) when the target's session
- * is gone — a dead layer must still surface as a GONE card, never be silently dropped.
- */
-export function parseSessionLivenessOutput(text: string): Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> {
-  const out: Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> = [];
-  for (const line of text.split(/\r?\n/)) {
-    const m = /^SESSION-STATUS\s+(\S+)\s+alive=(\d+)(?:\s+pid=(\d+))?\s+halted=(\d+)/.exec(line);
-    if (m) {
-      out.push({
-        name: m[1],
-        alive: m[2] === "1",
-        pid: m[3] == null || m[3] === "0" ? null : Number.parseInt(m[3], 10),
-        halted: m[4] === "1",
-      });
-    }
-  }
-  return out;
 }
 
 /** Parse observer-registry.conf (`name|status|root|tmux|note` lines, # comments skipped). Pure. */
@@ -2800,38 +2758,6 @@ export function parseObserverRegistry(text: string): ObserverRow[] {
   return rows;
 }
 
-/**
- * Build explicit SESSION_TARGETS for the manager page's session-liveness probe: two named targets
- * (`outer → <session>:outer`, `inner → <session>:inner`) derived from the workspace's
- * orchestration/session-liveness.env SESSION_TMUX_SESSION.
- *
- * The env override is scoped to THIS probe (readManager) — it never mutates the shared
- * orchestration/session-liveness.env, so the outer/inner liveness mounts that source that file
- * keep their existing single target (AC3: existing mounts must not be disturbed).
- *
- * Returns null when the session name is unavailable (no env file / no SESSION_TMUX_SESSION) — the
- * caller then falls back to the script's own resolution (its env-file SESSION_TARGETS), preserving
- * the pre-existing display rather than inventing targets. An invented target would be a fake
- * reading (hard rule ④ — it can never be false), so we fail-closed to "no override".
- */
-export function buildManagerSessionTargets(root: string): string | null {
-  let text: string;
-  try {
-    text = fs.readFileSync(path.join(root, "orchestration", "session-liveness.env"), "utf8");
-  } catch {
-    return null;
-  }
-  for (const rawLine of text.split(/\r?\n/)) {
-    const m = /^SESSION_TMUX_SESSION=(.*)$/.exec(rawLine.trim());
-    if (!m) continue;
-    let session = m[1].trim().replace(/^["']|["']$/g, "");
-    session = session.split(":")[0]; // strip any window/pane suffix → base session name
-    if (!session) continue;
-    return `outer ${root} ${session}:outer\ninner ${root} ${session}:inner`;
-  }
-  return null;
-}
-
 /** loop-driver-check.sh --json → verdict/exit_code/detail. AC99: the JSON interface replaces the
  *  first-line text parse; exit code is carried in the JSON (0 LIVE / 3 STALLED / 4 DOUBLE /
  *  5 BANNED / 6 DEAD). One of readManager's four CONCURRENT probes. */
@@ -2841,22 +2767,6 @@ async function runLoopDriverProbe(root: string): Promise<LoopDriverReading> {
     return { status: "empty", reason: r.reason, verdict: null, exitCode: null, detail: null };
   }
   return { status: "ok", reason: null, ...parseLoopDriverJson(r.stdout) };
-}
-
-/** session-liveness.sh --once --json → per-target liveness rows (--once is REQUIRED: without it
- *  the script MOUNTS and polls forever — the serve path must never block the event loop on it).
- *  The manager page is three-layer (Outer / Inner); the shared orchestration/session-liveness.env
- *  only carries the OUTER's single inner target (管理者多目标配置已外移到 ~/.quay-global), so we
- *  pass an explicit SESSION_TARGETS override registering outer + inner — scoped to this probe,
- *  never mutating the env file the outer/inner mounts source (AC3). AC99: the --json output is
- *  requested (the Manager view's machine-readable interface). One of readManager's four CONCURRENT
- *  probes. */
-async function runLivenessProbe(root: string, targets: string | null): Promise<SessionLivenessReading> {
-  const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000, targets ? { SESSION_TARGETS: targets } : undefined);
-  const rows = r.stdout == null ? [] : parseSessionLivenessJson(r.stdout);
-  if (r.stdout == null) return { status: "empty", reason: r.reason, sessions: [] };
-  if (rows.length === 0) return { status: "empty", reason: "session-liveness 无 SESSION-STATUS 行（无观测目标）", sessions: [] };
-  return { status: "ok", reason: null, sessions: rows };
 }
 
 // ── Short-TTL cache for the promotion-driver round-carrier probe (WebUI display surface only) ────
@@ -3002,7 +2912,7 @@ async function readDevelopLead(root: string): Promise<number | null> {
 
 /**
  * Manager view — LIGHT path for the dashboard display surface (gap-webui-dashboard-load-time-
- * optimization AC1): loop-driver + session-liveness ONLY, WITHOUT the pool probe.
+ * optimization AC1): loop-driver ONLY, WITHOUT the pool probe.
  *
  * The dashboard's mgrCard (serve-handlers.ts renderDashboardPage) shows only loopDriver.verdict +
  * the alive-session count — it never renders pool/floor/deficit/cap. readPoolMetrics (AC136) now
@@ -3017,20 +2927,16 @@ async function readDevelopLead(root: string): Promise<number | null> {
  * does not show it, and a git rev-list is a subprocess we skip on the light path).
  */
 export async function readManagerLight(root: string): Promise<ManagerResult> {
-  const targets = buildManagerSessionTargets(root);
-  const [loopDriver, liveness] = await Promise.all([
-    runLoopDriverProbe(root),
-    runLivenessProbe(root, targets),
-  ]);
+  const loopDriver = await runLoopDriverProbe(root);
 
   const version: string | null = QUAY_VERSION || null;
 
-  const degraded = loopDriver.status === "empty" && liveness.status === "empty";
+  const degraded = loopDriver.status === "empty";
   return {
     status: degraded ? "empty" : "ok",
     reason: degraded ? "manager 观测机制脚本缺失" : null,
     loopDriver,
-    liveness,
+    liveness: { status: "empty", reason: "liveness observer retired 2026-09-03", sessions: [] },
     observers: { status: "empty", reason: "dashboard 轻量探针不含 observers（/manager 详情页才含）", rows: [] },
     pool: { status: "empty", reason: "dashboard 轻量探针不含 pool（/manager 详情页才含）", pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] },
     version,
@@ -3038,22 +2944,20 @@ export async function readManagerLight(root: string): Promise<ManagerResult> {
   };
 }
 
-/** Manager view: loop-driver + session-liveness + observer registry + promotion-driver pool metrics. */
+/** Manager view: loop-driver + observer registry + promotion-driver pool metrics (the liveness
+ *  observer was retired 2026-09-03 — no longer probed). */
 export async function readManager(root: string): Promise<ManagerResult> {
-  // AC1 (gap-webui-dashboard-manager-slow-parallelize): the four async probes are independent — run
-  // them CONCURRENTLY. readPoolMetrics (AC136) reads the promotion-driver's round carrier — a small
+  // AC1 (gap-webui-dashboard-manager-slow-parallelize): the probes are independent — run them
+  // CONCURRENTLY. readPoolMetrics (AC136) reads the promotion-driver's round carrier — a small
   // sync file read, no subprocess — so the ~9s slot-refill cold-call floor is gone from the manager
-  // path too. buildManagerSessionTargets is a tiny synchronous file read needed for the liveness
-  // probe's SESSION_TARGETS override, so it runs first; observers registry + version are small sync
-  // reads kept inline.
-  const targets = buildManagerSessionTargets(root);
-
-  const [loopDriver, liveness, pool, developLead] = await Promise.all([
+  // path too. observers registry + version are small sync reads kept inline.
+  const [loopDriver, pool, developLead] = await Promise.all([
     runLoopDriverProbe(root),
-    runLivenessProbe(root, targets),
     readPoolMetrics(root),
     readDevelopLead(root),
   ]);
+
+  const liveness: SessionLivenessReading = { status: "empty", reason: "liveness observer retired 2026-09-03", sessions: [] };
 
   // observer-registry.conf — the single registration surface (mechanism input, not prose).
   let observers: ManagerResult["observers"];
@@ -3076,7 +2980,7 @@ export async function readManager(root: string): Promise<ManagerResult> {
   // carries no '../package.json').
   const version: string | null = QUAY_VERSION || null;
 
-  const degraded = loopDriver.status === "empty" && liveness.status === "empty" && pool.status === "empty";
+  const degraded = loopDriver.status === "empty" && pool.status === "empty";
   return {
     status: degraded ? "empty" : "ok",
     reason: degraded ? "manager 观测机制脚本缺失" : null,
@@ -3257,7 +3161,7 @@ export function readTests(root: string): TestsResult {
   return { status: statePathStatus, reason, runs };
 }
 
-// ── Sessions view (session-liveness + resolved transcript tails) ───────────────────────────────────
+// ── Sessions view (resolved transcript tails) ───────────────────────────────────────────────────────
 
 export interface SessionMessage {
   time: string;
@@ -3372,8 +3276,8 @@ export function readTranscriptTail(transcriptPath: string, maxMsgs = SESSIONS_TR
 }
 
 // ── `claude agents --json` discovery (gap-webui-session-discovery-claude-agents-json) ───────────────
-// The official CLI session registry replaces the old three-role tmux-guessing discovery
-// (buildManagerSessionTargets → session-liveness.sh). It lists EVERY running session — interactive
+// The official CLI session registry replaces the old three-role tmux-guessing discovery. It lists
+// EVERY running session — interactive
 // AND `-p`/headless alike (SPEC §2.2 更正段) — but only RUNNING ones: ended sessions are absent from
 // the registry (SPEC §2.4) and are discovered separately by scanning the transcript directory.
 
@@ -3539,8 +3443,8 @@ export function isValidSessionId(sessionId: string): boolean {
   return SESSION_ID_RE.test(sessionId);
 }
 
-/** The per-project transcript directory slug — the same `tr '/' '-'` transform session-liveness.sh
- *  uses (`_sl_dynamic_transcript`), so `/home/yale/work/quay` → `-home-yale-work-quay`. */
+/** The per-project transcript directory slug — the `tr '/' '-'` transform, so
+ *  `/home/yale/work/quay` → `-home-yale-work-quay`. */
 export function projectSlug(root: string): string {
   return root.split("/").join("-");
 }

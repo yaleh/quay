@@ -47,7 +47,8 @@ function bucketsBranchSrc(testSh) {
   return lines.slice(start, end === -1 ? lines.length : end).join("\n");
 }
 
-/** The 8 SCD test files, in sorted basename order (the canonical-glob family). */
+/** The SCD test files, in sorted basename order (the canonical-glob family) — now retired
+ *  (gap-retire-session-liveness), so this must resolve to the empty list. */
 function scdFiles() {
   const dir = path.join(REPO_ROOT, "plugin", "test");
   return fs
@@ -56,23 +57,12 @@ function scdFiles() {
     .sort();
 }
 
-test("AC1 — all 8 session-liveness-scd-*.test.mjs files declare @test-group serial (none engine)", () => {
+test("AC1 — the SCD family (session-liveness-scd-*.test.mjs) is retired (0 files remain)", () => {
   const files = scdFiles();
-  assert.equal(files.length, 8, `expected exactly 8 SCD files, got ${files.length}: ${files.join(", ")}`);
-  const byGroup = new Map();
-  for (const f of files) {
-    const src = fs.readFileSync(path.join(REPO_ROOT, "plugin", "test", f), "utf8");
-    const m = src.match(/@test-group\s+([a-z]+)/);
-    const g = m ? m[1] : "engine";
-    byGroup.set(f, g);
-  }
-  for (const [f, g] of byGroup) {
-    assert.equal(g, "serial", `${f} must be @test-group serial (got ${g})`);
-  }
   assert.equal(
-    [...byGroup.values()].filter((g) => g === "engine").length,
+    files.length,
     0,
-    "no SCD file may remain @test-group engine (the main concurrency phase)",
+    `session-liveness-scd-*.test.mjs must all be retired by gap-retire-session-liveness; got ${files.length}: ${files.join(", ")}`,
   );
 });
 
@@ -133,10 +123,10 @@ test("AC5 — the TS classifier returns the correct @test-group for engine/lowco
   assert.equal(classifyGroup("plugin/test/suite-bucket-load-sensitive-isolation.test.mjs"), "engine");
   // lowconc: a still-lowconc file (worker-driver.test.mjs — the worker lifecycle family).
   assert.equal(classifyGroup("plugin/test/worker-driver.test.mjs"), "lowconc");
-  // serial: the real-install quay-init family AND the SCD family (reclassified lowconc→serial by
-  // gap-session-liveness-scd-target-move-to-serial, AC1).
+  // serial: the real-install quay-init family (reclassified to serial by
+  // gap-session-liveness-scd-target-move-to-serial, AC1). The SCD family itself is retired
+  // (gap-retire-session-liveness) — no scd-fire classification to pin.
   assert.equal(classifyGroup("plugin/test/quay-init.test.mjs"), "serial");
-  assert.equal(classifyGroup("plugin/test/session-liveness-scd-fire.test.mjs"), "serial");
   // Take-false: a missing declaration must default to engine (classifyFile's AC7 default), NOT an
   // empty string — an empty group is what the Discovered Issue #1 misdiagnosed as "undefined".
   // (The fixture text must NOT contain the literal "@test-group <word>" — classification FAIL-CLOSES on

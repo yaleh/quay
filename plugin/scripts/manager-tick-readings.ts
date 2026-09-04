@@ -8,9 +8,6 @@
 // 契约：
 //   - tmux 纯只读：只用 `list-panes`（含 -a 全量枚举）；零破坏性 tmux 子命令（kill 族一律不用）。AC2。
 //   - 身份判据：`pane_pid` + `pane_current_command`（cmd=claude 才算认出会话）；不用 pgrep 的 `-P` 子进程寻址。AC4。
-//   - 监视器实例枚举按 argv[0..1]（argv[1] basename == session-liveness.sh），不 grep 整条 cmdline
-//     （§1.4c 自匹配教训；monitor-mount-check.sh 同一谓词）；再加 root 过滤——解析后的脚本路径须落在
-//     主检出 repoRoot 下，worktree 测试进程（quay-worktrees/）不误计（硬规则 4b）。
 //   - 输出固定结构、逐行带标签：人为跳过一项 ⇒ 该标签行缺失，可被机械检出，不是静默少几行。AC3。
 //
 // 用法:
@@ -20,8 +17,7 @@
 // 测试/环境接缝（生产调用不设 → 行为不变）:
 //   MTR_PROJECTS           项目表 name=dir 空格分隔（默认 quay/archguard/meta-cc 于 /home/yale/work）
 //   MTR_TMUX_LIST_PANES    直接给定 `list-panes -a` 输出（tmux 只读接缝，测试用）
-//   MTR_ENTRY_LAST_COMMIT  直接给定 quay-session.ts 最后改动 epoch（git 接缝，测试用）
-//   TMUX_TMPDIR            tmux socket 覆盖（同 session-liveness.sh 的测试机制）
+//   TMUX_TMPDIR            tmux socket 覆盖（同 tmux 只读的测试机制）
 
 import fs from "node:fs";
 import path from "node:path";
@@ -31,9 +27,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 
 export const NAME = "manager-tick-readings";
 export const TMUX_LIST_PANES_SEAM = "MTR_TMUX_LIST_PANES";
-export const ENTRY_LAST_COMMIT_SEAM = "MTR_ENTRY_LAST_COMMIT";
 export const PROJECTS_SEAM = "MTR_PROJECTS";
-export const HZ = 100; // Linux USER_HZ（/proc/<pid>/stat starttime 的 tick 速率）
 
 export interface Project {
   name: string;
@@ -102,7 +96,7 @@ export function parsePanes(raw: string): PaneInfo[] {
   });
 }
 
-/** 只读 tmux：`env -u TMUX tmux -S <socket> list-panes -a`（读真实默认服务端，同 session-liveness.sh AC3）。 */
+/** 只读 tmux：`env -u TMUX tmux -S <socket> list-panes -a`（读真实默认服务端）。 */
 export function tmuxListPanes(socket: string, env: NodeJS.ProcessEnv = process.env): PaneInfo[] {
   const seam = env[TMUX_LIST_PANES_SEAM];
   const raw = seam !== undefined ? seam : runTmuxListPanes(socket, env);
@@ -365,39 +359,6 @@ export function latestTickLog(project: Project, maxLen = 200, opts?: { mtimeEpoc
   return truncate(r.row, maxLen);
 }
 
-export interface StatInfo {
-  ppid: number;
-  startEpoch: number;
-}
-
-/** 读 /proc/<pid>/stat：ppid（字段 4）与 starttime（字段 22）→ epoch。 */
-export function readStat(pid: number, procRoot = "/proc"): StatInfo {
-  let stat = "";
-  try {
-    stat = fs.readFileSync(path.join(procRoot, String(pid), "stat"), "utf8");
-  } catch {
-    return { ppid: 0, startEpoch: 0 };
-  }
-  const close = stat.lastIndexOf(")");
-  const rest = close >= 0 ? stat.slice(close + 1).trim().split(/\s+/) : [];
-  const ppid = Number(rest[1] ?? 0);
-  const startTicks = Number(rest[19] ?? 0);
-  return { ppid, startEpoch: startTicksToEpoch(startTicks, procRoot) };
-}
-
-export function startTicksToEpoch(startTicks: number, procRoot = "/proc"): number {
-  if (!startTicks) return 0;
-  let btime = 0;
-  try {
-    const s = fs.readFileSync(path.join(procRoot, "stat"), "utf8");
-    const m = s.match(/^btime\s+(\d+)/m);
-    if (m) btime = Number(m[1]);
-  } catch {
-    btime = 0;
-  }
-  return btime + Math.floor(startTicks / HZ);
-}
-
 export function readCmdline(pid: number, procRoot = "/proc"): string[] {
   try {
     const buf = fs.readFileSync(path.join(procRoot, String(pid), "cmdline"));
@@ -405,85 +366,6 @@ export function readCmdline(pid: number, procRoot = "/proc"): string[] {
   } catch {
     return [];
   }
-}
-
-export interface MonitorInstance {
-  pid: number;
-  ppid: number;
-  startEpoch: number;
-  stale: boolean;
-}
-
-/** 读 /proc/<pid>/cwd 链接目标（进程当前工作目录）。失败返回空串。 */
-export function readCwd(pid: number, procRoot = "/proc"): string {
-  try {
-    return fs.readlinkSync(path.join(procRoot, String(pid), "cwd"));
-  } catch {
-    return "";
-  }
-}
-
-/** 把 argv[1] 解析为绝对脚本路径：绝对 → normpath；相对 → 按进程 cwd 解析再 normpath
- *  （挂载常以 `bash plugin/scripts/session-liveness.sh` 形式启动，cwd = 项目根；
- *   monitor-mount-check.sh 的 resolve_script_path 同构）。 */
-export function resolveScriptPath(pid: number, argvScript: string, procRoot = "/proc"): string {
-  if (path.isAbsolute(argvScript)) return path.normalize(argvScript);
-  const cwd = readCwd(pid, procRoot);
-  if (!cwd) return path.normalize(argvScript); // cwd 不可得时退化为相对路径（仍不命中 root 过滤）
-  return path.normalize(path.join(cwd, argvScript));
-}
-
-/** root 过滤：解析后的脚本路径是否落在主检出 repoRoot 下（排除 worktree 测试进程等外仓实例）。
- *  `repoRoot + path.sep` 前缀判定——`quay-worktrees/<task>` 是 `repoRoot` 的兄弟目录，
- *  不满足前缀（`/home/yale/work/quay-worktrees/…` 不以 `/home/yale/work/quay/` 开头）。 */
-export function isMainCheckoutScript(resolved: string, repoRoot: string): boolean {
-  const root = path.normalize(repoRoot);
-  return resolved === root || resolved.startsWith(root + path.sep);
-}
-
-/** 枚举 session-liveness 监视器实例：argv[0]=bash 且 argv[1] basename == session-liveness.sh，
- *  且解析后的脚本路径落在主检出 repoRoot 下（root 过滤——worktree 测试进程不误计，硬规则 4b）。 */
-export function monitorInstances(entryLastCommit: number, repoRoot: string, procRoot = "/proc"): MonitorInstance[] {
-  const out: MonitorInstance[] = [];
-  let entries: string[] = [];
-  try {
-    entries = fs.readdirSync(procRoot);
-  } catch {
-    return out;
-  }
-  for (const d of entries) {
-    if (!/^\d+$/.test(d)) continue;
-    const pid = Number(d);
-    const argv = readCmdline(pid, procRoot);
-    if (argv.length < 2 || argv[0] !== "bash") continue;
-    if (path.basename(argv[1]) !== "session-liveness.sh") continue;
-    if (!isMainCheckoutScript(resolveScriptPath(pid, argv[1], procRoot), repoRoot)) continue;
-    const { ppid, startEpoch } = readStat(pid, procRoot);
-    out.push({
-      pid,
-      ppid,
-      startEpoch,
-      stale: entryLastCommit > 0 && startEpoch > 0 && entryLastCommit > startEpoch,
-    });
-  }
-  out.sort((a, b) => a.pid - b.pid);
-  return out;
-}
-
-/** quay-session.ts 最后一次改动（§1.4 的「我跑的是不是旧版」的入口面信号）。 */
-export function entryLastCommitEpoch(repoRoot: string, env: NodeJS.ProcessEnv = process.env): number {
-  const seam = env[ENTRY_LAST_COMMIT_SEAM];
-  if (seam !== undefined) {
-    const n = Number(seam);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  }
-  const res = spawnSync(
-    "git",
-    ["log", "-1", "--format=%ct", "--", "plugin/scripts/quay-session.ts"],
-    { cwd: repoRoot, encoding: "utf8", env },
-  );
-  const n = Number((res.stdout || "").trim());
-  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 export interface GoalReading {
@@ -529,8 +411,6 @@ export function render(projects: Project[], opts: RenderOpts): string {
   const procRoot = opts.procRoot ?? "/proc";
   const resources = resourceReadings(procRoot);
   const outer = outerReadings(projects, resolvePanes(projects, opts.socket, env));
-  const entryCommit = entryLastCommitEpoch(opts.repoRoot, env);
-  const monitors = monitorInstances(entryCommit, opts.repoRoot, procRoot);
 
   const lines: string[] = [];
   lines.push(`manager-tick-readings ts=${Date.now()}`);
@@ -550,13 +430,6 @@ export function render(projects: Project[], opts: RenderOpts): string {
     }
   }
   for (const p of projects) lines.push(`outer.ticklog ${p.name} ${latestTickLog(p, 200, { full: true })}`);
-  lines.push(`monitor.mounted ${monitors.length > 0}`);
-  lines.push(`monitor.instances ${monitors.length}`);
-  lines.push(`monitor.entry_last_commit ${entryCommit || "unknown"}`);
-  for (const m of monitors) {
-    const iso = m.startEpoch ? new Date(m.startEpoch * 1000).toISOString() : "unknown";
-    lines.push(`monitor.instance ${m.pid} start=${m.startEpoch}(${iso}) ppid=${m.ppid} stale=${m.stale}`);
-  }
   return `${lines.join("\n")}\n`;
 }
 

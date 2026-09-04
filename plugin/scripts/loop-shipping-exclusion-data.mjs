@@ -241,6 +241,11 @@ export function exclusionEntries(repoRoot, pluginDir) {
     },
     { rel: 'README.md', target: path.join(repoRoot, 'README.md'), reason: "the cold-start section documents the TARGET project's laid-down layout (orchestration/ + docs/analysis/)" },
     {
+      rel: 'docs/proposals/archguard-generation-era-primitives.md',
+      target: path.join(repoRoot, 'docs', 'proposals', 'archguard-generation-era-primitives.md'),
+      reason: "proposal record (archguard generation-era primitives) — §2.9 分发边界 documents a three-round experiment that edits the DEPLOYED tick-doc copy at orchestration/orchestrator-loop-tick.md via `quay-init.sh --all --loop --root t3` (the consumer target layout), a transcript excerpt of the deployed copy, not a live source-copy reference to the moved mechanism; same target-layout class as quay-init.sh / install-config-driven-e2e.test.mjs",
+    },
+    {
       rel: 'experiments/quay-perpetual-stream/fixtures/scheduler',
       target: path.join(repoRoot, 'experiments', 'quay-perpetual-stream', 'fixtures', 'scheduler'),
       reason: "replay fixtures (gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet): the eligibility check's OUTPUT embeds the old-path regex patterns as DATA (the replay pins what the scheduler names), not live callers",

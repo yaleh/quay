@@ -65,17 +65,6 @@ export const ROUTINE_TIMEOUT_MS = 120_000;
 
 // ── 纯函数（可单测）：解析各脚本输出为结构化值 ─────────────────────────────────────────────────────
 
-/** 解析 monitor-mount-check.sh --json 输出。返回 { mounted, targetOk }；解析失败 ⇒ null。 */
-export function parseMonitorMount(text: string): { mounted: boolean; targetOk: boolean } | null {
-  try {
-    const j = JSON.parse(text);
-    if (j && typeof j === "object") return { mounted: !!j.mounted, targetOk: !!j.targetOk };
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 /** 解析 ready-pool-check --json 输出，抽取 not-yet-flipped 计数（excluded[] 里 reasons 含
  *  not-yet-flipped 的条数，AC9 判据字段）。解析失败 ⇒ null。 */
 export function parseNotYetFlipped(text: string): { nyf: number; pool: number } | null {
@@ -195,16 +184,6 @@ function runExit(argv: string[], root: string): { exit: number | null; ok: boole
 function factOf<T>(name: string, value: T | null, notEvaluatedReason: string): Fact {
   if (value === null) return { name, value: null, state: "not-evaluated", reason: notEvaluatedReason };
   return { name, value, state: "verified", reason: null };
-}
-
-/** A1 · monitor-mount 读数：`monitor-mount-check.sh --json` → { mounted, targetOk }。 */
-export function monitorMountRoutine(root: string, cmd: string[] | null): () => Fact[] {
-  return () => {
-    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "monitor-mount-check.sh"), "--json"];
-    const parsed = runJson(argv, root);
-    const v = parsed && typeof parsed === "object" ? parseMonitorMount(JSON.stringify(parsed)) : null;
-    return [factOf("monitor_mount", v, "monitor-mount-check unreadable/unparseable")];
-  };
 }
 
 /** A6 · 占用率：`slot-refill --cap 5 --json` → in_flight / occupied_slots / effective_cap。 */
@@ -340,7 +319,6 @@ export function judgmentConsumerRoutine(root: string, cmd: string[] | null): () 
  *  schedule 字段保留供未来把低频例程（如 B17 每 N 轮）分化出来。cmd 覆盖是测试缝（同 promotion 的
  *  --ready-pool-cmd），缺省用真实命令。 */
 export function outerRoutines(root: string, opts: {
-  monitorMountCmd?: string[] | null;
   readyPoolCmd?: string[] | null;
   slotRefillCmd?: string[] | null;
   closureLagCmd?: string[] | null;
@@ -350,7 +328,6 @@ export function outerRoutines(root: string, opts: {
   judgmentConsumerCmd?: string[] | null;
 } = {}): RoutineSpec[] {
   return [
-    { name: "monitor_mount", schedule: EVERY_ROUND, run: monitorMountRoutine(root, opts.monitorMountCmd ?? null) },
     { name: "occupancy", schedule: EVERY_ROUND, run: occupancyRoutine(root, opts.slotRefillCmd ?? null) },
     { name: "not_yet_flipped", schedule: EVERY_ROUND, run: notYetFlippedRoutine(root, opts.readyPoolCmd ?? null) },
     { name: "closure_lag", schedule: EVERY_ROUND, run: closureLagRoutine(root, opts.closureLagCmd ?? null) },

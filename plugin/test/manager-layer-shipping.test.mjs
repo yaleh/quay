@@ -75,9 +75,8 @@ test('AC3 — cold-start/SKILL.md AC8c has no dead-key references (inner-state.s
   const src = fs.readFileSync(COLD_START_SKILL, 'utf8');
   const deadKeyRe = /inner-state\.sh|send-keys-verified/;
   const hits = src.split('\n').map((l, i) => ({ i: i + 1, l })).filter(({ l }) => deadKeyRe.test(l));
-  assert.deepEqual(hits, [], 'cold-start AC8c must contain NO dead-key reference (inner-state.sh, send-keys-verified) — the live observer is session-liveness.sh, the live delivery check is transcript-delivery-check.ts');
+  assert.deepEqual(hits, [], 'cold-start AC8c must contain NO dead-key reference (inner-state.sh, send-keys-verified) — the live delivery check is transcript-delivery-check.ts');
   // Positive control: the live mechanisms ARE present (the check must keep resolving power).
-  assert.match(src, /session-liveness-mount\.sh/, 'cold-start must reference the live observer mount (session-liveness-mount.sh)');
   assert.match(src, /send-keys-reliable\.sh/, 'cold-start must reference the live reliable-send mechanism (send-keys-reliable.sh)');
 });
 

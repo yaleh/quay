@@ -126,16 +126,14 @@ depends_on:
 
 > 判据2：逐条打印并分类（活指令 / 退役注记 / 历史记述），不得只给计数。分类表锚=命中行逐字前 70 字符。
 > 下表覆盖 4 份 loop 文档：inner/outer 模板（plugin/loop/，checker 强制）+ inner/outer 实例副本（docs/analysis/、orchestration/，补充/outer 建议）。
-> 摘要：inner 模板 35 处 = 活指令（有效）2 / 活指令→退役物 10 / 退役注记 7 / 历史（含过时）16；outer 模板 12 处 = 活指令→退役物 8 / 历史（含过时）4。
+> 摘要：inner 模板 33 处 = 活指令（有效）0 / 活指令→退役物 10 / 退役注记 7 / 历史（含过时）16；outer 模板 12 处 = 活指令→退役物 8 / 历史（含过时）4。
 
-### inner-template：`plugin/loop/fast-mode-loop-tick.md`（35 处, checker 强制）
+### inner-template：`plugin/loop/fast-mode-loop-tick.md`（33 处, checker 强制）
 
 | 分类 | 命中行（锚=逐字前 70 字符） | 说明 |
 |---|---|---|
 | 历史记述（过时） | `> quay 自身在 .quay/config.yml 覆盖成 fork_baseline: develop / merge_target:` | 描述 quay 旧两线配置 fork_baseline: develop / merge_target: integration；AC50 已切单线 |
 | 活指令→退役物 | `开始晚于最近一次 integration fan-in；机械判定 = integration-batch-merge.sh 自带的 fres` | 机械判定引用已 RETIRED 的 integration-batch-merge.sh 自带 freshness gate |
-| 活指令（有效） | `session-liveness-signals-kinds.test.mjs / session-liveness-signals-thr` | 测试文件名 session-liveness-signals-integration.test.mjs，仍存在 |
-| 活指令（有效） | `全绿（fail 0 / cancelled 0，$TEST_COMMAND plugin/test/session-liveness-eve` | $TEST_COMMAND 测试清单含同一测试文件 |
 | 历史记述 | `### 分支模型（两线：develop + integration，gap-branch-model-integration-branch-` | 两线分支模型节标题（gap-branch-model-…） |
 | 历史记述 | `**结构根因**（orchestration/SPEC-branching-model-integration-branch-2026-08` | 结构根因：master 曾同时是分叉基线与汇入点（SPEC-branching-model…） |
 | 历史记述 | `| **develop** | **已验证基线**（绿） | **所有任务从它分叉**（新模型一律 develop，gap-worktree` | 两线模型表（develop 行：已验证基线，integration→develop 批量合） |
