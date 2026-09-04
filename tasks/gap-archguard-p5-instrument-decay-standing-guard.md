@@ -88,4 +88,5 @@ INSTRUMENT-DECAY: .quay/fan-in-step-trace.jsonl — 4 group(s) stopped writing
 - plugin/scripts/capability-catalog.sh（登记新脚本）
 - plugin/scripts/runner-static-gate.ts（AC4 接线：run_operational_checks 挂入）
 - plugin/scripts/checker-mutation-cases/instrument-decay-check.sh（instrument-decay-check 的 mutation case——checker-mutation-check AC1b「新 checker 必须有 mutation case」）
+- plugin/test/scoped-static-checks.test.mjs（AC2 tier-registry 登记：OPERATIONAL_CLASS 集合补 instrument-decay-check——新 operational 检查器必须登记，否则 scoped-static-checks AC2「checker must be in the tier registry」误报）
 - tasks/gap-archguard-p5-instrument-decay-standing-guard.md
