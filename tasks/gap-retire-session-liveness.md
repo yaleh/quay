@@ -222,6 +222,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/scripts/integration-batch-merge.sh
 - plugin/scripts/manager-adopt.sh
 - plugin/test/manager-productization.test.mjs
+- tasks/gap-ac61-staleness-list-item-disposition.md
 - tasks/gap-retire-session-liveness.md（自身）
 
 ## Needs-Human
