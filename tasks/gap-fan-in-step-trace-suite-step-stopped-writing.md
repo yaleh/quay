@@ -3,7 +3,7 @@ id: gap-fan-in-step-trace-suite-step-stopped-writing
 title: fan-in-step-trace.jsonl 的 suite
   决策步骤（ac-precheck/suite-start/suite-end/suite-skip）自 2026-08-28 起写去了另一个per-run
   日志文件，共享载体上的这批步骤永久停写
-status: ready
+status: done
 labels:
   - gap
   - defect
