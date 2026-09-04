@@ -2,7 +2,7 @@
 id: gap-retire-outer-tmux-window-logic
 title: 删除 outer 相关 tmux 依赖（quay-topology.sh outer
   窗口/outer-session-check.sh/topology-check.sh/manager-adopt.sh）——不迁移，直接删除
-status: ready
+status: done
 labels:
   - gap
 parent: null
