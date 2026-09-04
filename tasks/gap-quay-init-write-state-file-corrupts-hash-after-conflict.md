@@ -2,7 +2,7 @@
 id: gap-quay-init-write-state-file-corrupts-hash-after-conflict
 title: quay-init.sh write_state_file 在 CONFLICT 分支后无条件用「当前磁盘内容」记账 laidFiles
   哈希——第 3 轮静默吃掉用户编辑且不再报 CONFLICT
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -54,19 +54,19 @@ CONFLICT 分支后错误记账的这一步；两者是同一子系统里两个�
 
 ## AC
 
-- [ ] AC1（复现负控制，须先红后绿）：新建一个全新临时工作区，跑 `quay-init.sh --all --loop`，编辑
+- [x] AC1（复现负控制，须先红后绿）：新建一个全新临时工作区，跑 `quay-init.sh --all --loop`，编辑
       一个 `managed` 类文件（如 `orchestration/orchestrator-loop-tick.md`）追加一行标记，连续三轮
       重跑 `--loop`：第 2 轮必须报 `CONFLICT` 且标记行仍在（`grep -c` ≥1）；**第 3 轮（零其它改动）
       必须仍然报 `CONFLICT` 且标记行仍在**——这条在修复前必须先复现为红（当前第 3 轮会静默吃掉标记、
       不报 CONFLICT），修复后必须转绿，三轮命令与每轮的 `grep -c` 输出全部贴出，不得只贴"通过"结论
-- [ ] AC2（正向路径不受影响）：同一临时工作区，`clean` 类文件（如 `plugin/scripts/claim-task.sh`）
+- [x] AC2（正向路径不受影响）：同一临时工作区，`clean` 类文件（如 `plugin/scripts/claim-task.sh`）
       的正常升级路径（无用户编辑）连续三轮 `--loop` 全部 `copied`/`skipped` 且 `conflicted=0`，不因
       本修复引入新的误报 CONFLICT
-- [ ] AC3：新增单测 `plugin/test/quay-init-conflict-state-hash.test.mjs` 复现 AC1 的三轮场景（复用
+- [x] AC3：新增单测 `plugin/test/quay-init-conflict-state-hash.test.mjs` 复现 AC1 的三轮场景（复用
       `plugin/test/helpers/quay-init-install-fixture.mjs` 现有夹具），断言第 3 轮
       `.quay/quay-init-state.json` 的 `laidFiles[<该相对路径>]` 与第 2 轮完全相同（不随磁盘上的用户
       编辑而更新）
-- [ ] AC4：`node --experimental-strip-types plugin/test/quay-init-conflict-state-hash.test.mjs` exit 0
+- [x] AC4：`node --experimental-strip-types plugin/test/quay-init-conflict-state-hash.test.mjs` exit 0
 
 ## DoD
 
@@ -75,6 +75,32 @@ CONFLICT 分支后错误记账的这一步；两者是同一子系统里两个�
 接入主 suite 并绿。不是"写了个断言就算"——必须是修复前后各跑一次 AC1 的真实三轮命令、把红/绿两次
 输出都保留在任务体里作对照，证明是这次修复让它从红变绿，而不是测试从一开始就设计成通不过 CONFLICT
 分支。
+
+## Verification（本轮真实执行证据）
+
+AC1 红/绿对照 — 三轮 `quay-init.sh --all --loop` 复现，managed 文件 `orchestration/orchestrator-loop-tick.md`，第 1 轮安装后追加一行 `AC1_USER_EDIT_MARKER`：
+
+```
+命令: quay-init.sh --all --loop --root <ws> --project proj --test-command 'node --test' --tmux-session proj-0:0.0 --worktree-root <disk-wt>
+```
+
+GREEN（修复后）：
+
+- 第1轮: 无 conflict/replace 行；grep -c = 0（编辑前）；laidFiles = 8b27f56786050d09893984bad68950f45a14f0fc958c85673f6a445f566c51e6
+- 第2轮: `CONFLICT: .../orchestrator-loop-tick.md (content differs — use --force to overwrite)` + `Conflicts detected`；grep -c = 1；laidFiles = 8b27f567…（不变）
+- 第3轮: `CONFLICT: .../orchestrator-loop-tick.md` + `Conflicts detected`；grep -c = 1；laidFiles = 8b27f567…（不变）
+
+RED（修复前，同一命令对未修复脚本跑）：
+
+- 第1轮: 无 conflict/replace 行；grep -c = 0（编辑前）；laidFiles = 8b27f567…
+- 第2轮: `CONFLICT: .../orchestrator-loop-tick.md` + `Conflicts detected`；grep -c = 1；laidFiles = 1dbc19836f5cba153411c01b4942f44bf0e130873111b904aa317881bc868982（错记成用户编辑哈希）
+- 第3轮: `replaced-stale-install: .../orchestrator-loop-tick.md`（不再报 CONFLICT）；grep -c = 0（编辑被静默吃掉）；laidFiles = 8b27f567…（被覆盖回产品）
+
+红/绿对照点：第 2 轮的 `laidFiles` 哈希是分水岭——修复后维持产品哈希（`8b27f567…`，第 3 轮继续正确报 CONFLICT），修复前被错记成用户编辑哈希（`1dbc1983…`，第 3 轮误判 stale-install 而静默覆盖）。
+
+AC2（clean 路径，修复后）：`plugin/scripts/claim-task.sh` 第 1 轮 `copied`、第 2/3 轮 `skipped (identical)`；`loop: copied=128 skipped=0 conflicted=0`（第1轮）/ `loop: copied=0 skipped=128 conflicted=0`（第2/3轮）；三轮 CONFLICT 行数 = 0、replaced-stale-install 行数 = 0、无 `Conflicts detected`。
+
+AC4：`node --experimental-strip-types plugin/test/quay-init-conflict-state-hash.test.mjs` → exit 0（tests 1 / pass 1 / fail 0）。
 
 ## Touches
 

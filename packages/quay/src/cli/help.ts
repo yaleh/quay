@@ -42,7 +42,6 @@ Usage:
   quay serve [--port <port>] [--host <host>]
   quay mcp
   quay manager start [--dry-run] [--json]
-  quay manager adopt <root> [--dry-run] [--json]
   quay manager arm [--dry-run] [--json] [--verify]
   quay driver <start|stop|drain|status|restart> --kind <promotion|worker> [--root <path>]
 

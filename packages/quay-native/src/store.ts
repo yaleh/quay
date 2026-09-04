@@ -10,12 +10,13 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { TASK_STATUSES, TASK_STATUS, isTaskStatus, type Task, type TaskStatus } from '../../quay/src/abi.ts';
-// gap-unified-frontmatter-parser: the ONE complete frontmatter parser lives in plugin/scripts/
-// task-schema.ts (the schema authority). This store READS through it rather than re-deriving a
-// private YAML.parse — parseTask/readDependsOn/store.parse all delegate to the same function, so the
-// schema can never drift across the three readers. The write-side serialize()/validateWrittenYaml()
-// keep their own YAML.stringify/YAML.parse: serialization correctness is the store's, not the schema's.
-import { parseFrontmatterCompletely } from "../../../plugin/scripts/task-schema.ts";
+// gap-unified-frontmatter-parser: the ONE complete frontmatter parser now lives in the product layer
+// (packages/quay/src/task-parsing.ts, next to abi.ts — gap-abi-promote-section-parsing-flip-store-
+// reverse-import). This store READS through it rather than re-deriving a private YAML.parse —
+// parseTask/readDependsOn/store.parse all delegate to the same function, so the schema can never
+// drift across the three readers. The write-side serialize()/validateWrittenYaml() keep their own
+// YAML.stringify/YAML.parse: serialization correctness is the store's, not the schema's.
+import { parseFrontmatterCompletely } from "../../quay/src/task-parsing.ts";
 
 export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
 
@@ -173,7 +174,7 @@ export function sectionAfterHeading(body: string, headings: string[]): string {
 /**
  * Contract shape (AC4): verify the `## Contract` section carries ALL six
  * mandatory keys (measure/band/invariant/invoke/control/resume) — the format
- * `plugin/scripts/task-contract-check.ts` consumes. Returns a per-key boolean
+ * `task-contract-check.ts` consumes. Returns a per-key boolean
  * map. Only meaningful when `detectShape(body) === "contract"`.
  */
 export function contractKeysPresent(body: string): Record<string, boolean> {

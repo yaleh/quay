@@ -61,8 +61,7 @@ const OWNING_TASKS = [
   "gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down",
   "gap-productize-the-manager-layer",
   "gap-crystallize-launch-config-into-checked-in-settings-file",
-  "gap-tmux-session-topology-no-factory-definition",
-  "gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash",
+    "gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash",
   "gap-quality-criteria-are-point-in-time-no-trend-criteria",
 ];
 
@@ -92,7 +91,7 @@ function cleanup(dir) {
 }
 
 // ── AC1 — the SPEC is the LIVE six-category single source ────────────────────────────────────────
-test("AC1 — the SPEC declares exactly six machine-readable categories (live single source, spec_is_live)", () => {
+test("AC1 — the SPEC declares exactly five machine-readable categories (live single source, spec_is_live)", () => {
   const spec = fs.readFileSync(SPEC, "utf8");
   const markers = spec.match(/<!--\s*l1-category:\s*([^>]*?)\s*-->/g) ?? [];
   const numbered = markers.filter((m) => {
@@ -100,7 +99,7 @@ test("AC1 — the SPEC declares exactly six machine-readable categories (live si
     const first = body.split(";")[0].trim();
     return /^\d+$/.test(first) || /^id:\s*\d+$/.test(first);
   });
-  assert.equal(numbered.length, 6, "the SPEC must declare exactly six categories");
+  assert.equal(numbered.length, 5, "the SPEC must declare exactly five categories");
   // Each marker must carry at least one deliverable AND an owning task (AC4: no holes).
   for (const m of numbered) {
     assert.match(m, /deliverable:/, "every category marker must declare a deliverable");
@@ -109,12 +108,12 @@ test("AC1 — the SPEC declares exactly six machine-readable categories (live si
 });
 
 // ── AC2 — the L1 check covers all six categories against the real delivery surface ────────────────
-test("AC2 — the L1 check reports 6/6 against the real delivery surface (six-category full coverage)", () => {
+test("AC2 — the L1 check reports 5/5 against the real delivery surface (five-category full coverage)", () => {
   const r = runCli(REPO_ROOT);
   assert.equal(r.status, 0, `l1 check must exit 0 against the repo:\n${r.stderr}`);
   const { covered, total } = parseCovered(r.stdout);
-  assert.equal(total, 6, "the SPEC must declare exactly six categories");
-  assert.equal(covered, 6, "all six categories must be covered (band 6)");
+  assert.equal(total, 5, "the SPEC must declare exactly five categories");
+  assert.equal(covered, 5, "all five categories must be covered (band 5)");
 });
 
 // ── AC2 per-category fixtures — removing a category's deliverable MUST drop the count ─────────────
@@ -136,7 +135,7 @@ test("AC2 — removing a category deliverable drops the covered count and names 
         throw new Error(`expected FAIL for ${deliv} but got status 0: ${r.stdout} / ${r.stderr}`);
       }
       const { covered, total } = parseCovered(r.stdout, r.stderr);
-      assert.equal(total, 6, "still six categories declared");
+      assert.equal(total, 5, "still five categories declared");
       assert.ok(covered < 6, `covered must drop below 6 when ${deliv} is removed`);
       assert.match(r.stderr, escapeRe(deliv), "must name the missing deliverable");
     } finally { cleanup(tmp); }
@@ -159,8 +158,8 @@ test("AC4 — removing a category's owning task file drops the covered count and
       assert.notEqual(r.status, 0,
         `category ${c.category.id} (${c.category.name}) must FAIL when task ${taskId} is missing`);
       const { covered, total } = parseCovered(r.stdout);
-      assert.equal(total, 6);
-      assert.ok(covered < 6, "covered must drop below 6 when an owning task is missing");
+      assert.equal(total, 5);
+      assert.ok(covered < 5, "covered must drop below 5 when an owning task is missing");
       assert.match(r.stderr, escapeRe(taskId), "must name the missing owning task");
     } finally { cleanup(tmp); }
   }

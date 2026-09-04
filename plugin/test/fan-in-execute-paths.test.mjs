@@ -769,7 +769,7 @@ test("⑨ wiring — the phase-2 prompt carries a land-time anti-drift block BEF
   const step5Idx = p2.indexOf("【持锁段 step 5");
   const landIdx = p2.indexOf("# anti-drift-land-block-start");
   const flipIdx = p2.indexOf("# flip-block-start");
-  const ffIdx = p2.indexOf("fan-in-ff-merge.sh --task");
+  const ffIdx = p2.indexOf("ff-merge.ts --task");
   assert.ok(step5Idx !== -1, "phase-2 prompt must carry 持锁段 step 5");
   assert.ok(landIdx > step5Idx, "land block must be inside step 5 (持锁段)");
   assert.ok(flipIdx > landIdx, "land block must come BEFORE the flip block (flip done)");
@@ -889,7 +889,7 @@ test("⑥ wiring — the fan-in prompt carries a bracket-close block targeting O
   const p2 = promptContaining(prompts, "# bracket-close-block-start");
   assert.ok(p2.includes("bracketClosed"), "the return contract must carry the bracket-closure result");
   // placement: the block runs AFTER the ff-merge call and BEFORE the worktree cleanup.
-  const ffIdx = p2.indexOf("fan-in-ff-merge.sh --task");
+  const ffIdx = p2.indexOf("ff-merge.ts --task");
   const blockIdx = p2.indexOf("# bracket-close-block-start");
   const cleanupIdx = p2.indexOf("ff 成功后清理");
   assert.ok(ffIdx !== -1, "ff-merge call present");
@@ -985,7 +985,6 @@ test("⑦ worktree-resolution — every fan-in orchestration script call is ${wo
     "select-static-checks-for-touches.ts --classify-delta", // step 2 (phase 1)
     "per-task-suite-record.ts",                             // step 4.5 (phase 2)
     "fan-in-ac-completion-gate.ts",                         // step 5 (phase 2)
-    "fan-in-ff-merge.sh",                                   // step 5 (phase 2)
     "closure-lag-check.sh",                                 // step 5.5 (phase 2)
     "anti-drift-touches-check.ts",                          // step 1 (phase 1)
     "fan-in-ts-typecheck-gate.ts",                          // step 3 (phase 1)
@@ -997,6 +996,12 @@ test("⑦ worktree-resolution — every fan-in orchestration script call is ${wo
     assert.ok(line, `a prompt must carry a ${WT}-rooted call to ${frag}`);
     assert.doesNotMatch(line, /bash \$\{?root\}?\/plugin\/scripts/, `call must NOT be root-rooted: ${line}`);
   }
+  // The ff-merge moved to the TS module (gap-fan-in-ff-merge-sh-retire-dead-shell-still-registered-
+  // live): it is worktree-rooted at packages/quay/src/fan-in/ff-merge.ts — a DIFFERENT path prefix
+  // than the plugin/scripts orchestration scripts above, so it is asserted separately.
+  const ffLine = all.split("\n").find((l) => l.includes("ff-merge.ts --task"));
+  assert.ok(ffLine, "a prompt must carry a worktree-rooted ff-merge.ts call");
+  assert.ok(ffLine.includes(`${WT}/packages/quay/src/fan-in/ff-merge.ts`), `ff-merge must be ${WT}-rooted at packages/quay/src/fan-in, not plugin/scripts: ${ffLine}`);
   // The scoped gate (step 4) still runs `cd ${worktree} && bash scripts/test.sh --for-task` (worktree-rooted);
   // the full-suite bucket path is the SUITE_LAUNCH `cd "$1" && node plugin/scripts/full-suite-runner.ts` —
   // also worktree-rooted (the runner resolves through the worktree's plugin tree).
@@ -1314,7 +1319,7 @@ test("⑧ stage-2 wait — the SINGLE stage-2 agent drives the GREEN path: suite
   const p2 = promptContaining(prompts, "# flip-block-start");
   assert.ok(p2.includes("POLL=not-done"), "stage-2 prompt must carry the wait block (single agent loops <600s Bash)");
   assert.ok(p2.includes("per-task-suite-record.ts"), "stage-2 must write the per-task-suite record (step 4.5)");
-  assert.ok(p2.includes("fan-in-ff-merge.sh --task"), "stage-2 must run the ff-merge (step 5)");
+  assert.ok(p2.includes("ff-merge.ts --task"), "stage-2 must run the ff-merge (step 5)");
   assert.ok(p2.includes("--worktree /tmp/wt"), "stage-2 must pass --worktree to the ff-merge (stale-lock reclaim scope, gap-worktree-remove-orphans-probes)");
   assert.ok(p2.includes("# bracket-close-block-start"), "stage-2 must close the telemetry bracket (step 5.5)");
   assert.ok(p2.includes("worktree-process-reaper.ts"), "stage-2 must reap live processes under the worktree before removal (gap-worktree-remove-orphans-probes)");

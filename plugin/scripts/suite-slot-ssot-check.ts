@@ -9,8 +9,9 @@
 // 没用, 不变量必须在行为层陈述。
 //
 // THIS CHECKER makes the behavioral invariants mechanical (each can take false):
-//   I1 — ff 闸不引用任何跨任务 suite 状态 (按位置): fan-in-ff-merge.sh 的 CODE (comments/strings masked)
-//       不得出现 `full-suite.lock`。ff 闸只读本任务 suite capture (AC1 收窄), 不读全局锁。
+//   I1 — ff 闸不引用任何跨任务 suite 状态 (按位置): 产品层 packages/quay/src/fan-in/ff-merge.ts 的 CODE
+//       (comments/strings masked) 不得出现 `full-suite.lock`。ff 闸只读本任务 suite capture (AC1 收窄),
+//       不读全局锁。
 //   I2 — 全仓不得存在除唯一槽路径实现外的 `full-suite.lock.<数字>` 字面量 (按位置 grep 槽文件名模式):
 //       槽路径由 canonical 以循环变量生成 (`base.${i}`), 字面量 `.0`/`.1` 出现即违规 — 直接对着表现
 //       形式, 不依赖谁读 S (能同时抓住 test.sh:1067 与 full-suite-runner.ts:1632 的注释断言同形)。
@@ -18,7 +19,7 @@
 //         scripts/test.sh              source plugin/scripts/suite-slot-lib.sh   (bash canonical)
 //         full-suite-runner.ts         import ./suite-lock-slots.ts              (TS canonical)
 //         worktree-process-reaper.ts   import ./suite-lock-slots.ts              (TS canonical)
-//         fan-in-ff-merge.sh           covered by I1 (不得引用任何 suite 锁).
+//         packages/quay/src/fan-in/ff-merge.ts   covered by I1 (不得引用任何 suite 锁).
 //   I4 — bash canonical 与 TS canonical 的槽数一致 (runtime 跨语言对照): suite_slot_count (bash) ==
 //       suiteLockSlotCount() (TS) under the same env — the two canons cannot silently drift.
 //   I5 — 运行时并发 suite 数 ≤ S (行为层): 对隔离锁基并发跑 N=S+2 个槽获取者, 实测持槽数 ≤ S
@@ -177,17 +178,19 @@ export function checkNoSlotPathLiterals(root: string): SsotVerdict {
   };
 }
 
-/** I1 — fan-in-ff-merge.sh's CODE/STRING must not reference the global suite lock at all. A reference
- *  inside a string literal IS a red flag (the old gate read `full-suite.lock.0/.1` from strings);
- *  only a comment mention (doc) is ignored — hence scanCommentsExcluded, not the full code mask. */
+/** I1 — packages/quay/src/fan-in/ff-merge.ts's CODE/STRING must not reference the global suite lock at
+ *  all. A reference inside a string literal IS a red flag (the old bash gate read `full-suite.lock.0/.1`
+ *  from strings); only a comment mention (doc) is ignored — hence scanCommentsExcluded, not the full
+ *  code mask. The checked object is the PRODUCT-layer TS ff module (gap-fan-in-ff-merge-sh-retire-
+ *  dead-shell-still-registered-live AC2): the retired bash fan-in-ff-merge.sh no longer exists. */
 export function checkFfNoGlobalSuiteLock(root: string): SsotVerdict {
-  const rel = "plugin/scripts/fan-in-ff-merge.sh";
+  const rel = "packages/quay/src/fan-in/ff-merge.ts";
   const abs = path.join(root, rel);
   if (!fs.existsSync(abs)) {
     return { id: "I1", ok: false, evaluated: false, detail: `${rel} not found (cannot judge — NOT-EVALUATED, never conflated with green)` };
   }
   const src = fs.readFileSync(abs, "utf8");
-  const hits = scanCommentsExcluded(src, FF_SUITE_LOCK_RE, true);
+  const hits = scanCommentsExcluded(src, FF_SUITE_LOCK_RE, rel.endsWith(".sh"));
   if (hits.length === 0) {
     return { id: "I1", ok: true, evaluated: true, detail: `${rel} code contains no 'full-suite.lock' read (ff 闸只读本任务 capture)` };
   }
@@ -214,7 +217,7 @@ export function checkConsumersReadCanonical(root: string): SsotVerdict {
   const t3 = reads("plugin/scripts/worktree-process-reaper.ts", ["suite-lock-slots.ts"]);
   if (t3) problems.push(t3);
   if (problems.length === 0) {
-    return { id: "I3", ok: true, evaluated: true, detail: "scripts/test.sh sources suite-slot-lib.sh; full-suite-runner.ts + worktree-process-reaper.ts import suite-lock-slots.ts (fan-in-ff-merge.sh covered by I1)" };
+    return { id: "I3", ok: true, evaluated: true, detail: "scripts/test.sh sources suite-slot-lib.sh; full-suite-runner.ts + worktree-process-reaper.ts import suite-lock-slots.ts (packages/quay/src/fan-in/ff-merge.ts covered by I1)" };
   }
   return { id: "I3", ok: false, evaluated: true, detail: `consumer(s) do not read the canonical: ${problems.join("; ")}` };
 }
@@ -369,7 +372,7 @@ const usage = `suite-slot-ssot-check.ts — suite 并发量单一定义点行为
 (tasks/gap-suite-concurrency-ff-gate-and-slot-ssot, AC4)
 
 Invariants (each can take false):
-  I1 — fan-in-ff-merge.sh code contains no 'full-suite.lock' read (ff 闸只读本任务 capture)
+  I1 — packages/quay/src/fan-in/ff-merge.ts code contains no 'full-suite.lock' read (ff 闸只读本任务 capture)
   I2 — no 'full-suite.lock.<digit>' literal in code across the executable surface
   I3 — the four consumers read the canonical (suite-slot-lib.sh / suite-lock-slots.ts)
   I4 — bash canonical slot count == TS canonical slot count under the same env
