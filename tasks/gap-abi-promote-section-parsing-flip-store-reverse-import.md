@@ -3,7 +3,7 @@ id: gap-abi-promote-section-parsing-flip-store-reverse-import
 title: ABI 缺口：extractSection/parseFrontmatterCompletely/countAcCheckboxes
   是纯函数却只活在机制层 task-schema.ts——上收到产品层，翻转 store.ts:18 唯一一条产品层反向 import 机制层的 src
   级依赖
-status: ready
+status: done
 labels:
   - gap
 parent: null
