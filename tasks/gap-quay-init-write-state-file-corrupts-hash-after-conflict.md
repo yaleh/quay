@@ -2,7 +2,7 @@
 id: gap-quay-init-write-state-file-corrupts-hash-after-conflict
 title: quay-init.sh write_state_file 在 CONFLICT 分支后无条件用「当前磁盘内容」记账 laidFiles
   哈希——第 3 轮静默吃掉用户编辑且不再报 CONFLICT
-status: ready
+status: done
 labels:
   - gap
   - defect
