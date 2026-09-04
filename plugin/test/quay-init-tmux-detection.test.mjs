@@ -24,7 +24,7 @@
 // AC3  — MULTIPLE matches ⇒ require explicit --tmux-session, never pick one
 // AC4  — no --tmux-session ⇒ either the real session is written or the install clearly fails
 // AC5  — the written value resolves: `tmux has-session -t <value>` exits 0
-// Plus: session-liveness.sh itself must fail closed when NO session is configured (the old
+// (The retired observer itself used to fail closed when NO session was configured — the old
 // "<basename>-0" fallback was the same guess shape — the monitor must never guess a session).
 //
 // Detection is exercised against a HERMETIC tmux server on a private socket (TMUX_TMPDIR), so
@@ -123,7 +123,7 @@ function runInit(workspace, args = [], env = process.env) {
     { cwd: workspace, encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_ROOT: pluginDir } });
 }
 
-// paneHasClaudeChild — replicate session-liveness.sh's session_pid(): the first child of the pane
+// paneHasClaudeChild — the first child of the pane
 // shell whose /proc/<pid>/cmdline contains "claude". The probe is `exec -a claude-probe sleep`.
 function paneHasClaudeChild(env, session) {
   const p = tmux(['list-panes', '-t', session, '-F', '#{pane_pid}'], env);
@@ -268,55 +268,6 @@ test('explicit --tmux-session takes priority over detection (the fallback the hu
   } finally {
     // AC2b: kill-session per created session (never kill-server — see socketPathFor comment).
     tmuxAt(socketPathFor(sockDir), ['kill-session', '-t', 'ac2bproj-0'], env);
-    cleanup(ws);
-  }
-});
-
-// ── the monitor itself must never guess a session (session-liveness.sh fail-closed) ────────────────
-test('session-liveness.sh — with NO session configured it fails closed (the old <basename>-0 fallback is gone)', () => {
-  const ws = makeTmp();
-  try {
-    const env = { ...process.env, SESSION_ROOT: ws };
-    delete env.SESSION_TMUX_SESSION;
-    delete env.SESSION_TARGETS;
-    const r = spawnSync('bash', [path.join(pluginDir, 'scripts', 'session-liveness.sh'), '--once'],
-      { encoding: 'utf8', env });
-    assert.notEqual(r.status, 0, 'must fail closed when no session is configured (exit non-zero)');
-    assert.match(r.stderr, /SESSION_TMUX_SESSION/, 'must name the missing config');
-    assert.ok(!/quay-0|-0/.test(r.stdout), 'must not fall back to a guessed session');
-  } finally { cleanup(ws); }
-});
-
-// ── session-liveness.sh works once a session IS configured (the installed value is used) ───────────
-test('session-liveness.sh — with a configured session the zero-config default target resolves', { skip: tmuxAvailable ? false : 'tmux not installed' }, async () => {
-  const ws = makeTmp();
-  const sockDir = path.join(ws, 'sock'); fs.mkdirSync(sockDir, { recursive: true });
-  const env = isolateTmuxEnv(sockDir);
-  try {
-    const ns = tmux(['new-session', '-d', '-s', 'confproj', '-n', 'outer', 'bash'], env);
-    assert.equal(ns.status, 0, `new-session failed: ${ns.stderr}`);
-    tmux(['send-keys', '-t', 'confproj:outer', 'exec -a claude-probe sleep 10000 &'], env);
-    tmux(['send-keys', '-t', 'confproj:outer', 'Enter'], env);
-    assert.ok(await waitForAlive(env, 'confproj:outer', 5000),
-      'the configured session must be alive before --once runs');
-    // configure the session the way quay-init would: SESSION_TMUX_SESSION in session-liveness.env
-    fs.mkdirSync(path.join(ws, 'orchestration'), { recursive: true });
-    fs.writeFileSync(path.join(ws, 'orchestration', 'session-liveness.env'),
-      'SESSION_TMUX_SESSION=confproj\n', 'utf8');
-    const r = spawnSync('bash', [path.join(pluginDir, 'scripts', 'session-liveness.sh'), '--once'],
-      { encoding: 'utf8', env: { ...env, SESSION_ROOT: ws } });
-    assert.equal(r.status, 0, `--once must exit 0:\n${r.stderr}`);
-    // The FIRST field is the TARGET label = the zero-config default target, which is the project
-    // root basename — NOT the session name (session-liveness consumer evidence: cold-start-e2e.sh:317
-    // asserts `SESSION-STATUS empty-project alive=` where empty-project is the project root basename;
-    // session-liveness.test.mjs:723 names its target explicitly via SESSION_TARGETS). The session
-    // `confproj` is the configured SESSION_TMUX_SESSION; the target it resolves under is ws's basename.
-    const base = path.basename(ws);
-    assert.match(r.stdout, new RegExp(`SESSION-STATUS ${base} alive=1`),
-      `must identify the configured session as alive under the zero-config default target (project root basename ${base}, NOT the session name confproj):\n${r.stdout}`);
-  } finally {
-    // AC2b: kill-session per created session (never kill-server — see socketPathFor comment).
-    tmuxAt(socketPathFor(sockDir), ['kill-session', '-t', 'confproj'], env);
     cleanup(ws);
   }
 });

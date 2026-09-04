@@ -188,10 +188,7 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 **这族测试的权威清单是机器可读的**：`plugin/scripts/known-load-sensitive.ts --list`（解析各测试文件头
 的 `// @load-sensitive <kind>` 标注，`gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage`
 AC1/AC2）。本散文只讲判读规则，**不再手列族文件**——文件清单以该脚本输出为准（单一来源，消灭双源）。
-代表成员（示意，非清单）：`plugin/test/session-liveness-events.test.mjs`、`session-liveness-heartbeat.test.mjs`、
-`session-liveness-signals-kinds.test.mjs` / `session-liveness-signals-thresholds.test.mjs` / `session-liveness-signals-integration.test.mjs`
-（原 `session-liveness.test.mjs` → `session-liveness-signals.test.mjs` 两次拆分，
-`gap-session-liveness-tail-capped-split` / `gap-split-session-liveness-signals-unblocks-lowconc`）、`plugin/test/cold-start-skill.test.mjs`（及其演练/laid-down
+代表成员（示意，非清单）：`plugin/test/cold-start-skill.test.mjs`（及其演练/laid-down
 `--once` 同类）、`plugin/test/runner-grouping-list-groups.test.mjs`（`nested-spawn` kind，2026-08-11
 `gap-suite-floor-two-longest-files-bound` 拆 5，同族五文件 runner-grouping-{list-groups,fixture-runs,flags-only,
 governance,serial-anti-stomp}.test.mjs）——它们用**真实进程 + tmux 时序**
@@ -215,7 +212,7 @@ governance,serial-anti-stomp}.test.mjs）——它们用**真实进程 + tmux �
 **机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**：`// @load-sensitive <kind>`
 （机器可解析，`known-load-sensitive.ts` 读取）+ `KNOWN-LOAD-SENSITIVE` 散文标记（人读）。`known-load-sensitive.ts --check`
 强制「有 KNOWN-LOAD-SENSITIVE 头声明 ⇒ 必有 `@load-sensitive`」，无标注的声明机械拒绝（AC2）。低负载基线实测：单套件连跑 2 次
-全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness-events.test.mjs plugin/test/session-liveness-heartbeat.test.mjs plugin/test/session-liveness-signals-kinds.test.mjs plugin/test/session-liveness-signals-thresholds.test.mjs plugin/test/session-liveness-signals-integration.test.mjs plugin/test/cold-start-skill.test.mjs`）；
+全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/cold-start-skill.test.mjs`）；
 人为负载（并发放量套件）下确实变红 ⇒ 敏感是真实的，标注不是伪装的借口。
 
 ## serial 组的显式判据（gap-serial-group-recompose-nested-runner-criterion，2026-08-07；round-162 扩展）
@@ -244,30 +241,12 @@ install-config 单文件；`gap-install-family-tests-rotate-flakes-under-full-su
 quay-init-tmux-detection 等原 lowconc 成员——家族按 round 轮换 flake，无法预判下一个），非家族的
 低负载/时序文件才走 lowconc。
 
-## 会话存活监视（`session-liveness.sh`）——看自己还在不在（AC13）
+## 会话存活监视——已退役（2026-09-03）
 
-**内层同样要挂 `session-liveness.sh`**（泛化后的会话存活监视，原 `outer-liveness.sh`）。
-理由（2026-08-03 实测）：只看**工作产出**的工具（`inner-state.sh` 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R07`）在会话死后
-只会看到「没有新遥测」，与「内层在思考一个难题」完全同形——这是本仓当天两次栽过的那一族失效换了个
-位置。内层跑重活，会话死掉代价更大，**更需要**进程存活这一层。
-
-**挂载无锁（2026-08-06 人裁定，gap-session-liveness-remove-shared-events-and-lock）**：观测是**树**
-（manager→N 个 outer、outer_i→inner_i），每条边是独立的 (观察者,目标) 对，**只读天然不排他**。
-挂载**不取任何锁**——观测对目标纯只读（capture-pane/git log/stat，零写入），两个观察者盯同一
-pane 的代价只是每周期多一次 capture-pane；不再有共享 events.jsonl（那是把 N 条独立流合并成一条
-再让每个消费者过滤回自己要的——严格劣于 N 条独立流）。**谁挂的谁拥有自己的 stdout 事件流**：
-挂载方（Monitor 工具）直接消费该流，谁先启动无关，观察者之间互不知情、不共享任何写点。
-（旧「单飞挂载 + 共享事件」设计退役说明 → `orchestration/archive/AC58-retired-clauses.md#R24`。）
-
-挂法与心跳（AC11/AC16）：内层的心跳不是外层那种 tick 日志，而是它的**会话 transcript**
-（AC1/AC16，2026-08-03 实测选定：`.workflow-events/` 每任务只写 1-2 行、任务进行中完全冻结，
-不是有效心跳源；transcript 每次工具调用都写，含 subagents 目录）。经
-`SESSION_TRANSCRIPTS="<名字> <会话id|绝对路径>"`（推荐，会话 id 是配置不去推断）或
-`SESSION_HEARTBEATS="<名字> <路径>"` 配置。事件 `SESSION-GONE/BACK/OVERDUE/IDLE/RESUMED` 报的是
-「会话本身还在不在、忙不忙」，`REPO-STALL` 报的是仓库信号（AC8，原 `SESSION-STALL`）。
-**观测只有一个工具**（SPEC-one-observer-two-surfaces.md；`inner-state.sh` 事件集退役说明 → `orchestration/archive/AC58-retired-clauses.md#R08`）；工作产出信号由外层直接读 `fast-mode-telemetry --report`（外层 cwd 就是本
-仓库），仓库告警同理直接看 `git log`。**解除停机（删 `.halt`）那一刻重置陈旧度基线**，停泊期间
-的陈旧不计入解除停机后的 OVERDUE/REPO-STALL。
+会话观测机制（Monitor 挂载 + SESSION-* 事件）2026-09-03 随 tmux 一并退役。
+内层停摆检测改由直接量活性承接：`git log -1 --format=%ci` 提交时刻 / `git worktree list` 活 worktree /
+worktree 内活进程 / 盘上任务 `status:` 枚举（fast-mode-tick-core A25）。工作产出信号由外层直接读
+`fast-mode-telemetry --report`（外层 cwd 就是本仓库），仓库告警同理直接看 `git log`。
 
 ## 状态单一来源
 
@@ -394,16 +373,9 @@ node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --
 `supervisor-preempt.sh preempt <target>` / `preempt-all`（OS 就是抢占原语，AC4/AC5b）**保留**——它是
 对目标进程/会话发停止信号的机制，不依赖 `.halt` 哨兵。
 
-**Monitor 挂载自检**（`gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`）：外层靠
-`plugin/scripts/session-liveness.sh` 的 Monitor 消费本层停止条件（观测只有一个工具；`inner-state.sh` 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R11`）——它没挂上/挂错目标/属于上个会话，本层停摆就没人发现。每个 tick 用一条命令核实，不靠人判断：
-
-```bash
-bash plugin/scripts/monitor-mount-check.sh --json
-```
-
-两判据缺一不可：`mounted=true`、`targetRoot` 等于本仓根（`targetOk=true`）。2026-08-06 起
-`delivered`（AC9 的共享事件文件判据）随共享 events.jsonl 移除——事件送达由挂载方自己的 Monitor
-事件流承担（谁挂的谁拥有），不是检查器能读的跨观察者文件。
+**Monitor 挂载自检**（`gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`）：已退役
+2026-09-03——monitor-mount-check 与观测者脚本随 tmux 一并删除，无对象可查。本层停摆检测由直接量活性
+（`git log` 时刻 / worktree 活进程 / full-suite-state）承接。
 
 ### 1. 读状态
 
@@ -1103,7 +1075,7 @@ last-run 文件**，任一先触发即写回，另一个在同一窗口内不会
 **每个 tick（含轻触）无条件跑一次** `bash plugin/scripts/observer-registry.sh --audit --json`——
 它问「有没有被登记下线的目标，且所有观测者是否都正确报『已下线』」。被下线的目标写一次在
 `orchestration/observer-registry.conf`（人/管理者显式 `--register-offline`，观测者从不自行猜），
-所有观测者（os-anchor-watchdog / session-liveness 的 git-staleness、coverage 读面 / topology-check）
+所有观测者（os-anchor-watchdog / topology-check）
 从同一处读。`--audit` 是 AC3 负控制：对每个 offline 目标重建 4 个消费者读面，任一仍报旧状态
 （REPO-STALL / NOT-WATCHED / GONE / 陈旧拓扑 / watchdog 复活）即 `stale`、退出 1。
 **`stale_observer_reports` 必须恒为 0（band）**——`--audit --json` 的 `consumers[*].stale` 合计。
@@ -1402,7 +1374,7 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 - 阻塞信号状态（步骤 3 `--detect-stop` 的输出：命中了哪些停止条件、`.quay/inner-blocked.json`
   存在与否；存在则报 `reason` + `question`，以及 `fast-mode-telemetry --report` 的累计死时间/单次最长
   ——2026-08-03 起该数有基线）
-- Monitor 两判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
+- ~~Monitor 两判据~~（已退役 2026-09-03：monitor-mount-check 已删除）
   `targetRoot` 是否等于本仓根 / `targetOk`）——外层消费本层停止条件的那条命脉，挂没挂/挂哪个仓库
   （2026-08-06 起 `delivered` 随共享 events.jsonl 移除；事件送达由挂载方自己的 Monitor 流承担）
 - **账本四元组（统一发射器，`gap-spec-p2-quad-tuple-unified-emitter`）**：用统一发射器吐本层

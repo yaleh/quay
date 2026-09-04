@@ -134,7 +134,8 @@ function runCli(root) {
 test("real repo is GREEN — orphan-checker N=0 (outer-anchor-check.ts explicitly retired)", () => {
   const res = checkPrecondition(repoRoot);
   assert.equal(res.evaluated, true, "the real repo must be evaluable");
-  assert.ok(res.checkerCount >= 10, `expected ≥10 referenced checkers, got ${res.checkerCount}`);
+  // monitor-mount-check.sh 随 session-liveness 退役（2026-09-03），执行核引用 checker 数 10→9。
+  assert.ok(res.checkerCount >= 9, `expected ≥9 referenced checkers, got ${res.checkerCount}`);
   assert.deepEqual(res.undischarged, [], `no orphan checker may lack a disposition: ${res.undischarged.join(", ")}`);
   assert.equal(res.ok, true, "the real repo must be green");
   // outer-anchor-check.ts is the SPEC §2.3b N=1 — it must now carry the explicit retirement marker.

@@ -1,13 +1,18 @@
 ---
 id: gap-session-liveness-scd-busy-disabled-composite-emit-flaky
 title: 修 scd-busy 鲁棒性：disabled composite emit 时序断言在 serial+降并发下仍 flaky，挡退役 tmux 任务
-status: ready
+status: superseded
 labels:
   - gap
   - defect
 parent: null
 children: []
 extra:
+  superseded: true
+  superseded_at: 2026-09-03
+  superseded_reason: session-liveness 退役（gap-retire-session-liveness）将删除
+    scd-busy.test.mjs，本任务「修 scd-busy 鲁棒性」的修改对象消失，多余——退役是更彻底的解法（删测试连同 flaky
+    根因一起消）
   schema: execution
 ---
 ## Proposal

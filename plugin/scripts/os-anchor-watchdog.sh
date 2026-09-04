@@ -24,7 +24,9 @@
 #
 # REUSE-ONLY (AC3 — zero new invention; every signal path is an already-validated
 # capability):
-#   * liveness      → session-liveness.sh --once   (PSI/pane dual signal, validated)
+#   * liveness      → pane_has_claude (tmux pane claude-process check; the retired
+#                     session-liveness observer's PSI/pane dual signal was removed
+#                     2026-09-03 — the direct pane check remains)
 #   * delivery      → send-keys-reliable.sh + transcript-delivery-check.ts
 #                     (the 6 failure modes crystallized; transcript is the only
 #                     trusted delivery signal)
@@ -109,8 +111,8 @@ os_anchor_decide() {
 }
 
 # ── tmux helpers ────────────────────────────────────────────────────────────────
-# Use the real default server explicitly (env -u TMUX tmux -S ...), same as
-# session-liveness.sh L0 — never inherit a caller's $TMUX.
+# Use the real default server explicitly (env -u TMUX tmux -S ...) — never inherit
+# a caller's $TMUX.
 _os_tmux_socket="${OS_ANCHOR_TMUX_SOCKET:-}"
 if [ -z "$_os_tmux_socket" ]; then
   _os_tmux_socket="${TMPDIR:-/tmp}/tmux-$(id -u)/default"
@@ -148,23 +150,21 @@ wait_for_prompt() {
   return 1
 }
 
-# ── liveness via the VALIDATED capability (session-liveness.sh --once) ──────────
-# Returns: 1 (alive) / 0 (dead) / "unknown" (could not measure — helper missing or
-# no SESSION-STATUS line). Never re-spawn on "unknown" (fail-safe against a broken
-# measurement double-spawning a live session).
+# ── liveness via the tmux pane claude-process check (the retired session observer's
+#    PSI/pane dual signal was removed 2026-09-03 — the direct pane check remains) ──
+# Returns: 1 (alive) / 0 (dead) / "unknown" (could not measure — no pane). Never
+# re-spawn on "unknown" (fail-safe against a broken measurement double-spawning a
+# live session).
 outer_liveness() {
   local name="$1" root="$2" session="$3" outer="$4"
-  local sl="$root/plugin/scripts/session-liveness.sh"
-  [ -x "$sl" ] || { echo "unknown"; return 0; }
-  local out line
-  out=$(SESSION_TARGETS="${name} ${root} ${session}:${outer}" \
-        SESSION_ROOT="$root" bash "$sl" --once 2>/dev/null || true)
-  line=$(printf '%s\n' "$out" | awk -v n="$name" '$1=="SESSION-STATUS" && $2==n { print $0; exit }')
-  [ -n "$line" ] || { echo "unknown"; return 0; }
-  case "$line" in
-    *alive=1*) echo 1 ;;
-    *) echo 0 ;;
-  esac
+  if ! session_exists "$session"; then
+    echo 0
+    return 0
+  fi
+  local has
+  has=$(pane_has_claude "${session}:${outer}")
+  [ -n "$has" ] || { echo "unknown"; return 0; }
+  echo "$has"
   return 0
 }
 
@@ -319,7 +319,7 @@ watch_project() {
       echo "STATUS $name halted"
       return 0 ;;
     skip-unverifiable)
-      echo "STATUS $name skip-unverifiable (session-liveness returned no verdict)"
+      echo "STATUS $name skip-unverifiable (no liveness verdict)"
       log "$name: unverifiable — skipping (never double-spawn on a broken measurement)"
       return 0 ;;
     recreate-session)

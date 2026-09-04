@@ -108,7 +108,7 @@ test("AC1 — the real family manifest is non-empty and covers ≥2 root-cause k
   const family = scanFamily(REPO_ROOT);
   assert.ok(family.length >= 2, `family must be non-empty; got ${family.length}`);
   const kinds = new Set(family.map((m) => m.kind));
-  assert.ok(kinds.has("wall-clock"), "session-liveness/cold-start-skill are wall-clock");
+  assert.ok(kinds.has("wall-clock"), "cold-start-skill/supervisor-preempt-candidates are wall-clock");
   assert.ok(kinds.has("nested-spawn"), "runner-grouping is nested-spawn");
   assert.ok(kinds.has("real-install"), "install/quay-init family is real-install");
   assert.ok(kinds.has("child-spawn"), "relation-sync/checker-cost/proposal-convergence are child-spawn");
@@ -121,7 +121,7 @@ test("AC1 — the real family manifest is non-empty and covers ≥2 root-cause k
 
 test("AC1 — kindForFile resolves the root causes distinctly (no conflation)", () => {
   const family = scanFamily(REPO_ROOT);
-  assert.equal(kindForFile(family, "plugin/test/session-liveness-events.test.mjs"), "wall-clock");
+  assert.equal(kindForFile(family, "plugin/test/supervisor-preempt-candidates.test.mjs"), "wall-clock");
   assert.equal(kindForFile(family, "plugin/test/cold-start-skill.test.mjs"), "wall-clock");
   assert.equal(kindForFile(family, "plugin/test/runner-grouping-list-groups.test.mjs"), "nested-spawn");
   assert.equal(kindForFile(family, "plugin/test/quay-init-loop-core.test.mjs"), "nested-spawn");
