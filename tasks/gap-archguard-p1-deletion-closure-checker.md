@@ -1,7 +1,7 @@
 ---
 id: gap-archguard-p1-deletion-closure-checker
 title: 落地 P1 删除闭包检测器（deletion-closure-check.ts）——依赖 P2 的别名索引作闭包边，用 8 个已落地退役任务做回归集
-status: ready
+status: done
 labels:
   - gap
 parent: null
