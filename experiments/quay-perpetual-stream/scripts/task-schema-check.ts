@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// task-schema-check.mjs — standalone CLI for the canonical task schema (exp5 / canonical-task-schema
+// task-schema-check.mjs — standalone CLI for the canonical task schema (canonical-task-schema
 // unit B2). Imports checkTask from task-schema.mjs (the ONE schema definition); this file adds NO
 // assertion logic of its own — it only reads files and prints/exits.
 //
