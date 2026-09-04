@@ -57,7 +57,7 @@ function readState(file) {
 // ── partition (AC3/AC4) ─────────────────────────────────────────────────────────────────────────────
 test("AC3 — partitionFailure marks an in-family file with in_family + kind, and only the right kind", () => {
   const family = scanFamily(REPO_ROOT);
-  const wall = partitionFailure({ line: "not ok 1 - x", file: "plugin/test/session-liveness-events.test.mjs" }, family);
+  const wall = partitionFailure({ line: "not ok 1 - x", file: "plugin/test/supervisor-preempt-candidates.test.mjs" }, family);
   assert.equal(wall.in_family, true);
   assert.equal(wall.kind, "wall-clock");
 
@@ -95,9 +95,9 @@ test("AC4 negative control — a real non-family cross-file race (test-file-snap
 
 // ── isolate-rerun command (AC3) ─────────────────────────────────────────────────────────────────────
 test("AC3 — buildIsolateRerunCommand emits an exact low-load command for the in-family files only", () => {
-  const cmd = buildIsolateRerunCommand(["plugin/test/session-liveness-events.test.mjs"], REPO_ROOT);
+  const cmd = buildIsolateRerunCommand(["plugin/test/supervisor-preempt-candidates.test.mjs"], REPO_ROOT);
   assert.ok(cmd.startsWith("bash scripts/test.sh "), cmd);
-  assert.ok(cmd.includes("session-liveness-events.test.mjs"), cmd);
+  assert.ok(cmd.includes("supervisor-preempt-candidates.test.mjs"), cmd);
   assert.ok(!cmd.includes("--test-concurrency"), "low load — no concurrency splice");
 });
 
@@ -224,7 +224,7 @@ test("Contract --record-verdict — writes the isolate-rerun verdict back and --
     state: "red",
     reason: "failed",
     failures: [
-      { line: "not ok 1 - x", file: "plugin/test/session-liveness-events.test.mjs" },
+      { line: "not ok 1 - x", file: "plugin/test/supervisor-preempt-candidates.test.mjs" },
     ],
   });
   // partition first (auto-issue isolate_rerun for the in-family failure)
