@@ -417,6 +417,20 @@ declare -A QUESTION=(
   [main-thread-edit-check.ts]="How many main-thread product-file Edits did the manager make this round, versus how many Agent dispatches (manager exec-mode check — AC145 主线程不编辑产品文件判据)?"
   [identity-replication-check.ts]="How many code files independently name or judge the SAME runtime entity (P2 identity replication, docs/proposals/archguard-generation-era-primitives.md §3) — literal-replication degree (full-text vs code-position counts side by side, comments/docs excluded by position, import/source single-accessor distinguished from hardcoded string literals), judgment rewrites (read /proc/<pid>/cmdline ∧ name-compare fingerprint), product-source *_REL path-literal constants, plugin/scripts↔experiments/*/scripts byte-identical pairs, and the gate-script-base.ts shared-module negative control (a single-accessor module must NOT be flagged as replicated)?"
   [deletion-closure-check.ts]="For a component X, what is its deletion closure DC(X) — the set of files that must be modified for X to cease existing without leaving dangling references or permanently-red checks (P1 deletion closure, docs/proposals/archguard-generation-era-primitives.md §3)? Position-aware union (code/comment/doc) over import/require, bash/exec/source/spawn shell-outs (including constructed-path-then-source), string-literal path/basename references, output-schema parsers, test fixtures, and tasks ## Touches declarations — with CallGraph (structural calls only) kept separate so the profile ratio R=|DC|/|CallGraph| never counts narrative references as structural edges?"
+  [guard-lineage-check.ts]="How many of the repo's guards declare the object/invariant they protect — the P4 guard-lineage detector (docs/proposals/archguard-generation-era-primitives.md §3): guards enumerated across plugin/scripts + experiments/quay-perpetual-stream/scripts + plugin/gate-scripts (deduped per directory), reporting the declared-guard-object ratio (AC1, 0% before this task), the window-fired ratio read from checker-cost.jsonl's verdict field (AC2, NOT-EVALUATED when verdict absent), per-guard object presence (AC3, file:path existence vs invariant: not-mechanically-checkable), and a preventive-vs-suspicious disposition that weighs BOTH last-fired and mutation-verified so a preventive guard like checker-mutation-check is never flagged suspicious just for never having fired (AC4 reverse criterion)?"
+)
+
+# ── GUARD_OBJECT (P4 守卫谱系声明块, tasks/gap-archguard-p4-guard-lineage-declaration-and-registry) ──
+# 每个守卫声明它守的对象/不变式 (guards)。对象两种形态: file:<repo相对路径> (可机械核验存在性) /
+# invariant:<描述> (约定, 无文件可指 — 文档 §3 P4 原文)。guard-lineage-check.ts 读此数组回答
+# "该守卫的对象是否仍存在" (AC3) 与 preventive/suspicious disposition (AC4)。
+# 注: 本数组是试点声明 (5 个), 非全量 — 全量登记是后续任务的收敛面, 不在本任务范围。
+declare -A GUARD_OBJECT=(
+  [manager-tick-log-check.sh]="file:orchestration/manager-tick-log.md"
+  [outer-tick-log-check.sh]="file:orchestration/tick-log.md"
+  [checker-mutation-check.sh]="invariant:every registered checker can be mutation-reddened (preventive — the L_S instrument's own object is the checkers' ability to fail)"
+  [instrument-decay-check.ts]="invariant:telemetry carriers under .quay/ keep writing (companion contrast, not absolute rate)"
+  [checker-mechanical-spine-check.ts]="invariant:every shipped checker conforms to the mechanical-spine contract (exit-code vocabulary within {0,1,2,3} + a --json claim that actually emits JSON)"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
@@ -537,6 +551,7 @@ declare -A CADENCE=(
 
   [instrument-failure-check.ts]="每轮"
   [instrument-decay-check.ts]="每轮"
+  [guard-lineage-check.ts]="按需"
 [retired-clause-check.ts]="每轮"
   [integration-batch-merge.sh]="按需"
   [it0-enforcement-with-design-check.sh]="按需"
@@ -849,6 +864,7 @@ declare -A INVALIDATION=(
 
   [instrument-failure-check.ts]="失效前提：tick 文档仍以 shell 命令承载判据；若判据迁出 shell，本条退休"
   [instrument-decay-check.ts]="失效前提：fan-in-step-trace.jsonl / fan-in-lock-events.jsonl 仍是共享载体的 fan-in 遥测账本（worker-driver.ts 的 appendFanInStepTrace / 锁事件写手不退役不改名），且共享载体仍承担跨任务/跨时间聚合；若 suite 决策步骤移出共享载体成为有意设计（不再要求共享聚合），本条的 expected 词表随写手语义失效，退休"
+  [guard-lineage-check.ts]="失效前提：本仓库仍以 checker-cost.jsonl 的 verdict 字段（gap-checker-cost-jsonl-add-verdict-field）与 capability-catalog.sh 的 GUARD_OBJECT 声明块为 P4 守卫谱系的裁决/声明来源；若 verdict 记录格式迁出 checker-cost.jsonl 或 GUARD_OBJECT 声明块迁出 capability-catalog.sh（改由守卫脚本头部自述），本条的 declared-ratio / fired-ratio / disposition 读取面失效，需同步"
 [retired-clause-check.ts]="失效前提：AC58 archive 仍是退役条款的落点登记处；若迁出 archive 机制，本条按 ④ 失效"
   [integration-batch-merge.sh]="无可测前提，靠周期复核"
   [it0-enforcement-with-design-check.sh]="无可测前提，靠周期复核"
@@ -1161,6 +1177,7 @@ declare -A LAST_REAFFIRMED=(
 
   [instrument-failure-check.ts]="2026-08-10"
   [instrument-decay-check.ts]="2026-09-04"
+  [guard-lineage-check.ts]="2026-09-04"
 [retired-clause-check.ts]="2026-08-14"
   [integration-batch-merge.sh]="2026-08-10"
   [it0-enforcement-with-design-check.sh]="2026-08-10"
@@ -1473,6 +1490,7 @@ declare -A MATCHING=(
 
   [instrument-failure-check.ts]="position"
   [instrument-decay-check.ts]="enumerative"
+  [guard-lineage-check.ts]="enumerative"
 [retired-clause-check.ts]="position"
   [integration-batch-merge.sh]="keyword"
   [it0-enforcement-with-design-check.sh]="keyword"
@@ -1740,6 +1758,7 @@ declare -A CONSUMER=(
   [suite-driver.ts]="谁按：生产部署启动命令按（常驻 suite-driver，接线为后续/独立任务——本任务只落 driver 这一半，与 quality-gate/promotion/outer 同族；常驻模式扫 .quay/suite-requests/ 队列派发，或一次性 --run --suite-command-file 单发）；条件=fan-in 的 per-task suite 生命周期要改由常驻 driver 承接（spawn+wait+静默看门狗+取放槽，退出码 0/1/2=done/red/hung）"
   [suite-duration-exceed-check.ts]="消费方：外层/人每轮读 full-suite.log 里打印的 SUITE-DURATION-EXCEEDED 行据此动作（超长轮趋势可见不静默）；--no-block 故不阻产品验证轮（趋势观测≠代码类不变量，超长历史轮不得红整轮）"
   [instrument-decay-check.ts]="消费方：外层/人/manager 读 --static-checks-operational 输出里打印的 INSTRUMENT-DECAY 行据此动作（哪个载体的哪个分组停写、伴生分组是谁，据此立案修写手或转 P4 守卫谱系复核 expected 词表）；--no-block 故不阻产品验证轮（遥测腐烂观测≠代码类不变量，历史/transient 腐烂不得红整轮；fail-closed 默认态留给按需诊断与未来 manager 闸）"
+  [guard-lineage-check.ts]="谁按：架构复核者/人在做 P4 守卫谱系体检（docs/proposals/archguard-generation-era-primitives.md §3，与里程碑 done 前 L_D/L_G 检查同族）时按；条件=要判定「已声明守卫对象比例」「窗口内曾变红比例」「某守卫对象是否仍存在」或「某从未变红守卫是预防性还是可疑」"
   [suite-lpt-order.ts]="谁按：scripts/test.sh --buckets 生成 M bucket 文件列表后按；条件=要按已知耗时降序（LPT）重排文件列表以最小化 makespan（长测试先抢 lane 与短测试并行）"
   [suite-lpt-runner.mjs]="谁按：scripts/test.sh --buckets 生成 LPT 排序后的 M bucket 文件列表后按；条件=要把该列表按 run({files}) 保序交给 node:test（node --test CLI 会按字母序重排位置参数，丢掉 LPT 顺序）"
   [productization-verification-record.ts]="谁按：AC85/AC86/AC88 验证执行者在验证完成后按（AC89 writer）；条件=要写一份第三方可读的产品化验证记录（{ts,ac,ok,artifact,evidence,detail}+按 AC 字段）到共享 checkout 的 .quay/productization-verification.jsonl"
