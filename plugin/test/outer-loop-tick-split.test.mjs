@@ -90,7 +90,6 @@ test("plugin 产品模板保留关键脚本引用（laydown set 覆盖不塌缩�
     "plugin/scripts/suite-state-trigger.ts",
     "plugin/scripts/outer-session-check.sh",
     "plugin/scripts/loop-driver-check.sh",
-    "plugin/scripts/session-liveness-mount.sh",
     "plugin/scripts/laydown-set-check.sh",
     "plugin/scripts/session-bootstrap.sh",
     "plugin/scripts/real-target-verify.sh",

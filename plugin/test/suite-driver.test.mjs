@@ -172,6 +172,23 @@ test("AC2: 被信号杀 ⇒ signalCode 可区分（非正常退出、非 hung）
   }
 });
 
+test("AC2 补 — resolve 时日志已 flush（readFileSync 立即可读完整 stdout，⛔ 空/半截读 ⇒ 下游 reason 回退 suite red）", async () => {
+  const tmp = makeTmp();
+  const { slotBase, logFile } = hermeticSuite(tmp);
+  const r = await spawnSuiteAndWait({
+    slotBase, slotLib: SLOT_LIB,
+    suiteCommand: ["bash", "-c", "echo line-one; echo line-two-tail; exit 0"],
+    logFile, silenceMs: 3000,
+  });
+  try {
+    assert.equal(r.outcome, "done");
+    const text = fs.readFileSync(logFile, "utf8");
+    assert.match(text, /line-two-tail/, "log file must be flushed before resolve (⛔ 空/半截读 ⇒ 下游 suite red reason 回退)");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── AC3 — 静默挂死自动检测（可区分独立取值 hung）─────────────────────────────────────────
 
 test("AC3: 活着但无输出 ≥N 秒 ⇒ 自动判挂死 → SIGKILL + outcome=hung（可区分独立取值）", async () => {

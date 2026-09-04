@@ -79,7 +79,7 @@ export type LoadSensitiveKind = (typeof KINDS)[number];
  * The SERIAL lane's allowed mechanism-kind set (分级闸, gap-suite-tiering-kind-heavy-not-a-mechanism
  * AC4). A serial-group family member must declare a kind from this set — a catch-all (`heavy`) or an
  * unknown kind is NOT an admission reason and fails `--check-exit` FAIL-closed. wall-clock is allowed
- * in BOTH serial (real-wall-clock-wait) and lowconc (hermetic session-observation); the kind describes
+ * in BOTH serial (real-wall-clock-wait) and lowconc (hermetic session-liveness); the kind describes
  * the root cause, the lane is a separate routing decision.
  */
 export const SERIAL_KINDS = ["wall-clock", "nested-spawn", "real-install", "child-spawn", "fixture-vs-sweeper"] as const;

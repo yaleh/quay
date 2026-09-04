@@ -21,7 +21,7 @@
 
 | # | 动作 | 判据 / 陷阱 |
 |---|---|---|
-| A1 | **→ 已驱动化 `plugin/scripts/outer-driver.ts`（AC143）** `bash plugin/scripts/monitor-mount-check.sh --json` | 两判据缺一不可:`mounted` + `targetRoot`==本仓根(`targetOk`);挂错目标与挂对了从外面一模一样 (src:232 "两判据缺一不可") |
+| A1 | **→ 已驱动化 `plugin/scripts/outer-driver.ts`（AC143）**（monitor-mount-check 观测已随 tmux 退役 2026-09-03，本判据随脚本一并退役） | （判据随脚本一并退役） (src:232 "两判据缺一不可") |
 - ~~**A2 正身已迁出**~~ → `orchestration/archive/AC58-retired-clauses.md#R32`
 | A3 | **→ 已驱动化 `plugin/scripts/outer-driver.ts`（AC143）** 三项目 `.halt` 存在性 + 内容 + **最后提交时距**(quay / archguard / meta-cc) | 每 tick 必报——「暂停后忘了」的唯一防线 (src:695 "每个 tick 必须报三个项目的 `.halt` 状态")。**组合判据(SPEC 2.8)**:`无 .halt` **且** 长期无产出(>24h)⇒ **未标记的停摆**,必须升级——只读不判会稳定产生「看见但没发现」(与 manager A5 同形) |
 | A4 | 观察块:`capture-pane` → `.quay/last-pane.txt`、`git log -10`、`git status --short`、`fast-mode-telemetry --report --json`、`task-status-drift-check`(含 `--stranded`)、`batch2-queue-state.md` | 只读不动手 (src:720 "tmux capture-pane") |

@@ -300,24 +300,25 @@ test("AC6 — anti-pass-through: configs genuinely differ + laid-down count > 0;
   assert.ok(pos.ok, `AC6: real installs must satisfy the anti-pass-through control; ${pos.reason}`);
 
   // The laid-down set must include the FULL known mechanism (the "equals the
-  // product set size" half of AC6): both tick docs, session-liveness.sh, and the
-  // core checkers the loop actually runs. This closes the "both sides miss the
-  // same file so they look identical" gap.
+  // product set size" half of AC6): both tick docs and the core checkers the loop
+  // actually runs. This closes the "both sides miss the same file so they look
+  // identical" gap.
   const REQUIRED_PRODUCT_FILES = [
     "orchestration/orchestrator-loop-tick.md",
     "docs/analysis/fast-mode-loop-tick.md",
-    "plugin/scripts/session-liveness.sh",
     "plugin/scripts/fast-mode-telemetry.ts",
     "plugin/scripts/resource-gate.sh",
     "plugin/scripts/task-contract-check.ts",
     "plugin/scripts/loop-driver-check.sh",
   ];
   // inner-state.sh is retired (gap-retire-inner-state-one-observer-targets-by-parameter AC3): it
-  // must NOT be in the laid-down product set.
+  // must NOT be in the laid-down product set. session-liveness.sh retired the same way 2026-09-03.
   for (const ws of [ws1, ws2]) {
     const laid = new Set(loopLaidDownFiles(ws));
     assert.ok(!laid.has("plugin/scripts/inner-state.sh"),
       "inner-state.sh must NOT be laid down into target projects (retired, AC3)");
+    assert.ok(!laid.has("plugin/scripts/session-liveness.sh"),
+      "session-liveness.sh must NOT be laid down into target projects (retired 2026-09-03)");
   }
   for (const ws of [ws1, ws2]) {
     const laid = new Set(loopLaidDownFiles(ws));
