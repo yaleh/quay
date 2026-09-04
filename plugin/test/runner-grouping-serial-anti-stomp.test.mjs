@@ -144,7 +144,9 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
   assert.match(grouping, /for \(const g of RECOGNIZED_GROUPS\) counts\.set\(g, 0\)/,
     "listGroups must initialize every recognized group (incl. serial) so it is always counted");
   // Behavioral: --group serial --list-files returns exactly the serial members and nothing else;
-  // the default --list-files EXCLUDES them (the concurrency-8 main body no longer pays their load).
+  // the default --list-files INCLUDES them (no-args --list-files reports the FULL default run —
+  // product,engine + serial + lowconc — gap-test-file-snapshot-worktree-drops-realinstall; the
+  // serial group still runs in its OWN concurrency-1 phase, not the concurrency-N main body).
   const serialList = runTestSh("--group", "serial", "--list-files").trim().split("\n").filter(Boolean);
   const g = parseGroups(runTestShCached("--list-groups"));
   assert.equal(serialList.length, g.serial, "--group serial must list exactly the serial group");
@@ -154,10 +156,11 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
   }
   const defaultFiles = runTestSh("--list-files").trim().split("\n").filter(Boolean);
   // --list-files returns realpath-deduped paths (build_deduped_files), so a direct set comparison
-  // is sound — no re-realpath needed.
-  const serialSet = new Set(serialList);
-  for (const f of defaultFiles) {
-    assert.ok(!serialSet.has(f), `default --list-files must EXCLUDE serial member ${f}`);
+  // is sound — no re-realpath needed. no-args --list-files is the canonical FULL test-file set
+  // (gap-test-file-snapshot-worktree-drops-realinstall), so it must INCLUDE every serial member.
+  const defaultSet = new Set(defaultFiles);
+  for (const f of serialList) {
+    assert.ok(defaultSet.has(f), `default --list-files must INCLUDE serial member ${f}`);
   }
 });
 

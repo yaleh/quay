@@ -1466,19 +1466,25 @@ if [ "${1:-}" = "--list-groups" ]; then
 elif [ "${1:-}" = "--list-files" ]; then
   # Metadata mode (test support / AC6) — print the selected file list, one per line. Respects
   # --group if given; else the DEFAULT RUN's full selection = the product,engine body PLUS the
-  # lowconc phase files — a default `bash scripts/test.sh` executes BOTH (the concurrent body,
-  # then the serial phase, then the lowconc phase), so no-args --list-files reports the full
-  # reachable surface and keeps the
-  # runner-grouping AC3 invariant (`--list-files count + serial == --list-groups total`) and the
+  # serial phase PLUS the lowconc phase files — a default `bash scripts/test.sh` executes ALL THREE
+  # (the concurrent body, then the serial phase, then the lowconc phase), so no-args --list-files
+  # reports the FULL reachable surface (all four groups, == --list-groups total) and keeps the
   # test-coverage-check AC5 canonical-coverage invariant. A serial/lowconc file is NOT in the
-  # default GROUP SET; it is in the default RUN (its own phase) — hence
-  # `--group product,engine --list-files` differs from no-args unless lowconc is named
-  # (runner-grouping AC6 pins `--group product,engine,lowconc --list-files == no-args --list-files`).
+  # default GROUP SET (product,engine); it is in the default RUN (its own phase) — hence
+  # `--group product,engine --list-files` differs from no-args unless serial AND lowconc are named
+  # (runner-grouping AC6 pins `--group product,engine,serial,lowconc --list-files == no-args
+  # --list-files`).
+  # gap-test-file-snapshot-worktree-drops-realinstall: the serial phase was previously OMITTED from
+  # no-args --list-files, so a tracked test file whose @test-group changed product→serial read as
+  # "REMOVED" to test-file-snapshot (its canonical set is this no-args --list-files) — a FALSE
+  # regression, and worse, serial files were never protected from real deletion. no-args --list-files
+  # is the SINGLE canonical test-file set; it must equal the full deduped glob, never a group subset.
   check_group_declarations
   if [ -n "${groups}" ]; then
     build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "$groups"
   else
     build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "$(effective_groups)"
+    build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "serial"
     build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "lowconc"
   fi
   exit 0
