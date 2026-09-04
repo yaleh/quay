@@ -46,7 +46,10 @@ function parsePerFile(stderr) {
   const out = new Map();
   for (const line of stderr.split("\n")) {
     // gap-test-detail-timeline — the line now carries an optional trailing `end_ms=<epoch-ms>`.
-    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)(?: end_ms=([0-9]+))?$/);
+    // gap-perfile-cpu-cost-collection — it MAY ALSO carry `cpu_ms=<n>` after end_ms (when the outer
+    // suite wired QUAY_PERFILE_CPU_DIR); tolerate it so a pre-existing test running inside the real
+    // suite (which sets that env) still parses the record.
+    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)(?: end_ms=([0-9]+))?(?: cpu_ms=([0-9.]+))?$/);
     if (m) out.set(m[2], { durationMs: parseFloat(m[1]), passed: m[3] === "true", endedAtMs: m[4] != null ? Number(m[4]) : undefined });
   // key = full path from the reporter
   }
@@ -106,7 +109,9 @@ test("reporter records the file END time (end_ms) so the START back-computes as 
 
     const line = res.stderr.split("\n").find((l) => l.startsWith(`__PERFILE__ `));
     assert.ok(line, `a __PERFILE__ line must be emitted:\n${res.stderr}`);
-    assert.match(line, / end_ms=\d+$/, `the line must carry a trailing end_ms epoch-ms:\n${line}`);
+    // gap-perfile-cpu-cost-collection — end_ms is no longer necessarily the LAST field (cpu_ms may
+    // follow it when the outer suite wired QUAY_PERFILE_CPU_DIR); assert presence, not end-of-line.
+    assert.match(line, / end_ms=\d+/, `the line must carry end_ms epoch-ms:\n${line}`);
 
     const rec = parsePerFile(res.stderr).get(f);
     assert.ok(rec, "timed file captured");
