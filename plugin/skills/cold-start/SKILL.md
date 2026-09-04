@@ -81,7 +81,7 @@ start did NOT complete.
 | 2 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts` — a BARE-FILENAME reference, resolved by quay-init's laydown derivation under plugin/scripts/, gap-laydown-derivation-is-sensitive-to-reference-spelling; Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
 | 3 | `TELEMETRY-RECORD` | `<root>/.workflow-events/` contains at least one `.jsonl` file carrying a `--task-start`-written record (the runId from the first `fast-mode-telemetry.ts --task-start --taskId <id> --root <root>`) | `ls <root>/.workflow-events/` + grep for the task-start record |
 | 4 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
-| 5 | `TOPOLOGY-IN-PLACE` | The two-window outer/inner session topology was retired with the outer tmux session (`gap-retire-outer-tmux-window-logic`) — this key is vacuous (no session topology remains to verify). manager is cross-project and NOT part of any project topology | n/a — retired |
+| 5 | `TOPOLOGY-IN-PLACE` | The two-window outer/inner session topology was retired with the outer tmux session (`gap-retire-outer-tmux-window-logic`) — this key is vacuous (no session topology remains to verify). manager is cross-project and NOT part of this topology | n/a — retired |
 
 **Manager cold start is NOT this checklist** — a project cold start never starts the manager
 (delivery ≠ startup, AC8). The manager layer has its OWN five-key falsifiable checklist
@@ -276,7 +276,7 @@ The two-window session topology (outer/inner) was retired with the outer tmux se
 (`gap-retire-outer-tmux-window-logic`) — the outer session role was absorbed into the manager's
 direct subagent dispatch, and the inner session was already replaced by the worker-driver. There is
 no session topology factory/check to build or verify anymore; the `TOPOLOGY-IN-PLACE` key above is
-vacuous. manager is cross-project and NOT part of any project topology.
+vacuous. manager is cross-project and NOT part of this topology.
 
 ### 5. Re-create the 20-minute cron — THE single loop driver (session-scoped: dies when the session PROCESS exits)
 

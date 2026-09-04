@@ -79,6 +79,7 @@ deliverables 之一"，task Contract invariant）把它列为 npm pack 必须携
 
 ## Touches
 
+- .quay/suite-bucket-reattribution.jsonl
 - docs/analysis/test-file-baseline.txt
 - packages/quay/bin/quay.ts
 - packages/quay/src/cli/help.ts
