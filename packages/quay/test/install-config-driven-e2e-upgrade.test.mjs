@@ -282,9 +282,12 @@ test("AC6/AC1 — an organically evolved consumer keeps the ENTIRE loop section 
   }, { prefix: "install-e2e-ac61-", rewriteWorktreeRoot: false });
   assert.equal(r.status, 0, `config-preserving upgrade must succeed:\n${r.stderr}`);
 
-  // AC1 first half: mechanism files ARE laid down.
-  assert.ok(fs.existsSync(path.join(ws, "plugin", "scripts", "session-liveness.sh")),
+  // AC1 first half: mechanism files ARE laid down (session-liveness.sh retired 2026-09-03 —
+  // it must NOT be laid down, its slot in the mechanism check taken by fast-mode-telemetry.ts).
+  assert.ok(fs.existsSync(path.join(ws, "plugin", "scripts", "fast-mode-telemetry.ts")),
     "AC1: mechanism files must be laid down on the existing consumer");
+  assert.ok(!fs.existsSync(path.join(ws, "plugin", "scripts", "session-liveness.sh")),
+    "session-liveness.sh must NOT be laid down (retired 2026-09-03)");
   const laid = laidDownProductFiles(ws);
   assert.ok(laid.length >= 20, `AC1: laid-down product count must be >= 20; got ${laid.length}`);
 

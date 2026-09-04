@@ -46,15 +46,15 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：session-liveness 的【实现/调用/测试】已清理，历史文档字样豁免：
+- [x] AC1（能取假）：session-liveness 的【实现/调用/测试】已清理，历史文档字样豁免：
   - 实现：`session-liveness.sh` / `session-liveness-mount.sh` / `monitor-mount-check.sh` 已删除；
   - 调用：`plugin/scripts/`、`packages/`、`test/`、`scripts/`、`.claude/workflows/` 里对上述脚本的调用已移除（`grep -rn "session-liveness\.sh\|session-liveness-mount\.sh\|monitor-mount-check" plugin/scripts/ packages/ test/ scripts/ .claude/workflows/` 归零，打印命中行）；`hermetic-tmux.sh` / `hermetic-tmux-mount-check.sh` 误引入的重命名悬空引用一并删除（`plugin/test/helpers/hermetic-tmux.mjs` 不在本范围）；
   - 测试：22 个 `session-liveness-*.test.mjs` + `monitor-mount-check.test.mjs` 已删除；
   - 豁免：`orchestration/` 历史文档（SPEC-*/RUNBOOK-*/ANALYSIS-*/archive/*/escalations 等）+ `docs/` + `adr/` + `CLAUDE.md`/`README.md` 里的 session-liveness 字样保留（记录过去，不影响退役），不在归零范围。
-- [ ] AC2（连带退役）：`monitor-mount-check.sh` / `monitor-mount-check.test.mjs` 一并删除（无对象可查）。
-- [ ] AC3（无悬空引用）：凡引用 SESSION-* 事件 / session-liveness 输出的下游脚本，不得出现「因缺 session-liveness 而恒红/报未挂载」的分支。
-- [ ] AC4（既有不回归）：全量 suite 绿（删测试后 @test-group ratchet / baseline / suite-bucket-reattribution 同步更新）。
-- [ ] AC5（idle-watch 随退役）：`grep -rn "idle-watch\|IDLE_WATCH\|--check-idle-watch\|--ensure-mount-intent" plugin/ packages/ test/ scripts/` 命中数归零（或仅剩「退役说明/未来 driver 替代」注释）；manager 冷启动 checklist 7 键变 5 键（无 IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）；orchestration/ + docs/ 历史文档字样豁免。
+- [x] AC2（连带退役）：`monitor-mount-check.sh` / `monitor-mount-check.test.mjs` 一并删除（无对象可查）。
+- [x] AC3（无悬空引用）：凡引用 SESSION-* 事件 / session-liveness 输出的下游脚本，不得出现「因缺 session-liveness 而恒红/报未挂载」的分支。
+- [x] AC4（既有不回归）：全量 suite 绿（删测试后 @test-group ratchet / baseline / suite-bucket-reattribution 同步更新）。
+- [x] AC5（idle-watch 随退役）：`grep -rn "idle-watch\|IDLE_WATCH\|--check-idle-watch\|--ensure-mount-intent" plugin/ packages/ test/ scripts/` 命中数归零（或仅剩「退役说明/未来 driver 替代」注释）；manager 冷启动 checklist 7 键变 5 键（无 IDLE-WATCH-MOUNTED / MONITORS-DELIVERING）；orchestration/ + docs/ 历史文档字样豁免。
 
 ## Definition of Done
 
@@ -171,6 +171,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/test/monitor-mount-check.test.mjs
 - plugin/test/observer-registry.test.mjs
 - plugin/test/outer-cron-registry.test.mjs
+- plugin/test/outer-driver.test.mjs
 - plugin/test/outer-loop-tick-split.test.mjs
 - plugin/test/outer-retirement-precondition-check.test.mjs
 - plugin/test/pane-state-classify.test.mjs

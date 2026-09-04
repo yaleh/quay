@@ -115,7 +115,7 @@ test("--verify-only re-probes L1 from disk (a laid-down project reports L1_OK=1,
     for (const d of dirs) fs.mkdirSync(path.join(tmp, d), { recursive: true });
     fs.writeFileSync(path.join(tmp, "orchestration", "orchestrator-loop-tick.md"), "# outer\n");
     fs.writeFileSync(path.join(tmp, "docs/analysis", "fast-mode-loop-tick.md"), "# inner\n");
-    fs.writeFileSync(path.join(tmp, "plugin/scripts", "session-liveness.sh"), "#!/bin/bash\n");
+    fs.writeFileSync(path.join(tmp, "plugin/scripts", "loop-driver-check.sh"), "#!/bin/bash\n");
     fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), "providers: {}\n");
     fs.writeFileSync(path.join(tmp, ".quay", "runtime", "bin", "quay.js"), "//x\n");
     const r = run(["--verify-only", "--root", tmp, "--project", "vtest",
