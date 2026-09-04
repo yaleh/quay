@@ -2,7 +2,7 @@
 id: gap-retire-outer-tmux-window-logic
 title: 删除 outer 相关 tmux 依赖（quay-topology.sh outer
   窗口/outer-session-check.sh/topology-check.sh/manager-adopt.sh）——不迁移，直接删除
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -89,3 +89,13 @@ deliverables 之一"，task Contract invariant）把它列为 npm pack 必须携
 - plugin/test/manager-productization.test.mjs
 - packages/quay/src/cli/manager.ts
 - tasks/gap-retire-outer-tmux-window-logic.md
+## Needs-Human
+
+**执行 2026-09-04T13:31:14.993Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: AC1: warmed request 950ms < 500ms (⛔ ≥500ms ⇒ 假)
+- run_id：wk-prod-1788285192
+- session_id：5488ad7c-dffe-49a8-90b8-eca9936a4562
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-retire-outer-tmux-window-logic~wk-prod-1788285192~1788528228791-32b70f.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-outer-tmux-window-logic-wk-prod-1788285192.log
