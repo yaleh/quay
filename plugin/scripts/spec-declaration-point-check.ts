@@ -36,7 +36,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, emitPass, emitFail, emitNotEvaluated } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** The default checked surface = the quay repo root (this script lives at <repo>/plugin/scripts/). */
@@ -173,37 +173,33 @@ export function main(argv: string[]): number {
   const res = checkSpecDeclarations(root);
 
   if (!res.evaluated) {
-    const detail = JSON.stringify(res);
-    if (json) {
-      process.stdout.write(`${detail}\n`);
-    } else {
-      process.stderr.write(`NOT-EVALUATED: ${res.notEvaluatedReason}\n`);
-    }
-    return 3;
+    return emitNotEvaluated(res.notEvaluatedReason ?? "could not evaluate the SPEC declaration surface", res, {
+      json,
+      stream: json ? "stdout" : "stderr",
+    });
   }
 
   const pointCount = res.declarationPoints.length;
   const missingCount = res.declarationPoints.reduce((n, d) => n + d.missingSpecs.length, 0);
 
-  if (json) {
-    process.stdout.write(`${JSON.stringify(res)}\n`);
-  } else if (res.ok) {
-    process.stdout.write(
-      `PASS: all ${res.specs.length} orchestration/SPEC-*.md declared at each of ${pointCount} declaration points\n`,
+  if (res.ok) {
+    return emitPass(
+      `all ${res.specs.length} orchestration/SPEC-*.md declared at each of ${pointCount} declaration points`,
+      res,
+      { json },
     );
-  } else {
-    process.stderr.write(
-      `RED: ${missingCount} missing SPEC declaration(s) across ${pointCount} declaration points\n`,
-    );
+  }
+  if (!json) {
     for (const d of res.declarationPoints) {
       if (d.missingSpecs.length === 0) continue;
       process.stderr.write(`  ${d.path} missing:\n`);
       for (const s of d.missingSpecs) process.stderr.write(`    - ${s}\n`);
     }
   }
-
-  if (!res.ok) return 1;
-  return 0;
+  return emitFail(`${missingCount} missing SPEC declaration(s) across ${pointCount} declaration points`, res, {
+    json,
+    stream: json ? "stdout" : "stderr",
+  });
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

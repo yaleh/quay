@@ -31,6 +31,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { buildNonCodeMask } from "./checker-lib.ts";
+import { emitPass, emitFail } from "./gate-script-base.ts";
 
 /** The exemption list's repo-root-relative location (a DATA file, not scattered code). */
 export const EXEMPTIONS_REL = "plugin/scripts/checker-mechanical-spine-exemptions.json";
@@ -150,7 +151,13 @@ export function claimsJson(source: string): boolean {
  * IS executed code. A comment/string that merely mentions `JSON.stringify` without a real call is a
  * false-NEGATIVE risk (we'd miss that violation), not a false positive — the safe direction. */
 export function emitsJsonTs(source: string): boolean {
-  return source.includes("JSON.stringify");
+  if (source.includes("JSON.stringify")) return true;
+  // The base's verdict emitters (gate-script-base.ts emitVerdict / emitPass / emitFail /
+  // emitNotEvaluated) own JSON.stringify — a checker that delegates `--json` to them satisfies the
+  // JSON primitive requirement without a literal JSON.stringify in its own source
+  // (gap-gate-script-base-behavior-contract-unusable: the contract verifier is aligned with the
+  // redesigned behavior contract). A false NEGATIVE (missing a violation) is the safe direction.
+  return /\bemit(?:Verdict|Pass|Fail|NotEvaluated)\s*\(/.test(source);
 }
 
 /** Does a .sh checker actually emit JSON? Direct (jq / python / `printf '{…}'` JSON literal) or
@@ -322,17 +329,18 @@ export function main(argv: string[]): number {
         `${result.violations.length} violation(s), ${result.exempted.length} exempted`,
     );
     if (ok) {
-      console.log("PASS: every checker's exit-code vocabulary is within {0,1,2,3} and every --json claim emits JSON; the exemption list did not grow.");
-    } else {
-      if (result.unexempted.length > 0) {
-        console.log(`FAIL: ${result.unexempted.length} unexempted violation(s):`);
-        for (const v of result.unexempted) console.log(`  - ${v.checker} (${v.dimension}): ${v.detail}`);
-      }
-      if (result.ratchetAdded.length > 0) {
-        console.log(`FAIL: ${result.ratchetAdded.length} exemption entry/entries ADDED (the list can only shrink):`);
-        for (const r of result.ratchetAdded) console.log(`  - ${r}`);
-      }
+      return emitPass("every checker's exit-code vocabulary is within {0,1,2,3} and every --json claim emits JSON; the exemption list did not grow.");
     }
+    let code = 0;
+    if (result.unexempted.length > 0) {
+      code = emitFail(`${result.unexempted.length} unexempted violation(s):`);
+      for (const v of result.unexempted) console.log(`  - ${v.checker} (${v.dimension}): ${v.detail}`);
+    }
+    if (result.ratchetAdded.length > 0) {
+      code = emitFail(`${result.ratchetAdded.length} exemption entry/entries ADDED (the list can only shrink):`);
+      for (const r of result.ratchetAdded) console.log(`  - ${r}`);
+    }
+    return code;
   }
   return ok ? 0 : 1;
 }
