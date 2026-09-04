@@ -1,20 +1,20 @@
 // @test-group engine
-// suite-scheduler.test.mjs — the unified suite scheduler (gap-suite-dynamic-waterline-scheduler):
-// waterline semantics, monotonicity, pass/fail-neutrality, and the min-lock control.
+// suite-scheduler.test.mjs — the unified suite scheduler: the RELIABILITY-CAP semantics
+// (gap-suite-scheduler-reliability-cap-not-speed, redefining the waterline established by
+// gap-suite-dynamic-waterline-scheduler), plus pass/fail-neutrality and the classification/LPT layer.
 //
 // Two layers are tested:
-//   1. The PURE scheduling core (mainCapacity / nextDispatch / simulateSchedule / simulateMinLock) —
-//      the waterline semantic (main uses REMAINING capacity, NOT a global min lock), the monotonic
-//      waterline rise, and pass/fail-neutrality (every file dispatched exactly once) are all proven
-//      WITHOUT spawning a process.
+//   1. The PURE scheduling core (currentCap / nextDispatch / simulateSchedule) — the reliability
+//      invariant (total concurrency ≤ min budget of the currently-active groups, at every event), the
+//      low-tier-drain → main-recovers-full-budget regression (AC3), and pass/fail-neutrality (every
+//      file dispatched exactly once) are all proven WITHOUT spawning a process.
 //   2. The execution entry (runScheduler) — spawns real `node --test` per file; a two-probe run
 //      (one passing, one failing) proves the exit-code aggregate = failed-file count (never drops a
 //      test, never green-washes a red file).
 //
-// AC2's control (min-lock vs waterline) is reproduced by simulateMinLock vs simulateSchedule on a
-// workload where serial∥lowconc overlap parallelism matters: min-lock caps the whole suite at
-// min(S,L,M) and discards the parallel low-group window, so its makespan EXCEEDS the waterline's
-// (the proposal's 706s min-lock vs 515s waterline direction).
+// The OLD "waterline makespan < min-lock makespan" control is REMOVED — that assertion encoded the
+// superseded speed target ("min lock is +8% slower"). The replacement AC2 asserts the opposite
+// direction: the reliability invariant (total ≤ min active budget) holds at every event.
 //
 // Run:
 //   scripts/test.sh plugin/test/suite-scheduler.test.mjs
@@ -27,10 +27,9 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
-  mainCapacity,
+  currentCap,
   nextDispatch,
   simulateSchedule,
-  simulateMinLock,
   classifyAndOrder,
   toSuiteGroup,
   groupsArgToSuiteGroups,
@@ -41,77 +40,83 @@ const SCHEDULER_CLI = path.join(__dirname, "..", "scripts", "suite-scheduler.ts"
 
 const empty = () => ({ serial: 0, lowconc: 0, main: 0 });
 
-test("mainCapacity — the waterline: main = main_budget − active serial − active lowconc, clamped ≥ 0", () => {
-  const b = { serial: 8, lowconc: 8, main: 16 };
-  assert.equal(mainCapacity(b, { serial: 0, lowconc: 0, main: 0 }), 16);
-  assert.equal(mainCapacity(b, { serial: 8, lowconc: 0, main: 0 }), 8);
-  assert.equal(mainCapacity(b, { serial: 0, lowconc: 8, main: 0 }), 8);
-  assert.equal(mainCapacity(b, { serial: 8, lowconc: 8, main: 0 }), 0);
-  // Clamp: low-group budgets exceeding the main budget must block main, never go negative.
-  assert.equal(mainCapacity({ serial: 8, lowconc: 8, main: 4 }, { serial: 8, lowconc: 8, main: 0 }), 0);
-  // main's OWN active count never reduces its capacity (only the LOW groups borrow from main).
-  assert.equal(mainCapacity(b, { serial: 0, lowconc: 0, main: 12 }), 16);
+test("currentCap — the reliability cap: min budget among the groups with ≥1 file running (none ⇒ +∞)", () => {
+  const b = { serial: 8, lowconc: 4, main: 28 };
+  // No group active ⇒ no total limit (+∞) — the per-group budgets decide who starts first.
+  assert.equal(currentCap(b, { serial: 0, lowconc: 0, main: 0 }), Infinity);
+  // Only serial active ⇒ cap = serial budget.
+  assert.equal(currentCap(b, { serial: 3, lowconc: 0, main: 0 }), 8);
+  // serial + lowconc active ⇒ cap = min(8, 4) = 4 (the lowconc tier dominates).
+  assert.equal(currentCap(b, { serial: 3, lowconc: 1, main: 0 }), 4);
+  // All three active ⇒ cap = min(8, 4, 28) = 4.
+  assert.equal(currentCap(b, { serial: 3, lowconc: 1, main: 5 }), 4);
+  // Only main active ⇒ cap = main budget (main recovers its full budget once the low tiers drain).
+  assert.equal(currentCap(b, { serial: 0, lowconc: 0, main: 12 }), 28);
 });
 
-test("nextDispatch — group budgets are INDEPENDENT (serial≤S AND lowconc≤L in parallel, main fills the remainder)", () => {
-  const budgets = { serial: 2, lowconc: 3, main: 8 };
+test("nextDispatch — total ≤ cap: serial fills to its budget first, lowconc/main blocked while it holds the cap", () => {
+  const budgets = { serial: 8, lowconc: 4, main: 28 };
   const queues = {
-    serial: ["s1", "s2", "s3"],
-    lowconc: ["l1", "l2", "l3", "l4"],
-    main: ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"],
+    serial: Array.from({ length: 8 }, (_, i) => `s${i}`),
+    lowconc: Array.from({ length: 4 }, (_, i) => `l${i}`),
+    main: Array.from({ length: 28 }, (_, i) => `m${i}`),
   };
   const active = empty();
   const started = nextDispatch(budgets, queues, active);
-  // serial takes 2, lowconc takes 3 (both INDEPENDENTLY — parallel, overlap not degraded), main fills
-  // main_budget − (2+3) = 3.
-  const byGroup = { serial: started.filter((s) => s.group === "serial"), lowconc: started.filter((s) => s.group === "lowconc"), main: started.filter((s) => s.group === "main") };
-  assert.equal(byGroup.serial.length, 2, "serial ≤ S");
-  assert.equal(byGroup.lowconc.length, 3, "lowconc ≤ L (independent of serial)");
-  assert.equal(byGroup.main.length, 3, "main fills remaining = M − S − L");
-  assert.equal(active.serial, 2);
-  assert.equal(active.lowconc, 3);
-  assert.equal(active.main, 3);
+  // Nothing active ⇒ no cap ⇒ serial fills to its OWN budget (8) first.
+  assert.equal(active.serial, 8, "serial fills to its budget first (nothing active ⇒ no cap)");
+  assert.equal(active.lowconc, 0, "lowconc cannot start while serial holds 8 = the cap (min(8)=8)");
+  assert.equal(active.main, 0, "main cannot start while serial holds 8 = the cap");
+  assert.equal(started.length, 8);
 });
 
-test("nextDispatch — main is BLOCKED while serial+lowconc saturate the low-group budget (waterline starts at 0)", () => {
-  const budgets = { serial: 8, lowconc: 8, main: 16 };
-  const queues = { serial: Array.from({ length: 8 }, (_, i) => `s${i}`), lowconc: Array.from({ length: 8 }, (_, i) => `l${i}`), main: ["m1", "m2"] };
-  const active = empty();
+test("nextDispatch — a low tier becoming active lowers the cap below the pre-start total (no overshoot)", () => {
+  const budgets = { serial: 8, lowconc: 4, main: 28 };
+  // serial is at 7 (just below its budget). lowconc (budget 4) may NOT start: its post-start cap
+  // would be min(8, 4) = 4 < 7 + 1 = 8. main (budget 28) MAY fill to total 8 (cap = min(8, 28) = 8).
+  const active = { serial: 7, lowconc: 0, main: 0 };
+  const queues = { serial: [], lowconc: ["l1"], main: ["m1"] };
   const started = nextDispatch(budgets, queues, active);
-  assert.equal(started.filter((s) => s.group === "main").length, 0, "main capacity 0 while serial+lowconc = 16 = main budget");
-  // But after the low groups DRAIN, main gets the capacity back (monotonic rise toward the budget).
-  const active2 = { serial: 0, lowconc: 0, main: 0 };
-  const started2 = nextDispatch(budgets, queues, active2);
-  assert.equal(started2.filter((s) => s.group === "main").length, 2, "drained low groups ⇒ main gets the full budget");
+  assert.deepEqual(started.map((s) => s.group), ["main"], "main fills the headroom, lowconc is blocked by its own lower cap");
+  assert.equal(active.main, 1);
+  assert.equal(active.lowconc, 0, "lowconc blocked: post-start total 8 > its cap 4");
+  // Once serial drains to 3, lowconc may start ONE (total 4 = cap 4), and no more.
+  const active2 = { serial: 3, lowconc: 0, main: 0 };
+  const queues2 = { serial: [], lowconc: ["l1", "l2"], main: [] };
+  const started2 = nextDispatch(budgets, queues2, active2);
+  assert.deepEqual(started2.map((s) => s.group), ["lowconc"], "lowconc starts once serial ≤ 3");
+  assert.equal(active2.lowconc, 1, "exactly one lowconc starts (total 4 = cap 4)");
+  assert.equal(active2.serial, 3);
 });
 
-test("simulateSchedule — monotonic waterline: capacity rises monotonically toward the main budget as the low groups drain", () => {
-  // serial/lowconc counts ≤ their budgets ⇒ the low groups are fully dispatched at t=0 and never
-  // re-dispatch, so active serial/lowconc only DEcrease ⇒ main capacity only rises — the exact
-  // "低并发组完成后容量单调升向 main 预算" consequence. (A low group with MORE files than its budget
-  // refills its slot as one drains, keeping the capacity FLAT rather than rising — the rise is over
-  // the DRAIN of the finite low queue, not over every individual completion.)
-  const budgets = { serial: 2, lowconc: 2, main: 6 };
+test("simulateSchedule — reliability invariant: total ≤ min active budget at every event (AC2)", () => {
+  const budgets = { serial: 8, lowconc: 4, main: 28 };
   const groups = {
-    serial: ["s1", "s2"],
-    lowconc: ["l1", "l2"],
-    main: ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"],
+    serial: Array.from({ length: 8 }, (_, i) => `s${i}`),
+    lowconc: Array.from({ length: 4 }, (_, i) => `l${i}`),
+    main: Array.from({ length: 20 }, (_, i) => `m${i}`),
   };
-  const durations = new Map([
-    ["s1", 50], ["s2", 20],
-    ["l1", 40], ["l2", 15],
-    ["m1", 8], ["m2", 8], ["m3", 8], ["m4", 8], ["m5", 8], ["m6", 8], ["m7", 8], ["m8", 8], ["m9", 8],
-  ]);
+  const durations = new Map();
+  for (const f of groups.serial) durations.set(f, 100);
+  for (const f of groups.lowconc) durations.set(f, 50);
+  for (const f of groups.main) durations.set(f, 10);
+
   const r = simulateSchedule(budgets, groups, durations);
-  assert.ok(r.mainCapacityTrace.length > 0, "the simulation must produce a capacity trace");
-  for (let i = 1; i < r.mainCapacityTrace.length; i++) {
-    assert.ok(
-      r.mainCapacityTrace[i] >= r.mainCapacityTrace[i - 1],
-      `main capacity must rise monotonically (trace[${i - 1}]=${r.mainCapacityTrace[i - 1]} → trace[${i}]=${r.mainCapacityTrace[i]})`,
-    );
+  assert.ok(r.trace.length > 0, "the simulation must produce a per-event trace");
+  for (const snap of r.trace) {
+    if (Number.isFinite(snap.cap)) {
+      assert.ok(
+        snap.total <= snap.cap,
+        `total ${snap.total} must be ≤ cap ${snap.cap} at every event`,
+      );
+    }
   }
-  // And it must RISE ALL THE WAY to the main budget once the low groups are fully drained.
-  assert.equal(r.mainCapacityTrace[r.mainCapacityTrace.length - 1], budgets.main, "the waterline tops out at the main budget");
+  // Meaningfulness guard (hard rule 4): the cap must actually BIND at the lowest active tier
+  // (lowconc budget 4) during the run — the assertion is not "total ≤ +∞ everywhere".
+  assert.ok(
+    r.trace.some((s) => s.cap === budgets.lowconc),
+    "the cap must actually bind at the lowest active tier (lowconc=4) during the run",
+  );
 });
 
 test("simulateSchedule — pass/fail-neutral: every file is dispatched EXACTLY once (membership unchanged)", () => {
@@ -124,27 +129,21 @@ test("simulateSchedule — pass/fail-neutral: every file is dispatched EXACTLY o
   assert.deepEqual(seen, all, "the scheduler reorders at most — it can never drop or duplicate a file");
 });
 
-test("AC2 control — waterline makespan < min-lock makespan (serial∥lowconc overlap parallelism preserved)", () => {
-  // The rejected "global min lock" caps EVERYTHING at min(S,L,M)=8; the waterline lets serial and
-  // lowconc each run at their OWN 8-lane budget in parallel (16 lanes total) while main fills the
-  // remainder. On this workload the min lock serializes the two long low-group waves into one 8-lane
-  // pool, so it is SLOWER (the proposal's 706s min-lock vs 515s waterline direction).
-  const budgets = { serial: 8, lowconc: 8, main: 16 };
-  const groups = {
-    serial: Array.from({ length: 8 }, (_, i) => `s${i}`),
-    lowconc: Array.from({ length: 8 }, (_, i) => `l${i}`),
-    main: Array.from({ length: 8 }, (_, i) => `m${i}`),
+test("AC3 regression — after serial/lowconc drain, main recovers its FULL budget (no permanent slow-down)", () => {
+  // The reliability cap must not REMEMBER tiers that have already drained: once serial (budget 8)
+  // and lowconc (budget 4) are gone, main (budget 28) runs at its own full budget.
+  const budgets = { serial: 8, lowconc: 4, main: 28 };
+  const active = empty();
+  const queues = {
+    serial: [],
+    lowconc: [],
+    main: Array.from({ length: 28 }, (_, i) => `m${i}`),
   };
-  const durations = new Map();
-  for (const f of groups.serial) durations.set(f, 100);
-  for (const f of groups.lowconc) durations.set(f, 100);
-  for (const f of groups.main) durations.set(f, 10);
-
-  const waterline = simulateSchedule(budgets, groups, durations).makespan;
-  const minLock = simulateMinLock(budgets, groups, durations);
-  assert.equal(waterline, 110, "waterline: serial(8×100s)∥lowconc(8×100s) in parallel, then main(8×10s)");
-  assert.equal(minLock, 210, "min-lock: 3 waves of 8 through one pool (100+100+10)");
-  assert.ok(waterline < minLock, `waterline ${waterline} must beat min-lock ${minLock}`);
+  const started = nextDispatch(budgets, queues, active);
+  assert.equal(active.main, 28, "main runs at its full budget once serial/lowconc are drained");
+  assert.equal(started.length, 28);
+  assert.equal(active.serial, 0);
+  assert.equal(active.lowconc, 0);
 });
 
 // ── classification + LPT layer (gap-suite-classification-lpt-scheduler-ts-ization) ────────────────

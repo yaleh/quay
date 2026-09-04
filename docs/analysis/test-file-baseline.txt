@@ -388,7 +388,6 @@ plugin/test/outer-doc-split.test.mjs
 plugin/test/outer-driver.test.mjs
 plugin/test/outer-loop-tick-split.test.mjs
 plugin/test/outer-retirement-precondition-check.test.mjs
-plugin/test/outer-session-check.test.mjs
 plugin/test/outer-tick-log-check.test.mjs
 plugin/test/pane-state-classify.test.mjs
 plugin/test/per-task-suite-record-check.test.mjs
@@ -466,9 +465,7 @@ plugin/test/self-touch-convention.test.mjs
 plugin/test/semantic-face-dispatch-record.test.mjs
 plugin/test/semantic-observer-judge.test.mjs
 plugin/test/send-keys-reliable.test.mjs
-plugin/test/session-bootstrap.test.mjs
 plugin/test/session-retirement-check.test.mjs
-plugin/test/session-topology.test.mjs
 plugin/test/slot-refill-heartbeat.test.mjs
 plugin/test/slot-refill.test.mjs
 plugin/test/slot-visibility.test.mjs

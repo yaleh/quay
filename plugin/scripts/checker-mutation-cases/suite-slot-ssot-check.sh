@@ -40,9 +40,9 @@ import { suiteLockSlotPaths } from "./suite-lock-slots.ts";
 export const y = 2;
 EOF
   # The ff gate carries NO global suite lock reference (I1 — reads only the task capture).
-  cat > plugin/scripts/fan-in-ff-merge.sh <<'EOF'
-#!/usr/bin/env bash
-# reads /tmp/fan-in-suite-${task}.env (the task's own suite certificate)
+  mkdir -p packages/quay/src/fan-in
+  cat > packages/quay/src/fan-in/ff-merge.ts <<'EOF'
+// reads /tmp/fan-in-suite-${task}.env (the task's own suite certificate)
 EOF
 }
 

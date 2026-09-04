@@ -449,9 +449,9 @@ test("checker I2 — 能取假: a hardcoded slot-path form (numbered var / conti
   } finally { cleanup(root); }
 });
 
-test("checker I1 — 能取假: a fan-in-ff-merge.sh that reads full-suite.lock ⇒ RED", () => {
+test("checker I1 — 能取假: a ff-merge.ts (product 层) that reads full-suite.lock ⇒ RED", () => {
   const root = makeFakeRoot({
-    "plugin/scripts/fan-in-ff-merge.sh": '#!/usr/bin/env bash\nfor s in "${suite_lock_dir}/full-suite.lock.0" "${suite_lock_dir}/full-suite.lock.1"; do flock -n "$s" true; done\n',
+    "packages/quay/src/fan-in/ff-merge.ts": 'export const suiteLockBase = "/var/lib/full-suite.lock";\n',
   });
   try {
     const v = checkFfNoGlobalSuiteLock(root);

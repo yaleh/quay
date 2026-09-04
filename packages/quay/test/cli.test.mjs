@@ -2052,7 +2052,7 @@ function block28() {
   // config/manager route their subcommands inside their handlers (src/cli/config.ts
   // / src/cli/manager.ts), not via `cmd && sub` routes in quay.ts — so enumerate
   // them here, the same list the fallback line is expected to carry.
-  const handlerSubs = ["config validate", "config check", "manager start", "manager adopt", "manager arm"];
+  const handlerSubs = ["config validate", "config check", "manager start", "manager arm"];
   const expected = new Set([...new Set(dispatchTopLevel), ...dispatchSubs, ...handlerSubs]);
 
   // Actual command set, parsed out of the fallback usage line's <…> payload.

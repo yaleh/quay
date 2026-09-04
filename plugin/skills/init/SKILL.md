@@ -74,23 +74,18 @@ mechanically by quay-init's `verify-referenced-landed` (see below).
 | `loop/orchestrator-tick-core.md` | `orchestration/orchestrator-tick-core.md` (byte-identical, no substitution; the ≤80-line outer exec core — `gap-ac37-exec-core-ships-with-package`) |
 | `loop/fast-mode-tick-core.md` | `orchestration/fast-mode-tick-core.md` (以 orchestration/ 本为正本；plugin/loop/ 为 quay-init --loop 铺出模板——引用目标 docs/analysis 源，非 byte-identical，两副本承担不同角色；正本改动后由 inner 按正本语义落地副本) |
 | `loop/manager-tick-core.md` | `orchestration/manager-tick-core.md` — **opt-in**: laid only with `--manager` (human ruling 2026-08-10: the typical path is two-layer, outer + inner), NOT in the default `--loop` set |
-| `scripts/*` referenced by a shipped skill/tick doc (e.g. `fast-mode-telemetry.ts`, `send-keys-reliable.sh`, `ready-pool-check.ts`, `read-probe-spec.ts`, `task-schema-check.ts`, `quay-launch.sh`, `quay-topology.sh`, `topology-check.sh`, …) | `plugin/scripts/` |
+| `scripts/*` referenced by a shipped skill/tick doc (e.g. `fast-mode-telemetry.ts`, `send-keys-reliable.sh`, `ready-pool-check.ts`, `read-probe-spec.ts`, `task-schema-check.ts`, `quay-launch.sh`, …) | `plugin/scripts/` |
 | `scripts/` bare-name mechanism files the docs call without a `plugin/scripts/` prefix (`inner-idle-log.ts`, `it0-split-or-commit-check.ts`, `pipe-exit-code-check.sh`; `heavy-op-token.sh` was retired 2026-08-06) | `plugin/scripts/` |
 | `scripts/gate-script-base.ts`, `workflow-event-schema.mjs`, `task-schema.ts`, `touches-parser.ts`, `wiring-coverage-check.ts` (transitive deps of the checkers — the laid-down mechanism must be functional) | `plugin/scripts/` |
 | `.claude/launch.settings.json` (default launch template — the consumer edits model/env per project; `quay-launch.sh` materializes it, so a cold-started target's launcher does NOT fail closed; `gap-quay-init-coldstart-usability-launch-not-used-...` F4) | `.claude/launch.settings.json` |
 
 ## Loop install: local-state files (self-create) and quay reference docs
 
-**Session topology lay-down (`gap-tmux-session-topology-no-factory-definition`):** the two-window
-session factory + check (`plugin/scripts/quay-topology.sh`, `plugin/scripts/topology-check.sh`) ship
-with `--loop` because the shipped cold-start / session-topology skills reference them (referenced ⊆
-landed). The topology is `outer` + `inner`; manager is cross-project and NOT part of a project's
-topology (`gap-manager-baked-into-project-topology-factory`). The topology **definition** itself
-lives in the `quay-session-topology` skill (a plugin
-skill, not laid down); cold start builds the windows by definition via the laid-down factory and
-verifies them via the laid-down check. The per-project session name comes from the same config
-(`orchestration/session-liveness.env` `SESSION_TMUX_SESSION`), so the factory and check address the
-target's real session without a guessed default.
+**Session topology lay-down — retired (`gap-retire-outer-tmux-window-logic`):** the two-window
+session topology factory + check and the session-topology skill were retired with the outer tmux
+session. The outer session role was absorbed into the manager's direct subagent dispatch, and the
+inner session was already replaced by the worker-driver — no session topology factory/check ships
+with `--loop` anymore.
 
 `--loop` does NOT lay down the following. They are referenced by the shipped tick template by
 path, and are resolved as follows:

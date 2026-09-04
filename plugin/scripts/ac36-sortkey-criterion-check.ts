@@ -31,7 +31,7 @@
 //     --before /tmp/before.json --after /tmp/after.json --dc-id gap-xxx --family-prefix gap-
 
 import fs from "node:fs";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, emitPass, emitFail } from "./gate-script-base.ts";
 
 /** True iff a ranking entry carries all four sort-key fields the mechanical check needs. */
 export function isRankingEntry(e) {
@@ -202,16 +202,15 @@ function main(argv) {
     return 2;
   }
   const result = checkCriterion2({ before, after, dcId, familyPrefix });
-  if (jsonOut) {
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  } else if (result.ok) {
+  if (result.ok) {
     const m = result.checks.dcMovement;
     const moved = m ? `DC ${m.id} ${m.before === null ? "outside→" : `${m.before}→`}${m.after}` : "DC moved forward";
-    process.stdout.write(`PASS — AC36 判据② mechanically verified: ${moved}; negative control (${result.checks.negativeControl.afterCount} same-family non-DC) unchanged; blocking_suite above DC\n`);
-  } else {
-    for (const r of result.reason) process.stdout.write(`FAIL — ${r}\n`);
+    return emitPass(`AC36 判据② mechanically verified: ${moved}; negative control (${result.checks.negativeControl.afterCount} same-family non-DC) unchanged; blocking_suite above DC`, result, { json: jsonOut });
   }
-  return result.ok ? 0 : 1;
+  if (!jsonOut) {
+    for (const r of result.reason) process.stdout.write(`  - ${r}\n`);
+  }
+  return emitFail(`AC36 判据② violated — ${result.reason.length} reason(s)`, result, { json: jsonOut });
 }
 
 if (isDirectEntry(import.meta)) {

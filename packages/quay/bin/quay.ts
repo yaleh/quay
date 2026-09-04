@@ -200,13 +200,13 @@ export async function run(argv, ctx = {}) {
   if (cmd === "run") return (await import("../src/cli/run.ts")).handleRun(ctx);
   // DIR-039: `quay migrate --from <id> --to <id>`.
   if (cmd === "migrate") return (await import("../src/cli/migrate.ts")).handleMigrate(ctx);
-  // Manager commands (C1-C5): start/adopt/arm.
+  // Manager commands (C1-C5): start/arm (adopt retired with the outer tmux session).
   if (cmd === "manager") return (await import("../src/cli/manager.ts")).handleManager(ctx);
   // AC139: unified driver launch surface (start/stop/drain/status/restart --kind promotion|worker).
   if (cmd === "driver") return (await import("../src/cli/driver.ts")).handleDriver(ctx);
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <adr|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|config check|action list|action run|serve|mcp|manager start|manager adopt|manager arm|driver> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <adr|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|config check|action list|action run|serve|mcp|manager start|manager arm|driver> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
     }
 }

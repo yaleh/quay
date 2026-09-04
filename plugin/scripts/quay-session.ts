@@ -17,9 +17,6 @@ import { isDirectEntry } from "./gate-script-base.ts";
 
 export const GROUP = "quay-session";
 export const MEMBERS: InstrumentSpec[] = [
-  { name: "topology-check", file: "topology-check.sh", kind: "bash", description: "会话拓扑查询" },
-  { name: "quay-topology", file: "quay-topology.sh", kind: "bash", description: "quay 拓扑/会话映射" },
-  { name: "session-bootstrap", file: "session-bootstrap.sh", kind: "bash", description: "会话引导（tmux 会话建立）" },
   { name: "quay-launch", file: "quay-launch.sh", kind: "bash", description: "启动 quay 会话" },
   { name: "manager-tick-readings", file: "manager-tick-readings.ts", kind: "ts", description: "管理者 tick 机械读数（三项目状态/资源/外层存活/tick日志/监视器版本，单命令产出）" },
 ];

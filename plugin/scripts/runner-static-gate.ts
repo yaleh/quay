@@ -457,6 +457,22 @@ run_static_checks() {
   # @static-tier change
   # @static-object .claude/workflows/* plugin/workflows/* plugin/scripts/workflows-dual-copy-drift-check.ts plugin/test/workflows-dual-copy-drift-check.test.mjs
   run_checker "workflows-dual-copy-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/workflows-dual-copy-drift-check.ts" --root "${repo_root}"
+  echo "== mirror-pair-drift-check (gap-mirror-pair-drift-policy-plugin-scripts-experiments — plugin/scripts/ vs experiments/quay-perpetual-stream/scripts/ 镜像漂移) =="
+  # The general mirror-pair drift gate: plugin/scripts/ and experiments/quay-perpetual-stream/scripts/
+  # carry 40 real-file copies (21 more same-name entries are experiments→plugin SYMLINKS — single-source
+  # references that cannot drift, excluded). The only prior drift checkers were PINNED single-file-pair
+  # lists (workflows-dual-copy / suite-bucket); this checker AUTO-DISCOVERS every same-basename
+  # REAL-FILE pair and byte-compares them, so a future copy drift (any extension) goes RED without
+  # anyone remembering to add the filename to a list (doc §2.2/§2.8 R6/R7). The 12 syncable copies
+  # were re-synced (experiments ← plugin, the canonical layer); the 2 structural copies
+  # (tree-hygiene-check.sh / worktree-branch-hygiene-check.sh — repo-root resolution is directory-depth
+  # -dependent, so byte-identity is the WRONG invariant) are allow-listed with a sha256 signature: a
+  # drift whose signature MATCHES the allow-list is ALLOWED (visible, not red), but if either side's
+  # sha256 changes the drift EXPANDED ⇒ RED (the exemption is re-checked, never a blind pass). Exit 1 on
+  # any unexempted/expanded drift; exit 3 (NOT-EVALUATED) when the experiments mirror dir is absent.
+  # @static-tier change
+  # @static-object plugin/scripts/ experiments/quay-perpetual-stream/scripts/ plugin/scripts/mirror-pair-drift-check.ts plugin/scripts/mirror-pair-drift-allowlist.json plugin/test/mirror-pair-drift-check.test.mjs
+  run_checker "mirror-pair-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/mirror-pair-drift-check.ts" --root "${repo_root}"
   echo "== rhythm-consumer-check (gap-ac73 判据1/2/3 — cadence consumer contract gate) =="
   # AC73's own checker — the rhythm column's consumer contract: non-按需 mechanisms must have a
   # call site in test.sh / an execution core (or wired elsewhere, or baselined), 按需 mechanisms

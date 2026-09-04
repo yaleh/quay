@@ -862,9 +862,9 @@ fi
 agent_id=$(basename "$self" .jsonl 2>/dev/null | sed 's/^agent-//')
 if [ -z "$agent_id" ]; then echo "FATAL: 未能从 $self 提取 agent id（--agent-id 不能由调用方填）" >&2; exit 2; fi
 # selfloc-block-end
-bash ${worktree}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget} --worktree ${worktree} --lock-wait ${mergeLockWaitSecs}
+node --experimental-strip-types ${worktree}/packages/quay/src/fan-in/ff-merge.ts --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget} --worktree ${worktree} --lock-wait ${mergeLockWaitSecs} --token "$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo fan-in-fallback-token)"
 ff_rc=$?
-# 本任务 suite capture 的使命已尽（ff 闸已在 fan-in-ff-merge.sh 内读过它）——清理掉；若 ff 失败重试，
+# 本任务 suite capture 的使命已尽（ff 闸已在 ff-merge.ts 内读过它）——清理掉；若 ff 失败重试，
 # step 4 会重写新 capture（gap-suite-concurrency-ff-gate-and-slot-ssot）。不在此 exit：step 5.5（仅 ff
 # 成功时执行）与清理仍需按序运行。ff_rc 由你在返回时上报（0=green, 1/3=ff-retry, 2=red）。
 rm -f "$suite_capture" 2>/dev/null || true

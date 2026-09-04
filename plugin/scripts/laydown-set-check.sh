@@ -8,11 +8,12 @@
 # session-liveness-mount.sh are both derived members, so cold-start would have shipped the M3 bug
 # into the target project) MUST block.
 #
-# The set is MECHANICALLY derived, no new mechanism (AC2): the SAME grep quay-init.sh's
-# derive_loop_scripts() step (a) uses — path-prefixed `plugin/scripts/` references in the shipped
-# skill docs (`plugin/skills/*/SKILL.md`) + loop tick docs (`plugin/loop/*.md`). This script is
-# itself a derived member once the cold-start SKILL.md references it, so its own test runs in the
-# set.
+# The set is MECHANICALLY derived, no new mechanism (AC2): it CALLS quay-init.sh's
+# derive_loop_scripts() — the SAME single source the --loop laydown uses — so "what this gate
+# verifies" and "what quay-init lays down" cannot drift (gap-quay-init-laydown-derivation-count-
+# mismatch-two-sources: the old path here was a second, narrower grep that derived a SUBSET of the
+# real laydown set). This script is itself a derived member once the cold-start SKILL.md references
+# it, so its own test runs in the set.
 #
 # "Green" for a member = the script exists AND parses (bash -n for .sh; node --check with
 # --experimental-strip-types for .ts/.mjs). The member's OWN tests (`*/test/<basename>.test.mjs`,
@@ -65,8 +66,6 @@ if [ -z "$ROOT" ]; then
   ROOT="$(git -C "$SELF_DIR" rev-parse --show-toplevel 2>/dev/null || dirname "$SELF_DIR")"
 fi
 
-SKILLS_DIR="$ROOT/plugin/skills"
-LOOP_DIR="$ROOT/plugin/loop"
 SCRIPTS_DIR="$ROOT/plugin/scripts"
 
 if [ ! -d "$ROOT/plugin" ]; then
@@ -79,9 +78,21 @@ if [ ! -d "$ROOT/plugin" ]; then
   exit 2
 fi
 
-# ── 1. Derive the laydown set (AC2 — the same grep quay-init.sh derive_loop_scripts step (a) uses) ──
-mapfile -t SET < <(grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$SKILLS_DIR"/*/SKILL.md "$LOOP_DIR"/*.md 2>/dev/null \
-  | sed 's#^plugin/scripts/##' | sort -u)
+# ── 1. Derive the laydown set — the SINGLE source of truth is quay-init.sh's derive_loop_scripts()
+# (gap-quay-init-laydown-derivation-count-mismatch-two-sources); no independent grep here. quay-init.sh
+# is sourceable (library mode — its guard stops before the install flow), so source it in a subshell
+# and call derive_loop_scripts() with PLUGIN_ROOT re-pointed at --root's plugin tree. The subshell
+# isolates quay-init.sh's `set -euo pipefail` + variable assignments from this script. Source it from
+# SELF_DIR (this checkout's plugin/scripts) under a VALID plugin root (passes the source-time plugin.json
+# check), then re-point PLUGIN_ROOT at the tree to DERIVE from (--root/plugin — a fixture root derives
+# its own fake skills/loop; the repo root derives the full shipped corpus).
+mapfile -t SET < <(
+  export CLAUDE_PLUGIN_ROOT="$SELF_DIR/.."
+  set --
+  . "$SELF_DIR/quay-init.sh"
+  PLUGIN_ROOT="$ROOT/plugin"
+  derive_loop_scripts
+)
 
 if [ "${#SET[@]}" -eq 0 ]; then
   if [ "$JSON" -eq 1 ]; then
