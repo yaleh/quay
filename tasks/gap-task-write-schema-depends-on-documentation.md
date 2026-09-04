@@ -1,12 +1,14 @@
 ---
 id: gap-task-write-schema-depends-on-documentation
 title: Document task_write MCP depends_on field usage
-status: needs-human
+status: todo
 labels: []
 parent: null
 children: []
 extra:
-  schema: v1
+  depends_on:
+    - gap-scoped-gate-m120-negative-control-false-positive
+  schema: execution
 ---
 ## Proposal
 

@@ -2764,13 +2764,21 @@ export function combinedOutput(stdout: string, stderr: string): string {
 /** 无害噪声行（MODULE_TYPELESS 等）——⛔ 污染失败摘要/判词。extractFailureSummary 与
  *  extractFirstFailureLine 共用（⛔ 两处各写一份正则 = 漂移，硬规则 5b）。 */
 function isNoiseLine(l: string): boolean {
+  const t = l.trim();
   return (
     l.includes("MODULE_TYPELESS_PACKAGE_JSON") ||
     l.includes("Reparsing as ES module") ||
     l.includes("This incurs a performance overhead") ||
     l.includes("To eliminate this warning") ||
     l.includes('add "type": "module"') ||
-    l.includes("--trace-warnings")
+    l.includes("--trace-warnings") ||
+    // gap-fan-in-suite-red-reason-carries-split-or-commit-title：suite 静态检查阶段的「== … ==」分节
+    // 标题行（runner-static-gate.ts 的 echo）与 node:test 的「✔ 通过测试」行都不是失败信号——但标题含
+    // 「continuously-checked」（\bchecked\b）/「to-fail」（\bFAIL\b）、通过测试名含「AssertionError」/
+    // 「Could not resolve」等词，会撞 isFailureSignalLine 的松散正则 ⇒ 把标题/通过测试当失败摘要（归因
+    // 错位到 split-or-commit 标题）。⛔ 两者都整体当噪声（不进 meaningful 回退、不进 signals）。
+    /^== .* ==$/.test(t) ||
+    /^\s*✔/.test(l)
   );
 }
 
@@ -2803,10 +2811,26 @@ export function extractFailureSummary(combined: string): string {
  *  且它无信号时回退 meaningful 会违反「无匹配行 ⇒ 回退通用文案」（硬规则 3b 三态可分）。
  *  无信号 ⇒ 空串（调用方回退 `suite <outcome>` 通用文案，⛔ 不伪造/截断出误导内容）。 */
 export function extractFirstFailureLine(combined: string): string {
-  const line = String(combined ?? "")
+  const lines = String(combined ?? "")
     .split("\n")
-    .find((l) => l.trim() !== "" && !isNoiseLine(l) && isFailureSignalLine(l));
-  return line ? line.trim() : "";
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && !isNoiseLine(l));
+  // 真实失败优先序（gap-fan-in-suite-red-reason-carries-split-or-commit-title）：真实断言原文
+  // （AssertionError）→ 失败文件（__PERFILE__ passed=false）→ 测试级失败（✖ / not ok / # fail N>0）
+  // → 松散静态检查信号（HARD FAIL / Could not resolve / checked / violation）。
+  // 旧实现取【文档序第一条】松散信号，而 suite 静态检查阶段的良性判词（0 violation(s) / checked 566 /
+  // PASS）排在真实失败之前、且全中松散正则 ⇒ reason 恒为「split-or-commit 标题」而非真实失败（归因
+  // 错位）。改成确定性失败优先，仍保留松散信号作【静态检查真失败】（无测试失败时）的回退。
+  const definitive = [
+    /AssertionError/i,
+    /__PERFILE__ .* passed=false/i,
+    /^\s*✖|^\s*not ok\b|# fail\s+[1-9]\d*\b/i,
+  ];
+  for (const re of definitive) {
+    const hit = lines.find((l) => re.test(l));
+    if (hit) return hit;
+  }
+  return lines.find(isFailureSignalLine) ?? "";
 }
 
 /** 读 fan-in 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。 */

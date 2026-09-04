@@ -689,7 +689,7 @@ test("REVERSE-EDGE AC2: --integration-authoritative + content criterion resolves
     assert.match(env, /^SESSION_TRANSCRIPTS="quay /m, "develop must carry the integration (fixed) env");
     assert.ok(!/^SESSION_TRANSCRIPTS="inner /.test(env), "develop's defective 'inner' must NOT win");
     // The criterion gate was applied and satisfied.
-    assert.match(r.stdout, /content criterion satisfied for orchestration\/session-liveness\.env/);
+    assert.match(r.stdout, /content criterion satisfied for orchestration\/session-liveness.env/);
     assert.match(r.stdout, /resolving integration-authoritative conflicts \(integration side, 1\)/);
     // AC3: the unlisted SHARED files still resolve develop-authoritative in the SAME merge (mixed
     // direction — the reverse edge is per-file, not a global direction flip).
@@ -736,7 +736,7 @@ test("REVERSE-EDGE AC4 (negative control): WITHOUT a reverse-edge declaration, t
     assert.match(r.stdout, /measure unmerged_develop_files=0/, "object gate must NOT be the blocker (.env)");
     assert.match(r.stderr, /REAL-MERGE FAIL-CLOSED/);
     assert.match(r.stderr, /code conflict files:/);
-    assert.match(r.stderr, /orchestration\/session-liveness\.env/);
+    assert.match(r.stderr, /orchestration\/session-liveness.env/);
     // Shared files are reported as blocked (not silently resolved either).
     assert.match(r.stderr, /would auto-resolve develop-authoritative/);
     assert.match(r.stderr, /orchestration\/tick-log\.md/);
@@ -763,9 +763,9 @@ test("REVERSE-EDGE AC4 (negative control): declared reverse-edge but the integra
       "--integration-authoritative", "orchestration/session-liveness.env",
       "--reverse-edge-criterion", criterion]);
     assert.notEqual(r.status, 0, "a criterion-failing reverse-edge candidate must fail closed");
-    assert.match(r.stderr, /content criterion NOT satisfied for orchestration\/session-liveness\.env/);
+    assert.match(r.stderr, /content criterion NOT satisfied for orchestration\/session-liveness.env/);
     assert.match(r.stderr, /REAL-MERGE FAIL-CLOSED/);
-    assert.match(r.stderr, /orchestration\/session-liveness\.env/);
+    assert.match(r.stderr, /orchestration\/session-liveness.env/);
     // Nothing moved — neither side was blindly chosen.
     assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), before);
     assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
@@ -788,7 +788,7 @@ test("REVERSE-EDGE contract measure: --merge --integration-authoritative 'orches
     // The env file is classified in the integration-authoritative (reverse-edge) bucket — the tool
     // can now EXPRESS the correct resolution direction (integration side), unlike pre-fix.
     assert.match(r.stdout, /integration-authoritative \(reverse-edge, integration side\):\s+1/);
-    assert.match(r.stdout, /orchestration\/session-liveness\.env/);
+    assert.match(r.stdout, /orchestration\/session-liveness.env/);
     // It is NOT in the code (fail-closed) bucket; shared files remain develop-authoritative.
     assert.match(r.stdout, /shared \(auto-resolve develop-authoritative\):\s+2/);
     assert.match(r.stdout, /code \(fail-closed, needs human\):\s+0/);

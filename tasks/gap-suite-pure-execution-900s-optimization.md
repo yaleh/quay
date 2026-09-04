@@ -1,7 +1,7 @@
 ---
 id: gap-suite-pure-execution-900s-optimization
 title: full-bucket 纯执行时间超 900s（人裁触发条件已成立，4/6 轮 998.5–1224.5s）——触发测试优化
-status: needs-human
+status: superseded
 labels:
   - gap
 parent: null
@@ -11,7 +11,15 @@ extra:
 ---
 **type:** execution
 
-> **⛔ 暂持 needs-human（2026-08-26）**：AC1 依赖四个上游落地后重取基线，但 `depends_on:` 对 worker 派发结构上不生效（`slot-refill.ts` depsReadyFor 只读 parent、不读 depends_on——与 `ready-pool-check.ts` 同名函数语义不一致，manager 读码核实）⇒ 用 needs-human 作唯一生效的闸（promotion-driver 不自动晋 needs-human）。四个上游（gap-retire-governance-group-merge-into-bucket / gap-suite-serial-lowconc-classification-recheck / gap-suite-move-27-evidenced-files-out-serial-lowconc / gap-suite-split-long-multi-test-files）全部落地后，由 outer 翻回 ready。
+> **✅ superseded（2026-09-04，人裁定）**：人裁定「我们已经实现它了」——四个上游优化任务
+> （serial-lowconc-classification-recheck / move-27-evidenced-files-out-serial-lowconc /
+> split-long-multi-test-files / retire-governance-group-merge-into-bucket）落地已达成本任务
+> 的优化目的，无需再走 AC1/AC2 的重测/负控制流程。**⚠️ manager 未独立重取落地后的
+> full-bucket 纯执行基线核验**（`.quay/per-task-suite-records.jsonl` 最新记录停留在
+> 08-28，非本次可用的活读数）——本次 close 依据人的直接裁定，非机械负控制证据；
+> 若后续怀疑纯执行时间回撞 900s，另立新任务重新触发。
+
+> **⛔ 暂持 needs-human（2026-08-26，历史记录）**：AC1 依赖四个上游落地后重取基线，但 `depends_on:` 对 worker 派发结构上不生效（`slot-refill.ts` depsReadyFor 只读 parent、不读 depends_on——与 `ready-pool-check.ts` 同名函数语义不一致，manager 读码核实）⇒ 用 needs-human 作唯一生效的闸（promotion-driver 不自动晋 needs-human）。四个上游（gap-retire-governance-group-merge-into-bucket / gap-suite-serial-lowconc-classification-recheck / gap-suite-move-27-evidenced-files-out-serial-lowconc / gap-suite-split-long-multi-test-files）全部落地后，由 outer 翻回 ready。
 
 ## Proposal
 

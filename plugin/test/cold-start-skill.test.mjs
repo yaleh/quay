@@ -12,14 +12,14 @@
 // merged telemetry AC + AC8c observable-consequences checklist).
 //
 // Pins the cold-start skill's agent-executed contract:
-//   AC5  — plugin/skills/cold-start/SKILL.md instructs mounting THE ONE monitor (session-liveness-mount.sh; inner-state.sh retired,
-//          session-liveness.sh) via the Monitor tool, and explicitly forbids nohup (a nohup'd
+//   AC5  — plugin/skills/cold-start/SKILL.md no longer instructs a monitor mount (the observer was
+//          retired 2026-09-03), and no longer references the retired observer scripts (a nohup'd
 //          process is identical in `ps` but its output goes to a file — nobody is notified).
 //          "事件送得到" not "进程在跑".
 //   telemetry AC — the skill asserts a real --task-start record in <root>/.workflow-events/ and
 //          treats a missing record as "not connected" (commits/tick-log do NOT substitute).
 //   AC8c — the skill defines "observable consequences" as a concrete seven-key checklist
-//          (MONITORS-MOUNTED / MONITORS-DELIVERING / CRON-CREATED / INNER-DRIVEN /
+//          (CRON-CREATED / INNER-DRIVEN /
 //          TELEMETRY-RECORD / FIRST-TASK / TOPOLOGY-IN-PLACE), so "same command, same results
 //          on any model" is falsifiable rather than prose.
 //   AC1 correction — the skill EXPLICITLY drives inner (send-keys-reliable.sh + the
@@ -86,25 +86,13 @@ test('AC5 — the cold-start skill exists, is a Monitor-based agent skill, and i
     'plugin.json commands[] must register the cold-start skill');
 });
 
-test('AC5 — the skill mounts THE ONE monitor via the Monitor tool (session-liveness-mount.sh; inner-state.sh retired)', () => {
-  assert.match(skillSrc, /Monitor\(\{command:.*session-liveness-mount\.sh/s,
-    'the skill must instruct a Monitor for the observer mount entry session-liveness-mount.sh (2026-08-06: no lock, who mounts owns its own stdout stream)');
-  assert.ok(!/Monitor\(\{command:.*inner-state\.sh/.test(skillSrc),
-    'the skill must NOT instruct a Monitor for inner-state.sh (retired, gap-retire-inner-state-one-observer-targets-by-parameter AC2)');
-  assert.match(skillSrc, /persistent:\s*true/s,
-    'the monitor must be persistent (outlive the current turn)');
-  // The judgment is "events delivered to THIS session", not "process running".
-  assert.match(skillSrc, /DELIVERED to this session/s,
-    'the skill must state the delivered-event criterion');
-});
-
-test('AC5 — the skill explicitly forbids nohup (a nohup process is indistinguishable in ps but notifies nobody)', () => {
-  assert.match(skillSrc, /nohup/s, 'the skill must name the nohup anti-pattern so a reader cannot miss it');
-  assert.match(skillSrc, /Never use nohup/s, 'the skill must explicitly forbid nohup');
-  // The skill presents nohup ONLY as the thing not to do — the forbidding sentence is the only
-  // "nohup" imperative; the monitors are mounted via the Monitor tool, not backgrounded.
-  assert.ok(skillSrc.includes('STOP — that is the anti-pattern this skill exists'),
-    'the skill must tell the agent to STOP rather than nohup');
+test('AC5 — the retired observer mount is gone: the skill no longer instructs a Monitor mount', () => {
+  assert.ok(!/Monitor\(\{command:.*session-liveness-mount\.sh/s.test(skillSrc),
+    'the skill must NOT instruct a Monitor for the retired observer mount entry');
+  assert.ok(!/session-liveness\.sh/.test(skillSrc),
+    'the skill must not reference the retired observer script');
+  assert.ok(!/monitor-mount-check\.sh/.test(skillSrc),
+    'the skill must not reference the retired mount check');
 });
 
 // ── Telemetry AC: the "loop is up" proof is a real .workflow-events/ --task-start record ─────────────
@@ -117,15 +105,15 @@ test('telemetry AC — the skill asserts a real --task-start record in .workflow
 });
 
 // ── AC8c: the observable-consequences checklist is concrete and falsifiable ──────────────────────────
-test('AC8c — the skill defines the observable-consequences checklist as a concrete six-key list', () => {
+test('AC8c — the skill defines the observable-consequences checklist as a concrete five-key list', () => {
   for (const key of [
-    'MONITORS-MOUNTED', 'MONITORS-DELIVERING', 'CRON-CREATED',
+    'CRON-CREATED',
     'INNER-DRIVEN', 'TELEMETRY-RECORD', 'FIRST-TASK', 'TOPOLOGY-IN-PLACE',
   ]) {
     assert.ok(skillSrc.includes(key), `the observable-consequences checklist must define ${key}`);
   }
   assert.match(skillSrc, /falsifiable/, 'the checklist must be stated as the falsifiable definition of "same results"');
-  assert.match(skillSrc, /all seven/, 'the skill must require ALL seven consequences, not a subset');
+  assert.match(skillSrc, /all five/, 'the skill must require ALL five consequences, not a subset');
 });
 
 // ── AC1 correction: the inner start is DRIVEN, never assumed as a side effect ────────────────────────

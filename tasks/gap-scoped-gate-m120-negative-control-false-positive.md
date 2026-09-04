@@ -9,6 +9,10 @@ labels:
   - fan-in-blocker
   - cross-suite-violation
 created: 2026-09-03T03:10Z
+extra:
+  depends_on:
+    - gap-retire-session-liveness
+  schema: execution
 ---
 
 ## Finding
@@ -147,3 +151,21 @@ scoped-gate（`scripts/test.sh --for-task <task> --allow-thin`，`worker-driver.
   对 `Could not resolve`/`[ERROR]` 的匹配,本缺陷是其镜像反例）
 - **Related**：gap-step-trace-reason-captures-gate-stdout（同一函数的另一次调整历史）
 
+
+## Needs-Human
+
+**执行 2026-09-03T07:50:44.249Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: == split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) ==
+- run_id：wk-prod-1788285192
+- session_id：78fee4bd-96e9-4cbe-93d7-9addb564315f
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-scoped-gate-m120-negative-control-false-positive~wk-prod-1788285192~1788421366597-8d597f.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-scoped-gate-m120-negative-control-false-positive-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-04T07:17:43.563Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
+- 失败步/判词：step=suite: == split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) ==

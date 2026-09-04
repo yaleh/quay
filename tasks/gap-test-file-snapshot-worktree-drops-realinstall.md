@@ -2,7 +2,7 @@
 id: gap-test-file-snapshot-worktree-drops-realinstall
 title: test-file-snapshot 在 worktree 报 sea-artifact-consumer-e2e.test.mjs
   REMOVED——文件在盘+tracked，worktree --list-files 却漏列
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
@@ -99,4 +99,15 @@ worktree 与主检出 `--list-files` 一致；AC1/AC2 勾；test-file-snapshot �
 - run_id：wk-prod-1788285192
 - session_id：00373147-3226-49fd-bff6-4d5aad853756
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-test-file-snapshot-worktree-drops-realinstall~wk-prod-1788285192~1788407868502-6d11c9.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-test-file-snapshot-worktree-drops-realinstall-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-03T09:20:34.982Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: == split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) ==
+- run_id：wk-prod-1788285192
+- session_id：3af7195f-2223-442b-b267-a7bea354c4b4
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-test-file-snapshot-worktree-drops-realinstall~wk-prod-1788285192~1788426626393-5da85c.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-test-file-snapshot-worktree-drops-realinstall-wk-prod-1788285192.log

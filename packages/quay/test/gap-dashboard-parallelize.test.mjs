@@ -97,9 +97,9 @@ test("AC1: readSystem runs resource-gate + process-budget concurrently (Promise.
   assert.equal((body.match(/Promise\.all/g) ?? []).length, 1, "readSystem has exactly one Promise.all");
 });
 
-test("AC1: readManager runs its four async probes concurrently (Promise.all)", () => {
+test("AC1: readManager runs its async probes concurrently (Promise.all)", () => {
   const src = fs.readFileSync(OBSERVATION_SRC, "utf8");
-  assertConcurrent(src, "readManager", ["runLoopDriverProbe", "runLivenessProbe", "readPoolMetrics", "readDevelopLead"]);
+  assertConcurrent(src, "readManager", ["runLoopDriverProbe", "readPoolMetrics", "readDevelopLead"]);
   const body = fnBody(src, "readManager");
   assert.equal((body.match(/Promise\.all/g) ?? []).length, 1, "readManager has exactly one Promise.all");
 });
@@ -110,13 +110,14 @@ test("AC2: handleDashboard runs readSystem + readManagerLight + readTaskSummary 
 });
 
 // gap-webui-dashboard-load-time-optimization AC1: the dashboard's manager probe is the LIGHT path —
-// loop-driver + liveness only. The ~9s slot-refill pool probe (readPoolMetrics) must NOT be reachable
-// from readManagerLight (the /manager detail page's full readManager keeps it).
-test("AC1: readManagerLight runs loop-driver + liveness concurrently and never calls readPoolMetrics", () => {
+// loop-driver only (the liveness observer was retired 2026-09-03). The ~9s slot-refill pool probe
+// (readPoolMetrics) must NOT be reachable from readManagerLight (the /manager detail page's full
+// readManager keeps it).
+test("AC1: readManagerLight runs only loop-driver and never calls liveness/pool/developLead", () => {
   const src = fs.readFileSync(OBSERVATION_SRC, "utf8");
-  assertConcurrent(src, "readManagerLight", ["runLoopDriverProbe", "runLivenessProbe"]);
   const body = fnBody(src, "readManagerLight");
-  assert.equal((body.match(/Promise\.all/g) ?? []).length, 1, "readManagerLight has exactly one Promise.all");
+  assert.ok(body.includes("runLoopDriverProbe"), "readManagerLight calls runLoopDriverProbe");
+  assert.ok(!body.includes("runLivenessProbe"), "readManagerLight never calls the retired liveness probe");
   assert.ok(!body.includes("readPoolMetrics"), "readManagerLight never calls readPoolMetrics (no slot-refill cold-call on the dashboard path)");
   assert.ok(!body.includes("readDevelopLead"), "readManagerLight never calls readDevelopLead (no git subprocess on the dashboard path)");
 });

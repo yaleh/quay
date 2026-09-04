@@ -98,8 +98,9 @@ test('AC2 — all three state classes are detected via EXISTING tools, zero new 
 test('AC3 — recovery converges into the SAME AC8c checklist as fresh-start (no second acceptance framework)', () => {
   assert.match(recSection, /SAME AC8c/, 'recovery must converge into the SAME AC8c checklist as fresh-start');
   assert.match(recSection, /no second acceptance framework/, 'recovery must not invent a separate acceptance framework');
-  // The fresh-start checklist is unchanged: the seven AC8c keys are still in the skill.
-  for (const key of ['MONITORS-MOUNTED', 'MONITORS-DELIVERING', 'CRON-CREATED', 'INNER-DRIVEN',
+  // The fresh-start checklist is unchanged: the five AC8c keys are still in the skill
+  // (MONITORS-MOUNTED / MONITORS-DELIVERING retired with session-liveness, 2026-09-03).
+  for (const key of ['CRON-CREATED', 'INNER-DRIVEN',
     'TELEMETRY-RECORD', 'FIRST-TASK', 'TOPOLOGY-IN-PLACE']) {
     assert.ok(skillSrc.includes(key), `fresh-start AC8c checklist must be preserved (${key})`);
   }

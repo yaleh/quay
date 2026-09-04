@@ -73,20 +73,18 @@ perspective exists only at the manager layer). Mechanisms:
   `echo "<reason> | 解除条件: <cond> | manager <ISO>" > <repo>/.halt` to pause a project, `rm <repo>/.halt`
   to resume.
 - **Cross-project heavy ops are NOT serialized** — `heavy-op-token.sh` (the "one heavy test at a
-  time" token) was RETIRED 2026-08-06 by human ruling (gap-session-liveness-remove-shared-events-and-
-  lock): resource pressure is handled by `plugin/scripts/resource-gate.sh` (per-run load gate), not by
-  a cross-project mutex.
+  time" token) was RETIRED 2026-08-06 by human ruling: resource pressure is handled by
+  `plugin/scripts/resource-gate.sh` (per-run load gate), not by a cross-project mutex.
 - **Escalations are aggregated, not solved** — read each project's `orchestration/escalations.md`,
   dedupe + sort + judge which need the human; solving them is the outer's job. The manager never
   resolves a project's escalation itself.
 
 ### 3. Trend watching (看趋势) — "what is happening across the network"
 
-Cross-project liveness and trend observation. 2026-08-06 (gap-session-liveness-remove-shared-events-
-and-lock): observation is a tree (manager→N outers, outer_i→inner_i) — each observer owns its own
-stdout event stream (who mounts owns it); there is NO shared events.jsonl anymore. The manager mounts
-its OWN observers for the outers (LOOP_MIN=0 to see everything if it wants) and reads ITS OWN Monitor
-streams; a project outer mounts its own observer for its inner. The manager
+Cross-project liveness and trend observation. 2026-09-03: the session-liveness mechanism（Monitor
+挂载 + SESSION-* 事件）随 tmux 一并退役——manager 的「定时/行为保持」观测能力未来由 driver 机制替代
+（本次只退役旧机制）。当前 manager 跨项目看趋势主要靠：各项目 `orchestration/escalations.md` 聚合、
+`git log` 提交时刻、`cpu some avg10`（AC4 判据 = 连续两次 tick 超 80）。The manager
 **relays a defect discovered in one
 project to the others** (a cross-project finding a single project's outer cannot see).
 
@@ -257,9 +255,8 @@ allowed-tools: Bash, Read, Monitor
 | **排序（prioritization）** | 跨项目资源仲裁：`.halt` 是仲裁手段（写 `<repo>/.halt` 暂停、`rm` 恢复）；
   优先级 **quay > archguard/meta-cc**（人 2026-08-03 裁定）；跨项目重活由
   `plugin/scripts/resource-gate.sh` 按负载门控（`heavy-op-token.sh` 已于 2026-08-06 退休）。 |
-| **看趋势（trend）** | 网络级存活观测（session-liveness 事件 / `monitor-mount-check.sh`，每观察者自己的
-  stdout 事件流——2026-08-06 起共享 events.jsonl 已移除）；每次 tick 记当时 `cpu some avg10`（AC4 判据 =
-  连续两次 tick 超 80）；REVIEW-cadence 3b 的「纯反应式」信号（同族纯反应式反复出现 = 战略层信号）。 |
+| **看趋势（trend）** | 网络级存活观测随 tmux 退役（2026-09-03），改由 driver 机制替代；每次 tick 记当时
+  `cpu some avg10`（AC4 判据 = 连续两次 tick 超 80）；REVIEW-cadence 3b 的「纯反应式」信号（同族纯反应式反复出现 = 战略层信号）。 |
 
 ---
 
@@ -344,24 +341,21 @@ dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份�
 
 ## 6.5 冷启动可证伪判据（observable consequences，对齐 outer 的 7 条）
 
-**外层的冷启动有 7 条可证伪判据（cold-start/SKILL.md observable consequences），manager 曾经一条
+**外层的冷启动有 5 条可证伪判据（cold-start/SKILL.md observable consequences），manager 曾经一条
 都没有——「说启动了」没有任何可以被证伪的完成定义。** 本条补上：**manager 冷启动完成后，以下
-七条必须全部为真**；任何一条为假 = 冷启动未完成。报告每条为 `<KEY>: true|false` + 一行证据。
-（判据的正本随包，`quay manager start` 写的 `idle-watch-mount.txt` 与 `manager-arm-loop.sh --verify`
-是本清单的机械执行面。）
+五条必须全部为真**；任何一条为假 = 冷启动未完成。报告每条为 `<KEY>: true|false` + 一行证据。
+（判据的正本随包，`manager-arm-loop.sh --verify` 是本清单的机械执行面。）
 
 | # | Key | 可证伪判据（checkable definition） | 证据 |
 |---|---|---|---|
 | 1 | `HOME-IN-PLACE` | manager 家 `$QUAY_GLOBAL_DIR/manager/` 三件套齐：`identity`（role=manager）+ `loop-registry.txt`（arm 后恰一条 `[manager-tick]`）+ `manager-tick-log.md`（tick 落行） | `ls` 三个文件 + `grep -c '\[manager-tick\]' loop-registry.txt` |
-| 2 | `IDLE-WATCH-MOUNTED` | 常驻观测者已挂：`bash <quay>/plugin/scripts/monitor-mount-check.sh --json` 报 `mounted=true` 且 `targetOk=true`（真机制 = `session-liveness-mount.sh` + Monitor 事件，非 `idle-watch.sh`——那脚本不存在） | `--json` 输出两条 |
-| 3 | `IDLE-WATCH-DELIVERING` | 观测者能产事件：`bash <quay>/plugin/scripts/session-liveness.sh --once` 至少一条 `SESSION-STATUS`（确定性接缝；稳态会话不发射转换事件是正常的，别等 ~90s） | `--once` 的 `SESSION-STATUS` 行逐字 |
-| 4 | `CRON-CREATED` | `CronList` 恰一 `[manager-tick]`（agent 在会话内确认；bash 看不到） | `CronList` 输出 |
-| 5 | `REGISTRY-MATCHES` | 注册表 ↔ 真 cron 可核实：`bash <quay>/plugin/scripts/manager-arm-loop.sh --verify --home <home>` 报 `registry-verified`（恰一哨兵 + 新鲜 CronCreate 收据；`registry-only` = 注册表说武装了但没核实 = 缺陷） | `--verify` 输出 |
-| 6 | `FIRST-TICK-LANDED` | 首轮 tick 落行：`bash <quay>/plugin/scripts/manager-tick-log-check.sh --log <home>/manager-tick-log.md` PASS | check 输出 |
-| 7 | `NOT-STARTED-BY-PROJECT` | manager 是跨项目第三层，**不属于任何项目的 `outer`+`inner` 拓扑**——`topology-check.sh --session <proj>` 只报两窗口，`quay manager start` 拒收项目参数（start/adopt 分离，C5） | topology `--json` + start 拒绝输出 |
+| 2 | `CRON-CREATED` | `CronList` 恰一 `[manager-tick]`（agent 在会话内确认；bash 看不到） | `CronList` 输出 |
+| 3 | `REGISTRY-MATCHES` | 注册表 ↔ 真 cron 可核实：`bash <quay>/plugin/scripts/manager-arm-loop.sh --verify --home <home>` 报 `registry-verified`（恰一哨兵 + 新鲜 CronCreate 收据；`registry-only` = 注册表说武装了但没核实 = 缺陷） | `--verify` 输出 |
+| 4 | `FIRST-TICK-LANDED` | 首轮 tick 落行：`bash <quay>/plugin/scripts/manager-tick-log-check.sh --log <home>/manager-tick-log.md` PASS | check 输出 |
+| 5 | `NOT-STARTED-BY-PROJECT` | manager 是跨项目第三层，**不属于任何项目的 `outer`+`inner` 拓扑**——`topology-check.sh --session <proj>` 只报两窗口，`quay manager start` 拒收项目参数（start/adopt 分离，C5） | topology `--json` + start 拒绝输出 |
 
-判据能机械回答的四问：**idle-watch 发事件?（#2/#3）cron 存在?（#4/#5）首轮 tick 留痕?（#6）
-家目录三件套齐?（#1）**——没有一条是「agent 说完成了」。
+判据能机械回答的四问：**cron 存在?（#2/#3）首轮 tick 留痕?（#4）家目录三件套齐?（#1）**——
+没有一条是「agent 说完成了」。
 
 ## 7. 方法论来源（AC6）——SPEC 索引唯一正本 = 上文 "Methodology sources"，不批量结晶
 

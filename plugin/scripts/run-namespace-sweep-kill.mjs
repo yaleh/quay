@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// plugin/scripts/session-liveness-sweep-kill.mjs — CLI entrypoint for the durable-registry kill
-// (gap-session-liveness-teardown-ol-scd-cf-leak). Invoked by scripts/test.sh immediately before the
+// plugin/scripts/run-namespace-sweep-kill.mjs — CLI entrypoint for the durable-registry kill
+// (teardown-ol-scd-cf-leak). Invoked by scripts/test.sh immediately before the
 // suite-tail tmux-leak-scan so a test process that died before its after() hook cannot leave its
 // registered server to red the scan (the process-crash hole the in-memory registry cannot close).
 //
 // Registry-driven (PID-targeted SIGKILL of servers the tests self-built via the durable
-// session-liveness-server registry), NEVER a name-based batch kill (invariant no_pkill_by_name_on_live
+// tmux server registry), NEVER a name-based batch kill (invariant no_pkill_by_name_on_live
 // = 1). Exits 0 always (best-effort — a cleanup failure must never change the verdict; the leak-scan
 // is the assertion).
 //
@@ -15,7 +15,7 @@
 //   QUAY_RUN_ID unset   → kill only entries whose OWNING TEST PROCESS is dead (crashed-process
 //                         residue). A concurrent scoped run's ACTIVE servers (proc alive) are never
 //                         touched — cross-run safety without the namespace.
-import { killRegisteredServers } from "./session-liveness-sweep.mjs";
+import { killRegisteredServers } from "./run-namespace-sweep.mjs";
 
 const runId = (process.env.QUAY_RUN_ID ?? "").trim();
 const killed = runId
@@ -24,6 +24,6 @@ const killed = runId
 
 if (killed.length > 0) {
   process.stderr.write(
-    `session-liveness-sweep-kill: killed ${killed.length} still-alive registered test server(s) before the leak scan\n`,
+    `run-namespace-sweep-kill: killed ${killed.length} still-alive registered test server(s) before the leak scan\n`,
   );
 }
