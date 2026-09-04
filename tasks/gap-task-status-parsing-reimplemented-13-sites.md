@@ -3,7 +3,7 @@ id: gap-task-status-parsing-reimplemented-13-sites
 title: readTaskStatusAtRef 被逐字复制 3
   份（driver-filters/ready-pool-check/worker-driver），注释承认「是同一个判定」却从未统一——收敛为
   task-schema.ts 的单一导出
-status: ready
+status: done
 labels:
   - gap
 parent: null
