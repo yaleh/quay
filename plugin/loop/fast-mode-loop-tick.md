@@ -1323,7 +1323,7 @@ engine 组 + governance 组 == 去重后 realpath 总数」这类**关系**，�
 （task_write）落盘到主检出 `tasks/<id>.md` 后，**同一 tick 步骤当场 `git add tasks/<id>.md && git commit`**
 （与派发记录 dispatch-record 同拍）。worktree 内提交**不包含**主检出的 untracked 任务体
 （git 语义：worktree 提交在 `task/<id>` 分支，主检出 untracked 不动）；主检出 untracked 任务体 =
-硬规则 11b 违反（盘上任务体即生产输入）——`fan-in-ff-merge.sh` 的 `git status --porcelain`
+硬规则 11b 违反（盘上任务体即生产输入）——`ff-merge.ts` 的 `git status --porcelain`
 （含 untracked）非空即 exit 2，**硬阻所有 fan-in 的 ff**（两次实证：
 gap-manager-layer-launch-config-test-pin-fjdac / gap-fan-in-workflow-check-test-hermetic-escalations，
 外层代提交 49526867 / 0743c444）。
