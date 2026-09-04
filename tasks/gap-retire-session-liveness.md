@@ -1,7 +1,7 @@
 ---
 id: gap-retire-session-liveness
 title: 退役 session-liveness（含 mount + 22 个测试 + monitor-mount-check + 引用清理），随 tmux 退役
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
@@ -28,7 +28,7 @@ tmux 机制即将退役，`session-liveness` 的 SESSION-GONE / SESSION-IDLE 两
 
 ## Plan
 
-0. **复用起点（⛔ 不从零重做）**：git 对象库有之前完整实现 commit `c50044bb7`（77 文件，删脚本 + 22 测试 + monitor-mount-check + 清引用 + 修 ac61 + 补 Touches）。执行 `git cherry-pick c50044bb7` 复用（代码文件干净；`tasks/gap-retire-session-liveness.md` 冲突时取 develop 版），然后只修正：① 撤销误删 `outer-anchor-check.ts`（grep 命中 0 却删了，orphan-checker 会失败）；② 确认 idle-watch 接缝（方案 B）已删；③ 历史文档（docs/analysis/ 等）清不清无所谓（AC1 历史豁免），不撤销。
+0. **复用起点（⛔ 不从零重做）**：git 对象库有之前完整实现 commit `c50044bb7`（77 文件，删脚本 + 22 测试 + monitor-mount-check + 清引用 + 修 ac61 + 补 Touches）。执行 `git cherry-pick c50044bb7` 复用（代码文件干净；`tasks/gap-retire-session-liveness.md` 冲突时取 develop 版），然后只修正：① 撤销误删 `outer-anchor-check.ts`（grep 命中 0 却删了，orphan-checker 会失败）；② 确认 idle-watch 接缝（方案 B）已删；③ 历史文档（docs/analysis/ 等）清不清无所谓（AC1 历史豁免），不撤销。④ 修 `plugin/test/cold-start-recovery.test.mjs` AC3：`MONITORS-MOUNTED` 从 AC8c 七键数组移除（session-liveness-mount.sh 已删，该 key 已不存在，断言现恒假）。
 
 1. 枚举 session-liveness 的全部消费方（147 个文件：orchestration 文档 / packages 代码 / plugin/loop 文档 / plugin/scripts / plugin/test / skills / workflows / scripts/test.sh），确认哪些是「可删」、哪些是「需改判」。
 2. 删：session-liveness.sh + session-liveness-mount.sh + session-liveness-sweep*.mjs（重命名 run-namespace-sweep*）+ 22 个测试 + monitor-mount-check.sh + monitor-mount-check.test.mjs。
@@ -148,6 +148,7 @@ session-liveness.sh / mount / sweep 脚本 / 22 个测试 / monitor-mount-check 
 - plugin/test/accounting-emit.test.mjs
 - plugin/test/adr016-screen-use-check.test.mjs
 - plugin/test/blocked-signal-parameterized.test.mjs
+- plugin/test/cold-start-recovery.test.mjs
 - plugin/test/cold-start-skill.test.mjs
 - plugin/test/direct-to-develop-bypass-check.test.mjs
 - plugin/test/execute-suite-fix-scope-gate.test.mjs
