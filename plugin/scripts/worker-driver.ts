@@ -3353,6 +3353,16 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   // 逐步骤 trace（A1，gap-mech-fan-in-log-webui-visible-clickable）：每步追加一行 {ts, step, exit,
   // wall_ms, ok} 到 .quay/fan-in-<task>-<runId>.log（web 可见的过程日志），失败步附 reason。
   const trace = (entry: Record<string, unknown>): void => appendFanInTrace(fanInLog, entry);
+  // suite 决策事件的两路 trace（gap-fan-in-step-trace-suite-step-stopped-writing）：ac-precheck /
+  // suite-start / suite-end / suite-skip 除写 per-run 过程日志（trace()，web 详情页 a5a301e03 的读者）
+  // 外，还必须镜像到共享载体 .quay/fan-in-step-trace.jsonl（appendFanInStepTrace，跨任务/跨时间聚合
+  // 监控的读者，如 gap-archguard-p5-instrument-decay-standing-guard）——两者服务不同读者，⛔ 互斥=分裂
+  // （原 bug：只写 per-run 让共享读者永久看不到这批步骤）。phase 统一 "end"（单发事件，⛔ 用 "begin"
+  // 会给挂起检测留下「begin 无 end」的假挂起）。与 trace() 一一对应 ⇒ 两载体 suite 条目数一致（AC3）。
+  const traceSuiteEvent = (step: string, extra: Record<string, unknown>): void => {
+    appendFanInStepTrace(root, task, runId, step, "end", extra);
+    trace({ step, ...extra });
+  };
   // mechSh 步的包层：跑 + 计时 + 两路 trace——① appendFanInStepTrace begin/end（挂起 = begin 无 end，
   // 据 epoch 定位挂起步；gap-fan-in-subprocess-hang-timeout-recovery AC1）；② A1 一行过程日志。
   const step = async (name: string, argv: string[], timeoutMs = 120_000): Promise<MechShResult> => {
@@ -3516,18 +3526,18 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         const summary = status === "not-evaluated"
           ? `AC/DoD 段缺失或无法识别（${checkedTotal}）——suite 前 fail-fast 拒翻`
           : `AC 未全勾（${checkedTotal}）——suite 前 fail-fast 拒翻`;
-        trace({ step: "ac-precheck", exit: acPre.status, wall_ms: Date.now() - acPreT0, ok: false, reason: summary });
+        traceSuiteEvent("ac-precheck", { exit: acPre.status, wall_ms: Date.now() - acPreT0, ok: false, reason: summary });
         return failClean("ac-precheck", summary, acPre.status);
       }
-      trace({ step: "ac-precheck", exit: 0, wall_ms: Date.now() - acPreT0, ok: true });
+      traceSuiteEvent("ac-precheck", { exit: 0, wall_ms: Date.now() - acPreT0, ok: true });
 
-      trace({ step: "suite-start", exit: 0, wall_ms: 0, ok: true });
+      traceSuiteEvent("suite-start", { exit: 0, wall_ms: 0, ok: true });
       const suiteCmd = opts.suiteCommand ?? defaultMechanicalSuiteCommand({ task, worktree, root, suiteLogFile, runId: perSuiteRunId });
       const sr: SuiteRunResult = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: suiteCmd, logFile: suiteLogFile, silenceMs: opts.silenceMs });
       suiteOutcome = sr.outcome;
       suiteFinishedEpoch = Math.floor(new Date(sr.finishedAt).getTime() / 1000);
       suitePid = sr.pid;
-      trace({ step: "suite-end", exit: sr.exitCode, wall_ms: sr.durationMs, ok: sr.outcome === "done", ...(sr.outcome === "done" ? {} : { reason: sr.error ?? `suite ${sr.outcome}` }) });
+      traceSuiteEvent("suite-end", { exit: sr.exitCode, wall_ms: sr.durationMs, ok: sr.outcome === "done", ...(sr.outcome === "done" ? {} : { reason: sr.error ?? `suite ${sr.outcome}` }) });
       if (sr.outcome !== "done") {
         // 红 suite 记录由 full-suite-runner.ts --buckets 在 suite 退出时写入（gap-fan-in-red-bucket-run-
         // not-recorded：runner 是 verification-round.jsonl 的唯一 writer，green+red 都入账，静态闸红亦由
@@ -3558,7 +3568,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       });
     } else {
       writeSuiteCapture(suiteCapture, { full_suite_ran: "false", skip_reason: reuseSkip ? "develop-advance-doc-only-reuse" : "doc-only-delta", suite_exit: "0", suite_head: suiteHead });
-      trace({ step: "suite-skip", exit: 0, wall_ms: 0, ok: true, reason: reuseSkip ? "develop-advance-doc-only-reuse" : "doc-only-delta" });
+      traceSuiteEvent("suite-skip", { exit: 0, wall_ms: 0, ok: true, reason: reuseSkip ? "develop-advance-doc-only-reuse" : "doc-only-delta" });
     }
 
     // 8. land 前 anti-drift 重跑 + AC 完成闸 + flip done（先 flip 后 ff，人 2026-08-14 裁定）。
