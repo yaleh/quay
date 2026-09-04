@@ -61,7 +61,7 @@ import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractSection } from "./task-schema.ts";
+import { extractSection, countAcCheckboxes } from "./task-schema.ts";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 import { recordNoBlockLedger } from "./task-contract-check.ts";
 import { TASK_STATUS } from "./task-status.ts";
@@ -72,10 +72,13 @@ import { TASK_STATUS } from "./task-status.ts";
 // section can name; a box without one returns null (out of the mechanism's scope). The id is the
 // token right after the box, terminated by `:`, a full-width `：`, or a paren — the heartbeat task's
 // unchecked boxes are `- [ ] AC13（损失函数结论一）: …`, `- [ ] AC14b（…）: …`, so `（` must end the id.
+// The CHECKED state is delegated to task-schema.ts's countAcCheckboxes — the single checkbox matcher
+// (gap-ac-checkbox-counting-four-counters-drifted); this module keeps only the AC<n>-id extraction.
 export function parseAcBox(line) {
-  const m = line.match(/^\s*-\s+\[([ xX])\]\s+(AC\d+[A-Za-z]*)\s*[:：（(]/);
+  const m = line.match(/^\s*-\s+\[.\]\s+(AC\d+[A-Za-z]*)\s*[:：（(]/);
   if (!m) return null;
-  return { id: m[2], checked: /[xX]/.test(m[1]) };
+  const box = countAcCheckboxes(line);
+  return { id: m[1], checked: box.checked === 1 };
 }
 
 export function uncheckedAcIds(acSection) {

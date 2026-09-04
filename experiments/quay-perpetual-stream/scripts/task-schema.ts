@@ -305,6 +305,31 @@ export function countBoxes(sectionBody) {
   return { unchecked, checked, total: unchecked + checked };
 }
 
+// ── AC checkbox matching — SINGLE-SOURCE (gap-ac-checkbox-counting-four-counters-drifted) ────────
+// "数任务体里的 AC/DoD 复选框" 这个判定曾有 4 个零共享 import 的独立实现（countAcCheckboxes /
+// checkedAcCount / readAcCheckState / task-ac-carryover-check 的勾选提取），并已产生行为分歧：
+// countAcCheckboxes 把 `- [~]`（部分完成）计入 total 但算未勾，而 worker-driver 的 readAcCheckState
+// 正则完全看不见 `[~]` ⇒ 同一任务文件在两个计数器下得到不同 total。此函数是复选框匹配的单一实现，
+// 其余 3 处（stale-ready-audit / worker-driver / task-ac-carryover-check）与 task-status-drift-check
+// 的重导出全部改为调用它；`[~]` 语义以此为准（计入 total、算未勾）。
+//
+// 与 packages/quay/src/task-parsing.ts 的 product 层副本行为一致（byte-identical 逻辑，
+// plugin/test/task-parsing-parity.test.mjs 钉住），机制层不能静态 import packages/ 树。
+export function countAcCheckboxes(acSection) {
+  if (acSection == null) {
+    // FAIL-CLOSED (gap-ac47-completion-predicate-consumer-fail-closed, AC1): an ABSENT / UNREADABLE
+    // section must NOT read as `{ unchecked: 0 }`. `sectionFound:false` is the distinguishable state
+    // for readers that check it; `total: NaN` is the STRUCTURAL guarantee that OLD destructuring
+    // read-patterns (`const { total, checked } = …`) cannot obtain a pass (`total === 0` and
+    // `checked === total` are both FALSE for NaN).
+    return { total: NaN, checked: NaN, unchecked: NaN, sectionFound: false };
+  }
+  const boxes = acSection.match(/^\s*-\s+\[(.)\]/gm) ?? [];
+  let checked = 0;
+  for (const b of boxes) if (/\[[xX]\]/.test(b)) checked++;
+  return { total: boxes.length, checked, unchecked: boxes.length - checked, sectionFound: true };
+}
+
 export function checkAcceptanceChecklist(task) {
   const sec = extractSection(task.body, "Acceptance Criteria");
   if (sec === null) {
