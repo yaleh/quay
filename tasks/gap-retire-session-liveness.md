@@ -1,7 +1,7 @@
 ---
 id: gap-retire-session-liveness
 title: 退役 session-liveness（含 mount + 22 个测试 + monitor-mount-check + 引用清理），随 tmux 退役
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -362,4 +362,48 @@ CONFLICT (content): Merge conflict in tasks/gap-retire-session-liveness.md
 Automatic merge failed; fix conflicts and then commit the result.
 - run_id：wk-prod-1788285192
 - session_id：ef92c5c7-d024-434a-8526-6ddf01c2055c
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-04T02:04:40.290Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=scoped-gate: ✔ AC2 — CLI: --report appends a JSONL record for a persistent violation log (680.136157ms)
+✔ AC5b — tick-log check: fresh row PASS; skipped round (stale mtime) FAIL; no row FAIL (759.267683ms)
+✔ manager-tick-readings: goalReading counts checked/total ACs in manager-phase-goal.md (4.292563ms)
+✖ real repo is GREEN — orphan-checker N=0 (outer-anchor-check.ts explicitly retired) (8587.48985ms)
+✔ state machine — fail-closed: no session config ⇒ exit 1 (never guess a session name) (48.560185ms)
+✔ AC7: hash-regression negative control — a busy fixture relabeled as waiting-input must FAIL (the test asserts semantics, not that the code ran) (0.731821ms)
+✔ AC2: the fault-6 criterion is mechanized in the pure verdict — C-u cleared ⇒ real; byte-identical ⇒ ghost; bounded + fail-loud (1.755153ms)
+✔ AC6 (sibling) — empty/null/0 split args are omitted, never fail-closed, never a fabricated 0 (0.583203ms)
+✔ AC1 fail-closed (sibling) — a REAL split value with a null cpu_time_s is ambiguous ⇒ error (0.78081ms)
+✔ AC6 (sibling) — negative / non-numeric split values fail-closed (0.530223ms)
+✔ gap-suite-cpu-time-capture-intermittent-not-wired — a RUN (fullSuiteRan:true) with `--cpu-time-s 0` ⇒ fail-closed (0 normalizes to null, and a real run must carry a real CPU) (1.042096ms)
+✔ gap-suite-cpu-time-capture-intermittent-not-wired — a RUN (fullSuiteRan:true) with `--cpu-time-s null` ⇒ fail-closed (not-wired shape) (8.30104ms)
+✔ gap-suite-cpu-time-capture-intermittent-not-wired — a RUN (fullSuiteRan:true) with NO --cpu-time-s at all ⇒ fail-closed (field-absent None shape) (7.084ms)
+✔ AC6 — buildRecord fail-closed: a non-zero cpu_time_s with --full-suite-ran false is a semantic contradiction (nothing ran) (19.927402ms)
+✔ 判据2 — buildRecord fail-closed: --skip-reason REQUIRES --full-suite-ran false (ambiguous trace never writes) (2.14196ms)
+✔ 判据2 — buildRecord fail-closed: --full-suite-ran must be true|false (1.393697ms)
+✔ 判据3 — buildRecord fail-closed: malformed --phases / negative cpu / negative load (3.943652ms)
+✔ writer — fail-closed on a missing required field (exit 2, nothing written) (283.415574ms)
+✔ writer — --doc-checked true --doc-check-exit 0 writes the AC63 判据1 doc-check trace (371.831031ms)
+✔ writer — --doc-checked must be true|false (a non-boolean value fails closed, nothing written) (413.923498ms)
+✔ writer — --doc-check-exit requires --doc-checked (fail-closed, nothing written) (305.566326ms)
+✔ checker CLI — --lock-events feeds the AC63 ff-no-doc-check judgment (RED on real ffs, GREEN when every ff'd task has a doc-checked record) (1685.473876ms)
+✔ buildRecord — fail-closed: a missing taskId/runId/state yields an error, never a partial record (0.690218ms)
+✔ AC2 — NO matching tmux session: fail-closed (exit 2), refuses to write, names --tmux-session; the monitor config is never written (1082.061975ms)
+✔ buildCommitTraceIndex: fail-closed on a non-git root (empty, never throws) (59.10909ms)
+✔ no-AC-section fallback (AC4, AC47-corrected): present-but-boxless landed no-AC task is a done-flip; ABSENT AC section is fail-closed (175.580937ms)
+✔ >50% checked but a remaining implementation box ⇒ NOT landed (stays in the dispatchable pool) (21.9658ms)
+✔ AC all checked but DoD has unchecked IMPLEMENTATION boxes ⇒ NOT landed (cli-import shape, human ruling) (41.491952ms)
+✔ priorityLevel maps p1/p2/none to ascending sort ranks (p1=1, p2=2, none=Infinity; unknown level fail-open) (16.420527ms)
+✔ detectLandingBlocked is fail-safe on a non-git root (no false report, no throw) (38.56021ms)
+✔ todo candidate with prose prereq and NO edge ⇒ ineligible for promotion (author→ready fail-closed) (395.075666ms)
+✔ AC2: applyRevaluations writes ready→todo + a grep-able ## Revaluation body record; retreatReadyToTodo is fail-closed (455.411276ms)
+✖ AC2 — the audit list covers the C 段 hard-constraint ids and key A 段 reading ids (33.497769ms)
+✔ CLI measure: no matching evidence → stdout state: unknown, exit 3 (three-state contract — NOT a bare FAIL) (396.651838ms)
+✔ CLI
+- run_id：wk-prod-1788285192
+- session_id：7fc66536-33a2-48d6-8e59-e24c80601d8d
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
