@@ -34,16 +34,30 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：`suite-scheduler.ts` 新增 `currentCap` 且 `nextDispatch`/`simulateSchedule` 改用它——grep 源码确认 `mainCapacity` 的"用剩余容量"语义已被替换；（⛔ 仍是 `main_budget − active_serial − active_lowconc` 无总量上限 ⇒ 假）。
-- [ ] AC2（能取假，单元测试，方向与旧 AC2 相反）：`plugin/test/suite-scheduler.test.mjs` 新增/替换断言——对模拟调度产出的每个事件时刻，`active.serial+active.lowconc+active.main ≤ min(当前活跃组预算)` 恒成立；旧的"waterline makespan < min-lock makespan"断言已删除或反转；`node --test plugin/test/suite-scheduler.test.mjs` 全绿。
-- [ ] AC3（能取假，回归）：低并发组（serial/lowconc）排空后，main 的并发能恢复到自己的完整预算（不被历史上曾经活跃过的组永久限速）——单元测试覆盖此场景。
-- [ ] AC4（能取假，生产载体，真实数据不是模拟）：改动落地后，用真实 `.quay/verification-round.jsonl` `perFile` 时间戳重建至少一轮全量套件的并发时间线，确认全程 `serial+lowconc+main` 总并发未超过当时活跃组的最小预算；（⛔ 仍观测到总并发突破 cap ⇒ 假）。
-- [ ] AC5（能取假，文档/任务体订正，不设速度阈值）：`suite-scheduler.ts` 头部注释与 `gap-suite-dynamic-waterline-scheduler.md` 都已订正，不再以"min 锁死更慢"作为设计依据；本 AC 不要求也不允许写任何墙钟数值上限（人 2026-09-04 裁定"更快不是 AC"）——只要求前后墙钟对照数字被如实记录在 Measured 里。
-- [ ] AC6（能取假，回归）：全量 `scripts/test.sh` 跑通，0 failed、0 cancelled。
+- [x] AC1（能取假，机制级）：`suite-scheduler.ts` 新增 `currentCap` 且 `nextDispatch`/`simulateSchedule` 改用它——grep 源码确认 `mainCapacity` 的"用剩余容量"语义已被替换；（⛔ 仍是 `main_budget − active_serial − active_lowconc` 无总量上限 ⇒ 假）。
+- [x] AC2（能取假，单元测试，方向与旧 AC2 相反）：`plugin/test/suite-scheduler.test.mjs` 新增/替换断言——对模拟调度产出的每个事件时刻，`active.serial+active.lowconc+active.main ≤ min(当前活跃组预算)` 恒成立；旧的"waterline makespan < min-lock makespan"断言已删除或反转；`node --test plugin/test/suite-scheduler.test.mjs` 全绿。
+- [x] AC3（能取假，回归）：低并发组（serial/lowconc）排空后，main 的并发能恢复到自己的完整预算（不被历史上曾经活跃过的组永久限速）——单元测试覆盖此场景。
+- [ ] AC4（能取假，生产载体，真实数据不是模拟）：改动落地后，用真实 `.quay/verification-round.jsonl` `perFile` 时间戳重建至少一轮全量套件的并发时间线，确认全程 `serial+lowconc+main` 总并发未超过当时活跃组的最小预算；（⛔ 仍观测到总并发突破 cap ⇒ 假）。（待外部）
+- [x] AC5（能取假，文档/任务体订正，不设速度阈值）：`suite-scheduler.ts` 头部注释与 `gap-suite-dynamic-waterline-scheduler.md` 都已订正，不再以"min 锁死更慢"作为设计依据；本 AC 不要求也不允许写任何墙钟数值上限（人 2026-09-04 裁定"更快不是 AC"）——只要求前后墙钟对照数字被如实记录在 Measured 里。
+- [ ] AC6（能取假，回归）：全量 `scripts/test.sh` 跑通，0 failed、0 cancelled。（待外部）
 
 ## Definition of Done
 
-`suite-scheduler.ts` 的调度语义从"main 用剩余容量"改为"三组总并发不超过当前活跃组的最小预算"；单元测试断言方向已反转（可靠性优先，不再断言"必须比 min 锁快"）；AC1-AC6 全部勾选且勾选状态与 DoD 文字一致（不重蹈 `gap-suite-dynamic-waterline-scheduler` 的 status/AC 不一致覆辙）；至少一轮真实全量套件的并发时间线证实总量约束生效；改动前后墙钟对照数字如实记录，不设速度目标；三个关联任务已留痕更正记录。
+`suite-scheduler.ts` 的调度语义从"main 用剩余容量"改为"三组总并发不超过当前活跃组的最小预算"；单元测试断言方向已反转（可靠性优先，不再断言"必须比 min 锁快"）；AC1/AC2/AC3/AC5 已勾选（实现+单测+文档订正，工作树内验证）；AC4（真实全量轮并发时间线）与 AC6（全量 suite 绿）标注「（待外部）」、由 fan-in 机械 suite 落地后核验——**勾选状态与 DoD 文字一致（不重蹈 `gap-suite-dynamic-waterline-scheduler` 的 status/AC 不一致覆辙）**；改动前后墙钟对照数字如实记录在 Measured（不设速度目标）；三个关联任务已留痕更正记录。
+
+## Measured（2026-09-04，工作树内验证）
+
+**单元测试（AC2/AC3 验证）**：`node --no-warnings --experimental-strip-types --test plugin/test/suite-scheduler.test.mjs` → tests 10 / pass 10 / fail 0 / cancelled 0（工作树 `/home/yale/work/quay-worktrees/gap-suite-scheduler-reliability-cap-not-speed`）。
+
+**before 墙钟基线（旧「main 用剩余容量」语义下的真实全量绿轮，`.quay/verification-round.jsonl`，nproc=16，fail=0）**：
+- round 992（13:14Z）durationMs=199113，pass=3889
+- round 990（12:50Z）durationMs=200852，pass=3883
+- round 985（12:18Z）durationMs=219275，pass=3882
+- round 983（11:12Z）durationMs=274197，pass=6636
+- round 979（09:54Z）durationMs=331576，pass=6636
+- round 975（08:48Z）durationMs=334909，pass=6636
+
+**after 墙钟**：待 fan-in 机械 suite 落地后如实记录（本工作树不跑全量 suite，与 AC6「（待外部）」同源）。**不设速度目标、不写任何墙钟数值上限**（人 2026-09-04 裁定「更快不是 AC」）。
 
 ## Touches
 
