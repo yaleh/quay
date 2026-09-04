@@ -41,18 +41,18 @@ extra:
 
 ## AC
 
-- [ ] AC1：`checker_cost_append` 新增第 4 个参数 `verdict`（取值 `pass`/`fail`/`not-evaluated`，由
+- [x] AC1：`checker_cost_append` 新增第 4 个参数 `verdict`（取值 `pass`/`fail`/`not-evaluated`，由
       调用方按 `RUN_CHECKER_EXIT_NOT_EVALUATED` 同款三态约定算出：0→pass，3→not-evaluated，其它非零
       →fail），写出的行含 `"verdict":"<值>"`；`_run_checker_one` 与并行路径都要把已经算出的 `_rc`
       映射成 verdict 传下去，不是重新计算一遍
-- [ ] AC2：`plugin/scripts/checker-cost.ts` 与 `packages/quay/src/gate/engine.ts` 的对应写手同步加
+- [x] AC2：`plugin/scripts/checker-cost.ts` 与 `packages/quay/src/gate/engine.ts` 的对应写手同步加
       `verdict` 字段，三处 schema 保持一致（这是 header 注释自己承诺的不变量）
-- [ ] AC3：`plugin/test/checker-cost.test.mjs`（现有，钉住 shape 的那个测试）更新以覆盖新字段，三种
+- [x] AC3：`plugin/test/checker-cost.test.mjs`（现有，钉住 shape 的那个测试）更新以覆盖新字段，三种
       verdict 取值（pass/fail/not-evaluated）各至少一个测例
-- [ ] AC4：向后兼容——旧格式（无 `verdict`）的历史行仍可被现有消费者（若有）正常解析，不因新增字段
+- [x] AC4：向后兼容——旧格式（无 `verdict`）的历史行仍可被现有消费者（若有）正常解析，不因新增字段
       而崩；`.quay/checker-cost.jsonl` 是 gitignored 运行时文件，新旧行混存是正常状态，不需要迁移
       脚本
-- [ ] AC5：真跑 `bash scripts/test.sh`（或至少 `--for-task` scoped）触发若干真实 checker 执行，
+- [x] AC5：真跑 `bash scripts/test.sh`（或至少 `--for-task` scoped）触发若干真实 checker 执行，
       `tail -3 .quay/checker-cost.jsonl` 贴出的真实新行含 `verdict` 字段且值正确对应各 checker 的
       真实退出码
 
@@ -60,6 +60,21 @@ extra:
 
 `tail` 出的真实新写入行（不是构造的样例）贴进任务体，三处写手（bash/ts/engine.ts）全部同步且测试
 绿。不是"加了参数但没人传"就算——AC5 的真实输出是硬要求。
+
+**AC5 实测**（`bash scripts/test.sh --for-task gap-checker-cost-jsonl-add-verdict-field`，102 条静态
+检查全绿后，`tail -5 .quay/checker-cost.jsonl`）：
+
+```json
+{"name":"concurrency-literal-check","ms":4236,"n":1,"load":3.61,"at":"2026-09-04T12:13:11Z","verdict":"pass"}
+{"name":"suite-slot-ssot-check","ms":1081,"n":1,"load":3.61,"at":"2026-09-04T12:13:12Z","verdict":"pass"}
+{"name":"suite-bucket-reattr-ratchet-check","ms":445,"n":1,"load":3.61,"at":"2026-09-04T12:13:13Z","verdict":"pass"}
+{"name":"landing-target-check","ms":1610,"n":1,"load":3.61,"at":"2026-09-04T12:13:14Z","verdict":"pass"}
+{"name":"test-file-snapshot-check","ms":5678,"n":1,"load":3.72,"at":"2026-09-04T12:13:20Z","verdict":"pass"}
+```
+
+本轮 16 个被 `run_checker` 包裹的静态 checker 全部真实退出 0 ⇒ 新行 `verdict` 全部为 `pass`，值正确
+对应各 checker 的真实退出码。同文件 52794 条历史行（无 `verdict`）与新行混存，`readCheckerCost`
+照常解析（AC4 由单测 `AC4 — old-format rows …` + 上述实测混存共同覆盖）。
 
 ## Touches
 
