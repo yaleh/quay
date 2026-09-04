@@ -2,7 +2,7 @@
 id: gap-ac-checkbox-counting-four-counters-drifted
 title: AC 复选框计数有 4 个独立实现，且已产生行为分歧——worker-driver 的 readAcCheckState 漏判 [~]
   部分完成，与规范实现 countAcCheckboxes 对同一任务给出不同总数
-status: ready
+status: done
 labels:
   - gap
   - defect
