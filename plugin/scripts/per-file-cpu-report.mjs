@@ -44,10 +44,24 @@
 // The key = sha256(path.resolve(argv[1]))[:16] MUST stay byte-identical to the key
 // measure-suite-reporter.mjs computes (sha256(path.resolve(d.file))[:16]) — that is the correlation
 // contract between this writer and the reporter reader. 缺一不可, neither may drift.
+//
+// ⛔ WHY child_process is NOT a top-level named ESM import (`import { execFileSync }`): this preload
+// is loaded via NODE_OPTIONS=--require into EVERY node process of a measured suite, INCLUDING the
+// suite-fs-trace subprocess (suite-fs-trace.ts traceOne spawns `node --require suite-fs-trace-preload.cjs
+// <test>` with `env: {...process.env}` — so NODE_OPTIONS leaks in). suite-fs-trace-preload.cjs patches
+// node:child_process's CJS exports so a test file's `import { spawnSync }` resolves against the patched
+// function; but a NAMED ESM import (`import { execFileSync } from "node:child_process"`) in ANY earlier
+// preload snapshots the namespace bindings BEFORE the patch, so the traced test's spawnSync is the
+// ORIGINAL and the trace captures zero reads (gap-perfile-cpu-cost-collection suite-red, measured:
+// named-import preload ⇒ suite-bucket-drift-check ②-AC1 reads=[]; default `import fs` / `path` /
+// `crypto` / `createRequire` ⇒ unaffected). So child_process is reached lazily via createRequire, only
+// inside the armed exit handler (which never runs in the inert trace subprocess).
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
 
 const cpuDir = process.env.QUAY_PERFILE_CPU_DIR;
 // The isolated test-file child carries `--test-isolation=process` (NOT the bare `--test`, which is
@@ -62,7 +76,10 @@ let CLK_TCK = null;
 function clockTicksPerSecond() {
   if (CLK_TCK == null) {
     try {
-      const out = execFileSync("getconf", ["CLK_TCK"], { encoding: "utf8", timeout: 2000 }).trim();
+      // Lazy require (NOT a top-level named import — see the ⛔ note above): only runs inside the
+      // armed exit handler, never in the inert FS-trace subprocess, so it cannot snapshot the
+      // child_process namespace before suite-fs-trace-preload.cjs patches it.
+      const out = require("node:child_process").execFileSync("getconf", ["CLK_TCK"], { encoding: "utf8", timeout: 2000 }).trim();
       const v = Number.parseInt(out, 10);
       if (Number.isFinite(v) && v > 0) CLK_TCK = v;
     } catch {
