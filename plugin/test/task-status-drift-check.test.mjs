@@ -58,6 +58,7 @@ import {
   taskIdFromTouches,
   wordMatch,
 } from "../../experiments/quay-perpetual-stream/scripts/task-status-drift-check.ts";
+import { countAcCheckboxes as schemaCountAcCheckboxes } from "../../experiments/quay-perpetual-stream/scripts/task-schema.ts";
 import { repoRoot } from "../scripts/repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -743,6 +744,13 @@ test("countAcCheckboxes: counts GFM boxes; only [x]/[X] counts as checked ([~] p
   // A PRESENT section with no boxes stays { total: 0, unchecked: 0 } + sectionFound:true — the
   // "段存在且零未勾" state, distinct from "段不存在".
   assert.deepStrictEqual(countAcCheckboxes("no boxes here"), { total: 0, checked: 0, unchecked: 0, sectionFound: true });
+});
+
+test("countAcCheckboxes is SINGLE-SOURCED — task-status-drift-check re-exports task-schema (no private copy)", () => {
+  // gap-ac-checkbox-counting-four-counters-drifted: the 4-way checkbox-counting drift is closed by
+  // making countAcCheckboxes a RE-EXPORT of task-schema.ts (identity, not a behaviorally-equal copy).
+  // A future private copy re-introduced here would break this identity assertion.
+  assert.equal(countAcCheckboxes, schemaCountAcCheckboxes);
 });
 
 test("AC2 (closed): LIVE-SPECIMEN reproduction — done + 0 AC checked + Touches files NOT in tree ⇒ reported as closed-without-work", () => {
