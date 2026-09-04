@@ -1,0 +1,27 @@
+# .worktreeinclude — DECLARATIVE list of gitignored files that every worktree
+# of this repo needs. Gitignore syntax (same rules as .gitignore). The
+# mechanical copy is performed by scripts/worktree-include.sh, run right after
+# `git worktree add` (and after any verification-checkout rebuild) — see
+# plugin/skills/loop-driver/SKILL.md step 3 (isolate).
+#
+# WHY THIS EXISTS: `git worktree add` places only TRACKED files in the new
+# worktree; gitignored-but-required files are absent. Round-5's 72 file crashes
+# were exactly this: .quay/config.yml was missing from the verification
+# worktree ("Error: Cannot find repo root: no .quay/config.yml found upward",
+# x15). Hand-copying misses; a declarative list does not.
+#
+# RULES:
+#   - List only GITIGNORED files (tracked files are already in the worktree and
+#     are NEVER copied; a declared-but-not-gitignored file is deliberately not
+#     copied — the gitignore whitelist gates the copy).
+#   - A gitignored file not listed here is NOT copied (negative control).
+#   - node_modules is always excluded (the build step symlinks/installs it).
+#
+# .quay/config.yml is the per-workspace provider/gates/loop config (gitignored
+# at /.quay/config.yml). Without it, quay tests cannot resolve the workspace
+# root.
+/.quay/config.yml
+# plugin/vendor/*/dist/*.js are generated build bundles (gitignored by the
+# bare `dist/` rule); the packaged-artifact tests shell out to them, so a
+# worktree that only has the tracked vendor scaffolding cannot run them.
+/plugin/vendor/*/dist/*.js

@@ -13,6 +13,8 @@ extra:
 
 **type:** execution
 
+> **判据重新评估（[[gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency]]）**：原判据是单套件墙钟（本任务「对墙钟无影响，不动」的取舍）；在并发维度下重新评估——spawn 总数决定内核负载与可并行套件数，不是单套件墙钟。本任务结论不改、不重开；A 层剩余调用点由该任务继续转换。
+
 ## Proposal
 
 Every test that shells out to the quay CLI pays a full TypeScript module-graph load. Measured
@@ -56,6 +58,8 @@ entry. 129 × 2.1 s ≈ 271 s **of summed CPU** — but the suite runs at `--tes
 | `packages/quay/test/serve.test.mjs` | 280 s | — | 36 次经 `quay-native.ts` 造 fixture（服务器本身是进程内启动） |
 | `packages/quay/test/mcp-server.test.mjs` | 142 s | — | 15 次 `connectStdio()` MCP 握手 |
 | 其余 110 个文件 | 各 <60 s | — | 不在关键路径上 |
+
+> **判据限定（[[gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency]]）**：上述「110 个文件对墙钟无影响，不动」的**原判据是单套件墙钟**；该任务在**并发维度**下重新评估了同一组事实——spawn 总数不决定单套件墙钟，但决定内核态负载与可并发套件数。本任务结论不变、不重开。
 
 文件耗时总和 858 s+ 远超墙钟 583 s，因为它们并行。**因此只有落在关键路径上的节省才真正缩短套件。**
 

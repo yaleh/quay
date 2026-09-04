@@ -295,6 +295,7 @@ test("behavior preservation: well-formed gates registered, malformed skipped (mi
 
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import {
   resolveGateDiagnosticsSink,
   emitDiagnostic,
@@ -302,9 +303,9 @@ import {
 } from "../src/gate/config/loader.ts";
 
 const __diagDirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__diagDirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__diagDirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const quayBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__diagDirname, "..", "..", "quay-native", "bin");
 
 function makeCliWorkspace(tag, gatesBlock) {
   const tasksDir = makeTmpDir("quay-diagc-" + tag + "-tasks-");

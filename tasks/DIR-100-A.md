@@ -1,7 +1,7 @@
 ---
 id: DIR-100-A
 title: "Fail-loud scan: unrecognized top-level keys under gates: emit diagnostics"
-status: needs-human
+status: done
 labels:
   - directive
   - human-steered
@@ -141,6 +141,9 @@ Standard inherited-core DoD clauses apply.
 
 1. Does an unrecognized key under `gates:` produce a diagnostic without crashing on
    malformed value shapes?
+
+**needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：ask (fail-loud scan of unrecognized gates keys + malformed-shape guards) landed in commit ed1e946f (M226), live in packages/quay/src/gate/config/loader.ts, RED/GREEN in gate-diagnostics.test.mjs.）**
+全文见 git 历史（`git log -p -- tasks/DIR-100-A.md`）。
 
 ## Touches
 

@@ -13,6 +13,7 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 import { shQuote } from "./config/utils.ts";
 
 export interface AcceptanceResult {
@@ -34,6 +35,56 @@ export interface RunAcceptanceArgs {
    *  When set, the runner dot-sources this file before the acceptance command;
    *  missing file fails closed pre-execution. Undefined means no env file. */
   envFile?: string;
+  /** Optional gate label for the cost ledger (`name`); default: the command's
+   *  first script basename, else "acceptance" (see gateCostName). */
+  name?: string;
+}
+
+// ── gate cost ledger (gap-no-criterion-records-its-own-cost-checker-cost-jsonl AC1) ───────────────────
+// The GATE execution path of the checker-cost mechanism. `runAcceptance` is the single choke point
+// through which EVERY gate (built-in acceptance + the workspace `gates:` it0/fixed/red-green/
+// test-pass/coverage-floor factories) executes its command. Recording here covers all 14 gates with
+// one hook, exactly like plugin/scripts/checker-cost.sh covers the run_static_checks path.
+//
+// Env-guard QUAY_COST_LEDGER=1 (set by the outer loop / a production caller): the gate cost ledger is
+// written to <cwd>/.quay/checker-cost.jsonl — a gitignored runtime file. Guarded so the existing
+// hermetic gate tests (which call runAcceptance directly against temp/process.cwd() roots) never
+// write shared state. Best-effort: a ledger write must never fail the gate.
+
+/** First script basename in a command string (`./plugin/scripts/x.sh` → `x.sh`), or null. */
+export function gateCostName(command: string, fallback = "acceptance"): string {
+  const m = String(command).match(/[\w.-]+\.(?:sh|ts|mjs)\b/);
+  return m ? m[0] : fallback;
+}
+
+/** /proc/loadavg 1min load, or 0 if unreadable (best-effort; same reading as checker-cost.sh). */
+export function gateLoadAvg(): number {
+  try {
+    const v = Number(String(fs.readFileSync("/proc/loadavg", "utf8")).trim().split(/\s+/)[0]);
+    return Number.isFinite(v) ? v : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Append one {name, ms, n, load, exit, ts} line to <cwd>/.quay/checker-cost.jsonl (QUAY_COST_LEDGER=1 only). */
+export function recordGateCost(cwd: string, name: string, ms: number, exit: number | null): void {
+  if (process.env.QUAY_COST_LEDGER !== "1") return;
+  try {
+    const ledger = path.join(cwd, ".quay", "checker-cost.jsonl");
+    if (!fs.existsSync(path.dirname(ledger))) return; // not a workspace root — skip, never create
+    const rec = {
+      name,
+      ms,
+      n: 0,
+      load: gateLoadAvg(),
+      exit: exit ?? -1,
+      ts: new Date().toISOString(),
+    };
+    fs.appendFileSync(ledger, JSON.stringify(rec) + "\n", "utf8");
+  } catch {
+    // best-effort — never let the ledger fail the gate
+  }
 }
 
 /**
@@ -45,7 +96,7 @@ export interface RunAcceptanceArgs {
  * exports are visible to the acceptance command, and the remaining environment
  * is inherited from the invoking process.
  */
-export function runAcceptance({ command, cwd, timeoutMs = 60000, envFile }: RunAcceptanceArgs): AcceptanceResult {
+export function runAcceptance({ command, cwd, timeoutMs = 60000, envFile, name }: RunAcceptanceArgs): AcceptanceResult {
   // DIR-103-C: fail-closed BEFORE execution when envFile is set but missing.
   if (envFile !== undefined && !fs.existsSync(envFile)) {
     return {
@@ -64,6 +115,8 @@ export function runAcceptance({ command, cwd, timeoutMs = 60000, envFile }: RunA
     ? `. ${shQuote(envFile)} && ${command}`
     : command;
 
+  const costName = name ?? gateCostName(command);
+  const startedMs = Date.now();
   const r = spawnSync(shellCmd, {
     cwd,
     shell: true,
@@ -72,6 +125,9 @@ export function runAcceptance({ command, cwd, timeoutMs = 60000, envFile }: RunA
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
+  // Gate cost ledger (AC1 — the gate execution path): every gate command records
+  // {name, ms, n, load, exit} on exit. Guarded by QUAY_COST_LEDGER=1 + a .quay cwd.
+  recordGateCost(cwd, costName, Date.now() - startedMs, r.status);
 
   // ETIMEDOUT first — the hanging-command branch, unambiguous.
   if (r.error && (r.error as NodeJS.ErrnoException).code === "ETIMEDOUT") {

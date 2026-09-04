@@ -44,7 +44,10 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { loadConfig, activeProvider } from "./config.ts";
 import { connectProvider } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
@@ -83,6 +86,103 @@ async function connectToProvider(cfg: ReturnType<typeof loadConfig>, providerId:
 function enabledProviderIds(cfg: ReturnType<typeof loadConfig>): string[] {
   const providers = (cfg.config as Record<string, unknown>).providers as Record<string, { enabled?: boolean }> ?? {};
   return Object.keys(providers).filter((id) => providers[id].enabled);
+}
+
+// ── instrument entry point (gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point) ─────
+// The 81+ instruments under plugin/scripts are reachable only by remembering a path and writing
+// `node --experimental-strip-types plugin/scripts/<name>.ts`. The `instrument` tool below is the
+// discoverable entry point (AC3: ONE tool with `action: "list" | "run"`, not 36 schemas — context
+// cost; AC5: discovery becomes a tool call instead of a remembered path). The directory and the
+// instrument count are DERIVED from the filesystem by plugin/scripts/runtime-usage-inventory.ts —
+// never hardcoded here — and the ADMISSION FILTER (AC4: a script that cannot say what question it
+// answers does not get in) is applied in that same derivation. The Core stays decoupled from the
+// plugin layer: this file only SPAWNS the inventory tool's CLI and parses its JSON (the JSON shape
+// below mirrors the inventory tool's --instruments-json output).
+
+interface InstrumentEntry {
+  name: string;
+  path: string;
+  description: string;
+  kind: string;
+}
+interface InstrumentsManifest {
+  generatedAt: string;
+  root: string;
+  total: number;
+  admitted: number;
+  notAdmitted: string[];
+  instruments: InstrumentEntry[];
+}
+
+function spawnCapture(command: string, args: string[], cwd: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    child.on("error", (err) => resolve({ exitCode: 1, stdout, stderr: String(err.message ?? err) }));
+    child.on("close", (code) => resolve({ exitCode: code ?? 0, stdout, stderr }));
+  });
+}
+
+/**
+ * Resolve a plugin script path to a runnable executable, preferring the raw source form and
+ * falling back to the bundled dist form (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-
+ * the-artifact). The shipped npm-pack artifact carries the plugin's consumer-referenced .ts as
+ * bundled `plugin/scripts/dist/*.js` executables (no .ts source), so `plugin/scripts/foo.ts` must
+ * resolve to `plugin/scripts/dist/foo.js` there; a source checkout keeps the .ts and is used as-is.
+ */
+function resolvePluginExecutable(
+  workspaceRoot: string,
+  relPath: string
+): { path: string; stripTypes: boolean } {
+  const abs = path.resolve(workspaceRoot, relPath);
+  if (fs.existsSync(abs)) return { path: abs, stripTypes: relPath.endsWith(".ts") };
+  if (relPath.endsWith(".ts")) {
+    const bundled = relPath.replace(/\.ts$/, ".js").replace(/\/(scripts|gate-scripts)\//, "/$1/dist/");
+    const absBundled = path.resolve(workspaceRoot, bundled);
+    if (fs.existsSync(absBundled)) return { path: absBundled, stripTypes: false };
+  }
+  return { path: abs, stripTypes: relPath.endsWith(".ts") };
+}
+
+/** Spawn the inventory tool's `--instruments-json` mode to DERIVE the instrument directory. */
+export async function fetchInstrumentsManifest(workspaceRoot: string): Promise<InstrumentsManifest> {
+  const inventoryRel = path.join("plugin", "scripts", "runtime-usage-inventory.ts");
+  const resolved = resolvePluginExecutable(workspaceRoot, inventoryRel);
+  if (!fs.existsSync(resolved.path)) {
+    throw new Error(
+      `instrument directory unavailable: ${inventoryRel} (or its dist bundle) is not present under workspace root ${workspaceRoot}`
+    );
+  }
+  const argv = resolved.stripTypes
+    ? ["--experimental-strip-types", resolved.path, "--instruments-json", "--root", workspaceRoot]
+    : [resolved.path, "--instruments-json", "--root", workspaceRoot];
+  const r = await spawnCapture(process.execPath, argv, workspaceRoot);
+  if (r.exitCode !== 0) {
+    throw new Error(`instrument directory build failed (exit ${r.exitCode}): ${r.stderr || r.stdout}`);
+  }
+  return JSON.parse(r.stdout) as InstrumentsManifest;
+}
+
+/** Resolve an instrument by name from the derived directory, then run it under its interpreter. */
+export async function runInstrument(
+  workspaceRoot: string,
+  name: string,
+  args: string[]
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const manifest = await fetchInstrumentsManifest(workspaceRoot);
+  const entry = manifest.instruments.find((i) => i.name === name);
+  if (!entry) {
+    throw new Error(
+      `no such instrument: "${name}" (the admitted directory has ${manifest.admitted}; call instrument action:list to see them)`
+    );
+  }
+  const resolved = resolvePluginExecutable(workspaceRoot, entry.path);
+  const command = entry.kind === "bash" ? "bash" : process.execPath;
+  const argv = entry.kind === "bash" ? [resolved.path, ...args] : resolved.stripTypes ? ["--experimental-strip-types", resolved.path, ...args] : [resolved.path, ...args];
+  return spawnCapture(command, argv, workspaceRoot);
 }
 
 export async function startMcpServer(): Promise<void> {
@@ -154,6 +254,59 @@ export async function startMcpServer(): Promise<void> {
   // Delegate tool registrations to domain handler groups (ARCH-M93-002).
   registerAllHandlers(server, getClient, cfg);
 
+  // instrument — the discoverable entry point for the plugin/scripts instruments
+  // (gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point, AC3/AC5). Workspace-scoped
+  // (like config_validate), not Provider-routed: there is no `provider` argument. Registered here in
+  // mcp-server.ts rather than mcp-handlers.ts because this task's Touches are limited to this file +
+  // the inventory tool + its doc; the handler body is the two exported helpers above.
+  server.registerTool(
+    "instrument",
+    {
+      description:
+        "Discover and run the workspace's plugin/scripts instruments (previously reachable only by remembering " +
+        "a path and writing `node --experimental-strip-types plugin/scripts/<name>.ts`). ONE tool, two actions. " +
+        "`action: \"list\"` returns the DERIVED instrument directory: every instrument that declares what question " +
+        "it answers (via `@instrument \"...\"` in its header comment, or the header's own `<basename> — <description>` " +
+        "line), with name/path/description/kind, plus `total` (the derived count — never hardcoded) and `notAdmitted` " +
+        "(instruments that could not say what they answer — kept OUT by the admission filter). " +
+        "`action: \"run\"` with `name` (+ optional `args`) invokes one instrument: node scripts run under " +
+        "`node --experimental-strip-types`, `.sh` scripts under bash; stdout is returned and a non-zero exit is isError.",
+      inputSchema: {
+        action: z.enum(["list", "run"]),
+        name: z.string().optional().describe("instrument name (basename without extension) — required for action: \"run\""),
+        args: z.array(z.string()).optional().describe("CLI args forwarded to the instrument (action: \"run\")"),
+      },
+    },
+    async ({ action, name, args }) => {
+      try {
+        if (action === "list") {
+          const manifest = await fetchInstrumentsManifest(cfg.workspaceRoot);
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(manifest, null, 2) }],
+            structuredContent: manifest as unknown as Record<string, unknown>,
+          };
+        }
+        if (!name) {
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: "instrument run requires a `name` (the instrument's basename without extension)" }],
+          };
+        }
+        const r = await runInstrument(cfg.workspaceRoot, name, args ?? []);
+        return {
+          isError: r.exitCode !== 0,
+          content: [{ type: "text" as const, text: r.exitCode === 0 ? r.stdout : (r.stderr || r.stdout || `exit ${r.exitCode}`) }],
+          structuredContent: { name, exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr },
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }],
+        };
+      }
+    }
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(
@@ -163,15 +316,32 @@ export async function startMcpServer(): Promise<void> {
   // Close every connected Provider client when the Core server's own
   // transport closes (stdin closes), so no orphaned Provider subprocess is
   // left running after the Agent disconnects.
-  transport.onclose = async () => {
-    for (const pending of clients.values()) {
-      try {
-        const { client } = await pending;
-        await client.close();
-      } catch {
-        // best-effort cleanup
-      }
-    }
+  //
+  // gap-mcp-server-test-deadlocks-at-high-test-concurrency: close providers in
+  // PARALLEL (Promise.allSettled) rather than sequentially. The SDK client's
+  // StdioClientTransport.close() gives this process only a 2s grace before it
+  // SIGTERMs, and 2s more before SIGKILL. Sequential provider closes multiply
+  // the cleanup time by the number of enabled providers — under load (a long
+  // batch at conc=8/16) that can exceed 2s, so the client SIGTERMs this process
+  // MID-cleanup and the not-yet-closed Provider subprocesses are orphaned.
+  // Parallel close keeps the whole tree's shutdown inside the grace window.
+  //
+  // closeAllProviders is extracted (not inline) so BOTH the transport onclose
+  // path and the SIGTERM/SIGINT path below run the same provider cleanup.
+  async function closeAllProviders(): Promise<void> {
+    await Promise.allSettled(
+      [...clients.values()].map(async (pending) => {
+        try {
+          const { client } = await pending;
+          await client.close();
+        } catch {
+          // best-effort cleanup
+        }
+      })
+    );
+  }
+  transport.onclose = () => {
+    void closeAllProviders();
   };
 
   // gap-suite-speedup (task gap-suite-speedup): when the client disconnects
@@ -187,4 +357,17 @@ export async function startMcpServer(): Promise<void> {
   process.stdin.on("close", () => {
     void transport.close();
   });
+
+  // gap-mcp-server-test-deadlocks-at-high-test-concurrency: if the SDK client's
+  // close() SIGTERMs us (its 2s grace elapsed before our stdin-EOF cleanup
+  // finished — possible under load), close the providers and exit rather than
+  // dying mid-cleanup and orphaning them. SIGKILL (the SDK's last resort) is
+  // uncatchable, so this is the final hand we get; after it the providers are
+  // piped (see provider-client.ts) so an orphan would not hold the runner's
+  // stderr anyway — this just reclaims the subprocesses too.
+  for (const sig of ["SIGTERM", "SIGINT"] as const) {
+    process.on(sig, () => {
+      void closeAllProviders().finally(() => process.exit(0));
+    });
+  }
 }

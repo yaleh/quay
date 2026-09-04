@@ -1,4 +1,8 @@
 // @test-group product
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (B-class real wall-clock wait — spawns the built dist bundle across real surfaces
+// incl. serve + MCP round-trips) so it runs in the concurrency-1 serial phase, never competing with
+// the concurrency-8 main body.
 // build-dist-smoke.test.mjs — M120 Stage 1.2 (DIR-060).
 //
 // Proves the built ESM `dist/quay.js` bundle is STANDALONE-runnable: invoked by
@@ -39,11 +43,12 @@ import http from "node:http";
 
 import { buildDist } from "../scripts/build-dist.mjs";
 import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
-const nativeBin = path.join(pkgDir, "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 // Build the bundle into a depth-matched temp tree (see header comment).
 const bundleRoot = makeTmpDir("quay-m120-smoke-bundle-");
@@ -131,9 +136,9 @@ test("(b) serve --port + HTTP GET returns 200", async () => {
     // A genuinely broken serve still fails here, just after a load-tolerant wait.
     for (let i = 0; i < 100; i++) {
       await sleep(150);
-      try { code = await httpGet(port, "/"); break; } catch { /* not up yet */ }
+      try { code = await httpGet(port, "/tasks"); break; } catch { /* not up yet */ }
     }
-    assert.equal(code, 200, "GET / on the standalone-bundle server must return 200");
+    assert.equal(code, 200, "GET /tasks on the standalone-bundle server must return 200");
   } finally {
     child.kill("SIGKILL");
   }

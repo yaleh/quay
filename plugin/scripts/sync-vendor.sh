@@ -48,7 +48,43 @@
 #   above). Fails loudly if the source bundle is missing — never silently
 #   paper over a stale/missing vendored copy.
 
+# ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
+  if [ -f "$_gap_help_lib" ]; then . "$_gap_help_lib"; tool_help "$0"; else echo "用法: bash $(basename "$0") [参数…]"; fi
+  exit 0
+fi
 set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Postinstall soft-fail WARN (gap-release-postinstall-fallback-breaks-windows-sea-build)
+# ---------------------------------------------------------------------------
+# The root package.json postinstall used to wrap this script in a bash-only
+# `(echo '...' >&2; exit 0)` subshell that cmd.exe (npm's Windows script shell)
+# cannot parse ("re-run: was unexpected at this time.") — breaking `npm install`
+# on windows-latest sea-release (v0.4.0 shipped WITHOUT the windows-x64 SEA
+# binary). The WARN now lives HERE, in bash, where the failure actually happens;
+# the postinstall is simply `bash plugin/scripts/sync-vendor.sh || true`, which
+# cmd.exe parses fine (the `|| true` swallows the nonzero exit, so npm install
+# never hard-fails on a build artifact that could not be regenerated).
+#
+# We print the WARN only in no-flag (postinstall) mode, and we KEEP the original
+# nonzero exit code — strict callers that invoke this script directly
+# (publish-dist-branch.sh, quay-init.sh, packages/quay/scripts/package.sh) must
+# still fail loudly; only the postinstall's own `|| true` swallows it.
+POSTINSTALL_MODE=false
+if [ "$#" -eq 0 ]; then
+  POSTINSTALL_MODE=true
+fi
+
+postinstall_fail() {
+  local rc=$?
+  if [ "$rc" -ne 0 ] && [ "$POSTINSTALL_MODE" = "true" ]; then
+    echo '[postinstall] WARNING: sync-vendor.sh failed -- plugin/vendor/quay/dist/quay.js may be missing or stale. This repo runs its own MCP server from plugin/vendor/quay/dist/quay.js (see .mcp.json); re-run: bash plugin/scripts/sync-vendor.sh' >&2
+  fi
+  exit "$rc"
+}
+trap postinstall_fail EXIT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -142,23 +178,48 @@ cmp_or_report() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Vendor dist bundle
+# 1. Vendor dist bundles (Core quay.js + native provider quay-native.js)
 # ---------------------------------------------------------------------------
+# gap-ac3b-prove-installed-quay-runs-without-dev-tree (AC1): the installed
+# plugin must be able to lay down a FUNCTIONAL provider runtime into a target
+# project (so the project's mcp_entry points at a project-local copy, never a
+# PATH-resolved `quay-native` into a dev tree). The native provider's
+# self-contained bundle (packages/quay-native/dist/quay-native.js, built by
+# build-dist.mjs — bundles quay/yaml/zod/sdk, runs on plain node) is mirrored
+# into plugin/vendor/quay-native/ alongside the Core bundle, exactly like the
+# Core dist/quay.js. provider.yml travels with it (the bundle resolves it
+# relative to its own location, so the laid-down pair must stay together).
+NATIVE_SRC="${REPO_ROOT}/packages/quay-native"
+NATIVE_DEST="${PLUGIN_DIR}/vendor/quay-native"
+
 if $CHECK_MODE; then
   echo "[sync-vendor --check] verifying vendor dist bundle ..."
   cmp_or_report "vendor/quay/dist/quay.js" \
     "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
+  echo "[sync-vendor --check] verifying vendor native-provider bundle ..."
+  cmp_or_report "vendor/quay-native/dist/quay-native.js" \
+    "${NATIVE_SRC}/dist/quay-native.js" "${NATIVE_DEST}/dist/quay-native.js"
+  cmp_or_report "vendor/quay-native/provider.yml" \
+    "${NATIVE_SRC}/provider.yml" "${NATIVE_DEST}/provider.yml"
 elif $SYNC_DIST_MODE; then
-  # --sync-dist: mirror an already-built source bundle, no rebuild (see header
+  # --sync-dist: mirror already-built source bundles, no rebuild (see header
   # comment — used by scripts/test.sh so the vendored mirror stays fresh before
-  # every test run).
+  # every test run). scripts/test.sh's build_dist_once builds BOTH source
+  # bundles (quay.js + quay-native.js) before calling --sync-dist, so a missing
+  # bundle here is a real failure (never silently papered over).
   if [ ! -f "${SRC}/dist/quay.js" ]; then
-    echo "ERROR: --sync-dist requires a built source bundle: ${SRC}/dist/quay.js (run the build first)" >&2
+    echo "ERROR: --sync-dist requires a built Core bundle: ${SRC}/dist/quay.js (run the build first)" >&2
     exit 2
   fi
-  echo "[sync-vendor --sync-dist] mirroring packages/quay/dist/quay.js -> plugin/vendor/quay/dist/quay.js (no rebuild)"
-  mkdir -p "${DEST}/dist"
+  if [ ! -f "${NATIVE_SRC}/dist/quay-native.js" ]; then
+    echo "ERROR: --sync-dist requires a built native bundle: ${NATIVE_SRC}/dist/quay-native.js (run the build first)" >&2
+    exit 2
+  fi
+  echo "[sync-vendor --sync-dist] mirroring packages/quay/dist/quay.js + packages/quay-native -> plugin/vendor/ (no rebuild)"
+  mkdir -p "${DEST}/dist" "${NATIVE_DEST}/dist"
   cp "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
+  cp "${NATIVE_SRC}/dist/quay-native.js" "${NATIVE_DEST}/dist/quay-native.js"
+  cp "${NATIVE_SRC}/provider.yml" "${NATIVE_DEST}/provider.yml"
 else
   if [ ! -d "$SRC" ]; then
     echo "ERROR: source not found: $SRC" >&2
@@ -170,6 +231,11 @@ else
   bash "${SRC}/scripts/build-dist.sh"
   mkdir -p "${DEST}/dist"
   cp "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
+  echo "[sync-vendor] building + mirroring packages/quay-native dist bundle -> plugin/vendor/quay-native/dist ..."
+  bash "${NATIVE_SRC}/scripts/build-dist.sh"
+  mkdir -p "${NATIVE_DEST}/dist"
+  cp "${NATIVE_SRC}/dist/quay-native.js" "${NATIVE_DEST}/dist/quay-native.js"
+  cp "${NATIVE_SRC}/provider.yml" "${NATIVE_DEST}/provider.yml"
 fi
 
 # --sync-dist is dist-bundle-only: mirror the source bundle and stop. All other
@@ -247,6 +313,7 @@ SYNC_SCRIPTS=(
   gate-script-base
   wiring-coverage-check
   proposal-convergence
+  write-json-atomic
   prepare-admission-check
   # NOTE (gap-retire-the-prepare-execute-pipeline-cluster): composite-{args,contracts,build,audit,
   # reconcile,land,preflight,manifest-synthesis} and milestone-preparation-check were retired with
@@ -410,5 +477,10 @@ if $CHECK_MODE; then
     exit 1
   fi
 else
-  echo "[sync-vendor] done. The vendored dist/quay.js is fully self-contained (no npm install needed)."
+  # gap-dist-runtime-not-self-contained-reads-external-package-json (AC3): the
+  # completion claim is now ACCURATE — src/version.ts embeds the version at build
+  # time (esbuild json loader inlines it into dist/quay.js), so the vendored
+  # bundle never reads a sibling package.json at runtime. It is self-contained:
+  # version inlined at build time, no runtime package.json read, no npm install.
+  echo "[sync-vendor] done. The vendored dist/quay.js is self-contained: version inlined at build time (no runtime package.json read), no npm install needed."
 fi

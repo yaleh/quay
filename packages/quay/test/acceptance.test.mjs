@@ -1,4 +1,7 @@
 // @test-group product
+// @load-sensitive child-spawn
+// @load-sensitive-entry 2026-08-12 real node CLI subprocess spawns (execFileSync) + real mkdtemp I/O; moved product→serial 2026-08-12 (8-lane flakes, isolated 36/36 — gap-suite-tiering-kind-heavy-not-a-mechanism 补缺省 kind)
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — spawns real node CLI subprocesses for the acceptance gate; flaked under 8-lane (moved to serial by outer 2026-08-12)
 // QENG-2 — AC-as-runnable-meter: `quay gate` runs `task.extra.acceptance`.
 //
 // Layered per plan 9 (docs/plans/9-quay-acceptance-meter.md):
@@ -23,11 +26,12 @@ import os from "node:os";
 import { runAcceptance } from "../src/gate/acceptance-runner.ts";
 import { gateRegistry, listGates } from "../src/gate/registry.ts";
 import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const quayBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -580,7 +584,7 @@ test("C1 [T4]: MCP gate_run surface sees acceptance_env exports (AC #4)", async 
   // Drive the REAL MCP surface via StdioClientTransport (mirrors mcp-server.test.mjs pattern)
   const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
-  const coreBin = path.join(__dirname, "..", "bin", "quay.ts");
+  const coreBin = QUAY_CLI;
 
   const transport = new StdioClientTransport({
     command: "node",
@@ -596,6 +600,55 @@ test("C1 [T4]: MCP gate_run surface sees acceptance_env exports (AC #4)", async 
     const sc = result.structuredContent;
     assert.ok(sc, `structuredContent missing: ${JSON.stringify(result)}`);
     assert.equal(sc.ok, true, `expected ok:true; got ${JSON.stringify(sc)}`);
+    assert.match(sc.reason, /passed/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("C1 [T4-control]: MCP gate_run with NO acceptance_env configured does not invent env exports", async () => {
+  const tag = "t4-mcp-ctrl";
+  const tasksDir = makeTmpDir(`quay-qeng2-${tag}-tasks-`);
+  const workspaceRoot = makeTmpDir(`quay-qeng2-${tag}-ws-`);
+
+  // deliberately NO acceptance_env key on this provider block
+  fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(workspaceRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+
+  runNative(["task", "create", "T4MCPCTRL", "--title", "mcp env control", "--status", "todo"], tasksDir);
+  runNative(["task", "edit", "T4MCPCTRL", "--extra", JSON.stringify({ acceptance: 'test -z "$MCP_ENV_TEST_VAR"' })], tasksDir);
+
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+  const coreBin = QUAY_CLI;
+
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [coreBin, "mcp"],
+    cwd: workspaceRoot,
+    env: process.env,
+  });
+  const client = new Client({ name: "test-agent", version: "0.0.1" });
+  await client.connect(transport);
+
+  try {
+    const result = await client.callTool({ name: "gate_run", arguments: { id: "T4MCPCTRL" } });
+    const sc = result.structuredContent;
+    assert.ok(sc, `structuredContent missing: ${JSON.stringify(result)}`);
+    assert.equal(sc.ok, true, `expected ok:true (var correctly absent, no phantom env file); got ${JSON.stringify(sc)}`);
     assert.match(sc.reason, /passed/);
   } finally {
     await client.close();

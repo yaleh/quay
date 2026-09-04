@@ -9,10 +9,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { QUAY_NATIVE_CLI } from "../../quay/test/helpers/cli-entry.mjs";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const binPath = path.join(__dirname, "..", "bin", "quay-native.ts");
+const binPath = QUAY_NATIVE_CLI;
 const tasksDir = path.join(__dirname, ".tmp-create-validation-test");
 
 let failures = 0;

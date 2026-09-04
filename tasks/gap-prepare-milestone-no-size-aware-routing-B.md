@@ -1,7 +1,7 @@
 ---
 id: gap-prepare-milestone-no-size-aware-routing-B
 title: Fast-lane execution manifest + execute-milestone Verify consumption
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -9,6 +9,8 @@ labels:
   - human-steered
 extra:
   schema: v1
+  superseded: true
+  superseded_at: 2026-08-12
 ---
 
 **PAUSED (2026-08-02, prepare-pipeline reduction — `docs/analysis/prepare-pipeline-reduction-plan.md`):**
@@ -352,3 +354,7 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/charters/M240-gap-prepare-milestone-no-size-aware-routing-B.md`
 - `docs/plans/M240-gap-prepare-milestone-no-size-aware-routing-b.md`
 - `plugin/test/*execution-manifest*.test.mjs`
+
+## Superseded (2026-08-12)
+
+引用 ADR-022 已物理删除的机制（prepare-milestone.js / execute-milestone.js 双镜像）：本任务的 fast-lane 执行清单（ExecutionManifest）与 execute-milestone Verify 消费均针对已删 pipeline。前提不存在，作废保留历史——不重开。若 fast mode 需要轻量执行清单，可另立新任务按当前两层模式重写。

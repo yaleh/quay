@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap">
+<script src="_ds/modernist-40217566-87fa-42b1-9cc0-36027903691f/_ds_bundle.js"></script>
+<style>*{box-sizing:border-box}body{margin:0}@keyframes ds-pulse{0%,100%{opacity:1}50%{opacity:0.25}}</style>
+</helmet>
+<div style="background:#f3f2f2;color:#201e1d;font-family:'Archivo',system-ui,sans-serif;min-height:100vh">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 24px;background:#201e1d;color:#f3f2f2;font-size:12px;flex-wrap:wrap">
+    <span style="opacity:0.75">改进版原型 · 首批交付：Dashboard / Tasks / Task Detail — 其余页面为路线图占位（点击可查看设计说明）</span>
+    <div style="display:inline-flex;border:1px solid rgba(243,242,242,0.35)">
+      <a href="javascript:void(0)" onClick="{{ setDesktop }}" style="padding:7px 14px;font-weight:800;text-decoration:none;color:{{ desktopBtnColor }};background:{{ desktopBtnBg }}">桌面</a>
+      <a href="javascript:void(0)" onClick="{{ setMobile }}" style="padding:7px 14px;font-weight:800;text-decoration:none;color:{{ mobileBtnColor }};background:{{ mobileBtnBg }};border-left:1px solid rgba(243,242,242,0.35)">移动端</a>
+    </div>
+  </div>
+
+  <sc-if value="{{ isDesktop }}" hint-placeholder-val="{{ true }}">
+  <div>
+    <nav style="display:flex;align-items:center;gap:24px;padding:16px 32px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);flex-wrap:wrap">
+      <span style="font-family:'Archivo',sans-serif;font-weight:800;font-size:19px;margin-right:8px">Quay</span>
+      <sc-for list="{{ navGroups }}" as="grp" hint-placeholder-count="4">
+        <div style="display:flex;align-items:center;gap:14px;padding-left:14px;border-left:1px solid color-mix(in srgb, #201e1d 20%, transparent)">
+          <sc-for list="{{ grp.items }}" as="item" hint-placeholder-count="3">
+            <a href="javascript:void(0)" onClick="{{ item.onClick }}" style="color:{{ item.color }};font-weight:{{ item.weight }};font-size:14px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+              {{ item.label }}
+              <sc-if value="{{ item.badge }}" hint-placeholder-val="{{ false }}">
+                <span style="font-size:9px;letter-spacing:0.06em;background:#ec3013;color:#f3f2f2;padding:1px 5px">{{ item.badge }}</span>
+              </sc-if>
+            </a>
+          </sc-for>
+        </div>
+      </sc-for>
+    </nav>
+
+    <main style="max-width:1180px;margin:0 auto;padding:32px 32px 64px">
+
+      <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <h1 style="font-size:32px;margin:0 0 6px">Dashboard</h1>
+        <p style="color:color-mix(in srgb, #201e1d 55%, transparent);font-size:14px;margin:0 0 20px">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px">
+          <span style="font-size:11px;padding:4px 10px;background:#fff2ef;color:#7c1405">✓ 已修复：移动端标签导航横向滚动 bug</span>
+          <span style="font-size:11px;padding:4px 10px;background:#fff2ef;color:#7c1405">✓ 已修复：Board 加入全站导航</span>
+        </div>
+
+        <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#605d5d;margin-bottom:8px">现在是否健康</div>
+        <div style="display:grid;grid-template-columns:1.2fr 1fr 1.3fr;gap:2px;background:color-mix(in srgb, #201e1d 40%, transparent);border:2px solid color-mix(in srgb, #201e1d 40%, transparent);margin-bottom:28px">
+          <div style="background:#eae9e9;padding:16px;display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013">循环脉搏</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;background:#ec3013;display:inline-block;animation:ds-pulse 1.4s infinite"></span><span style="font-size:22px;font-weight:800">running</span></div>
+            <p style="margin:0;font-size:12.5px;opacity:0.8">在飞 1 · 并发 1 · gap-task-telemetry-6-percent-join</p>
+            <a href="javascript:void(0)" onClick="{{ goLive }}" style="font-size:12px;color:#ae1800;text-decoration:none;margin-top:auto">查看 Live →</a>
+          </div>
+          <div style="background:#eae9e9;padding:16px;display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013">系统资源</div>
+            <p style="margin:0;font-size:12.5px;line-height:1.6">cpu_stall 1.76/60 ok<br>loadavg 5.19/32 ok</p>
+            <div style="font-weight:800;color:#7c1405;font-size:13px">⇒ GO</div>
+            <a href="javascript:void(0)" onClick="{{ goSystem }}" style="font-size:12px;color:#ae1800;text-decoration:none;margin-top:auto">查看系统状态 →</a>
+          </div>
+          <div style="background:#eae9e9;padding:16px;display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013">Manager / Outer / Inner</div>
+            <p style="margin:0;font-size:12.5px;line-height:1.6">Outer: LIVE · Inner: LIVE<br>Manager: 心跳推断中</p>
+            <a href="javascript:void(0)" onClick="{{ goManager }}" style="font-size:12px;color:#ae1800;text-decoration:none;margin-top:auto">查看三层状态 →</a>
+          </div>
+        </div>
+
+        <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#605d5d;margin-bottom:8px">工作进展</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;background:color-mix(in srgb, #201e1d 40%, transparent);border:2px solid color-mix(in srgb, #201e1d 40%, transparent);margin-bottom:28px">
+          <div style="background:#eae9e9;padding:18px;display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013">任务台账速览</div>
+            <div style="display:flex;height:16px;width:100%;overflow:hidden">
+              <div style="width:92.3%;background:#201e1d" title="done 938"></div><div style="width:3.1%;background:#ec3013" title="needs-human 32"></div>
+              <div style="width:1.7%;background:#bab6b6" title="todo 17"></div><div style="width:1.3%;background:#7d7979" title="ready 13"></div>
+              <div style="width:0.6%;background:#eae7e7" title="superseded 6"></div>
+            </div>
+            <div style="display:flex;gap:12px;font-size:11px;flex-wrap:wrap;color:#605d5d">
+              <span><b style="color:#201e1d">938</b> done</span><span><b style="color:#ec3013">32</b> needs-human</span><span><b>17</b> todo</span><span><b>13</b> ready</span>
+            </div>
+            <div style="border-top:1px solid color-mix(in srgb, #201e1d 20%, transparent);margin-top:2px;padding-top:8px;display:flex;flex-direction:column;gap:5px">
+              <div style="font-size:10px;color:#605d5d">最近更新（非 done）</div>
+              <sc-for list="{{ recentActiveTasks }}" as="rt" hint-placeholder-count="4">
+                <a href="javascript:void(0)" onClick="{{ rt.onClick }}" style="display:flex;justify-content:space-between;gap:8px;text-decoration:none;color:#201e1d;font-size:11.5px">
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ec3013;font-weight:600">{{ rt.id }}</span>
+                  <span style="color:{{ rt.statusColor }};flex:none">{{ rt.status }}</span>
+                </a>
+              </sc-for>
+            </div>
+            <a href="javascript:void(0)" onClick="{{ goTasks }}" style="font-size:12px;color:#ae1800;text-decoration:none;margin-top:auto">查看任务列表 →</a>
+          </div>
+          <div style="background:#eae9e9;padding:18px;display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013">测试</div>
+            <div style="font-size:16px;font-weight:800;color:{{ latestRun.status === 'pass' ? '#201e1d' : '#7c1405' }}">{{ latestRun.suite }} — {{ latestRun.status }}</div>
+            <p style="margin:0;font-size:13px;opacity:0.8">{{ latestRun.passed }}/{{ latestRun.total }} passed · {{ latestRun.duration }} · {{ latestRun.commit }}</p>
+            <a href="javascript:void(0)" onClick="{{ goTests }}" style="font-size:12px;color:#ae1800;text-decoration:none;margin-top:auto">查看 Tests →</a>
+          </div>
+        </div>
+
+        <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#605d5d;margin-bottom:8px">变更记录</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;background:color-mix(in srgb, #201e1d 40%, transparent);border:2px solid color-mix(in srgb, #201e1d 40%, transparent);margin-bottom:28px">
+          <div style="background:#eae9e9;padding:18px;display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013">最近提交</div>
+            <p style="margin:0;font-size:12.5px;line-height:1.7;font-family:ui-monospace,monospace">f5117682 delivery-start·done<br>f37462ec goal-store landed<br>cb21fc48 git-history svg</p>
+            <a href="javascript:void(0)" onClick="{{ goJournal }}" style="font-size:12px;color:#ae1800;text-decoration:none;margin-top:auto">查看 Journal →</a>
+          </div>
+          <div style="background:#eae9e9;padding:18px;display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013">Git History（提交树）</div>
+            <svg viewBox="0 0 200 48" width="100%" height="48">
+              <line x1="14" y1="4" x2="14" y2="44" stroke="#201e1d" stroke-width="2"/>
+              <line x1="54" y1="14" x2="54" y2="30" stroke="#ec3013" stroke-width="2"/>
+              <path d="M14,14 L54,14" stroke="#ec3013" stroke-width="2" fill="none"/>
+              <path d="M54,30 L14,30" stroke="#ec3013" stroke-width="2" fill="none"/>
+              <rect x="10" y="0" width="8" height="8" fill="#201e1d"/><rect x="10" y="10" width="8" height="8" fill="#201e1d"/>
+              <rect x="50" y="10" width="8" height="8" fill="#ec3013"/><rect x="50" y="26" width="8" height="8" fill="#ec3013"/>
+              <rect x="10" y="26" width="8" height="8" fill="#201e1d"/><rect x="10" y="38" width="8" height="8" fill="#201e1d"/>
+            </svg>
+            <a href="javascript:void(0)" onClick="{{ goGit }}" style="font-size:12px;color:#ae1800;text-decoration:none;margin-top:auto">查看 Git History →</a>
+          </div>
+        </div>
+
+        <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#605d5d;margin-bottom:8px">知识与规划</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:2px;background:color-mix(in srgb, #201e1d 40%, transparent);border:2px solid color-mix(in srgb, #201e1d 40%, transparent)">
+          <a href="javascript:void(0)" onClick="{{ goAdr }}" style="background:#eae9e9;padding:14px;text-decoration:none;color:#201e1d;display:flex;flex-direction:column;gap:4px">
+            <span style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#ec3013">ADRs</span>
+            <span style="font-size:18px;font-weight:800">33 <span style="font-size:11px;font-weight:400;opacity:0.7">条 · {{ adrDonutPct }}% accepted</span></span>
+          </a>
+          <a href="javascript:void(0)" onClick="{{ goGoal }}" style="background:#eae9e9;padding:14px;text-decoration:none;color:#201e1d;display:flex;flex-direction:column;gap:4px;border-left:3px solid #ec3013">
+            <span style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#ec3013">Goals</span>
+            <span style="font-size:13px;font-weight:800">未接入</span>
+          </a>
+          <a href="javascript:void(0)" onClick="{{ goSessions }}" style="background:#eae9e9;padding:14px;text-decoration:none;color:#201e1d;display:flex;flex-direction:column;gap:4px">
+            <span style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#ec3013">Sessions</span>
+            <span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ sessions.0.messages.0.text }}</span>
+          </a>
+          <a href="javascript:void(0)" onClick="{{ goArch }}" style="background:#eae9e9;padding:14px;text-decoration:none;color:#201e1d;display:flex;flex-direction:column;gap:4px">
+            <span style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#ec3013">Architecture</span>
+            <span style="font-size:12px">Web UI / ABI 开发中</span>
+          </a>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isTasks }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:28px;margin:0 0 4px">Task list <span style="font-size:14px;font-weight:400;opacity:0.6">native provider</span></h1>
+        <p style="font-size:13px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 18px">1018 tasks · Page 1 of 51 <span style="color:#ec3013">· {{ runningCount }} 个正在运行</span></p>
+
+        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+          <input class="input" placeholder="Search titles and descriptions" style="flex:1;min-width:220px;min-height:36px;padding:6px 10px;font-size:14px;background:#eae9e9;border:1px solid color-mix(in srgb, #201e1d 40%, transparent)">
+          <button style="background:#ec3013;color:#f3f2f2;border:none;font-family:Archivo;font-weight:800;font-size:14px;padding:8px 20px;cursor:pointer">Search</button>
+        </div>
+
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+          <span style="font-size:12px;color:#605d5d">Filter:</span>
+          <sc-for list="{{ statusFilters }}" as="f" hint-placeholder-count="6">
+            <a href="javascript:void(0)" onClick="{{ f.onClick }}" style="font-size:12px;padding:4px 10px;text-decoration:none;color:{{ f.color }};background:{{ f.bg }};border:{{ f.border }}">{{ f.label }} ({{ f.count }})</a>
+          </sc-for>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+          <span style="font-size:12px;color:#605d5d">Sort:</span>
+          <sc-for list="{{ sortOpts }}" as="o" hint-placeholder-count="4">
+            <a href="javascript:void(0)" onClick="{{ o.onClick }}" style="font-size:12px;text-decoration:none;color:{{ o.color }};font-weight:{{ o.weight }}">{{ o.label }}</a>
+          </sc-for>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px">
+          <span style="font-size:12px;padding:4px 10px;border:1px solid #ec3013;color:#ec3013">All</span>
+          <span style="font-size:12px;padding:4px 10px;background:#eae7e7;color:#444141">milestone-candidate (561)</span>
+          <span style="font-size:12px;padding:4px 10px;background:#fff2ef;color:#7c1405">defect (346)</span>
+          <span style="font-size:12px;padding:4px 10px;background:#eae7e7;color:#444141">directive (161)</span>
+          <span style="font-size:12px;padding:4px 10px;background:#eae7e7;color:#444141">human-steered (114)</span>
+          <span style="font-size:12px;padding:4px 10px;background:#eae7e7;color:#444141">crystallization (48)</span>
+          <span style="font-size:12px;padding:4px 10px;background:#eae7e7;color:#444141">v1 (35)</span>
+        </div>
+
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <thead>
+            <tr>
+              <th style="text-align:left;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:color-mix(in srgb, #201e1d 60%, transparent);padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent)">id</th>
+              <th style="text-align:left;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:color-mix(in srgb, #201e1d 60%, transparent);padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent)">status</th>
+              <th style="text-align:left;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:color-mix(in srgb, #201e1d 60%, transparent);padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent)">title</th>
+              <th style="text-align:left;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:color-mix(in srgb, #201e1d 60%, transparent);padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent)">labels</th>
+              <th style="text-align:left;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:color-mix(in srgb, #201e1d 60%, transparent);padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent)">updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{ tasks }}" as="t" hint-placeholder-count="10">
+              <tr>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);white-space:nowrap;vertical-align:top">
+                  <a href="javascript:void(0)" onClick="{{ t.onClick }}" style="color:#ec3013;text-decoration:none;font-weight:600">{{ t.id }}</a>
+                </td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);vertical-align:top">
+                  <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;background:{{ t.statusBg }};color:{{ t.statusColor }}">
+                    <sc-if value="{{ t.running }}" hint-placeholder-val="{{ false }}"><span style="width:6px;height:6px;background:#ec3013;display:inline-block;animation:ds-pulse 1.4s infinite"></span></sc-if>
+                    {{ t.status }}
+                  </span>
+                </td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);vertical-align:top;max-width:520px">{{ t.title }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);vertical-align:top;font-size:12px;color:color-mix(in srgb, #201e1d 55%, transparent);white-space:nowrap">{{ t.labelsPreview }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);vertical-align:top;font-size:12px;color:color-mix(in srgb, #201e1d 55%, transparent);white-space:nowrap">{{ t.updated }}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+
+        <div style="display:flex;justify-content:space-between;margin-top:18px;font-size:13px">
+          <span style="opacity:0.5">« Previous</span>
+          <span>Page 1 of 51</span>
+          <a href="javascript:void(0)" style="color:#ec3013;text-decoration:none">Next »</a>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+      <div style="display:grid;grid-template-columns:200px 1fr;gap:36px;align-items:start">
+        <aside style="position:sticky;top:24px;font-size:13px">
+          <a href="javascript:void(0)" onClick="{{ goTasks }}" style="display:block;color:#ec3013;text-decoration:none;margin-bottom:16px">← back to list</a>
+          <sc-if value="{{ isDIR001 }}" hint-placeholder-val="{{ false }}">
+            <div>
+              <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:color-mix(in srgb, #201e1d 55%, transparent);margin-bottom:8px">目录</div>
+              <a href="#dir001-finding" style="display:block;color:#201e1d;text-decoration:none;padding:5px 0;border-left:2px solid color-mix(in srgb, #201e1d 40%, transparent);padding-left:10px;margin-bottom:2px">Finding</a>
+              <a href="#dir001-action" style="display:block;color:#201e1d;text-decoration:none;padding:5px 0;border-left:2px solid color-mix(in srgb, #201e1d 40%, transparent);padding-left:10px;margin-bottom:2px">Requested action</a>
+              <a href="#dir001-resolution" style="display:block;color:#201e1d;text-decoration:none;padding:5px 0;border-left:2px solid color-mix(in srgb, #201e1d 40%, transparent);padding-left:10px">Resolution</a>
+            </div>
+          </sc-if>
+        </aside>
+        <div>
+          <h1 style="font-size:27px;line-height:1.25;margin:0 0 8px">{{ activeTask.id }}: {{ activeTask.title }} <span style="color:#605d5d;font-weight:400">[{{ activeTask.status }}]</span></h1>
+          <p style="font-size:13px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 4px">role: {{ activeTask.role }} · labels: {{ activeTask.labelsPreview }}</p>
+          <p style="font-size:13px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 24px">last updated: {{ activeTask.updated }}</p>
+
+          <sc-if value="{{ isDIR001 }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:14.5px;line-height:1.7">
+              <h3 id="dir001-finding" style="font-size:19px;margin:0 0 10px">Finding</h3>
+              <p>The whole coverage picture that drives VT (dashboard.md: CLI 0.95 / MCP 0.90 / Web UI 0.95) rests on exp4's gap-list.md, and that instrument has a structural blind spot that makes the "near-perfect" reading false.</p>
+              <details style="margin:0 0 16px">
+                <summary style="cursor:pointer;font-weight:600">证据（3 条，点击展开）</summary>
+                <ol style="padding-left:20px">
+                  <li style="margin-bottom:10px"><b>~90% of all improvement ideas came from AI-internal channels</b> — G3 self-review 55, simulated-user 43+1, Persona 29+2, human 13+3.</li>
+                  <li style="margin-bottom:10px"><b>The Provider ABI / GitHub backend is not a VT surface at all.</b> dashboard.md §VT lists only CLI/MCP/Web UI/Packaging/Docs.</li>
+                  <li><b>The GitHub Provider has been out of the evaluation loop since exp2.</b> title/body/labels/parent/children writes are explicitly unimplemented.</li>
+                </ol>
+              </details>
+
+              <h3 id="dir001-action" style="font-size:19px;margin:24px 0 10px">Requested action</h3>
+              <p>Open a near-term explore milestone (M-ABI-EVAL) that does both of the following before any further Core-surface polish milestone is selected:</p>
+              <ol style="padding-left:20px">
+                <li style="margin-bottom:8px">Add a Provider-ABI surface to the VT value function, scored by an explicit capability matrix.</li>
+                <li>Build an ABI conformance / differential-test suite run against both the native and github providers.</li>
+              </ol>
+
+              <h3 id="dir001-resolution" style="font-size:19px;margin:24px 0 10px">Resolution</h3>
+              <details open style="margin:0">
+                <summary style="cursor:pointer;font-weight:600">Applied at m3 SELECT (2026-07-18) — 点击折叠</summary>
+                <ul style="padding-left:20px;margin-top:10px">
+                  <li style="margin-bottom:8px"><b>Item 1 (Provider-ABI VT surface, capability matrix)：</b>APPLIED THIS MILESTONE. New charter M03-abi-eval authored.</li>
+                  <li style="margin-bottom:8px"><b>Item 2 (ABI conformance suite)：</b>APPLIED, folded into the same M03-abi-eval charter.</li>
+                  <li><b>Items 3–6</b>（outcome-based eval / adversarial eval / comparative benchmark / standing review cadence）：BACKLOGGED — added to backlog.md as four candidate rows.</li>
+                </ul>
+              </details>
+            </div>
+          </sc-if>
+          <sc-if value="{{ isDIR001 }}" hint-placeholder-val="{{ true }}">
+          </sc-if>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isLive }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:28px;margin:0 0 4px">Live <span style="font-size:13px;font-weight:400;background:#eae7e7;padding:3px 8px;margin-left:8px;vertical-align:middle">轮询 · 每 20s（设计效果）</span></h1>
+        <p style="font-size:13px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 20px">observation.ts readLive() · .workflow-events/*.jsonl + /proc/pressure/cpu</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;background:color-mix(in srgb, #201e1d 40%, transparent);border:2px solid color-mix(in srgb, #201e1d 40%, transparent);margin-bottom:24px">
+          <div style="background:#eae9e9;padding:18px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:#ec3013;margin-bottom:6px">live_state</div><div style="display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;background:#ec3013;animation:ds-pulse 1.4s infinite"></span><span style="font-size:22px;font-weight:800">running</span></div></div>
+          <div style="background:#eae9e9;padding:18px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:#ec3013;margin-bottom:6px">CPU 压力（PSI avg10）</div><div style="font-size:22px;font-weight:800">1.55</div></div>
+        </div>
+        <h3 style="font-size:16px;margin:0 0 10px">在飞任务 · 并发 1</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <thead><tr><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#605d5d">id</th><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#605d5d">state</th><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#605d5d">started</th></tr></thead>
+          <tbody><tr><td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);color:#ec3013;font-weight:600">gap-task-telemetry-6-percent-join</td><td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">running</td><td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);color:#605d5d">08:41Z</td></tr></tbody>
+        </table>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isJournal }}" hint-placeholder-val="{{ false }}">
+      <div style="display:grid;grid-template-columns:180px 1fr;gap:36px">
+        <aside style="position:sticky;top:24px;font-size:13px">
+          <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#605d5d;margin-bottom:8px">跳转</div>
+          <sc-for list="{{ journal }}" as="j" hint-placeholder-count="4">
+            <a href="#{{ j.id }}" style="display:block;color:#201e1d;text-decoration:none;padding:5px 0 5px 10px;border-left:2px solid color-mix(in srgb, #201e1d 40%, transparent);margin-bottom:2px;font-size:12.5px">{{ j.title }}</a>
+          </sc-for>
+        </aside>
+        <div>
+          <h1 style="font-size:28px;margin:0 0 20px">Journal — 循环滚动记录</h1>
+          <sc-for list="{{ journal }}" as="j" hint-placeholder-count="4">
+            <div id="{{ j.id }}" style="border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);padding:0 0 20px;margin-bottom:20px">
+              <div style="display:flex;gap:10px;align-items:baseline;margin-bottom:6px">
+                <span style="font-size:11px;padding:3px 9px;background:#fff2ef;color:#7c1405">{{ j.kind }}</span>
+                <span style="font-size:12px;color:#605d5d">{{ j.time }}</span>
+              </div>
+              <h3 style="font-size:17px;margin:0 0 6px">{{ j.title }}</h3>
+              <p style="font-size:14px;line-height:1.7;margin:0">{{ j.text }}</p>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:28px;margin:0 0 4px">Board <span style="font-size:11px;font-weight:400;background:#fff2ef;color:#7c1405;padding:3px 8px;margin-left:8px;vertical-align:middle">NEW · 已加入导航</span></h1>
+        <p style="font-size:13px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 6px">三源 join：Provider ABI（意图）+ .workflow-events/（执行）+ task-status-drift-check.ts（落地）</p>
+        <p style="font-size:12px;color:#7c1405;margin:0 0 20px">✓ 已缓存 · git HEAD f5117682 · 2 分钟前刷新（较 63 秒全量扫描降至即时）</p>
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <thead><tr>
+            <th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;text-transform:uppercase;color:#605d5d">id</th>
+            <th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;text-transform:uppercase;color:#605d5d">意图</th>
+            <th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;text-transform:uppercase;color:#605d5d">遥测</th>
+            <th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;text-transform:uppercase;color:#605d5d">落地</th>
+            <th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;text-transform:uppercase;color:#605d5d">drift</th>
+          </tr></thead>
+          <tbody>
+            <sc-for list="{{ boardRows }}" as="b" hint-placeholder-count="4">
+              <tr>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);color:#ec3013;font-weight:600">{{ b.id }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">{{ b.intent }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">{{ b.telemetry }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">{{ b.landing }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">{{ b.drift }}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isGit }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:28px;margin:0 0 4px">Git History</h1>
+        <p style="font-size:13px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 4px">renderGitHistorySvg() · 服务端纯 SVG，零客户端 JS，零新依赖</p>
+        <p style="font-size:12px;color:#7c1405;margin:0 0 20px">功能已完整实现 — 当前 demo 进程落后于 HEAD，重启即可上线</p>
+        <div style="display:flex;gap:6px;margin-bottom:16px">
+          <span style="font-size:12px;padding:5px 12px;border:1px solid #ec3013;color:#ec3013">7 天</span>
+          <span style="font-size:12px;padding:5px 12px;background:#eae7e7">30 天</span>
+          <span style="font-size:12px;padding:5px 12px;background:#eae7e7">90 天</span>
+        </div>
+        <svg viewBox="0 0 980 360" width="100%" height="360" style="background:#eae9e9">
+          <!-- master trunk -->
+          <line x1="70" y1="12" x2="70" y2="332" stroke="#201e1d" stroke-width="2"/>
+          <!-- exp5 lane vertical -->
+          <line x1="300" y1="130" x2="300" y2="196" stroke="#ec3013" stroke-width="2"/>
+          <!-- exp4 lane vertical -->
+          <line x1="550" y1="135" x2="550" y2="204" stroke="#7d7979" stroke-width="2"/>
+          <!-- fix lane stub -->
+          <line x1="800" y1="76" x2="800" y2="88" stroke="#ae1800" stroke-width="2" stroke-dasharray="4 3"/>
+
+          <!-- connectors: kept in the blank bands between commit rows, never crossing a text line -->
+          <path d="M70,240 L70,214 L300,214 L300,196" stroke="#ec3013" stroke-width="2" fill="none"/>
+          <path d="M300,130 L70,130 L70,108" stroke="#ec3013" stroke-width="2" fill="none"/>
+          <path d="M70,240 L70,224 L550,224 L550,204" stroke="#7d7979" stroke-width="2" fill="none"/>
+          <path d="M550,135 L70,135 L70,152" stroke="#7d7979" stroke-width="2" fill="none"/>
+          <path d="M70,108 L70,86 L800,86 L800,84" stroke="#ae1800" stroke-width="2" stroke-dasharray="4 3" fill="none"/>
+          <path d="M800,84 L800,40 L70,40 L70,64" stroke="#ae1800" stroke-width="2" stroke-dasharray="4 3" fill="none"/>
+
+          <!-- master commits (one line each; full hash/author/date in the log table below) -->
+          <rect x="66" y="16" width="8" height="8" fill="#201e1d"><title>f5117682 · yale · 09:02Z</title></rect><text x="88" y="21" font-size="11" fill="#201e1d">delivery-start · done</text>
+          <rect x="66" y="60" width="8" height="8" fill="#201e1d"><title>9a2c771 · claude · 08:10Z</title></rect><text x="88" y="65" font-size="11" fill="#605d5d">merge: fix/label-nav-scroll</text>
+          <rect x="66" y="104" width="8" height="8" fill="#201e1d"><title>c2f0aa1 · claude · 07:40Z</title></rect><text x="88" y="109" font-size="11" fill="#605d5d">merge: exp5/git-history</text>
+          <rect x="66" y="148" width="8" height="8" fill="#201e1d"><title>a8f0c33 · claude · 23:05Z</title></rect><text x="88" y="153" font-size="11" fill="#605d5d">merge: exp4/abi-eval</text>
+          <rect x="66" y="192" width="8" height="8" fill="#201e1d"><title>f37462ec · claude · 22:18Z</title></rect><text x="88" y="197" font-size="11" fill="#201e1d">goal-store.ts landed</text>
+          <rect x="66" y="236" width="8" height="8" fill="#201e1d"><title>b71e900 · yale · 18:00Z</title></rect><text x="88" y="241" font-size="11" fill="#201e1d">M03 milestone kickoff</text>
+          <rect x="66" y="280" width="8" height="8" fill="#201e1d"><title>7fb1e7a2 · yale · 14:22Z</title></rect><text x="88" y="285" font-size="11" fill="#201e1d">batch-merge not-fast-forward</text>
+          <rect x="66" y="324" width="8" height="8" fill="#201e1d"><title>a3c9012f · claude · 09:05Z</title></rect><text x="88" y="329" font-size="11" fill="#201e1d">directive DIR-001 resolution</text>
+
+          <!-- exp5 commits -->
+          <rect x="296" y="148" width="8" height="8" fill="#ec3013"><title>001eb376 · claude · 07:20Z</title></rect><text x="318" y="153" font-size="11" fill="#7c1405">add renderGitHistorySvg()</text>
+          <rect x="296" y="192" width="8" height="8" fill="#ec3013"><title>cb21fc48 · claude · 07:13Z</title></rect><text x="318" y="197" font-size="11" fill="#7c1405">wire /git-history route</text>
+          <text x="300" y="345" font-size="10" text-anchor="middle" fill="#ec3013">exp5/git-history</text>
+
+          <!-- exp4 commits (concurrent with exp5, same fork point) -->
+          <rect x="546" y="156" width="8" height="8" fill="#7d7979"><title>9e4c220 · claude · 22:40Z</title></rect><text x="568" y="161" font-size="11" fill="#605d5d">ABI differential-test suite</text>
+          <rect x="546" y="200" width="8" height="8" fill="#7d7979"><title>bd8871a · claude · 22:20Z</title></rect><text x="568" y="205" font-size="11" fill="#605d5d">M03-abi-eval capability matrix</text>
+          <text x="550" y="345" font-size="10" text-anchor="middle" fill="#7d7979">exp4/abi-eval</text>
+
+          <!-- fix commit (short-lived hotfix, forks from the exp5-merge commit) -->
+          <rect x="796" y="80" width="8" height="8" fill="#ae1800"><title>e71a002 · claude · 07:55Z</title></rect><text x="788" y="77" font-size="11" fill="#ae1800" text-anchor="end">remove white-space override</text>
+          <text x="800" y="345" font-size="10" text-anchor="middle" fill="#ae1800">fix/label-nav-scroll</text>
+
+          <text x="70" y="345" font-size="10" text-anchor="middle" fill="#605d5d">master</text>
+        </svg>
+        <p style="font-size:12px;color:#605d5d;margin-top:10px">提交树：分叉/合并点真实反映分支结构，悬停节点查看完整 hash/作者/时间。无工时语义 — 分支寿命 ≠ 任务工时，遥测与 git 仅约 6% 相交。</p>
+
+        <h3 style="font-size:15px;margin:24px 0 10px">提交日志</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">hash</th><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">message</th><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">branch</th><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">author</th><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">date</th></tr></thead>
+          <tbody>
+            <sc-for list="{{ gitCommits }}" as="c" hint-placeholder-count="7">
+              <tr>
+                <td style="padding:8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);font-family:ui-monospace,monospace;color:#ec3013">{{ c.hash }}</td>
+                <td style="padding:8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">{{ c.msg }}</td>
+                <td style="padding:8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);color:#605d5d">{{ c.lane }}</td>
+                <td style="padding:8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">{{ c.author }}</td>
+                <td style="padding:8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);color:#605d5d;white-space:nowrap">{{ c.date }}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isAdr }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:28px;margin:0 0 4px">ADRs</h1>
+        <p style="font-size:13px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 20px">client.adrList() / adrGet() · 33 条真实记录</p>
+        <div style="display:flex;gap:6px;margin-bottom:16px">
+          <span style="font-size:12px;padding:5px 12px;border:1px solid #ec3013;color:#ec3013">All</span>
+          <span style="font-size:12px;padding:5px 12px;background:#eae7e7">accepted</span>
+          <span style="font-size:12px;padding:5px 12px;background:#fff2ef;color:#7c1405">proposed</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:24px">
+          <thead><tr><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;text-transform:uppercase;color:#605d5d">id</th><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;text-transform:uppercase;color:#605d5d">title</th><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;text-transform:uppercase;color:#605d5d">status</th><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;text-transform:uppercase;color:#605d5d">date</th></tr></thead>
+          <tbody>
+            <sc-for list="{{ adrs }}" as="a" hint-placeholder-count="3">
+              <tr>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);color:#ec3013;font-weight:600;white-space:nowrap">{{ a.id }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">{{ a.title }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">{{ a.status }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);color:#605d5d;white-space:nowrap">{{ a.date }}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+        <h3 style="font-size:15px;margin:0 0 10px">supersedes 关系时间线（新增）</h3>
+        <div style="display:flex;align-items:center;gap:0;font-size:12px">
+          <div style="padding:8px 14px;background:#eae7e7">ADR-018</div>
+          <div style="width:36px;height:2px;background:color-mix(in srgb, #201e1d 40%, transparent)"></div>
+          <div style="padding:8px 14px;background:#fff2ef;color:#7c1405">ADR-030 supersedes</div>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isGoal }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:28px;margin:0 0 20px">Goals — 阶段目标</h1>
+        <div style="border:2px solid #ec3013;padding:24px;margin-bottom:24px">
+          <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013;margin-bottom:8px">未接入 · 诚实空态</div>
+          <p style="font-size:14.5px;line-height:1.7;margin:0 0 10px">goals/ 目录存在，当前 0 条记录。真正的阶段目标 / AC 仍是自然语言正本：</p>
+          <p style="font-size:13px;font-family:ui-monospace,monospace;margin:0 0 4px">orchestration/manager-phase-goal.md（2225 行 / 26 个 AC 小节）</p>
+          <p style="font-size:13px;font-family:ui-monospace,monospace;margin:0">orchestration/outer-phase-goal.md</p>
+        </div>
+        <h3 style="font-size:15px;margin:0 0 10px">迁移后的样式预览（灰置，未接入前不展示真数据）</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;opacity:0.4">
+          <thead><tr><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px">id</th><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px">kind</th><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px">status</th></tr></thead>
+          <tbody><tr><td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">M-ABI-EVAL</td><td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">phase</td><td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">—</td></tr></tbody>
+        </table>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isDoc }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:28px;margin:0 0 20px">Docs</h1>
+        <div style="border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);padding-bottom:16px;margin-bottom:16px">
+          <a href="javascript:void(0)" style="color:#ec3013;text-decoration:none;font-weight:600;font-size:15px">DOC-001 — Web UI 现状审计与改进方案摘要</a>
+          <p style="font-size:13px;color:#605d5d;margin:6px 0 0">createDocumentStore · docs-managed/ · 更新 22h ago</p>
+        </div>
+        <p style="font-size:13px;color:#605d5d">当前只有 1 篇文档。后续加入全文搜索。</p>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isSystem }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:640px">
+        <h1 style="font-size:28px;margin:0 0 4px">System</h1>
+        <p style="font-size:13px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 20px">resource-gate.sh · process-budget.sh（文本输出解析,轮询 30-60s）</p>
+        <div style="border:2px solid #7c1405;background:#fff2ef;padding:16px;margin-bottom:20px;font-weight:800;color:#7c1405">⇒ GO：资源充足，可以跑</div>
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>cpu_stall (avg10)</span><span>1.76 <span style="color:#605d5d">/ 限值 60</span></span></div><div style="height:8px;background:#d7d3d3"><div style="height:100%;width:3%;background:#201e1d"></div></div></div>
+          <div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>cpu_stall (avg300)</span><span>1.35 <span style="color:#605d5d">/ 限值 60</span></span></div><div style="height:8px;background:#d7d3d3"><div style="height:100%;width:2.3%;background:#201e1d"></div></div></div>
+          <div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>loadavg (1m)</span><span>5.19 <span style="color:#605d5d">/ 限值 nproc×2≈32</span></span></div><div style="height:8px;background:#d7d3d3"><div style="height:100%;width:16%;background:#201e1d"></div></div></div>
+          <div style="display:flex;justify-content:space-between;font-size:13px"><span>mem_avail</span><span>11859 MB</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:13px"><span>nproc / node_procs</span><span>16 / 0</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:13px"><span>node 进程预算</span><span>0 / 16 in use</span></div>
+        </div>
+        <p style="font-size:11px;color:#605d5d;margin-top:16px">阈值按 nproc 动态计算显示，不写死当前机器上的数字。</p>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isManager }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:28px;margin:0 0 4px">Manager / Outer / Inner</h1>
+        <p style="font-size:13px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 20px">三层自适应探测 — 多信号加权判定，缺失信号诚实标注</p>
+
+        <h3 style="font-size:15px;margin:0 0 10px">Cron / Loop</h3>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:2px;background:color-mix(in srgb, #201e1d 40%, transparent);border:2px solid color-mix(in srgb, #201e1d 40%, transparent);margin-bottom:24px">
+          <div style="background:#eae9e9;padding:16px"><div style="font-size:11px;color:#605d5d;margin-bottom:6px">Outer</div><div style="font-weight:800;color:#7c1405">LIVE</div><p style="font-size:12px;margin:6px 0 0">cron */20 * * * *</p></div>
+          <div style="background:#eae9e9;padding:16px"><div style="font-size:11px;color:#605d5d;margin-bottom:6px">Inner</div><div style="font-weight:800;color:#7c1405">LIVE</div><p style="font-size:12px;margin:6px 0 0">cron */20 * * * *</p></div>
+          <div style="background:#eae9e9;padding:16px"><div style="font-size:11px;color:#605d5d;margin-bottom:6px">Manager</div><div style="font-weight:800">推断中</div><p style="font-size:12px;margin:6px 0 0">无落盘配置 — 靠 tick-log.md mtime 间接心跳</p></div>
+        </div>
+
+        <h3 style="font-size:15px;margin:0 0 10px">Monitor 注册表</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:24px">
+          <thead><tr><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">name</th><th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">status</th></tr></thead>
+          <tbody>
+            <sc-for list="{{ monitors }}" as="m" hint-placeholder-count="3">
+              <tr><td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">{{ m.name }}</td><td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);color:#7c1405">{{ m.status }}</td></tr>
+            </sc-for>
+          </tbody>
+        </table>
+        <p style="font-size:11px;color:#605d5d;margin:-12px 0 24px">读 observer-registry.conf 单一登记表 — 不再发明并行清单。</p>
+
+        <h3 style="font-size:15px;margin:0 0 10px">主要观测指标</h3>
+        <div style="background:#eae9e9;padding:16px;font-family:ui-monospace,monospace;font-size:13px;line-height:1.8">
+          pool=4 floor=20 deficit=16<br>release=v0.4.0 · develop 领先 2367 提交<br>avg10=0.00 load1=2.49<br>任务台账 done938 / needs-human32 / todo17 / ready13
+        </div>
+        <p style="font-size:11px;color:#7c1405;margin-top:8px">⚠ 以上取自叙事性 tick 日志，非机读字段 — 需底层机件补齐 --json 输出后才算做实。</p>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isTests }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:28px;margin:0 0 4px">Tests</h1>
+        <p style="font-size:13px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 20px">最近一次运行的详情 + 历史运行记录，均关联到对应任务/提交/分支</p>
+
+        <div style="border:2px solid {{ latestRun.status === 'pass' ? '#605d5d' : '#ae1800' }};background:{{ latestRun.status === 'pass' ? '#eae9e9' : '#fff2ef' }};padding:20px;margin-bottom:24px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+            <span style="font-size:15px;font-weight:800;color:{{ latestRun.status === 'pass' ? '#201e1d' : '#7c1405' }}">{{ latestRun.suite }} — {{ latestRun.status }}</span>
+            <span style="font-size:12px;color:#605d5d">{{ latestRun.startedAt }} · 耗时 {{ latestRun.duration }}</span>
+          </div>
+          <div style="display:flex;gap:20px;font-size:13px;margin-bottom:10px">
+            <span>total <b>{{ latestRun.total }}</b></span>
+            <span style="color:#218f4e">passed <b>{{ latestRun.passed }}</b></span>
+            <span style="color:#ae1800">failed <b>{{ latestRun.failed }}</b></span>
+            <span style="color:#605d5d">skipped <b>{{ latestRun.skipped }}</b></span>
+          </div>
+          <p style="font-size:12px;color:#605d5d;margin:0">关联任务 <a href="javascript:void(0)" onClick="{{ goTasks }}" style="color:#ec3013;text-decoration:none">{{ latestRun.task }}</a> · commit <span style="font-family:ui-monospace,monospace">{{ latestRun.commit }}</span> · 分支 {{ latestRun.branch }}</p>
+        </div>
+
+        <h3 style="font-size:15px;margin:0 0 10px">历史运行</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:13.5px">
+          <thead><tr>
+            <th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">suite</th>
+            <th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">status</th>
+            <th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">pass/fail/skip</th>
+            <th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">duration</th>
+            <th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">task</th>
+            <th style="text-align:left;padding:8px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent);font-size:11px;color:#605d5d">commit / branch</th>
+          </tr></thead>
+          <tbody>
+            <sc-for list="{{ testRuns }}" as="r" hint-placeholder-count="4">
+              <tr>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">{{ r.suite }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);color:{{ r.status === 'pass' ? '#218f4e' : '#ae1800' }};font-weight:700">{{ r.status }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent)">{{ r.passed }}/{{ r.failed }}/{{ r.skipped }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);color:#605d5d">{{ r.duration }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);color:#ec3013">{{ r.task }}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid color-mix(in srgb, #201e1d 40%, transparent);color:#605d5d;font-family:ui-monospace,monospace;white-space:nowrap">{{ r.commit }} · {{ r.branch }}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+
+        <details style="margin-top:20px">
+          <summary style="cursor:pointer;font-weight:600;font-size:14px">run-2042 失败用例明细（点击展开）</summary>
+          <ul style="padding-left:20px;font-size:13px;line-height:1.8;color:#7c1405">
+            <li>githubProvider.updateLabels() should not throw</li>
+            <li>githubProvider.setParent() round-trips</li>
+            <li>diff: native vs github title write</li>
+            <li>diff: native vs github children write</li>
+            <li>ABI conformance: unimplemented method surfaces typed error</li>
+          </ul>
+        </details>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isSessions }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:28px;margin:0 0 4px">Sessions</h1>
+        <p style="font-size:13px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 24px">Manager / Outer / Inner 三层最近会话 transcript，最新消息在前</p>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+          <sc-for list="{{ sessions }}" as="sess" hint-placeholder-count="3">
+            <div style="background:#eae9e9;padding:16px;display:flex;flex-direction:column;gap:10px;min-height:280px">
+              <div style="display:flex;justify-content:space-between;align-items:baseline">
+                <b style="font-size:15px">{{ sess.layer }}</b>
+                <span style="font-size:11px;color:#7c1405;font-weight:700">{{ sess.status }}</span>
+              </div>
+              <div style="font-size:11px;color:#605d5d;margin-bottom:2px">{{ sess.cadence }}</div>
+              <sc-for list="{{ sess.messages }}" as="m" hint-placeholder-count="3">
+                <div style="border-left:2px solid color-mix(in srgb, #201e1d 30%, transparent);padding-left:10px">
+                  <div style="display:flex;gap:8px;font-size:10.5px;color:#605d5d;margin-bottom:2px"><span>{{ m.time }}</span><span style="text-transform:uppercase;letter-spacing:0.06em">{{ m.role }}</span></div>
+                  <p style="font-size:12.5px;line-height:1.5;margin:0">{{ m.text }}</p>
+                </div>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isArch }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:28px;margin:0 0 4px">Architecture</h1>
+        <p style="font-size:13px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 16px">系统组件图 — 高亮正在开发（红色实框）与最近变更（红色边框）的部分</p>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;font-size:11px;color:#605d5d">
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:#fff2ef;border:2px solid #ec3013;display:inline-block"></span>正在开发</span>
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:#fff2ef;border:2px solid #ae1800;display:inline-block"></span>最近变更</span>
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:#eae7e7;border:2px solid #605d5d;display:inline-block"></span>已标记问题</span>
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:#eae9e9;border:2px solid #bab6b6;display:inline-block"></span>滞后/未跟进</span>
+        </div>
+        <svg viewBox="0 0 500 400" width="100%" height="400" style="background:#f3f2f2">
+          <sc-for list="{{ archEdges }}" as="e" hint-placeholder-count="8">
+            <line x1="{{ e.x1 }}" y1="{{ e.y1 }}" x2="{{ e.x2 }}" y2="{{ e.y2 }}" stroke="color-mix(in srgb, #201e1d 30%, transparent)" stroke-width="1.5"></line>
+          </sc-for>
+          <sc-for list="{{ archNodes }}" as="n" hint-placeholder-count="9">
+            <rect x="{{ n.x }}" y="{{ n.y }}" width="{{ n.w }}" height="{{ n.h }}" fill="{{ n.fill }}" stroke="{{ n.stroke }}" stroke-width="2"></rect>
+          </sc-for>
+          <sc-for list="{{ archNodes }}" as="n" hint-placeholder-count="9">
+            <text x="{{ n.cx }}" y="{{ n.cy }}" font-size="12" text-anchor="middle" dominant-baseline="middle" fill="{{ n.text }}">{{ n.label }}</text>
+          </sc-for>
+        </svg>
+        <p style="font-size:12px;color:#605d5d;margin-top:10px">Web UI 与 Provider ABI 层正在推进 M03-abi-eval（能力矩阵评估）；Native Provider 与 goal-store.ts 为本轮最近落地变更；GitHub Provider 自 exp2 起脱离评估闭环，写路径长期未实现。</p>
+      </div>
+      </sc-if>
+
+    </main>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isMobile }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:390px;margin:24px auto;background:#f3f2f2;border:1px solid color-mix(in srgb, #201e1d 40%, transparent);box-shadow:0 12px 32px color-mix(in srgb, #2d2b2b 22%, transparent);min-height:700px;position:relative;overflow:hidden">
+
+    <header style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:2px solid color-mix(in srgb, #201e1d 40%, transparent)">
+      <a href="javascript:void(0)" onClick="{{ toggleMenu }}" style="width:44px;height:44px;display:flex;flex-direction:column;justify-content:center;gap:4px;cursor:pointer">
+        <span style="display:block;width:20px;height:2px;background:#201e1d"></span>
+        <span style="display:block;width:20px;height:2px;background:#201e1d"></span>
+        <span style="display:block;width:20px;height:2px;background:#201e1d"></span>
+      </a>
+      <span style="font-weight:800;font-size:17px">Quay</span>
+      <span style="margin-left:auto;font-size:12px;opacity:0.6">{{ mobilePageLabel }}</span>
+    </header>
+
+    <sc-if value="{{ mobileMenuOpen }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;inset:0;top:0;background:#f3f2f2;z-index:10;padding-top:57px;overflow-y:auto">
+        <sc-for list="{{ navGroups }}" as="grp" hint-placeholder-count="4">
+          <div>
+            <div style="padding:10px 20px 4px;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#605d5d;background:#eae7e7">{{ grp.label }}</div>
+            <sc-for list="{{ grp.items }}" as="item" hint-placeholder-count="3">
+              <a href="javascript:void(0)" onClick="{{ item.onClick }}" style="display:flex;align-items:center;min-height:48px;padding:0 20px;font-size:16px;text-decoration:none;color:{{ item.color }};font-weight:{{ item.weight }};border-bottom:1px solid color-mix(in srgb, #201e1d 15%, transparent)">{{ item.label }}</a>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <div style="padding:16px">
+
+      <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <h1 style="font-size:22px;margin:0 0 12px">Dashboard</h1>
+
+        <div style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#605d5d;margin:4px 0 6px">现在是否健康</div>
+        <div style="background:#eae9e9;padding:16px;margin-bottom:2px">
+          <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013;margin-bottom:6px">循环脉搏</div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;background:#ec3013;animation:ds-pulse 1.4s infinite"></span><span style="font-size:22px;font-weight:800">running</span></div>
+          <p style="margin:6px 0 0;font-size:13px">在飞 1 · 并发 1 · gap-task-telemetry-6-percent-join</p>
+          <a href="javascript:void(0)" onClick="{{ goLive }}" style="font-size:12px;color:#ae1800;text-decoration:none">查看 Live →</a>
+        </div>
+        <div style="background:#eae9e9;padding:16px;margin-bottom:2px">
+          <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013;margin-bottom:6px">系统资源</div>
+          <p style="margin:0 0 8px;font-size:13px">cpu_stall 1.76/60 ok · loadavg 5.19/32 ok</p>
+          <div style="font-weight:800;color:#7c1405;font-size:13px">⇒ GO</div>
+          <a href="javascript:void(0)" onClick="{{ goSystem }}" style="font-size:12px;color:#ae1800;text-decoration:none">查看系统状态 →</a>
+        </div>
+        <div style="background:#eae9e9;padding:16px;margin-bottom:2px">
+          <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013;margin-bottom:6px">Manager / Outer / Inner</div>
+          <p style="margin:0 0 8px;font-size:13px">Outer: LIVE · Inner: LIVE<br>Manager: 心跳推断中</p>
+          <a href="javascript:void(0)" onClick="{{ goManager }}" style="font-size:12px;color:#ae1800;text-decoration:none">查看三层状态 →</a>
+        </div>
+
+        <div style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#605d5d;margin:16px 0 6px">工作进展</div>
+        <div style="background:#eae9e9;padding:16px;margin-bottom:2px">
+          <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013;margin-bottom:6px">任务台账速览</div>
+          <div style="display:flex;height:14px;width:100%;overflow:hidden;margin-bottom:8px">
+            <div style="width:92.3%;background:#201e1d"></div><div style="width:3.1%;background:#ec3013"></div><div style="width:1.7%;background:#bab6b6"></div><div style="width:1.3%;background:#7d7979"></div><div style="width:0.6%;background:#eae7e7"></div>
+          </div>
+          <div style="display:flex;gap:12px;font-size:11px;flex-wrap:wrap;color:#605d5d;margin-bottom:6px"><span><b style="color:#201e1d">938</b> done</span><span><b style="color:#ec3013">32</b> needs-human</span><span><b>17</b> todo</span><span><b>13</b> ready</span></div>
+          <div style="border-top:1px solid color-mix(in srgb, #201e1d 20%, transparent);padding-top:8px;margin-bottom:8px;display:flex;flex-direction:column;gap:5px">
+            <div style="font-size:10px;color:#605d5d">最近更新（非 done）</div>
+            <sc-for list="{{ recentActiveTasks }}" as="rt" hint-placeholder-count="4">
+              <a href="javascript:void(0)" onClick="{{ rt.onClick }}" style="display:flex;justify-content:space-between;gap:8px;text-decoration:none;color:#201e1d;font-size:11.5px">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ec3013;font-weight:600">{{ rt.id }}</span>
+                <span style="color:{{ rt.statusColor }};flex:none">{{ rt.status }}</span>
+              </a>
+            </sc-for>
+          </div>
+          <a href="javascript:void(0)" onClick="{{ goTasks }}" style="font-size:12px;color:#ae1800;text-decoration:none">查看任务列表 →</a>
+        </div>
+        <div style="background:#eae9e9;padding:16px;margin-bottom:2px">
+          <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013;margin-bottom:6px">测试</div>
+          <p style="margin:0 0 8px;font-size:13px;color:{{ latestRun.status === 'pass' ? '#201e1d' : '#7c1405' }}">{{ latestRun.suite }} — {{ latestRun.status }} · {{ latestRun.passed }}/{{ latestRun.total }} passed</p>
+          <a href="javascript:void(0)" onClick="{{ goTests }}" style="font-size:12px;color:#ae1800;text-decoration:none">查看 Tests →</a>
+        </div>
+
+        <div style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#605d5d;margin:16px 0 6px">变更记录</div>
+        <div style="background:#eae9e9;padding:16px;margin-bottom:2px">
+          <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013;margin-bottom:6px">最近提交</div>
+          <p style="margin:0 0 8px;font-size:12px;font-family:ui-monospace,monospace;line-height:1.7">f5117682 delivery-start·done<br>f37462ec goal-store landed<br>cb21fc48 git-history svg</p>
+          <a href="javascript:void(0)" onClick="{{ goJournal }}" style="font-size:12px;color:#ae1800;text-decoration:none">查看 Journal →</a>
+        </div>
+        <div style="background:#eae9e9;padding:16px;margin-bottom:2px">
+          <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#ec3013;margin-bottom:6px">Git History（提交树）</div>
+          <svg viewBox="0 0 200 48" width="100%" height="48">
+            <line x1="14" y1="4" x2="14" y2="44" stroke="#201e1d" stroke-width="2"/>
+            <line x1="54" y1="14" x2="54" y2="30" stroke="#ec3013" stroke-width="2"/>
+            <path d="M14,14 L54,14" stroke="#ec3013" stroke-width="2" fill="none"/>
+            <path d="M54,30 L14,30" stroke="#ec3013" stroke-width="2" fill="none"/>
+            <rect x="10" y="0" width="8" height="8" fill="#201e1d"/><rect x="10" y="10" width="8" height="8" fill="#201e1d"/>
+            <rect x="50" y="10" width="8" height="8" fill="#ec3013"/><rect x="50" y="26" width="8" height="8" fill="#ec3013"/>
+            <rect x="10" y="26" width="8" height="8" fill="#201e1d"/><rect x="10" y="38" width="8" height="8" fill="#201e1d"/>
+          </svg>
+          <a href="javascript:void(0)" onClick="{{ goGit }}" style="font-size:12px;color:#ae1800;text-decoration:none">查看 Git History →</a>
+        </div>
+
+        <div style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#605d5d;margin:16px 0 6px">知识与规划</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px">
+          <a href="javascript:void(0)" onClick="{{ goAdr }}" style="background:#eae9e9;padding:12px;text-decoration:none;color:#201e1d;display:flex;flex-direction:column;gap:3px">
+            <span style="font-size:9.5px;letter-spacing:0.08em;text-transform:uppercase;color:#ec3013">ADRs</span>
+            <span style="font-size:15px;font-weight:800">33 <span style="font-size:10px;font-weight:400">条</span></span>
+          </a>
+          <a href="javascript:void(0)" onClick="{{ goGoal }}" style="background:#eae9e9;padding:12px;text-decoration:none;color:#201e1d;display:flex;flex-direction:column;gap:3px;border-left:3px solid #ec3013">
+            <span style="font-size:9.5px;letter-spacing:0.08em;text-transform:uppercase;color:#ec3013">Goals</span>
+            <span style="font-size:12px;font-weight:800">未接入</span>
+          </a>
+          <a href="javascript:void(0)" onClick="{{ goSessions }}" style="background:#eae9e9;padding:12px;text-decoration:none;color:#201e1d;display:flex;flex-direction:column;gap:3px">
+            <span style="font-size:9.5px;letter-spacing:0.08em;text-transform:uppercase;color:#ec3013">Sessions</span>
+            <span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">最新 transcript</span>
+          </a>
+          <a href="javascript:void(0)" onClick="{{ goArch }}" style="background:#eae9e9;padding:12px;text-decoration:none;color:#201e1d;display:flex;flex-direction:column;gap:3px">
+            <span style="font-size:9.5px;letter-spacing:0.08em;text-transform:uppercase;color:#ec3013">Architecture</span>
+            <span style="font-size:11px">Web UI / ABI 开发中</span>
+          </a>
+        </div>
+        <a href="javascript:void(0)" onClick="{{ goTasks }}" style="display:flex;align-items:center;justify-content:center;min-height:44px;margin-top:16px;background:#ec3013;color:#f3f2f2;text-decoration:none;font-weight:800">查看任务列表</a>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isTasks }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 10px">Task list</h1>
+        <input class="input" placeholder="Search" style="width:100%;min-height:44px;padding:8px 10px;font-size:14px;background:#eae9e9;border:1px solid color-mix(in srgb, #201e1d 40%, transparent);margin-bottom:10px">
+        <div style="display:flex;gap:6px;overflow-x:auto;white-space:nowrap;padding-bottom:8px;margin-bottom:14px;-webkit-overflow-scrolling:touch">
+          <span style="flex:none;font-size:11px;padding:5px 10px;border:1px solid #ec3013;color:#ec3013">All</span>
+          <span style="flex:none;font-size:11px;padding:5px 10px;background:#eae7e7">milestone-candidate (561)</span>
+          <span style="flex:none;font-size:11px;padding:5px 10px;background:#fff2ef;color:#7c1405">defect (346)</span>
+          <span style="flex:none;font-size:11px;padding:5px 10px;background:#eae7e7">directive (161)</span>
+          <span style="flex:none;font-size:11px;padding:5px 10px;background:#eae7e7">human-steered (114)</span>
+          <span style="flex:none;font-size:11px;padding:5px 10px;background:#eae7e7">…187 more</span>
+        </div>
+        <p style="font-size:10px;color:#ae1800;margin:-8px 0 12px">↑ 已修复：单行横向滚动，不再挤成 12 行文字墙</p>
+
+        <div style="display:flex;gap:6px;overflow-x:auto;white-space:nowrap;padding-bottom:8px;margin-bottom:8px">
+          <sc-for list="{{ statusFilters }}" as="f" hint-placeholder-count="6">
+            <a href="javascript:void(0)" onClick="{{ f.onClick }}" style="flex:none;min-height:32px;display:inline-flex;align-items:center;font-size:11px;padding:0 10px;text-decoration:none;color:{{ f.color }};background:{{ f.bg }};border:{{ f.border }}">{{ f.label }} ({{ f.count }})</a>
+          </sc-for>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;overflow-x:auto;white-space:nowrap;padding-bottom:10px;margin-bottom:8px">
+          <span style="font-size:11px;color:#605d5d;flex:none">Sort:</span>
+          <sc-for list="{{ sortOpts }}" as="o" hint-placeholder-count="4">
+            <a href="javascript:void(0)" onClick="{{ o.onClick }}" style="flex:none;font-size:12px;text-decoration:none;color:{{ o.color }};font-weight:{{ o.weight }}">{{ o.label }}</a>
+          </sc-for>
+        </div>
+
+        <sc-for list="{{ tasks }}" as="t" hint-placeholder-count="6">
+          <a href="javascript:void(0)" onClick="{{ t.onClick }}" style="display:block;text-decoration:none;color:#201e1d;background:#eae9e9;padding:12px;margin-bottom:2px;min-height:44px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+              <span style="color:#ec3013;font-weight:700;font-size:13px">{{ t.id }}</span>
+              <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 7px;background:{{ t.statusBg }};color:{{ t.statusColor }}">
+                <sc-if value="{{ t.running }}" hint-placeholder-val="{{ false }}"><span style="width:5px;height:5px;background:#ec3013;display:inline-block;animation:ds-pulse 1.4s infinite"></span></sc-if>
+                {{ t.status }}
+              </span>
+            </div>
+            <div style="font-size:13.5px;line-height:1.4">{{ t.title }}</div>
+          </a>
+        </sc-for>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <a href="javascript:void(0)" onClick="{{ goTasks }}" style="display:inline-flex;align-items:center;min-height:44px;color:#ec3013;text-decoration:none;font-size:14px">← back to list</a>
+        <h1 style="font-size:19px;line-height:1.3;margin:8px 0">{{ activeTask.id }}: {{ activeTask.title }}</h1>
+        <p style="font-size:12px;color:color-mix(in srgb, #201e1d 55%, transparent);margin:0 0 14px">{{ activeTask.status }} · {{ activeTask.updated }}</p>
+        <sc-if value="{{ isDIR001 }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="display:flex;gap:6px;overflow-x:auto;white-space:nowrap;padding-bottom:10px;margin-bottom:14px">
+              <a href="#m-finding" style="flex:none;font-size:12px;padding:6px 10px;background:#eae7e7;color:#201e1d;text-decoration:none">Finding</a>
+              <a href="#m-action" style="flex:none;font-size:12px;padding:6px 10px;background:#eae7e7;color:#201e1d;text-decoration:none">Requested action</a>
+              <a href="#m-resolution" style="flex:none;font-size:12px;padding:6px 10px;background:#eae7e7;color:#201e1d;text-decoration:none">Resolution</a>
+            </div>
+            <h3 id="m-finding" style="font-size:16px">Finding</h3>
+            <p style="font-size:14px;line-height:1.6">The whole coverage picture that drives VT rests on exp4's gap-list.md, and that instrument has a structural blind spot.</p>
+            <h3 id="m-action" style="font-size:16px">Requested action</h3>
+            <p style="font-size:14px;line-height:1.6">Open a near-term explore milestone (M-ABI-EVAL) before any further Core-surface polish milestone is selected.</p>
+            <h3 id="m-resolution" style="font-size:16px">Resolution</h3>
+            <details>
+              <summary style="cursor:pointer;font-size:14px;font-weight:600">Applied at m3 SELECT — 点击展开</summary>
+              <p style="font-size:13.5px;line-height:1.6;margin-top:8px">Item 1–2 applied this milestone; items 3–6 backlogged.</p>
+            </details>
+          </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isLive }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 10px">Live</h1>
+        <div style="background:#eae9e9;padding:14px;margin-bottom:2px"><div style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;background:#ec3013;animation:ds-pulse 1.4s infinite"></span><b style="font-size:18px">running</b></div><p style="font-size:13px;margin:8px 0 0">CPU 压力（PSI avg10）1.55</p></div>
+        <div style="background:#eae9e9;padding:12px;margin-bottom:2px">
+          <div style="font-size:10px;color:#605d5d;margin-bottom:4px">在飞任务 · 并发 1</div>
+          <div style="color:#ec3013;font-weight:700;font-size:13px">gap-task-telemetry-6-percent-join</div>
+          <div style="font-size:12px;color:#605d5d;margin-top:4px">state running · started 08:41Z</div>
+        </div>
+      </div>
+      </sc-if>
+      <sc-if value="{{ isJournal }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 10px">Journal</h1>
+        <div style="display:flex;gap:6px;overflow-x:auto;white-space:nowrap;padding-bottom:10px;margin-bottom:6px">
+          <sc-for list="{{ journal }}" as="j" hint-placeholder-count="4">
+            <a href="#m-{{ j.id }}" style="flex:none;font-size:11px;padding:6px 10px;background:#eae7e7;color:#201e1d;text-decoration:none">{{ j.title }}</a>
+          </sc-for>
+        </div>
+        <sc-for list="{{ journal }}" as="j" hint-placeholder-count="4">
+          <div id="m-{{ j.id }}" style="background:#eae9e9;padding:12px;margin-bottom:2px">
+            <div style="font-size:10px;color:#ae1800;margin-bottom:4px">{{ j.kind }} · {{ j.time }}</div>
+            <b style="font-size:14px">{{ j.title }}</b>
+            <p style="font-size:12.5px;line-height:1.5;margin:6px 0 0">{{ j.text }}</p>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+      <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 4px">Board</h1>
+        <p style="font-size:11px;color:#7c1405;margin:0 0 10px">✓ 已缓存 · 2 分钟前刷新</p>
+        <sc-for list="{{ boardRows }}" as="b" hint-placeholder-count="4">
+          <div style="background:#eae9e9;padding:12px;margin-bottom:2px">
+            <div style="color:#ec3013;font-weight:700;font-size:13px;margin-bottom:4px">{{ b.id }}</div>
+            <div style="font-size:12px;color:#605d5d">意图 {{ b.intent }} · 遥测 {{ b.telemetry }} · 落地 {{ b.landing }} · {{ b.drift }}</div>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+      <sc-if value="{{ isGit }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 4px">Git History</h1>
+        <p style="font-size:11px;color:#7c1405;margin:0 0 10px">提交树 · 已实现，重启进程即可上线</p>
+        <div style="display:flex;gap:6px;margin-bottom:10px">
+          <span style="font-size:11px;padding:5px 10px;border:1px solid #ec3013;color:#ec3013">7 天</span>
+          <span style="font-size:11px;padding:5px 10px;background:#eae7e7">30 天</span>
+          <span style="font-size:11px;padding:5px 10px;background:#eae7e7">90 天</span>
+        </div>
+        <svg viewBox="0 0 300 220" width="100%" height="220" style="background:#eae9e9">
+          <line x1="30" y1="10" x2="30" y2="200" stroke="#201e1d" stroke-width="2"/>
+          <path d="M30,140 L100,140 L100,110" stroke="#ec3013" stroke-width="2" fill="none"/>
+          <path d="M100,80 L100,60 L30,60" stroke="#ec3013" stroke-width="2" fill="none"/>
+          <line x1="100" y1="80" x2="100" y2="110" stroke="#ec3013" stroke-width="2"/>
+          <path d="M30,140 L170,140 L170,120" stroke="#7d7979" stroke-width="2" fill="none"/>
+          <path d="M170,90 L170,80" stroke="#7d7979" stroke-width="2" fill="none"/>
+          <path d="M170,80 L30,80" stroke="#7d7979" stroke-width="2" fill="none"/>
+          <line x1="170" y1="90" x2="170" y2="120" stroke="#7d7979" stroke-width="2"/>
+          <path d="M30,60 L230,60 L230,40" stroke="#ae1800" stroke-width="2" stroke-dasharray="4 3" fill="none"/>
+          <path d="M230,40 L230,25 L30,25" stroke="#ae1800" stroke-width="2" stroke-dasharray="4 3" fill="none"/>
+          <rect x="26" y="6" width="8" height="8" fill="#201e1d"/><rect x="26" y="56" width="8" height="8" fill="#201e1d"/><rect x="26" y="76" width="8" height="8" fill="#201e1d"/>
+          <rect x="26" y="106" width="8" height="8" fill="#201e1d"/><rect x="26" y="136" width="8" height="8" fill="#201e1d"/><rect x="26" y="166" width="8" height="8" fill="#201e1d"/><rect x="26" y="196" width="8" height="8" fill="#201e1d"/>
+          <rect x="96" y="76" width="8" height="8" fill="#ec3013"/><rect x="96" y="106" width="8" height="8" fill="#ec3013"/>
+          <rect x="166" y="86" width="8" height="8" fill="#7d7979"/><rect x="166" y="116" width="8" height="8" fill="#7d7979"/>
+          <rect x="226" y="21" width="8" height="8" fill="#ae1800"/>
+          <text x="30" y="214" font-size="10" text-anchor="middle" fill="#605d5d">master</text>
+          <text x="100" y="214" font-size="9" text-anchor="middle" fill="#ec3013">exp5</text>
+          <text x="170" y="214" font-size="9" text-anchor="middle" fill="#7d7979">exp4</text>
+          <text x="230" y="214" font-size="9" text-anchor="middle" fill="#ae1800">fix</text>
+        </svg>
+        <p style="font-size:11px;color:#605d5d;margin-top:8px">无工时语义 — 分支寿命 ≠ 任务工时，遥测与 git 仅约 6% 相交。</p>
+        <div style="font-size:10px;color:#605d5d;margin:12px 0 4px">提交日志</div>
+        <sc-for list="{{ gitCommits }}" as="c" hint-placeholder-count="7">
+          <div style="background:#eae9e9;padding:10px;margin-bottom:2px">
+            <div style="display:flex;justify-content:space-between;font-size:12px"><span style="font-family:ui-monospace,monospace;color:#ec3013">{{ c.hash }}</span><span style="color:#605d5d">{{ c.lane }}</span></div>
+            <div style="font-size:12.5px;margin:4px 0">{{ c.msg }}</div>
+            <div style="font-size:11px;color:#605d5d">{{ c.author }} · {{ c.date }}</div>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+      <sc-if value="{{ isAdr }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 10px">ADRs</h1>
+        <div style="display:flex;gap:6px;margin-bottom:12px">
+          <span style="font-size:11px;padding:5px 10px;border:1px solid #ec3013;color:#ec3013">All</span>
+          <span style="font-size:11px;padding:5px 10px;background:#eae7e7">accepted</span>
+          <span style="font-size:11px;padding:5px 10px;background:#fff2ef;color:#7c1405">proposed</span>
+        </div>
+        <sc-for list="{{ adrs }}" as="a" hint-placeholder-count="3">
+          <div style="background:#eae9e9;padding:12px;margin-bottom:2px">
+            <div style="color:#ec3013;font-weight:700;font-size:13px">{{ a.id }}</div>
+            <div style="font-size:13px;margin:4px 0">{{ a.title }}</div>
+            <div style="font-size:11px;color:#605d5d">{{ a.status }} · {{ a.date }}</div>
+          </div>
+        </sc-for>
+        <div style="margin-top:10px">
+          <div style="font-size:11px;color:#605d5d;margin-bottom:6px">supersedes 关系</div>
+          <div style="display:flex;align-items:center;font-size:11px">
+            <div style="padding:6px 10px;background:#eae7e7">ADR-018</div>
+            <div style="width:20px;height:2px;background:color-mix(in srgb, #201e1d 40%, transparent)"></div>
+            <div style="padding:6px 10px;background:#fff2ef;color:#7c1405">ADR-030</div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+      <sc-if value="{{ isGoal }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 10px">Goals</h1>
+        <div style="border:2px solid #ec3013;padding:14px;margin-bottom:12px">
+          <div style="font-size:10px;text-transform:uppercase;color:#ec3013;margin-bottom:6px">未接入 · 诚实空态</div>
+          <p style="font-size:13px;line-height:1.6;margin:0 0 6px">goals/ 目录存在，当前 0 条记录。</p>
+          <p style="font-size:12px;font-family:ui-monospace,monospace;margin:0 0 3px">orchestration/manager-phase-goal.md（2225 行）</p>
+          <p style="font-size:12px;font-family:ui-monospace,monospace;margin:0">orchestration/outer-phase-goal.md</p>
+        </div>
+        <div style="font-size:11px;color:#605d5d;margin-bottom:4px">迁移后的样式预览（灰置）</div>
+        <div style="background:#eae9e9;padding:10px;opacity:0.4;font-size:12px">M-ABI-EVAL · phase · —</div>
+      </div>
+      </sc-if>
+      <sc-if value="{{ isDoc }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 10px">Docs</h1>
+        <div style="background:#eae9e9;padding:12px"><b style="color:#ec3013;font-size:13px">DOC-001</b><p style="font-size:13px;margin:6px 0 0">Web UI 现状审计与改进方案摘要</p><p style="font-size:11px;color:#605d5d;margin:8px 0 0">createDocumentStore · docs-managed/ · 更新 22h ago</p></div>
+        <p style="font-size:11px;color:#605d5d;margin-top:10px">当前只有 1 篇文档。后续加入全文搜索。</p>
+      </div>
+      </sc-if>
+      <sc-if value="{{ isSystem }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 10px">System</h1>
+        <div style="border:2px solid #7c1405;background:#fff2ef;padding:12px;font-weight:800;color:#7c1405;margin-bottom:12px">⇒ GO：资源充足，可以跑</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span>cpu_stall avg10</span><span>1.76 / 限值60</span></div><div style="height:6px;background:#d7d3d3"><div style="height:100%;width:3%;background:#201e1d"></div></div></div>
+          <div><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span>cpu_stall avg300</span><span>1.35 / 限值60</span></div><div style="height:6px;background:#d7d3d3"><div style="height:100%;width:2.3%;background:#201e1d"></div></div></div>
+          <div><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span>loadavg (1m)</span><span>5.19 / 限值nproc×2≈32</span></div><div style="height:6px;background:#d7d3d3"><div style="height:100%;width:16%;background:#201e1d"></div></div></div>
+          <div style="display:flex;justify-content:space-between;font-size:12px"><span>mem_avail</span><span>11859 MB</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12px"><span>nproc / node_procs</span><span>16 / 0</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12px"><span>node 进程预算</span><span>0 / 16 in use</span></div>
+        </div>
+        <p style="font-size:10px;color:#605d5d;margin-top:12px">阈值按 nproc 动态计算，不写死当前机器上的数字。</p>
+      </div>
+      </sc-if>
+      <sc-if value="{{ isManager }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 10px">Manager/Outer/Inner</h1>
+        <div style="font-size:10px;color:#605d5d;margin-bottom:4px">Cron / Loop</div>
+        <div style="background:#eae9e9;padding:12px;margin-bottom:2px">Outer <b style="color:#7c1405">LIVE</b><div style="font-size:11px;color:#605d5d">cron */20 * * * *</div></div>
+        <div style="background:#eae9e9;padding:12px;margin-bottom:2px">Inner <b style="color:#7c1405">LIVE</b><div style="font-size:11px;color:#605d5d">cron */20 * * * *</div></div>
+        <div style="background:#eae9e9;padding:12px;margin-bottom:10px">Manager <b>推断中</b><div style="font-size:11px;color:#605d5d">无落盘配置 — 靠 tick-log.md mtime 间接心跳</div></div>
+
+        <div style="font-size:10px;color:#605d5d;margin-bottom:4px">Monitor 注册表</div>
+        <sc-for list="{{ monitors }}" as="m" hint-placeholder-count="3">
+          <div style="background:#eae9e9;padding:10px;margin-bottom:2px;display:flex;justify-content:space-between;font-size:13px"><span>{{ m.name }}</span><span style="color:#7c1405">{{ m.status }}</span></div>
+        </sc-for>
+        <p style="font-size:10px;color:#605d5d;margin:6px 0 14px">读 observer-registry.conf 单一登记表。</p>
+
+        <div style="font-size:10px;color:#605d5d;margin-bottom:4px">主要观测指标</div>
+        <div style="background:#eae9e9;padding:12px;font-family:ui-monospace,monospace;font-size:12px;line-height:1.8">
+          pool=4 floor=20 deficit=16<br>release=v0.4.0 · develop 领先 2367 提交<br>avg10=0.00 load1=2.49
+        </div>
+        <p style="font-size:10px;color:#7c1405;margin-top:6px">⚠ 取自叙事性 tick 日志，非机读字段。</p>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isTests }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 10px">Tests</h1>
+        <div style="border:2px solid {{ latestRun.status === 'pass' ? '#605d5d' : '#ae1800' }};background:{{ latestRun.status === 'pass' ? '#eae9e9' : '#fff2ef' }};padding:14px;margin-bottom:14px">
+          <div style="font-weight:800;font-size:14px;color:{{ latestRun.status === 'pass' ? '#201e1d' : '#7c1405' }};margin-bottom:6px">{{ latestRun.suite }} — {{ latestRun.status }}</div>
+          <div style="font-size:12px;color:#605d5d;margin-bottom:8px">{{ latestRun.startedAt }} · {{ latestRun.duration }}</div>
+          <div style="display:flex;gap:14px;font-size:12.5px;margin-bottom:8px">
+            <span style="color:#218f4e">passed {{ latestRun.passed }}</span><span style="color:#ae1800">failed {{ latestRun.failed }}</span><span style="color:#605d5d">skip {{ latestRun.skipped }}</span>
+          </div>
+          <p style="font-size:11.5px;color:#605d5d;margin:0">{{ latestRun.task }} · {{ latestRun.commit }} · {{ latestRun.branch }}</p>
+        </div>
+        <div style="font-size:10px;color:#605d5d;margin-bottom:4px">历史运行</div>
+        <sc-for list="{{ testRuns }}" as="r" hint-placeholder-count="4">
+          <div style="background:#eae9e9;padding:10px;margin-bottom:2px">
+            <div style="display:flex;justify-content:space-between;font-size:12.5px"><span>{{ r.suite }}</span><span style="color:{{ r.status === 'pass' ? '#218f4e' : '#ae1800' }};font-weight:700">{{ r.status }}</span></div>
+            <div style="font-size:11px;color:#605d5d;margin-top:4px">{{ r.passed }}/{{ r.failed }}/{{ r.skipped }} · {{ r.duration }} · {{ r.task }} · {{ r.commit }}</div>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isSessions }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 10px">Sessions</h1>
+        <sc-for list="{{ sessions }}" as="sess" hint-placeholder-count="3">
+          <div style="background:#eae9e9;padding:14px;margin-bottom:2px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px"><b style="font-size:14px">{{ sess.layer }}</b><span style="font-size:11px;color:#7c1405;font-weight:700">{{ sess.status }}</span></div>
+            <div style="font-size:11px;color:#605d5d;margin-bottom:8px">{{ sess.cadence }}</div>
+            <sc-for list="{{ sess.messages }}" as="m" hint-placeholder-count="3">
+              <div style="border-left:2px solid color-mix(in srgb, #201e1d 30%, transparent);padding-left:8px;margin-bottom:8px">
+                <div style="font-size:10px;color:#605d5d;margin-bottom:2px">{{ m.time }} · {{ m.role }}</div>
+                <p style="font-size:12px;line-height:1.5;margin:0">{{ m.text }}</p>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isArch }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-size:20px;margin:0 0 10px">Architecture</h1>
+        <svg viewBox="0 0 500 400" width="100%" height="320" style="background:#f3f2f2">
+          <sc-for list="{{ archEdges }}" as="e" hint-placeholder-count="8">
+            <line x1="{{ e.x1 }}" y1="{{ e.y1 }}" x2="{{ e.x2 }}" y2="{{ e.y2 }}" stroke="color-mix(in srgb, #201e1d 30%, transparent)" stroke-width="1.5"></line>
+          </sc-for>
+          <sc-for list="{{ archNodes }}" as="n" hint-placeholder-count="9">
+            <rect x="{{ n.x }}" y="{{ n.y }}" width="{{ n.w }}" height="{{ n.h }}" fill="{{ n.fill }}" stroke="{{ n.stroke }}" stroke-width="2"></rect>
+          </sc-for>
+          <sc-for list="{{ archNodes }}" as="n" hint-placeholder-count="9">
+            <text x="{{ n.cx }}" y="{{ n.cy }}" font-size="11" text-anchor="middle" dominant-baseline="middle" fill="{{ n.text }}">{{ n.label }}</text>
+          </sc-for>
+        </svg>
+        <p style="font-size:11px;color:#605d5d;margin-top:8px">红实框=正在开发 · 红边框=最近变更 · 灰边框=已标记问题 · 淡框=滞后未跟进</p>
+      </div>
+      </sc-if>
+
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { device: 'desktop', page: 'dashboard', mobileMenuOpen: false, activeTaskId: 'DIR-001', filterStatus: 'all', sortBy: 'default' };
+
+  GIT_COMMITS = [
+    { hash: 'f5117682', msg: 'delivery-start · done', author: 'yale', date: '2026-08-08 09:02Z', lane: 'master' },
+    { hash: '9a2c771', msg: "merge: fix/label-nav-scroll", author: 'claude', date: '2026-08-08 08:10Z', lane: 'master (merge)' },
+    { hash: 'e71a002', msg: 'remove inline white-space override', author: 'claude', date: '2026-08-08 07:55Z', lane: 'fix/label-nav-scroll' },
+    { hash: 'c2f0aa1', msg: "merge: exp5/git-history", author: 'claude', date: '2026-08-08 07:40Z', lane: 'master (merge)' },
+    { hash: '001eb376', msg: 'add renderGitHistorySvg()', author: 'claude', date: '2026-08-08 07:20Z', lane: 'exp5/git-history' },
+    { hash: 'cb21fc48', msg: 'wire /git-history route', author: 'claude', date: '2026-08-08 07:13Z', lane: 'exp5/git-history' },
+    { hash: 'a8f0c33', msg: "merge: exp4/abi-eval", author: 'claude', date: '2026-08-07 23:05Z', lane: 'master (merge)' },
+    { hash: '9e4c220', msg: 'ABI differential-test suite', author: 'claude', date: '2026-08-07 22:40Z', lane: 'exp4/abi-eval' },
+    { hash: 'bd8871a', msg: 'M03-abi-eval capability matrix', author: 'claude', date: '2026-08-07 22:20Z', lane: 'exp4/abi-eval' },
+    { hash: 'f37462ec', msg: 'goal-store.ts landed (488 lines)', author: 'claude', date: '2026-08-07 22:18Z', lane: 'master' },
+    { hash: 'b71e900', msg: 'M03 milestone kickoff', author: 'yale', date: '2026-08-07 18:00Z', lane: 'master (fork point)' },
+    { hash: '7fb1e7a2', msg: "batch-merge not-fast-forward", author: 'yale', date: '2026-08-07 14:22Z', lane: 'master' },
+    { hash: 'a3c9012f', msg: 'directive DIR-001 resolution', author: 'claude', date: '2026-08-07 09:05Z', lane: 'master' }
+  ];
+
+  navGroupDefs = [
+    { label: '核心', items: [['dashboard', 'Dashboard'], ['tasks', 'Tasks']] },
+    { label: '观测', items: [['live', 'Live'], ['board', 'Board'], ['system', 'System'], ['manager', 'Manager']] },
+    { label: '记录', items: [['journal', 'Journal'], ['git', 'Git History'], ['tests', 'Tests'], ['sessions', 'Sessions']] },
+    { label: '知识', items: [['adr', 'ADRs'], ['goal', 'Goals'], ['doc', 'Docs'], ['architecture', 'Architecture']] }
+  ];
+
+
+  stubMeta = {
+    live: { title: 'Live — 循环脉搏', desc: '展示当前在飞任务的 live_state、并发数与 CPU 压力（PSI）。下一批加入轮询自动刷新，替代手动 F5。', src: 'observation.ts readLive()' },
+    journal: { title: 'Journal — 滚动记录', desc: '当前是约 7000px 高的无结构长页。下一批加入锚点 TOC 与"回到顶部"，服务端渲染时给每个标题生成 id。', src: 'escalations.md + tick-log.md + git log' },
+    board: { title: 'Board — 三源 Join 看板', desc: '已修复：加入全站导航入口。下一批：按 git HEAD 缓存 drift-check 结果，把 63 秒延迟降到可用范围，并复用任务列表的分页机制。', src: 'Provider ABI + .workflow-events/ + task-status-drift-check.ts' },
+    git: { title: 'Git History — 提交热力图', desc: '功能已在源码里完整实现（服务端 SVG 柱状图），只是当前 demo 进程落后于 HEAD。重启进程即可上线，并纳入全站导航。', src: 'renderGitHistorySvg()' },
+    adr: { title: 'ADRs — 架构决策记录', desc: '现有 33 条记录完整可用。下一批加入 status 筛选与 supersedes 关系时间线（复用 Git History 已验证的纯 SVG 服务端渲染模式）。', src: 'client.adrList() / adrGet()' },
+    goal: { title: 'Goals — 阶段目标', desc: '机制已完整实现，但 goals/ 目录当前 0 条记录。空态将直接指向正本 orchestration/manager-phase-goal.md（2225 行），而不是静默显示 "No goals."。', src: 'goal-store.ts' },
+    doc: { title: 'Docs — 文档', desc: '现有 1 篇文档，结构可用。后续加入全文搜索。', src: 'createDocumentStore' },
+    system: { title: 'System — 系统状态', desc: '读取 resource-gate.sh / process-budget.sh 的文本输出：PSI CPU 压力、内存可用量、loadavg（阈值按 nproc 动态计算，不能写死）、进程预算、GO/WAIT 判决。', src: 'resource-gate.sh · process-budget.sh' },
+    manager: { title: 'Manager / Outer / Inner 状态', desc: '三层自适应探测：多信号加权判定每层是否存在，缺失信号时诚实标注"未检测到"，不静默假设。Manager 面板另需补齐字段级机读输出（pool/floor/deficit 等）才能做实。', src: 'loop-driver-check.sh · session-liveness.sh · observer-registry.conf' }
+  };
+
+  JOURNAL = [
+    { id: 'esc', kind: 'Escalation', time: '2026-08-08', title: '发布前置条件未满足', text: '已确认 2026-08-03：CI 上人机联合验证完整跑通之前，不批准 push & release。' },
+    { id: 'merge1', kind: 'Merge', time: '2026-08-07 14:22Z', title: 'batch-merge 支持 integration-authoritative', text: '冲突涉及 8 files / 3 branches。批量合并遵循 not-fast-forward，failed-needs-human 显式标注，不静默重试。' },
+    { id: 'tick1', kind: 'Tick', time: '2026-08-08 05:16Z', title: 'pool=4 floor=20 deficit=16', text: 'avg10=0.00 load1=2.49，tmux quay-0 的 claude/outer/inner 三窗均存活。任务台账 done938 / needs-human32 / todo17 / ready13 / superseded6。' },
+    { id: 'commits', kind: 'Commits', time: '—', title: '最近落地', text: 'f5117682 delivery-start·done · f37462ec goal-store landed (488 行) · cb21fc48 git-history svg server-rendered' }
+  ];
+
+  BOARD_ROWS = [
+    { id: 'gap-task-telemetry-6-percent-join', intent: '进行中', telemetry: 'running', landing: '未落地', drift: 'ok' },
+    { id: 'DIR-009', intent: 'done', telemetry: '—', landing: '已落地', drift: 'ok' },
+    { id: 'ARCH-M103-001', intent: 'done', telemetry: '—', landing: '已落地', drift: '⚠ drift' },
+    { id: 'DIR-010', intent: 'done', telemetry: '—', landing: '未落地', drift: '⚠ drift' }
+  ];
+
+  ADRS = [
+    { id: 'ADR-031', title: 'Provider ABI 保持只读边界，直到差异测试落地', status: 'accepted', date: '2026-08-06' },
+    { id: 'ADR-030', title: 'Board 三源 join 不缓存，直到有 git HEAD 失效信号', status: 'proposed', date: '2026-08-05', supersedes: null },
+    { id: 'ADR-018', title: 'goal-store 迁移延后至 phase-goal 裁定后', status: 'accepted', date: '2026-07-22', supersededBy: 'ADR-030' }
+  ];
+
+  MONITORS = [
+    { name: 'quay', status: 'active' }, { name: 'meta-cc', status: 'active' }, { name: 'archguard', status: 'active' }
+  ];
+
+  TEST_RUNS = [
+    { id: 'run-2043', suite: 'vitest · full', status: 'pass', startedAt: '2026-08-08 09:04Z', duration: '3m 12s', total: 842, passed: 842, failed: 0, skipped: 0, task: 'DIR-001', commit: 'f5117682', branch: 'master' },
+    { id: 'run-2042', suite: 'vitest · abi-differential', status: 'fail', startedAt: '2026-08-07 23:12Z', duration: '1m 48s', total: 96, passed: 91, failed: 5, skipped: 0, task: 'ARCH-M103-001', commit: 'a8f0c33', branch: 'exp4/abi-eval', failingTests: ['githubProvider.updateLabels() should not throw', 'githubProvider.setParent() round-trips', 'diff: native vs github title write', 'diff: native vs github children write', 'ABI conformance: unimplemented method surfaces typed error'] },
+    { id: 'run-2041', suite: 'vitest · git-history', status: 'pass', startedAt: '2026-08-08 07:22Z', duration: '42s', total: 58, passed: 58, failed: 0, skipped: 2, task: 'DIR-006', commit: '001eb376', branch: 'exp5/git-history' },
+    { id: 'run-2040', suite: 'vitest · full', status: 'pass', startedAt: '2026-08-07 18:05Z', duration: '3m 20s', total: 836, passed: 834, failed: 0, skipped: 2, task: 'ARCH-M93-004', commit: 'b71e900', branch: 'master' }
+  ];
+
+  SESSIONS = [
+    { layer: 'Inner', status: 'LIVE', cadence: 'cron */20 * * * *', messages: [
+      { time: '09:04Z', role: 'assistant', text: '完成 DIR-001 resolution：M03-abi-eval charter 已落地，items 3-6 转入 backlog.md。' },
+      { time: '08:51Z', role: 'tool', text: 'run_tests(vitest, full) → 842/842 passed' },
+      { time: '08:40Z', role: 'assistant', text: '开始处理 gap-task-telemetry-6-percent-join：核对遥测与 git 交集比例。' }
+    ]},
+    { layer: 'Outer', status: 'LIVE', cadence: 'cron */20 * * * *', messages: [
+      { time: '08:10Z', role: 'assistant', text: '审阅 exp5 提交的 fix/label-nav-scroll，验收通过，合并进 master。' },
+      { time: '07:42Z', role: 'tool', text: 'select_next_charter() → M03-abi-eval' },
+      { time: '07:30Z', role: 'assistant', text: '读取 backlog.md，评估 4 条候选项的优先级。' }
+    ]},
+    { layer: 'Manager', status: '推断中', cadence: '无落盘配置', messages: [
+      { time: '05:16Z', role: 'tick', text: 'pool=4 floor=20 deficit=16 · avg10=0.00 load1=2.49（来自 tick-log.md，非机读字段）' },
+      { time: '02:00Z', role: 'tick', text: '心跳最后一次确认活跃：tmux quay-0 三窗（claude/outer/inner）均存活' }
+    ]}
+  ];
+
+  ARCH_NODES = [
+    { id: 'cli', label: 'CLI', x: 20, y: 20, w: 140, h: 56, state: 'stable' },
+    { id: 'mcp', label: 'MCP Server', x: 180, y: 20, w: 140, h: 56, state: 'stable' },
+    { id: 'webui', label: 'Web UI', x: 340, y: 20, w: 140, h: 56, state: 'active-dev' },
+    { id: 'abi', label: 'Provider ABI', x: 180, y: 120, w: 140, h: 56, state: 'active-dev' },
+    { id: 'native', label: 'Native Provider', x: 20, y: 220, w: 140, h: 56, state: 'recent-change' },
+    { id: 'github', label: 'GitHub Provider', x: 340, y: 220, w: 140, h: 56, state: 'stale' },
+    { id: 'gate', label: 'gate/ (god-package)', x: 20, y: 320, w: 140, h: 56, state: 'flagged' },
+    { id: 'goalstore', label: 'goal-store.ts', x: 180, y: 320, w: 140, h: 56, state: 'recent-change' },
+    { id: 'observer', label: 'observer-registry', x: 340, y: 320, w: 140, h: 56, state: 'stable' }
+  ];
+  ARCH_EDGES = [
+    ['cli', 'abi'], ['mcp', 'abi'], ['webui', 'abi'], ['abi', 'native'], ['abi', 'github'],
+    ['native', 'gate'], ['native', 'goalstore'], ['abi', 'observer']
+  ];
+
+  TASKS = [
+    { id: 'ARCH-M103-001', status: 'done', role: 'primitive', title: 'new top outDegree: loadWorkspaceGates (gate/factories/loader.ts) outDegree=8 after M101 factory split — highest in codebase', labels: ['milestone-candidate', 'defect', 'milestone:M-105'], updated: '22h ago' },
+    { id: 'ARCH-M103-002', status: 'done', role: 'primitive', title: 'startServer outDegree 6→7 after M100: serve-handlers.ts.handleAllRoutes dependency not counted in M100 AC measurement', labels: ['milestone-candidate', 'defect', 'milestone:M-104', 'wontfix'], updated: '22h ago' },
+    { id: 'ARCH-M93-001', status: 'done', role: 'primitive', title: 'god-package: gate/ has fanOut=62 (all intra-package relations) vs fanIn=7 — concentration smell', labels: ['milestone-candidate', 'milestone:M-101'], updated: '22h ago' },
+    { id: 'ARCH-M93-002', status: 'done', role: 'primitive', title: 'god-function: startMcpServer (mcp-server.ts, 797 lines) has outDegree=10, 15 inline tool handlers', labels: ['milestone-candidate', 'milestone:M-97'], updated: '22h ago' },
+    { id: 'ARCH-M93-003', status: 'done', role: 'primitive', title: 'god-function: startServer (serve.ts, 675-line body) handles routing, rendering, and security in one scope', labels: ['milestone-candidate', 'milestone:M-100'], updated: '22h ago' },
+    { id: 'ARCH-M93-004', status: 'done', role: 'primitive', title: 'ABI boundary violation: quay-native imports Core implementation (createAdrStore) across provider boundary', labels: ['milestone-candidate', 'milestone:M-95'], updated: '22h ago' },
+    { id: 'DIR-001', status: 'done', role: 'primitive', title: 'The evaluation instrument is a polish engine blind to the Provider/ABI surface — add capability-completeness evaluation methods', labels: ['directive'], updated: '22h ago' },
+    { id: 'DIR-002', status: 'done', role: 'primitive', title: "Directives-as-quay-tasks — the requirement stands; restore the restrained file-canonical + task-projection design", labels: ['directive'], updated: '22h ago' },
+    { id: 'DIR-003', status: 'done', role: 'primitive', title: 'M05-dir-projection dogfoods its own directive-to-task projection mechanism', labels: ['directive'], updated: '22h ago' },
+    { id: 'DIR-006', status: 'done', role: 'primitive', title: 'Web UI verification regression — exp5 charters/reports narrate "real browser" sessions but paste only curl evidence', labels: ['directive'], updated: '21h ago' },
+    { id: 'DIR-007', status: 'done', role: 'primitive', title: 'G3 out-of-band adversarial audit role silently weakened into same-template independent re-run', labels: ['directive'], updated: '21h ago' },
+    { id: 'DIR-009', status: 'done', role: 'primitive', title: "Track exp5's own non-directive work in quay's task board — as backlog-primitive tasks", labels: ['directive'], updated: '20h ago' },
+    { id: 'DIR-010', status: 'done', role: 'primitive', title: 'The M05 directive-projection mechanism has two live structural gaps — cross-experiment task-id collisions', labels: ['directive'], updated: '20h ago' },
+    { id: 'gap-task-telemetry-6-percent-join', status: 'running', role: 'primitive', title: '6% 语义覆盖 join 遥测任务：跨 experiment 匹配率核实', labels: ['telemetry'], updated: '刚刚', updatedMin: 0, running: true },
+    { id: 'QC-014', status: 'ready', role: 'primitive', title: '为 Board 的三源 join 结果增加按 git HEAD 的缓存层', labels: ['performance'], updated: '3h ago', updatedMin: 180 },
+    { id: 'QN-007', status: 'todo', role: 'primitive', title: '/goal 空态展示改为指向 manager-phase-goal.md 正本', labels: ['directive'], updated: '5h ago', updatedMin: 300 },
+    { id: 'PROBE-002', status: 'needs-human', role: 'primitive', title: '裁定：是否推进 goal store 迁移（阶段目标迁移方向）', labels: ['human-steered'], updated: '1h ago', updatedMin: 60 }
+  ];
+
+  ARCH_STATE_STYLE = {
+    stable: { fill: '#eae9e9', stroke: '#605d5d', text: '#201e1d' },
+    'active-dev': { fill: '#fff2ef', stroke: '#ec3013', text: '#7c1405' },
+    'recent-change': { fill: '#fff2ef', stroke: '#ae1800', text: '#ae1800' },
+    stale: { fill: '#eae9e9', stroke: '#bab6b6', text: '#8a8686' },
+    flagged: { fill: '#eae7e7', stroke: '#605d5d', text: '#605d5d' }
+  };
+
+  goto(page, taskId) {
+    this.setState(s => ({ page, mobileMenuOpen: false, activeTaskId: taskId || s.activeTaskId }));
+  }
+
+  renderVals() {
+    const s = this.state;
+    const ACCENT700 = '#ae1800', TEXT = '#201e1d';
+
+    const mkItem = ([key, label]) => ({
+      key, label,
+      badge: key === 'board' ? 'NEW' : null,
+      active: s.page === key,
+      color: s.page === key ? ACCENT700 : TEXT,
+      weight: s.page === key ? 800 : 600,
+      onClick: () => this.goto(key)
+    });
+    const navGroups = this.navGroupDefs.map(g => ({ label: g.label, items: g.items.map(mkItem) }));
+    const navItems = [].concat(...this.navGroupDefs.map(g => g.items.map(mkItem)));
+
+    const STATUS_STYLE = {
+      done: { bg: '#eae7e7', color: '#444141' },
+      running: { bg: '#fff2ef', color: '#7c1405' },
+      ready: { bg: '#fff2ef', color: '#ae1800' },
+      todo: { bg: '#eae7e7', color: '#605d5d' },
+      'needs-human': { bg: '#ec3013', color: '#f3f2f2' }
+    };
+    let baseTasks = this.TASKS.map(t => {
+      const preview = t.labels.length > 2 ? t.labels.slice(0, 2).join(', ') + ' +' + (t.labels.length - 2) : t.labels.join(', ');
+      const st = STATUS_STYLE[t.status] || STATUS_STYLE.done;
+      return { ...t, labelsPreview: preview, updatedMin: t.updatedMin ?? 99999, statusBg: st.bg, statusColor: st.color, onClick: () => this.goto('detail', t.id) };
+    });
+    const counts = { all: baseTasks.length };
+    ['running', 'todo', 'ready', 'done', 'needs-human'].forEach(k => { counts[k] = baseTasks.filter(t => t.status === k).length; });
+    const globalCounts = { all: 1018, running: 1, todo: 17, ready: 13, done: 938, 'needs-human': 32 };
+    let tasks = s.filterStatus === 'all' ? baseTasks.slice() : baseTasks.filter(t => t.status === s.filterStatus);
+    if (s.sortBy === 'updated') tasks.sort((a, b) => a.updatedMin - b.updatedMin);
+    else if (s.sortBy === 'id') tasks.sort((a, b) => a.id.localeCompare(b.id));
+    else if (s.sortBy === 'status') tasks.sort((a, b) => a.status.localeCompare(b.status));
+    const statusFilters = ['all', 'running', 'todo', 'ready', 'done', 'needs-human'].map(k => ({
+      key: k, label: k === 'all' ? 'All' : k, count: globalCounts[k],
+      active: s.filterStatus === k, color: s.filterStatus === k ? '#ec3013' : '#201e1d',
+      bg: s.filterStatus === k ? 'transparent' : '#eae7e7', border: s.filterStatus === k ? '1px solid #ec3013' : 'none',
+      onClick: () => this.setState({ filterStatus: k })
+    }));
+    const sortOpts = ['default', 'id', 'status', 'updated'].map(k => ({
+      key: k, label: k === 'default' ? 'Default' : (k === 'updated' ? 'Updated ↓' : k),
+      active: s.sortBy === k, color: s.sortBy === k ? '#ae1800' : '#201e1d', weight: s.sortBy === k ? 800 : 400,
+      onClick: () => this.setState({ sortBy: k })
+    }));
+
+    const activeTask = tasks.find(t => t.id === s.activeTaskId) || tasks[0];
+    const recentActiveTasks = baseTasks.filter(t => t.status !== 'done').sort((a, b) => a.updatedMin - b.updatedMin).slice(0, 4);
+    const stub = this.stubMeta[s.page] || null;
+    const pageLabels = { dashboard: 'Dashboard', tasks: 'Tasks', detail: activeTask.id, live: 'Live', journal: 'Journal', board: 'Board', git: 'Git History', adr: 'ADRs', goal: 'Goals', doc: 'Docs', system: 'System', manager: 'Manager', tests: 'Tests', sessions: 'Sessions', architecture: 'Architecture' };
+    const archNodes = this.ARCH_NODES.map(n => ({ ...n, ...this.ARCH_STATE_STYLE[n.state], cx: n.x + n.w / 2, cy: n.y + n.h / 2 }));
+    const nodeById = Object.fromEntries(archNodes.map(n => [n.id, n]));
+    const archEdges = this.ARCH_EDGES.map(([a, b]) => ({ x1: nodeById[a].cx, y1: nodeById[a].cy, x2: nodeById[b].cx, y2: nodeById[b].cy }));
+    const adrDonut = (() => {
+      const acc = this.ADRS.filter(a => a.status === 'accepted').length, total = this.ADRS.length;
+      const pct = Math.round((acc / total) * 100);
+      return { pct, deg: (pct / 100) * 360 };
+    })();
+
+    return {
+      isDesktop: s.device === 'desktop',
+      isMobile: s.device === 'mobile',
+      setDesktop: () => this.setState({ device: 'desktop' }),
+      setMobile: () => this.setState({ device: 'mobile' }),
+      desktopBtnColor: s.device === 'desktop' ? '#201e1d' : '#f3f2f2',
+      desktopBtnBg: s.device === 'desktop' ? '#f3f2f2' : 'transparent',
+      mobileBtnColor: s.device === 'mobile' ? '#201e1d' : '#f3f2f2',
+      mobileBtnBg: s.device === 'mobile' ? '#f3f2f2' : 'transparent',
+      mobileMenuOpen: s.mobileMenuOpen,
+      toggleMenu: () => this.setState(st => ({ mobileMenuOpen: !st.mobileMenuOpen })),
+      mobilePageLabel: pageLabels[s.page] || (stub ? stub.title.split(' — ')[0] : ''),
+      navItems,
+      navGroups,
+      isDashboard: s.page === 'dashboard',
+      isTasks: s.page === 'tasks',
+      isDetail: s.page === 'detail',
+      isStub: !!stub,
+      stub,
+      isLive: s.page === 'live',
+      isJournal: s.page === 'journal',
+      isBoard: s.page === 'board',
+      isGit: s.page === 'git',
+      isAdr: s.page === 'adr',
+      isGoal: s.page === 'goal',
+      isDoc: s.page === 'doc',
+      isSystem: s.page === 'system',
+      isManager: s.page === 'manager',
+      isTests: s.page === 'tests',
+      isSessions: s.page === 'sessions',
+      isArch: s.page === 'architecture',
+      journal: this.JOURNAL,
+      boardRows: this.BOARD_ROWS,
+      adrs: this.ADRS,
+      monitors: this.MONITORS,
+      gitCommits: this.GIT_COMMITS,
+      testRuns: this.TEST_RUNS,
+      latestRun: this.TEST_RUNS[0],
+      sessions: this.SESSIONS,
+      archNodes,
+      archEdges,
+      statusFilters,
+      sortOpts,
+      runningCount: counts.running,
+      recentActiveTasks,
+      adrDonutPct: adrDonut.pct,
+      adrDonutBg: 'conic-gradient(#ec3013 0deg ' + adrDonut.deg + 'deg, #eae7e7 ' + adrDonut.deg + 'deg 360deg)',
+      tasks,
+      activeTask,
+      isDIR001: activeTask.id === 'DIR-001',
+      goDashboard: () => this.goto('dashboard'),
+      goTasks: () => this.goto('tasks'),
+      goLive: () => this.goto('live'),
+      goJournal: () => this.goto('journal'),
+      goSystem: () => this.goto('system'),
+      goManager: () => this.goto('manager'),
+      goGit: () => this.goto('git'),
+      goAdr: () => this.goto('adr'),
+      goGoal: () => this.goto('goal'),
+      goTests: () => this.goto('tests'),
+      goSessions: () => this.goto('sessions'),
+      goArch: () => this.goto('architecture')
+    };
+  }
+}
+</script>
+</body>
+</html>

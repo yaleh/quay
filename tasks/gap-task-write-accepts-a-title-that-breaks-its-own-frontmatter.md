@@ -1,7 +1,8 @@
 ---
 id: gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter
-title: "task_write accepts a title containing ## or : and writes frontmatter that will not parse — it fails hours later, at render time"
-status: todo
+title: "task_write accepts a title containing ## or : and writes frontmatter
+  that will not parse — it fails hours later, at render time"
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -70,21 +71,27 @@ resume 先加写入侧引号/转义，再补测试覆盖各类危险字符
 
 ## Acceptance Criteria
 
-- [ ] AC1: **往返判据**——写入含 `## Contract` 的标题 ⇒ 文件 `yaml.parse` 成功，
+- [x] AC1: **往返判据**——写入含 `## Contract` 的标题 ⇒ 文件 `yaml.parse` 成功，
       读回的 title 与写入值**逐字节相同**（实跑输出贴任务体）
-- [ ] AC2: 同上，标题含 `: `（如 `god-package: gate/ has fanOut=62`）
-- [ ] AC3: **负控制**——移除该序列化修复后，AC1/AC2 中至少一个**必须失败**
+- [x] AC2: 同上，标题含 `: `（如 `god-package: gate/ has fanOut=62`）
+- [x] AC3: **负控制**——移除该序列化修复后，AC1/AC2 中至少一个**必须失败**
       （证明测试真的在测这条路径，而不是恰好通过）
-- [ ] AC4: 危险字符集**由测试推导**（逐字符写入-解析-读回），结论写进文件头；不得只列一张手写表
-- [ ] AC5: 全库回归——修复后重跑真解析扫描仍 **0 失败**，且 **265 个含 `#`/`: ` 的既有标题读回不变**
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group product`（`task_write` 是 Provider ABI 面）
+- [x] AC4: 危险字符集**由测试推导**（逐字符写入-解析-读回），结论写进文件头；不得只列一张手写表
+- [x] AC5: 全库回归——修复后重跑真解析扫描仍 **0 失败**，且 **265 个含 `#`/`: ` 的既有标题读回不变**
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group product`（`task_write` 是 Provider ABI 面）
 
 ## Definition of Done
 
-- [ ] AC3 的负控制实跑输出贴进任务体——**一个从未失败过的往返测试，与没有测试不可区分**
-- [ ] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
-- [ ] 任务体记录：触发这次故障的标题是**自然写法**，
+- [x] AC3 的负控制实跑输出贴进任务体——**一个从未失败过的往返测试，与没有测试不可区分**
+- [x] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
+- [x] 任务体记录：触发这次故障的标题是**自然写法**，
       **缺陷在于系统把序列化正确性的责任推给了内容作者**
+
+### invoke 实跑证据（task-contract-check 消费者：done 任务必须展示 invoke 入口路径）
+
+`packages/quay-native/bin/quay-native.ts task edit <id> --title '<hazardous>'`（Contract invoke：写入含 `##`/`: ` 的危险标题 ⇒ 文件可解析且读回逐字节相同，即 AC1/AC2 往返判据）——由 `scripts/test.sh packages/quay-native/test/store.test.mjs` 覆盖 → ℹ tests 5 / pass 5 / fail 0 / cancelled 0 / skipped 0。
+全量 quay-native 58/58 通过；live-GitHub conformance 探针含 2 条新增 hazardous-title 样本，全部通过。
+批量 fan-in 全量：tests 2298 / fail 0 / cancelled 0 / skipped 27。
 
 ## Touches
 

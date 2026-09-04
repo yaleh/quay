@@ -129,14 +129,17 @@ echo "AC2: detection ladder detected npm test from package.json (printed for hum
 echo "== asserting laid-down artifacts =="
 for f in \
   orchestration/orchestrator-loop-tick.md docs/analysis/fast-mode-loop-tick.md \
-  plugin/scripts/inner-state.sh plugin/scripts/session-liveness.sh plugin/scripts/fast-mode-telemetry.ts \
+  plugin/scripts/session-liveness.sh plugin/scripts/fast-mode-telemetry.ts \
   .quay/config.yml; do
   assert_file "$PROJECT/$f"
 done
-if [ -f "$PROJECT/vendor/quay/dist/quay.js" ]; then
-  echo "  AC7b: runtime laid down at vendor/quay/dist/quay.js"
+if [ -e "$PROJECT/plugin/scripts/inner-state.sh" ]; then
+  fail "inner-state.sh must NOT be laid down into target projects (retired, AC3)"
+fi
+if [ -f "$PROJECT/.quay/runtime/bin/quay.js" ]; then
+  echo "  AC7b: runtime laid down at .quay/runtime/bin/quay.js"
 else
-  echo "  AC7b: vendor/quay/dist/quay.js NOT present (plugin had no built bundle in this source) — SKIP round-trip"
+  echo "  AC7b: .quay/runtime/bin/quay.js NOT present (plugin had no built bundle in this source) — SKIP round-trip"
 fi
 grep -q "mcp_entry" "$PROJECT/.quay/config.yml" || fail "AC7b: config has no mcp_entry"
 grep -q 'quay-native", "mcp"' "$PROJECT/.quay/config.yml" && \
@@ -176,7 +179,7 @@ if [ "$STRIPPED_PATH" = "$PATH" ]; then
 fi
 
 AC7_SKIP_REASON=""
-if [ ! -f "$PROJECT/vendor/quay/dist/quay.js" ]; then
+if [ ! -f "$PROJECT/.quay/runtime/bin/quay.js" ]; then
   AC7_SKIP_REASON="no laid-down runtime bundle in this source"
 elif [ ! -d "$REPO_ROOT/node_modules" ]; then
   AC7_SKIP_REASON="no node_modules available to run the provider (npm install ran by the full suite)"
@@ -198,10 +201,10 @@ else
     export PATH="$STRIPPED_PATH"
     export QUAY_NATIVE_TASKS_DIR="$TASKS_DIR"
     cd "$PROJECT"
-    node "$PROJECT/vendor/quay/dist/quay.js" task list --json --root "$PROJECT" \
+    node "$PROJECT/.quay/runtime/bin/quay.js" task list --json --root "$PROJECT" \
       >"$BASE/task_list.out" 2>"$BASE/task_list.err" || true
   )
-  echo "  round-trip: ran <target>/vendor/quay/dist/quay.js task list with PATH stripped of dev-tree symlink dirs"
+  echo "  round-trip: ran <target>/.quay/runtime/bin/quay.js task list with PATH stripped of dev-tree symlink dirs"
   if grep -qi 'Cannot find\|MODULE_NOT_FOUND\|No such file\|ENOENT' "$BASE/task_list.err" "$BASE/task_list.out"; then
     fail "AC7: the laid-down runtime depends on a stripped PATH source:\n$(cat "$BASE/task_list.err" "$BASE/task_list.out" 2>/dev/null)"
   fi

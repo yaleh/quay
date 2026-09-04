@@ -13,15 +13,41 @@
 // Pure functions are exported and unit-tested; `main()` is a thin CLI over them.
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import {
   parseTouches,
   expandGlobs,
+  normalizePath,
   matchGlob,
   checkTouchesPair,
-  findRepoRoot,
 } from "./touches-orthogonality-check.ts";
+// gap-experiment-legacy-reclaim-and-touches-heuristic AC3: when a candidate charter lacks a
+// `## Touches` section, derive a MECHANICAL hint from body prose (derive-touches-heuristic.ts,
+// reclaimed from experiments into plugin/scripts) so the scheduler has concrete globs to reason
+// about instead of a vacuous conservative "no/empty ## Touches → serialize" defer. The hint is
+// labeled `derived` and is NEVER a substitute for anti-drift-touches-check.ts's PRE-MERGE hard gate
+// (which verifies ACTUAL `git diff --numstat` files) — a wrong guess can only mis-batch (caught at
+// fan-in), never let a bad write land.
+import { deriveTouches } from "./derive-touches-heuristic.ts";
+// AC36 (gap-ac36-delivery-critical-priority-axis): parseTask is the ONE lenient frontmatter parse
+// (task-schema.ts) that reads `labels` — reused here so parseCandidate can expose a
+// delivery-critical flag without a second labels parser (slot-refill.ts:250 already uses it).
+import { parseTask } from "./task-schema.ts";
+// IN-FLIGHT WORKTREE DIRECT QUANTITY (tasks/gap-scheduler-inflight-detection-misses-fan-in-worktree):
+// the open-worktree enumerator (`git worktree list --porcelain`) + the `task/<id>`-branch → task-id
+// resolver — single source (fast-mode-telemetry's listWorktrees/taskIdFromBranch, not a parallel
+// porcelain parser). The in-flight worktree detection below reuses them to find fan-in workflow /
+// just-dispatched worktrees the snapshot in-flight set misses.
+import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
+// IN-FLIGHT WORKTREE LIVENESS (tasks/gap-compute-inflight-worktree-touches-no-liveness-check):
+// the "is any process anchored under this worktree" direct quantity is single-sourced from
+// worktree-process-reaper.ts's /proc enumerator (enumerateProcs + cwdUnder), NOT a hand-rolled
+// /proc scan — CLAUDE.md 硬规则 1 (用机件，不手搓) and the same /proc predicate the reaper uses.
+// For LIVENESS we do NOT exclude real claude sessions (a live inner claude session IS the task
+// being worked) and we DO exclude zombies (state "Z" is a dead, un-reaped process — not activity).
+import { enumerateProcs, cwdUnder } from "./worktree-process-reaper.ts";
 // DIR-117 iteration-2 item 4: the SAME touch-set-expansion arithmetic that
 // milestone-preparation-check.ts's `Prepared` gate used to detect a checked Plan outgrowing its
 // declared '## Touches'. milestone-preparation-check.ts is retired with the prepare/execute
@@ -56,8 +82,21 @@ export const SHARED_STATE_PATHS = [
 // with the many pre-DIR-116 charters/fixtures that never declared this field (mirrors the `type`
 // field's own unstated-default policy above); the field is only ever used to DEFER, never to admit
 // something the touches/type checks would otherwise reject.
-export function parseCandidate(id, charterText) {
+export function parseCandidate(id, charterText, repoRoot) {
   const touches = parseTouches(charterText);
+  // AC3: mechanical `## Touches` extraction when the charter lacks a `## Touches` section. Only
+  // runs when a repoRoot is available (callers pass it; unit tests that pass 2 args skip it, so
+  // the conservative no-declaration path is byte-unchanged for them). The derived globs are put in
+  // `touches.globs` and marked `derived: true` so checkTouchesPair can reason about them — but a
+  // candidate whose body yields ZERO path-shaped tokens stays conservative (hasSection stays false).
+  if (!touches.hasSection && repoRoot) {
+    const { globs } = deriveTouches(charterText, repoRoot);
+    if (globs.length > 0) {
+      touches.globs = globs;
+      touches.hasSection = true;
+      touches.derived = true;
+    }
+  }
   let type = "execution";
   // Tolerates `type: x`, `**type:** x` (colon inside bold), and `**type**: x`.
   const m = String(charterText).match(/^\s*\*{0,2}type\*{0,2}\s*:\s*\*{0,2}\s*`?([a-z][\w-]*)/im);
@@ -68,7 +107,15 @@ export function parseCandidate(id, charterText) {
   // **Value type:** ...") and/or with parenthetical prose between the label and the colon.
   const vm = String(charterText).match(/value[\s-]?type\b[^:\n]*:\s*\*{0,2}\s*`?([a-zA-Z][\w-]*)/i);
   if (vm) valueType = vm[1].toLowerCase();
-  return { id, touches, type, valueType };
+  // AC36 (gap-ac36-delivery-critical-priority-axis): expose the candidate's frontmatter `labels`
+  // (via parseTask — same single-source parse slot-refill.ts uses) and a derived `deliveryCritical`
+  // boolean. A candidate with no frontmatter / no such label ⇒ labels=[] / deliveryCritical=false
+  // (conservative default). This is what lets slot-refill's candidates.sort rank delivery-critical
+  // tasks as a SECOND axis — below blocking_suite, above plain id order.
+  const parsed = parseTask(String(charterText));
+  const labels = parsed.labels || [];
+  const deliveryCritical = labels.includes("delivery-critical");
+  return { id, touches, type, valueType, labels, deliveryCritical };
 }
 
 // ── isCapabilityGrowth ───────────────────────────────────────────────────────────────────────────
@@ -91,6 +138,42 @@ export function touchesSharedState(globs) {
     }
   }
   return false;
+}
+
+// ── expandDeclaredTouches ────────────────────────────────────────────────────────────────────────
+// The pre-dispatch expander for assembleBatch's injected `expand`. It answers "which files do these
+// tasks INTEND to touch?", NOT "which files exist right now?" — the dispatch-eligibility question is
+// about declared intent, and a task's `## Touches` routinely lists files it will CREATE.
+//
+// gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet: the previous expander was
+// expandGlobs against the live tree, so a task whose `## Touches` pointed ONLY at not-yet-created
+// files expanded to an EMPTY set and checkTouchesPair's conservative "matched nothing (likely a
+// typo)" branch fired — a false negative that silently serialized a perfectly disjoint pair, and —
+// worse — could not NAME the overlapping file when two tasks genuinely collided on a new file it
+// reported "your glob is probably a typo" (an instrument that says "matched nothing" while what
+// actually happened was "overlap"). The inner loop had already been hand-rolling a workaround
+// (normalize the declared path, never touch the filesystem); this function IS that workaround,
+// single-sourced in the production entry so the bypass disappears (AC5/AC6).
+//
+//   - a declared CONCRETE path resolves to itself (normalized) whether or not it exists on disk;
+//   - a declared WILDCARD (`*`/`?`) still needs the filesystem to find the concrete set it covers —
+//     expandGlobs stays for exactly that; a wildcard that matches nothing is genuinely "likely a
+//     typo" and the conservative branch below still fires (AC4 keeps wildcard support).
+// expandGlobs itself is UNTOUCHED (it is correct for its own callers, e.g. test selection).
+// `files` is an optional PRE-COMPUTED walkFiles(root) list (the walk-once pattern from
+// gap-select-preflight-json-real-store-too-slow): ready-pool-check's O(n²) pairwise
+// checkTouchesPair scan shares ONE tree walk instead of re-walking per pair. Omitted → walks per
+// call (unchanged behavior).
+export function expandDeclaredTouches(globs, root, files = null) {
+  const set = new Set();
+  for (const g of globs) {
+    if (/[*?]/.test(g)) {
+      for (const f of expandGlobs([g], root, files)) set.add(f);
+    } else {
+      set.add(normalizePath(g));
+    }
+  }
+  return set;
 }
 
 // ── assembleBatch ────────────────────────────────────────────────────────────────────────────────
@@ -128,10 +211,15 @@ export function assembleBatch(candidates, { expand }) {
     let blocked = null;
     for (const inBatch of batch) {
       const r = checkTouchesPair(c.touches, inBatch.touches, expand);
-      if (!r.disjoint) { blocked = { peer: inBatch.id, reason: r.reason }; break; }
+      if (!r.disjoint) { blocked = { peer: inBatch.id, reason: r.reason, overlaps: r.overlaps }; break; }
     }
     if (blocked) {
-      deferred.push({ id: c.id, reason: `not disjoint from ${blocked.peer}: ${blocked.reason}` });
+      // gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet AC2: NAME the overlapping
+      // file(s). The old reason stopped at "overlapping file-sets"; with declared-path expansion an
+      // overlap is often on a not-yet-created file (both tasks will create the same path) — a
+      // verdict that only says "not disjoint" makes a reader hunt for a typo that isn't there.
+      const overlapTail = blocked.overlaps?.length ? ` (overlap: ${blocked.overlaps.join(", ")})` : "";
+      deferred.push({ id: c.id, reason: `not disjoint from ${blocked.peer}: ${blocked.reason}${overlapTail}` });
       continue;
     }
     // A lone anchor still must have a well-declared touches (else it is unsafe to reason about even
@@ -225,6 +313,122 @@ function isSelfOverlapOnly(result) {
   return /overlapping file-sets/i.test(result.reason);
 }
 
+// ── IN-FLIGHT WORKTREE DETECTION (tasks/gap-scheduler-inflight-detection-misses-fan-in-worktree) ──
+// The dispatch gate's in-flight set was a SNAPSHOT (telemetry brackets / a historical in-flight id
+// list) that misses two live shapes: a fan-in workflow (its worktree exists but the subagent is a
+// WORKFLOW, not a standalone Agent) and a just-`git worktree add`-ed worktree (subagent not yet
+// started / already running). Both are DIRECT quantities only `git worktree list` sees — the same
+// 硬规则 4b family as resource.node_count's comm regex and outer.ticklog's line-shape predicate: a
+// snapshot stops updating exactly when the thing it tracks is mid-flight, so it reads "nothing in
+// flight" precisely when there IS. These helpers enumerate open TASK worktrees and resolve each to
+// its declared `## Touches` so the touches-overlap judgment (slot-refill step-4) can treat a fan-in /
+// just-dispatched worktree as in-flight. Fail-soft throughout: no worktree / unreadable list / no task
+// file / no declared Touches ⇒ [] (never a fabricated block — hard rule 5: absent evidence is not a
+// verdict).
+
+/** PURE core: resolve an open-worktree listing to in-flight task entries `[{id, touches}]`. The
+ *  worktree list is INJECTED (listWorktrees output) so tests exercise the resolution without faking
+ *  git; `computeInFlightWorktreeTouches` is the production wiring. A worktree is in-flight when it is
+ *  NOT the main checkout AND checks out a `task/<id>` branch (the fast-mode convention — both the
+ *  dispatched worktree and the fan-in workflow that later runs in it stay on `task/<id>`). Its
+ *  conflict surface is the task's DECLARED `## Touches` (the same declared-path surface the peer arm
+ *  uses), so the resolution only keeps worktrees whose task file exists AND declares a Touches section.
+ *  @param {Array<{path:string, branch:string|null}>} worktrees from listWorktrees (inject in tests)
+ *  @param {object} o
+ *  @param {string} o.root main checkout root (the main worktree is excluded)
+ *  @param {string} o.tasksDir the task store dir (`<root>/tasks`)
+ *  @param {(wt:{path:string,branch:string|null}) => ({hasLiveProcess:boolean, lastCommitMs:number|null})|null|undefined} [o.liveness]
+ *         injected per-worktree liveness facts; null (default) ⇒ every worktree is alive (pre-fix).
+ *  @param {number} [o.nowMs] fixed "now" for hermetic staleness tests (default Date.now())
+ *  @param {number} [o.staleMs] the staleness threshold (default INFLIGHT_WORKTREE_STALE_MS)
+ *  @returns {Array<{id:string, touches:object}>} resolvable in-flight task worktrees
+ */
+/** Staleness threshold for in-flight worktree LIVENESS (gap-compute-inflight-worktree-touches-
+ *  no-liveness-check): a worktree whose only "in-flight" evidence is its EXISTENCE — ZERO live
+ *  processes AND no commit on its branch for longer than this — is DEAD and must not occupy its
+ *  declared `## Touches` (a single dead worktree can otherwise lock out every overlapping
+ *  candidate; the live-process signal dominates, so this threshold only governs the zero-process
+ *  backstop — e.g. a just-`git worktree add`-ed worktree whose subagent has not spawned yet). */
+export const INFLIGHT_WORKTREE_STALE_MS = 15 * 60 * 1000;
+
+/** The dead predicate: ALIVE unless BOTH direct quantities prove otherwise — (a) zero live
+ *  processes under the worktree, AND (b) a known commit time older than `staleMs`. Unknown
+ *  liveness (`lv` null) or an unreadable commit time (null) is ALIVE (conservative — excluding
+ *  without evidence could dispatch a colliding task; hard rule 6: 缺值 = 未查, not 为假). */
+function isDeadInFlightWorktree(lv, nowMs, staleMs) {
+  if (!lv) return false; // no liveness facts ⇒ alive (backward-compatible, conservative)
+  if (lv.hasLiveProcess) return false; // a live process ⇒ alive regardless of commit age
+  const last = lv.lastCommitMs;
+  if (typeof last !== "number" || !Number.isFinite(last)) return false; // unknown commit ⇒ alive
+  return nowMs - last > staleMs; // zero processes AND stale ⇒ dead
+}
+
+/** The worktree HEAD's committer time (ms), or null when unreadable. `git -C <worktree> log -1`
+ *  reads the worktree's OWN checked-out HEAD — the direct "last commit in THIS worktree" quantity,
+ *  independent of the main checkout's branch namespace (a deleted-but-still-listed branch still
+ *  resolves via its worktree HEAD). */
+function lastCommitMsOfWorktree(worktreePath) {
+  try {
+    const out = execFileSync("git", ["-C", worktreePath, "log", "-1", "--format=%ct"], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    const line = out.trim();
+    if (line && /^\d+$/.test(line)) return Number(line) * 1000;
+  } catch (_) { /* unreadable worktree HEAD — conservative alive (null) */ }
+  return null;
+}
+
+export function resolveInFlightWorktrees(worktrees, {
+  root,
+  tasksDir,
+  liveness = null,
+  nowMs = Date.now(),
+  staleMs = INFLIGHT_WORKTREE_STALE_MS,
+} = {}) {
+  const mainRoot = root ? path.resolve(root) : null;
+  const seen = new Set();
+  const out = [];
+  for (const wt of worktrees || []) {
+    if (!wt || !wt.path) continue;
+    if (mainRoot !== null && path.resolve(wt.path) === mainRoot) continue; // the main checkout is not in-flight
+    const id = taskIdFromBranch(wt.branch);
+    if (!id) continue; // a non-task branch (integration / feat / milestone / detached) is not a task worktree
+    if (seen.has(id)) continue; // dedup: one task → one in-flight entry even if listed twice
+    seen.add(id);
+    const file = path.join(tasksDir, `${id}.md`);
+    if (!fs.existsSync(file)) continue; // a task worktree whose task file is gone blocks nothing
+    const touches = parseTouches(fs.readFileSync(file, "utf8"));
+    if (!touches.hasSection) continue; // no declared Touches ⇒ no usable conflict surface
+    // LIVENESS: a DEAD worktree (zero live processes + no commit within staleMs) does not occupy
+    // its Touches — `liveness` is INJECTED (null ⇒ every worktree is alive, the pre-fix behavior)
+    // so the pure core stays testable without faking /proc or git.
+    const lv = liveness ? liveness(wt) : null;
+    if (isDeadInFlightWorktree(lv, nowMs, staleMs)) continue;
+    out.push({ id, touches });
+  }
+  return out;
+}
+
+/** Production wiring: enumerate open worktrees via `git worktree list --porcelain` (the DIRECT
+ *  quantity) and resolve them to in-flight task entries, applying the liveness DIRECT quantity
+ *  (live processes under each worktree + its HEAD commit time). Fail-soft: an unreadable worktree
+ *  list / process table / HEAD ⇒ [] or conservative-alive, never a fabricated block. */
+export function computeInFlightWorktreeTouches(root, tasksDir) {
+  const worktrees = listWorktrees(root);
+  // Enumerate live processes ONCE (shared across every worktree) — the /proc scan is the cost, and
+  // it must not be re-done per worktree. A process whose cwd is under the worktree and is not a
+  // zombie is live activity.
+  const procs = enumerateProcs();
+  return resolveInFlightWorktrees(worktrees, {
+    root,
+    tasksDir,
+    liveness: (wt) => ({
+      hasLiveProcess: procs.some((p) => p.state !== "Z" && cwdUnder(p.cwd, wt.path)),
+      lastCommitMs: lastCommitMsOfWorktree(wt.path),
+    }),
+  });
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 function usage() {
   process.stderr.write("Usage: concurrent-batch-scheduler.mjs [--root <dir>] <charter1.md> <charter2.md> [charterN.md ...]\n");
@@ -233,6 +437,11 @@ function usage() {
 export async function main(argv) {
   const args = argv.slice(2);
   let root = null;
+  // --json: emit { batch, deferred } as JSON instead of the human-readable lines. The batch /
+  // deferred fields are what the task contract's measures read (gap-dispatch-eligibility-blind-to-
+  // files-that-do-not-exist-yet: `node --experimental-strip-types plugin/scripts/concurrent-batch-
+  // scheduler.ts --json`).
+  let json = false;
   // DIR-117 iteration-2 item 4: `--receipts id1=file1.json,id2=file2.json` — optional, maps a
   // candidate id (charter basename, no .md) to a real milestone-preparation-check.ts receipt file.
   // Omitted entirely → byte-for-behavior unchanged (golden replay for every pre-existing call).
@@ -240,6 +449,7 @@ export async function main(argv) {
   const files = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") { root = args[++i]; continue; }
+    if (args[i] === "--json") { json = true; continue; }
     if (args[i] === "--receipts") {
       receiptsById = {};
       for (const pair of args[++i].split(",")) {
@@ -254,16 +464,26 @@ export async function main(argv) {
   for (const f of files) {
     if (!fs.existsSync(f)) { process.stderr.write(`ERROR: charter not found: ${f}\n`); return 2; }
   }
-  const expandRoot = root ? path.resolve(root) : findRepoRoot(path.resolve(path.dirname(files[0])));
-  const expand = (globs) => expandGlobs(globs, expandRoot);
-  const parsedCandidates = files.map((f) => parseCandidate(path.basename(f, ".md"), fs.readFileSync(f, "utf8")));
+  const expandRoot = root ? path.resolve(root) : repoRoot(path.resolve(path.dirname(files[0])));
+  // gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet: eligibility compares DECLARED
+  // paths, not the filesystem — a task creating only NEW files must not be judged "matched nothing
+  // (likely a typo)". Concrete declared paths resolve to themselves (whether or not they exist yet);
+  // only wildcards are expanded against the tree (expandDeclaredTouches).
+  const expand = (globs) => expandDeclaredTouches(globs, expandRoot);
+  const parsedCandidates = files.map((f) =>
+    parseCandidate(path.basename(f, ".md"), fs.readFileSync(f, "utf8"), expandRoot)
+  );
   const { candidates, expansions } = applyPreparationExpansion(parsedCandidates, receiptsById);
   for (const e of expansions) {
     process.stdout.write(`  re-evaluated (checked Plan expanded '## Touches'): ${e.id} — +${e.addedGlobs.length} path(s): ${e.addedGlobs.join(", ")}\n`);
   }
   const r = assembleBatch(candidates, { expand });
-  process.stdout.write(`BATCH (${r.batch.length}-wide, concurrent): ${r.batch.join(", ") || "(none)"}\n`);
-  for (const d of r.deferred) process.stdout.write(`  deferred: ${d.id} — ${d.reason}\n`);
+  if (json) {
+    process.stdout.write(JSON.stringify({ batch: r.batch, deferred: r.deferred }, null, 2) + "\n");
+  } else {
+    process.stdout.write(`BATCH (${r.batch.length}-wide, concurrent): ${r.batch.join(", ") || "(none)"}\n`);
+    for (const d of r.deferred) process.stdout.write(`  deferred: ${d.id} — ${d.reason}\n`);
+  }
   // Exit 0 always (assembly succeeded); a caller inspects the batch. A 1-wide-or-empty batch is a
   // valid outcome (fully serial), not an error.
   return 0;
@@ -279,9 +499,19 @@ export async function main(argv) {
 function isDirectInvocation() {
   if (!process.argv[1]) return false;
   try {
-    const invokedReal = fs.realpathSync(path.resolve(process.argv[1]));
-    const moduleReal = fileURLToPath(import.meta.url);
-    return invokedReal === moduleReal;
+    // Bundling-safe direct-invocation check. Under esbuild (package.sh
+    // build-plugin-dist.mjs) `import.meta.url` is the BUNDLE path for every inlined
+    // module, so the historical `realpath(argv[1]) === fileURLToPath(import.meta.url)`
+    // comparison would report TRUE for every guarded module in the bundle — an imported
+    // dependency would hijack the entry's CLI (verified: dist/ready-pool-check.js ran
+    // this module's main instead of ready-pool-check's). Compare the invoked file's
+    // basename against THIS module's own basename instead: in the source tree the
+    // directly-run file is `concurrent-batch-scheduler.ts` (or the mirror symlink of the
+    // same name); in a bundle it is `dist/concurrent-batch-scheduler.js`. Both reduce to
+    // the same base name, and no other entry shares it. The basename survives the mirror
+    // symlink, preserving the original realpathSync intent.
+    const invoked = path.basename(process.argv[1]).replace(/\.(?:js|ts|mjs)$/, "");
+    return invoked === "concurrent-batch-scheduler";
   } catch {
     return false;
   }

@@ -23,8 +23,13 @@
 //     !startsWith("//")), and even the stronger guard missed two further
 //     real bypass shapes (backslash-prefixed and control-char-prefixed
 //     targets that WHATWG URL / real browsers normalize to an external
-//     origin). Fixed: both routes now share one isSafeRelativeRedirect()
-//     helper that closes all of these.
+//     origin). Fixed: both routes once shared one isSafeRelativeRedirect()
+//     helper that closes all of these. NOTE (2026-08-06): the POST .../action/
+//     <id> route itself was REMOVED by
+//     gap-web-action-buttons-unused-route-and-open-redirect-delete, so the
+//     POST-route open-redirect regression test below was deleted with it; the
+//     GET detail route (which still uses the shared helper via backHref)
+//     remains covered by testDetailRouteOpenRedirectBackslashBypass().
 //
 // Run: node test/serve-adversarial-eval.test.mjs
 
@@ -35,10 +40,11 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -62,25 +68,6 @@ function get(port, urlPath, timeoutMs = 5000) {
       req.destroy();
       reject(new Error("TIMEOUT: request never completed (this is exactly the crash/hang failure mode ADV-002 fixes)"));
     });
-  });
-}
-
-function post(port, urlPath, timeoutMs = 5000) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, path: urlPath, method: "POST", timeout: timeoutMs },
-      (res) => {
-        let body = "";
-        res.on("data", (c) => (body += c));
-        res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
-      }
-    );
-    req.on("error", reject);
-    req.on("timeout", () => {
-      req.destroy();
-      reject(new Error("TIMEOUT"));
-    });
-    req.end();
   });
 }
 
@@ -121,34 +108,34 @@ async function testMalformedTaskFileDegradesSafely() {
 
   writeConfig(workspaceRoot, tasksDir);
 
-  const port = 41720 + (process.pid % 500);
   const originalCwd = process.cwd();
   let server;
   try {
     process.chdir(workspaceRoot);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     // gap-one-unparseable-task-takes-down-the-whole-board: the malformed-file
     // behavior CHANGED from ADV-001/002's original "clean 500". The provider's
     // task_list now returns PARTIAL SUCCESS for one bad frontmatter (parseable
-    // tasks + a machine-readable malformed list) instead of isError, so GET /
-    // renders 200 with a VISIBLE .malformed-row naming the bad file, and the
-    // good task lists normally. The 500 path (AC5) is still exercised for a
+    // tasks + a machine-readable malformed list) instead of isError, so GET
+    // /tasks renders 200 with a VISIBLE .malformed-row naming the bad file, and
+    // the good task lists normally. The 500 path (AC5) is still exercised for a
     // genuine call-level failure — see serve.test.mjs's unparseable block.
     // ADV-001's core assertion (taskList() throws on isError, never a silent
     // empty list) is preserved at the provider-client level.
-    const withBadFile = await get(port, "/");
+    const withBadFile = await get(port, "/tasks");
     assert(
       withBadFile.status === 200,
-      `GET / with an unparseable task file present returns 200, not a 500 — one bad task must poison only its own row (gap-one-unparseable-task-takes-down-the-whole-board, superseding ADV-001/002) (got ${withBadFile.status})`
+      `GET /tasks with an unparseable task file present returns 200, not a 500 — one bad task must poison only its own row (gap-one-unparseable-task-takes-down-the-whole-board, superseding ADV-001/002) (got ${withBadFile.status})`
     );
     assert(
       withBadFile.body.includes('class="malformed-row"') && withBadFile.body.includes("BAD-1.md"),
-      `GET / renders a visible .malformed-row naming the unparseable file BAD-1.md (gap-one-unparseable-task-takes-down-the-whole-board)`
+      `GET /tasks renders a visible .malformed-row naming the unparseable file BAD-1.md (gap-one-unparseable-task-takes-down-the-whole-board)`
     );
     assert(
       withBadFile.body.includes("ADV-1"),
-      `GET / still lists the good task ADV-1 alongside the malformed row (gap-one-unparseable-task-takes-down-the-whole-board)`
+      `GET /tasks still lists the good task ADV-1 alongside the malformed row (gap-one-unparseable-task-takes-down-the-whole-board)`
     );
 
     // The server process must still be alive and healthy for a DIFFERENT
@@ -163,70 +150,9 @@ async function testMalformedTaskFileDegradesSafely() {
     // Remove the bad file and confirm the list route self-heals with NO
     // restart -- proving no corrupted state was left behind by the failure.
     fs.rmSync(path.join(tasksDir, "BAD-1.md"));
-    const afterFix = await get(port, "/");
-    assert(afterFix.status === 200, `GET / after removing the malformed file returns 200 (self-healed, got ${afterFix.status})`);
-    assert(afterFix.body.includes("ADV-1"), "GET / after removing the malformed file lists the good task correctly");
-  } finally {
-    process.chdir(originalCwd);
-    if (server) {
-      server.close();
-      if (server.client) await server.client.close();
-    }
-    fs.rmSync(tasksDir, { recursive: true, force: true });
-    fs.rmSync(workspaceRoot, { recursive: true, force: true });
-  }
-}
-
-// --- ADV-003: POST .../action/<id>?from=//evil.com open-redirect bypass
-// (the route that previously had a WEAKER guard than the GET detail route).
-async function testActionRouteOpenRedirectProtocolRelative() {
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-adv-redirect-"));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-adv-redirect-ws-"));
-
-  execFileSync(
-    "node",
-    [nativeBin, "task", "create", "RDR-1", "--title", "Redirect target task", "--status", "todo", "--body", VALID_SECTIONS],
-    { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir } }
-  );
-  writeConfig(workspaceRoot, tasksDir);
-
-  const port = 41730 + (process.pid % 500);
-  const originalCwd = process.cwd();
-  let server;
-  try {
-    process.chdir(workspaceRoot);
-    server = await startServer({ port });
-
-    const protoRel = encodeURIComponent("//evil.com");
-    const r1 = await post(port, `/task/RDR-1/action/advance?from=${protoRel}`);
-    assert(r1.status === 302, `POST .../action/advance?from=//evil.com returns 302 (got ${r1.status})`);
-    assert(
-      r1.headers.location && !r1.headers.location.startsWith("//") && !r1.headers.location.includes("evil.com"),
-      `POST .../action/advance?from=//evil.com redirect Location does NOT point at evil.com (open-redirect guard, ADV-003) (Location: ${r1.headers.location})`
-    );
-
-    // Backslash-prefixed bypass (browsers normalize \ to / per WHATWG URL,
-    // so "/\\evil.com" resolves to http://evil.com/ despite starting with a
-    // single "/" -- confirmed during Phase A audit with a direct `new URL()`
-    // resolution check).
-    const backslashTarget = "/\\evil.com";
-    const backslashEncoded = encodeURIComponent(backslashTarget);
-    const r2 = await post(port, `/task/RDR-1/action/advance?from=${backslashEncoded}`);
-    assert(r2.status === 302, `POST .../action/advance?from=/\\evil.com returns 302 (got ${r2.status})`);
-    assert(
-      r2.headers.location && !r2.headers.location.includes("evil.com"),
-      `POST .../action/advance?from=/\\evil.com redirect Location does NOT point at evil.com (backslash-normalization bypass guard, ADV-003) (Location: ${r2.headers.location})`
-    );
-
-    // A genuinely safe same-origin from= target must still work normally
-    // (no false-positive regression from the tightened guard).
-    const safeTarget = encodeURIComponent("/?status=todo");
-    const r3 = await post(port, `/task/RDR-1/action/advance?from=${safeTarget}`);
-    assert(r3.status === 302, `POST .../action/advance?from=/?status=todo (safe, same-origin) returns 302 (got ${r3.status})`);
-    assert(
-      r3.headers.location && r3.headers.location.startsWith("/?status=todo"),
-      `POST .../action/advance with a genuinely safe from= target redirects there correctly (no over-blocking regression) (Location: ${r3.headers.location})`
-    );
+    const afterFix = await get(port, "/tasks");
+    assert(afterFix.status === 200, `GET /tasks after removing the malformed file returns 200 (self-healed, got ${afterFix.status})`);
+    assert(afterFix.body.includes("ADV-1"), "GET /tasks after removing the malformed file lists the good task correctly");
   } finally {
     process.chdir(originalCwd);
     if (server) {
@@ -252,19 +178,19 @@ async function testDetailRouteOpenRedirectBackslashBypass() {
   );
   writeConfig(workspaceRoot, tasksDir);
 
-  const port = 41740 + (process.pid % 500);
   const originalCwd = process.cwd();
   let server;
   try {
     process.chdir(workspaceRoot);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const backslashTarget = encodeURIComponent("/\\evil.com");
     const resp = await get(port, `/task/RDR-2?from=${backslashTarget}`);
     assert(resp.status === 200, `GET /task/RDR-2?from=/\\evil.com returns 200 (got ${resp.status})`);
     assert(
-      resp.body.includes('href="/"') && !resp.body.includes("evil.com"),
-      "GET /task/RDR-2?from=/\\evil.com: back link defaults to / (backslash-normalization bypass rejected), no evil.com in body"
+      resp.body.includes('href="/tasks') && !resp.body.includes("evil.com"),
+      "GET /task/RDR-2?from=/\\evil.com: back link defaults to /tasks (backslash-normalization bypass rejected), no evil.com in body"
     );
   } finally {
     process.chdir(originalCwd);
@@ -279,7 +205,6 @@ async function testDetailRouteOpenRedirectBackslashBypass() {
 
 async function main() {
   await testMalformedTaskFileDegradesSafely();
-  await testActionRouteOpenRedirectProtocolRelative();
   await testDetailRouteOpenRedirectBackslashBypass();
 
   console.log(

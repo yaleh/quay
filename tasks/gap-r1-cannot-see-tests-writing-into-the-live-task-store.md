@@ -228,6 +228,19 @@ $ node --test --test-name-pattern="frontmatter" experiments/quay-perpetual-strea
 R7 的 RED/GREEN 测试加在既有 `plugin/test/test-isolation-check.test.mjs`（`// @test-group engine`，
 `import { test } from "node:test"`）内；未新建测试文件（新文件的 governance tag 要求不适用）。
 
+## 交叉标注（2026-08-07，B 类任务 disable 裁定）
+
+- → **gap-assert-clean-tree-premise-void-under-concurrent-writers（B）——本任务是 R7 规则的来源，
+  B（suite-after clean-tree 断言）是这条 R7 静态规则的「不认拼法只认结果」形态。** 2026-08-07 人
+  17:1x 裁定 B 的前提（协调者在干净树上跑）已作废（三层并发写入造成 r4/r5/r6 三次假红），外层裁定
+  **disable（非 delete）**：B 的调用已从全量套件路径摘掉，代码保留。
+  **AC4 已知让渡（直接影响本任务抓的类）**：B 是唯一能抓「测试真写进验证树」的网（不认拼法只认结果，
+  当年 R1/R7 都漏掉 `.quay-tmp-test-` 靠它抓到）。disable 期间，**靠 B 抓泄漏的能力暂缺**——即本任务
+  R7 那类「一个测试把 M-FAKE-*.md 写进真实 tasks/」不再由 suite-after 断言兜底。**复原路径**：
+  验证 worktree 运行期单写入者达成（`git worktree lock`）时重新接回；复原时 B 的差量版（--snapshot/
+  --check，integration 174badc0）为正确形态。tmux-leak-scan 仍抓 tmux 类。R7 静态探测器本身
+  （test-isolation-check）不受影响，仍在线。
+
 ## Touches
 
 - plugin/scripts/test-isolation-check.ts

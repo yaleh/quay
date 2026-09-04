@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // Unit + CLI tests for chart2-s2-delivery-completeness.ts — the machine-verifiable cov calculator
 // for chart-2 surface S2 (Delivery completeness), per DIR-064 / DIR-064-A. Mirrors the
 // it0-split-or-commit-check test style: node:test + node:assert/strict, pure-function unit tests
@@ -15,9 +15,6 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 const { readVersionFields, versionsConsistent, computeS2Cov, loadS2Evidence, selftest, } = await import("../scripts/chart2-s2-delivery-completeness.ts");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -169,9 +166,12 @@ test("loadS2Evidence: missing file → both false (fail-closed)", () => {
   assert.deepEqual(loadS2Evidence(p), { fullManifestPublished: false, foreignInstallE2eGreen: false });
 });
 
-test("loadS2Evidence: the checked-in real evidence file → both false", () => {
+// AC3 cross-annotation: evidence flags were flipped true by DELIVERY-C (ea3a33a9, manifest-published)
+// and DELIVERY-D (1b1c81ab, foreign-install-e2e-green) on 2026-07-24. When a delivery flips an
+// evidence flag, this test's expected values MUST be synced in the same change.
+test("loadS2Evidence: the checked-in real evidence file → both true (DELIVERY-C/D)", () => {
   const p = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "chart2-s2-delivery.json");
-  assert.deepEqual(loadS2Evidence(p), { fullManifestPublished: false, foreignInstallE2eGreen: false });
+  assert.deepEqual(loadS2Evidence(p), { fullManifestPublished: true, foreignInstallE2eGreen: true });
 });
 
 // ── selftest() — the module's own embedded RED+GREEN fixture suite ──────────────────────────────
@@ -199,19 +199,41 @@ test("CLI: --help → usage, exit 2", () => {
   assert.equal(r.status, 2);
 });
 
-test("CLI: against THIS repo (default root) → cov 0.0, version-consistent=false, exit 0", () => {
+test("CLI: against THIS repo (default root) → cov 3/3 (versions consistent, manifest + foreign all green), exit 0", () => {
   const r = spawnCli([]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /S2 Delivery-completeness cov = 0 /);
-  assert.match(r.stdout, /version-consistent=false/);
-  assert.match(r.stdout, /manifest-published=false/);
-  assert.match(r.stdout, /foreign-install-green=false/);
+  assert.match(r.stdout, /S2 Delivery-completeness cov = 1 \(3\/3/);
+  assert.match(r.stdout, /version-consistent=true/);
+  assert.match(r.stdout, /manifest-published=true/);
+  assert.match(r.stdout, /foreign-install-green=true/);
 });
 
-test("CLI: explicit repoRoot arg → cov 0.0 against the real repo", () => {
+test("CLI: explicit repoRoot arg → cov 3/3 against the real repo", () => {
   const r = spawnCli([REPO_ROOT]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /cov = 0 \(0\/3/);
+  assert.match(r.stdout, /S2 Delivery-completeness cov = 1 \(3\/3/);
 });
 
-}
+// AC2 negative control (fail-closed): a temp repo whose evidence file has BOTH flags false must
+// still compute cov 0.0 — if a delivery ever removes/negates the evidence without the code noticing,
+// this assertion catches the regression. Drifted versions + both-false evidence → 0/3.
+test("CLI: negative control — temp repo with both-false evidence → cov 0.0 (fail-closed)", () => {
+  const root = writeFixtureRepo(["0.3.8", "0.3.5", "0.3.22", "0.3.16", "0.3.5"]); // drifted → version-consistent=false
+  const evDir = path.join(root, "experiments", "quay-perpetual-stream");
+  fs.mkdirSync(evDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(evDir, "chart2-s2-delivery.json"),
+    JSON.stringify({ fullManifestPublished: false, foreignInstallE2eGreen: false })
+  );
+  try {
+    const r = spawnCli([root]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /S2 Delivery-completeness cov = 0 \(0\/3/);
+    assert.match(r.stdout, /version-consistent=false/);
+    assert.match(r.stdout, /manifest-published=false/);
+    assert.match(r.stdout, /foreign-install-green=false/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+

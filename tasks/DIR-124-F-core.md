@@ -1,7 +1,7 @@
 ---
 id: DIR-124-F-core
 title: "Ground-truth registry data + CLI: inject, validate, promote from seed facts"
-status: todo
+status: done
 labels:
   - directive
   - human-steered
@@ -12,14 +12,16 @@ extra:
   schema: v1
 ---
 
-**PAUSED (2026-08-02, prepare-pipeline reduction — `docs/analysis/prepare-pipeline-reduction-plan.md`):**
-`blocked-by: prepare-pipeline-reduction`. This task's premise assumes the CURRENT prepare
-pipeline shape (ProposalReview + 3-round PlanCheck). That shape is being reduced to three
-mechanical confirmations (mechanism count, AC executability, Touches completeness), which
-changes this task's value. NOT cancelled — re-evaluate after stage B–D of the reduction plan
-lands and real dispatch data is available. Do not schedule until then.
-
 **type:** execution
+
+**ADR-022 关闭（2026-08-09，manager 代写，人 17:4x 裁定关闭，随父任务 DIR-124-F 一并关闭）**
+
+原为 DIR-124-F 三个子任务之一（Registry 数据 + CLI + 种子 + 校验）。载体是 `prepare-milestone.js`
+的 PlanAuthor/PlanCheck 注入点——**已被 ADR-022（2026-08-03 accepted）物理删除**。
+
+意见：见父任务 `DIR-124-F` 关闭说明。
+
+全文见 git 历史（`git log -p -- tasks/DIR-124-F-core.md`）。
 
 ## Proposal
 
@@ -35,62 +37,5 @@ Merged from original DIR-124-F1 (template hygiene gate), F3 (touches coverage), 
 reconciliation), and F5 (seed integrity) — all are aspects of ONE mechanism: a single-source
 registry of repo-invariant facts with a CLI surface.
 
-### Registry shape
-
-```json
-{
-  "schemaVersion": "ground-truth-v1",
-  "version": 1,
-  "contentHash": "<sha256 of canonicalized sorted facts>",
-  "facts": [
-    {"id": "cli-quay-ts-path", "category": "cli-paths", "fact": "CLI binary is packages/quay/bin/quay.ts, not quay.js", "adrRef": "ADR-019"},
-    ...
-  ]
-}
-```
-
-### CLI surface
-
-- `--inject [--categories <cat,...>]` — emit subset as prompt-ready text
-- `--validate [--receipt <preparation.json>]` — schema + category whitelist + hash
-- `--promote <fact-json>` — schema/category validate, append, version bump, recompute hash
-- `--selftest` — verify internal invariants
-- `--version`, `--hash`
-
-### Categories (from repo-ground-truth.md)
-
-cli-paths, coverage-format, touches-matching, provider-defaults, module-signatures,
-evidence-surface, subprocess, gate-resolution
-
-## Acceptance Criteria
-
-- [ ] AC1: `ground-truth-registry.json` exists, seeded from 8 repo-ground-truth.md sections with M205 correction
-- [ ] AC2: `ground-truth-registry.ts` CLI module exists (both mirrors, byte-identical)
-- [ ] AC3: `--inject` emits all facts as prompt-ready text (or subset by category)
-- [ ] AC4: `--validate` checks schema, category whitelist, contentHash — non-zero exit on mismatch
-- [ ] AC5: `--promote` appends a fact, bumps version, recomputes hash — rejects duplicate exact-match or unknown category
-- [ ] AC6: `--selftest` verifies internal invariants (version > 0, contentHash matches, facts all have valid categories)
-- [ ] AC7: `prepare-milestone.js` injects registry facts into PlanAuthor/PlanCheck prompts via `_groundTruthAgentCall`
-- [ ] AC8: Template hygiene: `extractSection("Touches")` rejects prose after `## Touches` (`touches-overbroad`), surfaced via `prepare-admission-check.ts`
-- [ ] AC9: M205 correction applied: the false parenthetical-backtick-breaking claim is replaced with the true undeclared-Plan-Files-line cause
-
-## Definition of Done
-
-Standard `inherited-core.md` DoD clauses apply.
-
-- [ ] Tests pass: both mirrors byte-identical, `--validate` passes on seeded registry, `--promote` + `--validate` round-trip
-- [ ] `prepare-milestone.js` PlanAuthor/PlanCheck prompts include injected facts
-- [ ] Independent wiring audit confirms zero stale facts (M205 correction verified)
-
 ## Touches
-
-- experiments/quay-perpetual-stream/scripts/ground-truth-registry.json
-- plugin/scripts/ground-truth-registry.json
-- experiments/quay-perpetual-stream/scripts/ground-truth-registry.ts
-- plugin/scripts/ground-truth-registry.ts
-- .claude/workflows/prepare-milestone.js
-- plugin/workflows/prepare-milestone.js
-- experiments/quay-perpetual-stream/scripts/task-schema.ts
-- plugin/scripts/task-schema.ts
-- experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts
-- plugin/scripts/prepare-admission-check.ts
+- tasks/DIR-124-F-core.md（自身文件）

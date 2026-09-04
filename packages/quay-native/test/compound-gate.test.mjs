@@ -159,7 +159,7 @@ Real proposal content, long enough to clear the minimum section length bar.
   });
   {
     const r = store.check("LEAF-READY-INCOMPLETE-AC");
-    assert(r.ok === false, "primitive ready task with incomplete AC -> ok:false (unchanged AC-only gate for leaves)");
+    assert(r.ok === false, "primitive ready task with incomplete AC -> ok:false (AC5 backstop: AC checked-state still required at execute->done)");
   }
 
   console.log(failures === 0 ? "All QN-012 compound-gate tests passed" : `${failures} FAILURE(S)`);

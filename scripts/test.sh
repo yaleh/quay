@@ -18,10 +18,17 @@
 # the test-framework-policy static check below (AC6): every file in the glob must either import
 # node:test or be on the legacy exemption list (`plugin/test-framework-policy-exemptions.txt`,
 # currently 34 files — the shrink-only ratchet of AC4, it can only get shorter, never longer).
-# NEW files must also carry a `// @test-group <product|engine|governance>` declaration (AC5);
-# existing files may omit it and default to `engine`. The check does NOT migrate the 34 legacy
-# hand-rolled-harness files — it stops the 35th and turns each existing file's eventual conversion
-# (e.g. relation-sync's harness) into the ratchet.
+# NEW files must also carry a `// @test-group <product|engine|serial|lowconc>`
+# declaration (AC5); existing files may omit it and default to `engine`. `serial` is the
+# load-sensitive family routed to its own concurrency-1 phase — nested-suite-spawn + real-wall-
+# clock-wait + the real-install install/quay-init family, the latter admitted at round 162 after
+# rotating flakes across groups under full-suite load
+# (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests +
+# gap-install-family-tests-rotate-flakes-under-full-suite); `lowconc` is the hermetic-but-load-
+# sensitive session-observation family routed to its own low-concurrency phase
+# (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). The check does NOT migrate the 34
+# legacy hand-rolled-harness files — it stops the 35th and turns each existing file's eventual
+# conversion (e.g. relation-sync's harness) into the ratchet.
 #
 # TEST-ISOLATION CONTRACT (gap-test-isolation-contract-is-unwritten, AC1-AC6): a test must never
 # touch something it does not exclusively own (fixed __dirname/.tmp-* paths, the SHARED build
@@ -34,7 +41,7 @@
 #
 # Usage:
 #   scripts/test.sh                                  # default groups product,engine; runs the full
-#                                                    # deduped glob (governance files self-skip)
+#                                                    # deduped glob
 #   scripts/test.sh --group <name[,name]>            # run only the given group(s); sets QUAY_TEST_GROUPS
 #   scripts/test.sh --group <name[,name]> <file...>  # run explicit files with QUAY_TEST_GROUPS set
 #   scripts/test.sh --list-groups                    # report per-group file counts (deduped by realpath)
@@ -44,11 +51,31 @@
 #   scripts/test.sh --test-concurrency=4           # flags-only: extra node --test flag + the DEFAULT glob
 #   scripts/test.sh --experimental-test-coverage   # flags-only form also passes through (default glob kept)
 #   QUAY_TEST_LIVE_GITHUB=1 scripts/test.sh   # opt IN to the 3 live/conformance files too
+#   scripts/test.sh --for-task <id>                # task-scoped: change-relevant static checks + the
+#                                                  #   task's ## Touches-selected test set (scoped tier)
+#   scripts/test.sh --scoped <id>                  # same as --for-task (the scoped measure surface)
+#   scripts/test.sh --scoped <file...>             # scoped tier keyed to the given files as touches
+#   scripts/test.sh --static-checks-operational    # OPERATIONAL-class (runtime-state) checkers only — explicit
+#                                                  #   opt-in, no tests. The 11 checks that read the loop's LIVE runtime
+#                                                  #   state; home = the ACTIVE host, NOT the full-suite gate (passive
+#                                                  #   checkouts must go green on code alone — 2026-09-02 ruling).
+#   scripts/test.sh --static-checks                # gate-only: run the CODE-class static-check set, no tests
+#
+# SCOPED STATIC-CHECK TIER (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC2/AC6):
+#   A task-scoped run (`--for-task` / `--scoped`) runs the change-relevant static-check subset —
+#   checkers whose object intersects the task's `## Touches` plus the ## Contract consumer on the
+#   TOUCHED task files — SKIPPING checker-mutation-check (~13s) and unrelated repo-level ratchets.
+#   The COMPLETE set (run_static_checks) is unchanged and always runs in full-suite mode (the outer
+#   verification-round gate is NOT weakened); a scoped skip is DEFERRED to the full gate, never
+#   dropped. Trade-off: scoped = fast feedback on the change; full = complete gate (AC4-ii:
+#   an unrelated repo-level ratchet violation is caught by full, not by the scoped run).
 #
 # Layer grouping (gap-test-suite-has-no-layer-grouping):
 #   Every test file declares its layer at the very top: `// @test-group <name>` where name is
-#   one of product / engine / governance (AC1). The DEFAULT for an undeclared file is `engine`
-#   (AC7) — the current work surface, so a missed declaration never silently vanishes.
+#   one of product / engine / serial / lowconc (AC1). The DEFAULT for an undeclared
+#   file is `engine` (AC7) — the current work surface, so a missed declaration never silently
+#   vanishes. (`governance` is RETIRED — gap-retire-governance-group-merge-into-bucket — its
+#   files re-tagged to their real phase; a file still declaring it now fails closed.)
 #
 #   - product     packages/*/test/ — Core CLI, Provider ABI, gate engine, web UI; plus
 #                 plugin/test/plugin-packaging.test.mjs — plugin-packaging (incl. M136's
@@ -56,22 +83,48 @@
 #                 (AC8 of gap-sync-vendor-drift-mislabelled-as-task-schema).
 #   - engine      methodology EXECUTION path (the rest of plugin/test + the execution-path
 #                 tests under experiments/quay-perpetual-stream/test/)
-#   - governance  exp5 metering (PARKED but not deleted — exp6 phase-2 needs it; the in-file
-#                 skip block makes it visible as `skipped` in default runs instead of absent)
+#   - serial      KNOWN-LOAD-SENSITIVE A/B-class family (nested-suite-spawn, real-wall-clock-wait)
+#                 + the REAL-INSTALL install/quay-init family, routed OUT of the concurrency-N body
+#                 into its own phase at concurrency 1. The serial admission criterion
+#                 (gap-serial-group-recompose-nested-runner-criterion — nested-runner-only) was
+#                 EXTENDED at round 162 to admit the install/quay-init real-install family after it
+#                 rotated flakes across groups under full-suite load (rounds 160/161/162 — a
+#                 different file each round: drift-report/governance, loop-core/serial,
+#                 install-config/lowconc): the whole family is now consolidated into the
+#                 concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
+#                 (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests).
+#   - lowconc     hermetic-but-load-sensitive B-class session-observation family (each private
+#                 socket / wall-clock wait) — its own phase at host-derived concurrency (= serial).
+#                 The install/quay-init family LEFT this group for serial in round 162
+#                 (gap-install-family-tests-rotate-flakes-under-full-suite); only the session-
+#                 observation wall-clock files remain.
+#                 (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive).
 #
 #   The glob now ALSO includes experiments/quay-perpetual-stream/test/*.test.mjs (AC2), so the
 #   44 previously-invisible files always appear in the output. Symlinks under that dir that
 #   point back into plugin/test/ are deduped by realpath (AC3) so they never run twice.
-#   Non-default-group files self-skip BEFORE their heavy imports (AC8), so `--group product`
-#   does not pay the governance load cost. Default (no --group) = product,engine (AC4).
+#   Default (no --group) = product,engine (AC4). `--group product` runs only the product group —
+#   the load-sensitive serial/lowconc files route to their own phases, never the default body.
 #
 # --test-concurrency default is now DERIVED (gap-no-resource-awareness-heavy-ops-run-blind, AC5):
-#   default = max(1, floor(nproc / AMPLIFICATION))   with AMPLIFICATION ≈ 2.1 (measured, see
-#   default_test_concurrency below). The old hardcoded 8 was measured 10.3% faster than the runtime
-#   default by ADR-019 — but that was measured WITHOUT a second layer running concurrently; on a
-#   4-core box, 8 workers + spawned subprocesses = 17 processes = a 4.25× oversubscription, the
-#   measured steady state of a single full suite. A later --test-concurrency=N on the command line
-#   overrides the derived default (node --test is last-flag-wins).
+#   default = max(1, floor(nproc / AMPLIFICATION))   with AMPLIFICATION = 1.0 (see
+#   default_test_concurrency below). AMPLIFICATION was 2.1 (2026-08-03 measured process
+#   amplification 17/8 ≈ 2.125) until the AC5 cost-side experiment finally ran
+#   (gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible, 2026-08-08):
+#   the same selected set at concurrency 1/4/8 produced ZERO cancelled at every level — the
+#   cost-side criterion (CANCELLED dimension) that refuted "lower concurrency to avoid cancel".
+#   Wall-clock is a SEPARATE axis: in this selected set c4 was fastest (24s vs 57.5s at 1, 27.3s
+#   at 8 on this 4-core box), while the outer's full-suite rounds at laneCount 8 (13+ runs,
+#   2026-08-08) were wall-clock FASTER than lane 4 (median ~783s vs ~1302s, −22%~−40%, directional
+#   only — suite composition was changing). Do NOT read "nproc = wall-clock sweet spot" as the
+#   derivation's justification: the derived default is now nproc (4 on this box) on the CANCELLED
+#   dimension; wall-clock is a separate axis needing a controlled comparison
+#   (gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2 lane 4 vs 8). The old
+#   hardcoded 8 was a 4.25× oversubscription (17 processes on 4 cores), but the cost side of that
+#   oversubscription was never shown to cancel/fail — the outer's own full-suite verification
+#   rounds at laneCount 8 (13+ runs, 2026-08-08) all show cancelled 0. A later
+#   --test-concurrency=N on the command line overrides the derived
+#   default (node --test is last-flag-wins).
 #
 # gap-test-sh-flags-only-form-silently-runs-a-different-suite: the flags-only form
 # (scripts/test.sh --test-concurrency=4, --experimental-test-coverage, ...) MUST keep the default
@@ -105,188 +158,667 @@
 
 set -euo pipefail
 
+# ── FORCE_COLOR normalization (gap-suite-force-color-ansi-test-sh-normalize) ──────────────────────
+# FORCE_COLOR=3 in the ambient env makes Node's console.log emit ANSI color codes EVEN WHEN piped
+# (\x1B[33m…\x1B[39m) — deterministically breaking any output-assertion test whose spawnSync'd node
+# inherits it (fan-in-workflow-lock.test.mjs:171, instrument-failure-check.sh's node -e parse; the same
+# root as gap-suite-round-pass-fail-cancel-parser-breaks-under-force-color-ansi, superseded by this).
+# Normalize HERE at the entry so EVERY child process / spawnSync inherits the unset var (AC2:
+# entry-level, never a single-point patch). `unset` (⛔ not NO_COLOR=1 — Node IGNORES NO_COLOR while
+# FORCE_COLOR is set, warns and still colors) restores node's own TTY detection; suite subprocesses are
+# always piped so they emit no color regardless of a parent FORCE_COLOR value (1/2/3).
+unset FORCE_COLOR
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-# run_static_checks — the repo-wide invariants that run on EVERY test-running invocation,
-# independent of which test files were requested (fast; the metadata modes --list-groups/
-# --list-files skip them). CI inherits them because its only test step is `bash scripts/test.sh`.
-run_static_checks() {
-  # QUAY_TEST_SKIP_STATIC_CHECKS=1 — set by 0-match / pure-selector NESTED invocations (same shape as
-  # QUAY_TEST_SKIP_DIST_BUILD): the outer suite already ran these whole-store checks at its start, and
-  # a nested smoke run that matches 0 tests does not re-verify them. Skipping avoids a real race: a
-  # sibling test's transient untracked fixture (runner-grouping AC7's zz-*-undeclared.test.mjs) can
-  # appear as a spurious "NEW file without @test-group" to test-framework-policy-check if it exists
-  # during this window (surfaced 2026-08-03 in the stranded+parser combined suite).
-  if [ "${QUAY_TEST_SKIP_STATIC_CHECKS:-}" = "1" ]; then
-    echo "scripts/test.sh: QUAY_TEST_SKIP_STATIC_CHECKS=1 — skipping static checks (nested 0-match/smoke run; outer suite ran them)"
+# main_root derivation → plugin/scripts/runner-concurrency.ts deriveMainRoot() (SPEC P4 套件入口收进 TS).
+# QUAY_MAIN_CHECKOUT (empty-as-unset) → repo_root; then the git-derived FIRST worktree is ALWAYS
+# preferred when it differs from repo_root (full-suite-runner.ts launches with `--root <worktree>` and
+# sets QUAY_MAIN_CHECKOUT to the WORKTREE — whose project-dir slug has no session transcripts ⇒ a false
+# "fan-in-without-workflow" RED; the git primary checkout is authoritative). The TS reader consumes the
+# FULL porcelain stream (no early-exit awk ⇒ no EPIPE/SIGPIPE) and fails open to repo_root on a non-git
+# cwd — behavior byte-identical to the removed bash (gap-gitignored-carriers-absent-in-verify-worktree +
+# gap-fan-in-worktree-quay-provisioning; the 2026-08-28 awk-SIGPIPE fix is subsumed by the full-stream read).
+main_root="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --derive-main-root "${repo_root}")"
+
+# ── gap-fan-in-worktree-quay-provisioning — the worktree suite must read the MAIN's .quay ─────────
+# `.quay/` is gitignored ⇒ `git worktree add` copies NONE of it. The fan-in full suite runs DIRECTLY
+# in the task worktree (`cd ${worktree} && bash scripts/test.sh` — no full-suite-runner provisioning),
+# so `<worktree>/.quay/config.yml` was absent or stale ⇒ the suite's repo-root resolution
+# (_findRepoRoot) and config/gates tests (M63 ts-typecheck, blocked-signal, cap-from-gate,
+# monitor-mount, run-identity — ruled-gap fan-in: 72 environmental REDs across 22 files, ALL green
+# on the main checkout) failed environmentally. This is the OTHER half of gap-gitignored-carriers:
+# the carriers fix (QUAY_MAIN_CHECKOUT) pointed CHECKERS at the main; this snapshots the main's
+# .quay/ (config/gates/runtime carriers) into the worktree so the SUITE reads the same data.
+# refresh-worktree-quay.sh is a no-op on a main-checkout run (its linked-worktree guard) and is
+# idempotent; the copy source is QUAY_MAIN_CHECKOUT when set (full-suite-runner one-shot) else the
+# git-derived main worktree (fan-in direct path).
+# Metadata probes (--list-files / --list-groups, incl. `--group X --list-files`) only LIST files —
+# they run NO tests, so no .quay refresh is needed. Skipping them keeps the runner-grouping family's
+# nested probes cheap: each probe previously paid a ~23s refresh (the enumeration iterated
+# node-compile-cache's 346K+ ignored files), and the widened per-probe window turned the transient
+# zz-unknown-group fixture (runner-grouping-serial-anti-stomp) into a near-certain AC6 false red.
+# Real runs (plain / --group X without --list-files / --for-task) still refresh.
+case " $* " in
+  *"--list-files"*|*"--list-groups"*) ;;
+  *)
+    if [ -f "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" ]; then
+      bash "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" "${repo_root}" \
+        || echo "scripts/test.sh: WARNING — refresh-worktree-quay.sh failed (exit $?); the suite may be environmentally red in this worktree" >&2
+    fi
+    ;;
+esac
+
+# ── criterion-cost recording (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) ──────────
+# Every checker executed by run_static_checks (and the scoped tier, which evals the SAME wrapped
+# command lines) appends ONE `{name, ms, n, load, at}` line to .quay/checker-cost.jsonl on exit —
+# pure append, zero judgment (no threshold, no flag). The load field splits "the criterion got
+# slower" into "n got bigger" vs "the machine got busier" (the ready-pool-check 35.8→91.2→157.0
+# attribution case). run_checker must be defined here, BEFORE run_static_checks / the scoped
+# selector emit command lines that reference it.
+source "${repo_root}/plugin/scripts/checker-cost-lib.sh"
+
+# ── Node compile cache (gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses) ──────────
+# Every `node --experimental-strip-types` spawn in the suite re-parses .ts from source because
+# NODE_COMPILE_CACHE was set nowhere in the repo (measured 2026-08-04: ~450ms cold vs ~150ms warm
+# per spawn of plugin/scripts/task-schema.ts — ~2.6-3x per spawn, NOT suite wall-clock; see the
+# task body for why wall-clock A/B is the wrong axis). Node's DEFAULT cache location is
+# $TMPDIR/node-compile-cache — which on this machine is tmpfs (RAM); enabling the cache without
+# pinning a DISK path would grow a compile cache in memory (the OOM family of
+# gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs). So we pin it to a
+# DISK, gitignored, repo-root-relative directory (`.quay/node-compile-cache`, covered by
+# `**/.quay/node-compile-cache/` in .gitignore) and export it so EVERY spawn in the suite (incl.
+# plugin/test subprocesses, AC4) inherits it.
+# FAIL-OPEN (AC3): if the dir cannot be created we warn and leave the var unset — node then runs
+# uncached (slow but correct). The cache is a PURE SPEEDUP, never a single point of failure. A
+# user-supplied NODE_COMPILE_CACHE is honored verbatim (explicit opt-out from the disk default).
+node_compile_cache_dir="${NODE_COMPILE_CACHE:-${repo_root}/.quay/node-compile-cache}"
+if mkdir -p "${node_compile_cache_dir}" 2>/dev/null; then
+  export NODE_COMPILE_CACHE="${node_compile_cache_dir}"
+else
+  echo "scripts/test.sh: WARNING — could not create NODE_COMPILE_CACHE dir '${node_compile_cache_dir}'; running uncached (slow but correct, AC3 fail-open)" >&2
+fi
+
+# ── per-file duration reporter wiring (gap-install-suite-cost-instrument-reporter-not-wired) ───────
+# measure-suite-reporter.mjs EXISTS + is unit-tested, but the REAL full suite never loaded it (the
+# 34 file-level wall-clock lines in the log were LEGACY harness self-prints, not reporter output).
+# This helper produces the node --test reporter flags that load it into EVERY real-suite node --test
+# invocation (main body, serial phase, lowconc phase, and the --group serial/lowconc paths) so the
+# full-suite log carries per-file wall-clock for BOTH node:test files AND the 34 legacy harnesses
+# (>34 covered files). The flags are DUAL-REPORTER: spec keeps the normal spec/TAP summary on stdout
+# (the outer runner greps it for 判绿 markers), and measure-suite-reporter.mjs emits __PERFILE__ +
+# __GROUP__ + __CEILING__ (封顶者/该拆) lines to stderr, which full-suite-runner.ts tees into
+# .quay/full-suite.log. Mechanical anti-regression: plugin/test/measure-suite-reporter.test.mjs
+# asserts this wiring exists, so removing it flips the suite red (the 7th instance is prevented).
+suite_reporter_flags() {
+  printf '%s\n' \
+    "--test-reporter=spec" \
+    "--test-reporter=${repo_root}/plugin/scripts/measure-suite-reporter.mjs" \
+    "--test-reporter-destination=stdout" \
+    "--test-reporter-destination=stderr"
+}
+
+# run_static_checks (CODE-class) + run_operational_checks (OPERATIONAL-class runtime-state registry) —
+# the checker registries (@static-tier/@static-object/@static-class annotations) — extracted to
+# plugin/scripts/runner-static-gate.ts (gap-ac128-hub-split-harness-concerns). Sourced here so the
+# suite's dispatch paths call the SAME function bodies; select-static-checks-for-touches.ts and
+# checker-mutation-check.sh now parse the registries from that file (the single source, never a
+# hand-maintained list). runner-static-gate.ts is a HUB file (suite-bucket-hub-list.ts) — harness-critical.
+source "${repo_root}/plugin/scripts/runner-static-gate.ts"
+# run_doc_checks — the DOC-CLASS static checks (AC51 断言面拆分, gap-ac51-assertion-surface-split,
+# SPEC §13). These are the doc-consistency checkers whose judgment objects are ONLY document files
+# (tick-core docs, driver docs, CLAUDE.md, docs/proposals) and which never execute tested product
+# code. AC51 moves them OUT of the full-suite gate (run_static_checks) and INTO the pre-commit
+# moment: `scripts/test.sh --static-checks-doc` is the ONLY caller (wired into
+# plugin/scripts/precommit-guard.ts). They run at commit time — seconds-level feedback instead of
+# waiting a full 8-minute suite round — and because they no longer run in the suite, editing a doc
+# in the main checkout no longer makes any running round red.
+#
+# Each checker carries `# @static-class doc` — the mechanical marker that:
+#   - precommit-guard.ts parses to exclude doc files from the running-round assertion surface, and
+#   - checker-mutation-check.sh keeps in its manifest (the moved checkers' mutation cases still run
+#     in the full-suite gate — the L_S instrument is NOT weakened by the split).
+# The scoped static-check selector (select-static-checks-for-touches.ts) parses run_static_checks
+# only, so doc-class checkers are absent from the scoped tier by construction — a task-scoped run
+# does NOT re-pay them (pre-commit is their home).
+run_doc_checks() {
+  echo "== doc-class static checks (AC51 — pre-commit only; NOT part of the full-suite gate) =="
+  local _doc_rc=0
+  # Sequential (never parallel): the pre-commit path must attribute failures synchronously. If a
+  # caller left RUN_CHECKER_PARALLEL=1 set, force it off — backgrounded checkers would return 0
+  # immediately and mask a doc-check failure.
+  RUN_CHECKER_PARALLEL=0
+  set +e
+  # @static-class doc
+  # @static-object docs/proposals/ orchestration/
+  echo "  [doc-check] strategic-doc-staleness-check"
+  run_checker "strategic-doc-staleness-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/strategic-doc-staleness-check.ts" --root "${repo_root}"
+  _doc_rc=$(( _doc_rc || $? ))
+  # @static-class doc
+  # @static-object plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md orchestration/QUAY-OUTER-HANDOFF.md
+  echo "  [doc-check] drive-contract-check"
+  run_checker "drive-contract-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/drive-contract-check.ts" --root "${repo_root}"
+  _doc_rc=$(( _doc_rc || $? ))
+  # @static-class doc
+  # @static-object plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md CLAUDE.md plugin/scripts/threshold-scope-check.ts plugin/test/threshold-scope-check.test.mjs docs/analysis/threshold-scope-violations.md
+  echo "  [doc-check] threshold-scope-check"
+  run_checker "threshold-scope-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/threshold-scope-check.ts" --root "${repo_root}"
+  _doc_rc=$(( _doc_rc || $? ))
+  # @static-class doc
+  # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md plugin/scripts/state-worded-clause-check.ts plugin/test/state-worded-clause-check.test.mjs
+  echo "  [doc-check] state-worded-clause-check"
+  run_checker "state-worded-clause-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/state-worded-clause-check.ts" --root "${repo_root}"
+  _doc_rc=$(( _doc_rc || $? ))
+  # @static-class doc
+  # @static-object orchestration/orchestrator-tick-core.md plugin/scripts/red-on-omission-audit.ts plugin/test/red-on-omission-audit.test.mjs
+  echo "  [doc-check] red-on-omission-audit"
+  run_checker "red-on-omission-audit" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/red-on-omission-audit.ts" --root "${repo_root}"
+  _doc_rc=$(( _doc_rc || $? ))
+  # @static-class doc
+  # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md orchestration/outer-brief-2026-08-04-third-restart.md orchestration/QUAY-OUTER-HANDOFF.md orchestration/exp6-phase1-sustained-unattended-operation.md plugin/loop/orchestrator-loop-tick.md plugin/scripts/tick-core-static-check.ts plugin/test/tick-core-static-check.test.mjs
+  echo "  [doc-check] tick-core-static-check"
+  run_checker "tick-core-static-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/tick-core-static-check.ts" --root "${repo_root}"
+  _doc_rc=$(( _doc_rc || $? ))
+  # @static-class doc
+  # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md plugin/loop/manager-tick-core.md plugin/loop/orchestrator-tick-core.md plugin/loop/fast-mode-tick-core.md
+  echo "  [doc-check] tick-core-drift-check"
+  # gap-tick-core-drift-check-not-in-suite + gap-ac90-delivery-copy-drift-gate: the three execution
+  # cores ship in TWO copies each — orchestration/*-tick-core.md (what the three layers ACTUALLY
+  # read every tick) and plugin/loop/*-tick-core.md (the shipped/laid-down copy quay-init --loop
+  # delivers). quay-init's `--check-drift` report already LISTED these but had NO suite consumer
+  # (the fifth "instrument exists, consumer doesn't" instance — A12 line :31 vs :45 actually misled
+  # a round). Wired here at the pre-commit doc surface (AC51 — the check's objects are tick-core
+  # DOCS, so it lives with the sibling tick-core-static-check in run_doc_checks, not the code-class
+  # run_static_checks gate).
+  # AC90 (gap-ac90-delivery-copy-drift-gate): HARD gate. The pairs are reconciled — the fast-mode
+  # copy landed to 正本 semantics under normalized-byte (init/SKILL.md:71 非 byte-identical; the
+  # behavioral body from `## A.` must match), the manager pairs are pointers — so ANY drift
+  # (改正本而副本不落地 / 副本单边编辑) blocks the commit. The pre-reconcile --no-block window is
+  # closed; the hard `--check-drift` mode is mutation-tested (checker-mutation-cases/
+  # tick-core-static-check.sh INJECT #4/#5/#6, incl. the AC90 source-edit negative control).
+  run_checker "tick-core-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/tick-core-static-check.ts" --check-drift --root "${repo_root}"
+  _doc_rc=$(( _doc_rc || $? ))
+  # @static-class doc
+  # @static-object orchestration/manager-loop-tick.md plugin/loop/fast-mode-loop-tick.md plugin/loop/manager-loop-tick.md plugin/loop/orchestrator-loop-tick.md
+  echo "  [doc-check] instrument-failure-check"
+  run_checker "instrument-failure-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/instrument-failure-check.ts" --gate --root "${repo_root}"
+  _doc_rc=$(( _doc_rc || $? ))
+  set -e
+  return "$_doc_rc"
+}
+
+# run_scoped_static_checks — the change-relevant static-check TIER for SCOPED task runs
+# (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC3/AC6). A per-task scoped run used to pay
+# the FULL run_static_checks fixed overhead (~16s, ~13s of it checker-mutation-check) even when it
+# ran 1-2 test files. Scoped mode runs ONLY the checkers whose object intersects the task's
+# `## Touches` (e.g. test-framework-policy/isolation when a test file is touched, the code/shell
+# ratchets when their objects are touched) PLUS the always-relevant ## Contract consumer on the
+# TOUCHED task files (AC1's exemplar — it has already caught 7 Contract violations), SKIPPING
+# checker-mutation-check and the unrelated repo-level ratchets.
+#
+# Since AC51 (gap-ac51-assertion-surface-split) the DOC-CLASS checkers live in run_doc_checks
+# (pre-commit), so they are absent from the scoped registry by construction — a doc-file touch does
+# NOT select a doc checker in scoped; the pre-commit hook (precommit-guard.ts) runs them at commit
+# time. A scoped skip of a code-class repo-level ratchet is DEFERRED to the full-suite gate, never
+# dropped (AC4-ii: an unrelated repo-level ratchet violation is not caught by the scoped run and
+# MUST be caught by the full run). The touch→checker relevance mapping is MECHANICAL
+# (select-static-checks-for-touches.ts parses the `# @static-tier` / `# @static-object` annotations
+# in run_static_checks — the SAME single source checker-mutation-check.sh parses; never a
+# hand-maintained list, AC3).
+run_scoped_static_checks_sel() {
+  # "$@" = --task <id> OR --touches <csv>
+  if [ "${QUAY_TEST_NESTED:-}" = "1" ] && [ "${QUAY_TEST_NESTED_ROOT:-}" = "${repo_root}" ]; then
+    echo "scripts/test.sh: QUAY_TEST_NESTED=1 — skipping scoped static checks (nested invocation; outer suite ran them)"
     return 0
   fi
-  echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
-  bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
-  echo "== test-framework-policy check (gap-no-test-framework-policy-for-new-tests, AC1/AC3-AC5) =="
-  bash "${repo_root}/plugin/scripts/test-framework-policy-check.sh" "${repo_root}"
-  echo "== test-isolation contract check (gap-test-isolation-contract-is-unwritten, AC1-AC6) =="
-  bash "${repo_root}/plugin/scripts/test-isolation-check.sh" "${repo_root}"
-  echo "== ## Contract consumer check (gap-dispatch-gate-has-no-checklist-and-no-trace, AC6) =="
-  # gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed: this checker had NO runner — its
-  # shrink-only ratchet list (docs/analysis/contract-violations.md) grew 1 -> 12 unnoticed because
-  # the only consumer was an ad-hoc pre-dispatch run. Wiring it here (same place as the other three
-  # whole-store checkers) gives every test-running invocation — and CI, which inherits it via its
-  # single `bash scripts/test.sh` step — the ratchet enforcement for free. exit 1 on ratchet growth
-  # aborts the suite (set -euo pipefail), so a NEW violation red-lights the commit, not the dispatch.
-  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-contract-check.ts" --root "${repo_root}"
-  echo "== AC-carryover check (gap-nothing-checks-whether-a-done-task-left-its-acs-behind, AC6) =="
-  # A done task may leave ACs unchecked ONLY if a successor `## Carries` section names them — the
-  # gate on the gates: nothing previously noticed a done task closing with half its ACs unchecked and
-  # no carrier (measured 2026-08-03: session-liveness closed done with 8/16 unchecked, stage-2
-  # existed only because the outer happened to look). Wired here (same site as task-contract-check)
-  # so CI — whose only test step is `bash scripts/test.sh` — inherits it for free. The legacy
-  # baseline (docs/analysis/task-ac-carryover-baseline.md) is shrink-only: exit 1 on a NEW unowned
-  # AC aborts the suite (set -euo pipefail), red-lighting a done task that just closed with
-  # uncarried ACs instead of letting it merge silently.
-  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-ac-carryover-check.ts" --root "${repo_root}"
-  echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
-  # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
-  # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI
-  # workflow) appears in the manifest automatically and, until it gets a mutation case in
-  # plugin/scripts/checker-mutation-cases/, this gate FAILS — "a new checker with no mutation
-  # case" can never silently slip through (AC1b). --check runs every registered checker's
-  # mutation case (inject the defect it claims to catch → the checker MUST go red; restore →
-  # green) plus the two AC5 regression cases (the #6 zero-dependency-probe rename control and
-  # the #10 activity-present-telemetry-empty /live direction). `mutations_that_stayed_green`
-  # must be 0 (AC3), and the mechanism also mutates itself (AC4, --selftest).
-  bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check
+  if [ "${QUAY_TEST_SKIP_STATIC_CHECKS:-}" = "1" ]; then
+    echo "scripts/test.sh: QUAY_TEST_SKIP_STATIC_CHECKS=1 — skipping scoped static checks (nested 0-match/smoke run; outer suite ran them)"
+    return 0
+  fi
+  echo "== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) =="
+  local cmds
+  if ! cmds="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/select-static-checks-for-touches.ts" --root "${repo_root}" "$@" --commands 2>&1)"; then
+    echo "scripts/test.sh: scoped static-check selection FAILED — not silently skipping the gate" >&2
+    exit 1
+  fi
+  if [ -z "${cmds}" ]; then
+    echo "scripts/test.sh: scoped static checks — no change-relevant checkers selected (deferred to the full-suite gate)"
+    return 0
+  fi
+  local cmd
+  while IFS= read -r cmd; do
+    [ -n "${cmd}" ] || continue
+    echo "  scoped check: ${cmd}"
+    eval "${cmd}"
+  done <<< "${cmds}"
 }
+run_scoped_static_checks() { run_scoped_static_checks_sel --task "$1"; }
+run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"; }
 
 # ── derived default concurrency (gap-no-resource-awareness-heavy-ops-run-blind, AC5) ──────────────
 # node --test with concurrency N actually runs ~N × AMPLIFICATION node processes: each worker
 # spawns its own subprocesses. Measured 2026-08-03: a full suite at concurrency 8 peaked at
 # 17 node processes ⇒ ratio ≈ 2.125; a scoped concurrency-2 run of subprocess-heavy plugin tests
-# re-measured 3.0 per worker. The old hardcoded 8 on a 4-core box was a 4.25× oversubscription —
-# the measured steady state of a SINGLE full suite, not a product of concurrency. The default is
-# now derived:
+# re-measured 3.0 per worker. The derived default:
 #   default = max(1, floor(nproc / AMPLIFICATION))
-# which on this box gives floor(4 / 2.1) = 1 (~3 processes, under 4 cores).
+# AMPLIFICATION = 1.0 since the AC5 cost-side experiment finally ran
+# (gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible, 2026-08-08): the same
+# selected set (6 subprocess-heavy plugin test files, 86 tests) at concurrency 1/4/8 gave
+#   c1: 57.5s wall, 0 cancelled · c4: 24.1s, 0 cancelled · c8: 27.3s, 0 cancelled
+# — CANCELLED dimension: zero cancelled at 4 AND 8 refutes "lower concurrency to avoid cancel".
+#   Wall-clock is a SEPARATE axis (this selected set: c4 fastest; outer's full-suite laneCount-8
+#   rounds wall-clock faster than lane 4, −22%~−40% directional, 2026-08-08) — the derivation is
+#   justified by the cancelled dimension, NOT "nproc = the wall-clock sweet spot" (split per
+#   gap-claude-md-nproc-wallclock-claim-scope-correction). The old 2.1 amplification (which on this box gave 1, a
+# definite ~2.4× wall-clock penalty) was an unproven-conservative guard against oversubscription;
+# the cost side was never measured until now. On this box the default is now floor(4/1.0) = 4.
 #
-# TEMPORARILY OVERRIDDEN BACK TO 8 (2026-08-03, outer urgent correction): the derived default of 1
-# turned every full suite from ~8 min to ~55 min (Σ ≈ 3300s at concurrency 1 vs 460-570s wall at 8).
-# The AC5 tradeoff experiment was never run: the task body measured the amplification side (17/8 =
-# 2.125) but NOT the cost side — AC5 required running concurrency ∈ {2,4,6,8} once each in the same
-# low-pressure window with cancelled == 0 as the criterion. Meanwhile sigma measured Σ/wall ≈ 7.1 at
-# 8 lanes (8-lane is saturated, not overloaded), and its high-pressure negative control (41→99)
-# still captured 155/155 with no cancelled — "lower concurrency to avoid cancel" is unproven, while
-# the cost of lowering is a definite ~7×. REVERT this override to the derived formula once AC5's
-# tradeoff experiment is run and the choice is data-backed on BOTH sides. (stranded's OVER90 was a
-# direct casualty of the 55-min suites.)
+# CROSS-LAYER TOTAL BUDGET (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1/AC4): the
+# derivation is budget-aware — default = max(1, floor((total_budget − in_use) / AMPLIFICATION)),
+# where total_budget = nproc (the cross-layer authority, plugin/scripts/process-budget.sh) and
+# in_use = node-MainThread processes ALREADY running across all worktrees. When the machine is idle
+# (in_use = 0) this is exactly the nproc sweet spot above. When another worktree / a nested spawn is
+# already consuming node processes, this worker derives a SMALLER concurrency so the TOTAL across all
+# layers stays ≤ total_budget — nested spawns (quay-init family / session family) can no longer
+# multiply beyond the cap (the 17-19 procs / load 18.70 defect).
+#
+# REVERT HISTORY (single source of truth — gap-concurrency-derivation-reverted-but-doc-ac-and-tests-
+# all-still-report-derived): the derived default was TEMPORARILY pinned back to 8 and then restored.
+#   - 2026-08-03 (623d662b, outer urgent correction): pinned default_test_concurrency back to 8. The
+#     derived default of 1 turned every full suite from ~8 min to ~55 min (Σ ≈ 3300s at concurrency 1
+#     vs 460-570s wall at 8). AC5's tradeoff experiment never ran: the amplification side (17/8 =
+#     2.125) was measured but NOT the cost side. sigma measured Σ/wall ≈ 7.1 at 8 lanes (saturated,
+#     not overloaded); "lower concurrency to avoid cancel" was unproven, the cost of lowering was a
+#     definite ~7×. The pin was EXPLICITLY temporary ("REVERT this override once AC5's tradeoff
+#     experiment is run").
+#   - 2026-08-06 (gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived):
+#     REVERTED the pin — restored the derived formula. The drift being fixed: docs/ACs/tests all
+#     reported the derived form while the code returned a constant, and the unreachable call made
+#     default_concurrency_formula a dead organ. Reconciliation direction = "make reality catch up to
+#     claims": the derived formula IS the AC5 deliverable; the revert was a temporary override that
+#     never got its experiment. The cost side is already handled — ci.yml passes the EXPLICIT
+#     escape hatch (`--test-concurrency=N`, pinned there for the 10-min budget), so the derived
+#     default only governs LOCAL default runs, and full-suite-runner.ts already derives laneCount
+#     from nproc.
+#   - 2026-08-08 (gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible AC1/AC3):
+#     the AC5 cost-side experiment ran (see above) — zero cancelled at concurrency 4 AND 8, so the
+#     "avoid cancel" guard that justified AMPLIFICATION=2.1 (default 1 on 4 cores) is refuted.
+#     AMPLIFICATION lowered 2.1 → 1.0: the derived default is now nproc (4 on this box). The outer
+#     full-suite runner already verified at laneCount 8 with cancelled 0 across 13+ rounds
+#     (2026-08-08, .quay/verification-round.jsonl) — the oversubscription cost side never produced
+#     a cancelled/fail. The cross-layer TOTAL process budget is the responsibility of
+#     gap-test-concurrency-cap-does-not-scope-nested-spawns (AC4 cross-annotation), NOT this
+#     single-layer default.
 # An EXPLICIT --test-concurrency=N on the command line ALWAYS overrides (node --test is
 # last-flag-wins, and the user's flag is passed AFTER the default in the exec line).
 #
-# Test seams (unit test in plugin/test/resource-gate.test.mjs): RESOURCE_GATE_NPROC /
-# RESOURCE_GATE_AMPLIFICATION override the derivation inputs deterministically.
+# Test seams (unit test in plugin/test/resource-gate.test.mjs + plugin/test/runner-concurrency.test.mjs):
+# RESOURCE_GATE_NPROC / RESOURCE_GATE_CONCURRENT_SUITES / RESOURCE_GATE_OVERSUBSCRIPTION override the
+# derivation inputs deterministically (S read via concurrentSuiteSlots → suiteLockSlotCount, oversub =
+# 旋钮③ — env-read, never literals). The derivation functions below THIN-FORWARD to
+# plugin/scripts/runner-concurrency.ts (SPEC P4); suite-slot-lib.sh is STILL sourced for the single-flight
+# LOCK section further down (suite_slot_paths / spawn_suite_lock_hold_watchdog — the SAME bash S canonical
+# the TS suiteLockSlotCount is dual-checked against by suite-slot-ssot-check.ts I4, so the two cannot drift).
+source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
+
+# ── gap-suite-knobs-config-file-priority: config < env < CLI ──────────────────────────────────────
+# The suite: section in .quay/config.yml is the LOWEST-priority default for the 6 suite knobs. Read it
+# once and promote each present value into its env var via the `VAR="${VAR:-config}"` form — env wins
+# over config (an already-set env var is left untouched), and the existing CLI-flag logic stays above
+# env. A malformed suite: section makes the node helper exit non-zero ⇒ FAIL-CLOSED here (a broken
+# config must not silently degrade to env-only defaults — DIR-050 discipline, AC5).
+if ! suite_cfg="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-params.ts" --shell --root "${repo_root}" 2>&1)"; then
+  echo "test.sh: FAIL-CLOSED reading suite: config — ${suite_cfg}" >&2
+  exit 2
+fi
+eval "${suite_cfg}"
+
+# default_concurrency_formula / default_test_concurrency — MAIN-phase concurrency
+# max(1, floor(nproc × oversub / S)) (gap-suite-budget-oversubscribe pure computation, S=旋钮② single
+# source, oversub=旋钮③). THIN FORWARDER → plugin/scripts/runner-concurrency.ts defaultTestConcurrency()
+# (SPEC P4 套件入口收进 TS); the derivation rationale lives there + full-suite-runner.ts defaultLaneCount.
+# The exec-line spelling `--test-concurrency="$(default_test_concurrency)"` is UNCHANGED (resource-gate
+# AC5 pins exactly 5 sites) — only the body moved from bash awk to TS.
 default_concurrency_formula() {
-  local ncpu amp
-  ncpu="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
-  amp="${RESOURCE_GATE_AMPLIFICATION:-2.1}"
-  awk -v n="$ncpu" -v a="$amp" 'BEGIN { c = int(n / a); if (c < 1) c = 1; print c }'
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --default-test-concurrency
 }
 
 default_test_concurrency() {
-  # TEMPORARY (2026-08-03): fixed at 8 pending AC5's tradeoff experiment — see comment above.
-  # The derived formula (max(1, floor(nproc/2.1))) is preserved in default_concurrency_formula
-  # for when the experiment lands.
-  echo "8"
-  return 0
   default_concurrency_formula
 }
 
-# resource_gate_check — consult the shared resource gate BEFORE a FULL-SUITE (glob-based default)
-# run (gap-no-resource-awareness-heavy-ops-run-blind, AC7). WAIT → the gate printed the numbers,
-# this exits non-zero — NEVER silently wait (silent wait is indistinguishable from a hang).
-# Scoped paths (explicit files, --for-task, non-default --group) skip the gate — they are the
-# verification path that must stay usable under load. QUAY_TEST_SKIP_RESOURCE_GATE=1 is the
-# test-only escape for a nested runner invoked inside an outer suite.
-resource_gate_check() {
-  if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
-    echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping resource gate (nested runner)"
-    return 0
-  fi
-  echo "== resource gate (gap-no-resource-awareness-heavy-ops-run-blind) =="
-  if ! bash "${repo_root}/plugin/scripts/resource-gate.sh" --for full-suite; then
-    echo "scripts/test.sh: resource gate says WAIT — not running the full suite (numbers above). Re-run when the gate reports GO." >&2
-    exit 1
-  fi
+# ── load-sensitive phase concurrency knobs (gap-load-sensitive-serial-phase-unbounded-growth-
+# measure-first AC2/AC3 + gap-ac74-serial-lowconc-literal-direct-path AC44 直调读宿主) ─────────────
+# serial_lowconc_host_default — the host-derived SERIAL-phase fallback: max(1, floor(nproc ÷ (S×P))),
+# P = the concurrent-phase count (2 = overlap ON, 1 = sequential). THIN FORWARDER →
+# plugin/scripts/runner-concurrency.ts defaultPhaseConcurrencyDirect() (SPEC P4 套件入口收进 TS);
+# rationale lives there + full-suite-runner.ts defaultPhaseConcurrency (the runner twin — resource-gate
+# 判据4 cross-checks the two stay equal). The env-fallback spellings below are UNCHANGED.
+# gap-lowconc-concurrency-restore-host-derived: SERIAL and LOWCONC now SHARE this host-derived default —
+# lowconc_concurrency_default (below) returns the SAME max(1, floor(nproc ÷ (S×P))); the lowconc=3
+# fixed-value split (gap-lowconc-concurrency-8-starves-bclass-waiting) was wrong and is reverted.
+serial_lowconc_host_default() {
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --phase-concurrency
 }
-
-# heavy_op_acquire — the cross-project heavy-op token (gap-no-cross-project-heavy-op-token).
-# Called ONLY on the FULL-SUITE default path, BEFORE resource_gate_check (串联不合并: 先取令牌、
-# 再过闸 — a gate WAIT must release the token, or one WAIT would hold the whole cross-project mutex).
-# The token script itself FAILS OPEN (exit 0 + a loud marker) when $QUAY_GLOBAL_DIR is
-# unwritable/unreachable — this is a scheduling token, not a safety check; a non-zero exit HERE
-# means another project legitimately holds it, and the full suite must NOT run on top of it.
-# On success it arms an EXIT trap that releases the token on EVERY exit path (gate WAIT, build
-# failure, static-check failure, node test completion). Skips when QUAY_TEST_SKIP_RESOURCE_GATE=1 —
-# a nested runner inside an outer suite: the outer suite already holds the token (the exemption
-# boundary is identical to resource-gate.sh's).
-#
-# AC4 wait bound (gap-the-only-token-waiter-refuses-to-wait-at-all): the one real waiter used to
-# pass --timeout 0 (ZERO wait) — a ≤30s transient grace window (a crashed holder's token aged less
-# than HEAVY_OP_STALE_TIMEOUT_S, so not yet reclaimable) became a FAILED full-suite run. The bound
-# is HEAVY_OP_ACQUIRE_TIMEOUT_S (default 40): a full stale-timeout cycle (default 30) plus margin
-# for the write→reclaim race, yet FAR below one real heavy op (full suite ~8 min at concurrency 8)
-# — the worst-case wait absorbs the grace window and can NEVER serialize two heavy ops back-to-back
-# (40/480 ≈ 8% of a full suite). The token script's --timeout N is a bounded poll (re-checks reclaim
-# each second, AC1), so a dead holder is reclaimed mid-wait and the suite proceeds; a LIVE holder is
-# never stolen (AC3) — the wait only converts the DEAD-holder grace window, never a running op.
-HEAVY_OP_ACQUIRE_TIMEOUT_S="${HEAVY_OP_ACQUIRE_TIMEOUT_S:-40}"
-heavy_op_acquire() {
-  if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
-    echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping heavy-op token (nested runner; outer suite holds it)"
-    return 0
-  fi
-  echo "== heavy-op token (gap-no-cross-project-heavy-op-token) =="
-  if ! bash "${repo_root}/plugin/scripts/heavy-op-token.sh" --acquire quay --timeout "${HEAVY_OP_ACQUIRE_TIMEOUT_S}"; then
-    echo "scripts/test.sh: could not acquire the heavy-op token within ${HEAVY_OP_ACQUIRE_TIMEOUT_S}s (holder state printed above — dead vs alive) — not running the full suite to avoid cross-project resource contention. Re-run when the token is free." >&2
-    exit 1
-  fi
-  HEAVY_OP_ACQUIRED=1
-  # EXIT trap: release on every exit path. The default-set branch below runs node as a CHILD (not
-  # exec) precisely so this trap fires when node finishes — an exec'd node would replace this shell
-  # and silently skip the release.
-  trap 'if [ "${HEAVY_OP_ACQUIRED:-0}" = "1" ]; then bash "${repo_root}/plugin/scripts/heavy-op-token.sh" --release quay >/dev/null 2>&1 || true; HEAVY_OP_ACQUIRED=0; fi' EXIT
+# lowconc_concurrency_default — the lowconc-phase fallback: HOST-DERIVED max(1, floor(nproc ÷ (S×P))),
+# IDENTICAL to serial. THIN FORWARDER → runner-concurrency.ts defaultLowconcConcurrency()
+# (--lowconc-concurrency, = serial_lowconc_host_default). 用户 2026-09-02 反转「并发取 3 不取 8」——
+# lowconc 回退宿主推导，与 serial 一致。
+lowconc_concurrency_default() {
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --lowconc-concurrency
 }
+# The full-suite-runner sets these env vars when --serial-concurrency / --lowconc-concurrency are passed.
+SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-$(serial_lowconc_host_default)}"
+LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-$(lowconc_concurrency_default)}"
 
-# ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
+# ── phase-overlap knob (gap-phase-overlap-two-phase-parallel-exploration, AC1 + AC101 default-ON) ──
+# LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0) ONLY: the unified scheduler (default) always runs
+# serial∥lowconc∥main CONCURRENTLY via the waterline and does NOT read PHASE_OVERLAP for scheduling —
+# the overlap-vs-sequential decision below is RETIRED, kept only for the legacy phased path's
+# ONE-KEY ROLLBACK. (Note: the P=2/1 divisor this knob feeds into $SERIAL_CONCURRENCY via
+# runner-concurrency.ts --phase-concurrency is still READ on both paths; under the unified scheduler
+# serial+lowconc always run in parallel, so P=2 is the effective value.)
+# QUAY_PHASE_OVERLAP=1 runs the serial and lowconc phases in PARALLEL on the FULL-SUITE path (each at
+# its OWN $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY) instead of sequentially — the two-phase-overlap
+# exploration (serial+lowconc 并行, 预期 −154s/轮: the 331s sequential window 177+154 becomes
+# max(177,154)≈177s). This changes phase SCHEDULING only, never a concurrency value (AC4: one
+# variable at a time — $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY stay exactly as configured; the
+# "两个 6" in the task title reflects the author's reading, the live defaults here are host-derived
+# (H÷S, gap-ac74) and are NOT part of this exploration's variable). AC101 (2026-08-16) flips the
+# DEFAULT to 1 (overlap): the human-approved improvement becomes the default so the suite fits the
+# ≤600s target — the AC101 对照轮 (round 218, no-churn window) measured serial 232s + lowconc 183s
+# sequential (415s) ⇒ overlap max(232,183)=232s, saving ~183s/round. Set QUAY_PHASE_OVERLAP=0 for
+# the sequential serial→lowconc→main baseline (ONE-KEY ROLLBACK).
+PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"
 
-# group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
-# Only product|engine|governance are valid; a missing OR unrecognized declaration falls back
-# to engine so a typo can never silently remove a file from the default run.
-group_of() {
-  local f="$1" g
-  g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
-  case "${g:-}" in
-    product|engine|governance) echo "$g" ;;
-    *) echo "engine" ;;
-  esac
-}
+# ── main-tail-overlap knob (gap-suite-main-overlaps-load-sensitive-tail-experiment) ────────────────
+# LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0) ONLY: the A watcher below only launches on the legacy
+# phased path (the unified scheduler absorbs the stall-polling via its structural waterline). RETIRED,
+# kept only for the ONE-KEY ROLLBACK fallback.
+# QUERY_MAIN_TAIL_OVERLAP=<lanes> (default 0 = current behavior). When >0, the MAIN phase starts
+# EARLY — before the serial+lowconc window fully closes — at concurrency <lanes>, overlapping with the
+# window's latency-bound tail (the ~130s near-idle tail the director's load curve measured: 23/48
+# samples stall<3%; healthy idle tails dip to ~4-6% — round 773/795/798 measured 4.3-5.8% — hence the
+# default $MAIN_TAIL_STALL_PCT=6 below). The remaining wall-clock-wait / real-install tests hold their
+# processes at ~zero CPU. The start trigger is LOAD-DRIVEN (⛔ not a fixed delay): a watcher polls
+# cpu_stall
+# (/proc/pressure/cpu `some avg10`) and fires once it has stayed ≤ $MAIN_TAIL_STALL_PCT for
+# $MAIN_TAIL_HOLD_S consecutive seconds — i.e. the window's CPU work has drained — then launches main
+# at the knob's lanes. Total CPU load during the overlap = main lanes + the near-zero latency-bound
+# tail, so the experiment's lane sweep (0/4/8/12) is the independent variable; the observed load is
+# READ from /proc/loadavg at fire time (host-derived, never a literal — hard rule 4 推论二), and the
+# fire is announced on the stream (`main-tail-overlap: lanes=N load=X`) so full-suite-runner.ts records
+# main_tail_overlap_lanes + main_tail_overlap_load. ONE-KEY ROLLBACK: unset / 0 = the sequential
+# baseline (main runs at window close, unchanged). Only the overlap path (PHASE_OVERLAP=1, the AC2
+# control) launches the watcher; the sequential path is unchanged (the experiment fixes overlap=1).
+MAIN_TAIL_OVERLAP="${QUERY_MAIN_TAIL_OVERLAP:-0}"
+if ! awk -v v="${MAIN_TAIL_OVERLAP}" 'BEGIN { exit !(v ~ /^[0-9]+$/) }'; then
+  MAIN_TAIL_OVERLAP=0
+fi
+MAIN_TAIL_STALL_PCT="${QUAY_MAIN_TAIL_STALL_PCT:-6}"
+MAIN_TAIL_HOLD_S="${QUAY_MAIN_TAIL_HOLD_S:-5}"
+MAIN_TAIL_POLL_S="${QUAY_MAIN_TAIL_POLL_S:-1}"
+MAIN_TAIL_WAIT_MAX_S="${QUAY_MAIN_TAIL_WAIT_MAX_S:-300}"
 
-# build_deduped_files — echo the union glob, deduped by realpath (AC3). One file per line.
-build_deduped_files() {
-  shopt -s nullglob
-  local glob=(packages/*/test/*.test.mjs plugin/test/*.test.mjs experiments/quay-perpetual-stream/test/*.test.mjs)
-  shopt -u nullglob
-  declare -A seen=()
-  local f rp
-  for f in "${glob[@]}"; do
-    rp="$(realpath "$f")"
-    if [ -z "${seen[$rp]:-}" ]; then
-      seen[$rp]=1
-      printf '%s\n' "$rp"
+# main_tail_overlap_wait — block until the machine's CPU work has drained (cpu_stall ≤
+# $MAIN_TAIL_STALL_PCT for $MAIN_TAIL_HOLD_S consecutive polls), or until every TRACKED phase process
+# exits (no tail left to overlap), or until $MAIN_TAIL_WAIT_MAX_S elapses (bounded: the watcher must
+# never outlive the window). Returns 0 = fired (launch main early), 1 = fall through (main runs
+# normally at window close). Reads the caller's $serial_pid / $lowconc_pid to detect window close —
+# the full path sets BOTH (serial+lowconc run in parallel); the bucket-subset path sets only
+# lowconc_pid (serial already finished sequentially before it — legacy phased path only). Hermetic test seams:
+# QUAY_MAIN_TAIL_STALL_FILE / QUAY_MAIN_TAIL_LOADAVG_FILE override the /proc paths (the resource-gate
+# seam family).
+main_tail_overlap_wait() {
+  local stall_file="${QUAY_MAIN_TAIL_STALL_FILE:-/proc/pressure/cpu}"
+  local -i held=0 elapsed=0 max_s poll_s hold_s
+  max_s="${MAIN_TAIL_WAIT_MAX_S}"
+  poll_s="${MAIN_TAIL_POLL_S}"
+  hold_s="${MAIN_TAIL_HOLD_S}"
+  while [ "$elapsed" -lt "$max_s" ]; do
+    # Window-closed fallback: every TRACKED phase process (serial and/or lowconc) has exited ⇒ no tail
+    # left to overlap ⇒ fall through. A pid is tracked iff non-empty; the window closes iff ≥1 is
+    # tracked AND every tracked pid is dead. The full path tracks both (they run in parallel); the
+    # bucket-subset path tracks only lowconc (serial_pid is empty = "not tracked" there).
+    if { [ -n "${serial_pid:-}" ] || [ -n "${lowconc_pid:-}" ]; } \
+       && { [ -z "${serial_pid:-}" ] || ! kill -0 "${serial_pid}" 2>/dev/null; } \
+       && { [ -z "${lowconc_pid:-}" ] || ! kill -0 "${lowconc_pid}" 2>/dev/null; }; then
+      return 1
     fi
+    local stall=""
+    stall="$(awk '{ for (i=1;i<=NF;i++) if ($i ~ /^avg10=/) { sub(/^avg10=/,"",$i); print $i; exit } }' "$stall_file" 2>/dev/null)" || stall=""
+    if [ -n "$stall" ] && awk -v s="$stall" -v t="$MAIN_TAIL_STALL_PCT" 'BEGIN{ exit !(s+0 <= t+0) }'; then
+      held=$((held + 1))
+    else
+      held=0
+    fi
+    if [ "$held" -ge "$hold_s" ]; then
+      return 0
+    fi
+    sleep "$poll_s"
+    elapsed=$((elapsed + poll_s))
   done
+  return 1
 }
 
-# effective_groups — echo the groups a given run should include (default product,engine, AC4).
+# has_explicit_concurrency <args...> — whether the args already carry a --test-concurrency flag (the
+# `=` spelling, or the bare space-form marker). An explicit flag is the SINGLE concurrency source, so
+# the derived default MUST NOT be prepended (gap-full-suite-runner-concurrency-default-and-gate AC2:
+# the runner's REPLACE splice must leave EXACTLY ONE --test-concurrency on the node --test process).
+# THIN FORWARDER → plugin/scripts/runner-concurrency.ts hasExplicitConcurrency() (SPEC P4).
+has_explicit_concurrency() {
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --has-explicit-concurrency "$@"
+}
+
+# bucket_test_concurrency <args...> — the EFFECTIVE concurrency for the --buckets run({files}) runner
+# (suite-lpt-runner.mjs). An explicit --test-concurrency=N in args wins (single source, the SAME
+# precedence as has_explicit_concurrency); otherwise the derived default. Returns the VALUE — the runner
+# needs a number in execArgv. THIN FORWARDER → runner-concurrency.ts bucketTestConcurrency() (SPEC P4).
+bucket_test_concurrency() {
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --bucket-test-concurrency "$@"
+}
+
+# resource_gate_check — extracted to plugin/scripts/runner-static-gate.ts (gap-ac128-hub-split-harness-concerns),
+# sourced above alongside run_static_checks.
+# ── single-flight lock, S slots (gap-resource-gate-no-single-flight-lock-two-suite-overlap →
+#     gap-single-flight-lock-2-slot-concurrent-suites + gap-suite-concurrency-ff-gate-and-slot-ssot) ──
+# full_suite_lock — an S-slot counting semaphore over S SHARED lock files
+# (`<git-common-dir>/full-suite.lock.0` .. `.S-1`), each held for the ENTIRE full-suite run. The slot
+# COUNT IS GENERATED from the QUAY_MAX_CONCURRENT_SUITES knob (旋钮②) by the bash canonical
+# (plugin/scripts/suite-slot-lib.sh, the SAME single definition point as the TS side
+# plugin/scripts/suite-lock-slots.ts): S=1 ⇒ 仅 `.0`, S=3 ⇒ `.0/.1/.2`, S=2 ⇒ `.0`/`.1`. The old
+# implementation wrote TWO lock files (`.0`/`.1`) regardless of S — 注释断言「slot count IS the
+# QUAY_MAX_CONCURRENT_SUITES knob」而实现没有 (硬规则③b), 现在实现与注释一致 (人 2026-08-18「把系统真正做对」).
+# COMPLEMENTARY to the resource gate: the gate prevents "starting into a busy machine" (a load check
+# at startup), the lock prevents "a (S+1)-th suite joining" (mutual exclusion among the S allowed
+# suites). Together they are complete — up to QUAY_MAX_CONCURRENT_SUITES full suites can now run
+# concurrently (the spec-11 pilot's finding: ≥2 concurrent suites were structurally blocked by the old
+# 1-slot lock), and one more can no longer both see GO in a low-load window and start (the 2026-08-07
+# incident: two cc8 suites ran simultaneously in DIFFERENT worktrees, 16 workers + subprocesses on 4
+# cores, PSI cpu avg10 = 86.22).
+#
+# The lock is file-descriptor-based (one FD per slot, allocated dynamically via `exec {fd}>file`): the
+# FDs are opened once and held open for the whole run, so the lock releases automatically when this
+# process exits — even on an error abort — with no trap bookkeeping (flock's crash-autorelease is
+# PRESERVED: a dead suite can never leak a slot). Acquire tries each slot NON-BLOCKING (`flock -n`); if
+# ALL S are held it WAITs for EITHER to release (bounded per-attempt flock-wait, re-checking all after
+# each) — an UNBOUNDED queue wait, never a fail-closed timeout (gap-single-flight-lock-timeout-double-
+# value: the old FULL_SUITE_LOCK_TIMEOUT 600s default + the fan-in 900s override were two values on one
+# lock, and the 600s line was crossed by the now-normal 819-1619s full-bucket suite — a live suite got
+# fail-closed「not starting」). Correctness (never a (S+1)-th GO) is flock-guarded; liveness (never an
+# infinite hang) is crash-autorelease for a dead holder + the runner's SUITE_SILENCE_MS/SUITE_MAX_RUNTIME_MS
+# and the fan-in stuck-holder reaper for a hung-but-alive holder.
+#
+# Scoped paths (--for-task, --scoped, --group <non-default>, explicit files) never take the lock —
+# they are the verification path that must stay usable while a full suite runs. Nested runners skip
+# via the SAME escape hatch the resource gate uses (QUAY_TEST_SKIP_RESOURCE_GATE=1) plus the
+# same-root QUAY_TEST_NESTED guard (a nested test.sh spawned inside the running suite must not
+# deadlock against the suite's own lock).
+# SHARED lock files: resolve via git's COMMON dir so every worktree of this repo AND the primary
+# checkout contend on the SAME locks — the 2026-08-07 incident was two DIFFERENT worktrees each
+# running a cc8 suite, and a per-checkout `.quay/full-suite.lock` would NOT have serialized them.
+# git-common-dir resolves to the main repo's `.git` from any worktree, so
+# `<git-common-dir>/full-suite.lock.0`..`.S-1` are the same inodes everywhere. Fall back to
+# `<repo_root>/.git` when git is unavailable (a non-git copy).
+# `FULL_SUITE_LOCK_FILE=<path>` (the pilot's per-worktree escape) still works — the `.0`..`.S-1`
+# suffixes are appended, so a per-worktree override yields a per-worktree S-slot lock.
+# (suite-slot-lib.sh is sourced ABOVE, before the derivation functions — the S single-source
+# gap-suite-concurrency-S-two-source-divergence fix; the slot paths below reuse that same canonical.)
+FULL_SUITE_LOCK_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+if [ -z "${FULL_SUITE_LOCK_DIR}" ]; then
+  FULL_SUITE_LOCK_DIR="${repo_root}/.git"
+fi
+FULL_SUITE_LOCK_FILE="${FULL_SUITE_LOCK_FILE:-${FULL_SUITE_LOCK_DIR}/full-suite.lock}"
+# S slot paths + dynamically-allocated FDs (the bash canonical suite-slot-lib.sh generates the count
+# from 旋钮②; FDs are allocated at acquire time and kept in FULL_SUITE_LOCK_FDS for the run).
+FULL_SUITE_LOCK_SLOTS=()
+while IFS= read -r _suite_slot; do FULL_SUITE_LOCK_SLOTS+=("${_suite_slot}"); done < <(suite_slot_paths "${FULL_SUITE_LOCK_FILE}")
+FULL_SUITE_LOCK_FDS=()
+
+# Lock-hold cap (gap-suite-lock-starvation-long-validation-hold AC1): a validation-type long task
+# (e.g. serial/lowconc re-check runs — 33 files × N re-runs, 5.2h wall) must not hold a single-flight
+# slot for hours, starving every other fan-in. FULL_SUITE_LOCK_HOLD_MAX_S (default 1800s = 30min) caps
+# the hold: when the suite STILL holds its slot after T seconds, a watchdog child (part of THIS process
+# tree — the release must live in the holding process, ⛔ NOT a worker-driver kill) releases the slot and
+# records a fail-loud `lock_hold_exceeded=1` marker (never silent). The cap only yields the SLOT — the
+# long suite keeps running (it already passed the resource gate at startup); it accepts the contention
+# risk of a (S+1)-th suite joining rather than serializing the whole repo behind its re-check.
+FULL_SUITE_LOCK_HOLD_MAX_S="${FULL_SUITE_LOCK_HOLD_MAX_S:-1800}"
+
+# full_suite_lock_acquire — acquire one of the S single-flight slots (non-blocking try on each;
+# all busy ⇒ unbounded wait for any to release — never fail-closed, see the lock comment above).
+full_suite_lock_acquire() {
+  if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
+    echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping single-flight lock (nested runner)"
+    return 0
+  fi
+  if [ "${QUAY_TEST_NESTED:-}" = "1" ] && [ "${QUAY_TEST_NESTED_ROOT:-}" = "${repo_root}" ]; then
+    echo "scripts/test.sh: QUAY_TEST_NESTED=1 — skipping single-flight lock (nested invocation of the same suite)"
+    return 0
+  fi
+  # suite-driver holds the slot（SPEC-suite-lifecycle §3.3 资源集成）：常驻 suite-driver 已在 spawn 前取
+  # 单飞槽并持锁跨整个 suite（取/放同一执行点，释放原子）。test.sh 不再重复取槽——只跳过【锁】这一半，
+  # resource gate 照常跑（⛔ 不是 QUAY_TEST_SKIP_RESOURCE_GATE：那条连 gate 一起跳过，把 load 判定也丢了）。
+  if [ "${QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT:-}" = "1" ]; then
+    echo "scripts/test.sh: QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT=1 — suite-driver holds the single-flight slot; skipping re-acquire (resource gate still runs)"
+    return 0
+  fi
+  mkdir -p "$(dirname "${FULL_SUITE_LOCK_FILE}")"
+  local _s_fd _s_slot _s_idx _s_held="" _s_lock_start_ms="" _s_lock_end_ms=""
+  FULL_SUITE_LOCK_FDS=()
+  # Open EVERY slot file on its own dynamically-allocated FD (append mode: the file exists + is
+  # writable even if empty). FD-based flock auto-releases on process exit — a crash/abort cannot leak.
+  for _s_slot in "${FULL_SUITE_LOCK_SLOTS[@]}"; do
+    exec {_s_fd}>"${_s_slot}"
+    FULL_SUITE_LOCK_FDS+=("${_s_fd}")
+  done
+  # gap-verification-round-observability-holes AC1 (fan-in path) — measure the flock wait from the
+  # lock START marker to the acquired marker (EPOCHREALTIME, µs→ms) so the real landing writer
+  # pre-verified-round-record.ts can record lock_wait_ms. full-suite-runner derives the SAME value
+  # from its live stream markers; the fan-in log is a post-hoc file with no wall timestamps, so
+  # test.sh must emit it. Only on a REAL acquire (the skip branches returned above) — scoped/nested
+  # runs stay marker-less (缺键, not a fabricated 0).
+  _s_lock_start_ms="${EPOCHREALTIME:-}"
+  echo "== single-flight lock (${#FULL_SUITE_LOCK_SLOTS[@]} slots — gap-single-flight-lock-2-slot-concurrent-suites + SSoT) =="
+  # Non-blocking try over every slot: a free slot is taken immediately (AC1: the 2nd suite starts
+  # instead of being serialized).
+  _s_idx=0
+  for _s_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
+    if flock -n "${_s_fd}"; then _s_held="${_s_idx}"; break; fi
+    _s_idx=$((_s_idx + 1))
+  done
+  if [ -z "${_s_held}" ]; then
+    # ALL S slots busy — WAIT for ANY to release (an S-slot counting semaphore made of S flocks).
+    # Unbounded queue wait, never a fail-closed timeout: correctness (no (S+1)-th GO) is flock-guarded,
+    # liveness is crash-autorelease for a dead holder + the runner's SUITE_SILENCE_MS/SUITE_MAX_RUNTIME_MS
+    # and the fan-in stuck-holder reaper for a hung-but-alive holder (gap-single-flight-lock-timeout-
+    # double-value: the old 600s/900s timeout misfired on the now-normal 819-1619s suite). Bounded
+    # per-attempt flock-wait (1s per slot, re-checking all after each) so a release on ANY slot is
+    # picked up promptly.
+    while [ -z "${_s_held}" ]; do
+      _s_idx=0
+      for _s_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
+        if flock -w 1 "${_s_fd}"; then _s_held="${_s_idx}"; break; fi
+        _s_idx=$((_s_idx + 1))
+      done
+    done
+  fi
+  FULL_SUITE_LOCK_HELD="${_s_held}"
+  FULL_SUITE_LOCK_ACQUIRED_MS="${EPOCHREALTIME:-}"
+  echo "scripts/test.sh: acquired full-suite single-flight slot ${_s_held} (${FULL_SUITE_LOCK_FILE}.${_s_held}) — held for the entire run"
+  if [ -n "${_s_lock_start_ms:-}" ]; then
+    _s_lock_end_ms="${EPOCHREALTIME:-}"
+    if [ -n "${_s_lock_end_ms:-}" ]; then
+      _s_lock_wait_ms="$(awk -v a="${_s_lock_start_ms}" -v b="${_s_lock_end_ms}" 'BEGIN { d = (b - a) * 1000; printf "%d", d < 0 ? 0 : d }')"
+      echo "__OVERHEAD__ lock_wait_ms=${_s_lock_wait_ms}" >&2
+    fi
+  fi
+  # Hold-cap watchdog (gap-suite-lock-starvation-long-validation-hold AC1): a child of THIS process
+  # (the holder — ⛔ not an outside worker-driver kill) that releases the slot after T seconds of the
+  # suite STILL holding, and emits a fail-loud `lock_hold_exceeded=1` marker. The spawn lives in
+  # suite-slot-lib.sh (single definition point, sourceable/testable); it polls a flag file each 1s so a
+  # normal release (flag removed) or a crash (main pid gone) exits it promptly — no lingering FD.
+  FULL_SUITE_LOCK_FLAG="$(mktemp "${TMPDIR:-/tmp}/full-suite-lock-hold.XXXXXX")"
+  # 5th arg = timer-cut (1 = the suite lock's path (c) timer yield, the default); 6th arg = the HELD
+  # slot path: the watchdog writes `<slot>.yielded` on fire so the lane formula of a joining (S+1)-th
+  # suite counts this still-running slot-less suite (gap-suite-lane-budget-structural-guarantee-broken-
+  # buckets-no-lock 漏口② — 让槽同时让 lane, not just slot).
+  FULL_SUITE_LOCK_WATCHDOG_PID="$(spawn_suite_lock_hold_watchdog "${FULL_SUITE_LOCK_FDS[${_s_held}]}" "${FULL_SUITE_LOCK_FLAG}" "$$" "${FULL_SUITE_LOCK_HOLD_MAX_S}" "1" "${FULL_SUITE_LOCK_SLOTS[${_s_held}]}")"
+}
+
+# full_suite_lock_release — release the HELD slot and close all FDs (idempotent; flock also
+# auto-releases on exit — a skipped lock is a clean no-op).
+full_suite_lock_release() {
+  local _r_idx=0 _r_fd _r_now="" _r_hold_ms=""
+  # Cancel the hold-cap watchdog: it polls the flag file each 1s, so removing it makes the watchdog
+  # exit promptly (its inherited FD closes, no lingering process). Idempotent (a skipped lock has no
+  # flag — rm -f is a no-op).
+  rm -f "${FULL_SUITE_LOCK_FLAG:-}"
+  if [ -n "${FULL_SUITE_LOCK_HELD:-}" ]; then
+    _r_idx="${FULL_SUITE_LOCK_HELD}"
+    if [ "${_r_idx}" -lt "${#FULL_SUITE_LOCK_FDS[@]}" ]; then
+      flock -u "${FULL_SUITE_LOCK_FDS[${_r_idx}]}" 2>/dev/null || true
+    fi
+    # Remove the watchdog's lane-yield marker (written on fire) on a NORMAL release — a joining suite's
+    # lane formula must no longer count this (now-finished) suite as slot-less (gap-suite-lane-budget-
+    # structural-guarantee-broken-buckets-no-lock). A crash leaks a dead-pid marker that readers ignore
+    # (pid-liveness self-cleanup), so the rm here only needs to cover the normal path.
+    if [ "${_r_idx}" -lt "${#FULL_SUITE_LOCK_SLOTS[@]}" ]; then
+      rm -f "${FULL_SUITE_LOCK_SLOTS[${_r_idx}]}.yielded" 2>/dev/null || true
+    fi
+  fi
+  # gap-suite-lock-starvation-long-validation-hold AC2 — emit lock_hold_ms (the acquire→release wall)
+  # so the outcome records can distinguish "long lock hold" from "worker slow": lock_wait_ms is the
+  # queued-wait half, lock_hold_ms is the held half. Absent on scoped/nested runs (no lock taken —
+  # 缺键, never a fabricated 0).
+  if [ -n "${FULL_SUITE_LOCK_ACQUIRED_MS:-}" ]; then
+    _r_now="${EPOCHREALTIME:-}"
+    if [ -n "${_r_now:-}" ]; then
+      _r_hold_ms="$(awk -v a="${FULL_SUITE_LOCK_ACQUIRED_MS}" -v b="${_r_now}" 'BEGIN { d = (b - a) * 1000; printf "%d", d < 0 ? 0 : d }')"
+      echo "__OVERHEAD__ lock_hold_ms=${_r_hold_ms}" >&2
+    fi
+  fi
+  for _r_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
+    eval "exec ${_r_fd}>&-" 2>/dev/null || true
+  done
+  FULL_SUITE_LOCK_FDS=()
+}
+
+# ── group resolution (gap-test-suite-has-no-layer-grouping) ───────────────────────────────────────
+# Classification MOVED to TS (gap-suite-classification-lpt-scheduler-ts-ization): group_of /
+# check_group_declarations / effective_groups / in_group / is_default_set / select_files / list_groups
+# previously lived in plugin/scripts/runner-grouping.ts as a bash `source`d library; that file is now a
+# REAL TypeScript module (suite-scheduler.ts imports its classifyFile; the metadata modes + legacy
+# fallback call its CLI). scripts/test.sh keeps ONLY the trivial flag helpers inline below —
+# effective_groups / in_group / is_default_set are STRING tests on the user's --group flag, never
+# per-file classification — and the classification (which file declares which @test-group) lives in TS
+# (runner-grouping-metadata.mjs for the one-pass dedup+classify, suite-scheduler.ts's classifyFile for
+# the scheduler's raw list). The grouping mechanism stays a HUB (suite-bucket-hub-list.ts's
+# `runner-grouping*` glob still matches the real module).
+
+# effective_groups — the default run's group set (product,engine, AC4). serial/lowconc run in their own
+# phases, never the default body.
 effective_groups() {
   echo "product,engine"
 }
@@ -302,34 +834,66 @@ is_default_set() {
   [ "${1:-}" = "product,engine" ]
 }
 
-# select_files <groups-csv> — echo the files to run for the given groups (respecting the
-# default-set self-skip passthrough so governance reports `skipped` rather than absent, AC4/AC6).
-select_files() {
-  local groups="$1" f g
-  while IFS= read -r f; do
-    g="$(group_of "$f")"
-    if in_group "$g" "$groups"; then
-      printf '%s\n' "$f"
-    elif [ "$g" = "governance" ] && is_default_set "$groups"; then
-      # governance self-skips via its in-file block; keep it in the run so it is VISIBLE.
-      printf '%s\n' "$f"
-    fi
-  done < <(build_deduped_files)
+# ── in-process metadata cache (gap-suite-metadata-query-subprocess-spawn) ────────────────────────
+# build_deduped_files populates _RG_META ONCE via plugin/scripts/runner-grouping-metadata.mjs (a single
+# node spawn doing realpath dedup + @test-group read + FAIL-CLOSED on unknown, replacing the
+# ~1100-1600 per-file `realpath` / `grep|awk` subprocess spawns the metadata modes previously paid).
+# _RG_META is `realpath<TAB>group` per deduped file; the runner-grouping.ts CLI (--list-groups / --select)
+# and the retired legacy fallback consume it, so a metadata query never re-spawns the node pass.
+declare -a _RG_FILES=()
+_RG_META=""
+_RG_META_READY=""
+
+# build_deduped_files — echo the union glob, deduped by realpath (AC3), as `realpath<TAB>group` per line.
+# DELIBERATELY KEPT HERE (not moved to runner-grouping.ts): its canonical test-glob declaration line
+# is the ADR-004 SINGLE-SOURCE that FOUR checkers parse from scripts/test.sh
+# (test-framework-policy-check.ts / test-coverage-check.ts / test-impl-census-check.ts /
+# test-group-downgrade-check.ts) — moving it would break their glob derivation (0 files).
+# gap-suite-metadata-query-subprocess-spawn: the glob is expanded by bash (free, byte-identical order)
+# and handed to ONE in-process node pass that realpath-dedups AND reads each file's @test-group.
+build_deduped_files() {
+  if [ -n "${_RG_META_READY:-}" ]; then
+    printf '%s\n' "${_RG_META}"
+    return 0
+  fi
+  shopt -s nullglob
+  local glob=(packages/*/test/*.test.mjs plugin/test/*.test.mjs experiments/quay-perpetual-stream/test/*.test.mjs)
+  shopt -u nullglob
+  local meta rc=0
+  # if/else rc-capture (NOT `! cmd; rc=$?` — the `!` negates $?, capturing 0 instead of the helper's
+  # fail-closed 3 — and NOT `|| rc=$?`, which instrument-failure-check FAMILY-3 flags).
+  if meta="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping-metadata.mjs" "${glob[@]}")"; then
+    :
+  else
+    rc=$?
+    exit "$rc"
+  fi
+  _RG_META="${meta}"
+  _RG_META_READY=1
+  _RG_FILES=()
+  local f
+  while IFS=$'\t' read -r f _; do
+    [ -n "${f}" ] || continue
+    _RG_FILES+=("$f")
+  done <<< "${meta}"
+  printf '%s\n' "${_RG_META}"
 }
 
-# list_groups — per-group counts over the full deduped glob (AC10).
-list_groups() {
-  declare -A counts=([product]=0 [engine]=0 [governance]=0)
-  local f g
-  while IFS= read -r f; do
-    g="$(group_of "$f")"
-    counts[$g]=$(( ${counts[$g]:-0} + 1 ))
-  done < <(build_deduped_files)
-  printf 'product:    %d\n' "${counts[product]:-0}"
-  printf 'engine:     %d\n' "${counts[engine]:-0}"
-  printf 'governance: %d\n' "${counts[governance]:-0}"
-  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} ))
-  printf 'total:      %d (deduped by realpath)\n' "$total"
+# check_group_declarations — pre-flight fail-closed guard (AC0b). The UNKNOWN-group half is now
+# fail-closed inside build_deduped_files (runner-grouping-metadata.mjs exits 3 on an unknown
+# @test-group); the downgrade half still runs test-group-downgrade-check.ts. ⛔ errexit-safe: test.sh
+# runs `set -euo pipefail`, so the guard MUST capture its exit code without a non-zero result aborting
+# the script (the if/else form is both errexit-safe and FAMILY-3-clean). Exit-code split: 1 = downgrade
+# found → HARD block; 2 = NOT-EVALUATED (baseline missing) → warn-but-continue.
+check_group_declarations() {
+  build_deduped_files > /dev/null
+  local dg_rc=0
+  if node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-group-downgrade-check.ts" --root "${repo_root}" >&2; then
+    :
+  else
+    dg_rc=$?
+  fi
+  if [ "$dg_rc" -eq 1 ]; then exit 1; fi
 }
 
 # build_dist_once — build dist/quay.js ONCE per invocation, before any test runs
@@ -351,10 +915,21 @@ list_groups() {
 # mtime check / sync-vendor --check) still guards every real bundle consumer. A
 # standalone test.sh that sets this is explicitly vouching for bundle freshness, so it
 # skips the gate (never set it in CI or the outer loop). NOTE: runner-grouping.test.mjs
-# deliberately does NOT set it — its nested runs have 120s/300s budgets, run --group
-# subsets, and keep a second live in-suite exercise of this build; that is a documented,
-# lower-severity instance of the same structural exposure, not a regression.
+# does not set it either, but its nested runs now inherit QUAY_TEST_NESTED from the outer
+# suite's mark_nested() and skip the rebuild automatically (gap-suite-speed-under-a-297-
+# second-sigma). The build is still exercised ONCE per real suite (the outer invocation),
+# so the freshness gate keeps its guard; the runner-grouping nested runs only ever run
+# --group subsets / fixtures and re-running 2 esbuilds + vendor mirror inside each was the
+# measured redundant cost this skip removes.
 build_dist_once() {
+  # QUAY_TEST_NESTED — see run_static_checks(): a nested invocation (a test spawning scripts/test.sh)
+  # inherits the marker and skips the rebuild the OUTER suite already did at its start
+  # (gap-suite-speed-under-a-297-second-sigma). Same-root guard keeps a different-worktree nested
+  # run building its own bundle.
+  if [ "${QUAY_TEST_NESTED:-}" = "1" ] && [ "${QUAY_TEST_NESTED_ROOT:-}" = "${repo_root}" ]; then
+    echo "scripts/test.sh: QUAY_TEST_NESTED=1 — skipping dist rebuild (nested invocation; outer suite built it)"
+    return 0
+  fi
   if [ "${QUAY_TEST_SKIP_DIST_BUILD:-}" = "1" ]; then
     echo "scripts/test.sh: QUAY_TEST_SKIP_DIST_BUILD=1 — skipping dist rebuild (outer runner built it)"
     return 0
@@ -392,25 +967,88 @@ build_dist_once() {
   fi
 }
 
+# mark_nested — mark THIS invocation as the outer runner so any scripts/test.sh that a TEST spawns
+# (a nested invocation) can detect it is nested and skip the redundant dist rebuild + whole-store
+# static checks that the OUTER suite already ran at its start (gap-suite-speed-under-a-297-second-sigma).
+# The marker is set ONLY at the exec-to-node boundary (right before each `node --test` below), never
+# at the top of this script: the OUTER invocation must NOT skip its own setup. A nested invocation
+# inherits QUAY_TEST_NESTED/QUAY_TEST_NESTED_ROOT through its env, and the QUAY_TEST_NESTED check at
+# the top of build_dist_once()/run_static_checks() skips the redundant work. QUAY_TEST_NESTED_ROOT
+# carries the OUTER's repo_root so a nested run in a DIFFERENT worktree (a genuinely different repo
+# state) does not skip the checks it needs.
+mark_nested() {
+  export QUAY_TEST_NESTED=1
+  export QUAY_TEST_NESTED_ROOT="$repo_root"
+}
+
+# lpt_order_files <name-ref> — THIN FORWARDER to plugin/scripts/suite-lpt-order.ts (the TS LPT engine,
+# gap-suite-classification-lpt-scheduler-ts-ization): reorder the named array IN PLACE, longest-KNOWN
+# first. The DEFAULT path (the unified scheduler) now LPTs internally via suite-scheduler.ts's
+# classifyAndOrder — this helper is used ONLY by the retired legacy fallback (QUAY_SUITE_SCHEDULER=0),
+# which still runs the phased serial→lowconc→main execution. Durations come from the EXISTING carrier
+# .quay/verification-round.jsonl perFile[].durationMs (rolling average of the last QUAY_TEST_LPT_ROUNDS
+# rounds) — no new measurer. Scheduling-only (every file emitted exactly once) + FAIL-OPEN (no history /
+# helper failure / short result ⇒ original order). QUAY_TEST_LPT_ORDER=0 is the one-key rollback.
+lpt_order_files() {
+  local -n _lpt_arr="$1"
+  if [ "${QUAY_TEST_LPT_ORDER:-1}" = "1" ] && [ "${#_lpt_arr[@]}" -gt 1 ]; then
+    local _lpt_out
+    _lpt_out="$(printf '%s\n' "${_lpt_arr[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-lpt-order.ts" --root "${main_root}" --rounds "${QUAY_TEST_LPT_ROUNDS:-3}")" || _lpt_out=""
+    if [ -n "${_lpt_out}" ] && [ "$(printf '%s\n' "${_lpt_out}" | wc -l)" -eq "${#_lpt_arr[@]}" ]; then
+      mapfile -t _lpt_arr <<< "${_lpt_out}"
+      echo "scripts/test.sh: lpt-order: file list reordered (${#_lpt_arr[@]} files; first=$(basename "${_lpt_arr[0]}"))" >&2
+    fi
+  fi
+}
+
 # run_selected <groups-csv> [extra-node-flags...] — build the selected file list and exec node
 # --test. Runs the split-or-commit whole-store scan first (same invariant as the default/no-args
 # path). Extra flags (from the flags-only form) are PREPENDED to the file list; node --test is
 # last-flag-wins, so a user --test-concurrency=N still overrides the derived default.
+# ── Fixed-overhead instrumentation (gap-suite-fixed-overhead-decomposition, AC1/AC2) ───────────────
+# The _oh_* timing family (mark / emit / partial-fallback) was extracted to plugin/scripts/overhead-instrument.sh
+# (gap-suite-hub-file-responsibility-strip): overhead timing is PURE TELEMETRY — changing it never flips
+# pass/fail — so it is a NON-hub file. Sourced here; the `__OVERHEAD__` output stays byte-identical.
+source "${repo_root}/plugin/scripts/overhead-instrument.sh"
+
 run_selected() {
   local groups="$1"; shift
-  # The resource gate + heavy-op token guard the FULL-SUITE default (product,engine). A
-  # non-default --group is a subset run (e.g. --group governance) — scoped, skip both (the token's
-  # exemption boundary is identical to resource-gate.sh's). QUAY_TEST_SKIP_RESOURCE_GATE=1 is
-  # honored inside resource_gate_check / heavy_op_acquire for nested runners.
+  # Phase marks + oh_full are GLOBAL (no `local`): the SIGTERM/EXIT partial-fallback trap above runs
+  # OUTSIDE this function's frame, and bash does not reliably give a trap handler dynamic scoping
+  # into the interrupted frame — globals are the only channel for the trap to read the marks.
+  oh_t0="" oh_t1="" oh_t2="" oh_t3="" oh_t4="" oh_t5="" oh_t5b="" oh_t6="" oh_t6b="" oh_t7=""
+  oh_full=0
+  # Fail-closed pre-flight (AC0b): an unknown @test-group declaration must abort, not silently
+  # degrade to engine — a dropped group cancels the isolation guarantee without going red.
+  check_group_declarations
+  # The resource gate guards the FULL-SUITE default (product,engine). A non-default --group is a
+  # subset run (e.g. --group serial) — scoped, skip it (QUAY_TEST_SKIP_RESOURCE_GATE=1 is
+  # honored inside resource_gate_check for nested runners).
   if is_default_set "$groups"; then
-    heavy_op_acquire
+    FULL_SUITE_DEFAULT=1
+    oh_full=1
+    # AC3 partial-fallback: arm the kill-on-red trap on the FULL path only. Scoped runs (oh_full=0)
+    # skip it — their fixed overhead is not the object of measurement.
+    _oh_done=0
+    _oh_install_partial_trap
+    oh_t0=$(_oh_mark)
+    # Single-flight lock FIRST (serialize with any already-running full suite), then the resource
+    # gate (GO/WAIT on the machine's load at actual start time). Order matters: the lock queues the
+    # second suite, so the gate's verdict is computed AFTER serialization — never against stale load.
+    full_suite_lock_acquire
+    oh_t1=$(_oh_mark)
     resource_gate_check
+    oh_t2=$(_oh_mark)
   fi
   build_dist_once
+  oh_t3=$(_oh_mark)
   run_static_checks
+  # archguard 结构闸已从 fan-in gate 链移除（gap-fan-in-remove-archguard-gate），降级为【按需命令】
+  # （按需入口保留在 plugin/scripts/ 的结构分析脚本头注释，不进 suite 也不进 fan-in gate 链）——⛔ test.sh 不再触发。
+  oh_t4=$(_oh_mark)
   export QUAY_TEST_GROUPS="$groups"
   local files=() f
-  while IFS= read -r f; do files+=("$f"); done < <(select_files "$groups")
+  while IFS= read -r f; do files+=("$f"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "$groups")
   if [ "${#files[@]}" -eq 0 ]; then
     echo "scripts/test.sh: no test files matched groups '$groups' (packages/*/test/*.test.mjs, plugin/test/*.test.mjs, experiments/quay-perpetual-stream/test/*.test.mjs)" >&2
     exit 1
@@ -422,32 +1060,380 @@ run_selected() {
   # explicitly, so their selection is already visible. N here is exactly what `--list-files` prints
   # (the same select_files output), so AC4's "N == --list-files count" holds by construction.
   echo "selected ${#files[@]} files (groups=${groups})"
-  # gap-no-cross-project-heavy-op-token: while the token is held, run node as a CHILD (not exec) so
-  # the EXIT trap armed by heavy_op_acquire fires when node finishes — an exec'd node would replace
-  # this shell and silently skip the release. The concurrency flag is bound to a variable here
-  # because the literal `--test-concurrency="$(default_test_concurrency)"` spelling is pinned by
-  # plugin/test/resource-gate.test.mjs AC5 (exactly 4 sites) and select-tests-for-touches.test.mjs
-  # AC11 — the token-held branch must not add a fifth literal site.
-  if [ "${HEAVY_OP_ACQUIRED:-0}" = "1" ]; then
-    local cc
-    cc="$(default_test_concurrency)"
+  # FULL-SUITE default path: run node as a CHILD (not exec) so the suite-AFTER assertion
+  # (tmux-leak-scan) fires after node finishes — an exec'd node would replace this shell and skip
+  # it. The suite-after clean-tree assertion is DISABLED (human ruling 17:1x): its premise — the
+  # coordinator runs on a clean tree — is void under three concurrent writers, so it produced
+  # false reds (r4/r5/r6) and no longer participates in the red verdict. Re-enable when the
+  # verification worktree achieves runtime single-writer via `git worktree lock` (re-enable
+  # condition documented in the kept suite-after clean-tree script's header).
+  # The main phase's concurrency is delivered via bucket_test_concurrency (explicit flag wins, else
+  # the derived default) — NOT the `--test-concurrency="$(default_test_concurrency)"` literal, whose
+  # spelling is pinned by plugin/test/resource-gate.test.mjs AC5 (exactly 5 sites) and
+  # select-tests-for-touches.test.mjs AC11; the default-path branch must not add a sixth literal site.
+  if [ "${FULL_SUITE_DEFAULT:-0}" = "1" ]; then
+    mark_nested
+    # Suite-BEFORE snapshot (gap-assert-clean-tree-premise-void-under-concurrent-writers): capture
+    # the pre-run porcelain so a re-enabled suite-AFTER assertion is DELTA — only items newly added
+    # DURING the run count as test products. Preexisting dirt from concurrent writers (manager
+    # tick-log, outer worktree scaffolding, inner uncommitted change) is excluded. The snapshot is
+    # gitignored. NON-FATAL while the assertion is DISABLED (the clean-tree call itself stays
+    # disabled per the 17:1x ruling — restore fail-closed here when the assertion is re-enabled).
+    bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" --snapshot "${repo_root}" || true
+    # Same-family DELTA for tmux-leak-scan: pre-existing outer/manager tmux sessions are not this
+    # run's leak. Snapshot failure is non-fatal (the absolute suite-tail check still runs after).
+    # --sweep FIRST (gap-tmux-leak-scan-sweep-orphaned-servers): cure the HISTORICAL SIGKILL orphans
+    # (hermetic servers stranded on /tmp/<prefix>* sockets) before the snapshot, so --snapshot/--check
+    # stay a pure "this run's NEW leak" delta. best-effort, exit 0 always.
+    bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --sweep "${repo_root}" || true
+    bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
     set +e
-    node --test --test-concurrency="$cc" "$@" "${files[@]}"
-    local code=$?
+    # Phase order (gap-phase-order-serial-lowconc-before-main): LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0)
+    # only — under the unified scheduler serial/lowconc/main are scheduled CONCURRENTLY by the
+    # waterline, not as serially-sequenced phases. The "run BEFORE the main body" ordering below is
+    # the RETIRED phased-path rationale, kept only as the fallback.
+    # (Legacy-path rationale:) serial and lowconc phases run BEFORE the main concurrency-N body so a
+    # failure in a serial/lowconc file is judged red at the phase boundary (minutes) instead of AFTER
+    # the entire main phase's cost has been paid —
+    # the 16 long-reds were all judged red exactly total−30s=RED_GRACE_MS because their failures
+    # lived in the LAST phases (serial/lowconc) and paid the whole main phase first (2.37h pure
+    # waste). Phases are independent and serially sequenced (no shared state between phase runs),
+    # so the reorder changes wall-clock latency only, never correctness.
+    local code=0
+    # main-tail-overlap coordination (gap-suite-main-overlaps-load-sensitive-tail-experiment): the
+    # overlap branch's watcher may launch main early in the background. main_early_pid = the watcher
+    # process; main_early_code_file carries its verdict ("pending" → "fallthrough" → <exit-code>).
+    # Empty on the sequential / knob-0 path (main runs synchronously, unchanged).
+    local main_early_pid="" main_early_code_file=""
+    # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
+    # ⚠️ LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0) ONLY — under the unified scheduler (the default,
+    # gap-suite-dynamic-waterline-scheduler) serial∥lowconc∥main run CONCURRENTLY via the group-budget
+    # waterline; there is NO "serial runs ALONE before main" ordering there. The "BEFORE it, ALONE"
+    # description below is the RETIRED phased-path model, kept only as the ONE-KEY ROLLBACK fallback.
+    # the A/B-class KNOWN-LOAD-SENSITIVE family (nested-suite-spawn + real-wall-clock-wait) PLUS
+    # the REAL-INSTALL install/quay-init family is routed OUT of the concurrency-N main body into
+    # a `serial` group that runs BEFORE it, ALONE (legacy phased path only), at concurrency $SERIAL_CONCURRENCY (default 2 —
+    # raised from 1 by the AC2 controlled experiment, gap-load-sensitive-serial-phase-unbounded-
+    # growth-measure-first) —
+    # the mechanical isolation that keeps real-wall-clock-wait, nested-suite-spawn, and real-install
+    # tests from being starved by the main body's worker pool. The install/quay-init family was
+    # admitted to serial at round 162 after rotating flakes across groups under full-suite load
+    # (rounds 160/161/162 — a different file each round;
+    # gap-install-family-tests-rotate-flakes-under-full-suite). The concurrency default is 1 —
+    # serial isolation is the mechanism's invariant; QUAY_SERIAL_CONCURRENCY is the measure-first
+    # override (gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2) — the default is
+    # bumped only after an experiment proves 0-cancelled at a higher value (the --group serial path
+    # in the non-default branch strips explicit concurrency flags for the same isolation reason).
+    # Its TAP summary lands FIRST on the
+    # stream (before the main body), so a serial failure flips the run red BEFORE the main phase's
+    # cost is paid (gap-phase-order-serial-lowconc-before-main) — the phase runs EVEN IF a later
+    # phase fails (report all failures; the serial exit code merges into `code`), so a red main
+    # must not leave the serial files' verdict unknown (gap-post-merge-verification-failure-batch
+    # AC3: round 95 skipped serial when main was red, so serial failures were invisible).
+    local serial_files=() sf serial_code
+    while IFS= read -r sf; do serial_files+=("$sf"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "serial")
+    # LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0): the serial_files/lowconc_files selection below feeds
+    # ONLY the legacy phased path — the unified scheduler re-classifies from the raw file list itself.
+    # LOWCONC selection hoisted BEFORE the serial run so the overlap branch can launch both phases in
+    # parallel. In the SEQUENTIAL branch the lowconc selection used to run right before the lowconc
+    # phase; hoisting it here shifts that selection time into gap_ms_pre_to_serial (a diagnostic gap,
+    # NEVER a phase metric) — serial_phase_ms / lowconc_phase_ms / main_phase_ms are unchanged, so the
+    # before/after comparison metric (serial_phase_ms + lowconc_phase_ms, task constraint 3) is byte-
+    # identical between this and the pre-change sequential scheduling.
+    local lowconc_files=() lf lowconc_code
+    while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "lowconc")
+    # LPT order for the serial/lowconc phases (gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered):
+    # these were the last bare `node --test` dispatch points on the full path — node --test re-sorts
+    # positional args alphabetically, so a longest-known-first order is discarded (the serial/lowconc
+    # tail waited ≈38% of the round). Reorder IN PLACE before EITHER branch (overlap/sequential) so
+    # both get the LPT order, then hand to suite-lpt-runner.mjs run({files}) — the ONLY path that
+    # preserves argv order. Same invariant as the main phase (membership unchanged, order only).
+    lpt_order_files serial_files
+    lpt_order_files lowconc_files
+    # ── unified scheduler (gap-suite-dynamic-waterline-scheduler) ─────────────────────────────────
+    # Replaces the phased execution BELOW (static→serial→lowconc→main + PHASE_OVERLAP + the A
+    # main-tail-overlap watcher) with ONE event-driven loop. Since gap-suite-classification-lpt-
+    # scheduler-ts-ization the scheduler receives the RAW deduped file list (no pre-classification, no
+    # pre-LPT): it classifies each file (product+engine → main, serial → serial, lowconc → lowconc),
+    # LPT-orders each bucket, and schedules via the waterline — serial ≤ $SERIAL_CONCURRENCY and
+    # lowconc ≤ $LOWCONC_CONCURRENCY run in PARALLEL (independent budgets), main filling the remaining
+    # capacity (main budget − active low-group slots), rising monotonically as the low groups drain. No
+    # CPU-load detection — the waterline is a STRUCTURAL guarantee that absorbs the A watcher's
+    # stall-polling. The full-suite default includes all four groups (serial/lowconc run in their own
+    # buckets); a scoped --group is the filter. ONE-KEY ROLLBACK: QUAY_SUITE_SCHEDULER=0 falls through
+    # to the legacy phased path below (RETIRED — kept only as the fallback).
+    if [ "${QUAY_SUITE_SCHEDULER:-1}" = "1" ]; then
+      [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
+      local sched_groups="$groups"
+      if is_default_set "$groups"; then sched_groups="product,engine,serial,lowconc"; fi
+      echo "scheduler: unified group-budget scheduler (serial≤$SERIAL_CONCURRENCY lowconc≤$LOWCONC_CONCURRENCY main≤$(bucket_test_concurrency "$@"))"
+      printf '%s\n' "${_RG_FILES[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-scheduler.ts" \
+          --root "${repo_root}" \
+          --main-root "${main_root}" \
+          --serial-concurrency "$SERIAL_CONCURRENCY" \
+          --lowconc-concurrency "$LOWCONC_CONCURRENCY" \
+          --main-concurrency "$(bucket_test_concurrency "$@")" \
+          --groups "$sched_groups" \
+          "$@"
+      code=$?
+      [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
+      # Fixed-overhead segments; the phase timings (serial/lowconc/main_phase_ms) are emitted by the
+      # scheduler itself at each group's close (__OVERHEAD__ <group>_phase_ms) — no test.sh
+      # phase-segment emit here (the phased marks oh_t5b/oh_t6/oh_t6b have no scheduler meaning).
+      [ "$oh_full" -eq 1 ] && {
+        _oh_emit "lock_overhead"      "$oh_t0" "$oh_t1"
+        _oh_emit "resource_gate"      "$oh_t1" "$oh_t2"
+        _oh_emit "build_dist"         "$oh_t2" "$oh_t3"
+        _oh_emit "run_static_checks"  "$oh_t3" "$oh_t4"
+        _oh_done=1
+      }
+      # Shared suite-tail (same as the legacy path below): the tmux-leak-scan is a PER-ROUND checker,
+      # and the single-flight slot must release before exit.
+      node --experimental-strip-types "${repo_root}/plugin/scripts/run-namespace-sweep-kill.mjs" || true
+      if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
+        code=1
+      fi
+      full_suite_lock_release
+      exit "$code"
+    fi
+    # ════════════════════════════════════════════════════════════════════════════════════════════
+    # LEGACY PHASED PATH (RETIRED — reached ONLY when QUAY_SUITE_SCHEDULER=0, the ONE-KEY ROLLBACK):
+    # everything below (PHASE_OVERLAP serial+lowconc overlap, MAIN_TAIL_OVERLAP A watcher, the
+    # sequential serial→lowconc→main baseline, and the "main runs LAST" phase order) is the RETIRED
+    # static phase-splitting model. The unified scheduler above replaces it with one concurrent
+    # waterline loop (serial∥lowconc∥main). Kept solely as the fallback safety net.
+    # ════════════════════════════════════════════════════════════════════════════════════════════
+    # PHASE OVERLAP (gap-phase-overlap-two-phase-parallel-exploration AC1, default-ON since AC101):
+    # when QUAY_PHASE_OVERLAP=1 (the default) AND both phases are non-empty, run serial + lowconc in
+    # PARALLEL (each at its OWN concurrency, $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY — scheduling-
+    # only, never a value change, AC4). Set QUAY_PHASE_OVERLAP=0 for the sequential baseline
+    # (ONE-KEY ROLLBACK). Expected saving: the sequential serial+lowconc window (177+154=331s)
+    # becomes max(177,154)≈177s.
+    if [ "$PHASE_OVERLAP" -eq 1 ] && [ "${#serial_files[@]}" -gt 0 ] && [ "${#lowconc_files[@]}" -gt 0 ]; then
+      [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
+      echo "overlap: running ${#serial_files[@]} serial + ${#lowconc_files[@]} lowconc files in parallel (serial conc=$SERIAL_CONCURRENCY, lowconc conc=$LOWCONC_CONCURRENCY)"
+      local serial_pid lowconc_pid overlap_s_start overlap_l_start overlap_s_end overlap_l_end
+      # Per-process sub-times + per-phase completion markers for the runner's phase accounting
+      # (gap-verification-round-phases-overlap-merged AC1/AC2): the two phases run in PARALLEL, so
+      # the stream's __GROUP__ lines cannot be attributed to one or the other. Emitting
+      # `__OVERHEAD__ overlap_<phase>_done=1` right after each `wait` gives the runner an explicit
+      # "this parallel phase finished" signal — the combined window closes only when BOTH have fired,
+      # and `overlap_<phase>_ms=N` carries each phase's OWN wall sub-time so the serial/lowconc
+      # contributions stay distinguishable (the fixed-overhead serial_phase_ms stays the combined
+      # window — the analyst's serial+lowconc sum == the window, unchanged for the before/after metric).
+      overlap_s_start=$(_oh_mark)
+      node --test-concurrency="$SERIAL_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${serial_files[@]}" & serial_pid=$!
+      overlap_l_start=$(_oh_mark)
+      node --test-concurrency="$LOWCONC_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${lowconc_files[@]}" & lowconc_pid=$!
+      # main-tail-overlap (gap-suite-main-overlaps-load-sensitive-tail-experiment): when the knob is
+      # >0, launch a WATCHER that fires the MAIN phase EARLY (at the knob's lanes) once the window's
+      # CPU work drains — overlapping main with the latency-bound tail. The watcher LPT-reorders
+      # `files` (the SAME order the normal main phase uses) and writes its verdict to
+      # $main_early_code_file ("fallthrough" = trigger never fired ⇒ main runs normally at window
+      # close; a number = main's exit code). The main phase below adopts it (no double-run). The
+      # subshell inherits `set +e` (the enclosing full-suite block), so a red early main still writes
+      # its exit code before the watcher exits.
+      if [ "$MAIN_TAIL_OVERLAP" -gt 0 ]; then
+        lpt_order_files files
+        main_early_code_file="$(mktemp "${TMPDIR:-/tmp}/main-tail-overlap.XXXXXX")"
+        printf '%s' "pending" > "$main_early_code_file"
+        (
+          if main_tail_overlap_wait; then
+            _tail_load="$(awk '{print $1}' "${QUAY_MAIN_TAIL_LOADAVG_FILE:-/proc/loadavg}" 2>/dev/null || true)"
+            echo "main-tail-overlap: lanes=${MAIN_TAIL_OVERLAP}${_tail_load:+ load=${_tail_load}}" >&2
+            node --test-concurrency="$MAIN_TAIL_OVERLAP" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "$@" "${files[@]}"
+            printf '%s' "$?" > "$main_early_code_file"
+          else
+            printf '%s' "fallthrough" > "$main_early_code_file"
+          fi
+        ) &
+        main_early_pid=$!
+      fi
+      wait "$serial_pid"; serial_code=$?
+      overlap_s_end=$(_oh_mark)
+      echo "__OVERHEAD__ overlap_serial_ms=$((overlap_s_end - overlap_s_start))" >&2
+      echo "__OVERHEAD__ overlap_serial_done=1" >&2
+      wait "$lowconc_pid"; lowconc_code=$?
+      overlap_l_end=$(_oh_mark)
+      echo "__OVERHEAD__ overlap_lowconc_ms=$((overlap_l_end - overlap_l_start))" >&2
+      echo "__OVERHEAD__ overlap_lowconc_done=1" >&2
+      [ "$serial_code" -eq 0 ] || code="$serial_code"
+      [ "$lowconc_code" -eq 0 ] || code="$lowconc_code"
+      # Overlap timing: the two phases share ONE window. serial_phase_ms = the combined window and
+      # lowconc_phase_ms = 0 (subsumed — the analyst's serial+lowconc sum == the overlap window).
+      # gap_ms_serial_to_lowconc = 0 (no transition gap by construction).
+      [ "$oh_full" -eq 1 ] && { oh_t5b=$(_oh_mark); oh_t6="$oh_t5b"; oh_t6b="$oh_t5b"; }
+    else
+      # SEQUENTIAL baseline (unchanged scheduling). Timing markers preserve the historical semantics:
+      # oh_t5 = after serial selection / before serial, oh_t5b = after serial, oh_t6 = after lowconc
+      # selection / before lowconc, oh_t6b = after lowconc.
+      [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
+      if [ "${#serial_files[@]}" -gt 0 ]; then
+        echo "selected ${#serial_files[@]} files (groups=serial)"
+        node --test-concurrency="$SERIAL_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${serial_files[@]}"
+        serial_code=$?
+        [ "$serial_code" -eq 0 ] || code="$serial_code"
+      fi
+      [ "$oh_full" -eq 1 ] && oh_t5b=$(_oh_mark)
+      # LOWCONC phase (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4): the
+      # hermetic-but-load-sensitive files (B-class session-observation family, each private socket /
+      # wall-clock wait — the install/quay-init family LEFT this group for serial in round 162,
+      # gap-install-family-tests-rotate-flakes-under-full-suite) run in their OWN phase at
+      # `--test-concurrency=$LOWCONC_CONCURRENCY` (default = the host-derived lowconc_concurrency_default,
+      # the SAME max(1, floor(nproc/(S×P))) as serial; gap-lowconc-concurrency-restore-host-derived) — so
+      # wait-type tests get timely scheduling. The phase runs even if another phase failed (report all
+      # failures); its exit code merges into `code`. Runs BEFORE the main body so a lowconc failure is
+      # judged red at the phase boundary (gap-phase-order-serial-lowconc-before-main). The default is
+      # host-derived (not a literal) and does NOT add a derived-concurrency literal site
+      # (resource-gate AC5 pins exactly 5 `--test-concurrency="$(default_test_concurrency)"` sites).
+      [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
+      if [ "${#lowconc_files[@]}" -gt 0 ]; then
+        echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
+        node --test-concurrency="$LOWCONC_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${lowconc_files[@]}"
+        local lcode=$?
+        [ "$lcode" -eq 0 ] || code="$lcode"
+      fi
+      [ "$oh_full" -eq 1 ] && oh_t6b=$(_oh_mark)
+    fi
+    # MAIN phase (the concurrency-N default body) — runs LAST, after serial/lowconc
+    # (gap-phase-order-serial-lowconc-before-main): a serial/lowconc failure is now judged red at
+    # the phase boundary, never after the entire main phase's cost has been paid.
+    # LPT order + order-preserving run({files}) (gap-suite-lpt-full-bucket-run-selected): the main
+    # body is LPT-reordered longest-known-first and handed to suite-lpt-runner.mjs — the ONLY path
+    # that preserves argv order (node --test re-sorts positional globs alphabetically, which is how
+    # the full default path previously ran the main body: longest files serialized at the tail).
+    # Concurrency rides in execArgv via bucket_test_concurrency (explicit flag wins, else the derived
+    # default — the SAME single-concurrency-source precedence as has_explicit_concurrency), and the
+    # runner composes spec→stdout + measure-suite-reporter→stderr (the suite_reporter_flags
+    # equivalents), so the per-file attribution + LPT input carrier stay intact.
+    local mcode=0
+    # main-tail-overlap (gap-suite-main-overlaps-load-sensitive-tail-experiment): adopt the watcher's
+    # early-main verdict when it fired (a numeric exit code) and skip the normal main phase; otherwise
+    # run the normal main phase. ⚠️ The `if`/`fi` below sit at the SAME indent as their body so the two
+    # pinned main-phase lines keep their original `lpt_order_files files` + `node --test-concurrency=
+    # "$(bucket_test_concurrency "$@")"` adjacency — suite-lpt-order.test.mjs AC1 pins that exact
+    # adjacency (do NOT re-indent those two lines, and do NOT insert a line between them).
+    local _tail_skip_main=0
+    if [ -n "$main_early_pid" ]; then
+      wait "$main_early_pid" 2>/dev/null || true
+      local _tail_verdict=""
+      _tail_verdict="$(cat "$main_early_code_file" 2>/dev/null || true)"
+      rm -f "$main_early_code_file"
+      if [ -n "$_tail_verdict" ] && [ "$_tail_verdict" != "fallthrough" ] && [ "$_tail_verdict" != "pending" ]; then
+        mcode="$_tail_verdict"
+        if [ "$mcode" -ne 0 ]; then code="$mcode"; fi
+        _tail_skip_main=1
+      fi
+    fi
+    if [ "$_tail_skip_main" != "1" ]; then
+    lpt_order_files files
+    node --test-concurrency="$(bucket_test_concurrency "$@")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "$@" "${files[@]}"
+    mcode=$?
+    [ "$mcode" -eq 0 ] || code="$mcode"
+    fi
+    [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
+    # Fixed-overhead breakdown (gap-suite-fixed-overhead-decomposition AC2): emit the deterministic
+    # serial-segment durations. Each is a DIRECT measurement of one sequential step — decidable,
+    # unlike wall-clock diffs inside the 17–63s noise band. The "gap" segments are the inter-phase
+    # serial transitions (select/echo between phases: oh_t4→oh_t5 pre→serial, oh_t5b→oh_t6
+    # serial→lowconc); the phase segments (serial/lowconc/main) are the node --test runs themselves.
+    # Label tokens deliberately match the task's measure grep (`build_dist|run_static|resource_gate|gap_ms`).
+    if [ "$oh_full" -eq 1 ]; then
+      _oh_emit "lock_overhead"      "$oh_t0" "$oh_t1"
+      _oh_emit "resource_gate"      "$oh_t1" "$oh_t2"
+      _oh_emit "build_dist"         "$oh_t2" "$oh_t3"
+      _oh_emit "run_static_checks"  "$oh_t3" "$oh_t4"
+      _oh_emit "gap_ms_pre_to_serial"    "$oh_t4" "$oh_t5"
+      _oh_emit "serial_phase"       "$oh_t5" "$oh_t5b"
+      _oh_emit "gap_ms_serial_to_lowconc" "$oh_t5b" "$oh_t6"
+      _oh_emit "lowconc_phase"      "$oh_t6" "$oh_t6b"
+      _oh_emit "main_phase"         "$oh_t6b" "$oh_t7"
+      # The FULL decomposition is on the wire — suppress the partial fallback so a subsequent
+      # SIGTERM/EXIT trap (and the SIGTERM→EXIT chain) is a no-op.
+      _oh_done=1
+    fi
     set -e
-    # Suite-AFTER assertion (gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree): a FULL
-    # SUITE must leave the shared checkout clean (`git status --porcelain` empty). Harder than any
-    # static rule — it does not depend on a detector recognizing a particular spelling, so ANY
-    # test that dirties the tree (mkdtemp under REPO_ROOT, a leaked scratch dir, a stray file) is
-    # caught here. Only on the full-suite default path (this token-held branch); scoped runs
-    # legitimately execute inside uncommitted worktrees and skip it. A failing test's own exit
-    # code is the primary signal, so a dirty tree only flips a PASSING run (never masks a fail).
-    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" "${repo_root}"; then
+    # DISABLED (human ruling 17:1x, disable-not-delete): the suite-after clean-tree assertion NO
+    # LONGER RUNS here. Its premise — the coordinator runs on a clean tree — is VOID under three
+    # concurrent writers (manager tick-log append / outer worktree scaffolding / inner uncommitted
+    # change), which produced three false reds (r4/r5/r6) and a mis-cleaning config cascade. It
+    # cannot participate in the red verdict until the re-enable condition — the verification
+    # worktree achieves runtime SINGLE-WRITER via `git worktree lock` — is met. The kept script
+    # (not deleted, per the disable ruling) and the full re-enable condition + delta-form note live
+    # in the suite-after clean-tree script's header.
+    # KNOWN TRADE-OFF (AC4): catching a test that GENUINELY leaks into the verification tree is
+    # TEMPORARILY ABSENT while disabled; the tmux-leak-scan below still catches the tmux leak class.
+    # Suite-AFTER assertion, DELTA form (AC1, gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause):
+    # a FULL SUITE must leave no test-characteristic tmux server or /tmp dir behind (skv- /
+    # ol-tok- / enter-repro- prefixes). Delta: only items absent from the
+    # before-run snapshot are this run's leak. Second line of defense — the teardown fix
+    # (kill-session, never kill-server) is primary; this covers the whole leak class at once.
+    # Same flip-only-a-passing-run semantics as assert-clean-tree above.
+    # Candidate C (gap-runner-failure-patterns-miss-info-glyph-and-perfile-failed AC5): the leak scan
+    # runs UNCONDITIONALLY — the `&&` short-circuit (old `[ "$code" -eq 0 ] && ! bash ...`) swallowed
+    # the scan whenever the test phase exited non-zero, so a test-red ALSO hid a genuine leak-class
+    # residual (the snapshot was deleted by --check's success path or left stale). A leak is a REAL
+    # residual, independent of test-failure reporting — merge its verdict into code so the runner's
+    # tmux-leak-scan: FAIL line reaches the stream and failures[].
+    # BOUNDED REAP-WAIT (gap-leak-scan-reap-race-false-red): the wait-before-judgment lives INSIDE
+    # --check — when NEW matches appear it polls up to $TMUX_LEAK_REAP_WAIT_MS (default: host-derived
+    # reap_wait_default() in tmux-leak-scan.sh, ≥10000) for
+    # them to clear before declaring a leak, so test-spawned tmux servers still exiting at run end
+    # (round 95 false-red: tests=4150 all pass) are not swept as residue. A genuine leak persists
+    # past the bound and still fails. A clean run adds zero latency (first scan wins immediately).
+    # TRUE-CATCH-ALL registry kill (teardown-ol-scd-cf-leak): BEFORE the suite-tail
+    # leak scan, kill any STILL-ALIVE server the tests registered durably. Closes the
+    # process-crash / cancelled-test hole — a test process that died before its after() hook can never
+    # clean its server, but the durable registry (written at server-creation) survives. Registry-driven
+    # (PID-targeted SIGKILL of servers the tests self-built), NEVER a name-based batch kill (invariant
+    # no_pkill_by_name_on_live = 1). Best-effort (exit 0 always) — the leak-scan is the assertion.
+    node --experimental-strip-types "${repo_root}/plugin/scripts/run-namespace-sweep-kill.mjs" || true
+    if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
       code=1
     fi
+    full_suite_lock_release
     exit "$code"
   fi
-  exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
+  mark_nested
+  # SERIAL group run (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
+  # the serial group is isolated by definition — concurrency $SERIAL_CONCURRENCY (default 2 = the
+  # invariant; the measure-first override of gap-load-sensitive-serial-phase-unbounded-growth-
+  # measure-first AC2/AC3, bumped only after an experiment proves 0-cancelled).
+  # Strip any explicit --test-concurrency flag (both spellings) so the env-driven SERIAL_CONCURRENCY
+  # is the SINGLE concurrency source — a full-suite-runner splice onto a `--group serial` command
+  # must not leak concurrency N in.
+  if in_group "serial" "$groups"; then
+    local filtered=() a prev_arg=""
+    for a in "$@"; do
+      case "$a" in
+        --test-concurrency=*) continue ;;
+        --test-concurrency) prev_arg="continue" ; continue ;;
+      esac
+      if [ "$prev_arg" = "continue" ]; then prev_arg=""; continue; fi
+      filtered+=("$a")
+    done
+    exec node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${filtered[@]}" "${files[@]}"
+  fi
+  # LOWCONC group run (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4):
+  # (Scoped single-group run, NOT the full-suite phased path — a `--group lowconc` invocation runs
+  # ONLY the lowconc files; under the unified scheduler the full suite runs serial∥lowconc∥main
+  # CONCURRENTLY, never "lowconc ALONE before main".)
+  # `--group lowconc` runs the hermetic-but-load-sensitive phase ALONE at its own concurrency
+  # $LOWCONC_CONCURRENCY (host-derived, = serial). An explicit user --test-concurrency flag still
+  # wins (single concurrency source, AC2). The default adds no derived-concurrency literal site.
+  local lowconc_force=""
+  if in_group "lowconc" "$groups"; then
+    lowconc_force="--test-concurrency=$LOWCONC_CONCURRENCY"
+  fi
+  # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency source
+  # (gap-full-suite-runner-concurrency-default-and-gate AC2) — skip the default prepend.
+  if has_explicit_concurrency "$@"; then
+    exec node --test $(suite_reporter_flags) "$@" "${files[@]}"
+  elif [ -n "$lowconc_force" ]; then
+    exec node --test "$lowconc_force" $(suite_reporter_flags) "$@" "${files[@]}"
+  else
+    exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
+  fi
 }
 
 # ── argument dispatch ────────────────────────────────────────────────────────────────────────────
@@ -455,23 +1441,17 @@ run_selected() {
 # all_flags "$@" — return 0 iff EVERY argument starts with '-'. Detects the flags-only invocation
 # form (gap-test-sh-flags-only-form-silently-runs-a-different-suite): when nothing but node --test
 # flags remain after subcommand handling, treat them as extra flags + the selected glob rather than
-# as file paths. An empty "$@" returns 0, but every caller checks $# -eq 0 first.
+# as file paths. An empty "$@" returns 0, but every caller checks $# -eq 0 first. THIN FORWARDER →
+# plugin/scripts/runner-concurrency.ts allFlags() (SPEC P4 套件入口收进 TS).
 all_flags() {
-  local a
-  for a in "$@"; do
-    case "$a" in
-      -*) ;;
-      *) return 1 ;;
-    esac
-  done
-  return 0
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --all-flags "$@"
 }
 
 groups=""
 if [ "${1:-}" = "--group" ]; then
   groups="${2:-}"
   if [ -z "${groups}" ]; then
-    echo "scripts/test.sh: --group requires a group name (product|engine|governance, comma-separated)" >&2
+    echo "scripts/test.sh: --group requires a group name (product|engine|serial|lowconc, comma-separated)" >&2
     exit 2
   fi
   shift 2
@@ -480,15 +1460,26 @@ fi
 if [ "${1:-}" = "--list-groups" ]; then
   # Metadata mode (AC10) — no test run, no split-or-commit scan. Always reports the FULL
   # deduped glob's per-group counts, independent of any --group.
-  list_groups
+  check_group_declarations
+  build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --list-groups
   exit 0
 elif [ "${1:-}" = "--list-files" ]; then
   # Metadata mode (test support / AC6) — print the selected file list, one per line. Respects
-  # --group if given, else the default product,engine set.
+  # --group if given; else the DEFAULT RUN's full selection = the product,engine body PLUS the
+  # lowconc phase files — a default `bash scripts/test.sh` executes BOTH (the concurrent body,
+  # then the serial phase, then the lowconc phase), so no-args --list-files reports the full
+  # reachable surface and keeps the
+  # runner-grouping AC3 invariant (`--list-files count + serial == --list-groups total`) and the
+  # test-coverage-check AC5 canonical-coverage invariant. A serial/lowconc file is NOT in the
+  # default GROUP SET; it is in the default RUN (its own phase) — hence
+  # `--group product,engine --list-files` differs from no-args unless lowconc is named
+  # (runner-grouping AC6 pins `--group product,engine,lowconc --list-files == no-args --list-files`).
+  check_group_declarations
   if [ -n "${groups}" ]; then
-    select_files "$groups"
+    build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "$groups"
   else
-    select_files "$(effective_groups)"
+    build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "$(effective_groups)"
+    build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "lowconc"
   fi
   exit 0
 elif [ -n "${groups}" ]; then
@@ -497,7 +1488,7 @@ elif [ -n "${groups}" ]; then
     run_selected "$groups"
   elif all_flags "$@"; then
     # gap-test-sh-flags-only-...: bare node --test flags + the group's glob (e.g.
-    # `--group governance --test-concurrency=4`). Previously this fell to the explicit-file branch
+    # `--group serial --test-concurrency=4`). Previously this fell to the explicit-file branch
     # with an EMPTY file list → node --test auto-discovered a 3.7x-larger, different suite.
     run_selected "$groups" "$@"
   else
@@ -506,26 +1497,79 @@ elif [ -n "${groups}" ]; then
     run_static_checks
     export QUAY_TEST_GROUPS="$groups"
     build_dist_once
-    exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
+    mark_nested
+    # has_explicit_concurrency: explicit flag wins as the single concurrency source (AC2).
+    if has_explicit_concurrency "$@"; then
+      exec node --test "$@"
+    else
+      exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
+    fi
   fi
 fi
 
 if [ "$#" -eq 0 ]; then
-  # Default: product,engine (AC4). Governance files are passed through too — they self-skip,
-  # so they report `skipped`, not absent (ADR-019 decision #1 precedent). run_selected runs
-  # the split-or-commit whole-store scan.
+  # Default: product,engine (AC4). run_selected runs the split-or-commit whole-store scan.
   run_selected "$(effective_groups)"
-elif [ "${1:-}" = "--for-task" ]; then
+elif [ "${1:-}" = "--static-checks" ]; then
+  # Gate-only mode (gap-scoped-runs-pay-full-static-check-overhead, AC2 proof): run the COMPLETE
+  # static-check set (run_static_checks — the same set the full-suite path runs) with NO test run.
+  # The outer verification round and the AC2 "full set unchanged" mechanical proof use this to run
+  # the full gate without paying the test suite.
   run_static_checks
+  exit 0
+elif [ "${1:-}" = "--static-checks-doc" ]; then
+  # Doc-class static checks only (AC51 断言面拆分, gap-ac51-assertion-surface-split): run the
+  # DOC-ONLY checkers (run_doc_checks) with NO test run. This is the pre-commit home of the doc
+  # consistency checks — wired into plugin/scripts/precommit-guard.ts (the pre-commit hook invokes
+  # `bash scripts/test.sh --static-checks-doc` at commit time). It is NOT part of the full-suite
+  # gate; the full suite runs run_static_checks (code-class only; the operational-class runtime-state
+  # checks are `--static-checks-operational`, the branch below).
+  run_doc_checks
+  exit 0
+elif [ "${1:-}" = "--static-checks-operational" ]; then
+  # OPERATIONAL-class (runtime-state) static checks only (2026-09-02 passive-machine ruling — 执行
+  # suite 测试不应依赖本项目运行态): run the 11 runtime-state checkers (run_operational_checks) with NO
+  # test run. Home = this explicit opt-in on the ACTIVE host, NOT the full-suite gate (the default
+  # suite must be machine-independent — a passive checkout goes green on code alone). NOT wired into
+  # any automatic cadence (outer retiring; drift accepted). They REMAIN in the mutation manifest
+  # (checker-mutation-check.sh parses run_operational_checks) so the L_S instrument is not weakened.
+  # run_operational_checks is defined in runner-static-gate.ts (sourced above).
+  run_operational_checks
+  exit 0
+elif [ "${1:-}" = "--for-task" ] || [ "${1:-}" = "--scoped" ]; then
   # gap-test-selection-not-scoped-to-touches: mechanical per-task test selection. `scripts/test.sh
   # --for-task <id>` delegates to select-tests-for-touches.ts (which resolves the task's ## Touches
-  # to a test set) and runs EXACTLY that set. Additive: the full-suite default and the explicit-file
-  # form above are unchanged. `--allow-thin` passes through to the selector (see its exit codes).
-  task_id="${2:-}"
-  if [ -z "${task_id}" ]; then
-    echo "scripts/test.sh: --for-task requires a task id" >&2
+  # to a test set) and runs EXACTLY that set. `--scoped <id>` is the SAME scoped task path (the
+  # measure surface named by the gap-scoped-runs-pay-full-static-check-overhead Contract); `--scoped
+  # <file...>` (a repo-relative test file, not a task id) treats the given files as the change's
+  # touches and runs them with the scoped static-check tier. Additive: the full-suite default and
+  # the explicit-file form are unchanged. `--allow-thin` passes through to the selector.
+  #
+  # Scoped static-check tier: instead of the FULL run_static_checks (which scoped runs used to pay,
+  # ~16s, 13s of it checker-mutation-check), a task-scoped run runs the change-relevant subset —
+  # checks whose object intersects the touches + the ## Contract consumer on the touched task files
+  # (run_scoped_static_checks_sel below). The full set is deferred to the full-suite gate, not dropped.
+  scoped_flag="${1}"
+  scoped_arg="${2:-}"
+  if [ -z "${scoped_arg}" ]; then
+    echo "scripts/test.sh: ${scoped_flag} requires a task id (or, for --scoped, a test-file path)" >&2
     exit 2
   fi
+  if [ "${scoped_flag}" = "--scoped" ] && [ ! -f "${repo_root}/tasks/${scoped_arg}.md" ]; then
+    # --scoped <file...>: the argument is not a task id — treat the given files as the change's
+    # touches and run them with the scoped static-check tier (the contract's `<单文件>` surface).
+    shift 1
+    run_scoped_static_checks_touches "$(IFS=,; echo "$*")"
+    build_dist_once
+    mark_nested
+    # has_explicit_concurrency: explicit flag wins as the single concurrency source (AC2).
+    if has_explicit_concurrency "$@"; then
+      exec node --test "$@"
+    else
+      exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
+    fi
+  fi
+  task_id="${scoped_arg}"
   shift 2
   allow_thin_flag=""
   sel_mode="--paths-only"     # default: emit paths for test.sh to run
@@ -551,52 +1595,266 @@ elif [ "${1:-}" = "--for-task" ]; then
   fi
   if [ -n "${explicit_mode}" ]; then
     # The user asked for the selector's output, not a test execution — print it and exit with the
-    # selector's own code (so `test-selection-thin` still surfaces non-zero).
+    # selector's own code (so `test-selection-thin` still surfaces non-zero). Scoped static checks
+    # do not run for a selector-only query (no test run to gate) — same as --list-files/--list-groups.
     printf '%s\n' "${sel_out}"
     exit "${sel_code}"
   fi
+  # Scoped static-check tier — the change-relevant subset (the full set is the full-suite gate's job).
+  run_scoped_static_checks "${task_id}"
   # A here-string always appends a newline, so `mapfile <<< ""` yields a 1-element [""] array — the
   # empty case MUST be guarded on the string itself, not on the array length.
   if [ -z "${sel_out}" ]; then
     if [ "${sel_code}" -eq 2 ]; then
-      echo "scripts/test.sh: --for-task ${task_id} — selector could not resolve the task (exit 2)" >&2
+      echo "scripts/test.sh: ${scoped_flag} ${task_id} — selector could not resolve the task (exit 2)" >&2
       exit 2
     fi
     if [ -n "${allow_thin_flag}" ]; then
       # --allow-thin + zero tests to run: nothing to do, and the user explicitly accepted thin.
-      echo "scripts/test.sh: --for-task ${task_id} — selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in" >&2
+      echo "scripts/test.sh: ${scoped_flag} ${task_id} — selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in" >&2
       exit 0
     fi
-    echo "scripts/test.sh: --for-task ${task_id} selected no test files (selector exit ${sel_code}); add --allow-thin to force" >&2
+    echo "scripts/test.sh: ${scoped_flag} ${task_id} selected no test files (selector exit ${sel_code}); add --allow-thin to force" >&2
     exit 1
   fi
   mapfile -t files <<< "${sel_out}"
   # Run the selected set. A thin selector (sel_code != 0) still runs what was selected but the overall
   # exit is non-zero — fail-loud under-selection must never be masked by a green test run.
   build_dist_once
+  mark_nested
   set +e
   # Pass-through flags (e.g. --test-name-pattern=X) must precede the file list: node --test only
   # honors --test-name-pattern when it appears BEFORE the named files (after them it is ignored,
   # which would run the whole file — and for this self-referential test, recurse).
-  node --test --test-concurrency="$(default_test_concurrency)" "${rest_args[@]}" "${files[@]}"
+  # has_explicit_concurrency: explicit flag wins as the single concurrency source (AC2).
+  if has_explicit_concurrency "${rest_args[@]}"; then
+    node --test "${rest_args[@]}" "${files[@]}"
+  else
+    node --test --test-concurrency="$(default_test_concurrency)" "${rest_args[@]}" "${files[@]}"
+  fi
   test_code=$?
   set -e
   if [ "${sel_code}" -ne 0 ]; then
-    echo "scripts/test.sh: --for-task ${task_id} — test-selection-thin (selector exit ${sel_code}); re-run with --allow-thin to suppress" >&2
+    echo "scripts/test.sh: ${scoped_flag} ${task_id} — test-selection-thin (selector exit ${sel_code}); re-run with --allow-thin to suppress" >&2
     exit "${sel_code}"
   fi
   exit "${test_code}"
+elif [ "${1:-}" = "--buckets" ]; then
+  # gap-ac124-suite-bucket-production-carrier-benefit: bucket-level test selection (the phase's
+  # coarser granularity than --for-task). `scripts/test.sh --buckets <task-id>` delegates to
+  # suite-bucket-select.ts, which resolves the task's ## Touches to a bucket set via AC120 attribution
+  # + AC121 reattribution + AC122 hub fallback + AC123 both-sides, and runs the bucket subset:
+  #   hub touch  ⇒ FULL suite (unconditional, no fan-out)
+  #   P-only     ⇒ P bucket; M-only ⇒ M bucket; P+M ⇒ both; UNRESOLVED always selected (safe side)
+  #   no bucket  ⇒ FULL suite (fail-closed — an unclassifiable code change must not look like "nothing")
+  # FULL static checks ALWAYS run (the bucket is about TEST FILES, never a static-check frequency cut —
+  # phase-goal "按变更选桶,不是降频"). Emits a __BUCKETS__ marker line (bucket + file count + full flag)
+  # that full-suite-runner.ts carries into the verification-round record.
+  bucket_id="${2:-}"
+  if [ -z "${bucket_id}" ]; then
+    echo "scripts/test.sh: --buckets requires a task id" >&2
+    exit 2
+  fi
+  shift 2
+  rest_args=()
+  for a in "$@"; do rest_args+=("${a}"); done
+  bucket_summary="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-bucket-select.ts" --root "${repo_root}" --task "${bucket_id}" --summary)" || {
+    echo "scripts/test.sh: --buckets ${bucket_id} — bucket selector failed (exit $?)" >&2
+    exit 2
+  }
+  bucket_full="$(printf '%s' "${bucket_summary}" | sed -n 's/.*full=\([01]\).*/\1/p')"
+  bucket_buckets="$(printf '%s' "${bucket_summary}" | sed -n 's/.*buckets=\([^ ]*\).*/\1/p')"
+  bucket_files="$(printf '%s' "${bucket_summary}" | sed -n 's/.*files=\([0-9][0-9]*\).*/\1/p')"
+  echo "__BUCKETS__ buckets=${bucket_buckets} files=${bucket_files} full=${bucket_full}"
+  if [ "${bucket_full}" = "1" ]; then
+    # Hub touch / no-bucket-triggerable ⇒ the full default suite (run_selected exits).
+    run_selected "$(effective_groups)"
+  fi
+  bucket_sel_out="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-bucket-select.ts" --root "${repo_root}" --task "${bucket_id}" --paths-only)"
+  if [ -z "${bucket_sel_out}" ]; then
+    echo "scripts/test.sh: --buckets ${bucket_id} — selector selected 0 test files (bucket=${bucket_buckets}); falling back to full suite" >&2
+    run_selected "$(effective_groups)"
+  fi
+  mapfile -t files <<< "${bucket_sel_out}"
+  # LPT order (gap-m-bucket-long-tail-lpt-scheduling): reorder the M-bucket file list longest-known-
+  # first — the mechanism lives in lpt_order_files() (single definition point, shared with the
+  # run_selected full-suite default path via gap-suite-lpt-full-bucket-run-selected).
+  lpt_order_files files
+  # AC3 (gap-suite-serial-lowconc-classification-recheck 单飞锁侧): the bucket SUCCESS path
+  # (non-hub, non-zero selection) structurally bypasses run_selected() — where
+  # full_suite_lock_acquire() lives — so QUAY_MAX_CONCURRENT_SUITES=1 never applied to bucket runs
+  # (round #572 M-bucket lock_wait_ms key missing vs #573 full overlap 5min). Acquire the
+  # single-flight lock HERE (before static checks + build, matching run_selected's lock-first
+  # order), so a bucket suite contends on the SAME S-slot lock as a full suite. The lock's own
+  # skip guards (QUAY_TEST_SKIP_RESOURCE_GATE=1 / nested) still hold — this runs before
+  # mark_nested below, so a top-level bucket run acquires while a nested one (outer already holds
+  # the slot) skips. FD-based flock auto-releases on `exit "${bucket_code}"` below — no explicit
+  # release needed (same crash-autorelease guarantee as the full path).
+  full_suite_lock_acquire
+  # FULL static checks (verification-grade — no 降频), then the bucket test subset.
+  run_static_checks
+  build_dist_once
+  # Suite-tail leak scan on the bucket path (gap-bucket-subset-tmux-leak-scan-missing): the
+  # tmux-leak-scan --snapshot/--check delta pair + run-namespace-sweep-kill is a PER-ROUND
+  # checker, NOT 全量专属 — a bucket subset that skips it drops the checker from every-round to
+  # never-run (降频 violation). Snapshot failure is non-fatal (the absolute --check still runs).
+  # --sweep FIRST (gap-tmux-leak-scan-sweep-orphaned-servers): cure historical SIGKILL orphans
+  # before the snapshot so --snapshot/--check stay a pure "this run's NEW leak" delta.
+  bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --sweep "${repo_root}" || true
+  bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
+  mark_nested
+  set +e
+  # ── bucket load-sensitive isolation (gap-scd-load-sensitive-bucket-isolation) ──
+  # LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0): the "three-phase order (serial→lowconc→main)" below is
+  # the RETIRED static phase-splitting model — the unified scheduler bucket path above replaces it
+  # with one concurrent waterline loop. Kept solely as the ONE-KEY ROLLBACK fallback.
+  # The full-suite default path routes serial/lowconc files to their OWN phases (serial at
+  # $SERIAL_CONCURRENCY, lowconc at $LOWCONC_CONCURRENCY) BEFORE the main concurrency-N body; the
+  # bucket path previously handed the WHOLE selected list to suite-lpt-runner.mjs at
+  # bucket_test_concurrency, so load-sensitive files (the SCD session-observation family) ran under
+  # the full concurrent load and flaked/hung. Split the bucket list by @test-group and run the SAME
+  # three-phase order (serial → lowconc → main) with the SAME per-phase concurrency knobs, keeping
+  # the LPT-reordered main body order-preserving via suite-lpt-runner.mjs run({files}).
+  bucket_serial_files=()
+  bucket_lowconc_files=()
+  bucket_main_files=()
+  while IFS=$'\t' read -r bf bg; do
+    case "$bg" in
+      serial) bucket_serial_files+=("$bf") ;;
+      lowconc) bucket_lowconc_files+=("$bf") ;;
+      *) bucket_main_files+=("$bf") ;;
+    esac
+  done < <(printf '%s\n' "${files[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --classify)
+  # LPT order for the bucket serial/lowconc sub-phases (gap-suite-lpt-serial-lowconc-phases-not-lpt-
+  # ordered): same as the full path — bare `node --test` re-sorts alphabetically and discards the LPT
+  # order, so these two sub-phases were the last bare dispatch points on the --buckets path. Reorder
+  # IN PLACE then hand to suite-lpt-runner.mjs run({files}) (order-preserving). Membership unchanged.
+  lpt_order_files bucket_serial_files
+  lpt_order_files bucket_lowconc_files
+  # ── unified scheduler (gap-suite-dynamic-waterline-scheduler, bucket path) ─────────────────────
+  # Same group-budget waterline as the full-suite path; the bucket subset benefits identically
+  # (serial/lowconc keep their own budgets, main fills the remainder). ONE-KEY ROLLBACK: the same
+  # QUAY_SUITE_SCHEDULER=0 falls through to the legacy phased bucket path below (RETIRED).
+  if [ "${QUAY_SUITE_SCHEDULER:-1}" = "1" ]; then
+    echo "scheduler: unified group-budget scheduler (bucket path: serial≤$SERIAL_CONCURRENCY lowconc≤$LOWCONC_CONCURRENCY main≤$(bucket_test_concurrency "${rest_args[@]}"))"
+    printf '%s\n' "${files[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-scheduler.ts" \
+        --root "${repo_root}" \
+        --main-root "${main_root}" \
+        --serial-concurrency "$SERIAL_CONCURRENCY" \
+        --lowconc-concurrency "$LOWCONC_CONCURRENCY" \
+        --main-concurrency "$(bucket_test_concurrency "${rest_args[@]}")" \
+        --groups "product,engine,serial,lowconc" \
+        "${rest_args[@]}"
+    bucket_code=$?
+    # Same suite-AFTER tail as the legacy bucket path below (leak scan + fs-trace collect).
+    node --experimental-strip-types "${repo_root}/plugin/scripts/run-namespace-sweep-kill.mjs" || true
+    if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
+      bucket_code=1
+    fi
+    node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-fs-trace.ts" --update --limit "${QUAY_FS_TRACE_LIMIT:-8}" --root "${repo_root}" || true
+    exit "${bucket_code}"
+  fi
+  # LEGACY PHASED BUCKET PATH (RETIRED — reached ONLY when QUAY_SUITE_SCHEDULER=0): serial→lowconc→main
+  # static phases + the MAIN_TAIL_OVERLAP A watcher below are the RETIRED model; the unified scheduler
+  # bucket path above replaces it. Kept solely as the ONE-KEY ROLLBACK fallback.
+  bucket_code=0
+  if [ "${#bucket_serial_files[@]}" -gt 0 ]; then
+    echo "selected ${#bucket_serial_files[@]} files (groups=serial)"
+    node --test-concurrency="$SERIAL_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${bucket_serial_files[@]}"
+    _bscode=$?
+    [ "$_bscode" -eq 0 ] || bucket_code="$_bscode"
+  fi
+  # main-tail-overlap coordination (gap-suite-main-tail-overlap-bucket-subset): the bucket path has NO
+  # serial+lowconc overlap window — serial runs sequentially BEFORE lowconc (legacy phased path only) — so the trigger simplifies
+  # to the LOWCONC tail (the latency-bound segment the director's round-774 curve measured: 106s lowconc
+  # at ~zero CPU). bucket_lowconc runs in the BACKGROUND so its pid can be watched; when QUERY_MAIN_TAIL_
+  # OVERLAP>0, a watcher polls cpu_stall (main_tail_overlap_wait) and fires MAIN early at the knob's
+  # lanes once the lowconc tail's CPU work drains; lowconc exit / $MAIN_TAIL_WAIT_MAX_S ⇒ fallthrough
+  # (main runs normally after lowconc). Same knob / watcher / stream marker as the full path (A).
+  bucket_lowconc_pid=""
+  bucket_main_early_pid=""
+  bucket_main_early_code_file=""
+  if [ "${#bucket_lowconc_files[@]}" -gt 0 ]; then
+    echo "selected ${#bucket_lowconc_files[@]} files (groups=lowconc)"
+    node --test-concurrency="$LOWCONC_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${bucket_lowconc_files[@]}" &
+    bucket_lowconc_pid=$!
+    if [ "$MAIN_TAIL_OVERLAP" -gt 0 ] && [ "${#bucket_main_files[@]}" -gt 0 ]; then
+      bucket_main_early_code_file="$(mktemp "${TMPDIR:-/tmp}/main-tail-overlap.XXXXXX")"
+      printf '%s' "pending" > "$bucket_main_early_code_file"
+      (
+        serial_pid=""
+        lowconc_pid="$bucket_lowconc_pid"
+        if main_tail_overlap_wait; then
+          _tail_load="$(awk '{print $1}' "${QUAY_MAIN_TAIL_LOADAVG_FILE:-/proc/loadavg}" 2>/dev/null || true)"
+          echo "main-tail-overlap: lanes=${MAIN_TAIL_OVERLAP}${_tail_load:+ load=${_tail_load}}" >&2
+          node --test-concurrency="$MAIN_TAIL_OVERLAP" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${rest_args[@]}" "${bucket_main_files[@]}"
+          printf '%s' "$?" > "$bucket_main_early_code_file"
+        else
+          printf '%s' "fallthrough" > "$bucket_main_early_code_file"
+        fi
+      ) &
+      bucket_main_early_pid=$!
+    fi
+    wait "$bucket_lowconc_pid"
+    _blcode=$?
+    [ "$_blcode" -eq 0 ] || bucket_code="$_blcode"
+  fi
+  # MAIN phase — the remaining files at bucket_test_concurrency, LPT-ordered, order-preserving via
+  # suite-lpt-runner.mjs run({files}) (gap-m-bucket-long-tail-lpt-scheduling + per-file attribution
+  # gap-fix-scope-perfile-buckets-parser). The runner composes BOTH reporters via stream.compose:
+  # spec → stdout (判绿 markers) and measure-suite-reporter → stderr (__PERFILE__ duration_ms=<d>
+  # <path> passed=<bool> — the fix-scope gate's per-file attribution AND the LPT ordering's own
+  # input carrier; if this breaks the per-file duration data goes dark and LPT has no input ⇒
+  # self-defeating). Concurrency rides in execArgv (--test-concurrency=N) so the reporter's
+  # readConcurrency() sees the SAME value (single source, no drift). When the watcher fired, adopt its
+  # early-main exit code and skip the normal run; otherwise run the normal bucket main (unchanged).
+  bucket_tail_skip_main=0
+  if [ -n "$bucket_main_early_pid" ]; then
+    wait "$bucket_main_early_pid" 2>/dev/null || true
+    bucket_tail_verdict="$(cat "$bucket_main_early_code_file" 2>/dev/null || true)"
+    rm -f "$bucket_main_early_code_file"
+    if [ -n "$bucket_tail_verdict" ] && [ "$bucket_tail_verdict" != "fallthrough" ] && [ "$bucket_tail_verdict" != "pending" ]; then
+      _bmcode="$bucket_tail_verdict"
+      [ "$_bmcode" -eq 0 ] || bucket_code="$_bmcode"
+      bucket_tail_skip_main=1
+    fi
+  fi
+  if [ "$bucket_tail_skip_main" != "1" ] && [ "${#bucket_main_files[@]}" -gt 0 ]; then
+    node --test-concurrency="$(bucket_test_concurrency "${rest_args[@]}")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${rest_args[@]}" "${bucket_main_files[@]}"
+    _bmcode=$?
+    [ "$_bmcode" -eq 0 ] || bucket_code="$_bmcode"
+  fi
+  # Same suite-AFTER tail as the full default path: run-namespace-sweep-kill is the best-effort
+  # TRUE-CATCH-ALL registry kill (exit 0 always); the --check assertion is the leak verdict and
+  # merges into the exit code so a bucket-round leak still reports `tmux-leak-scan: FAIL`.
+  node --experimental-strip-types "${repo_root}/plugin/scripts/run-namespace-sweep-kill.mjs" || true
+  if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
+    bucket_code=1
+  fi
+  # gap-suite-bucket-dynamic-truth-drift-detector ③-AC4: 顺带增量 collect — 分桶执行后增量采集动态真值
+  # 缓存（suite-fs-trace.ts --update），每次至多 QUAY_FS_TRACE_LIMIT 个新/变更测试的 trace（内容 sha256
+  # 缓存跳过未变更，成本有界；trace 子进程带 QUAY_TEST_NESTED=1 防被测测试再 spawn test.sh 撞单飞锁）。
+  # 非致命——采集失败绝不翻转本轮套件判定（drift-check 读取的是【跨轮累积】的缓存，本轮采集供下一轮读）。
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-fs-trace.ts" --update --limit "${QUAY_FS_TRACE_LIMIT:-8}" --root "${repo_root}" || true
+  set -e
+  exit "${bucket_code}"
 elif all_flags "$@"; then
   # gap-test-sh-flags-only-...: bare node --test flags + the DEFAULT glob (the documented
   # `--test-concurrency=4` and `--experimental-test-coverage` forms). Previously these fell to the
   # explicit-file branch with an empty file list → node auto-discovered a 3.7x-larger suite (8573
   # vs 2296). node --test is last-flag-wins, so the user's own --test-concurrency=N still overrides
-  # the default 8.
+  # the derived default (default_test_concurrency, gap-no-resource-awareness-heavy-ops-run-blind AC5).
   run_selected "$(effective_groups)" "$@"
 else
   build_dist_once
   run_static_checks
-  # Explicit file list (no --group): QUAY_TEST_GROUPS stays unset, so in-file skips do not
-  # trigger and the named files run in full.
-  exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
+  # Explicit file list (no --group): QUAY_TEST_GROUPS stays unset, so the named files run in
+  # full (the bucket path uses exactly this explicit-file form).
+  mark_nested
+  # has_explicit_concurrency: explicit flag wins as the single concurrency source (AC2).
+  if has_explicit_concurrency "$@"; then
+    exec node --test "$@"
+  else
+    exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
+  fi
 fi

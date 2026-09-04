@@ -42,8 +42,10 @@
 // backticks. This is an explicit, accepted limitation of a mechanical gate, not an oversight (same
 // posture as task-schema.ts's own documented NON-GOAL for semantic emptiness).
 
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { helpExit } from "./gate-script-base.ts";
 
 // `owns?` intentionally excludes the ubiquitous possessive-determiner usage ("the task's own AC
 // section", "its own merits") via a negative lookbehind on `'s `/`s' `/a possessive pronoun
@@ -60,9 +62,9 @@ import { pathToFileURL } from "node:url";
 // were authored/audited) — reopening DONE, landed work is a worse cost than the narrow gap it
 // would close. Left as a known, narrower limitation; the DIR-126-B content gap this would have
 // caught is instead closed directly in that task's own AC text.
-const WIRING_VERB_RE =
+export const WIRING_VERB_RE =
   /\b(invokes?|calls?|dispatches?|enforces?|wires?|routes?|delegates?)\b|(?<!(?:'s|s'|its|their|my|our|your|his|her|whose)\s)\bowns?\b/i;
-const EVIDENCE_RE = /\b(real|production|callsite|call site|reachability|reachable|evidence|wired|confirm(?:ed|s|ation)?|reproduc\w*|verifi(?:ed|es|cation)?|proven?|proves?)\b/i;
+export const EVIDENCE_RE = /\b(real|production|callsite|call site|reachability|reachable|evidence|wired|confirm(?:ed|s|ation)?|reproduc\w*|verifi(?:ed|es|cation)?|proven?|proves?)\b/i;
 
 // Split a paragraph into Markdown-list-aware blocks: a new block starts at every bullet-list line
 // (`- `/`* `/`1. ` at the start of a line, allowing leading indentation), so a dense,
@@ -119,7 +121,7 @@ export function splitSentences(text) {
 }
 
 // Extract every distinct backtick-quoted identifier from a sentence.
-function backtickIdentifiers(sentence) {
+export function backtickIdentifiers(sentence) {
   const idents = new Set();
   const re = /`([^`]+)`/g;
   let m;
@@ -460,6 +462,69 @@ export function checkWiringCoverage(sourceSectionText, acSectionText) {
   };
 }
 
+// ── checkWiringClaimAcProbe — a wiring/reachability-declaring AC must name a real input probe. ─────
+// (gap-wiring-claim-ac-requires-real-input-probe)
+// A DIFFERENT judgment than checkWiringCoverage above: that one asks "does an AC bullet cover a
+// source-section mechanism claim with evidence"; THIS one asks "an AC bullet that ITSELF declares a
+// quantified reachability/real-data relationship (backtick identifier + `N 条` count + a
+// read/existence verb) must also name a REAL INPUT PROBE — a direct量 that can be false". The defect
+// family this catches (≥17 instances / 22 days): an AC asserts "`readDependsOn` 认到缩进形态、10 条命中
+// 任务都能被读到" while its test calls `readDependsOn("depends_on: [a, b]\n")` on a string literal — the
+// 10 real tasks/*.md files are never read; or "`.quay/promotion-outcome.jsonl` 已有 3 条现成样本" while its
+// test copies the samples into an mkdtemp synthetic file. A string-literal direct call, a self-built
+// fixture, or an mkdtemp workspace is NOT a probe.
+//
+// CALIBRATION (against the full task store, 2026-08-26): the declaration is DELIBERATELY NARROW — a
+// backtick identifier + an ASCII `N 条` count + one of the read/existence verbs (读到/读取/样本/现成).
+// A bare "already has" (已有), a grep/cache "命中", or a code-structure "wired into / calls / dispatches"
+// claim is NOT this defect (the structure claims are covered by checkWiringCoverage above; the
+// grep/cache/已有 usages would flood the store — measured 405 tasks / 741 bullets on the broad verb set).
+// This narrow trigger flags EXACTLY the two canonical instances on the current store — nothing else.
+// The probe markers are the human-specified direct量: 真实生产载体记录数 / 真实 argv / /proc/<pid>/* /
+// 真实 curl / 真机回放, plus the real-source signals (主检出/正本/实读/实跑) that satisfy the requirement.
+// NON-GOAL (accepted, same posture as this module's own wiring NON-GOAL): Chinese-numeral counts
+// (`三份`, `零命中`) and non-`条` measure words are not recognized — the two canonical instances both use
+// ASCII `N 条`, and widening the measure word set re-flooded the store (measured).
+export const WIRING_REACHABILITY_DECL_RE =
+  /\d+\s*条[\s\S]*?(读到|读取|样本|现成)|(读到|读取|样本|现成)[\s\S]*?\d+\s*条/;
+export const REAL_INPUT_PROBE_RE = /(真实|生产|主检出|正本|实读|实跑|回放|真机|argv|\/proc\/|curl|现网|生产环境)/;
+// A `grep <pattern> <real-file>` command IS a real input probe (硬规则② 按位置判定): the real file
+// named in the grep is the real input being read — grepping it by position (line/hit count) is exactly
+// what "按位置判定" prescribes, NOT a string-literal/fixture/mkdtemp synthetic stub (that defect family
+// names no grep read). Narrow: the bullet must name BOTH a `grep` verb AND a `/`-separated real file
+// path with a source/artifact extension — so a string-literal direct call (readDependsOn("...")), a
+// self-built fixture, or an mkdtemp sample (no grep verb) is NOT exempted (gap-wiring-claim-ac-
+// misflags-position-grep: DIR-130 AC4's `grep -n "DIR-130" orchestration/manager-tick-core.md` was
+// wrongly flagged no-probe because the file it greps IS the real input).
+export const GREP_REAL_FILE_PROBE_RE =
+  /\bgrep\b[^\n]{0,160}?[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.(?:md|mjs|js|ts|tsx|mts|cts|json|jsonl|yml|yaml|sh|css|html|py|txt|lock|toml)\b/;
+
+/** Scan an `## Acceptance Criteria` section's checklist bullets (continuation lines joined — same
+ *  `bulletsOf` the coverage check uses) and return one finding per bullet that declares a quantified
+ *  reachability/real-data claim (backtick identifier + `N 条` + 读到/读取/样本/现成) WITHOUT naming a
+ *  real input probe. Empty/absent AC ⇒ [] (nothing to judge — the caller's own absent-section semantics
+ *  apply). */
+export function checkWiringClaimAcProbe(acSectionText) {
+  if (!acSectionText || !acSectionText.trim()) return [];
+  const findings = [];
+  for (const bullet of bulletsOf(acSectionText)) {
+    const identifiers = backtickIdentifiers(bullet);
+    if (identifiers.length === 0) continue; // no named component — not a wiring/reachability claim
+    if (!WIRING_REACHABILITY_DECL_RE.test(bullet)) continue; // no `N 条` + read/exist verb — not a claim
+    if (REAL_INPUT_PROBE_RE.test(bullet)) continue; // names a real input probe — requirement satisfied
+    if (GREP_REAL_FILE_PROBE_RE.test(bullet)) continue; // `grep <real file>` = position-based probe (按位置判定)
+    findings.push({
+      code: "wiring-claim-ac-no-probe",
+      identifiers,
+      bullet,
+      message: `AC bullet names a quantified reachability/real-data declaration (${identifiers
+        .map((id) => "`" + id + "`")
+        .join(", ")}) but names no real input probe — a 真实生产载体记录数 / 真实 argv / /proc/<pid>/* / 真实 curl / 真机回放 direct量 is required; a string-literal/fixture/mkdtemp self-check is not a probe`,
+    });
+  }
+  return findings;
+}
+
 // ── CLI main (DIR-117-B/M195) — the grep-confirmable PRODUCTION call site ────────────
 // Workflow scripts (prepare-milestone.js) cannot `import` (sandboxed/resumable — the file's own
 // no-import convention), so the ProposalReview phase dispatches an agent to run THIS CLI and
@@ -522,11 +587,22 @@ function wiringFindingsFromUncovered(uncovered) {
 
 const _runAsCli = (() => {
   try {
+    // Symlink-tolerant (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact):
+    // the experiments mirror is a SYMLINK into plugin/scripts — node resolves import.meta.url to
+    // the REALPATH while process.argv[1] keeps the symlink path, so a raw URL equality silently
+    // fails (and `path` was not even imported). Resolve the realpath of argv[1] before comparing.
+    const entryReal = typeof process.argv[1] === "string" ? realpathSync(process.argv[1]) : "";
     return (
       typeof process !== "undefined" &&
       Array.isArray(process.argv) &&
       typeof process.argv[1] === "string" &&
-      import.meta.url === pathToFileURL(process.argv[1]).href
+      // Bundler-friendly (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact):
+      // when wiring-coverage-check is BUNDLED into another tool (task-schema → many entries), the
+      // inlined module shares the bundle's import.meta.url, so URL equality would falsely fire its
+      // CLI block. Basename match distinguishes running wiring-coverage-check itself from being
+      // inlined into another entry.
+      import.meta.url === pathToFileURL(entryReal).href &&
+      path.basename(entryReal).replace(/\.(?:js|ts|mjs)$/, "") === "wiring-coverage-check"
     );
   } catch {
     return false;
@@ -535,6 +611,7 @@ const _runAsCli = (() => {
 
 if (_runAsCli) {
   const argv = process.argv.slice(2);
+  if (argv.includes("--help") || argv.includes("-h")) helpExit("usage: wiring-coverage-check.ts --task <path/to/task.md> [--allow-empty]");
   const allowEmpty = argv.includes("--allow-empty");
   const taskIdx = argv.indexOf("--task");
   const taskPath = taskIdx >= 0 ? argv[taskIdx + 1] : undefined;

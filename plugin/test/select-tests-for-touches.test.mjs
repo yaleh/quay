@@ -1,7 +1,15 @@
-// @test-group engine
+// @test-group serial
+// @load-sensitive nested-spawn
+// @load-sensitive-entry 2026-08-08 A-class nested full-suite spawn (spawns scripts/test.sh --for-task, a nested runner with its own worker pool — gap-suite-tiering-kind-heavy-not-a-mechanism 补缺省 kind)
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — A-class nested scripts/test.sh spawn (routed to serial by gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests)
 // select-tests-for-touches.test.mjs — gap-test-selection-not-scoped-to-touches: RED/GREEN tests
 // for the mechanical per-task test selector (select-tests-for-touches.ts, byte-identical mirror).
-// Covers AC1–AC11 and the DoD's "tests cover AC2–AC9".
+// Covers AC1–AC11 and the DoD's "tests cover AC2–AC9", plus the cross-cut marker AC2–AC6 of
+// gap-scoped-selection-blind-to-packaging-state-diff (packaging-state / check-adr / lint).
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (A-class — spawns `scripts/test.sh --for-task`, a nested runner with its own
+// worker pool) so it runs in the concurrency-1 serial phase, never competing with the concurrency-8
+// main body.
 //
 // Resolution rules under test (most-specific first):
 //   1. Direct — a Touches entry that is itself a `*.test.mjs` path
@@ -28,6 +36,10 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const CLI = path.join(REPO_ROOT, "plugin", "scripts", "select-tests-for-touches.ts");
 const CLI_MIRROR = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "select-tests-for-touches.ts");
 const TEST_SH = path.join(REPO_ROOT, "scripts", "test.sh");
+// gap-suite-hub-file-responsibility-strip: the grouping functions (group_of/effective_groups/
+// build_deduped_files/...) moved from scripts/test.sh into this sourced library — the AC11 structural
+// pins that assert those BODIES now read the new file; the CALL-SITE pins stay on scripts/test.sh.
+const RUNNER_GROUPING = path.join(REPO_ROOT, "plugin", "scripts", "runner-grouping.ts");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -317,6 +329,165 @@ test("AC9 — --allow-thin downgrades AC8 to a warning and exits 0", () => {
   }
 });
 
+// ── AC2–AC6: cross-cut marker (gap-scoped-selection-blind-to-packaging-state-diff) ────────────────────
+//
+// A `packages/*/src` / new-MCP-tool change can break the packaged artifact (npm-pack-e2e /
+// build-dist / plugin-packaging), ADR conformance (check-adr), or lint while every src unit test
+// stays green — basename pairing never selects those cross-cut tests. The cross-cut registry
+// (CROSSCUT_CHECKS in select-tests-for-touches.ts) forces them into the scoped selection when a
+// touch triggers the surface, and pure plugin/doc tasks fire nothing (AC6, no bloat).
+
+const CROSSCUT_FILES = {
+  "packages/quay/test/npm-pack-e2e.test.mjs": TEST_FILE_CONTENT,
+  "packages/quay/test/build-dist.test.mjs": TEST_FILE_CONTENT,
+  "plugin/test/plugin-packaging.test.mjs": TEST_FILE_CONTENT,
+  "packages/quay/test/adr-gate.test.mjs": TEST_FILE_CONTENT,
+  "packages/quay/test/cli-adr.test.mjs": TEST_FILE_CONTENT,
+  "packages/quay/test/mcp-adr.test.mjs": TEST_FILE_CONTENT,
+  "packages/quay/test/adr-store.test.mjs": TEST_FILE_CONTENT,
+};
+
+test("AC2 — a src-touching task selects cross-cut tests it never basename-pairs to", () => {
+  const root = makeWorkspace({
+    ...CROSSCUT_FILES,
+    "packages/quay/test/foo.test.mjs": TEST_FILE_CONTENT,
+  });
+  try {
+    writeTask(root, "t2c", "## Touches\n- packages/quay/src/foo.ts\n");
+    const j = runCli(root, "--task", "t2c", "--json");
+    assert.equal(j.status, 0, j.stderr);
+    const out = JSON.parse(j.stdout);
+    // basename pairing still selects foo.test.mjs; the cross-cut marker adds packaging-state and
+    // check-adr regardless of basename.
+    assert.ok(out.selected.includes("packages/quay/test/foo.test.mjs"), "basename pair still selected");
+    assert.ok(out.selected.includes("packages/quay/test/npm-pack-e2e.test.mjs"), `packaging-state cross-cut in: ${out.selected}`);
+    assert.ok(out.selected.includes("packages/quay/test/build-dist.test.mjs"), "packaging-state cross-cut");
+    assert.ok(out.selected.includes("plugin/test/plugin-packaging.test.mjs"), "packaging-state cross-cut");
+    assert.ok(out.selected.includes("packages/quay/test/adr-gate.test.mjs"), "check-adr cross-cut");
+    assert.ok(out.selected.includes("packages/quay/test/mcp-adr.test.mjs"), "check-adr cross-cut");
+    // The default output carries the cross-cut marker names (Contract `invoke` grep surface).
+    const r = runCli(root, "--task", "t2c");
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /crosscut: .*packaging-state/);
+    assert.match(r.stdout, /crosscut: .*check-adr/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC3 — src-touching task selects ≥1 packaging-state test", () => {
+  const root = makeWorkspace({
+    ...CROSSCUT_FILES,
+    "packages/quay/test/engine.test.mjs": TEST_FILE_CONTENT,
+  });
+  try {
+    writeTask(root, "t3c", "## Touches\n- packages/quay/src/gate/engine.ts\n");
+    const j = runCli(root, "--task", "t3c", "--json");
+    assert.equal(j.status, 0, j.stderr);
+    const out = JSON.parse(j.stdout);
+    const packaging = [
+      "packages/quay/test/npm-pack-e2e.test.mjs",
+      "packages/quay/test/build-dist.test.mjs",
+      "plugin/test/plugin-packaging.test.mjs",
+    ];
+    assert.ok(packaging.some((p) => out.selected.includes(p)), `≥1 packaging-state test in scoped: ${out.selected}`);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC4 — src / new-MCP-tool task selects check-adr (ADR cross-cut)", () => {
+  const root = makeWorkspace({
+    ...CROSSCUT_FILES,
+    "packages/quay/test/mcp-server.test.mjs": TEST_FILE_CONTENT,
+  });
+  try {
+    writeTask(root, "t4c", "## Touches\n- packages/quay/src/mcp-server.ts\n");
+    const r = runCli(root, "--task", "t4c");
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /crosscut: .*check-adr/, "default output names the check-adr cross-cut");
+    const j = runCli(root, "--task", "t4c", "--json");
+    const out = JSON.parse(j.stdout);
+    assert.ok(out.selected.includes("packages/quay/test/mcp-adr.test.mjs"));
+    assert.ok(out.selected.includes("packages/quay/test/cli-adr.test.mjs"));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC5 — code-touching task's selection names the lint cross-cut (in-task leg via SKILL.md)", () => {
+  const root = makeWorkspace({
+    "plugin/test/foo.test.mjs": TEST_FILE_CONTENT,
+  });
+  try {
+    writeTask(root, "t5c", "## Touches\n- plugin/scripts/foo.ts\n");
+    const r = runCli(root, "--task", "t5c");
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /crosscut: .*lint/, "default output names the lint cross-cut");
+    // In-task leg of AC5: the author SKILL.md task template defaults new-code ACs to a lint-clean
+    // item (the archguard 14-error shape is caught because the author must run lint to tick it).
+    const skill = fs.readFileSync(path.join(REPO_ROOT, "plugin", "skills", "author", "SKILL.md"), "utf8");
+    assert.match(skill, /lint-clean/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC6 — a pure plugin/doc task selects NO cross-cut tests (no bloat)", () => {
+  const root = makeWorkspace({
+    ...CROSSCUT_FILES,
+  });
+  try {
+    writeTask(root, "t6c", "## Touches\n- plugin/skills/author/SKILL.md\n- CLAUDE.md\n");
+    const r = runCli(root, "--task", "t6c", "--paths-only", "--allow-thin");
+    assert.equal(r.status, 0, `--allow-thin pure doc must exit 0, got ${r.status} stderr: ${r.stderr}`);
+    for (const p of Object.keys(CROSSCUT_FILES)) {
+      assert.ok(!r.stdout.includes(p), `pure plugin/doc task must not select cross-cut ${p}: ${r.stdout}`);
+    }
+    const d = runCli(root, "--task", "t6c", "--allow-thin");
+    assert.doesNotMatch(d.stdout, /crosscut:/, "pure plugin/doc task emits no cross-cut marker");
+  } finally {
+    cleanup(root);
+  }
+});
+
+// gap-github-client-iscompound-sabotaged-uncommitted (AC4): a quay-github src change has no
+// same-basename test (`github-client.ts` -> no `*/test/github-client.test.mjs`), so the
+// `quay-github-src` cross-cut must pull quay-github's own gate-correctness tests into the scoped
+// selection. Without it, an isCompound-style checkGate regression in the GitHub Provider would stay
+// scoped-green and surface only at the full-suite red window (the 2026-08-09 round-190 sabotage).
+test("AC7 — a quay-github src change selects quay-github's own gate tests (quay-github-src cross-cut)", () => {
+  const root = makeWorkspace({
+    ...CROSSCUT_FILES,
+    // A same-basename file exists in the REAL repo only via the cross-cut (there is no
+    // `github-client.test.mjs`); the fixture adds one so this test's touch is not thin-coverage,
+    // keeping the assertion focused on the cross-cut ADDING the gate-correctness surface.
+    "packages/quay-github/test/github-client.test.mjs": TEST_FILE_CONTENT,
+    "packages/quay-github/test/compound-gate.test.mjs": TEST_FILE_CONTENT,
+    "packages/quay-github/test/create-mcp.test.mjs": TEST_FILE_CONTENT,
+    "packages/quay-github/test/gate.test.mjs": TEST_FILE_CONTENT,
+    "packages/quay-github/test/gate-gameability.test.mjs": TEST_FILE_CONTENT,
+    "packages/quay-github/test/task-check-passthrough.test.mjs": TEST_FILE_CONTENT,
+  });
+  try {
+    writeTask(root, "tqg", "## Touches\n- packages/quay-github/src/github-client.ts\n");
+    const j = runCli(root, "--task", "tqg", "--json");
+    assert.equal(j.status, 0, j.stderr);
+    const out = JSON.parse(j.stdout);
+    // basename pairing resolves github-client.test.mjs; the quay-github-src cross-cut must ALSO add
+    // the gate-correctness surface (compound-gate / create-mcp / task-check-passthrough / …) that
+    // basename pairing alone can never see.
+    assert.ok(out.selected.includes("packages/quay-github/test/compound-gate.test.mjs"), `quay-github-src cross-cut in: ${out.selected}`);
+    assert.ok(out.selected.includes("packages/quay-github/test/create-mcp.test.mjs"), "quay-github-src cross-cut (create-mcp)");
+    assert.ok(out.selected.includes("packages/quay-github/test/task-check-passthrough.test.mjs"), "quay-github-src cross-cut (task-check-passthrough)");
+    const r = runCli(root, "--task", "tqg");
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /crosscut: .*quay-github-src/, "default output names the quay-github-src cross-cut");
+  } finally {
+    cleanup(root);
+  }
+});
+
 // ── AC1: byte-identical mirrors ───────────────────────────────────────────────────────────────────────
 
 test("AC1 — experiments and plugin mirrors are byte-identical", () => {
@@ -341,8 +512,12 @@ test("AC10 — scripts/test.sh --for-task <id> runs exactly the selected set (re
     .trim().split("\n").filter(Boolean);
   assert.ok(sel.length >= 1, `selector must select ≥1 file for ${taskId}, got ${sel.length}: ${sel.join(",")}`);
   // Run test.sh --for-task pinned to a single non-recursive AC so each selected file contributes
-  // exactly one subprocess test (the AC2 pattern; avoids infinite recursion through this file).
-  const res = spawnTestSh(["--for-task", taskId, "--test-name-pattern", "AC2"]);
+  // exactly one subprocess test (avoids infinite recursion through this file). The pattern names
+  // the ORIGINAL AC2 test exactly — the cross-cut AC2 test added by
+  // gap-scoped-selection-blind-to-packaging-state-diff also begins with "AC2", so a bare "AC2"
+  // pin would now match two tests in this file and break the one-test-per-selected-file
+  // relationship below.
+  const res = spawnTestSh(["--for-task", taskId, "--test-name-pattern", "direct.*Touches entry resolves to that file"]);
   assert.equal(res.status, 0, `test.sh --for-task must exit 0, got ${res.status}\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
   const combined = `${res.stdout}\n${res.stderr}`;
   // The pinned AC must have run in the subprocess (plumbing proof).
@@ -385,13 +560,17 @@ test("REGRESSION (round-1 NIT) — testBasenameFor collapses a .test. marker (fo
 
 test("AC11 — scripts/test.sh no-args branch is the grouped default (structural)", () => {
   const src = fs.readFileSync(TEST_SH, "utf8");
+  const grouping = fs.readFileSync(RUNNER_GROUPING, "utf8");
   // The glob now spans ALL three test dirs (AC2); no-args routes through the grouped default
   // (product,engine, AC4); the exec line derives the default concurrency (gap-no-resource-awareness-
   // heavy-ops-run-blind AC5) and (gap-test-sh-flags-only-...) PREPENDS extra flags-only args before
-  // the file list so a user --test-concurrency=N wins (node last-flag-wins).
+  // the file list so a user --test-concurrency=N wins (node last-flag-wins). effectiveGroups' BODY now
+  // lives in the TS module runner-grouping.ts (gap-suite-classification-lpt-scheduler-ts-ization), while the
+  // build_deduped_files glob STAYS in test.sh (its `glob=(...)` line is the ADR-004 single-source
+  // canonical test glob parsed by four checkers); the CALL-SITE pins stay on test.sh.
   assert.match(src, /local glob=\(packages\/\*\/test\/\*\.test\.mjs plugin\/test\/\*\.test\.mjs experiments\/quay-perpetual-stream\/test\/\*\.test\.mjs\)/);
   assert.match(src, /run_selected "\$\(effective_groups\)"/);
-  assert.match(src, /effective_groups\(\) \{\n  echo "product,engine"/);
+  assert.match(grouping, /export function effectiveGroups\(\): string \{\n  return "product,engine";/);
   assert.match(src, /exec node --test --test-concurrency="\$\(default_test_concurrency\)" "\$@" "\$\{files\[@\]\}"/);
   // The explicit-file branch still runs through the same exec line.
   assert.match(src, /exec node --test --test-concurrency="\$\(default_test_concurrency\)" "\$@"/);

@@ -7,15 +7,23 @@
 // packages/quay/test/cli-migrate-backlog.test.mjs and the milestone's own
 // captured live-run evidence (see the ABSORB record).
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createBacklogClient, mapStatus } from "../src/backlog-client.ts";
 
+// Every fixture board dir is removed once at the end of this file (the carrier-array + after()
+// pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function makeFixtureBoard(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-backlog-fixture-"));
+  _tmpDirs.push(dir);
   for (const [name, content] of Object.entries(files)) {
     fs.writeFileSync(path.join(dir, name), content, "utf8");
   }

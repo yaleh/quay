@@ -10,7 +10,7 @@
     {
       "name": "quay",
       "source": ".",
-      "version": "0.3.13",
+      "version": "0.6.1",
       "description": "quay: a provider-agnostic task board. Bundles the quay MCP server, quay-directive skill, quay-loop-driver skill, and author/execute authoring skills.",
       "license": "MIT",
       "homepage": "https://github.com/yaleh/quay",

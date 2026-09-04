@@ -1,0 +1,1 @@
+../../../plugin/test/stage-receipt.test.mjs

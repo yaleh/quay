@@ -189,6 +189,29 @@ async function main() {
   seedTask(tasksDirA, "MCP-A1", { title: "Provider-A-only task", status: "todo", body: VALID_SECTIONS + AC_DOD_CHECKED });
   seedTask(tasksDirB, "MCP-B1", { title: "Provider-B-only task", status: "todo", body: VALID_SECTIONS + AC_DOD_CHECKED });
 
+  // instrument entry-point fixture (gap-eighty-one-instruments...): a real
+  // plugin/scripts subtree under the workspace so the `instrument` tool's
+  // list/run actions have something derived. The REAL inventory tool is copied
+  // in (its --instruments-json mode is what `instrument action:list` spawns);
+  // the three fixtures below exercise the admission filter (declared vs not).
+  fs.mkdirSync(path.join(workspaceRoot, "plugin", "scripts"), { recursive: true });
+  fs.copyFileSync(
+    path.join(__dirname, "..", "..", "..", "plugin", "scripts", "runtime-usage-inventory.ts"),
+    path.join(workspaceRoot, "plugin", "scripts", "runtime-usage-inventory.ts")
+  );
+  fs.writeFileSync(
+    path.join(workspaceRoot, "plugin", "scripts", "fixture-say-hello.ts"),
+    '// fixture-say-hello.ts — answers the fixture\'s greeting question.\n// @instrument "answers the fixture greeting question"\nexport const greeting = "hello-from-fixture";\n'
+  );
+  fs.writeFileSync(
+    path.join(workspaceRoot, "plugin", "scripts", "fixture-echo.sh"),
+    "#!/usr/bin/env bash\n# fixture-echo.sh — answers what the fixture echo instrument prints.\necho 'instrument-ran-ok'\n"
+  );
+  fs.writeFileSync(
+    path.join(workspaceRoot, "plugin", "scripts", "fixture-undeclared.sh"),
+    "#!/usr/bin/env bash\necho 'no declaration'\n"
+  );
+
   // AC4 (connection consolidation): blocks 17 (QN-035 _version) and 19
   // (QN-044 fence-search) are READ-ONLY and id/search-scoped (no store-wide
   // count assertions, no writes), so they share the primary `core` connection
@@ -342,6 +365,22 @@ async function main() {
     );
   }
 
+  // ---- 7b. superseded is a writable status via MCP (gap-superseded-modeled-as-task-lifecycle-terminal) ----
+  {
+    // MCP-A1 is currently "done" (set by step 7). Writing it to superseded
+    // proves the Core MCP layer accepts the newly modeled terminal status.
+    const r = await core.callTool({ name: "task_write", arguments: { id: "MCP-A1", status: "superseded", provider: "native" } });
+    assert(
+      r.structuredContent?.task?.status === "superseded",
+      "task_write via `quay mcp` can write the modeled superseded terminal status"
+    );
+    const afterSup = await core.callTool({ name: "task_get", arguments: { id: "MCP-A1", provider: "native" } });
+    assert(
+      afterSup.structuredContent.task.status === "superseded",
+      "task_get confirms MCP-A1 persisted as superseded (read-back after MCP write)"
+    );
+  }
+
   // ---- 8. Error paths ----
   {
     const rUnknownProvider = await core.callTool({ name: "task_list", arguments: { provider: "does-not-exist" } });
@@ -406,6 +445,42 @@ async function main() {
     );
 
     fs.rmSync(path.dirname(mockLogPath), { recursive: true, force: true });
+  }
+
+  // ---- 7b. (gap-eighty-one-instruments...) the `instrument` entry point ----
+  // One tool (not 36 schemas); `action: "list"` derives the directory from the
+  // fixture's plugin/scripts subtree (count is DERIVED, never hardcoded); the
+  // admission filter is visible (fixture-undeclared.sh stays out); `action:
+  // "run"` spawns an admitted instrument and returns its real stdout (the
+  // AC9 contract assertion — spawn, argv, exit code and stdout are all real).
+  {
+    const list = await core.callTool({ name: "instrument", arguments: { action: "list" } });
+    assert(list.isError !== true, "instrument action:list succeeds through quay mcp");
+    const dir = list.structuredContent;
+    // runtime-usage-inventory.ts + 3 fixture instruments = 4; >=4 keeps it a derived bound.
+    assert(dir.total >= 4, `instrument directory total is DERIVED from the fixture (>=4), got ${dir.total}`);
+    assert(dir.admitted >= 3, `fixture instruments admitted (>=3), got ${dir.admitted}`);
+    const sayHello = dir.instruments.find((i) => i.name === "fixture-say-hello");
+    assert(
+      sayHello && sayHello.description === "answers the fixture greeting question",
+      `fixture-say-hello is admitted with its declared question (got ${sayHello?.description})`
+    );
+    const undeclared = dir.notAdmitted.includes("plugin/scripts/fixture-undeclared.sh");
+    assert(undeclared, "the undeclared fixture is kept OUT (notAdmitted) — the admission filter is visible, not silent");
+
+    const run = await core.callTool({ name: "instrument", arguments: { action: "run", name: "fixture-echo", args: [] } });
+    assert(run.isError !== true, "instrument action:run on an admitted .sh instrument succeeds");
+    assert(run.structuredContent?.exitCode === 0, `fixture-echo exits 0 (got ${run.structuredContent?.exitCode})`);
+    assert(
+      String(run.structuredContent?.stdout ?? "").includes("instrument-ran-ok"),
+      "fixture-echo's real stdout carries its payload (real spawn contract assertion)"
+    );
+
+    const unknown = await core.callTool({ name: "instrument", arguments: { action: "run", name: "no-such-instrument" } });
+    assert(unknown.isError === true, "instrument run with an unknown name is isError:true, not a crash");
+
+    const noName = await core.callTool({ name: "instrument", arguments: { action: "run" } });
+    assert(noName.isError === true, "instrument run without a name is isError:true, not a crash");
   }
 
   // NOTE (AC4 connection consolidation): `core` is deliberately NOT closed here

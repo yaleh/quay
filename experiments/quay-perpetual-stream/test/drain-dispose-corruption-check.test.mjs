@@ -1,7 +1,7 @@
 // @test-group engine
 // Tests for drain-dispose-corruption-check.ts — gap-drain-dispose-body-corruption.
 // Mirror drain-scheduler.test.mjs's own test shape: pure-function tests + CLI exit-code tests.
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -17,6 +17,13 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.join(__dirname, "..", "scripts", "drain-dispose-corruption-check.ts");
+
+// Every CLI fixture dir is removed once at the end of this file (the carrier-array + after()
+// pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 // ── real evidence fixtures ────────────────────────────────────────────────────────────────────────
 // Reproduces the exact shape confirmed in wf_bb989746-4a0's own agent-*.jsonl transcripts: the
@@ -103,6 +110,7 @@ function makeTaskFile(dir, name, text) {
 
 test("CLI: exits 0 and prints ok:true on a clean file", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "corruption-check-cli-"));
+  _tmpDirs.push(dir);
   const file = makeTaskFile(dir, "CLEAN.md", CLEAN_BODY);
   const out = execFileSync("node", [scriptPath, "--file", file, "--min-lines", "100"], { encoding: "utf8" });
   const parsed = JSON.parse(out);
@@ -111,6 +119,7 @@ test("CLI: exits 0 and prints ok:true on a clean file", () => {
 
 test("CLI: exits 1 and prints ok:false + reasons on a corrupted file", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "corruption-check-cli-"));
+  _tmpDirs.push(dir);
   const file = makeTaskFile(dir, "CORRUPT.md", CORRUPT_BODY);
   let threw = false;
   let stdout = "";
@@ -149,6 +158,7 @@ test("CLI: exits 2 on missing args (usage error)", () => {
 // ── main() direct invocation (in-process, mirrors drain-scheduler.test.mjs's own pattern) ─────────
 test("main(): returns 0 for a clean file, 1 for a corrupted file", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "corruption-check-main-"));
+  _tmpDirs.push(dir);
   const cleanFile = makeTaskFile(dir, "clean.md", CLEAN_BODY);
   const corruptFile = makeTaskFile(dir, "corrupt.md", CORRUPT_BODY);
 

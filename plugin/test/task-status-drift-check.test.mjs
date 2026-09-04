@@ -4,13 +4,18 @@
 // symbols already resolve in the codebase while status is still todo/ready — the "board lies"
 // drift where landed code + stale status re-dispatches already-done work. It ALSO reports
 // reverse-drift (status done but the implementation never landed), with the code-root Touches
-// partition that keeps fast-mode bookkeeping noise out (tasks/gap-reverse-drift-check-buries-true-positives-in-noise).
+// partition that keeps fast-mode bookkeeping noise out (tasks/gap-reverse-drift-check-buries-true-positives-in-noise),
+// and closed-without-work (status done but 0 ACs checked — the DANGEROUS drift direction where
+// status is written directly, bypassing the gate; tasks/gap-drift-check-only-looks-at-the-harmless-direction).
 //
 // AC1 mirror byte-identity · AC2 zero false positives on genuinely-unlanded tasks (real store)
 // AC3 synthetic all-symbols-exist → suspect · AC4 synthetic no-symbols → nothing
 // AC5 exits 0 always · AC6 never writes tasks/** · AC7 --json shape.
 // Reverse-drift ACs: AC3 code/bookkeeping partition named · AC4 code-root .some() judgment
 // AC5 threshold 1/2 pinned by 1/4 fixture · AC6 fail-closed zero/bookkeeping-only Touches.
+// Closed-without-work ACs: AC2 live-specimen fixture (done + 0 AC checked + Touches not in tree)
+// → reported · AC3 reverse negative (done + complete evidence) → not reported · AC5 each record
+// names the missing evidence.
 //
 // Run: scripts/test.sh plugin/test/task-status-drift-check.test.mjs
 
@@ -28,21 +33,32 @@ import {
   touchesAllExist,
   scanTasks,
   formatJsonReport,
-  findRepoRoot,
   isDistinctiveName,
   parseTouchEntries,
   isBookkeepingTouchEntry,
   isCodeTouchEntry,
   hasAnyCodeRootTouch,
   hasDoneChildren,
+  countAcCheckboxes,
+  formatClosedText,
   REVERSE_SYMBOL_RATIO_MAX,
   BOOKKEEPING_ROOTS,
+  listRepoFiles,
   listWorkBranches,
   classifyBranch,
   strandedBranches,
   entriesInBranchDiff,
   formatStrandedText,
+  taskWorkLanded,
+  gitHistoryLanded,
+  buildGitHistoryIndex,
+  landingRef,
+  messageReferencesTask,
+  taskIdTokens,
+  taskIdFromTouches,
+  wordMatch,
 } from "../../experiments/quay-perpetual-stream/scripts/task-status-drift-check.ts";
+import { repoRoot } from "../scripts/repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -52,7 +68,7 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 // opt-in via QUAY_TEST_REAL_STORE=1; CI runs only the fast fixture cases by default.
 const REAL_STORE_ENABLED = process.env.QUAY_TEST_REAL_STORE === "1";
 
-// A git-rooted synthetic workspace the CLI can run in (findRepoRoot walks up to `.git`), so the CLI
+// A git-rooted synthetic workspace the CLI can run in (repoRoot walks up to `.git`), so the CLI
 // exit-0 / --json tests scan a tiny fixture store, not the real 553-task store.
 function makeGitWorkspace(tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `drift-cli-${tag}-`));
@@ -113,6 +129,27 @@ const REVERSE_UNLANDED_TASK = makeTask(
   "fixture-reverse-unlanded",
   "- [ ] AC1: `revGhostOneXYZ` and `_revGhostTwo` never landed\n- [ ] AC2: `_revGhostThree` also absent",
   "- code/ghost.ts",
+  "done"
+);
+
+// ── closed-without-work fixtures (gap-drift-check-only-looks-at-the-harmless-direction) ───────────
+// AC2 LIVE-SPECIMEN reproduction: `gap-no-e2e-proves-install-is-configuration-driven` was once
+// `status: done` with 8 ACs ALL unchecked and its Touches files only on an unmerged branch — the
+// shape the old scan (todo/ready only) reported nothing for. This fixture reproduces that historical
+// state: done + 0 AC checked + Touches files NOT in the tree. Must be reported as closed-without-work.
+const SPECIMEN_TASK = makeTask(
+  "fixture-specimen",
+  "- [ ] AC1: `installConfigDrivenE2E` lands and is RED first\n- [ ] AC2: `antiPassThroughCheck` requires laid-down count > 0\n- [ ] AC3: `renderSubstitutionFree` byte-identical across workspaces\n- [ ] AC4: `upgradePreservesState` keeps tick-log readable\n- [ ] AC5: `findingWithoutPlan` passes author→ready\n- [ ] AC6: `bothInstallsFailNegativeControl` stays red\n- [ ] AC7: `derivedTestCommand` differs (npm test vs go test)\n- [ ] AC8: `nodeTestGovernance` test-group",
+  "- packages/quay/test/install-config-driven-e2e.test.mjs\n- plugin/scripts/quay-init.sh\n- orchestration/GOAL-when-to-reinstall.md",
+  "done"
+);
+
+// AC3 REVERSE NEGATIVE: done + COMPLETE evidence (every AC checked + Touches file in the tree).
+// Must NOT be reported by ANY drift direction (not closed-without-work, not reverse-drift).
+const COMPLETE_DONE_TASK = makeTask(
+  "fixture-complete",
+  "- [x] AC1: `distinctiveLandedMarker` in the landed implementation\n- [x] AC2: `_internalLandedHelper` handles the boundary",
+  "- code/landed-symbol.ts",
   "done"
 );
 
@@ -336,6 +373,43 @@ test("AC1: experiments and plugin mirrors are byte-identical", () => {
   assert.equal(a, b, "mirrors must be byte-identical");
 });
 
+// ── timeout fix (gap-task-status-drift-check-timeout) ─────────────────────────────────────────────
+// AC1 (<8s on the real 1387-task store) is guaranteed by construction here. The walk that measured
+// 76s did so because `.quay/node-compile-cache` (384k files) was NOT in the exclusion set, so one
+// readdirSync returned 384k entries and the inner for-loop never re-checked the visited<20000 cap
+// (the cap was only tested at the outer pop). Two pins make the walk bounded and therefore fast:
+// (1) `.quay` is excluded, so that build-artifact directory is never descended; (2) the inner loop
+// re-checks the cap so a single huge NON-excluded directory also cannot overflow it.
+
+test("timeout fix: .quay (node-compile-cache) is excluded from the repo file walk", () => {
+  const ws = makeWorkspace("timeout-quay");
+  try {
+    fs.mkdirSync(path.join(ws, ".quay", "node-compile-cache"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "code", "landed-symbol.ts"), "export function distinctiveLandedMarker() {}\n");
+    // A build-artifact blob that must NOT be walked (384k files in the real store; a few hundred here
+    // is enough to prove exclusion without slowing the suite).
+    for (let i = 0; i < 500; i++) fs.writeFileSync(path.join(ws, ".quay", "node-compile-cache", `c${i}`), "");
+    const files = listRepoFiles(ws);
+    assert.ok(files.includes("code/landed-symbol.ts"), "code file is still listed");
+    assert.equal(files.some((f) => f.startsWith(".quay/")), false, ".quay/** must be excluded from the walk");
+    assert.ok(files.length < 100, `walk stayed bounded (got ${files.length})`);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("timeout fix: a single non-excluded directory >20000 entries is bounded by the inner-loop cap", () => {
+  const ws = makeWorkspace("timeout-cap");
+  try {
+    fs.mkdirSync(path.join(ws, "packages", "huge"), { recursive: true });
+    for (let i = 0; i < 20001; i++) fs.writeFileSync(path.join(ws, "packages", "huge", `f${i}`), "");
+    const files = listRepoFiles(ws);
+    assert.ok(files.length <= 20000, `inner-loop cap bounds the walk (got ${files.length})`);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 // ── pure extraction ──────────────────────────────────────────────────────────────────────────────
 
 test("extractSymbolCandidates: distinctive names yes, generic words / file basenames no", () => {
@@ -353,7 +427,7 @@ test("extractSymbolCandidates: distinctive names yes, generic words / file basen
   // Compound identifiers like `task_write` ARE name-distinctive; the resolve stage's frequency
   // filter (≤8 files) is what keeps over-recurring infrastructure words from resolving.
   assert.ok(cands.includes("task_write"), "task_write is a candidate by name; resolveSymbol freq-filters it");
-  assert.equal(resolveSymbol("task_write", findRepoRoot(process.cwd())), false, "task_write recurs across many files → must not resolve");
+  assert.equal(resolveSymbol("task_write", repoRoot(process.cwd())), false, "task_write recurs across many files → must not resolve");
 });
 
 test("isDistinctiveName: multi-part identifiers only", () => {
@@ -643,6 +717,172 @@ test("AC6 (reverse): done parent whose children are all done is NOT reverse-flag
   }
 });
 
+// ── closed-without-work — the DANGEROUS direction (gap-drift-check-only-looks-at-the-harmless-direction)
+// AC2 (live specimen): done + 0 AC checked + Touches files not in the tree ⇒ MUST be reported.
+// AC3 (reverse negative): done + complete evidence ⇒ MUST NOT be reported. The two-way control is
+// the task's true criterion — "turning 'invisible' into 'report everything' is another way of being
+// invisible".
+
+test("countAcCheckboxes: counts GFM boxes; only [x]/[X] counts as checked ([~] partial = unchecked)", () => {
+  const ac = "- [ ] AC1: a\n- [x] AC2: b\n- [X] AC3: c\n- [~] AC4: d\n- [ ] AC5: e";
+  const r = countAcCheckboxes(ac);
+  assert.equal(r.total, 5);
+  assert.equal(r.checked, 2);
+  assert.equal(r.unchecked, 3);
+  assert.equal(r.sectionFound, true, "a present section is marked sectionFound:true");
+  // AC47 fail-closed (gap-ac47-completion-predicate-consumer-fail-closed, AC1): an ABSENT section
+  // must NOT read as { unchecked: 0 } (that conflated "checked, zero unchecked" with "no section
+  // found"). sectionFound:false is the distinguishable state; total NaN is the structural guarantee
+  // that old destructuring read-patterns cannot get a pass (total===0 / checked===total both false).
+  const absent = countAcCheckboxes(null);
+  assert.equal(absent.sectionFound, false, "an absent/unreadable section is distinguishable (sectionFound:false)");
+  assert.ok(Number.isNaN(absent.total) && Number.isNaN(absent.checked) && Number.isNaN(absent.unchecked),
+    "absent section counts are NaN — old destructuring reads cannot obtain a pass");
+  assert.equal(absent.total === 0, false, "total===0 is false for an absent section");
+  assert.equal(absent.checked === absent.total, false, "checked===total is false for an absent section");
+  // A PRESENT section with no boxes stays { total: 0, unchecked: 0 } + sectionFound:true — the
+  // "段存在且零未勾" state, distinct from "段不存在".
+  assert.deepStrictEqual(countAcCheckboxes("no boxes here"), { total: 0, checked: 0, unchecked: 0, sectionFound: true });
+});
+
+test("AC2 (closed): LIVE-SPECIMEN reproduction — done + 0 AC checked + Touches files NOT in tree ⇒ reported as closed-without-work", () => {
+  const ws = makeWorkspace("c2");
+  try {
+    fs.writeFileSync(path.join(ws, "tasks", "fixture-specimen.md"), SPECIMEN_TASK);
+    // The Touches files are NOT created — this reproduces the specimen's historical state where the
+    // work existed only on an unmerged branch and the task was marked done directly.
+    const { closedWithoutWork, reverse } = scanTasks({ repoRoot: ws, roots: [path.join(ws, "code")] });
+    const hit = closedWithoutWork.find((c) => c.taskId === "fixture-specimen");
+    assert.ok(hit, "the specimen shape MUST be reported (done + 0 AC checked)");
+    assert.equal(hit.acChecked, 0, "reports 0 checked");
+    assert.equal(hit.acTotal, 8, "reports the total AC count");
+    assert.equal(hit.touchesAllExist, false, "Touches files not in tree is reported");
+    assert.equal(hit.codeTouchExists, false, "no code-root Touches entry exists");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC3 (closed): REVERSE NEGATIVE — done + complete evidence (ACs all checked + Touches in tree) ⇒ NOT reported by any direction", () => {
+  const ws = makeWorkspace("c3");
+  try {
+    fs.writeFileSync(path.join(ws, "code", "landed-symbol.ts"), "export function distinctiveLandedMarker() {}\nexport function _internalLandedHelper() {}\n");
+    fs.writeFileSync(path.join(ws, "tasks", "fixture-complete.md"), COMPLETE_DONE_TASK);
+    const { closedWithoutWork, suspects, reverse } = scanTasks({ repoRoot: ws, roots: [path.join(ws, "code")] });
+    assert.equal(closedWithoutWork.length, 0, "complete evidence → must NOT be closed-without-work");
+    assert.equal(suspects.length, 0, "done status → not a forward-drift suspect");
+    assert.equal(reverse.length, 0, "code landed → not reverse-drift");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC3b (closed): the 0-checked boundary — a done task with ≥1 AC checked is NOT closed-without-work", () => {
+  const ws = makeWorkspace("c3b");
+  try {
+    const partial = makeTask(
+      "fixture-partial",
+      "- [x] AC1: `distinctiveLandedMarker` done\n- [ ] AC2: `revGhostTwoXYZ` not yet\n- [ ] AC3: `revGhostThreeXYZ` not yet",
+      "- code/ghost.ts",
+      "done"
+    );
+    fs.writeFileSync(path.join(ws, "tasks", "fixture-partial.md"), partial);
+    const { closedWithoutWork } = scanTasks({ repoRoot: ws, roots: [path.join(ws, "code")] });
+    assert.equal(closedWithoutWork.length, 0, "1+ checked AC → the acceptance gate could have partially passed; not the 0-checked bypass shape");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC5 (closed): each reported record names the missing evidence (AC unchecked / file not in tree / branch unmerged)", () => {
+  const ws = makeWorkspace("c5");
+  try {
+    // A real git repo with a stranded branch so branchUnmerged can be demonstrated end-to-end.
+    const repo = makeRealGitRepo("c5");
+    try {
+      fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+      fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+      // The specimen's Touches live on a stranded branch, NOT master. Order matters: commit the code
+      // files on the branch FIRST (before the task file exists, so `git add .` can't sweep it onto
+      // the branch), THEN write the task file on master — the task file must be in master's tree for
+      // the scan to see it, while its Touches files exist only on the branch.
+      fs.mkdirSync(path.join(repo, "packages", "quay", "test"), { recursive: true });
+      fs.mkdirSync(path.join(repo, "plugin", "scripts"), { recursive: true });
+      git(repo, "checkout", "-q", "-b", "milestone/M250/iteration-0");
+      fs.writeFileSync(path.join(repo, "packages/quay/test/install-config-driven-e2e.test.mjs"), "// e2e\n");
+      fs.writeFileSync(path.join(repo, "plugin/scripts/quay-init.sh"), "#!/bin/sh\n");
+      git(repo, "add", ".");
+      git(repo, "commit", "-q", "-m", "specimen work");
+      git(repo, "checkout", "-q", "master");
+      fs.writeFileSync(path.join(repo, "tasks", "fixture-specimen.md"), SPECIMEN_TASK);
+      const stranded = strandedBranches(repo);
+      const { closedWithoutWork } = scanTasks({ repoRoot: repo, roots: [path.join(repo, "code")], strandedBranches: stranded });
+      const hit = closedWithoutWork.find((c) => c.taskId === "fixture-specimen");
+      assert.ok(hit, "specimen on a stranded branch is reported");
+      assert.equal(hit.acUnchecked, 8, "AC unchecked dimension");
+      assert.equal(hit.touchesAllExist, false, "Touches file not in tree dimension");
+      assert.equal(hit.branchUnmerged, true, "branch unmerged dimension");
+      assert.equal(hit.branch, "milestone/M250/iteration-0");
+      // The human-readable report names each missing dimension.
+      const text = formatClosedText(closedWithoutWork);
+      assert.match(text, /AC unchecked \(0\/8 checked\)/);
+      assert.match(text, /Touches file\(s\) not in tree/);
+      assert.match(text, /branch not merged \(milestone\/M250\/iteration-0\)/);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2/AC3 (closed): done-parent whose children are all done is NOT closed-without-work (delegation pattern, matches reverse-drift)", () => {
+  const ws = makeWorkspace("c2p");
+  try {
+    const parent = makeTask(
+      "fixture-closed-parent",
+      "- [ ] AC1: `ProposalReviewGhostXYZ` absent\n- [ ] AC2: `_ProposalAuthorsGhost` absent",
+      "- tasks/fixture-closed-parent.md",
+      "done",
+      ["fixture-closed-child"]
+    );
+    const child = makeTask("fixture-closed-child", "- [x] AC1: real work", "- code/child.ts", "done");
+    fs.writeFileSync(path.join(ws, "tasks", "fixture-closed-parent.md"), parent);
+    fs.writeFileSync(path.join(ws, "tasks", "fixture-closed-child.md"), child);
+    fs.writeFileSync(path.join(ws, "code", "child.ts"), "// child landed");
+    const { closedWithoutWork } = scanTasks({ repoRoot: ws, roots: [path.join(ws, "code")] });
+    assert.equal(closedWithoutWork.length, 0, "done parent whose implementation IS the children's work → not closed-without-work");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("--closed-direction: json emits a bare array (jq length counts it); text names the missing evidence", () => {
+  const cli = path.join(REPO_ROOT, "plugin", "scripts", "task-status-drift-check.ts");
+  const repo = makeRealGitRepo("cdir");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "tasks", "fixture-specimen.md"), SPECIMEN_TASK);
+    const jsonOut = execFileSync("node", ["--no-warnings", "--experimental-strip-types", cli, "--closed-direction", "--json"], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    const arr = JSON.parse(jsonOut);
+    assert.ok(Array.isArray(arr), "--closed-direction --json emits a bare ARRAY (so `| jq length` counts it)");
+    assert.equal(arr.length, 1, "exactly the specimen is reported");
+    assert.equal(arr[0].taskId, "fixture-specimen");
+    assert.equal(arr[0].acChecked, 0);
+    assert.equal(arr[0].acTotal, 8);
+    const textOut = execFileSync("node", ["--no-warnings", "--experimental-strip-types", cli, "--closed-direction"], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    assert.match(textOut, /CLOSED-without-work/);
+    assert.match(textOut, /fixture-specimen/);
+    assert.match(textOut, /AC unchecked \(0\/8 checked\)/, "text report names the missing evidence (AC5)");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 // ── AC2: real store — genuinely-unlanded tasks are not flagged, landed-but-stale are ─────────────
 // OPT-IN (QUAY_TEST_REAL_STORE=1): scans 553 real tasks, grepping the codebase per task (~47s).
 // The default CI run exercises the same scanTasks logic on synthetic fixtures (AC3/AC4 + the
@@ -652,8 +892,8 @@ test("AC6 (reverse): done parent whose children are all done is NOT reverse-flag
 test("AC2: real store — batch-1 todo tasks (code not landed) are NOT flagged; landed stale tasks ARE",
   { skip: !REAL_STORE_ENABLED && "opt-in with QUAY_TEST_REAL_STORE=1 (scans the real 553-task store, ~47s)" },
   () => {
-  const repoRoot = findRepoRoot(process.cwd());
-  const { suspects, reverse } = scanTasks({ repoRoot });
+  const root = repoRoot(process.cwd());
+  const { suspects, reverse } = scanTasks({ repoRoot: root });
 
   // Forward-drift (todo/ready but code in the tree) measured 2026-08-03: these must be flagged.
   for (const landed of [
@@ -709,8 +949,9 @@ test("AC6: source contains zero write calls, and a run leaves a task store byte-
   );
   // Zero fs-write APIs in the module ⇒ no code path can mutate tasks/** (the detector's Touches
   // walk only reads). The literal `tasks/**` string in its own doc comment is fine — what matters
-  // is that no write primitive exists.
-  assert.ok(!/writeFile|appendFile|createWriteStream|mkdirSync|rmSync|rm\(|unlink|copyFile|rename/.test(src), "no filesystem write calls in the detector");
+  // is that no write primitive exists. `rename` is matched as a CALL (`rename(`/`renameSync`) so a
+  // git `--no-renames` FLAG (buildGitHistoryIndex's batched `git log`) does not false-positive.
+  assert.ok(!/writeFile|appendFile|createWriteStream|mkdirSync|rmSync|rm\(|unlink|copyFile|rename\(|renameSync/.test(src), "no filesystem write calls in the detector");
 
   // A run must not mutate the store: snapshot and compare on a synthetic workspace (fast — the real
   // 553-task store scan is opt-in via AC2).
@@ -749,18 +990,20 @@ test("AC5: CLI exits 0 in all cases (report-only, never a gate)", () => {
 
 // ── AC7: --json shape ───────────────────────────────────────────────────────────────────────────
 
-test("AC7: --json mode emits { suspects, reverse, strandedTasks, stranded, scanned }", () => {
+test("AC7: --json mode emits { suspects, reverse, closedWithoutWork, strandedTasks, stranded, scanned }", () => {
   const report = formatJsonReport(
     [{ taskId: "X-1", matchedSymbols: ["planCheckNextAction"], touchesAllExist: true }],
     [{ taskId: "X-2", matchedSymbols: [], codeTouchExists: false, touchesAllExist: false }],
     10,
     [{ taskId: "X-3", matchedSymbols: [], branch: "milestone/M243/iteration-0", branchClassification: "has-commits" }],
-    [{ branch: "milestone/M239/iteration-0", classification: "has-commits", aheadCount: 2, insertions: 6901, lastCommitDate: "2026-08-01T00:00:00Z" }]
+    [{ branch: "milestone/M239/iteration-0", classification: "has-commits", aheadCount: 2, insertions: 6901, lastCommitDate: "2026-08-01T00:00:00Z" }],
+    [{ taskId: "X-4", acChecked: 0, acTotal: 3, acUnchecked: 3, touchesAllExist: false, codeTouchExists: false, branch: null, branchUnmerged: false }]
   );
   const parsed = JSON.parse(report);
-  assert.deepEqual(Object.keys(parsed).sort(), ["reverse", "scanned", "stranded", "strandedTasks", "suspects"]);
+  assert.deepEqual(Object.keys(parsed).sort(), ["closedWithoutWork", "reverse", "scanned", "stranded", "strandedTasks", "suspects"]);
   assert.equal(parsed.suspects.length, 1);
   assert.equal(parsed.reverse.length, 1);
+  assert.equal(parsed.closedWithoutWork.length, 1);
   assert.equal(parsed.strandedTasks.length, 1);
   assert.equal(parsed.stranded.length, 1);
   assert.deepEqual(
@@ -771,6 +1014,11 @@ test("AC7: --json mode emits { suspects, reverse, strandedTasks, stranded, scann
     Object.keys(parsed.reverse[0]).sort(),
     ["codeTouchExists", "matchedSymbols", "taskId", "touchesAllExist"],
     "reverse entries carry codeTouchExists (the code-root landing signal)"
+  );
+  assert.deepEqual(
+    Object.keys(parsed.closedWithoutWork[0]).sort(),
+    ["acChecked", "acTotal", "acUnchecked", "branch", "branchUnmerged", "codeTouchExists", "taskId", "touchesAllExist"],
+    "closed-without-work entries carry the actionable missing-evidence fields (AC5)"
   );
   assert.deepEqual(
     Object.keys(parsed.stranded[0]).sort(),
@@ -789,12 +1037,483 @@ test("AC7: --json mode emits { suspects, reverse, strandedTasks, stranded, scann
       cwd: ws, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
     });
     const fromCli = JSON.parse(out);
-    assert.deepEqual(Object.keys(fromCli).sort(), ["reverse", "scanned", "stranded", "strandedTasks", "suspects"]);
+    assert.deepEqual(Object.keys(fromCli).sort(), ["closedWithoutWork", "reverse", "scanned", "stranded", "strandedTasks", "suspects"]);
     assert.ok(Array.isArray(fromCli.suspects), "suspects must be an array");
     assert.ok(Array.isArray(fromCli.reverse), "reverse must be an array");
+    assert.ok(Array.isArray(fromCli.closedWithoutWork), "closedWithoutWork must be an array");
     assert.ok(Array.isArray(fromCli.stranded), "stranded must be an array");
     assert.ok(Array.isArray(fromCli.strandedTasks), "strandedTasks must be an array");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── git-history of declared specific Touches — the THIRD taskWorkLanded signal ────────────────────
+// (gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks). The first two signals depend
+// on AC SYMBOL SHAPE (resolvable backticked identifiers, or (new)-marked Touches files now existing);
+// a PROSE-HEAVY AC + existing-file Touches task shows neither though its work may have landed
+// (web-board: merged 0950b0b6/fb1fd520, taskWorkLanded was false, 3rd re-dispatch). The git-history
+// signal fires when a MASTER-REACHABLE commit whose message references the task modified one of the
+// task's SPECIFIC code-root Touches paths. AC1 positive · AC2 regression (symbol unchanged) ·
+// AC4 negatives (unrelated commit / shared-kernel collision / glob+(new) excluded / existing-file
+// overshoot NOT re-opened).
+
+/** A real git repo with a `master` branch (git-history tests need actual commits). */
+function makeGitHistoryRepo(tag) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `drift-gh-${tag}-`));
+  git(dir, "init", "-b", "master", "-q", ".");
+  git(dir, "config", "user.email", "test@example.com");
+  git(dir, "config", "user.name", "Test");
+  fs.writeFileSync(path.join(dir, ".gitkeep"), "base\n");
+  git(dir, "add", ".");
+  git(dir, "commit", "-q", "-m", "init");
+  return dir;
+}
+
+/** Create <branch> off master, commit <file> onto it, merge it back with a fan-in "merge <msg>".
+ *  Mirrors the fast-mode Land flow (git merge --no-ff puts the branch tip as second parent). */
+function commitAndMerge(repo, branch, file, content, mergeMsg) {
+  git(repo, "checkout", "-q", "-b", branch);
+  fs.writeFileSync(path.join(repo, file), content);
+  git(repo, "add", ".");
+  git(repo, "commit", "-q", "-m", "impl");
+  git(repo, "checkout", "-q", "master");
+  git(repo, "merge", "--no-ff", branch, "-m", mergeMsg, "-q");
+  git(repo, "branch", "-D", branch);
+}
+
+function gitHistoryTask(id, touches) {
+  return `---
+id: ${id}
+status: ready
+---
+## Acceptance Criteria
+- [ ] AC1: prose-only acceptance criterion — no backticked code identifiers, so symbol resolution cannot fire
+- [ ] AC2: the work lands on master via a merge that references the task
+## Touches
+- tasks/${id}.md
+${touches}
+`;
+}
+
+test("git-history: a merge referencing the task's short kernel that modified a specific Touches path ⇒ landed (AC1)", (t) => {
+  const repo = makeGitHistoryRepo("ac1");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // web-board shape: prose AC, existing-file Touches (no (new)), self-file in Touches. The fan-in
+    // merge "merge web-board: …" modified code/board.ts → the git-history signal fires.
+    const id = "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have";
+    const task = gitHistoryTask(id, "- code/board.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    commitAndMerge(repo, "task/gap-web-board", "code/board.ts", "board\n", "merge web-board: /board route joins intent/execution/landing");
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), true,
+      "merge referencing the short kernel + modified Touches path ⇒ landed");
+    assert.equal(taskWorkLanded(task, repo), true,
+      "taskWorkLanded ORs the git-history signal (taskId falls back to the self-file in Touches)");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: AC2 regression — a symbol-resolvable merged task stays landed (existing signals unchanged)", (t) => {
+  const repo = makeGitHistoryRepo("ac2");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "code", "upgrade-symbol.ts"), "export function distinctiveUpgradeChannelSync() {}\n");
+    const id = "gap-upgrade-channel-cant-sync-build-artifacts-dist-stale";
+    const task = `---
+id: ${id}
+status: ready
+---
+## Acceptance Criteria
+- [ ] AC1: \`distinctiveUpgradeChannelSync\` rebuilds the stale dist
+## Touches
+- tasks/${id}.md
+- code/upgrade-symbol.ts
+`;
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    assert.equal(taskWorkLanded(task, repo, { roots: [path.join(repo, "code")] }), true,
+      "symbol resolution still fires (backward compat) even with no git-history match");
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), false, "no commit references the task → git-history alone is false");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: a commit about a DIFFERENT task that touched the Touches path does NOT fire (AC4 negative)", (t) => {
+  const repo = makeGitHistoryRepo("ac4");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // A never-dispatched todo task whose Touches path was coincidentally modified by ANOTHER task's
+    // merge (message does NOT reference it) → must NOT be judged landed.
+    const id = "gap-never-dispatched";
+    const task = gitHistoryTask(id, "- code/shared.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    commitAndMerge(repo, "task/gap-other-work", "code/shared.ts", "shared\n", "merge gap-other-work: unrelated feature");
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), false,
+      "a coincidental modification by OTHER work must not judge the task landed");
+    assert.equal(taskWorkLanded(task, repo), false, "unlanded todo task stays unlanded");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: a SHARED short kernel (sibling collision) does NOT fire (AC4 — cold-start/red-window class)", (t) => {
+  const repo = makeGitHistoryRepo("collide");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // Two sibling tasks share the "cold-start" 2-segment kernel and BOTH declare code/cold.ts. A
+    // THIRD task's merge mentions "cold-start" and modified code/cold.ts. The never-landed sibling
+    // must NOT be judged landed (ambiguous kernel); the landed sibling IS caught by its own fan-in
+    // merge that references its longer id prefix.
+    const gateId = "gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite";
+    const ac8cId = "gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash";
+    const gate = gitHistoryTask(gateId, "- code/cold.ts");
+    const ac8c = gitHistoryTask(ac8cId, "- code/cold.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${gateId}.md`), gate);
+    fs.writeFileSync(path.join(repo, "tasks", `${ac8cId}.md`), ac8c);
+    // Third task's merge: mentions the shared word "cold-start", touches the shared file.
+    commitAndMerge(repo, "task/outer-self-checks", "code/cold.ts", "cold\n",
+      "merge outer-self-checks: cold-start step 3 three-state self-check (healthy=noop / empty-shell=drive)");
+    assert.equal(gitHistoryLanded(gate, repo, { taskId: gateId }), false,
+      "shared kernel must NOT fire for the never-landed sibling");
+    assert.equal(gitHistoryLanded(ac8c, repo, { taskId: ac8cId }), false,
+      "shared kernel must NOT fire for the landed sibling either (ambiguous)");
+    // The landed sibling's OWN fan-in merge (longer id prefix) DOES fire it.
+    commitAndMerge(repo, "task/gap-cold-start-ac8c", "code/cold.ts", "cold2\n",
+      "fan-in gap-cold-start-ac8c-key4 (critical path): AC8c key 4 + step 5 teach reliable-send");
+    assert.equal(gitHistoryLanded(ac8c, repo, { taskId: ac8cId }), true,
+      "the landed sibling IS caught via its own fan-in merge's longer id prefix");
+    assert.equal(gitHistoryLanded(gate, repo, { taskId: gateId }), false,
+      "the never-landed sibling STAYS unlanded");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: glob and (new) Touches do NOT participate (AC4)", (t) => {
+  const repo = makeGitHistoryRepo("globnew");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    const id = "gap-glob-new-only";
+    const task = `---
+id: ${id}
+status: ready
+---
+## Acceptance Criteria
+- [ ] AC1: prose only
+## Touches
+- tasks/${id}.md
+- code/*.ts
+- code/gen.ts (new)
+`;
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    // A merge references the task AND modified code/gen.ts — but (new) touches and globs do not
+    // participate in the git-history signal, and the self-file is bookkeeping → nothing fires.
+    commitAndMerge(repo, "task/gap-glob-new", "code/gen.ts", "gen\n", "merge gap-glob-new-only: generate the file");
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), false,
+      "glob/(new) touches must not participate in the git-history signal");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: an existing-file touch coincidentally modified by other work does NOT fire (prior overshoot gap NOT re-opened)", (t) => {
+  const repo = makeGitHistoryRepo("overshoot");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    const id = "gap-mod-existing";
+    const task = gitHistoryTask(id, "- code/existing.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    // The existing file is committed on master; an UNRELATED task's merge modified it. The task's
+    // own work has NOT landed → it must stay in the pool (the overshoot fix is not re-opened).
+    fs.writeFileSync(path.join(repo, "code", "existing.ts"), "existing\n");
+    git(repo, "add", "code/existing.ts");
+    git(repo, "commit", "-q", "-m", "add existing file");
+    commitAndMerge(repo, "task/gap-other", "code/existing.ts", "changed\n", "merge gap-other: unrelated change");
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), false,
+      "file existence + unrelated modification is NOT landing evidence");
+    assert.equal(taskWorkLanded(task, repo), false, "existing-file task with unlanded work stays unlanded");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: the BATCHED index path agrees with the per-task path (web-board positive + never-dispatched negative)", (t) => {
+  const repo = makeGitHistoryRepo("batch");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // web-board shape: prose AC, existing-file Touches, self-file in Touches. The fan-in merge
+    // "merge web-board: …" modified code/board.ts → the git-history signal fires.
+    const id = "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have";
+    const task = gitHistoryTask(id, "- code/board.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    // A never-dispatched todo task sharing the SAME Touches path (coincidentally modified by the
+    // web-board merge) → must stay unlanded on BOTH paths (the merge does not reference it).
+    const neverId = "gap-never-dispatched";
+    const neverTask = gitHistoryTask(neverId, "- code/board.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${neverId}.md`), neverTask);
+    commitAndMerge(repo, "task/gap-web-board", "code/board.ts", "board\n",
+      "merge web-board: /board route joins intent/execution/landing");
+
+    const index = buildGitHistoryIndex(repo);
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id, gitIndex: index }), true,
+      "batched index fires the positive (web-board merge touched code/board.ts)");
+    assert.equal(gitHistoryLanded(neverTask, repo, { taskId: neverId, gitIndex: index }), false,
+      "batched index does NOT fire for the never-dispatched sibling sharing the path");
+    // Regression control: the per-task path agrees with the index path.
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), true, "per-task path still fires");
+    assert.equal(gitHistoryLanded(neverTask, repo, { taskId: neverId }), false, "per-task path still negative");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: the BATCHED index preserves the shared-kernel negative control (AC4 via index)", (t) => {
+  const repo = makeGitHistoryRepo("batch-collide");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    const gateId = "gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite";
+    const ac8cId = "gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash";
+    const gate = gitHistoryTask(gateId, "- code/cold.ts");
+    const ac8c = gitHistoryTask(ac8cId, "- code/cold.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${gateId}.md`), gate);
+    fs.writeFileSync(path.join(repo, "tasks", `${ac8cId}.md`), ac8c);
+    // Third task's merge: mentions the shared word "cold-start", touches the shared file.
+    commitAndMerge(repo, "task/outer-self-checks", "code/cold.ts", "cold\n",
+      "merge outer-self-checks: cold-start step 3 three-state self-check (healthy=noop / empty-shell=drive)");
+    const index = buildGitHistoryIndex(repo);
+    for (const [task, id] of [[gate, gateId], [ac8c, ac8cId]]) {
+      const viaIndex = gitHistoryLanded(task, repo, { taskId: id, gitIndex: index });
+      const viaPerTask = gitHistoryLanded(task, repo, { taskId: id });
+      assert.equal(viaIndex, viaPerTask, `index and per-task paths agree for ${id}`);
+      assert.equal(viaIndex, false, `shared kernel must NOT fire for ${id} via the index`);
+    }
+    // The landed sibling's OWN fan-in merge (longer id prefix) DOES fire it — via the index too.
+    commitAndMerge(repo, "task/gap-cold-start-ac8c", "code/cold.ts", "cold2\n",
+      "fan-in gap-cold-start-ac8c-key4 (critical path): AC8c key 4 + step 5 teach reliable-send");
+    const index2 = buildGitHistoryIndex(repo);
+    assert.equal(gitHistoryLanded(ac8c, repo, { taskId: ac8cId, gitIndex: index2 }), true,
+      "the landed sibling IS caught via the index's longer id prefix");
+    assert.equal(gitHistoryLanded(gate, repo, { taskId: gateId, gitIndex: index2 }), false,
+      "the never-landed sibling STAYS unlanded via the index");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: the BATCHED index preserves glob/(new) exclusion and the overshoot negative (AC4 via index)", (t) => {
+  const repo = makeGitHistoryRepo("batch-globnew");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    const globNewId = "gap-glob-new-only";
+    const globNewTask = `---
+id: ${globNewId}
+status: ready
+---
+## Acceptance Criteria
+- [ ] AC1: prose only
+## Touches
+- tasks/${globNewId}.md
+- code/*.ts
+- code/gen.ts (new)
+`;
+    fs.writeFileSync(path.join(repo, "tasks", `${globNewId}.md`), globNewTask);
+    commitAndMerge(repo, "task/gap-glob-new", "code/gen.ts", "gen\n", "merge gap-glob-new-only: generate the file");
+    // Overshoot: an existing-file task whose Touches path was modified by an UNRELATED merge.
+    const overId = "gap-mod-existing";
+    const overTask = gitHistoryTask(overId, "- code/existing.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${overId}.md`), overTask);
+    fs.writeFileSync(path.join(repo, "code", "existing.ts"), "existing\n");
+    git(repo, "add", "code/existing.ts");
+    git(repo, "commit", "-q", "-m", "add existing file");
+    commitAndMerge(repo, "task/gap-other", "code/existing.ts", "changed\n", "merge gap-other: unrelated change");
+
+    const index = buildGitHistoryIndex(repo);
+    assert.equal(gitHistoryLanded(globNewTask, repo, { taskId: globNewId, gitIndex: index }), false,
+      "glob/(new) touches do not participate via the index (only code/gen.ts exists as a real path, and it is (new))");
+    assert.equal(gitHistoryLanded(overTask, repo, { taskId: overId, gitIndex: index }), false,
+      "existing-file + unrelated modification is NOT landing evidence via the index (overshoot not re-opened)");
+    // Per-task path agrees.
+    assert.equal(gitHistoryLanded(globNewTask, repo, { taskId: globNewId }), false);
+    assert.equal(gitHistoryLanded(overTask, repo, { taskId: overId }), false);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: the BATCHED index matches DIRECTORY-style Touches paths (git pathspec equivalence)", (t) => {
+  const repo = makeGitHistoryRepo("batch-dir");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // A task whose Touches declare a DIRECTORY path (`code/`) — the per-task `git log -- code/`
+    // pathspec matches every file under it. The batched index must reproduce that; before this
+    // fix the index only had exact-file keys and silently under-detected directory Touches
+    // (whole-store drift found on DIR-087/089/091's `…/scripts/`-style Touches: landed=true
+    // per-task but false via the index).
+    const dirId = "gap-dir-touch";
+    const dirTask = gitHistoryTask(dirId, "- code/");
+    fs.writeFileSync(path.join(repo, "tasks", `${dirId}.md`), dirTask);
+    // A never-dispatched sibling sharing the same directory Touch → must stay unlanded on BOTH
+    // paths (the merge does not reference it).
+    const neverId = "gap-dir-never";
+    const neverTask = gitHistoryTask(neverId, "- code/");
+    fs.writeFileSync(path.join(repo, "tasks", `${neverId}.md`), neverTask);
+    commitAndMerge(repo, "task/gap-dir-touch", "code/board.ts", "board\n",
+      "merge gap-dir-touch: directory-touch task lands a file under code/");
+
+    const index = buildGitHistoryIndex(repo);
+    assert.equal(gitHistoryLanded(dirTask, repo, { taskId: dirId }), true,
+      "per-task path fires for a directory-Touch task");
+    assert.equal(gitHistoryLanded(dirTask, repo, { taskId: dirId, gitIndex: index }), true,
+      "batched index fires for a directory-Touch task (prefix match)");
+    assert.equal(gitHistoryLanded(neverTask, repo, { taskId: neverId }), false,
+      "per-task path stays negative for the never-dispatched sibling");
+    assert.equal(gitHistoryLanded(neverTask, repo, { taskId: neverId, gitIndex: index }), false,
+      "batched index stays negative for the never-dispatched sibling");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// ── two-line-model landing ref (gap-git-history-landed-master-stale-under-two-line-model) ──────────
+// gitHistoryLanded used to hardcode `git log master`. Under the two-line model work lands on
+// integration (develop advances only via batch-merge) while master stalls (measured 2026-08-11:
+// master stuck at ea2208cf/08-06, master..integration=2212), so everything landed after that read
+// as unlanded. AC2: the ref follows the two-line model — integration/develop per landingRef, and a
+// STALE master no longer misjudges. AC3: a stray-branch commit (never merged into the working line)
+// still does NOT count as landed (negative control).
+
+test("landingRef: opts.ref wins, then integration→develop→master, then master fallback (two-line model)", (t) => {
+  const repo = makeGitHistoryRepo("landingref");
+  try {
+    // Only master exists → fallback to master (single-line repos / legacy fixtures).
+    assert.equal(landingRef(repo), "master", "only-master repo falls back to master");
+    // Two-line model: create develop then integration at the same base.
+    git(repo, "checkout", "-q", "-b", "develop");
+    git(repo, "checkout", "-q", "-b", "integration");
+    assert.equal(landingRef(repo), "integration", "integration is the first existing candidate (working line)");
+    assert.equal(landingRef(repo, { ref: "develop" }), "develop", "explicit opts.ref wins (config source)");
+    assert.equal(landingRef(repo, { ref: "feature/x" }), "feature/x", "explicit opts.ref is trusted verbatim");
+    // Delete integration → develop is now the working line.
+    git(repo, "checkout", "-q", "develop");
+    git(repo, "branch", "-q", "-D", "integration");
+    assert.equal(landingRef(repo), "develop", "develop is the working line when integration is absent");
+    // Explicit candidate list overrides the default chain.
+    assert.equal(landingRef(repo, { candidates: ["master"] }), "master", "explicit candidates win");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: two-line model — integration is the landing ref (stale master does not misjudge); a stray branch does NOT land (AC2/AC3)", (t) => {
+  const repo = makeGitHistoryRepo("twoline");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // The working line is `integration`; master stays behind as a stale historical ref.
+    git(repo, "checkout", "-q", "-b", "integration");
+    const id = "gap-suite-execution-rollback";
+    const task = gitHistoryTask(id, "- code/rollback.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    // Land the work on integration via a fan-in merge that references the task.
+    git(repo, "checkout", "-q", "-b", "task/gap-suite-execution-rollback");
+    fs.writeFileSync(path.join(repo, "code", "rollback.ts"), "rollback\n");
+    git(repo, "add", ".");
+    git(repo, "commit", "-q", "-m", "rollback impl");
+    git(repo, "checkout", "-q", "integration");
+    git(repo, "merge", "--no-ff", "task/gap-suite-execution-rollback", "-m", "inner: gap-suite-execution-rollback — rollback the stale state", "-q");
+    git(repo, "branch", "-D", "task/gap-suite-execution-rollback");
+    // master has NOT moved — the work is reachable only from integration.
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), true,
+      "integration-reachable commit referencing the task ⇒ landed (master staleness no longer misjudges)");
+    // BATCHED index built over the default landing ref (integration exists ⇒ landingRef=integration).
+    const index = buildGitHistoryIndex(repo);
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id, gitIndex: index }), true,
+      "batched index over integration also fires");
+    assert.equal(index.commits.size > 0, true, "index built over integration's history");
+
+    // AC3 negative control: a STRANDED-branch commit (never merged into integration) must NOT fire.
+    const strayId = "gap-stray-work";
+    const strayTask = gitHistoryTask(strayId, "- code/stray.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${strayId}.md`), strayTask);
+    git(repo, "checkout", "-q", "-b", "task/gap-stray");
+    fs.writeFileSync(path.join(repo, "code", "stray.ts"), "stray\n");
+    git(repo, "add", ".");
+    git(repo, "commit", "-q", "-m", "stray impl");
+    git(repo, "checkout", "-q", "integration");
+    // Leave the branch UNMERGED — its commit is reachable only from task/gap-stray.
+    assert.equal(gitHistoryLanded(strayTask, repo, { taskId: strayId }), false,
+      "a stray-branch commit not merged into integration must NOT be judged landed (AC3)");
+    const index2 = buildGitHistoryIndex(repo);
+    assert.equal(gitHistoryLanded(strayTask, repo, { taskId: strayId, gitIndex: index2 }), false,
+      "stray-branch commit stays unlanded via the batched index (AC3)");
+    git(repo, "branch", "-D", "task/gap-stray"); // cleanup so fixture removal is clean
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("taskIdTokens: full id, stripped id, and ≥2-segment prefixes of both", () => {
+  const toks = taskIdTokens("gap-web-board-needs-an-inconsistency-verdict-it-does-not-have");
+  assert.ok(toks.includes("gap-web-board-needs-an-inconsistency-verdict-it-does-not-have"), "full id");
+  assert.ok(toks.includes("web-board-needs-an-inconsistency-verdict-it-does-not-have"), "stripped id");
+  assert.ok(toks.includes("web-board"), "2-seg stripped prefix (the fan-in kernel)");
+  assert.ok(toks.includes("web-board-needs"), "3-seg stripped prefix");
+  assert.ok(toks.includes("gap-web-board"), "2-seg full prefix");
+});
+
+test("wordMatch: delimited word only — never embedded in a larger hyphenated token", () => {
+  assert.equal(wordMatch("merge web-board: /board lands", "web-board"), true);
+  assert.equal(wordMatch("gap-web-board-needs-x", "web-board"), false, "embedded in gap-web-board-needs");
+  assert.equal(wordMatch("merge send-keys-nbsp fix", "send-keys"), false, "embedded in send-keys-nbsp");
+  assert.equal(wordMatch("merge send-keys: fix", "send-keys"), true);
+  assert.equal(wordMatch("merge web-board:", "web-board"), true, "colon-delimited counts");
+});
+
+test("messageReferencesTask: full id any commit · long prefix any commit · short prefix merge+unique", () => {
+  const id = "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have";
+  assert.equal(messageReferencesTask("task(gap-web-board-needs-an-inconsistency-verdict-it-does-not-have): x", id, { isMerge: false }), true, "full id any commit");
+  assert.equal(messageReferencesTask("merge web-board: x", id, { isMerge: true }), true, "short kernel in a merge");
+  assert.equal(messageReferencesTask("fix web-board thing", id, { isMerge: false }), false, "short kernel in a NON-merge is ambiguous (sibling risk)");
+  assert.equal(messageReferencesTask("merge cold-start: x", "gap-cold-start-gate-a", { isMerge: true, ambiguousShortPrefixes: new Set(["cold-start"]) }), false, "ambiguous shared kernel rejected even in a merge");
+  assert.equal(messageReferencesTask("fan-in gap-cold-start-ac8c-key4 (critical path)", "gap-cold-start-ac8c-key4-teaches-x", { isMerge: true, ambiguousShortPrefixes: new Set(["cold-start"]) }), true, "long id prefix (≥4 segs) fires despite the shared short kernel");
+});
+
+test("taskIdFromTouches: the self-file tasks/<id>.md carries the id", () => {
+  assert.equal(taskIdFromTouches("- tasks/gap-x.md\n- code/a.ts"), "gap-x");
+  assert.equal(taskIdFromTouches("- code/a.ts\n- code/b.ts"), null, "no self-file → null (fallback needs opts.taskId)");
+  assert.equal(taskIdFromTouches(null), null);
+});
+
+test("CLI --check <task-id>: prints landed=true/false (Contract landed_signals measure)", (t) => {
+  const repo = makeGitHistoryRepo("cli");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    const id = "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have";
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), gitHistoryTask(id, "- code/board.ts"));
+    commitAndMerge(repo, "task/gap-web-board", "code/board.ts", "board\n", "merge web-board: /board lands");
+    const cli = path.join(REPO_ROOT, "plugin", "scripts", "task-status-drift-check.ts");
+    const out = execFileSync("node", ["--experimental-strip-types", cli, "--check", id], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    assert.match(out, /^landed=true\s*$/m, "landed task reports landed=true");
+    const out2 = execFileSync("node", ["--experimental-strip-types", cli, "--check", "gap-never-exists"], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    assert.match(out2, /^landed=false\s*$/m, "missing task reports landed=false (fail-closed)");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
   }
 });

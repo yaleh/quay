@@ -1,12 +1,13 @@
 {
   "name": "quay",
-  "version": "0.3.13",
+  "version": "0.6.1",
   "private": true,
   "description": "Quay Core: provider-agnostic web + CLI + MCP client over the Provider ABI (v0 walking skeleton).",
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "node scripts/build-dist.mjs"
+    "build": "node scripts/build-dist.mjs",
+    "postinstall": "node scripts/register-plugin.mjs"
   },
   "bin": {
     "quay": "./dist/quay.js"
@@ -23,13 +24,16 @@
     "LICENSE.md",
     "bin",
     "src",
-    "dist"
+    "dist",
+    "plugin",
+    "scripts/register-plugin.mjs"
   ],
   "engines": {
     "node": ">=20.0.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
+    "d3": "^7.9.0",
     "yaml": "^2.5.1"
   },
   "devDependencies": {

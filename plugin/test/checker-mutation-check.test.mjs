@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // checker-mutation-check.test.mjs — tasks/gap-checkers-have-never-been-shown-to-fail (AC1-AC7):
 // mutation-testing the CHECKERS themselves. The manifest (which checkers are registered) is
 // parsed from scripts/test.sh's run_static_checks + CI workflows, never hand-written (AC1);
@@ -26,13 +26,6 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 const SCRIPT = path.join(REPO_ROOT, "plugin/scripts/checker-mutation-check.sh");
 const CASES_DIR = path.join(REPO_ROOT, "plugin/scripts/checker-mutation-cases");
 
-// ── Governance self-skip (AC7 @test-group governance) ─────────────────────────────────────────────
-// In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
-// precedent). It runs in full when invoked explicitly (QUAY_TEST_GROUPS unset) or with
-// `--group governance`.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -100,13 +93,16 @@ test("AC1: manifest includes every CI-wired checker", () => {
 test("AC1 negative control: a fake checker added to run_static_checks appears in the manifest", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cmc-ac1-"));
   tmpDirs.push(tmp);
-  const src = fs.readFileSync(path.join(REPO_ROOT, "scripts/test.sh"), "utf8");
+  // run_static_checks now lives in plugin/scripts/runner-static-gate.ts (gap-ac128-hub-split-harness-concerns)
+  const src = fs.readFileSync(path.join(REPO_ROOT, "plugin/scripts/runner-static-gate.ts"), "utf8");
   const fake = '  echo "== fake checker (negative control) =="\n  bash "${repo_root}/plugin/scripts/fake-negative-control.sh" "${repo_root}"\n';
   const anchor = '  echo "== split-or-commit whole-store check';
   const idx = src.indexOf(anchor);
-  assert.ok(idx >= 0, "anchor line must exist in scripts/test.sh");
+  assert.ok(idx >= 0, "anchor line must exist in runner-static-gate.ts");
+  fs.mkdirSync(path.join(tmp, "plugin/scripts"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "plugin/scripts/runner-static-gate.ts"), src.slice(0, idx) + fake + src.slice(idx));
   fs.mkdirSync(path.join(tmp, "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(tmp, "scripts/test.sh"), src.slice(0, idx) + fake + src.slice(idx));
+  fs.copyFileSync(path.join(REPO_ROOT, "scripts/test.sh"), path.join(tmp, "scripts/test.sh"));
   fs.mkdirSync(path.join(tmp, ".github/workflows"), { recursive: true });
   fs.copyFileSync(path.join(REPO_ROOT, ".github/workflows/ci.yml"), path.join(tmp, ".github/workflows/ci.yml"));
   fs.mkdirSync(path.join(tmp, "plugin/scripts/checker-mutation-cases"), { recursive: true });
@@ -135,7 +131,15 @@ test("AC3: mutations_that_stayed_green is 0 (no checker stays green under its in
   assert.equal(r.json.mutations_that_always_red, 0,
     `checkers that stayed red after restore: ${JSON.stringify(r.json.always_red)}`);
   assert.equal(r.json.errors, 0);
-  assert.equal(Object.keys(r.json.results).length, 11, "9 registered (incl. the mechanism itself) + 2 regression cases");
+  // Relationship, not snapshot: every registered checker with a mutation case runs once, plus the
+  // 2 regression cases. The hardcoded 11 was stale the moment a checker was added to
+  // run_static_checks (9 → 12); the count must track the parsed manifest (gap-scoped-runs-pay-full-
+  // static-check-overhead surfaced this — the tier's annotations live in the same function body).
+  assert.equal(
+    Object.keys(r.json.results).length,
+    r.json.checkers_total + 2,
+    `every registered checker (${r.json.checkers_total}) + 2 regression cases must have a result`,
+  );
 });
 
 // ── AC4: meta-mutation — breaking the mechanism itself must fail ──────────────────────────────────
@@ -173,7 +177,7 @@ test("AC5 #6: a zero-dependency probe under the same defect is FLAGGED as stayed
   tmpDirs.push(tmp);
   // Two fake checkers wired into run_static_checks: one whose probe depends on quay, one whose
   // probe is zero-dependency (always exits 0, like resource-gate.sh was in the real #6).
-  const src = fs.readFileSync(path.join(REPO_ROOT, "scripts/test.sh"), "utf8");
+  const src = fs.readFileSync(path.join(REPO_ROOT, "plugin/scripts/runner-static-gate.ts"), "utf8");
   const fake = [
     '  bash "${repo_root}/plugin/scripts/fake-zerodep-check.sh" "${repo_root}"',
     '  bash "${repo_root}/plugin/scripts/fake-quaydep-check.sh" "${repo_root}"',
@@ -181,8 +185,10 @@ test("AC5 #6: a zero-dependency probe under the same defect is FLAGGED as stayed
   const anchor = '  echo "== split-or-commit whole-store check';
   const idx = src.indexOf(anchor);
   assert.ok(idx >= 0);
+  fs.mkdirSync(path.join(tmp, "plugin/scripts"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "plugin/scripts/runner-static-gate.ts"), src.slice(0, idx) + fake + src.slice(idx));
   fs.mkdirSync(path.join(tmp, "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(tmp, "scripts/test.sh"), src.slice(0, idx) + fake + src.slice(idx));
+  fs.copyFileSync(path.join(REPO_ROOT, "scripts/test.sh"), path.join(tmp, "scripts/test.sh"));
   fs.mkdirSync(path.join(tmp, ".github/workflows"), { recursive: true });
   fs.copyFileSync(path.join(REPO_ROOT, ".github/workflows/ci.yml"), path.join(tmp, ".github/workflows/ci.yml"));
   fs.mkdirSync(path.join(tmp, "plugin/scripts/checker-mutation-cases"), { recursive: true });
@@ -244,12 +250,11 @@ test("AC5 #10: decideLiveState covers activity-present + telemetry-empty ⇒ run
   assert.equal(rr.json.results["regression-live-telemetry-empty-activity"], "pass");
 });
 
-// ── AC7: node:test + @test-group governance ───────────────────────────────────────────────────────
+// ── AC7: node:test + @test-group engine ───────────────────────────────────────────────────────
 
-test("AC7: this file declares @test-group governance and imports node:test", () => {
+test("AC7: this file declares @test-group engine and imports node:test", () => {
   const src = fs.readFileSync(__filename, "utf8");
-  assert.match(src, /\/\/ @test-group governance/);
+  assert.match(src, /\/\/ @test-group engine/);
   assert.match(src, /import \{[^}]*test[^}]*\} from "node:test"/);
 });
 
-} // end governance self-skip else-branch

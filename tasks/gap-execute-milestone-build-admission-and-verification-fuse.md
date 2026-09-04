@@ -2,7 +2,7 @@
 id: gap-execute-milestone-build-admission-and-verification-fuse
 title: execute-milestone has no size-aware Build admission, bounded verification
   ladder, or repeated-test failure fuse
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -11,6 +11,8 @@ parent: null
 children: []
 extra:
   schema: v1
+  superseded: true
+  superseded_at: 2026-08-12
 ---
 
 **type:** execution
@@ -175,3 +177,7 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 - `experiments/quay-perpetual-stream/test/*build-admission*.test.mjs`
 - `plugin/test/*build-admission*.test.mjs`
 - `experiments/quay-perpetual-stream/OUTER-LOOP.md`
+
+## Superseded (2026-08-12)
+
+引用 ADR-022 已物理删除的机制（execute-milestone.js 双镜像 + OUTER-LOOP.md）：BuildAdmission / 验证阶梯 / repeated-failure fuse 均设计在经典 execute-milestone Build pipeline 上，fast mode 无对应物。前提不存在，作废保留历史——不重开。若 fast mode 的验证熔断 / 有界验证关注点复发，可另立新任务按当前两层模式重写。

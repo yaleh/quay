@@ -16,9 +16,10 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { validateConfig } from "../src/config-validate.ts";
+import { QUAY_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
+const quayBin = QUAY_CLI;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -498,6 +499,133 @@ loop:
     assert.equal(result.ok, false);
     const triggerIssue = result.issues.find((i) => i.field === "loop.routines[0].trigger" && i.message.includes("N must be >= 1"));
     assert.ok(triggerIssue, `expected every(0) issue, got: ${JSON.stringify(result.issues)}`);
+  } finally {
+    cleanup();
+  }
+});
+
+test("AC: interval:<N>m routine trigger passes validation (cand-config-validate-interval-trigger-drift)", () => {
+  // Mirrors the finding repro: a two-layer routine with an interval trigger
+  // (DIR-056 time form) must validate ok — the runtime readLoopParams accepts it.
+  const { root, cleanup } = tmpWorkspace({
+    ".quay/config.yml": `
+providers:
+  native:
+    enabled: true
+    mcp_entry: ["node", "./bin/native", "mcp"]
+gates:
+  testPass:
+    - name: my-gate
+      command: "echo ok"
+loop:
+  board: native
+  gates: [acceptance]
+  routines:
+    - name: nightly-report
+      trigger: "interval:30m"
+      probe: my-probe
+`.trim(),
+  });
+  try {
+    const result = validateConfig({ workspaceRoot: root, checkFiles: false });
+    const triggerIssues = result.issues.filter((i) => i.field.startsWith("loop.routines[0].trigger"));
+    assert.equal(triggerIssues.length, 0,
+      `expected no trigger issues for interval:30m, got: ${JSON.stringify(result.issues)}`);
+    assert.equal(result.ok, true, `expected ok:true, got issues: ${JSON.stringify(result.issues)}`);
+  } finally {
+    cleanup();
+  }
+});
+
+test("AC: interval:<N>m without gates section passes validation (exact finding repro)", () => {
+  // The finding's repro had no `gates:` section at all — only loop.gates: [acceptance].
+  const { root, cleanup } = tmpWorkspace({
+    ".quay/config.yml": `
+providers:
+  native:
+    enabled: true
+    mcp_entry: ["node", "./bin/native", "mcp"]
+    env:
+      QUAY_NATIVE_TASKS_DIR: "/custom/tasks"
+loop:
+  board: native
+  gates: [acceptance]
+  routines:
+    - name: nightly-report
+      trigger: "interval:30m"
+      probe: my-probe
+`.trim(),
+  });
+  try {
+    const result = validateConfig({ workspaceRoot: root, checkFiles: false });
+    const triggerIssues = result.issues.filter((i) => i.field.startsWith("loop.routines[0].trigger"));
+    assert.equal(triggerIssues.length, 0,
+      `expected no trigger issues for interval:30m (no gates section), got: ${JSON.stringify(result.issues)}`);
+    assert.equal(result.ok, true, `expected ok:true, got issues: ${JSON.stringify(result.issues)}`);
+  } finally {
+    cleanup();
+  }
+});
+
+test("AC: interval:0m exits with error (N must be >= 1)", () => {
+  const { root, cleanup } = tmpWorkspace({
+    ".quay/config.yml": `
+providers:
+  native:
+    enabled: true
+    mcp_entry: ["node", "./bin/native", "mcp"]
+gates:
+  testPass:
+    - name: my-gate
+      command: "echo ok"
+loop:
+  board: native
+  gates: [acceptance]
+  routines:
+    - name: zero-interval
+      trigger: "interval:0m"
+      probe: my-probe
+`.trim(),
+  });
+  try {
+    const result = validateConfig({ workspaceRoot: root, checkFiles: false });
+    assert.equal(result.ok, false);
+    const triggerIssue = result.issues.find((i) =>
+      i.field === "loop.routines[0].trigger" && i.message.includes("N must be >= 1")
+    );
+    assert.ok(triggerIssue, `expected interval:0m issue, got: ${JSON.stringify(result.issues)}`);
+  } finally {
+    cleanup();
+  }
+});
+
+test("AC: interval:1x exits with error (invalid pattern)", () => {
+  const { root, cleanup } = tmpWorkspace({
+    ".quay/config.yml": `
+providers:
+  native:
+    enabled: true
+    mcp_entry: ["node", "./bin/native", "mcp"]
+gates:
+  testPass:
+    - name: my-gate
+      command: "echo ok"
+loop:
+  board: native
+  gates: [acceptance]
+  routines:
+    - name: malformed-interval
+      trigger: "interval:1x"
+      probe: my-probe
+`.trim(),
+  });
+  try {
+    const result = validateConfig({ workspaceRoot: root, checkFiles: false });
+    assert.equal(result.ok, false);
+    const triggerIssue = result.issues.find((i) =>
+      i.field === "loop.routines[0].trigger" && i.message.includes("invalid")
+    );
+    assert.ok(triggerIssue, `expected interval:1x issue, got: ${JSON.stringify(result.issues)}`);
   } finally {
     cleanup();
   }

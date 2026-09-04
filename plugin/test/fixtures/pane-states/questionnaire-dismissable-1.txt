@@ -1,0 +1,10 @@
+● How is Claude doing this session? (optional)
+  1: Bad
+  2: Fine
+  3: Good
+  0: Dismiss
+  ↑/↓ navigate · Enter to confirm · Esc to cancel
+───────────────────────────────
+❯
+───────────────────────────────
+  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage

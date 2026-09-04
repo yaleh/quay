@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // pipe-exit-code-check.test.mjs — AC11 (gap-loop-mechanism-lives-outside-the-package-and-cannot-ship).
 // The "pipe then read $?" rule was prose in a tick doc and recurred three times in two days (once
 // TEN MINUTES after being written down). This pins the EXECUTABLE check that replaces the prose:

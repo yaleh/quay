@@ -15,7 +15,14 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # gap-release-timeout-10min-cancels-npm-tgz (2026-08-16): the "Run tests" step
+    # (96 deterministic test files across packages/quay + packages/quay-native) exceeded
+    # the old `timeout-minutes: 10` on the v0.5.0 run (31958447040) — the job was
+    # cancelled BEFORE "Build release artifact (npm pack)" / "Upload artifact to
+    # GitHub Release" ran, so the npm .tgz was never auto-attached. Widen to 30 to give
+    # cold runners + future test growth a comfortable margin (sea-release, which does
+    # more build work, is already 15).
+    timeout-minutes: 30
     permissions:
       contents: write
       issues: read
@@ -36,23 +43,26 @@ jobs:
 
       - name: Run tests
         # QX-056 (experiment 4, iteration 15): DIR-004 publish.
-        # GH_TOKEN required: packages/quay/test/cli.test.mjs includes integration
-        # tests that spawn `quay --provider github` making live GitHub API calls
-        # against yaleh/quay. Without GH_TOKEN the gh CLI subprocess returns 403.
-        # github.token has read access to this repo's issues by default.
         # quay-github package tests are excluded (they require broader org perms) —
         # this job intentionally scopes to packages/quay + packages/quay-native only,
         # narrower than scripts/test.sh's default glob, so it does NOT delegate to
         # scripts/test.sh here.
         #
-        # ADR-019/DIR-109 (M173): the hand-written `grep -vE 'serve-github|
-        # provider-abi-conformance|cli-edit-parity-conformance'` exclusion this step
-        # used to need (a 3rd duplicate of the same pattern CLAUDE.md/ci.yml hand-wrote)
-        # is GONE — those 3 files now each declare their own in-file `node:test` skip
-        # condition (opt-in via QUAY_TEST_LIVE_GITHUB=1, not set here), so they safely
-        # self-skip without github.token needing the broader perms they used to require.
-        env:
-          GH_TOKEN: ${{ github.token }}
+        # ADR-019/DIR-109 (M173): live-GitHub tests self-skip unless opted in via
+        # QUAY_TEST_LIVE_GITHUB=1 (in-file `node:test` skip conditions in serve-github /
+        # provider-abi-conformance / cli-edit-parity-conformance, and the same opt-in
+        # gate on cli.test.mjs's live blocks 8/10/11).
+        #
+        # gap-release-postinstall-fallback-breaks-windows-sea-build (AC4): this step
+        # deliberately does NOT set GH_TOKEN (nor QUAY_TEST_LIVE_GITHUB). The v0.4.0
+        # release run set GH_TOKEN here, which ENABLED cli.test.mjs's live blocks against
+        # the real yaleh/quay issue store — and those assertions drift with that store's
+        # current state (E3 adr-001 / M52 delivery-standalone-smoke / AC5 real-store
+        # scan failures in the same run), blocking the release on external state unrelated
+        # to whether the tagged commit's deterministic tests pass. A release gate verifies
+        # the ARTIFACT, not the live store's mutable state; the deterministic subset here
+        # runs without the token. Live-GitHub conformance remains covered by the FULL suite
+        # (scripts/test.sh / ci.yml) under QUAY_TEST_LIVE_GITHUB=1, where drift is triaged.
         run: node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs
 
       - name: Build release artifact (npm pack)
@@ -125,7 +135,7 @@ jobs:
         shell: bash
         run: bash packages/quay-native/scripts/build-sea.sh
 
-      - name: Assemble release bundle (both binaries + packaged .quay/config.yml)
+      - name: Assemble release bundle (both binaries + packaged .quay/config.yml + plugin sidecar)
         shell: bash
         run: |
           set -euo pipefail
@@ -140,6 +150,18 @@ jobs:
             cp packages/quay/dist-sea/quay "${BUNDLE_DIR}/quay"
             cp packages/quay-native/dist-sea/quay-native "${BUNDLE_DIR}/quay-native"
             MCP_ENTRY='["./quay-native", "mcp"]'
+          fi
+          # gap-release-sea-bundle-excludes-plugin-tree (AC16 产物层): the SEA archive is
+          # the RECOMMENDED distribution — it must carry the plugin SIDECAR (the agent
+          # surface that IS the self-evolving loop), staged by the Core build-sea.sh into
+          # packages/quay/dist-sea/plugin/. Fail closed if it is missing (AC1: the release
+          # artifact must contain plugin/).
+          if [ -d "packages/quay/dist-sea/plugin" ]; then
+            cp -R packages/quay/dist-sea/plugin "${BUNDLE_DIR}/plugin"
+            echo "Included plugin sidecar: ${BUNDLE_DIR}/plugin ($(find "${BUNDLE_DIR}/plugin" -type f | wc -l | tr -d ' ') files)"
+          else
+            echo "ERROR: packages/quay/dist-sea/plugin not found — the SEA archive would ship without the plugin bundle (AC1 unmet)." >&2
+            exit 1
           fi
           cat > "${BUNDLE_DIR}/.quay/config.yml" <<EOF
           # Packaged config for the SEA/single-file-executable distribution
@@ -178,6 +200,25 @@ jobs:
             echo "ARCHIVE_PATH=${ARCHIVE_NAME}.tar.gz" >> "$GITHUB_ENV"
           fi
 
+      # gap-release-artifact-missing-plugin-ac16 (AC3 产物层验证): extract the archive THIS job just
+      # built and run the mechanical artifact-level check (verify-sea-artifact.sh) — plugin/ sidecar
+      # present and non-empty AND all 6 mechanism names (dead-loop-check/verify-delivery-surface/
+      # slot-refill/claim-task/self-report-vocab/laydown-set-check) reverse-searchable in the
+      # artifact. This is the exact check archguard report #13 ran against v0.4.0 and found failing
+      # (strings of the 6 names: 0 hits; no plugin/ in the archive). Fail-closed BEFORE upload: a
+      # release artifact that would regress AC16 (artifact-level delivery) never reaches consumers.
+      - name: Verify the release archive carries the plugin sidecar (AC3)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p archive-check
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z x "${ARCHIVE_PATH}" -oarchive-check >/dev/null
+          else
+            tar -xzf "${ARCHIVE_PATH}" -C archive-check
+          fi
+          bash packages/quay/scripts/verify-sea-artifact.sh archive-check
+
       - name: Upload SEA archive to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -186,14 +227,23 @@ jobs:
             ## quay ${{ github.ref_name }} — single-file executables (Node SEA)
 
             Platform-specific archives (`quay-sea-<version>-<platform>.{tar.gz,zip}`)
-            contain two single-file executables (`quay`, `quay-native`) plus a
-            packaged `.quay/config.yml` wiring them together — no separately
-            installed Node.js runtime required. Extract the archive and run:
+            are the **recommended distribution**: two single-file executables (`quay`,
+            `quay-native`) plus a packaged `.quay/config.yml` wiring them together, AND
+            the full `plugin/` sidecar (the agent surface that IS the self-evolving
+            loop) — no separately installed Node.js runtime required. Extract the
+            archive and run:
 
             ```sh
             ./quay --help
             ./quay serve
             ```
+
+            Architecture decision (gap-release-sea-bundle-excludes-plugin-tree AC3):
+            the plugin ships as a **sidecar directory inside the same archive** (not
+            embedded into the SEA single-file binary — the plugin is a tree of
+            .sh/.ts/markdown that needs Node+shell at runtime, so embedding would force
+            a runtime unpack with no benefit). `quay-init --loop` (in `plugin/scripts/`)
+            lays the plugin's mechanisms into a target workspace.
 
   # Independent verification job (M01-dist Done-when clause 4, it0
   # domain-misfit audit-channel): downloads the Linux SEA archive this same
@@ -253,6 +303,26 @@ jobs:
             -o "${ASSET_NAME}" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${ASSET_ID}"
           mkdir -p extracted
           tar -xzf "${ASSET_NAME}" -C extracted
+      # gap-release-artifact-missing-plugin-ac16 (AC3): the DOWNLOADED consumer-facing asset must
+      # carry the plugin sidecar + all 6 mechanism names — the exact regression archguard #13 found
+      # (v0.4.0 archive had only quay/quay-native binaries, no plugin/). This container has no repo
+      # checkout, so the canonical verify-sea-artifact.sh is not available; this is an inline mirror
+      # of its checks (keep the 6-name list in sync with packages/quay/scripts/verify-sea-artifact.sh).
+      - name: Verify the downloaded archive carries the plugin sidecar (AC3)
+        run: |
+          set -euo pipefail
+          cd extracted
+          if [ ! -d plugin ] || [ -z "$(find plugin -type f 2>/dev/null | head -1)" ]; then
+            echo "ERROR: downloaded SEA archive has no non-empty plugin/ (AC16 regression)." >&2
+            exit 1
+          fi
+          for m in dead-loop-check verify-delivery-surface slot-refill claim-task self-report-vocab laydown-set-check; do
+            if ! grep -rlF -- "$m" . 2>/dev/null | grep -q .; then
+              echo "ERROR: mechanism '$m' not reverse-searchable in the downloaded artifact." >&2
+              exit 1
+            fi
+          done
+          echo "OK: downloaded SEA archive carries plugin/ + all 6 mechanism names (AC3)"
       - name: Run quay --help (no Node on PATH)
         run: |
           cd extracted

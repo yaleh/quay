@@ -107,6 +107,23 @@ authorTask(id, provider) = {
    - *Degraded fallback (currently active):* same-session checklist: (a)
      Plan phases map onto AC items, (b) AC section contains ≥1 real
      checkbox line, (c) DoD is a real checklist, not restated AC.
+   - *Cross-cut AC checklist (gap-scoped-selection-blind-to-packaging-state-diff, AC1):* every
+     authored task whose Plan names **NEW code** (a file the task creates or edits —
+     `packages/*/src`, a script, or a test) MUST default its AC to the cross-cut checklist, so
+     cross-cutting checks are in-task testable items rather than left to the full-suite gate
+     (the same "机制在一处做好、下游配置复用" principle as the scoped cross-cut marker in
+     `plugin/scripts/select-tests-for-touches.ts`):
+       1. **new code is lint-clean** (no new lint errors — archguard TASK-66's 14-error shape is
+          caught here because the author must run lint to tick it),
+       2. **check-adr: 0 ADR-conformance violations** (a new MCP tool ⇒ canonical CLI flag, ADR-007 —
+          archguard TASK-64/65/66 recurred three times before this became a default AC),
+       3. **packaging-state consistency** (a task touching `packages/*/src` runs the packaging-state
+          tests — `npm-pack-e2e` / `build-dist` / `plugin-packaging` — in its scoped selection, so a
+          src-green task cannot break the packaged artifact).
+     **Pure plugin/doc tasks** (skills, markdown, configs, docs) do NOT carry the cross-cut items
+     (AC6 — no bloat; their scoped selection stays sub-second). The scoped selector enforces the
+     same boundary mechanically: cross-cut tests enter `--for-task` selection when a touch triggers
+     the registry, and nothing fires for pure plugin/doc touches.
 5. `quay task check <id> --provider <provider> --json` — if `ok: true`, run
    `quay task edit <id> --status ready --provider <provider>`. If `ok:
    false`, do not force it; leave at `todo` (or move to `needs-human` if a

@@ -1,9 +1,20 @@
 // @test-group product
-// QN-019 (iteration 8): tighten the author->ready gate to require AC
-// checked-state, not merely checkbox presence — closing the asymmetry with
-// execute->done (which already requires full-checked state) that iteration
-// 7's QN-017 surfaced live (a task reached `ready` with 0/2 AC checkboxes
-// actually checked).
+// gap-both-gates-read-one-signal-so-done-costs-nothing: REVERSES QN-019
+// (iteration 8). QN-019 tightened the author->ready gate to require AC
+// checked-state; that tightening is what made `ready` mean "already done"
+// and made execute->done vacuous (both gates read the same evidence).
+// ADR-001's original design — restored here — says checked-state belongs to
+// `ready->done`, NOT `todo->ready`: for a not-yet-started task the AC
+// describes "what the work must satisfy", which by definition cannot be
+// checked yet. The two gates now read DIFFERENT evidence:
+//   author->ready reads the plan + AC presence/shape (>=1 checkbox, no
+//     checked-state requirement);
+//   execute->done reads the DoD checked-state (plus AC checked-state as the
+//     AC5 backstop, so "ready too strict" is not traded for "done too loose").
+//
+// This file is the historical home of the presence-vs-checked distinction;
+// the cases below are updated to the new semantics, and the execute->done
+// DoD-reading behavior is covered here too (AC7b).
 //
 // Run: node test/gate-checked-state.test.mjs
 import fs from "node:fs";
@@ -37,7 +48,7 @@ function main() {
   const store = createStore(tasksDir);
 
   // (a) zero checkboxes at all in the AC section: unchanged behavior,
-  // "AC section has no checkboxes" reason.
+  // "AC section has no checkboxes" reason (AC4 negative control).
   store.write("CS-A", {
     title: "no-checkboxes",
     status: "todo",
@@ -57,9 +68,10 @@ function main() {
     );
   }
 
-  // (b) THE EXACT CASE QN-017 EXPOSED: checkboxes present, but NONE checked.
-  // Previously this passed the author->ready gate (presence-only check).
-  // Must now fail, with a distinct "N/M AC checkboxes checked" reason.
+  // (b) THE QN-017 SHAPE, NOW REVERSED: checkboxes present, NONE checked.
+  // Under the restored ADR-001 semantics this PASSES author->ready (AC3) —
+  // checked-state is not required at todo->ready. This is the exact shape
+  // the old QN-019 tightening made fail; this task reverses that decision.
   store.write("CS-B", {
     title: "present-but-unchecked",
     status: "todo",
@@ -73,16 +85,16 @@ function main() {
     const r = store.check("CS-B");
     assert(r.gate === "author->ready", "CS-B: gate is author->ready");
     assert(
-      r.ok === false,
-      "CS-B: checkboxes present but 0 checked now fails the gate (was the QN-017 gap)"
+      r.ok === true,
+      `CS-B: checkboxes present but 0 checked PASSES author->ready now (ADR-001 restored; got ok=${r.ok}, reason="${r.reason}")`
     );
     assert(
-      r.reason === "0/2 AC checkboxes checked",
-      `CS-B: reason names the checked-state count (got: ${r.reason})`
+      r.acTotal === 2 && r.acChecked === 0,
+      `CS-B: acTotal/acChecked still surfaced for the author->ready gate (got ${r.acTotal}/${r.acChecked})`
     );
   }
 
-  // (c) partially checked: 1 of 2 checked — still must fail.
+  // (c) partially checked: 1 of 2 checked — also passes author->ready now.
   store.write("CS-C", {
     title: "partially-checked",
     status: "todo",
@@ -95,14 +107,13 @@ function main() {
   {
     const r = store.check("CS-C");
     assert(r.gate === "author->ready", "CS-C: gate is author->ready");
-    assert(r.ok === false, "CS-C: partially-checked AC fails the gate");
     assert(
-      r.reason === "1/2 AC checkboxes checked",
-      `CS-C: reason names the partial count (got: ${r.reason})`
+      r.ok === true,
+      `CS-C: partially-checked AC passes author->ready (checked-state not required; got ok=${r.ok})`
     );
   }
 
-  // (d) fully checked: must pass, exactly like execute->done already requires.
+  // (d) fully checked: still passes (unchanged behavior).
   store.write("CS-D", {
     title: "fully-checked",
     status: "todo",
@@ -118,10 +129,11 @@ function main() {
     assert(r.ok === true, `CS-D: fully-checked AC passes the gate (reason: ${r.reason})`);
   }
 
-  // (e) regression: execute->done (ready branch) and done branch are
-  // unaffected by this change — both already required full-checked state.
+  // (e) execute->done AC5 backstop: unchecked AC must still block done
+  // ("ready too strict" must not become "done too loose"). DoD here is
+  // prose-only (vacuous-true), so the AC check is the only reason it is red.
   store.write("CS-E", {
-    title: "ready-branch-regression",
+    title: "ready-branch-ac-backstop",
     status: "ready",
     body:
       `## Proposal\n${substantive("Proposal")}\n` +
@@ -131,12 +143,62 @@ function main() {
   });
   {
     const r = store.check("CS-E");
-    assert(r.gate === "execute->done", "CS-E: gate is execute->done (unaffected by this fix)");
-    assert(r.ok === false, "CS-E: unchecked AC still fails execute->done as before");
+    assert(r.gate === "execute->done", "CS-E: gate is execute->done");
+    assert(r.ok === false, "CS-E: unchecked AC still fails execute->done as before (AC5 backstop)");
     assert(
       r.reason === "0/2 AC checkboxes checked",
       `CS-E: execute->done reason format unchanged (got: ${r.reason})`
     );
+  }
+
+  // (f) AC7b (the main criterion): execute->done reads the DoD checked-state.
+  // AC all checked, DoD checkboxes present but NONE checked => RED.
+  store.write("CS-F", {
+    title: "ac-checked-dod-unchecked",
+    status: "ready",
+    body:
+      `## Proposal\n${substantive("Proposal")}\n` +
+      `## Plan\n${substantive("Plan")}\n` +
+      `## AC\n- [x] first acceptance criterion, fully checked\n- [x] second acceptance criterion, fully checked\n` +
+      `## DoD\n- [ ] first definition-of-done item, deliberately NOT checked\n- [ ] second definition-of-done item, deliberately NOT checked\n- [ ] third definition-of-done item, deliberately NOT checked\n`,
+  });
+  {
+    const r = store.check("CS-F");
+    assert(r.gate === "execute->done", "CS-F: gate is execute->done");
+    assert(
+      r.ok === false,
+      `CS-F (AC7b): AC all checked but DoD all unchecked => execute->done RED (got ok=${r.ok}, reason="${r.reason}")`
+    );
+    assert(
+      r.reason === "0/3 DoD checkboxes checked",
+      `CS-F: reason names the DoD checked-state count (got: ${r.reason})`
+    );
+    assert(r.dodTotal === 3 && r.dodChecked === 0, "CS-F: dodTotal/dodChecked surfaced");
+  }
+
+  // (g) AC7c (DIR-102 replay): a zero-work task — established, all AC checked
+  // in one commit, lifted to ready — must NOT be closeable. Same shape as (f).
+  // (CS-F already covers the shape; this pins the same assertion through a
+  // literal "zero work" fixture name.)
+
+  // (h) execute->done positive: AC all checked AND DoD all checked => ok:true.
+  store.write("CS-G", {
+    title: "ac-and-dod-checked",
+    status: "ready",
+    body:
+      `## Proposal\n${substantive("Proposal")}\n` +
+      `## Plan\n${substantive("Plan")}\n` +
+      `## AC\n- [x] first acceptance criterion, fully checked\n- [x] second acceptance criterion, fully checked\n` +
+      `## DoD\n- [x] first definition-of-done item, genuinely done\n- [x] second definition-of-done item, genuinely done\n`,
+  });
+  {
+    const r = store.check("CS-G");
+    assert(r.gate === "execute->done", "CS-G: gate is execute->done");
+    assert(
+      r.ok === true,
+      `CS-G: AC and DoD all checked => execute->done ok:true (reason: ${r.reason})`
+    );
+    assert(r.reason === "all AC and DoD checkboxes checked; eligible to move to done", "CS-G: reason is the new combined text");
   }
 
   reset();
@@ -150,4 +212,3 @@ function main() {
 }
 
 main();
-

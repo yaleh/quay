@@ -11,6 +11,18 @@ extra:
 
 **type:** execution
 
+> **AC4 cross-mark (2026-08-05, `gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked`)**:
+> same axis (criterion's own validity) — a layer-dimension extension. This task built the
+> mutation-test instrument for the STATIC + CI layer (`checker-mutation-check.sh` parses
+> `run_static_checks()` + CI). The gate-scripts task measured that same axis one layer down:
+> `plugin/gate-scripts/` (14 classic-pipeline era gates) were laid down but dead — `grep -c
+> gate-scripts = 0` in the mutation manifest ⇒ they had never been shown to fail, but being dead
+> (not wired) that gap was secondary; the real defect was delivery propagating dead weight. The
+> disposal (layered retirement of `--gate-scripts` from quay-init) reuses THIS task's mutation
+> mechanism: the manifest is still parsed from `run_static_checks` + CI, and the fast-mode gate
+> scripts that ARE wired (`it0-split-or-commit-check` etc.) stay mutation-covered. No changes to
+> this task's AC/status — cross-mark only.
+
 ## Proposal
 
 规格 `orchestration/SPEC-typed-axes-and-standing-dynamics.md` AC1（管理者定，最优先）。

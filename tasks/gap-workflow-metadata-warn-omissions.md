@@ -1,12 +1,14 @@
 ---
 id: gap-workflow-metadata-warn-omissions
 title: "Workflow metadata WARN-level omissions — decide fix or document"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
 extra:
   schema: v1
+  superseded: true
+  superseded_at: 2026-08-12
 ---
 
 **type:** execution
@@ -46,6 +48,16 @@ The checker's 14 WARNs on the live tree, by class:
 - [ ] Either the metadata mentions the mechanisms OR a documented decision records the omission as intentional
 - [ ] `workflow-metadata-conformance.mjs` reports the decided state; tests pin it
 
+## Contract
+
+measure   warn_count = `node --no-warnings --experimental-strip-types experiments/quay-perpetual-stream/scripts/workflow-metadata-conformance.mjs 2>&1 | grep -c 'WARN'` 输出的计数
+band      warn_count = 0（修复后）或每剩余 WARN 有文档 rationale
+invariant mirror_byte_identity = 1（两份 workflow 镜像 diff 为空——AC3）
+invariant tests_pinned = 1（workflow-metadata-conformance 测试更新到新基线）
+invoke    `bash scripts/test.sh --for-task gap-workflow-metadata-warn-omissions`
+control   scoped 门绿；WARN 计数与决策记录一致
+resume    逐 WARN 类决策（修 or 记录）分步提交
+
 ## Touches
 
 - .claude/workflows/execute-milestone.js
@@ -54,3 +66,15 @@ The checker's 14 WARNs on the live tree, by class:
 - plugin/workflows/prepare-milestone.js
 - plugin/test/workflow-metadata-conformance.test.mjs
 - experiments/quay-perpetual-stream/scripts/workflow-metadata-conformance.mjs
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-09
+changed: 无（本任务补 ## Contract 六键晋级 Contract，非新派发，无 review 记录）
+
+## Superseded (2026-08-12)
+
+引用 ADR-022 已物理删除的工作流（execute-milestone.js / prepare-milestone.js 双镜像）：本任务的 14 条 WARN 全部针对已删机制的元数据遗漏。检查器 workflow-metadata-conformance.mjs 仍在（it0-dod-check.ts clause 14 调用），但其描述对象已删，WARN 已不再存在。前提不存在，作废保留历史——不重开。
+
+Contract invoke 的 `bash scripts/test.sh --for-task gap-workflow-metadata-warn-omissions` 是本任务的 scoped 测试路径；任务作废保留历史（AC1-AC3 未勾，前提删除后未重跑 scoped 门）。

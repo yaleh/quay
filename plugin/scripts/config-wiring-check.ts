@@ -4,8 +4,8 @@
 //
 // Merging config files (DIR-050) does not fix the "declared but dead" failure mode — it can make
 // it WORSE, because a dead field in the canonical file looks MORE authoritative while still being
-// unread ([[gap-halt-sentinel-path-mismatch]] is the real-world proof: an authoritative-looking,
-// off-path `.halt` doc caused a genuine safety miss). This check distinguishes THREE distinct
+// unread (an authoritative-looking, off-path doc caused a genuine safety miss — the real-world
+// proof that motivated this check). This check distinguishes THREE distinct
 // failure shapes that "does it have a reader?" prose blurs together:
 //
 //   NO_READER              — no reader for this field exists ANYWHERE in the codebase.
@@ -60,6 +60,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { helpExit, readFileSafe } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // plugin/scripts -> plugin -> repo root. Robust to being invoked via the experiments/ symlink
@@ -85,14 +86,6 @@ interface FieldReport {
   field: LoopField;
   value: unknown;
   issues: FieldIssue[];
-}
-
-function readFileSafe(p: string): string {
-  try {
-    return fs.readFileSync(p, "utf8");
-  } catch {
-    return "";
-  }
 }
 
 // ── generalReader: does ANY reader for `field` exist? ──────────────────────────────────────────
@@ -136,7 +129,9 @@ function checkGenericDriverConsumes(field: LoopField, repoRoot: string): Evidenc
 function collectBespokeDriverFiles(repoRoot: string): string[] {
   const files: string[] = [
     path.join(repoRoot, "experiments/quay-perpetual-stream/OUTER-LOOP.md"),
-    path.join(repoRoot, ".claude/workflows/select-preflight.js"),
+    // gap-select-preflight-retirement-decision: select-preflight.js retired with the classic
+    // OUTER-LOOP SELECT phase (ADR-022); the surviving bespoke driver workflows are run-routines
+    // and drain-directives.
     path.join(repoRoot, ".claude/workflows/run-routines.js"),
     path.join(repoRoot, ".claude/workflows/drain-directives.js"),
   ];
@@ -174,19 +169,43 @@ function checkBespokeReaderViaReadLoopParams(field: LoopField, repoRoot: string)
   };
 }
 
-// `routines` has its OWN real bespoke path, distinct from readLoopParams: DIR-051/056's
-// `.claude/workflows/run-routines.js` genuinely instructs (and is invoked at the checkpoint step
-// by OUTER-LOOP.md) reading `routines:` straight out of `.quay/loop.yml`, then dispatching
-// `routine-scheduler.ts` against it.
+// `routines` has its OWN real bespoke path, distinct from readLoopParams. The LIVE caller is the
+// fast-mode two-layer tick docs (plugin/loop/*.md — THIS workspace's actual driver): they reference
+// the routine track (routine-scheduler / run-routines / routines:), which dispatches probes against
+// the configured `routines:` field. DIR-051/056's `.claude/workflows/run-routines.js` is the
+// backward-compat wrapper that delegates to the quay:run-routines skill.
+//
+// gap-delivery-outline-vs-verify-surface-single-source AC3c (dead-config detection): before this
+// check, a configured `routines:` was accepted by config-validate (which only checks SYNTAX, not
+// "is this field read") while the routine track's ONLY caller was the retired loop-driver SKILL
+// (live tick docs 0 hits) — dead config that no live driver consumed. The check below therefore
+// requires the LIVE fast-mode tick docs to reference the routine track; a configured `routines:`
+// with no live caller is reported as NOT_CONSUMED_BY_DRIVER (fail-closed, not a silent pass).
 function checkRoutinesBespokeReader(repoRoot: string): EvidenceResult {
+  const liveDocs = ["plugin/loop/fast-mode-loop-tick.md", "plugin/loop/orchestrator-loop-tick.md"]
+    .map((f) => path.join(repoRoot, f))
+    .filter((f) => fs.existsSync(f));
+  const liveOk = liveDocs.some((f) => {
+    const src = readFileSafe(f);
+    return /routine-scheduler/.test(src) || /run-routines/.test(src);
+  });
+  if (liveOk) {
+    return {
+      ok: true,
+      evidence: `the fast-mode tick docs (plugin/loop/*.md) reference the routine track (routine-scheduler / run-routines) — a real LIVE caller for the 'routines:' config field (AC3c)`,
+    };
+  }
+  // Fall back to the legacy backward-compat wrapper so an old deployment is still recognized —
+  // but flag the dead-config gap explicitly (the field is read by a RETIRED-path wrapper, not the
+  // live fast-mode driver).
   const file = path.join(repoRoot, ".claude/workflows/run-routines.js");
   const src = readFileSafe(file);
-  const ok = /routines:/.test(src) && /\.quay\/loop\.yml/.test(src) && /routine-scheduler/.test(src);
+  const legacyOk = /routines:/.test(src) && /\.quay\/loop\.yml/.test(src) && /routine-scheduler/.test(src);
   return {
-    ok,
-    evidence: ok
-      ? `.claude/workflows/run-routines.js instructs reading 'routines:' from .quay/loop.yml and dispatching routine-scheduler.ts — a real, checkpoint-invoked path distinct from readLoopParams`
-      : `.claude/workflows/run-routines.js does not reference reading routines: from .quay/loop.yml`,
+    ok: legacyOk,
+    evidence: legacyOk
+      ? `'.claude/workflows/run-routines.js' (legacy wrapper) references the routine track, but the LIVE fast-mode tick docs (plugin/loop/*.md) do NOT — a configured 'routines:' with no live caller is dead config (AC3c)`
+      : `no live caller reads 'routines:': the fast-mode tick docs (plugin/loop/*.md) do not reference the routine track and the legacy .claude/workflows/run-routines.js does not either — 'routines:' is configured but nobody reads it (config-validate only checks syntax, not consumption)`,
   };
 }
 
@@ -337,6 +356,7 @@ export {
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 async function main(argv: string[]): Promise<number> {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node config-wiring-check.ts [--workspace <path>] [--driver bespoke|generic|both] [--json] [--verify-readers] [--selftest]");
   if (args.includes("--selftest")) return runSelftest();
 
   if (args.includes("--verify-readers")) {

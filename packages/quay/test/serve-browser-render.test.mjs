@@ -49,10 +49,11 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -99,12 +100,12 @@ async function main() {
     `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n`
   );
 
-  const port = 41830 + (process.pid % 1000);
   const originalCwd = process.cwd();
   let server;
   try {
     process.chdir(workspaceRoot);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     // --- The root-caused, mechanically-checkable regression: Content-Type
     // must declare charset=utf-8 on both HTML-emitting routes, so any
@@ -112,16 +113,16 @@ async function main() {
     // body's UTF-8 bytes correctly instead of falling back to a legacy
     // encoding and mangling non-ASCII glyphs (the live browser-observed bug
     // this task fixes).
-    const list = await getRaw(port, "/");
-    assert(list.status === 200, `GET / returns 200 (got ${list.status})`);
+    const list = await getRaw(port, "/tasks");
+    assert(list.status === 200, `GET /tasks returns 200 (got ${list.status})`);
     assert(/charset=utf-8/i.test(list.headers["content-type"] || ""),
-      `GET / Content-Type header declares charset=utf-8 (got "${list.headers["content-type"]}")`);
+      `GET /tasks Content-Type header declares charset=utf-8 (got "${list.headers["content-type"]}")`);
     // The em-dash in "Quay — task list" is U+2014, UTF-8 bytes E2 80 94.
     const emDashBytes = Buffer.from([0xe2, 0x80, 0x94]);
     assert(list.raw.includes(emDashBytes),
-      "GET / body's raw bytes contain the correctly UTF-8-encoded em-dash (E2 80 94)");
+      "GET /tasks body's raw bytes contain the correctly UTF-8-encoded em-dash (E2 80 94)");
     assert(list.raw.toString("utf-8").includes("<meta charset=\"utf-8\">"),
-      "GET / body includes an explicit <meta charset=\"utf-8\"> tag (belt-and-braces alongside the HTTP header)");
+      "GET /tasks body includes an explicit <meta charset=\"utf-8\"> tag (belt-and-braces alongside the HTTP header)");
 
     const detail = await getRaw(port, "/task/RND-1");
     assert(detail.status === 200, `GET /task/RND-1 returns 200 (got ${detail.status})`);

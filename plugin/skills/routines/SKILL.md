@@ -27,11 +27,19 @@ their findings through the routine-file-gate, and verify the FILE-ONLY invariant
 1. Read `routines:` from `.quay/config.yml` `loop:` section (legacy fallback: `.quay/loop.yml`).
 2. Write routines as a temporary JSON array (one object per routine with
    `{name, trigger, probe?, dispatch?}`).
-3. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/routine-scheduler.ts" --iteration
-   <milestone_counter> --event checkpoint --plugin-root "${CLAUDE_PLUGIN_ROOT}"
-   /tmp/routines-<counter>.json`. Exit 0 + lists DUE routines (one per line:
-   `DUE: <name> (<trigger>) -> probe <name>`); exit 3 = none due.
+3. Run the scheduler against the TWO-LAYER trigger quantities (ADR-022 retired the iteration
+   counter — see `gap-probe-mechanism-dead-15-days-rewire-to-two-layer`):
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/routine-scheduler.ts" --now <epoch-ms>
+   --last-run <workspaceRoot>/.quay/routine-last-run.json [--event <event>] --plugin-root
+   "${CLAUDE_PLUGIN_ROOT}" /tmp/routines-<tick>.json`.
+   `--now` is the current wall-clock epoch-ms; `--last-run` is the per-routine last-run map
+   (`{ "<name>": <epoch-ms> }`, absent = never ran → due) that `interval:<N>m` triggers consult.
+   Exit 0 + lists DUE routines (one per line: `DUE: <name> (<trigger>) -> probe <name>`);
+   exit 3 = none due.
 4. If none due or no routines configured, return `{fired: 0}` — rest is no-op.
+5. **After Phase 2 dispatch, record last-run:** for each routine actually fired, write
+   `{ "<name>": <now-epoch-ms> }` back into `<workspaceRoot>/.quay/routine-last-run.json`
+   (merge, don't clobber) so `interval:<N>m` routines do not re-fire within their window.
 
 ### Phase 2 — Dispatch
 
@@ -98,9 +106,11 @@ For each candidate finding file:
 - **Browser-explorer probe (DIR-069):** When `chrome-devtools` or `playwright`
   MCP is available, the `browser-explorer` probe can dispatch. When unavailable,
   it skips cleanly with `filed: 0`.
-- **Works with scheduler triggers:** `on-startup`, `interval:<N>m`,
-  `on-checkpoint`, `on-snapshot` — the scheduler evaluates trigger conditions;
-  the skill only fires what is DUE.
+- **Works with scheduler triggers:** `every(N)` (LEGACY iteration-count, back-compat),
+  `interval:<N>m` (two-layer TIME — fires N minutes after last run; never-ran = due),
+  `on(<event>)` (event-based, e.g. `on(checkpoint)`) — the scheduler evaluates trigger
+  conditions; the skill only fires what is DUE. Two-layer mode configures
+  `interval:<N>m` / `on(<event>)` — not `every(N)` (no iteration counter exists).
 - **Gate quality/dedup/rate:** routine-file-gate enforces finding quality
   (actionable + evidence-backed), deduplication (no duplicate on the board),
   and rate capping (k files per window).

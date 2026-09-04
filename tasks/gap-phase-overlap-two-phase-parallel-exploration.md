@@ -1,0 +1,106 @@
+---
+id: gap-phase-overlap-two-phase-parallel-exploration
+title: 两相重叠探索（serial+lowconc 并行，各 conc=6）——预期 −154s/轮（~−34%）；一键回退 + 前后对照 + basename 归一；等吞吐观察窗口结束再动
+status: done
+labels:
+  - gap
+  - exploration
+  - mechanism
+parent: null
+children: []
+extra:
+  schema: execution
+---
+
+**type:** execution
+
+## Proposal
+
+**人 2026-08-13 08:5xZ 裁定：方案 A（两相重叠）【可以探索】——探索不是直接实施。**
+```
+serial 与 lowconc 并行跑，各自仍 conc=6，机器级 12 < 16 核
+窗口 177+154=331s → max(177,154)=177s ⇒ 预期 −154s/轮（约 −34%）
+前提已核：@test-group 使文件集按构造不相交；test.sh 自记 "independent, read-only, share no state"
+```
+
+**🛑 人裁【暂不动】的三项（不立案、不派，证据留 tick-log 08:4xZ，重启直接取用不重测）**：
+判决后仍在跑 24.9% / 同 commit 重复验证 21.8% / 轮间空转 30% · develop 被饿死（develop..integration 2→4→5→12）· CPU steal 16%。
+理由：AC42-AC53 落地后形态完全不同，现在优化 = 优化一个即将消失的结构。
+
+## 探索约束（manager 2026-08-13，写死——缺任一条不算探索）
+
+1. **时机**：等第二次吞吐观察窗口结束再动（manager 起了一个 ≥30 分钟的只读观察 subagent，正在测当前相调度的基线；在它跑完前改相调度会把它污染成混合体，报告作废）。manager 完成时通知。
+2. **一键回退开关**（配置/flag），不是重写调度——探索的定义就是「可能要退回来」。
+3. **对照量 = `__OVERHEAD__` 的相耗时**（绿轮的 `serial_phase_ms + lowconc_phase_ms` 之和，前后各 ≥5 轮），**不是整轮墙钟**（红轮污染极重：round 124/125/126 = 526s/559s/1063s，round 126 墙钟与 CPU 双双 2× 成因未知）。
+4. **判据跑之前写死，前后对照非绝对阈值**（硬规则4推论：成本结构未知前不设阈值）：
+   - 收益侧：serial+lowconc 合计相耗时下降 ≥30%（预期 331→177）。
+   - 代价侧：① cancelled 计数不上升 ② load-sensitive 族（real-install，今晚最大失败族 123 条）红率不上升。
+   - 任一代价侧上升 ⇒ 立即回退，并把读数记进 tick-log（不是「感觉变差了」）。
+5. **一次只上一个变量**——不同时改 `DEFAULT_SERIAL_CONCURRENCY` / `DEFAULT_LOWCONC_CONCURRENCY` 那两个 6。（那两处注释漂移 :1354/:1356 写 "=2 / =3" 而代码是 6——可顺手修注释，不改值。）
+6. **basename 归一**：`__PERFILE__` 按 basename 聚合（manager 自捕：按全路径聚合得 1179 个「文件」、真值 ~360——同一测试文件在多个 verify-round worktree 路径下各算一条）。前后对照不归一 ⇒ 可能得出相反结论。
+7. **CPU steal 混杂变量控制（manager 2026-08-13 第二次观察报告 + 同日撤回修正）**：宿主级 steal 升至 **48%**（`/proc/stat` jiffies 差分 n=79 中位 48%、mpstat 39%、30 分钟持续；systemd-detect-virt=kvm · 16 vCPU 多租户争抢，本仓代码修不了）。**方案 A 前后对照前各记一次 steal（`/proc/stat` 差分，≥2 工具），若前后 steal 不在同一量级，该次对照作废重做**。**⚠️ 撤回「±500s / 噪声淹没信号」**（manager 2026-08-13 撤：±500s 取自红轮极差、混入已确认污染轮 129 与推断轮 126/128——做对照须用绿轮）：**绿轮真实分布（n=68，按 startedAt 过滤）中位 440s · p10 383 · p90 559 · 极差 621 ⇒ p10–p90 宽 176s ≈ ±88s**。修正后判断：−154s 与自然波动同量级但**更大**；≥5 轮取中位数的标准误 ≈ 176/√5/2 ≈ 39s ⇒ **154s 效应可检出**。steal 列仍须记（p90=559 vs 中位 440，上尾真实存在）——记它是为了分辨「改动没用 vs 被宿主吃掉」，不是因为它淹没信号。
+8. **steal 中位数列（manager 2026-08-13 追加，③比上一条更强）**：空闲基线 steal 就有 **24%**（低负载自然实验：三个 5s 窗 24.1/25.0/23.9%，idle≈63%、load1≈3.3、真 runner=1），高负载 48%——**我们负载会【放大】它但不是成因**（与 burst/entitlement 限流形态一致；"credit 耗尽 vs 宿主超卖" 仍未区分，**不得写成已知结论**）。⇒ 前后对照表**除前后各测一点外，再给 ≥5 轮每轮的 steal 中位数加一列**——将来对照失败能分辨「改动没用」还是「被宿主吃掉」。空闲 24% ≫ 首报 16.2%（高约 50%）⇒ 宿主争抢本身在恶化。
+
+## Plan
+
+1. 等吞吐观察窗口结束（manager 通知）→ 落一键回退开关（配置/flag）→ 跑两相重叠。
+2. 前后各取 ≥5 绿轮：`serial_phase_ms + lowconc_phase_ms` 合计相耗时（basename 归一）。
+3. 对照判据④：收益 ≥30% + 代价侧不升；任一升 ⇒ 回退 + 记读数。
+4. 一次上一个变量。
+
+## AC
+
+- [x] AC1: 一键回退开关落地（配置/flag，非重写调度）——`QUAY_PHASE_OVERLAP=1`，默认 0=原顺序，清 env 即回退
+- [x] AC2: 前后对照（记录量）——绿轮 serial+lowconc 合计相耗时（basename 归一）；**after 读数未取**（人裁定降为记录量、不追加轮次，见下方降级注与 Closure），before 基线 = round 157 绿轮（serial 102068 + lowconc 63009 = 165077ms，顺序路径与改前字节一致）
+
+**降为记录量（人 2026-08-13 裁定「可以放松。suite 耗时的改进我已认可」，覆盖 manager 上一条建议）。**历史说明**：曾要求差值可判（先例 gap-suite-concurrency-4-vs-8-measurement：20–63s 噪声带内 34s 判不可判定；叠加全局轮争抢分辨力更低）——当时为拿可判结论有「排静默窗口 / 明写不可判定」二选一；人认可改进后不再需要可判结论，降为记录量**：贴读数即可，**不要求差值可判**；**不得因「差值落在噪声带内」而判任务不成立**（改进已被人认可，不需测量证明）；**不为此追加轮次**（「各 ≥5 轮」采样量可放宽）。**不删测量**——读数仍贴，只是不再决定任务成败（删掉会让后来的人以为从未测过；降为记录量留下「测过、当时不可判」的痕迹）。**后果（记一次）**：相级耗时回归（某一相变慢）不再有判据能抓到——全轮墙钟仍逐轮记在 verification-round.jsonl，粗粒度回归还看得见，丢的是「哪一相变慢」的归因；人已认可当前改进，这是接受的代价，不需要补偿机制。- [x] AC3: 判据跑前写死（任务体约束④，收益 ≥30% / 代价侧不升）+ 对照按记录量收——人已认可改进、不要求差值可判、不追加轮次（after 未取，见 Closure）
+- [x] AC4: 一次一个变量（并发值未动，只加调度开关）；`:1354/:1356` 注释漂移**实测不存在**（代码 2/3 与注释一致；任务体原引用基于一个已不存在的 6 值状态），无可修
+- [x] AC5: 既有测试全绿；`--for-task` scoped 门绿（merge ab689582 信息：scoped 136/0 绿；round 157 全量绿验）
+
+## Definition of Done
+
+- [x] AC1–AC5 全部勾上（AC2/AC3 按记录量收，AC5 由 scoped 136/0 + round 157 全量绿验）
+- [x] 前后对照样例贴出（before 基线 = round 157 绿轮：serial 102068 + lowconc 63009 = 165077ms；after 未取，见 Closure）
+- [x] 全量套件绿（round 157 验 ab689582 所在树，全量绿）
+
+## Touches
+
+- scripts/test.sh（相调度开关 + `QUAY_PHASE_OVERLAP` 一键回退开关）
+- plugin/scripts/full-suite-runner.ts（verification-round 记 `phase_overlap: true`；__OVERHEAD__ 相耗时按需）
+- plugin/scripts/measure-trend-check.ts（约束 6 的 `__PERFILE__` 归一——worktree-root 剥离 → repo-root-relative，非纯 basename，见下）
+- plugin/test/measure-trend-check.test.mjs（归一测试）
+- tasks/gap-phase-overlap-two-phase-parallel-exploration.md（自身）
+
+## Exploration setup（2026-08-13 提交，机制已落地；测量待吞吐观察窗口结束）
+
+- **AC1 已落地**：`QUAY_PHASE_OVERLAP=1`（env，默认 0=原顺序）在 FULL-SUITE 路径把 serial+lowconc 并行跑
+  （各用各自的 `$SERIAL_CONCURRENCY` / `$LOWCONC_CONCURRENCY`，只改调度不改值）。清掉该 env 即一键回退。
+- **AC4 现状核证（任务体原文的 :1354/:1356 漂移是 STALE 的）**：当前代码 `SERIAL_CONCURRENCY:-2` /
+  `LOWCONC_CONCURRENCY:-3`，注释同步写 2/3 —— **没有漂移可修**；任务体「那两个 6」与代码不符（代码是 2/3）。
+  并发值一律未动（一次一个变量成立）。
+- **约束 6 basename 归一**：在 `measure-trend-check.ts` 实现为**剥离 `quay-worktrees/<task-id>/` 前缀 →
+  repo-root-relative**，**不是纯 basename**——因为 measure-suite-reporter.mjs:156 故意用全路径防
+  `cli.test.mjs` 跨包碰撞（packages/quay vs packages/quay-github）。剥 worktree 前缀达到同一目标
+  （同一物理文件跨轮只算一条：1179 → ~360）且不引入 basename 碰撞。已有测试锁行为。
+- **AC2/AC3 对照（manager 2026-08-13 裁定窗口结束，记录量收）**：before 基线已取（round 157 绿轮
+  serial 102068 + lowconc 63009 = 165077ms，顺序路径与改前字节一致）；**after 读数未取**（记录量、
+  不追加轮次，见 Closure）。overlap 路径下 `serial_phase_ms`=合并窗口、`lowconc_phase_ms`=0
+  （subsumed，test.sh 注释写明），verification-round 记 `phase_overlap: true` 供将来对照区分。
+
+## Closure（2026-08-13，manager 裁定观察窗口结束）
+
+**窗口结束（manager 按任务体 :85 授权通知）**：观察窗口存在的唯一目的是攒够轮数拿一个可判的差值；
+人的裁定已「认可 suite 耗时改进、不要求差值可判、不追加轮次」，窗口的目的已被取消 ⇒ 关闭。
+
+- **AC2 按记录量收**：before 基线 = round 157 绿轮（serial 102068 + lowconc 63009 = 165077ms，
+  顺序路径，`phase_overlap: None`）；merge ab689582 确认顺序路径相耗时与改前**字节一致**
+  （比较量不被本次提交污染）。
+- **⚠️ after 读数未取及其理由**：overlap 路径的 after 读数**未取**——人裁定降为记录量、不追加轮次，
+  故不再专门跑 after 轮。**读者不应以为前后对照做过**。将来自然产生的绿轮（`phase_overlap: true`）
+  可追加 after 读数（记录量，可追加，不是欠账）。
+- **AC3 判据跑前已写死**（任务体约束④，收益 ≥30% / 代价侧不升）；对照部分按记录量收（人已认可，
+  不需测量证明；差值落在噪声带内也不判任务不成立）。
+- **AC5**：scoped 136/0 绿（merge ab689582）+ round 157 全量绿。
+- **DoD 全量套件绿**：round 157 验证 ab689582 所在树，全量绿（4308 pass / 0 fail 档）。
+- **2-slot 连锁**：本任务翻 done ⇒ 其 Touches 不再占互斥团 ⇒ `gap-single-flight-lock-2-slot-concurrent-suites`
+  解锁（其 blocking 分析见该任务）。

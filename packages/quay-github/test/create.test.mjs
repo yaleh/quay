@@ -1,4 +1,15 @@
 // @test-group product
+// @load-sensitive child-spawn
+// @load-sensitive-entry 2026-08-09 fake-gh subprocess HUNG 14:41 under full-suite load (round-202); suite spawn contention
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this test spawns a
+// REAL fake-gh subprocess over PATH and drives a full create() roundtrip (multiple synchronous gh-api
+// subprocess spawns per test case). It passed solo 4/4 (1.9s) but HUNG under full-suite concurrency
+// (round-202 2026-08-09: 904209 ms file duration — 15-min ceiling, passed=false; the fake-gh subprocess
+// `node /tmp/quay-github-fake-gh-create-*/gh api repos/o/r` never returned for 14:41) — suite-level
+// subprocess spawn contention, NOT CPU load (gap-create-test-mjs-suite-context-hang-after-create-mcp-fix).
+// Routed OUT of the concurrent main body to the concurrency-1 serial phase (same real-subprocess family
+// as create-mcp / npm-pack-e2e / install-config-driven-e2e) and carries the machine-readable `heavy`
+// family marker. The create-path assertions are UNCHANGED — solo must stay 4/4 (AC3).
 // DIR-041 (M57): RED->GREEN regression tests for the real issue CREATE path
 // -- the last remaining write-surface gap this milestone closes (title/body/
 // status/labels/parent/children write were ALL already implemented before

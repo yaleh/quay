@@ -9,6 +9,7 @@ import { makeTestPassGate } from "./test-pass.ts";
 import { makeCoverageFloorGate } from "./coverage-floor.ts";
 import { makeRedGreenGate } from "./red-green.ts";
 import { makeDocumentContractGate } from "./document-contract.ts";
+import { makeGoalGate } from "./goal.ts";
 
 export {
   makeIt0Gate,
@@ -18,6 +19,7 @@ export {
   makeCoverageFloorGate,
   makeRedGreenGate,
   makeDocumentContractGate,
+  makeGoalGate,
 };
 
 // Dispatch map for loadWorkspaceGates — maps gates.yml `type` string -> factory.

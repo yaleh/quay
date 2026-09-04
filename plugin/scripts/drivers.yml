@@ -1,0 +1,26 @@
+# plugin/scripts/drivers.yml — 声明式 driver 配置（git 版本化 · 人写 · 重启生效）。
+# AC155 (gap-ac155-config-merge-control-state-split-event-polling)：并发 cap / 轮询间隔 / 协调地板 的单一真相源。
+#
+# ⛔ 与运行时控制态的分界（AC155 AC2）：控制态（.quay/worker-control.json / .quay/promotion-control.json）
+# 是机器热写、gitignored，绝不并进本文件——机器改人的源文件 = CLAUDE.md 11b 同族（未提交改动正在影响生产、
+# 一次 git checkout 就静默回退）。
+#
+# 消费方（单一加载入口）：plugin/scripts/driver-config.ts 的 loadDriverConfig / driverCap。
+# 本文件取代旧的三份「单一真相源」：CAP_DEFAULT=5（promotion 字面量）/ resolveConcurrency（worker 读
+# QUAY_MAX_TASK_SUBAGENTS env）/ FIXED_EFFECTIVE_CAP=5（cap-from-gate 字面量）。
+version: 1
+
+kinds:
+  promotion:
+    cap: 5               # 并发 cap（promotion 的 ready-pool --cap；AC48 后 cap 不闸晋升，仍参与 floor/disjointness）
+    interval_ms: 30000   # 轮间隔（round heartbeat 节奏，SPEC §5.5 定时器地板）
+  worker:
+    cap: 5               # 并发 cap（worker 常驻选择环的存活 worker 上限）
+    interval_ms: 30000   # 无在飞 worker 且瞬时 WAIT 时的轮询间隔
+    reconcile_interval_secs: 300  # 协调地板（SPEC §5.5：至少每 N 秒协调一次，边沿事件全丢也「慢但正确」而非静默停摆）
+  outer:
+    cap: 5               # ⛔ outer 例程型 kind 无并发概念（例程是「读→报」非「spawn 执行者」）；字段仅为齐整
+    interval_ms: 30000   # 轮询节奏（= outer tick 例程的 round heartbeat；生产由 --interval 覆盖为 ~20min）
+  quality:
+    cap: 5               # ⛔ quality 例程型 kind 无并发概念（例程是「读→报」非「spawn 执行者」）；字段仅为齐整
+    interval_ms: 30000   # 轮询节奏（B15/B17 两条例程的 round heartbeat；生产由 --interval 覆盖）

@@ -1,0 +1,69 @@
+---
+id: gap-suite-bucket-reattribution-untracked-regression
+title: suite-bucket-reattribution.jsonl 被误分类为运行时产物去跟踪——它是 AC121 的 230 行判定记录（数据资产），去跟踪后每个 worktree suite 必红（4 次红实证）
+status: done
+labels:
+  - gap
+  - defect
+  - delivery-critical
+parent: null
+children: []
+extra:
+  schema: execution
+---
+**type:** execution
+
+## Proposal
+
+`gap-quay-runtime-files-tracked-but-shouldnt`（我立案，已 done）的 AC1 把 `.quay/suite-bucket-reattribution.jsonl` 误列进「5 个明显运行时产物」→ `git rm --cached` + `.gitignore:286` 去跟踪。**这是误分类**——该文件是 AC121 的一次性判定记录（数据资产），不是运行时产物。我读码/读 git 复核（manager 报，非采信）：
+
+- `git show 70ea6af7:.quay/suite-bucket-reattribution.jsonl` 完整取回 **230 行**，每行 `{file, judgment, mechanism, signal}`——AC121 任务体自己写「判定落机械可核记录」（`gap-ac121:31`）；
+- `suite-bucket-select.ts:45/:144` 把它当**输入读**，测试 `suite-bucket-select.test.mjs:52-54` 断言 `reattr.size > 0`（"the reattribution map must be present in this repo"）；
+- 全仓搜**零生产者**（负控制：同搜法对 verification-round.jsonl 得 3 个生产者 ⇒ 搜法有效）——它是 commit 里的一次性数据，非运行时写；
+- 去跟踪后主检出 + 各 worktree 均无此文件 ⇒ `git worktree add` 出来的新 worktree 结构上拿不到 ⇒ **每个 worktree 的 suite 必红**。
+
+**影响（manager 报，git 实读）**：01:14 首次失败至今，13 次 fan-in suite 启动 8 次 fail≥1，其中 `suite-bucket-select.test.mjs:52` 4 次。这是「跑了但不落地」的真因——不是没跑、不是锁、不是 ff，是 develop 上一条公共红、每个 worktree merge develop 后都继承。**这是我立案的 gap-quay-runtime-files-tracked-but-shouldnt 的回归，我认账**：分类「明显运行时产物 vs 数据资产」时没查该文件的读取侧（谁把它当输入读）。
+
+## Plan
+
+恢复（manager 定位，落笔方复核）：
+1. `git show 70ea6af7:.quay/suite-bucket-reattribution.jsonl` 取回 230 行 → 写回 `.quay/suite-bucket-reattribution.jsonl` + `git add` 重新跟踪；
+2. 撤掉 `.gitignore:286` 那条 `**/.quay/suite-bucket-reattribution.jsonl`；
+3. 修正 `gap-quay-runtime-files-tracked-but-shouldnt` 的 AC1——该文件从「5 个明显运行时产物」移除，标注「数据资产（AC121 判定记录），误分类已更正」。
+
+## Acceptance Criteria
+
+- [x] AC1（能取假，文件恢复跟踪）：`.quay/suite-bucket-reattribution.jsonl` 重新 tracked（230 行在、`git ls-files` 命中、`.gitignore:286` 移除）；（⛔ 仍缺失/仍 gitignored ⇒ 假）。
+- [x] AC2（能取假，负控制 suite 绿）：恢复后 `suite-bucket-select.test.mjs:52` 的 `reattr.size > 0` 断言过（worktree 能拿到该文件）；（⛔ 仍红 ⇒ 假）。
+- [x] AC3（能取假，修正原任务）：`gap-quay-runtime-files-tracked-but-shouldnt` 的 AC1 修正（该文件从「5 个明显运行时产物」移除 + 标注数据资产误分类）；（⛔ 仍列在运行时产物 ⇒ 假）。
+
+## Definition of Done
+
+文件恢复跟踪 + gitignore 撤除 + 原任务 AC1 修正；AC1-AC3 全勾；suite-bucket-select.test.mjs 不再红。
+
+## Touches
+
+- .quay/suite-bucket-reattribution.jsonl（git show 70ea6af7 恢复 + 重新跟踪）
+- .gitignore（:286 撤除 suite-bucket-reattribution 忽略）
+- tasks/gap-quay-runtime-files-tracked-but-shouldnt.md（AC1 修正误分类）
+- tasks/gap-suite-bucket-reattribution-untracked-regression.md（自身）
+
+## Evidence（inner 落盘 2026-08-26，核实已完成）
+
+> **实现已 out-of-band 落地**：恢复跟踪（`32364a14` fix: 恢复 `.quay/suite-bucket-reattribution.jsonl` 跟踪）+ 原任务 AC1 更正（`a5fe741f`）在本任务派发前已由直接提交上 develop。本 Evidence 是**核实 + 负控制 suite 验证**，非重新恢复——三处 Touches（非自身）均已 land，核对如下。
+
+### AC1 — 文件恢复跟踪
+
+worktree 内逐项核验：
+- `.quay/suite-bucket-reattribution.jsonl` **tracked**：`git ls-files --error-unmatch` 命中；
+- **230 行**在盘（`wc -l` = 230），内容与 `git show 70ea6af7:.quay/suite-bucket-reattribution.jsonl` **逐字节一致**（`diff` 空输出）；
+- `.gitignore` 已无 `**/.quay/suite-bucket-reattribution.jsonl` 字面忽略行（仅余 :280-287 更正注释块）；`git check-ignore` 报「not ignored」。
+
+### AC2 — 负控制 suite 绿
+
+worktree 内 `bash scripts/test.sh plugin/test/suite-bucket-select.test.mjs`：**10 tests / 10 pass / 0 fail**。
+关键断言 `effectiveBucketSet applies the AC121 reattribution override as a singleton`（含 `reattr.size > 0`，test.mjs:54）通过——worktree 能拿到该文件。
+
+### AC3 — 原任务 AC1 修正
+
+`tasks/gap-quay-runtime-files-tracked-but-shouldnt.md`：:15 误分类更正注、:22「共 4 个」（原「共 5 个」含该文件、已更正为数据资产并恢复跟踪）、:33 AC1 复选框 `[x]` + 5→4 标注——三处均已在 develop（`a5fe741f`）。

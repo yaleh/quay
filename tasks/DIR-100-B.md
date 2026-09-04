@@ -1,7 +1,7 @@
 ---
 id: DIR-100-B
 title: "Per-entry validation: gate entries missing required fields emit diagnostics"
-status: todo
+status: done
 labels:
   - directive
   - human-steered
@@ -109,6 +109,9 @@ Standard inherited-core DoD clauses apply.
 
 1. Does every missing-required-field case (all 5 types) emit a diagnostic, not just the
    it0-script case the original Proposal covered?
+
+**needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：feature landed: per-entry required-field validation (it0/adr/fixed/testPass/coverageFloor/redGreen) in packages/quay/src/gate/config/loader.ts (8 validation markers) + gate-diagnostics.test.mjs RED/GREEN; commit M227.）**
+全文见 git 历史（`git log -p -- tasks/DIR-100-B.md`）。
 
 ## Touches
 

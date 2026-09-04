@@ -252,11 +252,11 @@ pass on both mirrors? A finding against any of these three is material.
 
 ### Real-landing verification
 
-- [ ] `scripts/test.sh experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs` exits 0, 83/83 GREEN
-- [ ] `scripts/test.sh plugin/test/prepare-admission-check.test.mjs` exits 0, 83/83 GREEN
-- [ ] `diff experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts plugin/scripts/prepare-admission-check.ts` is empty (script mirrors byte-identical)
-- [ ] `diff experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs plugin/test/prepare-admission-check.test.mjs` is empty (test mirrors byte-identical)
-- [ ] `git diff --stat 1f36910f` shows zero changes to `experiments/` or `plugin/` paths (no code changes)
-- [ ] Task `gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss` `## Plan` references `docs/plans/M247-gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss.md`
-- [ ] Task status transitions to `ready` (the accepted-risk decision IS the completion)
+- [x] `scripts/test.sh experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs` exits 0, 83/83 GREEN (Build-pass verified 2026-08-05, `QUAY_TEST_SKIP_STATIC_CHECKS=1`)
+- [x] `scripts/test.sh plugin/test/prepare-admission-check.test.mjs` exits 0, 83/83 GREEN (Build-pass verified 2026-08-05, `QUAY_TEST_SKIP_STATIC_CHECKS=1`)
+- [x] `diff experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts plugin/scripts/prepare-admission-check.ts` is empty (script mirrors byte-identical)
+- [x] `diff experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs plugin/test/prepare-admission-check.test.mjs` is empty (test mirrors byte-identical)
+- [x] `git diff --stat 1f36910f` shows zero changes to `experiments/` or `plugin/` paths (no code changes)
+- [x] Task `gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss` `## Plan` references `docs/plans/M247-gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss.md`
+- [x] Task status transitions to `ready` (the accepted-risk decision IS the completion)
 - [ ] Independent audit (DoD clause) confirms no refutation of the accepted-risk reasoning

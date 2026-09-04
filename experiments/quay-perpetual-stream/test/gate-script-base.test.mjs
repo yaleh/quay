@@ -281,10 +281,12 @@ test("readFrontmatter: handles CRLF line endings", () => {
   fs.rmSync(d, { recursive: true });
 });
 
-test("readFrontmatter: missing file throws", () => {
-  assert.throws(
-    () => readFrontmatter("/nonexistent/path/task.md"),
-  );
+test("readFrontmatter: missing file returns null (ENOENT during scan = race, not a crash)", () => {
+  assert.equal(readFrontmatter("/nonexistent/path/task.md"), null);
+});
+
+test("readFrontmatter: non-ENOENT read errors still throw", () => {
+  assert.throws(() => readFrontmatter("/"));
 });
 
 test("readFrontmatter: list values strip surrounding quotes", () => {

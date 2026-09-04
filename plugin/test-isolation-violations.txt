@@ -24,8 +24,10 @@
 #                                   (2026-08-03): every variable-assigned mkdtemp result must be
 #                                   covered by a cleanup path (direct rmSync/rm/after/finally, a
 #                                   carrier-array + after-loop, or a helper-return captured into a
-#                                   cleaned variable). NEVER matches /tmp/claude-* (session data) /
-#                                   /tmp/quay-wt-* (in-use worktrees) prefixes (AC6).
+#                                   cleaned variable). NEVER matches /tmp/claude-* (session data)
+#                                   prefixes (AC6); the quay-wt-* worktree exemption was removed
+#                                   (worktrees are git worktree add at loop.worktree_root, never
+#                                   mkdtemp'd — gap-the-shipped-tick-doc...).
 #   R7 live-data-dir-write          never WRITE into the repo's LIVE product-data directories
 #                                   (tasks/, .quay/, .workflow-events/, adr/) via a NON-per-run-
 #                                   unique root (process.cwd()/__dirname/import.meta — the shared
@@ -66,6 +68,17 @@
 # REPO_ROOT/tmp, relying on the gitignored tmp/ dir). 47 -> 44: ALL THREE were FIXED to os.tmpdir()
 # roots, so no R8 entry remains. The `# baseline-count` ceiling is permanent and unchanged at 51.
 #
+# Backlog measurement (2026-08-08, gap-test-isolation-backlog-44-violations-unmeasured AC1/AC2): the
+# 44-entry backlog was MEASURED and confirmed against the live scan — `test-isolation-check.ts --list`
+# reports exactly these 44 (fixed-path-write=12 / shared-build-artifact-write=1 / spawns-test-sh=3 /
+# process-exit-1=7 / mkdtemp-no-cleanup=21 / live-data-dir-write=0 / shared-root-mkdtemp=0), the same
+# count the 2026-08-06 red-window triage hand-diffed from a rotated-out round1 log. The shrink-only
+# ratchet was empirically re-verified: a NEW violation (a temporary zz-* fixture added to the glob)
+# makes the check exit 1 with the "no entry" C1 failure; the existing 44 backlog keeps the check at
+# exit 0. runner-grouping.test.mjs:spawns-test-sh is the nested-spawn concurrent-trigger instance,
+# recognized as KNOWN-LOAD-SENSITIVE (kind nested-spawn) in red-window triage (cross-annotated with
+# gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage, AC5).
+#
 # The scanner (plugin/scripts/test-isolation-check.ts) REPORTS every current violation on every
 # scripts/test.sh run but does NOT block on the ones listed here (AC6, "报出而不阻断"). This list
 # is the SHRINK-ONLY known-violation baseline (AC5): the check FAILS if
@@ -84,10 +97,7 @@
 # MACHINE-READABLE RATCHET CEILING parsed by the check — the list can NEVER exceed this many entries,
 # even at a clean commit. It is permanent: it stays 51 even as entries are removed.
 # Format: <repo-root-relative-test-file>:<rule-key>  ('#' comments and blanks ignored). Sorted.
-experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs:mkdtemp-no-cleanup
-experiments/quay-perpetual-stream/test/drain-dispose-corruption-check.test.mjs:mkdtemp-no-cleanup
 experiments/quay-perpetual-stream/test/vmeta-lag-check.test.mjs:fixed-path-write
-packages/quay-backlog/test/backlog-client.test.mjs:mkdtemp-no-cleanup
 packages/quay-native/test/adversarial-eval.test.mjs:fixed-path-write
 packages/quay-native/test/adversarial-eval.test.mjs:process-exit-1
 packages/quay-native/test/cas-write.test.mjs:fixed-path-write
@@ -96,7 +106,6 @@ packages/quay-native/test/compound-gate-recursive.test.mjs:fixed-path-write
 packages/quay-native/test/compound-gate.test.mjs:fixed-path-write
 packages/quay-native/test/create-validation.test.mjs:fixed-path-write
 packages/quay-native/test/create-validation.test.mjs:process-exit-1
-packages/quay-native/test/document-cli.test.mjs:mkdtemp-no-cleanup
 packages/quay-native/test/edit-validation.test.mjs:fixed-path-write
 packages/quay-native/test/edit-validation.test.mjs:process-exit-1
 packages/quay-native/test/gate-checked-state.test.mjs:fixed-path-write
@@ -106,25 +115,9 @@ packages/quay-native/test/lock.test.mjs:fixed-path-write
 packages/quay-native/test/lock.test.mjs:process-exit-1
 packages/quay-native/test/yaml-frontmatter-colon.test.mjs:fixed-path-write
 packages/quay-native/test/yaml-frontmatter-colon.test.mjs:process-exit-1
-packages/quay/test/cli-adr.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/cli-edit-parity-conformance.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/cli-entry.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/cli-migrate.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/delivery-standalone-smoke-gate.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/dir022-remaining-gates.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/dir032-audit-independence.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/document-gate.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/dod-gate-set.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/frontmatter-store-base.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/gap-cli-gate-enforcement.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs:process-exit-1
-packages/quay/test/gate-list-verbose.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/it0-gates.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/mcp-config-validate.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/provider-abi-conformance.test.mjs:mkdtemp-no-cleanup
 plugin/test/plugin-packaging.test.mjs:shared-build-artifact-write
-plugin/test/runner-grouping.test.mjs:spawns-test-sh
-plugin/test/runtime-usage-inventory.test.mjs:mkdtemp-no-cleanup
+plugin/test/runner-grouping-flags-only.test.mjs:spawns-test-sh
+plugin/test/runner-grouping-list-groups.test.mjs:spawns-test-sh
+plugin/test/runner-grouping-serial-anti-stomp.test.mjs:spawns-test-sh
 plugin/test/select-tests-for-touches.test.mjs:spawns-test-sh
 plugin/test/test-coverage-check.test.mjs:spawns-test-sh

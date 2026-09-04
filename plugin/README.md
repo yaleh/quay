@@ -47,10 +47,14 @@ The `quay:init` skill copies methodology assets from the plugin into the current
 /quay:init --all           # Copy all assets (default)
 /quay:init --workflows     # Copy workflows only
 /quay:init --agents        # Copy agent types only
-/quay:init --gate-scripts  # Copy gate scripts only
 /quay:init --force         # Overwrite on conflict
 /quay:init --dry-run       # Preview only
 ```
+
+The former `--gate-scripts` category is **RETIRED** (2026-08-05): the classic-pipeline era gate
+scripts it laid into `scripts/gates/` had no callers in target projects — dead weight shipped to
+every install (layered retirement; the files remain in the plugin tree but are not laid down or
+synced). The live fast-mode gate scripts ship with `--loop` via `plugin/scripts/`.
 
 **Source → target mapping:**
 
@@ -58,7 +62,6 @@ The `quay:init` skill copies methodology assets from the plugin into the current
 |---|---|
 | `workflows/*.js` | `.claude/workflows/` |
 | `agents/*.md` | `.claude/agents/` |
-| `gate-scripts/*.sh`, `gate-scripts/*.ts` | `scripts/gates/` |
 
 Behavior: idempotent (skips identical files), conflict-aware (reports but does not overwrite without `--force`).
 
@@ -71,21 +74,13 @@ Behavior: idempotent (skips identical files), conflict-aware (reports but does n
   (execute-milestone.js and prepare-milestone.js were retired with the classic milestone loop — ADR-022 /
   gap-retire-the-prepare-execute-pipeline-cluster)
 
-### Gate scripts (`plugin/gate-scripts/`)
+### Retired gate scripts (`plugin/gate-scripts/` — RETIRED, not distributed)
 
-- `it0-ceiling-check.sh` — milestone ceiling enforcement
-- `it0-dod-check.sh` — DoD meta-enforcer
-- `it0-gate-hash-check.sh` — gate hash integrity
-- `it0-dogfood-evidence-gate.sh` — dogfood evidence
-- `it0-ceiling-line-budget-check.sh` — line budget enforcement
-- `it0-impl-row-check.sh` — implementation row verification
-- `it0-dashboard-line-budget-check.sh` — dashboard line budget
-- `it0-backlog-projection-check.sh` — backlog projection
-- `vmeta-lag-check.sh` — value meta lag detection
-- `tree-hygiene-check.sh` — repository tree hygiene
-- `worktree-branch-hygiene-check.sh` — worktree branch hygiene
-- `audit-independence-check.sh` — audit independence verification
-- `drain-scheduler.ts` — DRAIN classifier
+The classic-pipeline era gate scripts in `plugin/gate-scripts/` are **RETIRED** (2026-08-05):
+they were laid into `scripts/gates/` in target projects but nothing called them (dead weight).
+They remain in the tree as a historical artifact (分层退休 / layered retirement) but are
+**no longer laid down by quay-init and no longer synced by sync.sh**. The live
+fast-mode gate scripts ship under `plugin/scripts/` via the `--loop` category instead.
 
 ### Agent types (`plugin/agents/`)
 
@@ -110,4 +105,4 @@ Per the Layer A/B/C decomposition, the following are intentionally NOT distribut
 - `OUTER-LOOP.md` — delivered as the `quay:loop-driver` skill
 - `inherited-core.md` — each domain authors its own methodology
 - `dashboard.md` / `backlog.md` — generated views, not source files
-- Experiments directory contents beyond the gate scripts listed above
+- Experiments directory contents (the canonical gate-script sources live in `experiments/`, never shipped from there)

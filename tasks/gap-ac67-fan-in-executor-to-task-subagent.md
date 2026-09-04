@@ -1,0 +1,132 @@
+---
+id: gap-ac67-fan-in-executor-to-task-subagent
+title: AC67 fan-in 的执行者必须落到任务 subagent——AC62 搬了锁没搬执行者（人追问触发）
+status: done
+labels:
+  - gap
+  - mechanism
+parent: null
+children: []
+extra:
+  schema: execution
+depends_on:
+  - gap-ac62-fan-in-ff-merge-lock-protocol
+---
+
+**type:** execution
+
+## Proposal
+
+> **止损（2026-08-14 04:1xZ，人 提活行为缺陷两义务：修机制+止损）：需要 + 当轮可做。** inner 判断「能，现在做」——无锁段（rebase + ts-typecheck + scoped + 全量 suite + doc 检查，全在任务 worktree 内）挪 subagent，ff 留主线程；不依赖 AC62（无锁段三步全由 develop 现有机件构成：git merge 内置 / fan-in-ts-typecheck-gate 在 develop / scripts/test.sh+--static-checks-doc 在 develop；fan-in-ff-merge.sh 只服务持锁段，止损不动它）。在飞任务保持现有流程不中途换执行者（避免半新半旧），**从 AC62 fan-in 起**改走 subagent 无锁段。
+> **止损判据（manager 2026-08-14 04:1xZ，4b 修正——基线 phase 是自述量，换标法即同形）**：**止损生效 ⇔ 无锁段三步（`git merge develop` / 全量 suite / `--static-checks-doc`）的 Bash 调用出现在 inner 的 `subagents/agent-*.jsonl` 里，且【不再】出现在其主 `<session>.jsonl` 里。** 读法：`ls -S <session>/subagents/agent-*.jsonl` 定位 → `meta-cc inspect_session_files --files <显式路径>`（`query_session_content` 不递归 subagents，CLAUDE.md 硬规则① 已记）。**这个量不由 inner 产生，它停摆时不会跟着停止更新 ⇒ 满足 4b**（基线 phase 由 inner 自写，止损做了/只是改标法在此量上同形——循环论证，作废）。**且它是 AC67 判据2 的现成弱化落点**：判据2 要「ff 记录加 agent 标识 ≠ 主会话」，止损版用「无锁段 agent 标识 ≠ 主会话」的同一判据弱化形式，不需要等 `fan-in-ff-merge.sh`（无锁段本就不经过它）。基线（manager）：近 40 轮 fan-in 族 68% / 全历史 27%（此基线仅参考，不作判据——判据是 transcript 落点）。
+
+> **双副本同改（outer 裁定 28412b95/AC73 判据4，2026-08-14）**：**AC67 落地 A6 必须两份同改**（`orchestration/` + `plugin/loop/`），否则 drift-check 红。outer 不在 develop 上补（避免撞 ff-only 回退），由本任务在任务分支内把 `plugin/loop/fast-mode-tick-core.md` 补进 Touches 并直改 shipped 副本；`orchestration/` 副本按 C17 由外层按同一 A6 行落盘（本任务给出逐字改法建议）。
+
+> **重试范围（manager 2026-08-14 追问，落地写明）**：ff 失败（develop 前进了）后的重试 = **整轮**（回无锁段 step 1 `git merge develop` + 全量 suite + doc 检查，~6.5min），不是「只重跑受影响部分」（~30s）。理由：ff 失败唯一原因 = develop 前进了，subagent 的 worktree 必须与【新的 develop 头】重新合并验证——部分重跑无法知道新 develop 提交影响了哪些测试，只有全量 suite 能证明与 develop@新头的兼容性。**重试代价（~6.5min）直接决定活锁是否可忍**——这正是活锁触发条件「同一任务 ff 失败 ≥3 次」的数据面：重试记录（任务 id/第几次/当时 develop 头/时刻/runId/**agentId**）落地即有真数据（近 6h develop 135 提交/中位间隔 100s/suite ~390s ⇒ suite 期间 develop 前进 ~4 次，ff 在当前节奏下几乎必然失败过，重试记录是唯一观测面）。
+
+> **⚠️ 已知张力（manager 2026-08-14 ②，outer 落点裁定 2026-08-14，并进任务体重试 note 附近）——三条两两冲突**：
+> ```
+> 硬规则 11b  改任务体必立即提交（派发读盘不读 git）
+> clean-tree 闸  提交前脏树 ⇒ ff exit 2 硬阻
+> ff-only 协议  任何提交 ⇒ develop 前进 ⇒ 在飞任务 ff 重试
+> ```
+> ⇒ **高频任务体写入（A22 每 tick 晋级）与 fan-in 结构性互斥；重试是协议设计如此非缺陷**。三角落点：任务体管「实现者现在怎么办」（重试=整轮，见上），SPEC §7 由 manager 并进分母更正待办（协议形态长期记录）——两处互补。
+> **定量（outer 2026-08-14 追加）**：**A22 晋级与 fan-in 重叠概率 = suite 时长 / tick 周期 = 390s / ~1020s ≈ 38%**——两个已知常数之比。含义：A22 每 tick 固定发生的供给侧心跳，与 fan-in 重叠概率只取决于「suite/tick」比值，不取决于负载/任务数 ⇒ **单看 A22 一项，每次 fan-in 有 ~38% 概率被打断**（重试一次）。
+
+**AC67（fan-in 的【执行者】必须落到任务 subagent —— AC62 搬了锁，没搬执行者；人 2026-08-14 03:5xZ 追问「inner 任务 subagent 自行 merge 什么时候才能发生」）判据（phase-goal 逐字）**：
+
+**发现经过**：人问「outer 和 inner 仍然在用 fan-in 这样的描述，我们期望的 subagent 自行 merge 什么时候发生」。manager 原以为答案是「AC62 落地那一刻」，核了才知道不是——**AC62 交付的是协议形态，不是执行者位置**。
+
+**证据（三条，位置判定）**：
+```
+① AC62 五条判据 grep -c 'subagent' = 0（零计数已按硬规则②另一半干跑验证谓词有效：CLAUDE.md=6 / fast-mode-tick-core.md=3 ⇒ 真零）
+   五条分别是：协议本体 / 能取假 / 重试记录 / 两锁不交叉 / 测试绿 —— 【没有一条约束"谁执行"】
+② A6 改写后主语仍是「Fan-in 已返回任务」，动作形态 `git -C <wt>`、`<本会话在飞集合>`
+   ⇒ 主线程【从外面】操作别人的 worktree，且任务【已经先返回了】
+③ inner 自报 2026-08-14：「Waiting on cert monitors to drive fan-in per A6」⇒ 主线程等 suite，等完自己做 fan-in
+```
+**而人的裁定原文主语是 subagent**：「**每个 subagent 应在 merge 前**把 develop 最新变更 merge 回自己的 worktree 并执行 suite 测试」（SPEC-fan-in-ff-merge-lock-2026-08-14 §0 逐字）。**⇒ AC62 落地不会让它发生。缺的是这一条。**
+
+**⚠️ 一般形态（值得单记）**：**一个协议可以被完整实现，而它要解决的那个问题原封不动**——协议描述的是【动作序列】，问题出在【谁执行这个序列】，而判据只查了序列。同族于 FAMILY「字面为真且恒真」，但更隐蔽：这里判据不恒真、能取假、也确实红过绿过，**只是它测的维度与目标的维度正交**。⇒ **写判据时要问的不只是"它能取假吗"，还有"它取假的那个维度是目标维度吗"。**
+
+- **判据1（执行者的位置，人 2026-08-14 06:1xZ 追加完整四件）**：**fan-in 完整四件全部在任务 subagent 自己的回合内完成**——① `git merge develop`（无锁段）② 全量 suite（无锁段，人点名淘汰「在主会话跑」）③ doc 检查（无锁段）④ **flip done → ff-only merge（持锁段，人本条追加）**；**subagent 在 ff 成功之后才返回**。flip → merge 顺序：flip 先、merge 带 status（人 06:1xZ：「flip → merge 是可以接受的。flip 要动的记录也要用 git 跟踪，如果 flip 在后则 merge 后还要再修改和 merge」）。inner 主线程的 A6 上**不再有任何 merge/flip/suite 动作** ⇒ A6 的主语从「Fan-in 已返回任务」改掉，`git -C <wt>` 形态消失（subagent 在自己树里直接 `git merge`）。
+- **判据2（能取假·产物是本来就要写的东西）**：`fan-in-ff-merge.sh` 已被 AC62 判据3 要求写记录（任务 id/第几次/develop 头/时刻/runId）⇒ **该记录加一个调用方 agent 标识字段**，**判据 = 该标识 ≠ inner 主会话**。**不是新增打卡动作**，是给一条已经必写的记录加一列（同 AC66 判据2 的 A22 样板）。
+- **判据3（能取假·用真样本，不构造）**：**现行 A6 每一次主线程 fan-in 都是现成的真实缺席样本**（近 6 小时 4 次 merge，SPEC §8 实测）⇒ **回放其中任一次必须报红**。合 D2。
+- **判据4（能取假·读实际执行的命令行，不是标签/措辞；人 2026-08-14 06:1xZ 追加）**：**inner 主会话 `<session-id>.jsonl` 里【不再出现】三类**——(a) 不带 `--for-task` 的 `test.sh` 调用（全量 suite）(b) 对 `tasks/*.md` 的 status 翻转提交（flip）(c) 向 develop 的 merge——**这三类只出现在 `<session-id>/subagents/agent-*.jsonl` 中**。当前读数（manager 实测）：5 个 subagent transcript 共 40 次 test.sh 全带 `--for-task`；主 jsonl `05:17:15Z` `cd …/gap-ac63-… && (bash scripts/test.sh > /tmp/ac63-fullsuite…` 无 `--for-task` ⇒ **当前红**；AC67 落地后翻绿。
+- **⚠️ 不覆盖**：不改 AC62 已落的协议本体（无锁段/持锁段/ff-only/两锁不交叉全部照旧）；不引入队列/优先级/让步（活锁仍观察项，触发写死同任务 ff 失败 ≥3 次）；不要求 subagent 承担 needs-human 之外的路由判断。
+
+**依赖 AC62 落地**（协议先在，才谈交给谁执行）。
+
+**本任务不新建过程纪律型 AC**：负控制沿用 AC49。
+
+## Plan
+
+1. 读 SPEC §0 裁定原文 + AC62 已落协议 + 现行 A6（fast-mode-tick-core.md）。
+2. 判据1：无锁段①②③+持锁段④ 全移到任务 subagent 自己回合内，ff 成功后才返回；A6 主语改掉、`git -C <wt>` 形态消失。
+3. 判据2：`fan-in-ff-merge.sh` 的 ff 记录加调用方 agent 标识字段，判据=标识 ≠ inner 主会话。
+4. 判据3：现行 A6 主线程 fan-in（近 6h 4 次）回放任一次必须报红（真样本，D2）。
+5. 既有测试全绿 + `--for-task` scoped 门绿。
+
+## Acceptance Criteria
+
+- [x] AC1 判据1：无锁段①②③+持锁段④ 全在任务 subagent 自己回合内，ff 成功后才返回；A6 主语改掉、`git -C <wt>` 形态消失。
+- [x] AC2 判据2：fan-in-ff-merge 记录加调用方 agent 标识字段，判据=标识 ≠ inner 主会话（非新增打卡）。
+- [x] AC3 判据3 能取假：现行 A6 主线程 fan-in（近 6h 4 次）回放任一次必须报红——真样本不构造（D2）。
+- [x] AC4 不改 AC62 协议本体（无锁段/持锁段/ff-only/两锁不交叉照旧）；不引入队列/让步。
+- [x] AC5 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC6 **全量 suite 在主会话淘汰（人 2026-08-14 06:1xZ 逐字：「不应当是取消 cert monitor 这个提法后换个名字继续在主会话跑」；manager ⑤ 补判据）**：inner 主会话 `<session-id>.jsonl` 里**不再出现不带 `--for-task` 的 `test.sh` 调用**；该调用只出现在 `<session-id>/subagents/agent-*.jsonl` 中。读法：`ls -t <session>/subagents/agent-*.jsonl` 定位 + 直接读；主会话读 `<session-id>.jsonl`（`query_session_content` 不递归 subagents，负控制已验证）。**为什么防改名**：读的是实际执行的命令行（`bash scripts/test.sh` 七个字），不是任何标签/措辞/条款文本——改名改不掉命令、也改不掉它落在哪个 transcript。**当前读数=红**（manager 实测：inner 主 jsonl 05:17:15Z 逐字 `bash scripts/test.sh` 无 `--for-task` = 全量在主线程；5 个 subagent transcript 40 次调用全带 `--for-task`）。**落地后翻绿才是"淘汰"的证据。**（**⛔ 判定时点=落地后第一次 fan-in（manager ⑥）：本次 fan-in 后主会话 test.sh 无 --for-task 绝迹才翻绿——AC6 勾选为计划态非声称已满足**）
+  - **判定时点（manager ⑥ 2026-08-14 强制，写死为读法 B）**：AC6 **判在 AC67 落地【之后】的第一次 fan-in**，**不判 AC67 自身那次 fan-in**。理由：AC67 落地前 inner 主线程仍按【旧 A6】执行 fan-in ⇒ AC67 自己的全量 suite 必然跑在主会话 ⇒ **判 AC67 自身那次 AC6 结构性恒红（硬规则 4：一个此刻不可能取另一值的量不是测量）**。只有 AC67 落地后（新 A6 在 develop、执行者已搬进 subagent）的下一次 fan-in，transcript 落点才反映实现有没有做到——可红可绿，是测量。
+  - **⚠️ 撤回此前「cert 在跑本身就是全量 suite、若跑在子代理 transcript 里 AC6 已满足」的说法**：当前在跑的 cert 是 inner 主线程为 AC67 起的（按旧 A6），它落在哪与 AC67 的实现无关——拿旧机制产生的量判新机制是循环论证。
+  - **⚠️ 预期（已如实写下）：AC6 落地时 subagent 已按旧判据交付实现（scoped 47/47 已过）⇒ 实现很可能没有搬执行者 ⇒ AC67 落地后的第一次 fan-in 大概率 AC6 红 ⇒ AC67 需要第二遍。这是判据正常工作，不是事故**——若该次红被当成新缺陷去查，先看这条。
+
+## Definition of Done
+
+- [x] fan-in 执行者落到任务 subagent（完整四件：① merge develop ② 全量 suite ③ doc 检查 ④ flip done → ff-only merge；ff 成功后才返回）+ agent 标识记录 + 主线程 fan-in 真样本回放红 + 主会话 transcript 无 (a)(b)(c)。
+- [x] 接线 + 既有测试绿。
+
+## Touches
+
+- orchestration/fast-mode-tick-core.md（A6 主语改掉、`git -C <wt>` 形态消失——C17 外层落盘；本任务给出改法建议）
+- plugin/loop/fast-mode-tick-core.md（A6 双副本同改——AC73 判据4/28412b95：执行核两份都要变，否则 drift-check 红；inner 直改 shipped 副本，outer 落 orchestration 副本时按同一 A6 行）
+- plugin/scripts/fan-in-ff-merge.sh（ff 记录加调用方 agent 标识字段——AC62 已建的脚本；`--agent-id <id>` 写入锁事件 + 重试记录）
+- plugin/scripts/fan-in-ff-executor-check.ts（新检查器——判据1 A6 主语/形态 + 判据2 agent 标识 + 判据3 真样本回放 + 判据4 transcript 落点，能取假）
+- plugin/test/fan-in-ff-executor-check.test.mjs（负控制 fixture——真实旧 A6 / 真实主线程 fan-in 命令回放红 + NOT-EVALUATED；`@test-group serial` 防 16-lane 并发 spawn 脆弱）
+- plugin/scripts/capability-catalog.sh（新检查器入目录声明）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照再生——新脚本入 plugin bundle）
+- tasks/gap-ac67-fan-in-executor-to-task-subagent.md（自身）
+
+## Evidence
+
+- **判据1（AC1，执行者位置）**：`plugin/loop/fast-mode-tick-core.md` A6 已改——主语「Fan-in 已返回任务」→「Fan-in 回到任务 subagent（无锁段+持锁段全在 subagent 自回合内、ff 成功后才返回）」；① `git -C <wt> merge $MERGE_TARGET` → `git merge $MERGE_TARGET`（subagent 已在自身 worktree 内，`git -C <wt>` 形态消失）；③ `cd <wt>` → subagent 在其 worktree 内；持锁段加 `--agent-id <本 subagent 标识>`。`orchestration/` 副本 C17 外层落盘（本任务给出逐字 A6 建议，同 plugin/loop 行）。新检查器 `fan-in-ff-executor-check.ts` 判据1：`judgeA6Line` 对真实旧 A6（主语 + `git -C <wt>`）红、对新 A6 绿、空行 NOT-EVALUATED。
+- **判据2（AC2，agent 标识）**：`fan-in-ff-merge.sh` 加 `--agent-id <id>`，写入锁事件（acquire/release）+ 重试记录。**顺带修了一个真实 JSON 编码 bug**：原 `\"runId\":${run_id:+\"${run_id}\"}${run_id:-null}` 在 run_id 非空时双分支同发 ⇒ 值重复、JSON 损坏（AC62 测试从不传 --run-id 所以没暴露）；改为 if/else 预计算 `run_id_json`/`agent_id_json`（设值=一个引号串、缺省=null）。实测：`--agent-id subagent-uuid-abc --run-id fm-…` ⇒ 记录 `"agentId":"subagent-uuid-abc","runId":"fm-…"` 合法 JSON；缺 `--agent-id` ⇒ `"agentId":null`（检查器判主线程形态）。检查器 `checkAgentId`：agentId null/缺失/==主会话 ⇒ 红；subagent id ≠ 主会话 ⇒ 绿；无记录 ⇒ NOT-EVALUATED。
+- **判据3（AC3，真样本回放）**：`plugin/test/fan-in-ff-executor-check.test.mjs` 嵌入**真实旧 A6**（`orchestration/fast-mode-tick-core.md:25` 逐字：主语「Fan-in 已返回任务」+ ① `git -C <wt> merge`）与**真实主线程 fan-in 命令**（inner 会话 2026-08-12 16:01Z `git merge --no-ff task/gap-inner-blocked-signal-… -m "merge: fan-in … (A6)"`、18:35Z `git -C <worktree> … merge`）——回放全部报红（判据3 D2 不构造）。**接线**：落地 plugin/loop A6 经 `judgeA6Line` 判绿（未来回退即红）。
+- **判据4（AC6，transcript 落点；人 06:1xZ 追加 + manager AC6）**：检查器加 `classifyBashCommand`（(a) test.sh 无 `--for-task` ⇒ full-suite；(b) `git commit` 带 翻/…/done ⇒ status-flip；(c) `git merge` 或 `fan-in-ff-merge.sh` ⇒ develop-merge；`(?!-)` 排除只读 merge-base/merge-tree）+ `checkTranscriptLocation`（主会话含任一 ⇒ 红；仅 subagent transcript 含 ⇒ 绿；两侧皆无 ⇒ NOT-EVALUATED）。**真实样本**：主会话 bc1a438b 实测 `scripts/test.sh > /tmp/wtmod-final-fullsuite.log`（无 --for-task）+ `git merge --no-ff task/…` ⇒ 红；subagent transcript 902b4528 `scripts/test.sh --for-task … --allow-thin` 不触发。判据4 读实际命令行，改名改不掉（manager AC6 防改名）。
+- **④ flip done → ff-only merge（人 06:1xZ）**：A6 持锁段加 ④ 先 flip done（worktree 内 `status: ready`→`done`，commit 带 status——人「flip → merge 可接受：flip 要动的记录也要用 git 跟踪，flip 在后则 merge 后还要再修改和 merge」）→ 再 ff。plugin/loop A6 已含 ④；orchestration/ 副本外层已落 3-item（0054fc9c），**④ flip 需外层按同一 A6 行再落一次（本任务给出逐字建议）**。
+- **测试隔离（suite 环境脆弱性）**：`fan-in-ff-executor-check.test.mjs` 原 11 次 `spawnSync` node 在 16-lane 并发下部分空 stdout ⇒ `JSON.parse` 崩。修法三管齐下：`@test-group engine`→`serial`（并发 2，避开 16-lane spawn 竞争）；`runChecker` 加 30s timeout + 空 stdout 打 stderr 诊断；integration 测试改用直接 `extractA6Line`/`extractBashCommands` + judge（spawn 11→4）。
+- **AC4（不改 AC62 协议本体）**：fan-in 落地仍 = 无锁段自测（merge develop + 全量 suite + doc 检查）+ 锁内 `git merge --ff-only`；锁只包 ff、持锁期间唯一动作是 ff；两把锁覆盖不交叉照旧。`fan-in-ff-protocol-check.ts` 未改。
+- **门（AC5）**：`bash scripts/test.sh --for-task gap-ac67-fan-in-executor-to-task-subagent --allow-thin` = **47 tests / 47 pass / 0 fail**（含 fan-in-ff-merge 10、fan-in-ff-executor-check 21、capability-catalog 全绿、delivery-inventory `inventory_drift=0`）；`fan-in-ts-typecheck-gate.ts`（新增 1 .ts）**GREEN（exit 0）**。capability-catalog `--entry-surface` 顺带修了一个**既有红**：`fan-in-ff-merge.sh` 被 A6 文档引用却未声明 public ⇒ 声明入 `PUBLIC_ENTRYPOINTS`。
+- **重试记录真落盘（manager (a)）**：重试记录字段完整 taskId/attempt/developHead/ts/epoch/runId/**agentId**/mergeTarget/error——落地即有真数据（ff 在当前节奏下几乎必然失败，见重试 note）。
+- **重试范围（manager (b)）**：重试=整轮（回无锁段 step 1），已在 Proposal 写明理由；三角张力（11b/clean-tree/ff-only）已并进任务体。
+
+**⚠️ 已落地 ≠ 已启用（manager 2026-08-14 08:1xZ 记录）**：本任务 status=done（检查器/测试/A6 主语/agentId 全落地），**但 ff-only 协议自 AC67 落地后几乎未被使用**——`fan-in-merge-lock-events.jsonl` 分布：ac67=8（它自己 3 次重试+最终 ff）、**其余任务全部 0**；AC64/AC68/AC74/AC75/B15/AC77 六次 fan-in 全未走 `fan-in-ff-merge.sh`（直接 commit 到 develop 或 `git merge develop` 无锁段后直接落地）。**⇒ 脚本在 develop、A6 主语已改、`git -C <wt>` 归零、测试绿，但协议本体未被后续任务执行**——记录上看起来「已完成」，行为上「未启用」。**判据1b（执行者位置）已红六次**：每次后续任务绕过 ff-only 就是一次红。归因归 inner（实现漏走新流程 vs 判断这类任务不必走完整 fan-in，两种未假设）；**若为后者，绕过的判据必须成为 A6 显式分支，不能是隐式惯例**。判断「某任务走没走 fan-in」用 `fan-in-merge-lock-events.jsonl` 的 taskId 分布（每次 ff 必写、带 agentId、第三方可读），不用 `git log --grep='merge: fan-in'`（ff-only 不产生 merge commit，结构上取不到真）。
+
+**⚠️ 结果判据（manager 2026-08-14 08:2xZ，补「已落地 ≠ 已启用」的机械判据）**：
+```
+判据：凡 fan-in 发生在【AC67 落地（50ac710d，2026-08-14 08:01:32Z）之后】的任务，
+      fan-in-merge-lock-events.jsonl 里必须有 ≥1 条它的记录；差集非空 ⇒ 红（列出差集任务名）
+今天的读数：差集 = AC64 / AC68 / AC74 / AC75 / B15 / AC77 六条
+```
+**为什么能取真**：每次 ff 必写、带 agentId、第三方可读（满足 4b——不是被测对象自产的自述量）。
+
+**⚠️ 时间边界陷阱（manager 自算过计，写进判据防复发）**：第一版算「已 fan-in = status=done 且 worktree 已移除」得 13 条、lock-events 仅 1 条任务 ⇒ 差集 12——**12 是错的、真值 6**，因为 13 条里有 AC56/57/61/62/63 等**在 AC67 落地之前就 fan-in 的任务，它们本来就不该有 ff 锁事件**。**⇒ 判据必须带时间边界（只统计 AC67 落地之后 fan-in 的任务）**——没有边界会稳定过计、天天报红，而一个天天报红的检查等于没有检查（与 --no-block 同族，只是从另一头坏）。
+
+**根因（inner 已答 (a) 实现漏了，结构因）**：**A6 改了，而派发 brief 是它的【派生文本】，副本没跟着改，且没有任何判据读这个一致性**——brief 是运行时生成、不落盘 ⇒ 不能比对文件 ⇒ 只能靠【结果】判。**修 brief 模板可以一次解决，修态度不能**——记录里写结构因，不只写认领。
+
+---
+
+**重登陆（retreat 复核，2026-08-14 本任务 worktree 落地）**：
+
+- **A6 双副本 lockstep（判据1 复核）**：`orchestration/fast-mode-tick-core.md` 与 `plugin/loop/fast-mode-tick-core.md` 的 A6 行**逐字节相同**（python 比对 `A6 lines IDENTICAL: True`）；主语=fan-in 必须经 fan-in-execute workflow 执行（执行者是任务 subagent），**`git -C <wt>` 形态归零**（步骤正身 = `git merge $MERGE_TARGET` → delta 断言面判定 → ts-typecheck 闸 → scoped 门 + 全量 suite + doc 检查 → flip done + `fan-in-ff-merge.sh --agent-id <自找>` → ff 成功后 worktree remove + branch -d）；主线程 A6 无 merge/flip/suite 动作（只「每轮检查 workflow 是否被执行」）。机件实测：`fan-in-ff-executor-check.ts --a6-file plugin/loop/fast-mode-tick-core.md` 判 `a6-executor-position → subagent-executor-a6`、`a6-step1-merge-not-rebase`、`a6-delta-assertion-step` 全绿。
+- **AC6 机制（判据4 复核 + 判定时点）**：`classifyBashCommand`（(a) test.sh 无 `--for-task` ⇒ full-suite (b) flip commit (c) develop merge，`(?!-)` 排除只读 merge-base/merge-tree）+ `checkTranscriptLocation`（主会话含任一 ⇒ 红；仅 subagent ⇒ 绿；两侧皆无 ⇒ NOT-EVALUATED）已落。**AC6 判在 AC67 落地【之后】的第一次 fan-in**（manager ⑥ 读法 B），本次不判 AC67 自身；本次交付 = 机制 + A6 文本，翻绿证据在下次 fan-in 的 transcript 落点（读实际命令行，非措辞）。
+- **门（AC5，本次重跑）**：`bash scripts/test.sh --for-task gap-ac67-fan-in-executor-to-task-subagent --allow-thin` = **84 tests / 83 pass / 1 fail**。fan-in-ff-merge（10）、fan-in-ff-executor-check（21）全绿。**唯一 fail = 基线 pre-existing**：`capability-catalog.test.mjs:370` Wiring（`plugin/loop/fast-mode-loop-tick.md` referenced-not-landed）——由 **AC80 提交 2eedf16c（2026-08-14 22:02Z，晚于 AC67 实现 09dd5271/07:06Z）的 AC80-INNER-ANCHOR prompt**（fast-mode-loop-tick.md:1215 引 `plugin/loop/fast-mode-loop-tick.md`，quay-init --loop 目标铺到 `docs/analysis/` 而非 `plugin/loop/`）**重新引入**（d6afb737 2026-08-11 已修、AC67 前 47/47 全绿时该引用不存在）；非本任务 Touches，未动。**ts-typecheck 闸**：GREEN（exit 0，无新增 .ts）。
+- **双副本 drift-check（`tick-core-static-check --check-drift`）**：fast-mode pair 仍红 = **pre-existing 结构张力，非本任务引入**——① AC38 切分声明使两副本头部引用源不同（正本引 `plugin/loop/fast-mode-loop-tick.md`、落地副本引 `docs/analysis/fast-mode-loop-tick.md`），byte-identical 判据与 AC38 设计互斥；② AC80（2eedf16c）在 orchestration 副本单边加了 A26（plugin/loop 无）⇒ 又一处 drift。**若强行同步把正本头部引用带进 shipped 副本 ⇒ referenced-not-landed 更红** ⇒ 不改（A6 行本身 lockstep 已程序化核验）。orchestrator pair 红为 outer 领域。此张力需独立裁决（byte-identical 判据 vs AC38 切分），不在本任务范围。

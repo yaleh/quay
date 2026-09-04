@@ -24,9 +24,16 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { connectProvider } from "../src/provider-client.ts";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
+const nativeBin = QUAY_NATIVE_CLI;
+// Pinned to the SOURCE bin dir (not path.dirname(nativeBin), which resolves to dist/ when
+// the prebuilt bundle is fresh) — same definition as unparseable-frontmatter /
+// build-dist-smoke / serve-github / serve.test.mjs. 98e23f5b deleted this definition while
+// leaving the `cwd: nativeProviderDir` usage below, producing a ReferenceError in the full
+// suite; restored here per gap-task-check-test-nativeproviderdir-undefined.
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -58,19 +65,29 @@ async function main() {
   const acDodUnchecked =
     "## AC\n- [ ] a sufficiently long acceptance criterion line for the minimum-content check\n" +
     "## DoD\n- [ ] a sufficiently long definition-of-done line for the minimum-content check\n";
+  // gap-both-gates-read-one-signal-so-done-costs-nothing: an UNCHECKED AC box
+  // no longer fails author->ready (checked-state belongs to ready->done), so
+  // the old FAIL-1 fixture (acDodUnchecked) would now PASS. A genuine
+  // author->ready failure is an AC section with NO machine-checkable
+  // checkboxes at all.
+  const acNoCheckbox =
+    "## AC\nThis acceptance criteria section is written in prose only, with no machine-checkable checkbox lines at all, comfortably past forty non-whitespace characters.\n" +
+    "## DoD\n- [x] a sufficiently long definition-of-done line for the minimum-content check\n";
   execFileSync("node", [nativeBin, "task", "create", "PASS-1", "--title", "Passing task",
     "--body", validSections + acDodChecked], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
   execFileSync("node", [nativeBin, "task", "create", "FAIL-1", "--title", "Failing task",
-    "--body", validSections + acDodUnchecked], {
+    "--body", validSections + acNoCheckbox], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
 
   const client = await connectProvider({
     command: "node",
     args: [nativeBin, "mcp"],
-    cwd: path.dirname(nativeBin),
+    // Run the MCP server from the source bin dir so any relative provider paths resolve
+    // (A-layer spawn conversion intent — nativeProviderDir is pinned to the SOURCE bin dir).
+    cwd: nativeProviderDir,
     env: { QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
 
@@ -84,7 +101,7 @@ async function main() {
     assert(typeof pass.reason === "string" && pass.reason.length > 0, "result includes a non-empty reason string");
 
     const fail = await client.taskCheck("FAIL-1");
-    assert(fail.ok === false, `unchecked-AC task gates ok:false (got ok:${fail.ok})`);
+    assert(fail.ok === false, `AC-no-checkbox task gates ok:false (got ok:${fail.ok}, reason:${fail.reason})`);
     assert(typeof fail.reason === "string" && fail.reason.length > 0, "failing result still includes a reason string");
 
     // Confirm the passthrough round-trips the whole structuredContent object

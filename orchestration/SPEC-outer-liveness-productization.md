@@ -1,5 +1,11 @@
 # 规格：`outer-liveness.sh` 产品化
 
+> **RETIRED (2026-08-06)**：本规格的 **AC20（单飞挂载 + 共享 events 文件）与 AC21（共享文件记全量、
+> 阈值只作用于持有者 stdout）已被推翻**——人裁定彻底去掉共享事件文件 + 互斥锁（观测是树、只读天然
+> 不排他；`heavy-op-token.sh` 整体删除）。实现随 `plugin/scripts/session-liveness.sh` 更新：
+> 每观察者自己的 stdout 事件流（谁挂的谁拥有）、无锁、无共享文件。本文件保留为**历史记录**——
+> 其中的 AC10-19（信号源/阈值/心跳源/忙闲判据）仍有效，AC20-22（单飞/共享/订阅）已退役。
+
 **提出**：人 2026-08-03 ——「这个 monitor 脚本应当进一步产品化、通用化和参数化。使用 quay 的项目都需要使用它。」
 **定义者**：管理者（`quay-0:manager`）。**实现者**：`quay-0:tools`。
 **这份文件只定义「要什么」和「怎么算达成」，不规定实现细节**——实现选择由 tools 判断。
@@ -302,3 +308,71 @@
 **一般形态**：**「谁需要谁自己起一个」对单飞资源是错的默认。**
 正确的默认是「谁需要谁去订阅」，而挂载是一个有主的、可接管的角色。
 这与令牌是同一条原理，区别只在于令牌天然是排他的、监视器看起来不是——**看起来不是，所以没人给它加锁。**
+
+### 落地（2026-08-03/04，gap-liveness-mounting-is-a-single-flight-role-with-no-owner）
+
+- **挂载入口**：`plugin/scripts/session-liveness-mount.sh`（`exec` 进 `session-liveness.sh`，同一 pid）。
+  `session-liveness.sh` 自身也在长跑模式取单飞锁——**任何入口都单飞**，`--once` 等诊断接缝不取锁。
+- **AC20a**：取锁 = 直接调用 `heavy-op-token.sh --acquire <owner> --root $QUAY_GLOBAL_DIR/session-liveness`
+  （**不新写锁**；wx 原子创建 + mtime 陈旧 AND pid 不存活才回收，那套已在真实死持有者上回收 17 次）。
+  锁状态在 `$QUAY_GLOBAL_DIR/session-liveness/heavy-op/token`。
+- **AC20b**：`_sl_acquire_or_noop` 先 `--timeout 0` 快查；有活持有者 ⇒ 打印属主与 pid、退出 0。
+  两个实现陷阱（均已修并测试钉住）：① 取锁不能用命令替换 `$(...)`——它会引入瞬态子 shell 当
+  heavy-op-token 的父进程，锁记下子 shell 的 pid（随即退出），下一个挂载会误回收活持有者；
+  ② 单飞门必须直接调用、不能 `case "$( _sl_acquire_or_noop )" in`——命令替换的子 shell 会在函数
+  返回时触发 EXIT trap 立刻释放锁。
+- **AC20d**：持有者 kill -9 后，下一次挂载 `--timeout N` 有界等待回收并取得，输出
+  `takeover_ms=<毫秒>`（`SESSION_LIVENESS_MOUNT_STALE_S` 默认 3 只影响接管速度，活持有者永不回收）。
+- **AC20c / AC7**：事件与心跳写 `$QUAY_GLOBAL_DIR/session-liveness/events.jsonl`
+  （每行 `{"ts":…,"event":…,"name":…,"msg":…}`）；持有者每轮追加一条 `HEARTBEAT`。
+  订阅方读最后一条 ts / 文件 mtime 判「看门的不在了」，**不需要任何人去试挂**。
+- **AC9（本任务的判据）**：`monitor-mount-check.sh` 的 `ownedByThisSession` 已废除，
+  判据改为 `delivered`（共享事件文件有新事件）——别的会话挂的、投递正常 ⇒ PASS；无人挂载 ⇒ FAIL。
+
+## AC21(2026-08-04):共享日志记全量,过滤属于订阅方 —— AC20c 的修正
+
+**这是我自己那份 AC20 的设计缺陷,不是实现问题。**
+
+### 实测
+
+人 06:3xZ 指出「quay outer 在等待输入,monitor 应该通知你」——**而我没收到**。
+查:共享 `events.jsonl` 里 **`SESSION-IDLE` 出现 0 次**,`SESSION-RESUMED` 20 次。
+
+代码是对的(`session-liveness.sh:645` 走 `sl_emit`,`sl_emit` 确实双写),
+**是发出之前就被抑制了**:
+
+```
+:639   elif [ "$hmin" = "?" ] || [ "$hmin" -ge "$LOOP_MIN" ]
+持有者(外层的挂载 pid 456415)环境无 LOOP_MIN ⇒ 默认 20
+管理者先前配置:LOOP_MIN=0
+```
+
+**「空闲但心跳新鲜」在 `LOOP_MIN=20` 下被静默** —— 而抑制理由的注释是我自己标定的
+(「健康循环每 20 分钟一对事件、三项目满载 18 次/小时,全是噪声」)。
+
+### 缺陷
+
+**单飞挂载 + 共享文件,而过滤发生在【发出端】⇒ 持有者的阈值被强加给所有订阅方。**
+
+| 订阅方 | 需要什么 |
+|---|---|
+| 外层(持有者) | **不想**听自己空闲——噪声 |
+| 管理者 | **想**知道外层空闲等输入——「该派活了」 |
+
+**两者恰好相反,而现在只有持有者的阈值生效,被滤掉的事件根本没进文件,订阅方无法补救。**
+
+### 判据
+
+- **AC21a**:**共享 `events.jsonl` 记录全量事件,不施加任何阈值抑制**
+  (`LOOP_MIN`/`STALL_MIN`/`OVERDUE_MIN` 只作用于持有者自己的 stdout)。
+- **AC21b**:每条事件带上判定所需的原始量(如 `hmin` 心跳分钟数),
+  **让订阅方能自己决定报不报**,而不是只给一个已经判完的结论。
+- **AC21c(负控制)**:持有者以 `LOOP_MIN=20` 运行时,
+  共享文件里**仍应出现 `hmin < 20` 的 IDLE 记录**——出现即通过,不出现即未修。
+
+### 一般形态
+
+**已经被一个消费者的阈值筛过的日志,服务不了第二个消费者。**
+**记录与判断必须分开**:记录记全量,判断留给读的人。
+这与本仓「carry evidence not conclusions」是同一条,
+**而我在自己设计的机制里违反了它。**

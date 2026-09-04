@@ -1,0 +1,5 @@
+⏵⏵ bypass permissions on
+  esc to interrupt  ← 1 agent
+  ● main
+  ◯ general-purpose  running
+❯

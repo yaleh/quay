@@ -47,7 +47,7 @@ test('M172 (DIR-108): marketplace.json is valid JSON and lists the quay plugin p
   assert.equal(entry.source.ref, 'dist-plugin', 'source must pin the CI-published orphan branch');
 });
 
-test('plugin.json is valid JSON and declares the 11 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology; gap-loop-mechanism-...: +quay-task-operator; cold-start-8: +quay-cold-start)', () => {
+test('plugin.json is valid JSON and declares the 14 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology; gap-loop-mechanism-...: +quay-task-operator; cold-start-8: +quay-cold-start; gap-tmux-session-topology: +session-topology; gap-productize-the-manager-layer: +manager; +quay-file-task — new-task filing skill, the step before author)', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');
   // Cross-check against packages/quay's version rather than a hardcoded literal (which is
@@ -60,6 +60,7 @@ test('plugin.json is valid JSON and declares the 11 bundled skills (M179/DIR-070
     './skills/author/SKILL.md',
     './skills/execute/SKILL.md',
     './skills/quay-directive/SKILL.md',
+    './skills/quay-file-task/SKILL.md',
     './skills/loop-driver/SKILL.md',
     './skills/init/SKILL.md',
     './skills/cold-start/SKILL.md',
@@ -68,6 +69,8 @@ test('plugin.json is valid JSON and declares the 11 bundled skills (M179/DIR-070
     './skills/routines/SKILL.md',
     './skills/quay-native-methodology/SKILL.md',
     './skills/quay-webui-bootstrap-methodology/SKILL.md',
+    './skills/session-topology/SKILL.md',
+    './skills/manager/SKILL.md',
   ];
   for (const w of wanted) {
     assert.ok(manifest.commands.includes(w), `plugin.json commands[] must include ${w}`);
@@ -185,6 +188,8 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
     path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'SKILL.md'),
     path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'reference', 'visual-review-mechanism.md'),
     path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'reference', 'effectiveness-timing-corpus.md'),
+    // gap-productize-the-manager-layer: the manager layer (third layer) ships under plugin/.
+    path.join(pluginDir, 'skills', 'manager', 'SKILL.md'),
   ];
   const leakPattern = /experiments\/quay-perpetual-stream|\bexp5\b/i;
   for (const f of shippedFiles) {
@@ -485,35 +490,46 @@ test('DIR-070-C: Tier-B plugin copies have zero exp5/experiment-path references'
 // directories exist with the expected file counts, sync.sh is executable,
 // the init skill carries no research-layer references, and the vendored agent
 // file is present.
+//
+// gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked (2026-08-05): plugin/gate-scripts/
+// is RETIRED — the classic-pipeline era gates were laid into target projects but nothing called
+// them (dead weight). The files remain in the plugin tree (layered retirement) but quay-init no
+// longer lays them down and sync.sh no longer syncs them. The tests below pin that retirement:
+// quay-init.sh carries ZERO 'gate-scripts' references (contract measure dead_gates_remaining = 0).
 // ---------------------------------------------------------------------------
 
-test('M143: plugin/workflows/ exists with the 2 surviving JS workflow files', () => {
+test('M143: plugin/workflows/ exists with the surviving JS workflow files', () => {
   // gap-retire-the-prepare-execute-pipeline-cluster (ADR-022): execute-milestone.js and
   // prepare-milestone.js were retired with the classic milestone loop.
+  // AC91 (gap-ac91-delivery-core-refs-undelivered-files): execute-suite-fix.js and
+  // pool-quality-judge.js are ADDITIONAL survivors — the shipped orchestrator-tick-core.md
+  // references `.claude/workflows/execute-suite-fix.js` (:39) and `.claude/workflows/
+  // pool-quality-judge.js` (:70), so the distribution mirror must carry them (a delivered exec
+  // core must not point at an undelivered workflow). fan-in-execute.js is likewise mirrored.
   const workflowsDir = path.join(pluginDir, 'workflows');
   assert.ok(existsSync(workflowsDir), 'plugin/workflows/ must exist');
-  const wanted = ['drain-directives.js', 'run-routines.js'];
+  const wanted = ['drain-directives.js', 'run-routines.js', 'fan-in-execute.js', 'execute-suite-fix.js', 'pool-quality-judge.js'];
   for (const f of wanted) {
     const fp = path.join(workflowsDir, f);
     assert.ok(existsSync(fp), `plugin/workflows/${f} must exist`);
   }
 });
 
-test('M143: plugin/gate-scripts/ exists with 13 gate scripts', () => {
+test('M143: plugin/gate-scripts/ is RETIRED — kept in tree, not laid down by quay-init', () => {
+  // 分层退休（Layered retirement）: the classic-pipeline era gate scripts
+  // stay in the plugin tree as a historical artifact, but they are NO LONGER in the distribution.
   const gateDir = path.join(pluginDir, 'gate-scripts');
-  assert.ok(existsSync(gateDir), 'plugin/gate-scripts/ must exist');
-  const wanted = [
-    'it0-backlog-projection-check.sh', 'it0-ceiling-check.sh',
-    'it0-ceiling-line-budget-check.sh', 'it0-dashboard-line-budget-check.sh',
-    'it0-dod-check.sh', 'it0-dogfood-evidence-gate.sh',
-    'it0-gate-hash-check.sh', 'it0-impl-row-check.sh',
-    'vmeta-lag-check.sh', 'tree-hygiene-check.sh',
-    'worktree-branch-hygiene-check.sh', 'audit-independence-check.sh',
-    'drain-scheduler.ts',
-  ];
-  for (const f of wanted) {
-    assert.ok(existsSync(path.join(gateDir, f)), `plugin/gate-scripts/${f} must exist`);
-  }
+  assert.ok(existsSync(gateDir), 'plugin/gate-scripts/ must exist (retired artifact kept in tree)');
+  // Contract measure dead_gates_remaining: quay-init.sh must carry ZERO 'gate-scripts' references
+  // (dead gates no longer laid down).
+  const quayInit = readFileSync(path.join(pluginDir, 'scripts', 'quay-init.sh'), 'utf8');
+  assert.equal(quayInit.includes('gate-scripts'), false,
+    'quay-init.sh must contain ZERO gate-scripts references (dead weight no longer laid down)');
+  // sync.sh must no longer run any cp into the retired gate-scripts dir (a comment naming the
+  // retired dir is documentation of the retirement, not a sync operation).
+  const syncSrc = readFileSync(path.join(pluginDir, 'sync.sh'), 'utf8');
+  assert.doesNotMatch(syncSrc, /cp\s+.*gate-scripts\//,
+    'sync.sh must no longer sync the retired gate scripts');
 });
 
 test('M143: plugin/agents/baime-iteration-executor.md exists', () => {
@@ -529,8 +545,7 @@ test('M143: plugin/sync.sh exists and is executable', () => {
   const src = readFileSync(syncPath, 'utf8');
   assert.match(src, /drain-directives\.js/, 'sync.sh must sync drain-directives.js');
   assert.match(src, /run-routines\.js/, 'sync.sh must sync run-routines.js');
-  assert.match(src, /drain-scheduler\.ts/, 'sync.sh must sync drain-scheduler.ts');
-  assert.match(src, /vmeta-lag-check\.sh/, 'sync.sh must sync vmeta-lag-check.sh');
+  assert.doesNotMatch(src, /cp\s+.*gate-scripts\//, 'sync.sh must no longer sync the retired gate-scripts');
 });
 
 test('M143: init skill has zero research-layer references (VT/value-ledger/checkpoints/experiments/**)', () => {
@@ -544,8 +559,10 @@ test('M143: init skill has zero research-layer references (VT/value-ledger/check
 
 test('M143: git-tracked workflows in plugin/workflows/ are byte-identical to .claude/workflows/ canonical sources', () => {
   // Only test git-tracked source files that still exist after the prepare/execute retirement
-  // (ADR-022 / gap-retire-the-prepare-execute-pipeline-cluster).
-  const trackedWorkflows = ['drain-directives.js', 'run-routines.js'];
+  // (ADR-022 / gap-retire-the-prepare-execute-pipeline-cluster). AC91: the FULL mirrored set
+  // (drain-directives / run-routines / fan-in-execute / execute-suite-fix / pool-quality-judge) —
+  // every distribution workflow is a byte-identical mirror of its .claude/workflows/ canonical.
+  const trackedWorkflows = ['drain-directives.js', 'run-routines.js', 'fan-in-execute.js', 'execute-suite-fix.js', 'pool-quality-judge.js'];
   for (const name of trackedWorkflows) {
     const canonical = path.join(repoRoot, '.claude', 'workflows', name);
     const bundled = path.join(pluginDir, 'workflows', name);

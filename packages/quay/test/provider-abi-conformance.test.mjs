@@ -67,7 +67,7 @@
 // with read+write access to yaleh/quay — the M12-abi-parent-write block
 // genuinely mutates real issue bodies on gh-12/gh-13/gh-14).
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -75,12 +75,20 @@ import fs from "node:fs";
 import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+
+// The native-leg tasks dir is removed once at the end of this file (the carrier-array + after()
+// pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 const LIVE_GITHUB_ENV = "QUAY_TEST_LIVE_GITHUB";
 const liveGithubEnabled = process.env[LIVE_GITHUB_ENV] === "1";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
+const nativeBin = QUAY_NATIVE_CLI;
 const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.ts");
 
 let failures = 0;
@@ -107,6 +115,7 @@ const VALID_SECTIONS =
 async function main() {
   // ============================= NATIVE LEG =============================
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-abi-conf-native-"));
+  _tmpDirs.push(tasksDir);
   const nativeEnv = { QUAY_NATIVE_TASKS_DIR: tasksDir };
 
   // Primitive fixture.

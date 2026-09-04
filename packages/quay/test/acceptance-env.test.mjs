@@ -19,11 +19,12 @@ import os from "node:os";
 
 import { runAcceptance } from "../src/gate/acceptance-runner.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const quayBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -226,7 +227,7 @@ test("T4: MCP gate_run surface sees acceptance_env exports (AC #4)", async () =>
   // Drive the REAL MCP surface via StdioClientTransport (mirrors mcp-server.test.mjs pattern)
   const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
-  const coreBin = path.join(__dirname, "..", "bin", "quay.ts");
+  const coreBin = QUAY_CLI;
 
   const transport = new StdioClientTransport({
     command: "node",

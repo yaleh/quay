@@ -24,11 +24,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { parseTouchEntries } from "../scripts/touches-parser.ts";
-import { parseTouches, checkTouchesPair } from "../scripts/touches-orthogonality-check.ts";
+import { parseTouchEntries, parseTouchEntriesWithTags } from "../scripts/touches-parser.ts";
+import { parseTouches, checkTouchesPair, matchGlob } from "../scripts/touches-orthogonality-check.ts";
 import { parseBulletList } from "../scripts/select-tests-for-touches.ts";
 import { extractTouchesGlobs } from "../scripts/prepare-admission-check.ts";
 import { checkTouches } from "../scripts/task-schema.ts";
+import { checkTaskAntiDrift } from "../scripts/anti-drift-touches-check.ts";
 
 // ── AC3 fixture set ───────────────────────────────────────────────────────────────────────────────
 // Each fixture is a `## Touches` bullet line. `bodyOf` wraps it in a minimal execution-type task
@@ -44,6 +45,7 @@ const SECTION_FIXTURES = [
   "- ./packages/a.js",                                       // leading ./ — every parser strips it
   '- "packages/b.js"',                                       // double-quoted path
   "- `experiments/quay-perpetual-stream/scripts/*run-identity*`", // backticked wildcard glob
+  "- plugin/test/foo.test.mjs（档位测试）",                  // FULL-WIDTH （…） annotation (CJK convention) — stripped too
 ];
 
 const EXPECTED = [
@@ -57,6 +59,7 @@ const EXPECTED = [
   ["packages/a.js"],
   ["packages/b.js"],
   ["experiments/quay-perpetual-stream/scripts/*run-identity*"],
+  ["plugin/test/foo.test.mjs"],
 ];
 
 const bodyOf = (section) => `**type:** execution\n\n## Touches\n${section}`;
@@ -165,6 +168,125 @@ test("AC4: an un-stripped (new) annotation no longer triggers 'matched nothing (
   const r2 = checkTouchesPair(C, B, fakeExpand({ "brand-new.ts": [], "y/b.js": ["y/b.js"] }));
   assert.equal(r2.disjoint, false);
   assert.match(r2.reason, /matched nothing/);
+});
+
+// ── AC1/AC2 (gap-touches-parser-strip-annotation-nested-parens) ─────────────────────────────────────
+// stripTouchAnnotation must strip a trailing （…） annotation that CONTAINS a NESTED full-width pair.
+// The old regex `\s*（[^）]*）\s*$` could not cross a `）`, so a nested pair left the WHOLE annotated
+// string as the glob → anti-drift-touches-check HARD-FAILED on a clean write. Two real occurrences
+// (each was worked around by rewording the annotation — this test pins the parser defect itself):
+//   a23:         annotation contains a backticked nested full-width pair `（新增…）`
+//   provisioning: annotation contains a nested full-width pair （config/gates/运行时载体）
+const NESTED_PAREN_FIXTURES = [
+  "- plugin/scripts/outer-tick-log-check.sh（判定脚本；如注解含 `（新增…）` 嵌套全角括号则旧正则剥离失败）",
+  "- plugin/scripts/refresh-worktree-quay.sh（新：主检出 .quay/（config/gates/运行时载体）快照复制进 linked worktree）",
+];
+const NESTED_PAREN_EXPECTED = [
+  ["plugin/scripts/outer-tick-log-check.sh"],
+  ["plugin/scripts/refresh-worktree-quay.sh"],
+];
+
+test("AC1: nested full-width paren annotations strip to clean globs (a23 + provisioning shapes)", () => {
+  for (let i = 0; i < NESTED_PAREN_FIXTURES.length; i++) {
+    const section = NESTED_PAREN_FIXTURES[i];
+    assert.deepEqual(
+      parseTouchEntries(section),
+      NESTED_PAREN_EXPECTED[i],
+      `nested-paren annotation not stripped to a clean glob for ${JSON.stringify(section)}`,
+    );
+    // single-source parity: every parser must agree on the nested shapes too
+    assertAllAgree(PARSERS, bodyOf(section), section, NESTED_PAREN_EXPECTED[i]);
+  }
+});
+
+test("AC2 能取假: nested-paren annotations → matchGlob HITS the clean path; a REAL out-of-declared write still does NOT hit (HARD FAIL preserved)", () => {
+  // The declared globs are exactly what the anti-drift guard feeds to matchGlob.
+  for (let i = 0; i < NESTED_PAREN_FIXTURES.length; i++) {
+    const [cleanGlob] = NESTED_PAREN_EXPECTED[i];
+    // The clean write the task ACTUALLY made — under the old broken strip the annotation was part
+    // of the glob and matchGlob MISSED this → spurious HARD FAIL. Now it must HIT.
+    assert.equal(matchGlob(cleanGlob, cleanGlob), true, `matchGlob must hit the clean path for ${cleanGlob}`);
+  }
+  // End-to-end anti-drift semantics: declared nested-paren Touches + the task's own clean file → OK
+  // (no false HARD FAIL — the a23 shape as the a23 task's Touches would have been).
+  const a23Body = bodyOf(
+    "- plugin/scripts/outer-tick-log-check.sh（判定脚本；如注解含 `（新增…）` 嵌套全角括号则旧正则剥离失败）",
+  );
+  const ok = checkTaskAntiDrift(a23Body, ["plugin/scripts/outer-tick-log-check.sh"]);
+  assert.equal(ok.ok, true, `nested-paren annotation must NOT cause a false HARD FAIL: ${JSON.stringify(ok.violations)}`);
+  // Real drift: a genuinely out-of-declared file must STILL HARD FAIL (blocking semantics unchanged).
+  const drift = checkTaskAntiDrift(a23Body, ["plugin/scripts/unrelated/not-declared.ts"]);
+  assert.equal(drift.ok, false, "a real out-of-declared write must still HARD FAIL");
+  assert.ok(
+    drift.violations.some(
+      (v) => v.type === "out-of-declared" && v.file === "plugin/scripts/unrelated/not-declared.ts",
+    ),
+    "violation must be the out-of-declared kind naming the drift file",
+  );
+});
+
+// ── parseTouchEntriesWithTags (gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files) ──
+// The resolve check needs to KNOW a touch is `(new)` (file will be created — need not exist yet) vs
+// `(delete)` (file must exist to be deleted) vs plain. parseTouchEntriesWithTags captures the tag
+// while extracting the SAME paths as the single-source parseTouchEntries. Two invariants:
+//   (a) paths are byte-identical to parseTouchEntries on the parity fixture set;
+//   (b) the tag is `new`/`delete`/null exactly for `(new)`/`(delete)`/everything-else annotations.
+test("parseTouchEntriesWithTags: paths byte-identical to parseTouchEntries on the parity fixture set", () => {
+  for (let i = 0; i < SECTION_FIXTURES.length; i++) {
+    const section = SECTION_FIXTURES[i];
+    const tagged = parseTouchEntriesWithTags(section);
+    assert.deepEqual(
+      tagged.map((e) => e.path),
+      EXPECTED[i],
+      `tagged paths diverge from parseTouchEntries for ${JSON.stringify(section)}`,
+    );
+  }
+});
+
+test("parseTouchEntriesWithTags: (new)/(delete) tags captured, everything else null", () => {
+  const section = [
+    "- `a.ts` (new)",
+    "- `code/bar.ts (new)`",                          // annotation INSIDE the backticks
+    "- b.ts (delete)",
+    "- c.ts (deleted)",                               // tolerated alias
+    "- d.ts (refactor Verify phase)",                 // non-structural annotation → null
+    "- plain.ts",
+  ].join("\n");
+  const tagged = parseTouchEntriesWithTags(section);
+  assert.deepEqual(tagged, [
+    { path: "a.ts", tag: "new" },
+    { path: "code/bar.ts", tag: "new" },
+    { path: "b.ts", tag: "delete" },
+    { path: "c.ts", tag: "delete" },
+    { path: "d.ts", tag: null },
+    { path: "plain.ts", tag: null },
+  ]);
+});
+
+test("parseTouchEntriesWithTags: (new)/(delete) tag BEFORE a full-width （…） annotation is recovered", () => {
+  // 2026-08-28: a pre-existing quirk lost the structural tag when an ASCII (new) sat before a
+  // trailing full-width annotation — `` path (new)（描述） `` — the end-anchored ASCII match saw
+  // ）， not ), so every (new)（…） task was judged must-exist-missing (promotion reject). The
+  // tag is now recovered from the ASCII (…) that precedes the （; the PATH is unchanged.
+  const section = [
+    "- `plugin/scripts/foo.ts (new)（新建）`",
+    "- plugin/scripts/old.ts (delete)（删）",
+    "- plugin/test/fixtures/fake-suite/ (new)（假 suite fixture）",
+    "- plain.ts",
+  ].join("\n");
+  const tagged = parseTouchEntriesWithTags(section);
+  assert.deepEqual(tagged, [
+    { path: "plugin/scripts/foo.ts", tag: "new" },
+    { path: "plugin/scripts/old.ts", tag: "delete" },
+    { path: "plugin/test/fixtures/fake-suite/", tag: "new" },
+    { path: "plain.ts", tag: null },
+  ]);
+});
+
+test("parseTouchEntriesWithTags: empty/missing section → []", () => {
+  assert.deepEqual(parseTouchEntriesWithTags(""), []);
+  assert.deepEqual(parseTouchEntriesWithTags(null), []);
+  assert.deepEqual(parseTouchEntriesWithTags("## Next\nnot a bullet list"), []);
 });
 
 // ── AC1 backstop: only ONE implementation exists (definition-site grep) ───────────────────────────

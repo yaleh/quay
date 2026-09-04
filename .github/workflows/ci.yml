@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, develop]
   pull_request:
-    branches: [master]
+    branches: [master, develop]
   workflow_dispatch: {}
 
 jobs:
@@ -16,6 +16,12 @@ jobs:
       issues: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # list-files=0 CI 根因 (2026-08-28): 默认浅克隆 (depth 1) 缺
+          # test-group-downgrade-check 的 enforcement baseline 8ea050c7 → NOT-EVALUATED exit 2 →
+          # scripts/test.sh --list-files 空输出 → test-coverage-check --selftest AC5 fail。
+          # fetch-depth: 0 = 全量历史, baseline 存在, 守卫可评估。
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           # M120 (DIR-060): this step SPAWNS the `.ts` CLI bins as subprocesses
@@ -70,6 +76,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # list-files=0 CI 根因 (2026-08-28): 默认浅克隆 (depth 1) 缺
+          # test-group-downgrade-check 的 enforcement baseline 8ea050c7 → NOT-EVALUATED exit 2 →
+          # scripts/test.sh --list-files 空输出 → test-coverage-check --selftest AC5 fail。
+          # fetch-depth: 0 = 全量历史, baseline 存在, 守卫可评估。
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -85,8 +97,23 @@ jobs:
           TGZ="$(ls -1t packages/quay/quay-*.tgz | head -1)"
           echo "Installing ${TGZ} on $(node --version)"
           npm install -g "${TGZ}"
-          quay --help
-          quay --version
+          # gap-ac86 (2026-08-16): the npm-installed `quay` bin is a SYMLINK to dist/quay.js, and
+          # the bundle's main-entry guard (packages/quay/bin/quay.ts:230) compares process.argv[1]
+          # to import.meta.url — a symlink path never equals the realpath URL, so the CLI `run()`
+          # is never reached via the symlink and `quay --version` prints nothing (exit 0). That
+          # symlink/main-entry mismatch is a KNOWN latent defect (separate task; touches the CLI
+          # source, outside this job). To make THIS floor check non-vacuous we resolve the realpath
+          # and assert the bundled CLI ACTUALLY produces the version on the declared floor: a broken
+          # tarball, a Node-20-unrunnable bundle, or a regression where --version emits nothing all
+          # fail here (AC86 判据 能取假 — not just exit code, but real output).
+          QUAY_BIN="$(command -v quay)"
+          QUAY_REAL="$(node -p "require('fs').realpathSync(process.argv[1])" "${QUAY_BIN}")"
+          echo "installed bin: ${QUAY_BIN} -> ${QUAY_REAL}"
+          VERSION_OUT="$(node "${QUAY_REAL}" --version)"
+          echo "quay --version on $(node --version): ${VERSION_OUT}"
+          test -n "${VERSION_OUT}"
+          node "${QUAY_REAL}" --help >/dev/null
+          echo "dist-verify-node-floor OK: packaged bin runs and emits version on $(node --version)"
 
   # M132 (exp5-M-VERSION-CHECK-CI): fail-closed version consistency gate.
   # Runs version-consistency-check.ts on every push; fails the build if any
@@ -96,6 +123,12 @@ jobs:
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
+        with:
+          # list-files=0 CI 根因 (2026-08-28): 默认浅克隆 (depth 1) 缺
+          # test-group-downgrade-check 的 enforcement baseline 8ea050c7 → NOT-EVALUATED exit 2 →
+          # scripts/test.sh --list-files 空输出 → test-coverage-check --selftest AC5 fail。
+          # fetch-depth: 0 = 全量历史, baseline 存在, 守卫可评估。
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -112,7 +145,9 @@ jobs:
 
   # gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it (2026-08-03): the EXECUTOR for the
   # cold-start e2e. Measured cost of `bash test/cold-start-e2e.sh --from-build` is ~102s wall-clock
-  # (build ~3s + install + asserts + the AC7 >=90s inner-state.sh window), so this is NOT a per-push
+  # (build ~3s + install + asserts + the then-required AC7 >=90s inner-state.sh window; the window
+  # and the retired monitor were removed at gap-retire-inner-state-one-observer-targets-by-parameter,
+  # so the job is cheaper now), so this is NOT a per-push
   # job — it is gated to workflow_dispatch (milestone-cadence: a human or milestone agent triggers
   # it at milestone/release boundaries, matching ADR-010's milestone e2e and CLAUDE.md's "packaging
   # e2e is not covered by scripts/test.sh" stance). Never passes --push to publish-dist-branch.sh
@@ -125,6 +160,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # list-files=0 CI 根因 (2026-08-28): 默认浅克隆 (depth 1) 缺
+          # test-group-downgrade-check 的 enforcement baseline 8ea050c7 → NOT-EVALUATED exit 2 →
+          # scripts/test.sh --list-files 空输出 → test-coverage-check --selftest AC5 fail。
+          # fetch-depth: 0 = 全量历史, baseline 存在, 守卫可评估。
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'

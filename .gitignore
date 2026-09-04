@@ -19,12 +19,167 @@ experiment/timing/*.log
 .playwright-mcp/
 # QX-033: npm pack build artifacts — do not commit .tgz release files
 *.tgz
+# gap-release-excludes-plugin-bundle-agent-surface (AC16): packages/quay/plugin/ is a
+# generated SNAPSHOT of the repo-root plugin/ bundle, staged by package.sh right before
+# `npm pack` (npm pack's files entries cannot reach the sibling ../plugin). Never tracked —
+# the source of truth is the repo-root plugin/ tree, mirrored by sync-vendor.sh.
+packages/quay/plugin/
 
 # BAIME experiment throwaway checkouts / build output — never track
 **/worktrees/
+# gap-gitignore-worktree-scratch-dirs-kills-round4-false-red (2026-08-07): worktree-scratch
+# coordination dirs left at the repo root by the --loop quay-init worktree-root tests
+# (.quay-worktree-local/, .quay-worktree-local2/, .quay-wtl3/). Same gitignored family as
+# worktrees/ — untracked scratch, NOT test products; if left un-ignored they trip the suite-after
+# dirty-tree assertion (round-4 false red). First line of defense (git status never shows them);
+# complement to the assert-clean-tree exclusion, cross-annotated with
+# gap-assert-clean-tree-premise-void-under-concurrent-writers (AC3).
+# No trailing slash: `git check-ignore` must match these names even when absent
+# (the Contract measure counts 3 matches), not only when the scratch dirs exist.
+**/.quay-worktree-local*
+**/.quay-wtl*
 **/dist-sea/
+**/dist-sea-release/
 **/.quay/gate-events.jsonl
+**/.quay/supervisor-bus-ledger.jsonl
+**/.quay/inner-wakeup-heartbeat-refusals.jsonl
+# serve-send.ts runtime message-delivery receipts (SendMessage cross-session delivery record) — runtime
+# state, never git-tracked; same gitignored runtime-state family as gate-events.jsonl. A live file here
+# dirtied the checkout and made fan-in-ff-merge refuse (unrelated to the blocked task's code).
+**/.quay/message-receipts.jsonl
+# gap-ac115-spec-phase1-drive-single-worker (2026-08-22): the worker driver's per-task outcome record
+# (.quay/worker-outcome.jsonl) — runtime state, one line per driven task (SPEC-worker-driven-inner §4③:
+# outer reads it for cross-task checks, never git-tracked). Same gitignored runtime-state family as
+# gate-events.jsonl / dispatch-record.jsonl.
+**/.quay/worker-outcome.jsonl
+# gap-fan-in-workflow-lock-stale-runid-detached-holder (2026-08-28): the fan-in lock's
+# acquire/release event ledger (.quay/fan-in-lock-events.jsonl) + the fan-in lock's token
+# flag (.quay/fan-in-lock-token-*.json) + manager's fan-in failure classification
+# (.quay/fan-in-failure-classification.jsonl) — all runtime state, never git-tracked; a live file
+# here dirtied the checkout and made fan-in-ff-merge refuse the merge-mode ff (unrelated to the
+# blocked task's code). Same gitignored runtime-state family as worker-outcome.jsonl / gate-events.jsonl.
+**/.quay/fan-in-lock-events.jsonl
+**/.quay/fan-in-failure-classification.jsonl
+**/.quay/fan-in-lock-token-*.json
+# gap-mech-fan-in-log-webui-visible-clickable (2026-08-28): the mechanical fan-in process log
+# (.quay/fan-in-<task>-<runId>.log) + its per-run suite log (.quay/fan-in-suite-<task>-<runId>.log) —
+# both runtime state, never git-tracked; a live file here dirtied the checkout and made
+# fan-in-ff-merge refuse the merge-mode ff (unrelated to the blocked task's code). Same gitignored
+# runtime-state family as worker-outcome.jsonl / fan-in-lock-events.jsonl. The suite log
+# moves from /tmp to .quay/ (durable — /tmp is system-cleanup terrain;本机实测积压 3389 个遗留目录);
+# the bare `*.log` rule above would also match, but an explicit entry documents the intent.
+**/.quay/fan-in-*.log
+# gap-ac134-promotion-outcome-ledger (2026-08-22): the promotion driver's per-task outcome record
+# (.quay/promotion-outcome.jsonl) — runtime state, one line per determination/promotion/fix
+# (manager-phase-goal ### AC134: outer reads it for cross-task promotion-pattern recognition, never
+# git-tracked). Same gitignored runtime-state family as worker-outcome.jsonl / gate-events.jsonl.
+**/.quay/promotion-outcome.jsonl
+# gap-ac137-promotion-driver-production-enablement (2026-08-22): the promotion driver's production
+# launch state — round log (driver writes every round, AC130) + supervisor state files
+# (promotion-driver-launch.sh start/stop). All runtime state, never git-tracked; same gitignored
+# family as promotion-outcome.jsonl. ⚠ promotion-round.jsonl was a pre-existing gap (AC130 landed the
+# driver but never gitignored the round log) — surfaced now because AC137 turns the driver on in
+# production and the round log starts being written to the shared checkout.
+**/.quay/promotion-round.jsonl
+**/.quay/promotion-driver.pid
+**/.quay/promotion-driver-supervisor.pid
+**/.quay/promotion-driver.log
+**/.quay/promotion-driver-supervisor.log
+**/.quay/promotion-driver-liveness.log
+**/.quay/promotion-driver.stop
+# gap-ac138-worker-driver-production-enablement (2026-08-23): the worker driver's production
+# launch state — round heartbeat (unconditional per-loop record, AC138-3) + supervisor state files
+# (promotion-driver-launch.sh start/stop --kind worker) + control state (drain/control plane
+# worker-control.json). All runtime state, never git-tracked; same gitignored family as
+# worker-outcome.jsonl.
+**/.quay/worker-round.jsonl
+**/.quay/worker-control.json
+**/.quay/worker-driver.pid
+**/.quay/worker-driver-supervisor.pid
+**/.quay/worker-driver.log
+**/.quay/worker-driver-supervisor.log
+**/.quay/worker-driver-liveness.log
+**/.quay/worker-driver.stop
+**/.quay/worker-driver-inflight.pid
+# gap-ac143-observability-ledger-closing-driver (2026-08-26): the outer driver's production launch
+# state — round heartbeat (unconditional per-loop record, AC1 carrier) + supervisor state files
+# (driver-runtime start/stop --kind outer) + control state (drain/control plane outer-control.json).
+# All runtime state, never git-tracked; same gitignored family as worker-outcome.jsonl /
+# promotion-round.jsonl.
+**/.quay/outer-round.jsonl
+**/.quay/outer-control.json
+**/.quay/outer-driver.pid
+**/.quay/outer-driver-supervisor.pid
+**/.quay/outer-driver.log
+**/.quay/outer-driver-supervisor.log
+**/.quay/outer-driver-liveness.log
+**/.quay/outer-driver.stop
+# gap-ac144-quality-gate-shape-separated-driver (2026-08-26): the quality-gate driver's production
+# launch state — round heartbeat (unconditional per-loop record of B15/B17 routine facts) +
+# supervisor state files + control state (halt/control plane quality-control.json). All runtime
+# state, never git-tracked; same gitignored family as promotion/worker round+control.
+**/.quay/quality-round.jsonl
+**/.quay/quality-control.json
+**/.quay/quality-driver.pid
+**/.quay/quality-driver-supervisor.pid
+**/.quay/quality-driver.log
+**/.quay/quality-driver-supervisor.log
+**/.quay/quality-driver-liveness.log
+**/.quay/quality-driver.stop
+# gap-outer-message-bus-needs-file-inbox-transport (2026-08-09): the OUTER target's file-inbox
+# (.quay/outer-inbox/) is runtime message state (SPEC-inbox-service D1 — 收件箱不进 git 跟踪,
+# 不假设内容持久). Same gitignored runtime-state family as gate-events.jsonl — a real manager→outer
+# delivery must never appear in `git status --porcelain`.
+**/.quay/outer-inbox/
+# gap-manager-inbox-runtime-state-not-content (2026-08-12): the MANAGER's file-inbox
+# (.quay/manager-inbox/) is the SAME runtime-state family as outer-inbox — machine-local message
+# state, must never be git-tracked. vhs fan-in e851eab1 wrongly imported 113 inbox files (99 from
+# the other machine's history) as tracked content, breaking the A15 "列目录判空" criterion
+# (mtime reset to merge time ⇒ looks like 99 unread). Same gitignored runtime-state family as
+# gate-events.jsonl / outer-inbox.
+**/.quay/manager-inbox/
+# gap-precommit-guard-rejections-runtime-state (2026-08-12): the pre-commit guard's rejection ledger
+# (.quay/precommit-guard-rejections.jsonl) — runtime state (one line per rejected commit during a
+# running round), same family as gate-events.jsonl. NEVER committed: it is the guard's "did it
+# actually run" product — countably verifiable, not provenance.
+**/.quay/precommit-guard-rejections.jsonl
+# gap-assert-clean-tree-premise-void-under-concurrent-writers (2026-08-07): the before-run
+# porcelain snapshots for the suite-AFTER DELTA assertions (assert-clean-tree.sh --snapshot /
+# tmux-leak-scan.sh --snapshot). Same gitignored runtime-state family as gate-events.jsonl — a
+# snapshot is per-run transient state that must never appear in `git status --porcelain` (if it
+# did, the suite-AFTER check would see its own snapshot as NEW dirt).
+**/.quay/assert-clean-tree.snapshot
+**/.quay/tmux-leak-scan.snapshot
+# gap-fan-in-ff-clean-tree-gate-vs-runtime-state (2026-08-14, manager ② + outer 止损): the
+# fan-in ff-only merge script (fan-in-ff-merge.sh) hard-requires `git status --porcelain` empty,
+# but the loop's own runtime writes 5 un-ignored .quay/* state files (inner tick-log / wakeup
+# heartbeat / manager pending-send / task-file-violation-ledger / orphaned-suite-runner diff) ⇒
+# the gate is STRUCTURALLY unsatisfiable in this workspace (first ff via the new script would
+# `exit 2` on AC67's landing). Same gitignored runtime-state family as gate-events.jsonl — none
+# is committed provenance; all must never appear in `git status --porcelain`.
+**/.quay/inner-tick-log.jsonl
+**/.quay/inner-wakeup-heartbeat.jsonl
+**/.quay/manager-pending-send.txt
+**/.quay/manager-next-a20.txt
+**/.quay/manager-unescalated.txt
+**/.quay/task-file-violation-ledger.jsonl
+**/.quay/orphaned-full-suite-runner-*.diff
+# gap-sweeptmp-pkill-kills-live-observers-two-layer-blind (2026-08-08): the observer self-registry
+# files session-liveness.sh writes on resident start (candidate-D death detection). Per-pid
+# runtime state — must never appear in `git status --porcelain` (same family as gate-events.jsonl).
+**/.quay/session-liveness.*.json
+# gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses (2026-08-04): the Node compile
+# cache (NODE_COMPILE_CACHE) — same gitignored runtime-state family as gate-events.jsonl (DoD:
+# "与 gate-events.jsonl 同形"). On DISK by construction: scripts/test.sh pins it to
+# .quay/node-compile-cache (never $TMPDIR/tmpfs — the OOM family). A pure speedup: if absent, node
+# just runs uncached. Must stay untracked or the suite-after dirty check fails.
+**/.quay/node-compile-cache/
+**/.quay/heavy-op-token-events.jsonl
 **/.quay/prepare-leases/
+# gap-adaptive-concurrency-cap-tied-to-resource-gate: adaptive-cap hysteresis state (written by
+# cap-from-gate.ts at each dispatch decision point). Same gitignored runtime-state family as
+# gate-events.jsonl — the band decision is per-dispatch state, not committed provenance.
+**/.quay/concurrency-cap-state.json
 # DIR-124-A1a: per-run event log — transient diagnostic data, not committed provenance
 .workflow-events/
 # gap-no-explicit-blocked-signal-from-inner-layer (2026-08-03): the inner layer's explicit
@@ -33,6 +188,27 @@ experiment/timing/*.log
 # inner-blocked-signal.ts (AC4), never by hand. It must stay untracked: it is a live control-plane
 # signal that appears/disappears every time the inner layer stops and resumes.
 **/.quay/inner-blocked.json
+# gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer (2026-08-05): the parameterized
+# observation primitive's namespaced signal + per-target observer counter for NON-inner targets
+# (--target outer/manager writes .quay/blocked-signals/<target>.json + .<target>-observer-state.json).
+# Same gitignored live control-plane family as inner-blocked.json/.ruling-observer-state.json — these
+# files appear/reset every observation poll and MUST stay untracked (committing them would dirty the
+# tree the transcript composite requires clean).
+**/.quay/blocked-signals/
+# gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick (2026-08-04): the pane
+# observer's rolling multi-sample counter — same gitignored runtime-state family as inner-blocked.json.
+# Must stay untracked: it is live observer state (consecutive needs-input samples) that advances and
+# resets every 60s poll; committing it would dirty the tree the transcript composite requires clean.
+**/.quay/.ruling-observer-state.json
+# gap-quay-last-pane-txt-untracked-dirties-tree (2026-08-10): the tick §1 observe pane-snapshot
+# artifacts — `tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt` (outer observes inner,
+# orchestrator-tick-core A4/A7, fast-mode-tick-core A7) and `> .quay/last-outer-pane.txt` (manager
+# observes outer, orchestrator-loop-tick.md AC5). Same live observation-snapshot family as
+# blocked-signals/ / .ruling-observer-state.json — per-tick transient state that must never appear in
+# `git status --porcelain` (un-ignored they dirty the tree and diverge the two "clean" checkers:
+# assert-clean-tree's porcelain vs tree-hygiene-check's KNOWN SCRATCH patterns).
+**/.quay/last-pane.txt
+**/.quay/last-outer-pane.txt
 # outer correction 2026-08-03T02:45:03Z (idle instrumentation): the inner layer's append-only
 # idle-reason log — a separate, non-signal channel from inner-blocked.json. One line per
 # "round ended, no pending work" turn; no duration (the outer computes it from transcript gaps).
@@ -42,6 +218,135 @@ orchestration/inner-idle-log.jsonl
 # checkpoint — same per-workspace gitignored runtime-state family as prepare-leases/, never
 # committed (the task's own '## Proposal'/AC/Plan stay the single authoritative content source).
 **/.quay/prepare-checkpoints/
+# gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree's suite-after dirty-check flagged
+# this as a false positive (2026-08-04 second-OOM recovery fan-in): the loop-driver registry
+# (plugin/scripts/loop-driver-check.sh) writes it directly into the shared checkout by design —
+# same live control-plane-state family as gate-events.jsonl/inner-blocked.json, not a test
+# artifact. It predates any test run in this session (created 02:40:46Z at cold-start).
+**/.quay/loop-driver.jsonl
+# gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async: the outer layer's
+# append-only verification-round record (one line per round: round/at/suiteGreen/closed ids). Same
+# live control-plane-state family as gate-events.jsonl/inner-blocked.json — written by the outer's
+# async closure pass, read by the inner's stop condition; never committed.
+**/.quay/verification-round.jsonl
+# gap-obligation-ledger-mechanization: the derived obligation-ledger jsonl (one round record per
+# verification round + discharge/defer events). Same live runtime-state family as verification-round
+# — written by obligation-ledger.ts, read by obligation-ledger-check.ts; never committed.
+**/.quay/obligation-ledger.jsonl
+# gap-no-criterion-records-its-own-cost-checker-cost-jsonl: the per-criterion pure-append cost
+# ledger — one line {name, ms, n, load, exit, ts} per checker/gate execution (written by
+# plugin/scripts/checker-cost.sh). Same live runtime-state family as verification-round.jsonl /
+# gate-events.jsonl; never committed (the trend criterion reads it as a passive reader).
+**/.quay/checker-cost.jsonl
+# gap-red-window-has-no-automatic-executor (2026-08-05): the outer background suite's runtime state
+# + the suite-state trigger's transition event log + memo — same live control-plane-state family as
+# gate-events.jsonl/verification-round.jsonl (written by full-suite-runner.ts / suite-state-trigger.ts,
+# read by the inner stop condition / outer Monitor; never committed).
+**/.quay/full-suite-state.json
+**/.quay/full-suite.log
+**/.quay/suite-state-events.jsonl
+**/.quay/suite-state-last.json
+# gap-test-detail-load-timeseries: the per-run suite-load sampler's timeseries + pid sidecar —
+# same live runtime-state family as full-suite-state.json / verification-round.jsonl (written by
+# suite-load-sampler.ts while a suite runs, read by the /tests load curve; never committed).
+**/.quay/suite-load-*.jsonl
+**/.quay/suite-load-*.pid
+# DIR-123 (2026-08-11): develop-deliver-tgz.sh runtime state — same live control-plane-state family as
+# full-suite-state.json (lastDelivered commit + per-host http_code; read by the outer tick for
+# freshness; never committed).
+**/.quay/develop-deliver-state.json
+**/.quay/deliver-run.log
+**/.quay/deliver-worktree-*/
+# gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace: the slot-free trigger's append-
+# only SLOT-FREE event log + its transition memo — same live control-plane-state family as
+# suite-state-events.jsonl / gate-events.jsonl (written by slot-free-trigger.ts, read by the outer
+# Monitor + tick; never committed — the event IS runtime state, not provenance).
+**/.quay/slot-free-events.jsonl
+**/.quay/slot-free-last.json
+# AC62 fan-in ff-only protocol (gap-ac62-fan-in-ff-merge-lock-protocol): the merge-lock event log
+# and the ff retry-record are runtime state — written by fan-in-ff-merge.sh, read by
+# fan-in-ff-protocol-check.ts; never committed (same family as gate-events.jsonl).
+**/.quay/fan-in-merge-lock-events.jsonl
+**/.quay/fan-in-retries.jsonl
+# fan-in ff escalation record (gap-gitignore-fan-in-ff-escalations): the anti-livelock escalation
+# record is runtime state — written by fan-in-ff-merge.sh (SPEC §7), same family as
+# fan-in-retries.jsonl / gate-events.jsonl; never committed (untracked would dirty `git status
+# --porcelain` and trip fan-in-ff-merge.sh's own clean-tree check at exit 2).
+**/.quay/fan-in-ff-escalations.jsonl
+# doc↔develop sync event record (gap-doc-develop-sync-semantic-conflict-resolution): runtime
+# telemetry written by driver-filters.ts propagateDocBranchToDevelop / semanticSyncDocToDevelop on
+# mechanical ff-only failure + semantic-fallback outcome; never committed (same family as
+# worker-outcome.jsonl / fan-in-ff-escalations.jsonl — an untracked file would dirty `git status
+# --porcelain` and make the failure observable only as a dirty tree, not as a distinct event).
+**/.quay/doc-develop-sync.jsonl
+# AC72 cert retire (gap-ac72-cert-mechanism-retire): the per-task suite record is runtime state in
+# the SHARED checkout (written by per-task-suite-record.ts from a task worktree, read by
+# per-task-suite-record-check.ts); never committed (same family as full-suite-state.json).
+**/.quay/per-task-suite-records.jsonl
+# AC89 productization verification record (gap-ac89-productization-verification-record): the
+# productization state (AC85 build / AC86 dist-verify equivalent path / AC88 cross-host) is runtime
+# state in the SHARED checkout (written by productization-verification-record.ts from a task worktree,
+# read by productization-verification-record-check.ts); never committed (same family as
+# per-task-suite-records.jsonl / full-suite-state.json).
+**/.quay/productization-verification.jsonl
+# gap-runtime-state-files-not-gitignored (2026-08-10): 5 runtime state files fell through the
+# per-file .gitignore (there is NO `**/.quay/*` wildcard) — last-pane.txt (pane-state-classify
+# product), suite-cgroup-evidence.txt / suite-chain-heartbeat.json / suite-health-last-run.json
+# (suite-fix chain products), closure-pass-last-run.json (B2 closure accounting). Same live
+# runtime-state family as full-suite-state.json / gate-events.jsonl; never committed. All 5 were
+# ALSO accidentally tracked via fan-in ae47d845 — git rm --cached'd in the same gap.
+**/.quay/last-pane.txt
+**/.quay/suite-cgroup-evidence.txt
+**/.quay/suite-chain-heartbeat.json
+**/.quay/suite-health-last-run.json
+**/.quay/closure-pass-last-run.json
+# gap-inner-wakeup-heartbeat-invisible: inner's ScheduleWakeup fallback heartbeat product — runtime
+# state written by inner each time it reschedules (ts/delaySeconds/reason), read by the OUTER tick's
+# A13 checker (inner-wakeup-heartbeat-check.ts). Same class as suite-chain-heartbeat.json: never commit.
+**/.quay/inner-wakeup-heartbeat.json
+# gap-inner-subagent-budget-invisible: inner's subagent spawn-budget product — runtime state written
+# by inner before each dispatch decision ({spawned, limit, lastSpawnAt, hitLimit}), read by the OUTER
+# tick (inner-agent-budget-report.ts). The 200/200 harness ceiling is a silent dispatch killer — the
+# product makes it readable. Same class as suite-chain-heartbeat.json: never commit.
+**/.quay/inner-agent-budget.json
+# gap-resource-gate-no-single-flight-lock-two-suite-overlap: the single-flight lock FALLBACK path
+# (<repo_root>/.quay/full-suite.lock) used only when git-common-dir is unavailable (a non-git copy).
+# The PRIMARY path is <git-common-dir>/full-suite.lock (inside .git/, invisible to git status). The
+# file must PERSIST (never unlink a flock'd file — classic flock+unlink race), so ignore it.
+**/.quay/full-suite.lock
+# gap-single-file-test-duration-trend-unwatched (AC1): the append-only per-file duration history
+# (one line {round, runAt, file, durationMs, passed, laneCount, logDigest} per test file per round,
+# written by full-suite-runner.ts after every suite via measure-trend-check.ts). Same live
+# runtime-state family as verification-round.jsonl / full-suite.log; never committed.
+**/.quay/measure-history.jsonl
+# gap-quay-runtime-files-tracked-but-shouldnt (2026-08-25): 5 runtime products under .quay/ were
+# accidentally TRACKED (git rm --cached'd in the same gap). test.sh.lock (scripts/test.sh
+# single-flight lock), full-suite-state.json.suitefix-bak (suite-fix backup), no-code-caller-triage.jsonl
+# + no-code-caller-triage-rescan.jsonl (gap-ac111 triage dumps) — machine-local runtime state /
+# one-off task outputs,
+#
+# 2026-08-26 更正 (gap-suite-bucket-reattribution-untracked-regression): 该批原列 5 个, 其中
+# suite-bucket-reattribution.jsonl 是误分类 —— 它不是运行时产物, 而是 AC121 的一次性判定记录
+# (230 行 {file,judgment,mechanism,signal}), 被 plugin/scripts/suite-bucket-select.ts:45/:144 当
+# 输入读入, 且 plugin/test/suite-bucket-select.test.mjs:52 断言 reattr.size > 0。去跟踪后
+# git worktree add 出的 worktree 结构上拿不到它 => 每个 worktree 的 suite 必红 (08-26 01:14 起实测 4 次)。
+# 已恢复跟踪、从本清单移除。
+# 判据教训: 判「运行时产物 vs 数据资产」不能只看「在 .quay/ 下 + 像 jsonl」,
+#   必须查【有没有代码把它当输入读】—— 有读取侧消费者的就是数据资产。
+# same family as full-suite-state.json / verification-round.jsonl; never committed. The 3 .quay/ files
+# that ARE deliberately tracked (profiles.yml / red-on-omission-manifest.md /
+# outer-inflight-coordination-20260812.md) stay tracked — reasons in the task Evidence.
+**/.quay/test.sh.lock
+**/.quay/full-suite-state.json.suitefix-bak
+**/.quay/no-code-caller-triage.jsonl
+**/.quay/no-code-caller-triage-rescan.jsonl
+# gap-bucket-second-truth-source-page-recompute: the effective bucket-attribution artifact is a RUNTIME
+# DERIVED product (recomputed on every bucket dispatch by suite-bucket-select.ts, read by the /tests
+# page serve-tests.ts as the single truth source) — same family as verification-round.jsonl /
+# suite-load-*.jsonl; never committed. (The reattribution INPUT .quay/suite-bucket-reattribution.jsonl
+# is a tracked data asset — a reading consumer exists; this OUTPUT has none that would need a committed
+# value, only a page reader that degrades to UNRESOLVED when absent.)
+**/.quay/suite-bucket-effective.jsonl
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/
@@ -80,3 +385,62 @@ milestones/M9[0-9][0-9][0-9][0-9][0-9]/
 # the same shape of orphan behind.
 docs/plans/M997-*.md
 milestones/M997/
+/.quay/config.yml
+
+# 管理者 tick 记账（人 2026-08-07 裁定「记账进 gitignore」）
+# 理由：tick-log 是【运行时遥测】不是代码——没有任何测试或检查依赖它的版本与代码版本对齐，
+# 把它绑在分支模型上是白付合并成本。实测：develop 独有的 338 条里 328 条（97%）是三层的
+# tick 记账，只有 8 条是真内容；它们让批量合从 FF 变成真合并，且是脏树断言的写入者之一。
+# 与 .quay/gate-events.jsonl、milestones/fast-mode-telemetry/*.json 同类。
+# 历史保留在 git 里（155 个提交），从此不再新增。
+orchestration/manager-tick-log.md
+
+# 外层 + 内层 tick 记账（人 2026-08-07 16:1x 裁定「outer 和 inner 也进 gitignore」）
+# 同管理者：运行时遥测非代码，tick-log 可丢失（人明确接受的代价），历史 commit 不动。
+# 实测：develop 独有 341 条里 328 条（96%）是三层 tick 记账，只有 8 条真内容。
+# 自审/收尾必须读磁盘文件（tail），不读 git（文件可丢失）。
+orchestration/tick-log.md
+
+# 快照遥测（gap-b15-telemetry-snapshot-untracked，2026-08-14）——milestones/fast-mode-telemetry/*.json
+# 是运行时遥测不是代码，同 :242 的 tick-log / gate-events.jsonl 分类：B6 每 tick 由
+# fast-mode-telemetry.ts --snapshot 照写磁盘（writeAggregateReport → fs.writeFileSync），8 个读者
+# （slot-refill / quay-suite / select-tests-for-touches / accounting-emit / supervisor-preempt-candidates /
+# task-ac-carryover-check / inner-panel-stale-check / capability-catalog.sh）按位置读磁盘文件不读 git，
+# git rm --cached 只移除索引、磁盘文件仍在 ⇒ 读者无碍。之前每条 telemetry commit 都推进 develop 并
+# 可能在 in-flight suite 窗口内打断 ff-only fan-in（fan-in-ff-merge.sh 要求 porcelain 空，tracked 树里的
+# telemetry 文件会弄脏它）⇒ 收敛 14→~1/6h。历史 12 个提交保留在 git 里（git rm --cached），从此不再新增。
+milestones/fast-mode-telemetry/*.json
+# AC55 派发记录（tasks/gap-ac55-dispatch-record-fingerprint-reason）——运行时遥测非代码，同 tick-log
+# 的理由：inner 每派发一条就 append 一行（带倾向文件指纹 + 一句理由），它是运行时状态不是代码，
+# 不进 git（历史可丢弃，检查器读磁盘当前文件）。其指纹指向的倾向文件 orchestration/dispatch-preference.md
+# 是 git 可见的正本；本记录是它被消费的证明，但证明本身是运行时产物。
+orchestration/dispatch-record.jsonl
+# AC145 语义面派发记录（tasks/gap-ac145-semantic-face-subagent-manager-driven）——同 dispatch-record.jsonl
+# 的运行时遥测家族：manager 每派一条语义 subagent 就 append 一行（职责类别 + 一句理由），运行时状态
+# 不是代码，不进 git（历史可丢弃，查询面读磁盘当前文件）。
+orchestration/semantic-face-dispatch-record.jsonl
+docs/analysis/batch2-queue-state.md
+
+# 管理者的待办队列（条件触发项）——运行时状态不是代码，人 2026-08-08 02:3x 裁定：
+# 不进 git，manager 重启后丢失可接受。内容全部可从仓库重新推导（分析可重跑、grep 可重搜），
+# 丢的只是"待办意图"。同 tick-log 的理由：运行时状态不是代码。
+orchestration/manager-pending.md
+# gap-probe-mechanism-dead-15-days-rewire-to-two-layer (2026-08-07): the routine track's per-routine
+# last-run epoch-ms map (written by the run-routines skill after each probe fires, read by
+# routine-scheduler.ts's interval:<N>m triggers every tick). Same gitignored runtime-state family as
+**/.quay/routine-last-run.json
+
+# gap-task-store-parse-cost-0-8s-compounds-suite-slowdown (2026-08-13): the native store's
+# persistent parse cache — a runtime derived artifact written to <tasksDir>/.quay-parse-cache.json
+# by store.ts's list() surface (frontmatter keyed by mtimeMs/size; never tracked, rebuildable
+# from the .md files themselves on any machine). Same gitignored runtime-state family as the
+# routine-last-run / tick-log entries above: it is a cache, not code, and git status must stay
+# clean when the CLI or a test materializes it.
+**/.quay-parse-cache.json
+# gap-b15-pool-quality-judge-state-persist (2026-08-14): pool-quality-judge 完成态持久化
+# (.quay/pool-quality-judge-state.json lastRound) — written by pool-quality-judge.ts
+# --record-last-round at the judge workflow's completion path, read by readLastJudgeRoundState.
+# Same gitignored runtime-state family as gate-events.jsonl / routine-last-run.json: it is
+# machine-local judge state (rebuilt by the next judge), never committed provenance, and must
+# never appear in `git status --porcelain` (the fan-in ff-clean-tree gate depends on that).
+**/.quay/pool-quality-judge-state.json

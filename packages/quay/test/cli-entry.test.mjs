@@ -11,7 +11,7 @@
 // test/helpers/) so scripts/test.sh's `packages/*/test/*.test.mjs` glob picks
 // it up; it imports the pure resolution machinery from ./helpers/cli-entry.mjs.
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -25,9 +25,17 @@ import {
   QUAY_NATIVE_CLI,
 } from "./helpers/cli-entry.mjs";
 
+// Every fake tree is removed once at the end of this file (the doc-store/adr-store carrier-array
+// + after() pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 /** Build a fake package tree: {src/, bin/, dist/} with the given .ts/.js files. */
 function makeFakePkg(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cli-entry-test-"));
+  _tmpDirs.push(root);
   for (const [rel, body] of Object.entries(t.files ?? {})) {
     const full = path.join(root, rel);
     fs.mkdirSync(path.dirname(full), { recursive: true });

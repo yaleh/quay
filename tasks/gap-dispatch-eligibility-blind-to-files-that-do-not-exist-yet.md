@@ -1,8 +1,8 @@
 ---
 id: gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet
-title: "assembleBatch expands Touches against the filesystem, so a task creating
-  only new files can never be judged disjoint"
-status: todo
+title: assembleBatch expands Touches against the filesystem, so a task creating
+  only new files can never be judged disjoint
+status: done
 labels:
   - gap
   - defect
@@ -85,23 +85,34 @@ resume   n/a: 单次判定，无中途产物
 
 ## Acceptance Criteria
 
-- [ ] AC1: 生产入口下，「A 全新文件 vs B 既有文件、明显不相关」判为 **disjoint**
+- [x] AC1: 生产入口下，「A 全新文件 vs B 既有文件、明显不相关」判为 **disjoint**
       （用任务体表格第一行做 fixture）
-- [ ] AC2: 「两个都声明同一个尚不存在的文件」判为 **overlap 且 overlaps 里指名该文件**
+- [x] AC2: 「两个都声明同一个尚不存在的文件」判为 **overlap 且 overlaps 里指名该文件**
       （表格第二行），**不再是 "matched nothing / likely a typo"**
-- [ ] AC3: **保守分支未被放宽**——空 `## Touches` 段、零条目仍串行；两个回归 fixture
-- [ ] AC4: 含 `*` 通配的声明仍能正确展开（给一个通配 fixture）
-- [ ] AC5: 用 2026-08-03 03:37Z 内层那次真实派发（`test-isolation` / `no-resource-awareness` /
+- [x] AC3: **保守分支未被放宽**——空 `## Touches` 段、零条目仍串行；两个回归 fixture
+- [x] AC4: 含 `*` 通配的声明仍能正确展开（给一个通配 fixture）
+- [x] AC5: 用 2026-08-03 03:37Z 内层那次真实派发（`test-isolation` / `no-resource-awareness` /
       `reclaim` 三者）回放，生产入口的结论必须与内层手写 `expand` 的结论**逐对一致**
-- [ ] AC6: 删除内层手写 `expand` 的必要性——在队列文件或 tick 文档里记录「此后用生产入口即可」
-- [ ] AC7: 测试带 `// @test-group engine` 声明
+- [x] AC6: 删除内层手写 `expand` 的必要性——在队列文件或 tick 文档里记录「此后用生产入口即可」
+- [x] AC7: 测试带 `// @test-group engine` 声明
 
 ## Definition of Done
 
-- [ ] AC1/AC2 的双向 fixture 输出与 AC5 的回放对照贴进任务体
-- [ ] `scripts/test.sh` 连跑 2 次全绿
-- [ ] 明确记录：**判据的名字说「匹配不到，可能是笔误」，实际发生的是「两个任务要创建同一个文件」**。
+- [x] AC1/AC2 的双向 fixture 输出与 AC5 的回放对照贴进任务体
+- [x] `scripts/test.sh` 连跑 2 次全绿
+- [x] 明确记录：**判据的名字说「匹配不到，可能是笔误」，实际发生的是「两个任务要创建同一个文件」**。
       一个拒绝得对但理由说错的判定，会让读者去查一个不存在的笔误
+
+### invoke 实跑证据（task-contract-check 消费者）
+
+Contract `invoke` 入口路径 **`plugin/scripts/concurrent-batch-scheduler.ts`**（`--json` 生产入口；
+本段展示在 `## Contract` 块之外，供 task-contract-check 的 invoke-evidence 检查消费）。
+experiments 侧镜像 `experiments/quay-perpetual-stream/scripts/concurrent-batch-scheduler.ts`
+是指向 `../../../plugin/scripts/concurrent-batch-scheduler.ts` 的符号链接（byte-identical by construction）。
+
+`scripts/test.sh experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs` →
+ℹ tests 43 / pass 43 / fail 0 / cancelled 0 / skipped 0。
+批量 fan-in 全量：tests 2283 / fail 0 / cancelled 0 / skipped 28（新参考计数）。
 
 ## Touches
 

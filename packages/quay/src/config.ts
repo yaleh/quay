@@ -43,6 +43,28 @@ export function loadConfig(startDir = process.cwd()) {
  * Explicit-id selection does not require the provider to be `enabled: true`
  * in config — enabled/disabled only affects the *default* pick.
  */
+/**
+ * Returns the `.quay/config.yml` `loop:` section — the three target-project values
+ * (repo_root / test_command / tmux_session) that `quay-init --loop` writes as the single
+ * config source for the two-layer loop (SPEC AC2/AC3). Returns null when absent.
+ *
+ * gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them: install is
+ * configuration-driven, not text-substitution — laid-down files are byte-identical to the
+ * product (SPEC AC1) and scripts / tick docs READ these values at runtime instead of having
+ * them baked in at install. `loop.test_command` is the value that would previously have been
+ * text-substituted for `scripts/test.sh` in the laid-down tick docs.
+ */
+export function readLoopConfig(startDir = process.cwd()) {
+  try {
+    const { config } = loadConfig(startDir);
+    const loop = config.loop;
+    if (loop && typeof loop === "object") return loop;
+  } catch {
+    // no .quay/config.yml found — no loop config to read
+  }
+  return null;
+}
+
 export function activeProvider(cfg, id) {
   const providers = cfg.config.providers ?? {};
   if (id) {

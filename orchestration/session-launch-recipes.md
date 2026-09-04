@@ -216,3 +216,62 @@ POST https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages
 交接文档原名 `handover-for-flash.md`——**绑死在模型名上，第二次换模型就过时了**。
 已改为 `handover-for-successor.md`。
 **给继任者的东西不要用当时那个继任者的名字命名。**
+
+---
+
+## 6. L0：tmux 隔离不依赖启动命令（2026-08-04）
+
+`gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX`（L0）落地后：
+
+- **L0 落地前**：会话启动命令**不带** `env -u TMUX`（`restart-plan-2026-08-04-third.md` AC4 已定——
+  重启不是引入未验证变量的地方；当前 outer/inner 的 `TMUX` 是设着的）。
+- **L0 落地后**：启动命令**可以**加 `env -u TMUX`，但**隔离不再依赖它**——
+  主防线是 `plugin/scripts/tmux-isolated.sh` 的**显式 `-S`**（`env -u TMUX tmux -S <私有 socket> "$@"`），
+  结构性压过「调用方是否记得 unset TMUX」。
+
+**给临时探索路径的安全模板**：任何子代理/临时的 tmux 操作，一律经
+`plugin/scripts/tmux-isolated.sh <子命令>`——即使误发 `kill-server`，也只能杀掉该私有 socket，
+**真实默认服务端（quay-0）不受影响**。需要访问真实默认服务端的仓库脚本
+（`session-liveness.sh` 的只读 pane 探针、`quay-init.sh` 的会话探测）走等价显式形态
+`env -u TMUX tmux -S "${TMPDIR:-/tmp}/tmux-$(id -u)/default" ...`，并在各自头部明示。
+
+---
+
+## 7. 启动配置已结晶：`.claude/launch.settings.json`（2026-08-05，gap-crystallize-launch-config）
+
+本文件此前是「只活在某个人的操作里」的配方（§4）。现在**启动参数已结晶进检查进仓库的
+`.claude/launch.settings.json`**，冷启动通过 `plugin/scripts/quay-launch.sh` 机械加载，不再手打一行。
+
+- **settings-schema 键**（`--settings` 直接消费）：`permissions.defaultMode=bypassPermissions`、
+  `env`（917000 上下文/压缩 + ADR-016 两个 `DISABLE_*` + `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION="false"`）。
+  **角色级 env**：917k 上下文/压缩是 **deepseek 专用**——outer/inner 直接用文件全量 env；manager 跑
+  Anthropic 默认模型，`_launchSpec.roles.manager.env` 把三个 917k 变量置空串（launcher 合并时删键，
+  session-launch-recipes §5 的「压缩过晚 API 报错」形态不发生在 manager）。
+- **flag-only 参数**（settings.json 没有对应键，存于 `_launchSpec`，由 launcher 翻译成 CLI 参数）：
+  `--exclude-dynamic-system-prompt-sections`（`_launchSpec.excludeDynamicSystemPromptSections:true`）、
+  `--prompt-suggestions false`（`_launchSpec.promptSuggestions:false`，**REQUIRED**——ghost-suggestion
+  故障 6 从源头消除，人裁定冷启动必带；`gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false`）、
+  `-n/--name`（`_launchSpec.roles.<role>.name`）、`--bare`（一次性验证，`quay-launch.sh <role> --bare`）、
+  `--model`（`_launchSpec.roles.<role>.model`，仅 outer/inner 有；manager 用 claude 默认）。
+
+**逐角色启动命令（launcher 生成，`--dry-run` 可校验）：**
+
+```bash
+bash plugin/scripts/quay-launch.sh outer --dry-run
+# claude-deepseek --settings <root>/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --prompt-suggestions false --model deepseek-v4-flash -n quay-outer
+bash plugin/scripts/quay-launch.sh inner --dry-run
+# claude-deepseek --settings <root>/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --prompt-suggestions false --model deepseek-v4-flash -n quay-inner
+bash plugin/scripts/quay-launch.sh manager --dry-run
+# claude --settings <root>/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --prompt-suggestions false -n quay-manager
+```
+
+`--prompt-suggestions false` 是 **REQUIRED**（非可选）——每个角色命令都必须出现（launcher 从
+`_launchSpec.promptSuggestions:false` 机械翻译；`plugin/test/launch-settings.test.mjs` 有机械断言）。
+
+- **验命令**（AC4 正控）：`claude --settings .claude/launch.settings.json --version`。
+- **负控**（防 restart-plan-AC1 那类「选错模型」）：刻意改 `_launchSpec.roles.<role>.model` ⇒
+  launcher `--dry-run` 输出即变，`plugin/test/launch-settings.test.mjs` 有机械断言。
+- **-p 条件性三项**（`--replay-user-messages` / `--max-budget-usd` / `--forward-subagent-text`）
+  记在 `_launchSpec.deferredToPpMigration`，延后到 -p 迁移决定，不现在实现。
+
+**CLAUDE_CODE_* 内部环境变量不推荐使用**（无官方背书、随时可变），不进 settings 文件。

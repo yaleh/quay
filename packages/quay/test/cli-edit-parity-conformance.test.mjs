@@ -29,20 +29,29 @@
 // an external grep/glob exclusion list. Opt in with QUAY_TEST_LIVE_GITHUB=1
 // (requires GH_TOKEN / `gh auth login` with write access to yaleh/quay).
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+
+// The native-leg fixture dirs are removed once at the end of this file (the carrier-array +
+// after() pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 import fs from "node:fs";
 import os from "node:os";
+import YAML from "yaml";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const LIVE_GITHUB_ENV = "QUAY_TEST_LIVE_GITHUB";
 const liveGithubEnabled = process.env[LIVE_GITHUB_ENV] === "1";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const quayBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 
@@ -69,6 +78,8 @@ async function main() {
   // ============================= NATIVE LEG =============================
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-edit-conf-native-tasks-"));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-edit-conf-native-ws-"));
+  _tmpDirs.push(tasksDir);
+  _tmpDirs.push(workspaceRoot);
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(
     path.join(workspaceRoot, ".quay", "config.yml"),
@@ -108,6 +119,43 @@ async function main() {
     const ok = r.status === 0 && JSON.parse(r.stdout).title === t0.title;
     record("native", "title-two-provider", ok,
       `quay task edit CEP-1 --title "<same title>" -> exit=${r.status}, title matches=${ok}`);
+  }
+
+  // gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter: hazardous
+  // titles must be YAML-safe-serialized by the write side through the REAL Core
+  // CLI → native provider → store path. A title containing a space+`#` (YAML
+  // comment start) or `: ` (nested-mapping start) written UNQUOTED would
+  // truncate / fail to parse; the fix must quote it so the file still parses
+  // and the read-back title is byte-identical (AC1/AC2 conformance probe).
+  {
+    const hazardous = "The ## Contract";
+    const r = run(["task", "edit", "CEP-1", "--title", hazardous, "--json"], spawnOpts);
+    const t = JSON.parse(r.stdout || "null");
+    const filePath = path.join(envTasksDir, "CEP-1.md");
+    const raw = fs.readFileSync(filePath, "utf8");
+    const m = /^---\n([\s\S]*?)\n---/.exec(raw);
+    let parsed = null;
+    let parseErr = null;
+    try { parsed = YAML.parse(m[1]); } catch (e) { parseErr = e; }
+    const ok = r.status === 0 && t?.title === hazardous && !parseErr && parsed?.title === hazardous;
+    record("native", "hazardous-title-space-hash", ok,
+      `quay task edit CEP-1 --title "${hazardous}" -> exit=${r.status}, ` +
+      `read-back title matches=${t?.title === hazardous}, file parses=${!parseErr}, parsed=${JSON.stringify(parsed?.title)}`);
+  }
+  {
+    const hazardous = "god-package: gate/ has fanOut=62";
+    const r = run(["task", "edit", "CEP-1", "--title", hazardous, "--json"], spawnOpts);
+    const t = JSON.parse(r.stdout || "null");
+    const filePath = path.join(envTasksDir, "CEP-1.md");
+    const raw = fs.readFileSync(filePath, "utf8");
+    const m = /^---\n([\s\S]*?)\n---/.exec(raw);
+    let parsed = null;
+    let parseErr = null;
+    try { parsed = YAML.parse(m[1]); } catch (e) { parseErr = e; }
+    const ok = r.status === 0 && t?.title === hazardous && !parseErr && parsed?.title === hazardous;
+    record("native", "hazardous-title-colon-space", ok,
+      `quay task edit CEP-1 --title "${hazardous}" -> exit=${r.status}, ` +
+      `read-back title matches=${t?.title === hazardous}, file parses=${!parseErr}, parsed=${JSON.stringify(parsed?.title)}`);
   }
 
   // §5.2 --extra, native round-trip.

@@ -1,0 +1,550 @@
+# AC58 退役条款归档（retired-clauses archive）
+
+> **本文件是 AC58（`tasks/gap-ac58-retired-clauses-delete-and-archive.md`）的落点。**
+> 每条退役条款 / 退役标注从高频读取文件删除后，**正文落在此处**；高频文件只留**一行指针**指向本节。
+> **落点映射**：每条的唯一词条 → 本文件的 `<id>` 锚点。删除提交必须携带本映射（CLAUDE.md 硬规则⑤：
+> 验的是「全部有家」不是「抽查几个有家」）。
+>
+> 校验器：`plugin/scripts/retired-clause-check.ts` —— 每条注册项：①正文词条必须**已从源文件删除**
+> （源文件 0 命中）；②正文词条必须**在本文件有家**（本文件 ≥1 命中）。负控制（AC58 判据3）见
+> `plugin/test/retired-clause-check.test.mjs` 与 `plugin/scripts/checker-mutation-cases/retired-clause-check.sh`。
+
+---
+
+## R01 — outer B4 批量合（integration-batch-merge.sh 退役）
+
+**来源**：`orchestration/orchestrator-tick-core.md` B 段 B4
+**退役**：AC48 2026-08-13，integration 分支已退役
+**正文**（原文迁出保留）：
+
+```
+- **B4 批量合【RETIRED — AC48 2026-08-13,integration 分支已退役】**:原为 `integration-batch-merge.sh --develop develop --integration integration` 把 integration 批量合回 develop——integration 删除后该命令无目标、不再执行（全局轮亦已停,per-task 模型下每任务合入 develop 即生效）。**develop 落后上界(2026-08-10 裁定)仍有效但引用对象变了**:integration 领先 develop 改指「develop 落后 origin/vhs 对应线」或直接删（开发落后是唯一在累积的成本,保留 escalate 判据） (src:890 "批量合 integration→develop",902 "develop 不推进";AC48 退役)
+```
+
+---
+
+## R02 — inner-state.sh 退役说明（orchestrator-loop-tick.md 0b 事件式监测）
+
+**来源**：`plugin/loop/orchestrator-loop-tick.md` 0b 事件式监测
+**退役**：2026-08-02 实测后 inner-state.sh 退役（不观测会话）
+**正文**（原文迁出保留）：
+
+```
+`inner-state.sh` 已退役——它不观测会话（`tmux` 命中 0），它的招牌信号 `.quay/inner-blocked.json`
+在三个项目里从未产生，包括我们撞上过的唯一一次真实事故（那 68 分钟也没有它）。
+```
+
+---
+
+## R03 — AC12 已随 inner-state.sh 退役而收口
+
+**来源**：`plugin/loop/orchestrator-loop-tick.md` 外层监视器
+**退役**：AC12 随 inner-state.sh 退役而收口
+**正文**（原文迁出保留）：
+
+```
+**外层挂一个监视器（AC12 已随 inner-state.sh 退役而收口）——它答「会话还在不在」：**
+```
+
+---
+
+## R04 — AC48 integration 分支退役（orchestrator-loop-tick.md 实例量）
+
+**来源**：`plugin/loop/orchestrator-loop-tick.md` 实例量表（工作分支 / 外层工作 checkout）
+**退役**：AC48 2026-08-13 退役 integration 分支（AC50 已切 develop）
+**正文**（原文迁出保留）：
+
+```
+| 工作分支（**单线**，AC48 2026-08-13 退役 integration） | `fork_baseline: develop` / `merge_target: develop`（`.quay/config.yml` `loop:` 节）——per-task 模型：任务从 develop fork、worktree 内验证、merge 回 develop | 步骤 3b / A6 fan-in |
+| 外层工作 checkout | **develop**（AC50 已切，AC48 确认 integration 退役）——外层一切提交落 develop，无第二线 | 启动方式 / 各提交步 |
+```
+
+---
+
+## R05 — `.claude/loop.md` 已删除（exp5 退役）——调用方式
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 顶部「调用方式」
+**退役**：exp5 退役（`.claude/loop.md` 已删除）
+**正文**（原文迁出保留）：
+
+```
+**调用方式**（`.claude/loop.md` 已删除——exp5 退役；`/loop` 带显式 prompt 时不读该文件）：
+```
+
+---
+
+## R06 — heavy-op-token.sh 整体退休 + 「一次只跑一个重测试」约束退役
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 已知负载敏感族
+**退役**：2026-08-06 人裁定整体退休 heavy-op-token.sh；放宽实验前提不再存在
+**正文**（原文迁出保留）：
+
+```
+放宽实验（第三步：把重活令牌从单飞放宽到两个
+并发套件，= 负载翻倍——`heavy-op-token.sh` 已随 2026-08-06 人裁定整体退休，「一次只跑一个
+重测试」约束退役，此放宽实验前提不再存在）
+```
+
+---
+
+## R07 — 旧的 inner-state.sh 现已退役（session-liveness 理由）
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 会话存活监视
+**退役**：2026-08-03 实测
+**正文**（原文迁出保留）：
+
+```
+旧的 `inner-state.sh`，现已退役
+```
+
+---
+
+## R08 — 旧 inner-state.sh 的「在做什么」事件集随其退役而撤下
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 观测只有一个工具
+**退役**：inner-state.sh 退役
+**正文**（原文迁出保留）：
+
+```
+旧 `inner-state.sh` 的「在做什么」
+事件集随其退役而撤下
+```
+
+---
+
+## R09 — exp5 已退役 + `.halt` 语义从「暂停 exp5 循环」改为快速模式唯一停止开关
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 停止哨兵
+**退役**：exp5 退役（`.claude/loop.md` 已删除）
+**正文**（原文迁出保留）：
+
+```
+exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循环」改为**快速模式的唯一停止开关**。
+```
+
+---
+
+## R10 — 旧「声明依赖 / touches 相交 → integration」fork 判据退役
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 分支模型（分叉基线新模型）
+**退役**：AC48 2026-08-13 / fork-baseline.ts 一律 develop
+**正文**（原文迁出保留）：
+
+```
+旧「声明依赖 / touches 相交 → integration」的 fork 判据**退役**
+（`--force-integration` 已删除，`fork-baseline.ts` 传它 exit 2）。机械判定现为恒 `$FORK_BASELINE`
+（见步骤 4；`fork-baseline.ts` 默认路径仅单线下游用）。
+```
+
+---
+
+## R11 — inner-state.sh 已退役（Monitor 挂载自检）
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` Monitor 挂载自检
+**退役**：inner-state.sh 退役
+**正文**（原文迁出保留）：
+
+```
+（观测只有一个工具；`inner-state.sh`
+已退役）
+```
+
+---
+
+## R12 — 旧「touches 与 $MERGE_TARGET 上未验证任务相交」fork 判据与 --force-integration 一并退役
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 分叉基线（步骤 4 前）
+**退役**：AC48 2026-08-13 / fork-baseline.ts exit 2
+**正文**（原文迁出保留）：
+
+```
+旧「touches 与 `$MERGE_TARGET` 上未验证任务相交 ⇒
+`$MERGE_TARGET`」的 fork 判据与 `--force-integration` 一并退役（`fork-baseline.ts` 传它 exit 2；
+其默认路径仅单线下游用，`--develop master --integration master` 恒返回 master）。
+```
+
+---
+
+## R13 — 旧的 --force-integration（统一 integration HEAD）已退役
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 派发就绪任务（步骤 4 分叉基线）
+**退役**：AC48 2026-08-13 / fork-baseline.ts exit 2
+**正文**（原文迁出保留）：
+
+```
+旧的 `--force-integration`（统一 integration HEAD，`gap-task-file-develop-integration-drift-fan-in-conflicts`
+AC2）**已退役**（`fork-baseline.ts` 现在传它 exit 2）——它当初要解的「fork 落后 integration 的
+任务文件证据段冲突」由 **A6 rebase-重跑循环**吸收：fan-in 前先 `git -C <wt> rebase $FORK_BASELINE`，
+任务文件漂移就地合并、套件重跑通过再合并（**代价 = rebase 后要重跑套件**，人 2026-08-13 裁定④已同意）。
+依赖由派发闸 A15② PARENT-DONE-IFF-CHILDREN 串行化——B 等 A 合入 develop 后再派，B fork develop 时
+已含 A ⇒ **一律 fork 自 develop，无例外**。分支名**从配置代入，不字面写死**：
+```
+
+---
+
+## R14 — 旧 --force-integration 统一 integration 已退役（分叉基线新模型行内）
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 分叉基线（新模型 = $FORK_BASELINE）
+**退役**：AC48 2026-08-13
+**正文**（原文迁出保留）：
+
+```
+旧 `--force-integration` 统一 integration 已退役；依赖声明语义见 `fork-baseline.ts` 默认路径
+```
+
+---
+
+## R15 — 旧「fork 源统一 = integration」（--force-integration）已退役
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 每个任务 worktree 都从 $FORK_BASELINE 分叉
+**退役**：AC48 2026-08-13
+**正文**（原文迁出保留）：
+
+```
+旧「fork 源统一 = integration」
+（`--force-integration`）已退役；它当初要解的任务文件证据段冲突（实证 2026-08-10：round5-red
+c3583844 vs 2c1539d7 同文件不同段）由 **rebase-重跑循环**吸收：fan-in 前先 rebase 新 develop，
+冲突就地合并、套件重跑通过再合并（**代价 = rebase 后重跑套件**，人 2026-08-13 裁定④已同意）。
+```
+
+---
+
+## R16 — 旧的 inner-state.sh 曾用 inotifywait 监视阻塞信道，现随其退役
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 阻塞信号
+**退役**：inner-state.sh 退役
+**正文**（原文迁出保留）：
+
+```
+旧的 `inner-state.sh` 曾用 inotifywait 监视它，现随 inner-state.sh 一起退役——阻塞信道是
+「内层主动写、外层主动读」的显式信道，不需要一个常驻轮询工具转达。
+```
+
+---
+
+## R17 — CLAUDE.md「各 ≤80 行」判据退役（tick-core-static-check n=3 placeholder）
+
+**来源**：`CLAUDE.md` 每轮必经「三层每轮该做什么」
+**退役**：AC30(a) 明确退休（tick-core-static-check.ts:70/:94 自证「n=3 placeholder，已 RETIRED」）
+**正文**（原文迁出保留）：
+
+```
+本行原写「各 ≤80 行」，而该判据已被 AC30(a) 明确退休（`tick-core-static-check.ts:70/:94` 自证「n=3 placeholder，已 RETIRED」），实测 106/100/81 三个全超却无人报错：一个被退休的判据留在本文件里，正是本文件开头警告的那种漂移
+```
+
+---
+
+## R18 — RETIRED (ADR-022): classic milestone loop 退役说明
+
+**来源**：`CLAUDE.md` Architecture — methodology layer
+**退役**：ADR-022, 2026-08-03
+**正文**（原文迁出保留）：
+
+```
+- **RETIRED (ADR-022, 2026-08-03): the classic milestone loop — `OUTER-LOOP.md` + `prepare-milestone.js` + `execute-milestone.js` + the `composite-*` phases + `milestone-preparation-check.ts` + `diagnose-verify-failure.ts` — is retired.** The **two-layer fast mode is the sole development mode**. The gap tasks below that described `execute-milestone.js`/`prepare-milestone.js` as current mechanisms now describe **retired** mechanisms: those workflow files and the composite pipeline were physically deleted at `gap-retire-the-prepare-execute-pipeline-cluster` (2026-08-03). The surviving pieces of that cluster are `workflow-metadata-conformance.mjs` (shelled out to by `it0-dod-check.ts` clause 14) and the fast-mode-reused pure functions that were extracted into their consumers (`computeTouchesExpansion` → `concurrent-batch-scheduler.ts`; `parsePlanStages`/`validatePlanStructure` → `prepare-admission-check.ts`; `mapEvidenceToTasks` + composite types → `build-evidence-manifest.ts`). The mechanics below that reference the deleted files are kept as historical record of WHY the two-layer mode exists; the live driver for new work is the two-layer fast mode (fast-mode telemetry aggregated under `milestones/fast-mode-telemetry/<date>.json` — the old `.quay/fast-mode-telemetry.jsonl` path was drifted/never-existing, fixed 2026-08-05 by manager finding; `## Contract` six-key + `task-contract-check.ts` replacing ProposalReview/PlanCheck, subagent REFUTE rounds replacing the Audit phase).
+```
+
+---
+
+## R19 — RETIRED classic loop 的直接-master 工作树隔离历史记录（Land 锁 / 串并行机制）
+
+**来源**：`CLAUDE.md` Architecture — methodology layer
+**退役**：ADR-022, 2026-08-03
+**正文**（原文迁出保留）：
+
+```
+- **The loop ran directly on `master`** (there is no driver branch — DIR-027 retired it) **under the RETIRED classic loop** (ADR-022). The worktree-isolation mechanics below are kept as historical record of the classic loop's concurrency design; the two-layer fast mode isolates per-task via a plain `git worktree add` directly (no `milestone-worktree.ts` — that tool was retired after the 2026-08-03 reclaim). **The path convention is `/home/yale/work/quay-worktrees/<task-id>`, NOT `/tmp/quay-wt-<task>` — worktrees must not live in `/tmp`**（**2026-08-12 实测更正**：本机 boheidc 的 `/tmp` **不是 tmpfs**——`stat -f` 报 ext2/ext3、`findmnt` 无独立条目,即它在根文件系统上。原文"`/tmp` is tmpfs here"应是在前一台宿主（vhs）上写的,**换机器即失效——与硬规则 4 推论二同族：把依赖宿主的事实写成普适断言**。**规则本身不变**（worktree 仍不放 `/tmp`）,只是它的理由不再是"内存盘",而是：`/tmp` 会被系统清理、且本机已实测积压 3389 个测试遗留目录/1.1G,不适合放需要存活的工作副本。） (正本 `orchestration/inner-brief-2026-08-04-restart.md:103`). **The only correct in-flight reading is therefore `git worktree list | grep -c quay-worktrees`** — an `ls` of any `/tmp` path silently returns 0 and disguises a working inner as an idle one (实证 2026-08-10：我照 `/tmp` 数了 5 轮 `worktree=0`，真值是 1，而我自己执行核的 A3 早就写着上面那条正确命令 —— **手搓复现了机件已经解决的问题，正是硬规则 1 的反面**). **Default (no-isolation) path — strictly serial:** with no `isolationMode` arg, `execute-milestone.js`'s Build phase edits "in place, commit, done" directly in the shared working tree, so **two default `execute-milestone` dispatches must never run concurrently against this repo, regardless of whether their tasks' own `## Touches` are disjoint** — the risk is the shared working tree itself (uncommitted Build-phase state colliding), not task-level file overlap; wait for one milestone's Land commit before dispatching the next. **Opt-in concurrent-safe path (DIR-123, 2026-07-31):** passing `$a.isolationMode: 'worktree'` routes Build/Audit/Gate through a REAL per-milestone `git worktree` (`milestones/M<NN>/worktrees/iteration-0`, created by `scripts/milestone-worktree.ts` before Build), so a file-disjoint dispatch's uncommitted state lives in its own worktree, NOT the shared checkout. **Land is the SOLE phase that touches the shared checkout, and it is serialized by a single-flight Land lock (`.quay/land-locks/shared-checkout.lock`) held for the ENTIRE Land phase** — not just the merge: in the SERIAL path the lock is acquired before the real `git merge --no-ff` of the worktree branch + `git worktree remove`/`git branch -d` and released only AFTER the CAPTURE commits, the dashboard.md `## Log` append, the `milestone_counter` increment, and the `it0-backlog-regen.ts` regeneration, so two concurrent worktree Lands serialize over EVERY shared-checkout mutation (no lost-update on `milestone_counter`/`dashboard.md`/`backlog.md`, no git-index/HEAD race on CAPTURE). In the CONCURRENT (`mode:'concurrent'`) path the workflow merges NOTHING — it returns `buildBranch` and the fan-in (`OUTER-LOOP.md` step g) is the SOLE merge owner, doing each survivor's merge + CAPTURE + worktree-remove under that same Land lock. The lock uses the atomic `wx`-create grant with an `rmSync` + retry-`wx` bounded-loop stale reclaim (mirroring `proposal-convergence.ts`'s hardened epoch lock — never a plain overwrite, never a permanent lockout). A crashed dispatch that stranded a worktree was recovered by `milestone-worktree.ts --clean-stale` (retired 2026-08-03 after the reclaim; cleans only a branch with ZERO commits ahead of master; a branch WITH commits fails closed to needs-human, never discarded). Pre-dispatch eligibility for concurrent dispatch REUSES the existing `concurrent-batch-scheduler.ts`'s `assembleBatch` → `touches-orthogonality-check.ts`'s `checkTouchesPair` as the real production eligibility mechanism (the named `worktreeDispatchEligibility` is a thin TEST-FACING wrapper over `assembleBatch` that additionally tags same-file conflicts — it has no separate production callers). Same-file overlap → rejected pre-dispatch and serialized, never left to collide at Land; a real merge conflict that nonetheless reaches Land is auto-aborted + needs-human, never a blanket --ours/--theirs. A requested-but-unusable isolation (unknown mode, or no numeric milestone) FAILS CLOSED rather than silently falling back to the shared tree. Omitted/empty `isolationMode` is byte-for-behavior the old direct-on-`master` path (golden-replay-proven; the only legacy delta is Land's corrected step-1 prompt text). **HARD PRECONDITION (mixed modes):** the default (no-isolation) path takes NO Land lock and commits directly to master in Build, so it is NOT serialized against worktree Lands — therefore a no-isolation dispatch must NEVER overlap a concurrent batch against the same checkout; concurrent batches are worktree-isolated BY CONSTRUCTION (`OUTER-LOOP.md` step a always passes `isolationMode:'worktree'`). **Status (RETIRED under ADR-022):** mechanism + concurrency-safety fixes were implemented and real-git fixture/golden-replay/lock tested; the "two genuinely concurrent real milestone journals" proof never ran because the classic loop was retired before it. The two-layer fast mode is the sole mode.
+```
+
+---
+
+## R20 — prepare-milestone.js worktree-isolation 支持（RETIRED under ADR-022）
+
+**来源**：`CLAUDE.md` Architecture — methodology layer
+**退役**：ADR-022, 2026-08-03
+**正文**（原文迁出保留）：
+
+```
+- **`prepare-milestone.js` also supported the SAME opt-in `isolationMode: 'worktree'`** (gap-prepare-milestone-no-worktree-isolation, M252) — **RETIRED under ADR-022** (the file is deleted; kept as historical record): a per-milestone `git worktree` (`milestones/M<NN>/worktrees/iteration-0`, branch `milestone/M<NN>/iteration-0` — the SAME path/branch convention execute-milestone's Build worktree uses) was created via `milestone-worktree.ts --add` BEFORE the Admission lease is acquired; coordination primitives (Admission lease, epoch records, generation telemetry, split-decision records) stayed in the primary checkout while CONTENT outputs (task Proposal/Plan edits, `docs/plans/*.md`, receipt/ledger/inventory files, ProposalReview checkpoints) happened EXCLUSIVELY in the worktree. Content-agent prompts carried a single module-level `_worktreeIsolationNote` prefix (empty string when isolation is off → byte-for-behavior golden replay) that routed agents to `cd <worktree>` and use Bash `cat`/`>>` instead of the MCP `task_get`/`task_write` (which resolve against the primary checkout). Every terminal return was wrapped by `_wtRet`, adding `worktreeRel` so a stranded worktree was discoverable by the caller. **prepare-merge** (AFTER Receipt success + lease release): commit worktree changes (`git add -A && git commit`) → `milestone-worktree.ts --merge` (real `git merge --no-ff`) → `--remove`; a merge conflict auto-aborts leaving master clean and the worktree intact, returning needs-human `prepare-merge-conflict` + the conflict file list (the lease is already released, so a merge failure never strands it). In CONCURRENT mode (`$a.mode === 'concurrent'`, AC8), prepare-merge COMMITS-ONLY on the branch and returned `{ outcome: 'building', buildBranch, worktreeRel }` — it did NOT merge/remove/take the Land lock; the fan-in (`OUTER-LOOP.md` concurrent_execute step g) was the SOLE merge owner of prepared worktrees before any execute-milestone dispatch. The concurrent prepare dispatch proof (two file-disjoint tasks on `master`) was task #22's scope; the mechanism was opt-in, not the default, and never became it.
+```
+
+---
+
+## R21 — integration-branch-model.ts RETIRED 头注（AC48）
+
+**来源**：`plugin/scripts/integration-branch-model.ts` 头注释
+**退役**：AC48 判据2, 2026-08-13
+**正文**（原文迁出保留）：
+
+```
+// integration-branch-model.ts — the two-line branch model core.
+//
+// RETIRED (AC48 判据2, 2026-08-13 — tasks/gap-ac48-code-retirement-pool-filter-and-scripts; catalog
+// note per AC52): the two-line integration-branch model is retired. The branch itself was deleted and
+// config merge_target → develop by the outer (d41feba6/fc39e997); under the new model every task forks
+// from develop (`$FORK_BASELINE`, all tasks from develop) — `forkBaseline()` has ZERO production
+// callers (confirmed 2026-08-13). This file is KEPT AS THE REASON ARCHIVE (not deleted): it and
+// integration-batch-merge.sh + SPEC-branching-model-integration-branch-2026-08-05.md document the
+// two-line model's design, its empirical negation, and the reverse-edge ruling. No production path
+// should call it; the exported functions remain unit-tested for the archive only.
+```
+
+---
+
+## R22 — integration-batch-merge.sh RETIRED 头注（AC48）
+
+**来源**：`plugin/scripts/integration-batch-merge.sh` 头注释
+**退役**：AC48 判据2, 2026-08-13
+**正文**（原文迁出保留）：
+
+```
+# integration-batch-merge.sh — the integration→develop batch-merge helper of the two-line branch
+# model (gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point, AC3; real-merge
+# mode per gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling).
+#
+# RETIRED (AC48 判据2, 2026-08-13 — tasks/gap-ac48-code-retirement-pool-filter-and-scripts; catalog
+# note per AC52): the two-line integration-branch model is retired — the branch was deleted and config
+# merge_target → develop by the outer (d41feba6/fc39e997); every task now forks from develop and the
+# verification-round merges directly to develop. This script is KEPT AS THE REASON ARCHIVE (not
+# deleted): it + integration-branch-model.ts + SPEC-branching-model-integration-branch-2026-08-05.md
+# document the two-line model's design, its empirical negation (2026-08-06), and the reverse-edge
+# ruling. No production path should invoke it.
+```
+
+---
+
+## R23 — SPEC-branching-model-integration-branch 🚫 退役块（AC48）
+
+**来源**：`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md` 顶部
+**退役**：AC48 判据2, 2026-08-13
+**正文**（原文迁出保留）：
+
+```
+**🚫 退役（2026-08-13，AC48 判据2）**：integration 分支已退役——per-task 验证模型
+（`SPEC-per-task-suite-verification-2026-08-13.md`）取代了它：每个任务从 develop fork、worktree 内跑全量、
+绿后直接 merge 回 develop，**不再使用 integration 分支**。退役证据：`develop..integration = 0`（无独有内容）、
+`integration..develop = 187`（落后）、无生产路径写它（fork 恒 develop / fan-in 恒 develop）。本文件保留为
+**理由档案**（为什么当初要两线、实测如何否定了 FF-only 假设），不删；AC/DoD 与是否立案由外层判断。
+```
+
+---
+
+## R24 — 旧「单飞挂载 + 共享事件」设计及 heavy-op-token.sh 整体退休（fast-mode-loop-tick 观测流）
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 事件式监测（谁挂的谁拥有自己的 stdout 事件流）
+**退役**：2026-08-06 人裁定整体退休
+**正文**（原文迁出保留）：
+
+```
+（旧的「单飞挂载 + 共享事件」设计及 `heavy-op-token.sh` 已随人裁定整体退休。）
+```
+
+---
+
+## R25 — inner 核 C7（integration-branch-model.ts --overlaps-unverified 活指令→退役模块）
+
+**来源**：`orchestration/fast-mode-tick-core.md` C 段 C7（inner 执行核）
+**退役**：AC48 判据2 2026-08-13 模块标 RETIRED、零生产调用者；AC61 判据3 2026-08-14 确认活指令指向退役模块并迁出
+**正文**（原文迁出保留）：
+
+```
+| C7 | **【前提已死,不计入覆盖率分母】**`integration-branch-model.ts --overlaps-unverified` **不得传空串**——空串使该判定恒假、机制半死 (src:898) |
+```
+
+---
+
+## R26 — inner 核 C10（integration-batch-merge.sh --reconcile 对账引用退役）
+
+**来源**：`orchestration/fast-mode-tick-core.md` C 段 C10（inner 执行核）
+**退役**：AC48 判据2 2026-08-13 integration-batch-merge.sh 标 RETIRED；AC61 判据1 B-2 2026-08-14 改指有效模块
+**正文**（原文迁出保留 —— 安全规则「不得自己发明 git reset --hard」保留在核内，未迁出）：
+
+```
+| C10 | 主检出对账**只用 `integration-batch-merge.sh --reconcile`**,调用方不得自己发明 `git reset --hard`(2026-08-08 销毁过 manager 未提交编辑) (src:419) |
+```
+
+---
+
+## R27 — precommit-guard ② 退役（拒绝「轮 running 且触及断言面」的写入；AC64）
+
+**来源**：`plugin/scripts/precommit-guard.ts` ②（拒绝「轮 running 且触及断言面」的写入，覆盖全部写入者）
+**退役**：AC64 2026-08-14（gap-ac64-precommit-guard-clause2-retire）；**① 文档类检查保留**（doc 检查仍由
+pre-commit 触发 + AC62 协议第 3 步显式调用，AC63）
+**正文**（原文迁出保留 —— ② 的实证，三条立条教训）：
+
+```
+② 的实证（2026-08-12，三独立支撑，manager 判定）：「round 期间零提交」约定守不住：
+  ① 约定无产物（C17）——round 60 约定后 26s 即破（外层 47023142）；
+  ② 连事后都难区分——要靠人拿 startedAt 逐笔比对 commit 时刻；
+  ③ 参与方不完整且名单无人维护（最硬）——inner 从不在约定里，round 63 窗口内
+     以 30-40s 一次提交 4 笔任务体更新，无人告诉它有一轮在跑。
+  ①②可靠「更小心」缓解，③结构上不可能靠小心解决。守卫必须覆盖名单之外的写入者，
+  因此机制 = 共享 pre-commit 钩子（--install-hook 写入 <git-dir>/hooks/pre-commit）——
+  不是各层各自记得调的 commit 包装。约定参与方名单不可维护，钩子天然覆盖所有提交者。
+```
+
+**② 退役理由（AC64，manager 修正「重建参照系」为准确的表述）**：不是「参照系失效」，是
+**「它保护的危险已经不存在」**——② 原本保护「suite 正在跑时别改它正在读的文件」，因为当年
+suite 读【共享检出】；AC42 之后 per-task suite 跑在各自 worktree、读 worktree 的文件副本，
+改共享检出的 develop 完全不影响正在跑的 worktree suite ⇒ ② 保护的那个危险随 AC42 结构性消失
+（属「输入不存在」那一族）。
+
+**三条立条教训（AC64 留档——新协议下仍成立）**：② 当初的立条理由（①约定无产物 ②连事后都难区分
+③参与方名单不可维护）在新协议下仍成立 ⇒ **merge 锁必须是共享的机制（钩子/文件锁），不能是
+「各层记得调的约定」**——这正是 ② 当初选择 pre-commit 钩子而非 commit 包装的理由
+（约定参与方名单不可维护，钩子天然覆盖所有提交者）。
+
+## R28 — manager A4「两层忙闲 = capture-pane | pane-state-classify --classify」退役（2026-08-14T07:56:12Z）
+
+**退役理由（人 2026-08-14 07:5xZ 令「清理 pane-state-classify / manager A4 / phase_ac_checked」）**：
+**这条条款 manager 从未执行。** 实测：manager 整天的两层忙闲读数**全部来自 A0 的 `outer.liveness`**
+（`session-liveness.sh` 产出，判据是 pane 进程存在），**不是 A4 写的
+`tmux capture-pane -p -t <窗口名> | node pane-state-classify.ts --classify`**。
+**三层执行核里只有 manager A4 引用该读法，outer/inner 各 0。**
+
+**⚠️ 工具本身【不退役】**——`pane-state-classify.ts` 仍有活消费者：
+`session-liveness.sh`（判定逻辑 import：`classifyPaneVerdict` / `permPromptWarnVerdict` /
+`trailingApiErrorCount` / `transcriptContextSaturation` 等）与 `inner-blocked-signal.ts:151`（outer A7 在跑）。
+**退役的是「把它当 manager 每轮两层忙闲读法」这一个用法，不是工具。**
+（另两处引用 `send-keys-reliable.sh:165` / `supervisor-deliver.sh:277` 的 `--can-receive-wait` 前置，
+随人 2026-08-12「SendMessage 为默认、旧机件保留可用但非默认路径」而事实上不再触发——**保留不动**。）
+
+**落点映射（A4 的独有内容 → 新正本）**：
+| A4 独有词条 | 新正本 |
+|---|---|
+| 「两层忙闲」这一读数本身 | A0 `outer.liveness`（`manager-tick-readings.ts` → `session-liveness.sh`） |
+| 「⛔ 禁止手搓 `tail -N \| grep 'esc to interrupt'`」 | `CLAUDE.md` ADR-016 段（禁整屏哈希/限底部区域）+ `adr016-screen-use-check.ts` 强制 |
+| **2026-08-12 实测发现**：旧写法（`tail -3 \| grep`）在 outer 上报 idle 而真值 busy——**因为有 subagent 在跑时，subagent 状态行渲染在状态栏【下面】，标志被顶出末 3 行**（实测标志在第 55 行、非空行共 49，`● main` / `◯ general-purpose …4m45s` 在其后） | **本条（R28）即该实证的唯一正本**——`pane-state-classify.ts` 的固定深度取法正是为它而设，删 A4 不得丢失这条发现 |
+
+**⇒ 退役后 manager 的两层忙闲仍有读数（A0 `outer.liveness`），但要知道它是【代理量】**：
+pane 进程存在 ≠ 会话在处理消息（2026-08-14 实证：inner 的 pane 一直在，tick 停了 21 分钟）。
+**判层是否活着，正本是直接量**——`git log` 提交时刻 / `worktree` 内活进程（outer A21 / inner A25 已是这条路线）。
+
+---
+
+## R29 — inner-wakeup-heartbeat-check `blocked==[] && agentDispatches>=agentLimit` 判据退役（AC77）
+
+**来源**：`plugin/scripts/inner-wakeup-heartbeat-check.ts` semanticTriggerHeuristic（AC3 trigger）
+**退役**：AC77 判据2 2026-08-14（gap-ac77-spawn-limit-detect-harness-error-only，人 2026-08-14 07:4xZ 裁定「agentLimit 的处理仅应包括检测 harness 的报错……而不要自己重复计数」）
+**正文**（原文迁出保留）：
+
+```
+/** AC3 heuristic: `blocked==[] && agentDispatches>=agentLimit`. PURE. */
+export function semanticTriggerHeuristic(heartbeat) {
+  const blocked = Array.isArray(heartbeat?.blocked) ? heartbeat.blocked : [];
+  const atLimit =
+    typeof heartbeat?.agentDispatches === "number" &&
+    typeof heartbeat?.agentLimit === "number" &&
+    heartbeat.agentDispatches >= heartbeat.agentLimit;
+  return blocked.length === 0 && atLimit;
+}
+```
+
+**退役理由（AC77 判据2）**：`blocked==[] && agentDispatches>=agentLimit` 是结构上恒假的判据——心跳现读
+`agentLimit = undefined`（`agentDispatches=15`）⇒ 该判据从不报、与「一切正常」同形（硬规则 4）。且它用
+**我们自维护的计数**去判一个由 **harness 掌握**的预算（硬规则 4b：量由被测对象自产，停摆时跟着停，
+与「一切正常」同形——正是 CLAUDE.md:21 记载的那次数小时误诊的根源）。修法不是补写 `agentLimit`（那正是
+人禁止的「自己重复计数」）。
+
+**替代（AC77 判据1）**：检测 harness 自己的报错串 `Subagent spawn limit reached`（CLAUDE.md:21 识别法
+逐字——「目标会话 transcript 里搜 `Subagent spawn limit reached`」）。**只报不动（判据3）**：报错后的
+处理暂定由人执行，不自动 `/clear`、不自动降 cap、不自动重启。**不覆盖**：不估上限数值（正本在
+`tasks/gap-inner-subagent-budget-invisible.md`，随版本变）。
+
+---
+
+## R30 — inner 核 A6 步骤清单退役：fan-in 四步正身迁入 fan-in-execute workflow（AC78）
+
+**来源**：`plugin/loop/fast-mode-tick-core.md` A6（步骤清单）；`orchestration/fast-mode-tick-core.md` A6 由 outer 按同文本落盘
+**退役**：AC78 2026-08-14（人「应当创建和维护模板」「A6 应改为检查是否执行了 workflow」）——fan-in 四步正身迁入 `.claude/workflows/fan-in-execute.js`；A6 只留检查
+**正文**（原文迁出保留，plugin/loop 旧 A6 行）：
+
+```
+| A6 | Fan-in 回到任务 subagent(**无锁段+持锁段全在 subagent 自回合内、ff 成功后才返回,人 2026-08-14 裁定,SPEC-fan-in-ff-merge-lock**——取代旧「串行整段 + `git merge --no-ff`」(src:510,526);旧 rebase 冲突处理已随 ff-only 简化一个量级,ff 失败唯一原因=develop 前进了、处置唯一=回第 1 步 (src:515,523,534)) | **无锁段(全在任务 subagent 自回合内、其 worktree 内,不碰共享检出)** ① `git merge $MERGE_TARGET`(subagent 已在自身 worktree 内,cwd=worktree,主线程不再从外部 `git -C` 指向任务树;冲突【只可能在这】出现,自由解,不占任何人;取代旧 rebase) → ② **delta 断言面判定(AC75,复用 AC51 doc/代码分类,不设阈值):merge 进来的 develop delta 全落 doc/任务体/telemetry 面 ⇒ 跳过全量 suite(只跑 doc 检查);触及代码/测试/脚本面 ⇒ 重跑全量;判不出 ⇒ fail-closed 重跑全量(硬规则 3b:判不出≠不需要,独立取值)** → ③ **Touches 含新增/移动 .ts ⇒ 先跑 ts-typecheck 闸 `node --experimental-strip-types plugin/scripts/fan-in-ts-typecheck-gate.ts --task <id> --worktree <wt> --merge-target $MERGE_TARGET`(exit≠0 ⇒ 丢弃未合状态、needs-human、停本 tick 合并与派发;`gap-ts-touching-fan-in-needs-typecheck-gate`)**(unchanged,suite 前) → ④ subagent 在其 worktree 内跑 scoped 门 `$TEST_COMMAND --for-task <id>`(测试进程 cwd 落 worktree 非主检出——AC42 判据2 + 人「主检出只读诊断」裁定,`gap-a6-fan-in-verify-before-merge-in-worktree`)(src:517) + **全量 suite + doc 检查 `bash scripts/test.sh --static-checks-doc`(ff 不触发任何钩子,AC63;刻意不去重——第一次覆盖自己改动、第二次覆盖与 develop 合并后内容,人 2026-08-14 确认)** → 全绿才进。**持锁段(仍在 subagent 自回合内)** ⑤ 先 flip done：worktree 内把任务 `status: ready`→`done`（`git add tasks/<id>.md` + `git commit -m "tasks: 翻 <id> done（…）"`,commit 带 status——人 2026-08-14 裁定「flip → merge 可接受」:flip 要动的记录也用 git 跟踪,flip 在后则 merge 后还要再修改+merge ⇒ **flip 先、merge 带 status**) → 再 `bash plugin/scripts/fan-in-ff-merge.sh --task <id> --run-id <runId> --agent-id <本 subagent 标识>`(**锁只包 `git merge --ff-only`,毫秒级,成/败都解锁;ff 失败写重试记录(任务 id/第几次/当时 develop 头/时刻/runId)+ 回 step 1,不是 needs-human;suite state=running 时拒锁——锁与 suite 锁(full-suite.lock.0/.1)覆盖范围不交叉,AC62 两把锁互斥**)。**subagent 在 ff 成功之后才返回**(无锁段①②③④+持锁段⑤全在自回合内,ff 落地才上报完成)。ff 成功后 `git worktree remove` + `git branch -d`(src:537);冲突/选中集非绿 ⇒ **丢弃 worktree 内未合状态**(共享检出零污染)、标 needs-human、**停止本 tick 后续合并与派发**;设了 `QUAY_CLAIM_REMOTE` ⇒ `release-task.sh` 释放认领(src:552)。**⚠️ runId 桥(inner 2026-08-14 判断,已核)**:`integration-batch-merge.sh --fan-in` 的 runId 嵌入 merge commit subject(`merge: fan-in task/<id> (runId: fm-…)`),`fan-in-runid-check.ts` 按 `git log -1 --format=%s` 读——**ff-only 无 merge commit ⇒ 桥断**;故协议本体由 `fan-in-ff-merge.sh` 承担,runId 的 ff-only 载体(manifest/retry record)留给 AC63/AC64 跟进。**统一括号闭合点(`gap-needs-human-routing-does-not-close-bracket`,src:605)**:凡标 needs-human 的同一处(冲突/REFUTED/OVER90 等)**必须**先调 `bash plugin/scripts/closure-lag-check.sh --close-task --taskId <id> --outcome needs-human` 关括号;fan-in 成功(merge 落地、无需 further routing)时调 `bash plugin/scripts/closure-lag-check.sh --close-task --taskId <id> --outcome done` 关括号——括号在终止/完成同轮闭合,不停留 inProgress |
+```
+
+**退役理由（AC78）**：任务 subagent 的 prompt 无模板（四条特征串仓库【零命中】，谓词已干跑非假零）⇒ prompt 靠【复制上一次】生成 ⇒ A6 改了三次（AC62/AC67/AC75）而 prompt 一次没跟着改 ⇒ 六次 fan-in 全带 pre-AC67 的「DO NOT flip status. DO NOT merge.」。根因是【模板在记忆路径上】；人的方案是把它搬到【执行路径】——fan-in 步骤正身迁入 workflow 脚本，A6 只检查「是否走了该 workflow」（判据2 (a) Workflow 调用记录 ∩ (b) lock-events 带 agentId ∩ (c) agentId 是真实 subagent 标识，三处带时间边界）。改 workflow 的提交必须在提交信息点名对应 SPEC 节（弱判据）。
+
+**落点映射（A6 步骤清单的独有词条 → 新正本）**：
+| A6 旧步骤 | 新正本（fan-in-execute workflow 对应段落） |
+|---|---|
+| ① `git merge $MERGE_TARGET`（无锁段第 1 步，冲突只可能在这） | `fan-in-execute.js` 无锁段 step 1 |
+| ② delta 断言面判定（AC75，判不出 ⇒ fail-closed 重跑全量） | `fan-in-execute.js` 无锁段 step 2 |
+| ③ Touches 含新增/移动 .ts ⇒ ts-typecheck 闸 | `fan-in-execute.js` 无锁段 step 3 |
+| ④ scoped 门 + 全量 suite + doc 检查 | `fan-in-execute.js` 无锁段 step 4 |
+| ⑤ flip done + `fan-in-ff-merge.sh --agent-id <自找>`（持锁段） | `fan-in-execute.js` 持锁段 step 5 |
+| `fan-in-ff-merge.sh` 锁只包 `git merge --ff-only`、`--agent-id` 写锁事件/重试记录 | `fan-in-ff-merge.sh` 自身 + `fan-in-workflow-check.ts` 判据2(c) 自校验 |
+
+---
+
+## R31 — 自计数载体 inner-agent-budget.json 整体退休（2026-08-10 人裁定 A16；gap-retire-inner-agent-budget-report）
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 预算机制引用 + `capability-catalog.sh` 自计数脚本条目（`inner-agent-budget-report.ts` 整体废弃，090a0277 删脚本/测试）
+**退役**：2026-08-10 人裁定 A16「彻底取消所有 subagent 计数机制（`inner-agent-budget-report.ts` 整体废弃；`spawned/limit/budgetCritical` 全删——计数是我方自造的，Claude Code 无查询余量接口，只给设置上限 env）」——落地见 `tasks/gap-retire-inner-agent-budget-report`（done）；载体 `inner-agent-budget.json` 为虚构产物，永不再生产
+**正文**（原文迁出保留）：
+
+```
+（inner-agent-budget.json 已随 2026-08-10 人裁定 A16 退休——全仓零写入者=退休预期态，prod-data-audit 判据5b 直接出局。）
+```
+
+## R32 — outer B3 全量 suite 后台起跑退役（AC84 2026-08-15，人裁定 outer 不跑 suite）
+
+**来源**：`orchestration/orchestrator-tick-core.md` B 段 B3 + `orchestration/orchestrator-loop-tick.md` + `plugin/loop/orchestrator-tick-core.md` + `plugin/loop/orchestrator-loop-tick.md`
+**退役**：AC84 2026-08-15，人 09:47Z「outer 跑 suite 和红窗/绿窗等机制都应该废弃了，应该在 inner 的 workflow 中跑 suite 并合并到 develop」；人 10:1xZ 判据4「verify-worktree 环境 suite 测试仅在人的明确要求时单次运行」——无任何自动触发，B3 整条退役不留缩水版。近 24h 31 轮 · 2.98h 墙钟 ≈ 12% 释放。**明示代价**：环境类缺陷（如 round197 的 AC4——verify-worktree 环境唯一暴露）从此只在人下次要求跑时被发现，检测延迟由「一次落地」变「不确定」。**趋势分析数据源**改 `.quay/per-task-suite-records.jsonl`（判据6），不再依赖 verification-round.jsonl。
+**正文**（原文迁出保留）：
+
+```
+- **B3 全量 suite 后台起跑**【freshness（AC61 A-5，2026-08-14；FAMILY-5）：`finishedAt` 距今 ≥ 一个 tick 周期 ⇒ 陈旧不计入，同 A11】:条件 = 本轮收尾 ≥1(或有新 merge 落地)**且** `state != running` **且** `resource-gate.sh --for full-suite` 放行。被测 worktree/integration checkout 时**必须**同传 `--state-dir "$REPO_ROOT/.quay"` (src:869 "停派",871 "资源闸放行")。**事件分支(`gap-b3-tick-coupled-misses-between-tick-merges`,2026-08-11):起跑是事件,不是本 tick 的轮询副作用**——`suite-state-trigger.ts` 的 Monitor 已把同一条件事件化:integration HEAD 前移(merge 落地)且 `state != running` ⇒ `SUITE-MERGE-PENDING`(AC2);`state=green` 且 `develop..integration>0` 且持续 idle ⇒ `SUITE-IDLE-GREEN`(AC3)。两条事件都驱动起跑(不靠 tick),`event_not_tick` 恒 1。本 B3 仍是 tick 内兜底(收尾 ≥1 路径),事件路径在其之前 (src:任务体 gap-b3-tick-coupled-misses-between-tick-merges Proposal/Contract)
+```
+**同段迁入（AC76 2026-08-15 人裁定「tick core 不留已退役文本」，正文从核内迁出归此）——A2/A11/C3 三条 AC84 套件读取/闸门行**（原在 orchestrator-tick-core.md A/C 段，随 B3 退役）：
+
+```
+| A2 | ~~`pgrep -af 'suite-state-trigger.ts --monitor'`~~ | ⛔ outer tick 不跑 suite、不等任何 suite 测试的输出、不因 `state=running` 停 tick（人 2026-08-15 11:3xZ 重申）(src:211 "suite-state-trigger.ts --monitor";AC84 退役)
+| A11 | ~~读 `.quay/full-suite-state.json` 的 `state`/`reason`/`durationMs`~~ | ⛔ outer tick 不跑 suite 测试、不等任何 suite 测试的输出（人 2026-08-15 09:47Z + 11:3xZ）(src:887 "本轮的 suiteGreen";AC84 退役)
+| C3 | ~~`resource-gate.sh --for full-suite` 的 outer 侧前置~~ | ⛔ outer tick 不跑 suite 测试、不等 suite 输出（人 11:3xZ）(src:436 "跑全量套件前调用资源闸";AC84 退役)
+```
+
+
+## R34 — outer B5 轮次记录退役（AC84 2026-08-15，outer 不跑 suite ⇒ closed 恒空）
+
+**来源**：`orchestration/orchestrator-tick-core.md` B 段 B5
+**退役**：AC84 2026-08-15，outer 不跑 suite（B3 退役）⇒ B5 的 `closed` 门控 tick-append 触发条件死（closed 恒空）；runner 的 `appendVerificationRound` 随之只在人明确要求单次跑时产生记录。趋势分析数据源改 `.quay/per-task-suite-records.jsonl`（判据6）。
+**正文**（原文迁出保留）：
+
+```
+- **B5 轮次记录**:`closed` 非空 ⇒ 追加 `.quay/verification-round.jsonl` 一行,**追加前**断言 `N == last+1`、**追加后**断言尾部 round == `N`;断言失败即本轮 tick 异常,不得静默跳过。`closed` 为空 ⇒ 不写、不报警 (src:904 "写轮次记录",916 "非重开")。**⚠️ 载体由两个 writer 写，B5 只是其一且已不触发（`closed` 恒空）**：原活源是 runner `full-suite-runner.ts:1460 appendVerificationRound`（:2502/:3544 每次 suite 完成时调用）——AC84 后 runner 只在人要求时产生记录，趋势分析数据源改 `per-task-suite-records.jsonl`（判据6） (src:任务体 gap-ac61-staleness-list-item-disposition.md A-3; manager 2026-08-15 ④ 核;AC84 退役)
+```
+---
+
+## R33 — outer 红窗分诊外层独占退役（AC84 2026-08-15，输入随 B3 退役）
+
+**来源**：`orchestration/orchestrator-tick-core.md` D 边界段 + `orchestration/orchestrator-loop-tick.md` + `plugin/loop/orchestrator-tick-core.md` + `plugin/loop/orchestrator-loop-tick.md`
+**退役**：AC84 2026-08-15，人裁定 outer 不跑 suite。**理由写准**：红窗退役不是因为「红窗不重要」，而是因为**它的输入（outer 自己跑的全量轮）没有了**——红树的归因与回退在新模型下由 fan-in 的 scoped/全量门在合并前拦住。⛔ inner 侧的红窗**约束**（fast-mode-tick-core.md A24「红窗不再整体豁免」/「红窗仅豁免只读诊断」）原样保留，不在本退役范围。
+**正文**（原文迁出保留）：
+
+```
+**红窗分诊外层独占**,不把红树丢给 inner:bisect 定位肇事 merge → 回退该 merge → 回退对应的翻 done 由【inner】执行（翻 done 已移交 inner，(a2)；外层只做归因与回退决策）→ 修好才重启套件 → green 即撤信号;**绝不 blind `--ours/--theirs`** (src:1052 "全量 suite 红")
+```
+
+## R35 — outer A5 收件箱读数退役（inbox 机制彻底删除，人 2026-08-20 09:2xZ 裁定范围A）
+
+**来源**：`orchestration/orchestrator-tick-core.md` A5 + `orchestration/orchestrator-loop-tick.md` + `plugin/loop/orchestrator-tick-core.md` + `plugin/loop/orchestrator-loop-tick.md`
+**退役**：人 2026-08-20 09:2xZ 裁定 inbox 机制彻底删除（范围A，不留 archive/说明）。manager 已完成其侧（`.quay/manager-inbox/` 134 文件删除 + manager-tick-core A15/A0④/C10 清理，f40ef8f2+2ebef21c）；剩余面由任务 `gap-inbox-message-bus-teardown` 承接（message-bus.ts/inbox-reader.sh 代码+测试删除、supervisor-bus-identity.sh 失效子命令退役、capability-catalog 条目清理、inner 侧 fast-mode-loop-tick 收件箱段移除）。
+**正文**（原文迁出保留）：
+
+```
+| A5 | `ls .quay/manager-inbox/`（**列目录本身，不依赖任何 unread 计数器**——gap-inbox-counter-disconnected-from-files：counter 曾报 delivered=0 但目录实有 6 封，沉默失败） | 判据：**目录非空 ⇒ 逐条进决策**，不看 counter；`delivered`（写进目录）≠ `consumed`（读过+回执），无回执机制则 delivered>0 即报（不吞） (src:728 "inbox-summary") |
+```
+**落点映射**：A5 的「判非空要列目录本身」「delivered≠consumed」教训已一般化为硬规则 5（来源完备性）——不再需要收件箱专属条目；收件箱路径随机制删除，历史由 git + 本任务体承载。
+
+
+## R36 — inner A5 收件箱读数退役（inbox 机制彻底删除，人 2026-08-20 09:2xZ 裁定范围A）
+
+**来源**：`orchestration/fast-mode-tick-core.md` A5 + `plugin/loop/fast-mode-loop-tick.md`（inner 侧收件箱挂载点段）
+**退役**：人 2026-08-20 09:2xZ 裁定 inbox 机制彻底删除（范围A，不留 archive/说明）。与 outer A5（R35）平行——inner 执行核同一条收件箱读数指令退役。剩余面由任务 `gap-inbox-message-bus-teardown` 承接（message-bus.ts/inbox-reader.sh 代码+测试删除、supervisor-bus-identity.sh 失效子命令退役、capability-catalog 条目清理、inner 侧 fast-mode-loop-tick 收件箱段移除）。
+**正文**（原文迁出保留）：
+
+```
+| A5 | `bash plugin/scripts/supervisor-bus-identity.sh inbox-summary` | 有 `unread:` ⇒ 逐条进本轮决策;本步**只读不写回执** (src:385,389) |
+```
+**落点映射**：inner A5 的「有 unread 逐条进决策、只读不写回执」教训随 inbox 机制整体退役（人裁定范围A）；不再需要收件箱专属条目。收件箱路径随机制删除，历史由 git + 本任务体承载。

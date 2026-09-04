@@ -1,10 +1,10 @@
-// @test-group governance
+// @test-group engine
 // loop-shipping.test.mjs — gap-loop-mechanism-lives-outside-the-package-and-cannot-ship.
 // Pins the physical facts the task's AC1/AC2/AC7 rest on, so a future move back out of the
 // package (or a second physical copy) fails loudly instead of silently re-introducing the
 // "half the mechanism lives outside the plugin" gap:
 //
-//   AC1 — the 6 formerly-plugin-external mechanism files now live INSIDE plugin/, and their
+//   AC1 — the 5 formerly-plugin-external mechanism files now live INSIDE plugin/, and their
 //         old paths are symlink re-exports (the fast-mode-telemetry precedent), so the quay
 //         repo's own references keep working without a second physical copy.
 //   AC2 — fast-mode-telemetry.ts has ONE physical copy (plugin/scripts/ is authoritative; the
@@ -23,79 +23,126 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { oldPaths, oldPathPatterns, exclusionEntries, worktreeContainerPaths, stagingDirPrefix } from '../scripts/loop-shipping-exclusion-data.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(pluginDir, '..');
 
-// ── AC1: the 6 files are inside plugin/; old paths are gone (no shims left behind) ─────────────────
-test('AC1 — the 6 formerly-external mechanism files live in plugin/; the old paths are gone (no compat shells)', () => {
+// ── Shared corpus walk + worktree-container exclusion ──────────────────────────────────────────────
+// walk() is an fs traversal and does NOT respect gitignore: a git worktree under the repo (e.g.
+// .claude/worktrees/agent-*/ or milestones/M*/worktrees/iteration-0) is a COMPLETE content copy whose
+// stale-path strings and file copies would be scanned as if they were the main repo → AC1b/AC2
+// false-red (gap-loop-shipping-scan-does-not-exclude-worktrees). worktreeContainerPaths (single source
+// in loop-shipping-exclusion-data.mjs) supplies every container path; walkCorpus skips them exactly
+// like node_modules/.git/dist. It ALSO skips any `plugin-staging-*` dir by NAME (stagingDirPrefix,
+// single source in the same module): a KILLED stagePackagedPlugin() run leaves packages/quay/
+// plugin-staging-<pid>-{0,1}/ orphans that carry a full plugin/ copy — their tick-doc old-path strings
+// + scripts/*.ts false-red AC1b/AC2 (gap-orphan-staging-dirs-pollute-walkcorpus).
+function walkCorpus(dir, { excluded = [], includeWorktrees = false } = {}) {
+  // gap-loop-shipping-nested-worktree-container-false-exclude: worktreeContainerPaths(repoRoot)
+  // includes EVERY worktree `git worktree list` reports, including ones that are ANCESTORS of
+  // `dir` (e.g. the main checkout, when this suite runs from a nested `.claude/worktrees/<name>/`
+  // worktree — the harness's EnterWorktree layout). A container `c` that is an ancestor of `dir`
+  // makes `p.startsWith(c + path.sep)` true for EVERY `p` under `dir` (since `dir` itself is under
+  // `c`), so isContainer() matched everything and the walk starved to just `dir`'s own top-level
+  // files ("only 8 files scanned"). A container can only ever be REACHED by walking `dir`'s own
+  // subtree, so containers outside that subtree are never relevant — filter to descendants of (or
+  // equal to) `dir` before checking.
+  const rawContainers = includeWorktrees ? new Set() : worktreeContainerPaths(repoRoot);
+  const containers = [...rawContainers].filter((c) => c === dir || c.startsWith(dir + path.sep));
+  const isContainer = (p) => containers.some((c) => p === c || p.startsWith(c + path.sep));
+  const scanned = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist' || e.name.startsWith(stagingDirPrefix)) continue;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) {
+        if (isContainer(p) || excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
+        walk(p); continue;
+      }
+      if (!/\.(md|sh|mjs|ts|json|yml|js)$/.test(e.name)) continue;
+      if (excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
+      scanned.push(p);
+    }
+  };
+  walk(dir);
+  return scanned;
+}
+
+// ENOENT-tolerant read for the AC1b corpus scan (gap-loop-shipping-ac1b-walk-enoent-race): walkCorpus
+// enumerates a path into `scanned`, then a PARALLEL test can delete it before readFileSync reaches it
+// (the run-identity-selftest-* tests mkdir/rm their tmp/ worktrees mid-suite). A file that vanished
+// between walk and read is a transient artifact, NOT a live old-path reference — skip it. ONLY ENOENT
+// is tolerated; any other read error still throws (硬规则 3b: a "can't read" must not masquerade as
+// "passed"). Returns null — a distinguishable "not read" value, never conflated with empty-string
+// content (硬规则 6: 缺值 = 未查, not 「为假」).
+function readCorpusText(p) {
+  try {
+    return fs.readFileSync(p, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return null;
+    throw e;
+  }
+}
+
+// The AC1b exclusion targets (files/dirs that MAY legitimately mention the old paths).
+const exclusionTargets = () => exclusionEntries(repoRoot, pluginDir).map((e) => e.target);
+
+// ── AC1: the 5 files are inside plugin/; old paths are gone (no shims left behind) ─────────────────
+test('AC1 — the 5 formerly-external mechanism files live in plugin/; the old paths are gone (no compat shells)', () => {
   // (canonical, reason) — every entry ships with the plugin; the reason is the role it plays in
   // the two-layer loop, not "just in case".
   const canonicalInside = [
     ['plugin/loop/orchestrator-loop-tick.md', 'outer-layer driver doc'],
     ['plugin/loop/fast-mode-loop-tick.md', 'inner-layer driver doc'],
     ['plugin/scripts/inner-forensics.mjs', 'inner-layer forensics (outer verification)'],
-    ['plugin/scripts/inner-state.sh', 'inner-layer state Monitor (AC10 observation mechanism)'],
     ['plugin/scripts/resource-gate.sh', 'shared resource gate for heavy ops'],
-    ['plugin/scripts/heavy-op-token.sh', 'cross-project heavy-op token'],
+    // NOTE: plugin/scripts/heavy-op-token.sh was RETIRED entirely 2026-08-06 (human ruling:
+    // gap-session-liveness-remove-shared-events-and-lock — the "one heavy test at a time"
+    // constraint is gone with no replacement; resource-gate.sh remains the load gate).
+    // plugin/scripts/inner-state.sh was removed when it was retired
+    // (gap-retire-inner-state-one-observer-targets-by-parameter) — observation has one tool,
+    // session-liveness.sh, which ships via the separate session-liveness section of quay-init.sh.
   ];
-  const oldPaths = [
-    'orchestration/orchestrator-loop-tick.md',
-    'docs/analysis/fast-mode-loop-tick.md',
-    'orchestration/watch/inner-forensics.mjs',
-    'orchestration/watch/inner-state.sh',
-    'scripts/resource-gate.sh',
-    'scripts/heavy-op-token.sh',
-  ];
+  // oldPaths + oldPathPatterns + the exclusion table are the SINGLE SOURCE in
+  // plugin/scripts/loop-shipping-exclusion-data.mjs (gap-exclusion-lists-have-no-necessity-check)
+  // so the AC1b scan and the inert-exclusion necessity check can never disagree.
   for (const [rel, reason] of canonicalInside) {
     const p = path.join(pluginDir, rel.replace(/^plugin\//, ''));
     assert.ok(fs.existsSync(p), `${rel} must ship inside the plugin (role: ${reason})`);
     assert.ok(fs.statSync(p).isFile(), `${rel} must be a regular file (not a symlink leaving the package)`);
   }
+  // The two tick-doc old paths legitimately hold the DEPLOYED copies (quay as a target project lays
+  // them down at orchestration/ + docs/analysis/ per the template-params note; outer deployed them
+  // 2026-08-05 for cold-start/launch-config). A real file there is the target-layout deployment,
+  // NOT a compat shell — only a SYMLINK shim is forbidden. The other four old paths must be gone.
+  const deployedOldPaths = new Set([
+    'orchestration/orchestrator-loop-tick.md',
+    'docs/analysis/fast-mode-loop-tick.md',
+  ]);
   for (const rel of oldPaths) {
     const p = path.join(repoRoot, rel);
-    assert.ok(!fs.existsSync(p),
-      `old path must NOT remain (no compat shell / symlink shim): ${rel}`);
+    if (deployedOldPaths.has(rel)) {
+      assert.ok(!(fs.existsSync(p) && fs.lstatSync(p).isSymbolicLink()),
+        `old path must NOT be a compat symlink shim: ${rel}`);
+    } else {
+      assert.ok(!fs.existsSync(p),
+        `old path must NOT remain (no compat shell / symlink shim): ${rel}`);
+    }
   }
 });
 
-// ── AC (coordinator): no LIVE reference to the 6 old paths anywhere in the repo ─────────────────────
-test('AC1b — after the move, no live reference to the 6 old paths remains (comments/history excluded)', () => {
-  // The `scripts/*.sh` old paths are SUBSTRINGS of the new `plugin/scripts/*.sh` paths, so use a
-  // negative lookbehind to match only the bare old form (never the `plugin/`-prefixed new path).
-  // The `orchestration/` + `docs/analysis/` old paths are NOT substrings of their new `plugin/loop/`
-  // locations, so plain substring is exact there.
-  const oldPathPatterns = [
-    /(?<!plugin\/)scripts\/resource-gate\.sh/,
-    /(?<!plugin\/)scripts\/heavy-op-token\.sh/,
-    /orchestration\/watch\/inner-state\.sh/,
-    /orchestration\/watch\/inner-forensics\.mjs/,
-    /docs\/analysis\/fast-mode-loop-tick\.md/,
-    /orchestration\/orchestrator-loop-tick\.md/,
-  ];
+// ── AC (coordinator): no LIVE reference to the 5 old paths anywhere in the repo ─────────────────────
+test('AC1b — after the move, no live reference to the 5 old paths remains (comments/history excluded)', () => {
+  // oldPathPatterns + the exclusion table live in plugin/scripts/loop-shipping-exclusion-data.mjs
+  // (single source — the necessity check reads the SAME data). The patterns are derived from
+  // oldPaths there: the `scripts/*.sh` old paths are SUBSTRINGS of the new `plugin/scripts/*.sh`
+  // paths, so those two carry a negative lookbehind to match only the bare old form (never the
+  // `plugin/`-prefixed new path); the `orchestration/` + `docs/analysis/` old paths are NOT
+  // substrings of their new `plugin/loop/` locations, so plain substring is exact there.
   // Files that MAY legitimately mention the old paths (historical record / target-layout), and
   // are therefore excluded from the "no live reference" scan:
-  const excluded = [
-    path.join(repoRoot, 'tasks'),            // historical task records (descriptions of the past)
-    path.join(repoRoot, 'milestones'),       // historical milestone journals
-    path.join(repoRoot, 'orchestration', 'tick-log.md'),   // the outer's running log
-    path.join(pluginDir, 'scripts', 'quay-init.sh'),        // target layout (orchestration/ + docs/analysis/)
-    path.join(repoRoot, 'test', 'cold-start-e2e.sh'),       // target layout (asserts the laid-down project)
-    path.join(repoRoot, 'test', 'cold-start-oneliner-e2e.sh'), // AC8d target-layout paths (the cold start operates on orchestration/ + docs/analysis/)
-    path.join(pluginDir, 'skills', 'init', 'SKILL.md'),     // mapping table's target column
-    path.join(pluginDir, 'skills', 'cold-start', 'SKILL.md'), // cold-start skill operates on the TARGET project's laid-down layout (orchestration/ + docs/analysis/) — the AC8d target-layout paths, not the quay plugin/loop paths
-    path.join(pluginDir, 'test', 'quay-init-loop.test.mjs'),// asserts the laid-down target layout
-    path.join(pluginDir, 'loop'),                           // canonical templates: their /loop prompts and cross-refs use plugin/loop/; the only old-path strings left are in the template-params note documenting the TARGET layout
-    path.join(pluginDir, 'test', 'loop-shipping.test.mjs'), // this file's own regexes define the old paths
-    path.join(pluginDir, 'test', 'task-contract-check.test.mjs'), // fixtures test the invoke-entry-path criterion with OLD-path invoke commands (historical done tasks); data, not live refs
-    path.join(repoRoot, 'README.md'),                       // the cold-start section documents the TARGET project's laid-down layout (orchestration/ + docs/analysis/)
-    // plugin/loop/ is fully excluded: the tick-doc templates legitimately spell the TARGET layout
-    // (orchestration/ + docs/analysis/ for a cold-started project). Their own old-path strings are
-    // therefore only policed by AC1c's three assertions, and AC1c's liveLines filter drops
-    // `>`-blockquote lines, so old paths inside reference/blockquote blocks are NOT scanned here —
-    // intentional: blockquotes are documentation of the target layout, not live instructions.
-  ];
   const hits = [];
   // Corpus non-emptiness guard (gap-checks-that-verify-an-empty-set family): assert.deepEqual(hits, [])
   // alone would pass silently if walk() returned early, the extension filter changed, or the excluded
@@ -103,42 +150,79 @@ test('AC1b — after the move, no live reference to the 6 old paths remains (com
   // in the corpus, so the scan keeps resolving power.
   let scanned = 0;
   let sawTestSh = false;
-  const walk = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist') continue;
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) { walk(p); continue; }
-      if (!/\.(md|sh|mjs|ts|json|yml|js)$/.test(e.name)) continue;
-      if (excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
-      scanned += 1;
-      if (p === path.join(repoRoot, 'scripts', 'test.sh')) sawTestSh = true;
-      const src = fs.readFileSync(p, 'utf8');
-      for (const re of oldPathPatterns) {
-        if (re.test(src)) hits.push(`${path.relative(repoRoot, p)}: contains "${re}"`);
-      }
+  // walkCorpus skips node_modules/.git/dist AND every git worktree container (a worktree is a
+  // complete repo copy whose stale-path strings are not main-repo references).
+  for (const p of walkCorpus(repoRoot, { excluded: exclusionTargets() })) {
+    scanned += 1;
+    if (p === path.join(repoRoot, 'scripts', 'test.sh')) sawTestSh = true;
+    const src = readCorpusText(p);
+    if (src === null) continue; // deleted mid-walk by a parallel test → transient file, not a live reference
+    for (const re of oldPathPatterns) {
+      if (re.test(src)) hits.push(`${path.relative(repoRoot, p)}: contains "${re}"`);
     }
-  };
-  walk(repoRoot);
+  }
   assert.deepEqual(hits, [], 'no live reference to the moved files\' old paths may remain (update callers to plugin/loop/ + plugin/scripts/)');
   assert.ok(scanned >= 200, `scan corpus must not be empty/starved: only ${scanned} files scanned`);
   assert.ok(sawTestSh, 'scripts/test.sh (a known live caller) must be in the scan corpus');
 });
 
-test('AC1c — the tick-doc templates\' own /loop prompts and reciprocal cross-refs use plugin/loop/, not the old orchestration/ + docs/analysis/ paths', () => {
-  // The template-params NOTE legitimately spells the target layout (orchestration/ + docs/analysis/),
-  // but the actionable instructions (the /loop invocation, the cross-refs to the sibling tick doc)
-  // must point at the canonical plugin/loop/ location so the quay repo's own loop works.
+test('AC1 — readCorpusText tolerates ENOENT (a parallel test deleted the file between walk and read)', () => {
+  // The exact AC1b race: the file is enumerated into the corpus, then deleted before readFileSync.
+  // It must be skipped (null), not crash the scan with an ENOENT throw.
+  const probe = path.join(repoRoot, '.loop-shipping-enoent-probe.md');
+  fs.writeFileSync(probe, 'a file that will vanish before it is read\n');
+  fs.rmSync(probe, { force: true });
+  assert.equal(readCorpusText(probe), null, 'a file deleted between walk and read must be skipped, not throw ENOENT');
+});
+
+test('AC2 — a real old-path reference is still caught (ENOENT tolerance must not mask live refs)', () => {
+  const probe = path.join(repoRoot, '.loop-shipping-live-probe.md');
+  try {
+    fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
+    const src = readCorpusText(probe);
+    assert.ok(src !== null && oldPathPatterns.some((re) => re.test(src)),
+      'a live old-path reference must still be read and matched (ENOENT tolerance must not leak into live-ref capture)');
+  } finally {
+    fs.rmSync(probe, { force: true });
+  }
+});
+
+test('AC3 — a non-ENOENT read error still throws (not swallowed)', () => {
+  // A directory is a real non-ENOENT readFileSync failure (EISDIR): it must propagate, proving the
+  // tolerance is ENOENT-only, not a catch-all that hides "can't read" as "passed" (硬规则 3b).
+  assert.throws(
+    () => readCorpusText(path.join(pluginDir, 'scripts')),
+    (e) => e && e.code === 'EISDIR',
+    'non-ENOENT read errors must still throw'
+  );
+});
+
+test('AC1c — the tick-doc templates\' own /loop prompts and reciprocal cross-refs reference the CONSUMER landing (orchestration/ + docs/analysis/), not the non-landed plugin/loop/ bundle source', () => {
+  // gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop (AC37, ad-arm1): the LAID tick
+  // docs are the consumer deliverable — quay-init --loop lays plugin/loop/*.md VERBATIM to
+  // orchestration/ + docs/analysis/, and does NOT lay plugin/loop/. A doc cross-ref to
+  // plugin/loop/... is therefore a dead path for the target project (the consumer tick doc referenced
+  // 5 plugin/loop/ paths that never landed, and the inner reported "the tick references an execution
+  // core that isn't at the expected path"). The actionable instructions must reference the
+  // consumer-resolvable paths (orchestration/ + docs/analysis/), which exist in BOTH the quay repo
+  // (deployed copies) and a consumer — that is what makes the SAME byte-identical doc work in both
+  // contexts. The template-params NOTE spells the same target layout.
   for (const name of ['orchestrator-loop-tick.md', 'fast-mode-loop-tick.md']) {
     const src = fs.readFileSync(path.join(pluginDir, 'loop', name), 'utf8');
-    const liveLines = src.split('\n').filter((l) => !l.trim().startsWith('>'));
-    for (const snippet of ['orchestration/orchestrator-loop-tick.md', 'docs/analysis/fast-mode-loop-tick.md']) {
-      assert.ok(
-        !liveLines.some((l) => l.includes(snippet)),
-        `${name} has a LIVE instruction referencing the old tick-doc path "${snippet}" (should be plugin/loop/...)`
-      );
-    }
-    assert.match(src, /plugin\/loop\/orchestrator-loop-tick\.md/, `${name} must reference the canonical outer tick-doc path`);
-    assert.match(src, /plugin\/loop\/fast-mode-loop-tick\.md/, `${name} must reference the canonical inner tick-doc path`);
+    // DRIVE COMMANDS execute against the LAID-DOWN copy in a running workspace — they already use
+    // the `$REPO_ROOT/docs/analysis/fast-mode-loop-tick.md` target-layout form (cold-start/SKILL.md
+    // drives the same), so they are the execution-time interpolation, not the doc cross-ref this
+    // assertion governs.
+    const driveCmdRe = /\$REPO_ROOT\/docs\/analysis\/fast-mode-loop-tick\.md/;
+    const liveLines = src.split('\n').filter((l) => !l.trim().startsWith('>') && !driveCmdRe.test(l));
+    // No LIVE instruction may reference the non-landed plugin/loop/ bundle-source path.
+    assert.ok(
+      !liveLines.some((l) => l.includes('plugin/loop/')),
+      `${name} has a LIVE instruction referencing the non-landed plugin/loop/ path (should be orchestration/ + docs/analysis/ — the consumer landing)`
+    );
+    // The docs MUST reference the consumer landing of the sibling tick docs.
+    assert.match(src, /orchestration\/orchestrator-loop-tick\.md/, `${name} must reference the consumer landing of the outer tick doc`);
+    assert.match(src, /docs\/analysis\/fast-mode-loop-tick\.md/, `${name} must reference the consumer landing of the inner tick doc`);
   }
 });
 
@@ -161,18 +245,123 @@ test('AC2 — fast-mode-telemetry.ts has ONE physical copy; plugin/scripts/ is a
     'experiments symlink must point at the plugin authority'
   );
   // No OTHER physical copy anywhere under the repo. Use lstatSync so symlinks (the re-export at
-  // experiments/) are not counted as physical copies.
+  // experiments/) are not counted as physical copies. walkCorpus skips node_modules/.git/dist, the
+  // gitignored pack-time snapshot packages/quay/plugin/, AND every git worktree container (a worktree
+  // is a complete repo copy — its fast-mode-telemetry.ts is not a second authority).
   const copies = [];
-  const walk = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist') continue;
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.name === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink()) copies.push(p);
-    }
-  };
-  walk(repoRoot);
+  for (const p of walkCorpus(repoRoot, { excluded: [path.join(repoRoot, 'packages', 'quay', 'plugin')] })) {
+    if (path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink()) copies.push(p);
+  }
   assert.deepEqual(copies, [canonical], `exactly one physical fast-mode-telemetry.ts expected, got ${JSON.stringify(copies)}`);
+});
+
+// ── AC2/AC3 worktree-container controls (gap-loop-shipping-scan-does-not-exclude-worktrees) ────────
+test('AC2 — walk() skips a REAL git worktree (`git worktree list` source): stale refs + a telemetry copy inside it are not scanned', () => {
+  const worktreesDir = path.join(repoRoot, '.claude', 'worktrees');
+  const madeParent = !fs.existsSync(worktreesDir);
+  fs.mkdirSync(worktreesDir, { recursive: true });
+  const wt = path.join(worktreesDir, `ls-control-${process.pid}`);
+  try {
+    execFileSync('git', ['worktree', 'add', '--detach', wt, 'HEAD'], { cwd: repoRoot, stdio: 'pipe' });
+    // The fresh container set must report the registered worktree, and never the main repo root.
+    const containers = worktreeContainerPaths(repoRoot);
+    assert.ok(containers.has(wt), 'a registered git worktree must be reported by worktreeContainerPaths');
+    assert.ok(!containers.has(path.resolve(repoRoot)), 'repoRoot must never be a worktree container');
+    // Stale-path reference + a fast-mode-telemetry.ts copy inside the worktree.
+    fs.writeFileSync(path.join(wt, 'stale-probe.md'), 'old tick-doc path orchestration/orchestrator-loop-tick.md and docs/analysis/fast-mode-loop-tick.md\n');
+    fs.writeFileSync(path.join(wt, 'fast-mode-telemetry.ts'), 'export const worktreeCopy = true;\n');
+    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+    assert.ok(!scanned.some((p) => p.startsWith(wt + path.sep)), 'walk() must not scan inside a real git worktree');
+    const copies = scanned.filter((p) => path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink());
+    assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'a git worktree copy of fast-mode-telemetry.ts must not be counted (AC2)');
+  } finally {
+    try { execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: repoRoot, stdio: 'pipe' }); } catch { /* already gone */ }
+    fs.rmSync(wt, { recursive: true, force: true });
+    if (madeParent) fs.rmSync(worktreesDir, { recursive: true, force: true });
+  }
+});
+
+test('AC2 — walk() skips the .claude/worktrees/ container even for UNREGISTERED residue (the 2026-08-10 agent-* shape)', () => {
+  const worktreesDir = path.join(repoRoot, '.claude', 'worktrees');
+  const madeParent = !fs.existsSync(worktreesDir);
+  fs.mkdirSync(worktreesDir, { recursive: true });
+  const residue = path.join(worktreesDir, `residue-${process.pid}`);
+  try {
+    fs.mkdirSync(residue, { recursive: true });
+    // NOT a registered git worktree (no `.git`): a stale leftover `agent-*`-shaped dir whose content
+    // is a full repo copy — exactly the 2026-08-10 false-red source (agent-a8fd.../README.md). Only
+    // the explicit .claude/worktrees/ container skip catches this (git worktree list does not).
+    fs.writeFileSync(path.join(residue, 'README.md'), 'references orchestration/orchestrator-loop-tick.md\n');
+    fs.writeFileSync(path.join(residue, 'fast-mode-telemetry.ts'), 'export const residueCopy = true;\n');
+    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+    assert.ok(!scanned.some((p) => p.startsWith(residue + path.sep)), 'walk() must not scan unregistered residue under .claude/worktrees/');
+    const copies = scanned.filter((p) => path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink());
+    assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'residue fast-mode-telemetry.ts copy must not be counted (AC2)');
+  } finally {
+    fs.rmSync(residue, { recursive: true, force: true });
+    if (madeParent) fs.rmSync(worktreesDir, { recursive: true, force: true });
+  }
+});
+
+// ── plugin-staging-* orphan skip (gap-orphan-staging-dirs-pollute-walkcorpus) ───────────────────────
+test('AC1 — walkCorpus skips a plugin-staging-* orphan dir (its old-path tick-doc copy + telemetry copy are not scanned)', () => {
+  // An orphan is a KILLED stagePackagedPlugin() copy left at packages/quay/plugin-staging-<pid>-{0,1}/:
+  // it carries the full plugin/ tree (the tick docs' old-path strings) + scripts/*.ts — swept into the
+  // corpus it false-reds AC1b/AC2 (2026-08-25: plugin-staging-3477285-{0,1} red, worker hand-deleted).
+  const container = path.join(repoRoot, 'packages', 'quay');
+  const orphan = path.join(container, `${stagingDirPrefix}${process.pid}-0`);
+  fs.mkdirSync(orphan, { recursive: true });
+  try {
+    const tick = path.join(orphan, 'loop', 'orchestrator-loop-tick.md');
+    fs.mkdirSync(path.dirname(tick), { recursive: true });
+    fs.writeFileSync(tick, 'deployed copy lives at orchestration/orchestrator-loop-tick.md\n');
+    fs.mkdirSync(path.join(orphan, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(orphan, 'scripts', 'fast-mode-telemetry.ts'), 'export const orphanCopy = true;\n');
+    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+    assert.ok(!scanned.some((p) => p.startsWith(orphan + path.sep)), 'walkCorpus must not scan inside a plugin-staging-* orphan dir');
+    const copies = scanned.filter((p) => path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink());
+    assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'an orphan staging fast-mode-telemetry.ts copy must not be counted (AC2)');
+  } finally {
+    fs.rmSync(orphan, { recursive: true, force: true });
+  }
+});
+
+test('AC2 — negative control: renaming off the staging prefix makes walkCorpus COLLECT the orphan (the skip is load-bearing)', () => {
+  // The negative control proves the skip suppresses a REAL hit, not a vacuous exclusion: the orphan
+  // content IS a live old-path reference (it trips an AC1b pattern), and walkCorpus collects it the
+  // moment the dir stops matching the staging prefix — the exact red the skip prevents.
+  const container = path.join(repoRoot, 'packages', 'quay');
+  const orphan = path.join(container, `${stagingDirPrefix}${process.pid}-nc`);
+  const renamed = path.join(container, `orphan-probe-${process.pid}-nc`);
+  fs.mkdirSync(orphan, { recursive: true });
+  try {
+    const probe = path.join(orphan, 'stale-probe.md');
+    fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
+    const src = fs.readFileSync(probe, 'utf8');
+    assert.ok(oldPathPatterns.some((re) => re.test(src)), 'the orphan staging content must trip an AC1b pattern (a live reference)');
+    // With the staging skip active, the orphan is not part of the corpus.
+    assert.ok(!walkCorpus(repoRoot, { excluded: exclusionTargets() }).includes(probe), 'with the staging skip, the orphan probe is not in the corpus');
+    // Remove the skip (rename off the prefix): walkCorpus now COLLECTS the probe — would red AC1b.
+    fs.renameSync(orphan, renamed);
+    const renamedProbe = path.join(renamed, 'stale-probe.md');
+    assert.ok(walkCorpus(repoRoot, { excluded: exclusionTargets() }).includes(renamedProbe), 'without the staging skip, the orphan probe IS collected (would red AC1b)');
+  } finally {
+    fs.rmSync(orphan, { recursive: true, force: true });
+    fs.rmSync(renamed, { recursive: true, force: true });
+  }
+});
+
+test('AC3 — negative control: a REAL old-path reference in the MAIN repo is still caught (normal capture retained)', () => {
+  const probe = path.join(repoRoot, '.loop-shipping-main-repo-probe.md');
+  try {
+    fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
+    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+    assert.ok(scanned.includes(probe), 'a probe file in the MAIN repo must be part of the scan corpus (not over-excluded by the worktree skip)');
+    const src = fs.readFileSync(probe, 'utf8');
+    assert.ok(oldPathPatterns.some((re) => re.test(src)), 'the probe old-path reference must trip an AC1b old-path pattern (would be collected as a hit)');
+  } finally {
+    fs.rmSync(probe, { force: true });
+  }
 });
 
 // ── AC7: the shipped plugin subtree excludes per-project state files ───────────────────────────────
@@ -256,11 +445,20 @@ test('AC2 — cold-start-e2e.sh --from-build extracts via git archive, never a c
     'the --from-build branch must NOT cp -r the working tree to the install source (use git archive)');
 });
 
-test('AC3 — cold-start-e2e.sh asserts the three build-required files, fail-named', () => {
+test('AC3 — cold-start-e2e.sh asserts the build-required files, fail-named (inner-state.sh retired, not required)', () => {
   const src = fs.readFileSync(COLD_START_E2E, 'utf8');
-  for (const f of ['scripts/quay-init.sh', 'scripts/inner-state.sh', 'loop/orchestrator-loop-tick.md']) {
+  for (const f of ['scripts/quay-init.sh', 'loop/orchestrator-loop-tick.md']) {
     assert.ok(src.includes(f), `cold-start-e2e.sh must assert the presence of ${f} (AC3)`);
   }
+  // inner-state.sh is RETIRED — cold-start-e2e.sh must treat it as not-required, not list it as a
+  // required presence file. It legitimately REFERENCES the name in its absence-check ("must NOT be
+  // laid down", gap-retire-inner-state-one-observer-targets-by-parameter AC3), so the assertion is
+  // the positive retirement marker, not a substring absence (a substring grep would false-positive
+  // on the `plugin/scripts/inner-state.sh` path in that check).
+  assert.match(src, /inner-state\.sh is retired/i,
+    'cold-start-e2e.sh must document inner-state.sh as retired (not required)');
+  assert.ok(!src.includes('assert_file "$PROJECT/plugin/scripts/inner-state.sh"'),
+    'cold-start-e2e.sh must NOT require inner-state.sh\'s presence (retired, gap-retire-inner-state-one-observer-targets-by-parameter AC3)');
   // The completeness assertion must fail naming the missing file (not a bare "something failed").
   assert.match(src, /fail "missing file: \$1"/,
     'the AC3 completeness assertion must fail naming the file');

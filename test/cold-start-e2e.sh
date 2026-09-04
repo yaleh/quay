@@ -28,8 +28,9 @@
 #                 runs WITHOUT --push (AC10). This is the deliverability path: it installs the
 #                 BUILD ARTIFACT, not a renamed source dir.
 #
-# AC3: the install source must contain scripts/quay-init.sh, scripts/inner-state.sh and
-#      loop/orchestrator-loop-tick.md — missing any one FAILS naming the file.
+# AC3: the install source must contain scripts/quay-init.sh and loop/orchestrator-loop-tick.md —
+#      missing any one FAILS naming the file. (inner-state.sh is retired and NOT in the shipping
+#      set, gap-retire-inner-state-one-observer-targets-by-parameter AC3.)
 # AC4 (negative control): --sabotage <relpath> deletes <relpath> from the install source so the
 #      AC3 assertion fails naming it; re-run without --sabotage → exit 0.
 # AC6: the target project gets NO npm install — the laid-down mechanism is self-contained.
@@ -39,9 +40,6 @@
 # orchestration/session-liveness.env) are explicit exceptions. --sabotage-byte flips ONE byte in the
 # INSTALL SOURCE after install so the AC6 assertion must fail naming the file, then restores it so
 # the assertion passes again — the bidirectional negative control that proves the check can fail.
-# AC7: inner-state.sh gets a ≥90s window (it polls on a 55-60s cadence) with a real in-flight
-#      task to observe, and must emit its INIT baseline — the outer's earlier 4s/0-byte
-#      observation was INCONCLUSIVE (a 4s window proves neither alive nor dead).
 # AC8: the temp branch (and the throwaway worktree publish-dist-branch.sh creates) are cleaned
 #      on exit — no branch residue across repeated runs.
 # AC9: the script prints its own wall-clock elapsed time; the executor decision (a cold-start-e2e
@@ -52,9 +50,9 @@
 #   milestone-cadence, not per-push). The assertions below are IN EFFECT from that task onward.
 #
 # AC7 (SPEC-outer-liveness-productization.md): asserts session-liveness.sh is laid down AND usable —
-# a one-shot `--once` real run (the script's cold-start seam), matching inner-state.sh's seam in 7c.
-# In an environment with no tmux session for the project's outer, --once honestly reports
-# SESSION-STATUS <project> alive=0; what matters is that it RUNS, self-contained, after the rename.
+# a one-shot `--once` real run (the script's cold-start seam). In an environment with no tmux
+# session for the project's outer, --once honestly reports SESSION-STATUS <project> alive=0; what
+# matters is that it RUNS, self-contained, after the rename.
 
 set -euo pipefail
 
@@ -152,10 +150,10 @@ fi
 # Runs AFTER the sabotage hook so a --sabotage run fails HERE naming the missing file, and a
 # normal run proves the install source is complete before the install.
 echo "== AC3: install source completeness =="
-for f in scripts/quay-init.sh scripts/inner-state.sh loop/orchestrator-loop-tick.md; do
+for f in scripts/quay-init.sh loop/orchestrator-loop-tick.md; do
   assert_file "$QUAY_DEV/plugin/$f"
 done
-echo "  install source has quay-init.sh + inner-state.sh + orchestrator-loop-tick.md"
+echo "  install source has quay-init.sh + orchestrator-loop-tick.md (inner-state.sh retired, not required)"
 
 # ── 2. empty target project (never used before) ─────────────────────────────────────────────────────
 PROJECT="$BASE/empty-project"
@@ -178,15 +176,24 @@ assert_file "$PROJECT/orchestration/orchestrator-loop-tick.md"
 assert_file "$PROJECT/docs/analysis/fast-mode-loop-tick.md"
 for s in \
   fast-mode-telemetry.ts inner-blocked-signal.ts inner-forensics.mjs inner-idle-log.ts \
-  inner-state.sh resource-gate.sh heavy-op-token.sh task-contract-check.ts \
+  resource-gate.sh task-contract-check.ts \
   task-status-drift-check.ts touches-orthogonality-check.ts concurrent-batch-scheduler.ts \
   it0-split-or-commit-check.ts pipe-exit-code-check.sh session-liveness.sh; do
   assert_file "$PROJECT/plugin/scripts/$s"
 done
+if [ -e "$PROJECT/plugin/scripts/heavy-op-token.sh" ]; then
+  fail "heavy-op-token.sh must NOT be laid down into target projects (retired 2026-08-06, gap-session-liveness-remove-shared-events-and-lock)"
+fi
+if [ -e "$PROJECT/plugin/scripts/inner-state.sh" ]; then
+  fail "inner-state.sh must NOT be laid down into target projects (retired, AC3)"
+fi
 # --all categories
 assert_file "$PROJECT/.claude/workflows/drain-directives.js"
 assert_file "$PROJECT/.claude/agents/baime-iteration-executor.md"
-if ! ls "$PROJECT"/scripts/gates/*.sh >/dev/null 2>&1; then fail "no gate scripts laid down"; fi
+# gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked (2026-08-05): the retired
+# plugin/gate-scripts/ category is NO LONGER laid down — the classic-pipeline era gates were dead
+# weight in target projects. Negative control: scripts/gates/ must NOT exist after --all --loop.
+if [ -e "$PROJECT/scripts/gates" ]; then fail "scripts/gates/ must NOT be laid down (retired gate scripts are dead weight)"; fi
 echo "  all laid-down files present"
 
 # ── AC6/AC4 (gap-quay-init-rewrites-an-executable-instead-of-generating-config): byte-identical ─────
@@ -280,20 +287,13 @@ GATE_OUT="$(bash "$PROJECT/plugin/scripts/resource-gate.sh" 2>&1 || true)"
 [ -n "$GATE_OUT" ] || fail "resource-gate.sh produced no output (did not run after the rename)"
 echo "  resource-gate.sh runs after the rename"
 
-# 7b. heavy-op token (state lives outside every repo; --status is read-only)
-bash "$PROJECT/plugin/scripts/heavy-op-token.sh" --status > /dev/null
-echo "  heavy-op-token.sh --status runs (exit 0)"
+# 7b. (removed) heavy-op token — retired entirely 2026-08-06 (human ruling:
+#     gap-session-liveness-remove-shared-events-and-lock; the "one heavy test at a time"
+#     constraint is gone with no replacement, so there is nothing to --status).
 
-# 7c. inner-state.sh one-shot seam (a present inner-blocked.json must emit BLOCKED)
-BLOCK_ROOT="$BASE/block-root"
-mkdir -p "$BLOCK_ROOT/.quay"
-printf '{"since":0,"taskId":"e2e","reason":"task-over-90m","question":"abort it?"}\n' \
-  > "$BLOCK_ROOT/.quay/inner-blocked.json"
-if ! INNER_STATE_BLOCK_ROOT="$BLOCK_ROOT" bash "$PROJECT/plugin/scripts/inner-state.sh" \
-     | grep -q 'BLOCKED reason=task-over-90m'; then
-  fail "inner-state.sh one-shot did not emit BLOCKED after the rename"
-fi
-echo "  inner-state.sh one-shot emits BLOCKED (exit 0)"
+# 7c. (removed) inner-state.sh one-shot BLOCKED seam — inner-state.sh is retired
+#     (gap-retire-inner-state-one-observer-targets-by-parameter AC4); the blocked channel is
+#     written/read via inner-blocked-signal.ts directly, not via a retired monitor.
 
 # 7d. pipe-exit-code-check self-check (self-contained)
 bash "$PROJECT/plugin/scripts/pipe-exit-code-check.sh" --self-check > /dev/null
@@ -319,30 +319,10 @@ if ! printf '%s' "$OL_OUT" | grep -q 'SESSION-STATUS empty-project alive='; then
 fi
 echo "  session-liveness.sh --once emits SESSION-STATUS empty-project alive=... (exit 0)"
 
-# 7g. AC7: inner-state.sh ≥90s window retest (gap-cold-start-...-nothing-runs-it).
-#     The outer's earlier observation was inner-state.sh producing 0 bytes in 4 seconds — that is
-#     INCONCLUSIVE: it polls on a 55s/60s cadence, so a 4s window proves neither alive nor dead.
-#     Retest with a ≥90s window AND a real state transition to observe (an in-flight task written
-#     by the laid-down fast-mode-telemetry.ts), then run the ACTUAL long-running monitor for the
-#     full window and require it to (a) emit its INIT baseline and (b) survive the whole window.
-echo "== AC7: inner-state.sh >=90s window retest (polling cadence is 55-60s) =="
-node --experimental-strip-types "$PROJECT/plugin/scripts/fast-mode-telemetry.ts" \
-  --task-start --taskId e2e-ac7 --root "$PROJECT" >/dev/null
-AC7_OUT_FILE="$BASE/ac7-inner-state.out"
-set +e
-timeout 95 bash "$PROJECT/plugin/scripts/inner-state.sh" >"$AC7_OUT_FILE" 2>&1
-AC7_RC=$?
-set -e
-AC7_OUT="$(cat "$AC7_OUT_FILE")"
-if ! printf '%s' "$AC7_OUT" | grep -q 'INIT 挂载时的在飞任务: e2e-ac7'; then
-  fail "inner-state.sh did not emit its INIT baseline within a 95s window: $AC7_OUT"
-fi
-if [ "$AC7_RC" -ne 124 ]; then
-  fail "inner-state.sh exited before the 95s window elapsed (rc=$AC7_RC) — the monitor must be long-running: $AC7_OUT"
-fi
-echo "  inner-state.sh emitted within the 95s window:"
-printf '%s\n' "$AC7_OUT" | sed 's/^/    /'
-echo "  inner-state.sh 60s-polling path is ALIVE and survives a >=90s window after the rename"
+# 7g. (removed) inner-state.sh ≥90s window retest — inner-state.sh is retired
+#     (gap-retire-inner-state-one-observer-targets-by-parameter AC4). The ONE observer is
+#     session-liveness.sh, whose one-shot cold-start seam is asserted in 7f above; no
+#     55-60s-polling monitor remains to need a ≥90s window.
 
 # ── 8. wall-clock report (AC9 evidence) ─────────────────────────────────────────────────────────────
 END_TS="$(date +%s)"

@@ -11,8 +11,10 @@
 // Pure functions are exported and unit-tested; `main()` is a thin CLI over them.
 
 import fs from "node:fs";
-import { isDirectEntry } from "./gate-script-base.ts";
-import { matchGlob, isOverbroadDeclaration, normalizePath } from "./touches-orthogonality-check.ts";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { isDirectEntry, helpExit } from "./gate-script-base.ts";
+import { matchGlob, isOverbroadDeclaration, normalizePath, parseTouches } from "./touches-orthogonality-check.ts";
 
 // normalizePath (canonical: strips ./, collapses //, resolves ./.. segments, drops trailing /, case
 // preserved for the case-significant Linux repo) is single-source in touches-orthogonality-check.mjs
@@ -86,14 +88,126 @@ export function checkAntiDrift(builds, opts) {
   return { ok: violations.length === 0, violations };
 }
 
+// ── Driver input surface (gap-anti-drift-touches-zero-coverage-fast-mode) ──────────────────────────
+// The fast-mode fan-in path runs this module as a GATE with the ACTUAL diff (the files the fan-in
+// would land) vs the task's DECLARED `## Touches`:
+//   node --experimental-strip-types anti-drift-touches-check.ts --task <id> --worktree <dir>
+//        [--merge-target <ref>]
+// The classic-loop driver (anti-drift-touches-check.sh) supplied a pre-computed manifest from
+// `git diff --numstat`; THIS driver computes the actual diff itself (`git diff --name-only
+// <merge-target>...HEAD` — the task's own commits, i.e. exactly what fan-in-ff-merge would land)
+// and reads the declared globs from the task body (the ONE touches-parser). The judgment — one
+// build whose every actual file must fall within a declared glob — is the SAME checkAntiDrift as
+// the manifest-file mode (a single build cannot cross-build-overlap; out-of-declared and
+// overbroad-declaration are HARD FAIL). The judgment logic is UNCHANGED; only the input surface is new.
+
+function getArgValue(args, name) {
+  const idx = args.indexOf(name);
+  return idx === -1 ? undefined : args[idx + 1];
+}
+
+/** Compute the files the fan-in would land: `git diff --name-only <merge-target>...HEAD` in the
+ *  worktree. After the fan-in workflow's step-1 merge of the merge-target into the task worktree,
+ *  this is exactly the set of files the ff-merge would move onto the merge target. Fail-closed: a
+ *  git error THROWS — the caller maps it to a usage/env error (exit 2), never a silent OK. */
+export function computeActualFiles(worktree, mergeTarget) {
+  const out = execFileSync("git", ["-C", worktree, "diff", "--name-only", `${mergeTarget}...HEAD`], {
+    encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
+  });
+  return out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+}
+
+/** Build the single-build manifest a task fan-in must satisfy: the declared `## Touches` globs vs
+ *  the ACTUAL files the fan-in would land. `parseTouches` (the ONE parser) resolves a missing Touches
+ *  section to [] — fail-closed: any actual file then violates (an undeclared write is drift). */
+export function buildTaskManifest(taskBody, actualFiles) {
+  const { globs } = parseTouches(String(taskBody ?? ""));
+  return [{ id: "task", declaredGlobs: globs, actualFiles }];
+}
+
+/** Driver verdict over one task build: checkAntiDrift (judgment UNCHANGED) with the task's declared
+ *  Touches vs its actual diff. Returns the checkAntiDrift result plus the manifest for transparency. */
+export function checkTaskAntiDrift(taskBody, actualFiles, opts) {
+  const builds = buildTaskManifest(taskBody, actualFiles);
+  return { ...checkAntiDrift(builds, opts), builds, actualFiles, declaredGlobs: builds[0].declaredGlobs };
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 function usage() {
-  process.stderr.write("Usage: anti-drift-touches-check.mjs [--allow-empty] <ran-batch-manifest.json>\n");
+  process.stderr.write(
+    "Usage:\n" +
+      "  anti-drift-touches-check.mjs [--allow-empty] <ran-batch-manifest.json>\n" +
+      "  anti-drift-touches-check.mjs --task <id> --worktree <dir> [--merge-target <ref>] [--allow-empty]\n" +
+      "    (driver mode — fast-mode fan-in gate: actual diff vs declared ## Touches)\n",
+  );
+}
+
+/** Driver-mode body: run the anti-drift check over ONE task build. Exit 0 = clean (every actual
+ *  file within the declared Touches, declaration not overbroad); 1 = HARD FAIL (out-of-declared
+ *  write or overbroad declaration); 2 = usage/env error (task file missing / git diff unavailable —
+ *  fail-closed, never a silent OK). */
+function runTaskDriver({ taskId, worktree, mergeTarget, allowEmpty }) {
+  const taskPath = path.join(worktree, "tasks", `${taskId}.md`);
+  if (!fs.existsSync(taskPath)) {
+    process.stderr.write(`anti-drift-touches-check: task file not found: ${taskPath}\n`);
+    return 2;
+  }
+  let actualFiles;
+  try {
+    actualFiles = computeActualFiles(worktree, mergeTarget);
+  } catch (e) {
+    process.stderr.write(
+      `anti-drift-touches-check: could not compute git diff (${mergeTarget}...HEAD) in ${worktree}: ${e.message}\n`,
+    );
+    return 2;
+  }
+  let r;
+  try {
+    r = checkTaskAntiDrift(fs.readFileSync(taskPath, "utf8"), actualFiles, { allowEmpty });
+  } catch (e) {
+    // malformed task/input → fail-closed HARD FAIL (never silently pass a NON-WAIVABLE guardrail)
+    process.stdout.write(`ANTI-DRIFT HARD FAIL: malformed input — ${e.message}\n`);
+    return 1;
+  }
+  if (r.ok) {
+    process.stdout.write(
+      `ANTI-DRIFT OK: task ${taskId} — ${actualFiles.length} actual file(s), all within declared Touches (${r.declaredGlobs.length} glob(s))\n`,
+    );
+    return 0;
+  }
+  process.stdout.write(`ANTI-DRIFT HARD FAIL: task ${taskId} — ${r.violations.length} violation(s)\n`);
+  for (const v of r.violations) {
+    if (v.type === "overbroad-declaration") {
+      process.stdout.write(`  overbroad-declaration: task declares "${v.glob}" (too broad to validate stray writes against)\n`);
+    } else {
+      process.stdout.write(`  out-of-declared: task wrote ${v.file} (matches no declared Touches glob)\n`);
+    }
+  }
+  return 1;
 }
 
 export async function main(argv) {
   const args = argv.slice(2).filter((a) => a !== undefined);
+  if (args.includes("--help") || args.includes("-h")) {
+    helpExit(
+      "Usage:\n" +
+        "  anti-drift-touches-check.mjs [--allow-empty] <ran-batch-manifest.json>\n" +
+        "  anti-drift-touches-check.mjs --task <id> --worktree <dir> [--merge-target <ref>] [--allow-empty]\n" +
+        "    (driver mode — fast-mode fan-in gate: actual diff vs declared ## Touches)",
+    );
+  }
   const allowEmpty = args.includes("--allow-empty");
+  // Driver mode (gap-anti-drift-touches-zero-coverage-fast-mode): --task <id> --worktree <dir>
+  // [--merge-target <ref>] — the fast-mode fan-in gate. Reads the task body's declared Touches and
+  // computes the actual diff itself; the judgment is the SAME checkAntiDrift as the manifest mode.
+  if (args.includes("--task")) {
+    const taskId = getArgValue(args, "--task");
+    if (!taskId) { usage(); return 2; }
+    const worktree = path.resolve(getArgValue(args, "--worktree") ?? process.cwd());
+    const mergeTarget = getArgValue(args, "--merge-target") ?? "develop";
+    return runTaskDriver({ taskId, worktree, mergeTarget, allowEmpty });
+  }
+  // ── manifest-file mode (the classic-loop driver): [--allow-empty] <ran-batch-manifest.json>
   const files = args.filter((a) => a !== "--allow-empty");
   if (files.length !== 1) { usage(); return 2; }
   if (!fs.existsSync(files[0])) { process.stderr.write(`ERROR: manifest not found: ${files[0]}\n`); return 2; }
@@ -126,6 +240,6 @@ export async function main(argv) {
   return 1;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "anti-drift-touches-check")) {
   main(process.argv).then((code) => process.exit(code));
 }

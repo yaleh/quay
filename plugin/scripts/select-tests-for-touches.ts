@@ -16,7 +16,16 @@
 //                        resolve to the SAME test set (mirrors are byte-identical by construction)
 //   4. Declared extra  — an optional `## Test-Files` section in the task body, for coupling a basename
 //                        convention cannot see
-//   5. Unresolved      — a Touches entry matching no test is REPORTED, never silently dropped
+//   5. Cross-cut marker — gap-scoped-selection-blind-to-packaging-state-diff: cross-cut checkers
+//                        (packaging-state / check-adr / lint) enter the scoped selection when a touch
+//                        triggers them, REGARDLESS of basename pairing. A `packages/*/src` change can
+//                        break the packaged artifact (npm-pack-e2e/build-dist/plugin-packaging) or ADR
+//                        conformance (check-adr) while every src unit test stays green — basename
+//                        pairing never selects those cross-cut tests, so a src-touching task used to
+//                        go scoped-green and break packaged (archguard TASK-62/64/65/66, same pattern
+//                        in three projects). The registry (CROSSCUT_CHECKS) is the single cross-cut
+//                        surface — the same principle as "机制在一处做好、下游配置复用".
+//   6. Unresolved      — a Touches entry matching no test is REPORTED, never silently dropped
 //
 // DESIGN NOTES (adversarial-review findings, kept intentional):
 //   * Mirror fold (rule 3) is SUBSUMED by basename pairing — both mirror paths share a basename, so
@@ -42,11 +51,12 @@
 //   node --experimental-strip-types select-tests-for-touches.ts --task <id> [--root <dir>] [--json] [--paths-only] [--allow-thin]
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
 import { parseTouchEntries } from "./touches-parser.ts";
 
@@ -68,51 +78,104 @@ const PLUGIN_SCRIPTS_PREFIX = "plugin/scripts/";
 // Thin-coverage threshold: <50% of Touches entries resolving to ≥1 test is treated as under-selection.
 export const THIN_COVERAGE_RATIO = 0.5;
 
+// ── Cross-cut registry (gap-scoped-selection-blind-to-packaging-state-diff) ──────────────────────────
+
+/**
+ * Cross-cut checks that basename pairing CANNOT see but a change still must satisfy. A task whose
+ * touches trigger a cross-cut entry gets that entry's tests ADDED to the scoped selection regardless
+ * of basename pairing — the "cross-cut marker" (AC2). The alternative (leaving these to the full-suite
+ * gate) is how a src-touching task went scoped-green while breaking the packaged artifact
+ * (npm-pack-e2e/build-dist), ADR conformance (check-adr), or lint (the archguard 14-error case —
+ * TASK-66). Three projects, three checks, one mechanism — this registry is the single cross-cut
+ * surface, reused by whichever project consumes the selector.
+ *
+ * Each entry: `{ name, trigger(rel) -> boolean, tests: string[] }`.
+ *   * `tests` are repo-relative test paths; a path ABSENT from the index is skipped (cross-cut is a
+ *     best-effort add-on — the real repo ships them; a minimal test workspace may not).
+ *   * `name` is the marker emitted in the default CLI output (`crosscut: <name>…`).
+ *   * `trigger` fires on a normalized repo-relative touch.
+ */
+export const CROSSCUT_CHECKS = [
+  {
+    // AC3 — a `packages/*/src` change can break the PACKAGED artifact while all src unit tests stay
+    // green (basename pairing never matches npm-pack-e2e/build-dist/plugin-packaging to a src file).
+    name: "packaging-state",
+    trigger: (rel) => /^packages\/[^/]+\/src(\/|$)/.test(rel),
+    tests: [
+      "packages/quay/test/npm-pack-e2e.test.mjs",
+      "packages/quay/test/build-dist.test.mjs",
+      "plugin/test/plugin-packaging.test.mjs",
+    ],
+  },
+  {
+    // AC4 — a src / new-MCP-tool change must keep ADR conformance (archguard TASK-64/65/66: an MCP
+    // tool without a canonical CLI flag passed scoped-green for three recurrences). Same src surface
+    // as packaging-state, plus an explicit new-MCP-tool surface (`src/mcp-*.ts`).
+    name: "check-adr",
+    trigger: (rel) => /^packages\/[^/]+\/src(\/|$)/.test(rel) || /mcp[^/]*\.ts$/.test(rel),
+    tests: [
+      "packages/quay/test/adr-gate.test.mjs",
+      "packages/quay/test/cli-adr.test.mjs",
+      "packages/quay/test/mcp-adr.test.mjs",
+      "packages/quay/test/adr-store.test.mjs",
+    ],
+  },
+  {
+    // AC5 — new code must be lint-clean. quay configures no linter, so `tests` is empty — the
+    // cross-cut ENTRY still exists (a downstream project WITH a lint test selects it), and the author
+    // SKILL.md template carries `lint-clean` in the cross-cut AC checklist (the in-task leg of AC5).
+    name: "lint",
+    trigger: (rel) => /\.(ts|js|mjs)$/.test(rel) && !rel.startsWith("tasks/") && !rel.startsWith("docs/"),
+    tests: [],
+  },
+  {
+    // gap-github-client-iscompound-sabotaged-uncommitted (AC4): a quay-github src change must run
+    // quay-github's OWN gate-correctness tests in scoped mode. Basename pairing never selects them
+    // (`github-client.ts` has no `*/test/github-client.test.mjs`), so a task that edits
+    // `packages/quay-github/src/*` used to go scoped-green while a checkGate regression went
+    // uncaught until the full-suite red window (the 2026-08-09 round-190 sabotage: `isCompound`
+    // hardcoded false in an uncommitted working-tree edit). quay-github is the Provider reference
+    // implementation; its gate surface (compound-gate / create-mcp / gate / gate-gameability /
+    // task-check-passthrough) is the corresponding test set for ANY src change.
+    name: "quay-github-src",
+    trigger: (rel) => /^packages\/quay-github\/src(\/|$)/.test(rel),
+    tests: [
+      "packages/quay-github/test/compound-gate.test.mjs",
+      "packages/quay-github/test/create-mcp.test.mjs",
+      "packages/quay-github/test/gate.test.mjs",
+      "packages/quay-github/test/gate-gameability.test.mjs",
+      "packages/quay-github/test/task-check-passthrough.test.mjs",
+    ],
+  },
+];
+
+/**
+ * Apply the cross-cut registry to a task's touches: return the fired entry names (registry order,
+ * deduped) and the union of their EXISTING test files. AC6: a pure plugin/doc task touches no entry
+ * surface → fires nothing → adds no cross-cut tests (scoped stays sub-second).
+ * @param {string[]} touches
+ * @param {{byBasename: Map<string, Set<string>>, allPaths: Set<string>}} index
+ * @returns {{names: string[], tests: string[]}}
+ */
+export function applyCrosscut(touches, index) {
+  const names = [];
+  const tests = new Set();
+  for (const c of CROSSCUT_CHECKS) {
+    if (touches.some((t) => c.trigger(normalizeRel(t)))) {
+      names.push(c.name);
+      for (const t of c.tests) {
+        const rel = normalizeRel(t);
+        if (index.allPaths.has(rel)) tests.add(rel);
+      }
+    }
+  }
+  return { names, tests: [...tests].sort() };
+}
+
 // ── Repo-root detection ──────────────────────────────────────────────────────────────────────────────
 
-/**
- * Find the workspace root by walking up from `startDir` (`.quay/config.yml` marker), with a git
- * top-level fallback (mirrors fast-mode-telemetry.ts's findRepoRoot).
- * @param {string} [startDir]
- * @returns {string}
- */
-export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
 
 // ── Path helpers ──────────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Normalize a repo-relative path or glob: forward slashes, strip a leading `./`, collapse `//`,
- * resolve `.`/`..` segments, drop a trailing `/`. Wildcards are preserved untouched. This is the
- * single normalization the resolver uses so path-shape tricks (`./`, `//`, trailing `/`) cannot
- * spoof identity.
- * @param {string} p
- * @returns {string}
- */
-export function normalizeRel(p) {
-  const parts = String(p).replace(/\\/g, "/").split("/");
-  const out = [];
-  for (const seg of parts) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") { out.pop(); continue; }
-    out.push(seg);
-  }
-  return out.join("/");
-}
 
 /**
  * True iff the repo-relative path names a `.test.mjs` file (the runnable-by-`scripts/test.sh` kind).
@@ -285,6 +348,14 @@ export function selectTestsForTask(taskBody, taskId, index) {
     }
   }
 
+  // Rule 5 — cross-cut marker (gap-scoped-selection-blind-to-packaging-state-diff): cross-cut
+  // checkers (packaging-state / check-adr / lint) enter the scoped selection when a touch triggers
+  // them, REGARDLESS of basename pairing. Additive — never counts toward coverageRatio (the ratio
+  // stays "touches that resolved to their OWN test"; the cross-cut is the changed surface's
+  // cross-cutting coverage, not a per-touch resolution).
+  const crosscut = applyCrosscut(touches, index);
+  for (const p of crosscut.tests) selected.add(p);
+
   const touchesTotal = touches.length;
   const coverageRatio = touchesTotal > 0 ? resolvedTouches / touchesTotal : 0;
 
@@ -295,6 +366,7 @@ export function selectTestsForTask(taskBody, taskId, index) {
     coverageRatio,
     touchesTotal,
     resolvedTouches,
+    crosscut: crosscut.names,
   };
 }
 
@@ -310,7 +382,9 @@ Resolution rules (most-specific first):
   2. Basename pair — <dir>/foo.ts → any */test/foo.test.mjs
   3. Mirror fold   — experiments/quay-perpetual-stream/scripts/X.ts and plugin/scripts/X.ts fold to the same test set
   4. Declared extra — an optional ## Test-Files section in the task body
-  5. Unresolved     — a Touches entry matching no test is REPORTED, never silently dropped
+  5. Cross-cut marker — cross-cut checkers (packaging-state / check-adr / lint) enter the scoped
+                        selection when a touch triggers them, regardless of basename pairing
+  6. Unresolved     — a Touches entry matching no test is REPORTED, never silently dropped
 
 Exit codes:
   0  selected set emitted (or thin + --allow-thin)
@@ -338,7 +412,7 @@ export function main(argv) {
     process.stderr.write(`${usage}\n`);
     return 2;
   }
-  const root = path.resolve(rootArg ?? findRepoRoot());
+  const root = path.resolve(rootArg ?? repoRoot());
   const taskFile = path.join(root, "tasks", `${taskId}.md`);
   if (!fs.existsSync(taskFile)) {
     process.stderr.write(`select-tests-for-touches: task file not found: ${taskFile}\n`);
@@ -365,6 +439,12 @@ export function main(argv) {
   } else {
     process.stdout.write(`task ${result.taskId}: ${result.selected.length} test file(s)\n`);
     for (const p of result.selected) process.stdout.write(`  ${p}\n`);
+    if (result.crosscut.length > 0) {
+      // Cross-cut marker (gap-scoped-selection-blind-to-packaging-state-diff): the fired cross-cut
+      // checkers, in registry order — the machine-readable "these tests entered scoped regardless of
+      // basename pairing" line (Contract `invoke` greps it for check-adr / lint / crosscut).
+      process.stdout.write(`crosscut: ${result.crosscut.join(", ")}\n`);
+    }
     if (result.unresolved.length > 0) {
       process.stdout.write(`unresolved (${result.unresolved.length}):\n`);
       for (const u of result.unresolved) process.stdout.write(`  ${u.entry} — ${u.reason}\n`);
@@ -388,6 +468,6 @@ export function main(argv) {
 
 // ── Direct-entry check ──────────────────────────────────────────────────────────────────────────────
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "select-tests-for-touches")) {
   process.exitCode = main(process.argv);
 }

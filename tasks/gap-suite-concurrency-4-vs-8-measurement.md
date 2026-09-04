@@ -14,17 +14,6 @@ extra:
     explicit-file 分支（对抗审查 MAJOR，flags-only 任务的 scope
     limitation），会静默换掉选择集——那正是本次要防的事。
 ---
----
-id: gap-suite-concurrency-4-vs-8-measurement
-title: "nproc=4 while --test-concurrency=8 is 2x oversubscription — measure 4 vs 8, don't guess"
-status: todo
-labels:
-  - gap
-  - measurement
-  - milestone-candidate
-extra:
-  schema: v1
----
 
 **type:** execution
 

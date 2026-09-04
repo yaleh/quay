@@ -9,7 +9,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "postinstall": "bash plugin/scripts/sync-vendor.sh || (echo '[postinstall] WARNING: sync-vendor.sh failed -- plugin/vendor/quay/dist/quay.js may be missing or stale. This repo runs its own MCP server from plugin/vendor/quay/dist/quay.js (see .mcp.json); re-run: bash plugin/scripts/sync-vendor.sh' >&2; exit 0)"
+    "postinstall": "bash plugin/scripts/sync-vendor.sh || true"
   },
   "devDependencies": {
     "@types/node": "20.19.43",

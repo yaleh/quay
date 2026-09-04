@@ -4,14 +4,186 @@
 //
 // Canonical task view-model (quay-native-design.md §2, quay-proposal.md §7.1):
 //   id, title, status, labels, parent, children  (+ body markdown)
-// status ∈ {todo, ready, done, needs-human}      (design §3)
+// status ∈ {todo, ready, done, needs-human, superseded}   (design §3 + superseded terminal)
 
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import type { Task } from '../../quay/src/abi.ts';
+import { TASK_STATUSES, TASK_STATUS, isTaskStatus, type Task, type TaskStatus } from '../../quay/src/abi.ts';
+// gap-unified-frontmatter-parser: the ONE complete frontmatter parser lives in plugin/scripts/
+// task-schema.ts (the schema authority). This store READS through it rather than re-deriving a
+// private YAML.parse — parseTask/readDependsOn/store.parse all delegate to the same function, so the
+// schema can never drift across the three readers. The write-side serialize()/validateWrittenYaml()
+// keep their own YAML.stringify/YAML.parse: serialization correctness is the store's, not the schema's.
+import { parseFrontmatterCompletely } from "../../../plugin/scripts/task-schema.ts";
 
-export const VALID_STATUSES = ["todo", "ready", "done", "needs-human"];
+export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
+
+/**
+ * SHAPE_REGISTRY (AC1, single source of truth): the one place the task-shape →
+ * required-artifact mapping lives, shared by the `check()` gate and the tests.
+ * This replaces the old one-size-fits-all literal checks (`has("Proposal")`,
+ * `has("Plan")`, ...) that encoded a retired task shape:
+ *
+ *   - ADR-022 (2026-08-03) replaced `## Plan` with `## Contract` for quay's
+ *     fast-mode tasks → the `contract` shape fills the plan-slot with
+ *     `## Contract` and additionally requires all six Contract keys
+ *     (measure/band/invariant/invoke/control/resume) — STRICTER than a prose
+ *     Plan section, not looser (the task's Chosen-mechanism constraint 2).
+ *   - meta-cc's DIR template uses `## Finding` in place of `## Proposal` →
+ *     the `finding` shape fills the proposal-slot with `## Finding`. A
+ *     Finding task has NO `## Plan` by construction (ADR-001), so the
+ *     finding shape's required-section set OMITS `plan` entirely — it is not
+ *     a Plan-less shape that lazily skips the check, but a shape whose own
+ *     complete contract (Finding / AC / DoD) simply has no plan dimension.
+ *   - The classic milestone template is the `plan` shape (unchanged).
+ *
+ * Every shape's contract is complete on its own dimension; the gate dispatches
+ * by shape rather than waiving checks (invariant 分派 ≠ 豁免).
+ */
+export const SHAPE_REGISTRY = {
+  contract: {
+    planKeys: ["measure", "band", "invariant", "invoke", "control", "resume"],
+    sections: {
+      // `## 人的裁定` is the directive-variant proposal-slot: a directive task
+      // (type: directive) carries the human ruling as its proposal, with the
+      // implementation contract in `## Contract` (DIR-123-aarch64,
+      // gap-cli-quay-init-collides). Same alias principle as finding's
+      // `## Finding` mapping into the proposal-slot.
+      proposal: ["Proposal", "人的裁定"],
+      plan: ["Contract"],
+      ac: ["AC", "Acceptance Criteria"],
+      dod: ["DoD", "Definition of Done"],
+    },
+  },
+  finding: {
+    planKeys: [],
+    sections: {
+      proposal: ["Finding"],
+      ac: ["AC", "Acceptance Criteria"],
+      dod: ["DoD", "Definition of Done"],
+    },
+  },
+  plan: {
+    planKeys: [],
+    sections: {
+      proposal: ["Proposal"],
+      plan: ["Plan"],
+      ac: ["AC", "Acceptance Criteria"],
+      dod: ["DoD", "Definition of Done"],
+    },
+  },
+  // proposal shape (2026-08-11, DIR-127 + gap-mcp-server-test-deadlocks): a task
+  // whose own complete contract is Proposal / AC / DoD with NO plan dimension —
+  // symmetric with `finding` (which uses `## Finding` as its proposal-slot), but
+  // the proposal-slot is the literal `## Proposal`. Recording-type directives
+  // (DIR-028: "只记录方向,不要求立刻做") and execution tasks that carry their
+  // approach inside `## Proposal` (no separate `## Plan`) are complete on this
+  // dimension — adding a fabricated `## Contract` to them would be a shape change
+  // (gap-todo-shape-mismatch-author-gate's "分派 ≠ 豁免": a shape is complete on
+  // its OWN dimension, not lazily skipping the plan check).
+  proposal: {
+    planKeys: [],
+    sections: {
+      proposal: ["Proposal"],
+      ac: ["AC", "Acceptance Criteria"],
+      dod: ["DoD", "Definition of Done"],
+    },
+  },
+} as const;
+
+export type TaskShape = keyof typeof SHAPE_REGISTRY | "unknown";
+
+/** Does `body` contain a `## <heading>` line that is EXACTLY that heading
+ *  (trailing whitespace allowed)? Exact match prevents false positives from
+ *  subheadings like `## Finding (measured ...)` or `## Plan execution record`.
+ *  Detection uses exact match; section content extraction uses the looser
+ *  `\b` match (existing behavior) once the shape is known. */
+function hasExactHeading(body: string, heading: string): boolean {
+  return new RegExp(`^##\\s+${heading}\\s*$`, "im").test(body);
+}
+
+/**
+ * Detect a task's shape from its body, per the registered registry.
+ * Precedence: contract → finding → plan. `## Finding` is checked BEFORE
+ * `## Plan` because meta-cc's DIR template carries BOTH headings (Finding
+ * replaces Proposal, Plan stays); classifying it as `plan` would demand a
+ * `## Proposal` section the template does not have.
+ *
+ * A body matching none of the registered shapes is "unknown" — the gate must
+ * FAIL CLOSED on it (AC5), never fall into a lenient branch.
+ */
+export function detectShape(body: string): TaskShape {
+  if (hasExactHeading(body, "Contract")) return "contract";
+  if (hasExactHeading(body, "Finding")) return "finding";
+  if (hasExactHeading(body, "Plan")) return "plan";
+  // proposal shape: a literal `## Proposal` section with no contract/finding/plan
+  // heading. Checked AFTER contract/finding/plan so a task that carries `## Proposal`
+  // alongside its shape's own proposal-slot heading still resolves to its true shape
+  // (e.g. a contractBody test carries both `## Proposal` and `## Contract`).
+  // A subheading like `## Finding (measured ...)` does NOT match the proposal
+  // detection — exact-heading match only, so the existing unknown-shape negative
+  // control (Proposal + `## Finding (measured ...)` subheading) still fails closed.
+  if (hasExactHeading(body, "Proposal")) return "proposal";
+  return "unknown";
+}
+
+/**
+ * Extract a body section: the content after the first `## <heading>` (first
+ * alias that matches) up to the next `## ` heading or the end of the body.
+ * Moved to module scope (was `extractSection` inside createStore) so the
+ * shape helpers below can share one implementation (single source of truth).
+ */
+export function sectionAfterHeading(body: string, headings: string[]): string {
+  for (const h of headings) {
+    // Whole-line EXACT heading match — deliberately NOT `\b`. A `\b` is only a
+    // boundary between a `\w` char and a non-`\w` char; both the last char of a
+    // CJK heading (e.g. 定 in `## 人的裁定`) and the following newline are
+    // non-`\w`, so `\b` is a no-op there and a CJK alias NEVER matches — the
+    // registered `人的裁定` proposal-slot was dead code, diverging from
+    // ready-pool-check.ts (which uses task-schema.ts extractSection's
+    // `^(##+)\s*<heading>\s*$` whole-line match and recognizes the same alias).
+    // `^##\s+<h>\s*$` matches ASCII headings byte-for-byte as before and CJK
+    // headings the same way — one consistent `\b`-free semantics as the single
+    // judge.
+    //
+    // QN-005 fix (iteration 2): `\Z` is NOT a valid JavaScript regex
+    // end-of-string anchor (JS has no \Z metacharacter) — the engine took
+    // it as a literal capital "Z", and with the `i` (case-insensitive)
+    // flag this also matched a bare lowercase "z" anywhere in the
+    // section's prose, truncating capture early (found and root-caused
+    // by the iteration-1 G3 audit against QN-005's own AC text, which
+    // contains the word "zero"). Correct JS end-of-string lookahead is
+    // `(?![\s\S])` (no characters remain).
+    const headingRe = new RegExp(`^##\\s+${h}\\s*$`, "im");
+    const m = headingRe.exec(body);
+    if (!m) continue;
+    // Content = everything after the heading line up to the next `## ` heading
+    // (or end of body). `^##\s` (a line starting with exactly two hashes +
+    // whitespace) is the next-heading boundary — nested `### ` subheadings do
+    // NOT terminate the section (unchanged from the previous `(?=^##\s|…)`).
+    const rest = body.slice(m.index + m[0].length);
+    const nextRe = /^##\s/m;
+    const next = rest.match(nextRe);
+    return next ? rest.slice(0, next.index) : rest;
+  }
+  return "";
+}
+
+/**
+ * Contract shape (AC4): verify the `## Contract` section carries ALL six
+ * mandatory keys (measure/band/invariant/invoke/control/resume) — the format
+ * `plugin/scripts/task-contract-check.ts` consumes. Returns a per-key boolean
+ * map. Only meaningful when `detectShape(body) === "contract"`.
+ */
+export function contractKeysPresent(body: string): Record<string, boolean> {
+  const section = sectionAfterHeading(body, ["Contract"]);
+  const present: Record<string, boolean> = {};
+  for (const k of SHAPE_REGISTRY.contract.planKeys) {
+    present[k] = new RegExp(`^[ \\t]*${k}\\b`, "m").test(section);
+  }
+  return present;
+}
 
 /**
  * DIR-047: validate a `default_task_status` value from config.
@@ -30,6 +202,27 @@ export function resolveDefaultStatus(value: string): string {
     );
   }
   return value;
+}
+
+/**
+ * gap-serve-search-timeout-all-body-fetch: strip structural heading lines from
+ * a task body before using it as a search index, so template boilerplate
+ * (`## Proposal`, `## Plan`, `## AC`, `## DoD`) does not produce false positives
+ * when a search term matches a standard section name. This is the native-store
+ * mirror of Core's serve-render.stripHeadings (the exact function the web UI's
+ * own client-side search filter used) — byte-for-byte the same semantics, so a
+ * server-side `search` filter returns exactly the tasks the web UI's
+ * (now-removed-for-native) client-side filter would have. Heading lines outside
+ * fenced code blocks are stripped; `# comment` lines inside ``` fences are
+ * preserved (they are code content, still searchable).
+ */
+function stripHeadingsForSearch(text: string | undefined | null): string {
+  let inFence = false;
+  return (text || "").split("\n").filter((line) => {
+    if (/^```/.test(line)) { inFence = !inFence; return true; }
+    if (inFence) return true; // preserve code content (including # comment lines)
+    return !/^#+\s/.test(line); // strip structural headings outside fences
+  }).join(" ");
 }
 
 /**
@@ -67,7 +260,19 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
  * error so the caller knows immediately — before the corrupted file can crash
  * task_list for every other task in the store.
  *
- * Root cause of the defect: a task file manually (or otherwise) written with
+ * gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter: when the
+ * intended frontmatter is supplied, ALSO verify every STRING scalar round-trips
+ * byte-identically (`parsed[key] === intended[key]`). This is the fail-closed
+ * "reject" path the task mandates for any value that genuinely cannot be
+ * safely serialized: the write side auto-quotes via `YAML.stringify` (see
+ * serialize()); if a value ever slips through that still does NOT read back
+ * byte-identical (or silently truncates — the 2026-08-03 defect), the write is
+ * rejected and rolled back HERE, at write time, rather than surfacing hours
+ * later at render time. Non-string values (labels/children arrays, extra
+ * objects, null parent) are structural and not subject to scalar quoting, so
+ * they are not compared here.
+ *
+ * Root cause of the original defect: a task file manually (or otherwise) written with
  * an unquoted YAML value containing `: ` (colon-space) — e.g.
  *   dirStatus: mechanism-landed; routines: run (...)
  * — causes YAML.parse() to throw "Nested mappings are not allowed", which
@@ -81,9 +286,13 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
  *
  * @param {string} filePath - the path of the file just written
  * @param {string} id - the task id (for the error message)
- * @throws {Error} if the written file's YAML frontmatter fails to parse
+ * @param {Record<string, unknown>} [frontmatter] - the intended frontmatter the
+ *   caller asked to serialize; when provided, every string scalar it declares
+ *   must round-trip byte-identically or the write is rejected.
+ * @throws {Error} if the written file's YAML frontmatter fails to parse, or a
+ *   string scalar does not round-trip byte-identically
  */
-function validateWrittenYaml(filePath: string, id: string): void {
+function validateWrittenYaml(filePath: string, id: string, frontmatter?: Record<string, unknown>): void {
   let written: string;
   try {
     written = fs.readFileSync(filePath, "utf8");
@@ -100,8 +309,9 @@ function validateWrittenYaml(filePath: string, id: string): void {
         `written file has no valid YAML frontmatter block`
     );
   }
+  let parsed: Record<string, unknown>;
   try {
-    YAML.parse(m[1]);
+    parsed = (YAML.parse(m[1]) ?? {}) as Record<string, unknown>;
   } catch (yamlErr) {
     throw new Error(
       `post-write YAML validation failed for task "${id}": ` +
@@ -109,6 +319,20 @@ function validateWrittenYaml(filePath: string, id: string): void {
         `Hint: string values containing ": " must be quoted. ` +
         `The file has NOT been left in a corrupted state — this write was rejected.`
     );
+  }
+  if (frontmatter) {
+    for (const [key, intended] of Object.entries(frontmatter)) {
+      if (typeof intended !== "string") continue; // non-string scalars are not subject to scalar quoting
+      const actual = parsed[key];
+      if (actual !== intended) {
+        throw new Error(
+          `post-write YAML validation failed for task "${id}": ` +
+            `string scalar "${key}" did not round-trip byte-identically — ` +
+            `wrote ${JSON.stringify(intended)} but read back ${JSON.stringify(actual)}. ` +
+            `The value could not be safely serialized; the write was rejected and rolled back.`
+        );
+      }
+    }
   }
 }
 
@@ -122,7 +346,7 @@ function validateWrittenYaml(filePath: string, id: string): void {
  *   single-source — this is the ONE place the creation default is resolved).
  */
 export function createStore(tasksDir: string, opts?: { defaultStatus?: string }) {
-  const storeDefaultStatus = opts?.defaultStatus ?? "todo";
+  const storeDefaultStatus = opts?.defaultStatus ?? TASK_STATUS.TODO;
   fs.mkdirSync(tasksDir, { recursive: true });
 
   // M26-adversarial-eval finding ADV-004 (highest-severity real finding of
@@ -285,11 +509,36 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     if (!m) {
       throw new Error("malformed task file: missing YAML frontmatter block");
     }
-    const frontmatter = YAML.parse(m[1]) ?? {};
+    // gap-unified-frontmatter-parser: delegate to the single complete frontmatter parser (shared with
+    // task-schema.ts's parseTask/readDependsOn) — full YAML.parse semantics, one schema source.
+    const frontmatter = parseFrontmatterCompletely(m[1]);
     const body = m[2] ?? "";
     return { frontmatter, body };
   }
 
+  /**
+   * Serialize a task's frontmatter + body to the on-disk `.md` format.
+   *
+   * gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter: the WRITE
+   * side is responsible for serialization correctness — never the content
+   * author. The entire frontmatter object (title and every other string
+   * scalar: status, parent, ...) is routed through the YAML library's own
+   * `YAML.stringify`, which quotes/escapes any value that would otherwise be
+   * misparsed — a space+`#` starts a comment (title truncates), `: ` starts a
+   * nested mapping (parse throws), and values that would coerce to a number /
+   * boolean / null are quoted to stay strings. We deliberately do NOT hand-roll
+   * quoting rules: a hand-written rule table is exactly the class of defect
+   * that produced the 2026-08-03 board outage (a title written unquoted
+   * truncated at the first ` #`, the file stopped parsing, and the board 500'd
+   * hours later at render time).
+   *
+   * Byte-compat is preserved where safe: a string value that needs NO quoting
+   * is emitted exactly as before (`title: plain title` stays plain); the
+   * serializer only adds quotes/escapes when the value would otherwise be
+   * unsafe. `validateWrittenYaml` below is the belt-and-suspenders backstop:
+   * after every write it re-parses the file and fails closed (rollback) on any
+   * string scalar that does not round-trip byte-identically.
+   */
   function serialize(frontmatter, body) {
     const fm = YAML.stringify(frontmatter).trimEnd();
     return `---\n${fm}\n---\n${body}`;
@@ -313,6 +562,142 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   // store actually needs it).
   const parsedCache = new Map<string, { mtimeMs: number; size: number; frontmatter: Record<string, unknown>; body: string }>();
 
+  // gap-native-store-title-roundtrip-nondeterministic-failures: drop the
+  // parse cache for `id` after ANY in-process write to that task's file.
+  //
+  // The cache key is (mtimeMs, size) — a heuristic, not a content identity.
+  // It does NOT change when a task file is rewritten with the SAME byte size
+  // within the same mtime resolution (e.g. `title: aaa` → `title: bbb`: same
+  // frontmatter length, writes a millisecond apart → identical key). Without
+  // this invalidation, a get() after such a write would hit the stale entry
+  // and return the PREVIOUS title's parse — a read-after-write staleness that
+  // surfaced non-deterministically in store.test.mjs AC4's charset derivation
+  // (which round-trips ~135 candidate titles through the same id `RT` in a
+  // tight loop; the colliding key served a random earlier candidate).
+  //
+  // Every file write in this module MUST invalidate the ids it touched so the
+  // next get() re-reads fresh. The cache remains a win for the common
+  // unchanged-file case (repeated get() on an unmodified task still hits); it
+  // only becomes correct-by-construction for the read-after-write case.
+  //
+  // gap-task-store-parse-cost-0-8s-compounds-suite-slowdown: invalidate the
+  // persistent layer too (below), so a write is never served from a previous
+  // process's parse of the same file.
+  function invalidateCache(id: string): void {
+    parsedCache.delete(id);
+    persistentCache.delete(id);
+    persistentCacheDirty = true;
+  }
+
+  // Persistent parse cache (gap-task-store-parse-cost-0-8s-compounds-suite-slowdown,
+  // AC1/AC2/AC3). The in-process parsedCache above is per-process: a fresh CLI
+  // invocation is a fresh Node process, so `task list` paid the FULL cold
+  // read+YAML-parse of the store on every call (~686ms for 1110 files, measured
+  // 2026-08-13). This persistent layer makes the parse result SURVIVE across
+  // processes: a small JSON file next to the store holds each task's
+  // YAML-parsed frontmatter keyed by (mtimeMs, size), so a later process
+  // validates every file with a cheap statSync (~10ms for the whole store) and
+  // only readFileSync+YAML.parses the files that actually changed.
+  //
+  // WHAT IS CACHED: frontmatter ONLY, never the body. The profile that chose
+  // this mechanism: of the ~686ms cold store.list() for 1110 files, YAML.parse
+  // is ~395ms (the dominant cost) and readFileSync is ~142ms. `task list` must
+  // return the body anyway, so bodies are re-read from disk (fresh, never
+  // stale); the cache eliminates the YAML.parse. A full frontmatter+body cache
+  // was measured and REJECTED: a 10.9MB JSON cache took ~200ms to load — SLOWER
+  // than reading the 1110 raw files (~140ms) — so caching bodies is
+  // net-negative at this store's scale.
+  //
+  // CORRECTNESS (AC2/AC3): the (mtimeMs, size) key is the same heuristic the
+  // in-process cache already uses — an added file is absent from the cache, an
+  // edited file's mtime/size differs → cache miss → fresh parse, and a deleted
+  // file fails statSync → never served. A corrupt/missing cache file degrades
+  // to a cold parse (ensurePersistentCacheLoaded catches everything; the cache
+  // is an optimization, never a correctness input). The pathological
+  // same-size-same-mtime rewrite is the SAME accepted heuristic limitation the
+  // in-process cache already documents.
+  const PERSISTENT_CACHE_VERSION = 1;
+  const PERSISTENT_CACHE_FILENAME = ".quay-parse-cache.json";
+  const persistentCachePath = path.join(tasksDir, PERSISTENT_CACHE_FILENAME);
+  const persistentCache = new Map<string, { mtimeMs: number; size: number; frontmatter: Record<string, unknown> }>();
+  let persistentCacheLoaded = false;
+  let persistentCacheDirty = false;
+
+  /** Read the on-disk cache into `persistentCache` (merge: an entry already
+   *  present — e.g. added by this process's own write() cold parse — keeps the
+   *  fresh in-memory value; a stale disk entry is harmless because the walk
+   *  re-parses on any (mtimeMs, size) mismatch). Lazy: only the batch surfaces
+   *  (list / listWithMalformed) call this, so a standalone `task get <id>` never
+   *  pays the load (the task's own note: "task get 0.18s 是定向读取不付税"). */
+  function ensurePersistentCacheLoaded(): void {
+    if (persistentCacheLoaded) return;
+    persistentCacheLoaded = true;
+    let raw: string;
+    try {
+      raw = fs.readFileSync(persistentCachePath, "utf8");
+    } catch {
+      return; // absent or unreadable → start empty; the next dirty flush rebuilds it
+    }
+    let data: { version?: number; entries?: Record<string, unknown> };
+    try {
+      data = JSON.parse(raw) as { version?: number; entries?: Record<string, unknown> };
+    } catch {
+      return; // corrupt cache → rebuild on the next flush
+    }
+    if (data.version !== PERSISTENT_CACHE_VERSION || typeof data.entries !== "object" || data.entries === null) {
+      return;
+    }
+    for (const [id, entry] of Object.entries(data.entries)) {
+      const e = entry as { mtimeMs?: unknown; size?: unknown; frontmatter?: unknown };
+      if (
+        e && typeof e.mtimeMs === "number" && typeof e.size === "number" &&
+        typeof e.frontmatter === "object" && e.frontmatter !== null
+      ) {
+        persistentCache.set(id, { mtimeMs: e.mtimeMs, size: e.size, frontmatter: e.frontmatter as Record<string, unknown> });
+      }
+    }
+  }
+
+  /** Write the in-memory persistent cache to disk IF the batch operation dirtied
+   *  it. No-op when clean; silent no-op on write failure (the cache is an
+   *  optimization — a read-only store / disk-full / permission error must never
+   *  break `task list`). Atomic (tmp + rename): a crash leaves either the old or
+   *  the new file, never a torn one. */
+  function flushPersistentCache(): void {
+    if (!persistentCacheDirty) return;
+    persistentCacheDirty = false;
+    try {
+      // Prune entries whose task file no longer exists so the cache does not grow
+      // unbounded as the store's backlog shrinks.
+      const liveIds = new Set(listIds());
+      for (const id of [...persistentCache.keys()]) {
+        if (!liveIds.has(id)) persistentCache.delete(id);
+      }
+      const payload = JSON.stringify({ version: PERSISTENT_CACHE_VERSION, entries: Object.fromEntries(persistentCache) });
+      const tmpPath = `${persistentCachePath}.tmp`;
+      fs.writeFileSync(tmpPath, payload, "utf8");
+      fs.renameSync(tmpPath, persistentCachePath);
+    } catch {
+      // swallow — cache is an optimization, never a correctness input
+    }
+  }
+
+  /** AC2 guard: the persistent cache JSON-round-trips the frontmatter, so a
+   *  frontmatter carrying a type JSON cannot faithfully encode (Date, Map, Set,
+   *  function, ...) must NOT be persisted — serving a silently-mangled reload
+   *  (Date → ISO string, Map → {}) would violate "data consistent with a direct
+   *  parse". Such entries are simply never cached persistently (the in-process
+   *  parsedCache still holds the exact parse). The real store's frontmatter is
+   *  all JSON-safe (scanned 2026-08-13, 1110/1110), so this is a defensive net,
+   *  not the hot path. */
+  function isJsonSafe(v: unknown): boolean {
+    if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") return true;
+    if (Array.isArray(v)) return v.every(isJsonSafe);
+    if (v instanceof Date || v instanceof Map || v instanceof Set) return false;
+    if (typeof v === "object") return Object.values(v as Record<string, unknown>).every(isJsonSafe);
+    return false; // undefined, function, symbol, bigint
+  }
+
   // QX-018 (experiment 4, iteration 4): get() now includes updatedAt (file mtime
   // in ms) to close UQ-015 (task_get MCP response missing updatedAt field) and
   // enable the detail-page "last updated" display. The stat() call is cheap
@@ -322,7 +707,10 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   /** @returns the task view-model, or null if not found */
   function get(id: string): (Task & { updatedAt?: number }) | null {
     const taskFile = path.join(tasksDir, `${id}.md`);
-    let stat: ReturnType<typeof fs.statSync> | null = null;
+    // fs.statSync(taskFile) has no options, so it returns fs.Stats (numbers), not BigIntStats.
+    // `ReturnType<typeof fs.statSync>` resolves to the bigint overload's union (number|bigint
+    // fields), which breaks the parsedCache/toViewModel number types (ts-typecheck-gate M63 red).
+    let stat: fs.Stats | null = null;
     try {
       stat = fs.statSync(taskFile);
     } catch {
@@ -340,10 +728,48 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         children: (cached.frontmatter.children as string[] | undefined)?.slice() ?? [],
       }, cached.body, stat!.mtimeMs, id);
     }
+    // Persistent-cache hit: the YAML parse survived a previous process. Confirm
+    // the file's frontmatter block is still intact, then serve the cached
+    // frontmatter with a freshly-read body (bodies are never cached, so they
+    // cannot go stale). Falls through to the cold parse when the block is gone
+    // (a file corrupted in place must fail loudly, exactly like the cold path).
+    const pCached = stat ? persistentCache.get(id) : undefined;
+    if (pCached && pCached.mtimeMs === stat!.mtimeMs && pCached.size === stat!.size) {
+      // Direct readFileSync (no existsSync — get() already stat'd this file):
+      // the whole body read is the one cost a persistent hit cannot avoid.
+      let pRaw: string | null = null;
+      try {
+        pRaw = fs.readFileSync(taskFile, "utf8");
+      } catch {
+        // file vanished between stat and read → fall through; the cold readRaw
+        // below re-asserts absence and returns the same null contract.
+      }
+      if (pRaw !== null) {
+        const pm = FRONTMATTER_RE.exec(pRaw);
+        if (pm) {
+          const pBody = pm[2] ?? "";
+          const pFrontmatter = pCached.frontmatter;
+          parsedCache.set(id, { mtimeMs: stat!.mtimeMs, size: stat!.size, frontmatter: pFrontmatter, body: pBody });
+          return toViewModel({
+            ...pFrontmatter,
+            labels: (pFrontmatter.labels as string[] | undefined)?.slice() ?? [],
+            children: (pFrontmatter.children as string[] | undefined)?.slice() ?? [],
+          }, pBody, stat!.mtimeMs, id);
+        }
+      }
+    }
     const raw = readRaw(id);
     if (raw === null) return null;
     const { frontmatter, body } = parse(raw);
-    if (stat) parsedCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, frontmatter, body });
+    if (stat) {
+      parsedCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, frontmatter, body });
+      // AC2: only persist frontmatter that survives a JSON round-trip byte-for-
+      // byte; a non-JSON-safe frontmatter stays in-process-only (still exact).
+      if (isJsonSafe(frontmatter)) {
+        persistentCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, frontmatter });
+        persistentCacheDirty = true;
+      }
+    }
     return toViewModel(frontmatter, body, stat ? stat.mtimeMs : undefined, id);
   }
 
@@ -374,10 +800,22 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       const existing = Array.isArray(existingExtra.malformed) ? (existingExtra.malformed as string[]) : [];
       extra.malformed = [...new Set([...existing, "missing-id"])];
     }
+    // gap-abi-status-lifecycle-vocab-scattered-no-named-type: the disk-read status
+    // boundary. A status frontmatter value outside the five-word lifecycle vocab is
+    // REJECTED (fail-closed — hard rule 3b: an unreadable value must not look valid):
+    // it is coerced to the canonical `todo` and flagged `invalid-status` in
+    // `extra.malformed`, so a stray `status: reddy` can never silently surface as a
+    // legal-looking `Task.status` string downstream.
+    const rawStatus = frontmatter.status;
+    const status: TaskStatus | null = isTaskStatus(rawStatus) ? rawStatus : null;
+    if (status === null && rawStatus !== undefined) {
+      const existing = Array.isArray(existingExtra.malformed) ? (existingExtra.malformed as string[]) : [];
+      extra.malformed = [...new Set([...existing, "invalid-status"])];
+    }
     const vm: Task & { updatedAt?: number } = {
       id: resolvedId,
       title: frontmatter.title as string,
-      status: frontmatter.status as Task['status'],
+      status: status ?? TASK_STATUS.TODO,
       labels: (frontmatter.labels as string[] | undefined) ?? [],
       parent: (frontmatter.parent as string | null | undefined) ?? null,
       children,
@@ -437,8 +875,8 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       if (!child) return { id: childId, status: "missing" };
       if (child.role === "compound") {
         const grandkids = childrenStatus(child, nextVisited);
-        const subtreeOk = grandkids.every((g) => g.status === "done");
-        const status = child.status === "done" && !subtreeOk ? "stale-done" : child.status;
+        const subtreeOk = grandkids.every((g) => g.status === TASK_STATUS.DONE);
+        const status = child.status === TASK_STATUS.DONE && !subtreeOk ? "stale-done" : child.status;
         return { id: childId, status, childrenStatus: grandkids };
       }
       return { id: childId, status: child.status };
@@ -453,10 +891,16 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   // is a CLEAR error, safe degradation per DIR-001; listWithMalformed()
   // collects it into a machine-readable failure list).
   function walkTasks(
-    filter: { status?: string; label?: string },
+    filter: { status?: string; label?: string; search?: string },
     onError: (id: string, err: unknown) => void,
   ): (Task & { updatedAt?: number })[] {
     const tasks: (Task & { updatedAt?: number })[] = [];
+    // gap-serve-search-timeout-all-body-fetch: precompute the lowercased search
+    // needle once per walk (not once per task). The search matches title + body
+    // (with heading lines stripped), case-insensitively — the same predicate the
+    // web UI's client-side filter used, moved server-side so the MCP round-trip
+    // carries only the matches instead of every task's body.
+    const sq = filter.search ? filter.search.toLowerCase() : null;
     for (const id of listIds()) {
       let t: (Task & { updatedAt?: number }) | null;
       try {
@@ -468,6 +912,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       if (t === null) continue;
       if (filter.status && t.status !== filter.status) continue;
       if (filter.label && !(t.labels || []).includes(filter.label)) continue;
+      if (sq && !((t.title + " " + stripHeadingsForSearch(t.body)).toLowerCase().includes(sq))) continue;
       tasks.push(t);
     }
     return tasks;
@@ -490,7 +935,14 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     // is the provider's task_list ABI surface — via listWithMalformed() — that
     // becomes tolerant; the CLI's plain `task list` keeps the loud, clear
     // error (DIR-001 safe degradation) rather than silently dropping a file.
-    return walkTasks(filter, (_id, err) => { throw err; });
+    //
+    // gap-task-store-parse-cost-0-8s-compounds-suite-slowdown: prime the
+    // persistent parse cache before the walk and flush any newly-parsed entries
+    // after it, so a fresh-process list only re-parses files that changed.
+    ensurePersistentCacheLoaded();
+    const tasks = walkTasks(filter, (_id, err) => { throw err; });
+    flushPersistentCache();
+    return tasks;
   }
 
   /**
@@ -504,12 +956,14 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * partial success, not a call-level failure.
    */
   function listWithMalformed(
-    filter: { status?: string; label?: string } = {},
+    filter: { status?: string; label?: string; search?: string } = {},
   ): { tasks: (Task & { updatedAt?: number })[]; malformed: Array<{ file: string; error: string }> } {
     const malformed: Array<{ file: string; error: string }> = [];
+    ensurePersistentCacheLoaded();
     const tasks = walkTasks(filter, (id, err) => {
       malformed.push({ file: `${id}.md`, error: (err as Error).message });
     });
+    flushPersistentCache();
     return { tasks, malformed };
   }
 
@@ -550,6 +1004,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     if (!current.includes(childId)) return; // already absent (e.g. another writer beat us to it)
     const updated = { ...frontmatter, children: current.filter((c) => c !== childId) };
     fs.writeFileSync(filePathFor(parentId), serialize(updated, body), "utf8");
+    invalidateCache(parentId);
   }
 
   /**
@@ -564,6 +1019,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     if (current.includes(childId)) return; // already present
     const updated = { ...frontmatter, children: [...current, childId] };
     fs.writeFileSync(filePathFor(parentId), serialize(updated, body), "utf8");
+    invalidateCache(parentId);
   }
 
   /**
@@ -612,7 +1068,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * only ordinary last-writer-wins sequencing (identical to every other
    * field this store already handles).
    */
-  function write(id: string, { title, status, labels, parent, children, extra, body, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; expectedStatus?: string }): (Task & { updatedAt?: number }) | null {
+  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; expectedStatus?: string }): (Task & { updatedAt?: number }) | null {
     if (status && !VALID_STATUSES.includes(status)) {
       throw new Error(
         `invalid status "${status}" — must be one of ${VALID_STATUSES.join(", ")}`
@@ -654,6 +1110,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         if (children !== undefined) frontmatter.children = children;
         if (parent !== undefined) frontmatter.parent = parent;
         if (extra !== undefined) frontmatter.extra = extra;
+        if (depends_on !== undefined) frontmatter.depends_on = depends_on;
       } else {
         // No existing file: there is no "current status" to compare against,
         // so any expectedStatus is by definition a mismatch (there is
@@ -662,6 +1119,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
           throw new ConflictError(id, expectedStatus, null);
         }
         frontmatter.extra = extra ?? {};
+        if (depends_on !== undefined) frontmatter.depends_on = depends_on;
         // DIR-047 (ADR-004 single-source): apply the configured creation
         // default when creating a NEW task with no explicit status.
         // storeDefaultStatus is the per-provider default_task_status from
@@ -680,8 +1138,12 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       // it was newly created) so the store is never left in a corrupted state
       // that would crash task_list for all other tasks.
       fs.writeFileSync(taskFilePath, raw, "utf8");
+      // Read-after-write correctness: the file just changed; the (mtimeMs, size)
+      // cache key may be UNCHANGED (same-size rewrite in the same mtime tick),
+      // so drop any cached parse for this id BEFORE the trailing get() below.
+      invalidateCache(id);
       try {
-        validateWrittenYaml(taskFilePath, id);
+        validateWrittenYaml(taskFilePath, id, frontmatter);
       } catch (validationErr) {
         // Rollback: restore prior content if it existed, or remove the new file.
         if (existingRaw !== null) {
@@ -734,9 +1196,12 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       const finalRaw = serialize(updated, newBody);
       const noteFilePath = filePathFor(id);
       fs.writeFileSync(noteFilePath, finalRaw, "utf8");
+      // Read-after-write correctness (same class as write()): drop any cached
+      // parse for this id before the trailing get() re-reads it fresh.
+      invalidateCache(id);
       // M89: post-write YAML validation (same discipline as write() above).
       try {
-        validateWrittenYaml(noteFilePath, id);
+        validateWrittenYaml(noteFilePath, id, updated);
       } catch (validationErr) {
         // Rollback: restore prior content (appendNote() always modifies an
         // existing file — existingRaw is never null here).
@@ -767,19 +1232,45 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    */
   const MIN_SECTION_CHARS = 40;
 
-  function artifactSections(body) {
-    const has = (heading) => {
-      if (!new RegExp(`^##\\s+${heading}\\b`, "im").test(body)) return false;
-      const content = extractSection(body, [heading]);
-      const nonWhitespaceLen = content.replace(/\s/g, "").length;
-      return nonWhitespaceLen >= MIN_SECTION_CHARS;
+  /**
+   * Presence of the registered gate artifacts for a given shape, per
+   * SHAPE_REGISTRY. `shape` is the detected shape (see detectShape); the
+   * sections each shape requires come from the registry, so the aliases each
+   * project actually uses (quay: `## Contract` for Plan; meta-cc: `## Finding`
+   * for Proposal) are honored WITHOUT loosening any shape's own contract. An
+   * unknown shape yields all-false (the check() caller fails it closed).
+   *
+   * The artifact map is built from THE SHAPE'S OWN registered sections only —
+   * dispatch is not a waiver (each shape has a complete contract on its own
+   * dimension). The `finding` shape deliberately has no `plan` section
+   * (ADR-001: a Finding task has no `## Plan`), so `plan` is ABSENT from its
+   * map rather than present-and-false. The plan shape still carries a real
+   * `plan` artifact, so a Plan-shape task missing `## Plan` stays red.
+   */
+  function artifactSections(body, shape = detectShape(body)) {
+    const spec = SHAPE_REGISTRY[shape];
+    if (!spec) {
+      return { proposal: false, plan: false, ac: false, dod: false };
+    }
+    const has = (headings) => {
+      for (const h of headings) {
+        // Whole-line exact presence check (same CJK-safe, `\b`-free semantics
+        // as sectionAfterHeading): `\b` is a no-op between two non-word chars,
+        // so `## 人的裁定` (last char 定 is CJK, next char is the newline)
+        // never matched the old `^##\s+人的裁定\b` — the registered alias was
+        // dead code and the proposal artifact read false for a present section.
+        if (!new RegExp(`^##\\s+${h}\\s*$`, "im").test(body)) continue;
+        const content = sectionAfterHeading(body, [h]);
+        const nonWhitespaceLen = content.replace(/\s/g, "").length;
+        if (nonWhitespaceLen >= MIN_SECTION_CHARS) return true;
+      }
+      return false;
     };
-    return {
-      proposal: has("Proposal"),
-      plan: has("Plan"),
-      ac: has("AC") || has("Acceptance Criteria"),
-      dod: has("DoD") || has("Definition of Done"),
-    };
+    const artifacts = {};
+    for (const [artifact, headings] of Object.entries(spec.sections)) {
+      artifacts[artifact] = has(headings);
+    }
+    return artifacts;
   }
 
   /**
@@ -790,25 +1281,91 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   function check(id: string): Record<string, unknown> {
     const t = get(id);
     if (!t) return { id, ok: false, reason: "not found" };
-    const artifacts = artifactSections(t.body);
-    const allArtifactsPresent = Object.values(artifacts).every(Boolean);
 
-    if (t.status === "todo") {
+    // gap-abi-status-lifecycle-vocab-scattered-no-named-type: the disk-read
+    // boundary coerces an out-of-vocab on-disk status to `todo` and flags it
+    // `invalid-status` in extra.malformed (fail-closed at the parse boundary).
+    // The gate must NOT treat that coerced `todo` as a genuine todo — otherwise
+    // a stray `status: reddy` would pass author->ready. Recover the original
+    // value for an actionable reason and fail closed with gate:"unknown" (the
+    // pre-coercion contract that task-check/gate-correctness tests pin).
+    const malformed = Array.isArray(t.extra?.malformed) ? (t.extra.malformed as string[]) : [];
+    if (malformed.includes("invalid-status")) {
+      const raw = readRaw(id);
+      const rawStatus = raw !== null ? (parse(raw).frontmatter.status as string | undefined) : undefined;
+      return { id, gate: "unknown", ok: false, reason: `unrecognized status ${rawStatus}` };
+    }
+
+    if (t.status === TASK_STATUS.TODO) {
       const gate = "author->ready";
+      // Shape dispatch (ADR-001 re-landed; gap-the-dod-gate-encodes-a-retired-
+      // task-shape): the required sections depend on the task's registered
+      // shape. Contract (quay fast mode, `## Contract` for Plan) and finding
+      // (meta-cc DIR, `## Finding` for Proposal) each have their own COMPLETE
+      // contract — dispatch is not a waiver.
+      const shape = detectShape(t.body);
+      const artifacts = artifactSections(t.body, shape);
+      const allArtifactsPresent = Object.values(artifacts).every(Boolean);
+
+      // AC5 (fail-closed): an unknown shape must never fall into a lenient
+      // branch — otherwise "pick a template" becomes a new way to bypass the
+      // gate. Every registered shape has a complete contract; a body that
+      // matches none is refused.
+      if (shape === "unknown") {
+        return {
+          id,
+          gate,
+          ok: false,
+          shape,
+          artifacts,
+          reason:
+            "unrecognized task shape (no ## Contract / ## Finding / ## Plan section) — unknown shapes fail closed; register the shape before it can pass",
+        };
+      }
+
+      // Contract shape (AC4): the `## Contract` section must carry ALL six
+      // keys (measure/band/invariant/invoke/control/resume) — stricter than a
+      // prose Plan section, never looser. Failure names the missing key(s).
+      const contractKeys =
+        shape === "contract" ? contractKeysPresent(t.body) : undefined;
+      if (shape === "contract" && allArtifactsPresent && contractKeys) {
+        const missing = SHAPE_REGISTRY.contract.planKeys.filter(
+          (k) => !contractKeys[k]
+        );
+        if (missing.length > 0) {
+          return {
+            id,
+            gate,
+            ok: false,
+            shape,
+            artifacts,
+            contractKeys,
+            reason: `## Contract section missing required key(s): ${missing.join(", ")}`,
+          };
+        }
+      }
+
       // QN-005 phase 2: AC must be machine-checkable — require at least one
       // checkbox line in the AC section, even if all four headings +
       // minimum content are present. Distinct, specific failure reason so
       // the gate stays actionable (matches the existing missing-artifact
       // pattern).
       //
-      // QN-019 (iteration 8): tightened from presence-only to checked-state,
-      // matching the execute->done gate's own semantics below. Iteration
-      // 7's QN-017 found live that a task could reach `ready` with AC
-      // checkboxes present but zero of them checked — an asymmetry with
-      // execute->done, which already required full-checked state. This
-      // reuses the same checkboxes/checked regex-count logic, applied one
-      // gate earlier.
-      const acSection = extractSection(t.body, ["AC", "Acceptance Criteria"]);
+      // gap-both-gates-read-one-signal-so-done-costs-nothing (AC2, ADR-001
+      // restored): CHECKED-STATE is deliberately NOT required here. ADR-001's
+      // original design says checked-state belongs to `ready->done`, not
+      // `todo->ready`: for a not-yet-started task the AC describes "what the
+      // work must satisfy", which by definition cannot be checked yet.
+      // Requiring all boxes checked at author->ready made `ready` mean
+      // "already done" and — worse — made execute->done vacuous (both gates
+      // read the same evidence, so passing the first auto-satisfied the
+      // second; `done` cost nothing). The two gates now read DIFFERENT
+      // evidence: author->ready reads the plan + AC presence/shape (>=1
+      // checkbox); execute->done reads the DoD checked-state (plus AC
+      // checked-state as the AC5 backstop). This REVERSES QN-019
+      // (iteration 8) — see test/gate-checked-state.test.mjs, which was
+      // updated to the new semantics.
+      const acSection = sectionAfterHeading(t.body, ["AC", "Acceptance Criteria"]);
       const acCheckboxes = acSection.match(/- \[[ xX]\]/g) || [];
       const acChecked = acSection.match(/- \[[xX]\]/g) || [];
       const acHasCheckbox = acCheckboxes.length > 0;
@@ -817,31 +1374,26 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
           id,
           gate,
           ok: false,
+          shape,
           artifacts,
+          ...(contractKeys ? { contractKeys } : {}),
           reason: "AC section has no checkboxes",
         };
       }
-      const acAllChecked =
-        acHasCheckbox && acChecked.length === acCheckboxes.length;
-      if (allArtifactsPresent && acHasCheckbox && !acAllChecked) {
-        return {
-          id,
-          gate,
-          ok: false,
-          artifacts,
-          acTotal: acCheckboxes.length,
-          acChecked: acChecked.length,
-          reason: `${acChecked.length}/${acCheckboxes.length} AC checkboxes checked`,
-        };
-      }
-      const ok = allArtifactsPresent && acAllChecked;
+      const contractKeysOk =
+        !contractKeys || Object.values(contractKeys).every(Boolean);
+      const ok = allArtifactsPresent && acHasCheckbox && contractKeysOk;
       return {
         id,
         gate,
         ok,
+        shape,
         artifacts,
+        acTotal: acCheckboxes.length,
+        acChecked: acChecked.length,
+        ...(contractKeys ? { contractKeys } : {}),
         reason: ok
-          ? "all four artifacts present; eligible to move to ready"
+          ? "all required artifacts present; eligible to move to ready"
           : "missing artifacts: " +
             Object.entries(artifacts)
               .filter(([, v]) => !v)
@@ -849,14 +1401,34 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
               .join(", "),
       };
     }
-    if (t.status === "ready") {
-      // execute->done gate: v0 checks AC checkboxes are all ticked, as a thin
-      // machine-checkable proxy for "AC satisfied" (design §3). This is a
-      // deliberately thin v0 gate — see iteration-0 gap analysis.
-      const acSection = extractSection(t.body, ["AC", "Acceptance Criteria"]);
-      const checkboxes = acSection.match(/- \[[ xX]\]/g) || [];
-      const checked = acSection.match(/- \[[xX]\]/g) || [];
-      const acOk = checkboxes.length > 0 && checked.length === checkboxes.length;
+    if (t.status === TASK_STATUS.READY) {
+      // execute->done gate (gap-both-gates-read-one-signal-so-done-costs-
+      // nothing, AC7b): reads the DoD CHECKED-STATE as the completion
+      // evidence. The two gates now read DIFFERENT evidence — author->ready
+      // reads the plan + AC presence/shape (checked-state NOT required), and
+      // execute->done reads the DoD checkboxes. Previously BOTH gates read
+      // the AC checkboxes, so any task legally reaching `ready` (AC all
+      // checked) auto-satisfied execute->done and `done` cost nothing.
+      //
+      // AC checked-state is STILL required here (AC5 backstop: "ready too
+      // strict" must not be traded for "done too loose"). So execute->done =
+      // AC all checked AND DoD all checked AND (compound) all children done.
+      //
+      // A DoD section with NO machine-checkable checkboxes is treated as
+      // satisfied (vacuously true): the gate is a syntax counter, not a
+      // semantic verifier (QN-030 permanent boundary, AC8) — it cannot
+      // evaluate prose-only completion claims, so it does not block on them.
+      // A DoD WITH checkboxes requires every box checked.
+      const acSection = sectionAfterHeading(t.body, ["AC", "Acceptance Criteria"]);
+      const acCheckboxes = acSection.match(/- \[[ xX]\]/g) || [];
+      const acChecked = acSection.match(/- \[[xX]\]/g) || [];
+      const acOk = acCheckboxes.length > 0 && acChecked.length === acCheckboxes.length;
+
+      const dodSection = sectionAfterHeading(t.body, ["DoD", "Definition of Done"]);
+      const dodCheckboxes = dodSection.match(/- \[[ xX]\]/g) || [];
+      const dodChecked = dodSection.match(/- \[[xX]\]/g) || [];
+      const dodOk =
+        dodCheckboxes.length === 0 || dodChecked.length === dodCheckboxes.length;
 
       // QN-012: for a compound (epic) task, the execute->done gate must ALSO
       // require every child to already be `done` — a compound task's own
@@ -866,31 +1438,35 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       // (children.length === 0) are unaffected: childrenStatus is `[]` and
       // `.every(...)` over an empty array is vacuously true.
       const kids = childrenStatus(t);
-      const childrenOk = kids.every((c) => c.status === "done");
-      const ok = acOk && childrenOk;
-      const badChildren = kids.filter((c) => c.status !== "done");
+      const childrenOk = kids.every((c) => c.status === TASK_STATUS.DONE);
+      const ok = acOk && dodOk && childrenOk;
+      const badChildren = kids.filter((c) => c.status !== TASK_STATUS.DONE);
       let reason;
       if (!acOk) {
-        reason = `${checked.length}/${checkboxes.length} AC checkboxes checked`;
+        reason = `${acChecked.length}/${acCheckboxes.length} AC checkboxes checked`;
+      } else if (!dodOk) {
+        reason = `${dodChecked.length}/${dodCheckboxes.length} DoD checkboxes checked`;
       } else if (!childrenOk) {
         reason =
-          "AC checkboxes complete, but not all children are done: " +
+          "AC and DoD checkboxes complete, but not all children are done: " +
           badChildren.map((c) => `${c.id} (${c.status})`).join(", ");
       } else {
-        reason = "all AC checkboxes checked; eligible to move to done";
+        reason = "all AC and DoD checkboxes checked; eligible to move to done";
       }
       const result: Record<string, unknown> = {
         id,
         gate: "execute->done",
         ok,
-        acTotal: checkboxes.length,
-        acChecked: checked.length,
+        acTotal: acCheckboxes.length,
+        acChecked: acChecked.length,
+        dodTotal: dodCheckboxes.length,
+        dodChecked: dodChecked.length,
         reason,
       };
       if (t.role === "compound") result.childrenStatus = kids;
       return result;
     }
-    if (t.status === "done") {
+    if (t.status === TASK_STATUS.DONE) {
       // QN-012: a `done` compound (epic) task's gate check must actually
       // re-verify that its children are still `done`, rather than
       // unconditionally rubber-stamping `ok: true` — closing the gap named
@@ -901,9 +1477,9 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       // and `.every(...)` over an empty array is vacuously true, so this
       // branch degrades to the original unconditional behavior for leaves.
       const kids = childrenStatus(t);
-      const childrenOk = kids.every((c) => c.status === "done");
+      const childrenOk = kids.every((c) => c.status === TASK_STATUS.DONE);
       if (t.role === "compound" && !childrenOk) {
-        const badChildren = kids.filter((c) => c.status !== "done");
+        const badChildren = kids.filter((c) => c.status !== TASK_STATUS.DONE);
         return {
           id,
           gate: "none",
@@ -918,28 +1494,22 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       if (t.role === "compound") result.childrenStatus = kids;
       return result;
     }
-    if (t.status === "needs-human") {
+    if (t.status === TASK_STATUS.NEEDS_HUMAN) {
       return { id, gate: "none", ok: false, reason: "soft stop; human action required" };
     }
     return { id, gate: "unknown", ok: false, reason: `unrecognized status ${t.status}` };
   }
 
-  function extractSection(body, headings) {
-    for (const h of headings) {
-      // QN-005 fix (iteration 2): `\Z` is NOT a valid JavaScript regex
-      // end-of-string anchor (JS has no \Z metacharacter) — the engine took
-      // it as a literal capital "Z", and with the `i` (case-insensitive)
-      // flag this also matched a bare lowercase "z" anywhere in the
-      // section's prose, truncating capture early (found and root-caused
-      // by the iteration-1 G3 audit against QN-005's own AC text, which
-      // contains the word "zero"). Correct JS end-of-string lookahead is
-      // `(?![\s\S])` (no characters remain).
-      const re = new RegExp(`^##\\s+${h}\\b([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im");
-      const m = re.exec(body);
-      if (m) return m[1];
-    }
-    return "";
-  }
-
-  return { list, listWithMalformed, get, write, appendNote, check, artifactSections, childrenStatus };
+  return {
+    list,
+    listWithMalformed,
+    get,
+    write,
+    appendNote,
+    check,
+    artifactSections,
+    childrenStatus,
+    detectShape,
+    contractKeysPresent,
+  };
 }

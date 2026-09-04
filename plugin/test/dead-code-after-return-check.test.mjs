@@ -1,0 +1,122 @@
+// @test-group engine
+// dead-code-after-return-check.test.mjs — the AC6 anti-recurrence gate of
+// gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived.
+//
+// The defect: scripts/test.sh's default_test_concurrency had `echo "8"; return 0;
+// default_concurrency_formula` — a statement AFTER a top-level return (dead code), while docs/ACs/
+// tests all reported the derived form. AC6 requires a mechanical check that bans this shape so it
+// cannot be reintroduced. This file tests that checker:
+//   - the detection is by code position (the exact pin shape is caught; comment mentions are not)
+//   - a return as the last statement of a function, or inside an if/case block, is NOT dead code
+//   - the real repo scan is clean (0 instances on the current tree — strict-zero band)
+//   - the negative control (mutating the function to return a constant) reddens the AC1/AC3
+//     assertion in resource-gate.test.mjs and the checker's RED path
+//
+// Run: scripts/test.sh plugin/test/dead-code-after-return-check.test.mjs
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
+
+import { detectFileViolations, scanTree, stripShellComments, judgeScan } from "../scripts/dead-code-after-return-check.ts";
+import { driverResultToExit } from "../scripts/checker-io.ts";
+
+import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, "../..");
+
+const CHECKER = path.join(repoRoot, "plugin/scripts/dead-code-after-return-check.ts");
+
+function runChecker(root) {
+  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", root], {
+    encoding: "utf8",
+  });
+}
+
+// ── RED: the exact defect shapes ────────────────────────────────────────────────────────────────────
+test("AC6: the 2026-08-03 pin shape (statement after a top-level return) is detected", () => {
+  const vs = detectFileViolations(
+    "test.sh",
+    'default_test_concurrency() {\n  echo "8"\n  return 0\n  default_concurrency_formula\n}\n',
+  );
+  assert.equal(vs.length, 1);
+  assert.equal(vs[0].fn, "default_test_concurrency");
+  assert.equal(vs[0].line, 3); // the RETURN line is reported (where the dead code begins)
+  assert.equal(vs[0].after, "default_concurrency_formula");
+});
+
+test("AC6: the Contract control shape — changing the function to return a constant (echo 3) — is detected", () => {
+  const vs = detectFileViolations("x.sh", 'f() {\n  echo "3"\n  return 0\n  default_concurrency_formula\n}\n');
+  assert.equal(vs.length, 1);
+});
+
+// ── GREEN: legitimate returns are NOT dead code ─────────────────────────────────────────────────────
+test("AC6: a top-level return as the LAST statement is not dead code", () => {
+  const vs = detectFileViolations("ok.sh", 'f() {\n  echo "a"\n  return 0\n}\n');
+  assert.equal(vs.length, 0);
+});
+
+test("AC6: a return inside an if block (code after fi runs on the else path) is not dead code", () => {
+  const vs = detectFileViolations(
+    "ok.sh",
+    'f() {\n  if x; then\n    return 0\n  fi\n  echo "after"\n}\n',
+  );
+  assert.equal(vs.length, 0);
+});
+
+test("AC6: a return inside a case branch followed by its terminator is not dead code", () => {
+  const vs = detectFileViolations(
+    "ok.sh",
+    'f() {\n  case "$x" in\n    a)\n      return 0\n      ;;\n  esac\n}\n',
+  );
+  assert.equal(vs.length, 0);
+});
+
+test("AC6: a comment mentioning the pattern is NOT a violation (comment-vs-code)", () => {
+  const vs = detectFileViolations("c.sh", "# never write: return 0\ndefault_concurrency_formula\n");
+  assert.equal(vs.length, 0);
+});
+
+// ── CLI + real-repo strict-zero band ────────────────────────────────────────────────────────────────
+test("AC6: the real repo scan is clean — strict-zero band on the current tree", () => {
+  const { violations, files } = scanTree(repoRoot);
+  assert.equal(violations.length, 0, JSON.stringify(violations.map((v) => `${v.rel}:${v.line}`)));
+  assert.ok(files.length > 50, `expected a broad shell-script scan, got ${files.length} files`);
+  const res = runChecker(repoRoot);
+  assert.equal(res.status, 0);
+  assert.match(res.stdout, /violations: 0/);
+});
+
+test("AC6: a fixture with the injected shape exits 1 (negative control via the real CLI)", () => {
+  const dir = makeTmpDir("dcar-neg-");
+  fs.writeFileSync(dir + "/evil.sh", 'f() {\n  return 0\n  echo "never"\n}\n');
+  const res = runChecker(dir);
+  assert.equal(res.status, 1);
+  assert.match(res.stdout, /evil\.sh:2/);
+});
+
+test("stripShellComments: comments stripped, string literals preserved (quote-aware)", () => {
+  assert.equal(
+    stripShellComments("# full line\necho hi # trailing\necho 'a#b'\necho \"c#d\"\n"),
+    "\necho hi \necho 'a#b'\necho \"c#d\"\n",
+  );
+});
+
+// ── B4 DriverResult（gap-b4-checker-reuse-driver-result：判定收敛到 DriverResult<T> 词表）────────────
+
+test("B4 AC3: judgeScan maps clean⇒verified / violations⇒failed (DriverResult, exit 0/1)", () => {
+  const clean = judgeScan({ violations: [], files: ["a.sh", "b.sh"] });
+  assert.equal(clean.state, "verified");
+  assert.equal(driverResultToExit(clean), 0);
+
+  const dirty = judgeScan({
+    violations: [{ rel: "evil.sh", line: 2, fn: "f", returnStmt: "return 0", after: "echo never" }],
+    files: ["evil.sh"],
+  });
+  assert.equal(dirty.state, "failed");
+  assert.equal(driverResultToExit(dirty), 1);
+});

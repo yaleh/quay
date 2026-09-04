@@ -1,4 +1,12 @@
 // @test-group product
+// @load-sensitive wall-clock
+// @load-sensitive-entry 2026-08-12 real standalone smoke gates with real waits (163s); moved product→serial 2026-08-12 (7/7 isolated, timed out under 8-lane — gap-suite-tiering-kind-heavy-not-a-mechanism 补缺省 kind), then serial→product 2026-08-25 (gap-suite-move-27-evidenced-files-out-serial-lowconc — passed 22-60× high-load verification, reverted to the default product group)
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-wall-clock-wait smoke gates (delivery-standalone-smoke.sh: pack + fresh-workspace install)
+// (2026-08-12 outer: product → serial — real standalone smoke gates with real waits, 163s in the
+// 8-lane suite timed out but 7/7 pass isolated ⇒ load-sensitive real-wall-clock-wait family.
+// 2026-08-25: serial → product again (gap-suite-move-27-evidenced-files-out-serial-lowconc) — the
+// @test-group reverted to the default product group while the @load-sensitive / KNOWN-LOAD-SENSITIVE
+// markers are retained (the independent load-sensitive family mechanism, not the de-concurrency list).
 // DIR-035-D (M52) — `delivery-standalone-smoke` wired as a named gate declared in the
 // workspace's gates config (DIR-120: `.quay/config.yml`'s own `gates:` section for THIS repo;
 // a legacy `.quay/gates.yml` only for a workspace with no `config.yml`).
@@ -10,7 +18,7 @@
 //
 // Run: node --test packages/quay/test/*.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -19,14 +27,35 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { resolveGate, listGates } from "../src/gate/registry.ts";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const quayBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
+
+// Every workspace / fixed-gate fixture dir is removed once at the end of this file — the
+// carrier-array + after() pattern — so `quay-m52-*` never accumulates a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 // repo root: packages/quay/test -> repo root is 3 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const SMOKE_SCRIPT = path.join(REPO_ROOT, "packages", "quay", "test", "delivery-standalone-smoke.sh");
+
+// ── Amortized deliver baseline (gap-npm-file-copy-amortize AC1) ──────────────────────────────────
+// A2/C1/D1 (and the A1 zero-arg factory) each invoke the smoke gate through a DIFFERENT access
+// surface (direct gate() resolve, CLI `quay gate`, real-workspace wiring) but all run the SAME
+// smoke.sh — which historically did a full `npm pack → npm install --omit=dev` per invocation
+// (4× the expensive npm ops for one product state). Mirror quay-init-loop-helpers.mjs's
+// "one real install → shared baseline → each test deltas" technique: point every smoke.sh
+// invocation at ONE fresh baseline dir. The FIRST invocation builds the delivered product there
+// (real npm pack + install), the other three reuse it. Mechanism unchanged — still a real npm run
+// and real bash, just not repeated 4× (AC3). A fresh mkdtemp per run means no stale-baseline reuse.
+const SMOKE_BASE = fs.mkdtempSync(path.join(os.tmpdir(), "quay-m52-base-"));
+_tmpDirs.push(SMOKE_BASE);
+process.env.QUAY_DELIVERY_SMOKE_BASE = SMOKE_BASE;
 
 const gate = (name) => resolveGate(name, REPO_ROOT);
 
@@ -67,6 +96,8 @@ function runNative(args, tasksDir) {
 function makeWorkspace(tag) {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m52-${tag}-tasks-`));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m52-${tag}-ws-`));
+  _tmpDirs.push(tasksDir);
+  _tmpDirs.push(workspaceRoot);
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(
     path.join(workspaceRoot, ".quay", "config.yml"),
@@ -113,6 +144,7 @@ test("M52 A2: delivery-standalone-smoke gate PASSes for real (0 RED, real script
 test("M52 A2: a fixed gate pointed at a non-existent script fails closed (ok:false)", async () => {
   const { resolveGate: rg } = await import("../src/gate/registry.ts");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-m52-fixed-bad-"));
+  _tmpDirs.push(dir);
   fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
   fs.writeFileSync(
     path.join(dir, ".quay", "gates.yml"),

@@ -1,7 +1,7 @@
 ---
 id: gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree
 title: "Two tests mkdtemp inside the shared checkout, so every run dirties the working tree — and neither R1 nor R7 sees it"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -63,7 +63,7 @@ measure shared_root_mkdtemp = `bash plugin/scripts/test-isolation-check.sh .` �
 measure tree_dirty_after_suite = `git status --porcelain` 在一次完整套件后输出的行数字段
 band tree_dirty_after_suite = 0
 invariant 每运行唯一 ≠ 可以落在共享检出里；探测器覆盖「根在哪」这个类，不是某个字面前缀
-invoke `bash plugin/scripts/test-isolation-check.sh .`
+invoke `bash plugin/scripts/test-isolation-check.ts .`   # 真实脚本是 .ts（原 .sh 是笔误，AC2 实跑证据即 .ts 路径）
 control 造一个 mkdtemp 根在仓库根的测试文件 ⇒ 必须报出；改成 os.tmpdir() ⇒ 必须不报
 resume 先扩探测器并让它报出那 2 个活标本，再修它们
 ```
@@ -160,8 +160,10 @@ resume 先扩探测器并让它报出那 2 个活标本，再修它们
       **一个从没在真实仓库报出过东西的规则，与「永远返回空集」不可区分**
       （AC2 的 3 个活标本报出输出、AC5 的作用域实跑后 `git status --porcelain` 为空 + 断言脚本
       接入，均已贴在本任务体上方；完整套件 AC5 由协调器补实跑输出）
-- [~] 完整套件连跑 2 次全绿 —— **本任务在 worktree，协调器指令禁止跑完整套件**；已跑的作用域
-      套件（ts-typecheck-gate 5/5 + test-isolation-check 13/13）全绿、`git status` 空。
+- [~] 完整套件连跑 2 次全绿 —— **如实标注：仅 1 次全量绿**（协调方 fan-in，批 3 套件 **2157 tests /
+      2134 pass / 0 fail / 0 cancelled**，SUITE_EXIT=0，`/tmp/batch3-faninsuite3.log`，2026-08-03；
+      含 R8 检测器 + assert-clean-tree 接线 + 3 个修复实例）。scoped 全绿（ts-typecheck-gate 5/5 +
+      test-isolation-check 13/13 + 3 修复文件 55/55）、`git status` 空。
       完整套件 2 次连跑由协调器在合并态执行并标注。
 - [x] 任务体记录：这是同一形态的**第四次**（R1 看不见 `process.cwd()` → R6 文件级存在性 →
       R7 不含仓库根 → 本条 R8），**规则名覆盖类、实现覆盖标本**。

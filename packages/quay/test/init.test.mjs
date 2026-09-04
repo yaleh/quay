@@ -12,10 +12,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+import { generateConfigContent, mcpEntryForProvider } from "../src/init.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
+const quayBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -298,4 +300,222 @@ test("edge: no project type yields generic test suggestions", () => {
     configContent.includes("no project-type detected") || configContent.includes("your-test-command-here"),
     "no-package.json project should have generic test command"
   );
+});
+
+// ---------------------------------------------------------------------------
+// gap-cli-quay-init-collides-with-the-canonical-slash-quay-init (2026-08-07).
+// CLI `quay init` (DIR-098, empty task-store scaffold) collides in name with
+// the /quay:init skill (the canonical loop-laydown path). `quay init --loop`
+// used to silently swallow the flag and exit 0 reporting success while laying
+// down nothing but the empty store (reproduced live on B). The fix: fail closed
+// on --loop and point at /quay:init; disambiguate both help surfaces.
+// ---------------------------------------------------------------------------
+
+// AC1: quay init --loop must NOT silently succeed — fail closed, point at /quay:init.
+test("AC1-collision: quay init --loop fails closed and points at /quay:init", () => {
+  const dir = tmpDir("collision-ac1");
+  const out = runQuayAllowFail(["init", "--loop"], dir);
+  assert.notEqual(out.exitCode, 0, "quay init --loop must exit non-zero");
+  assert.ok(
+    out.stderr.includes("--loop") && out.stderr.includes("/quay:init"),
+    "error must mention the --loop flag and the /quay:init skill"
+  );
+  assert.ok(
+    !fs.existsSync(path.join(dir, ".quay", "config.yml")),
+    "quay init --loop must NOT write the empty-store scaffold (still the wrong action)"
+  );
+});
+
+// Contract measure: `quay init --loop --dry-run` must exit non-zero (baseline was 0).
+test("AC1-collision: quay init --loop --dry-run exits non-zero and writes nothing", () => {
+  const dir = tmpDir("collision-measure");
+  const out = runQuayAllowFail(["init", "--loop", "--dry-run"], dir);
+  assert.notEqual(out.exitCode, 0, "quay init --loop --dry-run must exit non-zero");
+  assert.ok(out.stderr.includes("/quay:init"), "error must point at /quay:init");
+  assert.ok(!fs.existsSync(path.join(dir, ".quay")), "no .quay/ written");
+  assert.ok(!fs.existsSync(path.join(dir, "tasks")), "no tasks/ written");
+});
+
+// AC2: both help surfaces disambiguate init from the /quay:init skill.
+test("AC2-collision: quay init --help disambiguates from /quay:init", () => {
+  const dir = tmpDir("collision-ac2");
+  const out = runQuay(["init", "--help"], dir);
+  assert.ok(out.includes("/quay:init"), "init --help must point at /quay:init");
+  assert.ok(out.includes("--loop"), "init --help must state --loop is not a CLI init flag");
+  assert.ok(out.includes("EMPTY task store"), "init --help must say it scaffolds an EMPTY task store");
+});
+
+test("AC2-collision: top-level quay --help disambiguates init from /quay:init", () => {
+  const dir = tmpDir("collision-ac2b");
+  const out = runQuay(["--help"], dir);
+  assert.ok(out.includes("/quay:init"), "top-level --help must mention /quay:init");
+  assert.ok(out.includes("EMPTY task store"), "top-level --help must say init scaffolds an EMPTY task store");
+});
+
+// AC3 negative control: the legit empty-store flags still behave unchanged.
+test("AC3-collision negative control: quay init --force still succeeds", () => {
+  const dir = tmpDir("collision-ac3");
+  const first = runQuayAllowFail(["init"], dir);
+  assert.equal(first.exitCode, 0, "plain quay init still exits 0");
+  assert.ok(fs.existsSync(path.join(dir, ".quay", "config.yml")));
+  const forced = runQuayAllowFail(["init", "--force"], dir);
+  assert.equal(forced.exitCode, 0, "quay init --force still exits 0");
+  assert.ok(forced.stdout.includes("Created"), "--force still prints Created");
+});
+
+// quay-native shares the same silent-swallow defect — reject --loop there too.
+test("AC1-collision: quay-native init --loop fails closed and points at /quay:init", () => {
+  const dir = tmpDir("collision-native");
+  const out = runNativeAllowFail(["init", "--loop"], dir);
+  assert.notEqual(out.exitCode, 0, "quay-native init --loop must exit non-zero");
+  assert.ok(out.stderr.includes("/quay:init"), "native error must point at /quay:init");
+  assert.ok(!fs.existsSync(path.join(dir, ".quay")), "no .quay/ written");
+});
+
+// ---------------------------------------------------------------------------
+// gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy (2026-08-11).
+// `quay init`'s generated config MUST select the provider MCP server launch
+// entry by the RESOLVED provider-path form:
+//   - INSTALLED form (provider path under node_modules, e.g. `./node_modules/quay-native`)
+//     launches the bundled `./dist/quay-native.js` — raw `.ts` under node_modules is
+//     refused by Node >=23.7 (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), so the
+//     bundled JS is the only runnable form there.
+//   - DEV form (provider path inside the repo tree, e.g. `./packages/quay-native`)
+//     keeps the raw `./bin/quay-native.ts` entry.
+// ---------------------------------------------------------------------------
+
+test("gap-installed-form: node_modules provider path -> bundled dist mcp_entry", () => {
+  const content = generateConfigContent({
+    providerId: "native",
+    providerPath: "./node_modules/quay-native",
+    isNode: false,
+    isGo: false,
+  });
+  assert.ok(
+    content.includes('mcp_entry: ["node", "./dist/quay-native.js", "mcp"]'),
+    "installed form must launch the bundled dist JS (no type-stripping under node_modules)"
+  );
+  assert.ok(
+    !content.includes('"./bin/quay-native.ts"'),
+    "installed form must NOT reference the raw .ts entry (it would hit ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING)"
+  );
+});
+
+test("gap-dev-form: repo-tree provider path keeps the raw .ts mcp_entry", () => {
+  const content = generateConfigContent({
+    providerId: "native",
+    providerPath: "./packages/quay-native",
+    isNode: false,
+    isGo: false,
+  });
+  assert.ok(
+    content.includes('mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]'),
+    "dev form must keep the raw TypeScript entry"
+  );
+});
+
+test("gap-mcp-entry-for-provider unit: node_modules vs repo-tree discrimination", () => {
+  assert.equal(
+    mcpEntryForProvider("./node_modules/quay-native"),
+    '["node", "./dist/quay-native.js", "mcp"]',
+    "node_modules path -> dist bundle"
+  );
+  assert.equal(
+    mcpEntryForProvider("./packages/quay-native"),
+    '["node", "./bin/quay-native.ts", "mcp"]',
+    "repo-tree path -> raw .ts"
+  );
+  assert.equal(
+    mcpEntryForProvider("../packages/quay-native"),
+    '["node", "./bin/quay-native.ts", "mcp"]',
+    "relative repo-tree path -> raw .ts"
+  );
+  assert.equal(
+    mcpEntryForProvider("C:\\npm\\node_modules\\quay-native"),
+    '["node", "./dist/quay-native.js", "mcp"]',
+    "windows-style node_modules path -> dist bundle"
+  );
+});
+
+// gap-quay-init-launch-settings-template-missing-permissions-and-exclude-dynamic
+// (2026-08-11). `quay init` must lay down `.claude/launch.settings.json` with
+// `permissions.defaultMode: "bypassPermissions"` so a cold-start inner does NOT hit a
+// permission prompt on its own loop scripts (measured F1/F2 on ad-arm1 archguard:
+// monitor-mount-check.sh approval box). AC154 (profile 抽层): the flag-only params
+// (excludeDynamicSystemPromptSections / promptSuggestions) + profiles/roles now live in the
+// SIBLING `.quay/profiles.yml` scaffold — launch.settings.json carries ONLY Claude Code keys.
+// ---------------------------------------------------------------------------
+
+test("gap-launch-settings: quay init lays down .claude/launch.settings.json (bypassPermissions, no _launchSpec) + .quay/profiles.yml", () => {
+  const dir = tmpDir("launchsettings");
+  const out = runQuay(["init"], dir);
+
+  assert.ok(out.includes("launch.settings.json"), "quay init should report the launch.settings.json scaffold");
+  assert.ok(out.includes("profiles.yml"), "quay init should report the .quay/profiles.yml scaffold (AC154)");
+  const settingsPath = path.join(dir, ".claude", "launch.settings.json");
+  assert.ok(fs.existsSync(settingsPath), ".claude/launch.settings.json should be laid down by quay init");
+  const s = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.equal(
+    s.permissions?.defaultMode,
+    "bypassPermissions",
+    "permissions.defaultMode must be bypassPermissions (F1 — inner must not hit permission prompt)"
+  );
+  assert.ok(!("_launchSpec" in s), "_launchSpec must be gone from launch.settings.json (AC154 profile 抽层)");
+
+  // AC154: the profile carrier is a SIBLING scaffold laid down beside launch.settings.json.
+  const profilesPath = path.join(dir, ".quay", "profiles.yml");
+  assert.ok(fs.existsSync(profilesPath), ".quay/profiles.yml should be laid down by quay init (AC154)");
+  const rawP = fs.readFileSync(profilesPath, "utf8");
+  assert.match(rawP, /excludeDynamicSystemPromptSections: true/, "profiles.yml must carry excludeDynamicSystemPromptSections: true");
+  assert.match(rawP, /promptSuggestions: false/, "profiles.yml must carry promptSuggestions: false");
+  assert.match(rawP, /quay-manager/, "profiles.yml must carry the manager role name (quay-manager)");
+});
+
+test("gap-launch-settings: quay-native init lays down the same launch.settings.json + profiles.yml", () => {
+  const dir = tmpDir("launchsettings-native");
+  const out = runNative(["init"], dir);
+  assert.ok(out.includes("launch.settings.json"), "quay-native init should report the launch.settings.json scaffold");
+  assert.ok(out.includes("profiles.yml"), "quay-native init should report the .quay/profiles.yml scaffold");
+
+  const settingsPath = path.join(dir, ".claude", "launch.settings.json");
+  assert.ok(fs.existsSync(settingsPath), "quay-native init should lay down .claude/launch.settings.json");
+  const s = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.equal(s.permissions?.defaultMode, "bypassPermissions");
+  assert.ok(!("_launchSpec" in s), "_launchSpec must be gone from launch.settings.json (AC154)");
+
+  const profilesPath = path.join(dir, ".quay", "profiles.yml");
+  assert.ok(fs.existsSync(profilesPath), "quay-native init should lay down .quay/profiles.yml");
+  assert.match(fs.readFileSync(profilesPath, "utf8"), /excludeDynamicSystemPromptSections: true/);
+});
+
+test("gap-launch-settings: quay init --dry-run does NOT write launch.settings.json", () => {
+  const dir = tmpDir("launchsettings-dryrun");
+  const out = runQuay(["init", "--dry-run"], dir);
+  assert.ok(out.includes("launch.settings.json"), "dry-run should preview the launch.settings.json path");
+  assert.ok(out.includes("profiles.yml"), "dry-run should preview the profiles.yml path");
+  assert.ok(!fs.existsSync(path.join(dir, ".claude")), "dry-run must NOT write .claude/ dir");
+  assert.ok(!fs.existsSync(path.join(dir, ".quay", "config.yml")), "dry-run must NOT write config");
+  assert.ok(!fs.existsSync(path.join(dir, ".quay", "profiles.yml")), "dry-run must NOT write profiles.yml");
+});
+
+test("gap-launch-settings: quay init --force overwrites a stale launch.settings.json (consumer fix path)", () => {
+  const dir = tmpDir("launchsettings-force");
+  runQuay(["init"], dir);
+  const settingsPath = path.join(dir, ".claude", "launch.settings.json");
+
+  // Simulate the consumer's stale/broken copy (F1/F2: no bypassPermissions,
+  // still carrying the pre-AC154 _launchSpec).
+  const staleRaw = JSON.stringify(
+    { $schema: "https://json.schemastore.org/claude-code-settings.json", _launchSpec: { excludeDynamicSystemPromptSections: false } },
+    null,
+    2,
+  );
+  fs.writeFileSync(settingsPath, staleRaw, "utf8");
+
+  runQuay(["init", "--force"], dir);
+  const afterRaw = fs.readFileSync(settingsPath, "utf8");
+  const second = JSON.parse(afterRaw);
+  assert.equal(second.permissions?.defaultMode, "bypassPermissions", "--force must restore bypassPermissions");
+  assert.ok(!("_launchSpec" in second), "--force must strip the stale _launchSpec (AC154)");
+  assert.notEqual(afterRaw, staleRaw, "stale file must be overwritten on --force");
 });

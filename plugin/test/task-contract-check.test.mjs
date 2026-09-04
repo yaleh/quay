@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // task-contract-check.test.mjs — the consumer-side checker for the `## Contract` block + `## Dispatch
 // review` section (tasks/gap-dispatch-gate-has-no-checklist-and-no-trace). The dispatch gate's five
 // verbal questions become a machine-readable Contract; this test pins the parser (shared with
@@ -10,11 +10,11 @@
 // changed from VERBATIM string to the command's EXECUTABLE ENTRY PATH (placeholders like <ISO> make
 // verbatim matching impossible by construction; 6 of the 7 prior findings were false positives). The
 // checker itself is now wired into scripts/test.sh's run_static_checks (AC4) so the ratchet CANNOT
-// grow unnoticed. AC8: this file declares `// @test-group governance`.
+// grow unnoticed. AC8: this file declares `// @test-group engine`.
 //
 // AC1 six-key syntax (task-schema) · AC2 five consumer judgments read content · AC3 Dispatch review
 // format + missing-section report · AC5 synthetic violation demo (AC-threshold-no-measure-ref,
-// measure-no-command) · AC6 ratchet data file · AC8 @test-group governance.
+// measure-no-command) · AC6 ratchet data file · AC8 @test-group engine.
 //
 // Run: scripts/test.sh plugin/test/task-contract-check.test.mjs
 
@@ -36,12 +36,20 @@ import {
 import {
   scanTaskText,
   hasThresholdMarker,
-  findWorkspaceRoot,
   readRatchet,
   writeRatchet,
   invokeEntryPath,
+  checkDodSuiteLine,
+  readDodSuiteLineBaseline,
+  readBareDirTouchesBaseline,
+  checkWiringClaimAcProbeGated,
+  readWiringClaimAcProbeBaseline,
   DATA_FILE_REL,
+  DOD_SUITE_LINE_BASELINE_REL,
+  WIRING_CLAIM_AC_PROBE_BASELINE_REL,
 } from "../scripts/task-contract-check.ts";
+import { repoRoot } from "../scripts/repo-root.ts";
+import { checkWiringClaimAcProbe } from "../scripts/wiring-coverage-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -50,24 +58,20 @@ const CHECKER = path.join(REPO_ROOT, "plugin", "scripts", "task-contract-check.t
 const fm = (labels, extra = 'extra:\n  schema: "v1"') =>
   `---\nid: T\ntitle: t\nstatus: ${labels.status || "todo"}\nlabels:\n${(labels.list || []).map((l) => `  - ${l}`).join("\n")}\n${extra}\n---\n`;
 
-function taskBody({ labels = [], status = "todo", contract, dispatchReview, ac, extraBody = "" }) {
+function taskBody({ labels = [], status = "todo", contract, dispatchReview, ac, dod, extraBody = "" }) {
   const parts = [];
   parts.push("## Proposal\n\nproposal body\n\n");
   if (contract !== undefined) parts.push(`## Contract\n\n${contract}\n\n`);
   if (ac !== undefined) parts.push(`## Acceptance Criteria\n\n${ac}\n\n`);
   if (dispatchReview !== undefined) parts.push(`## Dispatch review\n\n${dispatchReview}\n\n`);
+  if (dod !== undefined) parts.push(`## Definition of Done\n\n${dod}\n\n`);
   if (extraBody) parts.push(extraBody);
   return fm({ list: labels, status }, `extra:\n  schema: "v1"`) + parts.join("");
 }
 
-// ── Governance self-skip (AC8 @test-group governance) ─────────────────────────────────────────────
+// ── Governance self-skip (AC8 @test-group engine) ─────────────────────────────────────────────
 // In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
 // precedent) — the checker itself is enforced unconditionally via scripts/test.sh's
-// run_static_checks, and the file runs in full when invoked explicitly (QUAY_TEST_GROUPS unset) or
-// with `--group governance`.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 
 // ── parseContract ───────────────────────────────────────────────────────────────────────────────────
 
@@ -356,7 +360,7 @@ test("todo task: invoke evidence not required yet", () => {
 
 test("invokeEntryPath: first slash-bearing token, skipping interpreter + flags", () => {
   assert.equal(invokeEntryPath("node orchestration/watch/inner-forensics.mjs verify 全量套件 --since <ISO>"), "orchestration/watch/inner-forensics.mjs");
-  assert.equal(invokeEntryPath("bash scripts/heavy-op-token.sh --acquire quay --timeout 0"), "scripts/heavy-op-token.sh");
+  assert.equal(invokeEntryPath("bash scripts/assert-clean-tree.sh /srv/target"), "scripts/assert-clean-tree.sh");
   assert.equal(invokeEntryPath("node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4173"), "packages/quay/bin/quay.ts");
   assert.equal(invokeEntryPath("node --experimental-strip-types plugin/scripts/task-schema-check.ts <file>"), "plugin/scripts/task-schema-check.ts");
   assert.equal(invokeEntryPath("bash scripts/test.sh"), "scripts/test.sh");
@@ -478,6 +482,85 @@ test("dispatch-review-missing is a ratchet violation only when a Contract exists
     ac: `- [ ] AC1: x`,
   });
   assert.ok(scanTaskText(withContract, "tasks/b.md").violations.some((v) => v.code === "dispatch-review-missing"));
+});
+
+// ── Check 6: DoD full-suite-demand line (gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge, AC2) ──
+
+const SUITE_DEMAND_DOD = "- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）";
+
+test("AC2 negative control: a task whose DoD carries the full-suite demand and is NOT grandfathered → dod-suite-line", () => {
+  const text = taskBody({ status: "todo", dod: SUITE_DEMAND_DOD });
+  const { violations } = scanTaskText(text, "tasks/new-task.md");
+  const v = violations.find((x) => x.code === "dod-suite-line");
+  assert.ok(v, JSON.stringify(violations));
+  // points at the rule source task (AC2: 报出并指向本任务)
+  assert.match(v.what, /gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge/);
+});
+
+test("AC2: the same demand is NOT a violation when the file IS on the shrink-only grandfather list", () => {
+  const text = taskBody({ status: "todo", dod: SUITE_DEMAND_DOD });
+  const grandfathered = new Set(["tasks/legacy-task.md"]);
+  const { violations } = scanTaskText(text, "tasks/legacy-task.md", { dodSuiteLineBaseline: grandfathered });
+  assert.ok(!violations.some((x) => x.code === "dod-suite-line"), JSON.stringify(violations));
+});
+
+test("AC2: a DoD mentioning 完整套件 WITHOUT the demand (new-correct framing) is NOT flagged", () => {
+  // 「本任务自身不再要求完整套件」is the NEW correct framing (the gate lives at the batch-merge
+  // boundary) — bare 完整套件 must not fire; only the demand phrase (连跑|绿) does.
+  const text = taskBody({ status: "todo", dod: "- [ ] `--for-task` 选中集绿（**本任务自身不再要求完整套件——即以自身为首个应用**）" });
+  const { violations } = scanTaskText(text, "tasks/gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge.md");
+  assert.ok(!violations.some((x) => x.code === "dod-suite-line"), JSON.stringify(violations));
+});
+
+test("checkDodSuiteLine: absent DoD section → []", () => {
+  assert.deepEqual(checkDodSuiteLine("## Proposal\nx", "tasks/x.md", new Set()), []);
+});
+
+test("readDodSuiteLineBaseline: absent file → empty set + null count", () => {
+  const root = makeGitRoot("dslbaseline-absent");
+  const { baseline, baselineCount } = readDodSuiteLineBaseline(root);
+  assert.equal(baseline.size, 0);
+  assert.equal(baselineCount, null);
+});
+
+test("CLI AC2: a new task with the DoD demand (no grandfather baseline) is REPORTED; ratchet growth → exit 1", () => {
+  const root = makeGitRoot("dslcli");
+  fs.writeFileSync(path.join(root, "tasks", "t-clean.md"), CLEAN_TASK);
+  // Establish the contract ratchet over a clean store (baseline-count 0).
+  let r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--write-ratchet"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  // A NEW task with the DoD demand, NOT on the (absent) grandfather list → new violation → exit 1.
+  const demand = taskBody({ status: "todo", dod: SUITE_DEMAND_DOD });
+  fs.writeFileSync(path.join(root, "tasks", "t-demand.md"), demand);
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root], { encoding: "utf8" });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /dod-suite-line/);
+  assert.match(r.stdout, /new since baseline: 1/);
+});
+
+test("CLI AC2: with the file on the grandfather list, the same demand is NOT a violation (exit 0)", () => {
+  const root = makeGitRoot("dslgrandfather");
+  fs.writeFileSync(path.join(root, "tasks", "t-clean.md"), CLEAN_TASK);
+  // Write the dod-suite-line grandfather baseline listing the demand task as grandfathered.
+  fs.mkdirSync(path.join(root, "docs", "analysis"), { recursive: true });
+  fs.writeFileSync(path.join(root, DOD_SUITE_LINE_BASELINE_REL), `# baseline-count: 1\n\ntasks/t-demand.md\n`);
+  const demand = taskBody({ status: "todo", dod: SUITE_DEMAND_DOD });
+  fs.writeFileSync(path.join(root, "tasks", "t-demand.md"), demand);
+  let r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const report = JSON.parse(r.stdout);
+  assert.ok(!report.violations.some((v) => v.code === "dod-suite-line"), JSON.stringify(report.violations));
+});
+
+test("CLI AC2: the grandfather baseline itself is shrink-only — a ceiling breach exits 1", () => {
+  const root = makeGitRoot("dslceiling");
+  fs.writeFileSync(path.join(root, "tasks", "t-clean.md"), CLEAN_TASK);
+  // baseline-count says 1 but the file lists 2 entries → the list grew → breach.
+  fs.mkdirSync(path.join(root, "docs", "analysis"), { recursive: true });
+  fs.writeFileSync(path.join(root, DOD_SUITE_LINE_BASELINE_REL), `# baseline-count: 1\n\ntasks/a.md\ntasks/b.md\n`);
+  const r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root], { encoding: "utf8" });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /BASELINE CEILING BREACH/);
 });
 
 // ── hasThresholdMarker ──────────────────────────────────────────────────────────────────────────────
@@ -681,11 +764,171 @@ test("AC6 reset: --write-ratchet --reset-baseline re-anchors the ceiling to the 
   assert.match(r.stdout, /new since baseline: 0/);
 });
 
-test("findWorkspaceRoot walks up to .git", () => {
+// ── --no-block (gap-task-file-static-syntax-should-not-block-product-verification, option ①) ────────
+// A task-file Contract/AC syntax violation is a different risk class from "is the product code
+// usable" — in the verification-round path (--no-block) it is REPORTED + recorded in a grow-only
+// ledger but NEVER sets red. The DEFAULT mode (no --no-block) keeps the shrink-only ratchet blocking
+// behavior (maintenance / mutation tests) — the existing tests above pin that unchanged.
+
+test("CLI --no-block: ratchet growth is REPORTED + ledgered but does NOT exit 1 (round proceeds)", () => {
+  const root = makeGitRoot("noblock");
+  fs.writeFileSync(path.join(root, "tasks", "t-clean.md"), CLEAN_TASK);
+  let r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--write-ratchet"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  // Clean store → --no-block exits 0 with zero recorded.
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--no-block"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout);
+  assert.match(r.stdout, /recorded \(non-blocking\): 0/);
+  // Introduce a NEW violation → DEFAULT exits 1 (ratchet growth, unchanged), --no-block exits 0.
+  fs.writeFileSync(path.join(root, "tasks", "t-bad.md"), VIOLATING_TASK);
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root], { encoding: "utf8" });
+  assert.equal(r.status, 1, r.stdout);
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--no-block"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout);
+  // Reported + recorded, but the runner's static-check failure marker is avoided (no "new since
+  // baseline: N" with N>0 — full-suite-runner.ts would otherwise flip the round red).
+  assert.match(r.stdout, /VIOLATION:/);
+  assert.match(r.stdout, /recorded \(non-blocking\): 7/);
+  assert.match(r.stdout, /recorded \(non-blocking, grow-only ledger\): 7/);
+  assert.doesNotMatch(r.stdout, /new since baseline: 7/);
+  // Grow-only ledger written (one line per violation).
+  const ledgerPath = path.join(root, ".quay", "task-file-violation-ledger.jsonl");
+  assert.ok(fs.existsSync(ledgerPath), "grow-only ledger must be written");
+  const lineCount = () => fs.readFileSync(ledgerPath, "utf8").trim().split(/\r?\n/).filter(Boolean).length;
+  assert.equal(lineCount(), 7);
+  // Grow-only: a second run does NOT re-append (只增不减, dedup by (checker, violation)).
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--no-block"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout);
+  assert.equal(lineCount(), 7);
+});
+
+test("CLI --no-block + strict-subset: a touched task's violation is REPORTED + ledgered but does NOT exit 1", () => {
+  const root = makeGitRoot("noblock-subset");
+  fs.writeFileSync(path.join(root, "tasks", "t-bad.md"), VIOLATING_TASK);
+  // Default strict-subset still FAILS (AC4-i — the scoped contract consumer catches a touched task's
+  // violation in DEFAULT mode; unchanged).
+  let r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--strict-subset", path.join(root, "tasks", "t-bad.md")], { encoding: "utf8" });
+  assert.notEqual(r.status, 0, r.stdout);
+  // --no-block strict-subset reports + ledgeres but exits 0 (a scoped run is ALSO a verification —
+  // task-file syntax must not stop it).
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--strict-subset", path.join(root, "tasks", "t-bad.md"), "--no-block"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout);
+  assert.match(r.stdout, /REPORTED \+ ledgered, NOT blocking/);
+  assert.match(r.stdout, /recorded \(non-blocking, grow-only ledger\)/);
+});
+
+test("repoRoot walks up to .git", () => {
   const root = makeGitRoot("rootwalk");
   const sub = path.join(root, "a", "b");
   fs.mkdirSync(sub, { recursive: true });
-  assert.equal(findWorkspaceRoot(sub), root);
+  assert.equal(repoRoot(sub), root);
+});
+
+// ── Check 8: wiring/reachability-declaring AC must name a real input probe (gap-wiring-claim-ac-requires-real-input-probe) ──
+
+test("AC1: a wiring/reachability declaration without a real input probe → wiring-claim-ac-no-probe (sample 1)", () => {
+  // gap-readdepends-on-indented-extra-depends-on AC1: "10 条命中任务都能被读到" — the test called
+  // readDependsOn("depends_on: [a, b]\n") on a string literal, the 10 real files never read.
+  const ac = "- [x] AC1（能取假，缩进形态可读）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。";
+  const findings = checkWiringClaimAcProbe(ac);
+  assert.equal(findings.length, 1, JSON.stringify(findings));
+  assert.equal(findings[0].code, "wiring-claim-ac-no-probe");
+});
+
+test("AC1: sample 2 — '已有 3 条现成样本' without a real input probe → flagged", () => {
+  // gap-ac146-human-interface-explicit-owner AC2: "已有 3 条现成样本" — the test copied samples into an
+  // mkdtemp synthetic file, the real .quay/promotion-outcome.jsonl never read.
+  const ac = "- [x] AC2（能取假，负控制）：造一条 needs-human（`.quay/promotion-outcome.jsonl` 已有 3 条现成样本），该界面须显示它；（⛔ 不显示 ⇒ 假）。";
+  const findings = checkWiringClaimAcProbe(ac);
+  assert.equal(findings.length, 1, JSON.stringify(findings));
+  assert.equal(findings[0].code, "wiring-claim-ac-no-probe");
+});
+
+test("AC2 negative control: a declaration that NAMES a real input probe is NOT flagged", () => {
+  const acs = [
+    "- [x] AC2 — 负控制的真实输入（主检出真实读数，非 fixture）：`plugin/scripts/ready-pool-check.ts --root /home/yale/work/quay --cap 5 --json` 实读主检出 store，`candidates[]` 中 `eligible=false` 的已存在 todo 恰 2 条（都卡 `missing=dod`）",
+    "- [x] AC2（能取假，生产回放）：用生产 `verification-round.jsonl` 的 `#599`（buckets=P，lookback=[596,597,598] 全 M）回放——修复后 `packages/quay/test/*` 长文件不再被排到 35%-65% 位置",
+  ];
+  for (const ac of acs) {
+    assert.deepEqual(checkWiringClaimAcProbe(ac), [], ac.slice(0, 60));
+  }
+});
+
+test("AC3 boundary: a pure-function AC with no quantified reachability/existence claim is NOT flagged", () => {
+  const acs = [
+    "- [x] AC1（能取假）：`parseFoo` 对缩进输入返回正确的依赖列表；（⛔ 返回错 ⇒ 假）。",
+    "- [x] AC1: `--verbose` prints debug output to stderr.",
+    "- [x] AC2: 6 条旧路径模式零命中（grep 分写路径）——排除它不抑制任何命中。", // N 条 but grep-hit, not a read/exist claim
+  ];
+  for (const ac of acs) {
+    assert.deepEqual(checkWiringClaimAcProbe(ac), [], ac.slice(0, 60));
+  }
+});
+
+test("grep-real-file is a position-based probe → NOT flagged (gap-wiring-claim-ac-misflags-position-grep)", () => {
+  // DIR-130 AC2/AC4: `grep -n "DIR-130" <real file>` IS the real input probe — the real file is the
+  // real input being read by position (硬规则② 按位置判定). These must NOT be flagged no-probe.
+  const acs = [
+    "- [x] AC2: **skill 授权模型已改（按位置判定）**——`grep -n \"DIR-130\" plugin/skills/quay-task-operator/SKILL.md` 命中 ≥1 且位于授权契约小节内（打印命中行与其上下 5 行），证明凭据引用写在授权定义处而非注释/示例里（实测：`:10` authorize 契约行 + `:26` standing-authorization 段）",
+    "- [x] AC4: **manager 执行核可读到指针**——`grep -n \"DIR-130\" orchestration/manager-tick-core.md` 命中 ≥1 且与 permission-laundering 条款同段（打印命中行与上下文）（实测：`:78` C10 条款 permission-laundering 同段）",
+    "- [x] AC1（能取假）：`grep -n \"DIR-130\" plugin/skills/quay-task-operator/SKILL.md` 读到 3 条命中行（打印命中行与上下文），证明引用在正确位置",
+  ];
+  for (const ac of acs) {
+    assert.deepEqual(checkWiringClaimAcProbe(ac), [], ac.slice(0, 60));
+  }
+});
+
+test("grep exemption does NOT leak to synthetic stubs (string literal / fixture / mkdtemp) → still flagged", () => {
+  // AC3 negative control: a bullet that mentions `grep` but reads a synthetic stub (no real `/`-separated
+  // file path) is STILL a no-probe declaration — the exemption is anchored on grep + a real file.
+  const acs = [
+    "- [x] AC1（能取假，缩进形态可读）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。",
+    "- [x] AC2（能取假，负控制）：造一条 needs-human（`.quay/promotion-outcome.jsonl` 已有 3 条现成样本），该界面须显示它；（⛔ 不显示 ⇒ 假）。",
+    "- [x] AC1: `readDependsOn` 认到缩进形态、10 条命中任务都能被读到（测试用 grep 在 fixture 字符串里查，非真文件）",
+  ];
+  for (const ac of acs) {
+    const findings = checkWiringClaimAcProbe(ac);
+    assert.equal(findings.length, 1, `${ac.slice(0, 60)} → ${JSON.stringify(findings)}`);
+    assert.equal(findings[0].code, "wiring-claim-ac-no-probe");
+  }
+});
+
+test("checkWiringClaimAcProbeGated: grandfathered file → [] ; a non-grandfathered file → violation", () => {
+  const ac = "- [x] AC1（能取假）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。";
+  const body = taskBody({ status: "done", ac });
+  const grandfathered = new Set(["tasks/legacy.md"]);
+  assert.deepEqual(checkWiringClaimAcProbeGated(body, "tasks/legacy.md", grandfathered), []);
+  const hits = checkWiringClaimAcProbeGated(body, "tasks/new.md", grandfathered);
+  assert.equal(hits.length, 1, JSON.stringify(hits));
+  assert.equal(hits[0].code, "wiring-claim-ac-no-probe");
+  assert.match(hits[0].what, /gap-wiring-claim-ac-requires-real-input-probe/);
+});
+
+test("scanTaskText integration: declaration-without-probe is a violation unless grandfathered", () => {
+  const ac = "- [x] AC1（能取假）：`readDependsOn` 认到 `extra:` 缩进下的 `depends_on`（10 条命中任务都能被读到）；（⛔ 缩进形态仍读不到 ⇒ 假）。";
+  const body = taskBody({ status: "done", ac });
+  // no baseline → NEW occurrence
+  assert.ok(scanTaskText(body, "tasks/x.md").violations.some((v) => v.code === "wiring-claim-ac-no-probe"));
+  // grandfathered → not a violation
+  const grandfathered = new Set(["tasks/x.md"]);
+  assert.ok(!scanTaskText(body, "tasks/x.md", { wiringClaimAcProbeBaseline: grandfathered }).violations.some((v) => v.code === "wiring-claim-ac-no-probe"));
+});
+
+test("readWiringClaimAcProbeBaseline: absent file → empty set + null count", () => {
+  const root = makeGitRoot("wcapbaseline-absent");
+  const { baseline, baselineCount } = readWiringClaimAcProbeBaseline(root);
+  assert.equal(baseline.size, 0);
+  assert.equal(baselineCount, null);
+});
+
+test("readWiringClaimAcProbeBaseline: present file → set + count", () => {
+  const root = makeGitRoot("wcapbaseline-present");
+  fs.mkdirSync(path.join(root, "docs", "analysis"), { recursive: true });
+  fs.writeFileSync(path.join(root, WIRING_CLAIM_AC_PROBE_BASELINE_REL), "# baseline-count: 1\n\ntasks/gap-x.md\n");
+  const { baseline, baselineCount } = readWiringClaimAcProbeBaseline(root);
+  assert.equal(baseline.size, 1);
+  assert.equal(baselineCount, 1);
+  assert.ok(baseline.has("tasks/gap-x.md"));
 });
 
 // ── Real-store smoke (opt-in; runs the AC6 full-store scan) ────────────────────────────────────────
@@ -702,11 +945,14 @@ test("AC6 real-store: backfilled case tasks + this task are violation-free", { s
     "tasks/gap-dispatch-gate-has-no-checklist-and-no-trace.md",
   ];
   // NOTE: runCli process-exits (it IS the CLI), so the real-store assertions scan directly.
+  // gap-suite-concurrency-4-vs-8-measurement.md carries a pre-rule bare-dir Touches entry
+  // (`measurements/（若复用 measure-suite 工具）`), grandfathered in the bare-dir-touches baseline —
+  // so the scan passes the real baseline to stay change-relevant-aware (bare-dir-touches-check, AC1).
+  const { baseline } = readBareDirTouchesBaseline(root);
   for (const f of files) {
     const text = fs.readFileSync(path.join(root, f), "utf8");
-    const { violations } = scanTaskText(text, f);
+    const { violations } = scanTaskText(text, f, { bareDirTouchesBaseline: baseline, root });
     assert.deepEqual(violations, [], `expected ${f} to have zero violations, got: ${JSON.stringify(violations)}`);
   }
 });
 
-} // end governance group

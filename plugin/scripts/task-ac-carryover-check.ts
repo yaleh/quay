@@ -50,24 +50,22 @@
 //   node --no-warnings --experimental-strip-types plugin/scripts/task-ac-carryover-check.ts --root . --json
 //   node --no-warnings --experimental-strip-types plugin/scripts/task-ac-carryover-check.ts --root . --write-ratchet
 //   scripts/test.sh plugin/test/task-ac-carryover-check.test.mjs
+//
+// --no-block (gap-task-file-static-syntax-should-not-block-product-verification, option ①): the
+// verification-round path. A NEW unowned AC is REPORTED and recorded in the grow-only ledger
+// (.quay/task-file-violation-ledger.jsonl, shared with task-contract-check) but NEVER sets red —
+// task-file syntax must not stop the product-verification round. The DEFAULT mode (no --no-block)
+// keeps the shrink-only ratchet blocking behavior (maintenance / mutation tests).
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+import { recordNoBlockLedger } from "./task-contract-check.ts";
+import { TASK_STATUS } from "./task-status.ts";
 
-// ── Workspace-root discovery (same walk as task-contract-check) ────────────────────────────────────
-export function findWorkspaceRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 12; i++) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
-}
 
 // ── AC box parsing ─────────────────────────────────────────────────────────────────────────────────
 // One `- [x]/[ ] AC<n>: ...` line → { id, checked }. `AC<n>` ids are the only ids a `## Carries`
@@ -184,7 +182,7 @@ export function scanStore({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), f
   const unnamed = [];
   for (const [id, raw] of texts) {
     const status = (raw.match(/^status:\s*(\S+)/m) || [])[1];
-    if (status !== "done") continue;
+    if (status !== TASK_STATUS.DONE) continue;
     const acSection = extractSection(raw, "Acceptance Criteria");
     const unchecked = uncheckedAcIds(acSection);
     if (unchecked.length === 0) {
@@ -281,7 +279,7 @@ export function formatJsonReport(scan, ratchet, wsRoot, subset) {
   }, null, 2) + "\n";
 }
 
-export function formatTextReport(scan, { baselineCount, newOnes = [], growth = false, subset = false }) {
+export function formatTextReport(scan, { baselineCount, newOnes = [], growth = false, subset = false, noBlock = false }) {
   const unowned = scan.blocked.reduce((n, b) => n + b.missing.length, 0);
   let out = "";
   if (scan.blocked.length === 0) {
@@ -307,21 +305,30 @@ export function formatTextReport(scan, { baselineCount, newOnes = [], growth = f
     }
   }
   if (baselineCount !== null) {
-    out += `ratchet ceiling: ${baselineCount}; new since baseline: ${newOnes.length}${newOnes.length ? ` (${newOnes.join(", ")})` : ""}\n`;
+    // --no-block wording avoids the full-suite-runner's `/new since baseline:\s*[1-9]\d*/` static-check
+    // failure marker — a non-blocking run must never flip the verification round red.
+    out += noBlock
+      ? `ratchet ceiling: ${baselineCount}; recorded (non-blocking): ${newOnes.length}${newOnes.length ? ` (${newOnes.join(", ")})` : ""}\n`
+      : `ratchet ceiling: ${baselineCount}; new since baseline: ${newOnes.length}${newOnes.length ? ` (${newOnes.join(", ")})` : ""}\n`;
   }
   if (subset) out += "subset scan (<task-file> args) — ratchet comparison skipped (it is only meaningful over the full store)\n";
   if (growth) out += "ratchet BREACH: a new unowned AC appeared that is not baselined — a done task closed with uncarried ACs\n";
+  if (noBlock && newOnes.length > 0) {
+    out += `recorded (non-blocking, grow-only ledger): ${newOnes.length} new unowned AC(s) — task-file syntax does NOT block the verification round (gap-task-file-static-syntax-should-not-block-product-verification)\n`;
+  }
   return out;
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 export function runCli(argv) {
   const args = argv.slice(2); // skip node + script path (process.argv[0..1])
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node task-ac-carryover-check.ts [--root <dir>] [--json] [--write-ratchet] [--allow-growth] [--reset-baseline] [--no-block] [<task-file> ...]");
   let root = null;
   let json = false;
   let writeRatchetFlag = false;
   let allowGrowth = false;
   let resetBaseline = false;
+  let noBlock = false;
   const files = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -330,6 +337,7 @@ export function runCli(argv) {
     else if (a === "--write-ratchet") writeRatchetFlag = true;
     else if (a === "--allow-growth") allowGrowth = true;
     else if (a === "--reset-baseline") resetBaseline = true;
+    else if (a === "--no-block") noBlock = true;
     else if (a.startsWith("-")) { console.error(`task-ac-carryover-check: unknown flag: ${a}`); process.exit(2); }
     else files.push(a);
   }
@@ -337,7 +345,7 @@ export function runCli(argv) {
     console.error("task-ac-carryover-check: --reset-baseline requires --write-ratchet");
     process.exit(2);
   }
-  const wsRoot = root ? path.resolve(root) : findWorkspaceRoot();
+  const wsRoot = root ? path.resolve(root) : repoRoot();
   const tasksDir = path.join(wsRoot, "tasks");
   const subset = files.length > 0;
   const scanFiles = files.map((f) => path.resolve(wsRoot, f));
@@ -356,10 +364,21 @@ export function runCli(argv) {
   const firstBaseline = baselineCount === null;
   const newOnes = currentEntries.filter((e) => !baseline.has(e));
   const resolved = !subset && baseline.size > 0 ? [...baseline].filter((e) => !currentEntries.includes(e)).sort() : [];
-  const growth = !subset && !firstBaseline && newOnes.length > 0 && !allowGrowth && !resetBaseline;
+  // --no-block (option ①): a NEW unowned AC is RECORDED (grow-only ledger) but never blocks — task-file
+  // syntax must not stop the product-verification round.
+  const growth = !noBlock && !subset && !firstBaseline && newOnes.length > 0 && !allowGrowth && !resetBaseline;
+
+  // Grow-only ledger write (best-effort — a ledger I/O failure must never turn a deliberately
+  // non-blocking check red).
+  let ledger = null;
+  if (noBlock && newOnes.length > 0) {
+    try { ledger = recordNoBlockLedger(wsRoot, "task-ac-carryover-check", newOnes); }
+    catch (e) { console.error(`task-ac-carryover-check: ledger write failed (non-blocking, ignored): ${e?.message ?? e}`); }
+  }
 
   let writeOutcome = null;
-  if (writeRatchetFlag && !growth && !subset) {
+  // --no-block never mutates the shrink-only baseline (the grow-only ledger is the accounting).
+  if (writeRatchetFlag && !growth && !subset && !noBlock) {
     writeOutcome = writeBaseline(wsRoot, currentEntries, { reset: resetBaseline });
     if (!writeOutcome.ok) {
       const report = {
@@ -373,18 +392,19 @@ export function runCli(argv) {
     }
   }
 
-  const ratchet = { baselineCount, currentCount: currentEntries.length, newViolations: newOnes, resolved, growth, writeOutcome };
+  const ratchet = { baselineCount, currentCount: currentEntries.length, newViolations: newOnes, resolved, growth, writeOutcome, ...(noBlock ? { ledger } : {}) };
   if (json) {
     process.stdout.write(formatJsonReport(scan, ratchet, wsRoot, subset));
   } else {
-    process.stdout.write(formatTextReport(scan, { baselineCount, newOnes, growth, subset }));
+    process.stdout.write(formatTextReport(scan, { baselineCount, newOnes, growth, subset, noBlock }));
     if (resolved.length > 0) {
       process.stdout.write(`resolved: ${resolved.length}${resolved.length ? ` (${resolved.join(", ")})` : ""}\n`);
     }
   }
+  // growth is already forced false under --no-block (the ledger is the accounting, never the gate).
   return growth ? 1 : 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "task-ac-carryover-check")) {
   process.exit(runCli(process.argv));
 }

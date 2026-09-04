@@ -96,12 +96,60 @@
 // shared workspace/config.yml/task store), Phase 2 concurrent (7 isolated
 // blocks), Phase 3 serial (blocks 14-16, 23-25, shared workspace read-only).
 // Output prefixing via makeAssert(tag) for concurrent blocks.
+//
+// gap-cli-import-refactor-run-shell-architecture (2026-08-12): command-behavior
+// blocks now call run() IN-PROCESS (runImport — import of ../bin/quay.ts with
+// ctx.capture) instead of spawning the CLI, per the run()/shell architecture
+// (core: run(argv, ctx) → { code, stdout, stderr }; shell: thin argv→run→exit).
+// The execve floor dropped 285 → 205 (-28%) and this file's wall clock dropped
+// ~57.6s → ~28.3s (measured, not inferred). Blocks that stay SPAWNED are the
+// shell-contract / boundary surface: live-GitHub (8, 10, 11), serve (9),
+// broken-provider startup failure (12), and the 7 CONCURRENT own-workspace
+// blocks (13, 17-22) — run() mutates process-level cwd/env/stdout during the
+// call, so in-process calls must be serial, never Promise.all'd.
+//
+// ── SHELL-CONTRACT DERIVED-TEST MANIFEST (AC3) ─────────────────────────────
+// Shell contracts are the things that CANNOT be import-tested — they are about
+// the real process boundary. Each is either covered by a REAL spawn here or
+// explicitly documented as "no distinct branch" (measured, not assumed):
+//   D1 --version/-V argv passthrough + exit 0   → block 26 golden-replay spawn side
+//   D2 shebang line                             → block 27 (read-only check of bin/quay.ts)
+//   D3 stdin pipe (--body-file -)               → documented: exercising it via
+//        runImport would read the TEST's stdin; it stays a spawn concern
+//   D4 TTY detection                            → DOCUMENTED: bin/quay.ts and
+//        src/*.ts contain zero isTTY branches, so there is no distinct TTY
+//        behavior to derive; the contract is "no TTY special-casing"
+//   D5 signal (SIGINT/SIGTERM)                  → DOCUMENTED: no custom handler;
+//        process exits with Node's default signal disposition
+//   D6 exit-code mapping (run() code → process.exitCode) → block 26 spawn side
+//
+// ── ZERO-COVERAGE PURE-HELPER TESTS (AC2) ─────────────────────────────────
+// block 27 import-calls the six exported helpers from bin/quay.ts directly
+// (parseVerbless / resolveJsonFlag / resolvePageSize / relativeTimeCli /
+// parseFlags / stripHeadings) — zero derivation, closing the 4-name coverage
+// gap the Proposal measured.
 
 import { execFile, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+// gap-cli-import-refactor-run-shell-architecture: command-behavior coverage calls
+// run() IN-PROCESS (import from ../bin/quay.ts, ctx.capture=true) instead of
+// spawning the CLI — the same args/opts shape as the spawn helper below, but
+// zero process derivation for the coreBin layer. Shell-contract concerns
+// (argv passthrough through the real process boundary, shebang, signal, stdin
+// pipe, TTY detection, process exit semantics) REMAIN in the spawn path — the
+// explicit shell-contract list is in this file's header + cli-run.test.mjs.
+import {
+  run as runCli,
+  parseFlags,
+  parseVerbless,
+  resolveJsonFlag,
+  resolvePageSize,
+  relativeTimeCli,
+  stripHeadings,
+} from "../bin/quay.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -117,6 +165,19 @@ const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
+
+// ADR-019 (M173/DIR-109) in-file skip declaration, extended to this file's live-GitHub blocks
+// (tests 8, 10, 11). gap-release-postinstall-fallback-breaks-windows-sea-build (AC4): the release
+// job's "Run tests" step set GH_TOKEN, which ENABLED these live blocks against the real
+// yaleh/quay issue store — and their assertions drift with that store's current state (e.g. gh-3's
+// status label), so v0.4.0's release run failed on live-store drift that is unrelated to whether
+// the tagged commit's deterministic tests pass. Aligning with the three conformance files
+// (serve-github / provider-abi-conformance / cli-edit-parity-conformance): these blocks now run
+// ONLY with QUAY_TEST_LIVE_GITHUB=1. A release gate must verify the ARTIFACT, not re-verify the
+// live GitHub store's mutable state — so the release job does NOT set this env (and no longer
+// needs GH_TOKEN on its test step).
+const LIVE_GITHUB_ENV = "QUAY_TEST_LIVE_GITHUB";
+const liveGithubEnabled = process.env[LIVE_GITHUB_ENV] === "1";
 
 let failures = 0;
 let _lastAssertMs = 0; // AC1b assertion-gap timing (gap-suite-cost-model-is-wrong-optimizations-buy-nothing)
@@ -165,6 +226,13 @@ const AC_DOD_CHECKED =
 const AC_DOD_UNCHECKED =
   "## AC\n- [ ] a sufficiently long acceptance criterion line for the minimum-content check\n" +
   "## DoD\n- [ ] a sufficiently long definition-of-done line for the minimum-content check\n";
+// gap-both-gates-read-one-signal-so-done-costs-nothing: an UNCHECKED AC box no
+// longer fails author->ready (checked-state belongs to ready->done), so
+// AC_DOD_UNCHECKED is no longer a gate-FAILING fixture. A genuine author->ready
+// failure is an AC section with NO machine-checkable checkboxes at all.
+const AC_NO_CHECKBOX =
+  "## AC\nThis acceptance criteria section is written in prose only, with no machine-checkable checkbox lines at all, comfortably past forty non-whitespace characters.\n" +
+  "## DoD\n- [x] a sufficiently long definition-of-done line for the minimum-content check\n";
 
 function run(args, opts = {}) {
   return new Promise((resolve) => {
@@ -180,6 +248,20 @@ function run(args, opts = {}) {
       resolve({ status: err.status ?? 1, stdout: "", stderr: String(err) });
     });
   });
+}
+
+// gap-cli-import-refactor-run-shell-architecture (AC2/AC4): the import-call
+// sibling of the spawn `run()` above. Same (args, opts) contract — opts.cwd
+// and opts.env map onto run()'s ctx, capture:true returns { status, stdout,
+// stderr } identical in shape to the spawn helper. Used by the serial
+// command-behavior blocks; the shell-contract blocks (9 serve, live-github 8/
+// 10/11, broken-provider 12, and the concurrent 13/17-22) keep the spawn path.
+function runImport(args, opts = {}) {
+  return runCli(args, {
+    capture: true,
+    cwd: opts.cwd,
+    env: opts.env,
+  }).then((r) => ({ status: r.code, stdout: r.stdout, stderr: r.stderr }));
 }
 
 function runNative(args, opts = {}) {
@@ -236,7 +318,7 @@ async function main() {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envTasksDir },
   });
   execFileSync("node", [nativeBin, "task", "create", "CLI-2", "--title", "CLI test task two (fails gate)",
-    "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_UNCHECKED], {
+    "--status", "todo", "--body", VALID_SECTIONS + AC_NO_CHECKBOX], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envTasksDir },
   });
 
@@ -249,7 +331,7 @@ async function main() {
   //    correctly pointed the spawned quay-native mcp child at
   //    envTasksDir, not an empty/wrong directory.
   {
-    const r = await run(["task", "list", "--json"], spawnOpts);
+    const r = await runImport(["task", "list", "--json"], spawnOpts);
     assert(r.status === 0, "quay task list --json exits 0");
     let tasks;
     try {
@@ -266,14 +348,14 @@ async function main() {
 
   // 1b. Non-JSON fallback format (tab-separated id/status/role/title).
   {
-    const r = await run(["task", "list"], spawnOpts);
+    const r = await runImport(["task", "list"], spawnOpts);
     assert(r.status === 0, "quay task list (no --json) exits 0");
     assert(r.stdout.includes("CLI-1") && r.stdout.includes("\t"), "quay task list (no --json) emits tab-separated lines");
   }
 
   // 2. `quay task view <id> --json` — happy path.
   {
-    const r = await run(["task", "view", "CLI-1", "--json"], spawnOpts);
+    const r = await runImport(["task", "view", "CLI-1", "--json"], spawnOpts);
     assert(r.status === 0, "quay task view CLI-1 --json exits 0");
     const t = JSON.parse(r.stdout);
     assert(t.id === "CLI-1" && t.title === "CLI test task one", "quay task view --json returns the correct task");
@@ -281,14 +363,14 @@ async function main() {
 
   // 2b. "no such task" error path.
   {
-    const r = await run(["task", "view", "NOPE-999", "--json"], spawnOpts);
+    const r = await runImport(["task", "view", "NOPE-999", "--json"], spawnOpts);
     assert(r.status === 1, "quay task view <unknown id> exits 1");
     assert(r.stderr.includes("no such task"), "quay task view <unknown id> prints 'no such task' to stderr");
   }
 
   // 3. `quay task edit <id> --status ready --json` — happy path.
   {
-    const r = await run(["task", "edit", "CLI-1", "--status", "ready", "--json"], spawnOpts);
+    const r = await runImport(["task", "edit", "CLI-1", "--status", "ready", "--json"], spawnOpts);
     assert(r.status === 0, "quay task edit --status ready --json exits 0");
     const t = JSON.parse(r.stdout);
     assert(t.status === "ready", "quay task edit --status ready actually persists the new status");
@@ -299,7 +381,7 @@ async function main() {
   //     solely required; the guard now fires when NO patch-producing flag
   //     (nor --append-notes) is given at all.
   {
-    const r = await run(["task", "edit", "CLI-1", "--json"], spawnOpts);
+    const r = await runImport(["task", "edit", "CLI-1", "--json"], spawnOpts);
     assert(r.status === 1, "quay task edit with no patch flags exits 1");
     assert(
       r.stderr.includes("at least one of") && r.stderr.includes("--status"),
@@ -313,23 +395,26 @@ async function main() {
   //    provider-client.js's taskCheck() directly and never exercises this
   //    CLI-level exit-code-setting branch.
   {
-    const rOk = await run(["task", "check", "CLI-1", "--json"], spawnOpts);
+    const rOk = await runImport(["task", "check", "CLI-1", "--json"], spawnOpts);
     assert(rOk.status === 0, "quay task check <passing task> --json exits 0");
     const ok = JSON.parse(rOk.stdout);
     assert(ok.ok === true, "quay task check <passing task> reports ok:true");
 
-    const rFail = await run(["task", "check", "CLI-2", "--json"], spawnOpts);
+    const rFail = await runImport(["task", "check", "CLI-2", "--json"], spawnOpts);
     assert(rFail.status === 1, "quay task check <failing task> --json exits 1 (mirrors result.ok)");
     const fail = JSON.parse(rFail.stdout);
     assert(fail.ok === false, "quay task check <failing task> reports ok:false");
   }
 
   // 4b. M31-cli-gate-enforcement: `task edit <id> --status <x> --enforce-gate`.
-  //     CLI-2 (status todo, AC section present but UNCHECKED) is a real
+  //     CLI-2 (status todo, AC section with NO checkboxes) is a real
   //     gate-failing fixture against the native provider's own author->ready
   //     gate (store.js#check()) — `task check CLI-2` already asserts
   //     ok:false above (test 4), so `--enforce-gate` must refuse the SAME
   //     write for the SAME reason, by calling that exact same check.
+  //     (gap-both-gates-read-one-signal-so-done-costs-nothing: an unchecked
+  //     AC box no longer fails author->ready, so CLI-2 now fails via "AC
+  //     section has no checkboxes" instead.)
   //
   //     Decision (charter M31-cli-gate-enforcement, "Decision" section):
   //     default `task edit --status` remains UNGUARDED (git commit
@@ -341,31 +426,31 @@ async function main() {
   {
     // 4b-i. --enforce-gate refuses a gate-failing status transition: exit 1,
     //       no write performed, result.reason surfaced in the error message.
-    const rRefuse = await run(["task", "edit", "CLI-2", "--status", "ready", "--enforce-gate", "--json"], spawnOpts);
+    const rRefuse = await runImport(["task", "edit", "CLI-2", "--status", "ready", "--enforce-gate", "--json"], spawnOpts);
     assert(rRefuse.status === 1, "quay task edit CLI-2 --status ready --enforce-gate exits 1 (gate fails)");
     assert(
-      rRefuse.stderr.includes("AC checkboxes checked") || rRefuse.stderr.includes("checked"),
+      rRefuse.stderr.includes("checkboxes"),
       `quay task edit --enforce-gate refusal surfaces the gate's result.reason in the error message (got stderr: ${rRefuse.stderr.slice(0, 300)})`
     );
-    const viewAfterRefuse = await run(["task", "view", "CLI-2", "--json"], spawnOpts);
+    const viewAfterRefuse = await runImport(["task", "view", "CLI-2", "--json"], spawnOpts);
     const afterRefuse = JSON.parse(viewAfterRefuse.stdout);
     assert(afterRefuse.status === "todo", "quay task edit --enforce-gate refusal performs NO write — CLI-2 status unchanged (still todo)");
 
     // 4b-ii. WITHOUT --enforce-gate, the identical status transition against
     //        the SAME gate-failing fixture succeeds — current unguarded
     //        default behavior is unchanged (Done-when clause 3, zero regression).
-    const rUnguarded = await run(["task", "edit", "CLI-2", "--status", "ready", "--json"], spawnOpts);
+    const rUnguarded = await runImport(["task", "edit", "CLI-2", "--status", "ready", "--json"], spawnOpts);
     assert(rUnguarded.status === 0, "quay task edit CLI-2 --status ready (no --enforce-gate) still succeeds unguarded against the same gate-failing fixture (Done-when clause 3)");
     const unguarded = JSON.parse(rUnguarded.stdout);
     assert(unguarded.status === "ready", "quay task edit CLI-2 --status ready (no --enforce-gate) actually persists the new status");
 
     // Reset CLI-2 back to todo (still gate-failing) for the remaining checks.
-    await run(["task", "edit", "CLI-2", "--status", "todo"], spawnOpts);
+    await runImport(["task", "edit", "CLI-2", "--status", "todo"], spawnOpts);
 
     // 4b-iii. --enforce-gate succeeds identically to an unguarded write when
     //         the gate PASSES (Done-when clause 2) — use CLI-1, a passing
     //         fixture (AC fully checked), same exit code / output shape.
-    const rPass = await run(["task", "edit", "CLI-1", "--status", "todo", "--enforce-gate", "--json"], spawnOpts);
+    const rPass = await runImport(["task", "edit", "CLI-1", "--status", "todo", "--enforce-gate", "--json"], spawnOpts);
     assert(rPass.status === 0, "quay task edit CLI-1 --status todo --enforce-gate exits 0 when the gate passes");
     const passResult = JSON.parse(rPass.stdout);
     assert(passResult.status === "todo", "quay task edit --enforce-gate (gate passes) actually persists the new status, same output shape as unguarded");
@@ -377,14 +462,14 @@ async function main() {
     //        Verify it does NOT refuse even though CLI-2 (currently todo,
     //        gate-failing) is the target — because no status change is
     //        requested, the gate is never invoked.
-    const rLabelsOnly = await run(["task", "edit", "CLI-2", "--labels", "a,b", "--enforce-gate", "--json"], spawnOpts);
+    const rLabelsOnly = await runImport(["task", "edit", "CLI-2", "--labels", "a,b", "--enforce-gate", "--json"], spawnOpts);
     assert(rLabelsOnly.status === 0, "quay task edit CLI-2 --labels a,b --enforce-gate (no --status field) succeeds as a no-op guard-check — Done-when clause 4, option (b)");
   }
 
   // 5. `quay action list <id> --json` — action_buttons filtered by
   //    whenStatus against the task's live status.
   {
-    const r = await run(["action", "list", "CLI-1", "--json"], spawnOpts);
+    const r = await runImport(["action", "list", "CLI-1", "--json"], spawnOpts);
     assert(r.status === 0, "quay action list CLI-1 --json exits 0");
     const buttons = JSON.parse(r.stdout);
     assert(
@@ -399,7 +484,7 @@ async function main() {
     execFileSync("node", [nativeBin, "task", "edit", "CLI-1", "--status", "done"], {
       env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envTasksDir },
     });
-    const r = await run(["action", "list", "CLI-1", "--json"], spawnOpts);
+    const r = await runImport(["action", "list", "CLI-1", "--json"], spawnOpts);
     assert(r.status === 0, "quay action list <done task> --json exits 0");
     const buttons = JSON.parse(r.stdout);
     assert(
@@ -416,7 +501,7 @@ async function main() {
   //    deliverTrigger() reached without throwing; JSON output carries the
   //    expected fields.
   {
-    const r = await run(["action", "run", "CLI-1", "advance", "--json"], spawnOpts);
+    const r = await runImport(["action", "run", "CLI-1", "advance", "--json"], spawnOpts);
     assert(r.status === 0, "quay action run CLI-1 advance --json exits 0");
     // printJson() is the last thing `action run` writes, but composePayload()'s
     // own console.log lines precede it on stdout — find the start of the
@@ -447,7 +532,7 @@ async function main() {
   //     is required (the throw happens before deliverTrigger(), entirely
   //     local, against the same fixture used throughout this file).
   {
-    const r = await run(["action", "run", "CLI-1", "bogus-action-id", "--json"], spawnOpts);
+    const r = await runImport(["action", "run", "CLI-1", "bogus-action-id", "--json"], spawnOpts);
     assert(r.status === 1, "quay action run <id> <unknown actionId> exits 1 (not a hang, not a silent success)");
     assert(
       r.stderr.includes("no such action button"),
@@ -458,9 +543,13 @@ async function main() {
 
   // 7. Unknown top-level command — usage fallback + exit 1.
   {
-    const r = await run(["bogus"], spawnOpts);
+    const r = await runImport(["bogus"], spawnOpts);
     assert(r.status === 1, "quay <unknown command> exits 1");
     assert(r.stderr.includes("usage:"), "quay <unknown command> prints the usage fallback to stderr");
+    // gap-quay-driver-missing-from-usage-line: `driver` is a real subcommand
+    // (AC139) but was missing from the fallback usage line — discoverable via
+    // `quay --help` yet invisible when a user runs `quay` bare or mistypes.
+    assert(r.stderr.includes("driver"), "quay <unknown command> usage fallback includes 'driver' (gap-quay-driver-missing-from-usage-line)");
   }
 
   // 8. QN-039 (iteration 29): resolveProviderEnv()'s absolute-path
@@ -476,7 +565,7 @@ async function main() {
   //    so a genuinely successful, non-empty `task list` result is itself
   //    live proof the passthrough branch works, not an assumption. This
   //    makes a real (read-only) `gh api` call against yaleh/quay.
-  {
+  if (liveGithubEnabled) {
     fs.writeFileSync(
       path.join(workspaceRoot, ".quay", "config.yml"),
       [
@@ -521,6 +610,8 @@ async function main() {
         "",
       ].join("\n")
     );
+  } else {
+    console.log("SKIP: test 8 (live-GitHub `task list --provider github`) — opt in with QUAY_TEST_LIVE_GITHUB=1");
   }
 
   // 9. QN-039 (iteration 29): `quay serve`'s own CLI dispatch branch
@@ -564,7 +655,25 @@ async function main() {
         "",
       ].join("\n")
     );
-    const port = 41800 + (process.pid % 500);
+    // Port-collision fix (gap-serve-family-port-collision): the previous
+    // pid-derived port (base 41800 plus pid-modulo-a-range) overlapped other
+    // serve-family tests' ranges (e.g. serve-adversarial-eval [41720,42239])
+    // and collided deterministically under load. This test's PURPOSE is to
+    // verify an explicit --port is honored, so it must keep passing a real
+    // port number to the CLI (port 0 would forfeit the "exact port passed on
+    // the command line" contract). We obtain a genuinely-free number by
+    // probing with an ephemeral bind (bind 0 → read → close) instead of a
+    // pid-derived guess. The close→child-bind window is a tiny
+    // non-deterministic residual (TOCTOU) — vastly safer than the old
+    // deterministic overlap.
+    const port = await new Promise((resolve, reject) => {
+      const probe = http.createServer();
+      probe.once("error", reject);
+      probe.listen(0, "127.0.0.1", () => {
+        const p = probe.address().port;
+        probe.close(() => resolve(p));
+      });
+    });
     const child = (await import("node:child_process")).spawn(
       "node", [coreBin, "serve", "--port", String(port)],
       { cwd: serveWorkspaceRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
@@ -590,7 +699,7 @@ async function main() {
         await new Promise((r) => setTimeout(r, 100));
         try {
           const res = await new Promise((resolve, reject) => {
-            http.get({ host: "127.0.0.1", port, path: "/" }, resolve).on("error", reject);
+            http.get({ host: "127.0.0.1", port, path: "/tasks" }, resolve).on("error", reject);
           });
           if (res.statusCode === 200) up = true;
         } catch {
@@ -600,13 +709,13 @@ async function main() {
       assert(up, `quay serve --port <n>, spawned as a real subprocess, becomes reachable on the exact port passed on the command line (proves the argv.slice(3) re-parse works, not the 4173 default)${up ? "" : ` -- stdout: ${JSON.stringify(stdout.slice(0, 500))}, stderr: ${JSON.stringify(stderr.slice(0, 500))}, exitCode: ${child.exitCode}`}`);
       if (up) {
         const body = await new Promise((resolve, reject) => {
-          http.get({ host: "127.0.0.1", port, path: "/" }, (res) => {
+          http.get({ host: "127.0.0.1", port, path: "/tasks" }, (res) => {
             let b = "";
             res.on("data", (c) => (b += c));
             res.on("end", () => resolve(b));
           }).on("error", reject);
         });
-        assert(body.includes("CLI-1"), "quay serve (spawned as a subprocess) renders the seeded task in its GET / body, proving the cmd === 'serve' dispatch branch genuinely ran startServer()");
+        assert(body.includes("CLI-1"), "quay serve (spawned as a subprocess) renders the seeded task in its GET /tasks body, proving the cmd === 'serve' dispatch branch genuinely ran startServer()");
       }
     } finally {
       child.kill();
@@ -642,7 +751,7 @@ async function main() {
   //     status label ever changes, this assertion (not the harness) would
   //     need to be revisited, exactly as test 8's own live-repo dependency
   //     already requires.
-  {
+  if (liveGithubEnabled) {
     fs.writeFileSync(
       path.join(workspaceRoot, ".quay", "config.yml"),
       [
@@ -718,6 +827,8 @@ async function main() {
       ].join("\n")
     );
     fs.rmSync(path.dirname(mockLogPath), { recursive: true, force: true });
+  } else {
+    console.log("SKIP: test 10 (live-GitHub `action run gh-3 --provider github`) — opt in with QUAY_TEST_LIVE_GITHUB=1");
   }
 
   // 11. Iteration 55: a systematic sweep of every Provider-parameterized
@@ -758,7 +869,7 @@ async function main() {
   //     that reasoning applies identically at the Core CLI dispatch layer,
   //     so `task edit --provider github` remains a correctly-excluded,
   //     already-precedented gap, not an oversight.
-  {
+  if (liveGithubEnabled) {
     fs.writeFileSync(
       path.join(workspaceRoot, ".quay", "config.yml"),
       [
@@ -853,6 +964,8 @@ async function main() {
         "",
       ].join("\n")
     );
+  } else {
+    console.log("SKIP: test 11 (live-GitHub `task view/action list/task check` against gh-3) — opt in with QUAY_TEST_LIVE_GITHUB=1");
   }
 
   // 12. QN-062 (iteration 58): Provider-subprocess STARTUP-FAILURE
@@ -935,6 +1048,9 @@ async function main() {
   await block23();
   await block24(spawnOpts);
   await block25(spawnOpts);
+  await block26(spawnOpts);
+  await block27();
+  await block28();
 
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -1071,7 +1187,7 @@ async function block14(workspaceRoot) {
 
   // quay --help: exits 0, includes "Usage:" and key subcommands
   {
-    const r = await run(["--help"], helpOpts);
+    const r = await runImport(["--help"], helpOpts);
     assert(r.status === 0, "quay --help exits 0 (not an error)");
     assert(r.stdout.includes("Usage:"), "quay --help output includes 'Usage:'");
     assert(r.stdout.includes("task list"), "quay --help output includes 'task list'");
@@ -1112,18 +1228,49 @@ async function block14(workspaceRoot) {
       "quay --help documents the --gate <name> flag in a dedicated gate/gate-log options section"
     );
     assert(r.stdout.includes("--list"), "quay --help documents the --list flag for 'gate'");
+    // gap-docs-t5-help-missing-commands: the Usage synopsis must list EVERY dispatchable verb
+    // (adr / config validate / manager were missing — users could not discover them). AC1: the
+    // three previously-missing commands appear in the synopsis block. AC2: the synopsis verb set
+    // equals the quay.ts dispatch table's `cmd === "…"` set (mechanical, fails-closed).
+    const synopsisVerbs = synopsisBlock
+      .split("\n")
+      .map((l) => l.match(/^\s*quay ([a-z][a-z-]*)(?:\s|$)/))
+      .filter(Boolean)
+      .map((m) => m[1])
+      .filter((v) => v !== "--version" && v !== "--help" && v !== "-h");
+    for (const verb of ["adr", "config", "manager"]) {
+      assert(
+        synopsisVerbs.includes(verb),
+        `quay --help Usage synopsis includes the dispatchable verb '${verb}' (gap-docs-t5-help-missing-commands)`
+      );
+    }
+    assert(
+      r.stdout.includes("quay config validate"),
+      "quay --help Usage synopsis includes the 'quay config validate' line"
+    );
+    // The dispatch command set from packages/quay/bin/quay.ts (every `if (cmd === "…")` route).
+    const dispatchVerbs = [
+      "adr", "task", "action", "serve", "mcp", "init", "config", "gate", "gate-log",
+      "complete", "adjudicate", "promote", "retreat", "run", "migrate", "manager", "driver",
+    ];
+    const missing = dispatchVerbs.filter((v) => !synopsisVerbs.includes(v));
+    const extra = synopsisVerbs.filter((v) => !dispatchVerbs.includes(v));
+    assert(
+      missing.length === 0 && extra.length === 0,
+      `quay --help Usage synopsis verb set == dispatch table set (diff=0; missing: ${missing.join(",")}, extra: ${extra.join(",")})`
+    );
   }
 
   // quay -h: alias, also exits 0
   {
-    const r = await run(["-h"], helpOpts);
+    const r = await runImport(["-h"], helpOpts);
     assert(r.status === 0, "quay -h exits 0 (alias for --help)");
     assert(r.stdout.includes("Usage:"), "quay -h output includes 'Usage:'");
   }
 
   // quay task list --help: exits 0, includes task-list-specific flag docs
   {
-    const r = await run(["task", "list", "--help"], helpOpts);
+    const r = await runImport(["task", "list", "--help"], helpOpts);
     assert(r.status === 0, "quay task list --help exits 0");
     assert(r.stdout.includes("--prefix"), "quay task list --help output mentions --prefix");
     assert(r.stdout.includes("--status"), "quay task list --help output mentions --status");
@@ -1131,7 +1278,7 @@ async function block14(workspaceRoot) {
 
   // The existing "unknown command" test must still work (--help is not passed).
   {
-    const r = await run(["bogus-command-that-is-not-help"], helpOpts);
+    const r = await runImport(["bogus-command-that-is-not-help"], helpOpts);
     assert(r.status === 1, "quay <unknown-non-help command> still exits 1 (--help does not break fallback)");
     assert(r.stderr.includes("usage:"), "quay <unknown-non-help command> still prints usage to stderr");
   }
@@ -1143,7 +1290,7 @@ async function block14(workspaceRoot) {
 //     tests 1-12 (envTasksDir has CLI-1 seeded, which is enough to reach
 //     the prefix-guard code path).
 async function block15(spawnOpts) {
-  const r = await run(["task", "list", "--prefix"], spawnOpts);
+  const r = await runImport(["task", "list", "--prefix"], spawnOpts);
   assert(r.status === 1, "quay task list --prefix (no value) exits 1 (not a TypeError crash)");
   assert(
     r.stderr.includes("--prefix requires a value"),
@@ -1159,7 +1306,7 @@ async function block15(spawnOpts) {
 //     `quay action --help` must exit 0 and produce at least a stub line
 //     of output. Previously they exited 0 with no output (UQ-010).
 async function block16(spawnOpts) {
-  const r1 = await run(["serve", "--help"], spawnOpts);
+  const r1 = await runImport(["serve", "--help"], spawnOpts);
   assert(r1.status === 0, "quay serve --help exits 0");
   assert(
     r1.stdout.trim().length > 0,
@@ -1170,7 +1317,7 @@ async function block16(spawnOpts) {
     "quay serve --help output references serve or points to --help"
   );
 
-  const r2 = await run(["action", "--help"], spawnOpts);
+  const r2 = await runImport(["action", "--help"], spawnOpts);
   assert(r2.status === 0, "quay action --help exits 0");
   assert(
     r2.stdout.trim().length > 0,
@@ -1695,11 +1842,11 @@ async function block22() {
 //     exit 0. No provider/workspace needed — this must work from any cwd.
 async function block23() {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
-  const r1 = await run(["--version"]);
+  const r1 = await runImport(["--version"]);
   assert(r1.status === 0, "quay --version exits 0");
   assert(r1.stdout.trim() === pkg.version, `quay --version prints the real package.json version (got ${JSON.stringify(r1.stdout.trim())}, expected ${JSON.stringify(pkg.version)})`);
 
-  const r2 = await run(["-V"]);
+  const r2 = await runImport(["-V"]);
   assert(r2.status === 0, "quay -V exits 0");
   assert(r2.stdout.trim() === pkg.version, `quay -V prints the real package.json version (got ${JSON.stringify(r2.stdout.trim())}, expected ${JSON.stringify(pkg.version)})`);
 }
@@ -1707,8 +1854,8 @@ async function block23() {
 // 24. M08-merge-recover: --format json (CB-021) behaves identically to --json,
 //     across content, for both task list (array) and task view (object).
 async function block24(spawnOpts) {
-  const rJson = await run(["task", "list", "--json"], spawnOpts);
-  const rFormat = await run(["task", "list", "--format", "json"], spawnOpts);
+  const rJson = await runImport(["task", "list", "--json"], spawnOpts);
+  const rFormat = await runImport(["task", "list", "--format", "json"], spawnOpts);
   assert(rFormat.status === 0, "quay task list --format json exits 0");
   assert(rJson.status === 0 && rFormat.status === 0, "both --json and --format json exit 0");
   let jTasks, fTasks;
@@ -1720,8 +1867,8 @@ async function block24(spawnOpts) {
     "quay task list --format json output is identical in content to --json"
   );
 
-  const rViewJson = await run(["task", "view", "CLI-1", "--json"], spawnOpts);
-  const rViewFormat = await run(["task", "view", "CLI-1", "--format", "json"], spawnOpts);
+  const rViewJson = await runImport(["task", "view", "CLI-1", "--json"], spawnOpts);
+  const rViewFormat = await runImport(["task", "view", "CLI-1", "--format", "json"], spawnOpts);
   assert(rViewFormat.status === 0, "quay task view --format json exits 0");
   assert(
     rViewJson.stdout === rViewFormat.stdout,
@@ -1729,7 +1876,7 @@ async function block24(spawnOpts) {
   );
 
   // Invalid --format value is a hard usage error, not a silent human-readable fallback.
-  const rBadFormat = await run(["task", "list", "--format", "yaml"], spawnOpts);
+  const rBadFormat = await runImport(["task", "list", "--format", "yaml"], spawnOpts);
   assert(rBadFormat.status === 1, "quay task list --format yaml (unsupported value) exits 1");
   assert(
     rBadFormat.stderr.includes("--format"),
@@ -1742,11 +1889,11 @@ async function block24(spawnOpts) {
 //     Also UQ-048: invalid values (0, -1, abc) are a hard error.
 async function block25(spawnOpts) {
   // Baseline: workspace has exactly 2 tasks (CLI-1, CLI-2) at this point.
-  const rAllJson = await run(["task", "list", "--json"], spawnOpts);
+  const rAllJson = await runImport(["task", "list", "--json"], spawnOpts);
   const allTasks = JSON.parse(rAllJson.stdout);
   assert(allTasks.length === 2, `sanity: workspace has 2 tasks before --page-size test (got ${allTasks.length})`);
 
-  const rPage1 = await run(["task", "list", "--json", "--page-size", "1"], spawnOpts);
+  const rPage1 = await runImport(["task", "list", "--json", "--page-size", "1"], spawnOpts);
   assert(rPage1.status === 0, "quay task list --json --page-size 1 exits 0");
   const page1 = JSON.parse(rPage1.stdout);
   assert(
@@ -1755,23 +1902,195 @@ async function block25(spawnOpts) {
   );
   assert(page1[0].id === allTasks[0].id, "quay task list --json --page-size 1 returns the first task by current sort order");
 
-  const rTablePage1 = await run(["task", "list", "--page-size", "1"], spawnOpts);
+  const rTablePage1 = await runImport(["task", "list", "--page-size", "1"], spawnOpts);
   assert(rTablePage1.status === 0, "quay task list --page-size 1 (table mode) exits 0");
   const tableLines = rTablePage1.stdout.split("\n").filter((l) => l.includes("\t"));
   assert(tableLines.length === 1, `quay task list --page-size 1 (table mode) prints exactly 1 task row (got ${tableLines.length})`);
 
   // --page-size larger than the result set: returns everything, no error.
-  const rPageBig = await run(["task", "list", "--json", "--page-size", "1000"], spawnOpts);
+  const rPageBig = await runImport(["task", "list", "--json", "--page-size", "1000"], spawnOpts);
   assert(rPageBig.status === 0, "quay task list --json --page-size 1000 (larger than result set) exits 0");
   assert(JSON.parse(rPageBig.stdout).length === 2, "quay task list --json --page-size 1000 returns all tasks when page-size exceeds total count");
 
   // UQ-048: invalid --page-size values are a hard error, not a silent "show everything".
   for (const bad of ["0", "-1", "abc"]) {
-    const r = await run(["task", "list", "--page-size", bad], spawnOpts);
+    const r = await runImport(["task", "list", "--page-size", bad], spawnOpts);
     assert(r.status === 1, `quay task list --page-size ${bad} exits 1 (UQ-048 hard error, not silent fallback)`);
     assert(
       r.stderr.includes("--page-size"),
       `quay task list --page-size ${bad} prints a --page-size usage error to stderr (got: ${r.stderr.slice(0, 200)})`
     );
+  }
+}
+
+// 26. gap-cli-import-refactor-run-shell-architecture (AC4): GOLDEN-REPLAY
+// equivalence. Every command that the run()/shell refactor claims to cover
+// must behave byte-identically whether reached through a REAL spawned process
+// (`node <QUAY_CLI> ...` — the shell side) or through an import-call of run()
+// with ctx.capture (the core side). The spawn side of each pair is ALSO the
+// shell-contract derived coverage (D1/D6 --version argv passthrough + exit-code
+// mapping — see the shell-contract manifest in cli-run.test.mjs Part D).
+async function block26(spawnOpts) {
+  const pairs = [
+    ["--version", ["--version"]],
+    ["--help", ["--help"]],
+    ["unknown-command-xyz", ["unknown-command-xyz"]],
+    ["task list --json", ["task", "list", "--json"]],
+    ["task list --json --page-size 1", ["task", "list", "--json", "--page-size", "1"]],
+    ["config validate", ["config", "validate"]],
+    // gap-cli-import-command-migration-into-src (AC3): golden-replay for the
+    // command handlers migrated from bin/quay.ts's dispatch body into
+    // src/cli/<command>.ts. Read-only commands only — a mutating command
+    // (task create/edit, complete/promote/retreat, run, migrate, init) would
+    // make the second side of the spawn-vs-import pair see mutated state and
+    // falsely diverge; those handlers are covered by the serial command-
+    // behavior blocks (which exercise the SAME migrated handlers via
+    // runImport) plus the verbatim-move guarantee.
+    ["task view CLI-1", ["task", "view", "CLI-1"]],
+    ["task view CLI-1 --json", ["task", "view", "CLI-1", "--json"]],
+    ["task check CLI-1", ["task", "check", "CLI-1"]],
+    ["task check CLI-1 --json", ["task", "check", "CLI-1", "--json"]],
+    ["action list CLI-1 --json", ["action", "list", "CLI-1", "--json"]],
+    ["adr list", ["adr", "list"]],
+    ["gate --list", ["gate", "--list"]],
+    ["config validate --json", ["config", "validate", "--json"]],
+    ["gate-log CLI-1", ["gate-log", "CLI-1"]],
+    ["gate-log CLI-1 --json", ["gate-log", "CLI-1", "--json"]],
+  ];
+  for (const [name, args] of pairs) {
+    const [spawned, imported] = await Promise.all([
+      run(args, spawnOpts),
+      runImport(args, spawnOpts),
+    ]);
+    const ok =
+      spawned.status === imported.status &&
+      spawned.stdout === imported.stdout &&
+      spawned.stderr === imported.stderr;
+    assert(ok, `golden-replay "${name}": spawn vs run() byte-identical (status ${spawned.status}/${imported.status}, stdout ${spawned.stdout.length}/${imported.stdout.length}B, stderr ${spawned.stderr.length}/${imported.stderr.length}B)`);
+  }
+}
+
+// 27. gap-cli-import-refactor-run-shell-architecture (AC2/AC3): the six
+// exported pure helpers from bin/quay.ts, import-called directly (zero
+// derivation), closing the Proposal's measured zero-coverage gap
+// (parseVerbless / resolveJsonFlag / resolvePageSize / relativeTimeCli).
+// Also the D2 shebang-line shell-contract check.
+function block27() {
+  // parseVerbless — verb-less CLI arg ordering: a LEADING flag must not be
+  // misread as the task id (the bug this helper was written to close).
+  {
+    const { flags, id } = parseVerbless("--gate", ["dod", "ID-1"]);
+    assert(flags.gate === "dod", "parseVerbless recovers a leading --gate flag value");
+    assert(id === "ID-1", "parseVerbless recovers the positional task id after a leading flag");
+  }
+  {
+    const { flags, id } = parseVerbless("--gate", []);
+    assert(flags.gate === true, "parseVerbless: a bare leading boolean flag parses to true");
+    assert(id === undefined, "parseVerbless: no positional → id undefined (caller emits usage error)");
+  }
+  {
+    const { id } = parseVerbless(undefined, ["ID-9"]);
+    assert(id === "ID-9", "parseVerbless: id-first (no leading flag) still recovers the id");
+  }
+
+  // resolveJsonFlag — --format json alias + invalid --format rejection.
+  assert(JSON.stringify(resolveJsonFlag({ json: true })) === '{"json":true}', "resolveJsonFlag: --json → { json: true }");
+  assert(JSON.stringify(resolveJsonFlag({ format: "json" })) === '{"json":true}', "resolveJsonFlag: --format json → { json: true }");
+  assert(JSON.stringify(resolveJsonFlag({ format: "JSON" })) === '{"json":true}', "resolveJsonFlag: --format JSON (case-insensitive) → { json: true }");
+  assert(resolveJsonFlag({ format: "yaml" }) === null, "resolveJsonFlag: --format yaml → null (invalid value, caller exits 1)");
+  assert(JSON.stringify(resolveJsonFlag({})) === '{"json":false}', "resolveJsonFlag: no flags → { json: false }");
+
+  // resolvePageSize — shared --page-size parser.
+  assert(resolvePageSize({}).pageSize === null && resolvePageSize({}).error === null, "resolvePageSize: absent → no limit");
+  assert(resolvePageSize({ "page-size": "5" }).pageSize === 5, "resolvePageSize: valid positive integer");
+  for (const bad of ["0", "-1", "abc", "1.5"]) {
+    const r = resolvePageSize({ "page-size": bad });
+    assert(r.pageSize === null && r.error.includes("--page-size"), `resolvePageSize: invalid ${JSON.stringify(bad)} → hard error`);
+  }
+
+  // relativeTimeCli — CLI timestamp column.
+  const nowStr = relativeTimeCli(Date.now());
+  assert(nowStr === "just now" || /^\d+s ago$/.test(nowStr), "relativeTimeCli: now → just now / seconds");
+  assert(relativeTimeCli(Date.now() - 30_000) === "30s ago", "relativeTimeCli: 30s ago");
+  assert(relativeTimeCli(Date.now() - 3_000_000) === "50m ago", "relativeTimeCli: 50m ago");
+  assert(relativeTimeCli(Date.now() - 3_600_000) === "1h ago", "relativeTimeCli: exactly 1h → hours bucket");
+  assert(relativeTimeCli(Date.now() - 86_400_000) === "1d ago", "relativeTimeCli: 1d ago");
+  assert(relativeTimeCli(Date.now() + 5_000) === "just now", "relativeTimeCli: future → just now (clamped)");
+
+  // parseFlags / stripHeadings — the shared helpers run()'s dispatch relies on.
+  {
+    const { flags, positional } = parseFlags(["--label", "a", "--label", "b", "pos"]);
+    assert(JSON.stringify(flags.label) === '["a","b"]', "parseFlags: repeated --label collects to array (CB-013 fix)");
+    assert(positional[0] === "pos", "parseFlags: positional preserved");
+  }
+  assert(stripHeadings("## Proposal\nhello") === "hello", "stripHeadings: heading lines stripped for search index");
+
+  // D2 shebang-line shell-contract check (AC3).
+  const src = fs.readFileSync(path.join(__dirname, "..", "bin", "quay.ts"), "utf8");
+  assert(src.startsWith("#!/usr/bin/env node"), "D2: bin/quay.ts shebang line is #!/usr/bin/env node");
+}
+
+// 28. gap-quay-usage-line-fallback-drift (AC2): the short fallback usage line in
+//     bin/quay.ts (`usage: quay <…>`) had no mechanical guard against drifting from
+//     the dispatch table — gap-quay-driver-missing-from-usage-line only patched
+//     `driver`, and four real commands/subcommands were still absent (adr / manager
+//     arm / action run / config check). This mirrors block14's --help set-equality
+//     test but for the fallback line: the EXPECTED command set is derived FROM the
+//     dispatch table itself (every `if (cmd === "…")` route + every `cmd && sub`
+//     route, parsed out of bin/quay.ts source), plus the two handlers whose
+//     subcommands live OUTSIDE the dispatch chain (config validate|check →
+//     src/cli/config.ts; manager start|adopt|arm → src/cli/manager.ts). A new
+//     command/subcommand added to the dispatch — or one removed but left in the
+//     line — without a matching usage-line update turns this RED, so the drift
+//     class is closed by construction rather than patched one string at a time.
+function block28() {
+  const src = fs.readFileSync(path.join(__dirname, "..", "bin", "quay.ts"), "utf8");
+
+  // Expected command set, derived mechanically from the dispatch table.
+  const dispatchTopLevel = [...src.matchAll(/if \(cmd === "([a-z][a-z-]*)"/g)].map((m) => m[1]);
+  const dispatchSubs = [...src.matchAll(/if \(cmd === "([a-z][a-z-]*)" && sub === "([a-z][a-z-]*)"/g)].map((m) => `${m[1]} ${m[2]}`);
+  // config/manager route their subcommands inside their handlers (src/cli/config.ts
+  // / src/cli/manager.ts), not via `cmd && sub` routes in quay.ts — so enumerate
+  // them here, the same list the fallback line is expected to carry.
+  const handlerSubs = ["config validate", "config check", "manager start", "manager adopt", "manager arm"];
+  const expected = new Set([...new Set(dispatchTopLevel), ...dispatchSubs, ...handlerSubs]);
+
+  // Actual command set, parsed out of the fallback usage line's <…> payload.
+  const usageMatch = src.match(/usage: quay <([^>]*)>/);
+  assert(usageMatch, "bin/quay.ts fallback usage line present (gap-quay-usage-line-fallback-drift)");
+  const tokens = usageMatch[1].split("|").map((t) => t.trim());
+  const actual = new Set();
+  // `task list|view|create|edit|check` carries bare subcommand tokens after the
+  // first (`task list`); every other enumerated subcommand is prefixed
+  // (`config validate`, `manager arm`, …). Track the bare-parent (only `task`)
+  // so a bare token is read as a sub of the right command, not a new top-level.
+  const taskSubs = dispatchSubs.filter((s) => s.startsWith("task ")).map((s) => s.slice(5));
+  let bareParent = null;
+  for (const tok of tokens) {
+    const parts = tok.split(/\s+/);
+    if (parts.length === 2) {
+      actual.add(tok);
+      actual.add(parts[0]);
+      bareParent = parts[0] === "task" ? parts[0] : null;
+    } else if (parts.length === 1) {
+      if (bareParent === "task" && taskSubs.includes(parts[0])) {
+        actual.add(`task ${parts[0]}`);
+      } else {
+        actual.add(parts[0]);
+        bareParent = parts[0];
+      }
+    }
+  }
+
+  const missing = [...expected].filter((v) => !actual.has(v));
+  const extra = [...actual].filter((v) => !expected.has(v));
+  assert(
+    missing.length === 0 && extra.length === 0,
+    `usage fallback command set == dispatch-table command set (missing: ${missing.join(",")}, extra: ${extra.join(",")}) (gap-quay-usage-line-fallback-drift)`
+  );
+
+  // AC1: the four gaps this task closes are literally present in the line.
+  for (const needle of ["adr", "manager arm", "action run", "config check"]) {
+    assert(usageMatch[1].includes(needle), `usage fallback line includes '${needle}' (gap-quay-usage-line-fallback-drift AC1)`);
   }
 }

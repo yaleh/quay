@@ -4,7 +4,7 @@ title: preflightMergedMarkdownClaims silently returns zero findings for a
   genuine mid-line-bulleted block naming fewer than 2 backtick identifiers --
   pre-existing, found incidentally during a 2026-07-31 adversarial review of two
   sibling false-positive fixes, unrelated to either
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -369,18 +369,18 @@ note, recorded in ## Proposal above, is the appropriate resolution.
 
 ## Acceptance Criteria
 
-- [ ] A real-incidence scan (similar to the sibling tasks' 495-task-file scan) establishes whether
+- [x] A real-incidence scan (similar to the sibling tasks' 495-task-file scan) establishes whether
   this shape occurs in this repo's real task files today, to inform severity/priority.
-- [ ] Either: a fix lands extending coverage to this shape (with regression tests, following the
+- [x] Either: a fix lands extending coverage to this shape (with regression tests, following the
   round-3 "downgrade never fully suppresses" principle), OR an explicit, reasoned accepted-risk
   note is recorded here explaining why the current behavior is correct/acceptable as designed.
-- [ ] No regression: the full `prepare-admission-check.test.mjs` suite (both mirrors) stays green.
+- [x] No regression: the full `prepare-admission-check.test.mjs` suite (both mirrors) stays green.
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on `master` under human-steered discipline, OR closed as an explicit accepted-risk
+- [x] Landed on `master` under human-steered discipline, OR closed as an explicit accepted-risk
   decision with documented reasoning — this task's own AC #1 determines which outcome is
   appropriate.
 
@@ -392,3 +392,41 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 - plugin/test/prepare-admission-check.test.mjs
 - tasks/gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss.md
 - docs/plans/M247-gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss.md
+
+## Execution record
+
+- **Milestone:** M247 — `preflightMergedMarkdownClaims` low-identifier-count silent miss
+  (accepted-risk resolution, documentation-only deliverable).
+- **Iteration count:** 1 Build pass (no code changes made — the accepted-risk posture recorded in
+  `## Proposal` is the deliverable) + 1 verification pass covering the plan's Phase A stages.
+- **Outcome:** Closed as an explicit accepted-risk decision with documented reasoning. The
+  `<2`-identifier silent fall-through in `preflightMergedMarkdownClaims` is intentional and
+  correct per the detector's own stated purpose (header comment: detecting blocks that cram "two
+  or more distinct wiring claims onto one line" — a definitional lower bound of 2 identifiers).
+  The real-incidence scan found 0 genuine crammed-claims cases with <2 identifiers.
+- **Verification performed (plan Phase A, all three stages):**
+  - Stage 1 (real-incidence scan): scan reproduced from the detector's own
+    `extractSection`/`splitSentences`/`_MID_BULLET_RE` + code-span exclusion logic across all 675
+    task files under `tasks/`. Result: **0 genuine cases** with <2 identifiers. The 5 raw regex
+    hits are all non-genuine: three are prose math/table patterns (`1085 total - 410 lines`,
+    `| - --json`, `N * 50`) that are ASCII dash/asterisk in prose, not bullet markers; two are
+    this task's own self-referential examples (the motivating `FooModule` + `- also` construct from
+    the Finding section and the `Date.now()` example from the Alternatives section) constructed in
+    this task's Proposal/Finding, not in any production task body.
+  - Stage 2 (structural review): `preflightMergedMarkdownClaims`'s dispatch ladder at lines
+    573-580 (current file, byte-identical both mirrors) confirmed — `if (identifiers.size >= 4 &&
+    !allLookLikeProseDash)` then `else if (identifiers.size >= 2)`, no branch for `< 2`;
+    `worstIdentifierCount` stays 0 and `anyAmbiguous` stays false, so `return null` (line 592)
+    fires. The header comment (lines 435-441) grounds the definitional lower bound of 2.
+  - Stage 3 (test suite regression + mirror identity): both mirrors pass **83/83 tests, 0 fail,
+    0 skipped** (`scripts/test.sh experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs`
+    and `scripts/test.sh plugin/test/prepare-admission-check.test.mjs`, run with
+    `QUAY_TEST_SKIP_STATIC_CHECKS=1` because master-level static checks currently flag unrelated
+    in-flight sibling-task files, not this task's). `diff` confirms both script mirrors and both
+    test mirrors are byte-identical. `git diff` confirms zero changes to any `experiments/` or
+    `plugin/` source/test file (DD1 guardrail: no code changes).
+- **Realized Δv:** 0 (documentation-only; the accepted-risk decision record is the surface
+  improved, not product code).
+- **Commit SHA:** this Build commit on
+  `task/gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss` (landed on `master`
+  by the outer loop under human-steered discipline).

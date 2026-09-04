@@ -75,6 +75,13 @@ export const VALID_OUTCOMES = Object.freeze([
   // without a completion commit (start emitted, --task-end never reached with a terminal
   // outcome). Purely additive — SCHEMA_VERSION is NOT bumped.
   "abandoned",
+  // gap-over90-clock-measures-queue-time-not-work-time: a task whose open bracket was closed on a
+  // touches-overlap DEFER (the queue-time exclusion). NOT a terminal outcome — the task will be
+  // re-`--task-start`ed when work actually begins. aggregate() routes deferred pairs to a separate
+  // `deferred[]` array (never `tasks[]`), so a defer-close can never pollute throughput and never
+  // leaves a bracket in inProgress (OVER90's clock therefore excludes the queue segment). Purely
+  // additive — SCHEMA_VERSION is NOT bumped.
+  "deferred",
 ]);
 
 /** Valid wait-reason values. */
@@ -89,6 +96,20 @@ export const VALID_ISOLATION_MODES = Object.freeze(["worktree"]);
 
 /** Valid dispatch-mode values. */
 export const VALID_DISPATCH_MODES = Object.freeze(["serial", "concurrent"]);
+
+/** Fast-mode task-lifecycle `eventKind` values (the A1b extra field distinguishes start/end, and
+ *  now the impl-complete boundary). `impl-complete` is the THIRD task-lifecycle event
+ *  (gap-inflight-states-missing-impl-complete-event): its PRIMARY writer is the Build subagent's
+ *  completion (gap-impl-complete-event-written-by-fan-in-not-build), with fan-in step 4.4 re-invoking
+ *  it as an idempotent backstop before land. It splits the start→end span into start→impl-complete
+ *  (implementing) and impl-complete→end (awaiting-land). `blocked` is the separate blocked-wait
+ *  marker written by inner-blocked-signal.ts — NOT a task-lifecycle kind. Purely additive —
+ *  SCHEMA_VERSION is NOT bumped (M207 additive-growth precedent; eventKind is an extra field, never
+ *  validated). */
+export const VALID_EVENT_KINDS = Object.freeze(["start", "end", "impl-complete", "blocked"]);
+
+/** The single `eventKind` value marking the impl-complete boundary — see VALID_EVENT_KINDS. */
+export const IMPL_COMPLETE_EVENT_KIND = "impl-complete";
 
 /** Required field names for a v1 StageEvent. */
 export const REQUIRED_FIELDS = Object.freeze([
@@ -114,7 +135,7 @@ export const REQUIRED_FIELDS = Object.freeze([
   "recordedAtMs",
 ]);
 
-/** @typedef {"done"|"needs-human"|"revision-needed"|"skipped"|"error"|"abandoned"|null} Outcome */
+/** @typedef {"done"|"needs-human"|"revision-needed"|"skipped"|"error"|"abandoned"|"deferred"|null} Outcome */
 /** @typedef {"admission-contention"|"cache-hit"|"prepared-blocked"|null} WaitReason */
 /** @typedef {"worktree"|null} IsolationMode */
 /** @typedef {"serial"|"concurrent"|null} DispatchMode */
@@ -540,6 +561,15 @@ export function selftest() {
     check(`dispatchMode-${dm}`, r.ok, `ok=${r.ok}`);
   }
 
+  // ── impl-complete eventKind (gap-inflight-states-missing-impl-complete-event): the third
+  // task-lifecycle kind passes through as a forward-compat extra field and is declared in the
+  // single-source kind list ──
+  check("impl-complete-kind-declared", IMPL_COMPLETE_EVENT_KIND === "impl-complete" && VALID_EVENT_KINDS.includes(IMPL_COMPLETE_EVENT_KIND),
+    `VALID_EVENT_KINDS carries "${IMPL_COMPLETE_EVENT_KIND}"`);
+  const implCompleteEvent = { ...validEvent, eventKind: IMPL_COMPLETE_EVENT_KIND, timing: { queuedAtMs: null, startedAtMs: null, endedAtMs: null } };
+  const icr = validateEvent(implCompleteEvent);
+  check("impl-complete-event-validates", icr.ok, `ok=${icr.ok} (extra eventKind field, timing null)`);
+
   // ── null commandIdentity accepted ──
   const nullCmdResult = validateEvent({ ...validEvent, commandIdentity: null });
   check("commandIdentity-null", nullCmdResult.ok, `ok=${nullCmdResult.ok}`);
@@ -792,12 +822,12 @@ async function main(argv) {
 function isDirectEntry(argv1) {
   const entry = argv1 || process.argv[1];
   if (!entry) return false;
-  try {
-    return fs.realpathSync(path.resolve(entry)) === fileURLToPath(import.meta.url);
-  } catch (_) {
-    // Fallback: simple basename match
-    return entry.endsWith("workflow-event-schema.mjs");
-  }
+  // Bundler-friendly (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact):
+  // when this module is BUNDLED into another tool (fast-mode-telemetry, inner-blocked-signal),
+  // the inlined module shares the bundle's import.meta.url, so URL equality would falsely fire its
+  // CLI block. Basename match distinguishes running workflow-event-schema.mjs itself from being
+  // inlined into another entry.
+  return path.basename(entry) === "workflow-event-schema.mjs";
 }
 
 // Run CLI if invoked directly

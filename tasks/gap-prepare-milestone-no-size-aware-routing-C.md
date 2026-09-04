@@ -1,7 +1,7 @@
 ---
 id: gap-prepare-milestone-no-size-aware-routing-C
 title: "Fast-lane calibration + rollout: shadow-mode sampling and auto-enable gate"
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -9,6 +9,8 @@ labels:
   - human-steered
 extra:
   schema: v1
+  superseded: true
+  superseded_at: 2026-08-12
 ---
 
 **PAUSED (2026-08-02, prepare-pipeline reduction — `docs/analysis/prepare-pipeline-reduction-plan.md`):**
@@ -87,3 +89,7 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/scripts/proposal-convergence.ts`
 - `experiments/quay-perpetual-stream/test/*size-calibration*.test.mjs`
 - `plugin/test/*size-calibration*.test.mjs`
+
+## Superseded (2026-08-12)
+
+引用 ADR-022 已物理删除的机制（prepare-milestone.js 双镜像）：fast-lane 校准 / shadow-mode 采样 / auto-enable 闸均设计在经典 prepare-milestone pipeline 上，fast mode 无对应物。前提不存在，作废保留历史——不重开。

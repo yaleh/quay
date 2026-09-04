@@ -36,7 +36,7 @@ Download the latest release from the
 git clone https://github.com/yaleh/quay.git
 cd quay
 npm install
-node packages/quay/bin/quay.js --version
+node --experimental-strip-types packages/quay/bin/quay.ts --version
 ```
 
 ## Configuration
@@ -51,14 +51,14 @@ providers:
     enabled: true
     path: "./packages/quay-native"
     tasks_dir: "./tasks"
-    mcp_entry: ["node", "./bin/quay-native.js", "mcp"]
+    mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]
     env:
       QUAY_NATIVE_TASKS_DIR: "./tasks"
 
   github:
     enabled: false                       # native is the default; select explicitly via --provider github
     path: "./packages/quay-github"
-    mcp_entry: ["node", "./bin/quay-github.js", "mcp"]
+    mcp_entry: ["node", "./bin/quay-github.ts", "mcp"]
     env:
       QUAY_GITHUB_REPO: "yaleh/quay"     # owner/repo this Provider reads issues from
 ```
@@ -86,9 +86,9 @@ quay action run gh-3 advance --provider github
 Prints the real installed package version and exits 0:
 
 ```
-$ node packages/quay/bin/quay.js --version
+$ node --experimental-strip-types packages/quay/bin/quay.ts --version
 0.3.4
-$ node packages/quay/bin/quay.js -V
+$ node --experimental-strip-types packages/quay/bin/quay.ts -V
 0.3.4
 ```
 
@@ -117,11 +117,11 @@ quay task list [--status <status>] [--label <label>] [--prefix <prefix>]
 - `--provider <id>` — select a specific provider instead of the default.
 
 ```
-$ node packages/quay/bin/quay.js task list --prefix QX --page-size 2
+$ node --experimental-strip-types packages/quay/bin/quay.ts task list --prefix QX --page-size 2
 QX-001	done	primitive	Wire task_write into quay-native CLI/MCP with full frontmatter patch semantics	...
 QX-002	done	primitive	Build the GitHub Provider (second real backend, proves ABI)	...
 
-$ node packages/quay/bin/quay.js task list --prefix QX --page-size 2 --format json
+$ node --experimental-strip-types packages/quay/bin/quay.ts task list --prefix QX --page-size 2 --format json
 [
   { "id": "QX-001", ... },
   { "id": "QX-002", ... }
@@ -131,11 +131,11 @@ $ node packages/quay/bin/quay.js task list --prefix QX --page-size 2 --format js
 ### `quay task view <task-id>` / `quay task edit <task-id> [flags]`
 
 ```
-$ node packages/quay/bin/quay.js task view QN-001
+$ node --experimental-strip-types packages/quay/bin/quay.ts task view QN-001
 QN-001: Wire task_write into quay-native CLI/MCP with full frontmatter patch semantics [done]
 ...
 
-$ node packages/quay/bin/quay.js task edit QN-001 --status done --json
+$ node --experimental-strip-types packages/quay/bin/quay.ts task edit QN-001 --status done --json
 { "id": "QN-001", "status": "done", ... }
 ```
 
@@ -166,13 +166,13 @@ At least one of `--title`/`--status`/`--body`/`--body-file`/`--labels`/`--extra`
 status-only restriction is lifted).
 
 ```
-$ node packages/quay/bin/quay.js task edit QN-001 --title "New title" --body-file notes.md --json
+$ node --experimental-strip-types packages/quay/bin/quay.ts task edit QN-001 --title "New title" --body-file notes.md --json
 { "id": "QN-001", "title": "New title", ... }
 
-$ echo "quick body via stdin" | node packages/quay/bin/quay.js task edit QN-001 --body-file - --json
+$ echo "quick body via stdin" | node --experimental-strip-types packages/quay/bin/quay.ts task edit QN-001 --body-file - --json
 { "id": "QN-001", ... }
 
-$ node packages/quay/bin/quay.js task edit QN-001 --append-notes "Follow-up: checked with team." --json
+$ node --experimental-strip-types packages/quay/bin/quay.ts task edit QN-001 --append-notes "Follow-up: checked with team." --json
 { "id": "QN-001", ... }
 ```
 
@@ -184,7 +184,7 @@ evidence), not merely that the checkboxes are ticked. Exit code mirrors the
 result (`0` = pass, `1` = fail).
 
 ```
-$ node packages/quay/bin/quay.js task check QN-001
+$ node --experimental-strip-types packages/quay/bin/quay.ts task check QN-001
 QN-001: PASS — terminal
 ```
 
@@ -195,10 +195,10 @@ QN-001: PASS — terminal
 the corresponding trigger (e.g. to invoke a Skill).
 
 ```
-$ node packages/quay/bin/quay.js action list QN-001
+$ node --experimental-strip-types packages/quay/bin/quay.ts action list QN-001
 advance	Advance
 
-$ node packages/quay/bin/quay.js action run QN-001 advance
+$ node --experimental-strip-types packages/quay/bin/quay.ts action run QN-001 advance
 [quay action run] composed trigger for QN-001 (status=ready, skill=quay:execute):
   ...
 ```
@@ -233,14 +233,14 @@ Runs a named gate check against `<task-id>` and appends a GateEvent (see
   workspace instead of running one.
 
 ```
-$ node packages/quay/bin/quay.js gate --list
+$ node --experimental-strip-types packages/quay/bin/quay.ts gate --list
 dod
 acceptance
 
-$ node packages/quay/bin/quay.js task edit DEMO-1 --acceptance true --json
+$ node --experimental-strip-types packages/quay/bin/quay.ts task edit DEMO-1 --acceptance true --json
 { "id": "DEMO-1", "extra": { "acceptance": "true" }, ... }
 
-$ node packages/quay/bin/quay.js gate DEMO-1
+$ node --experimental-strip-types packages/quay/bin/quay.ts gate DEMO-1
 PASS
 ```
 
@@ -255,10 +255,10 @@ the raw GateEvent array. `--file <log-path>` overrides the log path (default
 `<workspaceRoot>/.quay/gate-events.jsonl`).
 
 ```
-$ node packages/quay/bin/quay.js gate-log DEMO-1
+$ node --experimental-strip-types packages/quay/bin/quay.ts gate-log DEMO-1
 2026-07-20T10:25:04.436Z acceptance pass
 
-$ node packages/quay/bin/quay.js gate-log DEMO-1 --json
+$ node --experimental-strip-types packages/quay/bin/quay.ts gate-log DEMO-1 --json
 [
   {
     "id": "0583c50b-...",
@@ -294,13 +294,13 @@ to write on FAIL.
   transition (e.g. retreating from `todo`) exits nonzero with a message.
 
 ```
-$ node packages/quay/bin/quay.js complete DEMO-1
+$ node --experimental-strip-types packages/quay/bin/quay.ts complete DEMO-1
 PASS — status=done
 
-$ node packages/quay/bin/quay.js retreat DEMO-1 --reason "re-open for a fix"
+$ node --experimental-strip-types packages/quay/bin/quay.ts retreat DEMO-1 --reason "re-open for a fix"
 RETREAT done → ready (re-open for a fix)
 
-$ node packages/quay/bin/quay.js promote DEMO-1
+$ node --experimental-strip-types packages/quay/bin/quay.ts promote DEMO-1
 PASS — status=done
 ```
 
@@ -319,18 +319,49 @@ drives each through `complete`, lowest task-id first (deterministic).
   (`maxIterations`) exits 1.
 
 ```
-$ node packages/quay/bin/quay.js run --once
+$ node --experimental-strip-types packages/quay/bin/quay.ts run --once
 FAIL — acceptance failed (exit 1)
 DEMO-2: FAIL — acceptance failed (exit 1) (left ready)
 ```
 
-### `quay serve [--port <port>]`
+### `quay serve [--host <host>] [--port <port>]`
 
-Starts the web UI (task list + detail pages). The list page supports the
-same filter/sort/search affordances as the CLI, plus a `?pageSize=` query
-param (10/20/50/100 selector rendered on the page) mirroring `--page-size`.
-An invalid `?pageSize=` value falls back to the default (20) with a visible
-warning banner, rather than silently showing everything.
+Starts the web UI. Defaults to binding `0.0.0.0` on port `4173`; pass
+`--host` to bind a specific interface (e.g. `127.0.0.1` for a localhost-only
+binding) and `--port` for a different port:
+
+```sh
+node --experimental-strip-types packages/quay/bin/quay.ts serve --host 0.0.0.0 --port 4173
+```
+
+The UI renders the full 15-view site nav — four groups — plus per-item
+detail pages:
+
+- **核心 (Core)** — `Dashboard` (the landing page; `/` redirects here),
+  `Tasks`.
+- **观测 (Observation)** — `Live`, `Board`, `System`, `Manager`.
+- **记录 (Records)** — `Journal`, `Git History`, `Tests`, `Sessions`.
+- **知识 (Knowledge)** — `ADRs`, `Goals`, `Docs`, `Architecture`.
+
+View highlights:
+
+- **Dashboard** — the landing page, with a task-ledger card and workspace
+  status.
+- **Tasks** — the task board. The list page supports the same
+  filter/sort/search affordances as the CLI, plus a `?pageSize=` query
+  param (10/20/50/100 selector rendered on the page) mirroring
+  `--page-size`. An invalid `?pageSize=` value falls back to the default
+  (20) with a visible warning banner, rather than silently showing
+  everything. Each task links to a `/task/<id>` detail page.
+- **Live** / **Board** / **System** / **Manager** — workspace observation:
+  live loop state, the intent/execution/landing inconsistency verdict,
+  resource-gate + process-budget system status, and the manager view.
+- **Journal** / **Git History** / **Tests** / **Sessions** — records: the
+  loop journal (escalations, tick log, recent commits), a server-rendered
+  commit-landing timeline SVG, the test-suite view, and session history.
+- **ADRs** / **Goals** / **Docs** / **Architecture** — knowledge: list +
+  detail pages for each kind (`/adr` + `/adr/<id>`, `/goal` + `/goal/<id>`,
+  `/doc` + `/doc/<id>`), plus the architecture view.
 
 ### `quay mcp`
 

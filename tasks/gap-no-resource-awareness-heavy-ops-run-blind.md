@@ -11,6 +11,22 @@ extra:
   schema: v1
 ---
 
+> **内层 fan-in 处理（2026-08-05 12:5xZ）：fail/timeout，needs-human。** 外层裁定：本任务 scoped 套件
+> 已中止（25 分钟超时；嵌套套件 2529066 内部又跑 40+ 文件 coverage，PSI 80+，疑似自指死锁）。agent
+> （a79458bb）首轮 scoped 已 42/42 过，但第二轮（加入 full-suite-runner.test.mjs 后）死锁。已停 agent。
+> **不重跑全 scoped**（外层指令）。
+>
+> **seam 调查（外层点名 RESOURCE_GATE_TEST_CPU_AVG10）**：seam **存在且两处测试都用对了**——
+> `resource-gate.test.mjs` 的 `runGate` 传 seam env；`full-suite-runner.test.mjs` AC3 用
+> `QUAY_TEST_SKIP_RESOURCE_GATE=0` + `RESOURCE_GATE_TEST_CPU_AVG10` 强制 WAIT/GO（确定性）。死锁
+> **不是「seam 没生效」**——是 `--for-task` 选中集把 gate 测试与 `full-suite-runner.test.mjs` 同跑，
+> 后者嵌套起真实 `test.sh`（40+ 文件 coverage）把 PSI 推到 80+；gate 的**非 CPU 检查**（mem/
+> node_procs/orphans）读真实值，负载下可能触 WAIT，测试等死。**建议**：gate 测试全量密封（全部检查
+> 都 seam 化）或调整选中集避免二者同跑。
+>
+> **保留**：worktree `/home/yale/work/quay-worktrees/resource-aware`（agent 未提交的 source-pin 测试
+> ——assert runner 查 gate / nproc 派生 / replace splice，价值保留，修复后可 reland）。
+
 **type:** execution
 
 ## Proposal
@@ -300,6 +316,12 @@ gate 只守默认全量集合（`is_default_set "product,engine"`）；`--group 
 - `docs/analysis/fast-mode-loop-tick.md`：同样改为调用 gate；并更新「默认 --test-concurrency=8
   （设计性 2 倍超订）」为「默认并发已改为推导值 = 1」
 
+**交叉标注（AC3，`gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red`）**：本任务
+的 `--test-concurrency` 是 **node:test/test.sh 项目的旋钮**；同一份机制文档服务 vitest 项目时
+分叉已写清——vitest 真实文件级并行 flag 是 `--maxWorkers`（archguard 用 `--maxWorkers=8` 跑通
+全量 4902 passed），两个 tick 文件与 full-suite-runner 用法均不再对 vitest 项目指导
+`--test-concurrency`。判红模式也不再匹配裸 `✖`（vitest 假红负控制实证）。
+
 ### AC9 — 记录已补
 
 `tasks/gap-suite-cost-model-is-wrong-optimizations-buy-nothing.md` 的 Execution record 后新增
@@ -321,7 +343,11 @@ gate 的作用不是让测试更快，是让「现在能不能跑」成为一个
 同一个 gate：同一套 `/proc/pressure/cpu` 读数、同一个 `pgrep -xc node-MainThread`、同一个
 `free -m` available。WAIT 的「原因」是打印出来的数字，不是各自脑中的印象。
 
+**needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：re-open AC12-17 landed: full-suite-runner.ts laneCount nproc-derived with replace-splice + resource-gate (commits 264ef5b9/916b1feb), resource-gate.sh exists, scripts/test.sh consults it on default path, CLAUDE.md documents budget-aware derivation.）**
+全文见 git 历史（`git log -p -- tasks/gap-no-resource-awareness-heavy-ops-run-blind.md`）。
+
 ## Touches
+- tasks/gap-no-resource-awareness-heavy-ops-run-blind.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - scripts/resource-gate.sh（新增，本任务核心产出）
 - scripts/test.sh
@@ -342,3 +368,129 @@ at: 2026-08-03T03:19:46Z
 changed: 初稿写「4 核跑 8 = 2× 超订」，外层实测在跑套件的真实进程数后改为 **17 个进程、4.25×**；
   据此改掉机制设计（`--test-concurrency` 不是正确旋钮）与 AC5（先实测放大系数，不许照 `nproc*2` 推导）；
   并加 AC10（gate 输出单列 ppid=1 且 cwd 已删除的孤儿进程）
+
+## Re-open 2026-08-05T07:30Z — 修复未接线生产调用方（外层，资源安全，最高优先）
+
+**触发**：管理者 07:24Z 高优先级资源安全告警 + 外层实测坐实。**机器今晚已崩三次，负载是从未被排除的
+候选根因。**
+
+**证据链（外层逐条核实）**：
+1. `nproc = 4`。
+2. `scripts/test.sh` 第 82-83 行派生默认（本任务 AC5 产出）：`max(1, floor(nproc / 2.1))` ⇒ 本机应为 **1**。
+3. 但当前全量套件进程实参是 `--test-concurrency=8`（ps 实证，约 200 个测试文件）。
+4. **根因**：`plugin/scripts/full-suite-runner.ts` 第 94 行
+   `const laneCount = Number(parseArg(argv, '--lane-count') ?? '8')`，第 32 行注释 `default: 8
+   (canonical full-suite concurrency)`——**硬编码 8，不读 nproc**。CLAUDE.md 明写「显式
+   --test-concurrency=N 永远覆盖派生默认」，test.sh 的资源感知对这条路径**完全失效**。
+5. **resource-gate 也未接线**：`grep -n 'resource-gate' plugin/scripts/full-suite-runner.ts` = NOT
+   REFERENCED——外层后台 runner 起跑前没有过闸。
+6. 当前 load average **30.91**（4 核 ⇒ 7.7× 超订），`/proc/pressure/cpu` some avg10=95.49，claude
+   进程 34 个。
+
+**后果（为什么比其它缺口都急）**：本任务 AC5 的原始论据是「硬编码 8 在 4 核上 4.25× 超订、8 workers +
+派生子进程 = 17 个进程」。修复只改了 test.sh 默认，**没改真正在生产里跑全套件的调用方
+（full-suite-runner）**——所以本任务的收益是 **0**，超订反而更严重（7.7×）。后果不是慢，是**整机
+崩溃**。属于「修复 landed 但生产路径未接线」族。
+
+**外层已止血**：07:26Z 中止当前套件（state→red + note），load 从 31.74 回落。**修复归内层**。
+
+### 新增 Acceptance Criteria（re-open）
+
+- [ ] AC12: **full-suite-runner laneCount 派生统一**——`plugin/scripts/full-suite-runner.ts` 的
+      laneCount 默认改为与 test.sh 同一派生（读 nproc，`max(1, floor(nproc / 2.1))`，不硬编码 8），
+      或干脆不传 `--lane-count` 让 test.sh 自己派生；显式 `--lane-count=N` 保留为覆盖手段。
+      本机 ⇒ 1。
+- [ ] AC13: **full-suite-runner 启动前过资源闸**——runner 起跑前调用
+      `scripts/resource-gate.sh --for full-suite`，WAIT 时打印数字退出非 0（与本任务 AC7 对 test.sh
+      的接入同一纪律）；当前路径 NOT REFERENCED。
+- [ ] AC14: **回归控制**——修复后全量套件进程实参必须不再出现 `--test-concurrency=8` 而按派生 1 跑
+      （ps 实证贴任务体）；显式 `--lane-count=8` 仍能覆盖（逃生口保留）。
+- [ ] AC15: 测试用 `node:test` 且带 `// @test-group engine`（沿用本任务 AC11 声明）。
+- [ ] AC17: **`--test-concurrency=*` 替换非追加**（管理者 09:03Z 隐患）——runner 拼接前**剥掉命令里
+      已有 `--test-concurrency=*` 再拼**（或设环境变量让 test.sh 自己派生），让它是替换不是追加。
+      当前实跑命令行同时出现 `--test-concurrency=8 --test-concurrency=1`（node 取最后一个生效 1，
+      行为正确），但**生效值依赖拼接顺序**——重构调换次序就静默回到 8，无判据会发现（两个值都合法，
+      退化只表现为负载升高 → 一路到 PSI 94 + 整机崩溃）。node 取值规则实测：`=8 =1` 同时给 8.72s（=1
+      生效）、`=1 =8` 同时给 2.62s（=8 生效）——**取最后一个**。
+- [ ] AC16: **显式传参必须传播到 test.sh**——`full-suite-runner.ts` 的 `--lane-count N` 必须真正拼进
+      传给 test.sh 的 command（转成 `--test-concurrency=N` 或 `--lane-count N` 传递），**不能只写
+      state 字段**；ps 实证 `--test-concurrency=<传值>` 生效（ABORT #2 根因：runner.ts:91 command 静态、
+      lane-count 从不到达 test.sh，显式 1 实际跑 8）。
+
+### ABORT #2（2026-08-05 07:48Z）——显式传参也不生效（比硬编码更危险）
+
+**触发**：管理者紧急告警 + 外层核实——外层 07:42 传 `--lane-count 1` 重跑 M3 验证套件，但 ps 实证
+**实际跑的是 `--test-concurrency=8`**（9 个并发 8 进程，load 26.92/PSI 94，07:26 ABORT 状态复现）。
+
+**根因定位（问题②，比硬编码更严重）**：`full-suite-runner.ts:91`
+`const command = parseArg(argv, "--command") ?? "bash scripts/test.sh"`——`--lane-count` **只写进 state
+文件的 laneCount 字段**（第 94/97 行），**从没拼进传给 test.sh 的 command**（第 102 行 spawn 只传
+静态 command）。test.sh 收不到任何并发覆盖，走自己默认 8。⇒ **`--lane-count 1` 完全没到达 test.sh**，
+它只影响 state 字段不影响实际并发。**「对并发的控制失效，且你以为它生效了」**——这比硬编码 8 更危险，
+因为它在错误安全感下重启了一轮。
+
+**外层决定：ABORT #2**（07:48Z）——PSI 94 = 07:26 复现状态，机器今晚已崩三次，8 并发下 M3 验证套件
+必然负载敏感假红 + 有崩溃风险。state=red + reason=aborted 已标记。
+
+**连带（管理者自曝，归因完整）**：跨项目 .halt 暂停有帮助但不是修复——做决定时还不知 quay 自己套件
+跑在 8，真正主因在 quay 这边。真修复是 laneCount 链路，且现在多了「显式传参也不生效」这一条。
+
+### Re-open Touches 增补
+
+- plugin/scripts/full-suite-runner.ts（AC12/AC13：laneCount 派生 + 过闸）
+- plugin/test/full-suite-runner.test.mjs（AC12/AC14 fixture）
+- plugin/scripts/（resource-gate 接线验证，若 runner 调用路径需包装）
+
+### Re-open Contract
+
+measure   runner_lane_count = `grep -n "lane-count" plugin/scripts/full-suite-runner.ts` stdout 的默认值段
+band      runner_lane_count = 派生（max(1, floor(nproc/2.1))，本机 1）或取消默认让 test.sh 派生
+invariant no_hardcoded_oversubscription = 1（生产 runner 与 test.sh 同源派生，不硬编码 8）
+invoke    `ps -eo args | grep -c -- '--test-concurrency=8'`
+control   本机跑全量 ⇒ 进程实参不得再出现 concurrency=8（AC14）；显式 --lane-count=1 ⇒ 实跑 concurrency=1（AC16 负向——ABORT #2 根因必须消失）
+resume    laneCount 派生与过闸分两步提交，任一步完成即写盘
+
+reviewer: outer (re-open)
+at: 2026-08-05T07:30Z
+changed: done→ready——原 AC5 只改 test.sh，未接线的生产调用方 full-suite-runner 仍硬编码 8（7.7×
+  超订、本机已崩三次、resource-gate NOT REFERENCED）。AC12/AC13/AC14/AC15 新增。外层已中止套件止血。
+  AC10 记账：post-friction（被管理者资源告警撞出），不计分。
+
+## Addendum 2026-08-06 — 回退记录 + 恢复（gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived）
+
+**回退记录（本任务 AC5 要求的追溯）**：`scripts/test.sh` 的默认并发推导在
+**623d662b**（2026-08-03 07:29，"fix(test.sh): TEMPORARILY pin default concurrency back to 8
+(outer urgent correction)"）被**临时回退**为硬编码 8——推导默认 1 把全量墙钟从 ~8min 推到
+~55min（stranded 的 OVER90 直接因此），AC5 的 cost-side tradeoff 实验未跑，注释明写
+「REVERT this override to the derived formula once AC5's tradeoff experiment is run」。回退后：
+- `default_test_concurrency()` 变成 `echo "8"; return 0; default_concurrency_formula`——
+  **公式在 return 之后，不可达**；
+- 但 CLAUDE.md、两个 tick 文档、本任务 AC5 的勾、resource-gate.test.mjs（正则抽取不可达公式）
+  与 runner-grouping.test.mjs（只断言拼写、消息却称 "derived"）**三层全部仍报告「已推导」**；
+- 实测本机 nproc=4 ⇒ 声称值 `floor(4/2.1)=1` vs 实际 8 = **恰好 4.25× 超订**——CLAUDE.md 自己
+  描述为「已消除」的那个缺陷仍在生效。
+
+**恢复（2026-08-06，由 `gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived` 执行）**：
+走「让现实追上声称」方向——推导就是 AC5 的交付物，回退是没等到实验的临时覆盖，且 cost 侧已被
+ci.yml 显式 `--test-concurrency=N`（10 分钟预算逃生口）与 full-suite-runner.ts 的 nproc 派生
+laneCount 覆盖。`default_test_concurrency()` 恢复为直接调用 `default_concurrency_formula`
+（公式可达，`formula_reachable = 1`），doc/AC/测试三层回归一致。
+
+**AC5 勾选状态**：保持 `[x]`——推导已恢复且真实生效（本机实测 `default_test_concurrency`
+返回值 = `floor(4/2.1)` = 1，与 CLAUDE.md/文档一致）。回退期间（623d662b → 恢复）该勾是
+「勾在一个被回退的机制上」——**本任务是这一形态的首个实例**（DoD 记录）。
+
+**交叉标注**：本任务 ↔ `gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived`
+（回退与恢复的完整记录；新增 `dead-code-after-return-check` 静态检查禁止该形态复发）。
+
+**交叉标注（AC5，`gap-systemd-run-limits-for-suite-and-heavy-ops`，2026-08-08）**：本任务把资源感知
+做成「必须被主动调用才生效」的 gate（AC7/AC13）——而 ABORT #5 实证它被绕过（full-suite-runner 0 次
+调用）。`gap-systemd-run-limits-for-suite-and-heavy-ops` 是**同源的 cgroup 硬限额上位解**：套件 runner
+起跑时包 `systemd-run --user --scope`（MemoryMax/CPUQuota/TasksMax），限额由内核强制、无法被「忘记
+调用」，且只作用于该套件的进程组——PID 爆（tmux 泄漏类）被 TasksMax 挡、内存爆（ugrep 类）被
+MemoryMax 杀单进程不进全机 swap（AC2/AC3 负控制实测）。两者同源于
+`orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md`：gate 补「调用纪律」、
+cgroup 限额补「不可被绕过」。
+
+## Touches 增补（Addendum 2026-08-06）
+- tasks/gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived.md（新增，恢复与防复发）

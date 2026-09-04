@@ -428,3 +428,12 @@ Of those, **unaccounted → live** (31): `.claude/workflows/drain-directives.js`
 - Some `unaccounted` entries are non-script files (config/fixture) that sit in a scripts dir — they are flagged in the `note` column (e.g. `tsconfig.json`, `deliverable-governor-fixture.json`, the 4 `fixtures/loadbearing/scripts/fixture-*.mjs`). They are included for full filesystem coverage but are not runnable scripts.
 - `never-runs-test` is eclipsed by `live` when a `*.test.*` outside the canonical glob was nonetheless executed in the window (e.g. `it0-enforcement-with-design-check.test.mjs`, run once manually). Such a file is genuinely "not in the suite" but has execution evidence — the class follows the priority, so it shows `live`, not `never-runs-test`.
 - The `executed` count is command-position matching (quotes stripped) plus a conservative wrapper-indirect signal (a transcript-live `.sh` that delegates to a same-dir `.ts`/references it via `node`/`bash`/ `gate_delegate_ts` marks that target as executed too). Known conservative misses: a script referenced inside `bash -c '...'` inline code, or invoked by bare basename after `cd`.
+
+## Entry point (gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point)
+
+The `plugin/scripts` instruments are discoverable through ONE entry point instead of remembered paths:
+
+- **MCP:** the Core `instrument` tool (`packages/quay/src/mcp-server.ts`) — `action: "list"` returns the derived instrument directory (each admitted instrument declaring what question it answers); `action: "run"` + `name` + `args` invokes one. The directory is DERIVED from the filesystem by this tool's `--instruments-json` mode:
+  `node --experimental-strip-types plugin/scripts/runtime-usage-inventory.ts --instruments-json`
+- **Admission filter (AC4):** an instrument is admitted only when it declares its question — explicitly via `@instrument "<question>"` in its header comment, or derived from the header's own `<basename> — <description>` line. Instruments that cannot say are kept OUT, listed under `notAdmitted`.
+- **The count is derived, never hardcoded** — the "81" in the task body is a snapshot; the manifest's `total` reflects the current filesystem.

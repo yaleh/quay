@@ -14,10 +14,11 @@
 // vmeta-lag-check.mjs's shape).
 
 import fs from "node:fs";
+import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
-import { parseTouchEntries, extractTouchesSection } from "./touches-parser.ts";
+import { parseTouchEntries, parseTouchEntriesWithTags, extractTouchesSection } from "./touches-parser.ts";
 
 // Kept for reference / callers; the authoritative test is isOverbroadDeclaration (semantic, below).
 export const OVERBROAD = new Set(["**", "*", "**/*", "./**", "**/**"]);
@@ -195,23 +196,438 @@ export function checkTouchesPair(parsedA, parsedB, expand) {
   return { disjoint, overlaps, reason: disjoint ? "disjoint file-sets" : "overlapping file-sets" };
 }
 
-// ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
-export function findRepoRoot(start) {
-  let dir = start;
-  for (;;) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) return start;
-    dir = parent;
+// ── outer-inflight occupancy (AC4 of gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files) ──
+// A dispatch-eligibility check COMPLEMENTING checkTouchesPair. checkTouchesPair answers "do these two
+// tasks' declared file-sets overlap?"; it does NOT answer "does a task's declared file-set collide with
+// what OUTER is editing RIGHT NOW in the main checkout?". Hot implementation files (e.g.
+// full-suite-runner.ts) are often touched by outer AND by an inner task in the same window — the inner
+// branch then collides with outer's mainline edit at fan-in (add/add or real conflicts). The fix
+// (task gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files ③): count outer's in-flight
+// edits as OCCUPIED — a task whose declared expansion intersects an outer-inflight path must serialize.
+// `outerInflightFiles` is an array of repo-relative paths (or path globs) outer has uncommitted edits
+// to; the CLI `--outer-inflight <path>` flag is repeatable. Exact paths are matched after
+// normalizePath; globs are expanded via `expand`.
+export function checkOuterInflight(parsed, outerInflightFiles, expand) {
+  if (!outerInflightFiles || outerInflightFiles.length === 0) {
+    return { blocked: [], ok: true };
   }
+  const taskSet = expand(parsed.globs);
+  const blocked = [];
+  for (const f of outerInflightFiles) {
+    const hasWildcard = /[*?]/.test(f);
+    if (hasWildcard || f.endsWith("/")) {
+      const glob = f.endsWith("/") && !hasWildcard ? `${f}**` : f;
+      for (const m of expand([glob])) if (taskSet.has(m)) blocked.push(m);
+    } else {
+      const p = normalizePath(f);
+      if (taskSet.has(p)) blocked.push(p);
+    }
+  }
+  blocked.sort();
+  return { blocked, ok: blocked.length === 0 };
 }
+
+// The full dispatch pre-flight for a PAIR (the existing checkTouchesPair verdict) PLUS outer-inflight
+// occupancy on EACH side. This is what the `--check-pair` CLI mode runs: a pair that is mutually
+// disjoint must STILL serialize when either side collides with an outer in-flight edit (the task's
+// dispatch gate step 4 must refuse a candidate whose declared file-set includes a file outer is
+// editing right now — otherwise the inner branch collides at fan-in).
+export function checkDispatchEligibility(parsedA, parsedB, outerInflightFiles, expand) {
+  const pair = checkTouchesPair(parsedA, parsedB, expand);
+  if (!pair.disjoint) return pair;
+  for (const [parsed, who] of [[parsedA, "A"], [parsedB, "B"]]) {
+    const oc = checkOuterInflight(parsed, outerInflightFiles, expand);
+    if (!oc.ok) {
+      return { disjoint: false, overlaps: oc.blocked, reason: `outer-inflight occupancy: side ${who} touches ${oc.blocked.join(", ")} → serialize (outer owns it in flight)` };
+    }
+  }
+  return pair;
+}
+
+// ── benign runtime dirty (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path) ─────────────────
+// A pre-flight dirty-tree classification COMPLEMENTING checkTouchesPair. The fan-in ff's clean-tree
+// pre-flight must distinguish a REAL dirty tree (task code edits, or a file within the task's ##
+// Touches) from a BENIGN one: an UNTRACKED runtime file under .quay/ (serve-send message-receipts,
+// worker/promotion round logs — the gitignore-missed runtime-state family). A benign file is never
+// overwritten by the ff (it is not in the tree) and is unrelated to the task's declared write
+// surface, so the ff passes through WITHOUT disposing it (仅放行不处置 — a NEW runtime file may
+// appear at any time, so committing/gitignoring ONE file is not the fix). CONSERVATIVE by
+// construction (fail-closed to "not benign"): an absent/empty ## Touches, an overbroad glob, or a
+// dirty path that MATCHES a Touches glob ⇒ NOT benign. Reuses parseTouches + matchGlob (the
+// checkTouchesPair machinery) — no new path matcher. `dirtyPaths` are repo-relative untracked
+// (porcelain `??`) paths.
+export function checkBenignRuntimeDirty(taskBody, dirtyPaths) {
+  if (!dirtyPaths || dirtyPaths.length === 0) {
+    return { benign: false, reason: "no dirty paths to classify", violations: [] };
+  }
+  const { hasSection, globs } = parseTouches(taskBody);
+  if (!hasSection || globs.length === 0) {
+    return { benign: false, reason: "conservative: task declares no/empty ## Touches → cannot prove the dirty path is outside its write surface", violations: [] };
+  }
+  const overbroad = globs.find((g) => isOverbroadDeclaration(g));
+  if (overbroad) {
+    return { benign: false, reason: `conservative: overbroad glob "${overbroad}" → cannot prove disjoint`, violations: [] };
+  }
+  const violations = [];
+  for (const raw of dirtyPaths) {
+    const p = normalizePath(raw);
+    if (p !== ".quay" && !p.startsWith(".quay/")) {
+      violations.push({ path: raw, why: "not under .quay/" });
+      continue;
+    }
+    const hit = globs.find((g) => matchGlob(g, p));
+    if (hit) violations.push({ path: raw, why: `matches task ## Touches glob "${hit}"` });
+  }
+  if (violations.length > 0) {
+    return { benign: false, reason: "dirty paths are not all untracked .quay/ runtime files outside the task's ## Touches", violations };
+  }
+  return { benign: true, reason: "all dirty paths are untracked .quay/ runtime files outside the task's ## Touches", violations: [] };
+}
+
+// ── touchExists / checkTouchesResolve ────────────────────────────────────────────────────────────
+// gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files: a dispatch-eligibility
+// resolve check COMPLEMENTING checkTouchesPair. checkTouchesPair answers "do these two tasks'
+// declared file-sets overlap?"; it does NOT answer "do the declared files even exist?" — so 8 of 9
+// `status: ready` tasks pointing at files ADR-022 physically deleted sailed through eligibility.
+// touchExists answers that for ONE entry. The task's AC2 wording ("verify every entry in
+// `## Touches` that is NOT tagged `(new)`/`(delete)` actually exists") exempts BOTH structural tags
+// from the existence requirement:
+//   - `(new)`   — the task will CREATE this file; it need not exist yet → never "missing".
+//   - `(delete)`— the task will DELETE this file; if it is already gone the delete is a no-op, so a
+//                 nonexistent target cannot make the task undispatchable → never "missing" either.
+// A path with a wildcard (`*`/`?`) or a trailing `/` is resolved as a GLOB (a trailing `/` is a
+// directory glob → `**` appended, matching parseTouches's DIR-106 Fix 3). A glob that matches
+// nothing resolves to "missing". An exact path resolves via fs.existsSync.
+export function touchExists(p, root) {
+  const hasWildcard = /[*?]/.test(p);
+  const glob = p.endsWith("/") && !hasWildcard ? `${p}**` : p;
+  if (hasWildcard || glob !== p) {
+    return expandGlobs([glob], root).size > 0;
+  }
+  return fs.existsSync(path.join(root, glob));
+}
+
+// Given parsed [{path, tag}] entries and a repo root, resolve each against the real tree. Returns:
+//   results:        [{path, tag, exists}] — exists is null for `(new)`/`(delete)` (skipped), true/false otherwise
+//   mustExist:      count of entries that must resolve (no tag, i.e. not `(new)`/`(delete)`)
+//   missing:        count of those that did NOT resolve
+//   majorityMissing:true iff more than half of the must-exist entries are missing → the task's
+//                   Touches majority-resolve to nonexistent files and it must not be dispatched.
+// A task with no must-exist entries (all `(new)`/`(delete)`, or empty) is never majorityMissing.
+export function checkTouchesResolve(entries, root) {
+  const results = [];
+  let mustExist = 0;
+  let missing = 0;
+  for (const e of entries) {
+    if (e.tag === "new" || e.tag === "delete") {
+      results.push({ path: e.path, tag: e.tag, exists: null });
+      continue;
+    }
+    mustExist++;
+    const ok = touchExists(e.path, root);
+    results.push({ path: e.path, tag: e.tag, exists: ok });
+    if (!ok) missing++;
+  }
+  const majorityMissing = mustExist > 0 && missing > mustExist / 2;
+  return { results, mustExist, missing, majorityMissing };
+}
+
+// Convenience: run checkTouchesResolve over a full task/charter BODY (extracts its `## Touches`
+// section via the single-source extractTouchesSection, then tag-parses via parseTouchEntriesWithTags).
+export function checkTaskTouchesResolve(taskBody, root) {
+  const { hasSection, section } = extractTouchesSection(taskBody);
+  const entries = hasSection ? parseTouchEntriesWithTags(section) : [];
+  return { hasSection, ...checkTouchesResolve(entries, root) };
+}
+
+/** Promotion-time touches-WIDTH check (2026-08-28, gap-touches-breadth-silent-global-dispatch-lock):
+ *  a task whose `## Touches` contains a DIRECTORY-LEVEL glob (a bare directory path, or a glob whose
+ *  expansion sweeps a whole directory tree) is a silent global dispatch lock while in flight — it
+ *  expands to every file under the dir, so touchesDisjoint filters every peer task touching that tree
+ *  (measured: `plugin/test/**` → 354 files; one running task emptied a 29-candidate dispatch pool to
+ *  zero). `isOverbroadDeclaration` already catches the <2-concrete-segment wildcards (`**`,
+ *  `orchestration/**`); this check catches the 2+ segment directory sweeps (`plugin/scripts/**`,
+ *  `plugin/test/**`, `packages/quay/src/**`) that pass it. A `(new)`-tagged entry is EXEMPT — a
+ *  directory the task itself creates cannot overlap peers' existing work (narrow by construction);
+ *  a `(delete)`-tagged one is NOT (deleting a tree a peer still touches is exactly the conflict to
+ *  flag). Returns { narrow, wideGlobs } — a distinct "too wide" verdict, NOT "evaluated & narrow"
+ *  conflated with "no Touches declared" (hard rule 3b; a missing section is handled by selfTouchCheck
+ *  / touchesResolve, which already reject it). */
+export function checkTouchesNarrow(taskBody) {
+  const { hasSection, section } = extractTouchesSection(taskBody);
+  const entries = hasSection ? parseTouchEntriesWithTags(section) : [];
+  const wideGlobs = [];
+  for (const e of entries) {
+    if (e.tag === "new") continue;
+    const norm = normalizePath(e.path);
+    if (isOverbroadDeclaration(norm) || /\/\*\*$/.test(norm) || /\/$/.test(e.path)) {
+      wideGlobs.push(e.path);
+    }
+  }
+  return { narrow: wideGlobs.length === 0, wideGlobs };
+}
+
+/** Frontmatter `role` field (raw value, null when absent) — the compound self-touch exemption's
+ *  single read of the full task text (which INCLUDES the frontmatter). `role: compound` is the
+ *  explicit aggregation marker (see ready-pool-check.ts's isCompoundTask for the same judgment). */
+function frontmatterRole(taskBody) {
+  const m = String(taskBody || "").match(/^role:\s*["']?([^\s"']+)/m);
+  return m ? m[1] : null;
+}
+
+// ── self-touch check (gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence) ──
+// (c) block of the three-block batch elimination: every task's `## Touches` MUST include its own
+// task file `tasks/<id>.md` — WITHOUT the `(new)` annotation. The self-file grants the executing
+// agent permission to edit its own task file at completion (tick AC checkboxes + paste its invoke
+// real-run evidence) — the AC/evidence delegation that shrinks outer closure to one DoD line per
+// task. The `(new)` ban is load-bearing: `hasAnyLandedNewTouch` fires on a `(new)`-marked entry
+// whose file exists, so a `(new)` self-file would misjudge every task as "work already landed",
+// emptying the ready pool (gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks).
+// checkTouchesPair is UNAFFECTED: the self-file is unique per task (tasks/A.md ≠ tasks/B.md), so two
+// tasks touching only their own files stay disjoint (filesDisjoint: overlaps.length === 0).
+// COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC3): a `role: compound`
+// parent's ## Touches delegates to its children by convention ("(compound task — see each child's own
+// ## Touches)"), so it structurally never carries a self-file. That is NOT a self-touch violation
+// (a compound is never dispatched to an executor as leaf work — 派发只认叶子) — `compound:true`
+// distinguishes "aggregate, no self-file needed" from a primitive missing its grant, so the scan /
+// slot-refill never report a compound as a false self-touch negative (invariant
+// no_self_touch_false_negative).
+export function selfTouchEntry(taskBody, taskId) {
+  const { hasSection, section } = extractTouchesSection(taskBody);
+  if (!hasSection) return null;
+  const expected = `tasks/${taskId}.md`;
+  return parseTouchEntriesWithTags(section).find((e) => e.path === expected) ?? null;
+}
+
+/** { ok, expected, entry, compound } — ok: true iff the task's Touches contains `tasks/<id>.md` and
+ *  that entry carries no `(new)` tag (a `(delete)` self-file is likewise not a grant). A task whose
+ *  frontmatter declares `role: compound` returns `ok:false` + `compound:true` — an aggregate that by
+ *  convention carries no self-file (consumers must NOT count it as a missing self-touch). */
+export function selfTouchCheck(taskBody, taskId) {
+  const expected = `tasks/${taskId}.md`;
+  const entry = selfTouchEntry(taskBody, taskId);
+  const ok = entry !== null && entry.tag !== "new";
+  const compound = frontmatterRole(taskBody) === "compound";
+  return { ok, expected, entry, compound };
+}
+
+// True when the task frontmatter declares the `fixture` label (block list `labels:\n  - fixture` or
+// flow list `labels: [..., fixture]`). Fixtures are gate demo tasks — never real work, never
+// dispatchable — so the ready-pool scan skips them (matching ready-pool-check.ts's isFixture).
+// `ac`-labelled AC-record tasks are also non-dispatchable by kind (matching isAcRecord) — tracked
+// for gate/ledger, excluded from the pool.
+const NON_DISPATCHABLE_LABELS = ["fixture", "ac"];
+export function isFixtureTask(raw) {
+  const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fm) return false;
+  const flow = fm[1].match(/^labels:\s*\[([^\]]*)\]\s*$/m);
+  if (flow) return flow[1].split(",").some((v) => NON_DISPATCHABLE_LABELS.includes(v.trim().replace(/^["']|["']$/g, "")));
+  const lines = fm[1].split(/\r?\n/);
+  const idx = lines.findIndex((l) => /^labels:\s*$/.test(l));
+  if (idx < 0) return false;
+  for (let i = idx + 1; i < lines.length; i++) {
+    const m = lines[i].match(/^\s+-\s+(.+?)\s*$/);
+    if (m) {
+      if (NON_DISPATCHABLE_LABELS.includes(m[1].replace(/^["']|["']$/g, ""))) return true;
+    } else if (/^\S/.test(lines[i])) break; // next top-level key ends the list
+  }
+  return false;
+}
+
+// Scan a tasks directory for `status: ready` tasks and return each one's self-touch status. This is
+// the AC1 static check over the READY pool: a ready task whose Touches lacks its own file is not
+// dispatchable (the dispatch gate's `--self-touch` per-candidate check blocks it). Fixture tasks are
+// skipped (not dispatchable by definition — ready-pool-check.ts excludes them as `fixture`).
+export function scanReadyTasksSelfTouch(tasksDir) {
+  const out = [];
+  if (!fs.existsSync(tasksDir)) return out;
+  for (const f of fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))) {
+    const id = f.replace(/\.md$/, "");
+    const raw = fs.readFileSync(path.join(tasksDir, f), "utf8");
+    if (!/^status:\s*["']?ready["']?\s*$/m.test(raw)) continue;
+    if (isFixtureTask(raw)) continue;
+    const { ok, expected, entry, compound } = selfTouchCheck(raw, id);
+    out.push({ id, ok, expected, entry, compound });
+  }
+  out.sort((a, b) => a.id.localeCompare(b.id));
+  return out;
+}
+
 
 function usage() {
   process.stderr.write("Usage: touches-orthogonality-check.mjs [--root <dir>] <charterA.md> <charterB.md>\n");
+  process.stderr.write("       touches-orthogonality-check.mjs --check-pair [--root <dir>] <charterA.md> <charterB.md> [--outer-inflight <path> ...]\n");
+  process.stderr.write("       touches-orthogonality-check.mjs --resolve [--root <dir>] <task.md>\n");
+  process.stderr.write("       touches-orthogonality-check.mjs --self-touch [--root <dir>] <task.md>\n");
+  process.stderr.write("       touches-orthogonality-check.mjs --self-touch-scan [--root <dir>]\n");
+  process.stderr.write("       touches-orthogonality-check.mjs --runtime-dirty --task <id> [--root <dir>] <path>…\n");
+}
+
+// --resolve mode: run the dispatch-eligibility resolve check over ONE task/charter file. Prints a
+// per-entry resolution table and exits 1 iff the task's Touches are MAJORITY-missing (not eligible
+// to dispatch). This is the mechanical hook fast-mode-loop-tick.md step 4 invokes before dispatching
+// a `status:ready` candidate (gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files).
+function mainResolve(args) {
+  let root = null;
+  const files = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--resolve") continue;
+    if (args[i] === "--root") { root = args[++i]; continue; }
+    files.push(args[i]);
+  }
+  if (files.length !== 1) { usage(); return 2; }
+  const file = files[0];
+  if (!fs.existsSync(file)) { process.stderr.write(`ERROR: task not found: ${file}\n`); return 2; }
+  const rootDir = root ? path.resolve(root) : repoRoot(path.resolve(path.dirname(file)));
+  const r = checkTaskTouchesResolve(fs.readFileSync(file, "utf8"), rootDir);
+  if (!r.hasSection) {
+    process.stdout.write(`RESOLVE ${file}: no ## Touches section — no existence claims to verify\n`);
+    return 0;
+  }
+  for (const res of r.results) {
+    if (res.exists === null) process.stdout.write(`  skip (${res.tag}): ${res.path}\n`);
+    else if (res.exists) process.stdout.write(`  ok:          ${res.path}\n`);
+    else process.stdout.write(`  MISSING:     ${res.path}\n`);
+  }
+  process.stdout.write(
+    `RESOLVE ${file}: ${r.missing}/${r.mustExist} non-tagged touches missing — ` +
+    (r.majorityMissing ? "MAJORITY-MISSING (NOT dispatchable)" : "resolves (dispatchable)") + "\n",
+  );
+  return r.majorityMissing ? 1 : 0;
+}
+
+// --self-touch mode: verify ONE task's `## Touches` includes its own `tasks/<id>.md` WITHOUT the
+// `(new)` annotation. This is the dispatch-gate eligibility check (fast-mode-loop-tick.md step 4,
+// AC1 of gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence): a ready
+// candidate whose Touches does not grant its own file is NOT dispatchable — the executing agent has
+// no authorization to tick its AC boxes / paste its invoke evidence at completion.
+function mainSelfTouch(args) {
+  let root = null;
+  const files = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--self-touch") continue;
+    if (args[i] === "--root") { root = args[++i]; continue; }
+    files.push(args[i]);
+  }
+  if (files.length !== 1) { usage(); return 2; }
+  const file = files[0];
+  if (!fs.existsSync(file)) { process.stderr.write(`ERROR: task not found: ${file}\n`); return 2; }
+  const body = fs.readFileSync(file, "utf8");
+  const id = path.basename(file, ".md");
+  const { ok, expected, compound } = selfTouchCheck(body, id);
+  if (ok) {
+    process.stdout.write(`SELF-TOUCH ${file}: ok (Touches includes ${expected} without (new))\n`);
+    return 0;
+  }
+  // COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC3): a `role: compound`
+  // task's Touches delegates to children by convention — the absence of a self-file is NOT a
+  // self-touch violation, so the per-candidate gate does not flag it (exit 0). Dispatchability of a
+  // compound is a separate question answered by slot-refill (compound-parent-not-dispatchable).
+  if (compound) {
+    process.stdout.write(`SELF-TOUCH ${file}: COMPOUND (aggregate — Touches delegate to children; no self-file needed)\n`);
+    return 0;
+  }
+  process.stdout.write(`SELF-TOUCH ${file}: MISSING ${expected} (without (new)) in ## Touches — not dispatchable\n`);
+  return 1;
+}
+
+// --self-touch-scan mode: the AC1 static check over the READY pool — every `status: ready` task in
+// `<root>/tasks/` must have its own file in Touches. Exits 1 when any ready task is missing it.
+function mainSelfTouchScan(args) {
+  let root = null;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--self-touch-scan") continue;
+    if (args[i] === "--root") { root = args[++i]; continue; }
+  }
+  const rootDir = root ? path.resolve(root) : repoRoot(process.cwd());
+  const rows = scanReadyTasksSelfTouch(path.join(rootDir, "tasks"));
+  // COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC3): a `role: compound`
+  // ready task is an aggregate — it never carries a self-file by convention, so it is NOT counted as
+  // a missing self-touch (no false negative). The row is still printed (visible), just not in
+  // `missing`.
+  const missing = rows.filter((r) => !r.ok && !r.compound);
+  for (const r of rows) {
+    if (r.ok) process.stdout.write(`  ok:      ${r.id} (touches ${r.expected})\n`);
+    else if (r.compound) process.stdout.write(`  COMPOUND:${r.id} (aggregate — Touches delegate to children; no self-file needed)\n`);
+    else process.stdout.write(`  MISSING: ${r.id} (expected ${r.expected} in ## Touches without (new))\n`);
+  }
+  process.stdout.write(
+    `SELF-TOUCH-SCAN: ${rows.length} ready task(s), ${missing.length} missing self-file entry — ` +
+    (missing.length === 0 ? "all dispatchable" : "NOT all dispatchable (add tasks/<id>.md to each ## Touches)") + "\n",
+  );
+  return missing.length === 0 ? 0 : 1;
+}
+
+// --check-pair mode: the dispatch gate's pair pre-flight PLUS outer-inflight occupancy. Takes exactly
+// two task/charter files and any number of `--outer-inflight <path>` entries (repeatable). Runs
+// checkDispatchEligibility — the existing checkTouchesPair verdict first, then each side against outer's
+// in-flight edits. Exits 1 (must serialize) when the pair overlaps OR either side collides with an
+// outer-inflight path (gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files AC4).
+function mainCheckPair(args) {
+  let root = null;
+  const files = [];
+  const outerInflight = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--check-pair") continue;
+    if (args[i] === "--root") { root = args[++i]; continue; }
+    if (args[i] === "--outer-inflight") { const v = args[++i]; if (v) outerInflight.push(v); continue; }
+    files.push(args[i]);
+  }
+  if (files.length !== 2) { usage(); return 2; }
+  for (const f of files) {
+    if (!fs.existsSync(f)) { process.stderr.write(`ERROR: charter not found: ${f}\n`); return 2; }
+  }
+  const expandRoot = root ? path.resolve(root) : repoRoot(path.resolve(path.dirname(files[0])));
+  const A = parseTouches(fs.readFileSync(files[0], "utf8"));
+  const B = parseTouches(fs.readFileSync(files[1], "utf8"));
+  const expand = (globs) => expandGlobs(globs, expandRoot);
+  const r = checkDispatchEligibility(A, B, outerInflight, expand);
+  if (r.disjoint) {
+    process.stdout.write(`DISJOINT: ${files[0]} ∥ ${files[1]} — safe to batch (${r.reason})\n`);
+    return 0;
+  }
+  const tail = r.overlaps.length ? ` [overlap: ${r.overlaps.join(", ")}]` : "";
+  process.stdout.write(`OVERLAP: ${files[0]} ✗ ${files[1]} — must serialize (${r.reason})${tail}\n`);
+  return 1;
+}
+
+// --runtime-dirty mode: the fan-in ff pre-flight's benign-runtime-dirty classification
+// (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path). Takes `--task <id>` (whose ## Touches is
+// the write surface), `--root <dir>`, and positional repo-relative untracked (porcelain `??`) paths.
+// Prints `BENIGN …` (exit 0) iff ALL paths are under .quay/ and outside the task's ## Touches; else
+// prints `NOT-BENIGN …` (exit 1). This is the bash script's thin hook over checkBenignRuntimeDirty.
+function mainRuntimeDirty(args) {
+  let taskId = null;
+  let root = null;
+  const paths = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--runtime-dirty") continue;
+    if (args[i] === "--task") { taskId = args[++i]; continue; }
+    if (args[i] === "--root") { root = args[++i]; continue; }
+    paths.push(args[i]);
+  }
+  if (!taskId) { process.stderr.write(`touches-orthogonality-check: --runtime-dirty requires --task <id>\n`); return 2; }
+  const rootDir = root ? path.resolve(root) : repoRoot(process.cwd());
+  const taskFile = path.join(rootDir, "tasks", `${taskId}.md`);
+  if (!fs.existsSync(taskFile)) { process.stderr.write(`touches-orthogonality-check: task file not found: ${taskFile}\n`); return 2; }
+  const r = checkBenignRuntimeDirty(fs.readFileSync(taskFile, "utf8"), paths);
+  if (r.benign) {
+    process.stdout.write(`BENIGN (${r.reason})\n`);
+    return 0;
+  }
+  const tail = r.violations.length ? ` [${r.violations.map((v) => `${v.path}: ${v.why}`).join(", ")}]` : "";
+  process.stdout.write(`NOT-BENIGN ${r.reason}${tail}\n`);
+  return 1;
 }
 
 export async function main(argv) {
   const args = argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) helpExit("usage: touches-orthogonality-check.ts [--root <dir>] <charterA.md> <charterB.md> | --check-pair | --resolve | --self-touch | --self-touch-scan | --runtime-dirty --task <id>");
+  if (args.includes("--runtime-dirty")) return mainRuntimeDirty(args);
+  if (args.includes("--self-touch-scan")) return mainSelfTouchScan(args);
+  if (args.includes("--self-touch")) return mainSelfTouch(args);
+  if (args.includes("--check-pair")) return mainCheckPair(args);
+  if (args.includes("--resolve")) return mainResolve(args);
   let root = null;
   const files = [];
   for (let i = 0; i < args.length; i++) {
@@ -222,7 +638,7 @@ export async function main(argv) {
   for (const f of files) {
     if (!fs.existsSync(f)) { process.stderr.write(`ERROR: charter not found: ${f}\n`); return 2; }
   }
-  const expandRoot = root ? path.resolve(root) : findRepoRoot(path.resolve(path.dirname(files[0])));
+  const expandRoot = root ? path.resolve(root) : repoRoot(path.resolve(path.dirname(files[0])));
   const A = parseTouches(fs.readFileSync(files[0], "utf8"));
   const B = parseTouches(fs.readFileSync(files[1], "utf8"));
   const expand = (globs) => expandGlobs(globs, expandRoot);
@@ -236,6 +652,6 @@ export async function main(argv) {
   return 1;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "touches-orthogonality-check")) {
   main(process.argv).then((code) => process.exit(code));
 }

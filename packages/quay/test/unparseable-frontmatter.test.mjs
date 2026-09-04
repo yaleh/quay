@@ -123,7 +123,7 @@ test("AC1: the provider's task_list MCP tool returns tasks + malformed list end-
 
 // ── AC2/AC3/AC4: the web board renders the bad task as a visible row ─────────
 
-test("AC2/AC3/AC4: / returns 200; the unparseable task is an explicit malformed row; removing it restores the clean list", async () => {
+test("AC2/AC3/AC4: /tasks returns 200; the unparseable task is an explicit malformed row; removing it restores the clean list", async () => {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-unparse-web-"));
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "quay-unparse-web-ws-"));
   seedTask(tasksDir, "GOOD-1", { title: "Good one", status: "todo", body: "ok" });
@@ -131,16 +131,16 @@ test("AC2/AC3/AC4: / returns 200; the unparseable task is an explicit malformed 
   fs.writeFileSync(path.join(tasksDir, "UNPARSE-1.md"), BAD_FRONTMATTER);
   writeConfig(ws, tasksDir);
 
-  const port = 41900 + (process.pid % 500);
   const orig = process.cwd();
   let server;
   try {
     process.chdir(ws);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     // ── inject direction ──
-    const list = await get(port, "/");
-    assert.equal(list.status, 200, "AC2: GET / returns 200 with 1 unparseable task (not a 500)");
+    const list = await get(port, "/tasks");
+    assert.equal(list.status, 200, "AC2: GET /tasks returns 200 with 1 unparseable task (not a 500)");
     assert.match(list.body, /class="malformed-row"/, "AC3: the bad task renders as a .malformed-row");
     assert.ok(list.body.includes("UNPARSE-1.md"), "AC3: the row names which file is broken");
     assert.ok(list.body.includes("解析失败"), "AC3: the row is visibly a parse failure");
@@ -151,8 +151,8 @@ test("AC2/AC3/AC4: / returns 200; the unparseable task is an explicit malformed 
 
     // ── remove direction (negative control: the bad row came from THAT file) ──
     fs.rmSync(path.join(tasksDir, "UNPARSE-1.md"));
-    const clean = await get(port, "/");
-    assert.equal(clean.status, 200, "AC4: GET / still 200 after removing the bad file");
+    const clean = await get(port, "/tasks");
+    assert.equal(clean.status, 200, "AC4: GET /tasks still 200 after removing the bad file");
     assert.ok(!clean.body.includes("class=\"malformed-row\"") && !clean.body.includes("UNPARSE-1.md"),
       "AC4: the malformed row disappears once the bad file is removed");
     assert.ok(clean.body.includes("GOOD-1") && clean.body.includes("GOOD-2"), "AC4: the good tasks are intact");
@@ -207,22 +207,22 @@ test("AC5: the web board 500s on a genuine task_list failure, never a silent 200
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "quay-unparse-ac5-ws-"));
   writeConfig(ws, tasksDir);
 
-  const port = 41910 + (process.pid % 500);
   const orig = process.cwd();
   let server;
   try {
     process.chdir(ws);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
     // sanity: with a valid (empty) store the list page renders 200.
-    const before = await get(port, "/");
-    assert.equal(before.status, 200, "precondition: GET / is 200 with a healthy store");
+    const before = await get(port, "/tasks");
+    assert.equal(before.status, 200, "precondition: GET /tasks is 200 with a healthy store");
 
     // Now make the store itself unusable at the call level: delete the tasks
     // dir out from under the running provider. The next task_list call throws
     // (ENOENT → provider isError → Core taskList throws), and the board must
     // degrade to a 500 — the ADV-001/002 "silent 200 with 0 tasks" must stay dead.
     fs.rmSync(tasksDir, { recursive: true, force: true });
-    const after = await get(port, "/");
+    const after = await get(port, "/tasks");
     assert.equal(after.status, 500, "AC5: a genuine task_list failure degrades to 500, not a silent 200 with 0 tasks");
     assert.ok(/internal server error/i.test(after.body), "AC5: 500 body is a real error response");
   } finally {

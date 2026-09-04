@@ -2,7 +2,7 @@
 id: DIR-124-B
 title: Single-source milestone RunIdentity, stage journal, hash-bound receipts,
   Verify cache, and explicit resume
-status: todo
+status: done
 labels:
   - directive
   - human-steered
@@ -11,36 +11,26 @@ children:
   - DIR-124-B1
   - DIR-124-B2
   - DIR-124-B3
-  - DIR-124-B4
 extra:
   dirStatus: applied
   schema: v1
 ---
+
 **type:** execution
 
-## Split into independently landable children (2026-08-01)
+**ADR-022 关闭（2026-08-09，manager 代写，人 17:4x 裁定关闭，随父任务 DIR-124 一并关闭）**
 
-This task has been split into four independently landable sub-tasks, each assigned its own M-number
-and milestone charter:
+原标题：Single-source milestone RunIdentity, stage journal, hash-bound receipts, Verify cache, and
+explicit resume。Touches 直指 `.claude/workflows/execute-milestone.js`——**已被 ADR-022
+（2026-08-03 accepted）物理删除**。
 
-| Child | M-number | Title | Mechanism |
-|-------|----------|-------|-----------|
-| [DIR-124-B1](DIR-124-B1.md) | **M253** | RunIdentity mint + canonical identity derivation (`run-identity.ts`) | One canonical `RunIdentity` factory — `runId` from `$CLAUDE_CODE_SESSION_ID` + per-dispatch nonce; singleton + composite same envelope; `candidateCommit` bound at Build, re-checked at Audit/Gate/Land |
-| [DIR-124-B2](DIR-124-B2.md) | **M254** | Stage journal store + hash-bound receipt envelope (`stage-receipt.ts`, `workflow-journal.ts`) | Versioned contract modules (`FindingEnvelope`/`StageEvent`/`StageReceiptEnvelope`/`ReceiptValidationResult`), `StageJournalStore` at canonical milestone root, atomic write + torn-write rejection, one-way migration adapters |
-| [DIR-124-B3](DIR-124-B3.md) | **M255** | Verify cache lookup replacement + persist (`workflow-resume.ts`) | Store-driven Verify cache (`loadValidatedVerifyCache`/`persistVerifyCache`) + `resumePlan` earliest-invalid-stage computation |
-| [DIR-124-B4](DIR-124-B4.md) | **M256** | Resume dispatch wiring (`execute-milestone.js` callsites) | Additive wiring in both mirrors: mint identity at Verify entry, append stage events + green-boundary receipts at all 7 phases, replace Verify cache lookup, dispatch `--resume-plan` |
+实测：本任务体对 `execute-milestone.js`/`composite-` 等关键词命中 16 处（含子任务 B1-B4 均已 split
+出去，各自独立 M-number，同样面临同一根因）。
 
-**Dependency order:** B1 → B2 → B3 are the substrate scripts (each independently landable and
-testable); B4 is the workflow wiring that consumes them. Each child is independently reviewable and
-landable. This parent is **done** when all four children are done.
+意见：见父任务 `DIR-124` 关闭说明。RunIdentity/StageReceipt/journal/resume 这类概念若仍有价值，
+应对照当前 fast-mode 的 worktree-per-task 执行模型重新设计，而不是复用这份为已删除引擎写的契约。
 
-**Original parent charter:** `experiments/quay-perpetual-stream/charters/M236-dir-124-b.md`
-(preserved for context).
-
-**Parent plan:** `docs/plans/M236-dir-124-b.md` (superseded by the child plans at
-`docs/plans/M253-dir-124-b1.md` through `docs/plans/M256-dir-124-b4.md`).
-
----
+全文见 git 历史（`git log -p -- tasks/DIR-124-B.md`）。
 
 ## Proposal
 
@@ -527,114 +517,5 @@ Acceptance Criteria item and AC-level proof (fixture, grep, real dispatch) — n
   (`workflow-event-schema.mjs`, `build-evidence-manifest.ts` precedent); a server would add an
   availability failure mode the journal cannot tolerate.
 
-## Plan
-
-Full checked milestone Plan: `docs/plans/M236-dir-124-b.md` (M236, base `65f414c4`). Covers all 11
-AC items across 8 ordered stages (RED contracts → implementation → GREEN → mirrors + canonical glob
-→ workflow wiring → wiring GREEN → real post-Land proof). The Lifecycle-feasibility section names
-the iteration-0 Audit-REFUTED-by-construction terminal (DoD 1–4 and the real halves of AC4/AC5/AC7
-are post-Land evidence): Stages 1–7 land human-steered, `done` is reached only via the post-Land
-Stage-8 re-promote.
-
-## Finding
-
-The live Verify phase accepts `cacheFingerprints` and `priorVerifyCache`, returns
-`verifyCacheUpdates`, and relies on its caller to persist them. Observed M185–M189 calls did not
-close that loop. Other stages transfer evidence through prompt output, mutable files, staging
-state, and task/dashboard text without a common binding to base commit, candidate commit, workflow
-source, inputs, or runtime generation.
-
-Consequently, a result can look reusable while proving another filesystem state or materialized
-workflow. Resume behavior is prompt/cache folklore rather than a durable transition, and the
-known `Workflow({name})` stale-materialization defect cannot be rejected by a stage receipt.
-
-## Requested action
-
-1. Define canonical typed `RunIdentity`, `FindingEnvelope`, `StageEvent`,
-   `StageReceiptEnvelope`, and `ReceiptValidationResult` contracts shared by singleton and
-   composite execution.
-   `FindingEnvelope` includes occurrence identity, stable `recurrenceKey`, observer/earliest
-   detectable stage, subsystem/claim reference, severity/blocking, evidence references, material
-   input hashes, first/last generation, disposition/resolution, and
-   `task-specific|profile|global` generalization.
-2. Bind identity/receipts to run ID, candidate ID, task IDs, attempt, base commit, candidate commit,
-   workflow source path/hash/commit, runtime generation, and task/charter/Plan/material input hashes.
-3. Store stage events and receipts append-only under the canonical milestone root, with atomic write
-   and schema/version validation.
-4. Move Verify cache persistence into this store. Cache lookup must validate the exact check input,
-   base/candidate state, workflow source, and runtime generation before reuse.
-5. Implement explicit resume: determine the earliest invalid/incomplete stage, reuse only validated
-   prior receipts, increment attempt identity, and record why each earlier stage was reused or
-   invalidated.
-6. Add fail-closed validation for wrong candidate/base/Plan/workflow hash/runtime generation,
-   tampered receipt, missing artifact, and candidate commit movement.
-7. Provide a migration/compatibility adapter for DIR-124-A diagnostic events; do not retain two
-   authoritative journal schemas.
-8. Expose extension fields needed later by DIR-118, but do not add `landed-awaiting-wiring`,
-   post-Land audit dispatch, or `done`-promotion enforcement.
-9. Add a one-way compatibility adapter for DIR-126-D Prepare telemetry and the existing Prepare
-   finding ledger. Preserve their hashes and provenance while making this task's envelopes the
-   sole cross-workflow receipt/finding contract.
-10. Allow a receipt to hash-reference a Build evidence manifest or other bounded evidence index.
-    Receipts must not copy authoritative task, Proposal, charter, or Plan content.
-
-## Acceptance Criteria
-
-- [ ] Singleton and composite calls use the same canonical RunIdentity and receipt envelope.
-- [ ] Prepare review, PlanCheck, Acceptance Audit, Gate, and later Wiring Audit findings validate
-  against one versioned FindingEnvelope; recurrence does not permit reuse when material input
-  hashes differ.
-- [ ] Every receipt is mechanically bound to base/candidate commits, workflow source hash/commit,
-  runtime generation, and material input hashes.
-- [ ] Stage journal and receipts survive process/session restart and reject partial/torn writes.
-- [ ] A second unchanged run reuses valid Verify receipts from the store; changing only one check's
-  material input reruns only that check.
-- [ ] Wrong base, wrong candidate, modified Plan, stale named-workflow materialization, wrong runtime
-  generation, missing artifact, moved candidate commit, and tampered receipt each fail closed in
-  RED/GREEN tests.
-- [ ] Explicit resume records the earliest invalid stage and never silently reuses a receipt merely
-  because prompt/label strings match.
-- [ ] DIR-124-A events have one migration path into the durable journal; no dual authoritative
-  event format remains.
-- [ ] DIR-126-D telemetry and existing Prepare-ledger fixtures migrate one way into the canonical
-  contracts with preserved source hashes and no dual-write or reverse dependency.
-- [ ] A receipt can validate a hash-bound Build evidence-manifest reference, while a fixture that
-  embeds copied task/Plan requirements in the receipt is rejected as a duplicate authority.
-- [ ] No DIR-118 lifecycle state or post-Land Wiring Audit behavior is introduced.
-
-## Definition of Done
-
-Standard exp5 DoD clauses apply.
-
-- [ ] Landed and mirrored through the plugin packaging path with canonical tests green.
-- [ ] One real milestone is interrupted after at least one stage and successfully resumes from
-  validated persisted receipts in a later process/session.
-- [ ] One real stale-receipt case is rejected and restarts from the correct stage.
-- [ ] Independent audit checks receipt bytes/hashes and real caller persistence, not just type
-  declarations or fixtures.
-
-## Human verification when exp5 marks this DIR done
-
-1. Can a receipt prove exactly which candidate and installed workflow generation produced it?
-2. Does Verify cache survive a real caller/session boundary?
-3. Can resume explain mechanically why each stage was reused or rerun?
-4. Is DIR-118 still responsible for wiring-required lifecycle semantics?
-
 ## Touches
-
-- `experiments/quay-perpetual-stream/scripts/*run-identity*`
-- `experiments/quay-perpetual-stream/scripts/*stage-receipt*`
-- `experiments/quay-perpetual-stream/scripts/*workflow-journal*`
-- `experiments/quay-perpetual-stream/scripts/*workflow-resume*`
-- `experiments/quay-perpetual-stream/test/*stage-receipt*`
-- `experiments/quay-perpetual-stream/test/*workflow-resume*`
-- `plugin/scripts/*run-identity*`
-- `plugin/scripts/*stage-receipt*`
-- `plugin/scripts/*workflow-journal*`
-- `plugin/scripts/*workflow-resume*`
-- `plugin/test/*stage-receipt*`
-- `plugin/test/*workflow-resume*`
-- `.claude/workflows/execute-milestone.js`
-- `plugin/workflows/execute-milestone.js`
-
-- `docs/plans/M236-dir-124-b.md`
+- tasks/DIR-124-B.md（自身文件）

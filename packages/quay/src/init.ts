@@ -20,6 +20,14 @@ export interface InitResult {
   tasksDir: string;
   /** The full generated config YAML content (for dry-run printing). */
   content: string;
+  /** Absolute path to the .claude/launch.settings.json scaffold. */
+  launchSettingsPath: string;
+  /** The full generated launch.settings.json content (for dry-run printing). */
+  launchSettingsContent: string;
+  /** Absolute path to the .quay/profiles.yml scaffold. */
+  profilesPath: string;
+  /** The full generated .quay/profiles.yml content (for dry-run printing). */
+  profilesContent: string;
 }
 
 /**
@@ -40,6 +48,32 @@ export interface InitOptions {
 // when embedded in template literals, so they are stored as raw strings.
 const GH_TOKEN_REF = "$GITHUB_TOKEN";
 const GH_TOKEN_SHELL_REF = "${GITHUB_TOKEN}";
+
+/**
+ * Pick the provider MCP server launch entry based on the RESOLVED provider
+ * path form (gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy).
+ *
+ * - INSTALLED form (the provider path contains a `node_modules` segment —
+ *   e.g. `./node_modules/quay-native`, an npm-installed copy): launch the
+ *   bundled dist ESM `./dist/quay-native.js` — the SAME target package.json's
+ *   `bin` field points at. Raw `.ts` under node_modules is refused by Node
+ *   ≥23.7 (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), so the bundled JS
+ *   is the only runnable form there.
+ * - DEV form (the provider path is inside the repo tree — e.g.
+ *   `./packages/quay-native` or a `../../...` repo-relative path): keep the
+ *   raw TypeScript entry `./bin/quay-native.ts`, which runs fine outside
+ *   node_modules.
+ *
+ * The Core's provider launcher resolves mcp_entry relative to provider.path,
+ * so both forms are `./`-relative within the provider package root.
+ */
+export function mcpEntryForProvider(providerPath: string): string {
+  const segments = providerPath.split(/[\\/]+/);
+  const installed = segments.includes("node_modules");
+  return installed
+    ? '["node", "./dist/quay-native.js", "mcp"]'
+    : '["node", "./bin/quay-native.ts", "mcp"]';
+}
 
 /**
  * Generate the full .quay/config.yml content with all 3 sections and inline
@@ -75,7 +109,7 @@ export function generateConfigContent(opts: { providerId: string; providerPath: 
     "    enabled: true",
     "    path: \"" + providerPath + "\"",
     "    tasks_dir: \"./tasks\"",
-    "    mcp_entry: [\"node\", \"./bin/quay-native.ts\", \"mcp\"]",
+    "    mcp_entry: " + mcpEntryForProvider(providerPath),
     "    env:",
     "      QUAY_NATIVE_TASKS_DIR: \"./tasks\"",
     "    # default_task_status: todo   # uncomment to change default status for new tasks",
@@ -252,6 +286,86 @@ export function detectProvider(): string {
 }
 
 /**
+ * Generate the `.claude/launch.settings.json` content laid down by `quay init`.
+ *
+ * gap-quay-init-launch-settings-template-missing-permissions-and-exclude-dynamic:
+ * the scaffold previously laid down NO launch.settings.json at all — consumers
+ * hand-copied it, and the copy was missing the `permissions.defaultMode:
+ * "bypassPermissions"` block (measured F1/F2 on ad-arm1 archguard: inner
+ * cold-start hit a permission prompt on its own loop scripts,
+ * monitor-mount-check.sh).
+ *
+ * AC154 (profile 抽层): `_launchSpec` is GONE — launch.settings.json now carries
+ * ONLY Claude Code keys ($schema/permissions/env). The profile/roles (launcher/
+ * model/--bare/-n/unset) + flag-only params live in the sibling `.quay/profiles.yml`
+ * scaffold (generateProfilesContent). Roles default to the generic `claude` launcher
+ * / null model; a consumer edits them to their stack (quay itself uses
+ * claude-fjdac + deepseek-v4-pro-anthropic).
+ */
+export function generateLaunchSettingsContent(): string {
+  return (
+    JSON.stringify(
+      {
+        $schema: "https://json.schemastore.org/claude-code-settings.json",
+        permissions: { defaultMode: "bypassPermissions" },
+        env: { CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false" },
+      },
+      null,
+      2,
+    ) + "\n"
+  );
+}
+
+/**
+ * Generate the `.quay/profiles.yml` content laid down by `quay init` (AC154).
+ *
+ * The profile carrier for the launcher (plugin/scripts/quay-launch.sh reads it via
+ * python3+yaml). Generic default: launcher=claude / model=null — a consumer edits
+ * them to their stack. Kept structurally identical to the checked-in dev-tree
+ * `.quay/profiles.yml` (worker-default / manager-local profiles + 3 roles), only
+ * differing in launcher/model values (dev-tree uses claude-fjdac + deepseek-v4-pro-anthropic).
+ */
+export function generateProfilesContent(): string {
+  return [
+    "# .quay/profiles.yml — Claude Code profile 承载（quay init 默认模板，AC154 profile 抽层）。",
+    "# launcher/model/--bare/-n/unset + flag-only 参数在此；launch.settings.json 只留 Claude Code 键。",
+    "# 通用默认 launcher=claude / model=null —— 消费者按自己的栈编辑。",
+    "version: 1",
+    "",
+    "excludeDynamicSystemPromptSections: true",
+    "promptSuggestions: false",
+    "",
+    "profiles:",
+    "  worker-default:",
+    "    launcher: claude",
+    "    model: null",
+    "    bare: false",
+    "    auth: key",
+    "  manager-local:",
+    "    launcher: claude",
+    "    model: null",
+    "    bare: false",
+    "    auth: key",
+    "    unset:",
+    "      - CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+    "      - CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+    "      - CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+    "",
+    "roles:",
+    "  manager:",
+    "    profile: manager-local",
+    "    name: quay-manager",
+    "  outer:",
+    "    profile: worker-default",
+    "    name: quay-outer",
+    "  inner:",
+    "    profile: worker-default",
+    "    name: quay-inner",
+    "",
+  ].join("\n");
+}
+
+/**
  * Run the init operation.
  *
  * @returns InitResult on success.
@@ -262,6 +376,10 @@ export function runInit(opts: InitOptions): InitResult {
   const quayDir = path.join(root, ".quay");
   const configPath = path.join(quayDir, "config.yml");
   const tasksDir = path.join(root, "tasks");
+  const launchSettingsPath = path.join(root, ".claude", "launch.settings.json");
+  const launchSettingsContent = generateLaunchSettingsContent();
+  const profilesPath = path.join(quayDir, "profiles.yml");
+  const profilesContent = generateProfilesContent();
 
   // Check if config already exists.
   const configExists = fs.existsSync(configPath);
@@ -272,6 +390,10 @@ export function runInit(opts: InitOptions): InitResult {
       configPath,
       tasksDir,
       content: "",
+      launchSettingsPath,
+      launchSettingsContent: "",
+      profilesPath,
+      profilesContent: "",
     };
     return result;
   }
@@ -289,7 +411,7 @@ export function runInit(opts: InitOptions): InitResult {
   const content = generateConfigContent({ providerId, providerPath, isNode, isGo });
 
   if (opts.dryRun) {
-    return { outcome: "dry-run", configPath, tasksDir, content };
+    return { outcome: "dry-run", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent };
   }
 
   // Write config.
@@ -301,7 +423,24 @@ export function runInit(opts: InitOptions): InitResult {
     fs.mkdirSync(tasksDir, { recursive: true });
   }
 
-  return { outcome: "written", configPath, tasksDir, content };
+  // Lay down .claude/launch.settings.json (with bypassPermissions) so a cold-start
+  // inner does not hit a permission prompt on its own loop scripts. Create-if-absent
+  // on a fresh init; --force overwrites a stale copy. Never silently overwrite a
+  // user's launch settings on a plain re-init (that path returns "skipped" anyway).
+  if (opts.force || !fs.existsSync(launchSettingsPath)) {
+    fs.mkdirSync(path.dirname(launchSettingsPath), { recursive: true });
+    fs.writeFileSync(launchSettingsPath, launchSettingsContent, "utf8");
+  }
+
+  // Lay down .quay/profiles.yml (the profile carrier, AC154) so quay-launch.sh can
+  // resolve launcher/model/--bare/-n/unset + flag-only params. Same create-if-absent /
+  // --force semantics as launch.settings.json.
+  if (opts.force || !fs.existsSync(profilesPath)) {
+    fs.mkdirSync(path.dirname(profilesPath), { recursive: true });
+    fs.writeFileSync(profilesPath, profilesContent, "utf8");
+  }
+
+  return { outcome: "written", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent };
 }
 
 /**

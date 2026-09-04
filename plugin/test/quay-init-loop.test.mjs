@@ -1,438 +1,201 @@
-// @test-group governance
-// quay-init-loop.test.mjs — gap-loop-mechanism-lives-outside-the-package-and-cannot-ship +
-// gap-cold-start-needs-a-human-to-dictate-eight-steps (phase 1: AC2/AC3/AC4).
-// Tests the `--loop` category of plugin/scripts/quay-init.sh: lays down the two-layer loop
-// mechanism into a target workspace with mechanized placeholder substitution (AC3/AC4), and
-// the upgrade path that must not overwrite local changes (AC5).
+// @test-group engine
+// @load-sensitive real-install
+// @load-sensitive-entry 2026-08-09 real-install e2e (quay-init --loop); install family flake rotation
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
+// each test spawns a real quay-init.sh --loop subprocess tree. The install/quay-init family rotated
+// flakes across groups under full-suite load, so the whole family is consolidated into the
+// concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
+// quay-init-loop.test.mjs — gap-quay-init-never-commits-broken-committed-state (AC1-AC3).
 //
-// AC3 — `quay-init --loop --dry-run` lists would-copy items; a real run lays down the full set.
-// AC4 — the laid-down tick docs have the target's test command / tmux session / repo root, and
-//       grep finds NO quay-specific literals (scripts/test.sh, /home/yale/work/quay).
-// AC5 — on a workspace where a laid-down tick doc was locally edited, a re-run does NOT overwrite
-//       the local change and lists the conflict.
-// AC2 — the test command detection ladder (scripts/test.sh → package.json scripts.test → go.mod →
-//       Cargo.toml) detects each real project's convention and PRINTS it for human confirmation;
-//       an explicit --test-command takes priority. (gap-cold-start-...-eight-steps AC2)
-// AC3 — with no detection source, --loop FAILS CLOSED naming every location searched, never a
-//       guessed default. (AC3 negative control)
-// AC4 — a stale same-name mechanism file is residue: backed up + replaced + reported without
-//       --force; localizable prose (tick docs) is NOT residue-cleaned (upgrade path preserved).
-//       (AC4)
+// quay-init 铺文件但从不 commit ⇒ consumer 仓库的机制默认活在未提交工作树里，committed 态是否自洽纯属
+// 运气（archguard 实测：提交了 ready-pool-check 却没提交它的三个 helper ⇒ fresh-clone broken）。本文件
+// 断言修复后的交付契约：铺完机制自动 commit（`chore(quay-init):` 前缀，AC1）；fresh-clone + quay-init
+// ⇒ 机制完整（ready-pool-check 依赖齐全，无 broken committed 态，AC2）；已有未提交改动时不静默覆盖
+// （检测 + 提示 + 待确认，AC3）。
 //
-// Run:
-//   scripts/test.sh plugin/test/quay-init-loop.test.mjs
-//   node --test plugin/test/quay-init-loop.test.mjs
+// NOTE (2026-08-08): this file reuses the NAME of the pre-split quay-init-loop.test.mjs (54 tests,
+// split 2026-08-07 into quay-init-loop-{core,runtime,vendor,driver}.test.mjs under the shared
+// quay-init-loop-helpers.mjs). The old file was deleted; this is a NEW, small file (well under the
+// node:test worker event-loop exhaustion threshold) scoped to the auto-commit ACs. Shared helpers
+// come from quay-init-loop-helpers.mjs (same single quay-init surface).
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { makeTmp, cleanup, runInit, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
 
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+// ── local helpers ────────────────────────────────────────────────────────────────────────────────────
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const pluginDir = path.resolve(__dirname, '..');
-
-function makeTmp(prefix = 'quay-init-') {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-}
-function cleanup(dir) {
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
-}
-
-function runInit(workspace, args = [], pluginRoot = pluginDir) {
-  return spawnSync('bash', [path.join(pluginRoot, 'scripts', 'quay-init.sh'), ...args],
-    {
-      cwd: workspace,
-      encoding: 'utf8',
-      env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
-    });
+// git <cwd> <args...>: run a git command and return trimmed stdout (empty string on failure).
+function git(cwd, args) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  return r.status === 0 ? (r.stdout || "").trim() : "";
 }
 
-// ── AC3: dry-run lists would-copy; real run lays down the full set ─────────────────────────────────
-test('AC3 — --loop --dry-run lists would-copy items for the full loop mechanism', () => {
-  const ws = makeTmp();
+// gitWorkspace(): a fresh temp git repo with one initial commit (so the consumer repo has a HEAD and
+// a clean tree — the "fresh-clone" baseline). Sets a local identity so `git commit` works anywhere.
+function gitWorkspace() {
+  const ws = makeTmp("quay-init-git-");
+  const init = spawnSync("git", ["init", "-q"], { cwd: ws, encoding: "utf8" });
+  if (init.status !== 0) {
+    cleanup(ws);
+    throw new Error(`git init failed in ${ws}: ${init.stderr}`);
+  }
+  spawnSync("git", ["config", "user.name", "quay-init test"], { cwd: ws, encoding: "utf8" });
+  spawnSync("git", ["config", "user.email", "quay-init-test@example.com"], { cwd: ws, encoding: "utf8" });
+  fs.writeFileSync(path.join(ws, "README.md"), "# fixture\n");
+  fs.writeFileSync(path.join(ws, "app.txt"), "v1\n");
+  spawnSync("git", ["add", "README.md", "app.txt"], { cwd: ws, encoding: "utf8" });
+  const cm = spawnSync("git", ["commit", "-qm", "initial"], { cwd: ws, encoding: "utf8" });
+  if (cm.status !== 0) {
+    cleanup(ws);
+    throw new Error(`initial commit failed in ${ws}: ${cm.stderr}`);
+  }
+  return ws;
+}
+
+const INIT_ARGS = (ws) => [
+  "--loop", "--root", ws, "--project", "proj",
+  "--test-command", "node --test", "--tmux-session", "proj-0:0.0",
+];
+
+// cloneOf(ws): a sibling temp dir that is a `git clone` of ws — a FRESH CLONE of the committed state.
+// Returns the clone dir (caller must cleanup).
+function cloneOf(ws) {
+  const dst = makeTmp("quay-init-clone-");
+  fs.rmSync(dst, { recursive: true, force: true });
+  const cl = spawnSync("git", ["clone", "-q", ws, dst], { encoding: "utf8" });
+  if (cl.status !== 0) {
+    cleanup(dst);
+    throw new Error(`git clone of ${ws} failed: ${cl.stderr}`);
+  }
+  return dst;
+}
+
+// ready-pool-check.ts + its three named helper modules (the archguard story: the consumer was
+// committed but its helpers were not → broken fresh-clone). AC2 asserts all four are committed.
+const READY_POOL_CLOSURE = [
+  "plugin/scripts/ready-pool-check.ts",
+  "plugin/scripts/task-status-drift-check.ts",      // taskWorkLanded
+  "plugin/scripts/touches-orthogonality-check.ts",  // checkTaskTouchesResolve
+  "plugin/scripts/concurrent-batch-scheduler.ts",   // expandDeclaredTouches
+];
+
+// precommit-guard.ts's ESM `./` import — the delta-scope unverified-landing defect
+// (gap-quay-init-laydown-missing-touches-checker): the guard is laid down AND its hook installed,
+// but the imported checker was absent from the --loop laydown set until this fix. The
+// ${SCRIPT_DIR} dependency-closure scan cannot see ESM relative imports, so the checker is an
+// EXPLICIT derive_loop_scripts addition — and must be present in the committed consumer tree.
+const PRECOMMIT_GUARD_CLOSURE = [
+  "plugin/scripts/precommit-guard.ts",
+  "plugin/scripts/touches-one-entry-one-path-check.ts",  // imported by precommit-guard.ts:65
+];
+
+// ── AC1: auto-commit with a `chore(quay-init):` prefix ──────────────────────────────────────────────
+test('AC1 — quay-init --loop auto-commits the laid-down mechanisms with a chore(quay-init): prefix', () => {
+  const ws = gitWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--dry-run', '--root', ws, '--project', 'proj',
-      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
+    const r = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /auto-commit: committed/, 'must report the auto-commit');
+    // The measure: `git log --oneline -3 | grep -c 'chore(quay-init)'` ≥ 1.
+    const log = git(ws, ["log", "--oneline", "-3"]);
+    assert.match(log, /chore\(quay-init\)/, 'the auto-commit must use the chore(quay-init): prefix');
+    // The committed tree carries the mechanism files — a fresh clone after this commit is complete.
+    const tracked = git(ws, ["ls-files"]);
+    assert.ok(tracked.includes("plugin/scripts/resource-gate.sh"), 'mechanism script must be committed');
+    assert.ok(tracked.includes("orchestration/orchestrator-loop-tick.md"), 'outer tick doc must be committed');
+    assert.ok(tracked.includes("docs/analysis/fast-mode-loop-tick.md"), 'inner tick doc must be committed');
+    assert.ok(tracked.includes(".quay/config.yml"), 'the provider config must be committed');
+    // The pre-commit guard's own ESM import must ship too — the hook install below runs
+    // precommit-guard.ts --install-hook which imports ./touches-one-entry-one-path-check.ts; a
+    // consumer committed state WITHOUT the imported checker is exactly the ERR_MODULE_NOT_FOUND
+    // defect (gap-quay-init-laydown-missing-touches-checker).
+    assert.ok(tracked.includes("plugin/scripts/touches-one-entry-one-path-check.ts"),
+      'precommit-guard.ts\'s imported checker must be committed');
+    // The gitignored runtime bundles are NOT committed (AC10) — a committed state without 1.3MB bundles.
+    assert.ok(!/quay\/runtime\//.test(tracked), 'runtime bundles must not be committed (gitignored, AC10)');
+  } finally { cleanup(ws); }
+});
+
+// ── AC2: fresh-clone + quay-init ⇒ complete mechanism, no broken committed state ─────────────────────
+test('AC2 — a fresh clone of the committed state carries the FULL mechanism set (ready-pool-check and its helper modules together)', () => {
+  const ws = gitWorkspace();
+  try {
+    const r = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    // Fresh-clone observer: clone the repo's committed state and read the committed tree.
+    const clone = cloneOf(ws);
+    try {
+      const committed = git(clone, ["ls-files"]);
+      for (const f of READY_POOL_CLOSURE) {
+        assert.ok(committed.includes(f), `fresh-clone committed tree must carry ${f} (broken-committed-state guard)`);
+      }
+      for (const f of PRECOMMIT_GUARD_CLOSURE) {
+        assert.ok(committed.includes(f), `fresh-clone committed tree must carry ${f} (precommit-guard ESM import closure)`);
+      }
+      // A fresh clone's worktree is clean at HEAD — nothing is left half-committed.
+      assert.equal(git(clone, ["status", "--porcelain"]), "", 'fresh clone working tree must be clean');
+    } finally { cleanup(clone); }
+  } finally { cleanup(ws); }
+});
+
+// ── AC3: pre-existing uncommitted changes are NOT silently swept ─────────────────────────────────────
+test('AC3 — pre-existing uncommitted changes: quay-init detects + prompts; non-interactive declines, --auto-commit-confirm commits ONLY its own laid-down files', () => {
+  const ws = gitWorkspace();
+  try {
+    // Pre-existing uncommitted consumer work (the meta-cc 46-changes shape): an untracked file and a
+    // modified tracked file, both unrelated to quay-init.
+    fs.writeFileSync(path.join(ws, "notes.txt"), "user note\n");
+    fs.writeFileSync(path.join(ws, "app.txt"), "v2\n");
+    const pre = git(ws, ["status", "--porcelain"]);
+    assert.match(pre, /notes\.txt/, 'fixture: notes.txt is an uncommitted untracked file');
+    assert.match(pre, /app\.txt/, 'fixture: app.txt has an uncommitted tracked edit');
+
+    // Run 1 — non-interactive, no confirm flag: must DETECT + DECLINE, never silently sweep.
+    const r1 = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r1.status, 0, `declined run must still exit 0 (laydown succeeded):\n${r1.stderr}`);
+    assert.match(r1.stderr, /already had uncommitted change/, 'must detect pre-existing uncommitted changes');
+    assert.match(r1.stderr, /DECLINED \(non-interactive/, 'non-interactive without confirm must decline the auto-commit');
+    assert.ok(!/chore\(quay-init\)/.test(git(ws, ["log", "--oneline", "-3"])), 'must NOT commit without confirmation');
+    assert.equal(fs.readFileSync(path.join(ws, "notes.txt"), "utf8"), "user note\n", 'pre-existing untracked file survives');
+    assert.equal(fs.readFileSync(path.join(ws, "app.txt"), "utf8"), "v2\n", 'pre-existing tracked edit survives');
+
+    // Run 2 — explicit confirmation: commits ONLY quay-init's laid-down paths; pre-existing stays out.
+    const r2 = runInit(ws, [...INIT_ARGS(ws), "--auto-commit-confirm"]);
+    assert.equal(r2.status, 0, `confirmed run must exit 0:\n${r2.stderr}`);
+    assert.match(r2.stdout, /auto-commit: committed/, 'confirmed run must commit');
+    assert.match(git(ws, ["log", "--oneline", "-3"]), /chore\(quay-init\)/, 'chore(quay-init) commit must exist after confirmation');
+    const status = git(ws, ["status", "--porcelain"]);
+    assert.match(status, /notes\.txt/, 'notes.txt must stay uncommitted (not swept into the quay-init commit)');
+    assert.match(status, /app\.txt/, 'app.txt must stay uncommitted (not swept into the quay-init commit)');
+  } finally { cleanup(ws); }
+});
+
+// ── non-git workspace: auto-commit is a no-op; the laydown still succeeds ────────────────────────────
+// (gap-slow-test-shared-fixture-and-group-recheck AC2): this is the ONE test in the file that is
+// install-as-setup (a non-git laydown whose captured output + laid-down tree are reusable), so it now
+// copies from the SHARED prebuilt fixture (laydownWorkspace) instead of running a fresh install. The
+// auto-commit tests above/below are install-as-behavior (the git auto-commit is the object under test)
+// and keep their real installs on fresh git workspaces — the non-git fixture cannot serve them.
+test('AC1/control — a non-git workspace skips auto-commit but still lays the mechanisms down (exit 0)', () => {
+  const { ws, install: r } = laydownWorkspace();
+  try {
+    assert.equal(r.status, 0, `non-git laydown must still exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /auto-commit: SKIP \(not a git repository/, 'must skip auto-commit in a non-git workspace');
+    assert.ok(fs.existsSync(path.join(ws, "plugin", "scripts", "resource-gate.sh")), 'mechanism files are still laid down');
+  } finally { cleanup(ws); }
+});
+
+// ── --dry-run: never commits (nothing was written) ───────────────────────────────────────────────────
+test('AC1/control — --dry-run never auto-commits', () => {
+  const ws = gitWorkspace();
+  try {
+    const r = runInit(ws, [...INIT_ARGS(ws), "--dry-run"]);
     assert.equal(r.status, 0, `dry-run must exit 0:\n${r.stderr}`);
-    assert.match(r.stdout, /would-copy/, 'dry-run must report would-copy lines');
-    assert.match(r.stdout, /orchestrator-loop-tick\.md/, 'dry-run must list the outer tick doc');
-    assert.match(r.stdout, /fast-mode-loop-tick\.md/, 'dry-run must list the inner tick doc');
-    assert.match(r.stdout, /fast-mode-telemetry\.ts/, 'dry-run must list the telemetry checker');
-    assert.match(r.stdout, /resource-gate\.sh/, 'dry-run must list the resource gate');
-    assert.match(r.stdout, /heavy-op-token\.sh/, 'dry-run must list the heavy-op token');
-    // Dry-run must NOT write anything.
-    assert.ok(!fs.existsSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md')), 'dry-run must not write files');
-    assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'resource-gate.sh')), 'dry-run must not write files');
+    assert.match(r.stdout, /auto-commit: SKIP \(--dry-run/, 'dry-run must skip auto-commit');
+    assert.ok(!/chore\(quay-init\)/.test(git(ws, ["log", "--oneline", "-3"])), 'dry-run must not create any commit');
   } finally { cleanup(ws); }
-});
-
-test('AC3 — a real --loop run lays down the full two-layer mechanism set', () => {
-  const ws = makeTmp();
-  try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj',
-      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    // 2 tick docs
-    assert.ok(fs.existsSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md')), 'outer tick doc laid down');
-    assert.ok(fs.existsSync(path.join(ws, 'docs', 'analysis', 'fast-mode-loop-tick.md')), 'inner tick doc laid down');
-    // mechanism scripts
-    const expectedScripts = [
-      'fast-mode-telemetry.ts', 'inner-blocked-signal.ts', 'inner-forensics.mjs', 'inner-idle-log.ts',
-      'inner-state.sh', 'resource-gate.sh', 'heavy-op-token.sh', 'task-contract-check.ts',
-      'task-status-drift-check.ts', 'touches-orthogonality-check.ts', 'concurrent-batch-scheduler.ts',
-      'it0-split-or-commit-check.ts', 'pipe-exit-code-check.sh',
-      // transitive deps of the checkers (the laid-down mechanism must be functional)
-      'gate-script-base.ts', 'workflow-event-schema.mjs', 'task-schema.ts', 'touches-parser.ts',
-      'wiring-coverage-check.ts',
-    ];
-    for (const s of expectedScripts) {
-      assert.ok(fs.existsSync(path.join(ws, 'plugin', 'scripts', s)), `loop script must be laid down: plugin/scripts/${s}`);
-    }
-    // state file records the plugin version (upgrade path seed)
-    assert.ok(fs.existsSync(path.join(ws, '.quay', 'quay-init-state.json')), 'state file must be written');
-    const state = JSON.parse(fs.readFileSync(path.join(ws, '.quay', 'quay-init-state.json'), 'utf8'));
-    assert.equal(typeof state.pluginVersion, 'string');
-  } finally { cleanup(ws); }
-});
-
-// ── AC4: mechanized placeholder substitution + negative control ────────────────────────────────────
-test('AC4 — laid-down tick docs carry the target values and NO quay-specific literals (negative control)', () => {
-  const ws = makeTmp();
-  try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'myproj',
-      '--test-command', 'npm test', '--tmux-session', 'myproj-0:0.0', '--repo-root', '/srv/target']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-
-    const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
-    const inner = fs.readFileSync(path.join(ws, 'docs', 'analysis', 'fast-mode-loop-tick.md'), 'utf8');
-    const all = outer + '\n' + inner;
-
-    // Substitution applied: the target's test command replaced scripts/test.sh.
-    assert.ok(!all.includes('scripts/test.sh'), 'laid-down tick docs must NOT contain scripts/test.sh (AC4 negative control)');
-    assert.ok(all.includes('npm test'), 'laid-down tick docs must contain the target test command');
-    // Repo root replaced.
-    assert.ok(!all.includes('/home/yale/work/quay'), 'laid-down tick docs must NOT contain the quay dev-tree root (AC8 negative control)');
-    assert.ok(all.includes('/srv/target'), 'laid-down tick docs must contain the target repo root');
-    // tmux session replaced.
-    assert.ok(!all.includes('quay-0:0.0'), 'laid-down tick docs must NOT contain quay tmux session');
-    assert.ok(all.includes('myproj-0:0.0'), 'laid-down tick docs must contain the target tmux session');
-
-    // The mechanism scripts that used to carry quay literals are now self-locating.
-    const innerState = fs.readFileSync(path.join(ws, 'plugin', 'scripts', 'inner-state.sh'), 'utf8');
-    assert.ok(!innerState.includes('/home/yale/work/quay'), 'inner-state.sh must not carry a hardcoded quay root');
-  } finally { cleanup(ws); }
-});
-
-test('AC3 — no detection source: --loop fails closed, naming every location it searched, without guessing a default', () => {
-  const ws = makeTmp(); // empty — no scripts/test.sh, package.json, go.mod, or Cargo.toml
-  try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
-    assert.equal(r.status, 2, '--loop with no detectable test command must fail closed (exit 2)');
-    assert.match(r.stderr, /--test-command/, 'failure must tell the human to pass --test-command explicitly');
-    // AC3: the failure must say WHICH locations it searched (not just "no command found").
-    for (const src of ['scripts/test.sh', 'package.json', 'go.mod', 'Cargo.toml']) {
-      assert.ok(r.stderr.includes(src), `failure must name the searched detection source: ${src}`);
-    }
-    assert.match(r.stderr, /no universal default/, 'failure must state that no default is guessed');
-  } finally { cleanup(ws); }
-});
-
-// ── AC2: the detection ladder (gap-cold-start-...-eight-steps) ──────────────────────────────────────
-// Measured on three real projects, each on a different rung:
-//   quay ⇒ scripts/test.sh → "bash scripts/test.sh"; archguard ⇒ package.json scripts.test → "npm test";
-//   meta-cc ⇒ go.mod → "go test ./..."; Cargo.toml → "cargo test".
-test('AC2 — detection ladder: scripts/test.sh is detected as bash scripts/test.sh (quay convention)', () => {
-  const ws = makeTmp();
-  try {
-    fs.mkdirSync(path.join(ws, 'scripts'), { recursive: true });
-    fs.writeFileSync(path.join(ws, 'scripts', 'test.sh'), '#!/bin/bash\necho test\n');
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
-    assert.equal(r.status, 0, `init with a detected test command must exit 0:\n${r.stderr}`);
-    assert.match(r.stdout, /detected test command: bash scripts\/test\.sh/,
-      'must print the detected command for the human to confirm (AC2: 显示给人确认)');
-  } finally { cleanup(ws); }
-});
-
-test('AC2 — detection ladder: package.json scripts.test is detected as npm test (archguard convention)', () => {
-  const ws = makeTmp();
-  try {
-    fs.writeFileSync(path.join(ws, 'package.json'),
-      JSON.stringify({ name: 'proj', scripts: { test: 'vitest run' } }, null, 2));
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    assert.match(r.stdout, /detected test command: npm test/,
-      'must detect npm test from a package.json scripts.test entry');
-    // The laid-down tick docs must carry the DETECTED command, not the quay-specific default.
-    const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
-    assert.ok(outer.includes('npm test'), 'tick docs must carry the detected test command');
-    assert.ok(!outer.includes('scripts/test.sh'), 'tick docs must NOT carry the quay default (AC3/AC4 negative control)');
-  } finally { cleanup(ws); }
-});
-
-test('AC2 — detection ladder: go.mod is detected as go test ./... (meta-cc convention)', () => {
-  const ws = makeTmp();
-  try {
-    fs.writeFileSync(path.join(ws, 'go.mod'), 'module example.com/proj\n\ngo 1.22\n');
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    assert.match(r.stdout, /detected test command: go test \.\/\.\.\./,
-      'must detect go test ./... from a go.mod file');
-  } finally { cleanup(ws); }
-});
-
-test('AC2 — detection ladder: Cargo.toml is detected as cargo test', () => {
-  const ws = makeTmp();
-  try {
-    fs.writeFileSync(path.join(ws, 'Cargo.toml'), '[package]\nname = "proj"\nversion = "0.1.0"\n');
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    assert.match(r.stdout, /detected test command: cargo test/,
-      'must detect cargo test from a Cargo.toml file');
-  } finally { cleanup(ws); }
-});
-
-test('AC2 — an explicit --test-command takes priority over detection', () => {
-  const ws = makeTmp();
-  try {
-    // The workspace WOULD detect npm test; the explicit flag must win.
-    fs.writeFileSync(path.join(ws, 'package.json'),
-      JSON.stringify({ name: 'proj', scripts: { test: 'vitest run' } }, null, 2));
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    assert.match(r.stdout, /using explicit --test-command: node --test/,
-      'must report the explicit command');
-    assert.ok(!/detected test command/.test(r.stdout),
-      'an explicit --test-command must suppress the detection ladder');
-    const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
-    assert.ok(outer.includes('node --test'), 'tick docs must carry the explicit command');
-    assert.ok(!outer.includes('npm test'), 'tick docs must NOT carry a detected command when explicit wins');
-  } finally { cleanup(ws); }
-});
-
-// ── AC4: residue cleanup merged into the install (gap-cold-start-...-eight-steps) ───────────────────
-// A same-name-different-content PRODUCT file is a stale hot-copy leftover (residue). The install
-// must dispose of it VISIBLY — back it up, replace it with the product content, report both — and
-// must NOT require a separate `git rm` step nor a --force flag. Localizable prose (tick docs) stays
-// preserve-mode: a local edit is a conflict, listed and left untouched (upgrade path, AC5).
-test('AC4 — a stale same-name mechanism file is residue: backed up, replaced, and reported (no --force needed)', () => {
-  const ws = makeTmp();
-  try {
-    // Pre-place a stale copy of a product mechanism file (a hot-copy leftover) with different content.
-    fs.mkdirSync(path.join(ws, 'plugin', 'scripts'), { recursive: true });
-    fs.writeFileSync(path.join(ws, 'plugin', 'scripts', 'resource-gate.sh'), '#!/bin/bash\necho stale-residue\n');
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
-    assert.equal(r.status, 0, `init must succeed after disposing of the residue:\n${r.stderr}`);
-    assert.match(r.stdout, /cleaned-residue/, 'must report the residue cleanup visibly');
-    assert.match(r.stdout, /backup:/, 'must report where the backup went');
-    // The stale file is replaced with the product content (byte-identical to the plugin source).
-    const installed = fs.readFileSync(path.join(ws, 'plugin', 'scripts', 'resource-gate.sh'), 'utf8');
-    const source = fs.readFileSync(path.join(pluginDir, 'scripts', 'resource-gate.sh'), 'utf8');
-    assert.equal(installed, source, 'residue must be replaced with the product content');
-    // The backup exists and preserves the stale content.
-    const backupsDir = path.join(ws, '.quay', 'quay-init-backups');
-    assert.ok(fs.existsSync(backupsDir), 'a backup directory must exist');
-    const backupFiles = fs.readdirSync(backupsDir, { recursive: true })
-      .filter((p) => typeof p === 'string' && p.endsWith('resource-gate.sh'));
-    assert.ok(backupFiles.length > 0, 'a backup of the stale file must exist');
-    const backupPath = path.join(backupsDir, backupFiles[0]);
-    assert.equal(fs.readFileSync(backupPath, 'utf8'), '#!/bin/bash\necho stale-residue\n',
-      'the backup must preserve the stale content (nothing silently lost)');
-    // The AC6 verify check still passes (installed executables byte-identical to the product).
-    assert.match(r.stdout, /verify-installed-executables: OK/, 'the byte-identical check must pass after residue cleanup');
-  } finally { cleanup(ws); }
-});
-
-test('AC4 — localizable files (tick docs) are NOT residue-cleaned: a local edit survives without --force', () => {
-  const ws = makeTmp();
-  try {
-    const args = ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test'];
-    const r1 = runInit(ws, args);
-    assert.equal(r1.status, 0, `first init must exit 0:\n${r1.stderr}`);
-    const outerPath = path.join(ws, 'orchestration', 'orchestrator-loop-tick.md');
-    const firstContent = fs.readFileSync(outerPath, 'utf8');
-    // A project's own customization of a laid-down tick doc.
-    fs.writeFileSync(outerPath, firstContent + '\n<!-- local customisation -->\n', 'utf8');
-    const r2 = runInit(ws, args);
-    assert.equal(r2.status, 0, `re-run must exit 0:\n${r2.stderr}`);
-    assert.match(r2.stdout, /CONFLICT/, 'the local tick-doc edit is reported as a conflict');
-    assert.ok(!r2.stdout.includes('cleaned-residue'),
-      'tick docs (prose, localizable) must NOT be residue-cleaned');
-    const after = fs.readFileSync(outerPath, 'utf8');
-    assert.ok(after.includes('local customisation'), 'the local edit must survive (upgrade path)');
-    assert.equal(after, firstContent + '\n<!-- local customisation -->\n', 'the local edit must be byte-preserved');
-  } finally { cleanup(ws); }
-});
-
-// ── AC5: upgrade path — idempotent re-run; local edits not overwritten, conflict listed ─────────────
-test('AC5 — re-run is idempotent (skips identical), and a locally-edited tick doc is NOT overwritten; the conflict is listed', () => {
-  const ws = makeTmp();
-  try {
-    const args = ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test'];
-    const r1 = runInit(ws, args);
-    assert.equal(r1.status, 0, `first init must exit 0:\n${r1.stderr}`);
-    const outerPath = path.join(ws, 'orchestration', 'orchestrator-loop-tick.md');
-    const firstContent = fs.readFileSync(outerPath, 'utf8');
-
-    // Second run: everything identical → skipped, nothing changed.
-    const r2 = runInit(ws, args);
-    assert.equal(r2.status, 0, `second init must exit 0:\n${r2.stderr}`);
-    assert.match(r2.stdout, /skipped \(identical\)/, 're-run must skip identical files');
-    assert.equal(fs.readFileSync(outerPath, 'utf8'), firstContent, 'second run must not modify the laid-down tick doc');
-
-    // Local edit: simulate the target project customizing its outer tick doc.
-    fs.writeFileSync(outerPath, firstContent + '\n<!-- local customisation -->\n', 'utf8');
-
-    // Third run: the local change must SURVIVE (conflict listed, not overwritten).
-    const r3 = runInit(ws, args);
-    assert.equal(r3.status, 0, `third init must exit 0:\n${r3.stderr}`);
-    assert.match(r3.stdout, /CONFLICT/, 're-run must report the conflict for the locally-edited tick doc');
-    const after = fs.readFileSync(outerPath, 'utf8');
-    assert.ok(after.includes('local customisation'), 'local edit must NOT be overwritten (upgrade path preserves local changes)');
-    assert.equal(after, firstContent + '\n<!-- local customisation -->\n', 'the local edit must be byte-preserved');
-  } finally { cleanup(ws); }
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════════════════════
-// gap-quay-init-rewrites-an-executable-instead-of-generating-config
-// 可执行文件一律原样复制，只生成配置；散文可以本地化，代码不行。
-// ═══════════════════════════════════════════════════════════════════════════════════════════════
-
-// AC1/AC2 — session-liveness.sh is laid down VERBATIM (cp, not render_substitutions); the
-// per-project session is CONFIG, generated into orchestration/session-liveness.env.
-test('AC1/AC2 — session-liveness.sh is copied verbatim; the session is generated config, not a script rewrite', () => {
-  const ws = makeTmp();
-  try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj',
-      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    const src = fs.readFileSync(path.join(pluginDir, 'scripts', 'session-liveness.sh'), 'utf8');
-    const installed = fs.readFileSync(path.join(ws, 'plugin', 'scripts', 'session-liveness.sh'), 'utf8');
-    assert.equal(installed, src, 'installed session-liveness.sh must be byte-identical to its source (cp, not render)');
-    assert.ok(!installed.includes('__QUAY_TMUX_SESSION__'), 'the placeholder must not exist (AC1)');
-    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-liveness.env'), 'utf8');
-    assert.match(envFile, /SESSION_TMUX_SESSION=proj-0:0\.0/, 'the --tmux-session value must be written to the generated config');
-    assert.ok(!installed.includes('proj-0'), 'the script itself must NOT carry the target session (config, not code)');
-  } finally { cleanup(ws); }
-});
-
-// AC2 — no render_substitutions call in quay-init.sh acts on an executable: grep shows the script
-// is only ever passed to copy_one. (The two remaining render_substitutions calls are tick docs.)
-test('AC2 — quay-init.sh has no render_substitutions call targeting session-liveness.sh', () => {
-  const initSrc = fs.readFileSync(path.join(pluginDir, 'scripts', 'quay-init.sh'), 'utf8');
-  // The render_substitutions call sites must not reference the executable.
-  assert.ok(!initSrc.includes('render_substitutions "$sl_src"'),
-    'quay-init.sh must not render the session-liveness.sh executable');
-  // The executable path is only ever copied verbatim.
-  assert.ok(initSrc.includes('copy_one "$sl_src" "$sl_dst"'),
-    'quay-init.sh must copy session-liveness.sh via copy_one (cp)');
-});
-
-// AC6 — the mechanical check runs as part of quay-init --loop and passes on a clean install.
-test('AC6 — verify-installed-executables.sh runs inside quay-init --loop and passes (byte-identical executables)', () => {
-  const ws = makeTmp();
-  try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj',
-      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    assert.match(r.stdout, /verify-installed-executables: OK/, 'quay-init must run the AC6 check and report OK');
-    // Standalone re-run, matching what cold-start-e2e does.
-    const v = spawnSync('bash', [path.join(pluginDir, 'scripts', 'verify-installed-executables.sh'), pluginDir, ws],
-      { encoding: 'utf8' });
-    assert.equal(v.status, 0, `verify must exit 0:\n${v.stderr}`);
-    assert.match(v.stdout, /byte-identical/, 'verify must report the byte-identical invariant');
-  } finally { cleanup(ws); }
-});
-
-// AC4 — bidirectional negative control: flip one byte in an installed executable ⇒ the check FAILS
-// naming it; restore ⇒ the check PASSES again. A check that only ever reports "same" is the bug.
-test('AC4 — the check fails when an installed executable drifts by one byte, and passes after restore', () => {
-  const ws = makeTmp();
-  try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj',
-      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    const installed = path.join(ws, 'plugin', 'scripts', 'session-liveness.sh');
-    // fail direction: simulate a future render path rewriting the installed executable by one byte.
-    const buf = fs.readFileSync(installed);
-    buf[0] ^= 0x01;
-    fs.writeFileSync(installed, buf);
-    const v = spawnSync('bash', [path.join(pluginDir, 'scripts', 'verify-installed-executables.sh'), pluginDir, ws],
-      { encoding: 'utf8' });
-    assert.notEqual(v.status, 0, 'verify must FAIL when an installed executable drifts by one byte');
-    assert.match(v.stderr, /session-liveness\.sh/, 'the failure must name the drifted file');
-    // restore direction.
-    buf[0] ^= 0x01;
-    fs.writeFileSync(installed, buf);
-    const v2 = spawnSync('bash', [path.join(pluginDir, 'scripts', 'verify-installed-executables.sh'), pluginDir, ws],
-      { encoding: 'utf8' });
-    assert.equal(v2.status, 0, 'verify must PASS after restore (AC4 restore direction)');
-  } finally { cleanup(ws); }
-});
-
-// ── AC7b: lay the runtime into the target + PATH-independent provider config ─────────────────────────
-// gap-cold-start-...-eight-steps: the cold-started loop must NOT depend on the quay dev tree via
-// PATH symlinks (quay-native → /home/yale/work/quay/packages/quay-native/dist/).
-test('AC7b — --loop writes a .quay/config.yml whose provider mcp_entry is project-local absolute (never a PATH-resolved quay-native)', () => {
-  const ws = makeTmp();
-  try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    const cfg = path.join(ws, '.quay', 'config.yml');
-    assert.ok(fs.existsSync(cfg), '--loop must write a .quay/config.yml for a config-less target (AC7b)');
-    const src = fs.readFileSync(cfg, 'utf8');
-    // The provider's mcp_entry must be an absolute project-local path, not a bare `quay-native`.
-    assert.ok(src.includes('mcp_entry'), 'config must declare the provider mcp_entry');
-    assert.ok(src.includes(ws), 'config must reference the target project by absolute path');
-    // Negative control: the COMMAND element must never be the bare `quay-native` (which PATH-resolves
-    // to the dev-tree symlink). It must be an absolute path into the target.
-    assert.ok(!/mcp_entry: \["node", "quay-native", "mcp"\]/.test(src),
-      'config must not PATH-resolve a bare quay-native command — that is the dev-tree symlink dependency (AC7b negative control)');
-    assert.match(src, /mcp_entry: \["node", "\/[^"]*\/packages\/quay-native\/bin\/quay-native\.ts", "mcp"\]/,
-      'the mcp_entry command must be an absolute project-local path into the laid-down runtime');
-    assert.ok(src.includes('QUAY_NATIVE_TASKS_DIR'), 'config must set the native tasks dir');
-  } finally { cleanup(ws); }
-});
-
-test('AC7b — when the plugin has no built runtime bundle, --loop warns (does not fail) and still writes the config', () => {
-  // Construct the no-bundle scenario deterministically: a temp COPY of the plugin with
-  // vendor/quay/dist/quay.js removed. The real pluginDir may have a bundle (the full suite
-  // builds dist into it), so the test must not depend on ambient build state.
-  const src = makeTmp();
-  try {
-    fs.cpSync(pluginDir, src, { recursive: true });
-    fs.rmSync(path.join(src, 'vendor', 'quay', 'dist', 'quay.js'), { force: true });
-    const ws = makeTmp();
-    try {
-      const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
-        '--plugin-root', src]);
-      assert.equal(r.status, 0, `init must exit 0 even without a built runtime:\n${r.stderr}`);
-      assert.match(r.stderr, /WARN:.*vendor\/quay\/dist\/quay\.js/, 'must warn that the runtime bundle is absent');
-      assert.ok(fs.existsSync(path.join(ws, '.quay', 'config.yml')), 'config must still be written');
-    } finally { cleanup(ws); }
-  } finally { cleanup(src); }
-});
-
-test('AC7b — a plugin source WITH a built runtime lays it into the target (project-local copy)', () => {
-  // Use a temp COPY of the plugin + a fake built bundle, so the real worktree is never polluted.
-  const src = makeTmp();
-  try {
-    fs.cpSync(pluginDir, src, { recursive: true });
-    const fakeDist = path.join(src, 'vendor', 'quay', 'dist', 'quay.js');
-    fs.mkdirSync(path.dirname(fakeDist), { recursive: true });
-    fs.writeFileSync(fakeDist, '// fake built quay.js bundle\n', 'utf8');
-    const ws = makeTmp();
-    try {
-      const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
-        '--plugin-root', src]);
-      assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-      assert.match(r.stdout, /vendor\/quay\/dist\/quay\.js/, 'must report the runtime lay-down');
-      const laid = path.join(ws, 'vendor', 'quay', 'dist', 'quay.js');
-      assert.ok(fs.existsSync(laid), 'the runtime must be laid into the target project');
-      assert.equal(fs.readFileSync(laid, 'utf8'), '// fake built quay.js bundle\n',
-        'the laid-down runtime must be byte-identical to the plugin source');
-    } finally { cleanup(ws); }
-  } finally { cleanup(src); }
 });

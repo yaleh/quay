@@ -126,23 +126,33 @@ function main() {
   // (proves this test file isn't merely testing "the gate always passes";
   // it demonstrates the gate correctly rejects genuinely unchecked/missing
   // criteria, and ONLY the checked-but-false case slips through.)
+  //
+  // gap-both-gates-read-one-signal-so-done-costs-nothing: under the restored
+  // ADR-001 semantics, an honestly-unchecked AC box no longer fails
+  // author->ready (checked-state belongs to ready->done, AC3). The honest
+  // failure control therefore moves to the execute->done gate, where the
+  // DoD checked-state is read (AC7b): a ready task with a genuinely-
+  // unchecked DoD box must still fail. This is exactly the shape the task's
+  // main criterion demands, and it confirms the gate rejects honest
+  // non-completion while only the checked-but-FALSE-claim case slips through.
   store.write("GAME-C", {
-    title: "genuinely-unchecked-control",
-    status: "todo",
+    title: "genuinely-unchecked-dod-control",
+    status: "ready",
     body:
       `## Proposal\n${substantive("Proposal")}\n` +
       `## Plan\n${substantive("Plan")}\n` +
-      `## AC\n- [ ] a real, unchecked criterion\n` +
-      `## DoD\n${substantive("DoD")}\n`,
+      `## AC\n- [x] a real, genuinely checked acceptance criterion\n` +
+      `## DoD\n- [ ] a genuinely-unchecked definition-of-done item, honestly not done\n`,
   });
   {
     const r = store.check("GAME-C");
-    assert(r.gate === "author->ready", "GAME-C: gate is author->ready");
+    assert(r.gate === "execute->done", "GAME-C: gate is execute->done");
     assert(
       r.ok === false,
-      "GAME-C: control case — an honestly-unchecked box still correctly " +
-        "fails the gate (confirms this file is testing the false-but-" +
-        "CHECKED gap specifically, not a broken gate that always passes)"
+      "GAME-C: control case — an honestly-unchecked DoD box still correctly " +
+        "fails the execute->done gate (confirms this file is testing the " +
+        "false-but-CHECKED gap specifically, not a broken gate that always " +
+        "passes)"
     );
   }
 

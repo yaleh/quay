@@ -372,3 +372,291 @@ gh workflow run publish-plugin-dist.yml   # 从 master 重建 dist-plugin，不�
 ```
 
 **这不是催促**——是把「那一次动作具体是什么、代价多大」测清楚放在这里，等人决定。
+
+## 2026-08-07 15:1xZ — 分支合并：integration→develop 分叉，batch-merge 工具只支持 FF、fail-closed needs-human
+
+**现象**：并发 8 真绿已达成（integration 71734885，state=green，human ruling「并发拿到真绿」兑现）。
+按裁定「merge waits for fast reliable concurrency-8 suite」，合并应可进行。但 `integration-batch-merge.sh
+--dry-run` 报 **NOT-FAST-FORWARD（develop 有 integration 缺的 commit，分叉）→ needs human**。
+
+**分叉构成**：develop 有书纪 commit（外层/管理者 tick-log 等）integration 缺；integration 有任务 commit
+（serial 机制 f062caf9 / fix-21 b209f4fd / 40→6 内容 / 系统性 serial 路由 c4343421 / tmux 修复 71734885）
+develop 缺。两线模型下 develop 只被批量合推进、任务只合 integration ⇒ 分叉是**预期形态**，但 batch-merge
+的 FF pre-check 不认识它（SPEC ruling 2026-08-06：FF premise falsified，实际需真 merge）。
+
+**已尝试**：dry-run 确认分叉 + needs-human；工具不移动 ref（fail-closed 安全）。
+
+**为什么超出授权**：真 merge integration→develop 可能冲突（develop 曾 revert 40→6 = 7642849a 删了
+quay-session.ts 等，integration 有 40→6 内容 ⇒ 冲突风险真实）。外层不盲 merge；batch-merge 工具只支持 FF。
+
+**建议选项**：
+1. **修 batch-merge 工具支持真 merge**（gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling
+   的 scope，该任务在 notYetFlipped、DoD 需连跑 2 次全绿）——让工具安全处理分叉合并；
+2. **人裁定直接真 merge**（手动作业或授权 inner 处理），承担 40→6 revert-vs-content 冲突的解决；
+3. **先同步书纪**：把 develop 的书纪 commit 合进 integration（让 integration 重新成为 develop 后代），
+   再走 FF 批量合——但这是反向合并，同样需处理。
+
+**关联**：gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling（notYetFlipped）；
+gap-forty-to-six-remerge-needs-tests-updated-first（40→6 内容已随 fix-21 在 integration 验证绿，remerge
+前提已满足）。
+
+## 2026-08-07 18:2xZ — 并发 8 真绿达成，人的门槛（可靠 + 高速验证）证据提交，请裁定是否开始处理 git branch
+
+**r11 终态**：green 848s（14.1 min）✔2720 ✖0，三趟：245 (product,engine) + 6 (serial) + 15 (lowconc) =
+266（正好 = r10 单趟文件数）。分组机制修复生效（fail-closed 守卫 + 反踩踏测试已保护）。
+
+**门槛两半的证据**：
+- **可靠 ✓（正面证据强）**：r11 三趟 fail=0；今晚两轮红（r10 九条）事后全部归因到真实缺陷、无一假红
+  （r9/r10 各趟测试段此前也多轮 fail 0）。
+- **高速（正面但有争议）**：1368s → 848s（省 38%），但高于 <700s 目标。三趟分解：理论 628s vs 实测
+  848s，220s 开销（进程启动/laydown/尾部效应——非静态检查，checker-mutation 只跑一次）。lowconc cc5
+  理论省 ~65s（848→~780s），仍 >700s；真正大头是 220s 开销。
+
+**选项（裁定归人）**：
+1. **门槛视为达成 → 开始处理 git branch**（24 块冲突面合并）——可靠半已定论，fast 半 38% 改善是实
+   质正面证据；cc5 实验（~30 分钟、省 ~65s）作为合并后精化；
+2. **先做 cc5 实验再判门槛**——绿窗已开、人此前裁定"并发调优等绿窗再做"；但 ~65s 省不跨 <700s，
+   门槛判据可能不变；
+3. **门槛未达成（fast 未到 <700s）→ 继续优化 fast**（220s 开销为首要目标，非 cc5）。
+
+**外层倾向**：选项 1——可靠半定论 + fast 38% 改善是实质正面证据；拖沓无收益（差全真内容、24 块冲突
+面在涨）。cc5 与开销优化作为合并后 follow-up。
+
+---
+
+## 2026-08-08 22:15Z — 红窗闭锁（**manager 已裁定 23:1x：不豁免，维持 AC27 前置②——可读性修复是便利非阻塞；豁免会连带 22 条未验证提交进 develop。正解=修绿套件；逃生口=红窗连续 3 次全量重跑仍不绿时窄 cherry-pick e1f34338（只改 gitignored 运行时产物），届时 manager 直接给，不再上升。本条结案，移出待裁队列**）：可读性修复 e1f34338 在 integration 但合不进来（AC27 前置②套件 green 为假）
+
+**现象**：套件真红（reason=failed, durationMs=1294131, 21.6min 完整跑完）——第一条真正跑完测试后的红，
+真失败在 capability-catalog.test.mjs:272（installed catalog 非 0 unclassified）。同时 failures=[] 空
+（可读性缺口兑现）。
+
+**闭锁（manager 指出）**：让 failures 有内容的修复 e1f34338（static-check red 写 reason + failures[]
+填充）**在 integration 不在 develop**；AC27 前置②「套件 green」为假 ⇒ 批量合不能走 ⇒
+**「让红变可读」的修复，因为红而合不进来**。最短环：修复↔它要修的症状。
+
+**外层已尝试**：确认 e1f34338 在 integration（不在 develop）；integration 领先 16；内层在修
+capability-catalog（套件转绿钥匙）+ Fixing doc assertions + status=ready 负控制。
+
+**为什么超出授权**：合 e1f34338 需豁免 freshness gate（套件红但合可读性修复）——AC27 前置② 明确要求
+套件 green，豁免是范围级决定（改 AC27 前置或特批手动合）。
+
+**选项**：
+1. **人裁定豁免一次**：手动合 e1f34338（+integration 16）进 develop——红窗分诊可读（下次红有明细），
+   不修测试失败本身（capability-catalog 仍待内层）。打破闭锁第一环。
+2. **等内层修完 capability-catalog** → 套件转绿 → 正常 AC27 合并（含 e1f34338）——最正统，但红窗持续
+   期间 integration 累积（现 16）。
+3. **红窗豁免规则化**：AC27 前置② 区分「测试失败红」与「静态/可读性红」——可读性修复（非测试失败）可
+   在红窗下合（配合双阈值任务 a4d937f1 的 aborted 区分）。
+
+**外层倾向选项 1 或 3**：选项 2 最安全但红窗长期化；闭锁本身是 AC27 前置过严（可读性修复被红挡）。
+
+
+---
+
+## 2026-08-08 14:1xZ — integration→develop 真 merge fail-closed：session-liveness.env 归边反向，batch-merge 工具只支持 develop-authoritative
+
+**背景**：AC27（6b6e985d）裁定合并由 tick 驱动，四条前置全成立即执行。manager 已裁定「现在就合」，
+外层执行 `integration-batch-merge.sh --merge --reconcile`。
+
+**实测（外层执行，REF-LEVEL fail-closed 触发）**：
+
+```
+REAL-MERGE FAIL-CLOSED — code conflicts need a human; nothing moved
+  code conflict files: orchestration/session-liveness.env
+  (shared files would auto-resolve develop-authoritative):
+     tasks/gap-session-liveness-ignores-unknown-transcript-names.md
+     tasks/gap-session-liveness-monitor-watches-self-not-inner.md
+```
+
+**为什么前置③（dry-run 无真实代码冲突）在 real-merge 下为假**：dry-run 报 3 个 would-conflict 全被当
+共享文件；real-merge 实际执行发现 `orchestration/session-liveness.env` 是**双方都改的真代码冲突**——
+它不在 batch-merge 默认 shared-file 清单（`*tick-log.md, tasks/*.md, *queue-state*`）里。
+
+**冲突归边实测（核心新事实）**：
+
+| 侧 | SESSION_TRANSCRIPTS 值 | 判定 |
+|---|---|---|
+| develop（ba0c1968 12:26Z） | `"inner /path"` | **缺陷版**——名字与目标表不一致（monitor-watches-self 任务体明说「12:2x 误用 inner」） |
+| integration（40a67514 13:01Z） | `"quay /path"` | **修复版**——monitor-watches-self 的产物，名字与 SESSION_TARGETS 目标名一致 |
+
+**正确归边 = integration-authoritative（"quay"）**，而 batch-merge 工具只支持 develop-authoritative
+（`resolve_as_ours`，`--shared-file` 只会加进 develop 优先清单）。**工具无法表达这个归边。**
+
+**外层已尝试**：执行 AC27 授权的 merge；fail-closed 正确触发（ref 未动、树干净）；核对冲突两侧内容 +
+git blame（40a67514 改名）确定归边方向。
+
+**为什么超出授权**：修 batch-merge 工具支持 integration-authoritative 归边 = 改工具语义（范围级）；
+手动 merge 该文件 = 外层不直接改代码/不自己 merge。AC27 管「触发权归 tick」，不管「归边方向」——
+当正确的归边与工具默认相反时，是机制缺口，不是外层能自行扩的。
+
+**选项**：
+1. **（建议）修 batch-merge 支持 integration-authoritative 归边**——如 `--integration-authoritative <glob>`，
+   冲突时取 integration 侧。理由：两线模型下「任务改的运行时配置」天然 integration 侧更新、develop 滞后，
+   develop-authoritative 对这类文件是错的（本案例即证明）。
+2. **（最小）把 orchestration/session-liveness.env 加进 shared-file 清单但改归边为 integration**——需
+   工具加反向开关，或外层在 merge 前手动把 develop 版 env 更新为 integration 版（等于把修复手工带上
+   develop，再用 develop-authoritative 合——但「手工带上」需内层执行，外层不手改）。
+3. **单文件单独处理**：外层/内层把 integration 版 env 的修复（"quay" 名字）直接 commit 到 develop，
+   再重跑 merge（此时 env 无冲突，仅 2 任务体 shared 自动消解）。最轻，但属「手工搬运修复」而非机制。
+
+---
+
+## 2026-08-08 16:48Z — 内层求助：4 个 needs-human worktree 占槽阻塞派发，需裁定复活 or 清理
+
+**现象**：内层报「Needs outer attention (blocking dispatch)——4 parked needs-human worktrees with
+unmerged branches occupy slots (executor processes exited, worktrees persist → AC6 counts them)」。
+列名：gap-chart2-s2-test-assertions、gap-shipped-ts-files-are-not-bundled、serial-recompose-nested-runner、
+resource-aware。
+
+**外层核实**：chart2-s2（1 提交未合并）、shipped-ts（1 提交未合并）均领先 develop、未并入 integration、
+任务 status=needs-human。工作（分支 commit）未合并但任务已 needs-human。
+
+**内层诉求**：这些 worktree 的残留（进程退出但目录在）被 AC6 计为占用槽位，阻塞派发。需裁定「复活 or
+授权 worktree 清理」——needs-human 任务去留是范围决定，外层不自行处理。
+
+**选项**：
+1. **授权清理残留 worktree**（保留分支）——`git worktree remove` 释放槽位，分支/task 保留供 needs-human
+   裁定后续合并。最轻，不丢工作。
+2. **逐任务裁定去留**——复活并合并（若工作仍要）、或确认作废（若随新模式放弃）。与 escalations #N+1
+   的「坚决应用新模式」裁定衔接。
+3. **维持现状**——4 槽被占，内层只能派发 2 候选（dod-over90/load-sensitive），其余 3 候选等槽。
+
+**外层倾向选项 1**：清理残留 worktree（进程已退出、非在飞工作）释放槽位，分支保留待 needs-human 裁定；
+不碰分支本身（去留仍归人）。这是解阻塞不是范围改变。
+
+
+
+## 2026-08-09 17:3xZ — 批量合被 freshness-gate 持续拒（round-174b 拒一次，b69266c7 注定再拒）：inner A9 允许套件运行中照常 fan-in，gate COVERAGE 轴要求 suite start ≥ 最后 integration fan-in ⇒ inner 活跃时套件永远不满足 gate
+**现象**：④ integration 领先 develop 45 commit，round-174b 17:23 绿，批量合被 FRESHNESS-GATE FAIL-CLOSED 拒（last fan-in 28ac96a3 17:22:47 > suite start 16:42:07，绿没测 pending tip）。补跑 b69266c7（17:24 起）——但 17:25 三个 inner fan-in（27f44be5/aa3cdf1b/30029245，改代码 .ts/.mjs/.sh 非 doc-only）又落在套件起跑后 ⇒ 此绿注定再拒。14:02 成功合（52 commit）是 inner 当时 idle（0 in-flight）；现在 inner 固定 cap=5 压力测试（OB-FIXEDCAP-FIRST-LOADTEST），fan-in 每 1-2 min 一条 ⇒ 无套件可满足 gate。
+**外层已尝试**：① round-174b 绿后立即 dry-run→real 批量合（被 gate 拒，正确 fail-closed）；② 误把 `full-suite-runner.ts --help`（无 --help 分支）当用法查询，实际跑出 b69266c7 真套件——巧合补上「套件必须起跑于最后 fan-in 后」的正确动作。
+**为什么超出授权**：修法是「inner A9 套件运行中暂停 fan-in」或「freshness gate 放宽（仅检查 merge 目标树）或加 inner-quiescent 前置」，都是对两线模型协调语义的改变，且 manager OB-MERGE 已在跟踪该义务——方向归 manager/人，外层不自行改 gate 或 A9。
+**选项**：
+1. **inner A9 改：套件 running 时暂停 fan-in**（fan-in 排队到 suite 绿后再放）——最直，gate 语义不变，代价 inner 吞吐下降（一个套件周期 ~40min 无新 merge）。
+2. **batch-merge 加 quiescent 前置**：先验 integration 最近 N 分钟无新 fan-in 再起跑套件（gate 侧等待，不动 A9）——外层/脚本侧，可机械执行。
+3. **接受现状**：inner 压力测试结束后自然 quiesce，届时套件可满足 gate——零改动，但 batch-merge 在 active 期持续阻塞，44+ commit 积压 develop 不前进（AC19 两线模型不完整运转）。
+**外层倾向**：选项 2（不动 inner A9，外层起跑套件前先查 quiescence），或接受选项 3 直到压力测试收尾；不建议选项 1（套件期暂停内层吞吐，与 fixed-cap 目标相悖）。
+
+
+## 2026-08-12 03:32Z — .halt 在位；integration/develop 同步（38 commit）被 batch-merge 双闸阻塞：无 scope=worktree 绿记录
+**现象**：manager 03:20 放 .halt「同步 integration/develop 后改在 integration 上开发；同步完成前不派发」。develop 落后 integration 38 commit（纯 fast-forward）。batch-merge 双闸 fail-closed：① freshness 闸（full-suite-state.json 缺绿）② worktree-green 闸（verification-round.jsonl 无 scope=worktree+state=green）。11 个 not-yet-flipped 任务 DoD 均含「全量套件绿」，同步与闭包被同一根阻塞。
+**外层已尝试**：修复 threshold-scope 静态违规（CLAUDE.md 反引号 `:16` → stale-path-ext，baseline 4→5→4）提交 c3e051bd；补挂 suite-state-trigger；全量套件已由 SUITE-RETRIGGER 自动在 main checkout 起跑（scope=main）。**注意：我误用 `full-suite-runner.ts --help`（无 --help 分支）触发了一次真套件（03:28 static-check 红）——与 2026-08-09 上届外层同型错误，教训已在上条 escalations 记录**。
+**为什么需要裁定**：套件绿后 worktree-green 闸仍缺 scope=worktree 记录。选项：① 在 verify worktree 跑全量到绿（A15 execute-suite-fix workflow，重操作）；② 38 提交以记账/配置为主、main 全量绿足够时走 `--skip-worktree-green-gate` 逃生口（上届 outer 在 verified-commit 场景用过 --skip-freshness-gate 先例）。
+**外层倾向**：等 main 套件结果；绿后若改动面确为记账/配置为主则倾向选项②（逃生口），若含产品代码改动则走选项①（worktree 全量）。已同步 manager 收件箱（outer-halt-sync-status-20260812-0332Z.md）。
+
+
+## 2026-08-12 03:36Z — 红窗：d24e303c（manager 裸机安装向量）破坏 AC3，套件红（stop-dispatch），同步被此红阻塞
+**现象**：全量套件 runId 1d0bac1d 03:34 早红。唯一确定性失败 `quay-init-loop-consumer-doc-refs.test.mjs` AC3：`plugin/skills/{init,manager}/SKILL.md` 引用 `plugin/loop/manager-loop-tick.md`（打包源路径，AC3 要求 shipped docs/skills 零 plugin/loop/ 引用）。隔离重跑稳定复现，非 flake。
+**根因**：d24e303c（manager 自己的 commit）把 SKILL.md 的 `orchestration/manager-loop-tick.md` 引用改成 `plugin/loop/manager-loop-tick.md`（裸机安装向量 arm-loop 指针）。develop 绿、integration 红。冲突本质 = AC3 机械判据 vs manager 的模板指针意图。
+**外层处置**：建任务 `gap-d24e303c-skill-refs-plugin-loop-violates-ac3`（todo, red-window）；manager 收件箱升级 outer-red-window-d24e303c-ac3-20260812-0336Z.md。外层不可直接修（plugin/ 授权边界外）。**同步与闭包仍被同一根阻塞：缺一次绿验证轮。**
+**选项**：① SKILL.md 引用改回 orchestration/（模板指针用注释携带）；② AC3 测试加 pack-上下文豁免；③ 回退 d24e303c 的 SKILL.md 改动。倾向①（贴合 AC3 语义、不丢 manager 意图）。
+
+
+## 2026-08-12 05:32Z — 结构性死锁：sync 需绿 ↔ 绿需 serial 标注 flaky 测试 ↔ 标注需派发 ↔ 派发被 .halt 挡；本机套件无法可靠绿
+**现象**：合并 vhs（45d1cde1，AC3/store 修复已含）后多次重跑套件（16 lanes × 2 + 8 lanes × 3），**每次失败集不同且全为长测试 flake**（gap-cli-gate-enforcement 38s / select-preflight 124s / acceptance.test 100s / it0 milestone 60s 等），**顺序隔离重跑全部通过**（5/5、37/37、36/36）。唯一确定性真失败 store.test AC5（vhs 新建 2 任务 title YAML 缺陷）**已修**。
+**根因**：长/负载敏感测试在任意并发下超时 flake（需 `@test-group serial` 标注，即 `gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests` 任务）；另 16 lanes 超 TasksMax=200、一次 suite scope OOM（MemoryMax=4G cgroup）、outer 进程第 4 次重启 kill runner。
+**死锁**：.halt「同步前不派发」↔ sync 需绿 ↔ 绿需 serial 标注任务（inner 派发）↔ 派发被 .halt 挡。**结构性，机械上无法自行解开**。
+**选项**：
+1. **B（推荐）**：走 vhs 已验证的 MERGE-TO-VERIFIED-COMMIT + --skip-freshness-gate 完成同步——产品代码 vhs r314 已验证（3361/0），外层增量仅 config/task（session-liveness/CLAUDE.md/tasks）；同步后 .halt 解除条件（同步完成）满足，serial 标注任务可随后正常派发。
+2. 人先解除 .halt 放行 serial 标注任务（inner 修 flaky 测试），绿后再同步——更稳但更慢。
+3. vhs 侧代跑验证 + 同步（vhs 环境稳定）。
+**外层倾向 1（B）**。已升级 manager 3 次（04:35 flakiness / 05:15 instability+OOM / 本条目）未获回应。**另：outer 进程反复重启（4 次）是需根因的基础设施问题**（瘫痪 Monitor/runner/可观测性）。
+## 2026-08-12 09:17Z — suite-state-trigger 在 runner 仍活时重触发（双套件事故）
+- **现象**：state=red（runner 早红后仍收集）期间任意 integration HEAD 前移（本此=我的收尾 commit）⇒ trigger `state != running` 条件判定「不在跑」⇒ 重触发第二个 8-lane 套件。2×8 竞争 + 新 runner 截断共享 full-suite.log + 新 runner 的 terminal write（runId 更新）让旧 runner 的 guarded state write 全部被 generation guard 丢弃。
+- **已试**：精确 pid 杀新 runner 树；把 state 重写回旧 runner（runId 19e5a998, state=running）恢复其后续 write；旧 runner 继续收集未受影响（in-memory failures[] 完整）。
+- **为何超权**：修复 suite-state-trigger.ts 是 plugin/scripts 实现+测试 ⇒ task 路径（外层不可直接改实现）。
+- **选项**：① trigger 重触发前校验 state.pid 进程存活（/proc 存在且是 runner）——最直接；② runner 早红后不再把 state 标 red 直到真正停（改早红语义，代价大）；③ trigger 等 finishedAt != null 才允许重触发。
+
+## 2026-08-14 01:2xZ — 「manager 报缺陷 → outer 直接修」路径是否立规则（D 段边界 vs 既成模式）
+- **现象**：本会话 outer 直接修改 `plugin/scripts/outer-tick-log-check.sh`（cc611891 mutation case）、`plugin/test/outer-tick-log-check.test.mjs`（4ca03fc4 单测）——均为 manager 报的缺陷（timestamp 族）被 outer 当面修。D 段边界（orchestrator-tick-core.md:97）写「不可以：直接改代码、…写 `packages/`/`plugin/`/`experiments/` 下的实现与测试」——直改 plugin 单测/脚本字面上撞这条边界。
+- **外层已尝试什么**：manager 已做 164 条轮次区间分析（AC4 停轮为界）——冻结前 68 次直改落在红区间（但红窗覆盖率 64.1%，正相关非因果）；冻结后 29 次里 20 次是今天、全是我当面修 manager 报的 bug。manager 裁定「不立案」（硬规则 12：给不出更强发生率不阻塞）。
+- **为什么超出授权**：D 段边界「outer 不写 plugin/ 实现与测试」是明确写入执行核的授权边界；「manager 报小缺陷 → outer 直接修」是既成但**未入规则**的习惯。两者冲突，属「改变方向/范围」类——不是我能单方面定的。
+- **选项**：① **立规则**——在 D 段补「manager 报的 checker/mutation-case 类小缺陷（非产品功能）可由 outer 直接修，几行级」，把既成模式固化；② **维持边界**——manager 报缺陷一律走 inner（立任务→subagent 实现→outer 验收），代价是几行修复也走完整 pipeline；③ **设阈值**——改动 <N 行且是 checker/mutation-case 类 ⇒ outer 直接修，否则走 inner。建议 ①（模式已被今天 20 次实例证明有效且快得多）。
+- **已决（2026-08-14 02:5xZ，人裁定，取【选项④】——非原列①②③）**：按【谁能验证】切分 outer 直改权限（AC65 入本阶段，0e4e18f6）。
+  ```
+  可由 outer 直接修  改动的正确性能在【同一轮对话内】被一条命令验证（跑该 checker 自己 + 它的 mutation case，秒级）
+  必须走 inner      改动的正确性需要【全量套件】才能确认（full-suite-runner.ts 属此类——它【是】套件本身）
+  ```
+  不按大小、不按类别切，按【谁能验证】切（meta-cc 全历史 97 次直改分类推翻了人原先猜的形态：「非代码」被 78% 反例推翻、「改自身行为」被 96.9% 反例推翻）。
+  **产物（判据2）**：outer 每次直接修，必须在同一条提交信息或投递里贴出那条验证命令的【实际输出】——没有输出即违规（「几行/checker 类」都没有产物只能靠自觉，而贴输出是本来就该做的那一步，零额外成本，守与不守在记录上可区分）。
+  **能取假（判据3）**：一次没有贴验证输出的产品文件直改 ⇒ 红（负控制由落地方产出，沿用 AC49 判据1）。
+  **落地**：orchestrator-tick-core.md:97 D 段边界已按 AC65 判据1 更新（outer 核，outer 改）；对照实例 `outer-tick-log-check.sh`+测试=可直接修侧、`full-suite-runner.ts`+测试=必须走 inner 侧。
+
+## 2026-08-23 23:06Z — manager 会话（quay-3e）消失，adjudication 层离线
+- **现象**：quay-3e（manager）从 ListAgents 消失、tmux quay-0 只剩 outer+inner 两窗（原 manager 窗没了）、ps 无 manager 进程。adjudication 层离线——needs-human / 重定范围 / 裁定无人接。
+- **已试**：确认进程不在、tmux 窗不在（list-windows 仅 outer+inner）。
+- **为何超权**：manager 是独立跨项目会话，重启它不在 outer 授权内（AC147「manager 活性由不依赖 manager 的通道兜底」属 AC143-149 下一阶段，尚未落地）。
+- **选项**：① 人重启 manager（quay-launch.sh manager）；② 等 manager 自愈（大概率不会）；③ 暂以 tick-log 为 durable record 继续观察（loop 仍在跑，worker-driver 照常派发，仅无 adjudication）。
+
+## 2026-08-23 23:06Z — AC150 三次死亡根因：worker 墙钟 < fan-in 时长（含 ff-retry），⛔ 非登记内容
+- **现象**：AC150 三次 exited-not-landed（37.2 / 27.7 / 25.5 min）。①②卡 scoped 门（driver-shared.ts 未登记 capability-catalog，已修 8cc18952）；③ 登记修好后 suite 已绿（4071/0 exit=0 @22:46:12），但 ff-merge 22:47:35-36 撞「not a fast-forward」（develop 22:40:02 被 reflog-to-revlist 非惰性代码变更推进）⇒ retry 回无锁段，worker 墙钟 25.5min 就死，没来得及重跑。
+- **为何超权**：worker 生命周期（worker 墙钟 vs fan-in 时长）是 driver/机制面，需 manager 裁定或立任务；`gap-worker-driver-periodic-exit-resident`（worker 生命周期族）已在飞。
+- **选项**：① 立任务：fan-in 遇非惰性 develop 前进时 ff-retry 让 worker 墙钟不够——诊断 worker 墙钟上限 vs fan-in 时长；② 等 periodic-exit-resident（在飞）落地看是否连带解决；③ 临时提高 worker 墙钟 / 允许 ff-retry 跨 worker 存活。
+
+## 2026-08-24 01:2xZ — 【已解】上一条「manager 离线」升级：manager 以 quay-4f（fork）回归
+- manager 会话以 quay-4f 恢复（并已在驱动——restart --kind worker 并发 2→5，事故报告见 gap-worker-driver-cold-start-inflight-blind）。
+- adjudication 层恢复。AC150 worker 生命周期那条升级仍 open（drain 保持到 AC150 落地，manager 在跟）。
+
+## 2026-08-24 04:26Z — ⚠️ 根因 fix 卡在 catch-22：gap-worker-print-bg-wait-ceiling-600s 的 worker 死于它自己要修的 600s 根因，无法 land
+
+**现象**：根因 fix 任务（worker 反复 exited-not-landed = `claude -p` end_turn 时存活后台任务的 600s 宽限竞态，43/77=56%）的 worker 04:15 exited-not-landed（wall 1890s）——**死于同一个根因**（fan-in 全量 suite 517s+ 必然超 600s 天花板）。fix 完整实现已在分支 `task/gap-worker-print-bg-wait-ceiling-600s`（0658efa7：(a) launch.settings.json 设 PRINT_BG_WAIT_CEILING_MS=0 + (b) worker-driver 外部超时保 worktree + (c) prompt 回合内等 + 两个测试），但 worktree 已清理、分支未 merge。driver 无限重派 → 无限死。
+
+**外层已尝试**：向 manager 报 catch-22（msg 1dcc1021）请求破局授权。
+
+**为什么超出授权**：设 launch.settings.json env var 是共享 config 改动（影响所有会话 launch），worker-driver.ts merge 是产品代码落地——两者都不是外层可单方执行的（AC141/C17 写所有权）。
+
+**选项**：
+1. **外层直接设 env var**（launch.settings.json `_launchSpec.roles["task-worker"].env` 加 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`，可验证）——下一个 worker 带无限等待，能正常 land 完整 fix；这是拆循环的唯一机制级路径。
+2. **人手工 merge fix 分支**（0658efa7）到 develop——直接落地完整 fix。
+3. 其它（如临时把 fix 任务标记为暂停，等人处理）。
+**外层倾向选项 1**（机制级拆循环，env var 是主修法 (a)，也是 SPEC 2026-08-16 裁定的内容）。
+
+### 已解（2026-08-24 04:29Z）——manager 自行破局
+manager 只搬 (a) env var 到 launch.settings.json task-worker.env（`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:"0"`），commit f1ea7c26 到 develop（.claude/ 在 design-internal 排除集，非 bypass；已核实生效）。(b)(c)/测试留正常 fan-in（真实产品代码）。task 仍 ready，driver 自然重派——下一个 worker 带无限等待应能 land 完整 fix。外层不 merge 0658efa7。若重派仍死于同一处 ⇒ 问题更复杂（worker 等待方式不可靠），届时再升级。
+
+## 2026-08-27 00:1xZ — ⚠️ worker 泄漏根因 fix 卡在自指死锁：worker 修 worker-driver 泄漏 bug 会再泄漏，需人直改
+
+**现象**：fan-in 锁 worker（gap-fan-in-workflow-lock-and-S1）实现泄漏到主检出 6 文件（file-tools 不感知 shell cd、未用 worktree 绝对路径）⇒ 主检出脏树挡它自己 ff-merge ⇒ 重派循环（2568822→2583695）。根因 fix 任务 `gap-worker-leaks-implementation-to-main-checkout`（b645196a7）要改 `worker-driver.ts`（spawn cwd + dispatch prompt 明示 worktree 绝对路径）+ `dispatch-worktree-setup.sh`（provisioning fail-closed）——**但这是「用 worker 修 worker-driver 泄漏 bug」，bug 未修时 worker 自己的修复也落主检出 ⇒ 自指死锁，worker 修不了自己**。
+
+**外层已止损**：`git stash push -u` 保存 6 文件实现入 stash@{0}、清主检出、manager drain + kill worker 2583695、driver halted。环已断但根因未修。
+
+**为什么超出授权**：直改 worker-driver.ts + dispatch-worktree-setup.sh 是「写 plugin/ 实现」，AC65 只授权「同一轮对话一条命令可验证」的直改；本修复三处代码改动，验证靠「派 worker 看它泄不泄漏」，非一条命令 ⇒ 超出 AC65。manager（peer）不能授予越界权。
+
+**现状**：b645196a7 已改 needs-human（85fa19880，防 resume auto-dispatch）；driver halted、主检出干净、stash@{0} 保留。等**人直改** worker-driver.ts + dispatch-worktree-setup.sh（或人明确授权一方）。
+
+**选项**：
+1. **人直改** worker-driver.ts（spawn cwd + prompt 明示 worktree 绝对路径）+ dispatch-worktree-setup.sh（provisioning fail-closed）→ commit → 核实 → resume → stash pop 重派 fan-in 锁。
+2. **人授权** outer/manager 紧急越权直改（需人逐字授权，peer 不能代授权）。
+3. 其它（如人手工 merge 已 stashed 的实现到 worktree 分支再修）。
+
+**同类前例**：2026-08-24 04:26Z「worker 死于它自己要修的 600s 根因」catch-22——同为「fix 任务被它要修的 bug 卡死」，那次 manager 搬 env var 部分直改破局。本次是第二个同类。
+
+**根因定位（manager 读码到行号级，让人一步到位）**：
+- `worker-driver.ts:825-837` `buildWorkerPrompt`——告诉 worker「create isolated worktree」+「implement per Proposal/Plan/AC」，但**从未强制「Read/Edit/Write 的 file_path 必须用 worktree 绝对路径」**。setup/fan-in 签名处用占位词 `<the worktree path…>`，实现步骤（step 2）完全没提路径。Claude Code file-tools 用绝对路径、不感知 shell cd ⇒ 无强制指令时 worker 默认落主检出绝对路径。
+- `worker-driver.ts:1311` spawn `{ cwd: rootDir }` 是【对的】非 bug（worker 得在主检出跑 `git worktree add`，改 cwd 没用）。
+- `dispatch-worktree-setup.sh` 已 fail-closed（exit 2 on missing worktree）——seam ③「建 worktree 失败不继续」已覆盖。**主 seam = ① prompt 未强制 worktree 绝对路径**。
+
+**给人直改的最小形态**：`buildWorkerPrompt`（+ `buildContinueWorkerPrompt` 续做版同源）加一句强制——「所有 Read/Edit/Write 的 file_path 一律用 worktree 绝对路径（如 `/home/yale/work/quay-worktrees/<task>/…`），file-tools 用绝对路径不感知 cd，禁用主检出路径与相对路径」。纯 prompt 文本改动，静态 grep 可验证。
+
+### 已解（2026-08-27 03:0xZ）——人授权 manager 直改 + 恢复链闭环
+人单次授权 manager 直改根因 → `dfc3e7ee8`（buildWorkerPrompt + buildContinueWorkerPrompt 各加一句强制 worktree 绝对路径，88 test pass）。outer 恢复 fan-in 锁实现（worktree 重建 + stash pop → `a8b211c6e`）→ manager 四查 → resume → 重派 fan-in 锁（CONTINUE 复用，不泄漏）→ **`0621a3066` fan-in lock 落地 done（AC1-AC6 全勾）**。自指死锁环结构性断开。`gap-worker-leaks-implementation-to-main-checkout` 翻 done（6c58e28b6）。stash 全部清（仅剩历史 stashifdirty/worker-driver 两条）。
+
+
+## 2026-08-27 21:26Z — L1 token 闸卡死：suite 被 15min 静默看门狗连杀，迁移序 L0✓→L1→L2/L3 全堵
+
+**现象**：迁移序（人裁定 L0→L1→L2→L3）推进到 L1（`gap-fan-in-ff-merge-token-gate-fail-closed`）时卡死。L1 实现已提交（`b7f4e3411`，fan-in-ff-merge.sh --acquire-workflow-lock 加 driver 一次性 token 闸），但 fan-in 在 suite 步连红：worker-outcome 累计 **9 次**「suite hung: silence watchdog killed the suite (no output ≥ silence timeout)」，最新 20:48:43 `mf.outcome=red/step=suite/final_state=exited-not-landed`。**根因不是 L1 自身代码**，是已知缺陷 `gap-mech-fan-in-suite-silence-watchdog-fired`（`suite-driver.ts` `SILENCE_MS_DEFAULT=15min` 静默看门狗对 suite 启动/等锁静默段误杀，非真挂死）。
+
+**自锁形态**：修这个看门狗的任务 `gap-mech-fan-in-suite-silence-watchdog-fired` 自己 status=ready 未落地——它要改 `suite-driver.ts` + `scripts/test.sh`（跑全量 suite 验证），而它自己的 fan-in suite 同样被 15min 静默看门狗杀（与 2026-08-27 00:1xZ「worker 修 worker-driver 泄漏 bug 会再泄漏」同族：fix 任务被它要修的 bug 卡死）。
+
+**已试**：driver 对 L1 自动重派 ~9 次，每次同一静默看门狗杀；止血只对锁持有看门狗生效过（`ffc4a225d` fallback 3600，那是 `FULL_SUITE_LOCK_HOLD_MAX_S`，不是 suite 静默看门狗），静默看门狗无对应止血。
+
+**为什么需要升级**：迁移是**人裁定**的方向（eliminate fan-in workflow path），L1 是 token 闸（掐死非机械路径的关键缝），被一个**无关缺陷**（静默看门狗）挡住。修法要么是「盲抬数值止血」（正是 fix 任务自己警告的「⛔ 不盲设数值」），要么是「先修静默看门狗再回 L1」（改变人裁定的迁移序），两者都需人定方向，非 outer 可自行裁决。
+
+**选项**：
+1. **盲抬数值止血**：把 `suite-driver.ts` `SILENCE_MS_DEFAULT` 字面 15min→60min（或生产设 `QUAY_TEST_SUITE_DRIVER_SILENCE_MS=3600000`）——让 L1 suite 存活 >15min 静默落地，迁移继续。代价：真挂死检测变松（fix 任务已警告「数字是止血不是结论」）；需后续补心跳真修。
+2. **先修静默看门狗再回 L1（改迁移序）**：把 `gap-mech-fan-in-suite-silence-watchdog-fired` 提为迁移前置，但它自己也卡在静默看门狗 ⇒ 仍需 1 的止血才能落地 ⇒ 与 1 合并。
+3. **outer 直改静默看门狗 fix（AC65）**：test.sh 等锁心跳 + suite-driver 观测面，但需全量 suite 验证 ⇒ 超 AC65（一条命令不可验证），须走 inner ⇒ 又回自锁。
+4. **人直改/授权**：人直改 `suite-driver.ts` 静默看门狗观测面（读 suite 真实写的流 + 「仍在推进」直接量，非只读 mtime——fix 任务 Plan 已写清），或人明确授权一方越权止血。
+
+**判据（推荐）**：先做 **1 的止血**（盲抬数值是已知的止血形态、秒级可回退），让 L1 落地、迁移序走通；同时 `gap-mech-fan-in-suite-silence-watchdog-fired` 按正常 fan-in 落地真修（止血后它也不再被杀）。止血 = 用现有材料压住出血，非提前实现（硬规则 12 不违反：这是「止损」不是「实现 fix」）。
+
+**止血是否需止损判定（B18）**：`止损：需要 —— 抬 SILENCE_MS_DEFAULT 字面 15→60min`（或 env）。防的那条路径（静默看门狗误杀 suite）此刻**已启用**（9 次实锤），不是防一个不存在的成本。

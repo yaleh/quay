@@ -1,4 +1,18 @@
 // @test-group engine
+// RESTORED (2026-08-13 round 140 green: Fix A expiry reached) (2026-08-13, round 133+134 deterministic-under-load): AC5/tmux-leak-scan DELTA
+// genuine-leak dir removed within reap-wait bound under full-suite load (identical assertion both
+// rounds) — isolated runs green, but full-suite load is a NECESSARY condition, so it recurs on the
+// certification path. TEMPORARILY moved off the default (product,engine) certification path to
+// governance. EXPIRY: restore to engine when the removal-source fix lands (R2 reaper / scope
+// collision trace) — the trace task owns it. STILL RUNS in --for-task / --group governance scoped
+// gates (防真泄漏回归无人发现). WAS @test-group engine.
+// @load-sensitive fixture-vs-sweeper
+// @load-sensitive-entry 2026-08-13 fixture-vs-sweeper (manager root cause): DELTA's genuine-leak dir
+// was swept by sweepRunNamespace() — the sweeper removes run-root children WITHOUT a live tmux owner,
+// and a plain-mkdir fixture (no owner) is judged orphan. Isolated runs don't concurrency-sweep ⇒
+// green; full-suite does ⇒ deterministic red (rounds 133-136). Fix A: fixtures at
+// os.tmpdir()/leakscan-fixture-* (outside the run-root the sweeper scans). The --scope isolation from
+// round 131 is preserved.
 // test-isolation-check.test.mjs — gap-test-isolation-contract-is-unwritten: RED/GREEN tests for
 // the test-isolation contract scan + shrink-only violation ratchet (test-isolation-check.ts).
 // Covers AC1–AC8:
@@ -10,7 +24,9 @@
 //   - R4 (AC2): process.exit(1) reports only in a hand-rolled (non-node:test) file; comments,
 //               strings, and process.exitCode never report.
 //   - R6 (AC2/AC6): mkdtemp with no cleanup construct anywhere reports; rm/after/finally cleanup
-//               does not; /tmp/claude-* and /tmp/quay-wt-* prefixes are NEVER matched (AC6).
+//               does not; /tmp/claude-* prefix is NEVER matched (AC6). The quay-wt-* worktree
+//               exemption was removed — worktrees are git worktree add at loop.worktree_root,
+//               never mkdtemp'd (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs).
 //   - R8 (AC1/AC2/AC4): a mkdtemp whose ROOT resolves into the shared checkout
 //               (REPO_ROOT/repoRoot/__dirname/process.cwd() or a derived variable) reports —
 //               per-run-unique is NECESSARY, not SUFFICIENT; an os.tmpdir()/makeTmp root never
@@ -18,7 +34,9 @@
 //               never reports (AC3).
 //   - AC3/AC4 rehearsal (CLI): the real-repo run reports the three known instances (M136's
 //               plugin-packaging, AC11's select-tests-for-touches; relation-sync is fixed and
-//               must NOT report) and the 7 remaining process.exit(1) harnesses.
+//               must NOT report) and the 6 remaining process.exit(1) harnesses (gap002 was fixed
+//               by the tmp-leak fix d887ab12 — it now imports node:test + uses an after() cleanup
+//               hook instead of process.exit(1), so it is out of R4's rule scope).
 //   - AC5 ratchet (CLI rehearsal): adding a new violation file → check FAILS; fixing it → PASSES.
 //   - AC7: a deliberately-constructed violating test file is reported by the CLI.
 //
@@ -32,7 +50,6 @@ import path from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-
 import {
   detectFixedPathWrites,
   detectSharedBuildArtifactWrites,
@@ -180,18 +197,20 @@ test("R6/AC2: mkdtemp with no cleanup reports; rm/after/finally cleanup does not
   );
 });
 
-// ── AC6 / AC4: /tmp/claude-* and /tmp/quay-wt-* are NEVER matched; negative control ─────────────────
-test("AC6: claude-* and quay-wt-* mkdtemp prefixes never report; a normal fixture prefix still does (AC4 negative control, both directions)", () => {
-  // session data / in-use worktree prefixes are exempt (AC6)
+// ── AC6 / AC4: /tmp/claude-* is NEVER matched; quay-wt-* exemption removed; negative control ───────
+test("AC6: claude-* mkdtemp prefix never reports; quay-wt-* (worktree exemption REMOVED) now reports; a normal fixture prefix still does (AC4 negative control, both directions)", () => {
+  // session data prefix is exempt (AC6); the quay-wt-* worktree exemption was removed because
+  // worktrees are `git worktree add` at loop.worktree_root, never mkdtemp'd — R6 never sees them
+  // (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs AC6).
   assert.equal(
     detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-abc123"));\n', "x.test.mjs").length,
     0,
     "claude-* prefix must be excluded"
   );
-  assert.equal(
-    detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-wt-some-task"));\n', "x.test.mjs").length,
-    0,
-    "quay-wt-* prefix must be excluded"
+  assert.ok(
+    detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-wt-some-task"));\n', "x.test.mjs")
+      .some((v) => v.rule === "mkdtemp-no-cleanup"),
+    "quay-wt-* prefix must now report — the worktree exemption is gone (negative control for the removal)"
   );
   // AC4 NEGATIVE direction: a NORMAL fixture prefix (the leak shape) reports
   assert.ok(
@@ -377,6 +396,117 @@ test("AC5/clean-tree: the suite-after assertion fails on a dirty tree and passes
   }
 });
 
+// ── AC5 / suite-after DELTA: assert-clean-tree.sh's delta form ─────────────────────────────────────
+// gap-assert-clean-tree-premise-void-under-concurrent-writers: the absolute form assumed the
+// coordinator runs on a clean tree — a premise VOID under concurrent writers (manager tick-log,
+// outer worktree scaffolding, inner uncommitted change). The DELTA form (--snapshot before, --check
+// after) counts only items ABSENT from the before-run snapshot as this run's test products.
+test("AC5/clean-tree DELTA: pre-existing dirt is excluded; only newly-added items count", () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "test-isolation-clean-tree-delta-"));
+  const CLEAN_TREE_SH = path.join(REPO_ROOT, "plugin", "scripts", "assert-clean-tree.sh");
+  try {
+    // A real git repo with one committed file — a meaningful "clean" baseline.
+    fs.writeFileSync(path.join(scratch, "seed.txt"), "x", "utf8");
+    const gitCmd = (args) => spawnSync("git", args, { cwd: scratch, encoding: "utf8" });
+    gitCmd(["init", "-q"]);
+    gitCmd(["config", "user.email", "test@example.com"]);
+    gitCmd(["config", "user.name", "test"]);
+    gitCmd(["add", "-A"]);
+    gitCmd(["commit", "-q", "-m", "seed"]);
+
+    // Pre-existing dirt (a concurrent writer's uncommitted change): modify a tracked file.
+    fs.appendFileSync(path.join(scratch, "seed.txt"), "\ntick-log line", "utf8");
+
+    // DELTA GREEN: snapshot before the run; only pre-existing dirt present → check PASSES.
+    let res = spawnSync("bash", [CLEAN_TREE_SH, "--snapshot", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0, `snapshot must succeed:\n${res.stdout}\n${res.stderr}`);
+    res = spawnSync("bash", [CLEAN_TREE_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0, `pre-existing dirt must NOT trip the DELTA check:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stdout, /PASS: git status --porcelain gained no NEW items/);
+
+    // DELTA RED (negative control): a NEW item written AFTER the snapshot IS a test product →
+    // check FAILS, listing the new item but NOT the pre-existing dirt.
+    res = spawnSync("bash", [CLEAN_TREE_SH, "--snapshot", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0);
+    fs.writeFileSync(path.join(scratch, "test-residue.txt"), "leak", "utf8");
+    res = spawnSync("bash", [CLEAN_TREE_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 1, `a NEW item after the snapshot must FAIL:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /DIRTY after the full suite/);
+    assert.match(res.stderr, /test-residue\.txt/);
+    assert.doesNotMatch(res.stderr, /seed\.txt/, "pre-existing dirt must not be listed as a NEW item");
+
+    // DELTA GREEN restore: removing the new item restores PASS (pre-existing dirt still present).
+    fs.rmSync(path.join(scratch, "test-residue.txt"));
+    res = spawnSync("bash", [CLEAN_TREE_SH, "--snapshot", scratch], { encoding: "utf8", timeout: 30_000 });
+    res = spawnSync("bash", [CLEAN_TREE_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0, `removing the new item must restore PASS:\n${res.stdout}\n${res.stderr}`);
+
+    // DELTA fail-closed: --check with no snapshot (the before-run baseline is unknown).
+    fs.rmSync(path.join(scratch, ".quay", "assert-clean-tree.snapshot"), { force: true });
+    res = spawnSync("bash", [CLEAN_TREE_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 1, `--check without a snapshot must fail closed:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /no before-run snapshot/);
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+// ── AC5 / suite-after DELTA: tmux-leak-scan.sh's delta form (same family) ───────────────────────────
+// gap-assert-clean-tree-premise-void-under-concurrent-writers: the outer layer legitimately runs
+// tmux sessions (send-keys remote-drive, skv- names) WHILE the suite runs — a pre-existing
+// concurrent-writer match is not this run's leak. The DELTA form excludes pre-existing matches.
+test("AC5/tmux-leak-scan DELTA: pre-existing matches are excluded; only NEW matches leak", () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "test-tmux-leak-delta-"));
+  const SCAN_SH = path.join(REPO_ROOT, "plugin", "scripts", "tmux-leak-scan.sh");
+  // Fix A (2026-08-13 manager root cause): the DELTA test's leak dirs live under a TEST-LOCAL scope
+  // OUTSIDE the run-root (os.tmpdir()/leakscan-fixture-*) so sweepRunNamespace() — which removes the
+  // run-root's owner-dead children — cannot sweep them. The --scope arg points the scan at this
+  // test-local root. (Round 131: shared run-root cross-flagged; rounds 133-136: sweeper removed the
+  // owner-dead fixture dir, deterministic-under-load.)
+  const scope = fs.mkdtempSync(path.join(os.tmpdir(), "leakscan-fixture-"));
+  const preDir = path.join(scope, "skv-delta-test-preexisting");
+  const newDir = path.join(scope, "skv-delta-test-newleak");
+  // Fix B (gap-suite-leak-scan-ol-scd-g-teardown-slow, 2026-08-24): the reap-wait bound is now
+  // HOST-DERIVED (max(10000, nproc×2500) = 40000ms on 16 cores) — a genuine-leak --check polls the
+  // full bound, which exceeds this 30s spawnSync timeout → status null (deterministic RED, both full
+  // and isolate rounds). This DELTA test asserts DETECTION (NEW vs pre-existing, fail-closed), NOT the
+  // reap-wait bound (that is tmux-leak-scan.test.mjs R2/R3/R6). Pin the documented seam
+  // TMUX_LEAK_REAP_WAIT_MS/Poll to deterministic small values so a genuine-leak --check finishes in
+  // ~1s regardless of host nproc — the test is not weakened (all three DELTA assertions unchanged).
+  const runScan = (mode) => spawnSync("bash", [SCAN_SH, "--scope", scope, mode, scratch], { encoding: "utf8", timeout: 30_000, env: { ...process.env, TMUX_LEAK_REAP_WAIT_MS: "1000", TMUX_LEAK_REAP_POLL_MS: "100" } });
+  try {
+    // PASS: a pre-existing match is excluded (recorded in the before-run snapshot).
+    fs.mkdirSync(preDir, { recursive: true });
+    let res = runScan("--snapshot");
+    assert.equal(res.status, 0, `snapshot must succeed:\n${res.stdout}\n${res.stderr}`);
+    res = runScan("--check");
+    assert.equal(res.status, 0, `a pre-existing match must not trip the DELTA check:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stdout, /no NEW residual test tmux servers\/dirs/);
+
+    // RED (negative control): a NEW match after the snapshot IS this run's leak → FAIL, listing
+    // the new match but NOT the pre-existing one.
+    res = runScan("--snapshot");
+    assert.equal(res.status, 0);
+    fs.mkdirSync(newDir, { recursive: true });
+    res = runScan("--check");
+    assert.equal(res.status, 1, `a NEW match after the snapshot must FAIL:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /NEW residual test tmux servers\/dirs/);
+    assert.match(res.stderr, /skv-delta-test-newleak/);
+    assert.doesNotMatch(res.stderr, /skv-delta-test-preexisting/, "pre-existing match must not be listed as NEW");
+
+    // fail-closed: --check with no snapshot.
+    fs.rmSync(path.join(scratch, ".quay", "tmux-leak-scan.snapshot"), { force: true });
+    res = runScan("--check");
+    assert.equal(res.status, 1, `--check without a snapshot must fail closed:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /no before-run snapshot/);
+  } finally {
+    fs.rmSync(newDir, { recursive: true, force: true });
+    fs.rmSync(preDir, { recursive: true, force: true });
+    fs.rmSync(scope, { recursive: true, force: true });
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 // ── the ratchet (runIsolationChecks, AC5) ───────────────────────────────────────────────────────────
 test("AC5 ratchet: current==data file passes; new/grown/stale/malformed entries fail", () => {
   const entries = ["a.test.mjs:fixed-path-write", "b.test.mjs:process-exit-1"];
@@ -411,7 +541,7 @@ test("AC5 ratchet: current==data file passes; new/grown/stale/malformed entries 
 });
 
 // ── AC3/AC4 real-repo rehearsal: the known instances appear, relation-sync is quiet ─────────────────
-test("AC3/AC4 rehearsal: real repo reports the three known instances + the 7 remaining process.exit(1)s", () => {
+test("AC3/AC4 rehearsal: real repo reports the three known instances + the 6 remaining process.exit(1)s", () => {
   const res = spawnSync("node", ["--experimental-strip-types", CHECK_TS, "--list"], { encoding: "utf8", timeout: 60_000 });
   assert.equal(res.status, 0, res.stderr);
   const lines = res.stdout.trim().split("\n").filter(Boolean);
@@ -432,12 +562,14 @@ test("AC3/AC4 rehearsal: real repo reports the three known instances + the 7 rem
   // FIXED to os.tmpdir() — none may report shared-root-mkdtemp
   for (const f of [
     "experiments/quay-perpetual-stream/test/loadbearing-test-gate.test.mjs",
-    "packages/quay/test/ts-typecheck-gate.test.mjs",
+    "packages/quay/test/ts-typecheck-gate-cli-event.test.mjs",
     "plugin/test/run-identity.test.mjs",
   ]) {
     assert.ok(!lines.some((l) => l.startsWith(`${f}:shared-root-mkdtemp`)), `${f} R8 must not report (fixed to os.tmpdir):\n${res.stdout}`);
   }
-  // AC4: the 7 remaining known process.exit(1) harnesses (AC7 list, minus the fixed relation-sync)
+  // AC4: the 6 remaining known process.exit(1) harnesses (AC7 list, minus the fixed relation-sync
+  // and gap002 — the tmp-leak fix d887ab12 made gap002 import node:test + use an after() cleanup
+  // hook, so R4's hand-rolled-only scope no longer applies to it).
   for (const f of [
     "packages/quay-native/test/adversarial-eval.test.mjs",
     "packages/quay-native/test/cas-write.test.mjs",
@@ -445,11 +577,10 @@ test("AC3/AC4 rehearsal: real repo reports the three known instances + the 7 rem
     "packages/quay-native/test/edit-validation.test.mjs",
     "packages/quay-native/test/lock.test.mjs",
     "packages/quay-native/test/yaml-frontmatter-colon.test.mjs",
-    "packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs",
   ]) {
     assert.ok(lines.includes(`${f}:process-exit-1`), `missing AC4 process.exit(1) file ${f}:\n${res.stdout}`);
   }
-  assert.equal(byRule("process-exit-1").length, 7, `expected exactly 7 process-exit-1 entries:\n${res.stdout}`);
+  assert.equal(byRule("process-exit-1").length, 6, `expected exactly 6 process-exit-1 entries:\n${res.stdout}`);
 });
 
 // ── AC7: a deliberately-constructed violating test file is reported by the CLI ──────────────────────

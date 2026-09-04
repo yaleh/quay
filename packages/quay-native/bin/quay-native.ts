@@ -271,7 +271,30 @@ Description:
   Go) to suggest appropriate gate defaults.
 
   If .quay/config.yml already exists, refuses to overwrite unless --force.
+
+  This command only scaffolds a brand-new EMPTY task store. It does NOT lay
+  down the loop mechanism — the canonical path for onboarding an existing
+  project onto quay-driven development is the /quay:init skill inside a Claude
+  Code session (/quay:init --all --loop). CLI init has no --loop flag.
 `);
+      return;
+    }
+
+    // Collision guard (gap-cli-quay-init-collides-with-the-canonical-slash-quay-init):
+    // same silent-swallow defect as Core `quay init` — reject --loop and point at
+    // the /quay:init skill (the canonical loop-laydown path) instead of exiting 0.
+    if (initFlags.loop) {
+      console.error(
+        "quay-native init: unrecognized option --loop.\n" +
+        "This command only scaffolds a brand-new EMPTY quay task store\n" +
+        "(.quay/config.yml + tasks/); it accepts only --force / --dry-run / --root.\n" +
+        "\n" +
+        "To lay the full quay loop mechanism into an existing project, the canonical\n" +
+        "path is the /quay:init skill inside a Claude Code session:\n" +
+        "\n" +
+        "    /quay:init --all --loop"
+      );
+      process.exitCode = 1;
       return;
     }
 
@@ -296,11 +319,15 @@ Description:
         console.log(`\n# Dry run — nothing written to disk.`);
         console.log(`# Would create: ${result.configPath}`);
         console.log(`# Would create: ${result.tasksDir}/`);
+        console.log(`# Would create: ${result.launchSettingsPath}`);
+        console.log(`# Would create: ${result.profilesPath}`);
         return;
       }
 
       console.log(`Created ${result.configPath}`);
       console.log(`Created ${result.tasksDir}/ (or already existed)`);
+      console.log(`Created ${result.launchSettingsPath}`);
+      console.log(`Created ${result.profilesPath}`);
       printNextSteps("native", result.tasksDir);
     } catch (err) {
       console.error(`quay-native init: ${err instanceof Error ? err.message : String(err)}`);

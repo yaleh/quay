@@ -26,11 +26,12 @@ import os from "node:os";
 import { resolveGate, listGates } from "../src/gate/registry.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { createAdrStore } from "../src/adr-store.ts";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const quayBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 // repo root: packages/quay/test -> repo root is 3 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const REAL_ADR_DIR = path.join(REPO_ROOT, "adr");
@@ -153,6 +154,24 @@ function writeAdrFixture(adrDir, { status = "accepted", enforcement, appliesTo }
   fs.writeFileSync(path.join(adrDir, "ADR-001-fixture.md"), fm.join("\n") + "\n");
 }
 
+// Copy the REAL ADR-001 (with its real, REPO-ROOT-relative `enforcement` command)
+// into an isolated workspace's own `adr/` dir, so the `adr-001` gate resolves
+// inside that workspace (makeAdrGate reads ADR-001 from <workspaceRoot>/adr). The
+// enforcement command itself still runs with cwd = the REAL repo root — pinned via
+// the `--cwd REPO_ROOT` flag at the CLI layer — so its repo-relative script paths
+// resolve against the real repo the ADR governs, not the empty tmp workspace. This
+// keeps the end-to-end test exercising the REAL ADR-001's REAL enforcement command
+// while the task fixture lives in the isolated tmp tasks dir, never the live tasks/.
+function copyRealAdrIntoWorkspace(workspaceRoot) {
+  const adrDir = path.join(workspaceRoot, "adr");
+  fs.mkdirSync(adrDir, { recursive: true });
+  const realAdrFile = fs
+    .readdirSync(REAL_ADR_DIR)
+    .find((f) => f.startsWith("ADR-001-") && f.endsWith(".md"));
+  assert.ok(realAdrFile, "expected the real ADR-001 file in the repo's adr/ dir");
+  fs.copyFileSync(path.join(REAL_ADR_DIR, realAdrFile), path.join(adrDir, realAdrFile));
+}
+
 // ===========================================================================
 // Stage 1 — registration + fail-closed branches
 // ===========================================================================
@@ -245,37 +264,36 @@ test("E3 A3: 'quay gate --list' includes adr-001", () => {
 });
 
 test("E3 A1/A3: 'quay gate <task> --gate adr-001' end-to-end PASSes against the real ADR-001/B7 and appends a real GateEvent", () => {
-  // `quay gate` pins QUAY_ACCEPTANCE_CWD to cfg.workspaceRoot (the convention
-  // shared by acceptance/impl-row/line-budget: the enforcement command's
-  // relative paths resolve against the invoking workspace). ADR-001's own
-  // `enforcement` command uses REPO-ROOT-relative paths
-  // (experiments/quay-perpetual-stream/scripts/...), so an `adr-<id>` gate's
-  // command only resolves when the invoking workspace root IS the real repo
-  // root it governs — unlike the free-form `acceptance` gate (an arbitrary
-  // task-authored command in an arbitrary workspace). This is the realistic
-  // usage (an `adr-<id>` gate always runs inside the repo the ADR governs), so
-  // this test uses the REAL repo's own workspace/tasks dir directly — writing
-  // a throwaway fixture task there and removing it in a `finally`, rather than
-  // an isolated tmp workspace (which would make the enforcement command
-  // unresolvable, as proven above by the exit-127 failure this replaced).
+  // `quay gate` pins QUAY_ACCEPTANCE_CWD to cfg.workspaceRoot by default, and
+  // ADR-001's own `enforcement` command uses REPO-ROOT-relative paths
+  // (experiments/quay-perpetual-stream/scripts/...), so the command only
+  // resolves when its cwd IS the real repo root it governs. The task fixture,
+  // however, must NOT be written into the live REPO_ROOT/tasks/ (it races the
+  // store's full-scan under 16-lane load — see
+  // gap-adr-gate-test-fixture-isolation-live-task-store). The two needs are
+  // satisfied separately: an isolated tmp workspace (own config.yml + tasks dir
+  // + a COPY of the real ADR-001) makes the `adr-001` gate AND the fixture task
+  // resolve in tmp, while `--cwd REPO_ROOT` (explicit-cwd-wins precedence,
+  // DIR-046) makes the real enforcement command still run against the real repo
+  // root — so nothing writes into the live tasks/ and the real gate still
+  // executes against the real repo, not an empty tmp workspace.
   const fixtureId = "T-ADR001-e2e-fixture";
-  const realTasksDir = path.join(REPO_ROOT, "tasks");
-  const fixturePath = path.join(realTasksDir, `${fixtureId}.md`);
+  const { workspaceRoot, tasksDir } = makeWorkspace("cli-adr001");
+  copyRealAdrIntoWorkspace(workspaceRoot);
   const logDir = makeTmpDir("quay-e3-cli-adr001-log-");
   const logFile = path.join(logDir, "gate-events.jsonl");
-  writeTaskFixture(realTasksDir, fixtureId);
-  try {
-    const r = runQuay(["gate", fixtureId, "--gate", "adr-001", "--file", logFile], REPO_ROOT);
-    assert.equal(r.status, 0, `expected PASS; stdout=${r.stdout} stderr=${r.stderr}`);
-    assert.match(r.stdout, /PASS/);
-    const log = runQuay(["gate-log", fixtureId, "--json", "--file", logFile], REPO_ROOT);
-    const events = JSON.parse(log.stdout);
-    assert.equal(events.length, 1);
-    assert.equal(events[0].gate, "adr-001");
-    assert.equal(events[0].verdict, "pass");
-  } finally {
-    fs.rmSync(fixturePath, { force: true });
-  }
+  writeTaskFixture(tasksDir, fixtureId);
+  const r = runQuay(
+    ["gate", fixtureId, "--gate", "adr-001", "--file", logFile, "--cwd", REPO_ROOT],
+    workspaceRoot
+  );
+  assert.equal(r.status, 0, `expected PASS; stdout=${r.stdout} stderr=${r.stderr}`);
+  assert.match(r.stdout, /PASS/);
+  const log = runQuay(["gate-log", fixtureId, "--json", "--file", logFile], workspaceRoot);
+  const events = JSON.parse(log.stdout);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].gate, "adr-001");
+  assert.equal(events[0].verdict, "pass");
 });
 
 // ===========================================================================

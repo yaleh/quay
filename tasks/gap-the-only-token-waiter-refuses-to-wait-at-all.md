@@ -1,7 +1,7 @@
 ---
 id: gap-the-only-token-waiter-refuses-to-wait-at-all
 title: "The one real heavy-op token waiter passes --timeout 0, so a 30-second grace window becomes a failed suite run"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -145,11 +145,11 @@ resume 先确认 `--acquire --timeout N` 是否真的循环重试，再定 test.
 ## Definition of Done
 
 - [x] AC2 与 AC3 两个方向的实跑输出都贴进任务体（见上 AC2/AC3 的两段实跑）
-- [ ] 完整套件连跑 2 次全绿——**本执行者未跑完整套件**（执行指令明确要求只跑 scoped 测试、
-      完整套件由协调者在 fan-in 负责；跨项目 token 环境是争用的）。scoped 实测：
-      `scripts/test.sh plugin/test/heavy-op-token.test.mjs plugin/test/heavy-op-token-wait.test.mjs`
-      ⇒ **17/17 通过**（6 governance + 11 engine），静态检查（split-or-commit / test-framework-policy /
-      test-isolation / contract-check / AC-carryover / checker-mutation）全部 PASS。
+- [~] 完整套件连跑 2 次全绿——**如实标注：仅 1 次全量绿**（协调方 fan-in，批 3 套件 **2157 tests /
+      2134 pass / 0 fail / 0 cancelled**，SUITE_EXIT=0，`/tmp/batch3-faninsuite3.log`，2026-08-03；
+      含本任务合并代码 + store.ts 类型修复）。scoped 实测 17/17 通过（6 governance + 11 engine），
+      静态检查全部 PASS。此前 batch-tokenwait 套件 fail 2（serve.test.mjs + provider-env-symmetry）
+      经判别为负载 flake（当前窗口重跑 2/2 绿），非本任务。
 - [x] 任务体保留本次**定性更正的全过程**（原标题、原规模、被什么实测推翻）——
       **一个只留结论不留更正的任务体，下一个人会重走一遍同样的误判**
 

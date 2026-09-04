@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // runtime-usage-inventory.test.mjs — gap-no-inventory-of-what-the-two-layer-mode-actually-runs.
 // Unit + integration tests for the runtime-usage-inventory tool (plugin/scripts/runtime-usage-inventory.ts).
 //
@@ -14,13 +14,13 @@
 //          portfolio), source-cited; never inferred from a path prefix.
 //   AC6  — never-runs-test lists every *.test.* outside scripts/test.sh's canonical glob.
 //   AC7  — buildInventory computes the main→long diff (low-frequency ≠ dead).
-//   AC10 — this file declares `// @test-group governance`.
+//   AC10 — this file declares `// @test-group engine`.
 //
 // Run:
 //   scripts/test.sh --for-task gap-no-inventory-of-what-the-two-layer-mode-actually-runs
 //   scripts/test.sh plugin/test/runtime-usage-inventory.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -36,13 +36,20 @@ import {
   globMatch,
   inTestGlob,
   buildInventory,
+  extractHeaderComment,
+  extractInstrumentDeclaration,
+  buildInstrumentsManifest,
   DORMANT_BY_DECISION,
   TEST_GLOB_PATTERNS,
 } from "../scripts/runtime-usage-inventory.ts";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
+// Every synthetic-repo dir is removed once at the end of this file (the carrier-array + after()
+// pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
@@ -75,7 +82,7 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
     const paths = [SCRIPT_FIXTURE.relPath, SCRIPT_FIXTURE.realPath];
     assert.equal(countExecutedInCommand(`node ${SCRIPT_FIXTURE.relPath}`, SCRIPT_FIXTURE, paths), 1);
     assert.equal(countExecutedInCommand(`node --no-warnings --experimental-strip-types ${SCRIPT_FIXTURE.relPath} --json`, SCRIPT_FIXTURE, paths), 1);
-    assert.equal(countExecutedInCommand(`cd /tmp/quay-wt-x && node ${SCRIPT_FIXTURE.relPath}`, SCRIPT_FIXTURE, paths), 1);
+    assert.equal(countExecutedInCommand(`cd /home/yale/work/quay-worktrees/x && node ${SCRIPT_FIXTURE.relPath}`, SCRIPT_FIXTURE, paths), 1);
     // env-prefix assignments before the program (REFUTE finding 2)
     assert.equal(countExecutedInCommand(`FOO=1 BAR=2 node ${SCRIPT_FIXTURE.relPath}`, SCRIPT_FIXTURE, paths), 1);
     assert.equal(countExecutedInCommand(`QUAY_TEST_LIVE_GITHUB=1 bash scripts/test.sh`, { relPath: "scripts/test.sh", realPath: "scripts/test.sh", basename: "test.sh", aliases: [] }, ["scripts/test.sh"]), 1);
@@ -210,6 +217,7 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
   // ── AC7 + AC4: end-to-end buildInventory over a SYNTHETIC transcript dir ────────────────────
   test("AC7: buildInventory computes the main→long diff (low-frequency ≠ dead)", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rui-test-"));
+    _tmpDirs.push(tmp);
     const root = path.join(tmp, "repo");
     // Minimal repo: two scripts, one workflow, one dormant.
     fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
@@ -263,6 +271,7 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
 
   test("REFUTE: wrapper-indirect honors gate_delegate_ts and ignores echo mentions", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rui-wrap-"));
+    _tmpDirs.push(tmp);
     const root = path.join(tmp, "repo");
     fs.mkdirSync(path.join(root, "experiments", "quay-perpetual-stream", "scripts"), { recursive: true });
     fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
@@ -297,6 +306,53 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
     assert.notEqual(mention.class, "live");
   });
 
+  // ── Instrument manifest (gap-eighty-one-instruments...) ──────────────────────────────────────
+  // The entry-point directory is DERIVED from the filesystem (never a hardcoded "81"), and the
+  // admission filter (AC4: cannot say what question it answers => does not get in) is mechanical.
+  test("extractHeaderComment: block comments, // runs, and # runs (shebang-safe)", () => {
+    assert.equal(extractHeaderComment("/* a\n b */\ncode"), " a\n b "); // block interior preserved as-is
+    assert.equal(extractHeaderComment("// one\n// two\n\ncode\n"), "one\ntwo");
+    assert.equal(extractHeaderComment("#!/usr/bin/env bash\n# a comment\necho hi\n"), "/usr/bin/env bash\na comment");
+    assert.equal(extractHeaderComment("export const a = 1;\n"), "");
+  });
+
+  test("extractInstrumentDeclaration: @instrument tag wins; em-dash header derived; silent => null", () => {
+    assert.equal(
+      extractInstrumentDeclaration("// foo.ts — a derived description.\nexport const a = 1;\n", "foo.ts"),
+      "a derived description."
+    );
+    assert.equal(
+      extractInstrumentDeclaration('// foo.ts\n// @instrument "answers the foo question"\nexport const a = 1;\n', "foo.ts"),
+      "answers the foo question"
+    );
+    assert.equal(extractInstrumentDeclaration("#!/usr/bin/env bash\necho hi\n", "x.sh"), null);
+    assert.equal(extractInstrumentDeclaration("export const a = 1;\n", "bar.ts"), null);
+  });
+
+  test("buildInstrumentsManifest: derived count + visible admission filter", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rui-instr-"));
+    _tmpDirs.push(tmp);
+    const root = path.join(tmp, "repo");
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "alpha.ts"), "// alpha.ts — answers the alpha question.\nexport const a = 1;\n");
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "beta.sh"), "#!/usr/bin/env bash\n# @instrument \"echoes beta\"\necho beta\n");
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "gamma.ts"), "export const g = 1;\n"); // silent -> not admitted
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "tsconfig.json"), "{}"); // non-script -> excluded
+    const m = buildInstrumentsManifest(root);
+    assert.equal(m.total, 3); // alpha.ts + beta.sh + gamma.ts (tsconfig.json is not a script)
+    assert.equal(m.admitted, 2);
+    assert.deepEqual(m.notAdmitted, ["plugin/scripts/gamma.ts"]);
+    const alpha = m.instruments.find((i) => i.name === "alpha");
+    assert.ok(alpha, "alpha is admitted");
+    assert.equal(alpha.description, "answers the alpha question.");
+    assert.equal(alpha.kind, "node");
+    const beta = m.instruments.find((i) => i.name === "beta");
+    assert.equal(beta.kind, "bash");
+    // derived, not hardcoded: the real repo's plugin/scripts is enumerated by the same code path
+    const real = buildInstrumentsManifest(REPO_ROOT);
+    assert.ok(real.total >= 70, `real plugin/scripts instrument count is derived (>=70 floor), got ${real.total}`);
+  });
+
   // ── AC4: real-transcript bidirectional control (skips if the sessions dir is absent) ────────
   test("AC4: real transcripts — scripts/test.sh is live; chart2-s1 is NOT live", { timeout: 120_000 }, (t) => {
     const sessionsDir = path.join(os.homedir(), ".claude", "projects", "-home-yale-work-quay");
@@ -304,17 +360,16 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
       t.skip("real sessions dir not present");
       return;
     }
+    // Rolling recent window (a fixed historical window rots: its transcripts get compacted and the
+    // positive control's `executed` drops to 0, flipping `scripts/test.sh` from live → ci-only). The
+    // suite runs scripts/test.sh every round, so the trailing 24h always carries live executions.
     const inv = buildInventory(
       REPO_ROOT,
       sessionsDir,
-      "2026-08-02T11:00:00Z",
-      "2026-08-03T02:54:00Z",
+      new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+      new Date().toISOString(),
       72,
-      { innerSessions: new Set([
-        "3bbd3095-de01-467c-8c6e-abb00f342e53",
-        "82ecfb6a-94ba-462d-ac8d-dfa0984e6dbf",
-        "47eb704e-a8a7-4e2f-9ad6-e419f4dc51eb",
-      ]) },
+      {},
     );
     const byRel = new Map(inv.scripts.map((s) => [s.relPath, s]));
     const testSh = byRel.get("scripts/test.sh");
@@ -329,4 +384,3 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
     const nrt = inv.summary.neverRunsTest.filter((p) => p.includes("experiments") && p.endsWith(".test.ts"));
     assert.ok(nrt.length >= 4, `expected >=4 experiments .test.ts never-runs-test, got ${nrt.length}`);
   });
-}

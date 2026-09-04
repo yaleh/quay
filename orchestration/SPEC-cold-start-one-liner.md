@@ -142,3 +142,29 @@ AC1 说「安装 1–2 行命令 + outer init 1 行 + 冷启动 1 行」。
 **AC8 揭示那个清单漏了一项：内层的启动。**
 ⇒ **AC1 的命令数应当改为「≤4 条，其中必须包含内层启动」**，
 不是把内层启动算作外层引导的副作用——今天证明了那个副作用不会发生。
+
+## AC9:worktree 不许建在 tmpfs(2026-08-03,meta-cc 实测后追加)
+
+**实测**:meta-cc 有 4 个 git worktree 注册在 `/tmp`(DIR-045/053/056/066),
+而这台机器的 `/tmp` 是 **tmpfs——重启即消失**。
+损失的**不是提交**(对象在磁盘 `.git` 里,已验证四个分支全部可解析),
+而是**未提交的工作**:其中一个 worktree 里躺着一份 07-29 写的 `status: accepted` 的 ADR,
+五天没进任何仓库,再一次重启就没了(已救出,见 [[a-mechanism-discarded-as-noise]])。
+
+- **AC9a**:冷启动脚本在建 worktree 前**检查目标路径的文件系统类型**;
+  是 `tmpfs` 则拒绝并说明原因,**不静默继续**。
+- **AC9b**:负控制——在一个真磁盘路径上必须正常建成,
+  否则这条检查就把正常路径也挡了。
+- **AC9c**:已存在的 tmpfs worktree 要能被**发现**(`git worktree list | grep ^/tmp`),
+  这是冷启动前置检查的一项。
+
+**一般形态**:`/tmp` 在不同机器上是磁盘还是内存**不确定**,
+而 worktree 的语义假定它在磁盘上。**把一个持久性假设建在一个不确定的路径上,是静默的。**
+
+**已落地(2026-08-04,`gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs`)**:
+`quay-init --loop` 现在解析 `loop.worktree_root`(缺省 `<repo>/../<basename>-worktrees`,
+磁盘),并在落盘前校验其文件系统类型——`tmpfs` 则 fail-closed 退出非 0、说明「这是内存」并给出
+该改成什么(AC9a);真磁盘路径正常建成、exit 0(AC9b,负控制);存量由
+`git worktree list | awk '$1...'`+`stat` 一行报出(AC9c)。**理由从「重启即消失」升级为「OOM 成因」**:
+2026-08-04 整机 OOM 的分解直接把在飞 worktree 所在的 `/tmp`(tmpfs,占 4.4GB)指向内存——
+同一判据,严重性从「你会丢工作」变成「你会打死整台机器」。

@@ -7,6 +7,14 @@
 // list`/`action run` in CLI terms). See §9's own command block (lines
 // 42-48) for the literal capability list this test is scoped to.
 //
+// NOTE (2026-08-06): the web action-buttons POST route and its form renders
+// were REMOVED (gap-web-action-buttons-unused-route-and-open-redirect-delete).
+// Action-button triggering is now a TWO-way symmetry (CLI + Core MCP) — the
+// Web UI leg of that capability (the detail-page form + the POST route) was
+// deleted with the route, so this file's action-leg assertions cover only
+// the CLI and Core MCP bindings (2 mock-delivery records, not 3). Task-list
+// and task-detail rendering remain three-way (the Web UI still renders both).
+//
 // This is a DIFFERENT symmetry claim from `packages/quay-native/test/
 // abi-symmetry.mjs` (P3, quay-native-design.md §6): that file proves
 // Provider-level CLI/MCP schema symmetry (quay-native's own CLI vs. its own
@@ -47,11 +55,12 @@ import http from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { startServer } from "../src/serve.ts";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const coreBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const coreBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -70,18 +79,6 @@ function get(port, urlPath) {
       res.on("data", (c) => (body += c));
       res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
     }).on("error", reject);
-  });
-}
-
-function post(port, urlPath) {
-  return new Promise((resolve, reject) => {
-    const req = http.request({ host: "127.0.0.1", port, path: urlPath, method: "POST" }, (res) => {
-      let body = "";
-      res.on("data", (c) => (body += c));
-      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
-    });
-    req.on("error", reject);
-    req.end();
   });
 }
 
@@ -159,12 +156,12 @@ async function main() {
     // -- Web UI leg --
     const originalCwd = process.cwd();
     process.chdir(workspaceRoot);
-    const port = 41830 + (process.pid % 1000);
-    webServer = await startServer({ port });
+    webServer = await startServer({ port: 0 });
+    const port = webServer.address().port;
     process.chdir(originalCwd);
 
-    const listPage = await get(port, "/");
-    assert(listPage.status === 200, `Web UI leg: GET / returns 200 (got ${listPage.status})`);
+    const listPage = await get(port, "/tasks");
+    assert(listPage.status === 200, `Web UI leg: GET /tasks returns 200 (got ${listPage.status})`);
     assert(listPage.body.includes("SYM-1"), "Web UI leg: task-list page renders the fixture task's id");
     assert(listPage.body.includes("Three-way symmetry fixture"), "Web UI leg: task-list page renders the fixture task's title");
     assert(listPage.body.includes("todo"), "Web UI leg: task-list page renders the fixture task's status");
@@ -245,10 +242,6 @@ async function main() {
       "Core MCP leg: action_list tool returns the same one applicable 'advance' button as the CLI leg"
     );
 
-    // -- Web UI leg: the detail page renders the action button as a form --
-    assert(detailPage.body.includes("Advance"), "Web UI leg: task-detail page renders the 'Advance' action button's label");
-    assert(detailPage.body.includes("action/advance"), "Web UI leg: task-detail page's button form posts to the action/advance route");
-
     // -- CLI leg: action run (mock delivery mode, DIR-009, so this
     //    assertion never depends on live manda) --
     const cliRunEnv = { ...process.env, QUAY_ACTION_MOCK_LOG: mockLogPath };
@@ -270,25 +263,15 @@ async function main() {
       "action-button triggering: CLI and Core MCP legs compose the byte-identical payload for the same task/action"
     );
 
-    // -- Web UI leg: POST the action route, confirm it fires (redirect +
-    //    mock-delivery record appended), using the same QUAY_ACTION_MOCK_LOG
-    //    convention serve.js's own POST handler already reads. --
-    process.env.QUAY_ACTION_MOCK_LOG = mockLogPath;
-    const linesBefore = fs.readFileSync(mockLogPath, "utf8").trim().split("\n").filter(Boolean).length;
-    const postResult = await post(port, "/task/SYM-1/action/advance");
-    assert(postResult.status === 302, `Web UI leg: POST /task/SYM-1/action/advance returns 302 (got ${postResult.status})`);
-    // QX-013 (iteration 3): gate passes (VALID_SECTIONS all ACs checked) so redirect
-    // now includes ?success= appended. Check it starts with /task/SYM-1.
-    assert(postResult.headers.location && postResult.headers.location.startsWith("/task/SYM-1"), "Web UI leg: POST redirect Location header points back to the task-detail page (QX-013 may append ?success=)");
-    const linesAfter = fs.readFileSync(mockLogPath, "utf8").trim().split("\n").filter(Boolean).length;
-    assert(linesAfter === linesBefore + 1, `Web UI leg: POSTing the action button appended exactly one new mock-delivery record (before=${linesBefore}, after=${linesAfter})`);
-    delete process.env.QUAY_ACTION_MOCK_LOG;
-
-    // Cross-leg agreement on the delivery-mode-tagged result: all three legs
-    // produced a "mock"-delivered record for the same task/action, on the
-    // same underlying mock log — the "action-button triggering" capability
-    // agrees across all three bindings, per DIR-010's own item 2 wording
-    // ("same delivery-mode-tagged result on trigger").
+    // Cross-leg agreement on the delivery-mode-tagged result: both surviving
+    // legs (CLI + Core MCP) produced a "mock"-delivered record for the same
+    // task/action, on the same underlying mock log — the "action-button
+    // triggering" capability agrees across both bindings, per DIR-010's own
+    // item 2 wording ("same delivery-mode-tagged result on trigger").
+    // NOTE (2026-08-06): the Web UI leg of this symmetry was REMOVED with the
+    // web action-buttons route
+    // (gap-web-action-buttons-unused-route-and-open-redirect-delete), so the
+    // expected record count is now 2, not 3.
     const allRecords = fs
       .readFileSync(mockLogPath, "utf8")
       .trim()
@@ -297,9 +280,9 @@ async function main() {
       .map((l) => JSON.parse(l));
     assert(
       allRecords.every((r) => r.taskId === "SYM-1" && r.channel === "task-SYM-1"),
-      "all three legs' mock-delivery records agree on taskId/channel for the same fixture task"
+      "both surviving legs' mock-delivery records agree on taskId/channel for the same fixture task"
     );
-    assert(allRecords.length === 3, `exactly 3 mock-delivery records were appended, one per leg (CLI, Core MCP, Web UI) (got ${allRecords.length})`);
+    assert(allRecords.length === 2, `exactly 2 mock-delivery records were appended, one per leg (CLI, Core MCP) (got ${allRecords.length})`);
   } finally {
     if (mcpClient) await mcpClient.close();
     if (webServer) {

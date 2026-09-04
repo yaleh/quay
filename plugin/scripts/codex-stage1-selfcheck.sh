@@ -11,7 +11,17 @@
 # If `codex` is not on PATH, the LIVE confirmation is reported as SKIP (not a failure)
 # and the static validation still runs — a credential-/tool-less environment must not
 # be silently treated as proven.
+# If `codex` IS present but predates project-scoped MCP config support (no `quay` row
+# surfaces in `codex mcp list`), the LIVE confirmation is likewise SKIPPED with an
+# explicit present-but-incompatible note — never a raw failure on an environment/codex
+# mismatch (this project's .codex/config.toml is validated against codex-cli >=0.146.0).
 
+# ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
+  if [ -f "$_gap_help_lib" ]; then . "$_gap_help_lib"; tool_help "$0"; else echo "用法: bash $(basename "$0") [参数…]"; fi
+  exit 0
+fi
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,14 +86,35 @@ note "implementing Codex version: $CODEX_VERSION"
 
 # Parse-check: codex must accept the config and resolve the quay server. Run from the
 # repo root so the project-scoped .codex/config.toml is the one under test.
-if (cd "$REPO_ROOT" && codex mcp get quay >/dev/null 2>&1); then
-  pass "codex mcp get quay parsed the project config (exit 0)"
-else
-  bad "codex mcp get quay FAILED — the project .codex/config.toml is not accepted by $CODEX_VERSION"
+if ! (cd "$REPO_ROOT" && codex mcp get quay >/dev/null 2>&1); then
+  # Present-but-INCOMPATIBLE vs a REAL config defect, distinguished by whether the
+  # installed codex loads project-scoped MCP config AT ALL: a version that reads
+  # .codex/config.toml surfaces a `quay` row in `codex mcp list` even when the server
+  # is misconfigured; an older version (e.g. codex-cli 0.125.0, predating project-scoped
+  # MCP config) shows NO `quay` row because it never loads the file. Only the latter may
+  # DEGRADE (an explicit SKIP of the live proof, never a raw failure); the former FAILs.
+  LIST_OUT="$(cd "$REPO_ROOT" && codex mcp list 2>&1)"
+  if printf '%s\n' "$LIST_OUT" | grep -Eq '^quay[[:space:]]'; then
+    bad "codex mcp get quay FAILED — the project .codex/config.toml is loaded but not accepted by $CODEX_VERSION:"
+    printf '%s\n' "$LIST_OUT" | sed 's/^/       /'
+  else
+    note "SKIP (present-but-incompatible): $CODEX_VERSION does not load project-scoped"
+    note "      .codex/config.toml MCP servers — 'codex mcp list' surfaces no 'quay' row. The config"
+    note "      was validated against codex-cli >=0.146.0; this installed version cannot provide the"
+    note "      live proof. Static validation above is necessary-but-not-sufficient; upgrade codex-cli"
+    note "      (>=0.146.0) or run this selfcheck where a compatible codex is installed for the live proof."
+    if [[ "$fail" -ne 0 ]]; then
+      note "=== RESULT: FAIL (static) ==="
+      exit 1
+    fi
+    note "=== RESULT: PASS (static; live codex confirmation SKIPPED — installed codex present-but-incompatible) ==="
+    exit 0
+  fi
 fi
+pass "codex mcp get quay parsed the project config (exit 0)"
 
 # Enabled check: `codex mcp list` must show a project `quay` row that is enabled.
-LIST_OUT="$(cd "$REPO_ROOT" && codex mcp list 2>/dev/null)"
+LIST_OUT="$(cd "$REPO_ROOT" && codex mcp list 2>&1)"
 if printf '%s\n' "$LIST_OUT" | grep -Eq '^quay[[:space:]].*enabled'; then
   pass "codex mcp list reports project 'quay' server as enabled"
 else
@@ -92,7 +123,7 @@ else
 fi
 
 # `codex mcp get quay` structured confirmation (transport stdio, enabled true).
-GET_OUT="$(cd "$REPO_ROOT" && codex mcp get quay 2>/dev/null)"
+GET_OUT="$(cd "$REPO_ROOT" && codex mcp get quay 2>&1)"
 if printf '%s\n' "$GET_OUT" | grep -Eq 'enabled:[[:space:]]*true' && printf '%s\n' "$GET_OUT" | grep -Eq 'transport:[[:space:]]*stdio'; then
   pass "codex mcp get quay: enabled=true, transport=stdio"
 else

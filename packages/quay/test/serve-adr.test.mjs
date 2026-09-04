@@ -10,10 +10,11 @@ import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -38,8 +39,8 @@ before(async () => {
     `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_ADR_DIR: "${adrDir.replaceAll("\\", "\\\\")}"\n`);
   originalCwd = process.cwd();
   process.chdir(workspaceRoot);
-  port = 41830 + (process.pid % 900);
-  server = await startServer({ port });
+  server = await startServer({ port: 0 });
+  port = server.address().port;
 });
 
 after(async () => {
@@ -66,8 +67,8 @@ test("GET /adr/nope → 404", async () => {
   assert.equal((await get(port, "/adr/ADR-999")).status, 404);
 });
 
-test("the task list (/) does not list ADRs", async () => {
-  const r = await get(port, "/");
+test("the task list (/tasks) does not list ADRs", async () => {
+  const r = await get(port, "/tasks");
   assert.equal(r.status, 200);
   assert.ok(!r.body.includes("ADR-001"), "ADR must not appear on the task list page");
 });

@@ -23,6 +23,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry, parseArgs } from "./gate-script-base.ts";
+import { writeJsonAtomic } from "./write-json-atomic.ts";
 import { extractSection, countBoxes } from "./task-schema.ts";
 import { PREFLIGHT_POLICY_VERSION, releaseLease, _readLeaseFileWithRetry } from "./prepare-admission-check.ts";
 // gap-prepare-milestone-cross-generation-review-state-reset: the novelty scan (AC #6) reuses
@@ -1607,16 +1608,9 @@ function _readCheckpointRecord(workspace, taskId) {
   }
 }
 
-// _atomicWriteJson — tmp-then-rename, the same durable-JSON-write idiom this module's own lease
-// precedent (prepare-admission-check.ts's `wx`-flag lease acquire) established for state a LATER,
-// possibly different process reads back — never a partial/torn file a concurrent reader could
-// observe mid-write.
-function _atomicWriteJson(p, obj) {
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  const tmp = `${p}.tmp-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
-  fs.renameSync(tmp, p);
-}
+// (The private atomic-write helper this module once carried was absorbed into the shared
+//  writeJsonAtomic — the same tmp-then-rename idiom, imported above — tasks/gap-writestate-
+//  atomicity-split.)
 
 // --resolve-checkpoint: READ-ONLY. Reads the checkpoint (if any), validates it fail-closed against
 // the CURRENT task/charter/scope/review-policy (Requested-action item 2), and — only when valid —
@@ -1738,7 +1732,7 @@ export function _writeCheckpointCli({ taskId, workspace, charterFile, checkpoint
       recordedAtMs: Date.now(),
     });
     const p = checkpointPath(workspace, taskId);
-    _atomicWriteJson(p, record);
+    writeJsonAtomic(p, record);
     return { ok: true, checkpointFile: p, counters, epochReset: !sameEpoch };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -1821,11 +1815,11 @@ export function epochPath(workspace, taskId) {
 
 // ── Epoch lock — gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening (item 1): a real
 // TOCTOU race, reproduced live by the round-3 adversarial review — `_newEpochCli`/
-// `_overrideBudgetCli` each do a read-existing-record -> check-hard-ceiling -> `_atomicWriteJson`
+// `_overrideBudgetCli` each do a read-existing-record -> check-hard-ceiling -> `writeJsonAtomic`
 // sequence with NO inter-process lock around the check-then-act window; 6 (and separately 20)
 // genuinely concurrent `--new-epoch` calls against `maxNewEpochResetCount:3` produced 4 `ok:true`
 // responses, and the final on-disk record showed only 3 resets — one caller's own accepted entry
-// silently vanished (last-writer-wins on `_atomicWriteJson`'s rename). Fixed by reusing this
+// silently vanished (last-writer-wins on `writeJsonAtomic`'s rename). Fixed by reusing this
 // repo's EXISTING atomic-lock primitive verbatim rather than inventing a new one:
 // `prepare-admission-check.ts`'s lease acquisition uses `fs.writeFileSync(path, json, {flag:
 // 'wx'})` (Node's atomic exclusive-create, throws EEXIST on contention) as the single-flight
@@ -1910,10 +1904,25 @@ function _acquireEpochLock(workspace, taskId) {
         }
       }
       if (age !== null && age >= EPOCH_LOCK_STALE_MS) {
-        // Stale — reclaim by removing the orphaned lock file, then retry immediately (still
-        // bounded by this SAME loop's own attempt count, never an unbounded reclaim/retry cycle).
-        try { fs.rmSync(lockPath, { force: true }); } catch { /* another racer may have reclaimed it first */ }
-        continue;
+        // Stale age alone is NOT proof the holder crashed — a holder that is ALIVE but slow
+        // (its critical section runs > EPOCH_LOCK_STALE_MS under load) must NOT be reclaimed:
+        // reclaiming it breaks mutual exclusion (two callers inside the critical section), which
+        // lets the hard ceiling be exceeded (proposal-convergence 20-concurrency --new-epoch
+        // REGRESSION red under the suite's systemd-scoped load: succeeded.length > maxNewEpochResetCount).
+        // Probe holder liveness via process.kill(pid, 0) (no signal sent): ESRCH ⇒ genuinely
+        // crashed ⇒ reclaim the orphaned lock; alive (or PID unknown on a corrupt lock) ⇒ treat
+        // as LIVE contention and fall through to the bounded retry sleep below.
+        const holderPid = existing?.pid;
+        let holderDead = true;
+        if (Number.isFinite(holderPid)) {
+          try { process.kill(holderPid, 0); holderDead = false; } catch { holderDead = true; }
+        }
+        if (holderDead) {
+          // genuinely crashed holder — reclaim by removing the orphaned lock file, retry immediately
+          // (still bounded by this SAME loop's own attempt count, never an unbounded reclaim/retry cycle).
+          try { fs.rmSync(lockPath, { force: true }); } catch { /* another racer may have reclaimed it first */ }
+          continue;
+        }
       }
       if (attempt < EPOCH_LOCK_RETRY_DELAYS_MS.length) {
         _syncSleepMs(EPOCH_LOCK_RETRY_DELAYS_MS[attempt]);
@@ -2244,7 +2253,7 @@ export function _recordEpochDispatchCli({
       createdAtMs: existing ? existing.createdAtMs : Date.now(),
     });
     const p = epochPath(workspace, taskId);
-    _atomicWriteJson(p, record);
+    writeJsonAtomic(p, record);
     const hr = highRisk === true || highRisk === "true";
     const capCheck = checkEpochCaps({ counters: record.counters, policy: record.policy, highRisk: hr, overrides: record.overrides, checkFullReviewCap: false });
     return { ok: true, epochFile: p, epochId: record.epochId, parentEpochId: record.parentEpochId, counters: record.counters, policy: record.policy, capCheck };
@@ -2335,7 +2344,7 @@ export function _newEpochCli({ taskId, workspace, charterFile, reason, owner, co
       createdAtMs: Date.now(),
     });
     const p = epochPath(workspace, taskId);
-    _atomicWriteJson(p, record);
+    writeJsonAtomic(p, record);
     return { ok: true, epochFile: p, epochId: record.epochId, parentEpochId: record.parentEpochId, record };
   } catch (err) {
     return { ok: false, code: err.code || "new-epoch-exception", error: err.message };
@@ -2403,7 +2412,7 @@ export function _overrideBudgetCli({ taskId, workspace, charterFile, reason, own
     const overrideEntry = { owner, reason, additionalBudget: minutes, grantedAt: Date.now() };
     const record = { ...existing, overrides: [...priorOverrides, overrideEntry] };
     const p = epochPath(workspace, taskId);
-    _atomicWriteJson(p, record);
+    writeJsonAtomic(p, record);
     return { ok: true, epochFile: p, epochId: record.epochId, override: overrideEntry, overrides: record.overrides };
   } catch (err) {
     return { ok: false, code: err.code || "override-exception", error: err.message };
@@ -2634,6 +2643,6 @@ async function _cliMain(argv) {
   return 2;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "proposal-convergence")) {
   _cliMain(process.argv).then((code) => process.exit(code));
 }

@@ -50,13 +50,12 @@ extra:
 ## Contract
 
 ```
-measure  executed   = 内层 transcript 中命令位置出现该脚本的次数   # 剥离引号后匹配，非裸子串
-measure  imported   = 全仓 import/require 语句中引用该脚本的次数   # 解析语句，非子串
-measure  ci_invoked = `.github/workflows/*.yml` 中出现该脚本的次数
+measure  executed   = `node plugin/scripts/runtime-usage-inventory.ts --since <ISO> --json` executed 计数
+measure  imported   = `node plugin/scripts/runtime-usage-inventory.ts --since <ISO> --json` imported 计数
+measure  ci_invoked = `node plugin/scripts/runtime-usage-inventory.ts --since <ISO> --json` ci_invoked 计数
 invariant 脚本总数在测量前后一致（211）                            # 分类必须覆盖全集，不许漏
 invoke   `node plugin/scripts/runtime-usage-inventory.ts --since <ISO> --json`
-control  取一个已知每天都跑的脚本（如 `scripts/test.sh`）⇒ 必须落进「已执行」；
-         取一个已知封存的（如 `chart2-s1-distribution-reliability.ts`）⇒ 必须不落进「已执行」
+control  取一个已知每天都跑的脚本（如 `scripts/test.sh`）⇒ 必须落进「已执行」；取一个已知封存的（如 `chart2-s1-distribution-reliability.ts`）⇒ 必须不落进「已执行」
 resume   每分析完一个脚本即写盘                                    # 211 个，中断保全
 ```
 
@@ -164,3 +163,9 @@ resume   每分析完一个脚本即写盘                                    # 
 - plugin/scripts/runtime-usage-inventory.ts
 - plugin/test/runtime-usage-inventory.test.mjs
 - docs/analysis/runtime-usage-inventory.md
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05T18:2xZ
+changed: contract-ratchet compliance，外层 18:2xZ 补齐（未审）

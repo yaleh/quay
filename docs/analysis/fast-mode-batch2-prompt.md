@@ -30,10 +30,12 @@
 Agent(run_in_background: true, description: "<taskId>", prompt: <见下>)
 ```
 
-**worktree**：subagent 自己建，`/tmp/quay-wt-<slug>`，分支 `task/<taskId>`。
+**worktree**：subagent 自己建，`$WORKTREE_ROOT/<slug>`（磁盘路径——`/tmp` 是 tmpfs、是内存，
+worktree 建进去就是在重演整机 OOM；`worktree_root` 从 `.quay/config.yml` `loop:` 节读），
+分支 `task/<taskId>`。
 
 ```bash
-git worktree add /tmp/quay-wt-<slug> -b task/<taskId>
+git worktree add $WORKTREE_ROOT/<slug> -b task/<taskId>
 ```
 
 注意 `milestone-worktree.ts` **不能用**——它要求数字 milestone 号，本批次任务都是 gap 任务没有 M 号。用上面的裸 `git worktree`，这正是批次 1 实际用的。
@@ -55,11 +57,14 @@ git worktree add /tmp/quay-wt-<slug> -b task/<taskId>
 subagent 返回后，按完成顺序逐个：
 
 1. `git merge --no-ff task/<taskId>`，冲突就中止并报告，不要 `--ours`/`--theirs`
-2. 跑**全量** `scripts/test.sh`（约 7 分钟，1166 tests，期望 0 fail）
-3. 全绿才继续下一个合并；不绿就停下来定位
-4. `git worktree remove /tmp/quay-wt-<slug>` + `git branch -d task/<taskId>`
+2. 跑该任务的**选中集** `$TEST_COMMAND --for-task <taskId>`（`TEST_COMMAND` 见 `.quay/config.yml` `loop.test_command`；秒级，按 `## Touches` 选测试）——**不跑全量**
+3. 选中集非绿才停下来定位；绿才继续下一个合并
+4. `git worktree remove $WORKTREE_ROOT/<slug>` + `git branch -d task/<taskId>`
 5. 关闭任务状态（见下）
 6. 记录耗时
+
+> **全量套件不在此处跑**（`gap-two-thirds-of-a-task-is-polling-a-suite-log` 方向 C）：迭代/fan-in 只用
+> `--for-task` 选中集把关，**全量只留给 DoD 要求的最后连跑 2 次全绿**——那是「有没有破坏别处」的唯一回答。
 
 **合并必须串行。** 并行合并会在共享工作树上撞车——这个会话见过真实事故。
 
@@ -121,7 +126,7 @@ Touches 不相交，可并发：
 2. RED/GREEN
 3. 独立子代理对抗审查，要它反驳；**硬上限 2 轮**（新增）
 4. 镜像字节一致
-5. 任务内只跑局部测试，全量只在 fan-in
+5. 任务内只跑局部测试，全量只在 DoD 最后两次
 6. 新增导出函数必须有生产调用点，否则不算完成
 7. **AC 和 DoD 都要勾**，勾不上逐条说明（加严）
 8. 发现异常必须处置——修，或建任务；降级必须同时建任务

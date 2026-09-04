@@ -1,0 +1,39 @@
+---
+id: gap-webui-board-load-120s
+title: "/board 加载 120s——readBoardLanding 无缓存 + 硬超时 120s（超时后渲染错误态），每次请求冷跑子进程"
+status: done
+labels:
+  - gap
+  - defect
+  - webui
+  - performance
+parent: null
+children: []
+extra:
+  schema: execution
+---
+
+**type:** finding
+
+## Finding
+
+`/board` 加载 120.4s（dashboard 23.4s / manager 20.3s）。根因：每次请求都冷跑 `node --experimental-strip-types <script> --json` 子进程；`readBoardLanding`（observation.ts:483）调 `task-status-drift-check.ts` 无缓存、`timeout: 120_000` 硬编码（:518），超时后渲染错误态（等 2 分钟换来「没读到数据」）。
+
+**方向（不细化实现）**：① 补短 TTL 缓存（复用 `readPoolMetrics` 已有的 30s TTL 模式）；② timeout 降到秒级 + fail-open 渲染；③ 探针脚本预编译 `.js` 跳过每次 strip-types 开销（产品 dist 路径已这么做）；④（激进，需产品定）骨架先出 + 异步补数据。
+
+## Acceptance Criteria
+
+- [x] AC1: `/board` 冷加载从 ~120s 降到个位数秒（TTL 缓存 + 秒级 timeout + fail-open）。
+- [x] AC2: 负控制——缓存命中时不再冷跑子进程（可观测：第二次请求快）。
+- [x] AC3: 超时渲染「读取超时」而非空等到硬顶（fail-open）。
+
+## Definition of Done
+
+- [x] `/board` 冷加载实测耗时从 ~120s 降到个位数秒（真实输出，非估算；缓存命中 + 秒级 timeout + fail-open 三者都落地）。
+
+## Touches
+
+- packages/quay/src/observation.ts（readBoardLanding：TTL 缓存 + 秒级 timeout + fail-open + timedOut 标志 + 测试 seam/counter）
+- packages/quay/src/serve-handlers.ts（renderBoardPage 读取超时分支 + 导出 + handleBoard catch 补 timedOut）
+- packages/quay/test/serve-board.test.mjs（新增 AC1/AC2/AC3 三条；既有 AC3 负控制在两次请求间 clearLandingCache）
+- tasks/gap-webui-board-load-120s.md（自身）

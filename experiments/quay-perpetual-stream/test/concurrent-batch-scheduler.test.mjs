@@ -6,7 +6,7 @@
 // this module IMPORTS checkTouchesPair from touches-orthogonality-check.mjs, never re-implements it.
 // Run:
 //   node --test experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -17,6 +17,7 @@ import {
   touchesSharedState,
   SHARED_STATE_PATHS,
   assembleBatch,
+  expandDeclaredTouches,
   isCapabilityGrowth,
   applyPreparationExpansion,
   loadReceiptTouches,
@@ -29,12 +30,35 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const SFX = path.join(__dirname, "..", "fixtures", "scheduler");
 const sfx = (f) => path.join(SFX, f);
 
+// Every mkdtemp receipt/ac dir is removed once at the end of this file (the carrier-array +
+// after() pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // A fake expander maps a declared glob → concrete file set (hermetic, no fs).
 const fakeExpand = (mapping) => (globs) => {
   const out = new Set();
   for (const g of globs) for (const f of (mapping[g] || [])) out.add(f);
   return out;
 };
+
+// Run `main()` with `--json` and capture its stdout, so CLI-level assertions can read the
+// { batch, deferred } verdict the task contract measures (gap-dispatch-eligibility-blind-to-files-
+// that-do-not-exist-yet). main() is async and writes via process.stdout.write, which is patched
+// for the duration of the call and always restored.
+async function runMainJson(args) {
+  const chunks = [];
+  const origWrite = process.stdout.write;
+  process.stdout.write = (chunk, ...rest) => { chunks.push(String(chunk)); return true; };
+  try {
+    const code = await main(["node", "s", "--json", ...args]);
+    return { code, stdout: chunks.join("") };
+  } finally {
+    process.stdout.write = origWrite;
+  }
+}
 
 // ── parseCandidate ───────────────────────────────────────────────────────────────────────────────
 test("parseCandidate: extracts id, touches globs, and type", () => {
@@ -48,6 +72,34 @@ test("parseCandidate: type defaults to 'execution' when unstated; learning detec
   assert.equal(parseCandidate("c", "## Touches\n- a.js").type, "execution");
   assert.equal(parseCandidate("c", "**type:** learning\n## Touches\n- a.js").type, "learning");
   assert.equal(parseCandidate("c", "type: learning-experiment\n## Touches\n- a.js").type, "learning-experiment");
+});
+
+// ── gap-experiment-legacy-reclaim-and-touches-heuristic AC3 ─────────────────────────────────────
+// A charter WITHOUT a `## Touches` section + a repoRoot gets a MECHANICAL derived hint from body
+// prose (derive-touches-heuristic.ts), so the scheduler can batch it instead of conservative-
+// serializing it. The hint is marked `derived: true` and `hasSection` becomes true ONLY when at
+// least one path-shaped token is extracted; a charter with no path-shaped tokens stays conservative.
+test("parseCandidate: derives mechanical touches when ## Touches is missing and repoRoot is provided", () => {
+  const c = parseCandidate(
+    "no-touches",
+    "**type:** execution\n## Proposal\nFix the bug in `plugin/scripts/foo.ts` and update `docs/bar.md`.",
+    REPO_ROOT,
+  );
+  assert.equal(c.touches.hasSection, true, "derived globs make hasSection usable");
+  assert.equal(c.touches.derived, true, "derived hint is labeled auto-derived");
+  assert.ok(c.touches.globs.includes("plugin/scripts/foo.ts"), "path-shaped token from prose is extracted");
+  assert.ok(c.touches.globs.includes("docs/bar.md"), "path-shaped token from prose is extracted");
+});
+
+test("parseCandidate: no repoRoot (or no path-shaped tokens) keeps the conservative no-declaration path", () => {
+  // 2-arg call (no repoRoot) — byte-unchanged legacy behavior.
+  const noRoot = parseCandidate("c", "**type:** execution\nFix `plugin/scripts/foo.ts` here.");
+  assert.equal(noRoot.touches.hasSection, false);
+  assert.equal(noRoot.touches.derived, undefined);
+  // repoRoot but no path-shaped tokens → stays conservative.
+  const noPaths = parseCandidate("c", "**type:** execution\nImprove the flow and fix the bug.", REPO_ROOT);
+  assert.equal(noPaths.touches.hasSection, false, "no path-shaped tokens → no derivation");
+  assert.equal(noPaths.touches.derived, undefined);
 });
 
 // ── DIR-116: value-type extraction ──────────────────────────────────────────────────────────────
@@ -250,6 +302,7 @@ test("loadReceiptTouches: null for a missing/absent receipt file", () => {
 
 test("loadReceiptTouches: reads a real receipt's '.touches' array", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cbs-receipt-"));
+  _tmpDirs.push(dir);
   const receiptFile = path.join(dir, "preparation.json");
   fs.writeFileSync(receiptFile, JSON.stringify({ touches: ["a.ts", "b.ts"] }));
   assert.deepEqual(loadReceiptTouches(receiptFile), ["a.ts", "b.ts"]);
@@ -271,6 +324,7 @@ test("applyPreparationExpansion: a candidate with no matching receipt entry is u
 
 test("applyPreparationExpansion: a candidate's checked-Plan receipt expands its effective touches", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cbs-receipt-"));
+  _tmpDirs.push(dir);
   const receiptFile = path.join(dir, "preparation.json");
   fs.writeFileSync(receiptFile, JSON.stringify({ touches: ["y/b.js", "x/a.js"] }));
   const cands = [
@@ -289,6 +343,7 @@ test("applyPreparationExpansion: a candidate's checked-Plan receipt expands its 
 
 test("assembleBatch: a candidate re-evaluated with its EXPANDED touches is deferred for a real overlap the stale declaration hid (DIR-117 iteration-2 item 4, the exact 'not just detectable in isolation' proof)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cbs-receipt-"));
+  _tmpDirs.push(dir);
   const receiptFile = path.join(dir, "preparation.json");
   // B's checked Plan actually touches x/a.js too, even though B's declared '## Touches' only
   // ever said y/b.js — the exact staleness this item closes.
@@ -333,4 +388,167 @@ test("main: real governance-integrity clean candidate is excluded; real capabili
   assert.deepEqual(r.batch, ["cap-growth-explicit"]);
   assert.equal(r.deferred[0].id, "governance-integrity-clean");
   assert.match(r.deferred[0].reason, /value-type/i);
+});
+
+// ── gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet ─────────────────────────────────
+// The production expander compares DECLARED paths, not the filesystem. A task whose `## Touches`
+// points only at files it will CREATE (the `(new)` case) must be judged by those declared paths —
+// the old fs-backed expander expanded them to an EMPTY set, so checkTouchesPair's conservative
+// "matched nothing (likely a typo)" branch fired (a false negative that also could NOT name a real
+// overlap on a not-yet-created file: the verdict said "your glob is probably a typo" when two tasks
+// actually collided on creating the same file).
+test("expandDeclaredTouches: a concrete declared path resolves to itself even when the file does NOT exist", () => {
+  const p = "plugin/scripts/brand-new-alpha.ts";
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, p)), false, "precondition: the fixture path must not exist in the tree");
+  assert.deepEqual([...expandDeclaredTouches([p], REPO_ROOT)], [p]);
+});
+
+test("expandDeclaredTouches: a concrete declared path that exists still resolves (unchanged for the normal case)", () => {
+  assert.deepEqual(
+    [...expandDeclaredTouches(["experiments/quay-perpetual-stream/scripts/vmeta-lag-check.ts"], REPO_ROOT)],
+    ["experiments/quay-perpetual-stream/scripts/vmeta-lag-check.ts"],
+  );
+});
+
+test("expandDeclaredTouches: a wildcard still expands against the filesystem (AC4 — wildcard support kept)", () => {
+  const set = expandDeclaredTouches(["experiments/quay-perpetual-stream/scripts/vmeta-lag-*.ts"], REPO_ROOT);
+  assert.ok(set.size >= 1, "wildcard must resolve to the concrete files that exist");
+  assert.ok(set.has("experiments/quay-perpetual-stream/scripts/vmeta-lag-check.ts"));
+});
+
+test("expandDeclaredTouches: a wildcard that matches nothing is EMPTY (the conservative 'likely a typo' survives for wildcards)", () => {
+  const set = expandDeclaredTouches(["packages/quay/src/gate/definitely-no-such-*.js"], REPO_ROOT);
+  assert.equal(set.size, 0);
+});
+
+test("assembleBatch (AC1): a NEW-file candidate vs an EXISTING-file candidate, clearly unrelated → disjoint, both batch", () => {
+  const cands = [
+    parseCandidate("A", "**type:** execution\n## Touches\n- plugin/scripts/brand-new-alpha.ts"),
+    parseCandidate("B", "**type:** execution\n## Touches\n- packages/quay/src/serve.ts"),
+  ];
+  const r = assembleBatch(cands, { expand: (g) => expandDeclaredTouches(g, REPO_ROOT) });
+  assert.deepEqual(r.batch, ["A", "B"]);
+  assert.deepEqual(r.deferred, []);
+});
+
+test("assembleBatch (AC2): both declare the SAME not-yet-existing file → overlap, deferred reason NAMES the file (no typo excuse)", () => {
+  const cands = [
+    parseCandidate("A", "**type:** execution\n## Touches\n- plugin/scripts/brand-new-alpha.ts"),
+    parseCandidate("C", "**type:** execution\n## Touches\n- plugin/scripts/brand-new-alpha.ts"),
+  ];
+  const r = assembleBatch(cands, { expand: (g) => expandDeclaredTouches(g, REPO_ROOT) });
+  assert.deepEqual(r.batch, ["A"]);
+  assert.equal(r.deferred.length, 1);
+  assert.equal(r.deferred[0].id, "C");
+  assert.match(r.deferred[0].reason, /overlapping file-sets/);
+  assert.match(r.deferred[0].reason, /plugin\/scripts\/brand-new-alpha\.ts/, "the overlapping file must be NAMED");
+  assert.doesNotMatch(r.deferred[0].reason, /matched nothing/, "not the 'matched nothing' false reason");
+  assert.doesNotMatch(r.deferred[0].reason, /likely a typo/, "not the 'likely a typo' false reason");
+});
+
+test("assembleBatch (AC3): an EMPTY ## Touches section still serializes — conservative branch NOT relaxed", () => {
+  const cands = [
+    parseCandidate("A", "**type:** execution\n## Touches\n- x/a.js"),
+    parseCandidate("EMPTY", "**type:** execution\n## Touches\n"),
+  ];
+  const r = assembleBatch(cands, { expand: (g) => expandDeclaredTouches(g, REPO_ROOT) });
+  assert.deepEqual(r.batch, ["A"]);
+  assert.equal(r.deferred.length, 1);
+  assert.equal(r.deferred[0].id, "EMPTY");
+  assert.match(r.deferred[0].reason, /no\/empty ## Touches/);
+});
+
+test("assembleBatch (AC3): an ABSENT ## Touches section still serializes (regression fixture 2)", () => {
+  const cands = [
+    parseCandidate("A", "**type:** execution\n## Touches\n- x/a.js"),
+    parseCandidate("NONE", "**type:** execution\n## Proposal\nno touches section at all"),
+  ];
+  const r = assembleBatch(cands, { expand: (g) => expandDeclaredTouches(g, REPO_ROOT) });
+  assert.deepEqual(r.batch, ["A"]);
+  assert.equal(r.deferred.length, 1);
+  assert.equal(r.deferred[0].id, "NONE");
+  assert.match(r.deferred[0].reason, /no\/empty ## Touches/);
+});
+
+test("assembleBatch (AC4): a wildcard declaration still expands and overlap detection names the covered file", () => {
+  const cands = [
+    parseCandidate("A", "**type:** execution\n## Touches\n- experiments/quay-perpetual-stream/scripts/vmeta-lag-*.ts"),
+    parseCandidate("B", "**type:** execution\n## Touches\n- experiments/quay-perpetual-stream/scripts/vmeta-lag-check.ts"),
+  ];
+  const r = assembleBatch(cands, { expand: (g) => expandDeclaredTouches(g, REPO_ROOT) });
+  assert.deepEqual(r.batch, ["A"]);
+  assert.equal(r.deferred.length, 1);
+  assert.equal(r.deferred[0].id, "B");
+  assert.match(r.deferred[0].reason, /overlapping file-sets/);
+  assert.match(r.deferred[0].reason, /vmeta-lag-check\.ts/);
+});
+
+test("main --json (AC1): new-file vs existing-file pair → both batch, no defer (CLI surface)", async () => {
+  // var names avoid `dir`/`dirA`-style collisions on purpose: the test-isolation R6 rule's cleanup
+  // coverage is NAME-based, and this file's pre-existing baselined `mkdtemp-no-cleanup` entry uses
+  // the name `dir` — introducing a cleaned `dir` would mask that baseline (stale-entry ratchet).
+  const ac1Dir = fs.mkdtempSync(path.join(os.tmpdir(), "cbs-ac1-"));
+  try {
+    const newA = path.join(ac1Dir, "new-a.md");
+    const existB = path.join(ac1Dir, "existing-b.md");
+    fs.writeFileSync(newA, "**type:** execution\n## Touches\n- plugin/scripts/brand-new-alpha.ts\n");
+    fs.writeFileSync(existB, "**type:** execution\n## Touches\n- packages/quay/src/serve.ts\n");
+    const r = await runMainJson(["--root", REPO_ROOT, newA, existB]);
+    assert.equal(r.code, 0);
+    const parsed = JSON.parse(r.stdout);
+    assert.deepEqual(parsed.batch, ["new-a", "existing-b"]);
+    assert.deepEqual(parsed.deferred, []);
+  } finally {
+    fs.rmSync(ac1Dir, { recursive: true, force: true });
+  }
+});
+
+test("main --json (AC2): both declare the same not-yet-existing file → deferred reason names the file, no typo excuse (CLI surface)", async () => {
+  const ac2Dir = fs.mkdtempSync(path.join(os.tmpdir(), "cbs-ac2-"));
+  try {
+    const a = path.join(ac2Dir, "a.md");
+    const c = path.join(ac2Dir, "c.md");
+    fs.writeFileSync(a, "**type:** execution\n## Touches\n- plugin/scripts/brand-new-alpha.ts\n");
+    fs.writeFileSync(c, "**type:** execution\n## Touches\n- plugin/scripts/brand-new-alpha.ts\n");
+    const r = await runMainJson(["--root", REPO_ROOT, a, c]);
+    assert.equal(r.code, 0);
+    const parsed = JSON.parse(r.stdout);
+    assert.deepEqual(parsed.batch, ["a"]);
+    assert.equal(parsed.deferred.length, 1);
+    assert.match(parsed.deferred[0].reason, /plugin\/scripts\/brand-new-alpha\.ts/);
+    assert.doesNotMatch(parsed.deferred[0].reason, /likely a typo/);
+  } finally {
+    fs.rmSync(ac2Dir, { recursive: true, force: true });
+  }
+});
+
+test("main --json (AC5): 2026-08-03 03:37Z inner dispatch replay — production entry matches the inner hand-written expand pairwise", async () => {
+  // The three real tasks the inner loop dispatched on 2026-08-03 03:37Z (frozen as fixtures under
+  // fixtures/scheduler/replay-*.md). The inner hand-written expand concluded
+  // "test-isolation vs no-resource-awareness => false OVERLAP: [\"scripts/test.sh\"]" and the other
+  // two pairs disjoint. The production entry must reproduce exactly that, pairwise.
+  const t = sfx("replay-test-isolation.md");
+  const n = sfx("replay-no-resource-awareness.md");
+  const r = sfx("replay-reclaim.md");
+
+  const tn = JSON.parse((await runMainJson(["--root", REPO_ROOT, t, n])).stdout);
+  assert.deepEqual(tn.batch, ["replay-test-isolation"]);
+  assert.equal(tn.deferred.length, 1);
+  assert.equal(tn.deferred[0].id, "replay-no-resource-awareness");
+  assert.match(tn.deferred[0].reason, /scripts\/test\.sh/, "the recorded overlap on scripts/test.sh must be named");
+  assert.match(tn.deferred[0].reason, /overlapping file-sets/);
+
+  const tr = JSON.parse((await runMainJson(["--root", REPO_ROOT, t, r])).stdout);
+  assert.deepEqual([...tr.batch].sort(), ["replay-reclaim", "replay-test-isolation"]);
+  assert.deepEqual(tr.deferred, []);
+
+  const nr = JSON.parse((await runMainJson(["--root", REPO_ROOT, n, r])).stdout);
+  assert.deepEqual([...nr.batch].sort(), ["replay-no-resource-awareness", "replay-reclaim"]);
+  assert.deepEqual(nr.deferred, []);
+});
+
+test("mirror: plugin/scripts/concurrent-batch-scheduler.ts and the experiments mirror are byte-identical", () => {
+  const real = fs.readFileSync(path.join(REPO_ROOT, "plugin/scripts/concurrent-batch-scheduler.ts"), "utf8");
+  const mirror = fs.readFileSync(path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/concurrent-batch-scheduler.ts"), "utf8");
+  assert.equal(real, mirror, "the experiments mirror must stay byte-identical to the plugin original");
 });

@@ -44,15 +44,18 @@ const res = spawnSync(
 );
 const wallMs = Date.now() - started;
 
-// ── Parse reporter lines: `__PERFILE__ <full-path> <duration_ms> <passed>`.
+// ── Parse reporter lines: `__PERFILE__ duration_ms=<duration_ms> <full-path> <passed>`.
+// (gap-install-suite-cost-instrument-reporter-not-wired AC2 — the reporter now emits
+// `duration_ms=` BEFORE the path so every per-file line matches the contract measure
+// `grep -cE "duration_ms.*test\.mjs|file.*duration"` in the real full-suite log.)
 const durations = new Map(); // full path -> duration_ms
 const passedMap = new Map(); // full path -> passed bool
 const fileSet = new Set(files);
 for (const line of String(res.stderr ?? "").split("\n")) {
-  const m = line.match(/^__PERFILE__ (\S+) ([0-9.]+) (true|false)$/);
+  const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)(?: end_ms=([0-9]+))?$/);
   if (m) {
-    const full = m[1];
-    const dur = parseFloat(m[2]);
+    const full = m[2];
+    const dur = parseFloat(m[1]);
     if (fileSet.has(full)) {
       durations.set(full, dur);
       passedMap.set(full, m[3] === "true");

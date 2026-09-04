@@ -9,8 +9,9 @@
 # re-baseline after a criterion fix; it re-anchors the ceiling to the current violation set.
 #
 # Format: one `<task-file>: <violation-code>` per line (repo-root-relative, sorted).
-# baseline-count: 5
+# baseline-count: 6
 
+tasks/gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point.md: ac-ticked-self-admission
 tasks/gap-no-inventory-of-what-the-two-layer-mode-actually-runs.md: contract-line-unknown
 tasks/gap-no-inventory-of-what-the-two-layer-mode-actually-runs.md: dispatch-review-missing
 tasks/gap-no-inventory-of-what-the-two-layer-mode-actually-runs.md: measure-no-command

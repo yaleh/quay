@@ -58,3 +58,11 @@ Standard inherited-core DoD clauses apply.
 
 ## M135 attempt 1 (it0-failed — gate-hash charter format)
 Charter had prose "Verbatim transclusion" instead of GATE-HASH-REF line. Charter fixed; re-SELECTed for retry.
+
+## Cross-annotation (gap-release-excludes-plugin-bundle-agent-surface, 2026-08-06)
+
+本任务校验 manifest vs release.yml 的**一致性**（doc-vs-reality），但 manifest 本身**不含 plugin
+bundle**——release 资产里没有 `plugin/` 条目需要校验。AC16 判据 2「完整性」的 files/plugin 缺口由
+`tasks/gap-release-excludes-plugin-bundle-agent-surface.md`（done 后状态）补上：`files` 加 `plugin`，
+release tarball 含整个 plugin bundle。本任务与它是相邻两半：manifest 校验「发布物与声明一致」，它补
+「声明本身把 agent 面（plugin bundle）算进去」。

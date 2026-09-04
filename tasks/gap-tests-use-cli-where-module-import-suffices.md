@@ -12,6 +12,8 @@ extra:
 
 **type:** execution
 
+> **判据重新评估（[[gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency]]）**：原判据是单套件墙钟（本任务「其余 110 个文件各 <60 s，对墙钟无影响，不动」的取舍）；在并发维度下重新评估——spawn 总数决定内核负载与可并行套件数，不是单套件墙钟。本任务结论不改、不重开；A 层剩余调用点由该任务继续转换。
+
 ## Proposal
 
 套件墙钟由**最慢的单个文件**决定（`--test-concurrency=8` 并行），不是由调用点总数决定。实测
@@ -31,6 +33,8 @@ extra:
 | `packages/quay/test/serve.test.mjs` | **280 s** | **36 次经 `quay-native.ts` 造 fixture**；服务器本身是进程内启动（`spawn(` 计数为 0） | **不起进程造 fixture** ← 本任务 |
 | `packages/quay/test/mcp-server.test.mjs` | **142 s** | **15 次 `connectStdio()`**，每次起一个 MCP server 子进程并做协议握手 | **共享连接** ← 本任务 |
 | 其余 110 个文件 | 各 <60 s | — | 对墙钟无影响，不动 |
+
+> **判据限定（[[gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency]]）**：上述「110 个文件对墙钟无影响，不动」的**原判据是单套件墙钟**；该任务在**并发维度**下重新评估了同一组事实——spawn 总数不决定单套件墙钟，但决定内核态负载与可并发套件数。本任务结论不变、不重开。
 
 三个文件三种成因，**不能用同一个手段**。这是本任务与 [[gap-tests-spawn-cli-from-ts-source]] 的分工：
 那个任务换执行载体（对 `cli.test.mjs` 有效），本任务消除不必要的进程本身（对另外两个有效）。

@@ -15,18 +15,30 @@
 //
 // Run: node --test test/cli-migrate.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+
+// Every workspace triple (source + target + root) is removed once at the end of this file — the
+// carrier-array + after() pattern — so `quay-migrate-*` never accumulates a /tmp dir per run.
+const _workspaces = [];
+after(() => {
+  for (const ws of _workspaces) {
+    fs.rmSync(ws.sourceTasksDir, { recursive: true, force: true });
+    fs.rmSync(ws.targetTasksDir, { recursive: true, force: true });
+    fs.rmSync(ws.workspaceRoot, { recursive: true, force: true });
+  }
+});
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const coreBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const coreBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 const VALID_SECTIONS =
   "## Proposal\nThis is a sufficiently long proposal section so the gate's minimum-content check passes cleanly.\n" +
@@ -69,7 +81,9 @@ function makeWorkspace() {
       "",
     ].join("\n")
   );
-  return { workspaceRoot, sourceTasksDir, targetTasksDir };
+  const ws = { workspaceRoot, sourceTasksDir, targetTasksDir };
+  _workspaces.push(ws);
+  return ws;
 }
 
 test("quay migrate --from --to copies every task from source to target with fidelity", () => {

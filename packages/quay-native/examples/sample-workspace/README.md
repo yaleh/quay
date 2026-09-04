@@ -30,18 +30,18 @@ Point `quay-native` (or `quay` Core) at ONLY this directory via
 
 ```sh
 cd packages/quay-native/examples/sample-workspace
-QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node ../../bin/quay-native.js task list
-QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node ../../bin/quay-native.js task get SAMPLE-1
-QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node ../../bin/quay-native.js task check SAMPLE-1
+QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node --experimental-strip-types ../../bin/quay-native.ts task list
+QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node --experimental-strip-types ../../bin/quay-native.ts task get SAMPLE-1
+QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node --experimental-strip-types ../../bin/quay-native.ts task check SAMPLE-1
 ```
 
 Or via Core, using this directory's own `.quay/config.yml`:
 
 ```sh
 cd packages/quay-native/examples/sample-workspace
-node ../../../quay/bin/quay.js task list
-node ../../../quay/bin/quay.js task view SAMPLE-1A
-node ../../../quay/bin/quay.js gate SAMPLE-1A
+node --experimental-strip-types ../../../quay/bin/quay.ts task list
+node --experimental-strip-types ../../../quay/bin/quay.ts task view SAMPLE-1A
+node --experimental-strip-types ../../../quay/bin/quay.ts gate SAMPLE-1A
 ```
 
 This is a **separate, minimal store** from the repo root's own `tasks/`

@@ -29,10 +29,11 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -87,23 +88,31 @@ async function main() {
     ].join("\n")
   );
 
-  const port = 41900 + (process.pid % 500);
   const originalCwd = process.cwd();
   let server;
   try {
     process.chdir(workspaceRoot);
-    server = await startServer({ port });
+    // Ephemeral port (0): the fixed PID-derived range (41900 + pid%500) collided under the 4-lane
+    // parallel suite (two processes whose PIDs differ by exactly 500 compute the same port →
+    // EADDRINUSE at round 313). The OS assigns a free port; read it back after 'listening'.
+    server = await startServer({ port: 0 });
+    // startServer() now awaits the 'listening' event before resolving (serve.ts,
+    // port-collision fix), so the explicit once("listening") wait that used to
+    // be required here is gone — re-registering it now would hang (the event has
+    // already fired and EventEmitter never replays past events). Read the bound
+    // port back directly.
+    const port = server.address().port;
 
-    const res = await get(port, "/");
-    assert(res.status === 200, "GET / returns 200 (got " + res.status + ")");
+    const res = await get(port, "/tasks");
+    assert(res.status === 200, "GET /tasks returns 200 (got " + res.status + ")");
     assert(
       res.body.includes("PEV-1"),
-      "GET / body includes PEV-1 -- proves startServer() resolved env.QUAY_NATIVE_TASKS_DIR (the seeded, 'real' dir), NOT tasks_dir (the empty 'decoy' dir), closing DESIGN.md §4.4's asymmetry"
+      "GET /tasks body includes PEV-1 -- proves startServer() resolved env.QUAY_NATIVE_TASKS_DIR (the seeded, 'real' dir), NOT tasks_dir (the empty 'decoy' dir), closing DESIGN.md §4.4's asymmetry"
     );
 
     // Cross-check: the CLI leg (bin/quay.js, via withProvider()/resolveProviderEnv())
     // must resolve to the SAME directory -- proving all three bindings are now symmetric.
-    const cliOut = execFileSync("node", [path.join(__dirname, "..", "bin", "quay.ts"), "task", "list", "--json"], {
+    const cliOut = execFileSync("node", [QUAY_CLI, "task", "list", "--json"], {
       cwd: workspaceRoot,
       encoding: "utf8",
     });

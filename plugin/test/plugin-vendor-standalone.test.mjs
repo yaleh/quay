@@ -1,19 +1,20 @@
 // @test-group engine
 // plugin-vendor-standalone.test.mjs — M120 Stage 3.2 (DIR-060).
 //
-// Proves the vendored Core bundle runs STANDALONE with ZERO node_modules
-// resolution: copy the vendor/quay tree (dist/quay.js + its sibling
-// package.json) into an isolated scratch dir that has NO node_modules anywhere,
-// then run --help and a raw MCP `initialize` round-trip against the copy. This
-// mirrors how Claude Code copies only the plugin/ subtree into its install
+// Proves the vendored Core bundle runs STANDALONE with ZERO node_modules and
+// ZERO sibling files: copy dist/quay.js ALONE into an isolated scratch dir that
+// has NO node_modules anywhere and NO package.json beside the bundle, then run
+// --help / --version and a raw MCP `initialize` round-trip against the copy.
+// This mirrors how Claude Code copies only the plugin/ subtree into its install
 // cache (no repo node_modules follows it).
 //
-// GROUNDED REFINEMENT to the plan's "copy dist/quay.js alone" wording: the
-// bundle is not a single loose file — src/version.ts reads `../package.json` at
-// import (for the MCP _version field), so the bundle needs its sibling-parent
-// package.json (part of the vendor tree, NOT node_modules). "Standalone" here
-// means "no node_modules / no external dependency," which this test asserts
-// directly — copying quay.js truly alone crashes on the version read.
+// gap-dist-runtime-not-self-contained-reads-external-package-json made the
+// plan's original "copy dist/quay.js alone" wording TRUE: src/version.ts now
+// EMBEDS the version at build time (esbuild json loader inlines package.json),
+// so the bundle no longer reads a sibling package.json at runtime. The old
+// GROUNDED REFINEMENT ("copying quay.js truly alone crashes on the version
+// read") was pinned to the pre-fix behavior and is now obsolete — this test
+// asserts the fixed behavior: the single loose bundle runs standalone.
 //
 // Coverage (ROUND-2 correction): this is a new `.test.mjs` file (code branch of
 // the classifier), so its own coverage IS measured and pasted — expected ~100%
@@ -62,14 +63,15 @@ function writeConfig(root, tasksDir) {
   );
 }
 
-// Copy the vendor/quay tree (dist/quay.js + package.json) into an isolated
-// scratch dir with no node_modules anywhere.
+// Copy dist/quay.js ALONE into an isolated scratch dir — no package.json, no
+// node_modules anywhere (gap-dist-runtime-not-self-contained-reads-external-
+// package-json: the bundle must run standalone because version.ts embeds the
+// version at build time, so a sibling package.json is NOT a runtime dependency).
 function isolatedCopy() {
   const root = mkdtempSync(path.join(os.tmpdir(), 'quay-m120-vendor-standalone-'));
   const copy = path.join(root, 'vendor-quay');
   mkdirSync(path.join(copy, 'dist'), { recursive: true });
   copyFileSync(path.join(vendorDir, 'dist', 'quay.js'), path.join(copy, 'dist', 'quay.js'));
-  copyFileSync(path.join(vendorDir, 'package.json'), path.join(copy, 'package.json'));
   return { root, bundle: path.join(copy, 'dist', 'quay.js') };
 }
 
@@ -87,16 +89,26 @@ function hasNodeModules(dir) {
   return false;
 }
 
-test('vendor bundle runs --help from an isolated copy with zero node_modules present', () => {
+test('vendor bundle runs --help / --version from an isolated copy with zero node_modules AND zero package.json', () => {
   const { root, bundle } = isolatedCopy();
   try {
     assert.ok(!hasNodeModules(root), 'the isolated copy must contain NO node_modules');
+    assert.ok(!existsSync(path.join(root, 'vendor-quay', 'package.json')), 'the isolated copy must have NO package.json beside the bundle');
     const help = execFileSync('node', [bundle, '--help'], {
       encoding: 'utf8',
       cwd: root,
       env: { ...process.env, NODE_PATH: '' },
     });
     assert.match(help, /Usage/, 'the standalone vendor bundle must print usage');
+    // gap-dist-runtime-not-self-contained-reads-external-package-json: --version
+    // must print the real version from the BUILD-TIME-inlined constant, with no
+    // sibling package.json to read — the pre-fix bundle crashed with ENOENT here.
+    const version = execFileSync('node', [bundle, '--version'], {
+      encoding: 'utf8',
+      cwd: root,
+      env: { ...process.env, NODE_PATH: '' },
+    }).trim();
+    assert.match(version, /^\d+\.\d+\.\d+$/, '--version must print a semver version (build-time inlined, no ENOENT)');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

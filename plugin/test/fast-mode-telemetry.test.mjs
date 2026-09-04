@@ -56,12 +56,37 @@ function cleanup(tmpRoot) {
 function runCli(tmpRoot, ...args) {
   const res = spawnSync("node", ["--experimental-strip-types", CLI, "--root", tmpRoot, ...args], {
     encoding: "utf8",
+    // Deterministic slot arithmetic: --slots/--slot-status scan the LIVE machine for non-task
+    // subagent processes (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots). Tests
+    // pin QUAY_TELEMETRY_SUBAGENTS=0 so exact occupied/slots_free assertions never depend on what
+    // else happens to be running during the suite; the subagent-counting tests override it.
+    env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: process.env.QUAY_TELEMETRY_SUBAGENTS ?? "0" },
+  });
+  return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
+}
+
+function runCliEnv(tmpRoot, env, ...args) {
+  const res = spawnSync("node", ["--experimental-strip-types", CLI, "--root", tmpRoot, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
   });
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
 
 function readEventsJsonl(root, runId) {
   const file = path.join(root, ".workflow-events", `${runId}.jsonl`);
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+/** Read an arbitrary `.workflow-events/<filename>.jsonl` log (e.g. the reconcile-invocation log). */
+function readEventsJsonlRaw(root, filename) {
+  const file = path.join(root, ".workflow-events", filename);
   if (!fs.existsSync(file)) return [];
   return fs
     .readFileSync(file, "utf8")
@@ -87,6 +112,12 @@ async function importCli() {
 async function importSchema() {
   return import(SCHEMA);
 }
+
+// ── Governance self-skip (AC6 @test-group engine) ─────────────────────────────────────────────
+// In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
+// precedent). It runs in full when invoked explicitly (QUAY_TEST_GROUPS unset) or with
+// `--group governance`. The fast-mode telemetry is the metering/measurement layer — governance,
+// not engine.
 
 // ── AC2: --task-start ────────────────────────────────────────────────────────────────────────────────
 
@@ -155,6 +186,67 @@ test("AC3 — --task-end rejects an outcome outside VALID_OUTCOMES (fail-closed)
     const res = runCli(tmp, "--task-end", "--taskId", "gap-test-1", "--runId", runId, "--outcome", "bogus");
     assert.notEqual(res.status, 0, "invalid outcome must fail closed");
     assert.match(res.stderr, /outcome|bogus/, `stderr should explain the invalid outcome: ${res.stderr}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// ── DEFER OUTCOME (gap-over90-clock-measures-queue-time-not-work-time): a bracket closed on a
+// touches-overlap defer must leave inProgress (so OVER90's clock never counts the queue segment),
+// route to `deferred[]` (never `tasks[]`, never throughput), and be re-`--task-start`able as a
+// FRESH bracket (so OVER90 measures from work start, not task-start). ──────────────────────────────
+
+test("OVER90-DEFER — --task-end --outcome deferred is accepted and the pair routes to deferred[], not tasks[]", async () => {
+  const cli = await importCli();
+  const runId = cli.generateRunId("gap-defer-1");
+  const startEvent = cli.buildStartEvent({ taskId: "gap-defer-1", runId, recordedAtMs: 1_000_000 });
+  const endEvent = cli.buildEndEvent({ taskId: "gap-defer-1", runId, outcome: "deferred", recordedAtMs: 1_060_000 });
+  const report = cli.aggregate([startEvent, endEvent]);
+  assert.equal(report.inProgress.length, 0, "a defer-close must leave inProgress (no OVER90 on the queue segment)");
+  assert.equal(report.tasks.length, 0, "a defer-close is NOT a completed task — must never land in tasks[]/throughput");
+  assert.equal(report.deferred.length, 1, "the defer-close pair surfaces in deferred[]");
+  assert.equal(report.deferred[0].taskId, "gap-defer-1");
+  assert.equal(report.deferred[0].outcome, "deferred");
+  assert.equal(report.deferred[0].startedAtMs, 1_000_000, "deferred entry carries the bracket-open instant");
+});
+
+test("OVER90-DEFER — a defer-close does not extend the throughput window bounds (deferred[] is excluded like reconciled[])", async () => {
+  const cli = await importCli();
+  // Two events: a deferred close at t=1000..1060 (a queue segment) and a REAL completed task at t=5000..6000.
+  const dRun = cli.generateRunId("gap-defer-2");
+  const deferStart = cli.buildStartEvent({ taskId: "gap-defer-2", runId: dRun, recordedAtMs: 1_000_000 });
+  const deferEnd = cli.buildEndEvent({ taskId: "gap-defer-2", runId: dRun, outcome: "deferred", recordedAtMs: 1_060_000 });
+  const rRun = cli.generateRunId("gap-real-2");
+  const realStart = cli.buildStartEvent({ taskId: "gap-real-2", runId: rRun, recordedAtMs: 5_000_000 });
+  const realEnd = cli.buildEndEvent({ taskId: "gap-real-2", runId: rRun, outcome: "done", recordedAtMs: 5_600_000 });
+  const report = cli.aggregate([deferStart, deferEnd, realStart, realEnd], { nowMs: 6_000_000 });
+  assert.equal(report.tasks.length, 1, "only the real completed task is in tasks[]");
+  assert.equal(report.deferred.length, 1, "the defer-close is in deferred[]");
+  // Window start must be the REAL task's start (5_000_000), NOT the deferred segment's 1_000_000.
+  assert.equal(new Date(report.windowStart).getTime(), 5_000_000, "deferred segment must not pull the window earlier");
+});
+
+test("OVER90-DEFER — a fresh --task-start after a defer-close opens a NEW bracket (OVER90 measures from work start)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    // t=0: --task-start opens a bracket (pre-defer).
+    const start1 = runCli(tmp, "--task-start", "--taskId", "gap-defer-3");
+    const runId1 = start1.stdout.trim();
+    // t=0: defer detected → close the bracket with outcome deferred.
+    const defer = runCli(tmp, "--task-end", "--taskId", "gap-defer-3", "--runId", runId1, "--outcome", "deferred");
+    assert.equal(defer.status, 0, defer.stderr);
+    // t=80min later: work actually starts → fresh --task-start (new runId).
+    const start2 = runCli(tmp, "--task-start", "--taskId", "gap-defer-3");
+    const runId2 = start2.stdout.trim();
+    assert.notEqual(runId2, runId1, "a fresh --task-start must open a NEW bracket/runId");
+
+    const rep = runCli(tmp, "--report", "--json");
+    const r = JSON.parse(rep.stdout);
+    assert.equal(r.inProgress.length, 1, "only the FRESH work bracket is inProgress");
+    assert.equal(r.inProgress[0].runId, runId2, "the inProgress bracket is the fresh work one");
+    assert.equal(r.deferred.length, 1, "the pre-defer bracket is accounted in deferred[]");
+    assert.equal(r.tasks.length, 0, "the defer-close never counts as a completed task");
   } finally {
     cleanup(tmp);
   }
@@ -724,4 +816,1424 @@ test("Byte-identity — workflow-event-schema mirrors still byte-identical", () 
   const plug = fs.readFileSync(SCHEMA, "utf8");
   const exp = fs.readFileSync(path.join(EXP_SCRIPTS, "workflow-event-schema.mjs"), "utf8");
   assert.equal(exp, plug, "workflow-event-schema.mjs mirrors must stay byte-identical");
+});
+
+// ── Reconcile (gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards) ──
+// A crash kills the executor and `--task-end` never comes — the record sits in `inProgress` forever
+// (phantom), and the only signal that eventually fires about it (OVER90) is indistinguishable from a
+// genuinely slow task. `--reconcile` closes an in-flight record ONLY when the executor is OBSERVABLY
+// gone (branch merged / worktree gone / process gone — never wall-clock age), and never closes a
+// record whose executor is still present (AC3 negative control). The ACs are pinned below.
+
+test("AC6 — this file declares // @test-group engine (metering/measurement layer)", () => {
+  const src = fs.readFileSync(new URL(import.meta.url), "utf8");
+  assert.match(src, /\/\/ @test-group engine/, "must declare @test-group engine");
+});
+
+test("RECONCILE — a branch-merged phantom is closed with an observable reason; a live executor is kept (AC2/AC3/AC4)", async () => {
+  const cli = await importCli();
+  const old = Date.now() - 91 * 60_000; // 91 min — OVER90 territory, but age alone must never decide
+  const inProgress = [
+    { taskId: "phantom-merged", runId: "fm-phantom-1", startedAtMs: old },
+    { taskId: "phantom-worktree-gone", runId: "fm-phantom-2", startedAtMs: Date.now() - 5 * 60_000 },
+    { taskId: "live", runId: "fm-live-1", startedAtMs: old }, // AC4: old but executor alive → kept
+  ];
+  const { closed, kept } = cli.reconcileInFlight(inProgress, {
+    executorGone: (rec) => {
+      if (rec.taskId === "phantom-merged") return { gone: true, reason: "branch-merged" };
+      if (rec.taskId === "phantom-worktree-gone") return { gone: true, reason: "worktree-gone-and-no-process" };
+      return { gone: false, reason: "process-alive" };
+    },
+    firstKnownCommitMs: () => null,
+  });
+  const closedMerged = closed.find((c) => c.taskId === "phantom-merged");
+  const closedWt = closed.find((c) => c.taskId === "phantom-worktree-gone");
+  assert.ok(closedMerged, `branch-merged phantom must be closed: ${JSON.stringify(closed)}`);
+  assert.equal(closedMerged.reconcileReason, "branch-merged");
+  assert.equal(closedMerged.outcome, "abandoned");
+  assert.ok(closedWt, "worktree-gone phantom must be closed");
+  assert.equal(closedWt.reconcileReason, "worktree-gone-and-no-process");
+  // AC4: the 91-minute-old record whose executor is alive is NOT closed.
+  assert.equal(closed.some((c) => c.taskId === "live"), false, "a live executor must never be closed, regardless of age");
+  const keptLive = kept.find((k) => k.taskId === "live");
+  assert.ok(keptLive, "live record must be kept");
+  assert.equal(keptLive.keepReason, "process-alive");
+});
+
+test("RECONCILE — without an executor probe, records are kept (fail-closed; never close without evidence)", async () => {
+  const cli = await importCli();
+  const { closed, kept } = cli.reconcileInFlight([{ taskId: "x", runId: "fm-x-1", startedAtMs: 1 }], {});
+  assert.equal(closed.length, 0, "no evidence ⇒ nothing closed");
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].keepReason, "no-executor-probe");
+});
+
+test("RECONCILE — a backfilled start (later than the task's first known commit) is marked startedAtMs-unreliable (AC7)", async () => {
+  const cli = await importCli();
+  const firstCommit = Date.parse("2026-08-04T04:00:00Z");
+  const { closed, kept } = cli.reconcileInFlight(
+    [
+      { taskId: "backfilled", runId: "fm-b1", startedAtMs: firstCommit + 3_600_000 }, // after → unreliable
+      { taskId: "honest", runId: "fm-h1", startedAtMs: firstCommit - 3_600_000 }, // before → reliable
+    ],
+    { executorGone: () => ({ gone: true, reason: "branch-merged" }), firstKnownCommitMs: () => firstCommit },
+  );
+  const b = closed.find((c) => c.taskId === "backfilled");
+  const h = closed.find((c) => c.taskId === "honest");
+  assert.ok(b && h, "both must be closed in this fixture");
+  assert.equal(b.startedAtMsUnreliable, true, "start after first known commit ⇒ unreliable");
+  assert.equal(h.startedAtMsUnreliable, false, "start before first known commit ⇒ reliable");
+  assert.equal(kept.length, 0);
+});
+
+test("RECONCILE — a reconcile-closed pair routes to reconciled[], never tasks[] (throughput stays clean)", async () => {
+  const cli = await importCli();
+  const runId = cli.generateRunId("phantom");
+  const start = cli.buildStartEvent({ taskId: "phantom", runId, recordedAtMs: 1_000_000 });
+  const end = cli.buildEndEvent({
+    taskId: "phantom", runId, outcome: "abandoned", reconcileReason: "branch-merged", recordedAtMs: 1_100_000,
+  });
+  const r = cli.aggregate([start, end], { nowMs: 1_100_000 });
+  assert.equal(r.reconciled.length, 1, "reconcile-closed pair must surface in reconciled[]");
+  assert.equal(r.reconciled[0].reconcileReason, "branch-merged");
+  assert.equal(r.tasks.length, 0, "a reconcile-closed phantom must never count as a completed task");
+  assert.equal(r.inProgress.length, 0, "a reconcile-closed record leaves inProgress (OVER90 no longer fires)");
+  assert.equal(r.tasksPerHour, 0, "phantom must not contribute to throughput");
+});
+
+test("RECONCILE — a startedAtMs-unreliable completed pair is excluded from the throughput numerator AND denominator (AC7)", async () => {
+  const cli = await importCli();
+  const firstCommit = 1_000_000;
+  const uRunId = cli.generateRunId("backfilled");
+  const uStart = cli.buildStartEvent({ taskId: "backfilled", runId: uRunId, recordedAtMs: firstCommit + 60_000 });
+  const uEnd = cli.buildEndEvent({ taskId: "backfilled", runId: uRunId, outcome: "done", recordedAtMs: firstCommit + 120_000 });
+  const hRunId = cli.generateRunId("honest");
+  const hStart = cli.buildStartEvent({ taskId: "honest", runId: hRunId, recordedAtMs: firstCommit - 60_000 });
+  const hEnd = cli.buildEndEvent({ taskId: "honest", runId: hRunId, outcome: "done", recordedAtMs: firstCommit + 60_000 });
+  const r = cli.aggregate([uStart, uEnd, hStart, hEnd], {
+    nowMs: firstCommit + 120_000,
+    firstKnownCommitMsByTask: () => firstCommit,
+  });
+  assert.equal(r.tasks.length, 1, "only the reliable pair counts as a completed task (numerator exclusion)");
+  assert.equal(r.tasks[0].taskId, "honest");
+  assert.equal(r.unreliable.length, 1, "the backfilled pair surfaces in unreliable[]");
+  assert.equal(r.unreliable[0].taskId, "backfilled");
+  assert.equal(r.unreliable[0].startedAtMsUnreliable, true);
+  // Denominator exclusion: the unreliable start must not pull windowStart earlier.
+  assert.equal(r.windowStart, new Date(firstCommit - 60_000).toISOString(), "unreliable start must not pull the window earlier");
+});
+
+test("AC5 — OVER90 no longer fires for a reconcile-closed record; still fires for a genuine slow task", async () => {
+  const cli = await importCli();
+  const { detectTaskOver90m } = await import(path.join(PLUGIN_SCRIPTS, "inner-blocked-signal.ts"));
+  const tmp = makeTmpWorkspace();
+  try {
+    const old = Date.now() - 91 * 60_000;
+    // Phantom only, closed by reconcile: OVER90 must be silent.
+    const pRun = cli.generateRunId("phantom-slow");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "phantom-slow", runId: pRun, recordedAtMs: old }), tmp);
+    cli.writeEvent(cli.buildEndEvent({
+      taskId: "phantom-slow", runId: pRun, outcome: "abandoned", reconcileReason: "branch-merged", recordedAtMs: Date.now(),
+    }), tmp);
+    const afterClose = await detectTaskOver90m(tmp);
+    assert.equal(afterClose, null, `OVER90 must NOT fire for a reconcile-closed record: ${JSON.stringify(afterClose)}`);
+
+    // A genuine slow task (same 91-min age, executor still present → no reconcile end): OVER90 fires.
+    const gRun = cli.generateRunId("genuine-slow");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "genuine-slow", runId: gRun, recordedAtMs: old }), tmp);
+    const withGenuine = await detectTaskOver90m(tmp);
+    assert.ok(withGenuine && withGenuine.taskId === "genuine-slow", `OVER90 must fire for a genuine slow task: ${JSON.stringify(withGenuine)}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("RECONCILE CLI — real git: a merged-branch phantom closes; an open-worktree-ONLY task now closes too (worktree-present keep retired, AC4)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "phantom-task.md"), "---\nid: phantom-task\n---\n", "utf8");
+    fs.writeFileSync(path.join(tmp, "tasks", "live-task.md"), "---\nid: live-task\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed tasks").status, 0);
+    // phantom-task: branch created and MERGED into master (its work landed ⇒ executor done).
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/phantom-task").status, 0);
+    fs.appendFileSync(path.join(tmp, "tasks", "phantom-task.md"), "work\n");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "phantom work landed").status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+    assert.equal(gitCmd(tmp, "merge", "--no-ff", "task/phantom-task", "-m", "Merge branch 'task/phantom-task'").status, 0);
+    // live-task: branch checked out in an OPEN worktree (executor mid-flight). The branch carries a
+    // NON-merged commit (so the close reason below is NOT branch-merged — the ONLY observable signal
+    // is the open worktree, which is exactly the retired worktree-present keep).
+    assert.equal(gitCmd(tmp, "worktree", "add", "-b", "task/live-task", path.join(tmp, "wt-live")).status, 0);
+
+    const ps = runCli(tmp, "--task-start", "--taskId", "phantom-task");
+    assert.equal(ps.status, 0, ps.stderr);
+    const ls = runCli(tmp, "--task-start", "--taskId", "live-task");
+    assert.equal(ls.status, 0, ls.stderr);
+    // live work lands on the branch → the branch is NOT merged (so the close reason is
+    // "no-observable-executor", NOT branch-merged — the ONLY observable signal is the worktree).
+    fs.writeFileSync(path.join(tmp, "wt-live", "live.txt"), "live work\n", "utf8");
+    assert.equal(gitCmd(path.join(tmp, "wt-live"), "add", "live.txt").status, 0);
+    assert.equal(gitCmd(path.join(tmp, "wt-live"), "commit", "-m", "live work").status, 0);
+
+    const rec = runCli(tmp, "--reconcile", "--json");
+    assert.equal(rec.status, 0, rec.stderr);
+    const out = JSON.parse(rec.stdout);
+    const closedP = (out.closed ?? []).find((c) => c.taskId === "phantom-task");
+    const closedL = (out.closed ?? []).find((c) => c.taskId === "live-task");
+    assert.ok(closedP, `phantom must be closed by observable branch-merged: ${JSON.stringify(out.closed)}`);
+    assert.equal(closedP.reconcileReason, "branch-merged");
+    // gap-inflight-states-missing-impl-complete-event AC4: the worktree-present keep is RETIRED —
+    // an open worktree is pure implementation detail, never a concurrency-accounting signal. So a
+    // bracket whose ONLY observable signal is an open worktree (no process, no subagent transcript)
+    // now CLOSES as "no-observable-executor" (the negative control for the inference deletion).
+    assert.ok(closedL, `live-task with only an open worktree now closes (worktree-present retired): ${JSON.stringify(out.closed)}`);
+    assert.equal(closedL.reconcileReason, "no-observable-executor", "a non-merged branch + open worktree + no process/transcript ⇒ executor observably gone (worktree alone is not a keep)");
+    assert.equal((out.kept ?? []).length, 0, "nothing is kept — neither bracket has a process/transcript executor");
+    // AC7 annotation on real git: phantom-task's --task-start was written AFTER its work merged
+    // (a backfill in this fixture) → unreliable.
+    assert.equal(closedP.startedAtMsUnreliable, true, "a start written after the work merged is unreliable");
+
+    // After reconcile: both phantoms leave inProgress (into reconciled[], not tasks[]).
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const repObj = JSON.parse(rep.stdout);
+    assert.equal(repObj.inProgress.length, 0, `no bracket stays in-progress: ${JSON.stringify(repObj.inProgress)}`);
+    assert.equal(repObj.reconciled.length, 2, "both surface in reconciled[], not tasks[]");
+    const recPhantom = repObj.reconciled.find((r) => r.taskId === "phantom-task");
+    const recLive = repObj.reconciled.find((r) => r.taskId === "live-task");
+    assert.equal(recPhantom.reconcileReason, "branch-merged");
+    assert.equal(recLive.reconcileReason, "no-observable-executor");
+    assert.equal(recPhantom.startedAtMsUnreliable, true, "the report marks the reconciled phantom's start unreliable");
+    assert.equal(repObj.tasks.length, 0, "no phantom in the completed-tasks roll-up");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("RECONCILE — firstKnownCommitMs resolves to the task's WORK start (branch or merge), never its creation (AC7 reference)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  const commit = (args, env = {}) => spawnSync("git", ["-C", tmp, ...args], {
+    encoding: "utf8", env: { ...process.env, ...env },
+  });
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "wk.md"), "---\nid: wk\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    // Pin the creation commit date so a fallback-to-creation would be detectable.
+    assert.equal(commit(["commit", "-m", "create wk.md"], { GIT_AUTHOR_DATE: "2026-08-01T00:00:00Z", GIT_COMMITTER_DATE: "2026-08-01T00:00:00Z" }).status, 0);
+
+    // Freshly dispatched: branch at HEAD with no own commits → no work reference → null.
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/wk-fresh").status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+    assert.equal(cli.firstKnownCommitMs(tmp, "wk-fresh"), null, "fresh branch with no work commits ⇒ no reference (not unreliable)");
+
+    // In-flight with work: one task-specific commit at a pinned date → that commit is the reference.
+    const workDate = "2026-08-02T12:00:00Z";
+    const workMs = Date.parse(workDate);
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/wk-work").status, 0);
+    fs.appendFileSync(path.join(tmp, "tasks", "wk.md"), "work\n");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(commit(["commit", "-m", "wk work"], { GIT_AUTHOR_DATE: workDate, GIT_COMMITTER_DATE: workDate }).status, 0);
+    assert.equal(cli.firstKnownCommitMs(tmp, "wk-work"), workMs, "reference = the task's first work commit");
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+
+    // Merged: branch merged into master → reference = the merge commit time (work already known done).
+    assert.equal(gitCmd(tmp, "merge", "--no-ff", "task/wk-work", "-m", `Merge branch 'task/wk-work'`).status, 0);
+    const mergeMs = cli.firstKnownCommitMs(tmp, "wk-work");
+    assert.ok(mergeMs != null && mergeMs >= workMs, `merged reference should be the merge time (>= work start), got ${mergeMs}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("RECONCILE — batched makeFirstKnownCommitMsByTask is byte-equivalent to per-task firstKnownCommitMs (gap-fast-mode-telemetry-hangs-on-verification-round-growth)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  const commit = (args, env = {}) => spawnSync("git", ["-C", tmp, ...args], {
+    encoding: "utf8", env: { ...process.env, ...env },
+  });
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "wk.md"), "---\nid: wk\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    gitCmd(tmp, "add", "-A");
+    assert.equal(commit(["commit", "-m", "create wk.md"], { GIT_AUTHOR_DATE: "2026-08-01T00:00:00Z", GIT_COMMITTER_DATE: "2026-08-01T00:00:00Z" }).status, 0);
+
+    // Fresh (no own commits) → null via both paths.
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/wk-fresh").status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+
+    // In-flight with work → its first work commit time.
+    const workDate = "2026-08-02T12:00:00Z";
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/wk-work").status, 0);
+    fs.appendFileSync(path.join(tmp, "tasks", "wk.md"), "work\n");
+    gitCmd(tmp, "add", "-A");
+    assert.equal(commit(["commit", "-m", "wk work"], { GIT_AUTHOR_DATE: workDate, GIT_COMMITTER_DATE: workDate }).status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+
+    // Merged (branch merged into master) → the merge commit time.
+    assert.equal(gitCmd(tmp, "merge", "--no-ff", "task/wk-work", "-m", "Merge branch 'task/wk-work'").status, 0);
+
+    // The batched factory must agree with the per-task reference on EVERY case: fresh (null),
+    // in-flight (work start), merged (merge time), and a never-existing task (null).
+    const batched = cli.makeFirstKnownCommitMsByTask(tmp);
+    for (const taskId of ["wk-fresh", "wk-work", "wk-never-existed"]) {
+      assert.equal(
+        batched(taskId),
+        cli.firstKnownCommitMs(tmp, taskId),
+        `batched lookup for ${taskId} must match per-task firstKnownCommitMs`,
+      );
+    }
+    // The factory is memoized: a repeat lookup returns the same value (and must not re-hit git).
+    assert.equal(batched("wk-work"), cli.firstKnownCommitMs(tmp, "wk-work"));
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("RECONCILE — processAlive detects a live process by runId (AC3 real-process criterion)", async () => {
+  const cli = await importCli();
+  const runId = `fm-proc-${Date.now()}`;
+  const { spawn } = await import("node:child_process");
+  const child = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)", runId], { detached: true, stdio: "ignore" });
+  child.unref();
+  try {
+    let alive = false;
+    for (let i = 0; i < 50 && !alive; i++) {
+      alive = cli.processAlive(runId);
+      if (!alive) await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.equal(alive, true, `processAlive must find the runId in /proc: ${runId}`);
+  } finally {
+    try { process.kill(child.pid, "SIGKILL"); } catch (_) { /* already gone */ }
+  }
+});
+
+// ── Subagent-transcript liveness (gap-reconcile-processalive-blind-spot-brief-phase-false-close) ────
+// `processAlive(runId)` is blind to a brief-phase impl subagent: the Agent-tool dispatch's process
+// cmdline carries no runId, and the worktree is not forked yet. The old four-level probe fell through
+// to `worktree-gone-and-no-process` and false-closed a LIVE bracket. The fix adds a subagent-transcript
+// liveness signal: a transcript at `<session>/subagents/agent-*.jsonl` written within the recency
+// window whose content names the task ⇒ KEEP, not false-close.
+
+test("SUBAGENT-LIVENESS — subagentTranscriptAlive finds a recent transcript naming the task (PURE, injected projectsDir)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    const root = "/home/yale/work/quay";
+    const proj = path.join(tmp, "projects");
+    const sess = path.join(proj, cli.claudeProjectsSlug(root), "sess-1", "subagents");
+    fs.mkdirSync(sess, { recursive: true });
+    fs.writeFileSync(
+      path.join(sess, "agent-abc123.jsonl"),
+      '{"type":"user","message":{"content":"执行任务 gap-x（任务文件 /home/yale/work/quay/tasks/gap-x.md）。git worktree add /home/yale/work/quay-worktrees/gap-x"}}',
+      "utf8",
+    );
+    assert.equal(cli.subagentTranscriptAlive(root, "gap-x", { projectsDir: proj }), true, "a recent transcript naming the task ⇒ alive");
+    assert.equal(cli.subagentTranscriptAlive(root, "gap-other", { projectsDir: proj }), false, "a different taskId is not matched");
+    // Aged out: the same transcript read from beyond the recency window ⇒ false (no permanent keep).
+    assert.equal(
+      cli.subagentTranscriptAlive(root, "gap-x", { projectsDir: proj, nowMs: Date.now() + cli.TRANSCRIPT_LIVENESS_WINDOW_MS + 60_000 }),
+      false,
+      "a stale transcript outside the window ⇒ not alive",
+    );
+    // Missing projects dir ⇒ false (fail-closed, never a positive signal from an unavailable source).
+    assert.equal(cli.subagentTranscriptAlive(root, "gap-x", { projectsDir: path.join(tmp, "nope") }), false);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("SUBAGENT-LIVENESS — claudeProjectsSlug maps a root path to Claude Code's project-dir slug", async () => {
+  const cli = await importCli();
+  assert.equal(cli.claudeProjectsSlug("/home/yale/work/quay"), "-home-yale-work-quay");
+});
+
+test("SUBAGENT-LIVENESS CLI — brief-phase bracket (live transcript, no worktree) is KEPT by --reconcile; closed_brackets_reflect_processes stays true (AC1/AC2/AC3)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  const tmpHome = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "brief-task.md"), "---\nid: brief-task\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
+
+    // Open a brief-phase bracket: --task-start, NO worktree, NO task branch (the defect shape).
+    const start = runCli(tmp, "--task-start", "--taskId", "brief-task");
+    assert.equal(start.status, 0, start.stderr);
+
+    // A live impl subagent transcript naming brief-task, written just now, under a temp HOME so the
+    // probe (os.homedir → $HOME) scans only this corpus.
+    const sess = path.join(tmpHome, ".claude", "projects", cli.claudeProjectsSlug(tmp), "sess-brief", "subagents");
+    fs.mkdirSync(sess, { recursive: true });
+    fs.writeFileSync(
+      path.join(sess, "agent-brief123.jsonl"),
+      '{"type":"user","message":{"content":"执行任务 brief-task（任务文件 ' + path.join(tmp, "tasks", "brief-task.md") +
+        '）。git -C ' + tmp + ' worktree add ' + path.join(path.dirname(tmp), "quay-worktrees", "brief-task") + ' -b task/brief-task develop"}}',
+      "utf8",
+    );
+
+    const env = { HOME: tmpHome, QUAY_TELEMETRY_SUBAGENTS: "0" };
+
+    // AC1/AC2 negative control: --reconcile KEEPS the brief-phase bracket (no false-close).
+    const rec = runCliEnv(tmp, env, "--reconcile", "--json");
+    assert.equal(rec.status, 0, rec.stderr);
+    const out = JSON.parse(rec.stdout);
+    const keptB = (out.kept ?? []).find((k) => k.taskId === "brief-task");
+    assert.ok(keptB, `brief-phase bracket must be KEPT: ${JSON.stringify(out)}`);
+    assert.equal(keptB.keepReason, "subagent-transcript-alive");
+    assert.equal((out.closed ?? []).length, 0, "nothing closed — the live subagent keeps the bracket open");
+
+    // AC3: the slot view reports the bracket as real in-flight, no closed-but-live residual.
+    const slot = runCliEnv(tmp, env, "--slot-status", "--cap", "5", "--json");
+    assert.equal(slot.status, 0, slot.stderr);
+    const s = JSON.parse(slot.stdout);
+    assert.equal(s.real_in_flight, 1, "the brief-phase bracket is real in-flight (kept), not stale");
+    assert.equal(s.stale_brackets, 0);
+    assert.equal(s.closed_but_live_agents.length, 0, "no closed-but-live residual");
+    assert.equal(s.closed_brackets_reflect_processes, true, "invariant restored (no false-close ⇒ no closed-but-live)");
+
+    // Negative control: remove the transcript (executor now observably gone) ⇒ --reconcile closes.
+    fs.rmSync(path.join(sess, "agent-brief123.jsonl"));
+    const rec2 = runCliEnv(tmp, env, "--reconcile", "--json");
+    assert.equal(rec2.status, 0, rec2.stderr);
+    const out2 = JSON.parse(rec2.stdout);
+    const closedB = (out2.closed ?? []).find((c) => c.taskId === "brief-task");
+    assert.ok(closedB, `with the transcript gone the bracket closes: ${JSON.stringify(out2)}`);
+    assert.equal(closedB.reconcileReason, "no-observable-executor");
+  } finally {
+    cleanup(tmp);
+    cleanup(tmpHome);
+  }
+});
+
+// ── Slot status (gap-telemetry-brackets-vs-subagents-no-slot-visibility) ────────────────────────────
+
+test("SLOT-STATUS — 5 stale brackets + 1 real agent ⇒ real_in_flight 1, slots_free 2 (AC5 regression shape)", async () => {
+  const cli = await importCli();
+  const inProgress = [
+    ...["a", "b", "c", "d", "e"].map((t, i) => ({
+      taskId: `stale-${t}`, runId: `fm-stale-${t}-${i}`, startedAtMs: 1000 + i,
+    })),
+    { taskId: "real-task", runId: "fm-real-1", startedAtMs: 9000 },
+  ];
+  // Injected deterministic probe: stale-* executor observably gone; real-task worktree present.
+  const executorGone = (rec) => rec.taskId.startsWith("stale-")
+    ? { gone: true, reason: "worktree-gone-and-no-process" }
+    : { gone: false, reason: "worktree-present" };
+  const s = cli.analyzeSlotStatus(inProgress, { cap: 3, executorGone });
+  assert.equal(s.in_progress_total, 6, "raw bracket count = 5 stale + 1 real");
+  assert.equal(s.stale_brackets, 5, "5 brackets have an observably-gone executor");
+  assert.equal(s.real_in_flight, 1, "only the worktree-present agent is real in-flight");
+  assert.equal(s.slots_free, 2, "cap 3 − real 1 ⇒ 2 slots idle (not 'full' on raw 6, not 'empty')");
+  assert.equal(s.slot_state, "free");
+  assert.equal(s.brackets_reflect_subagents, false, "raw brackets (6) ≠ real subagents (1) ⇒ invariant false");
+  assert.equal(s.closed.length, 5);
+  assert.equal(s.kept.length, 1);
+  assert.equal(s.kept[0].taskId, "real-task");
+});
+
+test("SLOT-STATUS — real_in_flight > cap is a detectable violation (AC3 criterion not vacuous)", async () => {
+  const cli = await importCli();
+  // 4 live agents, cap 3 — a genuine over-dispatch a vacuous check would let pass.
+  const inProgress = [1, 2, 3, 4].map((i) => ({
+    taskId: `live-${i}`, runId: `fm-live-${i}-1`, startedAtMs: i,
+  }));
+  const executorGone = () => ({ gone: false, reason: "worktree-present" });
+  const s = cli.analyzeSlotStatus(inProgress, { cap: 3, executorGone });
+  assert.equal(s.real_in_flight, 4);
+  assert.equal(s.slots_free, 0);
+  assert.equal(s.slot_state, "full");
+  assert.equal(s.stale_brackets, 0);
+  assert.equal(s.brackets_reflect_subagents, true, "all 4 brackets are real — but 4 > cap 3 is the violation");
+  // The criterion the self-check uses: real_in_flight ≤ cap. 4 > 3 ⇒ violation caught.
+  assert.ok(s.real_in_flight > s.cap, "the slot-status exposes real_in_flight so real_in_flight <= cap is checkable");
+});
+
+test("SLOT-STATUS — 0 brackets ⇒ real_in_flight 0, slots_free cap (empty is visible, not 'full')", async () => {
+  const cli = await importCli();
+  const s = cli.analyzeSlotStatus([], { cap: 3, executorGone: () => ({ gone: false, reason: "n/a" }) });
+  assert.equal(s.in_progress_total, 0);
+  assert.equal(s.stale_brackets, 0);
+  assert.equal(s.real_in_flight, 0);
+  assert.equal(s.slots_free, 3);
+  assert.equal(s.slot_state, "free");
+  assert.equal(s.brackets_reflect_subagents, true, "empty store trivially consistent");
+});
+
+test("SLOT-STATUS CLI — real git: merged-branch phantom stale; open-worktree-ONLY agent now stale too (worktree-present retired, AC3/AC4); pure-read", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "stale-task.md"), "---\nid: stale-task\n---\n", "utf8");
+    fs.writeFileSync(path.join(tmp, "tasks", "live-task.md"), "---\nid: live-task\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed tasks").status, 0);
+    // stale-task: branch created and MERGED into master ⇒ executor observably done (would close).
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/stale-task").status, 0);
+    fs.appendFileSync(path.join(tmp, "tasks", "stale-task.md"), "work\n");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "stale work landed").status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+    assert.equal(gitCmd(tmp, "merge", "--no-ff", "task/stale-task", "-m", "Merge branch 'task/stale-task'").status, 0);
+    // live-task: branch checked out in an OPEN worktree with a NON-merged commit — the ONLY
+    // observable signal is the worktree (no process, no subagent transcript). Per AC3/AC4 the
+    // worktree-present keep is retired ⇒ this bracket is STALE (no longer "real in-flight").
+    assert.equal(gitCmd(tmp, "worktree", "add", "-b", "task/live-task", path.join(tmp, "wt-live")).status, 0);
+
+    const ps = runCli(tmp, "--task-start", "--taskId", "stale-task");
+    assert.equal(ps.status, 0, ps.stderr);
+    const ls = runCli(tmp, "--task-start", "--taskId", "live-task");
+    assert.equal(ls.status, 0, ls.stderr);
+    // The live work commit lands AFTER the dispatch start → the start stays reliable.
+    fs.writeFileSync(path.join(tmp, "wt-live", "live.txt"), "live work\n", "utf8");
+    assert.equal(gitCmd(path.join(tmp, "wt-live"), "add", "live.txt").status, 0);
+    assert.equal(gitCmd(path.join(tmp, "wt-live"), "commit", "-m", "live work").status, 0);
+    // snapshot the .workflow-events/ dir contents BEFORE the slot-status read.
+    const before = fs.readdirSync(path.join(tmp, ".workflow-events")).sort();
+
+    const slot = runCli(tmp, "--slot-status", "--cap", "3", "--json");
+    assert.equal(slot.status, 0, slot.stderr);
+    const out = JSON.parse(slot.stdout);
+    assert.equal(out.in_progress_total, 2, "raw brackets = 2 (stale + live)");
+    assert.equal(out.stale_brackets, 2, "merged-branch phantom AND the open-worktree-only bracket are both stale (worktree no longer a keep)");
+    assert.equal(out.real_in_flight, 0, "no bracket has a process/transcript executor ⇒ 0 real");
+    assert.equal(out.slots_free, 3, "cap 3 − real 0 ⇒ 3 slots idle");
+    assert.equal(out.brackets_reflect_subagents, false, "2 raw brackets ≠ 0 real subagents");
+
+    // PURE READ: --slot-status must NOT write a reconcile end event (only --reconcile does).
+    const after = fs.readdirSync(path.join(tmp, ".workflow-events")).sort();
+    assert.deepEqual(after, before, "--slot-status is pure-read: no event file appears/vanishes");
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    assert.equal(JSON.parse(rep.stdout).inProgress.length, 2, "stale bracket still in inProgress (slot-status did not close it)");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("SLOT-STATUS — human output names the stale/reconcile hint when the invariant fails (AC2 readability)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    // 2 starts, no git ⇒ both executors observably gone (bare workspace) ⇒ both stale.
+    const a = runCli(tmp, "--task-start", "--taskId", "ghost-a");
+    assert.equal(a.status, 0, a.stderr);
+    const b = runCli(tmp, "--task-start", "--taskId", "ghost-b");
+    assert.equal(b.status, 0, b.stderr);
+    const slot = runCli(tmp, "--slot-status", "--cap", "3");
+    assert.equal(slot.status, 0, slot.stderr);
+    assert.match(slot.stdout, /real in-flight.*: 0/);
+    assert.match(slot.stdout, /stale brackets.*: 2/, "both bare-workspace brackets report stale");
+    assert.match(slot.stdout, /slots free: 3/);
+    assert.match(slot.stdout, /--reconcile/, "human output points at the reconcile action when brackets ≠ subagents");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("SLOT-STATUS — closed bracket + live executor is NOT a free slot (reverse direction, AC2/AC3)", async () => {
+  const cli = await importCli();
+  // 1 OPEN bracket (real in-flight) + 2 CLOSED brackets: one whose executor is STILL present
+  // (the defect shape — bracket closed, agent alive) and one whose executor is gone.
+  const inProgress = [{ taskId: "running-a", runId: "fm-running-a-1", startedAtMs: 1000 }];
+  const completed = [
+    { taskId: "ghost-live", runId: "fm-ghost-live-1" }, // bracket closed, but executor present
+    { taskId: "ghost-done", runId: "fm-ghost-done-1" }, // bracket closed, executor gone
+  ];
+  const executorGone = () => ({ gone: false, reason: "worktree-present" });
+  const executorPresent = (rec) =>
+    rec.taskId === "ghost-live"
+      ? { present: true, reason: "worktree-present" }
+      : { present: false, reason: "no-present-signal" };
+  const s = cli.analyzeSlotStatus(inProgress, { cap: 3, executorGone, completed, executorPresent });
+  assert.equal(s.in_progress_total, 1, "1 raw open bracket");
+  assert.equal(s.real_in_flight, 1, "open-bracket executor still present");
+  assert.equal(s.closed_but_live_agents.length, 1, "the closed-bracket-but-live agent is detected");
+  assert.equal(s.closed_but_live_agents[0].taskId, "ghost-live");
+  assert.equal(s.closed_but_live_agents[0].reason, "worktree-present");
+  assert.equal(s.occupied_slots, 2, "1 real + 1 closed-but-live = 2 occupied");
+  assert.equal(s.slots_free, 1, "cap 3 − occupied 2 ⇒ 1 slot free (NOT 2 — the closed-but-live slot must not read free)");
+  assert.equal(s.slot_state, "free");
+  assert.equal(s.closed_brackets_reflect_processes, false, "a closed bracket whose executor is present violates the reverse invariant");
+});
+
+test("SLOT-STATUS — closed-but-live agents can push the slot view to FULL (AC3 negative control)", async () => {
+  const cli = await importCli();
+  // cap 2, 1 real in-flight + 1 closed-but-live ⇒ 0 free — a new dispatch must NOT be recommended.
+  const inProgress = [{ taskId: "running-a", runId: "fm-running-a-1", startedAtMs: 1000 }];
+  const completed = [{ taskId: "ghost-live", runId: "fm-ghost-live-1" }];
+  const s = cli.analyzeSlotStatus(inProgress, {
+    cap: 2,
+    executorGone: () => ({ gone: false, reason: "worktree-present" }),
+    completed,
+    executorPresent: () => ({ present: true, reason: "worktree-present" }),
+  });
+  assert.equal(s.real_in_flight, 1);
+  assert.equal(s.closed_but_live_agents.length, 1);
+  assert.equal(s.occupied_slots, 2);
+  assert.equal(s.slots_free, 0);
+  assert.equal(s.slot_state, "full", "a closed-bracket-but-live agent consumes the last free slot");
+});
+
+test("SLOT-STATUS — no completed records ⇒ reverse dimension is a no-op (byte-compatible forward view)", async () => {
+  const cli = await importCli();
+  const s = cli.analyzeSlotStatus(
+    [{ taskId: "running-a", runId: "fm-running-a-1", startedAtMs: 1000 }],
+    { cap: 3, executorGone: () => ({ gone: false, reason: "worktree-present" }) },
+  );
+  assert.equal(s.closed_but_live_agents.length, 0, "absent completed array contributes nothing");
+  assert.equal(s.occupied_slots, 1, "occupied = real in-flight only");
+  assert.equal(s.slots_free, 2);
+  assert.equal(s.closed_brackets_reflect_processes, true, "no closed-but-live ⇒ invariant holds");
+});
+
+test("SLOT-STATUS CLI — real git: closed bracket + OPEN worktree reads as occupied, not free (AC2/AC3)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "closed-live.md"), "---\nid: closed-live\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
+    // CLOSED bracket (start + end pair) whose branch is STILL checked out in an open worktree —
+    // the defect shape: bracket closed, agent (dispatch environment) still present.
+    assert.equal(gitCmd(tmp, "worktree", "add", "-b", "task/closed-live", path.join(tmp, "wt-closed-live")).status, 0);
+    const runId = cli.generateRunId("closed-live");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "closed-live", runId }), tmp);
+    cli.writeEvent(cli.buildEndEvent({ taskId: "closed-live", runId, outcome: "done" }), tmp);
+
+    const slots = runCli(tmp, "--slots", "--cap", "1", "--json");
+    assert.equal(slots.status, 0, slots.stderr);
+    const out = JSON.parse(slots.stdout);
+    assert.equal(out.bracketsInFlight, 0, "the bracket is CLOSED — not in inProgress");
+    assert.equal(out.realInFlight, 0, "no open brackets");
+    assert.equal(out.closedButLive.length, 1, "the closed-bracket agent is mechanically detected as still present");
+    assert.equal(out.closedButLive[0].taskId, "closed-live");
+    assert.equal(out.occupiedSlots, 1, "a closed bracket does NOT free the slot while the worktree is open");
+    assert.equal(out.slotsRemaining, 0, "cap 1 − occupied 1 ⇒ 0 slots remaining — a new dispatch must not land here");
+
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const repObj = JSON.parse(rep.stdout);
+    assert.equal(repObj.inProgress.length, 0, "closed bracket not in inProgress");
+    assert.equal(repObj.closedButLive.length, 1, "--report surfaces the closed-but-live agent");
+    assert.equal(repObj.occupiedSlots, 1);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("SLOT-STATUS CLI — real git: closed bracket + worktree REMOVED reads as genuinely free (clean case)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "closed-clean.md"), "---\nid: closed-clean\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
+    // Closed bracket whose executor is OBSERVABLY gone — no branch, no worktree (fully cleaned up).
+    const runId = cli.generateRunId("closed-clean");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "closed-clean", runId }), tmp);
+    cli.writeEvent(cli.buildEndEvent({ taskId: "closed-clean", runId, outcome: "done" }), tmp);
+
+    const slots = runCli(tmp, "--slots", "--cap", "1", "--json");
+    assert.equal(slots.status, 0, slots.stderr);
+    const out = JSON.parse(slots.stdout);
+    assert.equal(out.bracketsInFlight, 0);
+    assert.equal(out.closedButLive.length, 0, "executor observably gone ⇒ NOT closed-but-live");
+    assert.equal(out.occupiedSlots, 0);
+    assert.equal(out.slotsRemaining, 1, "the fully-gone closed bracket leaves its slot genuinely free");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// ── Fast slot view (QUAY_TELEMETRY_FAST_SLOTS=1) — accounting-emit's occupancy.in_flight source ─────
+// (task gap-ac39-accounting-emit-layer, AC3: occupancy.in_flight 三层统一). The full --slots
+// aggregation is heavy in a large workspace (~30s: per-task git history + closed-but-live reverse
+// scan); the fast view skips both annotations — they are irrelevant to realConcurrency, the number
+// accounting-emit's autoOccupancy reads. Contract: realInFlight/realConcurrency are IDENTICAL to the
+// full path; closedButLive is empty by design (the reverse-dimension scan is the expensive part).
+
+test("FAST-SLOTS — QUAY_TELEMETRY_FAST_SLOTS=1 reports the same realInFlight/realConcurrency as the full --slots view", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "closed-live.md"), "---\nid: closed-live\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
+    // CLOSED bracket whose branch is STILL checked out in an open worktree — the reverse-dimension
+    // defect shape the FULL path detects as closedButLive; the fast path deliberately skips it.
+    assert.equal(gitCmd(tmp, "worktree", "add", "-b", "task/closed-live", path.join(tmp, "wt-closed-live")).status, 0);
+    const runId = cli.generateRunId("closed-live");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "closed-live", runId }), tmp);
+    cli.writeEvent(cli.buildEndEvent({ taskId: "closed-live", runId, outcome: "done" }), tmp);
+
+    // Deterministic slot arithmetic for BOTH paths (the full path's runCli default-pins subagents to
+    // 0, but this test's exact occupiedSlots assertion must hold even when the ambient env sets
+    // QUAY_TELEMETRY_SUBAGENTS — so pin 0 explicitly for both full and fast). The fast path also
+    // scans the live machine for non-task subagents
+    // (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots), so the pin is what makes
+    // the fast-vs-full comparison non-flaky under a concurrent suite.
+    const full = JSON.parse(
+      runCliEnv(tmp, { QUAY_TELEMETRY_SUBAGENTS: "0" }, "--slots", "--cap", "1", "--json").stdout,
+    );
+    assert.equal(full.closedButLive.length, 1, "full path detects the closed-but-live agent");
+    assert.equal(full.occupiedSlots, 1);
+
+    const fast = JSON.parse(
+      runCliEnv(tmp, { QUAY_TELEMETRY_FAST_SLOTS: "1", QUAY_TELEMETRY_SUBAGENTS: "0" }, "--slots", "--cap", "1", "--json").stdout,
+    );
+    // Core in-flight numbers IDENTICAL — the value accounting-emit's autoOccupancy reads.
+    assert.equal(fast.realInFlight, full.realInFlight, "fast realInFlight matches full");
+    assert.equal(fast.realConcurrency, full.realConcurrency, "fast realConcurrency matches full");
+    assert.equal(fast.bracketsInFlight, full.bracketsInFlight, "fast bracketsInFlight matches full");
+    assert.equal(fast.reconcileCompliant, full.reconcileCompliant, "fast reconcileCompliant matches full");
+    // The reverse-dimension scan is deliberately skipped — closedButLive empty, occupiedSlots = realConcurrency.
+    assert.deepEqual(fast.closedButLive, [], "fast path does not run the closed-but-live reverse scan");
+    assert.equal(fast.occupiedSlots, fast.realConcurrency, "fast occupiedSlots = realConcurrency");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// ── Non-task subagents in-flight (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots) ──
+// The UNDER-REPORT direction: an investigation-type subagent (general-purpose / Explore / Plan) has
+// NO --task-start bracket, so the bracket-based real_in_flight read 0 while the subagent burned CPU —
+// `--slots` reported 0/3 empty slots and the inner state self-check ① judged 3 free slots (real
+// concurrency was 4, not 3). The fix counts non-task subagent PROCESSES separately; real concurrency =
+// real_in_flight + subagents_in_flight is what the self-check ① must read.
+
+test("SLOT-STATUS — a non-task subagent (no bracket) is counted toward real concurrency (AC1 under-report fix)", async () => {
+  const cli = await importCli();
+  // Empty bracket store + 1 non-task subagent process (investigation, no --task-start bracket).
+  const s = cli.analyzeSlotStatus([], {
+    cap: 3,
+    executorGone: () => ({ gone: false, reason: "worktree-present" }),
+    subagentsInFlight: 1,
+  });
+  assert.equal(s.real_in_flight, 0, "no brackets ⇒ 0 bracket-based real in-flight");
+  assert.equal(s.subagents_in_flight, 1, "the non-task subagent is counted separately");
+  assert.equal(s.real_concurrency, 1, "real concurrency = brackets + non-task subagents — NO LONGER 0/3");
+  assert.equal(s.occupied_slots, 1, "a non-task subagent occupies a slot");
+  assert.equal(s.slots_free, 2, "cap 3 − 1 occupied ⇒ 2 slots free (NOT 3 — a bare subagent must not read as an empty slot)");
+});
+
+test("SLOT-STATUS — real task in flight + non-task subagent SUM, never double-count (AC3 negative control)", async () => {
+  const cli = await importCli();
+  const s = cli.analyzeSlotStatus(
+    [{ taskId: "task-a", runId: "fm-task-a-1", startedAtMs: 1000 }],
+    { cap: 3, executorGone: () => ({ gone: false, reason: "worktree-present" }), subagentsInFlight: 1 },
+  );
+  assert.equal(s.real_in_flight, 1, "bracket-based real in-flight unchanged");
+  assert.equal(s.subagents_in_flight, 1);
+  assert.equal(s.real_concurrency, 2, "real concurrency = bracket(1) + subagent(1) = 2 (each occupies its own slot)");
+  assert.equal(s.occupied_slots, 2);
+  assert.equal(s.slots_free, 1, "cap 3 − 2 ⇒ 1 free — a real task and a subagent share the budget");
+});
+
+test("SLOT-STATUS — zero in-flight (no brackets, no subagents) still reports 0 (AC3 negative control)", async () => {
+  const cli = await importCli();
+  const s = cli.analyzeSlotStatus([], {
+    cap: 3,
+    executorGone: () => ({ gone: false, reason: "worktree-present" }),
+    subagentsInFlight: 0,
+  });
+  assert.equal(s.real_concurrency, 0);
+  assert.equal(s.occupied_slots, 0);
+  assert.equal(s.slots_free, 3);
+  assert.equal(s.slot_state, "free");
+});
+
+test("countNonTaskSubagents — Contract pgrep pattern; excludes pgrep/bash -c wrappers and the telemetry CLI's own process", async () => {
+  const cli = await importCli();
+  assert.equal(cli.countNonTaskSubagents([]), 0);
+  assert.equal(cli.countNonTaskSubagents(["node general-purpose run"]), 1);
+  assert.equal(cli.countNonTaskSubagents(["node Explore agent", "node Plan agent"]), 2);
+  assert.equal(
+    cli.countNonTaskSubagents([
+      "node general-purpose run",
+      "pgrep -af general-purpose", // the Contract's grep -v pgrep leg
+      "bash -c node general-purpose", // the Contract's grep -v "bash -c" leg
+      "node --experimental-strip-types fast-mode-telemetry.ts --slots", // the meter must not count itself
+    ]),
+    1,
+    "pgrep/bash -c wrappers and the telemetry CLI's own process must not count",
+  );
+  // Case-sensitive Contract pattern: a lowercase "plan" in a path must NOT match.
+  assert.equal(cli.countNonTaskSubagents(["node scripts/plan-workflow.ts"]), 0);
+});
+
+test("SLOT-STATUS CLI — an in-flight non-task subagent reports realInFlight + subagentsInFlight ≥ 1 (AC1 shape, no more 0/3)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const slots = runCliEnv(tmp, { QUAY_TELEMETRY_SUBAGENTS: "2" }, "--slots", "--cap", "3", "--json");
+    assert.equal(slots.status, 0, slots.stderr);
+    const out = JSON.parse(slots.stdout);
+    assert.equal(out.realInFlight, 0, "empty bracket store ⇒ 0 bracket-based in-flight");
+    assert.equal(out.subagentsInFlight, 2, "the 2 non-task subagent processes are reported");
+    assert.ok(out.realInFlight + out.subagentsInFlight >= 1, "bare subagents must NOT read as 0/3 empty slots");
+    assert.equal(out.realConcurrency, 2, "real concurrency = brackets + non-task subagents");
+    assert.equal(out.occupiedSlots, 2, "subagents occupy slots");
+    assert.equal(out.slotsRemaining, 1, "cap 3 − occupied 2 ⇒ 1 remaining, NOT 3");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("SLOT-STATUS CLI — --slot-status carries subagents_in_flight / real_concurrency (slot-status surface)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const slots = runCliEnv(tmp, { QUAY_TELEMETRY_SUBAGENTS: "1" }, "--slot-status", "--cap", "3", "--json");
+    assert.equal(slots.status, 0, slots.stderr);
+    const out = JSON.parse(slots.stdout);
+    assert.equal(out.subagents_in_flight, 1);
+    assert.equal(out.real_concurrency, 1);
+    assert.equal(out.occupied_slots, 1);
+    assert.equal(out.slots_free, 2);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// ── Reconcile compliance (gap-reconcile-step-skipped-no-compliance-product, C17) ─────────────────────
+// The A13 rule "stale_brackets > 0 ⇒ run --reconcile" previously had no record-observable product
+// separating 守 from 不守 — a tick observing stale_brackets > 0 and skipping --reconcile left no
+// trace (04:01 incident: realConcurrency=8 residual occupancy written, --reconcile never run).
+// `--reconcile` now records each invocation timestamp; --slot-status reconcile_compliant /
+// --slots reconcileCompliant compare stale > 0 against the last invocation within the window.
+
+test("RECONCILE-COMPLIANCE — stale>0 and no reconcile invocation ⇒ false (the 04:01 shape)", async () => {
+  const cli = await importCli();
+  const inProgress = [
+    { taskId: "ghost-a", runId: "fm-ghost-a-1", startedAtMs: 1000 },
+    { taskId: "ghost-b", runId: "fm-ghost-b-1", startedAtMs: 2000 },
+  ];
+  const executorGone = () => ({ gone: true, reason: "worktree-gone-and-no-process" });
+  const s = cli.analyzeSlotStatus(inProgress, { cap: 3, executorGone, lastReconcileAtMs: null });
+  assert.equal(s.stale_brackets, 2, "both ghosts are stale");
+  assert.equal(s.reconcile_compliant, false, "stale exists and no --reconcile was EVER recorded ⇒ non-compliant");
+  assert.equal(s.reconcile_compliant_reason, "stale-but-no-reconcile-invocation");
+  assert.equal(s.last_reconcile_at_ms, null);
+});
+
+test("RECONCILE-COMPLIANCE — stale>0 but reconcile invoked within the window ⇒ true", async () => {
+  const cli = await importCli();
+  const inProgress = [{ taskId: "ghost-a", runId: "fm-ghost-a-1", startedAtMs: 1000 }];
+  const executorGone = () => ({ gone: true, reason: "worktree-gone-and-no-process" });
+  const now = 10_000;
+  const s = cli.analyzeSlotStatus(inProgress, {
+    cap: 3,
+    executorGone,
+    lastReconcileAtMs: now - cli.RECONCILE_COMPLIANCE_WINDOW_MS / 2,
+    nowMs: now,
+  });
+  assert.equal(s.stale_brackets, 1, "stale still exists (a NEW phantom after the reconcile)");
+  assert.equal(s.reconcile_compliant, true, "the actor ran --reconcile in the same/adjacent round ⇒ compliant");
+  assert.equal(s.reconcile_compliant_reason, "reconcile-invoked-recently");
+});
+
+test("RECONCILE-COMPLIANCE — stale>0 and last reconcile OLDER than the window ⇒ false (freshness)", async () => {
+  const cli = await importCli();
+  const inProgress = [{ taskId: "ghost-a", runId: "fm-ghost-a-1", startedAtMs: 1000 }];
+  const executorGone = () => ({ gone: true, reason: "worktree-gone-and-no-process" });
+  const now = 10_000;
+  const s = cli.analyzeSlotStatus(inProgress, {
+    cap: 3,
+    executorGone,
+    lastReconcileAtMs: now - cli.RECONCILE_COMPLIANCE_WINDOW_MS - 1,
+    nowMs: now,
+  });
+  assert.equal(s.reconcile_compliant, false, "stale exists but the last --reconcile is beyond the adjacent-round window");
+  assert.equal(s.reconcile_compliant_reason, "stale-and-last-reconcile-stale");
+});
+
+test("RECONCILE-COMPLIANCE — stale=0 ⇒ compliant regardless of the reconcile log (nothing to reconcile)", async () => {
+  const cli = await importCli();
+  const executorGone = () => ({ gone: false, reason: "worktree-present" });
+  const noReconcile = cli.analyzeSlotStatus([], { cap: 3, executorGone, lastReconcileAtMs: null });
+  assert.equal(noReconcile.stale_brackets, 0);
+  assert.equal(noReconcile.reconcile_compliant, true);
+  assert.equal(noReconcile.reconcile_compliant_reason, "no-stale-brackets");
+  // Even with a reconcile log present, stale=0 is trivially compliant.
+  const withReconcile = cli.analyzeSlotStatus([], { cap: 3, executorGone, lastReconcileAtMs: 1000, nowMs: 1_000_000 });
+  assert.equal(withReconcile.reconcile_compliant, true);
+});
+
+test("RECONCILE-COMPLIANCE — computeReconcileCompliance window boundary (exactly AT the window ⇒ still adjacent)", async () => {
+  const cli = await importCli();
+  const now = 10_000;
+  // atMs exactly one window ago ⇒ difference == WINDOW ⇒ compliant (≤).
+  const boundary = cli.computeReconcileCompliance(1, now - cli.RECONCILE_COMPLIANCE_WINDOW_MS, now);
+  assert.equal(boundary.compliant, true, "at the window edge still counts as adjacent");
+  assert.equal(boundary.reason, "reconcile-invoked-recently");
+  const over = cli.computeReconcileCompliance(1, now - cli.RECONCILE_COMPLIANCE_WINDOW_MS - 1, now);
+  assert.equal(over.compliant, false);
+  assert.equal(over.reason, "stale-and-last-reconcile-stale");
+});
+
+test("RECONCILE-COMPLIANCE CLI — --reconcile records an invocation; --slot-status flips to compliant; --slot-status itself stays pure-read", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "ghost-task.md"), "---\nid: ghost-task\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
+    // ghost-task: branch merged ⇒ executor observably done ⇒ stale.
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/ghost-task").status, 0);
+    fs.appendFileSync(path.join(tmp, "tasks", "ghost-task.md"), "work\n");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "ghost work landed").status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+    assert.equal(gitCmd(tmp, "merge", "--no-ff", "task/ghost-task", "-m", "Merge branch 'task/ghost-task'").status, 0);
+    const start = runCli(tmp, "--task-start", "--taskId", "ghost-task");
+    assert.equal(start.status, 0, start.stderr);
+
+    // Before --reconcile: stale>0, no invocation recorded ⇒ non-compliant, AND the log file does not exist.
+    const pre = runCli(tmp, "--slot-status", "--cap", "5", "--json");
+    assert.equal(pre.status, 0, pre.stderr);
+    const preObj = JSON.parse(pre.stdout);
+    assert.equal(preObj.stale_brackets, 1);
+    assert.equal(preObj.reconcile_compliant, false);
+    assert.equal(preObj.reconcile_compliant_reason, "stale-but-no-reconcile-invocation");
+    assert.equal(
+      fs.existsSync(path.join(tmp, ".workflow-events", cli.RECONCILE_LOG_FILENAME)),
+      false,
+      "--slot-status is pure-read: a reconcile-compliance read must NOT write the invocation log",
+    );
+
+    // --reconcile closes the phantom AND records the invocation timestamp.
+    const rec = runCli(tmp, "--reconcile", "--json");
+    assert.equal(rec.status, 0, rec.stderr);
+    const invocations = readEventsJsonlRaw(tmp, cli.RECONCILE_LOG_FILENAME);
+    assert.equal(invocations.length, 1, "exactly one invocation recorded");
+    assert.equal(invocations[0].type, "reconcile");
+    assert.equal(invocations[0].event, "invoke");
+    assert.ok(typeof invocations[0].atMs === "number" && Number.isFinite(invocations[0].atMs), "invocation carries a numeric timestamp");
+
+    // After: the phantom left inProgress (stale=0) ⇒ compliant trivially, and last_reconcile_at_ms set.
+    const post = runCli(tmp, "--slot-status", "--cap", "5", "--json");
+    assert.equal(post.status, 0, post.stderr);
+    const postObj = JSON.parse(post.stdout);
+    assert.equal(postObj.stale_brackets, 0);
+    assert.equal(postObj.reconcile_compliant, true);
+    assert.equal(postObj.last_reconcile_at_ms, invocations[0].atMs);
+
+    // The invocation log must NOT pollute the task pairing: --report inProgress/tasks stay clean.
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const repObj = JSON.parse(rep.stdout);
+    assert.equal(repObj.inProgress.length, 0, "ghost reconciled out of inProgress");
+    assert.equal(repObj.tasks.length, 0, "reconciled phantom must not enter completed tasks");
+    assert.equal(repObj.reconciled.length, 1, "phantom surfaces in reconciled[]");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("RECONCILE-COMPLIANCE CLI — --reconcile with NOTHING stale still records an invocation (zero-close record)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  const tmpHome = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "live-task.md"), "---\nid: live-task\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
+    // live-task: a live impl subagent transcript naming the task ⇒ reconcile KEEPS it (zero closes).
+    // (The open-worktree-only keep is RETIRED — gap-inflight-states-missing-impl-complete-event AC4;
+    //  the subagent transcript is the remaining KEEP signal.)
+    const start = runCli(tmp, "--task-start", "--taskId", "live-task");
+    assert.equal(start.status, 0, start.stderr);
+    const sess = path.join(tmpHome, ".claude", "projects", cli.claudeProjectsSlug(tmp), "sess-live", "subagents");
+    fs.mkdirSync(sess, { recursive: true });
+    fs.writeFileSync(
+      path.join(sess, "agent-live123.jsonl"),
+      '{"type":"user","message":{"content":"执行任务 live-task（任务文件 ' + path.join(tmp, "tasks", "live-task.md") + "）\"}}",
+      "utf8",
+    );
+    const env = { HOME: tmpHome, QUAY_TELEMETRY_SUBAGENTS: "0" };
+
+    const pre = runCliEnv(tmp, env, "--slot-status", "--cap", "5", "--json");
+    const preObj = JSON.parse(pre.stdout);
+    assert.equal(preObj.stale_brackets, 0, "the live-transcript executor is real in-flight, not stale");
+
+    const rec = runCliEnv(tmp, env, "--reconcile", "--json");
+    assert.equal(rec.status, 0, rec.stderr);
+    const recObj = JSON.parse(rec.stdout);
+    assert.equal(recObj.closed.length, 0, "nothing stale ⇒ zero closes");
+    assert.equal(recObj.kept.length, 1, "the transcript-alive task is kept");
+
+    const invocations = readEventsJsonlRaw(tmp, cli.RECONCILE_LOG_FILENAME);
+    assert.equal(invocations.length, 1, "a zero-close --reconcile still records its invocation");
+    assert.equal(invocations[0].event, "invoke");
+
+    const post = runCliEnv(tmp, env, "--slot-status", "--cap", "5", "--json");
+    const postObj = JSON.parse(post.stdout);
+    assert.equal(postObj.stale_brackets, 0);
+    assert.equal(postObj.reconcile_compliant, true, "nothing stale ⇒ compliant, and the invocation is now on record");
+    assert.equal(postObj.last_reconcile_at_ms, invocations[0].atMs);
+  } finally {
+    cleanup(tmp);
+    cleanup(tmpHome);
+  }
+});
+
+// ── Worktree leaks (gap-worktree-leak-after-fan-in-occupies-slot-permanently) ──
+// A fan-in merges a task's branch back into the merge target but the worktree is never removed —
+// `worktreeExists`/worktree-present then reads that leak as an ALIVE executor forever, so occupied
+// climbs monotonically until someone removes the worktree. The leak detector flags open
+// quay-worktrees whose `task/<id>` branch is already merged; the compliance verdict (AC4) fails
+// exactly when `occupied > cap` AND leaks exist.
+
+test("WORKTREE-LEAK — detectWorktreeLeaks flags merged quay-worktree task branches only (PURE)", async () => {
+  const cli = await importCli();
+  const root = "/home/yale/work/quay";
+  const worktrees = [
+    { path: "/home/yale/work/quay-worktrees/task-merged", branch: "refs/heads/task/task-merged" },
+    { path: "/home/yale/work/quay-worktrees/task-unmerged", branch: "refs/heads/task/task-unmerged" },
+    { path: "/home/yale/work/quay", branch: "refs/heads/integration" }, // main checkout — never a leak
+    { path: "/tmp/fan-in-test", branch: "refs/heads/task/tmp-task" }, // non-quay-worktrees fixture
+    { path: "/home/yale/work/quay-worktrees/feat-x", branch: "refs/heads/feat/feat-x" }, // non-task branch
+  ];
+  const isQuayWorktree = (p) => cli.isQuayWorktreePath(p, root);
+  const leaks = cli.detectWorktreeLeaks(worktrees, {
+    isMerged: (id) => id === "task-merged",
+    isQuayWorktree,
+  });
+  assert.deepEqual(
+    leaks.map((l) => l.taskId),
+    ["task-merged"],
+    "only the merged quay-worktree task branch leaks; main checkout, /tmp fixture, feat branch, unmerged excluded",
+  );
+  assert.equal(leaks[0].path, "/home/yale/work/quay-worktrees/task-merged");
+  assert.equal(leaks[0].branch, "refs/heads/task/task-merged");
+});
+
+test("WORKTREE-LEAK — no isMerged probe ⇒ no leak flagged (fail-closed without evidence)", async () => {
+  const cli = await importCli();
+  const leaks = cli.detectWorktreeLeaks(
+    [{ path: "/home/yale/work/quay-worktrees/task-a", branch: "refs/heads/task/task-a" }],
+    { isQuayWorktree: () => true },
+  );
+  assert.deepEqual(leaks, [], "without a merged probe the detector must not fabricate leaks");
+});
+
+test("WORKTREE-LEAK — taskIdFromBranch accepts both ref forms and rejects non-task branches", async () => {
+  const cli = await importCli();
+  assert.equal(cli.taskIdFromBranch("refs/heads/task/abc"), "abc");
+  assert.equal(cli.taskIdFromBranch("task/def"), "def");
+  assert.equal(cli.taskIdFromBranch("refs/heads/integration"), null);
+  assert.equal(cli.taskIdFromBranch("feat/x"), null);
+  assert.equal(cli.taskIdFromBranch(null), null);
+});
+
+test("WORKTREE-LEAK — isQuayWorktreePath excludes the main checkout and non-convention paths", async () => {
+  const cli = await importCli();
+  const root = "/home/yale/work/quay";
+  assert.equal(cli.isQuayWorktreePath("/home/yale/work/quay-worktrees/foo", root), true);
+  assert.equal(cli.isQuayWorktreePath("/home/yale/work/quay", root), false, "main checkout is not a task worktree");
+  assert.equal(cli.isQuayWorktreePath("/tmp/foo", root), false, "test fixtures outside quay-worktrees/ never occupy a slot");
+  assert.equal(cli.isQuayWorktreePath("/home/yale/work/other/quay-worktrees/foo", root), false, "sibling project's worktrees are not this repo's slots");
+  assert.equal(cli.isQuayWorktreePath(null, root), false);
+});
+
+test("WORKTREE-LEAK — occupied>cap AND leaks ⇒ NON-COMPLIANT; leaks alone or over-cap alone stay compliant (AC4)", async () => {
+  const cli = await importCli();
+  const inProgress = [{ taskId: "live-1", runId: "fm-live-1-1", startedAtMs: 1 }];
+  const executorGone = () => ({ gone: false, reason: "worktree-present" });
+  const leaks = [{ taskId: "merged-a", path: "/home/yale/work/quay-worktrees/merged-a", branch: "task/merged-a" }];
+
+  // The AC4 shape: occupied (1) > cap (0) AND a leak present ⇒ NON-COMPLIANT.
+  const s1 = cli.analyzeSlotStatus(inProgress, { cap: 0, executorGone, worktreeLeaks: leaks });
+  assert.equal(s1.occupied_slots > s1.cap, true, "occupied exceeds cap");
+  assert.equal(s1.worktree_leaks_count, 1, "a merged-worktree leak is present");
+  assert.equal(s1.worktree_leak_compliant, false, "occupied>cap AND leaks ⇒ the round is NON-COMPLIANT");
+
+  // Leaks alone (occupied ≤ cap) do NOT fail the round.
+  const s2 = cli.analyzeSlotStatus(inProgress, { cap: 3, executorGone, worktreeLeaks: leaks });
+  assert.equal(s2.worktree_leaks_count, 1);
+  assert.equal(s2.worktree_leak_compliant, true, "leaks alone must not fail a round that has free slots");
+
+  // Over-cap alone (no leaks) is a DIFFERENT violation — not the worktree-leak verdict.
+  const s3 = cli.analyzeSlotStatus(inProgress, { cap: 0, executorGone, worktreeLeaks: [] });
+  assert.equal(s3.occupied_slots > s3.cap, true);
+  assert.equal(s3.worktree_leaks_count, 0);
+  assert.equal(s3.worktree_leak_compliant, true, "over-cap with no leaks is not a worktree-leak compliance failure");
+
+  // Default (no worktreeLeaks arg) — no leaks, compliant, byte-compatible forward shape.
+  const s4 = cli.analyzeSlotStatus(inProgress, { cap: 0, executorGone });
+  assert.equal(s4.worktree_leaks_count, 0);
+  assert.equal(s4.worktree_leak_compliant, true);
+  assert.equal(s4.worktree_leaks.length, 0);
+});
+
+test("WORKTREE-LEAK CLI — real git: merged worktree reads as a leak; removal clears it and frees the slot (AC2/AC4)", async () => {
+  const tmp = makeTmpWorkspace();
+  // quay-worktrees sibling dir follows the fast-mode worktree path convention.
+  const wtRoot = path.join(path.dirname(tmp), "quay-worktrees");
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "seed.md"), "---\nid: seed\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q", "-b", "master");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed tasks").status, 0);
+    fs.mkdirSync(wtRoot, { recursive: true });
+    // task/leak-a: branch checked out in a quay-worktree, work committed, merged into master,
+    // worktree NEVER removed ⇒ the leak shape.
+    assert.equal(gitCmd(tmp, "worktree", "add", "-b", "task/leak-a", path.join(wtRoot, "leak-a"), "master").status, 0);
+    fs.appendFileSync(path.join(wtRoot, "leak-a", "tasks", "seed.md"), "work\n");
+    const wtGit = (args) => gitCmd(path.join(wtRoot, "leak-a"), ...args);
+    assert.equal(wtGit(["add", "-A"]).status, 0);
+    assert.equal(wtGit(["commit", "-m", "leak-a work"]).status, 0);
+    assert.equal(gitCmd(tmp, "merge", "--no-ff", "task/leak-a", "-m", "merge: fan-in leak-a").status, 0);
+
+    // The task has an OPEN telemetry bracket. gap-inflight-states-missing-impl-complete-event AC3:
+    // a worktree is pure implementation detail — its presence is NOT a concurrency-accounting signal.
+    // So the leaked worktree is still DETECTED (git hygiene) but does NOT occupy a slot (the bracket
+    // reads as stale, not real in-flight).
+    assert.equal(runCli(tmp, "--task-start", "--taskId", "leak-a").status, 0);
+
+    const before = runCli(tmp, "--slot-status", "--cap", "1", "--json");
+    assert.equal(before.status, 0, before.stderr);
+    const b = JSON.parse(before.stdout);
+    assert.deepEqual(b.worktree_leaks.map((l) => l.taskId), ["leak-a"], "the merged-but-present worktree is still reported as a leak (git hygiene)");
+    assert.equal(b.real_in_flight, 0, "the leaked worktree NO LONGER reads as an alive executor (AC3 — worktree not read for accounting)");
+    assert.equal(b.stale_brackets, 1, "the leaked-worktree bracket is stale (would be closed by --reconcile — no process/transcript)");
+    assert.equal(b.occupied_slots, 0, "occupied = 0 — the leak no longer occupies a slot");
+    assert.equal(b.slots_free, 1, "cap 1 − occupied 0 ⇒ the slot the leak used to hold is free");
+    // The over-cap-AND-leak shape is no longer reachable via a worktree alone (AC3): with the leak
+    // occupying 0 slots, occupied_slots (0) can never exceed cap ≥ 0 ⇒ the verdict stays COMPLIANT.
+    const over = runCli(tmp, "--slot-status", "--cap", "0", "--json");
+    const ov = JSON.parse(over.stdout);
+    assert.equal(ov.worktree_leaks_count, 1, "the leak is still detected at cap 0");
+    assert.equal(ov.occupied_slots > ov.cap, false, "occupied 0 is NOT > cap 0 — the leak can no longer fabricate over-cap occupancy");
+
+    // Pure read: --slot-status must not remove the worktree or write reconcile events.
+    assert.equal(fs.existsSync(path.join(wtRoot, "leak-a")), true, "slot-status is pure-read: it never removes a worktree");
+
+    // The hygiene fix is still `git worktree remove` (safe — branch merged, only the working copy is deleted).
+    assert.equal(gitCmd(tmp, "worktree", "remove", path.join(wtRoot, "leak-a")).status, 0);
+
+    const after = runCli(tmp, "--slot-status", "--cap", "5", "--json");
+    assert.equal(after.status, 0, after.stderr);
+    const a = JSON.parse(after.stdout);
+    assert.equal(a.worktree_leaks_count, 0, "after removal the leak is gone");
+    assert.equal(a.real_in_flight, 0, "no real executor, no leak");
+    assert.equal(a.worktree_leak_compliant, true, "no leaks ⇒ compliant");
+  } finally {
+    cleanup(tmp);
+    try { fs.rmSync(wtRoot, { recursive: true, force: true }); } catch (_) { /* best-effort */ }
+  }
+});
+
+
+// ── FAN-IN RUNID BRIDGE (gap-task-telemetry-6-percent-join) ──────────────────────────────────────────
+// The 6% join-rate defect: git fan-in commits and telemetry records barely intersected. The bridge:
+// a fan-in commit subject carries the telemetry runId at a fixed position — "merge: fan-in task/<id>
+// (runId: fm-...)" — and the telemetry reads it back (extractRunIdFromCommitSubject) and traces a
+// taskId → its fan-in commit (findFanInCommitSha). --task-end records the sha (AC3 traceability).
+
+test("FAN-IN BRIDGE — extractRunIdFromCommitSubject parses the runId by POSITION (and rejects absent/malformed)", async () => {
+  const cli = await importCli();
+  assert.equal(
+    cli.extractRunIdFromCommitSubject("merge: fan-in task/gap-x (runId: fm-gap-x-1750-abc123)"),
+    "fm-gap-x-1750-abc123",
+    "the runId in the fixed (runId: …) group is extracted",
+  );
+  assert.equal(
+    cli.extractRunIdFromCommitSubject("merge: fan-in task/gap-x (runId:fm-gap-x-1750-abc123)"),
+    "fm-gap-x-1750-abc123",
+    "no space after the colon is tolerated (position-based, whitespace-insensitive)",
+  );
+  assert.equal(cli.extractRunIdFromCommitSubject("merge: fan-in task/gap-x"), null, "no runId group ⇒ null");
+  assert.equal(cli.extractRunIdFromCommitSubject("Merge branch 'task/gap-x'"), null, "auto merge subject has no runId ⇒ null");
+  assert.equal(cli.extractRunIdFromCommitSubject(null), null, "null subject ⇒ null");
+  assert.equal(cli.extractRunIdFromCommitSubject(""), null, "empty subject ⇒ null");
+});
+
+test("FAN-IN BRIDGE — findFanInCommitSha traces a taskId to its fan-in merge commit (AC3)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, "base.txt"), "base\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    gitCmd(tmp, "add", "-A");
+    gitCmd(tmp, "commit", "-q", "-m", "base");
+    gitCmd(tmp, "checkout", "-q", "-b", "task/gap-bridge");
+    fs.writeFileSync(path.join(tmp, "work.txt"), "work\n", "utf8");
+    gitCmd(tmp, "add", "-A");
+    gitCmd(tmp, "commit", "-q", "-m", "work");
+    gitCmd(tmp, "checkout", "-q", "master");
+    const merged = gitCmd(tmp, "merge", "--no-ff", "task/gap-bridge", "-m", "merge: fan-in task/gap-bridge (runId: fm-gap-bridge-1750-abc)");
+    assert.equal(merged.status, 0, merged.stderr);
+    const expected = gitCmd(tmp, "rev-parse", "HEAD").stdout.trim();
+
+    const sha = cli.findFanInCommitSha(tmp, "gap-bridge");
+    assert.equal(sha, expected, "the task's fan-in merge commit is traced");
+    assert.equal(cli.findFanInCommitSha(tmp, "gap-never-landed"), null, "a task never fan-in'd ⇒ null");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("FAN-IN BRIDGE — --task-end auto-records the fan-in commit sha when the task's branch was merged (AC3)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, "base.txt"), "base\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    gitCmd(tmp, "add", "-A");
+    gitCmd(tmp, "commit", "-q", "-m", "base");
+    gitCmd(tmp, "checkout", "-q", "-b", "task/gap-end-rec");
+    fs.writeFileSync(path.join(tmp, "work.txt"), "work\n", "utf8");
+    gitCmd(tmp, "add", "-A");
+    gitCmd(tmp, "commit", "-q", "-m", "work");
+    gitCmd(tmp, "checkout", "-q", "master");
+    gitCmd(tmp, "merge", "--no-ff", "task/gap-end-rec", "-m", "merge: fan-in task/gap-end-rec (runId: fm-gap-end-rec-1-x)");
+    const fanSha = gitCmd(tmp, "rev-parse", "HEAD").stdout.trim();
+
+    const start = runCli(tmp, "--task-start", "--taskId", "gap-end-rec");
+    assert.equal(start.status, 0, start.stderr);
+    const runId = start.stdout.trim();
+    const end = runCli(tmp, "--task-end", "--taskId", "gap-end-rec", "--runId", runId, "--outcome", "done");
+    assert.equal(end.status, 0, end.stderr);
+
+    const events = readEventsJsonl(tmp, runId);
+    const endEv = events[events.length - 1];
+    assert.equal(endEv.eventKind, "end");
+    assert.equal(endEv.fanInCommitSha, fanSha, "the end event records the fan-in commit sha automatically");
+    assert.equal(endEv.runId, runId);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("FAN-IN BRIDGE — --task-end --fanInCommit <sha> overrides the auto-lookup; a non-git root records null", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const start = runCli(tmp, "--task-start", "--taskId", "gap-override");
+    assert.equal(start.status, 0, start.stderr);
+    const runId = start.stdout.trim();
+    const end = runCli(tmp, "--task-end", "--taskId", "gap-override", "--runId", runId, "--outcome", "done", "--fanInCommit", "deadbeef1234");
+    assert.equal(end.status, 0, end.stderr);
+    let ev = readEventsJsonl(tmp, runId);
+    assert.equal(ev[ev.length - 1].fanInCommitSha, "deadbeef1234", "explicit --fanInCommit wins");
+
+    // No git repo → auto-lookup is null (never a wrong sha).
+    const start2 = runCli(tmp, "--task-start", "--taskId", "gap-no-git");
+    const runId2 = start2.stdout.trim();
+    const end2 = runCli(tmp, "--task-end", "--taskId", "gap-no-git", "--runId", runId2, "--outcome", "abandoned");
+    assert.equal(end2.status, 0, end2.stderr);
+    const evs = readEventsJsonl(tmp, runId2);
+    assert.equal(evs[evs.length - 1].fanInCommitSha, null, "no git ⇒ fanInCommitSha null (fail-soft, never a wrong sha)");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// ── IMPL-COMPLETE (gap-inflight-states-missing-impl-complete-event) ─────────────────────────────────
+// The THIRD task-lifecycle event. fan-in writes it after impl completes (suite green) and BEFORE land,
+// splitting start→end into start→impl-complete (implementing) and impl-complete→end (awaiting-land).
+// Build dispatch reads the former; the land single-flight gate reads the latter. AC4 负控制: the
+// worktree-present keep is retired; the event stream's impl-complete boundary is the state record.
+
+test("IMPL-COMPLETE — --impl-complete writes the third event (eventKind, timing-null); --report splits implementing vs awaitingLand (AC2/AC5)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    // gap-building: start only ⇒ implementing.
+    const startB = runCli(tmp, "--task-start", "--taskId", "gap-building");
+    assert.equal(startB.status, 0, startB.stderr);
+    const runB = startB.stdout.trim();
+
+    // gap-landing: start + impl-complete (no end) ⇒ awaitingLand.
+    const startL = runCli(tmp, "--task-start", "--taskId", "gap-landing");
+    assert.equal(startL.status, 0, startL.stderr);
+    const runL = startL.stdout.trim();
+    const ic = runCli(tmp, "--impl-complete", "--taskId", "gap-landing", "--runId", runL);
+    assert.equal(ic.status, 0, ic.stderr);
+    assert.match(ic.stdout, /impl-complete event written/, `impl-complete reports the write, got: ${ic.stdout}`);
+
+    // gap-done: start + end ⇒ completed (neither implementing nor awaiting-land).
+    const startD = runCli(tmp, "--task-start", "--taskId", "gap-done");
+    assert.equal(startD.status, 0, startD.stderr);
+    const runD = startD.stdout.trim();
+    const end = runCli(tmp, "--task-end", "--taskId", "gap-done", "--runId", runD, "--outcome", "done");
+    assert.equal(end.status, 0, end.stderr);
+
+    // The impl-complete event is schema-valid: eventKind "impl-complete", timing all-null.
+    const evs = readEventsJsonl(tmp, runL);
+    const icEv = evs.find((e) => e.eventKind === "impl-complete");
+    assert.ok(icEv, `impl-complete event present in ${runL}.jsonl: ${JSON.stringify(evs)}`);
+    assert.equal(icEv.timing.queuedAtMs, null);
+    assert.equal(icEv.timing.startedAtMs, null);
+    assert.equal(icEv.timing.endedAtMs, null);
+    assert.equal(icEv.runId, runL);
+
+    // The aggregate report exposes the two INDEPENDENT segments.
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const r = JSON.parse(rep.stdout);
+    const implIds = (r.implementing ?? []).map((x) => x.taskId);
+    const awaitIds = (r.awaitingLand ?? []).map((x) => x.taskId);
+    assert.deepEqual(implIds, ["gap-building"], "implementing = start without impl-complete (真正在实现)");
+    assert.deepEqual(awaitIds, ["gap-landing"], "awaitingLand = impl-complete without end (排队待落地)");
+    assert.ok(!awaitIds.includes("gap-done"), "a completed run is not awaiting-land");
+    assert.ok(!implIds.includes("gap-done"), "a completed run is not implementing");
+    assert.equal(r.inProgress.length, 2, "both open runs still surface in inProgress (both start-without-end)");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("IMPL-COMPLETE — idempotent: a second --impl-complete for the same runId is skipped (ff-retry re-runs phase 2)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const start = runCli(tmp, "--task-start", "--taskId", "gap-idi");
+    assert.equal(start.status, 0, start.stderr);
+    const runId = start.stdout.trim();
+    const ic1 = runCli(tmp, "--impl-complete", "--taskId", "gap-idi", "--runId", runId);
+    assert.equal(ic1.status, 0, ic1.stderr);
+    const ic2 = runCli(tmp, "--impl-complete", "--taskId", "gap-idi", "--runId", runId);
+    assert.equal(ic2.status, 0, ic2.stderr);
+    assert.match(ic2.stdout, /idempotent/, `the second write is skipped: ${ic2.stdout}`);
+    const evs = readEventsJsonl(tmp, runId);
+    const icCount = evs.filter((e) => e.eventKind === "impl-complete").length;
+    assert.equal(icCount, 1, "a runId carries exactly one impl-complete boundary (first wins)");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// ── IMPL-COMPLETE Build-side write (gap-impl-complete-event-written-by-fan-in-not-build) ─────────────
+// The PRIMARY writer moves from fan-in step 4.4 to the Build subagent's completion. The Build subagent
+// does not hold the runId (the inner generated it at --task-start dispatch), so `--impl-complete`
+// auto-resolves it from the task's OPEN bracket when `--runId` is omitted — the same lookup --run-id-for
+// uses. These are REAL-CLI tests (write the real event file, read it back) — the AC2 production-carrier
+// negative control.
+
+test("IMPL-COMPLETE — Build-side write: --impl-complete without --runId auto-resolves the open bracket's runId (gap-impl-complete-event-written-by-fan-in-not-build AC1)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const start = runCli(tmp, "--task-start", "--taskId", "gap-build-side");
+    assert.equal(start.status, 0, start.stderr);
+    const runId = start.stdout.trim();
+    assert.match(runId, /^fm-/, `--task-start printed a runId, got: ${runId}`);
+
+    // The Build-side write: only --taskId + --root (no --runId — the subagent does not hold it).
+    const ic = runCli(tmp, "--impl-complete", "--taskId", "gap-build-side");
+    assert.equal(ic.status, 0, `auto-resolve must succeed: ${ic.stderr}`);
+    assert.match(ic.stdout, /impl-complete event written/, `reports the write: ${ic.stdout}`);
+    assert.ok(ic.stdout.includes(runId), `the auto-resolved runId is the open bracket's, got: ${ic.stdout}`);
+
+    // Read the REAL event stream back: the runId file (the one --task-start generated) carries the
+    // impl-complete boundary — AC2 production carrier (real file, not a fixture).
+    const evs = readEventsJsonl(tmp, runId);
+    assert.equal(evs.filter((e) => e.eventKind === "impl-complete").length, 1, "exactly one impl-complete in the runId event file");
+    assert.equal(evs[evs.length - 1].runId, runId, "the event landed in the open bracket's runId file");
+
+    // The report classifies it awaiting-land (impl-complete, no end) — NOT implementing.
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const r = JSON.parse(rep.stdout);
+    assert.ok(!(r.implementing ?? []).some((x) => x.taskId === "gap-build-side"), "a Build-completed task is NOT counted as implementing");
+    assert.ok((r.awaitingLand ?? []).some((x) => x.taskId === "gap-build-side"), "a Build-completed task IS awaiting-land");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("IMPL-COMPLETE — Build-side negative control: no open bracket ⇒ fail-closed (exit 1), nothing written (AC2)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    // No --task-start was ever run for this task — there is no open bracket to auto-resolve.
+    const ic = runCli(tmp, "--impl-complete", "--taskId", "gap-no-bracket");
+    assert.notEqual(ic.status, 0, "no open bracket must fail-closed, not silently pass");
+    assert.match(ic.stderr, /could not resolve an open runId/, `names the cause: ${ic.stderr}`);
+    // Nothing was written: the events dir has no runId file for this task.
+    const dir = path.join(tmp, ".workflow-events");
+    const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")) : [];
+    assert.ok(files.every((f) => !f.includes("gap-no-bracket")), `no event file for a bracket-less task, got: ${files.join(", ")}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("IMPL-COMPLETE — AC2 production carrier: Build-completed-but-queued (start + impl-complete, no end) is NOT implementing; start-only IS", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    // gap-queued: Build completed, waiting in the fan-in queue (start + impl-complete, no end).
+    const startQ = runCli(tmp, "--task-start", "--taskId", "gap-queued");
+    assert.equal(startQ.status, 0, startQ.stderr);
+    const icQ = runCli(tmp, "--impl-complete", "--taskId", "gap-queued"); // Build-side write, no runId
+    assert.equal(icQ.status, 0, icQ.stderr);
+
+    // gap-building: still in Build (start only, no impl-complete).
+    const startB = runCli(tmp, "--task-start", "--taskId", "gap-building-2");
+    assert.equal(startB.status, 0, startB.stderr);
+
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const r = JSON.parse(rep.stdout);
+    const implIds = (r.implementing ?? []).map((x) => x.taskId);
+    const awaitIds = (r.awaitingLand ?? []).map((x) => x.taskId);
+    assert.ok(implIds.includes("gap-building-2"), "start-only IS implementing (真正在 Build)");
+    assert.ok(!implIds.includes("gap-queued"), "Build-completed-queued is NOT implementing — frees the Build slot (AC2)");
+    assert.ok(awaitIds.includes("gap-queued"), "Build-completed-queued IS awaiting-land");
+    assert.equal(r.inProgress.length, 2, "both open runs still surface in inProgress (start-without-end)");
+  } finally {
+    cleanup(tmp);
+  }
 });

@@ -583,7 +583,9 @@ test("DIR-048 GREEN: opt-out combo inline+none returns inline/none", () => {
 test("DIR-051: loop-params trigger validation agrees with routine-scheduler parseTrigger (no drift)", async () => {
   const { parseTrigger } = await import("../../../experiments/quay-perpetual-stream/scripts/routine-scheduler.ts");
   const cases = ["every(5)", "every(1)", "every( 3 )", "on(checkpoint)", "on(idle)", "on(a-b)",
-                 "every(0)", "every(-1)", "every()", "every(00)", "every(2.5)", "daily", "on()", "on(a b)", "EVERY(5)", "every(5)x"];
+                 "every(0)", "every(-1)", "every()", "every(00)", "every(2.5)", "daily", "on()", "on(a b)", "EVERY(5)", "every(5)x",
+                 "interval:60m", "interval: 60 m", "interval:5m", "interval:1m", "interval:1440m",
+                 "interval:0m", "interval:-1m", "interval:m", "interval:", "interval:2.5m", "interval:60h", "interval:60M", "interval:60"];
   for (const t of cases) {
     let paramsAccepts = true;
     try { readLoopParams(writeAndWs(t)); } catch { paramsAccepts = false; }

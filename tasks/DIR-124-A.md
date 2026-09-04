@@ -2,7 +2,7 @@
 id: DIR-124-A
 title: Establish milestone-workflow observability, invariant ownership, and
   golden replay before control-plane refactoring
-status: todo
+status: done
 labels:
   - directive
   - human-steered
@@ -17,7 +17,23 @@ extra:
   dirStatus: applied
   schema: v1
 ---
+
 **type:** execution
+
+**ADR-022 关闭（2026-08-09，manager 代写，人 17:4x 裁定关闭，随父任务 DIR-124 一并关闭）**
+
+原标题：Establish milestone-workflow observability, invariant ownership, and golden replay before
+control-plane refactoring。Proposal 明确是「the C0 layer from
+`docs/proposals/quay-milestone-workflow-git-crystallization.md`」，目标是为 DIR-124-B/C/D/E 的
+control-plane 重构打前站——**目标本身（`.claude/workflows/execute-milestone.js` 的重构）已被
+ADR-022（2026-08-03 accepted）物理删除**，前站工作失去意义。
+
+实测：`grep -c "execute-milestone\.js\|prepare-milestone\.js\|composite-"` 本任务体命中 34 处。
+
+意见：见父任务 `DIR-124` 关闭说明。若需要恢复此类可观测性/golden-replay 基线能力，应针对当前
+fast-mode 架构重新提案。
+
+全文见 git 历史（`git log -p -- tasks/DIR-124-A.md`）。
 
 ## Proposal
 
@@ -399,56 +415,5 @@ Explicitly excluded from this parent's scope:
 
 **Alt12: Using the A1 event stream as a gating mechanism.** Rejected: the event stream is observational-only. A missing or malformed event must never block a phase or change dispatch outcome. The gate engine (`quay gate`) already has its own immutable GateEvent append mechanism at `.quay/gate-events.jsonl`; this proposal does not introduce a competing gate journal.
 
-## Plan
-
-N/A -- parent directive resolved only through its ordered children. Parent completion is exactly the completion of DIR-124-A1 through DIR-124-A5; the parent is not independently SELECTable.
-
-## Finding
-
-Recent workflow repairs have relied on prose histories and manually reconstructed Claude Code timelines. Current workflow journals are inconsistent or merely mentioned by task acceptance text; there is no canonical event schema covering queue/start/end time, agent calls, test commands, working directory, observed effects, and commit identity. Without a before-state replay boundary, DIR-123 and kernel extraction cannot distinguish a deliberate behavior change from another accidental capability regression.
-
-Naive golden snapshots are also dangerous: the current workflow contains known defects and stale claims. A replay corpus must classify each captured behavior as normative, compatibility-only, observed-but-undesired, or an explicitly open defect.
-
-## Requested action
-
-Execute DIR-124-A1, DIR-124-A2, DIR-124-A3, DIR-124-A4, DIR-124-A5 in order; each is independently `prepare-milestone.js` + `execute-milestone.js` dispatched with its own real proof and independent audit. Do not promote DIR-124-A to `done` until all five children are `done`.
-
-## Acceptance Criteria
-
-- [ ] DIR-124-A1 is `done`: one canonical stage-event schema is exercised by real workflow execution
-  and records all fields named in the parent's Requested action item 1.
-- [ ] DIR-124-A2 is `done`: replay fixtures cover all eight named cases plus the two known-defect
-  shapes; each assertion is labeled normative/compatibility-only/known-defect.
-- [ ] DIR-124-A3 is `done`: the invariant-ownership manifest rejects two authoritative owners and
-  lists every known workflow/OUTER-LOOP/composite duplicate scheduled for deletion.
-- [ ] DIR-124-A4 is `done`: a deliberately stale workflow metadata/driver claim fails the
-  conformance check; the corrected claim passes.
-- [ ] DIR-124-A5 is `done`: baseline measurements are emitted mechanically, separate
-  mechanical/content agent calls, and report stage wall/queue time, agent-minutes, tokens, finding
-  novelty/recurrence, and artifact-class output with explicit unknowns.
-- [ ] Parent/child lifecycle consistency gate passes: this parent is `done` iff all five children
-  are `done` -- no PARENT-DONE-IFF-CHILDREN violation.
-
-## Definition of Done
-
-Standard exp5 DoD clauses apply.
-
-- [ ] All five children are real-landed and independently audited.
-- [ ] `it0-split-or-commit-check.ts .` reports no PARENT-DONE-IFF-CHILDREN violation.
-- [ ] No child introduces post-Land Wiring Audit, lifecycle-promotion policy, worktree redesign,
-  stage scheduler, or resource lease (the parent AC9 non-goal is enforced per-child).
-
-## Human verification when exp5 marks this DIR done
-
-1. Can the before-state of every later DIR-124 refactor be replayed mechanically?
-2. Are known defects clearly excluded from the normative compatibility contract?
-3. Does the event stream show actual commands/effects rather than agent assertions about them?
-4. Is each invariant assigned to one future owner?
-
 ## Touches
-
-- `tasks/DIR-124-A1.md`
-- `tasks/DIR-124-A2.md`
-- `tasks/DIR-124-A3.md`
-- `tasks/DIR-124-A4.md`
-- `tasks/DIR-124-A5.md`
+- tasks/DIR-124-A.md（自身文件）

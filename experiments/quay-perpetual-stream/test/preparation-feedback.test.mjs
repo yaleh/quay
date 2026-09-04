@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group engine
 // preparation-feedback.test.mjs — sibling test for preparation-feedback.ts. Not currently imported
 // by another module (N/A under ADR-001's load-bearing trigger today), but added proactively so any
 // future wiring (e.g. into select-preflight.ts's Stage 1.6 pipeline) never has to retrofit this —
@@ -8,9 +8,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
-  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
-} else {
 const { runPreparationFeedbackLoop, MAX_PREPARATION_ROUNDS, selftest } = await import("../scripts/preparation-feedback.ts");
 
 test("preparation-feedback.ts embedded selftest() suite passes", () => {
@@ -68,4 +65,3 @@ test("history is a non-empty, human-readable audit trail on both accept and huma
   assert.match(reviewed.history[reviewed.history.length - 1], /human review/);
 });
 
-}

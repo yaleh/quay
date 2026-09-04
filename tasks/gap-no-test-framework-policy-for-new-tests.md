@@ -164,7 +164,15 @@ extra:
   pre-commit ceiling bump），固化测试。
 - **Round 2 后**：22/22 selftest + 25/25 node:test 绿，`--for-task` 全绿。
 
-## Touches
+## 交叉标注（2026-08-08，gap-test-isolation-backlog-44-violations-unmeasured AC3）
+
+**本任务的棘轮机制现在是第二个消费者。** 本任务（`gap-no-test-framework-policy-for-new-tests`）建立
+了「数据文件 + `# baseline-count` 提交后封顶 + git-HEAD 严格子集」的 shrink-only 棘轮形态；
+`test-isolation-check`（`gap-test-isolation-contract-is-unwritten` 的检查器）复用了**同一形态**
+——数据文件 `plugin/test-isolation-violations.txt`、同样的 C0a/C0b/C1/C2a/C2c 判定（`runIsolationChecks`
+与 `test-framework-policy-check` 的棘轮逐条对应）、同样的 commit-surviving 计数上限。两个检查器共享
+同一套「名单只能变短」的不变量，但各有独立的数据文件与 ceiling（policy=34 豁免项；isolation=51 历史峰值，
+当前 44 条）。**同一棘轮机制的第二消费者**由此交叉标注成立（AC3）。
 
 - scripts/test.sh
 - plugin/scripts/test-framework-policy-check.ts

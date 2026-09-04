@@ -982,7 +982,130 @@ export function renderMarkdown(inv: Inventory): string {
   lines.push(`- \`never-runs-test\` is eclipsed by \`live\` when a \`*.test.*\` outside the canonical glob was nonetheless executed in the window (e.g. \`it0-enforcement-with-design-check.test.mjs\`, run once manually). Such a file is genuinely "not in the suite" but has execution evidence — the class follows the priority, so it shows \`live\`, not \`never-runs-test\`.`);
   lines.push(`- The \`executed\` count is command-position matching (quotes stripped) plus a conservative wrapper-indirect signal (a transcript-live \`.sh\` that delegates to a same-dir \`.ts\`/references it via \`node\`/\`bash\`/ \`gate_delegate_ts\` marks that target as executed too). Known conservative misses: a script referenced inside \`bash -c '...'\` inline code, or invoked by bare basename after \`cd\`.`);
   lines.push("");
+  lines.push(`## Entry point (gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point)`);
+  lines.push("");
+  lines.push(`The \`plugin/scripts\` instruments are discoverable through ONE entry point instead of remembered paths:`);
+  lines.push("");
+  lines.push(`- **MCP:** the Core \`instrument\` tool (\`packages/quay/src/mcp-server.ts\`) — \`action: "list"\` returns the derived instrument directory (each admitted instrument declaring what question it answers); \`action: "run"\` + \`name\` + \`args\` invokes one. The directory is DERIVED from the filesystem by this tool's \`--instruments-json\` mode:`);
+  lines.push(`  \`node --experimental-strip-types plugin/scripts/runtime-usage-inventory.ts --instruments-json\``);
+  lines.push(`- **Admission filter (AC4):** an instrument is admitted only when it declares its question — explicitly via \`@instrument "<question>"\` in its header comment, or derived from the header's own \`<basename> — <description>\` line. Instruments that cannot say are kept OUT, listed under \`notAdmitted\`.`);
+  lines.push(`- **The count is derived, never hardcoded** — the "81" in the task body is a snapshot; the manifest's \`total\` reflects the current filesystem.`);
+  lines.push("");
   return lines.join("\n");
+}
+
+// ── Instrument manifest ────────────────────────────────────────────────────────────────────────────────
+// gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point: the ENTRY POINT data source.
+// The plugin/scripts instruments are discoverable only by remembering a path; this section derives the
+// machine-readable directory (name/path/declared-question) that a consumer (the Core `instrument` MCP
+// tool in packages/quay/src/mcp-server.ts) surfaces. The count is DERIVED from the filesystem — never a
+// hardcoded "81" — and the ADMISSION FILTER (AC4: a script that cannot say what question it answers
+// does not get in) is mechanical: an instrument is admitted only when it DECLARES its question, either
+// explicitly via an `@instrument "<question>"` tag in its header comment or derived from the header's
+// own `<basename> — <description>` line.
+
+/** Extract the leading header comment block (a block comment, a `//` run, or a `#` run) from script source. */
+export function extractHeaderComment(src: string): string {
+  const text = src.replace(/^﻿/, "").trimStart();
+  if (text.startsWith("/*")) {
+    const end = text.indexOf("*/");
+    if (end !== -1) return text.slice(2, end);
+  }
+  const out: string[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trimStart();
+    if (line.startsWith("//")) out.push(line.slice(2).trim());
+    else if (line.startsWith("#!")) out.push(line.slice(2).trim());
+    else if (line.startsWith("#")) out.push(line.slice(1).trim());
+    else if (out.length && line === "") out.push("");
+    else if (out.length) break;
+    else break;
+  }
+  while (out.length && out[out.length - 1] === "") out.pop();
+  return out.join("\n");
+}
+
+const INSTRUMENT_TAG_RE = /@instrument\s+(.+?)\s*$/;
+
+/**
+ * The declared "what question this instrument answers". Returns null when the script cannot say — and a
+ * null here is the admission filter: the instrument stays OUT of the entry-point directory (AC4).
+ * Explicit `@instrument "<question>"` wins; otherwise the header's own `<basename> — <description>`
+ * line is the derived fallback (the repo's established header convention).
+ */
+export function extractInstrumentDeclaration(src: string, basename: string): string | null {
+  const header = extractHeaderComment(src);
+  if (!header) return null;
+  for (const line of header.split("\n")) {
+    const m = line.match(INSTRUMENT_TAG_RE);
+    if (m) return m[1].trim().replace(/^["'“”]+|["'“”]+$/g, "").trim();
+  }
+  const dashLine = header.split("\n").find((l) => l.includes("—") || l.includes("–"));
+  if (dashLine) {
+    const dashAt = dashLine.indexOf("—") !== -1 ? dashLine.indexOf("—") : dashLine.indexOf("–");
+    const desc = dashLine.slice(dashAt + 1).trim();
+    if (desc) return desc;
+  }
+  return null;
+}
+
+/** The interpreter an instrument runs under (drives the `instrument` tool's `run` dispatch). */
+export function instrumentKind(basename: string): string {
+  return /\.(sh|bash|zsh)$/.test(basename) ? "bash" : "node";
+}
+
+export interface InstrumentEntry {
+  name: string;        // basename without extension — the `instrument run <name>` handle
+  path: string;        // workspace-root-relative script path
+  description: string; // the declared "what question this answers"
+  kind: string;        // "node" | "bash" — interpreter hint for the run action
+}
+
+export interface InstrumentsManifest {
+  generatedAt: string;
+  root: string;
+  total: number;         // derived plugin/scripts script count (never hardcoded)
+  admitted: number;      // instruments that declared their question (in the directory)
+  notAdmitted: string[]; // plugin/scripts scripts that could not say — kept OUT (the filter is visible)
+  instruments: InstrumentEntry[];
+}
+
+/** Derive the plugin/scripts instrument directory. Cheap: filesystem scan + header read, no transcripts. */
+export function buildInstrumentsManifest(root: string): InstrumentsManifest {
+  const { scripts } = enumerateScripts(root);
+  const pluginScripts = scripts
+    .filter((s) => s.category === "plugin-scripts" && isScriptFile(s.basename))
+    .sort((a, b) => a.relPath.localeCompare(b.relPath));
+  const instruments: InstrumentEntry[] = [];
+  const notAdmitted: string[] = [];
+  for (const s of pluginScripts) {
+    let src = "";
+    try {
+      src = fs.readFileSync(path.join(root, s.realPath), "utf8");
+    } catch {
+      src = "";
+    }
+    const description = extractInstrumentDeclaration(src, s.basename);
+    if (description) {
+      instruments.push({
+        name: s.basename.replace(/\.[^.]+$/, ""),
+        path: s.realPath,
+        description,
+        kind: instrumentKind(s.basename),
+      });
+    } else {
+      notAdmitted.push(s.realPath);
+    }
+  }
+  instruments.sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    generatedAt: new Date().toISOString(),
+    root,
+    total: pluginScripts.length,
+    admitted: instruments.length,
+    notAdmitted,
+    instruments,
+  };
 }
 
 // ── CLI ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1017,6 +1140,13 @@ export function main(argv: string[]): number {
   const args = parseArgv(argv);
   const here = path.dirname(fileURLToPath(import.meta.url));
   const root = path.resolve(args.root ?? path.resolve(here, "..", ".."));
+  // --instruments-json: the entry-point directory (gap-eighty-one-instruments...). Cheap (filesystem
+  // scan + header reads only — NO transcript reading), so it is the mode the Core `instrument` MCP
+  // tool spawns for `action: "list"`. The count is derived, never hardcoded.
+  if (args["instruments-json"] === "true") {
+    process.stdout.write(JSON.stringify(buildInstrumentsManifest(root), null, 2) + "\n");
+    return 0;
+  }
   const since = args.since ?? DEFAULT_SINCE;
   const until = args.until ?? new Date().toISOString();
   const longHours = Number(args["long-hours"] ?? DEFAULT_LONG_HOURS);

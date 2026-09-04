@@ -46,12 +46,26 @@ export interface ProviderClient {
 }
 
 export async function connectProvider({ command, args, env, cwd }: ConnectProviderOptions): Promise<ProviderClient> {
+  // gap-mcp-server-test-deadlocks-at-high-test-concurrency: spawn the Provider
+  // with stderr PIPED (not inherited) and forward it to our own stderr. The
+  // SDK's StdioClientTransport defaults stderr to "inherit", so a Provider
+  // subprocess carries the PARENT's stderr fd. When `quay mcp` is killed by its
+  // client BEFORE finishing provider cleanup (the SDK's close() SIGTERMs at 2s,
+  // SIGKILLs at 4s — under load the sequential provider cleanup can exceed the
+  // 2s grace), the Provider is orphaned while still holding that inherited
+  // stderr pipe open. In `node --test` that pipe is the test FILE's stderr, so
+  // the runner waits on its EOF forever — the batch-tail deadlock (wchan=ep_poll,
+  // ~0% CPU, "socket handles not released"). Piping + forwarding preserves the
+  // diagnostics while breaking the fd-inheritance chain: an orphaned Provider
+  // then holds only a pipe to its (dead) parent, never the runner's stderr.
   const transport = new StdioClientTransport({
     command,
     args,
     cwd,
     env: { ...process.env, ...(env ?? {}) },
+    stderr: "pipe",
   });
+  transport.stderr?.pipe(process.stderr);
   const client = new Client({ name: "quay-core", version: "0.0.1" });
   await client.connect(transport);
 

@@ -12,8 +12,13 @@
 //   - AC1  parse the CURRENT `local glob=(...)` line AND the legacy `files=(...)` spelling.
 //   - AC2  an empty/absent glob is a parse FAILURE (throws) — never a silent [].
 //   - AC4  the real repo tree has zero orphans (canonical set non-empty).
-//   - AC5  the canonical set (realpath-deduped) EXACTLY equals `scripts/test.sh --list-files`.
-//   - AC6  this file declares `// @test-group engine`.
+//   - AC5  the canonical set (realpath-deduped) EXACTLY equals `scripts/test.sh --list-files`
+//         (enumerating ALL groups — the default excludes the serial group).
+//   - AC6  this file declares `// @test-group serial` (A-class: nested test.sh spawns).
+//
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (A-class — this file spawns `scripts/test.sh`, a nested runner with its own worker
+// pool) so it runs in the concurrency-1 serial phase, never competing with the concurrency-8 body.
 //
 // Run:
 //   scripts/test.sh plugin/test/test-coverage-check.test.mjs
@@ -112,7 +117,11 @@ test("AC5: canonical set == scripts/test.sh --list-files (realpath-deduped)", ()
       }
     })
   );
-  const listOut = spawnSync("bash", ["scripts/test.sh", "--list-files"], {
+  // serial + lowconc (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests /
+  // gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive): the default --list-files
+  // (product,engine + the lowconc phase) EXCLUDES the serial group, so
+  // the canonical-set comparison must enumerate ALL FOUR groups to stay single-source.
+  const listOut = spawnSync("bash", ["scripts/test.sh", "--group", "product,engine,serial,lowconc", "--list-files"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
   });

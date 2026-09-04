@@ -13,7 +13,7 @@
 //
 // Run: node --test --experimental-test-coverage packages/quay/test/*.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -22,11 +22,19 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { resolveGate, listGates } from "../src/gate/registry.ts";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const quayBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
+
+// Every tmp dir / workspace triple is removed once at the end of this file — the carrier-array +
+// after() pattern — so `quay-m43-*` never accumulates a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 // repo root: packages/quay/test -> repo root is 3 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 // DIR-035-B: `vmeta-lag`/`dogfood-evidence` are no longer module-level
@@ -42,7 +50,9 @@ const gate = (name) => resolveGate(name, REPO_ROOT);
 // ---------------------------------------------------------------------------
 
 function tmpDir(tag) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `quay-m43-${tag}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m43-${tag}-`));
+  _tmpDirs.push(dir);
+  return dir;
 }
 
 function runQuay(args, cwd, extraEnv = {}) {
@@ -77,6 +87,8 @@ function runNative(args, tasksDir) {
 function makeWorkspace(tag) {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m43-${tag}-tasks-`));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m43-${tag}-ws-`));
+  _tmpDirs.push(tasksDir);
+  _tmpDirs.push(workspaceRoot);
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(
     path.join(workspaceRoot, ".quay", "config.yml"),
