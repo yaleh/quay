@@ -97,6 +97,24 @@ reference-doc + `plugin/skills/manager/SKILL.md` SPEC index），并把这两文
 （否则 anti-drift 越界 HARD FAIL）。这是对既有多起同形修复（`189e9dd17`/`c4dd6899b`/`0a5f20cea`/
 `a71b1524c`）的延续，与本任务 m120 修复正交。
 
+### 补充（2026-09-04 CONTINUE 第二轮）：m120 已落地，当前 suite 红是 develop 侧另一全局红
+
+m120 修复已完成且是本分支相对 develop 的唯一实质变更（`git diff develop...HEAD` 仅 3 文件：
+`build-dist.mjs` + `build-dist.test.mjs` + 本任务体；AC 3/3 全勾）。本轮 suite 红**不是本任务**，
+而是 develop 侧另一条全局红：`plugin/test/direct-to-develop-bypass-check.test.mjs:651`
+（"AC3 回放·CLI 全量扫描 b11ce720"）——checker 返回 exit 1，测试期望 exit 0 NOT-EVALUATED。
+
+**成因**：合并提交 `c789d1f49`（"Merge fix/runtime-usage-ac4-host-corpus into develop"，触及
+`plugin/test/runtime-usage-inventory.test.mjs`）被判 `confirmedBypass:true`——它不在 fan-in ledger
+（`fan-in-ff-merge.sh` 只记 ff 落地的 `landedSha`，merge 落地漏记），reflog action `commit (merge):`
+落入「直接提交」分支 ⇒ RED。已实测：主检出 develop（`a5873f548`）与工作树同红；两处 ledger
+`grep -c c789d1f49` 均 0。
+
+**待裁定（非本任务 Touches，⛔ 不擅自修）**：`c789d1f49` 属 (a) 合法 fan-in 落地但 ledger 漏记
+⇒ 修 ledger 记 merge 落地；(b) 真实直接 merge develop ⇒ 入 ruled 表 + manager 裁定；(c) 测试期望
+过期（基线区间已含真 bypass）⇒ 改确定性 fixture。三者任一本任务 Touches 均不覆盖，需 manager/outer
+裁定后另立任务。
+
 ---
 
 ## Plan
