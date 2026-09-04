@@ -173,24 +173,23 @@ test('AC1/AC4 — every plugin/scripts/* reference in the shipped skills/tick do
   } finally { cleanup(ws); }
 });
 
-// AC2 — the check must REPORT the two real live specimens (quay-topology.sh,
-// send-keys-reliable.sh) when they are absent from the landing set. Reproduce the pre-fix state in
-// a plugin copy by removing them from the shipped scripts dir (referenced by cold-start, unable to
-// land) — the check names both and fails the install. NOTE: send-keys-verified.sh was layer-retired
-// by gap-cold-start-ac8c-key4 (key 4 now teaches send-keys-reliable.sh); the specimen was swapped to
-// the current live replacement.
-test('AC2 — the check reports the two real live specimens (quay-topology.sh, send-keys-reliable.sh) when they cannot land', () => {
+// AC2 — the check must REPORT a real live specimen (send-keys-reliable.sh) when it is absent from
+// the landing set. Reproduce the pre-fix state in a plugin copy by removing it from the shipped
+// scripts dir (referenced by cold-start, unable to land) — the check names it and fails the install.
+// NOTE: quay-topology.sh was a prior specimen, retired with the outer tmux session
+// (gap-retire-outer-tmux-window-logic); send-keys-verified.sh was layer-retired by
+// gap-cold-start-ac8c-key4 (key 4 now teaches send-keys-reliable.sh) — the specimen is the current
+// live replacement.
+test('AC2 — the check reports the live specimen (send-keys-reliable.sh) when it cannot land', () => {
   const src = makeTmp();
   try {
     fs.cpSync(pluginDir, src, { recursive: true });
-    fs.rmSync(path.join(src, 'scripts', 'quay-topology.sh'), { force: true });
     fs.rmSync(path.join(src, 'scripts', 'send-keys-reliable.sh'), { force: true });
     const ws = makeTmp();
     try {
       const args = INIT_LOOP_ARGS.map((a) => (a === 'WS' ? ws : a));
       const r = runInit(ws, args, src);
       assert.notEqual(r.status, 0, 'the check must FAIL when a referenced script cannot land');
-      assert.match(r.stderr, /quay-topology\.sh/, 'must name quay-topology.sh');
       assert.match(r.stderr, /send-keys-reliable\.sh/, 'must name send-keys-reliable.sh');
       assert.match(r.stderr, /referenced-not-landed/, 'must use the referenced-not-landed category');
     } finally { cleanup(ws); }

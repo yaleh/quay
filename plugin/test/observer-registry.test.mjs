@@ -12,11 +12,11 @@
 //
 // Coverage map (task ACs):
 //   AC1 — registry exists and is readable: --list / --list --json report registered targets + status.
-//   AC2 — the 2 known consumers each read the registry instead of their own hardcoded list:
-//         os-anchor-watchdog /
-//         session-topology (topology-check).
-//   AC3 (load-bearing negative control) — register a target offline, then run all 2 consumers once:
-//         ALL must report "offline", none stale; --audit --json reports stale_observer_reports=0.
+//   AC2 — the known consumer reads the registry instead of its own hardcoded list:
+//         os-anchor-watchdog. (The session-topology consumer was retired with the outer tmux
+//         session — gap-retire-outer-tmux-window-logic.)
+//   AC3 (load-bearing negative control) — register a target offline, then run the consumer once:
+//         it must report "offline", none stale; --audit --json reports stale_observer_reports=0.
 //   AC5 — registration is an explicit write (--register-offline / --register-active), and the
 //         mechanism creates NO system crontab (the audit rides the existing dual-trigger style).
 //
@@ -34,7 +34,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
 const registry = join(repoRoot, "plugin", "scripts", "observer-registry.sh");
 const watchdog = join(repoRoot, "plugin", "scripts", "os-anchor-watchdog.sh");
-const topologyCheck = join(repoRoot, "plugin", "scripts", "topology-check.sh");
 
 function run(script, args, opts = {}) {
   const res = spawnSync("bash", [script, ...args], { encoding: "utf8", ...opts });
@@ -95,7 +94,7 @@ test("AC1: --list / --list --json report registered targets + status (machine + 
 
 // ── AC2 + AC3: each consumer reads the registry; the negative control is load-bearing ─────────────
 
-test("AC3 (load-bearing): register a target offline → run all 4 consumers once → ALL report decommissioned, none stale", () => {
+test("AC3 (load-bearing): register a target offline → run the consumer once → report decommissioned, not stale", () => {
   const dir = makeTmp("ac3");
   try {
     const reg = fixtureRegistry(dir);
@@ -109,11 +108,6 @@ test("AC3 (load-bearing): register a target offline → run all 4 consumers once
     assert.match(wd.stdout, /test-target decommissioned \(offline per observer-registry/);
     assert.doesNotMatch(wd.stdout, /recreate-session|relaunch-outer/, "a decommissioned target is never re-spawned");
 
-    // Consumer 2 — session-topology: topology-check must say decommissioned, not stale live state.
-    const tp = run(topologyCheck, ["--session", "test-sess"], { env });
-    assert.equal(tp.status, 0, tp.stderr);
-    assert.match(tp.stdout, /test-sess decommissioned \(offline per observer-registry/);
-
     // The audit codifies the SAME negative control: stale_observer_reports must be 0.
     const a = run(registry, ["--audit", "--json"], { env });
     assert.equal(a.status, 0, "audit exit 0 when every consumer is fresh");
@@ -123,7 +117,7 @@ test("AC3 (load-bearing): register a target offline → run all 4 consumers once
     for (const c of audit.consumers) {
       assert.equal(c.stale, false, `consumer ${c.name} must not be stale for an offline target`);
     }
-    assert.equal(audit.consumers.length, 2, "the 2 known consumers are audited");
+    assert.equal(audit.consumers.length, 1, "the known consumer is audited");
   } finally {
     cleanup(dir);
   }
@@ -135,13 +129,9 @@ test("AC2: an ACTIVE target is NOT reported decommissioned by any consumer (no f
     const reg = writeRegistry(dir, "registry.conf", "quay|active|.|quay-0|本仓库\n");
     const env = { ...process.env, OBSERVER_REGISTRY_FILE: reg };
 
-    // --is-offline exits 1 for an active/unknown target (the consumers' if-condition is false).
+    // --is-offline exits 1 for an active/unknown target (the consumer's if-condition is false).
     const io = run(registry, ["--is-offline", "quay"], { env });
     assert.equal(io.status, 1, "active target is not offline");
-
-    // topology-check must NOT report decommissioned for an active session.
-    const tp = run(topologyCheck, ["--session", "quay-0"], { env });
-    assert.doesNotMatch(tp.stdout + tp.stderr, /decommissioned/, "active session must not be reported decommissioned");
   } finally {
     cleanup(dir);
   }

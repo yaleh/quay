@@ -1,4 +1,4 @@
-// cli/manager.ts — `quay manager start` / `adopt` / `arm` command handler.
+// cli/manager.ts — `quay manager start` / `arm` command handler (`adopt` retired with the outer tmux session).
 // Migrated verbatim from packages/quay/bin/quay.ts dispatch body by
 // gap-cli-import-command-migration-into-src. No behavior change.
 //
@@ -15,7 +15,8 @@ import { parseFlags, fsSyncExists } from "./shared.ts";
 import type { CliCtx } from "./context.ts";
 
 // ── manager commands (C1-C5, gap-manager-productization-five-constraints) ─────────────────────────
-// `quay manager start` / `quay manager adopt <root>`. The manager is a plugin-layer product
+// `quay manager start` / `arm`. (`adopt <root>` was retired with the outer tmux session —
+// gap-retire-outer-tmux-window-logic.) The manager is a plugin-layer product
 // component: the CLI locates the plugin scripts (plugin/scripts/manager-*.sh) relative to this
 // package's own root (the plugin ships under the repo root's plugin/ dir, and the npm pack's
 // `files` includes `plugin`). Dispatches to the plugin scripts — the manager implementation lives
@@ -24,21 +25,21 @@ export async function handleManager({ sub, rest, positional }: CliCtx) {
   const { flags: mgrFlags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
 
   if (sub === "--help" || sub === "-h" || mgrFlags.help) {
-    process.stdout.write(`quay manager — start/adopt the manager layer (C4/C5)
+    process.stdout.write(`quay manager — start/arm the manager layer (C4/C5)
 
 Usage:
   quay manager start                 Start the manager independently (no project args; C5)
-  quay manager adopt <root>          Adopt a project (three-state: healthy/empty-shell/missing)
   quay manager arm                   (re)arm the manager loop anchor (sentinel-idempotent; AC5/AC5c)
 
 Flags:
-  --dry-run            Print the plan without changing anything (start/adopt/arm)
+  --dry-run            Print the plan without changing anything (start/arm)
   --json               Machine-readable output
   --verify             (arm) externally verify the loop-registry carries a fresh CronCreate receipt (AC4)
 
 The manager is CROSS-PROJECT (SPEC-manager-productization C2): its session (quay-manager), home
-(\$QUAY_GLOBAL_DIR/manager/) and loop anchor belong to no single project. 'start' and 'adopt' are
-separate commands on purpose (C5: two commands, not one parameterised command).
+(\$QUAY_GLOBAL_DIR/manager/) and loop anchor belong to no single project. 'adopt <root>' was retired
+with the outer tmux session (gap-retire-outer-tmux-window-logic): the per-project outer session it
+adopted no longer exists as an independent role.
 `);
     return;
   }
@@ -62,7 +63,6 @@ separate commands on purpose (C5: two commands, not one parameterised command).
     return path.resolve(dir, "plugin", "scripts");
   })();
   const managerStart = path.join(scriptsDir, "manager-start.sh");
-  const managerAdopt = path.join(scriptsDir, "manager-adopt.sh");
   const managerArm = path.join(scriptsDir, "manager-arm-loop.sh");
 
   const runManagerScript = (script, args) => {
@@ -86,19 +86,6 @@ separate commands on purpose (C5: two commands, not one parameterised command).
     process.exitCode = runManagerScript(managerStart, args) ?? 1;
     return;
   }
-  if (sub === "adopt") {
-    const root = positional[0];
-    if (!root) {
-      console.error("quay manager adopt: missing required <root> (the project root to adopt)");
-      process.exitCode = 1;
-      return;
-    }
-    const args = [root];
-    if (mgrFlags["dry-run"]) args.push("--dry-run");
-    if (mgrFlags.json) args.push("--json");
-    process.exitCode = runManagerScript(managerAdopt, args) ?? 1;
-    return;
-  }
   if (sub === "arm") {
     const args = [];
     if (mgrFlags["dry-run"]) args.push("--dry-run");
@@ -107,7 +94,7 @@ separate commands on purpose (C5: two commands, not one parameterised command).
     process.exitCode = runManagerScript(managerArm, args) ?? 1;
     return;
   }
-  console.error(`unknown manager subcommand: ${sub} (try: start, adopt <root>, arm)`);
+  console.error(`unknown manager subcommand: ${sub} (try: start, arm)`);
   process.exitCode = 1;
   return;
 }

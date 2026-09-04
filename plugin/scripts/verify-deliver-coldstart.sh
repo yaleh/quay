@@ -38,8 +38,8 @@
 #
 # 与 cold-start skill 的分工：本脚本做【验证】，不做第二次冷启动实现。真正的冷启动按 shipped 的
 #   plugin/skills/cold-start/SKILL.md（/quay:cold-start）执行——那是 agent 驱动的（Monitor / CronCreate /
-#   send-keys 驱动 inner）。本脚本的 --cold-start-drive 只【编排 shipped 的脚本】（session-bootstrap.sh +
-#   loop-driver 注册 + send-keys-reliable.sh 驱动 + task-start 遥测），绝不复制 cold-start 的实现。
+#   send-keys 驱动 inner）。本脚本的 --cold-start-drive 只【编排 shipped 的脚本】（loop-driver 注册 +
+#   send-keys-reliable.sh 驱动 + task-start 遥测），绝不复制 cold-start 的实现。
 #   典型流程：先跑本脚本（①②③，③报 not-live 基线）→ 按 cold-start skill 起双层 →
 #   重跑本脚本 --verify-only --require-live 确认 COLDSTART_LIVE=yes。
 #   判据能取假：冷启动没做/没活 ⇒ AC88_VERIFY=not-live（非恒绿）。
@@ -179,7 +179,7 @@ L2_DEAD_LOOP_STATE="unknown"
 probe_startup_prompt() {
   local root="$1" sess cap verdict socket role
   L2_STARTUP_PROMPT=0
-  # 会话名解析（与 session-bootstrap.sh / quay-topology.sh 同源——绝不猜会话名）：
+  # 会话名解析（绝不猜会话名）：
   #   显式 --tmux-session > SESSION_TMUX_SESSION env > session-liveness.env（quay-init 写入的每项目
   #   权威配置）> 默认 `${PROJECT}-0:0.0` 的会话部分（猜测，仅 full 模式兜底）。
   #   ⚠️ 默认 `${PROJECT}-0:0.0` 是猜测：quay-init --loop 写进 session-liveness.env 的才是真实会话名，
@@ -196,7 +196,8 @@ probe_startup_prompt() {
   socket="${VC_TMUX_SOCKET:-}"
   if [ -z "$socket" ] && [ -n "${TMUX_TMPDIR:-}" ]; then socket="${TMUX_TMPDIR}/tmux-$(id -u)/default"; fi
   if [ -z "$socket" ]; then socket="${TMPDIR:-/tmp}/tmux-$(id -u)/default"; fi
-  # 单窗口拓扑 = outer（quay-topology.sh 的 <project>-N:outer）。
+  # outer 窗口（外层会话）——probe 只观测该窗口 pane 是否卡启动弹窗（outer 独立会话角色已退役，
+  # 此处仅保留 pane 观测，不再依赖已删除的拓扑工厂脚本）。
   for role in outer; do
     cap="$(env -u TMUX tmux -S "$socket" capture-pane -p -t "$sess:$role" 2>/dev/null || true)"
     [ -n "$cap" ] || continue
@@ -463,17 +464,14 @@ coldstart_drive() {
   local root="$1"
   COLDSTART_DRIVE_STATE="attempted"
   echo "== ③ cold-start drive (orchestrate shipped scripts; agent-driven 部分按 cold-start skill) =="
-  local sb
-  sb="$root/plugin/scripts/session-bootstrap.sh"
-  if ! command -v claude >/dev/null 2>&1 || ! command -v tmux >/dev/null 2>&1 || [ ! -f "$sb" ]; then
+  if ! command -v claude >/dev/null 2>&1 || ! command -v tmux >/dev/null 2>&1; then
     COLDSTART_DRIVE_STATE="skipped-no-env"
-    echo "  cold-start drive: SKIPPED (need claude+tmux on PATH and session-bootstrap.sh laid down)"
-    echo "  COLDSTART_OPERATOR_STEPS: run the shipped cold-start skill in the project:"
-    echo "    bash ${sb} ${root} outer --session ${TMUX_SESSION}   # (or /quay:cold-start per plugin/skills/cold-start/SKILL.md)"
+    echo "  cold-start drive: SKIPPED (need claude+tmux on PATH)"
+    echo "  COLDSTART_OPERATOR_STEPS: run the shipped cold-start skill in the project (/quay:cold-start per plugin/skills/cold-start/SKILL.md)"
     return 0
   fi
-  # 会话拓扑（shipped session-bootstrap.sh，幂等）+ driver 注册 + 遥测 + 驱动 inner（shipped 脚本）
-  bash "$sb" "$root" outer --session "$TMUX_SESSION" >/dev/null 2>&1 || true
+  # driver 注册 + 遥测 + 驱动 inner（shipped 脚本；会话拓扑工厂已随 outer 退役——
+  # gap-retire-outer-tmux-window-logic，不再编排 session-bootstrap.sh）
   mkdir -p "$root/.quay"
   printf '%s\n' '{"mechanism":"cron","interval":"*/20 * * * *","source":"verify-deliver-coldstart"}' >> "$root/.quay/loop-driver.jsonl" 2>/dev/null || true
   node --no-warnings --experimental-strip-types "$root/plugin/scripts/fast-mode-telemetry.ts" \
@@ -483,7 +481,7 @@ coldstart_drive() {
       "执行 $root/docs/analysis/fast-mode-loop-tick.md 中的 tick 指令" \
       "${HOME}/.claude/projects/$(printf '%s' "$root" | tr '/' '-')/verify.jsonl" >/dev/null 2>&1 || true
   fi
-  echo "  cold-start drive: launched (session-bootstrap + driver reg + telemetry + inner drive attempt)"
+  echo "  cold-start drive: launched (driver reg + telemetry + inner drive attempt)"
 }
 
 # ── ③ 执行 ─────────────────────────────────────────────────────────────────────────────
@@ -510,8 +508,8 @@ step3_coldstart() {
     echo "  COLDSTART_LIVE=yes — loop verified live (outer window + inner layer) by direct measures"
   else
     echo "  COLDSTART_LIVE=no — cold-start not verified live. This is DATA, not a defect:"
-    echo "    · if the cold-start has not been performed yet: perform it per plugin/skills/cold-start/SKILL.md"
-    echo "      (or bash ${ROOT}/plugin/scripts/session-bootstrap.sh ${ROOT} outer), then re-run with --verify-only --require-live."
+    echo "    · if the cold-start has not been performed yet: perform it per plugin/skills/cold-start/SKILL.md,"
+    echo "      then re-run with --verify-only --require-live."
     echo "    · if it was performed: the direct measures show no live outer-window + inner-layer — investigate (dead loop)."
   fi
 }
