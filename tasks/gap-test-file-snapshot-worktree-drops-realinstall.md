@@ -50,6 +50,8 @@ worktree 与主检出 `--list-files` 一致；AC1/AC2 勾；test-file-snapshot �
 - docs/analysis/test-file-baseline.txt（重快照 565 全群，含 serial）
 - scripts/test-coverage-check.ts（AC5 注释随全群语义更新）
 - plugin/test/test-coverage-check.test.mjs（AC5 注释随全群语义更新）
+- plugin/skills/init/SKILL.md（补声明 SPEC-tmux-retirement-2026-09-03 于 reference-doc 块，解 spec-declaration-point-check 挡全局 fan-in）
+- plugin/skills/manager/SKILL.md（补声明 SPEC-tmux-retirement-2026-09-03 于 SPEC 索引，解 spec-declaration-point-check 挡全局 fan-in）
 - tasks/gap-test-file-snapshot-worktree-drops-realinstall.md（自身）
 
 ## Needs-Human
