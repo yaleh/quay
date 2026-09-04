@@ -1213,7 +1213,7 @@ export function countRunnerProcesses(): number {
 /**
  * gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3 (measure-first) —
  * the load-sensitive phase concurrency defaults. The serial phase (KNOWN-LOAD-SENSITIVE A/B-class +
- * real-install family) and the lowconc phase (hermetic-but-load-sensitive session-liveness
+ * real-install family) and the lowconc phase (hermetic-but-load-sensitive
  * family) default to the HOST parallelism (os.availableParallelism()), not a machine-spec-dependent
  * literal 6 — on nproc=16 the old 6/6 left 10 cores idle across 59.5% of wall-clock
  * (gap-ac44-concurrent-phases-read-host-parallelism). The measured experiment evidence for WHY these
@@ -1253,7 +1253,7 @@ export function concurrentPhaseCount(): number {
 /**
  * gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3 (measure-first) —
  * the load-sensitive phase concurrency defaults. The serial phase (KNOWN-LOAD-SENSITIVE A/B-class +
- * real-install family) and the lowconc phase (hermetic-but-load-sensitive session-liveness
+ * real-install family) and the lowconc phase (hermetic-but-load-sensitive
  * family) default to the HOST parallelism (os.availableParallelism()), not a machine-spec-dependent
  * literal 6 — on nproc=16 the old 6/6 left 10 cores idle across 59.5% of wall-clock
  * (gap-ac44-concurrent-phases-read-host-parallelism). The measured experiment evidence for WHY these

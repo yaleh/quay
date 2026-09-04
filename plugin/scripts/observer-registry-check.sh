@@ -2,12 +2,15 @@
 # observer-registry-check.sh — 「观测者被杀」要有观测者（gap-sweeptmp-pkill-kills-live-observers-
 # two-layer-blind 候选 D / AC5）。
 #
-# 背景（2026-08-08 事故）：一个按进程名批量杀 session-liveness 监视器的清理命令把在用监视器当
+# 背景（2026-08-08 事故）：一个按进程名批量杀 observer 监视器的清理命令把在用监视器当
 # 泄漏残留杀光，两层同时失明，而「观测者被杀」本身没有观测者——外层靠 Monitor 报 failed、manager
 # 靠重挂才回来，都是被动、且会随会话一起死的通道。本脚本把【注册表】变成主动死亡探测器：
-#   - session-liveness.sh 常驻启动时写 <root>/.quay/session-liveness.<pid>.json（记录 pid/started/
+#   - 常驻 observer 启动时写 <root>/.quay/observer.<pid>.json（记录 pid/started/
 #     root/targets），退出时经 trap 移除（SIGKILL 无法 trap → 文件留下 = 死亡可被发现，这正是要的）。
 #   - 本脚本读注册表 + 对照 /proc，发现「已注册但进程已消失」的实例 ⇒ 该观测者死亡，非零退出并指名。
+#
+# 2026-09-03：session-liveness observer 已随 tmux 退役，其注册表 writer 一并移除——本脚本现查
+# observer.<pid>.json（当前无 writer，恒报 clean，作为未来 driver 机制的死亡探测器接缝保留）。
 #
 # 纯读契约（AC7）：只读注册表文件 + /proc，不写任何文件、不杀任何进程。
 # 用法: bash plugin/scripts/observer-registry-check.sh <workspace-root> [--json]
@@ -37,20 +40,20 @@ fi
 
 dead=""
 alive=""
-for f in "$reg_dir"/session-liveness.*.json; do
+for f in "$reg_dir"/observer.*.json; do
   [ -e "$f" ] || continue
   pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pid",""))' "$f" 2>/dev/null || echo "")"
   if [ -z "$pid" ]; then
     dead="$dead $f"
     continue
   fi
-  # Is <pid> still a live `bash …/session-liveness.sh` process? /proc/cmdline is authoritative.
+  # Is <pid> still a live observer process? /proc/cmdline is authoritative.
   if python3 -c 'import sys,os
 try:
     with open(f"/proc/{sys.argv[1]}/cmdline","rb") as fh: argv=fh.read().split(b"\0")
 except OSError:
     sys.exit(1)
-ok = len(argv) >= 2 and argv[0] == b"bash" and os.path.basename(argv[1].decode("utf-8","replace")) == "session-liveness.sh"
+ok = len(argv) >= 2 and argv[0] == b"bash" and b"observer" in os.path.basename(argv[1])
 sys.exit(0 if ok else 1)' "$pid" 2>/dev/null; then
     alive="$alive $f"
   else

@@ -10,7 +10,7 @@
 //   node --experimental-strip-types plugin/scripts/quay-session.ts list
 //   import { list, has, run, GROUP } from "../scripts/quay-session.ts";   // in-process reuse
 //
-// (The session-liveness / outer-liveness observer was retired 2026-09-03.)
+// (The liveness observer was retired 2026-09-03.)
 
 import { createEntryPoint, type InstrumentSpec } from "./quay-entry-base.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
